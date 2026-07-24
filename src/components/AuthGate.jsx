@@ -1,0 +1,85 @@
+import { useState } from 'react'
+import Icon from './Icon'
+import { authStore, useAuthStore, hasLegacyData } from '../authStore'
+
+// ============ 登录/注册门户（未登录时全屏，云端账号）============
+export default function AuthGate() {
+  const { status, error } = useAuthStore()
+  const [tab, setTab] = useState('login') // login | register
+  const [nick, setNick] = useState('')
+  const [pw, setPw] = useState('')
+  const [importLegacy, setImportLegacy] = useState(true)
+  const legacy = hasLegacyData()
+  const loading = status === 'loading'
+
+  const submit = async () => {
+    if (loading) return
+    if (tab === 'register') await authStore.register(nick, pw, legacy && importLegacy)
+    else await authStore.login(nick, pw)
+  }
+
+  return (
+    <div className="auth-gate">
+      <div className="auth-card">
+        <div className="auth-brand">
+          <span className="nav-logo"><Icon name="pulse" size={20} /></span>
+          <span>短线操盘台</span>
+        </div>
+        <div className="auth-tabs">
+          <button className={'auth-tab' + (tab === 'login' ? ' active' : '')} onClick={() => setTab('login')}>登录</button>
+          <button className={'auth-tab' + (tab === 'register' ? ' active' : '')} onClick={() => setTab('register')}>注册</button>
+        </div>
+
+        <input className="wl-input auth-input" placeholder="昵称" value={nick}
+          onChange={(e) => setNick(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
+        <input className="wl-input auth-input" type="password" placeholder="密码（任意文本/字符）" value={pw}
+          onChange={(e) => setPw(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
+
+        {tab === 'register' && legacy && (
+          <label className="auth-import">
+            <input type="checkbox" checked={importLegacy} onChange={(e) => setImportLegacy(e.target.checked)} />
+            <span>把本机现有数据(自选/持仓/交易记录)导入此账号</span>
+          </label>
+        )}
+
+        {error && <div className="err auth-err">{error}</div>}
+
+        <button className="btn btn-primary auth-submit" onClick={submit} disabled={loading}>
+          <Icon name={loading ? 'refresh' : (tab === 'register' ? 'plus' : 'check')} size={14} className={loading ? 'spin' : ''} />
+          {loading ? '处理中…' : (tab === 'register' ? '注册并进入' : '登录')}
+        </button>
+
+        <div className="auth-note">
+          账号数据保存在云端，换设备用同一昵称+密码登录即可看到同一份数据。
+          {tab === 'register' && ' 密码可为任意字符，请自行牢记（无法找回）。'}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ============ 顶部账号菜单（已登录，可登出）============
+export function AccountMenu() {
+  const { user } = useAuthStore()
+  const [open, setOpen] = useState(false)
+  if (!user) return null
+
+  return (
+    <div className="acct-wrap">
+      <button className="acct-btn" onClick={() => setOpen((o) => !o)} title="账号">
+        <Icon name="user" size={13} /><span>{user}</span><Icon name="chevronDown" size={12} />
+      </button>
+      {open && (
+        <>
+          <div className="acct-mask" onClick={() => setOpen(false)} />
+          <div className="acct-menu">
+            <div className="acct-menu-label">当前账号 · 数据已云端同步</div>
+            <div className="acct-item" onClick={() => { authStore.logout(); setOpen(false) }}>
+              <Icon name="close" size={13} />退出登录
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
