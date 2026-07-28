@@ -1,0 +1,187 @@
+import { useState, useMemo } from 'react'
+import Icon from './Icon'
+import StockName from './StockName'
+import ConfirmDialog from './ConfirmDialog'
+import { usePolling } from '../hooks'
+import { planStore, usePlanStore } from '../planStore'
+import { alertStore, useAlertStore, describeAlert, ALERT_TYPES } from '../alertStore'
+import { fmtRaw } from '../format'
+
+// ============ 盯盘预警（内嵌面板，非弹窗）：规则管理 + 通知历史 ============
+export default function AlertPanel({ interval }) {
+  const book = usePlanStore()
+  const { notifications, permission } = useAlertStore()
+  const [tab, setTab] = useState('rules') // rules 规则 | notif 通知
+  const [adding, setAdding] = useState(false)
+  const [delTarget, setDelTarget] = useState(null)
+  const alerts = book.alerts || []
+  const activeCnt = alerts.filter((a) => a.enabled && !a.triggeredAt).length
+
+  // 候选：自选 + 持仓（去重），供新增预警选择
+  const cands = useMemo(() => {
+    const m = new Map()
+    ;[...book.plan, ...book.holding].forEach((x) => { if (!m.has(x.code)) m.set(x.code, { code: x.code, name: x.name }) })
+    return [...m.values()]
+  }, [book.plan, book.holding])
+  const codes = cands.map((c) => c.code)
+  const { data } = usePolling(codes.length ? `/api/quote?codes=${codes.join(',')}` : null, interval, [codes.join(',')])
+  const quote = {}
+  ;(data?.list || []).forEach((s) => { quote[s.code] = s })
+
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <div className="panel-title"><Icon name="bell" size={16} /> 盯盘预警
+          <span className="sub-name">{activeCnt} 条监控中 · 命中即弹通知+响铃</span>
+        </div>
+        <button className="btn btn-primary" onClick={async () => { await alertStore.requestPermission(); setAdding((v) => !v) }} disabled={cands.length === 0}>
+          <Icon name="plus" size={13} /> 新增预警
+        </button>
+      </div>
+
+      {/* 通知权限提示 */}
+      {permission !== 'granted' && (
+        <div className="alert-perm">
+          <Icon name="info" size={13} /> 开启浏览器通知，切后台也能收到预警提醒
+          <button className="btn btn-primary" style={{ marginLeft: 'auto' }} onClick={() => alertStore.requestPermission()}>开启通知</button>
+        </div>
+      )}
+
+      {/* 新增预警表单 */}
+      {adding && (
+        <div className="alert-add-wrap">
+          {cands.length === 0
+            ? <div className="empty small">先在「今日选股/持仓」加自选或建仓，才能给它设预警。</div>
+            : <NewAlertForm cands={cands} quote={quote} onDone={() => setAdding(false)} />}
+        </div>
+      )}
+
+      <div className="tabs" style={{ margin: '4px 18px 8px' }}>
+        <div className={'tab' + (tab === 'rules' ? ' active' : '')} onClick={() => setTab('rules')}>规则 {alerts.length > 0 && `(${alerts.length})`}</div>
+        <div className={'tab' + (tab === 'notif' ? ' active' : '')} onClick={() => setTab('notif')}>命中记录 {notifications.length > 0 && `(${notifications.length})`}</div>
+      </div>
+
+      <div className="alert-body-inline">
+        {tab === 'rules' ? (
+          alerts.length === 0 ? (
+            <div className="empty">还没有预警规则。点右上「新增预警」，或在自选/持仓卡片、个股详情里点「设预警」添加。</div>
+          ) : (
+            alerts.map((a) => (
+              <div className={'alert-rule' + (a.enabled ? '' : ' off')} key={a.id}>
+                <div className="ar-main">
+                  <div className="ar-name">
+                    <StockName code={a.code} name={a.name} stopPropagation><span>{a.name || a.code}</span></StockName>
+                    <span className="ar-code">{a.code}</span>
+                    {quote[a.code] && <span className="ar-now">现 {fmtRaw(quote[a.code].price)}</span>}
+                  </div>
+                  <div className="ar-desc">{describeAlert(a)}{a.note ? ` · ${a.note}` : ''}</div>
+                  {a.triggeredAt && <div className="ar-fired">已于 {new Date(a.triggeredAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })} 触发：{a.triggeredMsg}</div>}
+                </div>
+                <div className="ar-actions">
+                  {a.triggeredAt ? (
+                    <button className="chip-btn ghost" title="重新启用" onClick={() => planStore.rearmAlert(a.id)}><Icon name="refresh" size={12} />重启</button>
+                  ) : (
+                    <button className={'ar-toggle' + (a.enabled ? ' on' : '')} title={a.enabled ? '点击停用' : '点击启用'} onClick={() => planStore.toggleAlert(a.id)}>
+                      {a.enabled ? '启用中' : '已停用'}
+                    </button>
+                  )}
+                  <button className="icon-btn" title="删除规则" onClick={() => setDelTarget(a)}><Icon name="trash" size={13} /></button>
+                </div>
+              </div>
+            ))
+          )
+        ) : (
+          notifications.length === 0 ? (
+            <div className="empty">暂无命中记录。预警触发后会在这里留档。</div>
+          ) : (
+            <>
+              <div className="alert-toolbar">
+                <span className="sub-name">{notifications.length} 条命中</span>
+                <button className="btn" onClick={() => alertStore.clearAll()}><Icon name="trash" size={12} /> 清空</button>
+              </div>
+              {notifications.map((n) => (
+                <div className="alert-notif" key={n.id}>
+                  <div className="an-dot" />
+                  <div className="an-main">
+                    <div className="an-title"><StockName code={n.code} name={n.name} stopPropagation><span>{n.name || n.code}</span></StockName></div>
+                    <div className="an-body">{n.body}</div>
+                    <div className="an-time">{new Date(n.at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</div>
+                  </div>
+                </div>
+              ))}
+            </>
+          )
+        )}
+      </div>
+
+      <div className="ai-disclaimer" style={{ padding: '8px 18px 12px' }}>
+        预警基于实时行情轮询（交易时段约15秒/次），命中后自动停用防重复；仅供研究参考，非投资建议
+      </div>
+
+      {delTarget && (
+        <ConfirmDialog
+          title="删除此预警？"
+          body={<>确定删除 <b>{delTarget.name}</b> 的「{describeAlert(delTarget)}」预警？</>}
+          confirmText="删除"
+          onConfirm={() => { planStore.removeAlert(delTarget.id); setDelTarget(null) }}
+          onCancel={() => setDelTarget(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+// 新增预警表单（在预警面板内选股票+条件）
+function NewAlertForm({ cands, quote, onDone }) {
+  const [code, setCode] = useState(cands[0]?.code || '')
+  const [type, setType] = useState('price')
+  const [op, setOp] = useState('gte')
+  const [value, setValue] = useState('')
+  const typeDef = ALERT_TYPES.find((t) => t.key === type) || {}
+  const picked = cands.find((c) => c.code === code)
+  const q = quote[code]
+
+  const submit = () => {
+    if (!picked) return
+    if (typeDef.needValue && !(Number(value) || value === '0')) return
+    planStore.addAlert({
+      code, name: picked.name, type,
+      op: typeDef.needOp ? op : 'gte',
+      value: typeDef.needValue ? Number(value) : null,
+    })
+    onDone()
+  }
+
+  return (
+    <div className="alert-form">
+      <div className="af-row">
+        <label>股票</label>
+        <select className="wl-select" value={code} onChange={(e) => setCode(e.target.value)}>
+          {cands.map((c) => <option key={c.code} value={c.code}>{c.name} {c.code}</option>)}
+        </select>
+        {q && <span className="af-now">现价 {fmtRaw(q.price)} · {q.pct >= 0 ? '+' : ''}{q.pct}%</span>}
+      </div>
+      <div className="af-row">
+        <label>条件</label>
+        <select className="wl-select" value={type} onChange={(e) => setType(e.target.value)}>
+          {ALERT_TYPES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+        </select>
+        {typeDef.needOp && (
+          <select className="wl-select" value={op} onChange={(e) => setOp(e.target.value)}>
+            <option value="gte">≥</option>
+            <option value="lte">≤</option>
+          </select>
+        )}
+        {typeDef.needValue && (
+          <input className="wl-input" style={{ width: 90 }} value={value} onChange={(e) => setValue(e.target.value)}
+            placeholder={'阈值' + (typeDef.unit ? '(' + typeDef.unit + ')' : '')} inputMode="decimal" />
+        )}
+        {!typeDef.needValue && <span className="af-hint">{type === 'limitup' ? '涨幅≥9.5% 提醒' : '跌幅≥9.5% 提醒'}</span>}
+      </div>
+      <div className="af-actions">
+        <button className="chip-btn done" onClick={submit}><Icon name="check" size={12} />添加预警</button>
+        <button className="chip-btn ghost" onClick={onDone}>取消</button>
+      </div>
+    </div>
+  )
+}

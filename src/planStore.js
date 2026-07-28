@@ -50,7 +50,7 @@ function normalizeClosed(closed) {
   })
 }
 
-let state = { plan: [], holding: [], closed: [] }
+let state = { plan: [], holding: [], closed: [], account: null, alerts: [] }
 const listeners = new Set()
 
 // 云端回存：authStore 登录后注册 saver；每次数据变更防抖保存
@@ -61,24 +61,59 @@ function scheduleSave() {
   if (_suspend || !_saver) return
   if (_saveTimer) clearTimeout(_saveTimer)
   _saveTimer = setTimeout(() => {
-    _saver({ plan: state.plan, holding: state.holding, closed: state.closed })
+    _saver({ plan: state.plan, holding: state.holding, closed: state.closed, account: state.account, alerts: state.alerts })
   }, 800)
 }
 function emit() { state = { ...state }; listeners.forEach((l) => l()); scheduleSave() }
 
-// 把某笔持仓上已配对的做T收益，归档为独立的 closed 记录(kind:'T')，避免随持仓删除而丢失
-function archiveTFlows(h) {
-  const { pairList } = computeTFlows(h.tFlows)
-  if (!pairList || !pairList.length) return []
-  return pairList.map((p) => ({
-    id: uid(), type: 'T', kind: 'T', code: h.code, name: h.name,
-    qty: p.qty, buyPrice: p.buyPrice, sellPrice: p.sellPrice,
-    buyFee: p.buyFee, sellFee: p.sellFee,
-    grossPnl: p.grossPnl, netPnl: p.netPnl, realizedPnl: p.netPnl,
-    pnlPct: p.buyPrice ? +(p.netPnl / (p.buyPrice * p.qty * 100 + p.buyFee) * 100).toFixed(2) : 0,
-    tDir: p.tDir, holdingId: h.id,
-    buyAt: p.buyAt, sellAt: p.sellAt, at: p.at,
-  }))
+// 把某笔持仓上已配对的做T收益，归档为独立的 closed 记录(kind:'T')；
+// 未配平的开口腿按净额方向归档为 加仓(BUY) / 减仓(SELL)，避免"当天没追平底仓"时无处归类。
+// batchId：同一次结算/清仓产生的记录共享，删除时可按批级联，保证各分类联动一致。
+function archiveTFlows(h, batchId) {
+  const r = computeTFlows(h.tFlows)
+  const out = []
+  // 1) 已配对的做T差价
+  for (const p of (r.pairList || [])) {
+    out.push({
+      id: uid(), batchId, type: 'T', kind: 'T', code: h.code, name: h.name,
+      qty: p.qty, buyPrice: p.buyPrice, sellPrice: p.sellPrice,
+      buyFee: p.buyFee, sellFee: p.sellFee,
+      grossPnl: p.grossPnl, netPnl: p.netPnl, realizedPnl: p.netPnl,
+      pnlPct: p.buyPrice ? +(p.netPnl / (p.buyPrice * p.qty * 100 + p.buyFee) * 100).toFixed(2) : 0,
+      tDir: p.tDir, holdingId: h.id,
+      buyAt: p.buyAt, sellAt: p.sellAt, at: p.at,
+    })
+  }
+  // 2) 开口净买入 → 加仓（BUY，单腿，无已实现盈亏）
+  if (r.openBuy > 0 && r.openBuyAvg != null) {
+    const amount = +(r.openBuyAvg * r.openBuy * 100).toFixed(2)
+    out.push({
+      id: uid(), batchId, type: 'BUY', code: h.code, name: h.name, side: 'buy',
+      qty: r.openBuy, price: r.openBuyAvg, fee: r.openBuyFee, amount,
+      cashFlow: -(amount + r.openBuyFee), realizedPnl: null,
+      holdingId: h.id, at: r.openBuyAt || Date.now(), note: '做T净买入(加仓)',
+    })
+  }
+  // 3) 开口净卖出 → 减仓/清仓（SELL，以底仓成本为基准算已实现盈亏）
+  if (r.openSell > 0 && r.openSellAvg != null) {
+    const shares = r.openSell * 100
+    const amount = +(r.openSellAvg * shares).toFixed(2)
+    const cost = (h.buyPrice || 0) * shares
+    // 底仓买入费按卖出比例分摊
+    const buyFeePart = h.qty ? +(((h.buyFee || 0) * (r.openSell / h.qty))).toFixed(2) : 0
+    const netPnl = +((amount - cost) - r.openSellFee - buyFeePart).toFixed(2)
+    out.push({
+      id: uid(), batchId, type: 'SELL', kind: 'SELL', code: h.code, name: h.name, side: 'sell',
+      qty: r.openSell, price: r.openSellAvg, amount, fee: r.openSellFee,
+      cashFlow: +(amount - r.openSellFee).toFixed(2),
+      costPrice: h.buyPrice, buyPrice: h.buyPrice, sellPrice: r.openSellAvg,
+      buyFee: buyFeePart, sellFee: r.openSellFee,
+      grossPnl: +(amount - cost).toFixed(2), netPnl, realizedPnl: netPnl,
+      pnlPct: cost ? +(netPnl / (cost + buyFeePart) * 100).toFixed(2) : 0,
+      holdingId: h.id, at: r.openSellAt || Date.now(), sellAt: r.openSellAt || Date.now(), note: '做T净卖出(减仓)',
+    })
+  }
+  return out
 }
 
 // 生成一条纯买入(BUY)交易记录：单腿，现金流出，无已实现盈亏
@@ -103,9 +138,13 @@ export const planStore = {
       plan: (d && d.plan) || [],
       holding: (d && d.holding) || [],
       closed: normalizeClosed((d && d.closed) || []),
+      account: (d && d.account) || null,   // { totalAssets, cash, updatedAt }
+      alerts: (d && d.alerts) || [],        // 预警规则集
     }
     listeners.forEach((l) => l())
     _suspend = false
+    // 登录/切换账号载入后，自动结算跨天未结算的做T（会触发一次云端回存）
+    this.autoSettleTFlows()
   },
   // authStore 注册云端保存回调
   registerSaver(fn) { _saver = fn },
@@ -117,6 +156,11 @@ export const planStore = {
     emit()
   },
   removePlan(code) { state.plan = state.plan.filter((x) => x.code !== code); emit() },
+  // 切换「重点关注」标记（自选/候选置顶高亮）
+  toggleStar(code) {
+    state.plan = state.plan.map((x) => x.code === code ? { ...x, star: !x.star } : x)
+    emit()
+  },
 
   // 计划 → 持仓（每次买入都是独立一笔，同股可多笔并存）
   buy(code, buyPrice, qty = 1) {
@@ -172,9 +216,10 @@ export const planStore = {
 
     // 更新该笔持仓：部分卖则减仓，全卖则移除
     let archived = []
+    const batchId = uid() // 本次清仓/卖出批次：卖出记录 + 归档做T记录共享，删除时级联
     if (sq >= h.qty) {
       // 全部清仓：把该持仓上已配对的做T收益归档，避免随持仓删除而丢失
-      archived = archiveTFlows(h)
+      archived = archiveTFlows(h, batchId)
       state.holding = state.holding.filter((x) => x.id !== id)
     } else {
       const remainQty = h.qty - sq
@@ -184,7 +229,7 @@ export const planStore = {
     }
 
     state.closed = [{
-      id: uid(), type: 'SELL', kind: 'SELL', code: h.code, name: h.name,
+      id: uid(), batchId, type: 'SELL', kind: 'SELL', code: h.code, name: h.name,
       side: 'sell', qty: sq, price, amount: +proceeds.toFixed(2),
       fee: sellFee, cashFlow: +(proceeds - sellFee).toFixed(2), // 卖出=现金流入
       costPrice: h.buyPrice, realizedPnl: netPnl,               // 有成本基准→带已实现盈亏
@@ -238,13 +283,28 @@ export const planStore = {
   removeHolding(id) {
     const h = state.holding.find((x) => x.id === id)
     if (h) {
-      const archived = archiveTFlows(h) // 删除持仓前，先归档已实现做T收益
+      const archived = archiveTFlows(h, uid()) // 删除持仓前，先归档已实现做T收益
       if (archived.length) state.closed = [...archived, ...state.closed].slice(0, 300)
     }
     state.holding = state.holding.filter((x) => x.id !== id); emit()
   },
   clearClosed() { state.closed = []; emit() },
-  removeClosed(id) { state.closed = state.closed.filter((x) => x.id !== id); emit() },
+  // 删除单条交易记录：连带删除同一次操作(同 batchId)产生的其他记录，保证各分类联动一致
+  removeClosed(id) {
+    const target = state.closed.find((x) => x.id === id)
+    if (target && target.batchId) {
+      state.closed = state.closed.filter((x) => x.batchId !== target.batchId)
+    } else {
+      state.closed = state.closed.filter((x) => x.id !== id)
+    }
+    emit()
+  },
+  // 计算某条记录删除时会级联影响的记录数（供 UI 二次确认提示）
+  batchSize(id) {
+    const target = state.closed.find((x) => x.id === id)
+    if (target && target.batchId) return state.closed.filter((x) => x.batchId === target.batchId).length
+    return 1
+  },
 
   // ===== 做T：流水式（每次只记一腿买或卖，FIFO自动配对算收益，底仓手数不变）=====
   // side='buy'(低吸/买回) | 'sell'(高抛/卖出)
@@ -270,10 +330,157 @@ export const planStore = {
       : x)
     emit()
   },
+  // 编辑某笔做T流水（改方向/价格/手数，手续费按新值重算）
+  editTFlow(id, flowId, { side, price, qty }) {
+    const p = Number(price), q = Number(qty)
+    if (!p || !(q > 0)) return
+    const amount = p * q * 100
+    const fee = side === 'buy' ? calcBuyFee(amount) : calcSellFee(amount)
+    state.holding = state.holding.map((x) => x.id === id
+      ? { ...x, tFlows: (x.tFlows || []).map((f) => f.id === flowId ? { ...f, side, price: p, qty: q, fee } : f) }
+      : x)
+    emit()
+  },
+
+  // 结算做T：把该笔持仓的做T流水固化进交易记录（配对差价=做T；净买入=加仓；净卖出=减仓/清仓），
+  // 并按净额调整底仓手数，清空做T流水。做T是当日行为，跨天自动触发（见 autoSettleTFlows）。
+  settleTFlows(id) {
+    const h = state.holding.find((x) => x.id === id)
+    if (!h || !(h.tFlows && h.tFlows.length)) return
+    const r = computeTFlows(h.tFlows)
+    const archived = archiveTFlows(h, uid())
+    // 净额调整底仓：净买入加仓(+)、净卖出减仓(−)
+    const net = (r.openBuy || 0) - (r.openSell || 0)
+    const newQty = h.qty + net
+    if (archived.length) state.closed = [...archived, ...state.closed].slice(0, 300)
+    if (newQty <= 0) {
+      // 全部卖光 → 清仓，移除持仓
+      state.holding = state.holding.filter((x) => x.id !== id)
+    } else {
+      // 加仓时按加权平均更新成本价；减仓成本价不变
+      let newBuyPrice = h.buyPrice
+      if (r.openBuy > 0 && r.openBuyAvg != null) {
+        newBuyPrice = +(((h.buyPrice * h.qty) + (r.openBuyAvg * r.openBuy)) / (h.qty + r.openBuy)).toFixed(3)
+      }
+      state.holding = state.holding.map((x) => x.id === id
+        ? { ...x, qty: newQty, buyPrice: newBuyPrice, tFlows: [] }
+        : x)
+    }
+    emit()
+  },
+
+  // 自动结算：把「所有做T流水都发生在今天之前」的持仓自动结算（做T为当日行为，跨天自动兑现）
+  // 应用启动 & 每次数据变更后调用；只结算历史天，当天流水保持可编辑。
+  autoSettleTFlows() {
+    const start = new Date(); start.setHours(0, 0, 0, 0)
+    const todayStart = start.getTime()
+    const toSettle = (state.holding || []).filter((h) =>
+      h.tFlows && h.tFlows.length && h.tFlows.every((f) => f.at < todayStart)
+    )
+    if (!toSettle.length) return false
+    for (const h of toSettle) {
+      // 复用 settleTFlows 逻辑（逐个结算）
+      const cur = state.holding.find((x) => x.id === h.id)
+      if (!cur || !(cur.tFlows && cur.tFlows.length)) continue
+      const r = computeTFlows(cur.tFlows)
+      const archived = archiveTFlows(cur, uid())
+      const net = (r.openBuy || 0) - (r.openSell || 0)
+      const newQty = cur.qty + net
+      if (archived.length) state.closed = [...archived, ...state.closed].slice(0, 300)
+      if (newQty <= 0) {
+        state.holding = state.holding.filter((x) => x.id !== cur.id)
+      } else {
+        let newBuyPrice = cur.buyPrice
+        if (r.openBuy > 0 && r.openBuyAvg != null) {
+          newBuyPrice = +(((cur.buyPrice * cur.qty) + (r.openBuyAvg * r.openBuy)) / (cur.qty + r.openBuy)).toFixed(3)
+        }
+        state.holding = state.holding.map((x) => x.id === cur.id
+          ? { ...x, qty: newQty, buyPrice: newBuyPrice, tFlows: [] }
+          : x)
+      }
+    }
+    emit()
+    return true
+  },
 
   // 仅判断是否在「计划买入」候选中（用于加自选按钮态）
   has(code) {
     return state.plan.some((x) => x.code === code)
+  },
+
+  // ===== 账户资产（仓位/资金管理）=====
+  // account: { totalAssets(总资产,元), cash(可用资金,元), updatedAt }
+  setAccount(patch) {
+    state.account = { ...(state.account || {}), ...patch, updatedAt: Date.now() }
+    emit()
+  },
+
+  // ===== 交易计划与纪律：给某持仓设/改止盈、止损、计划仓位、买入理由 =====
+  // 用 hasOwnProperty 判断字段是否传入，传了就覆盖（含 null=清空），没传才保留旧值
+  setPlanRule(id, rule) {
+    const has = (k) => Object.prototype.hasOwnProperty.call(rule, k)
+    state.holding = state.holding.map((x) => x.id === id
+      ? {
+          ...x,
+          tp: has('tp') ? rule.tp : x.tp,
+          sl: has('sl') ? rule.sl : x.sl,
+          planReason: has('planReason') ? rule.planReason : x.planReason,
+          planWeight: has('planWeight') ? rule.planWeight : x.planWeight,
+        }
+      : x)
+    emit()
+  },
+  // 清除某持仓的交易计划（止盈/止损/理由）+ 其联动的到价预警
+  clearPlanRule(id) {
+    state.holding = state.holding.map((x) => x.id === id
+      ? { ...x, tp: null, sl: null, planReason: null, planWeight: null } : x)
+    state.alerts = (state.alerts || []).filter((a) => a.planId !== id) // 移除计划联动预警
+    emit()
+  },
+  // 给候选(计划买入)预设交易计划：目标买入价/止盈/止损/理由/计划仓位
+  setCandPlan(code, plan) {
+    state.plan = state.plan.map((x) => x.code === code ? { ...x, ...plan } : x)
+    emit()
+  },
+
+  // ===== 预警规则 =====
+  // alert: { id, code, name, type, op, value, note, enabled, createdAt, triggeredAt, triggeredMsg }
+  //   type: price(到价) | pct(涨跌幅) | vol(量比) | turnover(换手) | ma(均线突破/跌破) | limit(涨跌停临近)
+  //   op:   gte(>=) | lte(<=)
+  addAlert(a) {
+    const alert = {
+      id: uid(), enabled: true, createdAt: Date.now(),
+      triggeredAt: null, triggeredMsg: '',
+      ...a,
+    }
+    state.alerts = [alert, ...(state.alerts || [])]
+    emit()
+    return alert
+  },
+  updateAlert(id, patch) {
+    state.alerts = (state.alerts || []).map((x) => x.id === id ? { ...x, ...patch } : x)
+    emit()
+  },
+  removeAlert(id) {
+    state.alerts = (state.alerts || []).filter((x) => x.id !== id)
+    emit()
+  },
+  toggleAlert(id) {
+    state.alerts = (state.alerts || []).map((x) => x.id === id ? { ...x, enabled: !x.enabled } : x)
+    emit()
+  },
+  // 标记预警已触发（供预警引擎回写；只在未触发或重新武装时更新）
+  markAlertTriggered(id, msg) {
+    state.alerts = (state.alerts || []).map((x) => x.id === id
+      ? { ...x, triggeredAt: Date.now(), triggeredMsg: msg, enabled: false } // 触发后自动停用，避免重复提醒
+      : x)
+    emit()
+  },
+  // 重新武装预警（用户手动重启）
+  rearmAlert(id) {
+    state.alerts = (state.alerts || []).map((x) => x.id === id
+      ? { ...x, enabled: true, triggeredAt: null, triggeredMsg: '' } : x)
+    emit()
   },
 }
 
@@ -325,9 +532,49 @@ export function computeTFlows(flows) {
   }
   const openBuy = queue.buy.reduce((a, x) => a + x.qty, 0)
   const openSell = queue.sell.reduce((a, x) => a + x.qty, 0)
-  return { realized: +realized.toFixed(2), pairs, openBuy, openSell, pairList }
+  // 开口腿（未配平的净头寸）明细：净买入=加仓，净卖出=减仓/清仓
+  const openBuyAmt = queue.buy.reduce((a, x) => a + x.price * x.qty * 100, 0)
+  const openBuyFee = +queue.buy.reduce((a, x) => a + x.fee, 0).toFixed(2)
+  const openSellAmt = queue.sell.reduce((a, x) => a + x.price * x.qty * 100, 0)
+  const openSellFee = +queue.sell.reduce((a, x) => a + x.fee, 0).toFixed(2)
+  const openBuyAvg = openBuy ? +(openBuyAmt / (openBuy * 100)).toFixed(3) : null
+  const openSellAvg = openSell ? +(openSellAmt / (openSell * 100)).toFixed(3) : null
+  const openBuyAt = queue.buy.length ? Math.max(...queue.buy.map((x) => x.at)) : null
+  const openSellAt = queue.sell.length ? Math.max(...queue.sell.map((x) => x.at)) : null
+  return {
+    realized: +realized.toFixed(2), pairs, openBuy, openSell, pairList,
+    openBuyAvg, openBuyFee, openBuyAt, openSellAvg, openSellFee, openSellAt,
+  }
 }
 
 export function usePlanStore() {
   return useSyncExternalStore(planStore.subscribe, planStore.get)
 }
+
+// ============ 账户全景计算：传入 holding + 实时报价 quote(按code索引) + account =============
+// 返回：持仓市值、成本、浮盈、总资产、可用现金、总仓位%、每笔持仓的市值/占比/浮盈
+export function computePortfolio(holding, quoteMap, account) {
+  const positions = (holding || []).map((h) => {
+    const q = quoteMap && quoteMap[h.code]
+    const price = q ? q.price : h.buyPrice
+    const shares = (h.qty || 0) * 100
+    const mktValue = +(price * shares).toFixed(2)          // 市值
+    const costValue = +((h.buyPrice || 0) * shares + (h.buyFee || 0)).toFixed(2) // 含费成本
+    const floatPnl = +(mktValue - costValue).toFixed(2)     // 浮动盈亏
+    const floatPct = costValue ? +((floatPnl / costValue) * 100).toFixed(2) : 0
+    return { id: h.id, code: h.code, name: h.name, qty: h.qty, price, buyPrice: h.buyPrice, mktValue, costValue, floatPnl, floatPct }
+  })
+  const holdMktValue = +positions.reduce((a, p) => a + p.mktValue, 0).toFixed(2)   // 持仓总市值
+  const holdCostValue = +positions.reduce((a, p) => a + p.costValue, 0).toFixed(2) // 持仓总成本
+  const floatPnl = +(holdMktValue - holdCostValue).toFixed(2)                       // 总浮盈
+  // 总资产：用户填了就用填的；否则用 持仓市值 + 现金(若填) 估算
+  const cash = account && account.cash != null ? account.cash : null
+  let totalAssets = account && account.totalAssets != null ? account.totalAssets : null
+  if (totalAssets == null) totalAssets = cash != null ? +(holdMktValue + cash).toFixed(2) : holdMktValue
+  const position = totalAssets ? +((holdMktValue / totalAssets) * 100).toFixed(1) : null // 总仓位%
+  const available = cash != null ? cash : (totalAssets != null ? +(totalAssets - holdMktValue).toFixed(2) : null)
+  // 单票占比（对总资产）
+  positions.forEach((p) => { p.weight = totalAssets ? +((p.mktValue / totalAssets) * 100).toFixed(1) : null })
+  return { positions, holdMktValue, holdCostValue, floatPnl, totalAssets, cash, available, position }
+}
+

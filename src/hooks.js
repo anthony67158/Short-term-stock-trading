@@ -20,10 +20,13 @@ export function usePolling(url, intervalMs, deps = []) {
   const timer = useRef(null)
   const tick = useRefreshTick()
 
-  const load = useCallback(async () => {
-    if (!url) { setData(null); setLoading(false); return } // 无 url 跳过请求
+  // 底层取数：bust=true 时加时间戳破 CDN 缓存 + 先置 loading（供手动刷新反馈）
+  const fetchData = useCallback(async (bust = false) => {
+    if (!url) { setData(null); setLoading(false); return }
+    if (bust) setLoading(true)
     try {
-      const res = await fetch(url)
+      const u = bust ? url + (url.includes('?') ? '&' : '?') + '_t=' + Date.now() : url
+      const res = await fetch(u, bust ? { cache: 'no-store' } : undefined)
       const j = await res.json()
       if (j && j.ok === false) {
         setError(j.error || '数据源暂不可用')
@@ -39,6 +42,9 @@ export function usePolling(url, intervalMs, deps = []) {
     // eslint-disable-next-line
   }, [url])
 
+  const load = useCallback(() => fetchData(false), [fetchData])
+  const reload = useCallback(() => fetchData(true), [fetchData]) // 手动刷新：破缓存 + 有 loading 反馈
+
   useEffect(() => {
     if (!url) { setData(null); setLoading(false); return }
     load()
@@ -48,7 +54,7 @@ export function usePolling(url, intervalMs, deps = []) {
     // eslint-disable-next-line
   }, [url, intervalMs, tick, ...deps])
 
-  return { data, loading, error, reload: load }
+  return { data, loading, error, reload }
 }
 
 // 全局刷新倒计时：与轮询间隔对齐

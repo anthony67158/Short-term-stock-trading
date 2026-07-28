@@ -2,21 +2,75 @@ import { useState, useMemo, useEffect, useRef } from 'react'
 import ReactECharts from 'echarts-for-react'
 import Icon from './Icon'
 import { usePolling } from '../hooks'
-import { fmtPct, pctClass } from '../format'
+import { fmtPct, pctClass, fmtRaw, fmtNum } from '../format'
 import { aiStore } from '../aiStore'
+import { AlertForm } from './AlertCenter'
 
-// 个股详情弹窗：代码 + 主营业务 + K线图
+// 把公司网址补全为可点击的绝对 URL（东财 F10 常给不带协议的裸域名）
+function normalizeUrl(raw) {
+  if (!raw) return null
+  let u = String(raw).trim().split(/[,;，、\s]+/)[0] // 只取第一个
+  if (!u || u === '-' || u === '--') return null
+  if (!/^https?:\/\//i.test(u)) u = 'http://' + u
+  try { new URL(u); return u } catch { return null }
+}
+// 成交量（手）友好显示
+function fmtVol(v) {
+  if (v == null || isNaN(v)) return '--'
+  const a = Math.abs(v)
+  if (a >= 1e8) return (v / 1e8).toFixed(2) + '亿手'
+  if (a >= 1e4) return (v / 1e4).toFixed(1) + '万手'
+  return Math.round(v) + '手'
+}
+// 把纯文本里的网址/域名渲染成可点击链接（公司简介里常带参考网站）
+function Linkify({ text }) {
+  if (!text) return null
+  // 匹配 http(s):// 链接，或 www./裸域名(含常见后缀)
+  const re = /(https?:\/\/[^\s，。；、）)]+|www\.[^\s，。；、）)]+|[a-zA-Z0-9-]+\.(?:com|cn|net|org|com\.cn)(?:\/[^\s，。；、）)]*)?)/g
+  const out = []
+  let last = 0, m, i = 0
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) out.push(text.slice(last, m.index))
+    const raw = m[0]
+    const href = /^https?:\/\//i.test(raw) ? raw : 'http://' + raw
+    out.push(
+      <a key={i++} href={href} target="_blank" rel="noopener noreferrer" className="inline-link">{raw}</a>
+    )
+    last = m.index + raw.length
+  }
+  if (last < text.length) out.push(text.slice(last))
+  return <>{out}</>
+}
+
+// 个股详情弹窗：代码 + 主营业务 + 分时/K线图
 export default function StockDetail({ stock, onClose }) {
+  const [mode, setMode] = useState('kline') // kline K线 | trend 分时
   const [klt, setKlt] = useState('101') // 101日 102周 103月
   const [chartType, setChartType] = useState('candle') // candle | line
+  const [refreshing, setRefreshing] = useState(false) // 手动刷新中（保证转圈可见）
+  const [refreshedAt, setRefreshedAt] = useState(null) // 最近一次成功刷新时间
+  const [showAlert, setShowAlert] = useState(false) // 设预警表单开关
   const { data, loading, error, reload } = usePolling(
-    stock ? `/api/stock_detail?code=${stock.code}&klt=${klt}&lmt=120` : null,
+    stock ? `/api/stock_detail?code=${stock.code}&klt=${klt}&lmt=120&trends=1` : null,
     600000, // 详情不需要频繁刷新
     [stock && stock.code, klt]
   )
 
+  // 手动刷新：破缓存重拉 + 转圈至少 600ms + 完成后记录更新时间
+  const doRefresh = async () => {
+    if (refreshing) return
+    setRefreshing(true)
+    retryRef.current = 0
+    const started = Date.now()
+    try { await reload() } catch { /* usePolling 内部已兜底 */ }
+    const wait = Math.max(0, 600 - (Date.now() - started))
+    setTimeout(() => { setRefreshing(false); setRefreshedAt(Date.now()) }, wait)
+  }
+
   const profile = data && data.profile
   const candles = (data && data.candles) || []
+  const trends = (data && data.trends) || []
+  const preClose = data && data.preClose
 
   // K线为空时自动重试（东财偶发空响应）：最多重试 2 次，间隔递增
   const retryRef = useRef(0)
@@ -44,6 +98,82 @@ export default function StockDetail({ stock, onClose }) {
       for (let j = 0; j < n; j++) sum += arr[i - j].close
       return +(sum / n).toFixed(2)
     })
+
+  // 价格与均线概览（用最后一根K线 + 尾部均值），换周期时随 candles 重算
+  const overview = useMemo(() => {
+    if (!candles.length) return null
+    const last = candles[candles.length - 1]
+    // 以 endIdx 为“最后一根”，计算 n 日均线（用于当前值 & 上一根值，判断交叉）
+    const maAt = (n, endIdx) => {
+      if (endIdx < n - 1) return null
+      let sum = 0
+      for (let j = 0; j < n; j++) sum += candles[endIdx - j].close
+      return +(sum / n).toFixed(3)
+    }
+    const li = candles.length - 1
+    const maN = (n) => maAt(n, li)
+    const price = last.close
+    const mas = [5, 10, 20, 60].map((n) => {
+      const v = maN(n)
+      return { n, v, above: v != null ? price >= v : null, diff: v != null ? +(((price - v) / v) * 100).toFixed(2) : null }
+    })
+    const [m5, m10, m20, m60] = [maN(5), maN(10), maN(20), maN(60)]
+    // 上一根的均线（用于交叉判定）
+    const [p5, p10, p20] = [maAt(5, li - 1), maAt(10, li - 1), maAt(20, li - 1)]
+
+    let trend = null
+    if (m5 != null && m10 != null && m20 != null) {
+      if (m5 >= m10 && m10 >= m20) trend = { label: '多头排列', cls: 'red' }
+      else if (m5 <= m10 && m10 <= m20) trend = { label: '空头排列', cls: 'green' }
+      else trend = { label: '均线纠缠', cls: 'muted' }
+    }
+    const periodLabel = klt === '102' ? '周' : klt === '103' ? '月' : '日'
+
+    // ===== 技术参考结论（本地计算，非投资建议）=====
+    const signals = []
+    // 1) 金叉/死叉：MA5 与 MA10（短中期），以及 MA10 与 MA20（中期）
+    const cross = (fastNow, slowNow, fastPrev, slowPrev, fastName, slowName) => {
+      if ([fastNow, slowNow, fastPrev, slowPrev].some((x) => x == null)) return null
+      if (fastPrev <= slowPrev && fastNow > slowNow) return { type: 'gold', fastName, slowName }
+      if (fastPrev >= slowPrev && fastNow < slowNow) return { type: 'dead', fastName, slowName }
+      return null
+    }
+    const c1 = cross(m5, m10, p5, p10, 'MA5', 'MA10')
+    const c2 = cross(m10, m20, p10, p20, 'MA10', 'MA20')
+    for (const c of [c1, c2]) {
+      if (!c) continue
+      if (c.type === 'gold') signals.push({ cls: 'red', tag: '金叉', text: `${c.fastName} 上穿 ${c.slowName}，短期走强信号，${periodLabel}线级别偏多` })
+      else signals.push({ cls: 'green', tag: '死叉', text: `${c.fastName} 下穿 ${c.slowName}，短期转弱信号，${periodLabel}线级别偏空` })
+    }
+    // 2) 均线排列
+    if (trend && trend.label === '多头排列') signals.push({ cls: 'red', tag: '多头排列', text: 'MA5>MA10>MA20，均线向上发散，趋势偏强，回踩均线可关注' })
+    else if (trend && trend.label === '空头排列') signals.push({ cls: 'green', tag: '空头排列', text: 'MA5<MA10<MA20，均线向下压制，趋势偏弱，反弹到均线易受阻' })
+    // 3) 关键均线位置（现价 vs MA20 生命线 / MA60）
+    if (m20 != null) {
+      const d = +(((price - m20) / m20) * 100).toFixed(2)
+      if (price >= m20) signals.push({ cls: 'red', tag: '站上MA20', text: `现价在 20${periodLabel}均线上方 ${d}%，中期趋势偏多` })
+      else signals.push({ cls: 'green', tag: '跌破MA20', text: `现价在 20${periodLabel}均线下方 ${Math.abs(d)}%，中期趋势承压` })
+    }
+    if (m60 != null) {
+      if (price >= m60) signals.push({ cls: 'red', tag: '站上MA60', text: `站稳 60${periodLabel}均线（季线），中长期多头格局` })
+      else signals.push({ cls: 'green', tag: '跌破MA60', text: `处于 60${periodLabel}均线（季线）下方，中长期偏弱` })
+    }
+    // 4) 均线粘合（5/10/20 极度靠拢，变盘临界）
+    if (m5 != null && m10 != null && m20 != null) {
+      const maxV = Math.max(m5, m10, m20), minV = Math.min(m5, m10, m20)
+      const spread = +(((maxV - minV) / minV) * 100).toFixed(2)
+      if (spread <= 1.5) signals.push({ cls: 'muted', tag: '均线粘合', text: `MA5/10/20 高度粘合（发散${spread}%），方向待选，突破方向或加速` })
+    }
+    // 5) 乖离过大（现价离 MA5 太远，短线过热/超跌）
+    if (m5 != null) {
+      const bias = +(((price - m5) / m5) * 100).toFixed(2)
+      if (bias >= 8) signals.push({ cls: 'muted', tag: '正乖离大', text: `现价高出 MA5 达 ${bias}%，短线偏热，注意回踩风险` })
+      else if (bias <= -8) signals.push({ cls: 'muted', tag: '负乖离大', text: `现价低于 MA5 达 ${Math.abs(bias)}%，短线超跌，或有反抽` })
+    }
+    if (!signals.length) signals.push({ cls: 'muted', tag: '暂无明显信号', text: '均线无交叉、排列中性，观望为主，等待方向明朗' })
+
+    return { last, price, pct: last.pct, mas, trend, periodLabel, signals }
+  }, [candles, klt])
 
   const option = useMemo(() => {
     if (!candles.length) return null
@@ -132,6 +262,49 @@ export default function StockDetail({ stock, onClose }) {
     }
   }, [candles, chartType])
 
+  // 分时图 option：现价线 + 均价线 + 昨收基准 + 成交量
+  const trendOption = useMemo(() => {
+    if (!trends.length) return null
+    const times = trends.map((t) => t.time.slice(11, 16)) // HH:MM
+    const prices = trends.map((t) => t.price)
+    const avgs = trends.map((t) => t.avg)
+    const vols = trends.map((t, i) => ({
+      value: t.volume,
+      itemStyle: { color: (i > 0 ? t.price >= trends[i - 1].price : t.price >= (preClose || t.price)) ? 'rgba(244,97,78,.55)' : 'rgba(63,185,80,.55)' },
+    }))
+    const base = preClose || prices[0]
+    return {
+      animation: false,
+      axisPointer: { link: [{ xAxisIndex: 'all' }] },
+      legend: { data: ['价格', '均价'], top: 0, right: 8, textStyle: { color: '#767881', fontSize: 10 }, itemWidth: 14, itemHeight: 8 },
+      tooltip: {
+        trigger: 'axis', backgroundColor: '#16181f', borderColor: '#23252d', textStyle: { color: '#e6e7ea', fontSize: 12 },
+        formatter: (ps) => {
+          const i = ps[0].dataIndex, t = trends[i]
+          const pct = base ? ((t.price - base) / base * 100).toFixed(2) : '0'
+          return `${times[i]}<br/>价格 ${fmtRaw(t.price)}（${pct >= 0 ? '+' : ''}${pct}%）<br/>均价 ${fmtRaw(t.avg)}`
+        },
+      },
+      grid: [{ left: 52, right: 16, top: 24, height: '60%' }, { left: 52, right: 16, top: '76%', height: '16%' }],
+      xAxis: [
+        { type: 'category', data: times, boundaryGap: false, axisLabel: { color: '#767881', fontSize: 10, interval: Math.floor(times.length / 5) }, axisLine: { lineStyle: { color: '#23252d' } } },
+        { type: 'category', gridIndex: 1, data: times, axisLabel: { show: false }, axisLine: { lineStyle: { color: '#23252d' } } },
+      ],
+      yAxis: [
+        { scale: true, axisLabel: { color: '#767881', fontSize: 10 }, splitLine: { lineStyle: { color: '#16181f' } } },
+        { scale: true, gridIndex: 1, axisLabel: { show: false }, splitLine: { show: false } },
+      ],
+      series: [
+        { name: '价格', type: 'line', data: prices, smooth: false, symbol: 'none', lineStyle: { color: '#5b8def', width: 1.5 },
+          areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(91,141,239,.22)' }, { offset: 1, color: 'rgba(91,141,239,.01)' }] } },
+          markLine: base ? { symbol: 'none', silent: true, data: [{ yAxis: base, lineStyle: { color: '#767881', type: 'dashed', width: 1 }, label: { formatter: '昨收 ' + fmtRaw(base), color: '#767881', fontSize: 10, position: 'insideEndTop' } }] } : undefined,
+        },
+        { name: '均价', type: 'line', data: avgs, smooth: false, symbol: 'none', lineStyle: { color: '#e3b341', width: 1 } },
+        { name: '成交量', type: 'bar', xAxisIndex: 1, yAxisIndex: 1, data: vols },
+      ],
+    }
+  }, [trends, preClose])
+
   if (!stock) return null
 
   return (
@@ -143,7 +316,18 @@ export default function StockDetail({ stock, onClose }) {
             <span className="detail-code">{stock.code}</span>
             {profile && profile.market && <span className="detail-market">{profile.market}</span>}
           </div>
-          <div className="modal-close" onClick={onClose}><Icon name="close" size={16} /></div>
+          <div className="modal-actions">
+            <button
+              className="icon-btn detail-refresh"
+              title="刷新最新价格 / K线"
+              disabled={refreshing || loading}
+              onClick={doRefresh}
+            >
+              <Icon name="refresh" size={15} className={refreshing || loading ? 'spin' : ''} />
+              <span className="detail-refresh-txt">{refreshing ? '刷新中' : '刷新'}</span>
+            </button>
+            <div className="modal-close" onClick={onClose}><Icon name="close" size={16} /></div>
+          </div>
         </div>
 
         <div className="detail-scroll">
@@ -153,40 +337,111 @@ export default function StockDetail({ stock, onClose }) {
               {profile.fullName && <div className="detail-full">{profile.fullName}</div>}
               <div className="detail-meta">
                 {profile.industry && <span className="detail-chip"><Icon name="building" size={12} /> {profile.industry}</span>}
-                {profile.website && <span className="detail-chip"><Icon name="compass" size={12} /> {profile.website}</span>}
+                {normalizeUrl(profile.website) && (
+                  <a className="detail-chip detail-link" href={normalizeUrl(profile.website)} target="_blank" rel="noopener noreferrer" title="打开公司官网">
+                    <Icon name="compass" size={12} /> {profile.website} <Icon name="chevronRight" size={11} />
+                  </a>
+                )}
               </div>
               {profile.business && (
                 <div className="detail-block">
                   <div className="detail-label">主营业务</div>
-                  <div className="detail-text">{profile.business}</div>
+                  <div className="detail-text"><Linkify text={profile.business} /></div>
                 </div>
               )}
               {profile.intro && (
                 <div className="detail-block">
                   <div className="detail-label">公司简介</div>
-                  <div className="detail-text detail-intro">{profile.intro}</div>
+                  <div className="detail-text detail-intro"><Linkify text={profile.intro} /></div>
                 </div>
               )}
             </div>
           )}
 
-          {/* K线 */}
-          <div className="detail-kline">
-            <div className="detail-kline-head">
-              <div className="detail-label" style={{ margin: 0 }}>K 线图</div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <div className="tabs">
-                  <div className={'tab' + (chartType === 'candle' ? ' active' : '')} onClick={() => setChartType('candle')}>蜡烛图</div>
-                  <div className={'tab' + (chartType === 'line' ? ' active' : '')} onClick={() => setChartType('line')}>折线图</div>
+          {/* 价格 & 均线概览 */}
+          {overview && (
+            <div className="detail-quote">
+              <div className="dq-price-row">
+                <div className="dq-price-main">
+                  <span className={'dq-price ' + pctClass(overview.pct)}>{fmtRaw(overview.price)}</span>
+                  <span className={'dq-pct ' + pctClass(overview.pct)}>{fmtPct(overview.pct)}</span>
                 </div>
-                <div className="tabs">
-                  {[['101', '日K'], ['102', '周K'], ['103', '月K']].map(([v, t]) => (
-                    <div key={v} className={'tab' + (klt === v ? ' active' : '')} onClick={() => setKlt(v)}>{t}</div>
+                {overview.trend && <span className={'dq-trend ' + overview.trend.cls}>{overview.trend.label}</span>}
+                <span className="dq-period">
+                  最新{overview.periodLabel}K
+                  {refreshedAt && <span className="dq-updated">· 已更新 {new Date(refreshedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>}
+                </span>
+              </div>
+              <div className="dq-ohlc">
+                <span>开 <b>{fmtRaw(overview.last.open)}</b></span>
+                <span>高 <b className="red">{fmtRaw(overview.last.high)}</b></span>
+                <span>低 <b className="green">{fmtRaw(overview.last.low)}</b></span>
+                <span>量 <b>{fmtVol(overview.last.volume)}</b></span>
+              </div>
+              <div className="dq-ma">
+                {overview.mas.map((m) => (
+                  <div className={'dq-ma-cell' + (m.v == null ? ' na' : m.above ? ' above' : ' below')} key={m.n}>
+                    <span className="dq-ma-k">MA{m.n}</span>
+                    <span className="dq-ma-v">{m.v == null ? '--' : fmtRaw(m.v)}</span>
+                    {m.diff != null && <span className={'dq-ma-d ' + (m.above ? 'red' : 'green')}>{m.diff >= 0 ? '+' : ''}{m.diff}%</span>}
+                  </div>
+                ))}
+              </div>
+              {/* 技术参考结论 */}
+              {overview.signals && overview.signals.length > 0 && (
+                <div className="dq-signals">
+                  <div className="dq-signals-head"><Icon name="pulse" size={13} /> 均线技术参考</div>
+                  {overview.signals.map((s, i) => (
+                    <div className={'dq-sig ' + s.cls} key={i}>
+                      <span className={'dq-sig-tag ' + s.cls}>{s.tag}</span>
+                      <span className="dq-sig-text">{s.text}</span>
+                    </div>
                   ))}
                 </div>
-              </div>
+              )}
+              <div className="dq-hint">现价{overview.periodLabel === '日' ? '' : '(' + overview.periodLabel + 'K收盘)'}在均线<span className="red">上方</span>=偏多、<span className="green">下方</span>=偏空 · MA为{overview.periodLabel}线均价 · 结论由均线本地测算，仅供参考，非投资建议</div>
             </div>
-            {(loading && !data) || retrying ? (
+          )}
+
+          {/* 分时 / K线 */}
+          <div className="detail-kline">
+            <div className="detail-kline-head">
+              <div className="tabs">
+                <div className={'tab' + (mode === 'trend' ? ' active' : '')} onClick={() => setMode('trend')}>分时</div>
+                <div className={'tab' + (mode === 'kline' ? ' active' : '')} onClick={() => setMode('kline')}>K线</div>
+              </div>
+              {mode === 'kline' ? (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <div className="tabs">
+                    <div className={'tab' + (chartType === 'candle' ? ' active' : '')} onClick={() => setChartType('candle')}>蜡烛图</div>
+                    <div className={'tab' + (chartType === 'line' ? ' active' : '')} onClick={() => setChartType('line')}>折线图</div>
+                  </div>
+                  <div className="tabs">
+                    {[['101', '日K'], ['102', '周K'], ['103', '月K']].map(([v, t]) => (
+                      <div key={v} className={'tab' + (klt === v ? ' active' : '')} onClick={() => setKlt(v)}>{t}</div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <span className="sub-name">当日分时 · 蓝=价格 金=均价 虚线=昨收</span>
+              )}
+            </div>
+            {mode === 'trend' ? (
+              (loading && !data) ? (
+                <div className="loading">加载分时中…</div>
+              ) : trendOption ? (
+                <ReactECharts
+                  key={`${stock.code}-trend-${trends.length}`}
+                  option={trendOption}
+                  style={{ height: 340, width: '100%' }}
+                  notMerge lazyUpdate={false}
+                  opts={{ renderer: 'canvas' }}
+                  onChartReady={(chart) => { setTimeout(() => chart.resize(), 60) }}
+                />
+              ) : (
+                <div className="empty">暂无分时数据（非交易时段或数据源繁忙）。可切到「K线」查看，或点右上刷新。</div>
+              )
+            ) : (loading && !data) || retrying ? (
               <div className="loading">{retrying ? '数据源繁忙，正在重试加载 K 线…' : '加载 K 线中…'}</div>
             ) : option ? (
               <ReactECharts
@@ -207,14 +462,39 @@ export default function StockDetail({ stock, onClose }) {
             )}
           </div>
 
-          {/* 在统一 AI 助手中分析该股 */}
+          {/* 在统一 AI 助手中分析该股：预填到输入框，用户编辑后自行发送 */}
           <div style={{ padding: '12px 4px 4px', textAlign: 'center' }}>
             <button
               className="btn btn-primary"
-              onClick={() => { aiStore.focusStock({ code: stock.code, name: (profile && profile.name) || stock.name }); onClose() }}
+              onClick={() => {
+                const nm = (profile && profile.name) || stock.name
+                const cur = overview ? `当前价 ${fmtRaw(overview.price)}（${fmtPct(overview.pct)}）` : ''
+                const trend = overview && overview.trend ? `，均线${overview.trend.label}` : ''
+                const text =
+                  `帮我分析一下 ${nm}(${stock.code})。${cur}${trend}。\n` +
+                  `想了解：\n` +
+                  `1. 现在的资金面和量价配合怎么样？主力是在进还是在出？\n` +
+                  `2. 结合均线（MA5/10/20/60）和当前位置，短线是偏多还是偏空？\n` +
+                  `3. 有没有值得关注的消息面或所属板块的催化？\n` +
+                  `4. 如果做短线，买点、止盈、止损大概怎么设？`
+                aiStore.prefillStock({ code: stock.code, name: nm }, text)
+                onClose()
+              }}
             >
               <Icon name="spark" size={14} /> 在 AI 助手中分析 / 提问这只票
             </button>
+            <div className="sub-name" style={{ marginTop: 6, fontSize: 11 }}>会把股票信息和建议问题填入助手输入框，你可编辑后再发送</div>
+            <div style={{ marginTop: 10 }}>
+              <button className="btn" onClick={() => setShowAlert((v) => !v)}>
+                <Icon name="bell" size={13} /> {showAlert ? '收起预警设置' : '设置盯盘预警'}
+              </button>
+            </div>
+            {showAlert && (
+              <div style={{ marginTop: 8, textAlign: 'left', maxWidth: 420, marginLeft: 'auto', marginRight: 'auto' }}>
+                <AlertForm stock={{ code: stock.code, name: (profile && profile.name) || stock.name }} onDone={() => setShowAlert(false)} />
+                <div className="sub-name" style={{ fontSize: 11, marginTop: 4 }}>命中后会通过预警中心（顶部铃铛）+ 浏览器通知提醒你</div>
+              </div>
+            )}
           </div>
 
           <div className="ai-disclaimer" style={{ padding: '10px 4px 0' }}>

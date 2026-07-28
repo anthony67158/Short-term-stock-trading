@@ -1,24 +1,49 @@
 import { useState, useRef, useEffect } from 'react'
 import { useAIStore, aiStore } from '../aiStore'
 import { openStockDetail } from '../detailStore'
+import { chatStore } from '../chatStore'
 import { callAI } from '../ai'
 import Icon from './Icon'
 import Md from './Md'
 
 // ============ 统一 AI 助手：一个入口，对话为核心 ============
 // 能力：个股多轮问答(RAG+新闻) + 快捷指令(全盘扫描/盘面复盘/板块选股/个股诊断)
-// 所有结果都进入同一条对话流
+// 对话按日期持久化，单日上下文连贯，可按天查看/删除历史
 
 export default function AIAssistant({ snapshot }) {
-  const { open, stock, sector, intent, seq } = useAIStore()
+  const { open, stock, sector, intent, seq, prefill, prefillSeq } = useAIStore()
   const [q, setQ] = useState('')
   const [loading, setLoading] = useState(false)
-  const [msgs, setMsgs] = useState([]) // {role, kind, content|data, news?}
+  const today = chatStore.today()
+  const [day, setDay] = useState(today) // 当前查看的日期
+  const [msgs, setMsgs] = useState(() => chatStore.load(today)) // 从今天的持久化对话恢复
+  const [histOpen, setHistOpen] = useState(false) // 历史面板
+  const [histTick, setHistTick] = useState(0) // 历史列表刷新
   const scrollRef = useRef(null)
+  const inputRef = useRef(null) // 输入框，用于预填后聚焦
+  const abortRef = useRef(null) // 当前分析的中止控制器
+  const isToday = day === today
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
   }, [msgs, loading])
+
+  // 输入框随内容自动增高（多行预填/编辑时不遮挡）
+  useEffect(() => {
+    const el = inputRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = Math.min(el.scrollHeight, 160) + 'px'
+  }, [q, open])
+
+  // 消息变化时，持久化到「当天」（仅当查看的是今天且非加载态时写入）
+  useEffect(() => {
+    if (isToday) chatStore.save(msgs, today)
+    // eslint-disable-next-line
+  }, [msgs])
+
+  // 切换查看的日期
+  const viewDay = (d) => { setDay(d); setMsgs(chatStore.load(d)); setHistOpen(false) }
 
   // 响应外部意图（从页面点"问AI"→直接以自然语言提问该股）
   useEffect(() => {
@@ -28,6 +53,20 @@ export default function AIAssistant({ snapshot }) {
     // eslint-disable-next-line
   }, [seq])
 
+  // 响应预填：把文本填入输入框但不发送，聚焦并把光标移到末尾，由用户编辑后手动发
+  useEffect(() => {
+    if (!prefill) return
+    // 若在看历史，切回今天再填
+    if (!isToday) { setDay(today); setMsgs(chatStore.load(today)) }
+    setQ(prefill)
+    aiStore.consumePrefill()
+    setTimeout(() => {
+      const el = inputRef.current
+      if (el) { el.focus(); const n = el.value.length; try { el.setSelectionRange(n, n) } catch { /* noop */ } el.scrollTop = el.scrollHeight }
+    }, 60)
+    // eslint-disable-next-line
+  }, [prefillSeq])
+
   const pushUser = (content) => setMsgs((m) => [...m, { role: 'user', kind: 'text', content }])
   const pushAI = (msg) => setMsgs((m) => [...m, { role: 'assistant', ...msg }])
 
@@ -36,13 +75,20 @@ export default function AIAssistant({ snapshot }) {
     const query = (question || q).trim()
     if (!query || loading) return
     setQ('')
-    const history = msgs.filter((m) => m.kind === 'text').map((m) => ({ role: m.role, content: typeof m.content === 'string' ? m.content : '' }))
+    // 若正在查看历史某天，提问自动切回今天继续对话
+    let base = msgs
+    if (!isToday) { base = chatStore.load(today); setDay(today); setMsgs(base) }
+    // 传当天完整文本上下文给后端，保证单日对话连贯（取最近若干轮）
+    const history = base.filter((m) => m.kind === 'text').map((m) => ({ role: m.role, content: typeof m.content === 'string' ? m.content : '' })).slice(-12)
     pushUser(query)
     setLoading(true)
+    const ctrl = new AbortController()
+    abortRef.current = ctrl
     try {
       const res = await fetch('/api/agent', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question: query, history, stock: stock || null }),
+        signal: ctrl.signal,
       })
       // 健壮解析：后端超时/崩溃时 Vercel 返回纯文本而非 JSON，先读文本再尝试解析
       const raw = await res.text()
@@ -58,9 +104,15 @@ export default function AIAssistant({ snapshot }) {
       } else {
         pushAI({ kind: 'text', content: '抱歉，' + (j.error || '分析失败') })
       }
-    } catch (e) { pushAI({ kind: 'text', content: '抱歉，网络异常：' + String(e.message || e) }) }
-    finally { setLoading(false) }
+    } catch (e) {
+      if (e.name === 'AbortError') pushAI({ kind: 'text', content: '已停止本次分析。' })
+      else pushAI({ kind: 'text', content: '抱歉，网络异常：' + String(e.message || e) })
+    }
+    finally { setLoading(false); abortRef.current = null }
   }
+
+  // 停止正在进行的分析
+  const stop = () => { if (abortRef.current) abortRef.current.abort() }
 
   return (
     <>
@@ -76,13 +128,40 @@ export default function AIAssistant({ snapshot }) {
           <div className="ai-drawer-head">
             <div className="ai-drawer-title">
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}><Icon name="spark" size={16} /> AI 操盘助手</span>
-              <span className="ai-focus muted">直接提问，我会自己查数据</span>
+              <span className="ai-focus muted">{isToday ? '直接提问，我会自己查数据' : `查看 ${day} 的对话（只读）`}</span>
             </div>
             <div className="ai-head-actions">
-              {msgs.length > 0 && <button className="icon-btn" title="清空对话" onClick={() => setMsgs([])}><Icon name="refresh" size={14} /></button>}
+              <button className="icon-btn" title="历史对话" onClick={() => setHistOpen((v) => !v)}><Icon name="history" size={14} /></button>
+              {msgs.length > 0 && isToday && <button className="icon-btn" title="清空今天对话" onClick={() => { if (confirm('清空今天的对话？')) { setMsgs([]); chatStore.removeDay(today) } }}><Icon name="trash" size={14} /></button>}
               <div className="modal-close" onClick={() => aiStore.close()}><Icon name="close" size={16} /></div>
             </div>
           </div>
+
+          {/* 历史对话面板（按天） */}
+          {histOpen && (
+            <div className="ai-hist">
+              <div className="ai-hist-head">历史对话（按天）{!isToday && <span className="ai-hist-back" onClick={() => viewDay(today)}>回到今天</span>}</div>
+              {chatStore.days().length === 0 && <div className="ai-hist-empty">暂无历史对话</div>}
+              {chatStore.days().map((d) => {
+                const s = chatStore.summary(d)
+                return (
+                  <div key={d} className={'ai-hist-item' + (d === day ? ' active' : '')}>
+                    <span className="ai-hist-main" onClick={() => viewDay(d)}>
+                      <b>{d === today ? '今天' : d}</b>
+                      <span className="ai-hist-sub">{s.count}条 · {s.first}</span>
+                    </span>
+                    <span className="del" title="删除这一天" onClick={() => {
+                      if (confirm(`删除 ${d} 的全部对话？`)) {
+                        chatStore.removeDay(d)
+                        if (d === day) { const t = today; setDay(t); setMsgs(chatStore.load(t)) }
+                        setHistTick((n) => n + 1)
+                      }
+                    }}>×</span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
 
           {/* 快捷能力：都是自然语言问题，点了直接问 */}
           <div className="ai-quick">
@@ -110,20 +189,26 @@ export default function AIAssistant({ snapshot }) {
             {msgs.map((m, i) => <Message key={i} m={m} />)}
             {loading && (
               <div className="qa-msg assistant"><div className="qa-bubble">
-                <div className="ai-loading"><span className="ai-loading-dot" /><span className="ai-loading-dot" /><span className="ai-loading-dot" />分析中…</div>
+                <div className="ai-loading"><span className="ai-loading-dot" /><span className="ai-loading-dot" /><span className="ai-loading-dot" />分析中…<span className="ai-stop-link" onClick={stop}>停止</span></div>
               </div></div>
             )}
           </div>
 
           {/* 提问输入 */}
           <div className="ai-input-row">
-            <input
-              className="wl-input" style={{ flex: 1, width: 'auto' }}
-              placeholder="分析某只票 / 选股 / 问板块 / 问大盘…"
-              value={q} onChange={(e) => setQ(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && ask()} disabled={loading}
+            <textarea
+              ref={inputRef}
+              className="wl-input ai-textarea" style={{ flex: 1, width: 'auto' }}
+              rows={1}
+              placeholder={isToday ? '分析某只票 / 选股 / 问板块 / 问大盘…（Enter 发送，Shift+Enter 换行）' : '正在查看历史，输入即回到今天继续对话'}
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ask() } }}
+              disabled={loading}
             />
-            <button className="btn btn-primary" onClick={() => ask()} disabled={loading}><Icon name="send" size={14} />发送</button>
+            {loading
+              ? <button className="btn btn-danger" onClick={stop}><Icon name="close" size={14} />停止</button>
+              : <button className="btn btn-primary" onClick={() => ask()}><Icon name="send" size={14} />发送</button>}
           </div>
           <div className="ai-disclaimer" style={{ padding: '0 16px 12px' }}>AI 基于实时行情/RAG/联网新闻分析，仅供研究参考，非投资建议</div>
         </div>

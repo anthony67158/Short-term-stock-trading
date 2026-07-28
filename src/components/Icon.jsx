@@ -12,6 +12,12 @@ const paths = {
   bolt: <><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z" /></>,
   book: <><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2V5Z" /><path d="M4 19a2 2 0 0 1 2-2h13" /><path d="M9 7h7M9 11h5" /></>,
   user: <><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 4-6 8-6s8 2 8 6" /></>,
+  edit: <><path d="M4 20h4L18.5 9.5a2 2 0 0 0-3-3L5 17v3Z" /><path d="M13.5 6.5l3 3" /></>,
+  star: <><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.7l5.9-.9L12 3.5Z" /></>,
+  sun: <><circle cx="12" cy="12" r="4.2" /><path d="M12 2v2.4M12 19.6V22M4.9 4.9l1.7 1.7M17.4 17.4l1.7 1.7M2 12h2.4M19.6 12H22M4.9 19.1l1.7-1.7M17.4 6.6l1.7-1.7" /></>,
+  moon: <><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z" /></>,
+  logo: <><path d="M4 16 L10 10.5 L14 13.5 L20 5.5" /><circle cx="20" cy="5.5" r="1.6" fill="currentColor" stroke="none" /><path d="M7.5 13.5v5M16 15v3.5" /></>,
+  starFill: <><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.7l5.9-.9L12 3.5Z" fill="currentColor" /></>,
   fire: <><path d="M12 3c1 3-1 4-1 6a3 3 0 0 0 6 0c0-1 0-2-1-3 2 1 3 4 3 6a7 7 0 1 1-14 0c0-3 2-5 4-7 0 2 1 3 2 3 1-1 1-3 1-5Z" /></>,
   rocket: <><path d="M5 15c-1 1-2 4-2 4s3-1 4-2" /><path d="M9 11a12 12 0 0 1 8-8c2 0 3 1 3 3a12 12 0 0 1-8 8l-3-3Z" /><circle cx="14.5" cy="9.5" r="1.3" /><path d="M9 11l-3 1 3 3 1-3" /></>,
   pulse: <><path d="M3 12h4l2-6 4 12 2-6h6" /></>,
@@ -42,6 +48,12 @@ const paths = {
   brain: <><path d="M9 3a3 3 0 0 0-3 3 3 3 0 0 0-1 5 3 3 0 0 0 1 5 3 3 0 0 0 3 3V3Z" /><path d="M15 3a3 3 0 0 1 3 3 3 3 0 0 1 1 5 3 3 0 0 1-1 5 3 3 0 0 1-3 3V3Z" /></>,
   shield: <><path d="M12 3 5 6v5c0 4 3 7 7 9 4-2 7-5 7-9V6l-7-3Z" /></>,
   gauge: <><path d="M4 15a8 8 0 1 1 16 0" /><path d="M12 15l4-3" /><circle cx="12" cy="15" r="1.2" /></>,
+  bell: <><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6Z" /><path d="M10 20a2 2 0 0 0 4 0" /></>,
+  scale: <><path d="M12 3v18" /><path d="M6 8h12" /><path d="M6 8l-3 6a3 3 0 0 0 6 0L6 8Z" /><path d="M18 8l-3 6a3 3 0 0 0 6 0l-3-6Z" /><path d="M8 21h8" /></>,
+  flag: <><path d="M5 21V4" /><path d="M5 4h11l-2 4 2 4H5" /></>,
+  clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
+  download: <><path d="M12 4v10M8 11l4 4 4-4" /><path d="M4 19h16" /></>,
+  coins: <><ellipse cx="9" cy="7" rx="6" ry="3" /><path d="M3 7v5c0 1.7 2.7 3 6 3s6-1.3 6-3V7" /><path d="M9 15c0 1.7 2.7 3 6 3s6-1.3 6-3v-5" /><ellipse cx="15" cy="10" rx="6" ry="3" /></>,
 }
 
 export default function Icon({ name, size = 16, className = '', style }) {

@@ -1,0 +1,26 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7C6BF5"/>
+      <stop offset="1" stop-color="#5B8DEF"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="64" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffffff" stop-opacity="0.18"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <!-- 圆角徽章底 -->
+  <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#bg)"/>
+  <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#sheen)"/>
+  <!-- 上升折线（趋势） -->
+  <path d="M12 42 L26 30 L36 37 L52 18" stroke="#ffffff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.95"/>
+  <!-- 折线终点强调点 -->
+  <circle cx="52" cy="18" r="3.4" fill="#fff"/>
+  <!-- K线蜡烛（短线操盘意象） -->
+  <g opacity="0.95">
+    <rect x="19.5" y="34" width="4.2" height="12" rx="2" fill="#fff"/>
+    <rect x="20.6" y="30" width="2" height="4" rx="1" fill="#fff"/>
+    <rect x="20.6" y="46" width="2" height="3" rx="1" fill="#fff"/>
+    <rect x="33.5" y="40" width="4.2" height="9" rx="2" fill="#fff" opacity="0.85"/>
+  </g>
+</svg>

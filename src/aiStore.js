@@ -7,6 +7,8 @@ let state = {
   sector: null,  // { code, name }
   intent: null,  // 'diagnose' | 'scan' | 'market' | 'sector' | null  —— 打开后要自动触发的动作
   seq: 0,        // 自增，用于触发 intent
+  prefill: null, // 预填到输入框的文本（不自动发送，由用户编辑后手动发）
+  prefillSeq: 0, // 自增，用于触发预填
 }
 const listeners = new Set()
 
@@ -32,6 +34,17 @@ export const aiStore = {
   },
   // 设置当前板块（供板块选股用）
   setSector(sector) { state.sector = sector; emit() },
+
+  // 聚焦某只票并打开助手，把文本预填进输入框（不自动发送，用户可编辑后手动发）
+  prefillStock(stock, text) {
+    state.stock = stock || state.stock
+    state.open = true
+    state.prefill = text || ''
+    state.prefillSeq++
+    emit()
+  },
+  // 消费预填（助手取走后清空）
+  consumePrefill() { state.prefill = null; emit() },
 
   // 消费意图（助手处理后清空）
   consumeIntent() { state.intent = null; emit() },

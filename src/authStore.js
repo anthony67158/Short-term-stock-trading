@@ -2,15 +2,26 @@ import { useSyncExternalStore } from 'react'
 import { planStore } from './planStore'
 
 // ============ 云端账号体系（Vercel Blob 持久化，跨设备同步）============
-// 会话仅存昵称+密码在本机 sessionStorage(便于刷新保持登录)，数据存云端。
+// 会话（昵称+密码）持久化在本机 localStorage，保持长期登录（关标签页/切后台不掉线）；数据存云端。
 const SESS = 'cloud_session_v1'
 const LEGACY_KEY = 'trade_book_v2' // 旧的无账号本机数据(供首次注册导入)
 
 function loadSession() {
-  try { return JSON.parse(sessionStorage.getItem(SESS) || 'null') } catch { return null }
+  try {
+    let raw = localStorage.getItem(SESS)
+    // 兼容旧版本存在 sessionStorage 的会话：迁移到 localStorage，避免掉线
+    if (!raw) {
+      const legacy = sessionStorage.getItem(SESS)
+      if (legacy) { localStorage.setItem(SESS, legacy); sessionStorage.removeItem(SESS); raw = legacy }
+    }
+    return JSON.parse(raw || 'null')
+  } catch { return null }
 }
 function saveSession(s) {
-  try { s ? sessionStorage.setItem(SESS, JSON.stringify(s)) : sessionStorage.removeItem(SESS) } catch { /* ignore */ }
+  try {
+    if (s) localStorage.setItem(SESS, JSON.stringify(s))
+    else { localStorage.removeItem(SESS); sessionStorage.removeItem(SESS) }
+  } catch { /* ignore */ }
 }
 
 let state = {

@@ -2,11 +2,11 @@ import { useState } from 'react'
 import { usePolling } from '../hooks'
 import Icon from './Icon'
 import StockName from './StockName'
-import { fmtPct, pctClass, fmtInflow, fmtNum } from '../format'
+import { fmtPct, pctClass, fmtInflow, fmtNum , fmtRaw } from '../format'
 
 export default function Movers({ interval }) {
   const [kind, setKind] = useState('inflow') // inflow | speed | outflow
-  const { data, loading, error } = usePolling(`/api/movers?kind=${kind}`, interval, [kind])
+  const { data, loading, error } = usePolling(`/api/board?type=movers&kind=${kind}`, interval, [kind])
   const list = (data && data.list) || []
 
   return (
@@ -37,7 +37,7 @@ export default function Movers({ interval }) {
               {list.map((s, i) => (
                 <tr key={s.code}>
                   <td><span className="rank">{i + 1}</span><StockName code={s.code} name={s.name} showCode={false} />{s.isLimitUp && <span className="tag tag-lu">涨停</span>}</td>
-                  <td>{fmtNum(s.price)}</td>
+                  <td>{fmtRaw(s.price)}</td>
                   <td className={pctClass(s.pct)}>{fmtPct(s.pct)}</td>
                   {kind === 'speed'
                     ? <td className={pctClass(s.speed)}>{fmtNum(s.speed, 2)}%</td>

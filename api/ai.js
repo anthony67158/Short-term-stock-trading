@@ -82,6 +82,20 @@ function buildUserPrompt(mode, payload, ragText) {
 
 请输出 JSON：{"advisable":"适合/谨慎/不建议","light":"green/yellow/red","dir":"positive或reverse或none","dirLabel":"正T低吸 或 反T高抛 或 暂不做T","confidence":"高/中/低","plain":"用大白话解释为什么这么做(假设用户不太懂,像师傅带徒弟那样讲清楚,别堆术语)","marketNote":"一句话大盘环境(引用数据)","stockNote":"一句话个股当下位置(引用分时vwap/日内位置/量比)","support":支撑位数字,"resistance":压力位数字,"theory":"引用的理论+一句话如何支撑","suggestQty":建议手数(整数,按风格),"leg1Price":第一腿参考价(数字),"leg2Price":第二腿目标价(数字),"estProfit":"预估净赚(元)","estCostDown":"预估成本下降(元/股)","addOn":"激进风格可给加码条件(如放量突破X可追,目标X);其他风格填空字符串","risk":"风险与失效止损价位"}。不建议做T时 dir=none、价位可 null。`;
   }
+  if (mode === 'plan') {
+    return `【交易计划请求】用户持有一只票，想为它定一份短线交易计划(止盈价/止损价/买入理由)，用户不太懂技术，需要你基于技术指标与经典理论给出默认建议，用户会在此基础上微调。
+数据含：个股实时量价、当日分时(intraday: vwap均价/日内高低/现价位置)、大盘情绪(market)、资金流向(marketFlow)、近20日走势(history: ma5/ma10/ma20、20日高低high20/low20、区间位置posInRange)、用户持仓成本(holdCost)。
+数据：${data}
+
+【定价逻辑链，必须结合数据与理论，给出具体数字】：
+1. 止损价：以"支撑失守即离场"为原则。优先取 MA10/MA20 生命线、近20日重要支撑(low20 附近)中，离现价最近的下方支撑；并确保相对持仓成本(holdCost)的最大回撤不超过约 8%(短线纪律)。两者取更能护住本金的那个(通常是更靠上的支撑)。
+2. 止盈价：以压力位与波段空间为依据。参考近20日高点(high20)、前高、整数关口、或按趋势给出合理的目标涨幅(短线常见 +8%~+15%)。强势趋势可给远目标，弱势/接近压力则保守。
+3. 理由：一句话讲清这份计划的技术依据(引用均线/支撑压力/量价/趋势理论其一)，像师傅带徒弟，别堆术语。
+
+【硬约束】止损价必须 < 现价 < 止盈价；价位精度贴合该股价位量级(低价股可到3位小数)；数字必须落在合理区间(别给离谱的价)。
+
+请输出 JSON：{"tp":止盈价数字,"sl":止损价数字,"reason":"一句话交易计划理由(含技术依据)","tpBasis":"止盈定价依据(如:近20日高X/压力位X/目标+X%)","slBasis":"止损定价依据(如:MA10生命线X/成本-8%X/支撑X)","theory":"引用的理论一句话","confidence":"高/中/低"}。只输出JSON。`;
+  }
   return `分析以下数据并输出JSON：${data}`;
 }
 
@@ -124,8 +138,8 @@ export default async function handler(req, res) {
       }
     }
 
-    // t_advice 模式：服务端补齐"大盘情绪+资金流向+个股历史走势"，让建议有据可依
-    if (mode === 't_advice' && payload.code) {
+    // t_advice / plan 模式：服务端补齐"大盘情绪+资金流向+个股历史走势+分时"，让建议有据可依
+    if ((mode === 't_advice' || mode === 'plan') && payload.code) {
       try {
         const proto = req.headers['x-forwarded-proto'] || 'https';
         const host = req.headers['x-forwarded-host'] || req.headers.host;

@@ -12,7 +12,7 @@ function fmtTime(t) {
 
 export default function LimitPool({ interval }) {
   const [kind, setKind] = useState('zt') // zt | zb
-  const { data, loading, error } = usePolling(`/api/limitup?kind=${kind}`, interval, [kind])
+  const { data, loading, error } = usePolling(`/api/board?type=limitup&kind=${kind}`, interval, [kind])
   const list = (data && data.list) || []
 
   // 连板梯队统计（仅涨停池）

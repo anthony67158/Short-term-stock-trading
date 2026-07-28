@@ -27,6 +27,19 @@ export function fmtNum(v, d = 2) {
   return Number(v).toFixed(d);
 }
 
+// 原样显示价格：接口/用户录入是多少就显示多少，绝不四舍五入。
+// 仅去掉浮点误差产生的多余尾数（如 10.2300000001 → 10.23），不改变真实精度。
+export function fmtRaw(v) {
+  if (v == null || v === '' || isNaN(Number(v))) return '--';
+  const n = Number(v);
+  // 用足够高精度还原，再去掉尾部多余的 0，保留原始有效位
+  let s = n.toPrecision(12);
+  if (s.indexOf('.') >= 0) s = s.replace(/0+$/, '').replace(/\.$/, '');
+  // 处理科学计数法回退
+  if (s.indexOf('e') >= 0 || s.indexOf('E') >= 0) s = String(n);
+  return s;
+}
+
 export function timeStr(ts) {
   const d = new Date(ts);
   return d.toLocaleTimeString('zh-CN', { hour12: false });

@@ -4,9 +4,10 @@ import StockPanel from './StockPanel'
 import SectorHistory from './SectorHistory'
 import MarketFlow from './MarketFlow'
 import Movers from './Movers'
+import ErrorBoundary from './ErrorBoundary'
 import { usePolling } from '../hooks'
 
-// ============ 盘面研究（次级）：板块/个股下钻/资金流向桑基图 ============
+// ============ 盘面研究（次级）：大盘资金流向 + 板块/个股下钻 ============
 export default function ResearchTab({ interval }) {
   const [type, setType] = useState('industry')
   const [selected, setSelected] = useState(null)
@@ -21,20 +22,22 @@ export default function ResearchTab({ interval }) {
 
   return (
     <div className="research">
-      <MarketFlow interval={interval} />
+      <ErrorBoundary label="资金流向图"><MarketFlow interval={interval} /></ErrorBoundary>
       <div className="grid" style={{ marginTop: 14 }}>
-        <SectorPanel
-          data={sectors.data} loading={sectors.loading} error={sectors.error}
-          type={type} setType={(t) => { setType(t); setSelected(null) }}
-          selected={selected} onSelect={setSelected}
-        />
+        <ErrorBoundary label="板块资金">
+          <SectorPanel
+            data={sectors.data} loading={sectors.loading} error={sectors.error}
+            type={type} setType={(t) => { setType(t); setSelected(null) }}
+            selected={selected} onSelect={setSelected}
+          />
+        </ErrorBoundary>
         <div>
-          <StockPanel sector={selected} data={selected ? stocks.data : null} loading={stocks.loading} error={stocks.error} sort={sort} setSort={setSort} />
-          <SectorHistory sector={selected} />
+          <ErrorBoundary label="成分股"><StockPanel sector={selected} data={selected ? stocks.data : null} loading={stocks.loading} error={stocks.error} sort={sort} setSort={setSort} /></ErrorBoundary>
+          <ErrorBoundary label="板块历史"><SectorHistory sector={selected} /></ErrorBoundary>
         </div>
       </div>
       <div style={{ marginTop: 14 }}>
-        <Movers interval={interval} />
+        <ErrorBoundary label="盘中异动"><Movers interval={interval} /></ErrorBoundary>
       </div>
     </div>
   )

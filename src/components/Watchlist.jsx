@@ -3,7 +3,7 @@ import { usePolling } from '../hooks'
 import { aiStore } from '../aiStore'
 import Icon from './Icon'
 import StockName from './StockName'
-import { fmtPct, pctClass, fmtInflow, fmtNum } from '../format'
+import { fmtPct, pctClass, fmtInflow, fmtNum , fmtRaw } from '../format'
 
 const KEY = 'watchlist_codes'
 
@@ -58,7 +58,7 @@ export default function Watchlist({ interval }) {
               {list.map((s) => (
                 <tr key={s.code}>
                   <td><StockName code={s.code} name={s.name} />{s.isLimitUp && <span className="tag tag-lu">涨停</span>}</td>
-                  <td>{fmtNum(s.price)}</td>
+                  <td>{fmtRaw(s.price)}</td>
                   <td className={pctClass(s.pct)}>{fmtPct(s.pct)}</td>
                   <td className={s.turnover > 10 ? 'gold' : ''}>{fmtNum(s.turnover, 1)}%</td>
                   <td className={s.volRatio > 2 ? 'gold' : ''}>{fmtNum(s.volRatio, 1)}</td>

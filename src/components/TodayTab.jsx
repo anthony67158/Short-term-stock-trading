@@ -6,20 +6,76 @@ import { usePolling } from '../hooks'
 import { callAI } from '../ai'
 import { planStore, usePlanStore } from '../planStore'
 import { aiStore } from '../aiStore'
-import { fmtPct, pctClass, fmtInflow, fmtNum } from '../format'
+import { fmtPct, pctClass, fmtInflow, fmtNum , fmtRaw } from '../format'
 
 // ============ 今日选股 Tab：今天买什么 ============
 export default function TodayTab({ interval, market, sectors, snapshot }) {
-  const zt = usePolling('/api/limitup?kind=zt', interval)
-  const movers = usePolling('/api/movers?kind=inflow', interval)
-  const speed = usePolling('/api/movers?kind=speed', interval)
+  const zt = usePolling('/api/board?type=limitup&kind=zt', interval)
+  const zb = usePolling('/api/board?type=limitup&kind=zb', interval)
+  const movers = usePolling('/api/board?type=movers&kind=inflow', interval)
+  const speed = usePolling('/api/board?type=movers&kind=speed', interval)
 
   return (
     <div className="today">
       <MarketLight market={market} sectors={sectors} snapshot={snapshot} />
+      <SentimentGauge zt={zt.data} zb={zb.data} market={market} />
       <DailyPlay snapshot={snapshot} />
       <CandidatePool zt={zt.data} movers={movers.data} speed={speed.data} sectors={sectors} />
       <LimitPool interval={interval} />
+    </div>
+  )
+}
+
+// ---------- 市场情绪温度计（用涨停/炸板池本地计算，不占接口）----------
+function SentimentGauge({ zt, zb, market }) {
+  const g = useMemo(() => {
+    const ztList = (zt && zt.list) || []
+    const zbList = (zb && zb.list) || []
+    const ztCount = ztList.length
+    const zbCount = zbList.length
+    // 炸板率 = 炸板数 /(涨停数+炸板数)
+    const breakRate = (ztCount + zbCount) ? Math.round(zbCount / (ztCount + zbCount) * 100) : null
+    // 连板梯队：按 lbc(连板数) 分布
+    const tiers = {}
+    let maxBoard = 0
+    ztList.forEach((s) => {
+      const lb = s.lbc || 1
+      if (lb > maxBoard) maxBoard = lb
+      const key = lb >= 2 ? lb : 1
+      tiers[key] = (tiers[key] || 0) + 1
+    })
+    const lianban = ztCount - (tiers[1] || 0) // 连板数(>=2板)
+    const b = (market && market.breadth) || {}
+    // 情绪温度分：涨停多、炸板率低、连板高 → 高分
+    let score = 50
+    if (ztCount >= 60) score += 15; else if (ztCount >= 30) score += 8; else if (ztCount < 15) score -= 12
+    if (breakRate != null) { if (breakRate <= 15) score += 12; else if (breakRate >= 35) score -= 15 }
+    if (maxBoard >= 5) score += 10; else if (maxBoard >= 3) score += 5
+    if (b.limitDown > 10) score -= 10
+    score = Math.max(0, Math.min(100, score))
+    const level = score >= 70 ? { t: '情绪火热', c: 'red' } : score >= 55 ? { t: '情绪偏暖', c: 'gold' } : score >= 40 ? { t: '情绪中性', c: 'muted' } : { t: '情绪偏冷', c: 'green' }
+    return { ztCount, zbCount, breakRate, maxBoard, lianban, score, level, b }
+  }, [zt, zb, market])
+
+  if (!zt) return null
+  return (
+    <div className="panel senti-gauge">
+      <div className="sg-head">
+        <div className="panel-title"><Icon name="fire" size={16} /> 市场情绪温度计</div>
+        <span className={'sg-level ' + g.level.c}>{g.level.t} · {g.score}分</span>
+      </div>
+      <div className="sg-bar"><span className={'sg-bar-fill ' + g.level.c} style={{ width: g.score + '%' }} /></div>
+      <div className="sg-cells">
+        <div className="sg-cell"><span className="sg-k">涨停</span><span className="sg-v red">{g.ztCount}</span></div>
+        <div className="sg-cell"><span className="sg-k">炸板</span><span className="sg-v">{g.zbCount}</span></div>
+        <div className="sg-cell"><span className="sg-k">炸板率</span><span className={'sg-v ' + (g.breakRate != null && g.breakRate >= 35 ? 'green' : g.breakRate != null && g.breakRate <= 15 ? 'red' : '')}>{g.breakRate != null ? g.breakRate + '%' : '--'}</span></div>
+        <div className="sg-cell"><span className="sg-k">最高板</span><span className="sg-v gold">{g.maxBoard || '--'}板</span></div>
+        <div className="sg-cell"><span className="sg-k">连板数</span><span className="sg-v">{g.lianban}</span></div>
+        <div className="sg-cell"><span className="sg-k">跌停</span><span className="sg-v green">{g.b.limitDown || 0}</span></div>
+      </div>
+      <div className="legend" style={{ padding: '6px 2px 0' }}>
+        炸板率低+连板高=接力意愿强、赚钱效应好；炸板率高+跌停多=情绪退潮，谨慎追高。综合评分仅供参考。
+      </div>
     </div>
   )
 }
@@ -105,7 +161,7 @@ function MarketLight({ market, sectors, snapshot }) {
           {idx.map((i) => (
             <div className="mb-idx" key={i.code}>
               <div className="mb-idx-name">{i.name}</div>
-              <div className={'mb-idx-price ' + pctClass(i.pct)}>{i.price ? fmtNum(i.price) : '--'}</div>
+              <div className={'mb-idx-price ' + pctClass(i.pct)}>{i.price ? fmtRaw(i.price) : '--'}</div>
               <div className={'mb-idx-pct ' + pctClass(i.pct)}>{fmtPct(i.pct)}</div>
             </div>
           ))}
@@ -237,7 +293,21 @@ function DailyPlay({ snapshot }) {
 // ---------- 精选候选池（涨停/异动/涨速/资金 合成带标签列表） ----------
 function CandidatePool({ zt, movers, speed, sectors }) {
   const [tab, setTab] = useState('hot') // hot(综合) | limit | inflow | speed
+  const [colSort, setColSort] = useState(null) // { key, dir } 表头点击排序；null=用默认榜单排序
   const book = usePlanStore()
+
+  const clickHead = (key) => setColSort((c) => {
+    if (!c || c.key !== key) return { key, dir: 'desc' }
+    if (c.dir === 'desc') return { key, dir: 'asc' }
+    return null
+  })
+  const Th = ({ label, k }) => (
+    <th className={'th-sort' + (colSort && colSort.key === k ? ' active' : '')} onClick={() => clickHead(k)}>
+      <span className="th-inner">{label}
+        <span className="th-arrow">{colSort && colSort.key === k ? (colSort.dir === 'asc' ? '↑' : '↓') : '⇅'}</span>
+      </span>
+    </th>
+  )
 
   const rows = useMemo(() => {
     const map = new Map()
@@ -260,8 +330,17 @@ function CandidatePool({ zt, movers, speed, sectors }) {
     else if (tab === 'inflow') arr = arr.filter((x) => x.tags.includes('主力抢筹')).sort((a, b) => b.mainInflow - a.mainInflow)
     else if (tab === 'speed') arr = arr.filter((x) => x.tags.includes('涨速')).sort((a, b) => (b.speed || 0) - (a.speed || 0))
     else arr = arr.sort((a, b) => b.tags.length - a.tags.length || b.mainInflow - a.mainInflow) // 综合：多标签优先
-    return arr.slice(0, 30)
-  }, [zt, movers, speed, tab])
+    arr = arr.slice(0, 30)
+    // 表头点击排序（覆盖默认榜单排序）
+    if (colSort) {
+      const { key, dir } = colSort
+      arr = [...arr].sort((a, b) => {
+        const va = Number(a[key]) || 0, vb = Number(b[key]) || 0
+        return dir === 'asc' ? va - vb : vb - va
+      })
+    }
+    return arr
+  }, [zt, movers, speed, tab, colSort])
 
   const tabs = [['hot', '综合精选'], ['limit', '涨停连板'], ['inflow', '主力抢筹'], ['speed', '涨速异动']]
 
@@ -271,14 +350,14 @@ function CandidatePool({ zt, movers, speed, sectors }) {
         <div className="panel-title"><Icon name="fire" size={16} /> 今日精选候选池</div>
         <div className="tabs">
           {tabs.map(([k, t]) => (
-            <div key={k} className={'tab' + (tab === k ? ' active' : '')} onClick={() => setTab(k)}>{t}</div>
+            <div key={k} className={'tab' + (tab === k ? ' active' : '')} onClick={() => { setTab(k); setColSort(null) }}>{t}</div>
           ))}
         </div>
       </div>
       <div className="scroll" style={{ maxHeight: 520 }}>
         <table className="tbl">
           <thead>
-            <tr><th>名称</th><th>现价</th><th>涨幅</th><th>信号</th><th>主力/封资</th><th style={{ textAlign: 'center' }}>操作</th></tr>
+            <tr><th>名称</th><Th label="现价" k="price" /><Th label="涨幅" k="pct" /><th>信号</th><Th label="主力/封资" k="mainInflow" /><th style={{ textAlign: 'center' }}>操作</th></tr>
           </thead>
           <tbody>
             {rows.map((s) => {
@@ -288,7 +367,7 @@ function CandidatePool({ zt, movers, speed, sectors }) {
                   <td>
                     <StockName code={s.code} name={s.name}><span>{s.name}<span className="sub-name">{s.code}</span></span></StockName>
                   </td>
-                  <td className={pctClass(s.pct)}>{s.price ? fmtNum(s.price) : '--'}</td>
+                  <td className={pctClass(s.pct)}>{s.price ? fmtRaw(s.price) : '--'}</td>
                   <td className={pctClass(s.pct)}>{fmtPct(s.pct)}</td>
                   <td>
                     {s.tags.slice(0, 3).map((t, i) => (
@@ -308,7 +387,7 @@ function CandidatePool({ zt, movers, speed, sectors }) {
           </tbody>
         </table>
         <div className="legend" style={{ padding: '8px 14px' }}>
-          综合精选按信号重叠度排序（同时涨停+主力抢筹+涨速的最强）· 点名称看详情K线 · 点「加自选」进入计划买入
+          综合精选按信号重叠度排序 · 点表头「现价/涨幅/主力」切换正倒序 · 点名称看详情K线 · 点「加自选」进入计划
         </div>
       </div>
     </div>

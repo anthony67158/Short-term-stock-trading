@@ -1,4 +1,4 @@
-import { fmtPct, pctClass, fmtInflow, timeStr } from '../format'
+import { fmtPct, pctClass, fmtInflow, timeStr , fmtRaw } from '../format'
 
 export default function Sentiment({ data, error }) {
   const indices = (data && data.indices) || []
@@ -12,7 +12,7 @@ export default function Sentiment({ data, error }) {
       {indices.map((idx) => (
         <div className="card" key={idx.code}>
           <div className="label">{idx.name}</div>
-          <div className={'val ' + pctClass(idx.pct)}>{idx.price.toFixed(2)}</div>
+          <div className={'val ' + pctClass(idx.pct)}>{fmtRaw(idx.price)}</div>
           <div className={'sub ' + pctClass(idx.pct)}>
             {fmtPct(idx.pct)} {idx.chg >= 0 ? '+' : ''}{idx.chg.toFixed(2)}
           </div>
