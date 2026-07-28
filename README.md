@@ -8,6 +8,18 @@
 
 ---
 
+## 🖼 界面预览
+
+> 完整设计理念、信息架构与数据流见 **[docs/DESIGN.md](docs/DESIGN.md)**。
+
+| 今日选股 | 账户 · 交易 |
+|---|---|
+| ![今日选股](docs/screenshots/today.png) | ![账户·交易](docs/screenshots/account.png) |
+| **盘面研究** | **AI 操盘助手** |
+| ![盘面研究](docs/screenshots/research.png) | ![AI 助手](docs/screenshots/ai.png) |
+
+---
+
 ## ✨ 核心功能
 
 | 模块 | 能力 |
