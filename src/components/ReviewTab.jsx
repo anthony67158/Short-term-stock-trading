@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
+import ReactECharts from 'echarts-for-react'
 import Icon from './Icon'
 import StockName from './StockName'
 import { planStore, usePlanStore, computeTFlows } from '../planStore'
@@ -60,6 +61,7 @@ export default function ReviewTab({ interval, snapshot }) {
   return (
     <div className="review">
       <TradeStat records={records} />
+      <ReviewCharts records={records} />
       <DailyLog records={records} />
     </div>
   )
@@ -155,6 +157,7 @@ function DailyLog({ records }) {
   const toggle = (key) => setCollapsed((s) => ({ ...s, [key]: !s[key] }))
   const filtered = records.filter((c) => filter === 'all' || typeKey(c) === filter)
   const delBatch = delTarget ? planStore.batchSize(delTarget.id) : 1
+  const delImpact = delTarget ? (planStore.removeClosedImpact(delTarget.id) || []) : []
 
   // 按天分组
   const groups = {}
@@ -228,7 +231,17 @@ function DailyLog({ records }) {
               ) : (
                 <>确定删除 <b>{delTarget.name}</b> 的这条记录？</>
               )}
-              <br />删除后，复盘的净收益、胜率、手续费等统计会同步更新。此操作<b className="red">不可恢复</b>。
+              {delImpact.length > 0 && (
+                <div className="del-impact">
+                  <Icon name="info" size={12} /> 持仓将同步调整：
+                  {delImpact.map((im, i) => (
+                    <span key={i} className="del-impact-item">
+                      {im.name} <b className={im.delta > 0 ? 'red' : 'green'}>{im.delta > 0 ? '+' : ''}{im.delta}手</b>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <br />删除后，持仓与复盘统计会同步更新。若删错了，可点顶部<b>撤回</b>按钮一键还原。
             </div>
             <div className="confirm-actions">
               <button className="btn" onClick={() => setDelTarget(null)}>取消</button>
@@ -488,3 +501,131 @@ function TradeStat({ records }) {
   )
 }
 
+
+// ============ 复盘图表：资金曲线 + 每日盈亏 + 个股盈亏排行 ============
+const RED = '#f4614e', GREEN = '#3fb950'
+const CHART_BG = '#16181f', CHART_BORDER = '#23252d', AXIS = '#767881', SPLIT = 'rgba(255,255,255,.05)'
+
+function ReviewCharts({ records }) {
+  // 只取有已实现盈亏的记录（BUY 无盈亏不计），按时间升序
+  const closed = useMemo(
+    () => records
+      .filter((c) => c.realizedPnl != null)
+      .map((c) => ({ ...c, ts: c.at || c.sellAt || c.buyAt || 0 }))
+      .sort((a, b) => a.ts - b.ts),
+    [records]
+  )
+
+  // ① 累计收益曲线
+  const equityOption = useMemo(() => {
+    if (!closed.length) return null
+    let cum = 0
+    const pts = closed.map((c) => { cum += c.realizedPnl; return [c.ts, +cum.toFixed(2)] })
+    const dates = pts.map((p) => new Date(p[0]).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }))
+    const vals = pts.map((p) => p[1])
+    const up = cum >= 0
+    return {
+      animation: false,
+      grid: { left: 56, right: 16, top: 16, bottom: 28 },
+      tooltip: { trigger: 'axis', backgroundColor: CHART_BG, borderColor: CHART_BORDER, textStyle: { color: '#e6e7ea', fontSize: 12 },
+        formatter: (ps) => `第${ps[0].dataIndex + 1}笔 · ${dates[ps[0].dataIndex]}<br/>累计净收益：${ps[0].value >= 0 ? '+' : ''}${ps[0].value}` },
+      xAxis: { type: 'category', data: dates, axisLabel: { color: AXIS, fontSize: 10 }, axisLine: { lineStyle: { color: CHART_BORDER } }, splitLine: { show: false } },
+      yAxis: { type: 'value', axisLabel: { color: AXIS, fontSize: 10 }, splitLine: { lineStyle: { color: SPLIT } } },
+      series: [{
+        type: 'line', data: vals, smooth: true, symbol: 'none',
+        lineStyle: { color: up ? RED : GREEN, width: 2 },
+        areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [
+          { offset: 0, color: up ? 'rgba(244,97,78,.25)' : 'rgba(63,185,80,.25)' },
+          { offset: 1, color: 'rgba(0,0,0,0)' } ] } },
+        markLine: { symbol: 'none', silent: true, data: [{ yAxis: 0, lineStyle: { color: AXIS, type: 'dashed', width: 1 } }] },
+      }],
+    }
+  }, [closed])
+
+  // ② 每日盈亏柱状
+  const dailyOption = useMemo(() => {
+    if (!closed.length) return null
+    const map = new Map()
+    for (const c of closed) {
+      const k = dayKey(c.ts)
+      map.set(k, (map.get(k) || 0) + c.realizedPnl)
+    }
+    const days = [...map.keys()].sort()
+    const vals = days.map((d) => +map.get(d).toFixed(2))
+    return {
+      animation: false,
+      grid: { left: 56, right: 16, top: 16, bottom: 28 },
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, backgroundColor: CHART_BG, borderColor: CHART_BORDER, textStyle: { color: '#e6e7ea', fontSize: 12 },
+        formatter: (ps) => `${ps[0].axisValue}<br/>当日盈亏：${ps[0].value >= 0 ? '+' : ''}${ps[0].value}` },
+      xAxis: { type: 'category', data: days.map((d) => d.slice(5)), axisLabel: { color: AXIS, fontSize: 10 }, axisLine: { lineStyle: { color: CHART_BORDER } } },
+      yAxis: { type: 'value', axisLabel: { color: AXIS, fontSize: 10 }, splitLine: { lineStyle: { color: SPLIT } } },
+      series: [{
+        type: 'bar', data: vals.map((v) => ({ value: v, itemStyle: { color: v >= 0 ? RED : GREEN, borderRadius: v >= 0 ? [3, 3, 0, 0] : [0, 0, 3, 3] } })),
+        barMaxWidth: 26,
+      }],
+    }
+  }, [closed])
+
+  // ③ 个股盈亏排行（横向条形）
+  const stockOption = useMemo(() => {
+    if (!closed.length) return null
+    const map = new Map()
+    for (const c of closed) {
+      if (!map.has(c.code)) map.set(c.code, { name: c.name || c.code, pnl: 0 })
+      map.get(c.code).pnl += c.realizedPnl
+    }
+    const arr = [...map.values()].map((x) => ({ ...x, pnl: +x.pnl.toFixed(2) }))
+      .sort((a, b) => a.pnl - b.pnl) // 升序，最赚的在顶部（ECharts y 轴从下往上）
+    const names = arr.map((x) => x.name)
+    const vals = arr.map((x) => x.pnl)
+    return {
+      animation: false,
+      grid: { left: 8, right: 56, top: 8, bottom: 8, containLabel: true },
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, backgroundColor: CHART_BG, borderColor: CHART_BORDER, textStyle: { color: '#e6e7ea', fontSize: 12 },
+        formatter: (ps) => `${ps[0].axisValue}<br/>累计盈亏：${ps[0].value >= 0 ? '+' : ''}${ps[0].value}` },
+      xAxis: { type: 'value', axisLabel: { color: AXIS, fontSize: 10 }, splitLine: { lineStyle: { color: SPLIT } } },
+      yAxis: { type: 'category', data: names, axisLabel: { color: '#b3b3bf', fontSize: 11 }, axisLine: { lineStyle: { color: CHART_BORDER } }, axisTick: { show: false } },
+      series: [{
+        type: 'bar', data: vals.map((v) => ({ value: v, itemStyle: { color: v >= 0 ? RED : GREEN, borderRadius: v >= 0 ? [0, 4, 4, 0] : [4, 0, 0, 4] } })),
+        barMaxWidth: 20,
+        label: { show: true, position: 'right', color: '#b3b3bf', fontSize: 10, formatter: (p) => (p.value >= 0 ? '+' : '') + p.value },
+      }],
+    }
+  }, [closed])
+
+  if (!closed.length) {
+    return (
+      <div className="panel">
+        <div className="panel-head"><div className="panel-title"><Icon name="chart" size={16} /> 复盘图表</div></div>
+        <div className="empty">有已兑现的卖出/做T记录后，这里会用图表展示资金曲线、每日盈亏与个股盈亏排行。</div>
+      </div>
+    )
+  }
+  const stockCount = new Set(closed.map((c) => c.code)).size
+  return (
+    <div className="panel">
+      <div className="panel-head"><div className="panel-title"><Icon name="chart" size={16} /> 复盘图表</div>
+        <span className="panel-sub">资金曲线 · 每日盈亏 · 个股盈亏排行</span>
+      </div>
+      <div className="rv-charts">
+        <div className="rv-chart">
+          <div className="rv-chart-title">累计收益曲线 <span className="sub-name">每笔平仓/做T后的累计净收益走势</span></div>
+          <ReactECharts option={equityOption} style={{ height: 240 }} notMerge lazyUpdate />
+        </div>
+        <div className="rv-chart-2col">
+          <div className="rv-chart">
+            <div className="rv-chart-title">每日盈亏 <span className="sub-name">红盈绿亏</span></div>
+            <ReactECharts option={dailyOption} style={{ height: 240 }} notMerge lazyUpdate />
+          </div>
+          <div className="rv-chart">
+            <div className="rv-chart-title">个股盈亏排行 <span className="sub-name">{stockCount} 只</span></div>
+            <ReactECharts option={stockOption} style={{ height: Math.max(240, stockCount * 30 + 30) }} notMerge lazyUpdate />
+          </div>
+        </div>
+      </div>
+      <div className="legend" style={{ padding: '4px 18px 12px' }}>
+        资金曲线看整体稳定性与回撤 · 每日盈亏看盈亏天分布(防扛单) · 个股排行看钱赚在哪、亏在哪。均为已实现净收益(含费)。
+      </div>
+    </div>
+  )
+}

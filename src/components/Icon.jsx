@@ -19,6 +19,7 @@ const paths = {
   logo: <><path d="M4 16 L10 10.5 L14 13.5 L20 5.5" /><circle cx="20" cy="5.5" r="1.6" fill="currentColor" stroke="none" /><path d="M7.5 13.5v5M16 15v3.5" /></>,
   starFill: <><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.7l5.9-.9L12 3.5Z" fill="currentColor" /></>,
   fire: <><path d="M12 3c1 3-1 4-1 6a3 3 0 0 0 6 0c0-1 0-2-1-3 2 1 3 4 3 6a7 7 0 1 1-14 0c0-3 2-5 4-7 0 2 1 3 2 3 1-1 1-3 1-5Z" /></>,
+  trophy: <><path d="M7 4h10v4a5 5 0 0 1-10 0V4Z" /><path d="M7 6H4v1a3 3 0 0 0 3 3M17 6h3v1a3 3 0 0 1-3 3" /><path d="M12 13v4M9 21h6M10 17h4v4h-4z" /></>,
   rocket: <><path d="M5 15c-1 1-2 4-2 4s3-1 4-2" /><path d="M9 11a12 12 0 0 1 8-8c2 0 3 1 3 3a12 12 0 0 1-8 8l-3-3Z" /><circle cx="14.5" cy="9.5" r="1.3" /><path d="M9 11l-3 1 3 3 1-3" /></>,
   pulse: <><path d="M3 12h4l2-6 4 12 2-6h6" /></>,
   wave: <><path d="M3 10c3-3 6 3 9 0s6-3 9 0" /><path d="M3 15c3-3 6 3 9 0s6-3 9 0" /></>,

@@ -50,8 +50,26 @@ function normalizeClosed(closed) {
   })
 }
 
-let state = { plan: [], holding: [], closed: [], account: null, alerts: [] }
+let state = { plan: [], holding: [], closed: [], account: null, alerts: [], reviews: {} }
 const listeners = new Set()
+
+// ===== 撤销栈：交易类操作前存快照，支持一步步撤回 =====
+// 只存交易相关的四类数据的深拷贝；不进云端存储，刷新后清空（撤回是“本次会话内的后悔药”）
+let _undoStack = []
+const UNDO_LIMIT = 30
+function snapshot(label) {
+  try {
+    _undoStack.push({
+      label,
+      at: Date.now(),
+      data: JSON.parse(JSON.stringify({
+        plan: state.plan, holding: state.holding, closed: state.closed,
+        account: state.account, alerts: state.alerts,
+      })),
+    })
+    if (_undoStack.length > UNDO_LIMIT) _undoStack.shift()
+  } catch { /* 快照失败不阻断操作 */ }
+}
 
 // 云端回存：authStore 登录后注册 saver；每次数据变更防抖保存
 let _saver = null
@@ -166,6 +184,7 @@ export const planStore = {
   buy(code, buyPrice, qty = 1) {
     const p = state.plan.find((x) => x.code === code)
     if (!p) return
+    snapshot(`建仓 ${p.name || code}`)
     const q = Number(qty) || 1
     const price = Number(buyPrice)
     const buyAmount = price * q * 100
@@ -183,6 +202,7 @@ export const planStore = {
   // 直接建仓（同股也可多笔，不去重）
   buyDirect(stock, buyPrice, qty = 1) {
     if (!stock || !stock.code) return
+    snapshot(`建仓 ${stock.name || stock.code}`)
     const q = Number(qty) || 1
     const price = Number(buyPrice)
     const buyAmount = price * q * 100
@@ -203,6 +223,7 @@ export const planStore = {
     if (!h) return
     const sq = Math.min(Number(sellQty) || h.qty, h.qty) // 卖出手数，不超过该笔持仓
     if (sq <= 0) return
+    snapshot(`${sq >= h.qty ? '清仓' : '减仓'} ${h.name || h.code}`)
     const price = Number(sellPrice)
     const shares = sq * 100
     const cost = h.buyPrice * shares
@@ -248,6 +269,7 @@ export const planStore = {
     const q = Number(addQty) || 0
     const price = Number(addPrice)
     if (q <= 0 || !price) return
+    snapshot(`加仓 ${h.name || h.code}`)
     const addAmount = price * q * 100
     const addFee = calcBuyFee(addAmount)
     const newQty = h.qty + q
@@ -282,22 +304,84 @@ export const planStore = {
 
   removeHolding(id) {
     const h = state.holding.find((x) => x.id === id)
-    if (h) {
-      const archived = archiveTFlows(h, uid()) // 删除持仓前，先归档已实现做T收益
-      if (archived.length) state.closed = [...archived, ...state.closed].slice(0, 300)
-    }
+    if (!h) return
+    snapshot(`删除持仓 ${h.name || h.code}`)
+    const archived = archiveTFlows(h, uid()) // 删除持仓前，先归档已实现做T收益
+    if (archived.length) state.closed = [...archived, ...state.closed].slice(0, 300)
     state.holding = state.holding.filter((x) => x.id !== id); emit()
   },
-  clearClosed() { state.closed = []; emit() },
-  // 删除单条交易记录：连带删除同一次操作(同 batchId)产生的其他记录，保证各分类联动一致
+  clearClosed() { snapshot('清空交易记录'); state.closed = []; emit() },
+  // 删除单条交易记录：连带删除同一次操作(同 batchId)产生的其他记录；
+  // 并联动调整持仓手数/成本，保证「持仓」与「交易记录」始终对得上。
   removeClosed(id) {
     const target = state.closed.find((x) => x.id === id)
-    if (target && target.batchId) {
-      state.closed = state.closed.filter((x) => x.batchId !== target.batchId)
-    } else {
-      state.closed = state.closed.filter((x) => x.id !== id)
+    if (!target) return
+    snapshot(`删除交易记录 ${target.name || target.code || ''}`.trim())
+    // 找出本次要删的所有记录（同批级联）
+    const toDelete = target.batchId
+      ? state.closed.filter((x) => x.batchId === target.batchId)
+      : [target]
+    const delIds = new Set(toDelete.map((x) => x.id))
+
+    // 按个股汇总这批记录对持仓手数的净影响：删 BUY→减手数、删 SELL→加回手数（T 不影响底仓）
+    const deltaByCode = {}
+    for (const r of toDelete) {
+      const t = r.type || r.kind
+      if (t === 'BUY') deltaByCode[r.code] = (deltaByCode[r.code] || 0) - (r.qty || 0)
+      else if (t === 'SELL' || t === 'CLOSE') deltaByCode[r.code] = (deltaByCode[r.code] || 0) + (r.qty || 0)
+    }
+
+    // 先移除记录
+    state.closed = state.closed.filter((x) => !delIds.has(x.id))
+
+    // 再联动持仓
+    for (const [code, delta] of Object.entries(deltaByCode)) {
+      if (!delta) continue
+      const h = state.holding.find((x) => x.code === code)
+      if (h) {
+        const newQty = h.qty + delta
+        if (newQty <= 0) {
+          state.holding = state.holding.filter((x) => x.id !== h.id)
+        } else {
+          // 成本按“剩余的买入记录”重算；无剩余买入记录则沿用原成本价
+          const remainBuys = state.closed.filter((x) => x.code === code && (x.type === 'BUY'))
+          let buyPrice = h.buyPrice, buyFee = h.buyFee
+          if (remainBuys.length) {
+            const totQty = remainBuys.reduce((a, b) => a + (b.qty || 0), 0)
+            if (totQty > 0) {
+              buyPrice = +(remainBuys.reduce((a, b) => a + (b.price || 0) * (b.qty || 0), 0) / totQty).toFixed(3)
+              buyFee = +(remainBuys.reduce((a, b) => a + (b.fee || 0), 0)).toFixed(2)
+            }
+          }
+          state.holding = state.holding.map((x) => x.id === h.id ? { ...x, qty: newQty, buyPrice, buyFee } : x)
+        }
+      } else if (delta > 0) {
+        // 删掉卖出记录、但持仓已不存在 → 重建一笔持仓（用该卖出记录的成本价）
+        const src = toDelete.find((r) => r.code === code && (r.type === 'SELL' || r.type === 'CLOSE'))
+        state.holding = [...state.holding, {
+          id: uid(), code, name: (src && src.name) || code,
+          buyPrice: (src && (src.costPrice || src.buyPrice)) || (src && src.price) || 0,
+          buyAt: Date.now(), qty: delta,
+          buyFee: (src && src.buyFee) || 0,
+        }]
+      }
     }
     emit()
+  },
+  // 预估删除某条记录对持仓的联动影响（供 UI 二次确认提示）
+  removeClosedImpact(id) {
+    const target = state.closed.find((x) => x.id === id)
+    if (!target) return null
+    const toDelete = target.batchId
+      ? state.closed.filter((x) => x.batchId === target.batchId)
+      : [target]
+    const impact = {}
+    for (const r of toDelete) {
+      const t = r.type || r.kind
+      if (t === 'BUY') impact[r.code] = { name: r.name, delta: (impact[r.code]?.delta || 0) - (r.qty || 0) }
+      else if (t === 'SELL' || t === 'CLOSE') impact[r.code] = { name: r.name, delta: (impact[r.code]?.delta || 0) + (r.qty || 0) }
+    }
+    return Object.values(impact).filter((x) => x.delta !== 0)
   },
   // 计算某条记录删除时会级联影响的记录数（供 UI 二次确认提示）
   batchSize(id) {
@@ -314,6 +398,7 @@ export const planStore = {
     const q = Number(qty) || 1
     const p = Number(price)
     if (q <= 0 || !p) return
+    snapshot(`做T ${side === 'buy' ? '低吸' : '高抛'} ${h.name || h.code}`)
     const amount = p * q * 100
     const fee = side === 'buy' ? calcBuyFee(amount) : calcSellFee(amount)
     const flow = { id: uid(), side, price: p, qty: q, fee, at: Date.now() }
@@ -325,6 +410,7 @@ export const planStore = {
   },
   // 删除某笔做T流水（持仓上的收益/成本自动重算）
   removeTFlow(id, flowId) {
+    snapshot('删除做T流水')
     state.holding = state.holding.map((x) => x.id === id
       ? { ...x, tFlows: (x.tFlows || []).filter((f) => f.id !== flowId) }
       : x)
@@ -334,6 +420,7 @@ export const planStore = {
   editTFlow(id, flowId, { side, price, qty }) {
     const p = Number(price), q = Number(qty)
     if (!p || !(q > 0)) return
+    snapshot('编辑做T流水')
     const amount = p * q * 100
     const fee = side === 'buy' ? calcBuyFee(amount) : calcSellFee(amount)
     state.holding = state.holding.map((x) => x.id === id
@@ -347,6 +434,7 @@ export const planStore = {
   settleTFlows(id) {
     const h = state.holding.find((x) => x.id === id)
     if (!h || !(h.tFlows && h.tFlows.length)) return
+    snapshot(`结算做T ${h.name || h.code}`)
     const r = computeTFlows(h.tFlows)
     const archived = archiveTFlows(h, uid())
     // 净额调整底仓：净买入加仓(+)、净卖出减仓(−)
@@ -481,6 +569,22 @@ export const planStore = {
     state.alerts = (state.alerts || []).map((x) => x.id === id
       ? { ...x, enabled: true, triggeredAt: null, triggeredMsg: '' } : x)
     emit()
+  },
+
+  // ===== 撤回：弹出最近一次快照并恢复（交易类操作的后悔药）=====
+  canUndo() { return _undoStack.length > 0 },
+  lastUndoLabel() { return _undoStack.length ? _undoStack[_undoStack.length - 1].label : null },
+  undoCount() { return _undoStack.length },
+  undo() {
+    const snap = _undoStack.pop()
+    if (!snap) return null
+    const d = snap.data
+    state = {
+      plan: d.plan || [], holding: d.holding || [], closed: d.closed || [],
+      account: d.account || null, alerts: d.alerts || [],
+    }
+    emit() // 恢复后正常回存云端，保证撤回结果也持久化
+    return snap.label
   },
 }
 

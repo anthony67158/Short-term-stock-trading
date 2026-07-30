@@ -8,7 +8,7 @@ import AIAssistant from './components/AIAssistant'
 import StockDetail from './components/StockDetail'
 import AuthGate, { AccountMenu } from './components/AuthGate'
 import { usePolling, isTradingHours, useCountdown, triggerRefresh, useRefreshTick } from './hooks'
-import { usePlanStore } from './planStore'
+import { usePlanStore, planStore } from './planStore'
 import { useAIStore } from './aiStore'
 import { useAuthStore, authStore } from './authStore'
 import { useTheme, themeStore } from './themeStore'
@@ -51,6 +51,7 @@ function MainApp() {
   const sectors = usePolling('/api/sectors?type=industry&sort=main', interval)
   const ztPool = usePolling('/api/board?type=limitup&kind=zt', interval)
   const moversData = usePolling('/api/board?type=movers&kind=inflow', interval)
+  const speedData = usePolling('/api/board?type=movers&kind=speed', interval)
 
   const refreshTick = useRefreshTick()
   const remain = useCountdown(interval, (market.data && market.data.updatedAt) + refreshTick)
@@ -75,7 +76,7 @@ function MainApp() {
 
   // 数据快照给 AI（避免频繁重建）
   const dataRef = useRef({})
-  dataRef.current = { market: market.data, sectors: sectors.data, limitPool: ztPool.data, movers: moversData.data }
+  dataRef.current = { market: market.data, sectors: sectors.data, limitPool: ztPool.data, movers: moversData.data, speed: speedData.data }
   const snapshot = () => dataRef.current
 
   return (
@@ -102,6 +103,7 @@ function MainApp() {
           <button className="nav-refresh" onClick={triggerRefresh} title="立即刷新数据">
             <Icon name="refresh" size={13} /><span>{remain}s</span>
           </button>
+          <UndoButton />
           <AlertBell onOpen={() => { setHubSub('alert'); setHubNonce((n) => n + 1); setTab('hub') }} />
           <button className="icon-btn nav-theme" onClick={themeStore.toggle} title={theme === 'dark' ? '切到白天模式' : '切到夜间模式'}>
             <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={15} />
@@ -137,5 +139,31 @@ function AlertBell({ onOpen }) {
       <Icon name="bell" size={15} />
       {unread > 0 && <span className="nav-bell-dot">{unread > 9 ? '9+' : unread}</span>}
     </button>
+  )
+}
+
+// 导航栏「撤回」按钮：一步步撤销买入/清仓/做T等交易操作（本次会话内的后悔药）
+function UndoButton() {
+  usePlanStore() // 订阅：交易操作后重渲染，刷新可撤回状态
+  const [toast, setToast] = useState('')
+  const can = planStore.canUndo()
+  const label = planStore.lastUndoLabel()
+  const n = planStore.undoCount()
+  const doUndo = () => {
+    const restored = planStore.undo()
+    if (restored) {
+      setToast(`已撤回：${restored}`)
+      setTimeout(() => setToast(''), 2200)
+    }
+  }
+  return (
+    <div className="undo-wrap">
+      <button className="icon-btn nav-undo" onClick={doUndo} disabled={!can}
+        title={can ? `撤回上一步：${label}（还可撤回 ${n} 步）` : '暂无可撤回的操作'}>
+        <Icon name="refresh" size={15} className="flip-x" />
+        {n > 0 && <span className="nav-undo-dot">{n > 9 ? '9+' : n}</span>}
+      </button>
+      {toast && <span className="undo-toast">{toast}</span>}
+    </div>
   )
 }

@@ -9,7 +9,9 @@ import { createHash } from 'crypto';
 
 const PREFIX = 'accounts/';
 const sha = (s) => createHash('sha256').update(String(s)).digest('hex');
-const pathOf = (nick) => `${PREFIX}${sha('u:' + nick)}.json`;
+// 账号的 blob 前缀（目录式）：每次写入生成唯一文件名，读取取最新，彻底规避 Vercel Blob 覆盖写的 CDN 强缓存
+const prefixOf = (nick) => `${PREFIX}${sha('u:' + nick)}/`;
+const legacyPathOf = (nick) => `${PREFIX}${sha('u:' + nick)}.json`; // 旧的单文件覆盖式路径（兼容迁移）
 
 function ok(res, obj) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -17,23 +19,45 @@ function ok(res, obj) {
   res.status(200).send(JSON.stringify(obj));
 }
 
-// 读取某账号的 blob（找不到返回 null）
+// 读取某账号：优先读新目录下最新版本；没有则回退旧单文件路径（老用户平滑迁移）
 async function readAccount(nick) {
   try {
-    const { blobs } = await list({ prefix: pathOf(nick), limit: 1 });
-    if (!blobs || !blobs.length) return null;
-    const r = await fetch(blobs[0].url, { cache: 'no-store' });
-    if (!r.ok) return null;
-    return await r.json();
+    const { blobs } = await list({ prefix: prefixOf(nick), limit: 100 });
+    if (blobs && blobs.length) {
+      const latest = blobs.slice().sort(
+        (a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
+      )[0];
+      const url = latest.downloadUrl || latest.url;
+      const r = await fetch(url, { cache: 'no-store' });
+      if (r.ok) return await r.json();
+    }
+    // 回退：旧单文件路径
+    const { blobs: old } = await list({ prefix: legacyPathOf(nick), limit: 1 });
+    if (old && old.length) {
+      const base = old[0].downloadUrl || old[0].url;
+      const bust = base + (base.includes('?') ? '&' : '?') + '_t=' + Date.now();
+      const r = await fetch(bust, { cache: 'no-store' });
+      if (r.ok) return await r.json();
+    }
+    return null;
   } catch { return null; }
 }
 
 async function writeAccount(acc) {
   acc.updatedAt = Date.now();
-  await put(pathOf(acc.nick), JSON.stringify(acc), {
+  // 用唯一文件名写入（addRandomSuffix），保证每次都是新 URL，绝不读到 CDN 旧副本
+  await put(`${prefixOf(acc.nick)}${acc.updatedAt}.json`, JSON.stringify(acc), {
     access: 'public', contentType: 'application/json',
-    addRandomSuffix: false, allowOverwrite: true,
+    addRandomSuffix: true, cacheControlMaxAge: 0,
   });
+  // 清理旧版本，避免无限堆积（保留最近3份即可）
+  try {
+    const { blobs } = await list({ prefix: prefixOf(acc.nick), limit: 100 });
+    const olds = blobs.slice()
+      .sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime())
+      .slice(3);
+    for (const b of olds) { try { await del(b.url); } catch { /* ignore */ } }
+  } catch { /* ignore */ }
   return acc;
 }
 
@@ -81,8 +105,8 @@ export default async function handler(req, res) {
       if (!acc) return ok(res, { ok: false, error: '账号不存在' });
       if (acc.pwHash !== sha(pw)) return ok(res, { ok: false, error: '密码错误' });
       try {
-        const { blobs } = await list({ prefix: pathOf(nick), limit: 1 });
-        if (blobs && blobs.length) await del(blobs[0].url);
+        const { blobs } = await list({ prefix: prefixOf(nick), limit: 100 });
+        for (const b of (blobs || [])) { try { await del(b.url); } catch { /* ignore */ } }
       } catch { /* ignore */ }
       return ok(res, { ok: true });
     }

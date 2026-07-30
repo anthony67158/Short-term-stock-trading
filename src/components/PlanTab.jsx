@@ -9,6 +9,65 @@ import { planStore, usePlanStore, calcBuyFee, calcSellFee, computeTFlows } from 
 import { aiStore } from '../aiStore'
 import { fmtPct, pctClass, fmtNum, fmtInflow , fmtRaw } from '../format'
 
+// 从交易记录里提取某只股的历史买卖(供 AI 贴合用户成本带/操作习惯)
+function tradeHistoryOf(closed, code) {
+  return (closed || [])
+    .filter((c) => c.code === code)
+    .slice(0, 12)
+    .map((c) => ({
+      type: c.kind || c.type,
+      buy: c.buyPrice != null ? +Number(c.buyPrice).toFixed(3) : null,
+      sell: c.sellPrice != null ? +Number(c.sellPrice).toFixed(3) : null,
+      qty: c.qty, pnl: c.netPnl != null ? +Number(c.netPnl).toFixed(0) : null,
+    }))
+}
+
+// 通用「AI 建议价」按钮：点击→基于历史规律+实时价+交易记录给挂单价→填入输入框
+// props: code,name,actionKind(buy|add|sell),quote,holdCost,onPick(price)
+function SuggestPriceBtn({ code, name, actionKind, quote, holdCost, onPick }) {
+  const [st, setSt] = useState(null) // {loading}|{result}|{error}
+  const book = usePlanStore()
+  const q = quote && quote[code]
+  const ask = async () => {
+    setSt({ loading: true })
+    try {
+      const r = await callAI('price', {
+        code, name, action: actionKind === 'sell' ? 'sell' : 'buy', actionKind,
+        nowPrice: q?.price, pct: q?.pct,
+        dayHigh: q?.high, dayLow: q?.low, open: q?.open, prevClose: q?.prevClose,
+        turnover: q?.turnover, volRatio: q?.volRatio,
+        holdCost: holdCost || null,
+        tradeHistory: tradeHistoryOf(book.closed, code),
+      })
+      if (r.ok && r.result && r.result.price != null) {
+        onPick(String(r.result.price))
+        setSt({ result: r.result })
+      } else setSt({ error: r.error || 'AI 未能给出价格' })
+    } catch (e) { setSt({ error: String(e.message || e) }) }
+  }
+  const isSell = actionKind === 'sell'
+  return (
+    <div className="sug-price">
+      <button type="button" className={'sug-price-btn' + (isSell ? ' sell' : ' buy')} onClick={ask} disabled={st && st.loading}
+        title="AI 结合历史规律 + 当前实时价 + 你的过往交易记录，给一个合理挂单价">
+        {st && st.loading ? <><Icon name="refresh" size={12} className="spin" />算价中</> : <><Icon name="spark" size={12} />AI 建议{isSell ? '卖' : '买'}价</>}
+      </button>
+      {st && st.result && (
+        <div className="sug-price-info">
+          <span className="sug-price-val">{st.result.price}{st.result.altPrice ? <span className="sug-alt"> / 备用 {st.result.altPrice}</span> : null}</span>
+          {st.result.anchor && <span className="sug-price-anchor">{st.result.anchor}</span>}
+          {st.result.reason && <div className="sug-price-reason">{st.result.reason}</div>}
+          {st.result.histNote && <div className="sug-price-hist"><Icon name="history" size={11} />{st.result.histNote}</div>}
+          {st.result.techNote && <div className="sug-price-hist tech"><Icon name="target" size={11} />{st.result.techNote}</div>}
+          {st.result.quantNote && <div className="sug-price-hist quant"><Icon name="gauge" size={11} />{st.result.quantNote}</div>}
+          {st.result.confidence && <span className="sug-price-conf">信心 {st.result.confidence}</span>}
+        </div>
+      )}
+      {st && st.error && <span className="sug-price-err">{st.error} <span className="expand-btn" onClick={ask}>重试</span></span>}
+    </div>
+  )
+}
+
 // 金额格式化（元 → 带符号，万以上转万）
 function fmtMoney(v) {
   const sign = v >= 0 ? '+' : '-'
@@ -78,6 +137,63 @@ function tap5break10({ price, prevClose, volRatio, candles, cost, pnlPct }) {
   // 默认：站稳5日线之上，持有
   reasons.push(`站稳5日线上方 ${dist5}%，10日线上方 ${dist10}%`)
   return { level: 'hold', tag: '持有', action: '踏5不破10，趋势健康，持有为主', reasons, ma5, ma10 }
+}
+
+// ========== 盘中时段操盘提示引擎 ==========
+// 依据用户的盘中交易规律：不同时段 + 实时盘面(高开/封板/量比/冲高缩量/跳水) → 一句话"此刻该怎么做"
+// 返回 { phase, when, tag, tone, tip } 或 null(非交易时段/数据不足)
+// tone: sell(偏减) | buy(偏吸) | hold(持有) | watch(观望)
+function intradayPlaybook(q) {
+  if (!q || !q.price) return null
+  // 北京时间（东八区）当前分钟数
+  const now = new Date()
+  const bj = new Date(now.getTime() + (now.getTimezoneOffset() + 480) * 60000)
+  const hm = bj.getHours() * 60 + bj.getMinutes()
+  const inSession = (hm >= 570 && hm <= 690) || (hm >= 780 && hm <= 900) // 9:30-11:30 / 13:00-15:00
+  if (!inSession) return null
+
+  const open = q.open, prev = q.prevClose, price = q.price, high = q.high, low = q.low
+  const pct = q.pct
+  const openGap = (open != null && prev) ? (open - prev) / prev * 100 : null   // 高/低开幅度
+  const vr = q.volRatio
+  const limitUp = q.isLimitUp
+  const nearHigh = high && price >= high * 0.997
+  const offHigh = high && high > 0 ? (high - price) / high * 100 : null          // 距日内高点回落%
+  const shrink = vr != null && vr < 1                                            // 缩量
+
+  const mk = (tag, tone, tip, when) => ({ when, tag, tone, tip })
+
+  // —— 9:30–10:00 早盘：以减仓为主 ——
+  if (hm < 600) {
+    if (limitUp) return mk('封板持有', 'hold', '早盘已封涨停，封单稳则持有观察，别急着卖。', '9:30–10:00')
+    if (openGap != null && openGap >= 3 && !limitUp) return mk('高开未封·减五成', 'sell', `高开${openGap.toFixed(1)}%但未封板，早盘冲高兑现窗口，先减约五成锁利。`, '9:30–10:00')
+    if (offHigh != null && offHigh >= 1.5 && shrink) return mk('冲高缩量·止盈', 'sell', `早盘冲高后缩量回落(距高点${offHigh.toFixed(1)}%)，优先止盈不恋战。`, '9:30–10:00')
+    if (openGap != null && Math.abs(openGap) < 1 && vr != null && vr >= 1.3 && pct > 0) return mk('平开放量·可顺势', 'buy', '平开后放量小步走高，10点后若量能持续可考虑顺势加一点。', '9:30–10:00')
+    return mk('早盘多看少动', 'watch', '早盘以减仓为主、少加仓；等量价方向明确再动手。', '9:30–10:00')
+  }
+  // —— 10:00–11:00：观察量价，不盲目追涨 ——
+  if (hm < 660) {
+    if (limitUp) return mk('封板持有', 'hold', '封板中，封单稳定继续持有。', '10:00–11:00')
+    if (offHigh != null && offHigh >= 1.5 && shrink) return mk('冲高缩量·止盈', 'sell', `冲高后缩量(距高点${offHigh.toFixed(1)}%)、无资金配合，及时止盈。`, '10:00–11:00')
+    if (pct > 3 && vr != null && vr >= 1.5) return mk('放量上扬·持有', 'hold', '一路放量上扬、有资金配合，持有;若11点后突然加速要防冲高回落。', '10:00–11:00')
+    return mk('看量价·不追高', 'watch', '重点看量能是否持续放大;缩量别追,放量才可靠。', '10:00–11:00')
+  }
+  // —— 11:00–13:30：午盘,减少冲动 ——
+  if (hm < 810) {
+    return mk('午盘观察', 'watch', '午盘减少冲动交易:看板块持续性与承接,不追短拉、不因短调恐慌。', '11:00–13:30')
+  }
+  // —— 13:30–14:30：日内次强波动段 ——
+  if (hm < 870) {
+    if (offHigh != null && offHigh >= 1.5 && shrink) return mk('未破高点·止盈', 'sell', `未突破上午高点且缩量(距高点${offHigh.toFixed(1)}%)，可考虑止盈。`, '13:30–14:30')
+    if (pct <= -3) return mk('午后大跌·不急抄', 'watch', `午后跌${pct.toFixed(1)}%，不急于当日抄底;看次日能否回踩10日线获支撑再接。`, '13:30–14:30')
+    return mk('观察承接', 'watch', '观察个股承接与量能,有支撑+量价配合才考虑动作。', '13:30–14:30')
+  }
+  // —— 14:30–15:00：尾盘,决定持仓与次日 ——
+  if (limitUp && hm >= 840) return mk('午后封板·谨慎', 'sell', '午后小单封板需谨慎,封单不实考虑清仓/大幅减仓。', '14:30–15:00')
+  if (pct >= 5 || (nearHigh && pct >= 3)) return mk('尾盘大涨·减仓', 'sell', `尾盘大涨(${pct.toFixed(1)}%),以减仓为主、不盲目追高。`, '14:30–15:00')
+  if (pct <= -3) return mk('尾盘跳水·次日看', 'watch', `尾盘跳水${pct.toFixed(1)}%,次日若回踩10日线获支撑再考虑接回。`, '14:30–15:00')
+  if (offHigh != null && offHigh <= 1 && low && price <= low * 1.01 && vr != null && vr < 1.2) return mk('尾盘低吸窗口', 'buy', '尾盘企稳、贴近日内低点,若有支撑+量价依据可低吸;需谨慎。', '14:30–15:00')
+  return mk('尾盘少动', 'watch', '尾盘原则上少减仓、不追高,重点看是否有尾盘资金承接。', '14:30–15:00')
 }
 
 // 时间戳 → 天key(YYYY-MM-DD) / 展示标签(今天/昨天/MM-DD)
@@ -229,12 +345,15 @@ function PlanList({ book, quote }) {
           </div>
         )}
         {buying === p.code ? (
-          <div className="buy-inline">
-            <input className="wl-input" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="买入价" />
-            <input className="wl-input" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="手" />
-            {price && Number(qty) > 0 && <span className="fee-hint">费≈{calcBuyFee(Number(price) * Number(qty) * 100).toFixed(0)}</span>}
-            <button className="chip-btn done" onClick={() => confirmBuy(p.code)}><Icon name="check" size={12} />确认</button>
-            <button className="chip-btn ghost" onClick={() => setBuying(null)}>取消</button>
+          <div className="buy-inline-wrap">
+            <div className="buy-inline">
+              <input className="wl-input" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="买入价" />
+              <input className="wl-input" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="手" />
+              {price && Number(qty) > 0 && <span className="fee-hint">费≈{calcBuyFee(Number(price) * Number(qty) * 100).toFixed(0)}</span>}
+              <button className="chip-btn done" onClick={() => confirmBuy(p.code)}><Icon name="check" size={12} />确认</button>
+              <button className="chip-btn ghost" onClick={() => setBuying(null)}>取消</button>
+            </div>
+            <SuggestPriceBtn code={p.code} name={(q && q.name) || p.name} actionKind="buy" quote={quote} onPick={setPrice} />
           </div>
         ) : alerting === p.code ? (
           <div className="pc-alert-box">
@@ -326,7 +445,7 @@ function HoldingItem({ h, idx, quote: q }) {
   const [tPrice, setTPrice] = useState('')
   const [tQty, setTQty] = useState('1')
   const [tAdvice, setTAdvice] = useState(null) // {loading,result,error} AI做T参考
-  const [tStyle, setTStyle] = useState('balanced') // conservative | balanced | aggressive
+  const [tStyle, setTStyle] = useState('auto') // auto(按历史规律) | conservative | balanced | aggressive
   const [openDays, setOpenDays] = useState({}) // 做T流水按天折叠，key→是否展开
 
   const baseQty = h.baseQty || h.qty
@@ -347,6 +466,8 @@ function HoldingItem({ h, idx, quote: q }) {
     price: q.price, prevClose: q.prevClose, volRatio: q.volRatio,
     candles, cost: costWithFee, pnlPct: pnl,
   }) : null
+  // 盘中时段操盘提示（时段 + 实时盘面 → 此刻该怎么做）
+  const play = q ? intradayPlaybook(q) : null
 
   // 交易计划：止盈(tp)/止损(sl)/理由(planReason)。判断现价是否触及
   const hitTP = q && h.tp && q.price >= Number(h.tp)
@@ -407,8 +528,18 @@ function HoldingItem({ h, idx, quote: q }) {
       })
       if (r.ok && r.result) {
         const rs = r.result
-        if (rs.tp != null && !isNaN(rs.tp)) setPlanTP(String(rs.tp))
-        if (rs.sl != null && !isNaN(rs.sl)) setPlanSL(String(rs.sl))
+        const base = costWithFee || (q && q.price) || h.buyPrice
+        const round = (v) => (v < 10 ? +v.toFixed(3) : +v.toFixed(2))
+        let tp = rs.tp != null && !isNaN(rs.tp) ? Number(rs.tp) : null
+        let sl = rs.sl != null && !isNaN(rs.sl) ? Number(rs.sl) : null
+        // 兜底校验：止盈必须显著高于成本、止损必须低于成本，防 AI 越界给出低于成本的"止盈"
+        if (base) {
+          if (tp == null || tp <= base * 1.03) tp = round(base * 1.08)   // 止盈至少成本+8%
+          if (sl == null || sl >= base) sl = round(base * 0.92)          // 止损至多成本-8%
+          if (sl < base * 0.90) sl = round(base * 0.92)                  // 止损别离谱过深
+        }
+        if (tp != null) setPlanTP(String(tp))
+        if (sl != null) setPlanSL(String(sl))
         if (rs.reason) setPlanReason(rs.reason)
         setPlanBasis({ tpBasis: rs.tpBasis, slBasis: rs.slBasis, theory: rs.theory, confidence: rs.confidence })
       }
@@ -487,11 +618,35 @@ function HoldingItem({ h, idx, quote: q }) {
       </div>
 
       <div className="hold-meta">
-        <span>{h.qty}手</span>
-        <span title={`裸买入价 ${fmtRaw(h.buyPrice)} + 买入手续费 ${(h.buyFee || 0).toFixed(2)}`}>成本 {fmtRaw(costWithFee)} <span className="sub-name">(含费)</span></span>
+        {(() => {
+          // 实时持仓手数：底仓 ± 今日做T未配对净额（买入+/卖出−），做T后立即反映
+          const netT = (tStat.openBuy || 0) - (tStat.openSell || 0)
+          const liveQty = h.qty + netT
+          // 实时成本：有做T差价则用摊薄后 effCost，否则含费成本
+          const liveCost = tStat.realized ? effCost : costWithFee
+          return (
+            <>
+              <span title={netT !== 0 ? `底仓 ${h.qty} 手，今日做T未结算净${netT > 0 ? '买入+' : '卖出'}${netT} 手` : '当前持仓手数'}>
+                {liveQty}手{netT !== 0 && <span className="sub-name"> (底仓{h.qty}{netT > 0 ? '+' : ''}{netT})</span>}
+              </span>
+              <span title={`裸买入价 ${fmtRaw(h.buyPrice)} + 买入手续费 ${(h.buyFee || 0).toFixed(2)}${tStat.realized ? `；做T差价摊薄 ${fmtMoney(tStat.realized)}` : ''}`}>
+                成本 {fmtRaw(liveCost)} <span className="sub-name">{tStat.realized ? '(做T后)' : '(含费)'}</span>
+              </span>
+            </>
+          )
+        })()}
         {q && <span>现价 <b className={pctClass(q.pct)}>{fmtRaw(q.price)}</b></span>}
         {q && h.buyPrice && <span title="现价市值 − 裸成本 − 已付买入手续费">浮盈 <b className={floatPnl >= 0 ? 'red' : 'green'}>{fmtMoney(floatPnl)}</b></span>}
       </div>
+
+      {/* 盘中时段操盘提示（仅交易时段显示：此刻该怎么做）*/}
+      {play && (
+        <div className={'ipb ipb-' + play.tone}>
+          <span className="ipb-when">{play.when}</span>
+          <span className={'ipb-tag ipb-' + play.tone}>{play.tag}</span>
+          <span className="ipb-tip">{play.tip}</span>
+        </div>
+      )}
 
       {/* 「踏5不破10」策略信号灯 */}
       {signal && (
@@ -567,21 +722,27 @@ function HoldingItem({ h, idx, quote: q }) {
 
       {/* 操作区 */}
       {mode === 'add' ? (
-        <div className="buy-inline">
-          <input className="wl-input" value={addPrice} onChange={(e) => setAddPrice(e.target.value)} placeholder="加仓价" />
-          <input className="wl-input" value={addQty} onChange={(e) => setAddQty(e.target.value)} placeholder="手" />
-          {addPrice && Number(addQty) > 0 && <span className="fee-hint">费≈{calcBuyFee(Number(addPrice) * Number(addQty) * 100).toFixed(2)}</span>}
-          <button className="chip-btn buy" onClick={confirmAdd}><Icon name="check" size={13} />确认加仓</button>
-          <button className="chip-btn ghost" onClick={() => setMode(null)}>取消</button>
+        <div className="buy-inline-wrap">
+          <div className="buy-inline">
+            <input className="wl-input" value={addPrice} onChange={(e) => setAddPrice(e.target.value)} placeholder="加仓价" />
+            <input className="wl-input" value={addQty} onChange={(e) => setAddQty(e.target.value)} placeholder="手" />
+            {addPrice && Number(addQty) > 0 && <span className="fee-hint">费≈{calcBuyFee(Number(addPrice) * Number(addQty) * 100).toFixed(2)}</span>}
+            <button className="chip-btn buy" onClick={confirmAdd}><Icon name="check" size={13} />确认加仓</button>
+            <button className="chip-btn ghost" onClick={() => setMode(null)}>取消</button>
+          </div>
+          <SuggestPriceBtn code={h.code} name={h.name} actionKind="add" quote={q ? { [h.code]: q } : null} holdCost={costWithFee} onPick={setAddPrice} />
         </div>
       ) : mode === 'sell' ? (
-        <div className="buy-inline">
-          <input className="wl-input" value={sellPrice} onChange={(e) => setSellPrice(e.target.value)} placeholder="卖出价" />
-          <input className="wl-input" value={sellQty} onChange={(e) => setSellQty(e.target.value)} placeholder="手" />
-          <span className="qty-hint">/{h.qty}手</span>
-          {sellPrice && Number(sellQty) > 0 && <span className="fee-hint">费≈{calcSellFee(Number(sellPrice) * Number(sellQty) * 100).toFixed(2)}</span>}
-          <button className="chip-btn done" onClick={confirmSell}><Icon name="check" size={13} />{Number(sellQty) >= h.qty ? '确认清仓' : '确认减仓'}</button>
-          <button className="chip-btn ghost" onClick={() => setMode(null)}>取消</button>
+        <div className="buy-inline-wrap">
+          <div className="buy-inline">
+            <input className="wl-input" value={sellPrice} onChange={(e) => setSellPrice(e.target.value)} placeholder="卖出价" />
+            <input className="wl-input" value={sellQty} onChange={(e) => setSellQty(e.target.value)} placeholder="手" />
+            <span className="qty-hint">/{h.qty}手</span>
+            {sellPrice && Number(sellQty) > 0 && <span className="fee-hint">费≈{calcSellFee(Number(sellPrice) * Number(sellQty) * 100).toFixed(2)}</span>}
+            <button className="chip-btn done" onClick={confirmSell}><Icon name="check" size={13} />{Number(sellQty) >= h.qty ? '确认清仓' : '确认减仓'}</button>
+            <button className="chip-btn ghost" onClick={() => setMode(null)}>取消</button>
+          </div>
+          <SuggestPriceBtn code={h.code} name={h.name} actionKind="sell" quote={q ? { [h.code]: q } : null} holdCost={costWithFee} onPick={setSellPrice} />
         </div>
       ) : mode === 'plan' ? (
         <div className="plan-edit">
@@ -673,35 +834,44 @@ function HoldingItem({ h, idx, quote: q }) {
         <div className="t-panel">
           {/* AI 做T参考 */}
           <div className="t-ai">
-            {/* 风格选择 */}
+            {/* 风格选择：默认「自动」由 AI 按该股历史规律选定 */}
             <div className="t-style">
               <span className="t-style-label">风格</span>
-              {[['conservative', '稳健'], ['balanced', '均衡'], ['aggressive', '激进']].map(([k, label]) => (
-                <button key={k} className={'t-style-btn' + (tStyle === k ? ' active ' + k : '')} onClick={() => askTAdvice(k)}>{label}</button>
+              {[['auto', '自动'], ['conservative', '稳健'], ['balanced', '均衡'], ['aggressive', '激进']].map(([k, label]) => (
+                <button key={k} className={'t-style-btn' + (tStyle === k ? ' active ' + k : '')} onClick={() => askTAdvice(k)} title={k === 'auto' ? 'AI 分析这只股的历史规律，自动选激进/均衡/稳健并定正T或反T' : ''}>{label}</button>
               ))}
             </div>
             {!tAdvice && (
-              <button className="t-ai-btn" onClick={() => askTAdvice()}><Icon name="spark" size={14} />获取 AI 做T参考（{tStyle === 'conservative' ? '稳健' : tStyle === 'aggressive' ? '激进' : '均衡'}）</button>
+              <button className="t-ai-btn" onClick={() => askTAdvice()}><Icon name="spark" size={14} />{tStyle === 'auto' ? 'AI 按历史规律自动决策做T策略' : `获取 AI 做T参考（${tStyle === 'conservative' ? '稳健' : tStyle === 'aggressive' ? '激进' : '均衡'}）`}</button>
             )}
-            {tAdvice && tAdvice.loading && <div className="t-ai-loading"><Icon name="refresh" size={13} className="spin" />AI 正在分析分时/大盘/资金/走势…</div>}
+            {tAdvice && tAdvice.loading && <div className="t-ai-loading"><Icon name="refresh" size={13} className="spin" />AI 正在分析历史规律/分时/大盘/资金…</div>}
             {tAdvice && tAdvice.error && <div className="err">{tAdvice.error} <span className="expand-btn" onClick={askTAdvice}>重试</span></div>}
             {tAdvice && tAdvice.result && (
               <div className={'t-ai-card ' + (tAdvice.result.light || 'yellow')}>
                 <div className="t-ai-head">
                   <span className="t-ai-badge">{tAdvice.result.dirLabel || tAdvice.result.advisable}</span>
+                  {tAdvice.result.chosenStyle && <span className={'t-style-tag ' + tAdvice.result.chosenStyle}>{{ conservative: '稳健', balanced: '均衡', aggressive: '激进' }[tAdvice.result.chosenStyle] || tAdvice.result.chosenStyle}</span>}
                   {tAdvice.result.confidence && <span className="t-conf">信心 {tAdvice.result.confidence}</span>}
                   <div className="t-ai-actions" style={{ marginLeft: 'auto' }}>
                     <span className="expand-btn" onClick={() => askTAdvice()}>重新生成</span>
                     <span className="expand-btn" onClick={() => setTAdvice(null)}>收起</span>
                   </div>
                 </div>
+                {tAdvice.result.actionPlan && (
+                  <div className="t-ai-plan"><Icon name="target" size={13} /><span className="t-ai-plan-k">这样操作</span>{tAdvice.result.actionPlan}</div>
+                )}
+                {tAdvice.result.histPattern && (
+                  <div className="t-ai-hist"><Icon name="history" size={12} /><span>历史规律</span>{tAdvice.result.histPattern}</div>
+                )}
                 {tAdvice.result.plain && <div className="t-ai-plain">{tAdvice.result.plain}</div>}
                 <div className="t-ai-basis">
+                  {tAdvice.result.styleReason && <div className="t-basis-row"><span className="t-basis-k">选型</span>{tAdvice.result.styleReason}</div>}
                   {tAdvice.result.marketNote && <div className="t-basis-row"><span className="t-basis-k">大盘</span>{tAdvice.result.marketNote}</div>}
                   {tAdvice.result.stockNote && <div className="t-basis-row"><span className="t-basis-k">盘面</span>{tAdvice.result.stockNote}</div>}
                   {(tAdvice.result.support || tAdvice.result.resistance) && (
                     <div className="t-basis-row"><span className="t-basis-k">支撑压力</span>支撑 <b className="green">{tAdvice.result.support ?? '--'}</b> · 压力 <b className="red">{tAdvice.result.resistance ?? '--'}</b></div>
                   )}
+                  {tAdvice.result.quantNote && <div className="t-basis-row"><span className="t-basis-k quant">量化</span>{tAdvice.result.quantNote}</div>}
                   {tAdvice.result.theory && <div className="t-basis-row"><span className="t-basis-k theory">理论</span>{tAdvice.result.theory}</div>}
                 </div>
                 {tAdvice.result.dir !== 'none' && (

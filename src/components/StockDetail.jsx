@@ -4,6 +4,8 @@ import Icon from './Icon'
 import { usePolling } from '../hooks'
 import { fmtPct, pctClass, fmtRaw, fmtNum } from '../format'
 import { aiStore } from '../aiStore'
+import { callAI } from '../ai'
+import { usePlanStore } from '../planStore'
 import { AlertForm } from './AlertCenter'
 
 // 把公司网址补全为可点击的绝对 URL（东财 F10 常给不带协议的裸域名）
@@ -49,6 +51,38 @@ export default function StockDetail({ stock, onClose }) {
   const [chartType, setChartType] = useState('candle') // candle | line
   const [refreshing, setRefreshing] = useState(false) // 手动刷新中（保证转圈可见）
   const [refreshedAt, setRefreshedAt] = useState(null) // 最近一次成功刷新时间
+  const [quantState, setQuantState] = useState(null) // 操作建议：null未取 | {loading} | {result} | {error}
+  const [showTech, setShowTech] = useState(false) // 专业技术指标默认收起
+  const book = usePlanStore()
+  // 该股持仓（可能多笔）→ 加权成本，用于给"加/减/做T"建议；未持仓则给"买/观望"
+  const myHold = useMemo(() => {
+    const hs = (book.holding || []).filter((h) => h.code === (stock && stock.code))
+    if (!hs.length) return null
+    const qty = hs.reduce((a, h) => a + (h.qty || 0), 0)
+    const cost = qty ? hs.reduce((a, h) => a + (h.buyPrice || 0) * (h.qty || 0), 0) / qty : 0
+    return { cost: +cost.toFixed(3), qty }
+  }, [book.holding, stock && stock.code])
+  // 切换股票时重置状态
+  useEffect(() => { setQuantState(null); setShowTech(false) }, [stock && stock.code])
+  const loadQuant = async () => {
+    if (!stock) return
+    setQuantState({ loading: true })
+    try {
+      const hp = myHold ? `&holdCost=${myHold.cost}&holdQty=${myHold.qty}` : ''
+      // 量化服务(走势预测/多因子分) 与 LLM 操作建议(带具体价位) 并发
+      const quantP = fetch(`/api/stock_detail?code=${stock.code}&klt=101&lmt=60&quant=1${hp}&_t=${Date.now()}`)
+        .then((r) => r.json()).catch(() => null)
+      // 持仓 → LLM 给"加/减/持有/清仓 + 具体价位"；未持仓不调 LLM（量化本身已给买/观望）
+      const adviceP = myHold
+        ? callAI('hold_advice', { code: stock.code, name: (profile && profile.name) || stock.name, holdCost: myHold.cost, holdQty: myHold.qty })
+            .then((r) => (r && r.ok ? r.result : null)).catch(() => null)
+        : Promise.resolve(null)
+      const [j, advice] = await Promise.all([quantP, adviceP])
+      if (j && j.quant) setQuantState({ result: j.quant, advice })
+      else if (advice) setQuantState({ result: null, advice })
+      else setQuantState({ error: '量化服务暂不可用（可能冷启动，请稍后重试）' })
+    } catch (e) { setQuantState({ error: '获取失败：' + String(e.message || e) }) }
+  }
   const [showAlert, setShowAlert] = useState(false) // 设预警表单开关
   const { data, loading, error, reload } = usePolling(
     stock ? `/api/stock_detail?code=${stock.code}&klt=${klt}&lmt=120&trends=1` : null,
@@ -71,6 +105,7 @@ export default function StockDetail({ stock, onClose }) {
   const candles = (data && data.candles) || []
   const trends = (data && data.trends) || []
   const preClose = data && data.preClose
+  const tech = data && data.tech
 
   // K线为空时自动重试（东财偶发空响应）：最多重试 2 次，间隔递增
   const retryRef = useRef(0)
@@ -265,7 +300,8 @@ export default function StockDetail({ stock, onClose }) {
   // 分时图 option：现价线 + 均价线 + 昨收基准 + 成交量
   const trendOption = useMemo(() => {
     if (!trends.length) return null
-    const times = trends.map((t) => t.time.slice(11, 16)) // HH:MM
+    const hm = (s) => { s = String(s || ''); const i = s.indexOf(' '); return i >= 0 ? s.slice(i + 1, i + 6) : (s.length > 5 ? s.slice(11, 16) : s) }
+    const times = trends.map((t) => hm(t.time)) // HH:MM（兼容东财"YYYY-MM-DD HH:MM"与腾讯"HH:MM"）
     const prices = trends.map((t) => t.price)
     const avgs = trends.map((t) => t.avg)
     const vols = trends.map((t, i) => ({
@@ -387,19 +423,131 @@ export default function StockDetail({ stock, onClose }) {
                   </div>
                 ))}
               </div>
-              {/* 技术参考结论 */}
-              {overview.signals && overview.signals.length > 0 && (
-                <div className="dq-signals">
-                  <div className="dq-signals-head"><Icon name="pulse" size={13} /> 均线技术参考</div>
-                  {overview.signals.map((s, i) => (
-                    <div className={'dq-sig ' + s.cls} key={i}>
-                      <span className={'dq-sig-tag ' + s.cls}>{s.tag}</span>
-                      <span className="dq-sig-text">{s.text}</span>
-                    </div>
-                  ))}
+              {/* ===== AI 操作建议（核心：告诉你该买/加/减/做T + 走势预测）===== */}
+              <div className="decide-box">
+                <div className="decide-head">
+                  <div className="decide-title"><Icon name="target" size={14} /> AI 操作建议
+                    {myHold ? <span className="decide-hold">持仓 {myHold.qty}手 · 成本{fmtRaw(myHold.cost)}</span>
+                            : <span className="decide-hold none">未持仓</span>}
+                  </div>
+                  {quantState && quantState.result && quantState.result.asOf && <span className="quant-asof">量化 {quantState.result.asOf}</span>}
+                </div>
+
+                {!quantState && (
+                  <div className="quant-cta">
+                    <button className="quant-btn" onClick={loadQuant}><Icon name="spark" size={14} /> 生成操作建议</button>
+                    <span className="quant-cta-hint">{myHold ? '结合你的持仓，告诉你该加仓 / 减仓 / 持有做T' : '结合量化预测，告诉你该不该买、何时买'}</span>
+                  </div>
+                )}
+                {quantState && quantState.loading && (
+                  <div className="quant-loading"><Icon name="refresh" size={14} className="spin" /> 量化模型计算中…（首次冷启动约需几秒）</div>
+                )}
+                {quantState && quantState.error && (
+                  <div className="quant-err">{quantState.error} <span className="expand-btn" onClick={loadQuant}>重试</span></div>
+                )}
+                {quantState && !quantState.loading && !quantState.error && (quantState.result || quantState.advice) && (() => {
+                  const q = quantState.result || {}
+                  const adv = quantState.advice
+                  const dec = q.decision || {}
+                  const fc = q.forecast
+                  // 有 LLM 操作建议(持仓场景)时以它为主结论；否则回退到量化规则决策
+                  const verdict = adv
+                    ? { tone: adv.tone || 'muted', title: adv.title || adv.action || '—', detail: adv.actionPlan || adv.reason || '' }
+                    : { tone: dec.tone || 'muted', title: dec.title || '—', detail: dec.detail || '' }
+                  return (
+                    <>
+                      {/* 决策结论（最大最醒目）*/}
+                      <div className={'decide-verdict ' + verdict.tone}>
+                        <div className="dv-action">{verdict.title}</div>
+                        <div className="dv-detail">{verdict.detail}</div>
+                      </div>
+
+                      {/* LLM 具体操作价位（持仓场景核心：加/减/止损/目标都给数字）*/}
+                      {adv && (
+                        <>
+                          <div className="advice-prices">
+                            {adv.addPrice != null && <div className="ap-cell"><span className="ap-k">加仓参考</span><span className="ap-v red">{adv.addPrice}</span></div>}
+                            {adv.reducePrice != null && <div className="ap-cell"><span className="ap-k">减仓参考</span><span className="ap-v green">{adv.reducePrice}</span></div>}
+                            {adv.stopPrice != null && <div className="ap-cell"><span className="ap-k">止损价</span><span className="ap-v green">{adv.stopPrice}</span></div>}
+                            {adv.targetPrice != null && <div className="ap-cell"><span className="ap-k">目标价</span><span className="ap-v red">{adv.targetPrice}</span></div>}
+                          </div>
+                          {adv.pnlNote && <div className="advice-line">💰 {adv.pnlNote}</div>}
+                          {adv.reason && <div className="advice-line muted">{adv.reason}</div>}
+                          {adv.quantNote && <div className="advice-line muted">📊 {adv.quantNote}</div>}
+                          {adv.risk && <div className="advice-line warn">⚠ {adv.risk}</div>}
+                        </>
+                      )}
+
+                      {/* 走势预测 */}
+                      {fc && (
+                        <div className="forecast-box">
+                          <div className="fc-row1">
+                            <span className={'fc-dir ' + (fc.direction === '看涨' ? 'red' : fc.direction === '看跌' ? 'green' : 'muted')}>
+                              未来{fc.days}日 {fc.direction}
+                            </span>
+                            <span className="fc-conf">预测信心 {fc.confidence}</span>
+                          </div>
+                          <div className="fc-grid">
+                            <div className="fc-cell"><span className="fc-k">上涨概率</span><span className={'fc-v ' + (fc.upProb >= 55 ? 'red' : fc.upProb <= 45 ? 'green' : '')}>{fc.upProb}%</span></div>
+                            <div className="fc-cell"><span className="fc-k">预期涨跌</span><span className={'fc-v ' + (fc.expRet >= 0 ? 'red' : 'green')}>{fc.expRet >= 0 ? '+' : ''}{fc.expRet}%</span></div>
+                            <div className="fc-cell"><span className="fc-k">目标区间</span><span className="fc-v"><b className="green">{fc.targetLow}</b> ~ <b className="red">{fc.targetHigh}</b></span></div>
+                            <div className="fc-cell"><span className="fc-k">中枢价</span><span className="fc-v">{fc.targetMid}</span></div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 量化分（一行紧凑）*/}
+                      {q.score != null && (
+                        <div className="quant-line">
+                          <span className={'quant-chip ' + (q.score >= 62 ? 'red' : q.score <= 38 ? 'green' : 'gold')}>量化 {q.score} · {q.bias}</span>
+                          {(q.reads || []).slice(-1).map((r, i) => <span className="quant-line-read" key={i}>{r}</span>)}
+                          <span className="expand-btn" style={{ marginLeft: 'auto' }} onClick={loadQuant}>刷新</span>
+                        </div>
+                      )}
+                      <div className="dq-hint">{adv ? 'AI 操作建议由大模型结合量化预测/技术面/你的持仓成本生成' : '走势预测=基于历史波动的蒙特卡洛模拟，量化=多因子打分'}；均为统计口径，仅供参考，非投资建议</div>
+                    </>
+                  )
+                })()}
+              </div>
+
+              {/* 均线技术参考（精简为可折叠的次要信息）*/}
+              {tech && (
+                <div className="tech-box">
+                  <div className="tech-fold" onClick={() => setShowTech((v) => !v)}>
+                    <span><Icon name="pulse" size={13} /> 技术面细节
+                      {tech.verdict && <span className={'tech-verdict-inline ' + (tech.vtone || 'muted')}>{tech.verdict}</span>}
+                    </span>
+                    <Icon name={showTech ? 'chevronDown' : 'chevronRight'} size={14} />
+                  </div>
+                  {showTech && (
+                    <>
+                      {/* 买卖价位 */}
+                      {tech.priceHints && (
+                        <div className="tech-prices">
+                          {tech.priceHints.buyZone && <div className="tech-price-cell buy"><span className="tpc-k">建议低吸区</span><span className="tpc-v red">{tech.priceHints.buyZone.low} ~ {tech.priceHints.buyZone.high}</span></div>}
+                          {tech.priceHints.sellZone && <div className="tech-price-cell sell"><span className="tpc-k">建议高抛区</span><span className="tpc-v green">{tech.priceHints.sellZone.low} ~ {tech.priceHints.sellZone.high}</span></div>}
+                          {tech.priceHints.stopLoss != null && <div className="tech-price-cell"><span className="tpc-k">参考止损</span><span className="tpc-v green">{tech.priceHints.stopLoss}</span></div>}
+                          {tech.priceHints.takeProfit != null && <div className="tech-price-cell"><span className="tpc-k">参考止盈</span><span className="tpc-v red">{tech.priceHints.takeProfit}</span></div>}
+                        </div>
+                      )}
+                      {tech.reads && tech.reads.length > 0 && (
+                        <div className="tech-reads">
+                          {tech.reads.map((r, i) => (
+                            <div className={'tech-read ' + (r.tone || 'muted')} key={r.key || i}>
+                              <div className="tech-read-top">
+                                <span className={'tech-read-tag ' + (r.tone || 'muted')}>{r.tag}</span>
+                                <span className="tech-read-val">{r.value}</span>
+                              </div>
+                              <div className="tech-read-plain">{r.plain}</div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div className="dq-hint">ATR=一天正常波动幅度 · 布林下轨=低吸区/上轨=高抛区 · RSI/KDJ 超买该抛超卖可吸 · 本地测算，仅供参考</div>
+                    </>
+                  )}
                 </div>
               )}
-              <div className="dq-hint">现价{overview.periodLabel === '日' ? '' : '(' + overview.periodLabel + 'K收盘)'}在均线<span className="red">上方</span>=偏多、<span className="green">下方</span>=偏空 · MA为{overview.periodLabel}线均价 · 结论由均线本地测算，仅供参考，非投资建议</div>
             </div>
           )}
 
@@ -454,9 +602,9 @@ export default function StockDetail({ stock, onClose }) {
               />
             ) : (
               <div className="empty">
-                {error ? 'K 线数据暂不可用' : '未获取到 K 线数据'}
-                <button className="btn" style={{ marginLeft: 10 }} onClick={() => { retryRef.current = 0; reload() }}>
-                  <Icon name="refresh" size={13} /> 重试
+                {error ? '数据源繁忙，K线暂时没取到' : '未获取到 K 线数据'}
+                <button className="btn" style={{ marginLeft: 10 }} disabled={refreshing} onClick={doRefresh}>
+                  <Icon name="refresh" size={13} className={refreshing ? 'spin' : ''} /> {refreshing ? '重试中…' : '重试'}
                 </button>
               </div>
             )}

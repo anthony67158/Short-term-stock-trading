@@ -43,6 +43,14 @@ const TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'get_quant_score',
+      description: '查询个股的【量化模型打分】：0~100综合分(越高越偏多)、偏多/偏空/中性判断、建议做T方向(正T低吸/反T高抛)、多因子解读(动量/均线/RSI/量价/均值回归)。分析或推荐某只个股、给买卖价参考、判断该不该买/该不该做T时，务必调用它作为量化依据。',
+      parameters: { type: 'object', properties: { code: { type: 'string', description: '6位股票代码' } }, required: ['code'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'screen_stocks',
       description: '按条件从全市场筛选/选股。可指定排序(资金/涨幅/换手/量比/涨速)和过滤条件。推荐股票、选股时用。',
       parameters: {
@@ -132,6 +140,24 @@ async function execTool(name, args, origin) {
       const p = j.profile || {};
       return { name: p.name, code: p.code, industry: p.industry, business: (p.business || '').slice(0, 300), intro: (p.intro || '').slice(0, 300) };
     }
+    if (name === 'get_quant_score') {
+      // 拉量化打分 + 专业技术指标（含买卖价位锚），给 LLM 做量化依据
+      const j = await call(`/api/stock_detail?code=${args.code}&klt=101&lmt=60&quant=1`);
+      const q = j.quant || null;
+      const t = j.tech || null;
+      const out = { code: args.code, name: (j.profile && j.profile.name) || args.code };
+      if (q) out.quant = { score: q.score, bias: q.bias, tDir: q.tDir, reads: q.reads, asOf: q.asOf };
+      if (t) out.tech = {
+        verdict: t.verdict, rsi: t.rsi,
+        boll: t.boll && { lower: t.boll.lower, mid: t.boll.mid, upper: t.boll.upper },
+        atrPct: t.atr && t.atr.atrPct,
+        support: t.sr && t.sr.support, resistance: t.sr && t.sr.resistance,
+        buyZone: t.priceHints && t.priceHints.buyZone, sellZone: t.priceHints && t.priceHints.sellZone,
+        stopLoss: t.priceHints && t.priceHints.stopLoss, takeProfit: t.priceHints && t.priceHints.takeProfit,
+      };
+      if (!q && !t) out.note = '量化服务暂不可用，请基于其他工具的行情数据分析';
+      return out;
+    }
     if (name === 'screen_stocks') {
       const opts = { limit: 15 };
       for (const k of ['sort', 'minPct', 'maxPct', 'minTurnover', 'minVolRatio', 'minInflowYi', 'onlyLimitUp', 'limit']) {
@@ -199,7 +225,7 @@ const SYSTEM = `你是"操盘手 Alpha"，一位有十年A股短线实战经验�
 【工作方式】
 1. 自主决定调用哪些工具、调几次，多轮调用直到信息足够。
 2. 【推荐/选股】先 get_sector_rank 找强势主线，或 screen_stocks 按资金/涨幅/量比筛，结合 get_limit_pool（连板梯队）、get_movers（盘中资金），再综合给候选：每只讲清 ①属于什么主线 ②入选逻辑（引用具体数据+对应理论）③买点/关注位 ④风险。
-3. 【分析个股】get_quote + get_stock_detail(+web_news)，从情绪周期位置、量价、资金、题材、支撑压力多维度分析，给出短线操作倾向。
+3. 【分析个股】get_quote + get_stock_detail + **get_quant_score(量化打分+技术买卖价位，分析/推荐个股必调)** (+web_news)，从量化打分、情绪周期位置、量价、资金、题材、支撑压力多维度分析，给出短线操作倾向。引用量化分时说人话（如"量化分72偏多、模型建议正T低吸"），并把 buyZone/sellZone/止损止盈等具体价位告诉用户。
 4. 【判断大盘/能不能做】用情绪周期理论 + 涨跌比/涨停数/资金判断当前阶段和策略。
 5. 用户提到股票名没代码，先 search_stock。
 

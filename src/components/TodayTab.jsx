@@ -1,8 +1,8 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import Icon from './Icon'
 import StockName from './StockName'
 import LimitPool from './LimitPool'
-import { usePolling } from '../hooks'
+import { usePolling, isTradingHours } from '../hooks'
 import { callAI } from '../ai'
 import { planStore, usePlanStore } from '../planStore'
 import { aiStore } from '../aiStore'
@@ -192,97 +192,155 @@ function MarketLight({ market, sectors, snapshot }) {
   )
 }
 
-// ---------- AI 今日操盘（一键出决策+候选） ----------
+// ---------- AI 选股（量化模型 + LLM 结合，精选今日3只 + 怎么买）----------
+// 交易时段=「AI 选股」，结果本地持久化(刷新不丢);收盘后按钮=「看明日计划」，展示当日盘中选出的、供次日开盘参考
+const PICK_KEY = 'ai_pick_v1'
+function nowBJ() { const n = new Date(); return new Date(n.getTime() + (n.getTimezoneOffset() + 480) * 60000) }
+// 当日交易场次:9:15–15:01(含午间 11:30–13:00 休市)整体算“盘中/当日”，午休不切到“明日计划”，只有收盘后(15:01 之后)/盘前/周末才算收盘
+function isTradingNow() { const d = nowBJ(); if (d.getDay() === 0 || d.getDay() === 6) return false; const hm = d.getHours() * 60 + d.getMinutes(); return hm >= 555 && hm <= 901 } // 9:15-15:01(含午休)
+function todayKey() { const d = nowBJ(); return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}` }
+function loadPick() { try { return JSON.parse(localStorage.getItem(PICK_KEY) || 'null') } catch { return null } }
+function savePick(obj) { try { localStorage.setItem(PICK_KEY, JSON.stringify(obj)) } catch { /* ignore */ } }
+
 function DailyPlay({ snapshot }) {
   const [loading, setLoading] = useState(false)
-  const [res, setRes] = useState(null)
+  const [stage, setStage] = useState('') // 进度文案
+  const saved = loadPick()
+  const [res, setRes] = useState(saved && saved.result ? saved.result : null)
+  const [savedAt, setSavedAt] = useState(saved && saved.at ? saved.at : null)
+  const [savedDay, setSavedDay] = useState(saved && saved.day ? saved.day : null)
   const [err, setErr] = useState(null)
   const book = usePlanStore()
+  const trading = isTradingNow()
 
   const run = async () => {
-    setLoading(true); setErr(null)
+    setLoading(true); setErr(null); setRes(null)
     try {
       const s = snapshot()
-      const payload = {
-        breadth: s.market?.breadth || {},
-        indices: (s.market?.indices || []).map((i) => ({ name: i.name, pct: i.pct })),
-        topSectors: (s.sectors?.list || []).slice(0, 10).map((x) => ({ name: x.name, pct: x.pct, mainInflowYi: +(x.mainInflow / 1e8).toFixed(2), lead: x.leadName })),
-        limitUp: (s.limitPool?.list || []).slice(0, 12).map((x) => ({ name: x.name, code: x.code, lbc: x.lbc, sector: x.sector })),
-        movers: (s.movers?.list || []).slice(0, 12).map((x) => ({ name: x.name, code: x.code, pct: x.pct, mainInflowYi: +(x.mainInflow / 1e8).toFixed(2) })),
+      // ① 收集候选池：涨停/连板 + 主力抢筹 + 涨速 + 板块领涨，去重取前若干只（带上已有行情）
+      const cand = new Map()
+      const add = (x, tag, extra) => {
+        if (!x || !x.code) return
+        if (!cand.has(x.code)) cand.set(x.code, { code: x.code, name: x.name, tags: [], ...extra })
+        const o = cand.get(x.code)
+        if (tag && !o.tags.includes(tag)) o.tags.push(tag)
       }
-      const r = await callAI('daily', payload)
-      if (r.ok) setRes(r.result); else setErr(r.error || 'AI 调用失败')
+      ;(s.limitPool?.list || []).slice(0, 8).forEach((x) => add(x, x.lbc >= 2 ? `${x.lbc}连板` : '涨停', { pct: x.pct, turnover: x.turnover, mainInflow: x.fundAmount }))
+      ;(s.movers?.list || []).slice(0, 8).forEach((x) => add(x, '主力抢筹', { pct: x.pct, turnover: x.turnover, volRatio: x.volRatio, mainInflow: x.mainInflow }))
+      ;(s.speed?.list || []).slice(0, 6).forEach((x) => add(x, '涨速', { pct: x.pct, speed: x.speed }))
+      const codes = [...cand.values()].slice(0, 10)
+      if (!codes.length) { setErr('暂无候选数据，开盘后再试（休市时段候选池为空）'); setLoading(false); return }
+
+      // ② 对候选并发跑量化打分（浏览器并发，规避 Vercel 单函数超时）
+      setStage(`量化模型正在给 ${codes.length} 只候选打分…`)
+      const scored = await Promise.all(codes.map(async (c) => {
+        try {
+          const r = await fetch(`/api/stock_detail?code=${c.code}&klt=101&lmt=60&quant=1&_t=${Date.now()}`)
+          const j = await r.json()
+          const q = j.quant, fc = q && q.forecast
+          return {
+            code: c.code, name: c.name, tags: c.tags,
+            pct: c.pct, turnover: c.turnover, volRatio: c.volRatio,
+            mainInflowYi: c.mainInflow != null ? +(c.mainInflow / 1e8).toFixed(2) : null,
+            quant: q ? {
+              score: q.score, bias: q.bias,
+              upProb: fc && fc.upProb, expRet: fc && fc.expRet,
+              targetLow: fc && fc.targetLow, targetHigh: fc && fc.targetHigh,
+            } : null,
+          }
+        } catch { return { code: c.code, name: c.name, tags: c.tags, quant: null } }
+      }))
+      const withQuant = scored.filter((x) => x.quant) // 只把打上分的交给 LLM
+      if (!withQuant.length) { setErr('量化服务暂不可用，请稍后重试'); setLoading(false); return }
+
+      // ③ 带量化分 + 盘面 → LLM 精选 3 只
+      setStage('AI 正在结合量化与盘面精选 3 只…')
+      const payload = {
+        market: {
+          breadth: s.market?.breadth || {},
+          indices: (s.market?.indices || []).map((i) => ({ name: i.name, pct: i.pct })),
+        },
+        sectors: (s.sectors?.list || []).slice(0, 8).map((x) => ({ name: x.name, pct: x.pct, mainInflowYi: +(x.mainInflow / 1e8).toFixed(2), lead: x.leadName })),
+        candidates: withQuant,
+      }
+      const r = await callAI('scan_pick', payload)
+      if (r.ok) {
+        const at = Date.now(), day = todayKey()
+        setRes(r.result); setSavedAt(at); setSavedDay(day)
+        savePick({ result: r.result, at, day })
+      } else setErr(r.error || 'AI 选股失败')
     } catch (e) { setErr(String(e.message || e)) }
-    finally { setLoading(false) }
+    finally { setLoading(false); setStage('') }
   }
 
-  const lightClass = res ? (res.light || 'yellow') : ''
+  const savedTimeStr = savedAt ? new Date(savedAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : null
+  const isToday = savedDay === todayKey()
+
   return (
     <div className="play-card">
       <div className="play-head">
         <div className="play-title">
-          <Icon name="target" size={18} />
-          <span>AI 今日操盘</span>
-          <span className="play-sub">一键给出：能不能做 · 主攻方向 · 可执行候选</span>
+          <Icon name="radar" size={18} />
+          <span>{trading ? 'AI 选股' : '明日计划入选'}</span>
+          <span className="play-sub">{trading ? '量化模型 + AI 结合，选出今日最值得买的 3 只' : '盘中选出的候选，供明天开盘参考买入'}</span>
         </div>
-        <button className="btn btn-primary" onClick={run} disabled={loading}>
+        <button className="btn btn-primary" onClick={run} disabled={loading || !trading} title={!trading ? '仅交易时段(9:15–15:00)可重新选股;当前展示的是最近一次盘中结果' : ''}>
           <Icon name={loading ? 'refresh' : 'spark'} size={15} className={loading ? 'spin' : ''} />
-          {loading ? '分析中' : (res ? '重新分析' : '开始分析')}
+          {loading ? '选股中' : (trading ? (res ? '重新选股' : 'AI 选股') : '休市·看盘中结果')}
         </button>
       </div>
 
       <div className="play-body">
         {err && <div className="err">{err}</div>}
         {!res && !err && !loading && (
-          <div className="play-hint">综合大盘情绪、板块资金、涨停梯队、盘中异动，给你一份今日可执行的短线操盘计划。</div>
+          <div className="play-hint">{trading
+            ? '从今日涨停/异动/强势候选里，先用量化模型打分筛出高分股，再由 AI 结合大盘与板块精选 3 只、给出买点与止损。'
+            : '当前为休市时段，暂无盘中选股结果。开盘后(9:15起)点「AI 选股」，收盘后这里会保留结果供次日参考。'}</div>
         )}
-        {loading && <div className="play-hint">正在综合多维数据，生成操盘计划…</div>}
+        {loading && <div className="play-hint"><Icon name="refresh" size={13} className="spin" /> {stage || '正在选股…'}</div>}
         {res && (
           <>
-            <div className={'play-verdict ' + lightClass}>
-              <div className="pv-badge">{res.canTrade || '—'}</div>
-              <div className="pv-text">
-                <div className="pv-main">{res.verdict}</div>
-                <div className="pv-meta">
-                  <span>主攻：<b>{res.direction}</b></span>
-                  {res.position && <span>仓位：<b>{res.position}</b></span>}
-                </div>
+            {savedTimeStr && (
+              <div className="pick-savedat">
+                <Icon name="history" size={12} />
+                {isToday ? (trading ? `本次选股 ${savedTimeStr}，结果已保留` : `今日盘中 ${savedTimeStr} 选出，供明天开盘参考`) : `${savedTimeStr} 选出(非今日，仅供参考)`}
               </div>
-            </div>
-
-            {Array.isArray(res.candidates) && res.candidates.length > 0 && (
-              <div className="cand-grid">
-                {res.candidates.map((c, i) => {
+            )}
+            {res.marketNote && <div className="pick-market"><Icon name="pulse" size={13} /> {res.marketNote}</div>}
+            {Array.isArray(res.picks) && res.picks.length > 0 && (
+              <div className="pick-list">
+                {res.picks.map((c, i) => {
                   const added = book.plan.some((x) => x.code === c.code)
                   return (
-                    <div className="cand-card" key={i}>
-                      <div className="cand-top">
-                        <div className="cand-name">
+                    <div className="pick-card" key={c.code || i}>
+                      <div className="pick-top">
+                        <span className="pick-rank">{c.rank || i + 1}</span>
+                        <div className="pick-name">
                           <StockName code={c.code} name={c.name}><span>{c.name}<span className="cand-code">{c.code}</span></span></StockName>
                         </div>
-                        <button
-                          className={'chip-btn' + (added ? ' done' : '')}
-                          disabled={added}
-                          onClick={() => planStore.addPlan({ code: c.code, name: c.name }, c.reason)}
-                        >
+                        {c.quantScore != null && <span className={'pick-score ' + (c.quantScore >= 60 ? 'red' : c.quantScore <= 40 ? 'green' : 'gold')}>量化 {c.quantScore}</span>}
+                        <button className={'chip-btn' + (added ? ' done' : '')} disabled={added} style={{ marginLeft: 'auto' }}
+                          onClick={() => planStore.addPlan({ code: c.code, name: c.name }, c.reason)}>
                           <Icon name={added ? 'check' : 'plus'} size={13} />{added ? '已加入' : '加自选'}
                         </button>
                       </div>
-                      <div className="cand-row"><span className="cand-tag reason">逻辑</span>{c.reason}</div>
-                      {c.buyPoint && <div className="cand-row"><span className="cand-tag buy">买点</span>{c.buyPoint}</div>}
-                      <div className="cand-foot">
-                        {c.expect && <span className="cand-expect">次日：{c.expect}</span>}
-                        {c.stop && <span className="cand-stop">止损：{c.stop}</span>}
+                      <div className="pick-reason">{c.reason}</div>
+                      <div className="pick-rows">
+                        {c.buyPoint && <div className="pick-row"><span className="pick-k buy">买点</span>{c.buyPoint}</div>}
+                        {c.buyZone && <div className="pick-row"><span className="pick-k">买入区</span><b className="red">{c.buyZone}</b></div>}
+                        <div className="pick-foot">
+                          {c.target && <span className="cand-expect">目标 {c.target}</span>}
+                          {c.stop && <span className="cand-stop">止损 {c.stop}</span>}
+                        </div>
+                        {c.risk && <div className="pick-row"><span className="pick-k risk">风险</span>{c.risk}</div>}
                       </div>
                     </div>
                   )
                 })}
               </div>
             )}
-            {res.risk && (
-              <div className="play-risk"><Icon name="shield" size={14} /><span>{res.risk}</span></div>
-            )}
-            <div className="play-disclaimer">AI 基于实时数据的客观分析，仅供研究参考，非投资建议</div>
+            {res.note && <div className="play-risk"><Icon name="shield" size={14} /><span>{res.note}</span></div>}
+            <div className="play-disclaimer">量化打分(多因子)+ AI 综合研判，基于实时数据，仅供研究参考，非投资建议</div>
           </>
         )}
       </div>
