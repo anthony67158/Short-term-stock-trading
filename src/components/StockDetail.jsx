@@ -5,7 +5,8 @@ import { usePolling } from '../hooks'
 import { fmtPct, pctClass, fmtRaw, fmtNum } from '../format'
 import { aiStore } from '../aiStore'
 import { callAI } from '../ai'
-import { usePlanStore } from '../planStore'
+import { usePlanStore, planStore } from '../planStore'
+import { generateReview, sessionLabel } from '../review'
 import { AlertForm } from './AlertCenter'
 
 // 把公司网址补全为可点击的绝对 URL（东财 F10 常给不带协议的裸域名）
@@ -72,13 +73,16 @@ export default function StockDetail({ stock, onClose }) {
       // 量化服务(走势预测/多因子分) 与 LLM 操作建议(带具体价位) 并发
       const quantP = fetch(`/api/stock_detail?code=${stock.code}&klt=101&lmt=60&quant=1${hp}&_t=${Date.now()}`)
         .then((r) => r.json()).catch(() => null)
-      // 持仓 → LLM 给"加/减/持有/清仓 + 具体价位"；未持仓不调 LLM（量化本身已给买/观望）
+      // 持仓 → LLM 给"加/减/持有/清仓 + 具体价位"；未持仓 → LLM 给"该不该买/买入时机/买入价 + 止损"
       const adviceP = myHold
         ? callAI('hold_advice', { code: stock.code, name: (profile && profile.name) || stock.name, holdCost: myHold.cost, holdQty: myHold.qty })
             .then((r) => (r && r.ok ? r.result : null)).catch(() => null)
-        : Promise.resolve(null)
+        : callAI('buy_advice', { code: stock.code, name: (profile && profile.name) || stock.name })
+            .then((r) => (r && r.ok ? r.result : null)).catch(() => null)
       const [j, advice] = await Promise.all([quantP, adviceP])
-      if (j && j.quant) setQuantState({ result: j.quant, advice })
+      // 未持仓但 LLM 买入建议没返回（超时/冷启动）→ 记一个软提示，允许一键重试，不静默回退到模糊量化结论
+      const adviceMissing = !myHold && !advice
+      if (j && j.quant) setQuantState({ result: j.quant, advice, adviceMissing })
       else if (advice) setQuantState({ result: null, advice })
       else setQuantState({ error: '量化服务暂不可用（可能冷启动，请稍后重试）' })
     } catch (e) { setQuantState({ error: '获取失败：' + String(e.message || e) }) }
@@ -462,10 +466,21 @@ export default function StockDetail({ stock, onClose }) {
                         <div className="dv-detail">{verdict.detail}</div>
                       </div>
 
-                      {/* LLM 具体操作价位（持仓场景核心：加/减/止损/目标都给数字）*/}
+                      {/* 未持仓但 AI 买入建议没返回 → 提示重试（避免只给模糊量化结论）*/}
+                      {quantState.adviceMissing && !adv && (
+                        <div className="advice-retry">
+                          <Icon name="spark" size={13} /> AI 买入建议(买点/时机/止损)生成超时，
+                          <span className="expand-btn" onClick={loadQuant}>点此重试</span>
+                        </div>
+                      )}
+
+                      {/* LLM 具体操作价位（持仓=加/减/止损/目标；未持仓=买点/买入区/止损/目标）*/}
                       {adv && (
                         <>
+                          {adv.timing && <div className="advice-timing"><Icon name="clock" size={13} /> <b>买入时机</b>：{adv.timing}</div>}
                           <div className="advice-prices">
+                            {adv.buyPrice != null && <div className="ap-cell"><span className="ap-k">建议买入价</span><span className="ap-v red">{adv.buyPrice}</span></div>}
+                            {adv.buyZone && <div className="ap-cell"><span className="ap-k">买入区间</span><span className="ap-v red">{adv.buyZone}</span></div>}
                             {adv.addPrice != null && <div className="ap-cell"><span className="ap-k">加仓参考</span><span className="ap-v red">{adv.addPrice}</span></div>}
                             {adv.reducePrice != null && <div className="ap-cell"><span className="ap-k">减仓参考</span><span className="ap-v green">{adv.reducePrice}</span></div>}
                             {adv.stopPrice != null && <div className="ap-cell"><span className="ap-k">止损价</span><span className="ap-v green">{adv.stopPrice}</span></div>}
@@ -473,6 +488,7 @@ export default function StockDetail({ stock, onClose }) {
                           </div>
                           {adv.pnlNote && <div className="advice-line">💰 {adv.pnlNote}</div>}
                           {adv.reason && <div className="advice-line muted">{adv.reason}</div>}
+                          {adv.techNote && <div className="advice-line muted">📈 {adv.techNote}</div>}
                           {adv.quantNote && <div className="advice-line muted">📊 {adv.quantNote}</div>}
                           {adv.risk && <div className="advice-line warn">⚠ {adv.risk}</div>}
                         </>
@@ -504,11 +520,14 @@ export default function StockDetail({ stock, onClose }) {
                           <span className="expand-btn" style={{ marginLeft: 'auto' }} onClick={loadQuant}>刷新</span>
                         </div>
                       )}
-                      <div className="dq-hint">{adv ? 'AI 操作建议由大模型结合量化预测/技术面/你的持仓成本生成' : '走势预测=基于历史波动的蒙特卡洛模拟，量化=多因子打分'}；均为统计口径，仅供参考，非投资建议</div>
+                      <div className="dq-hint">{adv ? (myHold ? 'AI 操作建议由大模型结合量化预测/技术面/你的持仓成本生成' : 'AI 买入建议由大模型结合量化走势预测与技术面生成') : '走势预测=基于历史波动的蒙特卡洛模拟，量化=多因子打分'}；均为统计口径，仅供参考，非投资建议</div>
                     </>
                   )
                 })()}
               </div>
+
+              {/* ===== 复盘结论（持仓股午间/收盘自动生成并保留最新一条；未持仓可手动生成）===== */}
+              <ReviewCard stock={stock} name={(profile && profile.name) || stock.name} myHold={myHold} overview={overview} />
 
               {/* 均线技术参考（精简为可折叠的次要信息）*/}
               {tech && (
@@ -653,3 +672,71 @@ export default function StockDetail({ stock, onClose }) {
     </div>
   )
 }
+
+// ---------- 复盘结论卡：持仓股午间/收盘自动生成(每只只留最新一条)；未持仓可手动生成 ----------
+function ReviewCard({ stock, name, myHold, overview }) {
+  const book = usePlanStore()
+  const review = (book.reviews || {})[stock.code] || null
+  const [gen, setGen] = useState(null) // {loading}|{error}
+  const run = async () => {
+    setGen({ loading: true })
+    let hold = null
+    if (myHold && overview) {
+      const pnlPct = myHold.cost ? +(((overview.price - myHold.cost) / myHold.cost) * 100).toFixed(2) : null
+      hold = { cost: myHold.cost, qty: myHold.qty, pnlPct }
+    }
+    const r = await generateReview({ code: stock.code, name, session: 'manual', hold })
+    if (r && r.error) setGen({ error: r.error })
+    else setGen(null)
+  }
+  const r = review && review.result
+  const tone = r ? (r.tone || 'muted') : 'muted'
+  const ts = review ? new Date(review.at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : null
+  return (
+    <div className="review-card">
+      <div className="review-head">
+        <div className="review-title"><Icon name="history" size={14} /> 复盘结论
+          {review && <span className={'review-sess ' + review.session}>{sessionLabel(review.session)}</span>}
+          {ts && <span className="review-time">{ts}</span>}
+        </div>
+        <button className="quant-btn sm" onClick={run} disabled={gen && gen.loading}>
+          <Icon name={gen && gen.loading ? 'refresh' : 'spark'} size={13} className={gen && gen.loading ? 'spin' : ''} />
+          {gen && gen.loading ? '复盘中' : (review ? '重新复盘' : '生成复盘')}
+        </button>
+      </div>
+      {gen && gen.error && <div className="quant-err">{gen.error} <span className="expand-btn" onClick={run}>重试</span></div>}
+      {!review && !(gen && gen.loading) && !(gen && gen.error) && (
+        <div className="review-empty">
+          {myHold
+            ? '持仓股会在午间休市、收盘时各自动生成一条复盘(指导下午 / 次日操作)，这里只保留最新一条；也可点右上「生成复盘」立即生成。'
+            : '未持仓股不自动复盘。点右上「生成复盘」让 AI 复盘该股当前状态并给出后续操作建议。'}
+        </div>
+      )}
+      {r && (
+        <>
+          <div className={'review-verdict ' + tone}>
+            <span className={'review-stance ' + tone}>{r.stance || '—'}</span>
+            <span className="review-headline">{r.headline || ''}</span>
+          </div>
+          {r.nextAction && <div className="review-next"><Icon name="target" size={13} /><span className="rn-k">{review.session === 'noon' ? '下午' : review.session === 'close' ? '明天开盘' : '后续'}怎么做</span>{r.nextAction}</div>}
+          <div className="review-rows">
+            {r.todayRecap && <div className="review-row"><span className="rr-k">今日回顾</span>{r.todayRecap}</div>}
+            {r.pnlNote && r.pnlNote !== '未持仓，跳过' && <div className="review-row"><span className="rr-k">盈亏</span>{r.pnlNote}</div>}
+            {r.tradeReview && r.tradeReview !== '今日无成交' && <div className="review-row"><span className="rr-k">操作点评</span>{r.tradeReview}</div>}
+            {(r.addPrice != null || r.reducePrice != null || r.stopPrice != null) && (
+              <div className="review-prices">
+                {r.addPrice != null && <span className="rp-cell"><span className="rp-k">回踩加仓</span><b className="red">{r.addPrice}</b></span>}
+                {r.reducePrice != null && <span className="rp-cell"><span className="rp-k">反弹减仓</span><b className="green">{r.reducePrice}</b></span>}
+                {r.stopPrice != null && <span className="rp-cell"><span className="rp-k">止损</span><b className="green">{r.stopPrice}</b></span>}
+              </div>
+            )}
+            {r.keyLevel && <div className="review-row"><span className="rr-k">盯住</span>{r.keyLevel}</div>}
+            {r.quantNote && <div className="review-row"><span className="rr-k quant">量化</span>{r.quantNote}</div>}
+            {r.risk && <div className="review-row"><span className="rr-k risk">风险</span>{r.risk}</div>}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+

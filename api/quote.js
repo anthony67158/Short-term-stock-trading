@@ -50,6 +50,7 @@ async function quoteTx(codes) {
       amount: num(p[37]) ? num(p[37]) * 10000 : null, // 成交额(万元→元)
       high: num(p[33]) || null, low: num(p[34]) || null, open: num(p[5]) || null,
       prevClose,
+      industry: null,
       isLimitUp: pct >= 9.8, isLimitDown: pct <= -9.8,
     });
   }
@@ -62,8 +63,8 @@ export default async function handler(req, res) {
     if (codes.length === 0) return sendJson(res, { ok: true, list: [] });
 
     const secids = codes.map(toSecid).join(',');
-    // f15 最高 f16 最低 f17 今开 f18 昨收
-    const fields = 'f2,f3,f4,f8,f10,f12,f14,f62,f184,f6,f15,f16,f17,f18';
+    // f15 最高 f16 最低 f17 今开 f18 昨收 f100 所属行业
+    const fields = 'f2,f3,f4,f8,f10,f12,f14,f62,f184,f6,f15,f16,f17,f18,f100';
     const path =
       `/api/qt/ulist.np/get?fltt=2&invt=2&secids=${encodeURIComponent(secids)}` +
       `&fields=${fields}`;
@@ -87,6 +88,7 @@ export default async function handler(req, res) {
         low: num(d.f16),
         open: num(d.f17),
         prevClose: num(d.f18),
+        industry: (d.f100 && d.f100 !== '-') ? d.f100 : null,
         isLimitUp: num(d.f3) >= 9.8,
         isLimitDown: num(d.f3) <= -9.8,
       }));

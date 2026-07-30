@@ -64,7 +64,7 @@ function snapshot(label) {
       at: Date.now(),
       data: JSON.parse(JSON.stringify({
         plan: state.plan, holding: state.holding, closed: state.closed,
-        account: state.account, alerts: state.alerts,
+        account: state.account, alerts: state.alerts, reviews: state.reviews,
       })),
     })
     if (_undoStack.length > UNDO_LIMIT) _undoStack.shift()
@@ -79,7 +79,7 @@ function scheduleSave() {
   if (_suspend || !_saver) return
   if (_saveTimer) clearTimeout(_saveTimer)
   _saveTimer = setTimeout(() => {
-    _saver({ plan: state.plan, holding: state.holding, closed: state.closed, account: state.account, alerts: state.alerts })
+    _saver({ plan: state.plan, holding: state.holding, closed: state.closed, account: state.account, alerts: state.alerts, reviews: state.reviews })
   }, 800)
 }
 function emit() { state = { ...state }; listeners.forEach((l) => l()); scheduleSave() }
@@ -158,6 +158,7 @@ export const planStore = {
       closed: normalizeClosed((d && d.closed) || []),
       account: (d && d.account) || null,   // { totalAssets, cash, updatedAt }
       alerts: (d && d.alerts) || [],        // 预警规则集
+      reviews: (d && d.reviews) || {},      // 复盘结论：key=code → { code,name,at,session(noon/close/manual),text,... }
     }
     listeners.forEach((l) => l())
     _suspend = false
@@ -571,6 +572,21 @@ export const planStore = {
     emit()
   },
 
+  // ===== 复盘结论（每只股只留最新一条，指导下一段/次日操作）=====
+  // review: { code, name, at, session:'noon'|'close'|'manual', dayKey, result:{...LLM结论}, snap:{price,pnlPct,...} }
+  // 只保留最新：同 code 直接覆盖。
+  saveReview(code, review) {
+    if (!code) return
+    state.reviews = { ...(state.reviews || {}), [code]: { ...review, code, at: Date.now() } }
+    emit()
+  },
+  getReview(code) { return (state.reviews || {})[code] || null },
+  removeReview(code) {
+    if (!state.reviews || !state.reviews[code]) return
+    const next = { ...state.reviews }; delete next[code]
+    state.reviews = next; emit()
+  },
+
   // ===== 撤回：弹出最近一次快照并恢复（交易类操作的后悔药）=====
   canUndo() { return _undoStack.length > 0 },
   lastUndoLabel() { return _undoStack.length ? _undoStack[_undoStack.length - 1].label : null },
@@ -581,7 +597,7 @@ export const planStore = {
     const d = snap.data
     state = {
       plan: d.plan || [], holding: d.holding || [], closed: d.closed || [],
-      account: d.account || null, alerts: d.alerts || [],
+      account: d.account || null, alerts: d.alerts || [], reviews: d.reviews || {},
     }
     emit() // 恢复后正常回存云端，保证撤回结果也持久化
     return snap.label

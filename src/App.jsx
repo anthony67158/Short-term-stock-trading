@@ -14,6 +14,7 @@ import { useAuthStore, authStore } from './authStore'
 import { useTheme, themeStore } from './themeStore'
 import { useDetailStore, detailStore } from './detailStore'
 import { alertStore, useAlertStore } from './alertStore'
+import { runAutoReviewIfDue } from './review'
 import { timeStr } from './format'
 
 const TABS = [
@@ -73,6 +74,26 @@ function MainApp() {
     list.forEach((q) => { map[q.code] = q })
     alertStore.evaluate(map)
   }, [alertQuotes.data])
+
+  // ===== 自动复盘：午间休市(11:30)、收盘(15:00) 那一刻，对持仓股各生成一条复盘 =====
+  // 拉持仓股实时报价供算浮盈亏；每分钟检查一次是否到点（review.js 内部按天+场次去重，只跑一次）
+  const holdCodes = [...new Set(book.holding.map((x) => x.code))]
+  const reviewQuotes = usePolling(
+    holdCodes.length ? `/api/quote?codes=${holdCodes.join(',')}` : null,
+    60000,
+    [holdCodes.join(',')]
+  )
+  useEffect(() => {
+    const check = () => {
+      const map = {}
+      ;((reviewQuotes.data && reviewQuotes.data.list) || []).forEach((q) => { map[q.code] = q })
+      runAutoReviewIfDue(map)
+    }
+    check()
+    const id = setInterval(check, 60000) // 每分钟检查一次是否跨入复盘时点
+    return () => clearInterval(id)
+  }, [reviewQuotes.data])
+
 
   // 数据快照给 AI（避免频繁重建）
   const dataRef = useRef({})

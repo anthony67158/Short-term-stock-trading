@@ -869,6 +869,24 @@ body {
 .pi-note { font-size: 12px; color: var(--muted); margin-top: 6px; line-height: 1.55; }
 .hold-meta { display: flex; gap: 16px; margin-top: 7px; font-size: 12px; color: var(--muted); }
 .hold-meta b { font-variant-numeric: tabular-nums; }
+
+/* 焦点提示：折叠态只留一句"此刻最该关注的" */
+.hold-focus { display: flex; align-items: center; gap: 7px; margin-top: 8px; padding: 7px 11px; border-radius: 9px; font-size: 12.5px; font-weight: 600; line-height: 1.5; border: 1px solid var(--border-soft); background: var(--panel2); color: var(--text2); }
+.hold-focus.focus-red { color: var(--red); background: rgba(224,67,47,.07); border-color: rgba(224,67,47,.24); }
+.hold-focus.focus-green { color: var(--green); background: rgba(31,157,67,.07); border-color: rgba(31,157,67,.24); }
+.hold-focus.focus-muted { color: var(--text2); }
+.hold-focus .icon { flex-shrink: 0; }
+.hf-tag { font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 5px; background: rgba(255,255,255,.08); white-space: nowrap; flex-shrink: 0; }
+.hf-when { font-size: 10.5px; font-weight: 700; color: var(--muted); background: var(--panel3, rgba(255,255,255,.05)); padding: 1px 7px; border-radius: 5px; white-space: nowrap; flex-shrink: 0; }
+
+/* 明细折叠开关 */
+.hold-detail-toggle { display: flex; align-items: center; gap: 5px; margin-top: 8px; padding: 4px 2px; background: none; border: none; color: var(--muted); font-size: 12px; font-weight: 600; cursor: pointer; user-select: none; }
+.hold-detail-toggle:hover { color: var(--text2); }
+.hdt-chips { display: inline-flex; gap: 5px; margin-left: 4px; }
+.hdt-chip { font-size: 10px; font-weight: 600; padding: 1px 7px; border-radius: 5px; color: var(--muted); background: var(--panel2); border: 1px solid var(--border-soft); }
+.hold-detail { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; padding: 10px 11px; border-radius: 10px; background: var(--panel2); border: 1px solid var(--border-soft); }
+.hold-detail > *:first-child { margin-top: 0 !important; }
+
 .pi-actions { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 /* 加仓/减仓 就地录入行：允许换行，输入框自适应，不溢出窄卡片 */
 .buy-inline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
@@ -1150,6 +1168,22 @@ body {
 .star-zone-head { display: flex; align-items: center; gap: 6px; padding: 10px 16px 0; font-size: 12.5px; font-weight: 700; color: var(--gold); }
 .star-zone .plan-cand-grid { padding-top: 8px; }
 .star-zone-divider { padding: 10px 16px 2px; font-size: 12px; font-weight: 600; color: var(--muted); }
+
+/* 行业分类 Tab 栏 */
+.ind-tabs { display: flex; gap: 8px; padding: 12px 14px 4px; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.ind-tabs::-webkit-scrollbar { display: none; }
+.ind-tab { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border-soft); background: var(--panel2); color: var(--text2); font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: all .12s; }
+.ind-tab:hover { color: var(--text); border-color: var(--border); }
+.ind-tab.on { background: var(--accent, #7c6bf5); border-color: var(--accent, #7c6bf5); color: #fff; }
+.ind-tab.other { color: var(--muted); }
+.ind-tab.other.on { background: var(--muted); border-color: var(--muted); color: #fff; }
+.ind-tab-n { font-size: 11px; font-weight: 700; padding: 0 6px; border-radius: 8px; background: rgba(255,255,255,.14); font-variant-numeric: tabular-nums; }
+.ind-tab:not(.on) .ind-tab-n { background: var(--panel3, rgba(255,255,255,.06)); color: var(--muted); }
+.ind-tab-pct { font-size: 10.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.ind-tab.on .ind-tab-pct { color: #fff; opacity: .9; }
+.ind-tab:not(.on) .ind-tab-pct.red { color: var(--red); }
+.ind-tab:not(.on) .ind-tab-pct.green { color: var(--green); }
+
 .pc-price { font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .pc-actions { display: flex; gap: 8px; margin-top: 10px; align-items: center; }
 .pc-metrics { display: flex; flex-wrap: wrap; gap: 10px 14px; margin-bottom: 8px; font-size: 11.5px; color: var(--muted); }
@@ -1657,6 +1691,10 @@ body {
 .advice-line { font-size: 12.5px; line-height: 1.6; margin-bottom: 4px; color: var(--text2); }
 .advice-line.muted { color: var(--muted); }
 .advice-line.warn { color: var(--gold); }
+.advice-timing { display: flex; align-items: baseline; gap: 6px; font-size: 13px; line-height: 1.55; margin-bottom: 9px; padding: 8px 11px; border-radius: 9px; color: var(--text); background: rgba(124,107,245,.08); border: 1px solid rgba(124,107,245,.22); }
+.advice-timing .icon { color: var(--accent, #7c6bf5); flex-shrink: 0; align-self: center; }
+.advice-timing b { color: var(--accent, #7c6bf5); flex-shrink: 0; }
+.advice-retry { font-size: 12.5px; color: var(--gold); margin-bottom: 8px; padding: 7px 10px; border-radius: 8px; background: rgba(227,179,65,.08); border: 1px solid rgba(227,179,65,.24); }
 /* 技术面细节折叠 */
 .tech-fold { display: flex; align-items: center; justify-content: space-between; cursor: pointer; padding: 4px 0; font-size: 12.5px; font-weight: 600; color: var(--text2); user-select: none; }
 .tech-fold:hover { color: var(--text); }
@@ -1679,6 +1717,64 @@ body {
 .ipb-tag.ipb-hold { color: var(--gold); background: rgba(227,179,65,.16); }
 .ipb-tag.ipb-watch { color: var(--text2); background: rgba(255,255,255,.06); }
 .ipb-tip { color: var(--text2); flex: 1; min-width: 180px; }
+
+/* ===== 复盘结论：个股详情内的完整卡 ===== */
+.review-card { margin-top: 12px; padding: 12px 14px; border-radius: 12px; background: var(--panel2); border: 1px solid var(--border-soft); }
+.review-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.review-title { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; color: var(--text); }
+.review-sess { font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 5px; color: var(--accent, #7c6bf5); background: rgba(124,107,245,.14); }
+.review-sess.close { color: var(--gold); background: rgba(227,179,65,.16); }
+.review-time { font-size: 10.5px; color: var(--muted); }
+.quant-btn.sm { padding: 4px 10px; font-size: 12px; }
+.review-empty { font-size: 12px; color: var(--muted); line-height: 1.6; }
+.review-verdict { display: flex; align-items: baseline; gap: 8px; padding: 9px 11px; border-radius: 9px; margin-bottom: 8px; border-left: 4px solid var(--border); background: var(--panel3, rgba(255,255,255,.03)); }
+.review-verdict.red { border-left-color: var(--red); background: rgba(224,67,47,.07); }
+.review-verdict.green { border-left-color: var(--green); background: rgba(31,157,67,.07); }
+.review-verdict.muted { border-left-color: var(--muted); }
+.review-stance { font-size: 14px; font-weight: 800; white-space: nowrap; }
+.review-verdict.red .review-stance { color: var(--red); }
+.review-verdict.green .review-stance { color: var(--green); }
+.review-verdict.muted .review-stance { color: var(--text2); }
+.review-headline { font-size: 12.5px; color: var(--text2); line-height: 1.5; }
+.review-next { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; font-size: 13px; font-weight: 600; color: var(--text); line-height: 1.6; padding: 8px 11px; border-radius: 9px; background: rgba(124,107,245,.08); border: 1px solid rgba(124,107,245,.22); margin-bottom: 8px; }
+.review-next .icon { color: var(--accent, #7c6bf5); align-self: center; flex-shrink: 0; }
+.rn-k { font-size: 10.5px; font-weight: 700; color: var(--accent, #7c6bf5); background: rgba(124,107,245,.16); padding: 1px 7px; border-radius: 5px; white-space: nowrap; }
+.review-rows { display: flex; flex-direction: column; gap: 5px; }
+.review-row { font-size: 12px; color: var(--text2); line-height: 1.55; }
+.rr-k { display: inline-block; font-size: 10.5px; font-weight: 700; color: var(--muted); background: var(--panel3, rgba(255,255,255,.05)); padding: 1px 7px; border-radius: 5px; margin-right: 6px; }
+.rr-k.quant { color: var(--accent, #7c6bf5); background: rgba(124,107,245,.14); }
+.rr-k.risk { color: var(--gold); background: rgba(227,179,65,.14); }
+.review-prices { display: flex; gap: 12px; flex-wrap: wrap; padding: 4px 0; }
+.rp-cell { display: flex; align-items: baseline; gap: 5px; font-size: 12px; }
+.rp-k { font-size: 10.5px; color: var(--muted); }
+.rp-cell b { font-size: 14px; font-weight: 800; font-variant-numeric: tabular-nums; }
+
+/* ===== 复盘结论：持仓卡上的紧凑条 ===== */
+.hold-review { margin: 8px 0 0; border-radius: 9px; border: 1px solid var(--border-soft); background: var(--panel2); overflow: hidden; }
+.hold-review.rev-red { border-color: rgba(224,67,47,.28); background: rgba(224,67,47,.05); }
+.hold-review.rev-green { border-color: rgba(31,157,67,.28); background: rgba(31,157,67,.05); }
+.hold-review-head { display: flex; align-items: center; gap: 7px; padding: 7px 10px; cursor: pointer; user-select: none; flex-wrap: wrap; }
+.hr-badge { display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; font-weight: 700; color: var(--muted); flex-shrink: 0; }
+.hr-sess { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 5px; color: var(--accent, #7c6bf5); background: rgba(124,107,245,.14); flex-shrink: 0; }
+.hr-sess.close { color: var(--gold); background: rgba(227,179,65,.16); }
+.hr-headline { font-size: 12px; font-weight: 600; color: var(--text); flex: 1; min-width: 100px; line-height: 1.4; }
+.hr-empty { font-size: 11.5px; color: var(--muted); flex: 1; min-width: 100px; }
+.hr-btn { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--border-soft); background: var(--panel); color: var(--text2); cursor: pointer; flex-shrink: 0; }
+.hr-btn:hover:not(:disabled) { color: var(--accent, #7c6bf5); border-color: rgba(124,107,245,.4); }
+.hr-btn:disabled { opacity: .6; cursor: default; }
+.hr-caret { color: var(--muted); flex-shrink: 0; }
+.hr-next { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; font-size: 12.5px; font-weight: 600; color: var(--text); line-height: 1.55; padding: 6px 10px 8px; }
+.hr-next-k { font-size: 10px; font-weight: 700; color: var(--accent, #7c6bf5); background: rgba(124,107,245,.16); padding: 1px 6px; border-radius: 5px; white-space: nowrap; }
+.hr-detail { padding: 0 10px 9px; display: flex; flex-direction: column; gap: 5px; border-top: 1px dashed var(--border-soft); margin-top: 2px; padding-top: 8px; }
+.hr-time { font-size: 10.5px; color: var(--muted); }
+.hr-row { font-size: 11.5px; color: var(--text2); line-height: 1.5; }
+.hr-k { display: inline-block; font-size: 10px; font-weight: 700; color: var(--muted); background: var(--panel3, rgba(255,255,255,.05)); padding: 1px 6px; border-radius: 5px; margin-right: 5px; }
+.hr-k.risk { color: var(--gold); background: rgba(227,179,65,.14); }
+.hr-prices { display: flex; gap: 10px; flex-wrap: wrap; }
+.hr-p { display: flex; align-items: baseline; gap: 4px; font-size: 11.5px; }
+.hr-pk { font-size: 10px; color: var(--muted); }
+.hr-p b { font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums; }
+
 
 /* ===== AI 选股结果 ===== */
 .pick-market { display: flex; align-items: baseline; gap: 6px; font-size: 12.5px; color: var(--text2); line-height: 1.5; margin-bottom: 10px; padding: 8px 11px; border-radius: 8px; background: rgba(124,107,245,.08); border: 1px solid rgba(124,107,245,.22); }
