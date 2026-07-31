@@ -234,9 +234,9 @@ const SYSTEM = `你是"操盘手 Alpha"，一位有十年A股短线实战经验�
 2. 【效率铁律·非常重要】同一步需要多个数据时，务必在**同一轮里一次性发起多个工具调用**（系统会并行执行、显著更快），不要一次只调一个、来回磨蹭。例如做选股时，第一轮就同时调 get_market + get_sector_rank + get_limit_pool + get_movers 把全景一次拿全。
 3. 【推荐/选股/遍览市场（最复杂，按此配方走，避免超时）】
    - 第1轮（并行）：get_market（大盘能不能做）+ get_sector_rank（强势主线）+ get_limit_pool（连板梯队/情绪）+ get_movers inflow（主力抢筹）。必要时同轮再加 screen_stocks（按主力净流入或涨幅筛一批候选）。
-   - 第2轮（并行）：从上一轮锁定 3~5 个候选，对它们**同时**调 get_quant_score（逐只量化打分+买卖价位）；需要消息面时并行加 web_news。
+   - 第2轮（并行）：从上一轮锁定 3~5 个候选，对它们**同时**调 get_quant_score（逐只量化打分+买卖价位）。消息面不是必需——只在明显需要催化剂佐证时，对最强的 1 只补一次 web_news，不要每只都查新闻(会拖慢)。
    - 第3轮：直接综合成文，不再调工具。
-   - 目标是**2~3 轮出结论**：先铺全景、再深挖候选、然后总结，切忌一只一只慢慢串行查。
+   - 目标是**2~3 轮出结论**：先铺全景、再深挖候选、然后总结，切忌一只一只慢慢串行查，也不要在细枝末节上反复补查。凑够数据就果断下结论。
 4. 【分析个股】一轮内并行 get_quote + get_stock_detail + **get_quant_score(量化打分+技术买卖价位，分析/推荐个股必调)** (+web_news)，从量化打分、情绪周期位置、量价、资金、题材、支撑压力多维度分析，给出短线操作倾向。引用量化分时说人话（如"量化分72偏多、模型建议正T低吸"），并把 buyZone/sellZone/止损止盈等具体价位告诉用户。
 5. 【判断大盘/能不能做】用情绪周期理论 + 涨跌比/涨停数/资金判断当前阶段和策略。
 6. 用户提到股票名没代码，先 search_stock（可与其他工具同轮并行）。
@@ -312,6 +312,10 @@ export default async function handler(req, res) {
       // 预算不足以再跑一轮带工具的对话（需给最终总结留时间）→ 提前跳出去做总结
       if (remain() < RESERVE_FINAL + 6000) break;
 
+      // 收敛闸：已积累足够数据(≥8次工具调用)或预算偏紧时，本轮禁用工具、强制模型出结论，
+      // 避免"无止境地再查一点"把时间耗光，导致复杂问题永远等不到最终答案。
+      const forceConclude = toolTrace.length >= 8 || remain() < RESERVE_FINAL + 14000;
+
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), Math.max(remain() - RESERVE_FINAL, 7000));
       const resp = await fetch(`${BASE}/chat/completions`, {
@@ -321,8 +325,7 @@ export default async function handler(req, res) {
         body: JSON.stringify({
           model: AGENT_MODEL,
           messages,
-          tools: TOOLS,
-          tool_choice: 'auto',
+          ...(forceConclude ? { tool_choice: 'none' } : { tools: TOOLS, tool_choice: 'auto' }),
           temperature: 0.3,
           max_tokens: 1600,
         }),
