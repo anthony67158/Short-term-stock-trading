@@ -9,6 +9,13 @@ import { screenStocks } from './_screen.js';
 
 const AGENT_MODEL = process.env.AGENT_MODEL || 'Qwen3-Max-A';
 
+// 工具中文名（用于超时兜底时告诉用户"已经查到了什么"）
+const TOOL_LABEL_CN = {
+  search_stock: '股票搜索', get_quote: '实时行情', get_stock_detail: '公司主营',
+  get_quant_score: '量化打分', screen_stocks: '条件选股', get_sector_rank: '板块资金排行',
+  get_limit_pool: '涨停连板池', get_movers: '盘中异动', get_market: '大盘情绪', web_news: '联网新闻',
+};
+
 function toSecid(code) {
   const c = String(code).trim();
   return /^(6|9|5)/.test(c) ? '1.' + c : '0.' + c;
@@ -173,13 +180,13 @@ async function execTool(name, args, origin) {
       return { list: (j.list || []).slice(0, lim).map((s) => ({ name: s.name, pct: s.pct, mainInflowYi: +(s.mainInflow / 1e8).toFixed(2), lead: s.leadName })) };
     }
     if (name === 'get_limit_pool') {
-      const j = await call(`/api/limitup?kind=zt`);
-      return { count: (j.list || []).length, list: (j.list || []).slice(0, 20).map((s) => ({ name: s.name, code: s.code, lbc: s.lbc, fundYi: +(s.fundAmount / 1e8).toFixed(2), sector: s.sector })) };
+      const j = await call(`/api/board?type=limitup&kind=zt`);
+      return { count: (j.list || []).length, list: (j.list || []).slice(0, 24).map((s) => ({ name: s.name, code: s.code, lbc: s.lbc, fundYi: +((s.fundAmount || 0) / 1e8).toFixed(2), sector: s.sector })) };
     }
     if (name === 'get_movers') {
       const kind = args.kind === 'speed' ? 'speed' : 'inflow';
-      const j = await call(`/api/movers?kind=${kind}`);
-      return { list: (j.list || []).slice(0, 12).map((s) => ({ name: s.name, code: s.code, pct: s.pct, speed: s.speed, mainInflowYi: +(s.mainInflow / 1e8).toFixed(2) })) };
+      const j = await call(`/api/board?type=movers&kind=${kind}`);
+      return { list: (j.list || []).slice(0, 15).map((s) => ({ name: s.name, code: s.code, pct: s.pct, speed: s.speed, mainInflowYi: +((s.mainInflow || 0) / 1e8).toFixed(2) })) };
     }
     if (name === 'get_market') {
       const j = await call(`/api/market`);
@@ -224,10 +231,15 @@ const SYSTEM = `你是"操盘手 Alpha"，一位有十年A股短线实战经验�
 
 【工作方式】
 1. 自主决定调用哪些工具、调几次，多轮调用直到信息足够。
-2. 【推荐/选股】先 get_sector_rank 找强势主线，或 screen_stocks 按资金/涨幅/量比筛，结合 get_limit_pool（连板梯队）、get_movers（盘中资金），再综合给候选：每只讲清 ①属于什么主线 ②入选逻辑（引用具体数据+对应理论）③买点/关注位 ④风险。
-3. 【分析个股】get_quote + get_stock_detail + **get_quant_score(量化打分+技术买卖价位，分析/推荐个股必调)** (+web_news)，从量化打分、情绪周期位置、量价、资金、题材、支撑压力多维度分析，给出短线操作倾向。引用量化分时说人话（如"量化分72偏多、模型建议正T低吸"），并把 buyZone/sellZone/止损止盈等具体价位告诉用户。
-4. 【判断大盘/能不能做】用情绪周期理论 + 涨跌比/涨停数/资金判断当前阶段和策略。
-5. 用户提到股票名没代码，先 search_stock。
+2. 【效率铁律·非常重要】同一步需要多个数据时，务必在**同一轮里一次性发起多个工具调用**（系统会并行执行、显著更快），不要一次只调一个、来回磨蹭。例如做选股时，第一轮就同时调 get_market + get_sector_rank + get_limit_pool + get_movers 把全景一次拿全。
+3. 【推荐/选股/遍览市场（最复杂，按此配方走，避免超时）】
+   - 第1轮（并行）：get_market（大盘能不能做）+ get_sector_rank（强势主线）+ get_limit_pool（连板梯队/情绪）+ get_movers inflow（主力抢筹）。必要时同轮再加 screen_stocks（按主力净流入或涨幅筛一批候选）。
+   - 第2轮（并行）：从上一轮锁定 3~5 个候选，对它们**同时**调 get_quant_score（逐只量化打分+买卖价位）；需要消息面时并行加 web_news。
+   - 第3轮：直接综合成文，不再调工具。
+   - 目标是**2~3 轮出结论**：先铺全景、再深挖候选、然后总结，切忌一只一只慢慢串行查。
+4. 【分析个股】一轮内并行 get_quote + get_stock_detail + **get_quant_score(量化打分+技术买卖价位，分析/推荐个股必调)** (+web_news)，从量化打分、情绪周期位置、量价、资金、题材、支撑压力多维度分析，给出短线操作倾向。引用量化分时说人话（如"量化分72偏多、模型建议正T低吸"），并把 buyZone/sellZone/止损止盈等具体价位告诉用户。
+5. 【判断大盘/能不能做】用情绪周期理论 + 涨跌比/涨停数/资金判断当前阶段和策略。
+6. 用户提到股票名没代码，先 search_stock（可与其他工具同轮并行）。
 
 【铁律】
 - 只依据工具返回的真实数据，绝不编造代码/价格/数据；没有就说不知道。
@@ -286,20 +298,22 @@ export default async function handler(req, res) {
 
     const toolTrace = []; // 记录调用了哪些工具，回传前端展示
     const theoryRefs = theoryHits.map((t) => ({ book: t.book, topic: t.topic })); // 命中的理论，回传前端
-    const MAX_ROUNDS = 3;
+    // 复杂选股/遍览类问题需要更多步(板块→涨停→异动→筛选→逐只量化)，轮次给足；
+    // 靠"同一轮工具并行 + 缩短最终总结预留"把时间挤出来，而不是靠减轮次。
+    const MAX_ROUNDS = 6;
 
-    // ===== 全局时间预算：Vercel maxDuration=60s，留足余量在 55s 内必须返回 JSON =====
+    // ===== 全局时间预算：Vercel maxDuration=60s，留足余量在 56s 内必须返回 JSON =====
     const START = Date.now();
-    const BUDGET = 55000;           // 总预算
+    const BUDGET = 56000;           // 总预算
     const remain = () => BUDGET - (Date.now() - START);
-    const RESERVE_FINAL = 20000;    // 为“最终总结”预留的时间（模型较慢，留足）
+    const RESERVE_FINAL = 14000;    // 为"最终总结"预留(单次总结一般 8~12s，14s 足够且不浪费轮次)
 
     for (let round = 0; round < MAX_ROUNDS; round++) {
       // 预算不足以再跑一轮带工具的对话（需给最终总结留时间）→ 提前跳出去做总结
-      if (remain() < RESERVE_FINAL + 8000) break;
+      if (remain() < RESERVE_FINAL + 6000) break;
 
       const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), Math.max(remain() - RESERVE_FINAL, 8000));
+      const t = setTimeout(() => ctrl.abort(), Math.max(remain() - RESERVE_FINAL, 7000));
       const resp = await fetch(`${BASE}/chat/completions`, {
         method: 'POST',
         signal: ctrl.signal,
@@ -310,7 +324,7 @@ export default async function handler(req, res) {
           tools: TOOLS,
           tool_choice: 'auto',
           temperature: 0.3,
-          max_tokens: 1500,
+          max_tokens: 1600,
         }),
       }).catch((e) => ({ __err: e })); // abort/网络错误不抛出，转入最终总结兜底
       clearTimeout(t);
@@ -331,39 +345,48 @@ export default async function handler(req, res) {
         }));
       }
 
-      // 有工具调用：执行所有工具，把结果塞回对话，继续下一轮
+      // 有工具调用：把本轮所有工具【并行】执行(选股类一轮常并发查多只票/多个榜单，
+      // 并行相比串行能省数倍时间，换来更多可用轮次)，全部完成后塞回对话继续下一轮。
       messages.push({ role: 'assistant', content: msg.content || '', tool_calls: toolCalls });
-      for (const tc of toolCalls) {
+      const parsed = toolCalls.map((tc) => {
         let args = {};
         try { args = JSON.parse(tc.function.arguments || '{}'); } catch { /* ignore */ }
-        const result = await execTool(tc.function.name, args, origin);
+        return { tc, args };
+      });
+      const results = await Promise.all(parsed.map(({ tc, args }) => execTool(tc.function.name, args, origin)));
+      parsed.forEach(({ tc, args }, i) => {
         toolTrace.push({ tool: tc.function.name, args });
         messages.push({
           role: 'tool',
           tool_call_id: tc.id,
-          content: JSON.stringify(result).slice(0, 4000),
+          content: JSON.stringify(results[i]).slice(0, 6000),
         });
-      }
+      });
     }
 
     // 达到最大轮次或预算不足，用剩余时间强制让模型基于已查信息总结（不再给工具）
-    if (remain() < 5000) {
-      // 时间已所剩无几，直接返回兜底文本，避免被平台强杀返回非 JSON
+    // 已调用过的工具清单——即便总结超时，也能告诉用户"已经查到了什么"，而非纯道歉。
+    const gathered = [...new Set(toolTrace.map((t) => TOOL_LABEL_CN[t.tool] || t.tool))].join('、');
+    const partialHint = gathered
+      ? `我已查询了${gathered}等数据，但综合分析用时超出限制未能完成。你可以直接追问其中一部分（比如"就从刚才的涨停池里挑2只最强的"），我能更快给出结论。`
+      : '这个问题查询用时较长，分析未能在限定时间内完成。建议把问题聚焦到单只个股或单个板块，我会更快返回完整分析。';
+    if (remain() < 4000) {
+      // 时间已所剩无几，直接返回带"已查内容"的兜底文本，避免被平台强杀返回非 JSON
       return res.status(200).send(JSON.stringify({
-        ok: true, answer: '这个问题涉及的数据较多，本次分析用时较长。请把问题聚焦一些（比如只问某一只票或某一个板块），我可以更快给你完整结论。', toolTrace, theoryRefs, model: AGENT_MODEL, updatedAt: Date.now(),
+        ok: true, answer: partialHint, toolTrace, theoryRefs, model: AGENT_MODEL, updatedAt: Date.now(),
       }));
     }
     const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), Math.max(remain() - 2000, 5000));
+    const t = setTimeout(() => ctrl.abort(), Math.max(remain() - 1500, 4000));
     const resp = await fetch(`${BASE}/chat/completions`, {
       method: 'POST', signal: ctrl.signal,
       headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: AGENT_MODEL, messages: [...messages, { role: 'user', content: '请基于以上已查到的信息直接给出最终回答。' }], temperature: 0.3, max_tokens: 1500 }),
+      body: JSON.stringify({ model: AGENT_MODEL, messages: [...messages, { role: 'user', content: '请基于以上已查到的信息直接给出最终回答，用规范 Markdown 分节，关键结论加粗。若某类数据没查到，就用已有数据尽力给出可执行的结论，不要空手道歉。' }], temperature: 0.3, max_tokens: 1600 }),
     }).catch((e) => ({ __err: e }));
     clearTimeout(t);
     if (resp && resp.__err) {
       return res.status(200).send(JSON.stringify({
-        ok: true, answer: '这个问题查询用时较长，分析未能在限定时间内完成。建议把问题聚焦到单只个股或单个板块，我会更快返回完整分析。', toolTrace, theoryRefs, model: AGENT_MODEL, updatedAt: Date.now(),
+        ok: true, answer: partialHint, toolTrace, theoryRefs, model: AGENT_MODEL, updatedAt: Date.now(),
       }));
     }
     const j = await resp.json();

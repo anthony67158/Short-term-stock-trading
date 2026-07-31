@@ -220,8 +220,8 @@ export default function AIAssistant({ snapshot }) {
 // 消息渲染（区分文本/诊断/扫描/复盘/选股）
 const TOOL_LABEL = {
   search_stock: '搜索股票', get_quote: '查行情', get_stock_detail: '查主营',
-  screen_stocks: '选股筛选', get_sector_rank: '板块排行', get_limit_pool: '涨停池',
-  get_movers: '盘中异动', get_market: '大盘情绪', web_news: '联网新闻',
+  get_quant_score: '量化打分', screen_stocks: '选股筛选', get_sector_rank: '板块排行',
+  get_limit_pool: '涨停池', get_movers: '盘中异动', get_market: '大盘情绪', web_news: '联网新闻',
 }
 function Message({ m }) {
   if (m.role === 'user') {
