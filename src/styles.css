@@ -2201,3 +2201,7 @@ body {
    仅在 hover 面板时轻微点亮(情感化:克制而非炫技) */
 .panel-title .icon { color: var(--muted); transition: color var(--t-fast); }
 .panel:hover .panel-title .icon { color: var(--accent); }
+
+/* AI 研判思路(ReAct/CoT 推理链)：轻量左色条提示，不做成盒子，符合去盒化系统 */
+.ai-reasoning { display: flex; align-items: baseline; gap: 8px; margin: 0 0 10px; padding: 7px 0 7px 11px; border-left: 3px solid var(--accent); font-size: 12.5px; line-height: 1.6; color: var(--text2); }
+.ai-reasoning-k { flex: none; font-size: 10.5px; font-weight: 800; color: var(--accent); background: rgba(124,107,245,.14); padding: 2px 8px; border-radius: 5px; }

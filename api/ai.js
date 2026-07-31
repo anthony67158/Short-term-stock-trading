@@ -2,6 +2,7 @@
 // POST body: { mode: 'market'|'sector'|'stock'|'scan', payload: {...} }
 import { buildCorpus, retrieve } from './_rag.js';
 import { techSummaryForAI, fetchQuantPredict, backtestSignal } from './_ta.js';
+import { marketTimePromptBlock, marketTimeContext } from './_market_time.js';
 
 function avg(arr) { return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0; }
 function std(arr) { if (arr.length < 2) return 0; const m = avg(arr); return Math.sqrt(avg(arr.map((x) => (x - m) ** 2))); }
@@ -282,7 +283,13 @@ const SYSTEM_PROMPT = `你是一位专业的A股短线交易策略分析师。�
 5. 保持简洁、结构化、有逻辑依据，每个观点都要能追溯到给定数据。
 6. 若提供了【RAG检索资料】（近5日走势、主营、联网新闻），务必结合消息面/基本面一起分析。
 
-你必须只输出一个合法的 JSON 对象（不要 markdown 代码块包裹），结构见用户要求。`;
+你必须只输出一个合法的 JSON 对象（不要 markdown 代码块包裹），结构见用户要求。
+
+【作答前必做·思维链自检(内部推演，不必长篇输出)】：
+1. 认时间：先看【市场时间坐标】——今天是不是交易日?数据是哪个交易日的?本次结论面向哪个交易日?休市/盘前时绝不能说"今日情绪/今日实时"，要说清是上一交易日的数据、结论落到下一交易日开盘。
+2. 核数据：每个结论都要能追溯到给定数据里的具体数值，别把陈旧数据当实时。
+3. 查矛盾：结论之间、结论与时间坐标之间不能自相矛盾(如休市日谈"今日盘面热度"、或"情绪弱"却"重仓买入")。
+若用户要求的 JSON 里有 reasoning 字段，就用一句话填写你的关键推理；没有该字段则只需内部推演、不额外输出。`;
 
 // 顶级操盘军师人设：用于 做T/加减仓/买入/持仓建议/复盘/定价 等深度个股研判
 const ADVISOR_SYSTEM = `你是用户的【顶级操盘军师】——一位浸淫A股短线二十年、把消息面、宏观面、资金面、技术面、盘口全部融会贯通的实战高手，像股神一样一眼看透一只票此刻的多空博弈。用户把真金白银的买卖决策托付给你，你必须给出果断、专业、可直接照做的判断，但绝不自欺——好就是好、烂就是烂、看不清就说看不清。
@@ -306,7 +313,13 @@ const ADVISOR_SYSTEM = `你是用户的【顶级操盘军师】——一位浸�
 - 【必列反方】诚实给出"我可能错在哪(bearCase)"和"什么信号出现就证明错了、必须离场(invalidation)"。
 - 【承认不确定】上涨概率60%意味着40%会错；信心(confidence)要与共振分/消息面/宏观一致，不许无脑"高"，也不许无脑"低"。
 - 资金数据 isHistorical=true 时说明用的是最近收盘(asOfDate)数据，按"收盘后、为下一交易时段准备"口径，别说成实时；盘口委比仅盘中有效。
-- 所有价位具体、可成交；语言像师傅带徒弟一针见血，但只输出用户要求的合法 JSON（不要 markdown 代码块包裹）。`;
+- 所有价位具体、可成交；语言像师傅带徒弟一针见血，但只输出用户要求的合法 JSON（不要 markdown 代码块包裹）。
+
+【作答前必做·思维链自检(内部推演，不必长篇输出)】：
+① 认时间：先读【市场时间坐标】——今天是不是交易日?拿到的 tech/资金/情绪是哪个交易日收盘的?本次建议面向哪个交易日开盘?休市/盘前【绝不能】说"今日实时情绪/今天盘面如何"，要按"最近交易日收盘数据"口径、把操作落到下一交易日开盘(用真实日期，别说"明天"当成周末)。若有 todayQuote 则说明是盘中实时、以它为当下事实。
+② 核数据→定方向：先消息面+宏观+资金，再技术面择时，每个论点引用具体数字。
+③ 查矛盾：结论与时间坐标、结论彼此之间不得自相矛盾(如休市却谈"今日情绪"、"看空"却给"加仓"、涨停后却喊"低于现价减仓")。
+④ 若用户要求的 JSON 含 reasoning 字段，用一句话概括关键推理链；无该字段则只做内部推演。`;
 
 function buildUserPrompt(mode, payload, ragText) {
   const data = JSON.stringify(payload, null, 0);
@@ -316,7 +329,7 @@ function buildUserPrompt(mode, payload, ragText) {
 ⚠️数据时效铁律：下面的 tech(技术面均线/金叉)、stockFund(主力资金)、backtest 都是【昨日收盘口径】，会滞后！必须以本行"今日实时行情"为当下事实基准，两者矛盾时【以今日实时为准】。
 ${payload.todayQuote.isLimitUp ? '⚠️该股【今日已涨停】：说明今日主力大幅流入、多方极强，绝不能因为昨日"空头排列/主力流出"就喊"下午/明日继续减仓"——那是自相矛盾。涨停后正确视角是:看能否封住/连板→持有；炸板/开板放量→再考虑减。给出的减仓价必须高于现价(涨停价附近冲高兑现)，不能低于现价。' : ''}${payload.todayQuote.isLimitDown ? '⚠️该股【今日已跌停】：多方极弱，别喊"反弹买入"，以止损/离场为主。' : ''}${(payload.todayQuote.bigMove && payload.todayQuote.pct >= 7 && !payload.todayQuote.isLimitUp) ? '⚠️该股【今日大涨】：今日资金明显流入，昨日的"空头/流出"结论已过期，别据此喊减仓；应按"强势股冲高兑现或持有看延续"来判断。' : ''}` : ''}${payload.marketPhase ? `\n【当前时段】${payload.marketPhase}` : ''}${payload.marketEnv ? `\n【大盘环境】${payload.marketEnv.level}(环境分${payload.marketEnv.score})。${payload.marketEnv.note}` : ''}${payload.resonance ? `\n【信号共振】共振分 ${payload.resonance.score}/${payload.resonance.max}，命中:[${(payload.resonance.hits || []).join('、')}]。共振分≥2即可考虑小仓做多、≥4可正常仓位；<2才观望。共振不足不等于必须观望——若个股是逆势强票仍可小仓试多。${payload.resonance.hasNegNews ? '注意:消息面检测到潜在利空词，务必核查。' : ''}` : ''}${payload.counterTrend ? `\n【逆势强票判定】${payload.counterTrend.note}` : ''}${payload.tech ? `\n【技术面 tech(昨日收盘口径,可能滞后)】含 maCross(金叉/死叉)、maTrend(多头/空头排列)、macd、rsi、kdj、boll、支撑support/压力resistance、ATR。务必点名是否金叉、是否多头排列；但若与今日实时行情矛盾，以实时为准。` : ''}${payload.stockFund ? `\n【个股资金面 stockFund(截至asOfDate=${payload.stockFund.asOfDate || '—'},${payload.stockFund.isHistorical ? '昨日收盘口径' : '实时'})】mainNetYi=主力净流入(亿)、trend5=近5日主力净额序列(亿)、inflowDays=近5日流入天数、main5dYi=5日累计、weibi=盘口委比%。看5日趋势判断主力持续进货还是出货；若今日已涨停/大涨，说明今日资金大幅流入，昨日流出数据已过期。` : ''}${payload.lhb ? `\n【龙虎榜 lhb】近30日上榜${payload.lhb.times30d}次，最近${payload.lhb.date}，买方席位:[${(payload.lhb.buySeats || []).join('、')}]，smartMoney=${payload.lhb.smartMoney}(${payload.lhb.smartMoney ? '有知名游资/机构' : '无明显知名席位'})。` : ''}${(payload.macroNews && payload.macroNews.length) ? `\n【宏观·国内外要闻(必须纳入分析)】${payload.macroNews.join(' | ')}。请判断当前宏观是风险偏好还是避险、对该股所属板块是顺风还是逆风。` : ''}${(payload.newsHeadlines && payload.newsHeadlines.length) ? `\n【个股消息面头条】${payload.newsHeadlines.join(' | ')}` : ''}${(payload.newsDigest && payload.newsDigest.length) ? `\n【个股消息面摘要】${payload.newsDigest.join(' ')}` : ''}${payload.backtest ? `\n【信号回测】${payload.backtest.note}。命中率低时不要只凭金叉看多。` : ''}${payload.quant && payload.quant.forecast ? `\n【量化预测可信度】上涨概率${payload.quant.forecast.upProb}%仅是统计概率，务必结合回测命中率与共振分判断可信度，别当承诺。` : ''}`;
   if (mode === 'market') {
-    return `【今日盘面实时数据】\n${data}\n\n请输出 JSON：{"sentiment":"多头/中性/空头","score":0-100的情绪分,"summary":"一句话盘面总结","mainLines":[{"name":"最强主线板块名","reason":"资金/涨停依据"}],"risks":["风险点1","风险点2"],"advice":"短线操作建议(仓位/节奏)"}`;
+    return `【今日盘面实时数据】\n${data}\n\n请输出 JSON：{"reasoning":"一句话研判思路(先点明数据是哪个交易日的、面向哪个交易日)","sentiment":"多头/中性/空头","score":0-100的情绪分,"summary":"一句话盘面总结","mainLines":[{"name":"最强主线板块名","reason":"资金/涨停依据"}],"risks":["风险点1","风险点2"],"advice":"短线操作建议(仓位/节奏)"}`;
   }
   if (mode === 'sector') {
     return `【板块「${payload.sectorName}」实时数据+成分股】\n${data}\n\n请从上面【真实成分股列表】中挑选最多3只短线关注度高的个股（必须是列表里存在的），输出 JSON：{"sectorView":"该板块资金/强弱判断","picks":[{"name":"股票名(必须来自列表)","code":"代码","reason":"入选逻辑(资金/量价/连板)","watch":"短线关注点/风险"}],"note":"整体提示"}`;
@@ -325,7 +338,7 @@ ${payload.todayQuote.isLimitUp ? '⚠️该股【今日已涨停】：说明今�
     return `【个股实时数据】\n${data}${ragBlock}\n\n请综合实时数据与RAG资料（消息面/近5日走势），输出 JSON（各字段填你的分析结论，不要照抄字段说明）：{"name":"股票名","view":"用一句话给出资金面+量价+消息面的综合判断结论","strength":"强或中或弱三选一","points":["解读要点1","解读要点2","解读要点3"],"newsImpact":"最新消息面对短线的具体影响；若近期无重要消息则写'近期无重要消息'","watch":"短线关注点与风险"}`;
   }
   if (mode === 'scan') {
-    return `【当日全盘综合数据：大盘情绪 + 板块资金流 + 涨停连板 + 盘中异动】\n${data}\n\n你是短线策略总监，请综合以上所有维度，给出今日最值得关注的 TOP3 方向。输出 JSON：{"marketMood":"一句话大盘定调","topDirections":[{"rank":1,"direction":"方向/板块名","logic":"入选逻辑(必须结合资金流/涨停/异动的具体数据)","representStocks":[{"name":"代表股(必须来自给定数据)","code":"代码"}],"strength":"强/中/弱"}],"strategy":"今日短线操作策略(仓位/节奏/风格)","topRisk":"最需警惕的风险"}`;
+    return `【当日全盘综合数据：大盘情绪 + 板块资金流 + 涨停连板 + 盘中异动】\n${data}\n\n你是短线策略总监，请综合以上所有维度，给出今日最值得关注的 TOP3 方向。输出 JSON：{"reasoning":"一句话研判思路(先点明数据对应哪个交易日、结论面向哪个交易日开盘)","marketMood":"一句话大盘定调","topDirections":[{"rank":1,"direction":"方向/板块名","logic":"入选逻辑(必须结合资金流/涨停/异动的具体数据)","representStocks":[{"name":"代表股(必须来自给定数据)","code":"代码"}],"strength":"强/中/弱"}],"strategy":"今日短线操作策略(仓位/节奏/风格)","topRisk":"最需警惕的风险"}`;
   }
   if (mode === 'scan_pick') {
     return `【AI 选股请求】用户不知道今天买哪只，需要你从"已用量化模型打过分的候选池"里，结合大盘/板块/盘面，精选出今日最值得买的 **3 只** 个股，并说清怎么买。
@@ -342,10 +355,10 @@ ${payload.todayQuote.isLimitUp ? '⚠️该股【今日已涨停】：说明今�
 
 【硬要求】：精选正好 3 只(若实在符合的不足3只，可少给并说明)，必须来自 candidates 里的真实个股，理由必须引用该股的量化分/上涨概率/资金等具体数字。
 
-请输出 JSON：{"marketNote":"一句话今日大盘环境与选股基调","picks":[{"rank":1,"name":"股票名","code":"代码","quantScore":量化分数字,"reason":"为什么选它(引用量化分/上涨概率/资金/板块的具体数字，大白话)","buyPoint":"买点(如回踩5日线不破/放量突破X/竞价低吸)","buyZone":"参考买入价区间(如 12.3~12.8)","target":"目标位/预期","stop":"止损位","risk":"该股主要风险"}],"note":"整体提示(仓位/节奏)"}。只输出 JSON。`;
+请输出 JSON：{"reasoning":"一句话研判思路(先点明候选数据对应哪个交易日、结论面向哪个交易日开盘)","marketNote":"一句话今日大盘环境与选股基调","picks":[{"rank":1,"name":"股票名","code":"代码","quantScore":量化分数字,"reason":"为什么选它(引用量化分/上涨概率/资金/板块的具体数字，大白话)","buyPoint":"买点(如回踩5日线不破/放量突破X/竞价低吸)","buyZone":"参考买入价区间(如 12.3~12.8)","target":"目标位/预期","stop":"止损位","risk":"该股主要风险"}],"note":"整体提示(仓位/节奏)"}。只输出 JSON。`;
   }
   if (mode === 'daily') {
-    return `【当日全盘数据：大盘情绪 + 板块资金流 + 涨停连板 + 盘中异动】\n${data}\n\n你是短线操盘手，服务做 T+1（今买明卖）的用户。请综合所有维度，直接给出今日可执行的操盘决策。输出 JSON：{"canTrade":"能做/谨慎/空仓 三选一","light":"green/yellow/red","verdict":"一句话今日定调(能不能做、什么风格)","direction":"今日主攻方向(1-2个板块/主线)","candidates":[{"name":"候选股(必须来自给定数据)","code":"代码","reason":"入选逻辑(结合资金/涨停/异动的具体数据)","buyPoint":"买点提示(如回踩不破/放量突破)","expect":"次日预期","stop":"止损提示"}],"position":"建议仓位(如3-5成)","risk":"最需警惕的风险"}。candidates 给3-5只，必须来自给定数据里的真实个股。`;
+    return `【当日全盘数据：大盘情绪 + 板块资金流 + 涨停连板 + 盘中异动】\n${data}\n\n你是短线操盘手，服务做 T+1（今买明卖）的用户。请综合所有维度，直接给出今日可执行的操盘决策。输出 JSON：{"reasoning":"一句话研判思路(先点明数据对应哪个交易日、决策面向哪个交易日开盘;若今天休市要说清是基于上一交易日数据、面向下一交易日)","canTrade":"能做/谨慎/空仓 三选一","light":"green/yellow/red","verdict":"一句话今日定调(能不能做、什么风格)","direction":"今日主攻方向(1-2个板块/主线)","candidates":[{"name":"候选股(必须来自给定数据)","code":"代码","reason":"入选逻辑(结合资金/涨停/异动的具体数据)","buyPoint":"买点提示(如回踩不破/放量突破)","expect":"次日预期","stop":"止损提示"}],"position":"建议仓位(如3-5成)","risk":"最需警惕的风险"}。candidates 给3-5只，必须来自给定数据里的真实个股。`;
   }
   if (mode === 't_advice') {
     const styleMap = {
@@ -829,6 +842,7 @@ export default async function handler(req, res) {
         model: useModel,
         messages: [
           { role: 'system', content: sysPrompt },
+          { role: 'system', content: marketTimePromptBlock() },
           { role: 'user', content: buildUserPrompt(mode, payload, ragText) },
         ],
         temperature: 0.4,

@@ -2,6 +2,7 @@ import { emGet, num } from './_lib.js';
 import { buildCorpus } from './_rag.js';
 import { retrieveTheory } from './_kb.js';
 import { screenStocks } from './_screen.js';
+import { marketTimePromptBlock } from './_market_time.js';
 
 // ============ 股票 Agent：工具增强的智能体 ============
 // LLM 自主调用 skill 工具（查行情/选股/板块/涨停/异动/新闻…）多轮后综合作答
@@ -229,6 +230,17 @@ const SYSTEM = `你是"操盘手 Alpha"，一位有十年A股短线实战经验�
 - 仓位与风控（凯利/分批）：不满仓、控制单票仓位、设止损、盈亏比优先；情绪高潮期减仓、冰点期试仓。
 - 短线纪律：打板/低吸/接力各有逻辑，重势不重价；错了快止损，对了让利润奔跑。
 
+【ReAct 推理链·每次作答前后严格自我推演（这是硬性思维纪律，不许跳过）】
+1. Think(想清楚再动手)：先在心里回答三问——①现在是什么时间坐标？今天是不是交易日？我拿到的数据是哪个交易日的？②用户到底要什么、面向哪个交易日?③要回答它，我缺哪些数据、该按什么顺序调哪些工具? 想清楚再调工具。
+2. Act(调工具)：按计划(尽量同轮并行)调工具取真实数据。
+3. Observe(读数据)：核对每个工具返回——数据对应哪天?是否为空/异常?与我的时间坐标是否自洽?
+4. Reflect(证据自检，出结论前必做)：逐条自问——
+   · 时间自洽吗?(休市日绝不能说"今日情绪如何";数据是上一交易日的就说清是那天的，结论落到下一交易日开盘)
+   · 我的每个论点都有工具数据支撑吗?有没有把陈旧数据当实时?
+   · 结论内部有没有自相矛盾?(如"情绪弱"却又"满仓买入")
+   通过自检再输出;发现问题就回到第2步补数据或修正。
+5. 输出：结论 + "数据(哪天的)+理论"双支撑。可用一句极短的"研判："点出关键推理，但不要长篇复述思考过程。
+
 【工作方式】
 1. 自主决定调用哪些工具、调几次，多轮调用直到信息足够。
 2. 【效率铁律·非常重要】同一步需要多个数据时，务必在**同一轮里一次性发起多个工具调用**（系统会并行执行、显著更快），不要一次只调一个、来回磨蹭。例如做选股时，第一轮就同时调 get_market + get_sector_rank + get_limit_pool + get_movers 把全景一次拿全。
@@ -291,6 +303,7 @@ export default async function handler(req, res) {
 
     const messages = [
       { role: 'system', content: SYSTEM + sysExtra },
+      { role: 'system', content: marketTimePromptBlock() },
       ...(theoryMsg ? [theoryMsg] : []),
       ...history.filter((m) => (m.role === 'user' || m.role === 'assistant') && m.content).map((m) => ({ role: m.role, content: String(m.content).slice(0, 1200) })),
       { role: 'user', content: question },

@@ -43,6 +43,7 @@ export default function AIMarket({ market, sectors, limitPool }) {
         {loading && <div className="ai-hint">正在综合分析实时数据…</div>}
         {res && (
           <div className="ai-result">
+            {res.reasoning && <div className="ai-reasoning"><span className="ai-reasoning-k">研判</span>{res.reasoning}</div>}
             <div className="ai-senti">
               <span className={'ai-badge ' + sentiClass(res.sentiment)}>{res.sentiment || '—'}</span>
               {typeof res.score === 'number' && (

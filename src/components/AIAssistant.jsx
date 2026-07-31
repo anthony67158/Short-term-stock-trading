@@ -284,6 +284,7 @@ function Diagnose({ r }) {
 function Scan({ r }) {
   return (
     <div className="ai-result">
+      {r.reasoning && <div className="ai-reasoning"><span className="ai-reasoning-k">研判</span>{r.reasoning}</div>}
       {r.marketMood && <div className="ai-summary" style={{ marginBottom: 8 }}>{r.marketMood}</div>}
       {Array.isArray(r.topDirections) && r.topDirections.map((d, i) => (
         <div key={i} className="ai-pick">
@@ -304,6 +305,7 @@ function Scan({ r }) {
 function MarketReview({ r }) {
   return (
     <div className="ai-result">
+      {r.reasoning && <div className="ai-reasoning"><span className="ai-reasoning-k">研判</span>{r.reasoning}</div>}
       <div className="ai-senti"><span className={'ai-badge ' + badge(r.sentiment)}>{r.sentiment || '—'}</span>{typeof r.score === 'number' && <span className="ai-score">情绪分 <b>{r.score}</b></span>}<span className="ai-summary">{r.summary}</span></div>
       {Array.isArray(r.mainLines) && <div className="ai-block"><div className="ai-label">最强主线</div>{r.mainLines.map((x, i) => <div key={i} className="ai-line"><b>{x.name}</b> — {x.reason}</div>)}</div>}
       {Array.isArray(r.risks) && <div className="ai-block"><div className="ai-label">风险</div>{r.risks.map((x, i) => <div key={i} className="ai-line">· {x}</div>)}</div>}

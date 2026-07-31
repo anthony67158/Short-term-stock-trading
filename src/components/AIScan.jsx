@@ -46,6 +46,7 @@ export default function AIScan({ market, sectors, limitPool, movers }) {
         {loading && <div className="ai-hint">正在综合全市场多维数据，生成今日主线判断…</div>}
         {res && (
           <>
+            {res.reasoning && <div className="ai-reasoning"><span className="ai-reasoning-k">研判</span>{res.reasoning}</div>}
             {res.marketMood && <div className="scan-mood">🎯 {res.marketMood}</div>}
             {Array.isArray(res.topDirections) && (
               <div className="dir-grid">
