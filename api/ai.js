@@ -527,6 +527,13 @@ export default async function handler(req, res) {
     const mode = (body && body.mode) || 'market';
     const payload = (body && body.payload) || {};
 
+    // ===== 全局时间预算：Vercel maxDuration=60s，留足余量在 57s 内必须返回 JSON =====
+    // 数据采集阶段(补大盘/资金/分时/量化…)可能耗时 15~20s，之后 LLM 生成又要时间；
+    // 不设总预算时两段相加可能超 60s 被平台强杀、返回非 JSON。这里统一编排。
+    const START = Date.now();
+    const BUDGET = 57000;
+    const remain = () => BUDGET - (Date.now() - START);
+
     // stock 模式：接入 RAG（近5日走势+主营+联网新闻）
     let ragText = '';
     let newsRefs = [];
@@ -551,7 +558,12 @@ export default async function handler(req, res) {
         const proto = req.headers['x-forwarded-proto'] || 'https';
         const host = req.headers['x-forwarded-host'] || req.headers.host;
         const origin = `${proto}://${host}`;
-        const getJ = (p) => fetch(origin + p).then((r) => r.json()).catch(() => null);
+        const getJ = (p) => {
+          // 内部 API 调用加超时保护(原来无超时——某个内部接口卡住会拖垮整个数据采集、烧光预算)
+          const c = new AbortController();
+          const to = setTimeout(() => c.abort(), 8000);
+          return fetch(origin + p, { signal: c.signal }).then((r) => r.json()).catch(() => null).finally(() => clearTimeout(to));
+        };
 
         const [mkt, sec, detail, trend, stockFund, lhb, corpus, macroNews, todayQ] = await Promise.all([
           getJ('/api/market'),
@@ -773,12 +785,38 @@ export default async function handler(req, res) {
       }
     }
 
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 44000);
-
     const isAdvisor = (mode === 't_advice' || mode === 'hold_advice' || mode === 'buy_advice' || mode === 'review' || mode === 'price' || mode === 'plan');
     const useModel = isAdvisor ? ADVISOR_MODEL : MODEL;
     const sysPrompt = isAdvisor ? ADVISOR_SYSTEM : SYSTEM_PROMPT;
+
+    // 已采集到的数据 meta——即便 LLM 超时降级，也把这些"确定性数据"回传前端展示(有价值、不空手)
+    const collectedMeta = {
+      resonance: payload.resonance || null,
+      counterTrend: payload.counterTrend || null,
+      trustScore: payload.trustScore || null,
+      marketEnv: payload.marketEnv || null,
+      backtest: payload.backtest || null,
+      lhb: payload.lhb ? { onList: true, date: payload.lhb.date, times30d: payload.lhb.times30d, smartMoney: payload.lhb.smartMoney, smartSeats: payload.lhb.smartSeats, buySeats: payload.lhb.buySeats } : null,
+      hasNegNews: payload.resonance ? payload.resonance.hasNegNews : null,
+      newsHeadlines: payload.newsHeadlines || null,
+      macroNews: payload.macroNews || null,
+      fundAsOf: payload.stockFund ? { date: payload.stockFund.asOfDate, historical: payload.stockFund.isHistorical, main5dAvg: payload.stockFund.main5dAvgYi, inflowDays: payload.stockFund.inflowDays } : null,
+      marketPhase: payload.marketPhase || null,
+      todayQuote: payload.todayQuote || null,
+    };
+    // 数据采集后剩余时间不足 → 直接降级返回(不硬闯 LLM 被平台强杀)。带 meta 让前端仍能展示已查到的确定性数据。
+    if (remain() < 9000) {
+      return res.status(200).send(JSON.stringify({
+        ok: false, degraded: true, mode, model: useModel, updatedAt: Date.now(),
+        error: '数据采集用时较长，本次分析未能在限定时间内完成，请稍后重试。',
+        meta: collectedMeta, news: newsRefs,
+      }));
+    }
+
+    const ctrl = new AbortController();
+    // LLM 超时按【剩余预算】动态给：预留 2.5s 兜底返回时间，最少给 8s、最多 46s
+    const llmTimeout = Math.max(8000, Math.min(46000, remain() - 2500));
+    const t = setTimeout(() => ctrl.abort(), llmTimeout);
 
     const resp = await fetch(`${BASE}/chat/completions`, {
       method: 'POST',
@@ -797,14 +835,24 @@ export default async function handler(req, res) {
         max_tokens: (mode === 'scan' || mode === 'daily' || mode === 'scan_pick') ? 2200 : (mode === 't_advice' ? 2000 : (mode === 'hold_advice' || mode === 'buy_advice' || mode === 'review') ? 1900 : 1200),
         response_format: { type: 'json_object' },
       }),
-    });
+    }).catch((e) => ({ __err: e }));  // abort/网络错误不抛出 → 转入降级返回，避免裸报错/被平台强杀
     clearTimeout(t);
+
+    // LLM 超时/网络错误 → 结构化降级返回(带已采集 meta)，前端可提示"重试/缩小范围"而非"服务不可用"
+    if (resp && resp.__err) {
+      const timedOut = resp.__err.name === 'AbortError';
+      return res.status(200).send(JSON.stringify({
+        ok: false, degraded: true, mode, model: useModel, updatedAt: Date.now(),
+        error: timedOut ? '分析生成超时，可稍后重试；如反复超时请缩小问题范围。' : ('网络异常：' + String(resp.__err.message || resp.__err)),
+        meta: collectedMeta, news: newsRefs,
+      }));
+    }
 
     if (!resp.ok) {
       const errText = await resp.text();
       return res
         .status(200)
-        .send(JSON.stringify({ ok: false, error: `LLM ${resp.status}`, detail: errText.slice(0, 200) }));
+        .send(JSON.stringify({ ok: false, error: `LLM ${resp.status}`, detail: errText.slice(0, 200), meta: collectedMeta }));
     }
 
     const j = await resp.json();
@@ -828,20 +876,7 @@ export default async function handler(req, res) {
         result,
         news: newsRefs,
         // 可信度元信息：供前端展示共振灯/环境/龙虎榜/消息面(不依赖模型自报)
-        meta: {
-          resonance: payload.resonance || null,
-          counterTrend: payload.counterTrend || null,
-          trustScore: payload.trustScore || null,
-          marketEnv: payload.marketEnv || null,
-          backtest: payload.backtest || null,
-          lhb: payload.lhb ? { onList: true, date: payload.lhb.date, times30d: payload.lhb.times30d, smartMoney: payload.lhb.smartMoney, smartSeats: payload.lhb.smartSeats, buySeats: payload.lhb.buySeats } : null,
-          hasNegNews: payload.resonance ? payload.resonance.hasNegNews : null,
-          newsHeadlines: payload.newsHeadlines || null,
-          macroNews: payload.macroNews || null,
-          fundAsOf: payload.stockFund ? { date: payload.stockFund.asOfDate, historical: payload.stockFund.isHistorical, main5dAvg: payload.stockFund.main5dAvgYi, inflowDays: payload.stockFund.inflowDays } : null,
-          marketPhase: payload.marketPhase || null,
-          todayQuote: payload.todayQuote || null,
-        },
+        meta: collectedMeta,
         usedRag: !!ragText,
         usage: j.usage || null,
       })
