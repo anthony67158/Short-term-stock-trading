@@ -7,8 +7,8 @@ import { usePolling } from '../hooks'
 import { callAI } from '../ai'
 import { planStore, usePlanStore, calcBuyFee, calcSellFee, computeTFlows } from '../planStore'
 import { aiStore } from '../aiStore'
-import { generateReview, sessionLabel } from '../review'
-import { fmtPct, pctClass, fmtNum, fmtInflow , fmtRaw } from '../format'
+import { generateReview, sessionLabel, forceGenerateReviews, currentAutoSession, missingReviewCount } from '../review'
+import { fmtPct, pctClass, fmtNum, fmtInflow , fmtRaw, hasVal, opText } from '../format'
 
 // 从交易记录里提取某只股的历史买卖(供 AI 贴合用户成本带/操作习惯)
 function tradeHistoryOf(closed, code) {
@@ -469,12 +469,56 @@ function PlanList({ book, quote }) {
     </div>
   )
 }
+// ---------- 军师战绩：AI建议真实胜率(事后回测统计) ----------
+function AdvisorScore({ book }) {
+  const stats = planStore.adviceStats()
+  if (!stats || (stats.total === 0 && stats.pending === 0)) return null
+  const wr = stats.winRate
+  const tone = wr == null ? 'muted' : wr >= 55 ? 'red' : wr >= 45 ? 'gold' : 'green'
+  return (
+    <div className="advisor-score" title="AI建议隔日自动比对真实价格得出的命中率，样本越多越可信">
+      <Icon name="target" size={13} />
+      <span className="as-k">军师战绩</span>
+      {wr != null
+        ? <><span className={'as-wr ' + tone}>{wr}%</span><span className="as-sub">胜率 · {stats.total}次已验</span></>
+        : <span className="as-sub">积累中 · {stats.pending}次待验</span>}
+    </div>
+  )
+}
+
 // ---------- 当前持仓 ----------
 function HoldingList({ book, quote }) {
+  const [reviewing, setReviewing] = useState(null) // null | 'loading' | {ok,fail,skipped}
+  // "补全复盘"：只对今天还没有复盘的持仓补生成，与单卡"重生成"(覆盖单只)职责分离，避免重复。
+  const missing = missingReviewCount()
+  const runReview = async () => {
+    if (reviewing === 'loading' || missing === 0) return
+    setReviewing('loading')
+    const qmap = {}
+    Object.keys(quote || {}).forEach((c) => { qmap[c] = { price: quote[c].price } })
+    const session = currentAutoSession() || 'manual'
+    try {
+      const res = await forceGenerateReviews(session, qmap, { onlyMissing: true })
+      setReviewing(res)
+      setTimeout(() => setReviewing(null), 4000)
+    } catch { setReviewing({ ok: 0, fail: 1 }); setTimeout(() => setReviewing(null), 4000) }
+  }
   return (
     <div className="panel">
       <div className="panel-head">
         <div className="panel-title"><Icon name="wallet" size={16} /> 当前持仓 <span className="sub-name">{book.holding.length} 只 · 支持做T</span></div>
+        <div className="hold-head-actions">
+          <AdvisorScore book={book} />
+          {book.holding.length > 0 && (
+            <button className="mini-btn" onClick={runReview} disabled={reviewing === 'loading' || (reviewing == null && missing === 0)}
+              title={missing === 0 ? '所有持仓今日复盘已就绪；如需更新单只，展开该卡的「复盘」点重生成' : `为今天还没有复盘的 ${missing} 只持仓补生成复盘`}>
+              <Icon name={reviewing === 'loading' ? 'refresh' : 'history'} size={12} className={reviewing === 'loading' ? 'spin' : ''} />
+              {reviewing === 'loading' ? '复盘中…'
+                : (reviewing && typeof reviewing === 'object') ? `已补${reviewing.ok}只${reviewing.fail ? `·失败${reviewing.fail}` : ''}`
+                : missing === 0 ? '复盘已就绪' : `补全复盘 (${missing})`}
+            </button>
+          )}
+        </div>
       </div>
       {book.holding.length === 0 ? (
         <div className="empty">在下方「自选 / 候选」里点「建仓」后，持仓出现在这里。做T：在每笔持仓上高抛低吸、摊薄成本。</div>
@@ -507,6 +551,7 @@ function HoldingItem({ h, idx, quote: q }) {
   const [tStyle, setTStyle] = useState('auto') // auto(按历史规律) | conservative | balanced | aggressive
   const [openDays, setOpenDays] = useState({}) // 做T流水按天折叠，key→是否展开
   const [expanded, setExpanded] = useState(false) // 卡片明细区（盘中提示/复盘/信号/计划/做T）默认折叠
+  const [detailTab, setDetailTab] = useState(null) // 明细手风琴当前展开的分段: 'review'|'signal'|'plan'|'t'|null
 
   const book = usePlanStore()
 
@@ -669,151 +714,179 @@ function HoldingItem({ h, idx, quote: q }) {
   }
 
   const flowDays = groupTFlowsByDay(h.tFlows)
+  // 实时持仓手数/成本（做T后即时反映）
+  const netT = (tStat.openBuy || 0) - (tStat.openSell || 0)
+  const liveQty = h.qty + netT
+  const liveCost = tStat.realized ? effCost : costWithFee
+  // 主行动：此刻最该做的一件事（触及止盈/止损 > 信号动作 > 盘中提示）
+  const focus = (() => {
+    if (hitTP) return { tone: 'red', badge: '止盈', text: `已到止盈价 ${fmtRaw(h.tp)}，考虑落袋` }
+    if (hitSL) return { tone: 'green', badge: '止损', text: `已到止损价 ${fmtRaw(h.sl)}，按纪律离场` }
+    if (signal) return { tone: (signal.level === 'buy' || signal.level === 'hold') ? 'red' : (signal.level === 'sell' || signal.level === 'danger') ? 'green' : 'muted', badge: signal.tag, text: signal.action }
+    if (play) return { tone: play.tone === 'buy' ? 'red' : play.tone === 'sell' ? 'green' : 'muted', badge: play.when, text: play.tip }
+    return null
+  })()
   return (
     <div className="hold-item">
-      <div className="pi-main">
-        <div className="pi-name">
-          <StockName code={h.code} name={h.name}><span>{h.name}<span className="sub-name">{h.code}</span></span></StockName>
-          <span className="sub-name" style={{ marginLeft: 6 }}>#{idx + 1}</span>
+      {/* 决策条：股名 + 特大号浮盈亏（第一视觉焦点）*/}
+      <div className="hold-head">
+        <div className="hold-head-l">
+          <StockName code={h.code} name={h.name}><span className="hh-name">{h.name}</span></StockName>
+          <span className="hh-code">{h.code}</span>
+          {q && <span className={'hh-price ' + pctClass(q.pct)}>{fmtRaw(q.price)} <span className="hh-chg">{fmtPct(q.pct)}</span></span>}
         </div>
-        {pnl != null && <div className={'pi-pnl ' + (pnl >= 0 ? 'red' : 'green')}>{pnl >= 0 ? '+' : ''}{pnl.toFixed(2)}%</div>}
+        {pnl != null && (
+          <div className={'hold-pnl ' + (pnl >= 0 ? 'red' : 'green')} title="相对含费成本的浮动盈亏">
+            <span className="hp-pct">{pnl >= 0 ? '+' : ''}{pnl.toFixed(2)}%</span>
+            {floatPnl != null && <span className="hp-amt">{fmtMoney(floatPnl)}</span>}
+          </div>
+        )}
       </div>
 
+      {/* 数据行：只留 持仓手数 · 成本（现价已并入顶部）*/}
       <div className="hold-meta">
-        {(() => {
-          // 实时持仓手数：底仓 ± 今日做T未配对净额（买入+/卖出−），做T后立即反映
-          const netT = (tStat.openBuy || 0) - (tStat.openSell || 0)
-          const liveQty = h.qty + netT
-          // 实时成本：有做T差价则用摊薄后 effCost，否则含费成本
-          const liveCost = tStat.realized ? effCost : costWithFee
-          return (
-            <>
-              <span title={netT !== 0 ? `底仓 ${h.qty} 手，今日做T未结算净${netT > 0 ? '买入+' : '卖出'}${netT} 手` : '当前持仓手数'}>
-                {liveQty}手{netT !== 0 && <span className="sub-name"> (底仓{h.qty}{netT > 0 ? '+' : ''}{netT})</span>}
-              </span>
-              <span title={`裸买入价 ${fmtRaw(h.buyPrice)} + 买入手续费 ${(h.buyFee || 0).toFixed(2)}${tStat.realized ? `；做T差价摊薄 ${fmtMoney(tStat.realized)}` : ''}`}>
-                成本 {fmtRaw(liveCost)} <span className="sub-name">{tStat.realized ? '(做T后)' : '(含费)'}</span>
-              </span>
-            </>
-          )
-        })()}
-        {q && <span>现价 <b className={pctClass(q.pct)}>{fmtRaw(q.price)}</b></span>}
-        {q && h.buyPrice && <span title="现价市值 − 裸成本 − 已付买入手续费">浮盈 <b className={floatPnl >= 0 ? 'red' : 'green'}>{fmtMoney(floatPnl)}</b></span>}
+        <span title={netT !== 0 ? `底仓 ${h.qty} 手，今日做T未结算净${netT > 0 ? '买入+' : '卖出'}${netT} 手` : '当前持仓手数'}>
+          持仓 {liveQty}手{netT !== 0 && <span className="sub-name"> (底仓{h.qty}{netT > 0 ? '+' : ''}{netT})</span>}
+        </span>
+        <span title={`裸买入价 ${fmtRaw(h.buyPrice)} + 买入手续费 ${(h.buyFee || 0).toFixed(2)}${tStat.realized ? `；做T差价摊薄 ${fmtMoney(tStat.realized)}` : ''}`}>
+          成本 {fmtRaw(liveCost)} <span className="sub-name">{tStat.realized ? '(做T后)' : '(含费)'}</span>
+        </span>
       </div>
 
-      {/* 焦点提示：折叠态只显示"此刻最该关注的一句"（触及止盈/止损 > 信号动作 > 盘中提示）*/}
-      {(() => {
-        // 计划触及最紧急
-        if (hitTP) return <div className="hold-focus focus-red"><Icon name="target" size={12} /> 已到止盈价 {fmtRaw(h.tp)}，考虑落袋</div>
-        if (hitSL) return <div className="hold-focus focus-green"><Icon name="shield" size={12} /> 已到止损价 {fmtRaw(h.sl)}，按纪律离场</div>
-        if (signal) return <div className={'hold-focus focus-' + (signal.level === 'buy' || signal.level === 'hold' ? 'red' : signal.level === 'sell' || signal.level === 'danger' ? 'green' : 'muted')}><span className="hf-tag">{signal.tag}</span>{signal.action}</div>
-        if (play) return <div className={'hold-focus focus-' + (play.tone === 'buy' ? 'red' : play.tone === 'sell' ? 'green' : 'muted')}><span className="hf-when">{play.when}</span>{play.tip}</div>
-        return null
-      })()}
-
-      {/* 明细展开开关：把盘中提示/复盘/信号依据/交易计划/做T战绩都收纳进来 */}
-      {(play || signal || (h.tp || h.sl || h.planReason) || (h.tFlows && h.tFlows.length > 0) || (book.reviews && book.reviews[h.code])) && (
-        <button className="hold-detail-toggle" onClick={() => setExpanded((v) => !v)}>
-          <Icon name={expanded ? 'chevronDown' : 'chevronRight'} size={13} />
-          {expanded ? '收起明细' : '明细'}
-          {!expanded && (
-            <span className="hdt-chips">
-              {(h.tp || h.sl) && <span className="hdt-chip">计划</span>}
-              {book.reviews && book.reviews[h.code] && <span className="hdt-chip">复盘</span>}
-              {(h.tFlows && h.tFlows.length > 0) && <span className="hdt-chip">做T{h.tFlows.length}</span>}
-              {signal && <span className="hdt-chip">信号</span>}
-            </span>
-          )}
-        </button>
+      {/* 主行动：此刻唯一最该关注的一句（徽标 + 一句话）*/}
+      {focus && (
+        <div className={'hold-focus focus-' + focus.tone}>
+          {focus.badge && <span className="hf-badge">{focus.badge}</span>}
+          <span className="hf-text">{focus.text}</span>
+        </div>
       )}
 
-      {expanded && (
-        <div className="hold-detail">
-          {/* 盘中时段操盘提示（仅交易时段显示：此刻该怎么做）*/}
-          {play && (
-            <div className={'ipb ipb-' + play.tone}>
-              <span className="ipb-when">{play.when}</span>
-              <span className={'ipb-tag ipb-' + play.tone}>{play.tag}</span>
-              <span className="ipb-tip">{play.tip}</span>
-            </div>
-          )}
+      {/* 明细展开开关：把复盘/信号/计划/做T 收纳，展开后手风琴分段(一次看一类) */}
+      {(() => {
+        const hasReview = !!(book.reviews && book.reviews[h.code])
+        const hasSignal = !!signal
+        const hasPlan = !!(h.tp || h.sl || h.planReason)
+        const hasT = !!(h.tFlows && h.tFlows.length > 0)
+        const segs = [
+          { key: 'review', label: '复盘', dot: !hasReview },
+          hasSignal && { key: 'signal', label: '信号' },
+          hasPlan && { key: 'plan', label: '计划' },
+          hasT && { key: 't', label: `做T${h.tFlows.length}` },
+        ].filter(Boolean)
+        if (!segs.length && !play) return null
+        // 打开明细时默认选中第一个分段
+        const openDetail = () => { const nx = !expanded; setExpanded(nx); if (nx && !detailTab && segs.length) setDetailTab(segs[0].key) }
+        return (
+          <>
+            <button className="hold-detail-toggle" onClick={openDetail}>
+              <Icon name={expanded ? 'chevronDown' : 'chevronRight'} size={13} />
+              {expanded ? '收起明细' : '明细'}
+              {!expanded && <span className="hdt-chips">{segs.map((s) => <span key={s.key} className={'hdt-chip' + (s.dot ? ' pending' : '')}>{s.label}</span>)}</span>}
+            </button>
 
-          {/* 复盘结论（午间/收盘自动生成，只显示最新一条）*/}
-          <HoldReview code={h.code} name={h.name} cost={costWithFee} qty={h.qty} price={q && q.price} />
+            {expanded && (
+              <div className="hold-detail">
+                {/* 盘中时段操盘提示（若与主行动不同，作为补充展示在明细顶部）*/}
+                {play && (
+                  <div className={'ipb ipb-' + play.tone}>
+                    <span className="ipb-when">{play.when}</span>
+                    <span className={'ipb-tag ipb-' + play.tone}>{play.tag}</span>
+                    <span className="ipb-tip">{play.tip}</span>
+                  </div>
+                )}
 
-          {/* 「踏5不破10」策略信号灯 */}
-          {signal && (
-            <div className={'sig5 sig-' + signal.level}>
-              <div className="sig5-main" onClick={() => setShowStrat((v) => !v)}>
-                <div className="sig5-top">
-                  <span className={'sig5-tag sig-' + signal.level}>{signal.tag}</span>
-                  <span className="sig5-action">{signal.action}</span>
-                  <Icon name={showStrat ? 'chevronDown' : 'chevronRight'} size={14} className="sig5-caret" />
-                </div>
-                {signal.ma5 != null && (
-                  <div className="sig5-ma">
-                    <span className="sig5-ma-item">MA5 <b className={q && q.price >= signal.ma5 ? 'red' : 'green'}>{fmtRaw(signal.ma5)}</b></span>
-                    <span className="sig5-ma-item">MA10 <b className={q && q.price >= signal.ma10 ? 'red' : 'green'}>{fmtRaw(signal.ma10)}</b></span>
-                    {q && q.turnover != null && <span className="sig5-ma-item">换手 <b className={q.turnover > 10 ? 'gold' : ''}>{fmtNum(q.turnover, 1)}%</b></span>}
-                    {q && q.volRatio != null && <span className="sig5-ma-item">量比 <b className={q.volRatio > 2 ? 'gold' : ''}>{fmtNum(q.volRatio, 1)}</b></span>}
-                    {q && q.mainInflow != null && <span className="sig5-ma-item">主力 <b className={pctClass(q.mainInflow)}>{fmtInflow(q.mainInflow)}</b></span>}
+                {/* 手风琴分段切换条 */}
+                {segs.length > 0 && (
+                  <div className="hd-segs">
+                    {segs.map((s) => (
+                      <button key={s.key} className={'hd-seg' + (detailTab === s.key ? ' on' : '') + (s.dot ? ' has-dot' : '')} onClick={() => setDetailTab(s.key)}>{s.label}</button>
+                    ))}
+                  </div>
+                )}
+
+                {/* 复盘结论：即使还没有自动复盘，也暴露按钮支持手动生成/重新生成 */}
+                {detailTab === 'review' && (
+                  <HoldReview code={h.code} name={h.name} cost={costWithFee} qty={h.qty} price={q && q.price} />
+                )}
+
+                {/* 「踏5不破10」策略信号灯 */}
+                {detailTab === 'signal' && signal && (
+                  <div className={'sig5 sig-' + signal.level}>
+                    <div className="sig5-main" onClick={() => setShowStrat((v) => !v)}>
+                      <div className="sig5-top">
+                        <span className={'sig5-tag sig-' + signal.level}>{signal.tag}</span>
+                        <span className="sig5-action">{signal.action}</span>
+                        <Icon name={showStrat ? 'chevronDown' : 'chevronRight'} size={14} className="sig5-caret" />
+                      </div>
+                      {signal.ma5 != null && (
+                        <div className="sig5-ma">
+                          <span className="sig5-ma-item">MA5 <b className={q && q.price >= signal.ma5 ? 'red' : 'green'}>{fmtRaw(signal.ma5)}</b></span>
+                          <span className="sig5-ma-item">MA10 <b className={q && q.price >= signal.ma10 ? 'red' : 'green'}>{fmtRaw(signal.ma10)}</b></span>
+                          {q && q.turnover != null && <span className="sig5-ma-item">换手 <b className={q.turnover > 10 ? 'gold' : ''}>{fmtNum(q.turnover, 1)}%</b></span>}
+                          {q && q.volRatio != null && <span className="sig5-ma-item">量比 <b className={q.volRatio > 2 ? 'gold' : ''}>{fmtNum(q.volRatio, 1)}</b></span>}
+                          {q && q.mainInflow != null && <span className="sig5-ma-item">主力 <b className={pctClass(q.mainInflow)}>{fmtInflow(q.mainInflow)}</b></span>}
+                        </div>
+                      )}
+                    </div>
+                    {showStrat && (
+                      <div className="sig5-detail">
+                        {signal.reasons.map((r, i) => <div key={i} className="sig5-reason">· {r}</div>)}
+                        <div className="sig5-rule">
+                          踏5不破10：站上5日线持有、缩量踩5线可低吸；跌破5线减仓、放量破10线清仓；单票亏损&gt;8% 止损。信号由日K均线+量能本地测算，仅供参考。
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 交易计划条：止盈/止损/理由 */}
+                {detailTab === 'plan' && hasPlan && mode !== 'plan' && (
+                  <div className={'plan-card' + (hitTP ? ' hit-tp' : hitSL ? ' hit-sl' : '')}>
+                    <div className="plan-card-body">
+                      <div className="plan-card-prices">
+                        <span className="plan-price-item">
+                          <span className="plan-price-k tp"><Icon name="target" size={11} /> 止盈</span>
+                          <b className="red">{h.tp ? fmtRaw(h.tp) : '—'}</b>
+                          {hitTP && <span className="plan-hit">已触及</span>}
+                        </span>
+                        <span className="plan-price-item">
+                          <span className="plan-price-k sl"><Icon name="shield" size={11} /> 止损</span>
+                          <b className="green">{h.sl ? fmtRaw(h.sl) : '—'}</b>
+                          {hitSL && <span className="plan-hit">已触及</span>}
+                        </span>
+                      </div>
+                      {h.planReason && <div className="plan-card-reason" title={h.planReason}>{h.planReason}</div>}
+                    </div>
+                    <div className="plan-card-actions">
+                      <button className="icon-btn" title="修改计划" onClick={() => openPlan(true)}><Icon name="edit" size={13} /></button>
+                      <button className="icon-btn" title="删除计划" onClick={() => planStore.clearPlanRule(h.id)}><Icon name="trash" size={13} /></button>
+                    </div>
+                  </div>
+                )}
+
+                {/* 做T战绩（流水式）：数据一行、结算入账另起一行，不再挤 */}
+                {detailTab === 't' && hasT && (
+                  <div className="t-stat t-stat-v">
+                    <div className="t-stat-row">
+                      <span className="t-badge"><Icon name="refresh" size={12} />做T {h.tFlows.length}笔</span>
+                      <span>差价已实现 <b className={tStat.realized >= 0 ? 'red' : 'green'}>{fmtMoney(tStat.realized)}</b></span>
+                      {tStat.realized !== 0 && <span>实际成本 <b className="red">{fmtRaw(effCost)}</b> <span className="t-down">↓{fmtRaw(h.buyPrice - effCost)}</span></span>}
+                      {tStat.openBuy > 0 && <span className="t-open" style={{ color: 'var(--red)' }}>净买入 {tStat.openBuy}手 → 加仓</span>}
+                      {tStat.openSell > 0 && <span className="t-open" style={{ color: 'var(--green)' }}>净卖出 {tStat.openSell}手 → {tStat.openSell >= h.qty ? '清仓' : '减仓'}</span>}
+                    </div>
+                    <div className="t-stat-foot">
+                      <button className="chip-btn done t-settle-btn" onClick={() => setConfirmSettle(true)} title="立即把今天的做T流水固化进交易记录并调整底仓">
+                        <Icon name="check" size={12} />结算入账
+                      </button>
+                      <span className="t-auto-hint">或次日自动结算</span>
+                    </div>
                   </div>
                 )}
               </div>
-              {showStrat && (
-                <div className="sig5-detail">
-                  {signal.reasons.map((r, i) => <div key={i} className="sig5-reason">· {r}</div>)}
-                  <div className="sig5-rule">
-                    踏5不破10：站上5日线持有、缩量踩5线可低吸；跌破5线减仓、放量破10线清仓；单票亏损&gt;8% 止损。信号由日K均线+量能本地测算，仅供参考。
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* 交易计划条：止盈/止损/理由；触及时高亮提醒 */}
-          {(h.tp || h.sl || h.planReason) && mode !== 'plan' && (
-            <div className={'plan-card' + (hitTP ? ' hit-tp' : hitSL ? ' hit-sl' : '')}>
-              <div className="plan-card-body">
-                <div className="plan-card-prices">
-                  <span className="plan-price-item">
-                    <span className="plan-price-k tp"><Icon name="target" size={11} /> 止盈</span>
-                    <b className="red">{h.tp ? fmtRaw(h.tp) : '—'}</b>
-                    {hitTP && <span className="plan-hit">已触及</span>}
-                  </span>
-                  <span className="plan-price-item">
-                    <span className="plan-price-k sl"><Icon name="shield" size={11} /> 止损</span>
-                    <b className="green">{h.sl ? fmtRaw(h.sl) : '—'}</b>
-                    {hitSL && <span className="plan-hit">已触及</span>}
-                  </span>
-                </div>
-                {h.planReason && <div className="plan-card-reason" title={h.planReason}>{h.planReason}</div>}
-              </div>
-              <div className="plan-card-actions">
-                <button className="icon-btn" title="修改计划" onClick={() => openPlan(true)}><Icon name="edit" size={13} /></button>
-                <button className="icon-btn" title="删除计划" onClick={() => planStore.clearPlanRule(h.id)}><Icon name="trash" size={13} /></button>
-              </div>
-            </div>
-          )}
-
-          {/* 做T战绩（流水式）*/}
-          {(h.tFlows && h.tFlows.length > 0) && (
-            <div className="t-stat">
-              <span className="t-badge"><Icon name="refresh" size={12} />做T {h.tFlows.length}笔</span>
-              <span>差价已实现 <b className={tStat.realized >= 0 ? 'red' : 'green'}>{fmtMoney(tStat.realized)}</b></span>
-              {tStat.realized !== 0 && <span>实际成本 <b className="red">{fmtRaw(effCost)}</b> <span className="t-down">↓{fmtRaw(h.buyPrice - effCost)}</span></span>}
-              {tStat.openBuy > 0 && <span className="t-open" style={{ color: 'var(--red)' }}>净买入 {tStat.openBuy}手 → 加仓</span>}
-              {tStat.openSell > 0 && <span className="t-open" style={{ color: 'var(--green)' }}>净卖出 {tStat.openSell}手 → {tStat.openSell >= h.qty ? '清仓' : '减仓'}</span>}
-              <span className="t-settle-wrap" style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                <button className="chip-btn done t-settle-btn" onClick={() => setConfirmSettle(true)} title="立即把今天的做T流水固化进交易记录并调整底仓">
-                  <Icon name="check" size={12} />结算入账
-                </button>
-                <span className="t-auto-hint">或次日自动结算</span>
-              </span>
-            </div>
-          )}
-        </div>
-      )}
+            )}
+          </>
+        )
+      })()}
 
       {/* 操作区 */}
       {mode === 'add' ? (
@@ -963,10 +1036,16 @@ function HoldingItem({ h, idx, quote: q }) {
                   {tAdvice.result.styleReason && <div className="t-basis-row"><span className="t-basis-k">选型</span>{tAdvice.result.styleReason}</div>}
                   {tAdvice.result.marketNote && <div className="t-basis-row"><span className="t-basis-k">大盘</span>{tAdvice.result.marketNote}</div>}
                   {tAdvice.result.stockNote && <div className="t-basis-row"><span className="t-basis-k">盘面</span>{tAdvice.result.stockNote}</div>}
+                  {tAdvice.result.fundNote && <div className="t-basis-row"><span className="t-basis-k">资金</span>{tAdvice.result.fundNote}</div>}
                   {(tAdvice.result.support || tAdvice.result.resistance) && (
                     <div className="t-basis-row"><span className="t-basis-k">支撑压力</span>支撑 <b className="green">{tAdvice.result.support ?? '--'}</b> · 压力 <b className="red">{tAdvice.result.resistance ?? '--'}</b></div>
                   )}
                   {tAdvice.result.quantNote && <div className="t-basis-row"><span className="t-basis-k quant">量化</span>{tAdvice.result.quantNote}</div>}
+                  {tAdvice.result.newsNote && <div className="t-basis-row"><span className="t-basis-k">消息</span>{tAdvice.result.newsNote}</div>}
+                  {tAdvice.result.macroNote && <div className="t-basis-row"><span className="t-basis-k">宏观</span>{tAdvice.result.macroNote}</div>}
+                  {tAdvice.result.riskReward && <div className="t-basis-row"><span className="t-basis-k">盈亏比</span>{tAdvice.result.riskReward}</div>}
+                  {tAdvice.result.bearCase && <div className="t-basis-row"><span className="t-basis-k">反方</span>{tAdvice.result.bearCase}</div>}
+                  {tAdvice.result.invalidation && <div className="t-basis-row"><span className="t-basis-k theory">失效</span>{tAdvice.result.invalidation}</div>}
                   {tAdvice.result.theory && <div className="t-basis-row"><span className="t-basis-k theory">理论</span>{tAdvice.result.theory}</div>}
                 </div>
                 {tAdvice.result.dir !== 'none' && (
@@ -1101,55 +1180,109 @@ function TFlowRow({ f, holdingId }) {
   )
 }
 
-// ---------- 持仓卡上的复盘结论条（午间/收盘自动生成，只显示最新一条；可手动重新复盘）----------
+// ---------- 持仓卡上的复盘结论条（午间/收盘自动生成，只显示最新一条；无按钮，纯自动）----------
 function HoldReview({ code, name, cost, qty, price }) {
   const book = usePlanStore()
   const review = (book.reviews || {})[code] || null
-  const [gen, setGen] = useState(null) // {loading}|{error}
   const [open, setOpen] = useState(false) // 展开完整细节
-  const run = async () => {
-    setGen({ loading: true })
-    const pnlPct = (price && cost) ? +(((price - cost) / cost) * 100).toFixed(2) : null
-    const r = await generateReview({ code, name, session: 'manual', hold: { cost, qty, pnlPct } })
-    if (r && r.error) setGen({ error: r.error })
-    else setGen(null)
-  }
+  const [regen, setRegen] = useState(null) // null | loading | error
   const r = review && review.result
   const tone = r ? (r.tone || 'muted') : 'muted'
   const ts = review ? new Date(review.at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : null
   const nextLabel = review ? (review.session === 'noon' ? '下午' : review.session === 'close' ? '明天开盘' : '后续') : '后续'
+  const doRegenerate = async () => {
+    if (regen === 'loading') return
+    setRegen('loading')
+    try {
+      const pnlPct = (price && cost) ? +(((price - cost) / cost) * 100).toFixed(2) : null
+      const res = await generateReview({ code, name, session: currentAutoSession() || 'manual', hold: { cost, qty, pnlPct } })
+      if (res && !res.error) { setRegen(null); setOpen(false) }
+      else setRegen(res && res.error ? res.error : '生成失败')
+    } catch (e) {
+      setRegen(String(e.message || e || '生成失败'))
+    }
+  }
+  if (!review || !r) {
+    return (
+      <div className="hold-review rev-muted">
+        <div className="hr-top minimal">
+          <span className="hr-badge"><Icon name="history" size={12} /> 复盘</span>
+          <button className="hr-link" onClick={doRegenerate} disabled={regen === 'loading'}>
+            {regen === 'loading' ? '生成中…' : '生成复盘'}
+          </button>
+        </div>
+        <div className="hr-empty">还没有复盘。可点右上「生成复盘」为这只单独生成，或用顶部「补全复盘」一次补齐所有缺口；午间/收盘也会自动生成。</div>
+        {regen && regen !== 'loading' && <div className="hr-empty err">{regen}</div>}
+      </div>
+    )
+  }
   return (
     <div className={'hold-review rev-' + tone}>
-      <div className="hold-review-head" onClick={() => r && setOpen((v) => !v)}>
+      {/* ① 顶部元信息条：徽标 + 场次 + 时间（复盘由午间/收盘自动生成，无需按钮）*/}
+      <div className="hr-top minimal">
         <span className="hr-badge"><Icon name="history" size={12} /> 复盘</span>
         {review && <span className={'hr-sess ' + review.session}>{sessionLabel(review.session)}</span>}
-        {r ? <span className="hr-headline">{r.headline || r.stance}</span>
-           : <span className="hr-empty">午间/收盘自动生成，或手动点「复盘」</span>}
-        <button className="hr-btn" onClick={(e) => { e.stopPropagation(); run() }} disabled={gen && gen.loading}>
-          <Icon name={gen && gen.loading ? 'refresh' : 'spark'} size={11} className={gen && gen.loading ? 'spin' : ''} />
-          {gen && gen.loading ? '复盘中' : (review ? '重新复盘' : '复盘')}
+        {ts && <span className="hr-time">{ts}</span>}
+        <button className="hr-link" onClick={doRegenerate} disabled={regen === 'loading'} title="基于当前账户资金/持仓/行情重新生成复盘意见">
+          {regen === 'loading' ? '生成中…' : '重生成'}
         </button>
-        {r && <Icon name={open ? 'chevronDown' : 'chevronRight'} size={13} className="hr-caret" />}
       </div>
-      {gen && gen.error && <div className="err" style={{ margin: '4px 8px' }}>{gen.error}</div>}
-      {r && r.nextAction && (
-        <div className="hr-next"><span className="hr-next-k">{nextLabel}</span>{r.nextAction}</div>
+      {regen && regen !== 'loading' && <div className="hr-empty err">{regen}</div>}
+
+      {/* ② 结论行：只保留“动作 + 一句话结论”，避免复盘卡堆太多分区 */}
+      {r && (
+        <div className={'hr-verdict tone-' + tone} onClick={() => setOpen((v) => !v)}>
+          {r.stance && <span className={'hr-stance tone-' + tone}>{r.stance}</span>}
+          <span className="hr-headline">{r.headline || r.stance}</span>
+        </div>
       )}
-      {r && open && (
-        <div className="hr-detail">
-          {ts && <div className="hr-time">{ts} 生成</div>}
-          {r.todayRecap && <div className="hr-row"><span className="hr-k">今日</span>{r.todayRecap}</div>}
-          {r.pnlNote && r.pnlNote !== '未持仓，跳过' && <div className="hr-row"><span className="hr-k">盈亏</span>{r.pnlNote}</div>}
-          {r.tradeReview && r.tradeReview !== '今日无成交' && <div className="hr-row"><span className="hr-k">操作</span>{r.tradeReview}</div>}
-          {(r.addPrice != null || r.reducePrice != null || r.stopPrice != null) && (
-            <div className="hr-prices">
-              {r.addPrice != null && <span className="hr-p"><span className="hr-pk">回踩加</span><b className="red">{r.addPrice}</b></span>}
-              {r.reducePrice != null && <span className="hr-p"><span className="hr-pk">反弹减</span><b className="green">{r.reducePrice}</b></span>}
-              {r.stopPrice != null && <span className="hr-p"><span className="hr-pk">止损</span><b className="green">{r.stopPrice}</b></span>}
+
+      {/* ③ 下一步行动：保留核心操作指令 */}
+      {r && r.nextAction && (
+        <div className="hr-next compact">
+          <span className="hr-next-k">下一步</span>
+          <span className="hr-next-txt">{r.nextAction}</span>
+        </div>
+      )}
+
+      {/* ③b 算账条：预期赚整行 hero + 短标量 chip + 仓位整句独行 —— 不截断不出血。
+          持有/观望时 opQty/opAmount 为 0，经 hasVal 过滤后不渲染，避免出现迷惑的"00"。 */}
+      {r && (hasVal(r.opQty) || hasVal(r.opAmount) || hasVal(r.expReturn) || hasVal(r.riskReward) || hasVal(r.posAfter)) && (
+        <div className="op-calc">
+          {hasVal(r.expReturn) && <div className="oc-exp"><span className="oc-k">预期收益</span><b>{r.expReturn}</b></div>}
+          {(hasVal(r.opQty) || hasVal(r.opAmount) || hasVal(r.newCost) || hasVal(r.riskReward)) && (
+            <div className="oc-grid">
+              {hasVal(r.opQty) && <div className="oc-cell"><span className="oc-k">操作</span><b>{opText(r.opQty, r.stance)}</b></div>}
+              {hasVal(r.opAmount) && <div className="oc-cell"><span className="oc-k">资金</span><b>{r.opAmount}</b></div>}
+              {hasVal(r.newCost) && <div className="oc-cell"><span className="oc-k">新成本</span><b>{r.newCost}</b></div>}
+              {hasVal(r.riskReward) && <div className="oc-cell"><span className="oc-k">盈亏比</span><b>{r.riskReward}</b></div>}
             </div>
           )}
-          {r.keyLevel && <div className="hr-row"><span className="hr-k">盯住</span>{r.keyLevel}</div>}
-          {r.risk && <div className="hr-row"><span className="hr-k risk">风险</span>{r.risk}</div>}
+          {hasVal(r.posAfter) && <div className="oc-line"><span className="oc-k">仓位</span><span>{r.posAfter}</span></div>}
+        </div>
+      )}
+
+      {/* 无需操作也要明确展示，避免“持有0/观望0”这种含糊表达 */}
+      {r && !hasVal(r.opQty) && !hasVal(r.opAmount) && (r.stance === '持有' || r.stance === '观望') && (
+        <div className="op-calc noop-calc">
+          <div className="oc-exp noop"><span className="oc-k">本次操作</span><b>无需操作</b></div>
+          {hasVal(r.posAfter) && <div className="oc-line"><span className="oc-k">当前仓位</span><span>{r.posAfter}</span></div>}
+          <div className="oc-line"><span className="oc-k">怎么做</span><span>{r.nextAction || r.keyLevel || '按当前仓位继续观察，等触发价或失效信号出现再动。'}</span></div>
+        </div>
+      )}
+
+      {/* ④ 明细：只保留少量核心，其他细节放到个股详情页里看 */}
+      {r && open && (
+        <div className="hr-detail slim">
+          {(r.addPrice != null || r.reducePrice != null || r.stopPrice != null) && (
+            <div className="hr-prices">
+              {r.addPrice != null && <span className="hr-p"><span className="hr-pk">加仓价</span><b className="red">{r.addPrice}</b></span>}
+              {r.reducePrice != null && <span className="hr-p"><span className="hr-pk">减仓价</span><b className="green">{r.reducePrice}</b></span>}
+              {r.stopPrice != null && <span className="hr-p"><span className="hr-pk">止损价</span><b className="green">{r.stopPrice}</b></span>}
+            </div>
+          )}
+          {r.keyLevel && <div className="hr-row"><span className="hr-k">盯住</span><span className="hr-v">{r.keyLevel}</span></div>}
+          {r.invalidation && <div className="hr-row"><span className="hr-k risk">失效</span><span className="hr-v">{r.invalidation}</span></div>}
         </div>
       )}
     </div>

@@ -1,7 +1,7 @@
 // AI 分析代理：服务端调用 LLM，Key 从环境变量读取，绝不暴露给前端
 // POST body: { mode: 'market'|'sector'|'stock'|'scan', payload: {...} }
 import { buildCorpus, retrieve } from './_rag.js';
-import { techSummaryForAI, fetchQuantPredict } from './_ta.js';
+import { techSummaryForAI, fetchQuantPredict, backtestSignal } from './_ta.js';
 
 function avg(arr) { return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0; }
 function std(arr) { if (arr.length < 2) return 0; const m = avg(arr); return Math.sqrt(avg(arr.map((x) => (x - m) ** 2))); }
@@ -115,6 +115,163 @@ async function fetchTrend(code) {
   return null;
 }
 
+// 个股资金面：主力/超大单/大单 净额 + 5日主力均值 + 盘口委比委差
+// 关键：用【历史每日资金流】接口(fflow/daykline)，收盘后/开盘前依然能回溯到最近交易日，不会归零；
+// 实时快照(stock/get f62)只在盘中有效、清算后清零，故仅用于取盘口委比与"当日实时"补充。
+async function fetchStockFund(code) {
+  const secid = toSecid(code);
+  const yi = (v) => (v == null || v === '-' || v === '' || isNaN(Number(v)) ? null : +(Number(v) / 1e8).toFixed(2));
+  const pct = (v) => (v == null || v === '-' || v === '' || isNaN(Number(v)) ? null : +Number(v).toFixed(2));
+  let daily = null;
+
+  // 1) 历史每日资金流（可回溯）。只取最近8天(lmt=8)避免全历史大响应超时；多镜像竞速(Promise.any)
+  // fields2: f51日期,f52主力净额,f53小单,f54中单,f55大单,f56超大单,f57主力净占比%
+  const hisHosts = ['https://push2his.eastmoney.com', 'https://82.push2his.eastmoney.com', 'https://push2.eastmoney.com', 'https://push2delay.eastmoney.com'];
+  const hpath = `/api/qt/stock/fflow/daykline/get?lmt=8&klt=101&secid=${secid}&ut=b2884a393a59ad64002292a3e90d46a5&fields1=f1,f2,f3,f7&fields2=f51,f52,f53,f54,f55,f56,f57`;
+  const tryHis = (h) => {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 7000);
+    return fetch(h + hpath, { signal: ctrl.signal, headers: { Referer: 'https://data.eastmoney.com/', 'User-Agent': 'Mozilla/5.0' } })
+      .then((r) => r.json())
+      .then((j) => { const kl = j && j.data && j.data.klines; if (kl && kl.length) return kl; throw new Error('empty'); })
+      .finally(() => clearTimeout(t));
+  };
+  try {
+    const kl = await Promise.any(hisHosts.map(tryHis));
+    const rows = kl.map((line) => { const p = line.split(','); return { date: p[0], main: Number(p[1]), small: Number(p[2]), mid: Number(p[3]), big: Number(p[4]), super: Number(p[5]), mainPct: Number(p[6]) }; });
+    const last = rows[rows.length - 1];
+    const last5 = rows.slice(-5);
+    const sum5 = last5.reduce((a, x) => a + (x.main || 0), 0);
+    daily = {
+      date: last.date,
+      mainNetYi: yi(last.main), mainNetPct: pct(last.mainPct),
+      superNetYi: yi(last.super), bigNetYi: yi(last.big), midNetYi: yi(last.mid), smallNetYi: yi(last.small),
+      main5dYi: yi(sum5), main5dAvgYi: yi(sum5 / (last5.length || 1)),
+      trend5: last5.map((x) => yi(x.main)),   // 近5日主力净额序列(亿)
+      inflowDays: last5.filter((x) => x.main > 0).length, // 近5日流入天数
+    };
+  } catch { /* 所有镜像失败 → 走备用源 */ }
+
+  // 1b) 备用：若竞速全失败，串行再给最稳的镜像一次独立、更长超时的机会(大盘股响应慢，竞速易被别的镜像拖累)
+  if (!daily) {
+    for (const h of ['https://push2his.eastmoney.com', 'https://push2.eastmoney.com']) {
+      try {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 9000);
+        const r = await fetch(h + hpath, { signal: ctrl.signal, headers: { Referer: 'https://data.eastmoney.com/', 'User-Agent': 'Mozilla/5.0' } });
+        clearTimeout(t);
+        const j = await r.json();
+        const kl = j && j.data && j.data.klines;
+        if (kl && kl.length) {
+          const rows = kl.map((line) => { const p = line.split(','); return { date: p[0], main: Number(p[1]), small: Number(p[2]), mid: Number(p[3]), big: Number(p[4]), super: Number(p[5]), mainPct: Number(p[6]) }; });
+          const last = rows[rows.length - 1]; const last5 = rows.slice(-5);
+          const sum5 = last5.reduce((a, x) => a + (x.main || 0), 0);
+          daily = { date: last.date, mainNetYi: yi(last.main), mainNetPct: pct(last.mainPct), superNetYi: yi(last.super), bigNetYi: yi(last.big), midNetYi: yi(last.mid), smallNetYi: yi(last.small), main5dYi: yi(sum5), main5dAvgYi: yi(sum5 / (last5.length || 1)), trend5: last5.map((x) => yi(x.main)), inflowDays: last5.filter((x) => x.main > 0).length };
+          break;
+        }
+      } catch { /* try next */ }
+    }
+  }
+
+  // 2) 实时快照：取盘口委比/委差(盘中有效) + 当日实时主力净额(盘中非0则优先)
+  let snap = null;
+  const rtHosts = ['https://push2.eastmoney.com', 'https://82.push2.eastmoney.com', 'https://push2delay.eastmoney.com'];
+  const rpath = `/api/qt/stock/get?secid=${secid}&fields=f62,f184,f66,f72,f164,f191,f192`;
+  const tryRt = (h) => {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 5000);
+    return fetch(h + rpath, { signal: ctrl.signal, headers: { Referer: 'https://data.eastmoney.com/', 'User-Agent': 'Mozilla/5.0' } })
+      .then((r) => r.json())
+      .then((j) => { if (j && j.data) return j.data; throw new Error('empty'); })
+      .finally(() => clearTimeout(t));
+  };
+  try {
+    const d = await Promise.any(rtHosts.map(tryRt));
+    snap = { mainNetYi: yi(d.f62), mainNetPct: pct(d.f184), superNetYi: yi(d.f66), bigNetYi: yi(d.f72), main5dYi: yi(d.f164), weibi: pct(d.f191), weicha: (d.f192 == null || d.f192 === '-') ? null : Math.round(Number(d.f192)) };
+  } catch { /* ignore */ }
+
+  if (!daily && !snap) return null;
+  const base = daily || {};
+  // 当日主力净额：盘中用实时快照(非0)，否则用历史最近交易日
+  const realtimeMain = snap && snap.mainNetYi != null && snap.mainNetYi !== 0 ? snap.mainNetYi : null;
+  return {
+    asOfDate: base.date || null,               // 资金数据对应的交易日
+    isHistorical: !realtimeMain,               // true=用的是最近收盘数据(非实时)
+    mainNetYi: realtimeMain != null ? realtimeMain : (base.mainNetYi ?? null),
+    mainNetPct: (snap && snap.mainNetPct) ?? base.mainNetPct ?? null,
+    superNetYi: (realtimeMain != null && snap && snap.superNetYi) ? snap.superNetYi : (base.superNetYi ?? null),
+    bigNetYi: (realtimeMain != null && snap && snap.bigNetYi) ? snap.bigNetYi : (base.bigNetYi ?? null),
+    midNetYi: base.midNetYi ?? null, smallNetYi: base.smallNetYi ?? null,
+    main5dYi: base.main5dYi ?? (snap && snap.main5dYi) ?? null,
+    main5dAvgYi: base.main5dAvgYi ?? null,
+    trend5: base.trend5 || null,
+    inflowDays: base.inflowDays ?? null,
+    weibi: snap ? snap.weibi : null, weicha: snap ? snap.weicha : null,  // 盘口仅盘中有效
+  };
+}
+
+
+// 个股近期龙虎榜 + 买方席位识别（是否知名游资/机构专用席位 = 聪明钱）
+const HOT_SEATS = ['章盟主', '赵老哥', '炒股养家', '作手新一', '方新侠', '孙哥', 'UBS', '摩根', '中金', '华鑫', '东方财富', '拉萨', '成都', '深股通', '沪股通', '机构专用', '国泰君安', '中信', '量化'];
+async function fetchStockLHB(code) {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 6000);
+    const flt = encodeURIComponent(`(SECURITY_CODE="${code}")`);
+    const url = `https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_DAILYBILLBOARD_DETAILSNEW&columns=SECURITY_CODE,TRADE_DATE,EXPLANATION,BILLBOARD_NET_AMT,CHANGE_RATE&filter=${flt}&sortColumns=TRADE_DATE&sortTypes=-1&pageSize=5&source=WEB&client=WEB`;
+    const r = await fetch(url, { signal: ctrl.signal, headers: { Referer: 'https://data.eastmoney.com/', 'User-Agent': 'Mozilla/5.0' } });
+    clearTimeout(t);
+    const j = await r.json();
+    const rows = (j && j.result && j.result.data) || [];
+    if (!rows.length) return null;
+    const recent = rows[0];
+    const lhbDate = String(recent.TRADE_DATE || '').slice(0, 10);
+    let seats = [];
+    try {
+      const ctrl2 = new AbortController();
+      const t2 = setTimeout(() => ctrl2.abort(), 6000);
+      const flt2 = encodeURIComponent(`(SECURITY_CODE="${code}")(TRADE_DATE='${lhbDate}')`);
+      const url2 = `https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_BILLBOARD_DAILYDETAILSBUY&columns=OPERATEDEPT_NAME,BUY,NET&filter=${flt2}&sortColumns=NET&sortTypes=-1&pageSize=5&source=WEB&client=WEB`;
+      const r2 = await fetch(url2, { signal: ctrl2.signal, headers: { Referer: 'https://data.eastmoney.com/', 'User-Agent': 'Mozilla/5.0' } });
+      clearTimeout(t2);
+      const j2 = await r2.json();
+      seats = ((j2 && j2.result && j2.result.data) || []).map((s) => s.OPERATEDEPT_NAME).filter(Boolean);
+    } catch { /* ignore */ }
+    const smart = seats.filter((nm) => HOT_SEATS.some((h) => nm.includes(h)));
+    return {
+      onList: true, date: lhbDate, times30d: rows.length,
+      reason: recent.EXPLANATION || '',
+      buySeats: seats.slice(0, 5),
+      smartMoney: smart.length > 0,
+      smartSeats: smart.slice(0, 3),
+    };
+  } catch { return null; }
+}
+
+// 宏观/国内外重大事件新闻（当日财经要闻）——让军师把大环境纳入分析，而非只看个股技术
+// 用东财财经要闻搜索(全球宏观/政策/市场关键词)，取当日最新几条标题
+async function fetchMacroNews() {
+  try {
+    const kw = '宏观 政策 央行 美股 关税 A股 市场';
+    const param = encodeURIComponent(JSON.stringify({
+      uid: '', keyword: kw, type: ['cmsArticleWebOld'], client: 'web', clientType: 'web',
+      param: { cmsArticleWebOld: { searchScope: 'default', sort: 'time', pageIndex: 1, pageSize: 10 } },
+    }));
+    const url = `https://search-api-web.eastmoney.com/search/jsonp?cb=x&param=${param}`;
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 6000);
+    const r = await fetch(url, { signal: ctrl.signal, headers: { Referer: 'https://so.eastmoney.com/', 'User-Agent': 'Mozilla/5.0' } });
+    clearTimeout(t);
+    const txt = await r.text();
+    const clean = txt.replace(/^x\(/, '').replace(/\);?$/, '');
+    const nj = JSON.parse(clean);
+    const arr = (nj.result && nj.result.cmsArticleWebOld) || [];
+    const heads = arr.map((a) => ({ title: (a.title || '').replace(/<[^>]+>/g, ''), date: a.date || '', url: a.url || '' }))
+      .filter((x) => x.title).slice(0, 8);
+    return heads.length ? heads : null;
+  } catch { return null; }
+}
+
 const SYSTEM_PROMPT = `你是一位专业的A股短线交易策略分析师。你的任务是基于用户提供的【实时行情数据】做客观分析。
 
 严格规则（必须遵守）：
@@ -127,9 +284,37 @@ const SYSTEM_PROMPT = `你是一位专业的A股短线交易策略分析师。�
 
 你必须只输出一个合法的 JSON 对象（不要 markdown 代码块包裹），结构见用户要求。`;
 
+// 顶级操盘军师人设：用于 做T/加减仓/买入/持仓建议/复盘/定价 等深度个股研判
+const ADVISOR_SYSTEM = `你是用户的【顶级操盘军师】——一位浸淫A股短线二十年、把消息面、宏观面、资金面、技术面、盘口全部融会贯通的实战高手，像股神一样一眼看透一只票此刻的多空博弈。用户把真金白银的买卖决策托付给你，你必须给出果断、专业、可直接照做的判断，但绝不自欺——好就是好、烂就是烂、看不清就说看不清。
+
+【重要·权重原则】技术面只是"择时工具"，真正决定短线生死的是【消息面+宏观面+资金面】。不要让技术信号(金叉/多头)主导结论；技术面服务于择时，方向要由消息、宏观、资金共同决定。若消息/宏观与技术冲突，以消息/宏观为主、技术为辅。
+
+你的分析必须【多面合参】，每条结论都要引用给定数据里的具体数字：
+1. 【消息面·个股】newsHeadlines/newsDigest(个股新闻/公告/催化/风险)——有减持/问询/立案/解禁/预亏/诉讼等利空，即使技术面再好也必须降级甚至回避；有明确催化(订单/中标/重组/业绩超预期)才可加分。这是第一优先。
+2. 【宏观·国内外】macroNews(当日国内外重大事件：政策/央行/关税/地缘/美股/商品/行业政策等)——判断当前是风险偏好上升还是避险；结合该股所属板块，说清宏观是顺风还是逆风。宏观逆风时全面降级。
+3. 【资金面】主力净流入/流出(stockFund.mainNetYi，注意asOfDate是哪天、isHistorical是否为收盘数据)、近5日主力序列(trend5)与流入天数(inflowDays)——判断主力是持续进货还是出货，一天的数字不算数，看5日趋势。
+4. 【龙虎榜/席位】lhb(是否上榜、买方席位、smartMoney)——判断是不是聪明钱在买，还是跌停接盘/散户。
+5. 【技术面·仅择时】maCross金叉死叉、maTrend多头空头、RSI/KDJ/布林/支撑压力——只用来确定"买卖点位与止损位"，不用来定方向。
+6. 【量化模型】quant走势预测作为客观概率参照。
+
+【必须遵守的可信度铁律】：
+- 【今日实时优先·最高】若数据里有 todayQuote(今日实时行情)，它是"当下事实"，优先级高于一切历史指标。tech(技术面)、stockFund(主力资金)、backtest 均为昨日收盘口径、会滞后，与今日实时矛盾时【一律以今日实时为准】。特别地：**个股今日已涨停→今日主力大幅流入、极强，绝不能喊"下午/明日继续减仓/反弹卖出"，那是拿昨天的旧数据自相矛盾；涨停后应讲"封住则持有看连板、炸板放量再减"，任何减仓价必须在现价上方**；今日大涨(>7%)同理，昨日"空头/流出"结论已过期。今日跌停→别喊反弹买入。
+- 【消息宏观定方向】方向判断必须先看消息面+宏观面，再用技术面择时。分析里必须明确交代"消息面+宏观对该股是利好/利空/中性"，不能只堆技术指标。
+- 【择时择股分离·核心】大盘/宏观弱是【择时】信号，只用来压【仓位】(marketEnv.suggestPosition)，绝不用来一刀切否决【个股方向】。大盘弱≠所有票都观望——弱市里逆势强票(counterTrend.isStrong=抗跌/资金逆势流入/多头创新高)恰恰是资金抱团的龙头，应【优先给"小仓做多"的具体买点】，而不是一律观望。真正该回避的是：技术破位、主力持续出逃(trend5连续为负)、有明确利空的弱票。
+- 【敢于看多】共振分≥2且个股结构不坏，就应给出明确的做多/买入结论(可标注小仓)，不要因为"大盘弱/不够完美"就习惯性观望。观望要有具体理由(破位/资金出逃/利空/盈亏比太差)，不能拿"大盘不好"当万能挡箭牌。每次分析后自检：如果因为大盘弱而给观望，但个股本身是逆势强票，请改判为"小仓做多"。
+- 【盈亏比前置】买入/加仓/做T先算盈亏比(目标÷止损)，<1.8:1 才不值得做；≥1.8:1 且方向对就可以做。
+- 【必列反方】诚实给出"我可能错在哪(bearCase)"和"什么信号出现就证明错了、必须离场(invalidation)"。
+- 【承认不确定】上涨概率60%意味着40%会错；信心(confidence)要与共振分/消息面/宏观一致，不许无脑"高"，也不许无脑"低"。
+- 资金数据 isHistorical=true 时说明用的是最近收盘(asOfDate)数据，按"收盘后、为下一交易时段准备"口径，别说成实时；盘口委比仅盘中有效。
+- 所有价位具体、可成交；语言像师傅带徒弟一针见血，但只输出用户要求的合法 JSON（不要 markdown 代码块包裹）。`;
+
 function buildUserPrompt(mode, payload, ragText) {
   const data = JSON.stringify(payload, null, 0);
   const ragBlock = ragText ? `\n\n【RAG检索资料：近5日走势+主营+联网新闻】\n${ragText}` : '';
+  // 军师五面数据说明：把技术金叉多头、主力资金、盘口、消息面、龙虎榜、大盘环境、共振分全部显式点名，强制引用
+  const advisorData = `${payload.todayQuote ? `\n【★今日实时行情(最高优先·当下事实)】现价${payload.todayQuote.price}、今日涨跌${payload.todayQuote.pct >= 0 ? '+' : ''}${payload.todayQuote.pct}%${payload.todayQuote.isLimitUp ? '、【已涨停】' : payload.todayQuote.isLimitDown ? '、【已跌停】' : ''}${payload.todayQuote.bigMove && !payload.todayQuote.isLimitUp && !payload.todayQuote.isLimitDown ? `、【当日大幅${payload.todayQuote.pct >= 0 ? '异动上涨' : '异动下跌'}】` : ''}、量比${payload.todayQuote.volRatio ?? '—'}、换手${payload.todayQuote.turnover ?? '—'}%。
+⚠️数据时效铁律：下面的 tech(技术面均线/金叉)、stockFund(主力资金)、backtest 都是【昨日收盘口径】，会滞后！必须以本行"今日实时行情"为当下事实基准，两者矛盾时【以今日实时为准】。
+${payload.todayQuote.isLimitUp ? '⚠️该股【今日已涨停】：说明今日主力大幅流入、多方极强，绝不能因为昨日"空头排列/主力流出"就喊"下午/明日继续减仓"——那是自相矛盾。涨停后正确视角是:看能否封住/连板→持有；炸板/开板放量→再考虑减。给出的减仓价必须高于现价(涨停价附近冲高兑现)，不能低于现价。' : ''}${payload.todayQuote.isLimitDown ? '⚠️该股【今日已跌停】：多方极弱，别喊"反弹买入"，以止损/离场为主。' : ''}${(payload.todayQuote.bigMove && payload.todayQuote.pct >= 7 && !payload.todayQuote.isLimitUp) ? '⚠️该股【今日大涨】：今日资金明显流入，昨日的"空头/流出"结论已过期，别据此喊减仓；应按"强势股冲高兑现或持有看延续"来判断。' : ''}` : ''}${payload.marketPhase ? `\n【当前时段】${payload.marketPhase}` : ''}${payload.marketEnv ? `\n【大盘环境】${payload.marketEnv.level}(环境分${payload.marketEnv.score})。${payload.marketEnv.note}` : ''}${payload.resonance ? `\n【信号共振】共振分 ${payload.resonance.score}/${payload.resonance.max}，命中:[${(payload.resonance.hits || []).join('、')}]。共振分≥2即可考虑小仓做多、≥4可正常仓位；<2才观望。共振不足不等于必须观望——若个股是逆势强票仍可小仓试多。${payload.resonance.hasNegNews ? '注意:消息面检测到潜在利空词，务必核查。' : ''}` : ''}${payload.counterTrend ? `\n【逆势强票判定】${payload.counterTrend.note}` : ''}${payload.tech ? `\n【技术面 tech(昨日收盘口径,可能滞后)】含 maCross(金叉/死叉)、maTrend(多头/空头排列)、macd、rsi、kdj、boll、支撑support/压力resistance、ATR。务必点名是否金叉、是否多头排列；但若与今日实时行情矛盾，以实时为准。` : ''}${payload.stockFund ? `\n【个股资金面 stockFund(截至asOfDate=${payload.stockFund.asOfDate || '—'},${payload.stockFund.isHistorical ? '昨日收盘口径' : '实时'})】mainNetYi=主力净流入(亿)、trend5=近5日主力净额序列(亿)、inflowDays=近5日流入天数、main5dYi=5日累计、weibi=盘口委比%。看5日趋势判断主力持续进货还是出货；若今日已涨停/大涨，说明今日资金大幅流入，昨日流出数据已过期。` : ''}${payload.lhb ? `\n【龙虎榜 lhb】近30日上榜${payload.lhb.times30d}次，最近${payload.lhb.date}，买方席位:[${(payload.lhb.buySeats || []).join('、')}]，smartMoney=${payload.lhb.smartMoney}(${payload.lhb.smartMoney ? '有知名游资/机构' : '无明显知名席位'})。` : ''}${(payload.macroNews && payload.macroNews.length) ? `\n【宏观·国内外要闻(必须纳入分析)】${payload.macroNews.join(' | ')}。请判断当前宏观是风险偏好还是避险、对该股所属板块是顺风还是逆风。` : ''}${(payload.newsHeadlines && payload.newsHeadlines.length) ? `\n【个股消息面头条】${payload.newsHeadlines.join(' | ')}` : ''}${(payload.newsDigest && payload.newsDigest.length) ? `\n【个股消息面摘要】${payload.newsDigest.join(' ')}` : ''}${payload.backtest ? `\n【信号回测】${payload.backtest.note}。命中率低时不要只凭金叉看多。` : ''}${payload.quant && payload.quant.forecast ? `\n【量化预测可信度】上涨概率${payload.quant.forecast.upProb}%仅是统计概率，务必结合回测命中率与共振分判断可信度，别当承诺。` : ''}`;
   if (mode === 'market') {
     return `【今日盘面实时数据】\n${data}\n\n请输出 JSON：{"sentiment":"多头/中性/空头","score":0-100的情绪分,"summary":"一句话盘面总结","mainLines":[{"name":"最强主线板块名","reason":"资金/涨停依据"}],"risks":["风险点1","风险点2"],"advice":"短线操作建议(仓位/节奏)"}`;
   }
@@ -173,7 +358,7 @@ function buildUserPrompt(mode, payload, ragText) {
       ? '【自动】用户没有指定风格，请你根据 stockProfile(这只股自己的历史规律) 自动选定最合适的风格：波动大/振幅大的妖股→偏激进博差价；温吞小波动→偏稳健小做；居中→均衡。并在 chosenStyle 字段回填你选的风格。'
       : (styleMap[payload.style] || styleMap.balanced)
     return `【做T参考请求】用户持有一只票想日内做T摊薄成本。做T有两个方向，你要根据此刻盘面对称判断、不要默认只做正T：正T=先低吸后高抛(现价偏低时)，反T=先高抛后低接(现价偏高/浮盈时)。数据含：个股实时量价、当日分时结构(intraday: vwap均价/日内高低/现价位置posInDay/节奏rhythm/是否触及日内高低)、大盘情绪(market)、大盘资金流向(marketFlow)、个股近20日走势(history)、【个股历史规律画像 stockProfile】、【专业技术指标 tech(ATR真实波幅/布林带/RSI/KDJ/MACD/支撑压力/买卖带/止损止盈)】、用户持仓(holdCost/holdQty/baseQty)。
-数据：${data}
+数据：${data}${advisorData}
 
 【个股历史规律画像 stockProfile —— 本次策略自适应的核心，务必逐项参考】
 这是根据该股近${payload.stockProfile ? payload.stockProfile.days : 60}日日线统计出的“这只股自己的性格”，含义：
@@ -205,12 +390,12 @@ ${isAuto ? '你要基于历史规律自动决策，并在 chosenStyle 明确回�
 - **观望(none)**：振幅太小(recentAmplitude<2.5)、震荡无边界、或极度逆风。
 判定顺序：先用 intraday 的当日位置定“此刻更该先买还是先卖”，再用 stockProfile 的 dirBias/开盘路径做辅助验证。dirBias=balanced 时，完全以当日位置为准。不要因为“做T=高抛低吸”这个习惯说法就默认选正T——反T同样是做T，方向取决于此刻价格在日内的高低。
 
-请输出 JSON：{"advisable":"适合/谨慎/不建议","light":"green/yellow/red","chosenStyle":"conservative或balanced或aggressive(你据历史规律选定的风格)","styleReason":"为什么给这只股选这个风格(必须引用stockProfile的具体数字，如振幅/波动率/均值回归分)","dir":"positive或reverse或none","dirLabel":"正T低吸 或 反T高抛 或 暂不做T","confidence":"高/中/低","actionPlan":"【最重要·一句话行动指令，让用户能直接照做】把方向+手数+两腿价位+触发条件揉成一句话，例如'现价X偏高，先在Y附近高抛N手，回落到Z附近接回，量化看跌upProb仅30%所以别追高'。必须含具体价格数字。","histPattern":"用一句话概括这只股的历史规律","plain":"用大白话解释为什么这么做(像师傅带徒弟，点出历史规律)","marketNote":"一句话大盘环境(引用数据)","stockNote":"一句话个股当下位置(引用分时vwap/日内位置/量比)","support":支撑位数字,"resistance":压力位数字,${payload.quant ? '"quantNote":"量化走势预测如何影响这次决策(引用quant.score、forecast上涨概率与目标区间的具体数字，说明为什么两腿价定在这;用大白话)",' : ''}"theory":"引用的理论+一句话如何支撑","suggestQty":建议手数(整数,按风格),"leg1Price":第一腿参考价(数字),"leg2Price":第二腿目标价(数字,须落在量化目标区间内),"estProfit":"预估净赚(元)","estCostDown":"预估成本下降(元/股)","addOn":"激进风格可给加码条件;其他风格填空字符串","risk":"风险与失效止损价位"}。不建议做T时 dir=none、价位可 null。`;
+请输出 JSON：{"advisable":"适合/谨慎/不建议","light":"green/yellow/red","chosenStyle":"conservative或balanced或aggressive(你据历史规律选定的风格)","styleReason":"为什么给这只股选这个风格(必须引用stockProfile的具体数字，如振幅/波动率/均值回归分)","dir":"positive或reverse或none","dirLabel":"正T低吸 或 反T高抛 或 暂不做T","confidence":"高/中/低","actionPlan":"【最重要·一句话行动指令，让用户能直接照做】把方向+手数+两腿价位+触发条件揉成一句话，例如'现价X偏高，先在Y附近高抛N手，回落到Z附近接回，量化看跌upProb仅30%所以别追高'。必须含具体价格数字。","histPattern":"用一句话概括这只股的历史规律","plain":"用大白话解释为什么这么做(像师傅带徒弟，点出历史规律)","marketNote":"一句话大盘环境(引用数据)","stockNote":"一句话个股当下位置(引用分时vwap/日内位置/量比)","fundNote":"资金面依据(引用主力净流入/流出mainNetYi、盘口委比weibi，研判主力进出与盘口意愿)","support":支撑位数字,"resistance":压力位数字,${payload.quant ? '"quantNote":"量化走势预测如何影响这次决策(引用quant.score、forecast上涨概率与目标区间的具体数字，说明为什么两腿价定在这;用大白话)",' : ''}"theory":"引用的理论+一句话如何支撑","suggestQty":建议手数(整数,按风格),"leg1Price":第一腿参考价(数字),"leg2Price":第二腿目标价(数字,须落在量化目标区间内),"estProfit":"预估净赚(元)","estCostDown":"预估成本下降(元/股)","addOn":"激进风格可给加码条件;其他风格填空字符串","newsNote":"消息面(有利空点明,无则'无明显利空')","macroNote":"宏观/国内外影响(引用macroNews判断风险偏好/避险,及对该股板块是顺风还是逆风;无则'宏观中性')","seatNote":"龙虎榜/席位(有则点明smartMoney,无则'近期未上榜')","riskReward":"盈亏比(如 2:1)","resonanceScore":共振分数字(引用resonance.score),"bearCase":"【反方观点】可能错在哪","invalidation":"【失效信号】什么价一破就止损离场(含价格)","risk":"风险与失效止损价位"}。不建议做T时 dir=none、价位可 null；大盘弱只压手数(建议底仓更小比例)不禁做T，逆势强票/振幅够仍可做T。只输出JSON。`;
   }
   if (mode === 'plan') {
     return `【交易计划请求】用户持有一只票，想为它定一份短线交易计划(止盈价/止损价/买入理由)。用户不太懂技术，需要你基于**持仓成本**并结合技术指标给出默认建议，用户会再微调。
 数据含：个股实时量价、当日分时(intraday)、大盘情绪(market)、资金流向(marketFlow)、近20日走势(history: ma5/ma10/ma20、20日高低high20/low20)、**用户持仓成本 holdCost（本次定价的核心基准）**。
-数据：${data}
+数据：${data}${advisorData}
 
 【最高优先级 · 定价基准 = 持仓成本 holdCost】
 用户要的是"相对我的成本能赚多少、亏多少"，不是相对现价。所以：
@@ -231,7 +416,7 @@ ${isAuto ? '你要基于历史规律自动决策，并在 chosenStyle 明确回�
     const actLabel = { buy: '建仓(首次买入)', add: '加仓(补仓)', sell: '减仓/清仓(卖出)' }[payload.actionKind] || (isBuy ? '买入' : '卖出');
     return `【${isBuy ? '买入' : '卖出'}挂单价请求】用户正准备${actLabel}一只票，需要你给出一个**极其合理的${isBuy ? '买入' : '卖出'}挂单价**（一个具体数字），供他人工挂单参考。
 数据含：个股实时量价(nowPrice=当前实时价、dayHigh/dayLow/open/prevClose)、当日分时(intraday: now实时价/vwap均价/日内高低/posInDay位置/rhythm节奏/是否触及日内高低)、【个股历史规律画像 stockProfile】、【专业技术指标 tech(ATR真实波幅/布林带上下轨/RSI/KDJ/MACD/支撑support压力resistance/系统算好的买入带buyZone卖出带sellZone/止损stopLoss/止盈takeProfit)】、大盘情绪(market)、资金流向(marketFlow)、近20日走势(history)${payload.holdCost ? '、用户当前持仓成本 holdCost' : ''}${payload.tradeHistory ? '、用户过往在这只股上的交易记录 tradeHistory(历史买卖价与盈亏，用于贴合他的操作习惯与成本带)' : ''}。
-数据：${data}
+数据：${data}${advisorData}
 
 【定价三大依据，缺一不可，且必须落到一个具体价格】：
 1. **当前实时价(最高优先，锚)**：以 intraday.now / nowPrice 为基准锚，你的挂单价必须在实时价附近的合理区间，不能脱离盘口开虚价。${isBuy ? '买入价通常≤实时价(挂低吸单)，但不宜低于日内低点太多导致挂不上；急拉时可贴近实时价追。' : '卖出价通常≥实时价(挂高抛单)，但不宜高于日内高点太多导致挂不出；跳水时可贴近实时价出。'}
@@ -246,8 +431,20 @@ ${isAuto ? '你要基于历史规律自动决策，并在 chosenStyle 明确回�
   }
   if (mode === 'hold_advice') {
     return `【持仓个股操作建议请求】用户持有一只票，需要你像贴身操盘顾问一样，明确告诉他现在该 **加仓 / 减仓 / 持有 / 清仓**，并且**给出具体的参考价位（一个数字或一个窄区间）**让他能直接照着挂单。这是持仓管理决策，不是做T。
-数据含：个股实时量价(nowPrice/dayHigh/dayLow/open/prevClose)、当日分时(intraday: now实时价/vwap均价/日内高低/posInDay位置/rhythm节奏/是否触及日内高低)、大盘情绪(market)、资金流向(marketFlow)、个股近20日走势(history: ma5/ma10/ma20、20日高低)、【个股历史规律画像 stockProfile】、【专业技术指标 tech(ATR真实波幅/布林带上下轨/RSI/KDJ/MACD/支撑support压力resistance/买入带buyZone卖出带sellZone/止损stopLoss/止盈takeProfit)】、**用户持仓成本 holdCost 与手数 holdQty（决策基准）**${payload.quant ? '、量化模型 quant(score多因子分/bias/forecast走势预测)' : ''}。
-数据：${data}
+${payload.openTNet ? `【重要·持仓口径】holdCost/holdQty 已按【实时持仓】计算——用户有未结算的做T腿，净${payload.openTNet > 0 ? '买入' : '卖出'}${Math.abs(payload.openTNet)}手在做T未结算前【就当作已经${payload.openTNet > 0 ? '加仓' : '减仓'}】计入了当前持仓(手数与成本都已反映)。请直接以这个 holdQty=${payload.holdQty}手、holdCost=${payload.holdCost} 为当前真实持仓来判断加/减/持有/清仓，不要再把那部分当"待结算做T"。` : ''}
+数据含：个股实时量价(nowPrice/dayHigh/dayLow/open/prevClose)、当日分时(intraday: now实时价/vwap均价/日内高低/posInDay位置/rhythm节奏/是否触及日内高低)、大盘情绪(market)、资金流向(marketFlow)、个股近20日走势(history: ma5/ma10/ma20、20日高低)、【个股历史规律画像 stockProfile】、【专业技术指标 tech(ATR真实波幅/布林带上下轨/RSI/KDJ/MACD/支撑support压力resistance/买入带buyZone卖出带sellZone/止损stopLoss/止盈takeProfit)】、**用户持仓成本 holdCost 与手数 holdQty（决策基准，已含未结算做T净腿）**${payload.account && payload.account.totalAssets ? `、账户总资产${payload.account.totalAssets}元${payload.account.cash != null ? '/可用' + payload.account.cash + '元' : ''}${payload.account.position != null ? '/当前总仓位' + payload.account.position + '%' : ''}${payload.account.stockWeight != null ? '/该股当前占总资产' + payload.account.stockWeight + '%' : ''}(用于按账户全景算补仓金额、仓位占比、最多可买几手)` : ''}${payload.quant ? '、量化模型 quant(score多因子分/bias/forecast走势预测)' : ''}。
+【账户全景优先】若给了 account.totalAssets / account.cash / account.position / account.stockWeight，你必须先按账户约束算建议，而不是只按K线拍脑袋：
+- 加仓：先判断可用资金 account.cash 最多还能买几手(整数手=100股)，再按 marketEnv.suggestPosition 与该股当前占比 stockWeight 判断是否该补；弱市/单票占比已偏高时，只能小补或不补。
+- 减仓：若单票占比 stockWeight 已过高，优先给减仓几手把单票降到更合理区间；别只说“减仓”，要明确减几手、减完后仓位大概降到多少。
+- 持有：也要说清楚“为什么此刻不动”，以及若要再加/再减，分别在什么仓位线触发。
+- 所有手数必须是 **100股整数手**，且不能超过 holdQty 或 cash 能支持的上限。
+【把账算清楚·必做】给加仓/减仓建议时，务必算出：操作手数、约需/回笼资金(=价×手数×100)、操作后新成本、到目标价的预期收益(元+%)、到止损的亏损额、盈亏比${payload.account && payload.account.totalAssets ? '、操作后该股占账户仓位%' : ''}，让用户能直接照做，而不是只说"可加仓"。
+【账户约束·必做】若提供了 account：
+- 先根据 account.cash 算出本次最多还能买几手；加仓手数不能超过这个上限。
+- 再根据 marketEnv.suggestPosition + account.position(当前总仓位) + account.stockWeight(该股当前占比) 决定本次到底给 0/1/2/3…手，而不是空泛地说“适量”。
+- 默认把单票控制在总资产的合理范围：弱市尽量不超过约10%~15%，中性市约15%~20%，强市龙头可放宽但仍要讲清楚理由；若当前 stockWeight 已偏高，优先减仓/持有，不要继续建议重仓加。
+- 若是做T/减仓，也要结合 holdQty 给出可执行的整数手数，不能超过当前手数。
+数据：${data}${advisorData}
 
 【决策逻辑，逐条结合数据，不许空谈】：
 1. **先算盈亏**：用 nowPrice 与 holdCost 比，判断此刻是浮盈还是套牢、幅度多少。这决定基调：浮盈可考虑落袋/减仓，套牢要看该补还是该止损。
@@ -262,36 +459,39 @@ ${isAuto ? '你要基于历史规律自动决策，并在 chosenStyle 明确回�
 - **止损价 stopPrice**：跌破则无条件离场（通常 holdCost×0.92 与最近关键支撑取较高者）。
 - 根据你的决策(action)，主推的那个价位要给准；不主推的价位也尽量给出以便用户参考。价格精度贴合该股量级(低价股可3位小数)，且必须与 tech 的买卖带/支撑压力大体吻合，明显偏离要在理由里说明。
 
-请输出 JSON：{"action":"加仓 或 减仓 或 持有 或 清仓","tone":"red(偏多/加仓/持有强势) 或 green(偏空/减仓/清仓) 或 muted(观望/持有中性)","title":"一句话结论(如:可小幅减仓锁利 / 回踩可加仓 / 继续持有)","pnlNote":"当前相对成本的盈亏情况(引用现价与holdCost的具体数字)","actionPlan":"【最重要·一句话可直接照做的行动指令】把动作+手数(或仓位比例)+参考价位+触发条件揉成一句话，必须含具体价格数字，例如'现价X已浮盈Y%，可在Z附近减2手锁利，跌破W则清仓止损'。","addPrice":加仓参考价数字或null,"reducePrice":减仓参考价数字或null,"stopPrice":止损价数字或null,"targetPrice":目标位/预期价数字或null,"reason":"大白话理由(结合盈亏+趋势+位置+量化，说清为什么这么做、价位为什么定在这)","techNote":"技术面依据(引用布林/RSI/支撑压力/均线的具体数字)"${payload.quant ? ',"quantNote":"量化走势预测如何支撑(引用score/upProb/目标区间的具体数字，大白话)"' : ''},"risk":"最需警惕的风险与失效信号","confidence":"高/中/低"}。只输出JSON。`;
+请输出 JSON：{"action":"加仓 或 减仓 或 持有 或 清仓","tone":"red(偏多/加仓/持有强势) 或 green(偏空/减仓/清仓) 或 muted(观望/持有中性)","title":"一句话结论(如:可小幅减仓锁利 / 回踩可加仓 / 继续持有)","pnlNote":"当前相对成本的盈亏情况(引用现价与holdCost的具体数字)","actionPlan":"【最重要·一句话可直接照做的行动指令】把动作+手数(或仓位比例)+参考价位+触发条件揉成一句话，必须含具体价格数字，例如'现价X已浮盈Y%，可在Z附近减2手锁利，跌破W则清仓止损'。","addPrice":加仓参考价数字或null,"reducePrice":减仓参考价数字或null,"stopPrice":止损价数字或null,"targetPrice":目标位/预期价数字或null,"opQty":"本次建议操作，必须写清动作+手数：加仓X手/减仓X手/清仓X手/做T X手；若本次不动，必须填'无需操作'，禁止填'0'、'0手'、'持有0'这类含糊值","opAmount":"本次约需/回笼资金(元,=操作价×手数×100;加仓为支出、减仓为回笼)","newCost":"加/减仓后的新持仓成本(数字;持有则填'不变')","expReturn":"预期收益(按holdQty到targetPrice能赚多少元、约+N%)","riskAmount":"到stopPrice会亏多少元","posAfter":"${payload.account && payload.account.totalAssets ? '操作后该股占账户仓位%(用account.totalAssets算)' : '相对仓位描述(总资产未填)'}","reason":"大白话理由(结合盈亏+趋势+位置+量化，说清为什么这么做、价位为什么定在这)","techNote":"技术面依据(必须点名当前是否金叉/是否均线多头排列，并引用RSI/布林/支撑压力的具体数字)","fundNote":"资金面依据(引用主力净流入/流出mainNetYi、5日主力main5dYi、盘口委比weibi的具体数字，研判主力进货还是出货)","newsNote":"消息面研判(引用newsHeadlines/newsDigest；有利空必须点明；无则写'近期无明显利空')","macroNote":"宏观/国内外影响(引用macroNews判断风险偏好/避险,及对该股板块是顺风还是逆风;无则'宏观中性')","seatNote":"龙虎榜/席位(lhb有则点明smartMoney；无则'近期未上榜')"${payload.quant ? ',"quantNote":"量化走势预测如何支撑(引用score/upProb/目标区间的具体数字，大白话)"' : ''},"riskReward":"盈亏比(预期收益空间÷止损空间，如 2.5:1)","positionNote":"仓位建议(结合marketEnv.suggestPosition)","resonanceScore":共振分数字(引用resonance.score,0-6),"bearCase":"【反方观点】这个判断可能错在哪(诚实说)","invalidation":"【失效信号】什么价格/信号出现就必须离场(含具体价格)","confidenceReason":"信心等级的理由","risk":"最需警惕的风险与失效信号","confidence":"高/中/低"}。大盘弱只压仓位不否决方向：持仓若个股仍强(逆势强票/资金流入)可继续持有甚至回踩加仓，别因大盘弱就一律减仓；真正该减的是破位/主力出逃/明确利空。加仓/减仓类结论必须把 opQty+opAmount+newCost+expReturn+riskReward 都算出来，让用户能直接照做。只输出JSON。`;
   }
   if (mode === 'buy_advice') {
-    return `【未持仓·买入决策请求】用户还没买这只票，正在研究要不要买、什么时候买、买多少钱。你要像贴身操盘顾问一样，**明确告诉他:现在该买 / 等回调再买 / 暂时观望**，并给出**具体的买入时机 + 买入价(一个数字或窄区间) + 止损价 + 目标价**，让他能直接照着挂单，绝不能含糊其辞。
-数据含：个股实时量价(nowPrice/dayHigh/dayLow/open/prevClose)、当日分时(intraday: now实时价/vwap均价/日内高低/posInDay位置/rhythm节奏/是否触及日内高低)、大盘情绪(market)、资金流向(marketFlow)、个股近20日走势(history: ma5/ma10/ma20、20日高低)、【个股历史规律画像 stockProfile】、【专业技术指标 tech(ATR真实波幅/布林带上下轨/RSI/KDJ/MACD/支撑support压力resistance/买入带buyZone卖出带sellZone/止损stopLoss/止盈takeProfit)】${payload.quant ? '、量化模型 quant(score多因子分/bias/forecast走势预测)' : ''}。
-数据：${data}
+    return `【未持仓·买入决策请求】用户还没买这只票，正在研究到底要不要买。你要像贴身操盘顾问一样，**第一步先给一个明确结论(四选一)**，**第二步再按这个结论给出对应的差异化建议**，绝不能含糊，也不要不管结论如何都只会喊"买入"。
+【买入结论四档(action 必须严格是其一)，按 共振分+现价位置+盈亏比+个股结构 判定】：
+- **立即买入**：共振分≥4(或≥3且counterTrend逆势强票) + 现价不追高(posInDay≤60或缩量回踩企稳、贴买入带/支撑) + 盈亏比≥2:1 + 无明确利空。→ buyPrice/buyZone贴近现价可成交、stopPrice、targetPrice、positionNote(正常仓;弱市压到3~4成)。
+- **回调再买**：看好(共振分≥3)但现价偏高/追高不划算(posInDay高/贴布林上轨/RSI偏高)。→ buyPrice/buyZone给"回踩到哪个价再买"(低于现价)、timing说清等什么信号、stopPrice、targetPrice。
+- **小仓试错**：方向偏多但证据不够强(共振分=2，或逆势强票但大盘弱/资金未确认)——值得参与但不敢重仓。→ buyPrice/buyZone + 明确小仓 positionNote(如"仅1~2成试仓,破位就走") + 偏紧 stopPrice。**这是为弱市强票保留的档，别把本该小仓参与的机会也划到观望。**
+- **观望**：证据不足或该回避——共振分≤1、或技术破位、或主力持续出逃(trend5连负)、或有明确利空、或盈亏比<1.8:1。→ buyPrice/buyZone可为null，必须给watchPrice(突破/跌破哪个价才重新评估)、timing说清等什么信号。
+数据含：个股实时量价(nowPrice/dayHigh/dayLow/open/prevClose)、当日分时(intraday: now实时价/vwap均价/日内高低/posInDay位置/rhythm节奏/是否触及日内高低)、大盘情绪(market)、资金流向(marketFlow)、个股近20日走势(history: ma5/ma10/ma20、20日高低)、【个股历史规律画像 stockProfile】、【专业技术指标 tech(ATR真实波幅/布林带上下轨/RSI/KDJ/MACD/支撑support压力resistance/买入带buyZone卖出带sellZone/止损stopLoss/止盈takeProfit)】${payload.account && payload.account.totalAssets ? `、账户全景 account(totalAssets总资产=${payload.account.totalAssets}元${payload.account.cash != null ? `、cash可用资金=${payload.account.cash}元` : ''}${payload.account.position != null ? `、position当前总仓位=${payload.account.position}%` : ''}${payload.account.holdMktValue != null ? `、holdMktValue当前持仓市值=${payload.account.holdMktValue}元` : ''})` : ''}${payload.quant ? '、量化模型 quant(score多因子分/bias/forecast走势预测)' : ''}。
+数据：${data}${advisorData}
 
 【决策逻辑，逐条结合数据，不许空谈】：
-1. **值不值得买(先定性)**：用 history(均线多空/20日区间位置) + tech(布林/RSI/KDJ/MACD/支撑压力) + stockProfile(振幅/波动率/均值回归) 判断这只股当前是强势可介入、还是转弱该回避、还是超跌可博反弹。振幅太小(recentAmplitude<2.5)、或明显转弱逆风，就直接建议观望。
-2. **买入时机(最关键，必须具体)**：用 intraday(现价vs均价/日内位置posInDay/节奏rhythm/是否触及日内高低) + tech 判断"现在这个点位该不该马上买"：
-   - 现价在日内低位/贴近支撑/RSI偏低/缩量回踩 → 可"现价附近直接买"或"分批建仓";
-   - 现价在日内高位/贴布林上轨/RSI超买/放量冲高 → 建议"等回踩到X再买"，别追高;
-   - 无明确信号 → "观望，等突破X或回踩X再动手"。
-   把时机说成一句可执行的话(如"竞价别追，等回踩到均价线56.8附近分批买""放量站上58.2压力后再介入")。
-3. **买入价(必须落到数字)**：给一个具体的**建议买入价 buyPrice**(优先贴近 tech.buyZone/布林下轨tech.boll.lower/支撑tech.support/MA10)，再给一个**买入区间 buyZone**(如"56.5~57.2")便于分批。价格必须贴合实时价、可成交，不能开脱离盘口的虚价。
-4. **止损与目标**：给 stopPrice(跌破则不追，通常近关键支撑下方或买入价-5%~8%)、targetPrice(短线目标，参考压力位/近20日高/量化目标上沿)。${payload.quant ? `
-5. **量化走势预测 quant.forecast**：upProb(未来5日上涨概率%)、direction(看涨/看跌/震荡)、targetLow~targetHigh(目标价区间)、expRet(预期涨跌%)。看涨且上涨概率高(≥58)→可积极些、买点贴近现价；看跌(≤42)→保守或观望、只在回踩深支撑才考虑;震荡→区间低吸。量化目标区间用来锚定你给的目标价。量化与技术面冲突时以稳健为先并点明分歧。` : ''}
+1. **先按四档规则对号入座**：读 resonance 共振分 + counterTrend(是否逆势强票) + posInDay(现价日内高低位) + 先算盈亏比，严格套用上面四档阈值。**不要因大盘弱就习惯性观望**——大盘弱体现在压低 positionNote 仓位，不改方向；逆势强票即使大盘弱也至少给"小仓试错"，别一律观望。振幅太小(recentAmplitude<2.5)且无逆势强票信号才归观望。
+2. **买入时机(具体到信号+价位)**：用 intraday + tech 说清"现在这个点位该不该动、等什么信号"：现价在日内低位/贴支撑/RSI偏低/缩量回踩→可现价附近买；现价在日内高位/贴布林上轨/RSI超买/放量冲高→等回踩再买；无明确信号→观望等突破或回踩。把时机说成一句可执行的话(含具体价格)。
+3. **价位(按结论给)**：立即买入/回调再买→给 buyPrice(优先贴近 tech.buyZone/布林下轨/支撑/MA10) + buyZone(便于分批) + stopPrice + targetPrice；观望→给 watchPrice(关键触发价)；不建议买→价位可全 null。价格必须贴合实时价、可成交，不能开虚价。
+4. **账户全景约束(如果给了 account 必须执行)**：先用 account.cash 算这笔最多还能买几手(100股整数手)，再结合 marketEnv.suggestPosition 与当前总仓位/总资产决定建议先买几手。不要只说“1成仓”，而要换算成具体**买几手、约花多少钱、约占总资产/可用资金多少**。弱市默认首笔约总资产5%~10%，中性市约8%~15%，强市确认龙头约10%~20%；若现金不够则按最大可买整数手下调。${payload.quant ? `
+5. **量化走势预测 quant.forecast**：upProb(未来5日上涨概率%)、direction(看涨/看跌/震荡)、targetLow~targetHigh(目标价区间)、expRet(预期涨跌%)。看涨且概率高(≥58)→倾向立即买入/回调买、买点可积极；看跌(≤42)→倾向观望或不建议买；震荡→回调再买、区间低吸。量化目标区间用来锚定 targetPrice。量化与技术面冲突时以稳健为先并点明分歧。` : ''}
 
-请输出 JSON：{"action":"买入 或 等回调 或 观望","tone":"red(看多可买) 或 green(偏空回避) 或 muted(观望等待)","title":"一句话结论(如:可现价分批建仓 / 等回踩58再买 / 暂时观望)","timing":"【买入时机·可直接照做】一句话说清什么点位/什么信号出现再买，含具体价格数字","actionPlan":"【最重要·一句话可直接照做的行动指令】把动作+仓位比例+买入价+触发条件揉成一句话，必须含具体价格数字，例如'现价X偏高别追，回踩到Y附近先建半仓，站稳再加，跌破Z放弃'。","buyPrice":建议买入价数字或null,"buyZone":"买入区间(如 56.5~57.2)或null","stopPrice":止损价数字或null,"targetPrice":目标价数字或null,"reason":"大白话理由(结合趋势+位置+量化，说清为什么这么判断、价位为什么定在这)","techNote":"技术面依据(引用布林/RSI/ATR/支撑压力/均线的具体数字)"${payload.quant ? ',"quantNote":"量化走势预测如何支撑(引用score/upProb/目标区间的具体数字，大白话)"' : ''},"risk":"最需警惕的风险与不该买的情形","confidence":"高/中/低"}。观望时 buyPrice 可 null 但 timing 必须说清"等什么信号"。只输出JSON。`;
+请输出 JSON：{"action":"立即买入 或 回调再买 或 小仓试错 或 观望","tier":"now(立即买) 或 pullback(回调买) 或 probe(小仓试错) 或 wait(观望)","tone":"red(立即买/回调买) 或 gold(小仓试错) 或 muted(观望)","title":"一句话结论(直接对应action)","timing":"【买入时机·可直接照做】什么点位/信号出现再买或再评估，含具体价格数字","actionPlan":"【最重要·一句话可直接照做】结论+建议先买几手(若有account必须给整数手数)+约占总资产/可用资金比例+价位+触发条件揉成一句话，含具体价格数字","buyPrice":建议买入价数字或null,"buyZone":"买入区间(如 56.5~57.2)或null","watchPrice":"观望时的关键触发价(如:站上58.2再评估)或null","stopPrice":止损价数字或null,"targetPrice":目标价数字或null,"planQty":"建议首笔买入几手(整数;观望填0)","planAmount":"按建议买入约需资金(元,=买价×手数×100;观望填0)","planWeight":"按建议买入约占总资产/可用资金多少(如 总资产8% / 可用资金25%; 无account则给相对仓位)","reason":"大白话理由(为什么是这一档、价位为什么定在这，并解释为什么是这个手数/仓位)","techNote":"技术面依据(必须点名当前是否金叉/是否均线多头排列，并引用RSI/ATR/布林/支撑压力的具体数字)","fundNote":"资金面依据(引用mainNetYi/main5dYi/trend5/inflowDays，研判主力持续进货还是出货、值不值得跟)","newsNote":"消息面研判(引用newsHeadlines/newsDigest；有减持/问询/解禁等利空必须点明并据此降级；无则写'近期无明显利空')","macroNote":"宏观/国内外影响(引用macroNews判断风险偏好/避险,及对该股板块是顺风还是逆风;无则'宏观中性')","seatNote":"龙虎榜/席位(若lhb有数据，点明是否知名游资/机构在买smartMoney；无则写'近期未上榜')"${payload.quant ? ',"quantNote":"量化走势预测如何支撑(引用score/upProb/目标区间的具体数字，大白话)"' : ''},"riskReward":"盈亏比(目标空间÷止损空间，如 2.5:1)","positionNote":"必须是基于账户余额和总资产换算后的资金管理建议：说明这笔建议买入/不买对应几手、约用多少资金、占总资产/可用资金多少；不是只写抽象仓位。","resonanceScore":共振分数字(引用给定resonance.score,0-6),"bearCase":"【反方观点】我这个判断可能错在哪(一句话，诚实说)","invalidation":"【失效信号】什么价格/信号一出现就证明我错了、必须离场(含具体价格)","confidenceReason":"信心为什么是这个等级(结合共振分/消息面/大盘环境说明)","risk":"最需警惕的风险与不该买的情形","confidence":"高/中/低"}。结论与价位字段必须自洽(观望不硬给buyPrice)。【重要】四档里"小仓试错"是为弱市强票保留的——逆势强票(counterTrend.isStrong)或共振分=2且结构不坏，应给"小仓试错"而不是观望；共振分≥3给回调买或立即买。大盘弱只体现在压低仓位(positionNote)，不改方向。若给了 account，planQty/planAmount/planWeight 必须认真计算、不可空泛。只输出JSON。`;
   }
   if (mode === 'review') {
     const sess = payload.session === 'close' ? '收盘复盘' : payload.session === 'noon' ? '午盘复盘' : '复盘';
+    const nextDay = payload.nextTradeDay || '下一交易日';   // 真实下一交易日(已跳过周末/节假日)
     const guideFor = payload.session === 'close'
-      ? '这是**收盘后复盘**，用户看盘结束、准备为**明天开盘**做决策。请站在"今天收完盘、明天该怎么办"的视角，给出对次日开盘的明确指导（继续持有/明天开盘减/回踩再加/直接止损等）。'
+      ? `这是**收盘后复盘**，用户看盘结束、准备为**${nextDay}**做决策。请站在"今天收完盘、${nextDay}该怎么办"的视角，给出对下一交易日开盘的明确指导（继续持有/${nextDay}开盘减/回踩再加/直接止损等）。注意：下一交易日是 ${nextDay}，不要笼统说"明天"，也不要把它当成周末。`
       : payload.session === 'noon'
       ? '这是**午间休市复盘**，上午已经交易完、下午还要开盘。请站在"上午收完、下午该怎么操作"的视角，给出对**今天下午**的明确指导（下午继续持有/逢高减/回踩加/盯住某价位等）。'
-      : '这是用户手动发起的复盘，请对该股当前状态做一次完整复盘，并给出后续操作指导。';
+      : `这是用户手动发起的复盘，请对该股当前状态做一次完整复盘，并给出后续操作指导；涉及下一交易日时用"${nextDay}"表述。`;
     return `【持仓复盘请求·${sess}】用户${payload.hold ? '持有' : '关注'}这只票，需要你像操盘教练一样做一次**复盘总结**：回顾这只股当前的走势/量价/资金/量化状态，结合用户的持仓成本与今日/历史交易，给出一句话能照做的后续操作指导。${guideFor}
+${payload.openTNet ? `【重要·持仓口径】hold(cost/qty) 已按【实时持仓】计算：用户有未结算做T腿，净${payload.openTNet > 0 ? '买入' : '卖出'}${Math.abs(payload.openTNet)}手在结算前【就当作已经${payload.openTNet > 0 ? '加仓' : '减仓'}】计入了当前持仓。请以这个实时持仓来复盘和给后续指导。` : ''}
 数据含：个股实时量价、当日分时(intraday: vwap均价/日内高低/posInDay位置/rhythm节奏)、大盘情绪(market)、资金流向(marketFlow)、近20日走势(history)、【个股历史规律画像 stockProfile】、【专业技术指标 tech】${payload.quant ? '、量化模型 quant(score/bias/forecast走势预测)' : ''}${payload.hold ? '、用户持仓 hold(cost成本/qty手数/pnlPct浮盈亏%)' : ''}${payload.todayTrades ? '、用户今日在该股的成交 todayTrades(买卖价/手数)' : ''}${payload.tradeHistory ? '、用户过往交易记录 tradeHistory' : ''}。
-数据：${data}
+数据：${data}${advisorData}
 
 【复盘逻辑，逐条结合数据】：
 1. **今日表现回顾**：用当日涨跌/分时节奏(rhythm)/量比，一句话概括这只股今天走成什么样、强还是弱。
@@ -299,7 +499,7 @@ ${isAuto ? '你要基于历史规律自动决策，并在 chosenStyle 明确回�
 3. **趋势与位置研判**：用 history(均线多空/20日位置) + tech(布林/RSI/KDJ/支撑压力) + stockProfile 判断当前处于强势/转弱/超跌，配合量化 forecast 判断后市方向。
 4. **给出下一步指导(最重要)**：${payload.session === 'close' ? '明确"明天开盘"怎么做' : payload.session === 'noon' ? '明确"今天下午"怎么做' : '明确后续怎么做'}——持有/加仓/减仓/清仓/止损，并给**具体参考价位**（回踩加仓价、反弹减仓价、止损价），让用户能直接照做。
 
-请输出 JSON：{"stance":"持有 或 加仓 或 减仓 或 清仓 或 观望","tone":"red(偏多/持有/加仓) 或 green(偏空/减仓/清仓) 或 muted(中性观望)","headline":"一句话复盘结论(最醒目，含核心动作)","todayRecap":"今日走势与量价一句话回顾(引用涨跌/量比/节奏)","pnlNote":"${payload.hold ? '当前持仓盈亏一句话(引用成本与浮盈亏%)' : '未持仓，跳过'}","tradeReview":"${payload.todayTrades ? '今日操作点评(哪步做得好/该改进)' : '今日无成交'}","nextAction":"【${payload.session === 'close' ? '明天开盘' : payload.session === 'noon' ? '今天下午' : '后续'}怎么做·可直接照做】动作+参考价位+触发条件揉成一句话，必须含具体价格数字","addPrice":回踩加仓参考价数字或null,"reducePrice":反弹减仓参考价数字或null,"stopPrice":止损价数字或null,"keyLevel":"要盯住的关键价位说明(如:守住X则持有，破X则走)"${payload.quant ? ',"quantNote":"量化走势预测一句话(引用upProb/direction/目标区间)"' : ''},"risk":"最需警惕的风险","confidence":"高/中/低"}。只输出JSON。`;
+请输出 JSON：{"stance":"持有 或 加仓 或 减仓 或 清仓 或 观望","tone":"red(偏多/持有/加仓) 或 green(偏空/减仓/清仓) 或 muted(中性观望)","headline":"一句话复盘结论(最醒目，含核心动作)","todayRecap":"今日走势与量价一句话回顾(引用涨跌/量比/节奏)","pnlNote":"${payload.hold ? '当前持仓盈亏一句话(引用成本与浮盈亏%)' : '未持仓，跳过'}","tradeReview":"${payload.todayTrades ? '今日操作点评(哪步做得好/该改进)' : '今日无成交'}","nextAction":"【${payload.session === 'noon' ? '今天下午' : (payload.nextTradeDay || '下一交易日')}怎么做·可直接照做】动作+手数+参考价位+触发条件揉成一句话，含具体价格与手数","opQty":"本次建议操作手数(加X手/减X手/持有0，整数)","opAmount":"本次操作约需资金或回笼资金(元,=价×手数×100，加仓为支出/减仓为回笼)","newCost":"若按建议加/减仓后的新持仓成本(数字或'不变')","expReturn":"预期收益(到目标价能赚多少元、约+N%;结合holdQty和目标价算)","riskAmount":"到止损会亏多少元(结合手数与止损价算)","riskReward":"盈亏比(预期收益空间÷止损空间，如 2.2:1)","posAfter":"${payload.account && payload.account.totalAssets ? '操作后该股占账户仓位%(用account.totalAssets算)' : '账户总资产未填,给相对仓位描述(如占比约X成)'}","addPrice":回踩加仓参考价数字或null,"reducePrice":反弹减仓参考价数字或null,"stopPrice":止损价数字或null,"targetPrice":目标价数字或null,"keyLevel":"要盯住的关键价位说明(如:守住X则持有，破X则走)","techNote":"技术面依据(点名是否金叉/多头排列 + RSI/支撑压力)","fundNote":"资金面依据(引用主力净流入/流出、5日主力、盘口委比，研判主力进出)","newsNote":"消息面(有利空点明,无则'无明显利空')","macroNote":"宏观/国内外影响(引用macroNews判断风险偏好/避险,及对该股板块是顺风还是逆风;无则'宏观中性')","seatNote":"龙虎榜/席位(有则点明smartMoney,无则'近期未上榜')"${payload.quant ? ',"quantNote":"量化走势预测一句话(引用upProb/direction/目标区间)"' : ''},"resonanceScore":共振分数字(引用resonance.score),"bearCase":"【反方观点】这个复盘判断可能错在哪","invalidation":"【失效信号】${payload.session === 'noon' ? '下午' : (payload.nextTradeDay || '下一交易日')}什么价一破就改变计划(含价格)","risk":"最需警惕的风险","confidence":"高/中/低"}。大盘弱只压仓位不否决方向；个股强则可持有/加仓。涉及下一交易日时用给定的真实日期表述，不要说成"明天"当成周末。加仓/减仓类结论必须给 opQty+opAmount+expReturn+riskReward，把账算清楚让用户能直接照做。只输出JSON。`;
   }
   return `分析以下数据并输出JSON：${data}`;
 }
@@ -315,6 +515,8 @@ export default async function handler(req, res) {
   const BASE = process.env.LLM_BASE_URL;
   const KEY = process.env.LLM_API_KEY;
   const MODEL = process.env.LLM_MODEL || 'DeepSeek-V3.2-Pro';
+  // 顶级操盘军师专用模型：深度个股研判(做T/加减仓/买入/复盘)用更强、更快、原生JSON稳定的模型
+  const ADVISOR_MODEL = process.env.ADVISOR_MODEL || 'DeepSeek-V4-Pro';
   if (!BASE || !KEY) {
     return res.status(200).send(JSON.stringify({ ok: false, error: 'LLM 未配置' }));
   }
@@ -351,17 +553,51 @@ export default async function handler(req, res) {
         const origin = `${proto}://${host}`;
         const getJ = (p) => fetch(origin + p).then((r) => r.json()).catch(() => null);
 
-        const [mkt, sec, detail, trend] = await Promise.all([
+        const [mkt, sec, detail, trend, stockFund, lhb, corpus, macroNews, todayQ] = await Promise.all([
           getJ('/api/market'),
           getJ('/api/sectors?type=industry&sort=main'),
           getJ(`/api/stock_detail?code=${payload.code}&klt=101&lmt=60`),
           fetchTrend(payload.code),
+          fetchStockFund(payload.code),
+          fetchStockLHB(payload.code),
+          buildCorpus(payload.code).catch(() => null),  // 消息面/公告/基本面 RAG 语料
+          fetchMacroNews(),                              // 国内外宏观/重大事件
+          getJ(`/api/quote?codes=${payload.code}&_t=${Date.now()}`),  // ★今日实时行情(涨跌幅/涨停/量比)——纠正"技术面/资金是昨日口径"的滞后
         ]);
+        // ★今日实时行情：这是"当下事实"，优先级高于昨日收盘的 tech/资金
+        {
+          const q0 = todayQ && todayQ.list && todayQ.list[0];
+          if (q0 && q0.price != null) {
+            payload.todayQuote = {
+              price: q0.price, pct: q0.pct,
+              isLimitUp: !!q0.isLimitUp, isLimitDown: !!q0.isLimitDown,
+              high: q0.high, low: q0.low, open: q0.open, prevClose: q0.prevClose,
+              turnover: q0.turnover, volRatio: q0.volRatio,
+              bigMove: q0.pct != null && Math.abs(q0.pct) >= 7,  // 当日大涨/大跌(>7%)
+            };
+          }
+        }
+        if (macroNews && macroNews.length) payload.macroNews = macroNews.map((n) => n.title).slice(0, 6);
+        // 消息面：直接取新闻/公告/基本面文档(不做向量检索，省3~5s，避免函数超时)
+        if (corpus && corpus.docs && corpus.docs.length) {
+          payload.newsDigest = corpus.docs
+            .filter((d) => d.type === 'news' || d.type === 'profile' || d.type === 'summary')
+            .map((d) => d.text).slice(0, 6);
+          if (corpus.news && corpus.news.length) {
+            payload.newsHeadlines = corpus.news.slice(0, 6).map((n) => n.title).filter(Boolean);
+            newsRefs = corpus.news.filter((n) => n.url).slice(0, 5);  // 供前端引用消息来源
+          }
+        }
+        if (lhb) payload.lhb = lhb;
+        // 信号回测：用历史K线检验该股"金叉后上涨"的命中率，给预测一个可信度自评
+        if (detail && detail.ok && Array.isArray(detail.candles) && detail.candles.length >= 40) {
+          try { const bt = backtestSignal(detail.candles, 5); if (bt) payload.backtest = bt; } catch { /* ignore */ }
+        }
         // 量化预测：用刚取到的 K线喂给量化服务（绕开其取数被风控），t_advice/price 场景带持仓成本
         let quant = null;
         if (detail && detail.ok && Array.isArray(detail.candles) && detail.candles.length >= 25) {
           const hold = payload.holdCost ? { cost: payload.holdCost, qty: payload.holdQty } : null;
-          try { quant = await fetchQuantPredict(payload.code, detail.candles, hold, 9000); } catch { /* 静默 */ }
+          try { quant = await fetchQuantPredict(payload.code, detail.candles, hold, 7000); } catch { /* 静默 */ }
         }
 
         // 大盘情绪
@@ -445,6 +681,91 @@ export default async function handler(req, res) {
             atDayLow: nearLow, atDayHigh: nearHigh,
           }
         }
+        // 个股资金面（主力/超大单/大单净额 + 5日主力 + 盘口委比委差）
+        if (stockFund) payload.stockFund = stockFund;
+        // 交易时段标记：非交易时段时，分时/盘口为最后收盘数据，模型据此参考"收盘后"口径
+        {
+          const nb = new Date(Date.now() + 8 * 3600 * 1000); // 北京时间
+          const wd = nb.getUTCDay(), hm = nb.getUTCHours() * 60 + nb.getUTCMinutes();
+          const trading = wd >= 1 && wd <= 5 && ((hm >= 570 && hm <= 690) || (hm >= 780 && hm <= 900));
+          payload.marketPhase = trading ? '盘中(实时数据)' : '非交易时段(以下分时/盘口/资金为最近收盘数据，请按收盘后口径分析，为下一交易时段做准备)';
+        }
+        // 大盘环境自适应：只影响【仓位/择时】，不再一票否决【个股方向/择股】(择时与择股分离)
+        if (payload.market) {
+          const m = payload.market;
+          let envScore = 50; // 0~100，越低越弱
+          if (m.upDownRatio != null) envScore += Math.min(25, Math.max(-25, (m.upDownRatio - 1) * 25));
+          if (m.limitUp != null && m.limitDown != null) envScore += Math.min(15, Math.max(-15, (m.limitUp - m.limitDown * 3) / 5));
+          const idxAvg = (m.indices || []).length ? avg(m.indices.map((i) => i.pct || 0)) : 0;
+          envScore += Math.min(20, Math.max(-20, idxAvg * 8));
+          envScore = Math.round(Math.min(100, Math.max(0, envScore)));
+          let envLevel = '中性', suggestPosition = '常规(3~5成)', weak = false;
+          if (envScore <= 30) { envLevel = '极弱(冰点)'; suggestPosition = '轻仓(≤2成)'; weak = true; }
+          else if (envScore <= 44) { envLevel = '偏弱'; suggestPosition = '控仓(2~3成)'; weak = true; }
+          else if (envScore >= 68) { envLevel = '强势'; suggestPosition = '可积极(5~7成)'; }
+          payload.marketEnv = {
+            score: envScore, level: envLevel, weak, suggestPosition,
+            // 客观规律：弱市压【仓位】而非禁【看多】；逆势强票仍可小仓做多，弱票才回避
+            note: weak
+              ? `大盘${envLevel}：这是【择时】信号，只压仓位不否决个股——总仓位建议${suggestPosition}、单笔试仓、严设止损；但若个股是逆势强票(抗跌/资金逆流入/创新高)，仍可小仓做多，不要因大盘弱就把好票也一律观望。弱票、破位票才回避。`
+              : (envLevel === '强势' ? `大盘强势：可顺势积极，仓位${suggestPosition}，仍守纪律。` : `大盘中性：常规操作，仓位${suggestPosition}，跟随个股信号。`),
+          };
+        }
+        // 逆势强票识别(D)：个股相对大盘的强弱——大盘跌它抗跌/资金逆势流入/创近期新高
+        {
+          const idxAvg = payload.market && (payload.market.indices || []).length ? avg(payload.market.indices.map((i) => i.pct || 0)) : 0;
+          // 个股当日涨跌幅：优先今日实时行情，否则用最近日K的 pct
+          let stkPct = null;
+          if (payload.todayQuote && payload.todayQuote.pct != null) stkPct = payload.todayQuote.pct;
+          else if (detail && detail.ok && Array.isArray(detail.candles) && detail.candles.length) {
+            const lc = detail.candles[detail.candles.length - 1];
+            if (lc && lc.pct != null) stkPct = lc.pct;
+          }
+          const sf = payload.stockFund;
+          const flags = [];
+          // 抗跌/强于大盘：大盘跌但个股跌得少或翻红
+          if (stkPct != null && idxAvg < -0.3 && stkPct > idxAvg + 0.5) flags.push('强于大盘(抗跌/逆势翻红)');
+          // 资金逆势流入：大盘弱但主力近5日净流入
+          if (sf && sf.main5dYi != null && sf.main5dYi > 0 && idxAvg < 0) flags.push('资金逆势净流入');
+          // 技术创新高/多头：多头排列 + 站上20日线
+          const t2 = payload.tech;
+          if (t2 && String(t2.maTrend).includes('多头')) flags.push('均线多头(强势结构)');
+          if (t2 && t2.boll && t2.boll.pctB != null && t2.boll.pctB >= 80) flags.push('逼近布林上轨(强势)');
+          if (flags.length >= 2) payload.counterTrend = { isStrong: true, flags, note: `逆势强票信号:[${flags.join('、')}]。弱市中这类是资金抱团方向，应优先给"小仓做多"而非观望。` };
+          else if (flags.length === 1) payload.counterTrend = { isStrong: false, flags, note: `部分强势:[${flags.join('、')}]` };
+        }
+        // 信号共振计分（0~6）：技术金叉多头 / 主力真流入 / 量化看涨 / 消息面无雷 / 逆势强票 / 龙虎榜聪明钱
+        {
+          let score = 0; const hit = [];
+          const t2 = payload.tech;
+          if (t2 && (String(t2.maCross).includes('金叉') || String(t2.maTrend).includes('多头') || (t2.bull != null && t2.bear != null && t2.bull - t2.bear >= 2))) { score++; hit.push('技术偏多(金叉/多头)'); }
+          const sf = payload.stockFund;
+          if (sf && ((sf.mainNetYi != null && sf.mainNetYi > 0) || (sf.main5dYi != null && sf.main5dYi > 0))) { score++; hit.push('主力资金净流入'); }
+          const q2 = payload.quant && payload.quant.forecast;
+          if (q2 && ((q2.upProb != null && q2.upProb >= 52) || String(q2.direction).includes('涨'))) { score++; hit.push('量化看涨'); }
+          // 消息面无雷（无减持/问询/立案/解禁等负面词）
+          const negWords = ['减持', '问询', '立案', '违规', '解禁', '亏损', '预亏', '诉讼', '质押', 'ST', '退市'];
+          const newsBlob = [...(payload.newsHeadlines || []), ...(payload.newsDigest || [])].join(' ');
+          const hasNeg = negWords.some((w) => newsBlob.includes(w));
+          if (newsBlob && !hasNeg) { score++; hit.push('消息面暂无明显利空'); }
+          else if (hasNeg) { hit.push('⚠消息面有潜在利空'); }
+          // 逆势强票加分(D)：不再因大盘弱扣分，改为个股强则加分
+          if (payload.counterTrend && payload.counterTrend.isStrong) { score++; hit.push('逆势强票(抗跌/资金逆流入)'); }
+          else if (payload.marketEnv && !payload.marketEnv.weak) { score++; hit.push('大盘不逆风'); }
+          if (payload.lhb && payload.lhb.smartMoney) { score = Math.min(6, score + 1); hit.push('龙虎榜有知名游资/机构'); }
+          payload.resonance = { score: Math.min(6, score), max: 6, hits: hit, hasNegNews: hasNeg };
+        }
+        // 综合可信度(0~100)：共振(50%) + 回测命中率(25%) + 大盘环境(15%) + 消息面无雷(10%)
+        {
+          const rez = payload.resonance ? payload.resonance.score / (payload.resonance.max || 6) : 0.4;
+          const bt = payload.backtest && payload.backtest.hitRate != null ? payload.backtest.hitRate / 100 : 0.5;
+          const env = payload.marketEnv ? payload.marketEnv.score / 100 : 0.5;
+          const news = (payload.resonance && payload.resonance.hasNegNews) ? 0.2 : 0.9;
+          let conf = Math.round((rez * 0.5 + bt * 0.25 + env * 0.15 + news * 0.10) * 100);
+          conf = Math.min(95, Math.max(15, conf)); // 永远不给100%,也不低于15
+          let band = conf >= 68 ? '较可信' : conf >= 48 ? '中等' : '低(仅参考)';
+          payload.trustScore = { score: conf, band, note: '综合共振/历史命中率/大盘环境/消息面得出，非胜率承诺' };
+        }
         // 风格
         payload.style = payload.style || 'balanced'
       } catch (e) {
@@ -453,7 +774,11 @@ export default async function handler(req, res) {
     }
 
     const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 55000);
+    const t = setTimeout(() => ctrl.abort(), 44000);
+
+    const isAdvisor = (mode === 't_advice' || mode === 'hold_advice' || mode === 'buy_advice' || mode === 'review' || mode === 'price' || mode === 'plan');
+    const useModel = isAdvisor ? ADVISOR_MODEL : MODEL;
+    const sysPrompt = isAdvisor ? ADVISOR_SYSTEM : SYSTEM_PROMPT;
 
     const resp = await fetch(`${BASE}/chat/completions`, {
       method: 'POST',
@@ -463,13 +788,13 @@ export default async function handler(req, res) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: MODEL,
+        model: useModel,
         messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'system', content: sysPrompt },
           { role: 'user', content: buildUserPrompt(mode, payload, ragText) },
         ],
         temperature: 0.4,
-        max_tokens: (mode === 'scan' || mode === 'daily' || mode === 'scan_pick') ? 2200 : (mode === 't_advice' ? 1600 : (mode === 'hold_advice' || mode === 'buy_advice' || mode === 'review') ? 1400 : 1200),
+        max_tokens: (mode === 'scan' || mode === 'daily' || mode === 'scan_pick') ? 2200 : (mode === 't_advice' ? 2000 : (mode === 'hold_advice' || mode === 'buy_advice' || mode === 'review') ? 1900 : 1200),
         response_format: { type: 'json_object' },
       }),
     });
@@ -498,10 +823,25 @@ export default async function handler(req, res) {
       JSON.stringify({
         ok: true,
         mode,
-        model: MODEL,
+        model: useModel,
         updatedAt: Date.now(),
         result,
         news: newsRefs,
+        // 可信度元信息：供前端展示共振灯/环境/龙虎榜/消息面(不依赖模型自报)
+        meta: {
+          resonance: payload.resonance || null,
+          counterTrend: payload.counterTrend || null,
+          trustScore: payload.trustScore || null,
+          marketEnv: payload.marketEnv || null,
+          backtest: payload.backtest || null,
+          lhb: payload.lhb ? { onList: true, date: payload.lhb.date, times30d: payload.lhb.times30d, smartMoney: payload.lhb.smartMoney, smartSeats: payload.lhb.smartSeats, buySeats: payload.lhb.buySeats } : null,
+          hasNegNews: payload.resonance ? payload.resonance.hasNegNews : null,
+          newsHeadlines: payload.newsHeadlines || null,
+          macroNews: payload.macroNews || null,
+          fundAsOf: payload.stockFund ? { date: payload.stockFund.asOfDate, historical: payload.stockFund.isHistorical, main5dAvg: payload.stockFund.main5dAvgYi, inflowDays: payload.stockFund.inflowDays } : null,
+          marketPhase: payload.marketPhase || null,
+          todayQuote: payload.todayQuote || null,
+        },
         usedRag: !!ragText,
         usage: j.usage || null,
       })

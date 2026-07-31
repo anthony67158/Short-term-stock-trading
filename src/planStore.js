@@ -50,7 +50,7 @@ function normalizeClosed(closed) {
   })
 }
 
-let state = { plan: [], holding: [], closed: [], account: null, alerts: [], reviews: {} }
+let state = { plan: [], holding: [], closed: [], account: null, alerts: [], reviews: {}, adviceLog: [] }
 const listeners = new Set()
 
 // ===== 撤销栈：交易类操作前存快照，支持一步步撤回 =====
@@ -64,7 +64,7 @@ function snapshot(label) {
       at: Date.now(),
       data: JSON.parse(JSON.stringify({
         plan: state.plan, holding: state.holding, closed: state.closed,
-        account: state.account, alerts: state.alerts, reviews: state.reviews,
+        account: state.account, alerts: state.alerts, reviews: state.reviews, adviceLog: state.adviceLog,
       })),
     })
     if (_undoStack.length > UNDO_LIMIT) _undoStack.shift()
@@ -79,7 +79,7 @@ function scheduleSave() {
   if (_suspend || !_saver) return
   if (_saveTimer) clearTimeout(_saveTimer)
   _saveTimer = setTimeout(() => {
-    _saver({ plan: state.plan, holding: state.holding, closed: state.closed, account: state.account, alerts: state.alerts, reviews: state.reviews })
+    _saver({ plan: state.plan, holding: state.holding, closed: state.closed, account: state.account, alerts: state.alerts, reviews: state.reviews, adviceLog: state.adviceLog })
   }, 800)
 }
 function emit() { state = { ...state }; listeners.forEach((l) => l()); scheduleSave() }
@@ -159,6 +159,7 @@ export const planStore = {
       account: (d && d.account) || null,   // { totalAssets, cash, updatedAt }
       alerts: (d && d.alerts) || [],        // 预警规则集
       reviews: (d && d.reviews) || {},      // 复盘结论：key=code → { code,name,at,session(noon/close/manual),text,... }
+      adviceLog: (d && d.adviceLog) || [],  // AI建议决策记录：{id,code,name,mode,at,action,entry,stop,target,trust,resonance,verified,hit,...}
     }
     listeners.forEach((l) => l())
     _suspend = false
@@ -587,6 +588,55 @@ export const planStore = {
     state.reviews = next; emit()
   },
 
+  // ===== AI建议决策记录 + 事后回测（用真实结果给建议可信度背书）=====
+  // entry: { code,name,mode,action,tone,entryPrice,stop,target,trust,resonance,priceAtAdvice }
+  logAdvice(entry) {
+    if (!entry || !entry.code) return
+    const rec = {
+      id: uid(), at: Date.now(), verified: false, hit: null, resultPct: null,
+      ...entry,
+    }
+    // 同股同模式10分钟内不重复记录，避免刷屏
+    const dup = (state.adviceLog || []).find((x) => x.code === entry.code && x.mode === entry.mode && (Date.now() - x.at) < 600000)
+    if (dup) return
+    state.adviceLog = [rec, ...(state.adviceLog || [])].slice(0, 500)
+    emit()
+  },
+  // 事后核验：传入 {code: 现价}，对≥1个交易日前、未核验的建议判定命中
+  verifyAdvice(priceMap) {
+    if (!priceMap) return
+    const DAY = 24 * 3600 * 1000
+    let changed = false
+    state.adviceLog = (state.adviceLog || []).map((r) => {
+      if (r.verified) return r
+      if (Date.now() - r.at < DAY) return r          // 至少隔一天再判
+      const now = priceMap[r.code]
+      if (now == null || !r.priceAtAdvice) return r
+      const chg = +(((now - r.priceAtAdvice) / r.priceAtAdvice) * 100).toFixed(2)
+      // 命中定义：看多类(买入/加仓/持有/正T)→涨了算对；看空类(减仓/清仓/观望/不建议)→跌了或没大涨算对
+      const bull = /买|加|持有|正T|立即|回调再买/.test(r.action || '')
+      const bear = /减|清|观望|不建议|反T/.test(r.action || '')
+      let hit = null
+      if (bull) hit = chg > 0
+      else if (bear) hit = chg <= 1   // 看空/观望：没明显上涨即算对
+      return { ...r, verified: true, hit, resultPct: chg, verifiedAt: Date.now(), ...(changed = true, {}) }
+    })
+    if (changed) emit()
+  },
+  // 各类建议真实胜率统计（供"军师战绩"展示）
+  adviceStats() {
+    const log = (state.adviceLog || []).filter((r) => r.verified && r.hit != null)
+    const by = {}
+    for (const r of log) {
+      const k = r.mode || 'other'
+      if (!by[k]) by[k] = { mode: k, total: 0, hit: 0 }
+      by[k].total++; if (r.hit) by[k].hit++
+    }
+    const groups = Object.values(by).map((g) => ({ ...g, winRate: g.total ? Math.round((g.hit / g.total) * 100) : null }))
+    const total = log.length, hit = log.filter((r) => r.hit).length
+    return { groups, total, hit, winRate: total ? Math.round((hit / total) * 100) : null, pending: (state.adviceLog || []).filter((r) => !r.verified).length }
+  },
+
   // ===== 撤回：弹出最近一次快照并恢复（交易类操作的后悔药）=====
   canUndo() { return _undoStack.length > 0 },
   lastUndoLabel() { return _undoStack.length ? _undoStack[_undoStack.length - 1].label : null },
@@ -597,11 +647,36 @@ export const planStore = {
     const d = snap.data
     state = {
       plan: d.plan || [], holding: d.holding || [], closed: d.closed || [],
-      account: d.account || null, alerts: d.alerts || [], reviews: d.reviews || {},
+      account: d.account || null, alerts: d.alerts || [], reviews: d.reviews || {}, adviceLog: d.adviceLog || [],
     }
     emit() // 恢复后正常回存云端，保证撤回结果也持久化
     return snap.label
   },
+}
+
+// 某只股的【实时持仓】口径：底仓 ± 未结算做T净腿(买腿=已加仓、卖腿=已减仓)。
+// 返回 { qty, cost, hasOpenT, tNetHands } 或 null(无持仓)。供 AI 建议/复盘统一使用。
+export function livePositionOf(code) {
+  const hs = (state.holding || []).filter((h) => h.code === code)
+  if (!hs.length) return null
+  let qty = 0, costSum = 0, hasOpenT = false, tNet = 0
+  for (const h of hs) {
+    const baseQty = h.qty || 0, baseCost = h.buyPrice || 0
+    const r = computeTFlows(h.tFlows)
+    const openBuy = r.openBuy || 0, openSell = r.openSell || 0
+    const net = openBuy - openSell
+    if (h.tFlows && h.tFlows.length && (openBuy > 0 || openSell > 0)) hasOpenT = true
+    tNet += net
+    const liveQty = Math.max(0, baseQty + net)
+    let cost = baseCost
+    if (openBuy > 0 && r.openBuyAvg != null && (baseQty + openBuy) > 0) {
+      cost = ((baseCost * baseQty) + (r.openBuyAvg * openBuy)) / (baseQty + openBuy)
+    }
+    qty += liveQty
+    costSum += cost * liveQty
+  }
+  if (qty <= 0) return null
+  return { qty, cost: +(costSum / qty).toFixed(3), hasOpenT, tNetHands: tNet }
 }
 
 // FIFO 配对做T流水，算已实现净收益 + 未配对(挂单)手数 + 每笔配对明细

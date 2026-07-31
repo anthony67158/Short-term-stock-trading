@@ -111,6 +111,23 @@ export function computeTechnicals(candles, periodLabel = '日') {
   const last = closes[closes.length - 1];
 
   const ma = { ma5: sma(closes, 5), ma10: sma(closes, 10), ma20: sma(closes, 20), ma60: sma(closes, 60) };
+  // 均线金叉/死叉（MA5 上穿/下穿 MA10）——短线最常用的择时信号
+  let maCross = null;
+  if (closes.length >= 11) {
+    const ma5Prev = sma(closes.slice(0, -1), 5), ma10Prev = sma(closes.slice(0, -1), 10);
+    if (ma.ma5 != null && ma.ma10 != null && ma5Prev != null && ma10Prev != null) {
+      if (ma5Prev <= ma10Prev && ma.ma5 > ma.ma10) maCross = 'gold';       // 金叉
+      else if (ma5Prev >= ma10Prev && ma.ma5 < ma.ma10) maCross = 'dead';  // 死叉
+    }
+  }
+  // 均线排列：多头(5>10>20>60) / 空头(5<10<20<60) / 缠绕
+  let maTrend = 'tangle';
+  const { ma5, ma10, ma20, ma60 } = ma;
+  if (ma5 != null && ma10 != null && ma20 != null) {
+    const m60 = ma60 != null ? ma60 : -Infinity;
+    if (ma5 > ma10 && ma10 > ma20 && ma20 >= (ma60 != null ? ma60 : ma20)) maTrend = 'bull';
+    else if (ma5 < ma10 && ma10 < ma20 && (ma60 == null || ma20 <= ma60)) maTrend = 'bear';
+  }
   const atrObj = computeATR(cs, 14);
   const boll = computeBoll(closes, 20, 2);
   const rsi = computeRSI(closes, 14);
@@ -196,6 +213,8 @@ export function computeTechnicals(candles, periodLabel = '日') {
   if (kdj) { if (kdj.j <= 0 || kdj.k <= 20) bull++; if (kdj.j >= 100 || kdj.k >= 80) bear++; }
   if (macd) { if (macd.cross === 'gold' || macd.macd > 0) bull++; if (macd.cross === 'dead' || macd.macd < 0) bear++; }
   if (ma.ma20 != null) { if (last >= ma.ma20) bull++; else bear++; }
+  if (maCross === 'gold') bull++; else if (maCross === 'dead') bear++;
+  if (maTrend === 'bull') bull++; else if (maTrend === 'bear') bear++;
   let verdict, vtone;
   if (bull - bear >= 2) { verdict = '偏多：多项指标共振向上，逢低吸纳为主'; vtone = 'red'; }
   else if (bear - bull >= 2) { verdict = '偏空：多项指标转弱，逢高减仓为主'; vtone = 'green'; }
@@ -204,11 +223,40 @@ export function computeTechnicals(candles, periodLabel = '日') {
   return {
     price: round(last),
     ma: { ma5: round(ma.ma5), ma10: round(ma.ma10), ma20: round(ma.ma20), ma60: round(ma.ma60) },
+    maCross, maTrend,
     atr: atrObj, boll, rsi, macd, kdj, sr, volRatio,
     reads,                       // 大白话逐条解读
     verdict, vtone, bull, bear,  // 综合结论
     priceHints: { buyZone, sellZone, stopLoss, takeProfit }, // 给定价用的价位锚
   };
+}
+
+// 信号滚动回测：用历史K线检验"金叉/多头后N日上涨"的命中率，给预测一个"这只股历史上准不准"的自评
+// candles 升序[{open,close,high,low}]；返回 {hitRate, samples, note} 或 null
+export function backtestSignal(candles, horizon = 5) {
+  const cs = (candles || []).filter((c) => c && c.close != null);
+  if (cs.length < 40) return null;
+  const closes = cs.map((c) => c.close);
+  const sma = (arr, n, end) => { if (end < n - 1) return null; let s = 0; for (let i = end - n + 1; i <= end; i++) s += arr[i]; return s / n; };
+  let signals = 0, hits = 0;
+  // 遍历历史，每次出现"MA5上穿MA10金叉"时，看未来 horizon 日收盘是否上涨
+  for (let i = 11; i < cs.length - horizon; i++) {
+    const ma5 = sma(closes, 5, i), ma10 = sma(closes, 10, i);
+    const ma5p = sma(closes, 5, i - 1), ma10p = sma(closes, 10, i - 1);
+    if (ma5 == null || ma10 == null || ma5p == null || ma10p == null) continue;
+    const goldCross = ma5p <= ma10p && ma5 > ma10;
+    if (!goldCross) continue;
+    signals++;
+    const fut = closes[i + horizon];
+    if (fut > closes[i]) hits++;
+  }
+  if (signals < 3) return { hitRate: null, samples: signals, note: `历史金叉样本不足(${signals}次)，命中率不可靠` };
+  const hitRate = Math.round((hits / signals) * 100);
+  let note;
+  if (hitRate >= 60) note = `历史上该股金叉后${horizon}日上涨命中率${hitRate}%(${signals}次样本)，信号较可靠`;
+  else if (hitRate >= 45) note = `历史金叉后命中率${hitRate}%(${signals}次)，一般，需结合其他信号`;
+  else note = `历史金叉后命中率仅${hitRate}%(${signals}次)，该股金叉信号不灵，别只凭技术面追`;
+  return { hitRate, samples: signals, horizon, note };
 }
 
 // 供 AI prompt 用的“紧凑摘要”（省 token，只保留结论性数据）
@@ -217,9 +265,12 @@ export function techSummaryForAI(tech) {
   const p = tech.priceHints || {};
   return {
     verdict: tech.verdict, bull: tech.bull, bear: tech.bear,
+    ma: tech.ma,
+    maCross: tech.maCross === 'gold' ? 'MA5上穿MA10金叉' : tech.maCross === 'dead' ? 'MA5下穿MA10死叉' : '无均线交叉',
+    maTrend: tech.maTrend === 'bull' ? '均线多头排列(5>10>20>60)' : tech.maTrend === 'bear' ? '均线空头排列(5<10<20<60)' : '均线缠绕',
     atr: tech.atr && tech.atr.atr, atrPct: tech.atr && tech.atr.atrPct,
     boll: tech.boll && { lower: tech.boll.lower, mid: tech.boll.mid, upper: tech.boll.upper, pctB: tech.boll.pctB, width: tech.boll.width },
-    rsi: tech.rsi, kdj: tech.kdj && tech.kdj.j, macd: tech.macd && (tech.macd.cross || (tech.macd.macd > 0 ? '红柱' : '绿柱')),
+    rsi: tech.rsi, kdj: tech.kdj && tech.kdj.j, macd: tech.macd && (tech.macd.cross === 'gold' ? 'MACD金叉' : tech.macd.cross === 'dead' ? 'MACD死叉' : (tech.macd.macd > 0 ? 'MACD红柱' : 'MACD绿柱')),
     volRatio: tech.volRatio,
     support: tech.sr && tech.sr.support, resistance: tech.sr && tech.sr.resistance,
     buyZone: p.buyZone, sellZone: p.sellZone, stopLoss: p.stopLoss, takeProfit: p.takeProfit,

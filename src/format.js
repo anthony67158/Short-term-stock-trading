@@ -44,3 +44,34 @@ export function timeStr(ts) {
   const d = new Date(ts);
   return d.toLocaleTimeString('zh-CN', { hour12: false });
 }
+
+// 算账/建议字段取值净化：AI 在"持有/观望"时返回 "0"/"0手"/"不变"/"-" 等占位，
+// 字符串在 JSX 里是真值会渲染出空的 0 格子(挨一起显示成"00")。hasVal 把这些统一判为无值。
+export function hasVal(v) {
+  if (v == null) return false;
+  const s = String(v).trim();
+  if (!s || s === '-' || s === '--' || s === '不变' || s === '无' || s === '/' || s === '无需操作' || s === '不操作') return false;
+  // 把“持有0 / 观望0 / 加仓0手 / 减仓0手”等动作前缀去掉后再判断是否为 0
+  const num = s
+    .replace(/[手股元%,，\s]/g, '')
+    .replace(/^(持有|观望|无需操作|不操作|操作|加仓|减仓|买入|卖出|做T|清仓)/, '');
+  if (/^0+(\.0+)?$/.test(num)) return false;
+  return true;
+}
+
+// 操作字段标准化：不能显示“持有0/操作0/资金0”这类含糊值。
+// 无动作 => “无需操作”；有动作但只有数字 => 根据 action 补成“加仓X手/减仓X手/做T X手”。
+export function opText(v, action = '') {
+  if (!hasVal(v)) return '无需操作';
+  const raw = String(v).trim();
+  if (/^(加仓|减仓|买入|卖出|做T|清仓)/.test(raw)) return raw;
+  const n = raw.match(/\d+(?:\.\d+)?/);
+  if (!n) return raw;
+  const qty = n[0];
+  const a = String(action || '');
+  if (a.includes('加') || a.includes('买')) return `加仓${qty}手`;
+  if (a.includes('减') || a.includes('卖')) return `减仓${qty}手`;
+  if (a.includes('清')) return `清仓${qty}手`;
+  if (/T/i.test(a)) return `做T ${qty}手`;
+  return raw;
+}

@@ -94,6 +94,19 @@ function MainApp() {
     return () => clearInterval(id)
   }, [reviewQuotes.data])
 
+  // ===== AI建议事后回测：拉取待核验建议的现价，隔日判定命中，累计真实胜率 =====
+  const pendingCodes = [...new Set((book.adviceLog || []).filter((r) => !r.verified).map((r) => r.code))].slice(0, 30)
+  const verifyQuotes = usePolling(
+    pendingCodes.length ? `/api/quote?codes=${pendingCodes.join(',')}` : null,
+    300000, // 5分钟一次足够
+    [pendingCodes.join(',')]
+  )
+  useEffect(() => {
+    const map = {}
+    ;((verifyQuotes.data && verifyQuotes.data.list) || []).forEach((q) => { map[q.code] = q.price })
+    if (Object.keys(map).length) planStore.verifyAdvice(map)
+  }, [verifyQuotes.data])
+
 
   // 数据快照给 AI（避免频繁重建）
   const dataRef = useRef({})

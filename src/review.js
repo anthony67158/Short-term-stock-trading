@@ -1,7 +1,7 @@
 // 复盘工具：构造复盘请求 payload + 调用后端 review 模式
 // 复盘结论"每只股只留最新一条"，存 planStore.reviews（云端持久化）
 import { callAI } from './ai'
-import { planStore } from './planStore'
+import { planStore, livePositionOf } from './planStore'
 
 // 北京时间当前分钟数 / 日key
 export function nowBJ() { const n = new Date(); return new Date(n.getTime() + (n.getTimezoneOffset() + 480) * 60000) }
@@ -9,15 +9,45 @@ export function bjMinutes() { const d = nowBJ(); return d.getHours() * 60 + d.ge
 export function bjDayKey() { const d = nowBJ(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
 export function isWeekday() { const g = nowBJ().getDay(); return g !== 0 && g !== 6 }
 
+// A股法定节假日(闭市)——每年初可补充维护；用于"下一交易日"计算，避免"明天开盘"落在周末/假期
+const A_SHARE_HOLIDAYS = new Set([
+  // 2026(示例，按实际公布调整)
+  '2026-01-01', '2026-02-16', '2026-02-17', '2026-02-18', '2026-02-19', '2026-02-20', '2026-02-21', '2026-02-22',
+  '2026-04-06', '2026-05-01', '2026-06-19', '2026-09-25', '2026-10-01', '2026-10-02', '2026-10-05', '2026-10-06', '2026-10-07',
+])
+function ymd(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
+// 从今天(北京时间)算下一个交易日：跳过周末与已知节假日
+export function nextTradingDay() {
+  const d = nowBJ(); d.setHours(0, 0, 0, 0)
+  for (let i = 1; i <= 12; i++) {
+    const n = new Date(d.getTime() + i * 86400000)
+    const g = n.getDay()
+    if (g === 0 || g === 6) continue
+    if (A_SHARE_HOLIDAYS.has(ymd(n))) continue
+    return n
+  }
+  return new Date(d.getTime() + 86400000)
+}
+// 下一交易日的友好标签：如"下周一(08-03)"/"明天(08-01)"
+export function nextTradingDayLabel() {
+  const today = nowBJ(); today.setHours(0, 0, 0, 0)
+  const nt = nextTradingDay()
+  const diffDays = Math.round((nt.getTime() - today.getTime()) / 86400000)
+  const wk = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][nt.getDay()]
+  const md = `${String(nt.getMonth() + 1).padStart(2, '0')}-${String(nt.getDate()).padStart(2, '0')}`
+  if (diffDays === 1) return `明天(${wk} ${md})`
+  return `下一交易日${wk}(${md})`
+}
+
 // 当前应生成的复盘场次：
 //   noon  = 午间休市那一刻起(11:30–13:00) → 指导下午
-//   close = 收盘那一刻起(15:00–收盘后一段) → 指导次日
-//   null  = 非复盘时点
+//   close = 收盘后(15:00 起，一直到当天结束/次日盘前) → 指导次日
+//   null  = 非复盘时点(盘前、盘中)
 export function currentAutoSession() {
   if (!isWeekday()) return null
   const hm = bjMinutes()
-  if (hm >= 690 && hm < 780) return 'noon'   // 11:30–13:00
-  if (hm >= 900 && hm <= 990) return 'close'  // 15:00–16:30
+  if (hm >= 690 && hm < 780) return 'noon'    // 11:30–13:00 午间
+  if (hm >= 900) return 'close'               // 15:00 之后(收盘~当天结束)都可补生成，不再限 16:30
   return null
 }
 
@@ -56,6 +86,12 @@ function tradeHistoryOf(code) {
     }))
 }
 
+// 账户资产(总资产/可用现金)——供 AI 算补仓金额、仓位占比、预期收益
+function acctInfo() {
+  const a = planStore.get().account || {}
+  return { totalAssets: a.totalAssets ?? null, cash: a.cash ?? null }
+}
+
 // 生成一次复盘并写入 store。opts: { code, name, session, hold:{cost,qty,pnlPct}|null }
 // 成功返回 review 对象，失败返回 { error }
 export async function generateReview({ code, name, session, hold }) {
@@ -65,6 +101,9 @@ export async function generateReview({ code, name, session, hold }) {
     hold: hold ? { cost: hold.cost, qty: hold.qty, pnlPct: hold.pnlPct } : null,
     holdCost: hold ? hold.cost : null,
     holdQty: hold ? hold.qty : null,
+    openTNet: hold ? (hold.openTNet || 0) : 0,   // 未结算做T净手数(正=已净加仓/负=已净减仓)
+    nextTradeDay: nextTradingDayLabel(),          // 真实下一交易日(跳过周末/节假日)，避免"明天"落在周末
+    account: acctInfo(),                           // 账户总资产/可用，用于算仓位占比与补仓金额
     todayTrades: todayTradesOf(code),
     tradeHistory: tradeHistoryOf(code),
   }
@@ -100,9 +139,44 @@ function isDone(session) {
   return !!loadDone()[key]
 }
 
+// 某只持仓是否"今天还没有复盘"(用于"补生成"只补缺口，不重复覆盖已有)
+export function isReviewMissingToday(code) {
+  const review = (planStore.get().reviews || {})[code]
+  return !review || review.dayKey !== bjDayKey()
+}
+// 今天缺复盘的持仓只数(供按钮显示"补 N 只"或在全部就绪时禁用)
+export function missingReviewCount() {
+  const holding = planStore.get().holding || []
+  const codes = [...new Set(holding.map((h) => h.code))]
+  return codes.filter((c) => isReviewMissingToday(c)).length
+}
+
 let _autoRunning = false
+// 对持仓股逐只按【实时持仓】口径生成复盘。返回 {ok, fail, skipped}。供自动调度 + 手动补生成共用。
+// opts.onlyMissing=true 时只对"今天还没有复盘"的持仓生成(补缺口，不覆盖已有)——用于顶部"补生成"按钮，
+// 与单卡上的"重生成"(强制覆盖单只)职责分离，消除重复。
+async function reviewAllHoldings(session, quoteMap, opts = {}) {
+  const onlyMissing = !!opts.onlyMissing
+  const holding = planStore.get().holding || []
+  const codes = [...new Set(holding.map((h) => h.code))]
+  let ok = 0, fail = 0, skipped = 0
+  for (const code of codes) {
+    if (onlyMissing && !isReviewMissingToday(code)) { skipped++; continue }
+    const lp = livePositionOf(code)  // {qty,cost,hasOpenT,tNetHands}
+    if (!lp) continue
+    const name = (holding.find((h) => h.code === code) || {}).name || code
+    const price = quoteMap && quoteMap[code] ? quoteMap[code].price : null
+    const pnlPct = (price && lp.cost) ? +(((price - lp.cost) / lp.cost) * 100).toFixed(2) : null
+    try {
+      const r = await generateReview({ code, name, session, hold: { cost: lp.cost, qty: lp.qty, pnlPct, openTNet: lp.hasOpenT ? lp.tNetHands : 0 } })
+      if (r && !r.error) ok++; else fail++
+    } catch { fail++ }
+  }
+  return { ok, fail, skipped }
+}
+
 // 检查并执行当前场次的自动复盘。quoteMap: {code: {price}} 供算浮盈亏。
-// 返回是否触发了一轮自动复盘。
+// 关键：只有【至少成功生成一只】才标记完成；全失败则不标记，下一分钟自动重试(修复"占位后失败=永久不再生成")。
 export async function runAutoReviewIfDue(quoteMap) {
   if (_autoRunning) return false
   const session = currentAutoSession()
@@ -111,26 +185,27 @@ export async function runAutoReviewIfDue(quoteMap) {
   const holding = planStore.get().holding || []
   if (!holding.length) { markDone(session); return false }  // 无持仓也标记，避免反复检查
   _autoRunning = true
-  // 先占位标记，避免多标签/多次触发；失败的单只不影响整体标记
-  markDone(session)
   try {
-    // 按 code 去重（同股多笔持仓合并成本）
-    const byCode = new Map()
-    for (const h of holding) {
-      const o = byCode.get(h.code) || { code: h.code, name: h.name, qty: 0, costSum: 0 }
-      o.qty += h.qty || 0
-      o.costSum += (h.buyPrice || 0) * (h.qty || 0)
-      byCode.set(h.code, o)
-    }
-    for (const o of byCode.values()) {
-      const cost = o.qty ? +(o.costSum / o.qty).toFixed(3) : 0
-      const price = quoteMap && quoteMap[o.code] ? quoteMap[o.code].price : null
-      const pnlPct = (price && cost) ? +(((price - cost) / cost) * 100).toFixed(2) : null
-      try {
-        await generateReview({ code: o.code, name: o.name, session, hold: { cost, qty: o.qty, pnlPct } })
-      } catch { /* 单只失败跳过 */ }
-    }
-    return true
+    const { ok } = await reviewAllHoldings(session, quoteMap)
+    if (ok > 0) markDone(session)   // 成功至少一只才标记；否则保留未完成，下轮重试
+    return ok > 0
+  } finally {
+    _autoRunning = false
+  }
+}
+
+// 手动补生成：对持仓生成复盘。默认 onlyMissing=true → 只补"今天还没有复盘"的持仓(顶部"补生成"按钮的语义)。
+// 单卡上的"重生成"走 generateReview 直接覆盖单只，二者职责分离不重复。
+// session 传 'close'/'noon'/'manual'；成功后按需标记完成，避免之后又自动重复跑。
+export async function forceGenerateReviews(session, quoteMap, opts = {}) {
+  if (_autoRunning) return { ok: 0, fail: 0, busy: true }
+  _autoRunning = true
+  try {
+    const s = session || currentAutoSession() || 'manual'
+    const onlyMissing = opts.onlyMissing !== false // 默认只补缺口
+    const res = await reviewAllHoldings(s, quoteMap, { onlyMissing })
+    if (res.ok > 0 && (s === 'close' || s === 'noon')) markDone(s)
+    return res
   } finally {
     _autoRunning = false
   }
