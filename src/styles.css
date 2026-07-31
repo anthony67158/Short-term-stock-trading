@@ -29,6 +29,10 @@
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
   --t-fast: .14s var(--ease);
   --t-med: .22s var(--ease);
+  /* 去盒化设计系统：三级"表面"层次 —— 用极轻底色/分隔线代替处处描边 */
+  --surface-quiet: color-mix(in srgb, var(--panel3) 42%, transparent); /* 静默字段底色(无边框) */
+  --surface-hair: color-mix(in srgb, var(--border) 55%, transparent);  /* 发丝分隔线 */
+  --field-gap: 1px;   /* 网格字段间的发丝缝(靠底色分隔而非边框) */
 }
 
 /* ============ 白天模式（浅色）：覆盖同名变量，组件零改动 ============ */
@@ -2107,3 +2111,93 @@ body {
   transition: border-color var(--t-fast), box-shadow var(--t-fast);
 }
 .hold-grid .hold-item:hover { border-color: var(--border); }
+
+/* ═══════════════════════════════════════════════════════════════
+   全站去盒化精修 (v3) — 形式追随功能 · 情感化设计
+   ───────────────────────────────────────────────────────────────
+   原则:
+   1) 面板(.panel)是唯一的"容器盒"。面板内的 KPI/数据/价位小格
+      不再各自描边+抬升,改用"极轻底色 + 发丝缝"成组,降低视觉噪音。
+   2) 形式追随功能:语义色(买红/卖绿)从"整块盒"降级为"左色条/淡色调",
+      让颜色服务于信息优先级,而非制造更多框。
+   3) 情感化:决策/盈亏信息保留应有的视觉重量(hero),支撑数据退隐;
+      交互有即时、克制的反馈(hover/active),层次靠留白与分隔重建。
+   仅调层次/间距/配色/圆角,不动任何结构与功能逻辑。
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ---- 通用:面板内"字段网格"去盒化基类效果 ----
+   下列小格原来各自 border+bg+radius(一排 4~6 个抬升盒),
+   统一改为:无边框、共享极轻底色、用 1px 发丝缝分隔,成为一个"数据带"。*/
+.sg-cell,
+.acc-cell,
+.rv-kpi-cell,
+.rv-attr-cell,
+.ap-cell,
+.tech-price-cell,
+.fc-cell {
+  border: none !important;
+  background: var(--surface-quiet) !important;
+  box-shadow: none !important;
+}
+
+/* 今日选股·情绪温度计六宫格:去边框,保留栅格间距,静默底色成组 */
+.sg-cell { background: var(--surface-quiet) !important; }
+
+/* 大盘小统计(mb-stats 本就是发丝缝网格)—统一底色,弱化割裂 */
+.mb-stats { background: var(--surface-hair); }
+.mb-stat { background: var(--panel); }
+
+/* 账户四宫格 KPI:去盒成静默字段,hero(总资产)保留强调 */
+.acc-cell { background: var(--surface-quiet) !important; }
+
+/* 复盘 KPI/绩效格:去边框,保留栅格间距;hero 卡保留品牌渐变(它是主视觉焦点,功能上应最重) */
+.rv-kpi-cell, .rv-attr-cell { background: var(--surface-quiet) !important; }
+
+/* 复盘图表:三张图不再各自成盒,改为面板内平铺 + 发丝分隔线 */
+.rv-chart {
+  border: none !important;
+  background: none !important;
+  border-radius: 0 !important;
+  padding: 4px 0 12px !important;
+  border-top: 1px solid var(--surface-hair);
+}
+.rv-charts > .rv-chart:first-child { border-top: none; }
+.rv-chart-2col { gap: 18px !important; }
+
+/* ---- 个股详情弹窗(StockDetail)—— 最重的盒中盒重灾区 ---- */
+/* 报价块 / K线块:从"抬升盒"降为"分隔区块",与弹窗背景融合 */
+.detail-quote, .detail-kline {
+  background: color-mix(in srgb, var(--bg-elev) 55%, transparent) !important;
+  border: none !important;
+  border-radius: var(--radius-sm) !important;
+}
+/* 技术价位格 / 建议属性格 / 走势因子格:去边框成静默字段(保留栅格间距) */
+.ap-cell, .tech-price-cell { background: var(--surface-quiet) !important; }
+/* 语义色:买红/卖绿 不再整块描边,改为左色条(功能:标方向,不抢框) */
+.tech-price-cell.buy { border-left: 3px solid var(--red) !important; }
+.tech-price-cell.sell { border-left: 3px solid var(--green) !important; }
+/* 因子折叠头/因子格:弱化描边 */
+.fc-fold { background: var(--surface-quiet) !important; border: none !important; }
+.fc-fold:hover { background: var(--panel3) !important; }
+.fc-cell { background: var(--surface-quiet) !important; }
+
+/* ---- AI 助手 / AI 选股:结果块去盒,靠标题+留白分层 ---- */
+.ai-result, .ai-summary { background: none !important; }
+.scan-body .ai-block, .ai-result .ai-block { border-top: 1px solid var(--surface-hair); padding-top: 10px; }
+.ai-result .ai-block:first-child { border-top: none; padding-top: 0; }
+
+/* ---- 情绪面板(Sentiment)三张 card:去描边,静默底色 ---- */
+.sentiment .card { border: none !important; background: var(--surface-quiet) !important; }
+.sentiment .card:hover { background: var(--panel3) !important; transform: none !important; }
+
+/* ---- 候选卡 / AI选股卡:保留卡形(它们确是独立对象),但去掉 hover 位移的浮夸,反馈更克制 ---- */
+.cand-card, .pick-card { transition: border-color var(--t-fast), background-color var(--t-fast) !important; }
+.pick-card:hover { transform: none !important; }
+
+/* ---- 龙虎榜席位:席位块去盒,发丝缝分隔 ---- */
+.lhb-seats { gap: var(--field-gap); }
+
+/* 面板标题图标:从"品牌紫实心"降为中性,减少每个面板顶部的彩色噪音,
+   仅在 hover 面板时轻微点亮(情感化:克制而非炫技) */
+.panel-title .icon { color: var(--muted); transition: color var(--t-fast); }
+.panel:hover .panel-title .icon { color: var(--accent); }
