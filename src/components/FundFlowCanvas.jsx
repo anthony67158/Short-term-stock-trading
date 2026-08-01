@@ -126,20 +126,28 @@ export default function FundFlowCanvas({ interval }) {
   const partRef = useRef([])                  // 粒子池
   const drawRafRef = useRef(0)
 
-  // 生成/更新连线配置（左右各若干条汇向中枢）
+  // 生成"贯穿式"流：每条 = 左板块(流出) → 中枢 → 右板块(流入)，粒子走完整条路，
+  // 过中枢时颜色由绿渐变到红，直观表现"资金从流出板块迁移到流入板块"，两侧方块真正连起来。
   const links = useMemo(() => {
-    const mk = (arr, side) => arr.map((s, i) => ({
-      key: side + s.code, side, name: s.name, amt: Math.abs(s.mainInflow), idx: i,
-      w: Math.max(1.2, (Math.abs(s.mainInflow) / maxAmt) * 7), // 线宽∝金额
-    }))
-    return { out: mk(outTop, 'out'), in: mk(inTop, 'in') }
+    const outN = outTop.length, inN = inTop.length
+    if (!outN || !inN) return []
+    const n = Math.max(outN, inN)
+    const flows = []
+    for (let i = 0; i < n; i++) {
+      const o = outTop[i % outN], k = inTop[i % inN]
+      const amt = (Math.abs(o.mainInflow) + Math.abs(k.mainInflow)) / 2
+      flows.push({
+        key: 'f' + i, outIdx: i % outN, inIdx: i % inN,
+        w: Math.max(1.3, (amt / maxAmt) * 6.5), // 线宽∝金额
+      })
+    }
+    return flows
   }, [outTop, inTop, maxAmt])
 
-  // 初始化粒子：每条线按金额分配粒子数
+  // 初始化粒子：每条贯穿流按线宽分配粒子数，t 均匀铺满整条路(左→右)
   useEffect(() => {
     const ps = []
-    const push = (lk) => { const n = Math.max(2, Math.round(lk.w * 1.6)); for (let i = 0; i < n; i++) ps.push({ link: lk, t: Math.random(), speed: 0.15 + Math.random() * 0.35 }) }
-    links.out.forEach(push); links.in.forEach(push)
+    links.forEach((lk) => { const n = Math.max(3, Math.round(lk.w * 2.2)); for (let i = 0; i < n; i++) ps.push({ link: lk, t: Math.random(), speed: 0.12 + Math.random() * 0.28 }) })
     partRef.current = ps
   }, [links])
 
@@ -157,11 +165,23 @@ export default function FundFlowCanvas({ interval }) {
     const rows = rowsRef.current
 
     const GREEN = '#3fb950', RED = '#f4614e'
-    // 贝塞尔路径：左行→中枢 / 中枢→右行
-    const pathOf = (lk) => {
-      const arr = rows[lk.side]; const y = (arr[lk.idx] != null ? arr[lk.idx] : hubY)
-      if (lk.side === 'out') return { x0: leftX, y0: y, cx1: leftX + (hubX - leftX) * 0.5, cy1: y, cx2: leftX + (hubX - leftX) * 0.5, cy2: hubY, x1: hubX, y1: hubY }
-      return { x0: hubX, y0: hubY, cx1: hubX + (rightX - hubX) * 0.5, cy1: hubY, cx2: hubX + (rightX - hubX) * 0.5, cy2: y, x1: rightX, y1: y }
+    // 混色：t<0.5 纯绿，t>0.5 渐变到红，中枢处过渡
+    const mix = (t) => {
+      const g = [63, 185, 80], r = [244, 97, 78]
+      const k = t < 0.42 ? 0 : t > 0.58 ? 1 : (t - 0.42) / 0.16
+      return `rgb(${Math.round(g[0] + (r[0] - g[0]) * k)},${Math.round(g[1] + (r[1] - g[1]) * k)},${Math.round(g[2] + (r[2] - g[2]) * k)})`
+    }
+    // 一条贯穿流的完整锚点：左板块 y → 中枢 → 右板块 y
+    const anchorsOf = (lk) => {
+      const oy = rows.out[lk.outIdx] != null ? rows.out[lk.outIdx] : hubY
+      const iy = rows.in[lk.inIdx] != null ? rows.in[lk.inIdx] : hubY
+      return { oy, iy }
+    }
+    // 分两段贝塞尔：seg 0 = 左→中枢, seg 1 = 中枢→右
+    const segPath = (lk, seg) => {
+      const { oy, iy } = anchorsOf(lk)
+      if (seg === 0) return { x0: leftX, y0: oy, cx1: (leftX + hubX) / 2, cy1: oy, cx2: (leftX + hubX) / 2, cy2: hubY, x1: hubX, y1: hubY }
+      return { x0: hubX, y0: hubY, cx1: (hubX + rightX) / 2, cy1: hubY, cx2: (hubX + rightX) / 2, cy2: iy, x1: rightX, y1: iy }
     }
     const bez = (p, t) => {
       const mt = 1 - t
@@ -169,30 +189,34 @@ export default function FundFlowCanvas({ interval }) {
       const y = mt * mt * mt * p.y0 + 3 * mt * mt * t * p.cy1 + 3 * mt * t * t * p.cy2 + t * t * t * p.y1
       return { x, y }
     }
-    // 画连线（柔和、低透明）
-    const drawLink = (lk) => {
-      const p = pathOf(lk)
-      ctx.beginPath(); ctx.moveTo(p.x0, p.y0); ctx.bezierCurveTo(p.cx1, p.cy1, p.cx2, p.cy2, p.x1, p.y1)
-      ctx.strokeStyle = lk.side === 'out' ? 'rgba(63,185,80,.20)' : 'rgba(244,97,78,.20)'
-      ctx.lineWidth = lk.w; ctx.stroke()
+    // 整条流上 [0,1] 的位置：前半 seg0、后半 seg1
+    const posOf = (lk, t) => (t < 0.5 ? bez(segPath(lk, 0), t * 2) : bez(segPath(lk, 1), (t - 0.5) * 2))
+
+    // 画连线：每条流的两段用同一渐变描边，绿→红连续，两侧方块被真正连起来
+    for (const lk of links) {
+      const s0 = segPath(lk, 0), s1 = segPath(lk, 1)
+      const grad = ctx.createLinearGradient(leftX, 0, rightX, 0)
+      grad.addColorStop(0, 'rgba(63,185,80,.22)'); grad.addColorStop(0.5, 'rgba(150,140,200,.18)'); grad.addColorStop(1, 'rgba(244,97,78,.22)')
+      ctx.strokeStyle = grad; ctx.lineWidth = lk.w; ctx.lineCap = 'round'
+      ctx.beginPath(); ctx.moveTo(s0.x0, s0.y0); ctx.bezierCurveTo(s0.cx1, s0.cy1, s0.cx2, s0.cy2, s0.x1, s0.y1)
+      ctx.bezierCurveTo(s1.cx1, s1.cy1, s1.cx2, s1.cy2, s1.x1, s1.y1); ctx.stroke()
     }
-    links.out.forEach(drawLink); links.in.forEach(drawLink)
 
     // 中枢光晕
-    const g = ctx.createRadialGradient(hubX, hubY, 2, hubX, hubY, 46)
-    g.addColorStop(0, 'rgba(124,107,245,.5)'); g.addColorStop(1, 'rgba(124,107,245,0)')
-    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(hubX, hubY, 46, 0, Math.PI * 2); ctx.fill()
+    const g = ctx.createRadialGradient(hubX, hubY, 2, hubX, hubY, 44)
+    g.addColorStop(0, 'rgba(124,107,245,.45)'); g.addColorStop(1, 'rgba(124,107,245,0)')
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(hubX, hubY, 44, 0, Math.PI * 2); ctx.fill()
 
-    // 粒子：出线 t:0→1 汇入中枢；入线 t:0→1 从中枢流向右
+    // 粒子：沿整条流 t:0→1 连续流动，颜色随位置绿→红
     for (const pt of partRef.current) {
-      const lk = pt.link; const p = pathOf(lk)
+      const lk = pt.link
       pt.t += pt.speed * 0.016 * (0.6 + flowRatio * 0.8)
       if (pt.t > 1) pt.t -= 1
-      const pos = bez(p, pt.t)
-      const col = lk.side === 'out' ? GREEN : RED
-      const r = 1.4 + lk.w * 0.18
+      const pos = posOf(lk, pt.t)
+      const col = mix(pt.t)
+      const r = 1.4 + lk.w * 0.16
       const gg = ctx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, r * 3.2)
-      gg.addColorStop(0, col); gg.addColorStop(0.4, lk.side === 'out' ? 'rgba(63,185,80,.55)' : 'rgba(244,97,78,.55)'); gg.addColorStop(1, 'rgba(0,0,0,0)')
+      gg.addColorStop(0, col); gg.addColorStop(1, 'rgba(0,0,0,0)')
       ctx.fillStyle = gg; ctx.beginPath(); ctx.arc(pos.x, pos.y, r * 3.2, 0, Math.PI * 2); ctx.fill()
       ctx.fillStyle = col; ctx.beginPath(); ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2); ctx.fill()
     }
@@ -230,7 +254,7 @@ export default function FundFlowCanvas({ interval }) {
         </div>
         <div className="ffc-date-wrap">
           <div className="ffc-date">{dateLabel}</div>
-          <div className="ffc-session">{tl.phase} · {replay ? `真回放 ${series.length}帧` : '当前快照'}</div>
+          <div className="ffc-session">{replay ? `${tl.phase} · 真回放 ${series.length}帧` : (tl.live ? '当前快照 · 实时' : '最近交易日收盘快照')}</div>
         </div>
         <div className="ffc-head-right">
           <button className="ffc-play" onClick={() => setPlaying((v) => !v)} disabled={!replay} title={!replay ? '积累到≥2个时点后可回放' : (playing ? '暂停' : '播放')}>
