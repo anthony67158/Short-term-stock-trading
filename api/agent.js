@@ -266,39 +266,41 @@ const SYSTEM = `你是"操盘手 Alpha"，一位有十年A股短线实战经验�
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  if (req.method !== 'POST') return res.status(200).send(JSON.stringify({ ok: false, error: 'POST only' }));
+  if (req.method !== 'POST') { res.setHeader('Content-Type', 'application/json; charset=utf-8'); return res.status(200).send(JSON.stringify({ ok: false, error: 'POST only' })); }
 
   const BASE = process.env.LLM_BASE_URL;
   const KEY = process.env.LLM_API_KEY;
-  if (!BASE || !KEY) return res.status(200).send(JSON.stringify({ ok: false, error: 'LLM 未配置' }));
+  if (!BASE || !KEY) { res.setHeader('Content-Type', 'application/json; charset=utf-8'); return res.status(200).send(JSON.stringify({ ok: false, error: 'LLM 未配置' })); }
+
+  // ===== SSE 流式：边分析边推送(工具进度 + 答案 token)，用户实时看到进展、不再"超时空手" =====
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // 禁止中间层缓冲，token 即时下发
+  const send = (event, data) => {
+    try { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } catch { /* 连接已断 */ }
+  };
 
   try {
     let body = req.body;
     if (typeof body === 'string') body = JSON.parse(body || '{}');
     const question = (body.question || '').trim();
     const history = Array.isArray(body.history) ? body.history.slice(-6) : [];
-    const focusStock = body.stock; // 可选：当前聚焦个股 {code,name}
-    if (!question) return res.status(200).send(JSON.stringify({ ok: false, error: '缺少 question' }));
+    const focusStock = body.stock;
+    if (!question) { send('error', { error: '缺少 question' }); return res.end(); }
 
-    // 内部 API origin（同域）
     const proto = req.headers['x-forwarded-proto'] || 'https';
     const host = req.headers['x-forwarded-host'] || req.headers.host;
     const origin = `${proto}://${host}`;
-
     const sysExtra = focusStock ? `\n\n【当前用户聚焦的股票】${focusStock.name}（${focusStock.code}），如无特别说明，"这只票/它"指这只。` : '';
 
-    // ===== 理论 RAG：检索相关投资理论/名著知识块，注入对话 =====
+    // ===== 理论 RAG =====
     let theoryHits = [];
     try { theoryHits = await retrieveTheory(question, 4); } catch { /* 检索失败不阻断 */ }
+    const theoryRefs = theoryHits.map((t) => ({ book: t.book, topic: t.topic }));
+    if (theoryRefs.length) send('theory', { theoryRefs });
     const theoryMsg = theoryHits.length
-      ? {
-          role: 'system',
-          content:
-            '【投资理论参考·检索自经典名著知识库】以下是与本问题最相关的交易理论要点，请把它们作为分析的理论依据，'
-            + '在讲逻辑时自然引用对应的理论名/书名（如"按道氏理论…""龙头战法讲…"），做到有据可依、把逻辑讲透，但不要生硬堆砌：\n\n'
-            + theoryHits.map((t, i) => `${i + 1}. ${t.text}`).join('\n'),
-        }
+      ? { role: 'system', content: '【投资理论参考·检索自经典名著知识库】以下是与本问题最相关的交易理论要点，请把它们作为分析的理论依据，在讲逻辑时自然引用对应的理论名/书名（如"按道氏理论…""龙头战法讲…"），做到有据可依、把逻辑讲透，但不要生硬堆砌：\n\n' + theoryHits.map((t, i) => `${i + 1}. ${t.text}`).join('\n') }
       : null;
 
     const messages = [
@@ -309,107 +311,139 @@ export default async function handler(req, res) {
       { role: 'user', content: question },
     ];
 
-    const toolTrace = []; // 记录调用了哪些工具，回传前端展示
-    const theoryRefs = theoryHits.map((t) => ({ book: t.book, topic: t.topic })); // 命中的理论，回传前端
-    // 复杂选股/遍览类问题需要更多步(板块→涨停→异动→筛选→逐只量化)，轮次给足；
-    // 靠"同一轮工具并行 + 缩短最终总结预留"把时间挤出来，而不是靠减轮次。
+    const toolTrace = [];
     const MAX_ROUNDS = 6;
-
-    // ===== 全局时间预算：Vercel maxDuration=60s，留足余量在 56s 内必须返回 JSON =====
     const START = Date.now();
-    const BUDGET = 56000;           // 总预算
+    const BUDGET = 56000;
     const remain = () => BUDGET - (Date.now() - START);
-    const RESERVE_FINAL = 14000;    // 为"最终总结"预留(单次总结一般 8~12s，14s 足够且不浪费轮次)
+    const RESERVE_FINAL = 16000; // 给流式总结留足(边流边发，可稍短)
 
-    for (let round = 0; round < MAX_ROUNDS; round++) {
-      // 预算不足以再跑一轮带工具的对话（需给最终总结留时间）→ 提前跳出去做总结
-      if (remain() < RESERVE_FINAL + 6000) break;
+    // 非流式的一轮：决定调工具还是收尾（收尾走流式，见下）
+    let concluded = false;
+    let answerBuf = '';
 
-      // 收敛闸：已积累足够数据(≥8次工具调用)或预算偏紧时，本轮禁用工具、强制模型出结论，
-      // 避免"无止境地再查一点"把时间耗光，导致复杂问题永远等不到最终答案。
-      const forceConclude = toolTrace.length >= 8 || remain() < RESERVE_FINAL + 14000;
-
+    // 通用：发起一次 chat completion（stream 可选）
+    const callLLM = async ({ stream, useTools, timeoutMs }) => {
       const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), Math.max(remain() - RESERVE_FINAL, 7000));
+      const t = setTimeout(() => ctrl.abort(), timeoutMs);
       const resp = await fetch(`${BASE}/chat/completions`, {
-        method: 'POST',
-        signal: ctrl.signal,
+        method: 'POST', signal: ctrl.signal,
         headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: AGENT_MODEL,
-          messages,
-          ...(forceConclude ? { tool_choice: 'none' } : { tools: TOOLS, tool_choice: 'auto' }),
-          temperature: 0.3,
-          max_tokens: 1600,
+          model: AGENT_MODEL, messages,
+          ...(useTools ? { tools: TOOLS, tool_choice: 'auto' } : { tool_choice: 'none' }),
+          temperature: 0.3, max_tokens: 1600, stream: !!stream,
         }),
-      }).catch((e) => ({ __err: e })); // abort/网络错误不抛出，转入最终总结兜底
-      clearTimeout(t);
-      if (resp && resp.__err) break; // 本轮超时/失败 → 跳出用已有信息总结
-      if (!resp.ok) {
-        const e = await resp.text();
-        return res.status(200).send(JSON.stringify({ ok: false, error: `LLM ${resp.status}`, detail: e.slice(0, 150) }));
-      }
+      }).catch((e) => ({ __err: e }));
+      return { resp, done: () => clearTimeout(t) };
+    };
+
+    for (let round = 0; round < MAX_ROUNDS; round++) {
+      // 预算不足 → 去做流式总结
+      if (remain() < RESERVE_FINAL + 6000) break;
+      // 收敛闸：数据够或预算偏紧 → 本轮直接进入流式总结（不再调工具）
+      const forceConclude = toolTrace.length >= 8 || remain() < RESERVE_FINAL + 12000;
+      if (forceConclude) break;
+
+      send('status', { phase: 'thinking', text: round === 0 ? '正在规划分析路径…' : '正在综合已查数据、决定下一步…' });
+      const { resp, done } = await callLLM({ stream: false, useTools: true, timeoutMs: Math.max(remain() - RESERVE_FINAL, 7000) });
+      done();
+      if (resp && resp.__err) break; // 超时/网络 → 去流式总结
+      if (!resp.ok) { const e = await resp.text().catch(() => ''); send('error', { error: `LLM ${resp.status}`, detail: (e || '').slice(0, 150) }); return res.end(); }
       const j = await resp.json();
       const msg = j.choices?.[0]?.message;
-      if (!msg) return res.status(200).send(JSON.stringify({ ok: false, error: '无返回' }));
+      if (!msg) break;
 
       const toolCalls = msg.tool_calls || [];
       if (toolCalls.length === 0) {
-        // 无工具调用 = 最终回答
-        return res.status(200).send(JSON.stringify({
-          ok: true, answer: msg.content || '', toolTrace, theoryRefs, model: AGENT_MODEL, updatedAt: Date.now(),
-        }));
+        // 模型这轮直接给了文本(没调工具) = 最终答案。流式补发已不可能(已整段返回)，直接作为 delta 发出。
+        answerBuf = msg.content || '';
+        if (answerBuf) send('delta', { text: answerBuf });
+        concluded = true;
+        break;
       }
 
-      // 有工具调用：把本轮所有工具【并行】执行(选股类一轮常并发查多只票/多个榜单，
-      // 并行相比串行能省数倍时间，换来更多可用轮次)，全部完成后塞回对话继续下一轮。
+      // 有工具调用：先把"正在调用"事件发给前端，让用户看到进度
       messages.push({ role: 'assistant', content: msg.content || '', tool_calls: toolCalls });
-      const parsed = toolCalls.map((tc) => {
-        let args = {};
-        try { args = JSON.parse(tc.function.arguments || '{}'); } catch { /* ignore */ }
-        return { tc, args };
-      });
+      const parsed = toolCalls.map((tc) => { let args = {}; try { args = JSON.parse(tc.function.arguments || '{}'); } catch { /* ignore */ } return { tc, args }; });
+      parsed.forEach(({ tc, args }) => send('tool', { status: 'calling', tool: tc.function.name, label: TOOL_LABEL_CN[tc.function.name] || tc.function.name, args }));
+      // 并行执行
       const results = await Promise.all(parsed.map(({ tc, args }) => execTool(tc.function.name, args, origin)));
       parsed.forEach(({ tc, args }, i) => {
         toolTrace.push({ tool: tc.function.name, args });
-        messages.push({
-          role: 'tool',
-          tool_call_id: tc.id,
-          content: JSON.stringify(results[i]).slice(0, 6000),
-        });
+        const r = results[i] || {};
+        const ok = !r.error;
+        // 给前端一个"查到了什么"的极简摘要(条数/关键值)，让进度更有信息量
+        let brief = '';
+        if (Array.isArray(r.list)) brief = `${r.list.length} 条`;
+        else if (r.count != null) brief = `${r.count} 条`;
+        else if (r.name) brief = r.name;
+        send('tool', { status: ok ? 'done' : 'error', tool: tc.function.name, label: TOOL_LABEL_CN[tc.function.name] || tc.function.name, brief, error: ok ? undefined : String(r.error).slice(0, 60) });
+        messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(r).slice(0, 6000) });
       });
     }
 
-    // 达到最大轮次或预算不足，用剩余时间强制让模型基于已查信息总结（不再给工具）
-    // 已调用过的工具清单——即便总结超时，也能告诉用户"已经查到了什么"，而非纯道歉。
-    const gathered = [...new Set(toolTrace.map((t) => TOOL_LABEL_CN[t.tool] || t.tool))].join('、');
-    const partialHint = gathered
-      ? `我已查询了${gathered}等数据，但综合分析用时超出限制未能完成。你可以直接追问其中一部分（比如"就从刚才的涨停池里挑2只最强的"），我能更快给出结论。`
-      : '这个问题查询用时较长，分析未能在限定时间内完成。建议把问题聚焦到单只个股或单个板块，我会更快返回完整分析。';
-    if (remain() < 4000) {
-      // 时间已所剩无几，直接返回带"已查内容"的兜底文本，避免被平台强杀返回非 JSON
-      return res.status(200).send(JSON.stringify({
-        ok: true, answer: partialHint, toolTrace, theoryRefs, model: AGENT_MODEL, updatedAt: Date.now(),
-      }));
+    // ===== 流式总结：把最终回答一个 token 一个 token 推给前端 =====
+    if (!concluded) {
+      send('status', { phase: 'writing', text: '正在综合数据、生成分析…' });
+      // 时间实在不够 → 发已查内容兜底(仍是有价值信息，不空手)
+      if (remain() < 4000) {
+        const gathered = [...new Set(toolTrace.map((t) => TOOL_LABEL_CN[t.tool] || t.tool))].join('、');
+        answerBuf = gathered
+          ? `我已查询了${gathered}等数据。综合分析所需时间较长，先把要点给你：请直接追问其中一部分（例如"就从刚才的涨停池里挑2只最强的"），我能立刻给出结论。`
+          : '这个问题查询用时较长。建议把问题聚焦到单只个股或单个板块，我会更快返回完整分析。';
+        send('delta', { text: answerBuf });
+      } else {
+        messages.push({ role: 'user', content: '请基于以上已查到的信息直接给出最终回答，用规范 Markdown 分节、关键结论加粗。若某类数据没查到，就用已有数据尽力给出可执行的结论，不要空手道歉。' });
+        const { resp, done } = await callLLM({ stream: true, useTools: false, timeoutMs: Math.max(remain() - 1500, 5000) });
+        if (resp && resp.__err) {
+          // 流式发起就失败 → 兜底文本
+          const gathered = [...new Set(toolTrace.map((t) => TOOL_LABEL_CN[t.tool] || t.tool))].join('、');
+          answerBuf = gathered ? `我已查询了${gathered}等数据，但生成分析超时。请追问其中一部分，我能更快给出结论。` : '分析生成超时，请缩小问题范围重试。';
+          send('delta', { text: answerBuf });
+        } else if (!resp.ok) {
+          const e = await resp.text().catch(() => '');
+          send('error', { error: `LLM ${resp.status}`, detail: (e || '').slice(0, 150) }); done(); return res.end();
+        } else {
+          // 解析 OpenAI 兼容的 SSE 流，逐 delta 转发
+          answerBuf = await pumpStream(resp, (piece) => { answerBuf; send('delta', { text: piece }); });
+          done();
+        }
+      }
     }
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), Math.max(remain() - 1500, 4000));
-    const resp = await fetch(`${BASE}/chat/completions`, {
-      method: 'POST', signal: ctrl.signal,
-      headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: AGENT_MODEL, messages: [...messages, { role: 'user', content: '请基于以上已查到的信息直接给出最终回答，用规范 Markdown 分节，关键结论加粗。若某类数据没查到，就用已有数据尽力给出可执行的结论，不要空手道歉。' }], temperature: 0.3, max_tokens: 1600 }),
-    }).catch((e) => ({ __err: e }));
-    clearTimeout(t);
-    if (resp && resp.__err) {
-      return res.status(200).send(JSON.stringify({
-        ok: true, answer: partialHint, toolTrace, theoryRefs, model: AGENT_MODEL, updatedAt: Date.now(),
-      }));
-    }
-    const j = await resp.json();
-    return res.status(200).send(JSON.stringify({
-      ok: true, answer: j.choices?.[0]?.message?.content || '（信息较多，请缩小问题范围再试）', toolTrace, theoryRefs, model: AGENT_MODEL, updatedAt: Date.now(),
-    }));
+
+    send('done', { toolTrace, theoryRefs, model: AGENT_MODEL, updatedAt: Date.now(), answer: answerBuf });
+    return res.end();
   } catch (e) {
-    res.status(200).send(JSON.stringify({ ok: false, error: String(e.message || e) }));
+    send('error', { error: String(e.message || e) });
+    return res.end();
   }
+}
+
+// 读取上游 OpenAI 兼容 SSE 流，把每个 content delta 通过 onPiece 回调转发；返回拼好的完整文本
+async function pumpStream(resp, onPiece) {
+  let full = '';
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buf = '';
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    // 按 SSE 行拆分
+    let idx;
+    while ((idx = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, idx).trim();
+      buf = buf.slice(idx + 1);
+      if (!line || !line.startsWith('data:')) continue;
+      const data = line.slice(5).trim();
+      if (data === '[DONE]') return full;
+      try {
+        const j = JSON.parse(data);
+        const piece = j.choices?.[0]?.delta?.content || '';
+        if (piece) { full += piece; onPiece(piece); }
+      } catch { /* 非完整 JSON 行，忽略 */ }
+    }
+  }
+  return full;
 }

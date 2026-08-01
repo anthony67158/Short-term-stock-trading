@@ -36,9 +36,13 @@ export default function AIAssistant({ snapshot }) {
     el.style.height = Math.min(el.scrollHeight, 160) + 'px'
   }, [q, open])
 
-  // 消息变化时，持久化到「当天」（仅当查看的是今天且非加载态时写入）
+  // 消息变化时，持久化到「当天」（仅当查看的是今天、且没有正在流式的消息时写入；
+  // 流式过程中每 token 都写盘既浪费又会存下临时态，故等流式结束再落盘，并剥离临时字段）
   useEffect(() => {
-    if (isToday) chatStore.save(msgs, today)
+    if (!isToday) return
+    if (msgs.some((m) => m.streaming)) return
+    const clean = msgs.map(({ streaming, status, steps, ...rest }) => rest)
+    chatStore.save(clean, today)
     // eslint-disable-next-line
   }, [msgs])
 
@@ -70,45 +74,100 @@ export default function AIAssistant({ snapshot }) {
   const pushUser = (content) => setMsgs((m) => [...m, { role: 'user', kind: 'text', content }])
   const pushAI = (msg) => setMsgs((m) => [...m, { role: 'assistant', ...msg }])
 
-  // ===== 核心：Agent 对话（自主调用工具，支持开放性问题 + 个股问答） =====
+  // ===== 核心：Agent 对话（SSE 流式：工具进度实时可见 + 答案逐字流出） =====
   const ask = async (question) => {
     const query = (question || q).trim()
     if (!query || loading) return
     setQ('')
-    // 若正在查看历史某天，提问自动切回今天继续对话
     let base = msgs
     if (!isToday) { base = chatStore.load(today); setDay(today); setMsgs(base) }
-    // 传当天完整文本上下文给后端，保证单日对话连贯（取最近若干轮）
     const history = base.filter((m) => m.kind === 'text').map((m) => ({ role: m.role, content: typeof m.content === 'string' ? m.content : '' })).slice(-12)
     pushUser(query)
     setLoading(true)
     const ctrl = new AbortController()
     abortRef.current = ctrl
+
+    // 先插入一个"流式中"的助手占位消息，后续所有事件都就地更新它
+    let aiIndex = -1
+    setMsgs((m) => { aiIndex = m.length; return [...m, { role: 'assistant', kind: 'text', content: '', steps: [], theoryRefs: [], streaming: true, status: '正在规划分析路径…' }] })
+    // 就地更新占位消息的辅助函数
+    const patchAI = (patch) => setMsgs((m) => {
+      const idx = m.findIndex((x, i) => i >= 0 && x.role === 'assistant' && x.streaming)
+      if (idx < 0) return m
+      const next = m.slice()
+      next[idx] = typeof patch === 'function' ? patch(next[idx]) : { ...next[idx], ...patch }
+      return next
+    })
+
     try {
       const res = await fetch('/api/agent', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question: query, history, stock: stock || null }),
         signal: ctrl.signal,
       })
-      // 健壮解析：后端超时/崩溃时 Vercel 返回纯文本而非 JSON，先读文本再尝试解析
-      const raw = await res.text()
-      let j = null
-      try { j = JSON.parse(raw) } catch { /* 非 JSON */ }
-      if (!j) {
-        const hint = res.status === 504 || /timed? ?out|An error occurred/i.test(raw)
-          ? '这个问题查询的数据较多，分析超时了。可以换个更聚焦的问法（如只问某一只票、或某一个板块），我会更快返回。'
-          : `服务暂时不可用（${res.status}），请稍后重试。`
-        pushAI({ kind: 'text', content: '抱歉，' + hint })
-      } else if (j.ok) {
-        pushAI({ kind: 'text', content: j.answer, toolTrace: j.toolTrace || [], theoryRefs: j.theoryRefs || [] })
+      const ctype = res.headers.get('content-type') || ''
+      // 兜底：若后端未走 SSE(旧版/错误页) → 回退到整段解析
+      if (!ctype.includes('text/event-stream')) {
+        const raw = await res.text()
+        let j = null; try { j = JSON.parse(raw) } catch { /* 非 JSON */ }
+        if (j && j.ok) patchAI({ content: j.answer || '', toolTrace: j.toolTrace || [], theoryRefs: j.theoryRefs || [], streaming: false, status: null })
+        else patchAI({ content: '抱歉，' + ((j && j.error) || '分析超时，请换个更聚焦的问法重试。'), streaming: false, status: null })
       } else {
-        pushAI({ kind: 'text', content: '抱歉，' + (j.error || '分析失败') })
+        // 解析 SSE：event: xxx\n data: {...}\n\n
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder('utf-8')
+        let buf = ''
+        const handle = (event, data) => {
+          if (event === 'status') patchAI({ status: data.text || '' })
+          else if (event === 'theory') patchAI({ theoryRefs: data.theoryRefs || [] })
+          else if (event === 'tool') {
+            patchAI((prev) => {
+              const steps = (prev.steps || []).slice()
+              if (data.status === 'calling') {
+                steps.push({ tool: data.tool, label: data.label, status: 'calling' })
+              } else {
+                // 把最近一个同名 calling 标记为 done/error
+                for (let i = steps.length - 1; i >= 0; i--) {
+                  if (steps[i].tool === data.tool && steps[i].status === 'calling') { steps[i] = { ...steps[i], status: data.status, brief: data.brief, error: data.error }; break }
+                }
+              }
+              return { ...prev, steps, status: data.status === 'calling' ? `正在${data.label}…` : prev.status }
+            })
+          } else if (event === 'delta') {
+            patchAI((prev) => ({ ...prev, content: (prev.content || '') + (data.text || ''), status: null }))
+          } else if (event === 'done') {
+            patchAI((prev) => ({ ...prev, content: data.answer || prev.content, toolTrace: data.toolTrace || [], theoryRefs: data.theoryRefs || prev.theoryRefs, streaming: false, status: null }))
+          } else if (event === 'error') {
+            patchAI((prev) => ({ ...prev, content: prev.content || ('抱歉，' + (data.error || '分析失败')), streaming: false, status: null }))
+          }
+        }
+        while (true) {
+          const { value, done } = await reader.read()
+          if (done) break
+          buf += decoder.decode(value, { stream: true })
+          let sep
+          while ((sep = buf.indexOf('\n\n')) >= 0) {
+            const chunk = buf.slice(0, sep); buf = buf.slice(sep + 2)
+            let event = 'message', dataStr = ''
+            for (const line of chunk.split('\n')) {
+              if (line.startsWith('event:')) event = line.slice(6).trim()
+              else if (line.startsWith('data:')) dataStr += line.slice(5).trim()
+            }
+            if (!dataStr) continue
+            let data = null; try { data = JSON.parse(dataStr) } catch { continue }
+            handle(event, data)
+          }
+        }
       }
     } catch (e) {
-      if (e.name === 'AbortError') pushAI({ kind: 'text', content: '已停止本次分析。' })
-      else pushAI({ kind: 'text', content: '抱歉，网络异常：' + String(e.message || e) })
+      if (e.name === 'AbortError') patchAI((prev) => ({ ...prev, content: prev.content || '已停止本次分析。', streaming: false, status: null }))
+      else patchAI((prev) => ({ ...prev, content: prev.content || ('抱歉，网络异常：' + String(e.message || e)), streaming: false, status: null }))
     }
-    finally { setLoading(false); abortRef.current = null }
+    finally {
+      setLoading(false); abortRef.current = null
+      // 流式结束确保清掉 streaming 标记
+      setMsgs((m) => m.map((x) => (x.streaming ? { ...x, streaming: false, status: null } : x)))
+    }
   }
 
   // 停止正在进行的分析
@@ -187,11 +246,6 @@ export default function AIAssistant({ snapshot }) {
               </div>
             )}
             {msgs.map((m, i) => <Message key={i} m={m} />)}
-            {loading && (
-              <div className="qa-msg assistant"><div className="qa-bubble">
-                <div className="ai-loading"><span className="ai-loading-dot" /><span className="ai-loading-dot" /><span className="ai-loading-dot" />分析中…<span className="ai-stop-link" onClick={stop}>停止</span></div>
-              </div></div>
-            )}
           </div>
 
           {/* 提问输入 */}
@@ -231,14 +285,34 @@ function Message({ m }) {
     <div className="qa-msg assistant"><div className="qa-bubble">
       {m.kind === 'text' && (
         <>
-          {Array.isArray(m.toolTrace) && m.toolTrace.length > 0 && (
+          {/* 流式·工具调用进度：每一步实时显示 调用中→完成(带条数摘要)，让用户看到进展 */}
+          {Array.isArray(m.steps) && m.steps.length > 0 && (
+            <div className="tool-steps">
+              {m.steps.map((s, i) => (
+                <div key={i} className={'tool-step ' + s.status}>
+                  <span className="ts-ico">
+                    {s.status === 'calling' ? <Icon name="refresh" size={11} className="spin" /> : s.status === 'error' ? <Icon name="close" size={11} /> : <Icon name="check" size={11} />}
+                  </span>
+                  <span className="ts-label">{s.label || TOOL_LABEL[s.tool] || s.tool}</span>
+                  {s.status === 'done' && s.brief && <span className="ts-brief">{s.brief}</span>}
+                  {s.status === 'error' && <span className="ts-err">{s.error || '失败'}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+          {/* 流式·当前阶段状态(思考/写作)——答案还没开始流时显示 */}
+          {m.streaming && m.status && !m.content && (
+            <div className="ai-stream-status"><Icon name="spark" size={12} className="pulse" /> {m.status}</div>
+          )}
+          {/* 静态历史消息仍展示 toolTrace（无 steps 时）*/}
+          {(!m.steps || m.steps.length === 0) && Array.isArray(m.toolTrace) && m.toolTrace.length > 0 && (
             <div className="tool-trace">
               {m.toolTrace.map((t, i) => (
                 <span key={i} className="tool-chip"><Icon name="bolt" size={11} /> {TOOL_LABEL[t.tool] || t.tool}</span>
               ))}
             </div>
           )}
-          <div className="qa-bubble-text"><Md text={m.content} /></div>
+          {m.content && <div className="qa-bubble-text"><Md text={m.content} />{m.streaming && <span className="stream-caret" />}</div>}
           {Array.isArray(m.theoryRefs) && m.theoryRefs.length > 0 && (
             <div className="theory-refs">
               <span className="theory-refs-label"><Icon name="book" size={11} /> 参考理论</span>
