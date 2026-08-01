@@ -7,6 +7,7 @@ import { usePolling } from '../hooks'
 import { callAI, callAIStream } from '../ai'
 import { planStore, usePlanStore, calcBuyFee, calcSellFee, computeTFlows } from '../planStore'
 import { aiStore } from '../aiStore'
+import { openStockDetail } from '../detailStore'
 import { generateReview, sessionLabel, forceGenerateReviews, currentAutoSession, missingReviewCount } from '../review'
 import { fmtPct, pctClass, fmtNum, fmtInflow , fmtRaw, hasVal, opText } from '../format'
 
@@ -1248,53 +1249,35 @@ function HoldReview({ code, name, cost, qty, price }) {
         <div className="ai-reasoning" style={{ margin: '8px 10px 0' }}><span className="ai-reasoning-k">研判</span>{r.reasoning}</div>
       )}
 
-      {/* ③ 下一步行动：保留核心操作指令 */}
+      {/* ③ 今日回顾：复盘特有价值——今天走成啥样 + 我操作得如何(操作建议没有这部分) */}
+      {r && (r.todayRecap || r.tradeReview) && (
+        <div className="hr-recap">
+          {r.todayRecap && <div className="hr-recap-row"><span className="hr-recap-k">今日</span><span>{r.todayRecap}</span></div>}
+          {r.tradeReview && r.tradeReview !== '今日无成交' && <div className="hr-recap-row"><span className="hr-recap-k">操作点评</span><span>{r.tradeReview}</span></div>}
+        </div>
+      )}
+
+      {/* ④ 下一步方向：复盘给"大方向指引"(一句话)，具体价位/算账交给操作建议 */}
       {r && r.nextAction && (
         <div className="hr-next compact">
-          <span className="hr-next-k">下一步</span>
+          <span className="hr-next-k">{nextLabel}</span>
           <span className="hr-next-txt">{r.nextAction}</span>
         </div>
       )}
 
-      {/* ③b 算账条：预期赚整行 hero + 短标量 chip + 仓位整句独行 —— 不截断不出血。
-          持有/观望时 opQty/opAmount 为 0，经 hasVal 过滤后不渲染，避免出现迷惑的"00"。 */}
-      {r && (hasVal(r.opQty) || hasVal(r.opAmount) || hasVal(r.expReturn) || hasVal(r.riskReward) || hasVal(r.posAfter)) && (
-        <div className="op-calc">
-          {hasVal(r.expReturn) && <div className="oc-exp"><span className="oc-k">预期收益</span><b>{r.expReturn}</b></div>}
-          {(hasVal(r.opQty) || hasVal(r.opAmount) || hasVal(r.newCost) || hasVal(r.riskReward)) && (
-            <div className="oc-grid">
-              {hasVal(r.opQty) && <div className="oc-cell"><span className="oc-k">操作</span><b>{opText(r.opQty, r.stance)}</b></div>}
-              {hasVal(r.opAmount) && <div className="oc-cell"><span className="oc-k">资金</span><b>{r.opAmount}</b></div>}
-              {hasVal(r.newCost) && <div className="oc-cell"><span className="oc-k">新成本</span><b>{r.newCost}</b></div>}
-              {hasVal(r.riskReward) && <div className="oc-cell"><span className="oc-k">盈亏比</span><b>{r.riskReward}</b></div>}
-            </div>
-          )}
-          {hasVal(r.posAfter) && <div className="oc-line"><span className="oc-k">仓位</span><span>{r.posAfter}</span></div>}
-        </div>
+      {/* ⑤ 分工引导：复盘=回顾+方向；要"此刻具体怎么操作/买卖价"→ 去详情页看 AI 操作建议。
+          消除"复盘和操作建议长得一样"的重复感：这里不再重复铺算账网格与价位明细。 */}
+      {r && (
+        <button className="hr-goadvice" onClick={() => openStockDetail(code, name)}>
+          <Icon name="target" size={12} />
+          <span>想看此刻<b>具体买卖价 / 加减仓算账</b>？打开 AI 操作建议</span>
+          <Icon name="chevronRight" size={13} />
+        </button>
       )}
 
-      {/* 无需操作也要明确展示，避免“持有0/观望0”这种含糊表达 */}
-      {r && !hasVal(r.opQty) && !hasVal(r.opAmount) && (r.stance === '持有' || r.stance === '观望') && (
-        <div className="op-calc noop-calc">
-          <div className="oc-exp noop"><span className="oc-k">本次操作</span><b>无需操作</b></div>
-          {hasVal(r.posAfter) && <div className="oc-line"><span className="oc-k">当前仓位</span><span>{r.posAfter}</span></div>}
-          <div className="oc-line"><span className="oc-k">怎么做</span><span>{r.nextAction || r.keyLevel || '按当前仓位继续观察，等触发价或失效信号出现再动。'}</span></div>
-        </div>
-      )}
-
-      {/* ④ 明细：只保留少量核心，其他细节放到个股详情页里看 */}
-      {r && open && (
-        <div className="hr-detail slim">
-          {(r.addPrice != null || r.reducePrice != null || r.stopPrice != null) && (
-            <div className="hr-prices">
-              {r.addPrice != null && <span className="hr-p"><span className="hr-pk">加仓价</span><b className="red">{r.addPrice}</b></span>}
-              {r.reducePrice != null && <span className="hr-p"><span className="hr-pk">减仓价</span><b className="green">{r.reducePrice}</b></span>}
-              {r.stopPrice != null && <span className="hr-p"><span className="hr-pk">止损价</span><b className="green">{r.stopPrice}</b></span>}
-            </div>
-          )}
-          {r.keyLevel && <div className="hr-row"><span className="hr-k">盯住</span><span className="hr-v">{r.keyLevel}</span></div>}
-          {r.invalidation && <div className="hr-row"><span className="hr-k risk">失效</span><span className="hr-v">{r.invalidation}</span></div>}
-        </div>
+      {/* ⑥ 失效信号：复盘保留这一条风控底线(简短)，其余明细都在操作建议里 */}
+      {r && r.invalidation && (
+        <div className="hr-row" style={{ margin: '8px 10px 0' }}><span className="hr-k risk">失效</span><span className="hr-v">{r.invalidation}</span></div>
       )}
     </div>
   )

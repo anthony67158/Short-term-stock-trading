@@ -2260,3 +2260,14 @@ body {
 @keyframes caretBlink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
 /* 用户气泡内(理论上不会流式)兜底配色 */
 .qa-msg.user .tool-steps { border-left-color: #fff; background: rgba(255,255,255,.12); }
+
+/* 复盘卡·今日回顾(复盘特有价值) */
+.hr-recap { margin: 8px 10px 0; display: flex; flex-direction: column; gap: 5px; }
+.hr-recap-row { display: flex; align-items: baseline; gap: 8px; font-size: 12px; line-height: 1.55; color: var(--text2); }
+.hr-recap-k { flex: none; font-size: 10px; font-weight: 700; color: var(--muted); background: var(--surface-quiet, rgba(255,255,255,.05)); padding: 2px 7px; border-radius: 5px; }
+/* 复盘→操作建议 分工引导入口：不再重复铺算账/价位，一键跳详情看具体操作 */
+.hr-goadvice { display: flex; align-items: center; gap: 7px; width: calc(100% - 20px); margin: 10px 10px 2px; padding: 8px 11px; border: 1px dashed var(--border); border-radius: 8px; background: none; color: var(--text2); font-size: 12px; cursor: pointer; transition: border-color var(--t-fast), color var(--t-fast), background-color var(--t-fast); text-align: left; }
+.hr-goadvice span { flex: 1; min-width: 0; }
+.hr-goadvice b { color: var(--accent); font-weight: 650; }
+.hr-goadvice .icon { color: var(--accent); flex: none; }
+.hr-goadvice:hover { border-color: var(--accent); color: var(--text); background: var(--surface-quiet, rgba(124,107,245,.06)); }
