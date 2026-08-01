@@ -519,9 +519,10 @@ ${payload.openTNet ? `【重要·持仓口径】hold(cost/qty) 已按【实时�
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  // 注意：Content-Type 延后设置——流式走 SSE、非流式走 JSON，见下方 streaming 分支
 
   if (req.method !== 'POST') {
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
     return res.status(200).send(JSON.stringify({ ok: false, error: 'POST only' }));
   }
 
@@ -531,6 +532,7 @@ export default async function handler(req, res) {
   // 顶级操盘军师专用模型：深度个股研判(做T/加减仓/买入/复盘)用更强、更快、原生JSON稳定的模型
   const ADVISOR_MODEL = process.env.ADVISOR_MODEL || 'DeepSeek-V4-Pro';
   if (!BASE || !KEY) {
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
     return res.status(200).send(JSON.stringify({ ok: false, error: 'LLM 未配置' }));
   }
 
@@ -539,6 +541,27 @@ export default async function handler(req, res) {
     if (typeof body === 'string') body = JSON.parse(body || '{}');
     const mode = (body && body.mode) || 'market';
     const payload = (body && body.payload) || {};
+    const streaming = !!(body && body.stream); // 客户端可选开启 SSE 进度流
+
+    // SSE 进度流：数据采集阶段(查大盘/资金/分时/龙虎榜/量化…)对用户是"黑盒卡住"，
+    // 开启后把每个采集里程碑实时推给前端(查大盘✓ 查资金✓ 量化打分✓ 生成建议中…)，
+    // 最后再推一个 result 事件带完整结构化结果。非流式调用保持原样(整段 JSON)，向后兼容。
+    if (streaming) {
+      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+    } else {
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    }
+    // 统一出口：流式用 SSE 事件，非流式回退为一次性 JSON
+    const emit = (event, data) => { if (streaming) { try { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } catch { /* 断连 */ } } };
+    const finish = (obj) => {
+      if (streaming) { emit('result', obj); return res.end(); }
+      return res.status(200).send(JSON.stringify(obj));
+    };
+    // 采集里程碑进度事件
+    const phase = (text, key) => emit('phase', { text, key });
 
     // ===== 全局时间预算：Vercel maxDuration=60s，留足余量在 57s 内必须返回 JSON =====
     // 数据采集阶段(补大盘/资金/分时/量化…)可能耗时 15~20s，之后 LLM 生成又要时间；
@@ -568,6 +591,7 @@ export default async function handler(req, res) {
     // t_advice / plan / price / hold_advice / buy_advice / review 模式：服务端补齐"大盘情绪+资金流向+个股历史走势+分时+量化"，让建议有据可依
     if ((mode === 't_advice' || mode === 'plan' || mode === 'price' || mode === 'hold_advice' || mode === 'buy_advice' || mode === 'review') && payload.code) {
       try {
+        phase('正在采集大盘 / 资金 / 分时 / 龙虎榜 / 量化数据…', 'collect');
         const proto = req.headers['x-forwarded-proto'] || 'https';
         const host = req.headers['x-forwarded-host'] || req.headers.host;
         const origin = `${proto}://${host}`;
@@ -603,6 +627,7 @@ export default async function handler(req, res) {
           }
         }
         if (macroNews && macroNews.length) payload.macroNews = macroNews.map((n) => n.title).slice(0, 6);
+        phase('行情 / 资金 / 消息面已就位，正在量化打分…', 'quant');
         // 消息面：直接取新闻/公告/基本面文档(不做向量检索，省3~5s，避免函数超时)
         if (corpus && corpus.docs && corpus.docs.length) {
           payload.newsDigest = corpus.docs
@@ -819,13 +844,14 @@ export default async function handler(req, res) {
     };
     // 数据采集后剩余时间不足 → 直接降级返回(不硬闯 LLM 被平台强杀)。带 meta 让前端仍能展示已查到的确定性数据。
     if (remain() < 9000) {
-      return res.status(200).send(JSON.stringify({
+      return finish({
         ok: false, degraded: true, mode, model: useModel, updatedAt: Date.now(),
         error: '数据采集用时较长，本次分析未能在限定时间内完成，请稍后重试。',
         meta: collectedMeta, news: newsRefs,
-      }));
+      });
     }
 
+    phase('数据齐全，正在生成操作建议…', 'llm');
     const ctrl = new AbortController();
     // LLM 超时按【剩余预算】动态给：预留 2.5s 兜底返回时间，最少给 8s、最多 46s
     const llmTimeout = Math.max(8000, Math.min(46000, remain() - 2500));
@@ -855,18 +881,16 @@ export default async function handler(req, res) {
     // LLM 超时/网络错误 → 结构化降级返回(带已采集 meta)，前端可提示"重试/缩小范围"而非"服务不可用"
     if (resp && resp.__err) {
       const timedOut = resp.__err.name === 'AbortError';
-      return res.status(200).send(JSON.stringify({
+      return finish({
         ok: false, degraded: true, mode, model: useModel, updatedAt: Date.now(),
         error: timedOut ? '分析生成超时，可稍后重试；如反复超时请缩小问题范围。' : ('网络异常：' + String(resp.__err.message || resp.__err)),
         meta: collectedMeta, news: newsRefs,
-      }));
+      });
     }
 
     if (!resp.ok) {
       const errText = await resp.text();
-      return res
-        .status(200)
-        .send(JSON.stringify({ ok: false, error: `LLM ${resp.status}`, detail: errText.slice(0, 200), meta: collectedMeta }));
+      return finish({ ok: false, error: `LLM ${resp.status}`, detail: errText.slice(0, 200), meta: collectedMeta });
     }
 
     const j = await resp.json();
@@ -881,21 +905,25 @@ export default async function handler(req, res) {
       result = { raw: content };
     }
 
-    res.status(200).send(
-      JSON.stringify({
-        ok: true,
-        mode,
-        model: useModel,
-        updatedAt: Date.now(),
-        result,
-        news: newsRefs,
-        // 可信度元信息：供前端展示共振灯/环境/龙虎榜/消息面(不依赖模型自报)
-        meta: collectedMeta,
-        usedRag: !!ragText,
-        usage: j.usage || null,
-      })
-    );
+    if (!streaming) res.status(200);
+    return finish({
+      ok: true,
+      mode,
+      model: useModel,
+      updatedAt: Date.now(),
+      result,
+      news: newsRefs,
+      // 可信度元信息：供前端展示共振灯/环境/龙虎榜/消息面(不依赖模型自报)
+      meta: collectedMeta,
+      usedRag: !!ragText,
+      usage: j.usage || null,
+    });
   } catch (e) {
+    if (res.headersSent || (res.getHeader && String(res.getHeader('Content-Type') || '').includes('event-stream'))) {
+      try { res.write(`event: result\ndata: ${JSON.stringify({ ok: false, error: String(e.message || e) })}\n\n`); } catch { /* ignore */ }
+      return res.end();
+    }
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.status(200).send(JSON.stringify({ ok: false, error: String(e.message || e) }));
   }
 }

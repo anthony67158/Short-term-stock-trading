@@ -4,7 +4,7 @@ import Icon from './Icon'
 import { usePolling } from '../hooks'
 import { fmtPct, pctClass, fmtRaw, fmtNum, hasVal, opText } from '../format'
 import { aiStore } from '../aiStore'
-import { callAI } from '../ai'
+import { callAI, callAIStream } from '../ai'
 import { usePlanStore, planStore, computeTFlows, computePortfolio } from '../planStore'
 import { getAdvice, saveAdvice } from '../adviceCache'
 import { AlertForm } from './AlertCenter'
@@ -107,7 +107,9 @@ export default function StockDetail({ stock, onClose }) {
   }, [stock && stock.code])
   const loadQuant = async () => {
     if (!stock) return
-    setQuantState({ loading: true })
+    setQuantState({ loading: true, phase: '正在准备分析…' })
+    // 流式进度回调：把后端数据采集里程碑实时显示出来，不再"黑盒卡住"
+    const onPhase = (p) => setQuantState((s) => (s && s.loading ? { ...s, phase: p.text } : s))
     try {
       const hp = myHold ? `&holdCost=${myHold.cost}&holdQty=${myHold.qty}` : ''
       // 量化服务(走势预测/多因子分) 与 LLM 操作建议(带具体价位) 并发
@@ -115,7 +117,7 @@ export default function StockDetail({ stock, onClose }) {
         .then((r) => r.json()).catch(() => null)
       // 持仓 → LLM 给"加/减/持有/清仓 + 具体价位"；未持仓 → LLM 给"买入/等回调/观望 结论 + 对应建议"
       const adviceP = myHold
-        ? callAI('hold_advice', {
+        ? callAIStream('hold_advice', {
             code: stock.code,
             name: (profile && profile.name) || stock.name,
             holdCost: myHold.cost,
@@ -131,9 +133,9 @@ export default function StockDetail({ stock, onClose }) {
                 return p && p.weight != null ? p.weight : null
               })(),
             },
-          })
+          }, onPhase)
             .then((r) => (r && r.ok ? { advice: r.result, meta: r.meta, news: r.news } : null)).catch(() => null)
-        : callAI('buy_advice', {
+        : callAIStream('buy_advice', {
             code: stock.code,
             name: (profile && profile.name) || stock.name,
             account: {
@@ -142,7 +144,7 @@ export default function StockDetail({ stock, onClose }) {
               position: portfolio && portfolio.position != null ? portfolio.position : null,
               holdMktValue: portfolio && portfolio.holdMktValue != null ? portfolio.holdMktValue : null,
             },
-          })
+          }, onPhase)
             .then((r) => (r && r.ok ? { advice: r.result, meta: r.meta, news: r.news } : null)).catch(() => null)
       const [j, adviceResp] = await Promise.all([quantP, adviceP])
       const advice = adviceResp && adviceResp.advice
@@ -493,7 +495,7 @@ export default function StockDetail({ stock, onClose }) {
                     <div className="sk-line sk-verdict" />
                     <div className="sk-line sk-timing" />
                     <div className="sk-cells"><div className="sk-cell" /><div className="sk-cell" /><div className="sk-cell" /></div>
-                    <div className="sk-hint"><Icon name="refresh" size={13} className="spin" /> 量化模型 + AI 计算中…（首次冷启动约需几秒）</div>
+                    <div className="sk-hint"><Icon name="refresh" size={13} className="spin" /> {quantState.phase || '量化模型 + AI 计算中…'}（首次冷启动约需几秒）</div>
                   </div>
                 )}
                 {quantState && quantState.error && (

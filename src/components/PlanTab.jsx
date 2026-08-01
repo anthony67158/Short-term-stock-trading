@@ -4,7 +4,7 @@ import StockName from './StockName'
 import ConfirmDialog from './ConfirmDialog'
 import { AlertForm } from './AlertCenter'
 import { usePolling } from '../hooks'
-import { callAI } from '../ai'
+import { callAI, callAIStream } from '../ai'
 import { planStore, usePlanStore, calcBuyFee, calcSellFee, computeTFlows } from '../planStore'
 import { aiStore } from '../aiStore'
 import { generateReview, sessionLabel, forceGenerateReviews, currentAutoSession, missingReviewCount } from '../review'
@@ -684,9 +684,10 @@ function HoldingItem({ h, idx, quote: q }) {
   const askTAdvice = async (styleOverride) => {
     const useStyle = styleOverride || tStyle
     if (styleOverride && styleOverride !== tStyle) setTStyle(styleOverride)
-    setTAdvice({ loading: true })
+    setTAdvice({ loading: true, phase: '正在准备分析…' })
+    const onPhase = (p) => setTAdvice((s) => (s && s.loading ? { ...s, phase: p.text } : s))
     try {
-      const r = await callAI('t_advice', {
+      const r = await callAIStream('t_advice', {
         name: h.name, code: h.code,
         nowPrice: q?.price, pct: q?.pct,
         dayHigh: q?.high, dayLow: q?.low, open: q?.open, prevClose: q?.prevClose,
@@ -694,7 +695,7 @@ function HoldingItem({ h, idx, quote: q }) {
         mainInflowYi: q ? +(q.mainInflow / 1e8).toFixed(2) : null,
         holdCost: h.buyPrice, holdQty: h.qty, baseQty,
         style: useStyle,
-      })
+      }, onPhase)
       if (r.ok) {
         setTAdvice({ result: r.result })
         // 建议方向自动切到对应买/卖
@@ -1012,7 +1013,7 @@ function HoldingItem({ h, idx, quote: q }) {
             {!tAdvice && (
               <button className="t-ai-btn" onClick={() => askTAdvice()}><Icon name="spark" size={14} />{tStyle === 'auto' ? 'AI 按历史规律自动决策做T策略' : `获取 AI 做T参考（${tStyle === 'conservative' ? '稳健' : tStyle === 'aggressive' ? '激进' : '均衡'}）`}</button>
             )}
-            {tAdvice && tAdvice.loading && <div className="t-ai-loading"><Icon name="refresh" size={13} className="spin" />AI 正在分析历史规律/分时/大盘/资金…</div>}
+            {tAdvice && tAdvice.loading && <div className="t-ai-loading"><Icon name="refresh" size={13} className="spin" />{tAdvice.phase || 'AI 正在分析历史规律/分时/大盘/资金…'}</div>}
             {tAdvice && tAdvice.error && <div className="err">{tAdvice.error} <span className="expand-btn" onClick={askTAdvice}>重试</span></div>}
             {tAdvice && tAdvice.result && (
               <div className={'t-ai-card ' + (tAdvice.result.light || 'yellow')}>
@@ -1189,21 +1190,22 @@ function HoldReview({ code, name, cost, qty, price }) {
   const review = (book.reviews || {})[code] || null
   const [open, setOpen] = useState(false) // 展开完整细节
   const [regen, setRegen] = useState(null) // null | loading | error
+  const [regenPhase, setRegenPhase] = useState('') // 流式采集进度文案
   const r = review && review.result
   const tone = r ? (r.tone || 'muted') : 'muted'
   const ts = review ? new Date(review.at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : null
   const nextLabel = review ? (review.session === 'noon' ? '下午' : review.session === 'close' ? '明天开盘' : '后续') : '后续'
   const doRegenerate = async () => {
     if (regen === 'loading') return
-    setRegen('loading')
+    setRegen('loading'); setRegenPhase('正在准备复盘…')
     try {
       const pnlPct = (price && cost) ? +(((price - cost) / cost) * 100).toFixed(2) : null
-      const res = await generateReview({ code, name, session: currentAutoSession() || 'manual', hold: { cost, qty, pnlPct } })
+      const res = await generateReview({ code, name, session: currentAutoSession() || 'manual', hold: { cost, qty, pnlPct }, onPhase: (p) => setRegenPhase(p.text) })
       if (res && !res.error) { setRegen(null); setOpen(false) }
       else setRegen(res && res.error ? res.error : '生成失败')
     } catch (e) {
       setRegen(String(e.message || e || '生成失败'))
-    }
+    } finally { setRegenPhase('') }
   }
   if (!review || !r) {
     return (
@@ -1211,7 +1213,7 @@ function HoldReview({ code, name, cost, qty, price }) {
         <div className="hr-top minimal">
           <span className="hr-badge"><Icon name="history" size={12} /> 复盘</span>
           <button className="hr-link" onClick={doRegenerate} disabled={regen === 'loading'}>
-            {regen === 'loading' ? '生成中…' : '生成复盘'}
+            {regen === 'loading' ? (regenPhase || '生成中…') : '生成复盘'}
           </button>
         </div>
         <div className="hr-empty">还没有复盘。可点右上「生成复盘」为这只单独生成，或用顶部「补全复盘」一次补齐所有缺口；午间/收盘也会自动生成。</div>
@@ -1227,7 +1229,7 @@ function HoldReview({ code, name, cost, qty, price }) {
         {review && <span className={'hr-sess ' + review.session}>{sessionLabel(review.session)}</span>}
         {ts && <span className="hr-time">{ts}</span>}
         <button className="hr-link" onClick={doRegenerate} disabled={regen === 'loading'} title="基于当前账户资金/持仓/行情重新生成复盘意见">
-          {regen === 'loading' ? '生成中…' : '重生成'}
+          {regen === 'loading' ? (regenPhase || '生成中…') : '重生成'}
         </button>
       </div>
       {regen && regen !== 'loading' && <div className="hr-empty err">{regen}</div>}

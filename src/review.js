@@ -1,6 +1,6 @@
 // 复盘工具：构造复盘请求 payload + 调用后端 review 模式
 // 复盘结论"每只股只留最新一条"，存 planStore.reviews（云端持久化）
-import { callAI } from './ai'
+import { callAI, callAIStream } from './ai'
 import { planStore, livePositionOf } from './planStore'
 
 // 北京时间当前分钟数 / 日key
@@ -92,9 +92,9 @@ function acctInfo() {
   return { totalAssets: a.totalAssets ?? null, cash: a.cash ?? null }
 }
 
-// 生成一次复盘并写入 store。opts: { code, name, session, hold:{cost,qty,pnlPct}|null }
-// 成功返回 review 对象，失败返回 { error }
-export async function generateReview({ code, name, session, hold }) {
+// 生成一次复盘并写入 store。opts: { code, name, session, hold:{cost,qty,pnlPct}|null, onPhase? }
+// onPhase({text}) 存在时走流式，把数据采集进度实时回调；成功返回 review 对象，失败返回 { error }
+export async function generateReview({ code, name, session, hold, onPhase }) {
   if (!code) return { error: '缺少股票代码' }
   const payload = {
     code, name, session,
@@ -107,7 +107,7 @@ export async function generateReview({ code, name, session, hold }) {
     todayTrades: todayTradesOf(code),
     tradeHistory: tradeHistoryOf(code),
   }
-  const r = await callAI('review', payload)
+  const r = onPhase ? await callAIStream('review', payload, onPhase) : await callAI('review', payload)
   if (r.ok && r.result) {
     const review = {
       code, name, session, dayKey: bjDayKey(), at: Date.now(),
