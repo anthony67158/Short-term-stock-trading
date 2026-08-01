@@ -49,8 +49,8 @@ function minToProgress(m, start, end) {
 const yiFmt = (v) => (Math.abs(v) / 1e8).toFixed(2)
 
 export default function FundFlowCanvas({ interval }) {
-  const [type, setType] = useState('industry')
-  const { data, loading } = usePolling(`/api/sectors?type=${type}&sort=main`, interval, [type])
+  // 固定按行业口径(截图无行业/概念切换)；如需概念可后续再加
+  const { data, loading } = usePolling(`/api/sectors?type=industry&sort=main`, interval, [])
   const list = (data && data.list) || []
 
   const [tl, setTl] = useState(timelineCtx)
@@ -63,17 +63,21 @@ export default function FundFlowCanvas({ interval }) {
   const rafRef = useRef(0)
   const lastRef = useRef(0)
 
-  // 取流出 TOP / 流入 TOP（真实主力净额）
+  // 取两侧 TOP：无论涨跌都体现"资金对流"——右=主力净额最高(资金进场方向)，左=最低(资金撤离/最弱方向)。
+  // A股常见全市普涨/普跌，若按正负分栏会出现"只有流入没有流出"；这里按【相对强弱】分栏，两侧永远都有内容。
   const { outTop, inTop, totalIn, totalOut, net, maxAmt } = useMemo(() => {
-    const sorted = [...list].sort((a, b) => b.mainInflow - a.mainInflow)
-    const inTop = sorted.filter((s) => s.mainInflow > 0).slice(0, 8)
-    const outTop = sorted.filter((s) => s.mainInflow < 0).slice(-8).reverse()
+    const sorted = [...list].sort((a, b) => b.mainInflow - a.mainInflow) // 高→低
+    const N = Math.min(8, Math.floor(sorted.length / 2) || sorted.length)
+    const inTop = sorted.slice(0, N)                       // 资金流入方向(最强)
+    const outTop = sorted.slice(-N).reverse()              // 资金流出方向(最弱/撤离)，最弱排最前
+    // 汇总仍按真实正负口径统计(客观)
     const totalIn = list.filter((s) => s.mainInflow > 0).reduce((a, s) => a + s.mainInflow, 0)
     const totalOut = list.filter((s) => s.mainInflow < 0).reduce((a, s) => a + s.mainInflow, 0)
-    const maxAmt = Math.max(1, ...inTop.map((s) => s.mainInflow), ...outTop.map((s) => Math.abs(s.mainInflow)))
+    const maxAmt = Math.max(1, ...inTop.map((s) => Math.abs(s.mainInflow)), ...outTop.map((s) => Math.abs(s.mainInflow)))
     return { outTop, inTop, totalIn, totalOut, net: totalIn + totalOut, maxAmt }
   }, [list])
-  const hasData = outTop.length > 0 || inTop.length > 0
+  // 两侧不重叠(板块数<16 时防同一板块两边都出现)
+  const hasData = outTop.length > 0 && inTop.length > 0
 
   // 当前进度对应的"已流动比例"：金额从 20%→100% 随进度增长，营造资金逐步迁移感
   const flowRatio = 0.2 + 0.8 * prog
@@ -212,10 +216,6 @@ export default function FundFlowCanvas({ interval }) {
           <div className="ffc-session">{tl.phase}</div>
         </div>
         <div className="ffc-head-right">
-          <div className="tabs">
-            <div className={'tab' + (type === 'industry' ? ' active' : '')} onClick={() => setType('industry')}>行业</div>
-            <div className={'tab' + (type === 'concept' ? ' active' : '')} onClick={() => setType('concept')}>概念</div>
-          </div>
           <button className="ffc-play" onClick={() => setPlaying((v) => !v)} title={playing ? '暂停' : '播放'}>
             <Icon name={playing ? 'pause' : 'play'} size={15} />
           </button>
