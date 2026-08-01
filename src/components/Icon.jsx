@@ -23,6 +23,8 @@ const paths = {
   rocket: <><path d="M5 15c-1 1-2 4-2 4s3-1 4-2" /><path d="M9 11a12 12 0 0 1 8-8c2 0 3 1 3 3a12 12 0 0 1-8 8l-3-3Z" /><circle cx="14.5" cy="9.5" r="1.3" /><path d="M9 11l-3 1 3 3 1-3" /></>,
   pulse: <><path d="M3 12h4l2-6 4 12 2-6h6" /></>,
   wave: <><path d="M3 10c3-3 6 3 9 0s6-3 9 0" /><path d="M3 15c3-3 6 3 9 0s6-3 9 0" /></>,
+  pause: <><rect x="7" y="5" width="3.4" height="14" rx="1" /><rect x="13.6" y="5" width="3.4" height="14" rx="1" /></>,
+  play: <><path d="M7 5l12 7-12 7V5Z" /></>,
   search: <><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></>,
   plus: <><path d="M12 5v14M5 12h14" /></>,
   check: <><path d="M20 6 9 17l-5-5" /></>,

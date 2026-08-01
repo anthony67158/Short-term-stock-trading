@@ -2271,3 +2271,68 @@ body {
 .hr-goadvice b { color: var(--accent); font-weight: 650; }
 .hr-goadvice .icon { color: var(--accent); flex: none; }
 .hr-goadvice:hover { border-color: var(--accent); color: var(--text); background: var(--surface-quiet, rgba(124,107,245,.06)); }
+
+/* ============ 板块资金流向 · Canvas 动画 (FundFlowCanvas) ============ */
+.ffc-panel { position: relative; overflow: hidden; }
+.ffc-panel::before { content:''; position:absolute; inset:0; pointer-events:none;
+  background: radial-gradient(600px 300px at 50% 40%, rgba(124,107,245,.06), transparent 70%); }
+.ffc-head { display: flex; align-items: flex-end; gap: 16px; padding: 16px 18px 6px; position: relative; z-index: 2; flex-wrap: wrap; }
+.ffc-title-wrap { display: flex; flex-direction: column; gap: 2px; }
+.ffc-sub { font-size: 11px; color: var(--muted); letter-spacing: .08em; }
+.ffc-title { font-size: 26px; font-weight: 800; letter-spacing: -0.01em; color: var(--text);
+  background: linear-gradient(90deg, var(--green), #6fe08a 30%, var(--text) 50%, #ff8a6b 72%, var(--red));
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+.ffc-date-wrap { margin-left: auto; text-align: right; }
+.ffc-date { font-size: 18px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.ffc-session { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+.ffc-head-right { display: flex; align-items: center; gap: 10px; }
+.ffc-play { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--border); background: var(--panel2); color: var(--text2); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: all var(--t-fast); }
+.ffc-play:hover { color: var(--accent); border-color: var(--accent); }
+.ffc-legend { display: flex; gap: 18px; padding: 4px 18px 10px; position: relative; z-index: 2; flex-wrap: wrap; }
+.ffc-lg { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); }
+.ffc-lg .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.ffc-lg .dot.out { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.ffc-lg .dot.in { background: var(--red); box-shadow: 0 0 6px var(--red); }
+.ffc-lg .dot.exit { background: var(--muted); }
+/* 时间轴 */
+.ffc-timeline { display: flex; align-items: center; gap: 12px; padding: 2px 18px 12px; position: relative; z-index: 2; }
+.ffc-tl-marks { display: none; }
+.ffc-tl-track { position: relative; flex: 1; height: 5px; border-radius: 3px; background: var(--panel3); overflow: visible; }
+.ffc-tl-noon { position: absolute; top: 0; height: 100%; border-radius: 2px;
+  background: repeating-linear-gradient(45deg, rgba(255,255,255,.10), rgba(255,255,255,.10) 3px, transparent 3px, transparent 6px); }
+.ffc-tl-fill { position: absolute; top: 0; left: 0; height: 100%; border-radius: 3px;
+  background: linear-gradient(90deg, var(--accent2), var(--accent)); box-shadow: 0 0 8px var(--glow); transition: width .2s linear; }
+.ffc-tl-cursor { position: absolute; top: 50%; transform: translate(-50%, -50%); width: 11px; height: 11px; border-radius: 50%;
+  background: #fff; box-shadow: 0 0 10px var(--accent), 0 0 3px #fff; transition: left .2s linear; }
+.ffc-tl-now { font-size: 13px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; min-width: 44px; text-align: right; }
+/* 舞台：canvas 铺底，两栏浮于其上 */
+.ffc-stage { position: relative; min-height: 380px; padding: 4px 0 8px; }
+.ffc-canvas { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; }
+.ffc-cols { position: relative; z-index: 2; display: flex; justify-content: space-between; padding: 0 18px; gap: 12px; }
+.ffc-col { display: flex; flex-direction: column; gap: 2px; width: 42%; }
+.ffc-col-head { font-size: 12px; font-weight: 600; margin-bottom: 8px; }
+.ffc-col-head.green { color: var(--green); }
+.ffc-col-head.red { color: var(--red); text-align: right; }
+.ffc-col.right .ffc-col-head { text-align: right; }
+.ffc-row { display: flex; align-items: center; gap: 8px; padding: 6px 4px; border-radius: 7px; cursor: pointer; transition: background-color var(--t-fast); font-variant-numeric: tabular-nums; }
+.ffc-row:hover { background: var(--surface-quiet, rgba(255,255,255,.04)); }
+.ffc-row.in { flex-direction: row; justify-content: flex-end; text-align: right; }
+.ffc-name { font-size: 13.5px; color: var(--text); font-weight: 500; white-space: nowrap; }
+.ffc-amt { font-size: 13px; font-weight: 700; white-space: nowrap; }
+.ffc-amt.green { color: var(--green); } .ffc-amt.red { color: var(--red); }
+.ffc-row.out .ffc-amt { min-width: 62px; }
+.ffc-row.in .ffc-amt { min-width: 62px; text-align: right; }
+.ffc-node { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.ffc-node.green { background: var(--green); box-shadow: 0 0 6px rgba(63,185,80,.7); }
+.ffc-node.red { background: var(--red); box-shadow: 0 0 6px rgba(244,97,78,.7); }
+.ffc-row.out { justify-content: flex-start; }
+.ffc-row.out .ffc-name { flex: 1; }
+.ffc-row.in .ffc-name { flex: 1; text-align: right; }
+.ffc-summary { display: flex; gap: 18px; justify-content: center; padding: 8px 18px 14px; position: relative; z-index: 2; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+.ffc-summary b { font-variant-numeric: tabular-nums; }
+@media (max-width: 720px) {
+  .ffc-title { font-size: 20px; }
+  .ffc-stage { min-height: 340px; }
+  .ffc-name { font-size: 12px; }
+  .ffc-col { width: 44%; }
+}
