@@ -489,16 +489,17 @@ function AdvisorScore({ book }) {
 // ---------- 当前持仓 ----------
 function HoldingList({ book, quote }) {
   const [reviewing, setReviewing] = useState(null) // null | 'loading' | {ok,fail,skipped}
-  // "补全复盘"：只对今天还没有复盘的持仓补生成，与单卡"重生成"(覆盖单只)职责分离，避免重复。
+  // 职责按【粒度】划分，避免动词歧义：顶部「全部复盘」=对所有持仓统一刷新；单卡「复盘/重做」=只这一只。
   const missing = missingReviewCount()
   const runReview = async () => {
-    if (reviewing === 'loading' || missing === 0) return
+    if (reviewing === 'loading') return
     setReviewing('loading')
     const qmap = {}
     Object.keys(quote || {}).forEach((c) => { qmap[c] = { price: quote[c].price } })
     const session = currentAutoSession() || 'manual'
     try {
-      const res = await forceGenerateReviews(session, qmap, { onlyMissing: true })
+      // 顶部按钮：对【全部】持仓刷新复盘(覆盖)，功能与单卡「只做这一只」明确区分开
+      const res = await forceGenerateReviews(session, qmap, { onlyMissing: false })
       setReviewing(res)
       setTimeout(() => setReviewing(null), 4000)
     } catch { setReviewing({ ok: 0, fail: 1 }); setTimeout(() => setReviewing(null), 4000) }
@@ -510,12 +511,12 @@ function HoldingList({ book, quote }) {
         <div className="hold-head-actions">
           <AdvisorScore book={book} />
           {book.holding.length > 0 && (
-            <button className="mini-btn" onClick={runReview} disabled={reviewing === 'loading' || (reviewing == null && missing === 0)}
-              title={missing === 0 ? '所有持仓今日复盘已就绪；如需更新单只，展开该卡的「复盘」点重生成' : `为今天还没有复盘的 ${missing} 只持仓补生成复盘`}>
+            <button className="mini-btn" onClick={runReview} disabled={reviewing === 'loading'}
+              title="对当前所有持仓统一生成/刷新今日复盘；如只想更新某一只，展开该卡在「复盘」里点重做">
               <Icon name={reviewing === 'loading' ? 'refresh' : 'history'} size={12} className={reviewing === 'loading' ? 'spin' : ''} />
               {reviewing === 'loading' ? '复盘中…'
-                : (reviewing && typeof reviewing === 'object') ? `已补${reviewing.ok}只${reviewing.fail ? `·失败${reviewing.fail}` : ''}`
-                : missing === 0 ? '复盘已就绪' : `补全复盘 (${missing})`}
+                : (reviewing && typeof reviewing === 'object') ? `已复盘${reviewing.ok}只${reviewing.fail ? `·失败${reviewing.fail}` : ''}`
+                : missing > 0 ? `全部复盘 · ${missing}只待更新` : '全部复盘'}
             </button>
           )}
         </div>
@@ -1216,7 +1217,7 @@ function HoldReview({ code, name, cost, qty, price }) {
             {regen === 'loading' ? (regenPhase || '生成中…') : '生成复盘'}
           </button>
         </div>
-        <div className="hr-empty">还没有复盘。可点右上「生成复盘」为这只单独生成，或用顶部「补全复盘」一次补齐所有缺口；午间/收盘也会自动生成。</div>
+        <div className="hr-empty">还没有复盘。点右上「生成」为这只单独生成，或用顶部「全部复盘」一次刷新所有持仓；午间/收盘也会自动生成。</div>
         {regen && regen !== 'loading' && <div className="hr-empty err">{regen}</div>}
       </div>
     )
@@ -1228,8 +1229,8 @@ function HoldReview({ code, name, cost, qty, price }) {
         <span className="hr-badge"><Icon name="history" size={12} /> 复盘</span>
         {review && <span className={'hr-sess ' + review.session}>{sessionLabel(review.session)}</span>}
         {ts && <span className="hr-time">{ts}</span>}
-        <button className="hr-link" onClick={doRegenerate} disabled={regen === 'loading'} title="基于当前账户资金/持仓/行情重新生成复盘意见">
-          {regen === 'loading' ? (regenPhase || '生成中…') : '重生成'}
+        <button className="hr-link" onClick={doRegenerate} disabled={regen === 'loading'} title="只重做这一只的复盘（基于当前账户资金/持仓/行情）；如需一次刷新全部持仓，用顶部「全部复盘」">
+          {regen === 'loading' ? (regenPhase || '生成中…') : '重做本只'}
         </button>
       </div>
       {regen && regen !== 'loading' && <div className="hr-empty err">{regen}</div>}
