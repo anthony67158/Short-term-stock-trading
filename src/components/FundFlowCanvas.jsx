@@ -49,43 +49,60 @@ function minToProgress(m, start, end) {
 const yiFmt = (v) => (Math.abs(v) / 1e8).toFixed(2)
 
 export default function FundFlowCanvas({ interval }) {
-  // 固定按行业口径(截图无行业/概念切换)；如需概念可后续再加
+  // 实时快照(兜底 / snapshot 模式用)
   const { data, loading } = usePolling(`/api/sectors?type=industry&sort=main`, interval, [])
-  const list = (data && data.list) || []
+  const liveList = (data && data.list) || []
+
+  // 分时快照序列(A+B 真回放的数据底座)：每次轮询顺带 capture 一份，累积当天时间序列
+  const { data: snapData } = usePolling(`/api/sector_snapshots?capture=1`, Math.max(interval || 20000, 20000), [])
+  const series = (snapData && snapData.series) || []
+  // 至少 2 个真实时点才进入"真回放"，否则诚实走"当前快照"模式
+  const replay = series.length >= 2
 
   const [tl, setTl] = useState(timelineCtx)
-  // 每 30s 刷新时间轴上下文（跨越午休/收盘时自动更新）
   useEffect(() => { const id = setInterval(() => setTl(timelineCtx()), 30000); return () => clearInterval(id) }, [])
 
-  // 播放进度 0~1（沿时间轴推进；到末尾循环）
   const [playing, setPlaying] = useState(true)
-  const [prog, setProg] = useState(0)
+  const [prog, setProg] = useState(0)          // 0~1 沿(真回放:快照序列 / 快照模式:静止)
   const rafRef = useRef(0)
   const lastRef = useRef(0)
 
-  // 取两侧 TOP：无论涨跌都体现"资金对流"——右=主力净额最高(资金进场方向)，左=最低(资金撤离/最弱方向)。
-  // A股常见全市普涨/普跌，若按正负分栏会出现"只有流入没有流出"；这里按【相对强弱】分栏，两侧永远都有内容。
+  // 把某个快照 items(简版 {c,n,p,m,l,lc}, m=百万) 还原成标准板块数组(mainInflow=元)
+  const frameToList = (items) => (items || []).map((s) => ({
+    code: s.c, name: s.n, pct: s.p, mainInflow: (s.m || 0) * 1e6, leadName: s.l, leadCode: s.lc,
+  }))
+
+  // 真回放：按 prog 在快照序列里定位"当前帧"（取最接近的快照，排名随之真实换位）
+  const replayFrame = useMemo(() => {
+    if (!replay) return null
+    const idx = Math.min(series.length - 1, Math.floor(prog * (series.length - 1) + 1e-6))
+    return series[idx]
+  }, [replay, series, prog])
+
+  // 当前用于绘制的板块列表：真回放用当前帧，否则用实时快照
+  const list = replay && replayFrame ? frameToList(replayFrame.items) : liveList
+
+  // 取两侧 TOP：右=主力净额最强(资金进场)，左=最弱(资金撤离)。普涨/普跌两侧都有内容。
   const { outTop, inTop, totalIn, totalOut, net, maxAmt } = useMemo(() => {
-    const sorted = [...list].sort((a, b) => b.mainInflow - a.mainInflow) // 高→低
+    const sorted = [...list].sort((a, b) => b.mainInflow - a.mainInflow)
     const N = Math.min(8, Math.floor(sorted.length / 2) || sorted.length)
-    const inTop = sorted.slice(0, N)                       // 资金流入方向(最强)
-    const outTop = sorted.slice(-N).reverse()              // 资金流出方向(最弱/撤离)，最弱排最前
-    // 汇总仍按真实正负口径统计(客观)
+    const inTop = sorted.slice(0, N)
+    const outTop = sorted.slice(-N).reverse()
     const totalIn = list.filter((s) => s.mainInflow > 0).reduce((a, s) => a + s.mainInflow, 0)
     const totalOut = list.filter((s) => s.mainInflow < 0).reduce((a, s) => a + s.mainInflow, 0)
     const maxAmt = Math.max(1, ...inTop.map((s) => Math.abs(s.mainInflow)), ...outTop.map((s) => Math.abs(s.mainInflow)))
     return { outTop, inTop, totalIn, totalOut, net: totalIn + totalOut, maxAmt }
   }, [list])
-  // 两侧不重叠(板块数<16 时防同一板块两边都出现)
   const hasData = outTop.length > 0 && inTop.length > 0
 
-  // 当前进度对应的"已流动比例"：金额从 20%→100% 随进度增长，营造资金逐步迁移感
-  const flowRatio = 0.2 + 0.8 * prog
+  // 金额一律显示【真实值】——不再做 20%→100% 的假缩放(方案A:诚实标注，所见即真实)
+  const shownAmt = (raw) => raw
 
-  // 播放循环：沿真实时间轴 [start,cursor] 内推进，约 12s 走完一遍再循环
+  // 播放循环：仅在【真回放】时推进 prog 逐帧回放当天各时点(约 10s 走完一遍再循环)；
+  // 快照模式没有时间序列，无需推进(静态展示当前快照，粒子仍流动表现活跃度)。
   useEffect(() => {
-    if (!playing || !hasData) { cancelAnimationFrame(rafRef.current); return }
-    const CYCLE = 12000
+    if (!playing || !hasData || !replay) { cancelAnimationFrame(rafRef.current); lastRef.current = 0; return }
+    const CYCLE = 10000
     const step = (ts) => {
       if (!lastRef.current) lastRef.current = ts
       const dt = ts - lastRef.current; lastRef.current = ts
@@ -94,11 +111,13 @@ export default function FundFlowCanvas({ interval }) {
     }
     rafRef.current = requestAnimationFrame(step)
     return () => { cancelAnimationFrame(rafRef.current); lastRef.current = 0 }
-  }, [playing, hasData])
+  }, [playing, hasData, replay])
 
-  // 指针分钟：起点→cursor 之间按 prog 插值（午休段会被 minToProgress 处理）
-  const cursorMin = Math.round(tl.start + (tl.cursor - tl.start) * prog)
-  const cursorLabel = tl.cursor <= tl.start ? minToLabel(tl.start) : minToLabel(cursorMin)
+  // 时间轴指针 & 标签：真回放→当前帧的真实时点；快照模式→"当前快照"时点(不回放)
+  const cursorMin = replay && replayFrame ? replayFrame.t : tl.cursor
+  const cursorLabel = minToLabel(cursorMin)
+  // 粒子流速用一个恒定活跃系数(不再依赖假 flowRatio)
+  const flowRatio = 0.9
 
   // ---------- Canvas 绘制：曲线 + 粒子 ----------
   const canvasRef = useRef(null)
@@ -197,8 +216,6 @@ export default function FundFlowCanvas({ interval }) {
   }, [])
   useEffect(() => { measure(); const on = () => measure(); window.addEventListener('resize', on); return () => window.removeEventListener('resize', on) })
 
-  // 当前展示金额（随进度 flowRatio 缩放，营造"逐步流入"）
-  const shownAmt = (raw) => raw * flowRatio
   const today = nowBJ()
   const dateLabel = `${String(today.getMonth() + 1).padStart(2, '0')}月${String(today.getDate()).padStart(2, '0')}日`
   const spansNoon = tl.start < T_LBRK && tl.end > T_AOPEN
@@ -213,11 +230,11 @@ export default function FundFlowCanvas({ interval }) {
         </div>
         <div className="ffc-date-wrap">
           <div className="ffc-date">{dateLabel}</div>
-          <div className="ffc-session">{tl.phase}</div>
+          <div className="ffc-session">{tl.phase} · {replay ? `真回放 ${series.length}帧` : '当前快照'}</div>
         </div>
         <div className="ffc-head-right">
-          <button className="ffc-play" onClick={() => setPlaying((v) => !v)} title={playing ? '暂停' : '播放'}>
-            <Icon name={playing ? 'pause' : 'play'} size={15} />
+          <button className="ffc-play" onClick={() => setPlaying((v) => !v)} disabled={!replay} title={!replay ? '积累到≥2个时点后可回放' : (playing ? '暂停' : '播放')}>
+            <Icon name={playing && replay ? 'pause' : 'play'} size={15} />
           </button>
         </div>
       </div>
