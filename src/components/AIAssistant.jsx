@@ -275,6 +275,7 @@ function badge(s, up = '强', down = '弱') {
 function Diagnose({ r }) {
   return (
     <div className="ai-result">
+      {r.reasoning && <div className="ai-reasoning"><span className="ai-reasoning-k">研判</span>{r.reasoning}</div>}
       <div className="ai-senti"><span className={'ai-badge ' + badge(r.strength)}>{r.strength || '—'}</span><span className="ai-summary">{r.view}</span></div>
       {Array.isArray(r.points) && <div className="ai-block">{r.points.map((p, i) => <div key={i} className="ai-line">· {p}</div>)}</div>}
       {r.watch && <div className="ai-line" style={{ marginTop: 6 }}><span className="ai-tag-watch">关注</span>{r.watch}</div>}
@@ -316,6 +317,7 @@ function MarketReview({ r }) {
 function SectorPick({ r }) {
   return (
     <div className="ai-result">
+      {r.reasoning && <div className="ai-reasoning"><span className="ai-reasoning-k">研判</span>{r.reasoning}</div>}
       {r.sectorView && <div className="ai-summary" style={{ marginBottom: 8 }}>{r.sectorView}</div>}
       {Array.isArray(r.picks) && r.picks.map((p, i) => (
         <div key={i} className="ai-pick">

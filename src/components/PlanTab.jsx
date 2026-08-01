@@ -1025,6 +1025,9 @@ function HoldingItem({ h, idx, quote: q }) {
                     <span className="expand-btn" onClick={() => setTAdvice(null)}>收起</span>
                   </div>
                 </div>
+                {tAdvice.result.reasoning && (
+                  <div className="ai-reasoning"><span className="ai-reasoning-k">研判</span>{tAdvice.result.reasoning}</div>
+                )}
                 {tAdvice.result.actionPlan && (
                   <div className="t-ai-plan"><Icon name="target" size={13} /><span className="t-ai-plan-k">这样操作</span>{tAdvice.result.actionPlan}</div>
                 )}
@@ -1235,6 +1238,11 @@ function HoldReview({ code, name, cost, qty, price }) {
           {r.stance && <span className={'hr-stance tone-' + tone}>{r.stance}</span>}
           <span className="hr-headline">{r.headline || r.stance}</span>
         </div>
+      )}
+
+      {/* ReAct 研判思路：复盘结论背后的推理链 */}
+      {r && r.reasoning && (
+        <div className="ai-reasoning" style={{ margin: '8px 10px 0' }}><span className="ai-reasoning-k">研判</span>{r.reasoning}</div>
       )}
 
       {/* ③ 下一步行动：保留核心操作指令 */}

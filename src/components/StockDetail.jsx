@@ -525,6 +525,11 @@ export default function StockDetail({ stock, onClose }) {
                         <div className="dv-detail">{verdict.detail}</div>
                       </div>
 
+                      {/* ReAct 研判思路：模型先于结论生成的推理链，让"为什么这么建议"透明可核对 */}
+                      {adv.reasoning && (
+                        <div className="ai-reasoning"><span className="ai-reasoning-k">研判</span>{adv.reasoning}</div>
+                      )}
+
                       {/* 可信度条：综合信任分 + 共振灯（让"能信多少"透明化）*/}
                       {(() => {
                         const meta = quantState.meta || {}
