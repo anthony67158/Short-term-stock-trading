@@ -6,6 +6,7 @@ import ResearchTab from './components/ResearchTab'
 import AccountHub from './components/AccountHub'
 import AIAssistant from './components/AIAssistant'
 import StockDetail from './components/StockDetail'
+import ErrorBoundary from './components/ErrorBoundary'
 import AuthGate, { AccountMenu } from './components/AuthGate'
 import { usePolling, isTradingHours, useCountdown, triggerRefresh, useRefreshTick } from './hooks'
 import { usePlanStore, planStore } from './planStore'
@@ -159,8 +160,13 @@ function MainApp() {
 
       <AIAssistant snapshot={snapshot} />
 
-      {/* 全局个股详情弹窗：任意页面点击股票名都会打开 */}
-      {detailStock && <StockDetail stock={detailStock} onClose={() => detailStore.close()} />}
+      {/* 全局个股详情弹窗：任意页面点击股票名都会打开。用 ErrorBoundary 兜底，
+          任一渲染异常只降级为"重试"占位，绝不再黑屏拖垮整个应用 */}
+      {detailStock && (
+        <ErrorBoundary label="个股详情">
+          <StockDetail stock={detailStock} onClose={() => detailStore.close()} />
+        </ErrorBoundary>
+      )}
     </div>
   )
 }
