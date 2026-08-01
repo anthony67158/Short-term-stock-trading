@@ -1309,6 +1309,22 @@ body {
 .md em { color: var(--text2); font-style: italic; }
 .md code { background: var(--panel3); padding: 1px 5px; border-radius: 4px; font-size: 12px; font-family: ui-monospace, monospace; }
 .md-hr { border: none; border-top: 1px solid var(--border); margin: 10px 0; }
+/* Markdown 引用块：左色条 + 极轻底色，符合去盒化系统 */
+.md-quote { margin: 8px 0; padding: 7px 12px; border-left: 3px solid var(--accent); background: var(--surface-quiet, rgba(124,107,245,.06)); color: var(--text2); border-radius: 0 6px 6px 0; line-height: 1.65; }
+/* Markdown 表格：横向可滚动，发丝分隔线，表头轻底，数字等宽 —— 修复表格显示成乱码 */
+.md-table-wrap { margin: 10px 0; overflow-x: auto; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); -webkit-overflow-scrolling: touch; }
+.md-table { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.md-table th, .md-table td { padding: 7px 11px; text-align: left; border-bottom: 1px solid var(--border-soft); white-space: nowrap; }
+.md-table thead th { background: var(--surface-quiet, var(--panel2)); color: var(--text); font-weight: 650; position: sticky; top: 0; }
+.md-table tbody tr:last-child td { border-bottom: none; }
+.md-table tbody tr:hover td { background: color-mix(in srgb, var(--panel2) 55%, transparent); }
+.md-table td { color: var(--text2); }
+.md-table td strong { color: var(--text); }
+/* 用户气泡里的表格：反白配色适配 */
+.qa-msg.user .md-table-wrap { border-color: rgba(255,255,255,.25); }
+.qa-msg.user .md-table th, .qa-msg.user .md-table td { border-color: rgba(255,255,255,.18); color: #fff; }
+.qa-msg.user .md-table thead th { background: rgba(255,255,255,.14); }
+.qa-msg.user .md-quote { color: #fff; border-left-color: #fff; background: rgba(255,255,255,.12); }
 .qa-msg.user .md strong, .qa-msg.user .md em { color: #fff; }
 
 /* ============ 账号体系 ============ */
@@ -2205,3 +2221,19 @@ body {
 /* AI 研判思路(ReAct/CoT 推理链)：轻量左色条提示，不做成盒子，符合去盒化系统 */
 .ai-reasoning { display: flex; align-items: baseline; gap: 8px; margin: 0 0 10px; padding: 7px 0 7px 11px; border-left: 3px solid var(--accent); font-size: 12.5px; line-height: 1.6; color: var(--text2); }
 .ai-reasoning-k { flex: none; font-size: 10.5px; font-weight: 800; color: var(--accent); background: rgba(124,107,245,.14); padding: 2px 8px; border-radius: 5px; }
+
+/* AI 操作建议·分析依据 & 风险区：带标签的结构化清单，取代一堆 emoji 平铺，扫读清晰 */
+.advice-basis, .advice-risk { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border-soft); display: flex; flex-direction: column; gap: 7px; }
+.advice-basis-title { font-size: 11px; font-weight: 700; color: var(--muted); letter-spacing: .04em; margin-bottom: 1px; }
+.ab-row { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; line-height: 1.6; }
+.ab-k { flex: none; width: 34px; text-align: center; font-size: 10.5px; font-weight: 700; padding: 2px 0; border-radius: 5px; color: var(--muted); background: var(--surface-quiet, rgba(255,255,255,.05)); }
+.ab-k.tech { color: var(--accent2); background: rgba(91,141,239,.14); }
+.ab-k.fund { color: var(--red); background: rgba(224,67,47,.12); }
+.ab-k.news { color: var(--gold); background: rgba(227,179,65,.14); }
+.ab-k.macro { color: var(--accent); background: rgba(124,107,245,.14); }
+.ab-k.seat { color: var(--text2); background: rgba(255,255,255,.06); }
+.ab-k.quant { color: var(--green); background: rgba(31,157,67,.12); }
+.ab-k.rev { color: var(--text2); background: rgba(255,255,255,.06); }
+.ab-k.warn { color: var(--gold); background: rgba(227,179,65,.16); }
+.ab-v { flex: 1; min-width: 0; color: var(--text2); overflow-wrap: anywhere; }
+.advice-risk .ab-v { color: var(--text2); }
