@@ -43,6 +43,9 @@ export default async function handler(req, res) {
 
   try {
     let body = req.body; if (typeof body === 'string') body = JSON.parse(body || '{}');
+    const START = Date.now();
+    const BUDGET = 58000; // 58s 内必须返回，避免被平台强杀
+    const remain = () => BUDGET - (Date.now() - START);
     const holdings = Array.isArray(body && body.holdings) ? body.holdings.slice(0, 20) : [];
     const session = (req.query.session && SESSION_CN[req.query.session]) ? req.query.session : autoSession();
     const refresh = req.query.refresh === '1';
@@ -70,26 +73,19 @@ export default async function handler(req, res) {
     const origin = `${proto}://${host}`;
     const getJ = (p) => { const c = new AbortController(); const to = setTimeout(() => c.abort(), 8000); return fetch(origin + p, { headers: { 'x-internal': '1' }, signal: c.signal }).then((r) => r.json()).catch(() => null).finally(() => clearTimeout(to)); };
 
-    const [sectors, aIdx, overseas, limitPool] = await Promise.all([
+    const [sectors, aIdx, overseas, limitPool, sectorNews, macroNews, holdingInfo] = await Promise.all([
       getJ('/api/sectors?type=industry&sort=main'),
       fetchAIndices(emGet, num),
       fetchOverseas(),
       getJ('/api/board?type=limitup&kind=zt'),
+      // 各板块定向新闻(每块并行)
+      Promise.all(SECTORS.map((s) => fetchNews(s.kw, 3).then((n) => ({ key: s.key, name: s.name, news: n })))),
+      // 宏观
+      fetchNews('宏观 政策 央行 A股 美联储 关税', 6),
+      // 持仓股(每只并行取当日新闻)
+      holdings.length ? Promise.all(holdings.map((h) => fetchStockNews(h.name || h.code, 3).then((news) => ({ code: h.code, name: h.name, news })))) : Promise.resolve([]),
     ]);
-
-    phase('正在检索海外市场 / 商品 / 各板块新闻…');
-    // 各板块定向新闻(并行) + 宏观
-    const sectorNews = await Promise.all(SECTORS.map((s) => fetchNews(s.kw, 3).then((n) => ({ key: s.key, name: s.name, news: n }))));
-    const macroNews = await fetchNews('宏观 政策 央行 A股 美联储 关税', 6);
-
-    // 持仓股信息(并行,每只取当日新闻/公告)
-    let holdingInfo = [];
-    if (holdings.length) {
-      phase(`正在检索 ${holdings.length} 只持仓股的公告 / 新闻…`);
-      holdingInfo = await Promise.all(holdings.map((h) =>
-        fetchStockNews(h.name || h.code, 3).then((news) => ({ code: h.code, name: h.name, news }))
-      ));
-    }
+    phase('数据齐全，正在撰写策略日报…');
 
     // 板块资金 TOP/BOTTOM
     const slist = (sectors && sectors.list) || [];
@@ -133,11 +129,13 @@ ${JSON.stringify(dataBlock, null, 0)}
 要求：sectors 至少覆盖 AI/科技、消费、医药、新能源、周期资源、金融地产、红利资产、港股、美股、商品 这些板块(数据不足的板块基于新闻与常识给方向性判断并标注'数据有限')。holdings 必须逐一覆盖给定的每只持仓股。只输出 JSON。`;
 
     const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 50000);
+    // LLM 超时按剩余预算动态给(预留2s兜底返回)，最少12s
+    const llmTimeout = Math.max(12000, remain() - 2000);
+    const t = setTimeout(() => ctrl.abort(), llmTimeout);
     const resp = await fetch(`${BASE}/chat/completions`, {
       method: 'POST', signal: ctrl.signal,
       headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: MODEL, messages: [{ role: 'system', content: SYS }, { role: 'user', content: userPrompt }], temperature: 0.4, max_tokens: 4000, response_format: { type: 'json_object' } }),
+      body: JSON.stringify({ model: MODEL, messages: [{ role: 'system', content: SYS }, { role: 'user', content: userPrompt }], temperature: 0.4, max_tokens: 3600, response_format: { type: 'json_object' } }),
     }).catch((e) => ({ __err: e }));
     clearTimeout(t);
     if (resp && resp.__err) { emit('result', { ok: false, error: '日报生成超时，请稍后重试' }); return res.end(); }
