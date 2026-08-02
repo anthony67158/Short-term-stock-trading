@@ -98,7 +98,7 @@ export default async function handler(req, res) {
     };
     const limitCount = ((limitPool && limitPool.list) || []).length;
 
-    // 3) 组织 prompt，调 LLM 生成结构化日报
+    // 3) 组织数据，拆成两路【并行】LLM 生成(单次输出减半、并发不叠加时间，避免超时)
     phase('数据齐全，正在撰写策略日报…');
     const dataBlock = {
       session: SESSION_CN[session], day,
@@ -108,43 +108,43 @@ export default async function handler(req, res) {
       macroNews: macroNews.map((n) => n.title),
       holdings: holdingInfo.map((h) => ({ 名称: h.name, 代码: h.code, 相关信息: h.news.map((n) => n.title) })),
     };
+    const dataStr = JSON.stringify(dataBlock, null, 0);
+    const SYS = `你是顶级卖方策略分析师，为专业短线/波段投资者撰写《全市场投资策略日报》。基于给定真实数据做判断，绝不编造。每个观点要有证据(引用给定数据的具体数字/新闻)。红涨绿跌(A股口径)。只输出合法 JSON，不要 markdown 代码块包裹。`;
+    const timeCtx = marketTimePromptBlock();
 
-    const SYS = `你是顶级卖方策略分析师，为专业短线/波段投资者撰写《全市场投资策略日报》。基于给定的真实数据(A股板块资金/涨停/指数、海外指数、商品、各板块新闻、宏观、持仓股信息)做判断，绝不编造数据。每个观点都要有证据链(引用给定数据里的具体数字/新闻)。红涨绿跌(A股口径)。只输出合法 JSON，不要 markdown 代码块包裹。`;
+    // 动态超时：两路并发，各自可用剩余预算
+    const llmTimeout = Math.max(14000, remain() - 3000);
+    const callLLM = async (userPrompt, maxTokens) => {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), llmTimeout);
+      const resp = await fetch(`${BASE}/chat/completions`, {
+        method: 'POST', signal: ctrl.signal,
+        headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: MODEL, messages: [{ role: 'system', content: SYS }, { role: 'user', content: userPrompt }], temperature: 0.4, max_tokens: maxTokens, response_format: { type: 'json_object' } }),
+      }).catch((e) => ({ __err: e }));
+      clearTimeout(t);
+      if (!resp || resp.__err || !resp.ok) return null;
+      const j = await resp.json().catch(() => null);
+      const content = j && j.choices?.[0]?.message?.content || '';
+      try { return JSON.parse(content.replace(/^```json\s*/i, '').replace(/```$/i, '').trim()); } catch { return null; }
+    };
 
-    const userPrompt = `${marketTimePromptBlock()}
+    // 路A：总览 + 海外 + 整体策略 + 风险 + 持仓股(短)
+    const promptA = `${timeCtx}\n【本期：${SESSION_CN[session]} · ${day}】\n【真实数据】\n${dataStr}\n\n输出 JSON：{"overview":"两三句总览(引用指数与资金具体数字)","overseas":"一句话隔夜海外/商品对A股影响(引用恒生/纳指/黄金/原油涨跌)","strategy":"今日整体操作策略(仓位/节奏/主攻方向,两三句)","risks":["风险1","风险2","风险3"],"holdings":[{"name":"持仓股名","info":"今日相关信息(引用给定信息;无则'今日无重要公告/新闻')","impact":"影响与关注建议(简短)"}]}。holdings 逐一覆盖每只持仓股。语言精炼。只输出 JSON。`;
+    // 路B：10 板块研判(数组)
+    const promptB = `${timeCtx}\n【本期：${SESSION_CN[session]} · ${day}】\n【真实数据】\n${dataStr}\n\n输出 JSON：{"sectors":[{"name":"板块名","rating":"看多/中性/看空","view":"观点+证据(一句话,引用资金流/涨停/新闻具体数据)","strategy":"操作策略(简短)","risk":"风险(简短)"}]}。sectors 必须覆盖这10个板块:AI/科技、消费、医药、新能源、周期资源、金融地产、红利资产、港股、美股、商品(数据不足的板块基于新闻常识给方向,view标'数据有限')。每字段一到两句。只输出 JSON。`;
 
-【本期：${SESSION_CN[session]} · ${day}】
-【真实数据】
-${JSON.stringify(dataBlock, null, 0)}
-
-请撰写一份覆盖全市场的投资策略日报，输出 JSON：
-{
- "session":"${SESSION_CN[session]}",
- "overview":"两三句话总览(今日/隔夜市场定调，引用指数与资金的具体数字)",
- "overseas":"一句话隔夜海外与商品对A股的影响(引用恒生/纳指/黄金/原油具体涨跌)",
- "sectors":[{"name":"板块名","rating":"看多/中性/看空","view":"观点+证据(一句话，引用资金流/涨停/新闻具体数据)","strategy":"操作策略(简短)","risk":"风险(简短)"}],
- "holdings":[{"name":"持仓股名","info":"今日相关信息(引用给定信息;无则'今日无重要公告/新闻')","impact":"影响与关注建议(简短)"}],
- "strategy":"今日整体操作策略(仓位/节奏/主攻方向，两三句)",
- "risks":["风险点1","风险点2","风险点3"]
-}
-要求：sectors 必须覆盖这10个板块：AI/科技、消费、医药、新能源、周期资源、金融地产、红利资产、港股、美股、商品(数据不足的板块基于新闻常识给方向,view里标'数据有限')。holdings 逐一覆盖每只持仓股。语言精炼,每字段一到两句话即可,不要长篇。只输出 JSON。`;
-
-    const ctrl = new AbortController();
-    // LLM 超时按剩余预算动态给(预留2s兜底返回)，最少12s
-    const llmTimeout = Math.max(12000, remain() - 2000);
-    const t = setTimeout(() => ctrl.abort(), llmTimeout);
-    const resp = await fetch(`${BASE}/chat/completions`, {
-      method: 'POST', signal: ctrl.signal,
-      headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: MODEL, messages: [{ role: 'system', content: SYS }, { role: 'user', content: userPrompt }], temperature: 0.4, max_tokens: 3600, response_format: { type: 'json_object' } }),
-    }).catch((e) => ({ __err: e }));
-    clearTimeout(t);
-    if (resp && resp.__err) { emit('result', { ok: false, error: '日报生成超时，请稍后重试' }); return res.end(); }
-    if (!resp.ok) { const e = await resp.text().catch(() => ''); emit('result', { ok: false, error: `LLM ${resp.status}`, detail: (e || '').slice(0, 150) }); return res.end(); }
-
-    const j = await resp.json();
-    const content = j.choices?.[0]?.message?.content || '';
-    let report; try { report = JSON.parse(content.replace(/^```json\s*/i, '').replace(/```$/i, '').trim()); } catch { report = { raw: content }; }
+    const [partA, partB] = await Promise.all([callLLM(promptA, 1400), callLLM(promptB, 2200)]);
+    if (!partA && !partB) { emit('result', { ok: false, error: '日报生成超时，请稍后重试' }); return res.end(); }
+    const report = {
+      session: SESSION_CN[session],
+      overview: (partA && partA.overview) || '',
+      overseas: (partA && partA.overseas) || '',
+      strategy: (partA && partA.strategy) || '',
+      risks: (partA && partA.risks) || [],
+      holdings: (partA && partA.holdings) || [],
+      sectors: (partB && partB.sectors) || [],
+    };
 
     const result = {
       ok: true, cached: false, day, session, sessionCn: SESSION_CN[session], updatedAt: Date.now(),
