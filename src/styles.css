@@ -2399,9 +2399,9 @@ body {
 
 /* ============ 盘面研究·外部宏观经济分析（MarketNews）============ */
 .mn-panel { margin-top: 0; }
-.mn-loading, .mn-error { padding: 22px; text-align: center; color: var(--muted); font-size: 12.5px; }
+.mn-loading, .mn-error { padding: 22px 18px; text-align: center; color: var(--muted); font-size: 12.5px; }
 .mn-error { color: var(--red); }
-.mn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 10px; }
+.mn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; padding: 14px 18px 0; }
 .mn-col { min-width: 0; }
 .mn-col-t { font-size: 12.5px; font-weight: 600; color: var(--text2); margin-bottom: 8px; letter-spacing: .02em; }
 .mn-empty { color: var(--muted); font-size: 12px; padding: 8px 0; }
@@ -2417,5 +2417,5 @@ a.mn-flash:hover { color: var(--accent); }
 .mn-src.sina { color: var(--accent2); background: rgba(91,141,239,.14); }
 .mn-src.muted { color: var(--muted); }
 .mn-flash-t { flex: 1; }
-.mn-disclaimer { margin-top: 14px; font-size: 11px; color: var(--muted); line-height: 1.6; }
-@media (max-width: 720px) { .mn-grid { grid-template-columns: 1fr; } }
+.mn-disclaimer { margin: 14px 18px 0; padding-bottom: 14px; font-size: 11px; color: var(--muted); line-height: 1.6; }
+@media (max-width: 720px) { .mn-grid { grid-template-columns: 1fr; gap: 0; } }
