@@ -2,6 +2,7 @@ import { put, list } from '@vercel/blob';
 import { emGet, num, sendJson } from './_lib.js';
 import { marketTimePromptBlock } from './_market_time.js';
 import { fetchOverseas, fetchAIndices, fetchNews, fetchStockNews } from './_market_data.js';
+import { buildDailySummary } from './_daily_summary.js';
 
 // ============ 全市场投资策略日报（早/午/晚三场次，SSE 流式 + Blob 缓存）============
 // GET /api/daily_report?session=morning|noon|evening[&refresh=1]  body(POST): { holdings:[{code,name}] }
@@ -152,6 +153,8 @@ ${JSON.stringify(dataBlock, null, 0)}
       data: { aIndices: aIdx, overseas: overseas.indices, commodities: overseas.commodities, sectorFlow, limitUpCount: limitCount },
       newsRefs: [...macroNews.slice(0, 3), ...sectorNews.flatMap((s) => s.news.slice(0, 1))].filter((n) => n && n.url).slice(0, 8),
     };
+    // 精简摘要：供操作建议/复盘复用为"外部市场环境"(阶段2)
+    result.summary = buildDailySummary(result);
 
     // 4) 写缓存
     if (hasBlob) {

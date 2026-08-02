@@ -559,6 +559,7 @@ export default function StockDetail({ stock, onClose }) {
                               {meta.counterTrend && meta.counterTrend.isStrong && <span className="trust-tag on" title={(meta.counterTrend.flags || []).join('、')}>逆势强票</span>}
                               {bt && bt.hitRate != null && <span className="trust-tag" title={bt.note}>回测 {bt.hitRate}%</span>}
                               {meta.lhb && meta.lhb.smartMoney && <span className="trust-tag on">游资/机构</span>}
+                              {meta.dailyReport && <span className="trust-tag" title={'已结合' + (meta.dailyReport.sessionCn || '今日日报') + '的外部市场环境判断'}>📋 已结合日报</span>}
                               {meta.hasNegNews && <span className="trust-tag warn">消息有雷</span>}
                             </div>
                           </div>
