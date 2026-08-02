@@ -334,6 +334,7 @@ function PlanList({ book, quote }) {
           <div className="pc-name">
             <StockName code={p.code} name={(q && q.name) || p.name}><span className="pc-nm">{(q && q.name) || p.name}</span></StockName>
             <span className="pc-code">{p.code}</span>
+            {String(p.code).startsWith('688') && <span className="tag tag-kc" title="科创板(涨跌幅±20%、门槛更高)">科创板</span>}
             {q && q.isLimitUp && <span className="tag tag-lu">涨停</span>}
           </div>
           {q && <span className={'pc-price ' + pctClass(q.pct)}>{fmtRaw(q.price)} <span className="pc-pct">{fmtPct(q.pct)}</span></span>}
