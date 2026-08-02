@@ -1,4 +1,5 @@
 import { emGet, sendJson, sendError, num } from './_lib.js';
+import { snapshotsHandler } from './_sector_snapshots.js';
 
 // ============ 盘面数据聚合接口（合并原 limitup + movers，节省 Vercel 函数位）============
 // query:
@@ -202,6 +203,7 @@ export default async function handler(req, res) {
     const type = req.query.type || 'movers';
     if (type === 'limitup') return await limitup(req, res);
     if (type === 'lhb') return await lhb(req, res);
+    if (type === 'snapshots') return await snapshotsHandler(req, res);
     return await movers(req, res);
   } catch (e) {
     sendError(res, e);

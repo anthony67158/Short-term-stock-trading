@@ -44,7 +44,7 @@ function pickSnapshot(list, n = 10) {
   return merged.map((s) => ({ c: s.code, n: s.name, p: s.pct, m: Math.round(s.mainInflow / 1e6), l: s.leadName, lc: s.leadCode })); // m 单位:百万，省体积
 }
 
-export default async function handler(req, res) {
+export async function snapshotsHandler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   try {

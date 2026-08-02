@@ -54,7 +54,7 @@ export default function FundFlowCanvas({ interval }) {
   const liveList = (data && data.list) || []
 
   // 分时快照序列(A+B 真回放的数据底座)：每次轮询顺带 capture 一份，累积当天时间序列
-  const { data: snapData } = usePolling(`/api/sector_snapshots?capture=1`, Math.max(interval || 20000, 20000), [])
+  const { data: snapData } = usePolling(`/api/board?type=snapshots&capture=1`, Math.max(interval || 20000, 20000), [])
   const series = (snapData && snapData.series) || []
   // 至少 2 个真实时点才进入"真回放"，否则诚实走"当前快照"模式
   const replay = series.length >= 2
