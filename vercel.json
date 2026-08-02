@@ -11,6 +11,9 @@
     "api/board.js": {
       "maxDuration": 60
     },
+    "api/daily_report.js": {
+      "maxDuration": 60
+    },
     "api/*.js": {
       "maxDuration": 15
     }

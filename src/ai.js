@@ -19,7 +19,41 @@ export async function callAI(mode, payload) {
   }
 }
 
-// 流式调用：数据采集阶段把进度(phase)实时回调给 UI，最终返回结构化 result(与 callAI 同结构)。
+// 全市场策略日报：SSE 流式(phase 进度 + result 结果)。session: morning|noon|evening
+export async function fetchDailyReport({ session, holdings, refresh, onPhase, signal }) {
+  try {
+    const qs = `?session=${session || ''}${refresh ? '&refresh=1' : ''}`
+    const res = await fetch('/api/daily_report' + qs, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ holdings: holdings || [] }), signal,
+    })
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder('utf-8')
+    let buf = '', result = null
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      let sep
+      while ((sep = buf.indexOf('\n\n')) >= 0) {
+        const chunk = buf.slice(0, sep); buf = buf.slice(sep + 2)
+        let event = 'message', dataStr = ''
+        for (const line of chunk.split('\n')) {
+          if (line.startsWith('event:')) event = line.slice(6).trim()
+          else if (line.startsWith('data:')) dataStr += line.slice(5).trim()
+        }
+        if (!dataStr) continue
+        let data = null; try { data = JSON.parse(dataStr) } catch { continue }
+        if (event === 'phase') { if (typeof onPhase === 'function') onPhase(data) }
+        else if (event === 'result') result = data
+      }
+    }
+    return result || { ok: false, error: '日报未返回结果，请重试' }
+  } catch (e) {
+    if (e.name === 'AbortError') return { ok: false, aborted: true, error: '已取消' }
+    return { ok: false, error: '网络异常：' + String(e.message || e) }
+  }
+}
 // onPhase({text,key}) 每到一个采集里程碑触发一次；signal 可选 AbortSignal。
 // 后端不支持 SSE 时自动回退为整段 JSON，不影响结果。
 export async function callAIStream(mode, payload, onPhase, signal) {

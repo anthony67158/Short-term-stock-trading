@@ -6,6 +6,7 @@ import { usePolling, isTradingHours } from '../hooks'
 import { callAI } from '../ai'
 import { planStore, usePlanStore } from '../planStore'
 import { aiStore } from '../aiStore'
+import DailyReport from './DailyReport'
 import { fmtPct, pctClass, fmtInflow, fmtNum , fmtRaw } from '../format'
 
 // ============ 今日选股 Tab：今天买什么 ============
@@ -96,6 +97,7 @@ function MarketLight({ market, sectors, snapshot }) {
   const [advice, setAdvice] = useState(null)
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState(null)
+  const [reportOpen, setReportOpen] = useState(false) // 策略日报抽屉
 
   const runAdvice = async () => {
     setLoading(true); setErr(null)
@@ -120,13 +122,14 @@ function MarketLight({ market, sectors, snapshot }) {
       <div className="panel-head">
         <div className="panel-title"><Icon name="pulse" size={16} /> 大盘盘面 <span className="sub-name">开盘先看势，定今日仓位</span></div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button className="btn btn-primary" onClick={runAdvice} disabled={loading}>
-            <Icon name={loading ? 'refresh' : 'spark'} size={13} className={loading ? 'spin' : ''} />
-            {loading ? '分析中' : (advice ? '重新建议' : 'AI建议')}
+          <button className="btn btn-primary" onClick={() => setReportOpen(true)}>
+            <Icon name="clipboard" size={13} />
+            策略日报
           </button>
           <div className={'mb-light ' + light}><span className="orb-dot" />{light === 'green' ? '可以做' : light === 'red' ? '谨慎/空仓' : '轻仓试探'} · {text}</div>
         </div>
       </div>
+      {reportOpen && <DailyReport onClose={() => setReportOpen(false)} />}
 
       {/* 今日操作建议：AI 动态建议优先；没有时再退回规则版建议 */}
       {(() => {
