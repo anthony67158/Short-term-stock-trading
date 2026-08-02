@@ -19,6 +19,19 @@ export async function callAI(mode, payload) {
   }
 }
 
+// 盘面研究·外部宏观快讯聚合：一次性拉取宏观要闻 + 7×24 快讯（非流式）
+export async function fetchMarketNews() {
+  try {
+    const res = await fetch('/api/news')
+    const raw = await res.text()
+    try { return JSON.parse(raw) } catch {
+      return { ok: false, error: `服务暂时不可用（${res.status}）`, macro: [], flashes: [] }
+    }
+  } catch (e) {
+    return { ok: false, error: '网络异常：' + String(e.message || e), macro: [], flashes: [] }
+  }
+}
+
 // 全市场策略日报：SSE 流式(phase 进度 + result 结果)。session: morning|noon|evening
 export async function fetchDailyReport({ session, holdings, refresh, onPhase, signal }) {
   try {

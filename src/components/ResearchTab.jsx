@@ -5,6 +5,7 @@ import SectorHistory from './SectorHistory'
 import MarketFlow from './FundFlowCanvas'
 import Movers from './Movers'
 import LhbBoard from './LhbBoard'
+import MarketNews from './MarketNews'
 import ErrorBoundary from './ErrorBoundary'
 import { usePolling } from '../hooks'
 
@@ -42,6 +43,9 @@ export default function ResearchTab({ interval }) {
       </div>
       <div style={{ marginTop: 14 }}>
         <ErrorBoundary label="游资龙虎榜"><LhbBoard interval={interval} /></ErrorBoundary>
+      </div>
+      <div style={{ marginTop: 14 }}>
+        <ErrorBoundary label="外部宏观经济分析"><MarketNews /></ErrorBoundary>
       </div>
     </div>
   )

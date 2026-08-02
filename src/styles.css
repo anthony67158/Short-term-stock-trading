@@ -2396,3 +2396,26 @@ body {
 .dr-ref-d { color: var(--muted); margin-right: 6px; font-variant-numeric: tabular-nums; }
 .dr-disclaimer { margin-top: 14px; font-size: 11px; color: var(--muted); line-height: 1.6; }
 @media (max-width: 600px) { .dr-drawer { width: 100vw; } }
+
+/* ============ 盘面研究·外部宏观经济分析（MarketNews）============ */
+.mn-panel { margin-top: 0; }
+.mn-loading, .mn-error { padding: 22px; text-align: center; color: var(--muted); font-size: 12.5px; }
+.mn-error { color: var(--red); }
+.mn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 10px; }
+.mn-col { min-width: 0; }
+.mn-col-t { font-size: 12.5px; font-weight: 600; color: var(--text2); margin-bottom: 8px; letter-spacing: .02em; }
+.mn-empty { color: var(--muted); font-size: 12px; padding: 8px 0; }
+.mn-macro { display: flex; gap: 8px; align-items: baseline; padding: 7px 0; border-bottom: 1px solid var(--border-soft); font-size: 12.5px; color: var(--text); text-decoration: none; line-height: 1.5; }
+.mn-macro:hover { color: var(--accent); }
+.mn-macro-d { flex: 0 0 auto; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.mn-macro-t { flex: 1; }
+.mn-flash-list { max-height: 420px; overflow-y: auto; }
+.mn-flash { display: flex; gap: 8px; align-items: baseline; padding: 7px 0; border-bottom: 1px solid var(--border-soft); font-size: 12.5px; color: var(--text); text-decoration: none; line-height: 1.5; }
+a.mn-flash:hover { color: var(--accent); }
+.mn-src { flex: 0 0 auto; font-size: 10.5px; font-weight: 600; padding: 1px 6px; border-radius: var(--radius-xs); color: var(--muted); background: var(--surface-quiet); white-space: nowrap; }
+.mn-src.hot { color: var(--red); background: rgba(244,97,78,.14); }
+.mn-src.sina { color: var(--accent2); background: rgba(91,141,239,.14); }
+.mn-src.muted { color: var(--muted); }
+.mn-flash-t { flex: 1; }
+.mn-disclaimer { margin-top: 14px; font-size: 11px; color: var(--muted); line-height: 1.6; }
+@media (max-width: 720px) { .mn-grid { grid-template-columns: 1fr; } }

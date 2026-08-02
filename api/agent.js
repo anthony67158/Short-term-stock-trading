@@ -3,6 +3,7 @@ import { buildCorpus } from './_rag.js';
 import { retrieveTheory } from './_kb.js';
 import { screenStocks } from './_screen.js';
 import { marketTimePromptBlock } from './_market_time.js';
+import { fetchClsTelegraph } from './_market_data.js';
 
 // ============ 股票 Agent：工具增强的智能体 ============
 // LLM 自主调用 skill 工具（查行情/选股/板块/涨停/异动/新闻…）多轮后综合作答
@@ -294,18 +295,29 @@ export default async function handler(req, res) {
     const origin = `${proto}://${host}`;
     const sysExtra = focusStock ? `\n\n【当前用户聚焦的股票】${focusStock.name}（${focusStock.code}），如无特别说明，"这只票/它"指这只。` : '';
 
-    // ===== 理论 RAG =====
+    // ===== 理论 RAG + 外部最新财经快讯（并行，供 AI 主动参考消息面）=====
     let theoryHits = [];
-    try { theoryHits = await retrieveTheory(question, 4); } catch { /* 检索失败不阻断 */ }
+    let macroFlashes = [];
+    try {
+      [theoryHits, macroFlashes] = await Promise.all([
+        retrieveTheory(question, 4).catch(() => []),
+        fetchClsTelegraph(10).catch(() => []),
+      ]);
+    } catch { /* 检索失败不阻断 */ }
     const theoryRefs = theoryHits.map((t) => ({ book: t.book, topic: t.topic }));
     if (theoryRefs.length) send('theory', { theoryRefs });
     const theoryMsg = theoryHits.length
       ? { role: 'system', content: '【投资理论参考·检索自经典名著知识库】以下是与本问题最相关的交易理论要点，请把它们作为分析的理论依据，在讲逻辑时自然引用对应的理论名/书名（如"按道氏理论…""龙头战法讲…"），做到有据可依、把逻辑讲透，但不要生硬堆砌：\n\n' + theoryHits.map((t, i) => `${i + 1}. ${t.text}`).join('\n') }
       : null;
+    // 外部宏观消息面：把当日最新财经快讯(财联社系/金十)作为背景注入，AI 判断消息/情绪时可直接参考，仍可用 web_news 深挖
+    const flashMsg = (macroFlashes && macroFlashes.length)
+      ? { role: 'system', content: '【外部最新财经快讯·背景消息面(财联社系/金十,当日更新)】以下是当前市场的最新宏观/政策/突发要闻，作为你判断大盘情绪、消息面、板块顺逆风的背景参考；当问题涉及某只个股或某个行业时，若这些快讯里没有针对性信息，请再用 web_news 工具补查个股/行业新闻：\n\n' + macroFlashes.map((n, i) => `${i + 1}. ${n.src ? `[${n.src}]` : ''}${n.title}`).join('\n') }
+      : null;
 
     const messages = [
       { role: 'system', content: SYSTEM + sysExtra },
       { role: 'system', content: marketTimePromptBlock() },
+      ...(flashMsg ? [flashMsg] : []),
       ...(theoryMsg ? [theoryMsg] : []),
       ...history.filter((m) => (m.role === 'user' || m.role === 'assistant') && m.content).map((m) => ({ role: m.role, content: String(m.content).slice(0, 1200) })),
       { role: 'user', content: question },
