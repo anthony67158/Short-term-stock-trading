@@ -17,7 +17,7 @@ const SESSION_CN = { morning: '盘前早报', noon: '午间午报', evening: '�
 const PREFIX = 'dailyreport/';
 const cacheKey = (day, session) => `${PREFIX}${day}-${session}`;
 
-const MODEL = process.env.DAILY_MODEL || process.env.LLM_MODEL || 'DeepSeek-V3.2-Pro';
+const MODEL = process.env.DAILY_MODEL || process.env.AGENT_MODEL || 'Qwen3-Max-A';
 
 // 板块清单（全市场覆盖）→ 每个用关键词做定向新闻检索
 const SECTORS = [
@@ -131,11 +131,13 @@ export default async function handler(req, res) {
 
     // 路A：总览 + 海外 + 整体策略 + 风险 + 持仓股(短)
     const promptA = `${timeCtx}\n【本期：${SESSION_CN[session]} · ${day}】\n【真实数据】\n${dataStr}\n\n输出 JSON：{"overview":"两三句总览(引用指数与资金具体数字)","overseas":"一句话隔夜海外/商品对A股影响(引用恒生/纳指/黄金/原油涨跌)","strategy":"今日整体操作策略(仓位/节奏/主攻方向,两三句)","risks":["风险1","风险2","风险3"],"holdings":[{"name":"持仓股名","info":"今日相关信息(引用给定信息;无则'今日无重要公告/新闻')","impact":"影响与关注建议(简短)"}]}。holdings 逐一覆盖每只持仓股。语言精炼。只输出 JSON。`;
-    // 路B：10 板块研判(数组)
-    const promptB = `${timeCtx}\n【本期：${SESSION_CN[session]} · ${day}】\n【真实数据】\n${dataStr}\n\n输出 JSON：{"sectors":[{"name":"板块名","rating":"看多/中性/看空","view":"观点+证据(一句话,引用资金流/涨停/新闻具体数据)","strategy":"操作策略(简短)","risk":"风险(简短)"}]}。sectors 必须覆盖这10个板块:AI/科技、消费、医药、新能源、周期资源、金融地产、红利资产、港股、美股、商品(数据不足的板块基于新闻常识给方向,view标'数据有限')。每字段一到两句。只输出 JSON。`;
+    // 路B/C：10 板块拆两批各5块并发(单批输出小更快，避免单次大JSON超时)
+    const sectorPrompt = (blocks) => `${timeCtx}\n【本期：${SESSION_CN[session]} · ${day}】\n【真实数据】\n${dataStr}\n\n只针对这些板块输出 JSON：{"sectors":[{"name":"板块名","rating":"看多/中性/看空","view":"观点+证据(一句话,引用资金流/涨停/新闻具体数据)","strategy":"操作策略(简短)","risk":"风险(简短)"}]}。必须且只覆盖这几个板块:${blocks}。数据不足的板块基于新闻常识给方向,view标'数据有限'。每字段一到两句。只输出 JSON。`;
+    const promptB = sectorPrompt('AI/科技、消费、医药、新能源、周期资源');
+    const promptC = sectorPrompt('金融地产、红利资产、港股、美股、商品');
 
-    const [partA, partB] = await Promise.all([callLLM(promptA, 1400), callLLM(promptB, 2200)]);
-    if (!partA && !partB) { emit('result', { ok: false, error: '日报生成超时，请稍后重试' }); return res.end(); }
+    const [partA, partB, partC] = await Promise.all([callLLM(promptA, 1200), callLLM(promptB, 1200), callLLM(promptC, 1200)]);
+    if (!partA && !partB && !partC) { emit('result', { ok: false, error: '日报生成超时，请稍后重试' }); return res.end(); }
     const report = {
       session: SESSION_CN[session],
       overview: (partA && partA.overview) || '',
@@ -143,7 +145,7 @@ export default async function handler(req, res) {
       strategy: (partA && partA.strategy) || '',
       risks: (partA && partA.risks) || [],
       holdings: (partA && partA.holdings) || [],
-      sectors: (partB && partB.sectors) || [],
+      sectors: [...((partB && partB.sectors) || []), ...((partC && partC.sectors) || [])],
     };
 
     const result = {
