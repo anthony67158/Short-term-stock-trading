@@ -22,7 +22,7 @@ export async function callAI(mode, payload) {
 // 盘面研究·外部宏观快讯聚合：一次性拉取宏观要闻 + 7×24 快讯（非流式）
 export async function fetchMarketNews() {
   try {
-    const res = await fetch('/api/news')
+    const res = await fetch('/api/market?news=1')
     const raw = await res.text()
     try { return JSON.parse(raw) } catch {
       return { ok: false, error: `服务暂时不可用（${res.status}）`, macro: [], flashes: [] }
