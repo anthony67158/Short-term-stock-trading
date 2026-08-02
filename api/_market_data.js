@@ -89,3 +89,66 @@ export async function fetchNews(keyword, size = 5) {
 export async function fetchStockNews(name, size = 4) {
   return fetchNews(name, size);
 }
+
+// ===== 权威财经快讯聚合（金十/财联社/东财，第三方开放聚合，无需 key）=====
+// 财联社官方接口需签名无法直调，改用聚合了金十数据/财联社系/东财的开放 JSON，权威且新鲜。
+export async function fetchClsTelegraph(size = 12) {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 6000);
+    const r = await fetch('https://news.finai.fun/api/news', { signal: ctrl.signal, headers: { 'User-Agent': 'Mozilla/5.0' } });
+    clearTimeout(t);
+    const j = await r.json();
+    const data = (j && j.data) || [];
+    const srcCn = { jin10: '金十数据', eastmoney: '东方财富', cls: '财联社', wallstreetcn: '华尔街见闻' };
+    return data.map((x) => ({
+      title: (x.title || x.summary || '').replace(/<[^>]+>/g, '').slice(0, 120),
+      date: (x.publishedAt || '').slice(0, 10),
+      url: x.url || '',
+      src: srcCn[x.sourceId] || x.sourceId || '快讯',
+      level: x.level, // 重要性(聚合源自带)
+    })).filter((x) => x.title).slice(0, size);
+  } catch { return []; }
+}
+
+// ===== 新浪财经 7×24 全球快讯（无需 key，直调）=====
+export async function fetchSinaFlash(size = 12) {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 6000);
+    // 财经全球直播滚动接口(zhibo)：lid=1 全球直播
+    const r = await fetch(`https://zhibo.sina.com.cn/api/zhibo/feed?page=1&page_size=${size}&zhibo_id=152&tag_id=0&dire=f&dpc=1`, {
+      signal: ctrl.signal, headers: { Referer: 'https://finance.sina.com.cn/7x24/', 'User-Agent': 'Mozilla/5.0' },
+    });
+    clearTimeout(t);
+    const j = await r.json();
+    const list = (j && j.result && j.result.data && j.result.data.feed && j.result.data.feed.list) || [];
+    return list.map((x) => ({
+      title: (x.rich_text || x.content || '').replace(/<[^>]+>/g, '').slice(0, 120),
+      date: (x.create_time || '').slice(0, 10),
+      url: (x.docurl || (x.ext && (() => { try { return JSON.parse(x.ext).docurl } catch { return '' } })()) || ''),
+      src: '新浪财经',
+    })).filter((x) => x.title).slice(0, size);
+  } catch { return []; }
+}
+
+// ===== Finnhub 海外市场新闻（需 key，补美股/宏观，英文）=====
+// 环境变量 FINNHUB_KEY；category=general 综合财经
+export async function fetchFinnhubNews(size = 8) {
+  const key = process.env.FINNHUB_KEY;
+  if (!key) return [];
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 6000);
+    const r = await fetch(`https://finnhub.io/api/v1/news?category=general&token=${key}`, { signal: ctrl.signal });
+    clearTimeout(t);
+    const arr = await r.json();
+    if (!Array.isArray(arr)) return [];
+    return arr.map((x) => ({
+      title: x.headline || '',
+      date: x.datetime ? new Date(x.datetime * 1000).toISOString().slice(0, 10) : '',
+      url: x.url || '', src: (x.source || 'Finnhub'),
+    })).filter((x) => x.title).slice(0, size);
+  } catch { return []; }
+}
+

@@ -1,7 +1,7 @@
 import { put, list } from '@vercel/blob';
 import { emGet, num, sendJson } from './_lib.js';
 import { marketTimePromptBlock } from './_market_time.js';
-import { fetchOverseas, fetchAIndices, fetchNews, fetchStockNews } from './_market_data.js';
+import { fetchOverseas, fetchAIndices, fetchNews, fetchStockNews, fetchClsTelegraph, fetchSinaFlash, fetchFinnhubNews } from './_market_data.js';
 import { buildDailySummary } from './_daily_summary.js';
 
 // ============ 全市场投资策略日报（早/午/晚三场次，SSE 流式 + Blob 缓存）============
@@ -74,7 +74,7 @@ export default async function handler(req, res) {
     const origin = `${proto}://${host}`;
     const getJ = (p) => { const c = new AbortController(); const to = setTimeout(() => c.abort(), 8000); return fetch(origin + p, { headers: { 'x-internal': '1' }, signal: c.signal }).then((r) => r.json()).catch(() => null).finally(() => clearTimeout(to)); };
 
-    const [sectors, aIdx, overseas, limitPool, sectorNews, macroNews, holdingInfo] = await Promise.all([
+    const [sectors, aIdx, overseas, limitPool, sectorNews, macroNews, holdingInfo, clsNews, sinaNews, finnhubNews] = await Promise.all([
       getJ('/api/sectors?type=industry&sort=main'),
       fetchAIndices(emGet, num),
       fetchOverseas(),
@@ -85,6 +85,10 @@ export default async function handler(req, res) {
       fetchNews('宏观 政策 央行 A股 美联储 关税', 6),
       // 持仓股(每只并行取当日新闻)
       holdings.length ? Promise.all(holdings.map((h) => fetchStockNews(h.name || h.code, 3).then((news) => ({ code: h.code, name: h.name, news })))) : Promise.resolve([]),
+      // 权威快讯源(金十/财联社系/东财聚合) + 新浪7×24 + Finnhub海外
+      fetchClsTelegraph(14),
+      fetchSinaFlash(10),
+      fetchFinnhubNews(6),
     ]);
     phase('数据齐全，正在撰写策略日报…');
 
@@ -106,6 +110,9 @@ export default async function handler(req, res) {
       sectorFlow, limitUpCount: limitCount,
       sectorNews: sectorNews.map((s) => ({ 板块: s.name, 新闻: s.news.map((n) => n.title).slice(0, 3) })),
       macroNews: macroNews.map((n) => n.title),
+      权威快讯: (clsNews || []).map((n) => `[${n.src}]${n.title}`).slice(0, 12),   // 金十/财联社系/东财聚合
+      新浪快讯: (sinaNews || []).map((n) => n.title).slice(0, 8),
+      海外新闻: (finnhubNews || []).map((n) => n.title).slice(0, 6),               // Finnhub(有key才有)
       holdings: holdingInfo.map((h) => ({ 名称: h.name, 代码: h.code, 相关信息: h.news.map((n) => n.title) })),
     };
     const dataStr = JSON.stringify(dataBlock, null, 0);
@@ -153,7 +160,7 @@ export default async function handler(req, res) {
       report,
       // 附上关键数据供前端展示与"数据来源"标注
       data: { aIndices: aIdx, overseas: overseas.indices, commodities: overseas.commodities, sectorFlow, limitUpCount: limitCount },
-      newsRefs: [...macroNews.slice(0, 3), ...sectorNews.flatMap((s) => s.news.slice(0, 1))].filter((n) => n && n.url).slice(0, 8),
+      newsRefs: [...(clsNews || []).slice(0, 4), ...(finnhubNews || []).slice(0, 2), ...macroNews.slice(0, 2), ...sectorNews.flatMap((s) => s.news.slice(0, 1))].filter((n) => n && n.url).slice(0, 10),
     };
     // 精简摘要：供操作建议/复盘复用为"外部市场环境"(阶段2)
     result.summary = buildDailySummary(result);
