@@ -161,7 +161,6 @@ export default function FundFlowCanvas({ interval }) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, W, H)
     const hubX = W / 2, hubY = H / 2
-    const leftX = W * 0.30, rightX = W * 0.70
     const rows = rowsRef.current
 
     const GREEN = '#3fb950', RED = '#f4614e'
@@ -171,17 +170,18 @@ export default function FundFlowCanvas({ interval }) {
       const k = t < 0.42 ? 0 : t > 0.58 ? 1 : (t - 0.42) / 0.16
       return `rgb(${Math.round(g[0] + (r[0] - g[0]) * k)},${Math.round(g[1] + (r[1] - g[1]) * k)},${Math.round(g[2] + (r[2] - g[2]) * k)})`
     }
-    // 一条贯穿流的完整锚点：左板块 y → 中枢 → 右板块 y
+    // 一条贯穿流的完整锚点：直接用【方块的真实屏幕坐标】(x,y)，曲线从绿方块出发、连到红方块
     const anchorsOf = (lk) => {
-      const oy = rows.out[lk.outIdx] != null ? rows.out[lk.outIdx] : hubY
-      const iy = rows.in[lk.inIdx] != null ? rows.in[lk.inIdx] : hubY
-      return { oy, iy }
+      const o = rows.out[lk.outIdx], i = rows.in[lk.inIdx]
+      const ox = o ? o.x : W * 0.30, oy = o ? o.y : hubY
+      const ix = i ? i.x : W * 0.70, iy = i ? i.y : hubY
+      return { ox, oy, ix, iy }
     }
-    // 分两段贝塞尔：seg 0 = 左→中枢, seg 1 = 中枢→右
+    // 分两段贝塞尔：seg 0 = 绿方块→中枢, seg 1 = 中枢→红方块。控制点用两端 x 的中点，曲线自然汇聚。
     const segPath = (lk, seg) => {
-      const { oy, iy } = anchorsOf(lk)
-      if (seg === 0) return { x0: leftX, y0: oy, cx1: (leftX + hubX) / 2, cy1: oy, cx2: (leftX + hubX) / 2, cy2: hubY, x1: hubX, y1: hubY }
-      return { x0: hubX, y0: hubY, cx1: (hubX + rightX) / 2, cy1: hubY, cx2: (hubX + rightX) / 2, cy2: iy, x1: rightX, y1: iy }
+      const { ox, oy, ix, iy } = anchorsOf(lk)
+      if (seg === 0) { const mx = (ox + hubX) / 2; return { x0: ox, y0: oy, cx1: mx, cy1: oy, cx2: mx, cy2: hubY, x1: hubX, y1: hubY } }
+      const mx = (hubX + ix) / 2; return { x0: hubX, y0: hubY, cx1: mx, cy1: hubY, cx2: mx, cy2: iy, x1: ix, y1: iy }
     }
     const bez = (p, t) => {
       const mt = 1 - t
@@ -195,8 +195,8 @@ export default function FundFlowCanvas({ interval }) {
     // 画连线：每条流的两段用同一渐变描边，绿→红连续，两侧方块被真正连起来
     for (const lk of links) {
       const s0 = segPath(lk, 0), s1 = segPath(lk, 1)
-      const grad = ctx.createLinearGradient(leftX, 0, rightX, 0)
-      grad.addColorStop(0, 'rgba(63,185,80,.22)'); grad.addColorStop(0.5, 'rgba(150,140,200,.18)'); grad.addColorStop(1, 'rgba(244,97,78,.22)')
+      const grad = ctx.createLinearGradient(s0.x0, 0, s1.x1, 0)
+      grad.addColorStop(0, 'rgba(63,185,80,.30)'); grad.addColorStop(0.5, 'rgba(150,140,200,.22)'); grad.addColorStop(1, 'rgba(244,97,78,.30)')
       ctx.strokeStyle = grad; ctx.lineWidth = lk.w; ctx.lineCap = 'round'
       ctx.beginPath(); ctx.moveTo(s0.x0, s0.y0); ctx.bezierCurveTo(s0.cx1, s0.cy1, s0.cx2, s0.cy2, s0.x1, s0.y1)
       ctx.bezierCurveTo(s1.cx1, s1.cy1, s1.cx2, s1.cy2, s1.x1, s1.y1); ctx.stroke()
@@ -229,16 +229,23 @@ export default function FundFlowCanvas({ interval }) {
     return () => cancelAnimationFrame(drawRafRef.current)
   }, [draw, hasData])
 
-  // 记录每行 y 中心（连线锚点）——布局后测量
+  // 记录每个方块节点的【真实屏幕坐标 x,y】作为连线锚点——不再写死 30%/70%，
+  // 直接量绿/红小方块(.ffc-node)的中心，曲线必然从方块出发、连到方块，手机窄屏也对齐。
   const measure = useCallback(() => {
     const box = boxRef.current; if (!box) return
-    const top = box.getBoundingClientRect().top
+    const b = box.getBoundingClientRect()
     const out = [], inn = []
-    box.querySelectorAll('.ffc-row.out').forEach((el) => { const r = el.getBoundingClientRect(); out.push(r.top + r.height / 2 - top) })
-    box.querySelectorAll('.ffc-row.in').forEach((el) => { const r = el.getBoundingClientRect(); inn.push(r.top + r.height / 2 - top) })
+    box.querySelectorAll('.ffc-row.out .ffc-node').forEach((el) => { const r = el.getBoundingClientRect(); out.push({ x: r.left + r.width / 2 - b.left, y: r.top + r.height / 2 - b.top }) })
+    box.querySelectorAll('.ffc-row.in .ffc-node').forEach((el) => { const r = el.getBoundingClientRect(); inn.push({ x: r.left + r.width / 2 - b.left, y: r.top + r.height / 2 - b.top }) })
     rowsRef.current = { out, in: inn }
   }, [])
-  useEffect(() => { measure(); const on = () => measure(); window.addEventListener('resize', on); return () => window.removeEventListener('resize', on) })
+  // 布局稳定后多量几次(字体/回流会改变位置)，并监听 resize
+  useEffect(() => {
+    measure()
+    const t1 = setTimeout(measure, 120); const t2 = setTimeout(measure, 400)
+    const on = () => measure(); window.addEventListener('resize', on)
+    return () => { clearTimeout(t1); clearTimeout(t2); window.removeEventListener('resize', on) }
+  })
 
   const today = nowBJ()
   const dateLabel = `${String(today.getMonth() + 1).padStart(2, '0')}月${String(today.getDate()).padStart(2, '0')}日`
