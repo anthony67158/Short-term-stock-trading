@@ -293,7 +293,9 @@ async function fetchMacroFlashes(size = 8) {
     const arr = await fetchClsTelegraph(size);
     return (arr && arr.length) ? arr.map((n) => (n.src ? `[${n.src}]${n.title}` : n.title)).slice(0, size) : null;
   } catch { return null; }
-}你的任务是基于用户提供的【实时行情数据】做客观分析。
+}
+
+const SYSTEM_PROMPT = `你的任务是基于用户提供的【实时行情数据】做客观分析。
 
 严格规则（必须遵守）：
 1. 只能引用用户在数据中提供的真实股票、板块、数值。绝对禁止虚构任何股票代码、名称、价格或数据。
