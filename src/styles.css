@@ -1068,6 +1068,8 @@ body {
 .t-ai-grid b { font-size: 14px; font-variant-numeric: tabular-nums; }
 .t-ai-risk { display: flex; align-items: flex-start; gap: 6px; font-size: 11.5px; color: var(--muted); line-height: 1.55; padding-top: 8px; border-top: 1px dashed var(--border); }
 .t-ai-risk .icon { color: var(--gold); flex-shrink: 0; margin-top: 1px; }
+.t-ai-warn { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--gold); background: rgba(212,175,55,.08); border: 1px solid rgba(212,175,55,.25); border-radius: 6px; padding: 6px 8px; margin: 6px 0; line-height: 1.5; }
+.t-ai-warn .icon { flex-shrink: 0; }
 
 /* 做T · AI 依据分析 */
 .t-ai-basis { margin: 8px 0; padding: 8px 10px; border-radius: 7px; background: rgba(255,255,255,.02); border: 1px solid var(--border-soft); display: flex; flex-direction: column; gap: 5px; }

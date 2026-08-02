@@ -912,7 +912,7 @@ export default async function handler(req, res) {
           { role: 'user', content: buildUserPrompt(mode, payload, ragText) },
         ],
         temperature: 0.4,
-        max_tokens: (mode === 'scan' || mode === 'daily' || mode === 'scan_pick') ? 2200 : (mode === 't_advice' ? 2000 : (mode === 'hold_advice' || mode === 'buy_advice' || mode === 'review') ? 1900 : 1200),
+        max_tokens: (mode === 'scan' || mode === 'daily' || mode === 'scan_pick') ? 3200 : (mode === 't_advice' ? 3600 : (mode === 'hold_advice' || mode === 'buy_advice' || mode === 'review') ? 3200 : 1600),
         response_format: { type: 'json_object' },
       }),
     }).catch((e) => ({ __err: e }));  // abort/网络错误不抛出 → 转入降级返回，避免裸报错/被平台强杀
@@ -935,6 +935,8 @@ export default async function handler(req, res) {
 
     const j = await resp.json();
     const content = j.choices?.[0]?.message?.content || '';
+    const finishReason = j.choices?.[0]?.finish_reason || '';
+    const truncated = finishReason === 'length';
 
     // 解析模型返回的 JSON（容错：剥离可能的 ```json 包裹）
     let result;
@@ -942,7 +944,20 @@ export default async function handler(req, res) {
       const cleaned = content.replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
       result = JSON.parse(cleaned);
     } catch {
-      result = { raw: content };
+      // 解析失败：多为输出被 max_tokens 截断。尝试补齐尾部再解析一次，仍失败则降级 raw。
+      let salvaged = null;
+      try {
+        let s = content.replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
+        // 去掉最后一个残缺的键值对，再按未闭合层级补齐引号/括号
+        s = s.replace(/,\s*"[^"]*"\s*:\s*("[^"]*)?$/, '');
+        const openBraces = (s.match(/\{/g) || []).length - (s.match(/\}/g) || []).length;
+        const openBrackets = (s.match(/\[/g) || []).length - (s.match(/\]/g) || []).length;
+        const quotes = (s.match(/(?<!\\)"/g) || []).length;
+        if (quotes % 2 === 1) s += '"';
+        s += ']'.repeat(Math.max(0, openBrackets)) + '}'.repeat(Math.max(0, openBraces));
+        salvaged = JSON.parse(s);
+      } catch { /* 补齐仍失败 */ }
+      result = salvaged || { raw: content, truncated };
     }
 
     if (!streaming) res.status(200);
@@ -952,6 +967,7 @@ export default async function handler(req, res) {
       model: useModel,
       updatedAt: Date.now(),
       result,
+      truncated,
       news: newsRefs,
       // 可信度元信息：供前端展示共振灯/环境/龙虎榜/消息面(不依赖模型自报)
       meta: collectedMeta,

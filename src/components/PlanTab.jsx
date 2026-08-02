@@ -1029,6 +1029,12 @@ function HoldingItem({ h, idx, quote: q }) {
                     <span className="expand-btn" onClick={() => setTAdvice(null)}>收起</span>
                   </div>
                 </div>
+                {(tAdvice.truncated || tAdvice.result.truncated) && (
+                  <div className="t-ai-warn"><Icon name="shield" size={12} /> 内容较长被截断，已展示已生成部分，可点「重新生成」重试</div>
+                )}
+                {tAdvice.result.raw && (
+                  <div className="t-ai-plain" style={{ whiteSpace: 'pre-wrap' }}>{tAdvice.result.raw}</div>
+                )}
                 {tAdvice.result.reasoning && (
                   <div className="ai-reasoning"><span className="ai-reasoning-k">研判</span>{tAdvice.result.reasoning}</div>
                 )}
