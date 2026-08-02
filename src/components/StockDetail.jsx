@@ -134,7 +134,7 @@ export default function StockDetail({ stock, onClose }) {
               })(),
             },
           }, onPhase)
-            .then((r) => (r && r.ok ? { advice: r.result, meta: r.meta, news: r.news } : null)).catch(() => null)
+            .then((r) => (r && r.ok ? { advice: r.result, meta: r.meta, news: r.news, truncated: r.truncated } : null)).catch(() => null)
         : callAIStream('buy_advice', {
             code: stock.code,
             name: (profile && profile.name) || stock.name,
@@ -145,17 +145,19 @@ export default function StockDetail({ stock, onClose }) {
               holdMktValue: portfolio && portfolio.holdMktValue != null ? portfolio.holdMktValue : null,
             },
           }, onPhase)
-            .then((r) => (r && r.ok ? { advice: r.result, meta: r.meta, news: r.news } : null)).catch(() => null)
+            .then((r) => (r && r.ok ? { advice: r.result, meta: r.meta, news: r.news, truncated: r.truncated } : null)).catch(() => null)
       const [j, adviceResp] = await Promise.all([quantP, adviceP])
       const advice = adviceResp && adviceResp.advice
       const meta = adviceResp && adviceResp.meta
       const news = adviceResp && adviceResp.news
+      // 后端标记输出被 max_tokens 截断(或解析仅救回部分字段) → 前端提示"内容不全,可重试"
+      const truncated = !!(adviceResp && (adviceResp.truncated || (advice && advice.truncated)))
       // 未持仓但 LLM 建议没返回（超时/冷启动）→ 记一个软提示，允许一键重试，不静默回退到模糊量化结论
       const adviceMissing = !myHold && !advice
       const result = (j && j.quant) ? j.quant : null
       if (result || advice) {
-        setQuantState({ result, advice, meta, news, adviceMissing, cachedAt: Date.now() })
-        saveAdvice(stock.code, { result, advice, meta, news }) // 持久化：关闭再进/刷新仍可见
+        setQuantState({ result, advice, meta, news, adviceMissing, truncated, cachedAt: Date.now() })
+        saveAdvice(stock.code, { result, advice, meta, news, truncated }) // 持久化：关闭再进/刷新仍可见
         // 决策记录：把这条建议落库，供事后回测算真实胜率
         if (advice) {
           try {
@@ -571,6 +573,14 @@ export default function StockDetail({ stock, onClose }) {
                         <div className="advice-retry">
                           <Icon name="spark" size={13} /> AI 操作建议(结论/买点/时机/止损)生成超时，
                           <span className="expand-btn" onClick={loadQuant}>点此重试</span>
+                        </div>
+                      )}
+
+                      {/* AI 输出被长度截断(内容不全) → 明确提示 + 一键重新生成，避免用户以为"卡住/只显示了一半" */}
+                      {quantState.truncated && adv && (
+                        <div className="advice-retry">
+                          <Icon name="spark" size={13} /> 本次分析内容较长被截断，下方可能不完整，
+                          <span className="expand-btn" onClick={loadQuant}>重新生成完整版</span>
                         </div>
                       )}
 
