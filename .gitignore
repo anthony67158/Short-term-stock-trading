@@ -15,3 +15,9 @@ qlib-service/fcbuild/
 qlib-service/__pycache__/
 api/__pycache__/
 .s/
+
+# 量化服务部署包的 vendored 依赖(300M,由 build_deploy_pkg 重建);源码/bootstrap/模型仍进仓库
+qlib-service/deploy_pkg/deps/
+# 训练中间产物(大文件,可重跑 build_dataset.py 重生成)
+qlib-service/dataset.npz
+qlib-service/pool_cache.json

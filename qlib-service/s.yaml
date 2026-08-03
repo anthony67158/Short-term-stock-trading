@@ -12,25 +12,32 @@ resources:
     props:
       region: ${vars.region}
       functionName: ${vars.functionName}
-      description: 量化打分+走势预测微服务（FastAPI，FC3.0 容器镜像）
-      runtime: custom-container
-      cpu: 0.5
-      memorySize: 1024                 # numpy 蒙特卡洛 3000 次模拟，1GB 足够
+      description: 量化打分(LightGBM)+走势预测(GARCH+蒙特卡洛)微服务(FastAPI, FC3.0 自定义运行时 免Docker)
+      runtime: custom.debian10          # 自定义运行时(免 Docker),依赖 vendored 到 deps/,与主服务同栈
+      cpu: 1                            # LGB 推理 + GARCH 拟合 + 蒙特卡洛
+      memorySize: 2048                  # lightgbm+arch+scipy+numpy 常驻,2GB 稳
       diskSize: 512
       timeout: 60
       instanceConcurrency: 10
-      customContainerConfig:
-        image: ${env.QUANT_IMAGE}      # ACR 个人版新域名，从「访问凭证」页复制，如 crpi-xxxxxxxx.cn-hangzhou.personal.cr.aliyuncs.com/<命名空间>/quant-score:1.0
-        port: 80                       # 与 Dockerfile CMD 默认 ${PORT:-80} 一致
+      caPort: 9000                      # 与 bootstrap 里 uvicorn 监听端口一致
+      code: ./deploy_pkg               # 部署包目录(app+factors+model_lib+bundled模型+deps/+bootstrap)
+      customRuntimeConfig:
+        command:
+          - bash
+          - bootstrap
       environmentVariables:
-        API_KEY: ${env.QUANT_KEY}      # 与操盘台 QUANT_KEY 用同一个值
-      triggers:
-        - triggerName: http
-          triggerType: http
-          triggerConfig:
-            authType: anonymous
-            disableURLInternet: false
-            methods:
-              - GET
-              - POST
-              - OPTIONS
+        API_KEY: ${env('QUANT_KEY')}     # 与操盘台 QUANT_KEY 用同一个值
+        # 让子进程能找到内置 python3.10 与 deps
+        PATH: /var/fc/lang/python3.10/bin:/usr/local/bin:/usr/bin:/bin
+        PYTHONPATH: /code/deps:/code
+        # LGB 模型: 主加载走部署包内 bundled 文件;OSS 仅用于热更新(可选)
+        OSS_REGION: ${env('OSS_REGION')}
+        OSS_BUCKET: ${env('OSS_BUCKET')}
+        OSS_ACCESS_KEY_ID: ${env('OSS_ACCESS_KEY_ID')}
+        OSS_ACCESS_KEY_SECRET: ${env('OSS_ACCESS_KEY_SECRET')}
+        # OSS_ENDPOINT 留空则 model_lib 从 OSS_REGION 自动推导,故不在此注入
+        QUANT_MODEL_PREFIX: quantmodel/
+      # 注意: 该函数已存在一个 http 触发器(线上 URL 稳定,见 docs)。
+      # fc3 用 triggerName 做主键,若此处名字与线上不一致会尝试"再建一个"而触发
+      # LimitExceededError(一个函数只能有一个 http 触发器)。故此处不声明 triggers,
+      # s deploy 只更新函数代码/配置,保留既有触发器与 URL 不变。

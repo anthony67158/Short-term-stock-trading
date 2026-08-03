@@ -1,0 +1,13 @@
+#!/bin/bash
+# FC3.0 custom runtime (custom.debian10). 依赖已 vendored 到 /code/deps。
+# 选一个可用的 python3.10(FC 内置优先),保证与 vendored cp310 wheel ABI 一致。
+export PYTHONPATH=/code/deps:/code:$PYTHONPATH
+PORT=${FC_SERVER_PORT:-9000}
+cd /code
+PY=""
+for c in /var/fc/lang/python3.10/bin/python3 /usr/local/bin/python3.10 /usr/bin/python3.10 python3.10 python3; do
+  if command -v "$c" >/dev/null 2>&1; then PY="$c"; break; fi
+done
+echo "[bootstrap] using python: $PY ($($PY --version 2>&1))"
+export PATH="$(dirname "$PY"):$PATH"
+exec "$PY" -m uvicorn app:app --host 0.0.0.0 --port ${PORT} --workers 1
