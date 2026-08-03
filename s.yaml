@@ -1,0 +1,59 @@
+edition: 3.0.0
+name: stock-dashboard
+access: default   # 对应 `s config add` 里配置的阿里云密钥别名
+
+vars:
+  region: cn-hangzhou              # 按需改：cn-hangzhou / cn-shanghai / ap-southeast-1(新加坡) 等
+  functionName: stock-dashboard
+
+resources:
+  web:
+    component: fc3
+    props:
+      region: ${vars.region}
+      functionName: ${vars.functionName}
+      description: 短线操盘台（前端+12个API，FC3.0 自定义运行时 + OSS 存储）
+      runtime: custom.debian10        # 自定义运行时（Debian10 内置多语言，用系统 node 或自带）
+      cpu: 0.5
+      memorySize: 1024                 # 1GB，够 SSE 并发与 LLM 拉取
+      diskSize: 512
+      timeout: 120                     # ai/agent/board/daily_report 需较长超时（Vercel 之前 60s，这里放宽到 120s）
+      instanceConcurrency: 20          # 单实例并发（Web 函数支持多请求复用实例，省成本）
+      caPort: 9000                     # 与 server.js 监听端口一致（FC 也会用 FC_SERVER_PORT 注入）
+      code: ./                         # 上传当前目录（含 dist/ api/ server.js node_modules）
+      customRuntimeConfig:
+        command:
+          - /var/fc/lang/nodejs20/bin/node
+          - server.js
+      environmentVariables:
+        # 让 PATH 包含内置 node，避免子进程找不到
+        PATH: /var/fc/lang/nodejs20/bin:/usr/local/bin:/usr/bin:/bin
+        # ---- 大模型（保持原样，不迁百炼）----
+        LLM_BASE_URL: ${env('LLM_BASE_URL')}
+        LLM_API_KEY: ${env('LLM_API_KEY')}
+        # 模型沿用代码内默认值（保持与线上一致）
+        LLM_MODEL: DeepSeek-V3.2-Pro
+        ADVISOR_MODEL: DeepSeek-V4-Pro
+        AGENT_MODEL: Qwen3-Max-A
+        DAILY_MODEL: Qwen3-Max-A
+        # ---- 第三方数据 ----
+        FINNHUB_KEY: ${env('FINNHUB_KEY')}
+        QUANT_URL: ${env('QUANT_URL')}
+        QUANT_KEY: ${env('QUANT_KEY')}
+        # ---- OSS 存储（替代 Vercel Blob）----
+        OSS_REGION: ${env('OSS_REGION')}
+        OSS_BUCKET: ${env('OSS_BUCKET')}
+        OSS_ACCESS_KEY_ID: ${env('OSS_ACCESS_KEY_ID')}
+        OSS_ACCESS_KEY_SECRET: ${env('OSS_ACCESS_KEY_SECRET')}
+      # HTTP 触发器：对外提供访问地址（可再叠加 CDN/自定义域名做 HTTPS 加速）
+      triggers:
+        - triggerName: http
+          triggerType: http
+          triggerConfig:
+            authType: anonymous
+            disableURLInternet: false
+            methods:
+              - GET
+              - POST
+              - PUT
+              - OPTIONS

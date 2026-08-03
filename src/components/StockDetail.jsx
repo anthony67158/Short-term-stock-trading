@@ -1,10 +1,12 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import ReactECharts from 'echarts-for-react'
 import Icon from './Icon'
+import Reasoning from './Reasoning'
 import { usePolling } from '../hooks'
 import { fmtPct, pctClass, fmtRaw, fmtNum, hasVal, opText } from '../format'
 import { aiStore } from '../aiStore'
 import { callAI, callAIStream } from '../ai'
+import { api } from '../apiBase'
 import { usePlanStore, planStore, computeTFlows, computePortfolio } from '../planStore'
 import { getAdvice, saveAdvice } from '../adviceCache'
 import { AlertForm } from './AlertCenter'
@@ -113,8 +115,28 @@ export default function StockDetail({ stock, onClose }) {
     try {
       const hp = myHold ? `&holdCost=${myHold.cost}&holdQty=${myHold.qty}` : ''
       // 量化服务(走势预测/多因子分) 与 LLM 操作建议(带具体价位) 并发
-      const quantP = fetch(`/api/stock_detail?code=${stock.code}&klt=101&lmt=60&quant=1${hp}&_t=${Date.now()}`)
+      const quantP = fetch(api(`/api/stock_detail?code=${stock.code}&klt=101&lmt=60&quant=1${hp}&_t=${Date.now()}`))
         .then((r) => r.json()).catch(() => null)
+      // 军师历史战绩（真实回测胜率），传给后端做自我校准：历史越差越收紧信心
+      const advisorTrack = (() => {
+        try {
+          const s = planStore.adviceStats()
+          if (!s || s.total < 5) return null // 样本太少不校准，避免噪声
+          const g = (s.groups || []).find((x) => x.mode === (myHold ? 'hold_advice' : 'buy_advice')) || null
+          // 各操盘理论的真实命中率 → 让军师优先采信在你这些票上"实测更灵"的理论、给低命中理论降权
+          let theoryScores = null
+          try {
+            const t = planStore.theoryStats()
+            const tg = (t && t.groups || []).filter((x) => x.total >= 3) // 每个理论≥3样本才纳入,避免噪声
+            if (tg.length) theoryScores = tg.map((x) => ({ theory: x.theory, winRate: x.winRate, total: x.total, avgPct: x.avgPct }))
+          } catch { /* ignore */ }
+          return {
+            overallWinRate: s.winRate, overallAvgPct: s.avgPct, overallTotal: s.total,
+            modeWinRate: g ? g.winRate : null, modeAvgPct: g ? g.avgPct : null, modeTotal: g ? g.total : 0,
+            theoryScores,
+          }
+        } catch { return null }
+      })()
       // 持仓 → LLM 给"加/减/持有/清仓 + 具体价位"；未持仓 → LLM 给"买入/等回调/观望 结论 + 对应建议"
       const adviceP = myHold
         ? callAIStream('hold_advice', {
@@ -123,11 +145,16 @@ export default function StockDetail({ stock, onClose }) {
             holdCost: myHold.cost,
             holdQty: myHold.qty,
             openTNet: myHold.hasOpenT ? myHold.tNetHands : 0,
+            advisorTrack,
             account: {
               totalAssets: (portfolio && portfolio.totalAssets) ?? (book.account && book.account.totalAssets) ?? null,
               cash: (portfolio && portfolio.available) ?? (book.account && book.account.cash) ?? null,
               position: portfolio && portfolio.position != null ? portfolio.position : null,
               holdMktValue: portfolio && portfolio.holdMktValue != null ? portfolio.holdMktValue : null,
+              goal: portfolio && portfolio.goal != null ? portfolio.goal : null,
+              goalProgress: portfolio && portfolio.goalProgress != null ? portfolio.goalProgress : null,
+              goalGap: portfolio && portfolio.goalGap != null ? portfolio.goalGap : null,
+              goalReturnPct: portfolio && portfolio.goalReturnPct != null ? portfolio.goalReturnPct : null,
               stockWeight: (() => {
                 const p = portfolio && portfolio.positions ? portfolio.positions.find((x) => x.code === stock.code) : null
                 return p && p.weight != null ? p.weight : null
@@ -138,11 +165,16 @@ export default function StockDetail({ stock, onClose }) {
         : callAIStream('buy_advice', {
             code: stock.code,
             name: (profile && profile.name) || stock.name,
+            advisorTrack,
             account: {
               totalAssets: (portfolio && portfolio.totalAssets) ?? (book.account && book.account.totalAssets) ?? null,
               cash: (portfolio && portfolio.available) ?? (book.account && book.account.cash) ?? null,
               position: portfolio && portfolio.position != null ? portfolio.position : null,
               holdMktValue: portfolio && portfolio.holdMktValue != null ? portfolio.holdMktValue : null,
+              goal: portfolio && portfolio.goal != null ? portfolio.goal : null,
+              goalProgress: portfolio && portfolio.goalProgress != null ? portfolio.goalProgress : null,
+              goalGap: portfolio && portfolio.goalGap != null ? portfolio.goalGap : null,
+              goalReturnPct: portfolio && portfolio.goalReturnPct != null ? portfolio.goalReturnPct : null,
             },
           }, onPhase)
             .then((r) => (r && r.ok ? { advice: r.result, meta: r.meta, news: r.news, truncated: r.truncated } : null)).catch(() => null)
@@ -172,6 +204,7 @@ export default function StockDetail({ stock, onClose }) {
               trust: meta && meta.trustScore ? meta.trustScore.score : null,
               resonance: meta && meta.resonance ? meta.resonance.score : null,
               priceAtAdvice: px,
+              theoryNote: advice.theoryNote || '',   // 军师所引理论原文 → 供事后按理论算胜率
             })
           } catch { /* ignore */ }
         }
@@ -531,7 +564,7 @@ export default function StockDetail({ stock, onClose }) {
 
                       {/* ReAct 研判思路：模型先于结论生成的推理链，让"为什么这么建议"透明可核对 */}
                       {adv && adv.reasoning && (
-                        <div className="ai-reasoning"><span className="ai-reasoning-k">研判</span>{adv.reasoning}</div>
+                        <Reasoning text={adv.reasoning} />
                       )}
 
                       {/* 可信度条：综合信任分 + 共振灯（让"能信多少"透明化）*/}
@@ -599,6 +632,9 @@ export default function StockDetail({ stock, onClose }) {
                               {adv.targetPrice != null && <div className="ap-cell"><span className="ap-k">目标价</span><span className="ap-v red">{adv.targetPrice}</span></div>}
                             </div>
                           )}
+                          {adv.serverAdjust && (
+                            <div className="advice-adjust"><Icon name="shield" size={12} /> 已按合规校正：{adv.serverAdjust}</div>
+                          )}
                           {/* 买入计划(未持仓·按账户全景算的手数/资金/占比) —— 一眼看清怎么下手 */}
                           {!myHold && (hasVal(adv.planQty) || hasVal(adv.planAmount) || hasVal(adv.planWeight)) && (
                             <div className="op-calc">
@@ -640,7 +676,7 @@ export default function StockDetail({ stock, onClose }) {
 
                           {/* 分析依据：把技术/资金/消息/宏观/席位/量化归为一组带标签的结构化清单，
                               不再是一堆 emoji 平铺，扫读更清晰 */}
-                          {(adv.techNote || adv.fundNote || adv.newsNote || adv.macroNote || adv.seatNote || adv.quantNote) && (
+                          {(adv.techNote || adv.fundNote || adv.newsNote || adv.macroNote || adv.seatNote || adv.quantNote || adv.theoryNote) && (
                             <div className="advice-basis">
                               <div className="advice-basis-title">分析依据</div>
                               {adv.techNote && <div className="ab-row"><span className="ab-k tech">技术</span><span className="ab-v">{adv.techNote}</span></div>}
@@ -649,6 +685,7 @@ export default function StockDetail({ stock, onClose }) {
                               {adv.macroNote && <div className="ab-row"><span className="ab-k macro">宏观</span><span className="ab-v">{adv.macroNote}</span></div>}
                               {adv.seatNote && <div className="ab-row"><span className="ab-k seat">席位</span><span className="ab-v">{adv.seatNote}</span></div>}
                               {adv.quantNote && <div className="ab-row"><span className="ab-k quant">量化</span><span className="ab-v">{adv.quantNote}</span></div>}
+                              {adv.theoryNote && <div className="ab-row"><span className="ab-k theory">理论</span><span className="ab-v">{adv.theoryNote}</span></div>}
                             </div>
                           )}
 

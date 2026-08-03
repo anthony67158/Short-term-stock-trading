@@ -10,13 +10,14 @@ import ErrorBoundary from './components/ErrorBoundary'
 import AuthGate, { AccountMenu } from './components/AuthGate'
 import { usePolling, isTradingHours, useCountdown, triggerRefresh, useRefreshTick } from './hooks'
 import { usePlanStore, planStore } from './planStore'
-import { useAIStore } from './aiStore'
+import { useAIStore, aiStore } from './aiStore'
 import { useAuthStore, authStore } from './authStore'
 import { useTheme, themeStore } from './themeStore'
 import { useDetailStore, detailStore } from './detailStore'
 import { alertStore, useAlertStore } from './alertStore'
 import { runAutoReviewIfDue } from './review'
 import { timeStr } from './format'
+import { api } from './apiBase'
 
 const TABS = [
   { key: 'today', label: '今日选股', icon: 'radar' },
@@ -95,24 +96,66 @@ function MainApp() {
     return () => clearInterval(id)
   }, [reviewQuotes.data])
 
-  // ===== AI建议事后回测：拉取待核验建议的现价，隔日判定命中，累计真实胜率 =====
-  const pendingCodes = [...new Set((book.adviceLog || []).filter((r) => !r.verified).map((r) => r.code))].slice(0, 30)
-  const verifyQuotes = usePolling(
-    pendingCodes.length ? `/api/quote?codes=${pendingCodes.join(',')}` : null,
-    300000, // 5分钟一次足够
-    [pendingCodes.join(',')]
-  )
+  // ===== AI建议事后回测（短线实战口径）：对≥1天前未核验建议，拉近期日K线 =====
+  // 判定"3日窗口内最高价是否触及目标价"，比单看隔日收盘更贴合短线，故取日K而非现价。
+  const DAY_MS = 24 * 3600 * 1000
+  const ripeCodes = [...new Set(
+    (book.adviceLog || [])
+      .filter((r) => !r.verified && (Date.now() - r.at) >= DAY_MS)
+      .map((r) => r.code)
+  )].slice(0, 12) // 逐只拉K线，限流保护，一轮最多12只
+  const ripeKey = ripeCodes.join(',')
   useEffect(() => {
-    const map = {}
-    ;((verifyQuotes.data && verifyQuotes.data.list) || []).forEach((q) => { map[q.code] = q.price })
-    if (Object.keys(map).length) planStore.verifyAdvice(map)
-  }, [verifyQuotes.data])
+    if (!ripeCodes.length) return
+    let cancelled = false
+    const run = async () => {
+      const candleMap = {}
+      // 并发拉每只的近8根日K（覆盖3日窗口+缓冲），复用 stock_detail（不新增函数）
+      await Promise.all(ripeCodes.map(async (code) => {
+        try {
+          const res = await fetch(api(`/api/stock_detail?code=${code}&klt=101&lmt=8`))
+          const j = await res.json()
+          if (j && j.ok && Array.isArray(j.candles) && j.candles.length) {
+            candleMap[code] = j.candles.map((c) => ({
+              date: c.date, open: c.open, close: c.close, high: c.high, low: c.low,
+            }))
+          }
+        } catch { /* 单只失败忽略，其余照常核验 */ }
+      }))
+      if (!cancelled && Object.keys(candleMap).length) planStore.verifyAdvice(candleMap)
+    }
+    run()
+    const id = setInterval(run, 300000) // 5分钟一轮
+    return () => { cancelled = true; clearInterval(id) }
+  }, [ripeKey])
 
 
   // 数据快照给 AI（避免频繁重建）
   const dataRef = useRef({})
   dataRef.current = { market: market.data, sectors: sectors.data, limitPool: ztPool.data, movers: moversData.data, speed: speedData.data }
   const snapshot = () => dataRef.current
+
+  // ===== 键盘快捷键：1-4 切换主 Tab；ESC 关闭详情/助手；/ 或 A 唤起助手 =====
+  useEffect(() => {
+    const onKey = (e) => {
+      // 在输入框/文本域/可编辑元素里打字时不拦截
+      const el = e.target
+      const typing = el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      if (e.key === 'Escape') {
+        // 优先关最上层：详情弹窗 → 助手抽屉
+        if (detailStore.get().stock) { detailStore.close(); return }
+        aiStore.close()
+        return
+      }
+      if (typing) return
+      const idx = { '1': 0, '2': 1, '3': 2, '4': 3 }[e.key]
+      if (idx != null && TABS[idx]) { setTab(TABS[idx].key); return }
+      if (e.key === '/' || e.key === 'a' || e.key === 'A') { e.preventDefault(); aiStore.toggle() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   return (
     <div className={'app' + (aiOpen ? ' with-ai' : '')}>

@@ -1,0 +1,21 @@
+# FC 部署忽略清单：只上传运行所需（server.js + api/ + dist/ + node_modules + package.json + public/）
+# 注意：路径用 / 开头做根锚定，避免误伤 node_modules 内同名目录（如 node_modules/**/src）
+/.git
+/.vercel
+/qlib-service
+/qlib-service.tar.gz
+/src
+/docs
+/scripts
+*.tar.gz
+*.log
+.DS_Store
+/.env
+/.env.local
+/.env.oss.example
+/.env.example
+/README.md
+/.impeccable.md
+/vercel.json
+/vite.config.js
+/dev-server.js

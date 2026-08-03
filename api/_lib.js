@@ -43,9 +43,28 @@ export async function emGet(pathAndQuery, { his = false } = {}) {
   }
 }
 
+// ---- 统一 CORS / 预检契约 ----
+// 前端(Vercel 域)直连 FC 后端属跨域，JSON POST 会先发 OPTIONS 预检；
+// 所有 handler 统一走这里，避免各写一份、漏设 Allow-Methods/Headers 导致预检失败。
+export function applyCors(res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-internal');
+}
+
+// OPTIONS 预检统一应答：命中则回 204 并返回 true，调用方 `if (preflight(req,res)) return;`
+export function preflight(req, res) {
+  if (req.method === 'OPTIONS') {
+    applyCors(res);
+    res.status(204).end();
+    return true;
+  }
+  return false;
+}
+
 export function sendJson(res, data, { cache = 30 } = {}) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  applyCors(res);
   res.setHeader(
     'Cache-Control',
     `public, s-maxage=${cache}, stale-while-revalidate=${cache * 4}`
@@ -55,7 +74,7 @@ export function sendJson(res, data, { cache = 30 } = {}) {
 
 export function sendError(res, err) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  applyCors(res);
   res.status(200).send(
     JSON.stringify({ ok: false, error: String(err && err.message || err) })
   );

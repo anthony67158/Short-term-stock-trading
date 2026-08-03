@@ -1,8 +1,9 @@
-import { put, list } from '@vercel/blob';
-import { emGet, num, sendJson } from './_lib.js';
+import { put, list, readJson, hasStorage } from './_blob.js';
+import { emGet, num, sendJson, preflight } from './_lib.js';
 import { marketTimePromptBlock } from './_market_time.js';
 import { fetchOverseas, fetchAIndices, fetchNews, fetchStockNews, fetchClsTelegraph, fetchSinaFlash, fetchFinnhubNews } from './_market_data.js';
 import { buildDailySummary } from './_daily_summary.js';
+import { llmEnv, makeSSE, callChat, parseLLMJson } from './_llm.js';
 
 // ============ 全市场投资策略日报（早/午/晚三场次，SSE 流式 + Blob 缓存）============
 // GET /api/daily_report?session=morning|noon|evening[&refresh=1]  body(POST): { holdings:[{code,name}] }
@@ -31,16 +32,11 @@ const SECTORS = [
 ];
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  const BASE = process.env.LLM_BASE_URL, KEY = process.env.LLM_API_KEY;
+  if (preflight(req, res)) return;
+  const { BASE, KEY } = llmEnv();
   const streaming = true; // 本接口一律 SSE
 
-  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-cache, no-transform');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no');
-  const emit = (event, data) => { try { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } catch { /* 断连 */ } };
-  const phase = (text) => emit('phase', { text });
+  const { emit, phase } = makeSSE(res); // makeSSE 内已统一应用 CORS
 
   try {
     let body = req.body; if (typeof body === 'string') body = JSON.parse(body || '{}');
@@ -51,7 +47,7 @@ export default async function handler(req, res) {
     const session = (req.query.session && SESSION_CN[req.query.session]) ? req.query.session : autoSession();
     const refresh = req.query.refresh === '1';
     const day = bjDayKey();
-    const hasBlob = !!process.env.BLOB_READ_WRITE_TOKEN;
+    const hasBlob = hasStorage();
 
     // 1) 命中缓存(同日同场次且非强制刷新)→ 直接返回
     if (hasBlob && !refresh) {
@@ -59,7 +55,7 @@ export default async function handler(req, res) {
         const { blobs } = await list({ prefix: cacheKey(day, session), limit: 5 });
         if (blobs.length) {
           const latest = blobs.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt))[0];
-          const cached = await fetch(latest.url).then((r) => r.json()).catch(() => null);
+          const cached = await readJson(latest);
           if (cached && cached.report) { emit('result', { ok: true, cached: true, ...cached }); return res.end(); }
         }
       } catch { /* 无缓存继续生成 */ }
@@ -74,7 +70,7 @@ export default async function handler(req, res) {
     const origin = `${proto}://${host}`;
     const getJ = (p) => { const c = new AbortController(); const to = setTimeout(() => c.abort(), 8000); return fetch(origin + p, { headers: { 'x-internal': '1' }, signal: c.signal }).then((r) => r.json()).catch(() => null).finally(() => clearTimeout(to)); };
 
-    const [sectors, aIdx, overseas, limitPool, sectorNews, macroNews, holdingInfo, clsNews, sinaNews, finnhubNews] = await Promise.all([
+    const [sectors, aIdx, overseas, limitPool, sectorNews, macroNews, holdingInfo, holdingQuotes, clsNews, sinaNews, finnhubNews] = await Promise.all([
       getJ('/api/sectors?type=industry&sort=main'),
       fetchAIndices(emGet, num),
       fetchOverseas(),
@@ -85,6 +81,8 @@ export default async function handler(req, res) {
       fetchNews('宏观 政策 央行 A股 美联储 关税', 6),
       // 持仓股(每只并行取当日新闻)
       holdings.length ? Promise.all(holdings.map((h) => fetchStockNews(h.name || h.code, 3).then((news) => ({ code: h.code, name: h.name, news })))) : Promise.resolve([]),
+      // ★持仓股今日真实行情(现价/涨跌幅/涨停跌停)——防止日报凭新闻标题臆断涨跌方向
+      holdings.length ? getJ(`/api/quote?codes=${holdings.map((h) => h.code).join(',')}&_t=${Date.now()}`) : Promise.resolve(null),
       // 权威快讯源(金十/财联社系/东财聚合) + 新浪7×24 + Finnhub海外
       fetchClsTelegraph(14),
       fetchSinaFlash(10),
@@ -102,6 +100,20 @@ export default async function handler(req, res) {
     };
     const limitCount = ((limitPool && limitPool.list) || []).length;
 
+    // 持仓股今日真实行情表:code → {price,pct,涨停,跌停}，作为日报持仓段的"当下事实"，压过新闻臆断
+    const hqMap = {};
+    ((holdingQuotes && holdingQuotes.list) || []).forEach((q) => {
+      if (!q || !q.code) return;
+      const pct = num(q.pct);
+      hqMap[q.code] = {
+        现价: num(q.price),
+        今日涨跌幅: pct,
+        状态: q.isLimitUp ? '今日涨停' : q.isLimitDown ? '今日跌停' : (pct >= 7 ? '今日大涨' : pct <= -7 ? '今日大跌' : pct >= 0 ? '今日上涨' : '今日下跌'),
+        量比: q.volRatio ?? null,
+        换手率: q.turnover ?? null,
+      };
+    });
+
     // 3) 组织数据，拆成两路【并行】LLM 生成(单次输出减半、并发不叠加时间，避免超时)
     phase('数据齐全，正在撰写策略日报…');
     const dataBlock = {
@@ -113,7 +125,11 @@ export default async function handler(req, res) {
       权威快讯: (clsNews || []).map((n) => `[${n.src}]${n.title}`).slice(0, 12),   // 金十/财联社系/东财聚合
       新浪快讯: (sinaNews || []).map((n) => n.title).slice(0, 8),
       海外新闻: (finnhubNews || []).map((n) => n.title).slice(0, 6),               // Finnhub(有key才有)
-      holdings: holdingInfo.map((h) => ({ 名称: h.name, 代码: h.code, 相关信息: h.news.map((n) => n.title) })),
+      holdings: holdingInfo.map((h) => ({
+        名称: h.name, 代码: h.code,
+        今日行情: hqMap[h.code] || null,   // ★真实行情(现价/涨跌幅/涨停跌停)——写持仓段必须以此为准
+        相关信息: h.news.map((n) => n.title),
+      })),
     };
     const dataStr = JSON.stringify(dataBlock, null, 0);
     const SYS = `你是顶级卖方策略分析师，为专业短线/波段投资者撰写《全市场投资策略日报》。基于给定真实数据做判断，绝不编造。每个观点要有证据(引用给定数据的具体数字/新闻)。红涨绿跌(A股口径)。只输出合法 JSON，不要 markdown 代码块包裹。`;
@@ -122,22 +138,27 @@ export default async function handler(req, res) {
     // 动态超时：两路并发，各自可用剩余预算
     const llmTimeout = Math.max(14000, remain() - 3000);
     const callLLM = async (userPrompt, maxTokens) => {
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), llmTimeout);
-      const resp = await fetch(`${BASE}/chat/completions`, {
-        method: 'POST', signal: ctrl.signal,
-        headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: MODEL, messages: [{ role: 'system', content: SYS }, { role: 'user', content: userPrompt }], temperature: 0.4, max_tokens: maxTokens, response_format: { type: 'json_object' } }),
-      }).catch((e) => ({ __err: e }));
-      clearTimeout(t);
+      const { resp, done } = await callChat({
+        model: MODEL,
+        messages: [{ role: 'system', content: SYS }, { role: 'user', content: userPrompt }],
+        temperature: 0.4,
+        maxTokens,
+        timeoutMs: llmTimeout,
+        responseFormat: { type: 'json_object' },
+      });
+      done();
       if (!resp || resp.__err || !resp.ok) return null;
       const j = await resp.json().catch(() => null);
       const content = j && j.choices?.[0]?.message?.content || '';
-      try { return JSON.parse(content.replace(/^```json\s*/i, '').replace(/```$/i, '').trim()); } catch { return null; }
+      return parseLLMJson(content).value;
     };
 
     // 路A：总览 + 海外 + 整体策略 + 风险 + 持仓股(短)
-    const promptA = `${timeCtx}\n【本期：${SESSION_CN[session]} · ${day}】\n【真实数据】\n${dataStr}\n\n输出 JSON：{"overview":"两三句总览(引用指数与资金具体数字)","overseas":"一句话隔夜海外/商品对A股影响(引用恒生/纳指/黄金/原油涨跌)","strategy":"今日整体操作策略(仓位/节奏/主攻方向,两三句)","risks":["风险1","风险2","风险3"],"holdings":[{"name":"持仓股名","info":"今日相关信息(引用给定信息;无则'今日无重要公告/新闻')","impact":"影响与关注建议(简短)"}]}。holdings 逐一覆盖每只持仓股。语言精炼。只输出 JSON。`;
+    const promptA = `${timeCtx}\n【本期：${SESSION_CN[session]} · ${day}】\n【真实数据】\n${dataStr}\n\n输出 JSON：{"overview":"两三句总览(引用指数与资金具体数字)","overseas":"一句话隔夜海外/商品对A股影响(引用恒生/纳指/黄金/原油涨跌)","strategy":"今日整体操作策略(仓位/节奏/主攻方向,两三句)","risks":["风险1","风险2","风险3"],"holdings":[{"name":"持仓股名","info":"今日相关信息(引用给定信息;无则'今日无重要公告/新闻')","impact":"影响与关注建议(简短)"}]}。holdings 逐一覆盖每只持仓股。
+【★持仓段·铁律,绝对不能违反】每只持仓股的 info 必须以该股 data.holdings[].今日行情 为【当下事实唯一依据】：
+1. 涨跌方向以"今日行情.状态/今日涨跌幅"为准——跌停就写跌停、下跌就写下跌,【绝对不能】把跌的说成涨、把涨停说成跌停;若某股今日行情为 null(未取到),只能写"今日行情数据缺失",不许臆断涨跌。
+2. "相关信息"里的新闻标题多为【全市场/板块新闻】,不是这只股的个股事实。【绝对禁止】把"88只涨停股/70股每笔成交量增长/封单超亿元"这类全市场统计,当成这只持仓股自己的表现来写。只有明确点名该股(名称/代码)的信息才可作为个股事实引用。
+3. info 里出现的涨跌幅数字必须等于"今日行情.今日涨跌幅",不许自造。语言精炼。只输出 JSON。`;
     // 路B/C：10 板块拆两批各5块并发(单批输出小更快，避免单次大JSON超时)
     const sectorPrompt = (blocks) => `${timeCtx}\n【本期：${SESSION_CN[session]} · ${day}】\n【真实数据】\n${dataStr}\n\n只针对这些板块输出 JSON：{"sectors":[{"name":"板块名","rating":"看多/中性/看空","view":"观点+证据(一句话,引用资金流/涨停/新闻具体数据)","strategy":"操作策略(简短)","risk":"风险(简短)"}]}。必须且只覆盖这几个板块:${blocks}。数据不足的板块基于新闻常识给方向,view标'数据有限'。每字段一到两句。只输出 JSON。`;
     const promptB = sectorPrompt('AI/科技、消费、医药、新能源、周期资源');

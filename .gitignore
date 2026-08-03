@@ -7,3 +7,11 @@ dist
 .env.local
 .env.*.local
 !.env.example
+
+# 构建/部署产物(体积大,不进仓库;可按需重建)
+*.tar.gz
+*.zip
+qlib-service/fcbuild/
+qlib-service/__pycache__/
+api/__pycache__/
+.s/

@@ -3,8 +3,10 @@ import { useAIStore, aiStore } from '../aiStore'
 import { openStockDetail } from '../detailStore'
 import { chatStore } from '../chatStore'
 import { callAI } from '../ai'
+import { api } from '../apiBase'
 import Icon from './Icon'
 import Md from './Md'
+import Reasoning from './Reasoning'
 
 // ============ 统一 AI 助手：一个入口，对话为核心 ============
 // 能力：个股多轮问答(RAG+新闻) + 快捷指令(全盘扫描/盘面复盘/板块选股/个股诊断)
@@ -100,7 +102,7 @@ export default function AIAssistant({ snapshot }) {
     })
 
     try {
-      const res = await fetch('/api/agent', {
+      const res = await fetch(api('/api/agent'), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question: query, history, stock: stock || null }),
         signal: ctrl.signal,
@@ -349,7 +351,7 @@ function badge(s, up = '强', down = '弱') {
 function Diagnose({ r }) {
   return (
     <div className="ai-result">
-      {r.reasoning && <div className="ai-reasoning"><span className="ai-reasoning-k">研判</span>{r.reasoning}</div>}
+      {r.reasoning && <Reasoning text={r.reasoning} />}
       <div className="ai-senti"><span className={'ai-badge ' + badge(r.strength)}>{r.strength || '—'}</span><span className="ai-summary">{r.view}</span></div>
       {Array.isArray(r.points) && <div className="ai-block">{r.points.map((p, i) => <div key={i} className="ai-line">· {p}</div>)}</div>}
       {r.watch && <div className="ai-line" style={{ marginTop: 6 }}><span className="ai-tag-watch">关注</span>{r.watch}</div>}
@@ -359,7 +361,7 @@ function Diagnose({ r }) {
 function Scan({ r }) {
   return (
     <div className="ai-result">
-      {r.reasoning && <div className="ai-reasoning"><span className="ai-reasoning-k">研判</span>{r.reasoning}</div>}
+      {r.reasoning && <Reasoning text={r.reasoning} />}
       {r.marketMood && <div className="ai-summary" style={{ marginBottom: 8 }}>{r.marketMood}</div>}
       {Array.isArray(r.topDirections) && r.topDirections.map((d, i) => (
         <div key={i} className="ai-pick">
@@ -380,7 +382,7 @@ function Scan({ r }) {
 function MarketReview({ r }) {
   return (
     <div className="ai-result">
-      {r.reasoning && <div className="ai-reasoning"><span className="ai-reasoning-k">研判</span>{r.reasoning}</div>}
+      {r.reasoning && <Reasoning text={r.reasoning} />}
       <div className="ai-senti"><span className={'ai-badge ' + badge(r.sentiment)}>{r.sentiment || '—'}</span>{typeof r.score === 'number' && <span className="ai-score">情绪分 <b>{r.score}</b></span>}<span className="ai-summary">{r.summary}</span></div>
       {Array.isArray(r.mainLines) && <div className="ai-block"><div className="ai-label">最强主线</div>{r.mainLines.map((x, i) => <div key={i} className="ai-line"><b>{x.name}</b> — {x.reason}</div>)}</div>}
       {Array.isArray(r.risks) && <div className="ai-block"><div className="ai-label">风险</div>{r.risks.map((x, i) => <div key={i} className="ai-line">· {x}</div>)}</div>}
@@ -391,7 +393,7 @@ function MarketReview({ r }) {
 function SectorPick({ r }) {
   return (
     <div className="ai-result">
-      {r.reasoning && <div className="ai-reasoning"><span className="ai-reasoning-k">研判</span>{r.reasoning}</div>}
+      {r.reasoning && <Reasoning text={r.reasoning} />}
       {r.sectorView && <div className="ai-summary" style={{ marginBottom: 8 }}>{r.sectorView}</div>}
       {Array.isArray(r.picks) && r.picks.map((p, i) => (
         <div key={i} className="ai-pick">

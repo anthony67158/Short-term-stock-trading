@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import { planStore } from './planStore'
+import { api as apiUrl } from './apiBase'
 
 // ============ 云端账号体系（Vercel Blob 持久化，跨设备同步）============
 // 会话（昵称+密码）持久化在本机 localStorage，保持长期登录（关标签页/切后台不掉线）；数据存云端。
@@ -50,7 +51,7 @@ export function readLegacyData() {
 export function hasLegacyData() { return !!readLegacyData() }
 
 async function api(action, payload) {
-  const r = await fetch('/api/account', {
+  const r = await fetch(apiUrl('/api/account'), {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action, ...payload }),
   })

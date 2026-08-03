@@ -1,0 +1,19 @@
+# 阿里云 FC 3.0 容器镜像专用（pip 换阿里云源，构建更快）
+# 与原 Dockerfile 逻辑一致，仅镜像源不同。构建后推到 ACR，再用 qlib-service/s.yaml 部署。
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+# 阿里云 pip 镜像源加速
+RUN pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY app.py .
+
+# FC 容器函数会注入 PORT；s.yaml 里 port 设为 80，与此默认一致
+CMD exec uvicorn app:app --host 0.0.0.0 --port ${PORT:-80} --workers 1

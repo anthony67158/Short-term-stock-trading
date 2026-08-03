@@ -1,4 +1,4 @@
-import { put, list } from '@vercel/blob';
+import { put, list, readJson, hasStorage } from './_blob.js';
 import { emGet, num, sendJson } from './_lib.js';
 
 // ============ 板块资金分时快照（A+B：真回放的数据底座）============
@@ -45,12 +45,11 @@ function pickSnapshot(list, n = 10) {
 }
 
 export async function snapshotsHandler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  // 响应头(CORS/Content-Type)由 sendJson 统一设置
   try {
     const day = bjDayKey();
     const wantCapture = req.query.capture === '1';
-    const hasBlob = !!process.env.BLOB_READ_WRITE_TOKEN;
+    const hasBlob = hasStorage();
 
     // 1) 盘中 + 允许写 → 抓当前快照并追加存储（做去重：同一分钟内不重复写）
     if (wantCapture && hasBlob && isTradingNow()) {
@@ -79,13 +78,11 @@ export async function snapshotsHandler(req, res) {
       try {
         const { blobs } = await list({ prefix: dayPrefix(day), limit: 200 });
         const sorted = blobs
-          .map((b) => ({ url: b.url, min: (b.pathname.match(/\/(\d+)-/) || [])[1] }))
+          .map((b) => ({ blob: b, min: (b.pathname.match(/\/(\d+)-/) || [])[1] }))
           .filter((x) => x.min != null)
           .sort((a, b) => Number(a.min) - Number(b.min));
         // 拉取每个快照内容（并发，容错）
-        const fetched = await Promise.all(sorted.map((x) =>
-          fetch(x.url).then((r) => r.json()).catch(() => null)
-        ));
+        const fetched = await Promise.all(sorted.map((x) => readJson(x.blob)));
         // 同一分钟只保留最后一份
         const byMin = new Map();
         for (const s of fetched) { if (s && s.t != null) byMin.set(s.t, s); }

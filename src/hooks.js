@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback, useSyncExternalStore } from 'react'
+import { api } from './apiBase'
 
 // 全局手动刷新总线：点刷新按钮 → 所有 usePolling 立即重拉
 let refreshTick = 0
@@ -26,7 +27,7 @@ export function usePolling(url, intervalMs, deps = []) {
     if (bust) setLoading(true)
     try {
       const u = bust ? url + (url.includes('?') ? '&' : '?') + '_t=' + Date.now() : url
-      const res = await fetch(u, bust ? { cache: 'no-store' } : undefined)
+      const res = await fetch(api(u), bust ? { cache: 'no-store' } : undefined)
       const j = await res.json()
       if (j && j.ok === false) {
         setError(j.error || '数据源暂不可用')

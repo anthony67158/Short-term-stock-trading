@@ -1,0 +1,36 @@
+edition: 3.0.0
+name: quant-score
+access: default
+
+vars:
+  region: cn-hangzhou              # 与主服务、OSS 保持同地域
+  functionName: quant-score
+
+resources:
+  quant:
+    component: fc3
+    props:
+      region: ${vars.region}
+      functionName: ${vars.functionName}
+      description: 量化打分+走势预测微服务（FastAPI，FC3.0 容器镜像）
+      runtime: custom-container
+      cpu: 0.5
+      memorySize: 1024                 # numpy 蒙特卡洛 3000 次模拟，1GB 足够
+      diskSize: 512
+      timeout: 60
+      instanceConcurrency: 10
+      customContainerConfig:
+        image: ${env.QUANT_IMAGE}      # ACR 个人版新域名，从「访问凭证」页复制，如 crpi-xxxxxxxx.cn-hangzhou.personal.cr.aliyuncs.com/<命名空间>/quant-score:1.0
+        port: 80                       # 与 Dockerfile CMD 默认 ${PORT:-80} 一致
+      environmentVariables:
+        API_KEY: ${env.QUANT_KEY}      # 与操盘台 QUANT_KEY 用同一个值
+      triggers:
+        - triggerName: http
+          triggerType: http
+          triggerConfig:
+            authType: anonymous
+            disableURLInternet: false
+            methods:
+              - GET
+              - POST
+              - OPTIONS

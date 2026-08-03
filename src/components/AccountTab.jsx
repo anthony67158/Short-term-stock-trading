@@ -22,6 +22,7 @@ export default function AccountTab({ interval }) {
   const [editing, setEditing] = useState(false)
   const [total, setTotal] = useState(account.totalAssets != null ? String(account.totalAssets) : '')
   const [cash, setCash] = useState(account.cash != null ? String(account.cash) : '')
+  const [goal, setGoal] = useState(account.goal != null ? String(account.goal) : '')
 
   // 拉持仓实时报价
   const codes = [...new Set(book.holding.map((x) => x.code))]
@@ -51,12 +52,19 @@ export default function AccountTab({ interval }) {
   const positionPct = equity > 0 ? (holdMktVal / equity) * 100 : 0
 
   const saveAccount = () => {
-    planStore.setAccount({ totalAssets: total ? Number(total) : null, cash: cash ? Number(cash) : null })
+    planStore.setAccount({ totalAssets: total ? Number(total) : null, cash: cash ? Number(cash) : null, goal: goal ? Number(goal) : null })
     setEditing(false)
   }
 
   const posLevel = positionPct >= 90 ? 'full' : positionPct >= 70 ? 'high' : positionPct >= 40 ? 'mid' : 'low'
   const posLabel = { full: '满仓', high: '重仓', mid: '半仓', low: '轻仓' }[posLevel]
+
+  // 目标资产（以终为始）：进度 / 还需净赚 / 所需涨幅
+  const goalVal = account.goal != null ? Number(account.goal) : 0
+  const goalProgress = goalVal > 0 && equity > 0 ? (equity / goalVal) * 100 : null
+  const goalGap = goalVal > 0 ? goalVal - equity : null          // >0=还差；<0=已超额
+  const goalReturnPct = goalVal > 0 && equity > 0 ? ((goalVal - equity) / equity) * 100 : null
+  const goalReached = goalGap != null && goalGap <= 0
 
   return (
     <div className="account">
@@ -64,7 +72,7 @@ export default function AccountTab({ interval }) {
       <div className="panel">
         <div className="panel-head">
           <div className="panel-title"><Icon name="gauge" size={16} /> 账户全景</div>
-          <button className="btn" onClick={() => { setTotal(account.totalAssets != null ? String(account.totalAssets) : ''); setCash(account.cash != null ? String(account.cash) : ''); setEditing(true) }}>
+          <button className="btn" onClick={() => { setTotal(account.totalAssets != null ? String(account.totalAssets) : ''); setCash(account.cash != null ? String(account.cash) : ''); setGoal(account.goal != null ? String(account.goal) : ''); setEditing(true) }}>
             <Icon name="edit" size={13} /> 设置资金
           </button>
         </div>
@@ -78,6 +86,10 @@ export default function AccountTab({ interval }) {
             <div className="acc-edit-row">
               <label>可用资金(元)</label>
               <input className="wl-input" value={cash} onChange={(e) => setCash(e.target.value)} placeholder="留空则自动=总资产−持仓市值" inputMode="decimal" />
+            </div>
+            <div className="acc-edit-row">
+              <label>目标资产(元)</label>
+              <input className="wl-input" value={goal} onChange={(e) => setGoal(e.target.value)} placeholder="以终为始，如 500000（50万）" inputMode="decimal" />
             </div>
             <div className="acc-edit-actions">
               <button className="chip-btn ghost" onClick={() => setEditing(false)}>取消</button>
@@ -117,6 +129,29 @@ export default function AccountTab({ interval }) {
           </div>
           <div className="acc-posbar"><div className={'acc-posbar-fill pos-' + posLevel} style={{ width: Math.min(positionPct, 100) + '%' }} /></div>
         </div>
+
+        {/* 目标资产进度条（以终为始） */}
+        {goalVal > 0 ? (
+          <div className="acc-goalbar-wrap">
+            <div className="acc-goalbar-head">
+              <span className="acc-goal-title"><Icon name="target" size={13} /> 目标资产 <b>{money(goalVal)}</b></span>
+              <span className={'acc-goal-prog ' + (goalReached ? 'done' : '')}>{goalProgress != null ? goalProgress.toFixed(1) + '%' : '--'}</span>
+            </div>
+            <div className="acc-goalbar"><div className={'acc-goalbar-fill' + (goalReached ? ' done' : '')} style={{ width: Math.min(goalProgress || 0, 100) + '%' }} /></div>
+            <div className="acc-goal-meta">
+              {goalReached
+                ? <span className="acc-goal-reached"><Icon name="check" size={12} /> 已达标，超额 {money(Math.abs(goalGap))}</span>
+                : <>
+                    <span>还需净赚 <b className="red">{money(goalGap)}</b></span>
+                    <span>需再涨 <b>{goalReturnPct != null ? goalReturnPct.toFixed(1) + '%' : '--'}</b></span>
+                  </>}
+            </div>
+          </div>
+        ) : (
+          <div className="acc-goal-hint">
+            <Icon name="target" size={12} /> 设置「目标资产」后，AI 操作建议 / 复盘 / 加减仓都会围绕你的目标给节奏与仓位。点右上「设置资金」填写。
+          </div>
+        )}
       </div>
 
       {/* 持仓明细（占比 + 浮盈） */}

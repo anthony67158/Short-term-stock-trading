@@ -1,7 +1,8 @@
-import { put, list, del } from '@vercel/blob';
+import { put, list, del, readJson, hasStorage } from './_blob.js';
+import { sendJson, preflight } from './_lib.js';
 import { createHash } from 'crypto';
 
-// ============ 云端账号 + 数据同步（Vercel Blob 持久化）============
+// ============ 云端账号 + 数据同步（阿里云 OSS 持久化）============
 // 单一入口，按 action 区分：register / login / get / save
 // 存储：每个账号一个 blob，pathname = accounts/<hash(nick)>.json
 //   { nick, pwHash, createdAt, updatedAt, data:{ plan, holding, closed } }
@@ -13,10 +14,9 @@ const sha = (s) => createHash('sha256').update(String(s)).digest('hex');
 const prefixOf = (nick) => `${PREFIX}${sha('u:' + nick)}/`;
 const legacyPathOf = (nick) => `${PREFIX}${sha('u:' + nick)}.json`; // 旧的单文件覆盖式路径（兼容迁移）
 
+// 账号响应绝不缓存(登录/保存态)，走统一 sendJson(cache:0) 契约
 function ok(res, obj) {
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.status(200).send(JSON.stringify(obj));
+  sendJson(res, obj, { cache: 0 });
 }
 
 // 读取某账号：优先读新目录下最新版本；没有则回退旧单文件路径（老用户平滑迁移）
@@ -27,17 +27,14 @@ async function readAccount(nick) {
       const latest = blobs.slice().sort(
         (a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
       )[0];
-      const url = latest.downloadUrl || latest.url;
-      const r = await fetch(url, { cache: 'no-store' });
-      if (r.ok) return await r.json();
+      const j = await readJson(latest);
+      if (j) return j;
     }
     // 回退：旧单文件路径
     const { blobs: old } = await list({ prefix: legacyPathOf(nick), limit: 1 });
     if (old && old.length) {
-      const base = old[0].downloadUrl || old[0].url;
-      const bust = base + (base.includes('?') ? '&' : '?') + '_t=' + Date.now();
-      const r = await fetch(bust, { cache: 'no-store' });
-      if (r.ok) return await r.json();
+      const j = await readJson(old[0]);
+      if (j) return j;
     }
     return null;
   } catch { return null; }
@@ -62,10 +59,9 @@ async function writeAccount(acc) {
 }
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  if (req.method === 'OPTIONS') { res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS'); res.setHeader('Access-Control-Allow-Headers', 'Content-Type'); return res.status(200).end(); }
+  if (preflight(req, res)) return;
   if (req.method !== 'POST') return ok(res, { ok: false, error: 'POST only' });
-  if (!process.env.BLOB_READ_WRITE_TOKEN) return ok(res, { ok: false, error: '云端存储未配置' });
+  if (!hasStorage()) return ok(res, { ok: false, error: '云端存储未配置' });
 
   try {
     let body = req.body;

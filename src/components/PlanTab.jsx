@@ -1,13 +1,16 @@
 import { useState, useRef, useMemo, useEffect } from 'react'
 import Icon from './Icon'
 import StockName from './StockName'
+import Reasoning from './Reasoning'
 import ConfirmDialog from './ConfirmDialog'
 import { AlertForm } from './AlertCenter'
 import { usePolling } from '../hooks'
 import { callAI, callAIStream } from '../ai'
-import { planStore, usePlanStore, calcBuyFee, calcSellFee, computeTFlows } from '../planStore'
+import { api } from '../apiBase'
+import { planStore, usePlanStore, calcBuyFee, calcSellFee, computeTFlows, computePortfolio } from '../planStore'
 import { aiStore } from '../aiStore'
-import { openStockDetail } from '../detailStore'
+import { openStockDetail, useDetailStore } from '../detailStore'
+import { getAdvice } from '../adviceCache'
 import { generateReview, sessionLabel, forceGenerateReviews, currentAutoSession, missingReviewCount } from '../review'
 import { fmtPct, pctClass, fmtNum, fmtInflow , fmtRaw, hasVal, opText } from '../format'
 
@@ -272,7 +275,7 @@ function StockSearch() {
     if (!v.trim()) { setList([]); return }
     timer.current = setTimeout(async () => {
       try {
-        const r = await fetch('/api/search?kw=' + encodeURIComponent(v.trim())).then((x) => x.json())
+        const r = await fetch(api('/api/search?kw=' + encodeURIComponent(v.trim()))).then((x) => x.json())
         setList(r.list || [])
       } catch { setList([]) }
     }, 250)
@@ -334,6 +337,7 @@ function PlanList({ book, quote }) {
           <div className="pc-name">
             <StockName code={p.code} name={(q && q.name) || p.name}><span className="pc-nm">{(q && q.name) || p.name}</span></StockName>
             <span className="pc-code">{p.code}</span>
+            {/^(300|301)/.test(String(p.code)) && <span className="tag tag-cy" title="创业板(涨跌幅±20%)">创</span>}
             {String(p.code).startsWith('688') && <span className="tag tag-kc" title="科创板(涨跌幅±20%、门槛更高)">科创板</span>}
             {q && q.isLimitUp && <span className="tag tag-lu">涨停</span>}
           </div>
@@ -472,18 +476,157 @@ function PlanList({ book, quote }) {
   )
 }
 // ---------- 军师战绩：AI建议真实胜率(事后回测统计) ----------
+const ADVICE_MODE_LABEL = {
+  hold_advice: '持仓建议', buy_advice: '买入建议', t_advice: '做T建议',
+  price: '目标价', plan: '交易计划', review: '复盘', other: '其他',
+}
 function AdvisorScore({ book }) {
+  const [open, setOpen] = useState(false)
   const stats = planStore.adviceStats()
   if (!stats || (stats.total === 0 && stats.pending === 0)) return null
   const wr = stats.winRate
   const tone = wr == null ? 'muted' : wr >= 55 ? 'red' : wr >= 45 ? 'gold' : 'green'
+  const groups = (stats.groups || []).filter((g) => g.total > 0).sort((a, b) => b.total - a.total)
+  const theory = planStore.theoryStats()
+  const theoryGroups = (theory && theory.groups || []).filter((g) => g.total > 0)
   return (
-    <div className="advisor-score" title="AI建议隔日自动比对真实价格得出的命中率，样本越多越可信">
-      <Icon name="target" size={13} />
-      <span className="as-k">军师战绩</span>
-      {wr != null
-        ? <><span className={'as-wr ' + tone}>{wr}%</span><span className="as-sub">胜率 · {stats.total}次已验</span></>
-        : <span className="as-sub">积累中 · {stats.pending}次待验</span>}
+    <div className="advisor-score-wrap">
+      <button
+        className="advisor-score"
+        onClick={() => setOpen((v) => !v)}
+        title="点击查看军师战绩的详细口径与分类命中率"
+      >
+        <Icon name="target" size={13} />
+        <span className="as-k">军师战绩</span>
+        {wr != null
+          ? <><span className={'as-wr ' + tone}>{wr}%</span><span className="as-sub">胜率 · {stats.total}次已验</span></>
+          : <span className="as-sub">积累中 · {stats.pending}次待验</span>}
+        <Icon name={open ? 'arrowUp' : 'chevronDown'} size={12} />
+      </button>
+      {open && (
+        <div className="advisor-pop">
+          <div className="ap-title"><Icon name="target" size={13} /> 军师战绩怎么看</div>
+          <p className="ap-desc">
+            系统把每条 AI <b>买入/持仓建议</b>自动存档，等 <b>3 个交易日</b>后用真实日 K 线回测：
+            看多类建议只要窗口内<b>最高价触及过它给的目标价</b>就算<b>命中</b>（没给目标价时，看 3 日内最大涨幅是否≥2%）；
+            看空/观望类则是<b>3 日内没明显上涨(&lt;2%)</b>算命中。这比"只看隔日收盘"更贴近短线实战——
+            因为盘中冲高你本可止盈，不该被一根收阴的 K 线判死。
+          </p>
+          {wr != null ? (
+            <>
+              <div className="ap-hero">
+                <span className={'ap-wr ' + tone}>{wr}%</span>
+                <div className="ap-hero-r">
+                  <span>综合胜率</span>
+                  <span className="muted">{stats.hit}/{stats.total} 命中 · 平均结果 {stats.avgPct >= 0 ? '+' : ''}{stats.avgPct}%</span>
+                </div>
+              </div>
+              <div className="ap-rows">
+                {groups.map((g) => (
+                  <div className="ap-row" key={g.mode}>
+                    <span className="ap-mode">{ADVICE_MODE_LABEL[g.mode] || g.mode}</span>
+                    <span className={'ap-rate ' + (g.winRate >= 55 ? 'red' : g.winRate >= 45 ? 'gold' : 'green')}>
+                      {g.winRate}%
+                    </span>
+                    <span className="ap-cnt muted">{g.hit}/{g.total} · 均{g.avgPct >= 0 ? '+' : ''}{g.avgPct}%</span>
+                  </div>
+                ))}
+              </div>
+              {theoryGroups.length > 0 && (
+                <div className="ap-theory">
+                  <div className="ap-subtitle"><Icon name="spark" size={12} /> 各操盘理论命中率 <span className="muted">（军师"融会贯通"时哪派最灵）</span></div>
+                  <div className="ap-rows">
+                    {theoryGroups.map((g) => (
+                      <div className="ap-row" key={g.theory}>
+                        <span className="ap-mode theory">{g.theory}</span>
+                        <span className={'ap-rate ' + (g.winRate >= 55 ? 'red' : g.winRate >= 45 ? 'gold' : 'green')}>
+                          {g.winRate}%
+                        </span>
+                        <span className="ap-cnt muted">{g.hit}/{g.total} · 均{g.avgPct >= 0 ? '+' : ''}{g.avgPct}%</span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="ap-desc muted" style={{ marginTop: 6 }}>
+                    军师每次会挑 1~2 个最贴合形态的理论来支撑决策，这里按理论回测其真实命中率——
+                    高命中的理论会被军师更多采信、低命中的会被降权，实现"越用越懂你这些票"。
+                  </p>
+                </div>
+              )}
+            </>
+          ) : (
+            <p className="ap-desc muted">还没有满 3 个交易日的样本，正在积累中（{stats.pending} 条待验证）。</p>
+          )}
+          <p className="ap-foot muted">
+            {stats.pending > 0 && `${stats.pending} 条建议未满窗口，暂不计入。`}
+            样本越多越可信；胜率高≠稳赚，仓位与止损纪律仍是第一位。
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// 单笔持仓的"含费成本 / 浮盈% / 紧急度"轻量测算（列表级排序用，只依赖实时报价）
+// urgency：数值越大越该先处理。止损触及/破8%纪律 > 止盈触及 > 常规
+function holdSnapshot(h, q) {
+  const shares = (h.qty || 0) * 100
+  const costWithFee = shares ? +(((h.buyPrice * shares) + (h.buyFee || 0)) / shares).toFixed(3) : h.buyPrice
+  const pnl = q && costWithFee ? +(((q.price - costWithFee) / costWithFee) * 100).toFixed(2) : null
+  const hitTP = q && h.tp && q.price >= Number(h.tp)
+  const hitSL = q && h.sl && q.price <= Number(h.sl)
+  let urgency = 0, flag = null
+  if (hitSL) { urgency = 100; flag = { tone: 'green', text: '触止损' } }
+  else if (pnl != null && pnl <= -8) { urgency = 95; flag = { tone: 'green', text: '破8%纪律' } }
+  else if (hitTP) { urgency = 80; flag = { tone: 'red', text: '触止盈' } }
+  else if (pnl != null && pnl <= -5) { urgency = 40; flag = { tone: 'green', text: '浮亏' } }
+  return { costWithFee, pnl, hitTP, hitSL, urgency, flag }
+}
+
+// ---------- 持仓作战总览条：总浮盈亏 / 今日做T / 仓位 / 需立即处理 ----------
+function HoldOverview({ book, quote }) {
+  const holding = book.holding || []
+  if (!holding.length) return null
+  const pf = computePortfolio(holding, quote, book.account)
+  // 今日做T已实现 = 未结算流水配对差价 + 今日已结算入账的做T记录(kind:'T')
+  // 关键：结算(或跨天自动结算)后 tFlows 会清空、收益转入 closed，只看 tFlows 会漏掉今天已入账的T
+  let tRealized = 0
+  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0); const t0 = todayStart.getTime()
+  holding.forEach((h) => {
+    const todayFlows = (h.tFlows || []).filter((f) => f.at >= t0)
+    if (todayFlows.length) tRealized += computeTFlows(todayFlows).realized || 0
+  })
+  ;(book.closed || []).forEach((c) => {
+    if ((c.kind || c.type) !== 'T') return
+    const at = c.at || c.sellAt || c.buyAt || 0
+    if (at >= t0) tRealized += (c.netPnl != null ? c.netPnl : c.realizedPnl) || 0
+  })
+  tRealized = +tRealized.toFixed(2)
+  // 需立即处理的只数(触止损/止盈/破纪律)
+  const urgent = holding.filter((h) => holdSnapshot(h, quote[h.code]).urgency >= 80)
+  const pnlTone = pf.floatPnl >= 0 ? 'red' : 'green'
+  return (
+    <div className="hold-overview">
+      <div className="ho-cell">
+        <span className="ho-k">总浮盈亏</span>
+        <span className={'ho-v ' + pnlTone}>{fmtMoney(pf.floatPnl)}</span>
+        {pf.holdCostValue > 0 && <span className={'ho-sub ' + pnlTone}>{pf.floatPnl >= 0 ? '+' : ''}{(pf.floatPnl / pf.holdCostValue * 100).toFixed(2)}%</span>}
+      </div>
+      <div className="ho-cell">
+        <span className="ho-k">今日做T</span>
+        <span className={'ho-v ' + (tRealized >= 0 ? 'red' : 'green')}>{tRealized === 0 ? '—' : fmtMoney(tRealized)}</span>
+      </div>
+      <div className="ho-cell">
+        <span className="ho-k">当前仓位</span>
+        <span className="ho-v">{pf.position != null ? pf.position + '%' : '—'}</span>
+        {pf.available != null && <span className="ho-sub muted">可用 {fmtMoney(pf.available).replace('+', '')}</span>}
+      </div>
+      <div className={'ho-cell ho-alert' + (urgent.length ? ' on' : '')}>
+        <span className="ho-k">需处理</span>
+        {urgent.length
+          ? <span className="ho-v alert-num" title={urgent.map((h) => h.name).join('、')}>{urgent.length} 只</span>
+          : <span className="ho-v muted">无</span>}
+        {urgent.length > 0 && <span className="ho-sub green">{urgent.slice(0, 2).map((h) => h.name).join(' ')}{urgent.length > 2 ? '…' : ''}</span>}
+      </div>
     </div>
   )
 }
@@ -493,6 +636,15 @@ function HoldingList({ book, quote }) {
   const [reviewing, setReviewing] = useState(null) // null | 'loading' | {ok,fail,skipped}
   // 职责按【粒度】划分，避免动词歧义：顶部「全部复盘」=对所有持仓统一刷新；单卡「复盘/重做」=只这一只。
   const missing = missingReviewCount()
+  // 紧急度排序：触止损/破纪律/触止盈的先处理 → 其余按浮亏在前(先看风险)
+  const sortedHolding = [...book.holding].sort((a, b) => {
+    const ua = holdSnapshot(a, quote[a.code]).urgency
+    const ub = holdSnapshot(b, quote[b.code]).urgency
+    if (ub !== ua) return ub - ua
+    const pa = holdSnapshot(a, quote[a.code]).pnl ?? 999
+    const pb = holdSnapshot(b, quote[b.code]).pnl ?? 999
+    return pa - pb
+  })
   const runReview = async () => {
     if (reviewing === 'loading') return
     setReviewing('loading')
@@ -523,11 +675,12 @@ function HoldingList({ book, quote }) {
           )}
         </div>
       </div>
+      <HoldOverview book={book} quote={quote} />
       {book.holding.length === 0 ? (
         <div className="empty">在下方「自选 / 候选」里点「建仓」后，持仓出现在这里。做T：在每笔持仓上高抛低吸、摊薄成本。</div>
       ) : (
         <div className="hold-grid">
-          {book.holding.map((h, idx) => (
+          {sortedHolding.map((h, idx) => (
             <HoldingItem key={h.id} h={h} idx={idx} quote={quote[h.code]} />
           ))}
         </div>
@@ -539,6 +692,7 @@ function HoldingList({ book, quote }) {
 // ---------- 单笔持仓 ----------
 function HoldingItem({ h, idx, quote: q }) {
   const [mode, setMode] = useState(null) // null | 'sell' | 'T' | 'add'
+  const detail = useDetailStore() // 监听个股详情弹窗：从个股页生成AI建议返回后自动代入价格
   const [sellPrice, setSellPrice] = useState('')
   const [sellQty, setSellQty] = useState('1')
   const [addPrice, setAddPrice] = useState('')
@@ -585,8 +739,7 @@ function HoldingItem({ h, idx, quote: q }) {
   const [planPrice, setPlanTP] = useState(h.tp != null ? String(h.tp) : '')
   const [planSL, setPlanSL] = useState(h.sl != null ? String(h.sl) : '')
   const [planReason, setPlanReason] = useState(h.planReason || '')
-  const [planLoading, setPlanLoading] = useState(false) // LLM 生成建议中
-  const [planBasis, setPlanBasis] = useState(null)       // LLM 给的定价依据 {tpBasis, slBasis, theory, confidence}
+  const [planBasis, setPlanBasis] = useState(null)       // 复用来源信息 {from:'advice', action, tone, at}
 
   // 依据该股 + 短线操作逻辑，给出默认止盈/止损/理由（用户可再改）
   const suggestPlan = () => {
@@ -607,7 +760,24 @@ function HoldingItem({ h, idx, quote: q }) {
     const reason = `短线：成本${fmtRaw(base)}，止损${usedMa ? '守MA10生命线' : '-8%纪律'}，止盈+10%；跌破5日线减仓、破10日线清仓`
     return { tp: String(round(tpRaw)), sl: String(round(slRaw)), reason }
   }
-  // 打开计划编辑：existing=true 用已有值；否则先用本地建议兜底，再异步用 LLM 覆盖
+  // 复用最新 AI 操作建议里的止损/止盈价（hold_advice / buy_advice 缓存）
+  const adviceForStock = () => {
+    try {
+      const a = getAdvice(h.code)
+      const adv = a && a.advice
+      if (!adv) return null
+      const tp = adv.targetPrice != null && !isNaN(adv.targetPrice) ? Number(adv.targetPrice) : null
+      const sl = adv.stopPrice != null && !isNaN(adv.stopPrice) ? Number(adv.stopPrice) : null
+      if (tp == null && sl == null) return null
+      return { tp, sl, action: adv.action || adv.stance || '', tone: adv.tone || '', at: a.at }
+    } catch { return null }
+  }
+  const hasAdvicePrices = () => {
+    const a = adviceForStock()
+    return !!(a && (a.tp != null || a.sl != null))
+  }
+
+  // 打开计划编辑：existing=true 用已有值；否则优先复用最新 AI 建议的止损/止盈，缺失则用本地公式兜底
   const openPlan = (useExisting) => {
     setPlanBasis(null)
     if (useExisting && (h.tp || h.sl || h.planReason)) {
@@ -617,45 +787,41 @@ function HoldingItem({ h, idx, quote: q }) {
       setMode('plan')
       return
     }
-    // 先用本地公式兜底填上（LLM 失败/慢时也有值）
+    const round = (v) => (v < 10 ? +v.toFixed(3) : +v.toFixed(2))
+    const adv = adviceForStock()
+    if (adv && (adv.tp != null || adv.sl != null)) {
+      // 直接复用 AI 操作建议里的止盈/止损
+      const s = suggestPlan()
+      setPlanTP(adv.tp != null ? String(round(adv.tp)) : s.tp)
+      setPlanSL(adv.sl != null ? String(round(adv.sl)) : s.sl)
+      setPlanReason(h.planReason || `复用AI操作建议${adv.action ? `(${adv.action})` : ''}的止盈/止损价`)
+      setPlanBasis({ from: 'advice', action: adv.action, tone: adv.tone, at: adv.at })
+      setMode('plan')
+      return
+    }
+    // 无建议：用本地公式兜底填上（同时界面会引导去个股页生成建议）
     const s = suggestPlan()
     setPlanTP(s.tp); setPlanSL(s.sl); setPlanReason(s.reason)
     setMode('plan')
-    fetchAiPlan()
   }
 
-  // 调 LLM：参考技术指标+理论生成止盈/止损/理由
-  const fetchAiPlan = async () => {
-    if (!q) return
-    setPlanLoading(true)
-    try {
-      const r = await callAI('plan', {
-        name: h.name, code: h.code,
-        nowPrice: q.price, pct: q.pct,
-        turnover: q.turnover, volRatio: q.volRatio,
-        mainInflowYi: q.mainInflow != null ? +(q.mainInflow / 1e8).toFixed(2) : null,
-        holdCost: costWithFee, holdQty: h.qty,
-      })
-      if (r.ok && r.result) {
-        const rs = r.result
-        const base = costWithFee || (q && q.price) || h.buyPrice
-        const round = (v) => (v < 10 ? +v.toFixed(3) : +v.toFixed(2))
-        let tp = rs.tp != null && !isNaN(rs.tp) ? Number(rs.tp) : null
-        let sl = rs.sl != null && !isNaN(rs.sl) ? Number(rs.sl) : null
-        // 兜底校验：止盈必须显著高于成本、止损必须低于成本，防 AI 越界给出低于成本的"止盈"
-        if (base) {
-          if (tp == null || tp <= base * 1.03) tp = round(base * 1.08)   // 止盈至少成本+8%
-          if (sl == null || sl >= base) sl = round(base * 0.92)          // 止损至多成本-8%
-          if (sl < base * 0.90) sl = round(base * 0.92)                  // 止损别离谱过深
-        }
-        if (tp != null) setPlanTP(String(tp))
-        if (sl != null) setPlanSL(String(sl))
-        if (rs.reason) setPlanReason(rs.reason)
-        setPlanBasis({ tpBasis: rs.tpBasis, slBasis: rs.slBasis, theory: rs.theory, confidence: rs.confidence })
+  // 从个股页生成AI操作建议返回后（详情弹窗关闭），若正在填计划则自动代入建议的止盈/止损价
+  const detailOpen = !!(detail && detail.stock)
+  const prevDetailOpen = useRef(detailOpen)
+  useEffect(() => {
+    const justClosed = prevDetailOpen.current && !detailOpen
+    prevDetailOpen.current = detailOpen
+    if (justClosed && mode === 'plan') {
+      const round = (v) => (v < 10 ? +v.toFixed(3) : +v.toFixed(2))
+      const adv = adviceForStock()
+      if (adv && (adv.tp != null || adv.sl != null)) {
+        if (adv.tp != null) setPlanTP(String(round(adv.tp)))
+        if (adv.sl != null) setPlanSL(String(round(adv.sl)))
+        setPlanReason((r) => r || `复用AI操作建议${adv.action ? `(${adv.action})` : ''}的止盈/止损价`)
+        setPlanBasis({ from: 'advice', action: adv.action, tone: adv.tone, at: adv.at })
       }
-    } catch { /* 失败保留本地兜底值 */ }
-    setPlanLoading(false)
-  }
+    }
+  }, [detailOpen, mode]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const savePlan = () => {
     const tpVal = planPrice === '' ? null : Number(planPrice)
@@ -756,6 +922,34 @@ function HoldingItem({ h, idx, quote: q }) {
           成本 {fmtRaw(liveCost)} <span className="sub-name">{tStat.realized ? '(做T后)' : '(含费)'}</span>
         </span>
       </div>
+
+      {/* 止损↔止盈 进度轨：一眼看清现价离两条防线的距离 */}
+      {(() => {
+        if (!q || h.sl == null || h.tp == null) return null
+        const sl = Number(h.sl), tp = Number(h.tp), price = q.price
+        if (!(tp > sl)) return null
+        const clamp = (v) => Math.max(0, Math.min(100, v))
+        const pos = clamp(((price - sl) / (tp - sl)) * 100)
+        // 成本线位置（含费成本落在轨道上的相对位置）
+        const costPos = costWithFee != null && costWithFee >= sl && costWithFee <= tp
+          ? clamp(((costWithFee - sl) / (tp - sl)) * 100) : null
+        const toTP = +(((tp - price) / price) * 100).toFixed(2)
+        const toSL = +(((price - sl) / price) * 100).toFixed(2)
+        return (
+          <div className="hold-track" title={`现价距止盈 ${toTP >= 0 ? '+' : ''}${toTP}% · 距止损 ${toSL >= 0 ? '-' : '+'}${Math.abs(toSL)}%`}>
+            <div className="ht-bar">
+              <div className="ht-fill" style={{ width: pos + '%' }} />
+              {costPos != null && <span className="ht-cost" style={{ left: costPos + '%' }} title={`成本 ${fmtRaw(costWithFee)}`} />}
+              <span className="ht-cursor" style={{ left: pos + '%' }} />
+            </div>
+            <div className="ht-labels">
+              <span className="ht-sl">止损 {fmtRaw(sl)}<em>-{Math.abs(toSL)}%</em></span>
+              <span className="ht-now">现 {fmtRaw(price)}</span>
+              <span className="ht-tp">止盈 {fmtRaw(tp)}<em>+{toTP}%</em></span>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* 主行动：此刻唯一最该关注的一句（徽标 + 一句话）*/}
       {focus && (
@@ -919,18 +1113,17 @@ function HoldingItem({ h, idx, quote: q }) {
       ) : mode === 'plan' ? (
         <div className="plan-edit">
           <div className="plan-edit-tip">
-            {planLoading
-              ? <><Icon name="refresh" size={12} className="spin" /> AI 正参考技术指标与理论生成建议…</>
-              : <><Icon name="spark" size={12} /> {planBasis ? 'AI 已按技术面给出建议价，可直接改' : '已按短线逻辑给默认值，可直接改'}</>}
-            <button className="plan-refill" onClick={fetchAiPlan} disabled={planLoading}>AI 重新生成</button>
+            {planBasis && planBasis.from === 'advice'
+              ? <><Icon name="spark" size={12} /> 已复用最新AI操作建议{planBasis.action ? `(${planBasis.action})` : ''}的止盈/止损价，可直接改</>
+              : <><Icon name="spark" size={12} /> 已按短线逻辑给默认值，可直接改</>}
             <button className="plan-refill" onClick={() => { const s = suggestPlan(); setPlanTP(s.tp); setPlanSL(s.sl); setPlanReason(s.reason); setPlanBasis(null) }}>用公式</button>
+            {!hasAdvicePrices() && (
+              <button className="plan-refill" onClick={() => openStockDetail(h.code, h.name)} title="去个股页生成AI操作建议，返回后自动代入止盈/止损价">去生成AI建议</button>
+            )}
           </div>
-          {planBasis && (
+          {(!hasAdvicePrices() && (!planBasis || planBasis.from !== 'advice')) && (
             <div className="plan-basis">
-              {planBasis.tpBasis && <span><b className="red">止盈</b> {planBasis.tpBasis}</span>}
-              {planBasis.slBasis && <span><b className="green">止损</b> {planBasis.slBasis}</span>}
-              {planBasis.theory && <span className="plan-basis-theory"><Icon name="book" size={11} /> {planBasis.theory}</span>}
-              {planBasis.confidence && <span className="plan-basis-conf">信心 {planBasis.confidence}</span>}
+              <span className="muted">该股暂无AI操作建议，当前为公式默认值。点「去生成AI建议」在个股页生成后返回，会自动代入建议的止盈/止损价。</span>
             </div>
           )}
           <div className="plan-edit-row">
@@ -1036,7 +1229,7 @@ function HoldingItem({ h, idx, quote: q }) {
                   <div className="t-ai-plain" style={{ whiteSpace: 'pre-wrap' }}>{tAdvice.result.raw}</div>
                 )}
                 {tAdvice.result.reasoning && (
-                  <div className="ai-reasoning"><span className="ai-reasoning-k">研判</span>{tAdvice.result.reasoning}</div>
+                  <Reasoning text={tAdvice.result.reasoning} />
                 )}
                 {tAdvice.result.actionPlan && (
                   <div className="t-ai-plan"><Icon name="target" size={13} /><span className="t-ai-plan-k">这样操作</span>{tAdvice.result.actionPlan}</div>
@@ -1253,7 +1446,7 @@ function HoldReview({ code, name, cost, qty, price }) {
 
       {/* ReAct 研判思路：复盘结论背后的推理链 */}
       {r && r.reasoning && (
-        <div className="ai-reasoning" style={{ margin: '8px 10px 0' }}><span className="ai-reasoning-k">研判</span>{r.reasoning}</div>
+        <Reasoning text={r.reasoning} style={{ margin: '8px 10px 0' }} />
       )}
 
       {/* ③ 今日回顾：复盘特有价值——今天走成啥样 + 我操作得如何(操作建议没有这部分) */}
@@ -1272,6 +1465,13 @@ function HoldReview({ code, name, cost, qty, price }) {
         </div>
       )}
 
+      {/* 服务端合规校正提示：手数超持仓 / 价格越过涨跌停时的自动纠偏 */}
+      {r && r.serverAdjust && (
+        <div className="advice-adjust" style={{ margin: '8px 10px 0' }}>
+          <Icon name="shield" size={12} /> 已按合规校正：{r.serverAdjust}
+        </div>
+      )}
+
       {/* ⑤ 分工引导：复盘=回顾+方向；要"此刻具体怎么操作/买卖价"→ 去详情页看 AI 操作建议。
           消除"复盘和操作建议长得一样"的重复感：这里不再重复铺算账网格与价位明细。 */}
       {r && (
@@ -1283,6 +1483,9 @@ function HoldReview({ code, name, cost, qty, price }) {
       )}
 
       {/* ⑥ 失效信号：复盘保留这一条风控底线(简短)，其余明细都在操作建议里 */}
+      {r && r.theoryNote && (
+        <div className="hr-row" style={{ margin: '8px 10px 0' }}><span className="hr-k theory">理论</span><span className="hr-v">{r.theoryNote}</span></div>
+      )}
       {r && r.invalidation && (
         <div className="hr-row" style={{ margin: '8px 10px 0' }}><span className="hr-k risk">失效</span><span className="hr-v">{r.invalidation}</span></div>
       )}

@@ -1,9 +1,10 @@
-import { emGet, num } from './_lib.js';
+import { emGet, num, applyCors, preflight } from './_lib.js';
 import { buildCorpus } from './_rag.js';
 import { retrieveTheory } from './_kb.js';
 import { screenStocks } from './_screen.js';
 import { marketTimePromptBlock } from './_market_time.js';
 import { fetchClsTelegraph } from './_market_data.js';
+import { makeSSE, callChat, pumpStream } from './_llm.js';
 
 // ============ 股票 Agent：工具增强的智能体 ============
 // LLM 自主调用 skill 工具（查行情/选股/板块/涨停/异动/新闻…）多轮后综合作答
@@ -266,21 +267,15 @@ const SYSTEM = `你是"操盘手 Alpha"，一位有十年A股短线实战经验�
 - 简洁专业，中文回答。`;
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  if (req.method !== 'POST') { res.setHeader('Content-Type', 'application/json; charset=utf-8'); return res.status(200).send(JSON.stringify({ ok: false, error: 'POST only' })); }
+  if (preflight(req, res)) return;
+  if (req.method !== 'POST') { applyCors(res); res.setHeader('Content-Type', 'application/json; charset=utf-8'); return res.status(200).send(JSON.stringify({ ok: false, error: 'POST only' })); }
 
   const BASE = process.env.LLM_BASE_URL;
   const KEY = process.env.LLM_API_KEY;
-  if (!BASE || !KEY) { res.setHeader('Content-Type', 'application/json; charset=utf-8'); return res.status(200).send(JSON.stringify({ ok: false, error: 'LLM 未配置' })); }
+  if (!BASE || !KEY) { applyCors(res); res.setHeader('Content-Type', 'application/json; charset=utf-8'); return res.status(200).send(JSON.stringify({ ok: false, error: 'LLM 未配置' })); }
 
   // ===== SSE 流式：边分析边推送(工具进度 + 答案 token)，用户实时看到进展、不再"超时空手" =====
-  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-cache, no-transform');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no'); // 禁止中间层缓冲，token 即时下发
-  const send = (event, data) => {
-    try { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } catch { /* 连接已断 */ }
-  };
+  const { emit: send } = makeSSE(res);
 
   try {
     let body = req.body;
@@ -336,18 +331,15 @@ export default async function handler(req, res) {
 
     // 通用：发起一次 chat completion（stream 可选）
     const callLLM = async ({ stream, useTools, timeoutMs }) => {
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), timeoutMs);
-      const resp = await fetch(`${BASE}/chat/completions`, {
-        method: 'POST', signal: ctrl.signal,
-        headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: AGENT_MODEL, messages,
-          ...(useTools ? { tools: TOOLS, tool_choice: 'auto' } : { tool_choice: 'none' }),
-          temperature: 0.3, max_tokens: 1600, stream: !!stream,
-        }),
-      }).catch((e) => ({ __err: e }));
-      return { resp, done: () => clearTimeout(t) };
+      return callChat({
+        model: AGENT_MODEL,
+        messages,
+        ...(useTools ? { tools: TOOLS, toolChoice: 'auto' } : { toolChoice: 'none' }),
+        temperature: 0.3,
+        maxTokens: 1600,
+        timeoutMs,
+        stream: !!stream,
+      });
     };
 
     for (let round = 0; round < MAX_ROUNDS; round++) {
@@ -432,30 +424,3 @@ export default async function handler(req, res) {
   }
 }
 
-// 读取上游 OpenAI 兼容 SSE 流，把每个 content delta 通过 onPiece 回调转发；返回拼好的完整文本
-async function pumpStream(resp, onPiece) {
-  let full = '';
-  const reader = resp.body.getReader();
-  const decoder = new TextDecoder('utf-8');
-  let buf = '';
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    // 按 SSE 行拆分
-    let idx;
-    while ((idx = buf.indexOf('\n')) >= 0) {
-      const line = buf.slice(0, idx).trim();
-      buf = buf.slice(idx + 1);
-      if (!line || !line.startsWith('data:')) continue;
-      const data = line.slice(5).trim();
-      if (data === '[DONE]') return full;
-      try {
-        const j = JSON.parse(data);
-        const piece = j.choices?.[0]?.delta?.content || '';
-        if (piece) { full += piece; onPiece(piece); }
-      } catch { /* 非完整 JSON 行，忽略 */ }
-    }
-  }
-  return full;
-}

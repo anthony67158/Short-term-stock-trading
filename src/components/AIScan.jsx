@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { callAI } from '../ai'
 import { openStockDetail } from '../detailStore'
+import Reasoning from './Reasoning'
 
 // AI 一键全盘扫描：综合大盘+板块+涨停+异动，输出当日 TOP3 方向
 export default function AIScan({ market, sectors, limitPool, movers }) {
@@ -46,7 +47,7 @@ export default function AIScan({ market, sectors, limitPool, movers }) {
         {loading && <div className="ai-hint">正在综合全市场多维数据，生成今日主线判断…</div>}
         {res && (
           <>
-            {res.reasoning && <div className="ai-reasoning"><span className="ai-reasoning-k">研判</span>{res.reasoning}</div>}
+            {res.reasoning && <Reasoning text={res.reasoning} />}
             {res.marketMood && <div className="scan-mood">🎯 {res.marketMood}</div>}
             {Array.isArray(res.topDirections) && (
               <div className="dir-grid">

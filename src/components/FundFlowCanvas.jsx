@@ -66,6 +66,8 @@ export default function FundFlowCanvas({ interval }) {
   const [prog, setProg] = useState(0)          // 0~1 沿(真回放:快照序列 / 快照模式:静止)
   const rafRef = useRef(0)
   const lastRef = useRef(0)
+  const playingRef = useRef(true)              // 供绘制循环实时读取(播放/暂停粒子流)
+  useEffect(() => { playingRef.current = playing }, [playing])
 
   // 把某个快照 items(简版 {c,n,p,m,l,lc}, m=百万) 还原成标准板块数组(mainInflow=元)
   const frameToList = (items) => (items || []).map((s) => ({
@@ -177,11 +179,22 @@ export default function FundFlowCanvas({ interval }) {
       const ix = i ? i.x : W * 0.70, iy = i ? i.y : hubY
       return { ox, oy, ix, iy }
     }
-    // 分两段贝塞尔：seg 0 = 绿方块→中枢, seg 1 = 中枢→红方块。控制点用两端 x 的中点，曲线自然汇聚。
+    // 每条流有自己的"中腰"锚点：Y 落在两端连线的中点附近(向中枢轻微收拢)，X 固定在中枢带。
+    // 这样多条流形成并行的"河道"，而不是全部挤进同一个点打结。
+    const hubHalf = Math.min(H * 0.30, 150)          // 中腰带的半高
+    const midOf = (lk) => {
+      const { oy, iy } = anchorsOf(lk)
+      const raw = (oy + iy) / 2
+      // 向中心收拢 35%，让河道适度汇聚又不至于挤成一团
+      const my = hubY + (raw - hubY) * 0.65
+      return { mx: hubX, my: Math.max(hubY - hubHalf, Math.min(hubY + hubHalf, my)) }
+    }
+    // 分两段贝塞尔：seg 0 = 绿方块→中腰, seg 1 = 中腰→红方块。控制点用两端 x 的中点，曲线自然汇聚。
     const segPath = (lk, seg) => {
       const { ox, oy, ix, iy } = anchorsOf(lk)
-      if (seg === 0) { const mx = (ox + hubX) / 2; return { x0: ox, y0: oy, cx1: mx, cy1: oy, cx2: mx, cy2: hubY, x1: hubX, y1: hubY } }
-      const mx = (hubX + ix) / 2; return { x0: hubX, y0: hubY, cx1: mx, cy1: hubY, cx2: mx, cy2: iy, x1: ix, y1: iy }
+      const { mx, my } = midOf(lk)
+      if (seg === 0) { const cx = (ox + mx) / 2; return { x0: ox, y0: oy, cx1: cx, cy1: oy, cx2: cx, cy2: my, x1: mx, y1: my } }
+      const cx = (mx + ix) / 2; return { x0: mx, y0: my, cx1: cx, cy1: my, cx2: cx, cy2: iy, x1: ix, y1: iy }
     }
     const bez = (p, t) => {
       const mt = 1 - t
@@ -192,26 +205,38 @@ export default function FundFlowCanvas({ interval }) {
     // 整条流上 [0,1] 的位置：前半 seg0、后半 seg1
     const posOf = (lk, t) => (t < 0.5 ? bez(segPath(lk, 0), t * 2) : bez(segPath(lk, 1), (t - 0.5) * 2))
 
-    // 画连线：每条流的两段用同一渐变描边，绿→红连续，两侧方块被真正连起来
+    // 画连线：每条流的两段用同一渐变描边，绿→红连续，两侧方块被真正连起来。
+    // 先画一层更宽更淡的"光晕底"，再叠一层实描边，线条有霓虹质感，不再是生硬细线。
     for (const lk of links) {
       const s0 = segPath(lk, 0), s1 = segPath(lk, 1)
+      const trace = () => {
+        ctx.beginPath(); ctx.moveTo(s0.x0, s0.y0)
+        ctx.bezierCurveTo(s0.cx1, s0.cy1, s0.cx2, s0.cy2, s0.x1, s0.y1)
+        ctx.bezierCurveTo(s1.cx1, s1.cy1, s1.cx2, s1.cy2, s1.x1, s1.y1)
+      }
       const grad = ctx.createLinearGradient(s0.x0, 0, s1.x1, 0)
-      grad.addColorStop(0, 'rgba(63,185,80,.30)'); grad.addColorStop(0.5, 'rgba(150,140,200,.22)'); grad.addColorStop(1, 'rgba(244,97,78,.30)')
-      ctx.strokeStyle = grad; ctx.lineWidth = lk.w; ctx.lineCap = 'round'
-      ctx.beginPath(); ctx.moveTo(s0.x0, s0.y0); ctx.bezierCurveTo(s0.cx1, s0.cy1, s0.cx2, s0.cy2, s0.x1, s0.y1)
-      ctx.bezierCurveTo(s1.cx1, s1.cy1, s1.cx2, s1.cy2, s1.x1, s1.y1); ctx.stroke()
+      grad.addColorStop(0, 'rgba(63,185,80,.55)'); grad.addColorStop(0.5, 'rgba(150,140,220,.30)'); grad.addColorStop(1, 'rgba(244,97,78,.55)')
+      // 光晕底
+      const glow = ctx.createLinearGradient(s0.x0, 0, s1.x1, 0)
+      glow.addColorStop(0, 'rgba(63,185,80,.14)'); glow.addColorStop(0.5, 'rgba(150,140,220,.08)'); glow.addColorStop(1, 'rgba(244,97,78,.14)')
+      ctx.strokeStyle = glow; ctx.lineWidth = lk.w + 6; ctx.lineCap = 'round'; ctx.lineJoin = 'round'
+      trace(); ctx.stroke()
+      // 实描边
+      ctx.strokeStyle = grad; ctx.lineWidth = lk.w; ctx.lineCap = 'round'; ctx.lineJoin = 'round'
+      trace(); ctx.stroke()
     }
 
-    // 中枢光晕
-    const g = ctx.createRadialGradient(hubX, hubY, 2, hubX, hubY, 44)
-    g.addColorStop(0, 'rgba(124,107,245,.45)'); g.addColorStop(1, 'rgba(124,107,245,0)')
-    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(hubX, hubY, 44, 0, Math.PI * 2); ctx.fill()
+    // 中腰"能量带"：一条柔和的竖向光带，暗示资金在此换手迁移(替代原来生硬的圆形光斑)
+    const band = ctx.createLinearGradient(hubX - 60, 0, hubX + 60, 0)
+    band.addColorStop(0, 'rgba(124,107,245,0)'); band.addColorStop(0.5, 'rgba(124,107,245,.16)'); band.addColorStop(1, 'rgba(124,107,245,0)')
+    ctx.fillStyle = band
+    ctx.fillRect(hubX - 60, hubY - hubHalf - 20, 120, (hubHalf + 20) * 2)
 
     // 粒子：沿整条流 t:0→1 连续流动，颜色随位置绿→红
+    const moving = playingRef.current
     for (const pt of partRef.current) {
       const lk = pt.link
-      pt.t += pt.speed * 0.016 * (0.6 + flowRatio * 0.8)
-      if (pt.t > 1) pt.t -= 1
+      if (moving) { pt.t += pt.speed * 0.016 * (0.6 + flowRatio * 0.8); if (pt.t > 1) pt.t -= 1 }
       const pos = posOf(lk, pt.t)
       const col = mix(pt.t)
       const r = 1.4 + lk.w * 0.16
@@ -264,8 +289,9 @@ export default function FundFlowCanvas({ interval }) {
           <div className="ffc-session">{replay ? `${tl.phase} · 真回放 ${series.length}帧` : (tl.live ? '当前快照 · 实时' : '最近交易日收盘快照')}</div>
         </div>
         <div className="ffc-head-right">
-          <button className="ffc-play" onClick={() => setPlaying((v) => !v)} disabled={!replay} title={!replay ? '积累到≥2个时点后可回放' : (playing ? '暂停' : '播放')}>
-            <Icon name={playing && replay ? 'pause' : 'play'} size={15} />
+          <button className={'ffc-play' + (playing ? ' on' : '')} onClick={() => setPlaying((v) => !v)}
+            title={playing ? (replay ? '暂停回放' : '暂停流动') : (replay ? '播放回放' : '恢复流动')}>
+            <Icon name={playing ? 'pause' : 'play'} size={15} />
           </button>
         </div>
       </div>

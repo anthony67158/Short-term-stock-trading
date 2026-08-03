@@ -86,10 +86,17 @@ function tradeHistoryOf(code) {
     }))
 }
 
-// 账户资产(总资产/可用现金)——供 AI 算补仓金额、仓位占比、预期收益
+// 账户资产(总资产/可用现金/目标资产)——供 AI 算补仓金额、仓位占比、预期收益、以终为始节奏
 function acctInfo() {
   const a = planStore.get().account || {}
-  return { totalAssets: a.totalAssets ?? null, cash: a.cash ?? null }
+  return {
+    totalAssets: a.totalAssets ?? null,
+    cash: a.cash ?? null,
+    goal: a.goal ?? null,
+    // 目标缺口/所需涨幅：让复盘也能"以终为始"，据离目标远近调仓位节奏(不凌驾止损)
+    goalGap: (a.goal != null && a.goal > 0 && a.totalAssets != null) ? +(a.goal - a.totalAssets).toFixed(2) : null,
+    goalReturnPct: (a.goal != null && a.goal > 0 && a.totalAssets > 0) ? +(((a.goal - a.totalAssets) / a.totalAssets) * 100).toFixed(1) : null,
+  }
 }
 
 // 生成一次复盘并写入 store。opts: { code, name, session, hold:{cost,qty,pnlPct}|null, onPhase? }

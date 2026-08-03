@@ -4,6 +4,7 @@ import StockName from './StockName'
 import LimitPool from './LimitPool'
 import { usePolling, isTradingHours } from '../hooks'
 import { callAI } from '../ai'
+import { api } from '../apiBase'
 import { planStore, usePlanStore } from '../planStore'
 import { aiStore } from '../aiStore'
 import DailyReport from './DailyReport'
@@ -238,7 +239,7 @@ function DailyPlay({ snapshot }) {
       setStage(`量化模型正在给 ${codes.length} 只候选打分…`)
       const scored = await Promise.all(codes.map(async (c) => {
         try {
-          const r = await fetch(`/api/stock_detail?code=${c.code}&klt=101&lmt=60&quant=1&_t=${Date.now()}`)
+          const r = await fetch(api(`/api/stock_detail?code=${c.code}&klt=101&lmt=60&quant=1&_t=${Date.now()}`))
           const j = await r.json()
           const q = j.quant, fc = q && q.forecast
           return {

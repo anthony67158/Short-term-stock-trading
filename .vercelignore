@@ -1,0 +1,7 @@
+# 后端已迁移至阿里云 FC(server.js + api/*.js 由 FC 自定义运行时承载)。
+# Vercel 只托管前端静态产物,避免把 api/ 当作 Serverless Functions 重新部署(会触发12函数上限)。
+api/
+server.js
+s.yaml
+.env
+migrate/

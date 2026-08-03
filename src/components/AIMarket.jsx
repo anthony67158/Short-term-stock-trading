@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { callAI } from '../ai'
+import Reasoning from './Reasoning'
 
 // AI 盘面复盘面板：汇总大盘情绪+涨停+板块Top，交给 AI 解读
 export default function AIMarket({ market, sectors, limitPool }) {
@@ -43,7 +44,7 @@ export default function AIMarket({ market, sectors, limitPool }) {
         {loading && <div className="ai-hint">正在综合分析实时数据…</div>}
         {res && (
           <div className="ai-result">
-            {res.reasoning && <div className="ai-reasoning"><span className="ai-reasoning-k">研判</span>{res.reasoning}</div>}
+            {res.reasoning && <Reasoning text={res.reasoning} />}
             <div className="ai-senti">
               <span className={'ai-badge ' + sentiClass(res.sentiment)}>{res.sentiment || '—'}</span>
               {typeof res.score === 'number' && (

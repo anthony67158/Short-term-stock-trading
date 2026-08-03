@@ -4,6 +4,32 @@ import { useSyncExternalStore } from 'react'
 let _seq = 0
 function uid() { return Date.now().toString(36) + '_' + (_seq++).toString(36) }
 
+// ---- 理论归因：把军师 theoryNote 自由文本归一化成【规范理论标签】，供事后按理论算胜率 ----
+// 每条建议可能引用 1~2 个理论；命中多个则都记入。顺序 = 优先级(靠前更具体)。
+const THEORY_TAGS = [
+  { tag: '利弗莫尔关键点',   re: /利弗莫尔|关键点|飞刀|金字塔加仓|错了.{0,3}认错|绝不摊亏/ },
+  { tag: '欧奈尔CANSLIM',    re: /欧奈尔|奈尔|can\s*slim|canslim|8%.{0,3}止损|buy\s*point|买点突破/i },
+  { tag: '米勒维尼VCP',      re: /米勒维尼|维尼|vcp|缩量收缩|均线多头排列/i },
+  { tag: '威科夫量价',       re: /威科夫|wyckoff|吸筹|派发|聪明钱|主力.{0,3}脚印/i },
+  { tag: '温斯坦阶段',       re: /温斯坦|weinstein|阶段分析|第二上升|30周线|生命线/i },
+  { tag: '道氏趋势',         re: /道氏|dow|趋势三级|顺大势|顺势/ },
+  { tag: '均值回归',         re: /均值回归|超买超卖|布林|回归中轨|震荡区间|高抛低吸/ },
+  { tag: '凯利/R风控',       re: /凯利|kelly|撒普|r\s*倍数|盈亏比|风险敞口|单笔风险|仓位管理/i },
+  { tag: '处置效应',         re: /处置效应|让利润奔跑|亏损快砍|截短亏损|赚一点就跑|亏了死扛/ },
+  { tag: '索罗斯反身性',     re: /索罗斯|反身性|泡沫|拐点/ },
+  { tag: '科斯托拉尼钟摆',   re: /科斯托拉尼|情绪钟摆|众人贪婪|众人恐慌|追顶|割底/ },
+]
+// 返回命中的规范标签数组(最多2个)；无匹配 → []
+function theoryTagsOf(note) {
+  if (!note || typeof note !== 'string') return []
+  const hits = []
+  for (const t of THEORY_TAGS) {
+    if (t.re.test(note)) { hits.push(t.tag); if (hits.length >= 2) break }
+  }
+  return hits
+}
+
+
 // 计划 / 持仓 交易闭环 store（云端账号驱动：数据由 authStore 登录后注入，变更自动回存云端）
 // plan:   候选   { code, name, note, addedAt }
 // holding: 持仓  { code, name, buyPrice, buyAt, qty, buyFee }  qty=手, buyFee=该持仓总买入手续费
@@ -156,7 +182,7 @@ export const planStore = {
       plan: (d && d.plan) || [],
       holding: (d && d.holding) || [],
       closed: normalizeClosed((d && d.closed) || []),
-      account: (d && d.account) || null,   // { totalAssets, cash, updatedAt }
+      account: (d && d.account) || null,   // { totalAssets, cash, goal, updatedAt }
       alerts: (d && d.alerts) || [],        // 预警规则集
       reviews: (d && d.reviews) || {},      // 复盘结论：key=code → { code,name,at,session(noon/close/manual),text,... }
       adviceLog: (d && d.adviceLog) || [],  // AI建议决策记录：{id,code,name,mode,at,action,entry,stop,target,trust,resonance,verified,hit,...}
@@ -499,7 +525,7 @@ export const planStore = {
   },
 
   // ===== 账户资产（仓位/资金管理）=====
-  // account: { totalAssets(总资产,元), cash(可用资金,元), updatedAt }
+  // account: { totalAssets(总资产,元), cash(可用资金,元), goal(目标总资产,元), updatedAt }
   setAccount(patch) {
     state.account = { ...(state.account || {}), ...patch, updatedAt: Date.now() }
     emit()
@@ -602,24 +628,69 @@ export const planStore = {
     state.adviceLog = [rec, ...(state.adviceLog || [])].slice(0, 500)
     emit()
   },
-  // 事后核验：传入 {code: 现价}，对≥1个交易日前、未核验的建议判定命中
-  verifyAdvice(priceMap) {
-    if (!priceMap) return
+  // 事后核验（短线实战口径）：传入 {code: 日K线数组[{date,open,close,high,low}]}
+  // 判定窗口=建议日之后 3 个交易日。看多：窗口内"最高价触及目标价"即命中(可提前结算)，
+  // 无目标价时看 3 日内最大涨幅≥2%；看空/观望：3 日内没明显上涨(<2%)即命中。
+  // 窗口未走完且未提前命中 → 保持待核验，绝不用单日收盘草率判死。
+  verifyAdvice(candleMap) {
+    if (!candleMap) return
     const DAY = 24 * 3600 * 1000
+    const WINDOW = 3               // 3个交易日窗口
+    const BULL_TH = 2              // 看多兜底/看空阈值：3日内最大涨幅百分比
     let changed = false
+    const toYmd = (ts) => {
+      const d = new Date(ts)
+      const p = (n) => String(n).padStart(2, '0')
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+    }
     state.adviceLog = (state.adviceLog || []).map((r) => {
       if (r.verified) return r
-      if (Date.now() - r.at < DAY) return r          // 至少隔一天再判
-      const now = priceMap[r.code]
-      if (now == null || !r.priceAtAdvice) return r
-      const chg = +(((now - r.priceAtAdvice) / r.priceAtAdvice) * 100).toFixed(2)
-      // 命中定义：看多类(买入/加仓/持有/正T)→涨了算对；看空类(减仓/清仓/观望/不建议)→跌了或没大涨算对
-      const bull = /买|加|持有|正T|立即|回调再买/.test(r.action || '')
-      const bear = /减|清|观望|不建议|反T/.test(r.action || '')
-      let hit = null
-      if (bull) hit = chg > 0
-      else if (bear) hit = chg <= 1   // 看空/观望：没明显上涨即算对
-      return { ...r, verified: true, hit, resultPct: chg, verifiedAt: Date.now(), ...(changed = true, {}) }
+      if (Date.now() - r.at < DAY) return r          // 至少隔一个自然日再判
+      const candles = candleMap[r.code]
+      if (!Array.isArray(candles) || !candles.length || !r.priceAtAdvice) return r
+      const adviceYmd = toYmd(r.at)
+      // 建议日"之后"的交易日K线（严格晚于建议当天）
+      const future = candles.filter((c) => c && c.date && c.date > adviceYmd)
+      if (!future.length) return r                   // 隔日数据还没出 → 继续等
+      const win = future.slice(0, WINDOW)            // 窗口内最多取前3个交易日
+      const windowComplete = future.length >= WINDOW
+      const base = r.priceAtAdvice
+      const target = Number(r.target) || null
+      const maxHigh = Math.max(...win.map((c) => c.high || c.close || base))
+      const minLow = Math.min(...win.map((c) => c.low || c.close || base))
+      const lastClose = win[win.length - 1].close || base
+      const maxUpPct = +(((maxHigh - base) / base) * 100).toFixed(2)   // 窗口内最大有利波动
+      const closePct = +(((lastClose - base) / base) * 100).toFixed(2) // 窗口末收盘涨幅
+
+      const bull = /买|加|持有|正T|立即|回调再买|抄底|吸|上车/.test(r.action || '')
+      const bear = /减|清|观望|不建议|反T|止损|离场|回避|谨慎/.test(r.action || '')
+
+      let hit = null, settled = false, note = ''
+      if (bull) {
+        if (target && maxHigh >= target) {           // 触及目标 → 提前判胜
+          hit = true; settled = true
+          note = `窗口内最高${maxHigh}触及目标${target}`
+        } else if (windowComplete) {                 // 没触及/无目标 → 看最大涨幅
+          hit = maxUpPct >= BULL_TH; settled = true
+          note = target ? `3日内最高${maxHigh}未及目标${target}(最大+${maxUpPct}%)` : `3日内最大+${maxUpPct}%`
+        }
+      } else if (bear) {
+        if (windowComplete) {                         // 看空/观望：没明显上涨即对
+          hit = maxUpPct < BULL_TH; settled = true
+          note = `3日内最大+${maxUpPct}%（看空/观望阈值${BULL_TH}%）`
+        }
+      } else if (windowComplete) {                     // 无法归类 → 收盘方向兜底
+        hit = closePct > 0; settled = true
+        note = `3日收盘${closePct}%`
+      }
+      if (!settled) return r
+      changed = true
+      return {
+        ...r, verified: true, hit,
+        resultPct: bull ? maxUpPct : closePct,        // 看多看最大有利波动，其余看收盘
+        maxUpPct, closePct, maxHigh, minLow, windowDays: win.length,
+        verifiedAt: Date.now(), verifyNote: note,
+      }
     })
     if (changed) emit()
   },
@@ -629,12 +700,45 @@ export const planStore = {
     const by = {}
     for (const r of log) {
       const k = r.mode || 'other'
-      if (!by[k]) by[k] = { mode: k, total: 0, hit: 0 }
+      if (!by[k]) by[k] = { mode: k, total: 0, hit: 0, sumPct: 0 }
       by[k].total++; if (r.hit) by[k].hit++
+      by[k].sumPct += Number(r.resultPct) || 0
     }
-    const groups = Object.values(by).map((g) => ({ ...g, winRate: g.total ? Math.round((g.hit / g.total) * 100) : null }))
+    const groups = Object.values(by).map((g) => ({
+      ...g,
+      winRate: g.total ? Math.round((g.hit / g.total) * 100) : null,
+      avgPct: g.total ? +(g.sumPct / g.total).toFixed(2) : null,
+    }))
     const total = log.length, hit = log.filter((r) => r.hit).length
-    return { groups, total, hit, winRate: total ? Math.round((hit / total) * 100) : null, pending: (state.adviceLog || []).filter((r) => !r.verified).length }
+    const sumPct = log.reduce((s, r) => s + (Number(r.resultPct) || 0), 0)
+    return {
+      groups, total, hit,
+      winRate: total ? Math.round((hit / total) * 100) : null,
+      avgPct: total ? +(sumPct / total).toFixed(2) : null,
+      pending: (state.adviceLog || []).filter((r) => !r.verified).length,
+    }
+  },
+  // 按【理论】统计真实胜率（军师"融会贯通"哪个理论在你的票上最灵）。
+  // 一条建议引用多个理论 → 每个理论都计入(该建议命中则各+1胜)。
+  theoryStats() {
+    const log = (state.adviceLog || []).filter((r) => r.verified && r.hit != null)
+    const by = {}
+    for (const r of log) {
+      const tags = theoryTagsOf(r.theoryNote)
+      for (const tag of tags) {
+        if (!by[tag]) by[tag] = { theory: tag, total: 0, hit: 0, sumPct: 0 }
+        by[tag].total++; if (r.hit) by[tag].hit++
+        by[tag].sumPct += Number(r.resultPct) || 0
+      }
+    }
+    const groups = Object.values(by).map((g) => ({
+      ...g,
+      winRate: g.total ? Math.round((g.hit / g.total) * 100) : null,
+      avgPct: g.total ? +(g.sumPct / g.total).toFixed(2) : null,
+    })).sort((a, b) => (b.winRate - a.winRate) || (b.total - a.total))
+    // 待归因：已落库但尚未验证的建议里，能识别出理论标签的条数
+    const taggedTotal = (state.adviceLog || []).filter((r) => theoryTagsOf(r.theoryNote).length).length
+    return { groups, taggedTotal }
   },
 
   // ===== 撤回：弹出最近一次快照并恢复（交易类操作的后悔药）=====
@@ -770,6 +874,15 @@ export function computePortfolio(holding, quoteMap, account) {
   const available = cash != null ? cash : (totalAssets != null ? +(totalAssets - holdMktValue).toFixed(2) : null)
   // 单票占比（对总资产）
   positions.forEach((p) => { p.weight = totalAssets ? +((p.mktValue / totalAssets) * 100).toFixed(1) : null })
-  return { positions, holdMktValue, holdCostValue, floatPnl, totalAssets, cash, available, position }
+  // ===== 目标资产（以终为始）=====
+  // goal = 用户想通过炒股达成的目标总资产(元)。派生:进度%、还需净赚缺口(元)、达标所需收益率%
+  const goal = account && account.goal != null && account.goal > 0 ? account.goal : null
+  let goalProgress = null, goalGap = null, goalReturnPct = null
+  if (goal && totalAssets != null) {
+    goalProgress = +((totalAssets / goal) * 100).toFixed(1)   // 进度%(可>100)
+    goalGap = +(goal - totalAssets).toFixed(2)                // 距目标还差(元;负=已超额)
+    goalReturnPct = totalAssets > 0 ? +(((goal - totalAssets) / totalAssets) * 100).toFixed(1) : null // 从现在到达标还需涨幅%
+  }
+  return { positions, holdMktValue, holdCostValue, floatPnl, totalAssets, cash, available, position, goal, goalProgress, goalGap, goalReturnPct }
 }
 

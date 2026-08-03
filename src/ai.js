@@ -1,7 +1,9 @@
 // 调用后端 AI 代理（健壮解析：后端超时/崩溃时 Vercel 返回纯文本而非 JSON）
+import { api } from './apiBase'
+
 export async function callAI(mode, payload) {
   try {
-    const res = await fetch('/api/ai', {
+    const res = await fetch(api('/api/ai'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mode, payload }),
@@ -22,7 +24,7 @@ export async function callAI(mode, payload) {
 // 盘面研究·外部宏观快讯聚合：一次性拉取宏观要闻 + 7×24 快讯（非流式）
 export async function fetchMarketNews() {
   try {
-    const res = await fetch('/api/market?news=1')
+    const res = await fetch(api('/api/market?news=1'))
     const raw = await res.text()
     try { return JSON.parse(raw) } catch {
       return { ok: false, error: `服务暂时不可用（${res.status}）`, macro: [], flashes: [] }
@@ -36,7 +38,7 @@ export async function fetchMarketNews() {
 export async function fetchDailyReport({ session, holdings, refresh, onPhase, signal }) {
   try {
     const qs = `?session=${session || ''}${refresh ? '&refresh=1' : ''}`
-    const res = await fetch('/api/daily_report' + qs, {
+    const res = await fetch(api('/api/daily_report' + qs), {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ holdings: holdings || [] }), signal,
     })
@@ -71,7 +73,7 @@ export async function fetchDailyReport({ session, holdings, refresh, onPhase, si
 // 后端不支持 SSE 时自动回退为整段 JSON，不影响结果。
 export async function callAIStream(mode, payload, onPhase, signal) {
   try {
-    const res = await fetch('/api/ai', {
+    const res = await fetch(api('/api/ai'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mode, payload, stream: true }),

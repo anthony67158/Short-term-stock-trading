@@ -1,23 +1,6 @@
 {
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "functions": {
-    "api/ai.js": {
-      "maxDuration": 60
-    },
-    "api/agent.js": {
-      "maxDuration": 60
-    },
-    "api/board.js": {
-      "maxDuration": 60
-    },
-    "api/daily_report.js": {
-      "maxDuration": 60
-    },
-    "api/*.js": {
-      "maxDuration": 15
-    }
-  },
   "headers": [
     {
       "source": "/",
