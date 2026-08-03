@@ -5,7 +5,7 @@ import { techSummaryForAI, fetchQuantPredict, backtestSignal } from './_ta.js';
 import { marketTimePromptBlock, marketTimeContext } from './_market_time.js';
 import { getLatestDailySummary } from './_daily_summary.js';
 import { fetchNews, fetchClsTelegraph } from './_market_data.js';
-import { callChat, parseLLMJson } from './_llm.js';
+import { callChat, callChatWithRetry, parseLLMJson } from './_llm.js';
 import { applyCors, preflight } from './_lib.js';
 import { SYSTEM_PROMPT, ADVISOR_SYSTEM, buildUserPrompt, isAdvisorMode, maxTokensForMode } from './_ai_prompts.js';
 
@@ -440,30 +440,28 @@ export default async function handler(req, res) {
             newsRefs = corpus.news.filter((n) => n.url).slice(0, 5);  // 供前端引用消息来源
           }
         }
-        // ★行业新闻：个股不仅看宏观+自身消息，还要看所属行业风向。用 corpus 里的所属行业检索
-        {
-          const industry = corpus && corpus.profile && corpus.profile.industry;
-          if (industry) {
-            try {
-              const indNews = await fetchIndustryNews(industry);
-              if (indNews && indNews.length) {
-                payload.industry = industry;
-                payload.industryNews = indNews.map((n) => n.title).filter(Boolean).slice(0, 5);
-              }
-            } catch { /* 行业新闻失败不阻断 */ }
-          }
+        // ★行业新闻 + 量化预测：二者相互独立，并行取(原来串行，白白多花一次网络往返)。
+        //   行业新闻依赖 corpus.profile.industry；量化预测依赖 detail.candles，均已在上面 Promise.all 就绪。
+        const industry = corpus && corpus.profile && corpus.profile.industry;
+        const hasCandles = detail && detail.ok && Array.isArray(detail.candles) && detail.candles.length >= 25;
+        const [indNews, quant] = await Promise.all([
+          industry
+            ? fetchIndustryNews(industry).catch(() => null)
+            : Promise.resolve(null),
+          hasCandles
+            ? fetchQuantPredict(payload.code, detail.candles, (payload.holdCost ? { cost: payload.holdCost, qty: payload.holdQty } : null), 7000).catch(() => null)
+            : Promise.resolve(null),
+        ]);
+        if (industry && indNews && indNews.length) {
+          payload.industry = industry;
+          payload.industryNews = indNews.map((n) => n.title).filter(Boolean).slice(0, 5);
         }
         if (lhb) payload.lhb = lhb;
-        // 信号回测：用历史K线检验该股"金叉后上涨"的命中率，给预测一个可信度自评
+        // 信号回测：用历史K线检验该股"金叉后上涨"的命中率，给预测一个可信度自评(纯计算,无网络)
         if (detail && detail.ok && Array.isArray(detail.candles) && detail.candles.length >= 40) {
           try { const bt = backtestSignal(detail.candles, 5); if (bt) payload.backtest = bt; } catch { /* ignore */ }
         }
-        // 量化预测：用刚取到的 K线喂给量化服务（绕开其取数被风控），t_advice/price 场景带持仓成本
-        let quant = null;
-        if (detail && detail.ok && Array.isArray(detail.candles) && detail.candles.length >= 25) {
-          const hold = payload.holdCost ? { cost: payload.holdCost, qty: payload.holdQty } : null;
-          try { quant = await fetchQuantPredict(payload.code, detail.candles, hold, 7000); } catch { /* 静默 */ }
-        }
+        // 量化预测已在上面与行业新闻并行取到(quant)——此处不再重复请求。
 
         // 大盘情绪
         if (mkt && mkt.ok) {
@@ -680,18 +678,18 @@ export default async function handler(req, res) {
     const llmCap = isAdvisor ? 52000 : 46000;
     const llmTimeout = Math.max(8000, Math.min(llmCap, remain() - 2500));
 
-    const { resp, done } = await callChat({
+    const { resp, done } = await callChatWithRetry({
       model: useModel,
       messages: [
         { role: 'system', content: sysPrompt },
         { role: 'system', content: marketTimePromptBlock() },
         { role: 'user', content: buildUserPrompt(mode, payload, ragText) },
       ],
-      temperature: 0.4,
+      temperature: 0.2,   // JSON 结构化输出：低温提升稳定性与可解析率，减少字段漂移
       maxTokens: maxTokensForMode(mode),
       timeoutMs: llmTimeout,
       responseFormat: { type: 'json_object' },
-    });  // abort/网络错误不抛出 → 转入降级返回，避免裸报错/被平台强杀
+    }, { budgetLeftMs: () => remain() - 2500 });  // 上游抖动/5xx 且预算足够时快速重试一次；abort/网络错误不抛出 → 转入降级返回
     done();
 
     // LLM 超时/网络错误 → 结构化降级返回(带已采集 meta)，前端可提示"重试/缩小范围"而非"服务不可用"
@@ -709,10 +707,24 @@ export default async function handler(req, res) {
       return finish({ ok: false, error: `LLM ${resp.status}`, detail: errText.slice(0, 200), meta: collectedMeta });
     }
 
-    const j = await resp.json();
+    const j = await resp.json().catch(() => null);
+    if (!j) {
+      return finish({
+        ok: false, degraded: true, mode, model: useModel, updatedAt: Date.now(),
+        error: '模型返回解析失败，请稍后重试。', meta: collectedMeta, news: newsRefs,
+      });
+    }
     const content = j.choices?.[0]?.message?.content || '';
     const finishReason = j.choices?.[0]?.finish_reason || '';
     const truncated = finishReason === 'length';
+
+    // 空内容(上游偶发返回空串) → 结构化降级,避免把空当成成功结果下发
+    if (!content.trim()) {
+      return finish({
+        ok: false, degraded: true, mode, model: useModel, updatedAt: Date.now(),
+        error: '模型未返回有效内容，请稍后重试。', meta: collectedMeta, news: newsRefs,
+      });
+    }
 
     // 解析模型返回的 JSON（容错：剥离 ```json 包裹 + 截断补齐）
     const parsed = parseLLMJson(content);

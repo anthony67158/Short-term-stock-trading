@@ -19,16 +19,24 @@ export function usePolling(url, intervalMs, deps = []) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const timer = useRef(null)
+  const ctrl = useRef(null)       // 当前在飞的请求 controller —— 组件卸载/切 url 时中止，避免旧响应覆盖新状态
+  const alive = useRef(true)      // 组件是否仍挂载：卸载后禁止 setState（防 "state update on unmounted"）
   const tick = useRefreshTick()
 
   // 底层取数：bust=true 时加时间戳破 CDN 缓存 + 先置 loading（供手动刷新反馈）
   const fetchData = useCallback(async (bust = false) => {
     if (!url) { setData(null); setLoading(false); return }
     if (bust) setLoading(true)
+    // 中止上一笔仍在飞的请求，避免慢的旧响应晚到覆盖新数据（竞态）
+    if (ctrl.current) { try { ctrl.current.abort() } catch { /* ignore */ } }
+    const ac = new AbortController()
+    ctrl.current = ac
     try {
       const u = bust ? url + (url.includes('?') ? '&' : '?') + '_t=' + Date.now() : url
-      const res = await fetch(api(u), bust ? { cache: 'no-store' } : undefined)
+      const res = await fetch(api(u), { cache: bust ? 'no-store' : 'default', signal: ac.signal })
+      if (!res.ok) throw new Error('HTTP ' + res.status)   // 先校验状态码，别把 500 的 HTML 当 JSON 解析
       const j = await res.json()
+      if (!alive.current || ac.signal.aborted) return       // 已卸载/被中止：丢弃结果，不 setState
       if (j && j.ok === false) {
         setError(j.error || '数据源暂不可用')
       } else {
@@ -36,9 +44,11 @@ export function usePolling(url, intervalMs, deps = []) {
         setError(null)
       }
     } catch (e) {
+      if (e && e.name === 'AbortError') return               // 主动中止不算错误
+      if (!alive.current) return
       setError(String(e.message || e))
     } finally {
-      setLoading(false)
+      if (alive.current && !ac.signal.aborted) setLoading(false)
     }
     // eslint-disable-next-line
   }, [url])
@@ -47,11 +57,16 @@ export function usePolling(url, intervalMs, deps = []) {
   const reload = useCallback(() => fetchData(true), [fetchData]) // 手动刷新：破缓存 + 有 loading 反馈
 
   useEffect(() => {
-    if (!url) { setData(null); setLoading(false); return }
+    alive.current = true
+    if (!url) { setData(null); setLoading(false); return () => { alive.current = false } }
     load()
     if (timer.current) clearInterval(timer.current)
     timer.current = setInterval(load, intervalMs)
-    return () => timer.current && clearInterval(timer.current)
+    return () => {
+      alive.current = false
+      if (timer.current) clearInterval(timer.current)
+      if (ctrl.current) { try { ctrl.current.abort() } catch { /* ignore */ } }
+    }
     // eslint-disable-next-line
   }, [url, intervalMs, tick, ...deps])
 

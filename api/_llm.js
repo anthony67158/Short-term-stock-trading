@@ -63,6 +63,32 @@ export async function callChat({
   return { resp, done: () => { if (t) clearTimeout(t); } };
 }
 
+// ---- 带一次快速重试的非流式 chat 调用 ----
+// 上游偶发网络抖动/5xx/非超时错误时,只要还有时间预算,自动重试一次(缩短超时),显著提升成功率。
+// AbortError(客户端主动超时)不重试——那是我们自己掐的,重试只会更晚。stream 模式不在此重试(交由调用方流控)。
+// budgetLeftMs: 传入当前剩余预算的取值函数或数值;为 0/负则不重试。
+export async function callChatWithRetry(opts = {}, { retries = 1, budgetLeftMs } = {}) {
+  const getLeft = typeof budgetLeftMs === 'function' ? budgetLeftMs : () => (budgetLeftMs == null ? Infinity : budgetLeftMs);
+  let attempt = 0;
+  while (true) {
+    const { resp, done } = await callChat(opts);
+    const errored = resp && resp.__err;
+    const isAbort = errored && resp.__err.name === 'AbortError';
+    const badStatus = resp && !resp.__err && !resp.ok && resp.status >= 500;
+    const retryable = (errored && !isAbort) || badStatus;
+    // 还能重试 且 剩余时间够跑一次(至少留 6s) → 关掉当前 timer,重试
+    if (retryable && attempt < retries && getLeft() > 6000) {
+      done();
+      attempt++;
+      // 重试时把超时收紧到剩余预算内,避免二次调用又把预算耗光
+      const tighter = Math.max(6000, Math.min(opts.timeoutMs || 30000, getLeft() - 2000));
+      opts = { ...opts, timeoutMs: tighter };
+      continue;
+    }
+    return { resp, done, attempts: attempt + 1 };
+  }
+}
+
 // ---- SSE 输出工厂 ----
 // 设置 SSE 响应头并返回 { emit, phase }。调用方在需要流式时使用。
 export function makeSSE(res) {
@@ -82,6 +108,7 @@ export function makeSSE(res) {
 // 逐个 content delta 通过 onPiece 回调转发；返回拼好的完整文本。
 export async function pumpStream(resp, onPiece) {
   let full = '';
+  if (!resp || !resp.body || typeof resp.body.getReader !== 'function') return full; // 上游无流体（错误响应/被中止）时安全返回空串
   const reader = resp.body.getReader();
   const decoder = new TextDecoder('utf-8');
   let buf = '';

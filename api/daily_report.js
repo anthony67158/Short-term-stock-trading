@@ -37,6 +37,9 @@ export default async function handler(req, res) {
   const streaming = true; // 本接口一律 SSE
 
   const { emit, phase } = makeSSE(res); // makeSSE 内已统一应用 CORS
+  // 双重 end 兜底:任何分支只要调用 endOnce 即可,重复调用无副作用(避免 "write after end" 崩溃)
+  let ended = false;
+  const endOnce = () => { if (ended) return; ended = true; try { res.end(); } catch { /* 连接已断 */ } };
 
   try {
     let body = req.body; if (typeof body === 'string') body = JSON.parse(body || '{}');
@@ -56,12 +59,12 @@ export default async function handler(req, res) {
         if (blobs.length) {
           const latest = blobs.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt))[0];
           const cached = await readJson(latest);
-          if (cached && cached.report) { emit('result', { ok: true, cached: true, ...cached }); return res.end(); }
+          if (cached && cached.report) { emit('result', { ok: true, cached: true, ...cached }); return endOnce(); }
         }
       } catch { /* 无缓存继续生成 */ }
     }
 
-    if (!BASE || !KEY) { emit('result', { ok: false, error: 'LLM 未配置' }); return res.end(); }
+    if (!BASE || !KEY) { emit('result', { ok: false, error: 'LLM 未配置' }); return endOnce(); }
 
     // 2) 并行抓全市场数据
     phase('正在采集 A股板块资金 / 涨停 / 指数…');
@@ -149,7 +152,8 @@ export default async function handler(req, res) {
       done();
       if (!resp || resp.__err || !resp.ok) return null;
       const j = await resp.json().catch(() => null);
-      const content = j && j.choices?.[0]?.message?.content || '';
+      const content = (j && j.choices?.[0]?.message?.content) || '';
+      if (!content.trim()) return null;
       return parseLLMJson(content).value;
     };
 
@@ -165,7 +169,7 @@ export default async function handler(req, res) {
     const promptC = sectorPrompt('金融地产、红利资产、港股、美股、商品');
 
     const [partA, partB, partC] = await Promise.all([callLLM(promptA, 1200), callLLM(promptB, 1200), callLLM(promptC, 1200)]);
-    if (!partA && !partB && !partC) { emit('result', { ok: false, error: '日报生成超时，请稍后重试' }); return res.end(); }
+    if (!partA && !partB && !partC) { emit('result', { ok: false, error: '日报生成超时，请稍后重试' }); return endOnce(); }
     const report = {
       session: SESSION_CN[session],
       overview: (partA && partA.overview) || '',
@@ -192,9 +196,9 @@ export default async function handler(req, res) {
     }
 
     emit('result', result);
-    return res.end();
+    return endOnce();
   } catch (e) {
     emit('result', { ok: false, error: String(e.message || e) });
-    return res.end();
+    return endOnce();
   }
 }

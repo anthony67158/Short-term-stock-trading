@@ -1,10 +1,5 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, lazy, Suspense } from 'react'
 import Icon from './components/Icon'
-import TodayTab from './components/TodayTab'
-import PlanTab from './components/PlanTab'
-import ResearchTab from './components/ResearchTab'
-import AccountHub from './components/AccountHub'
-import AIAssistant from './components/AIAssistant'
 import StockDetail from './components/StockDetail'
 import ErrorBoundary from './components/ErrorBoundary'
 import AuthGate, { AccountMenu } from './components/AuthGate'
@@ -18,6 +13,24 @@ import { alertStore, useAlertStore } from './alertStore'
 import { runAutoReviewIfDue } from './review'
 import { timeStr } from './format'
 import { api } from './apiBase'
+
+// 按需分包：四个主 Tab 与 AI 助手拆成独立 chunk，首屏只加载当前 Tab，
+// 切换时才拉取对应 chunk（配合 vite manualChunks），显著缩短首屏体积与白屏时间。
+const TodayTab = lazy(() => import('./components/TodayTab'))
+const PlanTab = lazy(() => import('./components/PlanTab'))
+const ResearchTab = lazy(() => import('./components/ResearchTab'))
+const AccountHub = lazy(() => import('./components/AccountHub'))
+const AIAssistant = lazy(() => import('./components/AIAssistant'))
+
+// Tab 切换时的轻量骨架占位（避免 Suspense fallback 空白闪一下）
+function TabSkeleton() {
+  return (
+    <div className="tab-skeleton" style={{ padding: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '40vh', color: 'var(--muted, #888)' }}>
+      <Icon name="refresh" size={16} className="spin" />
+      <span style={{ marginLeft: 8 }}>正在加载…</span>
+    </div>
+  )
+}
 
 const TABS = [
   { key: 'today', label: '今日选股', icon: 'radar' },
@@ -191,17 +204,25 @@ function MainApp() {
       </header>
 
       <main className="main">
-        {tab === 'today' && <TodayTab interval={interval} market={market.data} sectors={sectors.data} snapshot={snapshot} />}
-        {tab === 'plan' && <PlanTab interval={interval} />}
-        {tab === 'hub' && <AccountHub interval={interval} snapshot={snapshot} initialSub={hubSub} jumpNonce={hubNonce} />}
-        {tab === 'research' && <ResearchTab interval={interval} />}
+        <ErrorBoundary key={tab} label="页面">
+          <Suspense fallback={<TabSkeleton />}>
+            {tab === 'today' && <TodayTab interval={interval} market={market.data} sectors={sectors.data} snapshot={snapshot} />}
+            {tab === 'plan' && <PlanTab interval={interval} />}
+            {tab === 'hub' && <AccountHub interval={interval} snapshot={snapshot} initialSub={hubSub} jumpNonce={hubNonce} />}
+            {tab === 'research' && <ResearchTab interval={interval} />}
+          </Suspense>
+        </ErrorBoundary>
       </main>
 
       <footer className="footer">
         数据来源：东方财富公开接口 · AI 分析由大模型基于实时数据生成，仅供研究参考，非投资建议 · 资金流为已发生数据，追高有滞后风险，注意止损
       </footer>
 
-      <AIAssistant snapshot={snapshot} />
+      <ErrorBoundary label="AI 助手">
+        <Suspense fallback={null}>
+          <AIAssistant snapshot={snapshot} />
+        </Suspense>
+      </ErrorBoundary>
 
       {/* 全局个股详情弹窗：任意页面点击股票名都会打开。用 ErrorBoundary 兜底，
           任一渲染异常只降级为"重试"占位，绝不再黑屏拖垮整个应用 */}

@@ -123,8 +123,15 @@ const TOOLS = [
 // ---------- Skill 工具执行器（真正调数据） ----------
 async function execTool(name, args, origin) {
   const call = async (pathname) => {
-    const r = await fetch(origin + pathname, { headers: { 'x-internal': '1' } });
-    return r.json();
+    // 内部 API 调用加超时保护(原来无超时——某个工具后端卡住会拖垮整轮 agent、烧光预算)
+    const c = new AbortController();
+    const to = setTimeout(() => c.abort(), 8000);
+    try {
+      const r = await fetch(origin + pathname, { headers: { 'x-internal': '1' }, signal: c.signal });
+      return await r.json();
+    } finally {
+      clearTimeout(to);
+    }
   };
   try {
     if (name === 'search_stock') {
@@ -330,13 +337,13 @@ export default async function handler(req, res) {
     let answerBuf = '';
 
     // 通用：发起一次 chat completion（stream 可选）
-    const callLLM = async ({ stream, useTools, timeoutMs }) => {
+    const callLLM = async ({ stream, useTools, timeoutMs, maxTokens = 1600 }) => {
       return callChat({
         model: AGENT_MODEL,
         messages,
         ...(useTools ? { tools: TOOLS, toolChoice: 'auto' } : { toolChoice: 'none' }),
         temperature: 0.3,
-        maxTokens: 1600,
+        maxTokens,
         timeoutMs,
         stream: !!stream,
       });
@@ -353,9 +360,9 @@ export default async function handler(req, res) {
       const { resp, done } = await callLLM({ stream: false, useTools: true, timeoutMs: Math.max(remain() - RESERVE_FINAL, 7000) });
       done();
       if (resp && resp.__err) break; // 超时/网络 → 去流式总结
-      if (!resp.ok) { const e = await resp.text().catch(() => ''); send('error', { error: `LLM ${resp.status}`, detail: (e || '').slice(0, 150) }); return res.end(); }
-      const j = await resp.json();
-      const msg = j.choices?.[0]?.message;
+      if (!resp || !resp.ok) { const e = resp && !resp.__err ? await resp.text().catch(() => '') : ''; send('error', { error: `LLM ${resp && resp.status ? resp.status : 'error'}`, detail: (e || '').slice(0, 150) }); return res.end(); }
+      const j = await resp.json().catch(() => null);
+      const msg = j && j.choices?.[0]?.message;
       if (!msg) break;
 
       const toolCalls = msg.tool_calls || [];
@@ -399,7 +406,7 @@ export default async function handler(req, res) {
         send('delta', { text: answerBuf });
       } else {
         messages.push({ role: 'user', content: '请基于以上已查到的信息直接给出最终回答，用规范 Markdown 分节、关键结论加粗。若某类数据没查到，就用已有数据尽力给出可执行的结论，不要空手道歉。' });
-        const { resp, done } = await callLLM({ stream: true, useTools: false, timeoutMs: Math.max(remain() - 1500, 5000) });
+        const { resp, done } = await callLLM({ stream: true, useTools: false, timeoutMs: Math.max(remain() - 1500, 5000), maxTokens: 3000 });
         if (resp && resp.__err) {
           // 流式发起就失败 → 兜底文本
           const gathered = [...new Set(toolTrace.map((t) => TOOL_LABEL_CN[t.tool] || t.tool))].join('、');
@@ -410,7 +417,7 @@ export default async function handler(req, res) {
           send('error', { error: `LLM ${resp.status}`, detail: (e || '').slice(0, 150) }); done(); return res.end();
         } else {
           // 解析 OpenAI 兼容的 SSE 流，逐 delta 转发
-          answerBuf = await pumpStream(resp, (piece) => { answerBuf; send('delta', { text: piece }); });
+          answerBuf = await pumpStream(resp, (piece) => { send('delta', { text: piece }); });
           done();
         }
       }
