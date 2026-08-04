@@ -356,7 +356,7 @@ export default async function handler(req, res) {
     // 数据采集阶段(补大盘/资金/分时/量化…)可能耗时 15~20s，之后 LLM 生成又要时间；
     // 不设总预算时两段相加可能超 60s 被平台强杀、返回非 JSON。这里统一编排。
     const START = Date.now();
-    const BUDGET = 57000;
+    const BUDGET = 115000;
     const remain = () => BUDGET - (Date.now() - START);
 
     // stock 模式：接入 RAG（近5日走势+主营+联网新闻）
@@ -690,9 +690,9 @@ export default async function handler(req, res) {
 
     phase('数据齐全，正在生成操作建议…', 'llm');
     // LLM 超时按【剩余预算】动态给：预留 2.5s 兜底返回时间，最少给 8s。
-    // 军师模式(t_advice/hold_advice/buy_advice/review/price/plan)走 DeepSeek-V4-Pro，
-    // 实测 buy_advice 生成常需 47s+，原 46s 硬顶会误杀 → 慢模型放宽到 52s；其余模式维持 46s。
-    const llmCap = isAdvisor ? 52000 : 46000;
+    // 军师模式(t_advice/hold_advice/buy_advice/review/price/plan)走 DeepSeek-V4-Pro，实测常需 47s+；
+    // FC 超时已放到 600s，代码预算 115s，故 LLM 上限也整体放大：军师 100s、常规 80s，交由 remain() 收敛。
+    const llmCap = isAdvisor ? 100000 : 80000;
     const llmTimeout = Math.max(8000, Math.min(llmCap, remain() - 2500));
 
     const { resp, done } = await callChatWithRetry({

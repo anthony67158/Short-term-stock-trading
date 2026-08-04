@@ -14,10 +14,10 @@ resources:
       functionName: ${vars.functionName}
       description: 短线操盘台（前端+12个API，FC3.0 自定义运行时 + OSS 存储）
       runtime: custom.debian10        # 自定义运行时（Debian10 内置多语言，用系统 node 或自带）
-      cpu: 0.5
-      memorySize: 1024                 # 1GB，够 SSE 并发与 LLM 拉取
+      cpu: 1
+      memorySize: 2048                 # 2GB / 1vCPU：加速 SSE 流转、上游拉取与大 JSON 解析（原 0.5C/1G 偏低拖慢生成）
       diskSize: 512
-      timeout: 120                     # ai/agent/board/daily_report 需较长超时（Vercel 之前 60s，这里放宽到 120s）
+      timeout: 600                     # ai/agent/daily_report 走 SSE 长连接 + 慢模型(军师 V4-Pro 常 47s+)，放到 FC 上限 600s，杜绝平台侧强杀导致的"生成超时"
       instanceConcurrency: 20          # 单实例并发（Web 函数支持多请求复用实例，省成本）
       caPort: 9000                     # 与 server.js 监听端口一致（FC 也会用 FC_SERVER_PORT 注入）
       code: ./                         # 上传当前目录（含 dist/ api/ server.js node_modules）

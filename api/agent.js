@@ -331,7 +331,7 @@ export default async function handler(req, res) {
     const toolTrace = [];
     const MAX_ROUNDS = 6;
     const START = Date.now();
-    const BUDGET = 56000;
+    const BUDGET = 115000; // 总预算 115s（FC 超时已放到 600s）；多轮工具调用 + 流式总结的慢模型不再被误杀
     const remain = () => BUDGET - (Date.now() - START);
     const RESERVE_FINAL = 16000; // 给流式总结留足(边流边发，可稍短)
 

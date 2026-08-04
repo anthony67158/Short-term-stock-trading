@@ -47,7 +47,7 @@ export default async function handler(req, res) {
   try {
     let body = req.body; if (typeof body === 'string') body = JSON.parse(body || '{}');
     const START = Date.now();
-    const BUDGET = 58000; // 58s 内必须返回，避免被平台强杀
+    const BUDGET = 115000; // 总预算 115s（FC 超时 600s，此值决定何时兜底返回）；三路 LLM 并行，慢模型也不易被误杀
     const remain = () => BUDGET - (Date.now() - START);
     const holdings = Array.isArray(body && body.holdings) ? body.holdings.slice(0, 20) : [];
     const session = (req.query.session && SESSION_CN[req.query.session]) ? req.query.session : autoSession();
