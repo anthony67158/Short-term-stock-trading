@@ -1,0 +1,15 @@
+edition: 3.0.0
+name: stock-dashboard-domain
+access: default
+resources:
+  domain:
+    component: fc3-domain
+    props:
+      region: cn-hangzhou
+      domainName: tedixtf.cn
+      protocol: HTTP
+      routeConfig:
+        routes:
+          - path: /*
+            functionName: stock-dashboard
+            qualifier: LATEST
