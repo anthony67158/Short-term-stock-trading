@@ -173,8 +173,22 @@ def predict(payload: dict = Body(...), x_api_key: str = Header(default="")):
         highs = [float(c["high"]) for c in cs]
         lows = [float(c["low"]) for c in cs]
         vols = [float(c.get("volume") or 0) for c in cs]
+        opens = [float(c["open"]) for c in cs] if all(c.get("open") is not None for c in cs) else None
 
-        f = compute_factors(closes, highs, lows, vols)
+        # 大盘指数序列（可选）：调用方按个股同日期对齐后传入，用于相对/市场状态因子。
+        # 缺失时相对因子安全归零，与训练时"无 index"的降级路径完全一致。
+        index_closes = None
+        idx_payload = payload.get("index") or payload.get("indexCandles")
+        if isinstance(idx_payload, list) and len(idx_payload) >= 2:
+            try:
+                index_closes = [float(x.get("close")) for x in idx_payload
+                                if x and x.get("close") is not None]
+                if len(index_closes) < 2:
+                    index_closes = None
+            except Exception:
+                index_closes = None
+
+        f = compute_factors(closes, highs, lows, vols, opens=opens, index_closes=index_closes)
         score, bias, t_dir, engine, prob = score_stock(f)
         fc = forecast(f, days=5)
         dec = decide(score, bias, fc, f, hold)

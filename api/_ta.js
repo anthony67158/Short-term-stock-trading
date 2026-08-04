@@ -277,6 +277,27 @@ export function techSummaryForAI(tech) {
   };
 }
 
+// 大盘指数日线（沪深300 sh000300），供量化服务算“大盘相对/市场状态”因子。
+// 返回 {date: close} 映射；失败返回 {}（则相对因子安全归零，与训练降级路径一致）。
+// 注：v3 曾试验大盘相对因子，但经样本外对拍确认其净损害模型泛化，现役模型不消费 index；
+// 此函数暂保留但默认不调用，避免每次预测多一次网络往返、徒增延迟。
+async function fetchIndexCloseMap(bars = 130, timeoutMs = 6000) {
+  const url = `https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=sh000300,day,,,${bars},qfq&_=${Date.now()}`;
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    const r = await fetch(url, { signal: ctrl.signal, headers: { Referer: 'https://gu.qq.com/' } });
+    clearTimeout(t);
+    if (!r.ok) return {};
+    const j = await r.json();
+    const node = j && j.data && j.data.sh000300;
+    const rows = (node && (node.qfqday || node.day)) || [];
+    const map = {};
+    for (const row of rows) { if (row && row[0]) map[row[0]] = Number(row[2]); } // [date, open, close, ...]
+    return map;
+  } catch { return {}; }
+}
+
 // ============ 量化预测微服务调用（CloudBase）============
 // 数据由本地传入（candles），服务端只做因子打分+走势预测，绕开其自身取数被风控的问题。
 // 仅当配置了环境变量 QUANT_URL 才调用；失败静默返回 null，绝不阻断主流程。

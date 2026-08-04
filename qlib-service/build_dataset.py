@@ -81,7 +81,7 @@ def build_pool(total, cache="pool_cache.json"):
 
 
 def fetch_kline(symbol, bars=700):
-    """Tencent 前复权日线，返回 (closes,highs,lows,vols,dates) 或 None"""
+    """Tencent 前复权日线，返回 (opens,closes,highs,lows,vols,dates) 或 None"""
     url = f"{TX_KLINE}?param={symbol},day,,,{bars},qfq"
     try:
         j = json.loads(_get(url).decode("utf-8", "ignore"))
@@ -92,22 +92,51 @@ def fetch_kline(symbol, bars=700):
     if len(rows) < 90:
         return None
     dates = [r[0] for r in rows]
-    o = np.array([float(r[1]) for r in rows])   # noqa: F841 (open unused)
+    o = np.array([float(r[1]) for r in rows])
     c = np.array([float(r[2]) for r in rows])
     h = np.array([float(r[3]) for r in rows])
     l = np.array([float(r[4]) for r in rows])
     v = np.array([float(r[5]) for r in rows])
-    return c, h, l, v, dates
+    return o, c, h, l, v, dates
 
 
-def make_samples(c, h, l, v, dates, horizon=5, min_hist=60, stride=2):
+def fetch_index(symbol="sh000300", bars=900):
+    """拉大盘指数日线（默认沪深300），返回 {date: close} 映射，供个股按日期对齐。
+    失败返回 {}（则相对因子安全归零，不影响训练）。"""
+    url = f"{TX_KLINE}?param={symbol},day,,,{bars},qfq"
+    try:
+        j = json.loads(_get(url).decode("utf-8", "ignore"))
+        node = j["data"][symbol]
+        rows = node.get("qfqday") or node.get("day") or []
+    except Exception:
+        return {}
+    return {r[0]: float(r[2]) for r in rows}
+
+
+def make_samples(o, c, h, l, v, dates, idx_map=None, horizon=5, min_hist=60, stride=1):
     """滑窗生成样本：在每个 t 用截至 t 的历史算因子，
-    标签= 未来 horizon 日内最高价是否触及 close_t*(1+target)。"""
+    标签= 未来 horizon 日内最高价是否触及 close_t*(1+target)。
+    idx_map: {date: index_close}，若提供则把与个股同日期对齐的大盘序列传入因子计算。"""
     X, y, ds = [], [], []
     n = len(c)
+    # 预先构造与个股逐日对齐的大盘收盘序列（缺失日用前值前向填充，再不行用个股当日占位不参与相对计算）
+    idx_series = None
+    if idx_map:
+        idx_series = np.empty(n, dtype=float)
+        last_v = np.nan
+        for i, dt in enumerate(dates):
+            if dt in idx_map:
+                last_v = idx_map[dt]
+            idx_series[i] = last_v
+        # 头部仍是 nan 的用第一个有效值回填
+        if np.isnan(idx_series).any():
+            valid = idx_series[np.isfinite(idx_series)]
+            fill = valid[0] if len(valid) else 1.0
+            idx_series = np.where(np.isfinite(idx_series), idx_series, fill)
     for t in range(min_hist, n - horizon):
-        cc, hh, ll, vv = c[:t + 1], h[:t + 1], l[:t + 1], v[:t + 1]
-        f = compute_factors(cc, hh, ll, vv)
+        oo, cc, hh, ll, vv = o[:t + 1], c[:t + 1], h[:t + 1], l[:t + 1], v[:t + 1]
+        ic = idx_series[:t + 1] if idx_series is not None else None
+        f = compute_factors(cc, hh, ll, vv, opens=oo, index_closes=ic)
         last = f["_last"]
         tgt = target_price(last, f["_atr"])
         fut_high = float(np.max(h[t + 1:t + 1 + horizon]))
@@ -124,14 +153,20 @@ def make_samples(c, h, l, v, dates, horizon=5, min_hist=60, stride=2):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pool", type=int, default=600)
-    ap.add_argument("--bars", type=int, default=700)
+    ap.add_argument("--bars", type=int, default=900)
     ap.add_argument("--horizon", type=int, default=5)
+    ap.add_argument("--stride", type=int, default=1)
+    ap.add_argument("--index", default="sh000300", help="大盘指数代码（相对因子基准），空串则不用")
     ap.add_argument("--out", default="dataset.npz")
     a = ap.parse_args()
 
     t0 = time.time()
     pool = build_pool(a.pool)
     print(f"[pool] {len(pool)} stocks in {time.time()-t0:.1f}s")
+
+    # 拉大盘指数，供相对/市场状态因子（失败则空 → 相对因子安全归零）
+    idx_map = fetch_index(a.index, a.bars) if a.index else {}
+    print(f"[index] {a.index or 'none'} points={len(idx_map)}")
 
     X, y, codes, dates = [], [], [], []
     ok = fail = 0
@@ -140,8 +175,9 @@ def main():
         if not kl:
             fail += 1
             continue
-        c, h, l, v, dts = kl
-        xs, ys, dss = make_samples(c, h, l, v, dts, horizon=a.horizon)
+        o, c, h, l, v, dts = kl
+        xs, ys, dss = make_samples(o, c, h, l, v, dts, idx_map=idx_map,
+                                   horizon=a.horizon, stride=a.stride)
         X.extend(xs); y.extend(ys); dates.extend(dss); codes.extend([sym] * len(xs))
         ok += 1
         if (i + 1) % 50 == 0:

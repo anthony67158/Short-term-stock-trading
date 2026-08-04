@@ -67,13 +67,14 @@ def append_history(rec):
         fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
 
-def build_dataset(pool, bars, horizon):
-    """调 build_dataset.py 重建 dataset.npz（拉最新日线，新成熟标签自动进入）。"""
+def build_dataset(pool, bars, horizon, stride=1, index="sh000300"):
+    """调 build_dataset.py 重建 dataset.npz（拉最新日线+大盘指数，新成熟标签自动进入）。"""
     cmd = [sys.executable, os.path.join(HERE, "build_dataset.py"),
            "--pool", str(pool), "--bars", str(bars),
-           "--horizon", str(horizon), "--out", DATASET]
+           "--horizon", str(horizon), "--stride", str(stride),
+           "--index", index, "--out", DATASET]
     log("重建数据集:", " ".join(cmd[1:]))
-    r = subprocess.run(cmd, cwd=HERE, capture_output=True, text=True, timeout=1500)
+    r = subprocess.run(cmd, cwd=HERE, capture_output=True, text=True, timeout=1800)
     sys.stdout.write(r.stdout[-1500:] if r.stdout else "")
     if r.returncode != 0:
         sys.stderr.write(r.stderr[-1500:] if r.stderr else "")
@@ -203,8 +204,10 @@ def upload_oss():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pool", type=int, default=600)
-    ap.add_argument("--bars", type=int, default=700)  # 与冠军训练同深度(700根)，保证挑战者数据量对等、可公平胜出
+    ap.add_argument("--bars", type=int, default=900)  # 与冠军训练同深度，保证挑战者数据量对等、可公平胜出
     ap.add_argument("--horizon", type=int, default=5)
+    ap.add_argument("--stride", type=int, default=1)
+    ap.add_argument("--index", default="sh000300", help="大盘相对因子基准指数")
     ap.add_argument("--dry-run", action="store_true", help="只训练评测打印决策，不写文件不上传")
     ap.add_argument("--skip-build", action="store_true", help="复用现有 dataset.npz(调试用)")
     a = ap.parse_args()
@@ -212,7 +215,7 @@ def main():
     t0 = time.time()
     try:
         if not a.skip_build:
-            build_dataset(a.pool, a.bars, a.horizon)
+            build_dataset(a.pool, a.bars, a.horizon, a.stride, a.index)
         X, y, dates, feat_names = load_dataset()
     except Exception as e:  # noqa: BLE001
         append_history({"decision": "error", "stage": "build/load", "error": str(e)[:200]})

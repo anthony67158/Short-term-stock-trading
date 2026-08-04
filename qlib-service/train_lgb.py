@@ -17,12 +17,20 @@ from sklearn.metrics import roc_auc_score
 
 
 # LightGBM 超参：训练管道与每日重训编排器(retrain_daily.py)共用，单一真源。
+# v3 调优：因子 36→56、样本量随 stride=1 翻倍，故加大模型容量并放宽轮数，
+# 同时降低学习率 + 加强正则(更多因子更易过拟合)，让模型有空间挤出弱信号。
+# 之前 n_estimators 在 ~37 轮早停(lr=0.03) → 欠拟合迹象，这里 lr↓、leaves↑、rounds↑。
 PARAMS = dict(
     objective="binary", metric="auc", boosting_type="gbdt",
-    num_leaves=31, learning_rate=0.03, feature_fraction=0.8,
-    bagging_fraction=0.8, bagging_freq=1, min_data_in_leaf=200,
-    lambda_l1=0.5, lambda_l2=1.0, verbosity=-1, seed=42,
+    num_leaves=63, max_depth=7, learning_rate=0.015,
+    feature_fraction=0.7, bagging_fraction=0.8, bagging_freq=1,
+    min_data_in_leaf=150, min_gain_to_split=0.0,
+    lambda_l1=1.0, lambda_l2=2.0,
+    verbosity=-1, seed=42,
 )
+# 训练轮数上限 & 早停耐心（lr 更小需要更多轮，耐心也要更大以免误停）
+NUM_BOOST_ROUND = 3000
+EARLY_STOPPING = 120
 
 
 def time_series_folds(dates, n_splits=5):
@@ -46,8 +54,8 @@ def cv_auc_and_iters(X, y, dates, n_splits=5, verbose=True):
     for i, (tr, va) in enumerate(time_series_folds(dates, n_splits)):
         dtr = lgb.Dataset(X[tr], y[tr])
         dva = lgb.Dataset(X[va], y[va], reference=dtr)
-        m = lgb.train(PARAMS, dtr, num_boost_round=800, valid_sets=[dva],
-                      callbacks=[lgb.early_stopping(50, verbose=False),
+        m = lgb.train(PARAMS, dtr, num_boost_round=NUM_BOOST_ROUND, valid_sets=[dva],
+                      callbacks=[lgb.early_stopping(EARLY_STOPPING, verbose=False),
                                  lgb.log_evaluation(0)])
         p = m.predict(X[va], num_iteration=m.best_iteration)
         auc = roc_auc_score(y[va], p) if len(set(y[va])) > 1 else float("nan")

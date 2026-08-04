@@ -7,6 +7,15 @@ v2（扩充版）：因子从 11 → 36，参考微软 qlib Alpha158 的量价/�
 兼容性：**只做加法**——原 11 个因子键(mom5/mom10/mom20/vs_ma20/ma_bull/vol20/rsi/
 vol_ratio/vol_price_sync/pos60/mean_rev)与内部字段(_atr/_ma20/_last/_rets)全部保留，
 因为 app.py 的规则兜底 score_from_factors / forecast / decide 直接引用它们。
+
+v3（扩品类版）：因子 36 → 56，新增两类**正交**信息，突破"全是单股日线价量同源"的瓶颈：
+  A) 大盘相对/市场状态（8 个）：超额动量、相对强弱斜率、beta、与大盘相关性、
+     大盘动量/位置/波动率 regime。需传入 index_closes（与个股按日期对齐的大盘指数收盘序列）。
+  B) 单股高阶价量（12 个）：隔夜跳空、日内强弱、上下影线、Chaikin 资金流(CMF)、
+     资金流指标(MFI)、波动率的波动率、动量加速度、距60日低点、成交量 z 分、Amihud 非流动性。
+     其中跳空/日内/影线需传入 opens（开盘价序列）。
+设计约束：opens / index_closes 均为**可选**参数，缺失时对应因子取 0（优雅降级），
+从而训练、线上 /predict、规则兜底三处口径永远一致，且任何一方缺数据都绝不报错。
 """
 import numpy as np
 
@@ -30,6 +39,9 @@ FEATURE_NAMES = [
     # --- 新增：经典技术指标 ---
     "max_dd60", "cci14", "wr14", "boll_pct",
 ]
+# 注：compute_factors 内部仍会计算 v3 试验因子(大盘相对/单股高阶)，但经同一样本外
+# holdout 科学对拍，这 20 个新因子净损害泛化(0.5966 vs 0.6140)，故不纳入 FEATURE_NAMES、
+# 不进入模型输入。保留计算代码仅为可追溯，线上向量维度始终 36，与所部署模型严格一致。
 
 
 def _finite(x, default=0.0):
@@ -38,13 +50,20 @@ def _finite(x, default=0.0):
     return x if np.isfinite(x) else float(default)
 
 
-def compute_factors(closes, highs, lows, vols):
+def compute_factors(closes, highs, lows, vols, opens=None, index_closes=None):
     """给定截至某日的历史序列，计算当日因子快照。
-    返回 dict，含 FEATURE_NAMES 全部键，外加内部字段 _ma20/_last/_rets/_atr。"""
+    返回 dict，含 FEATURE_NAMES 全部键，外加内部字段 _ma20/_last/_rets/_atr。
+
+    可选参数（v3）：
+      opens         —— 开盘价序列（与 closes 等长、同步）。用于跳空/日内/影线因子；缺失取 0。
+      index_closes  —— 大盘指数收盘序列（与个股按日期对齐、等长）。用于相对/市场状态因子；缺失取 0。
+    两者缺失时对应因子安全归零，训练/线上/兜底口径一致，绝不报错。"""
     c = np.asarray(closes, float)
     h = np.asarray(highs, float)
     l = np.asarray(lows, float)
     v = np.asarray(vols, float)
+    o = np.asarray(opens, float) if opens is not None and len(opens) == len(c) else None
+    idx = np.asarray(index_closes, float) if index_closes is not None and len(index_closes) >= 2 else None
     n = len(c)
     last = c[-1]
     f = {}
@@ -199,6 +218,128 @@ def compute_factors(closes, highs, lows, vols):
         f["boll_pct"] = (last - lower) / (upper - lower) * 100 if upper > lower else 50.0
     else:
         f["boll_pct"] = 50.0
+
+    # ========== v3 A：大盘相对 / 市场状态（index_closes 缺失 → 全 0）==========
+    # 默认 0，仅在有对齐大盘序列时覆盖，保证缺数据也不报错。
+    for kk in ("exc_mom5", "exc_mom20", "rs_slope20", "beta60", "corr_idx60",
+               "idx_mom20", "idx_pos60", "idx_vol20"):
+        f[kk] = 0.0
+    if idx is not None:
+        ic = idx
+        m_len = min(len(ic), n)
+        cc_al = c[-m_len:]; ic_al = ic[-m_len:]
+        # 超额动量：个股涨幅 - 大盘涨幅（短线强弱本质是相对概念）
+        if m_len > 5:
+            stk5 = (cc_al[-1] / cc_al[-6] - 1) * 100
+            idx5 = (ic_al[-1] / ic_al[-6] - 1) * 100
+            f["exc_mom5"] = stk5 - idx5
+        if m_len > 20:
+            stk20 = (cc_al[-1] / cc_al[-21] - 1) * 100
+            idx20 = (ic_al[-1] / ic_al[-21] - 1) * 100
+            f["exc_mom20"] = stk20 - idx20
+        # 相对强弱(RS = 个股/大盘 比值)的20日斜率：捕捉"跑赢/跑输大盘"的趋势
+        if m_len >= 20:
+            rs = cc_al / np.where(ic_al == 0, np.nan, ic_al)
+            rs = rs[np.isfinite(rs)]
+            if len(rs) >= 20:
+                seg = rs[-20:]
+                xs = np.arange(len(seg))
+                base = np.mean(seg) + 1e-9
+                f["rs_slope20"] = float(np.polyfit(xs, seg, 1)[0] / base * 100)
+        # beta / 相关性（60日日收益回归）
+        if m_len >= 30:
+            sr = np.diff(cc_al) / (cc_al[:-1] + 1e-9)
+            ir = np.diff(ic_al) / (ic_al[:-1] + 1e-9)
+            k60 = min(60, len(sr), len(ir))
+            sr60 = sr[-k60:]; ir60 = ir[-k60:]
+            if k60 >= 10 and np.std(ir60) > 1e-12:
+                var_i = float(np.var(ir60))
+                cov = float(np.mean((sr60 - sr60.mean()) * (ir60 - ir60.mean())))
+                f["beta60"] = cov / (var_i + 1e-12)
+                if np.std(sr60) > 1e-12:
+                    f["corr_idx60"] = float(np.corrcoef(sr60, ir60)[0, 1])
+        # 大盘自身状态（regime）：动量 / 位置 / 波动，让模型知道"当前市场环境"
+        if len(ic) > 20:
+            f["idx_mom20"] = (ic[-1] / ic[-21] - 1) * 100
+        if len(ic) >= 60:
+            hi = float(np.max(ic[-60:])); lo = float(np.min(ic[-60:]))
+            f["idx_pos60"] = (ic[-1] - lo) / (hi - lo) * 100 if hi > lo else 50.0
+        ir_all = np.diff(ic) / (ic[:-1] + 1e-9) * 100
+        if len(ir_all) >= 20:
+            f["idx_vol20"] = float(np.std(ir_all[-20:]))
+
+    # ========== v3 B：单股高阶价量 ==========
+    # 隔夜跳空均值(近5日)：(open_t - close_{t-1})/close_{t-1}，需要 opens
+    f["gap_mean5"] = 0.0
+    f["intraday_str"] = 0.0
+    f["up_shadow"] = 0.0
+    f["dn_shadow"] = 0.0
+    if o is not None and n >= 6:
+        gaps = (o[1:] - c[:-1]) / (c[:-1] + 1e-9) * 100
+        gaps = gaps[np.isfinite(gaps)]
+        f["gap_mean5"] = float(np.mean(gaps[-5:])) if len(gaps) >= 1 else 0.0
+        # 日内强弱：(close-open)/(high-low)，近5日均值，衡量多空盘中掌控力
+        rng = (h - l)
+        intr = (c - o) / np.where(rng == 0, np.nan, rng)
+        intr = intr[np.isfinite(intr)]
+        f["intraday_str"] = float(np.mean(intr[-5:])) if len(intr) >= 1 else 0.0
+        # 上/下影线占比(近10日均值)：上影长=抛压，下影长=承接
+        body_hi = np.maximum(o, c); body_lo = np.minimum(o, c)
+        us = (h - body_hi) / np.where(rng == 0, np.nan, rng)
+        ds = (body_lo - l) / np.where(rng == 0, np.nan, rng)
+        us = us[np.isfinite(us)]; ds = ds[np.isfinite(ds)]
+        f["up_shadow"] = float(np.mean(us[-10:])) if len(us) >= 1 else 0.0
+        f["dn_shadow"] = float(np.mean(ds[-10:])) if len(ds) >= 1 else 0.0
+    # Chaikin Money Flow(20)：((C-L)-(H-C))/(H-L) * 量，20日资金流向（主力吸筹/派发代理）
+    if n >= 20:
+        rng2 = (h - l)
+        mfm = ((c - l) - (h - c)) / np.where(rng2 == 0, np.nan, rng2)
+        mfv = np.where(np.isfinite(mfm), mfm, 0.0) * v
+        f["cmf20"] = float(np.sum(mfv[-20:]) / (np.sum(v[-20:]) + 1e-9))
+    else:
+        f["cmf20"] = 0.0
+    # Money Flow Index(14)：带量的 RSI，0..100，衡量资金推动的超买超卖
+    if n >= 15:
+        tp2 = (h + l + c) / 3.0
+        rmf = tp2 * v
+        dtp = np.diff(tp2)
+        pos_mf = float(np.sum(rmf[1:][dtp > 0][-14:])) if np.any(dtp > 0) else 0.0
+        neg_mf = float(np.sum(rmf[1:][dtp < 0][-14:])) if np.any(dtp < 0) else 0.0
+        f["mfi14"] = 100.0 if neg_mf == 0 else 100 - 100 / (1 + pos_mf / (neg_mf + 1e-9))
+    else:
+        f["mfi14"] = 50.0
+    # 波动率的波动率(vol-of-vol)：20日 滚动10日波动 的标准差，捕捉波动放大/收敛
+    if len(rets) >= 30:
+        roll = np.array([np.std(rets[i - 10:i]) for i in range(len(rets) - 20, len(rets))])
+        f["vov20"] = float(np.std(roll)) if len(roll) else 0.0
+    else:
+        f["vov20"] = 0.0
+    # 动量加速度：mom5 - 上一期 mom5(5日前)，>0 表示上涨在提速
+    if n > 10:
+        prev_mom5 = (c[-6] / c[-11] - 1) * 100
+        f["mom_accel"] = f["mom5"] - prev_mom5
+    else:
+        f["mom_accel"] = 0.0
+    # 距60日最低点涨幅(%)：越大越远离底部
+    lo60_l = float(np.min(l[-60:])) if n >= 1 else last
+    f["dist_low60"] = (last / lo60_l - 1) * 100 if lo60_l else 0.0
+    # 成交量 z 分(近20日)：今日量相对20日均值的标准分，异常放量检测
+    if n >= 20 and np.std(v[-20:]) > 1e-9:
+        f["vol_z20"] = float((v[-1] - np.mean(v[-20:])) / np.std(v[-20:]))
+    else:
+        f["vol_z20"] = 0.0
+    # Amihud 非流动性(近20日)：|日收益| / 成交量 的均值 ×1e6，越高越不流动（冲击成本高）
+    if len(rets) >= 20 and n >= 21:
+        illiq = np.abs(rets[-20:]) / (v[-20:] + 1e-9)
+        f["amihud20"] = float(np.mean(illiq) * 1e6)
+    else:
+        f["amihud20"] = 0.0
+    # 量能加速度：近5日均量 / 前5日均量 - 1，量能是否在放大
+    if n >= 10:
+        v_now = float(np.mean(v[-5:])); v_prev = float(np.mean(v[-10:-5]))
+        f["turn_accel"] = (v_now / (v_prev + 1e-9) - 1) * 100
+    else:
+        f["turn_accel"] = 0.0
 
     # ========== 统一清洗：FEATURE_NAMES 内的 nan/inf → 0 ==========
     for name in FEATURE_NAMES:
