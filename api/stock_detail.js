@@ -230,7 +230,7 @@ export default async function handler(req, res) {
     if (wantQuant && candles.length >= 25) {
       const holdCost = Number(req.query.holdCost) || null;
       const hold = holdCost ? { cost: holdCost, qty: Number(req.query.holdQty) || null } : null;
-      try { quant = await fetchQuantPredict(code, candles, hold, 15000); } catch { /* 静默降级 */ }
+      try { quant = await fetchQuantPredict(code, candles, hold, 20000); } catch { /* 静默降级 */ }
     }
 
     // 缓存策略：带量化请求时，拿到 quant 才短缓存(60s)，没拿到不缓存(下次可重试冷启动后的服务)

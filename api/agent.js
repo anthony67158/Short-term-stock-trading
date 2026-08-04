@@ -121,10 +121,11 @@ const TOOLS = [
 
 // ---------- Skill 工具执行器（真正调数据） ----------
 async function execTool(name, args, origin) {
-  const call = async (pathname) => {
+  const call = async (pathname, timeoutMs = 8000) => {
     // 内部 API 调用加超时保护(原来无超时——某个工具后端卡住会拖垮整轮 agent、烧光预算)
+    // timeoutMs 可覆盖：普通工具 8s 足够；量化含冷启动需放宽(见 get_quant_score)
     const c = new AbortController();
-    const to = setTimeout(() => c.abort(), 8000);
+    const to = setTimeout(() => c.abort(), timeoutMs);
     try {
       const r = await fetch(origin + pathname, { headers: { 'x-internal': '1' }, signal: c.signal });
       return await r.json();
@@ -158,7 +159,17 @@ async function execTool(name, args, origin) {
     }
     if (name === 'get_quant_score') {
       // 拉量化打分 + 专业技术指标（含买卖价位锚），给 LLM 做量化依据
-      const j = await call(`/api/stock_detail?code=${args.code}&klt=101&lmt=60&quant=1`);
+      // 量化后端(LightGBM+GARCH)冷启动实测~11s，8s 会被 abort。放宽到 24s，并做一次重试:
+      // 首次可能踩冷启动，重试时服务已热(~1s)，几乎必成。绝不因超时让"量化打分"整块失败。
+      const path = `/api/stock_detail?code=${args.code}&klt=101&lmt=60&quant=1`;
+      let j = null;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          j = await call(path, 24000);
+          if (j && (j.quant || j.tech)) break; // 拿到量化或技术面即可
+        } catch { /* 超时/网络错，进入重试 */ }
+      }
+      j = j || {};
       const q = j.quant || null;
       const t = j.tech || null;
       const out = { code: args.code, name: (j.profile && j.profile.name) || args.code };
@@ -299,6 +310,21 @@ export default async function handler(req, res) {
     const host = req.headers['x-forwarded-host'] || req.headers.host;
     const origin = `${proto}://${host}`;
     const sysExtra = focusStock ? `\n\n【当前用户聚焦的股票】${focusStock.name}（${focusStock.code}），如无特别说明，"这只票/它"指这只。` : '';
+
+    // ===== 量化服务预热（fire-and-forget）=====
+    // 量化后端(LightGBM+GARCH)冷启动~11s。在 agent 一进来就发一个廉价预热请求，
+    // 让服务在第1轮扫描期间完成冷启动；等第2轮真正并行调 get_quant_score 时已是热实例(~1s)，
+    // 大幅降低"量化打分"因冷启动超时而失败的概率。不阻塞、失败静默。
+    (async () => {
+      try {
+        const c = new AbortController();
+        const to = setTimeout(() => c.abort(), 28000);
+        await fetch(`${origin}/api/stock_detail?code=600519&klt=101&lmt=60&quant=1`, {
+          headers: { 'x-internal': '1', 'x-warmup': '1' }, signal: c.signal,
+        }).catch(() => {});
+        clearTimeout(to);
+      } catch { /* 预热失败无所谓 */ }
+    })();
 
     // ===== 理论 RAG + 外部最新财经快讯（并行，供 AI 主动参考消息面）=====
     let theoryHits = [];

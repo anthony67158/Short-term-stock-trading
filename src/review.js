@@ -1,7 +1,7 @@
 // 复盘工具：构造复盘请求 payload + 调用后端 review 模式
 // 复盘结论"每只股只留最新一条"，存 planStore.reviews（云端持久化）
 import { callAI, callAIStream } from './ai'
-import { planStore, livePositionOf } from './planStore'
+import { planStore, livePositionOf, computeTFlows } from './planStore'
 
 // 北京时间当前分钟数 / 日key
 export function nowBJ() { const n = new Date(); return new Date(n.getTime() + (n.getTimezoneOffset() + 480) * 60000) }
@@ -169,13 +169,38 @@ async function reviewAllHoldings(session, quoteMap, opts = {}) {
   let ok = 0, fail = 0, skipped = 0
   for (const code of codes) {
     if (onlyMissing && !isReviewMissingToday(code)) { skipped++; continue }
-    const lp = livePositionOf(code)  // {qty,cost,hasOpenT,tNetHands}
-    if (!lp) continue
     const name = (holding.find((h) => h.code === code) || {}).name || code
     const price = quoteMap && quoteMap[code] ? quoteMap[code].price : null
-    const pnlPct = (price && lp.cost) ? +(((price - lp.cost) / lp.cost) * 100).toFixed(2) : null
+    const lp = livePositionOf(code)  // {qty,cost,hasOpenT,tNetHands} 或 null(底仓被反T卖光)
+    let cost, qty, openTNet
+    if (lp) {
+      cost = lp.cost; qty = lp.qty; openTNet = lp.hasOpenT ? lp.tNetHands : 0
+    } else {
+      // 反T(先卖后买)把底仓全部卖出、尚未接回→实时可卖持仓为0。不能跳过,否则用户看不到"该接回"的指导。
+      // 用底仓成本作参考,holdQty=0,openTNet为负,让复盘去指导接回/加仓而非"继续持有"。
+      const hs = holding.filter((h) => h.code === code)
+      let tNet = 0, baseCostSum = 0, baseQtySum = 0
+      for (const h of hs) {
+        const rr = computeTFlows(h.tFlows)
+        tNet += (rr.openBuy || 0) - (rr.openSell || 0)
+        baseCostSum += (h.buyPrice || 0) * (h.qty || 0); baseQtySum += (h.qty || 0)
+      }
+      if (tNet >= 0) continue  // 非"卖光未接回"场景(真的空仓)才跳过
+      cost = baseQtySum > 0 ? +(baseCostSum / baseQtySum).toFixed(3) : null
+      qty = 0; openTNet = tNet
+    }
+    const pnlPct = (price && cost) ? +(((price - cost) / cost) * 100).toFixed(2) : null
     try {
-      const r = await generateReview({ code, name, session, hold: { cost: lp.cost, qty: lp.qty, pnlPct, openTNet: lp.hasOpenT ? lp.tNetHands : 0 } })
+      // 关键:必须走流式(传 onPhase)。批量复盘逐只串行,慢票(如涨停+反T要重分析,可耗时60~90s)
+      // 用非流式 callAI 会被网关/浏览器空闲超时静默掐断→"只有最慢的那只没复盘成功"(泰坦股份复现)。
+      // 流式期间后端持续发 phase 心跳事件,连接不空闲,慢票也能跑完。onProgress 供上层回显进度。
+      const onPhase = opts.onProgress ? (p) => opts.onProgress(code, name, p) : () => {}
+      let r = await generateReview({ code, name, session, hold: { cost, qty, pnlPct, openTNet }, onPhase })
+      // 慢票偶发失败(超时/网络抖动)再重试一次:批量场景下"只有一只没成功"多是瞬时问题,重试即可救回。
+      if (!r || r.error) {
+        if (opts.onProgress) opts.onProgress(code, name, { text: '首次未成功，正在重试…' })
+        r = await generateReview({ code, name, session, hold: { cost, qty, pnlPct, openTNet }, onPhase })
+      }
       if (r && !r.error) ok++; else fail++
     } catch { fail++ }
   }
@@ -210,7 +235,7 @@ export async function forceGenerateReviews(session, quoteMap, opts = {}) {
   try {
     const s = session || currentAutoSession() || 'manual'
     const onlyMissing = opts.onlyMissing !== false // 默认只补缺口
-    const res = await reviewAllHoldings(s, quoteMap, { onlyMissing })
+    const res = await reviewAllHoldings(s, quoteMap, { onlyMissing, onProgress: opts.onProgress })
     if (res.ok > 0 && (s === 'close' || s === 'noon')) markDone(s)
     return res
   } finally {

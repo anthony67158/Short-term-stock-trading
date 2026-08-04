@@ -11,6 +11,11 @@ function persist() {
   try { localStorage.setItem(KEY, JSON.stringify(mem)) } catch { /* ignore */ }
 }
 
+// 轻量订阅：建议刷新时通知（供自选卡片自动跟随「建议买入价/手数」）
+const subs = new Set()
+export function subscribeAdvice(fn) { subs.add(fn); return () => subs.delete(fn) }
+function notify() { subs.forEach((fn) => { try { fn() } catch { /* ignore */ } }) }
+
 export function getAdvice(code) {
   if (!code) return null
   const e = mem[code]
@@ -29,9 +34,11 @@ export function saveAdvice(code, data) {
       .forEach((k) => delete mem[k])
   }
   persist()
+  notify()
 }
 
 export function clearAdvice(code) {
   if (code) { delete mem[code] } else { mem = {} }
   persist()
+  notify()
 }

@@ -776,6 +776,39 @@ export default async function handler(req, res) {
         };
         // opQty(hold_advice/review 文案手数)
         clampQtyField('opQty');
+        // (1b) 底仓为 0(反T已全部卖出未接回):绝对不能再出现任何"卖出/减仓/清仓X手"的建议。
+        //   LLM 仍可能把之前卖掉的手数当成还持有("剩余X手拿到收盘/X手清掉"),这里强制纠偏。
+        if (Number.isFinite(hq) && hq === 0) {
+          const openT = Number(payload.openTNet) || 0; // 负=反T卖出未接回手数
+          const soldBack = Math.abs(openT);
+          const scrub = (field) => {
+            if (typeof result[field] !== 'string') return;
+            // 命中"卖/减/清仓...手""拿到收盘""继续持有""让利润跑"等基于"手上有货"的错误指令 → 改写为"接回"口径
+            if (/(卖出|减仓|清仓|减半|拿到收盘|拿到尾盘).*?手|清掉|清仓|继续持有|保留持有|让利润(跑|奔跑)|封住.*持有|持有\s*\d+\s*手/.test(result[field])) {
+              result[field] = soldBack > 0
+                ? `底仓已被反T全部卖出、当前0手在手，无可卖/可持底仓；应择机把之前卖出的${soldBack}手在更低价接回(先买)以完成这笔反T`
+                : `当前0手在手，无可卖底仓，不宜再做卖出操作`;
+              notes.push('底仓为0(反T未接回),已纠正持有/卖出类指令为接回口径');
+            }
+          };
+          ['opQty', 'actionPlan', 'nextAction', 'headline', 'title', 'reason', 'plain', 'keyLevel', 'invalidation'].forEach(scrub);
+          // review:底仓0时 stance 不能是"持有/减仓/清仓",强制拉到"加仓"(接回也算加仓方向)或"观望"
+          if (mode === 'review' && soldBack > 0 && /持有|减仓|清仓/.test(String(result.stance || ''))) {
+            result.stance = '加仓';
+            result.tone = 'red';
+            notes.push('底仓为0(反T未接回),stance已从持有/减仓类改为加仓(接回)');
+          }
+          // review opQty 若仍是"持有/减仓/清仓X手",直接改写为接回口径
+          if (mode === 'review' && soldBack > 0 && typeof result.opQty === 'string' && /持有|减仓|清仓/.test(result.opQty)) {
+            result.opQty = `接回${soldBack}手`;
+          }
+          // t_advice:底仓0时禁止反T(先卖),方向只能是正向接回
+          if (mode === 't_advice' && result.dir === 'reverse') {
+            result.dir = 'positive';
+            if (result.dirLabel) result.dirLabel = '接回未平反T(先买)';
+            notes.push('底仓为0,反T方向已改为先买接回');
+          }
+        }
         // t_advice 反T卖出腿手数:suggestQty 是数字,反T时不能超过持仓
         if (mode === 't_advice' && Number.isFinite(hq) && result.dir === 'reverse'
             && result.suggestQty != null && Number(result.suggestQty) > hq) {
@@ -799,6 +832,62 @@ export default async function handler(req, res) {
         if (result.leg1Price != null) result.leg1Price = clampPx(result.leg1Price, '第一腿价');
         if (result.leg2Price != null) result.leg2Price = clampPx(result.leg2Price, '第二腿价');
         // review 关键价 support/resistance 不改(仅为参考位),但 keyLevel 是文案,不做数字夹取
+
+        // (3) ★金额严格重算·不信任模型心算★
+        //   资金额恒等于:手数 × 100股/手 × 参考价。模型常犯"15手×50.5元算成7575元(漏了×10)"这类错。
+        //   这里按结构化字段重算 opAmount/planAmount,并把 actionPlan/nextAction 文案里的"约用XXXX元"就地改对。
+        try {
+          const round0 = (n) => Math.round(n);
+          // 解析一段文字里的手数(取第一处"N手")
+          const handsIn = (s) => { const m = typeof s === 'string' && s.match(/(\d+(?:\.\d+)?)\s*手/); return m ? parseFloat(m[1]) : null; };
+          // 结构化动作 → 该用哪个参考价
+          const act = String(result.action || result.stance || '');
+          const isBuySide = /加仓|买入|买回|接回|试仓|试错|回调.*买|立即买/.test(act) || /买回|接回|加仓|买入/.test(String(result.opQty || ''));
+          const isSellSide = /减仓|清仓|卖出/.test(act) || /减仓|清仓|卖/.test(String(result.opQty || ''));
+          // buy_advice 用 buyPrice/planQty;hold_advice/review 用 add/reduce + opQty
+          const refPxStruct = mode === 'buy_advice'
+            ? Number(result.buyPrice)
+            : (isBuySide ? Number(result.addPrice) : isSellSide ? Number(result.reducePrice) : NaN);
+          const handsStruct = mode === 'buy_advice'
+            ? Number(result.planQty)
+            : (handsIn(result.opQty));
+          // 3a. 重算结构化金额字段(opAmount / planAmount)
+          const amtField = mode === 'buy_advice' ? 'planAmount' : 'opAmount';
+          if (Number.isFinite(refPxStruct) && refPxStruct > 0 && Number.isFinite(handsStruct) && handsStruct > 0) {
+            const correct = round0(handsStruct * 100 * refPxStruct);
+            const prev = result[amtField];
+            const prevNum = typeof prev === 'string' ? parseFloat(String(prev).replace(/[^\d.]/g, '')) : Number(prev);
+            if (!Number.isFinite(prevNum) || Math.abs(prevNum - correct) > Math.max(1, correct * 0.02)) {
+              result[amtField] = String(correct);
+              notes.push(`资金额已按 ${handsStruct}手×100×${refPxStruct}元=${correct}元 严格重算`);
+            }
+          }
+          // 3b. 修正文案里的"约用/约需/回笼 XXXX 元"——用文案自身的"N手"与"按X元"重算,避免漏乘/多乘
+          const fixMoneyInText = (field) => {
+            const t = result[field];
+            if (typeof t !== 'string') return;
+            const hands = handsIn(t);
+            // 文案里的参考价:优先"按X元(估算/计算/挂单)",否则用结构化参考价
+            let px = null;
+            const pm = t.match(/按\s*([\d.]+)\s*元/);
+            if (pm) px = parseFloat(pm[1]);
+            else if (Number.isFinite(refPxStruct)) px = refPxStruct;
+            if (!(hands > 0 && px > 0)) return;
+            const correct = round0(hands * 100 * px);
+            // 命中"(约|共|需|用|花|回笼|支出|买入|卖出)...数字元"里的金额并纠正(排除百分比/价位本身)
+            result[field] = t.replace(/((?:约(?:需|用|花|支出|回笼)?|共|需|回笼|合计)\s*)([\d,]{3,})(\s*元)/g, (full, pre, num, suf) => {
+              const v = parseFloat(num.replace(/,/g, ''));
+              // 只纠"资金总额"量级(≥1000元且与正确值偏差>2%);价位类小数字不动
+              if (Number.isFinite(v) && v >= 1000 && Math.abs(v - correct) > Math.max(1, correct * 0.02)) {
+                notes.push(`${field}资金额 ${v}→${correct}(按${hands}手×100×${px}元严格重算)`);
+                return pre + correct + suf;
+              }
+              return full;
+            });
+          };
+          ['actionPlan', 'nextAction', 'reason', 'positionNote', 'plain'].forEach(fixMoneyInText);
+        } catch { /* 金额重算失败不影响主流程 */ }
+
         if (notes.length) result.serverAdjust = notes.join('；');
       } catch { /* 兜底纠偏失败不影响主流程 */ }
     }

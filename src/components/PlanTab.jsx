@@ -7,10 +7,10 @@ import { AlertForm } from './AlertCenter'
 import { usePolling } from '../hooks'
 import { callAI, callAIStream } from '../ai'
 import { api } from '../apiBase'
-import { planStore, usePlanStore, calcBuyFee, calcSellFee, computeTFlows, computePortfolio } from '../planStore'
+import { planStore, usePlanStore, calcBuyFee, calcSellFee, computeTFlows, computePortfolio, livePositionOf } from '../planStore'
 import { aiStore } from '../aiStore'
 import { openStockDetail, useDetailStore } from '../detailStore'
-import { getAdvice } from '../adviceCache'
+import { getAdvice, subscribeAdvice } from '../adviceCache'
 import { generateReview, sessionLabel, forceGenerateReviews, currentAutoSession, missingReviewCount } from '../review'
 import { fmtPct, pctClass, fmtNum, fmtInflow , fmtRaw, hasVal, opText } from '../format'
 
@@ -267,22 +267,44 @@ function StockSearch() {
   const [kw, setKw] = useState('')
   const [list, setList] = useState([])
   const [open, setOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState('')
   const timer = useRef(null)
+  const reqSeq = useRef(0)  // 防竞态：只认最新一次请求的结果
+
+  // 真正发起搜索：名称/代码/拼音 → 后端 /api/search（真实A股+ETF+北交所数据）
+  const runSearch = async (raw) => {
+    const v = (raw ?? kw).trim()
+    if (!v) { setList([]); setErr(''); setLoading(false); return }
+    const seq = ++reqSeq.current
+    setLoading(true); setErr(''); setOpen(true)
+    try {
+      const r = await fetch(api('/api/search?kw=' + encodeURIComponent(v))).then((x) => x.json())
+      if (seq !== reqSeq.current) return  // 已有更新的请求，丢弃旧结果
+      if (r && r.ok) { setList(r.list || []); setErr('') }
+      else { setList([]); setErr((r && r.error) ? '搜索失败，请重试' : '搜索失败，请重试') }
+    } catch {
+      if (seq !== reqSeq.current) return
+      setList([]); setErr('网络异常，请重试')
+    } finally {
+      if (seq === reqSeq.current) setLoading(false)
+    }
+  }
 
   const onChange = (v) => {
-    setKw(v); setOpen(true)
+    setKw(v); setOpen(true); setErr('')
     if (timer.current) clearTimeout(timer.current)
-    if (!v.trim()) { setList([]); return }
-    timer.current = setTimeout(async () => {
-      try {
-        const r = await fetch(api('/api/search?kw=' + encodeURIComponent(v.trim()))).then((x) => x.json())
-        setList(r.list || [])
-      } catch { setList([]) }
-    }, 250)
+    if (!v.trim()) { setList([]); setLoading(false); return }
+    timer.current = setTimeout(() => runSearch(v), 250)  // 输入防抖自动搜
+  }
+  // 回车 / 点搜索按钮：取消防抖、立即搜（用户主动触发，反馈更快）
+  const submit = () => {
+    if (timer.current) clearTimeout(timer.current)
+    runSearch()
   }
   const pick = (s) => {
     planStore.addPlan({ code: s.code, name: s.name })
-    setKw(''); setList([]); setOpen(false)
+    setKw(''); setList([]); setErr(''); setOpen(false)
   }
 
   return (
@@ -292,11 +314,19 @@ function StockSearch() {
         <input
           value={kw} onChange={(e) => onChange(e.target.value)}
           onFocus={() => kw && setOpen(true)}
-          placeholder="搜索股票名称 / 代码，加入计划…"
+          onKeyDown={(e) => { if (e.key === 'Enter') submit(); else if (e.key === 'Escape') setOpen(false) }}
+          placeholder="搜索股票名称 / 代码 / 拼音，加入计划…"
         />
+        <button className="ss-btn" onClick={submit} disabled={loading} title="搜索">
+          {loading ? <span className="ss-spin" /> : <Icon name="search" size={14} />}
+          <span className="ss-btn-txt">搜索</span>
+        </button>
       </div>
-      {open && list.length > 0 && (
+      {open && kw.trim() && (
         <div className="ss-dropdown">
+          {loading && list.length === 0 && <div className="ss-hint">搜索中…</div>}
+          {!loading && err && <div className="ss-hint err">{err}</div>}
+          {!loading && !err && list.length === 0 && <div className="ss-hint">没有匹配的股票，换个名称/代码试试</div>}
           {list.map((s) => {
             const added = planStore.has(s.code)
             const held = (planStore.get().holding || []).some((x) => x.code === s.code)
@@ -308,6 +338,89 @@ function StockSearch() {
               </div>
             )
           })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------- 候选卡：目标价 + 买入手数 + 买点进度条 ----------
+// 取值可手动填写/编辑，也可自动来源于「AI 操作建议」的建议买入价 / 建议买入手数；
+// 个股详情刷新建议后（saveAdvice 触发 subscribeAdvice），未被手动覆盖的字段自动跟随更新。
+// 进度条：可视化「建议买入价 ↔ 当前价」的差距（当前价越接近/低于目标买价，越接近买点）。
+function CandTarget({ p, q }) {
+  const [, force] = useState(0)
+  // 订阅 AI 建议缓存：详情页刷新建议 → 重渲染 → 未手动覆盖的字段自动跟随
+  useEffect(() => subscribeAdvice(() => force((n) => n + 1)), [])
+
+  const rnd = (v) => (v == null || isNaN(v) ? null : v < 10 ? +Number(v).toFixed(3) : +Number(v).toFixed(2))
+  // AI 建议里的「建议买入价 / 建议买入手数」
+  const adv = (() => { try { const a = getAdvice(p.code); return (a && a.advice) || null } catch { return null } })()
+  const aiPrice = adv && adv.buyPrice != null && !isNaN(adv.buyPrice) ? Number(adv.buyPrice) : null
+  const aiQty = adv && adv.planQty != null && !isNaN(Number(adv.planQty)) ? Math.trunc(Number(adv.planQty)) : null
+
+  // 自动跟随:未手动覆盖时,用 AI 建议回写候选(持久化到云),保证卡片跟着刷新
+  useEffect(() => {
+    const patch = {}
+    if (!p.targetManual && aiPrice != null && rnd(aiPrice) !== rnd(p.targetPrice)) patch.targetPrice = rnd(aiPrice)
+    if (!p.qtyManual && aiQty != null && aiQty !== p.buyQty) patch.buyQty = aiQty
+    if (Object.keys(patch).length) planStore.setCandPlan(p.code, patch)
+    // eslint-disable-next-line
+  }, [aiPrice, aiQty, p.targetManual, p.qtyManual])
+
+  // 生效值:手动优先,否则 AI
+  const target = p.targetPrice != null ? Number(p.targetPrice) : (aiPrice != null ? rnd(aiPrice) : null)
+  const qty = p.buyQty != null ? p.buyQty : (aiQty != null ? aiQty : null)
+  const cur = q && q.price != null ? Number(q.price) : null
+
+  const onPrice = (e) => {
+    const v = e.target.value.trim()
+    if (v === '') planStore.setCandPlan(p.code, { targetPrice: null, targetManual: false })
+    else if (!isNaN(Number(v))) planStore.setCandPlan(p.code, { targetPrice: Number(v), targetManual: true })
+  }
+  const onQty = (e) => {
+    const v = e.target.value.trim()
+    if (v === '') planStore.setCandPlan(p.code, { buyQty: null, qtyManual: false })
+    else if (!isNaN(Number(v))) planStore.setCandPlan(p.code, { buyQty: Math.max(0, Math.trunc(Number(v))), qtyManual: true })
+  }
+  const resetPrice = () => planStore.setCandPlan(p.code, { targetPrice: aiPrice != null ? rnd(aiPrice) : null, targetManual: false })
+
+  // 进度条:当前价 → 目标买价 的接近度。diff>0=当前仍高于目标(需下跌);diff<=0=已到/低于买点
+  let bar = null
+  if (target != null && cur != null && target > 0) {
+    const diffPct = ((cur - target) / target) * 100
+    const W = 8 // 参照窗口:高于目标 8% 记为 0% 接近度
+    const reached = diffPct <= 0
+    const proximity = reached ? 100 : Math.max(0, Math.round((1 - diffPct / W) * 100))
+    const tone = reached ? 'reached' : proximity >= 60 ? 'near' : 'far'
+    const label = reached
+      ? (diffPct < -0.05 ? `已到买点 · 低于目标 ${Math.abs(diffPct).toFixed(1)}%` : '已到买点')
+      : `距目标买价还差 ${diffPct.toFixed(1)}%`
+    bar = { pct: proximity, tone, label }
+  }
+
+  return (
+    <div className="pc-target">
+      <div className="pc-tfields">
+        <label className="pc-tf">
+          <span className="pc-tf-k">目标价</span>
+          <input className="pc-tf-in" inputMode="decimal" placeholder={aiPrice != null ? String(rnd(aiPrice)) : '手填'}
+            value={p.targetPrice != null ? String(p.targetPrice) : ''} onChange={onPrice} />
+          {p.targetManual
+            ? <button type="button" className="pc-tf-src manual" title="点击恢复跟随 AI 建议买入价" onClick={resetPrice}><Icon name="close" size={9} />手填</button>
+            : (aiPrice != null && <span className="pc-tf-src ai" title="来源:AI 建议买入价,详情刷新后自动跟随"><Icon name="spark" size={9} />AI</span>)}
+        </label>
+        <label className="pc-tf">
+          <span className="pc-tf-k">买入手数</span>
+          <input className="pc-tf-in" inputMode="numeric" placeholder={aiQty != null ? String(aiQty) : '手'}
+            value={p.buyQty != null ? String(p.buyQty) : ''} onChange={onQty} />
+          {!p.qtyManual && aiQty != null && <span className="pc-tf-src ai" title="来源:AI 建议买入手数"><Icon name="spark" size={9} />AI</span>}
+        </label>
+      </div>
+      {bar && (
+        <div className={'pc-tbar ' + bar.tone} title={`当前 ${fmtRaw(cur)} → 目标 ${target}`}>
+          <div className="pc-tbar-track"><div className="pc-tbar-fill" style={{ width: bar.pct + '%' }} /></div>
+          <span className="pc-tbar-lb">{bar.label}</span>
         </div>
       )}
     </div>
@@ -351,6 +464,8 @@ function PlanList({ book, quote }) {
             <span>主力 <b className={pctClass(q.mainInflow)}>{fmtInflow(q.mainInflow)}</b></span>
           </div>
         )}
+        {/* 目标价 + 买入手数 + 买点进度条（可手填/编辑，缺省跟随 AI 建议买入价/手数）*/}
+        <CandTarget p={p} q={q} />
         {buying === p.code ? (
           <div className="buy-inline-wrap">
             <div className="buy-inline">
@@ -638,6 +753,7 @@ function HoldOverview({ book, quote }) {
 // ---------- 当前持仓 ----------
 function HoldingList({ book, quote }) {
   const [reviewing, setReviewing] = useState(null) // null | 'loading' | {ok,fail,skipped}
+  const [reviewProg, setReviewProg] = useState('') // 批量复盘进度文案(哪只/哪一步)
   // 职责按【粒度】划分，避免动词歧义：顶部「全部复盘」=对所有持仓统一刷新；单卡「复盘/重做」=只这一只。
   const missing = missingReviewCount()
   // 紧急度排序：触止损/破纪律/触止盈的先处理 → 其余按浮亏在前(先看风险)
@@ -657,10 +773,15 @@ function HoldingList({ book, quote }) {
     const session = currentAutoSession() || 'manual'
     try {
       // 顶部按钮：对【全部】持仓刷新复盘(覆盖)，功能与单卡「只做这一只」明确区分开
-      const res = await forceGenerateReviews(session, qmap, { onlyMissing: false })
+      // 传 onProgress:批量走流式,慢票(涨停+反T)也能跑完;并把"正在复盘哪只/哪一步"回显给用户。
+      const res = await forceGenerateReviews(session, qmap, {
+        onlyMissing: false,
+        onProgress: (code, name, p) => setReviewProg(`${name || code}：${(p && p.text) || '分析中…'}`),
+      })
+      setReviewProg('')
       setReviewing(res)
       setTimeout(() => setReviewing(null), 4000)
-    } catch { setReviewing({ ok: 0, fail: 1 }); setTimeout(() => setReviewing(null), 4000) }
+    } catch { setReviewProg(''); setReviewing({ ok: 0, fail: 1 }); setTimeout(() => setReviewing(null), 4000) }
   }
   return (
     <div className="panel">
@@ -676,6 +797,9 @@ function HoldingList({ book, quote }) {
                 : (reviewing && typeof reviewing === 'object') ? `已复盘${reviewing.ok}只${reviewing.fail ? `·失败${reviewing.fail}` : ''}`
                 : missing > 0 ? `全部复盘 · ${missing}只待更新` : '全部复盘'}
             </button>
+          )}
+          {reviewing === 'loading' && reviewProg && (
+            <span className="sub-name" style={{ marginLeft: 8, opacity: 0.8 }}>{reviewProg}</span>
           )}
         </div>
       </div>
@@ -874,13 +998,18 @@ function HoldingItem({ h, idx, quote: q }) {
     setTAdvice({ loading: true, phase: '正在准备分析…' })
     const onPhase = (p) => setTAdvice((s) => (s && s.loading ? { ...s, phase: p.text } : s))
     try {
+      // 【实时可做T手数】必须扣掉未结算的反T卖腿：先卖后买的反T在"接回"前，底仓已经不在手里，
+      // 可再做反T(先卖)的手数 = 底仓 + 净做T腿(openBuy-openSell)，卖光则为 0，绝不能拿原始底仓 h.qty 误当作还持有。
+      const tNet = (tStat.openBuy || 0) - (tStat.openSell || 0)
+      const liveHoldQty = Math.max(0, (h.qty || 0) + tNet)
       const r = await callAIStream('t_advice', {
         name: h.name, code: h.code,
         nowPrice: q?.price, pct: q?.pct,
         dayHigh: q?.high, dayLow: q?.low, open: q?.open, prevClose: q?.prevClose,
         turnover: q?.turnover, volRatio: q?.volRatio,
         mainInflowYi: q ? +(q.mainInflow / 1e8).toFixed(2) : null,
-        holdCost: h.buyPrice, holdQty: h.qty, baseQty,
+        holdCost: h.buyPrice, holdQty: liveHoldQty, baseQty,
+        openTNet: tNet,  // 未结算做T净手数(正=已净加仓;负=已净卖出/反T未接回，底仓被占用)
         style: useStyle,
       }, onPhase)
       if (r.ok) {
@@ -1420,18 +1549,56 @@ function HoldReview({ code, name, cost, qty, price }) {
   const tone = r ? (r.tone || 'muted') : 'muted'
   const ts = review ? new Date(review.at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : null
   const nextLabel = review ? (review.session === 'noon' ? '下午' : review.session === 'close' ? '明天开盘' : '后续') : '后续'
+  // 陈旧矛盾检测:反T(先卖后买)把底仓卖光未接回时 liveQty=0,但旧复盘还写着"持有/减仓/清仓"→自相矛盾。
+  // 这类卡是上次生成时口径没算对留下的"僵尸结论",要自动重刷成"做T接回/观望"指导,不必用户手点。
+  const staleContradiction = (() => {
+    if (!r) return false
+    const lp = livePositionOf(code)
+    if (lp) return false                       // 实时还有底仓→不矛盾
+    const hs = (planStore.get().holding || []).filter((x) => x.code === code)
+    if (!hs.length) return false               // 没有该持仓条目(真空仓)→不该有卡,跳过
+    let tNet = 0
+    for (const x of hs) { const rr = computeTFlows(x.tFlows); tNet += (rr.openBuy || 0) - (rr.openSell || 0) }
+    if (tNet >= 0) return false                // 只有"反T卖光未接回"(tNet<0)才需要接回指导
+    const txt = `${r.stance || ''} ${r.headline || ''} ${r.nextAction || ''}`
+    return /持有|减仓|清仓|加仓不减|继续拿/.test(txt)  // 结论仍谈"持有类"→与0手矛盾
+  })()
+  const autoFixedRef = useRef('')  // 记录已自动重刷过的复盘版本(code:at),避免死循环
   const doRegenerate = async () => {
     if (regen === 'loading') return
     setRegen('loading'); setRegenPhase('正在准备复盘…')
     try {
-      const pnlPct = (price && cost) ? +(((price - cost) / cost) * 100).toFixed(2) : null
-      const res = await generateReview({ code, name, session: currentAutoSession() || 'manual', hold: { cost, qty, pnlPct }, onPhase: (p) => setRegenPhase(p.text) })
+      // 按【实时持仓】口径复盘:把未结算做T腿计入。反T(先卖后买)未接回时底仓可能被卖光→liveQty=0,
+      // 此时不能说"继续持有",而要指导如何接回/加仓。
+      const lp = livePositionOf(code)
+      let hcost = cost, hqty = qty, openTNet = 0
+      if (lp) {
+        hcost = lp.cost; hqty = lp.qty; openTNet = lp.hasOpenT ? lp.tNetHands : 0
+      } else {
+        // 底仓被反T全部卖出(未接回),实时可卖持仓为0——复盘应指导接回/加仓,而非"继续持有"
+        const hs = (planStore.get().holding || []).filter((x) => x.code === code)
+        let tNet = 0
+        for (const x of hs) { const rr = computeTFlows(x.tFlows); tNet += (rr.openBuy || 0) - (rr.openSell || 0) }
+        hcost = cost; hqty = 0; openTNet = tNet
+      }
+      const pnlPct = (price && hcost) ? +(((price - hcost) / hcost) * 100).toFixed(2) : null
+      const res = await generateReview({ code, name, session: currentAutoSession() || 'manual', hold: { cost: hcost, qty: hqty, pnlPct, openTNet }, onPhase: (p) => setRegenPhase(p.text) })
       if (res && !res.error) { setRegen(null); setOpen(false) }
       else setRegen(res && res.error ? res.error : '生成失败')
     } catch (e) {
       setRegen(String(e.message || e || '生成失败'))
     } finally { setRegenPhase('') }
   }
+  // 检测到"0手却说持有"的陈旧矛盾卡→自动重刷一次(每个复盘版本只自动刷一次,避免死循环)。
+  useEffect(() => {
+    if (!staleContradiction) return
+    if (regen === 'loading') return
+    const ver = review ? `${code}:${review.at}` : ''
+    if (!ver || autoFixedRef.current === ver) return
+    autoFixedRef.current = ver
+    doRegenerate()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [staleContradiction, review && review.at])
   if (!review || !r) {
     return (
       <div className="hold-review rev-muted">
@@ -1457,6 +1624,12 @@ function HoldReview({ code, name, cost, qty, price }) {
           {regen === 'loading' ? (regenPhase || '生成中…') : '重做本只'}
         </button>
       </div>
+      {/* 陈旧矛盾卡自动重刷提示:0手却写"持有"→已识别并正在重生成为做T/接回指导 */}
+      {staleContradiction && regen === 'loading' && (
+        <div className="advice-adjust" style={{ margin: '8px 10px 0' }}>
+          <Icon name="shield" size={12} /> 该复盘与当前0手持仓(已反T卖光)矛盾，正在自动刷新为做T/接回指导…
+        </div>
+      )}
       {regen && regen !== 'loading' && <div className="hr-empty err">{regen}</div>}
 
       {/* ② 结论行：只保留“动作 + 一句话结论”，避免复盘卡堆太多分区 */}

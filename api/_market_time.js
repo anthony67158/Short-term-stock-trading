@@ -119,17 +119,61 @@ export function marketTimeContext() {
   };
 }
 
+// ============ 操作指导时间窗（按"此刻"决定建议面向哪段时间）============
+// 解决"复盘/操作建议不管什么时候生成，指导都写成面向第二天"的低级错误：
+// 指导应面向【紧接着当前时刻的那段可交易时间】——
+//   盘前(未开盘)      → 今天开盘及全天盘中
+//   早盘(9:30-11:30)  → 现在起到今天收盘前的盘中
+//   午间休市(11:30-13:00) → 今天下午(13:00开盘后到收盘)
+//   午盘(13:00-15:00) → 现在起到今天15:00收盘前
+//   盘后(>=15:00)/休市 → 下一交易日开盘
+// 返回 { isToday, whenLabel(短标签), phrase(可直接嵌入提示的动作时段描述), nextTradingDayLabel }
+export function guidanceHorizon() {
+  const bj = nowBJ();
+  const hm = bj.getHours() * 60 + bj.getMinutes();
+  const today = new Date(bj.getTime()); today.setHours(0, 0, 0, 0);
+  const tradingToday = isTradingDay(today);
+  const nextTd = nextTradingDay(bj);
+  const nextLabel = label(nextTd);
+
+  // 非交易日 或 已收盘 → 面向下一交易日
+  if (!tradingToday || hm >= 900) {
+    return {
+      isToday: false,
+      whenLabel: nextLabel,
+      phrase: `下一交易日（${nextLabel}）开盘及当日`,
+      nextTradingDayLabel: nextLabel,
+    };
+  }
+  // 交易日盘前(未开盘，含集合竞价前) → 今天开盘
+  if (hm < 570) {
+    return { isToday: true, whenLabel: '今天', phrase: '今天开盘后（含集合竞价与全天盘中）', nextTradingDayLabel: nextLabel };
+  }
+  // 早盘盘中 9:30-11:30 → 现在到今天收盘前
+  if (hm <= 690) {
+    return { isToday: true, whenLabel: '今天盘中', phrase: '现在起到今天（15:00 收盘前）的盘中', nextTradingDayLabel: nextLabel };
+  }
+  // 午间休市 11:30-13:00 → 今天下午
+  if (hm < 780) {
+    return { isToday: true, whenLabel: '今天下午', phrase: '今天下午（13:00 开盘后到 15:00 收盘前）', nextTradingDayLabel: nextLabel };
+  }
+  // 午盘盘中 13:00-15:00 → 现在到今天收盘前
+  return { isToday: true, whenLabel: '今天收盘前', phrase: '现在起到今天 15:00 收盘前的这段时间', nextTradingDayLabel: nextLabel };
+}
+
 // 生成给 LLM 的"时间坐标 + 铁律"提示块（agent 与结构化 AI 共用）
 export function marketTimePromptBlock() {
   const c = marketTimeContext();
+  const g = guidanceHorizon();  // 操作指导应面向的时段(盘前→今天/盘中→今天收盘前/午间→今天下午/盘后·休市→下一交易日)
   return `【⏰ 当前市场时间坐标（最高优先·作答前必须先认清）】
 - 此刻(北京时间)：${c.bjNow} ${c.weekday}
 - 市场状态：${c.phase}。${c.phaseNote}
 - 数据口径：${c.dataFreshness}你拿到的所有行情/资金/涨停/情绪数据，实际对应的是【${c.dataDayLabel}】这个交易日。
 - 下一个交易日：${c.nextTradingDayLabel}${c.tradingToday && c.isLive ? '' : `；你的操作建议应面向【${c.decisionDayLabel}】${c.decisionIsToday ? '开盘(今天即将开盘)' : '开盘'}。`}
+- 操作指导时间窗：你给的操作建议必须面向【${g.phrase}】——${g.isToday ? '现在还能交易,别把指导写成"明天/下一交易日开盘怎么做",要落到紧接着此刻的这段可交易时间。' : '当天已收盘或休市,面向下一交易日开盘。'}
 【时间铁律】
 1. ${c.tradingToday ? '今天是交易日。' : '⚠️今天不是交易日(休市)，绝对不存在“今日市场情绪/今日实时行情”。任何谈“今天盘面热不热、情绪强弱”的说法都是错的。'}
 2. 引用盘面/情绪时，必须说清是【${c.dataDayLabel}】的数据，不能把历史数据说成“今天/此刻”的实时情绪。
-3. ${c.tradingToday && c.isLive ? '给出面向今日盘中的操作。' : `给建议时明确面向【${c.decisionDayLabel}】开盘${c.decisionIsToday ? '（就是今天，稍后 9:30 开盘，不要说成“明天/下一交易日”）' : '，用真实日期表述，不要笼统说“明天”（可能是周末/假期）'}。`}
+3. ${c.tradingToday && c.isLive ? `给出面向【${g.phrase}】的操作，别写成"明天/下一交易日"——现在盘中/午间还能交易。` : `给建议时明确面向【${c.decisionDayLabel}】开盘${c.decisionIsToday ? '（就是今天，稍后 9:30 开盘，不要说成“明天/下一交易日”）' : '，用真实日期表述，不要笼统说“明天”（可能是周末/假期）'}。`}
 4. ${c.tradingToday && c.isLive ? '' : `${c.decisionIsToday ? '盘前' : '休市'}若被问“今天推荐什么/现在能不能做”，正确姿势是：基于最近交易日(${c.dataDayLabel})的收盘数据做研判，把结论落到【${c.decisionDayLabel}】开盘该怎么做，而不是假装有“今日实时情绪”。`}`;
 }
