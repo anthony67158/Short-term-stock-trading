@@ -21,3 +21,4 @@ qlib-service/deploy_pkg/deps/
 # 训练中间产物(大文件,可重跑 build_dataset.py 重生成)
 qlib-service/dataset.npz
 qlib-service/pool_cache.json
+src/components/.nfs*
