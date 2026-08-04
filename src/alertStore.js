@@ -40,7 +40,8 @@ function hit(a, q) {
   const cmp = (v, op, target) => (op === 'lte' ? v <= target : v >= target)
   switch (a.type) {
     case 'price': {
-      if (q.price == null) return null
+      // 现价必须 > 0 才判定到价:休市/接口异常会返回 0,否则「≤止损价」类预警会被误触发
+      if (q.price == null || !(Number(q.price) > 0)) return null
       if (cmp(q.price, a.op, a.value)) return `现价 ${q.price} ${OP_LABEL[a.op]} ${a.value}`
       return null
     }

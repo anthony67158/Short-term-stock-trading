@@ -571,9 +571,11 @@ function AdvisorScore({ book }) {
 function holdSnapshot(h, q) {
   const shares = (h.qty || 0) * 100
   const costWithFee = shares ? +(((h.buyPrice * shares) + (h.buyFee || 0)) / shares).toFixed(3) : h.buyPrice
-  const pnl = q && costWithFee ? +(((q.price - costWithFee) / costWithFee) * 100).toFixed(2) : null
-  const hitTP = q && h.tp && q.price >= Number(h.tp)
-  const hitSL = q && h.sl && q.price <= Number(h.sl)
+  // 现价有效性:必须 > 0。休市/接口异常返回 0 时不参与任何盈亏/触价计算,否则会算出 -100%、误触止损
+  const px = q && Number(q.price) > 0 ? q.price : null
+  const pnl = px != null && costWithFee ? +(((px - costWithFee) / costWithFee) * 100).toFixed(2) : null
+  const hitTP = px != null && h.tp && px >= Number(h.tp)
+  const hitSL = px != null && h.sl && px <= Number(h.sl)
   let urgency = 0, flag = null
   if (hitSL) { urgency = 100; flag = { tone: 'green', text: '触止损' } }
   else if (pnl != null && pnl <= -8) { urgency = 95; flag = { tone: 'green', text: '破8%纪律' } }
@@ -718,24 +720,27 @@ function HoldingItem({ h, idx, quote: q }) {
   const shares = (h.qty || 0) * 100
   const costWithFee = shares ? +(((h.buyPrice * shares) + (h.buyFee || 0)) / shares).toFixed(3) : h.buyPrice
   const effCost = tStat.realized ? +(costWithFee - tStat.realized / (baseQty * 100)).toFixed(3) : costWithFee
+  // 现价有效性统一闸门:必须 > 0。休市/接口异常返回 0(或 null/NaN)时视为无现价,
+  // 一切依赖现价的计算(浮盈亏、盈亏%、触止盈止损、进度轨)全部安全跳过,杜绝 -100%/±Infinity/误触止损。
+  const validPx = q && Number.isFinite(Number(q.price)) && Number(q.price) > 0 ? Number(q.price) : null
   // 浮盈(净)：现价市值 − 裸成本市值 − 已付买入手续费
-  const floatPnl = q && h.buyPrice ? (q.price - h.buyPrice) * shares - (h.buyFee || 0) : null
-  const pnl = q && costWithFee ? ((q.price - costWithFee) / costWithFee) * 100 : null
+  const floatPnl = validPx != null && h.buyPrice ? (validPx - h.buyPrice) * shares - (h.buyFee || 0) : null
+  const pnl = validPx != null && costWithFee ? ((validPx - costWithFee) / costWithFee) * 100 : null
 
   // 「踏5不破10」策略信号：拉该股日K算 MA5/MA10 → 出信号灯
   const [showStrat, setShowStrat] = useState(false) // 展开信号依据
   const kd = usePolling(`/api/stock_detail?code=${h.code}&klt=101&lmt=30`, 600000, [h.code])
   const candles = (kd.data && kd.data.candles) || []
-  const signal = q ? tap5break10({
-    price: q.price, prevClose: q.prevClose, volRatio: q.volRatio,
+  const signal = validPx != null ? tap5break10({
+    price: validPx, prevClose: q.prevClose, volRatio: q.volRatio,
     candles, cost: costWithFee, pnlPct: pnl,
   }) : null
   // 盘中时段操盘提示（时段 + 实时盘面 → 此刻该怎么做）
-  const play = q ? intradayPlaybook(q) : null
+  const play = validPx != null ? intradayPlaybook(q) : null
 
-  // 交易计划：止盈(tp)/止损(sl)/理由(planReason)。判断现价是否触及
-  const hitTP = q && h.tp && q.price >= Number(h.tp)
-  const hitSL = q && h.sl && q.price <= Number(h.sl)
+  // 交易计划：止盈(tp)/止损(sl)/理由(planReason)。判断现价是否触及(现价无效则一律不触发)
+  const hitTP = validPx != null && h.tp && validPx >= Number(h.tp)
+  const hitSL = validPx != null && h.sl && validPx <= Number(h.sl)
   const [planPrice, setPlanTP] = useState(h.tp != null ? String(h.tp) : '')
   const [planSL, setPlanSL] = useState(h.sl != null ? String(h.sl) : '')
   const [planReason, setPlanReason] = useState(h.planReason || '')
@@ -903,7 +908,9 @@ function HoldingItem({ h, idx, quote: q }) {
         <div className="hold-head-l">
           <StockName code={h.code} name={h.name}><span className="hh-name">{h.name}</span></StockName>
           <span className="hh-code">{h.code}</span>
-          {q && <span className={'hh-price ' + pctClass(q.pct)}>{fmtRaw(q.price)} <span className="hh-chg">{fmtPct(q.pct)}</span></span>}
+          {q && (validPx != null
+            ? <span className={'hh-price ' + pctClass(q.pct)}>{fmtRaw(validPx)} <span className="hh-chg">{fmtPct(q.pct)}</span></span>
+            : <span className="hh-price muted" title="休市或行情暂不可用,现价无效">现价 —</span>)}
         </div>
         {pnl != null && (
           <div className={'hold-pnl ' + (pnl >= 0 ? 'red' : 'green')} title="相对含费成本的浮动盈亏">
@@ -925,8 +932,9 @@ function HoldingItem({ h, idx, quote: q }) {
 
       {/* 止损↔止盈 进度轨：一眼看清现价离两条防线的距离 */}
       {(() => {
-        if (!q || h.sl == null || h.tp == null) return null
-        const sl = Number(h.sl), tp = Number(h.tp), price = q.price
+        // 现价无效(0/null/NaN,如休市)时不渲染进度轨,避免除零得 ±Infinity
+        if (validPx == null || h.sl == null || h.tp == null) return null
+        const sl = Number(h.sl), tp = Number(h.tp), price = validPx
         if (!(tp > sl)) return null
         const clamp = (v) => Math.max(0, Math.min(100, v))
         const pos = clamp(((price - sl) / (tp - sl)) * 100)
