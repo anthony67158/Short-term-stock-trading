@@ -378,7 +378,7 @@ export default async function handler(req, res) {
     }
 
     // t_advice / plan / price / hold_advice / buy_advice / review 模式：服务端补齐"大盘情绪+资金流向+个股历史走势+分时+量化"，让建议有据可依
-    if ((mode === 't_advice' || mode === 'plan' || mode === 'price' || mode === 'hold_advice' || mode === 'buy_advice' || mode === 'review') && payload.code) {
+    if ((mode === 't_advice' || mode === 'plan' || mode === 'hold_advice' || mode === 'buy_advice' || mode === 'review') && payload.code) {
       try {
         phase('正在采集大盘 / 资金 / 分时 / 龙虎榜 / 量化数据…', 'collect');
         const proto = req.headers['x-forwarded-proto'] || 'https';
@@ -517,7 +517,7 @@ export default async function handler(req, res) {
             posInRange: hi20 > lo20 ? +(((last - lo20) / (hi20 - lo20)) * 100).toFixed(0) : null, // 现价在20日区间的位置%
           };
           // 个股历史规律画像（近60日）——做T/建仓/减仓/持仓建议/复盘自动选价的核心依据
-          if (mode === 't_advice' || mode === 'price' || mode === 'hold_advice' || mode === 'buy_advice' || mode === 'review') {
+          if (mode === 't_advice' || mode === 'hold_advice' || mode === 'buy_advice' || mode === 'review') {
             const prof = computeStockProfile(cs);
             if (prof) payload.stockProfile = prof;
           }
@@ -890,6 +890,12 @@ export default async function handler(req, res) {
 
         if (notes.length) result.serverAdjust = notes.join('；');
       } catch { /* 兜底纠偏失败不影响主流程 */ }
+    }
+    // 明确输出「买入手数」的规范化整数字段:planQty 原文常为 "5手"/"约5手"/"5~8手" 等字符串,
+    // 这里抽取首个整数为 planQtyNum,供自选卡「买入手数」直接消费,避免 Number() 得 NaN。
+    if (mode === 'buy_advice' && result && result.planQty != null && result.planQtyNum == null) {
+      const m = String(result.planQty).match(/-?\d+(?:\.\d+)?/);
+      if (m) { const n = Math.trunc(Number(m[0])); if (Number.isFinite(n)) result.planQtyNum = n; }
     }
     return finish({
       ok: true,

@@ -5,10 +5,10 @@ import Reasoning from './Reasoning'
 import { usePolling } from '../hooks'
 import { fmtPct, pctClass, fmtRaw, fmtNum, hasVal, opText } from '../format'
 import { aiStore } from '../aiStore'
-import { callAI, callAIStream } from '../ai'
 import { api } from '../apiBase'
 import { usePlanStore, planStore, computeTFlows, computePortfolio } from '../planStore'
-import { getAdvice, saveAdvice } from '../adviceCache'
+import { getAdvice } from '../adviceCache'
+import { startAdvice, subscribeRunner, isRunning, getRunning, getResult } from '../adviceRunner'
 import { AlertForm } from './AlertCenter'
 
 // 把公司网址补全为可点击的绝对 URL（东财 F10 常给不带协议的裸域名）
@@ -101,115 +101,107 @@ export default function StockDetail({ stock, onClose }) {
       tNetHands,         // 未结算做T净手数(正=已净加仓/负=已净减仓)
     }
   }, [book.holding, stock && stock.code])
-  // 切换股票时：重置各折叠区；操作建议优先从缓存恢复（关闭再打开/刷新后仍可见上次结果）
+  // 切换股票时：重置各折叠区
   useEffect(() => {
     setShowTech(false); setShowForecast(false); setShowMa(false); setShowInfo(false)
-    const cached = stock ? getAdvice(stock.code) : null
-    setQuantState(cached ? { result: cached.result, advice: cached.advice, cachedAt: cached.at } : null)
   }, [stock && stock.code])
-  const loadQuant = async () => {
+  // 操作建议状态源（三级优先）：①后台 runner 正在跑 → 展示实时进度；②本会话刚跑完的瞬时结果
+  // (含 error/adviceMissing/truncated)；③持久缓存(关闭再进/刷新仍可见)。订阅 runner：即使
+  // 关闭弹窗后台仍在生成，重新打开时 sync() 会按当前 code 拉到「后台生成中」或已完成的结果。
+  useEffect(() => {
+    const code = stock && stock.code
+    if (!code) { setQuantState(null); return }
+    const sync = () => {
+      if (isRunning(code)) {
+        const r = getRunning(code)
+        setQuantState({ loading: true, phase: r && r.phase })
+        return
+      }
+      const res = getResult(code)
+      if (res) {
+        setQuantState(res.error
+          ? { error: res.error }
+          : { result: res.result, advice: res.advice, meta: res.meta, news: res.news,
+              adviceMissing: res.adviceMissing, truncated: res.truncated, cachedAt: res.cachedAt })
+        return
+      }
+      const cached = getAdvice(code)
+      setQuantState(cached
+        ? { result: cached.result, advice: cached.advice, meta: cached.meta, news: cached.news, truncated: cached.truncated, cachedAt: cached.at }
+        : null)
+    }
+    sync()
+    return subscribeRunner(sync)
+  }, [stock && stock.code])
+  const loadQuant = () => {
     if (!stock) return
-    setQuantState({ loading: true, phase: '正在准备分析…' })
-    // 流式进度回调：把后端数据采集里程碑实时显示出来，不再"黑盒卡住"
-    const onPhase = (p) => setQuantState((s) => (s && s.loading ? { ...s, phase: p.text } : s))
-    try {
-      const hp = myHold ? `&holdCost=${myHold.cost}&holdQty=${myHold.qty}` : ''
-      // 量化服务(走势预测/多因子分) 与 LLM 操作建议(带具体价位) 并发
-      const quantP = fetch(api(`/api/stock_detail?code=${stock.code}&klt=101&lmt=60&quant=1${hp}&_t=${Date.now()}`))
-        .then((r) => r.json()).catch(() => null)
-      // 军师历史战绩（真实回测胜率），传给后端做自我校准：历史越差越收紧信心
-      const advisorTrack = (() => {
+    const hp = myHold ? `&holdCost=${myHold.cost}&holdQty=${myHold.qty}` : ''
+    const quantUrl = api(`/api/stock_detail?code=${stock.code}&klt=101&lmt=60&quant=1${hp}&_t=${Date.now()}`)
+    // 军师历史战绩（真实回测胜率），传给后端做自我校准：历史越差越收紧信心
+    const advisorTrack = (() => {
+      try {
+        const s = planStore.adviceStats()
+        if (!s || s.total < 5) return null // 样本太少不校准，避免噪声
+        const g = (s.groups || []).find((x) => x.mode === (myHold ? 'hold_advice' : 'buy_advice')) || null
+        // 各操盘理论的真实命中率 → 让军师优先采信在你这些票上"实测更灵"的理论、给低命中理论降权
+        let theoryScores = null
         try {
-          const s = planStore.adviceStats()
-          if (!s || s.total < 5) return null // 样本太少不校准，避免噪声
-          const g = (s.groups || []).find((x) => x.mode === (myHold ? 'hold_advice' : 'buy_advice')) || null
-          // 各操盘理论的真实命中率 → 让军师优先采信在你这些票上"实测更灵"的理论、给低命中理论降权
-          let theoryScores = null
-          try {
-            const t = planStore.theoryStats()
-            const tg = (t && t.groups || []).filter((x) => x.total >= 3) // 每个理论≥3样本才纳入,避免噪声
-            if (tg.length) theoryScores = tg.map((x) => ({ theory: x.theory, winRate: x.winRate, total: x.total, avgPct: x.avgPct }))
-          } catch { /* ignore */ }
-          return {
-            overallWinRate: s.winRate, overallAvgPct: s.avgPct, overallTotal: s.total,
-            modeWinRate: g ? g.winRate : null, modeAvgPct: g ? g.avgPct : null, modeTotal: g ? g.total : 0,
-            theoryScores,
-          }
-        } catch { return null }
-      })()
-      // 持仓 → LLM 给"加/减/持有/清仓 + 具体价位"；未持仓 → LLM 给"买入/等回调/观望 结论 + 对应建议"
-      const adviceP = myHold
-        ? callAIStream('hold_advice', {
-            code: stock.code,
-            name: (profile && profile.name) || stock.name,
-            holdCost: myHold.cost,
-            holdQty: myHold.qty,
-            openTNet: myHold.hasOpenT ? myHold.tNetHands : 0,
-            advisorTrack,
-            account: {
-              totalAssets: (portfolio && portfolio.totalAssets) ?? (book.account && book.account.totalAssets) ?? null,
-              cash: (portfolio && portfolio.available) ?? (book.account && book.account.cash) ?? null,
-              position: portfolio && portfolio.position != null ? portfolio.position : null,
-              holdMktValue: portfolio && portfolio.holdMktValue != null ? portfolio.holdMktValue : null,
-              goal: portfolio && portfolio.goal != null ? portfolio.goal : null,
-              goalProgress: portfolio && portfolio.goalProgress != null ? portfolio.goalProgress : null,
-              goalGap: portfolio && portfolio.goalGap != null ? portfolio.goalGap : null,
-              goalReturnPct: portfolio && portfolio.goalReturnPct != null ? portfolio.goalReturnPct : null,
-              stockWeight: (() => {
-                const p = portfolio && portfolio.positions ? portfolio.positions.find((x) => x.code === stock.code) : null
-                return p && p.weight != null ? p.weight : null
-              })(),
-            },
-          }, onPhase)
-            .then((r) => (r && r.ok ? { advice: r.result, meta: r.meta, news: r.news, truncated: r.truncated } : null)).catch(() => null)
-        : callAIStream('buy_advice', {
-            code: stock.code,
-            name: (profile && profile.name) || stock.name,
-            advisorTrack,
-            account: {
-              totalAssets: (portfolio && portfolio.totalAssets) ?? (book.account && book.account.totalAssets) ?? null,
-              cash: (portfolio && portfolio.available) ?? (book.account && book.account.cash) ?? null,
-              position: portfolio && portfolio.position != null ? portfolio.position : null,
-              holdMktValue: portfolio && portfolio.holdMktValue != null ? portfolio.holdMktValue : null,
-              goal: portfolio && portfolio.goal != null ? portfolio.goal : null,
-              goalProgress: portfolio && portfolio.goalProgress != null ? portfolio.goalProgress : null,
-              goalGap: portfolio && portfolio.goalGap != null ? portfolio.goalGap : null,
-              goalReturnPct: portfolio && portfolio.goalReturnPct != null ? portfolio.goalReturnPct : null,
-            },
-          }, onPhase)
-            .then((r) => (r && r.ok ? { advice: r.result, meta: r.meta, news: r.news, truncated: r.truncated } : null)).catch(() => null)
-      const [j, adviceResp] = await Promise.all([quantP, adviceP])
-      const advice = adviceResp && adviceResp.advice
-      const meta = adviceResp && adviceResp.meta
-      const news = adviceResp && adviceResp.news
-      // 后端标记输出被 max_tokens 截断(或解析仅救回部分字段) → 前端提示"内容不全,可重试"
-      const truncated = !!(adviceResp && (adviceResp.truncated || (advice && advice.truncated)))
-      // 未持仓但 LLM 建议没返回（超时/冷启动）→ 记一个软提示，允许一键重试，不静默回退到模糊量化结论
-      const adviceMissing = !myHold && !advice
-      const result = (j && j.quant) ? j.quant : null
-      if (result || advice) {
-        setQuantState({ result, advice, meta, news, adviceMissing, truncated, cachedAt: Date.now() })
-        saveAdvice(stock.code, { result, advice, meta, news, truncated }) // 持久化：关闭再进/刷新仍可见
-        // 决策记录：把这条建议落库，供事后回测算真实胜率
-        if (advice) {
-          try {
-            const px = (result && result.price) || (overview && overview.price) || myHold?.cost || null
-            planStore.logAdvice({
-              code: stock.code, name: (profile && profile.name) || stock.name,
-              mode: myHold ? 'hold_advice' : 'buy_advice',
-              action: advice.action || advice.stance || '',
-              tone: advice.tone,
-              entryPrice: advice.buyPrice ?? advice.addPrice ?? null,
-              stop: advice.stopPrice ?? null, target: advice.targetPrice ?? null,
-              trust: meta && meta.trustScore ? meta.trustScore.score : null,
-              resonance: meta && meta.resonance ? meta.resonance.score : null,
-              priceAtAdvice: px,
-              theoryNote: advice.theoryNote || '',   // 军师所引理论原文 → 供事后按理论算胜率
-            })
-          } catch { /* ignore */ }
+          const t = planStore.theoryStats()
+          const tg = (t && t.groups || []).filter((x) => x.total >= 3) // 每个理论≥3样本才纳入,避免噪声
+          if (tg.length) theoryScores = tg.map((x) => ({ theory: x.theory, winRate: x.winRate, total: x.total, avgPct: x.avgPct }))
+        } catch { /* ignore */ }
+        return {
+          overallWinRate: s.winRate, overallAvgPct: s.avgPct, overallTotal: s.total,
+          modeWinRate: g ? g.winRate : null, modeAvgPct: g ? g.avgPct : null, modeTotal: g ? g.total : 0,
+          theoryScores,
         }
-      } else setQuantState({ error: '量化服务暂不可用（可能冷启动，请稍后重试）' })
-    } catch (e) { setQuantState({ error: '获取失败：' + String(e.message || e) }) }
+      } catch { return null }
+    })()
+    const account = {
+      totalAssets: (portfolio && portfolio.totalAssets) ?? (book.account && book.account.totalAssets) ?? null,
+      cash: (portfolio && portfolio.available) ?? (book.account && book.account.cash) ?? null,
+      position: portfolio && portfolio.position != null ? portfolio.position : null,
+      holdMktValue: portfolio && portfolio.holdMktValue != null ? portfolio.holdMktValue : null,
+      goal: portfolio && portfolio.goal != null ? portfolio.goal : null,
+      goalProgress: portfolio && portfolio.goalProgress != null ? portfolio.goalProgress : null,
+      goalGap: portfolio && portfolio.goalGap != null ? portfolio.goalGap : null,
+      goalReturnPct: portfolio && portfolio.goalReturnPct != null ? portfolio.goalReturnPct : null,
+    }
+    // 持仓 → LLM 给"加/减/持有/清仓 + 具体价位"；未持仓 → LLM 给"买入/等回调/观望 结论 + 对应建议"
+    const aiPayload = myHold
+      ? {
+          code: stock.code,
+          name: (profile && profile.name) || stock.name,
+          holdCost: myHold.cost,
+          holdQty: myHold.qty,
+          openTNet: myHold.hasOpenT ? myHold.tNetHands : 0,
+          advisorTrack,
+          account: {
+            ...account,
+            stockWeight: (() => {
+              const p = portfolio && portfolio.positions ? portfolio.positions.find((x) => x.code === stock.code) : null
+              return p && p.weight != null ? p.weight : null
+            })(),
+          },
+        }
+      : {
+          code: stock.code,
+          name: (profile && profile.name) || stock.name,
+          advisorTrack,
+          account,
+        }
+    const priceHint = (overview && overview.price) || myHold?.cost || null
+    // ★关键★ 生成流程交给模块级后台 runner：关闭弹窗也照跑完、落缓存、记决策；
+    // 本组件仅订阅 runner + 缓存来展示进度/结果（见下方 useEffect）。
+    startAdvice({
+      code: stock.code,
+      mode: myHold ? 'hold_advice' : 'buy_advice',
+      name: (profile && profile.name) || stock.name,
+      myHold: !!myHold,
+      aiPayload,
+      quantUrl,
+      priceHint,
+    })
   }
   const [showAlert, setShowAlert] = useState(false) // 设预警表单开关
   const { data, loading, error, reload } = usePolling(
@@ -639,7 +631,7 @@ export default function StockDetail({ stock, onClose }) {
                           {!myHold && (hasVal(adv.planQty) || hasVal(adv.planAmount) || hasVal(adv.planWeight)) && (
                             <div className="op-calc">
                               <div className="oc-grid">
-                                {hasVal(adv.planQty) && <div className="oc-cell"><span className="oc-k">建议买入</span><b className="red">{adv.planQty}</b></div>}
+                                {hasVal(adv.planQty) && <div className="oc-cell"><span className="oc-k">买入手数</span><b className="red">{adv.planQty}</b></div>}
                                 {hasVal(adv.planAmount) && <div className="oc-cell"><span className="oc-k">约需资金</span><b>{adv.planAmount}</b></div>}
                                 {hasVal(adv.riskReward) && <div className="oc-cell"><span className="oc-k">盈亏比</span><b>{adv.riskReward}</b></div>}
                               </div>

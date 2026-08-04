@@ -2,6 +2,7 @@ import { useState } from 'react'
 import Icon from './Icon'
 import { authStore, useAuthStore, hasLegacyData } from '../authStore'
 import { llmConfigStore } from '../llmConfigStore'
+import { quantReportUiStore } from '../quantReportUiStore'
 
 // ============ 登录/注册门户（未登录时全屏，云端账号）============
 export default function AuthGate() {
@@ -77,6 +78,9 @@ export function AccountMenu() {
             <div className="acct-menu-label">当前账号 · 数据已云端同步</div>
             <div className="acct-item" onClick={() => { llmConfigStore.open(); setOpen(false) }}>
               <Icon name="brain" size={13} />AI 模型配置
+            </div>
+            <div className="acct-item" onClick={() => { quantReportUiStore.open(); setOpen(false) }}>
+              <Icon name="gauge" size={13} />量化汇报
             </div>
             <div className="acct-item" onClick={() => { authStore.logout(); setOpen(false) }}>
               <Icon name="close" size={13} />退出登录

@@ -1,8 +1,30 @@
 import { useSyncExternalStore } from 'react'
+import { getAdvice } from './adviceCache'
 
 // 唯一 id（分笔持仓/记录用）
 let _seq = 0
 function uid() { return Date.now().toString(36) + '_' + (_seq++).toString(36) }
+
+// 价格按量级取合适小数位:<10 用3位,否则2位(全局统一口径)
+function roundPx(v) {
+  if (v == null || isNaN(v)) return null
+  const n = Number(v)
+  return n < 10 ? +n.toFixed(3) : +n.toFixed(2)
+}
+// 从最新 AI 操作建议缓存里取【标准化】的止盈(tp)/止损(sl)——全局唯一口径。
+// AI 建议字段:targetPrice=目标价(止盈)、stopPrice=止损价;统一映射成持仓/候选卡的 tp/sl。
+// 这样「个股详情页的AI建议」与「持仓卡的止盈/止损」永远同源同值,不会各算各的。
+export function advicePlan(code) {
+  try {
+    const a = getAdvice(code)
+    const adv = a && a.advice
+    if (!adv) return null
+    const tp = adv.targetPrice != null && !isNaN(adv.targetPrice) ? roundPx(adv.targetPrice) : null
+    const sl = adv.stopPrice != null && !isNaN(adv.stopPrice) ? roundPx(adv.stopPrice) : null
+    if (tp == null && sl == null) return null
+    return { tp, sl, action: adv.action || adv.stance || '', tone: adv.tone || '', at: a.at }
+  } catch { return null }
+}
 
 // ---- 理论归因：把军师 theoryNote 自由文本归一化成【规范理论标签】，供事后按理论算胜率 ----
 // 每条建议可能引用 1~2 个理论；命中多个则都记入。顺序 = 优先级(靠前更具体)。
@@ -207,6 +229,27 @@ export const planStore = {
     state.plan = state.plan.map((x) => x.code === code ? { ...x, star: !x.star } : x)
     emit()
   },
+  // 写入某股的【量化得分】(0~100) —— 自选候选与持仓同 code 都更新，专用字段 qScore/qBias/qAt。
+  // 两处触发：①加入自选/首屏时按需评分(quantScore.ensureQuantScore) ②生成AI操作建议时带回最新分(adviceRunner)。
+  // 无变化则不 emit，避免评分回写引发无谓重渲染/云端回存。
+  setQuantScore(code, patch) {
+    if (!code || !patch) return
+    const s = Number(patch.qScore)
+    if (isNaN(s)) return
+    const next = { qScore: +s.toFixed(1), qBias: patch.qBias || '', qAt: patch.qAt || Date.now() }
+    let changed = false
+    const apply = (arr) => (arr || []).map((x) => {
+      if (x.code !== code) return x
+      if (x.qScore === next.qScore && x.qBias === next.qBias) return x // 分数未变→跳过
+      changed = true
+      return { ...x, ...next }
+    })
+    const plan = apply(state.plan)
+    const holding = apply(state.holding)
+    if (!changed) return
+    state.plan = plan; state.holding = holding
+    emit()
+  },
 
   // 计划 → 持仓（每次买入都是独立一笔，同股可多笔并存）
   buy(code, buyPrice, qty = 1) {
@@ -219,12 +262,19 @@ export const planStore = {
     const fee = calcBuyFee(buyAmount)
     const hid = uid()
     state.plan = state.plan.filter((x) => x.code !== code)
+    // 建仓即带上最新 AI 操作建议的止盈/止损(若有):tpManual/slManual=false 表示「跟随AI」,
+    // 之后详情页刷新建议会自动跟随;用户手动改过则置 true 停止跟随。
+    const ap = advicePlan(p.code)
     state.holding = [...state.holding, {
       id: hid, code: p.code, name: p.name, buyPrice: price, buyAt: Date.now(),
       qty: q, buyFee: fee,
+      // 建仓继承候选上已算好的量化得分,持仓卡也能立刻展示分数(之后AI建议刷新会更新)
+      ...(p.qScore != null ? { qScore: p.qScore, qBias: p.qBias, qAt: p.qAt } : {}),
+      ...(ap ? { tp: ap.tp, sl: ap.sl, tpManual: false, slManual: false } : {}),
     }]
     // 记录一条纯买入交易流水
     state.closed = [makeBuyTxn(p.code, p.name, price, q, fee, hid), ...state.closed].slice(0, 300)
+    this._syncPlanAlerts(hid)
     emit()
   },
   // 直接建仓（同股也可多笔，不去重）
@@ -236,12 +286,15 @@ export const planStore = {
     const buyAmount = price * q * 100
     const fee = calcBuyFee(buyAmount)
     const hid = uid()
+    const ap = advicePlan(stock.code)
     state.holding = [...state.holding, {
       id: hid, code: stock.code, name: stock.name, buyPrice: price, buyAt: Date.now(),
       qty: q, buyFee: fee,
+      ...(ap ? { tp: ap.tp, sl: ap.sl, tpManual: false, slManual: false } : {}),
     }]
     state.plan = state.plan.filter((x) => x.code !== stock.code)
     state.closed = [makeBuyTxn(stock.code, stock.name, price, q, fee, hid), ...state.closed].slice(0, 300)
+    this._syncPlanAlerts(hid)
     emit()
   },
 
@@ -533,6 +586,7 @@ export const planStore = {
 
   // ===== 交易计划与纪律：给某持仓设/改止盈、止损、计划仓位、买入理由 =====
   // 用 hasOwnProperty 判断字段是否传入，传了就覆盖（含 null=清空），没传才保留旧值
+  // tpManual/slManual: 是否被用户手动改过(true=停止跟随AI, false/缺省=跟随AI建议自动更新)
   setPlanRule(id, rule) {
     const has = (k) => Object.prototype.hasOwnProperty.call(rule, k)
     state.holding = state.holding.map((x) => x.id === id
@@ -540,18 +594,37 @@ export const planStore = {
           ...x,
           tp: has('tp') ? rule.tp : x.tp,
           sl: has('sl') ? rule.sl : x.sl,
+          tpManual: has('tpManual') ? rule.tpManual : x.tpManual,
+          slManual: has('slManual') ? rule.slManual : x.slManual,
           planReason: has('planReason') ? rule.planReason : x.planReason,
           planWeight: has('planWeight') ? rule.planWeight : x.planWeight,
         }
       : x)
+    // 止盈/止损变了 → 同步刷新其联动的到价预警
+    if (has('tp') || has('sl')) this._syncPlanAlerts(id)
     emit()
   },
   // 清除某持仓的交易计划（止盈/止损/理由）+ 其联动的到价预警
   clearPlanRule(id) {
     state.holding = state.holding.map((x) => x.id === id
-      ? { ...x, tp: null, sl: null, planReason: null, planWeight: null } : x)
+      ? { ...x, tp: null, sl: null, tpManual: false, slManual: false, planReason: null, planWeight: null } : x)
     state.alerts = (state.alerts || []).filter((a) => a.planId !== id) // 移除计划联动预警
     emit()
+  },
+  // 计划联动预警同步:按持仓当前 tp/sl 重建到价预警(止盈 gte / 止损 lte),planId=持仓id。
+  // 建仓自动带计划、手动改计划、AI建议刷新自动跟随 —— 三处都走这一个口子,保证预警永远与计划一致。
+  _syncPlanAlerts(id) {
+    const h = state.holding.find((x) => x.id === id)
+    if (!h) return
+    state.alerts = (state.alerts || []).filter((a) => a.planId !== id) // 先清旧
+    const add = (op, value, note) => {
+      state.alerts = [{
+        id: uid(), enabled: true, createdAt: Date.now(), triggeredAt: null, triggeredMsg: '',
+        code: h.code, name: h.name, type: 'price', op, value: Number(value), note, planId: id,
+      }, ...(state.alerts || [])]
+    }
+    if (h.tp != null) add('gte', h.tp, '止盈')
+    if (h.sl != null) add('lte', h.sl, '止损')
   },
   // 给候选(计划买入)预设交易计划：目标买入价/止盈/止损/理由/计划仓位
   setCandPlan(code, plan) {

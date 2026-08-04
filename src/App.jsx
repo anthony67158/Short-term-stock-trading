@@ -11,6 +11,7 @@ import { useTheme, themeStore } from './themeStore'
 import { useDetailStore, detailStore } from './detailStore'
 import { alertStore, useAlertStore } from './alertStore'
 import { useLLMConfigOpen } from './llmConfigStore'
+import { useQuantReportOpen } from './quantReportUiStore'
 import { runAutoReviewIfDue } from './review'
 import { timeStr } from './format'
 import { api } from './apiBase'
@@ -23,6 +24,7 @@ const ResearchTab = lazy(() => import('./components/ResearchTab'))
 const AccountHub = lazy(() => import('./components/AccountHub'))
 const AIAssistant = lazy(() => import('./components/AIAssistant'))
 const LLMConfig = lazy(() => import('./components/LLMConfig'))
+const QuantReport = lazy(() => import('./components/QuantReport'))
 
 // Tab 切换时的轻量骨架占位（避免 Suspense fallback 空白闪一下）
 function TabSkeleton() {
@@ -62,6 +64,7 @@ function MainApp() {
   const theme = useTheme()
   const { stock: detailStock } = useDetailStore()
   const llmConfigOpen = useLLMConfigOpen()
+  const quantReportOpen = useQuantReportOpen()
   const trading = isTradingHours()
   const interval = trading ? 20000 : 120000
 
@@ -240,6 +243,15 @@ function MainApp() {
         <ErrorBoundary label="AI 模型配置">
           <Suspense fallback={null}>
             <LLMConfig />
+          </Suspense>
+        </ErrorBoundary>
+      )}
+
+      {/* 量化汇报弹窗:入口在账号菜单,与「AI 模型配置」并列;懒加载,仅打开时挂载 */}
+      {quantReportOpen && (
+        <ErrorBoundary label="量化汇报">
+          <Suspense fallback={null}>
+            <QuantReport />
           </Suspense>
         </ErrorBoundary>
       )}

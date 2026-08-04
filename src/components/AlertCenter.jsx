@@ -1,18 +1,22 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Icon from './Icon'
 import StockName from './StockName'
 import { planStore, usePlanStore } from '../planStore'
 import { alertStore, useAlertStore, describeAlert } from '../alertStore'
+import { quantReportStore, useQuantReportStore } from '../quantReportStore'
 
-// ============ 预警中心：站内通知流 + 预警规则管理 ============
+// ============ 预警中心：站内通知流 + 预警规则管理 + 量化每日汇报 ============
 export default function AlertCenter({ onClose }) {
-  const [tab, setTab] = useState('notif') // notif 通知 | rules 规则
+  const [tab, setTab] = useState('notif') // notif 通知 | rules 规则 | quant 量化
   const { notifications, permission } = useAlertStore()
+  const { reports, loading: qLoading, error: qError } = useQuantReportStore()
   const book = usePlanStore()
   const alerts = book.alerts || []
 
   // 打开即标记已读
   useState(() => { alertStore.markAllRead(); return 0 })
+  // 切到「量化」页时拉取每日汇报（后台定时任务写入 OSS）
+  useEffect(() => { if (tab === 'quant') quantReportStore.load() }, [tab])
 
   const enableNotif = async () => { await alertStore.requestPermission() }
 
@@ -27,6 +31,7 @@ export default function AlertCenter({ onClose }) {
         <div className="tabs" style={{ margin: '4px 16px 0' }}>
           <div className={'tab' + (tab === 'notif' ? ' active' : '')} onClick={() => setTab('notif')}>通知 {notifications.length > 0 && `(${notifications.length})`}</div>
           <div className={'tab' + (tab === 'rules' ? ' active' : '')} onClick={() => setTab('rules')}>规则 {alerts.length > 0 && `(${alerts.length})`}</div>
+          <div className={'tab' + (tab === 'quant' ? ' active' : '')} onClick={() => setTab('quant')}>量化汇报 {reports.length > 0 && `(${reports.length})`}</div>
         </div>
 
         {/* 通知授权提示 */}
@@ -38,7 +43,7 @@ export default function AlertCenter({ onClose }) {
         )}
 
         <div className="alert-body">
-          {tab === 'notif' ? (
+          {tab === 'notif' && (
             notifications.length === 0 ? (
               <div className="empty">暂无预警通知。在自选/持仓或个股详情里设置预警规则，命中时会在这里提醒你。</div>
             ) : (
@@ -59,7 +64,8 @@ export default function AlertCenter({ onClose }) {
                 ))}
               </>
             )
-          ) : (
+          )}
+          {tab === 'rules' && (
             alerts.length === 0 ? (
               <div className="empty">还没有预警规则。在「持仓·做T」的自选/持仓卡片，或个股详情弹窗里点「设预警」即可添加。</div>
             ) : (
@@ -85,6 +91,39 @@ export default function AlertCenter({ onClose }) {
                   </div>
                 </div>
               ))
+            )
+          )}
+          {tab === 'quant' && (
+            qLoading && reports.length === 0 ? (
+              <div className="empty">正在加载量化每日汇报…</div>
+            ) : qError && reports.length === 0 ? (
+              <div className="empty">加载失败：{qError}<br /><button className="btn" style={{ marginTop: 8 }} onClick={() => quantReportStore.load({ force: true })}>重试</button></div>
+            ) : reports.length === 0 ? (
+              <div className="empty">暂无量化汇报。每天凌晨持续训练跑完后，会把当天的中文决策汇报（晋级/拒绝、样本外 AUC 对比、样本量、耗时）推送到这里。</div>
+            ) : (
+              <>
+                <div className="alert-toolbar">
+                  <span className="sub-name">{reports.length} 条汇报</span>
+                  <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 6 }}>
+                    <button className="btn" onClick={() => quantReportStore.load({ force: true })}><Icon name="refresh" size={12} /> 刷新</button>
+                    <button className="btn" onClick={() => quantReportStore.clearAll()}><Icon name="trash" size={12} /> 清空</button>
+                  </span>
+                </div>
+                {reports.map((r) => (
+                  <div className={'alert-notif qr-item' + (r.decision ? ' qr-' + r.decision : '')} key={r.id}>
+                    <div className="an-dot" />
+                    <div className="an-main">
+                      <div className="an-title">
+                        <span>{r.title || '量化每日重训汇报'}</span>
+                        {r.decision && <span className={'qr-tag qr-tag-' + r.decision}>{r.decision === 'promote' ? '晋级' : r.decision === 'reject' ? '拒绝' : '异常'}</span>}
+                      </div>
+                      <div className="an-body qr-body">{r.body}</div>
+                      <div className="an-time">{new Date(r.at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</div>
+                    </div>
+                    <button className="icon-btn" title="删除这条汇报" onClick={() => quantReportStore.remove(r.id)}><Icon name="trash" size={13} /></button>
+                  </div>
+                ))}
+              </>
             )
           )}
         </div>

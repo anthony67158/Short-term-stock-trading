@@ -8,7 +8,7 @@ import { guidanceHorizon } from './_market_time.js';
 
 // 军师(深度个股研判)模式集合:做T/加减仓/买入/持仓/复盘/定价
 export const ADVISOR_MODES = new Set([
-  "t_advice", "hold_advice", "buy_advice", "review", "price", "plan",
+  "t_advice", "hold_advice", "buy_advice", "review", "plan",
 ]);
 export function isAdvisorMode(mode) { return ADVISOR_MODES.has(mode); }
 
@@ -188,24 +188,6 @@ ${isAuto ? '你要基于历史规律自动决策，并在 chosenStyle 明确回�
 【硬约束（务必自检）】必须满足 sl < holdCost < tp；且 sl ≥ holdCost×0.92、tp ≥ holdCost×1.06；价位精度贴合该股量级(低价股可3位小数)。若技术位与上述冲突，一律以成本基准为准。
 
 请输出 JSON：{"reasoning":"【ReAct推理链·先想后答】一句话串起:①持仓成本holdCost是多少、现价相对成本浮盈还是套牢→②止盈应落在成本+8%~15%的哪个技术位、止损应落在成本-8%内的哪个支撑→③自检:是否满足 sl<holdCost<tp 的铁律、技术位有没有越界","tp":止盈价数字,"sl":止损价数字,"reason":"一句话交易计划理由(说明相对成本的盈亏目标+技术依据)","tpBasis":"止盈依据(如:成本+10%/近20日高X)","slBasis":"止损依据(如:成本-8%/MA10 X)","theory":"引用的理论一句话","confidence":"高/中/低"}。只输出JSON。`;
-  }
-  if (mode === 'price') {
-    const isBuy = payload.action === 'buy';
-    const actLabel = { buy: '建仓(首次买入)', add: '加仓(补仓)', sell: '减仓/清仓(卖出)' }[payload.actionKind] || (isBuy ? '买入' : '卖出');
-    return `【${isBuy ? '买入' : '卖出'}挂单价请求】用户正准备${actLabel}一只票，需要你给出一个**极其合理的${isBuy ? '买入' : '卖出'}挂单价**（一个具体数字），供他人工挂单参考。
-数据含：个股实时量价(nowPrice=当前实时价、dayHigh/dayLow/open/prevClose)、当日分时(intraday: now实时价/vwap均价/日内高低/posInDay位置/rhythm节奏/是否触及日内高低)、【个股历史规律画像 stockProfile】、【专业技术指标 tech(ATR真实波幅/布林带上下轨/RSI/KDJ/MACD/支撑support压力resistance/系统算好的买入带buyZone卖出带sellZone/止损stopLoss/止盈takeProfit)】、大盘情绪(market)、资金流向(marketFlow)、近20日走势(history)${payload.holdCost ? '、用户当前持仓成本 holdCost' : ''}${payload.tradeHistory ? '、用户过往在这只股上的交易记录 tradeHistory(历史买卖价与盈亏，用于贴合他的操作习惯与成本带)' : ''}。
-数据：${data}${advisorData}
-
-【定价三大依据，缺一不可，且必须落到一个具体价格】：
-1. **当前实时价(最高优先，锚)**：以 intraday.now / nowPrice 为基准锚，你的挂单价必须在实时价附近的合理区间，不能脱离盘口开虚价。${isBuy ? '买入价通常≤实时价(挂低吸单)，但不宜低于日内低点太多导致挂不上；急拉时可贴近实时价追。' : '卖出价通常≥实时价(挂高抛单)，但不宜高于日内高点太多导致挂不出；跳水时可贴近实时价出。'}
-2. **历史规律(stockProfile)**：用 avgAmplitude/recentAmplitude 判断合理挂单偏离幅度(振幅大→可挂离现价远一点博差价，振幅小→贴近现价才成交)；用 lowOpenUpRate/highOpenDownRate/meanRevScore 判断这只股${isBuy ? '低吸' : '高抛'}的合适位置；用 posInDay/vwap 判断此刻贵不贵。
-3. **过往交易记录(tradeHistory)**：${payload.tradeHistory ? '参考用户历史在这只股的买卖价位带与成本，给出与他习惯/成本相衔接的价格(如买入尽量低于其历史均价成本、卖出尽量高于其成本)。' : '本次无历史成交记录，按前两条定价。'}${payload.holdCost ? ` 用户当前持仓成本 holdCost=${payload.holdCost}${isBuy ? '，加仓价应能摊低或至少不显著抬高成本' : '，卖出价应尽量高于成本以锁定收益(除非止损)'}。` : ''}
-4. **专业技术指标(tech)**：这是定价的技术锚，务必用它校准价格——${isBuy ? '买入价优先贴近 tech.buyZone(买入带)/布林下轨 tech.boll.lower/支撑 tech.support；若 RSI<30 或 KDJ 超卖或现价贴布林下轨，说明是低吸好位置可稍积极；用 ATR 判断挂单不要低于现价超过约1个ATR否则难成交。' : '卖出价优先贴近 tech.sellZone(卖出带)/布林上轨 tech.boll.upper/压力 tech.resistance；若 RSI>70 或 KDJ 超买或现价贴布林上轨，说明是高抛好位置可稍积极；用 ATR 判断挂单不要高于现价超过约1个ATR否则难成交。'} 你给出的价格应与 tech 的买卖带/支撑压力大体吻合，若明显偏离必须在理由里说明为什么。${payload.quant ? `
-5. **量化模型(quant)**：多因子打分 quant.score(0~100越高越偏多)、quant.bias，以及**走势预测 quant.forecast**(upProb未来5日上涨概率%、expRet预期涨跌%、targetLow~targetHigh目标价区间、direction看涨/看跌/震荡)。${isBuy ? '预测看涨且上涨概率高(≥58)时买入可略积极贴近现价；看跌或概率低(≤42)则买入更保守、或干脆等回调。' : '预测看跌时卖出可略积极尽快出；看涨则卖价可挂高一点等冲高。'} 目标价区间可作为你止盈/接回价的参考。量化与技术面冲突时以稳健为先并点明分歧。` : ''}
-
-【要求】只给一个最优挂单价 price(数字，精度贴合该股量级，低价股可3位小数)，并给一个可选的备用价 altPrice(更积极成交或更保守的另一档)。价格必须合理、可成交、有依据。
-
-请输出 JSON：{"reasoning":"【ReAct推理链·先想后答】一句话串起:①当前实时价是多少(锚)→②历史规律/技术买卖带/量化方向指向什么位置→③据此定挂单价，为何这个价能成交又划算→④自检:价格是否脱离盘口、与tech买卖带是否吻合","price":挂单价数字,"altPrice":备用价数字或null,"side":"${isBuy ? 'buy' : 'sell'}","anchor":"相对实时价的说明(如:实时X，挂低吸X/挂高抛X)","reason":"一句话大白话理由(点出实时价+历史规律+交易记录如何支撑这个价)","histNote":"历史规律如何影响定价(引用振幅/回归/开盘路径的具体数字)","techNote":"技术指标如何支撑这个价(引用布林/ATR/RSI/支撑压力的具体数字，用大白话)"${payload.quant ? ',"quantNote":"量化模型打分如何印证或修正(引用quant.score与bias，用大白话)"' : ''},"confidence":"高/中/低"}。只输出JSON。`;
   }
   if (mode === 'hold_advice') {
     return `【持仓个股操作建议请求】用户持有一只票，需要你像贴身操盘顾问一样，明确告诉他现在该 **加仓 / 减仓 / 持有 / 清仓**，并且**给出具体的参考价位（一个数字或一个窄区间）**让他能直接照着挂单。这是持仓管理决策，不是做T。

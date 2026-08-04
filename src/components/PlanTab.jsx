@@ -5,73 +5,16 @@ import Reasoning from './Reasoning'
 import ConfirmDialog from './ConfirmDialog'
 import { AlertForm } from './AlertCenter'
 import { usePolling } from '../hooks'
-import { callAI, callAIStream } from '../ai'
+import { callAIStream } from '../ai'
 import { api } from '../apiBase'
-import { planStore, usePlanStore, calcBuyFee, calcSellFee, computeTFlows, computePortfolio, livePositionOf } from '../planStore'
+import { planStore, usePlanStore, calcBuyFee, calcSellFee, computeTFlows, computePortfolio, livePositionOf, advicePlan } from '../planStore'
 import { aiStore } from '../aiStore'
 import { openStockDetail, useDetailStore } from '../detailStore'
 import { getAdvice, subscribeAdvice } from '../adviceCache'
+import { ensureQuantScore, ensureQuantScores } from '../quantScore'
 import { generateReview, sessionLabel, forceGenerateReviews, currentAutoSession, missingReviewCount } from '../review'
 import { fmtPct, pctClass, fmtNum, fmtInflow , fmtRaw, hasVal, opText } from '../format'
 
-// 从交易记录里提取某只股的历史买卖(供 AI 贴合用户成本带/操作习惯)
-function tradeHistoryOf(closed, code) {
-  return (closed || [])
-    .filter((c) => c.code === code)
-    .slice(0, 12)
-    .map((c) => ({
-      type: c.kind || c.type,
-      buy: c.buyPrice != null ? +Number(c.buyPrice).toFixed(3) : null,
-      sell: c.sellPrice != null ? +Number(c.sellPrice).toFixed(3) : null,
-      qty: c.qty, pnl: c.netPnl != null ? +Number(c.netPnl).toFixed(0) : null,
-    }))
-}
-
-// 通用「AI 建议价」按钮：点击→基于历史规律+实时价+交易记录给挂单价→填入输入框
-// props: code,name,actionKind(buy|add|sell),quote,holdCost,onPick(price)
-function SuggestPriceBtn({ code, name, actionKind, quote, holdCost, onPick }) {
-  const [st, setSt] = useState(null) // {loading}|{result}|{error}
-  const book = usePlanStore()
-  const q = quote && quote[code]
-  const ask = async () => {
-    setSt({ loading: true })
-    try {
-      const r = await callAI('price', {
-        code, name, action: actionKind === 'sell' ? 'sell' : 'buy', actionKind,
-        nowPrice: q?.price, pct: q?.pct,
-        dayHigh: q?.high, dayLow: q?.low, open: q?.open, prevClose: q?.prevClose,
-        turnover: q?.turnover, volRatio: q?.volRatio,
-        holdCost: holdCost || null,
-        tradeHistory: tradeHistoryOf(book.closed, code),
-      })
-      if (r.ok && r.result && r.result.price != null) {
-        onPick(String(r.result.price))
-        setSt({ result: r.result })
-      } else setSt({ error: r.error || 'AI 未能给出价格' })
-    } catch (e) { setSt({ error: String(e.message || e) }) }
-  }
-  const isSell = actionKind === 'sell'
-  return (
-    <div className="sug-price">
-      <button type="button" className={'sug-price-btn' + (isSell ? ' sell' : ' buy')} onClick={ask} disabled={st && st.loading}
-        title="AI 结合历史规律 + 当前实时价 + 你的过往交易记录，给一个合理挂单价">
-        {st && st.loading ? <><Icon name="refresh" size={12} className="spin" />算价中</> : <><Icon name="spark" size={12} />AI 建议{isSell ? '卖' : '买'}价</>}
-      </button>
-      {st && st.result && (
-        <div className="sug-price-info">
-          <span className="sug-price-val">{st.result.price}{st.result.altPrice ? <span className="sug-alt"> / 备用 {st.result.altPrice}</span> : null}</span>
-          {st.result.anchor && <span className="sug-price-anchor">{st.result.anchor}</span>}
-          {st.result.reason && <div className="sug-price-reason">{st.result.reason}</div>}
-          {st.result.histNote && <div className="sug-price-hist"><Icon name="history" size={11} />{st.result.histNote}</div>}
-          {st.result.techNote && <div className="sug-price-hist tech"><Icon name="target" size={11} />{st.result.techNote}</div>}
-          {st.result.quantNote && <div className="sug-price-hist quant"><Icon name="gauge" size={11} />{st.result.quantNote}</div>}
-          {st.result.confidence && <span className="sug-price-conf">信心 {st.result.confidence}</span>}
-        </div>
-      )}
-      {st && st.error && <span className="sug-price-err">{st.error} <span className="expand-btn" onClick={ask}>重试</span></span>}
-    </div>
-  )
-}
 
 // 金额格式化（元 → 带符号，万以上转万）
 function fmtMoney(v) {
@@ -344,6 +287,22 @@ function StockSearch() {
   )
 }
 
+// ---------- 量化得分徽标（自选卡 / 持仓卡通用）----------
+// 分数来源:qlib 量化服务(LightGBM达标概率+GARCH)。>=62 偏多(红) / <=38 偏空(绿) / 其余中性(金)。
+// 未评分(qScore==null)时占位「评分中」,由卡片挂载时的 ensureQuantScore 触发补分后自动回填。
+function quantTone(s) { return s == null ? 'muted' : s >= 62 ? 'red' : s <= 38 ? 'green' : 'gold' }
+function QuantBadge({ score, bias, size }) {
+  const tone = quantTone(score)
+  const scored = score != null && !isNaN(score)
+  return (
+    <span className={'q-badge ' + tone + (size === 'sm' ? ' sm' : '')}
+      title={scored ? `量化得分 ${score}（${bias || (tone === 'red' ? '偏多' : tone === 'green' ? '偏空' : '中性')}）· LightGBM+GARCH，统计口径非投资建议` : '正在计算量化得分…'}>
+      <span className="q-badge-k">量化</span>
+      {scored ? <b className="q-badge-v">{Math.round(score)}</b> : <span className="q-badge-load" />}
+    </span>
+  )
+}
+
 // ---------- 候选卡：目标价 + 买入手数 + 买点进度条 ----------
 // 取值可手动填写/编辑，也可自动来源于「AI 操作建议」的建议买入价 / 建议买入手数；
 // 个股详情刷新建议后（saveAdvice 触发 subscribeAdvice），未被手动覆盖的字段自动跟随更新。
@@ -357,7 +316,17 @@ function CandTarget({ p, q }) {
   // AI 建议里的「建议买入价 / 建议买入手数」
   const adv = (() => { try { const a = getAdvice(p.code); return (a && a.advice) || null } catch { return null } })()
   const aiPrice = adv && adv.buyPrice != null && !isNaN(adv.buyPrice) ? Number(adv.buyPrice) : null
-  const aiQty = adv && adv.planQty != null && !isNaN(Number(adv.planQty)) ? Math.trunc(Number(adv.planQty)) : null
+  // planQty 在 AI 建议里是「几手」的字符串(如 "5手""约5手""5~8手"),而非纯数字,
+  // 直接 Number() 会得 NaN 导致手数传不进卡片 —— 这里从文本中稳健抽取首个整数。
+  const parseQty = (v) => {
+    if (v == null) return null
+    if (typeof v === 'number') return isNaN(v) ? null : Math.trunc(v)
+    const m = String(v).match(/-?\d+(?:\.\d+)?/)
+    if (!m) return null
+    const n = Math.trunc(Number(m[0]))
+    return isNaN(n) ? null : n
+  }
+  const aiQty = adv ? (adv.planQtyNum != null ? parseQty(adv.planQtyNum) : parseQty(adv.planQty)) : null
 
   // 自动跟随:未手动覆盖时,用 AI 建议回写候选(持久化到云),保证卡片跟着刷新
   useEffect(() => {
@@ -443,10 +412,8 @@ function PlanList({ book, quote }) {
     const q = quote[p.code]
     return (
       <div className={'plan-cand' + (p.star ? ' starred' : '')} key={p.code}>
+        {/* 顶行：左=股名/代码/标签，右=量化得分徽标 + 现价 */}
         <div className="pc-top">
-          <button className={'star-btn' + (p.star ? ' on' : '')} title={p.star ? '取消重点关注' : '标记重点关注'} onClick={() => planStore.toggleStar(p.code)}>
-            <Icon name={p.star ? 'starFill' : 'star'} size={15} />
-          </button>
           <div className="pc-name">
             <StockName code={p.code} name={(q && q.name) || p.name}><span className="pc-nm">{(q && q.name) || p.name}</span></StockName>
             <span className="pc-code">{p.code}</span>
@@ -454,8 +421,15 @@ function PlanList({ book, quote }) {
             {String(p.code).startsWith('688') && <span className="tag tag-kc" title="科创板(涨跌幅±20%、门槛更高)">科创板</span>}
             {q && q.isLimitUp && <span className="tag tag-lu">涨停</span>}
           </div>
-          {q && <span className={'pc-price ' + pctClass(q.pct)}>{fmtRaw(q.price)} <span className="pc-pct">{fmtPct(q.pct)}</span></span>}
+          <div className="pc-top-r">
+            {q && <span className={'pc-price ' + pctClass(q.pct)}>{fmtRaw(q.price)} <span className="pc-pct">{fmtPct(q.pct)}</span></span>}
+            <QuantBadge score={p.qScore} bias={p.qBias} size="sm" />
+          </div>
         </div>
+        {/* 置顶别针：右上角浮标，点亮=重点关注(参与置顶分组并按量化分排序) */}
+        <button className={'pc-pin' + (p.star ? ' on' : '')} title={p.star ? '取消置顶重点关注' : '置顶重点关注（按量化分排序）'} onClick={() => planStore.toggleStar(p.code)}>
+          <Icon name={p.star ? 'starFill' : 'star'} size={13} />
+        </button>
         {/* 盯盘监控指标（原自选股监控能力）*/}
         {q && (
           <div className="pc-metrics">
@@ -475,7 +449,6 @@ function PlanList({ book, quote }) {
               <button className="chip-btn done" onClick={() => confirmBuy(p.code)}><Icon name="check" size={12} />确认</button>
               <button className="chip-btn ghost" onClick={() => setBuying(null)}>取消</button>
             </div>
-            <SuggestPriceBtn code={p.code} name={(q && q.name) || p.name} actionKind="buy" quote={quote} onPick={setPrice} />
           </div>
         ) : alerting === p.code ? (
           <div className="pc-alert-box">
@@ -513,9 +486,20 @@ function PlanList({ book, quote }) {
     // eslint-disable-next-line
   }, [Object.keys(quote).length, book.plan.length])
 
-  // 排序规则：重点关注置顶 → 当日涨幅高在前(强势优先) → 无行情的排后
+  // 量化评分:自选列表变化时,给「尚无量化得分」的候选按需补分(ensureQuantScore 内部去重/防冷启动风暴)。
+  // 加入自选(addPlan)后该候选无 qScore → 这里立刻触发评分,拿到分数后 setQuantScore 回写 → 卡片自动排序/展示。
+  useEffect(() => {
+    const codes = (book.plan || []).filter((p) => p.qScore == null).map((p) => p.code)
+    if (codes.length) ensureQuantScores(codes)
+    // eslint-disable-next-line
+  }, [book.plan.map((p) => p.code).join(',')])
+
+  // 排序规则：重点关注置顶 → 量化得分高在前(量化优先) → 同分/无分按当日涨幅 → 无行情排后
   const sortRule = (a, b) => {
     if (!!a.star !== !!b.star) return a.star ? -1 : 1
+    const sa = a.qScore != null ? a.qScore : -1
+    const sb = b.qScore != null ? b.qScore : -1
+    if (sa !== sb) return sb - sa
     const qa = quote[a.code], qb = quote[b.code]
     const pa = qa ? qa.pct : -999, pb = qb ? qb.pct : -999
     return pb - pa
@@ -765,6 +749,12 @@ function HoldingList({ book, quote }) {
     const pb = holdSnapshot(b, quote[b.code]).pnl ?? 999
     return pa - pb
   })
+  // 补分：历史持仓(建仓早于本功能)没有量化得分 → 按需评分,徽标从"计算中"变为分数
+  useEffect(() => {
+    const codes = (book.holding || []).filter((h) => h.qScore == null).map((h) => h.code)
+    if (codes.length) ensureQuantScores(codes)
+    // eslint-disable-next-line
+  }, [book.holding.map((h) => h.code).join(',')])
   const runReview = async () => {
     if (reviewing === 'loading') return
     setReviewing('loading')
@@ -883,6 +873,21 @@ function HoldingItem({ h, idx, quote: q }) {
   const [planReason, setPlanReason] = useState(h.planReason || '')
   const [planBasis, setPlanBasis] = useState(null)       // 复用来源信息 {from:'advice', action, tone, at}
 
+  // 订阅 AI 建议缓存：个股详情页每次刷新AI操作建议(saveAdvice) → 重渲染 → 未手动改过的止盈/止损自动跟随最新建议
+  const [, forceAdv] = useState(0)
+  useEffect(() => subscribeAdvice(() => forceAdv((n) => n + 1)), [])
+  // 该股最新 AI 建议的【标准化】止盈/止损(与个股详情页同源同值)
+  const aiPlan = advicePlan(h.code)
+  // 自动跟随:市场在变,每次生成AI建议都基于最新盘面 → 未被手动覆盖的字段回写持仓,保证与详情页一致
+  useEffect(() => {
+    if (!aiPlan) return
+    const patch = {}
+    if (!h.tpManual && aiPlan.tp != null && Number(aiPlan.tp) !== Number(h.tp)) patch.tp = aiPlan.tp
+    if (!h.slManual && aiPlan.sl != null && Number(aiPlan.sl) !== Number(h.sl)) patch.sl = aiPlan.sl
+    if (Object.keys(patch).length) planStore.setPlanRule(h.id, patch)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiPlan && aiPlan.tp, aiPlan && aiPlan.sl, h.tpManual, h.slManual])
+
   // 依据该股 + 短线操作逻辑，给出默认止盈/止损/理由（用户可再改）
   const suggestPlan = () => {
     const base = costWithFee || (q && q.price) || h.buyPrice
@@ -902,18 +907,8 @@ function HoldingItem({ h, idx, quote: q }) {
     const reason = `短线：成本${fmtRaw(base)}，止损${usedMa ? '守MA10生命线' : '-8%纪律'}，止盈+10%；跌破5日线减仓、破10日线清仓`
     return { tp: String(round(tpRaw)), sl: String(round(slRaw)), reason }
   }
-  // 复用最新 AI 操作建议里的止损/止盈价（hold_advice / buy_advice 缓存）
-  const adviceForStock = () => {
-    try {
-      const a = getAdvice(h.code)
-      const adv = a && a.advice
-      if (!adv) return null
-      const tp = adv.targetPrice != null && !isNaN(adv.targetPrice) ? Number(adv.targetPrice) : null
-      const sl = adv.stopPrice != null && !isNaN(adv.stopPrice) ? Number(adv.stopPrice) : null
-      if (tp == null && sl == null) return null
-      return { tp, sl, action: adv.action || adv.stance || '', tone: adv.tone || '', at: a.at }
-    } catch { return null }
-  }
+  // 复用最新 AI 操作建议里的止损/止盈价（与个股详情页同源:planStore.advicePlan 统一口径）
+  const adviceForStock = () => advicePlan(h.code)
   const hasAdvicePrices = () => {
     const a = adviceForStock()
     return !!(a && (a.tp != null || a.sl != null))
@@ -968,18 +963,24 @@ function HoldingItem({ h, idx, quote: q }) {
   const savePlan = () => {
     const tpVal = planPrice === '' ? null : Number(planPrice)
     const slVal = planSL === '' ? null : Number(planSL)
+    // 手动保存 → 标记为「手动」,停止自动跟随AI(除非用户点「跟随AI」恢复);预警由 setPlanRule 内部自动同步
     planStore.setPlanRule(h.id, {
       tp: tpVal,
       sl: slVal,
+      tpManual: tpVal != null,
+      slManual: slVal != null,
       planReason: planReason.trim() || null,
     })
-    // 计划联动预警：为止盈/止损各建一条到价预警，盘中触及即经预警中心提醒
-    // 先清掉本股旧的计划型预警(planId=h.id)，避免重复
-    const existing = (planStore.get().alerts || []).filter((a) => a.planId === h.id)
-    existing.forEach((a) => planStore.removeAlert(a.id))
-    if (tpVal != null) planStore.addAlert({ code: h.code, name: h.name, type: 'price', op: 'gte', value: tpVal, note: '止盈', planId: h.id })
-    if (slVal != null) planStore.addAlert({ code: h.code, name: h.name, type: 'price', op: 'lte', value: slVal, note: '止损', planId: h.id })
     setMode(null)
+  }
+  // 恢复跟随最新 AI 建议(清手动标记,让自动跟随重新接管)
+  const followAI = () => {
+    const ap = adviceForStock()
+    planStore.setPlanRule(h.id, {
+      ...(ap && ap.tp != null ? { tp: ap.tp } : {}),
+      ...(ap && ap.sl != null ? { sl: ap.sl } : {}),
+      tpManual: false, slManual: false,
+    })
   }
 
   const startSell = () => { setMode('sell'); setSellPrice(q ? String(q.price) : ''); setSellQty(String(h.qty || 1)) }
@@ -1050,6 +1051,7 @@ function HoldingItem({ h, idx, quote: q }) {
         <div className="hold-head-l">
           <StockName code={h.code} name={h.name}><span className="hh-name">{h.name}</span></StockName>
           <span className="hh-code">{h.code}</span>
+          <QuantBadge score={h.qScore} bias={h.qBias} size="sm" />
           {q && (validPx != null
             ? <span className={'hh-price ' + pctClass(q.pct)}>{fmtRaw(validPx)} <span className="hh-chg">{fmtPct(q.pct)}</span></span>
             : effPx != null
@@ -1197,15 +1199,26 @@ function HoldingItem({ h, idx, quote: q }) {
                         <span className="plan-price-item">
                           <span className="plan-price-k tp"><Icon name="target" size={11} /> 止盈</span>
                           <b className="red">{h.tp ? fmtRaw(h.tp) : '—'}</b>
+                          {h.tp != null && (h.tpManual
+                            ? <span className="plan-src manual" title="手动设定，不随AI更新">手动</span>
+                            : (aiPlan && aiPlan.tp != null && <span className="plan-src ai" title="来源:AI操作建议目标价，详情刷新后自动跟随"><Icon name="spark" size={9} />AI</span>))}
                           {hitTP && <span className="plan-hit">已触及</span>}
                         </span>
                         <span className="plan-price-item">
                           <span className="plan-price-k sl"><Icon name="shield" size={11} /> 止损</span>
                           <b className="green">{h.sl ? fmtRaw(h.sl) : '—'}</b>
+                          {h.sl != null && (h.slManual
+                            ? <span className="plan-src manual" title="手动设定，不随AI更新">手动</span>
+                            : (aiPlan && aiPlan.sl != null && <span className="plan-src ai" title="来源:AI操作建议止损价，详情刷新后自动跟随"><Icon name="spark" size={9} />AI</span>))}
                           {hitSL && <span className="plan-hit">已触及</span>}
                         </span>
                       </div>
                       {h.planReason && <div className="plan-card-reason" title={h.planReason}>{h.planReason}</div>}
+                      {aiPlan && (h.tpManual || h.slManual) && (
+                        <button className="plan-follow-ai" onClick={followAI} title="放弃手动值，恢复跟随最新AI操作建议">
+                          <Icon name="spark" size={10} />跟随最新AI建议
+                        </button>
+                      )}
                     </div>
                     <div className="plan-card-actions">
                       <button className="icon-btn" title="修改计划" onClick={() => openPlan(true)}><Icon name="edit" size={13} /></button>
@@ -1248,7 +1261,6 @@ function HoldingItem({ h, idx, quote: q }) {
             <button className="chip-btn buy" onClick={confirmAdd}><Icon name="check" size={13} />确认加仓</button>
             <button className="chip-btn ghost" onClick={() => setMode(null)}>取消</button>
           </div>
-          <SuggestPriceBtn code={h.code} name={h.name} actionKind="add" quote={q ? { [h.code]: q } : null} holdCost={costWithFee} onPick={setAddPrice} />
         </div>
       ) : mode === 'sell' ? (
         <div className="buy-inline-wrap">
@@ -1260,7 +1272,6 @@ function HoldingItem({ h, idx, quote: q }) {
             <button className="chip-btn done" onClick={confirmSell}><Icon name="check" size={13} />{Number(sellQty) >= h.qty ? '确认清仓' : '确认减仓'}</button>
             <button className="chip-btn ghost" onClick={() => setMode(null)}>取消</button>
           </div>
-          <SuggestPriceBtn code={h.code} name={h.name} actionKind="sell" quote={q ? { [h.code]: q } : null} holdCost={costWithFee} onPick={setSellPrice} />
         </div>
       ) : mode === 'plan' ? (
         <div className="plan-edit">
