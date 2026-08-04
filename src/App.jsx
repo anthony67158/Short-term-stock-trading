@@ -10,6 +10,7 @@ import { useAuthStore, authStore } from './authStore'
 import { useTheme, themeStore } from './themeStore'
 import { useDetailStore, detailStore } from './detailStore'
 import { alertStore, useAlertStore } from './alertStore'
+import { useLLMConfigOpen } from './llmConfigStore'
 import { runAutoReviewIfDue } from './review'
 import { timeStr } from './format'
 import { api } from './apiBase'
@@ -21,6 +22,7 @@ const PlanTab = lazy(() => import('./components/PlanTab'))
 const ResearchTab = lazy(() => import('./components/ResearchTab'))
 const AccountHub = lazy(() => import('./components/AccountHub'))
 const AIAssistant = lazy(() => import('./components/AIAssistant'))
+const LLMConfig = lazy(() => import('./components/LLMConfig'))
 
 // Tab 切换时的轻量骨架占位（避免 Suspense fallback 空白闪一下）
 function TabSkeleton() {
@@ -59,6 +61,7 @@ function MainApp() {
   const { open: aiOpen } = useAIStore()
   const theme = useTheme()
   const { stock: detailStock } = useDetailStore()
+  const llmConfigOpen = useLLMConfigOpen()
   const trading = isTradingHours()
   const interval = trading ? 20000 : 120000
 
@@ -229,6 +232,15 @@ function MainApp() {
       {detailStock && (
         <ErrorBoundary label="个股详情">
           <StockDetail stock={detailStock} onClose={() => detailStore.close()} />
+        </ErrorBoundary>
+      )}
+
+      {/* AI 模型配置向导:低频操作,入口藏在账号菜单;懒加载,仅打开时挂载 */}
+      {llmConfigOpen && (
+        <ErrorBoundary label="AI 模型配置">
+          <Suspense fallback={null}>
+            <LLMConfig />
+          </Suspense>
         </ErrorBoundary>
       )}
     </div>

@@ -1,0 +1,129 @@
+// ============ LLM 运行时配置层（OSS 持久化 + 环境变量回退）============
+// 目的：让前端「AI 模型配置」入口能在线修改 Base URL / API Key / 各角色模型，
+// 改完即时对全系统生效（对话、操盘军师、智能体、每日日报），无需重新部署。
+//
+// 存储：OSS 对象 config/llm.json（复用 _blob.js，与账号数据同桶）。
+//   { baseUrl, apiKey, models:{chat,advisor,agent,daily}, updatedAt }
+// 读取优先级：OSS 配置 > 环境变量 > 内置默认。
+//
+// 关键约束：
+//   - callChat / 三个 handler 都是同步读取模型与 BASE/KEY，故本层用【同步缓存】(currentConfig)，
+//     由 ensureConfig() 异步预热/刷新缓存；handler 入口先 `await ensureConfig()` 再取值。
+//   - API Key 只在后端与 OSS 之间流动，绝不回传前端（getMasked 只给掩码）。
+
+import { put, readJson, hasStorage } from './_blob.js';
+
+const KEY_PATH = 'config/llm.json';
+
+// 四个 AI 角色 → 各自的环境变量名与内置默认（与改造前 handler 里的默认保持一致）
+export const ROLES = {
+  chat:    { envs: ['LLM_MODEL'],                  def: 'DeepSeek-V3.2-Pro', label: '对话/盘面分析' },
+  advisor: { envs: ['ADVISOR_MODEL'],              def: 'DeepSeek-V4-Pro',   label: '操盘军师(深度研判)' },
+  agent:   { envs: ['AGENT_MODEL'],                def: 'Qwen3-Max-A',       label: '智能体(需函数调用)' },
+  daily:   { envs: ['DAILY_MODEL', 'AGENT_MODEL'], def: 'Qwen3-Max-A',       label: '每日复盘日报' },
+};
+
+// ---- 从环境变量拼出基线配置（OSS 无配置时的回退）----
+function envConfig() {
+  const models = {};
+  for (const [role, m] of Object.entries(ROLES)) {
+    let v = '';
+    for (const e of m.envs) { if (process.env[e]) { v = process.env[e]; break; } }
+    models[role] = v || m.def;
+  }
+  return {
+    baseUrl: process.env.LLM_BASE_URL || '',
+    apiKey: process.env.LLM_API_KEY || '',
+    models,
+    source: 'env',
+    updatedAt: 0,
+  };
+}
+
+// 合并：OSS 覆盖 env，缺项回退 env/默认
+function merge(base, over) {
+  if (!over) return base;
+  const models = { ...base.models };
+  if (over.models) for (const role of Object.keys(ROLES)) {
+    if (over.models[role]) models[role] = over.models[role];
+  }
+  return {
+    baseUrl: over.baseUrl || base.baseUrl,
+    apiKey: over.apiKey || base.apiKey,   // OSS 里没存 key 时保留 env key
+    models,
+    source: over.__stored ? 'oss' : base.source,
+    updatedAt: over.updatedAt || base.updatedAt,
+  };
+}
+
+let _cache = null;   // 已合并的当前配置（同步取）
+let _loadedAt = 0;
+
+// ---- 异步预热/刷新缓存：handler 入口 await 一次即可 ----
+// maxAgeMs 内不重复读 OSS；读失败保留旧缓存或回退 env，绝不抛出。
+export async function ensureConfig({ maxAgeMs = 20000 } = {}) {
+  const now = Date.now();
+  if (_cache && (now - _loadedAt) < maxAgeMs) return _cache;
+  const base = envConfig();
+  if (!hasStorage()) { _cache = base; _loadedAt = now; return _cache; }
+  try {
+    const stored = await readJson(KEY_PATH);
+    if (stored && typeof stored === 'object') stored.__stored = true;
+    _cache = merge(base, stored);
+  } catch { _cache = _cache || base; }
+  _loadedAt = now;
+  return _cache;
+}
+
+// ---- 同步取当前配置（未预热则先给 env 基线，不阻塞）----
+export function currentConfig() {
+  return _cache || envConfig();
+}
+
+// ---- 同步取某角色模型 ----
+export function getModel(role) {
+  const c = currentConfig();
+  return (c.models && c.models[role]) || (ROLES[role] && ROLES[role].def) || '';
+}
+
+// ---- 保存：写 OSS 并即时更新缓存。patch.apiKey 为空串时保留原 Key（前端不回传明文）----
+export async function saveConfig(patch = {}) {
+  const cur = await ensureConfig({ maxAgeMs: 0 });
+  const next = {
+    baseUrl: (patch.baseUrl != null && patch.baseUrl !== '') ? String(patch.baseUrl).replace(/\/+$/, '') : cur.baseUrl,
+    apiKey: (patch.apiKey != null && patch.apiKey !== '') ? String(patch.apiKey) : cur.apiKey,
+    models: { ...cur.models },
+    updatedAt: Date.now(),
+  };
+  if (patch.models) for (const role of Object.keys(ROLES)) {
+    if (patch.models[role]) next.models[role] = String(patch.models[role]);
+  }
+  if (!hasStorage()) throw new Error('存储未配置(OSS)，无法保存配置');
+  // 覆盖写固定对象名（不加随机后缀，保证下次可读到同一路径）
+  await put(KEY_PATH, JSON.stringify(next), { contentType: 'application/json', addRandomSuffix: false, cacheControlMaxAge: 0 });
+  next.__stored = true;
+  _cache = merge(envConfig(), next);
+  _loadedAt = Date.now();
+  return _cache;
+}
+
+// ---- API Key 掩码：只保留末 4 位 ----
+export function maskKey(k) {
+  const s = String(k || '');
+  if (!s) return '';
+  if (s.length <= 8) return '****';
+  return s.slice(0, 3) + '****' + s.slice(-4);
+}
+
+// ---- 给前端的安全视图（绝不含明文 Key）----
+export function publicView() {
+  const c = currentConfig();
+  return {
+    baseUrl: c.baseUrl || '',
+    apiKeyMask: maskKey(c.apiKey),
+    hasKey: !!c.apiKey,
+    models: c.models,
+    source: c.source,
+    updatedAt: c.updatedAt || 0,
+  };
+}

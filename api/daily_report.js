@@ -4,6 +4,7 @@ import { marketTimePromptBlock } from './_market_time.js';
 import { fetchOverseas, fetchAIndices, fetchNews, fetchStockNews, fetchClsTelegraph, fetchSinaFlash, fetchFinnhubNews } from './_market_data.js';
 import { buildDailySummary } from './_daily_summary.js';
 import { llmEnv, makeSSE, callChat, parseLLMJson } from './_llm.js';
+import { ensureConfig, getModel } from './_llm_config.js';
 
 // ============ 全市场投资策略日报（早/午/晚三场次，SSE 流式 + Blob 缓存）============
 // GET /api/daily_report?session=morning|noon|evening[&refresh=1]  body(POST): { holdings:[{code,name}] }
@@ -18,7 +19,7 @@ const SESSION_CN = { morning: '盘前早报', noon: '午间午报', evening: '�
 const PREFIX = 'dailyreport/';
 const cacheKey = (day, session) => `${PREFIX}${day}-${session}`;
 
-const MODEL = process.env.DAILY_MODEL || process.env.AGENT_MODEL || 'Qwen3-Max-A';
+// 日报模型改为运行时读取（前端「AI 模型配置」的 daily 角色），见 handler 内 getModel('daily')
 
 // 板块清单（全市场覆盖）→ 每个用关键词做定向新闻检索
 const SECTORS = [
@@ -33,6 +34,8 @@ const SECTORS = [
 
 export default async function handler(req, res) {
   if (preflight(req, res)) return;
+  await ensureConfig();               // 预热运行时配置（前端可改 Base/Key/模型）
+  const MODEL = getModel('daily');    // 日报角色模型
   const { BASE, KEY } = llmEnv();
   const streaming = true; // 本接口一律 SSE
 

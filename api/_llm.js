@@ -4,12 +4,16 @@
 // 各自保留自己的预算/超时编排逻辑（本层只提供无状态的原子能力）。
 
 import { applyCors } from './_lib.js';
+import { currentConfig } from './_llm_config.js';
 
 // ---- 环境读取 ----
+// 优先用运行时配置（前端「AI 模型配置」写入 OSS，经 ensureConfig 预热到同步缓存）；
+// 未预热或未配置时回退环境变量。handler 入口应先 await ensureConfig() 再调用。
 export function llmEnv() {
+  const c = currentConfig();
   return {
-    BASE: process.env.LLM_BASE_URL,
-    KEY: process.env.LLM_API_KEY,
+    BASE: c.baseUrl || process.env.LLM_BASE_URL,
+    KEY: c.apiKey || process.env.LLM_API_KEY,
   };
 }
 export function llmReady() {

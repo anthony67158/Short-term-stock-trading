@@ -4,13 +4,12 @@ import { retrieveTheory } from './_kb.js';
 import { screenStocks } from './_screen.js';
 import { marketTimePromptBlock } from './_market_time.js';
 import { fetchClsTelegraph } from './_market_data.js';
-import { makeSSE, callChat, pumpStream } from './_llm.js';
+import { makeSSE, callChat, pumpStream, llmEnv } from './_llm.js';
+import { ensureConfig, getModel } from './_llm_config.js';
 
 // ============ 股票 Agent：工具增强的智能体 ============
 // LLM 自主调用 skill 工具（查行情/选股/板块/涨停/异动/新闻…）多轮后综合作答
-// 用支持 function calling 的模型（Qwen3-Max-A）
-
-const AGENT_MODEL = process.env.AGENT_MODEL || 'Qwen3-Max-A';
+// 用支持 function calling 的模型（默认 Qwen3-Max-A，可在前端「AI 模型配置」改）
 
 // 工具中文名（用于超时兜底时告诉用户"已经查到了什么"）
 const TOOL_LABEL_CN = {
@@ -279,7 +278,11 @@ export default async function handler(req, res) {
 
   const BASE = process.env.LLM_BASE_URL;
   const KEY = process.env.LLM_API_KEY;
-  if (!BASE || !KEY) { applyCors(res); res.setHeader('Content-Type', 'application/json; charset=utf-8'); return res.status(200).send(JSON.stringify({ ok: false, error: 'LLM 未配置' })); }
+  // 运行时配置优先：预热同步缓存后取 BASE/KEY/模型（前端「AI 模型配置」写入 OSS）
+  await ensureConfig();
+  const { BASE: RT_BASE, KEY: RT_KEY } = llmEnv();
+  const AGENT_MODEL = getModel('agent');
+  if (!RT_BASE || !RT_KEY) { applyCors(res); res.setHeader('Content-Type', 'application/json; charset=utf-8'); return res.status(200).send(JSON.stringify({ ok: false, error: 'LLM 未配置' })); }
 
   // ===== SSE 流式：边分析边推送(工具进度 + 答案 token)，用户实时看到进展、不再"超时空手" =====
   const { emit: send } = makeSSE(res);

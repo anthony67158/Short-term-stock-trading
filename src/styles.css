@@ -370,6 +370,52 @@ body {
 .btn-danger { background: var(--red); color: #fff; border-color: var(--red); }
 .btn-danger:hover { filter: brightness(1.08); color: #fff; border-color: var(--red); }
 
+/* ===== AI 模型配置向导 ===== */
+.llm-cfg {
+  width: min(480px, 94vw); margin: auto;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: 0 20px 60px rgba(0,0,0,.55);
+  padding: 18px 20px 16px; animation: pop .24s var(--ease);
+  display: flex; flex-direction: column; max-height: 90vh;
+}
+.llm-cfg .modal-bar { margin-bottom: 14px; }
+.llm-steps { display: flex; align-items: center; justify-content: center; margin-bottom: 16px; }
+.llm-step-wrap { display: flex; align-items: center; }
+.llm-step { display: flex; align-items: center; gap: 7px; opacity: .5; transition: opacity .2s; }
+.llm-step.active, .llm-step.done { opacity: 1; }
+.llm-step-dot {
+  width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  background: var(--panel2); border: 1px solid var(--border); color: var(--muted); flex-shrink: 0;
+}
+.llm-step.active .llm-step-dot { background: var(--accent); border-color: var(--accent); color: #fff; }
+.llm-step.done .llm-step-dot { background: var(--green); border-color: var(--green); color: #fff; }
+.llm-step-label { font-size: 12.5px; font-weight: 600; color: var(--text2); }
+.llm-step.active .llm-step-label { color: var(--text); }
+.llm-step-line { width: 34px; height: 2px; background: var(--border); margin: 0 8px; border-radius: 2px; }
+.llm-step-line.done { background: var(--green); }
+.llm-body { flex: 1; min-height: 0; overflow-y: auto; }
+.llm-pane { display: flex; flex-direction: column; }
+.llm-field { margin-bottom: 12px; }
+.llm-field label { display: block; font-size: 12px; font-weight: 600; color: var(--text2); margin-bottom: 5px; }
+.llm-field .auth-input { margin-bottom: 4px; }
+.llm-hint { font-size: 11px; color: var(--muted); line-height: 1.5; }
+.llm-msg { font-size: 12px; margin-top: 8px; }
+.llm-msg.ok { color: var(--green); }
+.llm-testing { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text2); padding: 14px 0; }
+.llm-results { display: flex; flex-direction: column; gap: 6px; }
+.llm-result {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px;
+  background: var(--panel2); border: 1px solid var(--border); font-size: 12.5px;
+}
+.llm-result.ok { border-color: rgba(0,180,120,.35); }
+.llm-result.bad { border-color: rgba(230,70,70,.35); }
+.llm-result.ok .icon { color: var(--green); }
+.llm-result.bad .icon { color: var(--red); }
+.llm-result-model { font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.llm-result-meta { margin-left: auto; color: var(--muted); font-size: 11.5px; }
+.llm-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 16px; }
+.llm-actions .btn { min-width: 96px; justify-content: center; }
+
 /* diagnosis popover result inside table */
 .diag-row td { background: var(--panel2); }
 .diag-box { padding: 10px 14px; text-align: left; white-space: normal; }

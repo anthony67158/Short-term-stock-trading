@@ -6,6 +6,7 @@ import { marketTimePromptBlock, marketTimeContext } from './_market_time.js';
 import { getLatestDailySummary } from './_daily_summary.js';
 import { fetchNews, fetchClsTelegraph } from './_market_data.js';
 import { callChat, callChatWithRetry, parseLLMJson } from './_llm.js';
+import { ensureConfig, currentConfig, getModel } from './_llm_config.js';
 import { applyCors, preflight } from './_lib.js';
 import { SYSTEM_PROMPT, ADVISOR_SYSTEM, buildUserPrompt, isAdvisorMode, maxTokensForMode } from './_ai_prompts.js';
 
@@ -311,10 +312,15 @@ export default async function handler(req, res) {
 
   const BASE = process.env.LLM_BASE_URL;
   const KEY = process.env.LLM_API_KEY;
-  const MODEL = process.env.LLM_MODEL || 'DeepSeek-V3.2-Pro';
+  // 运行时配置优先（前端「AI 模型配置」写入 OSS）：先预热同步缓存，再取 BASE/KEY/模型
+  await ensureConfig();
+  const cfg = currentConfig();
+  const RT_BASE = cfg.baseUrl || BASE;
+  const RT_KEY = cfg.apiKey || KEY;
+  const MODEL = getModel('chat');
   // 顶级操盘军师专用模型：深度个股研判(做T/加减仓/买入/复盘)用更强、更快、原生JSON稳定的模型
-  const ADVISOR_MODEL = process.env.ADVISOR_MODEL || 'DeepSeek-V4-Pro';
-  if (!BASE || !KEY) {
+  const ADVISOR_MODEL = getModel('advisor');
+  if (!RT_BASE || !RT_KEY) {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     return res.status(200).send(JSON.stringify({ ok: false, error: 'LLM 未配置' }));
   }
@@ -404,9 +410,15 @@ export default async function handler(req, res) {
         {
           const q0 = todayQ && todayQ.list && todayQ.list[0];
           if (q0 && q0.price != null) {
+            // ★时效闸门:盘前(<9:15)/盘后/休市 时 /api/quote 返回的是【上一交易日收盘快照】,
+            //   绝不能当"今日实时行情"。用 marketTimeContext().isLive 判定:
+            //   isLive=true(集合竞价/盘中/午间/午盘) → 真·实时行情,可算今日合法价带;
+            //   isLive=false(盘前未开盘/盘后/休市) → 昨日收盘口径,不算"今日"涨跌停价(否则会错一天)。
+            const mtc = marketTimeContext();
+            const isLive = !!mtc.isLive;
             // ★涨停/跌停价:按【昨收×(1±涨跌幅限制)】四舍五入到分。限制比例按板块/ST判定:
             //   创业板(300/301)、科创板(688) = ±20%; ST/*ST(名称含ST) = ±5%; 其余主板 = ±10%。
-            //   北交所(8/4开头)=±30%。给 LLM 一个【绝对不能突破的合法价带】,避免出现"低于跌停价卖"这类不可能挂单。
+            //   北交所(8/4开头)=±30%。仅盘中(isLive)才注入"今日合法价带",盘前/盘后不注入避免口径错位。
             const nm = String((payload.name || (q0 && q0.name) || '')).toUpperCase();
             const codeStr = String(payload.code || '');
             const isST = nm.includes('ST');
@@ -415,15 +427,20 @@ export default async function handler(req, res) {
             else if (/^(30|68)/.test(codeStr)) ratio = 0.20;
             else if (/^(8|4)/.test(codeStr)) ratio = 0.30;
             const base = q0.prevClose;
-            const limitUpPrice = base != null ? +(base * (1 + ratio)).toFixed(2) : null;
-            const limitDownPrice = base != null ? +(base * (1 - ratio)).toFixed(2) : null;
+            // 只有实时(盘中)才给 LLM 硬性"今日合法价带";非实时时置 null,提示词自动转收盘口径。
+            const limitUpPrice = (isLive && base != null) ? +(base * (1 + ratio)).toFixed(2) : null;
+            const limitDownPrice = (isLive && base != null) ? +(base * (1 - ratio)).toFixed(2) : null;
             payload.todayQuote = {
+              live: isLive,                     // ★是否今日实时(false=上一交易日收盘快照)
+              asOfLabel: mtc.dataDayLabel,      // 该行情实际对应的交易日
+              phase: mtc.phase,                 // 盘前/盘中/盘后/休市
               price: q0.price, pct: q0.pct,
-              isLimitUp: !!q0.isLimitUp, isLimitDown: !!q0.isLimitDown,
+              // 涨停/跌停标记仅实时时有意义;盘前的 isLimit* 是昨日的,不代表今日
+              isLimitUp: isLive && !!q0.isLimitUp, isLimitDown: isLive && !!q0.isLimitDown,
               limitUpPrice, limitDownPrice, limitRatioPct: +(ratio * 100).toFixed(0),
               high: q0.high, low: q0.low, open: q0.open, prevClose: q0.prevClose,
               turnover: q0.turnover, volRatio: q0.volRatio,
-              bigMove: q0.pct != null && Math.abs(q0.pct) >= 7,  // 当日大涨/大跌(>7%)
+              bigMove: isLive && q0.pct != null && Math.abs(q0.pct) >= 7,  // 今日大涨/大跌(>7%),仅实时口径
             };
           }
         }
@@ -737,7 +754,10 @@ export default async function handler(req, res) {
       try {
         const hq = Number(payload.holdQty);
         const tq = payload.todayQuote || {};
-        const lo = Number(tq.limitDownPrice), hi = Number(tq.limitUpPrice);
+        // 只有实时(盘中)且给了合法价带时才做价格夹取;盘前/盘后 limit* 为 null,
+        //   Number(null)===0 会被误判为有限值把价格夹到 0,故用 == null 显式排除。
+        const lo = (tq.limitDownPrice == null) ? NaN : Number(tq.limitDownPrice);
+        const hi = (tq.limitUpPrice == null) ? NaN : Number(tq.limitUpPrice);
         const notes = [];
         // (1) 手数不得超过实际持仓
         const clampQtyField = (field) => {
