@@ -1,0 +1,53 @@
+# 每日量化持续训练（冠军-挑战者，只升不降）
+# 触发：每天 UTC 01:30（北京时间 09:30 前后，收盘后新成熟标签已可用）+ 手动。
+# 机制：拉最新日线→重建数据集→挑战者 vs 冠军(leak-free holdout AUC 对拍)→过护栏才晋级→上传 OSS。
+#       量化服务 model_lib 每 1h 从 OSS 热更新，故上传即上线，无需重部署 FC。
+name: daily-retrain
+
+on:
+  schedule:
+    - cron: "30 1 * * 1-5"   # 周一至周五 UTC 01:30
+  workflow_dispatch: {}       # 支持手动触发
+
+concurrency:
+  group: daily-retrain
+  cancel-in-progress: false
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: qlib-service   # 训练代码所在子目录(按仓库实际路径调整)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install lightgbm numpy scikit-learn oss2
+
+      - name: Run champion-challenger retrain
+        env:
+          OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+          OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+          OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
+          OSS_ENDPOINT: ${{ secrets.OSS_ENDPOINT }}
+          QUANT_MODEL_PREFIX: quantmodel/
+        run: |
+          python3 retrain_daily.py --pool 600 --bars 700 --horizon 5
+
+      - name: Show latest decision
+        if: always()
+        run: tail -n 1 retrain_history.jsonl || echo "(no history)"
+
+      - name: Upload audit log artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: retrain-history-${{ github.run_id }}
+          path: qlib-service/retrain_history.jsonl
+          if-no-files-found: ignore

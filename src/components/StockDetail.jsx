@@ -721,6 +721,21 @@ export default function StockDetail({ stock, onClose }) {
                                   </div>
                                 </div>
                               )}
+                              {q.highConfSignal && q.highConfSignal.fired && (
+                                <div className="hcs-box">
+                                  <div className="hcs-head">
+                                    <span className="hcs-star">⭐</span>
+                                    <span className="hcs-title">高把握买点</span>
+                                    <span className="hcs-cred">可信度 {q.highConfSignal.credibility}%</span>
+                                  </div>
+                                  <div className="hcs-grid">
+                                    <div className="hcs-cell"><span className="hcs-k">买入价</span><span className="hcs-v gold">{q.highConfSignal.buyPrice}</span></div>
+                                    <div className="hcs-cell"><span className="hcs-k">止盈价</span><span className="hcs-v red">{q.highConfSignal.takeProfit}</span></div>
+                                    <div className="hcs-cell"><span className="hcs-k">止损价</span><span className="hcs-v green">{q.highConfSignal.stopLoss}</span></div>
+                                  </div>
+                                  <div className="hcs-foot">{q.highConfSignal.label} · 样本外命中率约 {q.highConfSignal.holdoutPrecision}%（闸门 {q.highConfSignal.gate}）</div>
+                                </div>
+                              )}
                               {q.score != null && (q.reads || []).length > 0 && (
                                 <div className="quant-line">
                                   {(q.reads || []).slice(-1).map((r, i) => <span className="quant-line-read" key={i}>{r}</span>)}

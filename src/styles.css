@@ -1898,6 +1898,19 @@ body {
 .fc-k { font-size: 11px; color: var(--muted); }
 .fc-v { font-size: 13.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .fc-v b { font-variant-numeric: tabular-nums; }
+/* 高把握买点(可信度>=85%)卡片 */
+.hcs-box { margin-top: 8px; padding: 11px 12px; border-radius: 11px; background: linear-gradient(135deg, rgba(227,179,65,.13), rgba(224,67,47,.08)); border: 1px solid rgba(227,179,65,.45); }
+.hcs-head { display: flex; align-items: center; gap: 7px; margin-bottom: 9px; }
+.hcs-star { font-size: 14px; }
+.hcs-title { font-size: 13.5px; font-weight: 800; color: var(--gold); letter-spacing: .5px; }
+.hcs-cred { margin-left: auto; font-size: 12px; font-weight: 800; color: var(--red); background: rgba(224,67,47,.12); padding: 2px 9px; border-radius: 6px; font-variant-numeric: tabular-nums; }
+.hcs-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+.hcs-cell { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 7px 6px; border-radius: 8px; background: var(--panel3, rgba(255,255,255,.04)); }
+.hcs-k { font-size: 10.5px; color: var(--muted); }
+.hcs-v { font-size: 15px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.hcs-v.gold { color: var(--gold); } .hcs-v.red { color: var(--red); } .hcs-v.green { color: var(--green); }
+.hcs-foot { margin-top: 8px; font-size: 10.5px; color: var(--muted); text-align: center; }
+@media (max-width: 560px){ .hcs-grid { grid-template-columns: 1fr; } }
 /* 量化紧凑行 */
 .quant-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
 .quant-chip { font-size: 12px; font-weight: 700; padding: 2px 9px; border-radius: 6px; white-space: nowrap; }

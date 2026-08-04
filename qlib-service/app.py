@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import numpy as np
 
 from factors_lib import compute_factors, feature_vector, FEATURE_NAMES
-from model_lib import model_score, garch_sigma, get_model
+from model_lib import model_score, garch_sigma, get_model, signal_prob
 
 app = FastAPI(title="Quant Score & Forecast", version="3.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -121,6 +121,41 @@ def forecast(f, days=5, sims=3000):
     }
 
 
+# ---------- 高把握买点（可信度>=85% 的选择性出价，回答核心目标1）----------
+# 校准概率 prob>=gate 时给出「高把握买点」：买入价/止盈价(target_pct)/止损价(ATR锚定)。
+# 只在 prob>=gate 时出信号；否则 fired=False（宁可不出，不降低可信度）。
+def high_conf_signal(f):
+    prob, meta = signal_prob(feature_vector(f))
+    if prob is None or not meta:
+        return None
+    gate = float(meta.get("gate", 0.90))
+    target_pct = float(meta.get("target_pct", 0.02))
+    horizon = int(meta.get("horizon", 5))
+    last = float(f["_last"])
+    atr = float(f.get("_atr") or 0.0)
+    atr_pct = (atr / last) if (last > 0 and atr > 0) else 0.02
+    fired = bool(prob >= gate)
+    # 止盈：达标目标价 close*(1+target_pct)；止损：ATR 锚定（1.5×ATR，控制在合理区间）
+    take_profit = round(last * (1 + target_pct), 2)
+    stop_pct = float(min(max(1.5 * atr_pct, 0.02), 0.06))
+    stop_loss = round(last * (1 - stop_pct), 2)
+    return {
+        "fired": fired,
+        "prob": round(prob, 4),
+        "credibility": round(prob * 100, 1),
+        "gate": round(gate, 3),
+        "buyPrice": round(last, 2),
+        "takeProfit": take_profit,
+        "stopLoss": stop_loss,
+        "targetPct": round(target_pct * 100, 1),
+        "stopPct": round(stop_pct * 100, 1),
+        "horizon": horizon,
+        "holdoutPrecision": (round(float(meta["holdout_precision"]) * 100, 1)
+                             if meta.get("holdout_precision") is not None else None),
+        "label": f"{horizon}日内触及 +{target_pct*100:.0f}% 止盈",
+    }
+
+
 # ---------- 决策建议（结合是否持仓 + 打分 + 预测）----------
 def decide(score, bias, fc, f, hold):
     last = f["_last"]
@@ -191,6 +226,7 @@ def predict(payload: dict = Body(...), x_api_key: str = Header(default="")):
         f = compute_factors(closes, highs, lows, vols, opens=opens, index_closes=index_closes)
         score, bias, t_dir, engine, prob = score_stock(f)
         fc = forecast(f, days=5)
+        sig = high_conf_signal(f)
         dec = decide(score, bias, fc, f, hold)
 
         reads = []
@@ -198,11 +234,15 @@ def predict(payload: dict = Body(...), x_api_key: str = Header(default="")):
             reads.append(f"未来{fc['days']}日{fc['direction']}，上涨概率{fc['upProb']:.0f}%，预期{fc['expRet']:+.1f}%")
             reads.append(f"目标价区间 {fc['targetLow']} ~ {fc['targetHigh']}（中枢 {fc['targetMid']}）")
         reads.append(f"量化{bias}{score}分 · RSI {f['rsi']:.0f} · 60日位置{f['pos60']:.0f}%")
+        if sig and sig.get("fired"):
+            reads.append(f"⭐高把握买点：可信度{sig['credibility']:.0f}% · 买入{sig['buyPrice']} "
+                         f"止盈{sig['takeProfit']} 止损{sig['stopLoss']}（{sig['label']}）")
 
         return {
             "ok": True, "code": code,
             "score": score, "bias": bias, "tDir": t_dir,
             "forecast": fc, "decision": dec, "reads": reads,
+            "highConfSignal": sig,
             "engine": engine, "hitProb": (round(prob, 4) if prob is not None else None),
             "asOf": (cs[-1].get("date") or ""),
             "note": "统计口径，非投资建议",

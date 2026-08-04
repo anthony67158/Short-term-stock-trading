@@ -26,11 +26,18 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default="lgb_score.txt")
     ap.add_argument("--meta", default="meta.json")
+    ap.add_argument("--signal", default=None, help="信号头模型(lgb_signal.txt)，可选")
+    ap.add_argument("--signal-meta", default=None, help="信号头元数据(signal_meta.json)，可选")
     ap.add_argument("--prefix", default=os.environ.get("QUANT_MODEL_PREFIX", "quantmodel/"))
     a = ap.parse_args()
     b = bucket()
-    for local, key in [(a.model, a.prefix + "lgb_score.txt"),
-                       (a.meta, a.prefix + "meta.json")]:
+    pairs = [(a.model, a.prefix + "lgb_score.txt"),
+             (a.meta, a.prefix + "meta.json")]
+    if a.signal and os.path.exists(a.signal):
+        pairs.append((a.signal, a.prefix + "lgb_signal.txt"))
+    if a.signal_meta and os.path.exists(a.signal_meta):
+        pairs.append((a.signal_meta, a.prefix + "signal_meta.json"))
+    for local, key in pairs:
         b.put_object_from_file(key, local)
         print(f"[uploaded] {local} -> oss://{os.environ['OSS_BUCKET']}/{key}")
     # 读回校验

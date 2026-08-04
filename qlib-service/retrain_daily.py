@@ -47,6 +47,9 @@ from train_lgb import cv_auc_and_iters, fit_final
 HERE = os.path.dirname(os.path.abspath(__file__))
 BUNDLED_MODEL = os.path.join(HERE, "lgb_score.txt")
 BUNDLED_META = os.path.join(HERE, "meta.json")
+BUNDLED_SIGNAL = os.path.join(HERE, "lgb_signal.txt")
+BUNDLED_SIGNAL_META = os.path.join(HERE, "signal_meta.json")
+SWEEP = os.path.join(HERE, "sweep.npz")
 HISTORY = os.path.join(HERE, "retrain_history.jsonl")
 DATASET = os.path.join(HERE, "dataset.npz")
 
@@ -55,6 +58,9 @@ TOL = float(os.environ.get("RETRAIN_TOL", "0.005"))            # 挑战者可比
 AUC_FLOOR = float(os.environ.get("RETRAIN_AUC_FLOOR", "0.55")) # 挑战者 AUC 绝对下限
 MIN_SAMPLES = int(os.environ.get("RETRAIN_MIN_SAMPLES", "50000"))
 HOLDOUT_FRAC = float(os.environ.get("RETRAIN_HOLDOUT_FRAC", "0.15"))
+# ---- 信号头(高把握买点)护栏：只在样本外精确率达标时才更新，绝不降低可信度 ----
+SIGNAL_PREC_FLOOR = float(os.environ.get("RETRAIN_SIGNAL_PREC_FLOOR", "0.83"))  # 样本外精确率下限
+SIGNAL_MIN_N = int(os.environ.get("RETRAIN_SIGNAL_MIN_N", "100"))               # holdout 上最少信号数
 
 
 def log(*a):
@@ -67,14 +73,13 @@ def append_history(rec):
         fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
 
-def build_dataset(pool, bars, horizon, stride=1, index="sh000300"):
-    """调 build_dataset.py 重建 dataset.npz（拉最新日线+大盘指数，新成熟标签自动进入）。"""
+def build_dataset(pool, bars, horizon):
+    """调 build_dataset.py 重建 dataset.npz（拉最新日线，新成熟标签自动进入）。"""
     cmd = [sys.executable, os.path.join(HERE, "build_dataset.py"),
            "--pool", str(pool), "--bars", str(bars),
-           "--horizon", str(horizon), "--stride", str(stride),
-           "--index", index, "--out", DATASET]
+           "--horizon", str(horizon), "--out", DATASET]
     log("重建数据集:", " ".join(cmd[1:]))
-    r = subprocess.run(cmd, cwd=HERE, capture_output=True, text=True, timeout=1800)
+    r = subprocess.run(cmd, cwd=HERE, capture_output=True, text=True, timeout=1500)
     sys.stdout.write(r.stdout[-1500:] if r.stdout else "")
     if r.returncode != 0:
         sys.stderr.write(r.stderr[-1500:] if r.stderr else "")
@@ -185,12 +190,15 @@ def promote(X, y, dates, feat_names, chall_hold_auc, champ_auc):
 
 
 def upload_oss():
-    """把新模型上传 OSS(quantmodel/)。缺 OSS 凭证则跳过(只更新本地 bundled)。"""
+    """把新模型上传 OSS(quantmodel/)。缺 OSS 凭证则跳过(只更新本地 bundled)。
+    若信号头产物存在则一并上传(高把握买点当天同步热更新)。"""
     if not (os.environ.get("OSS_ACCESS_KEY_ID") and os.environ.get("OSS_BUCKET")):
         log("未配置 OSS_* 环境变量，跳过上传(本地 bundled 已更新，下次部署随包生效)")
         return False
     cmd = [sys.executable, os.path.join(HERE, "upload_model.py"),
            "--model", BUNDLED_MODEL, "--meta", BUNDLED_META]
+    if os.path.exists(BUNDLED_SIGNAL) and os.path.exists(BUNDLED_SIGNAL_META):
+        cmd += ["--signal", BUNDLED_SIGNAL, "--signal-meta", BUNDLED_SIGNAL_META]
     r = subprocess.run(cmd, cwd=HERE, capture_output=True, text=True, timeout=180)
     sys.stdout.write(r.stdout or "")
     if r.returncode != 0:
@@ -201,13 +209,66 @@ def upload_oss():
     return True
 
 
+def retrain_signal_head(pool, bars):
+    """重训「高把握买点」信号头(可信度>=85% 闸门)，实现每天 gate 随新样本前推。
+    冠军-挑战者护栏：新信号头须在样本外 holdout 上精确率 >= SIGNAL_PREC_FLOOR
+    且信号数 >= SIGNAL_MIN_N 才覆盖 bundled；否则保留旧信号头(绝不降低可信度)。
+    返回 dict(决策记录) 或 None(构建失败)。"""
+    # 1) 重建 sweep.npz(多口径评测集，含 fmax5)；失败则用现有的
+    cmd = [sys.executable, os.path.join(HERE, "build_sweep.py")]
+    try:
+        log("重建 sweep(信号头评测集)...")
+        r = subprocess.run(cmd, cwd=HERE, capture_output=True, text=True, timeout=1500)
+        sys.stdout.write(r.stdout[-800:] if r.stdout else "")
+        if r.returncode != 0 and not os.path.exists(SWEEP):
+            sys.stderr.write(r.stderr[-800:] if r.stderr else "")
+            return {"signal_decision": "error", "stage": "build_sweep"}
+    except Exception as e:  # noqa: BLE001
+        if not os.path.exists(SWEEP):
+            return {"signal_decision": "error", "stage": "build_sweep", "error": str(e)[:160]}
+
+    # 2) 训练候选信号头到临时文件(不直接覆盖 bundled，先过护栏)
+    cand_model = os.path.join(HERE, "lgb_signal.cand.txt")
+    cand_meta = os.path.join(HERE, "signal_meta.cand.json")
+    tr = subprocess.run(
+        [sys.executable, os.path.join(HERE, "train_signal.py"),
+         "--out-model", cand_model, "--out-meta", cand_meta],
+        cwd=HERE, capture_output=True, text=True, timeout=900)
+    sys.stdout.write(tr.stdout[-800:] if tr.stdout else "")
+    if tr.returncode != 0 or not os.path.exists(cand_meta):
+        sys.stderr.write(tr.stderr[-800:] if tr.stderr else "")
+        return {"signal_decision": "error", "stage": "train_signal"}
+
+    # 3) 护栏：候选信号头在其自身 holdout 上的样本外精确率必须达标
+    cm = json.load(open(cand_meta))
+    prec = cm.get("holdout_precision")
+    n_sig = cm.get("n_signal_holdout", 0)
+    ok = (prec is not None and np.isfinite(prec)
+          and prec >= SIGNAL_PREC_FLOOR and n_sig >= SIGNAL_MIN_N)
+    rec = {"signal_holdout_precision": (round(float(prec), 4) if prec is not None else None),
+           "signal_gate": cm.get("gate"), "signal_n": int(n_sig),
+           "signal_prec_floor": SIGNAL_PREC_FLOOR}
+    if ok:
+        os.replace(cand_model, BUNDLED_SIGNAL)
+        os.replace(cand_meta, BUNDLED_SIGNAL_META)
+        rec["signal_decision"] = "promote"
+        log(f"信号头晋级: 样本外精确率={prec*100:.1f}% gate={cm.get('gate')} n={n_sig}")
+    else:
+        for p in (cand_model, cand_meta):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+        rec["signal_decision"] = "reject"
+        log(f"信号头拒绝(保留旧版): 精确率={prec} n={n_sig} 未达 {SIGNAL_PREC_FLOOR}/{SIGNAL_MIN_N}")
+    return rec
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pool", type=int, default=600)
-    ap.add_argument("--bars", type=int, default=900)  # 与冠军训练同深度，保证挑战者数据量对等、可公平胜出
+    ap.add_argument("--bars", type=int, default=700)  # 与冠军训练同深度(700根)，保证挑战者数据量对等、可公平胜出
     ap.add_argument("--horizon", type=int, default=5)
-    ap.add_argument("--stride", type=int, default=1)
-    ap.add_argument("--index", default="sh000300", help="大盘相对因子基准指数")
     ap.add_argument("--dry-run", action="store_true", help="只训练评测打印决策，不写文件不上传")
     ap.add_argument("--skip-build", action="store_true", help="复用现有 dataset.npz(调试用)")
     a = ap.parse_args()
@@ -215,7 +276,7 @@ def main():
     t0 = time.time()
     try:
         if not a.skip_build:
-            build_dataset(a.pool, a.bars, a.horizon, a.stride, a.index)
+            build_dataset(a.pool, a.bars, a.horizon)
         X, y, dates, feat_names = load_dataset()
     except Exception as e:  # noqa: BLE001
         append_history({"decision": "error", "stage": "build/load", "error": str(e)[:200]})
@@ -271,14 +332,22 @@ def main():
     if not should_promote:
         reason = "below_floor" if not above_floor else "not_better_than_champion"
         rec = {**base, "decision": "reject", "reason": reason}
+        # 打分模型不晋级，但高把握买点信号头仍按自身护栏独立每日重训(gate 随新样本前推)
+        sig_rec = retrain_signal_head(a.pool, a.bars)
+        if sig_rec:
+            rec.update(sig_rec)
+            if sig_rec.get("signal_decision") == "promote":
+                rec["oss_uploaded"] = upload_oss()
         append_history(rec)
         log("拒绝晋级(保留冠军，线上不变):", reason)
         return
 
     meta, cv_auc = promote(X, y, dates, feat_names, chall_auc, (None if no_champ else champ_auc))
+    # 高把握买点信号头：与主模型同批每日重训(独立精确率护栏)
+    sig_rec = retrain_signal_head(a.pool, a.bars) or {}
     uploaded = upload_oss()
     rec = {**base, "decision": "promote", "cv_auc": round(cv_auc, 4),
-           "n_estimators": meta["n_estimators"], "oss_uploaded": uploaded}
+           "n_estimators": meta["n_estimators"], "oss_uploaded": uploaded, **sig_rec}
     append_history(rec)
     log("晋级完成:", json.dumps(rec, ensure_ascii=False))
 

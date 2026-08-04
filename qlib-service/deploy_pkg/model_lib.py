@@ -26,6 +26,19 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 BUNDLED_MODEL = os.path.join(_HERE, "lgb_score.txt")
 BUNDLED_META = os.path.join(_HERE, "meta.json")
 
+# ---------- 高把握买点「信号头」（可信度>=85% 的选择性出价）----------
+# 与主打分模型同 36 维特征、同源。独立的 LightGBM 概率模型 + isotonic 校准 + gate 闸门。
+# 推理：raw=predict(x); prob=np.interp(raw,cal_x,cal_y); 若 prob>=gate => 高把握买点。
+_SIGNAL = None         # lightgbm Booster（信号头）
+_SIGNAL_META = None    # dict: gate, cal_x, cal_y, target_pct, horizon, holdout_precision...
+_SIGNAL_TS = 0
+SIGNAL_MODEL_KEY = OSS_PREFIX + "lgb_signal.txt"
+SIGNAL_META_KEY = OSS_PREFIX + "signal_meta.json"
+LOCAL_SIGNAL = "/tmp/lgb_signal.txt"
+LOCAL_SIGNAL_META = "/tmp/signal_meta.json"
+BUNDLED_SIGNAL = os.path.join(_HERE, "lgb_signal.txt")
+BUNDLED_SIGNAL_META = os.path.join(_HERE, "signal_meta.json")
+
 
 def _oss_bucket():
     try:
@@ -153,6 +166,102 @@ def model_score(feat_vec, feat_names):
     except Exception:
         return None
     return float(np.clip(p * 100.0, 0, 100)), p
+
+
+def _download_signal():
+    """OSS → 本地 /tmp 拉取信号头模型 + 元数据。带下载后可加载校验。成功返回 True。"""
+    b = _oss_bucket()
+    if not b:
+        return False
+    import lightgbm as lgb
+    tmp_model = LOCAL_SIGNAL + ".part"
+    tmp_meta = LOCAL_SIGNAL_META + ".part"
+    try:
+        data = b.get_object(SIGNAL_MODEL_KEY).read()
+        with open(tmp_model, "wb") as fh:
+            fh.write(data)
+        lgb.Booster(model_file=tmp_model)          # 完整性校验
+        os.replace(tmp_model, LOCAL_SIGNAL)
+        try:
+            data = b.get_object(SIGNAL_META_KEY).read()
+            with open(tmp_meta, "wb") as fh:
+                fh.write(data)
+            json.load(open(tmp_meta))
+            os.replace(tmp_meta, LOCAL_SIGNAL_META)
+        except Exception:
+            pass
+        return True
+    except Exception:
+        for p in (tmp_model, tmp_meta):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+        return False
+
+
+def get_signal_model():
+    """返回 (booster, meta) 或 (None, None)。加载优先级：OSS 热更新 > bundled 兜底。
+    meta 含 gate / cal_x / cal_y / target_pct / horizon 等，供校准推理与目标价计算。"""
+    global _SIGNAL, _SIGNAL_META, _SIGNAL_TS
+    now = time.time()
+    if _SIGNAL is not None and (now - _SIGNAL_TS) < _TTL:
+        return _SIGNAL, _SIGNAL_META
+    try:
+        import lightgbm as lgb
+    except Exception:
+        return None, None
+    if not os.path.exists(LOCAL_SIGNAL):
+        try:
+            _download_signal()
+        except Exception:
+            pass
+    model_path, meta_path = None, None
+    if os.path.exists(LOCAL_SIGNAL):
+        model_path, meta_path = LOCAL_SIGNAL, LOCAL_SIGNAL_META
+    elif os.path.exists(BUNDLED_SIGNAL):
+        model_path, meta_path = BUNDLED_SIGNAL, BUNDLED_SIGNAL_META
+    if not model_path:
+        return None, None
+    try:
+        _SIGNAL = lgb.Booster(model_file=model_path)
+        if meta_path and os.path.exists(meta_path):
+            _SIGNAL_META = json.load(open(meta_path))
+        else:
+            _SIGNAL_META = None
+        _SIGNAL_TS = now
+        return _SIGNAL, _SIGNAL_META
+    except Exception:
+        if model_path != BUNDLED_SIGNAL and os.path.exists(BUNDLED_SIGNAL):
+            try:
+                _SIGNAL = lgb.Booster(model_file=BUNDLED_SIGNAL)
+                _SIGNAL_META = (json.load(open(BUNDLED_SIGNAL_META))
+                                if os.path.exists(BUNDLED_SIGNAL_META) else None)
+                _SIGNAL_TS = now
+                return _SIGNAL, _SIGNAL_META
+            except Exception:
+                return None, None
+        return None, None
+
+
+def signal_prob(feat_vec):
+    """高把握买点校准概率。返回 (prob, meta) 或 (None, None)。
+    prob = isotonic(raw)，与训练/holdout 同源；调用方用 prob>=meta['gate'] 判定是否给高把握买点。"""
+    booster, meta = get_signal_model()
+    if booster is None or not meta:
+        return None, None
+    x = np.asarray([feat_vec], dtype=np.float32)
+    try:
+        raw = float(booster.predict(x)[0])
+    except Exception:
+        return None, None
+    cal_x = meta.get("cal_x")
+    cal_y = meta.get("cal_y")
+    if cal_x and cal_y:
+        prob = float(np.interp(raw, np.asarray(cal_x, float), np.asarray(cal_y, float)))
+    else:
+        prob = raw
+    return float(np.clip(prob, 0.0, 1.0)), meta
 
 
 def garch_sigma(rets_pct, fallback):
