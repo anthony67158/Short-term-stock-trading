@@ -571,11 +571,9 @@ function AdvisorScore({ book }) {
 function holdSnapshot(h, q) {
   const shares = (h.qty || 0) * 100
   const costWithFee = shares ? +(((h.buyPrice * shares) + (h.buyFee || 0)) / shares).toFixed(3) : h.buyPrice
-  // 现价有效性:必须 > 0。休市/接口异常返回 0 时,盈亏用昨收兜底展示;但触价判定只认实时价,避免误触止损
+  // 现价有效性:必须 > 0。休市/接口异常返回 0 时不参与任何盈亏/触价计算,否则会算出 -100%、误触止损
   const px = q && Number(q.price) > 0 ? q.price : null
-  const pcClose = q && Number(q.prevClose) > 0 ? Number(q.prevClose) : null
-  const effPx = px != null ? px : pcClose
-  const pnl = effPx != null && costWithFee ? +(((effPx - costWithFee) / costWithFee) * 100).toFixed(2) : null
+  const pnl = px != null && costWithFee ? +(((px - costWithFee) / costWithFee) * 100).toFixed(2) : null
   const hitTP = px != null && h.tp && px >= Number(h.tp)
   const hitSL = px != null && h.sl && px <= Number(h.sl)
   let urgency = 0, flag = null
@@ -947,9 +945,9 @@ function HoldingItem({ h, idx, quote: q }) {
 
       {/* 止损↔止盈 进度轨：一眼看清现价离两条防线的距离 */}
       {(() => {
-        // 用有效价(实时现价,否则收盘价兜底);两者皆无(如无K线数据)才不渲染。effPx 一定 >0,不会除零。
-        if (effPx == null || h.sl == null || h.tp == null) return null
-        const sl = Number(h.sl), tp = Number(h.tp), price = effPx
+        // 现价无效(0/null/NaN,如休市)时不渲染进度轨,避免除零得 ±Infinity
+        if (validPx == null || h.sl == null || h.tp == null) return null
+        const sl = Number(h.sl), tp = Number(h.tp), price = validPx
         if (!(tp > sl)) return null
         const clamp = (v) => Math.max(0, Math.min(100, v))
         const pos = clamp(((price - sl) / (tp - sl)) * 100)
@@ -959,7 +957,7 @@ function HoldingItem({ h, idx, quote: q }) {
         const toTP = +(((tp - price) / price) * 100).toFixed(2)
         const toSL = +(((price - sl) / price) * 100).toFixed(2)
         return (
-          <div className="hold-track" title={`${priceIsClose ? '收盘价' : '现价'}距止盈 ${toTP >= 0 ? '+' : ''}${toTP}% · 距止损 ${toSL >= 0 ? '-' : '+'}${Math.abs(toSL)}%`}>
+          <div className="hold-track" title={`现价距止盈 ${toTP >= 0 ? '+' : ''}${toTP}% · 距止损 ${toSL >= 0 ? '-' : '+'}${Math.abs(toSL)}%`}>
             <div className="ht-bar">
               <div className="ht-fill" style={{ width: pos + '%' }} />
               {costPos != null && <span className="ht-cost" style={{ left: costPos + '%' }} title={`成本 ${fmtRaw(costWithFee)}`} />}
@@ -967,7 +965,7 @@ function HoldingItem({ h, idx, quote: q }) {
             </div>
             <div className="ht-labels">
               <span className="ht-sl">止损 {fmtRaw(sl)}<em>-{Math.abs(toSL)}%</em></span>
-              <span className="ht-now">{priceIsClose ? '收' : '现'} {fmtRaw(price)}</span>
+              <span className="ht-now">现 {fmtRaw(price)}</span>
               <span className="ht-tp">止盈 {fmtRaw(tp)}<em>+{toTP}%</em></span>
             </div>
           </div>

@@ -855,8 +855,10 @@ export function usePlanStore() {
 export function computePortfolio(holding, quoteMap, account) {
   const positions = (holding || []).map((h) => {
     const q = quoteMap && quoteMap[h.code]
-    // 现价必须 > 0 才有效：休市/接口异常会返回 0，此时回退到成本价，避免市值/浮盈亏被算成 -100%
-    const price = q && Number(q.price) > 0 ? q.price : h.buyPrice
+    // 现价必须 > 0 才有效:休市/接口异常会返回 0。兜底顺序:实时现价 → 昨收 prevClose → 买入成本,
+    // 保证市值/浮盈亏永远有个合理数值,既不为 0 也不会被算成 -100%。
+    const price = q && Number(q.price) > 0 ? q.price
+      : (q && Number(q.prevClose) > 0 ? Number(q.prevClose) : h.buyPrice)
     const shares = (h.qty || 0) * 100
     const mktValue = +(price * shares).toFixed(2)          // 市值
     const costValue = +((h.buyPrice || 0) * shares + (h.buyFee || 0)).toFixed(2) // 含费成本
