@@ -779,6 +779,7 @@ export const planStore = {
   // 事后核验（短线实战口径）：传入 {code: 日K线数组[{date,open,close,high,low}]}
   // 判定窗口=建议日之后 3 个交易日。看多：窗口内"最高价触及目标价"即命中(可提前结算)，
   // 无目标价时看 3 日内最大涨幅≥2%；看空/观望：3 日内没明显上涨(<2%)即命中。
+  // 持有(已在仓的中性决策)：跌破止损即判负，否则回撤在容忍内(≥-3%)即算持有正确——不要求必须上涨。
   // 窗口未走完且未提前命中 → 保持待核验，绝不用单日收盘草率判死。
   verifyAdvice(candleMap) {
     if (!candleMap) return
@@ -804,14 +805,22 @@ export const planStore = {
       const windowComplete = future.length >= WINDOW
       const base = r.priceAtAdvice
       const target = Number(r.target) || null
+      const stop = Number(r.stop) || null
       const maxHigh = Math.max(...win.map((c) => c.high || c.close || base))
       const minLow = Math.min(...win.map((c) => c.low || c.close || base))
       const lastClose = win[win.length - 1].close || base
       const maxUpPct = +(((maxHigh - base) / base) * 100).toFixed(2)   // 窗口内最大有利波动
+      const maxDownPct = +(((minLow - base) / base) * 100).toFixed(2)  // 窗口内最大不利波动(负数)
       const closePct = +(((lastClose - base) / base) * 100).toFixed(2) // 窗口末收盘涨幅
 
-      const bull = /买|加|持有|正T|立即|回调再买|抄底|吸|上车/.test(r.action || '')
-      const bear = /减|清|观望|不建议|反T|止损|离场|回避|谨慎/.test(r.action || '')
+      // 【持有/持股】是中性决策(已在仓，继续拿)：判对口径≠必须涨2%，而是"没明显下跌/没跌破止损"，
+      // 否则一个"横盘微涨的正确持有"会被看多的+2%尺子误判成失败，把持仓建议胜率整体压低。
+      const act = r.action || ''
+      const hold = /持有|持股|继续持|按兵不动|拿住|捂|不动/.test(act) && !/加|减|清/.test(act)
+      const bull = !hold && /买|加|正T|立即|回调再买|抄底|吸|上车|建仓|补仓/.test(act)
+      const bear = !hold && /减|清|观望|不建议|反T|止损|离场|回避|谨慎/.test(act)
+
+      const HOLD_DOWN_TH = 3        // 持有可容忍的最大回撤%(超过即认为本应减仓)
 
       let hit = null, settled = false, note = ''
       if (bull) {
@@ -821,6 +830,14 @@ export const planStore = {
         } else if (windowComplete) {                 // 没触及/无目标 → 看最大涨幅
           hit = maxUpPct >= BULL_TH; settled = true
           note = target ? `3日内最高${maxHigh}未及目标${target}(最大+${maxUpPct}%)` : `3日内最大+${maxUpPct}%`
+        }
+      } else if (hold) {
+        if (stop && minLow <= stop) {                // 跌破止损 → 提前判负(本应减/清仓)
+          hit = false; settled = true
+          note = `持有期内最低${minLow}跌破止损${stop}，本应减仓`
+        } else if (windowComplete) {                 // 没跌破止损 → 回撤在容忍内即算持有正确
+          hit = maxDownPct >= -HOLD_DOWN_TH; settled = true
+          note = `持有期内最大回撤${maxDownPct}%（容忍-${HOLD_DOWN_TH}%），收盘${closePct}%`
         }
       } else if (bear) {
         if (windowComplete) {                         // 看空/观望：没明显上涨即对
@@ -835,8 +852,8 @@ export const planStore = {
       changed = true
       return {
         ...r, verified: true, hit,
-        resultPct: bull ? maxUpPct : closePct,        // 看多看最大有利波动，其余看收盘
-        maxUpPct, closePct, maxHigh, minLow, windowDays: win.length,
+        resultPct: bull ? maxUpPct : closePct,        // 看多看最大有利波动，持有/看空看收盘
+        maxUpPct, maxDownPct, closePct, maxHigh, minLow, windowDays: win.length,
         verifiedAt: Date.now(), verifyNote: note,
       }
     })
