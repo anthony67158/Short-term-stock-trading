@@ -1,0 +1,41 @@
+# 部署架构与铁律（务必遵守）
+
+本项目是**前后端分离**部署，不是纯 Vercel 项目：
+
+- **前端（静态站）**：Vercel 项目 `stock-dashboard`（`prj_kj8hwBB7BtFtz8REVGttUwSQhpTG`），
+  统一域名 `https://stock-dashboard-one-plum.vercel.app`。
+  部署：`npm run build` → `npx vercel --prod --yes --token "$VC_TOKEN"` → alias 到 one-plum → 验 HTTP 200。
+- **后端（所有 API）**：阿里云函数计算（FC3.0），实例 `stock-dashboard-znrlekbzit`，
+  地址 `https://stock-dashboard-znrlekbzit.cn-hangzhou.fcapp.run`（cn-hangzhou）。
+  前端通过 `VITE_API_BASE` 注入此地址，浏览器**直连 FC**（Vercel 侧不跑 serverless）。
+
+## 铁律：后端改动必须部署到阿里云 FC
+
+**只要改动涉及后端（`api/`、`server.js`、以及任何被后端引用的模块，例如 `api/_ai_prompts.js` 军师 prompt），
+就必须部署到阿里云 FC，绝不能只推 Vercel。** 仅推 Vercel 不会更新任何后端逻辑。
+
+### 后端部署步骤（Serverless Devs）
+
+```bash
+cd <project-root>
+npm run build                       # 前端产物 dist/ 一并打进 FC 包，保持一致
+set -a; . ./.env; set +a            # 加载 .env，让 s.yaml 的 ${env('...')} 取到真值（关键，否则会把线上环境变量清空搞挂）
+npx @serverless-devs/s deploy -y    # 用 ~/.s/access.yaml 的 default 凭证部署到 stock-dashboard-znrlekbzit
+```
+
+部署后冒烟校验（都应 200）：
+```bash
+FC="https://stock-dashboard-znrlekbzit.cn-hangzhou.fcapp.run"
+curl -s -o /dev/null -w "%{http_code}\n" "$FC/api/quote?code=600519"
+curl -s -o /dev/null -w "%{http_code}\n" -X POST "$FC/api/ai" -H "Content-Type: application/json" -d '{"mode":"ping"}'
+```
+
+### 改动分类速查
+- 改 `src/**`（前端）→ 部署 Vercel。
+- 改 `api/**`、`server.js`（后端）→ 部署阿里云 FC（`s deploy`）。
+- 前后端都改 → **两边都部署**。
+
+## 安全铁律
+- GitHub token 是受保护占位符：**绝不**写入 git config / 文件 / 仓库，只在一次性命令 URL 里用。
+- **绝不**提交 `.env`、`.env.local`、`.vercel/`、运行日志。
+- `~/.s/access.yaml` 内阿里云密钥、`.env` 内各类 key：绝不打印明文值。
