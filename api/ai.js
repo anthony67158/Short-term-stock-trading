@@ -532,8 +532,23 @@ export default async function handler(req, res) {
           payload.quant = {
             score: quant.score, bias: quant.bias, tDir: quant.tDir,
             forecast: quant.forecast,   // {upProb,expRet,targetLow/Mid/High,direction,confidence}
+            hitProb: quant.hitProb,     // LGB达标概率(0~1,原始分辨力,未做isotonic校准)
             reads: quant.reads, asOf: quant.asOf,
           };
+          // ★高把握买点信号头(isotonic校准 + gate≥85%闸门):只有 fired=true 才是"校准后高可信"信号。
+          //   连同买入/止盈/止损价一并透传给军师,支撑其"把握闸+赔率闸"双闸门判断(P0"少出手"纪律)。
+          const hcs = quant.highConfSignal;
+          if (hcs && typeof hcs === 'object') {
+            payload.quant.highConfSignal = {
+              fired: !!hcs.fired,
+              credibility: hcs.credibility ?? null,             // 校准后可信度%
+              gate: hcs.gate != null ? Math.round(hcs.gate * 100) : null,
+              buyPrice: hcs.buyPrice ?? null,
+              takeProfit: hcs.takeProfit ?? null,
+              stopLoss: hcs.stopLoss ?? null,
+              label: hcs.label ?? null,
+            };
+          }
         }
         // 当日分时结构（VWAP均价、日内高低、当前节奏、现价相对均价/高低的位置）
         if (trend && trend.length) {

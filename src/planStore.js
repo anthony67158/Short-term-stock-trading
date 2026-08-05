@@ -876,8 +876,29 @@ export const planStore = {
     }))
     const total = log.length, hit = log.filter((r) => r.hit).length
     const sumPct = log.reduce((s, r) => s + (Number(r.resultPct) || 0), 0)
+    // 【★把握分层胜率】按建议当时的 trust(综合可信度0~100)分三档,验证"高把握档是否真的高胜率"——
+    //   这是 P0"高把握少出手"的度量闸:若高档胜率显著高于低档,说明 trust 有区分力,可据此收紧开火线。
+    const BANDS = [
+      { key: 'high', label: '较可信(≥68)', min: 68, max: Infinity },
+      { key: 'mid', label: '中等(48~68)', min: 48, max: 68 },
+      { key: 'low', label: '低(<48)', min: -Infinity, max: 48 },
+    ]
+    const byTrust = BANDS.map((b) => {
+      const items = log.filter((r) => {
+        const t = Number(r.trust)
+        return Number.isFinite(t) && t >= b.min && t < b.max
+      })
+      const h = items.filter((r) => r.hit).length
+      const sp = items.reduce((s, r) => s + (Number(r.resultPct) || 0), 0)
+      return {
+        band: b.key, label: b.label, total: items.length, hit: h,
+        winRate: items.length ? Math.round((h / items.length) * 100) : null,
+        avgPct: items.length ? +(sp / items.length).toFixed(2) : null,
+      }
+    })
+    const noTrust = log.filter((r) => !Number.isFinite(Number(r.trust))).length
     return {
-      groups, total, hit,
+      groups, byTrust, noTrust, total, hit,
       winRate: total ? Math.round((hit / total) * 100) : null,
       avgPct: total ? +(sumPct / total).toFixed(2) : null,
       pending: (state.adviceLog || []).filter((r) => !r.verified).length,
