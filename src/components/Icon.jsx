@@ -28,6 +28,8 @@ const paths = {
   search: <><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></>,
   plus: <><path d="M12 5v14M5 12h14" /></>,
   check: <><path d="M20 6 9 17l-5-5" /></>,
+  square: <><rect x="4" y="4" width="16" height="16" rx="3" /></>,
+  checkSquare: <><rect x="4" y="4" width="16" height="16" rx="3" /><path d="M8.5 12l2.5 2.5 4.5-5" /></>,
   close: <><path d="M18 6 6 18M6 6l12 12" /></>,
   trash: <><path d="M4 7h16M9 7V5a1.5 1.5 0 0 1 1.5-1.5h3A1.5 1.5 0 0 1 15 5v2M6 7l1 13a1.5 1.5 0 0 0 1.5 1.4h7A1.5 1.5 0 0 0 17 20L18 7" /></>,
   chevronRight: <><path d="M9 6l6 6-6 6" /></>,

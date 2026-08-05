@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import { getAdvice } from './adviceCache'
+import { getAdvice, getAllAdvice, setAllAdvice, registerAdviceSync } from './adviceCache'
 
 // 唯一 id（分笔持仓/记录用）
 let _seq = 0
@@ -22,7 +22,33 @@ export function advicePlan(code) {
     const tp = adv.targetPrice != null && !isNaN(adv.targetPrice) ? roundPx(adv.targetPrice) : null
     const sl = adv.stopPrice != null && !isNaN(adv.stopPrice) ? roundPx(adv.stopPrice) : null
     if (tp == null && sl == null) return null
-    return { tp, sl, action: adv.action || adv.stance || '', tone: adv.tone || '', at: a.at }
+    // 计划「理由」同源:优先具体操作计划,其次一句话结论/理由/时机,供持仓卡计划自动跟随
+    const reason = adv.actionPlan || adv.title || adv.reason || adv.timing || ''
+    return { tp, sl, reason, action: adv.action || adv.stance || '', tone: adv.tone || '', at: a.at }
+  } catch { return null }
+}
+
+// 从最新 AI 操作建议缓存里取【一句话主行动】——供持仓卡「主行动条」展示,与个股详情页同源同值。
+// 返回 { badge(动作词), text(操作指导一句话), tone('red'|'green'|'muted'), at, action, actionPlan, title }。
+// 无 AI 建议 → null,调用方据此提示用户「去生成AI建议」。取值优先级:
+//   badge = action/stance(如 立即买入/回调再买/加仓/减仓/持有/清仓/观望)
+//   text  = actionPlan(具体操作计划) → title → reason,尽量给一句可执行的话
+export function adviceFocus(code) {
+  try {
+    const a = getAdvice(code)
+    const adv = a && a.advice
+    if (!adv) return null
+    const badge = adv.action || adv.stance || ''
+    const text = adv.actionPlan || adv.title || adv.reason || adv.timing || ''
+    if (!badge && !text) return null
+    // tone:红=偏多(买入/加仓/持有),绿=偏空(卖出/减仓/清仓),其余取 adv.tone 或 muted
+    let tone = adv.tone || ''
+    if (!['red', 'green'].includes(tone)) {
+      if (/买入|加仓|持有|建仓|回调再买|试错/.test(badge)) tone = 'red'
+      else if (/卖出|减仓|清仓|止盈|离场/.test(badge)) tone = 'green'
+      else tone = 'muted'
+    }
+    return { badge, text, tone, at: a.at, action: adv.action || adv.stance || '', actionPlan: adv.actionPlan || '', title: adv.title || '' }
   } catch { return null }
 }
 
@@ -98,7 +124,7 @@ function normalizeClosed(closed) {
   })
 }
 
-let state = { plan: [], holding: [], closed: [], account: null, alerts: [], reviews: {}, adviceLog: [] }
+let state = { plan: [], holding: [], closed: [], account: null, alerts: [], reviews: {}, adviceLog: [], settings: {} }
 const listeners = new Set()
 
 // ===== 撤销栈：交易类操作前存快照，支持一步步撤回 =====
@@ -127,7 +153,7 @@ function scheduleSave() {
   if (_suspend || !_saver) return
   if (_saveTimer) clearTimeout(_saveTimer)
   _saveTimer = setTimeout(() => {
-    _saver({ plan: state.plan, holding: state.holding, closed: state.closed, account: state.account, alerts: state.alerts, reviews: state.reviews, adviceLog: state.adviceLog })
+    _saver({ plan: state.plan, holding: state.holding, closed: state.closed, account: state.account, alerts: state.alerts, reviews: state.reviews, adviceLog: state.adviceLog, advice: getAllAdvice(), settings: state.settings || {} })
   }, 800)
 }
 function emit() { state = { ...state }; listeners.forEach((l) => l()); scheduleSave() }
@@ -208,7 +234,10 @@ export const planStore = {
       alerts: (d && d.alerts) || [],        // 预警规则集
       reviews: (d && d.reviews) || {},      // 复盘结论：key=code → { code,name,at,session(noon/close/manual),text,... }
       adviceLog: (d && d.adviceLog) || [],  // AI建议决策记录：{id,code,name,mode,at,action,entry,stop,target,trust,resonance,verified,hit,...}
+      settings: (d && d.settings) || {},    // 跨设备同步的个性化设置(如 AI 每日精选/自动开关等)
     }
+    // AI 操作建议【结果】跨设备回灌：用云端数据整体覆盖本地建议缓存(登出/空账号→清空)
+    setAllAdvice((d && d.advice) || {})
     listeners.forEach((l) => l())
     _suspend = false
     // 登录/切换账号载入后，自动结算跨天未结算的做T（会触发一次云端回存）
@@ -216,6 +245,17 @@ export const planStore = {
   },
   // authStore 注册云端保存回调
   registerSaver(fn) { _saver = fn },
+  // ===== 跨设备同步的个性化设置 =====
+  // 供 UI(如 AI 每日精选选股/自动开关) 读写；变更即触发防抖回存云端。
+  getSetting(key, fallback = null) {
+    const s = state.settings || {}
+    return Object.prototype.hasOwnProperty.call(s, key) ? s[key] : fallback
+  },
+  setSetting(key, value) {
+    if (!key) return
+    state.settings = { ...(state.settings || {}), [key]: value }
+    emit()
+  },
   addPlan(stock, note = '') {
     if (!stock || !stock.code) return
     if (state.plan.some((x) => x.code === stock.code)) return
@@ -223,7 +263,11 @@ export const planStore = {
     state.plan = [...state.plan, { code: stock.code, name: stock.name, note, addedAt: Date.now() }]
     emit()
   },
-  removePlan(code) { state.plan = state.plan.filter((x) => x.code !== code); emit() },
+  removePlan(code) {
+    state.plan = state.plan.filter((x) => x.code !== code)
+    state.alerts = (state.alerts || []).filter((a) => a.candCode !== code) // 连带清理其买点预警
+    emit()
+  },
   // 切换「重点关注」标记（自选/候选置顶高亮）
   toggleStar(code) {
     state.plan = state.plan.map((x) => x.code === code ? { ...x, star: !x.star } : x)
@@ -262,6 +306,7 @@ export const planStore = {
     const fee = calcBuyFee(buyAmount)
     const hid = uid()
     state.plan = state.plan.filter((x) => x.code !== code)
+    state.alerts = (state.alerts || []).filter((a) => a.candCode !== code) // 已买入 → 移除买点预警(改由持仓计划联动)
     // 建仓即带上最新 AI 操作建议的止盈/止损(若有):tpManual/slManual=false 表示「跟随AI」,
     // 之后详情页刷新建议会自动跟随;用户手动改过则置 true 停止跟随。
     const ap = advicePlan(p.code)
@@ -293,6 +338,7 @@ export const planStore = {
       ...(ap ? { tp: ap.tp, sl: ap.sl, tpManual: false, slManual: false } : {}),
     }]
     state.plan = state.plan.filter((x) => x.code !== stock.code)
+    state.alerts = (state.alerts || []).filter((a) => a.candCode !== stock.code) // 已买入 → 移除买点预警
     state.closed = [makeBuyTxn(stock.code, stock.name, price, q, fee, hid), ...state.closed].slice(0, 300)
     this._syncPlanAlerts(hid)
     emit()
@@ -597,6 +643,7 @@ export const planStore = {
           tpManual: has('tpManual') ? rule.tpManual : x.tpManual,
           slManual: has('slManual') ? rule.slManual : x.slManual,
           planReason: has('planReason') ? rule.planReason : x.planReason,
+          reasonManual: has('reasonManual') ? rule.reasonManual : x.reasonManual,
           planWeight: has('planWeight') ? rule.planWeight : x.planWeight,
         }
       : x)
@@ -607,7 +654,7 @@ export const planStore = {
   // 清除某持仓的交易计划（止盈/止损/理由）+ 其联动的到价预警
   clearPlanRule(id) {
     state.holding = state.holding.map((x) => x.id === id
-      ? { ...x, tp: null, sl: null, tpManual: false, slManual: false, planReason: null, planWeight: null } : x)
+      ? { ...x, tp: null, sl: null, tpManual: false, slManual: false, planReason: null, reasonManual: false, planWeight: null } : x)
     state.alerts = (state.alerts || []).filter((a) => a.planId !== id) // 移除计划联动预警
     emit()
   },
@@ -629,6 +676,34 @@ export const planStore = {
   // 给候选(计划买入)预设交易计划：目标买入价/止盈/止损/理由/计划仓位
   setCandPlan(code, plan) {
     state.plan = state.plan.map((x) => x.code === code ? { ...x, ...plan } : x)
+    emit()
+  },
+  // 自选股「买点预警」自动同步：跟随 AI 操作建议的【建议买入价】,自动建一条【到价 ≤ 买入价】预警,
+  // 价格跌到买点即提醒去买入。规则:每只自选股只自动设这一条(买点),不把止盈/止损全设上——
+  // 未持仓阶段最有用的就是「到买点提醒买入」,其余等买入后由持仓计划联动生成。
+  //   candCode: 该预警所绑定的自选股代码(区别于持仓计划联动的 planId)
+  //   alertSyncedPrice(记在候选上): 上次自动同步过的买价 —— 相同价不重复写,用户删掉也不会被反复自动加回;
+  //   AI 买价变化时(≠ alertSyncedPrice)才会重新同步/重新武装。
+  autoSyncCandAlert(code, name, buyPrice) {
+    if (buyPrice == null || isNaN(buyPrice)) return
+    const v = roundPx(buyPrice)
+    const p = state.plan.find((x) => x.code === code)
+    if (!p) return
+    if (p.alertSyncedPrice != null && Number(p.alertSyncedPrice) === Number(v)) return // 该买价已处理过
+    const existing = (state.alerts || []).find((a) => a.candCode === code)
+    if (existing) {
+      // 已有买点预警 → 跟随 AI 新买价刷新到价并重新武装
+      state.alerts = (state.alerts || []).map((a) => a.candCode === code
+        ? { ...a, name: name || a.name, type: 'price', op: 'lte', value: Number(v), enabled: true, triggeredAt: null, triggeredMsg: '' }
+        : a)
+    } else {
+      // 新建买点到价预警(≤ 建议买入价)
+      state.alerts = [{
+        id: uid(), enabled: true, createdAt: Date.now(), triggeredAt: null, triggeredMsg: '',
+        code, name, type: 'price', op: 'lte', value: Number(v), note: '买点', candCode: code,
+      }, ...(state.alerts || [])]
+    }
+    state.plan = state.plan.map((x) => x.code === code ? { ...x, alertSyncedPrice: v } : x)
     emit()
   },
 
@@ -922,6 +997,10 @@ export function computeTFlows(flows) {
 export function usePlanStore() {
   return useSyncExternalStore(planStore.subscribe, planStore.get)
 }
+
+// AI 操作建议【结果】新增/清除时 → 触发一次防抖云端回存（随账号数据同步到其他设备）。
+// adviceCache 只在本机 localStorage 保存；这个回调把它接进 planStore 的云端同步链路。
+registerAdviceSync(() => { try { scheduleSave() } catch { /* ignore */ } })
 
 // ============ 账户全景计算：传入 holding + 实时报价 quote(按code索引) + account =============
 // 返回：持仓市值、成本、浮盈、总资产、可用现金、总仓位%、每笔持仓的市值/占比/浮盈

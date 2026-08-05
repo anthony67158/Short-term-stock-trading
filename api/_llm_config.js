@@ -3,7 +3,7 @@
 // 改完即时对全系统生效（对话、操盘军师、智能体、每日日报），无需重新部署。
 //
 // 存储：OSS 对象 config/llm.json（复用 _blob.js，与账号数据同桶）。
-//   { baseUrl, apiKey, models:{chat,advisor,agent,daily}, updatedAt }
+//   { baseUrl, apiKey, models:{chat,advisor,agent}, updatedAt }
 // 读取优先级：OSS 配置 > 环境变量 > 内置默认。
 //
 // 关键约束：
@@ -15,12 +15,12 @@ import { put, readJson, hasStorage } from './_blob.js';
 
 const KEY_PATH = 'config/llm.json';
 
-// 四个 AI 角色 → 各自的环境变量名与内置默认（与改造前 handler 里的默认保持一致）
+// 三个 AI 角色 → 各自的环境变量名与内置默认（与改造前 handler 里的默认保持一致）
+// 注：已移除的功能(如「每日复盘日报」)不再单列模型角色；策略日报复用 agent 模型。
 export const ROLES = {
-  chat:    { envs: ['LLM_MODEL'],                  def: 'DeepSeek-V3.2-Pro', label: '对话/盘面分析' },
-  advisor: { envs: ['ADVISOR_MODEL'],              def: 'DeepSeek-V4-Pro',   label: '操盘军师(深度研判)' },
-  agent:   { envs: ['AGENT_MODEL'],                def: 'Qwen3-Max-A',       label: '智能体(需函数调用)' },
-  daily:   { envs: ['DAILY_MODEL', 'AGENT_MODEL'], def: 'Qwen3-Max-A',       label: '每日复盘日报' },
+  chat:    { envs: ['LLM_MODEL'],     def: 'DeepSeek-V3.2-Pro', label: '对话/盘面分析' },
+  advisor: { envs: ['ADVISOR_MODEL'], def: 'DeepSeek-V4-Pro',   label: '操盘军师(深度研判)' },
+  agent:   { envs: ['AGENT_MODEL'],   def: 'Qwen3-Max-A',       label: '智能体/策略日报(需函数调用)' },
 };
 
 // ---- 从环境变量拼出基线配置（OSS 无配置时的回退）----

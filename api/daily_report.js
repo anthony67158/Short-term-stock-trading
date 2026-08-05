@@ -19,7 +19,7 @@ const SESSION_CN = { morning: '盘前早报', noon: '午间午报', evening: '�
 const PREFIX = 'dailyreport/';
 const cacheKey = (day, session) => `${PREFIX}${day}-${session}`;
 
-// 日报模型改为运行时读取（前端「AI 模型配置」的 daily 角色），见 handler 内 getModel('daily')
+// 日报模型改为运行时读取；原独立 daily 角色已移除，复用 agent 模型，见 handler 内 getModel('agent')
 
 // 板块清单（全市场覆盖）→ 每个用关键词做定向新闻检索
 const SECTORS = [
@@ -35,7 +35,7 @@ const SECTORS = [
 export default async function handler(req, res) {
   if (preflight(req, res)) return;
   await ensureConfig();               // 预热运行时配置（前端可改 Base/Key/模型）
-  const MODEL = getModel('daily');    // 日报角色模型
+  const MODEL = getModel('agent');    // 策略日报复用「智能体」模型(原独立 daily 角色已移除)
   const { BASE, KEY } = llmEnv();
   const streaming = true; // 本接口一律 SSE
 

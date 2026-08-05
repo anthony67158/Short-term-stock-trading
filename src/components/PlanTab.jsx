@@ -7,12 +7,13 @@ import { AlertForm } from './AlertCenter'
 import { usePolling } from '../hooks'
 import { callAIStream } from '../ai'
 import { api } from '../apiBase'
-import { planStore, usePlanStore, calcBuyFee, calcSellFee, computeTFlows, computePortfolio, livePositionOf, advicePlan } from '../planStore'
+import { planStore, usePlanStore, calcBuyFee, calcSellFee, computeTFlows, computePortfolio, livePositionOf, advicePlan, adviceFocus } from '../planStore'
 import { aiStore } from '../aiStore'
 import { openStockDetail, useDetailStore } from '../detailStore'
 import { getAdvice, subscribeAdvice } from '../adviceCache'
+import { runBatchAdvice, subscribeBatch, getBatchState, cancelBatch } from '../adviceBatch'
+import { getAutoConfig, K_ENABLED, K_INTERVAL, K_SCOPE, K_LAST, MIN_INTERVAL, MAX_INTERVAL, DEFAULT_INTERVAL } from '../adviceAutoRefresh'
 import { ensureQuantScore, ensureQuantScores } from '../quantScore'
-import { generateReview, sessionLabel, forceGenerateReviews, currentAutoSession, missingReviewCount } from '../review'
 import { fmtPct, pctClass, fmtNum, fmtInflow , fmtRaw, hasVal, opText } from '../format'
 
 
@@ -197,10 +198,19 @@ export default function PlanTab({ interval }) {
   const quote = {}
   ;(data?.list || []).forEach((s) => { quote[s.code] = s })
 
+  // ===== 批量一次性生成 AI 操作建议:统一入口(军师战绩旁),勾选可跨【持仓+自选】 =====
+  // 状态上提到 PlanTab,持仓区与自选区共享同一套 selectMode/selected → 只有一个入口、一条进度。
+  const [selectMode, setSelectMode] = useState(false)
+  const [selected, setSelected] = useState(() => new Set())
+  const toggleSel = (code) => setSelected((prev) => {
+    const nx = new Set(prev); nx.has(code) ? nx.delete(code) : nx.add(code); return nx
+  })
+  const batchSel = { selectMode, setSelectMode, selected, setSelected, toggleSel }
+
   return (
     <div className="plan">
-      <HoldingList book={book} quote={quote} />
-      <PlanList book={book} quote={quote} />
+      <HoldingList book={book} quote={quote} batchSel={batchSel} />
+      <PlanList book={book} quote={quote} batchSel={batchSel} />
     </div>
   )
 }
@@ -334,6 +344,8 @@ function CandTarget({ p, q }) {
     if (!p.targetManual && aiPrice != null && rnd(aiPrice) !== rnd(p.targetPrice)) patch.targetPrice = rnd(aiPrice)
     if (!p.qtyManual && aiQty != null && aiQty !== p.buyQty) patch.buyQty = aiQty
     if (Object.keys(patch).length) planStore.setCandPlan(p.code, patch)
+    // 买点预警自动同步:跟随 AI 建议买入价,自动建/刷新一条「到价 ≤ 买入价」预警(到买点即提醒)
+    if (aiPrice != null) planStore.autoSyncCandAlert(p.code, p.name, aiPrice)
     // eslint-disable-next-line
   }, [aiPrice, aiQty, p.targetManual, p.qtyManual])
 
@@ -396,13 +408,38 @@ function CandTarget({ p, q }) {
   )
 }
 
+// ---------- 候选卡：一句话操作建议（唯一数据源 = AI 操作建议）----------
+// 复用持仓卡「主行动条」同款取值(adviceFocus)：有建议→展示动作徽标+一句话;
+// 无建议→引导按钮，点击打开个股详情页生成一次即可(saveAdvice 触发 subscribeAdvice 自动回填)。
+function CandFocus({ code, name }) {
+  const [, force] = useState(0)
+  useEffect(() => subscribeAdvice(() => force((n) => n + 1)), [])
+  const f = adviceFocus(code)
+  if (!f) return (
+    <button className="cand-focus focus-prompt" onClick={() => openStockDetail(code, name)} title="打开个股详情页生成AI操作建议">
+      <span className="cf-badge"><Icon name="spark" size={9} /> 待生成</span>
+      <span className="cf-text">尚无 AI 操作建议，点此生成 →</span>
+    </button>
+  )
+  return (
+    <div className={'cand-focus focus-' + f.tone} title={f.text}>
+      {f.badge && <span className="cf-badge"><Icon name="spark" size={9} />{f.badge}</span>}
+      <span className="cf-text">{f.text}</span>
+    </div>
+  )
+}
+
 // ---------- 自选 / 候选（合并自选监控 + 计划买入）----------
-function PlanList({ book, quote }) {
+function PlanList({ book, quote, batchSel }) {
   const [buying, setBuying] = useState(null) // code
   const [price, setPrice] = useState('')
   const [qty, setQty] = useState('1')
   const [delTarget, setDelTarget] = useState(null) // 待删除的候选 {code,name}
   const [alerting, setAlerting] = useState(null) // 正在设预警的 code
+
+  // ===== 批量一次性生成:入口/工具条/进度条统一收敛到「持仓区(军师战绩旁)」。=====
+  // 这里只消费上提到 PlanTab 的共享勾选状态,给候选卡渲染复选框;不再自带入口与进度。
+  const { selectMode, selected, toggleSel } = batchSel
 
   const startBuy = (s) => { setBuying(s.code); setPrice(quote[s.code] ? String(quote[s.code].price) : ''); setQty('1') }
   const confirmBuy = (code) => { if (price && Number(qty) > 0) { planStore.buy(code, price, Number(qty)); setBuying(null); setPrice(''); setQty('1') } }
@@ -410,8 +447,17 @@ function PlanList({ book, quote }) {
   // 单张候选卡
   const Card = (p) => {
     const q = quote[p.code]
+    const checked = selected.has(p.code)
     return (
-      <div className={'plan-cand' + (p.star ? ' starred' : '')} key={p.code}>
+      <div className={'plan-cand' + (p.star ? ' starred' : '') + (selectMode ? ' selectable' : '') + (checked ? ' sel-on' : '')}
+        key={p.code}
+        onClickCapture={selectMode ? (e) => { e.stopPropagation(); toggleSel(p.code) } : undefined}>
+        {/* 勾选模式:左上角复选框(点整卡即可切换;捕获阶段拦截,屏蔽卡内其它交互) */}
+        {selectMode && (
+          <span className={'pc-check' + (checked ? ' on' : '')} title={checked ? '取消选择' : '选择此股'}>
+            <Icon name={checked ? 'checkSquare' : 'square'} size={16} />
+          </span>
+        )}
         {/* 顶行：左=股名/代码/标签，右=量化得分徽标 + 现价 */}
         <div className="pc-top">
           <div className="pc-name">
@@ -440,6 +486,22 @@ function PlanList({ book, quote }) {
         )}
         {/* 目标价 + 买入手数 + 买点进度条（可手填/编辑，缺省跟随 AI 建议买入价/手数）*/}
         <CandTarget p={p} q={q} />
+        {/* 一句话操作建议：唯一数据源 = AI 操作建议；有则展示，无则提示去生成 */}
+        <CandFocus code={p.code} name={(q && q.name) || p.name} />
+        {/* 买点预警提示：跟随 AI 建议买入价自动设的「到价 ≤ 买入价」预警，到点即提醒买入 */}
+        {(() => {
+          const bpa = (book.alerts || []).find((a) => a.candCode === p.code)
+          if (!bpa) return null
+          const tone = !bpa.enabled ? ' off' : (q && q.price != null && q.price <= bpa.value ? ' hot' : '')
+          return (
+            <div className={'pc-buyalert' + tone} title={bpa.enabled ? '价格跌到该价位会提醒你买入' : '预警已停用/已触发，可在预警中心重启'}>
+              <Icon name="bell" size={11} />
+              买点预警 ≤ <b>{fmtRaw(bpa.value)}</b>
+              {!bpa.enabled && <span className="pc-buyalert-off">已停用</span>}
+              {q && q.price != null && bpa.enabled && q.price <= bpa.value && <span className="pc-buyalert-hit">已到买点</span>}
+            </div>
+          )
+        })()}
         {buying === p.code ? (
           <div className="buy-inline-wrap">
             <div className="buy-inline">
@@ -540,8 +602,11 @@ function PlanList({ book, quote }) {
     <div className="panel">
       <div className="panel-head plan-head">
         <div className="panel-title"><Icon name="eye" size={16} /> 自选 / 候选 <span className="sub-name">{book.plan.length} 只 · 按行业分类</span></div>
-        <div className="plan-search"><StockSearch /></div>
+        <div className="plan-head-r">
+          <div className="plan-search"><StockSearch /></div>
+        </div>
       </div>
+
       {book.plan.length === 0 ? (
         <div className="empty small">搜索股票加入自选，或在「今日选股」点「加自选」。这里实时盯盘资金/量比，并按行业分类；点每张卡左上的星标可置顶重点关注。</div>
       ) : (
@@ -734,12 +799,105 @@ function HoldOverview({ book, quote }) {
   )
 }
 
+// ---------- 盘中定时刷新 AI 建议：任务配置 ----------
+// 用户可开启一个后台定时任务:交易时段内,每隔 N 分钟对选定范围(自选/持仓/两者)
+// 批量重生成 AI 操作建议(复用 runBatchAdvice,与手动/每日同源,保证连续性一致性)。
+// 展示最近一次更新时间;实际调度在 App.jsx 的分钟级 tick 里执行(runAutoRefreshIfDue)。
+function AutoRefreshControl() {
+  const book = usePlanStore()  // 订阅 settings/holding/plan 变化,配置改动即时反映
+  const [open, setOpen] = useState(false)
+  const cfg = getAutoConfig()
+  const enabled = cfg.enabled
+
+  const fmtLast = (t) => {
+    if (!t) return '尚未刷新'
+    const d = new Date(t)
+    const pad = (n) => String(n).padStart(2, '0')
+    const same = new Date().toDateString() === d.toDateString()
+    const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`
+    return same ? `今天 ${hm}` : `${d.getMonth() + 1}/${d.getDate()} ${hm}`
+  }
+  const scopeLabel = { watch: '仅自选', hold: '仅持仓', both: '自选+持仓' }[cfg.scope] || '自选+持仓'
+
+  const setInterval_ = (v) => {
+    let n = parseInt(v, 10)
+    if (!Number.isFinite(n)) n = DEFAULT_INTERVAL
+    if (n < MIN_INTERVAL) n = MIN_INTERVAL
+    if (n > MAX_INTERVAL) n = MAX_INTERVAL
+    planStore.setSetting(K_INTERVAL, n)
+  }
+
+  return (
+    <div className="auto-ref-wrap">
+      <button
+        className={'mini-btn auto-ref-btn' + (enabled ? ' on' : '')}
+        onClick={() => setOpen((v) => !v)}
+        title="设置盘中定时刷新 AI 操作建议(可配间隔与范围)"
+      >
+        <Icon name={enabled ? 'refresh' : 'clock'} size={13} className={enabled ? 'spin-slow' : ''} />
+        {enabled ? `自动刷新·每${cfg.intervalMin}分` : '定时刷新'}
+      </button>
+
+      {open && (
+        <div className="auto-ref-panel">
+          <div className="arp-head">
+            <span className="arp-title"><Icon name="clock" size={13} /> 盘中定时刷新 AI 操作建议</span>
+            <button className="arp-x" onClick={() => setOpen(false)}><Icon name="close" size={13} /></button>
+          </div>
+
+          <label className="arp-row toggle">
+            <span className="arp-k">开启定时刷新</span>
+            <input type="checkbox" checked={enabled}
+              onChange={(e) => planStore.setSetting(K_ENABLED, e.target.checked)} />
+          </label>
+
+          <div className="arp-row">
+            <span className="arp-k">刷新间隔</span>
+            <span className="arp-v">
+              <input className="arp-num" type="number" min={MIN_INTERVAL} max={MAX_INTERVAL}
+                value={cfg.intervalMin}
+                onChange={(e) => setInterval_(e.target.value)} /> 分钟
+            </span>
+          </div>
+          <div className="arp-quick">
+            {[5, 10, 15, 30, 60].map((m) => (
+              <button key={m} className={'arp-chip' + (cfg.intervalMin === m ? ' on' : '')}
+                onClick={() => planStore.setSetting(K_INTERVAL, m)}>{m}分</button>
+            ))}
+          </div>
+
+          <div className="arp-row">
+            <span className="arp-k">刷新范围</span>
+            <span className="arp-v seg">
+              {[['watch', '仅自选'], ['hold', '仅持仓'], ['both', '两者']].map(([v, lab]) => (
+                <button key={v} className={'arp-seg' + (cfg.scope === v ? ' on' : '')}
+                  onClick={() => planStore.setSetting(K_SCOPE, v)}>{lab}</button>
+              ))}
+            </span>
+          </div>
+
+          <div className="arp-foot">
+            <div className="arp-last"><Icon name="check" size={12} /> 最近更新：<b>{fmtLast(cfg.lastAt)}</b></div>
+            <div className="arp-note sub-name">
+              {enabled
+                ? `已开启 · 交易时段(09:15–15:00)内每 ${cfg.intervalMin} 分钟刷新一次「${scopeLabel}」`
+                : '开启后仅在交易时段自动刷新,收盘/休市不空跑'}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ---------- 当前持仓 ----------
-function HoldingList({ book, quote }) {
-  const [reviewing, setReviewing] = useState(null) // null | 'loading' | {ok,fail,skipped}
-  const [reviewProg, setReviewProg] = useState('') // 批量复盘进度文案(哪只/哪一步)
-  // 职责按【粒度】划分，避免动词歧义：顶部「全部复盘」=对所有持仓统一刷新；单卡「复盘/重做」=只这一只。
-  const missing = missingReviewCount()
+function HoldingList({ book, quote, batchSel }) {
+  // ===== 批量一次性生成:唯一入口(军师战绩旁)。勾选可跨【持仓+自选】,共享上提到 PlanTab 的状态 =====
+  const { selectMode, setSelectMode, selected, setSelected, toggleSel } = batchSel
+  const [, forceBatch] = useState(0)
+  useEffect(() => subscribeBatch(() => forceBatch((n) => n + 1)), [])
+  const batch = getBatchState()
+
   // 紧急度排序：触止损/破纪律/触止盈的先处理 → 其余按浮亏在前(先看风险)
   const sortedHolding = [...book.holding].sort((a, b) => {
     const ua = holdSnapshot(a, quote[a.code]).urgency
@@ -749,57 +907,127 @@ function HoldingList({ book, quote }) {
     const pb = holdSnapshot(b, quote[b.code]).pnl ?? 999
     return pa - pb
   })
+  // 持仓 / 自选 去重代码集(同股多笔只算一只);用于全选/生成
+  const holdCodes = [...new Set(sortedHolding.map((h) => h.code))]
+  const watchCodes = [...new Set((book.plan || []).map((p) => p.code))]
+  const allCodes = [...new Set([...holdCodes, ...watchCodes])]
   // 补分：历史持仓(建仓早于本功能)没有量化得分 → 按需评分,徽标从"计算中"变为分数
   useEffect(() => {
     const codes = (book.holding || []).filter((h) => h.qScore == null).map((h) => h.code)
     if (codes.length) ensureQuantScores(codes)
     // eslint-disable-next-line
   }, [book.holding.map((h) => h.code).join(',')])
-  const runReview = async () => {
-    if (reviewing === 'loading') return
-    setReviewing('loading')
-    const qmap = {}
-    Object.keys(quote || {}).forEach((c) => { qmap[c] = { price: quote[c].price } })
-    const session = currentAutoSession() || 'manual'
-    try {
-      // 顶部按钮：对【全部】持仓刷新复盘(覆盖)，功能与单卡「只做这一只」明确区分开
-      // 传 onProgress:批量走流式,慢票(涨停+反T)也能跑完;并把"正在复盘哪只/哪一步"回显给用户。
-      const res = await forceGenerateReviews(session, qmap, {
-        onlyMissing: false,
-        onProgress: (code, name, p) => setReviewProg(`${name || code}：${(p && p.text) || '分析中…'}`),
-      })
-      setReviewProg('')
-      setReviewing(res)
-      setTimeout(() => setReviewing(null), 4000)
-    } catch { setReviewProg(''); setReviewing({ ok: 0, fail: 1 }); setTimeout(() => setReviewing(null), 4000) }
-  }
+
+  const selHold = holdCodes.filter((c) => selected.has(c)).length
+  const selWatch = watchCodes.filter((c) => selected.has(c)).length
+  const selCount = allCodes.filter((c) => selected.has(c)).length
+  const canBatch = allCodes.length > 0
+
   return (
     <div className="panel">
-      <div className="panel-head">
+      <div className="panel-head plan-head">
         <div className="panel-title"><Icon name="wallet" size={16} /> 当前持仓 <span className="sub-name">{book.holding.length} 只 · 支持做T</span></div>
         <div className="hold-head-actions">
           <AdvisorScore book={book} />
-          {book.holding.length > 0 && (
-            <button className="mini-btn" onClick={runReview} disabled={reviewing === 'loading'}
-              title="对当前所有持仓统一生成/刷新今日复盘；如只想更新某一只，展开该卡在「复盘」里点重做">
-              <Icon name={reviewing === 'loading' ? 'refresh' : 'history'} size={12} className={reviewing === 'loading' ? 'spin' : ''} />
-              {reviewing === 'loading' ? '复盘中…'
-                : (reviewing && typeof reviewing === 'object') ? `已复盘${reviewing.ok}只${reviewing.fail ? `·失败${reviewing.fail}` : ''}`
-                : missing > 0 ? `全部复盘 · ${missing}只待更新` : '全部复盘'}
+          <AutoRefreshControl />
+          {canBatch && !selectMode && (
+            <button className="mini-btn batch-entry" onClick={() => { setSelectMode(true); setSelected(new Set()) }}
+              disabled={batch.running} title="勾选持仓 / 自选里的若干只股票，一次性批量生成 AI 操作建议（后台处理）">
+              <Icon name="spark" size={13} /> 一次性生成
             </button>
-          )}
-          {reviewing === 'loading' && reviewProg && (
-            <span className="sub-name" style={{ marginLeft: 8, opacity: 0.8 }}>{reviewProg}</span>
           )}
         </div>
       </div>
+
+      {/* 统一批量勾选工具条:可分别「全选持仓 / 全选自选」,已选计数跨两区合计;进入勾选模式时出现 */}
+      {selectMode && (() => {
+        const selectRegion = (codes, on) => setSelected((prev) => {
+          const nx = new Set(prev)
+          if (on) codes.forEach((c) => nx.delete(c))
+          else codes.forEach((c) => nx.add(c))
+          return nx
+        })
+        const allHoldSel = holdCodes.length > 0 && holdCodes.every((c) => selected.has(c))
+        const allWatchSel = watchCodes.length > 0 && watchCodes.every((c) => selected.has(c))
+        const doRun = () => {
+          const codes = allCodes.filter((c) => selected.has(c))
+          if (!codes.length) return
+          runBatchAdvice(codes, quote)   // 后台限流批量;返回 Promise,进度经 subscribeBatch 推送
+          setSelectMode(false)
+        }
+        return (
+          <div className="batch-bar">
+            <span className="batch-hint"><Icon name="spark" size={12} /> 勾选持仓 / 下方自选的股票，一次性生成</span>
+            {holdCodes.length > 0 && (
+              <button className="chip-btn ghost" onClick={() => selectRegion(holdCodes, allHoldSel)}>
+                <Icon name={allHoldSel ? 'checkSquare' : 'square'} size={13} />{allHoldSel ? '取消持仓' : `全选持仓(${holdCodes.length})`}
+              </button>
+            )}
+            {watchCodes.length > 0 && (
+              <button className="chip-btn ghost" onClick={() => selectRegion(watchCodes, allWatchSel)}>
+                <Icon name={allWatchSel ? 'checkSquare' : 'square'} size={13} />{allWatchSel ? '取消自选' : `全选自选(${watchCodes.length})`}
+              </button>
+            )}
+            <button className="chip-btn ghost" onClick={() => setSelected(new Set())} disabled={!selCount}>清空</button>
+            <span className="batch-count">已选 <b>{selCount}</b> 只
+              {(selHold > 0 || selWatch > 0) && <span className="sub-name">（持仓 {selHold} · 自选 {selWatch}）</span>}
+            </span>
+            <span className="batch-spacer" />
+            <button className="chip-btn buy" onClick={doRun} disabled={!selCount || batch.running}>
+              <Icon name="spark" size={12} />生成所选（{selCount}）
+            </button>
+            <button className="chip-btn ghost" onClick={() => { setSelectMode(false); setSelected(new Set()) }}>退出</button>
+          </div>
+        )
+      })()}
+
+      {/* 批量进度条:后台处理中/刚结束时展示;可取消,可切 Tab 后台继续 */}
+      {(batch.running || (batch.finishedAt > 0 && Date.now() - batch.finishedAt < 8000)) && (
+        <div className={'batch-prog' + (batch.running ? ' on' : ' done')}>
+          <div className="bp-head">
+            <span className="bp-title">
+              {batch.running
+                ? <><Icon name="refresh" size={13} className="spin" /> 正在后台批量生成 AI 操作建议…</>
+                : <><Icon name="check" size={13} /> 批量生成完成</>}
+            </span>
+            <span className="bp-stat">
+              {batch.done}/{batch.total}
+              {batch.ok > 0 && <span className="bp-ok"> · 成功 {batch.ok}</span>}
+              {batch.fail > 0 && <span className="bp-fail"> · 失败 {batch.fail}</span>}
+              {batch.skipped > 0 && <span className="sub-name"> · 跳过 {batch.skipped}</span>}
+            </span>
+            {batch.running
+              ? <button className="chip-btn ghost bp-cancel" onClick={cancelBatch} disabled={batch.cancelRequested}>{batch.cancelRequested ? '停止中…' : '取消'}</button>
+              : null}
+          </div>
+          <div className="bp-track"><div className="bp-fill" style={{ width: batch.pct + '%' }} /></div>
+          {batch.running && batch.current.length > 0 && (
+            <div className="bp-current">
+              正在处理：{batch.items.filter((x) => batch.current.includes(x.code)).map((x) => x.name).join('、')}
+            </div>
+          )}
+        </div>
+      )}
+
       <HoldOverview book={book} quote={quote} />
       {book.holding.length === 0 ? (
         <div className="empty">在下方「自选 / 候选」里点「建仓」后，持仓出现在这里。做T：在每笔持仓上高抛低吸、摊薄成本。</div>
       ) : (
         <div className="hold-grid">
           {sortedHolding.map((h, idx) => (
-            <HoldingItem key={h.id} h={h} idx={idx} quote={quote[h.code]} />
+            selectMode ? (
+              <div key={h.id}
+                className={'hold-select-wrap' + (selected.has(h.code) ? ' sel-on' : '')}
+                onClickCapture={(e) => { e.stopPropagation(); toggleSel(h.code) }}
+                title={selected.has(h.code) ? '取消选择' : '选择此股'}>
+                <span className={'pc-check' + (selected.has(h.code) ? ' on' : '')}>
+                  <Icon name={selected.has(h.code) ? 'checkSquare' : 'square'} size={16} />
+                </span>
+                <HoldingItem h={h} idx={idx} quote={quote[h.code]} />
+              </div>
+            ) : (
+              <HoldingItem key={h.id} h={h} idx={idx} quote={quote[h.code]} />
+            )
           ))}
         </div>
       )}
@@ -826,7 +1054,7 @@ function HoldingItem({ h, idx, quote: q }) {
   const [tStyle, setTStyle] = useState('auto') // auto(按历史规律) | conservative | balanced | aggressive
   const [openDays, setOpenDays] = useState({}) // 做T流水按天折叠，key→是否展开
   const [expanded, setExpanded] = useState(false) // 卡片明细区（盘中提示/复盘/信号/计划/做T）默认折叠
-  const [detailTab, setDetailTab] = useState(null) // 明细手风琴当前展开的分段: 'review'|'signal'|'plan'|'t'|null
+  const [detailTab, setDetailTab] = useState(null) // 明细手风琴当前展开的分段: 'review'|'plan'|'t'|null
 
   const book = usePlanStore()
 
@@ -839,8 +1067,7 @@ function HoldingItem({ h, idx, quote: q }) {
   // 现价有效性:必须为有限数且 > 0。休市/接口异常会返回 0(或 null/NaN),此时不能拿 0 去算盈亏。
   const validPx = q && Number.isFinite(Number(q.price)) && Number(q.price) > 0 ? Number(q.price) : null
 
-  // 「踏5不破10」策略信号：拉该股日K算 MA5/MA10 → 出信号灯
-  const [showStrat, setShowStrat] = useState(false) // 展开信号依据
+  // 拉该股日K：用于 MA10(计划公式兜底)/收盘价兜底/盈亏计算。信号灯已移入个股详情页。
   const kd = usePolling(`/api/stock_detail?code=${h.code}&klt=101&lmt=30`, 600000, [h.code])
   const candles = (kd.data && kd.data.candles) || []
   // 收盘价兜底:无有效现价时,用最近一根日K收盘价(今收);再退到昨收 prevClose。都为正数才采用。
@@ -884,9 +1111,11 @@ function HoldingItem({ h, idx, quote: q }) {
     const patch = {}
     if (!h.tpManual && aiPlan.tp != null && Number(aiPlan.tp) !== Number(h.tp)) patch.tp = aiPlan.tp
     if (!h.slManual && aiPlan.sl != null && Number(aiPlan.sl) !== Number(h.sl)) patch.sl = aiPlan.sl
+    // 理由同源:未被手动改写时,自动同步 AI 操作建议里的一句话理由/操作计划
+    if (!h.reasonManual && aiPlan.reason && aiPlan.reason !== h.planReason) patch.planReason = aiPlan.reason
     if (Object.keys(patch).length) planStore.setPlanRule(h.id, patch)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aiPlan && aiPlan.tp, aiPlan && aiPlan.sl, h.tpManual, h.slManual])
+  }, [aiPlan && aiPlan.tp, aiPlan && aiPlan.sl, aiPlan && aiPlan.reason, h.tpManual, h.slManual, h.reasonManual])
 
   // 依据该股 + 短线操作逻辑，给出默认止盈/止损/理由（用户可再改）
   const suggestPlan = () => {
@@ -963,13 +1192,18 @@ function HoldingItem({ h, idx, quote: q }) {
   const savePlan = () => {
     const tpVal = planPrice === '' ? null : Number(planPrice)
     const slVal = planSL === '' ? null : Number(planSL)
+    const reasonVal = planReason.trim() || null
+    const ap = adviceForStock()
+    // 理由:与最新 AI 理由一致 → 视为仍跟随AI(reasonManual=false);被改成别的 → 标记手动,停止自动跟随
+    const reasonManual = !!(reasonVal && ap && ap.reason ? reasonVal !== ap.reason : reasonVal)
     // 手动保存 → 标记为「手动」,停止自动跟随AI(除非用户点「跟随AI」恢复);预警由 setPlanRule 内部自动同步
     planStore.setPlanRule(h.id, {
       tp: tpVal,
       sl: slVal,
       tpManual: tpVal != null,
       slManual: slVal != null,
-      planReason: planReason.trim() || null,
+      planReason: reasonVal,
+      reasonManual,
     })
     setMode(null)
   }
@@ -979,7 +1213,8 @@ function HoldingItem({ h, idx, quote: q }) {
     planStore.setPlanRule(h.id, {
       ...(ap && ap.tp != null ? { tp: ap.tp } : {}),
       ...(ap && ap.sl != null ? { sl: ap.sl } : {}),
-      tpManual: false, slManual: false,
+      ...(ap && ap.reason ? { planReason: ap.reason } : {}),
+      tpManual: false, slManual: false, reasonManual: false,
     })
   }
 
@@ -1036,13 +1271,15 @@ function HoldingItem({ h, idx, quote: q }) {
   const netT = (tStat.openBuy || 0) - (tStat.openSell || 0)
   const liveQty = h.qty + netT
   const liveCost = tStat.realized ? effCost : costWithFee
-  // 主行动：此刻最该做的一件事（触及止盈/止损 > 信号动作 > 盘中提示）
+  // 主行动：此刻最该做的一件事。数据源唯一 = AI操作建议(与个股详情页同源)。
+  // 优先级：触及止盈/止损(实时纪律) > AI操作建议一句话 > 无建议则提示去生成。
+  // 「踏5不破10」参考均线信号已移入个股详情页,持仓卡不再展示,避免多套指导引发混淆。
+  const aiFocus = adviceFocus(h.code)
   const focus = (() => {
     if (hitTP) return { tone: 'red', badge: '止盈', text: `已到止盈价 ${fmtRaw(h.tp)}，考虑落袋` }
     if (hitSL) return { tone: 'green', badge: '止损', text: `已到止损价 ${fmtRaw(h.sl)}，按纪律离场` }
-    if (signal) return { tone: (signal.level === 'buy' || signal.level === 'hold') ? 'red' : (signal.level === 'sell' || signal.level === 'danger') ? 'green' : 'muted', badge: signal.tag, text: signal.action }
-    if (play) return { tone: play.tone === 'buy' ? 'red' : play.tone === 'sell' ? 'green' : 'muted', badge: play.when, text: play.tip }
-    return null
+    if (aiFocus) return { tone: aiFocus.tone, badge: aiFocus.badge, text: aiFocus.text, ai: true }
+    return { prompt: true }  // 无AI操作建议 → 引导用户去个股页生成
   })()
   return (
     <div className="hold-item">
@@ -1105,29 +1342,37 @@ function HoldingItem({ h, idx, quote: q }) {
         )
       })()}
 
-      {/* 主行动：此刻唯一最该关注的一句（徽标 + 一句话）*/}
-      {focus && (
-        <div className={'hold-focus focus-' + focus.tone}>
-          {focus.badge && <span className="hf-badge">{focus.badge}</span>}
-          <span className="hf-text">{focus.text}</span>
-        </div>
+      {/* 主行动：此刻唯一最该关注的一句。数据源=AI操作建议;无建议则提示去生成 */}
+      {focus && (focus.prompt
+        ? (
+          <button className="hold-focus focus-prompt" onClick={() => openStockDetail(h.code, h.name)} title="打开个股详情页生成AI操作建议">
+            <span className="hf-badge"><Icon name="spark" size={10} /> 待生成</span>
+            <span className="hf-text">尚无 AI 操作建议，点此在个股详情页生成 →</span>
+          </button>
+        )
+        : (
+          <div className={'hold-focus focus-' + focus.tone}>
+            {focus.badge && <span className="hf-badge">{focus.ai && <Icon name="spark" size={9} />}{focus.badge}</span>}
+            <span className="hf-text">{focus.text}</span>
+          </div>
+        )
       )}
 
-      {/* 明细展开开关：把复盘/信号/计划/做T 收纳，展开后手风琴分段(一次看一类) */}
+      {/* 明细展开开关：把计划/做T 收纳,展开后手风琴分段(一次看一类)。
+          复盘已与「AI操作建议」同源,直接点进个股详情页看即可,不再单列分段;
+          「踏5不破10」参考均线信号也已移入个股详情页。 */}
       {(() => {
-        const hasReview = !!(book.reviews && book.reviews[h.code])
-        const hasSignal = !!signal
         const hasPlan = !!(h.tp || h.sl || h.planReason)
         const hasT = !!(h.tFlows && h.tFlows.length > 0)
         const segs = [
-          { key: 'review', label: '复盘', dot: !hasReview },
-          hasSignal && { key: 'signal', label: '信号' },
           hasPlan && { key: 'plan', label: '计划' },
           hasT && { key: 't', label: `做T${h.tFlows.length}` },
         ].filter(Boolean)
         if (!segs.length && !play) return null
+        // 当前分段若已不在可用分段里(如旧的'review'),回退到第一个
+        const activeTab = segs.some((s) => s.key === detailTab) ? detailTab : (segs[0] && segs[0].key)
         // 打开明细时默认选中第一个分段
-        const openDetail = () => { const nx = !expanded; setExpanded(nx); if (nx && !detailTab && segs.length) setDetailTab(segs[0].key) }
+        const openDetail = () => { const nx = !expanded; setExpanded(nx); if (nx && segs.length && !segs.some((s) => s.key === detailTab)) setDetailTab(segs[0].key) }
         return (
           <>
             <button className="hold-detail-toggle" onClick={openDetail}>
@@ -1151,48 +1396,13 @@ function HoldingItem({ h, idx, quote: q }) {
                 {segs.length > 0 && (
                   <div className="hd-segs">
                     {segs.map((s) => (
-                      <button key={s.key} className={'hd-seg' + (detailTab === s.key ? ' on' : '') + (s.dot ? ' has-dot' : '')} onClick={() => setDetailTab(s.key)}>{s.label}</button>
+                      <button key={s.key} className={'hd-seg' + (activeTab === s.key ? ' on' : '') + (s.dot ? ' has-dot' : '')} onClick={() => setDetailTab(s.key)}>{s.label}</button>
                     ))}
                   </div>
                 )}
 
-                {/* 复盘结论：即使还没有自动复盘，也暴露按钮支持手动生成/重新生成 */}
-                {detailTab === 'review' && (
-                  <HoldReview code={h.code} name={h.name} cost={costWithFee} qty={h.qty} price={q && q.price} />
-                )}
-
-                {/* 「踏5不破10」策略信号灯 */}
-                {detailTab === 'signal' && signal && (
-                  <div className={'sig5 sig-' + signal.level}>
-                    <div className="sig5-main" onClick={() => setShowStrat((v) => !v)}>
-                      <div className="sig5-top">
-                        <span className={'sig5-tag sig-' + signal.level}>{signal.tag}</span>
-                        <span className="sig5-action">{signal.action}</span>
-                        <Icon name={showStrat ? 'chevronDown' : 'chevronRight'} size={14} className="sig5-caret" />
-                      </div>
-                      {signal.ma5 != null && (
-                        <div className="sig5-ma">
-                          <span className="sig5-ma-item">MA5 <b className={q && q.price >= signal.ma5 ? 'red' : 'green'}>{fmtRaw(signal.ma5)}</b></span>
-                          <span className="sig5-ma-item">MA10 <b className={q && q.price >= signal.ma10 ? 'red' : 'green'}>{fmtRaw(signal.ma10)}</b></span>
-                          {q && q.turnover != null && <span className="sig5-ma-item">换手 <b className={q.turnover > 10 ? 'gold' : ''}>{fmtNum(q.turnover, 1)}%</b></span>}
-                          {q && q.volRatio != null && <span className="sig5-ma-item">量比 <b className={q.volRatio > 2 ? 'gold' : ''}>{fmtNum(q.volRatio, 1)}</b></span>}
-                          {q && q.mainInflow != null && <span className="sig5-ma-item">主力 <b className={pctClass(q.mainInflow)}>{fmtInflow(q.mainInflow)}</b></span>}
-                        </div>
-                      )}
-                    </div>
-                    {showStrat && (
-                      <div className="sig5-detail">
-                        {signal.reasons.map((r, i) => <div key={i} className="sig5-reason">· {r}</div>)}
-                        <div className="sig5-rule">
-                          踏5不破10：站上5日线持有、缩量踩5线可低吸；跌破5线减仓、放量破10线清仓；单票亏损&gt;8% 止损。信号由日K均线+量能本地测算，仅供参考。
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
                 {/* 交易计划条：止盈/止损/理由 */}
-                {detailTab === 'plan' && hasPlan && mode !== 'plan' && (
+                {activeTab === 'plan' && hasPlan && mode !== 'plan' && (
                   <div className={'plan-card' + (hitTP ? ' hit-tp' : hitSL ? ' hit-sl' : '')}>
                     <div className="plan-card-body">
                       <div className="plan-card-prices">
@@ -1213,8 +1423,15 @@ function HoldingItem({ h, idx, quote: q }) {
                           {hitSL && <span className="plan-hit">已触及</span>}
                         </span>
                       </div>
-                      {h.planReason && <div className="plan-card-reason" title={h.planReason}>{h.planReason}</div>}
-                      {aiPlan && (h.tpManual || h.slManual) && (
+                      {h.planReason && (
+                        <div className="plan-card-reason" title={h.planReason}>
+                          {!h.reasonManual && aiPlan && aiPlan.reason
+                            ? <span className="plan-src ai" title="理由来源:AI操作建议,详情刷新后自动跟随"><Icon name="spark" size={9} />AI</span>
+                            : (h.reasonManual && <span className="plan-src manual" title="手动填写的理由,不随AI更新">手动</span>)}
+                          <span className="plan-reason-tx">{h.planReason}</span>
+                        </div>
+                      )}
+                      {aiPlan && (h.tpManual || h.slManual || h.reasonManual) && (
                         <button className="plan-follow-ai" onClick={followAI} title="放弃手动值，恢复跟随最新AI操作建议">
                           <Icon name="spark" size={10} />跟随最新AI建议
                         </button>
@@ -1228,7 +1445,7 @@ function HoldingItem({ h, idx, quote: q }) {
                 )}
 
                 {/* 做T战绩（流水式）：数据一行、结算入账另起一行，不再挤 */}
-                {detailTab === 't' && hasT && (
+                {activeTab === 't' && hasT && (
                   <div className="t-stat t-stat-v">
                     <div className="t-stat-row">
                       <span className="t-badge"><Icon name="refresh" size={12} />做T {h.tFlows.length}笔</span>
@@ -1549,154 +1766,107 @@ function TFlowRow({ f, holdingId }) {
   )
 }
 
-// ---------- 持仓卡上的复盘结论条（午间/收盘自动生成，只显示最新一条；无按钮，纯自动）----------
+// ---------- 持仓卡上的复盘结论条（完全复用 AI 操作建议生成的内容，纯展示，无按钮/无定时任务）----------
+// 数据源唯一化：直接读 adviceCache 里最新一次「AI 操作建议」(hold_advice/buy_advice)，
+// 里面已带 todayRecap/tradeReview(今日回顾)、actionPlan(下一步)、theoryNote/invalidation 等复盘价值字段。
+// AI 操作建议生成一次即可供复盘、主行动条、止盈止损全部复用，用户不必再单独点「生成复盘」。
 function HoldReview({ code, name, cost, qty, price }) {
-  const book = usePlanStore()
-  const review = (book.reviews || {})[code] || null
+  const [, force] = useState(0)
   const [open, setOpen] = useState(false) // 展开完整细节
-  const [regen, setRegen] = useState(null) // null | loading | error
-  const [regenPhase, setRegenPhase] = useState('') // 流式采集进度文案
-  const r = review && review.result
+  // 订阅建议缓存：AI 操作建议刷新时本卡自动跟随更新
+  useEffect(() => subscribeAdvice(() => force((n) => n + 1)), [])
+  const a = getAdvice(code)
+  const adv = a && a.advice
+  // 把 AI 操作建议标准化成复盘展示口径：动作/结论/今日回顾/下一步/理论/失效
+  const r = adv ? {
+    stance: adv.action || adv.stance || '',
+    headline: adv.title || adv.actionPlan || adv.reason || '',
+    reasoning: adv.reasoning || '',
+    todayRecap: adv.todayRecap || '',
+    tradeReview: adv.tradeReview || '',
+    nextAction: adv.actionPlan || adv.timing || '',
+    nextOpenPlan: adv.nextOpenPlan || '',
+    futurePlan: adv.futurePlan || '',
+    theoryNote: adv.theoryNote || '',
+    invalidation: adv.invalidation || '',
+    tone: adv.tone || 'muted',
+  } : null
   const tone = r ? (r.tone || 'muted') : 'muted'
-  const ts = review ? new Date(review.at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : null
-  const nextLabel = review ? (review.session === 'noon' ? '下午' : review.session === 'close' ? '明天开盘' : '后续') : '后续'
-  // 陈旧矛盾检测:反T(先卖后买)把底仓卖光未接回时 liveQty=0,但旧复盘还写着"持有/减仓/清仓"→自相矛盾。
-  // 这类卡是上次生成时口径没算对留下的"僵尸结论",要自动重刷成"做T接回/观望"指导,不必用户手点。
-  const staleContradiction = (() => {
-    if (!r) return false
-    const lp = livePositionOf(code)
-    if (lp) return false                       // 实时还有底仓→不矛盾
-    const hs = (planStore.get().holding || []).filter((x) => x.code === code)
-    if (!hs.length) return false               // 没有该持仓条目(真空仓)→不该有卡,跳过
-    let tNet = 0
-    for (const x of hs) { const rr = computeTFlows(x.tFlows); tNet += (rr.openBuy || 0) - (rr.openSell || 0) }
-    if (tNet >= 0) return false                // 只有"反T卖光未接回"(tNet<0)才需要接回指导
-    const txt = `${r.stance || ''} ${r.headline || ''} ${r.nextAction || ''}`
-    return /持有|减仓|清仓|加仓不减|继续拿/.test(txt)  // 结论仍谈"持有类"→与0手矛盾
-  })()
-  const autoFixedRef = useRef('')  // 记录已自动重刷过的复盘版本(code:at),避免死循环
-  const doRegenerate = async () => {
-    if (regen === 'loading') return
-    setRegen('loading'); setRegenPhase('正在准备复盘…')
-    try {
-      // 按【实时持仓】口径复盘:把未结算做T腿计入。反T(先卖后买)未接回时底仓可能被卖光→liveQty=0,
-      // 此时不能说"继续持有",而要指导如何接回/加仓。
-      const lp = livePositionOf(code)
-      let hcost = cost, hqty = qty, openTNet = 0
-      if (lp) {
-        hcost = lp.cost; hqty = lp.qty; openTNet = lp.hasOpenT ? lp.tNetHands : 0
-      } else {
-        // 底仓被反T全部卖出(未接回),实时可卖持仓为0——复盘应指导接回/加仓,而非"继续持有"
-        const hs = (planStore.get().holding || []).filter((x) => x.code === code)
-        let tNet = 0
-        for (const x of hs) { const rr = computeTFlows(x.tFlows); tNet += (rr.openBuy || 0) - (rr.openSell || 0) }
-        hcost = cost; hqty = 0; openTNet = tNet
-      }
-      const pnlPct = (price && hcost) ? +(((price - hcost) / hcost) * 100).toFixed(2) : null
-      const res = await generateReview({ code, name, session: currentAutoSession() || 'manual', hold: { cost: hcost, qty: hqty, pnlPct, openTNet }, onPhase: (p) => setRegenPhase(p.text) })
-      if (res && !res.error) { setRegen(null); setOpen(false) }
-      else setRegen(res && res.error ? res.error : '生成失败')
-    } catch (e) {
-      setRegen(String(e.message || e || '生成失败'))
-    } finally { setRegenPhase('') }
-  }
-  // 检测到"0手却说持有"的陈旧矛盾卡→自动重刷一次(每个复盘版本只自动刷一次,避免死循环)。
-  useEffect(() => {
-    if (!staleContradiction) return
-    if (regen === 'loading') return
-    const ver = review ? `${code}:${review.at}` : ''
-    if (!ver || autoFixedRef.current === ver) return
-    autoFixedRef.current = ver
-    doRegenerate()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [staleContradiction, review && review.at])
-  if (!review || !r) {
+  const ts = a ? new Date(a.at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : null
+  if (!r) {
     return (
       <div className="hold-review rev-muted">
         <div className="hr-top minimal">
           <span className="hr-badge"><Icon name="history" size={12} /> 复盘</span>
-          <button className="hr-link" onClick={doRegenerate} disabled={regen === 'loading'}>
-            {regen === 'loading' ? (regenPhase || '生成中…') : '生成复盘'}
-          </button>
         </div>
-        <div className="hr-empty">还没有复盘。点右上「生成」为这只单独生成，或用顶部「全部复盘」一次刷新所有持仓；午间/收盘也会自动生成。</div>
-        {regen && regen !== 'loading' && <div className="hr-empty err">{regen}</div>}
+        <button className="hr-goadvice" onClick={() => openStockDetail(code, name)}>
+          <Icon name="target" size={12} />
+          <span>复盘与操作指导已合并到 <b>AI 操作建议</b>，点此生成一次即可</span>
+          <Icon name="chevronRight" size={13} />
+        </button>
       </div>
     )
   }
   return (
     <div className={'hold-review rev-' + tone}>
-      {/* ① 顶部元信息条：徽标 + 场次 + 时间（复盘由午间/收盘自动生成，无需按钮）*/}
+      {/* ① 顶部元信息条：徽标 + 时间（内容取自 AI 操作建议，无按钮/无定时任务）*/}
       <div className="hr-top minimal">
         <span className="hr-badge"><Icon name="history" size={12} /> 复盘</span>
-        {review && <span className={'hr-sess ' + review.session}>{sessionLabel(review.session)}</span>}
+        <span className="hr-sess close">同源 AI 建议</span>
         {ts && <span className="hr-time">{ts}</span>}
-        <button className="hr-link" onClick={doRegenerate} disabled={regen === 'loading'} title="只重做这一只的复盘（基于当前账户资金/持仓/行情）；如需一次刷新全部持仓，用顶部「全部复盘」">
-          {regen === 'loading' ? (regenPhase || '生成中…') : '重做本只'}
-        </button>
       </div>
-      {/* 陈旧矛盾卡自动重刷提示:0手却写"持有"→已识别并正在重生成为做T/接回指导 */}
-      {staleContradiction && regen === 'loading' && (
-        <div className="advice-adjust" style={{ margin: '8px 10px 0' }}>
-          <Icon name="shield" size={12} /> 该复盘与当前0手持仓(已反T卖光)矛盾，正在自动刷新为做T/接回指导…
-        </div>
-      )}
-      {regen && regen !== 'loading' && <div className="hr-empty err">{regen}</div>}
 
-      {/* ② 结论行：只保留“动作 + 一句话结论”，避免复盘卡堆太多分区 */}
-      {r && (
-        <div className={'hr-verdict tone-' + tone} onClick={() => setOpen((v) => !v)}>
-          {r.stance && <span className={'hr-stance tone-' + tone}>{r.stance}</span>}
-          <span className="hr-headline">{r.headline || r.stance}</span>
-        </div>
-      )}
+      {/* ② 结论行：只保留“动作 + 一句话结论” */}
+      <div className={'hr-verdict tone-' + tone} onClick={() => setOpen((v) => !v)}>
+        {r.stance && <span className={'hr-stance tone-' + tone}>{r.stance}</span>}
+        <span className="hr-headline">{r.headline || r.stance}</span>
+      </div>
 
       {/* ReAct 研判思路：复盘结论背后的推理链 */}
-      {r && r.reasoning && (
+      {r.reasoning && (
         <Reasoning text={r.reasoning} style={{ margin: '8px 10px 0' }} />
       )}
 
-      {/* ③ 今日回顾：复盘特有价值——今天走成啥样 + 我操作得如何(操作建议没有这部分) */}
-      {r && (r.todayRecap || r.tradeReview) && (
+      {/* ③ 今日回顾：AI 操作建议里带的 todayRecap/tradeReview——今天走成啥样 + 操作点评 */}
+      {(r.todayRecap || (r.tradeReview && r.tradeReview !== '今日无成交')) && (
         <div className="hr-recap">
           {r.todayRecap && <div className="hr-recap-row"><span className="hr-recap-k">今日</span><span>{r.todayRecap}</span></div>}
           {r.tradeReview && r.tradeReview !== '今日无成交' && <div className="hr-recap-row"><span className="hr-recap-k">操作点评</span><span>{r.tradeReview}</span></div>}
         </div>
       )}
 
-      {/* ④ 下一步方向：复盘给"大方向指引"(一句话)，具体价位/算账交给操作建议 */}
-      {r && r.nextAction && (
+      {/* ④ 下一步方向：直接用 AI 操作建议的 actionPlan(一句可照做的操作) */}
+      {r.nextAction && (
         <div className="hr-next compact">
-          <span className="hr-next-k">{nextLabel}</span>
+          <span className="hr-next-k">下一步</span>
           <span className="hr-next-txt">{r.nextAction}</span>
         </div>
       )}
 
-      {/* 服务端合规校正提示：手数超持仓 / 价格越过涨跌停时的自动纠偏 */}
-      {r && r.serverAdjust && (
-        <div className="advice-adjust" style={{ margin: '8px 10px 0' }}>
-          <Icon name="shield" size={12} /> 已按合规校正：{r.serverAdjust}
+      {/* ④b 两段式指导：下个开盘时段怎么做 + 未来后续路径(今天买不了不必硬买) */}
+      {(r.nextOpenPlan || r.futurePlan) && (
+        <div className="advice-horizon" style={{ margin: '8px 10px 0' }}>
+          {r.nextOpenPlan && <div className="ah-row now"><span className="ah-k">下个开盘</span><span className="ah-v">{r.nextOpenPlan}</span></div>}
+          {r.futurePlan && <div className="ah-row future"><span className="ah-k">未来</span><span className="ah-v">{r.futurePlan}</span></div>}
         </div>
       )}
 
-      {/* ⑤ 分工引导：复盘=回顾+方向；要"此刻具体怎么操作/买卖价"→ 去详情页看 AI 操作建议。
-          消除"复盘和操作建议长得一样"的重复感：这里不再重复铺算账网格与价位明细。 */}
-      {r && (
-        <button className="hr-goadvice" onClick={() => openStockDetail(code, name)}>
-          <Icon name="target" size={12} />
-          <span>想看此刻<b>具体买卖价 / 加减仓算账</b>？打开 AI 操作建议</span>
-          <Icon name="chevronRight" size={13} />
-        </button>
-      )}
+      {/* ⑤ 分工引导：想看此刻具体买卖价/加减仓算账 → 去详情页看完整 AI 操作建议 */}
+      <button className="hr-goadvice" onClick={() => openStockDetail(code, name)}>
+        <Icon name="target" size={12} />
+        <span>想看此刻<b>具体买卖价 / 加减仓算账</b>？打开 AI 操作建议</span>
+        <Icon name="chevronRight" size={13} />
+      </button>
 
-      {/* ⑥ 失效信号：复盘保留这一条风控底线(简短)，其余明细都在操作建议里 */}
-      {r && r.theoryNote && (
+      {/* ⑥ 理论 + 失效信号：风控底线，其余明细都在操作建议里 */}
+      {r.theoryNote && (
         <div className="hr-row" style={{ margin: '8px 10px 0' }}><span className="hr-k theory">理论</span><span className="hr-v">{r.theoryNote}</span></div>
       )}
-      {r && r.invalidation && (
+      {r.invalidation && (
         <div className="hr-row" style={{ margin: '8px 10px 0' }}><span className="hr-k risk">失效</span><span className="hr-v">{r.invalidation}</span></div>
       )}
     </div>
   )
 }
+
 

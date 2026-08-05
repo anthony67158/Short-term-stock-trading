@@ -613,6 +613,13 @@ export default function StockDetail({ stock, onClose }) {
                       {adv && (
                         <>
                           {adv.timing && <div className="advice-timing"><Icon name="clock" size={13} /> <b>{myHold ? '操作时机' : '买入时机'}</b>：{adv.timing}</div>}
+                          {/* 两段式指导：下个开盘时段怎么做 + 未来后续路径（今天买不了不必硬买）*/}
+                          {(adv.nextOpenPlan || adv.futurePlan) && (
+                            <div className="advice-horizon">
+                              {adv.nextOpenPlan && <div className="ah-row now"><span className="ah-k">下个开盘</span><span className="ah-v">{adv.nextOpenPlan}</span></div>}
+                              {adv.futurePlan && <div className="ah-row future"><span className="ah-k">未来</span><span className="ah-v">{adv.futurePlan}</span></div>}
+                            </div>
+                          )}
                           {(adv.buyPrice != null || adv.buyZone || adv.watchPrice || adv.addPrice != null || adv.reducePrice != null || adv.stopPrice != null || adv.targetPrice != null) && (
                             <div className="advice-prices">
                               {adv.buyPrice != null && <div className="ap-cell"><span className="ap-k">建议买入价</span><span className="ap-v red">{adv.buyPrice}</span></div>}

@@ -25,12 +25,15 @@ export function clearResult(code) { if (code) { results.delete(code); } }
 // }
 export function startAdvice(spec) {
   const code = spec && spec.code
-  if (!code) return
-  if (running.has(code)) return  // 已在后台跑 → 幂等，不重复发起
+  if (!code) return Promise.resolve()
+  if (running.has(code)) return running.get(code).promise || Promise.resolve()  // 已在后台跑 → 幂等，复用同一 promise
   results.delete(code)           // 清掉上次的瞬时结果，UI 立即进入 loading
-  running.set(code, { phase: '正在准备分析…', startedAt: Date.now() })
+  const rec = { phase: '正在准备分析…', startedAt: Date.now() }
+  running.set(code, rec)
   notify()
-  run(spec).finally(() => { running.delete(code); notify() })
+  const p = run(spec).finally(() => { running.delete(code); notify() })
+  rec.promise = p                // 挂到运行记录上：批量生成器据此 await 完成
+  return p
 }
 
 async function run(spec) {

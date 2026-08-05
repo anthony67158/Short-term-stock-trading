@@ -12,7 +12,8 @@ import { useDetailStore, detailStore } from './detailStore'
 import { alertStore, useAlertStore } from './alertStore'
 import { useLLMConfigOpen } from './llmConfigStore'
 import { useQuantReportOpen } from './quantReportUiStore'
-import { runAutoReviewIfDue } from './review'
+import { runDailyAdviceIfDue } from './adviceDaily'
+import { runAutoRefreshIfDue } from './adviceAutoRefresh'
 import { timeStr } from './format'
 import { api } from './apiBase'
 
@@ -96,22 +97,31 @@ function MainApp() {
     alertStore.evaluate(map)
   }, [alertQuotes.data])
 
-  // ===== 自动复盘：午间休市(11:30)、收盘(15:00) 那一刻，对持仓股各生成一条复盘 =====
-  // 拉持仓股实时报价供算浮盈亏；每分钟检查一次是否到点（review.js 内部按天+场次去重，只跑一次）
+  // ===== 每日自动重生成 AI 操作建议：作为复盘/主行动/止盈止损的唯一数据源 =====
+  // 拉持仓股+自选股实时报价供算浮盈亏；每分钟检查一次是否到点（内部按天/按间隔去重）
   const holdCodes = [...new Set(book.holding.map((x) => x.code))]
+  const watchCodes = [...new Set((book.plan || []).map((x) => x.code))]
+  const schedCodes = [...new Set([...holdCodes, ...watchCodes])]
   const reviewQuotes = usePolling(
-    holdCodes.length ? `/api/quote?codes=${holdCodes.join(',')}` : null,
+    schedCodes.length ? `/api/quote?codes=${schedCodes.join(',')}` : null,
     60000,
-    [holdCodes.join(',')]
+    [schedCodes.join(',')]
   )
   useEffect(() => {
     const check = () => {
       const map = {}
       ;((reviewQuotes.data && reviewQuotes.data.list) || []).forEach((q) => { map[q.code] = q })
-      runAutoReviewIfDue(map)
+      // 每日定时重生成 AI 操作建议(持仓 hold_advice / 自选 buy_advice)——统一操作指导数据源。
+      // 盘前(08:30–09:15)与收盘后(15:00+)各触发一轮,当天去重;后台 runner 跑完落缓存,
+      // 供持仓卡主行动、复盘(直接复用建议里的 todayRecap/actionPlan)、计划止盈止损统一取值,
+      // 生成一次即可供所有消费方使用,用户不必再手点复盘。
+      runDailyAdviceIfDue(map)
+      // 盘中定时刷新:用户可配开关/间隔(min)/范围(自选·持仓),交易时段内每满一个间隔重生成一轮,
+      // 让操作指导对齐实时盘面;复用 runBatchAdvice,与手动/每日同源,保证连续性与一致性。
+      runAutoRefreshIfDue(map)
     }
     check()
-    const id = setInterval(check, 60000) // 每分钟检查一次是否跨入复盘时点
+    const id = setInterval(check, 60000) // 每分钟检查一次是否跨入重生成时点
     return () => clearInterval(id)
   }, [reviewQuotes.data])
 

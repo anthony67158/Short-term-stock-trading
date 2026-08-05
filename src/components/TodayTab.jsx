@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import Icon from './Icon'
 import StockName from './StockName'
 import LimitPool from './LimitPool'
@@ -203,8 +203,32 @@ function nowBJ() { const n = new Date(); return new Date(n.getTime() + (n.getTim
 // 当日交易场次:9:15–15:01(含午间 11:30–13:00 休市)整体算“盘中/当日”，午休不切到“明日计划”，只有收盘后(15:01 之后)/盘前/周末才算收盘
 function isTradingNow() { const d = nowBJ(); if (d.getDay() === 0 || d.getDay() === 6) return false; const hm = d.getHours() * 60 + d.getMinutes(); return hm >= 555 && hm <= 901 } // 9:15-15:01(含午休)
 function todayKey() { const d = nowBJ(); return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}` }
-function loadPick() { try { return JSON.parse(localStorage.getItem(PICK_KEY) || 'null') } catch { return null } }
-function savePick(obj) { try { localStorage.setItem(PICK_KEY, JSON.stringify(obj)) } catch { /* ignore */ } }
+// AI 每日精选结果 & 自动开关：随账号跨设备同步(planStore.settings)，localStorage 仅作离线镜像。
+// 读:云端优先→本地兜底；写:双写(云端触发防抖回存 + 本地即时镜像)。这样手机选出的名单/开关，电脑登录也能看到。
+function loadPick() {
+  try {
+    const cloud = planStore.getSetting && planStore.getSetting(PICK_KEY, undefined)
+    if (cloud !== undefined && cloud !== null) return cloud
+  } catch { /* ignore */ }
+  try { return JSON.parse(localStorage.getItem(PICK_KEY) || 'null') } catch { return null }
+}
+function savePick(obj) {
+  try { planStore.setSetting && planStore.setSetting(PICK_KEY, obj) } catch { /* ignore */ }
+  try { localStorage.setItem(PICK_KEY, JSON.stringify(obj)) } catch { /* ignore */ }
+}
+const AUTO_KEY = 'ai_pick_auto_v1'
+const AUTO_MIN = 20 // 自动刷新间隔(分钟)
+function loadAuto() {
+  try {
+    const cloud = planStore.getSetting && planStore.getSetting(AUTO_KEY, undefined)
+    if (cloud !== undefined && cloud !== null) return !!cloud
+  } catch { /* ignore */ }
+  try { return localStorage.getItem(AUTO_KEY) === '1' } catch { return false }
+}
+function saveAuto(v) {
+  try { planStore.setSetting && planStore.setSetting(AUTO_KEY, !!v) } catch { /* ignore */ }
+  try { localStorage.setItem(AUTO_KEY, v ? '1' : '0') } catch { /* ignore */ }
+}
 
 function DailyPlay({ snapshot }) {
   const [loading, setLoading] = useState(false)
@@ -214,25 +238,46 @@ function DailyPlay({ snapshot }) {
   const [savedAt, setSavedAt] = useState(saved && saved.at ? saved.at : null)
   const [savedDay, setSavedDay] = useState(saved && saved.day ? saved.day : null)
   const [err, setErr] = useState(null)
+  const [auto, setAuto] = useState(loadAuto())
   const book = usePlanStore()
   const trading = isTradingNow()
 
-  const run = async () => {
-    setLoading(true); setErr(null); setRes(null)
+  // 登录/切换账号后云端设置到达 → 回灌 AI 精选结果与自动开关(以云端更新时间较新者为准)。
+  // 依赖 book(planStore 快照):setData 灌入 settings 时会触发一次重渲染，从而拉到跨设备同步的名单。
+  useEffect(() => {
+    const p = loadPick()
+    if (p && p.at && p.at !== savedAt) {
+      setRes(p.result || null); setSavedAt(p.at || null); setSavedDay(p.day || null)
+    } else if (!p && savedAt) {
+      // 云端被清空(登出/切换到空账号) → 清掉本地展示
+      setRes(null); setSavedAt(null); setSavedDay(null)
+    }
+    const a = loadAuto()
+    if (a !== auto) setAuto(a)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [book])
+
+  const run = async (silent = false) => {
+    setLoading(true); setErr(null); if (!silent) setRes(null)
     try {
       const s = snapshot()
-      // ① 收集候选池：涨停/连板 + 主力抢筹 + 涨速 + 板块领涨，去重取前若干只（带上已有行情）
+      // ① 收集候选池：多来源合并，扩大参考面（涨停/连板 + 主力抢筹 + 涨速 + 板块领涨龙头），去重带标签
       const cand = new Map()
       const add = (x, tag, extra) => {
         if (!x || !x.code) return
         if (!cand.has(x.code)) cand.set(x.code, { code: x.code, name: x.name, tags: [], ...extra })
         const o = cand.get(x.code)
+        Object.entries(extra || {}).forEach(([k, v]) => { if (o[k] == null && v != null) o[k] = v }) // 补齐缺失字段
         if (tag && !o.tags.includes(tag)) o.tags.push(tag)
       }
-      ;(s.limitPool?.list || []).slice(0, 8).forEach((x) => add(x, x.lbc >= 2 ? `${x.lbc}连板` : '涨停', { pct: x.pct, turnover: x.turnover, mainInflow: x.fundAmount }))
-      ;(s.movers?.list || []).slice(0, 8).forEach((x) => add(x, '主力抢筹', { pct: x.pct, turnover: x.turnover, volRatio: x.volRatio, mainInflow: x.mainInflow }))
-      ;(s.speed?.list || []).slice(0, 6).forEach((x) => add(x, '涨速', { pct: x.pct, speed: x.speed }))
-      const codes = [...cand.values()].slice(0, 10)
+      ;(s.limitPool?.list || []).slice(0, 10).forEach((x) => add(x, x.lbc >= 2 ? `${x.lbc}连板` : '涨停', { pct: x.pct, turnover: x.turnover, mainInflow: x.fundAmount }))
+      ;(s.movers?.list || []).slice(0, 10).forEach((x) => add(x, '主力抢筹', { pct: x.pct, turnover: x.turnover, volRatio: x.volRatio, mainInflow: x.mainInflow }))
+      ;(s.speed?.list || []).slice(0, 8).forEach((x) => add(x, '涨速', { pct: x.pct, speed: x.speed }))
+      // 强势板块的领涨龙头：拓宽题材面，纳入非涨停但当日领涨主线的核心票
+      ;(s.sectors?.list || []).slice(0, 6).forEach((sec) => {
+        if (sec && sec.leadCode) add({ code: sec.leadCode, name: sec.leadName }, `${sec.name}领涨`, { pct: sec.leadPct })
+      })
+      const codes = [...cand.values()].slice(0, 14)
       if (!codes.length) { setErr('暂无候选数据，开盘后再试（休市时段候选池为空）'); setLoading(false); return }
 
       // ② 对候选并发跑量化打分（浏览器并发，规避 Vercel 单函数超时）
@@ -254,8 +299,10 @@ function DailyPlay({ snapshot }) {
           }
         } catch { return { code: c.code, name: c.name, tags: c.tags, quant: null } }
       }))
-      const withQuant = scored.filter((x) => x.quant) // 只把打上分的交给 LLM
-      if (!withQuant.length) { setErr('量化服务暂不可用，请稍后重试'); setLoading(false); return }
+      const withQuant = scored.filter((x) => x.quant) // 优先把打上分的交给 LLM
+      // 量化服务全挂时不再交白卷:退化为"仅盘面信号"名单,让 AI 基于资金/题材/涨速排序,并如实说明量化缺失
+      const forLLM = withQuant.length ? withQuant : scored
+      const quantMissing = withQuant.length === 0
 
       // ③ 带量化分 + 盘面 → LLM 精选 3 只
       setStage('AI 正在结合量化与盘面精选 3 只…')
@@ -265,7 +312,8 @@ function DailyPlay({ snapshot }) {
           indices: (s.market?.indices || []).map((i) => ({ name: i.name, pct: i.pct })),
         },
         sectors: (s.sectors?.list || []).slice(0, 8).map((x) => ({ name: x.name, pct: x.pct, mainInflowYi: +(x.mainInflow / 1e8).toFixed(2), lead: x.leadName })),
-        candidates: withQuant,
+        candidates: forLLM,
+        quantMissing,
       }
       const r = await callAI('scan_pick', payload)
       if (r.ok) {
@@ -277,6 +325,18 @@ function DailyPlay({ snapshot }) {
     finally { setLoading(false); setStage('') }
   }
 
+  // 定时自动刷新:开启后每 AUTO_MIN 分钟在交易时段内静默重选一次(结果保留、不清屏),下班/周末自动停
+  const runRef = useRef(run); runRef.current = run
+  const loadingRef = useRef(loading); loadingRef.current = loading
+  useEffect(() => {
+    if (!auto) return
+    const tick = () => { if (isTradingNow() && !loadingRef.current) runRef.current(true) }
+    const id = setInterval(tick, AUTO_MIN * 60000)
+    return () => clearInterval(id)
+  }, [auto])
+
+  const toggleAuto = () => { const v = !auto; setAuto(v); saveAuto(v); if (v && trading && !loading && !res) run(true) }
+
   const savedTimeStr = savedAt ? new Date(savedAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : null
   const isToday = savedDay === todayKey()
 
@@ -286,19 +346,25 @@ function DailyPlay({ snapshot }) {
         <div className="play-title">
           <Icon name="radar" size={18} />
           <span>{trading ? 'AI 选股' : '明日计划入选'}</span>
-          <span className="play-sub">{trading ? '量化模型 + AI 结合，选出今日最值得买的 3 只' : '盘中选出的候选，供明天开盘参考买入'}</span>
+          <span className="play-sub">{trading ? '多源候选 + 量化打分 + AI 排序，给出今日最值得关注的名单' : '盘中选出的候选，供明天开盘参考买入'}</span>
         </div>
-        <button className="btn btn-primary" onClick={run} disabled={loading || !trading} title={!trading ? '仅交易时段(9:15–15:00)可重新选股;当前展示的是最近一次盘中结果' : ''}>
-          <Icon name={loading ? 'refresh' : 'spark'} size={15} className={loading ? 'spin' : ''} />
-          {loading ? '选股中' : (trading ? (res ? '重新选股' : 'AI 选股') : '休市·看盘中结果')}
-        </button>
+        <div className="play-actions">
+          <button className={'play-auto' + (auto ? ' on' : '')} onClick={toggleAuto} title={`开启后每 ${AUTO_MIN} 分钟在交易时段自动重选一次并保留结果，休市自动停`}>
+            <Icon name={auto ? 'refresh' : 'clock'} size={13} className={auto && loading ? 'spin' : ''} />
+            {auto ? `自动刷新·每${AUTO_MIN}分` : '定时刷新'}
+          </button>
+          <button className="btn btn-primary" onClick={() => run(false)} disabled={loading || !trading} title={!trading ? '仅交易时段(9:15–15:00)可重新选股;当前展示的是最近一次盘中结果' : ''}>
+            <Icon name={loading ? 'refresh' : 'spark'} size={15} className={loading ? 'spin' : ''} />
+            {loading ? '选股中' : (trading ? (res ? '重新选股' : 'AI 选股') : '休市·看盘中结果')}
+          </button>
+        </div>
       </div>
 
       <div className="play-body">
         {err && <div className="err">{err}</div>}
         {!res && !err && !loading && (
           <div className="play-hint">{trading
-            ? '从今日涨停/异动/强势候选里，先用量化模型打分筛出高分股，再由 AI 结合大盘与板块精选 3 只、给出买点与止损。'
+            ? '汇集今日涨停/连板、主力抢筹、涨速、强势板块领涨龙头等多来源候选，量化打分后由 AI 结合大盘与板块排序，给出 3~5 只今日观察名单（含把握度、买点与止损）。可开「定时刷新」让它盘中自动更新。'
             : '当前为休市时段，暂无盘中选股结果。开盘后(9:15起)点「AI 选股」，收盘后这里会保留结果供次日参考。'}</div>
         )}
         {loading && <div className="play-hint"><Icon name="refresh" size={13} className="spin" /> {stage || '正在选股…'}</div>}
@@ -310,11 +376,12 @@ function DailyPlay({ snapshot }) {
                 {isToday ? (trading ? `本次选股 ${savedTimeStr}，结果已保留` : `今日盘中 ${savedTimeStr} 选出，供明天开盘参考`) : `${savedTimeStr} 选出(非今日，仅供参考)`}
               </div>
             )}
-            {res.marketNote && <div className="pick-market"><Icon name="pulse" size={13} /> {res.marketNote}</div>}
+            {res.marketNote && <div className="pick-market"><Icon name="pulse" size={13} /> {res.marketNote}{res.confidence && <span className={'pick-conf ' + (/高/.test(res.confidence) ? 'hi' : /低/.test(res.confidence) ? 'lo' : 'mid')}>把握度 {res.confidence}</span>}</div>}
             {Array.isArray(res.picks) && res.picks.length > 0 && (
               <div className="pick-list">
                 {res.picks.map((c, i) => {
                   const added = book.plan.some((x) => x.code === c.code)
+                  const gcls = c.grade === '强' ? 'strong' : c.grade === '弱' ? 'weak' : 'mid'
                   return (
                     <div className="pick-card" key={c.code || i}>
                       <div className="pick-top">
@@ -322,6 +389,7 @@ function DailyPlay({ snapshot }) {
                         <div className="pick-name">
                           <StockName code={c.code} name={c.name}><span>{c.name}<span className="cand-code">{c.code}</span></span></StockName>
                         </div>
+                        {c.grade && <span className={'pick-grade ' + gcls}>{c.grade}</span>}
                         {c.quantScore != null && <span className={'pick-score ' + (c.quantScore >= 60 ? 'red' : c.quantScore <= 40 ? 'green' : 'gold')}>量化 {c.quantScore}</span>}
                         <button className={'chip-btn' + (added ? ' done' : '')} disabled={added} style={{ marginLeft: 'auto' }}
                           onClick={() => planStore.addPlan({ code: c.code, name: c.name }, c.reason)}>
