@@ -24,3 +24,14 @@ qlib-service/pool_cache.json
 # 每日重训运行时历史日志(持续追加,属运行时产物,不进仓库)
 qlib-service/retrain_history.jsonl
 src/components/.nfs*
+
+# P1(Tushare)训练中间产物/缓存/大文件——可由源码脚本重生成,不进仓库
+qlib-service/dataset_ts_base.npz
+qlib-service/dataset_ts_ext.npz
+qlib-service/ortho.npz
+qlib-service/ortho_sub.npz
+qlib-service/ortho_raw_cache.json
+qlib-service/panel_cache/
+qlib-service/sweep.npz
+# 上线前备份快照(本地回滚用,不进仓库)
+qlib-service/*.bak

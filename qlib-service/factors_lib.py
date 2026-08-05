@@ -353,6 +353,112 @@ def compute_factors(closes, highs, lows, vols, opens=None, index_closes=None):
     return f
 
 
+# ========================================================================
+# P1 正交因子(来自 Tushare daily_basic + moneyflow)——与上面 36 个纯量价因子
+# 信息源不同、结构正交。先作为 CANDIDATE 名单单独评测(holdout 对拍越 0.005
+# 护栏才并入 FEATURE_NAMES),严格复用 v3 的科学纪律,绝不无脑加特征。
+# 三类:估值(基本面锚) / 换手(真实自由流通) / 资金流(主力大单订单流)。
+# 全部纯计算、可选、缺失优雅降级归零。
+# ========================================================================
+TS_CANDIDATE_NAMES = [
+    # --- 估值(财报锚,与价量正交)---
+    "earnings_yield",   # 1/pe_ttm(盈利收益率,比 pe 线性、稳健)
+    "pe_pctl250",       # pe_ttm 在本股近250日的分位(高=相对贵)
+    "pb_pctl250",       # pb 分位
+    "ps_pctl250",       # ps_ttm 分位
+    "div_yield",        # dv_ttm 股息率
+    "log_circ_mv",      # ln(流通市值)(规模因子)
+    # --- 流动性/换手(需流通股本,OHLCV 无法得到)---
+    "turnover_f",       # turnover_rate_f 当日自由流通换手率
+    "turnover_z20",     # 换手率20日 z 分(异常换手)
+    "vol_ratio_ts",     # volume_ratio 量比(Tushare 官方口径)
+    # --- 主力资金流(逐笔分类订单流,OHLCV 无此维度)---
+    "net_mf_mv5",       # 近5日主力净额 / 流通市值(主力净流入强度)
+    "elg_net_mv5",      # 近5日超大单净额 / 流通市值(机构/主力动向)
+    "lg_net_mv5",       # 近5日大单净额 / 流通市值
+    "mf_pos_frac10",    # 近10日净流入为正的天数占比(资金流持续性)
+]
+
+
+def _pctl(arr, x):
+    """x 在 arr(1维)中的分位(0..1),空则 0.5。"""
+    a = arr[np.isfinite(arr)]
+    if len(a) < 5 or not np.isfinite(x):
+        return 0.5
+    return float(np.mean(a <= x))
+
+
+def compute_ts_factors(basic, mf, circ_mv_series, upto):
+    """计算 Tushare 正交因子快照(截至索引 upto,含)。
+
+    参数(均为与个股价格序列**已对齐**的等长 np 数组,由 tushare_panel 产出):
+      basic         —— dict{turnover_rate_f, volume_ratio, pe_ttm, pb, ps_ttm, dv_ttm, total_mv, circ_mv}
+      mf            —— dict{buy_lg_amount, sell_lg_amount, buy_elg_amount, sell_elg_amount, net_mf_amount}
+      circ_mv_series—— 流通市值序列(万元),用于把资金流额归一化
+      upto          —— 当前时点索引(用 [:upto+1] 的历史,绝不看未来)
+    返回 dict,含 TS_CANDIDATE_NAMES 全部键;任何缺失/nan → 0(优雅降级)。"""
+    f = {k: 0.0 for k in TS_CANDIDATE_NAMES}
+    if basic is None or mf is None:
+        return f
+    s = slice(0, upto + 1)
+
+    def _last(d, key):
+        a = d.get(key)
+        if a is None or upto >= len(a):
+            return np.nan
+        return float(a[upto])
+
+    def _win(d, key, k):
+        a = d.get(key)
+        if a is None:
+            return np.array([])
+        seg = a[s][-k:]
+        return seg[np.isfinite(seg)]
+
+    # --- 估值 ---
+    pe = _last(basic, "pe_ttm")
+    if np.isfinite(pe) and pe > 0:
+        f["earnings_yield"] = 1.0 / pe
+    pe_hist = _win(basic, "pe_ttm", 250)
+    f["pe_pctl250"] = _pctl(pe_hist, pe) if len(pe_hist) else 0.5
+    pb = _last(basic, "pb")
+    f["pb_pctl250"] = _pctl(_win(basic, "pb", 250), pb)
+    ps = _last(basic, "ps_ttm")
+    f["ps_pctl250"] = _pctl(_win(basic, "ps_ttm", 250), ps)
+    dv = _last(basic, "dv_ttm")
+    f["div_yield"] = dv if np.isfinite(dv) else 0.0
+    cmv = _last(basic, "circ_mv")
+    f["log_circ_mv"] = float(np.log(cmv)) if np.isfinite(cmv) and cmv > 0 else 0.0
+
+    # --- 换手/流动性 ---
+    tf = _last(basic, "turnover_rate_f")
+    f["turnover_f"] = tf if np.isfinite(tf) else 0.0
+    tf20 = _win(basic, "turnover_rate_f", 20)
+    if len(tf20) >= 5 and np.std(tf20) > 1e-9 and np.isfinite(tf):
+        f["turnover_z20"] = float((tf - np.mean(tf20)) / np.std(tf20))
+    vr = _last(basic, "volume_ratio")
+    f["vol_ratio_ts"] = vr if np.isfinite(vr) else 0.0
+
+    # --- 主力资金流(归一化到流通市值,量纲一致、跨股可比)---
+    cmv_now = cmv if (np.isfinite(cmv) and cmv > 0) else np.nan
+    if np.isfinite(cmv_now):
+        net5 = _win(mf, "net_mf_amount", 5)
+        f["net_mf_mv5"] = float(np.sum(net5) / cmv_now) if len(net5) else 0.0
+        be = _win(mf, "buy_elg_amount", 5); se = _win(mf, "sell_elg_amount", 5)
+        if len(be) and len(se):
+            f["elg_net_mv5"] = float((np.sum(be) - np.sum(se)) / cmv_now)
+        bl = _win(mf, "buy_lg_amount", 5); sl = _win(mf, "sell_lg_amount", 5)
+        if len(bl) and len(sl):
+            f["lg_net_mv5"] = float((np.sum(bl) - np.sum(sl)) / cmv_now)
+    net10 = _win(mf, "net_mf_amount", 10)
+    if len(net10):
+        f["mf_pos_frac10"] = float(np.mean(net10 > 0))
+
+    for k in TS_CANDIDATE_NAMES:
+        f[k] = _finite(f.get(k, 0.0), 0.0)
+    return f
+
+
 def atr14(closes, highs, lows, k=14):
     c = np.asarray(closes, float)
     h = np.asarray(highs, float)

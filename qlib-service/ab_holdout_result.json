@@ -1,0 +1,142 @@
+{
+  "cut_date": "20251205",
+  "n_samples": 494572,
+  "holdout_n": 74308,
+  "baseline_auc": 0.6522,
+  "promote_tol": 0.005,
+  "results": [
+    {
+      "features": "ext",
+      "config": "gbdt_reg",
+      "holdout_auc": 0.6566,
+      "std": 0.0003,
+      "n_est": 218,
+      "aucs": [
+        0.657,
+        0.6563,
+        0.6564
+      ]
+    },
+    {
+      "features": "ext",
+      "config": "gbdt_bigger",
+      "holdout_auc": 0.6563,
+      "std": 0.0001,
+      "n_est": 120,
+      "aucs": [
+        0.6563,
+        0.6561,
+        0.6564
+      ]
+    },
+    {
+      "features": "ext",
+      "config": "gbdt_baseline",
+      "holdout_auc": 0.6561,
+      "std": 0.0003,
+      "n_est": 161,
+      "aucs": [
+        0.6562,
+        0.6557,
+        0.6564
+      ]
+    },
+    {
+      "features": "ext",
+      "config": "dart",
+      "holdout_auc": 0.656,
+      "std": 0.0001,
+      "n_est": 400,
+      "aucs": [
+        0.6562,
+        0.6558,
+        0.6561
+      ]
+    },
+    {
+      "features": "ext",
+      "config": "goss",
+      "holdout_auc": 0.656,
+      "std": 0.0005,
+      "n_est": 146,
+      "aucs": [
+        0.6563,
+        0.6564,
+        0.6553
+      ]
+    },
+    {
+      "features": "base",
+      "config": "gbdt_baseline",
+      "holdout_auc": 0.6522,
+      "std": 0.0003,
+      "n_est": 120,
+      "aucs": [
+        0.6521,
+        0.6519,
+        0.6526
+      ]
+    },
+    {
+      "features": "base",
+      "config": "gbdt_bigger",
+      "holdout_auc": 0.6522,
+      "std": 0.0002,
+      "n_est": 120,
+      "aucs": [
+        0.6525,
+        0.652,
+        0.652
+      ]
+    },
+    {
+      "features": "base",
+      "config": "goss",
+      "holdout_auc": 0.6517,
+      "std": 0.0005,
+      "n_est": 120,
+      "aucs": [
+        0.6515,
+        0.6512,
+        0.6525
+      ]
+    },
+    {
+      "features": "base",
+      "config": "gbdt_reg",
+      "holdout_auc": 0.6516,
+      "std": 0.0003,
+      "n_est": 127,
+      "aucs": [
+        0.6517,
+        0.6513,
+        0.652
+      ]
+    },
+    {
+      "features": "base",
+      "config": "dart",
+      "holdout_auc": 0.651,
+      "std": 0.0004,
+      "n_est": 400,
+      "aucs": [
+        0.6512,
+        0.6505,
+        0.6515
+      ]
+    }
+  ],
+  "winner": {
+    "features": "ext",
+    "config": "gbdt_reg",
+    "holdout_auc": 0.6566,
+    "std": 0.0003,
+    "n_est": 218,
+    "aucs": [
+      0.657,
+      0.6563,
+      0.6564
+    ]
+  },
+  "winner_beats_baseline": false
+}
