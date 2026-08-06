@@ -1290,7 +1290,7 @@ function HoldingItem({ h, idx, quote: q }) {
   const askTAdvice = async (styleOverride) => {
     const useStyle = styleOverride || tStyle
     if (styleOverride && styleOverride !== tStyle) setTStyle(styleOverride)
-    setTAdvice({ loading: true, phase: '正在准备分析…', sources: [], reasoning: '' })
+    setTAdvice({ loading: true, phase: '正在准备分析…', sources: [], reasoning: '', quant: null })
     const onPhase = (p) => setTAdvice((s) => (s && s.loading ? { ...s, phase: p.text } : s))
     // 细粒度事件:数据源勾选清单 + 军师思维链增量,实时展示"发生了什么"
     const onEvent = (event, data) => {
@@ -1298,6 +1298,8 @@ function HoldingItem({ h, idx, quote: q }) {
         setTAdvice((s) => (s && s.loading ? { ...s, sources: [...(s.sources || []), { label: data.label, ok: !!data.ok }] } : s))
       } else if (event === 'reasoning' && data && data.text) {
         setTAdvice((s) => (s && s.loading ? { ...s, reasoning: (s.reasoning || '') + data.text } : s))
+      } else if (event === 'quant' && data) {
+        setTAdvice((s) => (s && s.loading ? { ...s, quant: data } : s))
       }
     }
     try {
@@ -1666,6 +1668,12 @@ function HoldingItem({ h, idx, quote: q }) {
                         <Icon name={s.ok ? 'check' : 'close'} size={11} /> {s.label}
                       </span>
                     ))}
+                  </div>
+                )}
+                {tAdvice.quant && (
+                  <div className="adv-quant">
+                    <div className="adv-quant-head"><Icon name="activity" size={12} /> 量化模型结论</div>
+                    <div className="adv-quant-body">{tAdvice.quant.summary || '已完成打分'}</div>
                   </div>
                 )}
                 {tAdvice.reasoning && (

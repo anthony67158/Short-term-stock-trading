@@ -118,6 +118,8 @@ export const authStore = {
     await api('save', { nick: state.user, pw: _pw, data })
   },
   currentUser() { return state.user },
+  // 供 Web Push 订阅上报:把订阅绑到当前账号(服务端据此推给对的人)。仅内存,不落盘额外副本。
+  getCreds() { return (state.user && _pw) ? { nick: state.user, pw: _pw } : null },
 
   // 运行时【定期拉取】云端数据并【非破坏式合并】到本地。
   // 解决"手机上生成的 AI 操作建议,电脑浏览器不刷新"——之前只在 boot/login 拉一次,

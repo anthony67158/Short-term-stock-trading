@@ -115,7 +115,7 @@ export default function StockDetail({ stock, onClose }) {
     const sync = () => {
       if (isRunning(code)) {
         const r = getRunning(code)
-        setQuantState({ loading: true, phase: r && r.phase, sources: (r && r.sources) || [], reasoning: (r && r.reasoning) || '' })
+        setQuantState({ loading: true, phase: r && r.phase, sources: (r && r.sources) || [], reasoning: (r && r.reasoning) || '', quant: (r && r.quant) || null })
         return
       }
       const res = getResult(code)
@@ -545,6 +545,13 @@ export default function StockDetail({ stock, onClose }) {
                         ))}
                       </div>
                     )}
+                    {/* 量化模型结论:后端量化打分完成后推 quant 事件,先于军师推理展示"量化模型给了什么" */}
+                    {quantState.quant && (
+                      <div className="adv-quant">
+                        <div className="adv-quant-head"><Icon name="activity" size={12} /> 量化模型结论</div>
+                        <div className="adv-quant-body">{quantState.quant.summary || '已完成打分'}</div>
+                      </div>
+                    )}
                     {/* 模型思维链:开启「深度思考」时后端把 reasoning_content 增量推来,这里滚动展示"军师在想什么" */}
                     {quantState.reasoning && (
                       <div className="adv-reasoning">
@@ -552,7 +559,7 @@ export default function StockDetail({ stock, onClose }) {
                         <div className="adv-reasoning-body" ref={(el) => { if (el) el.scrollTop = el.scrollHeight }}>{quantState.reasoning}</div>
                       </div>
                     )}
-                    {(!quantState.sources || !quantState.sources.length) && !quantState.reasoning && (
+                    {(!quantState.sources || !quantState.sources.length) && !quantState.reasoning && !quantState.quant && (
                       <>
                         <div className="sk-line sk-verdict" />
                         <div className="sk-line sk-timing" />

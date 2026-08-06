@@ -1611,8 +1611,23 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 .nav-bell-dot { position: absolute; top: -5px; right: -5px; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 8px; background: var(--red); color: #fff; font-size: 9px; font-weight: 700; display: flex; align-items: center; justify-content: center; line-height: 1; }
 .alert-center { width: min(560px, 94vw); max-height: 86vh; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 .alert-perm { display: flex; align-items: center; gap: 6px; margin: 10px var(--pad-panel-x) 0; padding: 9px 12px; border-radius: 8px; font-size: 12px; color: var(--text2); background: rgba(124,107,245,.08); border: 1px solid rgba(124,107,245,.22); }
+/* 系统级 Web Push 开关条 */
+.push-bar { display: flex; align-items: flex-start; gap: 8px; margin: 8px var(--pad-panel-x) 0; padding: 9px 12px; border-radius: 8px; font-size: 12px; color: var(--text2); background: rgba(124,107,245,.06); border: 1px solid rgba(124,107,245,.18); }
+.push-bar.on { background: rgba(40,160,90,.08); border-color: rgba(40,160,90,.25); }
+.push-bar.ios { background: rgba(217,154,0,.08); border-color: rgba(217,154,0,.25); }
+.push-bar .push-txt { flex: 1; line-height: 1.6; min-width: 0; }
+.push-bar .push-txt b { color: var(--text); }
+.push-bar .push-err { color: var(--red); margin-left: 6px; }
+.push-bar .btn { flex-shrink: 0; }
 .alert-body { flex: 1; overflow-y: auto; padding: 10px 16px; min-height: 120px; }
 .alert-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+/* AI 自动预警总开关 + 分组 + 批量操作 */
+.ai-auto-switch { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text2); cursor: pointer; user-select: none; }
+.ai-auto-switch input { accent-color: var(--accent); width: 14px; height: 14px; cursor: pointer; }
+.alert-group { margin-bottom: 6px; }
+.alert-group-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0 2px; }
+.btn.tiny { padding: 2px 8px; font-size: 11px; line-height: 1.6; }
+.ar-badge { font-size: 9px; font-weight: 700; color: var(--accent); background: rgba(124,107,245,.14); padding: 0 5px; border-radius: 4px; line-height: 1.6; }
 .alert-notif { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border-soft); }
 .an-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); margin-top: 5px; flex-shrink: 0; }
 .an-main { flex: 1; min-width: 0; }
@@ -2074,6 +2089,9 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 .adv-reasoning-body { max-height: 160px; overflow-y: auto; padding: 8px 10px; font-size: 11.5px; line-height: 1.7; color: var(--text2); white-space: pre-wrap; word-break: break-word; }
 .adv-reasoning-body::-webkit-scrollbar { width: 5px; }
 .adv-reasoning-body::-webkit-scrollbar-thumb { background: rgba(124,107,245,.3); border-radius: 3px; }
+.adv-quant { margin-top: 2px; border: 1px solid rgba(53,198,107,.28); border-radius: 10px; background: rgba(53,198,107,.06); overflow: hidden; animation: advIn .2s ease; }
+.adv-quant-head { display: flex; align-items: center; gap: 5px; padding: 6px 10px; font-size: 11.5px; font-weight: 600; color: #2fae5f; border-bottom: 1px solid rgba(53,198,107,.18); }
+.adv-quant-body { padding: 7px 10px; font-size: 11.5px; line-height: 1.7; color: var(--text2); word-break: break-word; }
 .t-ai-loading-wrap { display: flex; flex-direction: column; gap: 8px; }
 
 /* 开高低量/均线 折叠 · 公司简介 折叠 */

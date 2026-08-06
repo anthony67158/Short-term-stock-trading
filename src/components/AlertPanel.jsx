@@ -6,6 +6,7 @@ import { usePolling } from '../hooks'
 import { planStore, usePlanStore } from '../planStore'
 import { alertStore, useAlertStore, describeAlert, ALERT_TYPES } from '../alertStore'
 import { fmtRaw } from '../format'
+import PushToggle from './PushToggle'
 
 // ============ 盯盘预警（内嵌面板，非弹窗）：规则管理 + 通知历史 ============
 export default function AlertPanel({ interval }) {
@@ -14,8 +15,14 @@ export default function AlertPanel({ interval }) {
   const [tab, setTab] = useState('rules') // rules 规则 | notif 通知
   const [adding, setAdding] = useState(false)
   const [delTarget, setDelTarget] = useState(null)
+  const [delBatch, setDelBatch] = useState(null)
   const alerts = book.alerts || []
   const activeCnt = alerts.filter((a) => a.enabled && !a.triggeredAt).length
+  // 分组:手动预警 vs AI 自动预警(planId=持仓止盈止损 / candCode=自选买点)
+  const manualAlerts = alerts.filter((a) => !a.planId && !a.candCode)
+  const autoAlerts = alerts.filter((a) => a.planId || a.candCode)
+  const triggeredAlerts = alerts.filter((a) => a.triggeredAt)
+  const aiAutoOn = (book.settings || {}).aiAutoAlert !== false
 
   // 候选：自选 + 持仓（去重），供新增预警选择
   const cands = useMemo(() => {
@@ -47,6 +54,9 @@ export default function AlertPanel({ interval }) {
         </div>
       )}
 
+      {/* 系统级 Web Push：关页面/锁屏也能收到（含 iOS 引导） */}
+      <PushToggle />
+
       {/* 新增预警表单 */}
       {adding && (
         <div className="alert-add-wrap">
@@ -66,29 +76,42 @@ export default function AlertPanel({ interval }) {
           alerts.length === 0 ? (
             <div className="empty">还没有预警规则。点右上「新增预警」，或在自选/持仓卡片、个股详情里点「设预警」添加。</div>
           ) : (
-            alerts.map((a) => (
-              <div className={'alert-rule' + (a.enabled ? '' : ' off')} key={a.id}>
-                <div className="ar-main">
-                  <div className="ar-name">
-                    <StockName code={a.code} name={a.name} stopPropagation><span>{a.name || a.code}</span></StockName>
-                    <span className="ar-code">{a.code}</span>
-                    {quote[a.code] && <span className="ar-now">现 {fmtRaw(quote[a.code].price)}</span>}
-                  </div>
-                  <div className="ar-desc">{describeAlert(a)}{a.note ? ` · ${a.note}` : ''}</div>
-                  {a.triggeredAt && <div className="ar-fired">已于 {new Date(a.triggeredAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })} 触发：{a.triggeredMsg}</div>}
-                </div>
-                <div className="ar-actions">
-                  {a.triggeredAt ? (
-                    <button className="chip-btn ghost" title="重新启用" onClick={() => planStore.rearmAlert(a.id)}><Icon name="refresh" size={12} />重启</button>
-                  ) : (
-                    <button className={'ar-toggle' + (a.enabled ? ' on' : '')} title={a.enabled ? '点击停用' : '点击启用'} onClick={() => planStore.toggleAlert(a.id)}>
-                      {a.enabled ? '启用中' : '已停用'}
-                    </button>
-                  )}
-                  <button className="icon-btn" title="删除规则" onClick={() => setDelTarget(a)}><Icon name="trash" size={13} /></button>
-                </div>
+            <>
+              {/* 批量工具条:一键清理已触发规则 + AI 自动预警总开关 */}
+              <div className="alert-toolbar">
+                <label className="ai-auto-switch" title="关闭后不再自动生成买点/止盈/止损预警,已有的自动预警会被清除">
+                  <input type="checkbox" checked={aiAutoOn} onChange={(e) => planStore.setAiAutoAlert(e.target.checked)} />
+                  <span>AI 自动预警</span>
+                </label>
+                {triggeredAlerts.length > 0 && (
+                  <button className="btn" style={{ marginLeft: 'auto' }}
+                    onClick={() => setDelBatch({ ids: triggeredAlerts.map((a) => a.id), label: `${triggeredAlerts.length} 条已触发规则` })}>
+                    <Icon name="trash" size={12} /> 清理已触发({triggeredAlerts.length})
+                  </button>
+                )}
               </div>
-            ))
+
+              {/* AI 自动预警(可整组清空) */}
+              {autoAlerts.length > 0 && (
+                <div className="alert-group">
+                  <div className="alert-group-head">
+                    <span className="sub-name">AI 自动预警 · {autoAlerts.length} 条(跟随军师建议自动维护)</span>
+                    <button className="btn tiny" onClick={() => setDelBatch({ ids: autoAlerts.map((a) => a.id), label: `全部 ${autoAlerts.length} 条 AI 自动预警` })}>
+                      <Icon name="trash" size={11} /> 全部删除
+                    </button>
+                  </div>
+                  {autoAlerts.map((a) => renderRule(a, quote, setDelTarget))}
+                </div>
+              )}
+
+              {/* 手动预警 */}
+              {manualAlerts.length > 0 && (
+                <div className="alert-group">
+                  <div className="alert-group-head"><span className="sub-name">手动预警 · {manualAlerts.length} 条</span></div>
+                  {manualAlerts.map((a) => renderRule(a, quote, setDelTarget))}
+                </div>
+              )}
+            </>
           )
         ) : (
           notifications.length === 0 ? (
@@ -121,12 +144,50 @@ export default function AlertPanel({ interval }) {
       {delTarget && (
         <ConfirmDialog
           title="删除此预警？"
-          body={<>确定删除 <b>{delTarget.name}</b> 的「{describeAlert(delTarget)}」预警？</>}
+          body={<>确定删除 <b>{delTarget.name}</b> 的「{describeAlert(delTarget)}」预警？{(delTarget.planId || delTarget.candCode) && <><br /><span className="sub-name">这是 AI 自动预警，删除后不会再被自动加回（除非在该股「恢复自动预警」）。</span></>}</>}
           confirmText="删除"
           onConfirm={() => { planStore.removeAlert(delTarget.id); setDelTarget(null) }}
           onCancel={() => setDelTarget(null)}
         />
       )}
+      {delBatch && (
+        <ConfirmDialog
+          title="批量删除预警？"
+          body={<>确定删除 <b>{delBatch.label}</b>？<br /><span className="sub-name">其中的 AI 自动预警删除后不会再被自动加回。</span></>}
+          confirmText="删除"
+          onConfirm={() => { planStore.removeAlerts(delBatch.ids); setDelBatch(null) }}
+          onCancel={() => setDelBatch(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+// 单条预警规则行（手动/AI 自动共用）
+function renderRule(a, quote, setDelTarget) {
+  const isAuto = !!(a.planId || a.candCode)
+  return (
+    <div className={'alert-rule' + (a.enabled ? '' : ' off')} key={a.id}>
+      <div className="ar-main">
+        <div className="ar-name">
+          <StockName code={a.code} name={a.name} stopPropagation><span>{a.name || a.code}</span></StockName>
+          <span className="ar-code">{a.code}</span>
+          {isAuto && <span className="ar-badge">AI</span>}
+          {quote[a.code] && <span className="ar-now">现 {fmtRaw(quote[a.code].price)}</span>}
+        </div>
+        <div className="ar-desc">{describeAlert(a)}{a.note ? ` · ${a.note}` : ''}</div>
+        {a.triggeredAt && <div className="ar-fired">已于 {new Date(a.triggeredAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })} 触发：{a.triggeredMsg}</div>}
+      </div>
+      <div className="ar-actions">
+        {a.triggeredAt ? (
+          <button className="chip-btn ghost" title="重新启用" onClick={() => planStore.rearmAlert(a.id)}><Icon name="refresh" size={12} />重启</button>
+        ) : (
+          <button className={'ar-toggle' + (a.enabled ? ' on' : '')} title={a.enabled ? '点击停用' : '点击启用'} onClick={() => planStore.toggleAlert(a.id)}>
+            {a.enabled ? '启用中' : '已停用'}
+          </button>
+        )}
+        <button className="icon-btn" title="删除规则" onClick={() => setDelTarget(a)}><Icon name="trash" size={13} /></button>
+      </div>
     </div>
   )
 }

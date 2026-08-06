@@ -269,6 +269,28 @@ export const planStore = {
         changed = true
       }
     }
+    // 3) 预警「已触发」状态回灌(按 id):cron_alert 在服务端(关页面时)命中并推送后,会把该
+    //    规则标记 triggeredAt/enabled:false 存回云端。这里只把「服务端已触发」并回本地——
+    //    ① 让前端「命中记录/规则」显示一致;② 避免前端仍当它监控中而重复响铃/重复推送。
+    //    只迁移 triggered 状态,绝不新增/删除规则(规则增删仍由用户在本机操作,防跨设备误删复活)。
+    if (Array.isArray(d.alerts) && d.alerts.length && Array.isArray(state.alerts) && state.alerts.length) {
+      const cloudById = new Map(d.alerts.map((a) => a && a.id ? [a.id, a] : [null, null]))
+      let touched = false
+      const next = state.alerts.map((a) => {
+        const c = cloudById.get(a.id)
+        if (c && c.triggeredAt && !a.triggeredAt) {
+          touched = true
+          return { ...a, triggeredAt: c.triggeredAt, triggeredMsg: c.triggeredMsg || a.triggeredMsg || '', enabled: false }
+        }
+        return a
+      })
+      if (touched) {
+        _suspend = true
+        state = { ...state, alerts: next }
+        _suspend = false
+        changed = true
+      }
+    }
     if (changed) { listeners.forEach((l) => l()); scheduleSave() }
     return changed
   },
@@ -687,18 +709,34 @@ export const planStore = {
   },
   // 计划联动预警同步:按持仓当前 tp/sl 重建到价预警(止盈 gte / 止损 lte),planId=持仓id。
   // 建仓自动带计划、手动改计划、AI建议刷新自动跟随 —— 三处都走这一个口子,保证预警永远与计划一致。
+  // 三条防刷屏纪律:
+  //   ① 全局开关 settings.aiAutoAlert===false → 不生成任何 AI 自动预警;
+  //   ② 静音:用户删掉某条 AI 自动预警会在持仓上落 muteTp/muteSl,此处永久跳过(删除即生效,不再被加回);
+  //   ③ 价位没变则「原样保留」旧预警(含 enabled/triggeredAt),不重新武装、不重复响铃。
   _syncPlanAlerts(id) {
     const h = state.holding.find((x) => x.id === id)
     if (!h) return
-    state.alerts = (state.alerts || []).filter((a) => a.planId !== id) // 先清旧
-    const add = (op, value, note) => {
-      state.alerts = [{
-        id: uid(), enabled: true, createdAt: Date.now(), triggeredAt: null, triggeredMsg: '',
-        code: h.code, name: h.name, type: 'price', op, value: Number(value), note, planId: id,
-      }, ...(state.alerts || [])]
+    if (state.settings && state.settings.aiAutoAlert === false) {
+      state.alerts = (state.alerts || []).filter((a) => a.planId !== id)
+      return
     }
-    if (h.tp != null) add('gte', h.tp, '止盈')
-    if (h.sl != null) add('lte', h.sl, '止损')
+    const old = (state.alerts || []).filter((a) => a.planId === id)
+    const rest = (state.alerts || []).filter((a) => a.planId !== id)
+    const rebuilt = []
+    const build = (op, value, note, muted) => {
+      if (muted) return                                  // 用户删过 → 永久不再生成
+      if (value == null) return
+      const v = Number(value)
+      const prev = old.find((a) => a.op === op)
+      if (prev && Number(prev.value) === v) { rebuilt.push(prev); return } // 价没变 → 原样保留触发态
+      rebuilt.push({
+        id: uid(), enabled: true, createdAt: Date.now(), triggeredAt: null, triggeredMsg: '',
+        code: h.code, name: h.name, type: 'price', op, value: v, note, planId: id,
+      })
+    }
+    build('gte', h.tp, '止盈', h.muteTp)
+    build('lte', h.sl, '止损', h.muteSl)
+    state.alerts = [...rebuilt, ...rest]
   },
   // 给候选(计划买入)预设交易计划：目标买入价/止盈/止损/理由/计划仓位
   setCandPlan(code, plan) {
@@ -718,9 +756,11 @@ export const planStore = {
   //   AI 买价变化时(≠ alertSyncedPrice)才会重新同步/重新武装。
   autoSyncCandAlert(code, name, buyPrice) {
     if (buyPrice == null || isNaN(buyPrice)) return
+    if (state.settings && state.settings.aiAutoAlert === false) return // 全局关闭 AI 自动预警
     const v = roundPx(buyPrice)
     const p = state.plan.find((x) => x.code === code)
     if (!p) return
+    if (p.alertMuted) return                                            // 用户删过买点预警 → 永久不再自动加回
     if (p.alertSyncedPrice != null && Number(p.alertSyncedPrice) === Number(v)) return // 该买价已处理过
     const existing = (state.alerts || []).find((a) => a.candCode === code)
     if (existing) {
@@ -757,8 +797,47 @@ export const planStore = {
     state.alerts = (state.alerts || []).map((x) => x.id === id ? { ...x, ...patch } : x)
     emit()
   },
+  // 删除预警。若删的是 AI 自动预警(planId 止盈/止损 或 candCode 买点),同时在对应持仓/候选上落"静音",
+  // 保证【删除即永久生效】——下次 AI 建议刷新不会把它偷偷加回来(直接回应用户"删了会不会又冒出来")。
   removeAlert(id) {
+    const a = (state.alerts || []).find((x) => x.id === id)
+    if (a) {
+      if (a.planId) {
+        const key = a.op === 'gte' ? 'muteTp' : 'muteSl'
+        state.holding = state.holding.map((h) => h.id === a.planId ? { ...h, [key]: true } : h)
+      } else if (a.candCode) {
+        state.plan = state.plan.map((p) => p.code === a.candCode ? { ...p, alertMuted: true } : p)
+      }
+    }
     state.alerts = (state.alerts || []).filter((x) => x.id !== id)
+    emit()
+  },
+  // 批量删除:传入 id 数组,一次删干净(供面板"删除全部已触发/按股清理"用)。同样为每条 AI 自动预警落静音。
+  removeAlerts(ids) {
+    const set = new Set(ids || [])
+    if (!set.size) return
+    for (const a of (state.alerts || [])) {
+      if (!set.has(a.id)) continue
+      if (a.planId) {
+        const key = a.op === 'gte' ? 'muteTp' : 'muteSl'
+        state.holding = state.holding.map((h) => h.id === a.planId ? { ...h, [key]: true } : h)
+      } else if (a.candCode) {
+        state.plan = state.plan.map((p) => p.code === a.candCode ? { ...p, alertMuted: true } : p)
+      }
+    }
+    state.alerts = (state.alerts || []).filter((x) => !set.has(x.id))
+    emit()
+  },
+  // AI 自动预警总开关:关 → 清掉所有 planId/candCode 联动预警且今后不再生成;开 → 允许下次刷新重建(受各自静音约束)。
+  setAiAutoAlert(on) {
+    state.settings = { ...(state.settings || {}), aiAutoAlert: !!on }
+    if (!on) state.alerts = (state.alerts || []).filter((a) => !a.planId && !a.candCode)
+    emit()
+  },
+  // 解除某只股票的 AI 预警静音(用户改主意想重新自动跟随):清掉持仓 muteTp/muteSl / 候选 alertMuted + alertSyncedPrice。
+  unmuteStockAlert(code) {
+    state.holding = state.holding.map((h) => h.code === code ? { ...h, muteTp: false, muteSl: false } : h)
+    state.plan = state.plan.map((p) => p.code === code ? { ...p, alertMuted: false, alertSyncedPrice: null } : p)
     emit()
   },
   toggleAlert(id) {

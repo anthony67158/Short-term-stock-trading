@@ -26,6 +26,8 @@ export function maxTokensForMode(mode, reasoning = false) {
 
 export const SYSTEM_PROMPT = `你的任务是基于用户提供的【实时行情数据】做客观分析。
 
+【语言铁律】你的全部思考过程(思维链/reasoning)与最终输出都【必须用简体中文】书写，绝对不要用英文思考或输出，专有名词/代码/数字除外。
+
 严格规则（必须遵守）：
 1. 只能引用用户在数据中提供的真实股票、板块、数值。绝对禁止虚构任何股票代码、名称、价格或数据。
 2. 如果数据不足以支撑某个结论，明确说"数据不足"，不要编造。
@@ -44,6 +46,8 @@ export const SYSTEM_PROMPT = `你的任务是基于用户提供的【实时行�
 
 // 顶级操盘军师人设：用于 做T/加减仓/买入/持仓建议/复盘/定价 等深度个股研判
 export const ADVISOR_SYSTEM = `你是用户的【顶级操盘军师】——一位智商150、浸淫A股短线二十年的天才操盘手，把消息面、宏观面、资金面、技术面、盘口、量化模型全部融会贯通，像股神一样一眼看透一只票此刻的多空博弈。用户把真金白银的买卖决策托付给你，你必须给出果断、专业、可直接照做的判断，但【绝不自欺、绝不糊弄】——好就是好、烂就是烂、看不清就明说看不清。
+
+【语言铁律·最高优先】你的【全部思考过程(思维链/reasoning)】以及最终 JSON 里的所有文字，都【必须用简体中文】书写、逐字用中文推理，【绝对禁止用英文思考或输出】(个股代码、专有名词缩写、纯数字除外)。用户会实时看到你的中文思考过程，任何英文推理都是不合格的。
 
 【第一铁律·实事求是】你的每一句话都必须建立在给定的真实数据之上，坦诚、清晰、直给：
 - 数据支持看多就旗帜鲜明看多，数据支持回避就直说回避，数据互相打架/不足以定论就老实说"证据不够、只能观望/小仓试错"，绝不为了显得"有观点"而硬编方向。
@@ -82,6 +86,9 @@ export const ADVISOR_SYSTEM = `你是用户的【顶级操盘军师】——一�
 
 export function buildUserPrompt(mode, payload, ragText) {
   const data = JSON.stringify(payload, null, 0);
+  // 语言前置指令:reasoning 模型的思维链默认用英文,系统提示词常压不住,故在用户消息最前面
+  //   再下一道最强指令——用户会实时看到中文思考过程,思维链必须全程简体中文。
+  const zhReason = '【语言要求·最高优先·先读这条】请务必用【简体中文】进行你的全部思考(思维链/reasoning)与输出，逐字都用中文推理，绝对不要用英文思考(个股代码/纯数字/专有名词缩写除外)。这一条优先级最高，任何英文思考都算不合格。\n\n';
   const ragBlock = ragText ? `\n\n【RAG检索资料：近5日走势+主营+联网新闻】\n${ragText}` : '';
   // 军师五面数据说明：把技术金叉多头、主力资金、盘口、消息面、龙虎榜、大盘环境、共振分全部显式点名，强制引用
   const advisorData = `${payload.todayQuote ? (payload.todayQuote.live ? `\n【★今日实时行情(最高优先·当下事实)】现价${payload.todayQuote.price}、今日涨跌${payload.todayQuote.pct >= 0 ? '+' : ''}${payload.todayQuote.pct}%${payload.todayQuote.isLimitUp ? '、【已涨停】' : payload.todayQuote.isLimitDown ? '、【已跌停】' : ''}${payload.todayQuote.bigMove && !payload.todayQuote.isLimitUp && !payload.todayQuote.isLimitDown ? `、【当日大幅${payload.todayQuote.pct >= 0 ? '异动上涨' : '异动下跌'}】` : ''}、量比${payload.todayQuote.volRatio ?? '—'}、换手${payload.todayQuote.turnover ?? '—'}%。
@@ -171,19 +178,19 @@ ${payload.holdQty != null ? `4) 手数纪律:任何减仓/清仓/卖出手数 �
 
 
   if (mode === 'market') {
-    return `【今日盘面实时数据】\n${data}\n\n请输出 JSON：{"reasoning":"一句话研判思路(先点明数据是哪个交易日的、面向哪个交易日)","sentiment":"多头/中性/空头","score":0-100的情绪分,"summary":"一句话盘面总结","mainLines":[{"name":"最强主线板块名","reason":"资金/涨停依据"}],"risks":["风险点1","风险点2"],"advice":"短线操作建议(仓位/节奏)"}`;
+    return `${zhReason}【今日盘面实时数据】\n${data}\n\n请输出 JSON：{"reasoning":"一句话研判思路(先点明数据是哪个交易日的、面向哪个交易日)","sentiment":"多头/中性/空头","score":0-100的情绪分,"summary":"一句话盘面总结","mainLines":[{"name":"最强主线板块名","reason":"资金/涨停依据"}],"risks":["风险点1","风险点2"],"advice":"短线操作建议(仓位/节奏)"}`;
   }
   if (mode === 'sector') {
-    return `【板块「${payload.sectorName}」实时数据+成分股】\n${data}\n\n请从上面【真实成分股列表】中挑选最多3只短线关注度高的个股（必须是列表里存在的），输出 JSON：{"reasoning":"【ReAct推理链·先想后答】一句话串起:①时间坐标(数据哪天的、面向哪个交易日)→②板块资金/强弱怎么判→③按什么标准从成分股里选(资金/量价/连板)→④自检所选票是否都在列表内、有无矛盾","sectorView":"该板块资金/强弱判断","picks":[{"name":"股票名(必须来自列表)","code":"代码","reason":"入选逻辑(资金/量价/连板)","watch":"短线关注点/风险"}],"note":"整体提示"}`;
+    return `${zhReason}【板块「${payload.sectorName}」实时数据+成分股】\n${data}\n\n请从上面【真实成分股列表】中挑选最多3只短线关注度高的个股（必须是列表里存在的），输出 JSON：{"reasoning":"【ReAct推理链·先想后答】一句话串起:①时间坐标(数据哪天的、面向哪个交易日)→②板块资金/强弱怎么判→③按什么标准从成分股里选(资金/量价/连板)→④自检所选票是否都在列表内、有无矛盾","sectorView":"该板块资金/强弱判断","picks":[{"name":"股票名(必须来自列表)","code":"代码","reason":"入选逻辑(资金/量价/连板)","watch":"短线关注点/风险"}],"note":"整体提示"}`;
   }
   if (mode === 'stock') {
-    return `【个股实时数据】\n${data}${ragBlock}\n\n请综合实时数据与RAG资料（消息面/近5日走势），输出 JSON（各字段填你的分析结论，不要照抄字段说明）：{"reasoning":"【ReAct推理链·先想后答】按此顺序一句话串起来:①时间坐标(数据是哪个交易日的)→②关键证据(消息/资金/量价里最决定性的1-2点)→③据此定方向(强/中/弱)→④自检有无矛盾/被陈旧数据误导。这段是你的思考过程，要先于下面结论得出","name":"股票名","view":"用一句话给出资金面+量价+消息面的综合判断结论","strength":"强或中或弱三选一","points":["解读要点1","解读要点2","解读要点3"],"newsImpact":"最新消息面对短线的具体影响；若近期无重要消息则写'近期无重要消息'","watch":"短线关注点与风险"}`;
+    return `${zhReason}【个股实时数据】\n${data}${ragBlock}\n\n请综合实时数据与RAG资料（消息面/近5日走势），输出 JSON（各字段填你的分析结论，不要照抄字段说明）：{"reasoning":"【ReAct推理链·先想后答】按此顺序一句话串起来:①时间坐标(数据是哪个交易日的)→②关键证据(消息/资金/量价里最决定性的1-2点)→③据此定方向(强/中/弱)→④自检有无矛盾/被陈旧数据误导。这段是你的思考过程，要先于下面结论得出","name":"股票名","view":"用一句话给出资金面+量价+消息面的综合判断结论","strength":"强或中或弱三选一","points":["解读要点1","解读要点2","解读要点3"],"newsImpact":"最新消息面对短线的具体影响；若近期无重要消息则写'近期无重要消息'","watch":"短线关注点与风险"}`;
   }
   if (mode === 'scan') {
-    return `【当日全盘综合数据：大盘情绪 + 板块资金流 + 涨停连板 + 盘中异动】\n${data}\n\n你是短线策略总监，请综合以上所有维度，给出今日最值得关注的 TOP3 方向。输出 JSON：{"reasoning":"一句话研判思路(先点明数据对应哪个交易日、结论面向哪个交易日开盘)","marketMood":"一句话大盘定调","topDirections":[{"rank":1,"direction":"方向/板块名","logic":"入选逻辑(必须结合资金流/涨停/异动的具体数据)","representStocks":[{"name":"代表股(必须来自给定数据)","code":"代码"}],"strength":"强/中/弱"}],"strategy":"今日短线操作策略(仓位/节奏/风格)","topRisk":"最需警惕的风险"}`;
+    return `${zhReason}【当日全盘综合数据：大盘情绪 + 板块资金流 + 涨停连板 + 盘中异动】\n${data}\n\n你是短线策略总监，请综合以上所有维度，给出今日最值得关注的 TOP3 方向。输出 JSON：{"reasoning":"一句话研判思路(先点明数据对应哪个交易日、结论面向哪个交易日开盘)","marketMood":"一句话大盘定调","topDirections":[{"rank":1,"direction":"方向/板块名","logic":"入选逻辑(必须结合资金流/涨停/异动的具体数据)","representStocks":[{"name":"代表股(必须来自给定数据)","code":"代码"}],"strength":"强/中/弱"}],"strategy":"今日短线操作策略(仓位/节奏/风格)","topRisk":"最需警惕的风险"}`;
   }
   if (mode === 'scan_pick') {
-    return `【AI 选股请求】用户不知道今天有哪些股票值得关注，需要你从"已用量化模型打过分的候选池"里，结合大盘/板块/盘面，**排序精选出今日最值得关注的 3~5 只**个股,并说清怎么看、怎么买。
+    return `${zhReason}【AI 选股请求】用户不知道今天有哪些股票值得关注，需要你从"已用量化模型打过分的候选池"里，结合大盘/板块/盘面，**排序精选出今日最值得关注的 3~5 只**个股,并说清怎么看、怎么买。
 核心目标:用户每天都想拿到一份"今日观察名单"。**你几乎总要给出标的(除非候选池确实为空)**——不要因为"没有完美的票"就交白卷。宁可给出把握度较低、但相对最优的标的并如实标注,也不要什么都不给。
 数据含：大盘情绪(market)、板块资金流(sectors)、【候选池 candidates —— 每只都带量化打分与走势预测】。
 数据：${data}
@@ -205,7 +212,7 @@ ${payload.quantMissing ? '⚠️【本次量化服务不可用·降级口径】�
 请输出 JSON：{"reasoning":"一句话研判思路(先点明候选数据对应哪个交易日、结论面向哪个交易日开盘)","marketNote":"一句话今日大盘环境与选股基调(顺/逆风、能否追高)","confidence":"今日名单整体把握度:高/中/低(并半句话说明,如'大盘逆风,今日以观察为主')","picks":[{"rank":1,"name":"股票名","code":"代码","quantScore":量化分数字,"grade":"强或中或弱","reason":"为什么值得关注(引用量化分/上涨概率/资金/板块的具体数字,大白话)","buyPoint":"买点或观察点(如回踩5日线不破/放量突破X/竞价低吸;若只宜观察写'暂不追,回踩到X再看')","buyZone":"参考买入价区间(如 12.3~12.8)","target":"目标位/预期","stop":"止损位","risk":"该股主要风险"}],"note":"整体提示(仓位/节奏/名单该怎么用)"}。只输出 JSON。`;
   }
   if (mode === 'daily') {
-    return `【当日全盘数据：大盘情绪 + 板块资金流 + 涨停连板 + 盘中异动】\n${data}\n\n你是短线操盘手，服务做 T+1（今买明卖）的用户。请综合所有维度，直接给出今日可执行的操盘决策。输出 JSON：{"reasoning":"一句话研判思路(先点明数据对应哪个交易日、决策面向哪个交易日开盘;若今天休市要说清是基于上一交易日数据、面向下一交易日)","canTrade":"能做/谨慎/空仓 三选一","light":"green/yellow/red","verdict":"一句话今日定调(能不能做、什么风格)","direction":"今日主攻方向(1-2个板块/主线)","candidates":[{"name":"候选股(必须来自给定数据)","code":"代码","reason":"入选逻辑(结合资金/涨停/异动的具体数据)","buyPoint":"买点提示(如回踩不破/放量突破)","expect":"次日预期","stop":"止损提示"}],"position":"建议仓位(如3-5成)","risk":"最需警惕的风险"}。candidates 给3-5只，必须来自给定数据里的真实个股。`;
+    return `${zhReason}【当日全盘数据：大盘情绪 + 板块资金流 + 涨停连板 + 盘中异动】\n${data}\n\n你是短线操盘手，服务做 T+1（今买明卖）的用户。请综合所有维度，直接给出今日可执行的操盘决策。输出 JSON：{"reasoning":"一句话研判思路(先点明数据对应哪个交易日、决策面向哪个交易日开盘;若今天休市要说清是基于上一交易日数据、面向下一交易日)","canTrade":"能做/谨慎/空仓 三选一","light":"green/yellow/red","verdict":"一句话今日定调(能不能做、什么风格)","direction":"今日主攻方向(1-2个板块/主线)","candidates":[{"name":"候选股(必须来自给定数据)","code":"代码","reason":"入选逻辑(结合资金/涨停/异动的具体数据)","buyPoint":"买点提示(如回踩不破/放量突破)","expect":"次日预期","stop":"止损提示"}],"position":"建议仓位(如3-5成)","risk":"最需警惕的风险"}。candidates 给3-5只，必须来自给定数据里的真实个股。`;
   }
   if (mode === 't_advice') {
     const styleMap = {
@@ -217,7 +224,7 @@ ${payload.quantMissing ? '⚠️【本次量化服务不可用·降级口径】�
     const styleText = isAuto
       ? '【自动】用户没有指定风格，请你根据 stockProfile(这只股自己的历史规律) 自动选定最合适的风格：波动大/振幅大的妖股→偏激进博差价；温吞小波动→偏稳健小做；居中→均衡。并在 chosenStyle 字段回填你选的风格。'
       : (styleMap[payload.style] || styleMap.balanced)
-    return `【做T参考请求】用户持有一只票想日内做T摊薄成本。做T有两个方向，你要根据此刻盘面对称判断、不要默认只做正T：正T=先低吸后高抛(现价偏低时)，反T=先高抛后低接(现价偏高/浮盈时)。数据含：个股实时量价、当日分时结构(intraday: vwap均价/日内高低/现价位置posInDay/节奏rhythm/是否触及日内高低)、大盘情绪(market)、大盘资金流向(marketFlow)、个股近20日走势(history)、【个股历史规律画像 stockProfile】、【专业技术指标 tech(ATR真实波幅/布林带/RSI/KDJ/MACD/支撑压力/买卖带/止损止盈)】、用户持仓(holdCost/holdQty/baseQty)。
+    return `${zhReason}【做T参考请求】用户持有一只票想日内做T摊薄成本。做T有两个方向，你要根据此刻盘面对称判断、不要默认只做正T：正T=先低吸后高抛(现价偏低时)，反T=先高抛后低接(现价偏高/浮盈时)。数据含：个股实时量价、当日分时结构(intraday: vwap均价/日内高低/现价位置posInDay/节奏rhythm/是否触及日内高低)、大盘情绪(market)、大盘资金流向(marketFlow)、个股近20日走势(history)、【个股历史规律画像 stockProfile】、【专业技术指标 tech(ATR真实波幅/布林带/RSI/KDJ/MACD/支撑压力/买卖带/止损止盈)】、用户持仓(holdCost/holdQty/baseQty)。
 ${payload.openTNet < 0 ? `【重要·反T未接回口径】用户当前有一笔【反T(先卖后买)尚未接回】：底仓${payload.baseQty ?? ''}手里已经卖出${Math.abs(payload.openTNet)}手、还没买回，所以他【当前实际可再卖的底仓 holdQty=${payload.holdQty}手】(已扣掉卖出未接回的那部分)。${payload.holdQty > 0 ? `不要把已卖出的${Math.abs(payload.openTNet)}手当成还在手里、更不能建议"把剩余${Math.abs(payload.openTNet)}手拿到收盘/清掉"——那些手已经不在手里了。` : `底仓已被反T全部卖光、当前可卖手数为0，绝对不能再建议任何"卖出/减仓/拿到收盘/清掉X手"——他手里没有可卖的底仓了。`}此刻更贴切的做T动作通常是【把之前反T卖出的${Math.abs(payload.openTNet)}手在更低价接回(先买)以完成这笔反T并降低成本】：请优先据当前盘面给出"在什么价接回这${Math.abs(payload.openTNet)}手"的正向(先买)建议;若现价仍偏高不宜接、则建议等回落到某价再接回。` : ''}${payload.openTNet > 0 ? `【持仓口径】用户有未结算做T净买入${payload.openTNet}手已计入当前持仓，holdQty=${payload.holdQty}手为含此加仓后的实时可卖手数。` : ''}
 数据：${data}${advisorData}
 
@@ -257,7 +264,7 @@ ${isAuto ? '你要基于历史规律自动决策，并在 chosenStyle 明确回�
 请输出 JSON：{"reasoning":"【ReAct推理链·先想后答，必须先于所有结论/价位得出】按此顺序一句话串起:①时间坐标(数据哪天的、是否盘中)→②历史规律stockProfile说明这只股天生适合怎么做T→③当日分时位置(现价vs均价/posInDay)决定此刻先买还是先卖→④量化方向与技术支撑压力锚定两腿价→⑤自检:方向与位置自洽吗?盈亏比够吗?有无被昨日陈旧数据误导?这段是你下所有结论的依据","advisable":"适合/谨慎/不建议","light":"green/yellow/red","chosenStyle":"conservative或balanced或aggressive(你据历史规律选定的风格)","styleReason":"为什么给这只股选这个风格(必须引用stockProfile的具体数字，如振幅/波动率/均值回归分)","dir":"positive或reverse或none","dirLabel":"正T低吸 或 反T高抛 或 暂不做T","confidence":"高/中/低","actionPlan":"【最重要·一句话行动指令，让用户能直接照做】把方向+手数+两腿价位+触发条件揉成一句话，例如'现价X偏高，先在Y附近高抛N手，回落到Z附近接回，量化看跌upProb仅30%所以别追高'。必须含具体价格数字。","histPattern":"用一句话概括这只股的历史规律","plain":"用大白话解释为什么这么做(像师傅带徒弟，点出历史规律)","marketNote":"一句话大盘环境(引用数据)","stockNote":"一句话个股当下位置(引用分时vwap/日内位置/量比)","fundNote":"资金面依据(引用主力净流入/流出mainNetYi、盘口委比weibi，研判主力进出与盘口意愿)","support":支撑位数字,"resistance":压力位数字,${payload.quant ? '"quantNote":"量化走势预测如何影响这次决策(引用quant.score、forecast上涨概率与目标区间的具体数字，说明为什么两腿价定在这;用大白话)",' : ''}"theory":"引用的理论+一句话如何支撑","suggestQty":建议手数(整数,按风格),"leg1Price":第一腿参考价(数字),"leg2Price":第二腿目标价(数字,须落在量化目标区间内),"estProfit":"预估净赚(元)","estCostDown":"预估成本下降(元/股)","addOn":"激进风格可给加码条件;其他风格填空字符串","newsNote":"消息面(有利空点明,无则'无明显利空')","macroNote":"宏观/国内外影响(引用macroNews判断风险偏好/避险,及对该股板块是顺风还是逆风;无则'宏观中性')","seatNote":"龙虎榜/席位(有则点明smartMoney,无则'近期未上榜')","riskReward":"盈亏比(如 2:1)","resonanceScore":共振分数字(引用resonance.score),"bearCase":"【反方观点】可能错在哪","invalidation":"【失效信号】什么价一破就止损离场(含价格)","risk":"风险与失效止损价位"}。不建议做T时 dir=none、价位可 null；大盘弱只压手数(建议底仓更小比例)不禁做T，逆势强票/振幅够仍可做T。只输出JSON。`;
   }
   if (mode === 'plan') {
-    return `【交易计划请求】用户持有一只票，想为它定一份短线交易计划(止盈价/止损价/买入理由)。用户不太懂技术，需要你基于**持仓成本**并结合技术指标给出默认建议，用户会再微调。
+    return `${zhReason}【交易计划请求】用户持有一只票，想为它定一份短线交易计划(止盈价/止损价/买入理由)。用户不太懂技术，需要你基于**持仓成本**并结合技术指标给出默认建议，用户会再微调。
 数据含：个股实时量价、当日分时(intraday)、大盘情绪(market)、资金流向(marketFlow)、近20日走势(history: ma5/ma10/ma20、20日高低high20/low20)、**用户持仓成本 holdCost（本次定价的核心基准）**。
 数据：${data}${advisorData}
 
@@ -276,7 +283,7 @@ ${isAuto ? '你要基于历史规律自动决策，并在 chosenStyle 明确回�
 请输出 JSON：{"reasoning":"【ReAct推理链·先想后答】一句话串起:①持仓成本holdCost是多少、现价相对成本浮盈还是套牢→②止盈应落在成本+8%~15%的哪个技术位、止损应落在成本-8%内的哪个支撑→③自检:是否满足 sl<holdCost<tp 的铁律、技术位有没有越界","tp":止盈价数字,"sl":止损价数字,"reason":"一句话交易计划理由(说明相对成本的盈亏目标+技术依据)","tpBasis":"止盈依据(如:成本+10%/近20日高X)","slBasis":"止损依据(如:成本-8%/MA10 X)","theory":"引用的理论一句话","confidence":"高/中/低"}。只输出JSON。`;
   }
   if (mode === 'hold_advice') {
-    return `【持仓个股操作建议请求】用户持有一只票，需要你像贴身操盘顾问一样，明确告诉他现在该 **加仓 / 减仓 / 持有 / 清仓**，并且**给出具体的参考价位（一个数字或一个窄区间）**让他能直接照着挂单。这是持仓管理决策，不是做T。
+    return `${zhReason}【持仓个股操作建议请求】用户持有一只票，需要你像贴身操盘顾问一样，明确告诉他现在该 **加仓 / 减仓 / 持有 / 清仓**，并且**给出具体的参考价位（一个数字或一个窄区间）**让他能直接照着挂单。这是持仓管理决策，不是做T。
 ${payload.openTNet ? `【重要·持仓口径】holdCost/holdQty 已按【实时持仓】计算——用户有未结算的做T腿，净${payload.openTNet > 0 ? '买入' : '卖出'}${Math.abs(payload.openTNet)}手在做T未结算前【就当作已经${payload.openTNet > 0 ? '加仓' : '减仓'}】计入了当前持仓(手数与成本都已反映)。请直接以这个 holdQty=${payload.holdQty}手、holdCost=${payload.holdCost} 为当前真实持仓来判断加/减/持有/清仓，不要再把那部分当"待结算做T"。` : ''}
 数据含：个股实时量价(nowPrice/dayHigh/dayLow/open/prevClose)、当日分时(intraday: now实时价/vwap均价/日内高低/posInDay位置/rhythm节奏/是否触及日内高低)、大盘情绪(market)、资金流向(marketFlow)、个股近20日走势(history: ma5/ma10/ma20、20日高低)、【个股历史规律画像 stockProfile】、【专业技术指标 tech(ATR真实波幅/布林带上下轨/RSI/KDJ/MACD/支撑support压力resistance/买入带buyZone卖出带sellZone/止损stopLoss/止盈takeProfit)】、**用户持仓成本 holdCost 与手数 holdQty（决策基准，已含未结算做T净腿）**${payload.account && payload.account.totalAssets ? `、账户总资产${payload.account.totalAssets}元${payload.account.cash != null ? '/可用' + payload.account.cash + '元' : ''}${payload.account.position != null ? '/当前总仓位' + payload.account.position + '%' : ''}${payload.account.stockWeight != null ? '/该股当前占总资产' + payload.account.stockWeight + '%' : ''}(用于按账户全景算补仓金额、仓位占比、最多可买几手)` : ''}${payload.quant ? '、量化模型 quant(score多因子分/bias/forecast走势预测)' : ''}。
 【账户全景优先】若给了 account.totalAssets / account.cash / account.position / account.stockWeight，你必须先按账户约束算建议，而不是只按K线拍脑袋：
@@ -309,7 +316,7 @@ ${payload.openTNet ? `【重要·持仓口径】holdCost/holdQty 已按【实时
 【★持仓建议·差异化定位】你面对的是【已持仓】的票,决策落在【加/减/持/清】四选一,必须紧扣"用户的成本 holdCost 与手数 holdQty"来算相对盈亏、算清每一笔操作的账(手数/金额/新成本/预期收益/止损亏损)——这与"未持仓买入建议"只谈要不要建仓、建多少不同。别把持仓建议写成泛泛的看多看空,要给持仓人"手里这些货现在具体怎么处置"。只输出JSON。`;
   }
   if (mode === 'buy_advice') {
-    return `【未持仓·买入决策请求】用户还没买这只票，正在研究到底要不要买。你要像贴身操盘顾问一样，**第一步先给一个明确结论(四选一)**，**第二步再按这个结论给出对应的差异化建议**，绝不能含糊，也不要不管结论如何都只会喊"买入"。
+    return `${zhReason}【未持仓·买入决策请求】用户还没买这只票，正在研究到底要不要买。你要像贴身操盘顾问一样，**第一步先给一个明确结论(四选一)**，**第二步再按这个结论给出对应的差异化建议**，绝不能含糊，也不要不管结论如何都只会喊"买入"。
 【买入结论四档(action 必须严格是其一)，按 共振分+现价位置+盈亏比+个股结构 判定】：
 - **立即买入**：共振分≥4(或≥3且counterTrend逆势强票) + 现价不追高(posInDay≤60或缩量回踩企稳、贴买入带/支撑) + 盈亏比≥2:1 + 无明确利空。→ buyPrice/buyZone贴近现价可成交、stopPrice、targetPrice、positionNote(正常仓;弱市压到3~4成)。
 - **回调再买**：看好(共振分≥3)但现价偏高/追高不划算(posInDay高/贴布林上轨/RSI偏高)。→ buyPrice/buyZone给"回踩到哪个价再买"(低于现价)、timing说清等什么信号、stopPrice、targetPrice。
@@ -339,7 +346,7 @@ ${payload.openTNet ? `【重要·持仓口径】holdCost/holdQty 已按【实时
     const guideFor = gh.isToday
       ? `这是用户在盘中/午间发起的复盘,后续指导必须面向【${horizon}】,而【不是】下一交易日——现在还能交易,别把指导写成"明天/下一交易日开盘怎么做"。请站在"现在这个时点、${horizon}该怎么操作"的视角,给出继续持有/逢高减/回踩加/盯住某价位/止损等明确指导。若确需提到再往后的交易日才用"${nextDay}"表述。`
       : `这是收盘后(或休市日)的复盘,当天已无法交易,后续指导面向【${nextDay}】开盘。请站在"今天收完盘、${nextDay}该怎么办"的视角,给出对下一交易日开盘的明确指导(继续持有/${nextDay}开盘减/回踩再加/直接止损等)。注意:下一交易日是 ${nextDay},不要笼统说"明天",也不要把它当成周末。`;
-    return `【持仓复盘请求·${sess}】用户${payload.hold ? '持有' : '关注'}这只票，需要你像操盘教练一样做一次**复盘总结**：回顾这只股当前的走势/量价/资金/量化状态，结合用户的持仓成本与今日/历史交易，给出一句话能照做的后续操作指导。${guideFor}
+    return `${zhReason}【持仓复盘请求·${sess}】用户${payload.hold ? '持有' : '关注'}这只票，需要你像操盘教练一样做一次**复盘总结**：回顾这只股当前的走势/量价/资金/量化状态，结合用户的持仓成本与今日/历史交易，给出一句话能照做的后续操作指导。${guideFor}
 ${payload.openTNet ? `【重要·持仓口径】hold(cost/qty) 已按【实时持仓】计算：用户有未结算做T腿，净${payload.openTNet > 0 ? '买入' : '卖出'}${Math.abs(payload.openTNet)}手在结算前【就当作已经${payload.openTNet > 0 ? '加仓' : '减仓'}】计入了当前持仓。请以这个实时持仓来复盘和给后续指导。` : ''}
 ${(payload.openTNet < 0 && (payload.holdQty === 0 || payload.holdQty == null)) ? `【★★反T未接回·核心铁律·压倒一切】用户做的是【反T(先卖后买)】：他已经把底仓卖出了${Math.abs(payload.openTNet)}手,但【还没有买回来接回】,所以此刻他手里【实际可卖持仓 = 0 手】,这些股【已经不在手上】。
 ❌ 绝对禁止说"继续持有X手""让利润跑""拿到收盘""封住涨停就持有""跌破X清仓"——他根本没有这些股可持有/可清仓,说这些是致命错误。
@@ -361,5 +368,5 @@ ${(payload.openTNet < 0 && (payload.holdQty === 0 || payload.holdQty == null)) ?
 请输出 JSON：{"reasoning":"【ReAct推理链·先想后答，必须先于stance/价位得出】按此顺序一句话串起:①时间坐标(今日走势是哪个交易日的、下一步面向${when})→②持仓盈亏+今日操作检视→③趋势位置+量化定后市方向→④据此定持/加/减/清+具体价位→⑤自检:结论与盈亏/趋势自洽吗?下一步指导面向的时段对吗(盘中别写成面向明天、盘后别把周末当明天)?这是你所有结论的依据","stance":"持有 或 加仓 或 减仓 或 清仓 或 观望","tone":"red(偏多/持有/加仓) 或 green(偏空/减仓/清仓) 或 muted(中性观望)","headline":"一句话复盘结论(最醒目，含核心动作)","todayRecap":"今日走势与量价一句话回顾(引用涨跌/量比/节奏)","pnlNote":"${payload.hold ? '当前持仓盈亏一句话(引用成本与浮盈亏%)' : '未持仓，跳过'}","tradeReview":"${payload.todayTrades ? '今日操作点评(哪步做得好/该改进)' : '今日无成交'}","nextAction":"【${horizon}怎么做·可直接照做】动作+手数+参考价位+触发条件揉成一句话，含具体价格与手数","opQty":"本次建议操作手数(加X手/减X手/持有0，整数)","opAmount":"本次操作约需资金或回笼资金(元,=价×手数×100，加仓为支出/减仓为回笼)","newCost":"若按建议加/减仓后的新持仓成本(数字或'不变')","expReturn":"预期收益(到目标价能赚多少元、约+N%;结合holdQty和目标价算)","riskAmount":"到止损会亏多少元(结合手数与止损价算)","riskReward":"盈亏比(预期收益空间÷止损空间，如 2.2:1)","posAfter":"${payload.account && payload.account.totalAssets ? '操作后该股占账户仓位%(用account.totalAssets算)' : '账户总资产未填,给相对仓位描述(如占比约X成)'}","addPrice":回踩加仓参考价数字或null,"reducePrice":反弹减仓参考价数字或null,"stopPrice":止损价数字或null,"targetPrice":目标价数字或null,"keyLevel":"要盯住的关键价位说明(如:守住X则持有，破X则走)","techNote":"技术面依据(点名是否金叉/多头排列 + RSI/支撑压力)","fundNote":"资金面依据(引用主力净流入/流出、5日主力、盘口委比，研判主力进出)","newsNote":"消息面(有利空点明,无则'无明显利空')","macroNote":"宏观/国内外影响(引用macroNews判断风险偏好/避险,及对该股板块是顺风还是逆风;无则'宏观中性')","seatNote":"龙虎榜/席位(有则点明smartMoney,无则'近期未上榜')"${payload.quant ? ',"quantNote":"量化走势预测一句话(引用upProb/direction/目标区间)"' : ''},"theoryNote":"【顶级操盘理论·融会贯通】挑1~2个最贴合本股当前形态的理论(如道氏顺势/威科夫派发/温斯坦跌破生命线走/处置效应亏损快砍),结合具体价位数字说清它此刻支撑持/加/减/清哪个决策;不要堆砌名词","resonanceScore":共振分数字(引用resonance.score),"bearCase":"【反方观点】这个复盘判断可能错在哪","invalidation":"【失效信号】${when}什么价一破就改变计划(含价格)","risk":"最需警惕的风险","confidence":"高/中/低"}。大盘弱只压仓位不否决方向；个股强则可持有/加仓。${gh.isToday ? '后续指导面向【' + horizon + '】,现在还能交易,别写成"明天/下一交易日"。' : '涉及下一交易日时用给定的真实日期表述，不要说成"明天"当成周末。'}加仓/减仓类结论必须给 opQty+opAmount+expReturn+riskReward，把账算清楚让用户能直接照做。${finalCheck}
 【★复盘·差异化定位】复盘是"回看+定下一步",与 AI 操作建议同源同口径:后续指导(nextAction/价位)必须与同一只股的持仓/买入建议方向一致,不要另立一套矛盾结论。复盘只多做"今日表现回顾 todayRecap + 操作检视 tradeReview",价位与算账口径与操作建议保持一致。只输出JSON。`;
   }
-  return `分析以下数据并输出JSON：${data}`;
+  return `${zhReason}分析以下数据并输出JSON：${data}`;
 }

@@ -28,7 +28,7 @@ export function startAdvice(spec) {
   if (!code) return Promise.resolve()
   if (running.has(code)) return running.get(code).promise || Promise.resolve()  // 已在后台跑 → 幂等，复用同一 promise
   results.delete(code)           // 清掉上次的瞬时结果，UI 立即进入 loading
-  const rec = { phase: '正在准备分析…', startedAt: Date.now(), sources: [], reasoning: '' }
+  const rec = { phase: '正在准备分析…', startedAt: Date.now(), sources: [], reasoning: '', quant: null }
   running.set(code, rec)
   notify()
   const p = run(spec).finally(() => { running.delete(code); notify() })
@@ -51,6 +51,9 @@ async function run(spec) {
       notify()
     } else if (event === 'reasoning' && data && data.text) {
       r.reasoning = (r.reasoning || '') + data.text
+      notify()
+    } else if (event === 'quant' && data) {
+      r.quant = data
       notify()
     }
   }

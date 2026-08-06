@@ -116,8 +116,12 @@ export const alertStore = {
     } catch { return 'default' }
   },
 
-  // 记录一条站内通知
+  // 记录一条站内通知(去重:同一预警 30 分钟内不重复留档,避免同规则反复刷屏)
   push(n) {
+    if (n && n.alertId) {
+      const dup = state.notifications.find((x) => x.alertId === n.alertId && (Date.now() - (x.at || 0)) < 1800000)
+      if (dup) return
+    }
     state.notifications = [{ id: Date.now() + '_' + Math.random().toString(36).slice(2, 6), at: Date.now(), read: false, ...n }, ...state.notifications].slice(0, 100)
     state.unread += 1
     emit()

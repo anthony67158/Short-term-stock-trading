@@ -1,0 +1,42 @@
+# 云端「盯盘预警」定时拨测(关页面/切后台也能收到 Web Push)
+# 背景:预警命中判定原本只在浏览器标签打开时由前端跑;本 workflow 定时 POST /api/cron_alert,
+#       由 FC 服务端遍历所有账号→取实时报价→命中即 web-push 给该账号所有设备,并在 OSS 标记
+#       triggeredAt/enabled:false(幂等,不重复推)。前端 mergeCloud 会把该"已触发"回灌显示。
+#
+# 触发:A股交易时段每 5 分钟拨测一次(GitHub Actions cron 最小粒度 5 分钟,且开机有 0~十几分钟
+#       抖动,属正常;后台推送抓关键价位足够,前端标签打开时仍有 15s 高频轮询兜底)。
+#   北京时间 09:30–11:30 → UTC 01:30–03:30 ;13:00–15:00 → UTC 05:00–07:00
+#   下方 cron 覆盖 UTC 01–03、05–06 整点区间(略有前后富余),仅工作日。
+# 鉴权:X-Cron-Key = 仓库 Secret CRON_KEY(须与 FC 环境变量 CRON_KEY 一致),防匿名滥用烧 token。
+name: cron-alert
+
+on:
+  schedule:
+    - cron: "*/5 1-3,5-6 * * 1-5"   # 工作日 UTC 01:00–03:59、05:00–06:59,每 5 分钟
+  workflow_dispatch: {}              # 支持手动触发(联调用)
+
+concurrency:
+  group: cron-alert
+  cancel-in-progress: true          # 上一拨没跑完就被下一拨取代,避免堆积
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping cron_alert (server-side eval + web-push)
+        env:
+          FC_URL: https://stock-dashboard-znrlekbzit.cn-hangzhou.fcapp.run
+          CRON_KEY: ${{ secrets.CRON_KEY }}
+        run: |
+          code=$(curl -sS -o /tmp/resp.json -w "%{http_code}" -m 120 \
+            -X POST "$FC_URL/api/cron_alert" \
+            -H "Content-Type: application/json" \
+            -H "X-Cron-Key: $CRON_KEY" \
+            -d '{}')
+          echo "HTTP $code"
+          cat /tmp/resp.json; echo
+          # 只把「网络/服务端 5xx/非 200」视为失败;命中 0 条属正常
+          if [ "$code" != "200" ]; then
+            echo "::error::cron_alert 返回非 200 ($code)"; exit 1
+          fi

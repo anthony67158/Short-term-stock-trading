@@ -284,7 +284,7 @@ async function fetchMacroNews() {
     }));
     const url = `https://search-api-web.eastmoney.com/search/jsonp?cb=x&param=${param}`;
     const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 6000);
+    const t = setTimeout(() => ctrl.abort(), 12000);
     const r = await fetch(url, { signal: ctrl.signal, headers: { Referer: 'https://so.eastmoney.com/', 'User-Agent': 'Mozilla/5.0' } });
     clearTimeout(t);
     const txt = await r.text();
@@ -376,7 +376,7 @@ export default async function handler(req, res) {
     // 故 reasoning 开启时把总预算与下方 LLM 超时上限整体放大,避免思维链未完就被掐断降级。
     const START = Date.now();
     const reasoningOn = isAdvisorMode(mode) ? getReasoning('advisor') : getReasoning('chat');
-    const BUDGET = reasoningOn ? 240000 : 115000;
+    const BUDGET = reasoningOn ? 360000 : 115000;
     const remain = () => BUDGET - (Date.now() - START);
 
     // stock 模式：接入 RAG（近5日走势+主营+联网新闻）
@@ -407,7 +407,7 @@ export default async function handler(req, res) {
         const getJ = (p) => {
           // 内部 API 调用加超时保护(原来无超时——某个内部接口卡住会拖垮整个数据采集、烧光预算)
           const c = new AbortController();
-          const to = setTimeout(() => c.abort(), 8000);
+          const to = setTimeout(() => c.abort(), 15000);
           return fetch(origin + p, { signal: c.signal }).then((r) => r.json()).catch(() => null).finally(() => clearTimeout(to));
         };
         // ★采集透明化:每个数据源各自 settle 时立即推 source 事件(名称+成功/失败),
@@ -515,7 +515,7 @@ export default async function handler(req, res) {
             ? fetchIndustryNews(industry).catch(() => null)
             : Promise.resolve(null),
           hasCandles
-            ? fetchQuantPredict(payload.code, quantCandles, (payload.holdCost ? { cost: payload.holdCost, qty: payload.holdQty } : null), 7000, quantRealtime).catch(() => null)
+            ? fetchQuantPredict(payload.code, quantCandles, (payload.holdCost ? { cost: payload.holdCost, qty: payload.holdQty } : null), 12000, quantRealtime).catch(() => null)
             : Promise.resolve(null),
         ]);
         if (industry && indNews && indNews.length) {
@@ -647,6 +647,33 @@ export default async function handler(req, res) {
               stopLoss: hcs.stopLoss ?? null,
               label: hcs.label ?? null,
             };
+          }
+          // ★量化透明化:把量化模型的打分/走势方向/概率/目标价/校准信号推给前端展示,
+          //   让用户在军师推理前先看到"量化模型给出了什么结论",军师也会显式引用它。
+          {
+            const f = payload.quant.forecast || {};
+            const parts = [];
+            if (payload.quant.score != null) parts.push(`综合分${payload.quant.score}${payload.quant.bias ? `(${payload.quant.bias})` : ''}`);
+            if (f.direction) parts.push(`走势${f.direction}`);
+            if (f.upProb != null) parts.push(`上涨概率${f.upProb}%`);
+            if (f.expRet != null) parts.push(`预期${f.expRet >= 0 ? '+' : ''}${f.expRet}%`);
+            if (f.targetLow != null || f.targetHigh != null) parts.push(`目标价${f.targetLow ?? '—'}~${f.targetHigh ?? '—'}${f.targetMid != null ? `(中枢${f.targetMid})` : ''}`);
+            const hc = payload.quant.highConfSignal;
+            if (hc) parts.push(hc.fired ? `高把握信号✅已触发(可信度${hc.credibility ?? '—'}%)` : `高把握信号未触发(可信度${hc.credibility ?? '—'}%)`);
+            emit('quant', {
+              score: payload.quant.score ?? null,
+              bias: payload.quant.bias || '',
+              direction: f.direction ?? null,
+              upProb: f.upProb ?? null,
+              expRet: f.expRet ?? null,
+              targetLow: f.targetLow ?? null,
+              targetMid: f.targetMid ?? null,
+              targetHigh: f.targetHigh ?? null,
+              reads: payload.quant.reads || null,
+              highConfFired: hc ? !!hc.fired : null,
+              highConfCredibility: hc ? (hc.credibility ?? null) : null,
+              summary: parts.join(' · '),
+            });
           }
         }
         // 当日分时结构（VWAP均价、日内高低、当前节奏、现价相对均价/高低的位置）
@@ -808,13 +835,19 @@ export default async function handler(req, res) {
     // 军师模式(t_advice/hold_advice/buy_advice/review/price/plan)走深度研判模型,实测常需 47s+;
     // 开启深度思考(reasoning)后需先跑思维链,军师级复杂题可达 120s+,故 reasoning 时上限整体放大。
     const llmCap = useReasoning
-      ? (isAdvisor ? 200000 : 160000)
+      ? (isAdvisor ? 330000 : 200000)
       : (isAdvisor ? 100000 : 80000);
     const llmTimeout = Math.max(8000, Math.min(llmCap, remain() - 2500));
 
     let content = '';
     let finishReason = '';
     let usage = null;
+    // 思维链语言:reasoning 模型的思维链标题默认英文,system + 用户开头指令都压不住时,
+    //   在用户消息【末尾】(recency 权重最高)再钉一条最强中文指令,连思维链小标题都要求中文。
+    const zhTail = useReasoning
+      ? '\n\n【★最终语言指令·优先级最高·必须遵守】从现在起，你的【全部思考过程/思维链，包括每一个分步小标题】都【必须用简体中文书写】，禁止出现任何英文句子或英文小标题(如禁止"Calculating...""Assessing..."这类)。请用中文思考，例如"正在计算盈亏比""正在评估回调买点"。最终 JSON 输出同样全程中文。'
+      : '';
+    const userPrompt = buildUserPrompt(mode, payload, ragText) + zhTail;
     if (streaming) {
       // ★流式路径(客户端开了 SSE):以 stream:true 调上游,把模型【思维链 reasoning_content】
       //   增量实时推为 reasoning 事件(军师在想什么),正文 content 累积到流结束后再统一解析。
@@ -825,7 +858,7 @@ export default async function handler(req, res) {
         messages: [
           { role: 'system', content: sysPrompt },
           { role: 'system', content: marketTimePromptBlock() },
-          { role: 'user', content: buildUserPrompt(mode, payload, ragText) },
+          { role: 'user', content: userPrompt },
         ],
         temperature: 0.2,
         maxTokens: maxTokensForMode(mode, useReasoning),
@@ -864,7 +897,7 @@ export default async function handler(req, res) {
         messages: [
           { role: 'system', content: sysPrompt },
           { role: 'system', content: marketTimePromptBlock() },
-          { role: 'user', content: buildUserPrompt(mode, payload, ragText) },
+          { role: 'user', content: userPrompt },
         ],
         temperature: 0.2,   // JSON 结构化输出：低温提升稳定性与可解析率，减少字段漂移
         maxTokens: maxTokensForMode(mode, useReasoning),

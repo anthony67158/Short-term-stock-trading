@@ -67,6 +67,11 @@ def log(*a):
     print(f"[{time.strftime('%H:%M:%S')}]", *a, flush=True)
 
 
+class DataUnavailable(RuntimeError):
+    """行情数据源不可达/被限流(非代码错误)。上游据此「跳过当日重训」并正常退出(exit 0),
+    避免海外 CI 出口 IP 拉不到 CN 行情时把每日任务判红报警。"""
+
+
 def append_history(rec):
     rec = {"ts": int(time.time()), "at": time.strftime("%Y-%m-%d %H:%M:%S"), **rec}
     with open(HISTORY, "a", encoding="utf-8") as fh:
@@ -74,13 +79,18 @@ def append_history(rec):
 
 
 def build_dataset(pool, bars, horizon):
-    """调 build_dataset.py 重建 dataset.npz（拉最新日线，新成熟标签自动进入）。"""
+    """调 build_dataset.py 重建 dataset.npz（拉最新日线，新成熟标签自动进入）。
+    区分退出码:rc==2 → 数据源不可达/被限流(海外 CI 常见),抛 DataUnavailable 让上游按
+    「跳过而非失败」处理;其它非 0 → 视为真实构建错误。"""
     cmd = [sys.executable, os.path.join(HERE, "build_dataset.py"),
            "--pool", str(pool), "--bars", str(bars),
            "--horizon", str(horizon), "--out", DATASET]
     log("重建数据集:", " ".join(cmd[1:]))
     r = subprocess.run(cmd, cwd=HERE, capture_output=True, text=True, timeout=1500)
     sys.stdout.write(r.stdout[-1500:] if r.stdout else "")
+    if r.returncode == 2:
+        sys.stderr.write(r.stderr[-1500:] if r.stderr else "")
+        raise DataUnavailable("行情数据源不可达/被限流,无法拉到任何日线")
     if r.returncode != 0:
         sys.stderr.write(r.stderr[-1500:] if r.stderr else "")
         raise RuntimeError(f"build_dataset 失败 rc={r.returncode}")
@@ -278,6 +288,11 @@ def main():
         if not a.skip_build:
             build_dataset(a.pool, a.bars, a.horizon)
         X, y, dates, feat_names = load_dataset()
+    except DataUnavailable as e:
+        # 数据源不可达(非代码错误):记一条 skip 审计,正常退出(不改线上、不判红报警)。
+        append_history({"decision": "skip", "reason": "data_unavailable", "detail": str(e)[:200]})
+        log("数据源不可达,跳过当日重训(线上保持冠军不变):", e)
+        sys.exit(0)
     except Exception as e:  # noqa: BLE001
         append_history({"decision": "error", "stage": "build/load", "error": str(e)[:200]})
         log("数据阶段失败:", e); sys.exit(1)

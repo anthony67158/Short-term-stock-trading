@@ -10,6 +10,7 @@
 import argparse
 import json
 import os
+import sys
 import time
 import urllib.request
 import numpy as np
@@ -188,8 +189,12 @@ def main():
     X = np.array(X, dtype=np.float32)
     y = np.array(y, dtype=np.int8)
     if len(X) == 0:
-        print(f"[ERROR] no samples produced (ok={ok} fail={fail}). Check network/pool.")
-        return
+        # 拉不到任何日线(典型:GitHub 海外 runner 访问新浪/腾讯 CN 行情接口被限流/不可达)。
+        # 明确 exit(2) 让上游 subprocess 判失败并区分「数据源不可用」——绝不静默写出空/旧数据集。
+        print(f"[ERROR] no samples produced (ok={ok} fail={fail}). "
+              f"数据源不可达或被限流(常见于海外 CI 出口 IP)。检查 Sina/Tencent 行情接口连通性。",
+              file=sys.stderr)
+        sys.exit(2)
     print(f"[done] stocks ok={ok} fail={fail} | samples={len(X)} "
           f"pos_rate={y.mean():.3f} feats={X.shape[1]} in {time.time()-t0:.0f}s")
     np.savez_compressed(a.out, X=X, y=y, codes=np.array(codes),
