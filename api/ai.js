@@ -201,6 +201,22 @@ async function fetchStockFund(code) {
   const base = daily || {};
   // 当日主力净额：盘中用实时快照(非0)，否则用历史最近交易日
   const realtimeMain = snap && snap.mainNetYi != null && snap.mainNetYi !== 0 ? snap.mainNetYi : null;
+  // 主力资金【连续性】：从最近交易日往回数,当前连续净流入(正)/连续净流出(负)天数。
+  // 口径与 K 线连阳连阴的 streak 一致:同号累加,遇反号或 0 即断。用户关心"主力是否连续做多/做空",
+  // 一天数字不算数,连续几天才见真章 —— 显式算好给军师,免得它自己从 trend5 里数错。
+  const mainStreak = (() => {
+    const seq = base.trend5;
+    if (!Array.isArray(seq) || !seq.length) return null;
+    let s = 0;
+    for (let i = seq.length - 1; i >= 0; i--) {
+      const v = seq[i];
+      if (v == null) break;
+      if (s === 0) { s = v > 0 ? 1 : (v < 0 ? -1 : 0); if (s === 0) break; }
+      else if ((s > 0 && v > 0) || (s < 0 && v < 0)) s += s > 0 ? 1 : -1;
+      else break;
+    }
+    return s;
+  })();
   return {
     asOfDate: base.date || null,               // 资金数据对应的交易日
     isHistorical: !realtimeMain,               // true=用的是最近收盘数据(非实时)
@@ -213,6 +229,7 @@ async function fetchStockFund(code) {
     main5dAvgYi: base.main5dAvgYi ?? null,
     trend5: base.trend5 || null,
     inflowDays: base.inflowDays ?? null,
+    mainStreak,                                 // 当前连续净流入(+)/净流出(-)天数;null=数据不足
     weibi: snap ? snap.weibi : null, weicha: snap ? snap.weicha : null,  // 盘口仅盘中有效
   };
 }
@@ -763,7 +780,7 @@ export default async function handler(req, res) {
       hasNegNews: payload.resonance ? payload.resonance.hasNegNews : null,
       newsHeadlines: payload.newsHeadlines || null,
       macroNews: payload.macroNews || null,
-      fundAsOf: payload.stockFund ? { date: payload.stockFund.asOfDate, historical: payload.stockFund.isHistorical, main5dAvg: payload.stockFund.main5dAvgYi, inflowDays: payload.stockFund.inflowDays } : null,
+      fundAsOf: payload.stockFund ? { date: payload.stockFund.asOfDate, historical: payload.stockFund.isHistorical, main5dAvg: payload.stockFund.main5dAvgYi, inflowDays: payload.stockFund.inflowDays, mainStreak: payload.stockFund.mainStreak ?? null } : null,
       marketPhase: payload.marketPhase || null,
       todayQuote: payload.todayQuote || null,
       dailyReport: payload.dailyReport ? { sessionCn: payload.dailyReport.sessionCn, day: payload.dailyReport.day } : null,
