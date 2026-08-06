@@ -370,11 +370,13 @@ export default async function handler(req, res) {
     // 采集里程碑进度事件
     const phase = (text, key) => emit('phase', { text, key });
 
-    // ===== 全局时间预算：Vercel maxDuration=60s，留足余量在 57s 内必须返回 JSON =====
-    // 数据采集阶段(补大盘/资金/分时/量化…)可能耗时 15~20s，之后 LLM 生成又要时间；
-    // 不设总预算时两段相加可能超 60s 被平台强杀、返回非 JSON。这里统一编排。
+    // ===== 全局时间预算:前端浏览器直连阿里云 FC(超时 600s),不受 Vercel 60s 限制 =====
+    // 数据采集阶段(补大盘/资金/分时/量化…)可能耗时 15~20s,之后 LLM 生成又要时间。
+    // 开启【深度思考(reasoning)】后模型要先跑思维链再输出,军师级复杂题实测可达 120s+,
+    // 故 reasoning 开启时把总预算与下方 LLM 超时上限整体放大,避免思维链未完就被掐断降级。
     const START = Date.now();
-    const BUDGET = 115000;
+    const reasoningOn = isAdvisorMode(mode) ? getReasoning('advisor') : getReasoning('chat');
+    const BUDGET = reasoningOn ? 240000 : 115000;
     const remain = () => BUDGET - (Date.now() - START);
 
     // stock 模式：接入 RAG（近5日走势+主营+联网新闻）
@@ -797,9 +799,11 @@ export default async function handler(req, res) {
 
     phase('数据齐全，正在生成操作建议…', 'llm');
     // LLM 超时按【剩余预算】动态给：预留 2.5s 兜底返回时间，最少给 8s。
-    // 军师模式(t_advice/hold_advice/buy_advice/review/price/plan)走 DeepSeek-V4-Pro，实测常需 47s+；
-    // FC 超时已放到 600s，代码预算 115s，故 LLM 上限也整体放大：军师 100s、常规 80s，交由 remain() 收敛。
-    const llmCap = isAdvisor ? 100000 : 80000;
+    // 军师模式(t_advice/hold_advice/buy_advice/review/price/plan)走深度研判模型,实测常需 47s+;
+    // 开启深度思考(reasoning)后需先跑思维链,军师级复杂题可达 120s+,故 reasoning 时上限整体放大。
+    const llmCap = useReasoning
+      ? (isAdvisor ? 200000 : 160000)
+      : (isAdvisor ? 100000 : 80000);
     const llmTimeout = Math.max(8000, Math.min(llmCap, remain() - 2500));
 
     const { resp, done } = await callChatWithRetry({
@@ -810,7 +814,7 @@ export default async function handler(req, res) {
         { role: 'user', content: buildUserPrompt(mode, payload, ragText) },
       ],
       temperature: 0.2,   // JSON 结构化输出：低温提升稳定性与可解析率，减少字段漂移
-      maxTokens: maxTokensForMode(mode),
+      maxTokens: maxTokensForMode(mode, useReasoning),
       timeoutMs: llmTimeout,
       reasoning: useReasoning,
       responseFormat: { type: 'json_object' },

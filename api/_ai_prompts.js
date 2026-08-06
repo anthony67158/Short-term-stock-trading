@@ -13,11 +13,15 @@ export const ADVISOR_MODES = new Set([
 export function isAdvisorMode(mode) { return ADVISOR_MODES.has(mode); }
 
 // 各 mode 的 LLM maxTokens:选股/盘面类输出长、做T最长、其余持仓类居中、简单分析最短
-export function maxTokensForMode(mode) {
-  if (mode === "scan" || mode === "daily" || mode === "scan_pick") return 3200;
-  if (mode === "t_advice") return 3600;
-  if (mode === "hold_advice" || mode === "buy_advice" || mode === "review") return 3200;
-  return 1600;
+// reasoning=true 时,max_tokens 为「思维链 + 正文」共用额度,需额外预留 2000 token 给思维链,
+// 否则正文 JSON 易被 finish_reason:length 截断成半个对象导致解析失败。
+export function maxTokensForMode(mode, reasoning = false) {
+  let base;
+  if (mode === "scan" || mode === "daily" || mode === "scan_pick") base = 3200;
+  else if (mode === "t_advice") base = 3600;
+  else if (mode === "hold_advice" || mode === "buy_advice" || mode === "review") base = 3200;
+  else base = 1600;
+  return reasoning ? base + 2000 : base;
 }
 
 export const SYSTEM_PROMPT = `你的任务是基于用户提供的【实时行情数据】做客观分析。
