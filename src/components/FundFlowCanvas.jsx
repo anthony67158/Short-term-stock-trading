@@ -1,4 +1,5 @@
 import { useMemo, useState, useRef, useEffect, useCallback } from 'react'
+import ReactECharts from 'echarts-for-react'
 import { usePolling } from '../hooks'
 import Icon from './Icon'
 import { openStockDetail } from '../detailStore'
@@ -62,6 +63,9 @@ export default function FundFlowCanvas({ interval }) {
   const [tl, setTl] = useState(timelineCtx)
   useEffect(() => { const id = setInterval(() => setTl(timelineCtx()), 30000); return () => clearInterval(id) }, [])
 
+  // 视图模式：'sankey' 桑基图(默认,宽度=资金体量,最直观) / 'flow' 原河道粒子流
+  const [view, setView] = useState('sankey')
+
   const [playing, setPlaying] = useState(true)
   const [prog, setProg] = useState(0)          // 0~1 沿(真回放:快照序列 / 快照模式:静止)
   const rafRef = useRef(0)
@@ -97,13 +101,70 @@ export default function FundFlowCanvas({ interval }) {
   }, [list])
   const hasData = outTop.length > 0 && inTop.length > 0
 
+  // ---------- 桑基图 option：流出板块(绿) → 市场中枢 → 流入板块(红) ----------
+  // 流带宽度 = 该板块主力净额绝对值(亿)。A股无板块间真实资金路由,故统一经"市场中枢"中转,
+  // 只表达"体量",不编造"某板块的钱流进了另一板块"。
+  const sankeyOption = useMemo(() => {
+    if (!hasData) return null
+    const HUB = '市场中枢'
+    const nodes = [
+      ...outTop.map((s) => ({ name: s.name, depth: 0, itemStyle: { color: '#3fb950' } })),
+      { name: HUB, depth: 1, itemStyle: { color: '#8b7cf6' } },
+      ...inTop.map((s) => ({ name: s.name, depth: 2, itemStyle: { color: '#f4614e' } })),
+    ]
+    const linksArr = [
+      ...outTop.map((s) => ({
+        source: s.name, target: HUB, value: Math.abs(s.mainInflow) / 1e8,
+        lineStyle: { color: 'source', opacity: 0.42 },
+      })),
+      ...inTop.map((s) => ({
+        source: HUB, target: s.name, value: Math.abs(s.mainInflow) / 1e8,
+        lineStyle: { color: 'target', opacity: 0.42 },
+      })),
+    ]
+    return {
+      backgroundColor: 'transparent',
+      tooltip: {
+        trigger: 'item', backgroundColor: 'rgba(20,22,34,.94)', borderColor: 'rgba(124,107,245,.4)',
+        borderWidth: 1, textStyle: { color: '#e6e6ef', fontSize: 12 },
+        formatter: (p) => {
+          if (p.dataType === 'edge') {
+            const dir = p.data.target === HUB ? '流出' : '流入'
+            const nm = p.data.target === HUB ? p.data.source : p.data.target
+            return `${nm}<br/><b>${dir} ${p.data.value.toFixed(2)} 亿</b>`
+          }
+          return `<b>${p.name}</b>`
+        },
+      },
+      series: [{
+        type: 'sankey', left: 12, right: 12, top: 14, bottom: 14,
+        nodeWidth: 14, nodeGap: 10, nodeAlign: 'justify',
+        emphasis: { focus: 'adjacency' },
+        draggable: false,
+        label: {
+          color: '#c9c9d6', fontSize: 12, fontWeight: 500,
+          formatter: (p) => (p.name === HUB ? '市场中枢' : p.name),
+        },
+        lineStyle: { curveness: 0.5 },
+        data: nodes, links: linksArr,
+      }],
+    }
+  }, [hasData, outTop, inTop])
+  const onSankeyEvents = useMemo(() => ({
+    click: (p) => {
+      if (p.dataType !== 'node' || p.name === '市场中枢') return
+      const hit = [...outTop, ...inTop].find((s) => s.name === p.name)
+      if (hit && hit.leadCode) openStockDetail(hit.leadCode, hit.leadName)
+    },
+  }), [outTop, inTop])
+
   // 金额一律显示【真实值】——不再做 20%→100% 的假缩放(方案A:诚实标注，所见即真实)
   const shownAmt = (raw) => raw
 
   // 播放循环：仅在【真回放】时推进 prog 逐帧回放当天各时点(约 10s 走完一遍再循环)；
   // 快照模式没有时间序列，无需推进(静态展示当前快照，粒子仍流动表现活跃度)。
   useEffect(() => {
-    if (!playing || !hasData || !replay) { cancelAnimationFrame(rafRef.current); lastRef.current = 0; return }
+    if (!playing || !hasData || !replay || view !== 'flow') { cancelAnimationFrame(rafRef.current); lastRef.current = 0; return }
     const CYCLE = 10000
     const step = (ts) => {
       if (!lastRef.current) lastRef.current = ts
@@ -249,10 +310,10 @@ export default function FundFlowCanvas({ interval }) {
   }, [links, flowRatio])
 
   useEffect(() => {
-    if (!hasData) { cancelAnimationFrame(drawRafRef.current); return }
+    if (!hasData || view !== 'flow') { cancelAnimationFrame(drawRafRef.current); return }
     drawRafRef.current = requestAnimationFrame(draw)
     return () => cancelAnimationFrame(drawRafRef.current)
-  }, [draw, hasData])
+  }, [draw, hasData, view])
 
   // 记录每个方块节点的【真实屏幕坐标 x,y】作为连线锚点——不再写死 30%/70%，
   // 直接量绿/红小方块(.ffc-node)的中心，曲线必然从方块出发、连到方块，手机窄屏也对齐。
@@ -289,10 +350,16 @@ export default function FundFlowCanvas({ interval }) {
           <div className="ffc-session">{replay ? `${tl.phase} · 真回放 ${series.length}帧` : (tl.live ? '当前快照 · 实时' : '最近交易日收盘快照')}</div>
         </div>
         <div className="ffc-head-right">
-          <button className={'ffc-play' + (playing ? ' on' : '')} onClick={() => setPlaying((v) => !v)}
-            title={playing ? (replay ? '暂停回放' : '暂停流动') : (replay ? '播放回放' : '恢复流动')}>
-            <Icon name={playing ? 'pause' : 'play'} size={15} />
-          </button>
+          <div className="ffc-viewsw" role="tablist">
+            <button className={'ffc-vbtn' + (view === 'sankey' ? ' on' : '')} onClick={() => setView('sankey')} title="桑基图:流带宽度=资金体量">桑基图</button>
+            <button className={'ffc-vbtn' + (view === 'flow' ? ' on' : '')} onClick={() => setView('flow')} title="河道流:粒子动画">河道流</button>
+          </div>
+          {view === 'flow' && (
+            <button className={'ffc-play' + (playing ? ' on' : '')} onClick={() => setPlaying((v) => !v)}
+              title={playing ? (replay ? '暂停回放' : '暂停流动') : (replay ? '播放回放' : '恢复流动')}>
+              <Icon name={playing ? 'pause' : 'play'} size={15} />
+            </button>
+          )}
         </div>
       </div>
       <div className="ffc-legend">
@@ -322,6 +389,19 @@ export default function FundFlowCanvas({ interval }) {
         <div className="loading">加载资金流向中…</div>
       ) : !hasData ? (
         <div className="empty">暂无资金流向数据（休市或数据源繁忙时可能为空）</div>
+      ) : view === 'sankey' ? (
+        <div className="ffc-stage sankey">
+          <div className="ffc-sankey-heads">
+            <span className="green">资金流出板块</span>
+            <span className="mid">市场中枢</span>
+            <span className="red">资金流入方向</span>
+          </div>
+          <ReactECharts
+            option={sankeyOption}
+            style={{ height: Math.max(360, Math.max(outTop.length, inTop.length) * 42 + 40) }}
+            notMerge lazyUpdate onEvents={onSankeyEvents}
+          />
+        </div>
       ) : (
         <div className="ffc-stage" ref={boxRef}>
           <canvas ref={canvasRef} className="ffc-canvas" />
