@@ -191,17 +191,19 @@ export default function LLMConfig() {
               </div>
               {Object.keys(roles).map((k) => (
                 <div className="llm-field" key={k}>
-                  <label>{roles[k].label || k}</label>
+                  <div className="llm-field-head">
+                    <label>{roles[k].label || k}</label>
+                    <button type="button"
+                      className={'llm-reason-toggle' + (reasoning[k] ? ' on' : '')}
+                      onClick={() => setReason(k, !reasoning[k])}
+                      title="开启后该角色调用支持推理的模型时启用深度思考(reasoning),响应更慎密但更慢">
+                      <span className="llm-reason-text"><Icon name="brain" size={12} /> 深度思考</span>
+                      <span className="llm-reason-track"><span className="llm-reason-thumb" /></span>
+                    </button>
+                  </div>
                   <input className="wl-input auth-input" list="llm-model-list" spellCheck={false}
                     placeholder={roles[k].def} value={models[k] || ''}
                     onChange={(e) => setModel(k, e.target.value)} />
-                  <label className={'llm-reason-toggle' + (reasoning[k] ? ' on' : '')}
-                    title="开启后该角色调用支持推理的模型时启用深度思考(reasoning),响应更慎密但更慢">
-                    <input type="checkbox" checked={!!reasoning[k]}
-                      onChange={(e) => setReason(k, e.target.checked)} />
-                    <span className="llm-reason-track"><span className="llm-reason-thumb" /></span>
-                    <span className="llm-reason-text"><Icon name="brain" size={12} /> 深度思考</span>
-                  </label>
                 </div>
               ))}
               <datalist id="llm-model-list">
