@@ -20,10 +20,10 @@ t0=time.time(); ok=fail=0
 for i,(sym,name) in enumerate(pool):
     kl=fetch_kline(sym,BARS)
     if not kl: fail+=1; continue
-    c,h,l,v,dts=kl; n=len(c); ok+=1
+    o,c,h,l,v,dts=kl; n=len(c); ok+=1
     hmax=max(HORIZONS)
     for t in range(MINH, n-hmax):
-        f=compute_factors(c[:t+1],h[:t+1],l[:t+1],v[:t+1])
+        f=compute_factors(c[:t+1],h[:t+1],l[:t+1],v[:t+1],opens=o[:t+1])
         fv=feature_vector(f)
         if not np.isfinite(fv).all(): continue
         last=f["_last"]
