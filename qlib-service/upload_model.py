@@ -28,6 +28,7 @@ def main():
     ap.add_argument("--meta", default="meta.json")
     ap.add_argument("--signal", default=None, help="信号头模型(lgb_signal.txt)，可选")
     ap.add_argument("--signal-meta", default=None, help="信号头元数据(signal_meta.json)，可选")
+    ap.add_argument("--event-tags", default=None, help="事件确认高把握标记(event_tags.json)，可选")
     ap.add_argument("--prefix", default=os.environ.get("QUANT_MODEL_PREFIX", "quantmodel/"))
     a = ap.parse_args()
     b = bucket()
@@ -37,6 +38,8 @@ def main():
         pairs.append((a.signal, a.prefix + "lgb_signal.txt"))
     if a.signal_meta and os.path.exists(a.signal_meta):
         pairs.append((a.signal_meta, a.prefix + "signal_meta.json"))
+    if a.event_tags and os.path.exists(a.event_tags):
+        pairs.append((a.event_tags, a.prefix + "event_tags.json"))
     for local, key in pairs:
         b.put_object_from_file(key, local)
         print(f"[uploaded] {local} -> oss://{os.environ['OSS_BUCKET']}/{key}")

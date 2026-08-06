@@ -5,3 +5,5 @@ server.js
 s.yaml
 .env
 migrate/
+# 量化训练/模型服务(近1GB,与前端无关,严禁上传 Vercel,否则触发 100MB 上限)
+qlib-service/

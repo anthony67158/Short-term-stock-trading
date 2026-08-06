@@ -2010,6 +2010,18 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 .hcs-v { font-size: 15px; font-weight: 800; font-variant-numeric: tabular-nums; }
 .hcs-v.gold { color: var(--gold); } .hcs-v.red { color: var(--red); } .hcs-v.green { color: var(--green); }
 .hcs-foot { margin-top: 8px; font-size: 10.5px; color: var(--muted); text-align: center; }
+/* 即时赔率行：把“胜率好≠现在能买”显性化 */
+.hcs-rr { display: flex; align-items: center; gap: 8px; margin-top: 9px; padding: 7px 10px; border-radius: 8px; font-variant-numeric: tabular-nums; }
+.hcs-rr.ok { background: rgba(31,157,67,.10); border: 1px solid rgba(31,157,67,.28); }
+.hcs-rr.bad { background: rgba(224,67,47,.10); border: 1px solid rgba(224,67,47,.32); }
+.hcs-rr-k { font-size: 11.5px; color: var(--muted); }
+.hcs-rr-v { font-size: 14px; font-weight: 800; margin-left: 2px; }
+.hcs-rr.ok .hcs-rr-v { color: var(--green); } .hcs-rr.bad .hcs-rr-v { color: var(--red); }
+.hcs-rr-tag { margin-left: auto; font-size: 11px; font-weight: 700; }
+.hcs-rr.ok .hcs-rr-tag { color: var(--green); } .hcs-rr.bad .hcs-rr-tag { color: var(--red); }
+/* 赔率不划算的警示条：引导用户以军师结论为准 */
+.hcs-warn { margin-top: 8px; padding: 8px 11px; border-radius: 8px; font-size: 11.5px; line-height: 1.65; color: var(--text2); background: rgba(224,67,47,.07); border-left: 3px solid var(--red); }
+.hcs-warn b { color: var(--red); font-weight: 800; }
 @media (max-width: 560px){ .hcs-grid { grid-template-columns: 1fr; } }
 /* 量化紧凑行 */
 .quant-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }

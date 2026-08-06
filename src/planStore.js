@@ -996,6 +996,50 @@ export function livePositionOf(code) {
   return { qty, cost: +(costSum / qty).toFixed(3), hasOpenT, tNetHands: tNet }
 }
 
+// 最近一个"北京时间零点"的时间戳(epoch ms)——不依赖沙箱本地时区，纯 epoch 运算。
+// 交易流水里的 at 都是 Date.now()(epoch ms)，据此判定"是否今天(北京时间)买入"。
+function bjDayStartTs() {
+  const EIGHT_H = 8 * 3600000, DAY = 24 * 3600000
+  return Math.floor((Date.now() + EIGHT_H) / DAY) * DAY - EIGHT_H
+}
+
+// 某只股的【T+1 锁定口径】：今日(北京时间)买入的手数当日不可卖(A股T+1)。
+// 今日买入 = 建仓/加仓(closed 里今日 BUY 流水) + 今日做T买腿(holding.tFlows 里今日 side='buy')。
+// 返回 { liveQty, boughtToday, sellableToday, buys }：
+//   · liveQty       实时持仓手数(底仓±未结算做T净腿)
+//   · boughtToday   今日买入手数(T+1 锁定，当日绝对不可卖)
+//   · sellableToday 今日最多可卖手数 = max(0, liveQty − boughtToday)
+//   · buys          今日买入明细 [{price,qty,at,kind}] 供AI判断加仓成本/时间
+// 无持仓返回 null。供 AI 建议(hold/buy)与复盘统一遵守：卖出/减仓/清仓手数不得超过 sellableToday。
+export function t1StatusOf(code) {
+  const lp = livePositionOf(code)
+  const liveQty = lp ? lp.qty : 0
+  const t0 = bjDayStartTs()
+  let boughtToday = 0
+  const buys = []
+  // 1) 建仓/加仓/手动补录买入：closed 里今日的 BUY 流水
+  ;(state.closed || []).forEach((c) => {
+    if (c.code !== code) return
+    if ((c.type || c.kind) !== 'BUY') return
+    const at = c.at || c.buyAt || 0
+    if (at < t0) return
+    boughtToday += (c.qty || 0)
+    buys.push({ price: c.price, qty: c.qty, at, kind: '建仓/加仓' })
+  })
+  // 2) 今日做T买腿(未结算或已配对都算——今天买进的就是今天买的，当日锁定)
+  ;(state.holding || []).filter((h) => h.code === code).forEach((h) => {
+    ;(h.tFlows || []).forEach((f) => {
+      if (f.side === 'buy' && (f.at || 0) >= t0) {
+        boughtToday += (f.qty || 0)
+        buys.push({ price: f.price, qty: f.qty, at: f.at, kind: '做T买腿' })
+      }
+    })
+  })
+  boughtToday = +boughtToday.toFixed(3)
+  const sellableToday = Math.max(0, +(liveQty - boughtToday).toFixed(3))
+  return { liveQty, boughtToday, sellableToday, buys }
+}
+
 // FIFO 配对做T流水，算已实现净收益 + 未配对(挂单)手数 + 每笔配对明细
 export function computeTFlows(flows) {
   const list = [...(flows || [])].sort((a, b) => a.at - b.at)

@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import numpy as np
 
 from factors_lib import compute_factors, feature_vector, FEATURE_NAMES
-from model_lib import model_score, garch_sigma, get_model, signal_prob
+from model_lib import model_score, garch_sigma, get_model, signal_prob, event_tag_for
 
 app = FastAPI(title="Quant Score & Forecast", version="3.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -228,6 +228,9 @@ def predict(payload: dict = Body(...), x_api_key: str = Header(default="")):
         fc = forecast(f, days=5)
         sig = high_conf_signal(f)
         dec = decide(score, bias, fc, f, hold)
+        # ★事件确认高把握层(P2:正交高精度筛子,离线每日刷新的 event_tags 查表)。
+        #   仅"查表附加",绝不参与上面的 36 维打分/信号头计算 —— 线上口径零改动。
+        evt_tag = event_tag_for(code)
 
         reads = []
         if fc:
@@ -237,12 +240,16 @@ def predict(payload: dict = Body(...), x_api_key: str = Header(default="")):
         if sig and sig.get("fired"):
             reads.append(f"⭐高把握买点：可信度{sig['credibility']:.0f}% · 买入{sig['buyPrice']} "
                          f"止盈{sig['takeProfit']} 止损{sig['stopLoss']}（{sig['label']}）")
+        if evt_tag and evt_tag.get("confirmed"):
+            reads.append(f"🎯事件确认(离线筛子·历史精度≈{evt_tag.get('precisionRef')}%)："
+                         f"{'、'.join(evt_tag.get('reasons') or [])}")
 
         return {
             "ok": True, "code": code,
             "score": score, "bias": bias, "tDir": t_dir,
             "forecast": fc, "decision": dec, "reads": reads,
             "highConfSignal": sig,
+            "eventTag": evt_tag,
             "engine": engine, "hitProb": (round(prob, 4) if prob is not None else None),
             "asOf": (cs[-1].get("date") or ""),
             "note": "统计口径，非投资建议",

@@ -30,6 +30,28 @@ import quoteHandler from './quote.js';
 
 const GAP_MS = 6 * 3600 * 1000; // 6h 内已有新鲜建议 → 跳过(与前端 adviceDaily.isFresh 同口径)
 
+// 北京时间"下一交易日"友好标签(与前端 review.nextTradingDayLabel 同口径,跳过周末/A股节假日)。
+// 用于告诉军师:今日买入的 T+1 锁定手数最早哪天可卖。
+const A_SHARE_HOLIDAYS = new Set([
+  '2026-01-01', '2026-02-16', '2026-02-17', '2026-02-18', '2026-02-19', '2026-02-20', '2026-02-21', '2026-02-22',
+  '2026-04-06', '2026-05-01', '2026-06-19', '2026-09-25', '2026-10-01', '2026-10-02', '2026-10-05', '2026-10-06', '2026-10-07',
+]);
+function nowBJ() { const n = new Date(); return new Date(n.getTime() + (n.getTimezoneOffset() + 480) * 60000); }
+function ymd(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+function nextTradeDayLabel() {
+  const d = nowBJ(); d.setHours(0, 0, 0, 0);
+  for (let i = 1; i <= 12; i++) {
+    const n = new Date(d.getTime() + i * 86400000);
+    const g = n.getDay();
+    if (g === 0 || g === 6) continue;
+    if (A_SHARE_HOLIDAYS.has(ymd(n))) continue;
+    const wk = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][g];
+    const md = `${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
+    return i === 1 ? `明天(${wk} ${md})` : `下一交易日${wk}(${md})`;
+  }
+  return '下一交易日';
+}
+
 // ---- 进程内调用另一个 handler:造一个最小 req/res,把 JSON 结果收集回来 ----
 // ai.js 非流式(stream 不传)会走 res.status(200).send(JSON字符串);stock_detail/quote 走 sendJson。
 function invoke(handler, { method = 'GET', query = {}, body = null } = {}) {
@@ -142,7 +164,7 @@ async function processAccount(acc, { scope, force }) {
     for (const code of [...new Set(holding.map((h) => h.code))]) {
       if (isFresh(code)) continue;
       const name = nameOf(code);
-      const p = buildHoldPayload(holding, code, name, portfolio, data.account);
+      const p = buildHoldPayload(holding, code, name, portfolio, data.account, data.closed, nextTradeDayLabel());
       const hp = (p.holdCost != null && p.holdQty != null) ? { holdCost: String(p.holdCost), holdQty: String(p.holdQty) } : {};
       p.advisorTrack = advisorTrackFrom(data);
       tasks.push({ code, name, mode: 'hold_advice', myHold: true, payload: p,

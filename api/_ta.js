@@ -302,7 +302,10 @@ async function fetchIndexCloseMap(bars = 130, timeoutMs = 6000) {
 // 数据由本地传入（candles），服务端只做因子打分+走势预测，绕开其自身取数被风控的问题。
 // 仅当配置了环境变量 QUANT_URL 才调用；失败静默返回 null，绝不阻断主流程。
 // candles: [{date,open,close,high,low,volume}]（升序）；hold: {cost,qty} 可选（持仓则给加/减建议）
-export async function fetchQuantPredict(code, candles, hold, timeoutMs = 8000) {
+// realtime: 可选 {price,pct,turnover,volRatio,asOf,live,marketVolLevel} —— 盘中把"当下"透传给模型,
+//   让预测"基于现在"。模型现役仅消费 OHLCV(36因子),额外字段向后兼容(服务端忽略未知键),
+//   但 candles 末根已在调用方用实时价覆盖,故盘中预测天然"基于现在"。
+export async function fetchQuantPredict(code, candles, hold, timeoutMs = 8000, realtime = null) {
   const base = process.env.QUANT_URL;
   const key = process.env.QUANT_KEY || '';
   if (!base) return null;
@@ -317,7 +320,7 @@ export async function fetchQuantPredict(code, candles, hold, timeoutMs = 8000) {
       method: 'POST',
       signal: ctrl.signal,
       headers: { 'Content-Type': 'application/json', ...(key ? { 'X-API-Key': key } : {}) },
-      body: JSON.stringify({ code, candles: cs, hold: hold || null }),
+      body: JSON.stringify({ code, candles: cs, hold: hold || null, ...(realtime ? { realtime } : {}) }),
     });
     clearTimeout(t);
     if (!r.ok) return null;

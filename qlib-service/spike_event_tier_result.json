@@ -1,0 +1,52 @@
+{
+  "gate": 0.815,
+  "signal_auc": 0.6995,
+  "cut_date": "20251118",
+  "holdout_n": 73113,
+  "holdout_base_rate": 0.6499,
+  "target_prec": 0.85,
+  "S0_signal_gate": {
+    "n": 6647,
+    "precision": 0.8329,
+    "coverage": 0.09091
+  },
+  "event_confirm_pure": {
+    "n": 1230,
+    "precision": 0.9114,
+    "coverage": 0.01682
+  },
+  "S1_or": {
+    "n": 7142,
+    "precision": 0.8366,
+    "coverage": 0.09768
+  },
+  "S1_incremental_only_event": {
+    "n": 495,
+    "precision": 0.8869,
+    "coverage": 0.00677
+  },
+  "event_subsets": {
+    "连板>=2": {
+      "n": 165,
+      "precision": 0.9394,
+      "coverage": 0.00226
+    },
+    "连板>=3": {
+      "n": 41,
+      "precision": 0.9756,
+      "coverage": 0.00056
+    },
+    "涨停&封单>0": {
+      "n": 1071,
+      "precision": 0.9225,
+      "coverage": 0.01465
+    },
+    "龙虎榜&净买>0": {
+      "n": 518,
+      "precision": 0.89,
+      "coverage": 0.00708
+    }
+  },
+  "verdict": "REJECT",
+  "evt_hit_rule": "limit_times>=2 OR (涨停&fd_z>0) OR (龙虎榜&net>0)"
+}

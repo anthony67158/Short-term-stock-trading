@@ -39,6 +39,17 @@ LOCAL_SIGNAL_META = "/tmp/signal_meta.json"
 BUNDLED_SIGNAL = os.path.join(_HERE, "lgb_signal.txt")
 BUNDLED_SIGNAL_META = os.path.join(_HERE, "signal_meta.json")
 
+# ---------- 「事件确认高把握」层(P2 结论:正交高精度筛子,离线每日刷新)----------
+# 由 build_event_tags.py 每日产出 event_tags.json 上传 OSS。此处像模型一样热加载(TTL),
+# /predict 按 code 查表回传 eventTag —— 线上 36 维打分向量【完全不变】,零线上风险。
+# 拿不到(OSS无/未配置/首日)时返回空表,eventTag=None,主流程不受任何影响。
+_EVENT_TAGS = None     # dict: {"tradeDate":..., "tags":{code6:{...}}, ...}
+_EVENT_TS = 0
+_EVENT_TTL = 1800      # 事件标记 30 分钟热更新一次(比模型更勤,盘后当天即可生效)
+EVENT_TAGS_KEY = OSS_PREFIX + "event_tags.json"
+LOCAL_EVENT_TAGS = "/tmp/event_tags.json"
+BUNDLED_EVENT_TAGS = os.path.join(_HERE, "event_tags.json")
+
 
 def _oss_bucket():
     try:
@@ -262,6 +273,71 @@ def signal_prob(feat_vec):
     else:
         prob = raw
     return float(np.clip(prob, 0.0, 1.0)), meta
+
+
+def _download_event_tags():
+    """OSS → 本地 /tmp 拉取 event_tags.json。成功返回 True;失败返回 False(不影响主流程)。"""
+    b = _oss_bucket()
+    if not b:
+        return False
+    tmp = LOCAL_EVENT_TAGS + ".part"
+    try:
+        data = b.get_object(EVENT_TAGS_KEY).read()
+        with open(tmp, "wb") as fh:
+            fh.write(data)
+        json.load(open(tmp))                 # 完整性校验:能被 json 解析才算有效
+        os.replace(tmp, LOCAL_EVENT_TAGS)
+        return True
+    except Exception:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        return False
+
+
+def get_event_tags():
+    """返回 {"tradeDate":..., "tags":{code6:{...}}, ...} 或 {}(拿不到时的空表)。
+    带进程内缓存 + TTL 热更新。加载优先级:OSS 热更新 > bundled(随包) > 空表。"""
+    global _EVENT_TAGS, _EVENT_TS
+    now = time.time()
+    if _EVENT_TAGS is not None and (now - _EVENT_TS) < _EVENT_TTL:
+        return _EVENT_TAGS
+    # 每个 TTL 周期尝试拉一次 OSS 最新(盘后当天即生效)
+    try:
+        _download_event_tags()
+    except Exception:
+        pass
+    path = None
+    if os.path.exists(LOCAL_EVENT_TAGS):
+        path = LOCAL_EVENT_TAGS
+    elif os.path.exists(BUNDLED_EVENT_TAGS):
+        path = BUNDLED_EVENT_TAGS
+    tags = {}
+    if path:
+        try:
+            tags = json.load(open(path)) or {}
+        except Exception:
+            tags = {}
+    _EVENT_TAGS = tags
+    _EVENT_TS = now
+    return _EVENT_TAGS
+
+
+def event_tag_for(code):
+    """按 6 位纯代码查"事件确认高把握"标记。命中返回 tag dict(含 tradeDate/精度参考),否则 None。
+    支持传入 '600519' 或 '600519.SH';online 36 维打分向量与本函数完全解耦。"""
+    if not code:
+        return None
+    doc = get_event_tags()
+    tags = (doc or {}).get("tags") or {}
+    c6 = str(code).split(".")[0]
+    t = tags.get(c6)
+    if not t:
+        return None
+    out = dict(t)
+    out["tradeDate"] = t.get("tradeDate") or doc.get("tradeDate")
+    return out
 
 
 def garch_sigma(rets_pct, fallback):

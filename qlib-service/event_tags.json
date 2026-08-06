@@ -1,0 +1,1037 @@
+{
+  "tradeDate": "20260805",
+  "rule": "连板>=2 OR (涨停&封单>当日涨停封单中位数) OR (龙虎榜&净买>0)",
+  "fdMedian": 64254734.0,
+  "precisionRef": {
+    "streak2": 93.9,
+    "streak3": 97.6,
+    "limitFdStrong": 92.3,
+    "lhbNetBuy": 89.0
+  },
+  "count": 92,
+  "tags": {
+    "002674": {
+      "confirmed": true,
+      "reasons": [
+        "连板2板"
+      ],
+      "streak": 2,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 93.9,
+      "tradeDate": "20260805"
+    },
+    "920117": {
+      "confirmed": true,
+      "reasons": [
+        "龙虎榜净买+0.08亿"
+      ],
+      "streak": 1,
+      "fdStrong": false,
+      "lhbNetYi": 0.08,
+      "precisionRef": 89.0,
+      "tradeDate": "20260805"
+    },
+    "002213": {
+      "confirmed": true,
+      "reasons": [
+        "涨停·封单强(高于当日涨停封单中位数)"
+      ],
+      "streak": 1,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 92.3,
+      "tradeDate": "20260805"
+    },
+    "600172": {
+      "confirmed": true,
+      "reasons": [
+        "涨停·封单强(高于当日涨停封单中位数)"
+      ],
+      "streak": 1,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 92.3,
+      "tradeDate": "20260805"
+    },
+    "002842": {
+      "confirmed": true,
+      "reasons": [
+        "涨停·封单强(高于当日涨停封单中位数)"
+      ],
+      "streak": 1,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 92.3,
+      "tradeDate": "20260805"
+    },
+    "688600": {
+      "confirmed": true,
+      "reasons": [
+        "龙虎榜净买+0.39亿"
+      ],
+      "streak": 1,
+      "fdStrong": false,
+      "lhbNetYi": 0.39,
+      "precisionRef": 89.0,
+      "tradeDate": "20260805"
+    },
+    "603306": {
+      "confirmed": true,
+      "reasons": [
+        "连板2板"
+      ],
+      "streak": 2,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 93.9,
+      "tradeDate": "20260805"
+    },
+    "001229": {
+      "confirmed": true,
+      "reasons": [
+        "龙虎榜净买+0.41亿"
+      ],
+      "streak": 0,
+      "fdStrong": false,
+      "lhbNetYi": 0.41,
+      "precisionRef": 89.0,
+      "tradeDate": "20260805"
+    },
+    "603629": {
+      "confirmed": true,
+      "reasons": [
+        "连板2板"
+      ],
+      "streak": 2,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 93.9,
+      "tradeDate": "20260805"
+    },
+    "002980": {
+      "confirmed": true,
+      "reasons": [
+        "连板2板"
+      ],
+      "streak": 2,
+      "fdStrong": false,
+      "lhbNetYi": null,
+      "precisionRef": 93.9,
+      "tradeDate": "20260805"
+    },
+    "003032": {
+      "confirmed": true,
+      "reasons": [
+        "连板8板"
+      ],
+      "streak": 8,
+      "fdStrong": true,
+      "lhbNetYi": 0.0,
+      "precisionRef": 97.6,
+      "tradeDate": "20260805"
+    },
+    "123276": {
+      "confirmed": true,
+      "reasons": [
+        "龙虎榜净买+0.52亿"
+      ],
+      "streak": 0,
+      "fdStrong": false,
+      "lhbNetYi": 0.52,
+      "precisionRef": 89.0,
+      "tradeDate": "20260805"
+    },
+    "000657": {
+      "confirmed": true,
+      "reasons": [
+        "涨停·封单强(高于当日涨停封单中位数)"
+      ],
+      "streak": 1,
+      "fdStrong": true,
+      "lhbNetYi": -2.18,
+      "precisionRef": 92.3,
+      "tradeDate": "20260805"
+    },
+    "002348": {
+      "confirmed": true,
+      "reasons": [
+        "连板2板"
+      ],
+      "streak": 2,
+      "fdStrong": false,
+      "lhbNetYi": null,
+      "precisionRef": 93.9,
+      "tradeDate": "20260805"
+    },
+    "002425": {
+      "confirmed": true,
+      "reasons": [
+        "连板2板"
+      ],
+      "streak": 2,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 93.9,
+      "tradeDate": "20260805"
+    },
+    "603435": {
+      "confirmed": true,
+      "reasons": [
+        "龙虎榜净买+0.19亿"
+      ],
+      "streak": 0,
+      "fdStrong": false,
+      "lhbNetYi": 0.19,
+      "precisionRef": 89.0,
+      "tradeDate": "20260805"
+    },
+    "920092": {
+      "confirmed": true,
+      "reasons": [
+        "龙虎榜净买+0.12亿"
+      ],
+      "streak": 0,
+      "fdStrong": false,
+      "lhbNetYi": 0.12,
+      "precisionRef": 89.0,
+      "tradeDate": "20260805"
+    },
+    "603078": {
+      "confirmed": true,
+      "reasons": [
+        "涨停·封单强(高于当日涨停封单中位数)"
+      ],
+      "streak": 1,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 92.3,
+      "tradeDate": "20260805"
+    },
+    "600721": {
+      "confirmed": true,
+      "reasons": [
+        "连板2板",
+        "龙虎榜净买+0.7亿"
+      ],
+      "streak": 2,
+      "fdStrong": true,
+      "lhbNetYi": 0.7,
+      "precisionRef": 93.9,
+      "tradeDate": "20260805"
+    },
+    "601231": {
+      "confirmed": true,
+      "reasons": [
+        "涨停·封单强(高于当日涨停封单中位数)"
+      ],
+      "streak": 1,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 92.3,
+      "tradeDate": "20260805"
+    },
+    "000811": {
+      "confirmed": true,
+      "reasons": [
+        "连板2板"
+      ],
+      "streak": 2,
+      "fdStrong": false,
+      "lhbNetYi": null,
+      "precisionRef": 93.9,
+      "tradeDate": "20260805"
+    },
+    "300248": {
+      "confirmed": true,
+      "reasons": [
+        "涨停·封单强(高于当日涨停封单中位数)",
+        "龙虎榜净买+1.09亿"
+      ],
+      "streak": 1,
+      "fdStrong": true,
+      "lhbNetYi": 1.09,
+      "precisionRef": 92.3,
+      "tradeDate": "20260805"
+    },
+    "603061": {
+      "confirmed": true,
+      "reasons": [
+        "连板2板"
+      ],
+      "streak": 2,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 93.9,
+      "tradeDate": "20260805"
+    },
+    "688432": {
+      "confirmed": true,
+      "reasons": [
+        "龙虎榜净买+0.02亿"
+      ],
+      "streak": 0,
+      "fdStrong": false,
+      "lhbNetYi": 0.02,
+      "precisionRef": 89.0,
+      "tradeDate": "20260805"
+    },
+    "002384": {
+      "confirmed": true,
+      "reasons": [
+        "龙虎榜净买+5.03亿"
+      ],
+      "streak": 0,
+      "fdStrong": false,
+      "lhbNetYi": 5.03,
+      "precisionRef": 89.0,
+      "tradeDate": "20260805"
+    },
+    "688549": {
+      "confirmed": true,
+      "reasons": [
+        "涨停·封单强(高于当日涨停封单中位数)",
+        "龙虎榜净买+1.22亿"
+      ],
+      "streak": 1,
+      "fdStrong": true,
+      "lhbNetYi": 1.22,
+      "precisionRef": 92.3,
+      "tradeDate": "20260805"
+    },
+    "002655": {
+      "confirmed": true,
+      "reasons": [
+        "连板2板"
+      ],
+      "streak": 2,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 93.9,
+      "tradeDate": "20260805"
+    },
+    "600367": {
+      "confirmed": true,
+      "reasons": [
+        "涨停·封单强(高于当日涨停封单中位数)"
+      ],
+      "streak": 1,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 92.3,
+      "tradeDate": "20260805"
+    },
+    "118053": {
+      "confirmed": true,
+      "reasons": [
+        "龙虎榜净买+0.03亿"
+      ],
+      "streak": 0,
+      "fdStrong": false,
+      "lhbNetYi": 0.03,
+      "precisionRef": 89.0,
+      "tradeDate": "20260805"
+    },
+    "605376": {
+      "confirmed": true,
+      "reasons": [
+        "涨停·封单强(高于当日涨停封单中位数)"
+      ],
+      "streak": 1,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 92.3,
+      "tradeDate": "20260805"
+    },
+    "002607": {
+      "confirmed": true,
+      "reasons": [
+        "涨停·封单强(高于当日涨停封单中位数)"
+      ],
+      "streak": 1,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 92.3,
+      "tradeDate": "20260805"
+    },
+    "002396": {
+      "confirmed": true,
+      "reasons": [
+        "涨停·封单强(高于当日涨停封单中位数)",
+        "龙虎榜净买+1.62亿"
+      ],
+      "streak": 1,
+      "fdStrong": true,
+      "lhbNetYi": 1.62,
+      "precisionRef": 92.3,
+      "tradeDate": "20260805"
+    },
+    "001359": {
+      "confirmed": true,
+      "reasons": [
+        "涨停·封单强(高于当日涨停封单中位数)"
+      ],
+      "streak": 1,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 92.3,
+      "tradeDate": "20260805"
+    },
+    "002036": {
+      "confirmed": true,
+      "reasons": [
+        "涨停·封单强(高于当日涨停封单中位数)"
+      ],
+      "streak": 1,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 92.3,
+      "tradeDate": "20260805"
+    },
+    "002080": {
+      "confirmed": true,
+      "reasons": [
+        "连板2板"
+      ],
+      "streak": 2,
+      "fdStrong": false,
+      "lhbNetYi": -0.66,
+      "precisionRef": 93.9,
+      "tradeDate": "20260805"
+    },
+    "002975": {
+      "confirmed": true,
+      "reasons": [
+        "连板2板"
+      ],
+      "streak": 2,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 93.9,
+      "tradeDate": "20260805"
+    },
+    "002579": {
+      "confirmed": true,
+      "reasons": [
+        "连板2板"
+      ],
+      "streak": 2,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 93.9,
+      "tradeDate": "20260805"
+    },
+    "000962": {
+      "confirmed": true,
+      "reasons": [
+        "连板2板"
+      ],
+      "streak": 2,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 93.9,
+      "tradeDate": "20260805"
+    },
+    "603657": {
+      "confirmed": true,
+      "reasons": [
+        "龙虎榜净买+0.01亿"
+      ],
+      "streak": 1,
+      "fdStrong": false,
+      "lhbNetYi": 0.01,
+      "precisionRef": 89.0,
+      "tradeDate": "20260805"
+    },
+    "002963": {
+      "confirmed": true,
+      "reasons": [
+        "连板4板"
+      ],
+      "streak": 4,
+      "fdStrong": false,
+      "lhbNetYi": null,
+      "precisionRef": 97.6,
+      "tradeDate": "20260805"
+    },
+    "600530": {
+      "confirmed": true,
+      "reasons": [
+        "龙虎榜净买+0.07亿"
+      ],
+      "streak": 0,
+      "fdStrong": false,
+      "lhbNetYi": 0.07,
+      "precisionRef": 89.0,
+      "tradeDate": "20260805"
+    },
+    "600397": {
+      "confirmed": true,
+      "reasons": [
+        "连板2板"
+      ],
+      "streak": 2,
+      "fdStrong": false,
+      "lhbNetYi": -4.96,
+      "precisionRef": 93.9,
+      "tradeDate": "20260805"
+    },
+    "603115": {
+      "confirmed": true,
+      "reasons": [
+        "连板2板"
+      ],
+      "streak": 2,
+      "fdStrong": false,
+      "lhbNetYi": null,
+      "precisionRef": 93.9,
+      "tradeDate": "20260805"
+    },
+    "002354": {
+      "confirmed": true,
+      "reasons": [
+        "龙虎榜净买+0.39亿"
+      ],
+      "streak": 0,
+      "fdStrong": false,
+      "lhbNetYi": 0.39,
+      "precisionRef": 89.0,
+      "tradeDate": "20260805"
+    },
+    "002636": {
+      "confirmed": true,
+      "reasons": [
+        "涨停·封单强(高于当日涨停封单中位数)",
+        "龙虎榜净买+0.37亿"
+      ],
+      "streak": 1,
+      "fdStrong": true,
+      "lhbNetYi": 0.37,
+      "precisionRef": 92.3,
+      "tradeDate": "20260805"
+    },
+    "603618": {
+      "confirmed": true,
+      "reasons": [
+        "涨停·封单强(高于当日涨停封单中位数)",
+        "龙虎榜净买+2.32亿"
+      ],
+      "streak": 1,
+      "fdStrong": true,
+      "lhbNetYi": 2.32,
+      "precisionRef": 92.3,
+      "tradeDate": "20260805"
+    },
+    "600206": {
+      "confirmed": true,
+      "reasons": [
+        "涨停·封单强(高于当日涨停封单中位数)"
+      ],
+      "streak": 1,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 92.3,
+      "tradeDate": "20260805"
+    },
+    "000603": {
+      "confirmed": true,
+      "reasons": [
+        "涨停·封单强(高于当日涨停封单中位数)"
+      ],
+      "streak": 1,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 92.3,
+      "tradeDate": "20260805"
+    },
+    "920045": {
+      "confirmed": true,
+      "reasons": [
+        "龙虎榜净买+0.85亿"
+      ],
+      "streak": 0,
+      "fdStrong": false,
+      "lhbNetYi": 0.85,
+      "precisionRef": 89.0,
+      "tradeDate": "20260805"
+    },
+    "600487": {
+      "confirmed": true,
+      "reasons": [
+        "龙虎榜净买+10.8亿"
+      ],
+      "streak": 0,
+      "fdStrong": false,
+      "lhbNetYi": 10.8,
+      "precisionRef": 89.0,
+      "tradeDate": "20260805"
+    },
+    "200056": {
+      "confirmed": true,
+      "reasons": [
+        "龙虎榜净买+0.0亿"
+      ],
+      "streak": 0,
+      "fdStrong": false,
+      "lhbNetYi": 0.0,
+      "precisionRef": 89.0,
+      "tradeDate": "20260805"
+    },
+    "002552": {
+      "confirmed": true,
+      "reasons": [
+        "连板2板"
+      ],
+      "streak": 2,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 93.9,
+      "tradeDate": "20260805"
+    },
+    "300686": {
+      "confirmed": true,
+      "reasons": [
+        "涨停·封单强(高于当日涨停封单中位数)",
+        "龙虎榜净买+0.64亿"
+      ],
+      "streak": 1,
+      "fdStrong": true,
+      "lhbNetYi": 0.64,
+      "precisionRef": 92.3,
+      "tradeDate": "20260805"
+    },
+    "000593": {
+      "confirmed": true,
+      "reasons": [
+        "连板4板"
+      ],
+      "streak": 4,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 97.6,
+      "tradeDate": "20260805"
+    },
+    "301520": {
+      "confirmed": true,
+      "reasons": [
+        "龙虎榜净买+0.23亿"
+      ],
+      "streak": 0,
+      "fdStrong": false,
+      "lhbNetYi": 0.23,
+      "precisionRef": 89.0,
+      "tradeDate": "20260805"
+    },
+    "600892": {
+      "confirmed": true,
+      "reasons": [
+        "连板2板"
+      ],
+      "streak": 2,
+      "fdStrong": false,
+      "lhbNetYi": -0.15,
+      "precisionRef": 93.9,
+      "tradeDate": "20260805"
+    },
+    "000981": {
+      "confirmed": true,
+      "reasons": [
+        "涨停·封单强(高于当日涨停封单中位数)"
+      ],
+      "streak": 1,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 92.3,
+      "tradeDate": "20260805"
+    },
+    "000510": {
+      "confirmed": true,
+      "reasons": [
+        "连板2板"
+      ],
+      "streak": 2,
+      "fdStrong": false,
+      "lhbNetYi": null,
+      "precisionRef": 93.9,
+      "tradeDate": "20260805"
+    },
+    "920222": {
+      "confirmed": true,
+      "reasons": [
+        "龙虎榜净买+0.03亿"
+      ],
+      "streak": 0,
+      "fdStrong": false,
+      "lhbNetYi": 0.03,
+      "precisionRef": 89.0,
+      "tradeDate": "20260805"
+    },
+    "600611": {
+      "confirmed": true,
+      "reasons": [
+        "涨停·封单强(高于当日涨停封单中位数)",
+        "龙虎榜净买+0.95亿"
+      ],
+      "streak": 1,
+      "fdStrong": true,
+      "lhbNetYi": 0.95,
+      "precisionRef": 92.3,
+      "tradeDate": "20260805"
+    },
+    "603186": {
+      "confirmed": true,
+      "reasons": [
+        "连板2板"
+      ],
+      "streak": 2,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 93.9,
+      "tradeDate": "20260805"
+    },
+    "003018": {
+      "confirmed": true,
+      "reasons": [
+        "连板2板"
+      ],
+      "streak": 2,
+      "fdStrong": false,
+      "lhbNetYi": null,
+      "precisionRef": 93.9,
+      "tradeDate": "20260805"
+    },
+    "601208": {
+      "confirmed": true,
+      "reasons": [
+        "连板2板"
+      ],
+      "streak": 2,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 93.9,
+      "tradeDate": "20260805"
+    },
+    "301026": {
+      "confirmed": true,
+      "reasons": [
+        "龙虎榜净买+0.21亿"
+      ],
+      "streak": 1,
+      "fdStrong": false,
+      "lhbNetYi": 0.21,
+      "precisionRef": 89.0,
+      "tradeDate": "20260805"
+    },
+    "600396": {
+      "confirmed": true,
+      "reasons": [
+        "龙虎榜净买+1.41亿"
+      ],
+      "streak": 0,
+      "fdStrong": false,
+      "lhbNetYi": 1.41,
+      "precisionRef": 89.0,
+      "tradeDate": "20260805"
+    },
+    "002703": {
+      "confirmed": true,
+      "reasons": [
+        "涨停·封单强(高于当日涨停封单中位数)"
+      ],
+      "streak": 1,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 92.3,
+      "tradeDate": "20260805"
+    },
+    "002119": {
+      "confirmed": true,
+      "reasons": [
+        "涨停·封单强(高于当日涨停封单中位数)"
+      ],
+      "streak": 1,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 92.3,
+      "tradeDate": "20260805"
+    },
+    "300996": {
+      "confirmed": true,
+      "reasons": [
+        "龙虎榜净买+0.34亿"
+      ],
+      "streak": 0,
+      "fdStrong": false,
+      "lhbNetYi": 0.34,
+      "precisionRef": 89.0,
+      "tradeDate": "20260805"
+    },
+    "002990": {
+      "confirmed": true,
+      "reasons": [
+        "连板2板"
+      ],
+      "streak": 2,
+      "fdStrong": false,
+      "lhbNetYi": null,
+      "precisionRef": 93.9,
+      "tradeDate": "20260805"
+    },
+    "600629": {
+      "confirmed": true,
+      "reasons": [
+        "龙虎榜净买+0.18亿"
+      ],
+      "streak": 1,
+      "fdStrong": false,
+      "lhbNetYi": 0.18,
+      "precisionRef": 89.0,
+      "tradeDate": "20260805"
+    },
+    "002957": {
+      "confirmed": true,
+      "reasons": [
+        "连板2板"
+      ],
+      "streak": 2,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 93.9,
+      "tradeDate": "20260805"
+    },
+    "601700": {
+      "confirmed": true,
+      "reasons": [
+        "连板3板"
+      ],
+      "streak": 3,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 97.6,
+      "tradeDate": "20260805"
+    },
+    "603407": {
+      "confirmed": true,
+      "reasons": [
+        "龙虎榜净买+0.32亿"
+      ],
+      "streak": 0,
+      "fdStrong": false,
+      "lhbNetYi": 0.32,
+      "precisionRef": 89.0,
+      "tradeDate": "20260805"
+    },
+    "001267": {
+      "confirmed": true,
+      "reasons": [
+        "连板2板"
+      ],
+      "streak": 2,
+      "fdStrong": true,
+      "lhbNetYi": -0.21,
+      "precisionRef": 93.9,
+      "tradeDate": "20260805"
+    },
+    "301045": {
+      "confirmed": true,
+      "reasons": [
+        "涨停·封单强(高于当日涨停封单中位数)"
+      ],
+      "streak": 1,
+      "fdStrong": true,
+      "lhbNetYi": -0.22,
+      "precisionRef": 92.3,
+      "tradeDate": "20260805"
+    },
+    "688596": {
+      "confirmed": true,
+      "reasons": [
+        "龙虎榜净买+1.36亿"
+      ],
+      "streak": 1,
+      "fdStrong": false,
+      "lhbNetYi": 1.36,
+      "precisionRef": 89.0,
+      "tradeDate": "20260805"
+    },
+    "110102": {
+      "confirmed": true,
+      "reasons": [
+        "龙虎榜净买+1.05亿"
+      ],
+      "streak": 0,
+      "fdStrong": false,
+      "lhbNetYi": 1.05,
+      "precisionRef": 89.0,
+      "tradeDate": "20260805"
+    },
+    "603773": {
+      "confirmed": true,
+      "reasons": [
+        "连板2板"
+      ],
+      "streak": 2,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 93.9,
+      "tradeDate": "20260805"
+    },
+    "920258": {
+      "confirmed": true,
+      "reasons": [
+        "龙虎榜净买+0.23亿"
+      ],
+      "streak": 0,
+      "fdStrong": false,
+      "lhbNetYi": 0.23,
+      "precisionRef": 89.0,
+      "tradeDate": "20260805"
+    },
+    "920176": {
+      "confirmed": true,
+      "reasons": [
+        "龙虎榜净买+0.11亿"
+      ],
+      "streak": 0,
+      "fdStrong": false,
+      "lhbNetYi": 0.11,
+      "precisionRef": 89.0,
+      "tradeDate": "20260805"
+    },
+    "002428": {
+      "confirmed": true,
+      "reasons": [
+        "连板2板",
+        "龙虎榜净买+7.26亿"
+      ],
+      "streak": 2,
+      "fdStrong": true,
+      "lhbNetYi": 7.26,
+      "precisionRef": 93.9,
+      "tradeDate": "20260805"
+    },
+    "600556": {
+      "confirmed": true,
+      "reasons": [
+        "涨停·封单强(高于当日涨停封单中位数)"
+      ],
+      "streak": 1,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 92.3,
+      "tradeDate": "20260805"
+    },
+    "002214": {
+      "confirmed": true,
+      "reasons": [
+        "涨停·封单强(高于当日涨停封单中位数)"
+      ],
+      "streak": 1,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 92.3,
+      "tradeDate": "20260805"
+    },
+    "603928": {
+      "confirmed": true,
+      "reasons": [
+        "龙虎榜净买+0.37亿"
+      ],
+      "streak": 1,
+      "fdStrong": false,
+      "lhbNetYi": 0.37,
+      "precisionRef": 89.0,
+      "tradeDate": "20260805"
+    },
+    "601869": {
+      "confirmed": true,
+      "reasons": [
+        "涨停·封单强(高于当日涨停封单中位数)",
+        "龙虎榜净买+1.83亿"
+      ],
+      "streak": 1,
+      "fdStrong": true,
+      "lhbNetYi": 1.83,
+      "precisionRef": 92.3,
+      "tradeDate": "20260805"
+    },
+    "002731": {
+      "confirmed": true,
+      "reasons": [
+        "龙虎榜净买+0.01亿"
+      ],
+      "streak": 0,
+      "fdStrong": false,
+      "lhbNetYi": 0.01,
+      "precisionRef": 89.0,
+      "tradeDate": "20260805"
+    },
+    "001210": {
+      "confirmed": true,
+      "reasons": [
+        "涨停·封单强(高于当日涨停封单中位数)"
+      ],
+      "streak": 1,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 92.3,
+      "tradeDate": "20260805"
+    },
+    "300615": {
+      "confirmed": true,
+      "reasons": [
+        "连板3板"
+      ],
+      "streak": 3,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 97.6,
+      "tradeDate": "20260805"
+    },
+    "002491": {
+      "confirmed": true,
+      "reasons": [
+        "涨停·封单强(高于当日涨停封单中位数)"
+      ],
+      "streak": 1,
+      "fdStrong": true,
+      "lhbNetYi": null,
+      "precisionRef": 92.3,
+      "tradeDate": "20260805"
+    },
+    "603823": {
+      "confirmed": true,
+      "reasons": [
+        "涨停·封单强(高于当日涨停封单中位数)",
+        "龙虎榜净买+2.36亿"
+      ],
+      "streak": 1,
+      "fdStrong": true,
+      "lhbNetYi": 2.36,
+      "precisionRef": 92.3,
+      "tradeDate": "20260805"
+    },
+    "000533": {
+      "confirmed": true,
+      "reasons": [
+        "龙虎榜净买+0.25亿"
+      ],
+      "streak": 0,
+      "fdStrong": false,
+      "lhbNetYi": 0.25,
+      "precisionRef": 89.0,
+      "tradeDate": "20260805"
+    },
+    "300552": {
+      "confirmed": true,
+      "reasons": [
+        "龙虎榜净买+0.08亿"
+      ],
+      "streak": 1,
+      "fdStrong": false,
+      "lhbNetYi": 0.08,
+      "precisionRef": 89.0,
+      "tradeDate": "20260805"
+    }
+  }
+}

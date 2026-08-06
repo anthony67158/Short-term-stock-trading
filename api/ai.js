@@ -248,6 +248,7 @@ async function fetchStockLHB(code) {
     return {
       onList: true, date: lhbDate, times30d: rows.length,
       reason: recent.EXPLANATION || '',
+      netAmount: recent.BILLBOARD_NET_AMT != null ? Number(recent.BILLBOARD_NET_AMT) : null, // 龙虎榜净买额(元),供 eventSignal 判方向
       buySeats: seats.slice(0, 5),
       smartMoney: smart.length > 0,
       smartSeats: smart.slice(0, 3),
@@ -461,12 +462,35 @@ export default async function handler(req, res) {
         //   行业新闻依赖 corpus.profile.industry；量化预测依赖 detail.candles，均已在上面 Promise.all 就绪。
         const industry = corpus && corpus.profile && corpus.profile.industry;
         const hasCandles = detail && detail.ok && Array.isArray(detail.candles) && detail.candles.length >= 25;
+        // ★让量化模型"基于现在预测未来":盘中把实时价/量并入送模型的最后一根K线。
+        //   stock_detail 的日K末根盘中虽是"进行中"的今日bar,但其收盘价可能滞后于 /api/quote 的最新价;
+        //   盘前/盘后/休市则末根为昨日收盘,不应改动(此时预测本就是"基于上一交易日")。
+        //   仅当 isLive 且实时价有效时,用实时 price/high/low 覆盖今日末根,使36因子基于当下重算。
+        let quantCandles = hasCandles ? detail.candles : null;
+        let quantRealtime = null;
+        if (hasCandles && payload.todayQuote && payload.todayQuote.live && payload.todayQuote.price != null) {
+          const tq = payload.todayQuote;
+          const cs0 = detail.candles;
+          const lastBar = cs0[cs0.length - 1];
+          const merged = { ...lastBar,
+            close: tq.price,
+            high: Math.max(lastBar.high != null ? lastBar.high : tq.price, tq.high != null ? tq.high : tq.price, tq.price),
+            low: Math.min(lastBar.low != null ? lastBar.low : tq.price, tq.low != null ? tq.low : tq.price, tq.price),
+            open: tq.open != null ? tq.open : lastBar.open,
+          };
+          quantCandles = [...cs0.slice(0, -1), merged];
+          quantRealtime = {
+            price: tq.price, pct: tq.pct, turnover: tq.turnover, volRatio: tq.volRatio,
+            asOf: tq.asOfLabel || null, live: true, phase: tq.phase || null,
+            marketVolLevel: (mkt && mkt.ok && mkt.breadth) ? mkt.breadth.volLevel : null,
+          };
+        }
         const [indNews, quant] = await Promise.all([
           industry
             ? fetchIndustryNews(industry).catch(() => null)
             : Promise.resolve(null),
           hasCandles
-            ? fetchQuantPredict(payload.code, detail.candles, (payload.holdCost ? { cost: payload.holdCost, qty: payload.holdQty } : null), 7000).catch(() => null)
+            ? fetchQuantPredict(payload.code, quantCandles, (payload.holdCost ? { cost: payload.holdCost, qty: payload.holdQty } : null), 7000, quantRealtime).catch(() => null)
             : Promise.resolve(null),
         ]);
         if (industry && indNews && indNews.length) {
@@ -487,7 +511,57 @@ export default async function handler(req, res) {
             indices: (mkt.indices || []).map((i) => ({ name: i.name, pct: i.pct })),
             up: b.up, down: b.down, limitUp: b.limitUp, limitDown: b.limitDown,
             upDownRatio: b.down ? +(b.up / b.down).toFixed(2) : null,
+            amountYi: b.amountYi,        // ★两市实时成交额(亿元)
+            volVsAvg5: b.volVsAvg5,      // ★较近5日均量的偏离%
+            volLevel: b.volLevel,        // ★放量/平量/缩量
           };
+        }
+        // ★事件确认高把握层(P2:正交高精度筛子)。优先用【离线权威标记】——qlib-service 每日
+        //   拉 Tushare limit_list_d/top_list,按高纯度规则(连板≥2 / 涨停封单强 / 龙虎榜净买>0)逐票判定,
+        //   holdout 样本外精度 89%~98%,与信号头【并列】给军师。拿不到权威标记时(首日/服务未热更)
+        //   回落到基于K线的粗估(pct≥9.8 数连板),保证向后兼容、绝不阻断。
+        {
+          const ev = {};
+          const authTag = (quant && quant.ok && quant.eventTag) ? quant.eventTag : null;
+          if (authTag && authTag.confirmed) {
+            // 权威口径:真实 Tushare 连板数/封单强度/龙虎榜净买 + 历史精度参考
+            ev.source = 'offline';
+            if (authTag.streak >= 2) ev.limitStreak = authTag.streak;
+            if (authTag.streak >= 1) ev.limitUpToday = true;
+            ev.fdStrong = !!authTag.fdStrong;
+            if (authTag.lhbNetYi != null) {
+              ev.lhbNetYi = authTag.lhbNetYi;
+              ev.lhbNetDir = authTag.lhbNetYi > 0 ? '净买入' : authTag.lhbNetYi < 0 ? '净卖出' : '持平';
+            }
+            ev.reasons = authTag.reasons || [];
+            ev.precisionRef = authTag.precisionRef ?? null;
+            ev.tradeDate = authTag.tradeDate ?? null;
+            ev.highConf = `事件确认命中${ev.reasons.length ? '(' + ev.reasons.join('、') + ')' : ''}` +
+              `${ev.precisionRef != null ? `·历史样本外精度约${ev.precisionRef}%` : ''}`;
+          } else {
+            // 回落:基于已取到的 todayQuote(涨停)与 lhb(龙虎榜)的粗估(无真实连板/封单强度)
+            ev.source = 'estimate';
+            const tq = payload.todayQuote;
+            if (tq && tq.live && tq.isLimitUp) {
+              ev.limitUpToday = true;
+              const cs = (detail && detail.ok && detail.candles) || [];
+              let streak = 0;
+              for (let i = cs.length - 1; i >= 0; i--) {
+                if (cs[i] && cs[i].pct != null && cs[i].pct >= 9.8) streak++;
+                else break;
+              }
+              ev.limitStreak = streak + 1;  // 含今日
+            }
+            if (lhb && (lhb.netAmount != null || lhb.net != null)) {
+              const net = lhb.netAmount != null ? lhb.netAmount : lhb.net;
+              ev.lhbNetYi = +(net / 1e8).toFixed(2);
+              ev.lhbNetDir = net > 0 ? '净买入' : net < 0 ? '净卖出' : '持平';
+            }
+            if (ev.limitStreak >= 2) ev.highConf = `连板≥2梯队(历史样本外次日上涨命中率约87.5%)`;
+          }
+          if (Object.keys(ev).length > 1 || ev.highConf) {
+            payload.eventSignal = ev;
+          }
         }
         // 大盘资金流向（板块前3流入/后3流出 + 全市场净额）
         if (sec && sec.ok && Array.isArray(sec.list)) {

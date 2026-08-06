@@ -1,0 +1,17 @@
+{
+  "base_mean": 0.6489858864112195,
+  "aug_mean": 0.6401179787167497,
+  "delta": -0.008867907694469768,
+  "wins": 0,
+  "seeds": 5,
+  "guard": 0.005,
+  "verdict": "REJECT",
+  "cut_date": "20251205",
+  "coverage": 1.0,
+  "regime_names": [
+    "idx_mom20",
+    "idx_pos60",
+    "idx_vol20"
+  ],
+  "n_samples": 494572
+}

@@ -46,12 +46,16 @@ export default async function handler(req, res) {
     // 2) 全市场涨跌家数统计 (沪深京 A股) — 单次请求
     const marketFs = 'm:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048';
 
-    const [idxJson, upDownJson] = await Promise.all([
+    const [idxJson, upDownJson, shK, szK] = await Promise.all([
       emGet(idxPath).catch(() => null),
       emGet(
         `/api/qt/clist/get?pn=1&pz=6000&po=1&np=1&fltt=2&invt=2&fid=f3` +
-          `&fs=${encodeURIComponent(marketFs)}&fields=f3`
+          `&fs=${encodeURIComponent(marketFs)}&fields=f3,f6`  // f6=成交额,用于全市场实时量能
       ).catch(() => null),
+      // 上证综指 / 深证成指 日K(取成交额 f57),用于"两市成交额"与近5日均量对比(放量/缩量)
+      // 注:kline 接口仅 push2his 镜像提供,必须走 { his: true },否则默认 push2 host 返回 502 → 量能因子丢失
+      emGet(`/api/qt/stock/kline/get?secid=1.000001&fields1=f1&fields2=f51,f57&klt=101&fqt=1&end=20500101&lmt=6`, { his: true }).catch(() => null),
+      emGet(`/api/qt/stock/kline/get?secid=0.399001&fields1=f1&fields2=f51,f57&klt=101&fqt=1&end=20500101&lmt=6`, { his: true }).catch(() => null),
     ]);
 
     // 指数
@@ -64,8 +68,9 @@ export default async function handler(req, res) {
       amount: num(d.f6),
     }));
 
-    // 涨跌家数 & 涨停跌停
+    // 涨跌家数 & 涨停跌停 & 全市场实时成交额(量能)
     let up = 0, down = 0, flat = 0, limitUp = 0, limitDown = 0;
+    let amountSum = 0;  // 全市场成交额合计(元)
     const diffs = (upDownJson && upDownJson.data && upDownJson.data.diff) || [];
     for (const d of diffs) {
       const p = num(d.f3);
@@ -74,6 +79,35 @@ export default async function handler(req, res) {
       else flat++;
       if (p >= 9.8) limitUp++;
       if (p <= -9.8) limitDown++;
+      const a = num(d.f6);
+      if (a != null && a > 0) amountSum += a;
+    }
+    // 全市场实时成交额(亿元);盘中为进行中累计,盘后为当日收盘值
+    const clistAmountYi = amountSum > 0 ? +(amountSum / 1e8).toFixed(0) : null;
+
+    // 两市成交额 + 近5日均量对比(放量/缩量)——用沪市/深市指数日K的成交额 f57
+    // klines: [{f51:date, f57:amount(元)}]；末根为今日(盘中为进行中累计,盘后为收盘值)
+    const klAmt = (kJson) => {
+      const kl = (kJson && kJson.data && kJson.data.klines) || [];
+      return kl.map((s) => {
+        const parts = String(s).split(',');
+        return +parts[1] || 0;  // fields2=f51,f57 → [date, amount]
+      });
+    };
+    const shAmts = klAmt(shK), szAmts = klAmt(szK);
+    let marketAmountYi = clistAmountYi, volVsAvg5 = null, volLevel = null;
+    if (shAmts.length && szAmts.length) {
+      const n = Math.min(shAmts.length, szAmts.length);
+      const sum2 = (i) => (shAmts[shAmts.length - n + i] || 0) + (szAmts[szAmts.length - n + i] || 0);
+      const todayAmt = sum2(n - 1);                         // 今日两市成交额(元)
+      const prev = [];
+      for (let i = 0; i < n - 1; i++) prev.push(sum2(i));   // 之前若干日
+      const avg5 = prev.length ? prev.slice(-5).reduce((a, b) => a + b, 0) / Math.min(5, prev.length) : 0;
+      if (todayAmt > 0) marketAmountYi = +(todayAmt / 1e8).toFixed(0);
+      if (todayAmt > 0 && avg5 > 0) {
+        volVsAvg5 = +((todayAmt / avg5 - 1) * 100).toFixed(1);  // 较5日均量的百分比(±)
+        volLevel = volVsAvg5 >= 15 ? '放量' : volVsAvg5 <= -15 ? '缩量' : '平量';
+      }
     }
 
     sendJson(
@@ -82,7 +116,12 @@ export default async function handler(req, res) {
         ok: true,
         updatedAt: Date.now(),
         indices,
-        breadth: { up, down, flat, limitUp, limitDown, total: diffs.length },
+        breadth: {
+          up, down, flat, limitUp, limitDown, total: diffs.length,
+          amountYi: marketAmountYi,   // 两市成交额(亿元)
+          volVsAvg5,                  // 较近5日均量的偏离%(+放量/-缩量)
+          volLevel,                   // 放量/平量/缩量
+        },
       },
       { cache: 20 }
     );

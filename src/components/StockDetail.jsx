@@ -6,7 +6,8 @@ import { usePolling } from '../hooks'
 import { fmtPct, pctClass, fmtRaw, fmtNum, hasVal, opText } from '../format'
 import { aiStore } from '../aiStore'
 import { api } from '../apiBase'
-import { usePlanStore, planStore, computeTFlows, computePortfolio } from '../planStore'
+import { usePlanStore, planStore, computeTFlows, computePortfolio, t1StatusOf } from '../planStore'
+import { nextTradingDayLabel } from '../review'
 import { getAdvice } from '../adviceCache'
 import { startAdvice, subscribeRunner, isRunning, getRunning, getResult } from '../adviceRunner'
 import { AlertForm } from './AlertCenter'
@@ -175,6 +176,20 @@ export default function StockDetail({ stock, onClose }) {
           holdCost: myHold.cost,
           holdQty: myHold.qty,
           openTNet: myHold.hasOpenT ? myHold.tNetHands : 0,
+          // T+1 买入时间锁定:今日买入手数当日不可卖,注入军师使其不建议卖/减超过今日可卖手数
+          ...(() => {
+            try {
+              const t1 = t1StatusOf(stock.code)
+              if (!t1) return {}
+              return {
+                boughtTodayQty: t1.boughtToday,
+                sellableTodayQty: t1.sellableToday != null ? t1.sellableToday : myHold.qty,
+                t1Locked: t1.boughtToday > 0,
+                todayBuys: (t1.buys || []).map((b) => ({ price: b.price, qty: b.qty, kind: b.kind })),
+                nextTradeDay: nextTradingDayLabel(),
+              }
+            } catch { return {} }
+          })(),
           advisorTrack,
           account: {
             ...account,
@@ -728,21 +743,45 @@ export default function StockDetail({ stock, onClose }) {
                                   </div>
                                 </div>
                               )}
-                              {q.highConfSignal && q.highConfSignal.fired && (
+                              {q.highConfSignal && q.highConfSignal.fired && (() => {
+                                const hcs = q.highConfSignal;
+                                // 即时赔率 = (止盈-买入)/(买入-止损)；用现价替代买入价算“照现价追”的真实赔率，更贴用户实际处境
+                                const curPx = (overview && overview.price != null) ? overview.price : (q.price != null ? q.price : hcs.buyPrice);
+                                const refPx = curPx != null ? curPx : hcs.buyPrice;
+                                const up = hcs.takeProfit != null && refPx != null ? (hcs.takeProfit - refPx) : null;
+                                const dn = hcs.stopLoss != null && refPx != null ? (refPx - hcs.stopLoss) : null;
+                                const rr = (up != null && dn != null && dn > 0) ? up / dn : null;
+                                // 赔率<1.5:1 视为“胜率好但赔率差”，触发警示，引导看军师结论
+                                const poor = rr != null && rr < 1.5;
+                                const chased = curPx != null && hcs.buyPrice != null && curPx > hcs.buyPrice; // 现价已高于建议买入价=在追高
+                                return (
                                 <div className="hcs-box">
                                   <div className="hcs-head">
                                     <span className="hcs-star">⭐</span>
                                     <span className="hcs-title">高把握买点</span>
-                                    <span className="hcs-cred">可信度 {q.highConfSignal.credibility}%</span>
+                                    <span className="hcs-cred">胜率把握 {hcs.credibility}%</span>
                                   </div>
                                   <div className="hcs-grid">
-                                    <div className="hcs-cell"><span className="hcs-k">买入价</span><span className="hcs-v gold">{q.highConfSignal.buyPrice}</span></div>
-                                    <div className="hcs-cell"><span className="hcs-k">止盈价</span><span className="hcs-v red">{q.highConfSignal.takeProfit}</span></div>
-                                    <div className="hcs-cell"><span className="hcs-k">止损价</span><span className="hcs-v green">{q.highConfSignal.stopLoss}</span></div>
+                                    <div className="hcs-cell"><span className="hcs-k">买入价</span><span className="hcs-v gold">{hcs.buyPrice}</span></div>
+                                    <div className="hcs-cell"><span className="hcs-k">止盈价</span><span className="hcs-v red">{hcs.takeProfit}</span></div>
+                                    <div className="hcs-cell"><span className="hcs-k">止损价</span><span className="hcs-v green">{hcs.stopLoss}</span></div>
                                   </div>
-                                  <div className="hcs-foot">{q.highConfSignal.label} · 样本外命中率约 {q.highConfSignal.holdoutPrecision}%（闸门 {q.highConfSignal.gate}）</div>
+                                  {rr != null && (
+                                    <div className={'hcs-rr ' + (poor ? 'bad' : 'ok')}>
+                                      <span className="hcs-rr-k">{chased ? '按现价追的赔率' : '即时赔率'}</span>
+                                      <span className="hcs-rr-v">{rr.toFixed(2)} : 1</span>
+                                      <span className="hcs-rr-tag">{poor ? '赚少亏多·不划算' : '赔率合适'}</span>
+                                    </div>
+                                  )}
+                                  {poor && (
+                                    <div className="hcs-warn">
+                                      ⚠️ 这是「高胜率」信号，只说 5 日内摸到止盈的概率高，<b>不代表现在这个价位值得买</b>。当前赔率仅 {rr.toFixed(2)}:1（赢一次赚得少、输一次亏得多），<b>请以下方「军师」结论为准</b>，通常需等回调到更好的价位再出手。
+                                    </div>
+                                  )}
+                                  <div className="hcs-foot">{hcs.label} · 样本外命中率约 {hcs.holdoutPrecision}%（闸门 {hcs.gate}）· 胜率信号，非买卖指令</div>
                                 </div>
-                              )}
+                                );
+                              })()}
                               {q.score != null && (q.reads || []).length > 0 && (
                                 <div className="quant-line">
                                   {(q.reads || []).slice(-1).map((r, i) => <span className="quant-line-read" key={i}>{r}</span>)}

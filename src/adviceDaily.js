@@ -5,7 +5,8 @@
 //   自选股 → mode='buy_advice'(立即买入/回调再买/小仓试错/观望 四档),二者内容差异由后端 prompt 区分。
 // 生成走模块级后台 runner(adviceRunner.startAdvice),关闭页面也照跑完、落缓存、记决策,与手动生成完全同源。
 import { api } from './apiBase'
-import { planStore, livePositionOf, computeTFlows, computePortfolio } from './planStore'
+import { planStore, livePositionOf, computeTFlows, computePortfolio, t1StatusOf } from './planStore'
+import { nextTradingDayLabel } from './review'
 import { getAdvice } from './adviceCache'
 import { startAdvice } from './adviceRunner'
 import { bjDayKey, isWeekday, bjMinutes } from './review'
@@ -57,6 +58,24 @@ function accountFrom(portfolio, account) {
   }
 }
 
+// T+1 买入时间锁定字段:注入 aiPayload,让军师知道"今天买的手数当日不可卖"。
+// boughtTodayQty=今日买入手数(建仓/加仓/今日做T买腿,T+1锁定); sellableTodayQty=今日最多可卖手数;
+// t1Locked=true 表示存在今日买入(有锁定手数); nextTradeDay=真实下一交易日(锁定手数最早可卖日)。
+function t1Fields(code, holdQty) {
+  try {
+    const t1 = t1StatusOf(code)
+    if (!t1) return {}
+    const sellable = t1.sellableToday != null ? t1.sellableToday : holdQty
+    return {
+      boughtTodayQty: t1.boughtToday,
+      sellableTodayQty: sellable,
+      t1Locked: t1.boughtToday > 0,
+      todayBuys: (t1.buys || []).map((b) => ({ price: b.price, qty: b.qty, kind: b.kind })),
+      nextTradeDay: nextTradingDayLabel(),
+    }
+  } catch { return {} }
+}
+
 // 6 小时内已有新鲜建议 → 跳过,不重复生成(节流,省算力/网关配额)
 function isFresh(code) {
   const a = getAdvice(code)
@@ -92,6 +111,8 @@ export function buildHoldSpec(code, name, quoteMap, portfolio, account) {
     code, name,
     holdCost, holdQty,
     openTNet,
+    // T+1 买入时间锁定：今日买入手数当日绝对不可卖(A股T+1)，今日最多可卖=可卖手数
+    ...t1Fields(code, holdQty),
     advisorTrack: advisorTrackFor('hold_advice'),
     account: { ...accountFrom(portfolio, account), stockWeight },
   }

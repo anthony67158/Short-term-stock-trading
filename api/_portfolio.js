@@ -99,8 +99,44 @@ export function accountFrom(portfolio, account) {
   };
 }
 
+// 最近一个"北京时间零点"的时间戳(epoch ms)——纯 epoch 运算,不依赖运行时时区。
+function bjDayStartTs() {
+  const EIGHT_H = 8 * 3600000, DAY = 24 * 3600000;
+  return Math.floor((Date.now() + EIGHT_H) / DAY) * DAY - EIGHT_H;
+}
+
+// T+1 买入时间锁定(与前端 planStore.t1StatusOf 同口径):今日买入手数当日不可卖。
+// 今日买入 = closed 里今日 BUY 流水 + holding.tFlows 里今日 side='buy' 做T买腿。
+// 返回 { liveQty, boughtToday, sellableToday, buys }。
+export function t1StatusOf(holding, closed, code) {
+  const lp = livePositionOf(holding, code);
+  const liveQty = lp ? lp.qty : 0;
+  const t0 = bjDayStartTs();
+  let boughtToday = 0;
+  const buys = [];
+  (closed || []).forEach((c) => {
+    if (c.code !== code) return;
+    if ((c.type || c.kind) !== 'BUY') return;
+    const at = c.at || c.buyAt || 0;
+    if (at < t0) return;
+    boughtToday += (c.qty || 0);
+    buys.push({ price: c.price, qty: c.qty, kind: '建仓/加仓' });
+  });
+  (holding || []).filter((h) => h.code === code).forEach((h) => {
+    (h.tFlows || []).forEach((f) => {
+      if (f.side === 'buy' && (f.at || 0) >= t0) {
+        boughtToday += (f.qty || 0);
+        buys.push({ price: f.price, qty: f.qty, kind: '做T买腿' });
+      }
+    });
+  });
+  boughtToday = +boughtToday.toFixed(3);
+  const sellableToday = Math.max(0, +(liveQty - boughtToday).toFixed(3));
+  return { liveQty, boughtToday, sellableToday, buys };
+}
+
 // 构造【持仓个股】hold_advice 的 payload(与前端 buildHoldSpec 的 aiPayload 同口径)
-export function buildHoldPayload(holding, code, name, portfolio, account) {
+export function buildHoldPayload(holding, code, name, portfolio, account, closed, nextTradeDay) {
   const lp = livePositionOf(holding, code);
   let holdCost, holdQty, openTNet;
   if (lp) {
@@ -120,8 +156,23 @@ export function buildHoldPayload(holding, code, name, portfolio, account) {
     const p = portfolio && portfolio.positions ? portfolio.positions.find((x) => x.code === code) : null;
     return p && p.weight != null ? p.weight : null;
   })();
+  // T+1 买入时间锁定字段(与前端 t1Fields 同口径)
+  let t1 = {};
+  try {
+    const st = t1StatusOf(holding, closed, code);
+    if (st) {
+      t1 = {
+        boughtTodayQty: st.boughtToday,
+        sellableTodayQty: st.sellableToday != null ? st.sellableToday : holdQty,
+        t1Locked: st.boughtToday > 0,
+        todayBuys: (st.buys || []).map((b) => ({ price: b.price, qty: b.qty, kind: b.kind })),
+        ...(nextTradeDay ? { nextTradeDay } : {}),
+      };
+    }
+  } catch { /* ignore */ }
   return {
     code, name, holdCost, holdQty, openTNet,
+    ...t1,
     account: { ...accountFrom(portfolio, account), stockWeight },
   };
 }
