@@ -1290,8 +1290,16 @@ function HoldingItem({ h, idx, quote: q }) {
   const askTAdvice = async (styleOverride) => {
     const useStyle = styleOverride || tStyle
     if (styleOverride && styleOverride !== tStyle) setTStyle(styleOverride)
-    setTAdvice({ loading: true, phase: '正在准备分析…' })
+    setTAdvice({ loading: true, phase: '正在准备分析…', sources: [], reasoning: '' })
     const onPhase = (p) => setTAdvice((s) => (s && s.loading ? { ...s, phase: p.text } : s))
+    // 细粒度事件:数据源勾选清单 + 军师思维链增量,实时展示"发生了什么"
+    const onEvent = (event, data) => {
+      if (event === 'source' && data && data.label) {
+        setTAdvice((s) => (s && s.loading ? { ...s, sources: [...(s.sources || []), { label: data.label, ok: !!data.ok }] } : s))
+      } else if (event === 'reasoning' && data && data.text) {
+        setTAdvice((s) => (s && s.loading ? { ...s, reasoning: (s.reasoning || '') + data.text } : s))
+      }
+    }
     try {
       // 【实时可做T手数】必须扣掉未结算的反T卖腿：先卖后买的反T在"接回"前，底仓已经不在手里，
       // 可再做反T(先卖)的手数 = 底仓 + 净做T腿(openBuy-openSell)，卖光则为 0，绝不能拿原始底仓 h.qty 误当作还持有。
@@ -1306,7 +1314,7 @@ function HoldingItem({ h, idx, quote: q }) {
         holdCost: h.buyPrice, holdQty: liveHoldQty, baseQty,
         openTNet: tNet,  // 未结算做T净手数(正=已净加仓;负=已净卖出/反T未接回，底仓被占用)
         style: useStyle,
-      }, onPhase)
+      }, onPhase, undefined, onEvent)
       if (r.ok) {
         setTAdvice({ result: r.result })
         // 建议方向自动切到对应买/卖
@@ -1648,7 +1656,26 @@ function HoldingItem({ h, idx, quote: q }) {
             {!tAdvice && (
               <button className="t-ai-btn" onClick={() => askTAdvice()}><Icon name="spark" size={14} />{tStyle === 'auto' ? 'AI 按历史规律自动决策做T策略' : `获取 AI 做T参考（${tStyle === 'conservative' ? '稳健' : tStyle === 'aggressive' ? '激进' : '均衡'}）`}</button>
             )}
-            {tAdvice && tAdvice.loading && <div className="t-ai-loading"><Icon name="refresh" size={13} className="spin" />{tAdvice.phase || 'AI 正在分析历史规律/分时/大盘/资金…'}</div>}
+            {tAdvice && tAdvice.loading && (
+              <div className="t-ai-loading-wrap">
+                <div className="t-ai-loading"><Icon name="refresh" size={13} className="spin" />{tAdvice.phase || 'AI 正在分析历史规律/分时/大盘/资金…'}</div>
+                {tAdvice.sources && tAdvice.sources.length > 0 && (
+                  <div className="adv-sources">
+                    {tAdvice.sources.map((s, i) => (
+                      <span className={'adv-src' + (s.ok ? ' ok' : ' none')} key={s.label + i}>
+                        <Icon name={s.ok ? 'check' : 'close'} size={11} /> {s.label}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {tAdvice.reasoning && (
+                  <div className="adv-reasoning">
+                    <div className="adv-reasoning-head"><Icon name="brain" size={12} /> 军师推理过程</div>
+                    <div className="adv-reasoning-body" ref={(el) => { if (el) el.scrollTop = el.scrollHeight }}>{tAdvice.reasoning}</div>
+                  </div>
+                )}
+              </div>
+            )}
             {tAdvice && tAdvice.error && <div className="err">{tAdvice.error} <span className="expand-btn" onClick={askTAdvice}>重试</span></div>}
             {tAdvice && tAdvice.result && (
               <div className={'t-ai-card ' + (tAdvice.result.light || 'yellow')}>

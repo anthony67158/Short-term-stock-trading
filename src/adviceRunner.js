@@ -28,7 +28,7 @@ export function startAdvice(spec) {
   if (!code) return Promise.resolve()
   if (running.has(code)) return running.get(code).promise || Promise.resolve()  // 已在后台跑 → 幂等，复用同一 promise
   results.delete(code)           // 清掉上次的瞬时结果，UI 立即进入 loading
-  const rec = { phase: '正在准备分析…', startedAt: Date.now() }
+  const rec = { phase: '正在准备分析…', startedAt: Date.now(), sources: [], reasoning: '' }
   running.set(code, rec)
   notify()
   const p = run(spec).finally(() => { running.delete(code); notify() })
@@ -42,10 +42,22 @@ async function run(spec) {
     const r = running.get(code)
     if (r && p && p.text) { r.phase = p.text; notify() }
   }
+  // 细粒度事件:source(数据源勾选清单) / reasoning(模型思维链增量)
+  const onEvent = (event, data) => {
+    const r = running.get(code)
+    if (!r) return
+    if (event === 'source' && data && data.label) {
+      r.sources = [...(r.sources || []), { label: data.label, ok: !!data.ok }]
+      notify()
+    } else if (event === 'reasoning' && data && data.text) {
+      r.reasoning = (r.reasoning || '') + data.text
+      notify()
+    }
+  }
   try {
     // 量化服务（走势预测/多因子分）与 LLM 操作建议（带具体价位）并发
     const quantP = fetch(quantUrl).then((r) => r.json()).catch(() => null)
-    const adviceP = callAIStream(mode, aiPayload, onPhase)
+    const adviceP = callAIStream(mode, aiPayload, onPhase, undefined, onEvent)
       .then((r) => (r && r.ok ? { advice: r.result, meta: r.meta, news: r.news, truncated: r.truncated } : null))
       .catch(() => null)
     const [j, adviceResp] = await Promise.all([quantP, adviceP])

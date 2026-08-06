@@ -5,7 +5,7 @@ import { techSummaryForAI, fetchQuantPredict, backtestSignal } from './_ta.js';
 import { marketTimePromptBlock, marketTimeContext } from './_market_time.js';
 import { getLatestDailySummary } from './_daily_summary.js';
 import { fetchNews, fetchClsTelegraph } from './_market_data.js';
-import { callChat, callChatWithRetry, parseLLMJson } from './_llm.js';
+import { callChat, callChatWithRetry, parseLLMJson, pumpChatStream } from './_llm.js';
 import { ensureConfig, currentConfig, getModel, getReasoning } from './_llm_config.js';
 import { applyCors, preflight } from './_lib.js';
 import { SYSTEM_PROMPT, ADVISOR_SYSTEM, buildUserPrompt, isAdvisorMode, maxTokensForMode } from './_ai_prompts.js';
@@ -410,19 +410,25 @@ export default async function handler(req, res) {
           const to = setTimeout(() => c.abort(), 8000);
           return fetch(origin + p, { signal: c.signal }).then((r) => r.json()).catch(() => null).finally(() => clearTimeout(to));
         };
+        // ★采集透明化:每个数据源各自 settle 时立即推 source 事件(名称+成功/失败),
+        //   让前端把"黑盒卡住"变成可见的勾选清单(查大盘✓ 查资金✓ 龙虎榜— …)。okFn 判定该源是否取到有效数据。
+        const track = (label, p, okFn) => p.then(
+          (v) => { emit('source', { label, ok: okFn ? !!okFn(v) : (v != null) }); return v; },
+          (e) => { emit('source', { label, ok: false }); throw e; },
+        );
 
         const [mkt, sec, detail, trend, stockFund, lhb, corpus, macroNews, todayQ, dailySummary, macroFlashes] = await Promise.all([
-          getJ('/api/market'),
-          getJ('/api/sectors?type=industry&sort=main'),
-          getJ(`/api/stock_detail?code=${payload.code}&klt=101&lmt=60`),
-          fetchTrend(payload.code),
-          fetchStockFund(payload.code),
-          fetchStockLHB(payload.code),
-          buildCorpus(payload.code).catch(() => null),  // 消息面/公告/基本面 RAG 语料
-          fetchMacroNews(),                              // 国内外宏观/重大事件
-          getJ(`/api/quote?codes=${payload.code}&_t=${Date.now()}`),  // ★今日实时行情(涨跌幅/涨停/量比)——纠正"技术面/资金是昨日口径"的滞后
-          getLatestDailySummary().catch(() => null),     // ★今日策略日报摘要——作为"外部市场环境"注入(阶段2)
-          fetchMacroFlashes(8).catch(() => null),        // ★权威财经快讯(财联社系/金十)——外部实时消息面
+          track('大盘情绪', getJ('/api/market'), (v) => v && v.ok !== false),
+          track('板块资金', getJ('/api/sectors?type=industry&sort=main'), (v) => v && v.list && v.list.length),
+          track('个股K线', getJ(`/api/stock_detail?code=${payload.code}&klt=101&lmt=60`), (v) => v && v.ok !== false && v.candles && v.candles.length),
+          track('分时走势', fetchTrend(payload.code)),
+          track('个股资金流', fetchStockFund(payload.code)),
+          track('龙虎榜', fetchStockLHB(payload.code)),
+          track('消息面/公告', buildCorpus(payload.code).catch(() => null), (v) => v && v.docs && v.docs.length),  // 消息面/公告/基本面 RAG 语料
+          track('宏观要闻', fetchMacroNews(), (v) => v && v.length),                              // 国内外宏观/重大事件
+          track('今日实时行情', getJ(`/api/quote?codes=${payload.code}&_t=${Date.now()}`), (v) => v && v.list && v.list.length),  // ★今日实时行情(涨跌幅/涨停/量比)——纠正"技术面/资金是昨日口径"的滞后
+          track('策略日报摘要', getLatestDailySummary().catch(() => null), (v) => v && v.text),     // ★今日策略日报摘要——作为"外部市场环境"注入(阶段2)
+          track('财经快讯', fetchMacroFlashes(8).catch(() => null), (v) => v && v.length),        // ★权威财经快讯(财联社系/金十)——外部实时消息面
         ]);
         // ★外部市场环境：把当天策略日报摘要注入，让个股建议结合大盘/板块/海外环境判断
         if (dailySummary && dailySummary.text) payload.dailyReport = dailySummary;
@@ -806,45 +812,94 @@ export default async function handler(req, res) {
       : (isAdvisor ? 100000 : 80000);
     const llmTimeout = Math.max(8000, Math.min(llmCap, remain() - 2500));
 
-    const { resp, done } = await callChatWithRetry({
-      model: useModel,
-      messages: [
-        { role: 'system', content: sysPrompt },
-        { role: 'system', content: marketTimePromptBlock() },
-        { role: 'user', content: buildUserPrompt(mode, payload, ragText) },
-      ],
-      temperature: 0.2,   // JSON 结构化输出：低温提升稳定性与可解析率，减少字段漂移
-      maxTokens: maxTokensForMode(mode, useReasoning),
-      timeoutMs: llmTimeout,
-      reasoning: useReasoning,
-      responseFormat: { type: 'json_object' },
-    }, { budgetLeftMs: () => remain() - 2500 });  // 上游抖动/5xx 且预算足够时快速重试一次；abort/网络错误不抛出 → 转入降级返回
-    done();
-
-    // LLM 超时/网络错误 → 结构化降级返回(带已采集 meta)，前端可提示"重试/缩小范围"而非"服务不可用"
-    if (resp && resp.__err) {
-      const timedOut = resp.__err.name === 'AbortError';
-      return finish({
-        ok: false, degraded: true, mode, model: useModel, updatedAt: Date.now(),
-        error: timedOut ? '分析生成超时，可稍后重试；如反复超时请缩小问题范围。' : ('网络异常：' + String(resp.__err.message || resp.__err)),
-        meta: collectedMeta, news: newsRefs,
+    let content = '';
+    let finishReason = '';
+    let usage = null;
+    if (streaming) {
+      // ★流式路径(客户端开了 SSE):以 stream:true 调上游,把模型【思维链 reasoning_content】
+      //   增量实时推为 reasoning 事件(军师在想什么),正文 content 累积到流结束后再统一解析。
+      //   代价是放弃 callChatWithRetry 的一次快速重试——换取"推理过程可见"的实时体验;
+      //   失败仍走下方统一降级(带已采集 meta),不会白屏。
+      const { resp, done } = await callChat({
+        model: useModel,
+        messages: [
+          { role: 'system', content: sysPrompt },
+          { role: 'system', content: marketTimePromptBlock() },
+          { role: 'user', content: buildUserPrompt(mode, payload, ragText) },
+        ],
+        temperature: 0.2,
+        maxTokens: maxTokensForMode(mode, useReasoning),
+        timeoutMs: llmTimeout,
+        reasoning: useReasoning,
+        responseFormat: { type: 'json_object' },
+        stream: true,
       });
-    }
+      if (resp && resp.__err) {
+        done();
+        const timedOut = resp.__err.name === 'AbortError';
+        return finish({
+          ok: false, degraded: true, mode, model: useModel, updatedAt: Date.now(),
+          error: timedOut ? '分析生成超时，可稍后重试；如反复超时请缩小问题范围。' : ('网络异常：' + String(resp.__err.message || resp.__err)),
+          meta: collectedMeta, news: newsRefs,
+        });
+      }
+      if (!resp.ok) {
+        const errText = await resp.text().catch(() => '');
+        done();
+        return finish({ ok: false, error: `LLM ${resp.status}`, detail: errText.slice(0, 200), meta: collectedMeta });
+      }
+      // reasoning 增量做轻量节流:攒到 ~40 字或遇换行再下发,避免事件风暴
+      let rbuf = '';
+      const flushR = () => { if (rbuf) { emit('reasoning', { text: rbuf }); rbuf = ''; } };
+      const pumped = await pumpChatStream(resp, {
+        onReasoning: (piece) => { rbuf += piece; if (rbuf.length >= 40 || /[\n。！？]/.test(piece)) flushR(); },
+      }).catch(() => ({ content: '', reasoning: '', finishReason: '' }));
+      flushR();
+      done();
+      content = pumped.content;
+      finishReason = pumped.finishReason;
+    } else {
+      const { resp, done } = await callChatWithRetry({
+        model: useModel,
+        messages: [
+          { role: 'system', content: sysPrompt },
+          { role: 'system', content: marketTimePromptBlock() },
+          { role: 'user', content: buildUserPrompt(mode, payload, ragText) },
+        ],
+        temperature: 0.2,   // JSON 结构化输出：低温提升稳定性与可解析率，减少字段漂移
+        maxTokens: maxTokensForMode(mode, useReasoning),
+        timeoutMs: llmTimeout,
+        reasoning: useReasoning,
+        responseFormat: { type: 'json_object' },
+      }, { budgetLeftMs: () => remain() - 2500 });  // 上游抖动/5xx 且预算足够时快速重试一次；abort/网络错误不抛出 → 转入降级返回
+      done();
 
-    if (!resp.ok) {
-      const errText = await resp.text();
-      return finish({ ok: false, error: `LLM ${resp.status}`, detail: errText.slice(0, 200), meta: collectedMeta });
-    }
+      // LLM 超时/网络错误 → 结构化降级返回(带已采集 meta)，前端可提示"重试/缩小范围"而非"服务不可用"
+      if (resp && resp.__err) {
+        const timedOut = resp.__err.name === 'AbortError';
+        return finish({
+          ok: false, degraded: true, mode, model: useModel, updatedAt: Date.now(),
+          error: timedOut ? '分析生成超时，可稍后重试；如反复超时请缩小问题范围。' : ('网络异常：' + String(resp.__err.message || resp.__err)),
+          meta: collectedMeta, news: newsRefs,
+        });
+      }
 
-    const j = await resp.json().catch(() => null);
-    if (!j) {
-      return finish({
-        ok: false, degraded: true, mode, model: useModel, updatedAt: Date.now(),
-        error: '模型返回解析失败，请稍后重试。', meta: collectedMeta, news: newsRefs,
-      });
+      if (!resp.ok) {
+        const errText = await resp.text();
+        return finish({ ok: false, error: `LLM ${resp.status}`, detail: errText.slice(0, 200), meta: collectedMeta });
+      }
+
+      const j = await resp.json().catch(() => null);
+      if (!j) {
+        return finish({
+          ok: false, degraded: true, mode, model: useModel, updatedAt: Date.now(),
+          error: '模型返回解析失败，请稍后重试。', meta: collectedMeta, news: newsRefs,
+        });
+      }
+      content = j.choices?.[0]?.message?.content || '';
+      finishReason = j.choices?.[0]?.finish_reason || '';
+      usage = j.usage || null;
     }
-    const content = j.choices?.[0]?.message?.content || '';
-    const finishReason = j.choices?.[0]?.finish_reason || '';
     const truncated = finishReason === 'length';
 
     // 空内容(上游偶发返回空串) → 结构化降级,避免把空当成成功结果下发
@@ -1020,7 +1075,7 @@ export default async function handler(req, res) {
       // 可信度元信息：供前端展示共振灯/环境/龙虎榜/消息面(不依赖模型自报)
       meta: collectedMeta,
       usedRag: !!ragText,
-      usage: j.usage || null,
+      usage: usage || null,
     });
   } catch (e) {
     if (res.headersSent || (res.getHeader && String(res.getHeader('Content-Type') || '').includes('event-stream'))) {

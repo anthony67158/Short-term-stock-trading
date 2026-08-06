@@ -70,8 +70,11 @@ export async function fetchDailyReport({ session, holdings, refresh, onPhase, si
   }
 }
 // onPhase({text,key}) 每到一个采集里程碑触发一次；signal 可选 AbortSignal。
+// 第 5 参 onEvent(event,data) 可选：转发细粒度事件——
+//   'source'{label,ok}   每个数据源采集完成(名称+成功/失败)，供前端渲染勾选清单；
+//   'reasoning'{text}    模型思维链增量(开启深度思考时)，供前端实时展示"军师在想什么"。
 // 后端不支持 SSE 时自动回退为整段 JSON，不影响结果。
-export async function callAIStream(mode, payload, onPhase, signal) {
+export async function callAIStream(mode, payload, onPhase, signal, onEvent) {
   try {
     const res = await fetch(api('/api/ai'), {
       method: 'POST',
@@ -108,6 +111,7 @@ export async function callAIStream(mode, payload, onPhase, signal) {
         let data = null; try { data = JSON.parse(dataStr) } catch { continue }
         if (event === 'phase') { if (typeof onPhase === 'function') onPhase(data) }
         else if (event === 'result') { result = data }
+        else if (typeof onEvent === 'function') onEvent(event, data)  // source / reasoning 等细粒度事件
       }
     }
     return result || { ok: false, error: '分析未返回结果，请重试' }

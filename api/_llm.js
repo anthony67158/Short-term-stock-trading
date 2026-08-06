@@ -140,6 +140,42 @@ export async function pumpStream(resp, onPiece) {
   return full;
 }
 
+// ---- 读取上游 SSE 流：同时捕获【思维链 reasoning_content】与【正文 content】增量 ----
+// gpt 系推理模型在 stream 模式下,思维链走 delta.reasoning_content,正文走 delta.content。
+// onReasoning(piece) / onContent(piece) 分别转发;返回 { content, reasoning, finishReason }。
+// 用于「AI操作建议」把模型的推理过程实时下发前端展示(军师在想什么)。
+export async function pumpChatStream(resp, { onReasoning, onContent } = {}) {
+  let content = '', reasoning = '', finishReason = '';
+  if (!resp || !resp.body || typeof resp.body.getReader !== 'function') return { content, reasoning, finishReason };
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buf = '';
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, idx).trim();
+      buf = buf.slice(idx + 1);
+      if (!line || !line.startsWith('data:')) continue;
+      const data = line.slice(5).trim();
+      if (data === '[DONE]') return { content, reasoning, finishReason };
+      try {
+        const j = JSON.parse(data);
+        const delta = j.choices?.[0]?.delta || {};
+        const rc = delta.reasoning_content || delta.reasoning || '';
+        const cc = delta.content || '';
+        if (rc) { reasoning += rc; if (typeof onReasoning === 'function') onReasoning(rc); }
+        if (cc) { content += cc; if (typeof onContent === 'function') onContent(cc); }
+        const fr = j.choices?.[0]?.finish_reason;
+        if (fr) finishReason = fr;
+      } catch { /* 非完整 JSON 行，忽略 */ }
+    }
+  }
+  return { content, reasoning, finishReason };
+}
+
 // ---- LLM JSON 解析（容错）----
 // 先剥离 ```json 包裹直接解析；失败则尝试补齐被 max_tokens 截断的尾部再解析。
 // 返回 { value, salvaged }：value 为解析对象或 null；salvaged 标记是否走了补齐路径。

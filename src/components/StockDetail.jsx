@@ -115,7 +115,7 @@ export default function StockDetail({ stock, onClose }) {
     const sync = () => {
       if (isRunning(code)) {
         const r = getRunning(code)
-        setQuantState({ loading: true, phase: r && r.phase })
+        setQuantState({ loading: true, phase: r && r.phase, sources: (r && r.sources) || [], reasoning: (r && r.reasoning) || '' })
         return
       }
       const res = getResult(code)
@@ -534,10 +534,31 @@ export default function StockDetail({ stock, onClose }) {
                 )}
                 {quantState && quantState.loading && (
                   <div className="advice-skeleton">
-                    <div className="sk-line sk-verdict" />
-                    <div className="sk-line sk-timing" />
-                    <div className="sk-cells"><div className="sk-cell" /><div className="sk-cell" /><div className="sk-cell" /></div>
                     <div className="sk-hint"><Icon name="refresh" size={13} className="spin" /> {quantState.phase || '量化模型 + AI 计算中…'}（首次冷启动约需几秒）</div>
+                    {/* 数据源采集清单:每个源 settle 时后端推 source 事件,这里实时勾选(✓ 成功 / — 无数据) */}
+                    {quantState.sources && quantState.sources.length > 0 && (
+                      <div className="adv-sources">
+                        {quantState.sources.map((s, i) => (
+                          <span className={'adv-src' + (s.ok ? ' ok' : ' none')} key={s.label + i}>
+                            <Icon name={s.ok ? 'check' : 'close'} size={11} /> {s.label}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {/* 模型思维链:开启「深度思考」时后端把 reasoning_content 增量推来,这里滚动展示"军师在想什么" */}
+                    {quantState.reasoning && (
+                      <div className="adv-reasoning">
+                        <div className="adv-reasoning-head"><Icon name="brain" size={12} /> 军师推理过程</div>
+                        <div className="adv-reasoning-body" ref={(el) => { if (el) el.scrollTop = el.scrollHeight }}>{quantState.reasoning}</div>
+                      </div>
+                    )}
+                    {(!quantState.sources || !quantState.sources.length) && !quantState.reasoning && (
+                      <>
+                        <div className="sk-line sk-verdict" />
+                        <div className="sk-line sk-timing" />
+                        <div className="sk-cells"><div className="sk-cell" /><div className="sk-cell" /><div className="sk-cell" /></div>
+                      </>
+                    )}
                   </div>
                 )}
                 {quantState && quantState.error && (
