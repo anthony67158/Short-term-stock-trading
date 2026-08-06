@@ -2497,9 +2497,36 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 
 /* 持仓卡整体:更清晰的层级(卡壳略提亮 + hover 微反馈),减少"到处描边"噪音 */
 .hold-grid .hold-item {
-  transition: border-color var(--t-fast), box-shadow var(--t-fast);
+  transition: border-color var(--t-fast), box-shadow var(--t-fast), transform var(--t-fast);
 }
 .hold-grid .hold-item:hover { border-color: var(--border); }
+
+/* ── 持仓卡「特殊化」：与自选卡明显区分 ──
+   自选卡(.plan-cand)是浅色轻量候选;持仓卡是「已投入真金」的重卡:
+   左侧强调色条 + 略深底 + 更强描边/圆角 + 顶部微光,视觉上一眼分得清「已持仓 vs 观察中」。*/
+.hold-grid .hold-item {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border, rgba(255,255,255,.12));
+  border-radius: var(--radius, 12px);
+  background:
+    linear-gradient(180deg, rgba(124,107,245,.06) 0%, rgba(124,107,245,0) 42%),
+    var(--panel, var(--panel2));
+  box-shadow: 0 1px 2px rgba(0,0,0,.18), 0 6px 16px rgba(0,0,0,.10);
+}
+/* 左侧强调色条：标记「持仓中」的实心资产感 */
+.hold-grid .hold-item::before {
+  content: '';
+  position: absolute; left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: linear-gradient(180deg, var(--accent, #7c6bf5), rgba(124,107,245,.35));
+  border-radius: var(--radius, 12px) 0 0 var(--radius, 12px);
+}
+.hold-grid .hold-item:hover {
+  border-color: var(--accent, #7c6bf5);
+  box-shadow: 0 2px 4px rgba(0,0,0,.22), 0 10px 24px rgba(124,107,245,.14);
+  transform: translateY(-1px);
+}
 
 /* ═══════════════════════════════════════════════════════════════
    全站去盒化精修 (v3) — 形式追随功能 · 情感化设计

@@ -907,6 +907,51 @@ function HoldingList({ book, quote, batchSel }) {
     const pb = holdSnapshot(b, quote[b.code]).pnl ?? 999
     return pa - pb
   })
+
+  // ===== 持仓区行业分类(全部 + 板块),与自选区同口径 =====
+  const [holdTab, setHoldTab] = useState('全部') // 当前选中行业 tab
+  const industryOf = (h) => {
+    const q = quote[h.code]
+    return (q && q.industry) || h.industry || '其他'
+  }
+  // 行情返回行业后，回写缓存到持仓，保证行情缺失时仍能分类（且持久化到云端）
+  useEffect(() => {
+    ;(book.holding || []).forEach((h) => {
+      const q = quote[h.code]
+      if (q && q.industry && q.industry !== h.industry) {
+        planStore.setHoldingMeta(h.id, { industry: q.industry })
+      }
+    })
+    // eslint-disable-next-line
+  }, [Object.keys(quote).length, book.holding.length])
+  // 汇总每个行业的只数 + 平均涨幅（用于 tab 排序：热门行业靠前）
+  const holdIndustries = useMemo(() => {
+    const map = new Map()
+    ;(book.holding || []).forEach((h) => {
+      const ind = (quote[h.code] && quote[h.code].industry) || h.industry || '其他'
+      const q = quote[h.code]
+      const o = map.get(ind) || { name: ind, count: 0, pctSum: 0, pctN: 0 }
+      o.count++
+      if (q && q.pct != null) { o.pctSum += q.pct; o.pctN++ }
+      map.set(ind, o)
+    })
+    const arr = [...map.values()].map((o) => ({ ...o, avgPct: o.pctN ? o.pctSum / o.pctN : null }))
+    arr.sort((a, b) => {
+      if (a.name === '其他') return 1
+      if (b.name === '其他') return -1
+      if (b.count !== a.count) return b.count - a.count
+      return (b.avgPct ?? -999) - (a.avgPct ?? -999)
+    })
+    return arr
+    // eslint-disable-next-line
+  }, [book.holding, quote])
+  // tab 可能因清仓失效 → 回退到全部
+  useEffect(() => {
+    if (holdTab !== '全部' && !holdIndustries.some((i) => i.name === holdTab)) setHoldTab('全部')
+    // eslint-disable-next-line
+  }, [holdIndustries])
+  // 当前 tab 下要显示的持仓（全部=所有；否则=该行业）
+  const shownHolding = holdTab === '全部' ? sortedHolding : sortedHolding.filter((h) => industryOf(h) === holdTab)
   // 持仓 / 自选 去重代码集(同股多笔只算一只);用于全选/生成
   const holdCodes = [...new Set(sortedHolding.map((h) => h.code))]
   const watchCodes = [...new Set((book.plan || []).map((p) => p.code))]
@@ -1013,23 +1058,37 @@ function HoldingList({ book, quote, batchSel }) {
       {book.holding.length === 0 ? (
         <div className="empty">在下方「自选 / 候选」里点「建仓」后，持仓出现在这里。做T：在每笔持仓上高抛低吸、摊薄成本。</div>
       ) : (
-        <div className="hold-grid">
-          {sortedHolding.map((h, idx) => (
-            selectMode ? (
-              <div key={h.id}
-                className={'hold-select-wrap' + (selected.has(h.code) ? ' sel-on' : '')}
-                onClickCapture={(e) => { e.stopPropagation(); toggleSel(h.code) }}
-                title={selected.has(h.code) ? '取消选择' : '选择此股'}>
-                <span className={'pc-check' + (selected.has(h.code) ? ' on' : '')}>
-                  <Icon name={selected.has(h.code) ? 'checkSquare' : 'square'} size={16} />
-                </span>
-                <HoldingItem h={h} idx={idx} quote={quote[h.code]} />
-              </div>
-            ) : (
-              <HoldingItem key={h.id} h={h} idx={idx} quote={quote[h.code]} />
-            )
-          ))}
-        </div>
+        <>
+          {/* 行业 Tab 栏：全部 + 各行业(按只数/强度排序) + 其他 —— 与自选区同口径 */}
+          <div className="ind-tabs">
+            <button className={'ind-tab' + (holdTab === '全部' ? ' on' : '')} onClick={() => setHoldTab('全部')}>
+              全部 <span className="ind-tab-n">{[...new Set(book.holding.map((h) => h.code))].length}</span>
+            </button>
+            {holdIndustries.map((i) => (
+              <button key={i.name} className={'ind-tab' + (holdTab === i.name ? ' on' : '') + (i.name === '其他' ? ' other' : '')} onClick={() => setHoldTab(i.name)}>
+                {i.name} <span className="ind-tab-n">{i.count}</span>
+                {i.avgPct != null && <span className={'ind-tab-pct ' + (i.avgPct >= 0 ? 'red' : 'green')}>{i.avgPct >= 0 ? '+' : ''}{i.avgPct.toFixed(1)}%</span>}
+              </button>
+            ))}
+          </div>
+          <div className="hold-grid">
+            {shownHolding.map((h, idx) => (
+              selectMode ? (
+                <div key={h.id}
+                  className={'hold-select-wrap' + (selected.has(h.code) ? ' sel-on' : '')}
+                  onClickCapture={(e) => { e.stopPropagation(); toggleSel(h.code) }}
+                  title={selected.has(h.code) ? '取消选择' : '选择此股'}>
+                  <span className={'pc-check' + (selected.has(h.code) ? ' on' : '')}>
+                    <Icon name={selected.has(h.code) ? 'checkSquare' : 'square'} size={16} />
+                  </span>
+                  <HoldingItem h={h} idx={idx} quote={quote[h.code]} />
+                </div>
+              ) : (
+                <HoldingItem key={h.id} h={h} idx={idx} quote={quote[h.code]} />
+              )
+            ))}
+          </div>
+        </>
       )}
     </div>
   )

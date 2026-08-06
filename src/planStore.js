@@ -705,6 +705,11 @@ export const planStore = {
     state.plan = state.plan.map((x) => x.code === code ? { ...x, ...plan } : x)
     emit()
   },
+  // 给某笔持仓回写附加元信息(如行业 industry，用于持仓区板块分类)——非结构性字段，不影响成本/手数。
+  setHoldingMeta(id, meta) {
+    state.holding = state.holding.map((x) => x.id === id ? { ...x, ...meta } : x)
+    emit()
+  },
   // 自选股「买点预警」自动同步：跟随 AI 操作建议的【建议买入价】,自动建一条【到价 ≤ 买入价】预警,
   // 价格跌到买点即提醒去买入。规则:每只自选股只自动设这一条(买点),不把止盈/止损全设上——
   // 未持仓阶段最有用的就是「到买点提醒买入」,其余等买入后由持仓计划联动生成。
