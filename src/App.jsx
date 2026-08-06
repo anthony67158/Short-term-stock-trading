@@ -6,7 +6,7 @@ import AuthGate, { AccountMenu } from './components/AuthGate'
 import { usePolling, isTradingHours, useCountdown, triggerRefresh, useRefreshTick } from './hooks'
 import { usePlanStore, planStore } from './planStore'
 import { useAIStore, aiStore } from './aiStore'
-import { useAuthStore, authStore } from './authStore'
+import { useAuthStore, authStore, startCloudSync } from './authStore'
 import { useTheme, themeStore } from './themeStore'
 import { useDetailStore, detailStore } from './detailStore'
 import { alertStore, useAlertStore } from './alertStore'
@@ -46,7 +46,7 @@ const TABS = [
 
 export default function App() {
   const { user, booting } = useAuthStore()
-  useEffect(() => { authStore.boot() }, [])   // 启动时尝试恢复会话
+  useEffect(() => { authStore.boot(); startCloudSync() }, [])   // 启动时尝试恢复会话 + 开启跨设备同步轮询
   if (booting) return (
     <div className="auth-gate"><div className="auth-card" style={{ textAlign: 'center' }}>
       <div className="auth-brand"><span className="nav-logo"><Icon name="logo" size={20} /></span><span>短线操盘台</span></div>

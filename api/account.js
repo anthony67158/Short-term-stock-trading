@@ -40,7 +40,31 @@ async function readAccount(nick) {
   } catch { return null; }
 }
 
-async function writeAccount(acc) {
+// 列出【全部账号】的最新快照(供云端定时任务遍历所有用户生成 AI 建议)。
+// accounts/ 下形如 accounts/<hash>/<ts>-<rand>.json(新)或 accounts/<hash>.json(旧单文件)。
+// 按 hash 目录分组,每组取 uploadedAt 最新的一份读出 → 返回账号对象数组(含 nick/pwHash/data)。
+export async function listAllAccounts() {
+  const out = [];
+  try {
+    const { blobs } = await list({ prefix: PREFIX, limit: 1000 });
+    const groups = new Map(); // key: hash 目录(或旧单文件 key) → 该组最新 blob
+    for (const b of (blobs || [])) {
+      const rest = b.pathname.slice(PREFIX.length);      // <hash>/<ts>.json 或 <hash>.json
+      const key = rest.includes('/') ? rest.split('/')[0] : rest; // 目录 hash 或旧文件名
+      const cur = groups.get(key);
+      if (!cur || new Date(b.uploadedAt).getTime() > new Date(cur.uploadedAt).getTime()) {
+        groups.set(key, b);
+      }
+    }
+    for (const b of groups.values()) {
+      const j = await readJson(b);
+      if (j && j.nick) out.push(j);
+    }
+  } catch { /* ignore */ }
+  return out;
+}
+
+export async function writeAccount(acc) {
   acc.updatedAt = Date.now();
   // 用唯一文件名写入（addRandomSuffix），保证每次都是新 URL，绝不读到 CDN 旧副本
   await put(`${prefixOf(acc.nick)}${acc.updatedAt}.json`, JSON.stringify(acc), {

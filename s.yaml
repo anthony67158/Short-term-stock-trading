@@ -45,6 +45,10 @@ resources:
         OSS_BUCKET: ${env('OSS_BUCKET')}
         OSS_ACCESS_KEY_ID: ${env('OSS_ACCESS_KEY_ID')}
         OSS_ACCESS_KEY_SECRET: ${env('OSS_ACCESS_KEY_SECRET')}
+        # ---- 云端定时生成 AI 操作建议（/api/cron_advice 的鉴权口令）----
+        # 由 Mira 定时任务 / 外部 cron 携带 X-Cron-Key 命中,防匿名 HTTP 触发器烧 token。
+        # 未配置时 cron_advice 放行(本地/未设),线上务必设置。
+        CRON_KEY: ${env('CRON_KEY')}
       # HTTP 触发器：对外提供访问地址（可再叠加 CDN/自定义域名做 HTTPS 加速）
       triggers:
         - triggerName: http

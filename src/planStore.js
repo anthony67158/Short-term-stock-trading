@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import { getAdvice, getAllAdvice, setAllAdvice, registerAdviceSync } from './adviceCache'
+import { getAdvice, getAllAdvice, setAllAdvice, mergeAdvice, registerAdviceSync } from './adviceCache'
 
 // 唯一 id（分笔持仓/记录用）
 let _seq = 0
@@ -245,6 +245,33 @@ export const planStore = {
   },
   // authStore 注册云端保存回调
   registerSaver(fn) { _saver = fn },
+  // 运行时【定期】把云端数据合并进本地(跨设备同步:手机生成的AI建议→电脑自动看到,无需刷新)。
+  // 与 setData(登录时整体覆盖) 不同:这里是运行态的【非破坏式增量合并】——
+  //   · AI操作建议(advice):按逐条时间戳合并,只补更新的,不删本机更新的(见 mergeAdvice)
+  //   · adviceLog(决策记录):按 id 去重并入,保留两端全集(仅新增,不删)
+  // 绝不触碰 plan/holding/closed/account —— 那些是用户正在本机编辑的,交由用户操作+防抖回存,
+  // 避免"电脑正在改持仓,却被云端旧值盖回"。合并若有变化,防抖回存一次让两端最终一致。
+  mergeCloud(d) {
+    if (!d || typeof d !== 'object') return false
+    let changed = false
+    // 1) AI 操作建议:逐条时间戳合并
+    if (d.advice && typeof d.advice === 'object') {
+      if (mergeAdvice(d.advice)) changed = true
+    }
+    // 2) 决策记录:按 id 并集(仅新增)
+    if (Array.isArray(d.adviceLog) && d.adviceLog.length) {
+      const seen = new Set((state.adviceLog || []).map((x) => x && x.id).filter(Boolean))
+      const add = d.adviceLog.filter((x) => x && x.id && !seen.has(x.id))
+      if (add.length) {
+        _suspend = true
+        state = { ...state, adviceLog: [...(state.adviceLog || []), ...add].sort((a, b) => (a.at || 0) - (b.at || 0)) }
+        _suspend = false
+        changed = true
+      }
+    }
+    if (changed) { listeners.forEach((l) => l()); scheduleSave() }
+    return changed
+  },
   // ===== 跨设备同步的个性化设置 =====
   // 供 UI(如 AI 每日精选选股/自动开关) 读写；变更即触发防抖回存云端。
   getSetting(key, fallback = null) {

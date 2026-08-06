@@ -47,6 +47,24 @@ export function setAllAdvice(map) {
   notify()
 }
 
+// 按【逐条时间戳】把云端建议合并进本地(用于运行时定期同步:手机生成→电脑自动看到)。
+// 与 setAllAdvice(整体覆盖) 不同:这里【只补更新更新的条目】,绝不删除本地更新的本机结果——
+//   · 云端某 code 的 at 比本地新 → 用云端覆盖(其它设备刚生成的,拉过来)
+//   · 本地某 code 的 at 更新或云端没有 → 保留本地(本机刚生成、还没回存完的,不被旧云端盖掉)
+// 返回 true 表示本地确有变化(触发了 notify),供上层决定是否要再回存。
+export function mergeAdvice(map) {
+  if (!map || typeof map !== 'object') return false
+  const now = Date.now()
+  let changed = false
+  for (const [k, v] of Object.entries(map)) {
+    if (!v || (now - (v.at || 0) > TTL)) continue   // 过期的不收
+    const cur = mem[k]
+    if (!cur || (v.at || 0) > (cur.at || 0)) { mem[k] = v; changed = true }
+  }
+  if (changed) { persist(); notify() }
+  return changed
+}
+
 export function getAdvice(code) {
   if (!code) return null
   const e = mem[code]

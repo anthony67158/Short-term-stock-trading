@@ -118,6 +118,39 @@ export const authStore = {
     await api('save', { nick: state.user, pw: _pw, data })
   },
   currentUser() { return state.user },
+
+  // 运行时【定期拉取】云端数据并【非破坏式合并】到本地。
+  // 解决"手机上生成的 AI 操作建议,电脑浏览器不刷新"——之前只在 boot/login 拉一次,
+  // 运行中从不复拉,桌面端会一直停在旧数据。这里周期性 get,交给 planStore.mergeCloud 按时间戳合并
+  // (只补更新的建议/决策,绝不覆盖本机正在编辑的持仓/账户),实现"手机生成、电脑自动看到"。
+  async pull() {
+    if (!state.user || !_pw) return false
+    if (_pulling) return false
+    _pulling = true
+    try {
+      const r = await api('get', { nick: state.user, pw: _pw })
+      if (r && r.ok && r.data) {
+        try { planStore.mergeCloud(r.data) } catch { /* ignore */ }
+        return true
+      }
+      return false
+    } catch { return false } finally { _pulling = false }
+  },
+}
+
+let _pulling = false
+let _pullTimer = null
+const PULL_INTERVAL = 45 * 1000  // 45s 轮询一次云端(登录态才跑);切前台/重新可见时也补拉一次
+
+// 启动跨设备同步轮询:仅在浏览器环境、登录后运行。关标签页即停(纯前端增量同步,与云端定时生成无关)。
+export function startCloudSync() {
+  if (typeof window === 'undefined') return
+  if (_pullTimer) return
+  _pullTimer = setInterval(() => { try { authStore.pull() } catch { /* ignore */ } }, PULL_INTERVAL)
+  // 页面重新可见/窗口聚焦 → 立刻补拉一次(用户从手机切回电脑那一刻就能看到最新建议)
+  const kick = () => { if (document.visibilityState === 'visible') { try { authStore.pull() } catch { /* ignore */ } } }
+  document.addEventListener('visibilitychange', kick)
+  window.addEventListener('focus', kick)
 }
 
 export function useAuthStore() {
