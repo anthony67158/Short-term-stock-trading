@@ -2698,16 +2698,13 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 .ffc-date { font-size: 18px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
 .ffc-session { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
 .ffc-head-right { display: flex; align-items: center; gap: 10px; }
-.ffc-viewsw { display: inline-flex; padding: 3px; gap: 2px; background: var(--panel3); border: 1px solid var(--border); border-radius: 9px; }
-.ffc-vbtn { border: none; background: transparent; color: var(--muted); font-size: 12px; font-weight: 600; padding: 5px 11px; border-radius: 6px; cursor: pointer; transition: all var(--t-fast); }
-.ffc-vbtn:hover { color: var(--text2); }
-.ffc-vbtn.on { background: var(--panel); color: var(--accent); box-shadow: 0 1px 4px rgba(0,0,0,.25); }
 /* 桑基图舞台 */
 .ffc-stage.sankey { min-height: 380px; padding: 0 6px 4px; }
 .ffc-sankey-heads { display: flex; justify-content: space-between; padding: 0 18px 2px; font-size: 12px; font-weight: 600; }
 .ffc-sankey-heads .green { color: var(--green); }
 .ffc-sankey-heads .mid { color: var(--accent); }
 .ffc-sankey-heads .red { color: var(--red); }
+.ffc-lg-note { color: var(--muted); font-style: normal; opacity: .85; }
 .ffc-play { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--border); background: var(--panel2); color: var(--text2); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: all var(--t-fast); }
 .ffc-play:hover { color: var(--accent); border-color: var(--accent); }
 .ffc-play.on { color: var(--accent); border-color: var(--accent); background: rgba(124,107,245,.12); }
