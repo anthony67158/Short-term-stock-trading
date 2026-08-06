@@ -399,6 +399,16 @@ body {
 .llm-field label { display: block; font-size: 12px; font-weight: 600; color: var(--text2); margin-bottom: 5px; }
 .llm-field .auth-input { margin-bottom: 4px; }
 .llm-hint { font-size: 11px; color: var(--muted); line-height: 1.5; }
+
+/* 深度思考开关(每角色一枚,置于模型输入下方) */
+.llm-reason-toggle { display: inline-flex; align-items: center; gap: 7px; margin-top: 6px; cursor: pointer; user-select: none; }
+.llm-reason-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+.llm-reason-track { position: relative; width: 34px; height: 18px; border-radius: 999px; background: var(--line, #3a3f52); transition: background .18s ease; flex: 0 0 auto; }
+.llm-reason-thumb { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.35); transition: transform .18s ease; }
+.llm-reason-toggle.on .llm-reason-track { background: #7c6bf5; }
+.llm-reason-toggle.on .llm-reason-thumb { transform: translateX(16px); }
+.llm-reason-text { display: inline-flex; align-items: center; gap: 3px; font-size: 11.5px; color: var(--muted); transition: color .18s ease; }
+.llm-reason-toggle.on .llm-reason-text { color: #8b7cf6; font-weight: 600; }
 .llm-msg { font-size: 12px; margin-top: 8px; }
 .llm-msg.ok { color: var(--green); }
 .llm-testing { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text2); padding: 14px 0; }

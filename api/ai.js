@@ -6,7 +6,7 @@ import { marketTimePromptBlock, marketTimeContext } from './_market_time.js';
 import { getLatestDailySummary } from './_daily_summary.js';
 import { fetchNews, fetchClsTelegraph } from './_market_data.js';
 import { callChat, callChatWithRetry, parseLLMJson } from './_llm.js';
-import { ensureConfig, currentConfig, getModel } from './_llm_config.js';
+import { ensureConfig, currentConfig, getModel, getReasoning } from './_llm_config.js';
 import { applyCors, preflight } from './_lib.js';
 import { SYSTEM_PROMPT, ADVISOR_SYSTEM, buildUserPrompt, isAdvisorMode, maxTokensForMode } from './_ai_prompts.js';
 
@@ -767,6 +767,7 @@ export default async function handler(req, res) {
 
     const isAdvisor = isAdvisorMode(mode);
     const useModel = isAdvisor ? ADVISOR_MODEL : MODEL;
+    const useReasoning = isAdvisor ? getReasoning('advisor') : getReasoning('chat');
     const sysPrompt = isAdvisor ? ADVISOR_SYSTEM : SYSTEM_PROMPT;
 
     // 已采集到的数据 meta——即便 LLM 超时降级，也把这些"确定性数据"回传前端展示(有价值、不空手)
@@ -811,6 +812,7 @@ export default async function handler(req, res) {
       temperature: 0.2,   // JSON 结构化输出：低温提升稳定性与可解析率，减少字段漂移
       maxTokens: maxTokensForMode(mode),
       timeoutMs: llmTimeout,
+      reasoning: useReasoning,
       responseFormat: { type: 'json_object' },
     }, { budgetLeftMs: () => remain() - 2500 });  // 上游抖动/5xx 且预算足够时快速重试一次；abort/网络错误不抛出 → 转入降级返回
     done();

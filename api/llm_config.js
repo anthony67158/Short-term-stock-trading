@@ -105,6 +105,7 @@ export default async function handler(req, res) {
         baseUrl: body && body.baseUrl,
         apiKey: body && body.apiKey,     // 空则 saveConfig 内部保留原 key
         models: body && body.models,
+        reasoning: body && body.reasoning,
       });
       return res.status(200).send(JSON.stringify({ ok: true, config: publicView(), source: saved.source }));
     }

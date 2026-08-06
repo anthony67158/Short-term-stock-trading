@@ -40,6 +40,7 @@ export default function LLMConfig() {
   // 角色 & 模型
   const [roles, setRoles] = useState({})           // { chat:{label,def}, ... }
   const [models, setModels] = useState({})         // { chat:'x', advisor:'y', ... }
+  const [reasoning, setReasoning] = useState({})   // { chat:true/false, ... } 深度思考开关
   const [modelList, setModelList] = useState([])   // 可选模型清单（来自 verify）
   const [listable, setListable] = useState(false)  // 端点是否支持 /models 列举
 
@@ -58,6 +59,7 @@ export default function LLMConfig() {
         setKeyMask(c.apiKeyMask || '')
         setRoles(j.roles || {})
         setModels({ ...(c.models || {}) })
+        setReasoning({ ...(c.reasoning || {}) })
       } else {
         setErr((j && j.error) || '读取配置失败')
       }
@@ -123,7 +125,7 @@ export default function LLMConfig() {
     setErr(''); setNotice('')
     setBusy(true)
     try {
-      const j = await callConfig('save', { baseUrl: baseUrl.trim(), apiKey: apiKey.trim(), models })
+      const j = await callConfig('save', { baseUrl: baseUrl.trim(), apiKey: apiKey.trim(), models, reasoning })
       if (!j || !j.ok) { setErr((j && j.error) || '保存失败'); setBusy(false); return }
       setNotice('已保存，全系统即时生效')
       setTimeout(() => close(), 800)
@@ -135,6 +137,7 @@ export default function LLMConfig() {
   }
 
   const setModel = (role, v) => setModels((prev) => ({ ...prev, [role]: v }))
+  const setReason = (role, v) => setReasoning((prev) => ({ ...prev, [role]: !!v }))
   const okCount = testResults ? testResults.filter((r) => r.ok).length : 0
 
   return (
@@ -192,6 +195,13 @@ export default function LLMConfig() {
                   <input className="wl-input auth-input" list="llm-model-list" spellCheck={false}
                     placeholder={roles[k].def} value={models[k] || ''}
                     onChange={(e) => setModel(k, e.target.value)} />
+                  <label className={'llm-reason-toggle' + (reasoning[k] ? ' on' : '')}
+                    title="开启后该角色调用支持推理的模型时启用深度思考(reasoning),响应更慎密但更慢">
+                    <input type="checkbox" checked={!!reasoning[k]}
+                      onChange={(e) => setReason(k, e.target.checked)} />
+                    <span className="llm-reason-track"><span className="llm-reason-thumb" /></span>
+                    <span className="llm-reason-text"><Icon name="brain" size={12} /> 深度思考</span>
+                  </label>
                 </div>
               ))}
               <datalist id="llm-model-list">

@@ -5,7 +5,7 @@ import { screenStocks } from './_screen.js';
 import { marketTimePromptBlock } from './_market_time.js';
 import { fetchClsTelegraph } from './_market_data.js';
 import { makeSSE, callChat, pumpStream, llmEnv } from './_llm.js';
-import { ensureConfig, getModel } from './_llm_config.js';
+import { ensureConfig, getModel, getReasoning } from './_llm_config.js';
 
 // ============ 股票 Agent：工具增强的智能体 ============
 // LLM 自主调用 skill 工具（查行情/选股/板块/涨停/异动/新闻…）多轮后综合作答
@@ -293,6 +293,7 @@ export default async function handler(req, res) {
   await ensureConfig();
   const { BASE: RT_BASE, KEY: RT_KEY } = llmEnv();
   const AGENT_MODEL = getModel('agent');
+  const AGENT_REASONING = getReasoning('agent');
   if (!RT_BASE || !RT_KEY) { applyCors(res); res.setHeader('Content-Type', 'application/json; charset=utf-8'); return res.status(200).send(JSON.stringify({ ok: false, error: 'LLM 未配置' })); }
 
   // ===== SSE 流式：边分析边推送(工具进度 + 答案 token)，用户实时看到进展、不再"超时空手" =====
@@ -374,6 +375,7 @@ export default async function handler(req, res) {
         temperature: 0.3,
         maxTokens,
         timeoutMs,
+        reasoning: AGENT_REASONING,
         stream: !!stream,
       });
     };

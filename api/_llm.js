@@ -35,6 +35,7 @@ export async function callChat({
   timeoutMs = 30000,
   stream = false,
   responseFormat,
+  reasoning = false,
   signal,
 } = {}) {
   const { BASE, KEY } = llmEnv();
@@ -56,6 +57,8 @@ export async function callChat({
     bodyObj.tool_choice = toolChoice;
   }
   if (responseFormat) bodyObj.response_format = responseFormat;
+  // 深度思考:开启时按 OpenAI 兼容格式传 reasoning_effort=high(网关据此触发思维链)
+  if (reasoning) bodyObj.reasoning_effort = 'high';
 
   const resp = await fetch(`${BASE}/chat/completions`, {
     method: 'POST',

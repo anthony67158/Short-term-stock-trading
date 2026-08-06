@@ -4,7 +4,7 @@ import { marketTimePromptBlock } from './_market_time.js';
 import { fetchOverseas, fetchAIndices, fetchNews, fetchStockNews, fetchClsTelegraph, fetchSinaFlash, fetchFinnhubNews } from './_market_data.js';
 import { buildDailySummary } from './_daily_summary.js';
 import { llmEnv, makeSSE, callChat, parseLLMJson } from './_llm.js';
-import { ensureConfig, getModel } from './_llm_config.js';
+import { ensureConfig, getModel, getReasoning } from './_llm_config.js';
 
 // ============ 全市场投资策略日报（早/午/晚三场次，SSE 流式 + Blob 缓存）============
 // GET /api/daily_report?session=morning|noon|evening[&refresh=1]  body(POST): { holdings:[{code,name}] }
@@ -36,6 +36,7 @@ export default async function handler(req, res) {
   if (preflight(req, res)) return;
   await ensureConfig();               // 预热运行时配置（前端可改 Base/Key/模型）
   const MODEL = getModel('agent');    // 策略日报复用「智能体」模型(原独立 daily 角色已移除)
+  const REASONING = getReasoning('agent');
   const { BASE, KEY } = llmEnv();
   const streaming = true; // 本接口一律 SSE
 
@@ -150,6 +151,7 @@ export default async function handler(req, res) {
         temperature: 0.4,
         maxTokens,
         timeoutMs: llmTimeout,
+        reasoning: REASONING,
         responseFormat: { type: 'json_object' },
       });
       done();

@@ -26,15 +26,18 @@ export const ROLES = {
 // ---- 从环境变量拼出基线配置（OSS 无配置时的回退）----
 function envConfig() {
   const models = {};
+  const reasoning = {};
   for (const [role, m] of Object.entries(ROLES)) {
     let v = '';
     for (const e of m.envs) { if (process.env[e]) { v = process.env[e]; break; } }
     models[role] = v || m.def;
+    reasoning[role] = false;   // 深度思考默认关闭
   }
   return {
     baseUrl: process.env.LLM_BASE_URL || '',
     apiKey: process.env.LLM_API_KEY || '',
     models,
+    reasoning,
     source: 'env',
     updatedAt: 0,
   };
@@ -47,10 +50,15 @@ function merge(base, over) {
   if (over.models) for (const role of Object.keys(ROLES)) {
     if (over.models[role]) models[role] = over.models[role];
   }
+  const reasoning = { ...base.reasoning };
+  if (over.reasoning) for (const role of Object.keys(ROLES)) {
+    if (over.reasoning[role] != null) reasoning[role] = !!over.reasoning[role];
+  }
   return {
     baseUrl: over.baseUrl || base.baseUrl,
     apiKey: over.apiKey || base.apiKey,   // OSS 里没存 key 时保留 env key
     models,
+    reasoning,
     source: over.__stored ? 'oss' : base.source,
     updatedAt: over.updatedAt || base.updatedAt,
   };
@@ -86,6 +94,12 @@ export function getModel(role) {
   return (c.models && c.models[role]) || (ROLES[role] && ROLES[role].def) || '';
 }
 
+// ---- 同步取某角色是否开启深度思考(reasoning) ----
+export function getReasoning(role) {
+  const c = currentConfig();
+  return !!(c.reasoning && c.reasoning[role]);
+}
+
 // ---- 保存：写 OSS 并即时更新缓存。patch.apiKey 为空串时保留原 Key（前端不回传明文）----
 export async function saveConfig(patch = {}) {
   const cur = await ensureConfig({ maxAgeMs: 0 });
@@ -93,10 +107,14 @@ export async function saveConfig(patch = {}) {
     baseUrl: (patch.baseUrl != null && patch.baseUrl !== '') ? String(patch.baseUrl).replace(/\/+$/, '') : cur.baseUrl,
     apiKey: (patch.apiKey != null && patch.apiKey !== '') ? String(patch.apiKey) : cur.apiKey,
     models: { ...cur.models },
+    reasoning: { ...cur.reasoning },
     updatedAt: Date.now(),
   };
   if (patch.models) for (const role of Object.keys(ROLES)) {
     if (patch.models[role]) next.models[role] = String(patch.models[role]);
+  }
+  if (patch.reasoning) for (const role of Object.keys(ROLES)) {
+    if (patch.reasoning[role] != null) next.reasoning[role] = !!patch.reasoning[role];
   }
   if (!hasStorage()) throw new Error('存储未配置(OSS)，无法保存配置');
   // 覆盖写固定对象名（不加随机后缀，保证下次可读到同一路径）
@@ -123,6 +141,7 @@ export function publicView() {
     apiKeyMask: maskKey(c.apiKey),
     hasKey: !!c.apiKey,
     models: c.models,
+    reasoning: c.reasoning || {},
     source: c.source,
     updatedAt: c.updatedAt || 0,
   };
