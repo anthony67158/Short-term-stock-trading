@@ -11,7 +11,7 @@ import { planStore, usePlanStore, calcBuyFee, calcSellFee, computeTFlows, comput
 import { aiStore } from '../aiStore'
 import { openStockDetail, useDetailStore } from '../detailStore'
 import { getAdvice, subscribeAdvice } from '../adviceCache'
-import { runBatchAdvice, subscribeBatch, getBatchState, cancelBatch } from '../adviceBatch'
+import { runBatchAdvice, subscribeBatch, getBatchState, cancelBatch, cancelOne, regenerateFailed } from '../adviceBatch'
 import { getAutoConfig, K_ENABLED, K_INTERVAL, K_SCOPE, K_LAST, MIN_INTERVAL, MAX_INTERVAL, DEFAULT_INTERVAL } from '../adviceAutoRefresh'
 import { ensureQuantScore, ensureQuantScores } from '../quantScore'
 import { fmtPct, pctClass, fmtNum, fmtInflow , fmtRaw, hasVal, opText } from '../format'
@@ -1076,7 +1076,7 @@ function HoldingList({ book, quote, batchSel }) {
           <div className="bp-head">
             <span className="bp-title">
               {batch.running
-                ? <><Icon name="refresh" size={13} className="spin" /> 正在后台批量生成 AI 操作建议…</>
+                ? <><Icon name="refresh" size={13} className="spin" /> 正在后台批量生成 AI 操作建议…{batch.serverMode ? <span className="sub-name"> · 云端(退后台/关页面照跑)</span> : null}</>
                 : <><Icon name="check" size={13} /> 批量生成完成</>}
             </span>
             <span className="bp-stat">
@@ -1086,13 +1086,37 @@ function HoldingList({ book, quote, batchSel }) {
               {batch.skipped > 0 && <span className="sub-name"> · 跳过 {batch.skipped}</span>}
             </span>
             {batch.running
-              ? <button className="chip-btn ghost bp-cancel" onClick={cancelBatch} disabled={batch.cancelRequested}>{batch.cancelRequested ? '停止中…' : '取消'}</button>
-              : null}
+              ? <button className="chip-btn ghost bp-cancel" onClick={cancelBatch} disabled={batch.cancelRequested}>{batch.cancelRequested ? '停止中…' : '全部取消'}</button>
+              : (batch.fail > 0
+                ? <button className="chip-btn buy bp-regen" onClick={() => regenerateFailed(quote)}><Icon name="refresh" size={12} /> 重生成失败({batch.fail})</button>
+                : null)}
           </div>
           <div className="bp-track"><div className="bp-fill" style={{ width: batch.pct + '%' }} /></div>
-          {batch.running && batch.current.length > 0 && (
-            <div className="bp-current">
-              正在处理：{batch.items.filter((x) => batch.current.includes(x.code)).map((x) => x.name).join('、')}
+          {/* 每只独立状态:排队/生成中/成功/失败/取消;生成中或已完成的可点击跳转详情;运行中的可单只取消 */}
+          {batch.items.length > 0 && (
+            <div className="bp-items">
+              {batch.items.map((it) => {
+                const st = it.status  // pending|running|ok|fail|skipped
+                const label = { pending: '排队中', running: '生成中', ok: '已完成', fail: '失败', skipped: '已取消' }[st] || st
+                const jumpable = st === 'running' || st === 'ok' || st === 'fail'
+                return (
+                  <span key={it.code} className={'bp-chip bp-' + st}
+                    onClick={jumpable ? () => openStockDetail(it.code, it.name) : undefined}
+                    title={jumpable ? '查看该股详情/建议' : (it.error || label)}
+                    style={jumpable ? { cursor: 'pointer' } : undefined}>
+                    {st === 'running' && <Icon name="refresh" size={10} className="spin" />}
+                    {st === 'ok' && <Icon name="check" size={10} />}
+                    <b className="bp-chip-name">{it.name}</b>
+                    <span className="bp-chip-st">{label}</span>
+                    {(st === 'running' || st === 'pending') && (
+                      <button className="bp-chip-x" title="取消这一只"
+                        onClick={(e) => { e.stopPropagation(); cancelOne(it.code) }}>
+                        <Icon name="close" size={10} />
+                      </button>
+                    )}
+                  </span>
+                )
+              })}
             </div>
           )}
         </div>
