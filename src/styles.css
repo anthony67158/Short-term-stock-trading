@@ -33,6 +33,9 @@
   --surface-quiet: color-mix(in srgb, var(--panel3) 42%, transparent); /* 静默字段底色(无边框) */
   --surface-hair: color-mix(in srgb, var(--border) 55%, transparent);  /* 发丝分隔线 */
   --field-gap: 1px;   /* 网格字段间的发丝缝(靠底色分隔而非边框) */
+  /* 全站内容基线：顶栏内容容器与正文 .main 共用同一最大宽度与水平边距，保证纵向对齐 */
+  --content-w: 1440px;
+  --content-pad: 24px;
 }
 
 /* ============ 白天模式（浅色）：覆盖同名变量，组件零改动 ============ */
@@ -219,7 +222,7 @@ body {
 .btn:hover { border-color: var(--accent); color: var(--text); background: var(--panel3); }
 .btn:active { transform: scale(.97); }
 
-.footer { margin-top: 32px; color: var(--muted); font-size: 11px; line-height: 1.8; text-align: center; }
+.footer { max-width: var(--content-w, 1440px); margin: 32px auto 0; padding: 0 var(--content-pad, 24px); color: var(--muted); font-size: 11px; line-height: 1.8; text-align: center; }
 .legend { font-size: 11px; color: var(--muted); }
 .sub-name { color: var(--muted); font-size: 11px; margin-left: 6px; font-weight: 500; }
 
@@ -739,10 +742,17 @@ body {
 /* ---------- 顶部导航 ---------- */
 .nav {
   position: sticky; top: 0; z-index: 50;
-  display: flex; align-items: center; gap: 20px;
-  padding: 0 24px; height: 58px;
+  height: 58px;
   background: rgba(11,11,16,.72); backdrop-filter: blur(18px) saturate(1.4);
   border-bottom: 1px solid var(--border-soft);
+}
+/* 内容居中容器：与 .main 同宽同边距，避免宽屏下品牌/账户被推到两侧贴边 */
+.nav-inner {
+  height: 100%;
+  max-width: var(--content-w, 1440px);
+  margin: 0 auto;
+  padding: 0 var(--content-pad, 24px);
+  display: flex; align-items: center; gap: 20px;
 }
 .nav-brand { display: flex; align-items: center; gap: 9px; }
 .nav-logo {
@@ -781,7 +791,7 @@ body {
 .nav-refresh:active { transform: scale(.95); }
 .nav-refresh:active .icon { transform: rotate(-180deg); transition: transform .3s; }
 
-.main { max-width: 1440px; margin: 0 auto; padding: 22px 24px 44px; display: flex; flex-direction: column; gap: 18px; }
+.main { max-width: var(--content-w, 1440px); margin: 0 auto; padding: 22px var(--content-pad, 24px) 44px; display: flex; flex-direction: column; gap: 18px; }
 /* 页面切换时内容轻柔上浮淡入；用 backwards 而非 both，动画结束后不保留 transform，
    避免 transform 使内部 position:fixed 弹窗(如做T抽屉)被容器截断 */
 .main > * { animation: content-in .34s var(--ease) backwards; }
@@ -1113,7 +1123,8 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 
 /* ================= 移动端响应式 ================= */
 @media (max-width: 720px) {
-  .nav { height: auto; flex-wrap: wrap; gap: 8px 12px; padding: 8px 12px; position: sticky; }
+  .nav { height: auto; position: sticky; }
+  .nav-inner { flex-wrap: wrap; gap: 8px 12px; padding: 8px 12px; max-width: none; }
   .nav-brand { order: 0; }
   .nav-meta { order: 1; margin-left: auto; font-size: 11px; gap: 10px; }
   .nav-tabs { order: 2; width: 100%; overflow-x: auto; gap: 2px; -webkit-overflow-scrolling: touch; }
@@ -3019,21 +3030,25 @@ a.mn-flash:hover { color: var(--accent); }
 /* ---------- iOS PWA 安全区(刘海 / 灵动岛 / Home 指示条) ---------- */
 /* 顶栏顶到状态栏下方(black-translucent 下内容会侵入状态栏),两侧适配横屏刘海 */
 .nav { padding-top: env(safe-area-inset-top); height: calc(58px + env(safe-area-inset-top)); }
-.nav, .main, .footer { padding-left: max(env(safe-area-inset-left), 0px); padding-right: max(env(safe-area-inset-right), 0px); }
+.nav-inner, .main, .footer { padding-left: max(var(--content-pad, 24px), env(safe-area-inset-left)); padding-right: max(var(--content-pad, 24px), env(safe-area-inset-right)); }
 
 /* ================= 移动端(≤720px):底部 Tab 栏 ================= */
 @media (max-width: 720px) {
   /* 顶栏:仅留品牌 + 状态/工具,Tab 下沉到底部;高度含安全区 */
   .nav {
-    height: auto; flex-wrap: nowrap; gap: 8px; padding: 8px 12px;
-    padding-top: calc(8px + env(safe-area-inset-top));
-    justify-content: space-between;
+    height: auto;
     /* 关键修复:顶栏必须去掉 backdrop-filter。任何祖先带 backdrop-filter/filter/transform
        都会成为其 position:fixed 子元素的"包含块",导致底部 Tab 栏的 bottom:0 锚到顶栏底边
        (即屏幕顶部)而非视口底部——正是"Tab 跑到顶部、和灵动岛重叠"的根因。 */
     backdrop-filter: none; -webkit-backdrop-filter: none;
     position: sticky; top: 0;
     background: #0b0b10;  /* 去掉模糊后改用近实色底,避免下方内容透上来 */
+  }
+  html[data-theme="light"] .nav { background: #ffffff; }
+  .nav-inner {
+    flex-wrap: nowrap; gap: 8px; padding: 8px 12px;
+    padding-top: calc(8px + env(safe-area-inset-top));
+    justify-content: space-between; max-width: none;
   }
   .nav-brand { order: 0; flex-shrink: 0; }
   .nav-tabs { order: 1; }

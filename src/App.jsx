@@ -190,32 +190,34 @@ function MainApp() {
     <div className={'app' + (aiOpen ? ' with-ai' : '')}>
       {/* 顶部导航 */}
       <header className="nav">
-        <div className="nav-brand">
-          <span className="nav-logo"><Icon name="logo" size={18} /></span>
-          <span className="nav-name">短线操盘台</span>
-        </div>
-        <nav className="nav-tabs">
-          {TABS.map((t) => (
-            <button key={t.key} className={'nav-tab' + (tab === t.key ? ' active' : '')} onClick={() => setTab(t.key)}>
-              <Icon name={t.icon} size={16} />
-              <span>{t.label}</span>
-              {t.key === 'plan' && planCount > 0 && <span className="nav-badge">{planCount}</span>}
+        <div className="nav-inner">
+          <div className="nav-brand">
+            <span className="nav-logo"><Icon name="logo" size={18} /></span>
+            <span className="nav-name">短线操盘台</span>
+          </div>
+          <nav className="nav-tabs">
+            {TABS.map((t) => (
+              <button key={t.key} className={'nav-tab' + (tab === t.key ? ' active' : '')} onClick={() => setTab(t.key)}>
+                <Icon name={t.icon} size={16} />
+                <span>{t.label}</span>
+                {t.key === 'plan' && planCount > 0 && <span className="nav-badge">{planCount}</span>}
+              </button>
+            ))}
+          </nav>
+          <div className="nav-meta">
+            <span className={'nav-status ' + (trading ? 'on' : 'off')}>
+              <span className="status-dot" />{trading ? '交易中' : '休市'}
+            </span>
+            <button className="nav-refresh" onClick={triggerRefresh} title="立即刷新数据">
+              <Icon name="refresh" size={13} /><span>{remain}s</span>
             </button>
-          ))}
-        </nav>
-        <div className="nav-meta">
-          <span className={'nav-status ' + (trading ? 'on' : 'off')}>
-            <span className="status-dot" />{trading ? '交易中' : '休市'}
-          </span>
-          <button className="nav-refresh" onClick={triggerRefresh} title="立即刷新数据">
-            <Icon name="refresh" size={13} /><span>{remain}s</span>
-          </button>
-          <UndoButton />
-          <AlertBell onOpen={() => { setHubSub('alert'); setHubNonce((n) => n + 1); setTab('hub') }} />
-          <button className="icon-btn nav-theme" onClick={themeStore.toggle} title={theme === 'dark' ? '切到白天模式' : '切到夜间模式'}>
-            <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={15} />
-          </button>
-          <AccountMenu />
+            <UndoButton />
+            <AlertBell onOpen={() => { setHubSub('alert'); setHubNonce((n) => n + 1); setTab('hub') }} />
+            <button className="icon-btn nav-theme" onClick={themeStore.toggle} title={theme === 'dark' ? '切到白天模式' : '切到夜间模式'}>
+              <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={15} />
+            </button>
+            <AccountMenu />
+          </div>
         </div>
       </header>
 
