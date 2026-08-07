@@ -16,6 +16,27 @@ import { getAutoConfig, K_ENABLED, K_INTERVAL, K_SCOPE, K_LAST, MIN_INTERVAL, MA
 import { ensureQuantScore, ensureQuantScores } from '../quantScore'
 import { fmtPct, pctClass, fmtNum, fmtInflow , fmtRaw, hasVal, opText } from '../format'
 
+// —— 搜索结果 → 定位到卡片:轻量模块级事件总线 ——
+// 搜索框(StockSearch)、自选区(PlanList)、持仓区(HoldingList)同在本文件,用一个 Set 广播即可:
+// 点击「已加/已持有」的搜索结果 → requestLocate(code) → 各区认领自己名下的 code,滚动居中并高亮。
+const locateSubs = new Set()
+function requestLocate(code) { if (code) locateSubs.forEach((fn) => { try { fn(code) } catch { /* ignore */ } }) }
+function subscribeLocate(fn) { locateSubs.add(fn); return () => locateSubs.delete(fn) }
+// 滚动到 data-code 卡片并高亮脉冲。tab 可能刚切到「全部」→ 卡片本帧才渲染,故用 rAF 等下一帧再查 DOM。
+function scrollToCard(code) {
+  const find = () => document.querySelector(`[data-code="${code}"]`)
+  const go = (retry) => {
+    const el = find()
+    if (!el) { if (retry > 0) requestAnimationFrame(() => go(retry - 1)); return }
+    try { el.scrollIntoView({ behavior: 'smooth', block: 'center' }) } catch { el.scrollIntoView() }
+    el.classList.remove('locate-flash')
+    // 强制重排以便重复点击同一张卡也能重新触发动画
+    void el.offsetWidth
+    el.classList.add('locate-flash')
+    setTimeout(() => { try { el.classList.remove('locate-flash') } catch { /* ignore */ } }, 1800)
+  }
+  requestAnimationFrame(() => go(8))
+}
 
 // 金额格式化（元 → 带符号，万以上转万）
 function fmtMoney(v) {
@@ -283,11 +304,20 @@ function StockSearch() {
           {list.map((s) => {
             const added = planStore.has(s.code)
             const held = (planStore.get().holding || []).some((x) => x.code === s.code)
+            const inBook = added || held
+            // 已加入/已持有 → 点击不再是「加入」,而是定位到已有卡片(自选多了也能秒找到)
+            const onItem = () => {
+              if (inBook) { requestLocate(s.code); setOpen(false) }
+              else pick(s)
+            }
             return (
-              <div className="ss-item" key={s.code} onClick={() => !added && !held && pick(s)}>
+              <div className={'ss-item' + (inBook ? ' locatable' : '')} key={s.code} onClick={onItem}
+                title={inBook ? '点击定位到已有卡片' : '点击加入自选'}>
                 <span className="ss-name">{s.name}<span className="sub-name">{s.code}</span></span>
                 <span className="ss-type">{s.type}</span>
-                <span className={'ss-add' + ((added || held) ? ' done' : '')}><Icon name={(added || held) ? 'check' : 'plus'} size={13} />{held ? '已持有' : added ? '已加' : '加入'}</span>
+                {inBook
+                  ? <span className="ss-add locate"><Icon name="target" size={13} />{held ? '已持有 · 定位' : '已加 · 定位'}</span>
+                  : <span className="ss-add"><Icon name="plus" size={13} />加入</span>}
               </div>
             )
           })}
@@ -451,6 +481,7 @@ function PlanList({ book, quote, batchSel }) {
     return (
       <div className={'plan-cand' + (p.star ? ' starred' : '') + (selectMode ? ' selectable' : '') + (checked ? ' sel-on' : '')}
         key={p.code}
+        data-code={p.code}
         onClickCapture={selectMode ? (e) => { e.stopPropagation(); toggleSel(p.code) } : undefined}>
         {/* 勾选模式:左上角复选框(点整卡即可切换;捕获阶段拦截,屏蔽卡内其它交互) */}
         {selectMode && (
@@ -597,6 +628,13 @@ function PlanList({ book, quote, batchSel }) {
     if (tab !== '全部' && !industries.some((i) => i.name === tab)) setTab('全部')
     // eslint-disable-next-line
   }, [industries])
+
+  // 搜索结果「定位」:命中本区(自选/候选)名下的 code → 先切回「全部」保证卡片被渲染,再滚动+高亮
+  useEffect(() => subscribeLocate((code) => {
+    if (!(book.plan || []).some((p) => p.code === code)) return
+    setTab('全部')
+    scrollToCard(code)
+  }), [book.plan])
 
   return (
     <div className="panel">
@@ -950,6 +988,12 @@ function HoldingList({ book, quote, batchSel }) {
     if (holdTab !== '全部' && !holdIndustries.some((i) => i.name === holdTab)) setHoldTab('全部')
     // eslint-disable-next-line
   }, [holdIndustries])
+  // 搜索结果「定位」:命中本区(持仓)名下的 code → 先切回「全部」保证卡片被渲染,再滚动+高亮
+  useEffect(() => subscribeLocate((code) => {
+    if (!(book.holding || []).some((h) => h.code === code)) return
+    setHoldTab('全部')
+    scrollToCard(code)
+  }), [book.holding])
   // 当前 tab 下要显示的持仓（全部=所有；否则=该行业）
   const shownHolding = holdTab === '全部' ? sortedHolding : sortedHolding.filter((h) => industryOf(h) === holdTab)
   // 持仓 / 自选 去重代码集(同股多笔只算一只);用于全选/生成
@@ -1366,6 +1410,7 @@ function HoldingItem({ h, idx, quote: q }) {
         </>
       )}
       <div className="hold-item" {...swipe.bind}
+        data-code={h.code}
         style={swipe.dx ? { transform: `translateX(${swipe.dx}px)`, transition: swipe.swiping ? 'none' : 'transform .2s ease' } : undefined}>
       {/* 决策条：股名 + 特大号浮盈亏（第一视觉焦点）*/}
       <div className="hold-head">

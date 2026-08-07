@@ -1121,6 +1121,19 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 .ss-type { color: var(--muted); font-size: 11px; }
 .ss-add { margin-left: auto; display: inline-flex; align-items: center; gap: 3px; font-size: 12px; color: var(--accent); font-weight: 500; }
 .ss-add.done { color: var(--green); }
+/* 搜索结果:已加入/已持有 → 可点击「定位」到已有卡片 */
+.ss-item.locatable { cursor: pointer; }
+.ss-item.locatable:hover { background: rgba(124,107,245,.1); }
+.ss-add.locate { color: var(--accent2); }
+.ss-add.locate .icon { color: var(--accent2); }
+/* 搜索定位:命中卡片脉冲高亮(inset 阴影,不会被 hold-swipe-wrap 的 overflow:hidden 裁掉) */
+@keyframes locate-flash {
+  0%   { box-shadow: inset 0 0 0 2px var(--accent), 0 0 0 rgba(124,107,245,0); background-color: rgba(124,107,245,.14); }
+  60%  { box-shadow: inset 0 0 0 2px var(--accent); background-color: rgba(124,107,245,.06); }
+  100% { box-shadow: inset 0 0 0 0 rgba(124,107,245,0); background-color: transparent; }
+}
+.locate-flash { animation: locate-flash 1.8s ease-out; border-radius: var(--radius, 8px); }
+@media (prefers-reduced-motion: reduce) { .locate-flash { animation-duration: .6s; } }
 /* 搜索按钮 + 状态提示（无结果/加载/报错时也给可见反馈，避免“像是搜不了”） */
 .ss-btn { display: inline-flex; align-items: center; gap: 4px; padding: 5px 12px; border-radius: var(--radius-sm); border: none; background: var(--accent); color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: opacity .15s, filter .15s; }
 .ss-btn:hover { filter: brightness(1.08); }
