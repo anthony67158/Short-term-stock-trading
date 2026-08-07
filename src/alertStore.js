@@ -34,6 +34,17 @@ export function describeAlert(a) {
   return `${t.label} ${OP_LABEL[a.op] || ''} ${a.value}${t.unit}`
 }
 
+// 到价后的"确认再动手"提示：价位预警(止盈/止损/买点)只是触发观察线，不是见价即成交。
+// 依据 note(止盈/止损/买点) 给一句时机提醒，引导用户去详情页看AI建议的"到价后怎么做"。
+function confirmHint(a) {
+  if (!a || a.type !== 'price') return ''
+  const note = a.note || ''
+  if (/止损/.test(note)) return '\n⚠️到价=开始盯，别急砍：确认是否放量/收盘跌破，只是瞬时插针又拉回可先缓一手。详情见AI建议「到价后怎么做」。'
+  if (/止盈/.test(note)) return '\n💡到价=开始盯，别一次清光：可先减一部分锁利，剩余用移动止盈跟着走。详情见AI建议「到价后怎么做」。'
+  if (/买点/.test(note)) return '\n💡到价=开始盯，别追一瞬价：等缩量企稳/站回均线再进。详情见AI建议「到价后怎么做」。'
+  return ''
+}
+
 // 判断单条规则是否命中（q=该股实时报价）
 function hit(a, q) {
   if (!q) return null
@@ -139,7 +150,10 @@ export const alertStore = {
       const msg = hit(a, q)
       if (msg) {
         const title = `⚡ 预警触发 · ${a.name || a.code}`
-        const body = `${describeAlert(a)}｜${msg}`
+        // 到价=开始盯盘,不是见价即砍:止盈/止损/买点这类价位预警,补一句"需确认信号再动手",
+        // 避免用户被瞬时插针骗出局(砍在最低点又眼看它涨回来)。具体确认条件见详情页AI建议的"到价后怎么做"。
+        const tail = confirmHint(a)
+        const body = `${describeAlert(a)}｜${msg}${tail}`
         this.push({ code: a.code, name: a.name, title, body, alertId: a.id })
         notify(title, body)
         planStore.markAlertTriggered(a.id, msg) // 触发后自动停用，防重复

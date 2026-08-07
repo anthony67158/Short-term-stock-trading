@@ -2233,6 +2233,10 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 .advice-horizon .ah-row.now .ah-k { color: #2e9e63; background: rgba(76,175,120,.16); }
 .advice-horizon .ah-row.future .ah-k { color: var(--accent, #7c6bf5); background: rgba(124,107,245,.14); }
 .advice-horizon .ah-v { flex: 1; }
+/* 到价后怎么做：把"见价即砍"升级为"到价→看信号确认→再执行"的时机提示条 */
+.advice-exit-timing { display: flex; align-items: flex-start; gap: 6px; font-size: 12.5px; line-height: 1.6; color: var(--text); padding: 8px 11px; border-radius: 9px; background: rgba(240,168,48,.08); border: 1px solid rgba(240,168,48,.30); margin-bottom: 9px; }
+.advice-exit-timing .icon, .advice-exit-timing svg { flex-shrink: 0; margin-top: 2px; color: #d98a1a; }
+.advice-exit-timing b { color: #b8730a; font-weight: 700; margin-right: 2px; }
 .advice-adjust { display: flex; align-items: center; gap: 5px; font-size: 12px; line-height: 1.5; margin: 8px 0; padding: 6px 10px; border-radius: 8px; color: #c98a12; background: rgba(240,180,40,.10); border: 1px solid rgba(240,180,40,.28); }
 .advice-adjust .icon { color: #c98a12; flex-shrink: 0; }
 .advice-retry { font-size: 12.5px; color: var(--gold); margin-bottom: 8px; padding: 7px 10px; border-radius: 8px; background: rgba(227,179,65,.08); border: 1px solid rgba(227,179,65,.24); }

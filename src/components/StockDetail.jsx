@@ -677,6 +677,10 @@ export default function StockDetail({ stock, onClose }) {
                           {adv.serverAdjust && (
                             <div className="advice-adjust"><Icon name="shield" size={12} /> 已按合规校正：{adv.serverAdjust}</div>
                           )}
+                          {/* 触价后怎么确认才动手：把"见价即砍"升级为"到价→看信号确认→再执行"，避免被瞬时插针骗出局 */}
+                          {adv.exitTiming && (
+                            <div className="advice-exit-timing"><Icon name="shield" size={13} /> <b>到价后怎么做</b>：{adv.exitTiming}</div>
+                          )}
                           {/* 买入计划(未持仓·按账户全景算的手数/资金/占比) —— 一眼看清怎么下手 */}
                           {!myHold && (hasVal(adv.planQty) || hasVal(adv.planAmount) || hasVal(adv.planWeight)) && (
                             <div className="op-calc">

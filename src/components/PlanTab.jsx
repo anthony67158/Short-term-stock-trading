@@ -1879,6 +1879,7 @@ function HoldReview({ code, name, cost, qty, price }) {
     todayRecap: adv.todayRecap || '',
     tradeReview: adv.tradeReview || '',
     nextAction: adv.actionPlan || adv.timing || '',
+    exitTiming: adv.exitTiming || '',
     nextOpenPlan: adv.nextOpenPlan || '',
     futurePlan: adv.futurePlan || '',
     theoryNote: adv.theoryNote || '',
@@ -1934,6 +1935,13 @@ function HoldReview({ code, name, cost, qty, price }) {
         <div className="hr-next compact">
           <span className="hr-next-k">下一步</span>
           <span className="hr-next-txt">{r.nextAction}</span>
+        </div>
+      )}
+
+      {/* ④a 到价后怎么做：把"见价即砍"升级为"到价→看信号确认→再执行"，避免被瞬时插针骗出局 */}
+      {r.exitTiming && (
+        <div className="advice-exit-timing" style={{ margin: '8px 10px 0' }}>
+          <Icon name="shield" size={13} /> <b>到价后怎么做</b>：{r.exitTiming}
         </div>
       )}
 
