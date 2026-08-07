@@ -463,6 +463,42 @@ body {
 .llm-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 16px; }
 .llm-actions .btn { min-width: 96px; justify-content: center; }
 
+/* 多端点资源池编辑器 */
+.llm-ep { margin-top: 6px; border-top: 1px solid var(--border-soft); padding-top: 12px; }
+.llm-ep-toggle { display: flex; align-items: center; gap: 7px; width: 100%; padding: 6px 2px; background: transparent; border: none; cursor: pointer; color: var(--text2); font-size: 12.5px; font-weight: 600; }
+.llm-ep-toggle:hover { color: var(--text); }
+.llm-ep-toggle .icon { color: var(--muted); flex-shrink: 0; }
+.llm-ep-badge { margin-left: auto; font-size: 11px; font-weight: 500; color: var(--muted); padding: 2px 8px; border-radius: 999px; background: var(--panel2); border: 1px solid var(--border-soft); }
+.llm-ep-body { margin-top: 8px; display: flex; flex-direction: column; gap: 10px; }
+.llm-ep-empty { font-size: 12px; color: var(--muted); text-align: center; padding: 12px; border: 1px dashed var(--border); border-radius: 8px; }
+.llm-ep-row { border: 1px solid var(--border); border-radius: 10px; padding: 10px; background: var(--panel2); display: flex; flex-direction: column; gap: 8px; transition: opacity .18s; }
+.llm-ep-row.off { opacity: .55; }
+.llm-ep-row-head { display: flex; align-items: center; gap: 8px; }
+.llm-ep-idx { font-size: 12px; font-weight: 700; color: var(--text2); font-variant-numeric: tabular-nums; }
+.llm-ep-row .llm-reason-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 2px 2px; margin: 0; border: none; background: transparent; cursor: pointer; line-height: 1; }
+.llm-ep-health { font-size: 10.5px; font-weight: 600; padding: 2px 8px; border-radius: 999px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.llm-ep-health.ok { color: var(--green); background: rgba(31,157,67,.12); }
+.llm-ep-health.warn { color: #d9a441; background: rgba(217,164,65,.12); }
+.llm-ep-health.cooling { color: var(--red); background: rgba(224,67,47,.12); }
+.llm-ep-del { margin-left: auto; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 7px; border: 1px solid var(--border); background: var(--panel); color: var(--muted); cursor: pointer; flex-shrink: 0; }
+.llm-ep-del:hover { color: var(--red); border-color: rgba(224,67,47,.4); }
+.llm-ep-row2 { display: flex; gap: 8px; align-items: stretch; }
+.llm-ep-row2 .auth-input { margin-bottom: 0; }
+.llm-ep-row2 > input[type="password"] { flex: 1; min-width: 0; }
+.llm-ep-weight { width: 68px; flex: 0 0 68px; text-align: center; }
+.llm-ep-verify { flex: 0 0 auto; min-width: 0; padding: 0 12px; gap: 5px; white-space: nowrap; }
+.llm-ep-msg { font-size: 11px; }
+.llm-ep-msg.ok { color: var(--green); }
+.llm-ep-msg.bad { color: var(--red); }
+.llm-ep-add { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 9px; border: 1px dashed var(--border); border-radius: 9px; background: transparent; color: var(--accent); font-size: 12.5px; font-weight: 600; cursor: pointer; transition: background .15s, border-color .15s; }
+.llm-ep-add:hover { background: rgba(124,107,245,.08); border-color: rgba(124,107,245,.4); }
+@media (max-width: 560px) {
+  .llm-ep-row2 { flex-wrap: wrap; }
+  .llm-ep-row2 > input[type="password"] { flex: 1 1 100%; }
+  .llm-ep-weight { flex: 1 1 auto; width: auto; }
+  .llm-ep-verify { flex: 1 1 auto; }
+}
+
 /* diagnosis popover result inside table */
 .diag-row td { background: var(--panel2); }
 .diag-box { padding: 10px 14px; text-align: left; white-space: normal; }

@@ -37,6 +37,12 @@ export default function LLMConfig() {
   const [hasKey, setHasKey] = useState(false)      // 后端是否已存有 Key（留空则沿用）
   const [keyMask, setKeyMask] = useState('')
 
+  // 多端点资源池（可选：配置后覆盖单端点，提供轮询/最少在途路由 + 熔断故障转移）
+  const [endpoints, setEndpoints] = useState([])   // [{id, baseUrl, apiKeyMask, hasKey, weight, enabled, apiKey?(仅本地新输入)}]
+  const [pool, setPool] = useState([])             // [{id, baseUrl, inflight, fails, cooling, cooldownMsLeft}]
+  const [showPool, setShowPool] = useState(false)  // 展开多端点面板
+  const [epTesting, setEpTesting] = useState({})   // { [id]: {ok, msg} } 单端点验证结果
+
   // 角色 & 模型
   const [roles, setRoles] = useState({})           // { chat:{label,def}, ... }
   const [models, setModels] = useState({})         // { chat:'x', advisor:'y', ... }
@@ -60,6 +66,10 @@ export default function LLMConfig() {
         setRoles(j.roles || {})
         setModels({ ...(c.models || {}) })
         setReasoning({ ...(c.reasoning || {}) })
+        const eps = Array.isArray(c.endpoints) ? c.endpoints : []
+        setEndpoints(eps)
+        setPool(Array.isArray(j.pool) ? j.pool : [])
+        setShowPool(eps.length > 0)
       } else {
         setErr((j && j.error) || '读取配置失败')
       }
@@ -125,8 +135,23 @@ export default function LLMConfig() {
     setErr(''); setNotice('')
     setBusy(true)
     try {
-      const j = await callConfig('save', { baseUrl: baseUrl.trim(), apiKey: apiKey.trim(), models, reasoning })
+      const payload = { baseUrl: baseUrl.trim(), apiKey: apiKey.trim(), models, reasoning }
+      // 仅当用户启用了多端点面板时才提交 endpoints(整组替换);未启用则传空数组=清空池,退回单端点
+      if (showPool) {
+        payload.endpoints = endpoints.map((e) => ({
+          id: e.id,
+          baseUrl: (e.baseUrl || '').trim(),
+          // 新输入的明文 key 才上送;掩码/留空则不传(后端按 id 保留原 key)
+          apiKey: (e.apiKey != null && e.apiKey !== '') ? e.apiKey.trim() : '',
+          weight: e.weight,
+          enabled: e.enabled !== false,
+        }))
+      } else {
+        payload.endpoints = []
+      }
+      const j = await callConfig('save', payload)
       if (!j || !j.ok) { setErr((j && j.error) || '保存失败'); setBusy(false); return }
+      if (Array.isArray(j.pool)) setPool(j.pool)
       setNotice('已保存，全系统即时生效')
       setTimeout(() => close(), 800)
     } catch (e) {
@@ -139,6 +164,34 @@ export default function LLMConfig() {
   const setModel = (role, v) => setModels((prev) => ({ ...prev, [role]: v }))
   const setReason = (role, v) => setReasoning((prev) => ({ ...prev, [role]: !!v }))
   const okCount = testResults ? testResults.filter((r) => r.ok).length : 0
+
+  // —— 多端点资源池：增删改 ——
+  const addEndpoint = () => {
+    const id = 'ep' + Date.now().toString(36)
+    setEndpoints((prev) => [...prev, { id, baseUrl: '', apiKey: '', weight: 1, enabled: true, hasKey: false }])
+    setShowPool(true)
+  }
+  const removeEndpoint = (id) => {
+    setEndpoints((prev) => prev.filter((e) => e.id !== id))
+    setEpTesting((prev) => { const n = { ...prev }; delete n[id]; return n })
+  }
+  const setEp = (id, patch) => setEndpoints((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)))
+
+  // 单端点连通性验证(复用后端 verify)。掩码/空 key 时用已存 key(后端按 id 沿用不了 verify,故此处需明文;掩码则提示)
+  const verifyEndpoint = async (ep) => {
+    setEpTesting((prev) => ({ ...prev, [ep.id]: { busy: true } }))
+    try {
+      const key = (ep.apiKey && !/\*/.test(ep.apiKey)) ? ep.apiKey.trim() : ''
+      if (!ep.baseUrl.trim()) { setEpTesting((p) => ({ ...p, [ep.id]: { ok: false, msg: '缺少 Base URL' } })); return }
+      if (!key && !ep.hasKey) { setEpTesting((p) => ({ ...p, [ep.id]: { ok: false, msg: '请填写 API Key' } })); return }
+      if (!key && ep.hasKey) { setEpTesting((p) => ({ ...p, [ep.id]: { ok: false, msg: '已存 Key 无法在线验证，请重输后测' } })); return }
+      const j = await callConfig('verify', { baseUrl: ep.baseUrl.trim(), apiKey: key })
+      setEpTesting((p) => ({ ...p, [ep.id]: { ok: !!(j && j.ok), msg: (j && j.ok) ? (j.listable ? `可用·${(j.models || []).length} 模型` : '可用') : ((j && j.error) || '验证失败') } }))
+    } catch (e) {
+      setEpTesting((p) => ({ ...p, [ep.id]: { ok: false, msg: e.message || String(e) } }))
+    }
+  }
+  const poolById = Object.fromEntries((pool || []).map((p) => [p.id, p]))
 
   return (
     <div className="modal-mask" onClick={(e) => { if (e.target === e.currentTarget) close() }}>
@@ -179,6 +232,74 @@ export default function LLMConfig() {
                   placeholder={hasKey ? `已保存（${keyMask}），留空则沿用` : 'sk-...'}
                   value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
                 <div className="llm-hint">仅用于后端调用，保存在服务端，前端不回显明文</div>
+              </div>
+
+              {/* 多端点资源池（可选）：折叠区，配置后覆盖上方单端点，提供路由+熔断+故障转移 */}
+              <div className="llm-ep">
+                <button type="button" className="llm-ep-toggle" onClick={() => setShowPool((v) => !v)}>
+                  <Icon name={showPool ? 'chevronDown' : 'chevronRight'} size={13} />
+                  <span>多端点资源池</span>
+                  <span className="llm-ep-badge">{endpoints.length ? `${endpoints.length} 个端点` : '可选'}</span>
+                </button>
+                {showPool && (
+                  <div className="llm-ep-body">
+                    <div className="llm-hint" style={{ marginBottom: 8 }}>
+                      配置多个网关后，请求按「最少在途×权重」自动路由，连续失败自动熔断并转移；留空则仅用上方单端点。
+                    </div>
+                    {endpoints.length === 0 && (
+                      <div className="llm-ep-empty">暂无端点，点下方「添加端点」开始配置</div>
+                    )}
+                    {endpoints.map((ep, i) => {
+                      const st = epTesting[ep.id] || {}
+                      const ph = poolById[ep.id]
+                      return (
+                        <div className={'llm-ep-row' + (ep.enabled === false ? ' off' : '')} key={ep.id}>
+                          <div className="llm-ep-row-head">
+                            <span className="llm-ep-idx">#{i + 1}</span>
+                            <button type="button"
+                              className={'llm-reason-toggle' + (ep.enabled !== false ? ' on' : '')}
+                              onClick={() => setEp(ep.id, { enabled: ep.enabled === false })}
+                              title="启用/停用该端点">
+                              <span className="llm-reason-text">{ep.enabled !== false ? '启用' : '停用'}</span>
+                              <span className="llm-reason-track"><span className="llm-reason-thumb" /></span>
+                            </button>
+                            {ph && (
+                              <span className={'llm-ep-health' + (ph.cooling ? ' cooling' : (ph.fails ? ' warn' : ' ok'))}>
+                                {ph.cooling ? `熔断中 ${Math.ceil((ph.cooldownMsLeft || 0) / 1000)}s`
+                                  : `在途${ph.inflight || 0}·失败${ph.fails || 0}`}
+                              </span>
+                            )}
+                            <button type="button" className="llm-ep-del" onClick={() => removeEndpoint(ep.id)} title="删除">
+                              <Icon name="close" size={13} />
+                            </button>
+                          </div>
+                          <input className="wl-input auth-input" placeholder="Base URL，如 https://gateway/v1"
+                            value={ep.baseUrl || ''} spellCheck={false}
+                            onChange={(e) => setEp(ep.id, { baseUrl: e.target.value })} />
+                          <div className="llm-ep-row2">
+                            <input className="wl-input auth-input" type="password" spellCheck={false}
+                              placeholder={ep.hasKey ? `已保存（${ep.apiKeyMask || '****'}），留空沿用` : 'API Key'}
+                              value={ep.apiKey || ''}
+                              onChange={(e) => setEp(ep.id, { apiKey: e.target.value })} />
+                            <input className="wl-input auth-input llm-ep-weight" type="number" min="1" step="1"
+                              title="权重（越大分到越多请求）" placeholder="权重"
+                              value={ep.weight ?? 1}
+                              onChange={(e) => setEp(ep.id, { weight: Number(e.target.value) || 1 })} />
+                            <button type="button" className="btn llm-ep-verify" disabled={st.busy}
+                              onClick={() => verifyEndpoint(ep)}>
+                              <Icon name={st.busy ? 'refresh' : 'bolt'} size={13} className={st.busy ? 'spin' : ''} />
+                              验证
+                            </button>
+                          </div>
+                          {st.msg && <div className={'llm-ep-msg' + (st.ok ? ' ok' : ' bad')}>{st.msg}</div>}
+                        </div>
+                      )
+                    })}
+                    <button type="button" className="llm-ep-add" onClick={addEndpoint}>
+                      <Icon name="plus" size={13} /> 添加端点
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           )}
