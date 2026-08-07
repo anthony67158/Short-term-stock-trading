@@ -3024,6 +3024,12 @@ a.mn-flash:hover { color: var(--accent); }
     height: auto; flex-wrap: nowrap; gap: 8px; padding: 8px 12px;
     padding-top: calc(8px + env(safe-area-inset-top));
     justify-content: space-between;
+    /* 关键修复:顶栏必须去掉 backdrop-filter。任何祖先带 backdrop-filter/filter/transform
+       都会成为其 position:fixed 子元素的"包含块",导致底部 Tab 栏的 bottom:0 锚到顶栏底边
+       (即屏幕顶部)而非视口底部——正是"Tab 跑到顶部、和灵动岛重叠"的根因。 */
+    backdrop-filter: none; -webkit-backdrop-filter: none;
+    position: sticky; top: 0;
+    background: #0b0b10;  /* 去掉模糊后改用近实色底,避免下方内容透上来 */
   }
   .nav-brand { order: 0; flex-shrink: 0; }
   .nav-tabs { order: 1; }
