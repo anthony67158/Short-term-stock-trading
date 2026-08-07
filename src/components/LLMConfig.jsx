@@ -47,8 +47,9 @@ export default function LLMConfig() {
   const [roles, setRoles] = useState({})           // { chat:{label,def}, ... }
   const [models, setModels] = useState({})         // { chat:'x', advisor:'y', ... }
   const [reasoning, setReasoning] = useState({})   // { chat:true/false, ... } 深度思考开关
-  const [modelList, setModelList] = useState([])   // 可选模型清单（来自 verify）
+  const [modelList, setModelList] = useState([])   // 可选模型清单（来自 verify，池模式下为各端点并集）
   const [listable, setListable] = useState(false)  // 端点是否支持 /models 列举
+  const [epModels, setEpModels] = useState({})     // { [id]: {ok, listable, models:[], reason} } 各端点可用模型(池模式)
 
   // 测试结果
   const [testResults, setTestResults] = useState(null) // [{model, ok, ms, error?}]
@@ -84,9 +85,59 @@ export default function LLMConfig() {
 
   const close = () => llmConfigStore.close()
 
+  // 池模式下有效端点(启用+有 baseUrl)
+  const activeEndpoints = () => endpoints.filter((e) => e.enabled !== false && (e.baseUrl || '').trim())
+  const poolMode = showPool && activeEndpoints().length > 0
+
+  // 某模型在各有效端点的覆盖:yes=已列出 / no=已列举但无此模型 / unknown=该端点未能列举
+  const modelCoverage = (model) => {
+    if (!model) return []
+    return activeEndpoints().map((ep, i) => {
+      const info = epModels[ep.id]
+      const label = ep.baseUrl ? ep.baseUrl.replace(/^https?:\/\//, '').replace(/\/.*$/, '') : `端点${i + 1}`
+      let state = 'unknown'
+      if (info && info.listable) state = info.models.includes(model) ? 'yes' : 'no'
+      return { id: ep.id, label, state }
+    })
+  }
+
   // —— Step 1 → 2：验证连接、拉取模型清单 ——
   const verifyAndNext = async () => {
     setErr(''); setNotice('')
+    // ===== 池模式:逐端点验证,取模型并集,并记录各端点覆盖情况 =====
+    if (poolMode) {
+      const eps = activeEndpoints()
+      setBusy(true)
+      try {
+        const results = await Promise.all(eps.map(async (ep) => {
+          const key = (ep.apiKey && !/\*/.test(ep.apiKey)) ? ep.apiKey.trim() : ''
+          // 掩码/空 key 的已存端点无法在线列举(后端 verify 无法按 id 取原 key)
+          if (!key) return { id: ep.id, ok: null, listable: false, models: [], reason: ep.hasKey ? '已存 Key,无法在线列举' : '缺少 Key' }
+          const j = await callConfig('verify', { baseUrl: ep.baseUrl.trim(), apiKey: key })
+          return { id: ep.id, ok: !!(j && j.ok), listable: !!(j && j.listable), models: Array.isArray(j && j.models) ? j.models : [], reason: (j && j.ok) ? '' : ((j && j.error) || '验证失败') }
+        }))
+        const map = {}; results.forEach((r) => { map[r.id] = r })
+        setEpModels(map)
+        // 并集:所有能列举的端点的模型合集
+        const union = [...new Set(results.flatMap((r) => r.models))]
+        setModelList(union)
+        const anyListable = results.some((r) => r.listable)
+        setListable(anyListable)
+        setModels((prev) => {
+          const next = { ...prev }
+          Object.keys(roles).forEach((k) => { if (!next[k]) next[k] = roles[k].def })
+          return next
+        })
+        const failed = results.filter((r) => r.ok === false)
+        if (failed.length) setNotice(`${failed.length} 个端点验证失败,请回上一步检查;仍可继续为可用端点分配模型`)
+        else if (!anyListable) setNotice('端点未提供模型列表,请手动填写模型名(下一步可测可用性)')
+        setStep(2)
+      } catch (e) {
+        setErr('验证失败:' + (e.message || e))
+      } finally { setBusy(false) }
+      return
+    }
+    // ===== 单端点模式(原逻辑) =====
     if (!baseUrl.trim()) { setErr('请填写 Base URL'); return }
     if (!apiKey.trim() && !hasKey) { setErr('请填写 API Key'); return }
     setBusy(true)
@@ -96,6 +147,7 @@ export default function LLMConfig() {
       const list = Array.isArray(j.models) ? j.models : []
       setModelList(list)
       setListable(!!j.listable)
+      setEpModels({})
       // 若某角色尚未选模型，用默认值兜底
       setModels((prev) => {
         const next = { ...prev }
@@ -116,10 +168,21 @@ export default function LLMConfig() {
     setErr(''); setNotice(''); setTestResults(null)
     const chosen = Object.values(models).filter(Boolean)
     if (!chosen.length) { setErr('请至少为一个角色选择模型'); return }
+    // 池模式:用某个带明文 key 的有效端点做测试(掩码/已存 key 无法在线测)
+    let testBase = baseUrl.trim(), testKey = apiKey.trim()
+    if (poolMode) {
+      const ep = activeEndpoints().find((e) => e.apiKey && !/\*/.test(e.apiKey))
+      if (!ep) {
+        setStep(3)
+        setNotice('资源池端点均为已存 Key，无法在线测试；如需实测请回上一步重输某端点的 Key。可直接保存。')
+        return
+      }
+      testBase = ep.baseUrl.trim(); testKey = ep.apiKey.trim()
+    }
     setStep(3)
     setBusy(true)
     try {
-      const j = await callConfig('test', { baseUrl: baseUrl.trim(), apiKey: apiKey.trim(), models: chosen })
+      const j = await callConfig('test', { baseUrl: testBase, apiKey: testKey, models: chosen })
       if (!j) { setErr('测试请求失败'); setBusy(false); return }
       setTestResults(Array.isArray(j.results) ? j.results : [])
       if (!j.ok) setNotice('部分模型不可用，可返回上一步更换后再测；或直接保存（不影响可用模型）')
@@ -308,9 +371,13 @@ export default function LLMConfig() {
           {step === 2 && (
             <div className="llm-pane">
               <div className="llm-hint" style={{ marginBottom: 10 }}>
-                为系统各处 AI 分别指定模型{listable ? `（共 ${modelList.length} 个可选）` : '（手动填写模型名）'}
+                {poolMode
+                  ? `资源池已启用（${activeEndpoints().length} 个端点）。请为每个角色选模型——池会把请求分发到所有端点，故所选模型最好在各端点都可用。`
+                  : `为系统各处 AI 分别指定模型${listable ? `（共 ${modelList.length} 个可选）` : '（手动填写模型名）'}`}
               </div>
-              {Object.keys(roles).map((k) => (
+              {Object.keys(roles).map((k) => {
+                const cov = poolMode ? modelCoverage(models[k]) : null
+                return (
                 <div className="llm-field" key={k}>
                   <div className="llm-field-head">
                     <label>{roles[k].label || k}</label>
@@ -325,8 +392,21 @@ export default function LLMConfig() {
                   <input className="wl-input auth-input" list="llm-model-list" spellCheck={false}
                     placeholder={roles[k].def} value={models[k] || ''}
                     onChange={(e) => setModel(k, e.target.value)} />
+                  {/* 池模式:展示该模型在各端点的覆盖情况 */}
+                  {poolMode && models[k] && (
+                    <div className="llm-cov">
+                      {cov.map((c) => (
+                        <span key={c.id}
+                          className={'llm-cov-chip' + (c.state === 'yes' ? ' yes' : c.state === 'no' ? ' no' : ' unknown')}
+                          title={c.state === 'yes' ? '该端点提供此模型' : c.state === 'no' ? '该端点未列出此模型' : '该端点未能在线列举（无法确认）'}>
+                          <Icon name={c.state === 'yes' ? 'check' : c.state === 'no' ? 'close' : 'info'} size={11} />
+                          {c.label}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              ))}
+              )})}
               <datalist id="llm-model-list">
                 {modelList.map((m) => <option key={m} value={m} />)}
               </datalist>

@@ -492,6 +492,13 @@ body {
 .llm-ep-msg.bad { color: var(--red); }
 .llm-ep-add { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 9px; border: 1px dashed var(--border); border-radius: 9px; background: transparent; color: var(--accent); font-size: 12.5px; font-weight: 600; cursor: pointer; transition: background .15s, border-color .15s; }
 .llm-ep-add:hover { background: rgba(124,107,245,.08); border-color: rgba(124,107,245,.4); }
+/* Step2 模型在各端点的覆盖 chip */
+.llm-cov { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.llm-cov-chip { display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; font-weight: 600; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--border-soft); background: var(--panel2); color: var(--muted); max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.llm-cov-chip.yes { color: var(--green); background: rgba(31,157,67,.1); border-color: rgba(31,157,67,.3); }
+.llm-cov-chip.no { color: var(--red); background: rgba(224,67,47,.1); border-color: rgba(224,67,47,.3); }
+.llm-cov-chip.unknown { color: var(--muted); }
+.llm-cov-chip .icon { flex-shrink: 0; }
 @media (max-width: 560px) {
   .llm-ep-row2 { flex-wrap: wrap; }
   .llm-ep-row2 > input[type="password"] { flex: 1 1 100%; }
