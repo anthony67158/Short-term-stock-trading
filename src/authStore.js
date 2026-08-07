@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import { planStore } from './planStore'
 import { api as apiUrl } from './apiBase'
+import { isBatchRunning } from './adviceBatch'
 
 // ============ 云端账号体系（Vercel Blob 持久化，跨设备同步）============
 // 会话（昵称+密码）持久化在本机 localStorage，保持长期登录（关标签页/切后台不掉线）；数据存云端。
@@ -142,13 +143,22 @@ export const authStore = {
 
 let _pulling = false
 let _pullTimer = null
-const PULL_INTERVAL = 45 * 1000  // 45s 轮询一次云端(登录态才跑);切前台/重新可见时也补拉一次
+const PULL_INTERVAL = 45 * 1000  // 常态:45s 轮询一次云端(登录态才跑);切前台/重新可见时也补拉一次
+const PULL_FAST = 8 * 1000       // 批量生成进行中:加速到 8s,让服务端批量进度近实时同步到本机进度条
 
 // 启动跨设备同步轮询:仅在浏览器环境、登录后运行。关标签页即停(纯前端增量同步,与云端定时生成无关)。
+// 用自调度 setTimeout(而非固定 setInterval):批量生成期间自动把间隔缩到 8s,平时回落到 45s——
+// 既让「手机生成、电脑同步看到进程」够快,又不在闲时空烧请求。
 export function startCloudSync() {
   if (typeof window === 'undefined') return
   if (_pullTimer) return
-  _pullTimer = setInterval(() => { try { authStore.pull() } catch { /* ignore */ } }, PULL_INTERVAL)
+  const tick = async () => {
+    try { await authStore.pull() } catch { /* ignore */ }
+    let fast = false
+    try { fast = isBatchRunning() } catch { fast = false }
+    _pullTimer = setTimeout(tick, fast ? PULL_FAST : PULL_INTERVAL)
+  }
+  _pullTimer = setTimeout(tick, PULL_INTERVAL)
   // 页面重新可见/窗口聚焦 → 立刻补拉一次(用户从手机切回电脑那一刻就能看到最新建议)
   const kick = () => { if (document.visibilityState === 'visible') { try { authStore.pull() } catch { /* ignore */ } } }
   document.addEventListener('visibilitychange', kick)

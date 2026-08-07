@@ -10,6 +10,7 @@ import { planStore, computePortfolio } from './planStore'
 import { getAdvice } from './adviceCache'
 import { startAdvice } from './adviceRunner'
 import { buildHoldSpec, buildWatchSpec } from './adviceDaily'
+import { triggerServerAdvice, canServerAdvice } from './serverAdvice'
 
 const CONCURRENCY = 1                 // 串行:一次只生成一只,确保每只都完整生成完再下一只
 
@@ -24,6 +25,8 @@ const state = {
   items: [],           // 有序:每只 {code, name, status:'pending'|'running'|'ok'|'fail'|'skipped'}
   startedAt: 0, finishedAt: 0,
   cancelRequested: false,
+  serverMode: false,   // true=进度来自服务端(本机点了「服务端生成」或另一设备正在生成,经云端回灌)
+  _cloudAt: 0,         // 已消费的云端进度时间戳(去重/防旧盖新)
 }
 const subs = new Set()
 function notify() { subs.forEach((fn) => { try { fn() } catch { /* ignore */ } }) }
@@ -37,11 +40,39 @@ export function getBatchState() {
     items: state.items.map((x) => ({ ...x })),
     startedAt: state.startedAt, finishedAt: state.finishedAt,
     cancelRequested: state.cancelRequested,
+    serverMode: state.serverMode,
     pct: state.total ? Math.round((state.done / state.total) * 100) : 0,
   }
 }
 export function isBatchRunning() { return state.running }
 export function cancelBatch() { if (state.running) { state.cancelRequested = true; notify() } }
+
+// ===== 服务端批量进度回灌(跨设备同步) =====
+// authStore.pull 每 45s(批量中加速)拉云端账号,把其中 data.batchProgress 喂进来。
+// 这样【另一台设备上正在跑的服务端批量】,本机也能实时看到同一个进度条(手机生成、电脑同步看到)。
+// 规则:
+//   · 仅当云端进度的 at 比已消费的更新才应用(防旧盖新/重复渲染);
+//   · 本机正在跑【本地】批量(serverMode=false 且 running)时不被云端覆盖,避免两套进度打架;
+//   · finished 后 8s 由 UI 自行淡出(与本地一致)。
+export function applyCloudBatch(bp) {
+  if (!bp || typeof bp !== 'object') return
+  const at = Number(bp.at || 0)
+  if (!at || at <= state._cloudAt) return                 // 不是更新的进度 → 忽略
+  if (state.running && !state.serverMode) return           // 本机本地批量进行中 → 不打架
+  state._cloudAt = at
+  state.serverMode = true
+  state.running = !!bp.running
+  state.total = bp.total || 0
+  state.done = bp.done || 0
+  state.ok = bp.ok || 0
+  state.fail = bp.fail || 0
+  state.skipped = bp.skipped || 0
+  state.current = new Set(Array.isArray(bp.current) ? bp.current : [])
+  state.items = Array.isArray(bp.items) ? bp.items.map((x) => ({ ...x })) : []
+  state.startedAt = bp.startedAt || at
+  state.finishedAt = bp.running ? 0 : (bp.finishedAt || at)
+  notify()
+}
 
 function setItemStatus(code, status) {
   const it = state.items.find((x) => x.code === code)
@@ -69,7 +100,30 @@ export async function runBatchAdvice(codes, quoteMap, opts = {}) {
   const nameOf = (code) =>
     (holding.find((h) => h.code === code) || watch.find((w) => w.code === code) || {}).name || code
 
+  // ===== 优先走【服务端生成】(已登录云端账号) =====
+  // 生成搬到 FC 后端:退到后台/锁屏/关页面也照跑完(解决"退后台就生成失败"),
+  // 进度写回云端 → 本机与其它设备都靠 authStore.pull 轮询同一份进度(手机生成、电脑同步看到)。
+  // 立刻本地点亮一个 running 进度条(乐观 UI),真实进度随首个云端 tick 覆盖。
+  if (opts.local !== true && canServerAdvice()) {
+    const fired = triggerServerAdvice(uniq, { scope: opts.scope || 'all', force: true })
+    if (fired) {
+      state.serverMode = true
+      state.running = true
+      state.cancelRequested = false
+      state.total = uniq.length
+      state.done = 0; state.ok = 0; state.fail = 0; state.skipped = 0
+      state.current = new Set()
+      state.items = uniq.map((code) => ({ code, name: nameOf(code), status: 'pending' }))
+      state.startedAt = Date.now(); state.finishedAt = 0
+      state._cloudAt = 0   // 允许后续云端 tick 覆盖这份乐观占位
+      notify()
+      return true
+    }
+  }
+
+  // ===== 兜底:本地浏览器生成(未登录云端 / 触发失败) =====
   // 初始化进度
+  state.serverMode = false
   state.running = true
   state.cancelRequested = false
   state.total = uniq.length

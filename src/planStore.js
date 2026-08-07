@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import { getAdvice, getAllAdvice, setAllAdvice, mergeAdvice, registerAdviceSync } from './adviceCache'
+import { applyCloudBatch } from './adviceBatch'
 
 // 唯一 id（分笔持仓/记录用）
 let _seq = 0
@@ -292,6 +293,11 @@ export const planStore = {
       }
     }
     if (changed) { listeners.forEach((l) => l()); scheduleSave() }
+    // 5) 服务端批量生成进度回灌:喂给 adviceBatch,让本机进度条显示【服务端/另一设备】正在跑的批量进程。
+    //    (与 advice/adviceLog 合并解耦:进度是纯展示态,不进 changed/不触发回存)
+    if (d.batchProgress && typeof d.batchProgress === 'object') {
+      try { applyCloudBatch(d.batchProgress) } catch { /* ignore */ }
+    }
     return changed
   },
   // ===== 跨设备同步的个性化设置 =====

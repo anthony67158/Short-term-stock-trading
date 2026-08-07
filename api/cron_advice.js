@@ -22,7 +22,7 @@
 //   header: X-Cron-Key: <CRON_KEY>
 
 import { applyCors, preflight } from './_lib.js';
-import { listAllAccounts, writeAccount } from './account.js';
+import { listAllAccounts, writeAccount, readAccount, sha } from './account.js';
 import { buildHoldPayload, buildWatchPayload, computePortfolio } from './_portfolio.js';
 import aiHandler from './ai.js';
 import stockDetailHandler from './stock_detail.js';
@@ -138,7 +138,9 @@ async function genOne({ code, name, mode, myHold, payload, quantQuery }) {
 }
 
 // 处理单个账号:构造持仓/自选建议任务 → 串行生成 → 合并进 acc.data → 返回是否有改动
-async function processAccount(acc, { scope, force }) {
+//   opts.codes:仅生成这些 code(用户按需勾选的批量生成),缺省=全部(定时任务遍历)。
+//   opts.onTick(progress):每完成一只回调一次,供【按需分支】把进度增量写回云端(两端可轮询看到)。
+async function processAccount(acc, { scope, force, codes = null, onTick = null } = {}) {
   const data = acc.data || (acc.data = {});
   const holding = data.holding || [];
   const watch = data.plan || [];
@@ -150,6 +152,7 @@ async function processAccount(acc, { scope, force }) {
     const a = advice[code];
     return !!(a && a.at && (Date.now() - a.at) < GAP_MS);
   };
+  const codeSet = (codes && codes.length) ? new Set(codes) : null; // 指定则只跑这些
 
   const holdSet = new Set(holding.map((h) => h.code));
   const allCodes = [...new Set([...holding.map((h) => h.code), ...watch.map((w) => w.code)])];
@@ -158,10 +161,11 @@ async function processAccount(acc, { scope, force }) {
   const nameOf = (code) =>
     (holding.find((h) => h.code === code) || watch.find((w) => w.code === code) || {}).name || code;
 
-  // 组装任务列表(scope 过滤 + 新鲜度节流)
+  // 组装任务列表(scope 过滤 + codes 过滤 + 新鲜度节流;按需分支 codeSet 命中即算已选)
   const tasks = [];
   if (scope === 'all' || scope === 'hold') {
     for (const code of [...new Set(holding.map((h) => h.code))]) {
+      if (codeSet && !codeSet.has(code)) continue;
       if (isFresh(code)) continue;
       const name = nameOf(code);
       const p = buildHoldPayload(holding, code, name, portfolio, data.account, data.closed, nextTradeDayLabel());
@@ -173,6 +177,7 @@ async function processAccount(acc, { scope, force }) {
   }
   if (scope === 'all' || scope === 'watch') {
     for (const code of [...new Set(watch.map((w) => w.code))].filter((c) => !holdSet.has(c))) {
+      if (codeSet && !codeSet.has(code)) continue;
       if (isFresh(code)) continue;
       const name = nameOf(code);
       const p = buildWatchPayload(code, name, portfolio, data.account);
@@ -183,13 +188,27 @@ async function processAccount(acc, { scope, force }) {
   }
 
   let ok = 0, fail = 0, changed = false;
-  const skip = allCodes.length - tasks.length;
+  const skip = (codeSet ? codeSet.size : allCodes.length) - tasks.length;
+  // 进度对象(与前端 adviceBatch.getBatchState 同结构,便于前端直接消费):
+  //   running/total/done/ok/fail/skipped/items([{code,name,status}])/startedAt/finishedAt/at
+  const total = tasks.length;
+  const items = tasks.map((t) => ({ code: t.code, name: t.name, status: 'pending' }));
+  const startTick = Date.now();
+  const progress = () => ({
+    running: true, total, done: ok + fail, ok, fail, skipped: skip < 0 ? 0 : skip,
+    current: [], items: items.map((x) => ({ ...x })),
+    startedAt: startTick, finishedAt: 0, at: Date.now(), source: 'server',
+  });
+  const setItem = (code, status) => { const it = items.find((x) => x.code === code); if (it) it.status = status; };
   // 串行:一次一只,完整生成完再下一只(对齐前端 CONCURRENCY=1)
   for (const t of tasks) {
+    setItem(t.code, 'running');
+    if (onTick) { try { await onTick({ ...progress(), current: [t.code] }); } catch { /* ignore */ } }
     try {
       const r = await genOne(t);
       if (r && r.cacheItem) {
         advice[t.code] = r.cacheItem; changed = true; ok++;
+        setItem(t.code, 'ok');
         if (r.logEntry) {
           const log = data.adviceLog || (data.adviceLog = []);
           const dup = log.find((x) => x.code === t.code && x.mode === t.mode && (Date.now() - (x.at || 0)) < 600000);
@@ -197,10 +216,13 @@ async function processAccount(acc, { scope, force }) {
         }
         // 量化得分写回自选/持仓卡专用字段(排序/展示同源)——写进 plan/holding 的 qScore/qBias(非结构性字段,安全)
         if (r.quantScore) applyQuantScore(data, t.code, r.quantScore);
-      } else { fail++; }
-    } catch { fail++; }
+      } else { fail++; setItem(t.code, 'fail'); }
+    } catch { fail++; setItem(t.code, 'fail'); }
+    if (onTick) { try { await onTick(progress()); } catch { /* ignore */ } }
   }
-  return { changed, ok, skip, fail };
+  // 收尾进度(finished)
+  const finalProgress = { ...progress(), running: false, finishedAt: Date.now() };
+  return { changed, ok, skip: skip < 0 ? 0 : skip, fail, finalProgress };
 }
 
 // 军师历史战绩(真实回测胜率)→ 从账号 adviceLog 现算,口径尽量对齐前端 planStore.adviceStats 的核心字段。
@@ -221,11 +243,86 @@ function applyQuantScore(data, code, qs) {
   stamp(data.holding); stamp(data.plan);
 }
 
+// 把本轮生成的结果【保护式合并】进云端最新版账号并写回。
+//   在【按需分支】的每只完成后调用:先重读云端最新账号(拿到浏览器可能刚改过的 holding/plan/account),
+//   只把「服务端生成」的部分(batchProgress + 本轮 advice/adviceLog/qScore)叠加上去再写,
+//   绝不用内存里的旧 holding/account 覆盖用户正在本机编辑的持仓——实现「服务端生成、两端都看到进度」
+//   且不误伤用户编辑。progress=进度快照(与前端 adviceBatch 同结构)。
+async function persistProgress(nick, workingAcc, progress) {
+  const fresh = (await readAccount(nick)) || workingAcc;
+  const fdata = fresh.data || (fresh.data = {});
+  // 1) batchProgress:服务端权威,直接覆盖
+  fdata.batchProgress = progress;
+  // 2) advice:把本轮已生成的逐条按时间戳并入(不丢云端其它更新的)
+  const wa = (workingAcc.data && workingAcc.data.advice) || {};
+  const fa = (fdata.advice && typeof fdata.advice === 'object') ? fdata.advice : (fdata.advice = {});
+  for (const [k, v] of Object.entries(wa)) {
+    if (!v) continue;
+    const cur = fa[k];
+    if (!cur || (v.at || 0) > (cur.at || 0)) fa[k] = v;
+  }
+  // 3) adviceLog:按 id 并集
+  const wlog = (workingAcc.data && workingAcc.data.adviceLog) || [];
+  if (wlog.length) {
+    const flog = fdata.adviceLog || (fdata.adviceLog = []);
+    const seen = new Set(flog.map((x) => x && x.id).filter(Boolean));
+    for (const e of wlog) if (e && e.id && !seen.has(e.id)) flog.unshift(e);
+    fdata.adviceLog = flog.slice(0, 500);
+  }
+  // 4) qScore/qBias 写回(仅同 code 存在时)
+  const stampFrom = (srcArr, dstArr) => {
+    for (const s of (srcArr || [])) {
+      if (!s || s.qScore == null) continue;
+      for (const d of (dstArr || [])) if (d && d.code === s.code) { d.qScore = s.qScore; d.qBias = s.qBias; d.qAt = s.qAt; }
+    }
+  };
+  stampFrom(workingAcc.data && workingAcc.data.holding, fdata.holding);
+  stampFrom(workingAcc.data && workingAcc.data.plan, fdata.plan);
+  try { await writeAccount(fresh); } catch { /* 写失败不阻断后续生成 */ }
+}
+
 export default async function handler(req, res) {
   if (preflight(req, res)) return;
   applyCors(res);
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
 
+  const body = (req.body && typeof req.body === 'object') ? req.body : {};
+  const scope = ['all', 'hold', 'watch'].includes(body.scope) ? body.scope : 'all';
+  const force = !!body.force;
+
+  // ====== 分支 A:【按需批量生成】(前端一键触发,账号密码鉴权) ======
+  // 用户在手机/电脑点「一次性生成」→ fire-and-forget POST 本地址,服务端在 FC(600s)里跑完,
+  // 每完成一只就把进度(batchProgress)+建议增量写回云端;两端(手机/电脑)靠 authStore.pull
+  // 轮询同一份云端进度,实现「手机生成、电脑同步看到批量生成进程」;且脱离浏览器,退到后台也跑得完。
+  const isOnDemand = !!(body.ondemand || (Array.isArray(body.codes) && body.codes.length) || (body.nick && body.pw != null));
+  if (isOnDemand) {
+    const nick = String(body.nick || '').trim();
+    const pw = body.pw != null ? String(body.pw) : '';
+    const codes = Array.isArray(body.codes) ? [...new Set(body.codes.filter(Boolean).map(String))] : null;
+    if (!nick || !pw) { res.statusCode = 200; return res.end(JSON.stringify({ ok: false, error: '缺少账号或密码' })); }
+    const acc = await readAccount(nick);
+    if (!acc) { res.statusCode = 200; return res.end(JSON.stringify({ ok: false, error: '账号不存在' })); }
+    if (acc.pwHash !== sha(pw)) { res.statusCode = 200; return res.end(JSON.stringify({ ok: false, error: '密码错误' })); }
+
+    const started = Date.now();
+    try {
+      const onTick = async (progress) => { await persistProgress(nick, acc, progress); };
+      // force 默认置真:用户主动点生成,勾选哪些就重生成哪些(与前端 adviceBatch 一致,不做新鲜度节流)
+      const r = await processAccount(acc, { scope, force: body.force != null ? force : true, codes, onTick });
+      // 收尾:再写一次最终进度(running:false)
+      if (r.finalProgress) { try { await persistProgress(nick, acc, r.finalProgress); } catch { /* ignore */ } }
+      return res.end(JSON.stringify({
+        ok: true, ondemand: true, nick,
+        total: r.finalProgress ? r.finalProgress.total : (r.ok + r.fail),
+        ok: r.ok, fail: r.fail, skip: r.skip, elapsedMs: Date.now() - started,
+      }));
+    } catch (e) {
+      res.statusCode = 200;
+      return res.end(JSON.stringify({ ok: false, error: String(e.message || e), elapsedMs: Date.now() - started }));
+    }
+  }
+
+  // ====== 分支 B:【定时全量刷新】(调度器触发,CRON_KEY 鉴权) ======
   // 鉴权:防止匿名 HTTP 触发器被滥用烧 token。未配置 CRON_KEY 时(本地/未设)放行。
   const CRON_KEY = process.env.CRON_KEY;
   if (CRON_KEY) {
@@ -233,9 +330,6 @@ export default async function handler(req, res) {
     if (given !== CRON_KEY) { res.statusCode = 401; return res.end(JSON.stringify({ ok: false, error: 'unauthorized' })); }
   }
 
-  const body = (req.body && typeof req.body === 'object') ? req.body : {};
-  const scope = ['all', 'hold', 'watch'].includes(body.scope) ? body.scope : 'all';
-  const force = !!body.force;
   const onlyNick = body.nick ? String(body.nick) : null;
 
   const started = Date.now();
@@ -251,7 +345,7 @@ export default async function handler(req, res) {
       catch (e) { r = { changed: false, ok: 0, skip: 0, fail: 0, error: String(e.message || e) }; }
       if (r.changed) { try { await writeAccount(acc); } catch (e) { r.writeError = String(e.message || e); } }
       totalOk += r.ok || 0; totalFail += r.fail || 0; totalSkip += r.skip || 0;
-      summary.push({ nick: acc.nick, ...r });
+      summary.push({ nick: acc.nick, ok: r.ok, skip: r.skip, fail: r.fail, changed: r.changed, ...(r.error ? { error: r.error } : {}), ...(r.writeError ? { writeError: r.writeError } : {}) });
     }
     return res.end(JSON.stringify({
       ok: true, scope, force,

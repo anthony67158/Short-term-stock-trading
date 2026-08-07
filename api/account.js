@@ -9,7 +9,7 @@ import { createHash } from 'crypto';
 // 密码以 SHA-256 摘要存储；账号文件名用昵称摘要，避免直接暴露昵称。
 
 const PREFIX = 'accounts/';
-const sha = (s) => createHash('sha256').update(String(s)).digest('hex');
+export const sha = (s) => createHash('sha256').update(String(s)).digest('hex');
 // 账号的 blob 前缀（目录式）：每次写入生成唯一文件名，读取取最新，彻底规避 Vercel Blob 覆盖写的 CDN 强缓存
 const prefixOf = (nick) => `${PREFIX}${sha('u:' + nick)}/`;
 const legacyPathOf = (nick) => `${PREFIX}${sha('u:' + nick)}.json`; // 旧的单文件覆盖式路径（兼容迁移）
@@ -20,7 +20,7 @@ function ok(res, obj) {
 }
 
 // 读取某账号：优先读新目录下最新版本；没有则回退旧单文件路径（老用户平滑迁移）
-async function readAccount(nick) {
+export async function readAccount(nick) {
   try {
     const { blobs } = await list({ prefix: prefixOf(nick), limit: 100 });
     if (blobs && blobs.length) {
@@ -115,7 +115,30 @@ export default async function handler(req, res) {
       const acc = await readAccount(nick);
       if (!acc) return ok(res, { ok: false, error: '账号不存在' });
       if (acc.pwHash !== sha(pw)) return ok(res, { ok: false, error: '密码错误' });
-      acc.data = (body.data && typeof body.data === 'object') ? body.data : acc.data;
+      const incoming = (body.data && typeof body.data === 'object') ? body.data : null;
+      if (incoming) {
+        const prev = acc.data || {};
+        // 客户端是 plan/holding/closed/account/alerts/reviews/adviceLog/settings 的权威源 → 直接采用其值。
+        // 但【服务端按需生成】写入的 batchProgress / 逐条更新的 advice 客户端可能还没拉到 →
+        // 这里做保护式合并,避免浏览器一次 save 把云端刚生成的进度/更新建议整体盖回旧值:
+        //   · batchProgress:客户端从不写,取两端 at 更新的一份(通常保留服务端的)。
+        //   · advice:按逐条时间戳取较新者的并集(与前端 mergeAdvice 同口径),不丢任一端刚生成的。
+        const merged = { ...incoming };
+        // batchProgress:保留更新的一份
+        const cbp = incoming.batchProgress, sbp = prev.batchProgress;
+        if (sbp && (!cbp || (sbp.at || 0) > (cbp.at || 0))) merged.batchProgress = sbp;
+        // advice:逐条时间戳并集
+        const ca = (incoming.advice && typeof incoming.advice === 'object') ? incoming.advice : {};
+        const sa = (prev.advice && typeof prev.advice === 'object') ? prev.advice : {};
+        const adv = { ...ca };
+        for (const [k, v] of Object.entries(sa)) {
+          if (!v) continue;
+          const cur = adv[k];
+          if (!cur || (v.at || 0) > (cur.at || 0)) adv[k] = v;
+        }
+        merged.advice = adv;
+        acc.data = merged;
+      }
       const saved = await writeAccount(acc);
       return ok(res, { ok: true, updatedAt: saved.updatedAt });
     }

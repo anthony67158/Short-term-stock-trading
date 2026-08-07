@@ -4,6 +4,7 @@
 import { callAIStream } from './ai'
 import { saveAdvice } from './adviceCache'
 import { planStore } from './planStore'
+import { triggerServerAdvice, canServerAdvice } from './serverAdvice'
 
 const running = new Map()  // code -> { phase, startedAt }
 const results = new Map()  // code -> { result, advice, meta, news, adviceMissing, truncated, error, cachedAt }
@@ -104,10 +105,30 @@ async function run(spec) {
         } catch { /* ignore */ }
       }
     } else {
-      results.set(code, { error: '量化服务暂不可用（可能冷启动，请稍后重试）' })
+      // 本地生成两头都空(军师+量化):很可能是移动端切后台/锁屏把 SSE 掐断了。
+      // 已登录云端账号 → 兜底改走【服务端生成】:请求带 keepalive,退到后台也能在 FC 里跑完,
+      // 结果稍后经 authStore.pull 轮询云端回灌到本机缓存(手机/电脑都能看到)。
+      if (serverFallback(code)) {
+        results.set(code, { pending: true, error: '本地生成中断,已转由云端继续生成,稍候自动刷新…' })
+      } else {
+        results.set(code, { error: '量化服务暂不可用（可能冷启动，请稍后重试）' })
+      }
     }
   } catch (e) {
-    results.set(code, { error: '获取失败：' + String((e && e.message) || e) })
+    if (serverFallback(code)) {
+      results.set(code, { pending: true, error: '本地生成中断,已转由云端继续生成,稍候自动刷新…' })
+    } else {
+      results.set(code, { error: '获取失败：' + String((e && e.message) || e) })
+    }
   }
   notify()
+}
+
+// 单只服务端兜底:已登录云端账号才可用。触发一次「按需服务端生成」(仅这一只 code),
+// fire-and-forget + keepalive,页面切后台/关闭也已送达 FC 照跑完。成功发出返回 true。
+function serverFallback(code) {
+  try {
+    if (!canServerAdvice()) return false
+    return !!triggerServerAdvice([code], { scope: 'all', force: true })
+  } catch { return false }
 }
