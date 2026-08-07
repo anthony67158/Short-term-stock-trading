@@ -31,18 +31,73 @@ export function describeAlert(a) {
   if (!t) return ''
   if (a.type === 'limitup') return '临近涨停(涨幅≥9.5%)'
   if (a.type === 'limitdown') return '临近跌停(跌幅≥9.5%)'
+  // 行动点预警(补仓/减仓):用「补仓点 ≤ X元 · 补1手」这类口径,一眼看清价位+要做什么
+  if (a.type === 'price' && a.actKind) {
+    const label = a.actKind === 'add' ? '补仓点' : '减仓点'
+    const qty = a.opQty ? ' · ' + a.opQty : ''
+    return `${label} ${OP_LABEL[a.op] || ''} ${a.value}元${qty}`
+  }
   return `${t.label} ${OP_LABEL[a.op] || ''} ${a.value}${t.unit}`
 }
 
-// 到价后的"确认再动手"提示：价位预警(止盈/止损/买点)只是触发观察线，不是见价即成交。
-// 依据 note(止盈/止损/买点) 给一句时机提醒，引导用户去详情页看AI建议的"到价后怎么做"。
+// 到价后的"确认再动手"提示：价位预警(止盈/止损/买点/补仓/减仓)只是触发观察线，不是见价即成交。
+// 依据 note/actKind 给一句时机提醒，引导用户去详情页看AI建议的"到价后怎么做"。
 function confirmHint(a) {
   if (!a || a.type !== 'price') return ''
+  // 行动点(补仓/减仓):带上建议里的具体确认口径(timing),没有则给通用一句
+  if (a.actKind === 'add') {
+    const tail = a.timing ? '：' + a.timing : '：等分时止跌/站回均价线再补，别追一瞬价。'
+    return '\n🎯到操作点=开始盯，先确认再动手' + tail + ' 详情见AI建议「到价后怎么做」。'
+  }
+  if (a.actKind === 'reduce') {
+    const tail = a.timing ? '：' + a.timing : '：反弹放量滞涨/冲高回落再减，锁定部分利润即可。'
+    return '\n🎯到操作点=开始盯，先确认再动手' + tail + ' 详情见AI建议「到价后怎么做」。'
+  }
   const note = a.note || ''
   if (/止损/.test(note)) return '\n⚠️到价=开始盯，别急砍：确认是否放量/收盘跌破，只是瞬时插针又拉回可先缓一手。详情见AI建议「到价后怎么做」。'
   if (/止盈/.test(note)) return '\n💡到价=开始盯，别一次清光：可先减一部分锁利，剩余用移动止盈跟着走。详情见AI建议「到价后怎么做」。'
   if (/买点/.test(note)) return '\n💡到价=开始盯，别追一瞬价：等缩量企稳/站回均线再进。详情见AI建议「到价后怎么做」。'
   return ''
+}
+
+// ============ 到价预警「距触发」可视化元数据 (A-2) ============
+// 依据规则类型 + 现价 q，算出:方向语义(add/reduce/buy/up/down/warn)、可读方向名、
+// 距触发百分比(仅对价位类有意义)、进度(0~100,越接近触发越满)、是否临近(≤2%)。
+// 供 AlertPanel / AlertCenter 统一渲染进度条与方向徽标。
+export function alertMeta(a, q) {
+  // 方向语义:优先看行动点(补/减),再看 note(止盈/止损/买点),最后按 type
+  let dir = 'warn', dirLabel = '预警'
+  if (a.type === 'price' && a.actKind === 'add') { dir = 'add'; dirLabel = '补仓' }
+  else if (a.type === 'price' && a.actKind === 'reduce') { dir = 'reduce'; dirLabel = '减仓' }
+  else if (a.type === 'limitup') { dir = 'up'; dirLabel = '涨停' }
+  else if (a.type === 'limitdown') { dir = 'down'; dirLabel = '跌停' }
+  else if (a.type === 'price') {
+    const note = a.note || ''
+    if (/止盈/.test(note)) { dir = 'reduce'; dirLabel = '止盈' }
+    else if (/止损/.test(note)) { dir = 'down'; dirLabel = '止损' }
+    else if (/买点|买入/.test(note)) { dir = 'buy'; dirLabel = '买点' }
+    else { dir = a.op === 'gte' ? 'up' : 'down'; dirLabel = a.op === 'gte' ? '涨到' : '跌到' }
+  } else if (a.type === 'pct') { dir = a.op === 'gte' ? 'up' : 'down'; dirLabel = '涨跌幅' }
+  else { dir = 'warn'; dirLabel = { vol: '量比', turnover: '换手' }[a.type] || '预警' }
+
+  // 距触发:只有「价位类(type=price)」且有现价才算得出准确百分比
+  let distPct = null, progress = null, near = false
+  const price = q && q.price != null ? Number(q.price) : null
+  if (a.type === 'price' && price != null && price > 0 && a.value != null) {
+    const target = Number(a.value)
+    if (target > 0) {
+      // 相对现价还差多少到目标价(带方向:gte 时价要往上，lte 时价要往下)
+      const raw = (target - price) / price * 100
+      // 已越过触发线 → 距触发=0
+      const crossed = a.op === 'gte' ? price >= target : price <= target
+      distPct = crossed ? 0 : Math.abs(raw)
+      // 进度:把 [10% 以外 → 0%] 映射为 [0 → 100]，越近越满(10% 视作起点，可覆盖多数波段)
+      const span = 10
+      progress = crossed ? 100 : Math.max(0, Math.min(100, (1 - distPct / span) * 100))
+      near = !crossed && distPct <= 2   // 距触发 ≤2% 视为临近
+    }
+  }
+  return { dir, dirLabel, distPct, progress, near, price }
 }
 
 // 判断单条规则是否命中（q=该股实时报价）
@@ -149,7 +204,10 @@ export const alertStore = {
       const q = quoteMap[a.code]
       const msg = hit(a, q)
       if (msg) {
-        const title = `⚡ 预警触发 · ${a.name || a.code}`
+        const actLabel = a.actKind === 'add' ? '补仓' : (a.actKind === 'reduce' ? '减仓' : '')
+        const title = actLabel
+          ? `🎯 到${actLabel}操作点 · ${a.name || a.code}`
+          : `⚡ 预警触发 · ${a.name || a.code}`
         // 到价=开始盯盘,不是见价即砍:止盈/止损/买点这类价位预警,补一句"需确认信号再动手",
         // 避免用户被瞬时插针骗出局(砍在最低点又眼看它涨回来)。具体确认条件见详情页AI建议的"到价后怎么做"。
         const tail = confirmHint(a)

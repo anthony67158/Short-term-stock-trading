@@ -60,6 +60,7 @@ export default function StockDetail({ stock, onClose }) {
   const [showForecast, setShowForecast] = useState(false) // 走势预测(蒙特卡洛)默认折叠
   const [showMa, setShowMa] = useState(false) // OHLC/MA 网格默认折叠
   const [showInfo, setShowInfo] = useState(false) // 公司简介默认折叠
+  const [showBasis, setShowBasis] = useState(false) // AI建议深度分析(依据/风险)默认折叠,先给关键结论
   const book = usePlanStore()
   // 账户全景(总资产/可用现金/总仓位/单票占比)——供 AI 按资金和仓位算具体手数。
   // ★不要依赖 overview(它在后面才定义，提前引用会触发 TDZ 报错导致弹窗白屏)；
@@ -679,7 +680,7 @@ export default function StockDetail({ stock, onClose }) {
                           )}
                           {/* 触价后怎么确认才动手：把"见价即砍"升级为"到价→看信号确认→再执行"，避免被瞬时插针骗出局 */}
                           {adv.exitTiming && (
-                            <div className="advice-exit-timing"><Icon name="shield" size={13} /> <b>到价后怎么做</b>：{adv.exitTiming}</div>
+                            <div className="advice-exit-timing key-block"><span className="ket-tag"><Icon name="shield" size={12} /> 到价后怎么做</span><span className="ket-body">{adv.exitTiming}</span></div>
                           )}
                           {/* 买入计划(未持仓·按账户全景算的手数/资金/占比) —— 一眼看清怎么下手 */}
                           {!myHold && (hasVal(adv.planQty) || hasVal(adv.planAmount) || hasVal(adv.planWeight)) && (
@@ -720,30 +721,49 @@ export default function StockDetail({ stock, onClose }) {
                           {adv.pnlNote && <div className="advice-line">💰 {adv.pnlNote}</div>}
                           {adv.reason && <div className="advice-line muted">{adv.reason}</div>}
 
-                          {/* 分析依据：把技术/资金/消息/宏观/席位/量化归为一组带标签的结构化清单，
-                              不再是一堆 emoji 平铺，扫读更清晰 */}
-                          {(adv.techNote || adv.fundNote || adv.newsNote || adv.macroNote || adv.seatNote || adv.quantNote || adv.theoryNote) && (
-                            <div className="advice-basis">
-                              <div className="advice-basis-title">分析依据</div>
-                              {adv.techNote && <div className="ab-row"><span className="ab-k tech">技术</span><span className="ab-v">{adv.techNote}</span></div>}
-                              {adv.fundNote && <div className="ab-row"><span className="ab-k fund">资金</span><span className="ab-v">{adv.fundNote}</span></div>}
-                              {adv.newsNote && <div className="ab-row"><span className="ab-k news">消息</span><span className="ab-v">{adv.newsNote}</span></div>}
-                              {adv.macroNote && <div className="ab-row"><span className="ab-k macro">宏观</span><span className="ab-v">{adv.macroNote}</span></div>}
-                              {adv.seatNote && <div className="ab-row"><span className="ab-k seat">席位</span><span className="ab-v">{adv.seatNote}</span></div>}
-                              {adv.quantNote && <div className="ab-row"><span className="ab-k quant">量化</span><span className="ab-v">{adv.quantNote}</span></div>}
-                              {adv.theoryNote && <div className="ab-row"><span className="ab-k theory">理论</span><span className="ab-v">{adv.theoryNote}</span></div>}
-                            </div>
-                          )}
-
-                          {/* 风险区：反方观点/失效信号/风险 归为一组，与依据区分开 */}
-                          {(adv.bearCase || adv.invalidation || adv.risk) && (
-                            <div className="advice-risk">
-                              {adv.bearCase && <div className="ab-row"><span className="ab-k rev">反方</span><span className="ab-v">{adv.bearCase}</span></div>}
-                              {adv.invalidation && <div className="ab-row"><span className="ab-k warn">失效</span><span className="ab-v">{adv.invalidation}</span></div>}
-                              {adv.risk && <div className="ab-row"><span className="ab-k warn">风险</span><span className="ab-v">{adv.risk}</span></div>}
-                            </div>
-                          )}
-                          {adv.confidenceReason && <div className="advice-line muted" style={{ fontSize: 11 }}>信心：{adv.confidence}（{adv.confidenceReason}）</div>}
+                          {/* 深度分析(依据+风险+信心)默认折叠：先给关键结论(结论/价位/到价后怎么做)，
+                              想深究再展开，避免信息一次性倾泻。有内容才显示折叠入口。 */}
+                          {(() => {
+                            const hasBasis = adv.techNote || adv.fundNote || adv.newsNote || adv.macroNote || adv.seatNote || adv.quantNote || adv.theoryNote
+                            const hasRisk = adv.bearCase || adv.invalidation || adv.risk
+                            const hasConf = !!adv.confidenceReason
+                            if (!hasBasis && !hasRisk && !hasConf) return null
+                            const n = (hasBasis ? 1 : 0) + (hasRisk ? 1 : 0)
+                            return (
+                              <div className="advice-deep">
+                                <button className="advice-deep-toggle" onClick={() => setShowBasis((v) => !v)} aria-expanded={showBasis}>
+                                  <span className="adt-label"><Icon name="layers" size={12} /> 深度分析 · 依据与风险{n > 0 ? ` (${n})` : ''}</span>
+                                  <Icon name={showBasis ? 'chevronDown' : 'chevronRight'} size={13} />
+                                </button>
+                                {showBasis && (
+                                  <div className="advice-deep-body">
+                                    {/* 分析依据：把技术/资金/消息/宏观/席位/量化归为一组带标签的结构化清单 */}
+                                    {hasBasis && (
+                                      <div className="advice-basis">
+                                        <div className="advice-basis-title">分析依据</div>
+                                        {adv.techNote && <div className="ab-row"><span className="ab-k tech">技术</span><span className="ab-v">{adv.techNote}</span></div>}
+                                        {adv.fundNote && <div className="ab-row"><span className="ab-k fund">资金</span><span className="ab-v">{adv.fundNote}</span></div>}
+                                        {adv.newsNote && <div className="ab-row"><span className="ab-k news">消息</span><span className="ab-v">{adv.newsNote}</span></div>}
+                                        {adv.macroNote && <div className="ab-row"><span className="ab-k macro">宏观</span><span className="ab-v">{adv.macroNote}</span></div>}
+                                        {adv.seatNote && <div className="ab-row"><span className="ab-k seat">席位</span><span className="ab-v">{adv.seatNote}</span></div>}
+                                        {adv.quantNote && <div className="ab-row"><span className="ab-k quant">量化</span><span className="ab-v">{adv.quantNote}</span></div>}
+                                        {adv.theoryNote && <div className="ab-row"><span className="ab-k theory">理论</span><span className="ab-v">{adv.theoryNote}</span></div>}
+                                      </div>
+                                    )}
+                                    {/* 风险区：反方观点/失效信号/风险 归为一组，与依据区分开 */}
+                                    {hasRisk && (
+                                      <div className="advice-risk">
+                                        {adv.bearCase && <div className="ab-row"><span className="ab-k rev">反方</span><span className="ab-v">{adv.bearCase}</span></div>}
+                                        {adv.invalidation && <div className="ab-row"><span className="ab-k warn">失效</span><span className="ab-v">{adv.invalidation}</span></div>}
+                                        {adv.risk && <div className="ab-row"><span className="ab-k warn">风险</span><span className="ab-v">{adv.risk}</span></div>}
+                                      </div>
+                                    )}
+                                    {hasConf && <div className="advice-line muted" style={{ fontSize: 11 }}>信心：{adv.confidence}（{adv.confidenceReason}）</div>}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })()}
                         </>
                       )}
 

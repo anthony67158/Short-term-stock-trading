@@ -8,8 +8,8 @@
   --border: #24242f;
   --border-soft: #191921;
   --text: #e7e7ec;
-  --text2: #b3b3bf;
-  --muted: #74747f;
+  --text2: #bcbcc7;
+  --muted: #8a8a95;
   --red: #f4614e;
   --green: #3fb950;
   --gold: #e3b341;
@@ -36,6 +36,32 @@
   /* 全站内容基线：顶栏内容容器与正文 .main 共用同一最大宽度与水平边距，保证纵向对齐 */
   --content-w: 1440px;
   --content-pad: 24px;
+
+  /* ============ 交易语义 Design Tokens（Linear 深色底座 × Binance 交易语义）============ */
+  /* 说明：本项目遵循 A 股「红涨绿跌」，故 up=红 / down=绿，与 --red/--green 同源，避免二义。 */
+  --sem-up: var(--red);            /* 上涨/涨停/收益(红) */
+  --sem-down: var(--green);        /* 下跌/跌停/亏损(绿) */
+  /* 交易动作语义色：补仓=绿(逆势买入)、减仓=红(卖出)、买入/关注=品牌蓝、清仓=强红、预警=橙黄 */
+  --sem-add: #2ea043;              /* 补仓/加仓(绿，与跌色系呼应但更饱和) */
+  --sem-add-bg: rgba(46,160,67,.13);
+  --sem-add-bd: rgba(46,160,67,.32);
+  --sem-reduce: #e5484d;           /* 减仓(红) */
+  --sem-reduce-bg: rgba(229,72,77,.13);
+  --sem-reduce-bd: rgba(229,72,77,.32);
+  --sem-buy: var(--accent2);       /* 买入/关注(品牌蓝) */
+  --sem-buy-bg: rgba(91,141,239,.13);
+  --sem-buy-bd: rgba(91,141,239,.32);
+  --sem-danger: #f0483e;           /* 清仓/危险操作(高辨识红) */
+  --sem-danger-bg: rgba(240,72,62,.14);
+  --sem-danger-bd: rgba(240,72,62,.4);
+  --sem-warn: #e3a341;             /* 预警/待确认/临界(橙黄) */
+  --sem-warn-bg: rgba(227,163,65,.13);
+  --sem-warn-bd: rgba(227,163,65,.34);
+  --sem-warn-strong: #ffb454;      /* 接近触发的强化橙 */
+  /* 距触发进度轨道 */
+  --track-bg: color-mix(in srgb, var(--panel3) 70%, transparent);
+  /* 间距刻度（4 基）——统一卡片规范用 */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-6: 24px;
 }
 
 /* ============ 白天模式（浅色）：覆盖同名变量，组件零改动 ============ */
@@ -58,6 +84,13 @@ html[data-theme="light"] {
   --glow: rgba(106, 88, 232, 0.18);
   --shadow: 0 1px 2px rgba(20,22,40,.06), 0 6px 20px rgba(20,22,40,.08);
   --shadow-lg: 0 4px 12px rgba(20,22,40,.1), 0 20px 48px rgba(20,22,40,.14);
+  /* 浅色下语义色微加深，保证白底可读 */
+  --sem-add: #1f9d43; --sem-add-bg: rgba(31,157,67,.1); --sem-add-bd: rgba(31,157,67,.3);
+  --sem-reduce: #d3352b; --sem-reduce-bg: rgba(211,53,43,.1); --sem-reduce-bd: rgba(211,53,43,.3);
+  --sem-buy: #3f79e0; --sem-buy-bg: rgba(63,121,224,.1); --sem-buy-bd: rgba(63,121,224,.3);
+  --sem-danger: #cf3025; --sem-danger-bg: rgba(207,48,37,.1); --sem-danger-bd: rgba(207,48,37,.36);
+  --sem-warn: #b7841a; --sem-warn-bg: rgba(183,132,26,.12); --sem-warn-bd: rgba(183,132,26,.34); --sem-warn-strong: #c8770a;
+  --track-bg: color-mix(in srgb, var(--panel3) 85%, transparent);
 }
 /* 浅色下调整几处硬编码深色 */
 html[data-theme="light"] .nav { background: rgba(255,255,255,.78); }
@@ -824,6 +857,25 @@ body {
 .chip-btn.done { background: rgba(63,185,80,.14); color: var(--green); border-color: rgba(63,185,80,.3); cursor: default; }
 .chip-btn.ghost { background: transparent; }
 .chip-btn:disabled { opacity: .7; cursor: default; }
+/* ===== A-1 主行动条视觉分级：按「操作语义」分色(补/买=绿, 减=红, 清仓=强红危险, 做T=蓝)。
+   注意与「涨跌价格色(红涨绿跌)」区分——这里表达的是操作方向而非行情涨跌。
+   分级：主操作(加/建/做T)=浅底描边; solid=确认态实心加重; 清仓=最强危险态防误点。 */
+.chip-btn.act-add, .chip-btn.act-buy { background: var(--sem-add-bg); color: var(--sem-add); border-color: var(--sem-add-bd); }
+.chip-btn.act-add:hover:not(:disabled), .chip-btn.act-buy:hover:not(:disabled) { border-color: var(--sem-add); color: var(--sem-add); }
+.chip-btn.act-reduce { background: var(--sem-reduce-bg); color: var(--sem-reduce); border-color: var(--sem-reduce-bd); }
+.chip-btn.act-reduce:hover:not(:disabled) { border-color: var(--sem-reduce); color: var(--sem-reduce); }
+.chip-btn.act-t { background: var(--sem-buy-bg); color: var(--sem-buy); border-color: var(--sem-buy-bd); }
+.chip-btn.act-t:hover:not(:disabled) { border-color: var(--sem-buy); color: var(--sem-buy); }
+/* 确认态(solid)：加重为实心，强调"这一步会落库/改仓位"，与取消(ghost)拉开层级 */
+.chip-btn.act-add.solid, .chip-btn.act-buy.solid { background: var(--sem-add); color: #fff; border-color: var(--sem-add); }
+.chip-btn.act-add.solid:hover:not(:disabled), .chip-btn.act-buy.solid:hover:not(:disabled) { filter: brightness(1.08); color: #fff; }
+.chip-btn.act-reduce.solid { background: var(--sem-reduce); color: #fff; border-color: var(--sem-reduce); }
+.chip-btn.act-reduce.solid:hover:not(:disabled) { filter: brightness(1.08); color: #fff; }
+/* 清仓=最强危险态：高识别红实心 + 轻微外发光，最高防误点权重 */
+.chip-btn.act-clear.solid { background: var(--sem-danger); color: #fff; border-color: var(--sem-danger); box-shadow: 0 0 0 1px var(--sem-danger-bd); font-weight: 600; }
+.chip-btn.act-clear.solid:hover:not(:disabled) { filter: brightness(1.08); color: #fff; }
+/* 删除持仓 icon-btn：hover 时透出危险红,提示破坏性 */
+.icon-btn.act-del:hover:not(:disabled) { color: var(--sem-danger); border-color: var(--sem-danger-bd); }
 .icon-btn {
   display: inline-flex; align-items: center; justify-content: center;
   width: 26px; height: 26px; border-radius: 7px; cursor: pointer;
@@ -933,6 +985,13 @@ body {
 @media (max-width: 1000px){ .plan-cols { grid-template-columns: 1fr; } }
 .plan-item, .hold-item { padding: 12px 15px; border-top: 1px solid var(--border-soft); }
 .plan-item:first-child, .hold-item:first-child { border-top: none; }
+/* B-7 横滑手势容器:相对定位承载左右提示,滑动时 hold-item translateX */
+.hold-swipe-wrap { position: relative; overflow: hidden; }
+.hold-swipe-wrap > .hold-item { position: relative; z-index: 1; touch-action: pan-y; }
+.hsw-hint { position: absolute; top: 0; bottom: 0; display: flex; align-items: center; gap: 6px; padding: 0 18px; font-size: 13px; font-weight: 650; z-index: 0; opacity: .55; transition: opacity .12s ease; }
+.hsw-hint.armed { opacity: 1; }
+.hsw-hint.hsw-right { left: 0; color: var(--sem-buy); background: linear-gradient(90deg, var(--sem-buy-bg), transparent); }
+.hsw-hint.hsw-left { right: 0; color: var(--sem-buy); background: linear-gradient(270deg, var(--sem-buy-bg), transparent); }
 .pi-main { display: flex; align-items: center; justify-content: space-between; }
 .pi-name { font-size: 14px; font-weight: 600; cursor: pointer; }
 .pi-name:hover { color: var(--accent); }
@@ -1660,6 +1719,16 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 .alert-rule { display: flex; align-items: flex-start; gap: 10px; padding: 11px 0; border-bottom: 1px solid var(--border-soft); }
 .alert-rule.off { opacity: .55; }
 .ar-main { flex: 1; min-width: 0; }
+/* B-5 预警一键跳转:整行主体可点进个股详情 */
+.ar-main-clickable { cursor: pointer; border-radius: 8px; margin: -4px -6px; padding: 4px 6px; transition: background .12s ease; }
+.ar-main-clickable:hover { background: var(--bg-elev); }
+.ar-jump { margin-left: auto; display: inline-flex; align-items: center; color: var(--muted); flex-shrink: 0; transition: color .12s ease, transform .12s ease; }
+.ar-main-clickable:hover .ar-jump { color: var(--accent); transform: translateX(2px); }
+.alert-notif.an-clickable { cursor: pointer; border-radius: 8px; margin: 0 -6px; padding: 10px 6px; transition: background .12s ease; }
+.alert-notif.an-clickable:hover { background: var(--bg-elev); }
+.an-title { position: relative; }
+.an-jump { display: inline-flex; align-items: center; color: var(--muted); margin-left: 4px; vertical-align: middle; transition: color .12s ease, transform .12s ease; }
+.an-clickable:hover .an-jump { color: var(--accent); transform: translateX(2px); }
 .ar-name { display: flex; align-items: center; gap: 6px; font-weight: 650; font-size: 13px; }
 .ar-code { font-size: 11px; color: var(--muted); font-weight: 400; }
 .ar-desc { font-size: 12px; color: var(--accent); margin-top: 2px; }
@@ -1667,6 +1736,9 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 .ar-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .ar-toggle { font-size: 11px; padding: 3px 9px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel2); color: var(--muted); cursor: pointer; }
 .ar-toggle.on { color: var(--red); border-color: rgba(224,67,47,.35); background: rgba(224,67,47,.08); }
+/* B-6 快捷执行:补/减1手(本地台账模拟,两段确认) */
+.chip-btn.quick-exec { white-space: nowrap; }
+.chip-btn.quick-exec.is-done { background: var(--sem-add-bg); color: var(--sem-add); border-color: var(--sem-add-bd); pointer-events: none; }
 /* 设预警小表单 */
 .alert-form { display: flex; flex-direction: column; gap: 12px; padding: 14px; border-radius: var(--radius-sm); background: var(--panel2); border: 1px solid var(--border-soft); }
 .af-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-height: 32px; }
@@ -2244,10 +2316,21 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 .advice-horizon .ah-row.now .ah-k { color: #2e9e63; background: rgba(76,175,120,.16); }
 .advice-horizon .ah-row.future .ah-k { color: var(--accent, #7c6bf5); background: rgba(124,107,245,.14); }
 .advice-horizon .ah-v { flex: 1; }
-/* 到价后怎么做：把"见价即砍"升级为"到价→看信号确认→再执行"的时机提示条 */
-.advice-exit-timing { display: flex; align-items: flex-start; gap: 6px; font-size: 12.5px; line-height: 1.6; color: var(--text); padding: 8px 11px; border-radius: 9px; background: rgba(240,168,48,.08); border: 1px solid rgba(240,168,48,.30); margin-bottom: 9px; }
-.advice-exit-timing .icon, .advice-exit-timing svg { flex-shrink: 0; margin-top: 2px; color: #d98a1a; }
-.advice-exit-timing b { color: #b8730a; font-weight: 700; margin-right: 2px; }
+/* 到价后怎么做：升级为"关键信息块"——独立标签(ket-tag) + 正文(ket-body)，
+   作为始终可见的核心结论之一，与折叠的深度分析区分开。 */
+.advice-exit-timing.key-block { display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; line-height: 1.6; color: var(--text); padding: 9px 11px; border-radius: 10px; background: var(--sem-warn-bg); border: 1px solid var(--sem-warn-bd); margin-bottom: 9px; }
+.advice-exit-timing.key-block .ket-tag { display: inline-flex; align-items: center; gap: 5px; align-self: flex-start; font-size: 11px; font-weight: 700; letter-spacing: .02em; color: var(--sem-warn-strong); padding: 2px 8px; border-radius: 6px; background: color-mix(in srgb, var(--sem-warn) 16%, transparent); }
+.advice-exit-timing.key-block .ket-tag .icon, .advice-exit-timing.key-block .ket-tag svg { color: var(--sem-warn-strong); flex-shrink: 0; }
+.advice-exit-timing.key-block .ket-body { color: var(--text); }
+/* 深度分析折叠：默认只给关键结论，依据/风险/信心收进折叠里 */
+.advice-deep { margin-top: 10px; }
+.advice-deep-toggle { width: 100%; display: flex; align-items: center; justify-content: space-between; cursor: pointer; padding: 7px 10px; border-radius: 8px; font-size: 12px; font-weight: 600; color: var(--text2); background: var(--track-bg); border: 1px solid var(--border-soft); user-select: none; transition: background .15s, border-color .15s; }
+.advice-deep-toggle:hover { background: color-mix(in srgb, var(--panel3) 85%, transparent); border-color: var(--border); color: var(--text); }
+.advice-deep-toggle .adt-label { display: inline-flex; align-items: center; gap: 6px; }
+.advice-deep-toggle .icon, .advice-deep-toggle svg { color: var(--muted); flex-shrink: 0; }
+.advice-deep-body { animation: deepReveal .18s ease; }
+@keyframes deepReveal { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+.advice-deep-body .advice-basis:first-child, .advice-deep-body .advice-risk:first-child { border-top: none; padding-top: 4px; margin-top: 6px; }
 .advice-adjust { display: flex; align-items: center; gap: 5px; font-size: 12px; line-height: 1.5; margin: 8px 0; padding: 6px 10px; border-radius: 8px; color: #c98a12; background: rgba(240,180,40,.10); border: 1px solid rgba(240,180,40,.28); }
 .advice-adjust .icon { color: #c98a12; flex-shrink: 0; }
 .advice-retry { font-size: 12.5px; color: var(--gold); margin-bottom: 8px; padding: 7px 10px; border-radius: 8px; background: rgba(227,179,65,.08); border: 1px solid rgba(227,179,65,.24); }
@@ -3133,5 +3216,113 @@ a.mn-flash:hover { color: var(--accent); }
   .nav-tab span:not(.nav-badge) { display: none; }
   .nav-tab { min-height: 46px; padding: 8px 4px; }
   .nav-tab .icon { width: 22px; height: 22px; }
+}
+
+/* ============================================================
+   到价预警「距触发」可视化 (A-2) —— 现价 vs 目标价距离进度条
+   方向语义色:补=绿/减·止盈=红/买点·涨=蓝/止损·跌=橙
+   ============================================================ */
+.ar-track { position: relative; height: 5px; border-radius: 3px; background: var(--track-bg); margin-top: 7px; overflow: hidden; }
+.ar-track-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: var(--dir-color, var(--accent)); transition: width var(--t-med); min-width: 2px; }
+.ar-dist-row { display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--muted); }
+.ar-dist-val { font-weight: 700; color: var(--dir-color, var(--text2)); }
+.ar-dist-target { margin-left: auto; color: var(--muted); }
+.ar-dist-target b { color: var(--text2); font-weight: 650; }
+/* 方向徽标(替代单纯颜色,兼顾无障碍) */
+.ar-dir { display: inline-flex; align-items: center; gap: 3px; font-size: 9.5px; font-weight: 700; padding: 1px 6px; border-radius: 4px; line-height: 1.7; white-space: nowrap;
+  color: var(--dir-color, var(--accent)); background: var(--dir-bg, rgba(124,107,245,.14)); border: 1px solid var(--dir-bd, transparent); }
+.ar-near { color: var(--sem-warn-strong); background: var(--sem-warn-bg); border: 1px solid var(--sem-warn-bd); animation: nearPulse 1.8s ease-in-out infinite; }
+@keyframes nearPulse { 0%,100% { opacity: 1 } 50% { opacity: .55 } }
+/* 方向色变量(通过 .dir-* 修饰类挂到规则行) */
+.dir-add    { --dir-color: var(--sem-add);    --dir-bg: var(--sem-add-bg);    --dir-bd: var(--sem-add-bd); }
+.dir-reduce { --dir-color: var(--sem-reduce); --dir-bg: var(--sem-reduce-bg); --dir-bd: var(--sem-reduce-bd); }
+.dir-buy    { --dir-color: var(--sem-buy);    --dir-bg: var(--sem-buy-bg);    --dir-bd: var(--sem-buy-bd); }
+.dir-up     { --dir-color: var(--sem-up);     --dir-bg: rgba(244,97,78,.13);  --dir-bd: rgba(244,97,78,.3); }
+.dir-down   { --dir-color: var(--sem-down);   --dir-bg: rgba(63,185,80,.13);  --dir-bd: rgba(63,185,80,.3); }
+.dir-warn   { --dir-color: var(--sem-warn);   --dir-bg: var(--sem-warn-bg);   --dir-bd: var(--sem-warn-bd); }
+/* 临近触发时整行左缘高亮 */
+.alert-rule.is-near { box-shadow: inset 2px 0 0 var(--sem-warn-strong); background: linear-gradient(90deg, var(--sem-warn-bg), transparent 40%); border-radius: var(--radius-xs); }
+
+/* ============================================================
+   骨架屏 (C-11) —— 内容形状占位,减少加载完成后的跳动
+   ============================================================ */
+.skel { position: relative; overflow: hidden; background: var(--panel2); border-radius: var(--radius-xs); }
+.skel::after { content: ''; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--panel3) 60%, transparent), transparent);
+  animation: skelSweep 1.3s ease-in-out infinite; }
+@keyframes skelSweep { 100% { transform: translateX(100%); } }
+.skel-line { height: 11px; border-radius: 4px; }
+.skel-line.sm { height: 9px; }
+.skel-alert { display: flex; flex-direction: column; gap: 8px; padding: 12px 0; border-bottom: 1px solid var(--border-soft); }
+.skel-alert .skel-line.w1 { width: 42%; } .skel-alert .skel-line.w2 { width: 68%; } .skel-alert .skel-line.w3 { width: 30%; }
+.skel-report { display: flex; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--border-soft); }
+.skel-report .skel-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 4px; }
+.skel-report .sk-body { flex: 1; display: flex; flex-direction: column; gap: 7px; }
+
+/* ============================================================
+   统一空状态 (C-12) —— 视觉占位 + 说明 + 下一步引导
+   ============================================================ */
+.empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 34px 20px; text-align: center; }
+.empty-state .es-icon { width: 44px; height: 44px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; color: var(--muted); background: var(--panel2); border: 1px solid var(--border-soft); }
+.empty-state .es-title { font-size: 13.5px; font-weight: 650; color: var(--text2); }
+.empty-state .es-desc { font-size: 12px; color: var(--muted); line-height: 1.6; max-width: 320px; }
+.empty-state .es-cta { margin-top: 4px; }
+
+/* ============================================================
+   撤销 Toast 倒计时强化 (B-8) —— 进度条 + 安全区,不遮挡底栏
+   ============================================================ */
+.undo-toast { display: inline-flex; flex-direction: column; gap: 5px; }
+.undo-toast .ut-bar { height: 2px; border-radius: 2px; background: var(--accent); transform-origin: left; animation: utCountdown 2.2s linear forwards; }
+@keyframes utCountdown { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+
+/* ============================================================
+   全局降动效 (C-9/A-3) —— 尊重系统「减少动态效果」偏好
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .skel::after, .ar-near, .undo-toast .ut-bar { animation: none !important; }
+  .num-roll { transition: none !important; }
+}
+
+/* ============================================================
+   D-14 横屏 / 平板 双栏(master-detail)
+   —— 个股详情弹窗在足够宽的横向视口里靠右停靠成侧栏,
+      左侧留出遮罩(半透明)仍可见列表,点遮罩关闭;
+      窄屏 / 竖屏回退为居中弹窗(不改任何 JS)。
+   仅对「个股详情」(.modal-mask:has(.detail-panel)) 生效,
+   不影响预警中心 / 确认弹窗等其它 modal。
+   ============================================================ */
+@media (min-width: 900px) and (orientation: landscape) {
+  .modal-mask:has(.detail-panel) {
+    flex-direction: row;
+    justify-content: flex-end;
+    padding: 0;
+    background: rgba(4,5,7,.55);
+  }
+  .modal-mask:has(.detail-panel) .detail-panel {
+    width: min(560px, 46vw);
+    max-height: 100vh;
+    height: 100vh;
+    margin: 0;
+    border-radius: 0;
+    border-top: none; border-right: none; border-bottom: none;
+    box-shadow: -12px 0 40px rgba(0,0,0,.5);
+    animation: slideInRight .24s var(--ease);
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+/* 平板竖屏(窄一些)也给更宽的停靠侧栏 */
+@media (min-width: 760px) and (max-width: 1100px) and (orientation: portrait) {
+  .modal-mask:has(.detail-panel) .detail-panel { width: min(680px, 88vw); }
+}
+@keyframes slideInRight { from { opacity: .4; transform: translateX(24px) } to { opacity: 1; transform: none } }
+@media (prefers-reduced-motion: reduce) {
+  .modal-mask:has(.detail-panel) .detail-panel { animation: none !important; }
 }
 

@@ -25,9 +25,33 @@ const OP_LABEL = { gte: '≥', lte: '≤' };
 function describeAlert(a) {
   if (a.type === 'limitup') return '临近涨停(涨幅≥9.5%)';
   if (a.type === 'limitdown') return '临近跌停(跌幅≥9.5%)';
+  // 行动点预警(补仓/减仓):补仓点 ≤ X元 · 补1手
+  if (a.type === 'price' && a.actKind) {
+    const l = a.actKind === 'add' ? '补仓点' : '减仓点';
+    const qty = a.opQty ? ' · ' + a.opQty : '';
+    return `${l} ${OP_LABEL[a.op] || ''} ${a.value}元${qty}`;
+  }
   const label = { price: '到价', pct: '涨跌幅', vol: '量比', turnover: '换手率' }[a.type] || a.type;
   const unit = { price: '元', pct: '%', turnover: '%' }[a.type] || '';
   return `${label} ${OP_LABEL[a.op] || ''} ${a.value}${unit}`;
+}
+
+// —— 与前端 alertStore.confirmHint 同口径:到操作点的「先确认再动手」提示 ——
+function confirmHint(a) {
+  if (!a || a.type !== 'price') return '';
+  if (a.actKind === 'add') {
+    const tail = a.timing ? '：' + a.timing : '：等分时止跌/站回均价线再补，别追一瞬价。';
+    return '\n🎯到操作点=开始盯，先确认再动手' + tail + ' 详情见AI建议「到价后怎么做」。';
+  }
+  if (a.actKind === 'reduce') {
+    const tail = a.timing ? '：' + a.timing : '：反弹放量滞涨/冲高回落再减，锁定部分利润即可。';
+    return '\n🎯到操作点=开始盯，先确认再动手' + tail + ' 详情见AI建议「到价后怎么做」。';
+  }
+  const note = a.note || '';
+  if (/止损/.test(note)) return '\n⚠️到价=开始盯，别急砍：确认是否放量/收盘跌破，只是瞬时插针又拉回可先缓一手。';
+  if (/止盈/.test(note)) return '\n💡到价=开始盯，别一次清光：可先减一部分锁利，剩余用移动止盈跟着走。';
+  if (/买点/.test(note)) return '\n💡到价=开始盯，别追一瞬价：等缩量企稳/站回均线再进。';
+  return '';
 }
 
 // —— 与前端 alertStore.hit 同口径 ——
@@ -104,8 +128,11 @@ async function processAccount(acc) {
     const msg = hit(a, quoteMap[a.code]);
     if (!msg) continue;
     hits++;
-    const title = `⚡ 预警触发 · ${a.name || a.code}`;
-    const body = `${describeAlert(a)}｜${msg}`;
+    const actLabel = a.actKind === 'add' ? '补仓' : (a.actKind === 'reduce' ? '减仓' : '');
+    const title = actLabel
+      ? `🎯 到${actLabel}操作点 · ${a.name || a.code}`
+      : `⚡ 预警触发 · ${a.name || a.code}`;
+    const body = `${describeAlert(a)}｜${msg}${confirmHint(a)}`;
     const r = await sendPush(subs, { title, body, code: a.code, tag: 'alert-' + a.id, url: '/' });
     sent += r.sent;
     for (const ep of r.deadEndpoints) dead.add(ep);

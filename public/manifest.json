@@ -3,10 +3,22 @@
   "short_name": "操盘台",
   "description": "A股短线 / 做T 交易决策系统 · 盯盘预警推送",
   "start_url": "/",
+  "scope": "/",
+  "id": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
+  "lang": "zh-CN",
+  "dir": "ltr",
+  "categories": ["finance", "productivity"],
   "background_color": "#0e0e12",
-  "theme_color": "#7C6BF5",
+  "theme_color": "#0e0e12",
   "icons": [
-    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "持仓·做T", "short_name": "持仓", "url": "/?tab=hub" },
+    { "name": "预警中心", "short_name": "预警", "url": "/?tab=hub&sub=alert" }
   ]
 }

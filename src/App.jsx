@@ -61,6 +61,16 @@ function MainApp() {
   const [tab, setTab] = useState('today')
   const [hubSub, setHubSub] = useState('account') // 账户·交易 融合页的子页
   const [hubNonce, setHubNonce] = useState(0)      // 每次外部要求跳预警时自增，强制生效
+  // D-15 PWA 快捷方式:manifest shortcuts 带 ?tab=hub&sub=alert 直达对应子页
+  useEffect(() => {
+    try {
+      const sp = new URLSearchParams(window.location.search)
+      const t = sp.get('tab')
+      const sub = sp.get('sub')
+      if (t) setTab(t)
+      if (sub) { setHubSub(sub); setHubNonce((n) => n + 1) }
+    } catch { /* ignore */ }
+  }, [])
   const { open: aiOpen } = useAIStore()
   const theme = useTheme()
   const { stock: detailStock } = useDetailStore()
@@ -303,7 +313,12 @@ function UndoButton() {
         <Icon name="refresh" size={15} className="flip-x" />
         {n > 0 && <span className="nav-undo-dot">{n > 9 ? '9+' : n}</span>}
       </button>
-      {toast && <span className="undo-toast">{toast}</span>}
+      {toast && (
+        <span className="undo-toast" key={toast + Date.now()}>
+          {toast}
+          <span className="ut-bar" />
+        </span>
+      )}
     </div>
   )
 }

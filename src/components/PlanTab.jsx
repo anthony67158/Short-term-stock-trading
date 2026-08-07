@@ -4,7 +4,7 @@ import StockName from './StockName'
 import Reasoning from './Reasoning'
 import ConfirmDialog from './ConfirmDialog'
 import { AlertForm } from './AlertCenter'
-import { usePolling } from '../hooks'
+import { usePolling, useSwipe } from '../hooks'
 import { callAIStream } from '../ai'
 import { api } from '../apiBase'
 import { planStore, usePlanStore, calcBuyFee, calcSellFee, computeTFlows, computePortfolio, livePositionOf, advicePlan, adviceFocus } from '../planStore'
@@ -508,7 +508,7 @@ function PlanList({ book, quote, batchSel }) {
               <input className="wl-input" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="买入价" />
               <input className="wl-input" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="手" />
               {price && Number(qty) > 0 && <span className="fee-hint">费≈{calcBuyFee(Number(price) * Number(qty) * 100).toFixed(0)}</span>}
-              <button className="chip-btn done" onClick={() => confirmBuy(p.code)}><Icon name="check" size={12} />确认</button>
+              <button className="chip-btn act-buy solid" onClick={() => confirmBuy(p.code)}><Icon name="check" size={12} />确认</button>
               <button className="chip-btn ghost" onClick={() => setBuying(null)}>取消</button>
             </div>
           </div>
@@ -519,7 +519,7 @@ function PlanList({ book, quote, batchSel }) {
           </div>
         ) : (
           <div className="pc-actions">
-            <button className="chip-btn buy" onClick={() => startBuy(p)}><Icon name="cart" size={12} />建仓</button>
+            <button className="chip-btn act-buy" onClick={() => startBuy(p)}><Icon name="cart" size={12} />建仓</button>
             <button className="chip-btn ghost" onClick={() => setAlerting(p.code)}><Icon name="bell" size={12} />预警</button>
             <button className="icon-btn" onClick={() => setDelTarget(p)}><Icon name="trash" size={13} /></button>
           </div>
@@ -1104,6 +1104,13 @@ function HoldingItem({ h, idx, quote: q }) {
   const [addQty, setAddQty] = useState('1')
   const [confirmDel, setConfirmDel] = useState(false) // 删除持仓二次确认
   const [confirmSettle, setConfirmSettle] = useState(false) // 手动结算做T二次确认
+  // B-7 移动端横滑:左滑=做T,右滑=看详情(显式按钮保留;仅触屏启用)
+  const isTouch = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches
+  const swipe = useSwipe({
+    enabled: isTouch,
+    onLeft: () => startT(),
+    onRight: () => openStockDetail(h.code, h.name),
+  })
 
   // 做T输入（流水式：直接记一腿买或卖）
   const [tSide, setTSide] = useState('buy') // buy 低吸/买回 | sell 高抛/卖出
@@ -1351,7 +1358,15 @@ function HoldingItem({ h, idx, quote: q }) {
     return { prompt: true }  // 无AI操作建议 → 引导用户去个股页生成
   })()
   return (
-    <div className="hold-item">
+    <div className="hold-swipe-wrap">
+      {swipe.swiping && isTouch && (
+        <>
+          <div className={'hsw-hint hsw-right' + (swipe.dx >= 64 ? ' armed' : '')}><Icon name="chart" size={16} /><span>详情</span></div>
+          <div className={'hsw-hint hsw-left' + (swipe.dx <= -64 ? ' armed' : '')}><span>做T</span><Icon name="refresh" size={16} /></div>
+        </>
+      )}
+      <div className="hold-item" {...swipe.bind}
+        style={swipe.dx ? { transform: `translateX(${swipe.dx}px)`, transition: swipe.swiping ? 'none' : 'transform .2s ease' } : undefined}>
       {/* 决策条：股名 + 特大号浮盈亏（第一视觉焦点）*/}
       <div className="hold-head">
         <div className="hold-head-l">
@@ -1544,7 +1559,7 @@ function HoldingItem({ h, idx, quote: q }) {
             <input className="wl-input" value={addPrice} onChange={(e) => setAddPrice(e.target.value)} placeholder="加仓价" />
             <input className="wl-input" value={addQty} onChange={(e) => setAddQty(e.target.value)} placeholder="手" />
             {addPrice && Number(addQty) > 0 && <span className="fee-hint">费≈{calcBuyFee(Number(addPrice) * Number(addQty) * 100).toFixed(2)}</span>}
-            <button className="chip-btn buy" onClick={confirmAdd}><Icon name="check" size={13} />确认加仓</button>
+            <button className="chip-btn act-add solid" onClick={confirmAdd}><Icon name="check" size={13} />确认加仓</button>
             <button className="chip-btn ghost" onClick={() => setMode(null)}>取消</button>
           </div>
         </div>
@@ -1555,7 +1570,7 @@ function HoldingItem({ h, idx, quote: q }) {
             <input className="wl-input" value={sellQty} onChange={(e) => setSellQty(e.target.value)} placeholder="手" />
             <span className="qty-hint">/{h.qty}手</span>
             {sellPrice && Number(sellQty) > 0 && <span className="fee-hint">费≈{calcSellFee(Number(sellPrice) * Number(sellQty) * 100).toFixed(2)}</span>}
-            <button className="chip-btn done" onClick={confirmSell}><Icon name="check" size={13} />{Number(sellQty) >= h.qty ? '确认清仓' : '确认减仓'}</button>
+            <button className={'chip-btn solid ' + (Number(sellQty) >= h.qty ? 'act-clear' : 'act-reduce')} onClick={confirmSell}><Icon name="check" size={13} />{Number(sellQty) >= h.qty ? '确认清仓' : '确认减仓'}</button>
             <button className="chip-btn ghost" onClick={() => setMode(null)}>取消</button>
           </div>
         </div>
@@ -1589,11 +1604,11 @@ function HoldingItem({ h, idx, quote: q }) {
         </div>
       ) : (
         <div className="pi-actions">
-          <button className="chip-btn buy" onClick={startAdd}><Icon name="cart" size={13} />加仓</button>
-          <button className="chip-btn buy" onClick={startT}><Icon name="refresh" size={13} />做T</button>
-          <button className="chip-btn sell" onClick={startSell}><Icon name="sell" size={13} />减仓/清仓</button>
+          <button className="chip-btn act-add" onClick={startAdd}><Icon name="cart" size={13} />加仓</button>
+          <button className="chip-btn act-t" onClick={startT}><Icon name="refresh" size={13} />做T</button>
+          <button className="chip-btn act-reduce" onClick={startSell}><Icon name="sell" size={13} />减仓/清仓</button>
           {!(h.tp || h.sl || h.planReason) && <button className="chip-btn ghost" onClick={() => openPlan(false)}><Icon name="target" size={12} />设计划</button>}
-          <button className="icon-btn" onClick={() => setConfirmDel(true)}><Icon name="trash" size={14} /></button>
+          <button className="icon-btn act-del" onClick={() => setConfirmDel(true)}><Icon name="trash" size={14} /></button>
         </div>
       )}
 
@@ -1806,6 +1821,7 @@ function HoldingItem({ h, idx, quote: q }) {
           </div>
         </div>
       )}
+    </div>
     </div>
   )
 }

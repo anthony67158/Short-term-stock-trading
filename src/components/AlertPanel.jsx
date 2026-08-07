@@ -2,9 +2,11 @@ import { useState, useMemo } from 'react'
 import Icon from './Icon'
 import StockName from './StockName'
 import ConfirmDialog from './ConfirmDialog'
+import ActionQuickExec from './ActionQuickExec'
+import { openStockDetail } from '../detailStore'
 import { usePolling } from '../hooks'
 import { planStore, usePlanStore } from '../planStore'
-import { alertStore, useAlertStore, describeAlert, ALERT_TYPES } from '../alertStore'
+import { alertStore, useAlertStore, describeAlert, alertMeta, ALERT_TYPES } from '../alertStore'
 import { fmtRaw } from '../format'
 import PushToggle from './PushToggle'
 
@@ -18,9 +20,9 @@ export default function AlertPanel({ interval }) {
   const [delBatch, setDelBatch] = useState(null)
   const alerts = book.alerts || []
   const activeCnt = alerts.filter((a) => a.enabled && !a.triggeredAt).length
-  // 分组:手动预警 vs AI 自动预警(planId=持仓止盈止损 / candCode=自选买点)
-  const manualAlerts = alerts.filter((a) => !a.planId && !a.candCode)
-  const autoAlerts = alerts.filter((a) => a.planId || a.candCode)
+  // 分组:手动预警 vs AI 自动预警(planId=持仓止盈止损 / candCode=自选买点 / actCode=补仓减仓行动点)
+  const manualAlerts = alerts.filter((a) => !a.planId && !a.candCode && !a.actCode)
+  const autoAlerts = alerts.filter((a) => a.planId || a.candCode || a.actCode)
   const triggeredAlerts = alerts.filter((a) => a.triggeredAt)
   const aiAutoOn = (book.settings || {}).aiAutoAlert !== false
 
@@ -100,7 +102,7 @@ export default function AlertPanel({ interval }) {
                       <Icon name="trash" size={11} /> 全部删除
                     </button>
                   </div>
-                  {autoAlerts.map((a) => renderRule(a, quote, setDelTarget))}
+                  {autoAlerts.map((a) => renderRule(a, quote, setDelTarget, book.holding))}
                 </div>
               )}
 
@@ -108,7 +110,7 @@ export default function AlertPanel({ interval }) {
               {manualAlerts.length > 0 && (
                 <div className="alert-group">
                   <div className="alert-group-head"><span className="sub-name">手动预警 · {manualAlerts.length} 条</span></div>
-                  {manualAlerts.map((a) => renderRule(a, quote, setDelTarget))}
+                  {manualAlerts.map((a) => renderRule(a, quote, setDelTarget, book.holding))}
                 </div>
               )}
             </>
@@ -144,7 +146,7 @@ export default function AlertPanel({ interval }) {
       {delTarget && (
         <ConfirmDialog
           title="删除此预警？"
-          body={<>确定删除 <b>{delTarget.name}</b> 的「{describeAlert(delTarget)}」预警？{(delTarget.planId || delTarget.candCode) && <><br /><span className="sub-name">这是 AI 自动预警，删除后不会再被自动加回（除非在该股「恢复自动预警」）。</span></>}</>}
+          body={<>确定删除 <b>{delTarget.name}</b> 的「{describeAlert(delTarget)}」预警？{(delTarget.planId || delTarget.candCode || delTarget.actCode) && <><br /><span className="sub-name">这是 AI 自动预警，删除后不会再被自动加回（除非在该股「恢复自动预警」）。</span></>}</>}
           confirmText="删除"
           onConfirm={() => { planStore.removeAlert(delTarget.id); setDelTarget(null) }}
           onCancel={() => setDelTarget(null)}
@@ -164,21 +166,37 @@ export default function AlertPanel({ interval }) {
 }
 
 // 单条预警规则行（手动/AI 自动共用）
-function renderRule(a, quote, setDelTarget) {
-  const isAuto = !!(a.planId || a.candCode)
+function renderRule(a, quote, setDelTarget, holding) {
+  const isAuto = !!(a.planId || a.candCode || a.actCode)
+  const q = quote[a.code]
+  const m = alertMeta(a, q)
+  const showTrack = !a.triggeredAt && m.progress != null   // 仅未触发的价位类显示距触发进度
   return (
-    <div className={'alert-rule' + (a.enabled ? '' : ' off')} key={a.id}>
-      <div className="ar-main">
+    <div className={'alert-rule dir-' + m.dir + (a.enabled ? '' : ' off') + (m.near ? ' is-near' : '')} key={a.id}>
+      <div className="ar-main ar-main-clickable" onClick={() => openStockDetail(a.code, a.name)} title="点击查看个股详情与K线">
         <div className="ar-name">
           <StockName code={a.code} name={a.name} stopPropagation><span>{a.name || a.code}</span></StockName>
           <span className="ar-code">{a.code}</span>
+          <span className="ar-dir">{m.dirLabel}</span>
           {isAuto && <span className="ar-badge">AI</span>}
-          {quote[a.code] && <span className="ar-now">现 {fmtRaw(quote[a.code].price)}</span>}
+          {q && <span className="ar-now">现 {fmtRaw(q.price)}</span>}
+          <span className="ar-jump" title="查看详情与K线"><Icon name="chevronRight" size={13} /></span>
         </div>
-        <div className="ar-desc">{describeAlert(a)}{a.note ? ` · ${a.note}` : ''}</div>
+        <div className="ar-desc">{describeAlert(a)}{a.note && !a.actKind ? ` · ${a.note}` : ''}</div>
+        {showTrack && (
+          <>
+            <div className="ar-track"><div className="ar-track-fill" style={{ width: m.progress + '%' }} /></div>
+            <div className="ar-dist-row">
+              {m.near ? <span className="ar-dir ar-near">接近触发</span> : null}
+              <span className="ar-dist-val">{m.distPct <= 0 ? '已到触发价' : `距触发还差 ${m.distPct.toFixed(2)}%`}</span>
+              <span className="ar-dist-target">目标 <b>{fmtRaw(a.value)}</b></span>
+            </div>
+          </>
+        )}
         {a.triggeredAt && <div className="ar-fired">已于 {new Date(a.triggeredAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })} 触发：{a.triggeredMsg}</div>}
       </div>
       <div className="ar-actions">
+        {a.actKind && <ActionQuickExec alert={a} holding={holding} />}
         {a.triggeredAt ? (
           <button className="chip-btn ghost" title="重新启用" onClick={() => planStore.rearmAlert(a.id)}><Icon name="refresh" size={12} />重启</button>
         ) : (

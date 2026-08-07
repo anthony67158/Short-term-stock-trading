@@ -94,3 +94,54 @@ export function isTradingHours() {
   const m = now.getHours() * 60 + now.getMinutes()
   return (m >= 9 * 60 + 15 && m <= 11 * 60 + 30) || (m >= 13 * 60 && m <= 15 * 60 + 5)
 }
+
+// B-7 移动端横滑手势:返回 { bind, dx, swiping }。
+//   bind 展开到目标元素的 touch 事件;dx 为实时位移(px,右滑为正);swiping 表示是否正在横滑。
+//   —— 触发阈值 threshold(默认 64px):越过后回弹并回调 onLeft(左滑)/onRight(右滑);
+//   —— 竖向滚动优先:纵向位移显著大于横向时判为滚动,放弃横滑(不劫持页面滚动);
+//   —— 显式按钮保留,手势仅作为快捷补充。
+export function useSwipe({ onLeft, onRight, threshold = 64, enabled = true } = {}) {
+  const [dx, setDx] = useState(0)
+  const [swiping, setSwiping] = useState(false)
+  const st = useRef({ x0: 0, y0: 0, active: false, decided: false, horiz: false })
+
+  const reset = () => { setDx(0); setSwiping(false); st.current.active = false; st.current.decided = false; st.current.horiz = false }
+
+  const onTouchStart = useCallback((e) => {
+    if (!enabled) return
+    const t = e.touches && e.touches[0]
+    if (!t) return
+    st.current = { x0: t.clientX, y0: t.clientY, active: true, decided: false, horiz: false }
+  }, [enabled])
+
+  const onTouchMove = useCallback((e) => {
+    if (!enabled || !st.current.active) return
+    const t = e.touches && e.touches[0]
+    if (!t) return
+    const ddx = t.clientX - st.current.x0
+    const ddy = t.clientY - st.current.y0
+    if (!st.current.decided) {
+      if (Math.abs(ddx) < 8 && Math.abs(ddy) < 8) return
+      st.current.decided = true
+      st.current.horiz = Math.abs(ddx) > Math.abs(ddy) * 1.3 // 横向明显占优才判为横滑
+    }
+    if (!st.current.horiz) { st.current.active = false; return } // 竖滑 → 交还页面滚动
+    // 阻尼:越滑越沉,越界不脱手
+    const damped = Math.sign(ddx) * Math.min(Math.abs(ddx), 120) * 0.9
+    setDx(damped)
+    setSwiping(true)
+  }, [enabled])
+
+  const onTouchEnd = useCallback(() => {
+    if (!enabled || !st.current.active && !swiping) { reset(); return }
+    const d = dx
+    if (d <= -threshold && onLeft) onLeft()
+    else if (d >= threshold && onRight) onRight()
+    reset()
+    // eslint-disable-next-line
+  }, [enabled, dx, swiping, threshold, onLeft, onRight])
+
+  const bind = enabled ? { onTouchStart, onTouchMove, onTouchEnd, onTouchCancel: reset } : {}
+  return { bind, dx, swiping }
+}
+

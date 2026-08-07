@@ -779,6 +779,58 @@ export const planStore = {
     emit()
   },
 
+  // 「行动点」自动预警：跟随 AI 操作建议里的【补仓价 addPrice】/【减仓价 reducePrice】,
+  // 自动建 到价预警,价一到就通知用户「现在是补/减仓的时候了」,直接回应「节点把握不准、太抽象」的诉求。
+  //   补仓:到价 ≤ addPrice(回踩到位) → op='lte', actKind='add'
+  //   减仓:到价 ≥ reducePrice(反弹到位) → op='gte', actKind='reduce'
+  // 通知里带上【要做什么(opQty,如 补1手/减1手)】+【到价后怎么确认(exitTiming)】——
+  //   遵循「到价=开始盯,不是见价即砍」纪律(A股 T+1),先确认信号再动手。
+  //   actCode: 绑定的股票代码(区别于持仓 planId / 候选 candCode);actKind: 'add' | 'reduce'
+  // 三条纪律与 _syncPlanAlerts 一致:
+  //   ① 全局开关 settings.aiAutoAlert===false → 不生成、并清掉旧的;
+  //   ② 用户删过 → 落 muteAdd/muteReduce(记在同 code 的持仓或候选上),永久不再自动加回;
+  //   ③ 价位没变则「原样保留」旧预警(含触发态),不重新武装、不重复响铃。
+  syncActionAlerts(code) {
+    if (!code) return
+    const rest = (state.alerts || []).filter((a) => a.actCode !== code)
+    if (state.settings && state.settings.aiAutoAlert === false) {
+      state.alerts = rest
+      emit()
+      return
+    }
+    let adv = null
+    try { adv = (getAdvice(code) || {}).advice } catch { adv = null }
+    if (!adv) { state.alerts = rest; emit(); return }
+    // 该 code 可能在持仓或自选里,静音标记落在哪就读哪(取到即用)
+    const holder = state.holding.find((x) => x.code === code)
+    const cand = state.plan.find((x) => x.code === code)
+    const owner = holder || cand || {}
+    const name = adv.name || owner.name || code
+    // opQty 是「补1手/减1手」这类操作量标签;actionPlan/exitTiming 给「到价后怎么确认」
+    const opQty = adv.opQty || ''
+    const timing = adv.exitTiming || adv.actionPlan || ''
+    const old = (state.alerts || []).filter((a) => a.actCode === code)
+    const rebuilt = []
+    const build = (kind, op, price, muted) => {
+      if (muted) return
+      if (price == null || isNaN(price)) return
+      const v = roundPx(price)
+      if (v == null || !(Number(v) > 0)) return
+      const note = kind === 'add' ? '补仓点' : '减仓点'
+      const prev = old.find((a) => a.actKind === kind)
+      if (prev && Number(prev.value) === Number(v)) { rebuilt.push(prev); return } // 价没变 → 原样保留触发态
+      rebuilt.push({
+        id: uid(), enabled: true, createdAt: Date.now(), triggeredAt: null, triggeredMsg: '',
+        code, name, type: 'price', op, value: Number(v), note,
+        actCode: code, actKind: kind, opQty, timing,
+      })
+    }
+    build('add', 'lte', adv.addPrice, owner.muteAdd)
+    build('reduce', 'gte', adv.reducePrice, owner.muteReduce)
+    state.alerts = [...rebuilt, ...rest]
+    emit()
+  },
+
   // ===== 预警规则 =====
   // alert: { id, code, name, type, op, value, note, enabled, createdAt, triggeredAt, triggeredMsg }
   //   type: price(到价) | pct(涨跌幅) | vol(量比) | turnover(换手) | ma(均线突破/跌破) | limit(涨跌停临近)
@@ -807,6 +859,11 @@ export const planStore = {
         state.holding = state.holding.map((h) => h.id === a.planId ? { ...h, [key]: true } : h)
       } else if (a.candCode) {
         state.plan = state.plan.map((p) => p.code === a.candCode ? { ...p, alertMuted: true } : p)
+      } else if (a.actCode) {
+        // 行动点预警删除 → 落静音(补/减各自独立),同 code 的持仓或候选上都打标记,永久不再自动加回
+        const key = a.actKind === 'add' ? 'muteAdd' : 'muteReduce'
+        state.holding = state.holding.map((h) => h.code === a.actCode ? { ...h, [key]: true } : h)
+        state.plan = state.plan.map((p) => p.code === a.actCode ? { ...p, [key]: true } : p)
       }
     }
     state.alerts = (state.alerts || []).filter((x) => x.id !== id)
@@ -823,6 +880,10 @@ export const planStore = {
         state.holding = state.holding.map((h) => h.id === a.planId ? { ...h, [key]: true } : h)
       } else if (a.candCode) {
         state.plan = state.plan.map((p) => p.code === a.candCode ? { ...p, alertMuted: true } : p)
+      } else if (a.actCode) {
+        const key = a.actKind === 'add' ? 'muteAdd' : 'muteReduce'
+        state.holding = state.holding.map((h) => h.code === a.actCode ? { ...h, [key]: true } : h)
+        state.plan = state.plan.map((p) => p.code === a.actCode ? { ...p, [key]: true } : p)
       }
     }
     state.alerts = (state.alerts || []).filter((x) => !set.has(x.id))
@@ -831,13 +892,13 @@ export const planStore = {
   // AI 自动预警总开关:关 → 清掉所有 planId/candCode 联动预警且今后不再生成;开 → 允许下次刷新重建(受各自静音约束)。
   setAiAutoAlert(on) {
     state.settings = { ...(state.settings || {}), aiAutoAlert: !!on }
-    if (!on) state.alerts = (state.alerts || []).filter((a) => !a.planId && !a.candCode)
+    if (!on) state.alerts = (state.alerts || []).filter((a) => !a.planId && !a.candCode && !a.actCode)
     emit()
   },
-  // 解除某只股票的 AI 预警静音(用户改主意想重新自动跟随):清掉持仓 muteTp/muteSl / 候选 alertMuted + alertSyncedPrice。
+  // 解除某只股票的 AI 预警静音(用户改主意想重新自动跟随):清掉持仓 muteTp/muteSl / 候选 alertMuted + alertSyncedPrice / 行动点 muteAdd/muteReduce。
   unmuteStockAlert(code) {
-    state.holding = state.holding.map((h) => h.code === code ? { ...h, muteTp: false, muteSl: false } : h)
-    state.plan = state.plan.map((p) => p.code === code ? { ...p, alertMuted: false, alertSyncedPrice: null } : p)
+    state.holding = state.holding.map((h) => h.code === code ? { ...h, muteTp: false, muteSl: false, muteAdd: false, muteReduce: false } : h)
+    state.plan = state.plan.map((p) => p.code === code ? { ...p, alertMuted: false, alertSyncedPrice: null, muteAdd: false, muteReduce: false } : p)
     emit()
   },
   toggleAlert(id) {

@@ -1,8 +1,12 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import Icon from './Icon'
 import StockName from './StockName'
+import ActionQuickExec from './ActionQuickExec'
+import { usePolling } from '../hooks'
+import { fmtRaw } from '../format'
+import { openStockDetail } from '../detailStore'
 import { planStore, usePlanStore } from '../planStore'
-import { alertStore, useAlertStore, describeAlert } from '../alertStore'
+import { alertStore, useAlertStore, describeAlert, alertMeta } from '../alertStore'
 import { quantReportStore, useQuantReportStore } from '../quantReportStore'
 
 // ============ 预警中心：站内通知流 + 预警规则管理 + 量化每日汇报 ============
@@ -17,6 +21,15 @@ export default function AlertCenter({ onClose }) {
   useState(() => { alertStore.markAllRead(); return 0 })
   // 切到「量化」页时拉取每日汇报（后台定时任务写入 OSS）
   useEffect(() => { if (tab === 'quant') quantReportStore.load() }, [tab])
+
+  // 规则页:轮询相关个股实时报价,用于「距触发」可视化
+  const ruleCodes = useMemo(() => [...new Set(alerts.map((a) => a.code))], [alerts])
+  const { data: quoteData } = usePolling(
+    tab === 'rules' && ruleCodes.length ? `/api/quote?codes=${ruleCodes.join(',')}` : null,
+    15000, [tab, ruleCodes.join(',')]
+  )
+  const quote = {}
+  ;(quoteData?.list || []).forEach((s) => { quote[s.code] = s })
 
   const enableNotif = async () => { await alertStore.requestPermission() }
 
@@ -45,7 +58,11 @@ export default function AlertCenter({ onClose }) {
         <div className="alert-body">
           {tab === 'notif' && (
             notifications.length === 0 ? (
-              <div className="empty">暂无预警通知。在自选/持仓或个股详情里设置预警规则，命中时会在这里提醒你。</div>
+              <div className="empty-state">
+                <span className="es-icon"><Icon name="bell" size={20} /></span>
+                <div className="es-title">暂无预警通知</div>
+                <div className="es-desc">在自选/持仓或个股详情里设置预警规则，命中时会在这里提醒你。</div>
+              </div>
             ) : (
               <>
                 <div className="alert-toolbar">
@@ -53,10 +70,12 @@ export default function AlertCenter({ onClose }) {
                   <button className="btn" onClick={() => alertStore.clearAll()}><Icon name="trash" size={12} /> 清空</button>
                 </div>
                 {notifications.map((n) => (
-                  <div className="alert-notif" key={n.id}>
+                  <div className={'alert-notif' + (n.code ? ' an-clickable' : '')} key={n.id}
+                    onClick={n.code ? () => openStockDetail(n.code, n.name) : undefined}
+                    title={n.code ? '点击查看个股详情与K线' : undefined}>
                     <div className="an-dot" />
                     <div className="an-main">
-                      <div className="an-title"><StockName code={n.code} name={n.name} stopPropagation><span>{n.name || n.code}</span></StockName></div>
+                      <div className="an-title"><StockName code={n.code} name={n.name} stopPropagation><span>{n.name || n.code}</span></StockName>{n.code && <span className="an-jump"><Icon name="chevronRight" size={12} /></span>}</div>
                       <div className="an-body">{n.body}</div>
                       <div className="an-time">{new Date(n.at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</div>
                     </div>
@@ -67,19 +86,41 @@ export default function AlertCenter({ onClose }) {
           )}
           {tab === 'rules' && (
             alerts.length === 0 ? (
-              <div className="empty">还没有预警规则。在「持仓·做T」的自选/持仓卡片，或个股详情弹窗里点「设预警」即可添加。</div>
+              <div className="empty-state">
+                <span className="es-icon"><Icon name="bell" size={20} /></span>
+                <div className="es-title">还没有预警规则</div>
+                <div className="es-desc">在「持仓·做T」的自选/持仓卡片，或个股详情弹窗里点「设预警」即可添加。AI 生成操作建议时也会自动挂上补仓/减仓行动预警。</div>
+              </div>
             ) : (
-              alerts.map((a) => (
-                <div className={'alert-rule' + (a.enabled ? '' : ' off')} key={a.id}>
-                  <div className="ar-main">
+              alerts.map((a) => {
+                const q = quote[a.code]
+                const m = alertMeta(a, q)
+                const showTrack = !a.triggeredAt && m.progress != null
+                return (
+                <div className={'alert-rule dir-' + m.dir + (a.enabled ? '' : ' off') + (m.near ? ' is-near' : '')} key={a.id}>
+                  <div className="ar-main ar-main-clickable" onClick={() => openStockDetail(a.code, a.name)} title="点击查看个股详情与K线">
                     <div className="ar-name">
                       <StockName code={a.code} name={a.name} stopPropagation><span>{a.name || a.code}</span></StockName>
                       <span className="ar-code">{a.code}</span>
+                      <span className="ar-dir">{m.dirLabel}</span>
+                      {q && <span className="ar-now">现 {fmtRaw(q.price)}</span>}
+                      <span className="ar-jump" title="查看详情与K线"><Icon name="chevronRight" size={13} /></span>
                     </div>
-                    <div className="ar-desc">{describeAlert(a)}{a.note ? ` · ${a.note}` : ''}</div>
+                    <div className="ar-desc">{describeAlert(a)}{a.note && !a.actKind ? ` · ${a.note}` : ''}</div>
+                    {showTrack && (
+                      <>
+                        <div className="ar-track"><div className="ar-track-fill" style={{ width: m.progress + '%' }} /></div>
+                        <div className="ar-dist-row">
+                          {m.near ? <span className="ar-dir ar-near">接近触发</span> : null}
+                          <span className="ar-dist-val">{m.distPct <= 0 ? '已到触发价' : `距触发还差 ${m.distPct.toFixed(2)}%`}</span>
+                          <span className="ar-dist-target">目标 <b>{fmtRaw(a.value)}</b></span>
+                        </div>
+                      </>
+                    )}
                     {a.triggeredAt && <div className="ar-fired">已于 {new Date(a.triggeredAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })} 触发：{a.triggeredMsg}</div>}
                   </div>
                   <div className="ar-actions">
+                    {a.actKind && <ActionQuickExec alert={a} holding={book.holding} />}
                     {a.triggeredAt ? (
                       <button className="chip-btn ghost" title="重新启用" onClick={() => planStore.rearmAlert(a.id)}><Icon name="refresh" size={12} />重启</button>
                     ) : (
@@ -90,16 +131,37 @@ export default function AlertCenter({ onClose }) {
                     <button className="icon-btn" title="删除规则" onClick={() => planStore.removeAlert(a.id)}><Icon name="trash" size={13} /></button>
                   </div>
                 </div>
-              ))
+                )
+              })
             )
           )}
           {tab === 'quant' && (
             qLoading && reports.length === 0 ? (
-              <div className="empty">正在加载量化每日汇报…</div>
+              <div className="skel-list">
+                {[0, 1, 2].map((i) => (
+                  <div className="skel-report" key={i}>
+                    <div className="skel-dot skel" />
+                    <div className="sk-body">
+                      <div className="skel-line w1 skel" style={{ width: '46%' }} />
+                      <div className="skel-line skel" style={{ width: '88%' }} />
+                      <div className="skel-line sm skel" style={{ width: '64%' }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
             ) : qError && reports.length === 0 ? (
-              <div className="empty">加载失败：{qError}<br /><button className="btn" style={{ marginTop: 8 }} onClick={() => quantReportStore.load({ force: true })}>重试</button></div>
+              <div className="empty-state">
+                <span className="es-icon"><Icon name="info" size={20} /></span>
+                <div className="es-title">加载失败</div>
+                <div className="es-desc">{qError}</div>
+                <button className="btn es-cta" onClick={() => quantReportStore.load({ force: true })}><Icon name="refresh" size={12} /> 重试</button>
+              </div>
             ) : reports.length === 0 ? (
-              <div className="empty">暂无量化汇报。每天凌晨持续训练跑完后，会把当天的中文决策汇报（晋级/拒绝、样本外 AUC 对比、样本量、耗时）推送到这里。</div>
+              <div className="empty-state">
+                <span className="es-icon"><Icon name="chart" size={20} /></span>
+                <div className="es-title">暂无量化汇报</div>
+                <div className="es-desc">每天凌晨持续训练跑完后，会把当天的中文决策汇报（晋级/拒绝、样本外 AUC 对比、样本量、耗时）推送到这里。</div>
+              </div>
             ) : (
               <>
                 <div className="alert-toolbar">

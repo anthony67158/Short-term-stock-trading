@@ -76,6 +76,11 @@ async function run(spec) {
       const cachedAt = Date.now()
       results.set(code, { result, advice, meta, news, adviceMissing, truncated, cachedAt })
       saveAdvice(code, { result, advice, meta, news, truncated }) // 持久化：关闭再进/刷新仍可见
+      // 行动点预警自动同步:把最新建议里的补仓价/减仓价转成到价预警,价一到就通知「现在该补/减仓了」。
+      // 挂在这个唯一出口 → 手动/每日/批量/盘中自动刷新(含页面已关的后台生成)全都覆盖。
+      if (advice) {
+        try { planStore.syncActionAlerts(code) } catch { /* ignore */ }
+      }
       // 生成AI操作建议时量化服务也跑了一次 → 把最新量化得分写回自选/持仓专用字段(排序/展示同源)
       if (result && result.score != null && !isNaN(result.score)) {
         try { planStore.setQuantScore(code, { qScore: Number(result.score), qBias: result.bias || '' }) } catch { /* ignore */ }
