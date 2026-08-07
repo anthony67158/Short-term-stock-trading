@@ -21,10 +21,24 @@ async function handleNews(res) {
       })
       .map((n) => ({ title: n.title, src: n.src || '快讯', date: n.date || '', url: n.url || '', level: n.level }))
       .slice(0, 30);
-    const macroList = (macro || [])
+    let macroList = (macro || [])
       .map((n) => ({ title: n.title, date: n.date || '', url: n.url || '' }))
       .filter((n) => n.title)
       .slice(0, 10);
+    // 兜底:东财搜索在服务端 egress IP 上偶发限流/超时→macro 为空。此时改用已抓到的
+    // 财联社系/金十/新浪7×24快讯,挑出带宏观/政策/央行/海外关键词的条目当"宏观要闻",
+    // 与 AI 侧 fetchMacroNews 的降级逻辑保持一致,确保面板不再出现"暂无"。
+    if (!macroList.length) {
+      const MACRO_RE = /(央行|货币|政策|降准|降息|LPR|财政|关税|美股|美联储|加息|经济|GDP|CPI|PPI|地缘|大盘|A股|外资|人民币|国常会|会议|监管|出口|贸易|指数)/;
+      const pool = [...(cls || []), ...(sina || [])].filter((x) => x && x.title);
+      let cand = pool.filter((x) => MACRO_RE.test(x.title));
+      if (!cand.length) cand = pool; // 关键词一条没命中→退化为最新快讯,总比空缺强
+      const seen2 = new Set();
+      macroList = cand
+        .filter((x) => { const k = x.title.slice(0, 24); if (seen2.has(k)) return false; seen2.add(k); return true; })
+        .map((x) => ({ title: (x.src ? `[${x.src}]${x.title}` : x.title).slice(0, 120), date: x.date || '', url: x.url || '' }))
+        .slice(0, 10);
+    }
     sendJson(res, { ok: true, macro: macroList, flashes, updatedAt: Date.now() }, { cache: 60 });
   } catch (e) {
     sendJson(res, { ok: false, error: String(e.message || e), macro: [], flashes: [] }, { cache: 0 });
