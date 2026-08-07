@@ -992,10 +992,10 @@ body {
 .hsw-hint.armed { opacity: 1; }
 .hsw-hint.hsw-right { left: 0; color: var(--sem-buy); background: linear-gradient(90deg, var(--sem-buy-bg), transparent); }
 .hsw-hint.hsw-left { right: 0; color: var(--sem-buy); background: linear-gradient(270deg, var(--sem-buy-bg), transparent); }
-.pi-main { display: flex; align-items: center; justify-content: space-between; }
-.pi-name { font-size: 14px; font-weight: 600; cursor: pointer; }
+.pi-main { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.pi-name { font-size: 14px; font-weight: 600; cursor: pointer; min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pi-name:hover { color: var(--accent); }
-.pi-price { font-size: 13px; font-variant-numeric: tabular-nums; }
+.pi-price { font-size: 13px; font-variant-numeric: tabular-nums; flex-shrink: 0; }
 .pi-price span { font-size: 11px; margin-left: 4px; }
 .pi-pnl { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .pi-note { font-size: 12px; color: var(--muted); margin-top: 6px; line-height: 1.55; }
@@ -1421,7 +1421,6 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 .batch-prog .bp-track { height: 6px; border-radius: 6px; background: var(--panel3, rgba(255,255,255,.1)); overflow: hidden; margin-top: 8px; }
 .batch-prog .bp-fill { height: 100%; border-radius: 6px; background: linear-gradient(90deg, var(--accent, #7c6bf5), #9c8bff); transition: width .3s ease; }
 .batch-prog.done .bp-fill { background: var(--green); }
-.batch-prog .bp-current { margin-top: 7px; font-size: 11.5px; color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 每只独立状态胶囊:排队/生成中/成功/失败/取消 */
 .batch-prog .bp-items { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
 .batch-prog .bp-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 999px; font-size: 11px; line-height: 1.4; border: 1px solid var(--border-soft); background: var(--panel3, rgba(255,255,255,.06)); color: var(--text2); max-width: 100%; }
@@ -2539,7 +2538,13 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
   margin: 2px -4px 2px;
   padding: 0 0 2px;
   border-bottom: 1px solid var(--border-soft);
+  /* 分段过多(复盘/信号/计划/做T…)在窄屏一行放不下时容器内横滑,不撑破卡片、不换行错位 */
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
 }
+.hd-segs::-webkit-scrollbar { display: none; }
 .hd-seg {
   flex: 0 0 auto;
   padding: 8px 12px 9px;
@@ -2906,7 +2911,7 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 .ffc-row { display: flex; align-items: center; gap: 8px; padding: 6px 4px; border-radius: 7px; cursor: pointer; transition: background-color var(--t-fast); font-variant-numeric: tabular-nums; }
 .ffc-row:hover { background: var(--surface-quiet, rgba(255,255,255,.04)); }
 .ffc-row.in { flex-direction: row; justify-content: flex-end; text-align: right; }
-.ffc-name { font-size: 13.5px; color: var(--text); font-weight: 500; white-space: nowrap; }
+.ffc-name { font-size: 13.5px; color: var(--text); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .ffc-amt { font-size: 13px; font-weight: 700; white-space: nowrap; }
 .ffc-amt.green { color: var(--green); } .ffc-amt.red { color: var(--red); }
 .ffc-row.out .ffc-amt { min-width: 62px; }
@@ -3421,4 +3426,23 @@ a.mn-flash:hover { color: var(--accent); }
   .dq-price { font-size: 24px; }
   .rv-kpi-hero-val { font-size: 24px; }
 }
+
+/* ================================================================
+   移动端细节精修 v4（追加覆盖层，later-wins；仅移动端断点，桌面零影响）
+   —— 量化仪表条防挤压 / 置顶别针·资金流播放钮触控热区达标 /
+      名称类元素统一可截断 / 卡片左缘与页面留白对齐。
+   均为纯样式,不改任何组件逻辑。
+   ================================================================ */
+@media (max-width: 720px) {
+  /* 量化把握度仪表条:窄屏不再用 150px 硬底,改为可压缩,避免与分数标签同行时溢出 */
+  .quant-gauge { min-width: 0; }
+  /* 灯组主标题列同理:去掉 130px 硬底,随内容自适应 */
+  .light-main { min-width: 0; }
+  /* 置顶别针 / 资金流播放钮:抬到 40px 触控基线(视觉图标尺寸不变,仅热区外扩) */
+  .pc-pin { width: 40px; height: 40px; top: 4px; right: 4px; }
+  .ffc-play { width: 40px; height: 40px; }
+  /* 分段切换条:可横滑时给一点右内边距,末个 tab 不贴边 */
+  .hd-segs { padding-right: 4px; }
+}
+
 
