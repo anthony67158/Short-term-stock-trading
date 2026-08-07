@@ -1,6 +1,9 @@
 import { useSyncExternalStore } from 'react'
 import { getAdvice, getAllAdvice, setAllAdvice, mergeAdvice, registerAdviceSync } from './adviceCache'
-import { applyCloudBatch } from './adviceBatch'
+// 注意:adviceBatch 只在 mergeCloud 运行时用到,这里【不能】做顶层静态 import——
+// 否则 planStore→adviceBatch→adviceRunner→serverAdvice→authStore 形成模块初始化环,
+// 而 authStore 顶层会调用 planStore.registerSaver(),此时 planStore 尚未初始化 → 整包崩(白屏卡启动)。
+// 改为运行时按需 import(),彻底打断这条初始化环。
 
 // 唯一 id（分笔持仓/记录用）
 let _seq = 0
@@ -296,7 +299,8 @@ export const planStore = {
     // 5) 服务端批量生成进度回灌:喂给 adviceBatch,让本机进度条显示【服务端/另一设备】正在跑的批量进程。
     //    (与 advice/adviceLog 合并解耦:进度是纯展示态,不进 changed/不触发回存)
     if (d.batchProgress && typeof d.batchProgress === 'object') {
-      try { applyCloudBatch(d.batchProgress) } catch { /* ignore */ }
+      // 按需动态 import,避免顶层静态 import 造成模块初始化环(见文件头注释)
+      import('./adviceBatch').then((m) => { try { m.applyCloudBatch(d.batchProgress) } catch { /* ignore */ } }).catch(() => { /* ignore */ })
     }
     return changed
   },
