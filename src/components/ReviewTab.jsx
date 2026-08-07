@@ -176,7 +176,7 @@ function DailyLog({ records }) {
     <div className="panel">
       <div className="panel-head">
         <div className="panel-title"><Icon name="clipboard" size={16} /> 每日操作流水</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <div className="tabs">
             {[['all', '全部'], ['BUY', '买入'], ['SELL', '卖出'], ['CLOSE', '平仓'], ['T', '做T']].map(([k, t]) => (
               <div key={k} className={'tab' + (filter === k ? ' active' : '')} onClick={() => setFilter(k)}>{t}</div>

@@ -38,6 +38,7 @@ function envConfig() {
     apiKey: process.env.LLM_API_KEY || '',
     models,
     reasoning,
+    endpoints: [],   // 多端点资源池(默认空 → 走单 baseUrl/apiKey);由前端配置写入 OSS
     source: 'env',
     updatedAt: 0,
   };
@@ -54,11 +55,14 @@ function merge(base, over) {
   if (over.reasoning) for (const role of Object.keys(ROLES)) {
     if (over.reasoning[role] != null) reasoning[role] = !!over.reasoning[role];
   }
+  // endpoints:多端点资源池。OSS 里存了(即使空数组)则以其为准;未存则保留 base(env 默认空)。
+  const endpoints = Array.isArray(over.endpoints) ? over.endpoints : (base.endpoints || []);
   return {
     baseUrl: over.baseUrl || base.baseUrl,
     apiKey: over.apiKey || base.apiKey,   // OSS 里没存 key 时保留 env key
     models,
     reasoning,
+    endpoints,
     source: over.__stored ? 'oss' : base.source,
     updatedAt: over.updatedAt || base.updatedAt,
   };
@@ -108,6 +112,7 @@ export async function saveConfig(patch = {}) {
     apiKey: (patch.apiKey != null && patch.apiKey !== '') ? String(patch.apiKey) : cur.apiKey,
     models: { ...cur.models },
     reasoning: { ...cur.reasoning },
+    endpoints: Array.isArray(cur.endpoints) ? cur.endpoints.slice() : [],
     updatedAt: Date.now(),
   };
   if (patch.models) for (const role of Object.keys(ROLES)) {
@@ -115,6 +120,22 @@ export async function saveConfig(patch = {}) {
   }
   if (patch.reasoning) for (const role of Object.keys(ROLES)) {
     if (patch.reasoning[role] != null) next.reasoning[role] = !!patch.reasoning[role];
+  }
+  // endpoints:整组替换(前端传全量)。每项 apiKey 留空则沿用同 id 旧 key(前端只回传掩码 → 不覆盖)。
+  if (Array.isArray(patch.endpoints)) {
+    const prevById = new Map((cur.endpoints || []).map((e) => [e.id, e]));
+    next.endpoints = patch.endpoints.map((e, i) => {
+      const id = e.id || `ep${i}`;
+      const prev = prevById.get(id) || {};
+      const apiKey = (e.apiKey != null && e.apiKey !== '' && !/\*/.test(String(e.apiKey))) ? String(e.apiKey) : (prev.apiKey || '');
+      return {
+        id,
+        baseUrl: String(e.baseUrl || prev.baseUrl || '').replace(/\/+$/, ''),
+        apiKey,
+        weight: Number(e.weight) > 0 ? Number(e.weight) : 1,
+        enabled: e.enabled !== false,
+      };
+    }).filter((e) => e.baseUrl && e.apiKey);
   }
   if (!hasStorage()) throw new Error('存储未配置(OSS)，无法保存配置');
   // 覆盖写固定对象名（不加随机后缀，保证下次可读到同一路径）
@@ -142,6 +163,10 @@ export function publicView() {
     hasKey: !!c.apiKey,
     models: c.models,
     reasoning: c.reasoning || {},
+    endpoints: (c.endpoints || []).map((e) => ({
+      id: e.id, baseUrl: e.baseUrl || '', weight: e.weight || 1,
+      enabled: e.enabled !== false, apiKeyMask: maskKey(e.apiKey), hasKey: !!e.apiKey,
+    })),
     source: c.source,
     updatedAt: c.updatedAt || 0,
   };

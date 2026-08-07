@@ -5,6 +5,7 @@
 
 import { applyCors } from './_lib.js';
 import { currentConfig } from './_llm_config.js';
+import { poolFetch } from './_llm_pool.js';
 
 // ---- 环境读取 ----
 // 优先用运行时配置（前端「AI 模型配置」写入 OSS，经 ensureConfig 预热到同步缓存）；
@@ -38,7 +39,6 @@ export async function callChat({
   reasoning = false,
   signal,
 } = {}) {
-  const { BASE, KEY } = llmEnv();
   const ctrl = signal ? null : new AbortController();
   const useSignal = signal || (ctrl && ctrl.signal);
   const t = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
@@ -60,12 +60,12 @@ export async function callChat({
   // 深度思考:开启时按 OpenAI 兼容格式传 reasoning_effort=high(网关据此触发思维链)
   if (reasoning) bodyObj.reasoning_effort = 'high';
 
-  const resp = await fetch(`${BASE}/chat/completions`, {
-    method: 'POST',
-    signal: useSignal,
-    headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(bodyObj),
-  }).catch((e) => ({ __err: e }));
+  const cfg = currentConfig();
+  // 资源池路由:配了多端点 → 轮询/最少在途 + 故障转移 + 熔断;未配则退化为单 { BASE, KEY }(向后兼容)。
+  // stream 模式下 poolFetch 仍返回上游 Response(其 body 可继续被 pumpStream/pumpChatStream 读取)。
+  const { resp } = await poolFetch(cfg, '/chat/completions', {
+    method: 'POST', body: bodyObj, signal: useSignal, timeoutMs,
+  }, stream ? 1 : 2);   // 流式只试一个端点(半路换端点会丢已下发的 token);非流式允许一次故障转移
 
   return { resp, done: () => { if (t) clearTimeout(t); } };
 }

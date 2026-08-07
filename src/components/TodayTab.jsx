@@ -122,7 +122,7 @@ function MarketLight({ market, sectors, snapshot }) {
     <div className="panel market-board">
       <div className="panel-head">
         <div className="panel-title"><Icon name="pulse" size={16} /> 大盘盘面 <span className="sub-name">开盘先看势，定今日仓位</span></div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <button className="btn btn-primary" onClick={() => setReportOpen(true)}>
             <Icon name="clipboard" size={13} />
             策略日报

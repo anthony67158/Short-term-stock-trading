@@ -9,6 +9,7 @@
 
 import { applyCors, preflight } from './_lib.js';
 import { ensureConfig, currentConfig, saveConfig, publicView, ROLES } from './_llm_config.js';
+import { poolStatus } from './_llm_pool.js';
 
 // 用一对 base/key 拉可用模型列表（OpenAI 兼容 GET /models）
 async function fetchModels(baseUrl, apiKey) {
@@ -75,7 +76,7 @@ export default async function handler(req, res) {
     const action = (body && body.action) || (req.query && req.query.action) || 'get';
 
     if (action === 'get') {
-      return res.status(200).send(JSON.stringify({ ok: true, config: publicView(), roles: ROLES }));
+      return res.status(200).send(JSON.stringify({ ok: true, config: publicView(), roles: ROLES, pool: poolStatus(currentConfig()) }));
     }
 
     // verify / test / save 都可能带明文 key；留空则用已存 key
@@ -106,8 +107,9 @@ export default async function handler(req, res) {
         apiKey: body && body.apiKey,     // 空则 saveConfig 内部保留原 key
         models: body && body.models,
         reasoning: body && body.reasoning,
+        endpoints: body && body.endpoints,   // 多端点资源池(整组替换;掩码 key 不覆盖旧值)
       });
-      return res.status(200).send(JSON.stringify({ ok: true, config: publicView(), source: saved.source }));
+      return res.status(200).send(JSON.stringify({ ok: true, config: publicView(), source: saved.source, pool: poolStatus(currentConfig()) }));
     }
 
     return res.status(200).send(JSON.stringify({ ok: false, error: '未知 action: ' + action }));

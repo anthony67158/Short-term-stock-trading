@@ -1195,13 +1195,8 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 
 /* ================= 移动端响应式 ================= */
 @media (max-width: 720px) {
-  .nav { height: auto; position: sticky; }
-  .nav-inner { flex-wrap: wrap; gap: 8px 12px; padding: 8px 12px; max-width: none; }
-  .nav-brand { order: 0; }
-  .nav-meta { order: 1; margin-left: auto; font-size: 11px; gap: 10px; }
-  .nav-tabs { order: 2; width: 100%; overflow-x: auto; gap: 2px; -webkit-overflow-scrolling: touch; }
-  .nav-tab { padding: 7px 11px; font-size: 13px; white-space: nowrap; }
-  .nav-name { font-size: 14px; }
+  /* 顶栏(.nav/.nav-inner/.nav-tabs/.nav-meta/.nav-tab/.nav-name)统一由下方
+     底部 Tab 栏专用块(约 3133 行)接管:此处不再重复声明,避免两套规则打架。 */
 
   .main { padding: 12px 12px 32px; gap: 12px; }
 
@@ -3228,13 +3223,36 @@ a.mn-flash:hover { color: var(--accent); }
   /* 选股结果卡:内边距与圆角略增,信息更透气 */
   .pick-card { padding: 13px 13px; border-radius: var(--radius-sm); }
   .pick-list { gap: 10px; }
+
+  /* ---- 输入框防 iOS 聚焦自动缩放:字号统一抬到 16px ----
+     iOS Safari 对 font-size<16px 的输入框会在聚焦时自动放大整页,造成布局错位。
+     视觉上仍紧凑(padding 未变),仅字号提到 16 消除缩放。 */
+  .wl-input, .pc-tf-in, .ss-input input, .auto-ref-panel .arp-num { font-size: 16px; }
+  /* .wl-input 桌面定宽 150px 在窄屏会溢出:改为自适应撑满容器
+     (.buy-inline .wl-input 用 flex 布局,不在此覆盖,保持其弹性宽度) */
+  .wl-input { width: 100%; box-sizing: border-box; }
+  .plan-edit-row .wl-input { width: 100%; }
 }
+
 
 /* 超小屏(≤380px):Tab 文字可省略,纯图标 + 徽标,避免换行拥挤 */
 @media (max-width: 380px) {
   .nav-tab span:not(.nav-badge) { display: none; }
   .nav-tab { min-height: 46px; padding: 8px 4px; }
   .nav-tab .icon { width: 22px; height: 22px; }
+}
+
+/* 极窄屏(≤360px):顶栏右侧工具收敛,避免 6 个不换行项 + 品牌撑破整页横滑。
+   隐藏"交易中/休市"文字(仅留状态圆点)与刷新倒计时秒数(仅留图标),
+   账户名进一步收窄,腾出空间保证顶栏在 320px 机型也不溢出。 */
+@media (max-width: 360px) {
+  /* 状态文字是裸文本节点(非 span),用 font-size:0 收起,仅保留圆点 */
+  .nav-status { gap: 0; padding: 5px; font-size: 0; }
+  .nav-status .status-dot { font-size: 0; }
+  .nav-refresh span { display: none; }
+  .nav-refresh { padding: 6px; }
+  .nav-meta { gap: 5px; }
+  .acct-btn { max-width: 76px; padding: 5px 6px; }
 }
 
 /* ============================================================

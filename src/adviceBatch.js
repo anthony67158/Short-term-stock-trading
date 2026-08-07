@@ -10,7 +10,7 @@ import { planStore, computePortfolio } from './planStore'
 import { getAdvice } from './adviceCache'
 import { startAdvice } from './adviceRunner'
 import { buildHoldSpec, buildWatchSpec } from './adviceDaily'
-import { triggerServerAdvice, canServerAdvice } from './serverAdvice'
+import { triggerServerAdvice, canServerAdvice, cancelServerAdvice } from './serverAdvice'
 
 const CONCURRENCY = 1                 // 串行:一次只生成一只,确保每只都完整生成完再下一只
 
@@ -45,7 +45,28 @@ export function getBatchState() {
   }
 }
 export function isBatchRunning() { return state.running }
-export function cancelBatch() { if (state.running) { state.cancelRequested = true; notify() } }
+// 取消整批:
+//   · 服务端模式 → 通知 FC 取消全部活跃任务(queued 立即取消、running 协作式停),状态经云端回灌;
+//   · 本地模式 → 置 cancelRequested,已在途那只跑完即止。
+export function cancelBatch() {
+  if (!state.running) return
+  if (state.serverMode) { cancelServerAdvice([]); state.cancelRequested = true; notify(); return }
+  state.cancelRequested = true; notify()
+}
+// 取消单只(服务端模式):只取消这一只,其余继续。乐观地把该项标记为 skipped,真实态随云端回灌覆盖。
+export function cancelOne(code) {
+  if (!code) return
+  if (state.serverMode) cancelServerAdvice([String(code)])
+  const it = state.items.find((x) => x.code === code)
+  if (it && (it.status === 'pending' || it.status === 'running')) { it.status = 'skipped'; notify() }
+}
+// 失败重生成:把 items 里 status==='fail' 的重新入队(服务端优先)。返回重生成的只数。
+export function regenerateFailed(quoteMap) {
+  const failed = state.items.filter((x) => x.status === 'fail').map((x) => x.code)
+  if (!failed.length) return 0
+  runBatchAdvice(failed, quoteMap || {})
+  return failed.length
+}
 
 // ===== 服务端批量进度回灌(跨设备同步) =====
 // authStore.pull 每 45s(批量中加速)拉云端账号,把其中 data.batchProgress 喂进来。

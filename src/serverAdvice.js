@@ -30,3 +30,23 @@ export function triggerServerAdvice(codes, { scope = 'all', force = true } = {})
 export function canServerAdvice() {
   try { const c = authStore.getCreds && authStore.getCreds(); return !!(c && c.nick) } catch { return false }
 }
+
+// 取消服务端任务:codes 为空/未传 → 取消全部(op:'cancelAll'),否则取消指定 codes(op:'cancel')。
+// fire-and-forget + keepalive:即使随后切后台/关页面也已送达 FC;取消结果经 authStore.pull 轮询云端回灌。
+// 返回 true=已发出,false=无登录态。
+export function cancelServerAdvice(codes) {
+  let creds = null
+  try { creds = authStore.getCreds && authStore.getCreds() } catch { creds = null }
+  if (!creds || !creds.nick) return false
+  const list = [...new Set((codes || []).filter(Boolean).map(String))]
+  const op = list.length ? 'cancel' : 'cancelAll'
+  try {
+    fetch(api('/api/cron_advice'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ op, codes: list, nick: creds.nick, pw: creds.pw }),
+      keepalive: true,
+    }).catch(() => { /* 取消结果靠云端轮询,忽略网络层错误 */ })
+    return true
+  } catch { return false }
+}

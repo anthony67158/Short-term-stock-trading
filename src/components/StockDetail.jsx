@@ -932,7 +932,7 @@ export default function StockDetail({ stock, onClose }) {
                 <div className={'tab' + (mode === 'kline' ? ' active' : '')} onClick={() => setMode('kline')}>K线</div>
               </div>
               {mode === 'kline' ? (
-                <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   <div className="tabs">
                     <div className={'tab' + (chartType === 'candle' ? ' active' : '')} onClick={() => setChartType('candle')}>蜡烛图</div>
                     <div className={'tab' + (chartType === 'line' ? ' active' : '')} onClick={() => setChartType('line')}>折线图</div>
