@@ -3332,3 +3332,46 @@ a.mn-flash:hover { color: var(--accent); }
   .modal-mask:has(.detail-panel) .detail-panel { animation: none !important; }
 }
 
+/* ================================================================
+   移动端细节精修（追加覆盖层，later-wins；仅移动端断点，桌面零影响）
+   —— 触控热区达标 44px / 大号数字可截断防溢出 / 浮层不超视口 /
+      弹窗底部让开 Home 条 / 超窄屏网格再降列。纯样式，不改任何逻辑。
+   ================================================================ */
+@media (max-width: 720px) {
+  /* --- 触控热区抬到 iOS HIG 基线 44×44 --- */
+  .icon-btn { min-width: 44px; min-height: 44px; }
+  .modal-close { width: 44px; height: 44px; }
+  .qrp-close { width: 44px; height: 44px; }
+  .dr-sess-tab { min-height: 40px; }
+  .dr-head-actions { gap: 10px; }
+  /* 详情刷新钮:窄屏纯图标态也保证可点面积 */
+  .icon-btn.detail-refresh { min-height: 40px; height: 40px; }
+
+  /* --- 大号数字/价格:允许收缩截断，长金额不再撑破两列格 --- */
+  .ho-cell, .rv-kpi, .acc-cell, .mb-stat { min-width: 0; }
+  .ho-v, .rv-kpi-hero-val, .dq-price, .pc-price {
+    overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+  }
+
+  /* --- 浮层/下拉不超视口宽（320px 小屏防溢出）--- */
+  .auto-ref-panel { width: auto; max-width: calc(100vw - 24px); min-width: 240px; }
+  .acct-menu { max-width: calc(100vw - 24px); }
+
+  /* --- 居中弹窗底部操作区让开 Home 指示条 --- */
+  .confirm-dialog { padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
+  .qrp-panel { max-height: calc(86vh - env(safe-area-inset-bottom)); }
+
+  /* --- AI Markdown 内嵌宽表:容器内横滑（保险，双写不冲突）--- */
+  .md-table-wrap { max-width: 100%; }
+}
+
+/* --- 超窄屏（≤400px）：多列格再降一档，避免每格文字换行拥挤 --- */
+@media (max-width: 400px) {
+  .sg-cells { grid-template-columns: repeat(2, 1fr); }
+  .hold-overview, .acc-grid, .rv-attr { grid-template-columns: 1fr 1fr; }
+  .flow-summary, .stat-grid { grid-template-columns: repeat(2, 1fr); }
+  /* 价格数字在极窄屏再收敛一档，给标签留位 */
+  .dq-price { font-size: 24px; }
+  .rv-kpi-hero-val { font-size: 24px; }
+}
+
