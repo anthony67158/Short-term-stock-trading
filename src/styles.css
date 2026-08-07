@@ -2376,6 +2376,10 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 .play-auto { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; padding: 6px 11px; border-radius: 8px; cursor: pointer; color: var(--text2); background: var(--panel); border: 1px solid var(--border-soft); transition: all .15s; }
 .play-auto:hover { color: var(--text); border-color: var(--border); }
 .play-auto.on { color: var(--accent, #7c6bf5); background: rgba(124,107,245,.1); border-color: rgba(124,107,245,.3); }
+/* 开启态:图标常亮呼吸,让用户一眼确认"自动刷新已待命/运行中"(直击"看起来没启动"的疑虑) */
+.play-auto.on .icon { animation: auto-armed 2.4s ease-in-out infinite; }
+@keyframes auto-armed { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { .play-auto.on .icon { animation: none; } }
 .pick-reason { font-size: 12.5px; color: var(--text2); line-height: 1.55; margin-bottom: 8px; }
 .pick-rows { display: flex; flex-direction: column; gap: 5px; }
 .pick-row { font-size: 12px; color: var(--text2); line-height: 1.5; }
@@ -3093,6 +3097,20 @@ a.mn-flash:hover { color: var(--accent); }
   /* 弹窗/抽屉顶部让开状态栏 */
   .modal-mask { padding-top: calc(16px + env(safe-area-inset-top)); }
   .dr-drawer { padding-top: env(safe-area-inset-top); }
+
+  /* ---- nuxt-ui 设计原则移动端增强:更大触控目标 + 更清晰的操作区 ---- */
+  /* AI 选股头部:标题与操作纵向排布,操作按钮撑满一行便于拇指点按 */
+  .play-head { padding: 14px 14px 4px; }
+  .play-actions { width: 100%; gap: 8px; }
+  .play-actions .play-auto,
+  .play-actions .btn-primary { flex: 1; justify-content: center; min-height: 42px; font-size: 13px; }
+  .play-body { padding: 0 14px 16px; }
+  /* 主行动按钮/次要按钮全局最小触控高度,符合移动端可点性基线 */
+  .btn-primary, .btn, .chip-btn { min-height: 40px; }
+  .chip-btn { padding: 7px 12px; }
+  /* 选股结果卡:内边距与圆角略增,信息更透气 */
+  .pick-card { padding: 13px 13px; border-radius: var(--radius-sm); }
+  .pick-list { gap: 10px; }
 }
 
 /* 超小屏(≤380px):Tab 文字可省略,纯图标 + 徽标,避免换行拥挤 */

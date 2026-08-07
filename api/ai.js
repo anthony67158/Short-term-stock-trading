@@ -4,7 +4,7 @@ import { buildCorpus, retrieve } from './_rag.js';
 import { techSummaryForAI, fetchQuantPredict, backtestSignal } from './_ta.js';
 import { marketTimePromptBlock, marketTimeContext } from './_market_time.js';
 import { getLatestDailySummary } from './_daily_summary.js';
-import { fetchNews, fetchClsTelegraph } from './_market_data.js';
+import { fetchNews, fetchClsTelegraph, fetchSinaFlash } from './_market_data.js';
 import { callChat, callChatWithRetry, parseLLMJson, pumpChatStream } from './_llm.js';
 import { ensureConfig, currentConfig, getModel, getReasoning } from './_llm_config.js';
 import { applyCors, preflight } from './_lib.js';
@@ -100,9 +100,44 @@ function computeStockProfile(candles) {
 
 // 抓取当日分时（时间,价格,量,均价VWAP），多镜像容错
 function toSecid(code) { const c = String(code).trim(); return /^(6|9|5)/.test(c) ? '1.' + c : '0.' + c; }
+// 腾讯分时(备用源)：东财 trends2 在 Vercel egress IP 上经常 502/限流,腾讯 gtimg 基本不限流,作为兜底。
+// 与 stock_detail.js 的 fetchTrendsTx 同源实现,行格式 "HHMM 价 累计量(手) 累计额(元)",均价=累计额/(累计量×100)。
+function toTxCode(code) {
+  const c = String(code).trim();
+  if (/^(6|9|5)/.test(c)) return 'sh' + c;
+  if (/^(0|3|2)/.test(c)) return 'sz' + c;
+  if (/^(4|8)/.test(c)) return 'bj' + c;
+  return 'sh' + c;
+}
+async function fetchTrendTx(code) {
+  const tx = toTxCode(code);
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 6000);
+    const r = await fetch(`https://web.ifzq.gtimg.cn/appstock/app/minute/query?code=${tx}&_=${Date.now()}`, { signal: ctrl.signal, headers: { Referer: 'https://gu.qq.com/', 'User-Agent': 'Mozilla/5.0' } });
+    clearTimeout(t);
+    const j = await r.json();
+    const root = j && j.data && j.data[tx];
+    const node = root && root.data;
+    if (!node || !Array.isArray(node.data) || !node.data.length) return null;
+    let prevCum = 0;
+    return node.data.map((line) => {
+      const p = String(line).split(/\s+/);
+      const hhmm = p[0];
+      const time = /^\d{4}$/.test(hhmm) ? `${hhmm.slice(0, 2)}:${hhmm.slice(2)}` : hhmm;
+      const price = Number(p[1]);
+      const cumVol = Number(p[2]);            // 累计成交量(手)
+      const cumAmt = Number(p[3]);            // 累计成交额(元)
+      const avg = cumVol ? +(cumAmt / (cumVol * 100)).toFixed(2) : price; // 真·均价VWAP
+      const vol = Math.max(cumVol - prevCum, 0);
+      prevCum = cumVol;
+      return { time, price, vol, avg };
+    }).filter((x) => x.price > 0);
+  } catch { return null; }
+}
 async function fetchTrend(code) {
-  const hosts = ['https://push2his.eastmoney.com', 'https://82.push2his.eastmoney.com'];
-  const path = `/api/qt/stock/trends2/get?secid=${toSecid(code)}&fields1=f1,f2&fields2=f51,f53,f56,f58&iscr=0&ndays=1`;
+  const hosts = ['https://push2his.eastmoney.com', 'https://82.push2his.eastmoney.com', 'https://push2.eastmoney.com', 'https://push2delay.eastmoney.com'];
+  const path = `/api/qt/stock/trends2/get?secid=${toSecid(code)}&fields1=f1,f2&fields2=f51,f53,f56,f58&iscr=0&ndays=1&forcect=1`;
   for (const h of hosts) {
     try {
       const ctrl = new AbortController();
@@ -119,7 +154,8 @@ async function fetchTrend(code) {
       }
     } catch (e) { /* try next */ }
   }
-  return null;
+  // 东财全镜像失败 → 回退腾讯分时(不限流),确保"分时走势"因子在 Vercel 上也能取到
+  return await fetchTrendTx(code);
 }
 
 // 个股资金面：主力/超大单/大单 净额 + 5日主力均值 + 盘口委比委差
@@ -276,6 +312,7 @@ async function fetchStockLHB(code) {
 // 宏观/国内外重大事件新闻（当日财经要闻）——让军师把大环境纳入分析，而非只看个股技术
 // 用东财财经要闻搜索(全球宏观/政策/市场关键词)，取当日最新几条标题
 async function fetchMacroNews() {
+  // 主源：东财财经要闻搜索(宏观/政策关键词)
   try {
     const kw = '宏观 政策 央行 美股 关税 A股 市场';
     const param = encodeURIComponent(JSON.stringify({
@@ -284,7 +321,7 @@ async function fetchMacroNews() {
     }));
     const url = `https://search-api-web.eastmoney.com/search/jsonp?cb=x&param=${param}`;
     const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 12000);
+    const t = setTimeout(() => ctrl.abort(), 8000);
     const r = await fetch(url, { signal: ctrl.signal, headers: { Referer: 'https://so.eastmoney.com/', 'User-Agent': 'Mozilla/5.0' } });
     clearTimeout(t);
     const txt = await r.text();
@@ -293,6 +330,23 @@ async function fetchMacroNews() {
     const arr = (nj.result && nj.result.cmsArticleWebOld) || [];
     const heads = arr.map((a) => ({ title: (a.title || '').replace(/<[^>]+>/g, ''), date: a.date || '', url: a.url || '' }))
       .filter((x) => x.title).slice(0, 8);
+    if (heads.length) return heads;
+  } catch { /* 主源失败 → 走兜底聚合 */ }
+  // 兜底：东财搜索在 Vercel egress IP 上偶发限流/超时,改用不限流的权威快讯聚合(财联社/金十)+新浪7×24,
+  // 挑出带宏观/政策/央行/海外关键词的条目当"国内外要闻",确保"宏观要闻"因子不再空缺。
+  try {
+    const MACRO_RE = /(央行|货币|政策|降准|降息|LPR|财政|关税|美股|美联储|加息|经济|GDP|CPI|PPI|地缘|大盘|A股|外资|人民币|国常会|会议|监管|出口|贸易|指数)/;
+    const [cls, sina] = await Promise.all([
+      fetchClsTelegraph(20).catch(() => []),
+      fetchSinaFlash(20).catch(() => []),
+    ]);
+    const pool = [...(cls || []), ...(sina || [])].filter((x) => x && x.title);
+    let macro = pool.filter((x) => MACRO_RE.test(x.title));
+    if (!macro.length) macro = pool; // 关键词一条没命中时退化为最新快讯,总比空缺强
+    const seen = new Set();
+    const heads = macro.filter((x) => { const k = x.title.slice(0, 24); if (seen.has(k)) return false; seen.add(k); return true; })
+      .map((x) => ({ title: (x.src ? `[${x.src}]${x.title}` : x.title).slice(0, 120), date: x.date || '', url: x.url || '' }))
+      .slice(0, 8);
     return heads.length ? heads : null;
   } catch { return null; }
 }

@@ -325,17 +325,44 @@ function DailyPlay({ snapshot }) {
     finally { setLoading(false); setStage('') }
   }
 
-  // 定时自动刷新:开启后每 AUTO_MIN 分钟在交易时段内静默重选一次(结果保留、不清屏),下班/周末自动停
+  // 定时自动刷新:开启后每 AUTO_MIN 分钟在交易时段内静默重选一次(结果保留、不清屏),下班/周末自动停。
+  // 【修复】原实现用 setInterval(20分) 固定倒计时——但本 Tab 是条件挂载(切走即卸载、切回即重挂),
+  //   每次重挂都会清掉旧 interval、重新从 0 计时,导致除非停在本页 20 分钟不动否则永远不触发="没启动"。
+  //   改为:以上次选股时间 savedAt 为锚,用 60 秒轻量轮询判断"是否已过间隔",并在挂载/切回时立即补检一次。
+  //   这样跨切页/重挂天然存活,开启后若已超过间隔会立刻补刷,不再"看着不动"。
   const runRef = useRef(run); runRef.current = run
   const loadingRef = useRef(loading); loadingRef.current = loading
+  const savedAtRef = useRef(savedAt); savedAtRef.current = savedAt
+  const lastAttemptRef = useRef(0) // 上次"尝试"时间(不论成败),失败时 savedAt 不变,用它防止每60秒狂刷
   useEffect(() => {
     if (!auto) return
-    const tick = () => { if (isTradingNow() && !loadingRef.current) runRef.current(true) }
-    const id = setInterval(tick, AUTO_MIN * 60000)
+    const tick = () => {
+      if (!isTradingNow() || loadingRef.current) return
+      const last = Math.max(savedAtRef.current || 0, lastAttemptRef.current || 0)
+      if (Date.now() - last >= AUTO_MIN * 60000) { lastAttemptRef.current = Date.now(); runRef.current(true) } // 距上次选股/尝试已满间隔→静默补刷
+    }
+    tick() // 挂载/开启/切回本页时立即检查一次:超时则马上刷新,不必再干等一个完整间隔
+    const id = setInterval(tick, 60000) // 每分钟检查(轻量),真正是否刷新由"距上次时间"决定,跨重挂存活
     return () => clearInterval(id)
   }, [auto])
 
-  const toggleAuto = () => { const v = !auto; setAuto(v); saveAuto(v); if (v && trading && !loading && !res) run(true) }
+  // 开关:开启即写入设置;是否立即刷新交给上面的 effect 首检(超时才刷、结果新则等到点),避免重复触发
+  const toggleAuto = () => { const v = !auto; setAuto(v); saveAuto(v) }
+
+  // 每分钟自增一个计数,驱动"下次自动刷新倒计时"文案重渲染,让用户直观看到自动刷新确实在待命/运行
+  const [, forceMin] = useState(0)
+  useEffect(() => {
+    if (!auto) return
+    const id = setInterval(() => forceMin((n) => n + 1), 60000)
+    return () => clearInterval(id)
+  }, [auto])
+  // 距下次自动刷新的剩余分钟(仅交易时段有意义):基于上次选股时间 savedAt 推算
+  const nextRefreshMin = (() => {
+    if (!auto || !trading) return null
+    const elapsed = Date.now() - (savedAt || 0)
+    const remain = Math.ceil((AUTO_MIN * 60000 - elapsed) / 60000)
+    return remain > 0 ? remain : 0
+  })()
 
   const savedTimeStr = savedAt ? new Date(savedAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : null
   const isToday = savedDay === todayKey()
@@ -351,7 +378,11 @@ function DailyPlay({ snapshot }) {
         <div className="play-actions">
           <button className={'play-auto' + (auto ? ' on' : '')} onClick={toggleAuto} title={`开启后每 ${AUTO_MIN} 分钟在交易时段自动重选一次并保留结果，休市自动停`}>
             <Icon name={auto ? 'refresh' : 'clock'} size={13} className={auto && loading ? 'spin' : ''} />
-            {auto ? `自动刷新·每${AUTO_MIN}分` : '定时刷新'}
+            {auto
+              ? (trading
+                  ? (loading ? '刷新中…' : nextRefreshMin > 0 ? `自动刷新·${nextRefreshMin}分后` : '自动刷新·即将')
+                  : `自动刷新·休市待命`)
+              : '定时刷新'}
           </button>
           <button className="btn btn-primary" onClick={() => run(false)} disabled={loading || !trading} title={!trading ? '仅交易时段(9:15–15:00)可重新选股;当前展示的是最近一次盘中结果' : ''}>
             <Icon name={loading ? 'refresh' : 'spark'} size={15} className={loading ? 'spin' : ''} />
