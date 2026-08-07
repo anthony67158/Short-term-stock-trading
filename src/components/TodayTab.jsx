@@ -407,7 +407,7 @@ function DailyPlay({ snapshot }) {
                 {isToday ? (trading ? `本次选股 ${savedTimeStr}，结果已保留` : `今日盘中 ${savedTimeStr} 选出，供明天开盘参考`) : `${savedTimeStr} 选出(非今日，仅供参考)`}
               </div>
             )}
-            {res.marketNote && <div className="pick-market"><Icon name="pulse" size={13} /> {res.marketNote}{res.confidence && <span className={'pick-conf ' + (/高/.test(res.confidence) ? 'hi' : /低/.test(res.confidence) ? 'lo' : 'mid')}>把握度 {res.confidence}</span>}</div>}
+            {res.marketNote && <div className="pick-market"><Icon name="pulse" size={13} /> <span className="pick-market-note">{res.marketNote}</span>{res.confidence && <span className={'pick-conf ' + (/高/.test(res.confidence) ? 'hi' : /低/.test(res.confidence) ? 'lo' : 'mid')}>把握度 {res.confidence}</span>}</div>}
             {Array.isArray(res.picks) && res.picks.length > 0 && (
               <div className="pick-list">
                 {res.picks.map((c, i) => {

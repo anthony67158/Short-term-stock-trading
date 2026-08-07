@@ -2444,8 +2444,9 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 
 
 /* ===== AI 选股结果 ===== */
-.pick-market { display: flex; align-items: baseline; gap: 6px; font-size: 12.5px; color: var(--text2); line-height: 1.5; margin-bottom: 10px; padding: 8px 11px; border-radius: 8px; background: rgba(124,107,245,.08); border: 1px solid rgba(124,107,245,.22); }
+.pick-market { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; font-size: 12.5px; color: var(--text2); line-height: 1.5; margin-bottom: 10px; padding: 8px 11px; border-radius: 8px; background: rgba(124,107,245,.08); border: 1px solid rgba(124,107,245,.22); }
 .pick-market .icon { color: var(--accent, #7c6bf5); flex-shrink: 0; align-self: center; }
+.pick-market-note { flex: 1 1 auto; min-width: 0; }
 .pick-list { display: flex; flex-direction: column; gap: 10px; }
 .pick-card { padding: 12px 14px; border-radius: 12px; background: var(--panel2); border: 1px solid var(--border-soft); }
 .pick-top { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
@@ -2456,7 +2457,7 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 .pick-score.green { color: var(--green); background: rgba(31,157,67,.12); }
 .pick-score.gold { color: var(--gold); background: rgba(227,179,65,.12); }
 /* 名单整体把握度徽标 */
-.pick-conf { margin-left: auto; flex: none; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 5px; white-space: nowrap; }
+.pick-conf { margin-left: auto; flex: none; max-width: 100%; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 5px; line-height: 1.5; white-space: normal; word-break: break-word; }
 .pick-conf.hi { color: var(--red); background: rgba(224,67,47,.12); }
 .pick-conf.mid { color: var(--gold); background: rgba(227,179,65,.12); }
 .pick-conf.lo { color: var(--muted); background: var(--panel3, rgba(255,255,255,.05)); }
@@ -3130,12 +3131,17 @@ a.mn-flash:hover { color: var(--accent); }
   html[data-theme="light"] .nav { background: #ffffff; }
   .nav-inner {
     flex-wrap: nowrap; gap: 8px; padding: 8px 12px;
-    padding-top: calc(8px + env(safe-area-inset-top));
-    justify-content: space-between; max-width: none;
+    /* 安全区已由 .nav 的 padding-top 处理,此处不再叠加,否则灵动岛机型会顶出双倍留白 */
+    padding-top: 8px;
+    justify-content: space-between; max-width: none; align-items: center;
   }
   .nav-brand { order: 0; flex-shrink: 0; }
   .nav-tabs { order: 1; }
-  .nav-meta { order: 2; margin-left: 0; font-size: 11px; gap: 8px; flex-shrink: 1; min-width: 0; }
+  .nav-meta { order: 2; margin-left: 0; font-size: 11px; gap: 7px; flex-shrink: 1; min-width: 0; }
+  /* 顶栏右侧每个工具项不换行、不被压缩,避免"休市""飞飞徐"竖排成两行 */
+  .nav-meta > *, .nav-status, .acct-btn, .acct-btn span, .nav-refresh { white-space: nowrap; flex-shrink: 0; }
+  .acct-btn { padding: 5px 8px; max-width: 108px; }
+  .acct-btn span { overflow: hidden; text-overflow: ellipsis; }
 
   /* 把主 Tab 组变成固定底部导航:拇指可达、始终可见、无需横滑寻找 */
   .nav-tabs {
