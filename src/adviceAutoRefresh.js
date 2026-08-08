@@ -78,9 +78,10 @@ export async function runAutoRefreshIfDue(quoteMap) {
   // 先记「发起时间」——即便本轮批量较慢,也不会在下一分钟重复发起
   planStore.setSetting(K_LASTTRY, now)
   try {
-    const ok = await runBatchAdvice(codes, quoteMap || {})
-    if (ok) planStore.setSetting(K_LAST, Date.now())
-    return ok
+    const r = await runBatchAdvice(codes, quoteMap || {})
+    const started = !!(r && r.status === 'started')
+    if (started) planStore.setSetting(K_LAST, Date.now())
+    return started
   } finally {
     _running = false
   }

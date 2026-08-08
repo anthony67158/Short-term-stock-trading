@@ -8,11 +8,12 @@
 //   5) 可取消:cancel() 停止派发后续任务(已在途的那批跑完即止)。
 import { planStore, computePortfolio } from './planStore'
 import { getAdvice } from './adviceCache'
-import { startAdvice } from './adviceRunner'
+import { startAdvice, getRunningList } from './adviceRunner'
 import { buildHoldSpec, buildWatchSpec } from './adviceDaily'
 import { triggerServerAdvice, canServerAdvice, cancelServerAdvice } from './serverAdvice'
 
-const CONCURRENCY = 1                 // 串行:一次只生成一只,确保每只都完整生成完再下一只
+// 本地兜底并发不再写死为 1:改为「动态并行填槽」——容量 = 端点数 − 非本批占用数,
+// 谁跑完就补谁的槽,与服务端 drainAccount 的调度模型一致(见 runBatchAdvice 末尾的 worker)。
 
 // 进度状态(单例):
 //   running(bool)、total、done、ok、fail、skipped、
@@ -36,6 +37,14 @@ export function subscribeBatch(fn) { subs.add(fn); return () => subs.delete(fn) 
 // 之后随云端 batchProgress.concurrency 覆盖为权威值。
 export function getConcurrency() { return Math.max(1, Number(state.concurrency) || 1) }
 export function seedConcurrency(n) { const v = Math.max(1, Number(n) || 0); if (v) { state.concurrency = v; notify() } }
+// 同步窥视端点占用(供批量入口 UI 先行门控)。excludeCodes=本批要生成的 code(须排除自占)。
+// 返回 { busy:[{code,name}], concurrency, full }。full=true 表示端点已被非本批单股生成占满。
+export function peekBatchBusy(excludeCodes) {
+  const ex = new Set((excludeCodes || []).filter(Boolean).map(String))
+  const busy = externalBusyCodes(ex)
+  const concurrency = getConcurrency()
+  return { busy, concurrency, full: busy.length >= concurrency }
+}
 // 取只读快照(current 转数组,便于组件直接用)
 export function getBatchState() {
   return {
@@ -110,15 +119,39 @@ function setItemStatus(code, status) {
 // 6 小时内已有新鲜建议 → 跳过(与 adviceDaily.isFresh 同口径)
 // (已按需求移除:批量生成不再做新鲜度节流,用户勾选哪些就重生成哪些)
 
+// 「外部占用端点」= 非本批的单股生成正在占用的端点(本地 runner ∪ 服务端 current)。
+// 与 adviceGate.generatingList 同口径,但直接读本模块 state 避免循环依赖。
+// excludeSet:本批要生成的 code(它们进入 running 后也会出现在 getRunningList/current,须排除以免自占)。
+function externalBusyCodes(excludeSet) {
+  const map = new Map()
+  try { for (const it of getRunningList()) if (it && it.code) map.set(String(it.code), it.name || it.code) } catch { /* ignore */ }
+  try { for (const c of state.current) { const code = String(c); if (!map.has(code)) map.set(code, code) } } catch { /* ignore */ }
+  if (excludeSet) for (const c of excludeSet) map.delete(String(c))
+  return [...map.entries()].map(([code, name]) => ({ code, name }))
+}
+
 // 批量入口。
 //   codes: 用户勾选的股票代码数组(来自自选/候选池)
 //   quoteMap: {code:{price,...}} 供算账户/浮盈亏(可空)
 //   opts: { force(bool) 保留参数占位,当前始终重生成 }
-// 返回 Promise,批量全部结束后 resolve。已在跑 → 直接返回(幂等,不重入)。
+// 返回:
+//   { status:'running' }                             —— 已有批量在跑(幂等,不重入)
+//   { status:'empty' }                               —— 无有效 code
+//   { status:'full', busy:[{code,name}], concurrency } —— 端点已被单股生成占满,拒绝启动
+//   { status:'started', mode:'server'|'local' }      —— 已启动
 export async function runBatchAdvice(codes, quoteMap, opts = {}) {
-  if (state.running) return false
+  if (state.running) return { status: 'running' }
   const uniq = [...new Set((codes || []).filter(Boolean))]
-  if (!uniq.length) return false
+  if (!uniq.length) return { status: 'empty' }
+
+  // ===== 规则:端点占用门控 =====
+  // 一次性生成也要看端点占用。剔除本批自身 code 后统计「非本批单股生成」占用数:
+  //   · 占满(≥端点数)→ 拒绝启动,返回 full(UI 弹「端点已满 + 正在生成清单」);
+  //   · 未满 → 剩几个用几个,后续单股空出来再补(见下方本地并行池 / 服务端 drainAccount)。
+  const batchSet = new Set(uniq.map(String))
+  const limit = getConcurrency()
+  const busyExt = externalBusyCodes(batchSet)
+  if (busyExt.length >= limit) return { status: 'full', busy: busyExt, concurrency: limit }
 
   const st = planStore.get()
   const holding = st.holding || []
@@ -145,7 +178,7 @@ export async function runBatchAdvice(codes, quoteMap, opts = {}) {
       state.startedAt = Date.now(); state.finishedAt = 0
       state._cloudAt = 0   // 允许后续云端 tick 覆盖这份乐观占位
       notify()
-      return true
+      return { status: 'started', mode: 'server' }
     }
   }
 
@@ -183,29 +216,33 @@ export async function runBatchAdvice(codes, quoteMap, opts = {}) {
     }
   }
 
-  // 并发限流:维护一个游标,最多 CONCURRENCY 个 worker 同时取任务
+  // ===== 并行填槽池(镜像服务端 drainAccount) =====
+  // 容量 = 端点数 − 非本批单股生成占用数(至少 1)。谁跑完就补谁的槽,把整批做完;
+  // 单股生成结束、端点空出后本方法内的下一轮 while 会自动取到更多任务(容量在循环内动态复算)。
   let cursor = 0
+  const drainMarkSkipped = () => {
+    while (cursor < uniq.length) {
+      const c = uniq[cursor++]
+      const it = state.items.find((x) => x.code === c)
+      if (it && it.status === 'pending') { it.status = 'skipped'; state.skipped++; state.done++ }
+    }
+    notify()
+  }
   const worker = async () => {
     while (cursor < uniq.length) {
-      if (state.cancelRequested) {
-        // 取消:把剩余未开始的直接标记 skipped
-        while (cursor < uniq.length) {
-          const c = uniq[cursor++]
-          const it = state.items.find((x) => x.code === c)
-          if (it && it.status === 'pending') { it.status = 'skipped'; state.skipped++; state.done++ }
-        }
-        notify()
-        break
-      }
+      if (state.cancelRequested) { drainMarkSkipped(); break }
       const code = uniq[cursor++]
       await runOne(code)
     }
   }
-  const workers = Array.from({ length: Math.min(CONCURRENCY, uniq.length) }, () => worker())
+  // 首轮并行度 = 端点数 − 已被单股生成占用的端点(动态复算,至少 1);随单只跑完自然补槽。
+  const freeSlots = Math.max(1, getConcurrency() - externalBusyCodes(batchSet).length)
+  const poolSize = Math.min(freeSlots, uniq.length)
+  const workers = Array.from({ length: poolSize }, () => worker())
   await Promise.all(workers)
 
   state.running = false
   state.finishedAt = Date.now()
   notify()
-  return true
+  return { status: 'started', mode: 'local' }
 }

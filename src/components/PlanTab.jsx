@@ -11,7 +11,9 @@ import { planStore, usePlanStore, calcBuyFee, calcSellFee, computeTFlows, comput
 import { aiStore } from '../aiStore'
 import { openStockDetail, useDetailStore } from '../detailStore'
 import { getAdvice, subscribeAdvice } from '../adviceCache'
-import { runBatchAdvice, subscribeBatch, getBatchState, cancelBatch, cancelOne, regenerateFailed } from '../adviceBatch'
+import { runBatchAdvice, subscribeBatch, getBatchState, cancelBatch, cancelOne, regenerateFailed, peekBatchBusy } from '../adviceBatch'
+import { generatingList } from '../adviceGate'
+import { subscribeRunner } from '../adviceRunner'
 import { getAutoConfig, K_ENABLED, K_INTERVAL, K_SCOPE, K_LAST, MIN_INTERVAL, MAX_INTERVAL, DEFAULT_INTERVAL } from '../adviceAutoRefresh'
 import { ensureQuantScore, ensureQuantScores } from '../quantScore'
 import { fmtPct, pctClass, fmtNum, fmtInflow , fmtRaw, hasVal, opText } from '../format'
@@ -935,6 +937,20 @@ function HoldingList({ book, quote, batchSel }) {
   const [, forceBatch] = useState(0)
   useEffect(() => subscribeBatch(() => forceBatch((n) => n + 1)), [])
   const batch = getBatchState()
+  // 一次性生成时若端点被单股生成占满 → 弹「端点已满 + 正在生成清单」(可点击跳转);端点空出自动关闭
+  const [busyModal, setBusyModal] = useState(null)
+  useEffect(() => {
+    if (!busyModal) return
+    const refresh = () => {
+      const busy = generatingList()
+      if (busy.length < (busyModal.concurrency || 1)) { setBusyModal(null); return }
+      setBusyModal((m) => (m ? { ...m, busy } : m))
+    }
+    const unsub = subscribeBatch(refresh)
+    const unsubR = subscribeRunner(refresh)
+    return () => { unsub(); unsubR() }
+    // eslint-disable-next-line
+  }, [busyModal])
 
   // 紧急度排序：触止损/破纪律/触止盈的先处理 → 其余按浮亏在前(先看风险)
   const sortedHolding = [...book.holding].sort((a, b) => {
@@ -1041,6 +1057,9 @@ function HoldingList({ book, quote, batchSel }) {
         const doRun = () => {
           const codes = allCodes.filter((c) => selected.has(c))
           if (!codes.length) return
+          // 端点占用门控:端点被单股生成占满 → 不启动,弹「端点已满」;未满则用剩余空槽并行(空出再补)
+          const peek = peekBatchBusy(codes)
+          if (peek.full) { setBusyModal({ busy: peek.busy, concurrency: peek.concurrency }); return }
           runBatchAdvice(codes, quote)   // 后台限流批量;返回 Promise,进度经 subscribeBatch 推送
           setSelectMode(false)
         }
@@ -1119,6 +1138,37 @@ function HoldingList({ book, quote, batchSel }) {
               })}
             </div>
           )}
+        </div>
+      )}
+
+      {/* 一次性生成时端点已满:列出正在生成的个股(可点击跳转),端点空出后本弹窗自动关闭 */}
+      {busyModal && (
+        <div className="busy-modal-mask" onClick={() => setBusyModal(null)}>
+          <div className="busy-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="busy-modal-head">
+              <span className="busy-modal-title"><Icon name="gauge" size={15} /> AI 端点已满</span>
+              <button className="icon-btn" onClick={() => setBusyModal(null)} title="关闭"><Icon name="close" size={15} /></button>
+            </div>
+            <div className="busy-modal-desc">
+              当前 {busyModal.concurrency || busyModal.busy.length} 个 AI 端点已全部占用（并发数=已配置端点数）。
+              下列个股正在生成，完成后会自动腾出端点，届时可再次点击「一次性生成」。
+            </div>
+            <div className="busy-modal-list">
+              {busyModal.busy.map((x) => (
+                <button
+                  key={x.code}
+                  className="busy-modal-item"
+                  onClick={() => { openStockDetail(x.code, x.name); setBusyModal(null) }}
+                  title="查看该股详情与生成进度"
+                >
+                  <span className="busy-item-name">{x.name}</span>
+                  <span className="busy-item-code">{x.code}</span>
+                  <Icon name="refresh" size={12} className="spin" />
+                  <Icon name="chevronRight" size={13} />
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       )}
 
