@@ -11,8 +11,10 @@
 //   · 鉴权:X-Cron-Key(= 环境变量 CRON_KEY),防匿名 HTTP 触发器滥用。未配置则放行(本地)。
 //   · 失效订阅(410/404)自动从账号剔除,避免长期堆积。
 //
-// 触发:POST /api/cron_alert   header: X-Cron-Key: <CRON_KEY>   body:{ nick?:'仅跑某账号' }
-//   建议交易时段每 1~2 分钟拨测一次(与前端 15s 轮询相比,后台粒度粗但足够抓到关键价位)。
+// 触发:POST /api/cron_alert   header: X-Cron-Key: <CRON_KEY>
+//   body:{ nick?:'仅跑某账号', roundMs?, budgetMs? }
+//   本 handler 内部自循环:每分钟被 cron 触发一次,单次内按 roundMs(默认 8s)连续评估多轮直到
+//   耗尽 budgetMs(默认 55s)。故有效监控频率 ≈ 8 秒级,不再受 GitHub Actions cron 1 分钟粒度限制。
 
 import { applyCors, preflight } from './_lib.js';
 import { listAllAccounts, writeAccount } from './account.js';
@@ -222,19 +224,45 @@ export default async function handler(req, res) {
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
   const onlyNick = body.nick ? String(body.nick) : null;
   const started = Date.now();
+
+  // —— 内部自循环:GitHub Actions cron 最细只有 1 分钟粒度,想「更快」就让单次拨测在函数内
+  //    连续跑多轮。每轮重新拉账号(拿最新 phase/新加的预警)→评估→写回,轮间 sleep 后再来一轮,
+  //    直到耗尽时间预算。这样有效监控频率 = 轮间隔(默认 8s),不再受 cron 粒度限制。
+  //    可调(env 优先,body 可临时覆盖):
+  //      CRON_ALERT_ROUND_MS   轮间隔毫秒(默认 8000,下限 3000 防烧 token)
+  //      CRON_ALERT_BUDGET_MS  单次总预算毫秒(默认 55000,须 < workflow curl -m 与 FC timeout)
+  const clampInt = (v, def, lo, hi) => {
+    const n = parseInt(v, 10);
+    if (!Number.isFinite(n)) return def;
+    return Math.max(lo, Math.min(hi, n));
+  };
+  const roundMs = clampInt(body.roundMs != null ? body.roundMs : process.env.CRON_ALERT_ROUND_MS, 8000, 3000, 60000);
+  const budgetMs = clampInt(body.budgetMs != null ? body.budgetMs : process.env.CRON_ALERT_BUDGET_MS, 55000, 5000, 110000);
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
   try {
     // 预热 LLM 运行时配置(judge 端点/模型),供智能确认闸门使用;失败不阻断(闸门会回退确定性信号)。
     try { await ensureConfig({ maxAgeMs: 20000 }); } catch { /* ignore */ }
-    let accounts = await listAllAccounts();
-    if (onlyNick) accounts = accounts.filter((a) => a.nick === onlyNick);
-    let totalHits = 0, totalSent = 0, touched = 0;
-    for (const acc of accounts) {
-      let r;
-      try { r = await processAccount(acc); } catch (e) { r = { changed: false, hits: 0, sent: 0, error: String(e.message || e) }; }
-      if (r.changed) { touched++; try { await writeAccount(acc); } catch { /* ignore */ } }
-      totalHits += r.hits || 0; totalSent += r.sent || 0;
+
+    let totalHits = 0, totalSent = 0, touched = 0, rounds = 0, lastAccounts = 0;
+    // 至少跑 1 轮;之后只要「距开始 + 一轮最坏耗时」仍在预算内就继续。
+    while (true) {
+      rounds++;
+      let accounts = await listAllAccounts();
+      if (onlyNick) accounts = accounts.filter((a) => a.nick === onlyNick);
+      lastAccounts = accounts.length;
+      for (const acc of accounts) {
+        let r;
+        try { r = await processAccount(acc); } catch (e) { r = { changed: false, hits: 0, sent: 0, error: String(e.message || e) }; }
+        if (r.changed) { touched++; try { await writeAccount(acc); } catch { /* ignore */ } }
+        totalHits += r.hits || 0; totalSent += r.sent || 0;
+      }
+      // 预算判断:若「再睡一轮 + 预留一轮评估余量」会超预算,则收尾退出。
+      const elapsed = Date.now() - started;
+      if (elapsed + roundMs + 3000 >= budgetMs) break;
+      await sleep(roundMs);
     }
-    return res.end(JSON.stringify({ ok: true, accounts: accounts.length, hits: totalHits, sent: totalSent, touched, elapsedMs: Date.now() - started }));
+    return res.end(JSON.stringify({ ok: true, accounts: lastAccounts, hits: totalHits, sent: totalSent, touched, rounds, roundMs, elapsedMs: Date.now() - started }));
   } catch (e) {
     return res.end(JSON.stringify({ ok: false, error: String(e.message || e), elapsedMs: Date.now() - started }));
   }

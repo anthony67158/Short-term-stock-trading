@@ -346,6 +346,40 @@ export default function LLMConfig() {
                 <div className="llm-hint">仅用于后端调用，保存在服务端，前端不回显明文</div>
               </div>
 
+              {/* 各角色模型速配（主端点）：无需先验证即可直接为每个 AI 角色指定模型 + 深度思考。
+                  与第 2 步「分工」共享同一份 models/reasoning，改这里等于改主端点各角色配置。 */}
+              {Object.keys(roles).length > 0 && (
+                <div className="llm-field">
+                  <label>各角色模型</label>
+                  <div className="llm-hint" style={{ marginBottom: 8 }}>
+                    为系统各处 AI 分别指定模型（对应主端点）。留空则用默认模型。多端点资源池可在下方展开单独配置。
+                  </div>
+                  <div className="llm-role-quick">
+                    {Object.keys(roles).map((k) => (
+                      <div className="llm-eprole" key={k}>
+                        <div className="llm-eprole-head">
+                          <label>{roles[k].label || k}</label>
+                          <button type="button"
+                            className={'llm-reason-toggle' + (reasoning[k] ? ' on' : '')}
+                            onClick={() => setReason(k, !reasoning[k])}
+                            title="开启后该角色调用支持推理的模型时启用深度思考(reasoning),响应更慎密但更慢">
+                            <span className="llm-reason-text"><Icon name="brain" size={12} /> 深度思考 <em className="llm-reason-state">{reasoning[k] ? '已开' : '关'}</em></span>
+                            <span className="llm-reason-track"><span className="llm-reason-thumb" /></span>
+                          </button>
+                        </div>
+                        <input className="wl-input auth-input" list="llm-model-list-step1" spellCheck={false}
+                          placeholder={roles[k].def}
+                          value={models[k] || ''}
+                          onChange={(e) => setModel(k, e.target.value)} />
+                      </div>
+                    ))}
+                    <datalist id="llm-model-list-step1">
+                      {modelList.map((m) => <option key={m} value={m} />)}
+                    </datalist>
+                  </div>
+                </div>
+              )}
+
               {/* 多端点资源池（可选）：折叠区，配置后覆盖上方单端点，提供路由+熔断+故障转移 */}
               <div className="llm-ep">
                 <button type="button" className="llm-ep-toggle" onClick={() => setShowPool((v) => !v)}>

@@ -507,6 +507,7 @@ body {
 .llm-epcard-count { margin-left: auto; font-size: 10.5px; font-weight: 600; padding: 1px 8px; border-radius: 999px; color: var(--green); background: rgba(31,157,67,.1); border: 1px solid rgba(31,157,67,.3); flex-shrink: 0; }
 .llm-epcard-count.bad { color: var(--red); background: rgba(224,67,47,.1); border-color: rgba(224,67,47,.3); }
 .llm-epcard-count.warn { color: var(--muted); background: var(--panel2); border-color: var(--border-soft); }
+.llm-role-quick { border: 1px solid rgba(124,107,245,.28); border-radius: 12px; padding: 12px; background: rgba(124,107,245,.05); }
 .llm-eprole { margin-bottom: 10px; }
 .llm-eprole:last-child { margin-bottom: 0; }
 .llm-eprole-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 5px; }
@@ -556,7 +557,7 @@ body {
 .detail-intro::-webkit-scrollbar { width: 6px; }
 .detail-intro::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 .detail-kline { margin-top: 8px; background: var(--bg-elev); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); padding: 12px; }
-.detail-kline-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.detail-kline-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; flex-wrap: wrap; gap: 8px; }
 
 /* 可点击链接 chip / 内联链接 */
 .detail-link { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; color: var(--accent); border-color: rgba(124,107,245,.35); background: rgba(124,107,245,.08); text-decoration: none; transition: background .15s; }
@@ -1063,7 +1064,7 @@ body {
 .hold-meta b { font-variant-numeric: tabular-nums; }
 
 /* 决策条：股名 + 特大号浮盈亏（第一视觉焦点）*/
-.hold-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.hold-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .hold-head-l { display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; min-width: 0; }
 .hh-name { font-size: 15px; font-weight: 700; color: var(--text); }
 .hh-code { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -1774,7 +1775,7 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 .push-bar .push-err { color: var(--red); margin-left: 6px; }
 .push-bar .btn { flex-shrink: 0; }
 .alert-body { flex: 1; overflow-y: auto; padding: 10px 16px; min-height: 120px; }
-.alert-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.alert-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; flex-wrap: wrap; gap: 8px; }
 /* AI 自动预警总开关 + 分组 + 批量操作 */
 .ai-auto-switch { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text2); cursor: pointer; user-select: none; }
 .ai-auto-switch input { accent-color: var(--accent); width: 14px; height: 14px; cursor: pointer; }
@@ -1816,7 +1817,7 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 .an-title { position: relative; }
 .an-jump { display: inline-flex; align-items: center; color: var(--muted); margin-left: 4px; vertical-align: middle; transition: color .12s ease, transform .12s ease; }
 .an-clickable:hover .an-jump { color: var(--accent); transform: translateX(2px); }
-.ar-name { display: flex; align-items: center; gap: 6px; font-weight: 650; font-size: 13px; }
+.ar-name { display: flex; align-items: center; gap: 6px; font-weight: 650; font-size: 13px; flex-wrap: wrap; min-width: 0; }
 .ar-code { font-size: 11px; color: var(--muted); font-weight: 400; }
 .ar-desc { font-size: 12px; color: var(--accent); margin-top: 2px; }
 .ar-fired { font-size: 11px; color: var(--gold); margin-top: 3px; }
@@ -1848,7 +1849,7 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 .acc-cell-v { font-size: 19px; font-weight: 750; font-variant-numeric: tabular-nums; margin-top: 4px; }
 .acc-cell-s { font-size: 10.5px; color: var(--muted); margin-top: 3px; }
 .acc-posbar-wrap { padding: 4px var(--pad-panel-x) 14px; }
-.acc-posbar-head { display: flex; align-items: center; justify-content: space-between; font-size: 12.5px; color: var(--text2); margin-bottom: 6px; }
+.acc-posbar-head { display: flex; align-items: center; justify-content: space-between; font-size: 12.5px; color: var(--text2); margin-bottom: 6px; flex-wrap: wrap; gap: 4px; }
 .acc-posbar-head b { font-size: 15px; font-variant-numeric: tabular-nums; }
 .pos-tag { font-size: 10.5px; padding: 1px 7px; border-radius: 5px; margin-left: 4px; }
 .pos-full, .acc-warn { color: var(--red); }
@@ -1865,7 +1866,7 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 .acc-posbar-fill.pos-low { background: var(--green); }
 /* 目标资产进度条（以终为始） */
 .acc-goalbar-wrap { padding: 2px var(--pad-panel-x) 14px; }
-.acc-goalbar-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.acc-goalbar-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; flex-wrap: wrap; gap: 4px; }
 .acc-goal-title { font-size: 12.5px; color: var(--text2); display: inline-flex; align-items: center; gap: 4px; }
 .acc-goal-title b { font-size: 14px; color: var(--text); font-variant-numeric: tabular-nums; margin-left: 2px; }
 .acc-goal-prog { font-size: 15px; font-weight: 700; color: var(--gold); font-variant-numeric: tabular-nums; }
@@ -1910,7 +1911,7 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 
 /* ===== 市场情绪温度计 ===== */
 .senti-gauge { padding: 14px 16px; margin-bottom: 14px; }
-.sg-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.sg-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; flex-wrap: wrap; gap: 8px; }
 .sg-level { font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 999px; }
 .sg-level.red { color: var(--red); background: rgba(224,67,47,.12); }
 .sg-level.gold { color: var(--gold); background: rgba(227,179,65,.14); }
@@ -1988,7 +1989,7 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 .mf-col-head { font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; gap: 5px; padding-bottom: 4px; }
 .mf-col-empty { font-size: 12px; color: var(--muted); padding: 8px 0; }
 .mf-row { padding: 7px 10px; border-radius: 8px; background: var(--panel2); border: 1px solid var(--border-soft); }
-.mf-row-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.mf-row-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
 .mf-row-name { font-size: 12.5px; color: var(--text); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mf-row-amt { font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; flex-shrink: 0; }
 .mf-row-bar { height: 6px; border-radius: 3px; background: var(--panel3, var(--bg-elev)); overflow: hidden; }
@@ -2108,7 +2109,7 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 
 /* ===== 量化模型评分（个股详情） ===== */
 .quant-box { margin-top: 12px; padding: 12px 14px; border-radius: 12px; background: linear-gradient(135deg, rgba(91,141,239,.08), rgba(124,107,245,.04)); border: 1px solid rgba(91,141,239,.24); }
-.quant-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.quant-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; flex-wrap: wrap; gap: 4px 8px; }
 .quant-title { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; color: var(--text); }
 .quant-title .icon { color: #5b8def; }
 .quant-asof { font-size: 10.5px; color: var(--muted); }
@@ -2446,7 +2447,7 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 
 /* ===== 复盘结论：个股详情内的完整卡 ===== */
 .review-card { margin-top: 12px; padding: 12px 14px; border-radius: 12px; background: var(--panel2); border: 1px solid var(--border-soft); }
-.review-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.review-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
 .review-title { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; color: var(--text); }
 .review-sess { font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 5px; color: var(--accent, #7c6bf5); background: rgba(124,107,245,.14); }
 .review-sess.close { color: var(--gold); background: rgba(227,179,65,.16); }
@@ -3002,7 +3003,7 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 /* ============ 全市场投资策略日报 抽屉 ============ */
 .dr-drawer { position: fixed; top: 0; right: 0; width: min(560px, 100vw); height: 100vh; background: var(--bg-elev); border-left: 1px solid var(--border); box-shadow: var(--shadow-lg); display: flex; flex-direction: column; z-index: 60; animation: drSlide .28s var(--ease); }
 @keyframes drSlide { from { transform: translateX(30px); opacity: .6 } to { transform: none; opacity: 1 } }
-.dr-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 18px 12px; border-bottom: 1px solid var(--border-soft); }
+.dr-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 18px 12px; border-bottom: 1px solid var(--border-soft); flex-wrap: wrap; gap: 8px; }
 .dr-title { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 700; color: var(--text); }
 .dr-title .icon { color: var(--accent); }
 .dr-head-actions { display: flex; align-items: center; gap: 6px; }
@@ -3554,6 +3555,40 @@ a.mn-flash:hover { color: var(--accent); }
   .ffc-play { width: 40px; height: 40px; }
   /* 分段切换条:可横滑时给一点右内边距,末个 tab 不贴边 */
   .hd-segs { padding-right: 4px; }
+}
+
+/* ================================================================
+   移动端细节精修 v5(追加覆盖层,later-wins;仅移动端断点,桌面零影响)
+   —— 头部标题统一可截断 / 固定宽度组件在窄卡内改可压缩 /
+      margin-left:auto 换行后复位 / 横滑 tab 条加渐隐提示。
+   纯样式,不改任何组件逻辑。
+   ================================================================ */
+@media (max-width: 720px) {
+  /* 各头部标题统一允许收缩截断,长标题不再把右侧动作/徽标顶出屏幕 */
+  .dr-title, .review-title, .quant-title, .sg-head > :first-child,
+  .hold-head-l, .mf-row-head > :first-child, .quant-head > :first-child {
+    min-width: 0;
+  }
+  .dr-title { overflow: hidden; }
+
+  /* 量化把握度仪表条:窄卡内去掉 150px 硬底,靠 flex 自适应,消除横向溢出 */
+  .quant-gauge { min-width: 0; }
+
+  /* margin-left:auto 的右对齐元素:头部换行后会被孤立到新行右端,
+     移动端复位为左对齐,跟随内容自然排布 */
+  .dr-meta { margin-left: 0; }
+  .acc-edit-actions { margin-left: 0; }
+
+  /* 量化汇报头部条允许换行,操作区不再被标题挤压 */
+  .qrp-bar { flex-wrap: wrap; }
+  .qrp-actions { margin-left: 0; }
+
+  /* 横滑 tab 条(行业):右缘加渐隐遮罩,提示"还能往右滑",
+     避免边缘内容看着像被裁断/已到底 */
+  .ind-tabs {
+    -webkit-mask-image: linear-gradient(90deg, #000 88%, transparent);
+    mask-image: linear-gradient(90deg, #000 88%, transparent);
+  }
 }
 
 /* ================================================================
