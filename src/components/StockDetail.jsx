@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef } from 'react'
 import ReactECharts from 'echarts-for-react'
 import Icon from './Icon'
 import Reasoning from './Reasoning'
+import { HL } from './RichText'
 import { usePolling } from '../hooks'
 import { fmtPct, pctClass, fmtRaw, fmtNum, hasVal, opText } from '../format'
 import { aiStore } from '../aiStore'
@@ -646,7 +647,7 @@ export default function StockDetail({ stock, onClose }) {
                           {actionLabel && <span className={'dv-badge ' + verdict.tone}>{actionLabel}</span>}
                           <div className="dv-action">{verdict.title}</div>
                         </div>
-                        <div className="dv-detail">{verdict.detail}</div>
+                        <div className="dv-detail"><HL text={verdict.detail} /></div>
                       </div>
 
                       {/* ReAct 研判思路：模型先于结论生成的推理链，让"为什么这么建议"透明可核对 */}
@@ -707,12 +708,12 @@ export default function StockDetail({ stock, onClose }) {
                       {/* LLM 具体操作价位（按结论差异化：观望给"关注价"，不建议买则不给买价）*/}
                       {adv && (
                         <>
-                          {adv.timing && <div className="advice-timing"><Icon name="clock" size={13} /> <b>{myHold ? '操作时机' : '买入时机'}</b>：{adv.timing}</div>}
+                          {adv.timing && <div className="advice-timing"><Icon name="clock" size={13} /> <b>{myHold ? '操作时机' : '买入时机'}</b>：<HL text={adv.timing} /></div>}
                           {/* 两段式指导：下个开盘时段怎么做 + 未来后续路径（今天买不了不必硬买）*/}
                           {(adv.nextOpenPlan || adv.futurePlan) && (
                             <div className="advice-horizon">
-                              {adv.nextOpenPlan && <div className="ah-row now"><span className="ah-k">下个开盘</span><span className="ah-v">{adv.nextOpenPlan}</span></div>}
-                              {adv.futurePlan && <div className="ah-row future"><span className="ah-k">未来</span><span className="ah-v">{adv.futurePlan}</span></div>}
+                              {adv.nextOpenPlan && <div className="ah-row now"><span className="ah-k">下个开盘</span><span className="ah-v"><HL text={adv.nextOpenPlan} /></span></div>}
+                              {adv.futurePlan && <div className="ah-row future"><span className="ah-k">未来</span><span className="ah-v"><HL text={adv.futurePlan} /></span></div>}
                             </div>
                           )}
                           {(adv.buyPrice != null || adv.buyZone || adv.watchPrice || adv.addPrice != null || adv.reducePrice != null || adv.stopPrice != null || adv.targetPrice != null) && (
@@ -731,7 +732,7 @@ export default function StockDetail({ stock, onClose }) {
                           )}
                           {/* 触价后怎么确认才动手：把"见价即砍"升级为"到价→看信号确认→再执行"，避免被瞬时插针骗出局 */}
                           {adv.exitTiming && (
-                            <div className="advice-exit-timing key-block"><span className="ket-tag"><Icon name="shield" size={12} /> 到价后怎么做</span><span className="ket-body">{adv.exitTiming}</span></div>
+                            <div className="advice-exit-timing key-block"><span className="ket-tag"><Icon name="shield" size={12} /> 到价后怎么做</span><span className="ket-body"><HL text={adv.exitTiming} /></span></div>
                           )}
                           {/* 买入计划(未持仓·按账户全景算的手数/资金/占比) —— 一眼看清怎么下手 */}
                           {!myHold && (hasVal(adv.planQty) || hasVal(adv.planAmount) || hasVal(adv.planWeight)) && (
@@ -741,8 +742,8 @@ export default function StockDetail({ stock, onClose }) {
                                 {hasVal(adv.planAmount) && <div className="oc-cell"><span className="oc-k">约需资金</span><b>{adv.planAmount}</b></div>}
                                 {hasVal(adv.riskReward) && <div className="oc-cell"><span className="oc-k">盈亏比</span><b>{adv.riskReward}</b></div>}
                               </div>
-                              {hasVal(adv.planWeight) && <div className="oc-line"><span className="oc-k">买入依据</span><span>{adv.planWeight}</span></div>}
-                              {hasVal(adv.positionNote) && <div className="oc-line"><span className="oc-k">资金约束</span><span>{adv.positionNote}</span></div>}
+                              {hasVal(adv.planWeight) && <div className="oc-line"><span className="oc-k">买入依据</span><span><HL text={adv.planWeight} /></span></div>}
+                              {hasVal(adv.positionNote) && <div className="oc-line"><span className="oc-k">资金约束</span><span><HL text={adv.positionNote} /></span></div>}
                             </div>
                           )}
                           {/* 算账条：预期赚整行 hero + 短标量 chip + 仓位整句独行 —— 不截断不出血。
@@ -758,19 +759,19 @@ export default function StockDetail({ stock, onClose }) {
                                   {hasVal(adv.riskReward) && <div className="oc-cell"><span className="oc-k">盈亏比</span><b>{adv.riskReward}</b></div>}
                                 </div>
                               )}
-                              {hasVal(adv.posAfter) && <div className="oc-line"><span className="oc-k">仓位</span><span>{adv.posAfter}</span></div>}
+                              {hasVal(adv.posAfter) && <div className="oc-line"><span className="oc-k">仓位</span><span><HL text={adv.posAfter} /></span></div>}
                             </div>
                           )}
                           {/* 无需操作也要明确告诉用户，而不是空着 */}
                           {noOpText && (
                             <div className="op-calc noop-calc">
                               <div className="oc-exp noop"><span className="oc-k">本次操作</span><b>无需操作</b></div>
-                              {hasVal(adv.posAfter) && <div className="oc-line"><span className="oc-k">当前仓位</span><span>{adv.posAfter}</span></div>}
-                              <div className="oc-line"><span className="oc-k">怎么做</span><span>{adv.actionPlan || noOpText}</span></div>
+                              {hasVal(adv.posAfter) && <div className="oc-line"><span className="oc-k">当前仓位</span><span><HL text={adv.posAfter} /></span></div>}
+                              <div className="oc-line"><span className="oc-k">怎么做</span><span><HL text={adv.actionPlan || noOpText} /></span></div>
                             </div>
                           )}
-                          {adv.pnlNote && <div className="advice-line">💰 {adv.pnlNote}</div>}
-                          {adv.reason && <div className="advice-line muted">{adv.reason}</div>}
+                          {adv.pnlNote && <div className="advice-line">💰 <HL text={adv.pnlNote} /></div>}
+                          {adv.reason && <div className="advice-line muted"><HL text={adv.reason} /></div>}
 
                           {/* 深度分析(依据+风险+信心)默认折叠：先给关键结论(结论/价位/到价后怎么做)，
                               想深究再展开，避免信息一次性倾泻。有内容才显示折叠入口。 */}
@@ -792,21 +793,21 @@ export default function StockDetail({ stock, onClose }) {
                                     {hasBasis && (
                                       <div className="advice-basis">
                                         <div className="advice-basis-title">分析依据</div>
-                                        {adv.techNote && <div className="ab-row"><span className="ab-k tech">技术</span><span className="ab-v">{adv.techNote}</span></div>}
-                                        {adv.fundNote && <div className="ab-row"><span className="ab-k fund">资金</span><span className="ab-v">{adv.fundNote}</span></div>}
-                                        {adv.newsNote && <div className="ab-row"><span className="ab-k news">消息</span><span className="ab-v">{adv.newsNote}</span></div>}
-                                        {adv.macroNote && <div className="ab-row"><span className="ab-k macro">宏观</span><span className="ab-v">{adv.macroNote}</span></div>}
-                                        {adv.seatNote && <div className="ab-row"><span className="ab-k seat">席位</span><span className="ab-v">{adv.seatNote}</span></div>}
-                                        {adv.quantNote && <div className="ab-row"><span className="ab-k quant">量化</span><span className="ab-v">{adv.quantNote}</span></div>}
-                                        {adv.theoryNote && <div className="ab-row"><span className="ab-k theory">理论</span><span className="ab-v">{adv.theoryNote}</span></div>}
+                                        {adv.techNote && <div className="ab-row"><span className="ab-k tech">技术</span><span className="ab-v"><HL text={adv.techNote} /></span></div>}
+                                        {adv.fundNote && <div className="ab-row"><span className="ab-k fund">资金</span><span className="ab-v"><HL text={adv.fundNote} /></span></div>}
+                                        {adv.newsNote && <div className="ab-row"><span className="ab-k news">消息</span><span className="ab-v"><HL text={adv.newsNote} /></span></div>}
+                                        {adv.macroNote && <div className="ab-row"><span className="ab-k macro">宏观</span><span className="ab-v"><HL text={adv.macroNote} /></span></div>}
+                                        {adv.seatNote && <div className="ab-row"><span className="ab-k seat">席位</span><span className="ab-v"><HL text={adv.seatNote} /></span></div>}
+                                        {adv.quantNote && <div className="ab-row"><span className="ab-k quant">量化</span><span className="ab-v"><HL text={adv.quantNote} /></span></div>}
+                                        {adv.theoryNote && <div className="ab-row"><span className="ab-k theory">理论</span><span className="ab-v"><HL text={adv.theoryNote} /></span></div>}
                                       </div>
                                     )}
                                     {/* 风险区：反方观点/失效信号/风险 归为一组，与依据区分开 */}
                                     {hasRisk && (
                                       <div className="advice-risk">
-                                        {adv.bearCase && <div className="ab-row"><span className="ab-k rev">反方</span><span className="ab-v">{adv.bearCase}</span></div>}
-                                        {adv.invalidation && <div className="ab-row"><span className="ab-k warn">失效</span><span className="ab-v">{adv.invalidation}</span></div>}
-                                        {adv.risk && <div className="ab-row"><span className="ab-k warn">风险</span><span className="ab-v">{adv.risk}</span></div>}
+                                        {adv.bearCase && <div className="ab-row"><span className="ab-k rev">反方</span><span className="ab-v"><HL text={adv.bearCase} /></span></div>}
+                                        {adv.invalidation && <div className="ab-row"><span className="ab-k warn">失效</span><span className="ab-v"><HL text={adv.invalidation} /></span></div>}
+                                        {adv.risk && <div className="ab-row"><span className="ab-k warn">风险</span><span className="ab-v"><HL text={adv.risk} /></span></div>}
                                       </div>
                                     )}
                                     {hasConf && <div className="advice-line muted" style={{ fontSize: 11 }}>信心：{adv.confidence}（{adv.confidenceReason}）</div>}

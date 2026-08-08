@@ -2291,6 +2291,20 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 .ap-v { font-size: 16px; font-weight: 800; font-variant-numeric: tabular-nums; }
 .ap-v.red { color: var(--red); }
 .ap-v.green { color: var(--green); }
+/* 自由文本里的关键数值(价格/区间/百分比/手数/金额/时间点):加粗放大,一眼锁定重点。
+   用 em 相对放大,任何字号的正文里都比周围文字大一号;继承父色但提亮,避免抢结论徽标的色相。 */
+.hl-key {
+  font-weight: 800;
+  font-size: 1.12em;
+  color: var(--text);
+  letter-spacing: .01em;
+  padding: 0 1px;
+}
+/* 在 muted/次要正文里,关键数值需要更强对比才能跳出来 */
+.advice-line.muted .hl-key,
+.ab-v .hl-key,
+.oc-line .hl-key,
+.hr-v .hl-key { color: var(--text); }
 .advice-line { font-size: 12.5px; line-height: 1.6; margin-bottom: 4px; color: var(--text2); }
 .advice-line.muted { color: var(--muted); }
 .advice-line.warn { color: var(--gold); }

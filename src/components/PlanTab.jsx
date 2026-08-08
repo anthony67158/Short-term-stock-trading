@@ -1,5 +1,6 @@
 import { useState, useRef, useMemo, useEffect } from 'react'
 import Icon from './Icon'
+import { HL } from './RichText'
 import StockName from './StockName'
 import Reasoning from './Reasoning'
 import ConfirmDialog from './ConfirmDialog'
@@ -2065,22 +2066,22 @@ function HoldReview({ code, name, cost, qty, price }) {
       {r.nextAction && (
         <div className="hr-next compact">
           <span className="hr-next-k">下一步</span>
-          <span className="hr-next-txt">{r.nextAction}</span>
+          <span className="hr-next-txt"><HL text={r.nextAction} /></span>
         </div>
       )}
 
       {/* ④a 到价后怎么做：把"见价即砍"升级为"到价→看信号确认→再执行"，避免被瞬时插针骗出局 */}
       {r.exitTiming && (
         <div className="advice-exit-timing" style={{ margin: '8px 10px 0' }}>
-          <Icon name="shield" size={13} /> <b>到价后怎么做</b>：{r.exitTiming}
+          <Icon name="shield" size={13} /> <b>到价后怎么做</b>：<HL text={r.exitTiming} />
         </div>
       )}
 
       {/* ④b 两段式指导：下个开盘时段怎么做 + 未来后续路径(今天买不了不必硬买) */}
       {(r.nextOpenPlan || r.futurePlan) && (
         <div className="advice-horizon" style={{ margin: '8px 10px 0' }}>
-          {r.nextOpenPlan && <div className="ah-row now"><span className="ah-k">下个开盘</span><span className="ah-v">{r.nextOpenPlan}</span></div>}
-          {r.futurePlan && <div className="ah-row future"><span className="ah-k">未来</span><span className="ah-v">{r.futurePlan}</span></div>}
+          {r.nextOpenPlan && <div className="ah-row now"><span className="ah-k">下个开盘</span><span className="ah-v"><HL text={r.nextOpenPlan} /></span></div>}
+          {r.futurePlan && <div className="ah-row future"><span className="ah-k">未来</span><span className="ah-v"><HL text={r.futurePlan} /></span></div>}
         </div>
       )}
 
@@ -2093,10 +2094,10 @@ function HoldReview({ code, name, cost, qty, price }) {
 
       {/* ⑥ 理论 + 失效信号：风控底线，其余明细都在操作建议里 */}
       {r.theoryNote && (
-        <div className="hr-row" style={{ margin: '8px 10px 0' }}><span className="hr-k theory">理论</span><span className="hr-v">{r.theoryNote}</span></div>
+        <div className="hr-row" style={{ margin: '8px 10px 0' }}><span className="hr-k theory">理论</span><span className="hr-v"><HL text={r.theoryNote} /></span></div>
       )}
       {r.invalidation && (
-        <div className="hr-row" style={{ margin: '8px 10px 0' }}><span className="hr-k risk">失效</span><span className="hr-v">{r.invalidation}</span></div>
+        <div className="hr-row" style={{ margin: '8px 10px 0' }}><span className="hr-k risk">失效</span><span className="hr-v"><HL text={r.invalidation} /></span></div>
       )}
     </div>
   )
