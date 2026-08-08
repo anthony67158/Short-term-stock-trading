@@ -13,17 +13,27 @@
 // 从而无状态、无 lastIndex 副作用地稳定切分。
 const HL_RE = /(\d{1,2}:\d{2}|[¥￥]?\d+(?:\.\d+)?\s*[~\-–至]\s*[¥￥]?\d+(?:\.\d+)?(?:\s*(?:元|%|手|股))?|[¥￥]\d+(?:\.\d+)?|[+\-]?\d+(?:\.\d+)?\s*(?:元|%|手|股|倍|亿|万)|\d+\.\d+)/g;
 
-// HL：把一段自由文本渲染成 React 节点数组,命中片段用 <b class="hl-key"> 包裹。
+// HL：把一段自由文本渲染成「单个内联 <span> 」,命中片段用 <b class="hl-key"> 包裹。
 // 传入非字符串/空串时安全返回 null,可直接用于 {cond && <HL text={x} />} 或作为子节点。
+//
+// 关键:外层必须包一层 <span class="hl">,不能直接返回片段数组。
+// 因为很多容器是 display:flex + gap(如 .advice-timing 操作时机行),若返回裸片段数组,
+// 每个「文本/<b>」都会成为独立 flex item,gap 被插进每个词/数字之间 —— 句子被拆成
+// 锯齿状、逐段换行(窄屏尤甚)。用一层 inline 的 <span> 包住,它在 flex 里只算 1 个
+// item(gap 不再插进词间),在普通文本流里 inline 也不改变原有换行行为,一处根治。
 export function HL({ text }) {
   if (text == null) return null;
   const s = String(text);
   if (!s) return null;
   const parts = s.split(HL_RE);
-  return parts.map((p, i) =>
-    (i % 2 === 1)
-      ? <b className="hl-key" key={i}>{p}</b>
-      : (p || null)
+  return (
+    <span className="hl">
+      {parts.map((p, i) =>
+        (i % 2 === 1)
+          ? <b className="hl-key" key={i}>{p}</b>
+          : (p || null)
+      )}
+    </span>
   );
 }
 

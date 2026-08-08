@@ -2291,6 +2291,10 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 .ap-v { font-size: 16px; font-weight: 800; font-variant-numeric: tabular-nums; }
 .ap-v.red { color: var(--red); }
 .ap-v.green { color: var(--green); }
+/* HL 高亮组件的外层包裹:必须是 inline,才能在普通文本流里正常随句子换行;
+   同时它把「文本+<b>」收成单个节点,避免在 flex+gap 容器(如 .advice-timing)里
+   被 gap 拆散成锯齿逐段换行。overflow-wrap 保证长串数值也能在窄屏正确断行。 */
+.hl { display: inline; overflow-wrap: anywhere; word-break: break-word; }
 /* 自由文本里的关键数值(价格/区间/百分比/手数/金额/时间点):加粗放大,一眼锁定重点。
    用 em 相对放大,任何字号的正文里都比周围文字大一号;继承父色但提亮,避免抢结论徽标的色相。 */
 .hl-key {
