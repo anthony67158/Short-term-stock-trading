@@ -106,7 +106,11 @@ export function reasoningForEndpoint(config, ep, role, fallback) {
 export function pickEndpoint(config, now = Date.now(), role) {
   const all = endpointsFrom(config);
   if (!all.length) return null;
-  const eps = role ? all.filter((e) => endpointServesRole(e, role)) : all;
+  // 优先在「承接该角色」的端点里选;但若没有任何端点承接(用户把该角色留空/主端点未填)——
+  //   不能因此一个端点都不给,否则该角色所有请求全失败。退回全部端点做安全兜底(配合 modelFallback
+  //   用角色默认模型名),保证可用性(恢复迁移前"留空=沿用主端点"的兜底效果)。
+  const served = role ? all.filter((e) => endpointServesRole(e, role)) : all;
+  const eps = served.length ? served : all;
   if (!eps.length) return null;
   const usable = eps.filter((e) => h(e.id).cooldownUntil <= now);
   const pool = usable.length ? usable : eps;
@@ -136,9 +140,12 @@ export function markFailure(id, now = Date.now()) {
 export async function poolFetch(config, path, { method = 'POST', body, signal, timeoutMs = 30000, role, modelFallback, reasonFallback } = {}, maxTries = 2) {
   const eps = endpointsFrom(config);
   if (!eps.length) return { resp: { __err: new Error('no LLM endpoint configured') }, endpoint: null };
-  // 承接该角色的候选端点(附加端点须自带该角色模型;主端点始终承接)——路由/故障转移都只在其中进行
-  const roleEps = role ? eps.filter((e) => endpointServesRole(e, role)) : eps;
-  if (!roleEps.length) return { resp: { __err: new Error(`no endpoint serves role "${role}"`) }, endpoint: null };
+  // 承接该角色的候选端点(附加端点须自带该角色模型;主端点始终承接)——路由/故障转移优先在其中进行。
+  //   安全兜底:若没有任何端点承接该角色(用户把该角色留空),不再直接失败,而是退回全部端点,
+  //   并用 modelFallback(角色默认模型名)发起,保证该角色永不"整体不可路由"(恢复迁移前可用性)。
+  const served = role ? eps.filter((e) => endpointServesRole(e, role)) : eps;
+  const roleEps = served.length ? served : eps;
+  if (!roleEps.length) return { resp: { __err: new Error('no LLM endpoint configured') }, endpoint: null };
   const tried = new Set();
   let lastErr = null;
   const tries = Math.min(maxTries, roleEps.length);
