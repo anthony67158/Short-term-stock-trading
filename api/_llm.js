@@ -146,6 +146,10 @@ export async function pumpStream(resp, onPiece) {
 
 // ---- 读取上游 SSE 流：同时捕获【思维链 reasoning_content】与【正文 content】增量 ----
 // gpt 系推理模型在 stream 模式下,思维链走 delta.reasoning_content,正文走 delta.content。
+// ★但很多【OpenAI 兼容网关】(尤其 DeepSeek-R1 / QwQ 系及自建端点)不单独给 reasoning_content,
+//   而是把思维链【内联在 delta.content 里,用 <think>…</think> 包裹】。若不识别这种形态:
+//   ① 前端拿不到 reasoning 事件 → "军师推理过程"空;② <think> 块混进 content → JSON 解析失败 → 建议为空。
+//   故这里做一个跨 chunk 的 <think> 状态机:标签内文本当作 reasoning 转发,标签外才计入 content。
 // onReasoning(piece) / onContent(piece) 分别转发;返回 { content, reasoning, finishReason }。
 // 用于「AI操作建议」把模型的推理过程实时下发前端展示(军师在想什么)。
 export async function pumpChatStream(resp, { onReasoning, onContent } = {}) {
@@ -154,6 +158,35 @@ export async function pumpChatStream(resp, { onReasoning, onContent } = {}) {
   const reader = resp.body.getReader();
   const decoder = new TextDecoder('utf-8');
   let buf = '';
+  // <think> 内联思维链状态机(跨增量保持):inThink 是否在标签内;pend 缓存可能被 chunk 边界切断的半个标签
+  let inThink = false, pend = '';
+  const feedContent = (piece) => {   // piece 是 delta.content 增量;按 <think>/</think> 拆分:标签内→reasoning,标签外→content
+    let s = pend + piece; pend = '';
+    while (s) {
+      if (!inThink) {
+        const open = s.indexOf('<think>');
+        if (open < 0) {
+          // 可能有半个 "<think" 卡在结尾——留到下次拼接,避免误判
+          const tail = s.match(/<(t(h(i(n(k)?)?)?)?)?$/);
+          if (tail) { const cut = s.length - tail[0].length; const out = s.slice(0, cut); pend = s.slice(cut); if (out) { content += out; if (typeof onContent === 'function') onContent(out); } }
+          else { content += s; if (typeof onContent === 'function') onContent(s); }
+          return;
+        }
+        const out = s.slice(0, open); if (out) { content += out; if (typeof onContent === 'function') onContent(out); }
+        s = s.slice(open + 7); inThink = true;
+      } else {
+        const close = s.indexOf('</think>');
+        if (close < 0) {
+          const tail = s.match(/<(\/(t(h(i(n(k)?)?)?)?)?)?$/);
+          if (tail) { const cut = s.length - tail[0].length; const out = s.slice(0, cut); pend = s.slice(cut); if (out) { reasoning += out; if (typeof onReasoning === 'function') onReasoning(out); } }
+          else { reasoning += s; if (typeof onReasoning === 'function') onReasoning(s); }
+          return;
+        }
+        const out = s.slice(0, close); if (out) { reasoning += out; if (typeof onReasoning === 'function') onReasoning(out); }
+        s = s.slice(close + 8); inThink = false;
+      }
+    }
+  };
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
@@ -164,19 +197,20 @@ export async function pumpChatStream(resp, { onReasoning, onContent } = {}) {
       buf = buf.slice(idx + 1);
       if (!line || !line.startsWith('data:')) continue;
       const data = line.slice(5).trim();
-      if (data === '[DONE]') return { content, reasoning, finishReason };
+      if (data === '[DONE]') { if (pend) { content += pend; if (typeof onContent === 'function') onContent(pend); pend = ''; } return { content, reasoning, finishReason }; }
       try {
         const j = JSON.parse(data);
         const delta = j.choices?.[0]?.delta || {};
         const rc = delta.reasoning_content || delta.reasoning || '';
         const cc = delta.content || '';
         if (rc) { reasoning += rc; if (typeof onReasoning === 'function') onReasoning(rc); }
-        if (cc) { content += cc; if (typeof onContent === 'function') onContent(cc); }
+        if (cc) feedContent(cc);   // 内联 <think> 拆分:标签内计入 reasoning,标签外计入 content
         const fr = j.choices?.[0]?.finish_reason;
         if (fr) finishReason = fr;
       } catch { /* 非完整 JSON 行，忽略 */ }
     }
   }
+  if (pend) { content += pend; if (typeof onContent === 'function') onContent(pend); pend = ''; }
   return { content, reasoning, finishReason };
 }
 
@@ -184,11 +218,29 @@ export async function pumpChatStream(resp, { onReasoning, onContent } = {}) {
 // 先剥离 ```json 包裹直接解析；失败则尝试补齐被 max_tokens 截断的尾部再解析。
 // 返回 { value, salvaged }：value 为解析对象或 null；salvaged 标记是否走了补齐路径。
 export function parseLLMJson(content) {
-  const raw = content || '';
+  let raw = content || '';
+  // ★防御:若正文里混进了内联思维链 <think>…</think>(非流式路径或流式漏网),先剥掉,否则 JSON 解析必失败。
+  //   兼容未闭合的 <think>(被 max_tokens 截断):从 <think> 起直到 </think> 或字符串结尾一并去除。
+  raw = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/<think>[\s\S]*$/i, '').trim();
   try {
     const cleaned = raw.replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
     return { value: JSON.parse(cleaned), salvaged: false };
   } catch { /* 进入补齐 */ }
+  // 退一步:从正文里抠出第一个 {...} 平衡片段(应对模型在 JSON 前后夹带说明文字)
+  try {
+    const start = raw.indexOf('{');
+    if (start >= 0) {
+      let depth = 0, inStr = false, esc = false, end = -1;
+      for (let i = start; i < raw.length; i++) {
+        const ch = raw[i];
+        if (inStr) { if (esc) esc = false; else if (ch === '\\') esc = true; else if (ch === '"') inStr = false; continue; }
+        if (ch === '"') inStr = true;
+        else if (ch === '{') depth++;
+        else if (ch === '}') { depth--; if (depth === 0) { end = i; break; } }
+      }
+      if (end > start) return { value: JSON.parse(raw.slice(start, end + 1)), salvaged: true };
+    }
+  } catch { /* 继续走截断补齐 */ }
   try {
     let s = raw.replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
     // 去掉最后一个残缺的键值对，再按未闭合层级补齐引号/括号
