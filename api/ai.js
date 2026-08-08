@@ -856,6 +856,7 @@ export default async function handler(req, res) {
 
     const isAdvisor = isAdvisorMode(mode);
     const useModel = isAdvisor ? ADVISOR_MODEL : MODEL;
+    const useRole = isAdvisor ? 'advisor' : 'chat';   // 端点级模型解析:按角色让资源池各端点用各自的模型名
     const useReasoning = isAdvisor ? getReasoning('advisor') : getReasoning('chat');
     const sysPrompt = isAdvisor ? ADVISOR_SYSTEM : SYSTEM_PROMPT;
 
@@ -909,6 +910,7 @@ export default async function handler(req, res) {
       //   失败仍走下方统一降级(带已采集 meta),不会白屏。
       const { resp, done } = await callChat({
         model: useModel,
+        role: useRole,
         messages: [
           { role: 'system', content: sysPrompt },
           { role: 'system', content: marketTimePromptBlock() },
@@ -948,6 +950,7 @@ export default async function handler(req, res) {
     } else {
       const { resp, done } = await callChatWithRetry({
         model: useModel,
+        role: useRole,
         messages: [
           { role: 'system', content: sysPrompt },
           { role: 'system', content: marketTimePromptBlock() },

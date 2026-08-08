@@ -147,6 +147,7 @@ export default async function handler(req, res) {
     const callLLM = async (userPrompt, maxTokens) => {
       const { resp, done } = await callChat({
         model: MODEL,
+        role: 'agent',   // 策略日报复用 agent 角色 → 端点级模型解析走 agent
         messages: [{ role: 'system', content: SYS }, { role: 'user', content: userPrompt }],
         temperature: 0.4,
         maxTokens,

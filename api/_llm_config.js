@@ -122,18 +122,28 @@ export async function saveConfig(patch = {}) {
     if (patch.reasoning[role] != null) next.reasoning[role] = !!patch.reasoning[role];
   }
   // endpoints:整组替换(前端传全量)。每项 apiKey 留空则沿用同 id 旧 key(前端只回传掩码 → 不覆盖)。
+  //   每个端点可携带自己的 models:{chat,advisor,agent}——不同网关上同一角色可能是不同模型名。
+  //   某角色留空 → 运行时回退到全局 models[role] → 再回退到角色默认(见 _llm_pool.modelForEndpoint)。
   if (Array.isArray(patch.endpoints)) {
     const prevById = new Map((cur.endpoints || []).map((e) => [e.id, e]));
     next.endpoints = patch.endpoints.map((e, i) => {
       const id = e.id || `ep${i}`;
       const prev = prevById.get(id) || {};
       const apiKey = (e.apiKey != null && e.apiKey !== '' && !/\*/.test(String(e.apiKey))) ? String(e.apiKey) : (prev.apiKey || '');
+      // 端点级模型:前端传则以其为准(整项替换),未传则沿用旧值;仅保留非空角色。
+      const epModels = {};
+      const src = (e.models && typeof e.models === 'object') ? e.models : (prev.models || {});
+      for (const role of Object.keys(ROLES)) {
+        const v = src[role];
+        if (v != null && String(v).trim()) epModels[role] = String(v).trim();
+      }
       return {
         id,
         baseUrl: String(e.baseUrl || prev.baseUrl || '').replace(/\/+$/, ''),
         apiKey,
         weight: Number(e.weight) > 0 ? Number(e.weight) : 1,
         enabled: e.enabled !== false,
+        models: epModels,
       };
     }).filter((e) => e.baseUrl && e.apiKey);
   }
@@ -166,6 +176,7 @@ export function publicView() {
     endpoints: (c.endpoints || []).map((e) => ({
       id: e.id, baseUrl: e.baseUrl || '', weight: e.weight || 1,
       enabled: e.enabled !== false, apiKeyMask: maskKey(e.apiKey), hasKey: !!e.apiKey,
+      models: e.models && typeof e.models === 'object' ? { ...e.models } : {},
     })),
     source: c.source,
     updatedAt: c.updatedAt || 0,

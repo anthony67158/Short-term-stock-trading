@@ -89,40 +89,62 @@ export default function LLMConfig() {
   const activeEndpoints = () => endpoints.filter((e) => e.enabled !== false && (e.baseUrl || '').trim())
   const poolMode = showPool && activeEndpoints().length > 0
 
-  // 某模型在各有效端点的覆盖:yes=已列出 / no=已列举但无此模型 / unknown=该端点未能列举
-  const modelCoverage = (model) => {
-    if (!model) return []
-    return activeEndpoints().map((ep, i) => {
-      const info = epModels[ep.id]
-      const label = ep.baseUrl ? ep.baseUrl.replace(/^https?:\/\//, '').replace(/\/.*$/, '') : `端点${i + 1}`
-      let state = 'unknown'
-      if (info && info.listable) state = info.models.includes(model) ? 'yes' : 'no'
-      return { id: ep.id, label, state }
-    })
+  // host 简写(用于端点标签)
+  const hostLabel = (url, i) => (url ? String(url).replace(/^https?:\/\//, '').replace(/\/.*$/, '') : `端点${i + 1}`)
+
+  // Step 2 要罗列的端点卡片:主端点(默认,模型=全局 models) + 各资源池端点(模型=端点自带 models)。
+  // 主端点始终作为第一张卡(只要填了 Base URL);poolMode 下再追加各附加端点。
+  const cardEndpoints = () => {
+    const list = []
+    if (baseUrl.trim()) list.push({ id: 'default', label: '主端点', host: hostLabel(baseUrl, 0), isMain: true })
+    if (poolMode) {
+      activeEndpoints().forEach((ep, i) => {
+        list.push({ id: ep.id, label: `端点 #${i + 1}`, host: hostLabel(ep.baseUrl, i), isMain: false, ep })
+      })
+    }
+    return list
   }
+
+  // 取/设某端点某角色的模型:主端点走全局 models;附加端点走该端点自带 models
+  const cardModel = (card, role) => (card.isMain ? (models[role] || '') : ((card.ep.models && card.ep.models[role]) || ''))
+  const setCardModel = (card, role, v) => {
+    if (card.isMain) { setModel(role, v); return }
+    setEp(card.ep.id, { models: { ...(card.ep.models || {}), [role]: v } })
+  }
+  // 附加端点某角色留空时的实际回退(全局模型 → 角色默认),作为 placeholder 提示
+  const fallbackModel = (role) => (models[role] || (roles[role] && roles[role].def) || '')
 
   // —— Step 1 → 2：验证连接、拉取模型清单 ——
   const verifyAndNext = async () => {
     setErr(''); setNotice('')
-    // ===== 池模式:逐端点验证,取模型并集,并记录各端点覆盖情况 =====
+    // ===== 池模式:逐端点验证(含主端点),各端点分别记录可用模型清单 =====
     if (poolMode) {
       const eps = activeEndpoints()
       setBusy(true)
       try {
-        const results = await Promise.all(eps.map(async (ep) => {
-          const key = (ep.apiKey && !/\*/.test(ep.apiKey)) ? ep.apiKey.trim() : ''
-          // 掩码/空 key 的已存端点无法在线列举(后端 verify 无法按 id 取原 key)
-          if (!key) return { id: ep.id, ok: null, listable: false, models: [], reason: ep.hasKey ? '已存 Key,无法在线列举' : '缺少 Key' }
-          const j = await callConfig('verify', { baseUrl: ep.baseUrl.trim(), apiKey: key })
-          return { id: ep.id, ok: !!(j && j.ok), listable: !!(j && j.listable), models: Array.isArray(j && j.models) ? j.models : [], reason: (j && j.ok) ? '' : ((j && j.error) || '验证失败') }
+        // 待验证清单:主端点(id 'default',用 step-1 的 baseUrl/apiKey) + 各附加端点
+        const toVerify = []
+        if (baseUrl.trim()) {
+          const mk = apiKey.trim() && !/\*/.test(apiKey) ? apiKey.trim() : ''
+          toVerify.push({ id: 'default', baseUrl: baseUrl.trim(), key: mk, hasKey })
+        }
+        eps.forEach((ep) => {
+          const k = (ep.apiKey && !/\*/.test(ep.apiKey)) ? ep.apiKey.trim() : ''
+          toVerify.push({ id: ep.id, baseUrl: ep.baseUrl.trim(), key: k, hasKey: ep.hasKey })
+        })
+        const results = await Promise.all(toVerify.map(async (t) => {
+          if (!t.key) return { id: t.id, ok: null, listable: false, models: [], reason: t.hasKey ? '已存 Key,无法在线列举' : '缺少 Key' }
+          const j = await callConfig('verify', { baseUrl: t.baseUrl, apiKey: t.key })
+          return { id: t.id, ok: !!(j && j.ok), listable: !!(j && j.listable), models: Array.isArray(j && j.models) ? j.models : [], reason: (j && j.ok) ? '' : ((j && j.error) || '验证失败') }
         }))
         const map = {}; results.forEach((r) => { map[r.id] = r })
         setEpModels(map)
-        // 并集:所有能列举的端点的模型合集
+        // 并集:供各端点 datalist 兜底提示
         const union = [...new Set(results.flatMap((r) => r.models))]
         setModelList(union)
         const anyListable = results.some((r) => r.listable)
         setListable(anyListable)
+        // 主端点各角色若空,用角色默认兜底
         setModels((prev) => {
           const next = { ...prev }
           Object.keys(roles).forEach((k) => { if (!next[k]) next[k] = roles[k].def })
@@ -166,18 +188,28 @@ export default function LLMConfig() {
   // —— Step 2 → 3：测试所选模型可用性 ——
   const testAndNext = async () => {
     setErr(''); setNotice(''); setTestResults(null)
-    const chosen = Object.values(models).filter(Boolean)
+    // 收集所有端点卡片上填写的模型(主端点全局 models + 各附加端点自带 models),去重
+    const gathered = new Set(Object.values(models).filter(Boolean))
+    if (poolMode) {
+      activeEndpoints().forEach((ep) => {
+        Object.values(ep.models || {}).forEach((m) => { if (m) gathered.add(m) })
+      })
+    }
+    const chosen = [...gathered]
     if (!chosen.length) { setErr('请至少为一个角色选择模型'); return }
     // 池模式:用某个带明文 key 的有效端点做测试(掩码/已存 key 无法在线测)
     let testBase = baseUrl.trim(), testKey = apiKey.trim()
     if (poolMode) {
-      const ep = activeEndpoints().find((e) => e.apiKey && !/\*/.test(e.apiKey))
-      if (!ep) {
-        setStep(3)
-        setNotice('资源池端点均为已存 Key，无法在线测试；如需实测请回上一步重输某端点的 Key。可直接保存。')
-        return
+      // 优先用主端点(若其 key 为明文),否则找一个带明文 key 的附加端点
+      if (!(testKey && !/\*/.test(testKey))) {
+        const ep = activeEndpoints().find((e) => e.apiKey && !/\*/.test(e.apiKey))
+        if (!ep) {
+          setStep(3)
+          setNotice('资源池端点均为已存 Key，无法在线测试；如需实测请回上一步重输某端点的 Key。可直接保存。')
+          return
+        }
+        testBase = ep.baseUrl.trim(); testKey = ep.apiKey.trim()
       }
-      testBase = ep.baseUrl.trim(); testKey = ep.apiKey.trim()
     }
     setStep(3)
     setBusy(true)
@@ -208,6 +240,10 @@ export default function LLMConfig() {
           apiKey: (e.apiKey != null && e.apiKey !== '') ? e.apiKey.trim() : '',
           weight: e.weight,
           enabled: e.enabled !== false,
+          // 端点级模型:各角色分别设定(留空由后端回退全局/默认)
+          models: e.models && typeof e.models === 'object'
+            ? Object.fromEntries(Object.entries(e.models).filter(([, v]) => v && String(v).trim()))
+            : {},
         }))
       } else {
         payload.endpoints = []
@@ -367,49 +403,54 @@ export default function LLMConfig() {
             </div>
           )}
 
-          {/* Step 2：分工 */}
+          {/* Step 2：分工——按【端点】分别设置各角色模型 */}
           {step === 2 && (
             <div className="llm-pane">
               <div className="llm-hint" style={{ marginBottom: 10 }}>
                 {poolMode
-                  ? `资源池已启用（${activeEndpoints().length} 个端点）。请为每个角色选模型——池会把请求分发到所有端点，故所选模型最好在各端点都可用。`
+                  ? `资源池已启用。下方逐个列出你配置的所有端点(含主端点),请为每个端点分别指定各角色的模型——不同网关同名角色可能是不同模型名。附加端点某角色留空则自动回退到主端点的对应模型。`
                   : `为系统各处 AI 分别指定模型${listable ? `（共 ${modelList.length} 个可选）` : '（手动填写模型名）'}`}
               </div>
-              {Object.keys(roles).map((k) => {
-                const cov = poolMode ? modelCoverage(models[k]) : null
+
+              {/* 端点卡片:主端点 + 各资源池端点 */}
+              {cardEndpoints().map((card) => {
+                const info = epModels[card.id]
+                const epList = info && info.models && info.models.length ? info.models : modelList
                 return (
-                <div className="llm-field" key={k}>
-                  <div className="llm-field-head">
-                    <label>{roles[k].label || k}</label>
-                    <button type="button"
-                      className={'llm-reason-toggle' + (reasoning[k] ? ' on' : '')}
-                      onClick={() => setReason(k, !reasoning[k])}
-                      title="开启后该角色调用支持推理的模型时启用深度思考(reasoning),响应更慎密但更慢">
-                      <span className="llm-reason-text"><Icon name="brain" size={12} /> 深度思考</span>
-                      <span className="llm-reason-track"><span className="llm-reason-thumb" /></span>
-                    </button>
-                  </div>
-                  <input className="wl-input auth-input" list="llm-model-list" spellCheck={false}
-                    placeholder={roles[k].def} value={models[k] || ''}
-                    onChange={(e) => setModel(k, e.target.value)} />
-                  {/* 池模式:展示该模型在各端点的覆盖情况 */}
-                  {poolMode && models[k] && (
-                    <div className="llm-cov">
-                      {cov.map((c) => (
-                        <span key={c.id}
-                          className={'llm-cov-chip' + (c.state === 'yes' ? ' yes' : c.state === 'no' ? ' no' : ' unknown')}
-                          title={c.state === 'yes' ? '该端点提供此模型' : c.state === 'no' ? '该端点未列出此模型' : '该端点未能在线列举（无法确认）'}>
-                          <Icon name={c.state === 'yes' ? 'check' : c.state === 'no' ? 'close' : 'info'} size={11} />
-                          {c.label}
-                        </span>
-                      ))}
+                  <div className={'llm-epcard' + (card.isMain ? ' main' : '')} key={card.id}>
+                    <div className="llm-epcard-head">
+                      <span className="llm-epcard-tag">{card.isMain ? <Icon name="star" size={12} /> : <Icon name="layers" size={12} />}{card.label}</span>
+                      <span className="llm-epcard-host">{card.host}</span>
+                      {info && info.listable && <span className="llm-epcard-count">{info.models.length} 模型</span>}
+                      {info && info.ok === false && <span className="llm-epcard-count bad">验证失败</span>}
+                      {info && info.ok === null && <span className="llm-epcard-count warn">未列举</span>}
                     </div>
-                  )}
-                </div>
-              )})}
-              <datalist id="llm-model-list">
-                {modelList.map((m) => <option key={m} value={m} />)}
-              </datalist>
+                    {Object.keys(roles).map((k) => (
+                      <div className="llm-eprole" key={k}>
+                        <div className="llm-eprole-head">
+                          <label>{roles[k].label || k}</label>
+                          {card.isMain && (
+                            <button type="button"
+                              className={'llm-reason-toggle' + (reasoning[k] ? ' on' : '')}
+                              onClick={() => setReason(k, !reasoning[k])}
+                              title="开启后该角色调用支持推理的模型时启用深度思考(reasoning),响应更慎密但更慢">
+                              <span className="llm-reason-text"><Icon name="brain" size={12} /> 深度思考</span>
+                              <span className="llm-reason-track"><span className="llm-reason-thumb" /></span>
+                            </button>
+                          )}
+                        </div>
+                        <input className="wl-input auth-input" list={`llm-model-list-${card.id}`} spellCheck={false}
+                          placeholder={card.isMain ? roles[k].def : `留空沿用主端点（${fallbackModel(k) || roles[k].def}）`}
+                          value={cardModel(card, k)}
+                          onChange={(e) => setCardModel(card, k, e.target.value)} />
+                        <datalist id={`llm-model-list-${card.id}`}>
+                          {epList.map((m) => <option key={m} value={m} />)}
+                        </datalist>
+                      </div>
+                    ))}
+                  </div>
+                )
+              })}
             </div>
           )}
 

@@ -21,9 +21,22 @@ function h(id) {
 }
 
 // 从运行时配置解析端点列表。config 来自 _llm_config.currentConfig()。
-//   优先 config.endpoints[](多端点);否则用单 { baseUrl, apiKey } 兜底。
+//   主端点(step-1 的 baseUrl/apiKey)始终作为 id 'default' 的一等成员参与池路由;
+//   config.endpoints[] 里的附加端点在其后追加(按 enabled 过滤、按 id 去重)。
+//   每个端点携带自己的 models:{chat,advisor,agent}——不同网关同一角色可能是不同模型名。
+//   都没配 → 空数组(无端点可用)。
 export function endpointsFrom(config) {
   const out = [];
+  // 主端点:step-1 单端点,视为 id 'default',其模型取全局 config.models。
+  if (config && config.baseUrl && config.apiKey) {
+    out.push({
+      id: 'default',
+      baseUrl: String(config.baseUrl).replace(/\/+$/, ''),
+      apiKey: config.apiKey,
+      weight: 1,
+      models: (config.models && typeof config.models === 'object') ? config.models : {},
+    });
+  }
   const eps = Array.isArray(config && config.endpoints) ? config.endpoints : null;
   if (eps && eps.length) {
     eps.forEach((e, i) => {
@@ -31,13 +44,24 @@ export function endpointsFrom(config) {
       const baseUrl = String(e.baseUrl || '').replace(/\/+$/, '');
       const apiKey = e.apiKey || '';
       if (!baseUrl || !apiKey) return;
-      out.push({ id: e.id || `ep${i}`, baseUrl, apiKey, weight: Number(e.weight) > 0 ? Number(e.weight) : 1 });
+      const id = e.id || `ep${i}`;
+      if (out.some((o) => o.id === id)) return;   // 与主端点或彼此 id 冲突则跳过
+      out.push({
+        id, baseUrl, apiKey,
+        weight: Number(e.weight) > 0 ? Number(e.weight) : 1,
+        models: (e.models && typeof e.models === 'object') ? e.models : {},
+      });
     });
   }
-  if (!out.length && config && config.baseUrl && config.apiKey) {
-    out.push({ id: 'default', baseUrl: String(config.baseUrl).replace(/\/+$/, ''), apiKey: config.apiKey, weight: 1 });
-  }
   return out;
+}
+
+// 端点级模型解析:选定端点后按角色定模型。
+//   端点自带 models[role] → 用之;否则回退全局 config.models[role];再回退传入的 fallback(通常是角色默认)。
+export function modelForEndpoint(config, ep, role, fallback) {
+  if (ep && ep.models && ep.models[role]) return ep.models[role];
+  if (config && config.models && config.models[role]) return config.models[role];
+  return fallback || '';
 }
 
 // 选一个端点:排除熔断中的;在可用端点里按【最少在途 × 权重】选负载最低者(round-robin 的加权推广)。
@@ -68,7 +92,9 @@ export function markFailure(id, now = Date.now()) {
 // 池化 fetch:自动选端点 + 失败故障转移到下一个可用端点(最多试 maxTries 个)。
 // 返回 { resp, endpoint }。resp 与原生 fetch 一致(或 { __err })。
 // 注:调用方负责构造 body/headers 的其余部分——本函数只注入 baseUrl 与 Authorization。
-export async function poolFetch(config, path, { method = 'POST', body, signal, timeoutMs = 30000 } = {}, maxTries = 2) {
+// 端点级模型:若传入 role,则选定端点后按 modelForEndpoint 覆盖 body.model
+//   (不同网关同一角色可能是不同模型名);modelFallback 为角色默认(端点与全局都没配时用)。
+export async function poolFetch(config, path, { method = 'POST', body, signal, timeoutMs = 30000, role, modelFallback } = {}, maxTries = 2) {
   const eps = endpointsFrom(config);
   if (!eps.length) return { resp: { __err: new Error('no LLM endpoint configured') }, endpoint: null };
   const tried = new Set();
@@ -82,6 +108,12 @@ export async function poolFetch(config, path, { method = 'POST', body, signal, t
     if (!ep) break;
     tried.add(ep.id);
     markStart(ep.id);
+    // 端点级模型:按选中端点重写 body.model(仅当 body 为对象且指定了 role)
+    let sendBody = body;
+    if (role && body && typeof body === 'object') {
+      const m = modelForEndpoint(config, ep, role, modelFallback || body.model);
+      if (m) sendBody = { ...body, model: m };
+    }
     const ctrl = signal ? null : new AbortController();
     const useSignal = signal || (ctrl && ctrl.signal);
     const t = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
@@ -90,7 +122,7 @@ export async function poolFetch(config, path, { method = 'POST', body, signal, t
       resp = await fetch(`${ep.baseUrl}${path}`, {
         method, signal: useSignal,
         headers: { Authorization: `Bearer ${ep.apiKey}`, 'Content-Type': 'application/json' },
-        body: typeof body === 'string' ? body : JSON.stringify(body || {}),
+        body: typeof sendBody === 'string' ? sendBody : JSON.stringify(sendBody || {}),
       });
     } catch (e) { resp = { __err: e }; }
     if (t) clearTimeout(t);

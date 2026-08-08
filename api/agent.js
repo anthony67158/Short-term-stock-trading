@@ -370,6 +370,7 @@ export default async function handler(req, res) {
     const callLLM = async ({ stream, useTools, timeoutMs, maxTokens = 1600 }) => {
       return callChat({
         model: AGENT_MODEL,
+        role: 'agent',
         messages,
         ...(useTools ? { tools: TOOLS, toolChoice: 'auto' } : { toolChoice: 'none' }),
         temperature: 0.3,

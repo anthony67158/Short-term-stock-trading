@@ -38,6 +38,7 @@ export async function callChat({
   responseFormat,
   reasoning = false,
   signal,
+  role,
 } = {}) {
   const ctrl = signal ? null : new AbortController();
   const useSignal = signal || (ctrl && ctrl.signal);
@@ -63,8 +64,11 @@ export async function callChat({
   const cfg = currentConfig();
   // 资源池路由:配了多端点 → 轮询/最少在途 + 故障转移 + 熔断;未配则退化为单 { BASE, KEY }(向后兼容)。
   // stream 模式下 poolFetch 仍返回上游 Response(其 body 可继续被 pumpStream/pumpChatStream 读取)。
+  // 端点级模型:传入 role 时,poolFetch 会在选定端点后按该端点自己的模型名覆盖 body.model
+  //   (不同网关同一角色可能是不同模型名);端点没配则回退全局/本次 model。
   const { resp } = await poolFetch(cfg, '/chat/completions', {
     method: 'POST', body: bodyObj, signal: useSignal, timeoutMs,
+    role, modelFallback: model,
   }, stream ? 1 : 2);   // 流式只试一个端点(半路换端点会丢已下发的 token);非流式允许一次故障转移
 
   return { resp, done: () => { if (t) clearTimeout(t); } };
