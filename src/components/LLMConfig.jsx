@@ -113,8 +113,7 @@ export default function LLMConfig() {
     if (card.isMain) { setModel(role, v); return }
     setEp(card.ep.id, { models: { ...(card.ep.models || {}), [role]: v } })
   }
-  // 附加端点某角色留空时的实际回退(全局模型 → 角色默认),作为 placeholder 提示
-  const fallbackModel = (role) => (models[role] || (roles[role] && roles[role].def) || '')
+  // 附加端点某角色留空 = 该端点不承接此角色(见 _llm_pool.endpointServesRole);不再借用主端点模型。
 
   // 取/设某端点某角色的「深度思考」开关:主端点走全局 reasoning;附加端点走该端点自带 reasoning
   //   (不同网关同名角色可能是不同模型,是否支持/需要推理各不相同 → 每端点独立)
@@ -422,7 +421,7 @@ export default function LLMConfig() {
             <div className="llm-pane">
               <div className="llm-hint" style={{ marginBottom: 10 }}>
                 {poolMode
-                  ? `资源池已启用。下方逐个列出你配置的所有端点(含主端点),请为每个端点分别指定各角色的模型——不同网关同名角色可能是不同模型名。附加端点某角色留空则自动回退到主端点的对应模型。`
+                  ? `资源池已启用。下方逐个列出你配置的所有端点(含主端点),请为每个端点分别指定各角色的模型——不同网关同名角色可能是不同模型名。附加端点某角色留空=该端点不承接此角色(不会借用主端点的模型),仅由填了该角色的端点参与分发。`
                   : `为系统各处 AI 分别指定模型${listable ? `（共 ${modelList.length} 个可选）` : '（手动填写模型名）'}`}
               </div>
               {/* 有已配置但被停用的端点 → 说明为何没在下方列出,引导回上一步启用 */}
@@ -458,7 +457,7 @@ export default function LLMConfig() {
                           </button>
                         </div>
                         <input className="wl-input auth-input" list={`llm-model-list-${card.id}`} spellCheck={false}
-                          placeholder={card.isMain ? roles[k].def : `留空沿用主端点（${fallbackModel(k) || roles[k].def}）`}
+                          placeholder={card.isMain ? roles[k].def : '留空=该端点不承接此角色'}
                           value={cardModel(card, k)}
                           onChange={(e) => setCardModel(card, k, e.target.value)} />
                         <datalist id={`llm-model-list-${card.id}`}>

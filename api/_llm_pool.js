@@ -59,11 +59,25 @@ export function endpointsFrom(config) {
 }
 
 // 端点级模型解析:选定端点后按角色定模型。
-//   端点自带 models[role] → 用之;否则回退全局 config.models[role];再回退传入的 fallback(通常是角色默认)。
+//   端点自带 models[role] → 用之;
+//   仅【主端点 default】在缺省时回退全局 config.models[role](全局模型本就属于主端点网关);
+//   【附加端点】绝不借用全局模型——不同网关服务的是各自的模型,把主端点的模型名(如 GPT-5.6)
+//   发给一个并不提供该模型的网关只会报错。附加端点没配该角色模型 → 由 endpointServesRole 提前从
+//   该角色的路由候选里剔除,故正常不会走到这里的 fallback;万一走到也只回退传入 fallback,不借全局。
 export function modelForEndpoint(config, ep, role, fallback) {
   if (ep && ep.models && ep.models[role]) return ep.models[role];
-  if (config && config.models && config.models[role]) return config.models[role];
+  if (ep && ep.id === 'default' && config && config.models && config.models[role]) return config.models[role];
   return fallback || '';
+}
+
+// 某端点是否承接某角色(路由资格):
+//   主端点(default)始终承接(用全局模型);附加端点仅在自带该角色模型时才承接。
+//   → 保证请求只会被发到「确实提供对应模型」的网关,杜绝把主端点模型名硬塞给其它端点。
+export function endpointServesRole(ep, role) {
+  if (!ep) return false;
+  if (!role) return true;
+  if (ep.id === 'default') return true;
+  return !!(ep.models && ep.models[role]);
 }
 
 // 端点级深度思考解析:选定端点后按角色定是否启用 reasoning。
@@ -77,8 +91,12 @@ export function reasoningForEndpoint(config, ep, role, fallback) {
 
 // 选一个端点:排除熔断中的;在可用端点里按【最少在途 × 权重】选负载最低者(round-robin 的加权推广)。
 // 全部熔断时,退而选 cooldownUntil 最早到期者(半开探测),保证不至于完全无端点可用。
-export function pickEndpoint(config, now = Date.now()) {
-  const eps = endpointsFrom(config);
+// role:传入时只在【承接该角色】的端点里选(附加端点须自带该角色模型),避免把请求路由到不提供对应模型的网关。
+//   若某角色只有主端点承接(附加端点都没配该角色模型),自然退化为单主端点。
+export function pickEndpoint(config, now = Date.now(), role) {
+  const all = endpointsFrom(config);
+  if (!all.length) return null;
+  const eps = role ? all.filter((e) => endpointServesRole(e, role)) : all;
   if (!eps.length) return null;
   const usable = eps.filter((e) => h(e.id).cooldownUntil <= now);
   const pool = usable.length ? usable : eps;
@@ -108,13 +126,16 @@ export function markFailure(id, now = Date.now()) {
 export async function poolFetch(config, path, { method = 'POST', body, signal, timeoutMs = 30000, role, modelFallback, reasonFallback } = {}, maxTries = 2) {
   const eps = endpointsFrom(config);
   if (!eps.length) return { resp: { __err: new Error('no LLM endpoint configured') }, endpoint: null };
+  // 承接该角色的候选端点(附加端点须自带该角色模型;主端点始终承接)——路由/故障转移都只在其中进行
+  const roleEps = role ? eps.filter((e) => endpointServesRole(e, role)) : eps;
+  if (!roleEps.length) return { resp: { __err: new Error(`no endpoint serves role "${role}"`) }, endpoint: null };
   const tried = new Set();
   let lastErr = null;
-  const tries = Math.min(maxTries, eps.length);
+  const tries = Math.min(maxTries, roleEps.length);
   for (let i = 0; i < tries; i++) {
-    let ep = pickEndpoint(config);
+    let ep = pickEndpoint(config, Date.now(), role);
     if (ep && tried.has(ep.id)) {
-      ep = eps.find((e) => !tried.has(e.id)) || ep;   // 换一个没试过的
+      ep = roleEps.find((e) => !tried.has(e.id)) || ep;   // 换一个没试过的(承接该角色的)
     }
     if (!ep) break;
     tried.add(ep.id);
