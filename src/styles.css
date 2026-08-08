@@ -3230,8 +3230,12 @@ a.mn-flash:hover { color: var(--accent); }
   .nav-brand { order: 0; flex-shrink: 0; }
   .nav-tabs { order: 1; }
   .nav-meta { order: 2; margin-left: 0; font-size: 11px; gap: 8px; flex-shrink: 1; min-width: 0; }
-  /* 顶栏右侧每个工具项不换行、不被压缩,避免"休市""飞飞徐"竖排成两行 */
-  .nav-meta > *, .nav-status, .acct-btn, .acct-btn span, .nav-refresh { white-space: nowrap; flex-shrink: 0; }
+  /* 顶栏右侧工具项统一不换行,避免"休市""飞飞徐"竖排成两行。
+     固定尺寸项(状态/刷新/图标钮)不压缩;账户名作为唯一"可压缩项",
+     空间不足时以省略号截断而非把整行顶出屏幕 —— 这是防溢出的最后兜底。 */
+  .nav-status, .nav-refresh, .nav-meta .icon-btn { white-space: nowrap; flex-shrink: 0; }
+  .acct-btn, .acct-btn span { white-space: nowrap; }
+  .acct-btn { flex-shrink: 1; min-width: 0; }
 
   /* ===== 顶栏控件统一规格:全部 34px 高 + 9px 圆角,消除"一大一小/方圆混杂" =====
      刷新胶囊、撤销、铃铛、主题、账户此前是三种高度两种圆角;这里对齐为同一视觉基线。 */
@@ -3360,17 +3364,24 @@ a.mn-flash:hover { color: var(--accent); }
   .nav-tab .icon { width: 22px; height: 22px; }
 }
 
-/* 极窄屏(≤360px):顶栏右侧工具收敛,避免 6 个不换行项 + 品牌撑破整页横滑。
-   隐藏"交易中/休市"文字(仅留状态圆点)与刷新倒计时秒数(仅留图标),
-   账户名进一步收窄,腾出空间保证顶栏在 320px 机型也不溢出。 */
-@media (max-width: 360px) {
+/* 常规手机竖屏(≤480px):顶栏右侧收敛,避免 6 个不换行项 + 品牌撑破整页。
+   多数手机竖屏宽 390~430pt,品牌 + 状态胶囊 + 刷新胶囊 + 撤销 + 铃铛 + 主题 + 账户
+   全展开约 370px,超出可用宽度 → 账户名被裁到屏幕外。这里在≤480px 就隐藏
+   "交易中/休市"文字(仅留状态圆点)与刷新倒计时秒数(仅留图标),把宽度让给账户。 */
+@media (max-width: 480px) {
   /* 状态文字是裸文本节点(非 span),用 font-size:0 收起,仅保留圆点 */
-  .nav-status { gap: 0; padding: 0 6px; font-size: 0; }
+  .nav-status { gap: 0; padding: 0 7px; font-size: 0; }
   .nav-status .status-dot { font-size: 0; }
   .nav-refresh span { display: none; }
   .nav-meta .nav-refresh { padding: 0; width: 34px; justify-content: center; }
   .nav-meta { gap: 6px; }
-  .acct-btn { max-width: 76px; padding: 0 8px; }
+  .acct-btn { max-width: 92px; padding: 0 9px; }
+}
+
+/* 极窄屏(≤360px):账户名进一步收窄,保证 320px 机型也不溢出。 */
+@media (max-width: 360px) {
+  .acct-btn { max-width: 72px; padding: 0 8px; }
+  .nav-meta { gap: 5px; }
 }
 
 /* ============================================================
