@@ -7,6 +7,7 @@ import { getLatestDailySummary } from './_daily_summary.js';
 import { fetchNews, fetchClsTelegraph, fetchSinaFlash } from './_market_data.js';
 import { callChat, callChatWithRetry, parseLLMJson, pumpChatStream } from './_llm.js';
 import { ensureConfig, currentConfig, getModel, getReasoning } from './_llm_config.js';
+import { endpointsFrom, endpointServesRole } from './_llm_pool.js';
 import { applyCors, preflight } from './_lib.js';
 import { SYSTEM_PROMPT, ADVISOR_SYSTEM, buildUserPrompt, isAdvisorMode, maxTokensForMode } from './_ai_prompts.js';
 
@@ -387,6 +388,15 @@ export default async function handler(req, res) {
   // 运行时配置优先（前端「AI 模型配置」写入 OSS）：先预热同步缓存，再取 BASE/KEY/模型
   await ensureConfig();
   const cfg = currentConfig();
+  // 深度思考「真实生效值」:全局开(config.reasoning[role]=true)或【承接该角色的任一端点】开了
+  //   (ep.reasoning[role]=true)即视为开。用于超时预算/maxTokens/中文思维链指令与底层 poolFetch 实际
+  //   下发的 reasoning_effort 对齐——避免用户只在端点卡片开深度思考时,编排层按"不思考"短预算把思维链掐断。
+  const effectiveReasoning = (role) => {
+    if (getReasoning(role)) return true;
+    try {
+      return endpointsFrom(cfg).some((ep) => endpointServesRole(ep, role) && ep.reasoning && ep.reasoning[role]);
+    } catch { return false; }
+  };
   const RT_BASE = cfg.baseUrl || BASE;
   const RT_KEY = cfg.apiKey || KEY;
   const MODEL = getModel('chat');
@@ -429,7 +439,7 @@ export default async function handler(req, res) {
     // 开启【深度思考(reasoning)】后模型要先跑思维链再输出,军师级复杂题实测可达 120s+,
     // 故 reasoning 开启时把总预算与下方 LLM 超时上限整体放大,避免思维链未完就被掐断降级。
     const START = Date.now();
-    const reasoningOn = isAdvisorMode(mode) ? getReasoning('advisor') : getReasoning('chat');
+    const reasoningOn = effectiveReasoning(isAdvisorMode(mode) ? 'advisor' : 'chat');
     const BUDGET = reasoningOn ? 360000 : 115000;
     const remain = () => BUDGET - (Date.now() - START);
 
@@ -857,7 +867,13 @@ export default async function handler(req, res) {
     const isAdvisor = isAdvisorMode(mode);
     const useModel = isAdvisor ? ADVISOR_MODEL : MODEL;
     const useRole = isAdvisor ? 'advisor' : 'chat';   // 端点级模型解析:按角色让资源池各端点用各自的模型名
-    const useReasoning = isAdvisor ? getReasoning('advisor') : getReasoning('chat');
+    // —— 编排层须与底层实际下发的 reasoning_effort 对齐 ——
+    // 深度思考开关既可开在全局(config.reasoning[role]),也可开在【端点级】(ep.reasoning[role])。
+    // poolFetch/reasoningForEndpoint 会按端点把 reasoning_effort=high 真实发给上游,但本文件的超时预算、
+    // maxTokens、强制中文思维链指令(zhTail)此前只读全局 getReasoning → 端点级开启时三者全按"不思考"跑,
+    // 导致军师思维链还没吐完就被短超时掐断、且不回显。此处改为读【真实生效值】:全局开 OR 任一承接该
+    // 角色的端点开 → 视为开,撑起长超时+大 token+中文思维链指令,思维链才能完整生成并回显。
+    const useReasoning = effectiveReasoning(useRole);
     const sysPrompt = isAdvisor ? ADVISOR_SYSTEM : SYSTEM_PROMPT;
 
     // 已采集到的数据 meta——即便 LLM 超时降级，也把这些"确定性数据"回传前端展示(有价值、不空手)
