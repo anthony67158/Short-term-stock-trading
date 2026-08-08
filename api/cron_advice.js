@@ -28,9 +28,19 @@ import {
   reapOrphans, gcJobs, runningCount, hasPendingWork, isActive, jobsToProgress,
   acquireWorkerLock, renewWorkerLock, releaseWorkerLock, workerHeldByOther,
 } from './_jobs.js';
+import { ensureConfig, currentConfig } from './_llm_config.js';
+import { endpointCountForRole } from './_llm_pool.js';
 import aiHandler from './ai.js';
 import stockDetailHandler from './stock_detail.js';
 import quoteHandler from './quote.js';
+
+// ---- 并发上限:严格等于用户为「操盘军师(advisor)」角色配置的端点数(核心规则1)----
+// AI 操作建议实际调用 advisor 角色 → 承接该角色的端点数即为可并行生成的最大只数。
+// 未配任何附加端点 → 退化为 1(仅主端点),endpointCountForRole 已保证最小 1。
+// 读取的是全局 LLM 配置(config/llm.json,进程级缓存),故所有账号/设备共享同一上限。
+function advisorConcurrency() {
+  try { return endpointCountForRole(currentConfig(), 'advisor'); } catch { return CONCURRENCY; }
+}
 
 // 北京时间"下一交易日"友好标签(跳过周末/A股节假日),告诉军师今日买入的 T+1 最早哪天可卖。
 const A_SHARE_HOLIDAYS = new Set([
@@ -206,8 +216,8 @@ async function persistServer(nick, workingAcc, myId) {
   mergeExternalJobs(wdata, fdata);
   fdata.jobs = wdata.jobs;
   fdata.jobWorker = wdata.jobWorker;
-  // 进度快照(旧前端仍消费 batchProgress)
-  fdata.batchProgress = jobsToProgress(wdata);
+  // 进度快照(旧前端仍消费 batchProgress);concurrency=当前 advisor 端点数(供前端单股触发门控)
+  fdata.batchProgress = jobsToProgress(wdata, Date.now(), advisorConcurrency());
   // advice 逐条时间戳并入
   const wa = (wdata.advice && typeof wdata.advice === 'object') ? wdata.advice : {};
   const fa = (fdata.advice && typeof fdata.advice === 'object') ? fdata.advice : (fdata.advice = {});
@@ -245,12 +255,13 @@ async function drainAccount(nick, initialAcc) {
 
   const inflight = new Map();   // code -> Promise<{code,res,err}>
   let ok = 0, fail = 0;
+  const CONC = advisorConcurrency();   // 本轮并发上限=当前 advisor 端点数(严格绑定)
   try {
     while (true) {
       data = acc.data;
       reapOrphans(data); gcJobs(data);
       renewWorkerLock(data, myId);
-      const free = CONCURRENCY - runningCount(data);
+      const free = CONC - runningCount(data);
       const startable = Object.values(jobsOf(data))
         .filter((j) => j && j.status === 'queued' && !j.cancelRequested && !inflight.has(j.code))
         .sort((a, b) => (a.at || 0) - (b.at || 0))
@@ -305,7 +316,7 @@ async function drainAccount(nick, initialAcc) {
       // 合并我们内存里的最终 jobs 状态
       mergeExternalJobs(acc.data, fdata);
       fdata.jobs = acc.data.jobs;
-      fdata.batchProgress = jobsToProgress(acc.data);
+      fdata.batchProgress = jobsToProgress(acc.data, Date.now(), CONC);
       try { await writeAccount(fresh); } catch { /* ignore */ }
     }
   }
@@ -342,6 +353,8 @@ export default async function handler(req, res) {
   if (preflight(req, res)) return;
   applyCors(res);
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  // 预热 LLM 配置 → advisorConcurrency() 才能读到最新的端点数(并发上限的权威来源)
+  try { await ensureConfig(); } catch { /* 读失败回退 env 基线,不阻断 */ }
 
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
   const scope = ['all', 'hold', 'watch'].includes(body.scope) ? body.scope : 'all';
@@ -359,21 +372,22 @@ export default async function handler(req, res) {
     const data = acc.data || (acc.data = {});
     const op = body.op || 'enqueue';
     const started = Date.now();
+    const CONC = advisorConcurrency();   // 当前 advisor 端点数=并发上限(所有响应/快照统一用它)
 
     try {
       if (op === 'status') {
-        return res.end(JSON.stringify({ ok: true, jobs: jobsOf(data), progress: jobsToProgress(data), concurrency: CONCURRENCY, running: runningCount(data) }));
+        return res.end(JSON.stringify({ ok: true, jobs: jobsOf(data), progress: jobsToProgress(data, Date.now(), CONC), concurrency: CONC, running: runningCount(data) }));
       }
       if (op === 'cancel') {
         const codes = Array.isArray(body.codes) ? body.codes.filter(Boolean).map(String) : [];
         let n = 0; for (const c of codes) if (cancelJob(data, c)) n++;
         await persistServer(nick, acc, 'cancel');
-        return res.end(JSON.stringify({ ok: true, canceled: n, progress: jobsToProgress(data) }));
+        return res.end(JSON.stringify({ ok: true, canceled: n, progress: jobsToProgress(data, Date.now(), CONC) }));
       }
       if (op === 'cancelAll') {
         const n = cancelAll(data);
         await persistServer(nick, acc, 'cancelAll');
-        return res.end(JSON.stringify({ ok: true, canceled: n, progress: jobsToProgress(data) }));
+        return res.end(JSON.stringify({ ok: true, canceled: n, progress: jobsToProgress(data, Date.now(), CONC) }));
       }
       // enqueue(默认):把 codes 排入队列(防重),随后 drain(拿不到锁则由在跑的 drainer 接手)
       const codes = Array.isArray(body.codes) ? [...new Set(body.codes.filter(Boolean).map(String))] : [];
@@ -395,7 +409,7 @@ export default async function handler(req, res) {
       return res.end(JSON.stringify({
         ok: true, enqueued: enq, dedup: dup,
         drained: dr && dr.drained ? true : false, ok2: dr && dr.ok, fail: dr && dr.fail,
-        concurrency: CONCURRENCY, elapsedMs: Date.now() - started,
+        concurrency: CONC, elapsedMs: Date.now() - started,
       }));
     } catch (e) {
       return res.end(JSON.stringify({ ok: false, error: String(e.message || e), elapsedMs: Date.now() - started }));

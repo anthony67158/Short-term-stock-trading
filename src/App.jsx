@@ -46,7 +46,13 @@ const TABS = [
 
 export default function App() {
   const { user, booting } = useAuthStore()
-  useEffect(() => { authStore.boot(); startCloudSync() }, [])   // 启动时尝试恢复会话 + 开启跨设备同步轮询
+  useEffect(() => {
+    authStore.boot(); startCloudSync()   // 启动时尝试恢复会话 + 开启跨设备同步轮询
+    // 预置并发上限=承接 advisor 角色的端点数(首屏即可门控;之后随云端 batchProgress.concurrency 覆盖为权威值)
+    fetch(api('/api/llm_config'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'get' }) })
+      .then((r) => r.json()).then((j) => { if (j && j.ok && Number(j.concurrency) > 0) import('./adviceBatch').then((m) => m.seedConcurrency(Number(j.concurrency))).catch(() => {}) })
+      .catch(() => { /* 拿不到就用默认 1,不阻断 */ })
+  }, [])
   if (booting) return (
     <div className="auth-gate"><div className="auth-card" style={{ textAlign: 'center' }}>
       <div className="auth-brand"><span className="nav-logo"><Icon name="logo" size={20} /></span><span>短线操盘台</span></div>

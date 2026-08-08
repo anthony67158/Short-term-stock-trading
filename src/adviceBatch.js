@@ -27,10 +27,15 @@ const state = {
   cancelRequested: false,
   serverMode: false,   // true=进度来自服务端(本机点了「服务端生成」或另一设备正在生成,经云端回灌)
   _cloudAt: 0,         // 已消费的云端进度时间戳(去重/防旧盖新)
+  concurrency: 1,      // 并发上限=服务端 advisor 端点数(云端进度回灌覆盖;首屏由 seedConcurrency 预置)
 }
 const subs = new Set()
 function notify() { subs.forEach((fn) => { try { fn() } catch { /* ignore */ } }) }
 export function subscribeBatch(fn) { subs.add(fn); return () => subs.delete(fn) }
+// 并发上限(=承接 advisor 角色的端点数)。首屏可由 /api/llm_config 预置(seedConcurrency),
+// 之后随云端 batchProgress.concurrency 覆盖为权威值。
+export function getConcurrency() { return Math.max(1, Number(state.concurrency) || 1) }
+export function seedConcurrency(n) { const v = Math.max(1, Number(n) || 0); if (v) { state.concurrency = v; notify() } }
 // 取只读快照(current 转数组,便于组件直接用)
 export function getBatchState() {
   return {
@@ -41,6 +46,7 @@ export function getBatchState() {
     startedAt: state.startedAt, finishedAt: state.finishedAt,
     cancelRequested: state.cancelRequested,
     serverMode: state.serverMode,
+    concurrency: getConcurrency(),
     pct: state.total ? Math.round((state.done / state.total) * 100) : 0,
   }
 }
@@ -82,6 +88,7 @@ export function applyCloudBatch(bp) {
   if (state.running && !state.serverMode) return           // 本机本地批量进行中 → 不打架
   state._cloudAt = at
   state.serverMode = true
+  if (Number(bp.concurrency) > 0) state.concurrency = Number(bp.concurrency)   // 权威并发上限=服务端 advisor 端点数
   state.running = !!bp.running
   state.total = bp.total || 0
   state.done = bp.done || 0

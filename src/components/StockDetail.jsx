@@ -9,7 +9,10 @@ import { api } from '../apiBase'
 import { usePlanStore, planStore, computeTFlows, computePortfolio, t1StatusOf } from '../planStore'
 import { nextTradingDayLabel } from '../review'
 import { getAdvice } from '../adviceCache'
-import { startAdvice, subscribeRunner, isRunning, getRunning, getResult } from '../adviceRunner'
+import { subscribeRunner, isRunning, getRunning, getResult } from '../adviceRunner'
+import { tryStartAdvice, generatingList } from '../adviceGate'
+import { subscribeBatch } from '../adviceBatch'
+import { detailStore } from '../detailStore'
 import { AlertForm } from './AlertCenter'
 
 // 把公司网址补全为可点击的绝对 URL（东财 F10 常给不带协议的裸域名）
@@ -61,6 +64,7 @@ export default function StockDetail({ stock, onClose }) {
   const [showMa, setShowMa] = useState(false) // OHLC/MA 网格默认折叠
   const [showInfo, setShowInfo] = useState(false) // 公司简介默认折叠
   const [showBasis, setShowBasis] = useState(false) // AI建议深度分析(依据/风险)默认折叠,先给关键结论
+  const [busyModal, setBusyModal] = useState(null) // 端点已满提示:{ busy:[{code,name}], concurrency } | null
   const book = usePlanStore()
   // 账户全景(总资产/可用现金/总仓位/单票占比)——供 AI 按资金和仓位算具体手数。
   // ★不要依赖 overview(它在后面才定义，提前引用会触发 TDZ 报错导致弹窗白屏)；
@@ -209,7 +213,8 @@ export default function StockDetail({ stock, onClose }) {
     const priceHint = (overview && overview.price) || myHold?.cost || null
     // ★关键★ 生成流程交给模块级后台 runner：关闭弹窗也照跑完、落缓存、记决策；
     // 本组件仅订阅 runner + 缓存来展示进度/结果（见下方 useEffect）。
-    startAdvice({
+    // 经门控层触发:并发已满 → 不启动,弹「端点已满 + 正在生成清单」;该股已在生成 → 复用进度不重复触发。
+    const r = tryStartAdvice({
       code: stock.code,
       mode: myHold ? 'hold_advice' : 'buy_advice',
       name: (profile && profile.name) || stock.name,
@@ -218,8 +223,23 @@ export default function StockDetail({ stock, onClose }) {
       quantUrl,
       priceHint,
     })
+    if (r && r.status === 'full') setBusyModal({ busy: r.busy || [], concurrency: r.concurrency || 0 })
   }
   const [showAlert, setShowAlert] = useState(false) // 设预警表单开关
+  // 端点已满弹窗打开时,订阅本地/云端生成进度 → 实时刷新「正在生成」清单;
+  // 有端点腾空(清单减少到并发上限以下)则自动关闭弹窗,方便用户马上重试。
+  useEffect(() => {
+    if (!busyModal) return
+    const refresh = () => {
+      const busy = generatingList().filter((x) => x.code !== (stock && stock.code))
+      if (busy.length < (busyModal.concurrency || 1)) { setBusyModal(null); return }
+      setBusyModal((m) => (m ? { ...m, busy } : m))
+    }
+    const unsub = subscribeBatch(refresh)
+    const unsubR = subscribeRunner(refresh)
+    return () => { unsub(); unsubR() }
+    // eslint-disable-next-line
+  }, [busyModal, stock && stock.code])
   const { data, loading, error, reload } = usePolling(
     stock ? `/api/stock_detail?code=${stock.code}&klt=${klt}&lmt=120&trends=1` : null,
     600000, // 详情不需要频繁刷新
@@ -1056,6 +1076,38 @@ export default function StockDetail({ stock, onClose }) {
             <Icon name="bell" size={14} /> {showAlert ? '收起预警' : '盯盘预警'}
           </button>
         </div>
+
+        {/* 端点已满弹窗:并发数=承接 advisor 角色的 AI 端点数;当前端点全部在生成时触发。
+            列出正在生成的股票名(可点击直接跳转到对应个股详情),等有端点腾空再来生成本股。*/}
+        {busyModal && (
+          <div className="busy-modal-mask" onClick={() => setBusyModal(null)}>
+            <div className="busy-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="busy-modal-head">
+                <span className="busy-modal-title"><Icon name="gauge" size={15} /> AI 端点已满</span>
+                <button className="icon-btn" onClick={() => setBusyModal(null)} title="关闭"><Icon name="close" size={15} /></button>
+              </div>
+              <div className="busy-modal-desc">
+                当前 {busyModal.concurrency || busyModal.busy.length} 个 AI 端点已全部占用（并发数=已配置端点数）。
+                下列个股正在生成，完成后会自动腾出端点，届时可再次点击生成。
+              </div>
+              <div className="busy-modal-list">
+                {busyModal.busy.map((x) => (
+                  <button
+                    key={x.code}
+                    className="busy-modal-item"
+                    onClick={() => { detailStore.open({ code: x.code, name: x.name }); setBusyModal(null) }}
+                    title="查看该股详情与生成进度"
+                  >
+                    <span className="busy-item-name">{x.name}</span>
+                    <span className="busy-item-code">{x.code}</span>
+                    <Icon name="refresh" size={12} className="spin" />
+                    <Icon name="chevronRight" size={13} />
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

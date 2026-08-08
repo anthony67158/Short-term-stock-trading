@@ -80,6 +80,16 @@ export function endpointServesRole(ep, role) {
   return !!(ep.models && ep.models[role]);
 }
 
+// 承接某角色的【可用端点数】——用作「AI 操作建议」并发上限的权威来源:
+//   系统并行生成的最大数量 = 用户为该角色配置的端点数(完全一致)。
+//   role 传入时只数承接该角色的端点(附加端点须自带该角色模型;主端点始终算);
+//   一个端点都没配(理论上主端点缺 base/key)→ 至少返回 1,避免并发上限为 0 导致完全不生成。
+export function endpointCountForRole(config, role) {
+  const all = endpointsFrom(config);
+  const eps = role ? all.filter((e) => endpointServesRole(e, role)) : all;
+  return Math.max(1, eps.length);
+}
+
 // 端点级深度思考解析:选定端点后按角色定是否启用 reasoning。
 //   端点显式配了该角色(true/false)→ 用之;否则回退全局 config.reasoning[role];再回退传入 fallback。
 //   注:附加端点 reasoning 里只存 true 的角色(见 _llm_config),故 undefined 即"该端点未单独指定"→ 回退全局。

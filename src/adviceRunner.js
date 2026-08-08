@@ -15,6 +15,10 @@ function notify() { subs.forEach((fn) => { try { fn() } catch { /* ignore */ } }
 export function subscribeRunner(fn) { subs.add(fn); return () => subs.delete(fn) }
 export function isRunning(code) { return code ? running.has(code) : false }
 export function getRunning(code) { return (code && running.get(code)) || null }
+// 本地正在生成的清单:[{code, name, startedAt}](供单股触发门控/「端点已满」弹窗展示)
+export function getRunningList() {
+  return [...running.entries()].map(([code, r]) => ({ code, name: (r && r.name) || code, startedAt: (r && r.startedAt) || 0 }))
+}
 // 取本次会话内刚跑完的结果（含 error/adviceMissing/truncated 等瞬时态；跨刷新则读 adviceCache）
 export function getResult(code) { return (code && results.get(code)) || null }
 // 组件消费完瞬时结果后可清掉，避免旧结果盖住后续从缓存恢复的值（可选）
@@ -29,7 +33,7 @@ export function startAdvice(spec) {
   if (!code) return Promise.resolve()
   if (running.has(code)) return running.get(code).promise || Promise.resolve()  // 已在后台跑 → 幂等，复用同一 promise
   results.delete(code)           // 清掉上次的瞬时结果，UI 立即进入 loading
-  const rec = { phase: '正在准备分析…', startedAt: Date.now(), sources: [], reasoning: '', quant: null }
+  const rec = { phase: '正在准备分析…', startedAt: Date.now(), name: (spec && spec.name) || code, sources: [], reasoning: '', quant: null }
   running.set(code, rec)
   notify()
   const p = run(spec).finally(() => { running.delete(code); notify() })

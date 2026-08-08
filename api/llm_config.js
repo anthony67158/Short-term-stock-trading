@@ -9,7 +9,7 @@
 
 import { applyCors, preflight } from './_lib.js';
 import { ensureConfig, currentConfig, saveConfig, publicView, ROLES } from './_llm_config.js';
-import { poolStatus } from './_llm_pool.js';
+import { poolStatus, endpointCountForRole } from './_llm_pool.js';
 
 // 用一对 base/key 拉可用模型列表（OpenAI 兼容 GET /models）
 async function fetchModels(baseUrl, apiKey) {
@@ -76,7 +76,7 @@ export default async function handler(req, res) {
     const action = (body && body.action) || (req.query && req.query.action) || 'get';
 
     if (action === 'get') {
-      return res.status(200).send(JSON.stringify({ ok: true, config: publicView(), roles: ROLES, pool: poolStatus(currentConfig()) }));
+      return res.status(200).send(JSON.stringify({ ok: true, config: publicView(), roles: ROLES, pool: poolStatus(currentConfig()), concurrency: endpointCountForRole(currentConfig(), 'advisor') }));
     }
 
     // verify / test / save 都可能带明文 key；留空则用已存 key

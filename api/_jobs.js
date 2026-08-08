@@ -18,7 +18,7 @@
 //   断点续跑:running 但 leaseUntil < now(FC 崩了没续租)→ 视为孤儿 → 回收成 queued,下次 drain 重跑。
 //   防重:同 code 已有 queued/running 活跃任务 → enqueue 复用,不新建(除非 force 重生成)。
 
-export const CONCURRENCY = Number(process.env.ADVICE_CONCURRENCY || 3); // 全局并发上限(跨端共享)
+export const CONCURRENCY = Number(process.env.ADVICE_CONCURRENCY || 3); // 全局并发上限【默认/回退】(运行时优先按承接 advisor 角色的端点数,见 cron_advice.js)
 export const LEASE_MS = 200 * 1000;      // 单只运行租约:超过未续租视为孤儿,回收重跑(genOne 内部预算 150s)
 export const LOCK_TTL_MS = 60 * 1000;    // Worker 锁 TTL:drainer 周期续租;崩溃后此后过期,他人接管
 export const MAX_ATTEMPTS = 3;           // 失败最多重试次数
@@ -170,8 +170,9 @@ export function hasPendingWork(data, now = Date.now()) {
 }
 
 // 生成对旧前端兼容的 batchProgress 快照(老逻辑仍消费 data.batchProgress)。
-// running/total/done/ok/fail/skipped/items([{code,name,status}])/startedAt/finishedAt/at/source
-export function jobsToProgress(data, now = Date.now()) {
+// running/total/done/ok/fail/skipped/items([{code,name,status}])/startedAt/finishedAt/at/source/concurrency
+// concurrency:本轮生效的并发上限(运行时由承接 advisor 角色的端点数决定;前端据此做单股触发门控)。
+export function jobsToProgress(data, now = Date.now(), concurrency = CONCURRENCY) {
   const jobs = jobsOf(data);
   const arr = Object.values(jobs).filter(Boolean);
   // 只统计"本轮相关"的:近 6h 内有活动的任务(避免历史 done 混入总数)
@@ -196,5 +197,6 @@ export function jobsToProgress(data, now = Date.now()) {
     finishedAt: active.length ? 0 : now,
     at: now,
     source: 'server',
+    concurrency: Math.max(1, Number(concurrency) || CONCURRENCY),
   };
 }
