@@ -8,7 +8,7 @@
 //   5) 可取消:cancel() 停止派发后续任务(已在途的那批跑完即止)。
 import { planStore, computePortfolio } from './planStore'
 import { getAdvice } from './adviceCache'
-import { startAdvice, getRunningList } from './adviceRunner'
+import { startAdvice, getRunningList, getResult } from './adviceRunner'
 import { buildHoldSpec, buildWatchSpec } from './adviceDaily'
 import { triggerServerAdvice, canServerAdvice, cancelServerAdvice } from './serverAdvice'
 
@@ -204,9 +204,21 @@ export async function runBatchAdvice(codes, quoteMap, opts = {}) {
     state.current.add(code); setItemStatus(code, 'running'); notify()
     try {
       await startAdvice(spec)   // runner 内部落缓存/记决策;这里等它完成
-      // 判定成功:缓存里出现了新鲜建议
-      const a = getAdvice(code)
-      const good = !!(a && a.at && (Date.now() - a.at) < 60 * 1000)
+      // ★成功判定★ 直接读本次运行的权威结果(runner 的 results),不再用脆弱的「60 秒新鲜度」:
+      //   · 有 advice/result 且无 error → ok(真成功)
+      //   · runner 记了 error → fail(真失败,如实上报,绝不假成功)
+      //   · 本地中断已转云端(pending) → 记 ok(云端会继续跑完并回灌;不算失败,避免误报)
+      //   · 兜底:results 里没有 → 回看 adviceCache 是否落了新鲜建议
+      const res = getResult(code)
+      let good
+      if (res) {
+        if (res.pending) good = true
+        else if (res.error) good = false
+        else good = !!(res.advice || res.result)
+      } else {
+        const a = getAdvice(code)
+        good = !!(a && a.at && (Date.now() - a.at) < 5 * 60 * 1000)
+      }
       setItemStatus(code, good ? 'ok' : 'fail')
       good ? state.ok++ : state.fail++
     } catch {

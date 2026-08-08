@@ -19,7 +19,7 @@
 //   防重:同 code 已有 queued/running 活跃任务 → enqueue 复用,不新建(除非 force 重生成)。
 
 export const CONCURRENCY = Number(process.env.ADVICE_CONCURRENCY || 3); // 全局并发上限【默认/回退】(运行时优先按承接 advisor 角色的端点数,见 cron_advice.js)
-export const LEASE_MS = 200 * 1000;      // 单只运行租约:超过未续租视为孤儿,回收重跑(genOne 内部预算 150s)
+export const LEASE_MS = 450 * 1000;      // 单只运行租约:须 > genOne 内部兜底预算(invoke 420s),否则长任务(深度思考 360s)会被误判孤儿而重复起跑
 export const LOCK_TTL_MS = 60 * 1000;    // Worker 锁 TTL:drainer 周期续租;崩溃后此后过期,他人接管
 export const MAX_ATTEMPTS = 3;           // 失败最多重试次数
 const JOB_TTL_MS = 24 * 3600 * 1000;     // 终态任务保留 24h 后清理(避免无限堆积)

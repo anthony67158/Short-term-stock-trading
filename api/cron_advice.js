@@ -90,7 +90,7 @@ function invoke(handler, { method = 'GET', query = {}, body = null } = {}) {
       const r = handler(req, res);
       if (r && typeof r.then === 'function') r.catch(() => finishWith(null));
     } catch { finishWith(null); }
-    setTimeout(() => finishWith(null), 150000);  // 兜底超时(ai.js 内部预算 115s)
+    setTimeout(() => finishWith(null), 420000);  // 兜底超时:放到 420s——覆盖 ai.js 深度思考预算(360s)+ 数据采集(~20s),避免思维链未完就被掐断造成"假失败"(FC 函数 timeout=600s 留足余量)
   });
 }
 

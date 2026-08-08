@@ -8,10 +8,10 @@ import { aiStore } from '../aiStore'
 import { api } from '../apiBase'
 import { usePlanStore, planStore, computeTFlows, computePortfolio, t1StatusOf } from '../planStore'
 import { nextTradingDayLabel } from '../review'
-import { getAdvice } from '../adviceCache'
+import { getAdvice, subscribeAdvice } from '../adviceCache'
 import { subscribeRunner, isRunning, getRunning, getResult } from '../adviceRunner'
 import { tryStartAdvice, generatingList } from '../adviceGate'
-import { subscribeBatch } from '../adviceBatch'
+import { subscribeBatch, getBatchState } from '../adviceBatch'
 import { detailStore } from '../detailStore'
 import { AlertForm } from './AlertCenter'
 
@@ -124,6 +124,11 @@ export default function StockDetail({ stock, onClose }) {
         return
       }
       const res = getResult(code)
+      if (res && res.pending) {
+        // 本地生成中断→已转云端继续,展示中转 loading,待云端回灌自动切成品
+        setQuantState({ loading: true, cloud: true, phase: (res.error && String(res.error)) || '云端继续生成中,稍候自动刷新…', sources: [], reasoning: '', quant: null })
+        return
+      }
       if (res) {
         setQuantState(res.error
           ? { error: res.error }
@@ -131,13 +136,39 @@ export default function StockDetail({ stock, onClose }) {
               adviceMissing: res.adviceMissing, truncated: res.truncated, cachedAt: res.cachedAt })
         return
       }
+      // 服务端(云端)批量/按需生成:该股在 FC 上生成,本机 isRunning 为 false。
+      // 若它出现在批量进度的 current(正在跑)或仍是 pending/running 项 → 展示「云端生成中」,
+      // 待结果经 authStore.pull 回灌 adviceCache 后自动切成品(见下方 subscribeAdvice)。
+      try {
+        const bs = getBatchState()
+        if (bs && bs.serverMode && bs.running) {
+          const c = String(code)
+          const inCurrent = (bs.current || []).map(String).includes(c)
+          const it = (bs.items || []).find((x) => String(x.code) === c)
+          if (inCurrent || (it && (it.status === 'running' || it.status === 'pending'))) {
+            const cloudPhase = inCurrent || (it && it.status === 'running')
+              ? '云端生成中…(退到后台/关页面也在跑,完成后自动刷新)'
+              : '已排队,等待云端端点空出…'
+            setQuantState({ loading: true, phase: cloudPhase, cloud: true, sources: [], reasoning: '', quant: null })
+            return
+          }
+          // 云端已把该股标记为失败 → 如实提示生成失败(不做假成功)
+          if (it && it.status === 'fail') {
+            setQuantState({ error: (it.error && String(it.error)) || '生成失败,请重试' })
+            return
+          }
+        }
+      } catch { /* ignore */ }
       const cached = getAdvice(code)
       setQuantState(cached
         ? { result: cached.result, advice: cached.advice, meta: cached.meta, news: cached.news, truncated: cached.truncated, cachedAt: cached.at }
         : null)
     }
     sync()
-    return subscribeRunner(sync)
+    const unRunner = subscribeRunner(sync)
+    const unBatch = subscribeBatch(sync)   // 服务端批量进度回灌 → 云端生成中/失败态实时反映
+    const unAdvice = subscribeAdvice(sync) // 云端结果回灌 adviceCache → 自动切成品
+    return () => { unRunner(); unBatch(); unAdvice() }
   }, [stock && stock.code])
   const loadQuant = () => {
     if (!stock) return
