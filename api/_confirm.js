@@ -18,8 +18,12 @@
 
 import { fetchTrendsTx, fetchKlineTx } from './stock_detail.js';
 import { computeTechnicals, techSummaryForAI } from './_ta.js';
-import { callChat, parseLLMJson } from './_llm.js';
+import { callChatWithRetry, parseLLMJson } from './_llm.js';
 import { getModel, getReasoning } from './_llm_config.js';
+import { put, readJson, hasStorage } from './_blob.js';
+
+// 置信度双闸门:LLM 判 confirm 但把握不足(< 阈值)时降级为 wait(只观察不发强提示),避免边缘信号过激进。
+const CONFIRM_MIN_CONFIDENCE = 75;
 
 // ---- 交易语义分类:把一条价位预警归成 buy / sell / stop 三类 ----
 // buy : 买点 / 补仓(回踩到位后想低吸)——确认「止跌企稳」才买。
@@ -154,15 +158,19 @@ async function llmJudge({ side, a, name, advice, prim, tech, det }) {
       + '\n\n输出格式:{"decision":"confirm|wait|invalid","confidence":0-100,"reason":"一句话中文理由(点明关键依据)"}' },
   ];
   try {
-    const { resp, done } = await callChat({
+    // 超时放宽到 20s,并在非超时错误/5xx 时故障转移重试一次(换池内另一端点),
+    // 减少盘中高波动时段(数据最有价值时)因单端点抖动而回退到纯技术面。
+    const startedAt = Date.now();
+    const TIMEOUT_MS = 20000;
+    const { resp, done } = await callChatWithRetry({
       role: 'judge', model,
       messages,
       temperature: 0,
       maxTokens: 320,
-      timeoutMs: 15000,
+      timeoutMs: TIMEOUT_MS,
       responseFormat: { type: 'json_object' },
       reasoning: getReasoning('judge'),
-    });
+    }, { retries: 1, budgetLeftMs: () => TIMEOUT_MS - (Date.now() - startedAt) });
     try {
       if (!resp || resp.__err || !resp.ok) return null;
       const j = await resp.json().catch(() => null);
@@ -204,19 +212,75 @@ export async function judgeConfirmation({ alert, name, advice, quote } = {}) {
 
   // LLM 最终闸门(可回退)
   const llm = await llmJudge({ side, a, name, advice, prim, tech, det });
+  let result;
   if (llm) {
-    return {
-      decision: llm.decision,
+    let decision = llm.decision;
+    let reason = llm.reason || (det.hits[0] || '综合研判');
+    let gated = false;
+    // 置信度双闸门:confirm 但把握不足(< CONFIRM_MIN_CONFIDENCE)→ 降级为 wait(只观察,不发强提示)。
+    //   confidence 为 null(模型没给)时不降级——避免把正常 confirm 误杀;wait/invalid 不受闸门影响。
+    if (decision === 'confirm' && llm.confidence != null && llm.confidence < CONFIRM_MIN_CONFIDENCE) {
+      decision = 'wait';
+      gated = true;
+      reason = `把握不足(${llm.confidence}<${CONFIRM_MIN_CONFIDENCE}),暂列观察:${reason}`;
+    }
+    result = {
+      decision,
       confidence: llm.confidence,
-      reason: llm.reason || (det.hits[0] || '综合研判'),
+      reason,
       side, signals, source: 'llm+ta',
+      ...(gated ? { gated: true, rawDecision: 'confirm' } : {}),
+    };
+  } else {
+    // 回退:纯确定性结论(不产出 invalid,保守只在 confirm/wait 间取)
+    result = {
+      decision: det.decision,
+      confidence: null,
+      reason: det.hits.length ? det.hits.join('、') : '证据不足,继续观察',
+      side, signals, source: 'ta',
     };
   }
-  // 回退:纯确定性结论(不产出 invalid,保守只在 confirm/wait 间取)
-  return {
-    decision: det.decision,
-    confidence: null,
-    reason: det.hits.length ? det.hits.join('、') : '证据不足,继续观察',
-    side, signals, source: 'ta',
+  // 可观测性:落一条轻量判定日志到 OSS(fire-and-forget,失败静默,绝不阻断主流程)。
+  logVerdict(a, name, prim, result);
+  return result;
+}
+
+// ---- 可观测性:落一条轻量判定日志到 OSS ----
+// 目的:事后回看 judge 判得准不准(积累后可对 {decision,confidence} 与实际后续走势做命中率统计)。
+// 存储:每天一个对象 confirm_log/YYYY-MM-DD.json,内含当日判定数组(追加写)。
+//   fire-and-forget:不 await 到主流程,失败静默——绝不因日志拖慢或阻断确认闸门。
+function logVerdict(a, name, prim, result) {
+  if (!hasStorage()) return;
+  const now = Date.now();
+  const d = new Date(now + 8 * 3600 * 1000);   // 东八区
+  const day = d.toISOString().slice(0, 10);
+  const key = `confirm_log/${day}.json`;
+  const entry = {
+    ts: now,
+    code: a.code,
+    name: name || a.code,
+    side: result.side,
+    op: a.op || null,
+    keyPrice: a.value != null ? a.value : null,
+    price: prim ? prim.price : null,
+    pctFromPre: prim ? prim.pctFromPre : null,
+    decision: result.decision,
+    confidence: result.confidence,
+    source: result.source,
+    gated: result.gated || false,
+    rawDecision: result.rawDecision || result.decision,
+    reason: (result.reason || '').slice(0, 160),
   };
+  (async () => {
+    try {
+      let arr = [];
+      try {
+        const prev = await readJson(key);
+        if (Array.isArray(prev)) arr = prev;
+      } catch { /* 首次当天无文件 */ }
+      arr.push(entry);
+      if (arr.length > 2000) arr = arr.slice(-2000);   // 单日上限,防无界增长
+      await put(key, JSON.stringify(arr), { contentType: 'application/json', addRandomSuffix: false, cacheControlMaxAge: 0 });
+    } catch { /* 日志失败静默 */ }
+  })();
 }
