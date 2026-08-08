@@ -137,6 +137,12 @@ export async function saveConfig(patch = {}) {
         const v = src[role];
         if (v != null && String(v).trim()) epModels[role] = String(v).trim();
       }
+      // 端点级深度思考:前端传则以其为准(整项替换),未传沿用旧值;仅保留 true 的角色(false=默认关,省空间)。
+      const epReason = {};
+      const rsrc = (e.reasoning && typeof e.reasoning === 'object') ? e.reasoning : (prev.reasoning || {});
+      for (const role of Object.keys(ROLES)) {
+        if (rsrc[role]) epReason[role] = true;
+      }
       return {
         id,
         baseUrl: String(e.baseUrl || prev.baseUrl || '').replace(/\/+$/, ''),
@@ -144,6 +150,7 @@ export async function saveConfig(patch = {}) {
         weight: Number(e.weight) > 0 ? Number(e.weight) : 1,
         enabled: e.enabled !== false,
         models: epModels,
+        reasoning: epReason,
       };
     }).filter((e) => e.baseUrl && e.apiKey);
   }
@@ -177,6 +184,7 @@ export function publicView() {
       id: e.id, baseUrl: e.baseUrl || '', weight: e.weight || 1,
       enabled: e.enabled !== false, apiKeyMask: maskKey(e.apiKey), hasKey: !!e.apiKey,
       models: e.models && typeof e.models === 'object' ? { ...e.models } : {},
+      reasoning: e.reasoning && typeof e.reasoning === 'object' ? { ...e.reasoning } : {},
     })),
     source: c.source,
     updatedAt: c.updatedAt || 0,

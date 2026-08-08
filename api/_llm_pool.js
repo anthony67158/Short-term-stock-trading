@@ -35,6 +35,7 @@ export function endpointsFrom(config) {
       apiKey: config.apiKey,
       weight: 1,
       models: (config.models && typeof config.models === 'object') ? config.models : {},
+      reasoning: (config.reasoning && typeof config.reasoning === 'object') ? config.reasoning : {},
     });
   }
   const eps = Array.isArray(config && config.endpoints) ? config.endpoints : null;
@@ -50,6 +51,7 @@ export function endpointsFrom(config) {
         id, baseUrl, apiKey,
         weight: Number(e.weight) > 0 ? Number(e.weight) : 1,
         models: (e.models && typeof e.models === 'object') ? e.models : {},
+        reasoning: (e.reasoning && typeof e.reasoning === 'object') ? e.reasoning : {},
       });
     });
   }
@@ -62,6 +64,15 @@ export function modelForEndpoint(config, ep, role, fallback) {
   if (ep && ep.models && ep.models[role]) return ep.models[role];
   if (config && config.models && config.models[role]) return config.models[role];
   return fallback || '';
+}
+
+// 端点级深度思考解析:选定端点后按角色定是否启用 reasoning。
+//   端点显式配了该角色(true/false)→ 用之;否则回退全局 config.reasoning[role];再回退传入 fallback。
+//   注:附加端点 reasoning 里只存 true 的角色(见 _llm_config),故 undefined 即"该端点未单独指定"→ 回退全局。
+export function reasoningForEndpoint(config, ep, role, fallback) {
+  if (ep && ep.reasoning && ep.reasoning[role] != null) return !!ep.reasoning[role];
+  if (config && config.reasoning && config.reasoning[role] != null) return !!config.reasoning[role];
+  return !!fallback;
 }
 
 // 选一个端点:排除熔断中的;在可用端点里按【最少在途 × 权重】选负载最低者(round-robin 的加权推广)。
@@ -94,7 +105,7 @@ export function markFailure(id, now = Date.now()) {
 // 注:调用方负责构造 body/headers 的其余部分——本函数只注入 baseUrl 与 Authorization。
 // 端点级模型:若传入 role,则选定端点后按 modelForEndpoint 覆盖 body.model
 //   (不同网关同一角色可能是不同模型名);modelFallback 为角色默认(端点与全局都没配时用)。
-export async function poolFetch(config, path, { method = 'POST', body, signal, timeoutMs = 30000, role, modelFallback } = {}, maxTries = 2) {
+export async function poolFetch(config, path, { method = 'POST', body, signal, timeoutMs = 30000, role, modelFallback, reasonFallback } = {}, maxTries = 2) {
   const eps = endpointsFrom(config);
   if (!eps.length) return { resp: { __err: new Error('no LLM endpoint configured') }, endpoint: null };
   const tried = new Set();
@@ -108,11 +119,16 @@ export async function poolFetch(config, path, { method = 'POST', body, signal, t
     if (!ep) break;
     tried.add(ep.id);
     markStart(ep.id);
-    // 端点级模型:按选中端点重写 body.model(仅当 body 为对象且指定了 role)
+    // 端点级模型 + 端点级深度思考:按选中端点重写 body(仅当 body 为对象且指定了 role)
     let sendBody = body;
     if (role && body && typeof body === 'object') {
+      sendBody = { ...body };
       const m = modelForEndpoint(config, ep, role, modelFallback || body.model);
-      if (m) sendBody = { ...body, model: m };
+      if (m) sendBody.model = m;
+      // 深度思考按端点解析:开→注入 reasoning_effort=high;关→删除(避免继承 callChat 的全局注入)
+      const wantReason = reasoningForEndpoint(config, ep, role, reasonFallback);
+      if (wantReason) sendBody.reasoning_effort = 'high';
+      else delete sendBody.reasoning_effort;
     }
     const ctrl = signal ? null : new AbortController();
     const useSignal = signal || (ctrl && ctrl.signal);

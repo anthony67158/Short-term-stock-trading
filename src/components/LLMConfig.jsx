@@ -116,6 +116,14 @@ export default function LLMConfig() {
   // 附加端点某角色留空时的实际回退(全局模型 → 角色默认),作为 placeholder 提示
   const fallbackModel = (role) => (models[role] || (roles[role] && roles[role].def) || '')
 
+  // 取/设某端点某角色的「深度思考」开关:主端点走全局 reasoning;附加端点走该端点自带 reasoning
+  //   (不同网关同名角色可能是不同模型,是否支持/需要推理各不相同 → 每端点独立)
+  const cardReason = (card, role) => (card.isMain ? !!reasoning[role] : !!(card.ep.reasoning && card.ep.reasoning[role]))
+  const setCardReason = (card, role, v) => {
+    if (card.isMain) { setReason(role, v); return }
+    setEp(card.ep.id, { reasoning: { ...(card.ep.reasoning || {}), [role]: !!v } })
+  }
+
   // —— Step 1 → 2：验证连接、拉取模型清单 ——
   const verifyAndNext = async () => {
     setErr(''); setNotice('')
@@ -245,6 +253,10 @@ export default function LLMConfig() {
           // 端点级模型:各角色分别设定(留空由后端回退全局/默认)
           models: e.models && typeof e.models === 'object'
             ? Object.fromEntries(Object.entries(e.models).filter(([, v]) => v && String(v).trim()))
+            : {},
+          // 端点级深度思考:各角色分别设定(未设=false,后端归一化)
+          reasoning: e.reasoning && typeof e.reasoning === 'object'
+            ? Object.fromEntries(Object.entries(e.reasoning).filter(([, v]) => v != null).map(([r, v]) => [r, !!v]))
             : {},
         }))
       } else {
@@ -437,15 +449,13 @@ export default function LLMConfig() {
                       <div className="llm-eprole" key={k}>
                         <div className="llm-eprole-head">
                           <label>{roles[k].label || k}</label>
-                          {card.isMain && (
-                            <button type="button"
-                              className={'llm-reason-toggle' + (reasoning[k] ? ' on' : '')}
-                              onClick={() => setReason(k, !reasoning[k])}
-                              title="开启后该角色调用支持推理的模型时启用深度思考(reasoning),响应更慎密但更慢">
-                              <span className="llm-reason-text"><Icon name="brain" size={12} /> 深度思考 <em className="llm-reason-state">{reasoning[k] ? '已开' : '关'}</em></span>
-                              <span className="llm-reason-track"><span className="llm-reason-thumb" /></span>
-                            </button>
-                          )}
+                          <button type="button"
+                            className={'llm-reason-toggle' + (cardReason(card, k) ? ' on' : '')}
+                            onClick={() => setCardReason(card, k, !cardReason(card, k))}
+                            title="开启后该角色在本端点调用支持推理的模型时启用深度思考(reasoning),响应更慎密但更慢">
+                            <span className="llm-reason-text"><Icon name="brain" size={12} /> 深度思考 <em className="llm-reason-state">{cardReason(card, k) ? '已开' : '关'}</em></span>
+                            <span className="llm-reason-track"><span className="llm-reason-thumb" /></span>
+                          </button>
                         </div>
                         <input className="wl-input auth-input" list={`llm-model-list-${card.id}`} spellCheck={false}
                           placeholder={card.isMain ? roles[k].def : `留空沿用主端点（${fallbackModel(k) || roles[k].def}）`}

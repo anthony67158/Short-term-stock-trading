@@ -68,7 +68,7 @@ export async function callChat({
   //   (不同网关同一角色可能是不同模型名);端点没配则回退全局/本次 model。
   const { resp } = await poolFetch(cfg, '/chat/completions', {
     method: 'POST', body: bodyObj, signal: useSignal, timeoutMs,
-    role, modelFallback: model,
+    role, modelFallback: model, reasonFallback: reasoning,
   }, stream ? 1 : 2);   // 流式只试一个端点(半路换端点会丢已下发的 token);非流式允许一次故障转移
 
   return { resp, done: () => { if (t) clearTimeout(t); } };
