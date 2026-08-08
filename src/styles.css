@@ -1782,6 +1782,9 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 .alert-group-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0 2px; }
 .btn.tiny { padding: 2px 8px; font-size: 11px; line-height: 1.6; }
 .ar-badge { font-size: 9px; font-weight: 700; color: var(--accent); background: rgba(124,107,245,.14); padding: 0 5px; border-radius: 4px; line-height: 1.6; }
+.ar-badge.watching { color: var(--gold); background: rgba(230,170,40,.16); animation: watchPulse 1.6s ease-in-out infinite; }
+@keyframes watchPulse { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
+.ar-watching { font-size: 11px; color: var(--gold); margin-top: 3px; line-height: 1.5; }
 .alert-notif { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border-soft); }
 .an-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); margin-top: 5px; flex-shrink: 0; }
 .an-main { flex: 1; min-width: 0; }

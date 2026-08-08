@@ -1,5 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import { planStore } from './planStore'
+import { getAdvice } from './adviceCache'
+import { api } from './apiBase'
 
 // ============ 盯盘预警引擎 ============
 // 统一轮询自选/持仓相关个股实时报价，逐条判断预警规则是否命中；
@@ -100,6 +102,20 @@ export function alertMeta(a, q) {
   return { dir, dirLabel, distPct, progress, near, price }
 }
 
+// 交易语义 → 中文动作词(与后端 _confirm.sideOf / ACTION_ZH 同口径)
+const ACTION_ZH = { buy: '买入', sell: '卖出', stop: '止损离场' }
+function sideOf(a) {
+  if (!a) return 'buy'
+  const note = a.note || ''
+  if (a.actKind === 'add') return 'buy'
+  if (a.actKind === 'reduce') return 'sell'
+  if (/止损/.test(note)) return 'stop'
+  if (/止盈|减仓/.test(note)) return 'sell'
+  if (/买点|补仓|买入/.test(note)) return 'buy'
+  if (a.op === 'gte') return 'sell'
+  return 'buy'
+}
+
 // 判断单条规则是否命中（q=该股实时报价）
 function hit(a, q) {
   if (!q) return null
@@ -140,6 +156,8 @@ function hit(a, q) {
 // ---- 站内通知中心状态 ----
 let state = { notifications: [], unread: 0, permission: (typeof Notification !== 'undefined' ? Notification.permission : 'default') }
 const listeners = new Set()
+// 智能确认在途去重:记录正在请求 /api/confirm_signal 的预警 id,避免同一预警跨轮并发重复判定
+const _confirming = new Set()
 function emit() { state = { ...state }; listeners.forEach((l) => l()) }
 
 // 声音：用 WebAudio 生成短促“叮”，无需外部资源
@@ -196,27 +214,96 @@ export const alertStore = {
   clearAll() { state.notifications = []; state.unread = 0; emit() },
 
   // 核心：对一批实时报价 quotes(map code→q) 跑一遍所有启用的规则
+  // 智能确认(两段式,与后端 cron_alert.processAccount 同口径):
+  //   · 非智能预警(手动到价/涨跌幅/量比/涨跌停,或无 phase)→ 命中即强提示 + 停用(老逻辑)。
+  //   · 智能预警(价位类 + 带 phase + settings.smartConfirm!==false):
+  //       armed  命中 → 发【弱提醒】(到点位·观察确认中) → 置 watching,继续监控真正时机。
+  //       watching → 异步 POST /api/confirm_signal(LLM Judge 留后端) 判定:
+  //         confirm → 发【强提示】(✅ 可以买入/卖出) + 置 confirmed 停用;
+  //         invalid → 发【失效说明】(⛔ 已失效·暂不操作) + 置 invalid 停用;
+  //         wait    → 静默维持 watching。
+  //   evaluate 为同步函数;watching 的确认调用是异步「即发即忘」,不阻塞本轮遍历。
   evaluate(quoteMap) {
     const book = planStore.get()
+    const smartOn = !(book.settings && book.settings.smartConfirm === false)
     const alerts = (book.alerts || []).filter((a) => a.enabled)
     if (!alerts.length) return
+    // 该预警是否走智能二段确认:仅【价位类 + 带 phase(AI 派生)】;手动/涨跌幅/量比/涨跌停 → 老逻辑
+    const isSmart = (a) => smartOn && a.type === 'price' && !!a.phase && a.phase !== 'confirmed' && a.phase !== 'invalid'
     for (const a of alerts) {
       const q = quoteMap[a.code]
-      const msg = hit(a, q)
-      if (msg) {
+      if (!isSmart(a)) {
+        // —— 老逻辑:命中即强推并停用(向后兼容)——
+        const msg = hit(a, q)
+        if (!msg) continue
         const actLabel = a.actKind === 'add' ? '补仓' : (a.actKind === 'reduce' ? '减仓' : '')
         const title = actLabel
           ? `🎯 到${actLabel}操作点 · ${a.name || a.code}`
           : `⚡ 预警触发 · ${a.name || a.code}`
-        // 到价=开始盯盘,不是见价即砍:止盈/止损/买点这类价位预警,补一句"需确认信号再动手",
-        // 避免用户被瞬时插针骗出局(砍在最低点又眼看它涨回来)。具体确认条件见详情页AI建议的"到价后怎么做"。
         const tail = confirmHint(a)
         const body = `${describeAlert(a)}｜${msg}${tail}`
         this.push({ code: a.code, name: a.name, title, body, alertId: a.id })
         notify(title, body)
         planStore.markAlertTriggered(a.id, msg) // 触发后自动停用，防重复
+        continue
+      }
+
+      // —— 智能二段确认 ——
+      if (a.phase === 'armed' || !a.phase) {
+        // 阶段一:价格触及关键价位 → 发【弱提醒】,进入「观察确认中」,继续监控真正时机(不停用)
+        const msg = hit(a, q)
+        if (!msg) continue
+        const side = sideOf(a)
+        const actZh = ACTION_ZH[side] || '操作'
+        const title = `👀 到点位·观察确认中 · ${a.name || a.code}`
+        const body = `${describeAlert(a)}｜${msg}\n⏳已到${actZh}价位,但「到价≠立刻动手」。系统正在盯盘确认真正时机,确认后会再发一次「✅ 可以${actZh}」的强提示,先别急。`
+        this.push({ code: a.code, name: a.name, title, body, alertId: 'watch-' + a.id })
+        notify(title, body)
+        planStore.markAlertWatching(a.id, msg)
+        continue
+      }
+
+      if (a.phase === 'watching') {
+        // 阶段二:异步调用智能确认闸门(LLM Judge 在后端),不阻塞本轮遍历
+        this._confirmWatching(a, q)
       }
     }
+  },
+
+  // 观察确认中 → 请求后端 /api/confirm_signal 判定真正交易时机(即发即忘,带在途去重)
+  _confirmWatching(a, q) {
+    if (_confirming.has(a.id)) return // 同一预警上一次判定还没回来,跳过,避免并发重复请求
+    _confirming.add(a.id)
+    const advEntry = getAdvice(a.code)
+    const payload = { alert: a, advice: advEntry && advEntry.advice, quote: q }
+    fetch(api('/api/confirm_signal'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+      .then((r) => r.json())
+      .then((v) => {
+        if (!v || !v.ok) return
+        const side = v.side || sideOf(a)
+        const actZh = ACTION_ZH[side] || '操作'
+        if (v.decision === 'confirm') {
+          const conf = v.confidence != null ? `(把握${v.confidence})` : ''
+          const title = `✅ 可以${actZh} · ${a.name || a.code}`
+          const body = `${describeAlert(a)}｜确认时机已到${conf}\n📌${v.reason || '多项信号共振确认'}`
+          this.push({ code: a.code, name: a.name, title, body, alertId: 'confirm-' + a.id })
+          notify(title, body)
+          planStore.markAlertConfirmed(a.id, `确认${actZh}:${v.reason || ''}`)
+        } else if (v.decision === 'invalid') {
+          const title = `⛔ 已失效·暂不${actZh} · ${a.name || a.code}`
+          const body = `${describeAlert(a)}｜原${actZh}逻辑已被破坏\n📌${v.reason || '关键条件已破坏,建议重新评估'}`
+          this.push({ code: a.code, name: a.name, title, body, alertId: 'invalid-' + a.id })
+          notify(title, body)
+          planStore.markAlertInvalid(a.id, `已失效:${v.reason || ''}`)
+        }
+        // wait → 维持 watching,静默继续观察
+      })
+      .catch(() => { /* 网络/解析失败 → 静默,下轮再判 */ })
+      .finally(() => { _confirming.delete(a.id) })
   },
 }
 

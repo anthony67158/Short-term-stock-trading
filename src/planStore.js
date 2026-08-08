@@ -282,9 +282,16 @@ export const planStore = {
       let touched = false
       const next = state.alerts.map((a) => {
         const c = cloudById.get(a.id)
-        if (c && c.triggeredAt && !a.triggeredAt) {
+        if (!c) return a
+        // ① 服务端已确认命中(强提示已发)→ 迁移 triggered + confirmed 态,避免本地重复响铃
+        if (c.triggeredAt && !a.triggeredAt) {
           touched = true
-          return { ...a, triggeredAt: c.triggeredAt, triggeredMsg: c.triggeredMsg || a.triggeredMsg || '', enabled: false }
+          return { ...a, triggeredAt: c.triggeredAt, triggeredMsg: c.triggeredMsg || a.triggeredMsg || '', enabled: false, phase: c.phase || a.phase }
+        }
+        // ② 服务端已进入「观察确认中」(弱提醒已发)→ 迁移 watching 态,本地据此显示"确认中"而非继续当作未到价
+        if (c.phase === 'watching' && a.phase !== 'watching' && a.phase !== 'confirmed' && !a.triggeredAt) {
+          touched = true
+          return { ...a, phase: 'watching', watchingAt: c.watchingAt || Date.now(), watchingMsg: c.watchingMsg || a.watchingMsg || '' }
         }
         return a
       })
@@ -738,10 +745,11 @@ export const planStore = {
       if (value == null) return
       const v = Number(value)
       const prev = old.find((a) => a.op === op)
-      if (prev && Number(prev.value) === v) { rebuilt.push(prev); return } // 价没变 → 原样保留触发态
+      if (prev && Number(prev.value) === v) { rebuilt.push(prev); return } // 价没变 → 原样保留触发态(含 phase)
       rebuilt.push({
         id: uid(), enabled: true, createdAt: Date.now(), triggeredAt: null, triggeredMsg: '',
         code: h.code, name: h.name, type: 'price', op, value: v, note, planId: id,
+        phase: 'armed', // 智能确认:到价先弱提醒(watching)、确认到真时机才强提示(confirmed)
       })
     }
     build('gte', h.tp, '止盈', h.muteTp)
@@ -776,13 +784,14 @@ export const planStore = {
     if (existing) {
       // 已有买点预警 → 跟随 AI 新买价刷新到价并重新武装
       state.alerts = (state.alerts || []).map((a) => a.candCode === code
-        ? { ...a, name: name || a.name, type: 'price', op: 'lte', value: Number(v), enabled: true, triggeredAt: null, triggeredMsg: '' }
+        ? { ...a, name: name || a.name, type: 'price', op: 'lte', value: Number(v), enabled: true, triggeredAt: null, triggeredMsg: '', phase: 'armed' }
         : a)
     } else {
       // 新建买点到价预警(≤ 建议买入价)
       state.alerts = [{
         id: uid(), enabled: true, createdAt: Date.now(), triggeredAt: null, triggeredMsg: '',
         code, name, type: 'price', op: 'lte', value: Number(v), note: '买点', candCode: code,
+        phase: 'armed',
       }, ...(state.alerts || [])]
     }
     state.plan = state.plan.map((x) => x.code === code ? { ...x, alertSyncedPrice: v } : x)
@@ -828,11 +837,12 @@ export const planStore = {
       if (v == null || !(Number(v) > 0)) return
       const note = kind === 'add' ? '补仓点' : '减仓点'
       const prev = old.find((a) => a.actKind === kind)
-      if (prev && Number(prev.value) === Number(v)) { rebuilt.push(prev); return } // 价没变 → 原样保留触发态
+      if (prev && Number(prev.value) === Number(v)) { rebuilt.push(prev); return } // 价没变 → 原样保留触发态(含 phase)
       rebuilt.push({
         id: uid(), enabled: true, createdAt: Date.now(), triggeredAt: null, triggeredMsg: '',
         code, name, type: 'price', op, value: Number(v), note,
         actCode: code, actKind: kind, opQty, timing,
+        phase: 'armed',
       })
     }
     build('add', 'lte', adv.addPrice, owner.muteAdd)
@@ -925,7 +935,33 @@ export const planStore = {
   // 重新武装预警（用户手动重启）
   rearmAlert(id) {
     state.alerts = (state.alerts || []).map((x) => x.id === id
-      ? { ...x, enabled: true, triggeredAt: null, triggeredMsg: '' } : x)
+      ? { ...x, enabled: true, triggeredAt: null, triggeredMsg: '', phase: x.phase ? 'armed' : x.phase } : x)
+    emit()
+  },
+  // 智能确认闸门:进入「观察确认中」——到价发弱提醒后置 watching(不停用、继续监控真正时机)
+  markAlertWatching(id, msg) {
+    state.alerts = (state.alerts || []).map((x) => x.id === id && x.phase !== 'watching' && x.phase !== 'confirmed'
+      ? { ...x, phase: 'watching', watchingAt: Date.now(), watchingMsg: msg || x.watchingMsg || '' }
+      : x)
+    emit()
+  },
+  // 智能确认闸门:确认真正交易时机到 → 置 confirmed 并停用(发强提示后不再重复)
+  markAlertConfirmed(id, msg) {
+    state.alerts = (state.alerts || []).map((x) => x.id === id
+      ? { ...x, phase: 'confirmed', triggeredAt: Date.now(), triggeredMsg: msg, enabled: false }
+      : x)
+    emit()
+  },
+  // 智能确认闸门:交易逻辑已被破坏(如买点却已放量跌破失效价)→ 置 invalid 并停用,不再纠缠
+  markAlertInvalid(id, msg) {
+    state.alerts = (state.alerts || []).map((x) => x.id === id
+      ? { ...x, phase: 'invalid', triggeredAt: Date.now(), triggeredMsg: msg, enabled: false }
+      : x)
+    emit()
+  },
+  // 智能确认总开关:关 → 恢复「见价即触发」的旧行为(不做二段确认)。默认开启。
+  setSmartConfirm(on) {
+    state.settings = { ...(state.settings || {}), smartConfirm: !!on }
     emit()
   },
 

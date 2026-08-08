@@ -21,6 +21,7 @@ export const ROLES = {
   chat:    { envs: ['LLM_MODEL'],     def: 'DeepSeek-V3.2-Pro', label: '对话/盘面分析' },
   advisor: { envs: ['ADVISOR_MODEL'], def: 'DeepSeek-V4-Pro',   label: '操盘军师(深度研判)' },
   agent:   { envs: ['AGENT_MODEL'],   def: 'Qwen3-Max-A',       label: '智能体/策略日报(需函数调用)' },
+  judge:   { envs: ['JUDGE_MODEL'],   def: 'gemini-2.5-flash',  label: '交易时机判定(确认闸门)' },
 };
 
 // ---- 从环境变量拼出基线配置（OSS 无配置时的回退）----

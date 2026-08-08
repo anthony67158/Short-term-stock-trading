@@ -25,6 +25,7 @@ export default function AlertPanel({ interval }) {
   const autoAlerts = alerts.filter((a) => a.planId || a.candCode || a.actCode)
   const triggeredAlerts = alerts.filter((a) => a.triggeredAt)
   const aiAutoOn = (book.settings || {}).aiAutoAlert !== false
+  const smartConfirmOn = (book.settings || {}).smartConfirm !== false
 
   // 候选：自选 + 持仓（去重），供新增预警选择
   const cands = useMemo(() => {
@@ -84,6 +85,10 @@ export default function AlertPanel({ interval }) {
                 <label className="ai-auto-switch" title="关闭后不再自动生成买点/止盈/止损预警,已有的自动预警会被清除">
                   <input type="checkbox" checked={aiAutoOn} onChange={(e) => planStore.setAiAutoAlert(e.target.checked)} />
                   <span>AI 自动预警</span>
+                </label>
+                <label className="ai-auto-switch" title="开启后:价位预警到点先发弱提醒(观察确认中),系统盯盘确认真正时机后再发「可以买入/卖出」强提示。关闭则见价即强提示。">
+                  <input type="checkbox" checked={smartConfirmOn} onChange={(e) => planStore.setSmartConfirm(e.target.checked)} />
+                  <span>智能时机确认</span>
                 </label>
                 {triggeredAlerts.length > 0 && (
                   <button className="btn" style={{ marginLeft: 'auto' }}
@@ -179,6 +184,7 @@ function renderRule(a, quote, setDelTarget, holding) {
           <span className="ar-code">{a.code}</span>
           <span className="ar-dir">{m.dirLabel}</span>
           {isAuto && <span className="ar-badge">AI</span>}
+          {a.phase === 'watching' && <span className="ar-badge watching">观察确认中</span>}
           {q && <span className="ar-now">现 {fmtRaw(q.price)}</span>}
           <span className="ar-jump" title="查看详情与K线"><Icon name="chevronRight" size={13} /></span>
         </div>
@@ -192,6 +198,9 @@ function renderRule(a, quote, setDelTarget, holding) {
               <span className="ar-dist-target">目标 <b>{fmtRaw(a.value)}</b></span>
             </div>
           </>
+        )}
+        {a.phase === 'watching' && !a.triggeredAt && (
+          <div className="ar-watching">👀 已到点位，系统盯盘确认真正时机中，确认后会发「可以操作」强提示{a.watchingAt ? ` · ${new Date(a.watchingAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}起` : ''}</div>
         )}
         {a.triggeredAt && <div className="ar-fired">已于 {new Date(a.triggeredAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })} 触发：{a.triggeredMsg}</div>}
       </div>

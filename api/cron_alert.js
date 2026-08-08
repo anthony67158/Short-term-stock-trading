@@ -18,8 +18,13 @@ import { applyCors, preflight } from './_lib.js';
 import { listAllAccounts, writeAccount } from './account.js';
 import quoteHandler from './quote.js';
 import { sendPush, pushConfigured } from './_push_send.js';
+import { ensureConfig } from './_llm_config.js';
+import { judgeConfirmation, sideOf } from './_confirm.js';
 
 const OP_LABEL = { gte: '≥', lte: '≤' };
+
+// 交易语义 → 强提示动作词(与 _confirm.sideOf 的 buy/sell/stop 对齐)
+const ACTION_ZH = { buy: '买入', sell: '卖出', stop: '止损离场' };
 
 // —— 与前端 alertStore.describeAlert 同口径 ——
 function describeAlert(a) {
@@ -116,6 +121,10 @@ async function processAccount(acc) {
   const data = acc.data || {};
   const alerts = Array.isArray(data.alerts) ? data.alerts : [];
   const subs = Array.isArray(data.pushSubs) ? data.pushSubs : [];
+  const adviceMap = (data.advice && typeof data.advice === 'object') ? data.advice : {};
+  // 智能确认默认开启;账号显式关掉(settings.smartConfirm===false)则回退「见价即强推」旧行为。
+  const smartOn = !(data.settings && data.settings.smartConfirm === false);
+  // armed/watching 均需处理:enabled && 未最终触发(confirmed)
   const active = alerts.filter((a) => a && a.enabled && !a.triggeredAt);
   if (!active.length || !subs.length) return { changed: false, hits: 0, sent: 0 };
 
@@ -124,21 +133,73 @@ async function processAccount(acc) {
 
   let changed = false, hits = 0, sent = 0;
   const dead = new Set();
+  const collectDead = (r) => { sent += r.sent; for (const ep of r.deadEndpoints) dead.add(ep); };
+
+  // 该预警是否走智能二段确认:仅对【价位类 + AI 派生(带 phase 字段)】启用;
+  //   手动到价/涨跌幅/量比/涨跌停等 → 无 phase → 老逻辑(见价即强推)。
+  const isSmart = (a) => smartOn && a.type === 'price' && !!a.phase && a.phase !== 'confirmed' && a.phase !== 'invalid';
+
   for (const a of active) {
-    const msg = hit(a, quoteMap[a.code]);
-    if (!msg) continue;
-    hits++;
-    const actLabel = a.actKind === 'add' ? '补仓' : (a.actKind === 'reduce' ? '减仓' : '');
-    const title = actLabel
-      ? `🎯 到${actLabel}操作点 · ${a.name || a.code}`
-      : `⚡ 预警触发 · ${a.name || a.code}`;
-    const body = `${describeAlert(a)}｜${msg}${confirmHint(a)}`;
-    const r = await sendPush(subs, { title, body, code: a.code, tag: 'alert-' + a.id, url: '/' });
-    sent += r.sent;
-    for (const ep of r.deadEndpoints) dead.add(ep);
-    // 标记已触发(与前端同口径:触发后自动停用防重复)
-    a.triggeredAt = Date.now(); a.triggeredMsg = msg; a.enabled = false;
-    changed = true;
+    const q = quoteMap[a.code];
+    if (!isSmart(a)) {
+      // —— 老逻辑:命中即强推并停用(向后兼容,不受智能确认影响)——
+      const msg = hit(a, q);
+      if (!msg) continue;
+      hits++;
+      const actLabel = a.actKind === 'add' ? '补仓' : (a.actKind === 'reduce' ? '减仓' : '');
+      const title = actLabel ? `🎯 到${actLabel}操作点 · ${a.name || a.code}` : `⚡ 预警触发 · ${a.name || a.code}`;
+      const body = `${describeAlert(a)}｜${msg}${confirmHint(a)}`;
+      collectDead(await sendPush(subs, { title, body, code: a.code, tag: 'alert-' + a.id, url: '/' }));
+      a.triggeredAt = Date.now(); a.triggeredMsg = msg; a.enabled = false;
+      changed = true;
+      continue;
+    }
+
+    // —— 智能二段确认 ——
+    if (a.phase === 'armed' || !a.phase) {
+      // 阶段一:价格触及关键价位 → 发【弱提醒】,进入「观察确认中」,继续监控真正时机(不停用)
+      const msg = hit(a, q);
+      if (!msg) continue;
+      hits++;
+      const side = sideOf(a);
+      const actZh = ACTION_ZH[side] || '操作';
+      const title = `👀 到点位·观察确认中 · ${a.name || a.code}`;
+      const body = `${describeAlert(a)}｜${msg}\n⏳已到${actZh}价位,但「到价≠立刻动手」。系统正在盯盘确认真正时机,确认后会再发一次「✅ 可以${actZh}」的强提示,先别急。`;
+      collectDead(await sendPush(subs, { title, body, code: a.code, tag: 'watch-' + a.id, url: '/' }));
+      a.phase = 'watching'; a.watchingAt = Date.now(); a.watchingMsg = msg;
+      changed = true;
+      continue;
+    }
+
+    if (a.phase === 'watching') {
+      // 阶段二:调用智能确认闸门,判定真正交易时机是否到
+      let verdict = null;
+      try {
+        verdict = await judgeConfirmation({ alert: a, name: a.name, advice: adviceMap[a.code] && adviceMap[a.code].advice, quote: q });
+      } catch (e) { verdict = { decision: 'wait', reason: '确认判定异常:' + String(e && e.message || e) }; }
+      if (!verdict) continue;
+      if (verdict.decision === 'confirm') {
+        hits++;
+        const side = verdict.side || sideOf(a);
+        const actZh = ACTION_ZH[side] || '操作';
+        const conf = verdict.confidence != null ? `(把握${verdict.confidence})` : '';
+        const title = `✅ 可以${actZh} · ${a.name || a.code}`;
+        const body = `${describeAlert(a)}｜确认时机已到${conf}\n📌${verdict.reason || '多项信号共振确认'}`;
+        collectDead(await sendPush(subs, { title, body, code: a.code, tag: 'confirm-' + a.id, url: '/' }));
+        a.phase = 'confirmed'; a.triggeredAt = Date.now(); a.triggeredMsg = `确认${actZh}:${verdict.reason || ''}`; a.enabled = false;
+        changed = true;
+      } else if (verdict.decision === 'invalid') {
+        // 交易逻辑已被破坏(如买点却已放量跌破失效价)→ 撤下该点位,发一次说明,不再纠缠
+        const side = verdict.side || sideOf(a);
+        const actZh = ACTION_ZH[side] || '操作';
+        const title = `⛔ 已失效·暂不${actZh} · ${a.name || a.code}`;
+        const body = `${describeAlert(a)}｜原${actZh}逻辑已被破坏\n📌${verdict.reason || '关键条件已破坏,建议重新评估'}`;
+        collectDead(await sendPush(subs, { title, body, code: a.code, tag: 'invalid-' + a.id, url: '/' }));
+        a.phase = 'invalid'; a.triggeredAt = Date.now(); a.triggeredMsg = `已失效:${verdict.reason || ''}`; a.enabled = false;
+        changed = true;
+      }
+      // wait → 维持 watching,静默继续观察
+    }
   }
   if (dead.size) { data.pushSubs = subs.filter((s) => !dead.has(s.endpoint)); changed = true; }
   return { changed, hits, sent };
@@ -162,6 +223,8 @@ export default async function handler(req, res) {
   const onlyNick = body.nick ? String(body.nick) : null;
   const started = Date.now();
   try {
+    // 预热 LLM 运行时配置(judge 端点/模型),供智能确认闸门使用;失败不阻断(闸门会回退确定性信号)。
+    try { await ensureConfig({ maxAgeMs: 20000 }); } catch { /* ignore */ }
     let accounts = await listAllAccounts();
     if (onlyNick) accounts = accounts.filter((a) => a.nick === onlyNick);
     let totalHits = 0, totalSent = 0, touched = 0;

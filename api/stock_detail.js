@@ -38,8 +38,10 @@ function toTxCode(code) {
 }
 
 // ===== 备用数据源：腾讯行情（海外基本不限流，作为东财失败时的兜底）=====
+// 注：fetchKlineTx / fetchTrendsTx 同时被 _confirm.js(智能确认闸门)复用为盘中/日线数据源,
+//   故一并 export;二者只读腾讯公开行情,不触碰量化 /predict(36维OHLCV模型)口径。
 // 日/周/月 K线
-async function fetchKlineTx(code, klt, lmt) {
+export async function fetchKlineTx(code, klt, lmt) {
   const tx = toTxCode(code);
   const period = klt === '102' ? 'week' : klt === '103' ? 'month' : 'day';
   const url = `https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${tx},${period},,,${lmt},qfq&_=${Date.now()}`;
@@ -68,7 +70,7 @@ async function fetchKlineTx(code, klt, lmt) {
 }
 
 // 当日分时（腾讯）
-async function fetchTrendsTx(code) {
+export async function fetchTrendsTx(code) {
   const tx = toTxCode(code);
   const url = `https://web.ifzq.gtimg.cn/appstock/app/minute/query?code=${tx}&_=${Date.now()}`;
   const j = await jget(url, 5000, 'https://gu.qq.com/');
