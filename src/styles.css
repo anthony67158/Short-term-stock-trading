@@ -3669,5 +3669,44 @@ a.mn-flash:hover { color: var(--accent); }
 .busy-item-code { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .busy-modal-item .spin { color: var(--accent); }
 
+/* ================================================================
+   移动端细节精修 v6(追加覆盖层,later-wins;仅移动端断点,桌面零影响)
+   —— 统一"零散小控件"的触控基线与视觉规格:此前全局 40px 规则只覆盖
+      .btn-primary/.btn/.chip-btn,遗漏了一批分段/切换/行内/图标类小控件
+      (.tab/.me-tab/.t-side-btn/.row-btn/.arp-chip/.star-btn/.del/.di-del),
+      它们停留在 16~26px 触控高,视觉高矮不一 → 用户感知的"界面不规范"。
+      同时把两处 min-width:180px 的 flex 子项去盒化,消除窄屏过早换行。
+   纯样式,不改任何组件逻辑。
+   ================================================================ */
+@media (max-width: 720px) {
+  /* --- 分段/切换类控件统一 34px 触控基线(对齐顶栏控件已确立的 34px) --- */
+  /* 面板内 Tab 药丸(.tab)、手动记一笔买/卖分段(.me-tab):居中对齐、够高可点 */
+  .tab, .me-tab {
+    min-height: 34px; display: inline-flex; align-items: center; justify-content: center;
+  }
+  /* 做T 买/卖方向切换:小分段也抬到可点高度,图标视觉不变 */
+  .t-side-btn {
+    min-height: 32px; display: inline-flex; align-items: center; justify-content: center;
+    padding: 4px 12px;
+  }
+  /* 列表行内动作按钮(.row-btn):加内边距抬高,窄屏更易点选 */
+  .row-btn { min-height: 32px; display: inline-flex; align-items: center; padding: 5px 11px; }
+  /* 自动刷新面板的间隔快捷 chip:两处定义都抬到 32px(later-wins 覆盖) */
+  .auto-ref-panel .arp-chip {
+    min-height: 32px; display: inline-flex; align-items: center; justify-content: center;
+  }
 
+  /* --- 图标类零 padding 控件:热区外扩到 ~32px(视觉图标尺寸不变) --- */
+  /* 星标(.star-btn)、删除"×"(.del)、日志行删除(.di-del):都用 flex 居中 + 最小热区 */
+  .star-btn, .del {
+    min-width: 32px; min-height: 32px;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .di-del { min-width: 32px; min-height: 32px; }
+  .di-del .del, .di-del > * { min-width: auto; min-height: auto; }
+
+  /* --- 去盒化:两处 min-width:180px 的 flex 子项在窄屏改 0,消除过早换行 --- */
+  /* 与 v4/v5 对 .quant-gauge/.light-main 的处理一致:靠 flex 自适应而非硬底撑宽 */
+  .tech-verdict, .ipb-tip { min-width: 0; }
+}
 
