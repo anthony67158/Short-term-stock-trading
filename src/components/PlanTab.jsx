@@ -1226,7 +1226,7 @@ function HoldingItem({ h, idx, quote: q }) {
   // B-7 移动端横滑:右滑=看详情(左滑做T已移除——改为点「做T」按钮打开全屏页,避免误触/内容裁切)
   const isTouch = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches
   const swipe = useSwipe({
-    enabled: isTouch,
+    enabled: isTouch && !mode, // 编辑态(加仓/减仓/做T/设计划打开时)禁用横滑,避免输入时误触"划来划去"
     onRight: () => openStockDetail(h.code, h.name),
   })
 
@@ -1746,7 +1746,7 @@ function HoldingItem({ h, idx, quote: q }) {
             <ul style={{ margin: '8px 0 0', paddingLeft: 18, lineHeight: 1.7 }}>
               {tStat.realized !== 0 && <li>配对差价 <b className={tStat.realized >= 0 ? 'red' : 'green'}>{fmtMoney(tStat.realized)}</b> 计入交易记录（做T）</li>}
               {tStat.openBuy > 0 && <li>净买入 <b className="red">{tStat.openBuy}手</b> → 加仓，底仓成本按加权平均更新</li>}
-              {tStat.openSell > 0 && <li>净卖出 <b className="green">{tStat.openSell}手</b> → {tStat.openSell >= h.qty ? '清仓（该持仓移除）' : '减仓'}</li>}
+              {tStat.openSell > 0 && <li>净卖出 <b className="green">{tStat.openSell}手</b> → {tStat.openSell >= h.qty ? '清仓（自动回归自选股，继续盯盘）' : '减仓'}</li>}
               <li>做T流水清空，结算不可撤销</li>
             </ul>
           </>}

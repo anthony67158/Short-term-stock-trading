@@ -435,6 +435,7 @@ export const planStore = {
       // 全部清仓：把该持仓上已配对的做T收益归档，避免随持仓删除而丢失
       archived = archiveTFlows(h, batchId)
       state.holding = state.holding.filter((x) => x.id !== id)
+      this._backToPlan(h) // 清仓不直接删除 → 自动回归自选股，方便再次盯盘
     } else {
       const remainQty = h.qty - sq
       state.holding = state.holding.map((x) => x.id === id
@@ -637,6 +638,7 @@ export const planStore = {
     if (newQty <= 0) {
       // 全部卖光 → 清仓，移除持仓
       state.holding = state.holding.filter((x) => x.id !== id)
+      this._backToPlan(h) // 清仓自动回归自选股
     } else {
       // 加仓时按加权平均更新成本价；减仓成本价不变
       let newBuyPrice = h.buyPrice
@@ -670,6 +672,7 @@ export const planStore = {
       if (archived.length) state.closed = [...archived, ...state.closed].slice(0, 300)
       if (newQty <= 0) {
         state.holding = state.holding.filter((x) => x.id !== cur.id)
+        this._backToPlan(cur) // 次日自动结算净卖光 → 清仓回归自选股
       } else {
         let newBuyPrice = cur.buyPrice
         if (r.openBuy > 0 && r.openBuyAvg != null) {
@@ -723,6 +726,19 @@ export const planStore = {
       ? { ...x, tp: null, sl: null, tpManual: false, slManual: false, planReason: null, reasonManual: false, planWeight: null } : x)
     state.alerts = (state.alerts || []).filter((a) => a.planId !== id) // 移除计划联动预警
     emit()
+  },
+  // 清仓回归自选：持仓清空(手动清仓/做T净卖光/次日自动结算)后不直接抹掉这只票,
+  // 而是把它放回自选股区继续盯盘。仅在「已无该股其它持仓笔」且「自选里还没有」时加入,避免重复。
+  // 注意:此处不 emit,由调用方(sell/settleTFlows/autoSettleTFlows)统一 emit。
+  _backToPlan(h) {
+    if (!h || !h.code) return
+    if (state.holding.some((x) => x.code === h.code)) return // 同股还有别的持仓笔 → 不回归
+    if (state.plan.some((x) => x.code === h.code)) return    // 自选已存在 → 不重复
+    state.plan = [...state.plan, {
+      code: h.code, name: h.name, note: '清仓后回归盯盘', addedAt: Date.now(),
+      ...(h.qScore != null ? { qScore: h.qScore, qBias: h.qBias, qAt: h.qAt } : {}),
+      ...(h.industry ? { industry: h.industry } : {}),
+    }]
   },
   // 计划联动预警同步:按持仓当前 tp/sl 重建到价预警(止盈 gte / 止损 lte),planId=持仓id。
   // 建仓自动带计划、手动改计划、AI建议刷新自动跟随 —— 三处都走这一个口子,保证预警永远与计划一致。

@@ -3354,6 +3354,37 @@ a.mn-flash:hover { color: var(--accent); }
   .t-drawer .buy-inline { flex-wrap: wrap; gap: 8px; }
   .t-drawer .buy-inline .wl-input { flex: 1 1 40%; min-width: 96px; width: auto; }
 
+  /* ===== 持仓卡:加仓/减仓/设计划 移动端改「底部浮出面板」=====
+     此前直接在卡片内联展开,把卡片撑高、和右滑手势打架("划来划去");
+     这里让它脱离卡片、固定浮出到屏幕底部,像做T一样一个独立的框里操作,
+     配一层遮罩(::before)聚焦当前操作,拇指够得到、不再误触卡片。 */
+  .hold-item .buy-inline-wrap,
+  .hold-item .plan-edit {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    z-index: 120;
+    margin: 0;
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -8px 30px rgba(0,0,0,.4);
+    padding: 16px 16px calc(18px + env(safe-area-inset-bottom));
+    animation: drawer-up .24s var(--ease);
+    max-height: 80dvh; overflow-y: auto;
+  }
+  /* 遮罩:盖住卡片区,视觉上把操作"抽离"成独立弹层 */
+  .hold-item .buy-inline-wrap::before,
+  .hold-item .plan-edit::before {
+    content: ''; position: fixed; inset: 0; bottom: auto; top: -100vh; height: 200vh;
+    background: rgba(4,5,7,.6); z-index: -1;
+    animation: fadein .2s var(--ease);
+  }
+  /* 浮出面板里的输入区换行铺满,按钮撑高便于点按 */
+  .hold-item .buy-inline-wrap .buy-inline { flex-wrap: wrap; gap: 10px; }
+  .hold-item .buy-inline-wrap .buy-inline .wl-input { flex: 1 1 40%; min-width: 96px; max-width: none; width: auto; min-height: 42px; }
+  .hold-item .buy-inline-wrap .chip-btn { min-height: 40px; }
+  .hold-item .plan-edit .chip-btn { min-height: 40px; }
+
   /* ---- nuxt-ui 设计原则移动端增强:更大触控目标 + 更清晰的操作区 ---- */
   /* AI 选股头部:标题与操作纵向排布,操作按钮撑满一行便于拇指点按 */
   .play-head { padding: 14px 14px 4px; }
