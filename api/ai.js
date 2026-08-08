@@ -446,7 +446,9 @@ export default async function handler(req, res) {
     // 故 reasoning 开启时把总预算与下方 LLM 超时上限整体放大,避免思维链未完就被掐断降级。
     const START = Date.now();
     const reasoningOn = effectiveReasoning(isAdvisorMode(mode) ? 'advisor' : 'chat');
-    const BUDGET = reasoningOn ? 360000 : 115000;
+    // 时间窗口拉到 FC 平台上限(600s)附近:深度思考+大量参考内容时模型很慢,总预算给到 560s,
+    // 只留 ~40s 给"数据回传/SSE 收尾/平台调度",绝不逼近 600s 硬墙被强杀。非深度思考仍给较小预算省成本。
+    const BUDGET = reasoningOn ? 560000 : 150000;
     const remain = () => BUDGET - (Date.now() - START);
 
     // stock 模式：接入 RAG（近5日走势+主营+联网新闻）
@@ -910,10 +912,12 @@ export default async function handler(req, res) {
     phase('数据齐全，正在生成操作建议…', 'llm');
     // LLM 超时按【剩余预算】动态给：预留 2.5s 兜底返回时间，最少给 8s。
     // 军师模式(t_advice/hold_advice/buy_advice/review/price/plan)走深度研判模型,实测常需 47s+;
-    // 开启深度思考(reasoning)后需先跑思维链,军师级复杂题可达 120s+,故 reasoning 时上限整体放大。
+    // 开启深度思考(reasoning)后需先跑思维链,参考内容多时军师级复杂题可远超 2 分钟——
+    // 故把 LLM 单次上限拉到接近总预算(depth 军师 540s / 对话 300s),真正的封顶交给上面的
+    // remain()(总预算 560s,留 ~40s 收尾)去动态收敛,确保"慢但完整"而不半路被掐。
     const llmCap = useReasoning
-      ? (isAdvisor ? 330000 : 200000)
-      : (isAdvisor ? 100000 : 80000);
+      ? (isAdvisor ? 540000 : 300000)
+      : (isAdvisor ? 120000 : 90000);
     const llmTimeout = Math.max(8000, Math.min(llmCap, remain() - 2500));
 
     let content = '';
@@ -1014,7 +1018,6 @@ export default async function handler(req, res) {
       finishReason = j.choices?.[0]?.finish_reason || '';
       usage = j.usage || null;
     }
-    const truncated = finishReason === 'length';
 
     // 空内容(上游偶发返回空串) → 结构化降级,避免把空当成成功结果下发
     if (!content.trim()) {
@@ -1026,6 +1029,13 @@ export default async function handler(req, res) {
 
     // 解析模型返回的 JSON（容错：剥离 ```json 包裹 + 截断补齐）
     const parsed = parseLLMJson(content);
+    // ★truncated 判定(既不误报、也绝不漏报):
+    //   ① 正文 JSON 完全解析不出(value=null)→ 只能落 raw 兜底 → 一定是残缺,truncated=true;
+    //   ② parseLLMJson 走了【截断补齐】路径(parsed.repaired,补了引号/括号才解析成功)→ 正文尾部真被截断,truncated=true;
+    //   ③ 一次干净解析成功,或仅"从前后噪声里抠出一个【完整闭合】对象"(salvaged=true 但 repaired=false)
+    //      → 对象本身完整,不算截断。即便 finish_reason=length(深度思考网关把思维链 token 计入 max_tokens
+    //      触发 length,但正文 JSON 已闭合)也不误报"建议被截断"。
+    const truncated = !parsed.value || !!parsed.repaired;
     const result = parsed.value || { raw: content, truncated };
 
     if (!streaming) res.status(200);

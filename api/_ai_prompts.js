@@ -13,15 +13,19 @@ export const ADVISOR_MODES = new Set([
 export function isAdvisorMode(mode) { return ADVISOR_MODES.has(mode); }
 
 // 各 mode 的 LLM maxTokens:选股/盘面类输出长、做T最长、其余持仓类居中、简单分析最短
-// reasoning=true 时,max_tokens 为「思维链 + 正文」共用额度,需额外预留 2000 token 给思维链,
-// 否则正文 JSON 易被 finish_reason:length 截断成半个对象导致解析失败。
+// reasoning=true 时,max_tokens 为「思维链 + 正文」共用额度。实测本网关把【思维链 token】
+// 也计入 max_tokens,参考内容一多、思维链一长(复杂军师题可轻松吃掉一两万 token),留给正文 JSON
+// 的额度就被吃光 → finish_reason:length → JSON 截断成半个对象、建议残缺(实测 17200 仍会在
+// 「长思维链 + 军师大 JSON(十余个长文案字段)」场景被吃穿,正文停在半个字段)。
+// 故深度思考时给足大额冗余,并设 32000 的绝对下限,让"超长思维链 + 完整正文"都装得下,
+// 配合大时间窗真正保证输出不断掉(gpt-5.6 / claude-sonnet-5 级模型输出上限足以覆盖 32k+)。
 export function maxTokensForMode(mode, reasoning = false) {
   let base;
   if (mode === "scan" || mode === "daily" || mode === "scan_pick") base = 3200;
   else if (mode === "t_advice") base = 3600;
   else if (mode === "hold_advice" || mode === "buy_advice" || mode === "review") base = 3200;
   else base = 1600;
-  return reasoning ? base + 2000 : base;
+  return reasoning ? Math.max(base + 30000, 32000) : base;
 }
 
 export const SYSTEM_PROMPT = `你的任务是基于用户提供的【实时行情数据】做客观分析。
@@ -37,6 +41,11 @@ export const SYSTEM_PROMPT = `你的任务是基于用户提供的【实时行�
 6. 若提供了【RAG检索资料】（近5日走势、主营、联网新闻），务必结合消息面/基本面一起分析。
 
 你必须只输出一个合法的 JSON 对象（不要 markdown 代码块包裹），结构见用户要求。
+
+【JSON 格式铁律·必须严格遵守，否则结果无法解析】：
+1. 直接以 { 开头、以 } 结尾输出，前后不得有任何说明文字、寒暄或思维链正文。
+2. 字符串值内部若要引用词语，一律用中文书名号「」或中文引号“”，【绝对禁止】使用英文半角双引号 "，否则会破坏 JSON。例：写「代码"AAPL"」要写成「代码“AAPL”」。
+3. 字符串值内不要出现裸换行，需要分点时用中文顿号或分号连接成一段。
 
 【作答前必做·思维链自检(内部推演，不必长篇输出)】：
 1. 认时间：先看【市场时间坐标】——今天是不是交易日?数据是哪个交易日的?本次结论面向哪个交易日?休市/盘前时绝不能说"今日情绪/今日实时"，要说清是上一交易日的数据、结论落到下一交易日开盘。

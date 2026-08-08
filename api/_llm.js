@@ -215,43 +215,106 @@ export async function pumpChatStream(resp, { onReasoning, onContent } = {}) {
 }
 
 // ---- LLM JSON 解析（容错）----
-// 先剥离 ```json 包裹直接解析；失败则尝试补齐被 max_tokens 截断的尾部再解析。
-// 返回 { value, salvaged }：value 为解析对象或 null；salvaged 标记是否走了补齐路径。
+// 军师深度思考场景实测两类"脏 JSON"(均 finish_reason=stop,非 token/时间截断):
+//   ① 模型在字符串值里写了【未转义的英文双引号】,如  代码"AAPL"是美股…  → 破坏 JSON 但对象其实闭合完整;
+//   ② 思维链正文漏进 content、或模型自然停在半个 JSON → 对象未闭合。
+// 解析分四级,越往后越"抢救":
+//   A 直接解析(剥 ```json 包裹)              → salvaged=false repaired=false
+//   B 从前后噪声里抠一个【平衡闭合】的 {…}    → salvaged=true  repaired=false(对象完整,不算截断)
+//   C 转义修复(把字符串内未转义的 " → \" 、裸换行/制表符 → \n/\t)后再抠平衡对象
+//                                            → salvaged=true  repaired=false(只是脏,不算截断)
+//   D 转义修复后仍未闭合(真残缺)→ 补引号/补括号 → salvaged=true  repaired=true(正文真被截断)
+// 返回 { value, salvaged, repaired }:repaired=true 才代表正文真的残缺(供上层判 truncated)。
 export function parseLLMJson(content) {
   let raw = content || '';
-  // ★防御:若正文里混进了内联思维链 <think>…</think>(非流式路径或流式漏网),先剥掉,否则 JSON 解析必失败。
-  //   兼容未闭合的 <think>(被 max_tokens 截断):从 <think> 起直到 </think> 或字符串结尾一并去除。
+  // ★防御:内联思维链 <think>…</think>(含被截断的未闭合 <think>)先剥掉,否则 JSON 解析必失败。
   raw = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/<think>[\s\S]*$/i, '').trim();
+
+  // —— A: 直接解析 ——
   try {
     const cleaned = raw.replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
-    return { value: JSON.parse(cleaned), salvaged: false };
-  } catch { /* 进入补齐 */ }
-  // 退一步:从正文里抠出第一个 {...} 平衡片段(应对模型在 JSON 前后夹带说明文字)
-  try {
-    const start = raw.indexOf('{');
-    if (start >= 0) {
-      let depth = 0, inStr = false, esc = false, end = -1;
-      for (let i = start; i < raw.length; i++) {
-        const ch = raw[i];
-        if (inStr) { if (esc) esc = false; else if (ch === '\\') esc = true; else if (ch === '"') inStr = false; continue; }
-        if (ch === '"') inStr = true;
-        else if (ch === '{') depth++;
-        else if (ch === '}') { depth--; if (depth === 0) { end = i; break; } }
-      }
-      if (end > start) return { value: JSON.parse(raw.slice(start, end + 1)), salvaged: true };
+    return { value: JSON.parse(cleaned), salvaged: false, repaired: false };
+  } catch { /* 下一级 */ }
+
+  const start = raw.indexOf('{');
+  if (start < 0) return { value: null, salvaged: false, repaired: false };
+
+  // 在给定串上,从头找到第一个 depth 归零的闭合位置(尊重字符串与转义);无则返回 -1。
+  const findBalancedEnd = (s) => {
+    let depth = 0, inStr = false, esc = false;
+    for (let i = 0; i < s.length; i++) {
+      const ch = s[i];
+      if (inStr) { if (esc) esc = false; else if (ch === '\\') esc = true; else if (ch === '"') inStr = false; continue; }
+      if (ch === '"') inStr = true;
+      else if (ch === '{') depth++;
+      else if (ch === '}') { depth--; if (depth === 0) return i; }
     }
-  } catch { /* 继续走截断补齐 */ }
+    return -1;
+  };
+
+  // —— B: 抠平衡闭合对象(应对模型在 JSON 前后夹带说明文字/思维链) ——
+  {
+    const end = findBalancedEnd(raw.slice(start));
+    if (end >= 0) {
+      try { return { value: JSON.parse(raw.slice(start, start + end + 1)), salvaged: true, repaired: false }; }
+      catch { /* 内部有未转义引号,进入 C */ }
+    }
+  }
+
+  // —— C: 转义修复 —— 把字符串值内【未转义的英文双引号】改写为 \" ,裸换行/制表符转义。
+  //   判定"是内容引号还是收尾引号":看该 " 之后第一个非空白字符,若是 : , } ] 或串尾 → 视为收尾;否则视为内容引号,转义之。
+  const seg = raw.slice(start);
+  const repairQuotes = (str) => {
+    const out = []; let inStr = false, esc = false;
+    for (let i = 0; i < str.length; i++) {
+      const ch = str[i];
+      if (!inStr) { out.push(ch); if (ch === '"') inStr = true; continue; }
+      if (esc) { out.push(ch); esc = false; continue; }
+      if (ch === '\\') { out.push(ch); esc = true; continue; }
+      if (ch === '"') {
+        let j = i + 1; while (j < str.length && ' \t\r\n'.includes(str[j])) j++;
+        const nxt = j < str.length ? str[j] : '';
+        if (nxt === '' || nxt === ':' || nxt === ',' || nxt === '}' || nxt === ']') { out.push(ch); inStr = false; }
+        else out.push('\\"');   // 字符串内容里的裸引号 → 转义
+        continue;
+      }
+      if (ch === '\n') { out.push('\\n'); continue; }
+      if (ch === '\r') { continue; }
+      if (ch === '\t') { out.push('\\t'); continue; }
+      out.push(ch);
+    }
+    return out.join('');
+  };
+  const fixed = repairQuotes(seg);
+  {
+    const end = findBalancedEnd(fixed);
+    if (end >= 0) {
+      try { return { value: JSON.parse(fixed.slice(0, end + 1)), salvaged: true, repaired: false }; }
+      catch { /* 进入 D */ }
+    }
+  }
+
+  // —— D: 真残缺(未闭合)—— 补齐未闭合引号/括号后解析;这才是真截断,repaired=true。
+  const padAndParse = (s) => {
+    let depth = 0, inStr = false, esc = false;
+    for (let i = 0; i < s.length; i++) {
+      const ch = s[i];
+      if (inStr) { if (esc) esc = false; else if (ch === '\\') esc = true; else if (ch === '"') inStr = false; continue; }
+      if (ch === '"') inStr = true;
+      else if (ch === '{') depth++;
+      else if (ch === '}') depth--;
+    }
+    let cand = s;
+    if (inStr) cand += '"';
+    cand += '}'.repeat(Math.max(0, depth));
+    return JSON.parse(cand);
+  };
+  try { return { value: padAndParse(fixed), salvaged: true, repaired: true }; }
+  catch { /* 再退一步:去掉尾部残缺键值对后补齐 */ }
   try {
-    let s = raw.replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
-    // 去掉最后一个残缺的键值对，再按未闭合层级补齐引号/括号
-    s = s.replace(/,\s*"[^"]*"\s*:\s*("[^"]*)?$/, '');
-    const openBraces = (s.match(/\{/g) || []).length - (s.match(/\}/g) || []).length;
-    const openBrackets = (s.match(/\[/g) || []).length - (s.match(/\]/g) || []).length;
-    const quotes = (s.match(/(?<!\\)"/g) || []).length;
-    if (quotes % 2 === 1) s += '"';
-    s += ']'.repeat(Math.max(0, openBrackets)) + '}'.repeat(Math.max(0, openBraces));
-    return { value: JSON.parse(s), salvaged: true };
+    const trimmed = fixed.replace(/,\s*"[^"]*"\s*:\s*("[^"]*)?$/, '');
+    return { value: padAndParse(trimmed), salvaged: true, repaired: true };
   } catch {
-    return { value: null, salvaged: false };
+    return { value: null, salvaged: false, repaired: false };
   }
 }
