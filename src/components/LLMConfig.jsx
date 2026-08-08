@@ -88,6 +88,8 @@ export default function LLMConfig() {
   // 池模式下有效端点(启用+有 baseUrl)
   const activeEndpoints = () => endpoints.filter((e) => e.enabled !== false && (e.baseUrl || '').trim())
   const poolMode = showPool && activeEndpoints().length > 0
+  // 已配置但被停用的端点(有 baseUrl 却 enabled===false)——用于提示"为何没列出来"
+  const disabledEndpoints = () => endpoints.filter((e) => e.enabled === false && (e.baseUrl || '').trim())
 
   // host 简写(用于端点标签)
   const hostLabel = (url, i) => (url ? String(url).replace(/^https?:\/\//, '').replace(/\/.*$/, '') : `端点${i + 1}`)
@@ -411,6 +413,12 @@ export default function LLMConfig() {
                   ? `资源池已启用。下方逐个列出你配置的所有端点(含主端点),请为每个端点分别指定各角色的模型——不同网关同名角色可能是不同模型名。附加端点某角色留空则自动回退到主端点的对应模型。`
                   : `为系统各处 AI 分别指定模型${listable ? `（共 ${modelList.length} 个可选）` : '（手动填写模型名）'}`}
               </div>
+              {/* 有已配置但被停用的端点 → 说明为何没在下方列出,引导回上一步启用 */}
+              {disabledEndpoints().length > 0 && (
+                <div className="llm-hint llm-hint-warn" style={{ marginBottom: 10 }}>
+                  <Icon name="info" size={12} /> 另有 {disabledEndpoints().length} 个端点处于「停用」状态,不参与分发,故未在此列出。如需为其单独设模型,请回「上一步」把对应端点切到「启用」。
+                </div>
+              )}
 
               {/* 端点卡片:主端点 + 各资源池端点 */}
               {cardEndpoints().map((card) => {
@@ -434,7 +442,7 @@ export default function LLMConfig() {
                               className={'llm-reason-toggle' + (reasoning[k] ? ' on' : '')}
                               onClick={() => setReason(k, !reasoning[k])}
                               title="开启后该角色调用支持推理的模型时启用深度思考(reasoning),响应更慎密但更慢">
-                              <span className="llm-reason-text"><Icon name="brain" size={12} /> 深度思考</span>
+                              <span className="llm-reason-text"><Icon name="brain" size={12} /> 深度思考 <em className="llm-reason-state">{reasoning[k] ? '已开' : '关'}</em></span>
                               <span className="llm-reason-track"><span className="llm-reason-thumb" /></span>
                             </button>
                           )}
