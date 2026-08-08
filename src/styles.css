@@ -2274,7 +2274,7 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 .info-fold-wrap .detail-info { margin-top: 10px; margin-bottom: 0; }
 
 /* 盯盘预警内嵌表单 */
-.detail-alert-box { margin-top: 12px; max-width: 460px; }
+.detail-alert-box { margin-top: 12px; max-width: min(460px, 100%); }
 
 /* 固定底部动作栏 */
 .detail-footbar { display: flex; gap: 10px; padding: 12px 18px; border-top: 1px solid var(--border-soft); background: var(--panel); flex-shrink: 0; }
@@ -3583,6 +3583,8 @@ a.mn-flash:hover { color: var(--accent); }
   .sg-cells { grid-template-columns: repeat(2, 1fr); }
   .hold-overview, .acc-grid, .rv-attr { grid-template-columns: 1fr 1fr; }
   .flow-summary, .stat-grid { grid-template-columns: repeat(2, 1fr); }
+  /* 生成中骨架屏的三格占位:320~400px 三列过挤,降为两列 */
+  .sk-cells { grid-template-columns: 1fr 1fr; }
   /* 价格数字在极窄屏再收敛一档，给标签留位 */
   .dq-price { font-size: 24px; }
   .rv-kpi-hero-val { font-size: 24px; }

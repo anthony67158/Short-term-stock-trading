@@ -394,7 +394,13 @@ export default async function handler(req, res) {
   const effectiveReasoning = (role) => {
     if (getReasoning(role)) return true;
     try {
-      return endpointsFrom(cfg).some((ep) => endpointServesRole(ep, role) && ep.reasoning && ep.reasoning[role]);
+      // 只要【任一端点】为该角色开了深度思考,就视为开——不再要求该端点必须自带该角色模型。
+      //   根因:用户在端点卡片开了深度思考、但没在该端点单独填 advisor 模型时,旧代码用
+      //   endpointServesRole 把这个端点从判定里剔除 → useReasoning 误判为 false → 不下发
+      //   reasoning_effort → 军师思维链整体不生成、不回显。用户"开了深度思考"就是明确意图,
+      //   底层 poolFetch 会把 reasoning_effort=high 真实发给【实际承接 advisor 的那个端点】
+      //   (配合下方 reasonFallback=true 与 reasoningForEndpoint 的兜底),故此处只认意图。
+      return endpointsFrom(cfg).some((ep) => ep.reasoning && ep.reasoning[role]);
     } catch { return false; }
   };
   const RT_BASE = cfg.baseUrl || BASE;
@@ -913,6 +919,7 @@ export default async function handler(req, res) {
     let content = '';
     let finishReason = '';
     let usage = null;
+    let streamedReasoning = '';   // 流式路径捕获的思维链原文：模型 JSON 里没吐 reasoning 字段时,用它兜底填充,保证"军师推理过程"持久可见
     // 思维链语言:reasoning 模型的思维链标题默认英文,system + 用户开头指令都压不住时,
     //   在用户消息【末尾】(recency 权重最高)再钉一条最强中文指令,连思维链小标题都要求中文。
     const zhTail = useReasoning
@@ -963,6 +970,7 @@ export default async function handler(req, res) {
       done();
       content = pumped.content;
       finishReason = pumped.finishReason;
+      streamedReasoning = pumped.reasoning || '';
     } else {
       const { resp, done } = await callChatWithRetry({
         model: useModel,
@@ -1169,6 +1177,15 @@ export default async function handler(req, res) {
     if (mode === 'buy_advice' && result && result.planQty != null && result.planQtyNum == null) {
       const m = String(result.planQty).match(/-?\d+(?:\.\d+)?/);
       if (m) { const n = Math.trunc(Number(m[0])); if (Number.isFinite(n)) result.planQtyNum = n; }
+    }
+    // ★思维链持久化:流式路径把模型思维链实时推给了前端(reasoning 事件),但生成结束、卡片落库后,
+    //   前端展示的是最终 result.reasoning。若模型没在 JSON 里单独吐 reasoning 字段(多数网关只把思维链
+    //   走 reasoning_content / <think>,不会重复进 JSON),就用本次流式捕获的思维链原文兜底填充,
+    //   保证"军师推理过程"在生成完成后依然可见(修复端点+深度思考场景下推理消失)。
+    if (result && typeof result === 'object' && !result.raw
+        && (!result.reasoning || !String(result.reasoning).trim())
+        && streamedReasoning && streamedReasoning.trim()) {
+      result.reasoning = streamedReasoning.trim();
     }
     return finish({
       ok: true,

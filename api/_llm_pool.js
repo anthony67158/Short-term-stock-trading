@@ -94,7 +94,14 @@ export function endpointCountForRole(config, role) {
 //   端点显式配了该角色(true/false)→ 用之;否则回退全局 config.reasoning[role];再回退传入 fallback。
 //   注:附加端点 reasoning 里只存 true 的角色(见 _llm_config),故 undefined 即"该端点未单独指定"→ 回退全局。
 export function reasoningForEndpoint(config, ep, role, fallback) {
+  // ① 端点显式配了该角色(true/false)→ 用之(最高优先,用户对该端点的直接意愿)。
   if (ep && ep.reasoning && ep.reasoning[role] != null) return !!ep.reasoning[role];
+  // ② 调用方明确要求开启(fallback=true)→ 尊重之。
+  //    fallback 来自 callChat 的 effectiveReasoning——它已综合"全局 reasoning + 任一端点为该角色开了深度思考"
+  //    算出本次真实生效值。故当它为 true 时,即便某角色的【全局默认】是 false(envConfig 把所有角色初始化为 false),
+  //    也不能让这个"默认 false"把用户在端点上打开的深度思考意愿吞掉(此前 advisor 路由到 default 端点即被此吞掉)。
+  if (fallback) return true;
+  // ③ 否则回退全局配置。
   if (config && config.reasoning && config.reasoning[role] != null) return !!config.reasoning[role];
   return !!fallback;
 }
