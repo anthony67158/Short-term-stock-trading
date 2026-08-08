@@ -1239,6 +1239,7 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
   display: flex; flex-direction: column; animation: drawer-in .24s var(--ease);
 }
 @keyframes drawer-in { from { transform: translateX(30px); opacity: .4 } to { transform: translateX(0); opacity: 1 } }
+@keyframes drawer-up { from { transform: translateY(28px); opacity: .4 } to { transform: translateY(0); opacity: 1 } }
 .t-drawer-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border-soft); flex-shrink: 0; }
 .t-drawer-body { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 18px 20px; }
 .t-drawer-body::-webkit-scrollbar { width: 8px; }
@@ -3219,18 +3220,33 @@ a.mn-flash:hover { color: var(--accent); }
   }
   html[data-theme="light"] .nav { background: #ffffff; }
   .nav-inner {
-    flex-wrap: nowrap; gap: 8px; padding: 8px 12px;
+    flex-wrap: nowrap; gap: 8px;
+    /* 两侧留出呼吸感(16px),不再贴边;横屏刘海机型再叠加安全区 */
+    padding: 10px max(16px, env(safe-area-inset-left)) 10px max(16px, env(safe-area-inset-right));
     /* 安全区已由 .nav 的 padding-top 处理,此处不再叠加,否则灵动岛机型会顶出双倍留白 */
-    padding-top: 8px;
+    padding-top: 10px;
     justify-content: space-between; max-width: none; align-items: center;
   }
   .nav-brand { order: 0; flex-shrink: 0; }
   .nav-tabs { order: 1; }
-  .nav-meta { order: 2; margin-left: 0; font-size: 11px; gap: 7px; flex-shrink: 1; min-width: 0; }
+  .nav-meta { order: 2; margin-left: 0; font-size: 11px; gap: 8px; flex-shrink: 1; min-width: 0; }
   /* 顶栏右侧每个工具项不换行、不被压缩,避免"休市""飞飞徐"竖排成两行 */
   .nav-meta > *, .nav-status, .acct-btn, .acct-btn span, .nav-refresh { white-space: nowrap; flex-shrink: 0; }
-  .acct-btn { padding: 5px 8px; max-width: 108px; }
+
+  /* ===== 顶栏控件统一规格:全部 34px 高 + 9px 圆角,消除"一大一小/方圆混杂" =====
+     刷新胶囊、撤销、铃铛、主题、账户此前是三种高度两种圆角;这里对齐为同一视觉基线。 */
+  .nav-meta .nav-refresh,
+  .nav-meta .icon-btn,
+  .nav-meta .acct-btn {
+    height: 34px; min-height: 34px; box-sizing: border-box;
+    border-radius: 9px; align-self: center;
+  }
+  .nav-meta .icon-btn { width: 34px; }                 /* 方形图标钮:等宽等高 */
+  .nav-meta .nav-refresh { padding: 0 11px; }           /* 胶囊改为定高,靠 flex 居中而非纵向 padding 撑 */
+  .acct-btn { padding: 0 10px; max-width: 116px; }
   .acct-btn span { overflow: hidden; text-overflow: ellipsis; }
+  /* 状态胶囊也对齐视觉高度,避免它比按钮矮一截 */
+  .nav-status { height: 34px; align-items: center; }
 
   /* 把主 Tab 组变成固定底部导航:拇指可达、始终可见、无需横滑寻找 */
   .nav-tabs {
@@ -3280,9 +3296,8 @@ a.mn-flash:hover { color: var(--accent); }
   .ai-drawer { width: 100vw; max-width: 100vw; padding-top: env(safe-area-inset-top); }
   .ai-input-row { padding-bottom: calc(6px + env(safe-area-inset-bottom)); }
 
-  /* 触控目标放大:导航图标钮、刷新钮更好点 */
+  /* 触控目标放大:导航图标钮更好点(高度/圆角已由上方 .nav-meta 统一规格接管) */
   .icon-btn { min-width: 34px; min-height: 34px; }
-  .nav-refresh { padding: 6px 12px; }
 
   /* 表格在窄屏:允许横滑,行高稍增便于点选 */
   .tbl th, .tbl td { padding: 9px 9px; font-size: 12px; }
@@ -3290,6 +3305,28 @@ a.mn-flash:hover { color: var(--accent); }
   /* 弹窗/抽屉顶部让开状态栏 */
   .modal-mask { padding-top: calc(16px + env(safe-area-inset-top)); }
   .dr-drawer { padding-top: env(safe-area-inset-top); }
+
+  /* ===== 做T:移动端改「全屏页」(从底部滑入),取代右侧窄抽屉 =====
+     窄抽屉在手机上信息被裁切、横向拥挤;这里让它占满整屏,头部 sticky、
+     底部留 Home 条安全区,内容完整可滚动、不再挤成一团。 */
+  .mask-drawer { padding: 0; }
+  .t-drawer {
+    margin-left: 0; width: 100vw; max-width: 100vw; height: 100dvh;
+    border-left: none; border-radius: 0;
+    box-shadow: none;
+    padding-top: env(safe-area-inset-top);
+    animation: drawer-up .26s var(--ease);
+  }
+  .t-drawer-head {
+    position: sticky; top: 0; z-index: 2;
+    background: var(--panel);
+    padding: 13px 16px;
+  }
+  .t-drawer-body { padding: 14px 16px calc(24px + env(safe-area-inset-bottom)); }
+  .t-drawer-meta { gap: 10px 14px; }
+  /* 做T记一腿输入区在窄屏换行排布,输入框不被挤扁 */
+  .t-drawer .buy-inline { flex-wrap: wrap; gap: 8px; }
+  .t-drawer .buy-inline .wl-input { flex: 1 1 40%; min-width: 96px; width: auto; }
 
   /* ---- nuxt-ui 设计原则移动端增强:更大触控目标 + 更清晰的操作区 ---- */
   /* AI 选股头部:标题与操作纵向排布,操作按钮撑满一行便于拇指点按 */
@@ -3328,12 +3365,12 @@ a.mn-flash:hover { color: var(--accent); }
    账户名进一步收窄,腾出空间保证顶栏在 320px 机型也不溢出。 */
 @media (max-width: 360px) {
   /* 状态文字是裸文本节点(非 span),用 font-size:0 收起,仅保留圆点 */
-  .nav-status { gap: 0; padding: 5px; font-size: 0; }
+  .nav-status { gap: 0; padding: 0 6px; font-size: 0; }
   .nav-status .status-dot { font-size: 0; }
   .nav-refresh span { display: none; }
-  .nav-refresh { padding: 6px; }
-  .nav-meta { gap: 5px; }
-  .acct-btn { max-width: 76px; padding: 5px 6px; }
+  .nav-meta .nav-refresh { padding: 0; width: 34px; justify-content: center; }
+  .nav-meta { gap: 6px; }
+  .acct-btn { max-width: 76px; padding: 0 8px; }
 }
 
 /* ============================================================

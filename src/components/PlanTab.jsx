@@ -1222,11 +1222,10 @@ function HoldingItem({ h, idx, quote: q }) {
   const [addQty, setAddQty] = useState('1')
   const [confirmDel, setConfirmDel] = useState(false) // 删除持仓二次确认
   const [confirmSettle, setConfirmSettle] = useState(false) // 手动结算做T二次确认
-  // B-7 移动端横滑:左滑=做T,右滑=看详情(显式按钮保留;仅触屏启用)
+  // B-7 移动端横滑:右滑=看详情(左滑做T已移除——改为点「做T」按钮打开全屏页,避免误触/内容裁切)
   const isTouch = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches
   const swipe = useSwipe({
     enabled: isTouch,
-    onLeft: () => startT(),
     onRight: () => openStockDetail(h.code, h.name),
   })
 
@@ -1477,11 +1476,8 @@ function HoldingItem({ h, idx, quote: q }) {
   })()
   return (
     <div className="hold-swipe-wrap">
-      {swipe.swiping && isTouch && (
-        <>
-          <div className={'hsw-hint hsw-right' + (swipe.dx >= 64 ? ' armed' : '')}><Icon name="chart" size={16} /><span>详情</span></div>
-          <div className={'hsw-hint hsw-left' + (swipe.dx <= -64 ? ' armed' : '')}><span>做T</span><Icon name="refresh" size={16} /></div>
-        </>
+      {swipe.swiping && isTouch && swipe.dx > 0 && (
+        <div className={'hsw-hint hsw-right' + (swipe.dx >= 64 ? ' armed' : '')}><Icon name="chart" size={16} /><span>详情</span></div>
       )}
       <div className="hold-item" {...swipe.bind}
         data-code={h.code}
