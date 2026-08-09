@@ -3754,3 +3754,33 @@ a.mn-flash:hover { color: var(--accent); }
   .acc-cell-v { font-size: 17px; }
 }
 
+/* ================================================================
+   移动端细节精修 v5(追加覆盖层,later-wins;仅移动端断点,桌面零影响)
+   —— 全局横向溢出兜底 / 弹层·Toast 不越右边缘 / 配置按钮换行 /
+      预警阈值输入弹性宽。均为纯样式,不改任何组件逻辑。
+   ================================================================ */
+@media (max-width: 720px) {
+  /* 1) 全局横向溢出兜底:任一超宽子元素(宽表/长串数字/绝对定位弹层)都不再
+     让整页能左右横滑、出现橡皮筋抖动。仅钳 body(不动 html:在 html 上加 overflow-x
+     会把 html 变成滚动容器,导致移动端 position:sticky 顶栏失效)。长文本容器可收缩。 */
+  body { overflow-x: hidden; max-width: 100%; }
+  .main, .nav-inner, .footer { max-width: 100vw; }
+  .main { min-width: 0; }
+  .panel, .card, .cand-card, .pick-card { min-width: 0; max-width: 100%; }
+
+  /* 2) 军师建议浮层:与 .auto-ref-panel/.acct-menu 同口径钳制,320~375px 不越右边缘 */
+  .advisor-pop { width: auto; max-width: calc(100vw - 24px); }
+
+  /* 3) 撤回 Toast:较长文案(如"已撤回:清仓 XX 3手")不再被顶出右边缘,允许换行 */
+  .undo-toast { max-width: calc(100vw - 24px); white-space: normal; word-break: break-word; }
+
+  /* 4) 模型配置底部操作区:多个按钮一行排不下时换行,不再溢出弹窗 */
+  .llm-actions { flex-wrap: wrap; }
+  .llm-actions .btn { min-width: 0; flex: 1 1 auto; }
+
+  /* 5) 预警阈值输入:固定 80/90px 内联宽在窄屏偏窄,改弹性宽,更好点、与下拉更透气。
+     (内联 style 的 width 优先级高于类;这里用 min-width + flex 由弹性布局接管,
+      配合 .af-row 已有的 flex-wrap,阈值输入可自然占满剩余宽度。) */
+  .af-row .wl-input { flex: 1 1 90px; min-width: 90px; width: auto; }
+}
+
