@@ -39,6 +39,7 @@ export async function callChat({
   reasoning = false,
   signal,
   role,
+  forceNoReason = false,
 } = {}) {
   const ctrl = signal ? null : new AbortController();
   const useSignal = signal || (ctrl && ctrl.signal);
@@ -66,9 +67,11 @@ export async function callChat({
   // stream 模式下 poolFetch 仍返回上游 Response(其 body 可继续被 pumpStream/pumpChatStream 读取)。
   // 端点级模型:传入 role 时,poolFetch 会在选定端点后按该端点自己的模型名覆盖 body.model
   //   (不同网关同一角色可能是不同模型名);端点没配则回退全局/本次 model。
+  // forceNoReason:硬关深度思考(优先级高于端点级/全局 reasoning 配置)——用于「思维链吃穿正文」
+  //   后的补生成:此时必须让模型把整段生成用于正文 JSON,绝不能被端点级 reasoning 配置再次拉起 CoT。
   const { resp } = await poolFetch(cfg, '/chat/completions', {
     method: 'POST', body: bodyObj, signal: useSignal, timeoutMs,
-    role, modelFallback: model, reasonFallback: reasoning,
+    role, modelFallback: model, reasonFallback: reasoning, forceNoReason,
   }, stream ? 1 : 2);   // 流式只试一个端点(半路换端点会丢已下发的 token);非流式允许一次故障转移
 
   return { resp, done: () => { if (t) clearTimeout(t); } };
@@ -108,11 +111,19 @@ export function makeSSE(res) {
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no'); // 禁止中间层缓冲，token 即时下发
+  // ★iOS Safari 修复:阿里云 FC 平台层会给响应注入 Content-Disposition: attachment,
+  //   iOS Safari 见 attachment 会把 SSE 当"文件下载"处理→只收一段就断、收不到 result。显式覆盖为 inline。
+  res.setHeader('Content-Disposition', 'inline');
   const emit = (event, data) => {
     try { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } catch { /* 连接已断 */ }
   };
   const phase = (text) => emit('phase', { text });
-  return { emit, phase };
+  // ★心跳:长流(深度思考/多股日报)期间每 10s 发一个 SSE 注释行,保持 iOS/移动网络连接活跃。
+  //   注释行(以 ':' 开头)不触发前端事件。返回 stop() 供收尾清理,避免 interval 泄漏。
+  let hb = setInterval(() => { try { res.write(`: hb ${Date.now()}\n\n`); } catch { /* 断连 */ } }, 10000);
+  if (hb && typeof hb.unref === 'function') hb.unref();
+  const stopHeartbeat = () => { if (hb) { clearInterval(hb); hb = null; } };
+  return { emit, phase, stopHeartbeat };
 }
 
 // ---- 读取上游 OpenAI 兼容 SSE 流 ----

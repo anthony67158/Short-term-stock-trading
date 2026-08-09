@@ -413,6 +413,8 @@ export default async function handler(req, res) {
     return res.status(200).send(JSON.stringify({ ok: false, error: 'LLM 未配置' }));
   }
 
+  // 心跳定时器提到 try 外层声明,保证下方 catch 也能兜底清理(异常绕过 finish 时不泄漏 interval)
+  let hbTimer = null;
   try {
     let body = req.body;
     if (typeof body === 'string') body = JSON.parse(body || '{}');
@@ -428,12 +430,26 @@ export default async function handler(req, res) {
       res.setHeader('Cache-Control', 'no-cache, no-transform');
       res.setHeader('Connection', 'keep-alive');
       res.setHeader('X-Accel-Buffering', 'no');
+      // ★iOS Safari 修复①:阿里云 FC 平台层会给响应注入 `Content-Disposition: attachment`,
+      //   iOS Safari 见到 attachment 会把这条 SSE 当成「文件下载」而非「持续流」——于是只收到
+      //   一段就断、result 事件永远收不到 → 前端 result=null → "分析未返回结果/生成失败"。
+      //   显式覆盖为 inline,强制按内联流处理。
+      res.setHeader('Content-Disposition', 'inline');
     } else {
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
     }
     // 统一出口：流式用 SSE 事件，非流式回退为一次性 JSON
     const emit = (event, data) => { if (streaming) { try { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } catch { /* 断连 */ } } };
+    // ★iOS Safari 修复②:深度思考模式下 result 事件要 ~137s 才在流末尾到达,期间若某段
+    //   静默过久(移动网络/运营商代理/iOS 空闲回收)连接就被掐断,前端拿不到 result → 生成失败。
+    //   每 10s 发一个 SSE 注释心跳(`: hb`),保持连接活跃、刷掉中间层缓冲。注释行不触发前端事件。
+    if (streaming) {
+      hbTimer = setInterval(() => { try { res.write(`: hb ${Date.now()}\n\n`); } catch { /* 断连 */ } }, 10000);
+      if (hbTimer && typeof hbTimer.unref === 'function') hbTimer.unref();
+    }
+    const stopHeartbeat = () => { if (hbTimer) { clearInterval(hbTimer); hbTimer = null; } };
     const finish = (obj) => {
+      stopHeartbeat();
       if (streaming) { emit('result', obj); return res.end(); }
       return res.status(200).send(JSON.stringify(obj));
     };
@@ -924,6 +940,7 @@ export default async function handler(req, res) {
     let finishReason = '';
     let usage = null;
     let streamedReasoning = '';   // 流式路径捕获的思维链原文：模型 JSON 里没吐 reasoning 字段时,用它兜底填充,保证"军师推理过程"持久可见
+    const _salvDbg = { tried: false };   // TEMP 诊断:补生成救援实况
     // 思维链语言:reasoning 模型的思维链标题默认英文,system + 用户开头指令都压不住时,
     //   在用户消息【末尾】(recency 权重最高)再钉一条最强中文指令,连思维链小标题都要求中文。
     const zhTail = useReasoning
@@ -981,11 +998,14 @@ export default async function handler(req, res) {
       //   此时思维链已实时下发并捕获(streamedReasoning),再补发一次【不带思维链】的生成拿正文
       //   (base token 足够、无 CoT 更快),把已捕获思维链拼回。既保留"军师推理过程",又保证
       //   正文完整,不再一思考完就失败。仅在正文缺失/真截断且仍有充足时间预算时才救援。
-      if (false && useReasoning && remain() > 15000) {
-        const probe = parseLLMJson(content);
+      if (useReasoning && remain() > 15000) {
+        const probe = content.trim() ? parseLLMJson(content) : { value: null };
         const bodyBroken = !probe.value || probe.repaired;   // 空/解析不出/需补齐才成立(真残缺)
         if (bodyBroken) {
           phase('思维链已完成，正在整理最终结论…', 'llm');
+          _salvDbg.tried = true;
+          const salvTimeout = Math.max(8000, Math.min(90000, remain() - 3000));
+          _salvDbg.timeout = salvTimeout;
           const salv = await callChat({
             model: useModel,
             role: useRole,
@@ -996,18 +1016,29 @@ export default async function handler(req, res) {
             ],
             temperature: 0.2,
             maxTokens: maxTokensForMode(mode, false),   // 不带思维链 → 用 base 额度,给正文留满
-            timeoutMs: Math.max(8000, Math.min(90000, remain() - 3000)),
+            timeoutMs: salvTimeout,
             reasoning: false,                            // ★关键:关掉思维链,额度全给正文 JSON
+            forceNoReason: true,                         // ★硬关:压过端点级/全局 reasoning,否则补生成又跑 CoT 再次吃穿
             responseFormat: { type: 'json_object' },
             stream: false,
           });
+          _salvDbg.err = salv.resp && salv.resp.__err ? String(salv.resp.__err.name || salv.resp.__err.message || salv.resp.__err) : '';
+          _salvDbg.status = salv.resp && !salv.resp.__err ? salv.resp.status : 0;
           if (salv.resp && !salv.resp.__err && salv.resp.ok) {
             const sj = await salv.resp.json().catch(() => null);
             const sc = sj?.choices?.[0]?.message?.content || '';
+            const src = sj?.choices?.[0]?.message?.reasoning_content || sj?.choices?.[0]?.message?.reasoning || '';
+            _salvDbg.contentLen = sc.length;
+            _salvDbg.reasoningLen = src.length;
+            _salvDbg.finishReason = sj?.choices?.[0]?.finish_reason || '';
             if (sc.trim()) {
               content = sc;
               finishReason = sj?.choices?.[0]?.finish_reason || finishReason;
               if (sj?.usage) usage = sj.usage;
+            } else if (src.trim()) {
+              // ★补生成仍把正文写进了 reasoning 通道(网关无视 forceNoReason 仍强开 CoT)→ 从中抠 JSON
+              const pr = parseLLMJson(src);
+              if (pr && pr.value) { content = JSON.stringify(pr.value); _salvDbg.rescuedFromReason = true; }
             }
           }
           salv.done();
@@ -1091,6 +1122,7 @@ export default async function handler(req, res) {
           reasoningLen: (streamedReasoning || '').length,
           reasoningHasBrace: /\{/.test(streamedReasoning || ''),
           reasoningTail: (streamedReasoning || '').slice(-300),
+          salv: _salvDbg,
         },
       });
     }
@@ -1111,6 +1143,7 @@ export default async function handler(req, res) {
       reasoningHead: (streamedReasoning || '').slice(0, 120),
       parsedOk: !!parsed.value,
       usage,
+      salv: _salvDbg,
     };
 
     if (!streaming) res.status(200);
@@ -1287,6 +1320,7 @@ export default async function handler(req, res) {
       _dbg,
     });
   } catch (e) {
+    if (hbTimer) { clearInterval(hbTimer); hbTimer = null; }
     if (res.headersSent || (res.getHeader && String(res.getHeader('Content-Type') || '').includes('event-stream'))) {
       try { res.write(`event: result\ndata: ${JSON.stringify({ ok: false, error: String(e.message || e) })}\n\n`); } catch { /* ignore */ }
       return res.end();

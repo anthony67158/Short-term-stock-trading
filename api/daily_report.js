@@ -40,10 +40,10 @@ export default async function handler(req, res) {
   const { BASE, KEY } = llmEnv();
   const streaming = true; // 本接口一律 SSE
 
-  const { emit, phase } = makeSSE(res); // makeSSE 内已统一应用 CORS
+  const { emit, phase, stopHeartbeat } = makeSSE(res); // makeSSE 内已统一应用 CORS
   // 双重 end 兜底:任何分支只要调用 endOnce 即可,重复调用无副作用(避免 "write after end" 崩溃)
   let ended = false;
-  const endOnce = () => { if (ended) return; ended = true; try { res.end(); } catch { /* 连接已断 */ } };
+  const endOnce = () => { if (ended) return; ended = true; try { stopHeartbeat && stopHeartbeat(); } catch { /* ignore */ } try { res.end(); } catch { /* 连接已断 */ } };
 
   try {
     let body = req.body; if (typeof body === 'string') body = JSON.parse(body || '{}');
