@@ -975,6 +975,44 @@ export default async function handler(req, res) {
       content = pumped.content;
       finishReason = pumped.finishReason;
       streamedReasoning = pumped.reasoning || '';
+      // ★「思考完就生成失败」根因修复:深度思考模式下,网关把【思维链 token】计入 max_tokens,
+      //   复杂军师题的超长思维链会把正文 JSON 的额度吃穿 → 思维链吐完即 finish_reason=length、
+      //   正文 content 为空/半截 → 命中下方"空内容硬降级",前端"思考完直接生成失败"。
+      //   此时思维链已实时下发并捕获(streamedReasoning),再补发一次【不带思维链】的生成拿正文
+      //   (base token 足够、无 CoT 更快),把已捕获思维链拼回。既保留"军师推理过程",又保证
+      //   正文完整,不再一思考完就失败。仅在正文缺失/真截断且仍有充足时间预算时才救援。
+      if (false && useReasoning && remain() > 15000) {
+        const probe = parseLLMJson(content);
+        const bodyBroken = !probe.value || probe.repaired;   // 空/解析不出/需补齐才成立(真残缺)
+        if (bodyBroken) {
+          phase('思维链已完成，正在整理最终结论…', 'llm');
+          const salv = await callChat({
+            model: useModel,
+            role: useRole,
+            messages: [
+              { role: 'system', content: sysPrompt },
+              { role: 'system', content: marketTimePromptBlock() },
+              { role: 'user', content: userPrompt },
+            ],
+            temperature: 0.2,
+            maxTokens: maxTokensForMode(mode, false),   // 不带思维链 → 用 base 额度,给正文留满
+            timeoutMs: Math.max(8000, Math.min(90000, remain() - 3000)),
+            reasoning: false,                            // ★关键:关掉思维链,额度全给正文 JSON
+            responseFormat: { type: 'json_object' },
+            stream: false,
+          });
+          if (salv.resp && !salv.resp.__err && salv.resp.ok) {
+            const sj = await salv.resp.json().catch(() => null);
+            const sc = sj?.choices?.[0]?.message?.content || '';
+            if (sc.trim()) {
+              content = sc;
+              finishReason = sj?.choices?.[0]?.finish_reason || finishReason;
+              if (sj?.usage) usage = sj.usage;
+            }
+          }
+          salv.done();
+        }
+      }
     } else {
       const { resp, done } = await callChatWithRetry({
         model: useModel,
@@ -1019,16 +1057,43 @@ export default async function handler(req, res) {
       usage = j.usage || null;
     }
 
-    // 空内容(上游偶发返回空串) → 结构化降级,避免把空当成成功结果下发
-    if (!content.trim()) {
+    // ★通道兜底(实测线上真凶):部分 OpenAI 兼容网关(如 gpt-5.6-terra)在深度思考时
+    //   会把【完整的正文 JSON 整个写进 reasoning_content 思维链通道】,而 delta.content 全程为空。
+    //   现象="思考完了→前端却报生成失败/不展示"(content 空命中下方降级,或解析不出)。
+    //   兜底策略:正文为空、或正文里根本抠不出合法 JSON 时,回到思维链原文里再抠一次——
+    //   实测能从思维链救回完整 31 字段建议(见诊断)。streamedReasoning 仅流式路径有;
+    //   非流式路径正文本就不空,不受影响。
+    const salvageFromReasoning = () => {
+      if (!streamedReasoning || !streamedReasoning.trim()) return null;
+      const pr = parseLLMJson(streamedReasoning);
+      return pr && pr.value ? pr : null;
+    };
+
+    // 解析模型返回的 JSON（容错：剥离 ```json 包裹 + 截断补齐）
+    let parsed = content.trim() ? parseLLMJson(content) : { value: null, salvaged: false, repaired: false };
+    // 正文抠不出对象(空正文 / 只解析出 null) → 从思维链通道兜底救 JSON
+    if (!parsed.value) {
+      const rescued = salvageFromReasoning();
+      if (rescued) {
+        parsed = rescued;
+        // 思维链已被当作正文消费,别再把整段思维链回填成 reasoning 字段(会把 JSON 原文塞进展示)
+        streamedReasoning = '';
+      }
+    }
+    // 兜底后仍无任何可用对象 → 才真正判定"模型未返回有效内容"
+    if (!parsed.value && !content.trim()) {
       return finish({
         ok: false, degraded: true, mode, model: useModel, updatedAt: Date.now(),
         error: '模型未返回有效内容，请稍后重试。', meta: collectedMeta, news: newsRefs,
+        _dbg: {
+          contentLen: (content || '').length,
+          finishReason,
+          reasoningLen: (streamedReasoning || '').length,
+          reasoningHasBrace: /\{/.test(streamedReasoning || ''),
+          reasoningTail: (streamedReasoning || '').slice(-300),
+        },
       });
     }
-
-    // 解析模型返回的 JSON（容错：剥离 ```json 包裹 + 截断补齐）
-    const parsed = parseLLMJson(content);
     // ★truncated 判定(既不误报、也绝不漏报):
     //   ① 正文 JSON 完全解析不出(value=null)→ 只能落 raw 兜底 → 一定是残缺,truncated=true;
     //   ② parseLLMJson 走了【截断补齐】路径(parsed.repaired,补了引号/括号才解析成功)→ 正文尾部真被截断,truncated=true;
@@ -1037,6 +1102,16 @@ export default async function handler(req, res) {
     //      触发 length,但正文 JSON 已闭合)也不误报"建议被截断"。
     const truncated = !parsed.value || !!parsed.repaired;
     const result = parsed.value || { raw: content, truncated };
+    const _dbg = {
+      contentLen: (content || '').length,
+      contentHead: (content || '').slice(0, 120),
+      finishReason,
+      reasoningLen: (streamedReasoning || '').length,
+      reasoningHasBrace: /\{/.test(streamedReasoning || ''),
+      reasoningHead: (streamedReasoning || '').slice(0, 120),
+      parsedOk: !!parsed.value,
+      usage,
+    };
 
     if (!streaming) res.status(200);
     // ★服务端兜底纠偏(hold_advice / review / t_advice):LLM 偶尔无视手数上限/合法价带,
@@ -1209,6 +1284,7 @@ export default async function handler(req, res) {
       meta: collectedMeta,
       usedRag: !!ragText,
       usage: usage || null,
+      _dbg,
     });
   } catch (e) {
     if (res.headersSent || (res.getHeader && String(res.getHeader('Content-Type') || '').includes('event-stream'))) {
