@@ -58,16 +58,35 @@ def fetch_pool(node, want, sort="amount"):
     return out[:want]
 
 
+def _load_pool_cache(cache):
+    """读本地股票池缓存,返回 [(sym,name)] 或 None(不存在/损坏)。"""
+    if not os.path.exists(cache):
+        return None
+    try:
+        saved = json.load(open(cache))
+        if saved:
+            return [tuple(x) for x in saved]
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
 def build_pool(total, cache="pool_cache.json"):
-    """hs300 全量 + 创业板成交额前列，去重。带本地缓存，避免 Sina 抖动。"""
-    if os.path.exists(cache):
-        try:
-            saved = json.load(open(cache))
-            if len(saved) >= total:
-                print(f"[pool] loaded {len(saved)} from cache {cache}")
-                return [tuple(x) for x in saved][:total]
-        except Exception:
-            pass
+    """hs300 全量 + 创业板成交额前列，去重。
+
+    数据源顺序(容灾):
+      1) 若本地缓存已够量(>=total),直接用缓存——避免每日无谓请求新浪、也绕开海外 CI 拉不到新浪的老问题。
+      2) 否则尝试在线拉新浪补全,成功且够健康(>=50 或 >=total)则回写缓存。
+      3) 在线拉失败或不足:**回落到本地缓存**(哪怕少于 total 也用),绝不因新浪不可达而返回空池
+         (空池会让 build_dataset exit(2)、当日重训被整体跳过——这正是历史上"凌晨任务总失败"的根因)。
+    """
+    cached = _load_pool_cache(cache)
+    # 1) 缓存已够量:直接用(截断到 total),不再打网络
+    if cached is not None and len(cached) >= total:
+        print(f"[pool] loaded {len(cached)} from cache {cache} (>= {total}, skip network)")
+        return cached[:total]
+
+    # 2) 缓存不足或缺失:尝试在线拉新浪
     hs = fetch_pool("hs300", 300, sort="amount")
     rest = max(0, total - len(hs))
     cyb = fetch_pool("cyb", rest, sort="amount") if rest else []
@@ -76,8 +95,15 @@ def build_pool(total, cache="pool_cache.json"):
         if sym not in seen:
             seen.add(sym); pool.append((sym, name))
     pool = pool[:total]
+
+    # 3) 在线结果健康则回写缓存;若在线不足但本地缓存更充足,则回落缓存(容灾,不返回空池)
     if len(pool) >= min(50, total):
         json.dump(pool, open(cache, "w"), ensure_ascii=False)
+        return pool
+    if cached:
+        print(f"[pool] online fetch weak (got {len(pool)}); fallback to cache {cache} "
+              f"({len(cached)} stocks). 新浪不可达时用缓存兜底,保证当日仍可重训。")
+        return cached[:total]
     return pool
 
 

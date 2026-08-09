@@ -32,8 +32,9 @@ jobs:
         run: pip install "numpy>=1.26,<2.1" "scipy>=1.11,<1.15" "lightgbm>=4.3,<4.8" "scikit-learn>=1.3,<1.6" "oss2>=2.18,<3.0"
 
       - name: Preflight - 行情数据源连通性自检
-        # 海外 CI 出口 IP 访问新浪/腾讯 CN 行情接口常被限流/不可达 —— 这是本任务历史性每日失败的根因。
-        # 这里先探测,连不通就直接跳过后续训练并正常退出(不判红报警),日志里也能一眼看清是数据源问题。
+        # 历史根因:海外 CI 出口 IP 访问新浪 CN 行情常超时。但股票池已有仓库内 pool_cache.json 兜底,
+        # 个股日线/指数走腾讯(海外可达)。故此处**只把腾讯作为硬性前置**——腾讯通即可训练;
+        # 新浪仅作参考探测(不通不影响,build_dataset 会自动回落缓存池)。
         id: preflight
         run: |
           python3 - <<'PY'
@@ -46,10 +47,10 @@ jobs:
                   print('  probe fail:', u.split('?')[0], repr(e)); return False
           sina=ok('https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData?page=1&num=3&sort=amount&asc=0&node=hs_a')
           tx=ok('https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=sh600000,day,,,60,qfq')
-          print(f'[preflight] sina={sina} tencent={tx}')
-          # 冷 runner 上 pool_cache.json 不在仓库(已 gitignore),股票池必须现拉新浪、个股日线必须现拉腾讯,
-          # 故两者都通才继续;任一不通即标记 skip(跳过当日重训,不判红)。
-          open('preflight.txt','w').write('ok' if (sina and tx) else 'skip')
+          print(f'[preflight] sina={sina}(仅参考) tencent={tx}(硬性)')
+          # 腾讯(个股日线源)通即可训练:股票池有仓库内缓存兜底,不再依赖新浪。
+          # 仅当腾讯也不可达时才 skip(此时确实拉不到任何日线)。
+          open('preflight.txt','w').write('ok' if tx else 'skip')
           PY
           echo "reachable=$(cat preflight.txt)" >> "$GITHUB_OUTPUT"
 
