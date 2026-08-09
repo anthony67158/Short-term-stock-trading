@@ -73,7 +73,16 @@ export function computePortfolio(holding, quoteMap, account) {
   let totalAssets = account && account.totalAssets != null ? account.totalAssets : null;
   if (totalAssets == null) totalAssets = cash != null ? +(holdMktValue + cash).toFixed(2) : holdMktValue;
   const position = totalAssets ? +((holdMktValue / totalAssets) * 100).toFixed(1) : null;
-  const available = cash != null ? cash : (totalAssets != null ? +(totalAssets - holdMktValue).toFixed(2) : null);
+  // 可用资金 = 总资产 − 持仓市值(账户恒等式)。即便用户手填了「可用资金」,也不能超过 总资产−持仓市值,
+  // 否则会把已成持仓的钱重复算作可买资金。须与前端 planStore.computePortfolio 完全同口径。
+  let available;
+  if (account && account.totalAssets != null) {
+    const free = +(account.totalAssets - holdMktValue).toFixed(2);
+    const freeClamped = free > 0 ? free : 0;
+    available = cash != null ? Math.min(cash, freeClamped) : freeClamped;
+  } else {
+    available = cash != null ? cash : null;
+  }
   positions.forEach((p) => { p.weight = totalAssets ? +((p.mktValue / totalAssets) * 100).toFixed(1) : null; });
   const goal = account && account.goal != null && account.goal > 0 ? account.goal : null;
   let goalProgress = null, goalGap = null, goalReturnPct = null;

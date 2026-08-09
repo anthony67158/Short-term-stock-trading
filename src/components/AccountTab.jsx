@@ -46,7 +46,11 @@ export default function AccountTab({ interval }) {
   const floatPnlTotal = rows.reduce((a, r) => a + r.floatPnl, 0)
 
   const totalAssets = Number(account.totalAssets) || 0
-  const cashVal = account.cash != null ? Number(account.cash) : Math.max(totalAssets - holdMktVal, 0)
+  // 可用资金 = 总资产 − 持仓市值(账户恒等式)。用户手填的可用资金也须以此封顶并夹到 ≥0,
+  // 否则把已成持仓的钱重复算作可用(与 planStore.computePortfolio 同口径)。
+  const cashVal = totalAssets > 0
+    ? (account.cash != null ? Math.min(Number(account.cash), Math.max(totalAssets - holdMktVal, 0)) : Math.max(totalAssets - holdMktVal, 0))
+    : (account.cash != null ? Number(account.cash) : 0)
   // 若用户填了总资产，用它；否则用 持仓市值+现金 估算
   const equity = totalAssets > 0 ? totalAssets : holdMktVal + cashVal
   const positionPct = equity > 0 ? (holdMktVal / equity) * 100 : 0

@@ -4,7 +4,7 @@ import { useSyncExternalStore } from 'react'
 let state = { stock: null } // { code, name }
 const listeners = new Set()
 
-function emit() { state = { ...state }; listeners.forEach((l) => l()) }
+function emit() { state = { ...state }; listeners.forEach((l) => { try { l() } catch (e) { console.error('[store] listener error', e) } }) }
 
 export const detailStore = {
   subscribe(l) { listeners.add(l); return () => listeners.delete(l) },

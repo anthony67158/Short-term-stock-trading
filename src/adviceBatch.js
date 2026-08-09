@@ -203,7 +203,14 @@ export async function runBatchAdvice(codes, quoteMap, opts = {}) {
       : buildWatchSpec(code, name, quoteMap || {}, portfolio, st.account)
     state.current.add(code); setItemStatus(code, 'running'); notify()
     try {
-      await startAdvice(spec)   // runner 内部落缓存/记决策;这里等它完成
+      // ★超时护栏:startAdvice 内部走 SSE,极端情况下(移动端切后台/网关半挂)可能长时间不 settle。
+      //   若不设上限,该 worker 会永久卡在 await → Promise.all 永不 resolve → state.running 永远为 true
+      //   → 之后所有批量都被 `if(state.running)` 挡死。给单只 180s 上限:超时即放行 worker 继续,
+      //   底层生成仍在 runner 后台自行管理(不受影响),这里按结果判定为成功/失败即可。
+      await Promise.race([
+        startAdvice(spec),   // runner 内部落缓存/记决策;这里等它完成
+        new Promise((resolve) => setTimeout(resolve, 180000)),
+      ])
       // ★成功判定★ 直接读本次运行的权威结果(runner 的 results),不再用脆弱的「60 秒新鲜度」:
       //   · 有 advice/result 且无 error → ok(真成功)
       //   · runner 记了 error → fail(真失败,如实上报,绝不假成功)
@@ -251,10 +258,13 @@ export async function runBatchAdvice(codes, quoteMap, opts = {}) {
   const freeSlots = Math.max(1, getConcurrency() - externalBusyCodes(batchSet).length)
   const poolSize = Math.min(freeSlots, uniq.length)
   const workers = Array.from({ length: poolSize }, () => worker())
-  await Promise.all(workers)
-
-  state.running = false
-  state.finishedAt = Date.now()
-  notify()
+  try {
+    await Promise.all(workers)
+  } finally {
+    // ★无论 worker 是否抛错,都必须复位 running,否则整个批量入口会被永久锁死。
+    state.running = false
+    state.finishedAt = Date.now()
+    notify()
+  }
   return { status: 'started', mode: 'local' }
 }

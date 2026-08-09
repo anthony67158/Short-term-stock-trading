@@ -25,6 +25,10 @@ import { judgeConfirmation, sideOf } from './_confirm.js';
 
 const OP_LABEL = { gte: '≥', lte: '≤' };
 
+// 单账号单轮「智能确认(LLM judge)」调用上限:watching 态预警很多时,若逐条 judge 会烧光 token/超时,
+// 拖垮整轮拨测。超出预算的 watching 预警本轮跳过(维持 watching,下轮再判),保证每轮有界收敛。
+const JUDGE_BUDGET_PER_ROUND = 8;
+
 // 交易语义 → 强提示动作词(与 _confirm.sideOf 的 buy/sell/stop 对齐)
 const ACTION_ZH = { buy: '买入', sell: '卖出', stop: '止损离场' };
 
@@ -136,6 +140,7 @@ async function processAccount(acc) {
   let changed = false, hits = 0, sent = 0;
   const dead = new Set();
   const collectDead = (r) => { sent += r.sent; for (const ep of r.deadEndpoints) dead.add(ep); };
+  let judgeCalls = 0;  // 本轮已消耗的 LLM judge 次数(受 JUDGE_BUDGET_PER_ROUND 上限约束)
 
   // 该预警是否走智能二段确认:仅对【价位类 + AI 派生(带 phase 字段)】启用;
   //   手动到价/涨跌幅/量比/涨跌停等 → 无 phase → 老逻辑(见价即强推)。
@@ -174,7 +179,12 @@ async function processAccount(acc) {
     }
 
     if (a.phase === 'watching') {
-      // 阶段二:调用智能确认闸门,判定真正交易时机是否到
+      // 阶段二:调用智能确认闸门,判定真正交易时机是否到。
+      // ★预算护栏:本轮 judge 调用达上限 → 跳过(维持 watching,下轮再判),避免 watching 堆积时烧光 token/超时。
+      if (judgeCalls >= JUDGE_BUDGET_PER_ROUND) continue;
+      // 现价缺失(接口异常/休市返回空)时不判定,省一次无谓的 judge 调用。
+      if (!q || q.price == null || !(Number(q.price) > 0)) continue;
+      judgeCalls++;
       let verdict = null;
       try {
         verdict = await judgeConfirmation({ alert: a, name: a.name, advice: adviceMap[a.code] && adviceMap[a.code].advice, quote: q });

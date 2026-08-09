@@ -3,7 +3,7 @@ import { useSyncExternalStore } from 'react'
 // 「量化汇报」弹窗的开合状态。入口在账号下拉菜单里，与「AI 模型配置」并列，点开后全屏弹窗。
 let open = false
 const listeners = new Set()
-function emit() { listeners.forEach((l) => l()) }
+function emit() { listeners.forEach((l) => { try { l() } catch (e) { console.error('[store] listener error', e) } }) }
 
 export const quantReportUiStore = {
   subscribe(l) { listeners.add(l); return () => listeners.delete(l) },

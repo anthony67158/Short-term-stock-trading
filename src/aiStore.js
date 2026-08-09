@@ -14,7 +14,7 @@ const listeners = new Set()
 
 function emit() {
   state = { ...state }
-  listeners.forEach((l) => l())
+  listeners.forEach((l) => { try { l() } catch (e) { console.error('[store] listener error', e) } })
 }
 
 export const aiStore = {

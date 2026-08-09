@@ -17,7 +17,7 @@ export const themeStore = {
     theme = theme === 'dark' ? 'light' : 'dark'
     try { localStorage.setItem(KEY, theme) } catch { /* ignore */ }
     apply()
-    listeners.forEach((l) => l())
+    listeners.forEach((l) => { try { l() } catch (e) { console.error('[store] listener error', e) } })
   },
 }
 

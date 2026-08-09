@@ -33,7 +33,7 @@ let state = {
   booting: true,     // 启动时是否在恢复会话
 }
 const listeners = new Set()
-function emit() { state = { ...state }; listeners.forEach((l) => l()) }
+function emit() { state = { ...state }; listeners.forEach((l) => { try { l() } catch (e) { console.error('[store] listener error', e) } }) }
 
 let _pw = null // 密码仅保存在内存 + sessionStorage，用于后续保存
 
@@ -66,17 +66,24 @@ export const authStore = {
 
   // 启动时尝试用 sessionStorage 里的会话恢复登录并拉云端数据
   async boot() {
-    const s = loadSession()
-    if (!s || !s.nick) { state.booting = false; emit(); return }
-    _pw = s.pw
-    const r = await api('get', { nick: s.nick, pw: s.pw })
-    if (r.ok) {
-      state.user = s.nick; state.status = 'ready'
-      planStore.setData(r.data)
-    } else {
-      saveSession(null); _pw = null
+    // ★必须保证无论成功/失败都清 booting,否则 api('get') 网络抛错会让应用永久卡在启动页。
+    try {
+      const s = loadSession()
+      if (!s || !s.nick) { return }
+      _pw = s.pw
+      const r = await api('get', { nick: s.nick, pw: s.pw })
+      if (r.ok) {
+        state.user = s.nick; state.status = 'ready'
+        planStore.setData(r.data)
+      } else {
+        saveSession(null); _pw = null
+      }
+    } catch {
+      // 网络/接口异常:保持未登录态,让用户可手动登录(而不是白屏卡死)
+      _pw = null
+    } finally {
+      state.booting = false; emit()
     }
-    state.booting = false; emit()
   },
 
   async register(nick, pw, importLegacy = false) {
@@ -116,7 +123,8 @@ export const authStore = {
   // 供 planStore 保存数据到云端
   async saveData(data) {
     if (!state.user || !_pw) return
-    await api('save', { nick: state.user, pw: _pw, data })
+    try { await api('save', { nick: state.user, pw: _pw, data }) }
+    catch { /* 离线/接口异常:静默,下次数据变更再存(本地已持久化,不丢) */ }
   },
   currentUser() { return state.user },
   // 供 Web Push 订阅上报:把订阅绑到当前账号(服务端据此推给对的人)。仅内存,不落盘额外副本。
@@ -170,4 +178,4 @@ export function useAuthStore() {
 }
 
 // 注册云端保存回调：planStore 数据变更 → 防抖后写回当前账号
-planStore.registerSaver((data) => { authStore.saveData(data) })
+planStore.registerSaver((data) => { try { authStore.saveData(data) } catch { /* ignore */ } })

@@ -3,7 +3,7 @@ import { useSyncExternalStore } from 'react'
 // 「AI 模型配置」向导的开合状态。入口藏在账号下拉菜单里，点开后全屏向导。
 let open = false
 const listeners = new Set()
-function emit() { listeners.forEach((l) => l()) }
+function emit() { listeners.forEach((l) => { try { l() } catch (e) { console.error('[store] listener error', e) } }) }
 
 export const llmConfigStore = {
   subscribe(l) { listeners.add(l); return () => listeners.delete(l) },

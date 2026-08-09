@@ -119,6 +119,19 @@ const TOOLS = [
   },
 ];
 
+// 外部数据源 fetch(东财等)统一超时护栏:原来裸 fetch 无超时,上游卡住会拖住整轮 SSE agent 流、
+// 烧光预算。用 AbortController + setTimeout 给外部请求兜底(与内部 call() 同口径),超时即 abort,
+// 由各调用点自己的 .catch 降级(返回空/null),绝不让单个外部请求把 agent 挂死。
+async function extFetch(url, opts = {}, timeoutMs = 8000) {
+  const c = new AbortController();
+  const to = setTimeout(() => c.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...opts, signal: c.signal });
+  } finally {
+    clearTimeout(to);
+  }
+}
+
 // ---------- Skill 工具执行器（真正调数据） ----------
 async function execTool(name, args, origin) {
   const call = async (pathname, timeoutMs = 8000) => {
@@ -137,7 +150,7 @@ async function execTool(name, args, origin) {
     if (name === 'search_stock') {
       // 用东财搜索建议接口
       const kw = encodeURIComponent(args.keyword || '');
-      const j = await fetch(
+      const j = await extFetch(
         `https://searchapi.eastmoney.com/api/suggest/get?input=${kw}&type=14&count=6&token=D43BF722C8E33BDC906FB84D85E326E8`,
         { headers: { Referer: 'https://www.eastmoney.com/' } }
       ).then((r) => r.json()).catch(() => null);
@@ -216,7 +229,7 @@ async function execTool(name, args, origin) {
       // 复用 RAG 语料里的新闻抓取（buildCorpus 内含东财新闻），或直接搜
       const kw = args.query || '';
       // 简单用东财资讯搜索
-      const j = await fetch(
+      const j = await extFetch(
         `https://search-api-web.eastmoney.com/search/jsonp?cb=&param=${encodeURIComponent(JSON.stringify({ uid: '', keyword: kw, type: ['cmsArticleWebOld'], client: 'web', clientType: 'web', param: { cmsArticleWebOld: { searchScope: 'default', sort: 'time', pageIndex: 1, pageSize: 6 } } }))}`,
         { headers: { Referer: 'https://so.eastmoney.com/' } }
       ).then((r) => r.text()).catch(() => '');

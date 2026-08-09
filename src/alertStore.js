@@ -119,35 +119,46 @@ function sideOf(a) {
 // 判断单条规则是否命中（q=该股实时报价）
 function hit(a, q) {
   if (!q) return null
+  // 数值型字段统一取有限数:接口异常/字符串/NaN 时返回 null(不判定),
+  // 避免后续 .toFixed 在字符串上抛错(会中断整个 evaluate 预警循环)或渲染出字面 "NaN"。
+  const fin = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null }
   const cmp = (v, op, target) => (op === 'lte' ? v <= target : v >= target)
   switch (a.type) {
     case 'price': {
       // 现价必须 > 0 才判定到价:休市/接口异常会返回 0,否则「≤止损价」类预警会被误触发
-      if (q.price == null || !(Number(q.price) > 0)) return null
-      if (cmp(q.price, a.op, a.value)) return `现价 ${q.price} ${OP_LABEL[a.op]} ${a.value}`
+      const price = fin(q.price)
+      if (price == null || !(price > 0)) return null
+      if (cmp(price, a.op, a.value)) return `现价 ${price} ${OP_LABEL[a.op]} ${a.value}`
       return null
     }
     case 'pct': {
-      if (q.pct == null) return null
-      if (cmp(q.pct, a.op, a.value)) return `涨跌幅 ${q.pct.toFixed(2)}% ${OP_LABEL[a.op]} ${a.value}%`
+      const pct = fin(q.pct)
+      if (pct == null) return null
+      if (cmp(pct, a.op, a.value)) return `涨跌幅 ${pct.toFixed(2)}% ${OP_LABEL[a.op]} ${a.value}%`
       return null
     }
     case 'vol': {
-      if (q.volRatio == null) return null
-      if (cmp(q.volRatio, a.op, a.value)) return `量比 ${q.volRatio.toFixed(2)} ${OP_LABEL[a.op]} ${a.value}`
+      const volRatio = fin(q.volRatio)
+      if (volRatio == null) return null
+      if (cmp(volRatio, a.op, a.value)) return `量比 ${volRatio.toFixed(2)} ${OP_LABEL[a.op]} ${a.value}`
       return null
     }
     case 'turnover': {
-      if (q.turnover == null) return null
-      if (cmp(q.turnover, a.op, a.value)) return `换手 ${q.turnover.toFixed(2)}% ${OP_LABEL[a.op]} ${a.value}%`
+      const turnover = fin(q.turnover)
+      if (turnover == null) return null
+      if (cmp(turnover, a.op, a.value)) return `换手 ${turnover.toFixed(2)}% ${OP_LABEL[a.op]} ${a.value}%`
       return null
     }
-    case 'limitup':
-      if (q.pct != null && q.pct >= 9.5) return `${q.name || ''} 涨幅 ${q.pct.toFixed(2)}%，临近/触及涨停`
+    case 'limitup': {
+      const pct = fin(q.pct)
+      if (pct != null && pct >= 9.5) return `${q.name || ''} 涨幅 ${pct.toFixed(2)}%，临近/触及涨停`
       return null
-    case 'limitdown':
-      if (q.pct != null && q.pct <= -9.5) return `${q.name || ''} 跌幅 ${q.pct.toFixed(2)}%，临近/触及跌停`
+    }
+    case 'limitdown': {
+      const pct = fin(q.pct)
+      if (pct != null && pct <= -9.5) return `${q.name || ''} 跌幅 ${pct.toFixed(2)}%，临近/触及跌停`
       return null
+    }
     default:
       return null
   }
@@ -158,14 +169,19 @@ let state = { notifications: [], unread: 0, permission: (typeof Notification !==
 const listeners = new Set()
 // 智能确认在途去重:记录正在请求 /api/confirm_signal 的预警 id,避免同一预警跨轮并发重复判定
 const _confirming = new Set()
-function emit() { state = { ...state }; listeners.forEach((l) => l()) }
+function emit() { state = { ...state }; listeners.forEach((l) => { try { l() } catch (e) { console.error('[store] listener error', e) } }) }
 
-// 声音：用 WebAudio 生成短促“叮”，无需外部资源
+// 声音：用 WebAudio 生成短促“叮”，无需外部资源。
+// ★复用单个 AudioContext:浏览器对 AudioContext 数量有上限(约 6 个),原来每次 beep 都 new 一个且不一定被
+//   及时回收,频繁预警时会耗尽配额导致后续静音甚至抛错。改为惰性单例 + resume(应对自动播放策略挂起)。
+let _audioCtx = null
 function beep() {
   try {
     const AC = window.AudioContext || window.webkitAudioContext
     if (!AC) return
-    const ctx = new AC()
+    if (!_audioCtx) _audioCtx = new AC()
+    const ctx = _audioCtx
+    if (ctx.state === 'suspended') { try { ctx.resume() } catch { /* ignore */ } }
     const o = ctx.createOscillator(), g = ctx.createGain()
     o.connect(g); g.connect(ctx.destination)
     o.type = 'sine'; o.frequency.value = 880
@@ -173,7 +189,7 @@ function beep() {
     g.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + 0.02)
     g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35)
     o.start(); o.stop(ctx.currentTime + 0.36)
-    o.onended = () => ctx.close()
+    o.onended = () => { try { o.disconnect(); g.disconnect() } catch { /* ignore */ } }  // 断开节点即可,ctx 复用不 close
   } catch { /* ignore */ }
 }
 
@@ -274,36 +290,44 @@ export const alertStore = {
   _confirmWatching(a, q) {
     if (_confirming.has(a.id)) return // 同一预警上一次判定还没回来,跳过,避免并发重复请求
     _confirming.add(a.id)
-    const advEntry = getAdvice(a.code)
-    const payload = { alert: a, advice: advEntry && advEntry.advice, quote: q }
-    fetch(api('/api/confirm_signal'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    })
-      .then((r) => r.json())
-      .then((v) => {
-        if (!v || !v.ok) return
-        const side = v.side || sideOf(a)
-        const actZh = ACTION_ZH[side] || '操作'
-        if (v.decision === 'confirm') {
-          const conf = v.confidence != null ? `(把握${v.confidence})` : ''
-          const title = `✅ 可以${actZh} · ${a.name || a.code}`
-          const body = `${describeAlert(a)}｜确认时机已到${conf}\n📌${v.reason || '多项信号共振确认'}`
-          this.push({ code: a.code, name: a.name, title, body, alertId: 'confirm-' + a.id })
-          notify(title, body)
-          planStore.markAlertConfirmed(a.id, `确认${actZh}:${v.reason || ''}`)
-        } else if (v.decision === 'invalid') {
-          const title = `⛔ 已失效·暂不${actZh} · ${a.name || a.code}`
-          const body = `${describeAlert(a)}｜原${actZh}逻辑已被破坏\n📌${v.reason || '关键条件已破坏,建议重新评估'}`
-          this.push({ code: a.code, name: a.name, title, body, alertId: 'invalid-' + a.id })
-          notify(title, body)
-          planStore.markAlertInvalid(a.id, `已失效:${v.reason || ''}`)
-        }
-        // wait → 维持 watching,静默继续观察
+    // ★超时护栏 + 同步异常兜底:若 fetch 同步抛错(URL 异常)或请求长时间不回,
+    //   必须保证 _confirming 里的 id 最终被清除,否则该预警将永久卡在「判定中」再也无法确认。
+    const ac = new AbortController()
+    const timer = setTimeout(() => { try { ac.abort() } catch { /* ignore */ } }, 20000)
+    const clear = () => { clearTimeout(timer); _confirming.delete(a.id) }
+    try {
+      const advEntry = getAdvice(a.code)
+      const payload = { alert: a, advice: advEntry && advEntry.advice, quote: q }
+      fetch(api('/api/confirm_signal'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: ac.signal,
       })
-      .catch(() => { /* 网络/解析失败 → 静默,下轮再判 */ })
-      .finally(() => { _confirming.delete(a.id) })
+        .then((r) => r.json())
+        .then((v) => {
+          if (!v || !v.ok) return
+          const side = v.side || sideOf(a)
+          const actZh = ACTION_ZH[side] || '操作'
+          if (v.decision === 'confirm') {
+            const conf = v.confidence != null ? `(把握${v.confidence})` : ''
+            const title = `✅ 可以${actZh} · ${a.name || a.code}`
+            const body = `${describeAlert(a)}｜确认时机已到${conf}\n📌${v.reason || '多项信号共振确认'}`
+            this.push({ code: a.code, name: a.name, title, body, alertId: 'confirm-' + a.id })
+            notify(title, body)
+            planStore.markAlertConfirmed(a.id, `确认${actZh}:${v.reason || ''}`)
+          } else if (v.decision === 'invalid') {
+            const title = `⛔ 已失效·暂不${actZh} · ${a.name || a.code}`
+            const body = `${describeAlert(a)}｜原${actZh}逻辑已被破坏\n📌${v.reason || '关键条件已破坏,建议重新评估'}`
+            this.push({ code: a.code, name: a.name, title, body, alertId: 'invalid-' + a.id })
+            notify(title, body)
+            planStore.markAlertInvalid(a.id, `已失效:${v.reason || ''}`)
+          }
+          // wait → 维持 watching,静默继续观察
+        })
+        .catch(() => { /* 网络/解析/超时失败 → 静默,下轮再判 */ })
+        .finally(clear)
+    } catch { clear() }  // fetch 同步抛错:立即清理,避免 id 永久滞留
   },
 }
 

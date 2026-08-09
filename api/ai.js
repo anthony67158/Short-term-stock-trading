@@ -1004,40 +1004,54 @@ export default async function handler(req, res) {
         if (bodyBroken) {
           phase('思维链已完成，正在整理最终结论…', 'llm');
           _salvDbg.tried = true;
-          const salvTimeout = Math.max(8000, Math.min(90000, remain() - 3000));
+          const salvTimeout = Math.max(8000, Math.min(120000, remain() - 3000));
           _salvDbg.timeout = salvTimeout;
+          // ★补生成必须【流式】:实测 DeepSeek-V4-Pro 是"思考原生"模型,删掉 reasoning_effort 也照跑长思维链;
+          //   非流式补生成是"全有或全无"——要等完整 CoT+正文,90s 到点 abort → 前功尽弃(实测两次都 AbortError)。
+          //   改流式后:① token 边到边收,即使慢也不会因 abort 整段丢失;② 思维链继续实时下发,前端"生成过程"不中断。
+          //   同时把【已完成的思维链尾段】回喂,并下达"立即停止思考、只输出 JSON"的硬指令,让模型直接落结论而非重头再想。
+          const priorTail = (streamedReasoning || '').slice(-2000);
+          const salvMessages = [
+            { role: 'system', content: sysPrompt },
+            { role: 'system', content: marketTimePromptBlock() },
+            { role: 'user', content: userPrompt },
+          ];
+          if (priorTail.trim()) {
+            salvMessages.push({ role: 'assistant', content: `（我已完成分析，思考过程节选）\n${priorTail}` });
+            salvMessages.push({ role: 'user', content: '你已完成上述分析。现在【立即停止思考】，严格依据前述分析，仅输出符合系统要求的最终 JSON 对象——不要再输出任何分析、解释、思考或 markdown 包裹，直接以 { 开头输出 JSON。' });
+          }
           const salv = await callChat({
             model: useModel,
             role: useRole,
-            messages: [
-              { role: 'system', content: sysPrompt },
-              { role: 'system', content: marketTimePromptBlock() },
-              { role: 'user', content: userPrompt },
-            ],
+            messages: salvMessages,
             temperature: 0.2,
-            maxTokens: maxTokensForMode(mode, false),   // 不带思维链 → 用 base 额度,给正文留满
+            maxTokens: maxTokensForMode(mode, true),   // 仍给推理原生模型足够额度(短 CoT + 完整正文)
             timeoutMs: salvTimeout,
-            reasoning: false,                            // ★关键:关掉思维链,额度全给正文 JSON
-            forceNoReason: true,                         // ★硬关:压过端点级/全局 reasoning,否则补生成又跑 CoT 再次吃穿
+            reasoning: false,                            // 尽力关思维链
+            forceNoReason: true,                         // ★硬关端点级/全局 reasoning 注入
             responseFormat: { type: 'json_object' },
-            stream: false,
+            stream: true,                                // ★关键:流式,partial 存活 + 进度可见
           });
           _salvDbg.err = salv.resp && salv.resp.__err ? String(salv.resp.__err.name || salv.resp.__err.message || salv.resp.__err) : '';
           _salvDbg.status = salv.resp && !salv.resp.__err ? salv.resp.status : 0;
           if (salv.resp && !salv.resp.__err && salv.resp.ok) {
-            const sj = await salv.resp.json().catch(() => null);
-            const sc = sj?.choices?.[0]?.message?.content || '';
-            const src = sj?.choices?.[0]?.message?.reasoning_content || sj?.choices?.[0]?.message?.reasoning || '';
+            let sc = '', sr = '';
+            const sp = await pumpChatStream(salv.resp, {
+              onReasoning: (piece) => { rbuf += piece; if (rbuf.length >= 40 || /[\n。！？]/.test(piece)) flushR(); },
+              onContent: (piece) => { sc += piece; },
+            }).catch(() => ({ content: '', reasoning: '', finishReason: '' }));
+            flushR();
+            sc = sp.content || sc;
+            sr = sp.reasoning || '';
             _salvDbg.contentLen = sc.length;
-            _salvDbg.reasoningLen = src.length;
-            _salvDbg.finishReason = sj?.choices?.[0]?.finish_reason || '';
+            _salvDbg.reasoningLen = sr.length;
+            _salvDbg.finishReason = sp.finishReason || '';
             if (sc.trim()) {
               content = sc;
-              finishReason = sj?.choices?.[0]?.finish_reason || finishReason;
-              if (sj?.usage) usage = sj.usage;
-            } else if (src.trim()) {
-              // ★补生成仍把正文写进了 reasoning 通道(网关无视 forceNoReason 仍强开 CoT)→ 从中抠 JSON
-              const pr = parseLLMJson(src);
+              finishReason = sp.finishReason || finishReason;
+            } else if (sr.trim()) {
+              // 补生成又把正文写进思维链通道 → 从中抠 JSON
+              const pr = parseLLMJson(sr);
               if (pr && pr.value) { content = JSON.stringify(pr.value); _salvDbg.rescuedFromReason = true; }
             }
           }

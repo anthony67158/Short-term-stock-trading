@@ -64,7 +64,18 @@ async function run(spec) {
   }
   try {
     // 量化服务（走势预测/多因子分）与 LLM 操作建议（带具体价位）并发
-    const quantP = fetch(quantUrl).then((r) => r.json()).catch(() => null)
+    // ★超时护栏:量化端点冷启动/挂起时,不加超时会让下面的 Promise.all 永久 pending →
+    //   running 永不释放 → 该股再也无法重新生成。加 15s AbortController,超时按「不可用」(null)处理,
+    //   与原有 .catch(()=>null) 的降级语义完全一致(不改服务端 /predict 打分逻辑)。
+    const quantP = (async () => {
+      if (!quantUrl) return null
+      const ac = new AbortController()
+      const t = setTimeout(() => { try { ac.abort() } catch { /* ignore */ } }, 15000)
+      try {
+        const r = await fetch(quantUrl, { signal: ac.signal })
+        return await r.json()
+      } catch { return null } finally { clearTimeout(t) }
+    })()
     const adviceP = callAIStream(mode, aiPayload, onPhase, undefined, onEvent)
       .then((r) => (r && r.ok ? { advice: r.result, meta: r.meta, news: r.news, truncated: r.truncated } : null))
       .catch(() => null)

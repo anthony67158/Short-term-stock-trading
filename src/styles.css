@@ -1878,7 +1878,7 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 .acc-goal-meta b { font-variant-numeric: tabular-nums; color: var(--text); }
 .acc-goal-meta b.red { color: var(--red); }
 .acc-goal-reached { color: var(--red); display: inline-flex; align-items: center; gap: 4px; }
-.acc-goal-hint { padding: 2px var(--pad-panel-x) 14px; font-size: 11.5px; color: var(--text3); line-height: 1.6; display: flex; align-items: flex-start; gap: 5px; }
+.acc-goal-hint { padding: 2px var(--pad-panel-x) 14px; font-size: 11.5px; color: var(--text3, var(--muted)); line-height: 1.6; display: flex; align-items: flex-start; gap: 5px; }
 .acc-holdlist { display: flex; flex-direction: column; gap: 10px; padding: 4px var(--pad-panel-x) 14px; }
 .acc-hold { padding: 11px 12px; border-radius: 10px; background: var(--panel2); border: 1px solid var(--border-soft); }
 .acc-hold-top { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
@@ -3710,5 +3710,47 @@ a.mn-flash:hover { color: var(--accent); }
   /* --- 去盒化:两处 min-width:180px 的 flex 子项在窄屏改 0,消除过早换行 --- */
   /* 与 v4/v5 对 .quant-gauge/.light-main 的处理一致:靠 flex 自适应而非硬底撑宽 */
   .tech-verdict, .ipb-tip { min-width: 0; }
+}
+
+/* ================================================================
+   移动端细节精修 v7(追加覆盖层,later-wins;仅移动端断点,桌面零影响)
+   —— 集中修「账户全景」在窄屏(320~430px)的换行/撞行/撑破:
+      1) 持仓行头 名称+代码+浮盈 同行会相撞 → 名称可截断、浮盈不收缩、允许换行兜底;
+      2) 账户 KPI 大数字(总资产/各单元格值)在两列格里无截断 → 补 overflow 省略号;
+      3) 目标进度「还需净赚/需再涨」两段无 wrap → 允许换行;
+      4) 设置资金三输入行在 flex-wrap 容器里无宽度基准 → 每行至少半宽、输入框撑满。
+   纯样式,不改任何组件逻辑。
+   ================================================================ */
+@media (max-width: 720px) {
+  /* 1) 持仓行头:名称可压缩截断,代码/超配标不挤,浮盈金额固定不收缩,整体允许换行兜底 */
+  .acc-hold-top { flex-wrap: wrap; row-gap: 2px; }
+  .acc-hold-name {
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    flex-shrink: 1;
+  }
+  .acc-hold-code, .acc-hold-warn { flex-shrink: 0; }
+  .acc-hold-pnl { flex-shrink: 0; }
+  /* 持仓 meta(占比/市值/手数/现价):行距略增,换行不锯齿 */
+  .acc-hold-meta { row-gap: 4px; }
+
+  /* 2) 账户 KPI 大数字截断:总资产 hero 值与各单元格值,亿级金额不再撑破两列格
+        (3565 行只覆盖了 .ho-v/.dq-price 等,账户面板这两个类遗漏,此处补上) */
+  .acc-hero, .acc-cell { min-width: 0; }
+  .acc-hero-val, .acc-cell-v {
+    overflow: hidden; text-overflow: ellipsis; max-width: 100%; white-space: nowrap;
+  }
+
+  /* 3) 目标进度双段说明允许换行,避免「还需净赚 …」被顶出格 */
+  .acc-goal-meta { flex-wrap: wrap; gap: 6px 16px; }
+
+  /* 4) 设置资金:三输入行在窄屏至少各占一整行,输入框撑满不被压扁 */
+  .acc-edit-row { flex: 1 1 100%; min-width: 0; }
+  .acc-edit-row .wl-input { width: 100%; box-sizing: border-box; }
+}
+
+/* --- 超窄屏(≤400px):账户 hero 大数字再收一档,给标签/副行留位 --- */
+@media (max-width: 400px) {
+  .acc-hero-val { font-size: 24px; }
+  .acc-cell-v { font-size: 17px; }
 }
 

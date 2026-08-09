@@ -8,7 +8,7 @@ import { api } from './apiBase'
 
 let state = { reports: [], loading: false, loaded: false, error: '' }
 const listeners = new Set()
-function emit() { state = { ...state }; listeners.forEach((l) => l()) }
+function emit() { state = { ...state }; listeners.forEach((l) => { try { l() } catch (e) { console.error('[store] listener error', e) } }) }
 
 export const quantReportStore = {
   subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn) },

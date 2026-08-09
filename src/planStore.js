@@ -157,10 +157,27 @@ function scheduleSave() {
   if (_suspend || !_saver) return
   if (_saveTimer) clearTimeout(_saveTimer)
   _saveTimer = setTimeout(() => {
+    _saveTimer = null
     _saver({ plan: state.plan, holding: state.holding, closed: state.closed, account: state.account, alerts: state.alerts, reviews: state.reviews, adviceLog: state.adviceLog, advice: getAllAdvice(), settings: state.settings || {} })
   }, 800)
 }
-function emit() { state = { ...state }; listeners.forEach((l) => l()); scheduleSave() }
+// 立即落盘(不等 800ms 防抖):页面隐藏/关闭前把待写数据抢存一次,避免"改完立刻切走/关页 → 800ms 内没保存到云端"丢数据。
+function flushSave() {
+  if (_suspend || !_saver) return
+  if (!_saveTimer) return   // 没有待写任务(数据已存过) → 无需重复保存
+  clearTimeout(_saveTimer); _saveTimer = null
+  try {
+    _saver({ plan: state.plan, holding: state.holding, closed: state.closed, account: state.account, alerts: state.alerts, reviews: state.reviews, adviceLog: state.adviceLog, advice: getAllAdvice(), settings: state.settings || {} })
+  } catch { /* ignore */ }
+}
+// 浏览器环境:页面切后台(visibilitychange→hidden)或即将卸载(pagehide/beforeunload)时,抢存一次待写数据。
+if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+  const kick = () => { if (document.visibilityState === 'hidden') flushSave() }
+  document.addEventListener('visibilitychange', kick)
+  window.addEventListener('pagehide', flushSave)
+  window.addEventListener('beforeunload', flushSave)
+}
+function emit() { state = { ...state }; listeners.forEach((l) => { try { l() } catch (e) { console.error('[store] listener error', e) } }); scheduleSave() }
 
 // 把某笔持仓上已配对的做T收益，归档为独立的 closed 记录(kind:'T')；
 // 未配平的开口腿按净额方向归档为 加仓(BUY) / 减仓(SELL)，避免"当天没追平底仓"时无处归类。
@@ -242,7 +259,7 @@ export const planStore = {
     }
     // AI 操作建议【结果】跨设备回灌：用云端数据整体覆盖本地建议缓存(登出/空账号→清空)
     setAllAdvice((d && d.advice) || {})
-    listeners.forEach((l) => l())
+    listeners.forEach((l) => { try { l() } catch (e) { console.error('[store] listener error', e) } })
     _suspend = false
     // 登录/切换账号载入后，自动结算跨天未结算的做T（会触发一次云端回存）
     this.autoSettleTFlows()
@@ -302,7 +319,7 @@ export const planStore = {
         changed = true
       }
     }
-    if (changed) { listeners.forEach((l) => l()); scheduleSave() }
+    if (changed) { listeners.forEach((l) => { try { l() } catch (e) { console.error('[store] listener error', e) } }); scheduleSave() }
     // 5) 服务端批量生成进度回灌:喂给 adviceBatch,让本机进度条显示【服务端/另一设备】正在跑的批量进程。
     //    (与 advice/adviceLog 合并解耦:进度是纯展示态,不进 changed/不触发回存)
     if (d.batchProgress && typeof d.batchProgress === 'object') {
@@ -1321,15 +1338,17 @@ registerAdviceSync(() => { try { scheduleSave() } catch { /* ignore */ } })
 // ============ 账户全景计算：传入 holding + 实时报价 quote(按code索引) + account =============
 // 返回：持仓市值、成本、浮盈、总资产、可用现金、总仓位%、每笔持仓的市值/占比/浮盈
 export function computePortfolio(holding, quoteMap, account) {
+  // 有限数兜底:任何非有限值(NaN/字符串/Infinity)一律折成 0,防止一条脏数据把总市值/浮盈亏整列算成 NaN。
+  const fin = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0 }
   const positions = (holding || []).map((h) => {
     const q = quoteMap && quoteMap[h.code]
     // 现价必须 > 0 才有效:休市/接口异常会返回 0。兜底顺序:实时现价 → 昨收 prevClose → 买入成本,
     // 保证市值/浮盈亏永远有个合理数值,既不为 0 也不会被算成 -100%。
-    const price = q && Number(q.price) > 0 ? q.price
-      : (q && Number(q.prevClose) > 0 ? Number(q.prevClose) : h.buyPrice)
-    const shares = (h.qty || 0) * 100
+    const price = fin(q && Number(q.price) > 0 ? q.price
+      : (q && Number(q.prevClose) > 0 ? Number(q.prevClose) : h.buyPrice))
+    const shares = fin(h.qty) * 100
     const mktValue = +(price * shares).toFixed(2)          // 市值
-    const costValue = +((h.buyPrice || 0) * shares + (h.buyFee || 0)).toFixed(2) // 含费成本
+    const costValue = +(fin(h.buyPrice) * shares + fin(h.buyFee)).toFixed(2) // 含费成本
     const floatPnl = +(mktValue - costValue).toFixed(2)     // 浮动盈亏
     const floatPct = costValue ? +((floatPnl / costValue) * 100).toFixed(2) : 0
     return { id: h.id, code: h.code, name: h.name, qty: h.qty, price, buyPrice: h.buyPrice, mktValue, costValue, floatPnl, floatPct }
@@ -1342,7 +1361,18 @@ export function computePortfolio(holding, quoteMap, account) {
   let totalAssets = account && account.totalAssets != null ? account.totalAssets : null
   if (totalAssets == null) totalAssets = cash != null ? +(holdMktValue + cash).toFixed(2) : holdMktValue
   const position = totalAssets ? +((holdMktValue / totalAssets) * 100).toFixed(1) : null // 总仓位%
-  const available = cash != null ? cash : (totalAssets != null ? +(totalAssets - holdMktValue).toFixed(2) : null)
+  // 可用资金 = 总资产 − 持仓市值(账户恒等式:A股账户「总资产」= 持仓市值 + 可用资金)。
+  // ★关键修正:即便用户在「可用资金」里手填了数字,也【不能超过 总资产−持仓市值】——否则会把
+  //   已经买成持仓的钱重复算作可买资金(用户常把「总本金」误填进可用资金,导致 AI 拿着不存在的钱建议加仓)。
+  //   故:用户填了总资产时,可用一律以「总资产−持仓市值」封顶并夹到 ≥0;只填可用资金(未填总资产)时才直接采信。
+  let available
+  if (account && account.totalAssets != null) {
+    const free = +(account.totalAssets - holdMktValue).toFixed(2)
+    const freeClamped = free > 0 ? free : 0
+    available = cash != null ? Math.min(cash, freeClamped) : freeClamped
+  } else {
+    available = cash != null ? cash : null
+  }
   // 单票占比（对总资产）
   positions.forEach((p) => { p.weight = totalAssets ? +((p.mktValue / totalAssets) * 100).toFixed(1) : null })
   // ===== 目标资产（以终为始）=====

@@ -95,6 +95,11 @@ export default async function handler(req, res) {
       fetchSinaFlash(10),
       fetchFinnhubNews(6),
     ]);
+    // ★海外/商品兜底:fetchOverseas 异常返回 null 时,下方多处 overseas.indices / overseas.commodities 会抛
+    //   TypeError 直接把整篇日报生成掐断。给个安全空壳,海外段缺失就留空,不影响 A 股主体内容。
+    const overseasSafe = (overseas && typeof overseas === 'object') ? overseas : {};
+    if (!Array.isArray(overseasSafe.indices)) overseasSafe.indices = [];
+    if (!Array.isArray(overseasSafe.commodities)) overseasSafe.commodities = [];
     phase('数据齐全，正在撰写策略日报…');
 
     // 板块资金 TOP/BOTTOM
@@ -125,7 +130,7 @@ export default async function handler(req, res) {
     phase('数据齐全，正在撰写策略日报…');
     const dataBlock = {
       session: SESSION_CN[session], day,
-      aIndices: aIdx, overseas: overseas.indices, commodities: overseas.commodities,
+      aIndices: aIdx, overseas: overseasSafe.indices, commodities: overseasSafe.commodities,
       sectorFlow, limitUpCount: limitCount,
       sectorNews: sectorNews.map((s) => ({ 板块: s.name, 新闻: s.news.map((n) => n.title).slice(0, 3) })),
       macroNews: macroNews.map((n) => n.title),
@@ -190,7 +195,7 @@ export default async function handler(req, res) {
       ok: true, cached: false, day, session, sessionCn: SESSION_CN[session], updatedAt: Date.now(),
       report,
       // 附上关键数据供前端展示与"数据来源"标注
-      data: { aIndices: aIdx, overseas: overseas.indices, commodities: overseas.commodities, sectorFlow, limitUpCount: limitCount },
+      data: { aIndices: aIdx, overseas: overseasSafe.indices, commodities: overseasSafe.commodities, sectorFlow, limitUpCount: limitCount },
       newsRefs: [...(clsNews || []).slice(0, 4), ...(finnhubNews || []).slice(0, 2), ...macroNews.slice(0, 2), ...sectorNews.flatMap((s) => s.news.slice(0, 1))].filter((n) => n && n.url).slice(0, 10),
     };
     // 精简摘要：供操作建议/复盘复用为"外部市场环境"(阶段2)

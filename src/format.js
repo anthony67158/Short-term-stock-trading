@@ -1,14 +1,18 @@
 // 格式化工具
 export function fmtYi(v) {
   // 元 -> 亿
-  const yi = v / 1e8;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '--';
+  const yi = n / 1e8;
   if (Math.abs(yi) >= 100) return yi.toFixed(0);
   if (Math.abs(yi) >= 1) return yi.toFixed(2);
-  return (v / 1e4).toFixed(0) + 'w';
+  return (n / 1e4).toFixed(0) + 'w';
 }
 
 export function fmtInflow(v) {
-  const yi = v / 1e8;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '--';
+  const yi = n / 1e8;
   const s = (yi >= 0 ? '+' : '') + yi.toFixed(2);
   return s + '亿';
 }
@@ -20,11 +24,15 @@ export function pctClass(v) {
 }
 
 export function fmtPct(v) {
-  return (v > 0 ? '+' : '') + v.toFixed(2) + '%';
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '--';
+  return (n > 0 ? '+' : '') + n.toFixed(2) + '%';
 }
 
 export function fmtNum(v, d = 2) {
-  return Number(v).toFixed(d);
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '--';
+  return n.toFixed(d);
 }
 
 // 原样显示价格：接口/用户录入是多少就显示多少，绝不四舍五入。
