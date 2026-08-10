@@ -87,5 +87,7 @@
   "model_format": "lightgbm_text",
   "trained_by": "tushare_rebuild_P1",
   "data_source": "tushare_qfq_477stocks_2022-2026",
+  "data_end_date": "2026-07-29",
+  "evaluation_protocol": "same_forward_unseen_holdout",
   "note": "P1: 数据源升级为Tushare全市场清洗前复权; 36因子口径不变, 线上兼容; holdout对拍显示正交因子(ext)+0.0044(<0.005护栏)已验证并暂存,未纳入线上热路径"
 }

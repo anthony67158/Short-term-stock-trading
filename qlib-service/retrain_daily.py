@@ -11,9 +11,9 @@
 
 每天凌晨的流程：
   1) 重建数据集：拉最新日线 → 因子 → ATR 锚定 5 日达标标签 → dataset.npz（新成熟样本自动进入）。
-  2) 切「保留评测集」：按日期排序取最近 HOLDOUT_FRAC（默认 15%）当样本外测试集。
-  3) 冠军评测：加载现役 bundled 模型，在保留集上算 AUC（champ_auc）。
-  4) 挑战者：仅用「保留集之前」的数据训练一个新模型，在同一保留集上算 AUC（chall_auc）。
+  2) 从 OSS 同步现役冠军及其训练数据截止日（CI runner 本身无状态）。
+  3) 切「前向保留集」：只取冠军训练截止日之后的新成熟样本，确保冠军从未见过。
+  4) 冠军与挑战者在同一前向保留集上计算 AUC，避免跨数据源、跨市场区间硬比历史 AUC。
   5) 护栏放行条件（全部满足才晋级）：
         - chall_auc >= champ_auc - TOL           （不明显更差）
         - chall_auc >= AUC_FLOOR                  （高于绝对下限，避免全局退化）
@@ -61,6 +61,8 @@ HOLDOUT_FRAC = float(os.environ.get("RETRAIN_HOLDOUT_FRAC", "0.15"))
 # ---- 信号头(高把握买点)护栏：只在样本外精确率达标时才更新，绝不降低可信度 ----
 SIGNAL_PREC_FLOOR = float(os.environ.get("RETRAIN_SIGNAL_PREC_FLOOR", "0.83"))  # 样本外精确率下限
 SIGNAL_MIN_N = int(os.environ.get("RETRAIN_SIGNAL_MIN_N", "100"))               # holdout 上最少信号数
+FORWARD_MIN_SAMPLES = int(os.environ.get("RETRAIN_FORWARD_MIN_SAMPLES", "1000"))
+FORWARD_MIN_DATES = int(os.environ.get("RETRAIN_FORWARD_MIN_DATES", "3"))
 
 
 def log(*a):
@@ -76,6 +78,74 @@ def append_history(rec):
     rec = {"ts": int(time.time()), "at": time.strftime("%Y-%m-%d %H:%M:%S"), **rec}
     with open(HISTORY, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+
+def merge_champion_metadata(remote_meta, bundled_meta):
+    """同一冠军首次迁移时，保留仓库补充的前向评测元数据。"""
+    merged = dict(remote_meta or {})
+    if merged.get("trained_at") != (bundled_meta or {}).get("trained_at"):
+        return merged
+    for key in ("data_end_date", "evaluation_protocol"):
+        if key not in merged and bundled_meta.get(key) is not None:
+            merged[key] = bundled_meta[key]
+    return merged
+
+
+def sync_champion_from_oss():
+    """CI runner 是无状态的，训练前必须从 OSS 拉取真正的现役冠军。
+
+    仓库内 bundled 仅是冷启动兜底。如果不做同步，某次晋级上传 OSS 后，下一次
+    Actions 仍会读取仓库旧模型，冠军-挑战者状态无法延续。
+    """
+    if not (os.environ.get("OSS_ACCESS_KEY_ID") and os.environ.get("OSS_BUCKET")):
+        log("未配置 OSS_*，使用仓库 bundled 冠军")
+        return False
+    try:
+        from upload_model import bucket
+        b = bucket()
+    except Exception as e:  # noqa: BLE001
+        log("OSS 冠军同步初始化失败，使用 bundled:", str(e)[:160])
+        return False
+
+    def download_pair(model_key, meta_key, model_path, meta_path, preserve_migration=False):
+        model_tmp, meta_tmp = model_path + ".sync", meta_path + ".sync"
+        try:
+            bundled_meta = {}
+            if preserve_migration and os.path.exists(meta_path):
+                bundled_meta = json.load(open(meta_path, encoding="utf-8"))
+            with open(model_tmp, "wb") as fh:
+                fh.write(b.get_object(model_key).read())
+            with open(meta_tmp, "wb") as fh:
+                fh.write(b.get_object(meta_key).read())
+            lgb.Booster(model_file=model_tmp)
+            remote_meta = json.load(open(meta_tmp, encoding="utf-8"))
+            if preserve_migration:
+                remote_meta = merge_champion_metadata(remote_meta, bundled_meta)
+                with open(meta_tmp, "w", encoding="utf-8") as fh:
+                    json.dump(remote_meta, fh, ensure_ascii=False, indent=2)
+            os.replace(model_tmp, model_path)
+            os.replace(meta_tmp, meta_path)
+            return True
+        except Exception:
+            for path in (model_tmp, meta_tmp):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+            return False
+
+    prefix = os.environ.get("QUANT_MODEL_PREFIX", "quantmodel/")
+    score_ok = download_pair(
+        prefix + "lgb_score.txt", prefix + "meta.json",
+        BUNDLED_MODEL, BUNDLED_META,
+        preserve_migration=True,
+    )
+    signal_ok = download_pair(
+        prefix + "lgb_signal.txt", prefix + "signal_meta.json",
+        BUNDLED_SIGNAL, BUNDLED_SIGNAL_META,
+    )
+    log(f"OSS 现役冠军同步: score={score_ok} signal={signal_ok}")
+    return score_ok
 
 
 def build_dataset(pool, bars, horizon):
@@ -121,7 +191,27 @@ def date_holdout_split(dates, frac):
     return np.asarray(train_idx), np.asarray(hold_idx), str(cut_date)
 
 
-def align_features(booster, meta, cur_feats, X):
+def _date_key(value):
+    return "".join(ch for ch in str(value) if ch.isdigit())
+
+
+def forward_holdout_split(dates, champion_data_end):
+    """用冠军训练截止日之后的成熟样本做真正的前向样本外评测。"""
+    end_key = _date_key(champion_data_end)
+    keys = np.asarray([_date_key(value) for value in dates])
+    train_idx = np.flatnonzero(keys <= end_key)
+    hold_idx = np.flatnonzero(keys > end_key)
+    hold_dates = sorted({str(dates[i]) for i in hold_idx}, key=_date_key)
+    return train_idx, hold_idx, hold_dates
+
+
+def forward_holdout_ready(holdout_n, holdout_dates, min_samples=None, min_dates=None):
+    min_samples = FORWARD_MIN_SAMPLES if min_samples is None else min_samples
+    min_dates = FORWARD_MIN_DATES if min_dates is None else min_dates
+    return holdout_n >= min_samples and len(holdout_dates) >= min_dates
+
+
+def align_features(meta, cur_feats, X):
     """把当前数据集的特征列，按冠军 meta 里的 feat_names 顺序对齐，供冠军打分。
     当前训练/推理同源，顺序一般一致；此处做防御式对齐，特征集不兼容则返回 None。"""
     champ_feats = (meta or {}).get("feat_names")
@@ -136,6 +226,17 @@ def align_features(booster, meta, cur_feats, X):
             return None  # 特征集不兼容，无法公平对拍
         idx.append(cur_map[f])
     return X[:, idx]
+
+
+def load_champion():
+    if not (os.path.exists(BUNDLED_MODEL) and os.path.exists(BUNDLED_META)):
+        return None, {}
+    try:
+        booster = lgb.Booster(model_file=BUNDLED_MODEL)
+        meta = json.load(open(BUNDLED_META, encoding="utf-8"))
+        return booster, meta
+    except Exception:  # noqa: BLE001
+        return None, {}
 
 
 def champion_baseline():
@@ -193,6 +294,9 @@ def promote(X, y, dates, feat_names, chall_hold_auc, champ_auc):
         "trained_at": int(time.time()),
         "model_format": "lightgbm_text",
         "trained_by": "retrain_daily",
+        "data_source": "tencent_qfq",
+        "data_end_date": str(max(dates, key=_date_key)),
+        "evaluation_protocol": "same_forward_unseen_holdout",
     }
     json.dump(meta, open(BUNDLED_META, "w"), ensure_ascii=False, indent=2)
     log(f"已覆盖 bundled 模型 (cv_auc={cv_auc:.4f} n_est={n_est})")
@@ -284,6 +388,7 @@ def main():
     a = ap.parse_args()
 
     t0 = time.time()
+    sync_champion_from_oss()
     try:
         if not a.skip_build:
             build_dataset(a.pool, a.bars, a.horizon)
@@ -311,15 +416,59 @@ def main():
             append_history(rec)
         sys.exit(0)
 
-    tr_idx, hold_idx, cut_date = date_holdout_split(dates, HOLDOUT_FRAC)
-    log(f"保留评测集切分: cut_date={cut_date} train={len(tr_idx)} holdout={len(hold_idx)}")
+    champion, champion_meta = load_champion()
+    champion_data_end = champion_meta.get("data_end_date")
+    hold_dates = []
+    evaluation_protocol = "legacy_recorded_holdout"
+    if champion is not None and champion_data_end:
+        tr_idx, hold_idx, hold_dates = forward_holdout_split(dates, champion_data_end)
+        if not forward_holdout_ready(len(hold_idx), hold_dates):
+            rec = {
+                "decision": "skip", "reason": "insufficient_forward_holdout",
+                "champion_data_end": champion_data_end,
+                "holdout_n": int(len(hold_idx)), "holdout_dates": hold_dates,
+                "required_samples": FORWARD_MIN_SAMPLES,
+                "required_dates": FORWARD_MIN_DATES,
+            }
+            if not a.dry_run:
+                append_history(rec)
+            log("冠军训练后新增成熟样本不足，等待积累:", json.dumps(rec, ensure_ascii=False))
+            return
+        champion_X = align_features(champion_meta, feat_names, X[hold_idx])
+        if champion_X is None:
+            append_history({
+                "decision": "error", "stage": "feature_alignment",
+                "reason": "champion_features_incompatible",
+            })
+            log("冠军特征与当前数据集不兼容，停止对拍")
+            sys.exit(1)
+        if len(set(y[hold_idx])) < 2:
+            rec = {
+                "decision": "skip", "reason": "single_class_forward_holdout",
+                "champion_data_end": champion_data_end,
+                "holdout_n": int(len(hold_idx)), "holdout_dates": hold_dates,
+            }
+            if not a.dry_run:
+                append_history(rec)
+            log("前向保留集只有单一标签，等待更多成熟样本")
+            return
+        champ_auc = float(roc_auc_score(y[hold_idx], champion.predict(champion_X)))
+        champ_src = "same_forward_unseen_holdout"
+        cut_date = hold_dates[0]
+        evaluation_protocol = "same_forward_unseen_holdout"
+        log(f"前向评测集: champion_data_end={champion_data_end} "
+            f"dates={len(hold_dates)} train={len(tr_idx)} holdout={len(hold_idx)}")
+    else:
+        # 兼容尚未记录训练截止日的旧冠军；当前 bundled 已补齐该字段，
+        # 这里只保留为部署迁移期间的兜底。
+        tr_idx, hold_idx, cut_date = date_holdout_split(dates, HOLDOUT_FRAC)
+        champ_auc, champ_src = champion_baseline()
+        log(f"旧版保留评测集: cut_date={cut_date} train={len(tr_idx)} holdout={len(hold_idx)}")
 
-    # 冠军基线：用「晋级当时记录的样本外 AUC」做 leak-free 对拍(见 champion_baseline 说明)
-    champ_auc, champ_src = champion_baseline()
-    # 挑战者：只用 train 段拟合，在最近 holdout 段做干净样本外评测
+    # 挑战者与冠军严格在同一保留集上评测
     chall_auc, _ = train_challenger(X[tr_idx], y[tr_idx], dates[tr_idx],
                                     X[hold_idx], y[hold_idx])
-    log(f"样本外 AUC → 冠军基线={champ_auc if champ_auc is None else round(champ_auc,4)}"
+    log(f"样本外 AUC → 冠军={champ_auc if champ_auc is None else round(champ_auc,4)}"
         f"(来源{champ_src}) 挑战者={round(chall_auc,4)} (容差 {TOL}, 下限 {AUC_FLOOR})")
 
     # ---- 护栏决策 ----
@@ -334,6 +483,9 @@ def main():
         "champ_baseline_auc": (None if no_champ else round(champ_auc, 4)),
         "champ_baseline_src": champ_src,
         "chall_holdout_auc": round(chall_auc, 4),
+        "evaluation_protocol": evaluation_protocol,
+        "champion_data_end": champion_data_end,
+        "holdout_dates": hold_dates,
         "tol": TOL, "auc_floor": AUC_FLOOR,
         "elapsed_s": round(time.time() - t0, 1),
     }
