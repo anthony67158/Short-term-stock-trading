@@ -42,6 +42,14 @@ export default function LLMConfig() {
   const [pool, setPool] = useState([])             // [{id, baseUrl, inflight, fails, cooling, cooldownMsLeft}]
   const [showPool, setShowPool] = useState(false)  // 展开多端点面板
   const [epTesting, setEpTesting] = useState({})   // { [id]: {ok, msg} } 单端点验证结果
+  const [judgeRole, setJudgeRole] = useState({})
+  const [judgeEndpoint, setJudgeEndpoint] = useState({
+    baseUrl: '', apiKey: '', apiKeyMask: '', hasKey: false,
+    model: '', reasoning: false, enabled: true,
+  })
+  const [judgePool, setJudgePool] = useState(null)
+  const [judgeTesting, setJudgeTesting] = useState({})
+  const [judgeModelList, setJudgeModelList] = useState([])
 
   // 角色 & 模型
   const [roles, setRoles] = useState({})           // { chat:{label,def}, ... }
@@ -65,8 +73,20 @@ export default function LLMConfig() {
         setHasKey(!!c.hasKey)
         setKeyMask(c.apiKeyMask || '')
         setRoles(j.roles || {})
+        setJudgeRole(j.judgeRole || {})
         setModels({ ...(c.models || {}) })
         setReasoning({ ...(c.reasoning || {}) })
+        setJudgeEndpoint({
+          baseUrl: c.judgeEndpoint?.baseUrl || '',
+          apiKey: '',
+          apiKeyMask: c.judgeEndpoint?.apiKeyMask || '',
+          hasKey: !!c.judgeEndpoint?.hasKey,
+          model: c.judgeEndpoint?.model || j.judgeRole?.def || '',
+          reasoning: !!c.judgeEndpoint?.reasoning,
+          enabled: c.judgeEndpoint?.enabled !== false,
+          source: c.judgeEndpoint?.source || '',
+        })
+        setJudgePool(j.judgePool || null)
         const eps = Array.isArray(c.endpoints) ? c.endpoints : []
         setEndpoints(eps)
         setPool(Array.isArray(j.pool) ? j.pool : [])
@@ -123,9 +143,50 @@ export default function LLMConfig() {
     setEp(card.ep.id, { reasoning: { ...(card.ep.reasoning || {}), [role]: !!v } })
   }
 
+  const setJudge = (patch) => setJudgeEndpoint((current) => ({ ...current, ...patch }))
+  const verifyJudgeEndpoint = async ({ required = false } = {}) => {
+    if (judgeEndpoint.enabled === false) return true
+    if (!judgeEndpoint.baseUrl.trim()) {
+      if (required) setErr('请填写 Judge 专用端点地址')
+      return false
+    }
+    if (!judgeEndpoint.model.trim()) {
+      if (required) setErr('请填写 Judge 专用模型')
+      return false
+    }
+    if (!judgeEndpoint.apiKey.trim() && !judgeEndpoint.hasKey) {
+      if (required) setErr('请填写 Judge 专用端点密钥')
+      return false
+    }
+    setJudgeTesting({ busy: true })
+    try {
+      const response = await callConfig('verify', {
+        target: 'judge',
+        baseUrl: judgeEndpoint.baseUrl.trim(),
+        apiKey: judgeEndpoint.apiKey.trim(),
+      })
+      const ok = !!(response && response.ok)
+      const available = Array.isArray(response?.models) ? response.models : []
+      setJudgeModelList(available)
+      setJudgeTesting({
+        ok,
+        msg: ok
+          ? (response.listable ? `可用 · ${available.length} 个模型` : '端点可用')
+          : (response?.error || '验证失败'),
+      })
+      if (!ok && required) setErr(`Judge 专用端点验证失败：${response?.error || '请检查连接信息'}`)
+      return ok
+    } catch (error) {
+      setJudgeTesting({ ok: false, msg: error.message || String(error) })
+      if (required) setErr('Judge 专用端点验证失败')
+      return false
+    }
+  }
+
   // —— Step 1 → 2：验证连接、拉取模型清单 ——
   const verifyAndNext = async () => {
     setErr(''); setNotice('')
+    if (!(await verifyJudgeEndpoint({ required: true }))) return
     // ===== 池模式:逐端点验证(含主端点),各端点分别记录可用模型清单 =====
     if (poolMode) {
       const eps = activeEndpoints()
@@ -197,36 +258,62 @@ export default function LLMConfig() {
   // —— Step 2 → 3：测试所选模型可用性 ——
   const testAndNext = async () => {
     setErr(''); setNotice(''); setTestResults(null)
-    // 收集所有端点卡片上填写的模型(主端点全局 models + 各附加端点自带 models),去重
-    const gathered = new Set(Object.values(models).filter(Boolean))
+    // 通用角色和 Judge 必须分别用各自端点测试，避免“模型可用”结论测错网关。
+    const gathered = new Set(Object.keys(roles).map((role) => models[role]).filter(Boolean))
     if (poolMode) {
       activeEndpoints().forEach((ep) => {
-        Object.values(ep.models || {}).forEach((m) => { if (m) gathered.add(m) })
+        Object.entries(ep.models || {}).forEach(([role, model]) => {
+          if (role !== 'judge' && model) gathered.add(model)
+        })
       })
     }
     const chosen = [...gathered]
-    if (!chosen.length) { setErr('请至少为一个角色选择模型'); return }
-    // 池模式:用某个带明文 key 的有效端点做测试(掩码/已存 key 无法在线测)
+    if (!chosen.length && judgeEndpoint.enabled === false) {
+      setErr('请至少为一个角色选择模型')
+      return
+    }
+
     let testBase = baseUrl.trim(), testKey = apiKey.trim()
     if (poolMode) {
-      // 优先用主端点(若其 key 为明文),否则找一个带明文 key 的附加端点
-      if (!(testKey && !/\*/.test(testKey))) {
+      if (!testBase || (!testKey && !hasKey)) {
         const ep = activeEndpoints().find((e) => e.apiKey && !/\*/.test(e.apiKey))
-        if (!ep) {
-          setStep(3)
-          setNotice('资源池端点均为已存 Key，无法在线测试；如需实测请回上一步重输某端点的 Key。可直接保存。')
-          return
-        }
-        testBase = ep.baseUrl.trim(); testKey = ep.apiKey.trim()
+        if (ep) { testBase = ep.baseUrl.trim(); testKey = ep.apiKey.trim() }
       }
     }
+
     setStep(3)
     setBusy(true)
     try {
-      const j = await callConfig('test', { baseUrl: testBase, apiKey: testKey, models: chosen })
-      if (!j) { setErr('测试请求失败'); setBusy(false); return }
-      setTestResults(Array.isArray(j.results) ? j.results : [])
-      if (!j.ok) setNotice('部分模型不可用，可返回上一步更换后再测；或直接保存（不影响可用模型）')
+      const requests = []
+      if (chosen.length && testBase && (testKey || hasKey)) {
+        requests.push(
+          callConfig('test', { baseUrl: testBase, apiKey: testKey, models: chosen })
+            .then((result) => ({ target: '通用端点', result }))
+        )
+      }
+      if (judgeEndpoint.enabled !== false) {
+        requests.push(
+          callConfig('test', {
+            target: 'judge',
+            baseUrl: judgeEndpoint.baseUrl.trim(),
+            apiKey: judgeEndpoint.apiKey.trim(),
+            models: [judgeEndpoint.model.trim()],
+          }).then((result) => ({ target: 'Judge 专用端点', result }))
+        )
+      }
+      if (!requests.length) {
+        setNotice('当前没有可在线测试的端点，可直接保存配置')
+        setTestResults([])
+        return
+      }
+      const responses = await Promise.all(requests)
+      const results = responses.flatMap(({ target, result }) =>
+        (Array.isArray(result?.results) ? result.results : []).map((item) => ({ ...item, target }))
+      )
+      setTestResults(results)
+      if (responses.some(({ result }) => !result?.ok)) {
+        setNotice('部分模型不可用，可返回上一步检查端点或更换模型')
+      }
     } catch (e) {
       setErr('测试失败：' + (e.message || e))
     } finally {
@@ -239,7 +326,19 @@ export default function LLMConfig() {
     setErr(''); setNotice('')
     setBusy(true)
     try {
-      const payload = { baseUrl: baseUrl.trim(), apiKey: apiKey.trim(), models, reasoning }
+      const payload = {
+        baseUrl: baseUrl.trim(),
+        apiKey: apiKey.trim(),
+        models: Object.fromEntries(Object.keys(roles).map((role) => [role, models[role] || ''])),
+        reasoning: Object.fromEntries(Object.keys(roles).map((role) => [role, !!reasoning[role]])),
+        judgeEndpoint: {
+          baseUrl: judgeEndpoint.baseUrl.trim(),
+          apiKey: judgeEndpoint.apiKey.trim(),
+          model: judgeEndpoint.model.trim(),
+          reasoning: !!judgeEndpoint.reasoning,
+          enabled: judgeEndpoint.enabled !== false,
+        },
+      }
       // 仅当用户启用了多端点面板时才提交 endpoints(整组替换);未启用则传空数组=清空池,退回单端点
       if (showPool) {
         payload.endpoints = endpoints.map((e) => ({
@@ -249,13 +348,16 @@ export default function LLMConfig() {
           apiKey: (e.apiKey != null && e.apiKey !== '') ? e.apiKey.trim() : '',
           weight: e.weight,
           enabled: e.enabled !== false,
-          // 端点级模型:各角色分别设定(留空由后端回退全局/默认)
+          // 通用端点只承接通用角色，Judge 使用上面的独立端点。
           models: e.models && typeof e.models === 'object'
-            ? Object.fromEntries(Object.entries(e.models).filter(([, v]) => v && String(v).trim()))
+            ? Object.fromEntries(Object.entries(e.models).filter(([role, value]) =>
+              role !== 'judge' && value && String(value).trim()
+            ))
             : {},
-          // 端点级深度思考:各角色分别设定(未设=false,后端归一化)
           reasoning: e.reasoning && typeof e.reasoning === 'object'
-            ? Object.fromEntries(Object.entries(e.reasoning).filter(([, v]) => v != null).map(([r, v]) => [r, !!v]))
+            ? Object.fromEntries(Object.entries(e.reasoning).filter(([role, value]) =>
+              role !== 'judge' && value != null
+            ).map(([role, value]) => [role, !!value]))
             : {},
         }))
       } else {
@@ -264,6 +366,7 @@ export default function LLMConfig() {
       const j = await callConfig('save', payload)
       if (!j || !j.ok) { setErr((j && j.error) || '保存失败'); setBusy(false); return }
       if (Array.isArray(j.pool)) setPool(j.pool)
+      setJudgePool(j.judgePool || null)
       setNotice('已保存，全系统即时生效')
       setTimeout(() => close(), 800)
     } catch (e) {
@@ -380,6 +483,71 @@ export default function LLMConfig() {
                 </div>
               )}
 
+              <div className={'llm-judge-card' + (judgeEndpoint.enabled === false ? ' off' : '')}>
+                <div className="llm-judge-head">
+                  <span className="llm-judge-title"><Icon name="gauge" size={14} /> Judge 专用端点</span>
+                  <span className="llm-judge-badge">不参与通用资源池</span>
+                  {judgePool && (
+                    <span className={'llm-ep-health' + (judgePool.cooling ? ' cooling' : (judgePool.fails ? ' warn' : ' ok'))}>
+                      {judgePool.cooling
+                        ? `熔断中 ${Math.ceil((judgePool.cooldownMsLeft || 0) / 1000)}秒`
+                        : `在途${judgePool.inflight || 0} · 失败${judgePool.fails || 0}`}
+                    </span>
+                  )}
+                  <button type="button"
+                    className={'llm-reason-toggle' + (judgeEndpoint.enabled !== false ? ' on' : '')}
+                    onClick={() => setJudge({ enabled: judgeEndpoint.enabled === false })}
+                    title="启用或停用 Judge 专用端点">
+                    <span className="llm-reason-text">{judgeEndpoint.enabled !== false ? '启用' : '停用'}</span>
+                    <span className="llm-reason-track"><span className="llm-reason-thumb" /></span>
+                  </button>
+                </div>
+                <div className="llm-hint">
+                  交易时机确认只走此端点，不与操盘军师和智能体争抢连接。建议使用低延迟、结构化输出稳定的模型。
+                </div>
+                {judgeEndpoint.source?.startsWith('legacy-') && (
+                  <div className="llm-hint llm-hint-warn">
+                    <Icon name="info" size={12} /> 已从旧配置迁移，目前仍沿用原连接；请改成独立网关或独立密钥后保存。
+                  </div>
+                )}
+                <div className="llm-judge-grid">
+                  <input className="wl-input auth-input" placeholder="Judge 专用 Base URL"
+                    value={judgeEndpoint.baseUrl} spellCheck={false}
+                    onChange={(event) => setJudge({ baseUrl: event.target.value })} />
+                  <input className="wl-input auth-input" type="password" spellCheck={false}
+                    placeholder={judgeEndpoint.hasKey
+                      ? `已保存（${judgeEndpoint.apiKeyMask || '****'}），留空沿用`
+                      : 'Judge 专用 API Key'}
+                    value={judgeEndpoint.apiKey}
+                    onChange={(event) => setJudge({ apiKey: event.target.value })} />
+                </div>
+                <div className="llm-judge-model-row">
+                  <input className="wl-input auth-input" list="llm-judge-model-list" spellCheck={false}
+                    placeholder={judgeRole.def || '低延迟模型名'}
+                    value={judgeEndpoint.model}
+                    onChange={(event) => setJudge({ model: event.target.value })} />
+                  <datalist id="llm-judge-model-list">
+                    {judgeModelList.map((model) => <option key={model} value={model} />)}
+                  </datalist>
+                  <button type="button"
+                    className={'llm-reason-toggle' + (judgeEndpoint.reasoning ? ' on' : '')}
+                    onClick={() => setJudge({ reasoning: !judgeEndpoint.reasoning })}
+                    title="Judge 通常建议关闭深度思考以降低确认延迟">
+                    <span className="llm-reason-text"><Icon name="brain" size={12} /> 深度思考</span>
+                    <span className="llm-reason-track"><span className="llm-reason-thumb" /></span>
+                  </button>
+                  <button type="button" className="btn llm-ep-verify"
+                    disabled={judgeTesting.busy || judgeEndpoint.enabled === false}
+                    onClick={() => verifyJudgeEndpoint()}>
+                    <Icon name={judgeTesting.busy ? 'refresh' : 'bolt'} size={13} className={judgeTesting.busy ? 'spin' : ''} />
+                    验证专用端点
+                  </button>
+                </div>
+                {judgeTesting.msg && (
+                  <div className={'llm-ep-msg' + (judgeTesting.ok ? ' ok' : ' bad')}>{judgeTesting.msg}</div>
+                )}
+              </div>
+
               {/* 多端点资源池（可选）：折叠区，配置后覆盖上方单端点，提供路由+熔断+故障转移 */}
               <div className="llm-ep">
                 <button type="button" className="llm-ep-toggle" onClick={() => setShowPool((v) => !v)}>
@@ -455,8 +623,8 @@ export default function LLMConfig() {
             <div className="llm-pane">
               <div className="llm-hint" style={{ marginBottom: 10 }}>
                 {poolMode
-                  ? `资源池已启用。下方逐个列出你配置的所有端点(含主端点),请为每个端点分别指定各角色的模型——不同网关同名角色可能是不同模型名。附加端点某角色留空=该端点不承接此角色(不会借用主端点的模型),仅由填了该角色的端点参与分发。`
-                  : `为系统各处 AI 分别指定模型${listable ? `（共 ${modelList.length} 个可选）` : '（手动填写模型名）'}`}
+                  ? `资源池已启用。下方只配置对话、操盘军师和智能体；Judge 已在上一步使用独立端点，不再作为资源池角色。附加端点某角色留空，表示该端点不承接该角色。`
+                  : `为通用 AI 能力分别指定模型${listable ? `（共 ${modelList.length} 个可选）` : '（手动填写模型名）'}。Judge 已单独配置。`}
               </div>
               {/* 有已配置但被停用的端点 → 说明为何没在下方列出,引导回上一步启用 */}
               {disabledEndpoints().length > 0 && (
@@ -518,9 +686,9 @@ export default function LLMConfig() {
                   </div>
                   <div className="llm-results">
                     {testResults.map((r) => (
-                      <div className={'llm-result' + (r.ok ? ' ok' : ' bad')} key={r.model}>
+                      <div className={'llm-result' + (r.ok ? ' ok' : ' bad')} key={`${r.target || '通用'}-${r.model}`}>
                         <Icon name={r.ok ? 'check' : 'close'} size={13} />
-                        <span className="llm-result-model">{r.model}</span>
+                        <span className="llm-result-model">{r.target ? `${r.target} · ` : ''}{r.model}</span>
                         <span className="llm-result-meta">{r.ok ? `${r.ms}ms` : (r.error || '不可用')}</span>
                       </div>
                     ))}

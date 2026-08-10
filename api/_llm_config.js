@@ -14,6 +14,7 @@
 import { put, readJson, hasStorage } from './_blob.js';
 
 const KEY_PATH = 'config/llm.json';
+const hasOwn = (obj, key) => !!obj && Object.prototype.hasOwnProperty.call(obj, key);
 
 // 三个 AI 角色 → 各自的环境变量名与内置默认（与改造前 handler 里的默认保持一致）
 // 注：已移除的功能(如「每日复盘日报」)不再单列模型角色；策略日报复用 agent 模型。
@@ -34,7 +35,7 @@ function envConfig() {
     models[role] = v || m.def;
     reasoning[role] = false;   // 深度思考默认关闭
   }
-  return {
+  const config = {
     baseUrl: process.env.LLM_BASE_URL || '',
     apiKey: process.env.LLM_API_KEY || '',
     models,
@@ -43,6 +44,59 @@ function envConfig() {
     source: 'env',
     updatedAt: 0,
   };
+  if (process.env.JUDGE_BASE_URL && process.env.JUDGE_API_KEY) {
+    config.judgeEndpoint = {
+      baseUrl: String(process.env.JUDGE_BASE_URL).replace(/\/+$/, ''),
+      apiKey: process.env.JUDGE_API_KEY,
+      model: process.env.JUDGE_MODEL || ROLES.judge.def,
+      reasoning: process.env.JUDGE_REASONING === 'true',
+      enabled: true,
+      source: 'env',
+    };
+  }
+  return config;
+}
+
+function normalizeJudgeEndpoint(raw, source = 'dedicated') {
+  if (!raw || typeof raw !== 'object') return null;
+  return {
+    baseUrl: String(raw.baseUrl || '').replace(/\/+$/, ''),
+    apiKey: String(raw.apiKey || ''),
+    model: String(raw.model || ''),
+    reasoning: !!raw.reasoning,
+    enabled: raw.enabled !== false,
+    source,
+  };
+}
+
+// 兼容旧配置：优先迁移附加端点里的 models.judge，其次迁移主端点 judge 模型。
+// 一旦显式保存 judgeEndpoint（包括 enabled:false），就绝不再回退通用池。
+export function resolveJudgeEndpoint(config = {}) {
+  if (hasOwn(config, 'judgeEndpoint')) {
+    return normalizeJudgeEndpoint(config.judgeEndpoint, config.judgeEndpoint?.source || 'dedicated');
+  }
+  const legacy = (config.endpoints || []).find((endpoint) =>
+    endpoint && endpoint.enabled !== false && endpoint.baseUrl && endpoint.apiKey && endpoint.models?.judge
+  );
+  if (legacy) {
+    return normalizeJudgeEndpoint({
+      baseUrl: legacy.baseUrl,
+      apiKey: legacy.apiKey,
+      model: legacy.models.judge,
+      reasoning: !!legacy.reasoning?.judge,
+      enabled: true,
+    }, 'legacy-pool');
+  }
+  if (config.baseUrl && config.apiKey && config.models?.judge) {
+    return normalizeJudgeEndpoint({
+      baseUrl: config.baseUrl,
+      apiKey: config.apiKey,
+      model: config.models.judge,
+      reasoning: !!config.reasoning?.judge,
+      enabled: true,
+    }, 'legacy-main');
+  }
+  return null;
 }
 
 // 合并：OSS 覆盖 env，缺项回退 env/默认
@@ -58,7 +112,7 @@ function merge(base, over) {
   }
   // endpoints:多端点资源池。OSS 里存了(即使空数组)则以其为准;未存则保留 base(env 默认空)。
   const endpoints = Array.isArray(over.endpoints) ? over.endpoints : (base.endpoints || []);
-  return {
+  const merged = {
     baseUrl: over.baseUrl || base.baseUrl,
     apiKey: over.apiKey || base.apiKey,   // OSS 里没存 key 时保留 env key
     models,
@@ -67,6 +121,20 @@ function merge(base, over) {
     source: over.__stored ? 'oss' : base.source,
     updatedAt: over.updatedAt || base.updatedAt,
   };
+  if (hasOwn(over, 'judgeEndpoint')) {
+    const previous = resolveJudgeEndpoint(base) || {};
+    const incoming = over.judgeEndpoint && typeof over.judgeEndpoint === 'object' ? over.judgeEndpoint : {};
+    merged.judgeEndpoint = normalizeJudgeEndpoint({
+      ...previous,
+      ...incoming,
+      apiKey: incoming.apiKey || previous.apiKey || '',
+    }, incoming.source || 'dedicated');
+  } else if (hasOwn(base, 'judgeEndpoint')) {
+    merged.judgeEndpoint = resolveJudgeEndpoint(base);
+  } else {
+    merged.judgeEndpoint = resolveJudgeEndpoint(merged);
+  }
+  return merged;
 }
 
 let _cache = null;   // 已合并的当前配置（同步取）
@@ -96,12 +164,22 @@ export function currentConfig() {
 // ---- 同步取某角色模型 ----
 export function getModel(role) {
   const c = currentConfig();
+  if (role === 'judge') {
+    const endpoint = resolveJudgeEndpoint(c);
+    return endpoint && endpoint.enabled !== false && endpoint.baseUrl && endpoint.apiKey
+      ? endpoint.model
+      : '';
+  }
   return (c.models && c.models[role]) || (ROLES[role] && ROLES[role].def) || '';
 }
 
 // ---- 同步取某角色是否开启深度思考(reasoning) ----
 export function getReasoning(role) {
   const c = currentConfig();
+  if (role === 'judge') {
+    const endpoint = resolveJudgeEndpoint(c);
+    return !!(endpoint && endpoint.enabled !== false && endpoint.reasoning);
+  }
   return !!(c.reasoning && c.reasoning[role]);
 }
 
@@ -114,6 +192,7 @@ export async function saveConfig(patch = {}) {
     models: { ...cur.models },
     reasoning: { ...cur.reasoning },
     endpoints: Array.isArray(cur.endpoints) ? cur.endpoints.slice() : [],
+    judgeEndpoint: resolveJudgeEndpoint(cur),
     updatedAt: Date.now(),
   };
   if (patch.models) for (const role of Object.keys(ROLES)) {
@@ -121,6 +200,20 @@ export async function saveConfig(patch = {}) {
   }
   if (patch.reasoning) for (const role of Object.keys(ROLES)) {
     if (patch.reasoning[role] != null) next.reasoning[role] = !!patch.reasoning[role];
+  }
+  if (hasOwn(patch, 'judgeEndpoint')) {
+    const previous = resolveJudgeEndpoint(cur) || {};
+    const incoming = patch.judgeEndpoint && typeof patch.judgeEndpoint === 'object' ? patch.judgeEndpoint : {};
+    const apiKey = (incoming.apiKey != null && incoming.apiKey !== '' && !/\*/.test(String(incoming.apiKey)))
+      ? String(incoming.apiKey)
+      : (previous.apiKey || '');
+    next.judgeEndpoint = normalizeJudgeEndpoint({
+      baseUrl: incoming.baseUrl ?? previous.baseUrl,
+      apiKey,
+      model: incoming.model ?? previous.model ?? ROLES.judge.def,
+      reasoning: incoming.reasoning ?? previous.reasoning,
+      enabled: incoming.enabled ?? previous.enabled ?? true,
+    }, 'dedicated');
   }
   // endpoints:整组替换(前端传全量)。每项 apiKey 留空则沿用同 id 旧 key(前端只回传掩码 → 不覆盖)。
   //   每个端点可携带自己的 models:{chat,advisor,agent}——不同网关上同一角色可能是不同模型名。
@@ -135,6 +228,7 @@ export async function saveConfig(patch = {}) {
       const epModels = {};
       const src = (e.models && typeof e.models === 'object') ? e.models : (prev.models || {});
       for (const role of Object.keys(ROLES)) {
+        if (role === 'judge') continue;
         const v = src[role];
         if (v != null && String(v).trim()) epModels[role] = String(v).trim();
       }
@@ -142,6 +236,7 @@ export async function saveConfig(patch = {}) {
       const epReason = {};
       const rsrc = (e.reasoning && typeof e.reasoning === 'object') ? e.reasoning : (prev.reasoning || {});
       for (const role of Object.keys(ROLES)) {
+        if (role === 'judge') continue;
         if (rsrc[role]) epReason[role] = true;
       }
       return {
@@ -181,11 +276,28 @@ export function publicView() {
     hasKey: !!c.apiKey,
     models: c.models,
     reasoning: c.reasoning || {},
+    judgeEndpoint: (() => {
+      const endpoint = resolveJudgeEndpoint(c);
+      if (!endpoint) return null;
+      return {
+        baseUrl: endpoint.baseUrl,
+        apiKeyMask: maskKey(endpoint.apiKey),
+        hasKey: !!endpoint.apiKey,
+        model: endpoint.model,
+        reasoning: !!endpoint.reasoning,
+        enabled: endpoint.enabled !== false,
+        source: endpoint.source,
+      };
+    })(),
     endpoints: (c.endpoints || []).map((e) => ({
       id: e.id, baseUrl: e.baseUrl || '', weight: e.weight || 1,
       enabled: e.enabled !== false, apiKeyMask: maskKey(e.apiKey), hasKey: !!e.apiKey,
-      models: e.models && typeof e.models === 'object' ? { ...e.models } : {},
-      reasoning: e.reasoning && typeof e.reasoning === 'object' ? { ...e.reasoning } : {},
+      models: e.models && typeof e.models === 'object'
+        ? Object.fromEntries(Object.entries(e.models).filter(([role]) => role !== 'judge'))
+        : {},
+      reasoning: e.reasoning && typeof e.reasoning === 'object'
+        ? Object.fromEntries(Object.entries(e.reasoning).filter(([role]) => role !== 'judge'))
+        : {},
     })),
     source: c.source,
     updatedAt: c.updatedAt || 0,

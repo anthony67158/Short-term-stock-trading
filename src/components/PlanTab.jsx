@@ -4,11 +4,13 @@ import { HL } from './RichText'
 import StockName from './StockName'
 import Reasoning from './Reasoning'
 import ConfirmDialog from './ConfirmDialog'
+import OverlayPortal from './OverlayPortal'
+import AdviceGenerationStatus, { useAdviceGeneration } from './AdviceGenerationStatus'
 import { AlertForm } from './AlertCenter'
-import { usePolling, useSwipe } from '../hooks'
+import { useMediaQuery, usePolling, useSwipe } from '../hooks'
 import { callAIStream } from '../ai'
 import { api } from '../apiBase'
-import { planStore, usePlanStore, calcBuyFee, calcSellFee, computeTFlows, computePortfolio, livePositionOf, advicePlan, adviceFocus } from '../planStore'
+import { planStore, usePlanStore, calcBuyFee, calcSellFee, computeTFlows, computePortfolio, livePositionOf, t1StatusOf, advicePlan, adviceFocus } from '../planStore'
 import { aiStore } from '../aiStore'
 import { openStockDetail, useDetailStore } from '../detailStore'
 import { getAdvice, subscribeAdvice } from '../adviceCache'
@@ -18,6 +20,7 @@ import { subscribeRunner } from '../adviceRunner'
 import { getAutoConfig, K_ENABLED, K_INTERVAL, K_SCOPE, K_LAST, MIN_INTERVAL, MAX_INTERVAL, DEFAULT_INTERVAL } from '../adviceAutoRefresh'
 import { ensureQuantScore, ensureQuantScores } from '../quantScore'
 import { fmtPct, pctClass, fmtNum, fmtInflow , fmtRaw, hasVal, opText } from '../format'
+import { computeDailyFinance, todayTradeCodes } from '../../shared/dailyFinance.js'
 
 // —— 搜索结果 → 定位到卡片:轻量模块级事件总线 ——
 // 搜索框(StockSearch)、自选区(PlanList)、持仓区(HoldingList)同在本文件,用一个 Set 广播即可:
@@ -213,7 +216,12 @@ function groupTFlowsByDay(flows) {
 // ============ 我的计划 Tab：交易闭环（候选→买入→持仓→卖出） ============
 export default function PlanTab({ interval }) {
   const book = usePlanStore()
-  const codes = [...new Set([...book.plan.map((x) => x.code), ...book.holding.map((x) => x.code)])]
+  const tradedToday = todayTradeCodes(book.closed, book.holding)
+  const codes = [...new Set([
+    ...book.plan.map((x) => x.code),
+    ...book.holding.map((x) => x.code),
+    ...tradedToday,
+  ])]
   const { data } = usePolling(
     codes.length ? `/api/quote?codes=${codes.join(',')}` : null,
     interval,
@@ -447,6 +455,8 @@ function CandTarget({ p, q }) {
 function CandFocus({ code, name }) {
   const [, force] = useState(0)
   useEffect(() => subscribeAdvice(() => force((n) => n + 1)), [])
+  const generation = useAdviceGeneration(code)
+  if (generation?.active) return <AdviceGenerationStatus code={code} />
   const f = adviceFocus(code)
   if (!f) return (
     <button className="cand-focus focus-prompt" onClick={() => openStockDetail(code, name)} title="打开个股详情页生成AI操作建议">
@@ -794,8 +804,12 @@ function holdSnapshot(h, q) {
 // ---------- 持仓作战总览条：总浮盈亏 / 今日做T / 仓位 / 需立即处理 ----------
 function HoldOverview({ book, quote }) {
   const holding = book.holding || []
-  if (!holding.length) return null
   const pf = computePortfolio(holding, quote, book.account)
+  const daily = computeDailyFinance({
+    holdings: holding,
+    trades: book.closed || [],
+    quoteMap: quote,
+  })
   // 今日做T已实现 = 未结算流水配对差价 + 今日已结算入账的做T记录(kind:'T')
   // 关键：结算(或跨天自动结算)后 tFlows 会清空、收益转入 closed，只看 tFlows 会漏掉今天已入账的T
   let tRealized = 0
@@ -812,13 +826,41 @@ function HoldOverview({ book, quote }) {
   tRealized = +tRealized.toFixed(2)
   // 需立即处理的只数(触止损/止盈/破纪律)
   const urgent = holding.filter((h) => holdSnapshot(h, quote[h.code]).urgency >= 80)
-  const pnlTone = pf.floatPnl >= 0 ? 'red' : 'green'
+  const pnlTone = daily.floatPnl >= 0 ? 'red' : 'green'
+  const dayTone = daily.dayChangeAmount == null ? 'muted' : daily.dayChangeAmount >= 0 ? 'red' : 'green'
+  const dayStatus = {
+    closed: '今日休市',
+    preopen: '待开盘',
+    active: '盘中实时',
+    postclose: '今日收盘',
+  }[daily.marketStatus]
+  const hasActivity = holding.length || daily.buyCount || daily.sellCount
+  if (!hasActivity) return null
   return (
     <div className="hold-overview">
       <div className="ho-cell">
-        <span className="ho-k">总浮盈亏</span>
-        <span className={'ho-v ' + pnlTone}>{fmtMoney(pf.floatPnl)}</span>
-        {pf.holdCostValue > 0 && <span className={'ho-sub ' + pnlTone}>{pf.floatPnl >= 0 ? '+' : ''}{(pf.floatPnl / pf.holdCostValue * 100).toFixed(2)}%</span>}
+        <span className="ho-k">持仓浮盈亏</span>
+        <span className={'ho-v ' + pnlTone}>{fmtMoney(daily.floatPnl)}</span>
+        {daily.floatPct != null && <span className={'ho-sub ' + pnlTone}>{daily.floatPct >= 0 ? '+' : ''}{daily.floatPct.toFixed(2)}%</span>}
+      </div>
+      <div className="ho-cell" title="今日买入成交额加买入费用，即实际资金支出">
+        <span className="ho-k">今日买入支出</span>
+        <span className="ho-v green">{daily.buyCount ? fmtMoney(-daily.buyOutflow) : '—'}</span>
+        <span className="ho-sub muted">{daily.buyCount ? `${daily.buyCount} 笔 · 含费` : dayStatus}</span>
+      </div>
+      <div className="ho-cell" title="今日卖出成交额扣除卖出费用，即实际到账金额">
+        <span className="ho-k">今日卖出入账</span>
+        <span className="ho-v red">{daily.sellCount ? fmtMoney(daily.sellInflow) : '—'}</span>
+        <span className="ho-sub muted">{daily.sellCount ? `${daily.sellCount} 笔 · 扣费后` : dayStatus}</span>
+      </div>
+      <div className="ho-cell" title="当前持仓市值 + 今日卖出净入账 - 今日买入净支出 - 前一交易日收盘持仓市值">
+        <span className="ho-k">较前收</span>
+        <span className={'ho-v ' + dayTone}>{daily.dayChangeAmount == null ? '—' : fmtMoney(daily.dayChangeAmount)}</span>
+        <span className={'ho-sub ' + dayTone}>
+          {daily.dayChangePct == null
+            ? dayStatus
+            : `${daily.dayChangePct >= 0 ? '+' : ''}${daily.dayChangePct.toFixed(2)}% · ${dayStatus}`}
+        </span>
       </div>
       <div className="ho-cell">
         <span className="ho-k">今日做T</span>
@@ -1117,24 +1159,45 @@ function HoldingList({ book, quote, batchSel }) {
             <div className="bp-items">
               {batch.items.map((it) => {
                 const st = it.status  // pending|running|ok|fail|skipped
-                const label = { pending: '排队中', running: '生成中', ok: '已完成', fail: '失败', skipped: '已取消' }[st] || st
+                const label = { pending: '排队中', queued: '排队中', running: '生成中', canceling: '取消中', ok: '已完成', fail: '失败', skipped: '已取消' }[st] || st
                 const jumpable = st === 'running' || st === 'ok' || st === 'fail'
+                const visibleProgress = st === 'running' && (it.phase || it.reasoning || it.sources?.length || it.model)
                 return (
-                  <span key={it.code} className={'bp-chip bp-' + st}
-                    onClick={jumpable ? () => openStockDetail(it.code, it.name) : undefined}
-                    title={jumpable ? '查看该股详情/建议' : (it.error || label)}
-                    style={jumpable ? { cursor: 'pointer' } : undefined}>
-                    {st === 'running' && <Icon name="refresh" size={10} className="spin" />}
-                    {st === 'ok' && <Icon name="check" size={10} />}
-                    <b className="bp-chip-name">{it.name}</b>
-                    <span className="bp-chip-st">{label}</span>
-                    {(st === 'running' || st === 'pending') && (
-                      <button className="bp-chip-x" title="取消这一只"
-                        onClick={(e) => { e.stopPropagation(); cancelOne(it.code) }}>
-                        <Icon name="close" size={10} />
-                      </button>
+                  <div key={it.code} className={'bp-item bp-' + st}>
+                    <span className={'bp-chip bp-' + st}
+                      onClick={jumpable ? () => openStockDetail(it.code, it.name) : undefined}
+                      title={jumpable ? '查看该股详情/建议' : (it.error || label)}
+                      style={jumpable ? { cursor: 'pointer' } : undefined}>
+                      {st === 'running' && <Icon name="refresh" size={10} className="spin" />}
+                      {st === 'ok' && <Icon name="check" size={10} />}
+                      <b className="bp-chip-name">{it.name}</b>
+                      <span className="bp-chip-st">{label}</span>
+                      {(st === 'running' || st === 'pending' || st === 'queued') && (
+                        <button className="bp-chip-x" title="取消这一只"
+                          onClick={(e) => { e.stopPropagation(); cancelOne(it.code) }}>
+                          <Icon name="close" size={10} />
+                        </button>
+                      )}
+                    </span>
+                    {visibleProgress && (
+                      <div className="bp-detail">
+                        <div className="bp-phase">{it.phase || '正在分析'}</div>
+                        {(it.model || it.endpoint) && (
+                          <div className="bp-route">{[it.model, it.endpoint].filter(Boolean).join(' · ')}</div>
+                        )}
+                        {Array.isArray(it.sources) && it.sources.length > 0 && (
+                          <div className="bp-sources">
+                            {it.sources.map((source, index) => (
+                              <span key={`${source.label}-${index}`} className={source.ok ? 'ok' : 'off'}>
+                                {source.ok ? '✓' : '—'} {source.label}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        {it.reasoning && <div className="bp-reasoning">{it.reasoning}</div>}
+                      </div>
                     )}
-                  </span>
+                  </div>
                 )
               })}
             </div>
@@ -1239,6 +1302,8 @@ function HoldingItem({ h, idx, quote: q }) {
   const [openDays, setOpenDays] = useState({}) // 做T流水按天折叠，key→是否展开
   const [expanded, setExpanded] = useState(false) // 卡片明细区（盘中提示/复盘/信号/计划/做T）默认折叠
   const [detailTab, setDetailTab] = useState(null) // 明细手风琴当前展开的分段: 'review'|'plan'|'t'|null
+  const [tradeErr, setTradeErr] = useState('')
+  const mobileOperations = useMediaQuery('(max-width: 720px)')
 
   const book = usePlanStore()
 
@@ -1402,14 +1467,33 @@ function HoldingItem({ h, idx, quote: q }) {
     })
   }
 
-  const startSell = () => { setMode('sell'); setSellPrice(q ? String(q.price) : ''); setSellQty(String(h.qty || 1)) }
-  const confirmSell = () => { if (sellPrice && Number(sellQty) > 0) { planStore.sell(h.id, sellPrice, Number(sellQty)); setMode(null) } }
+  const startSell = () => {
+    const t1 = t1StatusOf(h.code)
+    setTradeErr(t1.sellableToday > 0 ? '' : `今日买入 ${t1.boughtToday} 手仍受 T+1 锁定，当前没有可卖仓位`)
+    setMode('sell')
+    setSellPrice(q ? String(q.price) : '')
+    setSellQty(String(Math.min(h.qty || 1, t1.sellableToday || 0)))
+  }
+  const confirmSell = () => {
+    if (!sellPrice || !(Number(sellQty) > 0)) return
+    const result = planStore.sell(h.id, sellPrice, Number(sellQty))
+    if (!result || !result.ok) { setTradeErr((result && result.error) || '卖出记录失败'); return }
+    setTradeErr(result.message || '')
+    setMode(null)
+  }
 
-  const startAdd = () => { setMode('add'); setAddPrice(q ? String(q.price) : ''); setAddQty('1') }
+  const startAdd = () => { setTradeErr(''); setMode('add'); setAddPrice(q ? String(q.price) : ''); setAddQty('1') }
   const confirmAdd = () => { if (addPrice && Number(addQty) > 0) { planStore.addToHolding(h.id, addPrice, Number(addQty)); setMode(null) } }
 
-  const startT = () => { setMode('T'); setTPrice(q ? String(q.price) : ''); setTQty('1'); setTAdvice(null) }
-  const addTFlow = () => { if (tPrice && Number(tQty) > 0) { planStore.addTFlow(h.id, tSide, tPrice, Number(tQty)); setTPrice(q ? String(q.price) : ''); setTQty('1') } }
+  const startT = () => { setTradeErr(''); setMode('T'); setTPrice(q ? String(q.price) : ''); setTQty('1'); setTAdvice(null) }
+  const addTFlow = () => {
+    if (!tPrice || !(Number(tQty) > 0)) return
+    const result = planStore.addTFlow(h.id, tSide, tPrice, Number(tQty))
+    if (!result || !result.ok) { setTradeErr((result && result.error) || '做T流水记录失败'); return }
+    setTradeErr(result.message || '')
+    setTPrice(q ? String(q.price) : '')
+    setTQty('1')
+  }
 
   // AI 做T参考（可指定风格，切风格即用新风格重新生成）
   const askTAdvice = async (styleOverride) => {
@@ -1475,6 +1559,57 @@ function HoldingItem({ h, idx, quote: q }) {
     if (aiFocus) return { tone: aiFocus.tone, badge: aiFocus.badge, text: aiFocus.text, ai: true }
     return { prompt: true }  // 无AI操作建议 → 引导用户去个股页生成
   })()
+  const operationTitle = mode === 'add' ? '加仓' : mode === 'sell' ? '减仓 / 清仓' : mode === 'plan' ? '设置交易计划' : ''
+  const operationForm = mode === 'add' ? (
+    <div className="buy-inline-wrap">
+      <div className="buy-inline">
+        <input className="wl-input" value={addPrice} onChange={(e) => setAddPrice(e.target.value)} placeholder="加仓价" inputMode="decimal" />
+        <input className="wl-input" value={addQty} onChange={(e) => setAddQty(e.target.value)} placeholder="手" inputMode="numeric" />
+        {addPrice && Number(addQty) > 0 && <span className="fee-hint">费≈{calcBuyFee(Number(addPrice) * Number(addQty) * 100).toFixed(2)}</span>}
+        <button className="chip-btn act-add solid" onClick={confirmAdd}><Icon name="check" size={13} />确认加仓</button>
+        <button className="chip-btn ghost" onClick={() => setMode(null)}>取消</button>
+      </div>
+    </div>
+  ) : mode === 'sell' ? (
+    <div className="buy-inline-wrap">
+      <div className="buy-inline">
+        <input className="wl-input" value={sellPrice} onChange={(e) => setSellPrice(e.target.value)} placeholder="卖出价" inputMode="decimal" />
+        <input className="wl-input" value={sellQty} onChange={(e) => setSellQty(e.target.value)} placeholder="手" inputMode="numeric" />
+        <span className="qty-hint">今日可卖 / {h.qty}手</span>
+        {sellPrice && Number(sellQty) > 0 && <span className="fee-hint">费≈{calcSellFee(Number(sellPrice) * Number(sellQty) * 100).toFixed(2)}</span>}
+        <button className={'chip-btn solid ' + (Number(sellQty) >= h.qty ? 'act-clear' : 'act-reduce')} onClick={confirmSell}><Icon name="check" size={13} />{Number(sellQty) >= h.qty ? '确认清仓' : '确认减仓'}</button>
+        <button className="chip-btn ghost" onClick={() => setMode(null)}>取消</button>
+      </div>
+    </div>
+  ) : mode === 'plan' ? (
+    <div className="plan-edit">
+      <div className="plan-edit-tip">
+        {planBasis && planBasis.from === 'advice'
+          ? <><Icon name="spark" size={12} /> 已复用最新AI操作建议{planBasis.action ? `(${planBasis.action})` : ''}的止盈/止损价，可直接改</>
+          : <><Icon name="spark" size={12} /> 已按短线逻辑给默认值，可直接改</>}
+        <button className="plan-refill" onClick={() => { const s = suggestPlan(); setPlanTP(s.tp); setPlanSL(s.sl); setPlanReason(s.reason); setPlanBasis(null) }}>用公式</button>
+        {!hasAdvicePrices() && (
+          <button className="plan-refill" onClick={() => openStockDetail(h.code, h.name)} title="去个股页生成AI操作建议，返回后自动代入止盈/止损价">去生成AI建议</button>
+        )}
+      </div>
+      {(!hasAdvicePrices() && (!planBasis || planBasis.from !== 'advice')) && (
+        <div className="plan-basis">
+          <span className="muted">该股暂无AI操作建议，当前为公式默认值。生成建议后返回，会自动代入建议的止盈/止损价。</span>
+        </div>
+      )}
+      <div className="plan-edit-row">
+        <label><Icon name="target" size={12} /> 止盈价</label>
+        <input className="wl-input" value={planPrice} onChange={(e) => setPlanTP(e.target.value)} placeholder="到价止盈" inputMode="decimal" />
+        <label><Icon name="shield" size={12} /> 止损价</label>
+        <input className="wl-input" value={planSL} onChange={(e) => setPlanSL(e.target.value)} placeholder="到价止损" inputMode="decimal" />
+      </div>
+      <input className="wl-input plan-reason-input" value={planReason} onChange={(e) => setPlanReason(e.target.value)} placeholder="买入理由 / 交易逻辑（复盘时对照）" />
+      <div className="plan-edit-actions">
+        <button className="chip-btn done" onClick={savePlan}><Icon name="check" size={12} />保存计划</button>
+        <button className="chip-btn ghost" onClick={() => setMode(null)}>取消</button>
+      </div>
+    </div>
+  ) : null
   return (
     <div className="hold-swipe-wrap">
       {swipe.swiping && isTouch && swipe.dx > 0 && (
@@ -1543,6 +1678,7 @@ function HoldingItem({ h, idx, quote: q }) {
       })()}
 
       {/* 主行动：此刻唯一最该关注的一句。数据源=AI操作建议;无建议则提示去生成 */}
+      <AdviceGenerationStatus code={h.code} />
       {focus && (focus.prompt
         ? (
           <button className="hold-focus focus-prompt" onClick={() => openStockDetail(h.code, h.name)} title="打开个股详情页生成AI操作建议">
@@ -1669,56 +1805,8 @@ function HoldingItem({ h, idx, quote: q }) {
       })()}
 
       {/* 操作区 */}
-      {mode === 'add' ? (
-        <div className="buy-inline-wrap">
-          <div className="buy-inline">
-            <input className="wl-input" value={addPrice} onChange={(e) => setAddPrice(e.target.value)} placeholder="加仓价" />
-            <input className="wl-input" value={addQty} onChange={(e) => setAddQty(e.target.value)} placeholder="手" />
-            {addPrice && Number(addQty) > 0 && <span className="fee-hint">费≈{calcBuyFee(Number(addPrice) * Number(addQty) * 100).toFixed(2)}</span>}
-            <button className="chip-btn act-add solid" onClick={confirmAdd}><Icon name="check" size={13} />确认加仓</button>
-            <button className="chip-btn ghost" onClick={() => setMode(null)}>取消</button>
-          </div>
-        </div>
-      ) : mode === 'sell' ? (
-        <div className="buy-inline-wrap">
-          <div className="buy-inline">
-            <input className="wl-input" value={sellPrice} onChange={(e) => setSellPrice(e.target.value)} placeholder="卖出价" />
-            <input className="wl-input" value={sellQty} onChange={(e) => setSellQty(e.target.value)} placeholder="手" />
-            <span className="qty-hint">/{h.qty}手</span>
-            {sellPrice && Number(sellQty) > 0 && <span className="fee-hint">费≈{calcSellFee(Number(sellPrice) * Number(sellQty) * 100).toFixed(2)}</span>}
-            <button className={'chip-btn solid ' + (Number(sellQty) >= h.qty ? 'act-clear' : 'act-reduce')} onClick={confirmSell}><Icon name="check" size={13} />{Number(sellQty) >= h.qty ? '确认清仓' : '确认减仓'}</button>
-            <button className="chip-btn ghost" onClick={() => setMode(null)}>取消</button>
-          </div>
-        </div>
-      ) : mode === 'plan' ? (
-        <div className="plan-edit">
-          <div className="plan-edit-tip">
-            {planBasis && planBasis.from === 'advice'
-              ? <><Icon name="spark" size={12} /> 已复用最新AI操作建议{planBasis.action ? `(${planBasis.action})` : ''}的止盈/止损价，可直接改</>
-              : <><Icon name="spark" size={12} /> 已按短线逻辑给默认值，可直接改</>}
-            <button className="plan-refill" onClick={() => { const s = suggestPlan(); setPlanTP(s.tp); setPlanSL(s.sl); setPlanReason(s.reason); setPlanBasis(null) }}>用公式</button>
-            {!hasAdvicePrices() && (
-              <button className="plan-refill" onClick={() => openStockDetail(h.code, h.name)} title="去个股页生成AI操作建议，返回后自动代入止盈/止损价">去生成AI建议</button>
-            )}
-          </div>
-          {(!hasAdvicePrices() && (!planBasis || planBasis.from !== 'advice')) && (
-            <div className="plan-basis">
-              <span className="muted">该股暂无AI操作建议，当前为公式默认值。点「去生成AI建议」在个股页生成后返回，会自动代入建议的止盈/止损价。</span>
-            </div>
-          )}
-          <div className="plan-edit-row">
-            <label><Icon name="target" size={12} /> 止盈价</label>
-            <input className="wl-input" value={planPrice} onChange={(e) => setPlanTP(e.target.value)} placeholder="到价止盈" inputMode="decimal" />
-            <label><Icon name="shield" size={12} /> 止损价</label>
-            <input className="wl-input" value={planSL} onChange={(e) => setPlanSL(e.target.value)} placeholder="到价止损" inputMode="decimal" />
-          </div>
-          <input className="wl-input plan-reason-input" value={planReason} onChange={(e) => setPlanReason(e.target.value)} placeholder="买入理由 / 交易逻辑（复盘时对照）" />
-          <div className="plan-edit-actions">
-            <button className="chip-btn done" onClick={savePlan}><Icon name="check" size={12} />保存计划</button>
-            <button className="chip-btn ghost" onClick={() => setMode(null)}>取消</button>
-          </div>
-        </div>
-      ) : (
+      {!mobileOperations && tradeErr && <div className="err" style={{ margin: '8px 0' }}>{tradeErr}</div>}
+      {operationForm && !mobileOperations ? operationForm : (
         <div className="pi-actions">
           <button className="chip-btn act-add" onClick={startAdd}><Icon name="cart" size={13} />加仓</button>
           <button className="chip-btn act-t" onClick={startT}><Icon name="refresh" size={13} />做T</button>
@@ -1726,6 +1814,31 @@ function HoldingItem({ h, idx, quote: q }) {
           {!(h.tp || h.sl || h.planReason) && <button className="chip-btn ghost" onClick={() => openPlan(false)}><Icon name="target" size={12} />设计划</button>}
           <button className="icon-btn act-del" onClick={() => setConfirmDel(true)}><Icon name="trash" size={14} /></button>
         </div>
+      )}
+      {operationForm && mobileOperations && (
+        <OverlayPortal>
+          <div className="modal-mask mobile-trade-mask" onClick={() => setMode(null)}>
+            <div
+              className="mobile-trade-dialog"
+              role="dialog"
+              aria-modal="true"
+              aria-label={`${operationTitle} · ${h.name}`}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="mobile-trade-head">
+                <div>
+                  <div className="modal-title">{operationTitle} · {h.name}</div>
+                  <span className="detail-code">{h.code}</span>
+                </div>
+                <button type="button" className="modal-close" aria-label={`关闭${operationTitle}弹框`} onClick={() => setMode(null)}><Icon name="close" size={16} /></button>
+              </div>
+              <div className="mobile-trade-body">
+                {tradeErr && <div className="err" style={{ marginBottom: 10 }}>{tradeErr}</div>}
+                {operationForm}
+              </div>
+            </div>
+          </div>
+        </OverlayPortal>
       )}
 
       {confirmDel && (
@@ -1758,13 +1871,21 @@ function HoldingItem({ h, idx, quote: q }) {
 
       {/* 做T：独立抽屉弹窗（信息量大，不在行内展开，避免撑大表格/内容溢出）*/}
       {mode === 'T' && (
-        <div className="modal-mask mask-drawer" onClick={() => setMode(null)}>
-          <div className="t-drawer" onClick={(e) => e.stopPropagation()}>
-            <div className="t-drawer-head">
-              <div className="modal-title"><Icon name="refresh" size={16} /> 做T · {h.name}<span className="detail-code">{h.code}</span></div>
-              <div className="modal-close" onClick={() => setMode(null)}><Icon name="close" size={16} /></div>
-            </div>
-            <div className="t-drawer-body">
+        <OverlayPortal>
+          <div className="modal-mask mask-drawer" onClick={() => setMode(null)}>
+            <div
+              className="t-drawer"
+              role="dialog"
+              aria-modal="true"
+              aria-label={`做T · ${h.name}`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="t-drawer-head">
+                <div className="modal-title"><Icon name="refresh" size={16} /> 做T · {h.name}<span className="detail-code">{h.code}</span></div>
+                <button type="button" className="modal-close" aria-label="关闭做T弹层" onClick={() => setMode(null)}><Icon name="close" size={16} /></button>
+              </div>
+              <div className="t-drawer-body">
+                {tradeErr && <div className="err" style={{ marginBottom: 10 }}>{tradeErr}</div>}
               {/* 持仓概览 */}
               <div className="t-drawer-meta">
                 <span>{h.qty}手</span><span title={`裸买入价 ${fmtRaw(h.buyPrice)} + 买入手续费 ${(h.buyFee || 0).toFixed(2)}`}>成本 {fmtRaw(costWithFee)} <span className="sub-name">(含费)</span></span>
@@ -1934,8 +2055,9 @@ function HoldingItem({ h, idx, quote: q }) {
           )}
         </div>
             </div>
+            </div>
           </div>
-        </div>
+        </OverlayPortal>
       )}
     </div>
     </div>
@@ -1962,9 +2084,14 @@ function TFlowRow({ f, holdingId }) {
   const [side, setSide] = useState(f.side)
   const [price, setPrice] = useState(String(f.price))
   const [qty, setQty] = useState(String(f.qty))
+  const [error, setError] = useState('')
 
-  const start = () => { setSide(f.side); setPrice(String(f.price)); setQty(String(f.qty)); setEditing(true) }
-  const save = () => { planStore.editTFlow(holdingId, f.id, { side, price: Number(price), qty: Number(qty) }); setEditing(false) }
+  const start = () => { setError(''); setSide(f.side); setPrice(String(f.price)); setQty(String(f.qty)); setEditing(true) }
+  const save = () => {
+    const result = planStore.editTFlow(holdingId, f.id, { side, price: Number(price), qty: Number(qty) })
+    if (!result || !result.ok) { setError((result && result.error) || '流水修改失败'); return }
+    setEditing(false)
+  }
 
   if (editing) {
     return (
@@ -1977,6 +2104,7 @@ function TFlowRow({ f, holdingId }) {
         <input className="wl-input t-edit-qty" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="手" inputMode="numeric" />
         <button className="chip-btn done" onClick={save}><Icon name="check" size={12} />保存</button>
         <button className="chip-btn ghost" onClick={() => setEditing(false)}>取消</button>
+        {error && <span className="err">{error}</span>}
       </div>
     )
   }
@@ -2102,5 +2230,3 @@ function HoldReview({ code, name, cost, qty, price }) {
     </div>
   )
 }
-
-

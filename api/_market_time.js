@@ -4,29 +4,18 @@
 // 【数据应按哪天口径解读】【下一个交易日是哪天】，注入所有 LLM 提示，让模型先明确
 // "时间坐标"再作答，避免出现"周六还谈今日市场情绪"这类低级错误。
 
+import { isTradingDay, localDateKey } from '../shared/tradingCalendar.js';
+
 // 北京时间 Date（东八区）
 export function nowBJ() {
   const n = new Date();
   return new Date(n.getTime() + (n.getTimezoneOffset() + 480) * 60000);
 }
 function ymd(d) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return localDateKey(d);
 }
 const WK = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-
-// A股法定节假日(闭市)——按年维护；用于判断交易日与"下一交易日"，避免落在假期
-const A_SHARE_HOLIDAYS = new Set([
-  // 2026（按实际公布调整）
-  '2026-01-01', '2026-02-16', '2026-02-17', '2026-02-18', '2026-02-19', '2026-02-20', '2026-02-21', '2026-02-22',
-  '2026-04-06', '2026-05-01', '2026-06-19', '2026-09-25', '2026-10-01', '2026-10-02', '2026-10-05', '2026-10-06', '2026-10-07',
-]);
-
-export function isTradingDay(d) {
-  const g = d.getDay();
-  if (g === 0 || g === 6) return false;          // 周末
-  if (A_SHARE_HOLIDAYS.has(ymd(d))) return false; // 法定节假日
-  return true;
-}
+export { isTradingDay };
 
 // 从给定日期往后找第 1 个交易日（不含当天）
 export function nextTradingDay(from) {

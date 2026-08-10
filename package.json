@@ -6,22 +6,25 @@
   "scripts": {
     "dev": "vite",
     "dev:api": "node dev-server.js",
+    "test": "node --test test/*.test.js",
     "build": "vite build",
+    "package:fc": "node scripts/build-fc-package.mjs",
     "preview": "vite preview",
     "start": "node server.js",
-    "migrate:oss": "node scripts/migrate-blob-to-oss.mjs"
+    "migrate:oss": "node scripts/migrate-blob-to-oss.mjs",
+    "harness:advice": "node scripts/advice-reliability-harness.mjs"
   },
   "dependencies": {
     "@vercel/blob": "^2.6.1",
     "ali-oss": "^6.23.0",
-    "echarts": "^5.5.1",
-    "echarts-for-react": "^3.0.2",
+    "echarts": "6.1.0",
+    "echarts-for-react": "3.0.6",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "web-push": "^3.6.7"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.3.1",
-    "vite": "^5.4.8"
+    "@vitejs/plugin-react": "6.0.5",
+    "vite": "8.2.1"
   }
 }

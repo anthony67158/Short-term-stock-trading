@@ -23,6 +23,15 @@ export function getRunningList() {
 export function getResult(code) { return (code && results.get(code)) || null }
 // 组件消费完瞬时结果后可清掉，避免旧结果盖住后续从缓存恢复的值（可选）
 export function clearResult(code) { if (code) { results.delete(code); } }
+export function cancelAdvice(code) {
+  const record = code && running.get(code)
+  if (!record) return false
+  record.cancelRequested = true
+  try { record.controller.abort() } catch { /* ignore */ }
+  try { record.quantController?.abort() } catch { /* ignore */ }
+  notify()
+  return true
+}
 
 // spec: {
 //   code, mode('buy_advice'|'hold_advice'), name, myHold(bool),
@@ -33,15 +42,24 @@ export function startAdvice(spec) {
   if (!code) return Promise.resolve()
   if (running.has(code)) return running.get(code).promise || Promise.resolve()  // 已在后台跑 → 幂等，复用同一 promise
   results.delete(code)           // 清掉上次的瞬时结果，UI 立即进入 loading
-  const rec = { phase: '正在准备分析…', startedAt: Date.now(), name: (spec && spec.name) || code, sources: [], reasoning: '', quant: null }
+  const rec = {
+    phase: '正在准备分析…',
+    startedAt: Date.now(),
+    name: (spec && spec.name) || code,
+    sources: [],
+    reasoning: '',
+    quant: null,
+    controller: new AbortController(),
+    cancelRequested: false,
+  }
   running.set(code, rec)
   notify()
-  const p = run(spec).finally(() => { running.delete(code); notify() })
+  const p = run(spec, rec).finally(() => { running.delete(code); notify() })
   rec.promise = p                // 挂到运行记录上：批量生成器据此 await 完成
   return p
 }
 
-async function run(spec) {
+async function run(spec, record) {
   const { code, mode, name, myHold, aiPayload, quantUrl, priceHint } = spec
   const onPhase = (p) => {
     const r = running.get(code)
@@ -70,16 +88,21 @@ async function run(spec) {
     const quantP = (async () => {
       if (!quantUrl) return null
       const ac = new AbortController()
+      record.quantController = ac
       const t = setTimeout(() => { try { ac.abort() } catch { /* ignore */ } }, 15000)
       try {
         const r = await fetch(quantUrl, { signal: ac.signal })
         return await r.json()
       } catch { return null } finally { clearTimeout(t) }
     })()
-    const adviceP = callAIStream(mode, aiPayload, onPhase, undefined, onEvent)
+    const adviceP = callAIStream(mode, aiPayload, onPhase, record.controller.signal, onEvent)
       .then((r) => (r && r.ok ? { advice: r.result, meta: r.meta, news: r.news, truncated: r.truncated } : null))
       .catch(() => null)
     const [j, adviceResp] = await Promise.all([quantP, adviceP])
+    if (record.cancelRequested) {
+      results.delete(code)
+      return
+    }
 
     const advice = adviceResp && adviceResp.advice
     const meta = adviceResp && adviceResp.meta
@@ -130,6 +153,10 @@ async function run(spec) {
       }
     }
   } catch (e) {
+    if (record.cancelRequested) {
+      results.delete(code)
+      return
+    }
     if (serverFallback(code)) {
       results.set(code, { pending: true, error: '本地生成中断,已转由云端继续生成,稍候自动刷新…' })
     } else {

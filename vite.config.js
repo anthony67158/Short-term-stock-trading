@@ -4,14 +4,23 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   build: {
-    // 手动分包：把体积大且首屏非必需的库拆出主 bundle，
-    // 让浏览器并行下载 + 长效缓存(库变动频率远低于业务代码)。
-    // echarts(图表)~1MB 单独成块，仅在打开含图表页面时才拉取。
-    rollupOptions: {
+    // Rolldown 手动分包：稳定依赖单独缓存，业务改动不使大包失效。
+    // ECharts 与 zrender 保持同组；React 与 scheduler 保持同组。
+    rolldownOptions: {
       output: {
-        manualChunks: {
-          'react-vendor': ['react', 'react-dom'],
-          'echarts-vendor': ['echarts', 'echarts-for-react'],
+        codeSplitting: {
+          groups: [
+            {
+              name: 'react-vendor',
+              test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/,
+              priority: 20,
+            },
+            {
+              name: 'echarts-vendor',
+              test: /node_modules[\\/](echarts|echarts-for-react|zrender)[\\/]/,
+              priority: 20,
+            },
+          ],
         },
       },
     },

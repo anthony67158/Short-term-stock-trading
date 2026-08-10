@@ -43,6 +43,18 @@ export async function emGet(pathAndQuery, { his = false } = {}) {
   }
 }
 
+// 批量分页场景使用单镜像并在失败时顺序回退，避免每一页都并发竞速全部镜像。
+export async function emGetOne(pathAndQuery, { his = false, hostIndex = 0, maxAttempts } = {}) {
+  const hosts = his ? EM_HIS_HOSTS : EM_HOSTS;
+  const start = Math.abs(Number(hostIndex) || 0) % hosts.length;
+  const attempts = Math.max(1, Math.min(hosts.length, Number(maxAttempts) || hosts.length));
+  for (let offset = 0; offset < attempts; offset++) {
+    const host = hosts[(start + offset) % hosts.length];
+    try { return await fetchJson(host + pathAndQuery); } catch { /* 换下一镜像 */ }
+  }
+  throw new Error('all hosts failed');
+}
+
 // ---- 统一 CORS / 预检契约 ----
 // 前端(Vercel 域)直连 FC 后端属跨域，JSON POST 会先发 OPTIONS 预检；
 // 所有 handler 统一走这里，避免各写一份、漏设 Allow-Methods/Headers 导致预检失败。

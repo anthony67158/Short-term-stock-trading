@@ -4,18 +4,74 @@ import { openStockDetail } from '../detailStore'
 import { chatStore } from '../chatStore'
 import { callAI } from '../ai'
 import { api } from '../apiBase'
+import { computePortfolio, livePositionOf, planStore, t1StatusOf, usePlanStore } from '../planStore'
+import { sanitizeAccountContext } from '../../shared/assistantContext.js'
+import { sanitizeTradeProposal } from '../../shared/tradeProposal.js'
 import Icon from './Icon'
 import Md from './Md'
 import Reasoning from './Reasoning'
+import ConfirmDialog from './ConfirmDialog'
 
 // ============ 统一 AI 助手：一个入口，对话为核心 ============
 // 能力：个股多轮问答(RAG+新闻) + 快捷指令(全盘扫描/盘面复盘/板块选股/个股诊断)
 // 对话按日期持久化，单日上下文连贯，可按天查看/删除历史
 
+function buildAccountContext(book, snapshot) {
+  const shared = typeof snapshot === 'function' ? (snapshot() || {}) : {}
+  const quotes = Array.isArray(shared.quotes) ? shared.quotes : []
+  const quoteMap = Object.fromEntries(quotes.filter((item) => item && item.code).map((item) => [item.code, item]))
+  const portfolio = computePortfolio(book.holding || [], quoteMap, book.account)
+  const weights = {}
+  for (const item of (portfolio.positions || [])) weights[item.code] = (weights[item.code] || 0) + (Number(item.weight) || 0)
+  const codes = [...new Set((book.holding || []).map((item) => item.code).filter(Boolean))]
+  const positions = codes.map((code) => {
+    const holding = (book.holding || []).find((item) => item.code === code) || {}
+    const live = livePositionOf(code)
+    const t1 = t1StatusOf(code)
+    const quote = quoteMap[code] || {}
+    const currentPrice = Number(quote.price) > 0 ? Number(quote.price) : null
+    const pnlPct = currentPrice != null && live?.cost ? +((currentPrice - live.cost) / live.cost * 100).toFixed(2) : null
+    return {
+      code, name: holding.name, qty: live?.qty, cost: live?.cost,
+      currentPrice, pnlPct, sellableToday: t1.sellableToday,
+      t1Locked: t1.boughtToday > 0, weightPct: +(weights[code] || 0).toFixed(1),
+      tp: holding.tp, sl: holding.sl,
+    }
+  })
+  const recentTrades = [...(book.closed || [])]
+    .sort((a, b) => (b.at || b.sellAt || b.buyAt || 0) - (a.at || a.sellAt || a.buyAt || 0))
+    .slice(0, 10)
+    .map((item) => ({ ...item, type: item.type || item.kind }))
+  return sanitizeAccountContext({
+    account: {
+      totalAssets: portfolio.totalAssets,
+      cash: portfolio.available,
+      positionPct: portfolio.position,
+    },
+    positions,
+    watchlist: (book.plan || []).map((item) => ({
+      code: item.code, name: item.name, qScore: item.qScore, qBias: item.qBias,
+    })),
+    recentTrades,
+    decision: planStore.decisionStats(),
+  })
+}
+
+function sanitizeProposals(items, evidence) {
+  const allowed = (evidence || []).map((item) => item.id)
+  return (Array.isArray(items) ? items : [])
+    .map((item) => sanitizeTradeProposal(item, allowed))
+    .filter((item) => item && item.evidenceIds.length > 0)
+    .slice(0, 5)
+}
+
 export default function AIAssistant({ snapshot }) {
   const { open, stock, sector, intent, seq, prefill, prefillSeq } = useAIStore()
   const [q, setQ] = useState('')
   const [loading, setLoading] = useState(false)
+  const [confirmProposal, setConfirmProposal] = useState(null)
+  const [proposalNotice, setProposalNotice] = useState('')
+  const book = usePlanStore()
   const today = chatStore.today()
   const [day, setDay] = useState(today) // 当前查看的日期
   const [msgs, setMsgs] = useState(() => chatStore.load(today)) // 从今天的持久化对话恢复
@@ -91,7 +147,7 @@ export default function AIAssistant({ snapshot }) {
 
     // 先插入一个"流式中"的助手占位消息，后续所有事件都就地更新它
     let aiIndex = -1
-    setMsgs((m) => { aiIndex = m.length; return [...m, { role: 'assistant', kind: 'text', content: '', steps: [], theoryRefs: [], streaming: true, status: '正在规划分析路径…' }] })
+    setMsgs((m) => { aiIndex = m.length; return [...m, { role: 'assistant', kind: 'text', content: '', steps: [], theoryRefs: [], evidence: [], actionProposals: [], streaming: true, status: '正在规划分析路径…' }] })
     // 就地更新占位消息的辅助函数
     const patchAI = (patch) => setMsgs((m) => {
       const idx = m.findIndex((x, i) => i >= 0 && x.role === 'assistant' && x.streaming)
@@ -102,9 +158,10 @@ export default function AIAssistant({ snapshot }) {
     })
 
     try {
+      const accountContext = buildAccountContext(book, snapshot)
       const res = await fetch(api('/api/agent'), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: query, history, stock: stock || null }),
+        body: JSON.stringify({ question: query, history, stock: stock || null, accountContext }),
         signal: ctrl.signal,
       })
       const ctype = res.headers.get('content-type') || ''
@@ -112,7 +169,10 @@ export default function AIAssistant({ snapshot }) {
       if (!ctype.includes('text/event-stream')) {
         const raw = await res.text()
         let j = null; try { j = JSON.parse(raw) } catch { /* 非 JSON */ }
-        if (j && j.ok) patchAI({ content: j.answer || '', toolTrace: j.toolTrace || [], theoryRefs: j.theoryRefs || [], streaming: false, status: null })
+        if (j && j.ok) {
+          const evidence = j.evidence || []
+          patchAI({ content: j.answer || '', toolTrace: j.toolTrace || [], theoryRefs: j.theoryRefs || [], evidence, actionProposals: sanitizeProposals(j.actionProposals, evidence), streaming: false, status: null })
+        }
         else patchAI({ content: '抱歉，' + ((j && j.error) || '分析超时，请换个更聚焦的问法重试。'), streaming: false, status: null })
       } else {
         // 解析 SSE：event: xxx\n data: {...}\n\n
@@ -122,6 +182,13 @@ export default function AIAssistant({ snapshot }) {
         const handle = (event, data) => {
           if (event === 'status') patchAI({ status: data.text || '' })
           else if (event === 'theory') patchAI({ theoryRefs: data.theoryRefs || [] })
+          else if (event === 'evidence') {
+            patchAI((prev) => {
+              const byId = new Map((prev.evidence || []).map((item) => [item.id, item]))
+              for (const item of (data.evidence || [])) if (item && item.id) byId.set(item.id, item)
+              return { ...prev, evidence: [...byId.values()] }
+            })
+          }
           else if (event === 'tool') {
             patchAI((prev) => {
               const steps = (prev.steps || []).slice()
@@ -138,7 +205,10 @@ export default function AIAssistant({ snapshot }) {
           } else if (event === 'delta') {
             patchAI((prev) => ({ ...prev, content: (prev.content || '') + (data.text || ''), status: null }))
           } else if (event === 'done') {
-            patchAI((prev) => ({ ...prev, content: data.answer || prev.content, toolTrace: data.toolTrace || [], theoryRefs: data.theoryRefs || prev.theoryRefs, streaming: false, status: null }))
+            patchAI((prev) => {
+              const evidence = data.evidence || prev.evidence || []
+              return { ...prev, content: data.answer || prev.content, toolTrace: data.toolTrace || [], theoryRefs: data.theoryRefs || prev.theoryRefs, evidence, actionProposals: sanitizeProposals(data.actionProposals, evidence), streaming: false, status: null }
+            })
           } else if (event === 'error') {
             patchAI((prev) => ({ ...prev, content: prev.content || ('抱歉，' + (data.error || '分析失败')), streaming: false, status: null }))
           }
@@ -174,6 +244,23 @@ export default function AIAssistant({ snapshot }) {
 
   // 停止正在进行的分析
   const stop = () => { if (abortRef.current) abortRef.current.abort() }
+  const appliedProposalIds = new Set((book.decisionLog || [])
+    .filter((event) => event && event.kind === 'plan' && event.proposalId)
+    .map((event) => event.proposalId))
+  const requestApplyProposal = (proposal, evidence) => {
+    const clean = sanitizeProposals([proposal], evidence)[0]
+    if (!clean) { setProposalNotice('提案字段或证据校验失败，未打开确认'); return }
+    setConfirmProposal(clean)
+  }
+  const confirmApplyProposal = () => {
+    if (!confirmProposal) return
+    const result = planStore.applyAssistantProposal(confirmProposal)
+    setConfirmProposal(null)
+    setProposalNotice(result && result.ok
+      ? (result.alreadyApplied ? '该提案已写入计划，无需重复操作' : '已写入交易计划与预警，未记录成交')
+      : ((result && result.error) || '提案写入失败'))
+    setTimeout(() => setProposalNotice(''), 3200)
+  }
 
   return (
     <>
@@ -247,10 +334,19 @@ export default function AIAssistant({ snapshot }) {
                 </div>
               </div>
             )}
-            {msgs.map((m, i) => <Message key={i} m={m} />)}
+            {msgs.map((m, i) => (
+              <Message
+                key={i}
+                m={m}
+                canApply={isToday}
+                appliedProposalIds={appliedProposalIds}
+                onApplyProposal={requestApplyProposal}
+              />
+            ))}
           </div>
 
           {/* 提问输入 */}
+          {proposalNotice && <div className="proposal-notice" role="status">{proposalNotice}</div>}
           <div className="ai-input-row">
             <textarea
               ref={inputRef}
@@ -269,6 +365,17 @@ export default function AIAssistant({ snapshot }) {
           <div className="ai-disclaimer" style={{ padding: '0 16px 12px' }}>AI 基于实时行情/RAG/联网新闻分析，仅供研究参考，非投资建议</div>
         </div>
       )}
+      {confirmProposal && (
+        <ConfirmDialog
+          title="确认写入交易计划与预警？"
+          body={<ProposalConfirmBody proposal={confirmProposal} />}
+          confirmText="确认写入"
+          confirmIcon="target"
+          danger={false}
+          onConfirm={confirmApplyProposal}
+          onCancel={() => setConfirmProposal(null)}
+        />
+      )}
     </>
   )
 }
@@ -278,8 +385,9 @@ const TOOL_LABEL = {
   search_stock: '搜索股票', get_quote: '查行情', get_stock_detail: '查主营',
   get_quant_score: '量化打分', screen_stocks: '选股筛选', get_sector_rank: '板块排行',
   get_limit_pool: '涨停池', get_movers: '盘中异动', get_market: '大盘情绪', web_news: '联网新闻',
+  propose_trade_plan: '生成交易提案',
 }
-function Message({ m }) {
+function Message({ m, canApply, appliedProposalIds, onApplyProposal }) {
   if (m.role === 'user') {
     return <div className="qa-msg user"><div className="qa-bubble"><div className="qa-bubble-text">{m.content}</div></div></div>
   }
@@ -315,6 +423,16 @@ function Message({ m }) {
             </div>
           )}
           {m.content && <div className="qa-bubble-text"><Md text={m.content} />{m.streaming && <span className="stream-caret" />}</div>}
+          {Array.isArray(m.actionProposals) && m.actionProposals.length > 0 && (
+            <ProposalList
+              proposals={m.actionProposals}
+              evidence={m.evidence}
+              canApply={canApply}
+              appliedProposalIds={appliedProposalIds}
+              onApply={onApplyProposal}
+            />
+          )}
+          {Array.isArray(m.evidence) && m.evidence.length > 0 && <EvidenceList evidence={m.evidence} />}
           {Array.isArray(m.theoryRefs) && m.theoryRefs.length > 0 && (
             <div className="theory-refs">
               <span className="theory-refs-label"><Icon name="book" size={11} /> 参考理论</span>
@@ -338,6 +456,99 @@ function Message({ m }) {
       {m.kind === 'market' && <MarketReview r={m.data} />}
       {m.kind === 'sector' && <SectorPick r={m.data} />}
     </div></div>
+  )
+}
+
+const PROPOSAL_ACTION = {
+  buy: { label: '买入计划', cls: 'buy' },
+  add: { label: '加仓计划', cls: 'buy' },
+  reduce: { label: '减仓计划', cls: 'sell' },
+  sell: { label: '卖出计划', cls: 'sell' },
+}
+
+function ProposalList({ proposals, evidence, canApply, appliedProposalIds, onApply }) {
+  return (
+    <div className="proposal-list">
+      <div className="proposal-head"><Icon name="target" size={12} /> 待确认交易提案</div>
+      {proposals.map((proposal) => {
+        const action = PROPOSAL_ACTION[proposal.action] || { label: proposal.action, cls: '' }
+        const applied = appliedProposalIds.has(proposal.id)
+        return (
+          <div className="proposal-card" key={proposal.id}>
+            <div className="proposal-card-head">
+              <span><b>{proposal.name}</b> <span className="muted">{proposal.code}</span></span>
+              <span className={'proposal-action ' + action.cls}>{action.label}</span>
+            </div>
+            <div className="proposal-prices">
+              <span>触发 <b>{proposal.triggerOp === 'lte' ? '≤' : '≥'} {proposal.entryPrice}</b></span>
+              {proposal.targetPrice != null && <span>目标 <b>{proposal.targetPrice}</b></span>}
+              {proposal.stopPrice != null && <span>止损 <b>{proposal.stopPrice}</b></span>}
+              {proposal.qty != null && <span>计划 <b>{proposal.qty} 手</b></span>}
+            </div>
+            {proposal.reason && <div className="proposal-reason">{proposal.reason}</div>}
+            {proposal.confirmSignal && <div className="proposal-confirm">到价后确认：{proposal.confirmSignal}</div>}
+            {proposal.evidenceIds?.length > 0 && <div className="proposal-evidence">{proposal.evidenceIds.map((id) => `[${id}]`).join(' ')}</div>}
+            <button
+              type="button"
+              className="chip-btn proposal-apply"
+              disabled={!canApply || applied}
+              onClick={() => onApply(proposal, evidence)}
+            >
+              <Icon name={applied ? 'check' : 'target'} size={12} />
+              {applied ? '已写入计划' : canApply ? '转为计划与预警' : '历史提案只读'}
+            </button>
+          </div>
+        )
+      })}
+      <div className="proposal-foot">写入后仅开始盯盘，不会记录为已成交。</div>
+    </div>
+  )
+}
+
+function ProposalConfirmBody({ proposal }) {
+  const action = PROPOSAL_ACTION[proposal.action] || { label: proposal.action }
+  return (
+    <div className="proposal-dialog-body">
+      <p>将 <b>{proposal.name}（{proposal.code}）</b> 的“{action.label}”写入账号：</p>
+      <div className="proposal-dialog-grid">
+        <span>触发价</span><b>{proposal.triggerOp === 'lte' ? '≤' : '≥'} {proposal.entryPrice}</b>
+        <span>计划手数</span><b>{proposal.qty != null ? `${proposal.qty} 手` : '未指定'}</b>
+        <span>目标价</span><b>{proposal.targetPrice ?? '未指定'}</b>
+        <span>止损价</span><b>{proposal.stopPrice ?? '未指定'}</b>
+      </div>
+      {proposal.confirmSignal && <p className="muted">到价后仍需确认：{proposal.confirmSignal}</p>}
+      <p><b>不会执行真实下单，也不会记为已成交。</b></p>
+    </div>
+  )
+}
+
+function EvidenceList({ evidence }) {
+  const formatTime = (value) => {
+    const date = new Date(value)
+    return Number.isFinite(date.getTime())
+      ? date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+      : '时间未知'
+  }
+  return (
+    <div className="evidence-list">
+      <div className="evidence-head"><Icon name="shield" size={12} /> 数据证据</div>
+      {evidence.map((item) => {
+        const body = (
+          <>
+            <span className="evidence-id">[{item.id}]</span>
+            <span className="evidence-main">
+              <span className="evidence-title">{item.title}</span>
+              <span className="evidence-meta">{item.source} · {formatTime(item.asOf)}</span>
+              {item.summary && <span className="evidence-summary">{item.summary}</span>}
+            </span>
+            {item.url && <Icon name="chevronRight" size={11} />}
+          </>
+        )
+        return item.url
+          ? <a className="evidence-item" key={item.id} href={item.url} target="_blank" rel="noreferrer">{body}</a>
+          : <div className="evidence-item" key={item.id}>{body}</div>
+      })}
+    </div>
   )
 }
 

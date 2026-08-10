@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import ReactECharts from 'echarts-for-react'
 import Icon from './Icon'
+import AdviceGenerationStatus from './AdviceGenerationStatus'
 import Reasoning from './Reasoning'
 import { HL } from './RichText'
 import { usePolling } from '../hooks'
@@ -588,6 +589,7 @@ export default function StockDetail({ stock, onClose }) {
                 {quantState && quantState.loading && (
                   <div className="advice-skeleton">
                     <div className="sk-hint"><Icon name="refresh" size={13} className="spin" /> {quantState.phase || '量化模型 + AI 计算中…'}（首次冷启动约需几秒）</div>
+                    <AdviceGenerationStatus code={stock.code} variant="detail" />
                     {/* 数据源采集清单:每个源 settle 时后端推 source 事件,这里实时勾选(✓ 成功 / — 无数据) */}
                     {quantState.sources && quantState.sources.length > 0 && (
                       <div className="adv-sources">
@@ -622,7 +624,11 @@ export default function StockDetail({ stock, onClose }) {
                   </div>
                 )}
                 {quantState && quantState.error && (
-                  <div className="quant-err">{quantState.error} <span className="expand-btn" onClick={loadQuant}>重试</span></div>
+                  <div className="quant-err">{quantState.error}
+                    <button type="button" className="advice-regenerate-btn" onClick={loadQuant}>
+                      <Icon name="refresh" size={13} />重新生成
+                    </button>
+                  </div>
                 )}
                 {quantState && !quantState.loading && !quantState.error && (quantState.result || quantState.advice) && (() => {
                   const q = quantState.result || {}
@@ -693,7 +699,9 @@ export default function StockDetail({ stock, onClose }) {
                       {quantState.adviceMissing && !adv && (
                         <div className="advice-retry">
                           <Icon name="spark" size={13} /> AI 操作建议(结论/买点/时机/止损)生成超时，
-                          <span className="expand-btn" onClick={loadQuant}>点此重试</span>
+                          <button type="button" className="advice-regenerate-btn" onClick={loadQuant}>
+                            <Icon name="refresh" size={13} />重新生成
+                          </button>
                         </div>
                       )}
 
@@ -701,7 +709,9 @@ export default function StockDetail({ stock, onClose }) {
                       {quantState.truncated && adv && (
                         <div className="advice-retry">
                           <Icon name="spark" size={13} /> 本次分析内容较长被截断，下方可能不完整，
-                          <span className="expand-btn" onClick={loadQuant}>重新生成完整版</span>
+                          <button type="button" className="advice-regenerate-btn" onClick={loadQuant}>
+                            <Icon name="refresh" size={13} />重新生成完整版
+                          </button>
                         </div>
                       )}
 
@@ -900,7 +910,9 @@ export default function StockDetail({ stock, onClose }) {
                       {/* 生成时间 + 重新生成（结果已缓存，关闭再进/刷新仍可见）*/}
                       <div className="advice-foot">
                         {cachedStr && <span className="advice-cached"><Icon name="history" size={11} /> {cachedStr} 生成，已保留</span>}
-                        <span className="expand-btn" style={{ marginLeft: 'auto' }} onClick={loadQuant}>重新生成</span>
+                        <button type="button" className="advice-regenerate-btn primary" onClick={loadQuant}>
+                          <Icon name="refresh" size={13} />重新生成操作建议
+                        </button>
                       </div>
                       <div className="dq-hint">{adv ? (myHold ? 'AI 操作建议由大模型结合量化预测/技术面/你的持仓成本生成' : 'AI 操作建议由大模型结合量化走势预测/技术面/历史规律/当日盘面生成') : '走势预测=基于历史波动的蒙特卡洛模拟，量化=多因子打分'}；均为统计口径，仅供参考，非投资建议</div>
                     </>
@@ -1146,4 +1158,3 @@ export default function StockDetail({ stock, onClose }) {
 }
 
 // ---------- 复盘结论卡：已下线（复盘统一在「持仓·做T」卡片上自动展示，个股详情不再单独提供复盘）----------
-

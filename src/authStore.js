@@ -2,8 +2,9 @@ import { useSyncExternalStore } from 'react'
 import { planStore } from './planStore'
 import { api as apiUrl } from './apiBase'
 import { isBatchRunning } from './adviceBatch'
+import { createCloudSaveQueue } from '../shared/accountSync.js'
 
-// ============ 云端账号体系（Vercel Blob 持久化，跨设备同步）============
+// ============ 云端账号体系（阿里云 OSS 持久化，跨设备同步）============
 // 会话（昵称+密码）持久化在本机 localStorage，保持长期登录（关标签页/切后台不掉线）；数据存云端。
 const SESS = 'cloud_session_v1'
 const LEGACY_KEY = 'trade_book_v2' // 旧的无账号本机数据(供首次注册导入)
@@ -31,11 +32,15 @@ let state = {
   status: 'idle',    // idle | loading | ready | error
   error: '',
   booting: true,     // 启动时是否在恢复会话
+  syncStatus: 'idle', // idle | saving | synced | error
+  syncError: '',
+  lastSyncedAt: 0,
 }
 const listeners = new Set()
 function emit() { state = { ...state }; listeners.forEach((l) => { try { l() } catch (e) { console.error('[store] listener error', e) } }) }
 
 let _pw = null // 密码仅保存在内存 + sessionStorage，用于后续保存
+let _cloudRevision = 0
 
 // 读取本机旧数据（首次注册可导入）
 export function readLegacyData() {
@@ -52,13 +57,39 @@ export function readLegacyData() {
 export function hasLegacyData() { return !!readLegacyData() }
 
 async function api(action, payload) {
-  const r = await fetch(apiUrl('/api/account'), {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action, ...payload }),
-  })
-  const raw = await r.text()
-  try { return JSON.parse(raw) } catch { return { ok: false, error: `服务异常(${r.status})` } }
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 20000)
+  try {
+    const r = await fetch(apiUrl('/api/account'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, ...payload }),
+      signal: controller.signal,
+    })
+    const raw = await r.text()
+    try { return JSON.parse(raw) } catch { return { ok: false, error: `服务异常(${r.status})` } }
+  } finally {
+    clearTimeout(timeout)
+  }
 }
+
+const cloudSaveQueue = createCloudSaveQueue({
+  async save({ nick, pw, data }) {
+    const response = await api('save', {
+      nick, pw, data,
+      baseRevision: _cloudRevision,
+    })
+    if (response?.ok && Number.isInteger(response.revision)) {
+      _cloudRevision = response.revision
+    }
+    return response
+  },
+  onState(value) {
+    state.syncStatus = value.status
+    state.syncError = value.error || ''
+    if (value.updatedAt) state.lastSyncedAt = value.updatedAt
+    emit()
+  },
+})
 
 export const authStore = {
   subscribe(l) { listeners.add(l); return () => listeners.delete(l) },
@@ -74,6 +105,8 @@ export const authStore = {
       const r = await api('get', { nick: s.nick, pw: s.pw })
       if (r.ok) {
         state.user = s.nick; state.status = 'ready'
+        _cloudRevision = Number(r.revision) || 0
+        state.syncStatus = 'synced'; state.syncError = ''; state.lastSyncedAt = r.updatedAt || 0
         planStore.setData(r.data)
       } else {
         saveSession(null); _pw = null
@@ -95,7 +128,9 @@ export const authStore = {
     const r = await api('register', { nick, pw, data })
     if (!r.ok) { state.status = 'error'; state.error = r.error; emit(); return r }
     _pw = String(pw); saveSession({ nick, pw: _pw })
+    _cloudRevision = Number(r.revision) || 0
     state.user = nick; state.status = 'ready'; state.error = ''
+    state.syncStatus = 'synced'; state.syncError = ''; state.lastSyncedAt = r.updatedAt || Date.now()
     planStore.setData(r.data)
     emit()
     return { ok: true }
@@ -107,24 +142,37 @@ export const authStore = {
     const r = await api('login', { nick, pw })
     if (!r.ok) { state.status = 'error'; state.error = r.error; emit(); return r }
     _pw = String(pw); saveSession({ nick, pw: _pw })
+    _cloudRevision = Number(r.revision) || 0
     state.user = nick; state.status = 'ready'; state.error = ''
+    state.syncStatus = 'synced'; state.syncError = ''; state.lastSyncedAt = r.updatedAt || 0
     planStore.setData(r.data)
     emit()
     return { ok: true }
   },
 
   logout() {
-    saveSession(null); _pw = null
+    cloudSaveQueue.reset()
+    saveSession(null); _pw = null; _cloudRevision = 0
     state.user = null; state.status = 'idle'
+    state.syncStatus = 'idle'; state.syncError = ''; state.lastSyncedAt = 0
     planStore.setData({ plan: [], holding: [], closed: [] })
     emit()
   },
 
   // 供 planStore 保存数据到云端
   async saveData(data) {
-    if (!state.user || !_pw) return
-    try { await api('save', { nick: state.user, pw: _pw, data }) }
-    catch { /* 离线/接口异常:静默,下次数据变更再存(本地已持久化,不丢) */ }
+    if (!state.user || !_pw) return false
+    return cloudSaveQueue.enqueue({ nick: state.user, pw: _pw, data })
+  },
+  retrySave() { return cloudSaveQueue.retry() },
+  async deactivate() {
+    if (!state.user || !_pw) return { ok: false, error: '当前未登录' }
+    const flushed = await cloudSaveQueue.retry()
+    if (!flushed) return { ok: false, error: '最新账号数据尚未保存到 OSS，请稍后重试' }
+    const response = await api('deactivate', { nick: state.user, pw: _pw })
+    if (!response.ok) return response
+    this.logout()
+    return response
   },
   currentUser() { return state.user },
   // 供 Web Push 订阅上报:把订阅绑到当前账号(服务端据此推给对的人)。仅内存,不落盘额外副本。
@@ -141,6 +189,8 @@ export const authStore = {
     try {
       const r = await api('get', { nick: state.user, pw: _pw })
       if (r && r.ok && r.data) {
+        if (Number.isInteger(r.revision)) _cloudRevision = r.revision
+        state.lastSyncedAt = r.updatedAt || state.lastSyncedAt
         try { planStore.mergeCloud(r.data) } catch { /* ignore */ }
         return true
       }
@@ -166,7 +216,7 @@ export function startCloudSync() {
     try { fast = isBatchRunning() } catch { fast = false }
     _pullTimer = setTimeout(tick, fast ? PULL_FAST : PULL_INTERVAL)
   }
-  _pullTimer = setTimeout(tick, PULL_INTERVAL)
+  _pullTimer = setTimeout(tick, 0)
   // 页面重新可见/窗口聚焦 → 立刻补拉一次(用户从手机切回电脑那一刻就能看到最新建议)
   const kick = () => { if (document.visibilityState === 'visible') { try { authStore.pull() } catch { /* ignore */ } } }
   document.addEventListener('visibilitychange', kick)
@@ -178,4 +228,4 @@ export function useAuthStore() {
 }
 
 // 注册云端保存回调：planStore 数据变更 → 防抖后写回当前账号
-planStore.registerSaver((data) => { try { authStore.saveData(data) } catch { /* ignore */ } })
+planStore.registerSaver((data) => authStore.saveData(data))

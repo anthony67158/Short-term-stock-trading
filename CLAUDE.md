@@ -1,5 +1,7 @@
 # 部署架构与铁律（务必遵守）
 
+> 配套文件:`README.md`(完整项目介绍)、`AGENTS.md`(面向编码代理的工程指南)、`CREDENTIALS.md`(明文密钥,仅本人自用、绝不入库)。
+
 本项目是**前后端分离**部署，不是纯 Vercel 项目：
 
 - **前端（静态站）**：Vercel 项目 `stock-dashboard`（`prj_kj8hwBB7BtFtz8REVGttUwSQhpTG`），
@@ -19,6 +21,7 @@
 ```bash
 cd <project-root>
 npm run build                       # 前端产物 dist/ 一并打进 FC 包，保持一致
+npm run package:fc                  # 生成最小 FC 运行包，避免上传前端开发依赖
 set -a; . ./.env; set +a            # 加载 .env，让 s.yaml 的 ${env('...')} 取到真值（关键，否则会把线上环境变量清空搞挂）
 npx @serverless-devs/s deploy -y    # 用 ~/.s/access.yaml 的 default 凭证部署到 stock-dashboard-znrlekbzit
 ```

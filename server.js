@@ -14,6 +14,7 @@ import http from 'node:http';
 import { readdirSync, existsSync, statSync, createReadStream } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
+import { adviceTimerBody } from './api/_advice_timer.js';
 
 const PORT = process.env.FC_SERVER_PORT || process.env.PORT || 9000;
 const ROOT = process.cwd();
@@ -71,6 +72,28 @@ function serveStatic(req, res, pathname) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const pathname = url.pathname;
+
+  // FC 事件源（Timer/InvokeFunction）固定 POST /invoke。仅接受部署时 CRON_KEY
+  // 匹配的 advice-resume-timer，避免公开 HTTP 地址伪造定时调用消耗模型额度。
+  if (pathname === '/invoke' && req.method === 'POST') {
+    const raw = await parseBody(req);
+    let event = null;
+    try { event = JSON.parse(raw || '{}'); } catch { /* ignore */ }
+    const timerBody = adviceTimerBody(event, process.env.CRON_KEY);
+    if (!timerBody) { res.statusCode = 403; res.end('forbidden'); return; }
+    req.query = {};
+    req.body = timerBody;
+    req.headers['x-cron-key'] = process.env.CRON_KEY;
+    res.status = (code) => { res.statusCode = code; return res; };
+    res.send = (payload) => { res.end(typeof payload === 'string' ? payload : JSON.stringify(payload)); return res; };
+    res.json = (obj) => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(obj)); return res; };
+    try {
+      await handlers.cron_advice(req, res);
+    } catch (e) {
+      if (!res.writableEnded) { res.statusCode = 500; res.end(JSON.stringify({ ok: false, error: String(e.message || e) })); }
+    }
+    return;
+  }
 
   // 健康检查
   if (pathname === '/__health') { res.statusCode = 200; res.end('ok'); return; }

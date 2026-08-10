@@ -19,7 +19,7 @@
 //   防重:同 code 已有 queued/running 活跃任务 → enqueue 复用,不新建(除非 force 重生成)。
 
 export const CONCURRENCY = Number(process.env.ADVICE_CONCURRENCY || 3); // 全局并发上限【默认/回退】(运行时优先按承接 advisor 角色的端点数,见 cron_advice.js)
-export const LEASE_MS = 450 * 1000;      // 单只运行租约:须 > genOne 内部兜底预算(invoke 420s),否则长任务(深度思考 360s)会被误判孤儿而重复起跑
+export const LEASE_MS = 270 * 1000;      // 单只运行租约:大于批量单股 225s 护栏；Worker 每 20s 续租，中断后约 4.5 分钟可回收
 export const LOCK_TTL_MS = 60 * 1000;    // Worker 锁 TTL:drainer 周期续租;崩溃后此后过期,他人接管
 export const MAX_ATTEMPTS = 3;           // 失败最多重试次数
 const JOB_TTL_MS = 24 * 3600 * 1000;     // 终态任务保留 24h 后清理(避免无限堆积)
@@ -52,7 +52,8 @@ export function reapOrphans(data, now = Date.now()) {
   let n = 0;
   for (const j of Object.values(jobs)) {
     if (isOrphan(j, now)) {
-      j.status = 'queued'; j.leaseUntil = 0; j.error = '(中断,自动续跑)'; n++;
+      j.status = 'queued'; j.leaseUntil = 0; j.error = '(中断,自动续跑)';
+      j.phase = '任务中断，等待云端自动续跑'; j.progressAt = now; n++;
     }
   }
   return n;
@@ -80,6 +81,8 @@ export function enqueueJob(data, { code, name, mode, source = 'ondemand', force 
     attempts: 0, maxAttempts: MAX_ATTEMPTS,
     at: now, startedAt: 0, finishedAt: 0, leaseUntil: 0,
     error: '', source, cancelRequested: false,
+    phase: '排队等待云端生成',
+    sources: [], reasoning: '', model: '', endpoint: '', progressAt: now,
   };
   jobs[code] = job;
   return { job, created: true };
@@ -95,6 +98,8 @@ export function leaseJob(data, code, now = Date.now()) {
   j.startedAt = j.startedAt || now;
   j.leaseUntil = now + LEASE_MS;
   j.error = '';
+  j.phase = '正在准备分析';
+  j.progressAt = now;
   return j;
 }
 
@@ -104,10 +109,38 @@ export function renewLease(data, code, now = Date.now()) {
   if (j && j.status === 'running') j.leaseUntil = now + LEASE_MS;
 }
 
+function visibleChineseReasoning(value) {
+  const lines = String(value || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && /[\u4e00-\u9fff]/.test(line))
+  const text = lines.join('\n')
+  if (text.length <= 6000) return text
+  return `${text.slice(0, 800)}\n…\n${text.slice(-5197)}`
+}
+
+export function updateJobProgress(data, code, patch = {}, now = Date.now()) {
+  const job = jobsOf(data)[code]
+  if (!job) return null
+  if (patch.phase != null) job.phase = String(patch.phase).slice(0, 160)
+  if (Array.isArray(patch.sources)) {
+    job.sources = patch.sources.slice(-12).map((source) => ({
+      label: String(source?.label || '').slice(0, 60),
+      ok: !!source?.ok,
+    }))
+  }
+  if (patch.reasoning != null) job.reasoning = visibleChineseReasoning(patch.reasoning)
+  if (patch.model != null) job.model = String(patch.model).slice(0, 100)
+  if (patch.endpoint != null) job.endpoint = String(patch.endpoint).slice(0, 120)
+  job.progressAt = now
+  return job
+}
+
 export function completeJob(data, code, now = Date.now()) {
   const j = jobsOf(data)[code];
   if (!j) return;
   j.status = 'done'; j.finishedAt = now; j.leaseUntil = 0; j.error = '';
+  j.phase = '生成完成'; j.progressAt = now;
 }
 
 // 失败:还有重试次数 → 回 queued(下次 drain 重跑);否则 failed 终态。
@@ -116,9 +149,9 @@ export function failJob(data, code, err, now = Date.now()) {
   if (!j) return;
   j.error = String(err || '生成失败');
   if ((j.attempts || 0) < (j.maxAttempts || MAX_ATTEMPTS)) {
-    j.status = 'queued'; j.leaseUntil = 0;   // 重试
+    j.status = 'queued'; j.leaseUntil = 0; j.phase = `生成失败，准备第${(j.attempts || 0) + 1}次重试`; j.progressAt = now;
   } else {
-    j.status = 'failed'; j.finishedAt = now; j.leaseUntil = 0;
+    j.status = 'failed'; j.finishedAt = now; j.leaseUntil = 0; j.phase = '生成失败'; j.progressAt = now;
   }
 }
 
@@ -177,10 +210,28 @@ export function jobsToProgress(data, now = Date.now(), concurrency = CONCURRENCY
   const arr = Object.values(jobs).filter(Boolean);
   // 只统计"本轮相关"的:近 6h 内有活动的任务(避免历史 done 混入总数)
   const recent = arr.filter((j) => (now - (j.at || 0)) < 6 * 3600 * 1000);
-  const mapStatus = (s) => (s === 'done' ? 'ok' : s === 'failed' ? 'fail' : s === 'canceled' ? 'skipped' : s); // queued/running 原样
+  const mapStatus = (job) => {
+    if (job.cancelRequested && job.status === 'running') return 'canceling';
+    return job.status === 'done' ? 'ok'
+      : job.status === 'failed' ? 'fail'
+        : job.status === 'canceled' ? 'skipped'
+          : job.status;
+  };
   const items = recent
     .sort((a, b) => (a.at || 0) - (b.at || 0))
-    .map((j) => ({ code: j.code, name: j.name, status: mapStatus(j.status), error: j.error || '' }));
+    .map((j) => ({
+      code: j.code,
+      name: j.name,
+      status: mapStatus(j),
+      error: j.error || '',
+      phase: j.phase || '',
+      sources: Array.isArray(j.sources) ? j.sources : [],
+      reasoning: j.reasoning || '',
+      model: j.model || '',
+      endpoint: j.endpoint || '',
+      progressAt: j.progressAt || j.at || 0,
+      attempts: j.attempts || 0,
+    }));
   const ok = recent.filter((j) => j.status === 'done').length;
   const fail = recent.filter((j) => j.status === 'failed').length;
   const skipped = recent.filter((j) => j.status === 'canceled').length;
@@ -188,14 +239,21 @@ export function jobsToProgress(data, now = Date.now(), concurrency = CONCURRENCY
   const current = recent.filter((j) => j.status === 'running').map((j) => j.code);
   const total = recent.length;
   const done = ok + fail + skipped;
+  const snapshotAt = recent.reduce(
+    (latest, j) => Math.max(latest, j.progressAt || 0, j.finishedAt || 0, j.at || 0),
+    0,
+  );
+  const finishedAt = active.length
+    ? 0
+    : recent.reduce((latest, j) => Math.max(latest, j.finishedAt || 0), 0);
   return {
     running: active.length > 0,
     total, done, ok, fail, skipped,
     current,
     items,
-    startedAt: recent.reduce((m, j) => Math.min(m || Infinity, j.at || Infinity), 0) || now,
-    finishedAt: active.length ? 0 : now,
-    at: now,
+    startedAt: recent.reduce((m, j) => Math.min(m || Infinity, j.at || Infinity), 0) || 0,
+    finishedAt: finishedAt || snapshotAt,
+    at: snapshotAt,
     source: 'server',
     concurrency: Math.max(1, Number(concurrency) || CONCURRENCY),
   };

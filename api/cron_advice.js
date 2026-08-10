@@ -21,18 +21,64 @@
 //   · 每次 persist 都【重读云端最新账号】做保护式叠加(防止盖回用户本机刚编辑的持仓)。
 
 import { applyCors, preflight } from './_lib.js';
-import { writeAccount, readAccount, listAllAccounts, sha } from './account.js';
-import { buildHoldPayload, buildWatchPayload, computePortfolio } from './_portfolio.js';
+import { isAccountActive, writeAccount, readAccount, listAllAccounts, sha } from './account.js';
+import { buildHoldPayload, buildWatchPayload, computePortfolio, t1StatusOf } from './_portfolio.js';
 import {
   CONCURRENCY, jobsOf, enqueueJob, leaseJob, completeJob, failJob, cancelJob, cancelAll,
   reapOrphans, gcJobs, runningCount, hasPendingWork, isActive, jobsToProgress,
-  acquireWorkerLock, renewWorkerLock, releaseWorkerLock, workerHeldByOther,
+  acquireWorkerLock, renewWorkerLock, releaseWorkerLock, workerHeldByOther, updateJobProgress,
 } from './_jobs.js';
 import { ensureConfig, currentConfig } from './_llm_config.js';
 import { endpointCountForRole } from './_llm_pool.js';
+import { projectAdviceAlerts } from '../shared/adviceAlerts.js';
+import { createRecommendation } from '../shared/decisionLedger.js';
 import aiHandler from './ai.js';
 import stockDetailHandler from './stock_detail.js';
 import quoteHandler from './quote.js';
+
+export function createAdviceSSEParser(onEvent) {
+  let buffer = '';
+  const consume = (flush = false) => {
+    buffer = buffer.replace(/\r\n/g, '\n');
+    let boundary;
+    while ((boundary = buffer.indexOf('\n\n')) >= 0) {
+      const frame = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      let event = 'message';
+      const dataLines = [];
+      for (const line of frame.split('\n')) {
+        if (line.startsWith('event:')) event = line.slice(6).trim();
+        else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
+      }
+      if (!dataLines.length) continue;
+      try { onEvent(event, JSON.parse(dataLines.join('\n'))); } catch { /* 忽略心跳或不完整事件 */ }
+    }
+    if (flush && buffer.trim()) {
+      buffer += '\n\n';
+      consume(false);
+    }
+  };
+  return {
+    push(chunk) { buffer += String(chunk || ''); consume(false); },
+    end() { consume(true); },
+  };
+}
+
+export function progressPatchForEvent(event, data) {
+  if (!data || typeof data !== 'object') return null;
+  if (event === 'phase' && data.text) return { phase: String(data.text) };
+  if (event === 'source' && data.label) {
+    return { source: { label: String(data.label), ok: !!data.ok } };
+  }
+  if (event === 'reasoning' && data.text) return { reasoningDelta: String(data.text) };
+  if (event === 'model') {
+    return {
+      model: String(data.model || ''),
+      endpoint: String(data.endpoint || ''),
+    };
+  }
+  return null;
+}
 
 // ---- 并发上限:严格等于用户为「操盘军师(advisor)」角色配置的端点数(核心规则1)----
 // AI 操作建议实际调用 advisor 角色 → 承接该角色的端点数即为可并行生成的最大只数。
@@ -94,6 +140,52 @@ function invoke(handler, { method = 'GET', query = {}, body = null } = {}) {
   });
 }
 
+function invokeSSE(handler, { method = 'POST', query = {}, body = null, onEvent, timeoutMs = 225000 } = {}) {
+  return new Promise((resolve) => {
+    let done = false;
+    let result = null;
+    const parser = createAdviceSSEParser((event, data) => {
+      if (event === 'result') result = data;
+      if (typeof onEvent === 'function') onEvent(event, data);
+    });
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      parser.end();
+      resolve(result);
+    };
+    const res = {
+      statusCode: 200, headersSent: false, _headers: {},
+      setHeader(k, v) { this._headers[String(k).toLowerCase()] = v; },
+      getHeader(k) { return this._headers[String(k).toLowerCase()]; },
+      status(c) { this.statusCode = c; return this; },
+      write(chunk) { this.headersSent = true; parser.push(chunk); return true; },
+      send(payload) {
+        this.headersSent = true;
+        if (payload != null) {
+          try { result = typeof payload === 'string' ? JSON.parse(payload) : payload; } catch { /* ignore */ }
+        }
+        finish();
+        return this;
+      },
+      json(obj) { this.headersSent = true; result = obj; finish(); return this; },
+      end(payload) {
+        this.headersSent = true;
+        if (payload != null) parser.push(payload);
+        finish();
+        return this;
+      },
+    };
+    const req = { method, query, body: body || {}, headers: {} };
+    const timer = setTimeout(finish, timeoutMs);
+    try {
+      const promise = handler(req, res);
+      if (promise && typeof promise.then === 'function') promise.catch(finish);
+    } catch { finish(); }
+  });
+}
+
 // 行情缓存(进程级,30s):并发多只时避免每只都全量拉一遍行情。
 let _quoteMemo = { at: 0, key: '', map: {} };
 async function fetchQuoteMap(codes) {
@@ -126,10 +218,17 @@ function applyQuantScore(data, code, qs) {
 }
 
 // 生成单只:进程内并发跑 量化(stock_detail?quant=1) + 军师(ai.js) → 组装缓存项(对齐前端 saveAdvice 结构)
-async function genOne({ code, name, mode, myHold, payload, quantQuery }) {
+async function genOne({ code, name, mode, payload, quantQuery, onProgress }) {
   const quantP = invoke(stockDetailHandler, { method: 'GET', query: quantQuery })
     .then((j) => (j && j.quant) ? j.quant : null).catch(() => null);
-  const adviceP = invoke(aiHandler, { method: 'POST', body: { mode, payload } })
+  const adviceP = invokeSSE(aiHandler, {
+    method: 'POST',
+    body: { mode, payload, stream: true, runtimeBudgetMs: 210000 },
+    onEvent(event, data) {
+      const patch = progressPatchForEvent(event, data);
+      if (patch && typeof onProgress === 'function') onProgress(patch);
+    },
+  })
     .then((r) => (r && r.ok ? { advice: r.result, meta: r.meta, news: r.news, truncated: r.truncated } : null))
     .catch(() => null);
   const [result, adviceResp] = await Promise.all([quantP, adviceP]);
@@ -170,7 +269,7 @@ function buildTask(data, code) {
   const nameOf = (holding.find((h) => h.code === code) || watch.find((w) => w.code === code) || {}).name || code;
   return { holdSet, nameOf };
 }
-async function runJobGen(acc, code) {
+async function runJobGen(acc, code, onProgress) {
   const data = acc.data || {};
   const holding = data.holding || [], watch = data.plan || [];
   const holdSet = new Set(holding.map((h) => h.code));
@@ -182,11 +281,11 @@ async function runJobGen(acc, code) {
     const p = buildHoldPayload(holding, code, name, portfolio, data.account, data.closed, nextTradeDayLabel());
     p.advisorTrack = advisorTrackFrom(data);
     const hp = (p.holdCost != null && p.holdQty != null) ? { holdCost: String(p.holdCost), holdQty: String(p.holdQty) } : {};
-    return genOne({ code, name, mode: 'hold_advice', myHold: true, payload: p, quantQuery: { code, klt: '101', lmt: '60', quant: '1', ...hp } });
+    return genOne({ code, name, mode: 'hold_advice', payload: p, quantQuery: { code, klt: '101', lmt: '60', quant: '1', ...hp }, onProgress });
   }
   const p = buildWatchPayload(code, name, portfolio, data.account);
   p.advisorTrack = advisorTrackFrom(data);
-  return genOne({ code, name, mode: 'buy_advice', myHold: false, payload: p, quantQuery: { code, klt: '101', lmt: '60', quant: '1' } });
+  return genOne({ code, name, mode: 'buy_advice', payload: p, quantQuery: { code, klt: '101', lmt: '60', quant: '1' }, onProgress });
 }
 
 // ---- 任务表合并:把云端最新的【外部变更】并入内存 working(捕获其它设备新入队 / 取消)----
@@ -210,6 +309,7 @@ function mergeExternalJobs(workingData, freshData) {
 // ---- 保护式落盘:重读云端最新账号,只叠加服务端权威字段,绝不覆盖用户 plan/holding/account ----
 async function persistServer(nick, workingAcc, myId) {
   const fresh = (await readAccount(nick)) || workingAcc;
+  if (!isAccountActive(fresh)) return fresh;
   const fdata = fresh.data || (fresh.data = {});
   const wdata = workingAcc.data || {};
   // 先把云端外部变更并入内存(其它设备新入队/取消),再整体回写 jobs(服务端权威)
@@ -221,7 +321,18 @@ async function persistServer(nick, workingAcc, myId) {
   // advice 逐条时间戳并入
   const wa = (wdata.advice && typeof wdata.advice === 'object') ? wdata.advice : {};
   const fa = (fdata.advice && typeof fdata.advice === 'object') ? fdata.advice : (fdata.advice = {});
-  for (const [k, v] of Object.entries(wa)) { if (!v) continue; const cur = fa[k]; if (!cur || (v.at || 0) > (cur.at || 0)) fa[k] = v; }
+  for (const [k, v] of Object.entries(wa)) {
+    if (!v) continue;
+    const cur = fa[k];
+    if (!cur || (v.at || 0) > (cur.at || 0)) fa[k] = v;
+    const effective = fa[k];
+    if (effective && effective.advice) {
+      projectAdviceAlerts(fdata, k, effective.advice, {
+        t1Status: t1StatusOf(fdata.holding || [], fdata.closed || [], k),
+        nextTradeDay: nextTradeDayLabel(),
+      });
+    }
+  }
   // adviceLog 按 id 并集
   const wlog = wdata.adviceLog || [];
   if (wlog.length) {
@@ -230,6 +341,16 @@ async function persistServer(nick, workingAcc, myId) {
     for (const e of wlog) if (e && e.id && !seen.has(e.id)) flog.unshift(e);
     fdata.adviceLog = flog.slice(0, 500);
   }
+  // decisionLog 按 id 合并；同一建议的 executed 状态取更新时间更晚的一份。
+  const decisions = new Map(((fdata.decisionLog || [])).filter((x) => x && x.id).map((x) => [x.id, x]));
+  for (const event of (wdata.decisionLog || [])) {
+    if (!event || !event.id) continue;
+    const current = decisions.get(event.id);
+    if (!current || (event.executedAt || event.at || 0) > (current.executedAt || current.at || 0)) {
+      decisions.set(event.id, event);
+    }
+  }
+  fdata.decisionLog = [...decisions.values()].sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 1000);
   // qScore/qBias 写回(仅同 code 存在时)
   const stampFrom = (srcArr, dstArr) => {
     for (const s of (srcArr || [])) { if (!s || s.qScore == null) continue; for (const d of (dstArr || [])) if (d && d.code === s.code) { d.qScore = s.qScore; d.qBias = s.qBias; d.qAt = s.qAt; } }
@@ -246,26 +367,70 @@ async function persistServer(nick, workingAcc, myId) {
 async function drainAccount(nick, initialAcc) {
   const myId = `w_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   let acc = initialAcc || (await readAccount(nick));
-  if (!acc) return { drained: false, ok: 0, fail: 0 };
+  if (!isAccountActive(acc)) return { drained: false, ok: 0, fail: 0 };
   let data = acc.data || (acc.data = {});
   reapOrphans(data); gcJobs(data);
   if (!acquireWorkerLock(data, myId)) return { skipped: 'locked' };  // 已有他人在 drain → 交给它
-  acc = await persistServer(nick, acc, myId);                          // 公布锁 + 回收结果
+  let persistChain = Promise.resolve();
+  const saveWorking = () => {
+    persistChain = persistChain.then(async () => {
+      acc = await persistServer(nick, acc, myId);
+      data = acc.data;
+      return acc;
+    });
+    return persistChain;
+  };
+  acc = await saveWorking();                                           // 公布锁 + 回收结果
   data = acc.data;
 
   const inflight = new Map();   // code -> Promise<{code,res,err}>
   let ok = 0, fail = 0;
   const CONC = advisorConcurrency();   // 本轮并发上限=当前 advisor 端点数(严格绑定)
+  const startDeadline = Date.now() + 300000; // 单次 FC 最多派发约 5 分钟，余量留给在途任务收尾
+  let lastProgressSaveAt = 0;
+  let progressSavePending = false;
+  const queueProgressSave = (force = false) => {
+    if (progressSavePending) return persistChain;
+    const now = Date.now();
+    if (!force && now - lastProgressSaveAt < 1500) return persistChain;
+    progressSavePending = true;
+    lastProgressSaveAt = now;
+    return saveWorking().finally(() => { progressSavePending = false; });
+  };
+  const recordProgress = (code, patch) => {
+    const d = acc.data || (acc.data = {});
+    const job = jobsOf(d)[code];
+    if (!job) return;
+    if (patch.source) {
+      const sources = [...(job.sources || [])];
+      const idx = sources.findIndex((item) => item.label === patch.source.label);
+      if (idx >= 0) sources[idx] = patch.source;
+      else sources.push(patch.source);
+      updateJobProgress(d, code, { sources });
+    } else if (patch.reasoningDelta) {
+      updateJobProgress(d, code, { reasoning: `${job.reasoning || ''}${patch.reasoningDelta}` });
+    } else {
+      updateJobProgress(d, code, patch);
+    }
+    queueProgressSave(false);
+  };
+  const heartbeat = setInterval(() => {
+    const d = acc.data || (acc.data = {});
+    renewWorkerLock(d, myId);
+    for (const code of inflight.keys()) renewLease(d, code);
+    queueProgressSave(true);
+  }, 20000);
+  if (heartbeat && typeof heartbeat.unref === 'function') heartbeat.unref();
   try {
     while (true) {
       data = acc.data;
       reapOrphans(data); gcJobs(data);
       renewWorkerLock(data, myId);
       const free = CONC - runningCount(data);
-      const startable = Object.values(jobsOf(data))
+      const startable = Date.now() < startDeadline ? Object.values(jobsOf(data))
         .filter((j) => j && j.status === 'queued' && !j.cancelRequested && !inflight.has(j.code))
         .sort((a, b) => (a.at || 0) - (b.at || 0))
-        .slice(0, Math.max(0, free));
+        .slice(0, Math.max(0, free)) : [];
       // 处理 queued 里已被外部取消意图标记的
       for (const j of Object.values(jobsOf(data))) {
         if (j && j.status === 'queued' && j.cancelRequested) { j.status = 'canceled'; j.finishedAt = Date.now(); }
@@ -273,15 +438,16 @@ async function drainAccount(nick, initialAcc) {
       for (const j of startable) {
         leaseJob(data, j.code);
         const code = j.code;
-        const p = runJobGen(acc, code)
+        const p = runJobGen(acc, code, (patch) => recordProgress(code, patch))
           .then((res) => ({ code, res }))
           .catch((err) => ({ code, err }));
         inflight.set(code, p);
       }
-      if (startable.length) acc = await persistServer(nick, acc, myId);   // 公布 lease
+      if (startable.length) acc = await saveWorking();   // 公布 lease
 
       if (inflight.size === 0) {
         if (!hasPendingWork(acc.data)) break;   // 无在跑 + 无待办 → 完成
+        if (Date.now() >= startDeadline) break; // 留给下一次 cron 续跑，避免撞 FC 600s 硬墙
         // 有待办却起不来(理论上 free>0 时不会发生)——保护性跳出
         break;
       }
@@ -298,20 +464,29 @@ async function drainAccount(nick, initialAcc) {
         if (done.res.logEntry) {
           const log = d.adviceLog || (d.adviceLog = []);
           const dup = log.find((x) => x.code === done.code && (Date.now() - (x.at || 0)) < 600000);
-          if (!dup) { log.unshift({ id: `${done.res.logEntry.at}_${done.code}`, verified: false, hit: null, resultPct: null, ...done.res.logEntry }); d.adviceLog = log.slice(0, 500); }
+          if (!dup) {
+            const id = `${done.res.logEntry.at}_${done.code}`;
+            log.unshift({ id, verified: false, hit: null, resultPct: null, ...done.res.logEntry });
+            d.adviceLog = log.slice(0, 500);
+            const decisions = d.decisionLog || (d.decisionLog = []);
+            decisions.unshift(createRecommendation({ id, ...done.res.logEntry }));
+            d.decisionLog = decisions.slice(0, 1000);
+          }
         }
         if (done.res.quantScore) applyQuantScore(d, done.code, done.res.quantScore);
       } else {
         failJob(d, done.code, done.err ? String(done.err.message || done.err) : '生成失败(军师+量化均空)');
         if (jobsOf(d)[done.code] && jobsOf(d)[done.code].status === 'failed') fail++;
       }
-      acc = await persistServer(nick, acc, myId);
+      await queueProgressSave(true);
     }
   } finally {
+    clearInterval(heartbeat);
+    await persistChain.catch(() => {});
     // 释放锁(重读最新账号再放,避免盖回)
     const fresh = (await readAccount(nick)) || acc;
     const fdata = fresh.data || (fresh.data = {});
-    if (!workerHeldByOther(fdata, myId)) {
+    if (isAccountActive(fresh) && !workerHeldByOther(fdata, myId)) {
       releaseWorkerLock(fdata, myId);
       // 合并我们内存里的最终 jobs 状态
       mergeExternalJobs(acc.data, fdata);
@@ -369,6 +544,7 @@ export default async function handler(req, res) {
     const acc = await readAccount(nick);
     if (!acc) return res.end(JSON.stringify({ ok: false, error: '账号不存在' }));
     if (acc.pwHash !== sha(pw)) return res.end(JSON.stringify({ ok: false, error: '密码错误' }));
+    if (!isAccountActive(acc)) return res.end(JSON.stringify({ ok: false, error: '账号已注销' }));
     const data = acc.data || (acc.data = {});
     const op = body.op || 'enqueue';
     const started = Date.now();
@@ -437,7 +613,9 @@ export default async function handler(req, res) {
         const data = acc.data || (acc.data = {});
         reapOrphans(data);
         // 定时:排入过期建议(force=false → 6h 新鲜度节流,不烧 token);同时续跑遗留 queued/孤儿
-        const enq = enqueueStale(data, { scope, force: body.force === true });
+        const enq = body.resumeOnly === true
+          ? 0
+          : enqueueStale(data, { scope, force: body.force === true });
         await persistServer(nick, acc, 'cron');
         const dr = hasPendingWork(acc.data) ? await drainAccount(nick, await readAccount(nick)) : { drained: false, ok: 0, fail: 0 };
         totalOk += dr.ok || 0; totalFail += dr.fail || 0;

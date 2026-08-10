@@ -9,28 +9,7 @@
 //   { action:'unsubscribe', nick, pw, endpoint }         → 删除本设备订阅
 
 import { applyCors, preflight } from './_lib.js';
-import { createHash } from 'crypto';
-import { list, readJson } from './_blob.js';
-import { writeAccount } from './account.js';
-
-const PREFIX = 'accounts/';
-const sha = (s) => createHash('sha256').update(String(s)).digest('hex');
-const prefixOf = (nick) => `${PREFIX}${sha('u:' + nick)}/`;
-const legacyPathOf = (nick) => `${PREFIX}${sha('u:' + nick)}.json`;
-
-async function readAccount(nick) {
-  try {
-    const { blobs } = await list({ prefix: prefixOf(nick), limit: 100 });
-    if (blobs && blobs.length) {
-      const latest = blobs.slice().sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime())[0];
-      const j = await readJson(latest);
-      if (j) return j;
-    }
-    const { blobs: old } = await list({ prefix: legacyPathOf(nick), limit: 1 });
-    if (old && old.length) { const j = await readJson(old[0]); if (j) return j; }
-    return null;
-  } catch { return null; }
-}
+import { isAccountActive, readAccount, sha, writeAccount } from './account.js';
 
 function json(res, obj, code = 200) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -56,6 +35,7 @@ export default async function handler(req, res) {
   const acc = await readAccount(nick);
   if (!acc) return json(res, { ok: false, error: '账号不存在' });
   if (acc.pwHash !== sha(pw)) return json(res, { ok: false, error: '密码错误' });
+  if (!isAccountActive(acc)) return json(res, { ok: false, error: '账号已注销' });
 
   const data = acc.data || (acc.data = {});
   const subs = Array.isArray(data.pushSubs) ? data.pushSubs : (data.pushSubs = []);

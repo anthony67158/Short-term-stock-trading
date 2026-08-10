@@ -166,17 +166,26 @@ function mapWord(raw) {
 }
 
 function hasHan(s) { return /[一-鿿]/.test(s || ''); }
+const ALLOWED_LATIN = new Set(['ATR', 'BOLL', 'JSON', 'KDJ', 'MACD', 'RSI', 'VWAP']);
 
 // 主入口:把一段(可能含 **标题**)英文推理小标题转成中文;已是中文则原样返回
 export function zhReasonPiece(text) {
   if (!text) return text;
-  if (hasHan(text)) return text;                   // 已是中文(如 phase 文案)不动
-  return text.replace(/\*\*([^*]+)\*\*|([^*]+)/g, (m, bold, plain) => {
+  if (!/[A-Za-z]{3,}/.test(text)) return text;
+  const translated = text.replace(/\*\*([^*]+)\*\*|([^*]+)/g, (m, bold, plain) => {
     const seg = bold != null ? bold : plain;
     if (!seg || !seg.trim()) return m;             // 保留空白/分隔
     const zh = translateSeg(seg);
     return bold != null ? `**${zh}**` : zh;
   });
+  const residual = (translated.match(/[A-Za-z]{3,}/g) || [])
+    .filter((word) => !ALLOWED_LATIN.has(word.toUpperCase()));
+  if (residual.length) {
+    return hasHan(text)
+      ? '正在继续核验量价、资金、消息与风险约束…'
+      : '正在综合量价、资金、消息与风险约束，校验操作结论…';
+  }
+  return translated;
 }
 
 function translateSeg(seg) {

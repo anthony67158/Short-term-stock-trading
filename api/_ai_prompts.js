@@ -212,26 +212,26 @@ ${payload.holdQty != null ? `4) 手数纪律:任何减仓/清仓/卖出手数 �
     return `${zhReason}【当日全盘综合数据：大盘情绪 + 板块资金流 + 涨停连板 + 盘中异动】\n${data}\n\n你是短线策略总监，请综合以上所有维度，给出今日最值得关注的 TOP3 方向。输出 JSON：{"reasoning":"一句话研判思路(先点明数据对应哪个交易日、结论面向哪个交易日开盘)","marketMood":"一句话大盘定调","topDirections":[{"rank":1,"direction":"方向/板块名","logic":"入选逻辑(必须结合资金流/涨停/异动的具体数据)","representStocks":[{"name":"代表股(必须来自给定数据)","code":"代码"}],"strength":"强/中/弱"}],"strategy":"今日短线操作策略(仓位/节奏/风格)","topRisk":"最需警惕的风险"}`;
   }
   if (mode === 'scan_pick') {
-    return `${zhReason}【AI 选股请求】用户不知道今天有哪些股票值得关注，需要你从"已用量化模型打过分的候选池"里，结合大盘/板块/盘面，**排序精选出今日最值得关注的 3~5 只**个股,并说清怎么看、怎么买。
-核心目标:用户每天都想拿到一份"今日观察名单"。**你几乎总要给出标的(除非候选池确实为空)**——不要因为"没有完美的票"就交白卷。宁可给出把握度较低、但相对最优的标的并如实标注,也不要什么都不给。
-数据含：大盘情绪(market)、板块资金流(sectors)、【候选池 candidates —— 每只都带量化打分与走势预测】。
+    return `${zhReason}【AI 选股请求】用户不知道今天有哪些股票值得关注。系统已完成“全市场可交易性过滤→确定性横截面评分→量化复排”，你只负责对最终短名单做交易价值判断与解释。
+核心目标不是每天硬凑股票，而是只在“把握与赔率值得出手”时给标的。【今日不出手】是合法且重要的专业结论。
+数据含：大盘情绪(market)、板块资金流(sectors)、漏斗统计(funnel)、【候选池 candidates —— 已按 combinedScore 复排】。
 数据：${data}
 
-【候选池 candidates 字段说明】每只含：name/code、pct当日涨幅、量价(turnover换手/volRatio量比/mainInflowYi主力净流入亿)、tags信号(涨停/连板/主力抢筹/涨速/板块领涨)、以及量化模型结果 quant{ score综合分0~100越高越偏多, bias偏多/偏空/中性, upProb未来5日上涨概率%, expRet预期涨跌%, targetLow~targetHigh目标价区间 }。
-${payload.quantMissing ? '⚠️【本次量化服务不可用·降级口径】本次候选池里【没有 quant 量化打分】(量化接口暂时故障)。请【仅凭盘面信号排序】:综合 资金(mainInflowYi主力净流入)、量能(volRatio量比、turnover换手)、题材(tags:涨停/连板/主力抢筹/涨速/板块领涨)、当日涨幅与位置,给候选打个综合优先级,取相对最优的 3~5 只。quantScore 字段请填 null(不要编造分数),grade 相应普遍下调、并在 marketNote/note 里如实提示"本次为盘面信号选股、量化打分暂缺,把握度打折"。' : ''}
+【候选池 candidates 字段说明】每只含：name/code、price现价、marketScore全市场分、combinedScore量化复排分、pct/turnover/volRatio/mainInflowYi、tags，以及 quant{ score,upProb,expRet,targetLow~targetHigh,highConfFired,credibility,buyPrice,takeProfit,stopLoss }。
+${payload.quantMissing ? '⚠️【本次量化服务不可用】不得给“立即买入”。若盘面证据极强可列观察标的，否则 noTrade=true。quantScore 填 null，禁止编造。' : ''}
 
 【选股逻辑，逐条执行】：
 1. **先定大盘基调**：逆风(跌多/跌停多)→整体从严、标的把握度普遍下调、并在 marketNote 里提示今日不宜追高、控制仓位;顺风→可积极。
-2. **相对排序,而非硬性淘汰**：量化分只是"排序权重"之一,**不是一票否决的硬门槛**。综合 ①量化(score/upProb/expRet 越高越优先) ②资金(主力净流入) ③量能(量比适中放量) ④题材(是否当日强势主线) ⑤位置(别追已高位连板接盘) 五个维度给候选打个综合优先级,取相对最优的 3~5 只。即便全场量化分都不高,也要选出其中相对最好的,并把 grade 标为"弱"、如实说明"信号偏弱,仅观察不追高"。
+2. **绝对闸门优先于相对排名**：combinedScore/量化/资金/量能/题材只是候选证据。若没有一只同时满足方向不弱、位置不追高、盈亏比合理，就 noTrade=true、picks=[]，不要“矮子里拔高个”。
 3. **诚实分级 grade**：每只给"强/中/弱"把握度——强=量化+资金+题材+位置多维共振;中=有亮点但有瑕疵;弱=矮子里拔高个/信号不足,仅供观察。宁愿多标"弱",不要虚高。
 4. **可买性**：给出明确买点(回踩不破/放量突破/开盘竞价低吸)、参考买入价区间(可结合 quant 目标区间下沿)、止损位。若该股当下只适合观察不适合买,buyPoint 写清"暂不追,等回踩到X再看"。
 
 【硬要求】：
-- **只要 candidates 非空,就至少给 3 只**(候选不足3只时,有几只给几只并说明);必须来自 candidates 里的真实个股。
+- 真正值得出手的给 1~3 只即可；没有则明确今日不出手。禁止为了数量降低门槛。
 - 理由必须引用该股的量化分/上涨概率/资金/板块等**具体数字**,用大白话讲清"为什么值得关注"。
 - 每只都要有 grade(强/中/弱),整体名单的把握度用 confidence 概括。
 
-请输出 JSON：{"reasoning":"一句话研判思路(先点明候选数据对应哪个交易日、结论面向哪个交易日开盘)","marketNote":"一句话今日大盘环境与选股基调(顺/逆风、能否追高)","confidence":"今日名单整体把握度:高/中/低(并半句话说明,如'大盘逆风,今日以观察为主')","picks":[{"rank":1,"name":"股票名","code":"代码","quantScore":量化分数字,"grade":"强或中或弱","reason":"为什么值得关注(引用量化分/上涨概率/资金/板块的具体数字,大白话)","buyPoint":"买点或观察点(如回踩5日线不破/放量突破X/竞价低吸;若只宜观察写'暂不追,回踩到X再看')","buyZone":"参考买入价区间(如 12.3~12.8)","target":"目标位/预期","stop":"止损位","risk":"该股主要风险"}],"note":"整体提示(仓位/节奏/名单该怎么用)"}。只输出 JSON。`;
+请输出 JSON：{"reasoning":"一句话研判思路(数据日期→市场环境→把握与赔率闸门)","marketNote":"一句话大盘环境与选股基调","confidence":"高/中/低及简短原因","noTrade":true或false,"noTradeReason":"不出手时说明缺哪项证据；出手时为空字符串","picks":[{"rank":1,"name":"股票名","code":"代码","quantScore":量化分数字或null,"grade":"强或中或弱","reason":"引用marketScore/combinedScore/量化/资金等具体数字","buyPoint":"买点与确认信号","buyZone":"必须基于price或quant.buyPrice的窄区间","target":"优先采用quant.takeProfit/target区间","stop":"优先采用quant.stopLoss","risk":"主要风险"}],"note":"整体仓位与节奏"}。noTrade=true 时 picks 必须为空数组；只输出 JSON。`;
   }
   if (mode === 'daily') {
     return `${zhReason}【当日全盘数据：大盘情绪 + 板块资金流 + 涨停连板 + 盘中异动】\n${data}\n\n你是短线操盘手，服务做 T+1（今买明卖）的用户。请综合所有维度，直接给出今日可执行的操盘决策。输出 JSON：{"reasoning":"一句话研判思路(先点明数据对应哪个交易日、决策面向哪个交易日开盘;若今天休市要说清是基于上一交易日数据、面向下一交易日)","canTrade":"能做/谨慎/空仓 三选一","light":"green/yellow/red","verdict":"一句话今日定调(能不能做、什么风格)","direction":"今日主攻方向(1-2个板块/主线)","candidates":[{"name":"候选股(必须来自给定数据)","code":"代码","reason":"入选逻辑(结合资金/涨停/异动的具体数据)","buyPoint":"买点提示(如回踩不破/放量突破)","expect":"次日预期","stop":"止损提示"}],"position":"建议仓位(如3-5成)","risk":"最需警惕的风险"}。candidates 给3-5只，必须来自给定数据里的真实个股。`;

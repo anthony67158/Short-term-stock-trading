@@ -9,6 +9,7 @@ import { planStore, usePlanStore } from '../planStore'
 import { aiStore } from '../aiStore'
 import DailyReport from './DailyReport'
 import { fmtPct, pctClass, fmtInflow, fmtNum , fmtRaw } from '../format'
+import { rerankQuantCandidates } from '../../shared/stockRanking.js'
 
 // ============ 今日选股 Tab：今天买什么 ============
 export default function TodayTab({ interval, market, sectors, snapshot }) {
@@ -230,6 +231,30 @@ function saveAuto(v) {
   try { localStorage.setItem(AUTO_KEY, v ? '1' : '0') } catch { /* ignore */ }
 }
 
+async function fetchJsonWithTimeout(url, timeoutMs = 30000) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const response = await fetch(url, { signal: controller.signal })
+    return await response.json()
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function mapWithConcurrency(items, concurrency, worker) {
+  const output = new Array(items.length)
+  let cursor = 0
+  const run = async () => {
+    while (cursor < items.length) {
+      const index = cursor++
+      output[index] = await worker(items[index], index)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, run))
+  return output
+}
+
 function DailyPlay({ snapshot }) {
   const [loading, setLoading] = useState(false)
   const [stage, setStage] = useState('') // 进度文案
@@ -237,6 +262,7 @@ function DailyPlay({ snapshot }) {
   const [res, setRes] = useState(saved && saved.result ? saved.result : null)
   const [savedAt, setSavedAt] = useState(saved && saved.at ? saved.at : null)
   const [savedDay, setSavedDay] = useState(saved && saved.day ? saved.day : null)
+  const [funnel, setFunnel] = useState(saved && saved.funnel ? saved.funnel : null)
   const [err, setErr] = useState(null)
   const [auto, setAuto] = useState(loadAuto())
   const book = usePlanStore()
@@ -247,10 +273,10 @@ function DailyPlay({ snapshot }) {
   useEffect(() => {
     const p = loadPick()
     if (p && p.at && p.at !== savedAt) {
-      setRes(p.result || null); setSavedAt(p.at || null); setSavedDay(p.day || null)
+      setRes(p.result || null); setSavedAt(p.at || null); setSavedDay(p.day || null); setFunnel(p.funnel || null)
     } else if (!p && savedAt) {
       // 云端被清空(登出/切换到空账号) → 清掉本地展示
-      setRes(null); setSavedAt(null); setSavedDay(null)
+      setRes(null); setSavedAt(null); setSavedDay(null); setFunnel(null)
     }
     const a = loadAuto()
     if (a !== auto) setAuto(a)
@@ -261,7 +287,15 @@ function DailyPlay({ snapshot }) {
     setLoading(true); setErr(null); if (!silent) setRes(null)
     try {
       const s = snapshot()
-      // ① 收集候选池：多来源合并，扩大参考面（涨停/连板 + 主力抢筹 + 涨速 + 板块领涨龙头），去重带标签
+      // ① 全市场确定性初筛；失败时仍可回退原热点池。
+      setStage('正在扫描全市场可交易股票…')
+      let broad = { universeCount: null, eligibleCount: null, list: [] }
+      try {
+        const json = await fetchJsonWithTimeout(api(`/api/screen?limit=30&_t=${Date.now()}`), 30000)
+        if (json && json.ok) broad = json
+      } catch { /* 回退热点池 */ }
+
+      // ② 多来源合并：全市场排序 + 涨停/连板 + 主力抢筹 + 涨速 + 板块龙头。
       const cand = new Map()
       const add = (x, tag, extra) => {
         if (!x || !x.code) return
@@ -270,6 +304,12 @@ function DailyPlay({ snapshot }) {
         Object.entries(extra || {}).forEach(([k, v]) => { if (o[k] == null && v != null) o[k] = v }) // 补齐缺失字段
         if (tag && !o.tags.includes(tag)) o.tags.push(tag)
       }
+      ;(broad.list || []).forEach((x) => add(x, `全市场${x.marketScore}分`, {
+        price: x.price, pct: x.pct, speed: x.speed,
+        turnover: x.turnover, volRatio: x.volRatio,
+        mainInflow: x.mainInflow, amount: x.amount,
+        marketScore: x.marketScore, marketReasons: x.reasons,
+      }))
       ;(s.limitPool?.list || []).slice(0, 10).forEach((x) => add(x, x.lbc >= 2 ? `${x.lbc}连板` : '涨停', { pct: x.pct, turnover: x.turnover, mainInflow: x.fundAmount }))
       ;(s.movers?.list || []).slice(0, 10).forEach((x) => add(x, '主力抢筹', { pct: x.pct, turnover: x.turnover, volRatio: x.volRatio, mainInflow: x.mainInflow }))
       ;(s.speed?.list || []).slice(0, 8).forEach((x) => add(x, '涨速', { pct: x.pct, speed: x.speed }))
@@ -277,32 +317,47 @@ function DailyPlay({ snapshot }) {
       ;(s.sectors?.list || []).slice(0, 6).forEach((sec) => {
         if (sec && sec.leadCode) add({ code: sec.leadCode, name: sec.leadName }, `${sec.name}领涨`, { pct: sec.leadPct })
       })
-      const codes = [...cand.values()].slice(0, 14)
+      const codes = [...cand.values()]
+        .sort((a, b) => (b.marketScore || 0) - (a.marketScore || 0) || b.tags.length - a.tags.length)
+        .slice(0, 20)
       if (!codes.length) { setErr('暂无候选数据，开盘后再试（休市时段候选池为空）'); setLoading(false); return }
 
-      // ② 对候选并发跑量化打分（浏览器并发，规避 Vercel 单函数超时）
+      // ③ 最多 5 路并发量化，避免 20 只同时冲击 FC/量化冷启动。
       setStage(`量化模型正在给 ${codes.length} 只候选打分…`)
-      const scored = await Promise.all(codes.map(async (c) => {
+      const scored = await mapWithConcurrency(codes, 5, async (c) => {
         try {
-          const r = await fetch(api(`/api/stock_detail?code=${c.code}&klt=101&lmt=60&quant=1&_t=${Date.now()}`))
-          const j = await r.json()
+          const j = await fetchJsonWithTimeout(api(`/api/stock_detail?code=${c.code}&klt=101&lmt=60&quant=1&_t=${Date.now()}`), 25000)
           const q = j.quant, fc = q && q.forecast
           return {
             code: c.code, name: c.name, tags: c.tags,
-            pct: c.pct, turnover: c.turnover, volRatio: c.volRatio,
+            marketScore: c.marketScore, marketReasons: c.marketReasons,
+            price: c.price, pct: c.pct, turnover: c.turnover, volRatio: c.volRatio,
             mainInflowYi: c.mainInflow != null ? +(c.mainInflow / 1e8).toFixed(2) : null,
             quant: q ? {
               score: q.score, bias: q.bias,
               upProb: fc && fc.upProb, expRet: fc && fc.expRet,
               targetLow: fc && fc.targetLow, targetHigh: fc && fc.targetHigh,
+              highConfFired: !!(q.highConfSignal && q.highConfSignal.fired),
+              credibility: q.highConfSignal && q.highConfSignal.credibility,
+              buyPrice: q.highConfSignal && q.highConfSignal.buyPrice,
+              takeProfit: q.highConfSignal && q.highConfSignal.takeProfit,
+              stopLoss: q.highConfSignal && q.highConfSignal.stopLoss,
             } : null,
           }
         } catch { return { code: c.code, name: c.name, tags: c.tags, quant: null } }
-      }))
+      })
       const withQuant = scored.filter((x) => x.quant) // 优先把打上分的交给 LLM
       // 量化服务全挂时不再交白卷:退化为"仅盘面信号"名单,让 AI 基于资金/题材/涨速排序,并如实说明量化缺失
-      const forLLM = withQuant.length ? withQuant : scored
+      const forLLM = rerankQuantCandidates(withQuant.length ? withQuant : scored, { limit: 12 })
       const quantMissing = withQuant.length === 0
+      const funnelMeta = {
+        universeCount: broad.universeCount,
+        scannedCount: broad.scannedCount,
+        isComplete: broad.isComplete,
+        eligibleCount: broad.eligibleCount,
+        quantCount: withQuant.length,
+        shortlistCount: forLLM.length,
+      }
 
       // ③ 带量化分 + 盘面 → LLM 精选 3 只
       setStage('AI 正在结合量化与盘面精选 3 只…')
@@ -314,12 +369,13 @@ function DailyPlay({ snapshot }) {
         sectors: (s.sectors?.list || []).slice(0, 8).map((x) => ({ name: x.name, pct: x.pct, mainInflowYi: +(x.mainInflow / 1e8).toFixed(2), lead: x.leadName })),
         candidates: forLLM,
         quantMissing,
+        funnel: funnelMeta,
       }
       const r = await callAI('scan_pick', payload)
       if (r.ok) {
         const at = Date.now(), day = todayKey()
-        setRes(r.result); setSavedAt(at); setSavedDay(day)
-        savePick({ result: r.result, at, day })
+        setRes(r.result); setSavedAt(at); setSavedDay(day); setFunnel(funnelMeta)
+        savePick({ result: r.result, at, day, funnel: funnelMeta })
       } else setErr(r.error || 'AI 选股失败')
     } catch (e) { setErr(String(e.message || e)) }
     finally { setLoading(false); setStage('') }
@@ -373,7 +429,7 @@ function DailyPlay({ snapshot }) {
         <div className="play-title">
           <Icon name="radar" size={18} />
           <span>{trading ? 'AI 选股' : '明日计划入选'}</span>
-          <span className="play-sub">{trading ? '多源候选 + 量化打分 + AI 排序，给出今日最值得关注的名单' : '盘中选出的候选，供明天开盘参考买入'}</span>
+          <span className="play-sub">{trading ? '全市场过滤 + 量化复排 + AI 决策，没优势时明确不出手' : '盘中决策结果，供下一交易日开盘参考'}</span>
         </div>
         <div className="play-actions">
           <button className={'play-auto' + (auto ? ' on' : '')} onClick={toggleAuto} title={`开启后每 ${AUTO_MIN} 分钟在交易时段自动重选一次并保留结果，休市自动停`}>
@@ -395,7 +451,7 @@ function DailyPlay({ snapshot }) {
         {err && <div className="err">{err}</div>}
         {!res && !err && !loading && (
           <div className="play-hint">{trading
-            ? '汇集今日涨停/连板、主力抢筹、涨速、强势板块领涨龙头等多来源候选，量化打分后由 AI 结合大盘与板块排序，给出 3~5 只今日观察名单（含把握度、买点与止损）。可开「定时刷新」让它盘中自动更新。'
+            ? '扫描全市场并过滤不可交易标的，再经量化复排与 AI 把握/赔率闸门，输出 1~3 只可行动标的；没有优势机会时会明确提示「今日不出手」。'
             : '当前为休市时段，暂无盘中选股结果。开盘后(9:15起)点「AI 选股」，收盘后这里会保留结果供次日参考。'}</div>
         )}
         {loading && <div className="play-hint"><Icon name="refresh" size={13} className="spin" /> {stage || '正在选股…'}</div>}
@@ -407,7 +463,15 @@ function DailyPlay({ snapshot }) {
                 {isToday ? (trading ? `本次选股 ${savedTimeStr}，结果已保留` : `今日盘中 ${savedTimeStr} 选出，供明天开盘参考`) : `${savedTimeStr} 选出(非今日，仅供参考)`}
               </div>
             )}
+            {funnel && funnel.universeCount != null && (
+              <div className="pick-savedat">
+                全市场 {funnel.universeCount} 只{funnel.isComplete === false ? `（本轮扫描 ${funnel.scannedCount} 只）` : ''} → 可交易 {funnel.eligibleCount} 只 → 量化成功 {funnel.quantCount} 只 → 决策短名单 {funnel.shortlistCount} 只
+              </div>
+            )}
             {res.marketNote && <div className="pick-market"><Icon name="pulse" size={13} /> <span className="pick-market-note">{res.marketNote}</span>{res.confidence && <span className={'pick-conf ' + (/高/.test(res.confidence) ? 'hi' : /低/.test(res.confidence) ? 'lo' : 'mid')}>把握度 {res.confidence}</span>}</div>}
+            {(res.noTrade || !Array.isArray(res.picks) || res.picks.length === 0) && (
+              <div className="play-risk"><Icon name="shield" size={14} /><span><b>今日不出手</b> · {res.noTradeReason || '当前候选没有同时通过把握与赔率要求，保留现金等待更清晰机会。'}</span></div>
+            )}
             {Array.isArray(res.picks) && res.picks.length > 0 && (
               <div className="pick-list">
                 {res.picks.map((c, i) => {

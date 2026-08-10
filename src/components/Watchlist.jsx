@@ -32,7 +32,7 @@ export default function Watchlist({ interval }) {
   return (
     <div className="panel" style={{ marginTop: 14 }}>
       <div className="panel-head">
-        <div className="panel-title"><Icon name="eye" size={16} /> 自选股监控 <span className="sub-name">本地保存 · 点「问 AI」在助手中诊断/追问</span></div>
+        <div className="panel-title"><Icon name="eye" size={16} /> 自选股监控 <span className="sub-name">账号 OSS 保存 · 点「问 AI」在助手中诊断/追问</span></div>
         <div style={{ display: 'flex', gap: 8 }}>
           <input
             className="wl-input"

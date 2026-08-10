@@ -8,9 +8,15 @@
 //   5) 可取消:cancel() 停止派发后续任务(已在途的那批跑完即止)。
 import { planStore, computePortfolio } from './planStore'
 import { getAdvice } from './adviceCache'
-import { startAdvice, getRunningList, getResult } from './adviceRunner'
+import { startAdvice, getRunningList, getResult, cancelAdvice } from './adviceRunner'
 import { buildHoldSpec, buildWatchSpec } from './adviceDaily'
-import { triggerServerAdvice, canServerAdvice, cancelServerAdvice } from './serverAdvice'
+import {
+  triggerServerAdvice,
+  canServerAdvice,
+  cancelServerAdvice,
+  startServerAdviceStatusSync,
+} from './serverAdvice'
+import { shouldApplyCloudBatch } from '../shared/adviceUiState.js'
 
 // 本地兜底并发不再写死为 1:改为「动态并行填槽」——容量 = 端点数 − 非本批占用数,
 // 谁跑完就补谁的槽,与服务端 drainAccount 的调度模型一致(见 runBatchAdvice 末尾的 worker)。
@@ -72,8 +78,9 @@ export function cancelBatch() {
 export function cancelOne(code) {
   if (!code) return
   if (state.serverMode) cancelServerAdvice([String(code)])
+  else cancelAdvice(String(code))
   const it = state.items.find((x) => x.code === code)
-  if (it && (it.status === 'pending' || it.status === 'running')) { it.status = 'skipped'; notify() }
+  if (it && (it.status === 'pending' || it.status === 'queued' || it.status === 'running')) { it.status = 'skipped'; notify() }
 }
 // 失败重生成:把 items 里 status==='fail' 的重新入队(服务端优先)。返回重生成的只数。
 export function regenerateFailed(quoteMap) {
@@ -93,8 +100,18 @@ export function regenerateFailed(quoteMap) {
 export function applyCloudBatch(bp) {
   if (!bp || typeof bp !== 'object') return
   const at = Number(bp.at || 0)
-  if (!at || at <= state._cloudAt) return                 // 不是更新的进度 → 忽略
   if (state.running && !state.serverMode) return           // 本机本地批量进行中 → 不打架
+  if (!shouldApplyCloudBatch(bp)) {
+    const hadVisibleBatch = state.total > 0 || state.items.length > 0 || state.finishedAt > 0
+    state._cloudAt = Math.max(state._cloudAt, at)
+    state.serverMode = true
+    state.running = false
+    state.total = 0; state.done = 0; state.ok = 0; state.fail = 0; state.skipped = 0
+    state.current = new Set(); state.items = []; state.startedAt = 0; state.finishedAt = 0
+    if (hadVisibleBatch) notify()
+    return
+  }
+  if (!at || at <= state._cloudAt) return                 // 不是更新的进度 → 忽略
   state._cloudAt = at
   state.serverMode = true
   if (Number(bp.concurrency) > 0) state.concurrency = Number(bp.concurrency)   // 权威并发上限=服务端 advisor 端点数
@@ -109,6 +126,10 @@ export function applyCloudBatch(bp) {
   state.startedAt = bp.startedAt || at
   state.finishedAt = bp.running ? 0 : (bp.finishedAt || at)
   notify()
+}
+
+export function startBatchStatusSync() {
+  startServerAdviceStatusSync(applyCloudBatch)
 }
 
 function setItemStatus(code, status) {
@@ -211,6 +232,11 @@ export async function runBatchAdvice(codes, quoteMap, opts = {}) {
         startAdvice(spec),   // runner 内部落缓存/记决策;这里等它完成
         new Promise((resolve) => setTimeout(resolve, 180000)),
       ])
+      const item = state.items.find((entry) => entry.code === code)
+      if (item && item.status === 'skipped') {
+        state.skipped++
+        return
+      }
       // ★成功判定★ 直接读本次运行的权威结果(runner 的 results),不再用脆弱的「60 秒新鲜度」:
       //   · 有 advice/result 且无 error → ok(真成功)
       //   · runner 记了 error → fail(真失败,如实上报,绝不假成功)

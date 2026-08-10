@@ -10,6 +10,8 @@
 // 运行时健康态(内存,进程级):{ inflight, fails, cooldownUntil }
 //   连续失败达阈值 → 熔断冷却 COOLDOWN_MS;冷却到期自动半开重试(一次成功即清零恢复)。
 
+import { resolveJudgeEndpoint } from './_llm_config.js';
+
 const COOLDOWN_MS = 60 * 1000;   // 熔断冷却:连续失败达阈值后暂时不选它
 const FAIL_THRESHOLD = 3;        // 连续失败多少次触发熔断
 
@@ -76,8 +78,28 @@ export function modelForEndpoint(config, ep, role, fallback) {
 export function endpointServesRole(ep, role) {
   if (!ep) return false;
   if (!role) return true;
+  if (role === 'judge') return ep.id === 'judge-dedicated';
   if (ep.id === 'default') return true;
   return !!(ep.models && ep.models[role]);
+}
+
+export function endpointsForRole(config, role) {
+  if (role === 'judge') {
+    const judge = resolveJudgeEndpoint(config);
+    if (!judge || judge.enabled === false || !judge.baseUrl || !judge.apiKey || !judge.model) return [];
+    return [{
+      id: 'judge-dedicated',
+      baseUrl: judge.baseUrl,
+      apiKey: judge.apiKey,
+      weight: 1,
+      models: { judge: judge.model },
+      reasoning: { judge: !!judge.reasoning },
+    }];
+  }
+  const all = endpointsFrom(config);
+  if (!role) return all;
+  const served = all.filter((endpoint) => endpointServesRole(endpoint, role));
+  return served.length ? served : all;
 }
 
 // 承接某角色的【可用端点数】——用作「AI 操作建议」并发上限的权威来源:
@@ -85,8 +107,8 @@ export function endpointServesRole(ep, role) {
 //   role 传入时只数承接该角色的端点(附加端点须自带该角色模型;主端点始终算);
 //   一个端点都没配(理论上主端点缺 base/key)→ 至少返回 1,避免并发上限为 0 导致完全不生成。
 export function endpointCountForRole(config, role) {
-  const all = endpointsFrom(config);
-  const eps = role ? all.filter((e) => endpointServesRole(e, role)) : all;
+  const eps = endpointsForRole(config, role);
+  if (role === 'judge') return eps.length;
   return Math.max(1, eps.length);
 }
 
@@ -111,13 +133,7 @@ export function reasoningForEndpoint(config, ep, role, fallback) {
 // role:传入时只在【承接该角色】的端点里选(附加端点须自带该角色模型),避免把请求路由到不提供对应模型的网关。
 //   若某角色只有主端点承接(附加端点都没配该角色模型),自然退化为单主端点。
 export function pickEndpoint(config, now = Date.now(), role) {
-  const all = endpointsFrom(config);
-  if (!all.length) return null;
-  // 优先在「承接该角色」的端点里选;但若没有任何端点承接(用户把该角色留空/主端点未填)——
-  //   不能因此一个端点都不给,否则该角色所有请求全失败。退回全部端点做安全兜底(配合 modelFallback
-  //   用角色默认模型名),保证可用性(恢复迁移前"留空=沿用主端点"的兜底效果)。
-  const served = role ? all.filter((e) => endpointServesRole(e, role)) : all;
-  const eps = served.length ? served : all;
+  const eps = endpointsForRole(config, role);
   if (!eps.length) return null;
   const usable = eps.filter((e) => h(e.id).cooldownUntil <= now);
   const pool = usable.length ? usable : eps;
@@ -138,20 +154,20 @@ export function markFailure(id, now = Date.now()) {
   s.fails++;
   if (s.fails >= FAIL_THRESHOLD) s.cooldownUntil = now + COOLDOWN_MS;
 }
+export function markEndpointUnusable(id, now = Date.now(), releaseInflight = false) {
+  const state = h(id);
+  if (releaseInflight) state.inflight = Math.max(0, state.inflight - 1);
+  state.fails = Math.max(state.fails, FAIL_THRESHOLD);
+  state.cooldownUntil = now + COOLDOWN_MS;
+}
 
 // 池化 fetch:自动选端点 + 失败故障转移到下一个可用端点(最多试 maxTries 个)。
 // 返回 { resp, endpoint }。resp 与原生 fetch 一致(或 { __err })。
 // 注:调用方负责构造 body/headers 的其余部分——本函数只注入 baseUrl 与 Authorization。
 // 端点级模型:若传入 role,则选定端点后按 modelForEndpoint 覆盖 body.model
 //   (不同网关同一角色可能是不同模型名);modelFallback 为角色默认(端点与全局都没配时用)。
-export async function poolFetch(config, path, { method = 'POST', body, signal, timeoutMs = 30000, role, modelFallback, reasonFallback, forceNoReason = false } = {}, maxTries = 2) {
-  const eps = endpointsFrom(config);
-  if (!eps.length) return { resp: { __err: new Error('no LLM endpoint configured') }, endpoint: null };
-  // 承接该角色的候选端点(附加端点须自带该角色模型;主端点始终承接)——路由/故障转移优先在其中进行。
-  //   安全兜底:若没有任何端点承接该角色(用户把该角色留空),不再直接失败,而是退回全部端点,
-  //   并用 modelFallback(角色默认模型名)发起,保证该角色永不"整体不可路由"(恢复迁移前可用性)。
-  const served = role ? eps.filter((e) => endpointServesRole(e, role)) : eps;
-  const roleEps = served.length ? served : eps;
+export async function poolFetch(config, path, { method = 'POST', body, signal, timeoutMs = 30000, role, modelFallback, reasonFallback, forceNoReason = false, deferSuccess = false } = {}, maxTries = 2) {
+  const roleEps = endpointsForRole(config, role);
   if (!roleEps.length) return { resp: { __err: new Error('no LLM endpoint configured') }, endpoint: null };
   const tried = new Set();
   let lastErr = null;
@@ -193,7 +209,11 @@ export async function poolFetch(config, path, { method = 'POST', body, signal, t
     const bad5xx = resp && !resp.__err && !resp.ok && resp.status >= 500;
     const rateLimited = resp && !resp.__err && resp.status === 429;
     // 成功或客户端主动超时(abort)→ 直接返回(abort 不换端点:是我们自己掐的)
-    if (!errored && resp.ok) { markSuccess(ep.id); return { resp, endpoint: ep }; }
+    if (!errored && resp.ok) {
+      if (deferSuccess) return { resp, endpoint: ep, deferred: true };
+      markSuccess(ep.id);
+      return { resp, endpoint: ep, deferred: false };
+    }
     if (isAbort) { markFailure(ep.id); return { resp, endpoint: ep }; }
     // 可转移错误(网络错/5xx/429)→ 记失败,尝试下一个端点
     if (errored || bad5xx || rateLimited) {
@@ -218,4 +238,18 @@ export function poolStatus(config, now = Date.now()) {
       cooling: s.cooldownUntil > now, cooldownMsLeft: Math.max(0, s.cooldownUntil - now),
     };
   });
+}
+
+export function judgeEndpointStatus(config, now = Date.now()) {
+  const endpoint = endpointsForRole(config, 'judge')[0];
+  if (!endpoint) return null;
+  const state = h(endpoint.id);
+  return {
+    id: endpoint.id,
+    baseUrl: endpoint.baseUrl,
+    inflight: state.inflight,
+    fails: state.fails,
+    cooling: state.cooldownUntil > now,
+    cooldownMsLeft: Math.max(0, state.cooldownUntil - now),
+  };
 }

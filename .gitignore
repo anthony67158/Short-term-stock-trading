@@ -1,5 +1,6 @@
 node_modules
 dist
+.fc-package
 .vercel
 .DS_Store
 *.log
@@ -37,3 +38,6 @@ qlib-service/panel_cache/
 qlib-service/sweep.npz
 # 上线前备份快照(本地回滚用,不进仓库)
 qlib-service/*.bak
+
+# 明文密钥清单(仅本人自用,绝不入库)
+CREDENTIALS.md

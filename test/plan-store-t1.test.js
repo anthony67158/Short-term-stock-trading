@@ -1,0 +1,162 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+
+import { planStore } from '../src/planStore.js'
+
+test('真实账本入口阻止卖出今日买入仓位', () => {
+  planStore.setData({
+    plan: [{ code: '600519', name: '贵州茅台' }],
+    holding: [],
+    closed: [],
+  })
+  planStore.buy('600519', 1400, 1)
+
+  const holding = planStore.get().holding[0]
+  const result = planStore.sell(holding.id, 1410, 1)
+
+  assert.equal(result.ok, false)
+  assert.match(result.error, /T\+1/)
+  assert.equal(planStore.get().holding[0].qty, 1)
+  assert.equal(planStore.get().closed.filter((x) => x.type === 'SELL').length, 0)
+})
+
+test('历史持仓仍可正常卖出', () => {
+  planStore.setData({
+    plan: [],
+    holding: [{
+      id: 'old_holding',
+      code: '000001',
+      name: '平安银行',
+      buyPrice: 10,
+      buyAt: Date.now() - 86400000,
+      qty: 2,
+      buyFee: 5,
+    }],
+    closed: [],
+  })
+
+  const result = planStore.sell('old_holding', 10.5, 1)
+
+  assert.equal(result.ok, true)
+  assert.equal(result.qty, 1)
+  assert.equal(planStore.get().holding[0].qty, 1)
+})
+
+test('减仓后仍留在持仓区，只有同股全部清仓才回自选', () => {
+  const yesterday = Date.now() - 86400000
+  planStore.setData({
+    plan: [{ code: '600000', name: '浦发银行' }],
+    holding: [
+      { id: 'lot_1', code: '600000', name: '浦发银行', buyPrice: 10, buyAt: yesterday, qty: 2, buyFee: 5 },
+      { id: 'lot_2', code: '600000', name: '浦发银行', buyPrice: 10.2, buyAt: yesterday, qty: 1, buyFee: 5 },
+    ],
+    closed: [],
+  })
+
+  assert.equal(planStore.get().plan.some((item) => item.code === '600000'), false)
+
+  planStore.sell('lot_1', 10.5, 1)
+  assert.equal(planStore.get().holding.some((item) => item.code === '600000'), true)
+  assert.equal(planStore.get().plan.some((item) => item.code === '600000'), false)
+
+  planStore.sell('lot_1', 10.5, 1)
+  assert.equal(planStore.get().plan.some((item) => item.code === '600000'), false)
+
+  planStore.sell('lot_2', 10.5, 1)
+  assert.equal(planStore.get().holding.some((item) => item.code === '600000'), false)
+  assert.equal(planStore.get().plan.filter((item) => item.code === '600000').length, 1)
+})
+
+test('做T卖腿同样受今日可卖数量约束', () => {
+  const now = Date.now()
+  planStore.setData({
+    plan: [],
+    holding: [{
+      id: 'today_holding',
+      code: '000002',
+      name: '万科A',
+      buyPrice: 8,
+      buyAt: now,
+      qty: 1,
+      buyFee: 5,
+    }],
+    closed: [{
+      id: 'buy_today',
+      type: 'BUY',
+      code: '000002',
+      name: '万科A',
+      qty: 1,
+      price: 8,
+      at: now,
+    }],
+  })
+
+  const result = planStore.addTFlow('today_holding', 'sell', 8.2, 1)
+
+  assert.equal(result.ok, false)
+  assert.match(result.error, /T\+1/)
+  assert.equal((planStore.get().holding[0].tFlows || []).length, 0)
+})
+
+test('今日新建仓的止盈止损预警保留观察价但标记 T+1 锁定', () => {
+  const now = Date.now()
+  planStore.setData({
+    plan: [],
+    holding: [{
+      id: 'new_position',
+      code: '000636',
+      name: '风华高科',
+      buyPrice: 13,
+      buyAt: now,
+      qty: 1,
+      buyFee: 5,
+    }],
+    closed: [{
+      id: 'buy_today',
+      type: 'BUY',
+      code: '000636',
+      qty: 1,
+      price: 13,
+      at: now,
+    }],
+    alerts: [],
+  })
+
+  planStore.setPlanRule('new_position', { tp: 14, sl: 12 })
+
+  const alerts = planStore.get().alerts.filter((alert) => alert.planId === 'new_position')
+  assert.equal(alerts.length, 2)
+  assert.equal(alerts.every((alert) => alert.t1Blocked === true), true)
+  assert.equal(alerts.every((alert) => alert.sellableTodayQty === 0), true)
+})
+
+test('旧仓2手今日补1手时预警记录今日最多可卖2手', () => {
+  const now = Date.now()
+  planStore.setData({
+    plan: [],
+    holding: [{
+      id: 'mixed_position',
+      code: '000636',
+      name: '风华高科',
+      buyPrice: 13,
+      buyAt: now - 86400000,
+      qty: 3,
+      buyFee: 5,
+    }],
+    closed: [{
+      id: 'add_today',
+      type: 'BUY',
+      code: '000636',
+      qty: 1,
+      price: 13.2,
+      at: now,
+    }],
+    alerts: [],
+  })
+
+  planStore.setPlanRule('mixed_position', { tp: 14, sl: 12 })
+
+  const alerts = planStore.get().alerts.filter((alert) => alert.planId === 'mixed_position')
+  assert.equal(alerts.every((alert) => alert.t1Blocked === false), true)
+  assert.equal(alerts.every((alert) => alert.sellableTodayQty === 2), true)
+})

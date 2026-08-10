@@ -86,6 +86,20 @@ export function useCountdown(intervalMs, tick = 0) {
   return remain
 }
 
+export function useMediaQuery(query) {
+  const getMatch = () => typeof window !== 'undefined' && window.matchMedia(query).matches
+  const [matches, setMatches] = useState(getMatch)
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const media = window.matchMedia(query)
+    const update = () => setMatches(media.matches)
+    update()
+    media.addEventListener('change', update)
+    return () => media.removeEventListener('change', update)
+  }, [query])
+  return matches
+}
+
 // 判断当前是否 A 股交易时段
 export function isTradingHours() {
   const now = new Date()
@@ -144,4 +158,3 @@ export function useSwipe({ onLeft, onRight, threshold = 64, enabled = true } = {
   const bind = enabled ? { onTouchStart, onTouchMove, onTouchEnd, onTouchCancel: reset } : {}
   return { bind, dx, swiping }
 }
-

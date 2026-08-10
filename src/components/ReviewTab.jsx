@@ -60,9 +60,48 @@ export default function ReviewTab({ interval, snapshot }) {
 
   return (
     <div className="review">
+      <DecisionClosure book={book} />
       <TradeStat records={records} />
       <ReviewCharts records={records} />
       <DailyLog records={records} />
+    </div>
+  )
+}
+
+function DecisionClosure({ book }) {
+  const stats = useMemo(() => planStore.decisionStats(), [book.decisionLog])
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <div className="panel-title"><Icon name="target" size={16} /> 决策闭环</div>
+        <span className="panel-sub">AI 建议不等于真实操作，只统计实际落账</span>
+      </div>
+      {stats.recommendations === 0 && stats.executions === 0 ? (
+        <div className="empty">生成 AI 操作建议并记录真实买卖后，这里会显示建议采纳与执行关联。</div>
+      ) : (
+        <div className="rv-attr">
+          <div className="rv-attr-cell">
+            <div className="rv-attr-k">AI 建议</div>
+            <div className="rv-attr-v">{stats.recommendations}</div>
+            <div className="rv-attr-s">{stats.actionableRecommendations} 条可执行 · {stats.pending} 条待执行</div>
+          </div>
+          <div className="rv-attr-cell">
+            <div className="rv-attr-k">建议后执行</div>
+            <div className="rv-attr-v">{stats.executedRecommendations}</div>
+            <div className="rv-attr-s">同股同方向、24 小时内</div>
+          </div>
+          <div className="rv-attr-cell">
+            <div className="rv-attr-k">真实执行</div>
+            <div className="rv-attr-v">{stats.executions}</div>
+            <div className="rv-attr-s">{stats.linkedExecutions} 笔关联到建议</div>
+          </div>
+          <div className="rv-attr-cell">
+            <div className="rv-attr-k">采纳率</div>
+            <div className="rv-attr-v">{stats.adoptionRate == null ? '--' : stats.adoptionRate + '%'}</div>
+            <div className="rv-attr-s">已执行建议 / 全部建议</div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

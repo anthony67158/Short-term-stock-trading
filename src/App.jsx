@@ -16,16 +16,32 @@ import { runDailyAdviceIfDue } from './adviceDaily'
 import { runAutoRefreshIfDue } from './adviceAutoRefresh'
 import { timeStr } from './format'
 import { api } from './apiBase'
+import { chunkReloadKey, shouldReloadChunk } from './chunkError'
 
 // 按需分包：四个主 Tab 与 AI 助手拆成独立 chunk，首屏只加载当前 Tab，
-// 切换时才拉取对应 chunk（配合 vite manualChunks），显著缩短首屏体积与白屏时间。
-const TodayTab = lazy(() => import('./components/TodayTab'))
-const PlanTab = lazy(() => import('./components/PlanTab'))
-const ResearchTab = lazy(() => import('./components/ResearchTab'))
-const AccountHub = lazy(() => import('./components/AccountHub'))
-const AIAssistant = lazy(() => import('./components/AIAssistant'))
-const LLMConfig = lazy(() => import('./components/LLMConfig'))
-const QuantReport = lazy(() => import('./components/QuantReport'))
+// 切换时才拉取对应 chunk（配合 Rolldown codeSplitting），缩短首屏体积与白屏时间。
+function lazyWithReload(loader, name) {
+  return lazy(async () => {
+    try {
+      const module = await loader()
+      try { sessionStorage.removeItem(chunkReloadKey(name)) } catch { /* ignore */ }
+      return module
+    } catch (error) {
+      if (shouldReloadChunk(error, name)) {
+        window.location.reload()
+        return new Promise(() => {})
+      }
+      throw error
+    }
+  })
+}
+const TodayTab = lazyWithReload(() => import('./components/TodayTab'), 'today')
+const PlanTab = lazyWithReload(() => import('./components/PlanTab'), 'plan')
+const ResearchTab = lazyWithReload(() => import('./components/ResearchTab'), 'research')
+const AccountHub = lazyWithReload(() => import('./components/AccountHub'), 'account-hub')
+const AIAssistant = lazyWithReload(() => import('./components/AIAssistant'), 'assistant')
+const LLMConfig = lazyWithReload(() => import('./components/LLMConfig'), 'llm-config')
+const QuantReport = lazyWithReload(() => import('./components/QuantReport'), 'quant-report')
 
 // Tab 切换时的轻量骨架占位（避免 Suspense fallback 空白闪一下）
 function TabSkeleton() {
@@ -48,6 +64,7 @@ export default function App() {
   const { user, booting } = useAuthStore()
   useEffect(() => {
     authStore.boot(); startCloudSync()   // 启动时尝试恢复会话 + 开启跨设备同步轮询
+    import('./adviceBatch').then((m) => m.startBatchStatusSync()).catch(() => {})
     // 预置并发上限=承接 advisor 角色的端点数(首屏即可门控;之后随云端 batchProgress.concurrency 覆盖为权威值)
     fetch(api('/api/llm_config'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'get' }) })
       .then((r) => r.json()).then((j) => { if (j && j.ok && Number(j.concurrency) > 0) import('./adviceBatch').then((m) => m.seedConcurrency(Number(j.concurrency))).catch(() => {}) })
@@ -177,7 +194,14 @@ function MainApp() {
 
   // 数据快照给 AI（避免频繁重建）
   const dataRef = useRef({})
-  dataRef.current = { market: market.data, sectors: sectors.data, limitPool: ztPool.data, movers: moversData.data, speed: speedData.data }
+  dataRef.current = {
+    market: market.data,
+    sectors: sectors.data,
+    limitPool: ztPool.data,
+    movers: moversData.data,
+    speed: speedData.data,
+    quotes: (reviewQuotes.data && reviewQuotes.data.list) || [],
+  }
   const snapshot = () => dataRef.current
 
   // ===== 键盘快捷键：1-4 切换主 Tab；ESC 关闭详情/助手；/ 或 A 唤起助手 =====

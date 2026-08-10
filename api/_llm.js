@@ -5,7 +5,7 @@
 
 import { applyCors } from './_lib.js';
 import { currentConfig } from './_llm_config.js';
-import { poolFetch } from './_llm_pool.js';
+import { markEndpointUnusable, markSuccess, modelForEndpoint, poolFetch } from './_llm_pool.js';
 
 // ---- 环境读取 ----
 // 优先用运行时配置（前端「AI 模型配置」写入 OSS，经 ensureConfig 预热到同步缓存）；
@@ -69,12 +69,26 @@ export async function callChat({
   //   (不同网关同一角色可能是不同模型名);端点没配则回退全局/本次 model。
   // forceNoReason:硬关深度思考(优先级高于端点级/全局 reasoning 配置)——用于「思维链吃穿正文」
   //   后的补生成:此时必须让模型把整段生成用于正文 JSON,绝不能被端点级 reasoning 配置再次拉起 CoT。
-  const { resp } = await poolFetch(cfg, '/chat/completions', {
+  const { resp, endpoint, deferred } = await poolFetch(cfg, '/chat/completions', {
     method: 'POST', body: bodyObj, signal: useSignal, timeoutMs,
-    role, modelFallback: model, reasonFallback: reasoning, forceNoReason,
+    role, modelFallback: model, reasonFallback: reasoning, forceNoReason, deferSuccess: !!stream,
   }, stream ? 1 : 2);   // 流式只试一个端点(半路换端点会丢已下发的 token);非流式允许一次故障转移
 
-  return { resp, done: () => { if (t) clearTimeout(t); } };
+  let released = false;
+  return {
+    resp,
+    endpoint: endpoint ? (endpoint.id === 'default' ? '主端点' : endpoint.id) : '',
+    endpointId: endpoint?.id || '',
+    selectedModel: modelForEndpoint(cfg, endpoint, role, model),
+    done: (success = true) => {
+      if (t) clearTimeout(t);
+      if (deferred && endpoint && !released) {
+        released = true;
+        if (success) markSuccess(endpoint.id);
+        else markEndpointUnusable(endpoint.id, Date.now(), true);
+      }
+    },
+  };
 }
 
 // ---- 带一次快速重试的非流式 chat 调用 ----
@@ -85,7 +99,7 @@ export async function callChatWithRetry(opts = {}, { retries = 1, budgetLeftMs }
   const getLeft = typeof budgetLeftMs === 'function' ? budgetLeftMs : () => (budgetLeftMs == null ? Infinity : budgetLeftMs);
   let attempt = 0;
   while (true) {
-    const { resp, done } = await callChat(opts);
+    const { resp, done, endpoint, selectedModel } = await callChat(opts);
     const errored = resp && resp.__err;
     const isAbort = errored && resp.__err.name === 'AbortError';
     const badStatus = resp && !resp.__err && !resp.ok && resp.status >= 500;
@@ -99,7 +113,7 @@ export async function callChatWithRetry(opts = {}, { retries = 1, budgetLeftMs }
       opts = { ...opts, timeoutMs: tighter };
       continue;
     }
-    return { resp, done, attempts: attempt + 1 };
+    return { resp, done, endpoint, selectedModel, attempts: attempt + 1 };
   }
 }
 

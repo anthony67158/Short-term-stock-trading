@@ -20,10 +20,10 @@ import { fetchTrendsTx, fetchKlineTx } from './stock_detail.js';
 import { computeTechnicals, techSummaryForAI } from './_ta.js';
 import { callChatWithRetry, parseLLMJson } from './_llm.js';
 import { getModel, getReasoning } from './_llm_config.js';
-import { put, readJson, hasStorage } from './_blob.js';
-
-// 置信度双闸门:LLM 判 confirm 但把握不足(< 阈值)时降级为 wait(只观察不发强提示),避免边缘信号过激进。
-const CONFIRM_MIN_CONFIDENCE = 75;
+import { put, hasStorage } from './_blob.js';
+import { marketTimeContext } from './_market_time.js';
+import { isConfirmationPhase, isMinuteSnapshotFresh, normalizeConfidence } from '../shared/decisionGuards.js';
+import { fuseConfirmation } from '../shared/confirmPolicy.js';
 
 // ---- 交易语义分类:把一条价位预警归成 buy / sell / stop 三类 ----
 // buy : 买点 / 补仓(回踩到位后想低吸)——确认「止跌企稳」才买。
@@ -52,7 +52,7 @@ function round(v, d = 2) {
 // ---- 从分时序列提取「盘中确认原语」----
 // trends: [{time, price, volume, avg(VWAP)}] 升序;preClose 昨收。
 // 返回一组人类可读 + 机器可判的原语,后续确定性判定与 LLM 都消费它。
-function intradayPrimitives(trends, preClose) {
+export function intradayPrimitives(trends, preClose) {
   const ts = Array.isArray(trends) ? trends.filter((t) => t && Number(t.price) > 0) : [];
   if (ts.length < 5) return null;
   const last = ts[ts.length - 1];
@@ -78,10 +78,18 @@ function intradayPrimitives(trends, preClose) {
   const higherLows = lowB >= lowA;   // 后半段最低点不再创新低 → 止跌迹象
   const lowerHighs = highB <= highA; // 后半段最高点不再创新高 → 滞涨迹象
   const aboveVwap = vwap != null ? price >= vwap : null;
+  const recent3 = ts.slice(-3);
+  const aboveVwapCount3 = recent3.filter((item) =>
+    Number(item.avg) > 0 && Number(item.price) >= Number(item.avg)
+  ).length;
   const pctFromPre = preClose > 0 ? round((price - preClose) / preClose * 100, 2) : null;
+  const vwapDistancePct = vwap > 0 ? round((price - vwap) / vwap * 100, 2) : null;
+  const bounceFromLowPct = winLow > 0 ? round((price - winLow) / winLow * 100, 2) : null;
+  const drawdownFromHighPct = winHigh > 0 ? round((price - winHigh) / winHigh * 100, 2) : null;
   return {
     price: round(price), vwap: round(vwap), pctFromPre,
     aboveVwap, mom5Pct, volShrink, volSurge, higherLows, lowerHighs,
+    aboveVwapCount3, vwapDistancePct, bounceFromLowPct, drawdownFromHighPct,
     winLow: round(winLow), winHigh: round(winHigh), bars: ts.length,
     lastTime: last.time,
   };
@@ -90,34 +98,54 @@ function intradayPrimitives(trends, preClose) {
 // ---- 确定性确认判定:按交易语义(buy/sell/stop)对盘中原语 + 技术面打分 ----
 // 返回 { decision:'confirm'|'wait', score, hits:[命中的信号文字] } —— 这是 LLM 不可用时的兜底结论,
 // 也作为 LLM 的「客观依据」一并喂给它。此处保守:证据不足一律 wait,绝不轻易 confirm。
-function deterministicJudge(side, prim, tech) {
+export function deterministicJudge(side, prim, tech) {
   const hits = [];
   let score = 0;
   const macd = tech && tech.macd;
   const rsi = tech && typeof tech.rsi === 'number' ? tech.rsi : null;
   if (side === 'buy') {
+    if (prim.keyDistancePct <= -1.2 && prim.aboveVwap === false && prim.mom5Pct <= -0.2 && !prim.higherLows) {
+      return {
+        decision: 'invalid', score: 3,
+        hits: [`买点下方${Math.abs(prim.keyDistancePct)}%且仍在走弱，低吸逻辑失效`],
+      };
+    }
+    if (prim.keyDistancePct >= 1.5) {
+      return {
+        decision: 'invalid', score: 3,
+        hits: [`已反弹到买点上方${prim.keyDistancePct}%，继续追入赔率不足`],
+      };
+    }
     if (prim.higherLows) { score += 1; hits.push('分时低点抬高,止跌迹象'); }
     if (prim.aboveVwap) { score += 1; hits.push('站回分时均价线(VWAP)上方'); }
+    if (prim.aboveVwapCount3 === 3) { score += 0.5; hits.push('连续3分钟站在VWAP上方'); }
     if (prim.mom5Pct >= 0.2) { score += 1; hits.push(`近5分钟企稳回升(+${prim.mom5Pct}%)`); }
+    if (prim.bounceFromLowPct >= 0.3) { score += 0.5; hits.push(`较窗口低点反弹${prim.bounceFromLowPct}%`); }
+    if (prim.sinceTouchPct >= 0.15) { score += 0.5; hits.push(`触价后回升${prim.sinceTouchPct}%`); }
     if (prim.volShrink) { score += 0.5; hits.push('回踩缩量,抛压衰竭'); }
-    if (macd && macd.cross === 'gold') { score += 1; hits.push('日线MACD金叉'); }
+    if (macd && macd.cross === 'gold') { score += 0.5; hits.push('日线MACD金叉'); }
     if (rsi != null && rsi <= 35) { score += 0.5; hits.push(`RSI低位(${rsi})具反弹动能`); }
   } else if (side === 'sell') {
     if (prim.lowerHighs) { score += 1; hits.push('分时高点压低,冲高滞涨'); }
     if (prim.aboveVwap === false) { score += 1; hits.push('跌回分时均价线(VWAP)下方'); }
     if (prim.mom5Pct <= -0.2) { score += 1; hits.push(`近5分钟冲高回落(${prim.mom5Pct}%)`); }
+    if (prim.drawdownFromHighPct <= -0.25) { score += 1; hits.push(`较窗口高点回撤${Math.abs(prim.drawdownFromHighPct)}%`); }
+    if (prim.sinceTouchPct <= -0.15) { score += 0.5; hits.push(`触价后回落${Math.abs(prim.sinceTouchPct)}%`); }
     if (prim.volSurge && prim.mom5Pct <= 0.1) { score += 1; hits.push('放量不涨,疑似出货'); }
-    if (macd && macd.cross === 'dead') { score += 1; hits.push('日线MACD死叉'); }
+    if (macd && macd.cross === 'dead') { score += 0.5; hits.push('日线MACD死叉'); }
     if (rsi != null && rsi >= 68) { score += 0.5; hits.push(`RSI高位(${rsi})回落风险`); }
   } else { // stop:止损须「真跌破」而非瞬时插针
+    if (prim.keyDistancePct <= -0.3) { score += 1; hits.push(`已跌破止损线${Math.abs(prim.keyDistancePct)}%`); }
     if (prim.aboveVwap === false) { score += 1; hits.push('运行在分时均价线下方(弱势)'); }
+    if (prim.aboveVwapCount3 === 0) { score += 0.5; hits.push('连续3分钟未站回VWAP'); }
     if (prim.mom5Pct <= -0.3) { score += 1; hits.push(`近5分钟持续走弱(${prim.mom5Pct}%)`); }
+    if (prim.sinceTouchPct <= -0.2) { score += 0.5; hits.push(`触价后继续下跌${Math.abs(prim.sinceTouchPct)}%`); }
     if (!prim.higherLows) { score += 1; hits.push('分时不断创新低,未见企稳'); }
     if (prim.volSurge && prim.mom5Pct < 0) { score += 1; hits.push('放量下跌,跌破有效'); }
     if (macd && macd.cross === 'dead') { score += 0.5; hits.push('日线MACD死叉共振'); }
   }
-  // 阈值:≥2.5 视为确定性证据充分 → confirm;否则 wait
-  const decision = score >= 2.5 ? 'confirm' : 'wait';
+  const threshold = side === 'buy' ? 2.5 : 1.5;
+  const decision = score >= threshold ? 'confirm' : 'wait';
   return { decision, score: round(score, 1), hits };
 }
 
@@ -131,7 +159,8 @@ async function llmJudge({ side, a, name, advice, prim, tech, det }) {
   const adv = advice || {};
   const sys = '你是严谨的A股短线交易确认闸门。价格已触及关键价位,但「到价≠立刻动手」。'
     + '你的唯一任务:结合盘中走势与建议条件,判断【此刻是否真正到了动手时机】。'
-    + '保守优先:证据不足则 wait;若交易逻辑已被破坏(如买点却已放量跌破失效价)则 invalid。'
+    + '买入必须保守，客观止跌信号不足一律wait；止盈要重视触价后的冲高回落，避免利润明显回撤；'
+    + '止损要重视持续破位，不能因措辞犹豫而拖延。invalid必须有明确客观失效证据，不能只凭主观感觉。'
     + '只输出 JSON,不要多余文字。';
   const payload = {
     股票: `${name || a.code}(${a.code})`,
@@ -146,6 +175,13 @@ async function llmJudge({ side, a, name, advice, prim, tech, det }) {
       量能: prim.volSurge ? '放量' : prim.volShrink ? '缩量' : '平稳',
       分时低点是否抬高: prim.higherLows,
       分时高点是否压低: prim.lowerHighs,
+      连续3分钟站上VWAP次数: prim.aboveVwapCount3,
+      距VWAP: prim.vwapDistancePct != null ? prim.vwapDistancePct + '%' : null,
+      较窗口低点反弹: prim.bounceFromLowPct != null ? prim.bounceFromLowPct + '%' : null,
+      较窗口高点回撤: prim.drawdownFromHighPct != null ? prim.drawdownFromHighPct + '%' : null,
+      距关键价: prim.keyDistancePct != null ? prim.keyDistancePct + '%' : null,
+      触价后涨跌: prim.sinceTouchPct != null ? prim.sinceTouchPct + '%' : null,
+      已观察分钟: prim.observationAgeMin,
     },
     技术面: techSummaryForAI(tech),
     建议给出的确认条件: adv.exitTiming || adv.actionPlan || '(未提供,按通用纪律判断)',
@@ -158,10 +194,9 @@ async function llmJudge({ side, a, name, advice, prim, tech, det }) {
       + '\n\n输出格式:{"decision":"confirm|wait|invalid","confidence":0-100,"reason":"一句话中文理由(点明关键依据)"}' },
   ];
   try {
-    // 超时放宽到 20s,并在非超时错误/5xx 时故障转移重试一次(换池内另一端点),
-    // 减少盘中高波动时段(数据最有价值时)因单端点抖动而回退到纯技术面。
+    // Judge 必须及时：总预算 10s 内允许一次故障转移，超时立即回退客观信号。
     const startedAt = Date.now();
-    const TIMEOUT_MS = 20000;
+    const TIMEOUT_MS = 10000;
     const { resp, done } = await callChatWithRetry({
       role: 'judge', model,
       messages,
@@ -179,7 +214,7 @@ async function llmJudge({ side, a, name, advice, prim, tech, det }) {
       if (!value || !value.decision) return null;
       const d = String(value.decision).toLowerCase();
       const decision = ['confirm', 'wait', 'invalid'].includes(d) ? d : 'wait';
-      return { decision, confidence: Number(value.confidence) || null, reason: String(value.reason || '').slice(0, 200) };
+      return { decision, confidence: normalizeConfidence(value.confidence), reason: String(value.reason || '').slice(0, 200) };
     } finally { done(); }
   } catch { return null; }
 }
@@ -193,6 +228,15 @@ export async function judgeConfirmation({ alert, name, advice, quote } = {}) {
   const a = alert;
   if (!a || !a.code) return { decision: 'wait', reason: '缺少预警对象', side: null, source: 'ta' };
   const side = sideOf(a);
+  const timeContext = marketTimeContext();
+  if (!isConfirmationPhase(timeContext.phase)) {
+    return {
+      decision: 'wait',
+      reason: `${timeContext.phase}不做盘中确认，等待连续竞价`,
+      side,
+      source: 'ta',
+    };
+  }
   // 盘中分时(主依据)
   let trendsData = null;
   try { trendsData = await fetchTrendsTx(a.code); } catch { trendsData = null; }
@@ -200,6 +244,54 @@ export async function judgeConfirmation({ alert, name, advice, quote } = {}) {
   if (!prim) {
     return { decision: 'wait', reason: '分时数据不足,继续观察', side, source: 'ta' };
   }
+  if (!isMinuteSnapshotFresh(prim.lastTime, timeContext.bjNow)) {
+    return {
+      decision: 'wait',
+      reason: `分时快照已过期(${prim.lastTime || '时间未知'}),等待最新成交`,
+      side,
+      source: 'ta',
+    };
+  }
+  const quotePrice = Number(quote && quote.price);
+  prim.quotePrice = quotePrice > 0 ? quotePrice : null;
+  prim.sourceSpreadPct = quotePrice > 0
+    ? round((prim.price - quotePrice) / quotePrice * 100, 2)
+    : null;
+  if (prim.sourceSpreadPct != null && Math.abs(prim.sourceSpreadPct) > 0.8) {
+    return {
+      decision: 'wait',
+      reason: `分时价与实时报价偏差${Math.abs(prim.sourceSpreadPct)}%，等待数据源收敛`,
+      side,
+      source: 'ta',
+    };
+  }
+  const keyPrice = Number(a.value);
+  const watchingPrice = Number(a.watchingPrice);
+  const watchingAt = Number(a.watchingAt);
+  prim.keyDistancePct = keyPrice > 0 ? round((prim.price - keyPrice) / keyPrice * 100, 2) : null;
+  prim.sinceTouchPct = watchingPrice > 0 ? round((prim.price - watchingPrice) / watchingPrice * 100, 2) : null;
+  prim.observationAgeMs = watchingAt > 0 ? Math.max(0, Date.now() - watchingAt) : null;
+  prim.observationAgeMin = prim.observationAgeMs != null ? round(prim.observationAgeMs / 60000, 1) : null;
+
+  // 最短观察期内不调用 LLM；但买点明确跌破/追高失效可立即撤销。
+  const preliminary = deterministicJudge(side, prim, null);
+  const early = fuseConfirmation({
+    side,
+    deterministic: preliminary,
+    llm: null,
+    observationAgeMs: prim.observationAgeMs,
+  });
+  if (early.policy === 'observation' || early.decision === 'invalid') {
+    const result = {
+      ...early,
+      side,
+      signals: { side, primitives: prim, deterministic: preliminary, techVerdict: null },
+      source: 'ta',
+    };
+    await logVerdict(a, name, prim, result);
+    return result;
+  }
+
   // 日线技术面(辅助:MACD/RSI/均线)
   let tech = null;
   try {
@@ -210,51 +302,50 @@ export async function judgeConfirmation({ alert, name, advice, quote } = {}) {
   const det = deterministicJudge(side, prim, tech);
   const signals = { side, primitives: prim, deterministic: det, techVerdict: tech && tech.verdict };
 
-  // LLM 最终闸门(可回退)
-  const llm = await llmJudge({ side, a, name, advice, prim, tech, det });
-  let result;
-  if (llm) {
-    let decision = llm.decision;
-    let reason = llm.reason || (det.hits[0] || '综合研判');
-    let gated = false;
-    // 置信度双闸门:confirm 但把握不足(< CONFIRM_MIN_CONFIDENCE)→ 降级为 wait(只观察,不发强提示)。
-    //   confidence 为 null(模型没给)时不降级——避免把正常 confirm 误杀;wait/invalid 不受闸门影响。
-    if (decision === 'confirm' && llm.confidence != null && llm.confidence < CONFIRM_MIN_CONFIDENCE) {
-      decision = 'wait';
-      gated = true;
-      reason = `把握不足(${llm.confidence}<${CONFIRM_MIN_CONFIDENCE}),暂列观察:${reason}`;
-    }
-    result = {
-      decision,
-      confidence: llm.confidence,
-      reason,
-      side, signals, source: 'llm+ta',
-      ...(gated ? { gated: true, rawDecision: 'confirm' } : {}),
-    };
-  } else {
-    // 回退:纯确定性结论(不产出 invalid,保守只在 confirm/wait 间取)
-    result = {
-      decision: det.decision,
-      confidence: null,
-      reason: det.hits.length ? det.hits.join('、') : '证据不足,继续观察',
-      side, signals, source: 'ta',
-    };
+  // 强止损客观信号优先，避免等待 LLM 导致风险继续扩大。
+  if (side === 'stop' && det.score >= 3) {
+    const fused = fuseConfirmation({
+      side,
+      deterministic: det,
+      llm: null,
+      observationAgeMs: prim.observationAgeMs,
+    });
+    const result = { ...fused, side, signals, source: 'ta' };
+    await logVerdict(a, name, prim, result);
+    return result;
   }
-  // 可观测性:落一条轻量判定日志到 OSS(fire-and-forget,失败静默,绝不阻断主流程)。
-  logVerdict(a, name, prim, result);
+
+  // LLM 最终闸门(可回退)，最终结果由非对称融合策略裁决。
+  const llm = await llmJudge({ side, a, name, advice, prim, tech, det });
+  const fused = fuseConfirmation({
+    side,
+    deterministic: det,
+    llm,
+    observationAgeMs: prim.observationAgeMs,
+  });
+  const result = {
+    ...fused,
+    side,
+    signals,
+    source: llm ? 'llm+ta' : 'ta',
+  };
+  await logVerdict(a, name, prim, result);
   return result;
 }
 
 // ---- 可观测性:落一条轻量判定日志到 OSS ----
 // 目的:事后回看 judge 判得准不准(积累后可对 {decision,confidence} 与实际后续走势做命中率统计)。
-// 存储:每天一个对象 confirm_log/YYYY-MM-DD.json,内含当日判定数组(追加写)。
-//   fire-and-forget:不 await 到主流程,失败静默——绝不因日志拖慢或阻断确认闸门。
-function logVerdict(a, name, prim, result) {
+// 存储:每个预警每5分钟一个独立对象；最终决策使用独立时间戳对象。
+// 独立对象避免并发 read-modify-write 覆盖；await 确保 FC 响应结束前日志真正落 OSS。
+async function logVerdict(a, name, prim, result) {
   if (!hasStorage()) return;
   const now = Date.now();
   const d = new Date(now + 8 * 3600 * 1000);   // 东八区
   const day = d.toISOString().slice(0, 10);
-  const key = `confirm_log/${day}.json`;
+  const alertId = String(a.id || `${a.code}-${a.value}`).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100);
+  const decisive = result.decision === 'confirm' || result.decision === 'invalid';
+  const bucket = Math.floor(now / (5 * 60 * 1000));
+  const key = `confirm_log/${day}/${alertId}-${decisive ? now : bucket}.json`;
   const entry = {
     ts: now,
     code: a.code,
@@ -269,18 +360,21 @@ function logVerdict(a, name, prim, result) {
     source: result.source,
     gated: result.gated || false,
     rawDecision: result.rawDecision || result.decision,
+    policy: result.policy || null,
+    deterministicScore: result.signals?.deterministic?.score ?? null,
+    deterministicHits: result.signals?.deterministic?.hits || [],
+    keyDistancePct: prim?.keyDistancePct ?? null,
+    sinceTouchPct: prim?.sinceTouchPct ?? null,
+    drawdownFromHighPct: prim?.drawdownFromHighPct ?? null,
+    bounceFromLowPct: prim?.bounceFromLowPct ?? null,
+    observationAgeMin: prim?.observationAgeMin ?? null,
     reason: (result.reason || '').slice(0, 160),
   };
-  (async () => {
-    try {
-      let arr = [];
-      try {
-        const prev = await readJson(key);
-        if (Array.isArray(prev)) arr = prev;
-      } catch { /* 首次当天无文件 */ }
-      arr.push(entry);
-      if (arr.length > 2000) arr = arr.slice(-2000);   // 单日上限,防无界增长
-      await put(key, JSON.stringify(arr), { contentType: 'application/json', addRandomSuffix: false, cacheControlMaxAge: 0 });
-    } catch { /* 日志失败静默 */ }
-  })();
+  try {
+    await put(key, JSON.stringify(entry), {
+      contentType: 'application/json',
+      addRandomSuffix: false,
+      cacheControlMaxAge: 0,
+    });
+  } catch { /* 日志失败不阻断判定 */ }
 }

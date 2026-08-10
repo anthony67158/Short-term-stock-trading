@@ -1,7 +1,9 @@
 import { useSyncExternalStore } from 'react'
-import { planStore } from './planStore'
+import { planStore, t1StatusOf } from './planStore'
 import { getAdvice } from './adviceCache'
 import { api } from './apiBase'
+import { confirmationPolicy } from '../shared/confirmPolicy.js'
+import { applyT1ToAlert } from '../shared/t1AdvicePolicy.js'
 
 // ============ 盯盘预警引擎 ============
 // 统一轮询自选/持仓相关个股实时报价，逐条判断预警规则是否命中；
@@ -246,7 +248,9 @@ export const alertStore = {
     if (!alerts.length) return
     // 该预警是否走智能二段确认:仅【价位类 + 带 phase(AI 派生)】;手动/涨跌幅/量比/涨跌停 → 老逻辑
     const isSmart = (a) => smartOn && a.type === 'price' && !!a.phase && a.phase !== 'confirmed' && a.phase !== 'invalid'
-    for (const a of alerts) {
+    for (const storedAlert of alerts) {
+      const a = applyT1ToAlert(storedAlert, t1StatusOf(storedAlert.code))
+      if (a.t1Blocked) continue
       const q = quoteMap[a.code]
       if (!isSmart(a)) {
         // —— 老逻辑:命中即强推并停用(向后兼容)——
@@ -275,7 +279,7 @@ export const alertStore = {
         const body = `${describeAlert(a)}｜${msg}\n⏳已到${actZh}价位,但「到价≠立刻动手」。系统正在盯盘确认真正时机,确认后会再发一次「✅ 可以${actZh}」的强提示,先别急。`
         this.push({ code: a.code, name: a.name, title, body, alertId: 'watch-' + a.id })
         notify(title, body)
-        planStore.markAlertWatching(a.id, msg)
+        planStore.markAlertWatching(a.id, msg, q && q.price)
         continue
       }
 
@@ -289,6 +293,11 @@ export const alertStore = {
   // 观察确认中 → 请求后端 /api/confirm_signal 判定真正交易时机(即发即忘,带在途去重)
   _confirmWatching(a, q) {
     if (_confirming.has(a.id)) return // 同一预警上一次判定还没回来,跳过,避免并发重复请求
+    const side = sideOf(a)
+    const interval = side === 'stop' ? 20000 : side === 'sell' ? 30000 : 45000
+    if (a.lastJudgeAt && Date.now() - a.lastJudgeAt < interval) return
+    const minObserveMs = confirmationPolicy(side).minObserveMs
+    if (a.watchingAt && Date.now() - a.watchingAt < minObserveMs) return
     _confirming.add(a.id)
     // ★超时护栏 + 同步异常兜底:若 fetch 同步抛错(URL 异常)或请求长时间不回,
     //   必须保证 _confirming 里的 id 最终被清除,否则该预警将永久卡在「判定中」再也无法确认。
@@ -309,13 +318,14 @@ export const alertStore = {
           if (!v || !v.ok) return
           const side = v.side || sideOf(a)
           const actZh = ACTION_ZH[side] || '操作'
+          planStore.markAlertJudged(a.id, v, q && q.price)
           if (v.decision === 'confirm') {
             const conf = v.confidence != null ? `(把握${v.confidence})` : ''
             const title = `✅ 可以${actZh} · ${a.name || a.code}`
             const body = `${describeAlert(a)}｜确认时机已到${conf}\n📌${v.reason || '多项信号共振确认'}`
             this.push({ code: a.code, name: a.name, title, body, alertId: 'confirm-' + a.id })
             notify(title, body)
-            planStore.markAlertConfirmed(a.id, `确认${actZh}:${v.reason || ''}`)
+            planStore.markAlertConfirmed(a.id, `确认${actZh}:${v.reason || ''}`, v, q && q.price)
           } else if (v.decision === 'invalid') {
             const title = `⛔ 已失效·暂不${actZh} · ${a.name || a.code}`
             const body = `${describeAlert(a)}｜原${actZh}逻辑已被破坏\n📌${v.reason || '关键条件已破坏,建议重新评估'}`

@@ -7,12 +7,21 @@ import { getLatestDailySummary } from './_daily_summary.js';
 import { fetchNews, fetchClsTelegraph, fetchSinaFlash } from './_market_data.js';
 import { callChat, callChatWithRetry, parseLLMJson, pumpChatStream } from './_llm.js';
 import { ensureConfig, currentConfig, getModel, getReasoning } from './_llm_config.js';
-import { endpointsFrom, endpointServesRole } from './_llm_pool.js';
+import { endpointCountForRole, endpointsFrom } from './_llm_pool.js';
 import { applyCors, preflight } from './_lib.js';
+import { zhReasonPiece } from './_zh_reason.js';
 import { SYSTEM_PROMPT, ADVISOR_SYSTEM, buildUserPrompt, isAdvisorMode, maxTokensForMode } from './_ai_prompts.js';
+import { reconcileAdviceNumbers } from '../shared/adviceValidation.js';
+import { normalizePickDecision } from '../shared/stockRanking.js';
 
 function avg(arr) { return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0; }
 function std(arr) { if (arr.length < 2) return 0; const m = avg(arr); return Math.sqrt(avg(arr.map((x) => (x - m) ** 2))); }
+
+export function resolveAIBudget(reasoningOn, requestedMs) {
+  const fallback = reasoningOn ? 560000 : 150000;
+  if (requestedMs == null || !Number.isFinite(Number(requestedMs))) return fallback;
+  return Math.max(30000, Math.min(fallback, Math.trunc(Number(requestedMs))));
+}
 
 // ============ 个股历史规律画像（做T策略自适应的核心）============
 // 输入：近约60日日线 candles（含 open/close/high/low/pct/volume/preClose 或可推）
@@ -464,7 +473,7 @@ export default async function handler(req, res) {
     const reasoningOn = effectiveReasoning(isAdvisorMode(mode) ? 'advisor' : 'chat');
     // 时间窗口拉到 FC 平台上限(600s)附近:深度思考+大量参考内容时模型很慢,总预算给到 560s,
     // 只留 ~40s 给"数据回传/SSE 收尾/平台调度",绝不逼近 600s 硬墙被强杀。非深度思考仍给较小预算省成本。
-    const BUDGET = reasoningOn ? 560000 : 150000;
+    const BUDGET = resolveAIBudget(reasoningOn, body && body.runtimeBudgetMs);
     const remain = () => BUDGET - (Date.now() - START);
 
     // stock 模式：接入 RAG（近5日走势+主营+联网新闻）
@@ -934,12 +943,16 @@ export default async function handler(req, res) {
     const llmCap = useReasoning
       ? (isAdvisor ? 540000 : 300000)
       : (isAdvisor ? 120000 : 90000);
-    const llmTimeout = Math.max(8000, Math.min(llmCap, remain() - 2500));
+    const canFailover = streaming && isAdvisor && endpointCountForRole(cfg, useRole) > 1;
+    const retryReserve = canFailover ? Math.min(60000, Math.max(30000, Math.floor(remain() * 0.3))) : 0;
+    const llmTimeout = Math.max(8000, Math.min(llmCap, remain() - retryReserve - 2500));
 
     let content = '';
     let finishReason = '';
     let usage = null;
     let streamedReasoning = '';   // 流式路径捕获的思维链原文：模型 JSON 里没吐 reasoning 字段时,用它兜底填充,保证"军师推理过程"持久可见
+    let selectedModel = useModel;
+    let selectedEndpoint = '';
     const _salvDbg = { tried: false };   // TEMP 诊断:补生成救援实况
     // 思维链语言:reasoning 模型的思维链标题默认英文,system + 用户开头指令都压不住时,
     //   在用户消息【末尾】(recency 权重最高)再钉一条最强中文指令,连思维链小标题都要求中文。
@@ -952,7 +965,7 @@ export default async function handler(req, res) {
       //   增量实时推为 reasoning 事件(军师在想什么),正文 content 累积到流结束后再统一解析。
       //   代价是放弃 callChatWithRetry 的一次快速重试——换取"推理过程可见"的实时体验;
       //   失败仍走下方统一降级(带已采集 meta),不会白屏。
-      const { resp, done } = await callChat({
+      const routed = await callChat({
         model: useModel,
         role: useRole,
         messages: [
@@ -967,8 +980,12 @@ export default async function handler(req, res) {
         responseFormat: { type: 'json_object' },
         stream: true,
       });
+      const { resp, done } = routed;
+      selectedModel = routed.selectedModel || useModel;
+      selectedEndpoint = routed.endpoint || '';
+      emit('model', { model: selectedModel, endpoint: selectedEndpoint });
       if (resp && resp.__err) {
-        done();
+        done(false);
         const timedOut = resp.__err.name === 'AbortError';
         return finish({
           ok: false, degraded: true, mode, model: useModel, updatedAt: Date.now(),
@@ -978,20 +995,62 @@ export default async function handler(req, res) {
       }
       if (!resp.ok) {
         const errText = await resp.text().catch(() => '');
-        done();
+        done(false);
         return finish({ ok: false, error: `LLM ${resp.status}`, detail: errText.slice(0, 200), meta: collectedMeta });
       }
       // reasoning 增量做轻量节流:攒到 ~40 字或遇换行再下发,避免事件风暴
       let rbuf = '';
-      const flushR = () => { if (rbuf) { emit('reasoning', { text: rbuf }); rbuf = ''; } };
+      let lastVisibleReasoning = '';
+      const flushR = () => {
+        if (!rbuf) return;
+        const visible = zhReasonPiece(rbuf);
+        if (visible && visible !== lastVisibleReasoning) {
+          emit('reasoning', { text: visible });
+          lastVisibleReasoning = visible;
+        }
+        rbuf = '';
+      };
       const pumped = await pumpChatStream(resp, {
         onReasoning: (piece) => { rbuf += piece; if (rbuf.length >= 40 || /[\n。！？]/.test(piece)) flushR(); },
       }).catch(() => ({ content: '', reasoning: '', finishReason: '' }));
       flushR();
-      done();
+      done(!!(pumped.content?.trim() || pumped.reasoning?.trim()));
       content = pumped.content;
       finishReason = pumped.finishReason;
       streamedReasoning = pumped.reasoning || '';
+      if (!content.trim() && !streamedReasoning.trim() && canFailover && routed.endpointId && remain() > 12000) {
+        phase('当前端点响应异常，正在切换备用端点快速重试…', 'failover');
+        const fallbackTimeout = Math.max(8000, Math.min(90000, remain() - 3000));
+        const fallback = await callChat({
+          model: useModel,
+          role: useRole,
+          messages: [
+            { role: 'system', content: sysPrompt },
+            { role: 'system', content: marketTimePromptBlock() },
+            { role: 'user', content: userPrompt },
+          ],
+          temperature: 0.2,
+          maxTokens: maxTokensForMode(mode, false),
+          timeoutMs: fallbackTimeout,
+          reasoning: false,
+          forceNoReason: true,
+          responseFormat: { type: 'json_object' },
+          stream: true,
+        });
+        if (fallback.resp && !fallback.resp.__err && fallback.resp.ok) {
+          selectedModel = fallback.selectedModel || selectedModel;
+          selectedEndpoint = fallback.endpoint || selectedEndpoint;
+          emit('model', { model: selectedModel, endpoint: selectedEndpoint });
+          const retried = await pumpChatStream(fallback.resp, {
+            onReasoning: (piece) => { rbuf += piece; if (rbuf.length >= 40 || /[\n。！？]/.test(piece)) flushR(); },
+          }).catch(() => ({ content: '', reasoning: '', finishReason: '' }));
+          flushR();
+          content = retried.content || '';
+          streamedReasoning = retried.reasoning || '';
+          finishReason = retried.finishReason || '';
+        }
+        fallback.done(!!(content.trim() || streamedReasoning.trim()));
+      }
       // ★「思考完就生成失败」根因修复:深度思考模式下,网关把【思维链 token】计入 max_tokens,
       //   复杂军师题的超长思维链会把正文 JSON 的额度吃穿 → 思维链吐完即 finish_reason=length、
       //   正文 content 为空/半截 → 命中下方"空内容硬降级",前端"思考完直接生成失败"。
@@ -1059,7 +1118,7 @@ export default async function handler(req, res) {
         }
       }
     } else {
-      const { resp, done } = await callChatWithRetry({
+      const routed = await callChatWithRetry({
         model: useModel,
         role: useRole,
         messages: [
@@ -1073,6 +1132,9 @@ export default async function handler(req, res) {
         reasoning: useReasoning,
         responseFormat: { type: 'json_object' },
       }, { budgetLeftMs: () => remain() - 2500 });  // 上游抖动/5xx 且预算足够时快速重试一次；abort/网络错误不抛出 → 转入降级返回
+      const { resp, done } = routed;
+      selectedModel = routed.selectedModel || useModel;
+      selectedEndpoint = routed.endpoint || '';
       done();
 
       // LLM 超时/网络错误 → 结构化降级返回(带已采集 meta)，前端可提示"重试/缩小范围"而非"服务不可用"
@@ -1147,7 +1209,11 @@ export default async function handler(req, res) {
     //      → 对象本身完整,不算截断。即便 finish_reason=length(深度思考网关把思维链 token 计入 max_tokens
     //      触发 length,但正文 JSON 已闭合)也不误报"建议被截断"。
     const truncated = !parsed.value || !!parsed.repaired;
-    const result = parsed.value || { raw: content, truncated };
+    let result = parsed.value || { raw: content, truncated };
+    if (mode === 'scan_pick' && result && typeof result === 'object' && !result.raw) {
+      const allowedCodes = (payload.candidates || []).map((item) => item && item.code).filter(Boolean);
+      result = normalizePickDecision(result, allowedCodes);
+    }
     const _dbg = {
       contentLen: (content || '').length,
       contentHead: (content || '').slice(0, 120),
@@ -1298,11 +1364,16 @@ export default async function handler(req, res) {
               return full;
             });
           };
-          ['actionPlan', 'nextAction', 'reason', 'positionNote', 'plain'].forEach(fixMoneyInText);
+          if (isBuySide || isSellSide) {
+            ['actionPlan', 'nextAction', 'reason', 'positionNote', 'plain'].forEach(fixMoneyInText);
+          }
         } catch { /* 金额重算失败不影响主流程 */ }
 
         if (notes.length) result.serverAdjust = notes.join('；');
       } catch { /* 兜底纠偏失败不影响主流程 */ }
+    }
+    if (['buy_advice', 'hold_advice', 'review'].includes(mode) && result && typeof result === 'object' && !result.raw) {
+      result = reconcileAdviceNumbers({ mode, result, payload }).result;
     }
     // 明确输出「买入手数」的规范化整数字段:planQty 原文常为 "5手"/"约5手"/"5~8手" 等字符串,
     // 这里抽取首个整数为 planQtyNum,供自选卡「买入手数」直接消费,避免 Number() 得 NaN。
@@ -1317,12 +1388,15 @@ export default async function handler(req, res) {
     if (result && typeof result === 'object' && !result.raw
         && (!result.reasoning || !String(result.reasoning).trim())
         && streamedReasoning && streamedReasoning.trim()) {
-      result.reasoning = streamedReasoning.trim();
+      result.reasoning = zhReasonPiece(streamedReasoning.trim());
+    } else if (result && typeof result === 'object' && !result.raw && result.reasoning) {
+      result.reasoning = zhReasonPiece(String(result.reasoning));
     }
     return finish({
       ok: true,
       mode,
-      model: useModel,
+      model: selectedModel,
+      endpoint: selectedEndpoint,
       updatedAt: Date.now(),
       result,
       truncated,

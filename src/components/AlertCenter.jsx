@@ -5,9 +5,10 @@ import ActionQuickExec from './ActionQuickExec'
 import { usePolling } from '../hooks'
 import { fmtRaw } from '../format'
 import { openStockDetail } from '../detailStore'
-import { planStore, usePlanStore } from '../planStore'
+import { planStore, t1StatusOf, usePlanStore } from '../planStore'
 import { alertStore, useAlertStore, describeAlert, alertMeta } from '../alertStore'
 import { quantReportStore, useQuantReportStore } from '../quantReportStore'
+import { applyT1ToAlert } from '../../shared/t1AdvicePolicy.js'
 
 // ============ 预警中心：站内通知流 + 预警规则管理 + 量化每日汇报 ============
 export default function AlertCenter({ onClose }) {
@@ -95,6 +96,7 @@ export default function AlertCenter({ onClose }) {
               alerts.map((a) => {
                 const q = quote[a.code]
                 const m = alertMeta(a, q)
+                const t1View = applyT1ToAlert(a, t1StatusOf(a.code))
                 const showTrack = !a.triggeredAt && m.progress != null
                 return (
                 <div className={'alert-rule dir-' + m.dir + (a.enabled ? '' : ' off') + (m.near ? ' is-near' : '')} key={a.id}>
@@ -103,6 +105,7 @@ export default function AlertCenter({ onClose }) {
                       <StockName code={a.code} name={a.name} stopPropagation><span>{a.name || a.code}</span></StockName>
                       <span className="ar-code">{a.code}</span>
                       <span className="ar-dir">{m.dirLabel}</span>
+                      {t1View.t1Blocked && <span className="ar-badge t1">T+1锁定 · 今日不可卖</span>}
                       {q && <span className="ar-now">现 {fmtRaw(q.price)}</span>}
                       <span className="ar-jump" title="查看详情与K线"><Icon name="chevronRight" size={13} /></span>
                     </div>

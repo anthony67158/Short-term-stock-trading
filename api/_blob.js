@@ -136,3 +136,24 @@ export async function readJson(blobOrUrl) {
   }
   return null;
 }
+
+// 账号等关键数据使用严格读取：对象不存在返回 null，OSS 连接/鉴权/解析异常必须抛出，
+// 避免把存储故障误判成“账号不存在”。
+export async function readJsonStrict(blobOrPathname) {
+  const key = keyFromUrl(typeof blobOrPathname === 'string'
+    ? blobOrPathname
+    : (blobOrPathname && (blobOrPathname.pathname || blobOrPathname.url)));
+  const c = client();
+  if (!c) throw new Error('OSS 未配置');
+  if (!key) return null;
+  try {
+    const r = await c.get(key);
+    const content = r && r.content;
+    return content ? JSON.parse(content.toString('utf-8')) : null;
+  } catch (error) {
+    if (error && (error.status === 404 || error.code === 'NoSuchKey' || error.name === 'NoSuchKeyError')) {
+      return null;
+    }
+    throw error;
+  }
+}

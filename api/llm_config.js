@@ -8,8 +8,10 @@
 // 安全：apiKey 明文只在 verify/test/save 的【请求体入参】里出现，绝不写日志、绝不回传。
 
 import { applyCors, preflight } from './_lib.js';
-import { ensureConfig, currentConfig, saveConfig, publicView, ROLES } from './_llm_config.js';
-import { poolStatus, endpointCountForRole } from './_llm_pool.js';
+import {
+  ensureConfig, currentConfig, saveConfig, publicView, resolveJudgeEndpoint, ROLES,
+} from './_llm_config.js';
+import { poolStatus, endpointCountForRole, judgeEndpointStatus } from './_llm_pool.js';
 
 // 用一对 base/key 拉可用模型列表（OpenAI 兼容 GET /models）
 async function fetchModels(baseUrl, apiKey) {
@@ -76,13 +78,25 @@ export default async function handler(req, res) {
     const action = (body && body.action) || (req.query && req.query.action) || 'get';
 
     if (action === 'get') {
-      return res.status(200).send(JSON.stringify({ ok: true, config: publicView(), roles: ROLES, pool: poolStatus(currentConfig()), concurrency: endpointCountForRole(currentConfig(), 'advisor') }));
+      const config = currentConfig();
+      const roles = Object.fromEntries(Object.entries(ROLES).filter(([role]) => role !== 'judge'));
+      return res.status(200).send(JSON.stringify({
+        ok: true,
+        config: publicView(),
+        roles,
+        judgeRole: ROLES.judge,
+        pool: poolStatus(config),
+        judgePool: judgeEndpointStatus(config),
+        concurrency: endpointCountForRole(config, 'advisor'),
+      }));
     }
 
     // verify / test / save 都可能带明文 key；留空则用已存 key
     const cur = currentConfig();
-    const baseUrl = (body && body.baseUrl) || cur.baseUrl;
-    const apiKey = (body && body.apiKey) || cur.apiKey;
+    const judgeTarget = body && body.target === 'judge';
+    const judgeEndpoint = resolveJudgeEndpoint(cur);
+    const baseUrl = (body && body.baseUrl) || (judgeTarget ? judgeEndpoint?.baseUrl : cur.baseUrl);
+    const apiKey = (body && body.apiKey) || (judgeTarget ? judgeEndpoint?.apiKey : cur.apiKey);
 
     if (action === 'verify') {
       const r = await fetchModels(baseUrl, apiKey);
@@ -94,7 +108,9 @@ export default async function handler(req, res) {
 
     if (action === 'test') {
       const models = Array.isArray(body && body.models) ? body.models.filter(Boolean)
-        : Object.values((body && body.modelMap) || cur.models || {}).filter(Boolean);
+        : (judgeTarget
+          ? [judgeEndpoint?.model].filter(Boolean)
+          : Object.values((body && body.modelMap) || cur.models || {}).filter(Boolean));
       const uniq = [...new Set(models)];
       if (!uniq.length) return res.status(200).send(JSON.stringify({ ok: false, error: '没有要测试的模型' }));
       const results = await Promise.all(uniq.map((m) => pingModel(baseUrl, apiKey, m)));
@@ -102,14 +118,24 @@ export default async function handler(req, res) {
     }
 
     if (action === 'save') {
-      const saved = await saveConfig({
+      const patch = {
         baseUrl: body && body.baseUrl,
         apiKey: body && body.apiKey,     // 空则 saveConfig 内部保留原 key
         models: body && body.models,
         reasoning: body && body.reasoning,
         endpoints: body && body.endpoints,   // 多端点资源池(整组替换;掩码 key 不覆盖旧值)
-      });
-      return res.status(200).send(JSON.stringify({ ok: true, config: publicView(), source: saved.source, pool: poolStatus(currentConfig()) }));
+      };
+      if (body && Object.prototype.hasOwnProperty.call(body, 'judgeEndpoint')) {
+        patch.judgeEndpoint = body.judgeEndpoint;
+      }
+      const saved = await saveConfig(patch);
+      return res.status(200).send(JSON.stringify({
+        ok: true,
+        config: publicView(),
+        source: saved.source,
+        pool: poolStatus(currentConfig()),
+        judgePool: judgeEndpointStatus(currentConfig()),
+      }));
     }
 
     return res.status(200).send(JSON.stringify({ ok: false, error: '未知 action: ' + action }));

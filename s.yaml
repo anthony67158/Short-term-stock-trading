@@ -20,7 +20,7 @@ resources:
       timeout: 600                     # ai/agent/daily_report 走 SSE 长连接 + 慢模型(军师 V4-Pro 常 47s+)，放到 FC 上限 600s，杜绝平台侧强杀导致的"生成超时"
       instanceConcurrency: 20          # 单实例并发（Web 函数支持多请求复用实例，省成本）
       caPort: 9000                     # 与 server.js 监听端口一致（FC 也会用 FC_SERVER_PORT 注入）
-      code: ./                         # 上传当前目录（含 dist/ api/ server.js node_modules）
+      code: ./.fc-package              # npm run package:fc 生成的最小运行包
       customRuntimeConfig:
         command:
           - /var/fc/lang/nodejs20/bin/node
@@ -66,3 +66,9 @@ resources:
               - POST
               - PUT
               - OPTIONS
+        - triggerName: advice-resume-timer
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "@every 5m"
+            enable: true
+            payload: ${env('CRON_KEY')}

@@ -5,10 +5,12 @@ import ConfirmDialog from './ConfirmDialog'
 import ActionQuickExec from './ActionQuickExec'
 import { openStockDetail } from '../detailStore'
 import { usePolling } from '../hooks'
-import { planStore, usePlanStore } from '../planStore'
+import { planStore, t1StatusOf, usePlanStore } from '../planStore'
 import { alertStore, useAlertStore, describeAlert, alertMeta, ALERT_TYPES } from '../alertStore'
 import { fmtRaw } from '../format'
 import PushToggle from './PushToggle'
+import { judgeEffectStats } from '../../shared/confirmPolicy.js'
+import { applyT1ToAlert } from '../../shared/t1AdvicePolicy.js'
 
 // ============ 盯盘预警（内嵌面板，非弹窗）：规则管理 + 通知历史 ============
 export default function AlertPanel({ interval }) {
@@ -19,13 +21,15 @@ export default function AlertPanel({ interval }) {
   const [delTarget, setDelTarget] = useState(null)
   const [delBatch, setDelBatch] = useState(null)
   const alerts = book.alerts || []
-  const activeCnt = alerts.filter((a) => a.enabled && !a.triggeredAt).length
+  const visibleAlerts = alerts.filter((alert) => alert.phase !== 'superseded')
+  const activeCnt = visibleAlerts.filter((a) => a.enabled && !a.triggeredAt).length
   // 分组:手动预警 vs AI 自动预警(planId=持仓止盈止损 / candCode=自选买点 / actCode=补仓减仓行动点)
-  const manualAlerts = alerts.filter((a) => !a.planId && !a.candCode && !a.actCode)
-  const autoAlerts = alerts.filter((a) => a.planId || a.candCode || a.actCode)
-  const triggeredAlerts = alerts.filter((a) => a.triggeredAt)
+  const manualAlerts = visibleAlerts.filter((a) => !a.planId && !a.candCode && !a.actCode)
+  const autoAlerts = visibleAlerts.filter((a) => a.planId || a.candCode || a.actCode)
+  const triggeredAlerts = visibleAlerts.filter((a) => a.triggeredAt)
   const aiAutoOn = (book.settings || {}).aiAutoAlert !== false
   const smartConfirmOn = (book.settings || {}).smartConfirm !== false
+  const judgeStats = judgeEffectStats([...alerts, ...(book.decisionLog || [])])
 
   // 候选：自选 + 持仓（去重），供新增预警选择
   const cands = useMemo(() => {
@@ -60,6 +64,19 @@ export default function AlertPanel({ interval }) {
       {/* 系统级 Web Push：关页面/锁屏也能收到（含 iOS 引导） */}
       <PushToggle />
 
+      <div className="judge-effect">
+        <div>
+          <span className="judge-effect-k">LLM Judge 实测</span>
+          <b>{judgeStats.evaluated ? `${judgeStats.winRate}%` : '样本积累中'}</b>
+        </div>
+        <span>
+          已强提示 {judgeStats.confirmed} 次 · 已评估 {judgeStats.evaluated} 次
+          {judgeStats.avgDirectionalPct != null
+            ? ` · 平均方向收益 ${judgeStats.avgDirectionalPct >= 0 ? '+' : ''}${judgeStats.avgDirectionalPct}%`
+            : ' · 强提示后自动跟踪5/15/30分钟'}
+        </span>
+      </div>
+
       {/* 新增预警表单 */}
       {adding && (
         <div className="alert-add-wrap">
@@ -70,13 +87,13 @@ export default function AlertPanel({ interval }) {
       )}
 
       <div className="tabs" style={{ margin: '4px 18px 8px' }}>
-        <div className={'tab' + (tab === 'rules' ? ' active' : '')} onClick={() => setTab('rules')}>规则 {alerts.length > 0 && `(${alerts.length})`}</div>
+        <div className={'tab' + (tab === 'rules' ? ' active' : '')} onClick={() => setTab('rules')}>规则 {visibleAlerts.length > 0 && `(${visibleAlerts.length})`}</div>
         <div className={'tab' + (tab === 'notif' ? ' active' : '')} onClick={() => setTab('notif')}>命中记录 {notifications.length > 0 && `(${notifications.length})`}</div>
       </div>
 
       <div className="alert-body-inline">
         {tab === 'rules' ? (
-          alerts.length === 0 ? (
+          visibleAlerts.length === 0 ? (
             <div className="empty">还没有预警规则。点右上「新增预警」，或在自选/持仓卡片、个股详情里点「设预警」添加。</div>
           ) : (
             <>
@@ -172,6 +189,7 @@ export default function AlertPanel({ interval }) {
 
 // 单条预警规则行（手动/AI 自动共用）
 function renderRule(a, quote, setDelTarget, holding) {
+  const t1View = applyT1ToAlert(a, t1StatusOf(a.code))
   const isAuto = !!(a.planId || a.candCode || a.actCode)
   const q = quote[a.code]
   const m = alertMeta(a, q)
@@ -184,6 +202,7 @@ function renderRule(a, quote, setDelTarget, holding) {
           <span className="ar-code">{a.code}</span>
           <span className="ar-dir">{m.dirLabel}</span>
           {isAuto && <span className="ar-badge">AI</span>}
+          {t1View.t1Blocked && <span className="ar-badge t1">T+1锁定 · 今日不可卖</span>}
           {a.phase === 'watching' && <span className="ar-badge watching">观察确认中</span>}
           {q && <span className="ar-now">现 {fmtRaw(q.price)}</span>}
           <span className="ar-jump" title="查看详情与K线"><Icon name="chevronRight" size={13} /></span>

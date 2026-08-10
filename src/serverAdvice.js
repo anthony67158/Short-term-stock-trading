@@ -8,6 +8,57 @@
 import { api } from './apiBase'
 import { authStore } from './authStore'
 
+let statusTimer = null
+let statusPulling = false
+let statusConsumer = null
+let statusFastUntil = 0
+
+export async function fetchServerAdviceStatus() {
+  let creds = null
+  try { creds = authStore.getCreds && authStore.getCreds() } catch { creds = null }
+  if (!creds || !creds.nick || statusPulling) return null
+  statusPulling = true
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 8000)
+  try {
+    const response = await fetch(api('/api/cron_advice'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ op: 'status', nick: creds.nick, pw: creds.pw }),
+      signal: controller.signal,
+    })
+    const data = await response.json()
+    return data && data.ok ? data.progress : null
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timeout)
+    statusPulling = false
+  }
+}
+
+async function statusTick() {
+  const progress = await fetchServerAdviceStatus()
+  if (progress && statusConsumer) {
+    try { statusConsumer(progress) } catch { /* ignore */ }
+  }
+  const fast = (progress && progress.running) || Date.now() < statusFastUntil
+  statusTimer = setTimeout(statusTick, fast ? 2000 : 15000)
+}
+
+export function startServerAdviceStatusSync(consumer) {
+  if (typeof consumer === 'function') statusConsumer = consumer
+  if (typeof window === 'undefined' || statusTimer) return
+  statusTimer = setTimeout(statusTick, 0)
+}
+
+export function kickServerAdviceStatusSync() {
+  if (typeof window === 'undefined') return
+  statusFastUntil = Date.now() + 30000
+  if (statusTimer) clearTimeout(statusTimer)
+  statusTimer = setTimeout(statusTick, 0)
+}
+
 // 触发服务端生成。codes=要生成的股票代码数组;成功发出返回 true,无登录态/空列表返回 false。
 export function triggerServerAdvice(codes, { scope = 'all', force = true } = {}) {
   let creds = null
@@ -22,6 +73,7 @@ export function triggerServerAdvice(codes, { scope = 'all', force = true } = {})
       body: JSON.stringify({ ondemand: true, codes: list, nick: creds.nick, pw: creds.pw, scope, force }),
       keepalive: true,   // 页面切后台/关闭也已送达服务端,服务端照跑完
     }).catch(() => { /* 结果靠云端轮询,忽略网络层错误 */ })
+    kickServerAdviceStatusSync()
     return true
   } catch { return false }
 }

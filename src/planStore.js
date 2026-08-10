@@ -1,5 +1,9 @@
 import { useSyncExternalStore } from 'react'
-import { getAdvice, getAllAdvice, setAllAdvice, mergeAdvice, registerAdviceSync } from './adviceCache'
+import { getAdvice, getAllAdvice, setAllAdvice, mergeAdvice, registerAdviceSync } from './adviceCache.js'
+import { computeSellAllowance } from '../shared/decisionGuards.js'
+import { appendExecution, createRecommendation, decisionLedgerStats, removeExecutions } from '../shared/decisionLedger.js'
+import { proposalAlertSpec, sanitizeTradeProposal } from '../shared/tradeProposal.js'
+import { applyT1ToAlert } from '../shared/t1AdvicePolicy.js'
 // 注意:adviceBatch 只在 mergeCloud 运行时用到,这里【不能】做顶层静态 import——
 // 否则 planStore→adviceBatch→adviceRunner→serverAdvice→authStore 形成模块初始化环,
 // 而 authStore 顶层会调用 planStore.registerSaver(),此时 planStore 尚未初始化 → 整包崩(白屏卡启动)。
@@ -128,7 +132,7 @@ function normalizeClosed(closed) {
   })
 }
 
-let state = { plan: [], holding: [], closed: [], account: null, alerts: [], reviews: {}, adviceLog: [], settings: {} }
+let state = { plan: [], holding: [], closed: [], account: null, alerts: [], reviews: {}, adviceLog: [], decisionLog: [], settings: {} }
 const listeners = new Set()
 
 // ===== 撤销栈：交易类操作前存快照，支持一步步撤回 =====
@@ -142,7 +146,7 @@ function snapshot(label) {
       at: Date.now(),
       data: JSON.parse(JSON.stringify({
         plan: state.plan, holding: state.holding, closed: state.closed,
-        account: state.account, alerts: state.alerts, reviews: state.reviews, adviceLog: state.adviceLog,
+        account: state.account, alerts: state.alerts, reviews: state.reviews, adviceLog: state.adviceLog, decisionLog: state.decisionLog,
       })),
     })
     if (_undoStack.length > UNDO_LIMIT) _undoStack.shift()
@@ -158,7 +162,7 @@ function scheduleSave() {
   if (_saveTimer) clearTimeout(_saveTimer)
   _saveTimer = setTimeout(() => {
     _saveTimer = null
-    _saver({ plan: state.plan, holding: state.holding, closed: state.closed, account: state.account, alerts: state.alerts, reviews: state.reviews, adviceLog: state.adviceLog, advice: getAllAdvice(), settings: state.settings || {} })
+    _saver({ plan: state.plan, holding: state.holding, closed: state.closed, account: state.account, alerts: state.alerts, reviews: state.reviews, adviceLog: state.adviceLog, decisionLog: state.decisionLog, advice: getAllAdvice(), settings: state.settings || {} })
   }, 800)
 }
 // 立即落盘(不等 800ms 防抖):页面隐藏/关闭前把待写数据抢存一次,避免"改完立刻切走/关页 → 800ms 内没保存到云端"丢数据。
@@ -167,7 +171,7 @@ function flushSave() {
   if (!_saveTimer) return   // 没有待写任务(数据已存过) → 无需重复保存
   clearTimeout(_saveTimer); _saveTimer = null
   try {
-    _saver({ plan: state.plan, holding: state.holding, closed: state.closed, account: state.account, alerts: state.alerts, reviews: state.reviews, adviceLog: state.adviceLog, advice: getAllAdvice(), settings: state.settings || {} })
+    _saver({ plan: state.plan, holding: state.holding, closed: state.closed, account: state.account, alerts: state.alerts, reviews: state.reviews, adviceLog: state.adviceLog, decisionLog: state.decisionLog, advice: getAllAdvice(), settings: state.settings || {} })
   } catch { /* ignore */ }
 }
 // 浏览器环境:页面切后台(visibilitychange→hidden)或即将卸载(pagehide/beforeunload)时,抢存一次待写数据。
@@ -247,14 +251,19 @@ export const planStore = {
   // 由 authStore 登录/登出时注入数据（不触发回存云端，避免刚拉就写回）
   setData(d) {
     _suspend = true
+    const holding = Array.isArray(d && d.holding) ? d.holding : []
+    const heldCodes = new Set(holding.map((item) => String(item && item.code || '')).filter(Boolean))
+    const plan = (Array.isArray(d && d.plan) ? d.plan : [])
+      .filter((item) => !heldCodes.has(String(item && item.code || '')))
     state = {
-      plan: (d && d.plan) || [],
-      holding: (d && d.holding) || [],
-      closed: normalizeClosed((d && d.closed) || []),
+      plan,
+      holding,
+      closed: normalizeClosed(Array.isArray(d && d.closed) ? d.closed : []),
       account: (d && d.account) || null,   // { totalAssets, cash, goal, updatedAt }
-      alerts: (d && d.alerts) || [],        // 预警规则集
+      alerts: Array.isArray(d && d.alerts) ? d.alerts : [],        // 预警规则集
       reviews: (d && d.reviews) || {},      // 复盘结论：key=code → { code,name,at,session(noon/close/manual),text,... }
-      adviceLog: (d && d.adviceLog) || [],  // AI建议决策记录：{id,code,name,mode,at,action,entry,stop,target,trust,resonance,verified,hit,...}
+      adviceLog: Array.isArray(d && d.adviceLog) ? d.adviceLog : [],  // AI建议决策记录：{id,code,name,mode,at,action,entry,stop,target,trust,resonance,verified,hit,...}
+      decisionLog: Array.isArray(d && d.decisionLog) ? d.decisionLog : [], // 建议与真实执行分离的事件账本
       settings: (d && d.settings) || {},    // 跨设备同步的个性化设置(如 AI 每日精选/自动开关等)
     }
     // AI 操作建议【结果】跨设备回灌：用云端数据整体覆盖本地建议缓存(登出/空账号→清空)
@@ -290,7 +299,24 @@ export const planStore = {
         changed = true
       }
     }
-    // 3) 预警「已触发」状态回灌(按 id):cron_alert 在服务端(关页面时)命中并推送后,会把该
+    // 3) 决策事件按 id 合并；同一建议的 executed 状态以较新的云端事件为准。
+    if (Array.isArray(d.decisionLog) && d.decisionLog.length) {
+      const merged = new Map((state.decisionLog || []).filter((x) => x && x.id).map((x) => [x.id, x]))
+      let touched = false
+      for (const event of d.decisionLog) {
+        if (!event || !event.id) continue
+        const current = merged.get(event.id)
+        if (!current || (event.executedAt || event.at || 0) > (current.executedAt || current.at || 0)) {
+          merged.set(event.id, event)
+          touched = true
+        }
+      }
+      if (touched) {
+        state = { ...state, decisionLog: [...merged.values()].sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 1000) }
+        changed = true
+      }
+    }
+    // 4) 预警「已触发」状态回灌(按 id):cron_alert 在服务端(关页面时)命中并推送后,会把该
     //    规则标记 triggeredAt/enabled:false 存回云端。这里只把「服务端已触发」并回本地——
     //    ① 让前端「命中记录/规则」显示一致;② 避免前端仍当它监控中而重复响铃/重复推送。
     //    只迁移 triggered 状态,绝不新增/删除规则(规则增删仍由用户在本机操作,防跨设备误删复活)。
@@ -300,15 +326,57 @@ export const planStore = {
       const next = state.alerts.map((a) => {
         const c = cloudById.get(a.id)
         if (!c) return a
-        // ① 服务端已确认命中(强提示已发)→ 迁移 triggered + confirmed 态,避免本地重复响铃
-        if (c.triggeredAt && !a.triggeredAt) {
+        if (c.phase === 'superseded' && a.phase !== 'superseded') {
           touched = true
-          return { ...a, triggeredAt: c.triggeredAt, triggeredMsg: c.triggeredMsg || a.triggeredMsg || '', enabled: false, phase: c.phase || a.phase }
+          return { ...a, enabled: false, phase: 'superseded', supersededBy: c.supersededBy, triggeredMsg: c.triggeredMsg || a.triggeredMsg }
+        }
+        // ① 服务端已确认命中(强提示已发)→ 迁移 triggered + confirmed 态,避免本地重复响铃
+        if (c.triggeredAt) {
+          const patch = {
+            triggeredAt: c.triggeredAt,
+            triggeredMsg: c.triggeredMsg || a.triggeredMsg || '',
+            enabled: false,
+            phase: c.phase || a.phase,
+            decisionPrice: c.decisionPrice ?? a.decisionPrice,
+            decisionSide: c.decisionSide || a.decisionSide,
+            judgeOutcomes: c.judgeOutcomes || a.judgeOutcomes || {},
+            lastJudgeAt: c.lastJudgeAt || a.lastJudgeAt,
+            lastJudgeDecision: c.lastJudgeDecision || a.lastJudgeDecision,
+            lastJudgeConfidence: c.lastJudgeConfidence ?? a.lastJudgeConfidence,
+            lastJudgePolicy: c.lastJudgePolicy || a.lastJudgePolicy,
+            judgeCount: Math.max(Number(c.judgeCount) || 0, Number(a.judgeCount) || 0),
+          }
+          if (JSON.stringify(patch) !== JSON.stringify({
+            triggeredAt: a.triggeredAt,
+            triggeredMsg: a.triggeredMsg || '',
+            enabled: a.enabled,
+            phase: a.phase,
+            decisionPrice: a.decisionPrice,
+            decisionSide: a.decisionSide,
+            judgeOutcomes: a.judgeOutcomes || {},
+            lastJudgeAt: a.lastJudgeAt,
+            lastJudgeDecision: a.lastJudgeDecision,
+            lastJudgeConfidence: a.lastJudgeConfidence,
+            lastJudgePolicy: a.lastJudgePolicy,
+            judgeCount: Number(a.judgeCount) || 0,
+          })) touched = true
+          return { ...a, ...patch }
         }
         // ② 服务端已进入「观察确认中」(弱提醒已发)→ 迁移 watching 态,本地据此显示"确认中"而非继续当作未到价
         if (c.phase === 'watching' && a.phase !== 'watching' && a.phase !== 'confirmed' && !a.triggeredAt) {
           touched = true
-          return { ...a, phase: 'watching', watchingAt: c.watchingAt || Date.now(), watchingMsg: c.watchingMsg || a.watchingMsg || '' }
+          return {
+            ...a,
+            phase: 'watching',
+            watchingAt: c.watchingAt || Date.now(),
+            watchingPrice: c.watchingPrice ?? a.watchingPrice,
+            watchingMsg: c.watchingMsg || a.watchingMsg || '',
+            lastJudgeAt: c.lastJudgeAt || a.lastJudgeAt,
+            lastJudgeDecision: c.lastJudgeDecision || a.lastJudgeDecision,
+            lastJudgeConfidence: c.lastJudgeConfidence ?? a.lastJudgeConfidence,
+            lastJudgePolicy: c.lastJudgePolicy || a.lastJudgePolicy,
+            judgeCount: Math.max(Number(c.judgeCount) || 0, Number(a.judgeCount) || 0),
+          }
         }
         return a
       })
@@ -401,7 +469,9 @@ export const planStore = {
       ...(ap ? { tp: ap.tp, sl: ap.sl, tpManual: false, slManual: false } : {}),
     }]
     // 记录一条纯买入交易流水
-    state.closed = [makeBuyTxn(p.code, p.name, price, q, fee, hid), ...state.closed].slice(0, 300)
+    const txn = makeBuyTxn(p.code, p.name, price, q, fee, hid)
+    state.closed = [txn, ...state.closed].slice(0, 300)
+    this._recordExecution({ code: p.code, name: p.name, side: 'buy', price, qty: q, transactionId: txn.id })
     this._syncPlanAlerts(hid)
     emit()
   },
@@ -422,17 +492,24 @@ export const planStore = {
     }]
     state.plan = state.plan.filter((x) => x.code !== stock.code)
     state.alerts = (state.alerts || []).filter((a) => a.candCode !== stock.code) // 已买入 → 移除买点预警
-    state.closed = [makeBuyTxn(stock.code, stock.name, price, q, fee, hid), ...state.closed].slice(0, 300)
+    const txn = makeBuyTxn(stock.code, stock.name, price, q, fee, hid)
+    state.closed = [txn, ...state.closed].slice(0, 300)
+    this._recordExecution({ code: stock.code, name: stock.name, side: 'buy', price, qty: q, transactionId: txn.id })
     this._syncPlanAlerts(hid)
     emit()
   },
 
   // 持仓 → 平仓（按持仓笔 id 卖出，支持部分卖出）
-  sell(id, sellPrice, sellQty) {
+  sell(id, sellPrice, sellQty, opts = {}) {
     const h = state.holding.find((x) => x.id === id)
-    if (!h) return
-    const sq = Math.min(Number(sellQty) || h.qty, h.qty) // 卖出手数，不超过该笔持仓
-    if (sq <= 0) return
+    if (!h) return { ok: false, error: '持仓不存在或已被删除' }
+    const requested = Math.min(Number(sellQty) || h.qty, h.qty)
+    const t1 = t1StatusOf(h.code)
+    const allowance = computeSellAllowance(requested, t1.sellableToday)
+    if (!allowance.ok) {
+      return { ok: false, error: `今日买入 ${t1.boughtToday} 手仍受 T+1 锁定，当前没有可卖仓位` }
+    }
+    const sq = allowance.allowed
     snapshot(`${sq >= h.qty ? '清仓' : '减仓'} ${h.name || h.code}`)
     const price = Number(sellPrice)
     const shares = sq * 100
@@ -458,9 +535,10 @@ export const planStore = {
       state.holding = state.holding.map((x) => x.id === id
         ? { ...x, qty: remainQty, buyFee: +((h.buyFee || 0) * (remainQty / h.qty)).toFixed(2) }
         : x)
+      state.plan = state.plan.filter((item) => String(item.code) !== String(h.code))
     }
 
-    state.closed = [{
+    const sellTxn = {
       id: uid(), batchId, type: 'SELL', kind: 'SELL', code: h.code, name: h.name,
       side: 'sell', qty: sq, price, amount: +proceeds.toFixed(2),
       fee: sellFee, cashFlow: +(proceeds - sellFee).toFixed(2), // 卖出=现金流入
@@ -469,12 +547,20 @@ export const planStore = {
       buyPrice: h.buyPrice, sellPrice: price, buyFee: buyFeePart, sellFee,
       grossPnl: +grossPnl.toFixed(2), netPnl, pnlPct,
       buyAt: h.buyAt, sellAt: Date.now(), at: Date.now(),
-    }, ...archived, ...state.closed].slice(0, 300)
+    }
+    state.closed = [sellTxn, ...archived, ...state.closed].slice(0, 300)
+    this._recordExecution({ code: h.code, name: h.name, side: 'sell', price, qty: sq, source: opts.source, transactionId: sellTxn.id })
     emit()
+    return {
+      ok: true,
+      qty: sq,
+      adjusted: sq < Number(sellQty),
+      message: sq < Number(sellQty) ? `受 T+1 限制，本次仅记录卖出 ${sq} 手` : '',
+    }
   },
 
   // 加仓：对已有持仓追加买入，按加权平均更新成本价，并记一条 BUY 流水
-  addToHolding(id, addPrice, addQty) {
+  addToHolding(id, addPrice, addQty, opts = {}) {
     const h = state.holding.find((x) => x.id === id)
     if (!h) return
     const q = Number(addQty) || 0
@@ -490,7 +576,9 @@ export const planStore = {
       ? { ...x, qty: newQty, buyPrice: newAvg, buyFee: +((x.buyFee || 0) + addFee).toFixed(2) }
       : x)
     // 记一条买入交易流水
-    state.closed = [makeBuyTxn(h.code, h.name, price, q, addFee, id), ...state.closed].slice(0, 300)
+    const txn = makeBuyTxn(h.code, h.name, price, q, addFee, id)
+    state.closed = [txn, ...state.closed].slice(0, 300)
+    this._recordExecution({ code: h.code, name: h.name, side: 'buy', price, qty: q, source: opts.source, transactionId: txn.id })
     emit()
   },
 
@@ -510,6 +598,7 @@ export const planStore = {
           sellPrice: p, buyPrice: opts.costPrice ?? null, sellFee: fee, at: Date.now(), sellAt: Date.now(),
         }
     state.closed = [rec, ...state.closed].slice(0, 300)
+    this._recordExecution({ code: stock.code, name: stock.name, side: type === 'BUY' ? 'buy' : 'sell', price: p, qty: q, source: opts.source, transactionId: rec.id })
     emit()
   },
 
@@ -521,7 +610,12 @@ export const planStore = {
     if (archived.length) state.closed = [...archived, ...state.closed].slice(0, 300)
     state.holding = state.holding.filter((x) => x.id !== id); emit()
   },
-  clearClosed() { snapshot('清空交易记录'); state.closed = []; emit() },
+  clearClosed() {
+    snapshot('清空交易记录')
+    state.decisionLog = removeExecutions(state.decisionLog, state.closed.map((x) => x && x.id))
+    state.closed = []
+    emit()
+  },
   // 删除单条交易记录：连带删除同一次操作(同 batchId)产生的其他记录；
   // 并联动调整持仓手数/成本，保证「持仓」与「交易记录」始终对得上。
   removeClosed(id) {
@@ -544,6 +638,7 @@ export const planStore = {
 
     // 先移除记录
     state.closed = state.closed.filter((x) => !delIds.has(x.id))
+    state.decisionLog = removeExecutions(state.decisionLog, [...delIds])
 
     // 再联动持仓
     for (const [code, delta] of Object.entries(deltaByCode)) {
@@ -605,10 +700,19 @@ export const planStore = {
   // side='buy'(低吸/买回) | 'sell'(高抛/卖出)
   addTFlow(id, side, price, qty) {
     const h = state.holding.find((x) => x.id === id)
-    if (!h) return
-    const q = Number(qty) || 1
+    if (!h) return { ok: false, error: '持仓不存在或已被删除' }
+    const requested = Number(qty) || 1
     const p = Number(price)
-    if (q <= 0 || !p) return
+    if (requested <= 0 || !p) return { ok: false, error: '请输入有效的价格和手数' }
+    let q = requested
+    if (side === 'sell') {
+      const t1 = t1StatusOf(h.code)
+      const allowance = computeSellAllowance(requested, t1.sellableToday)
+      if (!allowance.ok) {
+        return { ok: false, error: `今日买入 ${t1.boughtToday} 手仍受 T+1 锁定，当前不能记录卖出腿` }
+      }
+      q = allowance.allowed
+    }
     snapshot(`做T ${side === 'buy' ? '低吸' : '高抛'} ${h.name || h.code}`)
     const amount = p * q * 100
     const fee = side === 'buy' ? calcBuyFee(amount) : calcSellFee(amount)
@@ -618,6 +722,12 @@ export const planStore = {
       ? { ...x, baseQty, tFlows: [...(x.tFlows || []), flow] }
       : x)
     emit()
+    return {
+      ok: true,
+      qty: q,
+      adjusted: q < requested,
+      message: q < requested ? `受 T+1 限制，本次卖出腿仅记录 ${q} 手` : '',
+    }
   },
   // 删除某笔做T流水（持仓上的收益/成本自动重算）
   removeTFlow(id, flowId) {
@@ -630,14 +740,33 @@ export const planStore = {
   // 编辑某笔做T流水（改方向/价格/手数，手续费按新值重算）
   editTFlow(id, flowId, { side, price, qty }) {
     const p = Number(price), q = Number(qty)
-    if (!p || !(q > 0)) return
+    if (!p || !(q > 0)) return { ok: false, error: '请输入有效的价格和手数' }
+    const h = state.holding.find((x) => x.id === id)
+    const oldFlow = h && (h.tFlows || []).find((f) => f.id === flowId)
+    if (!h || !oldFlow) return { ok: false, error: '做T流水不存在或已被删除' }
+    let finalQty = q
+    if (side === 'sell') {
+      const t1 = t1StatusOf(h.code)
+      const released = oldFlow.side === 'sell' ? Number(oldFlow.qty) || 0 : 0
+      const allowance = computeSellAllowance(q, t1.sellableToday + released)
+      if (!allowance.ok) {
+        return { ok: false, error: `今日买入 ${t1.boughtToday} 手仍受 T+1 锁定，当前不能改成卖出腿` }
+      }
+      finalQty = allowance.allowed
+    }
     snapshot('编辑做T流水')
-    const amount = p * q * 100
+    const amount = p * finalQty * 100
     const fee = side === 'buy' ? calcBuyFee(amount) : calcSellFee(amount)
     state.holding = state.holding.map((x) => x.id === id
-      ? { ...x, tFlows: (x.tFlows || []).map((f) => f.id === flowId ? { ...f, side, price: p, qty: q, fee } : f) }
+      ? { ...x, tFlows: (x.tFlows || []).map((f) => f.id === flowId ? { ...f, side, price: p, qty: finalQty, fee } : f) }
       : x)
     emit()
+    return {
+      ok: true,
+      qty: finalQty,
+      adjusted: finalQty < q,
+      message: finalQty < q ? `受 T+1 限制，本次卖出腿仅保留 ${finalQty} 手` : '',
+    }
   },
 
   // 结算做T：把该笔持仓的做T流水固化进交易记录（配对差价=做T；净买入=加仓；净卖出=减仓/清仓），
@@ -749,8 +878,8 @@ export const planStore = {
   // 注意:此处不 emit,由调用方(sell/settleTFlows/autoSettleTFlows)统一 emit。
   _backToPlan(h) {
     if (!h || !h.code) return
-    if (state.holding.some((x) => x.code === h.code)) return // 同股还有别的持仓笔 → 不回归
-    if (state.plan.some((x) => x.code === h.code)) return    // 自选已存在 → 不重复
+    if (state.holding.some((x) => String(x.code) === String(h.code))) return // 同股还有别的持仓笔 → 不回归
+    if (state.plan.some((x) => String(x.code) === String(h.code))) return    // 自选已存在 → 不重复
     state.plan = [...state.plan, {
       code: h.code, name: h.name, note: '清仓后回归盯盘', addedAt: Date.now(),
       ...(h.qScore != null ? { qScore: h.qScore, qBias: h.qBias, qAt: h.qAt } : {}),
@@ -773,17 +902,21 @@ export const planStore = {
     const old = (state.alerts || []).filter((a) => a.planId === id)
     const rest = (state.alerts || []).filter((a) => a.planId !== id)
     const rebuilt = []
+    const t1 = t1StatusOf(h.code)
     const build = (op, value, note, muted) => {
       if (muted) return                                  // 用户删过 → 永久不再生成
       if (value == null) return
       const v = Number(value)
       const prev = old.find((a) => a.op === op)
-      if (prev && Number(prev.value) === v) { rebuilt.push(prev); return } // 价没变 → 原样保留触发态(含 phase)
-      rebuilt.push({
+      if (prev && Number(prev.value) === v) {
+        rebuilt.push(applyT1ToAlert(prev, t1))
+        return
+      }
+      rebuilt.push(applyT1ToAlert({
         id: uid(), enabled: true, createdAt: Date.now(), triggeredAt: null, triggeredMsg: '',
         code: h.code, name: h.name, type: 'price', op, value: v, note, planId: id,
         phase: 'armed', // 智能确认:到价先弱提醒(watching)、确认到真时机才强提示(confirmed)
-      })
+      }, t1))
     }
     build('gte', h.tp, '止盈', h.muteTp)
     build('lte', h.sl, '止损', h.muteSl)
@@ -793,6 +926,69 @@ export const planStore = {
   setCandPlan(code, plan) {
     state.plan = state.plan.map((x) => x.code === code ? { ...x, ...plan } : x)
     emit()
+  },
+  applyAssistantProposal(rawProposal) {
+    let proposal = sanitizeTradeProposal(rawProposal, rawProposal?.evidenceIds)
+    if (!proposal) return { ok: false, error: '提案字段无效，未写入账本' }
+    if (!proposal.evidenceIds.length) return { ok: false, error: '提案缺少数据证据，未写入账本' }
+    const alreadyApplied = (state.decisionLog || []).some((event) =>
+      event && event.kind === 'plan' && event.proposalId === proposal.id
+    )
+    if (alreadyApplied) return { ok: true, alreadyApplied: true }
+    const holder = state.holding.find((item) => item.code === proposal.code)
+    if (['add', 'reduce', 'sell'].includes(proposal.action) && !holder) {
+      return { ok: false, error: '当前未持有该股，不能建立加仓或卖出计划' }
+    }
+    if (holder && ['reduce', 'sell'].includes(proposal.action)) {
+      const sellable = t1StatusOf(proposal.code).sellableToday
+      if (!(sellable > 0)) return { ok: false, error: '当前没有可卖仓位，提案未写入' }
+      if (proposal.qty != null && proposal.qty > sellable) {
+        return { ok: false, error: `计划 ${proposal.qty} 手超过今日可卖 ${sellable} 手，提案未写入` }
+      }
+    }
+    const alert = proposalAlertSpec(proposal)
+    if (!alert) return { ok: false, error: '提案无法生成有效预警' }
+    snapshot(`确认助手提案 ${proposal.name}`)
+    if (holder) {
+      state.holding = state.holding.map((item) => item.id === holder.id ? {
+        ...item,
+        ...(proposal.targetPrice != null ? { tp: proposal.targetPrice, tpManual: true } : {}),
+        ...(proposal.stopPrice != null ? { sl: proposal.stopPrice, slManual: true } : {}),
+        planReason: proposal.reason || item.planReason,
+        reasonManual: true,
+      } : item)
+      this._syncPlanAlerts(holder.id)
+    } else {
+      if (!state.plan.some((item) => item.code === proposal.code)) {
+        state.plan = [...state.plan, { code: proposal.code, name: proposal.name, addedAt: Date.now() }]
+      }
+      state.plan = state.plan.map((item) => item.code === proposal.code ? {
+        ...item,
+        targetPrice: proposal.entryPrice,
+        targetManual: true,
+        ...(proposal.targetPrice != null ? { tp: proposal.targetPrice } : {}),
+        ...(proposal.stopPrice != null ? { sl: proposal.stopPrice } : {}),
+        planReason: proposal.reason,
+        buyQty: proposal.qty || item.buyQty,
+        qtyManual: proposal.qty != null ? true : item.qtyManual,
+        assistantProposalId: proposal.id,
+      } : item)
+    }
+    if (!(state.alerts || []).some((item) => item.proposalId === proposal.id)) {
+      state.alerts = [{
+        id: uid(), enabled: true, createdAt: Date.now(), triggeredAt: null, triggeredMsg: '',
+        ...alert, timing: proposal.confirmSignal, opQty: proposal.qty ? `${proposal.qty}手` : '',
+        evidenceIds: proposal.evidenceIds,
+      }, ...(state.alerts || [])]
+    }
+    state.decisionLog = [{
+      id: `plan_${proposal.id}`, kind: 'plan', proposalId: proposal.id,
+      code: proposal.code, name: proposal.name, action: proposal.action,
+      entryPrice: proposal.entryPrice, qty: proposal.qty || null,
+      evidenceIds: proposal.evidenceIds, source: 'assistant', at: Date.now(),
+    }, ...(state.decisionLog || [])].slice(0, 1000)
+    emit()
+    return { ok: true, proposal }
   },
   // 给某笔持仓回写附加元信息(如行业 industry，用于持仓区板块分类)——非结构性字段，不影响成本/手数。
   setHoldingMeta(id, meta) {
@@ -861,6 +1057,7 @@ export const planStore = {
     // opQty 是「补1手/减1手」这类操作量标签;actionPlan/exitTiming 给「到价后怎么确认」
     const opQty = adv.opQty || ''
     const timing = adv.exitTiming || adv.actionPlan || ''
+    const t1 = holder ? t1StatusOf(code) : null
     const old = (state.alerts || []).filter((a) => a.actCode === code)
     const rebuilt = []
     const build = (kind, op, price, muted) => {
@@ -870,13 +1067,16 @@ export const planStore = {
       if (v == null || !(Number(v) > 0)) return
       const note = kind === 'add' ? '补仓点' : '减仓点'
       const prev = old.find((a) => a.actKind === kind)
-      if (prev && Number(prev.value) === Number(v)) { rebuilt.push(prev); return } // 价没变 → 原样保留触发态(含 phase)
-      rebuilt.push({
+      if (prev && Number(prev.value) === Number(v)) {
+        rebuilt.push(applyT1ToAlert({ ...prev, opQty, timing }, kind === 'reduce' ? t1 : null))
+        return
+      }
+      rebuilt.push(applyT1ToAlert({
         id: uid(), enabled: true, createdAt: Date.now(), triggeredAt: null, triggeredMsg: '',
         code, name, type: 'price', op, value: Number(v), note,
         actCode: code, actKind: kind, opQty, timing,
         phase: 'armed',
-      })
+      }, kind === 'reduce' ? t1 : null))
     }
     build('add', 'lte', adv.addPrice, owner.muteAdd)
     build('reduce', 'gte', adv.reducePrice, owner.muteReduce)
@@ -968,21 +1168,82 @@ export const planStore = {
   // 重新武装预警（用户手动重启）
   rearmAlert(id) {
     state.alerts = (state.alerts || []).map((x) => x.id === id
-      ? { ...x, enabled: true, triggeredAt: null, triggeredMsg: '', phase: x.phase ? 'armed' : x.phase } : x)
+      ? {
+          ...x,
+          enabled: true,
+          triggeredAt: null,
+          triggeredMsg: '',
+          rearmedAt: Date.now(),
+          phase: x.phase ? 'armed' : x.phase,
+          watchingAt: null,
+          watchingPrice: null,
+          watchingMsg: '',
+          lastJudgeAt: null,
+          lastJudgeDecision: null,
+          lastJudgeConfidence: null,
+          lastJudgePolicy: null,
+          lastJudgePrice: null,
+          judgeOutcomes: {},
+        } : x)
     emit()
   },
   // 智能确认闸门:进入「观察确认中」——到价发弱提醒后置 watching(不停用、继续监控真正时机)
-  markAlertWatching(id, msg) {
+  markAlertWatching(id, msg, price = null) {
     state.alerts = (state.alerts || []).map((x) => x.id === id && x.phase !== 'watching' && x.phase !== 'confirmed'
-      ? { ...x, phase: 'watching', watchingAt: Date.now(), watchingMsg: msg || x.watchingMsg || '' }
+      ? { ...x, phase: 'watching', watchingAt: Date.now(), watchingPrice: Number(price) || null, watchingMsg: msg || x.watchingMsg || '' }
+      : x)
+    emit()
+  },
+  markAlertJudged(id, verdict, price = null) {
+    state.alerts = (state.alerts || []).map((x) => x.id === id
+      ? {
+          ...x,
+          lastJudgeAt: Date.now(),
+          lastJudgeDecision: verdict?.decision || 'wait',
+          lastJudgeConfidence: verdict?.confidence ?? null,
+          lastJudgePolicy: verdict?.policy || null,
+          lastJudgePrice: Number(price) || null,
+          judgeCount: (Number(x.judgeCount) || 0) + 1,
+        }
       : x)
     emit()
   },
   // 智能确认闸门:确认真正交易时机到 → 置 confirmed 并停用(发强提示后不再重复)
-  markAlertConfirmed(id, msg) {
+  markAlertConfirmed(id, msg, verdict = null, price = null) {
+    const triggeredAt = Date.now()
     state.alerts = (state.alerts || []).map((x) => x.id === id
-      ? { ...x, phase: 'confirmed', triggeredAt: Date.now(), triggeredMsg: msg, enabled: false }
+      ? {
+          ...x,
+          phase: 'confirmed',
+          triggeredAt,
+          triggeredMsg: msg,
+          enabled: false,
+          decisionPrice: Number(price) || x.lastJudgePrice || null,
+          decisionSide: verdict?.side || null,
+          judgeOutcomes: {},
+        }
       : x)
+    const confirmed = state.alerts.find((alert) => alert.id === id)
+    if (confirmed) {
+      const judgeEvent = {
+        id: `judge:${id}`,
+        kind: 'judge',
+        alertId: id,
+        at: triggeredAt,
+        code: confirmed.code,
+        name: confirmed.name || confirmed.code,
+        decisionSide: confirmed.decisionSide,
+        decisionPrice: confirmed.decisionPrice,
+        confidence: verdict?.confidence ?? null,
+        policy: verdict?.policy || null,
+        reason: verdict?.reason || '',
+        judgeOutcomes: {},
+      }
+      state.decisionLog = [
+        judgeEvent,
+        ...(state.decisionLog || []).filter((event) => event?.id !== judgeEvent.id),
+      ].slice(0, 1000)
+    }
     emit()
   },
   // 智能确认闸门:交易逻辑已被破坏(如买点却已放量跌破失效价)→ 置 invalid 并停用,不再纠缠
@@ -1025,7 +1286,19 @@ export const planStore = {
     const dup = (state.adviceLog || []).find((x) => x.code === entry.code && x.mode === entry.mode && (Date.now() - x.at) < 600000)
     if (dup) return
     state.adviceLog = [rec, ...(state.adviceLog || [])].slice(0, 500)
+    state.decisionLog = [
+      createRecommendation({ ...entry, id: rec.id, at: rec.at }),
+      ...(state.decisionLog || []),
+    ].slice(0, 1000)
     emit()
+  },
+  _recordExecution(entry) {
+    if (!entry || !entry.code) return null
+    state.decisionLog = appendExecution(state.decisionLog, entry)
+    return state.decisionLog[0] || null
+  },
+  decisionStats() {
+    return decisionLedgerStats(state.decisionLog)
   },
   // 事后核验（短线实战口径）：传入 {code: 日K线数组[{date,open,close,high,low}]}
   // 判定窗口=建议日之后 3 个交易日。看多：窗口内"最高价触及目标价"即命中(可提前结算)，
@@ -1188,7 +1461,9 @@ export const planStore = {
     const d = snap.data
     state = {
       plan: d.plan || [], holding: d.holding || [], closed: d.closed || [],
-      account: d.account || null, alerts: d.alerts || [], reviews: d.reviews || {}, adviceLog: d.adviceLog || [],
+      account: d.account || null, alerts: d.alerts || [], reviews: d.reviews || {},
+      adviceLog: d.adviceLog || [], decisionLog: d.decisionLog || [],
+      settings: d.settings || state.settings || {},
     }
     emit() // 恢复后正常回存云端，保证撤回结果也持久化
     return snap.label
@@ -1386,4 +1661,3 @@ export function computePortfolio(holding, quoteMap, account) {
   }
   return { positions, holdMktValue, holdCostValue, floatPnl, totalAssets, cash, available, position, goal, goalProgress, goalGap, goalReturnPct }
 }
-

@@ -13,6 +13,7 @@
 //   两者取并集,才是真实占用的端点数(跨端一致)。
 import { startAdvice, getRunningList, isRunning } from './adviceRunner'
 import { getBatchState, getConcurrency } from './adviceBatch'
+import { adviceJobState } from '../shared/adviceUiState.js'
 
 // 汇总当前"正在生成"的股票:code -> name(本地 + 云端并集)。
 export function generatingList() {
@@ -33,7 +34,7 @@ export function isGenerating(code) {
   if (!code) return false
   const c = String(code)
   if (isRunning(c)) return true
-  try { return (getBatchState().current || []).map(String).includes(c) } catch { return false }
+  try { return !!adviceJobState(getBatchState(), c)?.active } catch { return false }
 }
 
 // 门控式触发。返回:
