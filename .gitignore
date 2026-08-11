@@ -3,11 +3,13 @@ dist
 .fc-package
 .vercel
 .DS_Store
+.npmrc
 *.log
 .env
 .env.local
 .env.*.local
 !.env.example
+qlib-service/.env.lab
 
 # 构建/部署产物(体积大,不进仓库;可按需重建)
 *.tar.gz
@@ -27,6 +29,8 @@ qlib-service/dataset.npz
 # 每日重训运行时历史日志(持续追加,属运行时产物,不进仓库)
 qlib-service/retrain_history.jsonl
 src/components/.nfs*
+.eas-computer-state*.jpg
+dsw_*_tmp.png
 
 # P1(Tushare)训练中间产物/缓存/大文件——可由源码脚本重生成,不进仓库
 qlib-service/dataset_ts_base.npz
