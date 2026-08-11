@@ -4,6 +4,7 @@
 // 得分写入 planStore 的专用字段 qScore/qBias/qAt，供自选卡排序 + 自选/持仓卡展示。
 import { api } from './apiBase'
 import { planStore } from './planStore'
+import { quantModelHeaders, quantModelQuery } from './quantModel'
 
 const FRESH = 30 * 60 * 1000   // 30 分钟内的分数视为新鲜，不重复评分（量化基于日K，日内变化很小）
 const inflight = new Map()      // code -> Promise，防止并发重复请求
@@ -30,8 +31,8 @@ export async function ensureQuantScore(code, { force = false } = {}) {
   }
   const p = (async () => {
     try {
-      const url = api(`/api/stock_detail?code=${code}&klt=101&lmt=60&quant=1&_t=${Date.now()}`)
-      const r = await fetch(url)
+      const url = api(`/api/stock_detail?code=${code}&klt=101&lmt=60&quant=1${quantModelQuery()}&_t=${Date.now()}`)
+      const r = await fetch(url, { headers: quantModelHeaders() })
       const j = await r.json().catch(() => null)
       const quant = j && j.quant
       if (quant && quant.score != null && !isNaN(quant.score)) {

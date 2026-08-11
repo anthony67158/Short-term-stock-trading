@@ -13,6 +13,8 @@ import { applyCors, preflight } from './_lib.js';
 import { ensureConfig } from './_llm_config.js';
 import { judgeConfirmation, sideOf } from './_confirm.js';
 import { t1GateForSide } from '../shared/t1AdvicePolicy.js';
+import { buildJudgeAdviceContext } from '../shared/judgeAdviceContext.js';
+import { authorizePaidRequest } from './_account_auth.js';
 
 const rateWindows = new Map();
 const RATE_WINDOW_MS = 60 * 1000;
@@ -56,17 +58,19 @@ export function sanitizeConfirmationBody(body) {
     watchingAt,
     watchingPrice,
   };
+  if (raw.judgeContext && typeof raw.judgeContext === 'object') {
+    alert.judgeContext = buildJudgeAdviceContext(raw.judgeContext);
+  }
   const sellableTodayQty = finite(raw.sellableTodayQty);
   const boughtTodayQty = finite(raw.boughtTodayQty);
   if (sellableTodayQty != null) alert.sellableTodayQty = Math.max(0, sellableTodayQty);
   if (boughtTodayQty != null) alert.boughtTodayQty = Math.max(0, boughtTodayQty);
   if (raw.nextTradeDay) alert.nextTradeDay = text(raw.nextTradeDay, 40);
   const adviceRaw = input.advice && typeof input.advice === 'object' ? input.advice : {};
-  const advice = {
-    exitTiming: text(adviceRaw.exitTiming, 1200),
-    actionPlan: text(adviceRaw.actionPlan, 1200),
-    invalidation: text(adviceRaw.invalidation, 800),
-  };
+  const advice = buildJudgeAdviceContext({
+    ...(alert.judgeContext || {}),
+    ...adviceRaw,
+  });
   const quoteRaw = input.quote && typeof input.quote === 'object' ? input.quote : {};
   const quote = {
     price: finite(quoteRaw.price),
@@ -101,6 +105,15 @@ export default async function handler(req, res) {
   try {
     if (req.method && req.method !== 'POST') {
       return res.status(405).send(JSON.stringify({ ok: false, decision: 'wait', error: 'method_not_allowed' }));
+    }
+    const accountAuth = await authorizePaidRequest(req);
+    if (!accountAuth.ok) {
+      return res.status(accountAuth.error === '请先登录' ? 401 : 403)
+        .send(JSON.stringify({
+          ok: false,
+          decision: 'wait',
+          error: accountAuth.error,
+        }));
     }
     if (!allowRequest(req)) {
       return res.status(429).send(JSON.stringify({ ok: false, decision: 'wait', error: 'rate_limited' }));

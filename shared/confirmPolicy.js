@@ -17,6 +17,12 @@ const POLICY = {
   },
 }
 
+export function resolveDecisionSide(verdict, fallback) {
+  const allowed = new Set(['buy', 'sell', 'stop'])
+  const candidate = String(verdict?.side || '')
+  return allowed.has(candidate) ? candidate : (allowed.has(fallback) ? fallback : null)
+}
+
 export function confirmationPolicy(side) {
   return POLICY[side] || POLICY.buy
 }

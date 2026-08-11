@@ -4,6 +4,37 @@ const finite = (value, fallback = 0) => {
   return Number.isFinite(n) ? n : fallback
 }
 
+export function stockPickSession(now = Date.now()) {
+  const beijing = new Date(Number(now) + 8 * 3600000)
+  const weekday = beijing.getUTCDay()
+  const minute = beijing.getUTCHours() * 60 + beijing.getUTCMinutes()
+  const trading = weekday >= 1 && weekday <= 5 && minute >= 555 && minute <= 901
+  return {
+    canRun: true,
+    trading,
+    mode: trading ? 'intraday' : 'next_open',
+  }
+}
+
+export function stockPickSavedLabel({
+  savedDay,
+  currentDay,
+  savedSession,
+  trading,
+  timeText,
+} = {}) {
+  if (!timeText) return ''
+  if (savedSession === 'next_open') {
+    return `开盘观察池 ${timeText} 生成，供下一交易日开盘参考`
+  }
+  if (savedDay === currentDay) {
+    return trading
+      ? `本次选股 ${timeText}，结果已保留`
+      : `今日盘中 ${timeText} 选出，供下一交易日开盘参考`
+  }
+  return `${timeText} 选出(非今日，仅供参考)`
+}
+
 export function marketPageNumbers(total, pageSize = 100) {
   const pages = Math.max(1, Math.ceil(Math.max(0, finite(total)) / Math.max(1, finite(pageSize, 100))))
   return Array.from({ length: pages }, (_, index) => index + 1)
@@ -105,14 +136,108 @@ export function rerankQuantCandidates(candidates, opts = {}) {
   ).slice(0, limit)
 }
 
-export function normalizePickDecision(value, allowedCodes = []) {
+function price(value) {
+  const number = Number(value)
+  return Number.isFinite(number) && number > 0 ? number : null
+}
+
+function roundedPrice(value) {
+  const number = price(value)
+  if (number == null) return null
+  return +(number < 10 ? number.toFixed(3) : number.toFixed(2))
+}
+
+function conditionalFallback(item, index, noTradeReason) {
+  const quant = item.quant || {}
+  const current = price(item.price)
+  const reference = price(quant.buyPrice) || current
+  const buyLow = reference != null
+    ? roundedPrice(reference * 0.995)
+    : null
+  const buyHigh = reference != null
+    ? roundedPrice(reference * 1.005)
+    : null
+  const breakout = current != null
+    ? roundedPrice(current * 1.015)
+    : null
+  const target = roundedPrice(
+    price(quant.takeProfit)
+    || price(quant.targetHigh)
+    || (current != null ? current * 1.04 : null)
+  )
+  const stop = roundedPrice(
+    price(quant.stopLoss)
+    || (current != null ? current * 0.97 : null)
+  )
+  const evidence = [
+    item.combinedScore != null ? `综合分${item.combinedScore}` : '',
+    item.marketScore != null ? `市场分${item.marketScore}` : '',
+    quant.score != null ? `量化${quant.score}` : '',
+    quant.upProb != null ? `方向概率${quant.upProb}%` : '',
+    item.mainInflowYi != null ? `主力净流入${item.mainInflowYi}亿` : '',
+    ...(item.tags || []).slice(0, 2),
+  ].filter(Boolean)
+  const buyPoint = buyLow != null && buyHigh != null
+    ? `等待回踩${buyLow}~${buyHigh}缩量企稳${breakout != null ? `，或放量突破${breakout}后再评估` : ''}`
+    : '等待回踩企稳或放量突破后再评估，不在加速段追入'
+
+  return {
+    rank: index + 1,
+    code: String(item.code),
+    name: item.name || String(item.code),
+    quantScore: quant.score ?? null,
+    grade: '观察',
+    actionability: '等待触发',
+    reason: evidence.join(' · ') || '确定性候选池排名靠前',
+    buyPoint,
+    buyZone: buyLow != null && buyHigh != null ? `${buyLow}~${buyHigh}` : null,
+    target,
+    stop,
+    risk: noTradeReason || '当前确认信号不足，只在触发条件成立后考虑',
+  }
+}
+
+export function normalizePickDecision(value, allowedCodes = [], fallbackCandidates = []) {
   const result = value && typeof value === 'object' ? { ...value } : {}
   const allowed = new Set((allowedCodes || []).map(String))
   const picks = (Array.isArray(result.picks) ? result.picks : [])
     .filter((item) => item && allowed.has(String(item.code || '')))
     .slice(0, 3)
-    .map((item, index) => ({ ...item, rank: index + 1 }))
-  if (result.noTrade === true || picks.length === 0) {
+    .map((item, index) => {
+      const requested = ['可执行', '等待触发', '观察'].includes(item.actionability)
+        ? item.actionability
+        : null
+      return {
+        ...item,
+        rank: index + 1,
+        actionability: result.noTrade === true
+          ? (requested === '观察' ? '观察' : '等待触发')
+          : (requested || '可执行'),
+      }
+    })
+  if (picks.length > 0) {
+    return {
+      ...result,
+      noTrade: result.noTrade === true,
+      noTradeReason: result.noTrade === true ? (result.noTradeReason || '当前没有立即买点') : '',
+      picks,
+    }
+  }
+  {
+    const fallback = (Array.isArray(fallbackCandidates) ? fallbackCandidates : [])
+      .filter((item) => item && allowed.has(String(item.code || '')))
+      .slice(0, 3)
+      .map((item, index) => conditionalFallback(item, index, result.noTradeReason))
+    if (fallback.length) {
+      return {
+        ...result,
+        noTrade: true,
+        noTradeReason: result.noTradeReason || '当前没有立即买点，以下为条件候选',
+        fallback: true,
+        fallbackReason: result.noTradeReason || 'AI未形成主动出手结论，已展示确定性条件候选',
+        picks: fallback,
+      }
+    }
     return {
       ...result,
       noTrade: true,
@@ -120,5 +245,23 @@ export function normalizePickDecision(value, allowedCodes = []) {
       picks: [],
     }
   }
-  return { ...result, noTrade: false, noTradeReason: '', picks }
+}
+
+export function normalizeStoredPickSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object' || !snapshot.result) return snapshot
+  const shortlist = Array.isArray(snapshot.shortlist) ? snapshot.shortlist : []
+  if (!shortlist.length) {
+    const picks = Array.isArray(snapshot.result.picks) ? snapshot.result.picks : []
+    return picks.length
+      ? snapshot
+      : { ...snapshot, result: null, legacyEmpty: true }
+  }
+  return {
+    ...snapshot,
+    result: normalizePickDecision(
+      snapshot.result,
+      shortlist.map((item) => item?.code).filter(Boolean),
+      shortlist,
+    ),
+  }
 }

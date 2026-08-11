@@ -11,6 +11,7 @@ qlib-service/
 node_modules/
 .git/
 .s/
+.s/**
 .fc-package/
 test/
 CREDENTIALS.md

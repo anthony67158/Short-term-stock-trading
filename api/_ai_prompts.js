@@ -99,6 +99,12 @@ export function buildUserPrompt(mode, payload, ragText) {
   //   再下一道最强指令——用户会实时看到中文思考过程,思维链必须全程简体中文。
   const zhReason = '【语言要求·最高优先·先读这条】请务必用【简体中文】进行你的全部思考(思维链/reasoning)与输出，逐字都用中文推理，绝对不要用英文思考(个股代码/纯数字/专有名词缩写除外)。这一条优先级最高，任何英文思考都算不合格。\n\n';
   const ragBlock = ragText ? `\n\n【RAG检索资料：近5日走势+主营+联网新闻】\n${ragText}` : '';
+  const v2QuantNote = payload.quant?.modelVersion === 'v2' && payload.quant?.v2
+    ? `\n【★当前量化版本：分钟 Transformer V2】这是基于收盘前真实5分钟序列、预测【下一交易日】三重障碍结果的分类模型。止盈/止损/超时概率分别为${Math.round((payload.quant.v2.probabilities?.takeProfit || 0) * 100)}%/${Math.round((payload.quant.v2.probabilities?.stopLoss || 0) * 100)}%/${Math.round((payload.quant.v2.probabilities?.timeout || 0) * 100)}%，概率优势${payload.quant.v2.outlook?.probabilityEdgePct ?? '—'}个百分点、有利/不利赔率${payload.quant.v2.outlook?.favorableToAdverseOdds ?? '—'}、方向分${payload.quant.v2.outlook?.directionScore ?? '—'}、障碍期望收益${payload.quant.v2.outlook?.expectedBarrierReturnPct ?? '—'}%、确定度${payload.quant.v2.outlook?.convictionScore ?? '—'}、不确定性${payload.quant.v2.outlook?.uncertaintyLevel || '—'}、信号强度${payload.quant.v2.outlook?.signalStrength || '—'}。
+【5分钟行情上下文】当日涨跌${payload.quant.v2.marketContext?.sessionReturnPct ?? '—'}%、近30分钟动量${payload.quant.v2.marketContext?.momentum30mPct ?? '—'}%、实现波动${payload.quant.v2.marketContext?.realizedVolPct ?? '—'}%、平均振幅${payload.quant.v2.marketContext?.averageRangePct ?? '—'}%、量能比${payload.quant.v2.marketContext?.volumeRatio20 ?? '—'}、收盘位置${payload.quant.v2.marketContext?.closeLocationPct ?? '—'}%、趋势对齐${payload.quant.v2.marketContext?.trendAlignment || '—'}。
+【价格参考锚点·不是模型承诺】信号收盘锚${payload.quant.v2.priceReferences?.anchorPrice ?? '—'}、5分钟支撑${payload.quant.v2.priceReferences?.supportPrice ?? '—'}、压力${payload.quant.v2.priceReferences?.resistancePrice ?? '—'}、参考买入区${payload.quant.v2.priceReferences?.referenceBuyZoneLow ?? '—'}~${payload.quant.v2.priceReferences?.referenceBuyZoneHigh ?? '—'}、障碍参考止盈${payload.quant.v2.priceReferences?.indicativeTakeProfitPrice ?? '—'}、参考止损${payload.quant.v2.priceReferences?.indicativeStopLossPrice ?? '—'}。这些绝对价格基于信号日收盘近似，【实际入场必须按下一交易日首根5分钟开盘与实时支撑压力重新修正】。
+军师必须在 quantNote 里明确引用上述概率、方向分、至少两个5分钟行情维度和价格参考；不得把止盈概率误写成传统5日上涨概率，也不得把参考锚点写成模型保证到达的目标价。`
+    : '';
   // 军师五面数据说明：把技术金叉多头、主力资金、盘口、消息面、龙虎榜、大盘环境、共振分全部显式点名，强制引用
   const advisorData = `${payload.todayQuote ? (payload.todayQuote.live ? `\n【★今日实时行情(最高优先·当下事实)】现价${payload.todayQuote.price}、今日涨跌${payload.todayQuote.pct >= 0 ? '+' : ''}${payload.todayQuote.pct}%${payload.todayQuote.isLimitUp ? '、【已涨停】' : payload.todayQuote.isLimitDown ? '、【已跌停】' : ''}${payload.todayQuote.bigMove && !payload.todayQuote.isLimitUp && !payload.todayQuote.isLimitDown ? `、【当日大幅${payload.todayQuote.pct >= 0 ? '异动上涨' : '异动下跌'}】` : ''}、量比${payload.todayQuote.volRatio ?? '—'}、换手${payload.todayQuote.turnover ?? '—'}%。
 ⚠️数据时效铁律：下面的 tech(技术面均线/金叉)、stockFund(主力资金)、backtest 都是【昨日收盘口径】，会滞后！必须以本行"今日实时行情"为当下事实基准，两者矛盾时【以今日实时为准】。
@@ -109,7 +115,7 @@ ${payload.todayQuote.isLimitUp ? '⚠️该股【今日已涨停】：说明今�
 · 【闸一·把握闸(胜率)】校准后把握读数要够高:优先看上面【高把握买点信号】——已触发(✅)为最强绿灯;若未触发或无该信号,则要求 共振分≥3 且 军师本类历史胜率≥50%(有样本时)作为替代把握证据。校准可信度低/信号未触发/共振不足→把握闸不过。
 · 【闸二·赔率闸(盈亏比)】用你定的价位算清盈亏比=(目标价−买入价)/(买入价−止损价),必须【≥1.8:1】才算过;<1.8:1 一律不给主动做多(哪怕方向看对,赔率不划算也不出手)。
 判定口径:①两闸全过→可给"立即买入/加仓"等主动评级,且 confidence 可给到与把握相称的档;②仅过一闸→最多给"小仓试错/回调再买",confidence 压到"中"及以下;③两闸都不过→"观望/持有",老实说"本次把握或赔率不够,不值得出手"。⚠️"高把握、少出手"的价值就在于:错过一个平庸机会不可惜,出手一次低把握的错单才致命。
-【★归因回写·必填 quantNote】无论是否出手,都要在 quantNote(没有该字段则并入 reason 末尾)用一句话交代双闸门结论,格式示例:"把握:校准可信度${payload.quant && payload.quant.highConfSignal ? (payload.quant.highConfSignal.credibility ?? 'X') : 'X'}%(闸一${payload.quant && payload.quant.highConfSignal && payload.quant.highConfSignal.fired ? '过' : '未过'});赔率:目标/止损=Y:1(闸二过/未过);结论:出手/降级观望——因为__"。让用户一眼看懂你为什么开火或为什么按兵不动。` : ''}
+【★归因回写·必填 quantNote】无论是否出手,都要在 quantNote(没有该字段则并入 reason 末尾)用一句话交代双闸门结论,格式示例:"把握:校准可信度${payload.quant && payload.quant.highConfSignal ? (payload.quant.highConfSignal.credibility ?? 'X') : 'X'}%(闸一${payload.quant && payload.quant.highConfSignal && payload.quant.highConfSignal.fired ? '过' : '未过'});赔率:目标/止损=Y:1(闸二过/未过);结论:出手/降级观望——因为__"。让用户一眼看懂你为什么开火或为什么按兵不动。` : ''}${v2QuantNote}
 【★资金金额·算术铁律(绝对不能算错,这是最低级也最致命的错误)】A股1手=100股。任何"约用/约需/回笼/买入/卖出金额"都【必须严格等于 手数×100×价格】,一分钱都不能凭感觉估。
 · 正确示例:15手 @ 50.5元 = 15×100×50.5 = 75750元(七万五千七百五十元),【绝不是7575元】。10手 @ 8.3元 = 10×100×8.3 = 8300元。3手 @ 42元 = 3×100×42 = 12600元。
 · 输出前【逐笔重算并自检】:把"opAmount/planAmount/opAmount"以及 actionPlan/nextAction/reason 文案里出现的每一个金额,都用"手数×100×价格"重新乘一遍,核对量级对不对(常见错误是漏乘100、或少乘/多乘10倍)。金额与"手数×价格"对不上就是错的,必须改对再输出。
@@ -213,25 +219,27 @@ ${payload.holdQty != null ? `4) 手数纪律:任何减仓/清仓/卖出手数 �
   }
   if (mode === 'scan_pick') {
     return `${zhReason}【AI 选股请求】用户不知道今天有哪些股票值得关注。系统已完成“全市场可交易性过滤→确定性横截面评分→量化复排”，你只负责对最终短名单做交易价值判断与解释。
-核心目标不是每天硬凑股票，而是只在“把握与赔率值得出手”时给标的。【今日不出手】是合法且重要的专业结论。
+核心目标是从真实短名单中找出相对最优机会，并把“现在能买”与“值得跟踪但要等触发”分开。noTrade=true 只表示【当前没有立即买点】，绝不表示整个市场没有值得观察的股票，也绝不能因此清空 picks。
 数据含：大盘情绪(market)、板块资金流(sectors)、漏斗统计(funnel)、【候选池 candidates —— 已按 combinedScore 复排】。
 数据：${data}
 
 【候选池 candidates 字段说明】每只含：name/code、price现价、marketScore全市场分、combinedScore量化复排分、pct/turnover/volRatio/mainInflowYi、tags，以及 quant{ score,upProb,expRet,targetLow~targetHigh,highConfFired,credibility,buyPrice,takeProfit,stopLoss }。
-${payload.quantMissing ? '⚠️【本次量化服务不可用】不得给“立即买入”。若盘面证据极强可列观察标的，否则 noTrade=true。quantScore 填 null，禁止编造。' : ''}
+${payload.quantMissing ? '⚠️【本次量化服务不可用】不得给“立即买入”。但仍须按市场分、资金、量能和板块强度选出3只条件候选，actionability只能是“等待触发”或“观察”，禁止返回空名单。quantScore 填 null，禁止编造。' : ''}
+${payload.session === 'next_open' ? '【当前为休市/盘前】结论面向下一交易日开盘；actionability原则上写“等待触发”，买点必须是开盘后可验证的回踩企稳或放量突破条件。' : '【当前为交易时段】可根据现价与分时位置判断“可执行”或“等待触发”。'}
 
 【选股逻辑，逐条执行】：
 1. **先定大盘基调**：逆风(跌多/跌停多)→整体从严、标的把握度普遍下调、并在 marketNote 里提示今日不宜追高、控制仓位;顺风→可积极。
-2. **绝对闸门优先于相对排名**：combinedScore/量化/资金/量能/题材只是候选证据。若没有一只同时满足方向不弱、位置不追高、盈亏比合理，就 noTrade=true、picks=[]，不要“矮子里拔高个”。
+2. **绝对闸门决定能否立即买，相对排名决定观察谁**：若没有一只同时满足方向不弱、位置不追高、盈亏比合理，就 noTrade=true；但仍从 candidates 中保留相对最优的1~3只，并将 actionability 标为“等待触发”或“观察”。
 3. **诚实分级 grade**：每只给"强/中/弱"把握度——强=量化+资金+题材+位置多维共振;中=有亮点但有瑕疵;弱=矮子里拔高个/信号不足,仅供观察。宁愿多标"弱",不要虚高。
 4. **可买性**：给出明确买点(回踩不破/放量突破/开盘竞价低吸)、参考买入价区间(可结合 quant 目标区间下沿)、止损位。若该股当下只适合观察不适合买,buyPoint 写清"暂不追,等回踩到X再看"。
 
 【硬要求】：
-- 真正值得出手的给 1~3 只即可；没有则明确今日不出手。禁止为了数量降低门槛。
+- candidates 非空时 picks 必须给1~3只，禁止空数组；可以全部是“等待触发/观察”，但必须说明触发条件和失效条件。
+- actionability 只能填“可执行 / 等待触发 / 观察”。noTrade=true 时不得填“可执行”。
 - 理由必须引用该股的量化分/上涨概率/资金/板块等**具体数字**,用大白话讲清"为什么值得关注"。
 - 每只都要有 grade(强/中/弱),整体名单的把握度用 confidence 概括。
 
-请输出 JSON：{"reasoning":"一句话研判思路(数据日期→市场环境→把握与赔率闸门)","marketNote":"一句话大盘环境与选股基调","confidence":"高/中/低及简短原因","noTrade":true或false,"noTradeReason":"不出手时说明缺哪项证据；出手时为空字符串","picks":[{"rank":1,"name":"股票名","code":"代码","quantScore":量化分数字或null,"grade":"强或中或弱","reason":"引用marketScore/combinedScore/量化/资金等具体数字","buyPoint":"买点与确认信号","buyZone":"必须基于price或quant.buyPrice的窄区间","target":"优先采用quant.takeProfit/target区间","stop":"优先采用quant.stopLoss","risk":"主要风险"}],"note":"整体仓位与节奏"}。noTrade=true 时 picks 必须为空数组；只输出 JSON。`;
+请输出 JSON：{"reasoning":"一句话研判思路(数据日期→市场环境→相对排名→把握与赔率闸门)","marketNote":"一句话大盘环境与选股基调","confidence":"高/中/低及简短原因","noTrade":true或false,"noTradeReason":"没有立即买点时说明缺哪项确认；存在可执行标的时为空字符串","picks":[{"rank":1,"name":"股票名","code":"代码","quantScore":量化分数字或null,"grade":"强或中或弱","actionability":"可执行或等待触发或观察","reason":"引用marketScore/combinedScore/量化/资金等具体数字","buyPoint":"买点与确认信号","buyZone":"必须基于price或quant.buyPrice的窄区间","target":"优先采用quant.takeProfit/target区间","stop":"优先采用quant.stopLoss","risk":"主要风险与失效条件"}],"note":"整体仓位与节奏"}。只输出 JSON。`;
   }
   if (mode === 'daily') {
     return `${zhReason}【当日全盘数据：大盘情绪 + 板块资金流 + 涨停连板 + 盘中异动】\n${data}\n\n你是短线操盘手，服务做 T+1（今买明卖）的用户。请综合所有维度，直接给出今日可执行的操盘决策。输出 JSON：{"reasoning":"一句话研判思路(先点明数据对应哪个交易日、决策面向哪个交易日开盘;若今天休市要说清是基于上一交易日数据、面向下一交易日)","canTrade":"能做/谨慎/空仓 三选一","light":"green/yellow/red","verdict":"一句话今日定调(能不能做、什么风格)","direction":"今日主攻方向(1-2个板块/主线)","candidates":[{"name":"候选股(必须来自给定数据)","code":"代码","reason":"入选逻辑(结合资金/涨停/异动的具体数据)","buyPoint":"买点提示(如回踩不破/放量突破)","expect":"次日预期","stop":"止损提示"}],"position":"建议仓位(如3-5成)","risk":"最需警惕的风险"}。candidates 给3-5只，必须来自给定数据里的真实个股。`;

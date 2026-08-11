@@ -40,10 +40,13 @@ export async function callChat({
   signal,
   role,
   forceNoReason = false,
+  forceReason = false,
 } = {}) {
-  const ctrl = signal ? null : new AbortController();
-  const useSignal = signal || (ctrl && ctrl.signal);
-  const t = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
+  const ctrl = new AbortController();
+  const useSignal = signal && typeof AbortSignal.any === 'function'
+    ? AbortSignal.any([signal, ctrl.signal])
+    : (signal || ctrl.signal);
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
 
   const bodyObj = {
     model,
@@ -71,7 +74,7 @@ export async function callChat({
   //   后的补生成:此时必须让模型把整段生成用于正文 JSON,绝不能被端点级 reasoning 配置再次拉起 CoT。
   const { resp, endpoint, deferred } = await poolFetch(cfg, '/chat/completions', {
     method: 'POST', body: bodyObj, signal: useSignal, timeoutMs,
-    role, modelFallback: model, reasonFallback: reasoning, forceNoReason, deferSuccess: !!stream,
+    role, modelFallback: model, reasonFallback: reasoning, forceNoReason, forceReason, deferSuccess: !!stream,
   }, stream ? 1 : 2);   // 流式只试一个端点(半路换端点会丢已下发的 token);非流式允许一次故障转移
 
   let released = false;
@@ -81,7 +84,7 @@ export async function callChat({
     endpointId: endpoint?.id || '',
     selectedModel: modelForEndpoint(cfg, endpoint, role, model),
     done: (success = true) => {
-      if (t) clearTimeout(t);
+      clearTimeout(t);
       if (deferred && endpoint && !released) {
         released = true;
         if (success) markSuccess(endpoint.id);
@@ -178,7 +181,7 @@ export async function pumpStream(resp, onPiece) {
 // onReasoning(piece) / onContent(piece) 分别转发;返回 { content, reasoning, finishReason }。
 // 用于「AI操作建议」把模型的推理过程实时下发前端展示(军师在想什么)。
 export async function pumpChatStream(resp, { onReasoning, onContent } = {}) {
-  let content = '', reasoning = '', finishReason = '';
+  let content = '', reasoning = '', finishReason = '', interrupted = false;
   if (!resp || !resp.body || typeof resp.body.getReader !== 'function') return { content, reasoning, finishReason };
   const reader = resp.body.getReader();
   const decoder = new TextDecoder('utf-8');
@@ -212,31 +215,57 @@ export async function pumpChatStream(resp, { onReasoning, onContent } = {}) {
       }
     }
   };
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    let idx;
-    while ((idx = buf.indexOf('\n')) >= 0) {
-      const line = buf.slice(0, idx).trim();
-      buf = buf.slice(idx + 1);
-      if (!line || !line.startsWith('data:')) continue;
-      const data = line.slice(5).trim();
-      if (data === '[DONE]') { if (pend) { content += pend; if (typeof onContent === 'function') onContent(pend); pend = ''; } return { content, reasoning, finishReason }; }
-      try {
-        const j = JSON.parse(data);
-        const delta = j.choices?.[0]?.delta || {};
-        const rc = delta.reasoning_content || delta.reasoning || '';
-        const cc = delta.content || '';
-        if (rc) { reasoning += rc; if (typeof onReasoning === 'function') onReasoning(rc); }
-        if (cc) feedContent(cc);   // 内联 <think> 拆分:标签内计入 reasoning,标签外计入 content
-        const fr = j.choices?.[0]?.finish_reason;
-        if (fr) finishReason = fr;
-      } catch { /* 非完整 JSON 行，忽略 */ }
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, idx).trim();
+        buf = buf.slice(idx + 1);
+        if (!line || !line.startsWith('data:')) continue;
+        const data = line.slice(5).trim();
+        if (data === '[DONE]') {
+          if (pend) {
+            if (inThink) {
+              reasoning += pend;
+              if (typeof onReasoning === 'function') onReasoning(pend);
+            } else {
+              content += pend;
+              if (typeof onContent === 'function') onContent(pend);
+            }
+            pend = '';
+          }
+          return { content, reasoning, finishReason, interrupted };
+        }
+        try {
+          const j = JSON.parse(data);
+          const delta = j.choices?.[0]?.delta || {};
+          const rc = delta.reasoning_content || delta.reasoning || '';
+          const cc = delta.content || '';
+          if (rc) { reasoning += rc; if (typeof onReasoning === 'function') onReasoning(rc); }
+          if (cc) feedContent(cc);   // 内联 <think> 拆分:标签内计入 reasoning,标签外计入 content
+          const fr = j.choices?.[0]?.finish_reason;
+          if (fr) finishReason = fr;
+        } catch { /* 非完整 JSON 行，忽略 */ }
+      }
     }
+  } catch {
+    // 上游可能在已流出部分 token 后重置连接；保留已收到内容供调用方救援。
+    interrupted = true;
   }
-  if (pend) { content += pend; if (typeof onContent === 'function') onContent(pend); pend = ''; }
-  return { content, reasoning, finishReason };
+  if (pend) {
+    if (inThink) {
+      reasoning += pend;
+      if (typeof onReasoning === 'function') onReasoning(pend);
+    } else {
+      content += pend;
+      if (typeof onContent === 'function') onContent(pend);
+    }
+    pend = '';
+  }
+  return { content, reasoning, finishReason, interrupted };
 }
 
 // ---- LLM JSON 解析（容错）----

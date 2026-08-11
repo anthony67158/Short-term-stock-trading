@@ -15,6 +15,11 @@ import { subscribeRunner, isRunning, getRunning, getResult } from '../adviceRunn
 import { tryStartAdvice, generatingList } from '../adviceGate'
 import { subscribeBatch, getBatchState } from '../adviceBatch'
 import { detailStore } from '../detailStore'
+import { currentQuantModelVersion, quantModelQuery } from '../quantModel'
+import {
+  cloudAdviceLoadingState,
+  newestAdviceResult,
+} from '../../shared/adviceUiState.js'
 import { AlertForm } from './AlertCenter'
 
 // 把公司网址补全为可点击的绝对 URL（东财 F10 常给不带协议的裸域名）
@@ -125,7 +130,9 @@ export default function StockDetail({ stock, onClose }) {
         setQuantState({ loading: true, phase: r && r.phase, sources: (r && r.sources) || [], reasoning: (r && r.reasoning) || '', quant: (r && r.quant) || null })
         return
       }
-      const res = getResult(code)
+      const cached = getAdvice(code)
+      const selectedResult = newestAdviceResult(getResult(code), cached)
+      const res = selectedResult.source === 'runner' ? selectedResult.value : null
       if (res && res.pending) {
         // 本地生成中断→已转云端继续,展示中转 loading,待云端回灌自动切成品
         setQuantState({ loading: true, cloud: true, phase: (res.error && String(res.error)) || '云端继续生成中,稍候自动刷新…', sources: [], reasoning: '', quant: null })
@@ -143,15 +150,12 @@ export default function StockDetail({ stock, onClose }) {
       // 待结果经 authStore.pull 回灌 adviceCache 后自动切成品(见下方 subscribeAdvice)。
       try {
         const bs = getBatchState()
-        if (bs && bs.serverMode && bs.running) {
+        if (bs && bs.serverMode) {
           const c = String(code)
-          const inCurrent = (bs.current || []).map(String).includes(c)
           const it = (bs.items || []).find((x) => String(x.code) === c)
-          if (inCurrent || (it && (it.status === 'running' || it.status === 'pending'))) {
-            const cloudPhase = inCurrent || (it && it.status === 'running')
-              ? '云端生成中…(退到后台/关页面也在跑,完成后自动刷新)'
-              : '已排队,等待云端端点空出…'
-            setQuantState({ loading: true, phase: cloudPhase, cloud: true, sources: [], reasoning: '', quant: null })
+          const cloudLoading = cloudAdviceLoadingState(bs, c)
+          if (cloudLoading) {
+            setQuantState(cloudLoading)
             return
           }
           // 云端已把该股标记为失败 → 如实提示生成失败(不做假成功)
@@ -161,9 +165,9 @@ export default function StockDetail({ stock, onClose }) {
           }
         }
       } catch { /* ignore */ }
-      const cached = getAdvice(code)
-      setQuantState(cached
-        ? { result: cached.result, advice: cached.advice, meta: cached.meta, news: cached.news, truncated: cached.truncated, cachedAt: cached.at }
+      const latestCache = selectedResult.source === 'cache' ? selectedResult.value : cached
+      setQuantState(latestCache
+        ? { result: latestCache.result, advice: latestCache.advice, meta: latestCache.meta, news: latestCache.news, truncated: latestCache.truncated, cachedAt: latestCache.at }
         : null)
     }
     sync()
@@ -175,7 +179,8 @@ export default function StockDetail({ stock, onClose }) {
   const loadQuant = () => {
     if (!stock) return
     const hp = myHold ? `&holdCost=${myHold.cost}&holdQty=${myHold.qty}` : ''
-    const quantUrl = api(`/api/stock_detail?code=${stock.code}&klt=101&lmt=60&quant=1${hp}&_t=${Date.now()}`)
+    const quantModelVersion = currentQuantModelVersion()
+    const quantUrl = api(`/api/stock_detail?code=${stock.code}&klt=101&lmt=60&quant=1${quantModelQuery()}${hp}&_t=${Date.now()}`)
     // 军师历史战绩（真实回测胜率），传给后端做自我校准：历史越差越收紧信心
     const advisorTrack = (() => {
       try {
@@ -211,6 +216,7 @@ export default function StockDetail({ stock, onClose }) {
       ? {
           code: stock.code,
           name: (profile && profile.name) || stock.name,
+          quantModelVersion,
           holdCost: myHold.cost,
           holdQty: myHold.qty,
           openTNet: myHold.hasOpenT ? myHold.tNetHands : 0,
@@ -240,6 +246,7 @@ export default function StockDetail({ stock, onClose }) {
       : {
           code: stock.code,
           name: (profile && profile.name) || stock.name,
+          quantModelVersion,
           advisorTrack,
           account,
         }
@@ -255,7 +262,18 @@ export default function StockDetail({ stock, onClose }) {
       aiPayload,
       quantUrl,
       priceHint,
+      deepMode: true,
     })
+    if (r?.mode === 'server') {
+      setQuantState({
+        loading: true,
+        cloud: true,
+        phase: '任务已提交云端，切到后台或关闭页面也会继续生成',
+        sources: [],
+        reasoning: '',
+        quant: null,
+      })
+    }
     if (r && r.status === 'full') setBusyModal({ busy: r.busy || [], concurrency: r.concurrency || 0 })
   }
   const [showAlert, setShowAlert] = useState(false) // 设预警表单开关
@@ -834,7 +852,7 @@ export default function StockDetail({ stock, onClose }) {
                         <div className="fc-fold-wrap">
                           <button className="fc-fold" onClick={() => setShowForecast((v) => !v)}>
                             <span className="fc-fold-summary">
-                              {fc && <span className={'fc-dir-inline ' + (fc.direction === '看涨' ? 'red' : fc.direction === '看跌' ? 'green' : 'muted')}>量化{fc.days}日{fc.direction}·概率{fc.upProb}%</span>}
+                              {fc && <span className={'fc-dir-inline ' + (fc.direction === '看涨' ? 'red' : fc.direction === '看跌' ? 'green' : 'muted')}>量化{q.modelVersion === 'v2' ? '次日' : `${fc.days || 5}日`}{fc.direction}·概率{fc.upProb}%</span>}
                               {q.score != null && <span className={'quant-chip sm ' + (q.score >= 62 ? 'red' : q.score <= 38 ? 'green' : 'gold')}>量化 {q.score}·{q.bias}</span>}
                             </span>
                             <Icon name={showForecast ? 'chevronDown' : 'chevronRight'} size={13} />
@@ -845,19 +863,51 @@ export default function StockDetail({ stock, onClose }) {
                                 <div className="forecast-box">
                                   <div className="fc-row1">
                                     <span className={'fc-dir ' + (fc.direction === '看涨' ? 'red' : fc.direction === '看跌' ? 'green' : 'muted')}>
-                                      未来{fc.days}日 {fc.direction}
+                                      {q.modelVersion === 'v2' ? '下一交易日' : `未来${fc.days || 5}日`} {fc.direction}
                                     </span>
                                     <span className="fc-conf">预测信心 {fc.confidence}</span>
                                   </div>
-                                  <div className="fc-grid">
-                                    <div className="fc-cell"><span className="fc-k">上涨概率</span><span className={'fc-v ' + (fc.upProb >= 55 ? 'red' : fc.upProb <= 45 ? 'green' : '')}>{fc.upProb}%</span></div>
-                                    <div className="fc-cell"><span className="fc-k">预期涨跌</span><span className={'fc-v ' + (fc.expRet >= 0 ? 'red' : 'green')}>{fc.expRet >= 0 ? '+' : ''}{fc.expRet}%</span></div>
-                                    <div className="fc-cell"><span className="fc-k">目标区间</span><span className="fc-v"><b className="green">{fc.targetLow}</b> ~ <b className="red">{fc.targetHigh}</b></span></div>
-                                    <div className="fc-cell"><span className="fc-k">中枢价</span><span className="fc-v">{fc.targetMid}</span></div>
-                                  </div>
+                                  {q.modelVersion === 'v2' && q.v2 ? (
+                                    <>
+                                      <div className="fc-grid v2">
+                                        <div className="fc-cell"><span className="fc-k">止盈概率</span><span className="fc-v red">{fc.upProb}%</span></div>
+                                        <div className="fc-cell"><span className="fc-k">止损概率</span><span className="fc-v green">{fc.downProb}%</span></div>
+                                        <div className="fc-cell"><span className="fc-k">超时概率</span><span className="fc-v">{fc.timeoutProb}%</span></div>
+                                        <div className="fc-cell"><span className="fc-k">概率优势</span><span className="fc-v">{q.v2.outlook?.probabilityEdgePct ?? '—'}%</span></div>
+                                        <div className="fc-cell"><span className="fc-k">障碍期望</span><span className={'fc-v ' + (fc.expRet >= 0 ? 'red' : 'green')}>{fc.expRet >= 0 ? '+' : ''}{fc.expRet}%</span></div>
+                                        <div className="fc-cell"><span className="fc-k">确定度 / 不确定性</span><span className="fc-v">{q.v2.outlook?.convictionScore ?? '—'} / {q.v2.outlook?.uncertaintyLevel || '—'}</span></div>
+                                        <div className="fc-cell"><span className="fc-k">30分钟动量</span><span className="fc-v">{q.v2.marketContext?.momentum30mPct ?? '—'}%</span></div>
+                                        <div className="fc-cell"><span className="fc-k">波动 / 量能比</span><span className="fc-v">{q.v2.marketContext?.realizedVolPct ?? '—'}% / {q.v2.marketContext?.volumeRatio20 ?? '—'}</span></div>
+                                        <div className="fc-cell"><span className="fc-k">收盘位置</span><span className="fc-v">{q.v2.marketContext?.closeLocationPct ?? '—'}%</span></div>
+                                        <div className="fc-cell"><span className="fc-k">风险 / 强度</span><span className="fc-v">{q.v2.outlook?.riskLevel || '—'} / {q.v2.outlook?.signalStrength || '—'}</span></div>
+                                      </div>
+                                      {q.v2.priceReferences && (
+                                        <div className="v2-price-refs">
+                                          <div className="v2-price-head">
+                                            <span>价格参考</span>
+                                            <small>信号收盘近似，下一交易日开盘后需修正</small>
+                                          </div>
+                                          <div className="v2-price-grid">
+                                            <span>锚点 <b>{q.v2.priceReferences.anchorPrice ?? '—'}</b></span>
+                                            <span>支撑 <b className="red">{q.v2.priceReferences.supportPrice ?? '—'}</b></span>
+                                            <span>压力 <b className="green">{q.v2.priceReferences.resistancePrice ?? '—'}</b></span>
+                                            <span>参考止盈 <b className="red">{q.v2.priceReferences.indicativeTakeProfitPrice ?? '—'}</b></span>
+                                            <span>参考止损 <b className="green">{q.v2.priceReferences.indicativeStopLossPrice ?? '—'}</b></span>
+                                          </div>
+                                        </div>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <div className="fc-grid">
+                                      <div className="fc-cell"><span className="fc-k">上涨概率</span><span className={'fc-v ' + (fc.upProb >= 55 ? 'red' : fc.upProb <= 45 ? 'green' : '')}>{fc.upProb}%</span></div>
+                                      <div className="fc-cell"><span className="fc-k">预期涨跌</span><span className={'fc-v ' + (fc.expRet >= 0 ? 'red' : 'green')}>{fc.expRet >= 0 ? '+' : ''}{fc.expRet}%</span></div>
+                                      <div className="fc-cell"><span className="fc-k">目标区间</span><span className="fc-v"><b className="green">{fc.targetLow}</b> ~ <b className="red">{fc.targetHigh}</b></span></div>
+                                      <div className="fc-cell"><span className="fc-k">中枢价</span><span className="fc-v">{fc.targetMid}</span></div>
+                                    </div>
+                                  )}
                                 </div>
                               )}
-                              {q.highConfSignal && q.highConfSignal.fired && (() => {
+                              {q.highConfSignal && q.highConfSignal.fired && q.modelVersion !== 'v2' && (() => {
                                 const hcs = q.highConfSignal;
                                 // 即时赔率 = (止盈-买入)/(买入-止损)；用现价替代买入价算“照现价追”的真实赔率，更贴用户实际处境
                                 const curPx = (overview && overview.price != null) ? overview.price : (q.price != null ? q.price : hcs.buyPrice);

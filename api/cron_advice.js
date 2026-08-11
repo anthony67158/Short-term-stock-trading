@@ -26,15 +26,25 @@ import { buildHoldPayload, buildWatchPayload, computePortfolio, t1StatusOf } fro
 import {
   CONCURRENCY, jobsOf, enqueueJob, leaseJob, completeJob, failJob, cancelJob, cancelAll,
   reapOrphans, gcJobs, runningCount, hasPendingWork, isActive, jobsToProgress,
-  acquireWorkerLock, renewWorkerLock, releaseWorkerLock, workerHeldByOther, updateJobProgress,
+  acquireWorkerLock, renewWorkerLock, renewLease, releaseWorkerLock, workerHeldByOther, updateJobProgress,
 } from './_jobs.js';
 import { ensureConfig, currentConfig } from './_llm_config.js';
 import { endpointCountForRole } from './_llm_pool.js';
 import { projectAdviceAlerts } from '../shared/adviceAlerts.js';
 import { createRecommendation } from '../shared/decisionLedger.js';
+import { ensureAdviceReasoning } from '../shared/adviceReasoning.js';
+import { autoConfigFromSettings, dueAutoScopes } from '../shared/adviceAutoRefreshPolicy.js';
+import {
+  acceptsGenerationResult,
+  batchConcurrency,
+  generationOptions,
+  validateBatchMode,
+} from '../shared/adviceBatchPolicy.js';
 import aiHandler from './ai.js';
 import stockDetailHandler from './stock_detail.js';
 import quoteHandler from './quote.js';
+import { TRUSTED_QUANT_VERSION } from './_quant_access.js';
+import { TRUSTED_ACCOUNT_REQUEST } from './_account_auth.js';
 
 export function createAdviceSSEParser(onEvent) {
   let buffer = '';
@@ -80,12 +90,51 @@ export function progressPatchForEvent(event, data) {
   return null;
 }
 
+// FC HTTP 网关会终止长时间没有 SSE 帧的请求。批量触发方不消费响应正文，
+// 结果统一从 OSS 状态轮询，因此这里用标准 SSE 注释心跳维持 Worker 执行上下文。
+export function startJsonHeartbeat(res, intervalMs = 10000) {
+  try {
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.setHeader('Content-Disposition', 'inline');
+  } catch { /* 测试桩或响应已关闭 */ }
+  let active = true;
+  const write = () => {
+    if (!active || res.writableEnded) return;
+    try { res.write(`: hb ${Date.now()}\n\n`); } catch { /* 连接已关闭 */ }
+  };
+  write();
+  const timer = setInterval(write, intervalMs);
+  if (timer && typeof timer.unref === 'function') timer.unref();
+  return () => {
+    active = false;
+    clearInterval(timer);
+  };
+}
+
+function endWorkerResponse(res, payload) {
+  return res.end(`event: result\ndata: ${JSON.stringify(payload)}\n\n`);
+}
+
 // ---- 并发上限:严格等于用户为「操盘军师(advisor)」角色配置的端点数(核心规则1)----
 // AI 操作建议实际调用 advisor 角色 → 承接该角色的端点数即为可并行生成的最大只数。
 // 未配任何附加端点 → 退化为 1(仅主端点),endpointCountForRole 已保证最小 1。
 // 读取的是全局 LLM 配置(config/llm.json,进程级缓存),故所有账号/设备共享同一上限。
 function advisorConcurrency() {
   try { return endpointCountForRole(currentConfig(), 'advisor'); } catch { return CONCURRENCY; }
+}
+
+function isDeepAdviceBatch(data) {
+  const batchId = String(data?.activeAdviceBatchId || '');
+  if (!batchId) return false;
+  return Object.values(data?.jobs || {}).some((job) => job?.batchId === batchId && job.deepMode === true);
+}
+
+function effectiveAdviceConcurrency(data, deepMode) {
+  const deep = deepMode == null ? isDeepAdviceBatch(data) : deepMode === true;
+  return batchConcurrency(advisorConcurrency(), deep);
 }
 
 // 北京时间"下一交易日"友好标签(跳过周末/A股节假日),告诉军师今日买入的 T+1 最早哪天可卖。
@@ -109,8 +158,32 @@ function nextTradeDayLabel() {
   return '下一交易日';
 }
 
+export function internalRequestHeaders(env = process.env) {
+  const rawPort = String(env.FC_SERVER_PORT || env.PORT || '3000').trim();
+  const portNumber = Number(rawPort);
+  const port = /^\d{1,5}$/.test(rawPort)
+    && Number.isInteger(portNumber)
+    && portNumber > 0
+    && portNumber <= 65535
+    ? rawPort
+    : '3000';
+  const host = `127.0.0.1:${port}`;
+  return {
+    host,
+    'x-forwarded-host': host,
+    'x-forwarded-proto': 'http',
+  };
+}
+
 // ---- 进程内调用另一个 handler:造最小 req/res,把 JSON 结果收集回来 ----
-function invoke(handler, { method = 'GET', query = {}, body = null } = {}) {
+function invoke(handler, {
+  method = 'GET',
+  query = {},
+  body = null,
+  signal,
+  trustedQuantVersion,
+  trustedAccount = false,
+} = {}) {
   return new Promise((resolve) => {
     let done = false;
     const chunks = [];
@@ -131,7 +204,21 @@ function invoke(handler, { method = 'GET', query = {}, body = null } = {}) {
       json(obj) { this.headersSent = true; finishWith(obj); return this; },
       end(payload) { this.headersSent = true; finishWith(payload != null ? payload : null); return this; },
     };
-    const req = { method, query, body: body || {}, headers: {} };
+    const req = {
+      method,
+      query,
+      body: body || {},
+      headers: internalRequestHeaders(),
+      signal,
+    };
+    if (trustedQuantVersion) {
+      req[TRUSTED_QUANT_VERSION] = trustedQuantVersion;
+    }
+    if (trustedAccount) req[TRUSTED_ACCOUNT_REQUEST] = true;
+    if (signal) {
+      if (signal.aborted) return finishWith(null);
+      signal.addEventListener('abort', () => finishWith(null), { once: true });
+    }
     try {
       const r = handler(req, res);
       if (r && typeof r.then === 'function') r.catch(() => finishWith(null));
@@ -140,7 +227,16 @@ function invoke(handler, { method = 'GET', query = {}, body = null } = {}) {
   });
 }
 
-function invokeSSE(handler, { method = 'POST', query = {}, body = null, onEvent, timeoutMs = 225000 } = {}) {
+function invokeSSE(handler, {
+  method = 'POST',
+  query = {},
+  body = null,
+  onEvent,
+  timeoutMs = 135000,
+  signal,
+  trustedQuantVersion,
+  trustedAccount = false,
+} = {}) {
   return new Promise((resolve) => {
     let done = false;
     let result = null;
@@ -177,8 +273,22 @@ function invokeSSE(handler, { method = 'POST', query = {}, body = null, onEvent,
         return this;
       },
     };
-    const req = { method, query, body: body || {}, headers: {} };
+    const req = {
+      method,
+      query,
+      body: body || {},
+      headers: internalRequestHeaders(),
+      signal,
+    };
+    if (trustedQuantVersion) {
+      req[TRUSTED_QUANT_VERSION] = trustedQuantVersion;
+    }
+    if (trustedAccount) req[TRUSTED_ACCOUNT_REQUEST] = true;
     const timer = setTimeout(finish, timeoutMs);
+    if (signal) {
+      if (signal.aborted) return finish();
+      signal.addEventListener('abort', finish, { once: true });
+    }
     try {
       const promise = handler(req, res);
       if (promise && typeof promise.then === 'function') promise.catch(finish);
@@ -217,33 +327,80 @@ function applyQuantScore(data, code, qs) {
   stamp(data.holding); stamp(data.plan);
 }
 
+export function adviceFailureReason(response, deepMode = false) {
+  if (!response) return '军师未返回结果';
+  if (!response.ok) {
+    return String(response.error || '军师未返回可用建议').slice(0, 160);
+  }
+  if (deepMode && response.truncated) return '深度建议输出不完整';
+  if (!response.result) return '军师未返回结构化建议';
+  return '';
+}
+
 // 生成单只:进程内并发跑 量化(stock_detail?quant=1) + 军师(ai.js) → 组装缓存项(对齐前端 saveAdvice 结构)
-async function genOne({ code, name, mode, payload, quantQuery, onProgress }) {
-  const quantP = invoke(stockDetailHandler, { method: 'GET', query: quantQuery })
+async function genOne({ code, name, mode, payload, quantQuery, priceHint, onProgress, signal, deepMode = false }) {
+  const generation = generationOptions(deepMode);
+  let streamedReasoning = '';
+  let adviceFailure = '';
+  const quantP = invoke(stockDetailHandler, {
+    method: 'GET',
+    query: quantQuery,
+    signal,
+    trustedQuantVersion: quantQuery.model,
+  })
     .then((j) => (j && j.quant) ? j.quant : null).catch(() => null);
   const adviceP = invokeSSE(aiHandler, {
     method: 'POST',
-    body: { mode, payload, stream: true, runtimeBudgetMs: 210000 },
+    body: {
+      mode,
+      payload,
+      stream: true,
+      fastMode: generation.fastMode,
+      forceReasoning: generation.forceReasoning,
+      runtimeBudgetMs: generation.runtimeBudgetMs,
+    },
+    timeoutMs: generation.timeoutMs,
+    signal,
+    trustedQuantVersion: payload.quantModelVersion,
+    trustedAccount: true,
     onEvent(event, data) {
+      if (event === 'reasoning' && data?.text) streamedReasoning += String(data.text);
       const patch = progressPatchForEvent(event, data);
       if (patch && typeof onProgress === 'function') onProgress(patch);
     },
   })
-    .then((r) => (r && r.ok ? { advice: r.result, meta: r.meta, news: r.news, truncated: r.truncated } : null))
-    .catch(() => null);
+    .then((r) => {
+      adviceFailure = adviceFailureReason(r, deepMode);
+      return adviceFailure
+        ? null
+        : { advice: r.result, meta: r.meta, news: r.news, truncated: r.truncated };
+    })
+    .catch((error) => {
+      adviceFailure = error?.name === 'AbortError'
+        ? '军师生成已中断'
+        : '军师生成请求异常';
+      return null;
+    });
   const [result, adviceResp] = await Promise.all([quantP, adviceP]);
 
-  const advice = adviceResp && adviceResp.advice;
+  const advice = adviceResp && adviceResp.advice
+    ? ensureAdviceReasoning(adviceResp.advice, streamedReasoning)
+    : null;
   const meta = adviceResp && adviceResp.meta;
   const news = adviceResp && adviceResp.news;
   const truncated = !!(adviceResp && (adviceResp.truncated || (advice && advice.truncated)));
-  if (!result && !advice) return null;
+  if (!acceptsGenerationResult({ quant: result, advice, truncated }, deepMode)) {
+    throw new Error(
+      adviceFailure
+      || (deepMode ? '深度建议未完整返回' : '军师和量化均未返回可用结果'),
+    );
+  }
 
   const at = Date.now();
   const cacheItem = { result, advice, meta, news, truncated, at };
   let logEntry = null;
   if (advice) {
-    const px = (result && result.price) || (payload && payload.holdCost) || null;
+    const px = (result && result.price) || priceHint || (payload && payload.holdCost) || null;
     logEntry = {
       code, name, mode,
       action: advice.action || advice.stance || '',
@@ -269,7 +426,7 @@ function buildTask(data, code) {
   const nameOf = (holding.find((h) => h.code === code) || watch.find((w) => w.code === code) || {}).name || code;
   return { holdSet, nameOf };
 }
-async function runJobGen(acc, code, onProgress) {
+async function runJobGen(acc, code, onProgress, signal, deepMode = false) {
   const data = acc.data || {};
   const holding = data.holding || [], watch = data.plan || [];
   const holdSet = new Set(holding.map((h) => h.code));
@@ -277,32 +434,46 @@ async function runJobGen(acc, code, onProgress) {
   const quoteMap = await fetchQuoteMap(allCodes);
   const portfolio = computePortfolio(holding, quoteMap, data.account);
   const name = (holding.find((h) => h.code === code) || watch.find((w) => w.code === code) || {}).name || code;
+  const priceHint = Number(quoteMap[code]?.price) > 0 ? Number(quoteMap[code].price) : null;
+  const quantModelVersion = data.settings?.quantModelVersion || 'default';
   if (holdSet.has(code)) {
     const p = buildHoldPayload(holding, code, name, portfolio, data.account, data.closed, nextTradeDayLabel());
     p.advisorTrack = advisorTrackFrom(data);
+    p.quantModelVersion = quantModelVersion;
     const hp = (p.holdCost != null && p.holdQty != null) ? { holdCost: String(p.holdCost), holdQty: String(p.holdQty) } : {};
-    return genOne({ code, name, mode: 'hold_advice', payload: p, quantQuery: { code, klt: '101', lmt: '60', quant: '1', ...hp }, onProgress });
+    return genOne({ code, name, mode: 'hold_advice', payload: p, quantQuery: { code, klt: '101', lmt: '60', quant: '1', model: quantModelVersion, ...hp }, priceHint, onProgress, signal, deepMode });
   }
   const p = buildWatchPayload(code, name, portfolio, data.account);
   p.advisorTrack = advisorTrackFrom(data);
-  return genOne({ code, name, mode: 'buy_advice', payload: p, quantQuery: { code, klt: '101', lmt: '60', quant: '1' }, onProgress });
+  p.quantModelVersion = quantModelVersion;
+  return genOne({ code, name, mode: 'buy_advice', payload: p, quantQuery: { code, klt: '101', lmt: '60', quant: '1', model: quantModelVersion }, priceHint, onProgress, signal, deepMode });
 }
 
 // ---- 任务表合并:把云端最新的【外部变更】并入内存 working(捕获其它设备新入队 / 取消)----
 // drainer 拥有 lease/status 主导权 → 对它已知的 code 保留内存态;
 // 对它不知道的 code(其它设备刚 enqueue 的第4只)从 fresh 补入;
 // 传播外部取消:fresh 里被标记 canceled/cancelRequested 的,回灌到内存。
-function mergeExternalJobs(workingData, freshData) {
+export function mergeExternalJobs(workingData, freshData) {
   const wj = jobsOf(workingData);
   const fj = (freshData && freshData.jobs && typeof freshData.jobs === 'object') ? freshData.jobs : {};
   for (const [code, fjob] of Object.entries(fj)) {
     if (!fjob) continue;
     const cur = wj[code];
     if (!cur) { wj[code] = fjob; continue; }                       // 外部新入队 → 补入
-    if (fjob.status === 'canceled') { if (isActive(cur)) cur.cancelRequested = true; if (cur.status === 'queued') { cur.status = 'canceled'; cur.finishedAt = Date.now(); } }
-    else if (fjob.cancelRequested && isActive(cur)) cur.cancelRequested = true;  // 传播运行中取消意图
-    // 外部对同 code 的强制重生成(新 id 且更新)→ 若内存已终态,采纳外部新任务
-    else if (!isActive(cur) && (fjob.at || 0) > (cur.at || 0) && isActive(fjob)) wj[code] = fjob;
+    const sameJob = !!(fjob.id && cur.id && fjob.id === cur.id);
+    if (sameJob && fjob.status === 'canceled') {
+      if (isActive(cur)) {
+        cur.cancelRequested = true;
+        cur.status = 'canceled';
+        cur.finishedAt = fjob.finishedAt || Date.now();
+        cur.leaseUntil = 0;
+        cur.phase = '已取消生成';
+        cur.progressAt = fjob.progressAt || Date.now();
+      }
+    }
+    else if (sameJob && fjob.cancelRequested && isActive(cur)) cur.cancelRequested = true;  // 传播运行中取消意图
+    // 外部对同 code 的强制重生成(新 id 且更新)→ 采纳新任务；旧在途请求由 cancelPoll 按 jobId 中止。
+    else if (fjob.id !== cur.id && (fjob.at || 0) >= (cur.at || 0) && isActive(fjob)) wj[code] = fjob;
   }
 }
 
@@ -316,8 +487,21 @@ async function persistServer(nick, workingAcc, myId) {
   mergeExternalJobs(wdata, fdata);
   fdata.jobs = wdata.jobs;
   fdata.jobWorker = wdata.jobWorker;
+  fdata.activeAdviceBatchId = wdata.activeAdviceBatchId || fdata.activeAdviceBatchId || '';
+  // 自动刷新运行时间由云端定时器维护，客户端旧快照不能把它覆盖回去。
+  const runtimeSettingKeys = [
+    'advAuto.holdLastAt', 'advAuto.holdLastTryAt',
+    'advAuto.watchLastAt', 'advAuto.watchLastTryAt',
+  ];
+  if (wdata.settings && typeof wdata.settings === 'object') {
+    const settings = { ...(fdata.settings || {}) };
+    for (const key of runtimeSettingKeys) {
+      if (wdata.settings[key] != null) settings[key] = wdata.settings[key];
+    }
+    fdata.settings = settings;
+  }
   // 进度快照(旧前端仍消费 batchProgress);concurrency=当前 advisor 端点数(供前端单股触发门控)
-  fdata.batchProgress = jobsToProgress(wdata, Date.now(), advisorConcurrency());
+  fdata.batchProgress = jobsToProgress(wdata, Date.now(), effectiveAdviceConcurrency(wdata));
   // advice 逐条时间戳并入
   const wa = (wdata.advice && typeof wdata.advice === 'object') ? wdata.advice : {};
   const fa = (fdata.advice && typeof fdata.advice === 'object') ? fdata.advice : (fdata.advice = {});
@@ -383,10 +567,12 @@ async function drainAccount(nick, initialAcc) {
   acc = await saveWorking();                                           // 公布锁 + 回收结果
   data = acc.data;
 
-  const inflight = new Map();   // code -> Promise<{code,res,err}>
+  const inflight = new Map();   // code -> { promise, controller }
   let ok = 0, fail = 0;
-  const CONC = advisorConcurrency();   // 本轮并发上限=当前 advisor 端点数(严格绑定)
-  const startDeadline = Date.now() + 300000; // 单次 FC 最多派发约 5 分钟，余量留给在途任务收尾
+  const CONC = effectiveAdviceConcurrency(data);
+  // 深度任务最坏可占约 495s，只允许在本次 FC 前 85s 内启动新任务，
+  // 保证在 600s 硬上限前有收尾时间；剩余队列由 5 分钟云端定时器接力。
+  const startDeadline = Date.now() + (isDeepAdviceBatch(data) ? 85000 : 300000);
   let lastProgressSaveAt = 0;
   let progressSavePending = false;
   const queueProgressSave = (force = false) => {
@@ -421,6 +607,23 @@ async function drainAccount(nick, initialAcc) {
     queueProgressSave(true);
   }, 20000);
   if (heartbeat && typeof heartbeat.unref === 'function') heartbeat.unref();
+  const cancelPoll = setInterval(async () => {
+    try {
+      const fresh = await readAccount(nick);
+      const freshJobs = fresh?.data?.jobs || {};
+      for (const [code, task] of inflight.entries()) {
+        const remote = freshJobs[code];
+        if (remote?.id && remote.id !== task.jobId) {
+          jobsOf(acc.data)[code] = remote;
+          task.controller.abort();
+        } else if (remote?.status === 'canceled' || remote?.cancelRequested) {
+          cancelJob(acc.data, code);
+          task.controller.abort();
+        }
+      }
+    } catch { /* 下一轮继续检查 */ }
+  }, 1500);
+  if (cancelPoll && typeof cancelPoll.unref === 'function') cancelPoll.unref();
   try {
     while (true) {
       data = acc.data;
@@ -438,10 +641,12 @@ async function drainAccount(nick, initialAcc) {
       for (const j of startable) {
         leaseJob(data, j.code);
         const code = j.code;
-        const p = runJobGen(acc, code, (patch) => recordProgress(code, patch))
-          .then((res) => ({ code, res }))
-          .catch((err) => ({ code, err }));
-        inflight.set(code, p);
+        const jobId = j.id;
+        const controller = new AbortController();
+        const promise = runJobGen(acc, code, (patch) => recordProgress(code, patch), controller.signal, !!j.deepMode)
+          .then((res) => ({ code, jobId, res }))
+          .catch((err) => ({ code, jobId, err }));
+        inflight.set(code, { promise, controller, jobId });
       }
       if (startable.length) acc = await saveWorking();   // 公布 lease
 
@@ -451,12 +656,14 @@ async function drainAccount(nick, initialAcc) {
         // 有待办却起不来(理论上 free>0 时不会发生)——保护性跳出
         break;
       }
-      const done = await Promise.race(inflight.values());
+      const done = await Promise.race([...inflight.values()].map((task) => task.promise));
       inflight.delete(done.code);
       // 应用结果到内存,再保护式落盘
       const d = acc.data;
       const job = jobsOf(d)[done.code];
-      if (job && job.cancelRequested) {                       // 运行中被取消 → 丢弃结果
+      if (!job || job.id !== done.jobId) {
+        // 同一股票已被新批次替换，旧结果必须丢弃。
+      } else if (job.cancelRequested || job.status === 'canceled') { // 运行中被取消 → 丢弃结果
         job.status = 'canceled'; job.finishedAt = Date.now(); job.leaseUntil = 0;
       } else if (done.res && done.res.cacheItem) {
         (d.advice || (d.advice = {}))[done.code] = done.res.cacheItem;
@@ -475,13 +682,23 @@ async function drainAccount(nick, initialAcc) {
         }
         if (done.res.quantScore) applyQuantScore(d, done.code, done.res.quantScore);
       } else {
-        failJob(d, done.code, done.err ? String(done.err.message || done.err) : '生成失败(军师+量化均空)');
+        failJob(
+          d,
+          done.code,
+          done.err
+            ? String(done.err.message || done.err)
+            : job?.deepMode
+              ? '深度建议未完整返回'
+              : '生成失败(军师+量化均空)',
+        );
         if (jobsOf(d)[done.code] && jobsOf(d)[done.code].status === 'failed') fail++;
       }
       await queueProgressSave(true);
     }
   } finally {
     clearInterval(heartbeat);
+    clearInterval(cancelPoll);
+    for (const task of inflight.values()) task.controller.abort();
     await persistChain.catch(() => {});
     // 释放锁(重读最新账号再放,避免盖回)
     const fresh = (await readAccount(nick)) || acc;
@@ -506,7 +723,11 @@ function enqueueStale(data, { scope = 'all', force = false } = {}) {
   const holdSet = new Set(holding.map((h) => h.code));
   const isFresh = (code) => { if (force) return false; const a = advice[code]; return !!(a && a.at && (Date.now() - a.at) < GAP_MS); };
   let n = 0;
-  const add = (code, name, mode) => { const { created } = enqueueJob(data, { code, name, mode, source: 'cron', force }); if (created) n++; };
+  const batchId = `cron_${Date.now()}`;
+  const add = (code, name, mode) => {
+    const { created } = enqueueJob(data, { code, name, mode, source: 'cron', force, batchId });
+    if (created) n++;
+  };
   if (scope === 'all' || scope === 'hold') {
     for (const code of [...new Set(holding.map((h) => h.code))]) {
       if (isFresh(code)) continue;
@@ -521,7 +742,61 @@ function enqueueStale(data, { scope = 'all', force = false } = {}) {
       add(code, name, 'buy_advice');
     }
   }
+  if (n > 0) data.activeAdviceBatchId = batchId;
   return n;
+}
+
+function inAutoRefreshWindow(now = Date.now()) {
+  const d = new Date(now + 8 * 3600 * 1000);
+  const day = d.getUTCDay();
+  const dayKey = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+  const minutes = d.getUTCHours() * 60 + d.getUTCMinutes();
+  return day >= 1 && day <= 5 && !A_SHARE_HOLIDAYS.has(dayKey) && minutes >= 555 && minutes <= 900;
+}
+
+export function enqueueAutoRefreshDue(data, now = Date.now()) {
+  if (!inAutoRefreshWindow(now)) return 0;
+  const settings = data.settings || (data.settings = {});
+  const scopes = dueAutoScopes(autoConfigFromSettings(settings), now);
+  if (!scopes.length) return 0;
+
+  const holding = data.holding || [];
+  const watch = data.plan || [];
+  const holdCodes = [...new Set(holding.map((item) => item.code))];
+  const holdSet = new Set(holdCodes);
+  const watchCodes = [...new Set(watch.map((item) => item.code))].filter((code) => !holdSet.has(code));
+  const batchId = `auto_${now}`;
+  let count = 0;
+  const enqueue = (code, name, mode) => {
+    const { created } = enqueueJob(data, { code, name, mode, source: 'auto', force: false, batchId }, now);
+    if (created) count++;
+  };
+  if (scopes.includes('hold')) {
+    settings['advAuto.holdLastTryAt'] = now;
+    settings['advAuto.holdLastAt'] = now;
+    for (const code of holdCodes) {
+      const name = holding.find((item) => item.code === code)?.name || code;
+      enqueue(code, name, 'hold_advice');
+    }
+  }
+  if (scopes.includes('watch')) {
+    settings['advAuto.watchLastTryAt'] = now;
+    settings['advAuto.watchLastAt'] = now;
+    for (const code of watchCodes) {
+      const name = watch.find((item) => item.code === code)?.name || code;
+      enqueue(code, name, 'buy_advice');
+    }
+  }
+  if (count > 0) data.activeAdviceBatchId = batchId;
+  return count;
+}
+
+export function shouldDetachOnDemandDrain(body) {
+  return !!(
+    body
+    && body.ondemand === true
+    && String(body.op || 'enqueue') === 'enqueue'
+  );
 }
 
 export default async function handler(req, res) {
@@ -548,7 +823,8 @@ export default async function handler(req, res) {
     const data = acc.data || (acc.data = {});
     const op = body.op || 'enqueue';
     const started = Date.now();
-    const CONC = advisorConcurrency();   // 当前 advisor 端点数=并发上限(所有响应/快照统一用它)
+    let CONC = effectiveAdviceConcurrency(data);
+    let stopHeartbeat = () => {};
 
     try {
       if (op === 'status') {
@@ -556,38 +832,84 @@ export default async function handler(req, res) {
       }
       if (op === 'cancel') {
         const codes = Array.isArray(body.codes) ? body.codes.filter(Boolean).map(String) : [];
-        let n = 0; for (const c of codes) if (cancelJob(data, c)) n++;
+        const batchId = String(body.batchId || '');
+        let n = 0; for (const c of codes) if (cancelJob(data, c, Date.now(), batchId)) n++;
         await persistServer(nick, acc, 'cancel');
         return res.end(JSON.stringify({ ok: true, canceled: n, progress: jobsToProgress(data, Date.now(), CONC) }));
       }
       if (op === 'cancelAll') {
-        const n = cancelAll(data);
+        const n = cancelAll(data, Date.now(), String(body.batchId || ''));
         await persistServer(nick, acc, 'cancelAll');
         return res.end(JSON.stringify({ ok: true, canceled: n, progress: jobsToProgress(data, Date.now(), CONC) }));
       }
       // enqueue(默认):把 codes 排入队列(防重),随后 drain(拿不到锁则由在跑的 drainer 接手)
       const codes = Array.isArray(body.codes) ? [...new Set(body.codes.filter(Boolean).map(String))] : [];
       if (!codes.length) return res.end(JSON.stringify({ ok: false, error: '缺少 codes' }));
+      const deepMode = body.deepMode === true;
+      const modeValidation = validateBatchMode(codes, deepMode);
+      if (!modeValidation.ok) {
+        return res.end(JSON.stringify({
+          ok: false,
+          error: '批量模式参数无效',
+          code: modeValidation.error,
+          limit: modeValidation.limit,
+        }));
+      }
       const holding = data.holding || [], watch = data.plan || [];
       const holdSet = new Set(holding.map((h) => h.code));
       const nameOf = (c) => (holding.find((h) => h.code === c) || watch.find((w) => w.code === c) || {}).name || c;
+      const requestedBatchId = String(body.batchId || '').trim();
+      const batchId = requestedBatchId
+        ? requestedBatchId.slice(0, 100)
+        : `ondemand_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
       let enq = 0, dup = 0;
       for (const code of codes) {
         if (scope === 'hold' && !holdSet.has(code)) continue;
         if (scope === 'watch' && holdSet.has(code)) continue;
         const mode = holdSet.has(code) ? 'hold_advice' : 'buy_advice';
-        const { created } = enqueueJob(data, { code, name: nameOf(code), mode, source: 'ondemand', force });
+        const { created } = enqueueJob(data, {
+          code, name: nameOf(code), mode, source: 'ondemand', force, batchId, deepMode,
+        });
         created ? enq++ : dup++;
       }
+      if (enq > 0) data.activeAdviceBatchId = batchId;
+      CONC = effectiveAdviceConcurrency(data, deepMode);
       await persistServer(nick, acc, 'enqueue');   // 立刻公布队列(另一设备可见)
+      if (shouldDetachOnDemandDrain(body)) {
+        res.statusCode = 202;
+        res.end(JSON.stringify({
+          ok: true,
+          accepted: true,
+          detached: true,
+          enqueued: enq,
+          dedup: dup,
+          concurrency: CONC,
+          deepMode,
+          progress: jobsToProgress(data, Date.now(), CONC),
+        }));
+        setImmediate(() => {
+          drainAccount(nick).catch((error) => {
+            console.error(
+              '[cron_advice] detached drain failed',
+              error?.code || error?.name || error?.message,
+            );
+          });
+        });
+        return;
+      }
       // 尝试成为 drainer;拿不到锁说明已有 drainer 在跑,会自动捞起我们刚入队的
+      stopHeartbeat = startJsonHeartbeat(res);
       const dr = await drainAccount(nick, await readAccount(nick));
-      return res.end(JSON.stringify({
+      stopHeartbeat();
+      return endWorkerResponse(res, {
         ok: true, enqueued: enq, dedup: dup,
         drained: dr && dr.drained ? true : false, ok2: dr && dr.ok, fail: dr && dr.fail,
         concurrency: CONC, elapsedMs: Date.now() - started,
-      }));
+        deepMode,
+      });
     } catch (e) {
+      stopHeartbeat();
+      if (res.headersSent) return endWorkerResponse(res, { ok: false, error: String(e.message || e), elapsedMs: Date.now() - started });
       return res.end(JSON.stringify({ ok: false, error: String(e.message || e), elapsedMs: Date.now() - started }));
     }
   }
@@ -600,6 +922,7 @@ export default async function handler(req, res) {
   }
   const onlyNick = body.nick ? String(body.nick) : null;
   const started = Date.now();
+  const stopHeartbeat = startJsonHeartbeat(res);
   try {
     let accounts = await listAllAccounts();
     if (onlyNick) accounts = accounts.filter((a) => a.nick === onlyNick);
@@ -613,17 +936,21 @@ export default async function handler(req, res) {
         const data = acc.data || (acc.data = {});
         reapOrphans(data);
         // 定时:排入过期建议(force=false → 6h 新鲜度节流,不烧 token);同时续跑遗留 queued/孤儿
-        const enq = body.resumeOnly === true
-          ? 0
-          : enqueueStale(data, { scope, force: body.force === true });
+        const enq = body.autoRefresh === true
+          ? enqueueAutoRefreshDue(data)
+          : body.resumeOnly === true
+            ? 0
+            : enqueueStale(data, { scope, force: body.force === true });
         await persistServer(nick, acc, 'cron');
         const dr = hasPendingWork(acc.data) ? await drainAccount(nick, await readAccount(nick)) : { drained: false, ok: 0, fail: 0 };
         totalOk += dr.ok || 0; totalFail += dr.fail || 0;
         summary.push({ nick, enqueued: enq, ...(dr.skipped ? { skipped: dr.skipped } : { ok: dr.ok, fail: dr.fail }) });
       } catch (e) { summary.push({ nick, error: String(e.message || e) }); }
     }
-    return res.end(JSON.stringify({ ok: true, scope, accounts: accounts.length, ok2: totalOk, fail: totalFail, elapsedMs: Date.now() - started, summary }));
+    stopHeartbeat();
+    return endWorkerResponse(res, { ok: true, scope, accounts: accounts.length, ok2: totalOk, fail: totalFail, elapsedMs: Date.now() - started, summary });
   } catch (e) {
-    return res.end(JSON.stringify({ ok: false, error: String(e.message || e), elapsedMs: Date.now() - started }));
+    stopHeartbeat();
+    return endWorkerResponse(res, { ok: false, error: String(e.message || e), elapsedMs: Date.now() - started });
   }
 }

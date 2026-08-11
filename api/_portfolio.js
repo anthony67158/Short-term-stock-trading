@@ -2,6 +2,7 @@
 // 供云端定时任务(cron_advice.js)在服务端复刻前端 buildHoldSpec/buildWatchSpec 的口径,
 // 保证「电脑关了浏览器,云端定时生成的 AI 操作建议」与「用户手动/浏览器定时生成」完全同源同值。
 // ⚠️ 只做纯计算,不碰网络/存储;若前端 planStore 的对应算法有变,这里需同步。
+import { deriveAccountValuation } from '../shared/accountValuation.js';
 
 // FIFO 配对做T流水:算未配平(挂单)净手数 + 开口腿均价(与 planStore.computeTFlows 同口径,只保留云端需要的字段)
 export function computeTFlows(flows) {
@@ -26,7 +27,8 @@ export function computeTFlows(flows) {
   const openSell = queue.sell.reduce((a, x) => a + x.qty, 0);
   const openBuyAmt = queue.buy.reduce((a, x) => a + x.price * x.qty * 100, 0);
   const openBuyAvg = openBuy ? +(openBuyAmt / (openBuy * 100)).toFixed(3) : null;
-  return { openBuy, openSell, openBuyAvg };
+  const openBuyFee = +queue.buy.reduce((a, x) => a + x.fee, 0).toFixed(2);
+  return { openBuy, openSell, openBuyAvg, openBuyFee };
 }
 
 // 某 code 的【实时持仓】(已并表反T):返回 {qty,cost,hasOpenT,tNetHands} 或 null(底仓被反T卖光)
@@ -59,30 +61,46 @@ export function computePortfolio(holding, quoteMap, account) {
     const q = quoteMap && quoteMap[h.code];
     const price = q && Number(q.price) > 0 ? q.price
       : (q && Number(q.prevClose) > 0 ? Number(q.prevClose) : h.buyPrice);
-    const shares = (h.qty || 0) * 100;
+    const baseQty = Number(h.qty) || 0;
+    const tFlows = computeTFlows(h.tFlows);
+    const liveQty = Math.max(0, baseQty + (tFlows.openBuy || 0) - (tFlows.openSell || 0));
+    const shares = liveQty * 100;
     const mktValue = +(price * shares).toFixed(2);
-    const costValue = +((h.buyPrice || 0) * shares + (h.buyFee || 0)).toFixed(2);
+    let costValue = (h.buyPrice || 0) * baseQty * 100 + (h.buyFee || 0);
+    if (tFlows.openBuy > 0 && tFlows.openBuyAvg != null) {
+      costValue += tFlows.openBuyAvg * tFlows.openBuy * 100 + (tFlows.openBuyFee || 0);
+    } else if (tFlows.openSell > 0 && baseQty > 0) {
+      costValue *= Math.max(0, baseQty - tFlows.openSell) / baseQty;
+    }
+    costValue = +costValue.toFixed(2);
     const floatPnl = +(mktValue - costValue).toFixed(2);
     const floatPct = costValue ? +((floatPnl / costValue) * 100).toFixed(2) : 0;
-    return { id: h.id, code: h.code, name: h.name, qty: h.qty, price, buyPrice: h.buyPrice, mktValue, costValue, floatPnl, floatPct };
+    return {
+      id: h.id,
+      code: h.code,
+      name: h.name,
+      qty: liveQty,
+      baseQty,
+      price,
+      buyPrice: h.buyPrice,
+      mktValue,
+      costValue,
+      floatPnl,
+      floatPct,
+    };
   });
   const holdMktValue = +positions.reduce((a, p) => a + p.mktValue, 0).toFixed(2);
   const holdCostValue = +positions.reduce((a, p) => a + p.costValue, 0).toFixed(2);
   const floatPnl = +(holdMktValue - holdCostValue).toFixed(2);
-  const cash = account && account.cash != null ? account.cash : null;
-  let totalAssets = account && account.totalAssets != null ? account.totalAssets : null;
-  if (totalAssets == null) totalAssets = cash != null ? +(holdMktValue + cash).toFixed(2) : holdMktValue;
+  const {
+    cash,
+    available,
+    totalAssets,
+    initialCapital,
+    totalPnl,
+    totalPnlPct,
+  } = deriveAccountValuation({ holdMktValue, holdCostValue, account });
   const position = totalAssets ? +((holdMktValue / totalAssets) * 100).toFixed(1) : null;
-  // 可用资金 = 总资产 − 持仓市值(账户恒等式)。即便用户手填了「可用资金」,也不能超过 总资产−持仓市值,
-  // 否则会把已成持仓的钱重复算作可买资金。须与前端 planStore.computePortfolio 完全同口径。
-  let available;
-  if (account && account.totalAssets != null) {
-    const free = +(account.totalAssets - holdMktValue).toFixed(2);
-    const freeClamped = free > 0 ? free : 0;
-    available = cash != null ? Math.min(cash, freeClamped) : freeClamped;
-  } else {
-    available = cash != null ? cash : null;
-  }
   positions.forEach((p) => { p.weight = totalAssets ? +((p.mktValue / totalAssets) * 100).toFixed(1) : null; });
   const goal = account && account.goal != null && account.goal > 0 ? account.goal : null;
   let goalProgress = null, goalGap = null, goalReturnPct = null;
@@ -91,7 +109,23 @@ export function computePortfolio(holding, quoteMap, account) {
     goalGap = +(goal - totalAssets).toFixed(2);
     goalReturnPct = totalAssets > 0 ? +(((goal - totalAssets) / totalAssets) * 100).toFixed(1) : null;
   }
-  return { positions, holdMktValue, holdCostValue, floatPnl, totalAssets, cash, available, position, goal, goalProgress, goalGap, goalReturnPct };
+  return {
+    positions,
+    holdMktValue,
+    holdCostValue,
+    floatPnl,
+    totalAssets,
+    initialCapital,
+    totalPnl,
+    totalPnlPct,
+    cash,
+    available,
+    position,
+    goal,
+    goalProgress,
+    goalGap,
+    goalReturnPct,
+  };
 }
 
 // account 上下文(与前端 adviceDaily.accountFrom 同口径)

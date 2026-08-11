@@ -22,8 +22,13 @@ import quoteHandler from './quote.js';
 import { sendPush, pushConfigured } from './_push_send.js';
 import { ensureConfig } from './_llm_config.js';
 import { judgeConfirmation, sideOf } from './_confirm.js';
+import { actionLabelOf } from '../shared/judgeAdviceContext.js';
 import { t1StatusOf } from './_portfolio.js';
-import { collectOutcomeSnapshots, duplicateSmartAlerts } from '../shared/confirmPolicy.js';
+import {
+  collectOutcomeSnapshots,
+  duplicateSmartAlerts,
+  resolveDecisionSide,
+} from '../shared/confirmPolicy.js';
 import { applyT1ToAlert } from '../shared/t1AdvicePolicy.js';
 
 const OP_LABEL = { gte: '≥', lte: '≤' };
@@ -33,9 +38,6 @@ const OP_LABEL = { gte: '≥', lte: '≤' };
 const JUDGE_BUDGET_PER_ROUND = 4;
 const JUDGE_INTERVAL_MS = { buy: 45000, sell: 30000, stop: 20000 };
 const WATCHING_MAX_MS = 90 * 60 * 1000;
-
-// 交易语义 → 强提示动作词(与 _confirm.sideOf 的 buy/sell/stop 对齐)
-const ACTION_ZH = { buy: '买入', sell: '卖出', stop: '止损离场' };
 
 // —— 与前端 alertStore.describeAlert 同口径 ——
 function describeAlert(a) {
@@ -224,8 +226,7 @@ async function processAccount(acc) {
       const msg = hit(a, q);
       if (!msg) continue;
       hits++;
-      const side = sideOf(a);
-      const actZh = ACTION_ZH[side] || '操作';
+      const actZh = actionLabelOf(a);
       const title = `👀 到点位·观察确认中 · ${a.name || a.code}`;
       const body = `${describeAlert(a)}｜${msg}\n⏳已到${actZh}价位,但「到价≠立刻动手」。系统正在盯盘确认真正时机,确认后会再发一次「✅ 可以${actZh}」的强提示,先别急。`;
       collectDead(await sendPush(subs, { title, body, code: a.code, tag: 'watch-' + a.id, url: '/' }));
@@ -269,14 +270,14 @@ async function processAccount(acc) {
       changed = true;
       if (verdict.decision === 'confirm') {
         hits++;
-        const decisionSide = verdict.side || side;
-        const actZh = ACTION_ZH[decisionSide] || '操作';
+        const actZh = actionLabelOf(a);
         const conf = verdict.confidence != null ? `(把握${verdict.confidence})` : '';
         const title = `✅ 可以${actZh} · ${a.name || a.code}`;
         const body = `${describeAlert(a)}｜确认时机已到${conf}\n📌${verdict.reason || '多项信号共振确认'}`;
         collectDead(await sendPush(subs, { title, body, code: a.code, tag: 'confirm-' + a.id, url: '/' }));
         a.phase = 'confirmed'; a.triggeredAt = Date.now(); a.triggeredMsg = `确认${actZh}:${verdict.reason || ''}`; a.enabled = false;
         a.decisionPrice = Number(q.price);
+        const decisionSide = resolveDecisionSide(verdict, side);
         a.decisionSide = decisionSide;
         a.judgeOutcomes = {};
         const judgeEvent = {
@@ -300,8 +301,7 @@ async function processAccount(acc) {
         changed = true;
       } else if (verdict.decision === 'invalid') {
         // 交易逻辑已被破坏(如买点却已放量跌破失效价)→ 撤下该点位,发一次说明,不再纠缠
-        const decisionSide = verdict.side || side;
-        const actZh = ACTION_ZH[decisionSide] || '操作';
+        const actZh = actionLabelOf(a);
         const title = `⛔ 已失效·暂不${actZh} · ${a.name || a.code}`;
         const body = `${describeAlert(a)}｜原${actZh}逻辑已被破坏\n📌${verdict.reason || '关键条件已破坏,建议重新评估'}`;
         collectDead(await sendPush(subs, { title, body, code: a.code, tag: 'invalid-' + a.id, url: '/' }));

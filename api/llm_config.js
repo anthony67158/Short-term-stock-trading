@@ -12,6 +12,7 @@ import {
   ensureConfig, currentConfig, saveConfig, publicView, resolveJudgeEndpoint, ROLES,
 } from './_llm_config.js';
 import { poolStatus, endpointCountForRole, judgeEndpointStatus } from './_llm_pool.js';
+import { authorizePaidRequest } from './_account_auth.js';
 
 // 用一对 base/key 拉可用模型列表（OpenAI 兼容 GET /models）
 async function fetchModels(baseUrl, apiKey) {
@@ -72,6 +73,11 @@ export default async function handler(req, res) {
   applyCors(res);
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   try {
+    const accountAuth = await authorizePaidRequest(req);
+    if (!accountAuth.ok) {
+      return res.status(accountAuth.error === '请先登录' ? 401 : 403)
+        .send(JSON.stringify({ ok: false, error: accountAuth.error }));
+    }
     await ensureConfig({ maxAgeMs: 0 });
     let body = req.body;
     if (typeof body === 'string') body = JSON.parse(body || '{}');

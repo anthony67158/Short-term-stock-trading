@@ -3,6 +3,7 @@ import Icon from './Icon'
 import { authStore, useAuthStore, hasLegacyData } from '../authStore'
 import { llmConfigStore } from '../llmConfigStore'
 import { quantReportUiStore } from '../quantReportUiStore'
+import { quantModelStore } from '../quantModelStore'
 import ConfirmDialog from './ConfirmDialog'
 
 // ============ 登录/注册门户（未登录时全屏，云端账号）============
@@ -105,6 +106,9 @@ export function AccountMenu() {
             )}
             <div className="acct-item" onClick={() => { llmConfigStore.open(); setOpen(false) }}>
               <Icon name="brain" size={13} />AI 模型配置
+            </div>
+            <div className="acct-item" onClick={() => { quantModelStore.open(); setOpen(false) }}>
+              <Icon name="activity" size={13} />量化模型配置
             </div>
             <div className="acct-item" onClick={() => { quantReportUiStore.open(); setOpen(false) }}>
               <Icon name="gauge" size={13} />量化汇报

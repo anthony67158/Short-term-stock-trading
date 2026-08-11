@@ -154,7 +154,7 @@ function feeOf(c) {
   return (c.buyFee ?? 0) + (c.sellFee ?? 0)
 }
 // 单条流水行渲染（区分 纯买入/纯卖出/平仓/做T）
-function TxnRow({ c, onDelete, showDate }) {
+function TxnRow({ c, onDelete, onEditDate, showDate }) {
   const t = typeKey(c)
   const tag = t === 'T'
     ? { cls: c.tDir === 'reverse' ? 'rev' : 'pos', label: c.tDir === 'reverse' ? '反T' : '正T' }
@@ -183,7 +183,12 @@ function TxnRow({ c, onDelete, showDate }) {
         : <span className="di-net di-cash">{t === 'BUY' ? '建/加仓' : '—'}</span>}
       {c.live
         ? <span className="di-del-ph" title="做T在持仓中，请在「我的计划」里增删">·</span>
-        : <span className="del di-del" title="删除此记录" onClick={() => onDelete(c)}>×</span>}
+        : <span className="di-row-actions">
+            <button className="di-date-edit" title="修改操作日期" onClick={() => onEditDate(c)}>
+              <Icon name="edit" size={11} />
+            </button>
+            <button className="del di-del" title="删除此记录" onClick={() => onDelete(c)}>×</button>
+          </span>}
     </div>
   )
 }
@@ -191,6 +196,9 @@ function DailyLog({ records }) {
   const [filter, setFilter] = useState('all') // all | BUY | SELL | CLOSE | T
   const [confirmClear, setConfirmClear] = useState(false)
   const [delTarget, setDelTarget] = useState(null) // 待删除的单条记录（可能级联同批）
+  const [dateTarget, setDateTarget] = useState(null)
+  const [tradeDate, setTradeDate] = useState('')
+  const [dateError, setDateError] = useState('')
   const [collapsed, setCollapsed] = useState({}) // key(day 或 day|code) → 是否折叠
   const [groupMode, setGroupMode] = useState('day') // day 按时间 | stock 按个股
   const toggle = (key) => setCollapsed((s) => ({ ...s, [key]: !s[key] }))
@@ -210,6 +218,20 @@ function DailyLog({ records }) {
 
   // 按个股维度：跨所有日期聚合同一只票的全部操作（groupByStock 已按最近一笔时间倒序）
   const stockGroups = groupByStock(filtered)
+  const openDateEditor = (record) => {
+    const timestamp = record.at || record.sellAt || record.buyAt || Date.now()
+    setDateTarget(record)
+    setTradeDate(dayKey(timestamp))
+    setDateError('')
+  }
+  const saveTradeDate = () => {
+    const result = planStore.updateClosedDate(dateTarget?.id, tradeDate)
+    if (!result?.ok) {
+      setDateError(result?.error || '日期修改失败')
+      return
+    }
+    setDateTarget(null)
+  }
 
   return (
     <div className="panel">
@@ -291,6 +313,34 @@ function DailyLog({ records }) {
           </div>
         </div>
       )}
+      {dateTarget && (
+        <div className="modal-mask" onClick={() => setDateTarget(null)}>
+          <div className="confirm-dialog trade-date-dialog" onClick={(event) => event.stopPropagation()}>
+            <div className="confirm-title"><Icon name="edit" size={18} /> 修改操作日期</div>
+            <div className="confirm-body">
+              <b>{dateTarget.name || dateTarget.code}</b> · {typeKey(dateTarget) === 'T' ? '做T' : typeKey(dateTarget) === 'BUY' ? '买入/加仓' : '卖出/减仓'}
+              <label className="trade-date-field">
+                <span>实际操作日期</span>
+                <input
+                  className="wl-input"
+                  type="date"
+                  value={tradeDate}
+                  max={dayKey(Date.now())}
+                  onChange={(event) => { setTradeDate(event.target.value); setDateError('') }}
+                />
+              </label>
+              <small>同一次结算产生的关联流水会同步调整，T+1 与军师建议将按新日期重新计算。</small>
+              {dateError && <div className="err">{dateError}</div>}
+            </div>
+            <div className="confirm-actions">
+              <button className="btn" onClick={() => setDateTarget(null)}>取消</button>
+              <button className="btn btn-primary" onClick={saveTradeDate}>
+                <Icon name="check" size={13} /> 保存日期
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {days.length === 0 ? (
         <div className="empty">买入、卖出或做T后，这里按{groupMode === 'stock' ? '个股' : '天'}汇总你的操作，方便回看进出与盈亏。</div>
       ) : groupMode === 'stock' ? (
@@ -322,7 +372,7 @@ function DailyLog({ records }) {
                         </span>
                       </div>
                     )}
-                    {g.items.map((c, i) => <TxnRow c={c} key={c.id || i} onDelete={setDelTarget} showDate />)}
+                    {g.items.map((c, i) => <TxnRow c={c} key={c.id || i} onDelete={setDelTarget} onEditDate={openDateEditor} showDate />)}
                   </div>
                 )}
               </div>
@@ -381,7 +431,7 @@ function DailyLog({ records }) {
                             </span>
                             <span className={'ds-stock-net ' + (g.net >= 0 ? 'red' : 'green')}>{fmtMoney(g.net)}</span>
                           </div>
-                          {!stockFolded && g.items.map((c, i) => <TxnRow c={c} key={c.id || i} onDelete={setDelTarget} />)}
+                          {!stockFolded && g.items.map((c, i) => <TxnRow c={c} key={c.id || i} onDelete={setDelTarget} onEditDate={openDateEditor} />)}
                         </div>
                       )
                     })}

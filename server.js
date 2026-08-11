@@ -14,7 +14,7 @@ import http from 'node:http';
 import { readdirSync, existsSync, statSync, createReadStream } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
-import { adviceTimerBody } from './api/_advice_timer.js';
+import { adviceTimerBody, v2AccuracyTimerBody } from './api/_advice_timer.js';
 
 const PORT = process.env.FC_SERVER_PORT || process.env.PORT || 9000;
 const ROOT = process.cwd();
@@ -79,16 +79,17 @@ const server = http.createServer(async (req, res) => {
     const raw = await parseBody(req);
     let event = null;
     try { event = JSON.parse(raw || '{}'); } catch { /* ignore */ }
-    const timerBody = adviceTimerBody(event, process.env.CRON_KEY);
-    if (!timerBody) { res.statusCode = 403; res.end('forbidden'); return; }
+    const adviceBody = adviceTimerBody(event, process.env.CRON_KEY);
+    const v2Body = v2AccuracyTimerBody(event, process.env.CRON_KEY);
+    if (!adviceBody && !v2Body) { res.statusCode = 403; res.end('forbidden'); return; }
     req.query = {};
-    req.body = timerBody;
+    req.body = adviceBody || v2Body;
     req.headers['x-cron-key'] = process.env.CRON_KEY;
     res.status = (code) => { res.statusCode = code; return res; };
     res.send = (payload) => { res.end(typeof payload === 'string' ? payload : JSON.stringify(payload)); return res; };
     res.json = (obj) => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(obj)); return res; };
     try {
-      await handlers.cron_advice(req, res);
+      await handlers[adviceBody ? 'cron_advice' : 'cron_v2_accuracy'](req, res);
     } catch (e) {
       if (!res.writableEnded) { res.statusCode = 500; res.end(JSON.stringify({ ok: false, error: String(e.message || e) })); }
     }

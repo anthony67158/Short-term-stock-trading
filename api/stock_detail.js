@@ -1,5 +1,10 @@
 import { sendJson, sendError, num } from './_lib.js';
-import { computeTechnicals, fetchQuantPredict } from './_ta.js';
+import { computeTechnicals, fetchSelectedQuantPredict } from './_ta.js';
+import {
+  normalizeQuantModelVersion,
+  QUANT_MODEL_V2,
+} from '../shared/modelVersion.js';
+import { canUseQuantModel } from './_quant_access.js';
 
 // secid 前缀：6/9/5 开头沪市=1，其余=0
 function toSecid(code) {
@@ -124,6 +129,16 @@ export default async function handler(req, res) {
     const lmt = Math.min(Number(req.query.lmt) || 120, 500);
     const wantTrends = req.query.trends === '1';
     const wantQuant = req.query.quant === '1';
+    const quantModelVersion = normalizeQuantModelVersion(req.query.model);
+    if (
+      wantQuant
+      && !(await canUseQuantModel(req, quantModelVersion))
+    ) {
+      return sendJson(res, {
+        ok: false,
+        error: 'V2模型需要已登录且当前账号已选择V2',
+      }, { cache: 0 });
+    }
     const secid = toSecid(code);
 
     // K线多镜像（多个负载均衡节点，任一有效即可）
@@ -229,17 +244,51 @@ export default async function handler(req, res) {
     // 量化预测（quant=1 时调用；把本地已取到的 K线传给量化服务，绕开其取数被风控）
     // 可选持仓：holdCost 传入则给"加/减/做T"建议，否则给"买/观望"建议
     let quant = null;
+    let quantError = '';
     if (wantQuant && candles.length >= 25) {
       const holdCost = Number(req.query.holdCost) || null;
       const hold = holdCost ? { cost: holdCost, qty: Number(req.query.holdQty) || null } : null;
-      try { quant = await fetchQuantPredict(code, candles, hold, 20000); } catch { /* 静默降级 */ }
+      try {
+        quant = await fetchSelectedQuantPredict(
+          quantModelVersion,
+          code,
+          candles,
+          hold,
+          20000,
+        )
+      } catch (error) {
+        quantError = String(error?.message || error || '')
+      }
+    }
+    if (
+      wantQuant
+      && quantModelVersion === QUANT_MODEL_V2
+      && !quant
+    ) {
+      return sendJson(res, {
+        ok: false,
+        error: quantError || 'V2模型服务未运行或预测不可用',
+        quantModelVersion,
+      }, { cache: 0 })
     }
 
     // 缓存策略：带量化请求时，拿到 quant 才短缓存(60s)，没拿到不缓存(下次可重试冷启动后的服务)
     const cacheSec = wantQuant ? (quant ? 60 : 0) : (candles.length ? 120 : 0);
     sendJson(
       res,
-      { ok: true, code, updatedAt: Date.now(), profile, klt, candles, trends, preClose, tech, quant },
+      {
+        ok: true,
+        code,
+        updatedAt: Date.now(),
+        profile,
+        klt,
+        candles,
+        trends,
+        preClose,
+        tech,
+        quant,
+        quantModelVersion,
+      },
       { cache: cacheSec }
     );
   } catch (e) {

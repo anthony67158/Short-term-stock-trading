@@ -1,0 +1,70 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+
+import {
+  actionIntentOf,
+  actionLabelOf,
+  adviceSupportsIntent,
+  buildJudgeAdviceContext,
+} from '../shared/judgeAdviceContext.js'
+
+test('加仓预警保留独立动作语义，不降级成普通买入', () => {
+  const alert = { actKind: 'add', note: '补仓点' }
+
+  assert.equal(actionIntentOf(alert), 'add')
+  assert.equal(actionLabelOf(alert), '加仓')
+})
+
+test('Judge建议快照覆盖军师的方向、风控、仓位与多维依据', () => {
+  const context = buildJudgeAdviceContext({
+    action: '加仓',
+    actionPlan: '回踩10元加仓1手',
+    addPrice: 10,
+    stopPrice: 9.6,
+    targetPrice: 11,
+    riskReward: '2.5:1',
+    positionNote: '加仓后单票不超过20%',
+    techNote: '站上MA10',
+    fundNote: '主力连续流入',
+    newsNote: '无明显利空',
+    quantNote: '量化上涨概率62%',
+    bearCase: '板块转弱',
+    invalidation: '跌破9.6元',
+  })
+
+  assert.deepEqual(context, {
+    action: '加仓',
+    tier: '',
+    title: '',
+    actionPlan: '回踩10元加仓1手',
+    exitTiming: '',
+    opQty: '',
+    addPrice: 10,
+    reducePrice: null,
+    stopPrice: 9.6,
+    targetPrice: 11,
+    riskReward: '2.5:1',
+    positionNote: '加仓后单票不超过20%',
+    reason: '',
+    techNote: '站上MA10',
+    fundNote: '主力连续流入',
+    newsNote: '无明显利空',
+    quantNote: '量化上涨概率62%',
+    bearCase: '板块转弱',
+    invalidation: '跌破9.6元',
+    confidence: '',
+  })
+})
+
+test('军师明确写不加仓或赔率不足时不能创建加仓提醒', () => {
+  assert.equal(adviceSupportsIntent('add', {
+    action: '持有',
+    addPrice: 10,
+    actionPlan: '回踩10元也暂不加仓，继续观察',
+  }), false)
+  assert.equal(adviceSupportsIntent('add', {
+    action: '持有',
+    addPrice: 10,
+    riskReward: '盈亏比1.2:1，赔率不足，因此不新增仓位',
+  }), false)
+})

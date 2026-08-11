@@ -4,6 +4,11 @@ import { computeSellAllowance } from '../shared/decisionGuards.js'
 import { appendExecution, createRecommendation, decisionLedgerStats, removeExecutions } from '../shared/decisionLedger.js'
 import { proposalAlertSpec, sanitizeTradeProposal } from '../shared/tradeProposal.js'
 import { applyT1ToAlert } from '../shared/t1AdvicePolicy.js'
+import { adviceSupportsIntent, buildJudgeAdviceContext } from '../shared/judgeAdviceContext.js'
+import {
+  applyAccountCashFlow,
+  deriveAccountValuation,
+} from '../shared/accountValuation.js'
 // 注意:adviceBatch 只在 mergeCloud 运行时用到,这里【不能】做顶层静态 import——
 // 否则 planStore→adviceBatch→adviceRunner→serverAdvice→authStore 形成模块初始化环,
 // 而 authStore 顶层会调用 planStore.registerSaver(),此时 planStore 尚未初始化 → 整包崩(白屏卡启动)。
@@ -18,6 +23,44 @@ function roundPx(v) {
   if (v == null || isNaN(v)) return null
   const n = Number(v)
   return n < 10 ? +n.toFixed(3) : +n.toFixed(2)
+}
+
+function replaceLocalDate(timestamp, dateText) {
+  const match = String(dateText || '').match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!match) return null
+  const source = new Date(Number(timestamp) || Date.now())
+  const next = new Date(
+    Number(match[1]),
+    Number(match[2]) - 1,
+    Number(match[3]),
+    source.getHours(),
+    source.getMinutes(),
+    source.getSeconds(),
+    source.getMilliseconds(),
+  )
+  if (
+    next.getFullYear() !== Number(match[1]) ||
+    next.getMonth() !== Number(match[2]) - 1 ||
+    next.getDate() !== Number(match[3])
+  ) return null
+  const today = new Date()
+  const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+  if (dateText > todayKey) return null
+  return next.getTime()
+}
+
+function shiftRecordDate(record, dateText) {
+  const primary = record.at || record.sellAt || record.buyAt
+  const nextPrimary = replaceLocalDate(primary, dateText)
+  if (!nextPrimary) return null
+  const shift = (value) => value ? replaceLocalDate(value, dateText) : value
+  return {
+    ...record,
+    at: record.at ? shift(record.at) : nextPrimary,
+    buyAt: record.buyAt ? shift(record.buyAt) : record.buyAt,
+    sellAt: record.sellAt ? shift(record.sellAt) : record.sellAt,
+    editedAt: Date.now(),
+  }
 }
 // 从最新 AI 操作建议缓存里取【标准化】的止盈(tp)/止损(sl)——全局唯一口径。
 // AI 建议字段:targetPrice=目标价(止盈)、stopPrice=止损价;统一映射成持仓/候选卡的 tp/sl。
@@ -196,6 +239,7 @@ function archiveTFlows(h, batchId) {
       qty: p.qty, buyPrice: p.buyPrice, sellPrice: p.sellPrice,
       buyFee: p.buyFee, sellFee: p.sellFee,
       grossPnl: p.grossPnl, netPnl: p.netPnl, realizedPnl: p.netPnl,
+      cashFlow: p.netPnl, cashApplied: !!p.cashApplied,
       pnlPct: p.buyPrice ? +(p.netPnl / (p.buyPrice * p.qty * 100 + p.buyFee) * 100).toFixed(2) : 0,
       tDir: p.tDir, holdingId: h.id,
       buyAt: p.buyAt, sellAt: p.sellAt, at: p.at,
@@ -208,6 +252,7 @@ function archiveTFlows(h, batchId) {
       id: uid(), batchId, type: 'BUY', code: h.code, name: h.name, side: 'buy',
       qty: r.openBuy, price: r.openBuyAvg, fee: r.openBuyFee, amount,
       cashFlow: -(amount + r.openBuyFee), realizedPnl: null,
+      cashApplied: !!r.openBuyCashApplied,
       holdingId: h.id, at: r.openBuyAt || Date.now(), note: '做T净买入(加仓)',
     })
   }
@@ -223,6 +268,7 @@ function archiveTFlows(h, batchId) {
       id: uid(), batchId, type: 'SELL', kind: 'SELL', code: h.code, name: h.name, side: 'sell',
       qty: r.openSell, price: r.openSellAvg, amount, fee: r.openSellFee,
       cashFlow: +(amount - r.openSellFee).toFixed(2),
+      cashApplied: !!r.openSellCashApplied,
       costPrice: h.buyPrice, buyPrice: h.buyPrice, sellPrice: r.openSellAvg,
       buyFee: buyFeePart, sellFee: r.openSellFee,
       grossPnl: +(amount - cost).toFixed(2), netPnl, realizedPnl: netPnl,
@@ -243,6 +289,19 @@ function makeBuyTxn(code, name, price, qty, fee, holdingId) {
     realizedPnl: null,                // 纯买入无已实现盈亏
     holdingId, at: Date.now(),
   }
+}
+
+function updateAccountCash(cashFlow) {
+  const result = applyAccountCashFlow(state.account, cashFlow)
+  if (result.applied) state.account = result.account
+  return result.applied
+}
+
+function tFlowCashFlow(side, price, qty, fee) {
+  const amount = Number(price) * Number(qty) * 100
+  return side === 'buy'
+    ? +(-(amount + Number(fee || 0))).toFixed(2)
+    : +(amount - Number(fee || 0)).toFixed(2)
 }
 
 export const planStore = {
@@ -470,6 +529,7 @@ export const planStore = {
     }]
     // 记录一条纯买入交易流水
     const txn = makeBuyTxn(p.code, p.name, price, q, fee, hid)
+    txn.cashApplied = updateAccountCash(txn.cashFlow)
     state.closed = [txn, ...state.closed].slice(0, 300)
     this._recordExecution({ code: p.code, name: p.name, side: 'buy', price, qty: q, transactionId: txn.id })
     this._syncPlanAlerts(hid)
@@ -493,6 +553,7 @@ export const planStore = {
     state.plan = state.plan.filter((x) => x.code !== stock.code)
     state.alerts = (state.alerts || []).filter((a) => a.candCode !== stock.code) // 已买入 → 移除买点预警
     const txn = makeBuyTxn(stock.code, stock.name, price, q, fee, hid)
+    txn.cashApplied = updateAccountCash(txn.cashFlow)
     state.closed = [txn, ...state.closed].slice(0, 300)
     this._recordExecution({ code: stock.code, name: stock.name, side: 'buy', price, qty: q, transactionId: txn.id })
     this._syncPlanAlerts(hid)
@@ -548,6 +609,7 @@ export const planStore = {
       grossPnl: +grossPnl.toFixed(2), netPnl, pnlPct,
       buyAt: h.buyAt, sellAt: Date.now(), at: Date.now(),
     }
+    sellTxn.cashApplied = updateAccountCash(sellTxn.cashFlow)
     state.closed = [sellTxn, ...archived, ...state.closed].slice(0, 300)
     this._recordExecution({ code: h.code, name: h.name, side: 'sell', price, qty: sq, source: opts.source, transactionId: sellTxn.id })
     emit()
@@ -577,6 +639,7 @@ export const planStore = {
       : x)
     // 记一条买入交易流水
     const txn = makeBuyTxn(h.code, h.name, price, q, addFee, id)
+    txn.cashApplied = updateAccountCash(txn.cashFlow)
     state.closed = [txn, ...state.closed].slice(0, 300)
     this._recordExecution({ code: h.code, name: h.name, side: 'buy', price, qty: q, source: opts.source, transactionId: txn.id })
     emit()
@@ -616,6 +679,33 @@ export const planStore = {
     state.closed = []
     emit()
   },
+  updateClosedDate(id, dateText) {
+    const target = state.closed.find((item) => item.id === id)
+    if (!target) return { ok: false, error: '交易记录不存在' }
+    if (!replaceLocalDate(target.at || target.sellAt || target.buyAt, dateText)) {
+      return { ok: false, error: '请选择今天或更早的有效日期' }
+    }
+    snapshot(`修改交易日期 ${target.name || target.code || ''}`.trim())
+    const ids = new Set(
+      (target.batchId
+        ? state.closed.filter((item) => item.batchId === target.batchId)
+        : [target]
+      ).map((item) => item.id),
+    )
+    state.closed = state.closed.map((item) => {
+      if (!ids.has(item.id)) return item
+      return shiftRecordDate(item, dateText) || item
+    })
+    state.decisionLog = (state.decisionLog || []).map((event) => {
+      if (!ids.has(event?.transactionId)) return event
+      const shifted = shiftRecordDate(event, dateText)
+      return shifted
+        ? { ...shifted, executedAt: event.executedAt ? replaceLocalDate(event.executedAt, dateText) : shifted.at }
+        : event
+    })
+    emit()
+    return { ok: true, updated: ids.size }
+  },
   // 删除单条交易记录：连带删除同一次操作(同 batchId)产生的其他记录；
   // 并联动调整持仓手数/成本，保证「持仓」与「交易记录」始终对得上。
   removeClosed(id) {
@@ -627,6 +717,10 @@ export const planStore = {
       ? state.closed.filter((x) => x.batchId === target.batchId)
       : [target]
     const delIds = new Set(toDelete.map((x) => x.id))
+    const appliedCashFlow = toDelete.reduce(
+      (sum, record) => sum + (record.cashApplied ? Number(record.cashFlow) || 0 : 0),
+      0,
+    )
 
     // 按个股汇总这批记录对持仓手数的净影响：删 BUY→减手数、删 SELL→加回手数（T 不影响底仓）
     const deltaByCode = {}
@@ -639,6 +733,7 @@ export const planStore = {
     // 先移除记录
     state.closed = state.closed.filter((x) => !delIds.has(x.id))
     state.decisionLog = removeExecutions(state.decisionLog, [...delIds])
+    if (appliedCashFlow) updateAccountCash(-appliedCashFlow)
 
     // 再联动持仓
     for (const [code, delta] of Object.entries(deltaByCode)) {
@@ -716,7 +811,17 @@ export const planStore = {
     snapshot(`做T ${side === 'buy' ? '低吸' : '高抛'} ${h.name || h.code}`)
     const amount = p * q * 100
     const fee = side === 'buy' ? calcBuyFee(amount) : calcSellFee(amount)
-    const flow = { id: uid(), side, price: p, qty: q, fee, at: Date.now() }
+    const cashFlow = tFlowCashFlow(side, p, q, fee)
+    const flow = {
+      id: uid(),
+      side,
+      price: p,
+      qty: q,
+      fee,
+      cashFlow,
+      cashApplied: updateAccountCash(cashFlow),
+      at: Date.now(),
+    }
     const baseQty = h.baseQty || h.qty
     state.holding = state.holding.map((x) => x.id === id
       ? { ...x, baseQty, tFlows: [...(x.tFlows || []), flow] }
@@ -731,11 +836,40 @@ export const planStore = {
   },
   // 删除某笔做T流水（持仓上的收益/成本自动重算）
   removeTFlow(id, flowId) {
+    const h = state.holding.find((item) => item.id === id)
+    const flow = h && (h.tFlows || []).find((item) => item.id === flowId)
+    if (!flow) return
     snapshot('删除做T流水')
+    if (flow.cashApplied) updateAccountCash(-Number(flow.cashFlow || 0))
     state.holding = state.holding.map((x) => x.id === id
       ? { ...x, tFlows: (x.tFlows || []).filter((f) => f.id !== flowId) }
       : x)
     emit()
+  },
+  updateTFlowDate(id, flowId, dateText) {
+    const h = state.holding.find((item) => item.id === id)
+    const flow = h && (h.tFlows || []).find((item) => item.id === flowId)
+    if (!h || !flow) return { ok: false, error: '做T流水不存在或已被删除' }
+    const nextAt = replaceLocalDate(flow.at, dateText)
+    if (!nextAt) return { ok: false, error: '请选择今天或更早的有效日期' }
+
+    snapshot(`修改做T日期 ${h.name || h.code || ''}`.trim())
+    state.holding = state.holding.map((item) => item.id === id
+      ? {
+          ...item,
+          tFlows: (item.tFlows || []).map((value) =>
+            value.id === flowId
+              ? { ...value, at: nextAt, editedAt: Date.now() }
+              : value
+          ),
+        }
+      : item)
+    emit()
+
+    const todayStart = new Date()
+    todayStart.setHours(0, 0, 0, 0)
+    if (nextAt < todayStart.getTime()) this.autoSettleTFlows()
+    return { ok: true }
   },
   // 编辑某笔做T流水（改方向/价格/手数，手续费按新值重算）
   editTFlow(id, flowId, { side, price, qty }) {
@@ -757,8 +891,17 @@ export const planStore = {
     snapshot('编辑做T流水')
     const amount = p * finalQty * 100
     const fee = side === 'buy' ? calcBuyFee(amount) : calcSellFee(amount)
+    const cashFlow = tFlowCashFlow(side, p, finalQty, fee)
+    const cashApplied = oldFlow.cashApplied
+      ? updateAccountCash(cashFlow - Number(oldFlow.cashFlow || 0))
+      : false
     state.holding = state.holding.map((x) => x.id === id
-      ? { ...x, tFlows: (x.tFlows || []).map((f) => f.id === flowId ? { ...f, side, price: p, qty: finalQty, fee } : f) }
+      ? {
+          ...x,
+          tFlows: (x.tFlows || []).map((f) => f.id === flowId
+            ? { ...f, side, price: p, qty: finalQty, fee, cashFlow, cashApplied }
+            : f),
+        }
       : x)
     emit()
     return {
@@ -1057,6 +1200,7 @@ export const planStore = {
     // opQty 是「补1手/减1手」这类操作量标签;actionPlan/exitTiming 给「到价后怎么确认」
     const opQty = adv.opQty || ''
     const timing = adv.exitTiming || adv.actionPlan || ''
+    const judgeContext = buildJudgeAdviceContext(adv)
     const t1 = holder ? t1StatusOf(code) : null
     const old = (state.alerts || []).filter((a) => a.actCode === code)
     const rebuilt = []
@@ -1065,20 +1209,25 @@ export const planStore = {
       if (price == null || isNaN(price)) return
       const v = roundPx(price)
       if (v == null || !(Number(v) > 0)) return
+      const actionQty = kind === 'add'
+        ? (/加仓|补仓|买回|接回/.test(opQty) ? opQty : '')
+        : (/减仓|卖出|清仓/.test(opQty) ? opQty : '')
       const note = kind === 'add' ? '补仓点' : '减仓点'
       const prev = old.find((a) => a.actKind === kind)
       if (prev && Number(prev.value) === Number(v)) {
-        rebuilt.push(applyT1ToAlert({ ...prev, opQty, timing }, kind === 'reduce' ? t1 : null))
+        rebuilt.push(applyT1ToAlert({ ...prev, opQty: actionQty, timing, judgeContext }, kind === 'reduce' ? t1 : null))
         return
       }
       rebuilt.push(applyT1ToAlert({
         id: uid(), enabled: true, createdAt: Date.now(), triggeredAt: null, triggeredMsg: '',
         code, name, type: 'price', op, value: Number(v), note,
-        actCode: code, actKind: kind, opQty, timing,
+        actCode: code, actKind: kind, opQty: actionQty, timing, judgeContext,
         phase: 'armed',
       }, kind === 'reduce' ? t1 : null))
     }
-    build('add', 'lte', adv.addPrice, owner.muteAdd)
+    if (adviceSupportsIntent('add', judgeContext)) {
+      build('add', 'lte', adv.addPrice, owner.muteAdd)
+    }
     build('reduce', 'gte', adv.reducePrice, owner.muteReduce)
     state.alerts = [...rebuilt, ...rest]
     emit()
@@ -1332,6 +1481,7 @@ export const planStore = {
       const stop = Number(r.stop) || null
       const maxHigh = Math.max(...win.map((c) => c.high || c.close || base))
       const minLow = Math.min(...win.map((c) => c.low || c.close || base))
+      const minClose = Math.min(...win.map((c) => c.close || base))
       const lastClose = win[win.length - 1].close || base
       const maxUpPct = +(((maxHigh - base) / base) * 100).toFixed(2)   // 窗口内最大有利波动
       const maxDownPct = +(((minLow - base) / base) * 100).toFixed(2)  // 窗口内最大不利波动(负数)
@@ -1356,12 +1506,12 @@ export const planStore = {
           note = target ? `3日内最高${maxHigh}未及目标${target}(最大+${maxUpPct}%)` : `3日内最大+${maxUpPct}%`
         }
       } else if (hold) {
-        if (stop && minLow <= stop) {                // 跌破止损 → 提前判负(本应减/清仓)
+        if (stop && minClose <= stop) {              // 收盘确认跌破止损 → 判负，盘中插针不误伤
           hit = false; settled = true
-          note = `持有期内最低${minLow}跌破止损${stop}，本应减仓`
-        } else if (windowComplete) {                 // 没跌破止损 → 回撤在容忍内即算持有正确
-          hit = maxDownPct >= -HOLD_DOWN_TH; settled = true
-          note = `持有期内最大回撤${maxDownPct}%（容忍-${HOLD_DOWN_TH}%），收盘${closePct}%`
+          note = `持有期内收盘最低${minClose}有效跌破止损${stop}，本应减仓`
+        } else if (windowComplete) {                 // 持有看最终管理结果，不用盘中影线判死
+          hit = closePct >= -HOLD_DOWN_TH; settled = true
+          note = `持有期末收盘${closePct}%（容忍-${HOLD_DOWN_TH}%），盘中最大回撤${maxDownPct}%`
         }
       } else if (bear) {
         if (windowComplete) {                         // 看空/观望：没明显上涨即对
@@ -1574,6 +1724,7 @@ export function computeTFlows(flows) {
         buyFee: +((f.side === 'buy' ? feeThisCur : feeThisHead)).toFixed(2),
         sellFee: +((f.side === 'buy' ? feeThisHead : feeThisCur)).toFixed(2),
         grossPnl: +gross.toFixed(2), netPnl: net,
+        cashApplied: buyLeg.cashApplied === true && sellLeg.cashApplied === true,
         tDir: buyAt <= sellAt ? 'positive' : 'reverse',
         buyAt, sellAt, at: Math.max(buyAt, sellAt),
       })
@@ -1583,7 +1734,15 @@ export function computeTFlows(flows) {
       head.fee -= head.fee * (m / (head.qty + m))
       if (head.qty <= 1e-9) queue[opp].shift()
     }
-    if (remain > 0) queue[f.side].push({ price: f.price, qty: remain, fee: feeLeft, at: f.at })
+    if (remain > 0) {
+      queue[f.side].push({
+        price: f.price,
+        qty: remain,
+        fee: feeLeft,
+        at: f.at,
+        cashApplied: f.cashApplied === true,
+      })
+    }
   }
   const openBuy = queue.buy.reduce((a, x) => a + x.qty, 0)
   const openSell = queue.sell.reduce((a, x) => a + x.qty, 0)
@@ -1596,9 +1755,12 @@ export function computeTFlows(flows) {
   const openSellAvg = openSell ? +(openSellAmt / (openSell * 100)).toFixed(3) : null
   const openBuyAt = queue.buy.length ? Math.max(...queue.buy.map((x) => x.at)) : null
   const openSellAt = queue.sell.length ? Math.max(...queue.sell.map((x) => x.at)) : null
+  const openBuyCashApplied = queue.buy.length > 0 && queue.buy.every((x) => x.cashApplied)
+  const openSellCashApplied = queue.sell.length > 0 && queue.sell.every((x) => x.cashApplied)
   return {
     realized: +realized.toFixed(2), pairs, openBuy, openSell, pairList,
     openBuyAvg, openBuyFee, openBuyAt, openSellAvg, openSellFee, openSellAt,
+    openBuyCashApplied, openSellCashApplied,
   }
 }
 
@@ -1621,33 +1783,46 @@ export function computePortfolio(holding, quoteMap, account) {
     // 保证市值/浮盈亏永远有个合理数值,既不为 0 也不会被算成 -100%。
     const price = fin(q && Number(q.price) > 0 ? q.price
       : (q && Number(q.prevClose) > 0 ? Number(q.prevClose) : h.buyPrice))
-    const shares = fin(h.qty) * 100
+    const baseQty = fin(h.qty)
+    const tFlows = computeTFlows(h.tFlows)
+    const liveQty = Math.max(0, baseQty + fin(tFlows.openBuy) - fin(tFlows.openSell))
+    const shares = liveQty * 100
     const mktValue = +(price * shares).toFixed(2)          // 市值
-    const costValue = +(fin(h.buyPrice) * shares + fin(h.buyFee)).toFixed(2) // 含费成本
+    let costValue = fin(h.buyPrice) * baseQty * 100 + fin(h.buyFee)
+    if (tFlows.openBuy > 0 && tFlows.openBuyAvg != null) {
+      costValue += fin(tFlows.openBuyAvg) * fin(tFlows.openBuy) * 100 + fin(tFlows.openBuyFee)
+    } else if (tFlows.openSell > 0 && baseQty > 0) {
+      costValue *= Math.max(0, baseQty - fin(tFlows.openSell)) / baseQty
+    }
+    costValue = +costValue.toFixed(2) // 含费动态持仓成本
     const floatPnl = +(mktValue - costValue).toFixed(2)     // 浮动盈亏
     const floatPct = costValue ? +((floatPnl / costValue) * 100).toFixed(2) : 0
-    return { id: h.id, code: h.code, name: h.name, qty: h.qty, price, buyPrice: h.buyPrice, mktValue, costValue, floatPnl, floatPct }
+    return {
+      id: h.id,
+      code: h.code,
+      name: h.name,
+      qty: liveQty,
+      baseQty,
+      price,
+      buyPrice: h.buyPrice,
+      mktValue,
+      costValue,
+      floatPnl,
+      floatPct,
+    }
   })
   const holdMktValue = +positions.reduce((a, p) => a + p.mktValue, 0).toFixed(2)   // 持仓总市值
   const holdCostValue = +positions.reduce((a, p) => a + p.costValue, 0).toFixed(2) // 持仓总成本
   const floatPnl = +(holdMktValue - holdCostValue).toFixed(2)                       // 总浮盈
-  // 总资产：用户填了就用填的；否则用 持仓市值 + 现金(若填) 估算
-  const cash = account && account.cash != null ? account.cash : null
-  let totalAssets = account && account.totalAssets != null ? account.totalAssets : null
-  if (totalAssets == null) totalAssets = cash != null ? +(holdMktValue + cash).toFixed(2) : holdMktValue
+  const {
+    cash,
+    available,
+    totalAssets,
+    initialCapital,
+    totalPnl,
+    totalPnlPct,
+  } = deriveAccountValuation({ holdMktValue, holdCostValue, account })
   const position = totalAssets ? +((holdMktValue / totalAssets) * 100).toFixed(1) : null // 总仓位%
-  // 可用资金 = 总资产 − 持仓市值(账户恒等式:A股账户「总资产」= 持仓市值 + 可用资金)。
-  // ★关键修正:即便用户在「可用资金」里手填了数字,也【不能超过 总资产−持仓市值】——否则会把
-  //   已经买成持仓的钱重复算作可买资金(用户常把「总本金」误填进可用资金,导致 AI 拿着不存在的钱建议加仓)。
-  //   故:用户填了总资产时,可用一律以「总资产−持仓市值」封顶并夹到 ≥0;只填可用资金(未填总资产)时才直接采信。
-  let available
-  if (account && account.totalAssets != null) {
-    const free = +(account.totalAssets - holdMktValue).toFixed(2)
-    const freeClamped = free > 0 ? free : 0
-    available = cash != null ? Math.min(cash, freeClamped) : freeClamped
-  } else {
-    available = cash != null ? cash : null
-  }
   // 单票占比（对总资产）
   positions.forEach((p) => { p.weight = totalAssets ? +((p.mktValue / totalAssets) * 100).toFixed(1) : null })
   // ===== 目标资产（以终为始）=====
@@ -1659,5 +1834,21 @@ export function computePortfolio(holding, quoteMap, account) {
     goalGap = +(goal - totalAssets).toFixed(2)                // 距目标还差(元;负=已超额)
     goalReturnPct = totalAssets > 0 ? +(((goal - totalAssets) / totalAssets) * 100).toFixed(1) : null // 从现在到达标还需涨幅%
   }
-  return { positions, holdMktValue, holdCostValue, floatPnl, totalAssets, cash, available, position, goal, goalProgress, goalGap, goalReturnPct }
+  return {
+    positions,
+    holdMktValue,
+    holdCostValue,
+    floatPnl,
+    totalAssets,
+    initialCapital,
+    totalPnl,
+    totalPnlPct,
+    cash,
+    available,
+    position,
+    goal,
+    goalProgress,
+    goalGap,
+    goalReturnPct,
+  }
 }

@@ -189,7 +189,8 @@ export const authStore = {
     try {
       const r = await api('get', { nick: state.user, pw: _pw })
       if (r && r.ok && r.data) {
-        if (Number.isInteger(r.revision)) _cloudRevision = r.revision
+        // pull 只增量合并 AI/预警，并未合并 holding/closed。
+        // 不能在此提升 revision，否则旧持仓会带着最新 revision 通过保存校验并覆盖云端交易。
         state.lastSyncedAt = r.updatedAt || state.lastSyncedAt
         try { planStore.mergeCloud(r.data) } catch { /* ignore */ }
         return true

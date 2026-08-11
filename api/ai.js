@@ -1,7 +1,8 @@
 // AI 分析代理：服务端调用 LLM，Key 从环境变量读取，绝不暴露给前端
 // POST body: { mode: 'market'|'sector'|'stock'|'scan', payload: {...} }
 import { buildCorpus, retrieve } from './_rag.js';
-import { techSummaryForAI, fetchQuantPredict, backtestSignal } from './_ta.js';
+import { techSummaryForAI, fetchSelectedQuantPredict, backtestSignal } from './_ta.js';
+import { normalizeQuantModelVersion } from '../shared/modelVersion.js';
 import { marketTimePromptBlock, marketTimeContext } from './_market_time.js';
 import { getLatestDailySummary } from './_daily_summary.js';
 import { fetchNews, fetchClsTelegraph, fetchSinaFlash } from './_market_data.js';
@@ -13,6 +14,8 @@ import { zhReasonPiece } from './_zh_reason.js';
 import { SYSTEM_PROMPT, ADVISOR_SYSTEM, buildUserPrompt, isAdvisorMode, maxTokensForMode } from './_ai_prompts.js';
 import { reconcileAdviceNumbers } from '../shared/adviceValidation.js';
 import { normalizePickDecision } from '../shared/stockRanking.js';
+import { canUseQuantModel } from './_quant_access.js';
+import { authorizePaidRequest } from './_account_auth.js';
 
 function avg(arr) { return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0; }
 function std(arr) { if (arr.length < 2) return 0; const m = avg(arr); return Math.sqrt(avg(arr.map((x) => (x - m) ** 2))); }
@@ -21,6 +24,11 @@ export function resolveAIBudget(reasoningOn, requestedMs) {
   const fallback = reasoningOn ? 560000 : 150000;
   if (requestedMs == null || !Number.isFinite(Number(requestedMs))) return fallback;
   return Math.max(30000, Math.min(fallback, Math.trunc(Number(requestedMs))));
+}
+
+export function resolveReasoningMode(configuredReasoning, fastMode = false, forceReasoning = false) {
+  if (forceReasoning) return true;
+  return !!configuredReasoning && !fastMode;
 }
 
 // ============ 个股历史规律画像（做T策略自适应的核心）============
@@ -392,6 +400,27 @@ export default async function handler(req, res) {
     return res.status(200).send(JSON.stringify({ ok: false, error: 'POST only' }));
   }
 
+  let body = req.body;
+  try {
+    if (typeof body === 'string') body = JSON.parse(body || '{}');
+  } catch {
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    return res.status(422).send(JSON.stringify({ ok: false, error: '请求格式无效' }));
+  }
+  if (body?.mode === 'ping') {
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    return res.status(200).send(JSON.stringify({ ok: true, mode: 'ping' }));
+  }
+  const accountAuth = await authorizePaidRequest(req);
+  if (!accountAuth.ok) {
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    const status = accountAuth.error === '请先登录' ? 401 : 403;
+    return res.status(status).send(JSON.stringify({
+      ok: false,
+      error: accountAuth.error,
+    }));
+  }
+
   const BASE = process.env.LLM_BASE_URL;
   const KEY = process.env.LLM_API_KEY;
   // 运行时配置优先（前端「AI 模型配置」写入 OSS）：先预热同步缓存，再取 BASE/KEY/模型
@@ -425,8 +454,6 @@ export default async function handler(req, res) {
   // 心跳定时器提到 try 外层声明,保证下方 catch 也能兜底清理(异常绕过 finish 时不泄漏 interval)
   let hbTimer = null;
   try {
-    let body = req.body;
-    if (typeof body === 'string') body = JSON.parse(body || '{}');
     const mode = (body && body.mode) || 'market';
     const payload = (body && body.payload) || {};
     const streaming = !!(body && body.stream); // 客户端可选开启 SSE 进度流
@@ -464,13 +491,25 @@ export default async function handler(req, res) {
     };
     // 采集里程碑进度事件
     const phase = (text, key) => emit('phase', { text, key });
+    const quantModelVersion = normalizeQuantModelVersion(
+      payload.quantModelVersion,
+    );
+    if (!(await canUseQuantModel(req, quantModelVersion))) {
+      return finish({
+        ok: false,
+        error: 'V2模型需要已登录且当前账号已选择V2',
+      });
+    }
 
     // ===== 全局时间预算:前端浏览器直连阿里云 FC(超时 600s),不受 Vercel 60s 限制 =====
     // 数据采集阶段(补大盘/资金/分时/量化…)可能耗时 15~20s,之后 LLM 生成又要时间。
     // 开启【深度思考(reasoning)】后模型要先跑思维链再输出,军师级复杂题实测可达 120s+,
     // 故 reasoning 开启时把总预算与下方 LLM 超时上限整体放大,避免思维链未完就被掐断降级。
     const START = Date.now();
-    const reasoningOn = effectiveReasoning(isAdvisorMode(mode) ? 'advisor' : 'chat');
+    const fastMode = body?.fastMode === true && isAdvisorMode(mode);
+    const forceReasoning = body?.forceReasoning === true && isAdvisorMode(mode);
+    const configuredReasoning = effectiveReasoning(isAdvisorMode(mode) ? 'advisor' : 'chat');
+    const reasoningOn = resolveReasoningMode(configuredReasoning, fastMode, forceReasoning);
     // 时间窗口拉到 FC 平台上限(600s)附近:深度思考+大量参考内容时模型很慢,总预算给到 560s,
     // 只留 ~40s 给"数据回传/SSE 收尾/平台调度",绝不逼近 600s 硬墙被强杀。非深度思考仍给较小预算省成本。
     const BUDGET = resolveAIBudget(reasoningOn, body && body.runtimeBudgetMs);
@@ -612,9 +651,23 @@ export default async function handler(req, res) {
             ? fetchIndustryNews(industry).catch(() => null)
             : Promise.resolve(null),
           hasCandles
-            ? fetchQuantPredict(payload.code, quantCandles, (payload.holdCost ? { cost: payload.holdCost, qty: payload.holdQty } : null), 12000, quantRealtime).catch(() => null)
+            ? fetchSelectedQuantPredict(
+              quantModelVersion,
+              payload.code,
+              quantCandles,
+              (payload.holdCost ? { cost: payload.holdCost, qty: payload.holdQty } : null),
+              12000,
+              quantRealtime,
+            ).catch(() => null)
             : Promise.resolve(null),
         ]);
+        if (quantModelVersion === 'v2' && !quant) {
+          return finish({
+            ok: false,
+            error: 'V2模型服务未运行或预测不可用，请先开启服务后重试',
+            quantModelVersion,
+          });
+        }
         if (industry && indNews && indNews.length) {
           payload.industry = industry;
           payload.industryNews = indNews.map((n) => n.title).filter(Boolean).slice(0, 5);
@@ -730,6 +783,9 @@ export default async function handler(req, res) {
             forecast: quant.forecast,   // {upProb,expRet,targetLow/Mid/High,direction,confidence}
             hitProb: quant.hitProb,     // LGB达标概率(0~1,原始分辨力,未做isotonic校准)
             reads: quant.reads, asOf: quant.asOf,
+            modelVersion: quant.modelVersion || 'default',
+            modelLabel: quant.modelLabel || '当前生产模型',
+            v2: quant.v2 || null,
           };
           // ★高把握买点信号头(isotonic校准 + gate≥85%闸门):只有 fired=true 才是"校准后高可信"信号。
           //   连同买入/止盈/止损价一并透传给军师,支撑其"把握闸+赔率闸"双闸门判断(P0"少出手"纪律)。
@@ -906,7 +962,7 @@ export default async function handler(req, res) {
     // maxTokens、强制中文思维链指令(zhTail)此前只读全局 getReasoning → 端点级开启时三者全按"不思考"跑,
     // 导致军师思维链还没吐完就被短超时掐断、且不回显。此处改为读【真实生效值】:全局开 OR 任一承接该
     // 角色的端点开 → 视为开,撑起长超时+大 token+中文思维链指令,思维链才能完整生成并回显。
-    const useReasoning = effectiveReasoning(useRole);
+    const useReasoning = resolveReasoningMode(effectiveReasoning(useRole), fastMode, forceReasoning);
     const sysPrompt = isAdvisor ? ADVISOR_SYSTEM : SYSTEM_PROMPT;
 
     // 已采集到的数据 meta——即便 LLM 超时降级，也把这些"确定性数据"回传前端展示(有价值、不空手)
@@ -977,6 +1033,9 @@ export default async function handler(req, res) {
         maxTokens: maxTokensForMode(mode, useReasoning),
         timeoutMs: llmTimeout,
         reasoning: useReasoning,
+        forceNoReason: fastMode,
+        forceReason: forceReasoning,
+        signal: req.signal,
         responseFormat: { type: 'json_object' },
         stream: true,
       });
@@ -1018,7 +1077,7 @@ export default async function handler(req, res) {
       content = pumped.content;
       finishReason = pumped.finishReason;
       streamedReasoning = pumped.reasoning || '';
-      if (!content.trim() && !streamedReasoning.trim() && canFailover && routed.endpointId && remain() > 12000) {
+      if (!req.signal?.aborted && !content.trim() && !streamedReasoning.trim() && canFailover && routed.endpointId && remain() > 12000) {
         phase('当前端点响应异常，正在切换备用端点快速重试…', 'failover');
         const fallbackTimeout = Math.max(8000, Math.min(90000, remain() - 3000));
         const fallback = await callChat({
@@ -1034,6 +1093,7 @@ export default async function handler(req, res) {
           timeoutMs: fallbackTimeout,
           reasoning: false,
           forceNoReason: true,
+          signal: req.signal,
           responseFormat: { type: 'json_object' },
           stream: true,
         });
@@ -1057,7 +1117,7 @@ export default async function handler(req, res) {
       //   此时思维链已实时下发并捕获(streamedReasoning),再补发一次【不带思维链】的生成拿正文
       //   (base token 足够、无 CoT 更快),把已捕获思维链拼回。既保留"军师推理过程",又保证
       //   正文完整,不再一思考完就失败。仅在正文缺失/真截断且仍有充足时间预算时才救援。
-      if (useReasoning && remain() > 15000) {
+      if (!req.signal?.aborted && useReasoning && remain() > 15000) {
         const probe = content.trim() ? parseLLMJson(content) : { value: null };
         const bodyBroken = !probe.value || probe.repaired;   // 空/解析不出/需补齐才成立(真残缺)
         if (bodyBroken) {
@@ -1088,6 +1148,7 @@ export default async function handler(req, res) {
             timeoutMs: salvTimeout,
             reasoning: false,                            // 尽力关思维链
             forceNoReason: true,                         // ★硬关端点级/全局 reasoning 注入
+            signal: req.signal,
             responseFormat: { type: 'json_object' },
             stream: true,                                // ★关键:流式,partial 存活 + 进度可见
           });
@@ -1130,6 +1191,9 @@ export default async function handler(req, res) {
         maxTokens: maxTokensForMode(mode, useReasoning),
         timeoutMs: llmTimeout,
         reasoning: useReasoning,
+        forceNoReason: fastMode,
+        forceReason: forceReasoning,
+        signal: req.signal,
         responseFormat: { type: 'json_object' },
       }, { budgetLeftMs: () => remain() - 2500 });  // 上游抖动/5xx 且预算足够时快速重试一次；abort/网络错误不抛出 → 转入降级返回
       const { resp, done } = routed;
@@ -1212,7 +1276,7 @@ export default async function handler(req, res) {
     let result = parsed.value || { raw: content, truncated };
     if (mode === 'scan_pick' && result && typeof result === 'object' && !result.raw) {
       const allowedCodes = (payload.candidates || []).map((item) => item && item.code).filter(Boolean);
-      result = normalizePickDecision(result, allowedCodes);
+      result = normalizePickDecision(result, allowedCodes, payload.candidates || []);
     }
     const _dbg = {
       contentLen: (content || '').length,

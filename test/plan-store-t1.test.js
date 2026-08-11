@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { planStore } from '../src/planStore.js'
+import { planStore, t1StatusOf } from '../src/planStore.js'
 
 test('真实账本入口阻止卖出今日买入仓位', () => {
   planStore.setData({
@@ -159,4 +159,126 @@ test('旧仓2手今日补1手时预警记录今日最多可卖2手', () => {
   const alerts = planStore.get().alerts.filter((alert) => alert.planId === 'mixed_position')
   assert.equal(alerts.every((alert) => alert.t1Blocked === false), true)
   assert.equal(alerts.every((alert) => alert.sellableTodayQty === 2), true)
+})
+
+test('修改加仓记录日期后T+1按新日期重新计算', () => {
+  const now = Date.now()
+  const yesterday = new Date(now - 86400000)
+  const day = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`
+  planStore.setData({
+    plan: [],
+    holding: [{
+      id: 'h1',
+      code: '600000',
+      name: '浦发银行',
+      buyPrice: 10,
+      buyAt: now - 86400000,
+      qty: 3,
+      buyFee: 5,
+    }],
+    closed: [{
+      id: 'buy-today',
+      type: 'BUY',
+      code: '600000',
+      name: '浦发银行',
+      holdingId: 'h1',
+      qty: 1,
+      price: 10.2,
+      at: now,
+    }],
+    decisionLog: [{
+      id: 'execution:buy-today',
+      kind: 'execution',
+      transactionId: 'buy-today',
+      at: now,
+      executedAt: now,
+    }],
+  })
+
+  assert.equal(t1StatusOf('600000').boughtToday, 1)
+  assert.equal(planStore.updateClosedDate('buy-today', day).ok, true)
+  assert.equal(t1StatusOf('600000').boughtToday, 0)
+  assert.equal(new Date(planStore.get().closed[0].at).getDate(), yesterday.getDate())
+  assert.equal(new Date(planStore.get().decisionLog[0].executedAt).getDate(), yesterday.getDate())
+})
+
+test('交易记录日期不能改到未来或非法日期', () => {
+  planStore.setData({
+    plan: [],
+    holding: [],
+    closed: [{ id: 'buy-1', type: 'BUY', code: '600000', at: Date.now() }],
+  })
+  assert.equal(planStore.updateClosedDate('buy-1', 'invalid').ok, false)
+  assert.equal(planStore.updateClosedDate('buy-1', '2999-01-01').ok, false)
+})
+
+test('未归档做T买腿修改到历史日期后立即重算T+1并结算', () => {
+  const now = Date.now()
+  const yesterday = new Date(now)
+  yesterday.setDate(yesterday.getDate() - 1)
+  const dateText = [
+    yesterday.getFullYear(),
+    String(yesterday.getMonth() + 1).padStart(2, '0'),
+    String(yesterday.getDate()).padStart(2, '0'),
+  ].join('-')
+  planStore.setData({
+    plan: [],
+    holding: [{
+      id: 'holding-t',
+      code: '600000',
+      name: '浦发银行',
+      buyPrice: 10,
+      buyAt: now - 86400000,
+      qty: 2,
+      buyFee: 5,
+      tFlows: [{
+        id: 'flow-buy',
+        side: 'buy',
+        price: 9.8,
+        qty: 1,
+        fee: 5,
+        at: now,
+      }],
+    }],
+    closed: [],
+  })
+
+  assert.equal(t1StatusOf('600000').boughtToday, 1)
+  const result = planStore.updateTFlowDate(
+    'holding-t',
+    'flow-buy',
+    dateText,
+  )
+
+  assert.equal(result.ok, true)
+  assert.equal(t1StatusOf('600000').boughtToday, 0)
+  assert.equal(planStore.get().holding[0].tFlows.length, 0)
+  assert.equal(planStore.get().holding[0].qty, 3)
+  assert.equal(planStore.get().closed[0].type, 'BUY')
+  assert.equal(new Date(planStore.get().closed[0].at).getDate(), yesterday.getDate())
+})
+
+test('未归档做T流水日期拒绝未来和非法值', () => {
+  planStore.setData({
+    plan: [],
+    holding: [{
+      id: 'holding-t',
+      code: '600000',
+      buyPrice: 10,
+      buyAt: Date.now() - 86400000,
+      qty: 2,
+      tFlows: [{
+        id: 'flow-buy',
+        side: 'buy',
+        price: 9.8,
+        qty: 1,
+        fee: 5,
+        at: Date.now(),
+      }],
+    }],
+    closed: [],
+  })
+
+  assert.equal(planStore.updateTFlowDate('holding-t', 'flow-buy', 'invalid').ok, false)
+  assert.equal(planStore.updateTFlowDate('holding-t', 'flow-buy', '2999-01-01').ok, false)
 })

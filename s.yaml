@@ -40,6 +40,13 @@ resources:
         FINNHUB_KEY: ${env('FINNHUB_KEY')}
         QUANT_URL: ${env('QUANT_URL')}
         QUANT_KEY: ${env('QUANT_KEY')}
+        # ---- V2 分钟 Transformer（独立 EAS，可手动启停）----
+        V2_QUANT_URL: ${env('V2_QUANT_URL')}
+        V2_EAS_TOKEN: ${env('V2_EAS_TOKEN')}
+        V2_API_KEY: ${env('V2_API_KEY')}
+        AUTHORIZED_ACCOUNT_HASHES: ${env('AUTHORIZED_ACCOUNT_HASHES')}
+        V2_LAB_OSS_BUCKET: stock-quant-lab-1730034925594178
+        V2_LAB_OSS_ENDPOINT: https://oss-cn-hangzhou-internal.aliyuncs.com
         # ---- OSS 存储（替代 Vercel Blob）----
         OSS_REGION: ${env('OSS_REGION')}
         OSS_BUCKET: ${env('OSS_BUCKET')}
@@ -70,5 +77,11 @@ resources:
           triggerType: timer
           triggerConfig:
             cronExpression: "@every 5m"
+            enable: true
+            payload: ${env('CRON_KEY')}
+        - triggerName: v2-accuracy-timer
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 15 15 * * 1-5"
             enable: true
             payload: ${env('CRON_KEY')}

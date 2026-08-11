@@ -17,7 +17,20 @@ import { getAdvice, subscribeAdvice } from '../adviceCache'
 import { runBatchAdvice, subscribeBatch, getBatchState, cancelBatch, cancelOne, regenerateFailed, peekBatchBusy } from '../adviceBatch'
 import { generatingList } from '../adviceGate'
 import { subscribeRunner } from '../adviceRunner'
-import { getAutoConfig, K_ENABLED, K_INTERVAL, K_SCOPE, K_LAST, MIN_INTERVAL, MAX_INTERVAL, DEFAULT_INTERVAL } from '../adviceAutoRefresh'
+import {
+  getAutoConfig,
+  runManualAdviceRefresh,
+  setAutoConfigSetting,
+  K_ENABLED,
+  K_HOLD_ENABLED,
+  K_HOLD_INTERVAL,
+  K_WATCH_ENABLED,
+  K_WATCH_INTERVAL,
+  MIN_INTERVAL,
+  MAX_INTERVAL,
+  DEFAULT_HOLD,
+  DEFAULT_WATCH,
+} from '../adviceAutoRefresh'
 import { ensureQuantScore, ensureQuantScores } from '../quantScore'
 import { fmtPct, pctClass, fmtNum, fmtInflow , fmtRaw, hasVal, opText } from '../format'
 import { computeDailyFinance, todayTradeCodes } from '../../shared/dailyFinance.js'
@@ -886,11 +899,16 @@ function HoldOverview({ book, quote }) {
 // 用户可开启一个后台定时任务:交易时段内,每隔 N 分钟对选定范围(自选/持仓/两者)
 // 批量重生成 AI 操作建议(复用 runBatchAdvice,与手动/每日同源,保证连续性一致性)。
 // 展示最近一次更新时间;实际调度在 App.jsx 的分钟级 tick 里执行(runAutoRefreshIfDue)。
-function AutoRefreshControl() {
-  const book = usePlanStore()  // 订阅 settings/holding/plan 变化,配置改动即时反映
+function AutoRefreshControl({ quote }) {
+  usePlanStore()  // 订阅 settings/holding/plan 变化,配置改动即时反映
   const [open, setOpen] = useState(false)
+  const [manualNotice, setManualNotice] = useState('')
+  const [, forceBatch] = useState(0)
+  const mobile = useMediaQuery('(max-width: 720px)')
+  useEffect(() => subscribeBatch(() => forceBatch((n) => n + 1)), [])
   const cfg = getAutoConfig()
   const enabled = cfg.enabled
+  const batch = getBatchState()
 
   const fmtLast = (t) => {
     if (!t) return '尚未刷新'
@@ -900,15 +918,104 @@ function AutoRefreshControl() {
     const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`
     return same ? `今天 ${hm}` : `${d.getMonth() + 1}/${d.getDate()} ${hm}`
   }
-  const scopeLabel = { watch: '仅自选', hold: '仅持仓', both: '自选+持仓' }[cfg.scope] || '自选+持仓'
-
-  const setInterval_ = (v) => {
-    let n = parseInt(v, 10)
-    if (!Number.isFinite(n)) n = DEFAULT_INTERVAL
+  const setInterval_ = (key, value, fallback) => {
+    let n = parseInt(value, 10)
+    if (!Number.isFinite(n)) n = fallback
     if (n < MIN_INTERVAL) n = MIN_INTERVAL
     if (n > MAX_INTERVAL) n = MAX_INTERVAL
-    planStore.setSetting(K_INTERVAL, n)
+    setAutoConfigSetting(key, n)
   }
+
+  const manualRefresh = async () => {
+    setManualNotice('正在发起…')
+    const result = await runManualAdviceRefresh('both', quote || {})
+    const text = result?.status === 'started'
+      ? '已开始刷新全部股票'
+      : result?.status === 'running'
+        ? '已有生成任务正在运行'
+        : result?.status === 'full'
+          ? 'AI 端点忙，请稍后再试'
+          : '当前没有可刷新的股票'
+    setManualNotice(text)
+  }
+
+  const scheduleRow = ({ label, hint, checked, enabledKey, intervalKey, intervalMin, fallback, lastAt }) => (
+    <div className={'arp-schedule' + (checked ? ' on' : '')}>
+      <div className="arp-schedule-main">
+        <label className="arp-scope-check">
+          <input type="checkbox" checked={checked}
+            onChange={(event) => setAutoConfigSetting(enabledKey, event.target.checked)} />
+          <span><b>{label}</b><small>{hint}</small></span>
+        </label>
+        <span className="arp-v">
+          <input className="arp-num" type="number" min={MIN_INTERVAL} max={MAX_INTERVAL}
+            aria-label={`${label}自动刷新间隔`}
+            value={intervalMin}
+            onChange={(event) => setInterval_(intervalKey, event.target.value, fallback)} />
+          分钟
+        </span>
+      </div>
+      <div className="arp-schedule-last">最近刷新：{fmtLast(lastAt)}</div>
+    </div>
+  )
+
+  const panel = (
+    <div className={'auto-ref-panel' + (mobile ? ' mobile' : '')} role="dialog" aria-modal={mobile || undefined}
+      aria-label="AI 操作建议刷新设置" onClick={(event) => event.stopPropagation()}>
+      <div className="arp-head">
+        <span className="arp-title"><Icon name="clock" size={13} /> AI 操作建议刷新</span>
+        <button className="arp-x" aria-label="关闭刷新设置" onClick={() => setOpen(false)}>
+          <Icon name="close" size={13} />
+        </button>
+      </div>
+
+      <label className="arp-row toggle">
+        <span>
+          <b className="arp-master-title">自动刷新</b>
+          <small className="arp-master-note">仅交易时段运行，默认关闭</small>
+        </span>
+        <input type="checkbox" checked={enabled}
+          onChange={(event) => setAutoConfigSetting(K_ENABLED, event.target.checked)} />
+      </label>
+
+      <div className="arp-schedules">
+        {scheduleRow({
+          label: '持仓股票',
+          hint: '建议 15 分钟',
+          checked: cfg.holdEnabled,
+          enabledKey: K_HOLD_ENABLED,
+          intervalKey: K_HOLD_INTERVAL,
+          intervalMin: cfg.holdIntervalMin,
+          fallback: DEFAULT_HOLD,
+          lastAt: cfg.holdLastAt,
+        })}
+        {scheduleRow({
+          label: '自选股票',
+          hint: '建议 30 分钟',
+          checked: cfg.watchEnabled,
+          enabledKey: K_WATCH_ENABLED,
+          intervalKey: K_WATCH_INTERVAL,
+          intervalMin: cfg.watchIntervalMin,
+          fallback: DEFAULT_WATCH,
+          lastAt: cfg.watchLastAt,
+        })}
+      </div>
+
+      <button className="arp-manual" onClick={manualRefresh} disabled={batch.running}>
+        <Icon name="refresh" size={13} className={batch.running ? 'spin' : ''} />
+        {batch.running ? '正在生成建议…' : '立即刷新全部'}
+      </button>
+      {manualNotice && <div className="arp-manual-note" role="status">{manualNotice}</div>}
+
+      <div className="arp-foot">
+        <div className="arp-note sub-name">
+          {enabled
+            ? '自动刷新已开启。已有任务运行时会顺延，不会重复生成。'
+            : '自动刷新未开启；你仍可随时手动刷新。'}
+        </div>
+      </div>
+    </div>
+  )
 
   return (
     <div className="auto-ref-wrap">
@@ -918,57 +1025,12 @@ function AutoRefreshControl() {
         title="设置盘中定时刷新 AI 操作建议(可配间隔与范围)"
       >
         <Icon name={enabled ? 'refresh' : 'clock'} size={13} className={enabled ? 'spin-slow' : ''} />
-        {enabled ? `自动刷新·每${cfg.intervalMin}分` : '定时刷新'}
+        {enabled ? `自动刷新·持${cfg.holdIntervalMin}/自${cfg.watchIntervalMin}分` : '刷新设置'}
       </button>
 
-      {open && (
-        <div className="auto-ref-panel">
-          <div className="arp-head">
-            <span className="arp-title"><Icon name="clock" size={13} /> 盘中定时刷新 AI 操作建议</span>
-            <button className="arp-x" onClick={() => setOpen(false)}><Icon name="close" size={13} /></button>
-          </div>
-
-          <label className="arp-row toggle">
-            <span className="arp-k">开启定时刷新</span>
-            <input type="checkbox" checked={enabled}
-              onChange={(e) => planStore.setSetting(K_ENABLED, e.target.checked)} />
-          </label>
-
-          <div className="arp-row">
-            <span className="arp-k">刷新间隔</span>
-            <span className="arp-v">
-              <input className="arp-num" type="number" min={MIN_INTERVAL} max={MAX_INTERVAL}
-                value={cfg.intervalMin}
-                onChange={(e) => setInterval_(e.target.value)} /> 分钟
-            </span>
-          </div>
-          <div className="arp-quick">
-            {[5, 10, 15, 30, 60].map((m) => (
-              <button key={m} className={'arp-chip' + (cfg.intervalMin === m ? ' on' : '')}
-                onClick={() => planStore.setSetting(K_INTERVAL, m)}>{m}分</button>
-            ))}
-          </div>
-
-          <div className="arp-row">
-            <span className="arp-k">刷新范围</span>
-            <span className="arp-v seg">
-              {[['watch', '仅自选'], ['hold', '仅持仓'], ['both', '两者']].map(([v, lab]) => (
-                <button key={v} className={'arp-seg' + (cfg.scope === v ? ' on' : '')}
-                  onClick={() => planStore.setSetting(K_SCOPE, v)}>{lab}</button>
-              ))}
-            </span>
-          </div>
-
-          <div className="arp-foot">
-            <div className="arp-last"><Icon name="check" size={12} /> 最近更新：<b>{fmtLast(cfg.lastAt)}</b></div>
-            <div className="arp-note sub-name">
-              {enabled
-                ? `已开启 · 交易时段(09:15–15:00)内每 ${cfg.intervalMin} 分钟刷新一次「${scopeLabel}」`
-                : '开启后仅在交易时段自动刷新,收盘/休市不空跑'}
-            </div>
-          </div>
-        </div>
-      )}
+      {open && (mobile
+        ? <OverlayPortal><div className="auto-ref-mask" onClick={() => setOpen(false)}>{panel}</div></OverlayPortal>
+        : panel)}
     </div>
   )
 }
@@ -982,6 +1044,7 @@ function HoldingList({ book, quote, batchSel }) {
   const batch = getBatchState()
   // 一次性生成时若端点被单股生成占满 → 弹「端点已满 + 正在生成清单」(可点击跳转);端点空出自动关闭
   const [busyModal, setBusyModal] = useState(null)
+  const [batchNotice, setBatchNotice] = useState('')
   useEffect(() => {
     if (!busyModal) return
     const refresh = () => {
@@ -1077,7 +1140,7 @@ function HoldingList({ book, quote, batchSel }) {
         <div className="panel-title"><Icon name="wallet" size={16} /> 当前持仓 <span className="sub-name">{book.holding.length} 只 · 支持做T</span></div>
         <div className="hold-head-actions">
           <AdvisorScore book={book} />
-          <AutoRefreshControl />
+          <AutoRefreshControl quote={quote} />
           {canBatch && !selectMode && (
             <button className="mini-btn batch-entry" onClick={() => { setSelectMode(true); setSelected(new Set()) }}
               disabled={batch.running} title="勾选持仓 / 自选里的若干只股票，一次性批量生成 AI 操作建议（后台处理）">
@@ -1097,14 +1160,15 @@ function HoldingList({ book, quote, batchSel }) {
         })
         const allHoldSel = holdCodes.length > 0 && holdCodes.every((c) => selected.has(c))
         const allWatchSel = watchCodes.length > 0 && watchCodes.every((c) => selected.has(c))
-        const doRun = () => {
+        const doRun = async (deepMode = false) => {
           const codes = allCodes.filter((c) => selected.has(c))
           if (!codes.length) return
           // 端点占用门控:端点被单股生成占满 → 不启动,弹「端点已满」;未满则用剩余空槽并行(空出再补)
-          const peek = peekBatchBusy(codes)
+          const peek = peekBatchBusy(codes, deepMode)
           if (peek.full) { setBusyModal({ busy: peek.busy, concurrency: peek.concurrency }); return }
-          runBatchAdvice(codes, quote)   // 后台限流批量;返回 Promise,进度经 subscribeBatch 推送
-          setSelectMode(false)
+          setBatchNotice(deepMode ? '深度生成将以2路并行逐批完成全部股票' : '')
+          const result = await runBatchAdvice(codes, quote, { deepMode })
+          if (result?.status === 'started') setSelectMode(false)
         }
         return (
           <div className="batch-bar">
@@ -1124,10 +1188,20 @@ function HoldingList({ book, quote, batchSel }) {
               {(selHold > 0 || selWatch > 0) && <span className="sub-name">（持仓 {selHold} · 自选 {selWatch}）</span>}
             </span>
             <span className="batch-spacer" />
-            <button className="chip-btn buy" onClick={doRun} disabled={!selCount || batch.running}>
-              <Icon name="spark" size={12} />生成所选（{selCount}）
+            <button className="chip-btn buy" onClick={() => doRun(false)} disabled={!selCount || batch.running}>
+              <Icon name="spark" size={12} />快速生成（{selCount}）
+            </button>
+            <button className="chip-btn batch-deep" onClick={() => doRun(true)}
+              disabled={!selCount || batch.running}
+              title="强制使用深度思考，最多2路并行，全部选中股票会依次完成">
+              <Icon name="brain" size={12} />深度生成（2路并行）
             </button>
             <button className="chip-btn ghost" onClick={() => { setSelectMode(false); setSelected(new Set()) }}>退出</button>
+            {batchNotice && (
+              <span className="batch-mode-note" role="status">
+                {batchNotice}
+              </span>
+            )}
           </div>
         )
       })()}
@@ -1138,14 +1212,14 @@ function HoldingList({ book, quote, batchSel }) {
           <div className="bp-head">
             <span className="bp-title">
               {batch.running
-                ? <><Icon name="refresh" size={13} className="spin" /> 正在后台批量生成 AI 操作建议…{batch.serverMode ? <span className="sub-name"> · 云端(退后台/关页面照跑)</span> : null}</>
-                : <><Icon name="check" size={13} /> 批量生成完成</>}
+                ? <><Icon name="refresh" size={13} className="spin" /> 正在后台{batch.deepMode ? '深度' : '快速'}生成 AI 操作建议…{batch.serverMode ? <span className="sub-name"> · 云端(退后台/关页面照跑)</span> : null}{batch.deepMode ? <span className="bp-deep-tag">深度思考·耗时较长</span> : null}</>
+                : <><Icon name="check" size={13} /> {batch.deepMode ? '深度' : '批量'}生成完成</>}
             </span>
             <span className="bp-stat">
               {batch.done}/{batch.total}
               {batch.ok > 0 && <span className="bp-ok"> · 成功 {batch.ok}</span>}
               {batch.fail > 0 && <span className="bp-fail"> · 失败 {batch.fail}</span>}
-              {batch.skipped > 0 && <span className="sub-name"> · 跳过 {batch.skipped}</span>}
+              {batch.skipped > 0 && <span className="sub-name"> · 已取消 {batch.skipped}</span>}
             </span>
             {batch.running
               ? <button className="chip-btn ghost bp-cancel" onClick={cancelBatch} disabled={batch.cancelRequested}>{batch.cancelRequested ? '停止中…' : '全部取消'}</button>
@@ -2084,12 +2158,27 @@ function TFlowRow({ f, holdingId }) {
   const [side, setSide] = useState(f.side)
   const [price, setPrice] = useState(String(f.price))
   const [qty, setQty] = useState(String(f.qty))
+  const [date, setDate] = useState(dayKeyOf(f.at))
   const [error, setError] = useState('')
 
-  const start = () => { setError(''); setSide(f.side); setPrice(String(f.price)); setQty(String(f.qty)); setEditing(true) }
+  const start = () => {
+    setError('')
+    setSide(f.side)
+    setPrice(String(f.price))
+    setQty(String(f.qty))
+    setDate(dayKeyOf(f.at))
+    setEditing(true)
+  }
   const save = () => {
     const result = planStore.editTFlow(holdingId, f.id, { side, price: Number(price), qty: Number(qty) })
     if (!result || !result.ok) { setError((result && result.error) || '流水修改失败'); return }
+    if (date !== dayKeyOf(f.at)) {
+      const dateResult = planStore.updateTFlowDate(holdingId, f.id, date)
+      if (!dateResult || !dateResult.ok) {
+        setError((dateResult && dateResult.error) || '日期修改失败')
+        return
+      }
+    }
     setEditing(false)
   }
 
@@ -2102,6 +2191,13 @@ function TFlowRow({ f, holdingId }) {
         </div>
         <input className="wl-input t-edit-price" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="单价" inputMode="decimal" />
         <input className="wl-input t-edit-qty" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="手" inputMode="numeric" />
+        <input
+          className="wl-input t-edit-date"
+          type="date"
+          value={date}
+          max={dayKeyOf(Date.now())}
+          onChange={(event) => { setDate(event.target.value); setError('') }}
+        />
         <button className="chip-btn done" onClick={save}><Icon name="check" size={12} />保存</button>
         <button className="chip-btn ghost" onClick={() => setEditing(false)}>取消</button>
         {error && <span className="err">{error}</span>}
@@ -2113,7 +2209,7 @@ function TFlowRow({ f, holdingId }) {
       <span className={'t-flow-side ' + f.side}>{f.side === 'buy' ? '买' : '卖'}</span>
       <span className="t-flow-p">{fmtRaw(f.price)} × {f.qty}手</span>
       <span className="t-flow-fee">费{f.fee.toFixed(2)}</span>
-      <span className="t-flow-time">{new Date(f.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
+      <span className="t-flow-time">{dayKeyOf(f.at).slice(5)} {new Date(f.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
       <span className="t-flow-edit-btn" title="编辑此笔" onClick={start}><Icon name="edit" size={12} /></span>
       <span className="del" title="删除此笔" onClick={() => planStore.removeTFlow(holdingId, f.id)}>×</span>
     </div>

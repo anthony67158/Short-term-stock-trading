@@ -1,5 +1,6 @@
 import { put, list, readJson, hasStorage } from './_blob.js';
-import { emGet, num, sendJson, preflight } from './_lib.js';
+import { emGet, num, preflight, applyCors } from './_lib.js';
+import { authorizePaidRequest } from './_account_auth.js';
 import { marketTimePromptBlock } from './_market_time.js';
 import { fetchOverseas, fetchAIndices, fetchNews, fetchStockNews, fetchClsTelegraph, fetchSinaFlash, fetchFinnhubNews } from './_market_data.js';
 import { buildDailySummary } from './_daily_summary.js';
@@ -34,6 +35,13 @@ const SECTORS = [
 
 export default async function handler(req, res) {
   if (preflight(req, res)) return;
+  const accountAuth = await authorizePaidRequest(req);
+  if (!accountAuth.ok) {
+    applyCors(res);
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    return res.status(accountAuth.error === '请先登录' ? 401 : 403)
+      .send(JSON.stringify({ ok: false, error: accountAuth.error }));
+  }
   await ensureConfig();               // 预热运行时配置（前端可改 Base/Key/模型）
   const MODEL = getModel('agent');    // 策略日报复用「智能体」模型(原独立 daily 角色已移除)
   const REASONING = getReasoning('agent');

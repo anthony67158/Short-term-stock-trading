@@ -17,6 +17,7 @@
 //   enqueue → queued → (worker 领取)running(带 lease)→ done | failed(可重试回 queued)| canceled
 //   断点续跑:running 但 leaseUntil < now(FC 崩了没续租)→ 视为孤儿 → 回收成 queued,下次 drain 重跑。
 //   防重:同 code 已有 queued/running 活跃任务 → enqueue 复用,不新建(除非 force 重生成)。
+import { generationOptions } from '../shared/adviceBatchPolicy.js';
 
 export const CONCURRENCY = Number(process.env.ADVICE_CONCURRENCY || 3); // 全局并发上限【默认/回退】(运行时优先按承接 advisor 角色的端点数,见 cron_advice.js)
 export const LEASE_MS = 270 * 1000;      // 单只运行租约:大于批量单股 225s 护栏；Worker 每 20s 续租，中断后约 4.5 分钟可回收
@@ -46,14 +47,21 @@ export function runningCount(data, now = Date.now()) {
   return n;
 }
 
-// 回收孤儿:running 且租约过期 → 回退 queued(保留 attempts,等待重跑)。返回回收数量。
+// 回收孤儿:running 且租约过期 → 未达上限则回退 queued；达到上限则失败，避免无限从头重跑。
 export function reapOrphans(data, now = Date.now()) {
   const jobs = jobsOf(data);
   let n = 0;
   for (const j of Object.values(jobs)) {
     if (isOrphan(j, now)) {
-      j.status = 'queued'; j.leaseUntil = 0; j.error = '(中断,自动续跑)';
-      j.phase = '任务中断，等待云端自动续跑'; j.progressAt = now; n++;
+      if ((j.attempts || 0) >= (j.maxAttempts || MAX_ATTEMPTS)) {
+        j.status = 'failed'; j.finishedAt = now; j.leaseUntil = 0;
+        j.error = '任务连续中断，已停止自动重试';
+        j.phase = '生成中断次数过多';
+      } else {
+        j.status = 'queued'; j.leaseUntil = 0; j.error = '(中断,自动续跑)';
+        j.phase = '任务中断，等待云端自动续跑';
+      }
+      j.progressAt = now; n++;
     }
   }
   return n;
@@ -70,17 +78,22 @@ export function gcJobs(data, now = Date.now()) {
 
 // 入队一只。dedup:同 code 已有活跃任务且未 force → 返回既有任务(不新建,防重复提交)。
 // mode 由调用方按持仓/自选判定。返回 { job, created(bool) }。
-export function enqueueJob(data, { code, name, mode, source = 'ondemand', force = false }, now = Date.now()) {
+export function enqueueJob(data, {
+  code, name, mode, source = 'ondemand', force = false, batchId = '', deepMode = false,
+}, now = Date.now()) {
   const jobs = jobsOf(data);
   const cur = jobs[code];
   if (cur && isActive(cur) && !force) return { job: cur, created: false };
+  const generation = generationOptions(deepMode);
   const job = {
     id: `${code}_${now}`,
     code, name: name || code, mode: mode || 'buy_advice',
     status: 'queued',
-    attempts: 0, maxAttempts: MAX_ATTEMPTS,
+    attempts: 0, maxAttempts: generation.maxAttempts,
     at: now, startedAt: 0, finishedAt: 0, leaseUntil: 0,
     error: '', source, cancelRequested: false,
+    batchId: String(batchId || ''),
+    deepMode: generation.deepMode,
     phase: '排队等待云端生成',
     sources: [], reasoning: '', model: '', endpoint: '', progressAt: now,
   };
@@ -122,6 +135,7 @@ function visibleChineseReasoning(value) {
 export function updateJobProgress(data, code, patch = {}, now = Date.now()) {
   const job = jobsOf(data)[code]
   if (!job) return null
+  if (job.status === 'canceled') return job
   if (patch.phase != null) job.phase = String(patch.phase).slice(0, 160)
   if (Array.isArray(patch.sources)) {
     job.sources = patch.sources.slice(-12).map((source) => ({
@@ -155,20 +169,27 @@ export function failJob(data, code, err, now = Date.now()) {
   }
 }
 
-// 取消一只:queued → 直接 canceled;running → 置 cancelRequested(drainer 协作式在下一步前停)。
-export function cancelJob(data, code, now = Date.now()) {
+// 取消一只:立即进入 canceled 终态并释放租约。Worker 看到 cancelRequested 后中止上游请求并丢弃结果。
+export function cancelJob(data, code, now = Date.now(), batchId = '') {
   const j = jobsOf(data)[code];
   if (!j || !isActive(j)) return false;
-  if (j.status === 'queued') { j.status = 'canceled'; j.finishedAt = now; j.leaseUntil = 0; }
-  else { j.cancelRequested = true; }
+  if (batchId && j.batchId !== batchId) return false;
+  j.cancelRequested = true;
+  j.status = 'canceled';
+  j.finishedAt = now;
+  j.leaseUntil = 0;
+  j.phase = '已取消生成';
+  j.progressAt = now;
   return true;
 }
 
 // 取消全部活跃任务
-export function cancelAll(data, now = Date.now()) {
+export function cancelAll(data, now = Date.now(), batchId = '') {
   const jobs = jobsOf(data);
   let n = 0;
-  for (const code of Object.keys(jobs)) if (isActive(jobs[code])) { cancelJob(data, code, now); n++; }
+  for (const code of Object.keys(jobs)) {
+    if (isActive(jobs[code]) && cancelJob(data, code, now, batchId)) n++;
+  }
   return n;
 }
 
@@ -208,8 +229,11 @@ export function hasPendingWork(data, now = Date.now()) {
 export function jobsToProgress(data, now = Date.now(), concurrency = CONCURRENCY) {
   const jobs = jobsOf(data);
   const arr = Object.values(jobs).filter(Boolean);
-  // 只统计"本轮相关"的:近 6h 内有活动的任务(避免历史 done 混入总数)
-  const recent = arr.filter((j) => (now - (j.at || 0)) < 6 * 3600 * 1000);
+  // 新版按批次精确隔离；旧数据没有 batchId 时才回退近 6 小时口径。
+  const activeBatchId = String(data.activeAdviceBatchId || '');
+  const recent = activeBatchId
+    ? arr.filter((j) => j.batchId === activeBatchId)
+    : arr.filter((j) => (now - (j.at || 0)) < 6 * 3600 * 1000);
   const mapStatus = (job) => {
     if (job.cancelRequested && job.status === 'running') return 'canceling';
     return job.status === 'done' ? 'ok'
@@ -231,6 +255,7 @@ export function jobsToProgress(data, now = Date.now(), concurrency = CONCURRENCY
       endpoint: j.endpoint || '',
       progressAt: j.progressAt || j.at || 0,
       attempts: j.attempts || 0,
+      deepMode: !!j.deepMode,
     }));
   const ok = recent.filter((j) => j.status === 'done').length;
   const fail = recent.filter((j) => j.status === 'failed').length;
@@ -255,6 +280,8 @@ export function jobsToProgress(data, now = Date.now(), concurrency = CONCURRENCY
     finishedAt: finishedAt || snapshotAt,
     at: snapshotAt,
     source: 'server',
+    batchId: activeBatchId,
+    deepMode: recent.some((job) => !!job.deepMode),
     concurrency: Math.max(1, Number(concurrency) || CONCURRENCY),
   };
 }

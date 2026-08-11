@@ -22,3 +22,58 @@ export function adviceJobState(batch, code) {
     cloud: !!batch.serverMode,
   }
 }
+
+export function cloudAdviceLoadingState(batch, code) {
+  const active = adviceJobState(batch, code)
+  if (!active) return null
+  const item = (batch.items || []).find(
+    (entry) => String(entry?.code) === String(code),
+  ) || {}
+  return {
+    loading: true,
+    cloud: true,
+    phase: item.phase || active.label,
+    sources: Array.isArray(item.sources) ? item.sources : [],
+    reasoning: String(item.reasoning || ''),
+    quant: item.quant || null,
+    model: String(item.model || ''),
+    endpoint: String(item.endpoint || ''),
+  }
+}
+
+export function startAdvicePersistently(
+  spec,
+  {
+    canUseServer,
+    triggerServer,
+    startLocal,
+  },
+) {
+  const code = String(spec?.code || '')
+  if (
+    code
+    && typeof canUseServer === 'function'
+    && canUseServer()
+    && typeof triggerServer === 'function'
+    && triggerServer([code], {
+      scope: 'all',
+      force: true,
+      deepMode: !!spec?.deepMode,
+    })
+  ) {
+    return { status: 'started', mode: 'server', code }
+  }
+  if (typeof startLocal === 'function') startLocal(spec)
+  return { status: 'started', mode: 'local', code }
+}
+
+export function newestAdviceResult(runnerResult, cachedResult) {
+  if (!runnerResult && !cachedResult) return { source: null, value: null }
+  if (!runnerResult) return { source: 'cache', value: cachedResult }
+  if (!cachedResult) return { source: 'runner', value: runnerResult }
+  const runnerAt = Number(runnerResult.cachedAt) || 0
+  const cachedAt = Number(cachedResult.at) || 0
+  return cachedAt > runnerAt
+    ? { source: 'cache', value: cachedResult }
+    : { source: 'runner', value: runnerResult }
+}

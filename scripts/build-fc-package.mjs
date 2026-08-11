@@ -24,6 +24,8 @@ const runtimePackage = {
   private: true,
   type: 'module',
   dependencies: {
+    '@alicloud/eas20210701': rootPackage.dependencies['@alicloud/eas20210701'],
+    '@alicloud/openapi-core': rootPackage.dependencies['@alicloud/openapi-core'],
     'ali-oss': rootPackage.dependencies['ali-oss'],
     'web-push': rootPackage.dependencies['web-push'],
   },

@@ -1,0 +1,29 @@
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PORT=8000 \
+    SHADOW_MODEL_PATH=/models/transformer.pt
+
+WORKDIR /app
+
+RUN useradd --create-home --uid 10001 shadow
+
+COPY requirements.shadow.txt .
+RUN pip install --no-cache-dir \
+      --index-url https://download.pytorch.org/whl/cpu \
+      torch==2.6.0 \
+    && pip install --no-cache-dir -r requirements.shadow.txt
+
+COPY build_intraday_dataset.py \
+     train_intraday_tcn.py \
+     labeling.py \
+     intraday_shadow_contract.py \
+     intraday_shadow_runtime.py \
+     intraday_shadow_recorder.py \
+     intraday_shadow_app.py \
+     ./
+
+USER shadow
+
+CMD ["sh", "-c", "uvicorn intraday_shadow_app:app --host 0.0.0.0 --port ${PORT} --workers 1"]

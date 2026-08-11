@@ -17,6 +17,11 @@ import {
   startServerAdviceStatusSync,
 } from './serverAdvice'
 import { shouldApplyCloudBatch } from '../shared/adviceUiState.js'
+import {
+  batchConcurrency,
+  generationOptions,
+  validateBatchMode,
+} from '../shared/adviceBatchPolicy.js'
 
 // 本地兜底并发不再写死为 1:改为「动态并行填槽」——容量 = 端点数 − 非本批占用数,
 // 谁跑完就补谁的槽,与服务端 drainAccount 的调度模型一致(见 runBatchAdvice 末尾的 worker)。
@@ -32,6 +37,8 @@ const state = {
   items: [],           // 有序:每只 {code, name, status:'pending'|'running'|'ok'|'fail'|'skipped'}
   startedAt: 0, finishedAt: 0,
   cancelRequested: false,
+  batchId: '',
+  deepMode: false,
   serverMode: false,   // true=进度来自服务端(本机点了「服务端生成」或另一设备正在生成,经云端回灌)
   _cloudAt: 0,         // 已消费的云端进度时间戳(去重/防旧盖新)
   concurrency: 1,      // 并发上限=服务端 advisor 端点数(云端进度回灌覆盖;首屏由 seedConcurrency 预置)
@@ -45,10 +52,10 @@ export function getConcurrency() { return Math.max(1, Number(state.concurrency) 
 export function seedConcurrency(n) { const v = Math.max(1, Number(n) || 0); if (v) { state.concurrency = v; notify() } }
 // 同步窥视端点占用(供批量入口 UI 先行门控)。excludeCodes=本批要生成的 code(须排除自占)。
 // 返回 { busy:[{code,name}], concurrency, full }。full=true 表示端点已被非本批单股生成占满。
-export function peekBatchBusy(excludeCodes) {
+export function peekBatchBusy(excludeCodes, deepMode = false) {
   const ex = new Set((excludeCodes || []).filter(Boolean).map(String))
   const busy = externalBusyCodes(ex)
-  const concurrency = getConcurrency()
+  const concurrency = batchConcurrency(getConcurrency(), deepMode)
   return { busy, concurrency, full: busy.length >= concurrency }
 }
 // 取只读快照(current 转数组,便于组件直接用)
@@ -60,6 +67,8 @@ export function getBatchState() {
     items: state.items.map((x) => ({ ...x })),
     startedAt: state.startedAt, finishedAt: state.finishedAt,
     cancelRequested: state.cancelRequested,
+    batchId: state.batchId,
+    deepMode: state.deepMode,
     serverMode: state.serverMode,
     concurrency: getConcurrency(),
     pct: state.total ? Math.round((state.done / state.total) * 100) : 0,
@@ -71,16 +80,41 @@ export function isBatchRunning() { return state.running }
 //   · 本地模式 → 置 cancelRequested,已在途那只跑完即止。
 export function cancelBatch() {
   if (!state.running) return
-  if (state.serverMode) { cancelServerAdvice([]); state.cancelRequested = true; notify(); return }
+  if (state.serverMode) {
+    cancelServerAdvice([], state.batchId)
+    state.cancelRequested = true
+    for (const item of state.items) {
+      if (item.status === 'pending' || item.status === 'queued' || item.status === 'running' || item.status === 'canceling') {
+        item.status = 'skipped'
+      }
+    }
+    state.skipped = state.items.filter((item) => item.status === 'skipped').length
+    state.done = state.items.filter((item) => ['ok', 'fail', 'skipped'].includes(item.status)).length
+    state.current = new Set()
+    state.running = false
+    state.finishedAt = Date.now()
+    notify()
+    return
+  }
   state.cancelRequested = true; notify()
 }
 // 取消单只(服务端模式):只取消这一只,其余继续。乐观地把该项标记为 skipped,真实态随云端回灌覆盖。
 export function cancelOne(code) {
   if (!code) return
-  if (state.serverMode) cancelServerAdvice([String(code)])
+  if (state.serverMode) cancelServerAdvice([String(code)], state.batchId)
   else cancelAdvice(String(code))
   const it = state.items.find((x) => x.code === code)
-  if (it && (it.status === 'pending' || it.status === 'queued' || it.status === 'running')) { it.status = 'skipped'; notify() }
+  if (it && (it.status === 'pending' || it.status === 'queued' || it.status === 'running')) {
+    it.status = 'skipped'
+    state.current.delete(String(code))
+    state.skipped = state.items.filter((item) => item.status === 'skipped').length
+    state.done = state.items.filter((item) => ['ok', 'fail', 'skipped'].includes(item.status)).length
+    if (state.done >= state.total) {
+      state.running = false
+      state.finishedAt = Date.now()
+    }
+    notify()
+  }
 }
 // 失败重生成:把 items 里 status==='fail' 的重新入队(服务端优先)。返回重生成的只数。
 export function regenerateFailed(quoteMap) {
@@ -106,6 +140,7 @@ export function applyCloudBatch(bp) {
     state._cloudAt = Math.max(state._cloudAt, at)
     state.serverMode = true
     state.running = false
+    state.deepMode = false
     state.total = 0; state.done = 0; state.ok = 0; state.fail = 0; state.skipped = 0
     state.current = new Set(); state.items = []; state.startedAt = 0; state.finishedAt = 0
     if (hadVisibleBatch) notify()
@@ -114,6 +149,8 @@ export function applyCloudBatch(bp) {
   if (!at || at <= state._cloudAt) return                 // 不是更新的进度 → 忽略
   state._cloudAt = at
   state.serverMode = true
+  state.batchId = String(bp.batchId || state.batchId || '')
+  state.deepMode = !!bp.deepMode
   if (Number(bp.concurrency) > 0) state.concurrency = Number(bp.concurrency)   // 权威并发上限=服务端 advisor 端点数
   state.running = !!bp.running
   state.total = bp.total || 0
@@ -163,14 +200,22 @@ function externalBusyCodes(excludeSet) {
 export async function runBatchAdvice(codes, quoteMap, opts = {}) {
   if (state.running) return { status: 'running' }
   const uniq = [...new Set((codes || []).filter(Boolean))]
-  if (!uniq.length) return { status: 'empty' }
+  const modeValidation = validateBatchMode(uniq, opts.deepMode === true)
+  if (!modeValidation.ok) {
+    return {
+      status: modeValidation.error,
+      limit: modeValidation.limit,
+      count: modeValidation.count,
+    }
+  }
+  const generation = generationOptions(modeValidation.deepMode)
 
   // ===== 规则:端点占用门控 =====
   // 一次性生成也要看端点占用。剔除本批自身 code 后统计「非本批单股生成」占用数:
   //   · 占满(≥端点数)→ 拒绝启动,返回 full(UI 弹「端点已满 + 正在生成清单」);
   //   · 未满 → 剩几个用几个,后续单股空出来再补(见下方本地并行池 / 服务端 drainAccount)。
   const batchSet = new Set(uniq.map(String))
-  const limit = getConcurrency()
+  const limit = batchConcurrency(getConcurrency(), generation.deepMode)
   const busyExt = externalBusyCodes(batchSet)
   if (busyExt.length >= limit) return { status: 'full', busy: busyExt, concurrency: limit }
 
@@ -187,11 +232,19 @@ export async function runBatchAdvice(codes, quoteMap, opts = {}) {
   // 进度写回云端 → 本机与其它设备都靠 authStore.pull 轮询同一份进度(手机生成、电脑同步看到)。
   // 立刻本地点亮一个 running 进度条(乐观 UI),真实进度随首个云端 tick 覆盖。
   if (opts.local !== true && canServerAdvice()) {
-    const fired = triggerServerAdvice(uniq, { scope: opts.scope || 'all', force: true })
+    const batchId = `client_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+    const fired = triggerServerAdvice(uniq, {
+      scope: opts.scope || 'all',
+      force: true,
+      batchId,
+      deepMode: generation.deepMode,
+    })
     if (fired) {
       state.serverMode = true
       state.running = true
       state.cancelRequested = false
+      state.batchId = batchId
+      state.deepMode = generation.deepMode
       state.total = uniq.length
       state.done = 0; state.ok = 0; state.fail = 0; state.skipped = 0
       state.current = new Set()
@@ -208,6 +261,8 @@ export async function runBatchAdvice(codes, quoteMap, opts = {}) {
   state.serverMode = false
   state.running = true
   state.cancelRequested = false
+  state.batchId = `local_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+  state.deepMode = generation.deepMode
   state.total = uniq.length
   state.done = 0; state.ok = 0; state.fail = 0; state.skipped = 0
   state.current = new Set()
@@ -222,6 +277,7 @@ export async function runBatchAdvice(codes, quoteMap, opts = {}) {
     const spec = holdSet.has(code)
       ? buildHoldSpec(code, name, quoteMap || {}, portfolio, st.account)
       : buildWatchSpec(code, name, quoteMap || {}, portfolio, st.account)
+    spec.deepMode = generation.deepMode
     state.current.add(code); setItemStatus(code, 'running'); notify()
     try {
       // ★超时护栏:startAdvice 内部走 SSE,极端情况下(移动端切后台/网关半挂)可能长时间不 settle。
@@ -230,7 +286,7 @@ export async function runBatchAdvice(codes, quoteMap, opts = {}) {
       //   底层生成仍在 runner 后台自行管理(不受影响),这里按结果判定为成功/失败即可。
       await Promise.race([
         startAdvice(spec),   // runner 内部落缓存/记决策;这里等它完成
-        new Promise((resolve) => setTimeout(resolve, 180000)),
+        new Promise((resolve) => setTimeout(resolve, generation.timeoutMs)),
       ])
       const item = state.items.find((entry) => entry.code === code)
       if (item && item.status === 'skipped') {
@@ -281,7 +337,8 @@ export async function runBatchAdvice(codes, quoteMap, opts = {}) {
     }
   }
   // 首轮并行度 = 端点数 − 已被单股生成占用的端点(动态复算,至少 1);随单只跑完自然补槽。
-  const freeSlots = Math.max(1, getConcurrency() - externalBusyCodes(batchSet).length)
+  const modeConcurrency = batchConcurrency(getConcurrency(), generation.deepMode)
+  const freeSlots = Math.max(1, modeConcurrency - externalBusyCodes(batchSet).length)
   const poolSize = Math.min(freeSlots, uniq.length)
   const workers = Array.from({ length: poolSize }, () => worker())
   try {

@@ -4,6 +4,7 @@ import { openStockDetail } from '../detailStore'
 import { chatStore } from '../chatStore'
 import { callAI } from '../ai'
 import { api } from '../apiBase'
+import { accountRequestHeaders } from '../quantModel'
 import { computePortfolio, livePositionOf, planStore, t1StatusOf, usePlanStore } from '../planStore'
 import { sanitizeAccountContext } from '../../shared/assistantContext.js'
 import { sanitizeTradeProposal } from '../../shared/tradeProposal.js'
@@ -160,7 +161,11 @@ export default function AIAssistant({ snapshot }) {
     try {
       const accountContext = buildAccountContext(book, snapshot)
       const res = await fetch(api('/api/agent'), {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...accountRequestHeaders(),
+        },
         body: JSON.stringify({ question: query, history, stock: stock || null, accountContext }),
         signal: ctrl.signal,
       })

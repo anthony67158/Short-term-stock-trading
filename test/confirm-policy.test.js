@@ -7,6 +7,7 @@ import {
   directionalOutcome,
   fuseConfirmation,
   judgeEffectStats,
+  resolveDecisionSide,
 } from '../shared/confirmPolicy.js'
 
 const det = (score, decision = 'wait') => ({ score, decision, hits: [] })
@@ -153,4 +154,10 @@ test('Judge效果统计优先使用30分钟后验并计算方向命中率', () =
   assert.equal(stats.wins, 2)
   assert.equal(stats.winRate, 67)
   assert.equal(stats.avgDirectionalPct, 1.33)
+})
+
+test('Judge确认方向优先使用本次判定并回退预警客观方向', () => {
+  assert.equal(resolveDecisionSide({ side: 'sell' }, 'buy'), 'sell')
+  assert.equal(resolveDecisionSide({}, 'stop'), 'stop')
+  assert.equal(resolveDecisionSide({ side: 'unknown' }, 'buy'), 'buy')
 })

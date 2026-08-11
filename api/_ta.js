@@ -1,4 +1,14 @@
 // ============================================================
+import {
+  fetchFiveMinuteBars,
+  fetchV2QuantPredict,
+} from './_v2_quant.js';
+import {
+  normalizeQuantModelVersion,
+  QUANT_MODEL_V2,
+} from '../shared/modelVersion.js';
+
+// ============================================================
 // 专业技术指标引擎（共享模块，前后端一致；下划线开头不占 Vercel 函数位）
 // 输入：candles = [{date,open,close,high,low,volume,pct}]（按时间升序，最后一根最新）
 // 输出：既有“专业指标数值”，又有“大白话结论”，并直接给出对买卖有用的价位锚点
@@ -329,3 +339,31 @@ export async function fetchQuantPredict(code, candles, hold, timeoutMs = 8000, r
   } catch { return null; }
 }
 
+export async function fetchSelectedQuantPredict(
+  version,
+  code,
+  candles,
+  hold,
+  timeoutMs = 8000,
+  realtime = null,
+  {
+    fetchBars = fetchFiveMinuteBars,
+    fetchV2 = fetchV2QuantPredict,
+  } = {},
+) {
+  if (normalizeQuantModelVersion(version) !== QUANT_MODEL_V2) {
+    return fetchQuantPredict(code, candles, hold, timeoutMs, realtime)
+  }
+  const bars = await fetchBars(code, {
+    timeoutMs: Math.min(timeoutMs, 6000),
+  })
+  const prediction = await fetchV2(code, {
+    bars,
+    price: realtime?.price ?? candles?.at(-1)?.close ?? null,
+    timeoutMs,
+  })
+  if (!prediction) {
+    throw new Error('V2模型服务未运行或预测不可用')
+  }
+  return prediction
+}

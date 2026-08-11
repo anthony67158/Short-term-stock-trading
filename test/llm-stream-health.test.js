@@ -8,6 +8,7 @@ import {
   poolFetch,
   poolStatus,
 } from '../api/_llm_pool.js'
+import { pumpChatStream } from '../api/_llm.js'
 
 test('空流端点立即冷却，下一次请求切换到备用端点', () => {
   const config = {
@@ -55,4 +56,57 @@ test('流式请求在响应体消费完成前持续占用端点', async () => {
   } finally {
     globalThis.fetch = originalFetch
   }
+})
+
+test('深度批量可覆盖端点默认关闭并实际下发深度参数', async () => {
+  const config = {
+    baseUrl: 'https://main.example/v1',
+    apiKey: 'key',
+    models: { advisor: 'model' },
+    reasoning: { advisor: false },
+  }
+  const originalFetch = globalThis.fetch
+  let sentBody = null
+  globalThis.fetch = async (_url, options) => {
+    sentBody = JSON.parse(options.body)
+    return new Response('{}', { status: 200 })
+  }
+  try {
+    await poolFetch(config, '/chat/completions', {
+      body: { model: 'model', stream: true },
+      role: 'advisor',
+      reasonFallback: true,
+      forceReason: true,
+    }, 1)
+
+    assert.equal(sentBody.reasoning_effort, 'high')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('流读取中断时保留已经收到的推理和正文', async () => {
+  const encoder = new TextEncoder()
+  const chunks = [
+    encoder.encode('data: {"choices":[{"delta":{"reasoning_content":"正在核对支撑位。"}}]}\n\n'),
+    encoder.encode('data: {"choices":[{"delta":{"content":"{\\"action\\":\\"持有\\""}}]}\n\n'),
+  ]
+  let index = 0
+  const response = {
+    body: {
+      getReader() {
+        return {
+          async read() {
+            if (index < chunks.length) return { value: chunks[index++], done: false }
+            throw new Error('upstream stream reset')
+          },
+        }
+      },
+    },
+  }
+
+  const result = await pumpChatStream(response)
+
+  assert.equal(result.reasoning, '正在核对支撑位。')
+  assert.equal(result.content, '{"action":"持有"')
 })

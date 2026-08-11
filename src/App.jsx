@@ -12,10 +12,10 @@ import { useDetailStore, detailStore } from './detailStore'
 import { alertStore, useAlertStore } from './alertStore'
 import { useLLMConfigOpen } from './llmConfigStore'
 import { useQuantReportOpen } from './quantReportUiStore'
-import { runDailyAdviceIfDue } from './adviceDaily'
-import { runAutoRefreshIfDue } from './adviceAutoRefresh'
+import { useQuantModelStore } from './quantModelStore'
 import { timeStr } from './format'
 import { api } from './apiBase'
+import { accountRequestHeaders } from './quantModel'
 import { chunkReloadKey, shouldReloadChunk } from './chunkError'
 
 // 按需分包：四个主 Tab 与 AI 助手拆成独立 chunk，首屏只加载当前 Tab，
@@ -42,6 +42,7 @@ const AccountHub = lazyWithReload(() => import('./components/AccountHub'), 'acco
 const AIAssistant = lazyWithReload(() => import('./components/AIAssistant'), 'assistant')
 const LLMConfig = lazyWithReload(() => import('./components/LLMConfig'), 'llm-config')
 const QuantReport = lazyWithReload(() => import('./components/QuantReport'), 'quant-report')
+const QuantModelControl = lazyWithReload(() => import('./components/QuantModelControl'), 'quant-model-control')
 
 // Tab 切换时的轻量骨架占位（避免 Suspense fallback 空白闪一下）
 function TabSkeleton() {
@@ -65,11 +66,21 @@ export default function App() {
   useEffect(() => {
     authStore.boot(); startCloudSync()   // 启动时尝试恢复会话 + 开启跨设备同步轮询
     import('./adviceBatch').then((m) => m.startBatchStatusSync()).catch(() => {})
+  }, [])
+  useEffect(() => {
+    if (!user) return
     // 预置并发上限=承接 advisor 角色的端点数(首屏即可门控;之后随云端 batchProgress.concurrency 覆盖为权威值)
-    fetch(api('/api/llm_config'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'get' }) })
+    fetch(api('/api/llm_config'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...accountRequestHeaders(),
+      },
+      body: JSON.stringify({ action: 'get' }),
+    })
       .then((r) => r.json()).then((j) => { if (j && j.ok && Number(j.concurrency) > 0) import('./adviceBatch').then((m) => m.seedConcurrency(Number(j.concurrency))).catch(() => {}) })
       .catch(() => { /* 拿不到就用默认 1,不阻断 */ })
-  }, [])
+  }, [user])
   if (booting) return (
     <div className="auth-gate"><div className="auth-card" style={{ textAlign: 'center' }}>
       <div className="auth-brand"><span className="nav-logo"><Icon name="logo" size={20} /></span><span>短线操盘台</span></div>
@@ -99,6 +110,7 @@ function MainApp() {
   const { stock: detailStock } = useDetailStore()
   const llmConfigOpen = useLLMConfigOpen()
   const quantReportOpen = useQuantReportOpen()
+  const quantModelState = useQuantModelStore()
   const trading = isTradingHours()
   const interval = trading ? 20000 : 120000
 
@@ -140,24 +152,6 @@ function MainApp() {
     60000,
     [schedCodes.join(',')]
   )
-  useEffect(() => {
-    const check = () => {
-      const map = {}
-      ;((reviewQuotes.data && reviewQuotes.data.list) || []).forEach((q) => { map[q.code] = q })
-      // 每日定时重生成 AI 操作建议(持仓 hold_advice / 自选 buy_advice)——统一操作指导数据源。
-      // 盘前(08:30–09:15)与收盘后(15:00+)各触发一轮,当天去重;后台 runner 跑完落缓存,
-      // 供持仓卡主行动、复盘(直接复用建议里的 todayRecap/actionPlan)、计划止盈止损统一取值,
-      // 生成一次即可供所有消费方使用,用户不必再手点复盘。
-      runDailyAdviceIfDue(map)
-      // 盘中定时刷新:用户可配开关/间隔(min)/范围(自选·持仓),交易时段内每满一个间隔重生成一轮,
-      // 让操作指导对齐实时盘面;复用 runBatchAdvice,与手动/每日同源,保证连续性与一致性。
-      runAutoRefreshIfDue(map)
-    }
-    check()
-    const id = setInterval(check, 60000) // 每分钟检查一次是否跨入重生成时点
-    return () => clearInterval(id)
-  }, [reviewQuotes.data])
-
   // ===== AI建议事后回测（短线实战口径）：对≥1天前未核验建议，拉近期日K线 =====
   // 判定"3日窗口内最高价是否触及目标价"，比单看隔日收盘更贴合短线，故取日K而非现价。
   const DAY_MS = 24 * 3600 * 1000
@@ -304,6 +298,14 @@ function MainApp() {
         <ErrorBoundary label="量化汇报">
           <Suspense fallback={null}>
             <QuantReport />
+          </Suspense>
+        </ErrorBoundary>
+      )}
+
+      {quantModelState.open && (
+        <ErrorBoundary label="量化模型配置">
+          <Suspense fallback={null}>
+            <QuantModelControl />
           </Suspense>
         </ErrorBoundary>
       )}

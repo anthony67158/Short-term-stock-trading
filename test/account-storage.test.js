@@ -158,6 +158,41 @@ test('旧客户端不能覆盖更新版本的持仓和交易流水', () => {
   assert.equal(account.data.closed.length, 1)
 })
 
+test('同版本旧页面缺少已执行交易时也不能覆盖云端持仓', () => {
+  const account = {
+    nick: '并发账号',
+    clientRevision: 8,
+    data: {
+      plan: [],
+      holding: [{ id: 'h1', code: '600601', qty: 4, buyPrice: 12.85 }],
+      closed: [{ id: 'tx1', code: '600601', type: 'BUY', qty: 4, price: 12.85 }],
+      decisionLog: [{
+        id: 'exec1',
+        kind: 'execution',
+        transactionId: 'tx1',
+        code: '600601',
+        side: 'buy',
+        qty: 4,
+        price: 12.85,
+        at: 100,
+      }],
+    },
+  }
+
+  const result = applyClientAccountSave(account, {
+    plan: [{ code: '600601' }],
+    holding: [],
+    closed: [],
+    // 旧页面通过云端拉取拿到了执行事件，却没有合并持仓和流水。
+    decisionLog: account.data.decisionLog,
+  }, 8)
+
+  assert.equal(result.ok, false)
+  assert.equal(result.code, 'TRADE_STATE_CONFLICT')
+  assert.equal(account.data.holding[0].qty, 4)
+  assert.equal(account.data.closed[0].id, 'tx1')
+})
+
 test('账号同时存在旧文件和新目录快照时定时任务只枚举一次', async () => {
   const storage = fakeStorage()
   const account = { nick: '重复账号', pwHash: 'hash', createdAt: 1, data: { plan: [] } }
@@ -211,6 +246,7 @@ test('客户端旧预警快照不能覆盖服务端Judge确认与后验结果', 
         triggeredAt: 200,
         lastJudgeAt: 190,
         judgeOutcomes: { m5: { directionalPct: 1.2 } },
+        judgeContext: { action: '加仓', addPrice: 10 },
       }],
       advice: {},
       adviceLog: [],
@@ -228,6 +264,7 @@ test('客户端旧预警快照不能覆盖服务端Judge确认与后验结果', 
   assert.equal(account.data.alerts[0].phase, 'confirmed')
   assert.equal(account.data.alerts[0].enabled, false)
   assert.equal(account.data.alerts[0].judgeOutcomes.m5.directionalPct, 1.2)
+  assert.deepEqual(account.data.alerts[0].judgeContext, { action: '加仓', addPrice: 10 })
 })
 
 test('客户端保存持仓时不能覆盖服务端 AI 任务队列和 Worker 锁', () => {
@@ -240,6 +277,7 @@ test('客户端保存持仓时不能覆盖服务端 AI 任务队列和 Worker �
       holding: [],
       jobs: serverJobs,
       jobWorker: { id: 'worker-server', lockUntil: 9999 },
+      activeAdviceBatchId: 'batch-server',
     },
   }
 
@@ -247,10 +285,12 @@ test('客户端保存持仓时不能覆盖服务端 AI 任务队列和 Worker �
     holding: [{ code: '000001', qty: 1 }],
     jobs: {},
     jobWorker: { id: '', lockUntil: 0 },
+    activeAdviceBatchId: 'batch-client-old',
   }, 3)
 
   assert.equal(result.ok, true)
   assert.deepEqual(account.data.jobs, serverJobs)
   assert.deepEqual(account.data.jobWorker, { id: 'worker-server', lockUntil: 9999 })
+  assert.equal(account.data.activeAdviceBatchId, 'batch-server')
   assert.deepEqual(account.data.holding, [{ code: '000001', qty: 1 }])
 })

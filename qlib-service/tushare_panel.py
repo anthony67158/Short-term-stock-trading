@@ -180,7 +180,7 @@ def main():
     ap.add_argument("--min-circ-mv", type=float, default=3e6)
     a = ap.parse_args()
 
-    ts = TushareClient(max_per_min=135)
+    ts = TushareClient()
     os.makedirs(os.path.join(HERE, a.out), exist_ok=True)
     t0 = time.time()
     pool = build_pool(ts, a.pool, min_circ_mv=a.min_circ_mv)

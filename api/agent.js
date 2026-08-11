@@ -1,4 +1,5 @@
 import { emGet, num, applyCors, preflight } from './_lib.js';
+import { authorizePaidRequest } from './_account_auth.js';
 import { buildCorpus } from './_rag.js';
 import { retrieveTheory } from './_kb.js';
 import { screenStocks } from './_screen.js';
@@ -333,6 +334,13 @@ const SYSTEM = `你是"操盘手 Alpha"，一位有十年A股短线实战经验�
 export default async function handler(req, res) {
   if (preflight(req, res)) return;
   if (req.method !== 'POST') { applyCors(res); res.setHeader('Content-Type', 'application/json; charset=utf-8'); return res.status(200).send(JSON.stringify({ ok: false, error: 'POST only' })); }
+  const accountAuth = await authorizePaidRequest(req);
+  if (!accountAuth.ok) {
+    applyCors(res);
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    return res.status(accountAuth.error === '请先登录' ? 401 : 403)
+      .send(JSON.stringify({ ok: false, error: accountAuth.error }));
+  }
 
   const BASE = process.env.LLM_BASE_URL;
   const KEY = process.env.LLM_API_KEY;

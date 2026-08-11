@@ -1,7 +1,12 @@
 // 复盘工具：构造复盘请求 payload + 调用后端 review 模式
 // 复盘结论"每只股只留最新一条"，存 planStore.reviews（云端持久化）
 import { callAI, callAIStream } from './ai'
-import { planStore, livePositionOf, computeTFlows } from './planStore'
+import {
+  computePortfolio,
+  computeTFlows,
+  livePositionOf,
+  planStore,
+} from './planStore'
 
 // 北京时间当前分钟数 / 日key
 export function nowBJ() { const n = new Date(); return new Date(n.getTime() + (n.getTimezoneOffset() + 480) * 60000) }
@@ -88,14 +93,16 @@ function tradeHistoryOf(code) {
 
 // 账户资产(总资产/可用现金/目标资产)——供 AI 算补仓金额、仓位占比、预期收益、以终为始节奏
 function acctInfo() {
-  const a = planStore.get().account || {}
+  const state = planStore.get()
+  const a = state.account || {}
+  const portfolio = computePortfolio(state.holding || [], {}, a)
   return {
-    totalAssets: a.totalAssets ?? null,
-    cash: a.cash ?? null,
+    totalAssets: portfolio.totalAssets ?? null,
+    cash: portfolio.available ?? null,
     goal: a.goal ?? null,
     // 目标缺口/所需涨幅：让复盘也能"以终为始"，据离目标远近调仓位节奏(不凌驾止损)
-    goalGap: (a.goal != null && a.goal > 0 && a.totalAssets != null) ? +(a.goal - a.totalAssets).toFixed(2) : null,
-    goalReturnPct: (a.goal != null && a.goal > 0 && a.totalAssets > 0) ? +(((a.goal - a.totalAssets) / a.totalAssets) * 100).toFixed(1) : null,
+    goalGap: portfolio.goalGap,
+    goalReturnPct: portfolio.goalReturnPct,
   }
 }
 
@@ -242,4 +249,3 @@ export async function forceGenerateReviews(session, quoteMap, opts = {}) {
     _autoRunning = false
   }
 }
-

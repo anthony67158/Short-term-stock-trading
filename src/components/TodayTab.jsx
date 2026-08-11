@@ -7,9 +7,20 @@ import { callAI } from '../ai'
 import { api } from '../apiBase'
 import { planStore, usePlanStore } from '../planStore'
 import { aiStore } from '../aiStore'
+import {
+  currentQuantModelVersion,
+  quantModelHeaders,
+  quantModelQuery,
+} from '../quantModel'
 import DailyReport from './DailyReport'
 import { fmtPct, pctClass, fmtInflow, fmtNum , fmtRaw } from '../format'
-import { rerankQuantCandidates } from '../../shared/stockRanking.js'
+import {
+  normalizePickDecision,
+  normalizeStoredPickSnapshot,
+  rerankQuantCandidates,
+  stockPickSession,
+  stockPickSavedLabel,
+} from '../../shared/stockRanking.js'
 
 // ============ 今日选股 Tab：今天买什么 ============
 export default function TodayTab({ interval, market, sectors, snapshot }) {
@@ -202,16 +213,18 @@ function MarketLight({ market, sectors, snapshot }) {
 const PICK_KEY = 'ai_pick_v1'
 function nowBJ() { const n = new Date(); return new Date(n.getTime() + (n.getTimezoneOffset() + 480) * 60000) }
 // 当日交易场次:9:15–15:01(含午间 11:30–13:00 休市)整体算“盘中/当日”，午休不切到“明日计划”，只有收盘后(15:01 之后)/盘前/周末才算收盘
-function isTradingNow() { const d = nowBJ(); if (d.getDay() === 0 || d.getDay() === 6) return false; const hm = d.getHours() * 60 + d.getMinutes(); return hm >= 555 && hm <= 901 } // 9:15-15:01(含午休)
+function isTradingNow() { return stockPickSession().trading }
 function todayKey() { const d = nowBJ(); return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}` }
 // AI 每日精选结果 & 自动开关：随账号跨设备同步(planStore.settings)，localStorage 仅作离线镜像。
 // 读:云端优先→本地兜底；写:双写(云端触发防抖回存 + 本地即时镜像)。这样手机选出的名单/开关，电脑登录也能看到。
 function loadPick() {
   try {
     const cloud = planStore.getSetting && planStore.getSetting(PICK_KEY, undefined)
-    if (cloud !== undefined && cloud !== null) return cloud
+    if (cloud !== undefined && cloud !== null) return normalizeStoredPickSnapshot(cloud)
   } catch { /* ignore */ }
-  try { return JSON.parse(localStorage.getItem(PICK_KEY) || 'null') } catch { return null }
+  try {
+    return normalizeStoredPickSnapshot(JSON.parse(localStorage.getItem(PICK_KEY) || 'null'))
+  } catch { return null }
 }
 function savePick(obj) {
   try { planStore.setSetting && planStore.setSetting(PICK_KEY, obj) } catch { /* ignore */ }
@@ -231,11 +244,14 @@ function saveAuto(v) {
   try { localStorage.setItem(AUTO_KEY, v ? '1' : '0') } catch { /* ignore */ }
 }
 
-async function fetchJsonWithTimeout(url, timeoutMs = 30000) {
+async function fetchJsonWithTimeout(url, timeoutMs = 30000, options = {}) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    const response = await fetch(url, { signal: controller.signal })
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    })
     return await response.json()
   } finally {
     clearTimeout(timer)
@@ -262,21 +278,23 @@ function DailyPlay({ snapshot }) {
   const [res, setRes] = useState(saved && saved.result ? saved.result : null)
   const [savedAt, setSavedAt] = useState(saved && saved.at ? saved.at : null)
   const [savedDay, setSavedDay] = useState(saved && saved.day ? saved.day : null)
+  const [savedSession, setSavedSession] = useState(saved && saved.session ? saved.session : null)
   const [funnel, setFunnel] = useState(saved && saved.funnel ? saved.funnel : null)
   const [err, setErr] = useState(null)
   const [auto, setAuto] = useState(loadAuto())
   const book = usePlanStore()
-  const trading = isTradingNow()
+  const session = stockPickSession()
+  const trading = session.trading
 
   // 登录/切换账号后云端设置到达 → 回灌 AI 精选结果与自动开关(以云端更新时间较新者为准)。
   // 依赖 book(planStore 快照):setData 灌入 settings 时会触发一次重渲染，从而拉到跨设备同步的名单。
   useEffect(() => {
     const p = loadPick()
     if (p && p.at && p.at !== savedAt) {
-      setRes(p.result || null); setSavedAt(p.at || null); setSavedDay(p.day || null); setFunnel(p.funnel || null)
+      setRes(p.result || null); setSavedAt(p.at || null); setSavedDay(p.day || null); setSavedSession(p.session || null); setFunnel(p.funnel || null)
     } else if (!p && savedAt) {
       // 云端被清空(登出/切换到空账号) → 清掉本地展示
-      setRes(null); setSavedAt(null); setSavedDay(null); setFunnel(null)
+      setRes(null); setSavedAt(null); setSavedDay(null); setSavedSession(null); setFunnel(null)
     }
     const a = loadAuto()
     if (a !== auto) setAuto(a)
@@ -324,9 +342,14 @@ function DailyPlay({ snapshot }) {
 
       // ③ 最多 5 路并发量化，避免 20 只同时冲击 FC/量化冷启动。
       setStage(`量化模型正在给 ${codes.length} 只候选打分…`)
+      const quantModelVersion = currentQuantModelVersion()
       const scored = await mapWithConcurrency(codes, 5, async (c) => {
         try {
-          const j = await fetchJsonWithTimeout(api(`/api/stock_detail?code=${c.code}&klt=101&lmt=60&quant=1&_t=${Date.now()}`), 25000)
+          const j = await fetchJsonWithTimeout(
+            api(`/api/stock_detail?code=${c.code}&klt=101&lmt=60&quant=1${quantModelQuery()}&_t=${Date.now()}`),
+            25000,
+            { headers: quantModelHeaders(quantModelVersion) },
+          )
           const q = j.quant, fc = q && q.forecast
           return {
             code: c.code, name: c.name, tags: c.tags,
@@ -344,7 +367,13 @@ function DailyPlay({ snapshot }) {
               stopLoss: q.highConfSignal && q.highConfSignal.stopLoss,
             } : null,
           }
-        } catch { return { code: c.code, name: c.name, tags: c.tags, quant: null } }
+        } catch {
+          return {
+            ...c,
+            mainInflowYi: c.mainInflow != null ? +(c.mainInflow / 1e8).toFixed(2) : null,
+            quant: null,
+          }
+        }
       })
       const withQuant = scored.filter((x) => x.quant) // 优先把打上分的交给 LLM
       // 量化服务全挂时不再交白卷:退化为"仅盘面信号"名单,让 AI 基于资金/题材/涨速排序,并如实说明量化缺失
@@ -368,15 +397,25 @@ function DailyPlay({ snapshot }) {
         },
         sectors: (s.sectors?.list || []).slice(0, 8).map((x) => ({ name: x.name, pct: x.pct, mainInflowYi: +(x.mainInflow / 1e8).toFixed(2), lead: x.leadName })),
         candidates: forLLM,
+        quantModelVersion,
         quantMissing,
         funnel: funnelMeta,
+        session: session.mode,
       }
       const r = await callAI('scan_pick', payload)
-      if (r.ok) {
-        const at = Date.now(), day = todayKey()
-        setRes(r.result); setSavedAt(at); setSavedDay(day); setFunnel(funnelMeta)
-        savePick({ result: r.result, at, day, funnel: funnelMeta })
-      } else setErr(r.error || 'AI 选股失败')
+      const allowedCodes = forLLM.map((item) => item.code)
+      const decision = r.ok
+        ? normalizePickDecision(r.result, allowedCodes, forLLM)
+        : normalizePickDecision({
+            noTrade: true,
+            noTradeReason: r.error || 'AI研判暂不可用',
+            marketNote: 'AI研判暂不可用，以下按全市场评分与量化复排展示条件候选。',
+            confidence: '确定性筛选',
+            picks: [],
+          }, allowedCodes, forLLM)
+      const at = Date.now(), day = todayKey()
+      setRes(decision); setSavedAt(at); setSavedDay(day); setSavedSession(session.mode); setFunnel(funnelMeta)
+      savePick({ result: decision, at, day, session: session.mode, funnel: funnelMeta, shortlist: forLLM })
     } catch (e) { setErr(String(e.message || e)) }
     finally { setLoading(false); setStage('') }
   }
@@ -421,15 +460,21 @@ function DailyPlay({ snapshot }) {
   })()
 
   const savedTimeStr = savedAt ? new Date(savedAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : null
-  const isToday = savedDay === todayKey()
+  const savedLabel = stockPickSavedLabel({
+    savedDay,
+    currentDay: todayKey(),
+    savedSession,
+    trading,
+    timeText: savedTimeStr,
+  })
 
   return (
     <div className="play-card">
       <div className="play-head">
         <div className="play-title">
           <Icon name="radar" size={18} />
-          <span>{trading ? 'AI 选股' : '明日计划入选'}</span>
-          <span className="play-sub">{trading ? '全市场过滤 + 量化复排 + AI 决策，没优势时明确不出手' : '盘中决策结果，供下一交易日开盘参考'}</span>
+          <span>{trading ? 'AI 选股' : '下一交易日观察池'}</span>
+          <span className="play-sub">{trading ? '全市场扫描 + 量化复排 + 条件买点，区分可执行与等待触发' : '基于最近完整行情生成开盘观察与触发计划'}</span>
         </div>
         <div className="play-actions">
           <button className={'play-auto' + (auto ? ' on' : '')} onClick={toggleAuto} title={`开启后每 ${AUTO_MIN} 分钟在交易时段自动重选一次并保留结果，休市自动停`}>
@@ -440,9 +485,14 @@ function DailyPlay({ snapshot }) {
                   : `自动刷新·休市待命`)
               : '定时刷新'}
           </button>
-          <button className="btn btn-primary" onClick={() => run(false)} disabled={loading || !trading} title={!trading ? '仅交易时段(9:15–15:00)可重新选股;当前展示的是最近一次盘中结果' : ''}>
+          <button className="btn btn-primary" onClick={() => run(false)} disabled={loading}
+            title={trading ? '重新扫描全市场并生成条件候选' : '按最近完整行情生成下一交易日观察池'}>
             <Icon name={loading ? 'refresh' : 'spark'} size={15} className={loading ? 'spin' : ''} />
-            {loading ? '选股中' : (trading ? (res ? '重新选股' : 'AI 选股') : '休市·看盘中结果')}
+            {loading
+              ? '选股中'
+              : trading
+                ? (res ? '重新选股' : 'AI 选股')
+                : (res ? '重新生成观察池' : '生成开盘观察池')}
           </button>
         </div>
       </div>
@@ -451,8 +501,8 @@ function DailyPlay({ snapshot }) {
         {err && <div className="err">{err}</div>}
         {!res && !err && !loading && (
           <div className="play-hint">{trading
-            ? '扫描全市场并过滤不可交易标的，再经量化复排与 AI 把握/赔率闸门，输出 1~3 只可行动标的；没有优势机会时会明确提示「今日不出手」。'
-            : '当前为休市时段，暂无盘中选股结果。开盘后(9:15起)点「AI 选股」，收盘后这里会保留结果供次日参考。'}</div>
+            ? '扫描全市场并过滤不可交易标的，再经量化复排与 AI 研判，始终输出最优候选；没有立即买点时转为等待触发。'
+            : '当前为休市时段，可按最近完整行情生成下一交易日观察池、买入区与失效条件。'}</div>
         )}
         {loading && <div className="play-hint"><Icon name="refresh" size={13} className="spin" /> {stage || '正在选股…'}</div>}
         {res && (
@@ -460,7 +510,7 @@ function DailyPlay({ snapshot }) {
             {savedTimeStr && (
               <div className="pick-savedat">
                 <Icon name="history" size={12} />
-                {isToday ? (trading ? `本次选股 ${savedTimeStr}，结果已保留` : `今日盘中 ${savedTimeStr} 选出，供明天开盘参考`) : `${savedTimeStr} 选出(非今日，仅供参考)`}
+                {savedLabel}
               </div>
             )}
             {funnel && funnel.universeCount != null && (
@@ -470,8 +520,12 @@ function DailyPlay({ snapshot }) {
             )}
             {res.marketNote && <div className="pick-market"><Icon name="pulse" size={13} /> <span className="pick-market-note">{res.marketNote}</span>{res.confidence && <span className={'pick-conf ' + (/高/.test(res.confidence) ? 'hi' : /低/.test(res.confidence) ? 'lo' : 'mid')}>把握度 {res.confidence}</span>}</div>}
             {(res.noTrade || !Array.isArray(res.picks) || res.picks.length === 0) && (
-              <div className="play-risk"><Icon name="shield" size={14} /><span><b>今日不出手</b> · {res.noTradeReason || '当前候选没有同时通过把握与赔率要求，保留现金等待更清晰机会。'}</span></div>
+              <div className="play-risk"><Icon name="shield" size={14} /><span>
+                <b>{Array.isArray(res.picks) && res.picks.length > 0 ? '当前不追，等待触发' : '数据不足，暂无候选'}</b>
+                {' · '}{res.noTradeReason || '当前候选没有立即买点，等待更清晰的确认信号。'}
+              </span></div>
             )}
+            {res.fallbackReason && <div className="pick-savedat">{res.fallbackReason}</div>}
             {Array.isArray(res.picks) && res.picks.length > 0 && (
               <div className="pick-list">
                 {res.picks.map((c, i) => {
@@ -485,6 +539,7 @@ function DailyPlay({ snapshot }) {
                           <StockName code={c.code} name={c.name}><span>{c.name}<span className="cand-code">{c.code}</span></span></StockName>
                         </div>
                         {c.grade && <span className={'pick-grade ' + gcls}>{c.grade}</span>}
+                        {c.actionability && <span className={'pick-action ' + (c.actionability === '可执行' ? 'ready' : 'watch')}>{c.actionability}</span>}
                         {c.quantScore != null && <span className={'pick-score ' + (c.quantScore >= 60 ? 'red' : c.quantScore <= 40 ? 'green' : 'gold')}>量化 {c.quantScore}</span>}
                         <button className={'chip-btn' + (added ? ' done' : '')} disabled={added} style={{ marginLeft: 'auto' }}
                           onClick={() => planStore.addPlan({ code: c.code, name: c.name }, c.reason)}>

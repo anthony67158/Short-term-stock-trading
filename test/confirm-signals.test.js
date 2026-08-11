@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { deterministicJudge, intradayPrimitives } from '../api/_confirm.js'
+import { deterministicJudge, intradayPrimitives, judgeConfirmation } from '../api/_confirm.js'
 
 test('分时原语包含VWAP连续性、窗口回撤和反弹幅度', () => {
   const trends = Array.from({ length: 10 }, (_, index) => ({
@@ -42,4 +42,25 @@ test('止盈触价后回撤并跌破VWAP达到客观确认门槛', () => {
 
   assert.equal(result.decision, 'confirm')
   assert.equal(result.score >= 1.5, true)
+})
+
+test('最新军师已转为减仓时旧加仓点直接失效', async () => {
+  const result = await judgeConfirmation({
+    alert: {
+      code: '600000',
+      actKind: 'add',
+      note: '补仓点',
+      value: 10,
+    },
+    advice: {
+      action: '减仓',
+      actionPlan: '反弹到10.5元减仓1手',
+      addPrice: 10,
+    },
+  })
+
+  assert.equal(result.decision, 'invalid')
+  assert.equal(result.actionIntent, 'add')
+  assert.equal(result.policy, 'advice-mismatch')
+  assert.match(result.reason, /不再支持加仓/)
 })

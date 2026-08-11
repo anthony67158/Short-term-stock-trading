@@ -44,6 +44,7 @@ export default function AdviceGenerationStatus({ code, variant = 'card' }) {
       aria-label={`取消${code}的 AI 操作建议生成`} title="点击取消本次生成">
       <Icon name="refresh" size={12} className="spin" />
       <span>{generation.label}</span>
+      {generation.cloud && <em>云端持续运行</em>}
       <b>{generation.cancelable ? '取消生成' : '取消中'}</b>
     </button>
   )

@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import confirmSignalHandler, { sanitizeConfirmationBody } from '../api/confirm_signal.js'
+import { TRUSTED_ACCOUNT_REQUEST } from '../api/_account_auth.js'
 
 test('确认接口只保留Judge需要的白名单字段', () => {
   const result = sanitizeConfirmationBody({
@@ -18,13 +19,31 @@ test('确认接口只保留Judge需要的白名单字段', () => {
       note: '止盈',
       injected: 'drop',
     },
-    advice: { exitTiming: '冲高回落再减', private: 'drop' },
+    advice: {
+      action: '加仓',
+      actionPlan: '回踩10元企稳后加仓1手',
+      exitTiming: '站回VWAP再加',
+      addPrice: 10,
+      stopPrice: 9.6,
+      targetPrice: 11,
+      riskReward: '2.5:1',
+      fundNote: '主力资金连续流入',
+      bearCase: '跌破支撑则判断错误',
+      invalidation: '跌破9.6元失效',
+      private: 'drop',
+    },
     quote: { price: 10.1, pct: 1, unknown: 'drop' },
   })
 
   assert.equal(result.ok, true)
   assert.equal(result.value.alert.injected, undefined)
   assert.equal(result.value.advice.private, undefined)
+  assert.equal(result.value.advice.action, '加仓')
+  assert.equal(result.value.advice.addPrice, 10)
+  assert.equal(result.value.advice.stopPrice, 9.6)
+  assert.equal(result.value.advice.riskReward, '2.5:1')
+  assert.equal(result.value.advice.fundNote, '主力资金连续流入')
+  assert.equal(result.value.advice.bearCase, '跌破支撑则判断错误')
   assert.equal(result.value.quote.unknown, undefined)
 })
 
@@ -46,6 +65,7 @@ test('今日无可卖仓位时确认接口直接返回 T+1 等待，不调用 Ju
   const req = {
     method: 'POST',
     headers: {},
+    [TRUSTED_ACCOUNT_REQUEST]: true,
     socket: { remoteAddress: 't1-test' },
     body: {
       alert: {

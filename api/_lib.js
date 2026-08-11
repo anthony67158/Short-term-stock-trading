@@ -61,7 +61,10 @@ export async function emGetOne(pathAndQuery, { his = false, hostIndex = 0, maxAt
 export function applyCors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-internal');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type, x-internal, X-Account-Nick, X-Account-Password',
+  );
 }
 
 // OPTIONS 预检统一应答：命中则回 204 并返回 true，调用方 `if (preflight(req,res)) return;`

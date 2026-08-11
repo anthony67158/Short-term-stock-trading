@@ -2,7 +2,7 @@ import { useState } from 'react'
 import Icon from './Icon'
 import StockName from './StockName'
 import { usePolling } from '../hooks'
-import { planStore, usePlanStore, computeTFlows } from '../planStore'
+import { computePortfolio, planStore, usePlanStore } from '../planStore'
 import { fmtRaw, pctClass } from '../format'
 
 // 金额显示：万以上转万，保留2位
@@ -20,7 +20,13 @@ export default function AccountTab({ interval }) {
   const book = usePlanStore()
   const account = book.account || {}
   const [editing, setEditing] = useState(false)
-  const [total, setTotal] = useState(account.totalAssets != null ? String(account.totalAssets) : '')
+  const [total, setTotal] = useState(
+    account.initialCapital != null
+      ? String(account.initialCapital)
+      : account.totalAssets != null
+        ? String(account.totalAssets)
+        : '',
+  )
   const [cash, setCash] = useState(account.cash != null ? String(account.cash) : '')
   const [goal, setGoal] = useState(account.goal != null ? String(account.goal) : '')
 
@@ -29,34 +35,47 @@ export default function AccountTab({ interval }) {
   const { data } = usePolling(codes.length ? `/api/quote?codes=${codes.join(',')}` : null, interval, [codes.join(',')])
   const quote = {}
   ;(data?.list || []).forEach((s) => { quote[s.code] = s })
+  const portfolio = computePortfolio(book.holding, quote, account)
+  const positionById = new Map(portfolio.positions.map((position) => [position.id, position]))
 
   // 逐笔持仓市值 / 成本 / 浮盈
   const rows = book.holding.map((h) => {
     const q = quote[h.code]
-    const price = q ? q.price : h.buyPrice
-    const shares = (h.qty || 0) * 100
-    const mktVal = price * shares
-    const cost = h.buyPrice * shares + (h.buyFee || 0)
-    const tStat = computeTFlows(h.tFlows)
-    const floatPnl = mktVal - cost + (tStat.realized || 0)
-    return { h, q, price, mktVal, cost, floatPnl, pct: q ? q.pct : null }
+    const position = positionById.get(h.id)
+    return {
+      h,
+      q,
+      qty: position?.qty ?? h.qty,
+      price: position?.price ?? h.buyPrice,
+      mktVal: position?.mktValue ?? 0,
+      cost: position?.costValue ?? 0,
+      floatPnl: position?.floatPnl ?? 0,
+      pct: q ? q.pct : null,
+    }
   })
-  const holdMktVal = rows.reduce((a, r) => a + r.mktVal, 0)   // 持仓总市值
-  const holdCost = rows.reduce((a, r) => a + r.cost, 0)       // 持仓总成本
-  const floatPnlTotal = rows.reduce((a, r) => a + r.floatPnl, 0)
-
-  const totalAssets = Number(account.totalAssets) || 0
-  // 可用资金 = 总资产 − 持仓市值(账户恒等式)。用户手填的可用资金也须以此封顶并夹到 ≥0,
-  // 否则把已成持仓的钱重复算作可用(与 planStore.computePortfolio 同口径)。
-  const cashVal = totalAssets > 0
-    ? (account.cash != null ? Math.min(Number(account.cash), Math.max(totalAssets - holdMktVal, 0)) : Math.max(totalAssets - holdMktVal, 0))
-    : (account.cash != null ? Number(account.cash) : 0)
-  // 若用户填了总资产，用它；否则用 持仓市值+现金 估算
-  const equity = totalAssets > 0 ? totalAssets : holdMktVal + cashVal
-  const positionPct = equity > 0 ? (holdMktVal / equity) * 100 : 0
+  const holdMktVal = portfolio.holdMktValue
+  const cashVal = portfolio.cash ?? 0
+  const equity = portfolio.totalAssets
+  const positionPct = portfolio.position ?? 0
+  const initialCapital = portfolio.initialCapital
+  const totalPnl = portfolio.totalPnl
+  const totalPnlPct = portfolio.totalPnlPct
 
   const saveAccount = () => {
-    planStore.setAccount({ totalAssets: total ? Number(total) : null, cash: cash ? Number(cash) : null, goal: goal ? Number(goal) : null })
+    const nextInitialCapital = total ? Number(total) : null
+    const nextCash = cash
+      ? Number(cash)
+      : account.cash != null
+        ? Number(account.cash)
+        : nextInitialCapital != null
+          ? Math.max(0, +(nextInitialCapital - holdMktVal).toFixed(2))
+          : null
+    planStore.setAccount({
+      initialCapital: nextInitialCapital,
+      totalAssets: nextInitialCapital,
+      cash: nextCash,
+      goal: goal ? Number(goal) : null,
+    })
     setEditing(false)
   }
 
@@ -64,10 +83,10 @@ export default function AccountTab({ interval }) {
   const posLabel = { full: '满仓', high: '重仓', mid: '半仓', low: '轻仓' }[posLevel]
 
   // 目标资产（以终为始）：进度 / 还需净赚 / 所需涨幅
-  const goalVal = account.goal != null ? Number(account.goal) : 0
-  const goalProgress = goalVal > 0 && equity > 0 ? (equity / goalVal) * 100 : null
-  const goalGap = goalVal > 0 ? goalVal - equity : null          // >0=还差；<0=已超额
-  const goalReturnPct = goalVal > 0 && equity > 0 ? ((goalVal - equity) / equity) * 100 : null
+  const goalVal = portfolio.goal || 0
+  const goalProgress = portfolio.goalProgress
+  const goalGap = portfolio.goalGap
+  const goalReturnPct = portfolio.goalReturnPct
   const goalReached = goalGap != null && goalGap <= 0
 
   return (
@@ -76,24 +95,36 @@ export default function AccountTab({ interval }) {
       <div className="panel">
         <div className="panel-head">
           <div className="panel-title"><Icon name="gauge" size={16} /> 账户全景</div>
-          <button className="btn" onClick={() => { setTotal(account.totalAssets != null ? String(account.totalAssets) : ''); setCash(account.cash != null ? String(account.cash) : ''); setGoal(account.goal != null ? String(account.goal) : ''); setEditing(true) }}>
-            <Icon name="edit" size={13} /> 设置资金
+          <button className="btn" onClick={() => {
+            setTotal(account.initialCapital != null
+              ? String(account.initialCapital)
+              : account.totalAssets != null
+                ? String(account.totalAssets)
+                : '')
+            setCash(portfolio.cash != null ? String(portfolio.cash) : '')
+            setGoal(account.goal != null ? String(account.goal) : '')
+            setEditing(true)
+          }}>
+            <Icon name="edit" size={13} /> 校准账户
           </button>
         </div>
 
         {editing && (
           <div className="acc-edit">
             <div className="acc-edit-row">
-              <label>总资产(元)</label>
-              <input className="wl-input" value={total} onChange={(e) => setTotal(e.target.value)} placeholder="如 100000" inputMode="decimal" />
+              <label>投入本金 / 盈亏基准(元)</label>
+              <input className="wl-input" value={total} onChange={(e) => setTotal(e.target.value)} placeholder="如 100000，仅用于计算累计盈亏" inputMode="decimal" />
             </div>
             <div className="acc-edit-row">
-              <label>可用资金(元)</label>
-              <input className="wl-input" value={cash} onChange={(e) => setCash(e.target.value)} placeholder="留空则自动=总资产−持仓市值" inputMode="decimal" />
+              <label>当前可用资金(元)</label>
+              <input className="wl-input" value={cash} onChange={(e) => setCash(e.target.value)} placeholder="按券商余额填写，后续买卖自动更新" inputMode="decimal" />
             </div>
             <div className="acc-edit-row">
               <label>目标资产(元)</label>
               <input className="wl-input" value={goal} onChange={(e) => setGoal(e.target.value)} placeholder="以终为始，如 500000（50万）" inputMode="decimal" />
+            </div>
+            <div className="acc-edit-note">
+              当前总资产无需手填，系统会按“可用资金 + 实时持仓市值”自动计算。
             </div>
             <div className="acc-edit-actions">
               <button className="chip-btn ghost" onClick={() => setEditing(false)}>取消</button>
@@ -106,7 +137,7 @@ export default function AccountTab({ interval }) {
           <div className="acc-hero">
             <div className="acc-hero-label">总资产</div>
             <div className="acc-hero-val">{equity > 0 ? money(equity) : '--'}</div>
-            <div className="acc-hero-sub">{totalAssets > 0 ? '手动录入' : '持仓市值 + 可用资金估算'}</div>
+            <div className="acc-hero-sub">可用资金 + 实时持仓市值</div>
           </div>
           <div className="acc-cell">
             <div className="acc-cell-k">持仓市值</div>
@@ -119,9 +150,17 @@ export default function AccountTab({ interval }) {
             <div className="acc-cell-s">{equity > 0 ? ((cashVal / equity) * 100).toFixed(0) + '% 空仓' : '--'}</div>
           </div>
           <div className="acc-cell">
-            <div className="acc-cell-k">浮动盈亏</div>
-            <div className={'acc-cell-v ' + (floatPnlTotal >= 0 ? 'red' : 'green')}>{signMoney(floatPnlTotal)}</div>
-            <div className="acc-cell-s">{holdCost > 0 ? ((floatPnlTotal / holdCost) * 100).toFixed(2) + '%' : '--'}</div>
+            <div className="acc-cell-k">累计盈亏</div>
+            <div className={'acc-cell-v ' + ((totalPnl ?? 0) >= 0 ? 'red' : 'green')}>
+              {totalPnl != null ? signMoney(totalPnl) : '--'}
+            </div>
+            <div className="acc-cell-s">
+              {totalPnlPct != null
+                ? `${totalPnlPct >= 0 ? '+' : ''}${totalPnlPct.toFixed(2)}%`
+                : initialCapital != null
+                  ? `基准 ${money(initialCapital)}`
+                  : '设置盈亏基准'}
+            </div>
           </div>
         </div>
 
@@ -153,7 +192,7 @@ export default function AccountTab({ interval }) {
           </div>
         ) : (
           <div className="acc-goal-hint">
-            <Icon name="target" size={12} /> 设置「目标资产」后，AI 操作建议 / 复盘 / 加减仓都会围绕你的目标给节奏与仓位。点右上「设置资金」填写。
+            <Icon name="target" size={12} /> 设置「目标资产」后，AI 操作建议 / 复盘 / 加减仓都会围绕你的目标给节奏与仓位。点右上「校准账户」填写。
           </div>
         )}
       </div>
@@ -180,7 +219,7 @@ export default function AccountTab({ interval }) {
                   <div className="acc-hold-meta">
                     <span>占比 <b>{weight.toFixed(1)}%</b></span>
                     <span>市值 {money(r.mktVal)}</span>
-                    <span>{r.h.qty}手 · 成本 {fmtRaw(r.h.buyPrice)}</span>
+                    <span>{r.qty}手 · 成本 {fmtRaw(r.h.buyPrice)}</span>
                     {r.q && <span>现价 <b className={pctClass(r.q.pct)}>{fmtRaw(r.price)}</b></span>}
                   </div>
                 </div>

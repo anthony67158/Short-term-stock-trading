@@ -166,7 +166,10 @@ export function markEndpointUnusable(id, now = Date.now(), releaseInflight = fal
 // 注:调用方负责构造 body/headers 的其余部分——本函数只注入 baseUrl 与 Authorization。
 // 端点级模型:若传入 role,则选定端点后按 modelForEndpoint 覆盖 body.model
 //   (不同网关同一角色可能是不同模型名);modelFallback 为角色默认(端点与全局都没配时用)。
-export async function poolFetch(config, path, { method = 'POST', body, signal, timeoutMs = 30000, role, modelFallback, reasonFallback, forceNoReason = false, deferSuccess = false } = {}, maxTries = 2) {
+export async function poolFetch(config, path, {
+  method = 'POST', body, signal, timeoutMs = 30000, role, modelFallback,
+  reasonFallback, forceNoReason = false, forceReason = false, deferSuccess = false,
+} = {}, maxTries = 2) {
   const roleEps = endpointsForRole(config, role);
   if (!roleEps.length) return { resp: { __err: new Error('no LLM endpoint configured') }, endpoint: null };
   const tried = new Set();
@@ -188,7 +191,11 @@ export async function poolFetch(config, path, { method = 'POST', body, signal, t
       if (m) sendBody.model = m;
       // 深度思考按端点解析:开→注入 reasoning_effort=high;关→删除(避免继承 callChat 的全局注入)
       // forceNoReason:硬关(优先级最高)——补生成场景绝不能让端点级/全局 reasoning 把 CoT 再拉起来。
-      const wantReason = forceNoReason ? false : reasoningForEndpoint(config, ep, role, reasonFallback);
+      const wantReason = forceNoReason
+        ? false
+        : forceReason
+          ? true
+          : reasoningForEndpoint(config, ep, role, reasonFallback);
       if (wantReason) sendBody.reasoning_effort = 'high';
       else delete sendBody.reasoning_effort;
     }

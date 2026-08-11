@@ -4,8 +4,11 @@ import assert from 'node:assert/strict'
 import {
   marketPageNumbers,
   normalizePickDecision,
+  normalizeStoredPickSnapshot,
   rankMarketCandidates,
   rerankQuantCandidates,
+  stockPickSession,
+  stockPickSavedLabel,
 } from '../shared/stockRanking.js'
 
 const row = (patch = {}) => ({
@@ -130,7 +133,7 @@ test('选股输出会剔除候选池外股票并限制最多三只', () => {
   assert.equal(result.noTrade, false)
 })
 
-test('不出手结论强制清空名单，无有效标的时自动转为不出手', () => {
+test('不出手结论保留合法条件候选，无有效标的时仍返回空名单', () => {
   const explicit = normalizePickDecision({
     noTrade: true,
     picks: [{ code: '600001' }],
@@ -140,7 +143,150 @@ test('不出手结论强制清空名单，无有效标的时自动转为不出�
     picks: [{ code: '999999' }],
   }, ['600001'])
 
-  assert.deepEqual(explicit.picks, [])
+  assert.deepEqual(explicit.picks.map((item) => item.code), ['600001'])
+  assert.equal(explicit.picks[0].actionability, '等待触发')
+  assert.equal(explicit.noTrade, true)
   assert.equal(empty.noTrade, true)
+  assert.deepEqual(empty.picks, [])
   assert.match(empty.noTradeReason, /候选/)
+})
+
+test('LLM给空结果但确定性候选存在时降级为观察名单而非空白', () => {
+  const result = normalizePickDecision({
+    noTrade: true,
+    noTradeReason: '量化证据不足',
+    picks: [],
+  }, ['600001', '600002'], [
+    { code: '600001', name: '甲公司', marketScore: 78, combinedScore: 72, tags: ['资金流入'] },
+    { code: '600002', name: '乙公司', marketScore: 70, combinedScore: 68, tags: ['板块领涨'] },
+  ])
+
+  assert.equal(result.noTrade, true)
+  assert.equal(result.fallback, true)
+  assert.deepEqual(result.picks.map((item) => item.code), ['600001', '600002'])
+  assert.equal(result.picks.every((item) => item.grade === '观察'), true)
+  assert.match(result.picks[0].buyPoint, /回踩企稳|放量突破/)
+})
+
+test('AI判断当前不追时仍保留有效短名单作为条件候选', () => {
+  const result = normalizePickDecision({
+    noTrade: true,
+    noTradeReason: '当前位置偏高，等待回踩',
+    picks: [{
+      code: '600001',
+      name: '甲公司',
+      grade: '中',
+      actionability: '可执行',
+      reason: '资金与量能共振',
+      buyPoint: '回踩确认后再买',
+      buyZone: '9.80~9.95',
+      target: '10.80',
+      stop: '9.40',
+    }],
+  }, ['600001'], [{
+    code: '600001',
+    name: '甲公司',
+    price: 10,
+    combinedScore: 76,
+  }])
+
+  assert.equal(result.noTrade, true)
+  assert.equal(result.picks.length, 1)
+  assert.equal(result.picks[0].code, '600001')
+  assert.equal(result.picks[0].actionability, '等待触发')
+})
+
+test('确定性回退候选必须提供买入区、目标、止损和触发条件', () => {
+  const result = normalizePickDecision({
+    noTrade: true,
+    noTradeReason: '量化方向尚未确认',
+    picks: [],
+  }, ['600001'], [{
+    code: '600001',
+    name: '甲公司',
+    price: 10,
+    marketScore: 82,
+    combinedScore: 75,
+    mainInflowYi: 1.2,
+    tags: ['主力资金', '量能放大'],
+    quant: {
+      score: 58,
+      upProb: 51,
+      buyPrice: 9.9,
+      takeProfit: 10.8,
+      stopLoss: 9.5,
+    },
+  }])
+
+  assert.equal(result.noTrade, true)
+  assert.equal(result.fallback, true)
+  assert.equal(result.picks[0].actionability, '等待触发')
+  assert.match(result.picks[0].buyZone, /9\.85/)
+  assert.equal(result.picks[0].target, 10.8)
+  assert.equal(result.picks[0].stop, 9.5)
+  assert.match(result.picks[0].buyPoint, /企稳|突破/)
+})
+
+test('休市时允许生成下一交易日观察池而不是禁用选股', () => {
+  const intraday = stockPickSession(Date.parse('2026-08-12T02:00:00Z'))
+  const overnight = stockPickSession(Date.parse('2026-08-11T18:00:00Z'))
+
+  assert.equal(intraday.trading, true)
+  assert.equal(intraday.mode, 'intraday')
+  assert.equal(intraday.canRun, true)
+  assert.equal(overnight.trading, false)
+  assert.equal(overnight.mode, 'next_open')
+  assert.equal(overnight.canRun, true)
+})
+
+test('读取已保存的空结果时用当时短名单恢复条件候选', () => {
+  const saved = normalizeStoredPickSnapshot({
+    at: 1000,
+    day: '2026-8-11',
+    result: {
+      noTrade: true,
+      noTradeReason: '当前位置不宜追高',
+      picks: [],
+    },
+    shortlist: [{
+      code: '600001',
+      name: '甲公司',
+      price: 10,
+      marketScore: 80,
+      combinedScore: 74,
+    }],
+  })
+
+  assert.equal(saved.result.noTrade, true)
+  assert.equal(saved.result.picks.length, 1)
+  assert.equal(saved.result.picks[0].code, '600001')
+  assert.equal(saved.result.picks[0].actionability, '等待触发')
+})
+
+test('没有短名单的旧版空结果自动失效以便重新生成', () => {
+  const saved = normalizeStoredPickSnapshot({
+    at: 1000,
+    day: '2026-8-11',
+    result: {
+      noTrade: true,
+      noTradeReason: '旧版空结果',
+      picks: [],
+    },
+  })
+
+  assert.equal(saved.result, null)
+  assert.equal(saved.legacyEmpty, true)
+})
+
+test('休市生成结果标记为开盘观察池而不是盘中或明天', () => {
+  const label = stockPickSavedLabel({
+    savedDay: '2026-8-12',
+    currentDay: '2026-8-12',
+    savedSession: 'next_open',
+    trading: false,
+    timeText: '08/12 03:13',
+  })
+
+  assert.equal(label, '开盘观察池 08/12 03:13 生成，供下一交易日开盘参考')
+  assert.doesNotMatch(label, /盘中|明天/)
 })

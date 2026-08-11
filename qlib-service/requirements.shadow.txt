@@ -1,0 +1,6 @@
+fastapi==0.115.5
+uvicorn[standard]==0.34.0
+numpy==2.0.2
+oss2==2.19.1
+alibabacloud_credentials==1.0.11
+torch==2.6.0

@@ -9,6 +9,7 @@ import { planStore, livePositionOf, computeTFlows, computePortfolio, t1StatusOf 
 import { nextTradingDayLabel } from './review'
 import { getAdvice } from './adviceCache'
 import { startAdvice } from './adviceRunner'
+import { currentQuantModelVersion, quantModelQuery } from './quantModel'
 import { bjDayKey, isWeekday, bjMinutes } from './review'
 
 const DONE_KEY = 'stock_advice_daily_v1'  // { day: 'YYYY-MM-DD', done: true }
@@ -102,13 +103,15 @@ export function buildHoldSpec(code, name, quoteMap, portfolio, account) {
     holdQty = 0; openTNet = tNet
   }
   const hp = (holdCost != null && holdQty != null) ? `&holdCost=${holdCost}&holdQty=${holdQty}` : ''
-  const quantUrl = api(`/api/stock_detail?code=${code}&klt=101&lmt=60&quant=1${hp}&_t=${Date.now()}`)
+  const quantModelVersion = currentQuantModelVersion()
+  const quantUrl = api(`/api/stock_detail?code=${code}&klt=101&lmt=60&quant=1${quantModelQuery()}${hp}&_t=${Date.now()}`)
   const stockWeight = (() => {
     const p = portfolio && portfolio.positions ? portfolio.positions.find((x) => x.code === code) : null
     return p && p.weight != null ? p.weight : null
   })()
   const aiPayload = {
     code, name,
+    quantModelVersion,
     holdCost, holdQty,
     openTNet,
     // T+1 买入时间锁定：今日买入手数当日绝对不可卖(A股T+1)，今日最多可卖=可卖手数
@@ -122,9 +125,11 @@ export function buildHoldSpec(code, name, quoteMap, portfolio, account) {
 
 // 生成【自选/非持仓个股】的 AI 操作建议(buy_advice):四档买点结论,不含持仓上下文
 export function buildWatchSpec(code, name, quoteMap, portfolio, account) {
-  const quantUrl = api(`/api/stock_detail?code=${code}&klt=101&lmt=60&quant=1&_t=${Date.now()}`)
+  const quantModelVersion = currentQuantModelVersion()
+  const quantUrl = api(`/api/stock_detail?code=${code}&klt=101&lmt=60&quant=1${quantModelQuery()}&_t=${Date.now()}`)
   const aiPayload = {
     code, name,
+    quantModelVersion,
     advisorTrack: advisorTrackFor('buy_advice'),
     account: accountFrom(portfolio, account),
   }

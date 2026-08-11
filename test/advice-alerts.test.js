@@ -52,10 +52,16 @@ test('云端持仓建议会生成补仓和减仓行动预警', () => {
 
   projectAdviceAlerts(data, '000001', {
     name: '平安银行',
+    action: '加仓',
     addPrice: 10.12,
     reducePrice: 11.36,
     opQty: '减1手',
     exitTiming: '站稳均价线再操作',
+    stopPrice: 9.8,
+    targetPrice: 12,
+    riskReward: '2:1',
+    fundNote: '主力资金流入',
+    invalidation: '跌破9.8元失效',
   }, { now, idFactory: ids })
 
   assert.equal(data.alerts.length, 2)
@@ -64,6 +70,10 @@ test('云端持仓建议会生成补仓和减仓行动预警', () => {
     ['reduce', 'gte', 11.36],
   ])
   assert.equal(data.alerts[0].timing, '站稳均价线再操作')
+  assert.equal(data.alerts[0].judgeContext.action, '加仓')
+  assert.equal(data.alerts[0].judgeContext.stopPrice, 9.8)
+  assert.equal(data.alerts[0].judgeContext.riskReward, '2:1')
+  assert.equal(data.alerts[0].judgeContext.fundNote, '主力资金流入')
 })
 
 test('今日新建仓的减仓预警标记为 T+1 锁定且不能提示卖出', () => {
@@ -112,7 +122,7 @@ test('旧仓2手今日补1手时减仓预警最多提示2手', () => {
   assert.equal(reduce.opQty, '减仓2手')
 })
 
-test('相同价位保留旧预警状态，不重复武装', () => {
+test('相同价位保留旧预警状态并刷新Judge建议快照', () => {
   const old = {
     id: 'old',
     code: '000001',
@@ -135,8 +145,10 @@ test('相同价位保留旧预警状态，不重复武装', () => {
     addPrice: 10.12,
   }, { now, idFactory: ids })
 
-  assert.equal(changed, false)
-  assert.equal(data.alerts[0], old)
+  assert.equal(changed, true)
+  assert.equal(data.alerts[0].id, 'old')
+  assert.equal(data.alerts[0].phase, 'watching')
+  assert.equal(data.alerts[0].judgeContext.addPrice, 10.12)
 })
 
 test('关闭 AI 自动预警时清理该股票的自动预警', () => {
@@ -175,4 +187,22 @@ test('股票已移出自选和持仓时不会从旧建议重建预警', () => {
 
   assert.equal(changed, true)
   assert.deepEqual(data.alerts, [{ id: 'manual', code: '600519', type: 'pct' }])
+})
+
+test('军师主结论已是减仓时不再创建备用加仓预警', () => {
+  const data = {
+    plan: [],
+    holding: [{ id: 'h1', code: '600000', name: '浦发银行' }],
+    alerts: [],
+    settings: {},
+  }
+
+  projectAdviceAlerts(data, '600000', {
+    action: '减仓',
+    actionPlan: '反弹到11元减仓1手',
+    addPrice: 9.8,
+    reducePrice: 11,
+  }, { now, idFactory: ids })
+
+  assert.deepEqual(data.alerts.map((alert) => alert.actKind), ['reduce'])
 })

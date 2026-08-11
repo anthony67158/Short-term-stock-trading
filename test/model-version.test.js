@@ -1,0 +1,114 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import {
+  adaptV2Prediction,
+  normalizeQuantModelVersion,
+  quantModelLabel,
+} from '../shared/modelVersion.js'
+
+test('模型版本默认回退现有生产模型且只接受V2显式值', () => {
+  assert.equal(normalizeQuantModelVersion(), 'default')
+  assert.equal(normalizeQuantModelVersion('unknown'), 'default')
+  assert.equal(normalizeQuantModelVersion('v2'), 'v2')
+  assert.equal(quantModelLabel('default'), '当前生产模型')
+  assert.equal(quantModelLabel('v2'), '分钟 Transformer V2')
+})
+
+test('V2三分类概率适配为军师可消费的统一量化结构', () => {
+  const result = adaptV2Prediction({
+    ok: true,
+    shadowOnly: true,
+    asOf: '2026-08-10 15:00:00',
+    predictedClass: 'TAKE_PROFIT',
+    probabilities: {
+      stopLoss: 0.2,
+      timeout: 0.1,
+      takeProfit: 0.7,
+    },
+    outlook: {
+      direction: 'bullish',
+      confidencePct: 70,
+      probabilityMarginPct: 50,
+      normalizedEntropy: 0.73,
+      expectedBarrierReturnPct: 0.58,
+      directionScore: 75,
+      riskLevel: 'medium',
+      signalStrength: 'strong',
+      probabilityEdgePct: 50,
+      favorableToAdverseOdds: 3.5,
+      uncertaintyLevel: 'medium',
+      convictionScore: 62,
+    },
+    marketContext: {
+      barsCount: 61,
+      sessionBars: 48,
+      sessionReturnPct: 1.25,
+      momentum30mPct: 0.42,
+      realizedVolPct: 1.18,
+      averageRangePct: 0.73,
+      volumeRatio20: 1.36,
+      closeLocationPct: 82,
+      drawdownFromHighPct: -0.18,
+      reboundFromLowPct: 1.92,
+      supportPrice: 9.82,
+      resistancePrice: 10.21,
+      trendAlignment: 'bullish',
+    },
+    priceReferences: {
+      anchorType: 'signalClose',
+      anchorPrice: 10,
+      supportPrice: 9.82,
+      resistancePrice: 10.21,
+      indicativeTakeProfitPrice: 10.1,
+      indicativeStopLossPrice: 9.94,
+      referenceBuyZoneLow: 9.82,
+      referenceBuyZoneHigh: 10,
+      provisional: true,
+    },
+    targetDefinition: {
+      entry: 'nextTradingDayFirst5mOpen',
+      horizon: 'nextTradingDay',
+      takeProfitPct: 1,
+      stopLossPct: 0.6,
+      sameBarPolicy: 'stopLossFirst',
+    },
+    model: {
+      runId: 'run-20260811-minute5m-v2',
+      architecture: 'transformer',
+      sha256: 'a'.repeat(64),
+    },
+  }, { price: 10 })
+
+  assert.equal(result.ok, true)
+  assert.equal(result.modelVersion, 'v2')
+  assert.equal(result.score, 75)
+  assert.equal(result.bias, '偏多')
+  assert.equal(result.forecast.upProb, 70)
+  assert.equal(result.forecast.downProb, 20)
+  assert.equal(result.forecast.timeoutProb, 10)
+  assert.equal(result.forecast.expRet, 0.58)
+  assert.equal(result.forecast.direction, '看涨')
+  assert.equal(result.forecast.horizon, '下一交易日')
+  assert.equal(result.v2.predictedClass, 'TAKE_PROFIT')
+  assert.equal(result.v2.outlook.probabilityEdgePct, 50)
+  assert.equal(result.v2.marketContext.momentum30mPct, 0.42)
+  assert.equal(result.v2.marketContext.trendAlignment, 'bullish')
+  assert.equal(result.v2.priceReferences.indicativeTakeProfitPrice, 10.1)
+  assert.equal(result.forecast.targetLow, 9.82)
+  assert.equal(result.forecast.targetMid, 10)
+  assert.equal(result.forecast.targetHigh, 10.1)
+  assert.equal(result.highConfSignal.buyPrice, 10)
+  assert.equal(result.highConfSignal.takeProfit, 10.1)
+  assert.equal(result.highConfSignal.stopLoss, 9.94)
+  assert.equal(result.highConfSignal.fired, true)
+  assert.equal(result.reads.length >= 6, true)
+})
+
+test('V2适配拒绝缺失或不守恒的概率输出', () => {
+  assert.throws(
+    () => adaptV2Prediction({
+      probabilities: { stopLoss: 0.7, timeout: 0.7, takeProfit: 0.1 },
+    }),
+    /概率/,
+  )
+})

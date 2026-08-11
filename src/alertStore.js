@@ -2,8 +2,10 @@ import { useSyncExternalStore } from 'react'
 import { planStore, t1StatusOf } from './planStore'
 import { getAdvice } from './adviceCache'
 import { api } from './apiBase'
+import { accountRequestHeaders } from './quantModel'
 import { confirmationPolicy } from '../shared/confirmPolicy.js'
 import { applyT1ToAlert } from '../shared/t1AdvicePolicy.js'
+import { actionLabelOf } from '../shared/judgeAdviceContext.js'
 
 // ============ 盯盘预警引擎 ============
 // 统一轮询自选/持仓相关个股实时报价，逐条判断预警规则是否命中；
@@ -104,8 +106,6 @@ export function alertMeta(a, q) {
   return { dir, dirLabel, distPct, progress, near, price }
 }
 
-// 交易语义 → 中文动作词(与后端 _confirm.sideOf / ACTION_ZH 同口径)
-const ACTION_ZH = { buy: '买入', sell: '卖出', stop: '止损离场' }
 function sideOf(a) {
   if (!a) return 'buy'
   const note = a.note || ''
@@ -273,8 +273,7 @@ export const alertStore = {
         // 阶段一:价格触及关键价位 → 发【弱提醒】,进入「观察确认中」,继续监控真正时机(不停用)
         const msg = hit(a, q)
         if (!msg) continue
-        const side = sideOf(a)
-        const actZh = ACTION_ZH[side] || '操作'
+        const actZh = actionLabelOf(a)
         const title = `👀 到点位·观察确认中 · ${a.name || a.code}`
         const body = `${describeAlert(a)}｜${msg}\n⏳已到${actZh}价位,但「到价≠立刻动手」。系统正在盯盘确认真正时机,确认后会再发一次「✅ 可以${actZh}」的强提示,先别急。`
         this.push({ code: a.code, name: a.name, title, body, alertId: 'watch-' + a.id })
@@ -309,15 +308,17 @@ export const alertStore = {
       const payload = { alert: a, advice: advEntry && advEntry.advice, quote: q }
       fetch(api('/api/confirm_signal'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...accountRequestHeaders(),
+        },
         body: JSON.stringify(payload),
         signal: ac.signal,
       })
         .then((r) => r.json())
         .then((v) => {
           if (!v || !v.ok) return
-          const side = v.side || sideOf(a)
-          const actZh = ACTION_ZH[side] || '操作'
+          const actZh = actionLabelOf(a)
           planStore.markAlertJudged(a.id, v, q && q.price)
           if (v.decision === 'confirm') {
             const conf = v.confidence != null ? `(把握${v.confidence})` : ''

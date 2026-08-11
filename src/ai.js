@@ -1,11 +1,16 @@
 // 调用后端 AI 代理（健壮解析：后端超时/崩溃时 Vercel 返回纯文本而非 JSON）
 import { api } from './apiBase'
+import { accountRequestHeaders, quantModelHeaders } from './quantModel'
 
 export async function callAI(mode, payload) {
   try {
     const res = await fetch(api('/api/ai'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...accountRequestHeaders(),
+        ...quantModelHeaders(payload?.quantModelVersion),
+      },
       body: JSON.stringify({ mode, payload }),
     })
     const raw = await res.text()
@@ -39,7 +44,11 @@ export async function fetchDailyReport({ session, holdings, refresh, onPhase, si
   try {
     const qs = `?session=${session || ''}${refresh ? '&refresh=1' : ''}`
     const res = await fetch(api('/api/daily_report' + qs), {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...accountRequestHeaders(),
+      },
       body: JSON.stringify({ holdings: holdings || [] }), signal,
     })
     const reader = res.body.getReader()
@@ -74,12 +83,23 @@ export async function fetchDailyReport({ session, holdings, refresh, onPhase, si
 //   'source'{label,ok}   每个数据源采集完成(名称+成功/失败)，供前端渲染勾选清单；
 //   'reasoning'{text}    模型思维链增量(开启深度思考时)，供前端实时展示"军师在想什么"。
 // 后端不支持 SSE 时自动回退为整段 JSON，不影响结果。
-export async function callAIStream(mode, payload, onPhase, signal, onEvent) {
+export async function callAIStream(mode, payload, onPhase, signal, onEvent, options = {}) {
   try {
     const res = await fetch(api('/api/ai'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode, payload, stream: true }),
+      headers: {
+        'Content-Type': 'application/json',
+        ...accountRequestHeaders(),
+        ...quantModelHeaders(payload?.quantModelVersion),
+      },
+      body: JSON.stringify({
+        mode,
+        payload,
+        stream: true,
+        ...(options.fastMode != null ? { fastMode: !!options.fastMode } : {}),
+        ...(options.forceReasoning ? { forceReasoning: true } : {}),
+        ...(options.runtimeBudgetMs ? { runtimeBudgetMs: options.runtimeBudgetMs } : {}),
+      }),
       signal,
     })
     const ctype = res.headers.get('content-type') || ''

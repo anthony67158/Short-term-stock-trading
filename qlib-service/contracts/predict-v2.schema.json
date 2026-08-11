@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://stock-quant-lab/contracts/predict-v2.schema.json",
+  "title": "Intraday Shadow Predict V2 Request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["code", "asOf", "bars"],
+  "properties": {
+    "requestId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$"
+    },
+    "code": {
+      "type": "string",
+      "pattern": "^\\d{6}\\.(SH|SZ|BJ)$"
+    },
+    "asOf": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$"
+    },
+    "bars": {
+      "type": "array",
+      "minItems": 61,
+      "maxItems": 240,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["tradeTime", "open", "high", "low", "close", "volume"],
+        "properties": {
+          "tradeTime": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$"
+          },
+          "open": {"type": "number", "exclusiveMinimum": 0},
+          "high": {"type": "number", "exclusiveMinimum": 0},
+          "low": {"type": "number", "exclusiveMinimum": 0},
+          "close": {"type": "number", "exclusiveMinimum": 0},
+          "volume": {"type": "number", "minimum": 0}
+        }
+      }
+    }
+  }
+}

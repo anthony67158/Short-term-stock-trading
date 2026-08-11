@@ -7,7 +7,7 @@ Tushare Pro 轻量 HTTP 客户端（P1 正交数据源接入）。
   - 自建网关会 307 跳到 ts2 子域、可能返回 gzip；此处一并处理，并做令牌桶限速+重试。
 
 安全：token 从环境变量 TUSHARE_TOKEN 读取，绝不硬编码/落库。网关地址可用
-      TUSHARE_URL 覆盖（默认已是 307 后的最终地址 ts2，省一次跳转）。
+      TUSHARE_URL 覆盖，但只接受文档公开入口及其已知重定向主机。
 
 用法：
     from tushare_client import TushareClient
@@ -23,16 +23,43 @@ import os
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
-DEFAULT_URL = os.environ.get("TUSHARE_URL", "https://ts2.gyzcloud.top/api")
-# 官方入口 https://ts.gyzcloud.top/api 会 307 → ts2；默认直连 ts2 省一跳，但仍保留跟随逻辑兜底。
+DEFAULT_URL = os.environ.get("TUSHARE_URL", "https://ts.gyzcloud.top/api")
+# 网关接口与限速说明：https://ts.gyzcloud.top/docs
+ALLOWED_GATEWAY_HOSTS = frozenset({"ts.gyzcloud.top", "ts2.gyzcloud.top"})
+SAFE_MAX_PER_MIN = 135
+DEFAULT_MAX_PER_MIN = 90
+RATE_LIMIT_COOLDOWN_SECONDS = 305
+
+
+def validate_gateway_url(url):
+    """只允许公开 Tushare 网关的 HTTPS API 地址，防止凭证外发或重定向 SSRF。"""
+    if not isinstance(url, str) or not url.strip():
+        raise ValueError("TUSHARE_URL 不能为空")
+    parsed = urllib.parse.urlparse(url.strip())
+    if parsed.scheme != "https":
+        raise ValueError("TUSHARE_URL 必须使用 HTTPS")
+    if parsed.hostname not in ALLOWED_GATEWAY_HOSTS:
+        raise ValueError("TUSHARE_URL 主机不在允许列表")
+    if parsed.port not in (None, 443):
+        raise ValueError("TUSHARE_URL 不允许自定义端口")
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise ValueError("TUSHARE_URL 不得包含凭证、查询参数或片段")
+    if parsed.path != "/api" or parsed.params:
+        raise ValueError("TUSHARE_URL 路径必须为 /api")
+    return parsed.geturl()
 
 
 class _RateLimiter:
     """简单令牌桶：限制每分钟最多 max_per_min 次调用（线程安全）。
     Tushare 网关限频 150 次/分；默认留 10% 余量取 135。"""
     def __init__(self, max_per_min=135):
+        if (not isinstance(max_per_min, (int, float))
+                or isinstance(max_per_min, bool)
+                or not 0 < max_per_min <= SAFE_MAX_PER_MIN):
+            raise ValueError(f"max_per_min 必须在 0 到 {SAFE_MAX_PER_MIN} 之间")
         self.capacity = max_per_min
         self.interval = 60.0 / max_per_min   # 每次调用最小间隔
         self._lock = threading.Lock()
@@ -47,20 +74,26 @@ class _RateLimiter:
                 now = time.time()
             self._next_at = max(now, self._next_at) + self.interval
 
+    def defer(self, seconds):
+        """把所有共享此 limiter 的线程统一延后，避免 429 后并发重试。"""
+        with self._lock:
+            self._next_at = max(self._next_at, time.time() + seconds)
+
 
 class TushareClient:
-    def __init__(self, token=None, url=None, max_per_min=135, timeout=40, retries=4):
+    def __init__(self, token=None, url=None, max_per_min=DEFAULT_MAX_PER_MIN,
+                 timeout=40, retries=4):
         self.token = token or os.environ.get("TUSHARE_TOKEN", "")
         if not self.token:
             raise RuntimeError("TUSHARE_TOKEN 未设置（应从环境变量读取，勿硬编码）")
-        self.url = url or DEFAULT_URL
+        self.url = validate_gateway_url(url or DEFAULT_URL)
         self.timeout = timeout
         self.retries = retries
         self._rl = _RateLimiter(max_per_min)
 
     def _post_once(self, body_bytes, url):
         """单次 POST，自动跟随 307 到 ts2，解 gzip。返回 (obj, final_url)。"""
-        cur = url
+        cur = validate_gateway_url(url)
         for _ in range(3):  # 最多跟随 3 次跳转
             req = urllib.request.Request(
                 cur, data=body_bytes,
@@ -81,7 +114,7 @@ class TushareClient:
                 if e.code in (301, 302, 307, 308):
                     loc = e.headers.get("Location")
                     if loc:
-                        cur = loc
+                        cur = validate_gateway_url(urllib.parse.urljoin(cur, loc))
                         continue
                 raise
         raise RuntimeError(f"重定向次数过多: {url}")
@@ -112,6 +145,12 @@ class TushareClient:
                     last = RuntimeError(f"{api_name} 限频: {msg}")
                     continue
                 raise RuntimeError(f"{api_name} 返回 code={code} msg={msg}")
+            except urllib.error.HTTPError as e:
+                last = e
+                if e.code == 429:
+                    self._rl.defer(RATE_LIMIT_COOLDOWN_SECONDS)
+                    continue
+                time.sleep(1.5 * (i + 1))
             except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
                 last = e
                 time.sleep(1.5 * (i + 1))

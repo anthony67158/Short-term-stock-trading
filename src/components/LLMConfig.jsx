@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import Icon from './Icon'
 import { llmConfigStore } from '../llmConfigStore'
 import { api } from '../apiBase'
+import { accountRequestHeaders } from '../quantModel'
 
 // ============ AI 模型配置向导（低频操作，入口藏在账号菜单）============
 // 三步走，但同屏切换：
@@ -19,7 +20,10 @@ const STEPS = [
 async function callConfig(action, payload) {
   const res = await fetch(api('/api/llm_config'), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...accountRequestHeaders(),
+    },
     body: JSON.stringify({ action, ...payload }),
   })
   return res.json()

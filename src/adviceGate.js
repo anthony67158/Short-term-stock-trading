@@ -13,7 +13,11 @@
 //   两者取并集,才是真实占用的端点数(跨端一致)。
 import { startAdvice, getRunningList, isRunning } from './adviceRunner'
 import { getBatchState, getConcurrency } from './adviceBatch'
-import { adviceJobState } from '../shared/adviceUiState.js'
+import { canServerAdvice, triggerServerAdvice } from './serverAdvice'
+import {
+  adviceJobState,
+  startAdvicePersistently,
+} from '../shared/adviceUiState.js'
 
 // 汇总当前"正在生成"的股票:code -> name(本地 + 云端并集)。
 export function generatingList() {
@@ -50,6 +54,9 @@ export function tryStartAdvice(spec) {
   const busy = generatingList().filter((x) => x.code !== String(code))
   const limit = getConcurrency()
   if (busy.length >= limit) return { status: 'full', busy, concurrency: limit }
-  startAdvice(spec)
-  return { status: 'started' }
+  return startAdvicePersistently(spec, {
+    canUseServer: canServerAdvice,
+    triggerServer: triggerServerAdvice,
+    startLocal: startAdvice,
+  })
 }

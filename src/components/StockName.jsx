@@ -8,8 +8,21 @@ export default function StockName({ code, name, showCode = true, className = '',
     if (stopPropagation) e.stopPropagation()
     openStockDetail(code, name)
   }
+  const onKeyDown = (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return
+    e.preventDefault()
+    onClick(e)
+  }
   return (
-    <span className={'stock-name-link ' + className} onClick={onClick} title="查看详情与K线">
+    <span
+      className={'stock-name-link ' + className}
+      role="button"
+      tabIndex={0}
+      aria-label={`查看${name || code}详情与K线`}
+      onClick={onClick}
+      onKeyDown={onKeyDown}
+      title="查看详情与K线"
+    >
       {children || (
         <>
           {name}

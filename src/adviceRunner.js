@@ -5,6 +5,9 @@ import { callAIStream } from './ai'
 import { saveAdvice } from './adviceCache'
 import { planStore } from './planStore'
 import { triggerServerAdvice, canServerAdvice } from './serverAdvice'
+import { acceptsGenerationResult, generationOptions } from '../shared/adviceBatchPolicy.js'
+import { ensureAdviceReasoning } from '../shared/adviceReasoning.js'
+import { quantModelHeaders } from './quantModel'
 
 const running = new Map()  // code -> { phase, startedAt }
 const results = new Map()  // code -> { result, advice, meta, news, adviceMissing, truncated, error, cachedAt }
@@ -61,6 +64,7 @@ export function startAdvice(spec) {
 
 async function run(spec, record) {
   const { code, mode, name, myHold, aiPayload, quantUrl, priceHint } = spec
+  const generation = generationOptions(!!spec.deepMode)
   const onPhase = (p) => {
     const r = running.get(code)
     if (r && p && p.text) { r.phase = p.text; notify() }
@@ -91,11 +95,14 @@ async function run(spec, record) {
       record.quantController = ac
       const t = setTimeout(() => { try { ac.abort() } catch { /* ignore */ } }, 15000)
       try {
-        const r = await fetch(quantUrl, { signal: ac.signal })
+        const r = await fetch(quantUrl, {
+          signal: ac.signal,
+          headers: quantModelHeaders(aiPayload?.quantModelVersion),
+        })
         return await r.json()
       } catch { return null } finally { clearTimeout(t) }
     })()
-    const adviceP = callAIStream(mode, aiPayload, onPhase, record.controller.signal, onEvent)
+    const adviceP = callAIStream(mode, aiPayload, onPhase, record.controller.signal, onEvent, generation)
       .then((r) => (r && r.ok ? { advice: r.result, meta: r.meta, news: r.news, truncated: r.truncated } : null))
       .catch(() => null)
     const [j, adviceResp] = await Promise.all([quantP, adviceP])
@@ -105,13 +112,15 @@ async function run(spec, record) {
     }
 
     const advice = adviceResp && adviceResp.advice
+      ? ensureAdviceReasoning(adviceResp.advice, record.reasoning)
+      : null
     const meta = adviceResp && adviceResp.meta
     const news = adviceResp && adviceResp.news
     const truncated = !!(adviceResp && (adviceResp.truncated || (advice && advice.truncated)))
     const adviceMissing = !myHold && !advice
     const result = (j && j.quant) ? j.quant : null
 
-    if (result || advice) {
+    if (acceptsGenerationResult({ quant: result, advice, truncated }, generation.deepMode)) {
       const cachedAt = Date.now()
       results.set(code, { result, advice, meta, news, adviceMissing, truncated, cachedAt })
       saveAdvice(code, { result, advice, meta, news, truncated }) // 持久化：关闭再进/刷新仍可见
@@ -146,7 +155,7 @@ async function run(spec, record) {
       // 本地生成两头都空(军师+量化):很可能是移动端切后台/锁屏把 SSE 掐断了。
       // 已登录云端账号 → 兜底改走【服务端生成】:请求带 keepalive,退到后台也能在 FC 里跑完,
       // 结果稍后经 authStore.pull 轮询云端回灌到本机缓存(手机/电脑都能看到)。
-      if (serverFallback(code)) {
+      if (serverFallback(code, generation.deepMode)) {
         results.set(code, { pending: true, error: '本地生成中断,已转由云端继续生成,稍候自动刷新…' })
       } else {
         results.set(code, { error: '量化服务暂不可用（可能冷启动，请稍后重试）' })
@@ -157,7 +166,7 @@ async function run(spec, record) {
       results.delete(code)
       return
     }
-    if (serverFallback(code)) {
+    if (serverFallback(code, generation.deepMode)) {
       results.set(code, { pending: true, error: '本地生成中断,已转由云端继续生成,稍候自动刷新…' })
     } else {
       results.set(code, { error: '获取失败：' + String((e && e.message) || e) })
@@ -168,9 +177,9 @@ async function run(spec, record) {
 
 // 单只服务端兜底:已登录云端账号才可用。触发一次「按需服务端生成」(仅这一只 code),
 // fire-and-forget + keepalive,页面切后台/关闭也已送达 FC 照跑完。成功发出返回 true。
-function serverFallback(code) {
+function serverFallback(code, deepMode = false) {
   try {
     if (!canServerAdvice()) return false
-    return !!triggerServerAdvice([code], { scope: 'all', force: true })
+    return !!triggerServerAdvice([code], { scope: 'all', force: true, deepMode })
   } catch { return false }
 }

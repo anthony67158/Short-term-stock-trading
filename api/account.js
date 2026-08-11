@@ -1,6 +1,10 @@
 import { put, list, del, readJsonStrict, hasStorage } from './_blob.js';
 import { sendJson, preflight } from './_lib.js';
 import { createHash } from 'crypto';
+import {
+  mergeAutoRefreshSettings,
+  newerAutoRefreshPatch,
+} from '../shared/adviceAutoRefreshPolicy.js';
 
 // ============ 云端账号 + 数据同步（阿里云 OSS 持久化）============
 // 单一入口，按 action 区分：register / login / get / save
@@ -40,6 +44,9 @@ function mergeAccountAlerts(clientAlerts, serverAlerts) {
   return (clientAlerts || []).map((client) => {
     const server = serverById.get(client?.id);
     if (!server) return client;
+    const withServerContext = server.judgeContext && !client.judgeContext
+      ? { ...client, judgeContext: server.judgeContext }
+      : client;
     const stamp = (alert) => Math.max(
       Number(alert?.triggeredAt) || 0,
       Number(alert?.lastJudgeAt) || 0,
@@ -49,11 +56,11 @@ function mergeAccountAlerts(clientAlerts, serverAlerts) {
     if (stamp(server) > stamp(client)) return { ...client, ...server };
     if (server.phase === 'confirmed' && client.phase === 'confirmed') {
       return {
-        ...client,
+        ...withServerContext,
         judgeOutcomes: { ...(client.judgeOutcomes || {}), ...(server.judgeOutcomes || {}) },
       };
     }
-    return client;
+    return withServerContext;
   });
 }
 
@@ -68,11 +75,39 @@ export function applyClientAccountSave(account, incoming, baseRevision) {
     };
   }
   const prev = account.data || {};
+  // 运行时跨端 pull 只增量合并 AI/预警，不覆盖本机持仓。旧页面可能因此拿到了最新
+  // execution 事件，却仍缺少对应交易流水。若允许这种快照保存，会把真实持仓整组盖回旧值。
+  const incomingClosedIds = new Set((incoming.closed || []).map((item) => item?.id).filter(Boolean));
+  const incomingExecutionTxnIds = new Set((incoming.decisionLog || [])
+    .filter((event) => event?.kind === 'execution' && event.transactionId)
+    .map((event) => event.transactionId));
+  const missingExecutedTrade = (prev.closed || []).find((record) =>
+    record?.id &&
+    !incomingClosedIds.has(record.id) &&
+    incomingExecutionTxnIds.has(record.id)
+  );
+  if (missingExecutedTrade) {
+    return {
+      ok: false,
+      code: 'TRADE_STATE_CONFLICT',
+      error: '云端交易记录已更新，请刷新页面后再操作',
+      revision: currentRevision,
+    };
+  }
   const merged = { ...incoming };
   // AI 任务生命周期只由服务端 Worker 管理。客户端可能持有数秒前的旧快照，
   // 保存持仓时绝不能把正在运行的队列、租约或 Worker 锁覆盖掉。
   if (prev.jobs && typeof prev.jobs === 'object') merged.jobs = prev.jobs;
   if (prev.jobWorker && typeof prev.jobWorker === 'object') merged.jobWorker = prev.jobWorker;
+  if (prev.activeAdviceBatchId) merged.activeAdviceBatchId = prev.activeAdviceBatchId;
+  const settings = mergeAutoRefreshSettings(prev.settings || {}, incoming.settings || {});
+  for (const key of [
+    'advAuto.holdLastAt', 'advAuto.holdLastTryAt',
+    'advAuto.watchLastAt', 'advAuto.watchLastTryAt',
+  ]) {
+    if (prev.settings?.[key] != null) settings[key] = prev.settings[key];
+  }
+  merged.settings = settings;
   const cbp = incoming.batchProgress, sbp = prev.batchProgress;
   if (sbp && (!cbp || (sbp.at || 0) > (cbp.at || 0))) merged.batchProgress = sbp;
   const ca = (incoming.advice && typeof incoming.advice === 'object') ? incoming.advice : {};
@@ -266,12 +301,21 @@ export default async function handler(req, res) {
       if (incoming) {
         const applied = applyClientAccountSave(acc, incoming, Number(body.baseRevision));
         if (!applied.ok) {
+          const refreshPatch = newerAutoRefreshPatch(acc.data?.settings || {}, incoming.settings || {});
+          let settingsSaved = false;
+          if (refreshPatch) {
+            acc.data = acc.data || {};
+            acc.data.settings = { ...(acc.data.settings || {}), ...refreshPatch };
+            await writeAccount(acc);
+            settingsSaved = true;
+          }
           return ok(res, {
             ok: false,
             code: applied.code,
             error: applied.error,
             revision: applied.revision,
             retryable: false,
+            settingsSaved,
           });
         }
       }

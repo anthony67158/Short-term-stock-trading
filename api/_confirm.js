@@ -24,6 +24,12 @@ import { put, hasStorage } from './_blob.js';
 import { marketTimeContext } from './_market_time.js';
 import { isConfirmationPhase, isMinuteSnapshotFresh, normalizeConfidence } from '../shared/decisionGuards.js';
 import { fuseConfirmation } from '../shared/confirmPolicy.js';
+import {
+  actionIntentOf,
+  actionLabelOf,
+  adviceSupportsIntent,
+  buildJudgeAdviceContext,
+} from '../shared/judgeAdviceContext.js';
 
 // ---- 交易语义分类:把一条价位预警归成 buy / sell / stop 三类 ----
 // buy : 买点 / 补仓(回踩到位后想低吸)——确认「止跌企稳」才买。
@@ -152,19 +158,23 @@ export function deterministicJudge(side, prim, tech) {
 // ---- LLM Judge:最终研判闸门 ----
 // 喂:交易意图 + 建议的确认条件/失效条件 + 确定性结论 + 技术面摘要 + 分时快照。
 // 要求返回严格 JSON:{decision:'confirm'|'wait'|'invalid', confidence:0-100, reason:'一句话'}。
-async function llmJudge({ side, a, name, advice, prim, tech, det }) {
+async function llmJudge({ a, name, advice, prim, tech, det }) {
   const model = getModel('judge');
   if (!model) return null;   // 未配置 judge 端点/模型 → 跳过 LLM,用确定性结论
-  const sideZh = side === 'buy' ? '买入(低吸/补仓)' : side === 'sell' ? '卖出(止盈/减仓)' : '止损离场';
-  const adv = advice || {};
+  const intent = actionIntentOf(a);
+  const sideZh = actionLabelOf(a);
+  const adv = buildJudgeAdviceContext({ ...(a.judgeContext || {}), ...(advice || {}) });
   const sys = '你是严谨的A股短线交易确认闸门。价格已触及关键价位,但「到价≠立刻动手」。'
     + '你的唯一任务:结合盘中走势与建议条件,判断【此刻是否真正到了动手时机】。'
+    + '军师建议是本次交易计划的上层约束：必须理解其方向、手数、仓位、盈亏比、止损目标、技术资金消息依据与失效条件；'
+    + '不得脱离军师建议单独创造相反动作。加仓尤其禁止下跌摊平，必须是军师仍支持加仓且触价后出现止跌确认。'
     + '买入必须保守，客观止跌信号不足一律wait；止盈要重视触价后的冲高回落，避免利润明显回撤；'
     + '止损要重视持续破位，不能因措辞犹豫而拖延。invalid必须有明确客观失效证据，不能只凭主观感觉。'
     + '只输出 JSON,不要多余文字。';
   const payload = {
     股票: `${name || a.code}(${a.code})`,
     本次交易意图: sideZh,
+    动作类型: intent,
     关键价位: a.value,
     当前价: prim.price,
     分时快照: {
@@ -184,6 +194,7 @@ async function llmJudge({ side, a, name, advice, prim, tech, det }) {
       已观察分钟: prim.observationAgeMin,
     },
     技术面: techSummaryForAI(tech),
+    军师完整建议: adv,
     建议给出的确认条件: adv.exitTiming || adv.actionPlan || '(未提供,按通用纪律判断)',
     建议给出的失效条件: adv.invalidation || '(未提供)',
     确定性信号: { 结论: det.decision, 评分: det.score, 命中: det.hits },
@@ -228,6 +239,19 @@ export async function judgeConfirmation({ alert, name, advice, quote } = {}) {
   const a = alert;
   if (!a || !a.code) return { decision: 'wait', reason: '缺少预警对象', side: null, source: 'ta' };
   const side = sideOf(a);
+  const intent = actionIntentOf(a);
+  const adviceContext = buildJudgeAdviceContext({ ...(a.judgeContext || {}), ...(advice || {}) });
+  if (!adviceSupportsIntent(intent, adviceContext)) {
+    return {
+      decision: 'invalid',
+      confidence: 100,
+      reason: `最新军师建议已不再支持${actionLabelOf(a)}，原操作点失效`,
+      side,
+      actionIntent: intent,
+      source: 'advice',
+      policy: 'advice-mismatch',
+    };
+  }
   const timeContext = marketTimeContext();
   if (!isConfirmationPhase(timeContext.phase)) {
     return {
@@ -328,6 +352,7 @@ export async function judgeConfirmation({ alert, name, advice, quote } = {}) {
     side,
     signals,
     source: llm ? 'llm+ta' : 'ta',
+    actionIntent: intent,
   };
   await logVerdict(a, name, prim, result);
   return result;

@@ -60,7 +60,9 @@ export function kickServerAdviceStatusSync() {
 }
 
 // 触发服务端生成。codes=要生成的股票代码数组;成功发出返回 true,无登录态/空列表返回 false。
-export function triggerServerAdvice(codes, { scope = 'all', force = true } = {}) {
+export function triggerServerAdvice(codes, {
+  scope = 'all', force = true, batchId = '', deepMode = false,
+} = {}) {
   let creds = null
   try { creds = authStore.getCreds && authStore.getCreds() } catch { creds = null }
   if (!creds || !creds.nick) return false
@@ -70,7 +72,9 @@ export function triggerServerAdvice(codes, { scope = 'all', force = true } = {})
     fetch(api('/api/cron_advice'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ondemand: true, codes: list, nick: creds.nick, pw: creds.pw, scope, force }),
+      body: JSON.stringify({
+        ondemand: true, codes: list, nick: creds.nick, pw: creds.pw, scope, force, batchId, deepMode,
+      }),
       keepalive: true,   // 页面切后台/关闭也已送达服务端,服务端照跑完
     }).catch(() => { /* 结果靠云端轮询,忽略网络层错误 */ })
     kickServerAdviceStatusSync()
@@ -86,7 +90,7 @@ export function canServerAdvice() {
 // 取消服务端任务:codes 为空/未传 → 取消全部(op:'cancelAll'),否则取消指定 codes(op:'cancel')。
 // fire-and-forget + keepalive:即使随后切后台/关页面也已送达 FC;取消结果经 authStore.pull 轮询云端回灌。
 // 返回 true=已发出,false=无登录态。
-export function cancelServerAdvice(codes) {
+export function cancelServerAdvice(codes, batchId = '') {
   let creds = null
   try { creds = authStore.getCreds && authStore.getCreds() } catch { creds = null }
   if (!creds || !creds.nick) return false
@@ -96,9 +100,10 @@ export function cancelServerAdvice(codes) {
     fetch(api('/api/cron_advice'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ op, codes: list, nick: creds.nick, pw: creds.pw }),
+      body: JSON.stringify({ op, codes: list, nick: creds.nick, pw: creds.pw, batchId }),
       keepalive: true,
     }).catch(() => { /* 取消结果靠云端轮询,忽略网络层错误 */ })
+    kickServerAdviceStatusSync()
     return true
   } catch { return false }
 }

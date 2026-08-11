@@ -105,6 +105,11 @@ export default function AlertCenter({ onClose }) {
                       <StockName code={a.code} name={a.name} stopPropagation><span>{a.name || a.code}</span></StockName>
                       <span className="ar-code">{a.code}</span>
                       <span className="ar-dir">{m.dirLabel}</span>
+                      {Number(a.judgeCount) > 0 && (
+                        <span className="ar-badge judge">
+                          已评估 {Number(a.judgeCount)} 次
+                        </span>
+                      )}
                       {t1View.t1Blocked && <span className="ar-badge t1">T+1锁定 · 今日不可卖</span>}
                       {q && <span className="ar-now">现 {fmtRaw(q.price)}</span>}
                       <span className="ar-jump" title="查看详情与K线"><Icon name="chevronRight" size={13} /></span>
