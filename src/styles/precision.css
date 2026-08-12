@@ -1463,6 +1463,35 @@ textarea:focus {
   max-height: min(760px, calc(100dvh - 32px));
 }
 
+.t-trade-mask {
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding:
+    max(var(--space-lg), env(safe-area-inset-top))
+    var(--space-lg)
+    max(var(--space-lg), env(safe-area-inset-bottom));
+}
+
+.t-trade-mask > .t-drawer {
+  align-self: auto;
+  margin: 0;
+  width: min(560px, calc(100vw - 48px));
+  max-width: 100%;
+  height: auto;
+  max-height: min(720px, calc(100dvh - 48px));
+  overflow: hidden;
+  animation: precision-modal-in var(--dur-long) var(--ease-out);
+}
+
+.t-trade-mask .t-drawer-head {
+  min-height: 58px;
+}
+
+.t-trade-mask .t-drawer-body {
+  padding: var(--space-sm) var(--space-md) var(--space-md);
+}
+
 .qrp-card {
   border-inline-start: 0;
   background: transparent;
@@ -2102,6 +2131,11 @@ button.acct-item {
 
   .t-drawer {
     height: auto;
+    max-height: calc(100dvh - var(--space-xl));
+  }
+
+  .t-trade-mask > .t-drawer {
+    width: 100%;
     max-height: calc(100dvh - var(--space-xl));
   }
 

@@ -15,6 +15,7 @@ const stockPanel = read('src/components/StockPanel.jsx')
 const stockDetail = read('src/components/StockDetail.jsx')
 const dailyReport = read('src/components/DailyReport.jsx')
 const llmConfig = read('src/components/LLMConfig.jsx')
+const planTab = read('src/components/PlanTab.jsx')
 const semanticTabSources = [
   'src/components/AlertCenter.jsx',
   'src/components/AlertPanel.jsx',
@@ -137,10 +138,16 @@ test('模型配置改为单列选择并给复杂表单足够宽度', () => {
   )
 })
 
-test('做T弹层按内容高度展示而不是强制占满视口', () => {
+test('做T使用独立居中弹窗而不是与策略日报共用右侧抽屉定位', () => {
+  assert.match(planTab, /className="modal-mask t-trade-mask"/)
+  assert.doesNotMatch(planTab, /className="modal-mask mask-drawer t-trade-mask"/)
   assert.match(
     precision,
-    /\.t-drawer\s*{[^}]*height:\s*auto[^}]*max-height:/s,
+    /\.t-trade-mask\s*{[^}]*flex-direction:\s*column[^}]*align-items:\s*center[^}]*justify-content:\s*center/s,
+  )
+  assert.match(
+    precision,
+    /\.t-trade-mask > \.t-drawer\s*{[^}]*margin:\s*0[^}]*height:\s*auto[^}]*max-height:/s,
   )
 })
 

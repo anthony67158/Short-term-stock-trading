@@ -1964,19 +1964,19 @@ function HoldingItem({ h, idx, quote: q }) {
         />
       )}
 
-      {/* 做T：独立抽屉弹窗（信息量大，不在行内展开，避免撑大表格/内容溢出）*/}
+      {/* 做T：独立居中弹窗，保留足够宽度展示策略与交易输入。 */}
       {mode === 'T' && (
         <OverlayPortal>
-          <div className="modal-mask mask-drawer" onClick={() => setMode(null)}>
+          <div className="modal-mask t-trade-mask" onClick={() => setMode(null)}>
             <div
               className="t-drawer"
               role="dialog"
               aria-modal="true"
-              aria-label={`做T · ${h.name}`}
+              aria-labelledby={`t-dialog-title-${h.id}`}
               onClick={(e) => e.stopPropagation()}
             >
               <div className="t-drawer-head">
-                <div className="modal-title"><Icon name="refresh" size={16} /> 做T · {h.name}<span className="detail-code">{h.code}</span></div>
+                <div className="modal-title" id={`t-dialog-title-${h.id}`}><Icon name="refresh" size={16} /> 做T · {h.name}<span className="detail-code">{h.code}</span></div>
                 <button type="button" className="modal-close" aria-label="关闭做T弹层" onClick={() => setMode(null)}><Icon name="close" size={16} /></button>
               </div>
               <div className="t-drawer-body">
