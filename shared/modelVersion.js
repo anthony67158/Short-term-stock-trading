@@ -177,14 +177,13 @@ export function adaptV21Prediction(
       targetHigh: target ?? (Number.isFinite(resistance) ? resistance : null),
     },
     highConfSignal: {
-      fired: selected.predictedClass === 'TAKE_PROFIT'
-        && outlook.confidencePct >= 65,
+      fired: false,
       credibility: round(outlook.confidencePct),
       gate: 0.65,
       buyPrice: Number.isFinite(anchor) ? anchor : null,
       takeProfit: target,
       stopLoss: stop,
-      label: `V2.1${selected.horizon}模型`,
+      label: `V2.1${selected.horizon}实验预测（非高把握信号）`,
     },
     reads: [
       `${heads.next30m.horizon}止盈概率${round(heads.next30m.probabilities.takeProfit * 100)}%，止损概率${round(heads.next30m.probabilities.stopLoss * 100)}%`,

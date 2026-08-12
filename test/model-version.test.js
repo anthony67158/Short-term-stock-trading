@@ -168,7 +168,7 @@ test('V2.1双头适配声明独立选择版本、实验状态与离线准确率'
         outlook: {
           direction: 'bullish',
           expectedBarrierReturnPct: 0.105,
-          confidencePct: 50,
+          confidencePct: 80,
         },
       },
       sessionClose: {
@@ -203,6 +203,8 @@ test('V2.1双头适配声明独立选择版本、实验状态与离线准确率'
   assert.equal(result.reliability.balancedAccuracyPct.sessionClose, 54.58)
   assert.equal(result.forecast.horizon, '未来30分钟')
   assert.equal(result.forecast.upProb, 50)
+  assert.equal(result.highConfSignal.fired, false)
+  assert.match(result.highConfSignal.label, /实验/)
   assert.equal(result.v21.heads.sessionClose.predictedClass, 'TIMEOUT')
   assert.equal(result.asOf, '2026-08-12 10:30:00')
 })
