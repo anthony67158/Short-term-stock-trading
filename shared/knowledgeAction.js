@@ -288,6 +288,19 @@ export function buildJudgeKnowledgeActionAssessment(
   }
 }
 
+export function latestKnowledgeActionReview(events, code) {
+  let latest = null
+  for (const event of Array.isArray(events) ? events : []) {
+    if (
+      event?.kind !== 'execution'
+      || event.code !== code
+      || !event.knowledgeActionReview
+    ) continue
+    if (!latest || (event.at || 0) >= (latest.at || 0)) latest = event
+  }
+  return latest?.knowledgeActionReview || null
+}
+
 export function evaluateKnowledgeActionCycle({
   plan,
   execution = {},

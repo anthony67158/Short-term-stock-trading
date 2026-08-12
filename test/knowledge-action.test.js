@@ -5,6 +5,7 @@ import {
   buildJudgeKnowledgeActionAssessment,
   buildKnowledgeActionPlan,
   evaluateKnowledgeActionCycle,
+  latestKnowledgeActionReview,
   scoreKnowledgeActionPlan,
 } from '../shared/knowledgeAction.js'
 
@@ -168,4 +169,30 @@ test('Judge不能用主观评分掩盖缺失的失效条件', () => {
   assert.equal(assessment.dimensions.falsifiability.score, 0)
   assert.ok(assessment.total < 60)
   assert.ok(assessment.missing.includes('策略失效条件'))
+})
+
+test('个股详情只展示当前股票最新一次知行合一复盘', () => {
+  const review = latestKnowledgeActionReview([
+    {
+      kind: 'execution',
+      code: '600000',
+      at: 100,
+      knowledgeActionReview: { executionScore: 70 },
+    },
+    {
+      kind: 'execution',
+      code: '000001',
+      at: 300,
+      knowledgeActionReview: { executionScore: 99 },
+    },
+    {
+      kind: 'execution',
+      code: '600000',
+      at: 200,
+      knowledgeActionReview: { executionScore: 92 },
+    },
+  ], '600000')
+
+  assert.equal(review.executionScore, 92)
+  assert.equal(latestKnowledgeActionReview([], '600000'), null)
 })

@@ -20,6 +20,7 @@ import {
   cloudAdviceLoadingState,
   newestAdviceResult,
 } from '../../shared/adviceUiState.js'
+import { latestKnowledgeActionReview } from '../../shared/knowledgeAction.js'
 import { AlertForm } from './AlertCenter'
 
 // 把公司网址补全为可点击的绝对 URL（东财 F10 常给不带协议的裸域名）
@@ -73,6 +74,13 @@ export default function StockDetail({ stock, onClose }) {
   const [showBasis, setShowBasis] = useState(false) // AI建议深度分析(依据/风险)默认折叠,先给关键结论
   const [busyModal, setBusyModal] = useState(null) // 端点已满提示:{ busy:[{code,name}], concurrency } | null
   const book = usePlanStore()
+  const knowledgeActionReview = useMemo(
+    () => latestKnowledgeActionReview(
+      book.decisionLog,
+      stock && stock.code,
+    ),
+    [book.decisionLog, stock && stock.code],
+  )
   // 账户全景(总资产/可用现金/总仓位/单票占比)——供 AI 按资金和仓位算具体手数。
   // ★不要依赖 overview(它在后面才定义，提前引用会触发 TDZ 报错导致弹窗白屏)；
   //   computePortfolio 对无实时报价的持仓会退回其 buyPrice 估值，足够给 AI 做仓位约束。
@@ -746,6 +754,46 @@ export default function StockDetail({ stock, onClose }) {
                           </section>
                         )
                       })()}
+
+                      {adv?.knowledgeActionPlan && (
+                        <section
+                          className={'knowledge-action-review-card ' + (knowledgeActionReview?.attribution || 'pending')}
+                          aria-label="知行合一真实执行复盘"
+                        >
+                          <div className="kar-head">
+                            <span><Icon name="history" size={13} /> 真实执行复盘</span>
+                            {knowledgeActionReview
+                              ? <strong>执行 {knowledgeActionReview.executionScore}分</strong>
+                              : <strong>待执行 / 待验证</strong>}
+                          </div>
+                          {knowledgeActionReview ? (
+                            <>
+                              <div className="kar-scores">
+                                <span>认知 <b>{knowledgeActionReview.cognitiveScore ?? '—'}</b></span>
+                                <span>执行 <b>{knowledgeActionReview.executionScore ?? '—'}</b></span>
+                                <span>综合 <b>{knowledgeActionReview.overallScore ?? '—'}</b></span>
+                                <span>纪律 <b>{knowledgeActionReview.disciplineVerdict || '待评估'}</b></span>
+                              </div>
+                              <div className="kar-attribution">
+                                <b>{knowledgeActionReview.attributionLabel}</b>
+                                <span>{knowledgeActionReview.summary}</span>
+                              </div>
+                              {knowledgeActionReview.violations?.length > 0 && (
+                                <div className="kar-violations">
+                                  纪律偏差：{knowledgeActionReview.violations.join('、')}
+                                </div>
+                              )}
+                              {knowledgeActionReview.luckyProfit && (
+                                <div className="kar-warning">本次盈利含纪律违规，不作为高质量执行加分。</div>
+                              )}
+                            </>
+                          ) : (
+                            <div className="kar-pending">
+                              尚无与本计划关联的真实成交。验证周期结束前，不用短期盈亏提前评价交易质量。
+                            </div>
+                          )}
+                        </section>
+                      )}
 
                       {/* ReAct 研判思路：模型先于结论生成的推理链，让"为什么这么建议"透明可核对 */}
                       {adv && adv.reasoning && (

@@ -2374,6 +2374,21 @@ button.acct-item { width: 100%; border: 0; background: transparent; font: inheri
 .ka-missing { margin-top: 7px; color: var(--gold); font-size: 11px; }
 .ka-principle { margin-top: 7px; color: var(--muted); font-size: 10.5px; }
 @media (max-width: 540px) { .ka-contract { grid-template-columns: 1fr; } }
+.knowledge-action-review-card { margin: 0 0 10px; padding: 10px 11px; border: 1px solid var(--border-soft); border-radius: 9px; background: var(--panel2); color: var(--text2); }
+.knowledge-action-review-card.plan_validated { border-color: rgba(224,67,47,.28); background: rgba(224,67,47,.05); }
+.knowledge-action-review-card.execution_error, .knowledge-action-review-card.judgment_error { border-color: rgba(31,157,67,.3); background: rgba(31,157,67,.05); }
+.knowledge-action-review-card.randomness, .knowledge-action-review-card.pending { border-color: rgba(227,179,65,.28); background: rgba(227,179,65,.05); }
+.kar-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.kar-head > span { display: inline-flex; align-items: center; gap: 5px; color: var(--text); font-size: 12px; font-weight: 750; }
+.kar-head strong { color: var(--gold); font-size: 12px; }
+.kar-scores { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; margin-top: 8px; }
+.kar-scores > span { min-width: 0; padding: 6px 7px; border-radius: 6px; background: var(--surface-quiet); color: var(--muted); font-size: 10.5px; }
+.kar-scores b { display: block; margin-top: 2px; color: var(--text); font-size: 12px; overflow-wrap: anywhere; }
+.kar-attribution { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border-soft); font-size: 11.5px; line-height: 1.55; overflow-wrap: anywhere; }
+.kar-attribution b { color: var(--text); }
+.kar-violations, .kar-warning, .kar-pending { margin-top: 6px; color: var(--muted); font-size: 11px; line-height: 1.55; overflow-wrap: anywhere; }
+.kar-violations, .kar-warning { color: var(--gold); }
+@media (max-width: 540px) { .kar-head { align-items: flex-start; flex-wrap: wrap; } .kar-scores { grid-template-columns: 1fr 1fr; } }
 .dv-action { font-size: 17px; font-weight: 800; margin-bottom: 4px; }
 .decide-verdict.red .dv-action { color: var(--red); }
 .decide-verdict.green .dv-action { color: var(--green); }
@@ -3172,19 +3187,6 @@ button.acct-item { width: 100%; border: 0; background: transparent; font: inheri
 .hr-recap { margin: 8px 10px 0; display: flex; flex-direction: column; gap: 5px; }
 .hr-recap-row { display: flex; align-items: baseline; gap: 8px; font-size: 12px; line-height: 1.55; color: var(--text2); }
 .hr-recap-k { flex: none; font-size: 10px; font-weight: 700; color: var(--muted); background: var(--surface-quiet, rgba(255,255,255,.05)); padding: 2px 7px; border-radius: 5px; }
-.hr-knowledge-action { margin: 8px 10px 0; padding: 9px; border: 1px solid rgba(227,179,65,.28); border-radius: 8px; background: rgba(227,179,65,.05); }
-.hr-ka-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
-.hr-ka-head > span { display: inline-flex; align-items: center; gap: 4px; color: var(--text); font-size: 11.5px; font-weight: 750; }
-.hr-ka-head b { color: var(--gold); font-size: 11px; }
-.hr-ka-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: 7px; }
-.hr-ka-grid > span { min-width: 0; padding: 6px 7px; border-radius: 6px; background: var(--panel2); color: var(--text2); font-size: 11px; line-height: 1.5; }
-.hr-ka-grid small { display: block; color: var(--muted); font-size: 9.5px; font-weight: 650; }
-.hr-ka-review { display: flex; flex-direction: column; gap: 2px; margin-top: 7px; padding-top: 7px; border-top: 1px dashed var(--border-soft); color: var(--text2); font-size: 11px; line-height: 1.5; }
-.hr-ka-review b { color: var(--text); }
-.hr-ka-review.execution_error b { color: var(--green); }
-.hr-ka-review.plan_validated b { color: var(--red); }
-.hr-ka-review.pending b, .hr-ka-review.randomness b { color: var(--gold); }
-@media (max-width: 540px) { .hr-ka-grid { grid-template-columns: 1fr; } }
 /* 复盘→操作建议 分工引导入口：不再重复铺算账/价位，一键跳详情看具体操作 */
 .hr-goadvice { display: flex; align-items: center; gap: 7px; width: calc(100% - 20px); margin: 10px 10px 2px; padding: 8px 11px; border: 1px dashed var(--border); border-radius: 8px; background: none; color: var(--text2); font-size: 12px; cursor: pointer; transition: border-color var(--t-fast), color var(--t-fast), background-color var(--t-fast); text-align: left; }
 .hr-goadvice span { flex: 1; min-width: 0; }
@@ -4041,4 +4043,61 @@ a.mn-flash:hover { color: var(--accent); }
      (内联 style 的 width 优先级高于类;这里用 min-width + flex 由弹性布局接管,
       配合 .af-row 已有的 flex-wrap,阈值输入可自然占满剩余宽度。) */
   .af-row .wl-input { flex: 1 1 90px; min-width: 90px; width: auto; }
+}
+
+/* 知行合一 / 连续计划 / V2 / Judge：移动端统一防溢出与单列化 */
+@media (max-width: 720px) {
+  .auth-gate {
+    min-height: 100dvh;
+    padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+    box-sizing: border-box;
+  }
+  .auth-card { width: min(380px, 100%); padding: 24px 20px; box-sizing: border-box; }
+  .detail-panel {
+    width: 100%;
+    max-width: 100%;
+    max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    border-radius: 14px;
+  }
+  .detail-panel .modal-bar { padding: 10px 12px; gap: 8px; }
+  .detail-panel .modal-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .detail-panel .modal-actions { flex: none; }
+  .detail-code { margin-left: 6px; }
+  .detail-market { display: none; }
+  .detail-scroll { padding: 12px; overflow-x: hidden; }
+  .detail-quote, .decide-box, .knowledge-action-card, .knowledge-action-review-card,
+  .advice-continuity, .forecast-box, .v2-execution-ref, .v2-price-refs {
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+  .ka-head, .kar-head { align-items: flex-start; flex-wrap: wrap; }
+  .ka-head strong, .kar-head strong { white-space: normal; overflow-wrap: anywhere; }
+  .ka-dimensions > span { flex: 1 1 calc(50% - 5px); min-width: 100px; }
+  .ka-contract > div, .ac-reason, .ac-proposed, .kar-attribution,
+  .kar-violations, .kar-warning, .kar-pending {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+  .judge-effect { width: auto; }
+  .judge-effect > div { white-space: normal; flex-wrap: wrap; }
+  .ar-name { flex-wrap: wrap; }
+  .ar-badge { white-space: normal; line-height: 1.35; }
+  .acct-menu-label { white-space: normal; line-height: 1.45; overflow-wrap: anywhere; }
+  .qmc-section-head { align-items: flex-start; }
+  .qmc-section-head > div { min-width: 0; }
+  .qmc-section-head strong { flex: none; }
+  .qmc-option, .qmc-service, .qmc-effect { min-width: 0; }
+}
+
+@media (max-width: 400px) {
+  .detail-panel { border-radius: 12px; }
+  .detail-scroll { padding: 10px; }
+  .detail-quote { padding: 11px; }
+  .ka-dimensions > span { flex-basis: 100%; min-width: 0; }
+  .kar-scores, .v2-price-grid, .qmc-days { grid-template-columns: 1fr; }
+  .qmc-option { grid-template-columns: 16px minmax(0, 1fr); padding: 12px; }
+  .qmc-option .qmc-status { grid-column: 2; justify-self: start; white-space: normal; }
+  .qmc-section-head { flex-direction: column; gap: 6px; }
+  .qmc-section-head strong { font-size: 19px; }
 }
