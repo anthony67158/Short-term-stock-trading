@@ -84,6 +84,22 @@ class IntradayV21TrainerContractTest(unittest.TestCase):
         self.assertEqual(np.unique(dates[holdout]).tolist(), ["20260805"])
         self.assertEqual(metadata["purge_start_date"], "20260804")
 
+    def test_batches_large_holdout_evaluation_without_gaps(self):
+        trainer = load_trainer()
+
+        batches = list(trainer.evaluation_slices(1_000_003, 4096))
+
+        self.assertEqual(batches[0], slice(0, 4096))
+        self.assertEqual(batches[-1].stop, 1_000_003)
+        self.assertTrue(all(
+            current.start == previous.stop
+            for previous, current in zip(batches, batches[1:])
+        ))
+        self.assertLessEqual(
+            max(current.stop - current.start for current in batches),
+            4096,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

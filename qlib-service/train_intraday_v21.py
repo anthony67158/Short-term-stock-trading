@@ -128,19 +128,73 @@ def _metrics(labels, probabilities):
     }
 
 
-def _evaluate(model, tensor, labels_next, labels_close, criterion_next, criterion_close):
+def evaluation_slices(total_size, batch_size):
+    if not isinstance(total_size, int) or total_size < 1:
+        raise ValueError("评估样本数必须为正整数")
+    if not isinstance(batch_size, int) or batch_size < 1:
+        raise ValueError("评估批次必须为正整数")
+    for start in range(0, total_size, batch_size):
+        yield slice(start, min(start + batch_size, total_size))
+
+
+def _evaluate(
+    model,
+    tensor,
+    labels_next,
+    labels_close,
+    criterion_next,
+    criterion_close,
+    *,
+    batch_size=4096,
+):
     import torch
 
     model.eval()
+    device = next(model.parameters()).device
+    loss_next_sum = 0.0
+    loss_close_sum = 0.0
+    weight_next_sum = 0.0
+    weight_close_sum = 0.0
+    probabilities_next = []
+    probabilities_close = []
     with torch.no_grad():
-        logits_next, logits_close = model(tensor)
-        loss = (
-            criterion_next(logits_next, labels_next)
-            + criterion_close(logits_close, labels_close)
-        ) / 2.0
-        probabilities_next = torch.softmax(logits_next, dim=1).cpu().numpy()
-        probabilities_close = torch.softmax(logits_close, dim=1).cpu().numpy()
-    return float(loss.detach().cpu()), probabilities_next, probabilities_close
+        for current in evaluation_slices(len(tensor), batch_size):
+            batch_next = labels_next[current].to(device)
+            batch_close = labels_close[current].to(device)
+            logits_next, logits_close = model(tensor[current].to(device))
+            loss_next_sum += float(torch.nn.functional.cross_entropy(
+                logits_next,
+                batch_next,
+                weight=criterion_next.weight,
+                reduction="sum",
+            ).detach().cpu())
+            loss_close_sum += float(torch.nn.functional.cross_entropy(
+                logits_close,
+                batch_close,
+                weight=criterion_close.weight,
+                reduction="sum",
+            ).detach().cpu())
+            weight_next_sum += float(
+                criterion_next.weight[batch_next].sum().detach().cpu()
+            )
+            weight_close_sum += float(
+                criterion_close.weight[batch_close].sum().detach().cpu()
+            )
+            probabilities_next.append(
+                torch.softmax(logits_next, dim=1).cpu().numpy()
+            )
+            probabilities_close.append(
+                torch.softmax(logits_close, dim=1).cpu().numpy()
+            )
+    loss = (
+        loss_next_sum / max(weight_next_sum, 1e-12)
+        + loss_close_sum / max(weight_close_sum, 1e-12)
+    ) / 2.0
+    return (
+        loss,
+        np.concatenate(probabilities_next),
+        np.concatenate(probabilities_close),
+    )
 
 
 def train_intraday_v21(
@@ -207,9 +261,9 @@ def train_intraday_v21(
     holdout_tensor = _model_input(
         holdout_x,
         "transformer",
-    ).to(device)
-    holdout_next = torch.from_numpy(labels_next[holdout_index]).long().to(device)
-    holdout_close = torch.from_numpy(labels_close[holdout_index]).long().to(device)
+    )
+    holdout_next = torch.from_numpy(labels_next[holdout_index]).long()
+    holdout_close = torch.from_numpy(labels_close[holdout_index]).long()
 
     best_loss = float("inf")
     best_epoch = 0
