@@ -857,7 +857,7 @@ export function enqueueAutoRefreshDue(data, now = Date.now()) {
 }
 
 async function scheduleAdviceWorker(nick) {
-  if (process.env.FC_SERVER_PORT) {
+  if (process.env.ADVICE_ASYNC_WORKER === 'true' || process.env.FC_SERVER_PORT) {
     return dispatchAdviceWorker(nick);
   }
   setImmediate(() => {
