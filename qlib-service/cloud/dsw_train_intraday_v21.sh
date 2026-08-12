@@ -74,4 +74,6 @@ if not gate.get("production_eligible"):
 print("V2.1_OFFLINE_GATE_PASSED")
 PY
 
+bash cloud/dsw_archive_intraday_v21.sh "${RUN_ID}"
+
 echo "INTRADAY_V21_PIPELINE_OK ${RUN_ID}"
