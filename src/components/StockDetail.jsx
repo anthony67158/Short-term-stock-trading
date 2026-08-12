@@ -5,7 +5,6 @@ import AdviceGenerationStatus from './AdviceGenerationStatus'
 import AdvicePresentation from './AdvicePresentation'
 import { usePolling } from '../hooks'
 import { fmtPct, pctClass, fmtRaw, fmtNum } from '../format'
-import { aiStore } from '../aiStore'
 import { api } from '../apiBase'
 import { usePlanStore, planStore, computeTFlows, computePortfolio, t1StatusOf } from '../planStore'
 import { nextTradingDayLabel } from '../review'
@@ -20,6 +19,10 @@ import {
   newestAdviceResult,
 } from '../../shared/adviceUiState.js'
 import { latestKnowledgeActionReview } from '../../shared/knowledgeAction.js'
+import {
+  adviceGenerationAction,
+  stockWatchAction,
+} from '../../shared/stockDetailActions.js'
 import { AlertForm } from './AlertCenter'
 
 // 把公司网址补全为可点击的绝对 URL（东财 F10 常给不带协议的裸域名）
@@ -580,6 +583,20 @@ export default function StockDetail({ stock, onClose }) {
   }, [trends, preClose])
 
   if (!stock) return null
+  const inWatchlist = (book.plan || []).some(
+    (item) => item.code === stock.code,
+  )
+  const isHeldStock = (book.holding || []).some(
+    (item) => item.code === stock.code,
+  )
+  const watchAction = stockWatchAction({
+    inWatchlist,
+    isHeld: isHeldStock,
+  })
+  const adviceAction = adviceGenerationAction({
+    loading: Boolean(quantState?.loading),
+    hasAdvice: Boolean(quantState?.result || quantState?.advice),
+  })
 
   return (
     <div className="modal-mask" onClick={onClose}>
@@ -591,6 +608,29 @@ export default function StockDetail({ stock, onClose }) {
             {profile && profile.market && <span className="detail-market">{profile.market}</span>}
           </div>
           <div className="modal-actions">
+            <button
+              className={
+                'detail-watch-btn'
+                + (watchAction.active ? ' active' : '')
+              }
+              type="button"
+              title={
+                isHeldStock
+                  ? '持仓股票已纳入持续关注，无需重复加入自选'
+                  : watchAction.label
+              }
+              disabled={watchAction.disabled}
+              onClick={() => {
+                if (inWatchlist) planStore.removePlan(stock.code)
+                else planStore.addPlan({
+                  code: stock.code,
+                  name: (profile && profile.name) || stock.name,
+                })
+              }}
+            >
+              <Icon name={watchAction.icon} size={14} />
+              <span>{watchAction.label}</span>
+            </button>
             <button
               className="icon-btn detail-refresh"
               title="刷新最新价格 / K线"
@@ -1119,26 +1159,20 @@ export default function StockDetail({ stock, onClose }) {
           </div>
         </div>
 
-        {/* 固定底部动作栏：AI 助手 / 预警，随详情始终可点 */}
+        {/* 固定底部动作栏：军师建议 / 预警，随详情始终可点 */}
         <div className="detail-footbar">
           <button
             className="btn btn-primary footbar-main"
-            onClick={() => {
-              const nm = (profile && profile.name) || stock.name
-              const cur = overview ? `当前价 ${fmtRaw(overview.price)}（${fmtPct(overview.pct)}）` : ''
-              const trend = overview && overview.trend ? `，均线${overview.trend.label}` : ''
-              const text =
-                `帮我分析一下 ${nm}(${stock.code})。${cur}${trend}。\n` +
-                `想了解：\n` +
-                `1. 现在的资金面和量价配合怎么样？主力是在进还是在出？\n` +
-                `2. 结合均线（MA5/10/20/60）和当前位置，短线是偏多还是偏空？\n` +
-                `3. 有没有值得关注的消息面或所属板块的催化？\n` +
-                `4. 如果做短线，买点、止盈、止损大概怎么设？`
-              aiStore.prefillStock({ code: stock.code, name: nm }, text)
-              onClose()
-            }}
+            type="button"
+            disabled={adviceAction.disabled}
+            onClick={loadQuant}
           >
-            <Icon name="spark" size={14} /> AI 助手分析
+            <Icon
+              name={adviceAction.icon}
+              size={14}
+              className={quantState?.loading ? 'spin' : ''}
+            />
+            {adviceAction.label}
           </button>
           <button className={'btn footbar-alert' + (showAlert ? ' on' : '')} onClick={() => setShowAlert((v) => !v)}>
             <Icon name="bell" size={14} /> {showAlert ? '收起预警' : '盯盘预警'}

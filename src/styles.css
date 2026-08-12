@@ -563,6 +563,15 @@ body {
 .detail-panel .modal-bar { padding: 14px 18px; border-bottom: 1px solid var(--border-soft); margin: 0; }
 .detail-code { color: var(--accent2); font-size: 13px; margin-left: 10px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .detail-market { color: var(--muted); font-size: 11px; margin-left: 10px; padding: 2px 8px; background: var(--panel2); border-radius: 5px; font-weight: 500; }
+.detail-watch-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  min-height: 34px; padding: 0 11px; border: 1px solid var(--border);
+  border-radius: 8px; background: var(--panel2); color: var(--text2);
+  font-size: 12px; font-weight: 700; white-space: nowrap; cursor: pointer;
+}
+.detail-watch-btn:hover:not(:disabled) { color: var(--gold); border-color: var(--gold); }
+.detail-watch-btn.active { color: var(--gold); border-color: rgba(227,179,65,.45); background: rgba(227,179,65,.1); }
+.detail-watch-btn:disabled { cursor: default; opacity: .7; }
 .detail-scroll { overflow-y: auto; padding: 16px 18px; flex: 1; min-height: 0; }
 .detail-scroll::-webkit-scrollbar { width: 8px; }
 .detail-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
@@ -2572,6 +2581,7 @@ button.acct-item { width: 100%; border: 0; background: transparent; font: inheri
 /* 固定底部动作栏 */
 .detail-footbar { display: flex; gap: 10px; padding: 12px 18px; border-top: 1px solid var(--border-soft); background: var(--panel); flex-shrink: 0; }
 .footbar-main { flex: 1; justify-content: center; }
+.footbar-main:disabled { cursor: wait; opacity: .78; }
 .footbar-alert { flex-shrink: 0; }
 .footbar-alert.on { color: var(--accent, #7c6bf5); border-color: rgba(124,107,245,.4); }
 
@@ -4124,6 +4134,8 @@ a.mn-flash:hover { color: var(--accent); }
   .detail-panel .modal-bar { padding: 10px 12px; gap: 8px; }
   .detail-panel .modal-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .detail-panel .modal-actions { flex: none; }
+  .detail-watch-btn { min-height: 40px; padding: 0 10px; }
+  .detail-watch-btn span { display: none; }
   .detail-code { margin-left: 6px; }
   .detail-market { display: none; }
   .detail-scroll { padding: 12px; overflow-x: hidden; }
