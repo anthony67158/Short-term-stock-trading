@@ -294,3 +294,30 @@ test('客户端保存持仓时不能覆盖服务端 AI 任务队列和 Worker �
   assert.equal(account.data.activeAdviceBatchId, 'batch-server')
   assert.deepEqual(account.data.holding, [{ code: '000001', qty: 1 }])
 })
+
+test('客户端保存持仓时不能清掉服务端已生成的策略日报摘要', () => {
+  const adviceDailyReport = {
+    summary: {
+      day: '2026-08-12',
+      session: 'morning',
+      text: '控制仓位，等待确认。',
+    },
+    at: 2000,
+    source: 'generated',
+  }
+  const account = {
+    clientRevision: 3,
+    data: {
+      holding: [],
+      adviceDailyReport,
+    },
+  }
+
+  const result = applyClientAccountSave(account, {
+    holding: [{ code: '000001', qty: 1 }],
+  }, 3)
+
+  assert.equal(result.ok, true)
+  assert.deepEqual(account.data.adviceDailyReport, adviceDailyReport)
+  assert.deepEqual(account.data.holding, [{ code: '000001', qty: 1 }])
+})

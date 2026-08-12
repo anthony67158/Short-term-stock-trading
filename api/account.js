@@ -100,6 +100,9 @@ export function applyClientAccountSave(account, incoming, baseRevision) {
   if (prev.jobs && typeof prev.jobs === 'object') merged.jobs = prev.jobs;
   if (prev.jobWorker && typeof prev.jobWorker === 'object') merged.jobWorker = prev.jobWorker;
   if (prev.activeAdviceBatchId) merged.activeAdviceBatchId = prev.activeAdviceBatchId;
+  if (prev.adviceDailyReport?.summary?.text) {
+    merged.adviceDailyReport = prev.adviceDailyReport;
+  }
   const settings = mergeAutoRefreshSettings(prev.settings || {}, incoming.settings || {});
   for (const key of [
     'advAuto.holdLastAt', 'advAuto.holdLastTryAt',

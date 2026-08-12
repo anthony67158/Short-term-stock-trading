@@ -46,12 +46,21 @@ import {
   buildAdviceCacheEntry,
   compactAdvicePlan,
 } from '../shared/adviceContinuity.js';
+import { attachAdviceDailyReport } from '../shared/adviceDailyReportPolicy.js';
 import aiHandler from './ai.js';
 import stockDetailHandler from './stock_detail.js';
 import quoteHandler from './quote.js';
 import { TRUSTED_QUANT_VERSION } from './_quant_access.js';
 import { TRUSTED_ACCOUNT_REQUEST } from './_account_auth.js';
 import { dispatchAdviceWorker } from './_advice_dispatch.js';
+import dailyReportHandler from './daily_report.js';
+import { getLatestDailySummary } from './_daily_summary.js';
+import {
+  collectAdviceDailyReportHoldings,
+  ensureAdviceDailyReport,
+  failAdviceJobsForDailyReport,
+  setAdviceDailyReportPhase,
+} from './_advice_daily_report.js';
 
 export function createAdviceSSEParser(onEvent) {
   let buffer = '';
@@ -192,6 +201,20 @@ export function internalRequestHeaders(env = process.env) {
     host,
     'x-forwarded-host': host,
     'x-forwarded-proto': 'http',
+  };
+}
+
+export function createRecoverableSerialRunner(task) {
+  let tail = Promise.resolve();
+  return {
+    run() {
+      const current = tail.then(task);
+      tail = current.catch(() => {});
+      return current;
+    },
+    settle() {
+      return tail;
+    },
   };
 }
 
@@ -479,7 +502,14 @@ function buildTask(data, code) {
   const nameOf = (holding.find((h) => h.code === code) || watch.find((w) => w.code === code) || {}).name || code;
   return { holdSet, nameOf };
 }
-async function runJobGen(acc, code, onProgress, signal, deepMode = false) {
+async function runJobGen(
+  acc,
+  code,
+  onProgress,
+  signal,
+  deepMode = false,
+  dailyReportSummary = null,
+) {
   const data = acc.data || {};
   const holding = data.holding || [], watch = data.plan || [];
   const holdSet = new Set(holding.map((h) => h.code));
@@ -492,16 +522,18 @@ async function runJobGen(acc, code, onProgress, signal, deepMode = false) {
   const previousEntry = data.advice?.[code] || null;
   const previousAdvice = compactAdvicePlan(previousEntry);
   if (holdSet.has(code)) {
-    const p = buildHoldPayload(holding, code, name, portfolio, data.account, data.closed, nextTradeDayLabel());
+    let p = buildHoldPayload(holding, code, name, portfolio, data.account, data.closed, nextTradeDayLabel());
     p.advisorTrack = advisorTrackFrom(data, 'hold_advice');
     p.quantModelVersion = quantModelVersion;
+    p = attachAdviceDailyReport(p, dailyReportSummary);
     if (previousAdvice) p.previousAdvice = previousAdvice;
     const hp = (p.holdCost != null && p.holdQty != null) ? { holdCost: String(p.holdCost), holdQty: String(p.holdQty) } : {};
     return genOne({ code, name, mode: 'hold_advice', payload: p, quantQuery: { code, klt: '101', lmt: '60', quant: '1', model: quantModelVersion, ...hp }, priceHint, onProgress, signal, deepMode, previousEntry });
   }
-  const p = buildWatchPayload(code, name, portfolio, data.account);
+  let p = buildWatchPayload(code, name, portfolio, data.account);
   p.advisorTrack = advisorTrackFrom(data, 'buy_advice');
   p.quantModelVersion = quantModelVersion;
+  p = attachAdviceDailyReport(p, dailyReportSummary);
   if (previousAdvice) p.previousAdvice = previousAdvice;
   return genOne({ code, name, mode: 'buy_advice', payload: p, quantQuery: { code, klt: '101', lmt: '60', quant: '1', model: quantModelVersion }, priceHint, onProgress, signal, deepMode, previousEntry });
 }
@@ -555,6 +587,16 @@ async function persistServer(nick, workingAcc, myId) {
   fdata.jobs = wdata.jobs;
   fdata.jobWorker = wdata.jobWorker;
   fdata.activeAdviceBatchId = wdata.activeAdviceBatchId || fdata.activeAdviceBatchId || '';
+  if (
+    wdata.adviceDailyReport?.summary?.text
+    && (
+      !fdata.adviceDailyReport
+      || (wdata.adviceDailyReport.at || 0)
+        >= (fdata.adviceDailyReport.at || 0)
+    )
+  ) {
+    fdata.adviceDailyReport = wdata.adviceDailyReport;
+  }
   // 自动刷新运行时间由云端定时器维护，客户端旧快照不能把它覆盖回去。
   const runtimeSettingKeys = [
     'advAuto.holdLastAt', 'advAuto.holdLastTryAt',
@@ -613,6 +655,34 @@ async function persistServer(nick, workingAcc, myId) {
   return fresh;
 }
 
+async function releaseDrainLock(nick, acc, myId, concurrency) {
+  const fresh = (await readAccount(nick)) || acc;
+  const fdata = fresh.data || (fresh.data = {});
+  if (isAccountActive(fresh) && !workerHeldByOther(fdata, myId)) {
+    releaseWorkerLock(fdata, myId);
+    mergeExternalJobs(acc.data, fdata);
+    fdata.jobs = acc.data.jobs;
+    fdata.batchProgress = jobsToProgress(
+      acc.data,
+      Date.now(),
+      concurrency,
+    );
+    if (acc.data.adviceDailyReport?.summary?.text) {
+      fdata.adviceDailyReport = acc.data.adviceDailyReport;
+    }
+    try { await writeAccount(fresh); } catch { /* ignore */ }
+  }
+}
+
+async function generateAdviceDailyReport(holdings) {
+  return invokeSSE(dailyReportHandler, {
+    method: 'POST',
+    body: { holdings },
+    timeoutMs: 140000,
+    trustedAccount: true,
+  });
+}
+
 // ---- 并发池 drainer:单 Worker 锁下,把 queued 任务以 ≤CONCURRENCY 并发跑完 ----
 // 返回 { drained(bool), ok, fail } 或 { skipped:'locked' }。
 async function drainAccount(nick, initialAcc) {
@@ -622,30 +692,107 @@ async function drainAccount(nick, initialAcc) {
   let data = acc.data || (acc.data = {});
   reapOrphans(data); gcJobs(data);
   if (!acquireWorkerLock(data, myId)) return { skipped: 'locked' };  // 已有他人在 drain → 交给它
-  let persistChain = Promise.resolve();
-  const saveWorking = () => {
-    persistChain = persistChain.then(async () => {
-      acc = await persistServer(nick, acc, myId);
-      data = acc.data;
-      return acc;
-    });
-    return persistChain;
-  };
+  const persistence = createRecoverableSerialRunner(async () => {
+    acc = await persistServer(nick, acc, myId);
+    data = acc.data;
+    return acc;
+  });
+  const saveWorking = () => persistence.run();
   acc = await saveWorking();                                           // 公布锁 + 回收结果
   data = acc.data;
 
+  const CONC = effectiveAdviceConcurrency(data);
+  setAdviceDailyReportPhase(
+    data,
+    '首次生成前：正在读取策略日报',
+  );
+  acc = await saveWorking();
+  data = acc.data;
+  const reportHeartbeat = setInterval(() => {
+    renewWorkerLock(acc.data || (acc.data = {}), myId);
+    void saveWorking().catch(() => {});
+  }, 20000);
+  if (
+    reportHeartbeat
+    && typeof reportHeartbeat.unref === 'function'
+  ) reportHeartbeat.unref();
+
+  let dailyReportResult;
+  try {
+    setAdviceDailyReportPhase(
+      data,
+      '策略日报缺失时将先自动生成，请稍候',
+    );
+    dailyReportResult = await ensureAdviceDailyReport({
+      scopeKey: nick,
+      existingSummary: data.adviceDailyReport?.summary || null,
+      getSummary: () => getLatestDailySummary(),
+      generate: () => generateAdviceDailyReport(
+        collectAdviceDailyReportHoldings(data),
+      ),
+    });
+    data.adviceDailyReport = {
+      summary: dailyReportResult.summary,
+      at: Date.now(),
+      source: dailyReportResult.source,
+    };
+    setAdviceDailyReportPhase(
+      data,
+      '策略日报已就绪，等待军师生成',
+    );
+    acc = await saveWorking();
+    data = acc.data;
+  } catch (error) {
+    const message = `策略日报生成失败：${String(
+      error?.message || error,
+    )}`;
+    const failed = failAdviceJobsForDailyReport(
+      data,
+      message,
+    );
+    acc = await saveWorking();
+    clearInterval(reportHeartbeat);
+    await releaseDrainLock(nick, acc, myId, CONC);
+    return {
+      drained: true,
+      ok: 0,
+      fail: failed,
+      reportError: message,
+    };
+  }
+  clearInterval(reportHeartbeat);
+
+  // 首次生成日报与军师分析拆成两次 FC 异步调用，避免日报耗时挤占
+  // 深度建议的 600 秒平台预算。第二次调用会直接命中账号摘要。
+  if (dailyReportResult.generated) {
+    await releaseDrainLock(nick, acc, myId, CONC);
+    let continued = false;
+    try {
+      continued = !!(await scheduleAdviceWorker(nick))?.accepted;
+    } catch { /* 定时任务会接力 */ }
+    return {
+      drained: false,
+      ok: 0,
+      fail: 0,
+      reportGenerated: true,
+      continued,
+    };
+  }
+
+  const dailyReportSummary = dailyReportResult.summary;
   const inflight = new Map();   // code -> { promise, controller }
   let ok = 0, fail = 0;
-  const CONC = effectiveAdviceConcurrency(data);
   // 深度任务最坏可占约 495s，只允许在本次 FC 前 85s 内启动新任务，
   // 保证在 600s 硬上限前有收尾时间；剩余队列由 5 分钟云端定时器接力。
   const startDeadline = Date.now() + (hasDeepAdviceWork(data) ? 85000 : 300000);
   let lastProgressSaveAt = 0;
   let progressSavePending = false;
   const queueProgressSave = (force = false) => {
-    if (progressSavePending) return persistChain;
+    if (progressSavePending) return persistence.settle();
     const now = Date.now();
-    if (!force && now - lastProgressSaveAt < 1500) return persistChain;
+    if (!force && now - lastProgressSaveAt < 1500) {
+      return persistence.settle();
+    }
     progressSavePending = true;
     lastProgressSaveAt = now;
     return saveWorking().finally(() => { progressSavePending = false; });
@@ -665,13 +812,13 @@ async function drainAccount(nick, initialAcc) {
     } else {
       updateJobProgress(d, code, patch);
     }
-    queueProgressSave(false);
+    void queueProgressSave(false).catch(() => {});
   };
   const heartbeat = setInterval(() => {
     const d = acc.data || (acc.data = {});
     renewWorkerLock(d, myId);
     for (const code of inflight.keys()) renewLease(d, code);
-    queueProgressSave(true);
+    void queueProgressSave(true).catch(() => {});
   }, 20000);
   if (heartbeat && typeof heartbeat.unref === 'function') heartbeat.unref();
   const cancelPoll = setInterval(async () => {
@@ -710,7 +857,14 @@ async function drainAccount(nick, initialAcc) {
         const code = j.code;
         const jobId = j.id;
         const controller = new AbortController();
-        const promise = runJobGen(acc, code, (patch) => recordProgress(code, patch), controller.signal, !!j.deepMode)
+        const promise = runJobGen(
+          acc,
+          code,
+          (patch) => recordProgress(code, patch),
+          controller.signal,
+          !!j.deepMode,
+          dailyReportSummary,
+        )
           .then((res) => ({ code, jobId, res }))
           .catch((err) => ({ code, jobId, err }));
         inflight.set(code, { promise, controller, jobId });
@@ -787,18 +941,8 @@ async function drainAccount(nick, initialAcc) {
     clearInterval(heartbeat);
     clearInterval(cancelPoll);
     for (const task of inflight.values()) task.controller.abort();
-    await persistChain.catch(() => {});
-    // 释放锁(重读最新账号再放,避免盖回)
-    const fresh = (await readAccount(nick)) || acc;
-    const fdata = fresh.data || (fresh.data = {});
-    if (isAccountActive(fresh) && !workerHeldByOther(fdata, myId)) {
-      releaseWorkerLock(fdata, myId);
-      // 合并我们内存里的最终 jobs 状态
-      mergeExternalJobs(acc.data, fdata);
-      fdata.jobs = acc.data.jobs;
-      fdata.batchProgress = jobsToProgress(acc.data, Date.now(), CONC);
-      try { await writeAccount(fresh); } catch { /* ignore */ }
-    }
+    await persistence.settle();
+    await releaseDrainLock(nick, acc, myId, CONC);
   }
   return { drained: true, ok, fail };
 }

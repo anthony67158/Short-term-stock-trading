@@ -3,13 +3,18 @@ import assert from 'node:assert/strict'
 
 import {
   adviceFailureReason,
+  createRecoverableSerialRunner,
   createAdviceSSEParser,
   internalRequestHeaders,
   mergeExternalJobs,
   progressPatchForEvent,
   startJsonHeartbeat,
 } from '../api/cron_advice.js'
-import { resolveAIBudget, resolveReasoningMode } from '../api/ai.js'
+import {
+  resolveAIBudget,
+  resolveAdviceDailySummary,
+  resolveReasoningMode,
+} from '../api/ai.js'
 
 test('服务端可解析跨分片的 AI SSE 事件', () => {
   const seen = []
@@ -191,4 +196,67 @@ test('批量快速模式会关闭深度思考，普通单股生成保持原配�
   assert.equal(resolveReasoningMode(true, false), true)
   assert.equal(resolveReasoningMode(false, false), false)
   assert.equal(resolveReasoningMode(false, false, true), true)
+})
+
+test('军师优先使用前置闸门注入的策略日报而不是再次查询覆盖', async () => {
+  const injected = {
+    day: new Date(Date.now() + 8 * 3600 * 1000)
+      .toISOString()
+      .slice(0, 10),
+    sessionCn: '盘前早报',
+    text: '闸门已确认的策略摘要',
+  }
+  let reads = 0
+
+  const result = await resolveAdviceDailySummary(
+    { dailyReport: injected },
+    async () => {
+      reads++
+      return { text: 'OSS中的其它摘要' }
+    },
+  )
+
+  assert.deepEqual(result, injected)
+  assert.equal(reads, 0)
+})
+
+test('军师拒绝过期的客户端日报并回退服务端当天摘要', async () => {
+  const current = {
+    day: new Date(Date.now() + 8 * 3600 * 1000)
+      .toISOString()
+      .slice(0, 10),
+    sessionCn: '盘前早报',
+    text: '服务端当天策略摘要',
+  }
+  let reads = 0
+
+  const result = await resolveAdviceDailySummary(
+    {
+      dailyReport: {
+        day: '2000-01-01',
+        sessionCn: '过期日报',
+        text: '过期策略摘要',
+      },
+    },
+    async () => {
+      reads++
+      return current
+    },
+  )
+
+  assert.deepEqual(result, current)
+  assert.equal(reads, 1)
+})
+
+test('串行保存单次失败后仍可执行下一次保存', async () => {
+  let attempts = 0
+  const runner = createRecoverableSerialRunner(async () => {
+    attempts++
+    if (attempts === 1) throw new Error('OSS瞬时失败')
+    return attempts
+  })
+
+  await assert.rejects(() => runner.run(), /OSS瞬时失败/)
+  assert.equal(await runner.run(), 2)
+  await runner.settle()
 })

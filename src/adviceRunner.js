@@ -9,6 +9,8 @@ import { acceptsGenerationResult, generationOptions } from '../shared/adviceBatc
 import { ensureAdviceReasoning } from '../shared/adviceReasoning.js'
 import { quantModelHeaders } from './quantModel'
 import { compactAdvicePlan } from '../shared/adviceContinuity.js'
+import { attachAdviceDailyReport } from '../shared/adviceDailyReportPolicy.js'
+import { ensureLocalAdviceDailyReport } from './adviceDailyReport.js'
 
 const running = new Map()  // code -> { phase, startedAt }
 const results = new Map()  // code -> { result, advice, meta, news, adviceMissing, truncated, error, cachedAt }
@@ -66,7 +68,7 @@ export function startAdvice(spec) {
 async function run(spec, record) {
   const { code, mode, name, myHold, aiPayload, quantUrl, priceHint } = spec
   const previousAdvice = compactAdvicePlan(getAdvice(code))
-  const requestPayload = {
+  let requestPayload = {
     ...(aiPayload || {}),
     ...(previousAdvice ? { previousAdvice } : {}),
   }
@@ -91,6 +93,46 @@ async function run(spec, record) {
     }
   }
   try {
+    record.phase = '正在检查今日策略日报…'
+    notify()
+    try {
+      const report = await ensureLocalAdviceDailyReport({
+        existingSummary: requestPayload.dailyReport || null,
+        holdings: (planStore.get().holding || []).map((holding) => ({
+          code: holding.code,
+          name: holding.name,
+        })),
+        signal: record.controller.signal,
+        onPhase: (text) => {
+          record.phase = `策略日报：${text}`
+          notify()
+        },
+      })
+      requestPayload = attachAdviceDailyReport(
+        requestPayload,
+        report.summary,
+      )
+      record.sources = [
+        ...(record.sources || []).filter(
+          (source) => source.label !== '策略日报摘要',
+        ),
+        { label: '策略日报摘要', ok: true },
+      ]
+      record.phase = '策略日报已就绪，正在准备军师分析…'
+      notify()
+    } catch (error) {
+      if (record.cancelRequested || record.controller.signal.aborted) {
+        results.delete(code)
+        return
+      }
+      results.set(code, {
+        error: `策略日报生成失败，未启动军师分析：${String(
+          error?.message || error,
+        )}`,
+      })
+      notify()
+      return
+    }
     // 量化服务（走势预测/多因子分）与 LLM 操作建议（带具体价位）并发
     // ★超时护栏:量化端点冷启动/挂起时,不加超时会让下面的 Promise.all 永久 pending →
     //   running 永不释放 → 该股再也无法重新生成。加 15s AbortController,超时按「不可用」(null)处理,

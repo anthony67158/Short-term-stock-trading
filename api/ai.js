@@ -28,6 +28,7 @@ import {
   buildKnowledgeActionPlan,
   scoreKnowledgeActionPlan,
 } from '../shared/knowledgeAction.js';
+import { isCurrentDailyReportSummary } from '../shared/adviceDailyReportPolicy.js';
 
 function avg(arr) { return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0; }
 function std(arr) { if (arr.length < 2) return 0; const m = avg(arr); return Math.sqrt(avg(arr.map((x) => (x - m) ** 2))); }
@@ -41,6 +42,20 @@ export function resolveAIBudget(reasoningOn, requestedMs) {
 export function resolveReasoningMode(configuredReasoning, fastMode = false, forceReasoning = false) {
   if (forceReasoning) return true;
   return !!configuredReasoning && !fastMode;
+}
+
+export async function resolveAdviceDailySummary(
+  payload,
+  getSummary = getLatestDailySummary,
+) {
+  if (isCurrentDailyReportSummary(payload?.dailyReport)) {
+    return payload.dailyReport
+  }
+  try {
+    return await getSummary()
+  } catch {
+    return null
+  }
 }
 
 // ============ 个股历史规律画像（做T策略自适应的核心）============
@@ -575,7 +590,7 @@ export default async function handler(req, res) {
           track('消息面/公告', buildCorpus(payload.code).catch(() => null), (v) => v && v.docs && v.docs.length),  // 消息面/公告/基本面 RAG 语料
           track('宏观要闻', fetchMacroNews(), (v) => v && v.length),                              // 国内外宏观/重大事件
           track('今日实时行情', getJ(`/api/quote?codes=${payload.code}&_t=${Date.now()}`), (v) => v && v.list && v.list.length),  // ★今日实时行情(涨跌幅/涨停/量比)——纠正"技术面/资金是昨日口径"的滞后
-          track('策略日报摘要', getLatestDailySummary().catch(() => null), (v) => v && v.text),     // ★今日策略日报摘要——作为"外部市场环境"注入(阶段2)
+          track('策略日报摘要', resolveAdviceDailySummary(payload), (v) => v && v.text),     // ★优先复用前置闸门注入的日报；旧调用无载荷时才查 OSS
           track('财经快讯', fetchMacroFlashes(8).catch(() => null), (v) => v && v.length),        // ★权威财经快讯(财联社系/金十)——外部实时消息面
         ]);
         // ★外部市场环境：把当天策略日报摘要注入，让个股建议结合大盘/板块/海外环境判断
