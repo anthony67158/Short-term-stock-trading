@@ -19,6 +19,7 @@ from train_intraday_v21 import (
 
 
 MODEL_NAME = "lightgbm-dual-head-sequence-summary"
+MARKET_BREADTH_FEATURES = (0, 6, 8)
 
 
 def sequence_summary_features(values):
@@ -38,12 +39,62 @@ def sequence_summary_features(values):
     ).astype(np.float32)
 
 
+def build_cross_sectional_context(values, as_of):
+    values = np.asarray(values)
+    as_of = np.asarray(as_of).astype(str)
+    if values.ndim != 3 or as_of.shape != (len(values),):
+        raise ValueError("横截面市场上下文字段无效")
+    _timestamps, inverse = np.unique(as_of, return_inverse=True)
+    group_count = int(inverse.max()) + 1
+    counts = np.bincount(inverse, minlength=group_count).astype(np.float64)
+    last = values[:, -1, :]
+    means = np.empty((group_count, last.shape[1]), dtype=np.float32)
+    for feature in range(last.shape[1]):
+        means[:, feature] = (
+            np.bincount(
+                inverse,
+                weights=last[:, feature],
+                minlength=group_count,
+            )
+            / counts
+        )
+    breadth = np.empty(
+        (group_count, len(MARKET_BREADTH_FEATURES)),
+        dtype=np.float32,
+    )
+    for column, feature in enumerate(MARKET_BREADTH_FEATURES):
+        breadth[:, column] = (
+            np.bincount(
+                inverse,
+                weights=(last[:, feature] > 0).astype(np.float32),
+                minlength=group_count,
+            )
+            / counts
+        )
+    return {
+        "inverse": inverse.astype(np.int32),
+        "means": means,
+        "breadth": breadth,
+    }
+
+
+def select_cross_sectional_features(values, indices, context):
+    values = np.asarray(values)
+    indices = np.asarray(indices, dtype=np.int64)
+    group = np.asarray(context["inverse"])[indices]
+    means = np.asarray(context["means"], dtype=np.float32)[group]
+    relative = values[indices, -1, :].astype(np.float32) - means
+    breadth = np.asarray(context["breadth"], dtype=np.float32)[group]
+    return np.concatenate((means, relative, breadth), axis=1)
+
+
 def summarize_indexed_sequences(
     values,
     indices,
     codes,
     *,
     categories=None,
+    cross_sectional_context=None,
     chunk_size=25_000,
 ):
     values = np.asarray(values)
@@ -64,12 +115,29 @@ def summarize_indexed_sequences(
         code: index
         for index, code in enumerate(categories)
     }
-    width = values.shape[2] * 6 + 1
+    summary_width = values.shape[2] * 6
+    context_width = (
+        values.shape[2] * 2 + len(MARKET_BREADTH_FEATURES)
+        if cross_sectional_context is not None
+        else 0
+    )
+    width = summary_width + context_width + 1
     output = np.empty((len(indices), width), dtype=np.float32)
     for start in range(0, len(indices), chunk_size):
         stop = min(start + chunk_size, len(indices))
         selected = indices[start:stop]
-        output[start:stop, :-1] = sequence_summary_features(values[selected])
+        output[start:stop, :summary_width] = sequence_summary_features(
+            values[selected]
+        )
+        if cross_sectional_context is not None:
+            output[
+                start:stop,
+                summary_width : summary_width + context_width,
+            ] = select_cross_sectional_features(
+                values,
+                selected,
+                cross_sectional_context,
+            )
         output[start:stop, -1] = np.fromiter(
             (category_index.get(code, -1) for code in codes[selected]),
             dtype=np.float32,
@@ -170,6 +238,7 @@ def train_intraday_v21_lgbm(
         raw_next = data["y_next30m"].astype(int)
         raw_close = data["y_session_close"].astype(int)
         feature_names = [str(value) for value in data["feature_names"]]
+    cross_sectional_context = build_cross_sectional_context(values, as_of)
     shape = validate_dual_head_dataset(
         values,
         raw_next,
@@ -190,20 +259,23 @@ def train_intraday_v21_lgbm(
         values,
         sampled_train,
         codes,
+        cross_sectional_context=cross_sectional_context,
     )
     calibration_features, _ = summarize_indexed_sequences(
         values,
         calibration_index,
         codes,
         categories=categories,
+        cross_sectional_context=cross_sectional_context,
     )
     holdout_features, _ = summarize_indexed_sequences(
         values,
         holdout_index,
         codes,
         categories=categories,
+        cross_sectional_context=cross_sectional_context,
     )
-    del values
+    del values, cross_sectional_context
 
     categorical_index = train_features.shape[1] - 1
     next_model = _train_head(
@@ -277,6 +349,9 @@ def train_intraday_v21_lgbm(
         "split": split,
         "sampled_train_samples": int(len(sampled_train)),
         "summary_features": int(train_features.shape[1]),
+        "cross_sectional_features": (
+            len(feature_names) * 2 + len(MARKET_BREADTH_FEATURES)
+        ),
         "source_feature_names": feature_names,
         "stock_categories": categories,
         "best_iteration": {
