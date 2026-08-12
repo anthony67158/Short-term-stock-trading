@@ -7,8 +7,8 @@ import re
 
 import numpy as np
 
-from build_intraday_dataset import FEATURE_NAMES, minute_features
 from intraday_shadow_runtime import _market_context, _round_price
+from intraday_v21_features import V21_FEATURE_NAMES, intraday_v21_features
 from train_intraday_tcn import _model_input
 from train_intraday_v21 import (
     ARCHITECTURE,
@@ -184,18 +184,18 @@ class IntradayV21Runtime:
             checkpoint.get("architecture") != ARCHITECTURE
             or checkpoint.get("model_version") != "v2.1-intraday"
             or checkpoint.get("label_definitions") != LABEL_DEFINITIONS
-            or feature_names != list(FEATURE_NAMES)
+            or feature_names != list(V21_FEATURE_NAMES)
             or not isinstance(sequence_length, int)
             or sequence_length < 2
-            or mean.shape != (len(FEATURE_NAMES),)
-            or std.shape != (len(FEATURE_NAMES),)
+            or mean.shape != (len(V21_FEATURE_NAMES),)
+            or std.shape != (len(V21_FEATURE_NAMES),)
             or not np.isfinite(mean).all()
             or not np.isfinite(std).all()
             or np.any(std <= 0)
         ):
             raise RuntimeError("V2.1 模型元数据不兼容")
         model = _build_dual_head_transformer(
-            len(FEATURE_NAMES),
+            len(V21_FEATURE_NAMES),
             sequence_length,
         ).to("cpu")
         model.load_state_dict(checkpoint["state_dict"])
@@ -207,7 +207,7 @@ class IntradayV21Runtime:
 
     def predict(self, request):
         self._load()
-        features = minute_features(request["panel"])
+        features = intraday_v21_features(request["panel"])
         if len(features) < self._sequence_length:
             raise ValueError("V2.1 分钟序列不足模型窗口")
         sequence = features[-self._sequence_length :]

@@ -100,6 +100,46 @@ class IntradayV21TrainerContractTest(unittest.TestCase):
             4096,
         )
 
+    def test_chunked_normalizer_matches_direct_training_subset_statistics(self):
+        trainer = load_trainer()
+        values = np.arange(8 * 4 * 3, dtype=np.float32).reshape(8, 4, 3)
+        train_index = np.asarray([0, 1, 3, 4, 6])
+
+        mean, std = trainer.fit_indexed_normalizer(
+            values,
+            train_index,
+            chunk_size=2,
+        )
+
+        expected = values[train_index].astype(np.float64)
+        np.testing.assert_allclose(mean, expected.mean(axis=(0, 1)))
+        np.testing.assert_allclose(std, expected.std(axis=(0, 1)))
+
+    def test_session_class_weights_balance_each_class_within_each_session(self):
+        trainer = load_trainer()
+        labels = np.asarray([0, 0, 0, 1, 2, 0, 1, 1, 2])
+        buckets = np.asarray([
+            "morning",
+            "morning",
+            "morning",
+            "morning",
+            "morning",
+            "afternoon",
+            "afternoon",
+            "afternoon",
+            "afternoon",
+        ])
+
+        table = trainer.fit_session_class_weights(labels, buckets)
+        weights = trainer.session_sample_weights(labels, buckets, table)
+
+        for bucket in ("morning", "afternoon"):
+            totals = [
+                weights[(buckets == bucket) & (labels == label)].sum()
+                for label in range(3)
+            ]
+            np.testing.assert_allclose(totals, totals[0])
+
 
 if __name__ == "__main__":
     unittest.main()

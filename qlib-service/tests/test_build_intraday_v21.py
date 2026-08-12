@@ -99,13 +99,53 @@ class IntradayV21DatasetTest(unittest.TestCase):
         self.assertIn("2026-08-10 11:30:00", as_of)
         self.assertIn("2026-08-10 14:30:00", as_of)
         self.assertNotIn("2026-08-10 14:35:00", as_of)
-        self.assertEqual(samples["X"].shape[1:], (12, 6))
+        self.assertEqual(samples["X"].shape[1:], (12, 12))
+        self.assertEqual(samples["feature_names"].tolist(), [
+            "log_return",
+            "range_pct",
+            "body_pct",
+            "volume_log_ratio",
+            "time_sin",
+            "time_cos",
+            "momentum_30m",
+            "realized_vol_30m",
+            "session_return",
+            "session_vwap_deviation",
+            "session_range_position",
+            "minutes_to_close",
+        ])
         self.assertEqual(len(samples["y_next30m"]), len(as_of))
         self.assertEqual(len(samples["y_session_close"]), len(as_of))
 
         index = as_of.index("2026-08-10 10:00:00")
         self.assertEqual(samples["y_next30m"][index], 1)
         self.assertEqual(samples["y_session_close"][index], 1)
+
+    def test_enhanced_features_do_not_change_when_future_bars_change(self):
+        builder = load_builder()
+        source = panel()
+        cutoff = source["trade_time"].tolist().index(
+            "2026-08-10 10:30:00"
+        )
+        before = builder.intraday_v21_features(source)
+
+        source["open"][cutoff + 1 :] *= 1.2
+        source["high"][cutoff + 1 :] *= 1.2
+        source["low"][cutoff + 1 :] *= 1.2
+        source["close"][cutoff + 1 :] *= 1.2
+        source["vol"][cutoff + 1 :] *= 3.0
+        after = builder.intraday_v21_features(source)
+
+        np.testing.assert_allclose(
+            before[: cutoff + 1],
+            after[: cutoff + 1],
+            rtol=0,
+            atol=0,
+        )
+        self.assertFalse(np.allclose(
+            before[cutoff + 1 :],
+            after[cutoff + 1 :],
+        ))
 
     def test_noon_sample_enters_at_first_afternoon_bar(self):
         builder = load_builder()

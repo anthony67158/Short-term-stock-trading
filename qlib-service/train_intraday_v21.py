@@ -11,8 +11,6 @@ from train_intraday_tcn import (
     _class_weights,
     _model_input,
     _set_seed,
-    apply_normalizer,
-    fit_normalizer,
     map_barrier_labels,
     purged_holdout_split,
 )
@@ -20,7 +18,8 @@ from train_intraday_tcn import (
 
 ARCHITECTURE = "transformer-dual-head"
 HEADS = ("next30m", "sessionClose")
-SESSION_BUCKETS = frozenset({"morning", "noon", "afternoon"})
+SESSION_ORDER = ("morning", "noon", "afternoon")
+SESSION_BUCKETS = frozenset(SESSION_ORDER)
 LABEL_DEFINITIONS = {
     "next30m": {
         "entry": "next5mOpen",
@@ -65,6 +64,88 @@ def validate_dual_head_dataset(X, next30m, session_close, buckets):
         "sequence_length": int(values.shape[1]),
         "features": int(values.shape[2]),
     }
+
+
+def fit_indexed_normalizer(values, indices, *, chunk_size=100_000):
+    values = np.asarray(values)
+    indices = np.asarray(indices, dtype=np.int64)
+    if values.ndim != 3 or indices.ndim != 1 or not len(indices):
+        raise ValueError("归一化数据或索引无效")
+    if not isinstance(chunk_size, int) or chunk_size < 1:
+        raise ValueError("归一化批次必须为正整数")
+    if np.any(indices < 0) or np.any(indices >= len(values)):
+        raise ValueError("归一化索引越界")
+
+    totals = np.zeros(values.shape[-1], dtype=np.float64)
+    squares = np.zeros(values.shape[-1], dtype=np.float64)
+    count = 0
+    for start in range(0, len(indices), chunk_size):
+        selected = indices[start : start + chunk_size]
+        chunk = np.asarray(values[selected], dtype=np.float64)
+        totals += chunk.sum(axis=(0, 1))
+        squares += np.square(chunk).sum(axis=(0, 1))
+        count += chunk.shape[0] * chunk.shape[1]
+    mean = totals / count
+    variance = np.maximum(squares / count - np.square(mean), 0.0)
+    std = np.sqrt(variance)
+    return mean, np.where(std > 1e-8, std, 1.0)
+
+
+def normalize_indexed(values, indices, mean, std, *, chunk_size=100_000):
+    values = np.asarray(values)
+    indices = np.asarray(indices, dtype=np.int64)
+    mean = np.asarray(mean, dtype=np.float32)
+    std = np.asarray(std, dtype=np.float32)
+    output = np.empty(
+        (len(indices), values.shape[1], values.shape[2]),
+        dtype=np.float32,
+    )
+    for start in range(0, len(indices), chunk_size):
+        stop = min(start + chunk_size, len(indices))
+        chunk = np.asarray(values[indices[start:stop]], dtype=np.float32)
+        output[start:stop] = (chunk - mean) / std
+    return output
+
+
+def fit_session_class_weights(labels, buckets):
+    labels = np.asarray(labels, dtype=int)
+    buckets = np.asarray(buckets).astype(str)
+    if labels.ndim != 1 or buckets.ndim != 1 or len(labels) != len(buckets):
+        raise ValueError("时段类别权重输入无效")
+    if not set(np.unique(labels)).issubset({0, 1, 2}):
+        raise ValueError("时段类别权重标签无效")
+    if not set(np.unique(buckets)).issubset(SESSION_BUCKETS):
+        raise ValueError("时段类别权重时段无效")
+
+    table = {}
+    for bucket in SESSION_ORDER:
+        selected = labels[buckets == bucket]
+        if not len(selected):
+            table[bucket] = [1.0, 1.0, 1.0]
+            continue
+        counts = np.bincount(selected, minlength=3)
+        if np.any(counts == 0):
+            raise ValueError(f"{bucket} 时段缺少完整三分类训练样本")
+        table[bucket] = [
+            float(len(selected) / (3 * count))
+            for count in counts
+        ]
+    return table
+
+
+def session_sample_weights(labels, buckets, table):
+    labels = np.asarray(labels, dtype=int)
+    buckets = np.asarray(buckets).astype(str)
+    if labels.ndim != 1 or buckets.ndim != 1 or len(labels) != len(buckets):
+        raise ValueError("时段样本权重输入无效")
+    output = np.empty(len(labels), dtype=np.float32)
+    for bucket in SESSION_ORDER:
+        selected = buckets == bucket
+        values = np.asarray(table.get(bucket), dtype=np.float32)
+        if values.shape != (3,) or not np.isfinite(values).all():
+            raise ValueError(f"{bucket} 时段类别权重无效")
+        output[selected] = values[labels[selected]]
+    return output
 
 
 def _build_dual_head_transformer(
@@ -223,14 +304,35 @@ def train_intraday_v21(
     labels_next = map_barrier_labels(raw_next)
     labels_close = map_barrier_labels(raw_close)
     train_index, holdout_index, split = purged_holdout_split(dates)
-    mean, std = fit_normalizer(X[train_index])
-    train_x = apply_normalizer(X[train_index], mean, std)
-    holdout_x = apply_normalizer(X[holdout_index], mean, std)
+    sequence_length = int(X.shape[1])
+    input_features = int(X.shape[2])
+    next_weight_table = fit_session_class_weights(
+        labels_next[train_index],
+        buckets[train_index],
+    )
+    close_weight_table = fit_session_class_weights(
+        labels_close[train_index],
+        buckets[train_index],
+    )
+    train_next_weights = session_sample_weights(
+        labels_next[train_index],
+        buckets[train_index],
+        next_weight_table,
+    )
+    train_close_weights = session_sample_weights(
+        labels_close[train_index],
+        buckets[train_index],
+        close_weight_table,
+    )
+    mean, std = fit_indexed_normalizer(X, train_index)
+    train_x = normalize_indexed(X, train_index, mean, std)
+    holdout_x = normalize_indexed(X, holdout_index, mean, std)
+    del X
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = _build_dual_head_transformer(
-        X.shape[-1],
-        X.shape[1],
+        input_features,
+        sequence_length,
     ).to(device)
     optimizer = torch.optim.AdamW(
         model.parameters(),
@@ -253,6 +355,8 @@ def train_intraday_v21(
             _model_input(train_x, "transformer"),
             torch.from_numpy(labels_next[train_index]).long(),
             torch.from_numpy(labels_close[train_index]).long(),
+            torch.from_numpy(train_next_weights),
+            torch.from_numpy(train_close_weights),
         ),
         batch_size=batch_size,
         shuffle=True,
@@ -272,13 +376,38 @@ def train_intraday_v21(
     for epoch in range(1, max_epochs + 1):
         model.train()
         losses = []
-        for batch_x, batch_next, batch_close in loader:
+        for (
+            batch_x,
+            batch_next,
+            batch_close,
+            batch_next_weight,
+            batch_close_weight,
+        ) in loader:
             optimizer.zero_grad(set_to_none=True)
+            batch_next = batch_next.to(device)
+            batch_close = batch_close.to(device)
             logits_next, logits_close = model(batch_x.to(device))
-            loss = (
-                criterion_next(logits_next, batch_next.to(device))
-                + criterion_close(logits_close, batch_close.to(device))
-            ) / 2.0
+            next_losses = torch.nn.functional.cross_entropy(
+                logits_next,
+                batch_next,
+                reduction="none",
+            )
+            close_losses = torch.nn.functional.cross_entropy(
+                logits_close,
+                batch_close,
+                reduction="none",
+            )
+            batch_next_weight = batch_next_weight.to(device)
+            batch_close_weight = batch_close_weight.to(device)
+            loss_next = (
+                (next_losses * batch_next_weight).sum()
+                / batch_next_weight.sum()
+            )
+            loss_close = (
+                (close_losses * batch_close_weight).sum()
+                / batch_close_weight.sum()
+            )
+            loss = (loss_next + loss_close) / 2.0
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
@@ -326,6 +455,10 @@ def train_intraday_v21(
         "split": split,
         "best_epoch": best_epoch,
         "holdout_loss": holdout_loss,
+        "training_class_weights": {
+            "next30m": next_weight_table,
+            "sessionClose": close_weight_table,
+        },
         "heads": {
             "next30m": _metrics(
                 labels_next[holdout_index],
@@ -365,7 +498,7 @@ def train_intraday_v21(
         "feature_names": feature_names,
         "normalizer_mean": mean,
         "normalizer_std": std,
-        "sequence_length": int(X.shape[1]),
+        "sequence_length": sequence_length,
         "label_definitions": LABEL_DEFINITIONS,
         "metrics": metrics,
     }, checkpoint_path)

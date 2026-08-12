@@ -9,12 +9,15 @@ import time
 import numpy as np
 
 from build_intraday_dataset import (
-    FEATURE_NAMES,
     _load_cache_panel,
-    _minute_features_from_arrays,
     _panel_arrays,
     _session_groups,
     barrier_counts,
+)
+from intraday_v21_features import (
+    V21_FEATURE_NAMES,
+    _intraday_v21_features_from_arrays,
+    intraday_v21_features as _shared_intraday_v21_features,
 )
 from labeling import triple_barrier_outcome
 
@@ -22,6 +25,10 @@ from labeling import triple_barrier_outcome
 FIRST_SIGNAL_TIME = "10:00:00"
 LAST_SIGNAL_TIME = "14:30:00"
 NEXT_30M_BARS = 6
+
+
+def intraday_v21_features(panel):
+    return _shared_intraday_v21_features(panel)
 
 
 def session_bucket(as_of):
@@ -60,7 +67,7 @@ def make_intraday_v21_samples(
         raise ValueError("minimum_bars_per_day 必须为正整数")
 
     times, arrays = _panel_arrays(panel)
-    features = _minute_features_from_arrays(times, arrays)
+    features = _intraday_v21_features_from_arrays(times, arrays)
     rows = {
         "X": [],
         "dates": [],
@@ -119,7 +126,7 @@ def make_intraday_v21_samples(
     count = len(rows["as_of"])
     return {
         "X": np.asarray(rows["X"], dtype=np.float32).reshape(
-            (-1, sequence_length, len(FEATURE_NAMES))
+            (-1, sequence_length, len(V21_FEATURE_NAMES))
         ),
         "dates": np.asarray(rows["dates"]),
         "as_of": np.asarray(rows["as_of"]),
@@ -128,7 +135,7 @@ def make_intraday_v21_samples(
         "session_bucket": np.asarray(rows["session_bucket"]),
         "y_next30m": np.asarray(rows["y_next30m"], dtype=np.int8),
         "y_session_close": np.asarray(rows["y_session_close"], dtype=np.int8),
-        "feature_names": np.asarray(FEATURE_NAMES),
+        "feature_names": np.asarray(V21_FEATURE_NAMES),
         "sample_count": count,
     }
 
@@ -196,7 +203,7 @@ def build_dataset_from_cache(
         field: np.concatenate([chunk[field] for chunk in chunks])
         for field in output_fields
     }
-    dataset["feature_names"] = np.asarray(FEATURE_NAMES)
+    dataset["feature_names"] = np.asarray(V21_FEATURE_NAMES)
     return dataset
 
 
