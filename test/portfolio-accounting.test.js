@@ -6,6 +6,7 @@ import {
   calcBuyFee,
   calcSellFee,
   computePortfolio,
+  sortHoldingsByProfit,
   planStore,
 } from '../src/planStore.js'
 
@@ -213,4 +214,25 @@ test('删除已应用现金的建仓记录会同时恢复现金和持仓', () =>
   assert.equal(planStore.get().account.cash, 10000)
   assert.equal(planStore.get().holding.length, 0)
   assert.equal(planStore.get().closed.length, 0)
+})
+
+test('持仓卡按实时浮盈金额从高到低排序而不是按收益率', () => {
+  const holdings = [
+    { id: 'high-rate', code: '000001', qty: 1, buyPrice: 10, buyFee: 0 },
+    { id: 'high-profit', code: '600000', qty: 10, buyPrice: 10, buyFee: 0 },
+    { id: 'loss', code: '300001', qty: 2, buyPrice: 10, buyFee: 0 },
+  ]
+  const quotes = {
+    '000001': { price: 11 },
+    '600000': { price: 10.3 },
+    '300001': { price: 9 },
+  }
+
+  const sorted = sortHoldingsByProfit(holdings, quotes, null)
+
+  assert.deepEqual(sorted.map((holding) => holding.id), [
+    'high-profit',
+    'high-rate',
+    'loss',
+  ])
 })

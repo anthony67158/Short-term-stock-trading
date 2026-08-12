@@ -1964,3 +1964,21 @@ export function computePortfolio(holding, quoteMap, account) {
     goalReturnPct,
   }
 }
+
+export function sortHoldingsByProfit(holding, quoteMap, account) {
+  const list = Array.isArray(holding) ? holding : []
+  const profitById = new Map(
+    computePortfolio(list, quoteMap, account).positions
+      .map((position) => [position.id, position.floatPnl]),
+  )
+  return list
+    .map((item, index) => ({ item, index }))
+    .sort((left, right) => {
+      const leftProfit = Number(profitById.get(left.item.id))
+      const rightProfit = Number(profitById.get(right.item.id))
+      const leftRank = Number.isFinite(leftProfit) ? leftProfit : -Infinity
+      const rightRank = Number.isFinite(rightProfit) ? rightProfit : -Infinity
+      return (rightRank - leftRank) || (left.index - right.index)
+    })
+    .map(({ item }) => item)
+}

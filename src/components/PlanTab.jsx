@@ -10,7 +10,7 @@ import { AlertForm } from './AlertCenter'
 import { useMediaQuery, usePolling, useSwipe } from '../hooks'
 import { callAIStream } from '../ai'
 import { api } from '../apiBase'
-import { planStore, usePlanStore, calcBuyFee, calcSellFee, computeTFlows, computePortfolio, livePositionOf, t1StatusOf, advicePlan, adviceFocus } from '../planStore'
+import { planStore, usePlanStore, calcBuyFee, calcSellFee, computeTFlows, computePortfolio, sortHoldingsByProfit, livePositionOf, t1StatusOf, advicePlan, adviceFocus } from '../planStore'
 import { aiStore } from '../aiStore'
 import { openStockDetail, useDetailStore } from '../detailStore'
 import { getAdvice, subscribeAdvice } from '../adviceCache'
@@ -1074,15 +1074,11 @@ function HoldingList({ book, quote, batchSel }) {
     // eslint-disable-next-line
   }, [busyModal])
 
-  // 紧急度排序：触止损/破纪律/触止盈的先处理 → 其余按浮亏在前(先看风险)
-  const sortedHolding = [...book.holding].sort((a, b) => {
-    const ua = holdSnapshot(a, quote[a.code]).urgency
-    const ub = holdSnapshot(b, quote[b.code]).urgency
-    if (ub !== ua) return ub - ua
-    const pa = holdSnapshot(a, quote[a.code]).pnl ?? 999
-    const pb = holdSnapshot(b, quote[b.code]).pnl ?? 999
-    return pa - pb
-  })
+  // 卡片按实时浮盈金额降序。排序口径复用账户估值，包含手续费和未结算做T净头寸。
+  const sortedHolding = useMemo(
+    () => sortHoldingsByProfit(book.holding, quote, book.account),
+    [book.holding, quote, book.account],
+  )
 
   // ===== 持仓区行业分类(全部 + 板块),与自选区同口径 =====
   const [holdTab, setHoldTab] = useState('全部') // 当前选中行业 tab
@@ -1153,7 +1149,7 @@ function HoldingList({ book, quote, batchSel }) {
   return (
     <div className="panel">
       <div className="panel-head plan-head">
-        <div className="panel-title"><Icon name="wallet" size={16} /> 当前持仓 <span className="sub-name">{book.holding.length} 只 · 支持做T</span></div>
+        <div className="panel-title"><Icon name="wallet" size={16} /> 当前持仓 <span className="sub-name">{book.holding.length} 只 · 按浮盈金额排序</span></div>
         <div className="hold-head-actions">
           <AdvisorScore book={book} />
           <AutoRefreshControl quote={quote} />
