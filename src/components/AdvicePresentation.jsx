@@ -49,7 +49,8 @@ export default function AdvicePresentation({ advice, knowledgeActionReview }) {
     || advice.quantNote
     || advice.theoryNote
     || advice.bearCase
-    || advice.risk,
+    || advice.risk
+    || view.planSteps.length > 0,
   )
 
   return (
@@ -98,7 +99,7 @@ export default function AdvicePresentation({ advice, knowledgeActionReview }) {
 
       <section className="advice-execution" aria-label="现在怎么做">
         <div className="advice-section-title">
-          <Icon name="target" size={13} /> 现在怎么做
+          <Icon name="target" size={13} /> 执行指令
         </div>
         <div className="advice-execution-main">
           <HL text={view.execution.instruction || '本次无需操作，等待触发条件出现后再行动。'} />
@@ -115,22 +116,6 @@ export default function AdvicePresentation({ advice, knowledgeActionReview }) {
             <span>仓位</span><HL text={view.execution.position} />
           </div>
         )}
-        {(advice.nextOpenPlan || advice.futurePlan) && (
-          <div className="advice-horizon compact">
-            {advice.nextOpenPlan && (
-              <div className="ah-row now">
-                <span className="ah-k">下个开盘</span>
-                <span className="ah-v"><HL text={advice.nextOpenPlan} /></span>
-              </div>
-            )}
-            {advice.futurePlan && (
-              <div className="ah-row future">
-                <span className="ah-k">后续路径</span>
-                <span className="ah-v"><HL text={advice.futurePlan} /></span>
-              </div>
-            )}
-          </div>
-        )}
       </section>
 
       {view.levels.length > 0 && (
@@ -138,7 +123,7 @@ export default function AdvicePresentation({ advice, knowledgeActionReview }) {
           <div className="advice-section-title">关键价位</div>
           <div className="advice-prices compact">
             {view.levels.map((level) => (
-              <div className="ap-cell" key={level.key}>
+              <div className={'ap-cell ' + level.key} key={level.key}>
                 <span className="ap-k">{level.label}</span>
                 <span className={'ap-v ' + level.tone}>{level.value}</span>
               </div>
@@ -199,7 +184,20 @@ export default function AdvicePresentation({ advice, knowledgeActionReview }) {
             <Icon name={expanded ? 'chevronDown' : 'chevronRight'} size={13} />
           </button>
           {expanded && (
-            <AdviceDetails advice={advice} review={knowledgeActionReview} />
+            <>
+              {view.planSteps.length > 0 && (
+                <section className="advice-plan-paths" aria-label="完整执行路径">
+                  <div className="advice-section-title">完整执行路径</div>
+                  {view.planSteps.map((step) => (
+                    <div className="advice-plan-step" key={step.key}>
+                      <span>{step.label}</span>
+                      <HL text={step.text} />
+                    </div>
+                  ))}
+                </section>
+              )}
+              <AdviceDetails advice={advice} review={knowledgeActionReview} />
+            </>
           )}
         </div>
       )}

@@ -55,7 +55,9 @@ function priceLevels(advice) {
       value: entry,
       tone: 'red',
     },
-    advice.watchPrice != null && {
+    advice.watchPrice != null
+      && clean(advice.watchPrice, 200).length <= 24
+      && {
       key: 'watch',
       label: '关注价',
       value: displayNumber(advice.watchPrice),
@@ -84,10 +86,10 @@ function priceLevels(advice) {
 
 function coreEvidence(advice) {
   return uniqueItems([
-    { key: 'quant', label: '量化', text: advice.quantNote },
-    { key: 'fund', label: '资金', text: advice.fundNote },
-    { key: 'trend', label: '趋势', text: advice.techNote },
-    { key: 'news', label: '消息', text: advice.newsNote },
+    { key: 'quant', label: '量化', text: clean(advice.quantNote, 180) },
+    { key: 'fund', label: '资金', text: clean(advice.fundNote, 180) },
+    { key: 'trend', label: '趋势', text: clean(advice.techNote, 180) },
+    { key: 'news', label: '消息', text: clean(advice.newsNote, 180) },
   ], 3)
 }
 
@@ -145,6 +147,18 @@ export function buildAdvicePresentation(advice = {}) {
         contract.positionRule,
       ),
     },
+    planSteps: [
+      advice.nextOpenPlan && {
+        key: 'nextOpen',
+        label: '下个开盘',
+        text: clean(advice.nextOpenPlan),
+      },
+      advice.futurePlan && {
+        key: 'future',
+        label: '后续路径',
+        text: clean(advice.futurePlan),
+      },
+    ].filter(Boolean),
     levels: priceLevels(advice),
     trigger: {
       condition: first(

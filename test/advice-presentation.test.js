@@ -39,6 +39,7 @@ test('军师展示契约固定输出结论执行价位触发和三条核心依�
   assert.equal(view.execution.quantity, '2手')
   assert.equal(view.execution.amount, '2020')
   assert.equal(view.execution.position, '约占总资产8%')
+  assert.deepEqual(view.planSteps, [])
   assert.deepEqual(
     view.levels.map((item) => item.label),
     ['买入区间', '目标价', '止损价'],
@@ -52,6 +53,44 @@ test('军师展示契约固定输出结论执行价位触发和三条核心依�
     ['量化', '资金', '趋势'],
   )
   assert.equal(view.model, null)
+})
+
+test('长段关注价说明不挤入价格格且后续路径默认收进完整分析', () => {
+  const view = buildAdvicePresentation({
+    action: '回调再买',
+    actionPlan: '先等待，不追高',
+    buyZone: '138.39~140.00元',
+    watchPrice: '回踩138.39~140.00元企稳，或放量站上145.47元再评估',
+    targetPrice: 160,
+    stopPrice: 127.88,
+    nextOpenPlan: '高开接近145.47元不追，回踩买入区再行动',
+    futurePlan: '后续放量站上145.47元再重新评估突破跟进',
+  })
+
+  assert.deepEqual(
+    view.levels.map((item) => [item.key, item.value]),
+    [
+      ['entry', '138.39~140.00元'],
+      ['target', '160'],
+      ['stop', '127.88'],
+    ],
+  )
+  assert.deepEqual(
+    view.planSteps.map((item) => item.label),
+    ['下个开盘', '后续路径'],
+  )
+})
+
+test('默认核心依据压缩为可扫读摘要而完整原文仍保留在建议数据中', () => {
+  const longText = `量化方向偏多，${'但仍需等待价格确认。'.repeat(30)}`
+  const view = buildAdvicePresentation({
+    quantNote: longText,
+    fundNote: '资金流向偏强。',
+  })
+
+  assert.ok(view.evidence[0].text.length <= 181)
+  assert.match(view.evidence[0].text, /…$/)
+  assert.equal(longText.length > view.evidence[0].text.length, true)
 })
 
 test('军师展示契约去除重复依据并兼容持仓建议旧字段', () => {

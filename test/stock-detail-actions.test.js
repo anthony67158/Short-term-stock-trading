@@ -35,7 +35,7 @@ test('底栏主按钮始终表达军师生成操作建议而不是AI助手', () 
   assert.equal(adviceGenerationAction({
     loading: false,
     hasAdvice: false,
-  }).label, '生成 AI 操作建议')
+  }).label, '军师生成 AI 操作建议')
   assert.equal(adviceGenerationAction({
     loading: true,
     hasAdvice: false,
@@ -43,5 +43,5 @@ test('底栏主按钮始终表达军师生成操作建议而不是AI助手', () 
   assert.equal(adviceGenerationAction({
     loading: false,
     hasAdvice: true,
-  }).label, '重新生成 AI 操作建议')
+  }).label, '重新生成军师 AI 操作建议')
 })

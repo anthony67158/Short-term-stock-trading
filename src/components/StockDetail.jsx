@@ -662,7 +662,7 @@ export default function StockDetail({ stock, onClose }) {
               {/* ===== AI 操作建议（核心：紧跟价格，第一优先展示）===== */}
               <div className="decide-box">
                 <div className="decide-head">
-                  <div className="decide-title"><Icon name="target" size={14} /> AI 操作建议
+                  <div className="decide-title"><Icon name="target" size={14} /> 军师 · AI 操作建议
                     {myHold ? <span className="decide-hold">持仓 {myHold.qty}手 · 成本{fmtRaw(myHold.cost)}</span>
                             : <span className="decide-hold none">未持仓</span>}
                   </div>
@@ -671,7 +671,7 @@ export default function StockDetail({ stock, onClose }) {
 
                 {!quantState && (
                   <div className="quant-cta">
-                    <button className="quant-btn" onClick={loadQuant}><Icon name="spark" size={14} /> 生成操作建议</button>
+                    <button className="quant-btn" onClick={loadQuant}><Icon name="spark" size={14} /> 军师生成操作建议</button>
                     <span className="quant-cta-hint">{myHold ? '结合你的持仓，告诉你该加仓 / 减仓 / 持有做T' : '结合量化+技术+历史规律+当日盘面，先给结论(买入/回调再买/观望/不建议)，再给对应买点与止损'}</span>
                   </div>
                 )}
@@ -732,6 +732,10 @@ export default function StockDetail({ stock, onClose }) {
                     title: dec.title || '—',
                     detail: dec.detail || '',
                   }
+                  const meta = quantState.meta || {}
+                  const trust = meta.trustScore
+                  const resonance = meta.resonance
+                  const marketEnv = meta.marketEnv
                   const cachedStr = quantState.cachedAt ? new Date(quantState.cachedAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : null
                   return (
                     <>
@@ -747,39 +751,14 @@ export default function StockDetail({ stock, onClose }) {
                         </div>
                       )}
 
-                      {/* 可信度条：综合信任分 + 共振灯（让"能信多少"透明化）*/}
-                      {(() => {
-                        const meta = quantState.meta || {}
-                        const ts = meta.trustScore, rez = meta.resonance, env = meta.marketEnv, bt = meta.backtest
-                        if (!ts && !rez) return null
-                        const tband = ts ? (ts.score >= 68 ? 'red' : ts.score >= 48 ? 'gold' : 'green') : 'muted'
-                        return (
-                          <div className="trust-bar">
-                            {ts && (
-                              <div className="trust-main">
-                                <span className="trust-k">可信度</span>
-                                <span className={'trust-score ' + tband}>{ts.score}</span>
-                                <span className="trust-band">{ts.band}</span>
-                                <div className="trust-track"><div className={'trust-fill ' + tband} style={{ width: ts.score + '%' }} /></div>
-                              </div>
-                            )}
-                            <div className="trust-tags">
-                              {meta.todayQuote && (meta.todayQuote.isLimitUp || meta.todayQuote.isLimitDown || meta.todayQuote.bigMove) && (
-                                <span className={'trust-tag ' + (meta.todayQuote.pct >= 0 ? 'on' : 'warn')} title="今日实时行情(优先于历史指标)">
-                                  今日{meta.todayQuote.isLimitUp ? '涨停' : meta.todayQuote.isLimitDown ? '跌停' : (meta.todayQuote.pct >= 0 ? '+' : '') + meta.todayQuote.pct + '%'}
-                                </span>
-                              )}
-                              {rez && <span className={'trust-tag ' + (rez.score >= 2 ? 'on' : '')} title={(rez.hits || []).join('、')}>共振 {rez.score}/{rez.max}</span>}
-                              {env && <span className={'trust-tag ' + (env.weak ? 'warn' : '')} title={env.suggestPosition ? ('建议仓位 ' + env.suggestPosition) : ''}>{env.level}</span>}
-                              {meta.counterTrend && meta.counterTrend.isStrong && <span className="trust-tag on" title={(meta.counterTrend.flags || []).join('、')}>逆势强票</span>}
-                              {bt && bt.hitRate != null && <span className="trust-tag" title={bt.note}>回测 {bt.hitRate}%</span>}
-                              {meta.lhb && meta.lhb.smartMoney && <span className="trust-tag on">游资/机构</span>}
-                              {meta.dailyReport && <span className="trust-tag" title={'已结合' + (meta.dailyReport.sessionCn || '今日日报') + '的外部市场环境判断'}>📋 已结合日报</span>}
-                              {meta.hasNegNews && <span className="trust-tag warn">消息有雷</span>}
-                            </div>
-                          </div>
-                        )
-                      })()}
+                      {(trust || resonance || marketEnv || cachedStr) && (
+                        <div className="advice-context-strip">
+                          {trust && <span>可信度 <b>{trust.score}</b> · {trust.band}</span>}
+                          {resonance && <span>共振 <b>{resonance.score}/{resonance.max}</b></span>}
+                          {marketEnv && <span>{marketEnv.level}</span>}
+                          {cachedStr && <span className="saved"><Icon name="history" size={10} /> {cachedStr} 已保存</span>}
+                        </div>
+                      )}
 
                       {/* 未持仓但 AI 建议没返回 → 提示重试（避免只给模糊量化结论）*/}
                       {quantState.adviceMissing && !adv && (
@@ -971,13 +950,6 @@ export default function StockDetail({ stock, onClose }) {
                         </div>
                       )}
 
-                      {/* 生成时间 + 重新生成（结果已缓存，关闭再进/刷新仍可见）*/}
-                      <div className="advice-foot">
-                        {cachedStr && <span className="advice-cached"><Icon name="history" size={11} /> {cachedStr} 生成，已保留</span>}
-                        <button type="button" className="advice-regenerate-btn primary" onClick={loadQuant}>
-                          <Icon name="refresh" size={13} />重新生成操作建议
-                        </button>
-                      </div>
                       <div className="dq-hint">{adv ? (myHold ? 'AI 操作建议由大模型结合量化预测/技术面/你的持仓成本生成' : 'AI 操作建议由大模型结合量化走势预测/技术面/历史规律/当日盘面生成') : '走势预测=基于历史波动的蒙特卡洛模拟，量化=多因子打分'}；均为统计口径，仅供参考，非投资建议</div>
                     </>
                   )

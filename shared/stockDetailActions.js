@@ -39,8 +39,8 @@ export function adviceGenerationAction({
   }
   return {
     label: hasAdvice
-      ? '重新生成 AI 操作建议'
-      : '生成 AI 操作建议',
+      ? '重新生成军师 AI 操作建议'
+      : '军师生成 AI 操作建议',
     icon: hasAdvice ? 'refresh' : 'spark',
     disabled: false,
   }
