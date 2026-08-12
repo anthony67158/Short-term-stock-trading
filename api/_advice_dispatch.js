@@ -28,7 +28,7 @@ function fcClient(env) {
   return new FCClient(new $OpenApiUtil.Config({
     accessKeyId,
     accessKeySecret,
-    regionId: env.FC_REGION || 'cn-hangzhou',
+    regionId: env.ADVICE_FC_REGION || 'cn-hangzhou',
     connectTimeout: 10000,
     readTimeout: 10000,
   }))
@@ -73,8 +73,8 @@ export async function dispatchAdviceWorker(
     invoke = invokeFC,
   } = {},
 ) {
-  const region = String(env.FC_REGION || 'cn-hangzhou')
-  const functionName = String(env.FC_FUNCTION_NAME || 'stock-dashboard')
+  const region = String(env.ADVICE_FC_REGION || 'cn-hangzhou')
+  const functionName = String(env.ADVICE_FC_FUNCTION_NAME || 'stock-dashboard')
   const event = buildAdviceWorkerEvent(nick, env.CRON_KEY)
   const result = await invoke({
     functionName,

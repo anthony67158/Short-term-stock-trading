@@ -28,8 +28,8 @@ resources:
       environmentVariables:
         # 让 PATH 包含内置 node，避免子进程找不到
         PATH: /var/fc/lang/nodejs20/bin:/usr/local/bin:/usr/bin:/bin
-        FC_REGION: ${vars.region}
-        FC_FUNCTION_NAME: ${vars.functionName}
+        ADVICE_FC_REGION: ${vars.region}
+        ADVICE_FC_FUNCTION_NAME: ${vars.functionName}
         ADVICE_ASYNC_WORKER: "true"
         # ---- 大模型（保持原样，不迁百炼）----
         LLM_BASE_URL: ${env('LLM_BASE_URL')}

@@ -11,8 +11,8 @@ test('建议Worker使用FC异步调用并携带最小账号事件', async () => 
   const result = await dispatchAdviceWorker('飞飞徐', {
     env: {
       CRON_KEY: 'secret-key',
-      FC_REGION: 'cn-hangzhou',
-      FC_FUNCTION_NAME: 'stock-dashboard',
+      ADVICE_FC_REGION: 'cn-hangzhou',
+      ADVICE_FC_FUNCTION_NAME: 'stock-dashboard',
     },
     invoke: async (request) => {
       calls.push(request)
