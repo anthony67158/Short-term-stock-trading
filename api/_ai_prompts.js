@@ -298,7 +298,7 @@ ${payload.holdQty != null ? `4) 手数纪律:任何减仓/清仓/卖出手数 �
 数据：${data}
 
 【候选池 candidates 字段说明】每只含：name/code、price现价、marketScore全市场分、combinedScore量化复排分、pct/turnover/volRatio/mainInflowYi、tags，以及 quant{ score,upProb,expRet,targetLow~targetHigh,highConfFired,credibility,buyPrice,takeProfit,stopLoss }。
-【本次量化版本】${payload.quantModelVersion === 'v2.1' ? '分钟 Transformer V2.1（盘中实验）' : payload.quantModelVersion === 'v2' ? '分钟 Transformer V2.0' : '当前生产模型'}。候选评分只采信该版本的结果；V2.0、V2.1与默认模型分数严禁混用。V2.1未达到58%生产门槛，只能作为实验排序参考，不得因其单一高概率直接给“可执行”。
+【本次量化版本】${payload.quantModelVersion === 'v2.1' ? '分钟 Transformer V2.1（盘中实验）' : payload.quantModelVersion === 'v2' ? '分钟 Transformer V2.0' : '当前生产模型'}。候选评分只采信该版本的结果；不得混用默认模型、V2.0或V2.1的分数。V2.1未达到58%生产门槛，只能作为实验排序参考，不得因其单一高概率直接给“可执行”。
 ${payload.quantMissing ? '⚠️【本次量化服务不可用】不得给“立即买入”。但仍须按市场分、资金、量能和板块强度选出3只条件候选，actionability只能是“等待触发”或“观察”，禁止返回空名单。quantScore 填 null，禁止编造。' : ''}
 ${payload.session === 'next_open' ? '【当前为休市/盘前】结论面向下一交易日开盘；actionability原则上写“等待触发”，买点必须是开盘后可验证的回踩企稳或放量突破条件。' : '【当前为交易时段】可根据现价与分时位置判断“可执行”或“等待触发”。'}
 
