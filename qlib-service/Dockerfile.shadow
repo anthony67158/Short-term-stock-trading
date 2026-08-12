@@ -3,7 +3,8 @@ FROM python:3.11-slim
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PORT=8000 \
-    SHADOW_MODEL_PATH=/models/transformer.pt
+    SHADOW_MODEL_PATH=/models/transformer.pt \
+    V21_MODEL_PATH=/models/v21_intraday.pt
 
 WORKDIR /app
 
@@ -17,10 +18,14 @@ RUN pip install --no-cache-dir \
 
 COPY build_intraday_dataset.py \
      train_intraday_tcn.py \
+     train_intraday_v21.py \
      labeling.py \
      intraday_shadow_contract.py \
      intraday_shadow_runtime.py \
      intraday_shadow_recorder.py \
+     intraday_v21_contract.py \
+     intraday_v21_runtime.py \
+     intraday_v21_recorder.py \
      intraday_shadow_app.py \
      ./
 

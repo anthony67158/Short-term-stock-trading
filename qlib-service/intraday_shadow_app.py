@@ -10,6 +10,9 @@ from fastapi.responses import JSONResponse
 from intraday_shadow_contract import validate_predict_v2_payload
 from intraday_shadow_recorder import OssShadowRecorder
 from intraday_shadow_runtime import IntradayShadowRuntime
+from intraday_v21_contract import validate_predict_v21_payload
+from intraday_v21_recorder import OssV21Recorder
+from intraday_v21_runtime import IntradayV21Runtime
 
 
 def _error(status_code, code, message):
@@ -52,7 +55,47 @@ class _LazyEnvironmentRecorder:
         return self._recorder.record(prediction)
 
 
-def create_app(*, runtime=None, api_key=None, recorder=None):
+class _LazyV21EnvironmentRuntime:
+    def __init__(self):
+        self._runtime = None
+        self._lock = threading.Lock()
+
+    def predict(self, request):
+        if self._runtime is None:
+            with self._lock:
+                if self._runtime is None:
+                    self._runtime = IntradayV21Runtime(
+                        model_path=os.environ.get("V21_MODEL_PATH", ""),
+                        run_id=os.environ.get("V21_RUN_ID", ""),
+                        expected_sha256=os.environ.get(
+                            "V21_MODEL_SHA256",
+                            "",
+                        ),
+                    )
+        return self._runtime.predict(request)
+
+
+class _LazyV21EnvironmentRecorder:
+    def __init__(self):
+        self._recorder = None
+        self._lock = threading.Lock()
+
+    def record(self, prediction):
+        if self._recorder is None:
+            with self._lock:
+                if self._recorder is None:
+                    self._recorder = OssV21Recorder.from_environment()
+        return self._recorder.record(prediction)
+
+
+def create_app(
+    *,
+    runtime=None,
+    api_key=None,
+    recorder=None,
+    v21_runtime=None,
+    v21_recorder=None,
+):
     service = FastAPI(
         title="Intraday Shadow Predictor",
         version="1.0",
@@ -62,6 +105,8 @@ def create_app(*, runtime=None, api_key=None, recorder=None):
     )
     runtime = runtime or _LazyEnvironmentRuntime()
     recorder = recorder or _LazyEnvironmentRecorder()
+    v21_runtime = v21_runtime or _LazyV21EnvironmentRuntime()
+    v21_recorder = v21_recorder or _LazyV21EnvironmentRecorder()
     configured_key = (
         os.environ.get("SHADOW_API_KEY", "")
         if api_key is None
@@ -74,6 +119,11 @@ def create_app(*, runtime=None, api_key=None, recorder=None):
             "ok": True,
             "shadowOnly": True,
             "configured": bool(configured_key),
+            "v21Configured": bool(
+                os.environ.get("V21_MODEL_PATH")
+                and os.environ.get("V21_RUN_ID")
+                and os.environ.get("V21_MODEL_SHA256")
+            ),
         }
 
     @service.post("/predict-v2")
@@ -97,6 +147,29 @@ def create_app(*, runtime=None, api_key=None, recorder=None):
             recorder.record(prediction)
         except Exception:  # noqa: BLE001
             return _error(503, "RECORDING_FAILED", "影子预测记录失败")
+        return prediction
+
+    @service.post("/predict-v2-intraday")
+    def predict_v21(
+        payload: dict = Body(...),
+        x_shadow_key: str = Header(default="", alias="X-Shadow-Key"),
+    ):
+        if not configured_key:
+            return _error(503, "NOT_CONFIGURED", "V2.1 服务尚未配置")
+        if not hmac.compare_digest(x_shadow_key, configured_key):
+            return _error(401, "UNAUTHORIZED", "V2.1 服务鉴权失败")
+        try:
+            request = validate_predict_v21_payload(payload)
+        except ValueError as error:
+            return _error(422, "INVALID_INPUT", str(error))
+        try:
+            prediction = v21_runtime.predict(request)
+        except (RuntimeError, ValueError):
+            return _error(503, "INFERENCE_UNAVAILABLE", "V2.1 推理暂不可用")
+        try:
+            v21_recorder.record(prediction)
+        except Exception:  # noqa: BLE001
+            return _error(503, "RECORDING_FAILED", "V2.1 预测记录失败")
         return prediction
 
     return service
