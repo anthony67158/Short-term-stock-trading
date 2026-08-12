@@ -14,6 +14,7 @@ from train_intraday_v21 import (
     ARCHITECTURE,
     LABEL_DEFINITIONS,
     _build_dual_head_transformer,
+    apply_probability_calibration,
 )
 
 
@@ -145,6 +146,7 @@ class IntradayV21Runtime:
         self._mean = None
         self._std = None
         self._sequence_length = None
+        self._probability_calibration = None
 
     def _verify_hash(self):
         digest = hashlib.sha256()
@@ -180,6 +182,9 @@ class IntradayV21Runtime:
             checkpoint.get("normalizer_std"),
             dtype=np.float32,
         )
+        probability_calibration = checkpoint.get(
+            "probability_calibration",
+        )
         if (
             checkpoint.get("architecture") != ARCHITECTURE
             or checkpoint.get("model_version") != "v2.1-intraday"
@@ -192,8 +197,22 @@ class IntradayV21Runtime:
             or not np.isfinite(mean).all()
             or not np.isfinite(std).all()
             or np.any(std <= 0)
+            or not isinstance(probability_calibration, dict)
+            or set(probability_calibration) != {
+                "next30m",
+                "sessionClose",
+            }
         ):
             raise RuntimeError("V2.1 模型元数据不兼容")
+        for head in ("next30m", "sessionClose"):
+            try:
+                apply_probability_calibration(
+                    np.full((3, 3), 1 / 3),
+                    np.asarray(["morning", "noon", "afternoon"]),
+                    probability_calibration[head],
+                )
+            except (TypeError, ValueError) as error:
+                raise RuntimeError("V2.1 概率校准参数不兼容") from error
         model = _build_dual_head_transformer(
             len(V21_FEATURE_NAMES),
             sequence_length,
@@ -204,6 +223,7 @@ class IntradayV21Runtime:
         self._mean = mean
         self._std = std
         self._sequence_length = sequence_length
+        self._probability_calibration = probability_calibration
 
     def predict(self, request):
         self._load()
@@ -220,12 +240,18 @@ class IntradayV21Runtime:
                 "transformer",
             )
             logits_next, logits_close = self._model(tensor)
+            session = np.asarray([request["session"]])
             probabilities = {
-                "next30m": torch.softmax(logits_next, dim=1).numpy()[0],
-                "sessionClose": torch.softmax(
-                    logits_close,
-                    dim=1,
-                ).numpy()[0],
+                "next30m": apply_probability_calibration(
+                    torch.softmax(logits_next, dim=1).numpy(),
+                    session,
+                    self._probability_calibration["next30m"],
+                )[0],
+                "sessionClose": apply_probability_calibration(
+                    torch.softmax(logits_close, dim=1).numpy(),
+                    session,
+                    self._probability_calibration["sessionClose"],
+                )[0],
             }
         return format_v21_prediction(
             request=request,

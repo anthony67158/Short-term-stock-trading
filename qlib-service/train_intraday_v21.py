@@ -107,44 +107,139 @@ def normalize_indexed(values, indices, mean, std, *, chunk_size=100_000):
     return output
 
 
-def fit_session_class_weights(labels, buckets):
+def three_way_date_split(
+    dates,
+    *,
+    holdout_fraction=0.15,
+    calibration_fraction=0.12,
+    purge_dates=1,
+):
+    dates = np.asarray(dates).astype(str)
+    pre_holdout, holdout, outer = purged_holdout_split(
+        dates,
+        holdout_fraction=holdout_fraction,
+        purge_dates=purge_dates,
+    )
+    train_relative, calibration_relative, inner = purged_holdout_split(
+        dates[pre_holdout],
+        holdout_fraction=calibration_fraction,
+        purge_dates=purge_dates,
+    )
+    train = pre_holdout[train_relative]
+    calibration = pre_holdout[calibration_relative]
+    return train, calibration, holdout, {
+        "train_samples": int(len(train)),
+        "calibration_samples": int(len(calibration)),
+        "holdout_samples": int(len(holdout)),
+        "calibration_start_date": inner["holdout_start_date"],
+        "calibration_purge_start_date": inner["purge_start_date"],
+        "holdout_start_date": outer["holdout_start_date"],
+        "holdout_purge_start_date": outer["purge_start_date"],
+        "purge_dates": purge_dates,
+    }
+
+
+def balanced_accuracy(labels, predictions):
     labels = np.asarray(labels, dtype=int)
-    buckets = np.asarray(buckets).astype(str)
-    if labels.ndim != 1 or buckets.ndim != 1 or len(labels) != len(buckets):
-        raise ValueError("时段类别权重输入无效")
-    if not set(np.unique(labels)).issubset({0, 1, 2}):
-        raise ValueError("时段类别权重标签无效")
-    if not set(np.unique(buckets)).issubset(SESSION_BUCKETS):
-        raise ValueError("时段类别权重时段无效")
-
-    table = {}
-    for bucket in SESSION_ORDER:
-        selected = labels[buckets == bucket]
-        if not len(selected):
-            table[bucket] = [1.0, 1.0, 1.0]
-            continue
-        counts = np.bincount(selected, minlength=3)
-        if np.any(counts == 0):
-            raise ValueError(f"{bucket} 时段缺少完整三分类训练样本")
-        table[bucket] = [
-            float(len(selected) / (3 * count))
-            for count in counts
-        ]
-    return table
+    predictions = np.asarray(predictions, dtype=int)
+    recalls = []
+    for label in range(3):
+        selected = labels == label
+        if np.any(selected):
+            recalls.append(float(np.mean(predictions[selected] == label)))
+    if not recalls:
+        raise ValueError("平衡准确率缺少标签")
+    return float(np.mean(recalls))
 
 
-def session_sample_weights(labels, buckets, table):
+def _macro_f1(labels, predictions):
     labels = np.asarray(labels, dtype=int)
+    predictions = np.asarray(predictions, dtype=int)
+    values = []
+    for label in range(3):
+        true_positive = np.sum((labels == label) & (predictions == label))
+        false_positive = np.sum((labels != label) & (predictions == label))
+        false_negative = np.sum((labels == label) & (predictions != label))
+        denominator = 2 * true_positive + false_positive + false_negative
+        values.append(
+            float(2 * true_positive / denominator)
+            if denominator
+            else 0.0
+        )
+    return float(np.mean(values))
+
+
+def fit_probability_calibration(labels, probabilities, buckets):
+    labels = np.asarray(labels, dtype=int)
+    probabilities = np.asarray(probabilities, dtype=np.float64)
     buckets = np.asarray(buckets).astype(str)
-    if labels.ndim != 1 or buckets.ndim != 1 or len(labels) != len(buckets):
-        raise ValueError("时段样本权重输入无效")
-    output = np.empty(len(labels), dtype=np.float32)
+    if (
+        labels.ndim != 1
+        or probabilities.shape != (len(labels), 3)
+        or buckets.shape != labels.shape
+        or not np.isfinite(probabilities).all()
+        or np.any(probabilities < 0)
+    ):
+        raise ValueError("概率校准输入无效")
+
+    calibration = {}
+    grid = np.linspace(-0.8, 0.8, 17)
     for bucket in SESSION_ORDER:
         selected = buckets == bucket
-        values = np.asarray(table.get(bucket), dtype=np.float32)
-        if values.shape != (3,) or not np.isfinite(values).all():
-            raise ValueError(f"{bucket} 时段类别权重无效")
-        output[selected] = values[labels[selected]]
+        if not np.any(selected):
+            calibration[bucket] = [0.0, 0.0, 0.0]
+            continue
+        bucket_labels = labels[selected]
+        log_probabilities = np.log(np.clip(
+            probabilities[selected],
+            1e-8,
+            1.0,
+        ))
+        best_bias = np.zeros(3, dtype=np.float64)
+        best_score = float("-inf")
+        best_norm = float("inf")
+        for stop_bias in grid:
+            for take_bias in grid:
+                bias = np.asarray([stop_bias, 0.0, take_bias])
+                predictions = (log_probabilities + bias).argmax(axis=1)
+                score = (
+                    balanced_accuracy(bucket_labels, predictions)
+                    + 0.15 * _macro_f1(bucket_labels, predictions)
+                )
+                norm = float(np.square(bias).sum())
+                if (
+                    score > best_score + 1e-12
+                    or (
+                        abs(score - best_score) <= 1e-12
+                        and norm < best_norm
+                    )
+                ):
+                    best_score = score
+                    best_norm = norm
+                    best_bias = bias
+        calibration[bucket] = best_bias.tolist()
+    return calibration
+
+
+def apply_probability_calibration(probabilities, buckets, calibration):
+    probabilities = np.asarray(probabilities, dtype=np.float64)
+    buckets = np.asarray(buckets).astype(str)
+    if probabilities.ndim != 2 or probabilities.shape[1] != 3:
+        raise ValueError("待校准概率维度无效")
+    if buckets.shape != (len(probabilities),):
+        raise ValueError("待校准概率时段无效")
+    output = np.empty_like(probabilities)
+    for bucket in SESSION_ORDER:
+        selected = buckets == bucket
+        if not np.any(selected):
+            continue
+        bias = np.asarray(calibration.get(bucket), dtype=np.float64)
+        if bias.shape != (3,) or not np.isfinite(bias).all():
+            raise ValueError(f"{bucket} 概率校准参数无效")
+        logits = np.log(np.clip(probabilities[selected], 1e-8, 1.0)) + bias
+        logits -= logits.max(axis=1, keepdims=True)
+        adjusted = np.exp(logits)
+        output[selected] = adjusted / adjusted.sum(axis=1, keepdims=True)
     return output
 
 
@@ -303,29 +398,14 @@ def train_intraday_v21(
     shape = validate_dual_head_dataset(X, raw_next, raw_close, buckets)
     labels_next = map_barrier_labels(raw_next)
     labels_close = map_barrier_labels(raw_close)
-    train_index, holdout_index, split = purged_holdout_split(dates)
+    train_index, calibration_index, holdout_index, split = (
+        three_way_date_split(dates)
+    )
     sequence_length = int(X.shape[1])
     input_features = int(X.shape[2])
-    next_weight_table = fit_session_class_weights(
-        labels_next[train_index],
-        buckets[train_index],
-    )
-    close_weight_table = fit_session_class_weights(
-        labels_close[train_index],
-        buckets[train_index],
-    )
-    train_next_weights = session_sample_weights(
-        labels_next[train_index],
-        buckets[train_index],
-        next_weight_table,
-    )
-    train_close_weights = session_sample_weights(
-        labels_close[train_index],
-        buckets[train_index],
-        close_weight_table,
-    )
     mean, std = fit_indexed_normalizer(X, train_index)
     train_x = normalize_indexed(X, train_index, mean, std)
+    calibration_x = normalize_indexed(X, calibration_index, mean, std)
     holdout_x = normalize_indexed(X, holdout_index, mean, std)
     del X
 
@@ -355,13 +435,21 @@ def train_intraday_v21(
             _model_input(train_x, "transformer"),
             torch.from_numpy(labels_next[train_index]).long(),
             torch.from_numpy(labels_close[train_index]).long(),
-            torch.from_numpy(train_next_weights),
-            torch.from_numpy(train_close_weights),
         ),
         batch_size=batch_size,
         shuffle=True,
         generator=generator,
     )
+    calibration_tensor = _model_input(
+        calibration_x,
+        "transformer",
+    )
+    calibration_next = torch.from_numpy(
+        labels_next[calibration_index]
+    ).long()
+    calibration_close = torch.from_numpy(
+        labels_close[calibration_index]
+    ).long()
     holdout_tensor = _model_input(
         holdout_x,
         "transformer",
@@ -376,57 +464,32 @@ def train_intraday_v21(
     for epoch in range(1, max_epochs + 1):
         model.train()
         losses = []
-        for (
-            batch_x,
-            batch_next,
-            batch_close,
-            batch_next_weight,
-            batch_close_weight,
-        ) in loader:
+        for batch_x, batch_next, batch_close in loader:
             optimizer.zero_grad(set_to_none=True)
-            batch_next = batch_next.to(device)
-            batch_close = batch_close.to(device)
             logits_next, logits_close = model(batch_x.to(device))
-            next_losses = torch.nn.functional.cross_entropy(
-                logits_next,
-                batch_next,
-                reduction="none",
-            )
-            close_losses = torch.nn.functional.cross_entropy(
-                logits_close,
-                batch_close,
-                reduction="none",
-            )
-            batch_next_weight = batch_next_weight.to(device)
-            batch_close_weight = batch_close_weight.to(device)
-            loss_next = (
-                (next_losses * batch_next_weight).sum()
-                / batch_next_weight.sum()
-            )
-            loss_close = (
-                (close_losses * batch_close_weight).sum()
-                / batch_close_weight.sum()
-            )
-            loss = (loss_next + loss_close) / 2.0
+            loss = (
+                criterion_next(logits_next, batch_next.to(device))
+                + criterion_close(logits_close, batch_close.to(device))
+            ) / 2.0
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
             losses.append(float(loss.detach().cpu()))
-        holdout_loss, _next_prob, _close_prob = _evaluate(
+        calibration_loss, _next_prob, _close_prob = _evaluate(
             model,
-            holdout_tensor,
-            holdout_next,
-            holdout_close,
+            calibration_tensor,
+            calibration_next,
+            calibration_close,
             criterion_next,
             criterion_close,
         )
         history.append({
             "epoch": epoch,
             "train_loss": float(np.mean(losses)),
-            "holdout_loss": holdout_loss,
+            "calibration_loss": calibration_loss,
         })
-        if holdout_loss < best_loss - 1e-5:
-            best_loss = holdout_loss
+        if calibration_loss < best_loss - 1e-5:
+            best_loss = calibration_loss
             best_epoch = epoch
             best_state = {
                 key: value.detach().cpu().clone()
@@ -438,13 +501,47 @@ def train_intraday_v21(
     if best_state is None:
         raise RuntimeError("V2.1 训练未产生有效检查点")
     model.load_state_dict(best_state)
-    holdout_loss, next_prob, close_prob = _evaluate(
+    calibration_loss, calibration_next_prob, calibration_close_prob = (
+        _evaluate(
+            model,
+            calibration_tensor,
+            calibration_next,
+            calibration_close,
+            criterion_next,
+            criterion_close,
+        )
+    )
+    calibration_buckets = buckets[calibration_index]
+    probability_calibration = {
+        "next30m": fit_probability_calibration(
+            labels_next[calibration_index],
+            calibration_next_prob,
+            calibration_buckets,
+        ),
+        "sessionClose": fit_probability_calibration(
+            labels_close[calibration_index],
+            calibration_close_prob,
+            calibration_buckets,
+        ),
+    }
+    holdout_loss, raw_next_prob, raw_close_prob = _evaluate(
         model,
         holdout_tensor,
         holdout_next,
         holdout_close,
         criterion_next,
         criterion_close,
+    )
+    holdout_buckets = buckets[holdout_index]
+    next_prob = apply_probability_calibration(
+        raw_next_prob,
+        holdout_buckets,
+        probability_calibration["next30m"],
+    )
+    close_prob = apply_probability_calibration(
+        raw_close_prob,
+        holdout_buckets,
+        probability_calibration["sessionClose"],
     )
     metrics = {
         "model": ARCHITECTURE,
@@ -454,10 +551,18 @@ def train_intraday_v21(
         **shape,
         "split": split,
         "best_epoch": best_epoch,
+        "calibration_loss": calibration_loss,
         "holdout_loss": holdout_loss,
-        "training_class_weights": {
-            "next30m": next_weight_table,
-            "sessionClose": close_weight_table,
+        "probability_calibration": probability_calibration,
+        "raw_heads": {
+            "next30m": _metrics(
+                labels_next[holdout_index],
+                raw_next_prob,
+            ),
+            "sessionClose": _metrics(
+                labels_close[holdout_index],
+                raw_close_prob,
+            ),
         },
         "heads": {
             "next30m": _metrics(
@@ -473,7 +578,6 @@ def train_intraday_v21(
         "trained_at": int(time.time()),
         "history": history,
     }
-    holdout_buckets = buckets[holdout_index]
     for bucket in sorted(SESSION_BUCKETS):
         index = np.flatnonzero(holdout_buckets == bucket)
         if not len(index):
@@ -500,6 +604,7 @@ def train_intraday_v21(
         "normalizer_std": std,
         "sequence_length": sequence_length,
         "label_definitions": LABEL_DEFINITIONS,
+        "probability_calibration": probability_calibration,
         "metrics": metrics,
     }, checkpoint_path)
     np.savez_compressed(
@@ -511,9 +616,11 @@ def train_intraday_v21(
         actual_next30m=labels_next[holdout_index],
         predicted_next30m=next_prob.argmax(axis=1),
         next30m_prob=next_prob.astype(np.float32),
+        raw_next30m_prob=raw_next_prob.astype(np.float32),
         actual_session_close=labels_close[holdout_index],
         predicted_session_close=close_prob.argmax(axis=1),
         session_close_prob=close_prob.astype(np.float32),
+        raw_session_close_prob=raw_close_prob.astype(np.float32),
     )
     with open(
         os.path.join(output_dir, "v21_metrics.json"),

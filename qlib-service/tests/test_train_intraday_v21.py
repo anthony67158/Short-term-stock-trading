@@ -115,30 +115,61 @@ class IntradayV21TrainerContractTest(unittest.TestCase):
         np.testing.assert_allclose(mean, expected.mean(axis=(0, 1)))
         np.testing.assert_allclose(std, expected.std(axis=(0, 1)))
 
-    def test_session_class_weights_balance_each_class_within_each_session(self):
+    def test_three_way_date_split_keeps_calibration_before_holdout(self):
         trainer = load_trainer()
-        labels = np.asarray([0, 0, 0, 1, 2, 0, 1, 1, 2])
-        buckets = np.asarray([
-            "morning",
-            "morning",
-            "morning",
-            "morning",
-            "morning",
-            "afternoon",
-            "afternoon",
-            "afternoon",
-            "afternoon",
+        dates = np.repeat(
+            np.asarray([f"202608{day:02d}" for day in range(1, 21)]),
+            2,
+        )
+
+        train, calibration, holdout, metadata = (
+            trainer.three_way_date_split(
+                dates,
+                holdout_fraction=0.2,
+                calibration_fraction=0.2,
+                purge_dates=1,
+            )
+        )
+
+        train_dates = sorted(set(dates[train]))
+        calibration_dates = sorted(set(dates[calibration]))
+        holdout_dates = sorted(set(dates[holdout]))
+        self.assertLess(train_dates[-1], calibration_dates[0])
+        self.assertLess(calibration_dates[-1], holdout_dates[0])
+        self.assertEqual(metadata["holdout_samples"], len(holdout))
+        self.assertEqual(metadata["calibration_samples"], len(calibration))
+
+    def test_session_calibration_improves_balanced_accuracy_without_holdout(self):
+        trainer = load_trainer()
+        labels = np.repeat(np.asarray([0, 1, 2]), 30)
+        probabilities = np.vstack([
+            np.tile([0.45, 0.30, 0.25], (30, 1)),
+            np.tile([0.40, 0.35, 0.25], (30, 1)),
+            np.tile([0.40, 0.25, 0.35], (30, 1)),
         ])
+        buckets = np.full(len(labels), "morning")
 
-        table = trainer.fit_session_class_weights(labels, buckets)
-        weights = trainer.session_sample_weights(labels, buckets, table)
+        calibration = trainer.fit_probability_calibration(
+            labels,
+            probabilities,
+            buckets,
+        )
+        adjusted = trainer.apply_probability_calibration(
+            probabilities,
+            buckets,
+            calibration,
+        )
 
-        for bucket in ("morning", "afternoon"):
-            totals = [
-                weights[(buckets == bucket) & (labels == label)].sum()
-                for label in range(3)
-            ]
-            np.testing.assert_allclose(totals, totals[0])
+        before = trainer.balanced_accuracy(
+            labels,
+            probabilities.argmax(axis=1),
+        )
+        after = trainer.balanced_accuracy(
+            labels,
+            adjusted.argmax(axis=1),
+        )
+        self.assertGreater(after, before)
+        np.testing.assert_allclose(adjusted.sum(axis=1), 1.0)
 
 
 if __name__ == "__main__":

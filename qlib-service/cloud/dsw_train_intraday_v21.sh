@@ -55,7 +55,7 @@ fi
   --data "${DATASET}" \
   --out-dir "${OUTPUT_DIR}" \
   --seed 42 \
-  --batch-size 512 \
+  --batch-size 1024 \
   --max-epochs 40 \
   --patience 6
 
