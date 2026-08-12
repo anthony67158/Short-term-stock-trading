@@ -1,5 +1,6 @@
 import { applyCors, preflight } from './_lib.js'
 import { refreshV2Accuracy } from './_v2_accuracy_store.js'
+import { refreshV21Accuracy } from './_v21_accuracy_store.js'
 
 function reply(res, body, status = 200) {
   applyCors(res)
@@ -17,10 +18,13 @@ export default async function handler(req, res) {
     return reply(res, { ok: false, error: 'unauthorized' }, 401)
   }
   try {
-    const accuracy = await refreshV2Accuracy()
-    return reply(res, { ok: true, accuracy })
+    const [accuracy, v21Accuracy] = await Promise.all([
+      refreshV2Accuracy(),
+      refreshV21Accuracy(),
+    ])
+    return reply(res, { ok: true, accuracy, v21Accuracy })
   } catch (error) {
     console.error('[cron_v2_accuracy] refresh failed', error?.code || error?.name || error?.message)
-    return reply(res, { ok: false, error: 'V2正确率刷新失败' }, 503)
+    return reply(res, { ok: false, error: 'V2/V2.1正确率刷新失败' }, 503)
   }
 }

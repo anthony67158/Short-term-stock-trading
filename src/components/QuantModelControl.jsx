@@ -30,7 +30,7 @@ function AccuracyPanel({ accuracy }) {
     <section className="qmc-effect">
       <div className="qmc-section-head">
         <div>
-          <b>模型效果数据</b>
+          <b>V2 日终效果数据</b>
           <span>按信号日统计下一交易日三重障碍分类正确率</span>
         </div>
         {accuracy?.overall?.total > 0 && (
@@ -60,8 +60,72 @@ function AccuracyPanel({ accuracy }) {
   )
 }
 
+function V21AccuracyPanel({ accuracy }) {
+  const heads = accuracy?.heads || {}
+  const sessions = accuracy?.sessions || {}
+  const hasSamples = Number(accuracy?.total) > 0
+  const sessionLabels = {
+    morning: '早盘',
+    noon: '午间',
+    afternoon: '午后',
+  }
+  return (
+    <section className="qmc-effect">
+      <div className="qmc-section-head">
+        <div>
+          <b>V2.1 盘中双头效果</b>
+          <span>未来30分钟与截至收盘分别结算，不与V2日终正确率混用</span>
+        </div>
+        {heads.next30m?.accuracyPct != null && (
+          <strong>{heads.next30m.accuracyPct}%</strong>
+        )}
+      </div>
+      {hasSamples ? (
+        <>
+          <div className="qmc-days">
+            <div className="qmc-day">
+              <span>未来30分钟</span>
+              <b>{heads.next30m?.accuracyPct ?? '—'}%</b>
+              <small>{heads.next30m?.correct || 0}/{heads.next30m?.total || 0} 正确</small>
+            </div>
+            <div className="qmc-day">
+              <span>截至收盘</span>
+              <b>{heads.sessionClose?.accuracyPct ?? '—'}%</b>
+              <small>{heads.sessionClose?.correct || 0}/{heads.sessionClose?.total || 0} 正确</small>
+            </div>
+          </div>
+          <div className="qmc-days qmc-days-spaced">
+            {Object.entries(sessionLabels).map(([key, label]) => sessions[key] && (
+              <div className="qmc-day" key={key}>
+                <span>{label}</span>
+                <b>{sessions[key].heads?.next30m?.accuracyPct ?? '—'}%</b>
+                <small>30分钟 · 收盘 {sessions[key].heads?.sessionClose?.accuracyPct ?? '—'}%</small>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : (
+        <div className="qmc-empty">
+          <Icon name="activity" size={18} />
+          <div>
+            <b>V2.1 样本尚未结算</b>
+            <span>盘中预测产生后，30分钟路径和当日收盘路径会分别结算。</span>
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
 export default function QuantModelControl() {
-  const { open, loading, error, control, accuracy } = useQuantModelStore()
+  const {
+    open,
+    loading,
+    error,
+    control,
+    accuracy,
+    v21Accuracy,
+  } = useQuantModelStore()
   useEffect(() => {
     if (open && !control && !loading) quantModelStore.refresh()
   }, [open, control, loading])
@@ -172,6 +236,7 @@ export default function QuantModelControl() {
           )}
 
           <AccuracyPanel accuracy={accuracy} />
+          <V21AccuracyPanel accuracy={v21Accuracy} />
           {error && <div className="qmc-error" role="alert"><Icon name="info" size={13} />{error}</div>}
           {loading && <div className="qmc-loading"><Icon name="refresh" size={13} className="spin" /> 正在同步模型状态…</div>}
         </div>

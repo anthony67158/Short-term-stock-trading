@@ -14,6 +14,7 @@ import {
   writeAccount,
 } from './account.js'
 import { loadV2Accuracy } from './_v2_accuracy_store.js'
+import { loadV21Accuracy } from './_v21_accuracy_store.js'
 
 function reply(res, body, status = 200) {
   applyCors(res)
@@ -58,11 +59,12 @@ export default async function handler(req, res) {
     } else if (action !== 'get') {
       return reply(res, { ok: false, error: '未知操作' }, 422)
     }
-    const [status, accuracy] = await Promise.all([
+    const [status, accuracy, v21Accuracy] = await Promise.all([
       transitionStatus
         ? resolveV2ServiceStatus(transitionStatus)
         : getV2ServiceStatus(),
       loadV2Accuracy().catch(() => null),
+      loadV21Accuracy().catch(() => null),
     ])
     return reply(res, {
       ok: true,
@@ -71,6 +73,7 @@ export default async function handler(req, res) {
         canControlV2: canControlV2Service(auth.account),
       }),
       accuracy,
+      v21Accuracy,
     })
   } catch (error) {
     console.error('[quant_model] operation failed', error?.code || error?.name || error?.message)

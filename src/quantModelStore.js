@@ -10,6 +10,7 @@ let state = {
   error: '',
   control: null,
   accuracy: null,
+  v21Accuracy: null,
 }
 const listeners = new Set()
 let statusPollTimer = null
@@ -64,6 +65,7 @@ async function run(action, extra = {}, { background = false } = {}) {
     const body = await request(action, extra)
     state.control = body.control || state.control
     state.accuracy = body.accuracy || state.accuracy
+    state.v21Accuracy = body.v21Accuracy || state.v21Accuracy
     if (body.control) {
       syncControlSelection(body.control, (key, value) => {
         if (planStore.getSetting(key, 'default') !== value) {

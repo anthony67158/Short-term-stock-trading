@@ -996,6 +996,7 @@ body {
 .qmc-section-head span { color: var(--muted); font-size: 11px; line-height: 1.5; }
 .qmc-section-head strong { color: var(--accent); font-size: 22px; font-variant-numeric: tabular-nums; }
 .qmc-days { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+.qmc-days-spaced { margin-top: 7px; }
 .qmc-day { display: grid; grid-template-columns: 1fr auto; gap: 3px 8px; padding: 8px; border-radius: 8px; background: var(--panel2); font-size: 11px; }
 .qmc-day b { color: var(--accent); }
 .qmc-day small { grid-column: 1 / -1; color: var(--muted); }
