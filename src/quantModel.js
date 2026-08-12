@@ -1,4 +1,4 @@
-import { planStore } from './planStore'
+import { planStore } from './planStore.js'
 import { normalizeQuantModelVersion } from '../shared/modelVersion.js'
 
 export const QUANT_MODEL_SETTING = 'quantModelVersion'
@@ -23,8 +23,8 @@ export function currentQuantModelVersion() {
   }
 }
 
-export function quantModelQuery() {
-  return `&model=${encodeURIComponent(currentQuantModelVersion())}`
+export function quantModelQuery(version = currentQuantModelVersion()) {
+  return `&model=${encodeURIComponent(normalizeQuantModelVersion(version))}`
 }
 
 export function accountRequestHeaders() {
@@ -41,9 +41,12 @@ export function quantModelHeaders(version = currentQuantModelVersion()) {
   return accountRequestHeaders()
 }
 
-export function withQuantModelPayload(payload) {
+export function withQuantModelPayload(
+  payload,
+  version = currentQuantModelVersion(),
+) {
   return {
     ...(payload || {}),
-    quantModelVersion: currentQuantModelVersion(),
+    quantModelVersion: normalizeQuantModelVersion(version),
   }
 }

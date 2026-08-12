@@ -34,3 +34,76 @@ test('持有建议不因盘中插针跌破止损而误判失败', () => {
   assert.match(record.verifyNote, /收盘/)
   assert.equal(planStore.adviceStats().winRate, 100)
 })
+
+test('旧口径已核验的持有建议会先退出统计并按当前口径重算', () => {
+  planStore.setData({
+    plan: [],
+    holding: [],
+    closed: [],
+    adviceLog: [{
+      id: 'legacy-hold-1',
+      code: '600001',
+      mode: 'hold_advice',
+      action: '继续持有',
+      at: new Date('2026-08-01T15:00:00+08:00').getTime(),
+      priceAtAdvice: 10,
+      stop: 9.5,
+      target: 10.8,
+      verified: true,
+      hit: false,
+      resultPct: 1.3,
+    }],
+  })
+
+  const staleStats = planStore.adviceStats()
+  assert.equal(staleStats.total, 0)
+  assert.equal(staleStats.pending, 1)
+
+  planStore.verifyAdvice({
+    '600001': [
+      { date: '2026-08-03', open: 10, high: 10.2, low: 9.8, close: 10.1 },
+      { date: '2026-08-04', open: 10.1, high: 10.3, low: 10, close: 10.2 },
+      { date: '2026-08-05', open: 10.2, high: 10.4, low: 10.1, close: 10.3 },
+    ],
+  })
+
+  const record = planStore.get().adviceLog[0]
+  assert.equal(record.verified, true)
+  assert.equal(record.hit, true)
+  assert.equal(Number.isInteger(record.outcomePolicyVersion), true)
+  assert.match(record.verifyNote, /持有期末收盘/)
+  assert.equal(planStore.adviceStats().winRate, 100)
+})
+
+test('K线未覆盖建议后的首个交易日时不使用近期行情误重算', () => {
+  planStore.setData({
+    plan: [],
+    holding: [],
+    closed: [],
+    adviceLog: [{
+      id: 'legacy-too-old',
+      code: '600002',
+      mode: 'hold_advice',
+      action: '继续持有',
+      at: new Date('2026-08-01T15:00:00+08:00').getTime(),
+      priceAtAdvice: 10,
+      stop: 9.5,
+      verified: true,
+      hit: false,
+      resultPct: -1,
+    }],
+  })
+
+  planStore.verifyAdvice({
+    '600002': [
+      { date: '2026-08-20', open: 10, high: 10.2, low: 9.9, close: 10.1 },
+      { date: '2026-08-21', open: 10.1, high: 10.3, low: 10, close: 10.2 },
+      { date: '2026-08-24', open: 10.2, high: 10.4, low: 10.1, close: 10.3 },
+    ],
+  })
+
+  const record = planStore.get().adviceLog[0]
+  assert.equal(record.outcomePolicyVersion, undefined)
+  assert.equal(planStore.adviceStats().total, 0)
+  assert.equal(planStore.adviceStats().pending, 1)
+})

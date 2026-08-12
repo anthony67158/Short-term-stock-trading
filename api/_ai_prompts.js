@@ -105,8 +105,38 @@ export function buildUserPrompt(mode, payload, ragText) {
 【价格参考锚点·不是模型承诺】信号收盘锚${payload.quant.v2.priceReferences?.anchorPrice ?? '—'}、5分钟支撑${payload.quant.v2.priceReferences?.supportPrice ?? '—'}、压力${payload.quant.v2.priceReferences?.resistancePrice ?? '—'}、参考买入区${payload.quant.v2.priceReferences?.referenceBuyZoneLow ?? '—'}~${payload.quant.v2.priceReferences?.referenceBuyZoneHigh ?? '—'}、障碍参考止盈${payload.quant.v2.priceReferences?.indicativeTakeProfitPrice ?? '—'}、参考止损${payload.quant.v2.priceReferences?.indicativeStopLossPrice ?? '—'}。这些绝对价格基于信号日收盘近似，【实际入场必须按下一交易日首根5分钟开盘与实时支撑压力重新修正】。
 军师必须在 quantNote 里明确引用上述概率、方向分、至少两个5分钟行情维度和价格参考；不得把止盈概率误写成传统5日上涨概率，也不得把参考锚点写成模型保证到达的目标价。`
     : '';
+  const advisorTrack = payload.advisorTrack;
+  const actionScores = Array.isArray(advisorTrack?.actionScores)
+    ? advisorTrack.actionScores
+    : [];
+  const actionScoreText = actionScores
+    .map((item) => `${item.label || item.kind} ${item.winRate}%(${item.total}次,均${item.avgPct >= 0 ? '+' : ''}${item.avgPct}%)`)
+    .join('、');
+  const missedBear = actionScores.find((item) =>
+    item.kind === 'bear'
+    && item.winRate < 45
+    && item.avgPct > 0
+  );
+  const missedBull = actionScores.find((item) =>
+    item.kind === 'bull'
+    && item.winRate < 45
+    && item.avgPct < 0
+  );
+  const actionDiagnosis = missedBear
+    ? `其中${missedBear.label || '减仓/清仓'}仅${missedBear.winRate}%，建议后股价平均${missedBear.avgPct >= 0 ? '+' : ''}${missedBear.avgPct}%，说明过去偏防守、过早减仓；本次没有有效破位/资金出逃证据时，不要机械减仓。`
+    : missedBull
+      ? `其中${missedBull.label || '买入/加仓'}仅${missedBull.winRate}%，建议后股价平均${missedBull.avgPct}%，说明过去主动做多偏激进；本次必须提高确认门槛并收紧风险。`
+      : '按同方向动作的历史表现校准：做多失败才收紧做多，减仓失败才减少无确认的防守动作。';
+  const advisorTrackNote = advisorTrack
+    ? `\n【★军师历史战绩·按动作方向校准】这是3个交易日的建议命中统计，不等于真实成交收益率。综合命中率${advisorTrack.overallWinRate}%(${advisorTrack.overallTotal}次已验、平均结果${advisorTrack.overallAvgPct >= 0 ? '+' : ''}${advisorTrack.overallAvgPct}%)${advisorTrack.modeWinRate != null ? `；本类(${mode})命中率${advisorTrack.modeWinRate}%(${advisorTrack.modeTotal}次)` : ''}${actionScoreText ? `；动作拆分：${actionScoreText}` : ''}。低命中不等于一律更保守，也不能一律更激进。${actionDiagnosis}样本少于8次只作弱参考；无论历史高低，当前实时证据、量化方向、确认信号与盈亏比仍优先。除非共振分≥4且盈亏比≥2.5:1，否则confidence不得给“高”。`
+    : '';
+  const theoryTrackNote = advisorTrack
+    && Array.isArray(advisorTrack.theoryScores)
+    && advisorTrack.theoryScores.length
+    ? `\n【★操盘理论·建议归因统计】以下是引用该理论的建议结果，不是对理论本身的独立因果检验；每个理论至少8个样本才纳入：${advisorTrack.theoryScores.map((item) => `${item.theory} ${item.winRate}%(${item.total}次,均${item.avgPct >= 0 ? '+' : ''}${item.avgPct}%)`).join('、')}。高命中理论仅在当前形态确实匹配时加权；低命中理论要检查是否生搬硬套，不能因名气机械引用。`
+    : '';
   // 军师五面数据说明：把技术金叉多头、主力资金、盘口、消息面、龙虎榜、大盘环境、共振分全部显式点名，强制引用
-  const advisorData = `${payload.todayQuote ? (payload.todayQuote.live ? `\n【★今日实时行情(最高优先·当下事实)】现价${payload.todayQuote.price}、今日涨跌${payload.todayQuote.pct >= 0 ? '+' : ''}${payload.todayQuote.pct}%${payload.todayQuote.isLimitUp ? '、【已涨停】' : payload.todayQuote.isLimitDown ? '、【已跌停】' : ''}${payload.todayQuote.bigMove && !payload.todayQuote.isLimitUp && !payload.todayQuote.isLimitDown ? `、【当日大幅${payload.todayQuote.pct >= 0 ? '异动上涨' : '异动下跌'}】` : ''}、量比${payload.todayQuote.volRatio ?? '—'}、换手${payload.todayQuote.turnover ?? '—'}%。
+  const advisorDataRaw = `${payload.todayQuote ? (payload.todayQuote.live ? `\n【★今日实时行情(最高优先·当下事实)】现价${payload.todayQuote.price}、今日涨跌${payload.todayQuote.pct >= 0 ? '+' : ''}${payload.todayQuote.pct}%${payload.todayQuote.isLimitUp ? '、【已涨停】' : payload.todayQuote.isLimitDown ? '、【已跌停】' : ''}${payload.todayQuote.bigMove && !payload.todayQuote.isLimitUp && !payload.todayQuote.isLimitDown ? `、【当日大幅${payload.todayQuote.pct >= 0 ? '异动上涨' : '异动下跌'}】` : ''}、量比${payload.todayQuote.volRatio ?? '—'}、换手${payload.todayQuote.turnover ?? '—'}%。
 ⚠️数据时效铁律：下面的 tech(技术面均线/金叉)、stockFund(主力资金)、backtest 都是【昨日收盘口径】，会滞后！必须以本行"今日实时行情"为当下事实基准，两者矛盾时【以今日实时为准】。
 ${(payload.todayQuote.limitUpPrice != null && payload.todayQuote.limitDownPrice != null) ? `【★合法价带·铁律】今日涨停价=${payload.todayQuote.limitUpPrice}、跌停价=${payload.todayQuote.limitDownPrice}(±${payload.todayQuote.limitRatioPct}%,按昨收${payload.todayQuote.prevClose}算)。你给出的【任何】买/卖/加/减/止损/止盈价都【绝对不能】超出 [${payload.todayQuote.limitDownPrice}, ${payload.todayQuote.limitUpPrice}] 这个区间——A股不接受涨停价以上的买单、跌停价以下的卖单。特别是止损价:若你想止损离场,止损价【不能低于跌停价】(跌停价以下根本挂不出卖单),跌停时最低只能挂在跌停价排队。自检时务必逐个价格核对是否落在此价带内。` : ''}
 ${payload.todayQuote.isLimitUp ? '⚠️该股【今日已涨停】：说明今日主力大幅流入、多方极强，绝不能因为昨日"空头排列/主力流出"就喊"下午/明日继续减仓"——那是自相矛盾。涨停后正确视角是:看能否封住/连板→持有；炸板/开板放量→再考虑减。给出的减仓价必须高于现价(涨停价附近冲高兑现)，不能低于现价。' : ''}${payload.todayQuote.isLimitDown ? `⚠️该股【今日已跌停封板】：多方极弱，别喊"反弹买入"，以止损/离场为主。但【跌停时卖出只能挂在跌停价${payload.todayQuote.limitDownPrice ?? ''}排队等成交,绝不能给低于跌停价的卖出价/止损价】(挂不出去);若封死无法成交,只能等次日。给出的减仓/清仓/止损价必须=跌停价或高于跌停价。` : ''}${(payload.todayQuote.bigMove && payload.todayQuote.pct >= 7 && !payload.todayQuote.isLimitUp) ? '⚠️该股【今日大涨】：今日资金明显流入，昨日的"空头/流出"结论已过期，别据此喊减仓；应按"强势股冲高兑现或持有看延续"来判断。' : ''}` : `\n【最近收盘行情(非实时·${payload.todayQuote.phase || '未开盘'})】这是【${payload.todayQuote.asOfLabel || '上一交易日'}】收盘快照，【不是今日实时】：收盘价${payload.todayQuote.price}、当日涨跌${payload.todayQuote.pct >= 0 ? '+' : ''}${payload.todayQuote.pct}%、量比${payload.todayQuote.volRatio ?? '—'}、换手${payload.todayQuote.turnover ?? '—'}%(昨收${payload.todayQuote.prevClose ?? '—'})。
@@ -127,6 +157,10 @@ ${payload.todayQuote.isLimitUp ? '⚠️该股【今日已涨停】：说明今�
 · 【仓位与风控派】凯利公式/范·撒普R倍数(按盈亏比与胜率定注、单笔风险敞口固定、绝不重仓一票梭哈)、盈亏比≥2:1才出手;
 · 【心理与反身性派】行为金融处置效应(克服"赚一点就跑、亏了死扛"的人性弱点:让利润奔跑、亏损快砍)、索罗斯反身性(价格与情绪/基本面互相强化,识别泡沫与拐点)、科斯托拉尼情绪钟摆与科技/大众心理(别在众人贪婪时追顶、别在众人恐慌时割底)。
 运用铁律:①先用趋势派判"顺势还是逆势、该不该动",②用均值回归判震荡区间的高抛低吸位,③用仓位风控派定"下多大注、止损放哪",④用心理派校准"是不是在追高/割肉/被情绪带偏"。理论之间冲突时,以【趋势方向+风控纪律】为最高优先,均值回归服从趋势。所有引用必须结合本股的具体数字/形态,一句话说清"这个理论在此刻告诉我们什么"。`;
+  const advisorData = advisorDataRaw.replace(
+    /\n【★军师历史战绩·自我校准[\s\S]*?(?=\n【★量化模型·|\n【★量化·高把握|\n【★★高把握|\n【★资金金额)/,
+    `${advisorTrackNote}${theoryTrackNote}`,
+  );
 
   // ============ 交易实况铁律：涨跌停可买性 + A股T+1 + 「下个开盘/未来」两段指导 ============
   // 解决:①卡片建议要结合涨跌停(±10%/±20%)、当前是否真能买(不追涨停、封板买不进)②A股T+1(当天买不能当天卖,自选股无底仓更不能当日做T卖)③建议要分「紧接着的下一个开盘时段」和「更远的未来」两段,今天买不了就讲后续怎么等。
@@ -224,6 +258,7 @@ ${payload.holdQty != null ? `4) 手数纪律:任何减仓/清仓/卖出手数 �
 数据：${data}
 
 【候选池 candidates 字段说明】每只含：name/code、price现价、marketScore全市场分、combinedScore量化复排分、pct/turnover/volRatio/mainInflowYi、tags，以及 quant{ score,upProb,expRet,targetLow~targetHigh,highConfFired,credibility,buyPrice,takeProfit,stopLoss }。
+【本次量化版本】${payload.quantModelVersion === 'v2' ? '分钟 Transformer V2' : '当前生产模型'}。候选评分只采信该版本的结果；选择V2时不得混用默认模型分数，选择默认模型时也不得引用V2分数。
 ${payload.quantMissing ? '⚠️【本次量化服务不可用】不得给“立即买入”。但仍须按市场分、资金、量能和板块强度选出3只条件候选，actionability只能是“等待触发”或“观察”，禁止返回空名单。quantScore 填 null，禁止编造。' : ''}
 ${payload.session === 'next_open' ? '【当前为休市/盘前】结论面向下一交易日开盘；actionability原则上写“等待触发”，买点必须是开盘后可验证的回踩企稳或放量突破条件。' : '【当前为交易时段】可根据现价与分时位置判断“可执行”或“等待触发”。'}
 

@@ -9,6 +9,13 @@ import {
   applyAccountCashFlow,
   deriveAccountValuation,
 } from '../shared/accountValuation.js'
+import {
+  ADVICE_OUTCOME_POLICY_VERSION,
+  adviceActionKind,
+  adviceNeedsVerification,
+  isAdviceOutcomeCurrent,
+  summarizeAdviceOutcomes,
+} from '../shared/adviceOutcome.js'
 // 注意:adviceBatch 只在 mergeCloud 运行时用到,这里【不能】做顶层静态 import——
 // 否则 planStore→adviceBatch→adviceRunner→serverAdvice→authStore 形成模块初始化环,
 // 而 authStore 顶层会调用 planStore.registerSaver(),此时 planStore 尚未初始化 → 整包崩(白屏卡启动)。
@@ -1466,7 +1473,7 @@ export const planStore = {
       return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
     }
     state.adviceLog = (state.adviceLog || []).map((r) => {
-      if (r.verified) return r
+      if (!adviceNeedsVerification(r)) return r
       if (Date.now() - r.at < DAY) return r          // 至少隔一个自然日再判
       const candles = candleMap[r.code]
       if (!Array.isArray(candles) || !candles.length || !r.priceAtAdvice) return r
@@ -1474,6 +1481,13 @@ export const planStore = {
       // 建议日"之后"的交易日K线（严格晚于建议当天）
       const future = candles.filter((c) => c && c.date && c.date > adviceYmd)
       if (!future.length) return r                   // 隔日数据还没出 → 继续等
+      const adviceDayAt = Date.parse(`${adviceYmd}T00:00:00+08:00`)
+      const firstFutureAt = Date.parse(`${future[0].date}T00:00:00+08:00`)
+      if (
+        Number.isFinite(adviceDayAt)
+        && Number.isFinite(firstFutureAt)
+        && firstFutureAt - adviceDayAt > 14 * DAY
+      ) return r                                     // K线未覆盖原窗口，禁止拿近期行情误重算
       const win = future.slice(0, WINDOW)            // 窗口内最多取前3个交易日
       const windowComplete = future.length >= WINDOW
       const base = r.priceAtAdvice
@@ -1489,10 +1503,10 @@ export const planStore = {
 
       // 【持有/持股】是中性决策(已在仓，继续拿)：判对口径≠必须涨2%，而是"没明显下跌/没跌破止损"，
       // 否则一个"横盘微涨的正确持有"会被看多的+2%尺子误判成失败，把持仓建议胜率整体压低。
-      const act = r.action || ''
-      const hold = /持有|持股|继续持|按兵不动|拿住|捂|不动/.test(act) && !/加|减|清/.test(act)
-      const bull = !hold && /买|加|正T|立即|回调再买|抄底|吸|上车|建仓|补仓/.test(act)
-      const bear = !hold && /减|清|观望|不建议|反T|止损|离场|回避|谨慎/.test(act)
+      const actionKind = adviceActionKind(r.action)
+      const hold = actionKind === 'hold'
+      const bull = actionKind === 'bull'
+      const bear = actionKind === 'bear' || actionKind === 'wait'
 
       const HOLD_DOWN_TH = 3        // 持有可容忍的最大回撤%(超过即认为本应减仓)
 
@@ -1526,6 +1540,7 @@ export const planStore = {
       changed = true
       return {
         ...r, verified: true, hit,
+        outcomePolicyVersion: ADVICE_OUTCOME_POLICY_VERSION,
         resultPct: bull ? maxUpPct : closePct,        // 看多看最大有利波动，持有/看空看收盘
         maxUpPct, maxDownPct, closePct, maxHigh, minLow, windowDays: win.length,
         verifiedAt: Date.now(), verifyNote: note,
@@ -1535,53 +1550,12 @@ export const planStore = {
   },
   // 各类建议真实胜率统计（供"军师战绩"展示）
   adviceStats() {
-    const log = (state.adviceLog || []).filter((r) => r.verified && r.hit != null)
-    const by = {}
-    for (const r of log) {
-      const k = r.mode || 'other'
-      if (!by[k]) by[k] = { mode: k, total: 0, hit: 0, sumPct: 0 }
-      by[k].total++; if (r.hit) by[k].hit++
-      by[k].sumPct += Number(r.resultPct) || 0
-    }
-    const groups = Object.values(by).map((g) => ({
-      ...g,
-      winRate: g.total ? Math.round((g.hit / g.total) * 100) : null,
-      avgPct: g.total ? +(g.sumPct / g.total).toFixed(2) : null,
-    }))
-    const total = log.length, hit = log.filter((r) => r.hit).length
-    const sumPct = log.reduce((s, r) => s + (Number(r.resultPct) || 0), 0)
-    // 【★把握分层胜率】按建议当时的 trust(综合可信度0~100)分三档,验证"高把握档是否真的高胜率"——
-    //   这是 P0"高把握少出手"的度量闸:若高档胜率显著高于低档,说明 trust 有区分力,可据此收紧开火线。
-    const BANDS = [
-      { key: 'high', label: '较可信(≥68)', min: 68, max: Infinity },
-      { key: 'mid', label: '中等(48~68)', min: 48, max: 68 },
-      { key: 'low', label: '低(<48)', min: -Infinity, max: 48 },
-    ]
-    const byTrust = BANDS.map((b) => {
-      const items = log.filter((r) => {
-        const t = Number(r.trust)
-        return Number.isFinite(t) && t >= b.min && t < b.max
-      })
-      const h = items.filter((r) => r.hit).length
-      const sp = items.reduce((s, r) => s + (Number(r.resultPct) || 0), 0)
-      return {
-        band: b.key, label: b.label, total: items.length, hit: h,
-        winRate: items.length ? Math.round((h / items.length) * 100) : null,
-        avgPct: items.length ? +(sp / items.length).toFixed(2) : null,
-      }
-    })
-    const noTrust = log.filter((r) => !Number.isFinite(Number(r.trust))).length
-    return {
-      groups, byTrust, noTrust, total, hit,
-      winRate: total ? Math.round((hit / total) * 100) : null,
-      avgPct: total ? +(sumPct / total).toFixed(2) : null,
-      pending: (state.adviceLog || []).filter((r) => !r.verified).length,
-    }
+    return summarizeAdviceOutcomes(state.adviceLog)
   },
   // 按【理论】统计真实胜率（军师"融会贯通"哪个理论在你的票上最灵）。
   // 一条建议引用多个理论 → 每个理论都计入(该建议命中则各+1胜)。
   theoryStats() {
-    const log = (state.adviceLog || []).filter((r) => r.verified && r.hit != null)
+    const log = (state.adviceLog || []).filter(isAdviceOutcomeCurrent)
     const by = {}
     for (const r of log) {
       const tags = theoryTagsOf(r.theoryNote)

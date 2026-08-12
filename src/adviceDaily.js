@@ -35,12 +35,22 @@ function advisorTrackFor(mode) {
     let theoryScores = null
     try {
       const t = planStore.theoryStats()
-      const tg = ((t && t.groups) || []).filter((x) => x.total >= 3)
+      const tg = ((t && t.groups) || []).filter((x) => x.total >= 8)
       if (tg.length) theoryScores = tg.map((x) => ({ theory: x.theory, winRate: x.winRate, total: x.total, avgPct: x.avgPct }))
     } catch { /* ignore */ }
+    const actionScores = (s.actions || [])
+      .filter((x) => x.total >= 5)
+      .map((x) => ({
+        kind: x.kind,
+        label: x.label,
+        winRate: x.winRate,
+        total: x.total,
+        avgPct: x.avgPct,
+      }))
     return {
       overallWinRate: s.winRate, overallAvgPct: s.avgPct, overallTotal: s.total,
       modeWinRate: g ? g.winRate : null, modeAvgPct: g ? g.avgPct : null, modeTotal: g ? g.total : 0,
+      actionScores,
       theoryScores,
     }
   } catch { return null }

@@ -17,6 +17,10 @@ import { timeStr } from './format'
 import { api } from './apiBase'
 import { accountRequestHeaders } from './quantModel'
 import { chunkReloadKey, shouldReloadChunk } from './chunkError'
+import {
+  adviceCandleLimit,
+  adviceNeedsVerification,
+} from '../shared/adviceOutcome.js'
 
 // 按需分包：四个主 Tab 与 AI 助手拆成独立 chunk，首屏只加载当前 Tab，
 // 切换时才拉取对应 chunk（配合 Rolldown codeSplitting），缩短首屏体积与白屏时间。
@@ -152,24 +156,28 @@ function MainApp() {
     60000,
     [schedCodes.join(',')]
   )
-  // ===== AI建议事后回测（短线实战口径）：对≥1天前未核验建议，拉近期日K线 =====
-  // 判定"3日窗口内最高价是否触及目标价"，比单看隔日收盘更贴合短线，故取日K而非现价。
+  // ===== AI建议事后回测（短线实战口径）：对≥1天前待核验或旧口径建议，拉近期日K线 =====
+  // 旧口径记录会自动重算，避免历史标签长期污染当前命中率。
   const DAY_MS = 24 * 3600 * 1000
   const ripeCodes = [...new Set(
     (book.adviceLog || [])
-      .filter((r) => !r.verified && (Date.now() - r.at) >= DAY_MS)
+      .filter((r) => adviceNeedsVerification(r) && (Date.now() - r.at) >= DAY_MS)
       .map((r) => r.code)
   )].slice(0, 12) // 逐只拉K线，限流保护，一轮最多12只
-  const ripeKey = ripeCodes.join(',')
+  const ripeLimits = Object.fromEntries(
+    ripeCodes.map((code) => [code, adviceCandleLimit(book.adviceLog, code)])
+  )
+  const ripeKey = ripeCodes.map((code) => `${code}:${ripeLimits[code]}`).join(',')
   useEffect(() => {
     if (!ripeCodes.length) return
     let cancelled = false
     const run = async () => {
       const candleMap = {}
-      // 并发拉每只的近8根日K（覆盖3日窗口+缓冲），复用 stock_detail（不新增函数）
+      // 按最旧待验日期自适应拉取K线，复用 stock_detail（不新增函数）。
       await Promise.all(ripeCodes.map(async (code) => {
         try {
-          const res = await fetch(api(`/api/stock_detail?code=${code}&klt=101&lmt=8`))
+          const lmt = ripeLimits[code]
+          const res = await fetch(api(`/api/stock_detail?code=${code}&klt=101&lmt=${lmt}`))
           const j = await res.json()
           if (j && j.ok && Array.isArray(j.candles) && j.candles.length) {
             candleMap[code] = j.candles.map((c) => ({

@@ -715,6 +715,7 @@ function AdvisorScore({ book }) {
   const wr = stats.winRate
   const tone = wr == null ? 'muted' : wr >= 55 ? 'red' : wr >= 45 ? 'gold' : 'green'
   const groups = (stats.groups || []).filter((g) => g.total > 0).sort((a, b) => b.total - a.total)
+  const actionGroups = (stats.actions || []).filter((g) => g.total > 0).sort((a, b) => b.total - a.total)
   const theory = planStore.theoryStats()
   const theoryGroups = (theory && theory.groups || []).filter((g) => g.total > 0)
   return (
@@ -727,7 +728,7 @@ function AdvisorScore({ book }) {
         <Icon name="target" size={13} />
         <span className="as-k">军师战绩</span>
         {wr != null
-          ? <><span className={'as-wr ' + tone}>{wr}%</span><span className="as-sub">胜率 · {stats.total}次已验</span></>
+          ? <><span className={'as-wr ' + tone}>{wr}%</span><span className="as-sub">建议命中 · {stats.total}次已验</span></>
           : <span className="as-sub">积累中 · {stats.pending}次待验</span>}
         <Icon name={open ? 'arrowUp' : 'chevronDown'} size={12} />
       </button>
@@ -735,17 +736,16 @@ function AdvisorScore({ book }) {
         <div className="advisor-pop">
           <div className="ap-title"><Icon name="target" size={13} /> 军师战绩怎么看</div>
           <p className="ap-desc">
-            系统把每条 AI <b>买入/持仓建议</b>自动存档，等 <b>3 个交易日</b>后用真实日 K 线回测：
-            看多类建议只要窗口内<b>最高价触及过它给的目标价</b>就算<b>命中</b>（没给目标价时，看 3 日内最大涨幅是否≥2%）；
-            看空/观望类则是<b>3 日内没明显上涨(&lt;2%)</b>算命中。这比"只看隔日收盘"更贴近短线实战——
-            因为盘中冲高你本可止盈，不该被一根收阴的 K 线判死。
+            这是<b>建议方向命中率</b>，不是账户真实成交胜率。买入/加仓看 3 日内是否触及目标
+            （无目标时看最大涨幅是否≥2%）；继续持有看是否有效跌破止损、期末回撤是否超过3%；
+            减仓/清仓与观望看后续是否避免明显上涨。旧口径记录会自动重算。
           </p>
           {wr != null ? (
             <>
               <div className="ap-hero">
                 <span className={'ap-wr ' + tone}>{wr}%</span>
                 <div className="ap-hero-r">
-                  <span>综合胜率</span>
+                  <span>综合建议命中率</span>
                   <span className="muted">{stats.hit}/{stats.total} 命中 · 平均结果 {stats.avgPct >= 0 ? '+' : ''}{stats.avgPct}%</span>
                 </div>
               </div>
@@ -760,13 +760,13 @@ function AdvisorScore({ book }) {
                   </div>
                 ))}
               </div>
-              {theoryGroups.length > 0 && (
+              {actionGroups.length > 0 && (
                 <div className="ap-theory">
-                  <div className="ap-subtitle"><Icon name="spark" size={12} /> 各操盘理论命中率 <span className="muted">（军师"融会贯通"时哪派最灵）</span></div>
+                  <div className="ap-subtitle"><Icon name="gauge" size={12} /> 按动作拆分</div>
                   <div className="ap-rows">
-                    {theoryGroups.map((g) => (
-                      <div className="ap-row" key={g.theory}>
-                        <span className="ap-mode theory">{g.theory}</span>
+                    {actionGroups.map((g) => (
+                      <div className="ap-row" key={g.kind}>
+                        <span className="ap-mode theory">{g.label}</span>
                         <span className={'ap-rate ' + (g.winRate >= 55 ? 'red' : g.winRate >= 45 ? 'gold' : 'green')}>
                           {g.winRate}%
                         </span>
@@ -774,9 +774,25 @@ function AdvisorScore({ book }) {
                       </div>
                     ))}
                   </div>
+                </div>
+              )}
+              {theoryGroups.length > 0 && (
+                <div className="ap-theory">
+                  <div className="ap-subtitle"><Icon name="spark" size={12} /> 理论引用后的建议归因 <span className="muted">（至少8次才用于校准）</span></div>
+                  <div className="ap-rows">
+                    {theoryGroups.map((g) => (
+                      <div className="ap-row" key={g.theory}>
+                        <span className="ap-mode theory">{g.theory}</span>
+                        <span className={'ap-rate ' + (g.total < 8 ? 'muted' : g.winRate >= 55 ? 'red' : g.winRate >= 45 ? 'gold' : 'green')}>
+                          {g.total < 8 ? '样本不足' : `${g.winRate}%`}
+                        </span>
+                        <span className="ap-cnt muted">{g.hit}/{g.total} · 均{g.avgPct >= 0 ? '+' : ''}{g.avgPct}%</span>
+                      </div>
+                    ))}
+                  </div>
                   <p className="ap-desc muted" style={{ marginTop: 6 }}>
-                    军师每次会挑 1~2 个最贴合形态的理论来支撑决策，这里按理论回测其真实命中率——
-                    高命中的理论会被军师更多采信、低命中的会被降权，实现"越用越懂你这些票"。
+                    同一条建议可能同时引用两个理论，因此这里是相关性归因，不是理论本身的独立因果检验。
+                    样本达到8次后才会用于军师校准。
                   </p>
                 </div>
               )}

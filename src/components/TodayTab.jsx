@@ -11,6 +11,7 @@ import {
   currentQuantModelVersion,
   quantModelHeaders,
   quantModelQuery,
+  withQuantModelPayload,
 } from '../quantModel'
 import DailyReport from './DailyReport'
 import { fmtPct, pctClass, fmtInflow, fmtNum , fmtRaw } from '../format'
@@ -21,6 +22,10 @@ import {
   stockPickSession,
   stockPickSavedLabel,
 } from '../../shared/stockRanking.js'
+import {
+  isQuantResultForVersion,
+  quantModelLabel,
+} from '../../shared/modelVersion.js'
 
 // ============ 今日选股 Tab：今天买什么 ============
 export default function TodayTab({ interval, market, sectors, snapshot }) {
@@ -341,22 +346,28 @@ function DailyPlay({ snapshot }) {
       if (!codes.length) { setErr('暂无候选数据，开盘后再试（休市时段候选池为空）'); setLoading(false); return }
 
       // ③ 最多 5 路并发量化，避免 20 只同时冲击 FC/量化冷启动。
-      setStage(`量化模型正在给 ${codes.length} 只候选打分…`)
       const quantModelVersion = currentQuantModelVersion()
+      const selectedModelLabel = quantModelLabel(quantModelVersion)
+      setStage(`${selectedModelLabel}正在给 ${codes.length} 只候选打分…`)
       const scored = await mapWithConcurrency(codes, 5, async (c) => {
         try {
           const j = await fetchJsonWithTimeout(
-            api(`/api/stock_detail?code=${c.code}&klt=101&lmt=60&quant=1${quantModelQuery()}&_t=${Date.now()}`),
+            api(`/api/stock_detail?code=${c.code}&klt=101&lmt=60&quant=1${quantModelQuery(quantModelVersion)}&_t=${Date.now()}`),
             25000,
             { headers: quantModelHeaders(quantModelVersion) },
           )
           const q = j.quant, fc = q && q.forecast
+          if (!isQuantResultForVersion(j, quantModelVersion)) {
+            throw new Error('量化模型版本不匹配')
+          }
           return {
             code: c.code, name: c.name, tags: c.tags,
             marketScore: c.marketScore, marketReasons: c.marketReasons,
             price: c.price, pct: c.pct, turnover: c.turnover, volRatio: c.volRatio,
             mainInflowYi: c.mainInflow != null ? +(c.mainInflow / 1e8).toFixed(2) : null,
-            quant: q ? {
+            quant: {
+              modelVersion: quantModelVersion,
+              modelLabel: q.modelLabel || selectedModelLabel,
               score: q.score, bias: q.bias,
               upProb: fc && fc.upProb, expRet: fc && fc.expRet,
               targetLow: fc && fc.targetLow, targetHigh: fc && fc.targetHigh,
@@ -365,7 +376,7 @@ function DailyPlay({ snapshot }) {
               buyPrice: q.highConfSignal && q.highConfSignal.buyPrice,
               takeProfit: q.highConfSignal && q.highConfSignal.takeProfit,
               stopLoss: q.highConfSignal && q.highConfSignal.stopLoss,
-            } : null,
+            },
           }
         } catch {
           return {
@@ -386,22 +397,23 @@ function DailyPlay({ snapshot }) {
         eligibleCount: broad.eligibleCount,
         quantCount: withQuant.length,
         shortlistCount: forLLM.length,
+        quantModelVersion,
+        quantModelLabel: selectedModelLabel,
       }
 
       // ③ 带量化分 + 盘面 → LLM 精选 3 只
       setStage('AI 正在结合量化与盘面精选 3 只…')
-      const payload = {
+      const payload = withQuantModelPayload({
         market: {
           breadth: s.market?.breadth || {},
           indices: (s.market?.indices || []).map((i) => ({ name: i.name, pct: i.pct })),
         },
         sectors: (s.sectors?.list || []).slice(0, 8).map((x) => ({ name: x.name, pct: x.pct, mainInflowYi: +(x.mainInflow / 1e8).toFixed(2), lead: x.leadName })),
         candidates: forLLM,
-        quantModelVersion,
         quantMissing,
         funnel: funnelMeta,
         session: session.mode,
-      }
+      }, quantModelVersion)
       const r = await callAI('scan_pick', payload)
       const allowedCodes = forLLM.map((item) => item.code)
       const decision = r.ok
@@ -515,7 +527,7 @@ function DailyPlay({ snapshot }) {
             )}
             {funnel && funnel.universeCount != null && (
               <div className="pick-savedat">
-                全市场 {funnel.universeCount} 只{funnel.isComplete === false ? `（本轮扫描 ${funnel.scannedCount} 只）` : ''} → 可交易 {funnel.eligibleCount} 只 → 量化成功 {funnel.quantCount} 只 → 决策短名单 {funnel.shortlistCount} 只
+                全市场 {funnel.universeCount} 只{funnel.isComplete === false ? `（本轮扫描 ${funnel.scannedCount} 只）` : ''} → 可交易 {funnel.eligibleCount} 只 → {funnel.quantModelLabel || '量化模型'}成功 {funnel.quantCount} 只 → 决策短名单 {funnel.shortlistCount} 只
               </div>
             )}
             {res.marketNote && <div className="pick-market"><Icon name="pulse" size={13} /> <span className="pick-market-note">{res.marketNote}</span>{res.confidence && <span className={'pick-conf ' + (/高/.test(res.confidence) ? 'hi' : /低/.test(res.confidence) ? 'lo' : 'mid')}>把握度 {res.confidence}</span>}</div>}

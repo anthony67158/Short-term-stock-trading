@@ -13,6 +13,15 @@ export function quantModelLabel(value) {
     : '当前生产模型'
 }
 
+export function isQuantResultForVersion(response, selectedVersion) {
+  if (!response?.ok || !response.quant) return false
+  const expected = normalizeQuantModelVersion(selectedVersion)
+  const actual = normalizeQuantModelVersion(
+    response.quantModelVersion ?? response.quant.modelVersion,
+  )
+  return actual === expected
+}
+
 export function syncControlSelection(control, setSetting) {
   if (!control || typeof setSetting !== 'function') return null
   const selected = normalizeQuantModelVersion(control.selected)

@@ -40,6 +40,7 @@ import {
   generationOptions,
   validateBatchMode,
 } from '../shared/adviceBatchPolicy.js';
+import { summarizeAdviceOutcomes } from '../shared/adviceOutcome.js';
 import aiHandler from './ai.js';
 import stockDetailHandler from './stock_detail.js';
 import quoteHandler from './quote.js';
@@ -312,14 +313,30 @@ async function fetchQuoteMap(codes) {
   return map;
 }
 
-// 军师历史战绩(样本<5 返回 null)
-function advisorTrackFrom(data) {
+// 军师历史战绩(当前回测口径样本<5 返回 null)
+function advisorTrackFrom(data, mode) {
   try {
-    const log = (data.adviceLog || []).filter((x) => x && x.verified && x.hit != null);
-    if (log.length < 5) return null;
-    const win = log.filter((x) => x.hit).length;
-    const avg = log.reduce((a, x) => a + (Number(x.resultPct) || 0), 0) / log.length;
-    return { overallWinRate: +(win / log.length * 100).toFixed(1), overallAvgPct: +avg.toFixed(2), overallTotal: log.length };
+    const stats = summarizeAdviceOutcomes(data.adviceLog);
+    if (stats.total < 5) return null;
+    const group = (stats.groups || []).find((item) => item.mode === mode);
+    const actionScores = (stats.actions || [])
+      .filter((item) => item.total >= 5)
+      .map((item) => ({
+        kind: item.kind,
+        label: item.label,
+        winRate: item.winRate,
+        total: item.total,
+        avgPct: item.avgPct,
+      }));
+    return {
+      overallWinRate: stats.winRate,
+      overallAvgPct: stats.avgPct,
+      overallTotal: stats.total,
+      modeWinRate: group ? group.winRate : null,
+      modeAvgPct: group ? group.avgPct : null,
+      modeTotal: group ? group.total : 0,
+      actionScores,
+    };
   } catch { return null; }
 }
 function applyQuantScore(data, code, qs) {
@@ -438,13 +455,13 @@ async function runJobGen(acc, code, onProgress, signal, deepMode = false) {
   const quantModelVersion = data.settings?.quantModelVersion || 'default';
   if (holdSet.has(code)) {
     const p = buildHoldPayload(holding, code, name, portfolio, data.account, data.closed, nextTradeDayLabel());
-    p.advisorTrack = advisorTrackFrom(data);
+    p.advisorTrack = advisorTrackFrom(data, 'hold_advice');
     p.quantModelVersion = quantModelVersion;
     const hp = (p.holdCost != null && p.holdQty != null) ? { holdCost: String(p.holdCost), holdQty: String(p.holdQty) } : {};
     return genOne({ code, name, mode: 'hold_advice', payload: p, quantQuery: { code, klt: '101', lmt: '60', quant: '1', model: quantModelVersion, ...hp }, priceHint, onProgress, signal, deepMode });
   }
   const p = buildWatchPayload(code, name, portfolio, data.account);
-  p.advisorTrack = advisorTrackFrom(data);
+  p.advisorTrack = advisorTrackFrom(data, 'buy_advice');
   p.quantModelVersion = quantModelVersion;
   return genOne({ code, name, mode: 'buy_advice', payload: p, quantQuery: { code, klt: '101', lmt: '60', quant: '1', model: quantModelVersion }, priceHint, onProgress, signal, deepMode });
 }

@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   adaptV2Prediction,
+  isQuantResultForVersion,
   normalizeQuantModelVersion,
   quantModelLabel,
 } from '../shared/modelVersion.js'
@@ -12,6 +13,29 @@ test('模型版本默认回退现有生产模型且只接受V2显式值', () => 
   assert.equal(normalizeQuantModelVersion('v2'), 'v2')
   assert.equal(quantModelLabel('default'), '当前生产模型')
   assert.equal(quantModelLabel('v2'), '分钟 Transformer V2')
+})
+
+test('量化评分结果必须与本次选股锁定的模型版本一致', () => {
+  assert.equal(isQuantResultForVersion({
+    ok: true,
+    quantModelVersion: 'default',
+    quant: { score: 61 },
+  }, 'default'), true)
+  assert.equal(isQuantResultForVersion({
+    ok: true,
+    quantModelVersion: 'v2',
+    quant: { score: 72, modelVersion: 'v2' },
+  }, 'v2'), true)
+  assert.equal(isQuantResultForVersion({
+    ok: true,
+    quantModelVersion: 'default',
+    quant: { score: 61 },
+  }, 'v2'), false)
+  assert.equal(isQuantResultForVersion({
+    ok: false,
+    quantModelVersion: 'v2',
+    quant: null,
+  }, 'v2'), false)
 })
 
 test('V2三分类概率适配为军师可消费的统一量化结构', () => {
