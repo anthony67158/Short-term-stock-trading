@@ -25,7 +25,7 @@ test -f "${DOWNLOAD_REPORT}"
 
 export QUANT_ENVIRONMENT=lab
 export LAB_OSS_BUCKET=stock-quant-lab-1730034925594178
-export LAB_MODEL_PREFIX="models/challengers/${RUN_ID}/v21/"
+export LAB_MODEL_PREFIX="models/challengers/${RUN_ID}/"
 "${PYTHON}" cloud/isolation_guard.py --check
 
 "${PYTHON}" - "${DOWNLOAD_REPORT}" <<'PY'

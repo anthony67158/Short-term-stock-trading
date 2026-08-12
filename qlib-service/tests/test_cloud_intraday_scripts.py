@@ -7,8 +7,10 @@ SERVICE_ROOT = Path(__file__).resolve().parents[1]
 CLOUD_ROOT = SERVICE_ROOT / "cloud"
 SCRIPT_NAMES = (
     "dsw_train_intraday_tcn.sh",
+    "dsw_train_intraday_v21.sh",
     "dsw_bakeoff_intraday.sh",
     "dsw_archive_intraday.sh",
+    "dsw_archive_intraday_v21.sh",
     "dsw_orchestrate_intraday.sh",
     "dsw_retry_minute_5m.sh",
     "dsw_recover_minute_monthly.sh",
@@ -60,6 +62,20 @@ class CloudIntradayScriptsTest(unittest.TestCase):
         self.assertIn("validate_download_report_for_training", source)
         self.assertNotIn("MINUTE_DOWNLOAD_INCOMPLETE", source)
         self.assertIn("INTRADAY_DATASET_CACHE_HIT", source)
+
+    def test_v21_training_uses_the_guarded_run_level_model_prefix(self):
+        source = (CLOUD_ROOT / "dsw_train_intraday_v21.sh").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn(
+            'LAB_MODEL_PREFIX="models/challengers/${RUN_ID}/"',
+            source,
+        )
+        self.assertNotIn(
+            'LAB_MODEL_PREFIX="models/challengers/${RUN_ID}/v21/"',
+            source,
+        )
 
     def test_repair_script_explicitly_enables_limited_source_row_drops(self):
         source = (CLOUD_ROOT / "dsw_retry_minute_5m.sh").read_text(
