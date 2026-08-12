@@ -2370,6 +2370,42 @@ button.acct-item { width: 100%; border: 0; background: transparent; font: inheri
 .advice-continuity.reverse { border-color: rgba(227,179,65,.38); background: rgba(227,179,65,.07); }
 .advice-continuity.blocked { border-color: rgba(91,141,239,.38); background: rgba(91,141,239,.07); }
 @media (max-width: 540px) { .advice-continuity .ac-head { align-items: flex-start; flex-direction: column; gap: 2px; } }
+.advice-presentation { display: flex; flex-direction: column; gap: 10px; }
+.advice-presentation .decide-verdict, .advice-presentation .advice-continuity { margin-bottom: 0; }
+.advice-confidence { margin-left: auto; color: var(--muted); font-size: 10.5px; font-weight: 650; white-space: nowrap; }
+.advice-section-title { display: flex; align-items: center; gap: 5px; margin-bottom: 7px; color: var(--text); font-size: 11.5px; font-weight: 750; }
+.advice-section-title .icon { color: var(--accent); }
+.advice-execution { padding: 11px 12px; border: 1px solid rgba(124,107,245,.24); border-radius: 9px; background: rgba(124,107,245,.07); }
+.advice-execution-main { color: var(--text); font-size: 13.5px; font-weight: 650; line-height: 1.65; }
+.advice-execution-metrics { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.advice-execution-metrics > span { min-width: 76px; padding: 5px 8px; border: 1px solid var(--border-soft); border-radius: 6px; background: var(--panel2); color: var(--muted); font-size: 10.5px; }
+.advice-execution-metrics b { display: block; margin-top: 2px; color: var(--text); font-size: 12.5px; overflow-wrap: anywhere; }
+.advice-execution-position { display: flex; align-items: baseline; gap: 8px; margin-top: 8px; color: var(--text2); font-size: 11.5px; line-height: 1.55; }
+.advice-execution-position > span:first-child { flex: none; color: var(--muted); font-size: 10.5px; font-weight: 650; }
+.advice-horizon.compact { margin: 9px 0 0; }
+.advice-levels, .advice-trigger, .advice-core-evidence { padding-top: 1px; }
+.advice-prices.compact { margin-bottom: 0; }
+.advice-trigger { padding: 10px 11px; border: 1px solid var(--sem-warn-bd); border-radius: 9px; background: var(--sem-warn-bg); }
+.advice-trigger-rows { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.advice-trigger-rows > div { min-width: 0; color: var(--text2); font-size: 11.5px; line-height: 1.55; overflow-wrap: anywhere; }
+.advice-trigger-rows > div > span:first-child { display: block; margin-bottom: 2px; color: var(--muted); font-size: 10px; font-weight: 700; }
+.advice-trigger-rows > div.invalid > span:first-child { color: var(--green); }
+.advice-core-evidence { display: flex; flex-direction: column; gap: 6px; }
+.advice-evidence-row { display: grid; grid-template-columns: 42px minmax(0, 1fr); align-items: start; gap: 8px; color: var(--text2); font-size: 11.5px; line-height: 1.55; }
+.advice-evidence-row > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+.advice-evidence-row .ab-k { width: auto; text-align: center; box-sizing: border-box; }
+.ab-k.trend { color: #48a7d8; background: rgba(72,167,216,.12); }
+.advice-detail-reason { margin: 8px 0; padding: 8px 10px; border-left: 3px solid var(--accent); color: var(--text2); font-size: 12px; line-height: 1.6; }
+.advice-confidence-detail { margin-top: 7px; color: var(--muted); font-size: 11px; line-height: 1.55; }
+.advice-presentation .advice-deep { margin-top: 0; }
+.advice-presentation .advice-deep-body > .knowledge-action-card,
+.advice-presentation .advice-deep-body > .knowledge-action-review-card { margin-top: 8px; margin-bottom: 0; }
+@media (max-width: 540px) {
+  .advice-confidence { width: 100%; margin-left: 0; }
+  .advice-trigger-rows { grid-template-columns: 1fr; }
+  .advice-execution-metrics > span { flex: 1 1 calc(50% - 6px); min-width: 0; }
+  .advice-horizon.compact .ah-row { align-items: flex-start; flex-direction: column; gap: 4px; }
+}
 .knowledge-action-card { margin: 0 0 10px; padding: 10px 11px; border: 1px solid rgba(227,179,65,.3); border-radius: 9px; background: rgba(227,179,65,.05); }
 .ka-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .ka-head > span { display: inline-flex; align-items: center; gap: 5px; color: var(--text); font-size: 12px; font-weight: 750; }
