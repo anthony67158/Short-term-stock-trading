@@ -447,6 +447,8 @@ async function genOne({
       resonance: meta && meta.resonance ? meta.resonance.score : null,
       priceAtAdvice: px,
       theoryNote: advice.theoryNote || '',
+      knowledgeActionPlan: advice.knowledgeActionPlan || null,
+      knowledgeActionScore: advice.knowledgeActionScore || null,
       at,
     };
   }
@@ -710,12 +712,33 @@ async function drainAccount(nick, initialAcc) {
         completeJob(d, done.code); ok++;
         if (done.res.logEntry) {
           const log = d.adviceLog || (d.adviceLog = []);
-          const dup = log.find((x) => x.code === done.code && (Date.now() - (x.at || 0)) < 600000);
-          if (!dup) {
+          const dup = log.find((x) =>
+            x.code === done.code
+            && x.mode === done.res.logEntry.mode
+            && (Date.now() - (x.at || 0)) < 600000
+          );
+          const decisions = d.decisionLog || (d.decisionLog = []);
+          const dupDecision = dup
+            ? decisions.find((event) => event?.id === dup.id)
+            : null;
+          if (dup && dupDecision && dupDecision.status !== 'executed') {
+            Object.assign(dup, {
+              ...done.res.logEntry,
+              verified: false,
+              hit: null,
+              resultPct: null,
+            });
+            Object.assign(dupDecision, {
+              ...done.res.logEntry,
+              status: 'pending',
+              executedAt: null,
+              linkedExecutionId: null,
+              knowledgeActionReview: null,
+            });
+          } else {
             const id = `${done.res.logEntry.at}_${done.code}`;
             log.unshift({ id, verified: false, hit: null, resultPct: null, ...done.res.logEntry });
             d.adviceLog = log.slice(0, 500);
-            const decisions = d.decisionLog || (d.decisionLog = []);
             decisions.unshift(createRecommendation({ id, ...done.res.logEntry }));
             d.decisionLog = decisions.slice(0, 1000);
           }

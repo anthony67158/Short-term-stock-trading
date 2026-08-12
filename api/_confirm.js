@@ -30,6 +30,7 @@ import {
   adviceSupportsIntent,
   buildJudgeAdviceContext,
 } from '../shared/judgeAdviceContext.js';
+import { buildJudgeKnowledgeActionAssessment } from '../shared/knowledgeAction.js';
 
 // ---- 交易语义分类:把一条价位预警归成 buy / sell / stop 三类 ----
 // buy : 买点 / 补仓(回踩到位后想低吸)——确认「止跌企稳」才买。
@@ -164,6 +165,9 @@ async function llmJudge({ a, name, advice, prim, tech, det }) {
   const intent = actionIntentOf(a);
   const sideZh = actionLabelOf(a);
   const adv = buildJudgeAdviceContext({ ...(a.judgeContext || {}), ...(advice || {}) });
+  const knowledgeActionBaseline = buildJudgeKnowledgeActionAssessment(
+    adv.knowledgeActionPlan || adv,
+  );
   const sys = '你是严谨的A股短线交易确认闸门。价格已触及关键价位,但「到价≠立刻动手」。'
     + '你的唯一任务:结合盘中走势与建议条件,判断【此刻是否真正到了动手时机】。'
     + '军师建议是本次交易计划的上层约束：必须理解其方向、手数、仓位、盈亏比、止损目标、技术资金消息依据与失效条件；'
@@ -201,6 +205,7 @@ async function llmJudge({ a, name, advice, prim, tech, det }) {
     },
     技术面: techSummaryForAI(tech),
     军师完整建议: adv,
+    知行合一基线评分: knowledgeActionBaseline,
     建议给出的确认条件: adv.exitTiming || adv.actionPlan || '(未提供,按通用纪律判断)',
     建议给出的失效条件: adv.invalidation || '(未提供)',
     确定性信号: { 结论: det.decision, 评分: det.score, 命中: det.hits },
@@ -208,7 +213,8 @@ async function llmJudge({ a, name, advice, prim, tech, det }) {
   const messages = [
     { role: 'system', content: sys },
     { role: 'user', content: '请判断此刻交易时机。数据如下(JSON):\n' + JSON.stringify(payload)
-      + '\n\n输出格式:{"decision":"confirm|wait|invalid","confidence":0-100,"reason":"一句话中文理由(点明关键依据)"}' },
+      + '\n\n同时评估知行合一：可执行性0-20、逻辑一致性0-20、可证伪性0-20、纪律合规0-25、可复盘性0-15。严格按计划止损即使亏损也属于高质量执行；违规侥幸盈利不得加分。'
+      + '\n输出格式:{"decision":"confirm|wait|invalid","confidence":0-100,"reason":"一句话中文理由","knowledgeAction":{"dimensions":{"executability":0,"logicConsistency":0,"falsifiability":0,"disciplineCompliance":0,"reviewability":0},"findings":["符合项"],"violations":["缺陷"]}}' },
   ];
   try {
     // Judge 必须及时：总预算 10s 内允许一次故障转移，超时立即回退客观信号。
@@ -231,7 +237,15 @@ async function llmJudge({ a, name, advice, prim, tech, det }) {
       if (!value || !value.decision) return null;
       const d = String(value.decision).toLowerCase();
       const decision = ['confirm', 'wait', 'invalid'].includes(d) ? d : 'wait';
-      return { decision, confidence: normalizeConfidence(value.confidence), reason: String(value.reason || '').slice(0, 200) };
+      return {
+        decision,
+        confidence: normalizeConfidence(value.confidence),
+        reason: String(value.reason || '').slice(0, 200),
+        knowledgeAction: buildJudgeKnowledgeActionAssessment(
+          adv.knowledgeActionPlan || adv,
+          value.knowledgeAction,
+        ),
+      };
     } finally { done(); }
   } catch { return null; }
 }
@@ -243,12 +257,27 @@ async function llmJudge({ a, name, advice, prim, tech, det }) {
 // 内部自取分时(fetchTrendsTx)+日线(fetchKlineTx→computeTechnicals);取数失败 → wait(不误发)。
 export async function judgeConfirmation({ alert, name, advice, quote } = {}) {
   const a = alert;
-  if (!a || !a.code) return { decision: 'wait', reason: '缺少预警对象', side: null, source: 'ta' };
+  if (!a || !a.code) {
+    return {
+      decision: 'wait',
+      reason: '缺少预警对象',
+      side: null,
+      source: 'ta',
+      knowledgeAction: buildJudgeKnowledgeActionAssessment({}),
+    };
+  }
   const side = sideOf(a);
   const intent = actionIntentOf(a);
   const adviceContext = buildJudgeAdviceContext({ ...(a.judgeContext || {}), ...(advice || {}) });
+  const knowledgeAction = buildJudgeKnowledgeActionAssessment(
+    adviceContext.knowledgeActionPlan || adviceContext,
+  );
+  const withKnowledgeAction = (result) => ({
+    ...result,
+    knowledgeAction: result?.knowledgeAction || knowledgeAction,
+  });
   if (!adviceSupportsIntent(intent, adviceContext)) {
-    return {
+    return withKnowledgeAction({
       decision: 'invalid',
       confidence: 100,
       reason: `最新军师建议已不再支持${actionLabelOf(a)}，原操作点失效`,
@@ -256,31 +285,31 @@ export async function judgeConfirmation({ alert, name, advice, quote } = {}) {
       actionIntent: intent,
       source: 'advice',
       policy: 'advice-mismatch',
-    };
+    });
   }
   const timeContext = marketTimeContext();
   if (!isConfirmationPhase(timeContext.phase)) {
-    return {
+    return withKnowledgeAction({
       decision: 'wait',
       reason: `${timeContext.phase}不做盘中确认，等待连续竞价`,
       side,
       source: 'ta',
-    };
+    });
   }
   // 盘中分时(主依据)
   let trendsData = null;
   try { trendsData = await fetchTrendsTx(a.code); } catch { trendsData = null; }
   const prim = trendsData ? intradayPrimitives(trendsData.trends, trendsData.preClose) : null;
   if (!prim) {
-    return { decision: 'wait', reason: '分时数据不足,继续观察', side, source: 'ta' };
+    return withKnowledgeAction({ decision: 'wait', reason: '分时数据不足,继续观察', side, source: 'ta' });
   }
   if (!isMinuteSnapshotFresh(prim.lastTime, timeContext.bjNow)) {
-    return {
+    return withKnowledgeAction({
       decision: 'wait',
       reason: `分时快照已过期(${prim.lastTime || '时间未知'}),等待最新成交`,
       side,
       source: 'ta',
-    };
+    });
   }
   const quotePrice = Number(quote && quote.price);
   prim.quotePrice = quotePrice > 0 ? quotePrice : null;
@@ -288,12 +317,12 @@ export async function judgeConfirmation({ alert, name, advice, quote } = {}) {
     ? round((prim.price - quotePrice) / quotePrice * 100, 2)
     : null;
   if (prim.sourceSpreadPct != null && Math.abs(prim.sourceSpreadPct) > 0.8) {
-    return {
+    return withKnowledgeAction({
       decision: 'wait',
       reason: `分时价与实时报价偏差${Math.abs(prim.sourceSpreadPct)}%，等待数据源收敛`,
       side,
       source: 'ta',
-    };
+    });
   }
   const keyPrice = Number(a.value);
   const watchingPrice = Number(a.watchingPrice);
@@ -318,8 +347,9 @@ export async function judgeConfirmation({ alert, name, advice, quote } = {}) {
       signals: { side, primitives: prim, deterministic: preliminary, techVerdict: null },
       source: 'ta',
     };
-    await logVerdict(a, name, prim, result);
-    return result;
+    const enriched = withKnowledgeAction(result);
+    await logVerdict(a, name, prim, enriched);
+    return enriched;
   }
 
   // 日线技术面(辅助:MACD/RSI/均线)
@@ -341,8 +371,9 @@ export async function judgeConfirmation({ alert, name, advice, quote } = {}) {
       observationAgeMs: prim.observationAgeMs,
     });
     const result = { ...fused, side, signals, source: 'ta' };
-    await logVerdict(a, name, prim, result);
-    return result;
+    const enriched = withKnowledgeAction(result);
+    await logVerdict(a, name, prim, enriched);
+    return enriched;
   }
 
   // LLM 最终闸门(可回退)，最终结果由非对称融合策略裁决。
@@ -359,6 +390,7 @@ export async function judgeConfirmation({ alert, name, advice, quote } = {}) {
     signals,
     source: llm ? 'llm+ta' : 'ta',
     actionIntent: intent,
+    knowledgeAction: llm?.knowledgeAction || knowledgeAction,
   };
   await logVerdict(a, name, prim, result);
   return result;

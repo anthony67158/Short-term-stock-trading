@@ -20,6 +20,10 @@ import {
   continuityEvidenceFromPayload,
   reconcileAdviceContinuity,
 } from '../shared/adviceContinuity.js';
+import {
+  buildKnowledgeActionPlan,
+  scoreKnowledgeActionPlan,
+} from '../shared/knowledgeAction.js';
 
 function avg(arr) { return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0; }
 function std(arr) { if (arr.length < 2) return 0; const m = avg(arr); return Math.sqrt(avg(arr.map((x) => (x - m) ** 2))); }
@@ -1458,6 +1462,17 @@ export default async function handler(req, res) {
     }
     if (['buy_advice', 'hold_advice', 'review'].includes(mode) && result && typeof result === 'object' && !result.raw) {
       result = reconcileAdviceNumbers({ mode, result, payload }).result;
+    }
+    if (
+      isAdvisorMode(mode)
+      && result
+      && typeof result === 'object'
+      && !result.raw
+    ) {
+      result.knowledgeActionPlan = buildKnowledgeActionPlan(result, { mode });
+      result.knowledgeActionScore = scoreKnowledgeActionPlan(
+        result.knowledgeActionPlan,
+      );
     }
     // 明确输出「买入手数」的规范化整数字段:planQty 原文常为 "5手"/"约5手"/"5~8手" 等字符串,
     // 这里抽取首个整数为 planQtyNum,供自选卡「买入手数」直接消费,避免 Number() 得 NaN。

@@ -110,11 +110,23 @@ export default function AlertCenter({ onClose }) {
                           已评估 {Number(a.judgeCount)} 次
                         </span>
                       )}
+                      {a.lastKnowledgeAction?.total != null && (
+                        <span className="ar-badge knowledge">
+                          知行合一 {a.lastKnowledgeAction.total} · {a.lastKnowledgeAction.grade}
+                        </span>
+                      )}
                       {t1View.t1Blocked && <span className="ar-badge t1">T+1锁定 · 今日不可卖</span>}
                       {q && <span className="ar-now">现 {fmtRaw(q.price)}</span>}
                       <span className="ar-jump" title="查看详情与K线"><Icon name="chevronRight" size={13} /></span>
                     </div>
                     <div className="ar-desc">{describeAlert(a)}{a.note && !a.actKind ? ` · ${a.note}` : ''}</div>
+                    {a.lastKnowledgeAction && (
+                      <div className="ar-desc">
+                        {a.lastKnowledgeAction.missing?.length
+                          ? `待补：${a.lastKnowledgeAction.missing.join('、')}`
+                          : '交易逻辑、触发、仓位、退出与失效条件已形成闭环'}
+                      </div>
+                    )}
                     {showTrack && (
                       <>
                         <div className="ar-track"><div className="ar-track-fill" style={{ width: m.progress + '%' }} /></div>

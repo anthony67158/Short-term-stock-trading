@@ -266,14 +266,18 @@ async function processAccount(acc) {
       a.lastJudgeConfidence = verdict.confidence ?? null;
       a.lastJudgePolicy = verdict.policy || null;
       a.lastJudgePrice = Number(q.price);
+      a.lastKnowledgeAction = verdict.knowledgeAction || a.lastKnowledgeAction || null;
       a.judgeCount = (Number(a.judgeCount) || 0) + 1;
       changed = true;
       if (verdict.decision === 'confirm') {
         hits++;
         const actZh = actionLabelOf(a);
         const conf = verdict.confidence != null ? `(把握${verdict.confidence})` : '';
+        const ka = verdict.knowledgeAction?.total != null
+          ? `｜知行合一${verdict.knowledgeAction.total}分`
+          : '';
         const title = `✅ 可以${actZh} · ${a.name || a.code}`;
-        const body = `${describeAlert(a)}｜确认时机已到${conf}\n📌${verdict.reason || '多项信号共振确认'}`;
+        const body = `${describeAlert(a)}｜确认时机已到${conf}${ka}\n📌${verdict.reason || '多项信号共振确认'}`;
         collectDead(await sendPush(subs, { title, body, code: a.code, tag: 'confirm-' + a.id, url: '/' }));
         a.phase = 'confirmed'; a.triggeredAt = Date.now(); a.triggeredMsg = `确认${actZh}:${verdict.reason || ''}`; a.enabled = false;
         a.decisionPrice = Number(q.price);
@@ -292,6 +296,7 @@ async function processAccount(acc) {
           confidence: verdict.confidence ?? null,
           policy: verdict.policy || null,
           reason: verdict.reason || '',
+          knowledgeAction: verdict.knowledgeAction || null,
           judgeOutcomes: {},
         };
         data.decisionLog = [

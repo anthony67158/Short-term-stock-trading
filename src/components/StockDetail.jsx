@@ -708,6 +708,45 @@ export default function StockDetail({ stock, onClose }) {
                         )
                       })()}
 
+                      {adv?.knowledgeActionPlan && (() => {
+                        const plan = adv.knowledgeActionPlan
+                        const score = adv.knowledgeActionScore || {}
+                        const dimensions = score.dimensions || {}
+                        const dimensionLabels = {
+                          executability: '可执行',
+                          logicConsistency: '逻辑一致',
+                          falsifiability: '可证伪',
+                          disciplineCompliance: '纪律',
+                          reviewability: '可复盘',
+                        }
+                        return (
+                          <section className="knowledge-action-card" aria-label="知行合一交易契约">
+                            <div className="ka-head">
+                              <span><Icon name="checkSquare" size={13} /> 知行合一</span>
+                              <strong>{score.total ?? '—'}分 · {score.grade || '待评估'}</strong>
+                            </div>
+                            <div className="ka-dimensions">
+                              {Object.entries(dimensionLabels).map(([key, label]) => dimensions[key] && (
+                                <span key={key}>{label} <b>{dimensions[key].score}/{dimensions[key].max}</b></span>
+                              ))}
+                            </div>
+                            <div className="ka-contract">
+                              <div><span>交易逻辑</span><HL text={plan.researchLogic} /></div>
+                              <div><span>触发条件</span><HL text={plan.triggerConditions} /></div>
+                              <div><span>仓位规则</span><HL text={plan.positionRule} /></div>
+                              <div><span>风险点</span><HL text={plan.riskPoints} /></div>
+                              <div><span>退出规则</span><HL text={plan.exitConditions || plan.stopLoss?.condition} /></div>
+                              <div><span>失效条件</span><HL text={plan.invalidation} /></div>
+                              <div><span>验证周期</span>{plan.validationWindow || '未定义'}</div>
+                            </div>
+                            {score.missing?.length > 0 && (
+                              <div className="ka-missing">待补齐：{score.missing.join('、')}</div>
+                            )}
+                            <div className="ka-principle">{plan.principle}</div>
+                          </section>
+                        )
+                      })()}
+
                       {/* ReAct 研判思路：模型先于结论生成的推理链，让"为什么这么建议"透明可核对 */}
                       {adv && adv.reasoning && (
                         <Reasoning text={adv.reasoning} />

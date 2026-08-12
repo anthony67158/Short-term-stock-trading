@@ -17,6 +17,8 @@ const CORE_FIELDS = [
   'positionNote',
   'posAfter',
   'invalidation',
+  'knowledgeActionPlan',
+  'knowledgeActionScore',
 ]
 
 const number = (value) => {

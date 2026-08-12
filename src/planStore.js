@@ -16,6 +16,7 @@ import {
   isAdviceOutcomeCurrent,
   summarizeAdviceOutcomes,
 } from '../shared/adviceOutcome.js'
+import { evaluateKnowledgeActionCycle } from '../shared/knowledgeAction.js'
 // 注意:adviceBatch 只在 mergeCloud 运行时用到,这里【不能】做顶层静态 import——
 // 否则 planStore→adviceBatch→adviceRunner→serverAdvice→authStore 形成模块初始化环,
 // 而 authStore 顶层会调用 planStore.registerSaver(),此时 planStore 尚未初始化 → 整包崩(白屏卡启动)。
@@ -410,6 +411,7 @@ export const planStore = {
             lastJudgeDecision: c.lastJudgeDecision || a.lastJudgeDecision,
             lastJudgeConfidence: c.lastJudgeConfidence ?? a.lastJudgeConfidence,
             lastJudgePolicy: c.lastJudgePolicy || a.lastJudgePolicy,
+            lastKnowledgeAction: c.lastKnowledgeAction || a.lastKnowledgeAction || null,
             judgeCount: Math.max(Number(c.judgeCount) || 0, Number(a.judgeCount) || 0),
           }
           if (JSON.stringify(patch) !== JSON.stringify({
@@ -424,12 +426,19 @@ export const planStore = {
             lastJudgeDecision: a.lastJudgeDecision,
             lastJudgeConfidence: a.lastJudgeConfidence,
             lastJudgePolicy: a.lastJudgePolicy,
+            lastKnowledgeAction: a.lastKnowledgeAction || null,
             judgeCount: Number(a.judgeCount) || 0,
           })) touched = true
           return { ...a, ...patch }
         }
         // ② 服务端已进入「观察确认中」(弱提醒已发)→ 迁移 watching 态,本地据此显示"确认中"而非继续当作未到价
-        if (c.phase === 'watching' && a.phase !== 'watching' && a.phase !== 'confirmed' && !a.triggeredAt) {
+        const cloudJudgeNewer = Number(c.lastJudgeAt) > Number(a.lastJudgeAt || 0)
+        if (
+          c.phase === 'watching'
+          && a.phase !== 'confirmed'
+          && !a.triggeredAt
+          && (a.phase !== 'watching' || cloudJudgeNewer)
+        ) {
           touched = true
           return {
             ...a,
@@ -441,6 +450,7 @@ export const planStore = {
             lastJudgeDecision: c.lastJudgeDecision || a.lastJudgeDecision,
             lastJudgeConfidence: c.lastJudgeConfidence ?? a.lastJudgeConfidence,
             lastJudgePolicy: c.lastJudgePolicy || a.lastJudgePolicy,
+            lastKnowledgeAction: c.lastKnowledgeAction || a.lastKnowledgeAction || null,
             judgeCount: Math.max(Number(c.judgeCount) || 0, Number(a.judgeCount) || 0),
           }
         }
@@ -1385,6 +1395,7 @@ export const planStore = {
           lastJudgeConfidence: null,
           lastJudgePolicy: null,
           lastJudgePrice: null,
+          lastKnowledgeAction: null,
           judgeOutcomes: {},
         } : x)
     emit()
@@ -1405,6 +1416,7 @@ export const planStore = {
           lastJudgeConfidence: verdict?.confidence ?? null,
           lastJudgePolicy: verdict?.policy || null,
           lastJudgePrice: Number(price) || null,
+          lastKnowledgeAction: verdict?.knowledgeAction || x.lastKnowledgeAction || null,
           judgeCount: (Number(x.judgeCount) || 0) + 1,
         }
       : x)
@@ -1422,6 +1434,7 @@ export const planStore = {
           enabled: false,
           decisionPrice: Number(price) || x.lastJudgePrice || null,
           decisionSide: verdict?.side || null,
+          lastKnowledgeAction: verdict?.knowledgeAction || x.lastKnowledgeAction || null,
           judgeOutcomes: {},
         }
       : x)
@@ -1439,6 +1452,7 @@ export const planStore = {
         confidence: verdict?.confidence ?? null,
         policy: verdict?.policy || null,
         reason: verdict?.reason || '',
+        knowledgeAction: verdict?.knowledgeAction || confirmed.lastKnowledgeAction || null,
         judgeOutcomes: {},
       }
       state.decisionLog = [
@@ -1486,7 +1500,32 @@ export const planStore = {
     }
     // 同股同模式10分钟内不重复记录，避免刷屏
     const dup = (state.adviceLog || []).find((x) => x.code === entry.code && x.mode === entry.mode && (Date.now() - x.at) < 600000)
-    if (dup) return
+    const dupDecision = dup
+      ? (state.decisionLog || []).find((event) => event?.id === dup.id)
+      : null
+    if (dup && dupDecision?.status !== 'executed') {
+      const at = Date.now()
+      state.adviceLog = (state.adviceLog || []).map((item) =>
+        item.id === dup.id
+          ? { ...item, ...entry, at, verified: false, hit: null, resultPct: null }
+          : item
+      )
+      state.decisionLog = (state.decisionLog || []).map((event) =>
+        event.id === dup.id && event.kind === 'recommendation'
+          ? {
+              ...event,
+              ...entry,
+              at,
+              status: 'pending',
+              executedAt: null,
+              linkedExecutionId: null,
+              knowledgeActionReview: null,
+            }
+          : event
+      )
+      emit()
+      return
+    }
     state.adviceLog = [rec, ...(state.adviceLog || [])].slice(0, 500)
     state.decisionLog = [
       createRecommendation({ ...entry, id: rec.id, at: rec.at }),
@@ -1496,7 +1535,21 @@ export const planStore = {
   },
   _recordExecution(entry) {
     if (!entry || !entry.code) return null
-    state.decisionLog = appendExecution(state.decisionLog, entry)
+    const transaction = entry.transactionId
+      ? (state.closed || []).find((item) => item?.id === entry.transactionId)
+      : null
+    const pnl = transaction?.realizedPnl
+      ?? transaction?.netPnl
+      ?? null
+    state.decisionLog = appendExecution(state.decisionLog, {
+      ...entry,
+      outcome: entry.outcome || {
+        pnl,
+        validationComplete: entry.side === 'sell' && pnl != null,
+        invalidated: false,
+        targetHit: false,
+      },
+    })
     return state.decisionLog[0] || null
   },
   decisionStats() {
@@ -1592,7 +1645,46 @@ export const planStore = {
         verifiedAt: Date.now(), verifyNote: note,
       }
     })
-    if (changed) emit()
+    if (changed) {
+      const verified = new Map(
+        (state.adviceLog || [])
+          .filter((record) => record?.verified && record?.id)
+          .map((record) => [record.id, record]),
+      )
+      const eventsById = new Map(
+        (state.decisionLog || [])
+          .filter((event) => event?.id)
+          .map((event) => [event.id, event]),
+      )
+      const reviews = new Map()
+      for (const [id, record] of verified) {
+        const recommendation = eventsById.get(id)
+        const execution = recommendation?.linkedExecutionId
+          ? eventsById.get(recommendation.linkedExecutionId)
+          : null
+        if (!recommendation?.knowledgeActionPlan || !execution) continue
+        reviews.set(id, evaluateKnowledgeActionCycle({
+          plan: recommendation.knowledgeActionPlan,
+          execution,
+          outcome: {
+            pnl: record.resultPct,
+            validationComplete: true,
+            invalidated: record.hit === false,
+            targetHit: record.hit === true,
+          },
+        }))
+      }
+      state.decisionLog = (state.decisionLog || []).map((event) => {
+        if (reviews.has(event.id)) {
+          return { ...event, knowledgeActionReview: reviews.get(event.id) }
+        }
+        if (event?.kind === 'execution' && event.linkedRecommendationId && reviews.has(event.linkedRecommendationId)) {
+          return { ...event, knowledgeActionReview: reviews.get(event.linkedRecommendationId) }
+        }
+        return event
+      })
+      emit()
+    }
   },
   // 各类建议真实胜率统计（供"军师战绩"展示）
   adviceStats() {

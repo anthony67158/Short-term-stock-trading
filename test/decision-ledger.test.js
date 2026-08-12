@@ -117,3 +117,63 @@ test('删除错误交易流水会移除执行事件并恢复建议待执行状�
   assert.equal(restored.find((event) => event.id === 'r1').status, 'pending')
   assert.equal(restored.find((event) => event.id === 'r1').linkedExecutionId, null)
 })
+
+test('真实止损执行关联建议并记录知行合一复盘', () => {
+  const recommendation = createRecommendation({
+    id: 'r-stop',
+    code: '600001',
+    action: '加仓',
+    knowledgeActionPlan: {
+      version: 1,
+      action: '加仓',
+      researchLogic: '支撑位企稳且资金流入',
+      executionPlan: '10元加仓1手',
+      triggerConditions: '站回VWAP',
+      positionRule: '最多1手',
+      riskPoints: '跌破支撑',
+      stopLoss: { price: 9.6, condition: '有效跌破止损' },
+      takeProfit: { price: 11, condition: '分批止盈' },
+      exitConditions: '止损或止盈退出',
+      invalidation: '跌破9.6元',
+      validationWindow: '3个交易日',
+      falsifiableClaim: '跌破9.6元则失效',
+      preTradeChecklist: ['逻辑', '触发', '仓位', '退出', '周期'],
+      plannedQuantity: 1,
+    },
+  }, NOW - 3600000)
+
+  const opened = appendExecution([recommendation], {
+    id: 'e-buy',
+    code: '600001',
+    side: 'buy',
+    price: 10,
+    qty: 1,
+    outcome: {
+      validationComplete: false,
+    },
+  }, NOW - 1800000)
+  const next = appendExecution(opened, {
+    id: 'e-stop',
+    code: '600001',
+    side: 'sell',
+    price: 9.59,
+    qty: 1,
+    outcome: {
+      pnl: -41,
+      validationComplete: true,
+      invalidated: true,
+    },
+  }, NOW)
+  const execution = next.find((event) => event.id === 'e-stop')
+
+  assert.equal(execution.knowledgeActionReview.attribution, 'judgment_error')
+  assert.ok(execution.knowledgeActionReview.executionScore >= 90)
+  assert.deepEqual(
+    next.find((event) => event.id === 'r-stop').linkedExecutionIds,
+    ['e-buy', 'e-stop'],
+  )
+  assert.equal(
+    next.find((event) => event.id === 'r-stop').knowledgeActionReview.executionScore,
+    execution.knowledgeActionReview.executionScore,
+  )
+})

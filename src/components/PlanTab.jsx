@@ -2239,10 +2239,19 @@ function TFlowRow({ f, holdingId }) {
 function HoldReview({ code, name, cost, qty, price }) {
   const [, force] = useState(0)
   const [open, setOpen] = useState(false) // 展开完整细节
+  const book = usePlanStore()
   // 订阅建议缓存：AI 操作建议刷新时本卡自动跟随更新
   useEffect(() => subscribeAdvice(() => force((n) => n + 1)), [])
   const a = getAdvice(code)
   const adv = a && a.advice
+  const latestExecutionReview = (book.decisionLog || [])
+    .filter((event) =>
+      event?.kind === 'execution'
+      && event.code === code
+      && event.knowledgeActionReview
+    )
+    .sort((left, right) => (right.at || 0) - (left.at || 0))[0]
+    ?.knowledgeActionReview || null
   // 把 AI 操作建议标准化成复盘展示口径：动作/结论/今日回顾/下一步/理论/失效
   const r = adv ? {
     stance: adv.action || adv.stance || '',
@@ -2256,6 +2265,8 @@ function HoldReview({ code, name, cost, qty, price }) {
     futurePlan: adv.futurePlan || '',
     theoryNote: adv.theoryNote || '',
     invalidation: adv.invalidation || '',
+    knowledgeActionPlan: adv.knowledgeActionPlan || null,
+    knowledgeActionScore: adv.knowledgeActionScore || null,
     tone: adv.tone || 'muted',
   } : null
   const tone = r ? (r.tone || 'muted') : 'muted'
@@ -2299,6 +2310,33 @@ function HoldReview({ code, name, cost, qty, price }) {
         <div className="hr-recap">
           {r.todayRecap && <div className="hr-recap-row"><span className="hr-recap-k">今日</span><span>{r.todayRecap}</span></div>}
           {r.tradeReview && r.tradeReview !== '今日无成交' && <div className="hr-recap-row"><span className="hr-recap-k">操作点评</span><span>{r.tradeReview}</span></div>}
+        </div>
+      )}
+
+      {r.knowledgeActionPlan && (
+        <div className="hr-knowledge-action">
+          <div className="hr-ka-head">
+            <span><Icon name="checkSquare" size={12} /> 知行合一</span>
+            <b>事前 {r.knowledgeActionScore?.total ?? '—'}分</b>
+            {latestExecutionReview && <b>执行 {latestExecutionReview.executionScore}分</b>}
+          </div>
+          <div className="hr-ka-grid">
+            <span><small>逻辑</small>{r.knowledgeActionPlan.researchLogic || '未定义'}</span>
+            <span><small>触发</small>{r.knowledgeActionPlan.triggerConditions || '未定义'}</span>
+            <span><small>仓位</small>{r.knowledgeActionPlan.positionRule || '未定义'}</span>
+            <span><small>验证周期</small>{r.knowledgeActionPlan.validationWindow || '未定义'}</span>
+          </div>
+          {latestExecutionReview ? (
+            <div className={'hr-ka-review ' + latestExecutionReview.attribution}>
+              <b>{latestExecutionReview.attributionLabel} · {latestExecutionReview.disciplineVerdict}</b>
+              <span>{latestExecutionReview.summary}</span>
+            </div>
+          ) : (
+            <div className="hr-ka-review pending">
+              <b>待执行 / 待验证</b>
+              <span>结果尚未形成，只检查计划是否清晰，不用短期涨跌提前评判。</span>
+            </div>
+          )}
         </div>
       )}
 

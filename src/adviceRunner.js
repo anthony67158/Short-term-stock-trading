@@ -154,6 +154,8 @@ async function run(spec, record) {
             resonance: meta && meta.resonance ? meta.resonance.score : null,
             priceAtAdvice: px,
             theoryNote: advice.theoryNote || '',
+            knowledgeActionPlan: advice.knowledgeActionPlan || null,
+            knowledgeActionScore: advice.knowledgeActionScore || null,
           })
         } catch { /* ignore */ }
       }

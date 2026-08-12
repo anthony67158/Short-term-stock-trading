@@ -1935,7 +1935,7 @@ button.acct-item { width: 100%; border: 0; background: transparent; font: inheri
 .nav-bell-dot { position: absolute; top: -5px; right: -5px; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 8px; background: var(--red); color: #fff; font-size: 9px; font-weight: 700; display: flex; align-items: center; justify-content: center; line-height: 1; }
 .alert-center { width: min(560px, 94vw); max-height: 86vh; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 .alert-perm { display: flex; align-items: center; gap: 6px; margin: 10px var(--pad-panel-x) 0; padding: 9px 12px; border-radius: 8px; font-size: 12px; color: var(--text2); background: rgba(124,107,245,.08); border: 1px solid rgba(124,107,245,.22); }
-.judge-effect { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 10px var(--pad-panel-x) 2px; padding: 10px 12px; border-radius: 9px; background: var(--panel2); border: 1px solid var(--border-soft); color: var(--muted); font-size: 11px; }
+.judge-effect { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin: 10px var(--pad-panel-x) 2px; padding: 10px 12px; border-radius: 9px; background: var(--panel2); border: 1px solid var(--border-soft); color: var(--muted); font-size: 11px; }
 .judge-effect > div { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
 .judge-effect-k { color: var(--text2); font-weight: 650; }
 .judge-effect b { color: var(--accent2); font-size: 14px; }
@@ -2117,6 +2117,7 @@ button.acct-item { width: 100%; border: 0; background: transparent; font: inheri
 .alert-body-inline { padding: 0 var(--pad-panel-x) 4px; max-height: 560px; overflow-y: auto; }
 .ar-now { font-size: 11px; color: var(--muted); margin-left: 6px; font-variant-numeric: tabular-nums; }
 .ar-badge.judge { color: var(--accent); background: rgba(124,107,245,.12); border: 1px solid rgba(124,107,245,.24); }
+.ar-badge.knowledge { color: var(--gold); background: rgba(227,179,65,.12); border: 1px solid rgba(227,179,65,.24); }
 .af-hint { font-size: 12px; color: var(--muted); }
 .af-actions { display: flex; gap: 8px; margin-top: 2px; }
 .di-row-actions { display: inline-flex; align-items: center; gap: 5px; }
@@ -2360,6 +2361,19 @@ button.acct-item { width: 100%; border: 0; background: transparent; font: inheri
 .advice-continuity.reverse { border-color: rgba(227,179,65,.38); background: rgba(227,179,65,.07); }
 .advice-continuity.blocked { border-color: rgba(91,141,239,.38); background: rgba(91,141,239,.07); }
 @media (max-width: 540px) { .advice-continuity .ac-head { align-items: flex-start; flex-direction: column; gap: 2px; } }
+.knowledge-action-card { margin: 0 0 10px; padding: 10px 11px; border: 1px solid rgba(227,179,65,.3); border-radius: 9px; background: rgba(227,179,65,.05); }
+.ka-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ka-head > span { display: inline-flex; align-items: center; gap: 5px; color: var(--text); font-size: 12px; font-weight: 750; }
+.ka-head strong { color: var(--gold); font-size: 12px; }
+.ka-dimensions { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+.ka-dimensions > span { padding: 2px 6px; border-radius: 5px; background: var(--panel2); color: var(--muted); font-size: 10.5px; }
+.ka-dimensions b { color: var(--text2); font-variant-numeric: tabular-nums; }
+.ka-contract { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px; }
+.ka-contract > div { min-width: 0; padding: 7px 8px; border-radius: 7px; background: var(--panel2); color: var(--text2); font-size: 11px; line-height: 1.55; }
+.ka-contract > div > span { display: block; margin-bottom: 2px; color: var(--muted); font-size: 10px; font-weight: 650; }
+.ka-missing { margin-top: 7px; color: var(--gold); font-size: 11px; }
+.ka-principle { margin-top: 7px; color: var(--muted); font-size: 10.5px; }
+@media (max-width: 540px) { .ka-contract { grid-template-columns: 1fr; } }
 .dv-action { font-size: 17px; font-weight: 800; margin-bottom: 4px; }
 .decide-verdict.red .dv-action { color: var(--red); }
 .decide-verdict.green .dv-action { color: var(--green); }
@@ -3158,6 +3172,19 @@ button.acct-item { width: 100%; border: 0; background: transparent; font: inheri
 .hr-recap { margin: 8px 10px 0; display: flex; flex-direction: column; gap: 5px; }
 .hr-recap-row { display: flex; align-items: baseline; gap: 8px; font-size: 12px; line-height: 1.55; color: var(--text2); }
 .hr-recap-k { flex: none; font-size: 10px; font-weight: 700; color: var(--muted); background: var(--surface-quiet, rgba(255,255,255,.05)); padding: 2px 7px; border-radius: 5px; }
+.hr-knowledge-action { margin: 8px 10px 0; padding: 9px; border: 1px solid rgba(227,179,65,.28); border-radius: 8px; background: rgba(227,179,65,.05); }
+.hr-ka-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+.hr-ka-head > span { display: inline-flex; align-items: center; gap: 4px; color: var(--text); font-size: 11.5px; font-weight: 750; }
+.hr-ka-head b { color: var(--gold); font-size: 11px; }
+.hr-ka-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: 7px; }
+.hr-ka-grid > span { min-width: 0; padding: 6px 7px; border-radius: 6px; background: var(--panel2); color: var(--text2); font-size: 11px; line-height: 1.5; }
+.hr-ka-grid small { display: block; color: var(--muted); font-size: 9.5px; font-weight: 650; }
+.hr-ka-review { display: flex; flex-direction: column; gap: 2px; margin-top: 7px; padding-top: 7px; border-top: 1px dashed var(--border-soft); color: var(--text2); font-size: 11px; line-height: 1.5; }
+.hr-ka-review b { color: var(--text); }
+.hr-ka-review.execution_error b { color: var(--green); }
+.hr-ka-review.plan_validated b { color: var(--red); }
+.hr-ka-review.pending b, .hr-ka-review.randomness b { color: var(--gold); }
+@media (max-width: 540px) { .hr-ka-grid { grid-template-columns: 1fr; } }
 /* 复盘→操作建议 分工引导入口：不再重复铺算账/价位，一键跳详情看具体操作 */
 .hr-goadvice { display: flex; align-items: center; gap: 7px; width: calc(100% - 20px); margin: 10px 10px 2px; padding: 8px 11px; border: 1px dashed var(--border); border-radius: 8px; background: none; color: var(--text2); font-size: 12px; cursor: pointer; transition: border-color var(--t-fast), color var(--t-fast), background-color var(--t-fast); text-align: left; }
 .hr-goadvice span { flex: 1; min-width: 0; }

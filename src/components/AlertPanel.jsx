@@ -30,6 +30,20 @@ export default function AlertPanel({ interval }) {
   const aiAutoOn = (book.settings || {}).aiAutoAlert !== false
   const smartConfirmOn = (book.settings || {}).smartConfirm !== false
   const judgeStats = judgeEffectStats([...alerts, ...(book.decisionLog || [])])
+  const knowledgeActionStats = useMemo(() => {
+    const scores = [
+      ...alerts.map((item) => item?.lastKnowledgeAction?.total),
+      ...(book.decisionLog || [])
+        .filter((item) => item?.kind === 'judge')
+        .map((item) => item?.knowledgeAction?.total),
+    ].map(Number).filter(Number.isFinite)
+    return {
+      total: scores.length,
+      average: scores.length
+        ? Math.round(scores.reduce((sum, value) => sum + value, 0) / scores.length)
+        : null,
+    }
+  }, [alerts, book.decisionLog])
 
   // 候选：自选 + 持仓（去重），供新增预警选择
   const cands = useMemo(() => {
@@ -68,6 +82,10 @@ export default function AlertPanel({ interval }) {
         <div>
           <span className="judge-effect-k">LLM Judge 实测</span>
           <b>{judgeStats.evaluated ? `${judgeStats.winRate}%` : '样本积累中'}</b>
+        </div>
+        <div>
+          <span className="judge-effect-k">知行合一</span>
+          <b>{knowledgeActionStats.average != null ? `${knowledgeActionStats.average}分` : '待评估'}</b>
         </div>
         <span>
           已强提示 {judgeStats.confirmed} 次 · 已评估 {judgeStats.evaluated} 次

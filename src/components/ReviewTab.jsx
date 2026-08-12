@@ -100,6 +100,21 @@ function DecisionClosure({ book }) {
             <div className="rv-attr-v">{stats.adoptionRate == null ? '--' : stats.adoptionRate + '%'}</div>
             <div className="rv-attr-s">已执行建议 / 全部建议</div>
           </div>
+          {stats.knowledgeAction && (
+            <div className="rv-attr-cell rv-attr-hint">
+              <div className="rv-attr-k">知行合一</div>
+              <div className="rv-attr-v">{stats.knowledgeAction.averageExecutionScore}分</div>
+              <div className="rv-attr-s">
+                事前计划均分 {stats.knowledgeAction.averagePlanScore} · 已评估 {stats.knowledgeAction.evaluated} 笔
+              </div>
+              <div className="rv-attr-note">
+                计划验证 {stats.knowledgeAction.attribution.plan_validated} ·
+                认知错误 {stats.knowledgeAction.attribution.judgment_error} ·
+                执行错误 {stats.knowledgeAction.attribution.execution_error} ·
+                偶然波动 {stats.knowledgeAction.attribution.randomness}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

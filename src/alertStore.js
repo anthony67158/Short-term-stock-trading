@@ -322,8 +322,11 @@ export const alertStore = {
           planStore.markAlertJudged(a.id, v, q && q.price)
           if (v.decision === 'confirm') {
             const conf = v.confidence != null ? `(把握${v.confidence})` : ''
+            const ka = v.knowledgeAction?.total != null
+              ? `｜知行合一${v.knowledgeAction.total}分`
+              : ''
             const title = `✅ 可以${actZh} · ${a.name || a.code}`
-            const body = `${describeAlert(a)}｜确认时机已到${conf}\n📌${v.reason || '多项信号共振确认'}`
+            const body = `${describeAlert(a)}｜确认时机已到${conf}${ka}\n📌${v.reason || '多项信号共振确认'}`
             this.push({ code: a.code, name: a.name, title, body, alertId: 'confirm-' + a.id })
             notify(title, body)
             planStore.markAlertConfirmed(a.id, `确认${actZh}:${v.reason || ''}`, v, q && q.price)

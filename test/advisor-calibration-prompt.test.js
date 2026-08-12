@@ -48,5 +48,8 @@ test('军师低命中校准按动作方向纠偏而不是一律变得更保守',
   assert.match(prompt, /上一版权威主计划/)
   assert.match(prompt, /无客观失效证据不得反转/)
   assert.match(prompt, /plan-600000/)
+  assert.match(prompt, /知行合一·事前交易契约/)
+  assert.match(prompt, /knowledgeActionPlan/)
+  assert.match(prompt, /validationWindow/)
   assert.doesNotMatch(prompt, /说明你过去偏乐观\/追高/)
 })

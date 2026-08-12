@@ -14,6 +14,7 @@ import { ensureConfig } from './_llm_config.js';
 import { judgeConfirmation, sideOf } from './_confirm.js';
 import { t1GateForSide } from '../shared/t1AdvicePolicy.js';
 import { buildJudgeAdviceContext } from '../shared/judgeAdviceContext.js';
+import { buildJudgeKnowledgeActionAssessment } from '../shared/knowledgeAction.js';
 import { authorizePaidRequest } from './_account_auth.js';
 
 const rateWindows = new Map();
@@ -139,6 +140,9 @@ export default async function handler(req, res) {
         side: sideOf(alert),
         source: 't1',
         policy: 't1-blocked',
+        knowledgeAction: buildJudgeKnowledgeActionAssessment(
+          advice.knowledgeActionPlan || advice,
+        ),
       }));
     }
     try { await ensureConfig({ maxAgeMs: 20000 }); } catch { /* 回退确定性信号 */ }

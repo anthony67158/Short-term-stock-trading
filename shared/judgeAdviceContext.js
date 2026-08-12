@@ -1,3 +1,5 @@
+import { buildKnowledgeActionPlan } from './knowledgeAction.js'
+
 const text = (value, max = 800) => String(value || '').trim().slice(0, max)
 const finite = (value) => {
   const number = Number(value)
@@ -32,8 +34,19 @@ export function buildJudgeAdviceContext(advice = {}) {
     ...(zone(zones.stop) ? { stopZone: zone(zones.stop) } : {}),
     ...(zone(zones.target) ? { targetZone: zone(zones.target) } : {}),
   } : {}
+  const knowledgeActionContext = advice.knowledgeActionPlan
+    && typeof advice.knowledgeActionPlan === 'object'
+    ? {
+        knowledgeActionPlan: buildKnowledgeActionPlan(advice),
+        knowledgeActionScore: advice.knowledgeActionScore
+          && typeof advice.knowledgeActionScore === 'object'
+          ? advice.knowledgeActionScore
+          : undefined,
+      }
+    : {}
   return {
     ...planContext,
+    ...knowledgeActionContext,
     action: text(advice.action || advice.stance, 40),
     tier: text(advice.tier, 30),
     title: text(advice.title || advice.headline, 200),

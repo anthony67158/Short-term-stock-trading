@@ -91,6 +91,17 @@ function tradeHistoryOf(code) {
     }))
 }
 
+function latestKnowledgeActionReviewOf(code) {
+  return (planStore.get().decisionLog || [])
+    .filter((event) =>
+      event?.kind === 'execution'
+      && event.code === code
+      && event.knowledgeActionReview
+    )
+    .sort((left, right) => (right.at || 0) - (left.at || 0))[0]
+    ?.knowledgeActionReview || null
+}
+
 // 账户资产(总资产/可用现金/目标资产)——供 AI 算补仓金额、仓位占比、预期收益、以终为始节奏
 function acctInfo() {
   const state = planStore.get()
@@ -120,6 +131,7 @@ export async function generateReview({ code, name, session, hold, onPhase }) {
     account: acctInfo(),                           // 账户总资产/可用，用于算仓位占比与补仓金额
     todayTrades: todayTradesOf(code),
     tradeHistory: tradeHistoryOf(code),
+    knowledgeActionReview: latestKnowledgeActionReviewOf(code),
   }
   const r = onPhase ? await callAIStream('review', payload, onPhase) : await callAI('review', payload)
   if (r.ok && r.result) {

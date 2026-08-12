@@ -140,6 +140,13 @@ ${payload.quant.v2.executionReference ? `【当前时段实时执行层·不是�
     ? `\n【★★上一版权威主计划·连续决策约束】${JSON.stringify(payload.previousAdvice)}。
 刷新不是重新猜一次方向，而是复核这份主计划：①方向和失效条件未被客观行情破坏时，必须延续原方向，只可微调动态买卖区间；②无客观失效证据不得反转，不得仅因现价小幅变化就在“买/持/卖”之间摇摆；③只有触及上一版止损/目标，或资金、消息、量化、技术出现多维反转共振时，才允许改成相反动作，并在理由中明确指出哪条原逻辑已失效；④上一版与新数据冲突但证据不足时，以主计划为准并继续等待 Judge 确认。`
     : '';
+  const knowledgeActionNote = `\n【★★知行合一·事前交易契约】先定义，再行动；先守纪律，再谈收益。除了已有结论字段，最终JSON必须额外给出 knowledgeActionPlan：
+{"researchLogic":"数据支持的交易逻辑","action":"本次明确动作","executionPlan":"可直接执行的计划","triggerConditions":"触发动作所需的价格+确认信号","positionRule":"建议手数/仓位及上限","riskPoints":"主要风险","stopLoss":{"price":止损价或null,"condition":"确认止损条件"},"takeProfit":{"price":止盈价或null,"condition":"分批止盈/退出条件"},"exitConditions":"退出规则","invalidation":"可证伪的策略失效条件","validationWindow":"验证周期，如3个交易日","falsifiableClaim":"出现什么事实就证明原判断错误"}。
+禁止用“适量、看情况、注意风险”等模糊词替代规则；研究逻辑、动作、触发、仓位、风险、退出、失效和验证周期缺一项都属于低质量建议。`;
+  const knowledgeActionReviewNote = payload.knowledgeActionReview
+    ? `\n【★★知行合一复盘归因·事实层不可改写】系统根据事前计划与真实执行已得出：${JSON.stringify(payload.knowledgeActionReview)}。
+你只能解释归因并提出改进，禁止根据短期盈亏推翻它：严格止损后的亏损不能判成执行错误；违反仓位、触发或止损纪律后的违规盈利不能粉饰执行质量。复盘必须明确区分认知错误、执行错误、偶然波动和计划验证。`
+    : '';
   // 军师五面数据说明：把技术金叉多头、主力资金、盘口、消息面、龙虎榜、大盘环境、共振分全部显式点名，强制引用
   const advisorDataRaw = `${payload.todayQuote ? (payload.todayQuote.live ? `\n【★今日实时行情(最高优先·当下事实)】现价${payload.todayQuote.price}、今日涨跌${payload.todayQuote.pct >= 0 ? '+' : ''}${payload.todayQuote.pct}%${payload.todayQuote.isLimitUp ? '、【已涨停】' : payload.todayQuote.isLimitDown ? '、【已跌停】' : ''}${payload.todayQuote.bigMove && !payload.todayQuote.isLimitUp && !payload.todayQuote.isLimitDown ? `、【当日大幅${payload.todayQuote.pct >= 0 ? '异动上涨' : '异动下跌'}】` : ''}、量比${payload.todayQuote.volRatio ?? '—'}、换手${payload.todayQuote.turnover ?? '—'}%。
 ⚠️数据时效铁律：下面的 tech(技术面均线/金叉)、stockFund(主力资金)、backtest 都是【昨日收盘口径】，会滞后！必须以本行"今日实时行情"为当下事实基准，两者矛盾时【以今日实时为准】。
@@ -165,7 +172,7 @@ ${payload.todayQuote.isLimitUp ? '⚠️该股【今日已涨停】：说明今�
   const advisorData = advisorDataRaw.replace(
     /\n【★军师历史战绩·自我校准[\s\S]*?(?=\n【★量化模型·|\n【★量化·高把握|\n【★★高把握|\n【★资金金额)/,
     `${advisorTrackNote}${theoryTrackNote}`,
-  ) + previousAdviceNote;
+  ) + previousAdviceNote + knowledgeActionNote + knowledgeActionReviewNote;
 
   // ============ 交易实况铁律：涨跌停可买性 + A股T+1 + 「下个开盘/未来」两段指导 ============
   // 解决:①卡片建议要结合涨跌停(±10%/±20%)、当前是否真能买(不追涨停、封板买不进)②A股T+1(当天买不能当天卖,自选股无底仓更不能当日做T卖)③建议要分「紧接着的下一个开盘时段」和「更远的未来」两段,今天买不了就讲后续怎么等。
