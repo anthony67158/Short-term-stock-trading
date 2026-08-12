@@ -80,7 +80,7 @@ function SentimentGauge({ zt, zb, market }) {
   return (
     <section className="panel senti-gauge workbench-aside">
       <div className="sg-head">
-        <div className="panel-title"><Icon name="fire" size={16} /> 市场情绪温度计</div>
+        <div role="heading" aria-level="2" className="panel-title"><Icon name="fire" size={16} /> 市场情绪温度计</div>
         <span className={'sg-level ' + g.level.c}>{g.level.t} · {g.score}分</span>
       </div>
       <div className="sg-bar"><span className={'sg-bar-fill ' + g.level.c} style={{ width: g.score + '%' }} /></div>
@@ -138,7 +138,7 @@ function MarketLight({ market, sectors, snapshot }) {
   return (
     <section className="panel market-board workbench-primary">
       <div className="panel-head">
-        <div className="panel-title"><Icon name="pulse" size={16} /> 大盘盘面 <span className="sub-name">开盘先看势，定今日仓位</span></div>
+        <div role="heading" aria-level="2" className="panel-title"><Icon name="pulse" size={16} /> 大盘盘面 <span className="sub-name">开盘先看势，定今日仓位</span></div>
         <div className="market-actions">
           <button className="btn btn-primary" onClick={() => setReportOpen(true)}>
             <Icon name="clipboard" size={13} />
@@ -643,7 +643,7 @@ function CandidatePool({ zt, movers, speed, sectors }) {
   return (
     <section className="panel candidate-pool">
       <div className="panel-head">
-        <div className="panel-title"><Icon name="fire" size={16} /> 今日精选候选池</div>
+        <div role="heading" aria-level="2" className="panel-title"><Icon name="fire" size={16} /> 今日精选候选池</div>
         <div className="tabs">
           {tabs.map(([k, t]) => (
             <button

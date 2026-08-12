@@ -12,11 +12,11 @@ export default function Movers({ interval }) {
   return (
     <div className="panel">
       <div className="panel-head">
-        <div className="panel-title"><Icon name="bolt" size={16} /> 盘中异动监控 <span className="sub-name">全市场</span></div>
+        <div role="heading" aria-level="2" className="panel-title"><Icon name="bolt" size={16} /> 盘中异动监控 <span className="sub-name">全市场</span></div>
         <div className="tabs">
-          <div className={'tab' + (kind === 'inflow' ? ' active' : '')} onClick={() => setKind('inflow')}>主力抢筹</div>
-          <div className={'tab' + (kind === 'speed' ? ' active' : '')} onClick={() => setKind('speed')}>涨速榜</div>
-          <div className={'tab' + (kind === 'outflow' ? ' active' : '')} onClick={() => setKind('outflow')}>主力出逃</div>
+          <button type="button" className={'tab' + (kind === 'inflow' ? ' active' : '')} aria-pressed={kind === 'inflow'} onClick={() => setKind('inflow')}>主力抢筹</button>
+          <button type="button" className={'tab' + (kind === 'speed' ? ' active' : '')} aria-pressed={kind === 'speed'} onClick={() => setKind('speed')}>涨速榜</button>
+          <button type="button" className={'tab' + (kind === 'outflow' ? ' active' : '')} aria-pressed={kind === 'outflow'} onClick={() => setKind('outflow')}>主力出逃</button>
         </div>
       </div>
       {loading && !data ? (

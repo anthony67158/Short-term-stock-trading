@@ -324,7 +324,7 @@ function MainApp() {
         数据来源：东方财富公开接口 · AI 分析由大模型基于实时数据生成，仅供研究参考，非投资建议 · 资金流为已发生数据，追高有滞后风险，注意止损
       </footer>
 
-      <ErrorBoundary label="AI 助手">
+      <ErrorBoundary label="军师">
         <Suspense fallback={null}>
           <AIAssistant snapshot={snapshot} />
         </Suspense>

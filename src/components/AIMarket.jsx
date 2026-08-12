@@ -32,7 +32,7 @@ export default function AIMarket({ market, sectors, limitPool }) {
   return (
     <section className="panel ai-panel">
       <div className="panel-head">
-        <div className="panel-title"><Icon name="brain" size={16} /> AI 盘面复盘 <span className="sub-name">实时解读</span></div>
+        <div role="heading" aria-level="2" className="panel-title"><Icon name="brain" size={16} /> AI 盘面复盘 <span className="sub-name">实时解读</span></div>
         <button className="btn btn-ai" onClick={run} disabled={loading}>
           {loading ? 'AI 分析中…' : '生成盘面分析'}
         </button>

@@ -28,7 +28,7 @@ export default function SectorHistory({ sector }) {
   return (
     <div className="panel" style={{ marginTop: 12 }}>
       <div className="panel-head">
-        <div className="panel-title">{sector.name} · 近10日主力资金流</div>
+        <div role="heading" aria-level="2" className="panel-title">{sector.name} · 近10日主力资金流</div>
         <div className="legend">复盘用：连续净流入=资金持续做多</div>
       </div>
       <div style={{ padding: 8 }}>

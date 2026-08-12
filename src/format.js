@@ -1,4 +1,9 @@
 // 格式化工具
+export function finiteNum(v, fallback = 0) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 export function fmtYi(v) {
   // 元 -> 亿
   const n = Number(v);

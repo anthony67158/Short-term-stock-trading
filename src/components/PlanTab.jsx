@@ -339,14 +339,14 @@ function StockSearch() {
               else pick(s)
             }
             return (
-              <div className={'ss-item' + (inBook ? ' locatable' : '')} key={s.code} onClick={onItem}
+              <button type="button" className={'ss-item' + (inBook ? ' locatable' : '')} key={s.code} onClick={onItem}
                 title={inBook ? '点击定位到已有卡片' : '点击加入自选'}>
                 <span className="ss-name">{s.name}<span className="sub-name">{s.code}</span></span>
                 <span className="ss-type">{s.type}</span>
                 {inBook
                   ? <span className="ss-add locate"><Icon name="target" size={13} />{held ? '已持有 · 定位' : '已加 · 定位'}</span>
                   : <span className="ss-add"><Icon name="plus" size={13} />加入</span>}
-              </div>
+              </button>
             )
           })}
         </div>
@@ -669,7 +669,7 @@ function PlanList({ book, quote, batchSel }) {
   return (
     <section className="panel plan-section plan-section-watch">
       <div className="panel-head plan-head">
-        <div className="panel-title"><Icon name="eye" size={16} /> 自选 / 候选 <span className="sub-name">{book.plan.length} 只 · 按买入准备度排序</span></div>
+        <div role="heading" aria-level="2" className="panel-title"><Icon name="eye" size={16} /> 自选 / 候选 <span className="sub-name">{book.plan.length} 只 · 按买入准备度排序</span></div>
         <div className="plan-head-r">
           <div className="plan-search"><StockSearch /></div>
         </div>
@@ -1153,7 +1153,7 @@ function HoldingList({ book, quote, batchSel }) {
   return (
     <section className="panel plan-section plan-section-hold">
       <div className="panel-head plan-head">
-        <div className="panel-title"><Icon name="wallet" size={16} /> 当前持仓 <span className="sub-name">{book.holding.length} 只 · 按浮盈金额排序</span></div>
+        <div role="heading" aria-level="2" className="panel-title"><Icon name="wallet" size={16} /> 当前持仓 <span className="sub-name">{book.holding.length} 只 · 按浮盈金额排序</span></div>
         <div className="hold-head-actions">
           <AdvisorScore book={book} />
           <AutoRefreshControl quote={quote} />
@@ -2031,7 +2031,7 @@ function HoldingItem({ h, idx, quote: q }) {
                 )}
               </div>
             )}
-            {tAdvice && tAdvice.error && <div className="err">{tAdvice.error} <span className="expand-btn" onClick={askTAdvice}>重试</span></div>}
+            {tAdvice && tAdvice.error && <div className="err">{tAdvice.error} <button type="button" className="expand-btn" onClick={askTAdvice}>重试</button></div>}
             {tAdvice && tAdvice.result && (
               <div className={'t-ai-card ' + (tAdvice.result.light || 'yellow')}>
                 <div className="t-ai-head">
@@ -2039,8 +2039,8 @@ function HoldingItem({ h, idx, quote: q }) {
                   {tAdvice.result.chosenStyle && <span className={'t-style-tag ' + tAdvice.result.chosenStyle}>{{ conservative: '稳健', balanced: '均衡', aggressive: '激进' }[tAdvice.result.chosenStyle] || tAdvice.result.chosenStyle}</span>}
                   {tAdvice.result.confidence && <span className="t-conf">信心 {tAdvice.result.confidence}</span>}
                   <div className="t-ai-actions" style={{ marginLeft: 'auto' }}>
-                    <span className="expand-btn" onClick={() => askTAdvice()}>重新生成</span>
-                    <span className="expand-btn" onClick={() => setTAdvice(null)}>收起</span>
+                    <button type="button" className="expand-btn" onClick={() => askTAdvice()}>重新生成</button>
+                    <button type="button" className="expand-btn" onClick={() => setTAdvice(null)}>收起</button>
                   </div>
                 </div>
                 {(tAdvice.truncated || tAdvice.result.truncated) && (
@@ -2117,12 +2117,12 @@ function HoldingItem({ h, idx, quote: q }) {
                 const expanded = openDays[d.key] ?? (di === 0) // 最新一天默认展开
                 return (
                   <div className="t-day" key={d.key}>
-                    <div className="t-day-head" onClick={() => setOpenDays((s) => ({ ...s, [d.key]: !expanded }))}>
+                    <button type="button" className="t-day-head" onClick={() => setOpenDays((s) => ({ ...s, [d.key]: !expanded }))}>
                       <Icon name={expanded ? 'chevronDown' : 'chevronRight'} size={13} />
                       <span className="t-day-label">{d.label}</span>
                       <span className="t-day-count">{d.count}笔</span>
                       <span className={'t-day-net ' + (d.realized >= 0 ? 'red' : 'green')}>{fmtMoney(d.realized)}</span>
-                    </div>
+                    </button>
                     {expanded && (
                       <>
                         {(d.buyAvg != null || d.sellAvg != null) && (
@@ -2231,8 +2231,8 @@ function TFlowRow({ f, holdingId }) {
       <span className="t-flow-p">{fmtRaw(f.price)} × {f.qty}手</span>
       <span className="t-flow-fee">费{f.fee.toFixed(2)}</span>
       <span className="t-flow-time">{dayKeyOf(f.at).slice(5)} {new Date(f.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
-      <span className="t-flow-edit-btn" title="编辑此笔" onClick={start}><Icon name="edit" size={12} /></span>
-      <span className="del" title="删除此笔" onClick={() => planStore.removeTFlow(holdingId, f.id)}>×</span>
+      <button type="button" className="t-flow-edit-btn" title="编辑此笔" onClick={start}><Icon name="edit" size={12} /></button>
+      <button type="button" className="del" title="删除此笔" onClick={() => planStore.removeTFlow(holdingId, f.id)}>×</button>
     </div>
   )
 }
@@ -2289,10 +2289,10 @@ function HoldReview({ code, name, cost, qty, price }) {
       </div>
 
       {/* ② 结论行：只保留“动作 + 一句话结论” */}
-      <div className={'hr-verdict tone-' + tone} onClick={() => setOpen((v) => !v)}>
+      <button type="button" className={'hr-verdict tone-' + tone} aria-expanded={open} onClick={() => setOpen((v) => !v)}>
         {r.stance && <span className={'hr-stance tone-' + tone}>{r.stance}</span>}
         <span className="hr-headline">{r.headline || r.stance}</span>
-      </div>
+      </button>
 
       {/* ReAct 研判思路：复盘结论背后的推理链 */}
       {r.reasoning && (

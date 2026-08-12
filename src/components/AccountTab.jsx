@@ -94,7 +94,7 @@ export default function AccountTab({ interval }) {
       {/* 账户全景卡 */}
       <div className="panel">
         <div className="panel-head">
-          <div className="panel-title"><Icon name="gauge" size={16} /> 账户全景</div>
+          <div role="heading" aria-level="2" className="panel-title"><Icon name="gauge" size={16} /> 账户全景</div>
           <button className="btn" onClick={() => {
             setTotal(account.initialCapital != null
               ? String(account.initialCapital)
@@ -199,7 +199,7 @@ export default function AccountTab({ interval }) {
 
       {/* 持仓明细（占比 + 浮盈） */}
       <div className="panel">
-        <div className="panel-head"><div className="panel-title"><Icon name="wallet" size={16} /> 持仓分布 <span className="sub-name">{rows.length} 只 · 按市值占比</span></div></div>
+        <div className="panel-head"><div role="heading" aria-level="2" className="panel-title"><Icon name="wallet" size={16} /> 持仓分布 <span className="sub-name">{rows.length} 只 · 按市值占比</span></div></div>
         {rows.length === 0 ? (
           <div className="empty">暂无持仓。在「持仓·做T」里建仓后，这里展示每只票的市值占比与浮盈。</div>
         ) : (

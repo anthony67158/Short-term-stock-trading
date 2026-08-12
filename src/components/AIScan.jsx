@@ -64,7 +64,7 @@ export default function AIScan({ market, sectors, limitPool, movers }) {
                     {Array.isArray(d.representStocks) && d.representStocks.length > 0 && (
                       <div className="dir-stocks">
                         {d.representStocks.map((s, j) => (
-                          <span className="dir-stock" key={j} onClick={() => s.code && openStockDetail(s.code, s.name)} style={{ cursor: s.code ? 'pointer' : 'default' }}>{s.name}<span style={{ opacity: .5, marginLeft: 4 }}>{s.code}</span></span>
+                          <button type="button" className="dir-stock" key={j} disabled={!s.code} onClick={() => s.code && openStockDetail(s.code, s.name)}>{s.name}<span className="dir-stock-code">{s.code}</span></button>
                         ))}
                       </div>
                     )}

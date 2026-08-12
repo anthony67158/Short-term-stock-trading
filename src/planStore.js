@@ -1108,7 +1108,7 @@ export const planStore = {
     }
     const alert = proposalAlertSpec(proposal)
     if (!alert) return { ok: false, error: '提案无法生成有效预警' }
-    snapshot(`确认助手提案 ${proposal.name}`)
+    snapshot(`确认军师提案 ${proposal.name}`)
     if (holder) {
       state.holding = state.holding.map((item) => item.id === holder.id ? {
         ...item,

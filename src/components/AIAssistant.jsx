@@ -279,7 +279,7 @@ export default function AIAssistant({ snapshot }) {
   return (
     <>
       {/* 悬浮球 */}
-      <button type="button" className={'ai-fab' + (open ? ' hidden' : '')} onClick={() => aiStore.open()} title="问军师">
+      <button type="button" className={'ai-fab' + (open ? ' hidden' : '')} onClick={() => aiStore.open()} title="问军师" aria-label="问军师">
         <span className="ai-fab-spark"><Icon name="spark" size={18} /></span>
         <span className="ai-fab-text">问军师</span>
       </button>
@@ -302,23 +302,23 @@ export default function AIAssistant({ snapshot }) {
           {/* 历史对话面板（按天） */}
           {histOpen && (
             <div className="ai-hist">
-              <div className="ai-hist-head">历史对话（按天）{!isToday && <span className="ai-hist-back" onClick={() => viewDay(today)}>回到今天</span>}</div>
+              <div className="ai-hist-head">历史对话（按天）{!isToday && <button type="button" className="ai-hist-back" onClick={() => viewDay(today)}>回到今天</button>}</div>
               {chatStore.days().length === 0 && <div className="ai-hist-empty">暂无历史对话</div>}
               {chatStore.days().map((d) => {
                 const s = chatStore.summary(d)
                 return (
                   <div key={d} className={'ai-hist-item' + (d === day ? ' active' : '')}>
-                    <span className="ai-hist-main" onClick={() => viewDay(d)}>
+                    <button type="button" className="ai-hist-main" onClick={() => viewDay(d)}>
                       <b>{d === today ? '今天' : d}</b>
                       <span className="ai-hist-sub">{s.count}条 · {s.first}</span>
-                    </span>
-                    <span className="del" title="删除这一天" onClick={() => {
+                    </button>
+                    <button type="button" className="del" title="删除这一天" aria-label={`删除 ${d} 的对话`} onClick={() => {
                       if (confirm(`删除 ${d} 的全部对话？`)) {
                         chatStore.removeDay(d)
                         if (d === day) { const t = today; setDay(t); setMsgs(chatStore.load(t)) }
                         setHistTick((n) => n + 1)
                       }
-                    }}>×</span>
+                    }}>×</button>
                   </div>
                 )
               })}
@@ -338,13 +338,13 @@ export default function AIAssistant({ snapshot }) {
           <div className="ai-chat" ref={scrollRef}>
             {msgs.length === 0 && !loading && (
               <div className="ai-welcome">
-                <div className="ai-welcome-title">我是你的短线操盘助手</div>
+                <div className="ai-welcome-title">我是你的短线操盘军师</div>
                 <div className="ai-welcome-sub">直接跟我说话就行——想分析哪只票就说名字（如"分析寒武纪"），想选股、看板块、问大盘都可以，我会自己查数据回答。</div>
-                <div className="qa-presets" style={{ marginTop: 14 }}>
-                  <span className="qa-preset" onClick={() => ask('分析一下寒武纪，资金面、基本面、消息面都看看')}>分析寒武纪</span>
-                  <span className="qa-preset" onClick={() => ask('帮我筛选涨幅5%以内、量比大于2、主力净流入靠前的票')}>按条件选股</span>
-                  <span className="qa-preset" onClick={() => ask('半导体板块现在资金和情绪怎么样？值得关注吗')}>问某个板块</span>
-                  <span className="qa-preset" onClick={() => ask('今天有哪些连板龙头？梯队健康吗')}>看连板梯队</span>
+                <div className="qa-presets qa-presets-welcome">
+                  <button type="button" className="qa-preset" onClick={() => ask('分析一下寒武纪，资金面、基本面、消息面都看看')}>分析寒武纪</button>
+                  <button type="button" className="qa-preset" onClick={() => ask('帮我筛选涨幅5%以内、量比大于2、主力净流入靠前的票')}>按条件选股</button>
+                  <button type="button" className="qa-preset" onClick={() => ask('半导体板块现在资金和情绪怎么样？值得关注吗')}>问某个板块</button>
+                  <button type="button" className="qa-preset" onClick={() => ask('今天有哪些连板龙头？梯队健康吗')}>看连板梯队</button>
                 </div>
               </div>
             )}
@@ -364,9 +364,9 @@ export default function AIAssistant({ snapshot }) {
           <div className="ai-input-row">
             <textarea
               ref={inputRef}
-              className="wl-input ai-textarea" style={{ flex: 1, width: 'auto' }}
+              className="wl-input ai-textarea"
               rows={1}
-              placeholder={isToday ? '分析某只票 / 选股 / 问板块 / 问大盘…（Enter 发送，Shift+Enter 换行）' : '正在查看历史，输入即回到今天继续对话'}
+              placeholder={isToday ? '分析股票、板块或大盘…' : '输入内容，回到今天继续对话'}
               value={q}
               onChange={(e) => setQ(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ask() } }}
@@ -376,7 +376,8 @@ export default function AIAssistant({ snapshot }) {
               ? <button className="btn btn-danger" onClick={stop}><Icon name="close" size={14} />停止</button>
               : <button className="btn btn-primary" onClick={() => ask()}><Icon name="send" size={14} />发送</button>}
           </div>
-          <div className="ai-disclaimer" style={{ padding: '0 16px 12px' }}>AI 基于实时行情/RAG/联网新闻分析，仅供研究参考，非投资建议</div>
+          <div className="ai-input-help">Enter 发送 · Shift+Enter 换行</div>
+          <div className="ai-disclaimer ai-drawer-disclaimer">AI 基于实时行情/RAG/联网新闻分析，仅供研究参考，非投资建议</div>
         </div>
       )}
       {confirmProposal && (
@@ -594,7 +595,7 @@ function Scan({ r }) {
           <div className="ai-line">{d.logic}</div>
           {Array.isArray(d.representStocks) && d.representStocks.length > 0 && (
             <div className="dir-stocks" style={{ marginTop: 4 }}>
-              {d.representStocks.map((s, j) => <span key={j} className="dir-stock" onClick={() => s.code && openStockDetail(s.code, s.name)} style={{ cursor: 'pointer' }}>{s.name} {s.code}</span>)}
+              {d.representStocks.map((s, j) => <button type="button" key={j} className="dir-stock" disabled={!s.code} onClick={() => s.code && openStockDetail(s.code, s.name)}>{s.name} {s.code}</button>)}
             </div>
           )}
         </div>
@@ -622,7 +623,7 @@ function SectorPick({ r }) {
       {r.sectorView && <div className="ai-summary" style={{ marginBottom: 8 }}>{r.sectorView}</div>}
       {Array.isArray(r.picks) && r.picks.map((p, i) => (
         <div key={i} className="ai-pick">
-          <div className="ai-pick-head"><b>{p.name}</b> <span className="dir-stock" onClick={() => p.code && openStockDetail(p.code, p.name)} style={{ cursor: 'pointer' }}>{p.code}</span></div>
+          <div className="ai-pick-head"><b>{p.name}</b> <button type="button" className="dir-stock" disabled={!p.code} onClick={() => p.code && openStockDetail(p.code, p.name)}>{p.code}</button></div>
           <div className="ai-line"><span className="ai-tag-reason">逻辑</span>{p.reason}</div>
           <div className="ai-line"><span className="ai-tag-watch">关注</span>{p.watch}</div>
         </div>

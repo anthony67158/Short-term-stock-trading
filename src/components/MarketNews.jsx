@@ -45,7 +45,7 @@ export default function MarketNews() {
   return (
     <div className="panel mn-panel">
       <div className="panel-head">
-        <div className="panel-title">
+        <div role="heading" aria-level="2" className="panel-title">
           <Icon name="news" size={16} /> 外部宏观经济分析
           <span className="sub-name">宏观要闻 · 7×24 快讯 · 全市场消息面</span>
         </div>
@@ -59,7 +59,7 @@ export default function MarketNews() {
       {reportOpen && <DailyReport onClose={() => setReportOpen(false)} />}
 
       {state.loading && <div className="mn-loading"><Icon name="refresh" size={13} className="spin" /> 正在加载外部消息面…</div>}
-      {state.error && <div className="mn-error">{state.error} <span className="expand-btn" onClick={load}>重试</span></div>}
+      {state.error && <div className="mn-error">{state.error} <button type="button" className="expand-btn" onClick={load}>重试</button></div>}
 
       {(macro.length > 0 || flashes.length > 0) && (
         <div className="mn-grid">

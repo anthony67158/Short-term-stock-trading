@@ -32,7 +32,7 @@ export default function Watchlist({ interval }) {
   return (
     <div className="panel" style={{ marginTop: 14 }}>
       <div className="panel-head">
-        <div className="panel-title"><Icon name="eye" size={16} /> 自选股监控 <span className="sub-name">账号 OSS 保存 · 点「问 AI」在助手中诊断/追问</span></div>
+        <div role="heading" aria-level="2" className="panel-title"><Icon name="eye" size={16} /> 自选股监控 <span className="sub-name">账号 OSS 保存 · 点「问军师」诊断/追问</span></div>
         <div style={{ display: 'flex', gap: 8 }}>
           <input
             className="wl-input"
@@ -45,13 +45,13 @@ export default function Watchlist({ interval }) {
         </div>
       </div>
       {codes.length === 0 ? (
-        <div className="empty">添加你的自选股（如 600519、300750），实时盯盘资金流，并可一键送入 AI 助手诊断</div>
+        <div className="empty">添加你的自选股（如 600519、300750），实时盯盘资金流，并可一键送入军师诊断</div>
       ) : (
         <div className="scroll" style={{ maxHeight: 460 }}>
           <table className="tbl">
             <thead>
               <tr>
-                <th>名称</th><th>现价</th><th>涨跌幅</th><th>换手</th><th>量比</th><th>主力净流入</th><th style={{ textAlign: 'center' }}>AI</th><th></th>
+                <th>名称</th><th>现价</th><th>涨跌幅</th><th>换手</th><th>量比</th><th>主力净流入</th><th style={{ textAlign: 'center' }}>军师</th><th></th>
               </tr>
             </thead>
             <tbody>
@@ -64,9 +64,9 @@ export default function Watchlist({ interval }) {
                   <td className={s.volRatio > 2 ? 'gold' : ''}>{fmtNum(s.volRatio, 1)}</td>
                   <td className={pctClass(s.mainInflow)}>{fmtInflow(s.mainInflow)}</td>
                   <td style={{ textAlign: 'center' }}>
-                    <button className="row-btn" onClick={() => aiStore.focusStock({ code: s.code, name: s.name }, 'diagnose')}>问 AI</button>
+                    <button className="row-btn" onClick={() => aiStore.focusStock({ code: s.code, name: s.name }, 'diagnose')}>问军师</button>
                   </td>
-                  <td><span className="del" onClick={() => remove(s.code)}>×</span></td>
+                  <td><button type="button" className="del" aria-label={`删除 ${s.name || s.code} 自选`} onClick={() => remove(s.code)}>×</button></td>
                 </tr>
               ))}
             </tbody>

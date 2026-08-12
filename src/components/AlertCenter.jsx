@@ -36,16 +36,16 @@ export default function AlertCenter({ onClose }) {
 
   return (
     <div className="modal-mask" onClick={onClose}>
-      <div className="alert-center" onClick={(e) => e.stopPropagation()}>
+      <div className="alert-center" role="dialog" aria-modal="true" aria-label="预警中心" onClick={(e) => e.stopPropagation()}>
         <div className="modal-bar">
           <div className="modal-title"><Icon name="bell" size={17} /> 预警中心</div>
-          <div className="modal-close" onClick={onClose}><Icon name="close" size={16} /></div>
+          <button type="button" className="modal-close" aria-label="关闭预警中心" onClick={onClose}><Icon name="close" size={16} /></button>
         </div>
 
         <div className="tabs" style={{ margin: '4px 16px 0' }}>
-          <div className={'tab' + (tab === 'notif' ? ' active' : '')} onClick={() => setTab('notif')}>通知 {notifications.length > 0 && `(${notifications.length})`}</div>
-          <div className={'tab' + (tab === 'rules' ? ' active' : '')} onClick={() => setTab('rules')}>规则 {alerts.length > 0 && `(${alerts.length})`}</div>
-          <div className={'tab' + (tab === 'quant' ? ' active' : '')} onClick={() => setTab('quant')}>量化汇报 {reports.length > 0 && `(${reports.length})`}</div>
+          <button type="button" className={'tab' + (tab === 'notif' ? ' active' : '')} aria-pressed={tab === 'notif'} onClick={() => setTab('notif')}>通知 {notifications.length > 0 && `(${notifications.length})`}</button>
+          <button type="button" className={'tab' + (tab === 'rules' ? ' active' : '')} aria-pressed={tab === 'rules'} onClick={() => setTab('rules')}>规则 {alerts.length > 0 && `(${alerts.length})`}</button>
+          <button type="button" className={'tab' + (tab === 'quant' ? ' active' : '')} aria-pressed={tab === 'quant'} onClick={() => setTab('quant')}>量化汇报 {reports.length > 0 && `(${reports.length})`}</button>
         </div>
 
         {/* 通知授权提示 */}
@@ -71,16 +71,17 @@ export default function AlertCenter({ onClose }) {
                   <button className="btn" onClick={() => alertStore.clearAll()}><Icon name="trash" size={12} /> 清空</button>
                 </div>
                 {notifications.map((n) => (
-                  <div className={'alert-notif' + (n.code ? ' an-clickable' : '')} key={n.id}
+                  <button type="button" className={'alert-notif' + (n.code ? ' an-clickable' : '')} key={n.id}
                     onClick={n.code ? () => openStockDetail(n.code, n.name) : undefined}
+                    disabled={!n.code}
                     title={n.code ? '点击查看个股详情与K线' : undefined}>
                     <div className="an-dot" />
                     <div className="an-main">
-                      <div className="an-title"><StockName code={n.code} name={n.name} stopPropagation><span>{n.name || n.code}</span></StockName>{n.code && <span className="an-jump"><Icon name="chevronRight" size={12} /></span>}</div>
+                      <div className="an-title"><span>{n.name || n.code}</span>{n.code && <span className="an-jump"><Icon name="chevronRight" size={12} /></span>}</div>
                       <div className="an-body">{n.body}</div>
                       <div className="an-time">{new Date(n.at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</div>
                     </div>
-                  </div>
+                  </button>
                 ))}
               </>
             )
@@ -100,9 +101,9 @@ export default function AlertCenter({ onClose }) {
                 const showTrack = !a.triggeredAt && m.progress != null
                 return (
                 <div className={'alert-rule dir-' + m.dir + (a.enabled ? '' : ' off') + (m.near ? ' is-near' : '')} key={a.id}>
-                  <div className="ar-main ar-main-clickable" onClick={() => openStockDetail(a.code, a.name)} title="点击查看个股详情与K线">
+                  <button type="button" className="ar-main ar-main-clickable" onClick={() => openStockDetail(a.code, a.name)} title="点击查看个股详情与K线">
                     <div className="ar-name">
-                      <StockName code={a.code} name={a.name} stopPropagation><span>{a.name || a.code}</span></StockName>
+                      <span>{a.name || a.code}</span>
                       <span className="ar-code">{a.code}</span>
                       <span className="ar-dir">{m.dirLabel}</span>
                       {Number(a.judgeCount) > 0 && (
@@ -138,7 +139,7 @@ export default function AlertCenter({ onClose }) {
                       </>
                     )}
                     {a.triggeredAt && <div className="ar-fired">已于 {new Date(a.triggeredAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })} 触发：{a.triggeredMsg}</div>}
-                  </div>
+                  </button>
                   <div className="ar-actions">
                     {a.actKind && <ActionQuickExec alert={a} holding={book.holding} />}
                     {a.triggeredAt ? (

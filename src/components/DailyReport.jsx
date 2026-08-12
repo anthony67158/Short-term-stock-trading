@@ -42,13 +42,13 @@ export default function DailyReport({ onClose }) {
 
   return (
     <div className="modal-mask mask-drawer" onClick={onClose}>
-      <div className="dr-drawer" onClick={(e) => e.stopPropagation()}>
+      <div className="dr-drawer" role="dialog" aria-modal="true" aria-label="全市场投资策略日报" onClick={(e) => e.stopPropagation()}>
         {/* 头 */}
         <div className="dr-head">
           <div className="dr-title"><Icon name="clipboard" size={17} /> 全市场投资策略日报</div>
           <div className="dr-head-actions">
             {r && <button className="icon-btn" title="刷新本场次" onClick={() => load(session, true)}><Icon name="refresh" size={15} /></button>}
-            <div className="modal-close" onClick={onClose}><Icon name="close" size={16} /></div>
+            <button type="button" className="modal-close" aria-label="关闭策略日报" onClick={onClose}><Icon name="close" size={16} /></button>
           </div>
         </div>
         {/* 场次切换 */}
@@ -63,7 +63,7 @@ export default function DailyReport({ onClose }) {
           {state.loading && (
             <div className="dr-loading"><Icon name="refresh" size={14} className="spin" /> {state.phase || '生成中…'}</div>
           )}
-          {state.error && <div className="dr-error">{state.error} <span className="expand-btn" onClick={() => load(session, true)}>重试</span></div>}
+          {state.error && <div className="dr-error">{state.error} <button type="button" className="expand-btn" onClick={() => load(session, true)}>重试</button></div>}
 
           {rep && (
             <>
@@ -85,7 +85,7 @@ export default function DailyReport({ onClose }) {
                   <div className="dr-block-t"><Icon name="wallet" size={13} /> 你的持仓 · 今日信息</div>
                   {rep.holdings.map((h, k) => (
                     <div className="dr-hold-item" key={k}>
-                      <div className="dr-hold-name" onClick={() => h.code && openStockDetail(h.code, h.name)}>{h.name}</div>
+                      <button type="button" className="dr-hold-name" onClick={() => h.code && openStockDetail(h.code, h.name)}>{h.name}</button>
                       <div className="dr-hold-info">{h.info}</div>
                       {h.impact && <div className="dr-hold-impact">{h.impact}</div>}
                     </div>

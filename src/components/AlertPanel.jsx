@@ -59,7 +59,7 @@ export default function AlertPanel({ interval }) {
   return (
     <div className="panel">
       <div className="panel-head">
-        <div className="panel-title"><Icon name="bell" size={16} /> 盯盘预警
+        <div role="heading" aria-level="2" className="panel-title"><Icon name="bell" size={16} /> 盯盘预警
           <span className="sub-name">{activeCnt} 条监控中 · 命中即弹通知+响铃</span>
         </div>
         <button className="btn btn-primary" onClick={async () => { await alertStore.requestPermission(); setAdding((v) => !v) }} disabled={cands.length === 0}>
@@ -105,8 +105,8 @@ export default function AlertPanel({ interval }) {
       )}
 
       <div className="tabs" style={{ margin: '4px 18px 8px' }}>
-        <div className={'tab' + (tab === 'rules' ? ' active' : '')} onClick={() => setTab('rules')}>规则 {visibleAlerts.length > 0 && `(${visibleAlerts.length})`}</div>
-        <div className={'tab' + (tab === 'notif' ? ' active' : '')} onClick={() => setTab('notif')}>命中记录 {notifications.length > 0 && `(${notifications.length})`}</div>
+        <button type="button" className={'tab' + (tab === 'rules' ? ' active' : '')} aria-pressed={tab === 'rules'} onClick={() => setTab('rules')}>规则 {visibleAlerts.length > 0 && `(${visibleAlerts.length})`}</button>
+        <button type="button" className={'tab' + (tab === 'notif' ? ' active' : '')} aria-pressed={tab === 'notif'} onClick={() => setTab('notif')}>命中记录 {notifications.length > 0 && `(${notifications.length})`}</button>
       </div>
 
       <div className="alert-body-inline">
@@ -214,9 +214,9 @@ function renderRule(a, quote, setDelTarget, holding) {
   const showTrack = !a.triggeredAt && m.progress != null   // 仅未触发的价位类显示距触发进度
   return (
     <div className={'alert-rule dir-' + m.dir + (a.enabled ? '' : ' off') + (m.near ? ' is-near' : '')} key={a.id}>
-      <div className="ar-main ar-main-clickable" onClick={() => openStockDetail(a.code, a.name)} title="点击查看个股详情与K线">
+      <button type="button" className="ar-main ar-main-clickable" onClick={() => openStockDetail(a.code, a.name)} title="点击查看个股详情与K线">
         <div className="ar-name">
-          <StockName code={a.code} name={a.name} stopPropagation><span>{a.name || a.code}</span></StockName>
+          <span>{a.name || a.code}</span>
           <span className="ar-code">{a.code}</span>
           <span className="ar-dir">{m.dirLabel}</span>
           {isAuto && <span className="ar-badge">AI</span>}
@@ -237,10 +237,10 @@ function renderRule(a, quote, setDelTarget, holding) {
           </>
         )}
         {a.phase === 'watching' && !a.triggeredAt && (
-          <div className="ar-watching">👀 已到点位，系统盯盘确认真正时机中，确认后会发「可以操作」强提示{a.watchingAt ? ` · ${new Date(a.watchingAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}起` : ''}</div>
+          <div className="ar-watching"><Icon name="eye" size={12} /> 已到点位，系统盯盘确认真正时机中，确认后会发「可以操作」强提示{a.watchingAt ? ` · ${new Date(a.watchingAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}起` : ''}</div>
         )}
         {a.triggeredAt && <div className="ar-fired">已于 {new Date(a.triggeredAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })} 触发：{a.triggeredMsg}</div>}
-      </div>
+      </button>
       <div className="ar-actions">
         {a.actKind && <ActionQuickExec alert={a} holding={holding} />}
         {a.triggeredAt ? (

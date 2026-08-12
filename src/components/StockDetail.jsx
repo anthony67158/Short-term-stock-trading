@@ -600,7 +600,7 @@ export default function StockDetail({ stock, onClose }) {
 
   return (
     <div className="modal-mask" onClick={onClose}>
-      <div className="detail-panel" onClick={(e) => e.stopPropagation()}>
+      <div className="detail-panel" role="dialog" aria-modal="true" aria-label={`${stock.name || stock.code} 个股详情`} onClick={(e) => e.stopPropagation()}>
         <div className="modal-bar">
           <div className="modal-title">
             {(profile && profile.name) || stock.name}
@@ -640,7 +640,7 @@ export default function StockDetail({ stock, onClose }) {
               <Icon name="refresh" size={15} className={refreshing || loading ? 'spin' : ''} />
               <span className="detail-refresh-txt">{refreshing ? '刷新中' : '刷新'}</span>
             </button>
-            <div className="modal-close" onClick={onClose}><Icon name="close" size={16} /></div>
+            <button type="button" className="modal-close" aria-label="关闭个股详情" onClick={onClose}><Icon name="close" size={16} /></button>
           </div>
         </div>
 
@@ -942,7 +942,7 @@ export default function StockDetail({ stock, onClose }) {
                               {q.score != null && (q.reads || []).length > 0 && (
                                 <div className="quant-line">
                                   {(q.reads || []).slice(-1).map((r, i) => <span className="quant-line-read" key={i}>{r}</span>)}
-                                  <span className="expand-btn" style={{ marginLeft: 'auto' }} onClick={loadQuant}>刷新</span>
+                                  <button type="button" className="expand-btn push-end" onClick={loadQuant}>刷新</button>
                                 </div>
                               )}
                             </>
@@ -959,12 +959,12 @@ export default function StockDetail({ stock, onClose }) {
               {/* 均线技术参考（精简为可折叠的次要信息）*/}
               {tech && (
                 <div className="tech-box">
-                  <div className="tech-fold" onClick={() => setShowTech((v) => !v)}>
+                  <button type="button" className="tech-fold" aria-expanded={showTech} onClick={() => setShowTech((v) => !v)}>
                     <span><Icon name="pulse" size={13} /> 技术面细节
                       {tech.verdict && <span className={'tech-verdict-inline ' + (tech.vtone || 'muted')}>{tech.verdict}</span>}
                     </span>
                     <Icon name={showTech ? 'chevronDown' : 'chevronRight'} size={14} />
-                  </div>
+                  </button>
                   {showTech && (
                     <>
                       {/* 买卖价位 */}

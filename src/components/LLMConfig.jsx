@@ -414,10 +414,10 @@ export default function LLMConfig() {
 
   return (
     <div className="modal-mask" onClick={(e) => { if (e.target === e.currentTarget) close() }}>
-      <div className="llm-cfg" onClick={(e) => e.stopPropagation()}>
+      <div className="llm-cfg" role="dialog" aria-modal="true" aria-label="AI 模型配置" onClick={(e) => e.stopPropagation()}>
         <div className="modal-bar">
           <div className="modal-title"><Icon name="brain" size={18} /> AI 模型配置</div>
-          <div className="modal-close" onClick={close}>×</div>
+          <button type="button" className="modal-close" aria-label="关闭 AI 模型配置" onClick={close}><Icon name="close" size={16} /></button>
         </div>
 
         {/* 步骤指示器 */}

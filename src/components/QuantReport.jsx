@@ -65,7 +65,7 @@ export default function QuantReport() {
 
   return (
     <div className="modal-mask" onClick={onClose}>
-      <div className="qrp-panel" onClick={(e) => e.stopPropagation()}>
+      <div className="qrp-panel" role="dialog" aria-modal="true" aria-label="量化汇报" onClick={(e) => e.stopPropagation()}>
         <div className="qrp-bar">
           <div className="qrp-heading"><Icon name="gauge" size={18} /> 量化汇报</div>
           <div className="qrp-actions">

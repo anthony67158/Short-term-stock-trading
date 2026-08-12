@@ -3,47 +3,66 @@ import ReactECharts from 'echarts-for-react'
 import Icon from './Icon'
 import StockName from './StockName'
 import { planStore, usePlanStore, computeTFlows } from '../planStore'
-import { fmtPct, pctClass , fmtRaw } from '../format'
+import { finiteNum, fmtPct, pctClass, fmtRaw } from '../format'
 
 // 汇总所有交易记录：已存 closed（BUY/SELL/CLOSE/T）+ 持仓中实时做T（未归档）
 function useRealizedRecords(book) {
   const closed = (book.closed || []).map((c) => ({
     ...c,
     type: c.type || (c.kind === 'T' ? 'T' : 'CLOSE'), // 兼容旧数据
-    realizedPnl: c.realizedPnl != null ? c.realizedPnl : (c.netPnl ?? null),
+    realizedPnl: c.realizedPnl != null
+      ? finiteNum(c.realizedPnl, null)
+      : finiteNum(c.netPnl, null),
   }))
   // 持仓中每笔已配对的做T（尚未归档，标记为 live 便于区分）
   const liveT = []
   for (const h of book.holding || []) {
     const r = computeTFlows(h.tFlows)
     for (const p of (r.pairList || [])) {
+      const qty = finiteNum(p.qty)
+      const buyPrice = finiteNum(p.buyPrice)
+      const sellPrice = finiteNum(p.sellPrice)
+      const buyFee = finiteNum(p.buyFee)
+      const sellFee = finiteNum(p.sellFee)
+      const netPnl = finiteNum(p.netPnl)
+      const costBasis = buyPrice * qty * 100 + buyFee
       liveT.push({
         id: h.id + '_' + p.at, type: 'T', kind: 'T', live: true, code: h.code, name: h.name,
-        qty: p.qty, buyPrice: p.buyPrice, sellPrice: p.sellPrice,
-        buyFee: p.buyFee, sellFee: p.sellFee, grossPnl: p.grossPnl, netPnl: p.netPnl, realizedPnl: p.netPnl,
-        pnlPct: p.buyPrice ? +(p.netPnl / (p.buyPrice * p.qty * 100 + p.buyFee) * 100).toFixed(2) : 0,
+        qty, buyPrice, sellPrice, buyFee, sellFee,
+        grossPnl: finiteNum(p.grossPnl), netPnl, realizedPnl: netPnl,
+        pnlPct: costBasis > 0 ? +(netPnl / costBasis * 100).toFixed(2) : 0,
         tDir: p.tDir, holdingId: h.id, buyAt: p.buyAt, sellAt: p.sellAt, at: p.at,
       })
     }
     // 未配平开口腿：净买入→加仓(BUY)、净卖出→减仓(SELL)，实时体现在交易记录（标 live+待结算）
-    if (r.openBuy > 0 && r.openBuyAvg != null) {
-      const amount = +(r.openBuyAvg * r.openBuy * 100).toFixed(2)
+    const openBuy = finiteNum(r.openBuy)
+    const openBuyAvg = finiteNum(r.openBuyAvg, null)
+    const openSell = finiteNum(r.openSell)
+    const openSellAvg = finiteNum(r.openSellAvg, null)
+    if (openBuy > 0 && openBuyAvg != null) {
+      const amount = +(openBuyAvg * openBuy * 100).toFixed(2)
       liveT.push({
         id: h.id + '_openbuy', type: 'BUY', live: true, pending: true, code: h.code, name: h.name, side: 'buy',
-        qty: r.openBuy, price: r.openBuyAvg, buyPrice: r.openBuyAvg, fee: r.openBuyFee, amount,
+        qty: openBuy, price: openBuyAvg, buyPrice: openBuyAvg,
+        fee: finiteNum(r.openBuyFee), amount,
         realizedPnl: null, holdingId: h.id, at: r.openBuyAt || Date.now(),
       })
     }
-    if (r.openSell > 0 && r.openSellAvg != null) {
-      const shares = r.openSell * 100
-      const amount = +(r.openSellAvg * shares).toFixed(2)
-      const cost = (h.buyPrice || 0) * shares
-      const buyFeePart = h.qty ? +(((h.buyFee || 0) * (r.openSell / h.qty))).toFixed(2) : 0
-      const netPnl = +((amount - cost) - r.openSellFee - buyFeePart).toFixed(2)
+    if (openSell > 0 && openSellAvg != null) {
+      const shares = openSell * 100
+      const amount = +(openSellAvg * shares).toFixed(2)
+      const costPrice = finiteNum(h.buyPrice)
+      const cost = costPrice * shares
+      const holdingQty = finiteNum(h.qty)
+      const buyFeePart = holdingQty
+        ? +((finiteNum(h.buyFee) * (openSell / holdingQty))).toFixed(2)
+        : 0
+      const sellFee = finiteNum(r.openSellFee)
+      const netPnl = +((amount - cost) - sellFee - buyFeePart).toFixed(2)
       liveT.push({
         id: h.id + '_opensell', type: 'SELL', kind: 'SELL', live: true, pending: true, code: h.code, name: h.name, side: 'sell',
-        qty: r.openSell, price: r.openSellAvg, sellPrice: r.openSellAvg, buyPrice: h.buyPrice, costPrice: h.buyPrice,
-        fee: r.openSellFee, buyFee: buyFeePart, sellFee: r.openSellFee, amount,
+        qty: openSell, price: openSellAvg, sellPrice: openSellAvg, buyPrice: costPrice, costPrice,
+        fee: sellFee, buyFee: buyFeePart, sellFee, amount,
         grossPnl: +(amount - cost).toFixed(2), netPnl, realizedPnl: netPnl,
         pnlPct: cost ? +(netPnl / (cost + buyFeePart) * 100).toFixed(2) : 0,
         holdingId: h.id, at: r.openSellAt || Date.now(), sellAt: r.openSellAt || Date.now(),
@@ -73,7 +92,7 @@ function DecisionClosure({ book }) {
   return (
     <div className="panel">
       <div className="panel-head">
-        <div className="panel-title"><Icon name="target" size={16} /> 决策闭环</div>
+        <div role="heading" aria-level="2" className="panel-title"><Icon name="target" size={16} /> 决策闭环</div>
         <span className="panel-sub">AI 建议不等于真实操作，只统计实际落账</span>
       </div>
       {stats.recommendations === 0 && stats.executions === 0 ? (
@@ -123,21 +142,25 @@ function groupByStock(items) {
     if (!map.has(c.code)) map.set(c.code, { code: c.code, name: c.name, items: [], bq: 0, ba: 0, bf: 0, sq: 0, sa: 0, sf: 0, net: 0, fee: 0 })
     const g = map.get(c.code)
     g.items.push(c)
-    const q = c.qty || 0, sh = q * 100
+    const q = finiteNum(c.qty), sh = q * 100
     const isBuy = c.type === 'BUY'
     const isSell = c.type === 'SELL'
     if (isBuy) {
-      g.bq += q; g.ba += (c.price || c.buyPrice || 0) * sh; g.bf += c.fee ?? c.buyFee ?? 0
-      g.fee += c.fee ?? c.buyFee ?? 0
+      const fee = finiteNum(c.fee ?? c.buyFee)
+      g.bq += q; g.ba += finiteNum(c.price || c.buyPrice) * sh; g.bf += fee
+      g.fee += fee
     } else if (isSell) {
-      g.sq += q; g.sa += (c.price || c.sellPrice || 0) * sh; g.sf += c.fee ?? c.sellFee ?? 0
-      g.fee += c.fee ?? c.sellFee ?? 0
+      const fee = finiteNum(c.fee ?? c.sellFee)
+      g.sq += q; g.sa += finiteNum(c.price || c.sellPrice) * sh; g.sf += fee
+      g.fee += fee
     } else { // CLOSE / T：买卖双腿
-      g.bq += q; g.ba += (c.buyPrice || 0) * sh; g.bf += c.buyFee || 0
-      g.sq += q; g.sa += (c.sellPrice || 0) * sh; g.sf += c.sellFee || 0
-      g.fee += (c.buyFee ?? 0) + (c.sellFee ?? 0)
+      const buyFee = finiteNum(c.buyFee)
+      const sellFee = finiteNum(c.sellFee)
+      g.bq += q; g.ba += finiteNum(c.buyPrice) * sh; g.bf += buyFee
+      g.sq += q; g.sa += finiteNum(c.sellPrice) * sh; g.sf += sellFee
+      g.fee += buyFee + sellFee
     }
-    g.net += c.realizedPnl ?? 0 // BUY 的 realizedPnl 为 null，不计入
+    g.net += finiteNum(c.realizedPnl) // BUY 的 realizedPnl 为 null，不计入
   }
   return [...map.values()].map((g) => ({
     ...g,
@@ -150,8 +173,8 @@ function groupByStock(items) {
 function typeKey(c) { return c.type || (c.kind === 'T' ? 'T' : 'CLOSE') }
 // 单条记录的手续费（单腿用 fee，回合用买+卖）
 function feeOf(c) {
-  if (c.fee != null && (c.type === 'BUY' || c.type === 'SELL')) return c.fee
-  return (c.buyFee ?? 0) + (c.sellFee ?? 0)
+  if (c.fee != null && (c.type === 'BUY' || c.type === 'SELL')) return finiteNum(c.fee)
+  return finiteNum(c.buyFee) + finiteNum(c.sellFee)
 }
 // 单条流水行渲染（区分 纯买入/纯卖出/平仓/做T）
 function TxnRow({ c, onDelete, onEditDate, showDate }) {
@@ -236,16 +259,16 @@ function DailyLog({ records }) {
   return (
     <div className="panel">
       <div className="panel-head">
-        <div className="panel-title"><Icon name="clipboard" size={16} /> 每日操作流水</div>
+        <div role="heading" aria-level="2" className="panel-title"><Icon name="clipboard" size={16} /> 每日操作流水</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <div className="tabs">
             {[['all', '全部'], ['BUY', '买入'], ['SELL', '卖出'], ['CLOSE', '平仓'], ['T', '做T']].map(([k, t]) => (
-              <div key={k} className={'tab' + (filter === k ? ' active' : '')} onClick={() => setFilter(k)}>{t}</div>
+              <button type="button" key={k} className={'tab' + (filter === k ? ' active' : '')} aria-pressed={filter === k} onClick={() => setFilter(k)}>{t}</button>
             ))}
           </div>
           <div className="tabs">
-            <div className={'tab' + (groupMode === 'day' ? ' active' : '')} onClick={() => setGroupMode('day')}>按时间</div>
-            <div className={'tab' + (groupMode === 'stock' ? ' active' : '')} onClick={() => setGroupMode('stock')}>按个股</div>
+            <button type="button" className={'tab' + (groupMode === 'day' ? ' active' : '')} aria-pressed={groupMode === 'day'} onClick={() => setGroupMode('day')}>按时间</button>
+            <button type="button" className={'tab' + (groupMode === 'stock' ? ' active' : '')} aria-pressed={groupMode === 'stock'} onClick={() => setGroupMode('stock')}>按个股</button>
           </div>
           {(records || []).some((c) => !c.live) && (
             <>
@@ -352,14 +375,18 @@ function DailyLog({ records }) {
             const dayset = new Set(g.items.map((c) => dayKey(c.at || c.sellAt || c.buyAt)))
             return (
               <div className="day-block" key={g.code}>
-                <div className="day-head day-head-btn" onClick={() => toggle(skey)}>
-                  <Icon name={folded ? 'chevronRight' : 'chevronDown'} size={13} />
+                <div className="day-head day-head-split">
+                  <button type="button" className="day-fold-toggle" aria-label={folded ? '展开个股交易记录' : '收起个股交易记录'} aria-expanded={!folded} onClick={() => toggle(skey)}>
+                    <Icon name={folded ? 'chevronRight' : 'chevronDown'} size={13} />
+                  </button>
                   <StockName code={g.code} name={g.name} stopPropagation><span className="day-date">{g.name}</span></StockName>
-                  <span className="day-sub">{g.items.length}笔 · {dayset.size}天</span>
-                  {g.ba > 0 && <span className="day-flow">花 <b>{fmtAmt(g.ba + g.bf)}</b></span>}
-                  {g.sa > 0 && <span className="day-flow">收 <b>{fmtAmt(g.sa - g.sf)}</b></span>}
-                  <span className="day-net">已实现 <b className={g.net >= 0 ? 'red' : 'green'}>{fmtMoney(g.net)}</b></span>
-                  <span className="day-fee">手续费 {fmtMoney(g.fee).replace('+', '')}</span>
+                  <button type="button" className="day-summary-toggle" aria-expanded={!folded} onClick={() => toggle(skey)}>
+                    <span className="day-sub">{g.items.length}笔 · {dayset.size}天</span>
+                    {g.ba > 0 && <span className="day-flow">花 <b>{fmtAmt(g.ba + g.bf)}</b></span>}
+                    {g.sa > 0 && <span className="day-flow">收 <b>{fmtAmt(g.sa - g.sf)}</b></span>}
+                    <span className="day-net">已实现 <b className={g.net >= 0 ? 'red' : 'green'}>{fmtMoney(g.net)}</b></span>
+                    <span className="day-fee">手续费 {fmtMoney(g.fee).replace('+', '')}</span>
+                  </button>
                 </div>
                 {!folded && (
                   <div className="day-items">
@@ -385,11 +412,11 @@ function DailyLog({ records }) {
           {days.map((day) => {
             const items = groups[day].slice().sort((a, b) => (b.at || b.sellAt || 0) - (a.at || a.sellAt || 0))
             // 已实现盈亏只统计有 realizedPnl 的（BUY 不计）
-            const net = items.reduce((a, c) => a + (c.realizedPnl ?? 0), 0)
+            const net = items.reduce((a, c) => a + finiteNum(c.realizedPnl), 0)
             const fee = items.reduce((a, c) => a + feeOf(c), 0)
             // 当天现金进出：买入花费(成交额+买费)、卖出回收(成交额−卖费)
-            const daySpend = items.filter((c) => typeKey(c) === 'BUY').reduce((a, c) => a + amountOf(c) + (c.fee ?? c.buyFee ?? 0), 0)
-            const dayRecover = items.filter((c) => typeKey(c) === 'SELL').reduce((a, c) => a + amountOf(c) - (c.fee ?? c.sellFee ?? 0), 0)
+            const daySpend = items.filter((c) => typeKey(c) === 'BUY').reduce((a, c) => a + amountOf(c) + finiteNum(c.fee ?? c.buyFee), 0)
+            const dayRecover = items.filter((c) => typeKey(c) === 'SELL').reduce((a, c) => a + amountOf(c) - finiteNum(c.fee ?? c.sellFee), 0)
             const nBuy = items.filter((c) => typeKey(c) === 'BUY').length
             const nSell = items.filter((c) => typeKey(c) === 'SELL').length
             const nClose = items.filter((c) => typeKey(c) === 'CLOSE').length
@@ -402,7 +429,7 @@ function DailyLog({ records }) {
             const dayFolded = collapsed[day] ?? (day !== today) // 非今天默认折叠
             return (
               <div className="day-block" key={day}>
-                <div className="day-head day-head-btn" onClick={() => toggle(day)}>
+                <button type="button" className="day-head day-head-btn" aria-expanded={!dayFolded} onClick={() => toggle(day)}>
                   <Icon name={dayFolded ? 'chevronRight' : 'chevronDown'} size={13} />
                   <span className="day-date">{day}</span>
                   <span className="day-sub">{parts.join(' · ')}</span>
@@ -410,7 +437,7 @@ function DailyLog({ records }) {
                   {dayRecover > 0 && <span className="day-flow">收 <b>{fmtAmt(dayRecover)}</b></span>}
                   <span className="day-net">已实现 <b className={net >= 0 ? 'red' : 'green'}>{fmtMoney(net)}</b></span>
                   <span className="day-fee">手续费 {fmtMoney(fee).replace('+', '')}</span>
-                </div>
+                </button>
                 {!dayFolded && (
                   <div className="day-items">
                     {groupByStock(items).map((g) => {
@@ -418,18 +445,22 @@ function DailyLog({ records }) {
                       const stockFolded = collapsed[skey] ?? false // 股票默认展开
                       return (
                         <div className="ds-stock" key={g.code}>
-                          <div className="ds-stock-head ds-stock-head-btn" onClick={() => toggle(skey)}>
-                            <Icon name={stockFolded ? 'chevronRight' : 'chevronDown'} size={12} />
+                          <div className="ds-stock-head ds-stock-head-split">
+                            <button type="button" className="day-fold-toggle" aria-label={stockFolded ? '展开个股流水' : '收起个股流水'} aria-expanded={!stockFolded} onClick={() => toggle(skey)}>
+                              <Icon name={stockFolded ? 'chevronRight' : 'chevronDown'} size={12} />
+                            </button>
                             <StockName code={g.code} name={g.name} stopPropagation><span className="ds-stock-name">{g.name}</span></StockName>
-                            <span className="ds-stock-cnt">{g.items.length}笔</span>
-                            <span className="ds-avg">
-                              {g.buyAvg != null && <span className="ds-avg-i"><span className="ds-avg-k buy">买均</span><b>{fmtRaw(g.buyAvg)}</b></span>}
-                              {g.sellAvg != null && <span className="ds-avg-i"><span className="ds-avg-k sell">卖均</span><b>{fmtRaw(g.sellAvg)}</b></span>}
-                              {g.ba > 0 && <span className="ds-avg-i"><span className="ds-avg-k buy">花费</span><b>{fmtAmt(g.ba + g.bf)}</b></span>}
-                              {g.sa > 0 && <span className="ds-avg-i"><span className="ds-avg-k sell">回收</span><b>{fmtAmt(g.sa - g.sf)}</b></span>}
-                              <span className="ds-avg-fee">费{g.fee.toFixed(0)}</span>
-                            </span>
-                            <span className={'ds-stock-net ' + (g.net >= 0 ? 'red' : 'green')}>{fmtMoney(g.net)}</span>
+                            <button type="button" className="ds-stock-summary" aria-expanded={!stockFolded} onClick={() => toggle(skey)}>
+                              <span className="ds-stock-cnt">{g.items.length}笔</span>
+                              <span className="ds-avg">
+                                {g.buyAvg != null && <span className="ds-avg-i"><span className="ds-avg-k buy">买均</span><b>{fmtRaw(g.buyAvg)}</b></span>}
+                                {g.sellAvg != null && <span className="ds-avg-i"><span className="ds-avg-k sell">卖均</span><b>{fmtRaw(g.sellAvg)}</b></span>}
+                                {g.ba > 0 && <span className="ds-avg-i"><span className="ds-avg-k buy">花费</span><b>{fmtAmt(g.ba + g.bf)}</b></span>}
+                                {g.sa > 0 && <span className="ds-avg-i"><span className="ds-avg-k sell">回收</span><b>{fmtAmt(g.sa - g.sf)}</b></span>}
+                                <span className="ds-avg-fee">费{g.fee.toFixed(0)}</span>
+                              </span>
+                              <span className={'ds-stock-net ' + (g.net >= 0 ? 'red' : 'green')}>{fmtMoney(g.net)}</span>
+                            </button>
                           </div>
                           {!stockFolded && g.items.map((c, i) => <TxnRow c={c} key={c.id || i} onDelete={setDelTarget} onEditDate={openDateEditor} />)}
                         </div>
@@ -448,33 +479,34 @@ function DailyLog({ records }) {
 
 // 交易统计
 function fmtMoney(v) {
-  const sign = v >= 0 ? '+' : '-'; const a = Math.abs(v)
+  const value = finiteNum(v)
+  const sign = value >= 0 ? '+' : '-'; const a = Math.abs(value)
   if (a >= 10000) return sign + (a / 10000).toFixed(2) + '万'
   return sign + a.toFixed(0)
 }
 // 无符号金额（成交额/花费/回收），万以上转万
 function fmtAmt(v) {
-  const a = Math.abs(v || 0)
+  const a = Math.abs(finiteNum(v))
   if (a >= 10000) return (a / 10000).toFixed(2) + '万'
   return a.toFixed(0)
 }
 // 一条记录的成交额（不含费）：单腿用 amount，回合/做T用买腿或卖腿市值
 function amountOf(c) {
-  if (c.amount != null) return c.amount
+  if (c.amount != null) return finiteNum(c.amount)
   const t = c.type || (c.kind === 'T' ? 'T' : 'CLOSE')
-  const sh = (c.qty || 0) * 100
-  if (t === 'BUY') return (c.price ?? c.buyPrice ?? 0) * sh
-  if (t === 'SELL') return (c.price ?? c.sellPrice ?? 0) * sh
-  return (c.sellPrice ?? 0) * sh // 平仓/做T 取卖出腿市值
+  const sh = finiteNum(c.qty) * 100
+  if (t === 'BUY') return finiteNum(c.price ?? c.buyPrice) * sh
+  if (t === 'SELL') return finiteNum(c.price ?? c.sellPrice) * sh
+  return finiteNum(c.sellPrice) * sh // 平仓/做T 取卖出腿市值
 }
 function statOf(arr) {
   const n = arr.length
-  const wins = arr.filter((c) => (c.realizedPnl ?? 0) > 0)
-  const losses = arr.filter((c) => (c.realizedPnl ?? 0) < 0)
+  const wins = arr.filter((c) => finiteNum(c.realizedPnl) > 0)
+  const losses = arr.filter((c) => finiteNum(c.realizedPnl) < 0)
   const win = wins.length
-  const net = arr.reduce((a, c) => a + (c.realizedPnl ?? 0), 0)
-  const avgWin = wins.length ? wins.reduce((a, c) => a + c.realizedPnl, 0) / wins.length : 0
-  const avgLoss = losses.length ? Math.abs(losses.reduce((a, c) => a + c.realizedPnl, 0) / losses.length) : 0
+  const net = arr.reduce((a, c) => a + finiteNum(c.realizedPnl), 0)
+  const avgWin = wins.length ? wins.reduce((a, c) => a + finiteNum(c.realizedPnl), 0) / wins.length : 0
+  const avgLoss = losses.length ? Math.abs(losses.reduce((a, c) => a + finiteNum(c.realizedPnl), 0) / losses.length) : 0
   const rate = n ? win / n : null
   // 盈亏比 = 平均盈利 / 平均亏损；期望值 = 胜率×平均盈利 − 败率×平均亏损
   const plRatio = avgLoss > 0 ? avgWin / avgLoss : null
@@ -493,8 +525,8 @@ function exportCsv(records) {
       typeLabel(c), c.code, c.name, c.qty ?? '',
       c.buyPrice ?? c.price ?? '', c.sellPrice ?? (c.type === 'SELL' ? c.price : '') ?? '',
       amountOf(c).toFixed(2),
-      ((c.fee ?? 0) || ((c.buyFee ?? 0) + (c.sellFee ?? 0))).toFixed(2),
-      c.realizedPnl != null ? c.realizedPnl.toFixed(2) : '',
+      feeOf(c).toFixed(2),
+      c.realizedPnl != null ? finiteNum(c.realizedPnl).toFixed(2) : '',
     ]
   })
   const csv = [head, ...rows].map((r) => r.map((x) => `"${String(x).replace(/"/g, '""')}"`).join(',')).join('\n')
@@ -513,14 +545,14 @@ function TradeStat({ records }) {
   const totalNet = sStat.net + tStat.net // 已实现净收益(买入不计盈亏)
   const totalFee = records.reduce((a, c) => a + feeOf(c), 0)
   // 累计花费(买入成交额+买费) / 累计回收(卖出成交额−卖费)
-  const buyAmt = buys.reduce((a, c) => a + amountOf(c) + (c.fee ?? c.buyFee ?? 0), 0)
-  const sellAmt = sells.reduce((a, c) => a + amountOf(c) - (c.fee ?? c.sellFee ?? 0), 0)
+  const buyAmt = buys.reduce((a, c) => a + amountOf(c) + finiteNum(c.fee ?? c.buyFee), 0)
+  const sellAmt = sells.reduce((a, c) => a + amountOf(c) - finiteNum(c.fee ?? c.sellFee), 0)
   const empty = records.length === 0
   const netCls = totalNet > 0 ? 'red' : totalNet < 0 ? 'green' : ''
 
   return (
     <div className="panel">
-      <div className="panel-head"><div className="panel-title"><Icon name="gauge" size={16} /> 交易复盘</div>
+      <div className="panel-head"><div role="heading" aria-level="2" className="panel-title"><Icon name="gauge" size={16} /> 交易复盘</div>
         <span className="panel-sub">买入/卖出/做T 分类统计</span>
       </div>
       {empty ? (
@@ -600,7 +632,11 @@ function ReviewCharts({ records }) {
   const closed = useMemo(
     () => records
       .filter((c) => c.realizedPnl != null)
-      .map((c) => ({ ...c, ts: c.at || c.sellAt || c.buyAt || 0 }))
+      .map((c) => ({
+        ...c,
+        realizedPnl: finiteNum(c.realizedPnl),
+        ts: c.at || c.sellAt || c.buyAt || 0,
+      }))
       .sort((a, b) => a.ts - b.ts),
     [records]
   )
@@ -637,7 +673,7 @@ function ReviewCharts({ records }) {
     const map = new Map()
     for (const c of closed) {
       const k = dayKey(c.ts)
-      map.set(k, (map.get(k) || 0) + c.realizedPnl)
+      map.set(k, (map.get(k) || 0) + finiteNum(c.realizedPnl))
     }
     const days = [...map.keys()].sort()
     const vals = days.map((d) => +map.get(d).toFixed(2))
@@ -661,7 +697,7 @@ function ReviewCharts({ records }) {
     const map = new Map()
     for (const c of closed) {
       if (!map.has(c.code)) map.set(c.code, { name: c.name || c.code, pnl: 0 })
-      map.get(c.code).pnl += c.realizedPnl
+      map.get(c.code).pnl += finiteNum(c.realizedPnl)
     }
     const arr = [...map.values()].map((x) => ({ ...x, pnl: +x.pnl.toFixed(2) }))
       .sort((a, b) => a.pnl - b.pnl) // 升序，最赚的在顶部（ECharts y 轴从下往上）
@@ -685,7 +721,7 @@ function ReviewCharts({ records }) {
   if (!closed.length) {
     return (
       <div className="panel">
-        <div className="panel-head"><div className="panel-title"><Icon name="chart" size={16} /> 复盘图表</div></div>
+        <div className="panel-head"><div role="heading" aria-level="2" className="panel-title"><Icon name="chart" size={16} /> 复盘图表</div></div>
         <div className="empty">有已兑现的卖出/做T记录后，这里会用图表展示资金曲线、每日盈亏与个股盈亏排行。</div>
       </div>
     )
@@ -693,7 +729,7 @@ function ReviewCharts({ records }) {
   const stockCount = new Set(closed.map((c) => c.code)).size
   return (
     <div className="panel">
-      <div className="panel-head"><div className="panel-title"><Icon name="chart" size={16} /> 复盘图表</div>
+      <div className="panel-head"><div role="heading" aria-level="2" className="panel-title"><Icon name="chart" size={16} /> 复盘图表</div>
         <span className="panel-sub">资金曲线 · 每日盈亏 · 个股盈亏排行</span>
       </div>
       <div className="rv-charts">

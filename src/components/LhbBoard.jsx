@@ -43,13 +43,13 @@ export default function LhbBoard({ interval }) {
   return (
     <div className="panel">
       <div className="panel-head">
-        <div className="panel-title">
+        <div role="heading" aria-level="2" className="panel-title">
           <Icon name="trophy" size={16} /> 游资龙虎榜
           <span className="sub-name">{date ? date : '收盘后更新'}</span>
         </div>
         <div className="tabs">
-          <div className={'tab' + (tab === 'stocks' ? ' active' : '')} onClick={() => setTab('stocks')}>上榜个股</div>
-          <div className={'tab' + (tab === 'seats' ? ' active' : '')} onClick={() => setTab('seats')}>活跃游资</div>
+          <button type="button" className={'tab' + (tab === 'stocks' ? ' active' : '')} aria-pressed={tab === 'stocks'} onClick={() => setTab('stocks')}>上榜个股</button>
+          <button type="button" className={'tab' + (tab === 'seats' ? ' active' : '')} aria-pressed={tab === 'seats'} onClick={() => setTab('seats')}>活跃游资</button>
         </div>
       </div>
 

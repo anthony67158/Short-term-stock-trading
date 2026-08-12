@@ -62,7 +62,7 @@ export default function AISector({ sector, stocks }) {
             {Array.isArray(res.picks) && res.picks.length > 0 && (
               <div className="pick-grid">
                 {res.picks.map((p, i) => (
-                  <div key={i} className="pick-card" onClick={() => p.code && setDetail({ name: p.name, code: p.code })}>
+                  <button type="button" key={i} className="pick-card" onClick={() => p.code && setDetail({ name: p.name, code: p.code })}>
                     <div className="pick-top">
                       <span className="pick-idx">{i + 1}</span>
                       <span className="pick-name">{p.name}</span>
@@ -70,7 +70,7 @@ export default function AISector({ sector, stocks }) {
                     </div>
                     <div className="pick-row"><span className="pick-tag reason">逻辑</span><span>{p.reason}</span></div>
                     <div className="pick-row"><span className="pick-tag watch">关注</span><span>{p.watch}</span></div>
-                  </div>
+                  </button>
                 ))}
               </div>
             )}

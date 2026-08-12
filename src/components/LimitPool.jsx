@@ -28,15 +28,15 @@ export default function LimitPool({ interval }) {
   return (
     <section className="panel limit-pool">
       <div className="panel-head">
-        <div className="panel-title">
+        <div role="heading" aria-level="2" className="panel-title">
           <Icon name="rocket" size={16} /> 涨停连板池
           {kind === 'zt' && list.length > 0 && (
             <span className="sub-name">今日涨停 {list.length} 家</span>
           )}
         </div>
         <div className="tabs">
-          <div className={'tab' + (kind === 'zt' ? ' active' : '')} onClick={() => setKind('zt')}>涨停池</div>
-          <div className={'tab' + (kind === 'zb' ? ' active' : '')} onClick={() => setKind('zb')}>炸板池</div>
+          <button type="button" className={'tab' + (kind === 'zt' ? ' active' : '')} aria-pressed={kind === 'zt'} onClick={() => setKind('zt')}>涨停池</button>
+          <button type="button" className={'tab' + (kind === 'zb' ? ' active' : '')} aria-pressed={kind === 'zb'} onClick={() => setKind('zb')}>炸板池</button>
         </div>
       </div>
 

@@ -40,10 +40,11 @@ export default function StockPanel({ sector, data, loading, error, sort, setSort
 
   // 可排序表头单元格
   const Th = ({ label, k }) => (
-    <th className={'th-sort' + (colSort && colSort.key === k ? ' active' : '')} onClick={() => clickHead(k)}>
-      <span className="th-inner">{label}
+    <th className={'th-sort' + (colSort && colSort.key === k ? ' active' : '')}>
+      <button type="button" className="th-inner" onClick={() => clickHead(k)}>
+        {label}
         <span className="th-arrow">{colSort && colSort.key === k ? (colSort.dir === 'asc' ? '↑' : '↓') : '⇅'}</span>
-      </span>
+      </button>
     </th>
   )
 
@@ -91,18 +92,18 @@ export default function StockPanel({ sector, data, loading, error, sort, setSort
   return (
     <div className="panel">
       <div className="panel-head">
-        <div className="panel-title">
+        <div role="heading" aria-level="2" className="panel-title">
           {sector ? sector.name : '个股'} <span className="sub-name">成分股 · {view === 'heat' ? '面积=成交额 · 红涨绿跌 · 点方块看详情' : '点表头排序 · 点行看详情'}</span>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div className="panel-head-actions">
           <div className="tabs">
-            <div className={'tab' + (sort === 'pct' ? ' active' : '')} onClick={() => { setSort('pct'); setColSort(null) }}>涨幅榜</div>
-            <div className={'tab' + (sort === 'down' ? ' active' : '')} onClick={() => { setSort('down'); setColSort(null) }}>跌幅榜</div>
-            <div className={'tab' + (sort === 'main' ? ' active' : '')} onClick={() => { setSort('main'); setColSort(null) }}>资金榜</div>
+            <button type="button" className={'tab' + (sort === 'pct' ? ' active' : '')} aria-pressed={sort === 'pct'} onClick={() => { setSort('pct'); setColSort(null) }}>涨幅榜</button>
+            <button type="button" className={'tab' + (sort === 'down' ? ' active' : '')} aria-pressed={sort === 'down'} onClick={() => { setSort('down'); setColSort(null) }}>跌幅榜</button>
+            <button type="button" className={'tab' + (sort === 'main' ? ' active' : '')} aria-pressed={sort === 'main'} onClick={() => { setSort('main'); setColSort(null) }}>资金榜</button>
           </div>
           <div className="tabs">
-            <div className={'tab' + (view === 'list' ? ' active' : '')} onClick={() => setView('list')}>榜单</div>
-            <div className={'tab' + (view === 'heat' ? ' active' : '')} onClick={() => setView('heat')}>热力图</div>
+            <button type="button" className={'tab' + (view === 'list' ? ' active' : '')} aria-pressed={view === 'list'} onClick={() => setView('list')}>榜单</button>
+            <button type="button" className={'tab' + (view === 'heat' ? ' active' : '')} aria-pressed={view === 'heat'} onClick={() => setView('heat')}>热力图</button>
           </div>
           {sector && view === 'heat' && (
             <button className="btn" onClick={() => setFullscreen(true)}><Icon name="layers" size={13} /> 全屏</button>
@@ -166,13 +167,13 @@ export default function StockPanel({ sector, data, loading, error, sort, setSort
       )}
 
       {fullscreen && (
-        <div className="modal-mask" onClick={() => setFullscreen(false)}>
-          <div className="modal-bar" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-title">
-              <Icon name="chart" size={17} /> {sector ? sector.name : ''} 成分股热力图
+        <div className="modal-mask heatmap-modal-mask" role="dialog" aria-modal="true" aria-label="成分股热力图" onClick={() => setFullscreen(false)}>
+          <div className="modal-bar heatmap-modal-bar" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-title heatmap-modal-copy">
+              <span><Icon name="chart" size={17} /> {sector ? sector.name : ''} 成分股热力图</span>
               <span className="sub-name">面积=成交额 · 红涨绿跌 · 点方块看K线</span>
             </div>
-            <div className="modal-close" onClick={() => setFullscreen(false)}><Icon name="close" size={16} /></div>
+            <button type="button" className="modal-close" aria-label="关闭成分股热力图" onClick={() => setFullscreen(false)}><Icon name="close" size={16} /></button>
           </div>
           <div className="modal-body" onClick={(e) => e.stopPropagation()}>
             <ReactECharts option={heatOptionFull} style={{ height: '100%' }} notMerge={false} lazyUpdate onEvents={heatEvents} />
