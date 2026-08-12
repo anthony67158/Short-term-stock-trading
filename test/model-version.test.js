@@ -5,15 +5,19 @@ import {
   adaptV2Prediction,
   isQuantResultForVersion,
   normalizeQuantModelVersion,
+  QUANT_MODEL_V21,
   quantModelLabel,
 } from '../shared/modelVersion.js'
 
-test('模型版本默认回退现有生产模型且只接受V2显式值', () => {
+test('模型版本明确区分默认、V2.0与V2.1', () => {
   assert.equal(normalizeQuantModelVersion(), 'default')
   assert.equal(normalizeQuantModelVersion('unknown'), 'default')
   assert.equal(normalizeQuantModelVersion('v2'), 'v2')
+  assert.equal(normalizeQuantModelVersion('v2.1'), QUANT_MODEL_V21)
+  assert.equal(normalizeQuantModelVersion('V21'), QUANT_MODEL_V21)
   assert.equal(quantModelLabel('default'), '当前生产模型')
-  assert.equal(quantModelLabel('v2'), '分钟 Transformer V2')
+  assert.equal(quantModelLabel('v2'), '分钟 Transformer V2.0')
+  assert.equal(quantModelLabel('v2.1'), '分钟 Transformer V2.1（盘中实验）')
 })
 
 test('量化评分结果必须与本次选股锁定的模型版本一致', () => {
@@ -27,6 +31,15 @@ test('量化评分结果必须与本次选股锁定的模型版本一致', () =>
     quantModelVersion: 'v2',
     quant: { score: 72, modelVersion: 'v2' },
   }, 'v2'), true)
+  assert.equal(isQuantResultForVersion({
+    ok: true,
+    quantModelVersion: 'v2.1',
+    quant: {
+      score: 68,
+      modelVersion: 'v2',
+      selectedModelVersion: 'v2.1',
+    },
+  }, 'v2.1'), true)
   assert.equal(isQuantResultForVersion({
     ok: true,
     quantModelVersion: 'default',
@@ -138,7 +151,7 @@ test('V2适配拒绝缺失或不守恒的概率输出', () => {
   )
 })
 
-test('V2.1双头适配保留V2选择版本并声明盘中运行版本', () => {
+test('V2.1双头适配声明独立选择版本、实验状态与离线准确率', () => {
   const result = adaptV21Prediction({
     modelVersion: 'v2.1-intraday',
     asOf: '2026-08-12 10:30:00',
@@ -180,9 +193,14 @@ test('V2.1双头适配保留V2选择版本并声明盘中运行版本', () => {
     },
   }, { price: 10 })
 
-  assert.equal(result.modelVersion, 'v2')
+  assert.equal(result.modelVersion, 'v2.1')
+  assert.equal(result.selectedModelVersion, 'v2.1')
   assert.equal(result.runtimeModelVersion, 'v2.1-intraday')
-  assert.equal(result.modelLabel, '分钟 Transformer V2.1（盘中）')
+  assert.equal(result.modelLabel, '分钟 Transformer V2.1（盘中实验）')
+  assert.equal(result.experimental, true)
+  assert.equal(result.reliability.productionGatePassed, false)
+  assert.equal(result.reliability.balancedAccuracyPct.next30m, 53.92)
+  assert.equal(result.reliability.balancedAccuracyPct.sessionClose, 54.58)
   assert.equal(result.forecast.horizon, '未来30分钟')
   assert.equal(result.forecast.upProb, 50)
   assert.equal(result.v21.heads.sessionClose.predictedClass, 'TIMEOUT')

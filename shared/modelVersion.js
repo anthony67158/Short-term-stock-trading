@@ -1,16 +1,31 @@
 export const QUANT_MODEL_DEFAULT = 'default'
 export const QUANT_MODEL_V2 = 'v2'
+export const QUANT_MODEL_V21 = 'v2.1'
+export const V21_EXPERIMENTAL_RELIABILITY = Object.freeze({
+  productionGatePassed: false,
+  thresholdPct: 58,
+  balancedAccuracyPct: Object.freeze({
+    next30m: 53.92,
+    sessionClose: 54.58,
+  }),
+})
 
 export function normalizeQuantModelVersion(value) {
-  return String(value || '').toLowerCase() === QUANT_MODEL_V2
-    ? QUANT_MODEL_V2
-    : QUANT_MODEL_DEFAULT
+  const normalized = String(value || '').trim().toLowerCase()
+  if (normalized === QUANT_MODEL_V2) return QUANT_MODEL_V2
+  if (normalized === QUANT_MODEL_V21 || normalized === 'v21') {
+    return QUANT_MODEL_V21
+  }
+  return QUANT_MODEL_DEFAULT
 }
 
 export function quantModelLabel(value) {
-  return normalizeQuantModelVersion(value) === QUANT_MODEL_V2
-    ? '分钟 Transformer V2'
-    : '当前生产模型'
+  const normalized = normalizeQuantModelVersion(value)
+  if (normalized === QUANT_MODEL_V21) {
+    return '分钟 Transformer V2.1（盘中实验）'
+  }
+  if (normalized === QUANT_MODEL_V2) return '分钟 Transformer V2.0'
+  return '当前生产模型'
 }
 
 export function isQuantResultForVersion(response, selectedVersion) {
@@ -139,9 +154,12 @@ export function adaptV21Prediction(
   )
   return {
     ok: true,
-    modelVersion: QUANT_MODEL_V2,
+    modelVersion: QUANT_MODEL_V21,
+    selectedModelVersion: QUANT_MODEL_V21,
     runtimeModelVersion: 'v2.1-intraday',
-    modelLabel: '分钟 Transformer V2.1（盘中）',
+    modelLabel: quantModelLabel(QUANT_MODEL_V21),
+    experimental: true,
+    reliability: V21_EXPERIMENTAL_RELIABILITY,
     price: Number.isFinite(Number(price)) ? Number(price) : null,
     score,
     bias: biasLabel(outlook.direction),
@@ -281,6 +299,8 @@ export function adaptV2Prediction(prediction, { price = null } = {}) {
   return {
     ok: true,
     modelVersion: QUANT_MODEL_V2,
+    selectedModelVersion: QUANT_MODEL_V2,
+    runtimeModelVersion: 'v2.0-daily',
     modelLabel: quantModelLabel(QUANT_MODEL_V2),
     price: Number.isFinite(Number(price)) ? Number(price) : null,
     score: Math.max(0, Math.min(100, Math.round(outlook.directionScore))),

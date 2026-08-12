@@ -37,7 +37,7 @@ export function accountRequestHeaders() {
 }
 
 export function quantModelHeaders(version = currentQuantModelVersion()) {
-  if (normalizeQuantModelVersion(version) !== 'v2') return {}
+  if (normalizeQuantModelVersion(version) === 'default') return {}
   return accountRequestHeaders()
 }
 

@@ -15,6 +15,18 @@ test('读取云端模型控制状态后同步本机实际调用版本', () => {
   assert.deepEqual(writes, [['quantModelVersion', 'v2']])
 })
 
+test('读取云端V2.1选择后同步独立版本而不是降级为V2.0', () => {
+  const writes = []
+
+  const selected = syncControlSelection(
+    { selected: 'v2.1' },
+    (key, value) => writes.push([key, value]),
+  )
+
+  assert.equal(selected, 'v2.1')
+  assert.deepEqual(writes, [['quantModelVersion', 'v2.1']])
+})
+
 test('模型控制响应缺失时不覆盖本机版本', () => {
   const writes = []
 

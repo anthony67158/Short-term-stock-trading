@@ -401,7 +401,7 @@ test('V2.1盘中序列按最近已完成5分钟K线截断', () => {
   )
 })
 
-test('V2.1客户端调用独立盘中路由并保留V2选择版本', async () => {
+test('V2.1客户端调用独立盘中路由并保留V2.1选择版本', async () => {
   const bars = selectV21IntradayBars(parseFiveMinuteKlines([
     ...validSessionLines('2026-08-11'),
     ...validSessionLines('2026-08-12', '10:30'),
@@ -453,13 +453,14 @@ test('V2.1客户端调用独立盘中路由并保留V2选择版本', async () =>
   assert.equal(captured.url.endsWith('/predict-v2-intraday'), true)
   assert.equal(captured.body.asOf, '2026-08-12 10:30:00')
   assert.equal(captured.body.bars.length >= 60, true)
-  assert.equal(result.modelVersion, 'v2')
+  assert.equal(result.modelVersion, 'v2.1')
+  assert.equal(result.selectedModelVersion, 'v2.1')
   assert.equal(result.runtimeModelVersion, 'v2.1-intraday')
   assert.equal(result.forecast.horizon, '未来30分钟')
   assert.equal(result.v21.heads.next30m.predictedClass, 'TAKE_PROFIT')
 })
 
-test('V2选择器盘中优先V2.1且失败时回退日终V2', async () => {
+test('V2.0选择器只调用日终模型，不会盘中偷换V2.1', async () => {
   const bars = parseFiveMinuteKlines([
     ...validSessionLines('2026-08-11'),
     ...validSessionLines('2026-08-12', '10:30'),
@@ -484,7 +485,12 @@ test('V2选择器盘中优先V2.1且失败时回退日终V2', async () => {
       fetchBars: async () => bars,
       fetchV21: async () => {
         v21Calls++
-        return { ...base, runtimeModelVersion: 'v2.1-intraday', v21: { heads: {} } }
+        return {
+          ...base,
+          modelVersion: 'v2.1',
+          runtimeModelVersion: 'v2.1-intraday',
+          v21: { heads: {} },
+        }
       },
       fetchV2: async () => {
         v2Calls++
@@ -499,12 +505,65 @@ test('V2选择器盘中优先V2.1且失败时回退日终V2', async () => {
     },
   )
 
-  assert.equal(result.runtimeModelVersion, 'v2.1-intraday')
+  assert.equal(result.modelVersion, 'v2')
+  assert.equal(result.selectedModelVersion, 'v2')
+  assert.equal(v21Calls, 0)
+  assert.equal(v2Calls, 1)
+})
+
+test('V2.1显式选择后优先盘中双头，失败才标记回退V2.0', async () => {
+  const bars = parseFiveMinuteKlines([
+    ...validSessionLines('2026-08-11'),
+    ...validSessionLines('2026-08-12', '10:30'),
+  ])
+  const base = {
+    ok: true,
+    modelVersion: 'v2',
+    forecast: { direction: '看涨', horizon: '下一交易日', upProb: 60 },
+    v2: {},
+    reads: [],
+  }
+  let v21Calls = 0
+  let v2Calls = 0
+  const intraday = await fetchSelectedQuantPredict(
+    'v2.1',
+    '600519',
+    [],
+    null,
+    1000,
+    null,
+    {
+      fetchBars: async () => bars,
+      fetchV21: async () => {
+        v21Calls++
+        return {
+          ok: true,
+          modelVersion: 'v2.1',
+          runtimeModelVersion: 'v2.1-intraday',
+          forecast: { direction: '看涨', horizon: '未来30分钟' },
+          v21: { heads: {} },
+          reads: [],
+        }
+      },
+      fetchV2: async () => {
+        v2Calls++
+        return base
+      },
+      timeContext: {
+        tradingToday: true,
+        isLive: true,
+        phase: '早盘(盘中)',
+        bjNow: '2026-08-12 10:32',
+      },
+    },
+  )
+  assert.equal(intraday.modelVersion, 'v2.1')
+  assert.equal(intraday.selectedModelVersion, 'v2.1')
   assert.equal(v21Calls, 1)
   assert.equal(v2Calls, 0)
 
-  await fetchSelectedQuantPredict(
-    'v2',
+  const fallback = await fetchSelectedQuantPredict(
+    'v2.1',
     '600519',
     [],
     null,
@@ -527,5 +586,11 @@ test('V2选择器盘中优先V2.1且失败时回退日终V2', async () => {
       },
     },
   )
+  assert.equal(fallback.modelVersion, 'v2')
+  assert.equal(fallback.selectedModelVersion, 'v2.1')
+  assert.equal(fallback.runtimeModelVersion, 'v2.0-daily')
+  assert.equal(fallback.fallback.from, 'v2.1')
+  assert.equal(fallback.fallback.to, 'v2')
+  assert.match(fallback.fallback.reason, /unavailable/)
   assert.equal(v2Calls, 1)
 })

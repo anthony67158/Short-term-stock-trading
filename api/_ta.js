@@ -10,6 +10,7 @@ import {
 import {
   normalizeQuantModelVersion,
   QUANT_MODEL_V2,
+  QUANT_MODEL_V21,
 } from '../shared/modelVersion.js';
 import { marketTimeContext } from './_market_time.js';
 
@@ -358,7 +359,8 @@ export async function fetchSelectedQuantPredict(
     timeContext = marketTimeContext(),
   } = {},
 ) {
-  if (normalizeQuantModelVersion(version) !== QUANT_MODEL_V2) {
+  const selectedVersion = normalizeQuantModelVersion(version)
+  if (selectedVersion === 'default') {
     return fetchQuantPredict(code, candles, hold, timeoutMs, realtime)
   }
   const bars = await fetchBars(code, {
@@ -366,21 +368,30 @@ export async function fetchSelectedQuantPredict(
     limit: 300,
     completedWindowOnly: false,
   })
-  const v21Bars = selectV21IntradayBars(bars, timeContext)
   let v21FallbackReason = ''
-  if (v21Bars.length) {
-    try {
-      const asOfHm = String(v21Bars.at(-1)?.tradeTime || '').slice(11, 16)
-      const prediction = await fetchV21(code, {
-        bars: v21Bars,
-        price: realtime?.price ?? candles?.at(-1)?.close ?? null,
-        activeHead: asOfHm >= '14:30' ? 'sessionClose' : 'next30m',
-        timeoutMs,
-      })
-      if (prediction) return prediction
-      v21FallbackReason = 'V2.1盘中模型未返回结果'
-    } catch (error) {
-      v21FallbackReason = String(error?.message || 'V2.1盘中模型不可用')
+  if (selectedVersion === QUANT_MODEL_V21) {
+    const v21Bars = selectV21IntradayBars(bars, timeContext)
+    if (v21Bars.length) {
+      try {
+        const asOfHm = String(v21Bars.at(-1)?.tradeTime || '').slice(11, 16)
+        const prediction = await fetchV21(code, {
+          bars: v21Bars,
+          price: realtime?.price ?? candles?.at(-1)?.close ?? null,
+          activeHead: asOfHm >= '14:30' ? 'sessionClose' : 'next30m',
+          timeoutMs,
+        })
+        if (prediction) {
+          return {
+            ...prediction,
+            selectedModelVersion: QUANT_MODEL_V21,
+          }
+        }
+        v21FallbackReason = 'V2.1盘中模型未返回结果'
+      } catch (error) {
+        v21FallbackReason = String(error?.message || 'V2.1盘中模型不可用')
+      }
+    } else {
+      v21FallbackReason = '当前时段不在V2.1支持的盘中预测窗口'
     }
   }
   const prediction = await fetchV2(code, {
@@ -401,6 +412,8 @@ export async function fetchSelectedQuantPredict(
       )
   return {
     ...prediction,
+    selectedModelVersion: selectedVersion,
+    runtimeModelVersion: 'v2.0-daily',
     forecast: {
       ...(prediction.forecast || {}),
       horizon,
@@ -409,10 +422,23 @@ export async function fetchSelectedQuantPredict(
       index === 0
         ? String(item).replace('下一交易日', horizon)
         : item
+    ).concat(
+      selectedVersion === QUANT_MODEL_V21 && v21FallbackReason
+        ? [`V2.1已回退V2.0：${v21FallbackReason}`]
+        : [],
     ),
+    ...(selectedVersion === QUANT_MODEL_V21 ? {
+      fallback: {
+        from: QUANT_MODEL_V21,
+        to: QUANT_MODEL_V2,
+        reason: v21FallbackReason || 'V2.1盘中模型不可用',
+      },
+    } : {}),
     v2: {
       ...(prediction.v2 || {}),
-      ...(v21FallbackReason ? { v21FallbackReason } : {}),
+      ...(selectedVersion === QUANT_MODEL_V21 && v21FallbackReason
+        ? { v21FallbackReason }
+        : {}),
       ...(executionReference ? { executionReference } : {}),
     },
   }

@@ -32,6 +32,22 @@ test('切换到V2但服务未运行时不可调用', () => {
   assert.equal(view.v2Enabled, false)
 })
 
+test('V2.1是手动选择的实验版本并复用分钟模型服务开关', () => {
+  const data = { settings: {} }
+  applyModelSelection(data, 'v2.1', 456)
+  const view = modelControlView(data, {
+    v2Status: 'Running',
+    canControlV2: true,
+  })
+
+  assert.equal(view.selected, 'v2.1')
+  assert.equal(view.label, '分钟 Transformer V2.1（盘中实验）')
+  assert.equal(view.available, true)
+  assert.equal(view.showV2Switch, true)
+  assert.equal(view.experimental, true)
+  assert.equal(view.v2Enabled, true)
+})
+
 test('V2启动中状态会明确标记为过渡态', () => {
   const view = modelControlView({
     settings: { quantModelVersion: 'v2' },

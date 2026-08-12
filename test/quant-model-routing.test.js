@@ -9,6 +9,7 @@ import {
 test('量化查询与AI载荷使用同一个显式模型版本', () => {
   assert.equal(quantModelQuery('default'), '&model=default')
   assert.equal(quantModelQuery('v2'), '&model=v2')
+  assert.equal(quantModelQuery('v2.1'), '&model=v2.1')
   assert.equal(
     withQuantModelPayload({ source: 'stock-pick' }, 'default').quantModelVersion,
     'default',
@@ -16,6 +17,10 @@ test('量化查询与AI载荷使用同一个显式模型版本', () => {
   assert.equal(
     withQuantModelPayload({ source: 'stock-pick' }, 'v2').quantModelVersion,
     'v2',
+  )
+  assert.equal(
+    withQuantModelPayload({ source: 'stock-pick' }, 'v2.1').quantModelVersion,
+    'v2.1',
   )
 })
 
