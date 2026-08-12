@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  adaptV21Prediction,
   adaptV2Prediction,
   isQuantResultForVersion,
   normalizeQuantModelVersion,
@@ -135,4 +136,55 @@ test('V2适配拒绝缺失或不守恒的概率输出', () => {
     }),
     /概率/,
   )
+})
+
+test('V2.1双头适配保留V2选择版本并声明盘中运行版本', () => {
+  const result = adaptV21Prediction({
+    modelVersion: 'v2.1-intraday',
+    asOf: '2026-08-12 10:30:00',
+    session: 'morning',
+    heads: {
+      next30m: {
+        horizon: '未来30分钟',
+        probabilities: {
+          stopLoss: 0.2,
+          timeout: 0.3,
+          takeProfit: 0.5,
+        },
+        predictedClass: 'TAKE_PROFIT',
+        outlook: {
+          direction: 'bullish',
+          expectedBarrierReturnPct: 0.105,
+          confidencePct: 50,
+        },
+      },
+      sessionClose: {
+        horizon: '截至今日收盘',
+        probabilities: {
+          stopLoss: 0.3,
+          timeout: 0.5,
+          takeProfit: 0.2,
+        },
+        predictedClass: 'TIMEOUT',
+        outlook: {
+          direction: 'neutral',
+          expectedBarrierReturnPct: 0.01,
+          confidencePct: 50,
+        },
+      },
+    },
+    model: {
+      runId: 'run-v21',
+      architecture: 'transformer-dual-head',
+      sha256: 'a'.repeat(64),
+    },
+  }, { price: 10 })
+
+  assert.equal(result.modelVersion, 'v2')
+  assert.equal(result.runtimeModelVersion, 'v2.1-intraday')
+  assert.equal(result.modelLabel, '分钟 Transformer V2.1（盘中）')
+  assert.equal(result.forecast.horizon, '未来30分钟')
+  assert.equal(result.forecast.upProb, 50)
+  assert.equal(result.v21.heads.sessionClose.predictedClass, 'TIMEOUT')
+  assert.equal(result.asOf, '2026-08-12 10:30:00')
 })

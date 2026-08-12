@@ -1003,7 +1003,49 @@ export default function StockDetail({ stock, onClose }) {
                                     </span>
                                     <span className="fc-conf">预测信心 {fc.confidence}</span>
                                   </div>
-                                  {q.modelVersion === 'v2' && q.v2 ? (
+                                  {q.modelVersion === 'v2' && q.v21 ? (
+                                    <div className="v21-heads">
+                                      <div className="v21-asof">
+                                        <b>V2.1 盘中双头</b>
+                                        <span>信号 {q.asOf || '—'} · {q.v21.session || '盘中'} · 当前采用{q.v21.activeHead === 'sessionClose' ? '截至收盘' : '未来30分钟'}</span>
+                                      </div>
+                                      {[
+                                        ['next30m', '未来30分钟'],
+                                        ['sessionClose', '截至今日收盘'],
+                                      ].map(([key, label]) => {
+                                        const head = q.v21.heads?.[key]
+                                        if (!head) return null
+                                        const probabilities = head.probabilities || {}
+                                        return (
+                                          <div className={'v21-head ' + (q.v21.activeHead === key ? 'active' : '')} key={key}>
+                                            <div className="v2-price-head">
+                                              <span>{label}</span>
+                                              <small>{head.predictedClass || '待判断'}{q.v21.activeHead === key ? ' · 当前采用' : ''}</small>
+                                            </div>
+                                            <div className="fc-grid v2">
+                                              <div className="fc-cell"><span className="fc-k">止盈概率</span><span className="fc-v red">{Math.round((probabilities.takeProfit || 0) * 100)}%</span></div>
+                                              <div className="fc-cell"><span className="fc-k">止损概率</span><span className="fc-v green">{Math.round((probabilities.stopLoss || 0) * 100)}%</span></div>
+                                              <div className="fc-cell"><span className="fc-k">震荡概率</span><span className="fc-v">{Math.round((probabilities.timeout || 0) * 100)}%</span></div>
+                                              <div className="fc-cell"><span className="fc-k">障碍期望</span><span className={'fc-v ' + ((head.outlook?.expectedBarrierReturnPct || 0) >= 0 ? 'red' : 'green')}>{head.outlook?.expectedBarrierReturnPct ?? '—'}%</span></div>
+                                            </div>
+                                          </div>
+                                        )
+                                      })}
+                                      {q.v21.priceReferences && (
+                                        <div className="v2-price-refs">
+                                          <div className="v2-price-head">
+                                            <span>盘中价格锚点</span>
+                                            <small>截至信号时点，不是保证目标价</small>
+                                          </div>
+                                          <div className="v2-price-grid">
+                                            <span>锚点 <b>{q.v21.priceReferences.anchorPrice ?? '—'}</b></span>
+                                            <span>支撑 <b className="red">{q.v21.priceReferences.supportPrice ?? '—'}</b></span>
+                                            <span>压力 <b className="green">{q.v21.priceReferences.resistancePrice ?? '—'}</b></span>
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  ) : q.modelVersion === 'v2' && q.v2 ? (
                                     <>
                                       <div className="fc-grid v2">
                                         <div className="fc-cell"><span className="fc-k">止盈概率</span><span className="fc-v red">{fc.upProb}%</span></div>
@@ -1031,6 +1073,9 @@ export default function StockDetail({ stock, onClose }) {
                                             <span>30分钟动量 <b>{q.v2.executionReference.momentum30mPct}%</b></span>
                                           </div>
                                         </div>
+                                      )}
+                                      {q.v2.v21FallbackReason && (
+                                        <div className="qmc-error">V2.1 暂不可用，已回退上一收盘日 V2：{q.v2.v21FallbackReason}</div>
                                       )}
                                       {q.v2.priceReferences && (
                                         <div className="v2-price-refs">

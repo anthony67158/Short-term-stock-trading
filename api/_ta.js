@@ -3,6 +3,8 @@ import {
   deriveV2SessionExecutionReference,
   fetchFiveMinuteBars,
   fetchV2QuantPredict,
+  fetchV21QuantPredict,
+  selectV21IntradayBars,
   v2ForecastHorizon,
 } from './_v2_quant.js';
 import {
@@ -352,6 +354,7 @@ export async function fetchSelectedQuantPredict(
   {
     fetchBars = fetchFiveMinuteBars,
     fetchV2 = fetchV2QuantPredict,
+    fetchV21 = fetchV21QuantPredict,
     timeContext = marketTimeContext(),
   } = {},
 ) {
@@ -363,6 +366,23 @@ export async function fetchSelectedQuantPredict(
     limit: 300,
     completedWindowOnly: false,
   })
+  const v21Bars = selectV21IntradayBars(bars, timeContext)
+  let v21FallbackReason = ''
+  if (v21Bars.length) {
+    try {
+      const asOfHm = String(v21Bars.at(-1)?.tradeTime || '').slice(11, 16)
+      const prediction = await fetchV21(code, {
+        bars: v21Bars,
+        price: realtime?.price ?? candles?.at(-1)?.close ?? null,
+        activeHead: asOfHm >= '14:30' ? 'sessionClose' : 'next30m',
+        timeoutMs,
+      })
+      if (prediction) return prediction
+      v21FallbackReason = 'V2.1盘中模型未返回结果'
+    } catch (error) {
+      v21FallbackReason = String(error?.message || 'V2.1盘中模型不可用')
+    }
+  }
   const prediction = await fetchV2(code, {
     bars,
     price: realtime?.price ?? candles?.at(-1)?.close ?? null,
@@ -392,6 +412,7 @@ export async function fetchSelectedQuantPredict(
     ),
     v2: {
       ...(prediction.v2 || {}),
+      ...(v21FallbackReason ? { v21FallbackReason } : {}),
       ...(executionReference ? { executionReference } : {}),
     },
   }

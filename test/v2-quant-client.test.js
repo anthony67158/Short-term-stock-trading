@@ -2,11 +2,14 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   buildV2Request,
+  buildV21Request,
   deriveV2SessionExecutionReference,
   fetchFiveMinuteBars,
   fetchV2QuantPredict,
+  fetchV21QuantPredict,
   parseFiveMinuteKlines,
   selectCompletedDayEndBars,
+  selectV21IntradayBars,
   v2ExecutionHorizon,
   v2ForecastHorizon,
 } from '../api/_v2_quant.js'
@@ -21,6 +24,22 @@ function minuteLines() {
     rows.push(`2026-08-10 ${hh}:${mm},10,10,10.1,9.9,${1000 + index},10000`)
   }
   rows.push('2026-08-10 15:00,10,10,10.1,9.9,1100,11000')
+  return rows
+}
+
+function validSessionLines(date, cutoff = '15:00') {
+  const rows = []
+  const pushRange = (start, end) => {
+    for (let total = start; total <= end; total += 5) {
+      const hh = String(Math.floor(total / 60)).padStart(2, '0')
+      const mm = String(total % 60).padStart(2, '0')
+      const hm = `${hh}:${mm}`
+      if (hm > cutoff) return
+      rows.push(`${date} ${hm},10,10,10.1,9.9,1000,10000`)
+    }
+  }
+  pushRange(9 * 60 + 35, 11 * 60 + 30)
+  pushRange(13 * 60 + 5, 15 * 60)
   return rows
 }
 
@@ -342,4 +361,171 @@ test('V2选择器同时返回原模型预测和当前时段执行参考', async 
   assert.equal(result.v2.targetDefinition, undefined)
   assert.equal(result.v2.executionReference.horizon, '今天下午13:00-15:00')
   assert.equal(result.v2.executionReference.modelProbability, false)
+})
+
+test('V2.1盘中序列按最近已完成5分钟K线截断', () => {
+  const bars = parseFiveMinuteKlines([
+    ...validSessionLines('2026-08-11'),
+    ...validSessionLines('2026-08-12', '10:35'),
+  ])
+
+  const morning = selectV21IntradayBars(bars, {
+    tradingToday: true,
+    phase: '早盘(盘中)',
+    bjNow: '2026-08-12 10:32',
+  })
+  const noon = selectV21IntradayBars(parseFiveMinuteKlines([
+    ...validSessionLines('2026-08-11'),
+    ...validSessionLines('2026-08-12', '11:30'),
+  ]), {
+    tradingToday: true,
+    phase: '午间休市',
+    bjNow: '2026-08-12 12:00',
+  })
+  const late = selectV21IntradayBars(parseFiveMinuteKlines([
+    ...validSessionLines('2026-08-11'),
+    ...validSessionLines('2026-08-12', '14:45'),
+  ]), {
+    tradingToday: true,
+    phase: '午盘(盘中)',
+    bjNow: '2026-08-12 14:46',
+  })
+
+  assert.equal(morning.at(-1).tradeTime, '2026-08-12 10:30:00')
+  assert.equal(noon.at(-1).tradeTime, '2026-08-12 11:30:00')
+  assert.equal(late.at(-1).tradeTime, '2026-08-12 14:30:00')
+  assert.equal(morning.length >= 60, true)
+  assert.equal(
+    buildV21Request('600519', morning).asOf,
+    '2026-08-12 10:30:00',
+  )
+})
+
+test('V2.1客户端调用独立盘中路由并保留V2选择版本', async () => {
+  const bars = selectV21IntradayBars(parseFiveMinuteKlines([
+    ...validSessionLines('2026-08-11'),
+    ...validSessionLines('2026-08-12', '10:30'),
+  ]), {
+    tradingToday: true,
+    phase: '早盘(盘中)',
+    bjNow: '2026-08-12 10:32',
+  })
+  let captured = null
+  const result = await fetchV21QuantPredict('600519', {
+    bars,
+    env: {
+      V2_QUANT_URL: 'https://123.cn-hangzhou.pai-eas.aliyuncs.com/api/predict/stock_quant_lab_shadow',
+      V2_EAS_TOKEN: 'eas-token',
+      V2_API_KEY: 'shadow-key',
+    },
+    fetchImpl: async (url, options) => {
+      captured = { url, body: JSON.parse(options.body) }
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            ok: true,
+            modelVersion: 'v2.1-intraday',
+            asOf: '2026-08-12 10:30:00',
+            session: 'morning',
+            heads: {
+              next30m: {
+                horizon: '未来30分钟',
+                probabilities: { stopLoss: 0.2, timeout: 0.3, takeProfit: 0.5 },
+                predictedClass: 'TAKE_PROFIT',
+                outlook: { direction: 'bullish', expectedBarrierReturnPct: 0.105 },
+              },
+              sessionClose: {
+                horizon: '截至今日收盘',
+                probabilities: { stopLoss: 0.3, timeout: 0.5, takeProfit: 0.2 },
+                predictedClass: 'TIMEOUT',
+                outlook: { direction: 'neutral', expectedBarrierReturnPct: 0.01 },
+              },
+            },
+            model: { runId: 'run-v21', architecture: 'transformer-dual-head', sha256: 'a'.repeat(64) },
+          }
+        },
+      }
+    },
+  })
+
+  assert.equal(captured.url.endsWith('/predict-v2-intraday'), true)
+  assert.equal(captured.body.asOf, '2026-08-12 10:30:00')
+  assert.equal(captured.body.bars.length >= 60, true)
+  assert.equal(result.modelVersion, 'v2')
+  assert.equal(result.runtimeModelVersion, 'v2.1-intraday')
+  assert.equal(result.forecast.horizon, '未来30分钟')
+  assert.equal(result.v21.heads.next30m.predictedClass, 'TAKE_PROFIT')
+})
+
+test('V2选择器盘中优先V2.1且失败时回退日终V2', async () => {
+  const bars = parseFiveMinuteKlines([
+    ...validSessionLines('2026-08-11'),
+    ...validSessionLines('2026-08-12', '10:30'),
+  ])
+  const base = {
+    ok: true,
+    modelVersion: 'v2',
+    forecast: { direction: '看涨', horizon: '下一交易日', upProb: 60 },
+    v2: {},
+    reads: [],
+  }
+  let v21Calls = 0
+  let v2Calls = 0
+  const result = await fetchSelectedQuantPredict(
+    'v2',
+    '600519',
+    [],
+    null,
+    1000,
+    null,
+    {
+      fetchBars: async () => bars,
+      fetchV21: async () => {
+        v21Calls++
+        return { ...base, runtimeModelVersion: 'v2.1-intraday', v21: { heads: {} } }
+      },
+      fetchV2: async () => {
+        v2Calls++
+        return base
+      },
+      timeContext: {
+        tradingToday: true,
+        isLive: true,
+        phase: '早盘(盘中)',
+        bjNow: '2026-08-12 10:32',
+      },
+    },
+  )
+
+  assert.equal(result.runtimeModelVersion, 'v2.1-intraday')
+  assert.equal(v21Calls, 1)
+  assert.equal(v2Calls, 0)
+
+  await fetchSelectedQuantPredict(
+    'v2',
+    '600519',
+    [],
+    null,
+    1000,
+    null,
+    {
+      fetchBars: async () => bars,
+      fetchV21: async () => {
+        throw new Error('V2.1 unavailable')
+      },
+      fetchV2: async () => {
+        v2Calls++
+        return base
+      },
+      timeContext: {
+        tradingToday: true,
+        isLive: true,
+        phase: '早盘(盘中)',
+        bjNow: '2026-08-12 10:32',
+      },
+    },
+  )
+  assert.equal(v2Calls, 1)
 })

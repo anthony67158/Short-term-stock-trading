@@ -1013,6 +1013,12 @@ body {
 .v2-price-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
 .v2-price-grid > span { display: flex; min-width: 0; flex-direction: column; gap: 3px; padding: 7px 8px; border-radius: 7px; background: var(--panel2); color: var(--muted); font-size: 10.5px; }
 .v2-price-grid b { color: var(--text2); font-size: 12px; font-variant-numeric: tabular-nums; }
+.v21-heads { display: flex; flex-direction: column; gap: 9px; }
+.v21-asof { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 8px 10px; border-radius: 8px; background: rgba(91,141,239,.08); border: 1px solid rgba(91,141,239,.24); }
+.v21-asof b { color: var(--accent2); font-size: 12px; }
+.v21-asof span { color: var(--muted); font-size: 10.5px; text-align: right; }
+.v21-head { padding: 9px 10px; border: 1px solid var(--border-soft); border-radius: 8px; background: var(--surface-quiet); }
+.v21-head.active { border-color: rgba(91,141,239,.38); background: rgba(91,141,239,.07); }
 @media (max-width: 720px) {
   .qmc-mask { padding: calc(12px + env(safe-area-inset-top)) 12px calc(12px + env(safe-area-inset-bottom)); }
   .qmc-modal { width: min(100%, 560px); max-height: 100%; }
@@ -1025,6 +1031,8 @@ body {
   .v2-price-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .v2-price-head { align-items: flex-start; flex-direction: column; gap: 3px; }
   .v2-price-head small { text-align: left; }
+  .v21-asof { align-items: flex-start; flex-direction: column; }
+  .v21-asof span { text-align: left; overflow-wrap: anywhere; }
   .nav-model-btn span { display: none; }
   .nav-model-btn { width: 34px; justify-content: center; padding: 0; }
 }

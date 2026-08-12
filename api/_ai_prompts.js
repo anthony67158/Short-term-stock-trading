@@ -99,6 +99,12 @@ export function buildUserPrompt(mode, payload, ragText) {
   //   再下一道最强指令——用户会实时看到中文思考过程,思维链必须全程简体中文。
   const zhReason = '【语言要求·最高优先·先读这条】请务必用【简体中文】进行你的全部思考(思维链/reasoning)与输出，逐字都用中文推理，绝对不要用英文思考(个股代码/纯数字/专有名词缩写除外)。这一条优先级最高，任何英文思考都算不合格。\n\n';
   const ragBlock = ragText ? `\n\n【RAG检索资料：近5日走势+主营+联网新闻】\n${ragText}` : '';
+  const v21QuantNote = payload.quant?.runtimeModelVersion === 'v2.1-intraday' && payload.quant?.v21
+    ? `\n【★当前量化版本：V2.1盘中双头模型】信号时间=${payload.quant.asOf || '—'}，当前时段=${payload.quant.v21.session || '—'}，实际采用=${payload.quant.v21.activeHead === 'sessionClose' ? '截至今日收盘' : '未来30分钟'}预测头。
+【未来30分钟】止盈/止损/超时概率=${Math.round((payload.quant.v21.heads?.next30m?.probabilities?.takeProfit || 0) * 100)}%/${Math.round((payload.quant.v21.heads?.next30m?.probabilities?.stopLoss || 0) * 100)}%/${Math.round((payload.quant.v21.heads?.next30m?.probabilities?.timeout || 0) * 100)}%。
+【截至今日收盘】止盈/止损/超时概率=${Math.round((payload.quant.v21.heads?.sessionClose?.probabilities?.takeProfit || 0) * 100)}%/${Math.round((payload.quant.v21.heads?.sessionClose?.probabilities?.stopLoss || 0) * 100)}%/${Math.round((payload.quant.v21.heads?.sessionClose?.probabilities?.timeout || 0) * 100)}%。
+这是基于截至 ${payload.quant.asOf || '当前最近完整5分钟K线'} 的真实盘中序列预测；两个头是独立概率，不得互相平均，不得与上一收盘日V2概率混用。军师必须在 quantNote 中分别引用两个窗口，并按当前采用头决定短线方向；价格锚点只用于执行，不是保证到达的目标价。`
+    : '';
   const v2QuantNote = payload.quant?.modelVersion === 'v2' && payload.quant?.v2
     ? `\n【★当前量化版本：分钟 Transformer V2】这是基于信号日15:00完整5分钟序列、预测信号日后【下一个交易时段】三重障碍结果的分类模型；相对当前时刻的展示窗口是【${payload.quant.forecast?.horizon || '下一交易日'}】。止盈/止损/超时概率分别为${Math.round((payload.quant.v2.probabilities?.takeProfit || 0) * 100)}%/${Math.round((payload.quant.v2.probabilities?.stopLoss || 0) * 100)}%/${Math.round((payload.quant.v2.probabilities?.timeout || 0) * 100)}%，概率优势${payload.quant.v2.outlook?.probabilityEdgePct ?? '—'}个百分点、有利/不利赔率${payload.quant.v2.outlook?.favorableToAdverseOdds ?? '—'}、方向分${payload.quant.v2.outlook?.directionScore ?? '—'}、障碍期望收益${payload.quant.v2.outlook?.expectedBarrierReturnPct ?? '—'}%、确定度${payload.quant.v2.outlook?.convictionScore ?? '—'}、不确定性${payload.quant.v2.outlook?.uncertaintyLevel || '—'}、信号强度${payload.quant.v2.outlook?.signalStrength || '—'}。
 【5分钟行情上下文】当日涨跌${payload.quant.v2.marketContext?.sessionReturnPct ?? '—'}%、近30分钟动量${payload.quant.v2.marketContext?.momentum30mPct ?? '—'}%、实现波动${payload.quant.v2.marketContext?.realizedVolPct ?? '—'}%、平均振幅${payload.quant.v2.marketContext?.averageRangePct ?? '—'}%、量能比${payload.quant.v2.marketContext?.volumeRatio20 ?? '—'}、收盘位置${payload.quant.v2.marketContext?.closeLocationPct ?? '—'}%、趋势对齐${payload.quant.v2.marketContext?.trendAlignment || '—'}。
@@ -157,7 +163,7 @@ ${payload.todayQuote.isLimitUp ? '⚠️该股【今日已涨停】：说明今�
 · 【闸一·把握闸(胜率)】校准后把握读数要够高:优先看上面【高把握买点信号】——已触发(✅)为最强绿灯;若未触发或无该信号,则要求 共振分≥3 且 军师本类历史胜率≥50%(有样本时)作为替代把握证据。校准可信度低/信号未触发/共振不足→把握闸不过。
 · 【闸二·赔率闸(盈亏比)】用你定的价位算清盈亏比=(目标价−买入价)/(买入价−止损价),必须【≥1.8:1】才算过;<1.8:1 一律不给主动做多(哪怕方向看对,赔率不划算也不出手)。
 判定口径:①两闸全过→可给"立即买入/加仓"等主动评级,且 confidence 可给到与把握相称的档;②仅过一闸→最多给"小仓试错/回调再买",confidence 压到"中"及以下;③两闸都不过→"观望/持有",老实说"本次把握或赔率不够,不值得出手"。⚠️"高把握、少出手"的价值就在于:错过一个平庸机会不可惜,出手一次低把握的错单才致命。
-【★归因回写·必填 quantNote】无论是否出手,都要在 quantNote(没有该字段则并入 reason 末尾)用一句话交代双闸门结论,格式示例:"把握:校准可信度${payload.quant && payload.quant.highConfSignal ? (payload.quant.highConfSignal.credibility ?? 'X') : 'X'}%(闸一${payload.quant && payload.quant.highConfSignal && payload.quant.highConfSignal.fired ? '过' : '未过'});赔率:目标/止损=Y:1(闸二过/未过);结论:出手/降级观望——因为__"。让用户一眼看懂你为什么开火或为什么按兵不动。` : ''}${v2QuantNote}
+【★归因回写·必填 quantNote】无论是否出手,都要在 quantNote(没有该字段则并入 reason 末尾)用一句话交代双闸门结论,格式示例:"把握:校准可信度${payload.quant && payload.quant.highConfSignal ? (payload.quant.highConfSignal.credibility ?? 'X') : 'X'}%(闸一${payload.quant && payload.quant.highConfSignal && payload.quant.highConfSignal.fired ? '过' : '未过'});赔率:目标/止损=Y:1(闸二过/未过);结论:出手/降级观望——因为__"。让用户一眼看懂你为什么开火或为什么按兵不动。` : ''}${v21QuantNote || v2QuantNote}
 【★资金金额·算术铁律(绝对不能算错,这是最低级也最致命的错误)】A股1手=100股。任何"约用/约需/回笼/买入/卖出金额"都【必须严格等于 手数×100×价格】,一分钱都不能凭感觉估。
 · 正确示例:15手 @ 50.5元 = 15×100×50.5 = 75750元(七万五千七百五十元),【绝不是7575元】。10手 @ 8.3元 = 10×100×8.3 = 8300元。3手 @ 42元 = 3×100×42 = 12600元。
 · 输出前【逐笔重算并自检】:把"opAmount/planAmount/opAmount"以及 actionPlan/nextAction/reason 文案里出现的每一个金额,都用"手数×100×价格"重新乘一遍,核对量级对不对(常见错误是漏乘100、或少乘/多乘10倍)。金额与"手数×价格"对不上就是错的,必须改对再输出。

@@ -53,6 +53,141 @@ function biasLabel(direction) {
   return '中性'
 }
 
+function adaptV21Head(head, name) {
+  if (!head || typeof head !== 'object') {
+    throw new Error(`V2.1 ${name}预测头缺失`)
+  }
+  const stopLoss = probability(head.probabilities?.stopLoss, `${name}止损`)
+  const timeout = probability(head.probabilities?.timeout, `${name}超时`)
+  const takeProfit = probability(head.probabilities?.takeProfit, `${name}止盈`)
+  if (Math.abs(stopLoss + timeout + takeProfit - 1) > 1e-5) {
+    throw new Error(`V2.1 ${name}概率之和必须为1`)
+  }
+  const fallbackExpected = takeProfit - stopLoss * 0.6
+  const direction = head.outlook?.direction || (
+    fallbackExpected > 0.08
+      ? 'bullish'
+      : fallbackExpected < -0.08 ? 'bearish' : 'neutral'
+  )
+  const confidence = Number.isFinite(Number(head.outlook?.confidencePct))
+    ? Number(head.outlook.confidencePct)
+    : Math.max(stopLoss, timeout, takeProfit) * 100
+  const expectedReturn = Number.isFinite(
+    Number(head.outlook?.expectedBarrierReturnPct),
+  )
+    ? Number(head.outlook.expectedBarrierReturnPct)
+    : fallbackExpected
+  return {
+    horizon: String(head.horizon || ''),
+    predictedClass: String(head.predictedClass || ''),
+    probabilities: { stopLoss, timeout, takeProfit },
+    outlook: {
+      ...(head.outlook || {}),
+      direction,
+      confidencePct: round(confidence),
+      expectedBarrierReturnPct: round(expectedReturn, 3),
+      directionScore: Number.isFinite(Number(head.outlook?.directionScore))
+        ? Number(head.outlook.directionScore)
+        : Math.round((takeProfit - stopLoss + 1) * 50),
+    },
+    targetDefinition: head.targetDefinition || null,
+  }
+}
+
+export function adaptV21Prediction(
+  prediction,
+  {
+    price = null,
+    activeHead = 'next30m',
+  } = {},
+) {
+  if (!prediction || typeof prediction !== 'object') {
+    throw new Error('V2.1预测结果无效')
+  }
+  const heads = {
+    next30m: adaptV21Head(prediction.heads?.next30m, '未来30分钟'),
+    sessionClose: adaptV21Head(
+      prediction.heads?.sessionClose,
+      '截至收盘',
+    ),
+  }
+  const selectedName = activeHead === 'sessionClose'
+    ? 'sessionClose'
+    : 'next30m'
+  const selected = heads[selectedName]
+  const probabilities = selected.probabilities
+  const outlook = selected.outlook
+  const refs = prediction.priceReferences
+    && typeof prediction.priceReferences === 'object'
+    ? prediction.priceReferences
+    : null
+  const anchor = Number(refs?.anchorPrice)
+  const support = Number(refs?.supportPrice)
+  const resistance = Number(refs?.resistancePrice)
+  const definition = selected.targetDefinition || {}
+  const target = Number.isFinite(anchor)
+    && Number.isFinite(Number(definition.takeProfitPct))
+    ? round(anchor * (1 + Number(definition.takeProfitPct) / 100), 3)
+    : null
+  const stop = Number.isFinite(anchor)
+    && Number.isFinite(Number(definition.stopLossPct))
+    ? round(anchor * (1 - Number(definition.stopLossPct) / 100), 3)
+    : null
+  const score = Math.max(
+    0,
+    Math.min(100, Math.round(outlook.directionScore)),
+  )
+  return {
+    ok: true,
+    modelVersion: QUANT_MODEL_V2,
+    runtimeModelVersion: 'v2.1-intraday',
+    modelLabel: '分钟 Transformer V2.1（盘中）',
+    price: Number.isFinite(Number(price)) ? Number(price) : null,
+    score,
+    bias: biasLabel(outlook.direction),
+    tDir: directionLabel(outlook.direction),
+    forecast: {
+      upProb: round(probabilities.takeProfit * 100),
+      downProb: round(probabilities.stopLoss * 100),
+      timeoutProb: round(probabilities.timeout * 100),
+      expRet: round(outlook.expectedBarrierReturnPct, 3),
+      direction: directionLabel(outlook.direction),
+      confidence: round(outlook.confidencePct),
+      horizon: selected.horizon,
+      targetLow: Number.isFinite(support) ? support : null,
+      targetMid: Number.isFinite(anchor) ? anchor : null,
+      targetHigh: target ?? (Number.isFinite(resistance) ? resistance : null),
+    },
+    highConfSignal: {
+      fired: selected.predictedClass === 'TAKE_PROFIT'
+        && outlook.confidencePct >= 65,
+      credibility: round(outlook.confidencePct),
+      gate: 0.65,
+      buyPrice: Number.isFinite(anchor) ? anchor : null,
+      takeProfit: target,
+      stopLoss: stop,
+      label: `V2.1${selected.horizon}模型`,
+    },
+    reads: [
+      `${heads.next30m.horizon}止盈概率${round(heads.next30m.probabilities.takeProfit * 100)}%，止损概率${round(heads.next30m.probabilities.stopLoss * 100)}%`,
+      `${heads.sessionClose.horizon}止盈概率${round(heads.sessionClose.probabilities.takeProfit * 100)}%，止损概率${round(heads.sessionClose.probabilities.stopLoss * 100)}%`,
+      `当前采用${selected.horizon}预测头，方向${directionLabel(outlook.direction)}，期望${round(outlook.expectedBarrierReturnPct, 3)}%`,
+      refs
+        ? `盘中锚点${refs.anchorPrice}，支撑${refs.supportPrice}，压力${refs.resistancePrice}`
+        : '',
+    ].filter(Boolean),
+    asOf: prediction.asOf || null,
+    model: prediction.model || null,
+    v21: {
+      session: prediction.session || null,
+      activeHead: selectedName,
+      heads,
+      marketContext: prediction.marketContext || null,
+      priceReferences: refs,
+    },
+  }
+}
+
 export function adaptV2Prediction(prediction, { price = null } = {}) {
   if (!prediction || typeof prediction !== 'object') {
     throw new Error('V2预测结果无效')

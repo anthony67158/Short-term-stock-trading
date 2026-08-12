@@ -1,5 +1,8 @@
 import { randomUUID } from 'node:crypto'
-import { adaptV2Prediction } from '../shared/modelVersion.js'
+import {
+  adaptV2Prediction,
+  adaptV21Prediction,
+} from '../shared/modelVersion.js'
 import { getV2RuntimeConfig } from './_quant_model_control.js'
 
 const CODE_RE = /^\d{6}$/
@@ -396,6 +399,67 @@ export function buildV2Request(code, bars, requestId = '') {
   }
 }
 
+function completedFiveMinuteCutoff(bjNow) {
+  const match = String(bjNow || '').match(
+    /^(\d{4}-\d{2}-\d{2}) (\d{2}):(\d{2})/,
+  )
+  if (!match) return null
+  const total = Number(match[2]) * 60 + Number(match[3])
+  const completed = Math.floor((total - 1) / 5) * 5
+  return {
+    date: match[1],
+    hhmm: `${String(Math.floor(completed / 60)).padStart(2, '0')}:${String(completed % 60).padStart(2, '0')}`,
+  }
+}
+
+export function selectV21IntradayBars(bars, context = {}) {
+  if (!Array.isArray(bars) || !context.tradingToday) return []
+  const current = completedFiveMinuteCutoff(context.bjNow)
+  if (!current) return []
+  let cutoff = current.hhmm
+  if (String(context.phase).includes('午间')) cutoff = '11:30'
+  if (String(context.phase).includes('午盘') && cutoff > '14:30') {
+    cutoff = '14:30'
+  }
+  if (String(context.phase).includes('早盘') && cutoff > '11:30') {
+    cutoff = '11:30'
+  }
+  const supported = (
+    ('10:00' <= cutoff && cutoff <= '11:30')
+    || ('13:05' <= cutoff && cutoff <= '14:30')
+  )
+  if (!supported) return []
+  const asOf = `${current.date} ${cutoff}:00`
+  const selected = bars
+    .filter((bar) => String(bar?.tradeTime || '') <= asOf)
+    .slice(-240)
+  if (
+    selected.length < 60
+    || !String(selected.at(-1)?.tradeTime || '').startsWith(
+      `${current.date} ${cutoff}`,
+    )
+  ) return []
+  return selected
+}
+
+export function buildV21Request(code, bars, requestId = '') {
+  code = String(code || '').trim()
+  if (!CODE_RE.test(code)) throw new Error('V2.1股票代码无效')
+  if (!Array.isArray(bars) || bars.length < 60) {
+    throw new Error('V2.1至少需要60根5分钟K线')
+  }
+  const ordered = bars.slice(-240)
+    .sort((left, right) => left.tradeTime.localeCompare(right.tradeTime))
+  const asOf = ordered.at(-1).tradeTime
+  const stamp = asOf.replace(/\D/g, '').slice(0, 12)
+  return {
+    requestId: requestId || `v21_${stamp}_${code}`,
+    code: exchangeCode(code),
+    asOf,
+    bars: ordered,
+  }
+}
+
 function v2Config(env) {
   const url = String(env.V2_QUANT_URL || '').trim().replace(/\/+$/, '')
   const easToken = String(env.V2_EAS_TOKEN || '')
@@ -407,6 +471,73 @@ function v2Config(env) {
     throw new Error('V2模型服务地址必须为阿里云EAS HTTPS地址')
   }
   return { url, easToken, apiKey }
+}
+
+export async function fetchV21QuantPredict(code, {
+  bars,
+  requestId = '',
+  price = null,
+  activeHead = 'next30m',
+  env = process.env,
+  fetchImpl = fetch,
+  resolveRuntimeConfig = getV2RuntimeConfig,
+  timeoutMs = 8000,
+} = {}) {
+  let config = env === process.env && runtimeConfigOverride
+    ? v2Config({
+        ...env,
+        V2_QUANT_URL: runtimeConfigOverride.url,
+        V2_EAS_TOKEN: runtimeConfigOverride.easToken,
+      })
+    : v2Config(env)
+  const payload = buildV21Request(code, bars, requestId)
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const request = (activeConfig) => fetchImpl(
+      `${activeConfig.url}/predict-v2-intraday`,
+      {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          Authorization: activeConfig.easToken,
+          'X-Shadow-Key': activeConfig.apiKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      },
+    )
+    let response = await request(config)
+    if (response.status === 401 && typeof resolveRuntimeConfig === 'function') {
+      try {
+        const runtime = await resolveRuntimeConfig()
+        const recovered = v2Config({
+          ...env,
+          V2_QUANT_URL: runtime.url,
+          V2_EAS_TOKEN: runtime.easToken,
+        })
+        if (
+          runtime?.status === 'Running'
+          && (
+            recovered.url !== config.url
+            || recovered.easToken !== config.easToken
+          )
+        ) {
+          config = recovered
+          response = await request(config)
+        }
+      } catch {
+        // Preserve the inference response when control-plane recovery fails.
+      }
+    }
+    if (!response.ok) throw new Error(`V2.1模型服务返回${response.status}`)
+    return adaptV21Prediction(await response.json(), {
+      price,
+      activeHead,
+    })
+  } finally {
+    clearTimeout(timeout)
+  }
 }
 
 export async function fetchV2QuantPredict(code, {
