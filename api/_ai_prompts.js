@@ -146,9 +146,14 @@ ${payload.quant.v2.executionReference ? `【当前时段实时执行层·不是�
     ? `\n【★★上一版权威主计划·连续决策约束】${JSON.stringify(payload.previousAdvice)}。
 刷新不是重新猜一次方向，而是复核这份主计划：①方向和失效条件未被客观行情破坏时，必须延续原方向，只可微调动态买卖区间；②无客观失效证据不得反转，不得仅因现价小幅变化就在“买/持/卖”之间摇摆；③只有触及上一版止损/目标，或资金、消息、量化、技术出现多维反转共振时，才允许改成相反动作，并在理由中明确指出哪条原逻辑已失效；④上一版与新数据冲突但证据不足时，以主计划为准并继续等待 Judge 确认。`
     : '';
-  const knowledgeActionNote = `\n【★★知行合一·事前交易契约】先定义，再行动；先守纪律，再谈收益。除了已有结论字段，最终JSON必须额外给出 knowledgeActionPlan：
-{"researchLogic":"数据支持的交易逻辑","action":"本次明确动作","executionPlan":"可直接执行的计划","triggerConditions":"触发动作所需的价格+确认信号","positionRule":"建议手数/仓位及上限","riskPoints":"主要风险","stopLoss":{"price":止损价或null,"condition":"确认止损条件"},"takeProfit":{"price":止盈价或null,"condition":"分批止盈/退出条件"},"exitConditions":"退出规则","invalidation":"可证伪的策略失效条件","validationWindow":"验证周期，如3个交易日","falsifiableClaim":"出现什么事实就证明原判断错误"}。
-禁止用“适量、看情况、注意风险”等模糊词替代规则；研究逻辑、动作、触发、仓位、风险、退出、失效和验证周期缺一项都属于低质量建议。`;
+  const knowledgeActionNote = `\n【★★知行合一·字段职责】先定义，再行动；先守纪律，再谈收益。请在已有字段中分别写清：action=明确动作、actionPlan/nextAction=当前执行指令、timing/nextOpenPlan=触发条件、positionNote/planWeight/posAfter=仓位上限、exitTiming=确认与退出规则、risk=主要风险、invalidation=可证伪的失效条件。禁止用“适量、看情况、注意风险”等模糊词替代规则。系统会在返回后统一生成知行合一交易契约与评分，你不要再额外复制一套嵌套契约。
+【★★输出格式·简洁去重】同一事实只写一次，各字段各司其职：
+1. title/headline 只写结论，控制在20字内；actionPlan/nextAction 只写当前可执行动作，控制在80字内。
+2. reason 控制在120字内，只解释最关键的因果链；reasoning 只给可核对的关键推理摘要，不复述所有字段。
+3. techNote/fundNote/quantNote/newsNote 各只保留1条最有区分度的证据，每项控制在80字内；没有新增信息就直说“无明显增量”，不要换句话重复 reason。
+4. exitTiming 只写到价后的确认方式；invalidation 只写什么事实证明原判断失效；bearCase 只写最强反方，三者不得互相抄写。
+5. nextOpenPlan 与 futurePlan 分别只写“最近可交易时段”和“更远后续路径”，每项控制在100字内。
+6. 除规定的JSON字段外不要增加章节、前言、总结或重复对象；只输出一个合法JSON。`;
   const knowledgeActionReviewNote = payload.knowledgeActionReview
     ? `\n【★★知行合一复盘归因·事实层不可改写】系统根据事前计划与真实执行已得出：${JSON.stringify(payload.knowledgeActionReview)}。
 你只能解释归因并提出改进，禁止根据短期盈亏推翻它：严格止损后的亏损不能判成执行错误；违反仓位、触发或止损纪律后的违规盈利不能粉饰执行质量。复盘必须明确区分认知错误、执行错误、偶然波动和计划验证。`
