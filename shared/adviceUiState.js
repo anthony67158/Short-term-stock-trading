@@ -41,7 +41,7 @@ export function cloudAdviceLoadingState(batch, code) {
   }
 }
 
-export function startAdvicePersistently(
+export async function startAdvicePersistently(
   spec,
   {
     canUseServer,
@@ -55,13 +55,27 @@ export function startAdvicePersistently(
     && typeof canUseServer === 'function'
     && canUseServer()
     && typeof triggerServer === 'function'
-    && triggerServer([code], {
-      scope: 'all',
-      force: true,
-      deepMode: !!spec?.deepMode,
-    })
   ) {
-    return { status: 'started', mode: 'server', code }
+    try {
+      const submission = await triggerServer([code], {
+        scope: 'all',
+        force: true,
+        deepMode: !!spec?.deepMode,
+      })
+      if (submission === true || submission?.ok) {
+        return { status: 'started', mode: 'server', code }
+      }
+      if (submission?.queued) {
+        return {
+          status: 'queued',
+          mode: 'server',
+          code,
+          error: submission.error || '任务已排队，等待云端恢复',
+        }
+      }
+    } catch {
+      // Fall back to the local runner only when the task was not persisted.
+    }
   }
   if (typeof startLocal === 'function') startLocal(spec)
   return { status: 'started', mode: 'local', code }

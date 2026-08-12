@@ -233,27 +233,39 @@ export async function runBatchAdvice(codes, quoteMap, opts = {}) {
   // 立刻本地点亮一个 running 进度条(乐观 UI),真实进度随首个云端 tick 覆盖。
   if (opts.local !== true && canServerAdvice()) {
     const batchId = `client_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
-    const fired = triggerServerAdvice(uniq, {
+    state.serverMode = true
+    state.running = true
+    state.cancelRequested = false
+    state.batchId = batchId
+    state.deepMode = generation.deepMode
+    state.total = uniq.length
+    state.done = 0; state.ok = 0; state.fail = 0; state.skipped = 0
+    state.current = new Set()
+    state.items = uniq.map((code) => ({
+      code,
+      name: nameOf(code),
+      status: 'pending',
+      phase: '正在提交云端任务',
+    }))
+    state.startedAt = Date.now(); state.finishedAt = 0
+    state._cloudAt = 0
+    notify()
+    const submission = await triggerServerAdvice(uniq, {
       scope: opts.scope || 'all',
       force: true,
       batchId,
       deepMode: generation.deepMode,
     })
-    if (fired) {
-      state.serverMode = true
-      state.running = true
-      state.cancelRequested = false
-      state.batchId = batchId
-      state.deepMode = generation.deepMode
-      state.total = uniq.length
-      state.done = 0; state.ok = 0; state.fail = 0; state.skipped = 0
-      state.current = new Set()
-      state.items = uniq.map((code) => ({ code, name: nameOf(code), status: 'pending' }))
-      state.startedAt = Date.now(); state.finishedAt = 0
-      state._cloudAt = 0   // 允许后续云端 tick 覆盖这份乐观占位
-      notify()
-      return { status: 'started', mode: 'server' }
+    if (submission === true || submission?.ok || submission?.queued) {
+      return {
+        status: 'started',
+        mode: 'server',
+        queued: !!submission?.queued,
+        error: submission?.error || '',
+      }
     }
+    state.running = false
+    notify()
   }
 
   // ===== 兜底:本地浏览器生成(未登录云端 / 触发失败) =====

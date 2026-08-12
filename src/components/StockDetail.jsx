@@ -184,8 +184,16 @@ export default function StockDetail({ stock, onClose }) {
     const unAdvice = subscribeAdvice(sync) // 云端结果回灌 adviceCache → 自动切成品
     return () => { unRunner(); unBatch(); unAdvice() }
   }, [stock && stock.code])
-  const loadQuant = () => {
+  const loadQuant = async () => {
     if (!stock) return
+    setQuantState({
+      loading: true,
+      cloud: true,
+      phase: '正在提交云端生成任务…',
+      sources: [],
+      reasoning: '',
+      quant: null,
+    })
     const hp = myHold ? `&holdCost=${myHold.cost}&holdQty=${myHold.qty}` : ''
     const quantModelVersion = currentQuantModelVersion()
     const quantUrl = api(`/api/stock_detail?code=${stock.code}&klt=101&lmt=60&quant=1${quantModelQuery()}${hp}&_t=${Date.now()}`)
@@ -272,7 +280,7 @@ export default function StockDetail({ stock, onClose }) {
     // ★关键★ 生成流程交给模块级后台 runner：关闭弹窗也照跑完、落缓存、记决策；
     // 本组件仅订阅 runner + 缓存来展示进度/结果（见下方 useEffect）。
     // 经门控层触发:并发已满 → 不启动,弹「端点已满 + 正在生成清单」;该股已在生成 → 复用进度不重复触发。
-    const r = tryStartAdvice({
+    const r = await tryStartAdvice({
       code: stock.code,
       mode: myHold ? 'hold_advice' : 'buy_advice',
       name: (profile && profile.name) || stock.name,
@@ -286,13 +294,20 @@ export default function StockDetail({ stock, onClose }) {
       setQuantState({
         loading: true,
         cloud: true,
-        phase: '任务已提交云端，切到后台或关闭页面也会继续生成',
+        phase: r.status === 'queued'
+          ? (r.error || '任务已排队，等待云端Worker恢复')
+          : r.status === 'already'
+            ? '云端已有同一任务，正在恢复实时进度'
+            : '云端已受理，刷新或切到后台也会继续生成',
         sources: [],
         reasoning: '',
         quant: null,
       })
     }
-    if (r && r.status === 'full') setBusyModal({ busy: r.busy || [], concurrency: r.concurrency || 0 })
+    if (r && r.status === 'full') {
+      setBusyModal({ busy: r.busy || [], concurrency: r.concurrency || 0 })
+      setQuantState(null)
+    }
   }
   const [showAlert, setShowAlert] = useState(false) // 设预警表单开关
   // 端点已满弹窗打开时,订阅本地/云端生成进度 → 实时刷新「正在生成」清单;

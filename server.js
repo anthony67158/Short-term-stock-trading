@@ -14,7 +14,11 @@ import http from 'node:http';
 import { readdirSync, existsSync, statSync, createReadStream } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
-import { adviceTimerBody, v2AccuracyTimerBody } from './api/_advice_timer.js';
+import {
+  adviceTimerBody,
+  adviceWorkerBody,
+  v2AccuracyTimerBody,
+} from './api/_advice_timer.js';
 
 const PORT = process.env.FC_SERVER_PORT || process.env.PORT || 9000;
 const ROOT = process.cwd();
@@ -79,7 +83,8 @@ const server = http.createServer(async (req, res) => {
     const raw = await parseBody(req);
     let event = null;
     try { event = JSON.parse(raw || '{}'); } catch { /* ignore */ }
-    const adviceBody = adviceTimerBody(event, process.env.CRON_KEY);
+    const adviceBody = adviceTimerBody(event, process.env.CRON_KEY)
+      || adviceWorkerBody(event, process.env.CRON_KEY);
     const v2Body = v2AccuracyTimerBody(event, process.env.CRON_KEY);
     if (!adviceBody && !v2Body) { res.statusCode = 403; res.end('forbidden'); return; }
     req.query = {};

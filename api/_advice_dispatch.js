@@ -52,6 +52,11 @@ async function invokeFC({
     }),
     new RuntimeOptions({}),
   )
+  if (response?.body && Symbol.asyncIterator in response.body) {
+    for await (const _chunk of response.body) {
+      // Async invocation returns no business payload; drain the SDK stream.
+    }
+  }
   return {
     requestId: String(
       response?.headers?.['x-fc-request-id']

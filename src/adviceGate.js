@@ -45,16 +45,22 @@ export function isGenerating(code) {
 //   { status:'started' }        —— 已启动本次生成
 //   { status:'already' }        —— 该股已在生成中(不重复触发,UI 直接看进度)
 //   { status:'full', busy:[{code,name}], concurrency } —— 端点已满,附正在生成的清单
-export function tryStartAdvice(spec) {
+export async function tryStartAdvice(spec) {
   const code = spec && spec.code
   if (!code) return { status: 'started' }   // 无 code 交给底层自行忽略
   // 规则2:同一只已在生成 → 不重复触发
-  if (isGenerating(code)) return { status: 'already', code: String(code) }
+  if (isGenerating(code)) {
+    return {
+      status: 'already',
+      mode: isRunning(String(code)) ? 'local' : 'server',
+      code: String(code),
+    }
+  }
   // 规则1:占用端点数(排除当前这只)达到并发上限 → 端点已满
   const busy = generatingList().filter((x) => x.code !== String(code))
   const limit = getConcurrency()
   if (busy.length >= limit) return { status: 'full', busy, concurrency: limit }
-  return startAdvicePersistently(spec, {
+  return await startAdvicePersistently(spec, {
     canUseServer: canServerAdvice,
     triggerServer: triggerServerAdvice,
     startLocal: startAdvice,

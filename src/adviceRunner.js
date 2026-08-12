@@ -188,6 +188,7 @@ async function run(spec, record) {
 function serverFallback(code, deepMode = false) {
   try {
     if (!canServerAdvice()) return false
-    return !!triggerServerAdvice([code], { scope: 'all', force: true, deepMode })
+    void triggerServerAdvice([code], { scope: 'all', force: true, deepMode })
+    return true
   } catch { return false }
 }

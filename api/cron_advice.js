@@ -26,7 +26,7 @@ import { isAccountActive, writeAccount, readAccount, listAllAccounts, sha } from
 import { buildHoldPayload, buildWatchPayload, computePortfolio, t1StatusOf } from './_portfolio.js';
 import {
   CONCURRENCY, jobsOf, enqueueJob, leaseJob, completeJob, failJob, cancelJob, cancelAll,
-  reapOrphans, gcJobs, runningCount, hasPendingWork, isActive, jobsToProgress,
+  reapOrphans, gcJobs, runningCount, hasPendingWork, needsWorkerDispatch, isActive, jobsToProgress,
   acquireWorkerLock, renewWorkerLock, renewLease, releaseWorkerLock, workerHeldByOther, updateJobProgress,
 } from './_jobs.js';
 import { ensureConfig, currentConfig } from './_llm_config.js';
@@ -51,6 +51,7 @@ import stockDetailHandler from './stock_detail.js';
 import quoteHandler from './quote.js';
 import { TRUSTED_QUANT_VERSION } from './_quant_access.js';
 import { TRUSTED_ACCOUNT_REQUEST } from './_account_auth.js';
+import { dispatchAdviceWorker } from './_advice_dispatch.js';
 
 export function createAdviceSSEParser(onEvent) {
   let buffer = '';
@@ -855,9 +856,19 @@ export function enqueueAutoRefreshDue(data, now = Date.now()) {
   return count;
 }
 
-export async function runAdviceDrainBeforeResponse(runDrain) {
-  if (typeof runDrain !== 'function') throw new Error('缺少建议任务Worker');
-  return await runDrain();
+async function scheduleAdviceWorker(nick) {
+  if (process.env.FC_SERVER_PORT) {
+    return dispatchAdviceWorker(nick);
+  }
+  setImmediate(() => {
+    drainAccount(nick).catch((error) => {
+      console.error(
+        '[cron_advice] local worker failed',
+        error?.code || error?.name || error?.message,
+      );
+    });
+  });
+  return { accepted: true, requestId: 'local-worker' };
 }
 
 export default async function handler(req, res) {
@@ -889,7 +900,29 @@ export default async function handler(req, res) {
 
     try {
       if (op === 'status') {
-        return res.end(JSON.stringify({ ok: true, jobs: jobsOf(data), progress: jobsToProgress(data, Date.now(), CONC), concurrency: CONC, running: runningCount(data) }));
+        const recovered = reapOrphans(data);
+        gcJobs(data);
+        if (recovered > 0) await persistServer(nick, acc, 'status-recover');
+        let workerScheduled = false;
+        if (needsWorkerDispatch(data)) {
+          try {
+            workerScheduled = !!(await scheduleAdviceWorker(nick))?.accepted;
+          } catch (error) {
+            console.error(
+              '[cron_advice] status worker dispatch failed',
+              error?.code || error?.name || error?.message,
+            );
+          }
+        }
+        return res.end(JSON.stringify({
+          ok: true,
+          jobs: jobsOf(data),
+          progress: jobsToProgress(data, Date.now(), CONC),
+          concurrency: CONC,
+          running: runningCount(data),
+          workerScheduled,
+          recovered,
+        }));
       }
       if (op === 'cancel') {
         const codes = Array.isArray(body.codes) ? body.codes.filter(Boolean).map(String) : [];
@@ -936,19 +969,40 @@ export default async function handler(req, res) {
       if (enq > 0) data.activeAdviceBatchId = batchId;
       CONC = effectiveAdviceConcurrency(data, deepMode);
       await persistServer(nick, acc, 'enqueue');   // 立刻公布队列(另一设备可见)
-      // 浏览器可以关闭，但 FC 请求必须保持到 Worker 完成；提前 202 + setImmediate
-      // 会让 FC 在响应结束后冻结实例，造成任务只排队不生成。
-      stopHeartbeat = startJsonHeartbeat(res);
-      const dr = await runAdviceDrainBeforeResponse(
-        async () => drainAccount(nick, await readAccount(nick)),
-      );
-      stopHeartbeat();
-      return endWorkerResponse(res, {
-        ok: true, enqueued: enq, dedup: dup,
-        drained: dr && dr.drained ? true : false, ok2: dr && dr.ok, fail: dr && dr.fail,
-        concurrency: CONC, elapsedMs: Date.now() - started,
+      let worker = null;
+      try {
+        if (needsWorkerDispatch(data)) worker = await scheduleAdviceWorker(nick);
+      } catch (error) {
+        console.error(
+          '[cron_advice] worker dispatch failed',
+          error?.code || error?.name || error?.message,
+        );
+        res.statusCode = 503;
+        return res.end(JSON.stringify({
+          ok: false,
+          accepted: true,
+          queued: true,
+          code: 'WORKER_DISPATCH_FAILED',
+          error: '任务已保存，但云端Worker调度失败，将由定时任务自动恢复',
+          enqueued: enq,
+          dedup: dup,
+          concurrency: CONC,
+          deepMode,
+          progress: jobsToProgress(data, Date.now(), CONC),
+        }));
+      }
+      res.statusCode = 202;
+      return res.end(JSON.stringify({
+        ok: true,
+        accepted: true,
+        workerScheduled: !!worker?.accepted,
+        requestId: worker?.requestId || '',
+        enqueued: enq,
+        dedup: dup,
+        concurrency: CONC,
         deepMode,
-      });
+        progress: jobsToProgress(data, Date.now(), CONC),
+      }));
     } catch (e) {
       stopHeartbeat();
       if (res.headersSent) return endWorkerResponse(res, { ok: false, error: String(e.message || e), elapsedMs: Date.now() - started });

@@ -7,10 +7,10 @@ import {
   enqueueJob,
   jobsToProgress,
   leaseJob,
+  needsWorkerDispatch,
   reapOrphans,
   updateJobProgress,
 } from '../api/_jobs.js'
-import { runAdviceDrainBeforeResponse } from '../api/cron_advice.js'
 
 test('过期运行任务会被回收并在进度中显示为排队等待续跑', () => {
   const data = {}
@@ -119,19 +119,15 @@ test('重复点击不能用新排队任务覆盖正在生成的同一股票', ()
   assert.equal(data.jobs['600000'].batchId, 'first-batch')
 })
 
-test('用户按需生成入队后FC请求不能在Worker完成前结束', async () => {
-  let releaseWorker
-  let responseFinished = false
-  const worker = new Promise((resolve) => { releaseWorker = resolve })
-  const request = runAdviceDrainBeforeResponse(() => worker)
-    .then(() => { responseFinished = true })
+test('待办且没有有效Worker锁时必须补发异步Worker', () => {
+  const data = {}
+  enqueueJob(data, { code: '600000', mode: 'buy_advice' }, 1000)
 
-  await Promise.resolve()
-  assert.equal(responseFinished, false)
+  assert.equal(needsWorkerDispatch(data, 1100), true)
 
-  releaseWorker()
-  await request
-  assert.equal(responseFinished, true)
+  data.jobWorker = { id: 'worker-1', lockUntil: 5000 }
+  assert.equal(needsWorkerDispatch(data, 1100), false)
+  assert.equal(needsWorkerDispatch(data, 6000), true)
 })
 
 test('上一批延迟到达的取消请求不能取消新批次任务', () => {

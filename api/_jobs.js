@@ -224,6 +224,16 @@ export function hasPendingWork(data, now = Date.now()) {
   return false;
 }
 
+export function needsWorkerDispatch(data, now = Date.now()) {
+  if (!hasPendingWork(data, now)) return false;
+  const worker = data?.jobWorker;
+  return !(
+    worker
+    && worker.id
+    && (worker.lockUntil || 0) > now
+  );
+}
+
 // 生成对旧前端兼容的 batchProgress 快照(老逻辑仍消费 data.batchProgress)。
 // running/total/done/ok/fail/skipped/items([{code,name,status}])/startedAt/finishedAt/at/source/concurrency
 // concurrency:本轮生效的并发上限(运行时由承接 advisor 角色的端点数决定;前端据此做单股触发门控)。

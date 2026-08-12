@@ -1178,9 +1178,14 @@ function HoldingList({ book, quote, batchSel }) {
           // 端点占用门控:端点被单股生成占满 → 不启动,弹「端点已满」;未满则用剩余空槽并行(空出再补)
           const peek = peekBatchBusy(codes, deepMode)
           if (peek.full) { setBusyModal({ busy: peek.busy, concurrency: peek.concurrency }); return }
-          setBatchNotice(deepMode ? '深度生成将以2路并行逐批完成全部股票' : '')
+          setBatchNotice(deepMode ? '正在提交云端深度生成任务…' : '正在提交云端快速生成任务…')
           const result = await runBatchAdvice(codes, quote, { deepMode })
-          if (result?.status === 'started') setSelectMode(false)
+          if (result?.status === 'started') {
+            setSelectMode(false)
+            setBatchNotice(result.error || (deepMode ? '云端已受理，将以2路并行逐批生成' : '云端已受理'))
+          } else {
+            setBatchNotice(result?.status === 'running' ? '已有云端任务正在运行' : '任务提交失败，请重试')
+          }
         }
         return (
           <div className="batch-bar">
