@@ -171,6 +171,40 @@ class IntradayV21TrainerContractTest(unittest.TestCase):
         self.assertGreater(after, before)
         np.testing.assert_allclose(adjusted.sum(axis=1), 1.0)
 
+    def test_stable_calibration_is_refit_only_after_forward_validation(self):
+        trainer = load_trainer()
+        labels = np.tile(np.repeat(np.asarray([0, 1, 2]), 10), 4)
+        probabilities = np.tile(np.vstack([
+            np.tile([0.45, 0.30, 0.25], (10, 1)),
+            np.tile([0.40, 0.35, 0.25], (10, 1)),
+            np.tile([0.40, 0.25, 0.35], (10, 1)),
+        ]), (4, 1))
+        buckets = np.full(len(labels), "morning")
+        dates = np.repeat(
+            np.asarray(["20260101", "20260102", "20260103", "20260104"]),
+            30,
+        )
+
+        calibration = trainer.select_stable_probability_calibration(
+            labels,
+            probabilities,
+            buckets,
+            dates,
+        )
+
+        self.assertNotEqual(calibration["morning"], [0.0, 0.0, 0.0])
+        self.assertEqual(calibration["noon"], [0.0, 0.0, 0.0])
+
+    def test_pooled_transformer_configuration_is_checkpointed(self):
+        trainer = load_trainer()
+
+        self.assertEqual(
+            trainer.ARCHITECTURE,
+            "transformer-dual-head-pooled",
+        )
+        self.assertEqual(trainer.MODEL_CONFIG["pooling"], "last-mean-max")
+        self.assertEqual(trainer.MODEL_CONFIG["num_layers"], 3)
+
 
 if __name__ == "__main__":
     unittest.main()

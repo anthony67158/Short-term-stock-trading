@@ -16,7 +16,15 @@ from train_intraday_tcn import (
 )
 
 
-ARCHITECTURE = "transformer-dual-head"
+ARCHITECTURE = "transformer-dual-head-pooled"
+MODEL_CONFIG = {
+    "model_size": 96,
+    "num_layers": 3,
+    "num_heads": 4,
+    "feedforward_multiplier": 2,
+    "dropout": 0.12,
+    "pooling": "last-mean-max",
+}
 HEADS = ("next30m", "sessionClose")
 SESSION_ORDER = ("morning", "noon", "afternoon")
 SESSION_BUCKETS = frozenset(SESSION_ORDER)
@@ -243,11 +251,83 @@ def apply_probability_calibration(probabilities, buckets, calibration):
     return output
 
 
+def _identity_probability_calibration():
+    return {
+        bucket: [0.0, 0.0, 0.0]
+        for bucket in SESSION_ORDER
+    }
+
+
+def select_stable_probability_calibration(
+    labels,
+    probabilities,
+    buckets,
+    dates,
+):
+    labels = np.asarray(labels, dtype=int)
+    probabilities = np.asarray(probabilities, dtype=np.float64)
+    buckets = np.asarray(buckets).astype(str)
+    dates = np.asarray(dates).astype(str)
+    unique_dates = np.unique(dates)
+    if len(unique_dates) < 4:
+        return _identity_probability_calibration()
+    boundary = unique_dates[len(unique_dates) // 2]
+    fit_index = dates < boundary
+    validation_index = dates >= boundary
+    candidate = fit_probability_calibration(
+        labels[fit_index],
+        probabilities[fit_index],
+        buckets[fit_index],
+    )
+    adjusted = apply_probability_calibration(
+        probabilities[validation_index],
+        buckets[validation_index],
+        candidate,
+    )
+    validation_labels = labels[validation_index]
+    validation_buckets = buckets[validation_index]
+    raw_predictions = probabilities[validation_index].argmax(axis=1)
+    adjusted_predictions = adjusted.argmax(axis=1)
+    raw_accuracy = balanced_accuracy(validation_labels, raw_predictions)
+    adjusted_accuracy = balanced_accuracy(
+        validation_labels,
+        adjusted_predictions,
+    )
+    raw_f1 = _macro_f1(validation_labels, raw_predictions)
+    adjusted_f1 = _macro_f1(validation_labels, adjusted_predictions)
+    stable = (
+        adjusted_accuracy >= raw_accuracy + 0.002
+        and adjusted_f1 >= raw_f1 - 0.005
+    )
+    for bucket in SESSION_ORDER:
+        selected = validation_buckets == bucket
+        if not np.any(selected):
+            continue
+        stable = stable and (
+            balanced_accuracy(
+                validation_labels[selected],
+                adjusted_predictions[selected],
+            )
+            >= balanced_accuracy(
+                validation_labels[selected],
+                raw_predictions[selected],
+            ) - 0.005
+        )
+    if not stable:
+        return _identity_probability_calibration()
+    return fit_probability_calibration(
+        labels,
+        probabilities,
+        buckets,
+    )
+
+
 def _build_dual_head_transformer(
     input_features,
     sequence_length,
-    model_size=64,
-    dropout=0.15,
+    model_size=MODEL_CONFIG["model_size"],
+    dropout=MODEL_CONFIG["dropout"],
+    num_layers=MODEL_CONFIG["num_layers"],
 ):
     import torch
 
@@ -260,23 +340,51 @@ def _build_dual_head_transformer(
             )
             layer = torch.nn.TransformerEncoderLayer(
                 d_model=model_size,
-                nhead=4,
-                dim_feedforward=model_size * 2,
+                nhead=MODEL_CONFIG["num_heads"],
+                dim_feedforward=(
+                    model_size
+                    * MODEL_CONFIG["feedforward_multiplier"]
+                ),
                 dropout=dropout,
                 activation="gelu",
                 batch_first=True,
                 norm_first=True,
             )
-            self.encoder = torch.nn.TransformerEncoder(layer, num_layers=2)
+            self.encoder = torch.nn.TransformerEncoder(
+                layer,
+                num_layers=num_layers,
+            )
             self.norm = torch.nn.LayerNorm(model_size)
-            self.dropout = torch.nn.Dropout(dropout)
-            self.next30m_head = torch.nn.Linear(model_size, 3)
-            self.session_close_head = torch.nn.Linear(model_size, 3)
+            pooled_size = model_size * 3
+            self.next30m_head = self._head(pooled_size, model_size, dropout)
+            self.session_close_head = self._head(
+                pooled_size,
+                model_size,
+                dropout,
+            )
+
+        @staticmethod
+        def _head(input_size, hidden_size, head_dropout):
+            return torch.nn.Sequential(
+                torch.nn.LayerNorm(input_size),
+                torch.nn.Linear(input_size, hidden_size),
+                torch.nn.GELU(),
+                torch.nn.Dropout(head_dropout),
+                torch.nn.Linear(hidden_size, 3),
+            )
 
         def forward(self, value):
             encoded = self.input_projection(value) + self.position
-            hidden = self.dropout(self.norm(self.encoder(encoded)[:, -1, :]))
-            return self.next30m_head(hidden), self.session_close_head(hidden)
+            hidden = self.norm(self.encoder(encoded))
+            pooled = torch.cat(
+                (
+                    hidden[:, -1, :],
+                    hidden.mean(dim=1),
+                    hidden.amax(dim=1),
+                ),
+                dim=1,
+            )
+            return self.next30m_head(pooled), self.session_close_head(pooled)
 
     return DualHeadTransformer()
 
@@ -512,16 +620,19 @@ def train_intraday_v21(
         )
     )
     calibration_buckets = buckets[calibration_index]
+    calibration_dates = dates[calibration_index]
     probability_calibration = {
-        "next30m": fit_probability_calibration(
+        "next30m": select_stable_probability_calibration(
             labels_next[calibration_index],
             calibration_next_prob,
             calibration_buckets,
+            calibration_dates,
         ),
-        "sessionClose": fit_probability_calibration(
+        "sessionClose": select_stable_probability_calibration(
             labels_close[calibration_index],
             calibration_close_prob,
             calibration_buckets,
+            calibration_dates,
         ),
     }
     holdout_loss, raw_next_prob, raw_close_prob = _evaluate(
@@ -545,6 +656,7 @@ def train_intraday_v21(
     )
     metrics = {
         "model": ARCHITECTURE,
+        "model_config": MODEL_CONFIG,
         "model_version": "v2.1-intraday",
         "device": str(device),
         "seed": seed,
@@ -598,6 +710,7 @@ def train_intraday_v21(
     torch.save({
         "state_dict": model.state_dict(),
         "architecture": ARCHITECTURE,
+        "model_config": MODEL_CONFIG,
         "model_version": "v2.1-intraday",
         "feature_names": feature_names,
         "normalizer_mean": mean,

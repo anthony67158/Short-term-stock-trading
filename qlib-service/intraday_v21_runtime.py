@@ -13,6 +13,7 @@ from train_intraday_tcn import _model_input
 from train_intraday_v21 import (
     ARCHITECTURE,
     LABEL_DEFINITIONS,
+    MODEL_CONFIG,
     _build_dual_head_transformer,
     apply_probability_calibration,
 )
@@ -187,6 +188,7 @@ class IntradayV21Runtime:
         )
         if (
             checkpoint.get("architecture") != ARCHITECTURE
+            or checkpoint.get("model_config") != MODEL_CONFIG
             or checkpoint.get("model_version") != "v2.1-intraday"
             or checkpoint.get("label_definitions") != LABEL_DEFINITIONS
             or feature_names != list(V21_FEATURE_NAMES)
