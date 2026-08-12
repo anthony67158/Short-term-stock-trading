@@ -73,6 +73,8 @@ export default function App() {
   }, [])
   useEffect(() => {
     if (!user) return
+    // 刷新后账号恢复成功，立即拉取云端任务状态；不要等空登录态启动的 15 秒慢轮询。
+    import('./serverAdvice').then((m) => m.kickServerAdviceStatusSync()).catch(() => {})
     // 预置并发上限=承接 advisor 角色的端点数(首屏即可门控;之后随云端 batchProgress.concurrency 覆盖为权威值)
     fetch(api('/api/llm_config'), {
       method: 'POST',

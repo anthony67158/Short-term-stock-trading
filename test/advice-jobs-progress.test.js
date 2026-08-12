@@ -10,7 +10,7 @@ import {
   reapOrphans,
   updateJobProgress,
 } from '../api/_jobs.js'
-import { shouldDetachOnDemandDrain } from '../api/cron_advice.js'
+import { runAdviceDrainBeforeResponse } from '../api/cron_advice.js'
 
 test('过期运行任务会被回收并在进度中显示为排队等待续跑', () => {
   const data = {}
@@ -92,19 +92,46 @@ test('深度任务模式会持久化到任务和批次进度', () => {
   assert.equal(progress.items[0].deepMode, true)
 })
 
-test('用户按需生成入队后必须脱离浏览器请求继续执行', () => {
-  assert.equal(shouldDetachOnDemandDrain({
-    op: 'enqueue',
-    ondemand: true,
-  }), true)
-  assert.equal(shouldDetachOnDemandDrain({
-    op: 'enqueue',
-    ondemand: false,
-  }), false)
-  assert.equal(shouldDetachOnDemandDrain({
-    op: 'status',
-    ondemand: true,
-  }), false)
+test('重复点击不能用新排队任务覆盖正在生成的同一股票', () => {
+  const data = {}
+  const first = enqueueJob(data, {
+    code: '600000',
+    name: '浦发银行',
+    mode: 'buy_advice',
+    batchId: 'first-batch',
+    deepMode: true,
+    force: true,
+  }, 1000)
+  leaseJob(data, '600000', 1100)
+
+  const duplicate = enqueueJob(data, {
+    code: '600000',
+    name: '浦发银行',
+    mode: 'buy_advice',
+    batchId: 'second-batch',
+    deepMode: true,
+    force: true,
+  }, 2000)
+
+  assert.equal(duplicate.created, false)
+  assert.equal(duplicate.job.id, first.job.id)
+  assert.equal(data.jobs['600000'].status, 'running')
+  assert.equal(data.jobs['600000'].batchId, 'first-batch')
+})
+
+test('用户按需生成入队后FC请求不能在Worker完成前结束', async () => {
+  let releaseWorker
+  let responseFinished = false
+  const worker = new Promise((resolve) => { releaseWorker = resolve })
+  const request = runAdviceDrainBeforeResponse(() => worker)
+    .then(() => { responseFinished = true })
+
+  await Promise.resolve()
+  assert.equal(responseFinished, false)
+
+  releaseWorker()
+  await request
+  assert.equal(responseFinished, true)
 })
 
 test('上一批延迟到达的取消请求不能取消新批次任务', () => {

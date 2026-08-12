@@ -76,14 +76,15 @@ export function gcJobs(data, now = Date.now()) {
   }
 }
 
-// 入队一只。dedup:同 code 已有活跃任务且未 force → 返回既有任务(不新建,防重复提交)。
+// 入队一只。dedup:同 code 已有活跃任务时始终返回既有任务；终态任务可以重建。
+// 这样刷新后重复点击不会把 running 覆盖回 queued，避免任务永远在排队。
 // mode 由调用方按持仓/自选判定。返回 { job, created(bool) }。
 export function enqueueJob(data, {
-  code, name, mode, source = 'ondemand', force = false, batchId = '', deepMode = false,
+  code, name, mode, source = 'ondemand', batchId = '', deepMode = false,
 }, now = Date.now()) {
   const jobs = jobsOf(data);
   const cur = jobs[code];
-  if (cur && isActive(cur) && !force) return { job: cur, created: false };
+  if (cur && isActive(cur)) return { job: cur, created: false };
   const generation = generationOptions(deepMode);
   const job = {
     id: `${code}_${now}`,

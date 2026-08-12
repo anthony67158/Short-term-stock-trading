@@ -10,7 +10,8 @@
 //         · 取消:queued 立即 canceled;running 协作式(跑完丢弃结果)。
 //         · 防重:同 code 已有活跃任务 → 复用不新建。
 //   触发(均无需浏览器常驻):
-//     A) 前端 fire-and-forget POST(keepalive):{ op:'enqueue', codes, nick, pw }(默认随后 drain)。
+//     A) 前端 fire-and-forget POST(keepalive):{ op:'enqueue', codes, nick, pw }；
+//        浏览器不等结果，但 FC 请求会 await drain，保证刷新/切后台不终止 Worker。
 //     B) 单只/全部取消:{ op:'cancel'|'cancelAll', codes, nick, pw }。
 //     C) 状态查询:{ op:'status', nick, pw }(前端也可直接靠 authStore.pull 读 batchProgress)。
 //     D) 定时兜底(CRON_KEY):遍历所有账号 → 回收孤儿 + 排入过期建议 + drain,实现"每天/定时续跑"。
@@ -854,12 +855,9 @@ export function enqueueAutoRefreshDue(data, now = Date.now()) {
   return count;
 }
 
-export function shouldDetachOnDemandDrain(body) {
-  return !!(
-    body
-    && body.ondemand === true
-    && String(body.op || 'enqueue') === 'enqueue'
-  );
+export async function runAdviceDrainBeforeResponse(runDrain) {
+  if (typeof runDrain !== 'function') throw new Error('缺少建议任务Worker');
+  return await runDrain();
 }
 
 export default async function handler(req, res) {
@@ -938,31 +936,12 @@ export default async function handler(req, res) {
       if (enq > 0) data.activeAdviceBatchId = batchId;
       CONC = effectiveAdviceConcurrency(data, deepMode);
       await persistServer(nick, acc, 'enqueue');   // 立刻公布队列(另一设备可见)
-      if (shouldDetachOnDemandDrain(body)) {
-        res.statusCode = 202;
-        res.end(JSON.stringify({
-          ok: true,
-          accepted: true,
-          detached: true,
-          enqueued: enq,
-          dedup: dup,
-          concurrency: CONC,
-          deepMode,
-          progress: jobsToProgress(data, Date.now(), CONC),
-        }));
-        setImmediate(() => {
-          drainAccount(nick).catch((error) => {
-            console.error(
-              '[cron_advice] detached drain failed',
-              error?.code || error?.name || error?.message,
-            );
-          });
-        });
-        return;
-      }
-      // 尝试成为 drainer;拿不到锁说明已有 drainer 在跑,会自动捞起我们刚入队的
+      // 浏览器可以关闭，但 FC 请求必须保持到 Worker 完成；提前 202 + setImmediate
+      // 会让 FC 在响应结束后冻结实例，造成任务只排队不生成。
       stopHeartbeat = startJsonHeartbeat(res);
-      const dr = await drainAccount(nick, await readAccount(nick));
+      const dr = await runAdviceDrainBeforeResponse(
+        async () => drainAccount(nick, await readAccount(nick)),
+      );
       stopHeartbeat();
       return endWorkerResponse(res, {
         ok: true, enqueued: enq, dedup: dup,
