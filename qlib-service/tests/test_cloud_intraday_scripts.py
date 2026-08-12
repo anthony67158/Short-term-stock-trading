@@ -77,6 +77,17 @@ class CloudIntradayScriptsTest(unittest.TestCase):
             source,
         )
 
+    def test_v21_archives_experiment_outputs_before_enforcing_promotion(self):
+        source = (CLOUD_ROOT / "dsw_train_intraday_v21.sh").read_text(
+            encoding="utf-8"
+        )
+
+        archive_at = source.index(
+            'bash cloud/dsw_archive_intraday_v21.sh "${RUN_ID}"'
+        )
+        promotion_at = source.index('if not gate.get("production_eligible")')
+        self.assertLess(archive_at, promotion_at)
+
     def test_repair_script_explicitly_enables_limited_source_row_drops(self):
         source = (CLOUD_ROOT / "dsw_retry_minute_5m.sh").read_text(
             encoding="utf-8"

@@ -63,6 +63,8 @@ fi
   --metrics "${METRICS}" \
   --out "${GATE}"
 
+bash cloud/dsw_archive_intraday_v21.sh "${RUN_ID}"
+
 "${PYTHON}" - "${GATE}" <<'PY'
 import json
 import sys
@@ -73,7 +75,5 @@ if not gate.get("production_eligible"):
     raise SystemExit("V2.1_OFFLINE_GATE_REJECTED")
 print("V2.1_OFFLINE_GATE_PASSED")
 PY
-
-bash cloud/dsw_archive_intraday_v21.sh "${RUN_ID}"
 
 echo "INTRADAY_V21_PIPELINE_OK ${RUN_ID}"
