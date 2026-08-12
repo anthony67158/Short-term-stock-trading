@@ -88,6 +88,19 @@ class CloudIntradayScriptsTest(unittest.TestCase):
         promotion_at = source.index('if not gate.get("production_eligible")')
         self.assertLess(archive_at, promotion_at)
 
+    def test_v21_archive_uses_injected_ram_role_instead_of_read_only_mount(self):
+        source = (CLOUD_ROOT / "dsw_archive_intraday_v21.sh").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn(
+            "ProviderAuth(providers.DefaultCredentialsProvider())",
+            source,
+        )
+        self.assertIn('TARGET_PREFIX="datasets/runs/${RUN_ID}/v21/"', source)
+        self.assertNotIn('TARGET="/mnt/data/', source)
+        self.assertNotIn("\ncp \\", source)
+
     def test_repair_script_explicitly_enables_limited_source_row_drops(self):
         source = (CLOUD_ROOT / "dsw_retry_minute_5m.sh").read_text(
             encoding="utf-8"

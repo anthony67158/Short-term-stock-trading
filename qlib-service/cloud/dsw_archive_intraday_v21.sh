@@ -9,40 +9,68 @@ if test -z "${RUN_ID}"; then
 fi
 
 SOURCE="${ROOT}/minute-runs/${RUN_ID}/v21"
-TARGET="/mnt/data/runs/${RUN_ID}/v21"
+TARGET_PREFIX="datasets/runs/${RUN_ID}/v21/"
 MANIFEST="${SOURCE}/v21_sha256_manifest.txt"
+PYTHON="${ROOT}/.venv-torch/bin/python"
+FILES=(
+  intraday_v21_dual_head.npz
+  v21_intraday.pt
+  v21_metrics.json
+  v21_holdout_predictions.npz
+  v21_gate.json
+)
 
 cd "${ROOT}"
-for file in \
-  intraday_v21_dual_head.npz \
-  v21_intraday.pt \
-  v21_metrics.json \
-  v21_holdout_predictions.npz \
-  v21_gate.json
-do
+test -x "${PYTHON}"
+for file in "${FILES[@]}"; do
   test -f "${SOURCE}/${file}"
 done
 
-sha256sum \
-  "${SOURCE}/intraday_v21_dual_head.npz" \
-  "${SOURCE}/v21_intraday.pt" \
-  "${SOURCE}/v21_metrics.json" \
-  "${SOURCE}/v21_holdout_predictions.npz" \
-  "${SOURCE}/v21_gate.json" \
-  > "${MANIFEST}"
+(
+  cd "${SOURCE}"
+  sha256sum "${FILES[@]}" > "$(basename "${MANIFEST}")"
+)
 
-if test -e "${TARGET}"; then
-  echo "V21_ARCHIVE_TARGET_EXISTS ${TARGET}" >&2
-  exit 2
-fi
-mkdir -p "${TARGET}"
-cp \
-  "${SOURCE}/intraday_v21_dual_head.npz" \
-  "${SOURCE}/v21_intraday.pt" \
-  "${SOURCE}/v21_metrics.json" \
-  "${SOURCE}/v21_holdout_predictions.npz" \
-  "${SOURCE}/v21_gate.json" \
-  "${MANIFEST}" \
-  "${TARGET}/"
+"${PYTHON}" - "${SOURCE}" "${TARGET_PREFIX}" <<'PY'
+import os
+import sys
 
-echo "INTRADAY_V21_ARCHIVE_OK ${TARGET}"
+import oss2
+from alibabacloud_credentials import providers
+
+source, target_prefix = sys.argv[1:3]
+bucket_name = os.environ["LAB_OSS_BUCKET"]
+endpoint = os.environ.get(
+    "LAB_OSS_ENDPOINT",
+    "https://oss-cn-hangzhou-internal.aliyuncs.com",
+)
+auth = oss2.ProviderAuth(providers.DefaultCredentialsProvider())
+bucket = oss2.Bucket(auth, endpoint, bucket_name)
+files = (
+    "intraday_v21_dual_head.npz",
+    "v21_intraday.pt",
+    "v21_metrics.json",
+    "v21_holdout_predictions.npz",
+    "v21_gate.json",
+    "v21_sha256_manifest.txt",
+)
+existing = [
+    target_prefix + name
+    for name in files
+    if bucket.object_exists(target_prefix + name)
+]
+if existing:
+    raise SystemExit(f"V21_ARCHIVE_TARGET_EXISTS {existing[0]}")
+for name in files:
+    oss2.resumable_upload(
+        bucket,
+        target_prefix + name,
+        os.path.join(source, name),
+        multipart_threshold=100 * 1024 * 1024,
+        part_size=10 * 1024 * 1024,
+        num_threads=4,
+    )
+print(f"INTRADAY_V21_ARCHIVE_OK oss://{bucket_name}/{target_prefix}")
+PY
+
+echo "INTRADAY_V21_ARCHIVE_COMPLETE ${RUN_ID}"
