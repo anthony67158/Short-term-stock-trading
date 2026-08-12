@@ -1,6 +1,7 @@
 import importlib.util
 import os
 import sys
+import tempfile
 import unittest
 from datetime import datetime, timedelta
 
@@ -24,6 +25,16 @@ def load_builder():
         return module
     finally:
         sys.path.remove(SERVICE_ROOT)
+
+
+def load_minute_data():
+    spec = importlib.util.spec_from_file_location(
+        "minute_data",
+        os.path.join(SERVICE_ROOT, "minute_data.py"),
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def trading_times():
@@ -123,6 +134,66 @@ class IntradayV21DatasetTest(unittest.TestCase):
         self.assertTrue(
             all(value[11:16] <= "14:30" for value in samples["as_of"])
         )
+
+    def test_dataset_builder_skips_codes_with_only_empty_month_caches(self):
+        builder = load_builder()
+        minute_data = load_minute_data()
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        start = datetime(2026, 8, 1, 9, 30)
+        end = datetime(2026, 8, 31, 15, 0)
+
+        empty_path = minute_data.month_cache_path(
+            temp.name,
+            "5min",
+            "000001.SZ",
+            start,
+        )
+        minute_data.write_month_cache(
+            empty_path,
+            frequency="5min",
+            code="000001.SZ",
+            start=start,
+            end=end,
+            rows=[],
+        )
+
+        source = panel()
+        valid_path = minute_data.month_cache_path(
+            temp.name,
+            "5min",
+            "600519.SH",
+            start,
+        )
+        minute_data.write_month_cache(
+            valid_path,
+            frequency="5min",
+            code="600519.SH",
+            start=start,
+            end=end,
+            rows=[
+                {
+                    "ts_code": "600519.SH",
+                    "trade_time": source["trade_time"][index],
+                    "open": source["open"][index],
+                    "high": source["high"][index],
+                    "low": source["low"][index],
+                    "close": source["close"][index],
+                    "vol": source["vol"][index],
+                    "amount": source["amount"][index],
+                }
+                for index in range(len(source["trade_time"]))
+            ],
+        )
+
+        dataset = builder.build_dataset_from_cache(
+            temp.name,
+            sequence_length=12,
+            minimum_bars_per_day=40,
+        )
+
+        self.assertGreater(len(dataset["X"]), 0)
+        self.assertEqual(np.unique(dataset["codes"]).tolist(), ["600519.SH"])
 
 
 if __name__ == "__main__":

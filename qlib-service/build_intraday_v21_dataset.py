@@ -167,6 +167,8 @@ def build_dataset_from_cache(
             field: np.concatenate([current[field] for current in panels])
             for field in fields
         }
+        if not len(panel["trade_time"]):
+            continue
         samples = make_intraday_v21_samples(
             panel,
             sequence_length=sequence_length,
