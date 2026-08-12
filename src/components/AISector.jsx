@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { callAI } from '../ai'
 import StockDetail from './StockDetail'
+import Icon from './Icon'
 
 // AI 板块选股：基于选中板块的真实成分股，让 AI 挑短线候选
 export default function AISector({ sector, stocks }) {
@@ -33,7 +34,7 @@ export default function AISector({ sector, stocks }) {
     <div className="ai-sector" style={{ marginTop: 14 }}>
       <div className="ai-sector-head">
         <div className="ai-sector-title">
-          <span className="ai-spark">✨</span>
+          <Icon name="layers" size={15} />
           <span>AI 板块选股</span>
           <span className="ai-sector-badge">{sector.name}</span>
         </div>

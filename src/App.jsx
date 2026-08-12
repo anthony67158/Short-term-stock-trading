@@ -21,6 +21,10 @@ import {
   adviceCandleLimit,
   adviceNeedsVerification,
 } from '../shared/adviceOutcome.js'
+import {
+  APP_SECTIONS,
+  resolveAppShortcut,
+} from '../shared/appShell.js'
 
 // 按需分包：四个主 Tab 与 AI 助手拆成独立 chunk，首屏只加载当前 Tab，
 // 切换时才拉取对应 chunk（配合 Rolldown codeSplitting），缩短首屏体积与白屏时间。
@@ -51,19 +55,12 @@ const QuantModelControl = lazyWithReload(() => import('./components/QuantModelCo
 // Tab 切换时的轻量骨架占位（避免 Suspense fallback 空白闪一下）
 function TabSkeleton() {
   return (
-    <div className="tab-skeleton" style={{ padding: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '40vh', color: 'var(--muted, #888)' }}>
+    <div className="tab-skeleton" role="status" aria-live="polite">
       <Icon name="refresh" size={16} className="spin" />
-      <span style={{ marginLeft: 8 }}>正在加载…</span>
+      <span>正在加载工作区…</span>
     </div>
   )
 }
-
-const TABS = [
-  { key: 'today', label: '今日选股', icon: 'radar' },
-  { key: 'plan', label: '持仓·做T', icon: 'wallet' },
-  { key: 'hub', label: '账户·交易', icon: 'gauge' },
-  { key: 'research', label: '盘面研究', icon: 'layers' },
-]
 
 export default function App() {
   const { user, booting } = useAuthStore()
@@ -88,7 +85,7 @@ export default function App() {
       .catch(() => { /* 拿不到就用默认 1,不阻断 */ })
   }, [user])
   if (booting) return (
-    <div className="auth-gate"><div className="auth-card" style={{ textAlign: 'center' }}>
+    <div className="auth-gate"><div className="auth-card auth-card-loading">
       <div className="auth-brand"><span className="nav-logo"><Icon name="logo" size={20} /></span><span>短线操盘台</span></div>
       <div className="play-hint"><Icon name="refresh" size={14} className="spin" /> 正在恢复登录…</div>
     </div></div>
@@ -131,6 +128,8 @@ function MainApp() {
   const remain = useCountdown(interval, (market.data && market.data.updatedAt) + refreshTick)
   const book = usePlanStore()
   const planCount = book.plan.length + book.holding.length
+  const currentSection = APP_SECTIONS.find((section) => section.key === tab)
+    || APP_SECTIONS[0]
 
   // ===== 盯盘预警：轮询所有“启用中预警”涉及的个股报价 → 逐条判断命中 =====
   const alertCodes = [...new Set((book.alerts || []).filter((a) => a.enabled).map((a) => a.code))]
@@ -214,17 +213,28 @@ function MainApp() {
       // 在输入框/文本域/可编辑元素里打字时不拦截
       const el = e.target
       const typing = el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)
-      if (e.metaKey || e.ctrlKey || e.altKey) return
-      if (e.key === 'Escape') {
+      const action = resolveAppShortcut({
+        key: e.key,
+        metaKey: e.metaKey,
+        ctrlKey: e.ctrlKey,
+        altKey: e.altKey,
+        typing,
+      })
+      if (!action) return
+      if (action.type === 'escape') {
         // 优先关最上层：详情弹窗 → 助手抽屉
         if (detailStore.get().stock) { detailStore.close(); return }
         aiStore.close()
         return
       }
-      if (typing) return
-      const idx = { '1': 0, '2': 1, '3': 2, '4': 3 }[e.key]
-      if (idx != null && TABS[idx]) { setTab(TABS[idx].key); return }
-      if (e.key === '/' || e.key === 'a' || e.key === 'A') { e.preventDefault(); aiStore.toggle() }
+      if (action.type === 'tab') {
+        setTab(action.tab)
+        return
+      }
+      if (action.type === 'assistant') {
+        e.preventDefault()
+        aiStore.toggle()
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -235,29 +245,53 @@ function MainApp() {
       {/* 顶部导航 */}
       <header className="nav">
         <div className="nav-inner">
-          <div className="nav-brand">
+          <button
+            type="button"
+            className="nav-brand"
+            onClick={() => setTab('today')}
+            aria-label="返回今日决策"
+          >
             <span className="nav-logo"><Icon name="logo" size={18} /></span>
             <span className="nav-name">短线操盘台</span>
-          </div>
-          <nav className="nav-tabs">
-            {TABS.map((t) => (
-              <button key={t.key} className={'nav-tab' + (tab === t.key ? ' active' : '')} onClick={() => setTab(t.key)}>
+          </button>
+          <nav className="nav-tabs" aria-label="主工作区">
+            {APP_SECTIONS.map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                className={'nav-tab' + (tab === t.key ? ' active' : '')}
+                onClick={() => setTab(t.key)}
+                aria-current={tab === t.key ? 'page' : undefined}
+                title={`${t.label} · ${t.description}`}
+              >
                 <Icon name={t.icon} size={16} />
-                <span>{t.label}</span>
+                <span className="nav-label-full">{t.label}</span>
+                <span className="nav-label-short">{t.shortLabel}</span>
                 {t.key === 'plan' && planCount > 0 && <span className="nav-badge">{planCount}</span>}
               </button>
             ))}
           </nav>
+          <button
+            type="button"
+            className="nav-command"
+            onClick={() => aiStore.open()}
+            aria-keyshortcuts="Meta+K Control+K /"
+            title="打开军师（⌘K / Ctrl+K / /）"
+          >
+            <Icon name="spark" size={14} />
+            <span>问军师</span>
+            <kbd>⌘K</kbd>
+          </button>
           <div className="nav-meta">
             <span className={'nav-status ' + (trading ? 'on' : 'off')}>
               <span className="status-dot" />{trading ? '交易中' : '休市'}
             </span>
-            <button className="nav-refresh" onClick={triggerRefresh} title="立即刷新数据">
+            <button type="button" className="nav-refresh" onClick={triggerRefresh} title="立即刷新数据" aria-label={`刷新数据，距自动刷新 ${remain} 秒`}>
               <Icon name="refresh" size={13} /><span>{remain}s</span>
             </button>
             <UndoButton />
             <AlertBell onOpen={() => { setHubSub('alert'); setHubNonce((n) => n + 1); setTab('hub') }} />
-            <button className="icon-btn nav-theme" onClick={themeStore.toggle} title={theme === 'dark' ? '切到白天模式' : '切到夜间模式'}>
+            <button type="button" className="icon-btn nav-theme" onClick={themeStore.toggle} title={theme === 'dark' ? '切到白天模式' : '切到夜间模式'} aria-label={theme === 'dark' ? '切到白天模式' : '切到夜间模式'}>
               <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={15} />
             </button>
             <AccountMenu />
@@ -266,6 +300,16 @@ function MainApp() {
       </header>
 
       <main className="main">
+        <div className="workspace-head">
+          <div className="workspace-title">
+            <h1>{currentSection.label}</h1>
+            <p>{currentSection.description}</p>
+          </div>
+          <div className="workspace-state" aria-label={trading ? '当前为交易时段' : '当前为休市时段'}>
+            <span className={'workspace-state-dot ' + (trading ? 'on' : 'off')} />
+            <span>{trading ? '行情实时更新' : '休市数据复核'}</span>
+          </div>
+        </div>
         <ErrorBoundary key={tab} label="页面">
           <Suspense fallback={<TabSkeleton />}>
             {tab === 'today' && <TodayTab interval={interval} market={market.data} sectors={sectors.data} snapshot={snapshot} />}

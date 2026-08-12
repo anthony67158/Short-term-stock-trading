@@ -87,6 +87,15 @@ export default function AIAssistant({ snapshot }) {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
   }, [msgs, loading])
 
+  // 命令入口（⌘K / Ctrl+K / /）打开后立即进入可输入状态。
+  useEffect(() => {
+    if (!open || loading) return undefined
+    const timer = setTimeout(() => {
+      try { inputRef.current?.focus({ preventScroll: true }) } catch { inputRef.current?.focus() }
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [open, loading])
+
   // 输入框随内容自动增高（多行预填/编辑时不遮挡）
   useEffect(() => {
     const el = inputRef.current
@@ -270,9 +279,9 @@ export default function AIAssistant({ snapshot }) {
   return (
     <>
       {/* 悬浮球 */}
-      <button className={'ai-fab' + (open ? ' hidden' : '')} onClick={() => aiStore.open()} title="AI 助手">
+      <button type="button" className={'ai-fab' + (open ? ' hidden' : '')} onClick={() => aiStore.open()} title="问军师">
         <span className="ai-fab-spark"><Icon name="spark" size={18} /></span>
-        <span className="ai-fab-text">AI 助手</span>
+        <span className="ai-fab-text">问军师</span>
       </button>
 
       {/* 抽屉 */}
@@ -280,13 +289,13 @@ export default function AIAssistant({ snapshot }) {
         <div className="ai-drawer">
           <div className="ai-drawer-head">
             <div className="ai-drawer-title">
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}><Icon name="spark" size={16} /> AI 操盘助手</span>
+              <span className="ai-drawer-heading"><Icon name="spark" size={16} /> 军师 · 操盘问答</span>
               <span className="ai-focus muted">{isToday ? '直接提问，我会自己查数据' : `查看 ${day} 的对话（只读）`}</span>
             </div>
             <div className="ai-head-actions">
               <button className="icon-btn" title="历史对话" onClick={() => setHistOpen((v) => !v)}><Icon name="history" size={14} /></button>
               {msgs.length > 0 && isToday && <button className="icon-btn" title="清空今天对话" onClick={() => { if (confirm('清空今天的对话？')) { setMsgs([]); chatStore.removeDay(today) } }}><Icon name="trash" size={14} /></button>}
-              <div className="modal-close" onClick={() => aiStore.close()}><Icon name="close" size={16} /></div>
+              <button type="button" className="modal-close" aria-label="关闭军师" onClick={() => aiStore.close()}><Icon name="close" size={16} /></button>
             </div>
           </div>
 

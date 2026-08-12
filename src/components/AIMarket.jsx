@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { callAI } from '../ai'
 import Reasoning from './Reasoning'
+import Icon from './Icon'
 
 // AI 盘面复盘面板：汇总大盘情绪+涨停+板块Top，交给 AI 解读
 export default function AIMarket({ market, sectors, limitPool }) {
@@ -29,14 +30,14 @@ export default function AIMarket({ market, sectors, limitPool }) {
   }
 
   return (
-    <div className="panel ai-panel" style={{ marginBottom: 12 }}>
+    <section className="panel ai-panel">
       <div className="panel-head">
-        <div className="panel-title">🤖 AI 盘面复盘 <span className="sub-name">DeepSeek 实时解读</span></div>
+        <div className="panel-title"><Icon name="brain" size={16} /> AI 盘面复盘 <span className="sub-name">实时解读</span></div>
         <button className="btn btn-ai" onClick={run} disabled={loading}>
           {loading ? 'AI 分析中…' : '生成盘面分析'}
         </button>
       </div>
-      <div style={{ padding: '12px 14px' }}>
+      <div className="ai-panel-body">
         {err && <div className="err">{err}</div>}
         {!res && !err && !loading && (
           <div className="ai-hint">点击右上角，让 AI 根据当前大盘情绪、涨停梯队、板块资金流，判断今日盘面强弱与短线主线。</div>
@@ -54,7 +55,7 @@ export default function AIMarket({ market, sectors, limitPool }) {
             </div>
             {Array.isArray(res.mainLines) && res.mainLines.length > 0 && (
               <div className="ai-block">
-                <div className="ai-label">🔥 最强主线</div>
+                <div className="ai-label"><Icon name="target" size={13} /> 最强主线</div>
                 {res.mainLines.map((m, i) => (
                   <div key={i} className="ai-line"><b>{m.name}</b> — {m.reason}</div>
                 ))}
@@ -62,13 +63,13 @@ export default function AIMarket({ market, sectors, limitPool }) {
             )}
             {Array.isArray(res.risks) && res.risks.length > 0 && (
               <div className="ai-block">
-                <div className="ai-label">⚠️ 风险提示</div>
+                <div className="ai-label"><Icon name="shield" size={13} /> 风险提示</div>
                 {res.risks.map((r, i) => <div key={i} className="ai-line">· {r}</div>)}
               </div>
             )}
             {res.advice && (
               <div className="ai-block ai-advice">
-                <div className="ai-label">📌 操作建议</div>
+                <div className="ai-label"><Icon name="clipboard" size={13} /> 操作建议</div>
                 <div className="ai-line">{res.advice}</div>
               </div>
             )}
@@ -76,7 +77,7 @@ export default function AIMarket({ market, sectors, limitPool }) {
           </div>
         )}
       </div>
-    </div>
+    </section>
   )
 }
 

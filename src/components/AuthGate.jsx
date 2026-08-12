@@ -4,6 +4,7 @@ import { authStore, useAuthStore, hasLegacyData } from '../authStore'
 import { llmConfigStore } from '../llmConfigStore'
 import { quantReportUiStore } from '../quantReportUiStore'
 import { quantModelStore } from '../quantModelStore'
+import { themeStore, useTheme } from '../themeStore'
 import ConfirmDialog from './ConfirmDialog'
 
 // ============ 登录/注册门户（未登录时全屏，云端账号）============
@@ -29,15 +30,38 @@ export default function AuthGate() {
           <span className="nav-logo"><Icon name="pulse" size={20} /></span>
           <span>短线操盘台</span>
         </div>
-        <div className="auth-tabs">
-          <button className={'auth-tab' + (tab === 'login' ? ' active' : '')} onClick={() => setTab('login')}>登录</button>
-          <button className={'auth-tab' + (tab === 'register' ? ' active' : '')} onClick={() => setTab('register')}>注册</button>
+        <div className="auth-tabs" aria-label="账号操作">
+          <button type="button" className={'auth-tab' + (tab === 'login' ? ' active' : '')} aria-pressed={tab === 'login'} onClick={() => setTab('login')}>登录</button>
+          <button type="button" className={'auth-tab' + (tab === 'register' ? ' active' : '')} aria-pressed={tab === 'register'} onClick={() => setTab('register')}>注册</button>
         </div>
 
-        <input className="wl-input auth-input" placeholder="昵称" value={nick}
-          onChange={(e) => setNick(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
-        <input className="wl-input auth-input" type="password" placeholder="密码（任意文本/字符）" value={pw}
-          onChange={(e) => setPw(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
+        <label className="auth-field">
+          <span>昵称</span>
+          <input
+            className="wl-input auth-input"
+            autoComplete="username"
+            placeholder="例如：飞飞徐"
+            value={nick}
+            aria-invalid={status === 'error'}
+            aria-describedby={error ? 'auth-error' : undefined}
+            onChange={(e) => setNick(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && submit()}
+          />
+        </label>
+        <label className="auth-field">
+          <span>密码</span>
+          <input
+            className="wl-input auth-input"
+            type="password"
+            autoComplete={tab === 'register' ? 'new-password' : 'current-password'}
+            placeholder="输入账号密码"
+            value={pw}
+            aria-invalid={status === 'error'}
+            aria-describedby={error ? 'auth-error' : undefined}
+            onChange={(e) => setPw(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && submit()}
+          />
+        </label>
 
         {tab === 'register' && legacy && (
           <label className="auth-import">
@@ -46,9 +70,17 @@ export default function AuthGate() {
           </label>
         )}
 
-        {error && <div className="err auth-err">{error}</div>}
+        <div
+          id="auth-error"
+          className={'auth-helper' + (error ? ' err auth-err' : '')}
+          role={error ? 'alert' : 'status'}
+        >
+          {error || (tab === 'register'
+            ? '创建后可在电脑与手机同步持仓、计划和复盘。'
+            : '使用已创建的昵称与密码进入工作台。')}
+        </div>
 
-        <button className="btn btn-primary auth-submit" onClick={submit} disabled={loading}>
+        <button type="button" className="btn btn-primary auth-submit" onClick={submit} disabled={loading}>
           <Icon name={loading ? 'refresh' : (tab === 'register' ? 'plus' : 'check')} size={14} className={loading ? 'spin' : ''} />
           {loading ? '处理中…' : (tab === 'register' ? '注册并进入' : '登录')}
         </button>
@@ -65,6 +97,7 @@ export default function AuthGate() {
 // ============ 顶部账号菜单（已登录，可登出）============
 export function AccountMenu() {
   const { user, syncStatus, syncError } = useAuthStore()
+  const theme = useTheme()
   const [open, setOpen] = useState(false)
   const [deactivateOpen, setDeactivateOpen] = useState(false)
   const [deactivateBusy, setDeactivateBusy] = useState(false)
@@ -93,34 +126,39 @@ export function AccountMenu() {
 
   return (
     <div className="acct-wrap">
-      <button className="acct-btn" onClick={() => setOpen((o) => !o)} title="账号">
+      <button type="button" className="acct-btn" aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen((o) => !o)} title="账号">
         <Icon name="user" size={13} /><span>{user}</span><Icon name="chevronDown" size={12} />
       </button>
       {open && (
         <>
-          <div className="acct-mask" onClick={() => setOpen(false)} />
-          <div className="acct-menu">
+          <button type="button" className="acct-mask" aria-label="关闭账号菜单" onClick={() => setOpen(false)} />
+          <div className="acct-menu" role="menu">
             <div className="acct-menu-label" title={syncError || ''}>当前账号 · {syncLabel}</div>
             {(syncStatus === 'error' || syncStatus === 'conflict') && (
-              <div className="acct-item" onClick={() => authStore.retrySave()}>
+              <button type="button" role="menuitem" className="acct-item" onClick={() => authStore.retrySave()}>
                 <Icon name="refresh" size={13} />
                 {syncStatus === 'conflict' ? '重新对齐并保存' : '立即重试 OSS 同步'}
-              </div>
+              </button>
             )}
-            <div className="acct-item" onClick={() => { llmConfigStore.open(); setOpen(false) }}>
+            <button type="button" role="menuitem" className="acct-item" onClick={() => { llmConfigStore.open(); setOpen(false) }}>
               <Icon name="brain" size={13} />AI 模型配置
-            </div>
-            <div className="acct-item" onClick={() => { quantModelStore.open(); setOpen(false) }}>
+            </button>
+            <button type="button" role="menuitem" className="acct-item" onClick={() => { quantModelStore.open(); setOpen(false) }}>
               <Icon name="activity" size={13} />量化模型配置
-            </div>
-            <div className="acct-item" onClick={() => { quantReportUiStore.open(); setOpen(false) }}>
+            </button>
+            <button type="button" role="menuitem" className="acct-item" onClick={() => { quantReportUiStore.open(); setOpen(false) }}>
               <Icon name="gauge" size={13} />量化汇报
-            </div>
-            <div className="acct-item" onClick={() => { authStore.logout(); setOpen(false) }}>
+            </button>
+            <button type="button" role="menuitem" className="acct-item" onClick={() => themeStore.toggle()}>
+              <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={13} />
+              {theme === 'dark' ? '切到浅色模式' : '切到深色模式'}
+            </button>
+            <button type="button" role="menuitem" className="acct-item" onClick={() => { authStore.logout(); setOpen(false) }}>
               <Icon name="close" size={13} />退出登录
-            </div>
+            </button>
             <button
               type="button"
+              role="menuitem"
               className="acct-item acct-danger"
               onClick={() => { setOpen(false); setDeactivateError(''); setDeactivateOpen(true) }}
             >

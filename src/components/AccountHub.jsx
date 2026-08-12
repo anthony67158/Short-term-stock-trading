@@ -24,15 +24,21 @@ export default function AccountHub({ interval, snapshot, initialSub, jumpNonce }
 
   return (
     <div className="hub">
-      <div className="hub-tabs">
+      <nav className="hub-tabs" aria-label="账户闭环">
         {SUBS.map((s) => (
-          <button key={s.key} className={'hub-tab' + (sub === s.key ? ' active' : '')} onClick={() => setSub(s.key)}>
+          <button
+            key={s.key}
+            type="button"
+            className={'hub-tab' + (sub === s.key ? ' active' : '')}
+            aria-current={sub === s.key ? 'page' : undefined}
+            onClick={() => setSub(s.key)}
+          >
             <Icon name={s.icon} size={15} />
             <span>{s.label}</span>
             {s.badge > 0 && <span className="hub-badge">{s.badge > 9 ? '9+' : s.badge}</span>}
           </button>
         ))}
-      </div>
+      </nav>
       <div className="hub-body">
         {sub === 'account' && <AccountTab interval={interval} />}
         {sub === 'alert' && <AlertPanel interval={interval} />}

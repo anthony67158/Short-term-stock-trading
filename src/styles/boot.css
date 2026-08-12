@@ -1,0 +1,80 @@
+/* Precision Cobalt boot surface. Keep this file tiny: it blocks first paint. */
+@import "../../tokens.css";
+
+#app-splash {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+  transition: opacity var(--dur-long) var(--ease-out);
+}
+
+#app-splash.hide {
+  pointer-events: none;
+  opacity: 0;
+}
+
+#app-splash .sp-logo {
+  width: 58px;
+  height: 58px;
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-card);
+  box-shadow: none;
+}
+
+#app-splash .sp-name {
+  font-family: var(--font-display);
+  font-size: var(--text-md);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+
+#app-splash .sp-sub {
+  margin-top: calc(var(--space-2xs) * -1);
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+}
+
+#app-splash .sp-bar {
+  width: 132px;
+  height: 2px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--color-rule-2);
+}
+
+#app-splash .sp-bar::before {
+  display: block;
+  width: 38%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-accent);
+  animation: precision-boot-progress 1.1s linear infinite;
+  content: "";
+}
+
+@keyframes precision-boot-progress {
+  from {
+    transform: translateX(-120%);
+  }
+  to {
+    transform: translateX(360%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #app-splash {
+    transition-duration: 150ms;
+  }
+
+  #app-splash .sp-bar::before {
+    animation-duration: 1.8s;
+  }
+}

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { callAI } from '../ai'
 import { openStockDetail } from '../detailStore'
 import Reasoning from './Reasoning'
+import Icon from './Icon'
 
 // AI 一键全盘扫描：综合大盘+板块+涨停+异动，输出当日 TOP3 方向
 export default function AIScan({ market, sectors, limitPool, movers }) {
@@ -34,9 +35,10 @@ export default function AIScan({ market, sectors, limitPool, movers }) {
   return (
     <div className="scan-hero">
       <div className="scan-head">
-        <div className="scan-title">✨ AI 一键全盘扫描 <span className="sub-name">综合资金·涨停·异动 → 当日 TOP3 方向</span></div>
+        <div className="scan-title"><Icon name="radar" size={16} /> AI 一键全盘扫描 <span className="sub-name">综合资金·涨停·异动 → 当日 TOP3 方向</span></div>
         <button className="btn btn-ai" onClick={run} disabled={loading}>
-          {loading ? '全盘分析中…' : '🔍 开始扫描'}
+          <Icon name={loading ? 'refresh' : 'search'} size={13} className={loading ? 'spin' : ''} />
+          {loading ? '全盘分析中…' : '开始扫描'}
         </button>
       </div>
       <div className="scan-body">
@@ -48,7 +50,7 @@ export default function AIScan({ market, sectors, limitPool, movers }) {
         {res && (
           <>
             {res.reasoning && <Reasoning text={res.reasoning} />}
-            {res.marketMood && <div className="scan-mood">🎯 {res.marketMood}</div>}
+            {res.marketMood && <div className="scan-mood"><Icon name="target" size={14} /> {res.marketMood}</div>}
             {Array.isArray(res.topDirections) && (
               <div className="dir-grid">
                 {res.topDirections.map((d, i) => (
@@ -73,13 +75,13 @@ export default function AIScan({ market, sectors, limitPool, movers }) {
             <div className="scan-foot">
               {res.strategy && (
                 <div className="scan-strategy">
-                  <div className="ai-label">📌 今日操作策略</div>
+                  <div className="ai-label"><Icon name="clipboard" size={13} /> 今日操作策略</div>
                   <div>{res.strategy}</div>
                 </div>
               )}
               {res.topRisk && (
                 <div className="scan-risk">
-                  <div className="ai-label">⚠️ 首要风险</div>
+                  <div className="ai-label"><Icon name="shield" size={13} /> 首要风险</div>
                   <div>{res.topRisk}</div>
                 </div>
               )}

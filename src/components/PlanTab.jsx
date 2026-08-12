@@ -667,7 +667,7 @@ function PlanList({ book, quote, batchSel }) {
   }), [book.plan])
 
   return (
-    <div className="panel">
+    <section className="panel plan-section plan-section-watch">
       <div className="panel-head plan-head">
         <div className="panel-title"><Icon name="eye" size={16} /> 自选 / 候选 <span className="sub-name">{book.plan.length} 只 · 按买入准备度排序</span></div>
         <div className="plan-head-r">
@@ -704,7 +704,7 @@ function PlanList({ book, quote, batchSel }) {
           onCancel={() => setDelTarget(null)}
         />
       )}
-    </div>
+    </section>
   )
 }
 // ---------- 军师战绩：AI建议真实胜率(事后回测统计) ----------
@@ -1151,7 +1151,7 @@ function HoldingList({ book, quote, batchSel }) {
   const canBatch = allCodes.length > 0
 
   return (
-    <div className="panel">
+    <section className="panel plan-section plan-section-hold">
       <div className="panel-head plan-head">
         <div className="panel-title"><Icon name="wallet" size={16} /> 当前持仓 <span className="sub-name">{book.holding.length} 只 · 按浮盈金额排序</span></div>
         <div className="hold-head-actions">
@@ -1367,7 +1367,7 @@ function HoldingList({ book, quote, batchSel }) {
           </div>
         </>
       )}
-    </div>
+    </section>
   )
 }
 

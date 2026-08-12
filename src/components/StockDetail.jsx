@@ -914,7 +914,7 @@ export default function StockDetail({ stock, onClose }) {
                                 return (
                                 <div className="hcs-box">
                                   <div className="hcs-head">
-                                    <span className="hcs-star">⭐</span>
+                                    <span className="hcs-star"><Icon name="starFill" size={14} /></span>
                                     <span className="hcs-title">高把握买点</span>
                                     <span className="hcs-cred">胜率把握 {hcs.credibility}%</span>
                                   </div>
@@ -932,7 +932,7 @@ export default function StockDetail({ stock, onClose }) {
                                   )}
                                   {poor && (
                                     <div className="hcs-warn">
-                                      ⚠️ 这是「高胜率」信号，只说 5 日内摸到止盈的概率高，<b>不代表现在这个价位值得买</b>。当前赔率仅 {rr.toFixed(2)}:1（赢一次赚得少、输一次亏得多），<b>请以下方「军师」结论为准</b>，通常需等回调到更好的价位再出手。
+                                      <Icon name="info" size={14} /> 这是「高胜率」信号，只说 5 日内摸到止盈的概率高，<b>不代表现在这个价位值得买</b>。当前赔率仅 {rr.toFixed(2)}:1（赢一次赚得少、输一次亏得多），<b>请以下方「军师」结论为准</b>，通常需等回调到更好的价位再出手。
                                     </div>
                                   )}
                                   <div className="hcs-foot">{hcs.label} · 样本外命中率约 {hcs.holdoutPrecision}%（闸门 {hcs.gate}）· 胜率信号，非买卖指令</div>
@@ -1028,18 +1028,18 @@ export default function StockDetail({ stock, onClose }) {
           <div className="detail-kline">
             <div className="detail-kline-head">
               <div className="tabs">
-                <div className={'tab' + (mode === 'trend' ? ' active' : '')} onClick={() => setMode('trend')}>分时</div>
-                <div className={'tab' + (mode === 'kline' ? ' active' : '')} onClick={() => setMode('kline')}>K线</div>
+                <button type="button" className={'tab' + (mode === 'trend' ? ' active' : '')} aria-pressed={mode === 'trend'} onClick={() => setMode('trend')}>分时</button>
+                <button type="button" className={'tab' + (mode === 'kline' ? ' active' : '')} aria-pressed={mode === 'kline'} onClick={() => setMode('kline')}>K线</button>
               </div>
               {mode === 'kline' ? (
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   <div className="tabs">
-                    <div className={'tab' + (chartType === 'candle' ? ' active' : '')} onClick={() => setChartType('candle')}>蜡烛图</div>
-                    <div className={'tab' + (chartType === 'line' ? ' active' : '')} onClick={() => setChartType('line')}>折线图</div>
+                    <button type="button" className={'tab' + (chartType === 'candle' ? ' active' : '')} aria-pressed={chartType === 'candle'} onClick={() => setChartType('candle')}>蜡烛图</button>
+                    <button type="button" className={'tab' + (chartType === 'line' ? ' active' : '')} aria-pressed={chartType === 'line'} onClick={() => setChartType('line')}>折线图</button>
                   </div>
                   <div className="tabs">
                     {[['101', '日K'], ['102', '周K'], ['103', '月K']].map(([v, t]) => (
-                      <div key={v} className={'tab' + (klt === v ? ' active' : '')} onClick={() => setKlt(v)}>{t}</div>
+                      <button type="button" key={v} className={'tab' + (klt === v ? ' active' : '')} aria-pressed={klt === v} onClick={() => setKlt(v)}>{t}</button>
                     ))}
                   </div>
                 </div>

@@ -77,12 +77,12 @@ export default function DailyReport({ onClose }) {
               )}
               {/* 总览 */}
               {rep.overview && <div className="dr-overview"><Md text={rep.overview} /></div>}
-              {rep.overseas && <div className="dr-block"><div className="dr-block-t">🌏 隔夜海外 / 商品</div><div className="dr-block-c"><Md text={rep.overseas} /></div></div>}
+              {rep.overseas && <div className="dr-block"><div className="dr-block-t"><Icon name="compass" size={13} /> 隔夜海外 / 商品</div><div className="dr-block-c"><Md text={rep.overseas} /></div></div>}
 
               {/* 持仓股信息(醒目置前) */}
               {Array.isArray(rep.holdings) && rep.holdings.length > 0 && (
                 <div className="dr-block dr-hold">
-                  <div className="dr-block-t">📌 你的持仓 · 今日信息</div>
+                  <div className="dr-block-t"><Icon name="wallet" size={13} /> 你的持仓 · 今日信息</div>
                   {rep.holdings.map((h, k) => (
                     <div className="dr-hold-item" key={k}>
                       <div className="dr-hold-name" onClick={() => h.code && openStockDetail(h.code, h.name)}>{h.name}</div>
@@ -96,7 +96,7 @@ export default function DailyReport({ onClose }) {
               {/* 板块 */}
               {Array.isArray(rep.sectors) && (
                 <div className="dr-sectors">
-                  <div className="dr-block-t">📊 全板块研判</div>
+                  <div className="dr-block-t"><Icon name="layers" size={13} /> 全板块研判</div>
                   {rep.sectors.map((s, k) => (
                     <div className={'dr-sector tone-' + rateTone(s.rating)} key={k}>
                       <div className="dr-sector-head">
@@ -114,9 +114,9 @@ export default function DailyReport({ onClose }) {
               )}
 
               {/* 整体策略 + 风险 */}
-              {rep.strategy && <div className="dr-block dr-final"><div className="dr-block-t">🎯 今日操作策略</div><div className="dr-block-c"><Md text={rep.strategy} /></div></div>}
+              {rep.strategy && <div className="dr-block dr-final"><div className="dr-block-t"><Icon name="target" size={13} /> 今日操作策略</div><div className="dr-block-c"><Md text={rep.strategy} /></div></div>}
               {Array.isArray(rep.risks) && rep.risks.length > 0 && (
-                <div className="dr-block"><div className="dr-block-t">⚠️ 风险提示</div>{rep.risks.map((x, k) => <div key={k} className="dr-risk-item">· {x}</div>)}</div>
+                <div className="dr-block"><div className="dr-block-t"><Icon name="shield" size={13} /> 风险提示</div>{rep.risks.map((x, k) => <div key={k} className="dr-risk-item">· {x}</div>)}</div>
               )}
 
               {/* 数据来源 */}

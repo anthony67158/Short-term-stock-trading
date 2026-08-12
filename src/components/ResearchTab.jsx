@@ -25,7 +25,7 @@ export default function ResearchTab({ interval }) {
   return (
     <div className="research">
       <ErrorBoundary label="资金流向图"><MarketFlow interval={interval} /></ErrorBoundary>
-      <div className="grid" style={{ marginTop: 14 }}>
+      <div className="grid research-grid">
         <ErrorBoundary label="板块资金">
           <SectorPanel
             data={sectors.data} loading={sectors.loading} error={sectors.error}
@@ -33,18 +33,18 @@ export default function ResearchTab({ interval }) {
             selected={selected} onSelect={setSelected}
           />
         </ErrorBoundary>
-        <div>
+        <div className="research-stack">
           <ErrorBoundary label="成分股"><StockPanel sector={selected} data={selected ? stocks.data : null} loading={stocks.loading} error={stocks.error} sort={sort} setSort={setSort} /></ErrorBoundary>
           <ErrorBoundary label="板块历史"><SectorHistory sector={selected} /></ErrorBoundary>
         </div>
       </div>
-      <div style={{ marginTop: 14 }}>
+      <div className="research-section">
         <ErrorBoundary label="盘中异动"><Movers interval={interval} /></ErrorBoundary>
       </div>
-      <div style={{ marginTop: 14 }}>
+      <div className="research-section">
         <ErrorBoundary label="游资龙虎榜"><LhbBoard interval={interval} /></ErrorBoundary>
       </div>
-      <div style={{ marginTop: 14 }}>
+      <div className="research-section">
         <ErrorBoundary label="外部宏观经济分析"><MarketNews /></ErrorBoundary>
       </div>
     </div>

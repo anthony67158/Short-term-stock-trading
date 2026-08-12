@@ -78,7 +78,7 @@ function SentimentGauge({ zt, zb, market }) {
 
   if (!zt) return null
   return (
-    <div className="panel senti-gauge">
+    <section className="panel senti-gauge workbench-aside">
       <div className="sg-head">
         <div className="panel-title"><Icon name="fire" size={16} /> 市场情绪温度计</div>
         <span className={'sg-level ' + g.level.c}>{g.level.t} · {g.score}分</span>
@@ -95,7 +95,7 @@ function SentimentGauge({ zt, zb, market }) {
       <div className="legend" style={{ padding: '6px 2px 0' }}>
         炸板率低+连板高=接力意愿强、赚钱效应好；炸板率高+跌停多=情绪退潮，谨慎追高。综合评分仅供参考。
       </div>
-    </div>
+    </section>
   )
 }
 
@@ -136,10 +136,10 @@ function MarketLight({ market, sectors, snapshot }) {
   }
 
   return (
-    <div className="panel market-board">
+    <section className="panel market-board workbench-primary">
       <div className="panel-head">
         <div className="panel-title"><Icon name="pulse" size={16} /> 大盘盘面 <span className="sub-name">开盘先看势，定今日仓位</span></div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <div className="market-actions">
           <button className="btn btn-primary" onClick={() => setReportOpen(true)}>
             <Icon name="clipboard" size={13} />
             策略日报
@@ -209,7 +209,7 @@ function MarketLight({ market, sectors, snapshot }) {
           )}
         </div>
       </div>
-    </div>
+    </section>
   )
 }
 
@@ -485,7 +485,7 @@ function DailyPlay({ snapshot }) {
   })
 
   return (
-    <div className="play-card">
+    <section className="play-card decision-workspace">
       <div className="play-head">
         <div className="play-title">
           <Icon name="radar" size={18} />
@@ -582,7 +582,7 @@ function DailyPlay({ snapshot }) {
           </>
         )}
       </div>
-    </div>
+    </section>
   )
 }
 
@@ -641,12 +641,20 @@ function CandidatePool({ zt, movers, speed, sectors }) {
   const tabs = [['hot', '综合精选'], ['limit', '涨停连板'], ['inflow', '主力抢筹'], ['speed', '涨速异动']]
 
   return (
-    <div className="panel">
+    <section className="panel candidate-pool">
       <div className="panel-head">
         <div className="panel-title"><Icon name="fire" size={16} /> 今日精选候选池</div>
         <div className="tabs">
           {tabs.map(([k, t]) => (
-            <div key={k} className={'tab' + (tab === k ? ' active' : '')} onClick={() => { setTab(k); setColSort(null) }}>{t}</div>
+            <button
+              key={k}
+              type="button"
+              className={'tab' + (tab === k ? ' active' : '')}
+              aria-pressed={tab === k}
+              onClick={() => { setTab(k); setColSort(null) }}
+            >
+              {t}
+            </button>
           ))}
         </div>
       </div>
@@ -686,6 +694,6 @@ function CandidatePool({ zt, movers, speed, sectors }) {
           综合精选按信号重叠度排序 · 点表头「现价/涨幅/主力」切换正倒序 · 点名称看详情K线 · 点「加自选」进入计划
         </div>
       </div>
-    </div>
+    </section>
   )
 }
