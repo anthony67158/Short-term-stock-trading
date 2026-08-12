@@ -367,7 +367,11 @@ function DailyPlay({ snapshot }) {
             mainInflowYi: c.mainInflow != null ? +(c.mainInflow / 1e8).toFixed(2) : null,
             quant: {
               modelVersion: quantModelVersion,
+              effectiveModelVersion: q.modelVersion || quantModelVersion,
+              runtimeModelVersion: q.runtimeModelVersion || null,
               modelLabel: q.modelLabel || selectedModelLabel,
+              fallback: q.fallback || null,
+              experimental: q.experimental === true,
               score: q.score, bias: q.bias,
               upProb: fc && fc.upProb, expRet: fc && fc.expRet,
               targetLow: fc && fc.targetLow, targetHigh: fc && fc.targetHigh,
