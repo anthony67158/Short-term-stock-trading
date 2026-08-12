@@ -57,19 +57,27 @@ def collect_pilot_cache(client, codes, *, start_date, end_date):
     )
     stocks = {}
     calls = 1
+    denied_sources = set()
     for code in codes:
         stock = {}
         for api_name, fields in STOCK_SOURCES:
             stock_key = "auction" if api_name == "stk_auction" else api_name
+            failure_key = f"{code}.{api_name}"
+            if api_name in denied_sources:
+                stock[stock_key] = []
+                failures[failure_key] = "permission_denied"
+                continue
             stock[stock_key] = _fetch(
                 client,
                 api_name,
                 {"ts_code": code, **common},
                 fields,
                 failures,
-                f"{code}.{api_name}",
+                failure_key,
             )
             calls += 1
+            if failures.get(failure_key) == "permission_denied":
+                denied_sources.add(api_name)
         stocks[code] = stock
     return {
         "meta": {

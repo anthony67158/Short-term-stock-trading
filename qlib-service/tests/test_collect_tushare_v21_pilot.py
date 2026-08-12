@@ -70,23 +70,36 @@ class CollectTushareV21PilotTest(unittest.TestCase):
         module = load_module()
 
         class PartialClient(FakeClient):
+            def __init__(self):
+                super().__init__()
+                self.auction_calls = 0
+
             def rows(self, api_name, params=None, fields=""):
                 if api_name == "stk_auction":
+                    self.auction_calls += 1
                     raise RuntimeError("没有接口访问权限")
                 return super().rows(api_name, params, fields)
 
+        client = PartialClient()
         result = module.collect_pilot_cache(
-            PartialClient(),
-            ["600519.SH"],
+            client,
+            ["600519.SH", "000001.SZ"],
             start_date="20260701",
             end_date="20260811",
         )
 
         self.assertEqual(result["stocks"]["600519.SH"]["auction"], [])
+        self.assertEqual(result["stocks"]["000001.SZ"]["auction"], [])
+        self.assertEqual(client.auction_calls, 1)
         self.assertEqual(
             result["meta"]["failures"]["600519.SH.stk_auction"],
             "permission_denied",
         )
+        self.assertEqual(
+            result["meta"]["failures"]["000001.SZ.stk_auction"],
+            "permission_denied",
+        )
+        self.assertEqual(result["meta"]["calls"], 6)
 
 
 if __name__ == "__main__":
