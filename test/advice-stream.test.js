@@ -145,6 +145,40 @@ test('同一任务的外部取消仍会立即传播到 Worker', () => {
   assert.equal(working.jobs['600000'].cancelRequested, true)
 })
 
+test('Worker合并后采用最新活跃任务的批次且保留旧任务运行态', () => {
+  const working = {
+    activeAdviceBatchId: 'single-a',
+    jobs: {
+      '600000': {
+        id: 'job-a',
+        code: '600000',
+        batchId: 'single-a',
+        status: 'running',
+        at: 1000,
+      },
+    },
+  }
+  const fresh = {
+    activeAdviceBatchId: 'single-b',
+    jobs: {
+      '600000': { ...working.jobs['600000'] },
+      '000001': {
+        id: 'job-b',
+        code: '000001',
+        batchId: 'single-b',
+        status: 'queued',
+        at: 2000,
+      },
+    },
+  }
+
+  mergeExternalJobs(working, fresh)
+
+  assert.equal(working.jobs['600000'].status, 'running')
+  assert.equal(working.jobs['000001'].status, 'queued')
+  assert.equal(working.activeAdviceBatchId, 'single-b')
+})
+
 test('批量任务可收紧单股预算但不能突破安全边界', () => {
   assert.equal(resolveAIBudget(true, 210000), 210000)
   assert.equal(resolveAIBudget(true, 999999), 560000)

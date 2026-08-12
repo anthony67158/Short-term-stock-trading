@@ -72,6 +72,30 @@ test('新批次进度只包含本批任务，不混入最近取消的旧任务',
   assert.deepEqual(progress.items.map((item) => item.code), ['600001'])
 })
 
+test('连续点击不同个股时进度必须保留所有跨批次活跃任务', () => {
+  const data = {}
+  enqueueJob(data, {
+    code: '600000', name: '第一只', mode: 'buy_advice', batchId: 'single-a',
+  }, 1000)
+  leaseJob(data, '600000', 1100)
+  enqueueJob(data, {
+    code: '000001', name: '第二只', mode: 'buy_advice', batchId: 'single-b',
+  }, 2000)
+  data.activeAdviceBatchId = 'single-b'
+
+  const progress = jobsToProgress(data, 2100, 3)
+
+  assert.deepEqual(
+    progress.items.map((item) => [item.code, item.status]),
+    [
+      ['600000', 'running'],
+      ['000001', 'queued'],
+    ],
+  )
+  assert.deepEqual(progress.current, ['600000'])
+  assert.equal(progress.total, 2)
+})
+
 test('深度任务模式会持久化到任务和批次进度', () => {
   const data = {}
   enqueueJob(data, {

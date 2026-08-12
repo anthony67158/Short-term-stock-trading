@@ -13,6 +13,19 @@ export function batchConcurrency(endpointCount, deepMode = false) {
   return deepMode ? Math.min(DEEP_BATCH_CONCURRENCY, available) : available
 }
 
+export function adviceConcurrency(
+  endpointCount,
+  {
+    deepMode = false,
+    batchRequest = false,
+  } = {},
+) {
+  const available = Math.max(1, Number(endpointCount) || 1)
+  return batchRequest
+    ? batchConcurrency(available, deepMode)
+    : available
+}
+
 export function acceptsGenerationResult(result, deepMode = false) {
   if (!deepMode) return !!(result?.advice || result?.quant)
   return !!result?.advice && result.truncated !== true

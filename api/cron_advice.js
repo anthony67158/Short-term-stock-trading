@@ -37,7 +37,7 @@ import { ensureAdviceReasoning } from '../shared/adviceReasoning.js';
 import { autoConfigFromSettings, dueAutoScopes } from '../shared/adviceAutoRefreshPolicy.js';
 import {
   acceptsGenerationResult,
-  batchConcurrency,
+  adviceConcurrency,
   generationOptions,
   validateBatchMode,
 } from '../shared/adviceBatchPolicy.js';
@@ -133,15 +133,28 @@ function advisorConcurrency() {
   try { return endpointCountForRole(currentConfig(), 'advisor'); } catch { return CONCURRENCY; }
 }
 
-function isDeepAdviceBatch(data) {
-  const batchId = String(data?.activeAdviceBatchId || '');
-  if (!batchId) return false;
-  return Object.values(data?.jobs || {}).some((job) => job?.batchId === batchId && job.deepMode === true);
+function hasDeepAdviceWork(data) {
+  return Object.values(data?.jobs || {}).some((job) =>
+    isActive(job) && job.deepMode === true
+  );
 }
 
-function effectiveAdviceConcurrency(data, deepMode) {
-  const deep = deepMode == null ? isDeepAdviceBatch(data) : deepMode === true;
-  return batchConcurrency(advisorConcurrency(), deep);
+function hasDeepBatchWork(data) {
+  return Object.values(data?.jobs || {}).some((job) =>
+    isActive(job)
+    && job.deepMode === true
+    && job.batchRequest === true
+  );
+}
+
+function effectiveAdviceConcurrency(data, deepMode, batchRequest) {
+  const hasDeepBatch = hasDeepBatchWork(data);
+  const deep = deepMode == null ? hasDeepAdviceWork(data) : deepMode === true;
+  const limitedBatch = hasDeepBatch || batchRequest === true;
+  return adviceConcurrency(advisorConcurrency(), {
+    deepMode: deep,
+    batchRequest: limitedBatch,
+  });
 }
 
 // 北京时间"下一交易日"友好标签(跳过周末/A股节假日),告诉军师今日买入的 T+1 最早哪天可卖。
@@ -519,6 +532,16 @@ export function mergeExternalJobs(workingData, freshData) {
     // 外部对同 code 的强制重生成(新 id 且更新)→ 采纳新任务；旧在途请求由 cancelPoll 按 jobId 中止。
     else if (fjob.id !== cur.id && (fjob.at || 0) >= (cur.at || 0) && isActive(fjob)) wj[code] = fjob;
   }
+  const withBatch = Object.values(wj).filter((job) => job?.batchId);
+  const active = withBatch.filter((job) => isActive(job));
+  const latest = (active.length ? active : withBatch)
+    .reduce((current, job) =>
+      !current || (job.at || 0) >= (current.at || 0) ? job : current
+    , null);
+  workingData.activeAdviceBatchId = latest?.batchId
+    || freshData?.activeAdviceBatchId
+    || workingData.activeAdviceBatchId
+    || '';
 }
 
 // ---- 保护式落盘:重读云端最新账号,只叠加服务端权威字段,绝不覆盖用户 plan/holding/account ----
@@ -616,7 +639,7 @@ async function drainAccount(nick, initialAcc) {
   const CONC = effectiveAdviceConcurrency(data);
   // 深度任务最坏可占约 495s，只允许在本次 FC 前 85s 内启动新任务，
   // 保证在 600s 硬上限前有收尾时间；剩余队列由 5 分钟云端定时器接力。
-  const startDeadline = Date.now() + (isDeepAdviceBatch(data) ? 85000 : 300000);
+  const startDeadline = Date.now() + (hasDeepAdviceWork(data) ? 85000 : 300000);
   let lastProgressSaveAt = 0;
   let progressSavePending = false;
   const queueProgressSave = (force = false) => {
@@ -953,6 +976,7 @@ export default async function handler(req, res) {
       const holdSet = new Set(holding.map((h) => h.code));
       const nameOf = (c) => (holding.find((h) => h.code === c) || watch.find((w) => w.code === c) || {}).name || c;
       const requestedBatchId = String(body.batchId || '').trim();
+      const batchRequest = !!requestedBatchId;
       const batchId = requestedBatchId
         ? requestedBatchId.slice(0, 100)
         : `ondemand_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -963,11 +987,12 @@ export default async function handler(req, res) {
         const mode = holdSet.has(code) ? 'hold_advice' : 'buy_advice';
         const { created } = enqueueJob(data, {
           code, name: nameOf(code), mode, source: 'ondemand', force, batchId, deepMode,
+          batchRequest,
         });
         created ? enq++ : dup++;
       }
       if (enq > 0) data.activeAdviceBatchId = batchId;
-      CONC = effectiveAdviceConcurrency(data, deepMode);
+      CONC = effectiveAdviceConcurrency(data, deepMode, batchRequest);
       await persistServer(nick, acc, 'enqueue');   // 立刻公布队列(另一设备可见)
       let worker = null;
       try {

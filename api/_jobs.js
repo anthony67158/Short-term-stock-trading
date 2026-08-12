@@ -81,6 +81,7 @@ export function gcJobs(data, now = Date.now()) {
 // mode 由调用方按持仓/自选判定。返回 { job, created(bool) }。
 export function enqueueJob(data, {
   code, name, mode, source = 'ondemand', batchId = '', deepMode = false,
+  batchRequest = false,
 }, now = Date.now()) {
   const jobs = jobsOf(data);
   const cur = jobs[code];
@@ -95,6 +96,7 @@ export function enqueueJob(data, {
     error: '', source, cancelRequested: false,
     batchId: String(batchId || ''),
     deepMode: generation.deepMode,
+    batchRequest: !!batchRequest,
     phase: '排队等待云端生成',
     sources: [], reasoning: '', model: '', endpoint: '', progressAt: now,
   };
@@ -240,10 +242,11 @@ export function needsWorkerDispatch(data, now = Date.now()) {
 export function jobsToProgress(data, now = Date.now(), concurrency = CONCURRENCY) {
   const jobs = jobsOf(data);
   const arr = Object.values(jobs).filter(Boolean);
-  // 新版按批次精确隔离；旧数据没有 batchId 时才回退近 6 小时口径。
+  // 当前批次的终态 + 所有跨批次活跃任务都必须可见。否则连续点击不同个股时，
+  // activeAdviceBatchId 会让先启动的任务从前端消失，看起来像被后一次点击取消。
   const activeBatchId = String(data.activeAdviceBatchId || '');
   const recent = activeBatchId
-    ? arr.filter((j) => j.batchId === activeBatchId)
+    ? arr.filter((j) => j.batchId === activeBatchId || isActive(j))
     : arr.filter((j) => (now - (j.at || 0)) < 6 * 3600 * 1000);
   const mapStatus = (job) => {
     if (job.cancelRequested && job.status === 'running') return 'canceling';
@@ -267,6 +270,7 @@ export function jobsToProgress(data, now = Date.now(), concurrency = CONCURRENCY
       progressAt: j.progressAt || j.at || 0,
       attempts: j.attempts || 0,
       deepMode: !!j.deepMode,
+      batchRequest: !!j.batchRequest,
     }));
   const ok = recent.filter((j) => j.status === 'done').length;
   const fail = recent.filter((j) => j.status === 'failed').length;

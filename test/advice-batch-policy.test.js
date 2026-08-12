@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
   acceptsGenerationResult,
+  adviceConcurrency,
   batchConcurrency,
   generationOptions,
   validateBatchMode,
@@ -21,6 +22,21 @@ test('深度批量固定最多两路并行，快速模式保持端点并发数',
   assert.equal(batchConcurrency(3, true), 2)
   assert.equal(batchConcurrency(1, true), 1)
   assert.equal(batchConcurrency(3, false), 3)
+})
+
+test('单股深度生成使用全部军师端点，只有一次性深度批量限制两路', () => {
+  assert.equal(adviceConcurrency(3, {
+    deepMode: true,
+    batchRequest: false,
+  }), 3)
+  assert.equal(adviceConcurrency(3, {
+    deepMode: true,
+    batchRequest: true,
+  }), 2)
+  assert.equal(adviceConcurrency(3, {
+    deepMode: false,
+    batchRequest: true,
+  }), 3)
 })
 
 test('快速模式关闭深度思考并使用短预算', () => {
