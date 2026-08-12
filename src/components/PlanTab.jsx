@@ -34,6 +34,10 @@ import {
 import { ensureQuantScore, ensureQuantScores } from '../quantScore'
 import { fmtPct, pctClass, fmtNum, fmtInflow , fmtRaw, hasVal, opText } from '../format'
 import { computeDailyFinance, todayTradeCodes } from '../../shared/dailyFinance.js'
+import {
+  rankWatchlistCandidates,
+  watchlistReadiness,
+} from '../../shared/watchlistRanking.js'
 
 // —— 搜索结果 → 定位到卡片:轻量模块级事件总线 ——
 // 搜索框(StockSearch)、自选区(PlanList)、持仓区(HoldingList)同在本文件,用一个 Set 广播即可:
@@ -420,25 +424,32 @@ function CandTarget({ p, q }) {
   }
   const resetPrice = () => planStore.setCandPlan(p.code, { targetPrice: aiPrice != null ? rnd(aiPrice) : null, targetManual: false })
 
-  // 进度条:当前价 → 目标买价 的接近度。diff>0=当前仍高于目标(需下跌);diff<=0=已到/低于买点
+  // 准备度与列表排序共用同一口径：量化55% + 买点接近度45%。
+  // 明显跌穿买入价会降分，避免把失效下跌误判为“最接近买点”。
   let bar = null
   if (target != null && cur != null && target > 0) {
-    const diffPct = ((cur - target) / target) * 100
-    const W = 8 // 参照窗口:高于目标 8% 记为 0% 接近度
-    const reached = diffPct <= 0
-    const proximity = reached ? 100 : Math.max(0, Math.round((1 - diffPct / W) * 100))
-    const tone = reached ? 'reached' : proximity >= 60 ? 'near' : 'far'
-    const label = reached
-      ? (diffPct < -0.05 ? `已到买点 · 低于目标 ${Math.abs(diffPct).toFixed(1)}%` : '已到买点')
-      : `距目标买价还差 ${diffPct.toFixed(1)}%`
-    bar = { pct: proximity, tone, label }
+    const readiness = watchlistReadiness(
+      { ...p, targetPrice: target },
+      q || {},
+    )
+    const tone = readiness.status === 'broken'
+      ? 'broken'
+      : readiness.status === 'waiting'
+        ? 'far'
+        : readiness.status
+    bar = {
+      pct: readiness.proximityScore,
+      tone,
+      label: readiness.label,
+      score: readiness.score,
+    }
   }
 
   return (
     <div className="pc-target">
       <div className="pc-tfields">
         <label className="pc-tf">
-          <span className="pc-tf-k">目标价</span>
+          <span className="pc-tf-k">买入参考</span>
           <input className="pc-tf-in" inputMode="decimal" placeholder={aiPrice != null ? String(rnd(aiPrice)) : '手填'}
             value={p.targetPrice != null ? String(p.targetPrice) : ''} onChange={onPrice} />
           {p.targetManual
@@ -455,7 +466,9 @@ function CandTarget({ p, q }) {
       {bar && (
         <div className={'pc-tbar ' + bar.tone} title={`当前 ${fmtRaw(cur)} → 目标 ${target}`}>
           <div className="pc-tbar-track"><div className="pc-tbar-fill" style={{ width: bar.pct + '%' }} /></div>
-          <span className="pc-tbar-lb">{bar.label}</span>
+          <span className="pc-tbar-lb">
+            {bar.label}<b>准备度 {bar.score}</b>
+          </span>
         </div>
       )}
     </div>
@@ -585,9 +598,6 @@ function PlanList({ book, quote, batchSel }) {
     )
   }
 
-  const starred = book.plan.filter((p) => p.star)
-  const others = book.plan.filter((p) => !p.star)
-
   // 行业归类：优先用实时行情的 industry，其次用已缓存到候选上的 industry，否则「其他」
   const [tab, setTab] = useState('全部') // 当前选中行业 tab
   const industryOf = (p) => {
@@ -613,17 +623,6 @@ function PlanList({ book, quote, batchSel }) {
     // eslint-disable-next-line
   }, [book.plan.map((p) => p.code).join(',')])
 
-  // 排序规则：重点关注置顶 → 量化得分高在前(量化优先) → 同分/无分按当日涨幅 → 无行情排后
-  const sortRule = (a, b) => {
-    if (!!a.star !== !!b.star) return a.star ? -1 : 1
-    const sa = a.qScore != null ? a.qScore : -1
-    const sb = b.qScore != null ? b.qScore : -1
-    if (sa !== sb) return sb - sa
-    const qa = quote[a.code], qb = quote[b.code]
-    const pa = qa ? qa.pct : -999, pb = qb ? qb.pct : -999
-    return pb - pa
-  }
-
   // 汇总每个行业的只数 + 平均涨幅（用于 tab 排序：热门行业靠前）
   const industries = useMemo(() => {
     const map = new Map()
@@ -648,7 +647,12 @@ function PlanList({ book, quote, batchSel }) {
   }, [book.plan, quote])
 
   // 当前 tab 下要显示的候选（全部=所有；否则=该行业）
-  const shown = (tab === '全部' ? book.plan : book.plan.filter((p) => industryOf(p) === tab)).slice().sort(sortRule)
+  const shown = rankWatchlistCandidates(
+    tab === '全部'
+      ? book.plan
+      : book.plan.filter((p) => industryOf(p) === tab),
+    quote,
+  )
   // tab 可能因删票失效 → 回退到全部
   useEffect(() => {
     if (tab !== '全部' && !industries.some((i) => i.name === tab)) setTab('全部')
@@ -665,7 +669,7 @@ function PlanList({ book, quote, batchSel }) {
   return (
     <div className="panel">
       <div className="panel-head plan-head">
-        <div className="panel-title"><Icon name="eye" size={16} /> 自选 / 候选 <span className="sub-name">{book.plan.length} 只 · 按行业分类</span></div>
+        <div className="panel-title"><Icon name="eye" size={16} /> 自选 / 候选 <span className="sub-name">{book.plan.length} 只 · 按买入准备度排序</span></div>
         <div className="plan-head-r">
           <div className="plan-search"><StockSearch /></div>
         </div>
@@ -687,7 +691,7 @@ function PlanList({ book, quote, batchSel }) {
               </button>
             ))}
           </div>
-          {/* 当前 tab 的候选卡（重点关注置顶 → 涨幅降序）*/}
+          {/* 当前 tab：重点关注置顶，其余按量化55% + 买点接近度45%排序 */}
           <div className="plan-cand-grid">{shown.map(Card)}</div>
         </>
       )}

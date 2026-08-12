@@ -1774,10 +1774,13 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 .pc-tbar.far .pc-tbar-fill { background: var(--muted); }
 .pc-tbar.near .pc-tbar-fill { background: var(--gold); }
 .pc-tbar.reached .pc-tbar-fill { background: var(--red); }
-.pc-tbar-lb { display: block; margin-top: 4px; font-size: 10.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.pc-tbar.broken .pc-tbar-fill { background: var(--green); }
+.pc-tbar-lb { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px; font-size: 10.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.pc-tbar-lb b { flex: none; color: var(--text2); font-size: 10px; }
 .pc-tbar.far .pc-tbar-lb { color: var(--muted); }
 .pc-tbar.near .pc-tbar-lb { color: var(--gold); }
 .pc-tbar.reached .pc-tbar-lb { color: var(--red); }
+.pc-tbar.broken .pc-tbar-lb { color: var(--green); }
 .empty.small { padding: 20px; font-size: 12.5px; }
 
 /* 当前持仓：独立模块，卡片网格 */
