@@ -157,6 +157,50 @@ test('V2客户端携带双层鉴权并返回统一量化结构', async () => {
   assert.equal(Number.isFinite(result.v2.outlook.convictionScore), true)
 })
 
+test('V2旧入口返回401时自动改用EAS当前入口重试', async () => {
+  const calls = []
+  const result = await fetchV2QuantPredict('600519', {
+    bars: parseFiveMinuteKlines(minuteLines()),
+    env: {
+      V2_QUANT_URL: 'https://old.cn-hangzhou.pai-eas.aliyuncs.com/api/predict/stock_quant_lab_shadow',
+      V2_EAS_TOKEN: 'current-token',
+      V2_API_KEY: 'shadow-key',
+    },
+    resolveRuntimeConfig: async () => ({
+      url: 'https://current.cn-hangzhou.pai-eas.aliyuncs.com/api/predict/stock_quant_lab_shadow',
+      easToken: 'current-token',
+      status: 'Running',
+    }),
+    fetchImpl: async (url, options) => {
+      calls.push({ url, authorization: options.headers.Authorization })
+      if (url.includes('old.cn-hangzhou')) {
+        return { ok: false, status: 401 }
+      }
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            ok: true,
+            shadowOnly: true,
+            asOf: '2026-08-10 15:00:00',
+            predictedClass: 'TAKE_PROFIT',
+            probabilities: { stopLoss: 0.2, timeout: 0.1, takeProfit: 0.7 },
+            outlook: { direction: 'bullish' },
+            model: { runId: 'run-v2', architecture: 'transformer', sha256: 'a'.repeat(64) },
+          }
+        },
+      }
+    },
+  })
+
+  assert.equal(calls.length, 2)
+  assert.match(calls[0].url, /old\.cn-hangzhou/)
+  assert.match(calls[1].url, /current\.cn-hangzhou/)
+  assert.equal(calls[1].authorization, 'current-token')
+  assert.equal(result.modelVersion, 'v2')
+})
+
 test('V2客户端拒绝非阿里云EAS地址和缺失密钥', async () => {
   const bars = parseFiveMinuteKlines(minuteLines())
   await assert.rejects(

@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import { adaptV2Prediction } from '../shared/modelVersion.js'
+import { getV2RuntimeConfig } from './_quant_model_control.js'
 
 const CODE_RE = /^\d{6}$/
 const EAS_HOST_RE = /(^|\.)pai-eas\.aliyuncs\.com$/i
+let runtimeConfigOverride = null
 const MINUTE_HOSTS = [
   'https://push2his.eastmoney.com',
   'https://82.push2his.eastmoney.com',
@@ -413,9 +415,16 @@ export async function fetchV2QuantPredict(code, {
   price = null,
   env = process.env,
   fetchImpl = fetch,
+  resolveRuntimeConfig = getV2RuntimeConfig,
   timeoutMs = 8000,
 } = {}) {
-  const config = v2Config(env)
+  let config = env === process.env && runtimeConfigOverride
+    ? v2Config({
+        ...env,
+        V2_QUANT_URL: runtimeConfigOverride.url,
+        V2_EAS_TOKEN: runtimeConfigOverride.easToken,
+      })
+    : v2Config(env)
   const payload = buildV2Request(
     code,
     selectCompletedDayEndBars(bars),
@@ -424,16 +433,44 @@ export async function fetchV2QuantPredict(code, {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    const response = await fetchImpl(`${config.url}/predict-v2`, {
+    const request = (activeConfig) => fetchImpl(`${activeConfig.url}/predict-v2`, {
       method: 'POST',
       signal: controller.signal,
       headers: {
-        Authorization: config.easToken,
-        'X-Shadow-Key': config.apiKey,
+        Authorization: activeConfig.easToken,
+        'X-Shadow-Key': activeConfig.apiKey,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(payload),
     })
+    let response = await request(config)
+    if (response.status === 401 && typeof resolveRuntimeConfig === 'function') {
+      try {
+        const runtime = await resolveRuntimeConfig()
+        if (runtime?.status === 'Running') {
+          const recoveredConfig = v2Config({
+            ...env,
+            V2_QUANT_URL: runtime.url,
+            V2_EAS_TOKEN: runtime.easToken,
+          })
+          if (
+            recoveredConfig.url !== config.url
+            || recoveredConfig.easToken !== config.easToken
+          ) {
+            config = recoveredConfig
+            response = await request(config)
+            if (env === process.env && response.ok) {
+              runtimeConfigOverride = {
+                url: config.url,
+                easToken: config.easToken,
+              }
+            }
+          }
+        }
+      } catch {
+        // Keep the original inference error when control-plane recovery fails.
+      }
+    }
     if (!response.ok) throw new Error(`V2模型服务返回${response.status}`)
     const prediction = await response.json()
     const context = prediction.marketContext || deriveV2MarketContext(payload.bars)

@@ -15,6 +15,7 @@ export const V2_SERVICE_NAME = 'stock_quant_lab_shadow'
 const EASClient = EASPackage.default || EASPackage
 const EAS_STATUS_ATTEMPTS = 3
 const EAS_RETRY_MS = 800
+const EAS_HOST_RE = /(^|\.)pai-eas\.aliyuncs\.com$/i
 const STARTING_STATUSES = new Set([
   'Creating',
   'Starting',
@@ -23,6 +24,20 @@ const STARTING_STATUSES = new Set([
 ])
 const STOPPING_STATUSES = new Set(['Stopping'])
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+export function normalizeV2ServiceEndpoint(value) {
+  const raw = String(value || '').trim()
+  if (!raw) throw new Error('EAS服务入口缺失')
+  const withProtocol = /^https?:\/\//i.test(raw)
+    ? raw.replace(/^http:/i, 'https:')
+    : `https://${raw.replace(/^\/+/, '')}`
+  let parsed
+  try { parsed = new URL(withProtocol) } catch { throw new Error('EAS服务入口无效') }
+  if (parsed.protocol !== 'https:' || !EAS_HOST_RE.test(parsed.hostname)) {
+    throw new Error('EAS服务入口必须使用阿里云HTTPS地址')
+  }
+  return parsed.toString().replace(/\/+$/, '')
+}
 
 function easClient(env = process.env) {
   const accessKeyId = env.EAS_ACCESS_KEY_ID || env.OSS_ACCESS_KEY_ID
@@ -97,6 +112,35 @@ export async function getV2ServiceStatus({
     }
   }
   throw lastError || new Error('EAS状态查询失败')
+}
+
+export async function getV2RuntimeConfig({
+  client = easClient(),
+  attempts = EAS_STATUS_ATTEMPTS,
+  sleepImpl = sleep,
+} = {}) {
+  let lastError = null
+  for (let attempt = 0; attempt < Math.max(1, attempts); attempt++) {
+    try {
+      const response = await client.describeService(
+        V2_CLUSTER_ID,
+        V2_SERVICE_NAME,
+        new DescribeServiceRequest({}),
+      )
+      const body = response?.body || {}
+      const easToken = String(body.accessToken || '')
+      if (!easToken) throw new Error('EAS服务Token缺失')
+      return {
+        url: normalizeV2ServiceEndpoint(body.internetEndpoint),
+        easToken,
+        status: String(body.status || 'Unknown'),
+      }
+    } catch (error) {
+      lastError = error
+      if (attempt + 1 < attempts) await sleepImpl(EAS_RETRY_MS)
+    }
+  }
+  throw lastError || new Error('EAS运行配置查询失败')
 }
 
 export async function resolveV2ServiceStatus(

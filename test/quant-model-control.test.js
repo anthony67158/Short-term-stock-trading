@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   applyModelSelection,
   canControlV2Service,
+  getV2RuntimeConfig,
   getV2ServiceStatus,
   modelControlView,
   resolveV2ServiceStatus,
@@ -80,6 +81,28 @@ test('EAS状态查询会重试瞬时控制面超时', async () => {
 
   assert.equal(status, 'Running')
   assert.equal(attempts, 3)
+})
+
+test('EAS运行配置会规范化当前服务入口并返回实时Token', async () => {
+  const runtime = await getV2RuntimeConfig({
+    client: {
+      async describeService() {
+        return {
+          body: {
+            status: 'Running',
+            internetEndpoint: 'current.cn-hangzhou.pai-eas.aliyuncs.com/api/predict/stock_quant_lab_shadow',
+            accessToken: 'current-token',
+          },
+        }
+      },
+    },
+  })
+
+  assert.deepEqual(runtime, {
+    url: 'https://current.cn-hangzhou.pai-eas.aliyuncs.com/api/predict/stock_quant_lab_shadow',
+    easToken: 'current-token',
+    status: 'Running',
+  })
 })
 
 test('启动命令已受理时状态回读失败回退为启动中', async () => {
