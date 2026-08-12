@@ -55,18 +55,30 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
   const owner = holder || candidate || {}
   const name = advice.name || owner.name || code
   const projected = []
+  const judgeContext = buildJudgeAdviceContext(advice)
 
   if (candidate && !candidate.alertMuted) {
-    const buyPrice = roundPrice(advice.buyPrice)
+    const triggerZone = judgeContext.addZone
+    const buyPrice = roundPrice(triggerZone?.high ?? advice.buyPrice)
     if (buyPrice != null) {
       const previous = alerts.find((a) => a && a.candCode === code)
-      if (previous && Number(previous.value) === buyPrice) {
-        projected.push(previous)
+      const samePlan = !!(
+        previous?.judgeContext?.planId
+        && judgeContext.planId
+        && previous.judgeContext.planId === judgeContext.planId
+      )
+      if (previous && (Number(previous.value) === buyPrice || samePlan)) {
+        projected.push({
+          ...previous,
+          value: buyPrice,
+          ...(triggerZone ? { triggerZone, judgeContext } : {}),
+        })
       } else {
         projected.push({
           ...baseAlert({ idFactory, now, code, name, op: 'lte', value: buyPrice, note: '买点' }),
           candCode: code,
           phase: 'armed',
+          ...(triggerZone ? { triggerZone, judgeContext } : {}),
         })
         changed = true
       }
@@ -79,21 +91,43 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
 
   const opQty = advice.opQty || ''
   const timing = advice.exitTiming || advice.actionPlan || ''
-  const judgeContext = buildJudgeAdviceContext(advice)
   const t1Status = options.t1Status || null
   const nextTradeDay = options.nextTradeDay || ''
   const buildAction = (kind, op, rawPrice, muted) => {
     if (muted) return
-    const value = roundPrice(rawPrice)
+    const triggerZone = kind === 'add'
+      ? judgeContext.addZone
+      : judgeContext.reduceZone
+    const zoneTrigger = kind === 'add'
+      ? triggerZone?.high
+      : triggerZone?.low
+    const value = roundPrice(zoneTrigger ?? rawPrice)
     if (value == null) return
     const actionQty = kind === 'add'
       ? (/加仓|补仓|买回|接回/.test(opQty) ? opQty : '')
       : (/减仓|卖出|清仓/.test(opQty) ? opQty : '')
     const previous = alerts.find((a) => a && a.actCode === code && a.actKind === kind)
-    if (previous && Number(previous.value) === value) {
+    const samePlan = !!(
+      previous?.judgeContext?.planId
+      && judgeContext.planId
+      && previous.judgeContext.planId === judgeContext.planId
+    )
+    if (previous && (Number(previous.value) === value || samePlan)) {
       const source = (actionQty || timing)
-        ? { ...previous, opQty: actionQty, ...(timing ? { timing } : {}), judgeContext }
-        : { ...previous, judgeContext }
+        ? {
+            ...previous,
+            value,
+            opQty: actionQty,
+            ...(timing ? { timing } : {}),
+            ...(triggerZone ? { triggerZone } : {}),
+            judgeContext,
+          }
+        : {
+            ...previous,
+            value,
+            ...(triggerZone ? { triggerZone } : {}),
+            judgeContext,
+          }
       const refreshed = applyT1ToAlert(source, kind === 'reduce' ? t1Status : null, nextTradeDay)
       if (JSON.stringify(refreshed) !== JSON.stringify(previous)) changed = true
       projected.push(refreshed)
@@ -113,6 +147,7 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
       actKind: kind,
       opQty: actionQty,
       timing,
+      ...(triggerZone ? { triggerZone } : {}),
       judgeContext,
       phase: 'armed',
     }

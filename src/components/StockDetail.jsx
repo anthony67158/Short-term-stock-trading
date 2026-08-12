@@ -684,6 +684,30 @@ export default function StockDetail({ stock, onClose }) {
                         <div className="dv-detail"><HL text={verdict.detail} /></div>
                       </div>
 
+                      {adv?.continuity && (() => {
+                        const continuity = adv.continuity
+                        const labels = {
+                          initial: '已建立主计划',
+                          maintain: '主计划延续',
+                          adjust: '方向不变 · 执行区间已更新',
+                          reverse: '客观信号确认 · 趋势版本已切换',
+                          blocked: '方向冲突已拦截 · 继续以上一版为准',
+                        }
+                        const blocked = continuity.changeType === 'blocked'
+                        return (
+                          <div className={'advice-continuity ' + (blocked ? 'blocked' : continuity.changeType || '')}>
+                            <div className="ac-head">
+                              <span><Icon name={blocked ? 'shield' : 'history'} size={12} /> {labels[continuity.changeType] || '主计划已更新'}</span>
+                              <b>趋势 V{continuity.thesisVersion || 1} · 修订 {continuity.revision || 1}</b>
+                            </div>
+                            <div className="ac-reason">{continuity.changeReason}</div>
+                            {blocked && continuity.proposedAction && (
+                              <div className="ac-proposed">本次候选意见“{continuity.proposedAction}”未取得反转资格，未覆盖当前计划。</div>
+                            )}
+                          </div>
+                        )
+                      })()}
+
                       {/* ReAct 研判思路：模型先于结论生成的推理链，让"为什么这么建议"透明可核对 */}
                       {adv && adv.reasoning && (
                         <Reasoning text={adv.reasoning} />
@@ -862,7 +886,7 @@ export default function StockDetail({ stock, onClose }) {
                         <div className="fc-fold-wrap">
                           <button className="fc-fold" onClick={() => setShowForecast((v) => !v)}>
                             <span className="fc-fold-summary">
-                              {fc && <span className={'fc-dir-inline ' + (fc.direction === '看涨' ? 'red' : fc.direction === '看跌' ? 'green' : 'muted')}>量化{q.modelVersion === 'v2' ? '次日' : `${fc.days || 5}日`}{fc.direction}·概率{fc.upProb}%</span>}
+                              {fc && <span className={'fc-dir-inline ' + (fc.direction === '看涨' ? 'red' : fc.direction === '看跌' ? 'green' : 'muted')}>量化{q.modelVersion === 'v2' ? (fc.horizon || '下一交易日') : `${fc.days || 5}日`}{fc.direction}·概率{fc.upProb}%</span>}
                               {q.score != null && <span className={'quant-chip sm ' + (q.score >= 62 ? 'red' : q.score <= 38 ? 'green' : 'gold')}>量化 {q.score}·{q.bias}</span>}
                             </span>
                             <Icon name={showForecast ? 'chevronDown' : 'chevronRight'} size={13} />
@@ -873,7 +897,7 @@ export default function StockDetail({ stock, onClose }) {
                                 <div className="forecast-box">
                                   <div className="fc-row1">
                                     <span className={'fc-dir ' + (fc.direction === '看涨' ? 'red' : fc.direction === '看跌' ? 'green' : 'muted')}>
-                                      {q.modelVersion === 'v2' ? '下一交易日' : `未来${fc.days || 5}日`} {fc.direction}
+                                      {q.modelVersion === 'v2' ? (fc.horizon || '下一交易日') : `未来${fc.days || 5}日`} {fc.direction}
                                     </span>
                                     <span className="fc-conf">预测信心 {fc.confidence}</span>
                                   </div>
@@ -891,11 +915,26 @@ export default function StockDetail({ stock, onClose }) {
                                         <div className="fc-cell"><span className="fc-k">收盘位置</span><span className="fc-v">{q.v2.marketContext?.closeLocationPct ?? '—'}%</span></div>
                                         <div className="fc-cell"><span className="fc-k">风险 / 强度</span><span className="fc-v">{q.v2.outlook?.riskLevel || '—'} / {q.v2.outlook?.signalStrength || '—'}</span></div>
                                       </div>
+                                      {q.v2.executionReference && (
+                                        <div className="v2-execution-ref">
+                                          <div className="v2-price-head">
+                                            <span>当前时段执行参考</span>
+                                            <small>{q.v2.executionReference.horizon} · 不计入V2正确率</small>
+                                          </div>
+                                          <div className="v2-price-grid">
+                                            <span>实时锚点 <b>{q.v2.executionReference.anchorPrice}</b></span>
+                                            <span>VWAP <b>{q.v2.executionReference.vwap}</b></span>
+                                            <span>动态下沿 <b className="green">{q.v2.executionReference.rangeLow}</b></span>
+                                            <span>动态上沿 <b className="red">{q.v2.executionReference.rangeHigh}</b></span>
+                                            <span>30分钟动量 <b>{q.v2.executionReference.momentum30mPct}%</b></span>
+                                          </div>
+                                        </div>
+                                      )}
                                       {q.v2.priceReferences && (
                                         <div className="v2-price-refs">
                                           <div className="v2-price-head">
                                             <span>价格参考</span>
-                                            <small>信号收盘近似，下一交易日开盘后需修正</small>
+                                            <small>{q.v2.executionReference ? '模型原始锚点，盘中执行以上方实时区间为准' : '信号收盘近似，下个交易时段开盘后需修正'}</small>
                                           </div>
                                           <div className="v2-price-grid">
                                             <span>锚点 <b>{q.v2.priceReferences.anchorPrice ?? '—'}</b></span>

@@ -151,6 +151,56 @@ test('相同价位保留旧预警状态并刷新Judge建议快照', () => {
   assert.equal(data.alerts[0].judgeContext.addPrice, 10.12)
 })
 
+test('同一主计划调价时保留观察状态并改用动态价格带', () => {
+  const old = {
+    id: 'stable-plan-alert',
+    code: '000001',
+    actCode: '000001',
+    actKind: 'add',
+    type: 'price',
+    op: 'lte',
+    value: 10.06,
+    phase: 'watching',
+    watchingAt: now - 60000,
+    enabled: true,
+    judgeContext: {
+      planId: 'plan-000001',
+      planRevision: 2,
+    },
+  }
+  const data = {
+    plan: [],
+    holding: [{ id: 'h1', code: '000001', name: '平安银行' }],
+    alerts: [old],
+    settings: {},
+  }
+
+  projectAdviceAlerts(data, '000001', {
+    action: '加仓',
+    addPrice: 10.2,
+    continuity: {
+      planId: 'plan-000001',
+      revision: 3,
+      thesisVersion: 1,
+      changeType: 'adjust',
+      zones: {
+        add: { low: 10.14, high: 10.26, anchor: 10.2 },
+      },
+    },
+  }, { now, idFactory: ids })
+
+  assert.equal(data.alerts[0].id, 'stable-plan-alert')
+  assert.equal(data.alerts[0].phase, 'watching')
+  assert.equal(data.alerts[0].watchingAt, now - 60000)
+  assert.equal(data.alerts[0].value, 10.26)
+  assert.deepEqual(data.alerts[0].triggerZone, {
+    low: 10.14,
+    high: 10.26,
+    anchor: 10.2,
+  })
+  assert.equal(data.alerts[0].judgeContext.planRevision, 3)
+})
+
 test('关闭 AI 自动预警时清理该股票的自动预警', () => {
   const data = {
     plan: [{ code: '600519', name: '贵州茅台' }],

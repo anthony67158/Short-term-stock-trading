@@ -2,12 +2,13 @@
 // 脱离 React 组件生命周期——关闭弹窗后照样在后台跑完，跑完写入 adviceCache 并记录决策；
 // 组件只需订阅本 runner + adviceCache，就能看到「后台生成中」的实时进度或直接拿到结果。
 import { callAIStream } from './ai'
-import { saveAdvice } from './adviceCache'
+import { getAdvice, saveAdvice } from './adviceCache'
 import { planStore } from './planStore'
 import { triggerServerAdvice, canServerAdvice } from './serverAdvice'
 import { acceptsGenerationResult, generationOptions } from '../shared/adviceBatchPolicy.js'
 import { ensureAdviceReasoning } from '../shared/adviceReasoning.js'
 import { quantModelHeaders } from './quantModel'
+import { compactAdvicePlan } from '../shared/adviceContinuity.js'
 
 const running = new Map()  // code -> { phase, startedAt }
 const results = new Map()  // code -> { result, advice, meta, news, adviceMissing, truncated, error, cachedAt }
@@ -64,6 +65,11 @@ export function startAdvice(spec) {
 
 async function run(spec, record) {
   const { code, mode, name, myHold, aiPayload, quantUrl, priceHint } = spec
+  const previousAdvice = compactAdvicePlan(getAdvice(code))
+  const requestPayload = {
+    ...(aiPayload || {}),
+    ...(previousAdvice ? { previousAdvice } : {}),
+  }
   const generation = generationOptions(!!spec.deepMode)
   const onPhase = (p) => {
     const r = running.get(code)
@@ -97,12 +103,12 @@ async function run(spec, record) {
       try {
         const r = await fetch(quantUrl, {
           signal: ac.signal,
-          headers: quantModelHeaders(aiPayload?.quantModelVersion),
+          headers: quantModelHeaders(requestPayload.quantModelVersion),
         })
         return await r.json()
       } catch { return null } finally { clearTimeout(t) }
     })()
-    const adviceP = callAIStream(mode, aiPayload, onPhase, record.controller.signal, onEvent, generation)
+    const adviceP = callAIStream(mode, requestPayload, onPhase, record.controller.signal, onEvent, generation)
       .then((r) => (r && r.ok ? { advice: r.result, meta: r.meta, news: r.news, truncated: r.truncated } : null))
       .catch(() => null)
     const [j, adviceResp] = await Promise.all([quantP, adviceP])

@@ -1,7 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { createCloudSaveQueue } from '../shared/accountSync.js'
+import {
+  createCloudSaveQueue,
+  accountTradeStateFingerprint,
+  sameAccountTradeState,
+  saveWithRevisionRecovery,
+} from '../shared/accountSync.js'
 
 test('云端保存失败后保留最新数据并自动重试到成功', async () => {
   const calls = []
@@ -70,13 +75,15 @@ test('退出账号会取消进行中的旧账号失败重试', async () => {
   assert.equal(states.some((item) => item.status === 'error'), false)
 })
 
-test('版本冲突属于不可重试错误并丢弃旧快照', async () => {
+test('真实交易冲突停止盲目重试并显示冲突状态', async () => {
   const states = []
   const timers = []
   const queue = createCloudSaveQueue({
     save: async () => ({
       ok: false,
       retryable: false,
+      code: 'TRADE_STATE_CONFLICT',
+      conflict: true,
       error: '云端数据已更新，请刷新页面后重试',
     }),
     onState: (value) => states.push(value),
@@ -90,5 +97,144 @@ test('版本冲突属于不可重试错误并丢弃旧快照', async () => {
   assert.equal(saved, false)
   assert.equal(retried, true)
   assert.equal(timers.length, 0)
-  assert.equal(states.at(-1).status, 'error')
+  assert.equal(states.at(-1).status, 'conflict')
+})
+
+test('交易账本一致时版本冲突会自动更新修订号并重放保存', async () => {
+  const calls = []
+  const revisions = []
+  const local = {
+    plan: [{ code: '600519' }],
+    holding: [{ id: 'h1', code: '600000', qty: 2 }],
+    closed: [{ id: 't1', code: '600000' }],
+    account: { cash: 10000 },
+    advice: { '600000': { at: 2 } },
+  }
+  const remote = {
+    ...local,
+    advice: { '600000': { at: 3 } },
+  }
+  const result = await saveWithRevisionRecovery({
+    payload: { nick: '测试', data: local, baseRevision: 7 },
+    save: async (payload) => {
+      calls.push(payload)
+      return calls.length === 1
+        ? {
+            ok: false,
+            code: 'ACCOUNT_VERSION_CONFLICT',
+            revision: 8,
+            retryable: false,
+          }
+        : { ok: true, storage: 'oss', revision: 9 }
+    },
+    getLatest: async () => ({
+      ok: true,
+      revision: 8,
+      data: remote,
+    }),
+    onRevision: (revision) => revisions.push(revision),
+  })
+
+  assert.equal(result.ok, true)
+  assert.equal(calls.length, 2)
+  assert.equal(calls[1].baseRevision, 8)
+  assert.deepEqual(revisions, [8])
+})
+
+test('两端交易账本都变化时拒绝自动覆盖', async () => {
+  const calls = []
+  const result = await saveWithRevisionRecovery({
+    payload: {
+      data: {
+        holding: [{ id: 'local', code: '600000', qty: 2 }],
+        closed: [],
+      },
+      baseRevision: 7,
+    },
+    save: async (payload) => {
+      calls.push(payload)
+      return {
+        ok: false,
+        code: 'ACCOUNT_VERSION_CONFLICT',
+        revision: 8,
+        retryable: false,
+      }
+    },
+    getLatest: async () => ({
+      ok: true,
+      revision: 8,
+      data: {
+        holding: [{ id: 'remote', code: '600000', qty: 1 }],
+        closed: [],
+      },
+    }),
+  })
+
+  assert.equal(result.ok, false)
+  assert.equal(result.code, 'TRADE_STATE_CONFLICT')
+  assert.equal(result.retryable, false)
+  assert.equal(calls.length, 1)
+})
+
+test('交易账本比较忽略AI建议和运行状态变化', () => {
+  const base = {
+    plan: [{ code: '600519' }],
+    holding: [{ id: 'h1', code: '600000', qty: 2 }],
+    closed: [{ id: 't1' }],
+    account: { cash: 10000 },
+  }
+  assert.equal(sameAccountTradeState({
+    ...base,
+    advice: { a: { at: 1 } },
+  }, {
+    ...base,
+    advice: { a: { at: 2 } },
+    jobs: { a: { status: 'running' } },
+  }), true)
+  assert.equal(sameAccountTradeState(base, {
+    ...base,
+    holding: [{ id: 'h1', code: '600000', qty: 1 }],
+  }), false)
+})
+
+test('本地待办基于的云端交易指纹未变时允许重放本地交易', async () => {
+  const base = {
+    holding: [{ id: 'h1', code: '600000', qty: 1 }],
+    closed: [],
+  }
+  const localPending = {
+    holding: [{ id: 'h1', code: '600000', qty: 2 }],
+    closed: [{ id: 'buy-2', code: '600000' }],
+  }
+  const calls = []
+  const result = await saveWithRevisionRecovery({
+    payload: {
+      data: localPending,
+      baseRevision: 7,
+      baseTradeFingerprint: accountTradeStateFingerprint(base),
+    },
+    save: async (payload) => {
+      calls.push(payload)
+      return calls.length === 1
+        ? {
+            ok: false,
+            code: 'ACCOUNT_VERSION_CONFLICT',
+            revision: 8,
+            retryable: false,
+          }
+        : { ok: true, storage: 'oss', revision: 9 }
+    },
+    getLatest: async () => ({
+      ok: true,
+      revision: 8,
+      data: {
+        ...base,
+        advice: { '600000': { at: 2 } },
+      },
+    }),
+  })
+
+  assert.equal(result.ok, true)
+  assert.equal(calls.length, 2)
+  assert.equal(calls[1].baseRevision, 8)
 })

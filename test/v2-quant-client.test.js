@@ -2,10 +2,13 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   buildV2Request,
+  deriveV2SessionExecutionReference,
   fetchFiveMinuteBars,
   fetchV2QuantPredict,
   parseFiveMinuteKlines,
   selectCompletedDayEndBars,
+  v2ExecutionHorizon,
+  v2ForecastHorizon,
 } from '../api/_v2_quant.js'
 import { fetchSelectedQuantPredict } from '../api/_ta.js'
 
@@ -201,4 +204,98 @@ test('选择V2后预测不可用必须明确失败而不是静默返回空', asy
     ),
     /V2模型服务未运行或预测不可用/,
   )
+})
+
+test('V2展示时段随市场阶段变化但不篡改训练标签', () => {
+  assert.equal(v2ForecastHorizon({
+    tradingToday: true,
+    phase: '早盘(盘中)',
+    bjNow: '2026-08-12 10:00',
+    nextTradingDayLabel: '2026-08-13(周四)',
+  }, '2026-08-11 15:00:00'), '今日交易日（基于上一收盘信号）')
+  assert.equal(v2ForecastHorizon({
+    tradingToday: true,
+    phase: '午间休市',
+    bjNow: '2026-08-12 12:00',
+    nextTradingDayLabel: '2026-08-13(周四)',
+  }, '2026-08-11 15:00:00'), '今日交易日（基于上一收盘信号）')
+  assert.equal(v2ExecutionHorizon({
+    tradingToday: true,
+    phase: '午间休市',
+  }), '今天下午13:00-15:00')
+  assert.equal(v2ForecastHorizon({
+    tradingToday: true,
+    phase: '盘后(已收盘)',
+    bjNow: '2026-08-12 15:30',
+    nextTradingDayLabel: '2026-08-13(周四)',
+  }, '2026-08-12 15:00:00'), '下一交易日（2026-08-13(周四)）')
+})
+
+test('午间使用今日真实5分钟行情生成下午执行区间', () => {
+  const bars = parseFiveMinuteKlines(
+    minuteLines()
+      .slice(0, 20)
+      .map((line) => line.replaceAll('2026-08-10', '2026-08-12')),
+  )
+  const reference = deriveV2SessionExecutionReference(bars, {
+    forecast: { direction: '看涨' },
+  }, {
+    tradingToday: true,
+    isLive: true,
+    phase: '午间休市',
+    bjNow: '2026-08-12 12:00',
+  })
+
+  assert.equal(reference.horizon, '今天下午13:00-15:00')
+  assert.equal(reference.kind, 'realtime-execution-reference')
+  assert.equal(reference.modelProbability, false)
+  assert.ok(reference.rangeLow < reference.rangeHigh)
+  assert.ok(reference.anchorPrice >= reference.rangeLow)
+  assert.ok(reference.anchorPrice <= reference.rangeHigh)
+})
+
+test('V2选择器同时返回原模型预测和当前时段执行参考', async () => {
+  let fetchOptions = null
+  const bars = parseFiveMinuteKlines([
+    ...minuteLines().map((line) => line.replaceAll('2026-08-10', '2026-08-11')),
+    ...minuteLines().slice(0, 20).map((line) => line.replaceAll('2026-08-10', '2026-08-12')),
+  ])
+  const result = await fetchSelectedQuantPredict(
+    'v2',
+    '600519',
+    [],
+    null,
+    1000,
+    null,
+    {
+      fetchBars: async (_code, options) => {
+        fetchOptions = options
+        return bars
+      },
+      fetchV2: async () => ({
+        ok: true,
+        modelVersion: 'v2',
+        forecast: {
+          direction: '看涨',
+          horizon: '下一交易日',
+          upProb: 62,
+        },
+        v2: {},
+        reads: [],
+      }),
+      timeContext: {
+        tradingToday: true,
+        isLive: true,
+        phase: '午间休市',
+        bjNow: '2026-08-12 12:00',
+        nextTradingDayLabel: '2026-08-13(周四)',
+      },
+    },
+  )
+
+  assert.equal(fetchOptions.completedWindowOnly, false)
+  assert.equal(result.forecast.horizon, '今日交易日（基于上一收盘信号）')
+  assert.equal(result.v2.targetDefinition, undefined)
+  assert.equal(result.v2.executionReference.horizon, '今天下午13:00-15:00')
+  assert.equal(result.v2.executionReference.modelProbability, false)
 })

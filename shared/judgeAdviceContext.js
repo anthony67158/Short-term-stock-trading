@@ -5,7 +5,35 @@ const finite = (value) => {
 }
 
 export function buildJudgeAdviceContext(advice = {}) {
+  const continuity = advice.continuity && typeof advice.continuity === 'object'
+    ? advice.continuity
+    : {}
+  const zones = continuity.zones && typeof continuity.zones === 'object'
+    ? continuity.zones
+    : {}
+  const zone = (value) => {
+    if (!value || typeof value !== 'object') return null
+    const low = finite(value.low)
+    const high = finite(value.high)
+    const anchor = finite(value.anchor)
+    return low != null && high != null
+      ? { low, high, anchor }
+      : null
+  }
+  const planId = text(continuity.planId, 120)
+  const planContext = planId ? {
+    planId,
+    planRevision: Number(continuity.revision) || 0,
+    thesisVersion: Number(continuity.thesisVersion) || 0,
+    changeType: text(continuity.changeType, 30),
+    changeReason: text(continuity.changeReason, 500),
+    ...(zone(zones.add) ? { addZone: zone(zones.add) } : {}),
+    ...(zone(zones.reduce) ? { reduceZone: zone(zones.reduce) } : {}),
+    ...(zone(zones.stop) ? { stopZone: zone(zones.stop) } : {}),
+    ...(zone(zones.target) ? { targetZone: zone(zones.target) } : {}),
+  } : {}
   return {
+    ...planContext,
     action: text(advice.action || advice.stance, 40),
     tier: text(advice.tier, 30),
     title: text(advice.title || advice.headline, 200),

@@ -16,6 +16,10 @@ import { reconcileAdviceNumbers } from '../shared/adviceValidation.js';
 import { normalizePickDecision } from '../shared/stockRanking.js';
 import { canUseQuantModel } from './_quant_access.js';
 import { authorizePaidRequest } from './_account_auth.js';
+import {
+  continuityEvidenceFromPayload,
+  reconcileAdviceContinuity,
+} from '../shared/adviceContinuity.js';
 
 function avg(arr) { return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0; }
 function std(arr) { if (arr.length < 2) return 0; const m = avg(arr); return Math.sqrt(avg(arr.map((x) => (x - m) ** 2))); }
@@ -807,6 +811,7 @@ export default async function handler(req, res) {
             const f = payload.quant.forecast || {};
             const parts = [];
             if (payload.quant.score != null) parts.push(`综合分${payload.quant.score}${payload.quant.bias ? `(${payload.quant.bias})` : ''}`);
+            if (f.horizon) parts.push(`窗口${f.horizon}`);
             if (f.direction) parts.push(`走势${f.direction}`);
             if (f.upProb != null) parts.push(`上涨概率${f.upProb}%`);
             if (f.expRet != null) parts.push(`预期${f.expRet >= 0 ? '+' : ''}${f.expRet}%`);
@@ -822,6 +827,8 @@ export default async function handler(req, res) {
               targetLow: f.targetLow ?? null,
               targetMid: f.targetMid ?? null,
               targetHigh: f.targetHigh ?? null,
+              horizon: f.horizon ?? null,
+              executionReference: payload.quant.v2?.executionReference || null,
               reads: payload.quant.reads || null,
               highConfFired: hc ? !!hc.fired : null,
               highConfCredibility: hc ? (hc.credibility ?? null) : null,
@@ -1277,6 +1284,19 @@ export default async function handler(req, res) {
     if (mode === 'scan_pick' && result && typeof result === 'object' && !result.raw) {
       const allowedCodes = (payload.candidates || []).map((item) => item && item.code).filter(Boolean);
       result = normalizePickDecision(result, allowedCodes, payload.candidates || []);
+    }
+    if (
+      ['buy_advice', 'hold_advice', 'review'].includes(mode)
+      && result
+      && typeof result === 'object'
+      && !result.raw
+    ) {
+      result = reconcileAdviceContinuity({
+        code: payload.code,
+        previous: payload.previousAdvice,
+        next: result,
+        evidence: continuityEvidenceFromPayload(payload),
+      }).advice;
     }
     const _dbg = {
       contentLen: (content || '').length,

@@ -1,12 +1,15 @@
 // ============================================================
 import {
+  deriveV2SessionExecutionReference,
   fetchFiveMinuteBars,
   fetchV2QuantPredict,
+  v2ForecastHorizon,
 } from './_v2_quant.js';
 import {
   normalizeQuantModelVersion,
   QUANT_MODEL_V2,
 } from '../shared/modelVersion.js';
+import { marketTimeContext } from './_market_time.js';
 
 // ============================================================
 // 专业技术指标引擎（共享模块，前后端一致；下划线开头不占 Vercel 函数位）
@@ -349,6 +352,7 @@ export async function fetchSelectedQuantPredict(
   {
     fetchBars = fetchFiveMinuteBars,
     fetchV2 = fetchV2QuantPredict,
+    timeContext = marketTimeContext(),
   } = {},
 ) {
   if (normalizeQuantModelVersion(version) !== QUANT_MODEL_V2) {
@@ -356,6 +360,8 @@ export async function fetchSelectedQuantPredict(
   }
   const bars = await fetchBars(code, {
     timeoutMs: Math.min(timeoutMs, 6000),
+    limit: 300,
+    completedWindowOnly: false,
   })
   const prediction = await fetchV2(code, {
     bars,
@@ -365,5 +371,28 @@ export async function fetchSelectedQuantPredict(
   if (!prediction) {
     throw new Error('V2模型服务未运行或预测不可用')
   }
-  return prediction
+  const horizon = v2ForecastHorizon(timeContext, prediction.asOf)
+  const executionReference = horizon.startsWith('下一交易日')
+    ? null
+    : deriveV2SessionExecutionReference(
+        bars,
+        prediction,
+        timeContext,
+      )
+  return {
+    ...prediction,
+    forecast: {
+      ...(prediction.forecast || {}),
+      horizon,
+    },
+    reads: (prediction.reads || []).map((item, index) =>
+      index === 0
+        ? String(item).replace('下一交易日', horizon)
+        : item
+    ),
+    v2: {
+      ...(prediction.v2 || {}),
+      ...(executionReference ? { executionReference } : {}),
+    },
+  }
 }

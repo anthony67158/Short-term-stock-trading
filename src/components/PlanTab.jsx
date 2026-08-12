@@ -399,7 +399,7 @@ function CandTarget({ p, q }) {
     if (!p.qtyManual && aiQty != null && aiQty !== p.buyQty) patch.buyQty = aiQty
     if (Object.keys(patch).length) planStore.setCandPlan(p.code, patch)
     // 买点预警自动同步:跟随 AI 建议买入价,自动建/刷新一条「到价 ≤ 买入价」预警(到买点即提醒)
-    if (aiPrice != null) planStore.autoSyncCandAlert(p.code, p.name, aiPrice)
+    if (aiPrice != null) planStore.autoSyncCandAlert(p.code, p.name, aiPrice, adv)
     // eslint-disable-next-line
   }, [aiPrice, aiQty, p.targetManual, p.qtyManual])
 

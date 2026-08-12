@@ -2,12 +2,56 @@ import { useSyncExternalStore } from 'react'
 import { planStore } from './planStore'
 import { api as apiUrl } from './apiBase'
 import { isBatchRunning } from './adviceBatch'
-import { createCloudSaveQueue } from '../shared/accountSync.js'
+import {
+  accountTradeStateFingerprint,
+  createCloudSaveQueue,
+  sameAccountTradeState,
+  saveWithRevisionRecovery,
+} from '../shared/accountSync.js'
 
 // ============ 云端账号体系（阿里云 OSS 持久化，跨设备同步）============
 // 会话（昵称+密码）持久化在本机 localStorage，保持长期登录（关标签页/切后台不掉线）；数据存云端。
 const SESS = 'cloud_session_v1'
 const LEGACY_KEY = 'trade_book_v2' // 旧的无账号本机数据(供首次注册导入)
+const OUTBOX_KEY = 'cloud_save_outbox_v1'
+
+function readOutbox(nick) {
+  try {
+    const values = JSON.parse(localStorage.getItem(OUTBOX_KEY) || '{}')
+    const value = values?.[nick]
+    return value?.data ? value : null
+  } catch {
+    return null
+  }
+}
+function writeOutbox(value) {
+  try {
+    const values = JSON.parse(localStorage.getItem(OUTBOX_KEY) || '{}')
+    values[value.nick] = value
+    localStorage.setItem(OUTBOX_KEY, JSON.stringify(values))
+  } catch { /* ignore */ }
+}
+function settleOutbox(nick, id, revision, syncedData) {
+  try {
+    const current = readOutbox(nick)
+    if (!current) return
+    const values = JSON.parse(localStorage.getItem(OUTBOX_KEY) || '{}')
+    if (current.id === id) {
+      delete values[nick]
+    } else {
+      values[nick] = {
+        ...current,
+        baseRevision: revision,
+        baseTradeFingerprint: accountTradeStateFingerprint(syncedData),
+      }
+    }
+    if (Object.keys(values).length) {
+      localStorage.setItem(OUTBOX_KEY, JSON.stringify(values))
+    } else {
+      localStorage.removeItem(OUTBOX_KEY)
+    }
+  } catch { /* ignore */ }
+}
 
 function loadSession() {
   try {
@@ -32,7 +76,7 @@ let state = {
   status: 'idle',    // idle | loading | ready | error
   error: '',
   booting: true,     // 启动时是否在恢复会话
-  syncStatus: 'idle', // idle | saving | synced | error
+  syncStatus: 'idle', // idle | saving | synced | error | conflict
   syncError: '',
   lastSyncedAt: 0,
 }
@@ -41,6 +85,7 @@ function emit() { state = { ...state }; listeners.forEach((l) => { try { l() } c
 
 let _pw = null // 密码仅保存在内存 + sessionStorage，用于后续保存
 let _cloudRevision = 0
+let _lastSyncedTradeFingerprint = ''
 
 // 读取本机旧数据（首次注册可导入）
 export function readLegacyData() {
@@ -73,13 +118,33 @@ async function api(action, payload) {
 }
 
 const cloudSaveQueue = createCloudSaveQueue({
-  async save({ nick, pw, data }) {
-    const response = await api('save', {
-      nick, pw, data,
-      baseRevision: _cloudRevision,
+  async save({
+    nick,
+    pw,
+    data,
+    outboxId,
+    lockedBaseRevision,
+    baseTradeFingerprint,
+  }) {
+    const response = await saveWithRevisionRecovery({
+      payload: {
+        nick,
+        pw,
+        data,
+        baseRevision: Number.isInteger(lockedBaseRevision)
+          ? lockedBaseRevision
+          : _cloudRevision,
+        baseTradeFingerprint: baseTradeFingerprint
+          || _lastSyncedTradeFingerprint,
+      },
+      save: (payload) => api('save', payload),
+      getLatest: () => api('get', { nick, pw }),
+      onRevision: (revision) => { _cloudRevision = revision },
     })
     if (response?.ok && Number.isInteger(response.revision)) {
       _cloudRevision = response.revision
+      _lastSyncedTradeFingerprint = accountTradeStateFingerprint(data)
+      settleOutbox(nick, outboxId, response.revision, data)
     }
     return response
   },
@@ -90,6 +155,22 @@ const cloudSaveQueue = createCloudSaveQueue({
     emit()
   },
 })
+
+function resumeOutbox(nick, pw) {
+  const pending = readOutbox(nick)
+  if (!pending) return false
+  void cloudSaveQueue.enqueue({
+    nick,
+    pw,
+    data: pending.data,
+    outboxId: pending.id,
+    lockedBaseRevision: Number.isInteger(pending.baseRevision)
+      ? pending.baseRevision
+      : undefined,
+    baseTradeFingerprint: pending.baseTradeFingerprint || '',
+  })
+  return true
+}
 
 export const authStore = {
   subscribe(l) { listeners.add(l); return () => listeners.delete(l) },
@@ -106,8 +187,10 @@ export const authStore = {
       if (r.ok) {
         state.user = s.nick; state.status = 'ready'
         _cloudRevision = Number(r.revision) || 0
+        _lastSyncedTradeFingerprint = accountTradeStateFingerprint(r.data)
         state.syncStatus = 'synced'; state.syncError = ''; state.lastSyncedAt = r.updatedAt || 0
         planStore.setData(r.data)
+        resumeOutbox(s.nick, s.pw)
       } else {
         saveSession(null); _pw = null
       }
@@ -129,9 +212,11 @@ export const authStore = {
     if (!r.ok) { state.status = 'error'; state.error = r.error; emit(); return r }
     _pw = String(pw); saveSession({ nick, pw: _pw })
     _cloudRevision = Number(r.revision) || 0
+    _lastSyncedTradeFingerprint = accountTradeStateFingerprint(r.data)
     state.user = nick; state.status = 'ready'; state.error = ''
     state.syncStatus = 'synced'; state.syncError = ''; state.lastSyncedAt = r.updatedAt || Date.now()
     planStore.setData(r.data)
+    resumeOutbox(nick, _pw)
     emit()
     return { ok: true }
   },
@@ -143,9 +228,11 @@ export const authStore = {
     if (!r.ok) { state.status = 'error'; state.error = r.error; emit(); return r }
     _pw = String(pw); saveSession({ nick, pw: _pw })
     _cloudRevision = Number(r.revision) || 0
+    _lastSyncedTradeFingerprint = accountTradeStateFingerprint(r.data)
     state.user = nick; state.status = 'ready'; state.error = ''
     state.syncStatus = 'synced'; state.syncError = ''; state.lastSyncedAt = r.updatedAt || 0
     planStore.setData(r.data)
+    resumeOutbox(nick, _pw)
     emit()
     return { ok: true }
   },
@@ -153,6 +240,7 @@ export const authStore = {
   logout() {
     cloudSaveQueue.reset()
     saveSession(null); _pw = null; _cloudRevision = 0
+    _lastSyncedTradeFingerprint = ''
     state.user = null; state.status = 'idle'
     state.syncStatus = 'idle'; state.syncError = ''; state.lastSyncedAt = 0
     planStore.setData({ plan: [], holding: [], closed: [] })
@@ -162,12 +250,41 @@ export const authStore = {
   // 供 planStore 保存数据到云端
   async saveData(data) {
     if (!state.user || !_pw) return false
-    return cloudSaveQueue.enqueue({ nick: state.user, pw: _pw, data })
+    const outboxId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    writeOutbox({
+      id: outboxId,
+      nick: state.user,
+      data,
+      at: Date.now(),
+      baseRevision: _cloudRevision,
+      baseTradeFingerprint: _lastSyncedTradeFingerprint,
+    })
+    return cloudSaveQueue.enqueue({
+      nick: state.user,
+      pw: _pw,
+      data,
+      outboxId,
+    })
   },
-  retrySave() { return cloudSaveQueue.retry() },
+  retrySave() {
+    const pending = state.user && _pw ? readOutbox(state.user) : null
+    if (pending) {
+      return cloudSaveQueue.enqueue({
+        nick: state.user,
+        pw: _pw,
+        data: pending.data,
+        outboxId: pending.id,
+        lockedBaseRevision: Number.isInteger(pending.baseRevision)
+          ? pending.baseRevision
+          : undefined,
+        baseTradeFingerprint: pending.baseTradeFingerprint || '',
+      })
+    }
+    return cloudSaveQueue.retry()
+  },
   async deactivate() {
     if (!state.user || !_pw) return { ok: false, error: '当前未登录' }
-    const flushed = await cloudSaveQueue.retry()
+    const flushed = await this.retrySave()
     if (!flushed) return { ok: false, error: '最新账号数据尚未保存到 OSS，请稍后重试' }
     const response = await api('deactivate', { nick: state.user, pw: _pw })
     if (!response.ok) return response
@@ -192,6 +309,10 @@ export const authStore = {
         // pull 只增量合并 AI/预警，并未合并 holding/closed。
         // 不能在此提升 revision，否则旧持仓会带着最新 revision 通过保存校验并覆盖云端交易。
         state.lastSyncedAt = r.updatedAt || state.lastSyncedAt
+        if (sameAccountTradeState(planStore.get(), r.data)) {
+          _cloudRevision = Number(r.revision) || _cloudRevision
+          _lastSyncedTradeFingerprint = accountTradeStateFingerprint(r.data)
+        }
         try { planStore.mergeCloud(r.data) } catch { /* ignore */ }
         return true
       }

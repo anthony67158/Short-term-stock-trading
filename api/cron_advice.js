@@ -41,6 +41,10 @@ import {
   validateBatchMode,
 } from '../shared/adviceBatchPolicy.js';
 import { summarizeAdviceOutcomes } from '../shared/adviceOutcome.js';
+import {
+  buildAdviceCacheEntry,
+  compactAdvicePlan,
+} from '../shared/adviceContinuity.js';
 import aiHandler from './ai.js';
 import stockDetailHandler from './stock_detail.js';
 import quoteHandler from './quote.js';
@@ -355,7 +359,18 @@ export function adviceFailureReason(response, deepMode = false) {
 }
 
 // 生成单只:进程内并发跑 量化(stock_detail?quant=1) + 军师(ai.js) → 组装缓存项(对齐前端 saveAdvice 结构)
-async function genOne({ code, name, mode, payload, quantQuery, priceHint, onProgress, signal, deepMode = false }) {
+async function genOne({
+  code,
+  name,
+  mode,
+  payload,
+  quantQuery,
+  priceHint,
+  onProgress,
+  signal,
+  deepMode = false,
+  previousEntry = null,
+}) {
   const generation = generationOptions(deepMode);
   let streamedReasoning = '';
   let adviceFailure = '';
@@ -414,7 +429,11 @@ async function genOne({ code, name, mode, payload, quantQuery, priceHint, onProg
   }
 
   const at = Date.now();
-  const cacheItem = { result, advice, meta, news, truncated, at };
+  const cacheItem = buildAdviceCacheEntry(
+    previousEntry,
+    { result, advice, meta, news, truncated },
+    at,
+  );
   let logEntry = null;
   if (advice) {
     const px = (result && result.price) || priceHint || (payload && payload.holdCost) || null;
@@ -453,17 +472,21 @@ async function runJobGen(acc, code, onProgress, signal, deepMode = false) {
   const name = (holding.find((h) => h.code === code) || watch.find((w) => w.code === code) || {}).name || code;
   const priceHint = Number(quoteMap[code]?.price) > 0 ? Number(quoteMap[code].price) : null;
   const quantModelVersion = data.settings?.quantModelVersion || 'default';
+  const previousEntry = data.advice?.[code] || null;
+  const previousAdvice = compactAdvicePlan(previousEntry);
   if (holdSet.has(code)) {
     const p = buildHoldPayload(holding, code, name, portfolio, data.account, data.closed, nextTradeDayLabel());
     p.advisorTrack = advisorTrackFrom(data, 'hold_advice');
     p.quantModelVersion = quantModelVersion;
+    if (previousAdvice) p.previousAdvice = previousAdvice;
     const hp = (p.holdCost != null && p.holdQty != null) ? { holdCost: String(p.holdCost), holdQty: String(p.holdQty) } : {};
-    return genOne({ code, name, mode: 'hold_advice', payload: p, quantQuery: { code, klt: '101', lmt: '60', quant: '1', model: quantModelVersion, ...hp }, priceHint, onProgress, signal, deepMode });
+    return genOne({ code, name, mode: 'hold_advice', payload: p, quantQuery: { code, klt: '101', lmt: '60', quant: '1', model: quantModelVersion, ...hp }, priceHint, onProgress, signal, deepMode, previousEntry });
   }
   const p = buildWatchPayload(code, name, portfolio, data.account);
   p.advisorTrack = advisorTrackFrom(data, 'buy_advice');
   p.quantModelVersion = quantModelVersion;
-  return genOne({ code, name, mode: 'buy_advice', payload: p, quantQuery: { code, klt: '101', lmt: '60', quant: '1', model: quantModelVersion }, priceHint, onProgress, signal, deepMode });
+  if (previousAdvice) p.previousAdvice = previousAdvice;
+  return genOne({ code, name, mode: 'buy_advice', payload: p, quantQuery: { code, klt: '101', lmt: '60', quant: '1', model: quantModelVersion }, priceHint, onProgress, signal, deepMode, previousEntry });
 }
 
 // ---- 任务表合并:把云端最新的【外部变更】并入内存 working(捕获其它设备新入队 / 取消)----

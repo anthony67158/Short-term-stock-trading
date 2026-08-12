@@ -262,6 +262,122 @@ export function deriveV2PriceReferences(bars, context) {
   }
 }
 
+export function v2ExecutionHorizon(context = {}) {
+  const phase = String(context.phase || '')
+  if (context.tradingToday && /午间/.test(phase)) {
+    return '今天下午13:00-15:00'
+  }
+  if (!context.tradingToday || /盘后|^休市/.test(phase)) {
+    return context.nextTradingDayLabel
+      ? `下一交易日（${context.nextTradingDayLabel}）`
+      : '下一交易日'
+  }
+  if (/早盘|午盘/.test(phase)) return '今日15:00收盘前'
+  return '今日交易时段'
+}
+
+export function v2ForecastHorizon(context = {}, signalAsOf = '') {
+  const phase = String(context.phase || '')
+  const today = String(context.bjNow || '').slice(0, 10)
+  const signalDate = String(signalAsOf || '').slice(0, 10)
+  const signalIsToday = !!today && signalDate === today
+  if (!context.tradingToday || /盘后|^休市/.test(phase) || signalIsToday) {
+    return context.nextTradingDayLabel
+      ? `下一交易日（${context.nextTradingDayLabel}）`
+      : '下一交易日'
+  }
+  return '今日交易日（基于上一收盘信号）'
+}
+
+export function deriveV2SessionExecutionReference(
+  bars,
+  prediction,
+  context = {},
+) {
+  if (!context.tradingToday || !context.isLive || !Array.isArray(bars)) {
+    return null
+  }
+  const today = String(context.bjNow || '').slice(0, 10)
+  const session = bars
+    .filter((bar) => String(bar?.tradeTime || '').slice(0, 10) === today)
+    .sort((a, b) => a.tradeTime.localeCompare(b.tradeTime))
+  if (session.length < 3) return null
+
+  const latest = session.at(-1)
+  const recent = session.slice(-20)
+  const closes = session.map((bar) => bar.close)
+  const volumes = session.map((bar) => bar.volume)
+  const volumeTotal = volumes.reduce((sum, value) => sum + value, 0)
+  const vwap = volumeTotal > 0
+    ? session.reduce((sum, bar) => sum + bar.close * bar.volume, 0)
+      / volumeTotal
+    : latest.close
+  const rangePct = recent.reduce(
+    (sum, bar) => sum + (bar.high - bar.low) / bar.close * 100,
+    0,
+  ) / recent.length
+  const momentumRef = closes.length >= 7 ? closes.at(-7) : closes[0]
+  const momentum30mPct = (latest.close / momentumRef - 1) * 100
+  const phase = String(context.phase || '')
+  const timeMatch = String(context.bjNow || '').match(/(\d{2}):(\d{2})/)
+  const minute = timeMatch
+    ? Number(timeMatch[1]) * 60 + Number(timeMatch[2])
+    : null
+  const remainingMinutes = /午间/.test(phase)
+    ? 120
+    : /早盘/.test(phase) && minute != null
+      ? Math.max(0, 690 - minute) + 120
+      : /午盘/.test(phase) && minute != null
+        ? Math.max(0, 900 - minute)
+        : 60
+  const remainingBars = Math.max(1, Math.ceil(remainingMinutes / 5))
+  const projectedPct = Math.max(
+    0.35,
+    Math.min(2.5, rangePct * Math.sqrt(Math.max(1, remainingBars) / 6)),
+  )
+  const direction = String(prediction?.forecast?.direction || '')
+  const modelTilt = direction === '看涨'
+    ? projectedPct * 0.18
+    : direction === '看跌' ? -projectedPct * 0.18 : 0
+  const momentumTilt = Math.max(
+    -projectedPct * 0.25,
+    Math.min(projectedPct * 0.25, momentum30mPct * 0.3),
+  )
+  const center = latest.close * (1 + (modelTilt + momentumTilt) / 100)
+  const support = Math.min(...recent.map((bar) => bar.low))
+  const resistance = Math.max(...recent.map((bar) => bar.high))
+  const rangeLow = Math.min(
+    latest.close,
+    vwap,
+    support,
+    center * (1 - projectedPct / 100),
+  )
+  const rangeHigh = Math.max(
+    latest.close,
+    vwap,
+    resistance,
+    center * (1 + projectedPct / 100),
+  )
+  const digits = latest.close < 10 ? 3 : 2
+  const roundPrice = (value) => +Number(value).toFixed(digits)
+
+  return {
+    kind: 'realtime-execution-reference',
+    modelProbability: false,
+    horizon: v2ExecutionHorizon(context),
+    asOf: latest.tradeTime,
+    anchorPrice: roundPrice(latest.close),
+    vwap: roundPrice(vwap),
+    momentum30mPct: rounded(momentum30mPct),
+    rangeLow: roundPrice(rangeLow),
+    rangeHigh: roundPrice(rangeHigh),
+    supportPrice: roundPrice(support),
+    resistancePrice: roundPrice(resistance),
+    modelDirection: direction || '未知',
+    note: '基于当日已发生的真实5分钟行情修正执行区间，不是新的模型概率，也不计入V2正确率',
+  }
+}
+
 export function buildV2Request(code, bars, requestId = '') {
   code = String(code || '').trim()
   if (!CODE_RE.test(code)) throw new Error('V2股票代码无效')

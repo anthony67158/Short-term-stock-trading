@@ -40,6 +40,7 @@ const paths = {
   sell: <><path d="M7 7h10v10" /><path d="M7 17 17 7" /></>,
   wallet: <><rect x="3" y="6" width="18" height="13" rx="2" /><path d="M3 10h18" /><circle cx="16.5" cy="14" r="1.3" /></>,
   chart: <><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" /></>,
+  activity: <><path d="M3 17h18" /><path d="M5 14l4-4 3 2 6-7" /><circle cx="5" cy="14" r="1" /><circle cx="9" cy="10" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="18" cy="5" r="1" /></>,
   candle: <><path d="M6 4v4m0 8v4M6 8h0M18 6v3m0 7v3" /><rect x="4" y="8" width="4" height="8" rx="1" /><rect x="16" y="9" width="4" height="7" rx="1" /></>,
   eye: <><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" /></>,
   info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h0" /></>,

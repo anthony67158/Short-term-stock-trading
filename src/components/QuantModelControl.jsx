@@ -115,7 +115,7 @@ export default function QuantModelControl() {
               <span className="qmc-radio" />
               <span className="qmc-copy">
                 <b>分钟 Transformer V2</b>
-                <small>真实 5 分钟序列，预测下一交易日止盈 / 止损 / 超时概率</small>
+                <small>日终模型预测下一个交易时段；盘中自动叠加今日剩余时段实时执行区间</small>
               </span>
               {selected === 'v2' && <StatusBadge control={control} />}
             </button>

@@ -1151,10 +1151,12 @@ export const planStore = {
   //   candCode: 该预警所绑定的自选股代码(区别于持仓计划联动的 planId)
   //   alertSyncedPrice(记在候选上): 上次自动同步过的买价 —— 相同价不重复写,用户删掉也不会被反复自动加回;
   //   AI 买价变化时(≠ alertSyncedPrice)才会重新同步/重新武装。
-  autoSyncCandAlert(code, name, buyPrice) {
+  autoSyncCandAlert(code, name, buyPrice, advice = null) {
     if (buyPrice == null || isNaN(buyPrice)) return
     if (state.settings && state.settings.aiAutoAlert === false) return // 全局关闭 AI 自动预警
-    const v = roundPx(buyPrice)
+    const judgeContext = buildJudgeAdviceContext(advice || {})
+    const triggerZone = judgeContext.addZone
+    const v = roundPx(triggerZone?.high ?? buyPrice)
     const p = state.plan.find((x) => x.code === code)
     if (!p) return
     if (p.alertMuted) return                                            // 用户删过买点预警 → 永久不再自动加回
@@ -1163,7 +1165,29 @@ export const planStore = {
     if (existing) {
       // 已有买点预警 → 跟随 AI 新买价刷新到价并重新武装
       state.alerts = (state.alerts || []).map((a) => a.candCode === code
-        ? { ...a, name: name || a.name, type: 'price', op: 'lte', value: Number(v), enabled: true, triggeredAt: null, triggeredMsg: '', phase: 'armed' }
+        ? {
+            ...a,
+            name: name || a.name,
+            type: 'price',
+            op: 'lte',
+            value: Number(v),
+            ...(
+              triggerZone
+                ? { triggerZone, judgeContext }
+                : {}
+            ),
+            ...(
+              triggerZone
+              && a.judgeContext?.planId === judgeContext.planId
+                ? {}
+                : {
+                    enabled: true,
+                    triggeredAt: null,
+                    triggeredMsg: '',
+                    phase: 'armed',
+                  }
+            ),
+          }
         : a)
     } else {
       // 新建买点到价预警(≤ 建议买入价)
@@ -1171,6 +1195,7 @@ export const planStore = {
         id: uid(), enabled: true, createdAt: Date.now(), triggeredAt: null, triggeredMsg: '',
         code, name, type: 'price', op: 'lte', value: Number(v), note: '买点', candCode: code,
         phase: 'armed',
+        ...(triggerZone ? { triggerZone, judgeContext } : {}),
       }, ...(state.alerts || [])]
     }
     state.plan = state.plan.map((x) => x.code === code ? { ...x, alertSyncedPrice: v } : x)
@@ -1213,22 +1238,43 @@ export const planStore = {
     const rebuilt = []
     const build = (kind, op, price, muted) => {
       if (muted) return
-      if (price == null || isNaN(price)) return
-      const v = roundPx(price)
+      const triggerZone = kind === 'add'
+        ? judgeContext.addZone
+        : judgeContext.reduceZone
+      const zoneTrigger = kind === 'add'
+        ? triggerZone?.high
+        : triggerZone?.low
+      const triggerPrice = zoneTrigger ?? price
+      if (triggerPrice == null || isNaN(triggerPrice)) return
+      const v = roundPx(triggerPrice)
       if (v == null || !(Number(v) > 0)) return
       const actionQty = kind === 'add'
         ? (/加仓|补仓|买回|接回/.test(opQty) ? opQty : '')
         : (/减仓|卖出|清仓/.test(opQty) ? opQty : '')
       const note = kind === 'add' ? '补仓点' : '减仓点'
       const prev = old.find((a) => a.actKind === kind)
-      if (prev && Number(prev.value) === Number(v)) {
-        rebuilt.push(applyT1ToAlert({ ...prev, opQty: actionQty, timing, judgeContext }, kind === 'reduce' ? t1 : null))
+      const samePlan = !!(
+        prev?.judgeContext?.planId
+        && judgeContext.planId
+        && prev.judgeContext.planId === judgeContext.planId
+      )
+      if (prev && (Number(prev.value) === Number(v) || samePlan)) {
+        rebuilt.push(applyT1ToAlert({
+          ...prev,
+          value: Number(v),
+          opQty: actionQty,
+          timing,
+          ...(triggerZone ? { triggerZone } : {}),
+          judgeContext,
+        }, kind === 'reduce' ? t1 : null))
         return
       }
       rebuilt.push(applyT1ToAlert({
         id: uid(), enabled: true, createdAt: Date.now(), triggeredAt: null, triggeredMsg: '',
         code, name, type: 'price', op, value: Number(v), note,
-        actCode: code, actKind: kind, opQty: actionQty, timing, judgeContext,
+        actCode: code, actKind: kind, opQty: actionQty, timing,
+        ...(triggerZone ? { triggerZone } : {}),
+        judgeContext,
         phase: 'armed',
       }, kind === 'reduce' ? t1 : null))
     }

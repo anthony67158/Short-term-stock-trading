@@ -72,6 +72,8 @@ export function AccountMenu() {
   if (!user) return null
   const syncLabel = syncStatus === 'saving'
     ? '正在保存到阿里云 OSS'
+    : syncStatus === 'conflict'
+      ? '检测到多设备交易冲突，已暂停覆盖'
     : syncStatus === 'error'
       ? 'OSS 同步失败，正在重试'
       : '数据已保存到阿里云 OSS'
@@ -99,9 +101,10 @@ export function AccountMenu() {
           <div className="acct-mask" onClick={() => setOpen(false)} />
           <div className="acct-menu">
             <div className="acct-menu-label" title={syncError || ''}>当前账号 · {syncLabel}</div>
-            {syncStatus === 'error' && (
+            {(syncStatus === 'error' || syncStatus === 'conflict') && (
               <div className="acct-item" onClick={() => authStore.retrySave()}>
-                <Icon name="refresh" size={13} />立即重试 OSS 同步
+                <Icon name="refresh" size={13} />
+                {syncStatus === 'conflict' ? '重新对齐并保存' : '立即重试 OSS 同步'}
               </div>
             )}
             <div className="acct-item" onClick={() => { llmConfigStore.open(); setOpen(false) }}>
