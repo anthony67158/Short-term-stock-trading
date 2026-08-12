@@ -5,6 +5,10 @@
 // 操作指导时间窗:按"此刻生成时间"决定指导面向哪段可交易时间(盘前→今天/盘中→今天收盘前/
 // 午间→今天下午/盘后·休市→下一交易日)。用于修正"复盘指导永远写成面向第二天"的低级错误。
 import { guidanceHorizon } from './_market_time.js';
+import {
+  QUANT_MODEL_V21,
+  V21_EXPERIMENTAL_RELIABILITY,
+} from '../shared/modelVersion.js';
 
 // 军师(深度个股研判)模式集合:做T/加减仓/买入/持仓/复盘/定价
 export const ADVISOR_MODES = new Set([
@@ -99,19 +103,32 @@ export function buildUserPrompt(mode, payload, ragText) {
   //   再下一道最强指令——用户会实时看到中文思考过程,思维链必须全程简体中文。
   const zhReason = '【语言要求·最高优先·先读这条】请务必用【简体中文】进行你的全部思考(思维链/reasoning)与输出，逐字都用中文推理，绝对不要用英文思考(个股代码/纯数字/专有名词缩写除外)。这一条优先级最高，任何英文思考都算不合格。\n\n';
   const ragBlock = ragText ? `\n\n【RAG检索资料：近5日走势+主营+联网新闻】\n${ragText}` : '';
-  const v21QuantNote = payload.quant?.runtimeModelVersion === 'v2.1-intraday' && payload.quant?.v21
-    ? `\n【★当前量化版本：V2.1盘中双头模型】信号时间=${payload.quant.asOf || '—'}，当前时段=${payload.quant.v21.session || '—'}，实际采用=${payload.quant.v21.activeHead === 'sessionClose' ? '截至今日收盘' : '未来30分钟'}预测头。
+  const selectedQuantVersion = payload.quant?.selectedModelVersion
+    || payload.quant?.modelVersion;
+  const v21Reliability = payload.quant?.reliability
+    || V21_EXPERIMENTAL_RELIABILITY;
+  const v21QuantNote = selectedQuantVersion === QUANT_MODEL_V21
+    && payload.quant?.runtimeModelVersion === 'v2.1-intraday'
+    && payload.quant?.v21
+    ? `\n【★当前量化版本：V2.1盘中双头模型】这是用户手动选择的实验模型。信号时间=${payload.quant.asOf || '—'}，当前时段=${payload.quant.v21.session || '—'}，实际采用=${payload.quant.v21.activeHead === 'sessionClose' ? '截至今日收盘' : '未来30分钟'}预测头。
 【未来30分钟】止盈/止损/超时概率=${Math.round((payload.quant.v21.heads?.next30m?.probabilities?.takeProfit || 0) * 100)}%/${Math.round((payload.quant.v21.heads?.next30m?.probabilities?.stopLoss || 0) * 100)}%/${Math.round((payload.quant.v21.heads?.next30m?.probabilities?.timeout || 0) * 100)}%。
 【截至今日收盘】止盈/止损/超时概率=${Math.round((payload.quant.v21.heads?.sessionClose?.probabilities?.takeProfit || 0) * 100)}%/${Math.round((payload.quant.v21.heads?.sessionClose?.probabilities?.stopLoss || 0) * 100)}%/${Math.round((payload.quant.v21.heads?.sessionClose?.probabilities?.timeout || 0) * 100)}%。
+【可靠性边界】离线平衡准确率：未来30分钟=${v21Reliability.balancedAccuracyPct?.next30m ?? 53.92}%，截至收盘=${v21Reliability.balancedAccuracyPct?.sessionClose ?? 54.58}%，未达到${v21Reliability.thresholdPct ?? 58}%生产门槛。它只能作为实验参考，不能单独推动买入/加仓/清仓；没有资金、消息、趋势和确定性分时信号共振时必须观望或维持原计划，confidence最多为“中”。
 这是基于截至 ${payload.quant.asOf || '当前最近完整5分钟K线'} 的真实盘中序列预测；两个头是独立概率，不得互相平均，不得与上一收盘日V2概率混用。军师必须在 quantNote 中分别引用两个窗口，并按当前采用头决定短线方向；价格锚点只用于执行，不是保证到达的目标价。`
     : '';
+  const v21FallbackNote = selectedQuantVersion === QUANT_MODEL_V21
+    && payload.quant?.fallback
+    ? `\n【★V2.1回退事实】用户选择了V2.1，但实际已回退V2.0；原因=${payload.quant.fallback.reason || 'V2.1当前不可用'}。本次只能引用V2.0日终概率，禁止把它描述成盘中双头结果，结论和卡片都必须明确标注回退。`
+    : '';
   const v2QuantNote = payload.quant?.modelVersion === 'v2' && payload.quant?.v2
-    ? `\n【★当前量化版本：分钟 Transformer V2】这是基于信号日15:00完整5分钟序列、预测信号日后【下一个交易时段】三重障碍结果的分类模型；相对当前时刻的展示窗口是【${payload.quant.forecast?.horizon || '下一交易日'}】。止盈/止损/超时概率分别为${Math.round((payload.quant.v2.probabilities?.takeProfit || 0) * 100)}%/${Math.round((payload.quant.v2.probabilities?.stopLoss || 0) * 100)}%/${Math.round((payload.quant.v2.probabilities?.timeout || 0) * 100)}%，概率优势${payload.quant.v2.outlook?.probabilityEdgePct ?? '—'}个百分点、有利/不利赔率${payload.quant.v2.outlook?.favorableToAdverseOdds ?? '—'}、方向分${payload.quant.v2.outlook?.directionScore ?? '—'}、障碍期望收益${payload.quant.v2.outlook?.expectedBarrierReturnPct ?? '—'}%、确定度${payload.quant.v2.outlook?.convictionScore ?? '—'}、不确定性${payload.quant.v2.outlook?.uncertaintyLevel || '—'}、信号强度${payload.quant.v2.outlook?.signalStrength || '—'}。
+    ? `\n【★当前量化版本：分钟 Transformer V2.0】这是基于信号日15:00完整5分钟序列、预测信号日后【下一个交易时段】三重障碍结果的分类模型；相对当前时刻的展示窗口是【${payload.quant.forecast?.horizon || '下一交易日'}】。止盈/止损/超时概率分别为${Math.round((payload.quant.v2.probabilities?.takeProfit || 0) * 100)}%/${Math.round((payload.quant.v2.probabilities?.stopLoss || 0) * 100)}%/${Math.round((payload.quant.v2.probabilities?.timeout || 0) * 100)}%，概率优势${payload.quant.v2.outlook?.probabilityEdgePct ?? '—'}个百分点、有利/不利赔率${payload.quant.v2.outlook?.favorableToAdverseOdds ?? '—'}、方向分${payload.quant.v2.outlook?.directionScore ?? '—'}、障碍期望收益${payload.quant.v2.outlook?.expectedBarrierReturnPct ?? '—'}%、确定度${payload.quant.v2.outlook?.convictionScore ?? '—'}、不确定性${payload.quant.v2.outlook?.uncertaintyLevel || '—'}、信号强度${payload.quant.v2.outlook?.signalStrength || '—'}。
 【5分钟行情上下文】当日涨跌${payload.quant.v2.marketContext?.sessionReturnPct ?? '—'}%、近30分钟动量${payload.quant.v2.marketContext?.momentum30mPct ?? '—'}%、实现波动${payload.quant.v2.marketContext?.realizedVolPct ?? '—'}%、平均振幅${payload.quant.v2.marketContext?.averageRangePct ?? '—'}%、量能比${payload.quant.v2.marketContext?.volumeRatio20 ?? '—'}、收盘位置${payload.quant.v2.marketContext?.closeLocationPct ?? '—'}%、趋势对齐${payload.quant.v2.marketContext?.trendAlignment || '—'}。
 【价格参考锚点·不是模型承诺】信号收盘锚${payload.quant.v2.priceReferences?.anchorPrice ?? '—'}、5分钟支撑${payload.quant.v2.priceReferences?.supportPrice ?? '—'}、压力${payload.quant.v2.priceReferences?.resistancePrice ?? '—'}、参考买入区${payload.quant.v2.priceReferences?.referenceBuyZoneLow ?? '—'}~${payload.quant.v2.priceReferences?.referenceBuyZoneHigh ?? '—'}、障碍参考止盈${payload.quant.v2.priceReferences?.indicativeTakeProfitPrice ?? '—'}、参考止损${payload.quant.v2.priceReferences?.indicativeStopLossPrice ?? '—'}。这些绝对价格基于信号日收盘近似，${payload.quant.v2.executionReference ? '盘中实际执行必须让位于下面的实时执行层' : '实际入场必须按下一个交易时段首根5分钟开盘与实时支撑压力重新修正'}。
 ${payload.quant.v2.executionReference ? `【当前时段实时执行层·不是新模型概率】窗口=${payload.quant.v2.executionReference.horizon}，锚点${payload.quant.v2.executionReference.anchorPrice}、VWAP${payload.quant.v2.executionReference.vwap}、动态区间${payload.quant.v2.executionReference.rangeLow}~${payload.quant.v2.executionReference.rangeHigh}、30分钟动量${payload.quant.v2.executionReference.momentum30mPct}%。该层只用于此刻执行和动态价带，不得冒充V2概率，也不计入V2正确率。` : ''}
 军师必须在 quantNote 里明确引用上述概率、方向分、至少两个5分钟行情维度和价格参考；不得把止盈概率误写成传统5日上涨概率，也不得把参考锚点写成模型保证到达的目标价。`
     : '';
+  const quantVersionNote = v21QuantNote
+    || `${v21FallbackNote}${v2QuantNote}`;
   const advisorTrack = payload.advisorTrack;
   const actionScores = Array.isArray(advisorTrack?.actionScores)
     ? advisorTrack.actionScores
@@ -168,7 +185,7 @@ ${payload.todayQuote.isLimitUp ? '⚠️该股【今日已涨停】：说明今�
 · 【闸一·把握闸(胜率)】校准后把握读数要够高:优先看上面【高把握买点信号】——已触发(✅)为最强绿灯;若未触发或无该信号,则要求 共振分≥3 且 军师本类历史胜率≥50%(有样本时)作为替代把握证据。校准可信度低/信号未触发/共振不足→把握闸不过。
 · 【闸二·赔率闸(盈亏比)】用你定的价位算清盈亏比=(目标价−买入价)/(买入价−止损价),必须【≥1.8:1】才算过;<1.8:1 一律不给主动做多(哪怕方向看对,赔率不划算也不出手)。
 判定口径:①两闸全过→可给"立即买入/加仓"等主动评级,且 confidence 可给到与把握相称的档;②仅过一闸→最多给"小仓试错/回调再买",confidence 压到"中"及以下;③两闸都不过→"观望/持有",老实说"本次把握或赔率不够,不值得出手"。⚠️"高把握、少出手"的价值就在于:错过一个平庸机会不可惜,出手一次低把握的错单才致命。
-【★归因回写·必填 quantNote】无论是否出手,都要在 quantNote(没有该字段则并入 reason 末尾)用一句话交代双闸门结论,格式示例:"把握:校准可信度${payload.quant && payload.quant.highConfSignal ? (payload.quant.highConfSignal.credibility ?? 'X') : 'X'}%(闸一${payload.quant && payload.quant.highConfSignal && payload.quant.highConfSignal.fired ? '过' : '未过'});赔率:目标/止损=Y:1(闸二过/未过);结论:出手/降级观望——因为__"。让用户一眼看懂你为什么开火或为什么按兵不动。` : ''}${v21QuantNote || v2QuantNote}
+【★归因回写·必填 quantNote】无论是否出手,都要在 quantNote(没有该字段则并入 reason 末尾)用一句话交代双闸门结论,格式示例:"把握:校准可信度${payload.quant && payload.quant.highConfSignal ? (payload.quant.highConfSignal.credibility ?? 'X') : 'X'}%(闸一${payload.quant && payload.quant.highConfSignal && payload.quant.highConfSignal.fired ? '过' : '未过'});赔率:目标/止损=Y:1(闸二过/未过);结论:出手/降级观望——因为__"。让用户一眼看懂你为什么开火或为什么按兵不动。` : ''}${quantVersionNote}
 【★资金金额·算术铁律(绝对不能算错,这是最低级也最致命的错误)】A股1手=100股。任何"约用/约需/回笼/买入/卖出金额"都【必须严格等于 手数×100×价格】,一分钱都不能凭感觉估。
 · 正确示例:15手 @ 50.5元 = 15×100×50.5 = 75750元(七万五千七百五十元),【绝不是7575元】。10手 @ 8.3元 = 10×100×8.3 = 8300元。3手 @ 42元 = 3×100×42 = 12600元。
 · 输出前【逐笔重算并自检】:把"opAmount/planAmount/opAmount"以及 actionPlan/nextAction/reason 文案里出现的每一个金额,都用"手数×100×价格"重新乘一遍,核对量级对不对(常见错误是漏乘100、或少乘/多乘10倍)。金额与"手数×价格"对不上就是错的,必须改对再输出。
@@ -281,7 +298,7 @@ ${payload.holdQty != null ? `4) 手数纪律:任何减仓/清仓/卖出手数 �
 数据：${data}
 
 【候选池 candidates 字段说明】每只含：name/code、price现价、marketScore全市场分、combinedScore量化复排分、pct/turnover/volRatio/mainInflowYi、tags，以及 quant{ score,upProb,expRet,targetLow~targetHigh,highConfFired,credibility,buyPrice,takeProfit,stopLoss }。
-【本次量化版本】${payload.quantModelVersion === 'v2' ? '分钟 Transformer V2' : '当前生产模型'}。候选评分只采信该版本的结果；选择V2时不得混用默认模型分数，选择默认模型时也不得引用V2分数。
+【本次量化版本】${payload.quantModelVersion === 'v2.1' ? '分钟 Transformer V2.1（盘中实验）' : payload.quantModelVersion === 'v2' ? '分钟 Transformer V2.0' : '当前生产模型'}。候选评分只采信该版本的结果；V2.0、V2.1与默认模型分数严禁混用。V2.1未达到58%生产门槛，只能作为实验排序参考，不得因其单一高概率直接给“可执行”。
 ${payload.quantMissing ? '⚠️【本次量化服务不可用】不得给“立即买入”。但仍须按市场分、资金、量能和板块强度选出3只条件候选，actionability只能是“等待触发”或“观察”，禁止返回空名单。quantScore 填 null，禁止编造。' : ''}
 ${payload.session === 'next_open' ? '【当前为休市/盘前】结论面向下一交易日开盘；actionability原则上写“等待触发”，买点必须是开盘后可验证的回踩企稳或放量突破条件。' : '【当前为交易时段】可根据现价与分时位置判断“可执行”或“等待触发”。'}
 

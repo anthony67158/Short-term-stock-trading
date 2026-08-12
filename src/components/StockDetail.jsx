@@ -684,6 +684,9 @@ export default function StockDetail({ stock, onClose }) {
                   const adv = quantState.advice
                   const dec = q.decision || {}
                   const fc = q.forecast
+                  const isV21 = q.modelVersion === 'v2.1' && !!q.v21
+                  const isV2 = q.modelVersion === 'v2' && !!q.v2
+                  const isMinuteModel = isV21 || isV2
                   const fallbackVerdict = {
                     tone: dec.tone || 'muted',
                     title: dec.title || '—',
@@ -763,7 +766,7 @@ export default function StockDetail({ stock, onClose }) {
                         <div className="fc-fold-wrap">
                           <button className="fc-fold" onClick={() => setShowForecast((v) => !v)}>
                             <span className="fc-fold-summary">
-                              {fc && <span className={'fc-dir-inline ' + (fc.direction === '看涨' ? 'red' : fc.direction === '看跌' ? 'green' : 'muted')}>量化{q.modelVersion === 'v2' ? (fc.horizon || '下一交易日') : `${fc.days || 5}日`}{fc.direction}·概率{fc.upProb}%</span>}
+                              {fc && <span className={'fc-dir-inline ' + (fc.direction === '看涨' ? 'red' : fc.direction === '看跌' ? 'green' : 'muted')}>量化{isMinuteModel ? (fc.horizon || '下一交易日') : `${fc.days || 5}日`}{fc.direction}·概率{fc.upProb}%</span>}
                               {q.score != null && <span className={'quant-chip sm ' + (q.score >= 62 ? 'red' : q.score <= 38 ? 'green' : 'gold')}>量化 {q.score}·{q.bias}</span>}
                             </span>
                             <Icon name={showForecast ? 'chevronDown' : 'chevronRight'} size={13} />
@@ -774,11 +777,11 @@ export default function StockDetail({ stock, onClose }) {
                                 <div className="forecast-box">
                                   <div className="fc-row1">
                                     <span className={'fc-dir ' + (fc.direction === '看涨' ? 'red' : fc.direction === '看跌' ? 'green' : 'muted')}>
-                                      {q.modelVersion === 'v2' ? (fc.horizon || '下一交易日') : `未来${fc.days || 5}日`} {fc.direction}
+                                      {isMinuteModel ? (fc.horizon || '下一交易日') : `未来${fc.days || 5}日`} {fc.direction}
                                     </span>
                                     <span className="fc-conf">预测信心 {fc.confidence}</span>
                                   </div>
-                                  {q.modelVersion === 'v2' && q.v21 ? (
+                                  {isV21 ? (
                                     <div className="v21-heads">
                                       <div className="v21-asof">
                                         <b>V2.1 盘中双头</b>
@@ -820,7 +823,7 @@ export default function StockDetail({ stock, onClose }) {
                                         </div>
                                       )}
                                     </div>
-                                  ) : q.modelVersion === 'v2' && q.v2 ? (
+                                  ) : isV2 ? (
                                     <>
                                       <div className="fc-grid v2">
                                         <div className="fc-cell"><span className="fc-k">止盈概率</span><span className="fc-v red">{fc.upProb}%</span></div>
@@ -878,7 +881,7 @@ export default function StockDetail({ stock, onClose }) {
                                   )}
                                 </div>
                               )}
-                              {q.highConfSignal && q.highConfSignal.fired && q.modelVersion !== 'v2' && (() => {
+                              {q.highConfSignal && q.highConfSignal.fired && !isMinuteModel && (() => {
                                 const hcs = q.highConfSignal;
                                 // 即时赔率 = (止盈-买入)/(买入-止损)；用现价替代买入价算“照现价追”的真实赔率，更贴用户实际处境
                                 const curPx = (overview && overview.price != null) ? overview.price : (q.price != null ? q.price : hcs.buyPrice);

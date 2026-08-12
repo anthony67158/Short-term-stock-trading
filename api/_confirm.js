@@ -31,6 +31,7 @@ import {
   buildJudgeAdviceContext,
 } from '../shared/judgeAdviceContext.js';
 import { buildJudgeKnowledgeActionAssessment } from '../shared/knowledgeAction.js';
+import { quantJudgeDiscipline } from '../shared/quantAdviceContext.js';
 
 // ---- 交易语义分类:把一条价位预警归成 buy / sell / stop 三类 ----
 // buy : 买点 / 补仓(回踩到位后想低吸)——确认「止跌企稳」才买。
@@ -168,6 +169,7 @@ async function llmJudge({ a, name, advice, prim, tech, det }) {
   const knowledgeActionBaseline = buildJudgeKnowledgeActionAssessment(
     adv.knowledgeActionPlan || adv,
   );
+  const modelDiscipline = quantJudgeDiscipline(adv.quantContext);
   const sys = '你是严谨的A股短线交易确认闸门。价格已触及关键价位,但「到价≠立刻动手」。'
     + '你的唯一任务:结合盘中走势与建议条件,判断【此刻是否真正到了动手时机】。'
     + '军师建议是本次交易计划的上层约束：必须理解其方向、手数、仓位、盈亏比、止损目标、技术资金消息依据与失效条件；'
@@ -175,6 +177,7 @@ async function llmJudge({ a, name, advice, prim, tech, det }) {
     + '必须围绕主计划版本、动态价格带、失效条件和触价后的分时结构判断。加仓尤其禁止下跌摊平，必须是军师仍支持加仓且触价后出现止跌确认。'
     + '买入必须保守，客观止跌信号不足一律wait；止盈要重视触价后的冲高回落，避免利润明显回撤；'
     + '止损要重视持续破位，不能因措辞犹豫而拖延。invalid必须有明确客观失效证据，不能只凭主观感觉。'
+    + (modelDiscipline ? `量化模型纪律：${modelDiscipline}` : '')
     + '只输出 JSON,不要多余文字。';
   const payload = {
     股票: `${name || a.code}(${a.code})`,
@@ -209,6 +212,7 @@ async function llmJudge({ a, name, advice, prim, tech, det }) {
     建议给出的确认条件: adv.exitTiming || adv.actionPlan || '(未提供,按通用纪律判断)',
     建议给出的失效条件: adv.invalidation || '(未提供)',
     确定性信号: { 结论: det.decision, 评分: det.score, 命中: det.hits },
+    量化模型纪律: modelDiscipline || null,
   };
   const messages = [
     { role: 'system', content: sys },
@@ -239,7 +243,10 @@ async function llmJudge({ a, name, advice, prim, tech, det }) {
       const decision = ['confirm', 'wait', 'invalid'].includes(d) ? d : 'wait';
       return {
         decision,
-        confidence: normalizeConfidence(value.confidence),
+        confidence: Math.min(
+          normalizeConfidence(value.confidence),
+          adv.quantContext?.experimental ? 85 : 100,
+        ),
         reason: String(value.reason || '').slice(0, 200),
         knowledgeAction: buildJudgeKnowledgeActionAssessment(
           adv.knowledgeActionPlan || adv,

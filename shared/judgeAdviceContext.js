@@ -1,4 +1,5 @@
 import { buildKnowledgeActionPlan } from './knowledgeAction.js'
+import { buildQuantAdviceContext } from './quantAdviceContext.js'
 
 const text = (value, max = 800) => String(value || '').trim().slice(0, max)
 const finite = (value) => {
@@ -44,9 +45,14 @@ export function buildJudgeAdviceContext(advice = {}) {
           : undefined,
       }
     : {}
+  const quantContext = buildQuantAdviceContext(
+    advice.quantContext,
+    advice.quantContext?.selectedModelVersion,
+  )
   return {
     ...planContext,
     ...knowledgeActionContext,
+    ...(quantContext ? { quantContext } : {}),
     action: text(advice.action || advice.stance, 40),
     tier: text(advice.tier, 30),
     title: text(advice.title || advice.headline, 200),

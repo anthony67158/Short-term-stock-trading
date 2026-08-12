@@ -91,6 +91,30 @@ function coreEvidence(advice) {
   ], 3)
 }
 
+function modelSummary(advice) {
+  const context = advice.quantContext
+  if (!context || typeof context !== 'object') return null
+  const reliability = context.reliability || {}
+  const next30m = displayNumber(
+    reliability.balancedAccuracyPct?.next30m,
+  )
+  const sessionClose = displayNumber(
+    reliability.balancedAccuracyPct?.sessionClose,
+  )
+  const threshold = displayNumber(reliability.thresholdPct)
+  const reliabilityText = next30m || sessionClose || threshold
+    ? `30分钟 ${next30m || '—'}% · 收盘 ${sessionClose || '—'}% · 门槛 ${threshold || '—'}%`
+    : ''
+  return {
+    label: clean(context.modelLabel, 120),
+    horizon: clean(context.horizon, 120),
+    asOf: clean(context.asOf, 40),
+    experimental: context.experimental === true,
+    fallback: context.fallback || null,
+    reliabilityText,
+  }
+}
+
 export function buildAdvicePresentation(advice = {}) {
   const contract = advice.knowledgeActionPlan || {}
   return {
@@ -139,5 +163,6 @@ export function buildAdvicePresentation(advice = {}) {
       validationWindow: first(contract.validationWindow),
     },
     evidence: coreEvidence(advice),
+    model: modelSummary(advice),
   }
 }

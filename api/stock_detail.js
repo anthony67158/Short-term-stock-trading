@@ -2,7 +2,7 @@ import { sendJson, sendError, num } from './_lib.js';
 import { computeTechnicals, fetchSelectedQuantPredict } from './_ta.js';
 import {
   normalizeQuantModelVersion,
-  QUANT_MODEL_V2,
+  quantModelLabel,
 } from '../shared/modelVersion.js';
 import { canUseQuantModel } from './_quant_access.js';
 
@@ -136,7 +136,7 @@ export default async function handler(req, res) {
     ) {
       return sendJson(res, {
         ok: false,
-        error: 'V2模型需要已登录且当前账号已选择V2',
+        error: `${quantModelLabel(quantModelVersion)}需要已登录且当前账号已选择该版本`,
       }, { cache: 0 });
     }
     const secid = toSecid(code);
@@ -262,12 +262,13 @@ export default async function handler(req, res) {
     }
     if (
       wantQuant
-      && quantModelVersion === QUANT_MODEL_V2
+      && quantModelVersion !== 'default'
       && !quant
     ) {
       return sendJson(res, {
         ok: false,
-        error: quantError || 'V2模型服务未运行或预测不可用',
+        error: quantError
+          || `${quantModelLabel(quantModelVersion)}服务未运行或预测不可用`,
         quantModelVersion,
       }, { cache: 0 })
     }

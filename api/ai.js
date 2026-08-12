@@ -2,7 +2,11 @@
 // POST body: { mode: 'market'|'sector'|'stock'|'scan', payload: {...} }
 import { buildCorpus, retrieve } from './_rag.js';
 import { techSummaryForAI, fetchSelectedQuantPredict, backtestSignal } from './_ta.js';
-import { normalizeQuantModelVersion } from '../shared/modelVersion.js';
+import {
+  normalizeQuantModelVersion,
+  quantModelLabel,
+} from '../shared/modelVersion.js';
+import { buildQuantAdviceContext } from '../shared/quantAdviceContext.js';
 import { marketTimePromptBlock, marketTimeContext } from './_market_time.js';
 import { getLatestDailySummary } from './_daily_summary.js';
 import { fetchNews, fetchClsTelegraph, fetchSinaFlash } from './_market_data.js';
@@ -505,7 +509,7 @@ export default async function handler(req, res) {
     if (!(await canUseQuantModel(req, quantModelVersion))) {
       return finish({
         ok: false,
-        error: 'V2模型需要已登录且当前账号已选择V2',
+        error: `${quantModelLabel(quantModelVersion)}需要已登录且当前账号已选择该版本`,
       });
     }
 
@@ -669,10 +673,10 @@ export default async function handler(req, res) {
             ).catch(() => null)
             : Promise.resolve(null),
         ]);
-        if (quantModelVersion === 'v2' && !quant) {
+        if (quantModelVersion !== 'default' && !quant) {
           return finish({
             ok: false,
-            error: 'V2模型服务未运行或预测不可用，请先开启服务后重试',
+            error: `${quantModelLabel(quantModelVersion)}服务未运行或预测不可用，请先开启服务后重试`,
             quantModelVersion,
           });
         }
@@ -792,8 +796,15 @@ export default async function handler(req, res) {
             hitProb: quant.hitProb,     // LGB达标概率(0~1,原始分辨力,未做isotonic校准)
             reads: quant.reads, asOf: quant.asOf,
             modelVersion: quant.modelVersion || 'default',
+            selectedModelVersion: quant.selectedModelVersion
+              || quantModelVersion,
+            runtimeModelVersion: quant.runtimeModelVersion || null,
             modelLabel: quant.modelLabel || '当前生产模型',
             v2: quant.v2 || null,
+            v21: quant.v21 || null,
+            fallback: quant.fallback || null,
+            reliability: quant.reliability || null,
+            experimental: quant.experimental === true,
           };
           // ★高把握买点信号头(isotonic校准 + gate≥85%闸门):只有 fired=true 才是"校准后高可信"信号。
           //   连同买入/止盈/止损价一并透传给军师,支撑其"把握闸+赔率闸"双闸门判断(P0"少出手"纪律)。
@@ -1469,6 +1480,10 @@ export default async function handler(req, res) {
       && typeof result === 'object'
       && !result.raw
     ) {
+      result.quantContext = buildQuantAdviceContext(
+        payload.quant,
+        quantModelVersion,
+      );
       result.knowledgeActionPlan = buildKnowledgeActionPlan(result, { mode });
       result.knowledgeActionScore = scoreKnowledgeActionPlan(
         result.knowledgeActionPlan,

@@ -51,6 +51,7 @@ test('军师展示契约固定输出结论执行价位触发和三条核心依�
     view.evidence.map((item) => item.label),
     ['量化', '资金', '趋势'],
   )
+  assert.equal(view.model, null)
 })
 
 test('军师展示契约去除重复依据并兼容持仓建议旧字段', () => {
@@ -78,4 +79,37 @@ test('军师展示契约去除重复依据并兼容持仓建议旧字段', () =>
     view.evidence.map((item) => item.label),
     ['量化', '资金'],
   )
+})
+
+test('军师默认展示所选模型、实际窗口与V2.1实验风险', () => {
+  const view = buildAdvicePresentation({
+    action: '观望',
+    title: '等待盘中信号确认',
+    quantContext: {
+      selectedModelVersion: 'v2.1',
+      effectiveModelVersion: 'v2.1',
+      runtimeModelVersion: 'v2.1-intraday',
+      modelLabel: '分钟 Transformer V2.1（盘中实验）',
+      horizon: '未来30分钟',
+      asOf: '2026-08-12 10:30:00',
+      experimental: true,
+      reliability: {
+        productionGatePassed: false,
+        thresholdPct: 58,
+        balancedAccuracyPct: {
+          next30m: 53.92,
+          sessionClose: 54.58,
+        },
+      },
+    },
+  })
+
+  assert.deepEqual(view.model, {
+    label: '分钟 Transformer V2.1（盘中实验）',
+    horizon: '未来30分钟',
+    asOf: '2026-08-12 10:30:00',
+    experimental: true,
+    fallback: null,
+    reliabilityText: '30分钟 53.92% · 收盘 54.58% · 门槛 58%',
+  })
 })

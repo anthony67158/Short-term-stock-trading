@@ -68,6 +68,34 @@ export default function AdvicePresentation({ advice, knowledgeActionReview }) {
 
       <Continuity continuity={advice.continuity} />
 
+      {view.model && (
+        <section
+          className={
+            'advice-model-context'
+            + (view.model.experimental ? ' experimental' : '')
+            + (view.model.fallback ? ' fallback' : '')
+          }
+          aria-label="本次量化模型"
+        >
+          <div className="amc-head">
+            <span><Icon name="activity" size={13} /> {view.model.label}</span>
+            {view.model.experimental && <b>实验</b>}
+          </div>
+          <div className="amc-meta">
+            {view.model.horizon && <span>窗口 {view.model.horizon}</span>}
+            {view.model.asOf && <span>信号 {view.model.asOf}</span>}
+          </div>
+          {view.model.reliabilityText && (
+            <div className="amc-reliability">{view.model.reliabilityText}</div>
+          )}
+          {view.model.fallback && (
+            <div className="amc-fallback">
+              已回退 V2.0：{view.model.fallback.reason}
+            </div>
+          )}
+        </section>
+      )}
+
       <section className="advice-execution" aria-label="现在怎么做">
         <div className="advice-section-title">
           <Icon name="target" size={13} /> 现在怎么做

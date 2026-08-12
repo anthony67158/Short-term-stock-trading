@@ -151,7 +151,7 @@ export default function QuantModelControl() {
 
         <div className="qmc-body">
           <div className="qmc-note">
-            生产环境默认沿用当前模型。切到 V2 后，只有服务运行中才会调用分钟 Transformer；两种模型不会同时给交易结论。
+            默认沿用当前生产模型。V2.0 与 V2.1 由你手动选择、不会混用；V2.1 未达生产门槛，界面和军师会持续标记为实验模型。
           </div>
 
           <div className="qmc-options" role="radiogroup" aria-label="模型版本">
@@ -178,20 +178,37 @@ export default function QuantModelControl() {
             >
               <span className="qmc-radio" />
               <span className="qmc-copy">
-                <b>分钟 Transformer V2</b>
-                <small>日终模型预测下一个交易时段；盘中自动叠加今日剩余时段实时执行区间</small>
+                <b>分钟 Transformer V2.0</b>
+                <small>稳定日终模型，始终基于15:00完整分钟序列预测下一交易时段</small>
               </span>
               {selected === 'v2' && <StatusBadge control={control} />}
             </button>
+            <button
+              role="radio"
+              aria-checked={selected === 'v2.1'}
+              className={
+                'qmc-option experimental'
+                + (selected === 'v2.1' ? ' selected' : '')
+              }
+              disabled={loading}
+              onClick={() => quantModelStore.select('v2.1')}
+            >
+              <span className="qmc-radio" />
+              <span className="qmc-copy">
+                <b>分钟 Transformer V2.1 <em>实验</em></b>
+                <small>盘中双头：未来30分钟 / 截至收盘；离线平衡准确率53.92% / 54.58%，未达58%门槛</small>
+              </span>
+              {selected === 'v2.1' && <StatusBadge control={control} />}
+            </button>
           </div>
 
-          {selected === 'v2' && (
+          {selected !== 'default' && (
             <section className="qmc-service">
               <div className="qmc-service-copy">
-                <b>V2 模型在线服务</b>
+                <b>V2.0 / V2.1 共用在线服务</b>
                 <span>
                   {control?.canControlV2
-                    ? '按需启停；停止后不产生 CPU 算力费用，V2 调用会明确提示不可用。'
+                    ? '按需启停；服务同时保留两个检查点，实际调用严格服从上方手动选择。'
                     : '当前账号只能选择模型，在线服务启停由授权账号管理。'}
                 </span>
               </div>

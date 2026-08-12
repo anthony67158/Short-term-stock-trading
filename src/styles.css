@@ -962,7 +962,7 @@ body {
 .qmc-modal .modal-close { border: 0; background: transparent; color: var(--muted); cursor: pointer; }
 .qmc-body { display: flex; flex-direction: column; gap: 12px; padding: 18px; overflow-y: auto; min-height: 0; }
 .qmc-note { padding: 11px 13px; border-radius: 9px; background: var(--surface-quiet); border: 1px solid var(--border-soft); color: var(--text2); font-size: 12px; line-height: 1.6; }
-.qmc-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; gap: 12px; }
+.qmc-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; gap: 10px; }
 .qmc-option { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: start; gap: 10px; min-height: 104px; height: 100%; padding: 14px; text-align: left; border-radius: 10px; border: 1px solid var(--border-soft); background: var(--panel2); color: var(--text); cursor: pointer; }
 .qmc-option:hover:not(:disabled) { border-color: var(--border); }
 .qmc-option.selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent); background: color-mix(in srgb, var(--accent) 7%, var(--panel2)); }
@@ -971,7 +971,10 @@ body {
 .qmc-option.selected .qmc-radio { border: 4px solid var(--accent); }
 .qmc-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 5px; }
 .qmc-copy b { font-size: 13px; line-height: 1.35; }
+.qmc-copy b em { margin-left: 4px; padding: 1px 5px; border-radius: 5px; background: rgba(227,179,65,.14); color: var(--gold); font-size: 9.5px; font-style: normal; vertical-align: 1px; }
 .qmc-copy small { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.qmc-option.experimental { border-color: rgba(227,179,65,.28); }
+.qmc-option.experimental.selected { border-color: var(--gold); box-shadow: inset 0 0 0 1px rgba(227,179,65,.28); background: rgba(227,179,65,.06); }
 .qmc-status { align-self: start; flex: none; padding: 3px 7px; border-radius: 6px; font-size: 10px; line-height: 1.3; font-style: normal; white-space: nowrap; }
 .qmc-status.ready { color: var(--green); background: rgba(31,157,67,.12); }
 .qmc-status.off { color: var(--red); background: rgba(224,67,47,.12); }
@@ -2373,6 +2376,16 @@ button.acct-item { width: 100%; border: 0; background: transparent; font: inheri
 .advice-presentation { display: flex; flex-direction: column; gap: 10px; }
 .advice-presentation .decide-verdict, .advice-presentation .advice-continuity { margin-bottom: 0; }
 .advice-confidence { margin-left: auto; color: var(--muted); font-size: 10.5px; font-weight: 650; white-space: nowrap; }
+.advice-model-context { padding: 9px 11px; border: 1px solid var(--border-soft); border-radius: 9px; background: var(--panel2); }
+.advice-model-context.experimental { border-color: rgba(227,179,65,.36); background: rgba(227,179,65,.06); }
+.advice-model-context.fallback { border-color: rgba(91,141,239,.36); background: rgba(91,141,239,.06); }
+.amc-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--text); font-size: 11.5px; font-weight: 750; }
+.amc-head > span { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+.amc-head .icon { color: var(--accent); flex: none; }
+.amc-head b { flex: none; padding: 2px 7px; border-radius: 5px; color: var(--gold); background: rgba(227,179,65,.14); font-size: 10px; }
+.amc-meta { display: flex; flex-wrap: wrap; gap: 5px 10px; margin-top: 5px; color: var(--muted); font-size: 10.5px; }
+.amc-reliability { margin-top: 5px; color: var(--gold); font-size: 10.5px; line-height: 1.5; }
+.amc-fallback { margin-top: 5px; color: var(--accent2); font-size: 10.5px; line-height: 1.5; }
 .advice-section-title { display: flex; align-items: center; gap: 5px; margin-bottom: 7px; color: var(--text); font-size: 11.5px; font-weight: 750; }
 .advice-section-title .icon { color: var(--accent); }
 .advice-execution { padding: 11px 12px; border: 1px solid rgba(124,107,245,.24); border-radius: 9px; background: rgba(124,107,245,.07); }
