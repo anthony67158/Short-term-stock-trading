@@ -15,7 +15,13 @@ import { ensureConfig, currentConfig, getModel, getReasoning } from './_llm_conf
 import { endpointCountForRole, endpointsFrom } from './_llm_pool.js';
 import { applyCors, preflight } from './_lib.js';
 import { zhReasonPiece } from './_zh_reason.js';
-import { SYSTEM_PROMPT, ADVISOR_SYSTEM, buildUserPrompt, isAdvisorMode, maxTokensForMode } from './_ai_prompts.js';
+import {
+  SYSTEM_PROMPT,
+  ADVISOR_SYSTEM,
+  buildUserPrompt,
+  isAdvisorMode,
+  maxTokensForMode,
+} from './_ai_prompts.js';
 import { reconcileAdviceNumbers } from '../shared/adviceValidation.js';
 import { normalizePickDecision } from '../shared/stockRanking.js';
 import { canUseQuantModel } from './_quant_access.js';
@@ -35,6 +41,12 @@ import {
   classifyPriceLimit,
   priceLimitRatio,
 } from '../shared/priceLimitPolicy.js';
+import {
+  attachEvidenceSnapshot,
+  createCanonicalEvidenceSnapshot,
+  resolveEvidenceAccountRevision,
+  sourceTextVersion,
+} from '../shared/evidenceSnapshot.js';
 
 function avg(arr) { return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0; }
 function std(arr) { if (arr.length < 2) return 0; const m = avg(arr); return Math.sqrt(avg(arr.map((x) => (x - m) ** 2))); }
@@ -490,6 +502,23 @@ export default async function handler(req, res) {
     const mode = (body && body.mode) || 'market';
     const payload = (body && body.payload) || {};
     const streaming = !!(body && body.stream); // 客户端可选开启 SSE 进度流
+    const evidenceAccountRevision = resolveEvidenceAccountRevision(
+      payload,
+      accountAuth.account,
+    );
+    let evidenceSnapshot = null;
+    const ensureEvidenceSnapshot = () => {
+      if (!isAdvisorMode(mode) || !payload.code) return null;
+      if (!evidenceSnapshot) {
+        evidenceSnapshot = createCanonicalEvidenceSnapshot({
+          mode,
+          payload,
+          accountRevision: evidenceAccountRevision,
+          promptVersion: sourceTextVersion('advisor', ADVISOR_SYSTEM),
+        });
+      }
+      return evidenceSnapshot;
+    };
 
     // SSE 进度流：数据采集阶段(查大盘/资金/分时/龙虎榜/量化…)对用户是"黑盒卡住"，
     // 开启后把每个采集里程碑实时推给前端(查大盘✓ 查资金✓ 量化打分✓ 生成建议中…)，
@@ -519,8 +548,9 @@ export default async function handler(req, res) {
     const stopHeartbeat = () => { if (hbTimer) { clearInterval(hbTimer); hbTimer = null; } };
     const finish = (obj) => {
       stopHeartbeat();
-      if (streaming) { emit('result', obj); return res.end(); }
-      return res.status(200).send(JSON.stringify(obj));
+      const output = attachEvidenceSnapshot(obj, ensureEvidenceSnapshot());
+      if (streaming) { emit('result', output); return res.end(); }
+      return res.status(200).send(JSON.stringify(output));
     };
     // 采集里程碑进度事件
     const phase = (text, key) => emit('phase', { text, key });
@@ -999,6 +1029,7 @@ export default async function handler(req, res) {
     }
 
     const isAdvisor = isAdvisorMode(mode);
+    if (isAdvisor && payload.code) ensureEvidenceSnapshot();
     const useModel = isAdvisor ? ADVISOR_MODEL : MODEL;
     const useRole = isAdvisor ? 'advisor' : 'chat';   // 端点级模型解析:按角色让资源池各端点用各自的模型名
     // —— 编排层须与底层实际下发的 reasoning_effort 对齐 ——

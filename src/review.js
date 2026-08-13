@@ -138,6 +138,7 @@ export async function generateReview({ code, name, session, hold, onPhase }) {
     const review = {
       code, name, session, dayKey: bjDayKey(), at: Date.now(),
       result: r.result,
+      ...(r.meta ? { meta: r.meta } : {}),
     }
     planStore.saveReview(code, review)
     return review

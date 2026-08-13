@@ -4,12 +4,14 @@ import assert from 'node:assert/strict'
 import {
   buildReviewPayload,
   processReviewAccount,
+  reviewRecordFromAIResponse,
   reviewResponse,
 } from '../api/cron_review.js'
 
 function accountFixture() {
   return {
     nick: '复盘测试账号',
+    clientRevision: 4,
     data: {
       holding: [{
         id: 'h1',
@@ -70,12 +72,21 @@ test('FC自动复盘先保存租约再写入成功结果且同场不重复生成
       return account
     },
     fetchQuotes: async () => ({ '600001': { price: 11 } }),
-    generate: async (payload) => ({
-      code: payload.code,
-      name: payload.name,
-      at: 1200,
-      result: { stance: '持有', headline: '守住10.5继续持有' },
-    }),
+    generate: async (payload) => {
+      assert.equal(payload.accountRevision, 4)
+      return {
+        code: payload.code,
+        name: payload.name,
+        at: 1200,
+        result: { stance: '持有', headline: '守住10.5继续持有' },
+        meta: {
+          evidenceSnapshot: {
+            snapshotId: 'ev_review_test',
+            schemaVersion: 'canonical-evidence.v1',
+          },
+        },
+      }
+    },
   }
 
   const first = await processReviewAccount(current, {
@@ -94,6 +105,10 @@ test('FC自动复盘先保存租约再写入成功结果且同场不重复生成
   assert.equal(writes.length, 2)
   assert.equal(writes[0].account.data.reviewAuto.runs['2026-08-13:noon'].codes['600001'].status, 'running')
   assert.equal(current.data.reviews['600001'].session, 'noon')
+  assert.equal(
+    current.data.reviews['600001'].meta.evidenceSnapshot.snapshotId,
+    'ev_review_test',
+  )
   assert.equal(current.data.reviewAuto.runs['2026-08-13:noon'].codes['600001'].status, 'done')
 })
 
@@ -142,4 +157,24 @@ test('定时端点响应的成功布尔值不能被生成数量覆盖', () => {
     generated: 0,
     failed: 2,
   })
+})
+
+test('自动复盘记录保留军师响应中的完整证据快照', () => {
+  const record = reviewRecordFromAIResponse(
+    { code: '600001', name: '主板一号' },
+    {
+      result: { stance: '持有' },
+      meta: {
+        evidenceSnapshot: {
+          snapshotId: 'ev_review_test',
+          schemaVersion: 'canonical-evidence.v1',
+        },
+      },
+    },
+    1200,
+  )
+
+  assert.equal(record.at, 1200)
+  assert.equal(record.result.stance, '持有')
+  assert.equal(record.meta.evidenceSnapshot.snapshotId, 'ev_review_test')
 })

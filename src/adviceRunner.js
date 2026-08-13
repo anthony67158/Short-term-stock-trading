@@ -7,6 +7,7 @@ import { planStore } from './planStore'
 import { triggerServerAdvice, canServerAdvice } from './serverAdvice'
 import { acceptsGenerationResult, generationOptions } from '../shared/adviceBatchPolicy.js'
 import { ensureAdviceReasoning } from '../shared/adviceReasoning.js'
+import { evidencePersistenceFields } from '../shared/evidenceSnapshot.js'
 import { quantModelHeaders } from './quantModel'
 import { compactAdvicePlan } from '../shared/adviceContinuity.js'
 import { attachAdviceDailyReport } from '../shared/adviceDailyReportPolicy.js'
@@ -201,6 +202,7 @@ async function run(spec, record) {
             thesisVersion: advice.continuity?.thesisVersion || null,
             knowledgeActionPlan: advice.knowledgeActionPlan || null,
             knowledgeActionScore: advice.knowledgeActionScore || null,
+            ...evidencePersistenceFields(advice),
           })
         } catch { /* ignore */ }
       }

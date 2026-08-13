@@ -148,6 +148,20 @@ async function fetchQuoteMap(codes) {
   )
 }
 
+export function reviewRecordFromAIResponse(
+  payload,
+  response,
+  now = Date.now(),
+) {
+  return {
+    code: payload.code,
+    name: payload.name,
+    at: now,
+    result: response.result,
+    ...(response.meta ? { meta: response.meta } : {}),
+  }
+}
+
 async function generateReview(payload) {
   const response = await invokeSSE(aiHandler, {
     method: 'POST',
@@ -164,12 +178,7 @@ async function generateReview(payload) {
   if (!response?.ok || !response.result) {
     throw new Error(response?.error || '复盘生成失败')
   }
-  return {
-    code: payload.code,
-    name: payload.name,
-    at: Date.now(),
-    result: response.result,
-  }
+  return reviewRecordFromAIResponse(payload, response)
 }
 
 async function defaultWrite(account, options) {
@@ -224,6 +233,7 @@ export async function processReviewAccount(
         quoteMap,
         { now, session, nextTradeDay },
       )
+      payload.accountRevision = Number(working.clientRevision) || null
       if (
         Number(payload.holdQty || 0) <= 0
         && Number(payload.openTNet || 0) >= 0

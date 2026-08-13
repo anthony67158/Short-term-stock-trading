@@ -46,6 +46,7 @@ import {
   buildAdviceCacheEntry,
   compactAdvicePlan,
 } from '../shared/adviceContinuity.js';
+import { evidencePersistenceFields } from '../shared/evidenceSnapshot.js';
 import { attachAdviceDailyReport } from '../shared/adviceDailyReportPolicy.js';
 import { adviceEntryMatchesMode } from '../shared/adviceModeContext.js';
 import aiHandler from './ai.js';
@@ -495,6 +496,7 @@ async function genOne({
       thesisVersion: advice.continuity?.thesisVersion || null,
       knowledgeActionPlan: advice.knowledgeActionPlan || null,
       knowledgeActionScore: advice.knowledgeActionScore || null,
+      ...evidencePersistenceFields(advice),
       at,
     };
   }
@@ -537,6 +539,7 @@ async function runJobGen(
     let p = buildHoldPayload(holding, code, name, portfolio, data.account, data.closed, nextTradeDayLabel());
     p.advisorTrack = advisorTrackFrom(data, 'hold_advice');
     p.quantModelVersion = quantModelVersion;
+    p.accountRevision = Number(acc.clientRevision) || null;
     p = attachAdviceDailyReport(p, dailyReportSummary);
     if (previousAdvice) p.previousAdvice = previousAdvice;
     const hp = (p.holdCost != null && p.holdQty != null) ? { holdCost: String(p.holdCost), holdQty: String(p.holdQty) } : {};
@@ -545,6 +548,7 @@ async function runJobGen(
   let p = buildWatchPayload(code, name, portfolio, data.account);
   p.advisorTrack = advisorTrackFrom(data, 'buy_advice');
   p.quantModelVersion = quantModelVersion;
+  p.accountRevision = Number(acc.clientRevision) || null;
   p = attachAdviceDailyReport(p, dailyReportSummary);
   if (previousAdvice) p.previousAdvice = previousAdvice;
   return genOne({ code, name, mode: 'buy_advice', payload: p, quantQuery: { code, klt: '101', lmt: '60', quant: '1', model: quantModelVersion }, priceHint, onProgress, signal, deepMode, previousEntry });
