@@ -9,6 +9,7 @@ const read = (path) => readFileSync(
 )
 
 const precision = read('src/styles/precision.css')
+const tokens = read('tokens.css')
 const assistant = read('src/components/AIAssistant.jsx')
 const sectorPanel = read('src/components/SectorPanel.jsx')
 const stockPanel = read('src/components/StockPanel.jsx')
@@ -16,6 +17,7 @@ const stockDetail = read('src/components/StockDetail.jsx')
 const dailyReport = read('src/components/DailyReport.jsx')
 const llmConfig = read('src/components/LLMConfig.jsx')
 const planTab = read('src/components/PlanTab.jsx')
+const fundFlowCanvas = read('src/components/FundFlowCanvas.jsx')
 const semanticTabSources = [
   'src/components/AlertCenter.jsx',
   'src/components/AlertPanel.jsx',
@@ -32,6 +34,27 @@ test('异常数值统一降级，交易复盘不会渲染 NaN', () => {
   assert.equal(finiteNum(Number.NaN), 0)
   assert.equal(finiteNum('12.5'), 12.5)
   assert.equal(finiteNum('bad', null), null)
+})
+
+test('白天模式建立明确表面层级并将遗留紫色变量统一映射到钴蓝系统', () => {
+  assert.match(
+    tokens,
+    /html\[data-theme="light"\]\s*{[\s\S]*?--color-paper:\s*oklch\(96% 0\.01 255\)[\s\S]*?--color-paper-2:\s*oklch\(99% 0\.004 255\)[\s\S]*?--color-paper-3:\s*oklch\(93\.5% 0\.012 255\)[\s\S]*?--color-rule:\s*oklch\(78% 0\.016 255\)/s,
+  )
+  assert.match(
+    precision,
+    /html\[data-theme="light"\]\s*{[\s\S]*?--panel:\s*var\(--color-paper-2\)[\s\S]*?--accent:\s*var\(--color-accent\)[\s\S]*?--sem-buy:\s*var\(--color-accent\)/s,
+  )
+  assert.match(
+    precision,
+    /html\[data-theme="light"\] \.ind-tab\.on\s*{[^}]*background:\s*color-mix\(\s*in oklch,\s*var\(--color-accent\) 9%,\s*var\(--color-paper-2\)\s*\)[^}]*color:\s*var\(--color-accent\)/s,
+  )
+  assert.match(
+    precision,
+    /html\[data-theme="light"\] \.ht-fill\s*{[^}]*background:\s*color-mix\(\s*in oklch,\s*var\(--color-accent\) 48%,\s*var\(--color-paper-4\)\s*\)/s,
+  )
+  assert.doesNotMatch(fundFlowCanvas, /hub:\s*'#6c5ce7'/)
+  assert.match(fundFlowCanvas, /hub:\s*'#0874d8'/)
 })
 
 test('今日工作台双栏等高且情绪指标桌面端为三列', () => {

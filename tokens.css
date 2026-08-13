@@ -1,7 +1,8 @@
 /* Hallmark · genre: modern-minimal · macrostructure: Workbench · design-system: design.md · designed-as-app
  * theme: custom · vibe: "professional precision, calm, focused" · paper: oklch(14.5% 0.012 255) · accent: oklch(68% 0.17 255)
+ * light: porcelain oklch(96% 0.01 255) · graphite rules · restrained cobalt oklch(52% 0.205 255)
  * display: Space Grotesk · body: Space Grotesk + PingFang SC · axes: dark / geometric-sans / cool
- * studied: no · context: explicit · pre-emit critique: P5 H5 E4 S5 R5 V4
+ * studied: no · context: explicit · pre-emit critique: P5 H5 E5 S5 R5 V4
  */
 
 :root {
@@ -137,26 +138,26 @@
 html[data-theme="light"] {
   color-scheme: light;
 
-  --color-paper: oklch(97.5% 0.006 255);
-  --color-paper-2: oklch(99.2% 0.004 255);
-  --color-paper-3: oklch(95% 0.008 255);
-  --color-paper-4: oklch(92.5% 0.01 255);
-  --color-ink: oklch(22% 0.018 255);
-  --color-ink-2: oklch(35% 0.016 255);
-  --color-muted: oklch(44% 0.014 255);
-  --color-neutral: oklch(38% 0.015 255);
-  --color-rule: oklch(84% 0.012 255);
-  --color-rule-2: oklch(90% 0.009 255);
-  --color-accent: oklch(56% 0.2 255);
-  --color-accent-ink: oklch(98% 0.006 255);
-  --color-focus: oklch(52% 0.22 255);
+  --color-paper: oklch(96% 0.01 255);
+  --color-paper-2: oklch(99% 0.004 255);
+  --color-paper-3: oklch(93.5% 0.012 255);
+  --color-paper-4: oklch(89.5% 0.014 255);
+  --color-ink: oklch(19.5% 0.022 255);
+  --color-ink-2: oklch(33% 0.018 255);
+  --color-muted: oklch(47% 0.014 255);
+  --color-neutral: oklch(58% 0.012 255);
+  --color-rule: oklch(78% 0.016 255);
+  --color-rule-2: oklch(86% 0.012 255);
+  --color-accent: oklch(52% 0.205 255);
+  --color-accent-ink: oklch(98.5% 0.006 255);
+  --color-focus: oklch(59% 0.19 255);
   --color-focus-on-accent: var(--color-paper-2);
-  --color-up: oklch(58% 0.2 25);
-  --color-down: oklch(56% 0.16 150);
-  --color-warning: oklch(58% 0.14 78);
-  --color-danger: oklch(55% 0.22 25);
+  --color-up: oklch(57% 0.2 25);
+  --color-down: oklch(52% 0.16 150);
+  --color-warning: oklch(55% 0.14 78);
+  --color-danger: oklch(53% 0.22 25);
 
-  --shadow-card: 0 1px 2px oklch(30% 0.018 255 / 0.07);
-  --shadow-overlay: 0 24px 64px oklch(30% 0.018 255 / 0.18);
-  --glow: oklch(56% 0.2 255 / 0.1);
+  --shadow-card: 0 1px 2px oklch(28% 0.018 255 / 0.055);
+  --shadow-overlay: 0 18px 48px oklch(28% 0.018 255 / 0.16);
+  --glow: oklch(52% 0.205 255 / 0.08);
 }

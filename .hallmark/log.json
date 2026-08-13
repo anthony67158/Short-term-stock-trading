@@ -4,6 +4,16 @@
     "scope": "app",
     "macrostructure": "Workbench",
     "theme": "custom",
+    "theme_axes": "light / geometric-sans / cool",
+    "vibe": "porcelain surfaces, graphite rules, restrained cobalt",
+    "enrichment": "none",
+    "brief": "短线操盘台 · 白天主题层级与配色升级"
+  },
+  {
+    "date": "2026-08-13",
+    "scope": "app",
+    "macrostructure": "Workbench",
+    "theme": "custom",
     "theme_axes": "dark / geometric-sans / cool",
     "vibe": "professional precision, calm, focused",
     "enrichment": "none",

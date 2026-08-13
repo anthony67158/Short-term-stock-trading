@@ -84,6 +84,212 @@ button:disabled,
   background: var(--color-paper);
 }
 
+/* Light mode uses a wider tonal ladder and remaps every legacy surface token. */
+html[data-theme="light"] {
+  --bg: var(--color-paper);
+  --bg-elev: var(--color-paper-2);
+  --panel: var(--color-paper-2);
+  --panel2: var(--color-paper-3);
+  --panel3: var(--color-paper-4);
+  --border: var(--color-rule);
+  --border-soft: var(--color-rule-2);
+  --text: var(--color-ink);
+  --text2: var(--color-ink-2);
+  --muted: var(--color-muted);
+  --red: var(--color-up);
+  --green: var(--color-down);
+  --gold: var(--color-warning);
+  --accent: var(--color-accent);
+  --accent2: var(--color-accent);
+  --glow: color-mix(in oklch, var(--color-accent) 8%, transparent);
+  --shadow: var(--shadow-card);
+  --shadow-lg: var(--shadow-overlay);
+  --surface-quiet: color-mix(
+    in oklch,
+    var(--color-paper-3) 76%,
+    var(--color-paper-2)
+  );
+  --surface-hair: var(--color-rule-2);
+  --track-bg: var(--color-paper-4);
+  --sem-up: var(--color-up);
+  --sem-down: var(--color-down);
+  --sem-add: var(--color-down);
+  --sem-reduce: var(--color-up);
+  --sem-buy: var(--color-accent);
+  --sem-danger: var(--color-danger);
+  --sem-warn: var(--color-warning);
+  --sem-warn-strong: var(--color-warning);
+  --sem-add-bg: color-mix(in oklch, var(--sem-add) 9%, transparent);
+  --sem-add-bd: color-mix(in oklch, var(--sem-add) 30%, transparent);
+  --sem-reduce-bg: color-mix(in oklch, var(--sem-reduce) 9%, transparent);
+  --sem-reduce-bd: color-mix(in oklch, var(--sem-reduce) 30%, transparent);
+  --sem-buy-bg: color-mix(in oklch, var(--sem-buy) 9%, transparent);
+  --sem-buy-bd: color-mix(in oklch, var(--sem-buy) 30%, transparent);
+  --sem-danger-bg: color-mix(in oklch, var(--sem-danger) 10%, transparent);
+  --sem-danger-bd: color-mix(in oklch, var(--sem-danger) 34%, transparent);
+  --sem-warn-bg: color-mix(in oklch, var(--sem-warn) 10%, transparent);
+  --sem-warn-bd: color-mix(in oklch, var(--sem-warn) 32%, transparent);
+}
+
+html[data-theme="light"] .nav {
+  border-bottom-color: var(--color-rule);
+  background: var(--color-paper-2);
+  backdrop-filter: none;
+}
+
+html[data-theme="light"] .nav-tab.active {
+  border-color: color-mix(
+    in oklch,
+    var(--color-accent) 24%,
+    var(--color-rule-2)
+  );
+  background: color-mix(
+    in oklch,
+    var(--color-accent) 7%,
+    var(--color-paper-2)
+  );
+}
+
+html[data-theme="light"] .workspace-head,
+html[data-theme="light"] .panel-head,
+html[data-theme="light"] .footer {
+  border-color: var(--color-rule);
+}
+
+html[data-theme="light"] .panel-head {
+  background: color-mix(
+    in oklch,
+    var(--color-paper-2) 92%,
+    var(--color-paper-3)
+  );
+}
+
+html[data-theme="light"] .plan-section .panel-head {
+  background: transparent;
+}
+
+html[data-theme="light"] .panel:not(.plan-section),
+html[data-theme="light"] .play-card,
+html[data-theme="light"] .plan-cand,
+html[data-theme="light"] .hold-grid .hold-item {
+  border-color: var(--color-rule-2);
+  background: var(--color-paper-2);
+}
+
+html[data-theme="light"] .hold-overview,
+html[data-theme="light"] .plan-card,
+html[data-theme="light"] .pc-target,
+html[data-theme="light"] .op-calc,
+html[data-theme="light"] .oc-cell {
+  border-color: var(--color-rule-2);
+  background: var(--color-paper-3);
+}
+
+html[data-theme="light"] .ht-fill {
+  background: color-mix(
+    in oklch,
+    var(--color-accent) 48%,
+    var(--color-paper-4)
+  );
+}
+
+html[data-theme="light"] .ind-tab {
+  border-color: var(--color-rule-2);
+  background: var(--color-paper-2);
+  color: var(--color-ink-2);
+}
+
+html[data-theme="light"] .ind-tab.on {
+  border-color: color-mix(
+    in oklch,
+    var(--color-accent) 38%,
+    var(--color-rule)
+  );
+  background: color-mix(
+    in oklch,
+    var(--color-accent) 9%,
+    var(--color-paper-2)
+  );
+  color: var(--color-accent);
+}
+
+html[data-theme="light"] .ind-tab.on .ind-tab-n {
+  background: var(--color-accent);
+  color: var(--color-accent-ink);
+}
+
+html[data-theme="light"] .ind-tab.on .ind-tab-pct.red {
+  color: var(--color-up);
+  opacity: 1;
+}
+
+html[data-theme="light"] .ind-tab.on .ind-tab-pct.green {
+  color: var(--color-down);
+  opacity: 1;
+}
+
+html[data-theme="light"] .tbl th {
+  background: var(--color-paper-3);
+  color: var(--color-ink-2);
+}
+
+html[data-theme="light"] .tbl tbody tr:hover {
+  background: color-mix(
+    in oklch,
+    var(--color-accent) 4%,
+    var(--color-paper-3)
+  );
+}
+
+html[data-theme="light"] .btn:not(.btn-primary):not(.btn-danger):not(.btn-ai),
+html[data-theme="light"] .chip-btn:not(.act-add):not(.act-buy):not(.act-reduce):not(.act-t):not(.act-clear),
+html[data-theme="light"] .row-btn,
+html[data-theme="light"] .mini-btn,
+html[data-theme="light"] .icon-btn {
+  border-color: var(--color-rule);
+  background: var(--color-paper-2);
+}
+
+html[data-theme="light"] .btn-primary,
+html[data-theme="light"] .btn-ai,
+html[data-theme="light"] .quant-btn,
+html[data-theme="light"] .t-ai-btn,
+html[data-theme="light"] .ss-btn {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-accent-ink);
+}
+
+html[data-theme="light"] .btn-danger,
+html[data-theme="light"] .chip-btn.act-clear.solid {
+  color: var(--color-accent-ink);
+}
+
+html[data-theme="light"] .modal-mask,
+html[data-theme="light"] .qmc-mask,
+html[data-theme="light"] .busy-modal-mask,
+html[data-theme="light"] .mask-drawer,
+html[data-theme="light"] .mobile-trade-mask,
+html[data-theme="light"] .t-trade-mask {
+  background: color-mix(in oklch, var(--color-ink) 14%, transparent);
+}
+
+html[data-theme="light"] .heatmap-modal-mask {
+  background: var(--color-paper);
+}
+
+html[data-theme="light"] .acct-menu,
+html[data-theme="light"] .auto-ref-panel,
+html[data-theme="light"] .advisor-pop,
+html[data-theme="light"] .detail-panel,
+html[data-theme="light"] .qmc-modal,
+html[data-theme="light"] .llm-modal,
+html[data-theme="light"] .t-drawer {
+  border-color: var(--color-rule);
+  background: var(--color-paper-2);
+  box-shadow: var(--shadow-overlay);
+}
+
 /* App shell */
 .nav {
   position: sticky;
@@ -95,10 +301,6 @@ button:disabled,
   background: color-mix(in oklch, var(--color-paper) 94%, transparent);
   box-shadow: none;
   backdrop-filter: blur(10px);
-}
-
-html[data-theme="light"] .nav {
-  background: color-mix(in oklch, var(--color-paper-2) 92%, transparent);
 }
 
 .nav-inner {

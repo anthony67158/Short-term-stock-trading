@@ -66,8 +66,8 @@ export default function FundFlowCanvas({ interval }) {
 
   // 主题相关色板
   const C = light
-    ? { green: '#1a9e46', red: '#d63a2f', hub: '#6c5ce7', label: '#2a2e3a',
-        tipBg: 'rgba(255,255,255,.97)', tipBorder: 'rgba(108,92,231,.35)', tipText: '#2a2e3a', linkOp: 0.5 }
+    ? { green: '#168a40', red: '#cf352d', hub: '#0874d8', label: '#202b3a',
+        tipBg: 'rgba(252,253,255,.98)', tipBorder: 'rgba(8,116,216,.32)', tipText: '#202b3a', linkOp: 0.46 }
     : { green: '#3fb950', red: '#f4614e', hub: '#8b7cf6', label: '#c9c9d6',
         tipBg: 'rgba(20,22,34,.94)', tipBorder: 'rgba(124,107,245,.4)', tipText: '#e6e6ef', linkOp: 0.42 }
 

@@ -43,14 +43,21 @@
 
 ### Light variant
 
-- `--color-paper` `oklch(97.5% 0.006 255)`
-- `--color-paper-2` `oklch(99.2% 0.004 255)`
-- `--color-paper-3` `oklch(95% 0.008 255)`
-- `--color-ink` `oklch(22% 0.018 255)`
-- `--color-ink-2` `oklch(35% 0.016 255)`
-- `--color-rule` `oklch(84% 0.012 255)`
-- `--color-accent` `oklch(56% 0.2 255)`
-- `--color-focus` `oklch(52% 0.22 255)`
+- `--color-paper` `oklch(96% 0.01 255)`
+- `--color-paper-2` `oklch(99% 0.004 255)`
+- `--color-paper-3` `oklch(93.5% 0.012 255)`
+- `--color-paper-4` `oklch(89.5% 0.014 255)`
+- `--color-ink` `oklch(19.5% 0.022 255)`
+- `--color-ink-2` `oklch(33% 0.018 255)`
+- `--color-muted` `oklch(47% 0.014 255)`
+- `--color-rule` `oklch(78% 0.016 255)`
+- `--color-rule-2` `oklch(86% 0.012 255)`
+- `--color-accent` `oklch(52% 0.205 255)`
+- `--color-focus` `oklch(59% 0.19 255)`
+- Page background uses cool slate paper; primary panels use porcelain paper.
+- Quiet bands use `paper-3`; pressed and track surfaces use `paper-4`.
+- Light overlays dim with graphite ink, never a translucent white veil.
+- Legacy purple aliases must remap to the cobalt tokens in the precision layer.
 
 ### Trading semantics
 
@@ -164,6 +171,20 @@
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --dur-short: 180ms;
 }
+
+html[data-theme="light"] {
+  --color-paper: oklch(96% 0.01 255);
+  --color-paper-2: oklch(99% 0.004 255);
+  --color-paper-3: oklch(93.5% 0.012 255);
+  --color-paper-4: oklch(89.5% 0.014 255);
+  --color-ink: oklch(19.5% 0.022 255);
+  --color-ink-2: oklch(33% 0.018 255);
+  --color-muted: oklch(47% 0.014 255);
+  --color-rule: oklch(78% 0.016 255);
+  --color-rule-2: oklch(86% 0.012 255);
+  --color-accent: oklch(52% 0.205 255);
+  --color-focus: oklch(59% 0.19 255);
+}
 ```
 
 ### Tailwind v4 `@theme`
@@ -188,6 +209,15 @@
   --radius-input: 7px;
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 }
+
+html[data-theme="light"] {
+  --color-paper: oklch(96% 0.01 255);
+  --color-paper-2: oklch(99% 0.004 255);
+  --color-paper-3: oklch(93.5% 0.012 255);
+  --color-ink: oklch(19.5% 0.022 255);
+  --color-rule: oklch(78% 0.016 255);
+  --color-accent: oklch(52% 0.205 255);
+}
 ```
 
 ### DTCG `tokens.json`
@@ -203,6 +233,18 @@
     "rule": { "$value": "oklch(29% 0.014 255)", "$type": "color" },
     "accent": { "$value": "oklch(68% 0.17 255)", "$type": "color" },
     "focus": { "$value": "oklch(75% 0.19 255)", "$type": "color" }
+  },
+  "color-light": {
+    "paper": { "$value": "oklch(96% 0.01 255)", "$type": "color" },
+    "paper-2": { "$value": "oklch(99% 0.004 255)", "$type": "color" },
+    "paper-3": { "$value": "oklch(93.5% 0.012 255)", "$type": "color" },
+    "paper-4": { "$value": "oklch(89.5% 0.014 255)", "$type": "color" },
+    "ink": { "$value": "oklch(19.5% 0.022 255)", "$type": "color" },
+    "ink-2": { "$value": "oklch(33% 0.018 255)", "$type": "color" },
+    "rule": { "$value": "oklch(78% 0.016 255)", "$type": "color" },
+    "rule-2": { "$value": "oklch(86% 0.012 255)", "$type": "color" },
+    "accent": { "$value": "oklch(52% 0.205 255)", "$type": "color" },
+    "focus": { "$value": "oklch(59% 0.19 255)", "$type": "color" }
   },
   "font": {
     "display": { "$value": "Space Grotesk Variable, PingFang SC, sans-serif", "$type": "fontFamily" },
@@ -245,5 +287,25 @@
   --destructive: 62% 0.22 25;
   --destructive-foreground: 96% 0.008 255;
   --radius: 10px;
+}
+
+html[data-theme="light"] {
+  --background: 96% 0.01 255;
+  --foreground: 19.5% 0.022 255;
+  --card: 99% 0.004 255;
+  --card-foreground: 19.5% 0.022 255;
+  --popover: 99% 0.004 255;
+  --popover-foreground: 19.5% 0.022 255;
+  --primary: 52% 0.205 255;
+  --primary-foreground: 98.5% 0.006 255;
+  --secondary: 93.5% 0.012 255;
+  --secondary-foreground: 33% 0.018 255;
+  --muted: 93.5% 0.012 255;
+  --muted-foreground: 47% 0.014 255;
+  --border: 78% 0.016 255;
+  --input: 78% 0.016 255;
+  --ring: 59% 0.19 255;
+  --destructive: 53% 0.22 25;
+  --destructive-foreground: 98.5% 0.006 255;
 }
 ```
