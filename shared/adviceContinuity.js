@@ -1,3 +1,5 @@
+import { buildAdviceReviewCycle } from './adviceReviewPolicy.js'
+
 const CORE_FIELDS = [
   'action',
   'tier',
@@ -138,8 +140,21 @@ export function buildAdviceCacheEntry(previous, data, at = Date.now()) {
   const trail = prior
     ? [...existingTrail, prior].slice(-8)
     : existingTrail.slice(-8)
-  return {
+  const reviewCycle = buildAdviceReviewCycle(previous, data, at)
+  const nextData = {
     ...(data || {}),
+    reviewCycle,
+    ...(data?.advice && typeof data.advice === 'object'
+      ? {
+          advice: {
+            ...data.advice,
+            reviewCycle,
+          },
+        }
+      : {}),
+  }
+  return {
+    ...nextData,
     at,
     ...(trail.length ? { trail } : {}),
   }

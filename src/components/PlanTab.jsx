@@ -21,7 +21,6 @@ import {
   getAutoConfig,
   runManualAdviceRefresh,
   setAutoConfigSetting,
-  K_ENABLED,
   K_HOLD_ENABLED,
   K_HOLD_INTERVAL,
   K_WATCH_ENABLED,
@@ -1054,14 +1053,13 @@ function AutoRefreshControl({ quote }) {
         </button>
       </div>
 
-      <label className="arp-row toggle">
+      <div className="arp-row toggle">
         <span>
-          <b className="arp-master-title">自动刷新</b>
-          <small className="arp-master-note">仅交易时段运行，默认关闭</small>
+          <b className="arp-master-title">持续复核已开启</b>
+          <small className="arp-master-note">云端交易时段自动运行，无需打开页面</small>
         </span>
-        <input type="checkbox" checked={enabled}
-          onChange={(event) => setAutoConfigSetting(K_ENABLED, event.target.checked)} />
-      </label>
+        <b className="arp-always-on">运行中</b>
+      </div>
 
       <div className="arp-schedules">
         {scheduleRow({
@@ -1094,9 +1092,7 @@ function AutoRefreshControl({ quote }) {
 
       <div className="arp-foot">
         <div className="arp-note sub-name">
-          {enabled
-            ? '自动刷新已开启。已有任务运行时会顺延，不会重复生成。'
-            : '自动刷新未开启；你仍可随时手动刷新。'}
+          军师按每条建议的下次复核时间自动检查；已有任务运行时会顺延，不会重复生成。
         </div>
       </div>
     </div>
@@ -1110,7 +1106,7 @@ function AutoRefreshControl({ quote }) {
         title="设置盘中定时刷新 AI 操作建议(可配间隔与范围)"
       >
         <Icon name={enabled ? 'refresh' : 'clock'} size={13} className={enabled ? 'spin-slow' : ''} />
-        {enabled ? `自动刷新·持${cfg.holdIntervalMin}/自${cfg.watchIntervalMin}分` : '刷新设置'}
+        {`持续复核·持${cfg.holdIntervalMin}/自${cfg.watchIntervalMin}分`}
       </button>
 
       {open && (mobile

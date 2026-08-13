@@ -34,6 +34,37 @@ function Continuity({ continuity }) {
   )
 }
 
+function ReviewCycle({ review }) {
+  if (!review?.nextReviewAt) return null
+  const next = new Date(review.nextReviewAt)
+  const nextLabel = next.toLocaleString('zh-CN', {
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+  const changed = review.changeType === 'reverse'
+    ? '本轮已改变方向'
+    : review.changeType === 'adjust'
+      ? '本轮已调整执行区间'
+      : review.changeType === 'initial'
+        ? '本轮已建立主计划'
+        : review.changeType === 'blocked'
+          ? '本轮候选反转已被纪律拦截'
+          : '本轮维持原计划'
+  return (
+    <section className="advice-review-cycle" aria-label="军师持续复核">
+      <div>
+        <Icon name="clock" size={12} />
+        <span>军师持续复核</span>
+        <b>第 {review.sequence || 1} 次</b>
+      </div>
+      <p>{changed}，下次将于 <time dateTime={next.toISOString()}>{nextLabel}</time> 自动检查。</p>
+    </section>
+  )
+}
+
 function DecisionContext({ context }) {
   if (!context) return null
   const topIndustry = Array.isArray(context.industryWeights)
@@ -113,6 +144,7 @@ export default function AdvicePresentation({ advice, knowledgeActionReview }) {
       </div>
 
       <Continuity continuity={advice.continuity} />
+      <ReviewCycle review={view.review} />
       <DecisionContext context={advice.decisionContext} />
       <RiskOverlay risk={advice.riskOverlay} />
 

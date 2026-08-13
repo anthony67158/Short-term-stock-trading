@@ -19,7 +19,7 @@ function interval(value, fallback) {
 
 export function normalizeAutoConfig(input = {}) {
   return {
-    enabled: input.enabled === true,
+    enabled: true,
     holdEnabled: input.holdEnabled !== false,
     holdIntervalMin: interval(input.holdIntervalMin, DEFAULT_HOLD_INTERVAL),
     holdLastAt: Number(input.holdLastAt) || 0,
@@ -41,7 +41,7 @@ export function autoConfigFromSettings(settings = {}) {
   const legacyLast = Number(settings['advAuto.lastAt']) || 0
   const legacyLastTry = Number(settings['advAuto.lastTryAt']) || 0
   return normalizeAutoConfig({
-    enabled: settings['advAuto.enabled'] === true,
+    enabled: true,
     holdEnabled: has('advAuto.holdEnabled')
       ? settings['advAuto.holdEnabled'] !== false
       : (hasLegacy ? legacyScope !== 'watch' : true),

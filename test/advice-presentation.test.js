@@ -27,6 +27,14 @@ test('军师展示契约固定输出结论执行价位触发和三条核心依�
       invalidation: '收盘跌破9.60元',
       validationWindow: '3个交易日',
     },
+    reviewCycle: {
+      status: 'scheduled',
+      sequence: 3,
+      reviewedAt: 1786327200000,
+      nextReviewAt: 1786328100000,
+      previousAction: '观望',
+      changeType: 'adjust',
+    },
   })
 
   assert.deepEqual(view.verdict, {
@@ -53,6 +61,14 @@ test('军师展示契约固定输出结论执行价位触发和三条核心依�
     ['量化', '资金', '趋势'],
   )
   assert.equal(view.model, null)
+  assert.deepEqual(view.review, {
+    status: 'scheduled',
+    sequence: 3,
+    reviewedAt: 1786327200000,
+    nextReviewAt: 1786328100000,
+    previousAction: '观望',
+    changeType: 'adjust',
+  })
 })
 
 test('长段关注价说明不挤入价格格且后续路径默认收进完整分析', () => {

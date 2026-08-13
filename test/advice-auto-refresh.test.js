@@ -9,10 +9,10 @@ import {
 } from '../shared/adviceAutoRefreshPolicy.js'
 import { enqueueAutoRefreshDue } from '../api/cron_advice.js'
 
-test('自动刷新默认关闭，持仓和自选采用不同建议频率', () => {
+test('自动刷新默认常开，持仓和自选采用不同建议频率', () => {
   const config = normalizeAutoConfig({})
 
-  assert.equal(config.enabled, false)
+  assert.equal(config.enabled, true)
   assert.equal(config.holdEnabled, true)
   assert.equal(config.holdIntervalMin, 15)
   assert.equal(config.watchEnabled, true)
@@ -54,14 +54,14 @@ test('关闭某一范围后该范围永不到期', () => {
   assert.deepEqual(dueAutoScopes(config, Date.now()), ['watch'])
 })
 
-test('云端定时器只在用户开启后创建持仓和自选刷新任务', () => {
+test('云端定时器默认创建到期的持仓和自选刷新任务', () => {
   const now = new Date('2026-08-10T02:00:00Z').getTime() // 北京时间周一 10:00
   const disabled = {
     settings: { 'advAuto.enabled': false },
     holding: [{ code: '600000', name: '持仓股' }],
     plan: [{ code: '000001', name: '自选股' }],
   }
-  assert.equal(enqueueAutoRefreshDue(disabled, now), 0)
+  assert.equal(enqueueAutoRefreshDue(disabled, now), 2)
 
   const enabled = {
     settings: { 'advAuto.enabled': true },
@@ -73,6 +73,25 @@ test('云端定时器只在用户开启后创建持仓和自选刷新任务', ()
   assert.equal(enabled.jobs['000001'].mode, 'buy_advice')
   assert.match(enabled.activeAdviceBatchId, /^auto_/)
   assert.equal(enqueueAutoRefreshDue(enabled, now + 5 * 60000), 0)
+})
+
+test('云端按每只股票自己的复核时间排队', () => {
+  const now = new Date('2026-08-10T02:00:00Z').getTime()
+  const data = {
+    settings: {},
+    holding: [
+      { code: '600000', name: '已到期' },
+      { code: '600001', name: '未到期' },
+    ],
+    advice: {
+      '600000': { advice: { reviewCycle: { nextReviewAt: now } } },
+      '600001': { advice: { reviewCycle: { nextReviewAt: now + 5 * 60000 } } },
+    },
+  }
+
+  assert.equal(enqueueAutoRefreshDue(data, now), 1)
+  assert.equal(data.jobs['600000'].source, 'auto')
+  assert.equal(data.jobs['600001'], undefined)
 })
 
 test('旧设备缺失刷新配置时不能清空云端新配置', () => {

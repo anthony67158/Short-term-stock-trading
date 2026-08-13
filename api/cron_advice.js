@@ -34,7 +34,8 @@ import { endpointCountForRole } from './_llm_pool.js';
 import { projectAdviceAlerts } from '../shared/adviceAlerts.js';
 import { createRecommendation } from '../shared/decisionLedger.js';
 import { ensureAdviceReasoning } from '../shared/adviceReasoning.js';
-import { autoConfigFromSettings, dueAutoScopes } from '../shared/adviceAutoRefreshPolicy.js';
+import { autoConfigFromSettings } from '../shared/adviceAutoRefreshPolicy.js';
+import { adviceReviewDue } from '../shared/adviceReviewPolicy.js';
 import {
   acceptsGenerationResult,
   adviceConcurrency,
@@ -428,6 +429,7 @@ async function genOne({
   signal,
   deepMode = false,
   previousEntry = null,
+  reviewIntervalMin = null,
   strategyGate = null,
   councilEnabled = true,
 }) {
@@ -491,7 +493,16 @@ async function genOne({
   const at = Date.now();
   const cacheItem = buildAdviceCacheEntry(
     previousEntry,
-    { mode, result, advice, meta, news, truncated },
+    {
+      mode,
+      result,
+      advice,
+      meta,
+      news,
+      truncated,
+      reviewIntervalMin,
+      reviewTrigger: previousEntry ? 'scheduled' : 'initial',
+    },
     at,
   );
   let councilShadow = null;
@@ -577,6 +588,10 @@ async function runJobGen(
   const councilEnabled = process.env.ADVISOR_COUNCIL_SHADOW !== 'false'
     && data.settings?.advisorCouncilShadow !== false;
   const mode = holdSet.has(code) ? 'hold_advice' : 'buy_advice';
+  const autoConfig = autoConfigFromSettings(data.settings || {});
+  const reviewIntervalMin = mode === 'hold_advice'
+    ? autoConfig.holdIntervalMin
+    : autoConfig.watchIntervalMin;
   const cachedPrevious = data.advice?.[code] || null;
   const previousEntry = adviceEntryMatchesMode(cachedPrevious, mode)
     ? cachedPrevious
@@ -591,7 +606,7 @@ async function runJobGen(
     p = attachAdviceDailyReport(p, dailyReportSummary);
     if (previousAdvice) p.previousAdvice = previousAdvice;
     const hp = (p.holdCost != null && p.holdQty != null) ? { holdCost: String(p.holdCost), holdQty: String(p.holdQty) } : {};
-    return genOne({ code, name, mode: 'hold_advice', payload: p, quantQuery: { code, klt: '101', lmt: '60', quant: '1', model: quantModelVersion, ...hp }, priceHint, onProgress, signal, deepMode, previousEntry, strategyGate, councilEnabled });
+    return genOne({ code, name, mode: 'hold_advice', payload: p, quantQuery: { code, klt: '101', lmt: '60', quant: '1', model: quantModelVersion, ...hp }, priceHint, onProgress, signal, deepMode, previousEntry, reviewIntervalMin, strategyGate, councilEnabled });
   }
   let p = buildWatchPayload(code, name, portfolio, data.account);
   p.advisorTrack = advisorTrackFrom(data, 'buy_advice');
@@ -600,7 +615,7 @@ async function runJobGen(
   p.accountRevision = Number(acc.clientRevision) || null;
   p = attachAdviceDailyReport(p, dailyReportSummary);
   if (previousAdvice) p.previousAdvice = previousAdvice;
-  return genOne({ code, name, mode: 'buy_advice', payload: p, quantQuery: { code, klt: '101', lmt: '60', quant: '1', model: quantModelVersion }, priceHint, onProgress, signal, deepMode, previousEntry, strategyGate, councilEnabled });
+  return genOne({ code, name, mode: 'buy_advice', payload: p, quantQuery: { code, klt: '101', lmt: '60', quant: '1', model: quantModelVersion }, priceHint, onProgress, signal, deepMode, previousEntry, reviewIntervalMin, strategyGate, councilEnabled });
 }
 
 // ---- 任务表合并:把云端最新的【外部变更】并入内存 working(捕获其它设备新入队 / 取消)----
@@ -1070,17 +1085,29 @@ function inAutoRefreshWindow(now = Date.now()) {
   const day = d.getUTCDay();
   const dayKey = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
   const minutes = d.getUTCHours() * 60 + d.getUTCMinutes();
-  return day >= 1 && day <= 5 && !A_SHARE_HOLIDAYS.has(dayKey) && minutes >= 555 && minutes <= 900;
+  const inMorning = minutes >= 570 && minutes <= 690;
+  const inAfternoon = minutes >= 780 && minutes <= 900;
+  return day >= 1
+    && day <= 5
+    && !A_SHARE_HOLIDAYS.has(dayKey)
+    && (inMorning || inAfternoon);
 }
 
 export function enqueueAutoRefreshDue(data, now = Date.now()) {
   if (!inAutoRefreshWindow(now)) return 0;
   const settings = data.settings || (data.settings = {});
-  const scopes = dueAutoScopes(autoConfigFromSettings(settings), now);
+  const config = autoConfigFromSettings(settings);
+  const scopes = [
+    ...(config.holdEnabled ? ['hold'] : []),
+    ...(config.watchEnabled ? ['watch'] : []),
+  ];
   if (!scopes.length) return 0;
 
   const holding = data.holding || [];
   const watch = data.plan || [];
+  const advice = data.advice && typeof data.advice === 'object'
+    ? data.advice
+    : {};
   const holdCodes = [...new Set(holding.map((item) => item.code))];
   const holdSet = new Set(holdCodes);
   const watchCodes = [...new Set(watch.map((item) => item.code))].filter((code) => !holdSet.has(code));
@@ -1091,19 +1118,27 @@ export function enqueueAutoRefreshDue(data, now = Date.now()) {
     if (created) count++;
   };
   if (scopes.includes('hold')) {
-    settings['advAuto.holdLastTryAt'] = now;
-    settings['advAuto.holdLastAt'] = now;
+    const before = count;
     for (const code of holdCodes) {
+      if (!adviceReviewDue(advice[code], now)) continue;
       const name = holding.find((item) => item.code === code)?.name || code;
       enqueue(code, name, 'hold_advice');
     }
+    if (count > before) {
+      settings['advAuto.holdLastTryAt'] = now;
+      settings['advAuto.holdLastAt'] = now;
+    }
   }
   if (scopes.includes('watch')) {
-    settings['advAuto.watchLastTryAt'] = now;
-    settings['advAuto.watchLastAt'] = now;
+    const before = count;
     for (const code of watchCodes) {
+      if (!adviceReviewDue(advice[code], now)) continue;
       const name = watch.find((item) => item.code === code)?.name || code;
       enqueue(code, name, 'buy_advice');
+    }
+    if (count > before) {
+      settings['advAuto.watchLastTryAt'] = now;
+      settings['advAuto.watchLastAt'] = now;
     }
   }
   if (count > 0) data.activeAdviceBatchId = batchId;

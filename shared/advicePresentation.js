@@ -119,6 +119,16 @@ function modelSummary(advice) {
 
 export function buildAdvicePresentation(advice = {}) {
   const contract = advice.knowledgeActionPlan || {}
+  const review = advice.reviewCycle && typeof advice.reviewCycle === 'object'
+    ? {
+        status: advice.reviewCycle.status || '',
+        sequence: Number(advice.reviewCycle.sequence) || 0,
+        reviewedAt: Number(advice.reviewCycle.reviewedAt) || 0,
+        nextReviewAt: Number(advice.reviewCycle.nextReviewAt) || 0,
+        previousAction: clean(advice.reviewCycle.previousAction, 80),
+        changeType: clean(advice.reviewCycle.changeType, 40),
+      }
+    : null
   return {
     verdict: {
       action: first(advice.action, advice.stance),
@@ -178,5 +188,6 @@ export function buildAdvicePresentation(advice = {}) {
     },
     evidence: coreEvidence(advice),
     model: modelSummary(advice),
+    review,
   }
 }
