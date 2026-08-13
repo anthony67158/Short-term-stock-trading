@@ -4,6 +4,27 @@
 返回 **0~100 综合分 + 偏多/偏空/中性 + 做T方向建议 + 可解释因子**。
 数据用 AKShare（东财，免费），CPU 秒级推理，无需预训练下载。
 
+## 统一策略组合回测
+
+`strategy_portfolio_backtest.py` 直接读取线上
+`strategy-spec.v1`，输出 `strategy-backtest.v1` 报告：
+
+```bash
+python3 strategy_portfolio_backtest.py \
+  --strategy "https://stock-dashboard-znrlekbzit.cn-hangzhou.fcapp.run/api/strategy_specs?strategyId=market-quant-resonance" \
+  --bars ./research/strategy-bars.json \
+  --out ./research/strategy-report.json \
+  --initial-cash 1000000
+```
+
+`strategy-bars.json` 可直接是数组，也可使用 `{"bars":[]}`。每条记录必须包含：
+
+- `date`、`code`：`YYYYMMDD`、`600519.SH` 格式。
+- `open/high/low/close/previousClose/volume`：未复权日线，`volume` 单位为股。
+- `marketScore/pct/volRatio/quant`：当日收盘时已可获得的策略证据，禁止写入未来数据。
+
+撮合顺序固定为：当日收盘产生信号 → 下一交易日开盘买入；收盘触发止损、止盈或到期 → 下一交易日开盘卖出。回测包含整手买入、T+1、停牌、涨跌停拒单、滑点、佣金、印花税、过户费、现金与最大持仓约束。报告保留交易、拒单、每日权益和未平仓头寸，不会在样本末尾虚构强制成交。
+
 ## 一、Cloud Run 适合吗？
 
 适合，而且是这几个方案里最优的：
