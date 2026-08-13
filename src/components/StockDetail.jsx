@@ -24,6 +24,7 @@ import {
   stockWatchAction,
 } from '../../shared/stockDetailActions.js'
 import { AlertForm } from './AlertCenter'
+import { portfolioExposureContext } from '../../shared/portfolioExposure.js'
 
 // 把公司网址补全为可点击的绝对 URL（东财 F10 常给不带协议的裸域名）
 function normalizeUrl(raw) {
@@ -238,6 +239,7 @@ export default function StockDetail({ stock, onClose }) {
       goalProgress: portfolio && portfolio.goalProgress != null ? portfolio.goalProgress : null,
       goalGap: portfolio && portfolio.goalGap != null ? portfolio.goalGap : null,
       goalReturnPct: portfolio && portfolio.goalReturnPct != null ? portfolio.goalReturnPct : null,
+      ...portfolioExposureContext(portfolio),
     }
     // 持仓 → LLM 给"加/减/持有/清仓 + 具体价位"；未持仓 → LLM 给"买入/等回调/观望 结论 + 对应建议"
     const aiPayload = myHold
@@ -266,8 +268,11 @@ export default function StockDetail({ stock, onClose }) {
           account: {
             ...account,
             stockWeight: (() => {
-              const p = portfolio && portfolio.positions ? portfolio.positions.find((x) => x.code === stock.code) : null
-              return p && p.weight != null ? p.weight : null
+              const positions = portfolio && portfolio.positions
+                ? portfolio.positions.filter((x) => x.code === stock.code)
+                : []
+              if (!positions.length) return null
+              return +positions.reduce((sum, position) => sum + (Number(position.weight) || 0), 0).toFixed(1)
             })(),
           },
         }

@@ -196,6 +196,9 @@ async function run(spec, record) {
             resonance: meta && meta.resonance ? meta.resonance.score : null,
             priceAtAdvice: px,
             theoryNote: advice.theoryNote || '',
+            planId: advice.continuity?.planId || '',
+            planRevision: advice.continuity?.revision || null,
+            thesisVersion: advice.continuity?.thesisVersion || null,
             knowledgeActionPlan: advice.knowledgeActionPlan || null,
             knowledgeActionScore: advice.knowledgeActionScore || null,
           })

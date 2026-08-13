@@ -33,7 +33,11 @@ import {
 } from '../adviceAutoRefresh'
 import { ensureQuantScore, ensureQuantScores } from '../quantScore'
 import { fmtPct, pctClass, fmtNum, fmtInflow, fmtRaw, hasVal, opText, formatAdviceTime } from '../format'
-import { computeDailyFinance, todayTradeCodes } from '../../shared/dailyFinance.js'
+import {
+  computeDailyAttribution,
+  computeDailyFinance,
+  todayTradeCodes,
+} from '../../shared/dailyFinance.js'
 import {
   rankWatchlistCandidates,
   watchlistReadiness,
@@ -752,7 +756,7 @@ function AdvisorScore({ book }) {
         <Icon name="target" size={13} />
         <span className="as-k">军师战绩</span>
         {wr != null
-          ? <><span className={'as-wr ' + tone}>{wr}%</span><span className="as-sub">建议命中 · {stats.total}次已验</span></>
+          ? <><span className={'as-wr ' + tone}>{wr}%</span><span className="as-sub">独立回合 · {stats.total}次已验</span></>
           : <span className="as-sub">积累中 · {stats.pending}次待验</span>}
         <Icon name={open ? 'arrowUp' : 'chevronDown'} size={12} />
       </button>
@@ -760,7 +764,8 @@ function AdvisorScore({ book }) {
         <div className="advisor-pop">
           <div className="ap-title"><Icon name="target" size={13} /> 军师战绩怎么看</div>
           <p className="ap-desc">
-            这是<b>建议方向命中率</b>，不是账户真实成交胜率。买入/加仓看 3 日内是否触及目标
+            这是<b>独立决策回合命中率</b>，不是账户真实成交胜率；同股同一主计划的重复刷新只计一次。
+            买入/加仓看 3 日内是否触及目标
             （无目标时看最大涨幅是否≥2%）；继续持有看是否有效跌破止损、期末回撤是否超过3%；
             减仓/清仓与观望看后续是否避免明显上涨。旧口径记录会自动重算。
           </p>
@@ -769,7 +774,7 @@ function AdvisorScore({ book }) {
               <div className="ap-hero">
                 <span className={'ap-wr ' + tone}>{wr}%</span>
                 <div className="ap-hero-r">
-                  <span>综合建议命中率</span>
+                  <span>独立决策回合命中率</span>
                   <span className="muted">{stats.hit}/{stats.total} 命中 · 平均结果 {stats.avgPct >= 0 ? '+' : ''}{stats.avgPct}%</span>
                 </div>
               </div>
@@ -825,7 +830,8 @@ function AdvisorScore({ book }) {
             <p className="ap-desc muted">还没有满 3 个交易日的样本，正在积累中（{stats.pending} 条待验证）。</p>
           )}
           <p className="ap-foot muted">
-            {stats.pending > 0 && `${stats.pending} 条建议未满窗口，暂不计入。`}
+            {stats.pending > 0 && `${stats.pending} 条独立回合未满窗口，暂不计入。`}
+            {stats.duplicateRefreshes > 0 && ` 已合并 ${stats.duplicateRefreshes} 条重复刷新；原始刷新样本 ${stats.raw?.total || 0} 条。`}
             样本越多越可信；胜率高≠稳赚，仓位与止损纪律仍是第一位。
           </p>
         </div>
@@ -863,6 +869,12 @@ function HoldOverview({ book, quote }) {
     trades: book.closed || [],
     quoteMap: quote,
   })
+  const attribution = computeDailyAttribution({
+    holdings: holding,
+    trades: book.closed || [],
+    quoteMap: quote,
+  })
+  const [showAttribution, setShowAttribution] = useState(false)
   // 今日做T已实现 = 未结算流水配对差价 + 今日已结算入账的做T记录(kind:'T')
   // 关键：结算(或跨天自动结算)后 tFlows 会清空、收益转入 closed，只看 tFlows 会漏掉今天已入账的T
   let tRealized = 0
@@ -890,6 +902,7 @@ function HoldOverview({ book, quote }) {
   const hasActivity = holding.length || daily.buyCount || daily.sellCount
   if (!hasActivity) return null
   return (
+    <>
     <div className="hold-overview">
       <div className="ho-cell">
         <span className="ho-k">持仓浮盈亏</span>
@@ -932,6 +945,38 @@ function HoldOverview({ book, quote }) {
         {urgent.length > 0 && <span className="ho-sub green">{urgent.slice(0, 2).map((h) => h.name).join(' ')}{urgent.length > 2 ? '…' : ''}</span>}
       </div>
     </div>
+    {daily.dayChangeAmount != null && (
+      <div className="daily-attribution">
+        <button
+          type="button"
+          className="daily-attribution-toggle"
+          onClick={() => setShowAttribution((value) => !value)}
+          aria-expanded={showAttribution}
+        >
+          <span><Icon name="chart" size={12} /> 当日损益归因</span>
+          <b className={attribution.total >= 0 ? 'red' : 'green'}>{fmtMoney(attribution.total)}</b>
+          <Icon name={showAttribution ? 'chevronDown' : 'chevronRight'} size={12} />
+        </button>
+        {showAttribution && (
+          <div className="daily-attribution-body">
+            <div className="da-metrics">
+              <span>隔夜持仓 <b className={attribution.overnightPnl >= 0 ? 'red' : 'green'}>{fmtMoney(attribution.overnightPnl)}</b></span>
+              <span>今日新买 <b className={attribution.newBuyPnl >= 0 ? 'red' : 'green'}>{fmtMoney(attribution.newBuyPnl)}</b></span>
+              <span>卖出执行 <b className={attribution.sellExecutionPnl >= 0 ? 'red' : 'green'}>{fmtMoney(attribution.sellExecutionPnl)}</b></span>
+            </div>
+            {attribution.topLosses.length > 0 && (
+              <div className="da-losses">
+                <span>主要拖累</span>
+                {attribution.topLosses.slice(0, 3).map((item) => (
+                  <b key={item.code}>{item.name} {fmtMoney(item.total)}</b>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    )}
+    </>
   )
 }
 

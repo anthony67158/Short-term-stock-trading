@@ -1,7 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { computeDailyFinance, todayTradeCodes } from '../shared/dailyFinance.js'
+import {
+  computeDailyAttribution,
+  computeDailyFinance,
+  todayTradeCodes,
+} from '../shared/dailyFinance.js'
 
 const at = (text) => new Date(`${text}+08:00`).getTime()
 
@@ -88,4 +92,33 @@ test('盘中行情日期不是今天时拒绝计算较前收', () => {
 
   assert.equal(result.marketStatus, 'active')
   assert.equal(result.dayChangeAmount, null)
+})
+
+test('当日损益归因区分隔夜持仓、今日新买和卖出执行', () => {
+  const result = computeDailyAttribution({
+    now: at('2026-08-10T15:10:00'),
+    holdings: [
+      { code: '600000', name: '隔夜股', qty: 2, buyPrice: 9, buyFee: 5 },
+      { code: '000001', name: '新买股', qty: 1, buyPrice: 11, buyFee: 5 },
+    ],
+    trades: [
+      { type: 'BUY', code: '000001', name: '新买股', qty: 1, price: 11, fee: 5, at: at('2026-08-10T10:00:00') },
+      { type: 'SELL', code: '000002', name: '卖出股', qty: 1, price: 9.5, fee: 5, at: at('2026-08-10T11:00:00') },
+    ],
+    quoteMap: {
+      '600000': { price: 9.5, prevClose: 10, tradeDate: '2026-08-10' },
+      '000001': { price: 10.5, prevClose: 10.8, tradeDate: '2026-08-10' },
+      '000002': { price: 9, prevClose: 10, tradeDate: '2026-08-10' },
+    },
+  })
+
+  assert.equal(result.overnightPnl, -100)
+  assert.equal(result.newBuyPnl, -55)
+  assert.equal(result.sellExecutionPnl, -55)
+  assert.equal(result.total, -210)
+  assert.deepEqual(result.topLosses.map((item) => item.name), [
+    '隔夜股',
+    '新买股',
+    '卖出股',
+  ])
 })

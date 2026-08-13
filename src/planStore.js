@@ -18,6 +18,7 @@ import {
   ADVICE_OUTCOME_POLICY_VERSION,
   adviceActionKind,
   adviceNeedsVerification,
+  dedupeAdviceEpisodes,
   isAdviceOutcomeCurrent,
   summarizeAdviceOutcomes,
 } from '../shared/adviceOutcome.js'
@@ -2075,7 +2076,9 @@ export const planStore = {
   // 按【理论】统计真实胜率（军师"融会贯通"哪个理论在你的票上最灵）。
   // 一条建议引用多个理论 → 每个理论都计入(该建议命中则各+1胜)。
   theoryStats() {
-    const log = (state.adviceLog || []).filter(isAdviceOutcomeCurrent)
+    const log = dedupeAdviceEpisodes(
+      (state.adviceLog || []).filter(isAdviceOutcomeCurrent),
+    )
     const by = {}
     for (const r of log) {
       const tags = theoryTagsOf(r.theoryNote)
@@ -2293,6 +2296,7 @@ export function computePortfolio(holding, quoteMap, account) {
     const floatPct = costValue ? +((floatPnl / costValue) * 100).toFixed(2) : 0
     return {
       id: h.id,
+      industry: h.industry || null,
       code: h.code,
       name: h.name,
       qty: liveQty,

@@ -1,7 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { computePortfolio as computeServerPortfolio } from '../api/_portfolio.js'
+import {
+  buildWatchPayload,
+  computePortfolio as computeServerPortfolio,
+} from '../api/_portfolio.js'
 import {
   calcBuyFee,
   calcSellFee,
@@ -38,6 +41,28 @@ test('总资产随持仓市值变化而变化，不再被设置金额固定', ()
     assert.equal(portfolio.totalPnl, 100)
     assert.equal(portfolio.totalPnlPct, 1)
   }
+})
+
+test('军师账户上下文包含现金储备与行业集中度', () => {
+  const holding = [
+    { id: 'h1', code: '600487', industry: '通信设备', buyPrice: 50, qty: 3 },
+    { id: 'h2', code: '600522', industry: '通信设备', buyPrice: 30, qty: 2 },
+    { id: 'h3', code: '605358', industry: '半导体', buyPrice: 40, qty: 2 },
+  ]
+  const quoteMap = {
+    '600487': { price: 60 },
+    '600522': { price: 35 },
+    '605358': { price: 45 },
+  }
+  const portfolio = computeServerPortfolio(holding, quoteMap, { cash: 6000 })
+  const payload = buildWatchPayload('000001', '候选股', portfolio, { cash: 6000 })
+
+  assert.equal(payload.account.cashReservePct, 15)
+  assert.equal(payload.account.maxStockWeight, 45)
+  assert.deepEqual(payload.account.industryWeights, [
+    { industry: '通信设备', weight: 62.5 },
+    { industry: '半导体', weight: 22.5 },
+  ])
 })
 
 test('买入后自动扣减可用现金并把手续费计入总资产亏损', () => {

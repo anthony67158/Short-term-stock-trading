@@ -78,3 +78,29 @@ test('持仓建议明确列出本次决策使用的持仓和可用资金快照',
   assert.match(prompt, /单票占比18\.5%/)
   assert.match(prompt, /positionNote.*可用资金/)
 })
+
+test('弱市买入必须同时通过个股强势和高把握信号硬闸门', () => {
+  const prompt = buildUserPrompt('buy_advice', {
+    code: '600000',
+    marketEnv: {
+      score: 30,
+      weak: true,
+      level: '极弱',
+      suggestPosition: '轻仓',
+    },
+    counterTrend: { isStrong: true },
+    quant: {
+      highConfSignal: { fired: false, credibility: 60 },
+    },
+    account: {
+      cash: 30000,
+      totalAssets: 80000,
+      position: 62.5,
+    },
+  })
+
+  assert.match(prompt, /弱市硬性入场闸门/)
+  assert.match(prompt, /逆势强势.*高把握信号.*同时成立/)
+  assert.match(prompt, /任一不满足.*观望/)
+  assert.doesNotMatch(prompt, /共振分≥2且个股结构不坏，就应给出明确的做多/)
+})

@@ -35,14 +35,19 @@ function Continuity({ continuity }) {
 }
 
 function DecisionContext({ context }) {
-  if (!context || context.mode !== 'hold_advice') return null
+  if (!context) return null
+  const topIndustry = Array.isArray(context.industryWeights)
+    ? context.industryWeights[0]
+    : null
   const values = [
     ['持仓', context.holdQty != null ? `${context.holdQty}手` : null],
     ['成本', context.holdCost != null ? `${context.holdCost}元` : null],
     ['今日可卖', context.sellableTodayQty != null ? `${context.sellableTodayQty}手` : null],
     ['可用资金', context.cash != null ? `${Math.round(context.cash).toLocaleString('zh-CN')}元` : null],
+    ['现金储备', context.cashReservePct != null ? `${context.cashReservePct}%` : null],
     ['总仓位', context.position != null ? `${context.position}%` : null],
     ['单票占比', context.stockWeight != null ? `${context.stockWeight}%` : null],
+    ['行业最高', topIndustry ? `${topIndustry.industry} ${topIndustry.weight}%` : null],
   ].filter(([, value]) => value != null)
   if (!values.length) return null
   return (
@@ -53,6 +58,23 @@ function DecisionContext({ context }) {
           <span key={label}>{label} <b>{value}</b></span>
         ))}
       </div>
+    </section>
+  )
+}
+
+function RiskOverlay({ risk }) {
+  if (!risk || !Array.isArray(risk.reasons) || !risk.reasons.length) return null
+  const defensive = risk.blocked || risk.stopBreached || risk.weakMarketDefense
+  return (
+    <section
+      className={'advice-risk-overlay ' + (defensive ? 'defensive' : risk.level || '')}
+      aria-label="账户风险闸门"
+    >
+      <div className="aro-title">
+        <Icon name="shield" size={12} /> 账户风险闸门
+        <b>{risk.stopBreached ? '止损已触发' : risk.blocked ? '已阻止新增风险' : '风险提示'}</b>
+      </div>
+      <div className="aro-reasons">{risk.reasons.join('；')}</div>
     </section>
   )
 }
@@ -92,6 +114,7 @@ export default function AdvicePresentation({ advice, knowledgeActionReview }) {
 
       <Continuity continuity={advice.continuity} />
       <DecisionContext context={advice.decisionContext} />
+      <RiskOverlay risk={advice.riskOverlay} />
 
       {view.model && (
         <section

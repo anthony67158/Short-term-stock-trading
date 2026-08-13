@@ -46,6 +46,33 @@ export function adviceCandleLimit(records, code, now = Date.now()) {
   return Math.max(8, Math.min(500, Math.ceil(ageDays * 5 / 7) + 10))
 }
 
+function beijingDayKey(timestamp) {
+  const date = new Date((Number(timestamp) || 0) + 8 * 3600000)
+  return Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 10) : 'unknown'
+}
+
+export function adviceEpisodeKey(record = {}) {
+  const kind = adviceActionKind(record.action)
+  const planId = String(record.planId || '').trim()
+  if (planId) {
+    return `${record.mode || 'other'}|${record.code || 'unknown'}|${kind}|${planId}`
+  }
+  return `${record.mode || 'other'}|${record.code || 'unknown'}|${kind}|${beijingDayKey(record.at)}`
+}
+
+export function dedupeAdviceEpisodes(records = []) {
+  const latest = new Map()
+  for (const record of Array.isArray(records) ? records : []) {
+    if (!record) continue
+    const key = adviceEpisodeKey(record)
+    const current = latest.get(key)
+    if (!current || (Number(record.at) || 0) >= (Number(current.at) || 0)) {
+      latest.set(key, record)
+    }
+  }
+  return [...latest.values()]
+}
+
 function summarizeGroups(records, keyOf, nameKey) {
   const grouped = {}
   for (const record of records) {
@@ -75,7 +102,8 @@ function summarizeGroups(records, keyOf, nameKey) {
 
 export function summarizeAdviceOutcomes(records) {
   const source = Array.isArray(records) ? records : []
-  const log = source.filter(isAdviceOutcomeCurrent)
+  const rawLog = source.filter(isAdviceOutcomeCurrent)
+  const log = dedupeAdviceEpisodes(rawLog)
   const groups = summarizeGroups(
     log,
     (record) => record.mode || 'other',
@@ -138,6 +166,17 @@ export function summarizeAdviceOutcomes(records) {
     hit,
     winRate: total ? Math.round((hit / total) * 100) : null,
     avgPct: total ? +(sumPct / total).toFixed(2) : null,
-    pending: source.filter(adviceNeedsVerification).length,
+    pending: dedupeAdviceEpisodes(source.filter(adviceNeedsVerification)).length,
+    raw: {
+      total: rawLog.length,
+      hit: rawLog.filter((record) => record.hit).length,
+      winRate: rawLog.length
+        ? Math.round(rawLog.filter((record) => record.hit).length / rawLog.length * 100)
+        : null,
+      avgPct: rawLog.length
+        ? +(rawLog.reduce((sum, record) => sum + (Number(record.resultPct) || 0), 0) / rawLog.length).toFixed(2)
+        : null,
+    },
+    duplicateRefreshes: Math.max(0, rawLog.length - log.length),
   }
 }

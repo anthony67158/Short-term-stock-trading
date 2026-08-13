@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { planStore } from '../src/planStore.js'
+import { summarizeAdviceOutcomes } from '../shared/adviceOutcome.js'
 
 test('持有建议不因盘中插针跌破止损而误判失败', () => {
   planStore.setData({
@@ -106,4 +107,52 @@ test('K线未覆盖建议后的首个交易日时不使用近期行情误重算'
   assert.equal(record.outcomePolicyVersion, undefined)
   assert.equal(planStore.adviceStats().total, 0)
   assert.equal(planStore.adviceStats().pending, 1)
+})
+
+test('军师战绩按独立决策回合统计而不是重复刷新次数', () => {
+  const day1 = new Date('2026-08-10T10:00:00+08:00').getTime()
+  const day2 = new Date('2026-08-11T10:00:00+08:00').getTime()
+  const records = [
+    {
+      id: 'refresh-1',
+      code: '600000',
+      mode: 'hold_advice',
+      action: '持有',
+      at: day1,
+      verified: true,
+      hit: false,
+      resultPct: -3,
+      outcomePolicyVersion: 2,
+    },
+    {
+      id: 'refresh-2',
+      code: '600000',
+      mode: 'hold_advice',
+      action: '继续持有',
+      at: day1 + 30 * 60 * 1000,
+      verified: true,
+      hit: false,
+      resultPct: -3,
+      outcomePolicyVersion: 2,
+    },
+    {
+      id: 'next-day',
+      code: '600000',
+      mode: 'hold_advice',
+      action: '持有',
+      at: day2,
+      verified: true,
+      hit: true,
+      resultPct: 1,
+      outcomePolicyVersion: 2,
+    },
+  ]
+
+  const stats = summarizeAdviceOutcomes(records)
+
+  assert.equal(stats.total, 2)
+  assert.equal(stats.hit, 1)
+  assert.equal(stats.winRate, 50)
+  assert.equal(stats.raw.total, 3)
+  assert.equal(stats.duplicateRefreshes, 1)
 })

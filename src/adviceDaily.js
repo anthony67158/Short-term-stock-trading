@@ -11,6 +11,7 @@ import { getAdvice } from './adviceCache'
 import { startAdvice } from './adviceRunner'
 import { currentQuantModelVersion, quantModelQuery } from './quantModel'
 import { bjDayKey, isWeekday, bjMinutes } from './review'
+import { portfolioExposureContext } from '../shared/portfolioExposure.js'
 
 const DONE_KEY = 'stock_advice_daily_v1'  // { day: 'YYYY-MM-DD', done: true }
 const GAP_MS = 6 * 3600 * 1000            // 同一只 6 小时内已生成过则跳过(避免与手动生成/上一场次重复)
@@ -66,6 +67,7 @@ function accountFrom(portfolio, account) {
     goalProgress: portfolio && portfolio.goalProgress != null ? portfolio.goalProgress : null,
     goalGap: portfolio && portfolio.goalGap != null ? portfolio.goalGap : null,
     goalReturnPct: portfolio && portfolio.goalReturnPct != null ? portfolio.goalReturnPct : null,
+    ...portfolioExposureContext(portfolio),
   }
 }
 
@@ -116,8 +118,11 @@ export function buildHoldSpec(code, name, quoteMap, portfolio, account) {
   const quantModelVersion = currentQuantModelVersion()
   const quantUrl = api(`/api/stock_detail?code=${code}&klt=101&lmt=60&quant=1${quantModelQuery()}${hp}&_t=${Date.now()}`)
   const stockWeight = (() => {
-    const p = portfolio && portfolio.positions ? portfolio.positions.find((x) => x.code === code) : null
-    return p && p.weight != null ? p.weight : null
+    const positions = portfolio && portfolio.positions
+      ? portfolio.positions.filter((x) => x.code === code)
+      : []
+    if (!positions.length) return null
+    return +positions.reduce((sum, position) => sum + (Number(position.weight) || 0), 0).toFixed(1)
   })()
   const aiPayload = {
     code, name,

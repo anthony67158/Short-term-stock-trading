@@ -1293,6 +1293,17 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 .ho-alert.on .alert-num { color: var(--green); }
 .alert-num { animation: hoPulse 1.6s ease-in-out infinite; }
 @keyframes hoPulse { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
+.daily-attribution { margin: -6px 14px 14px; border: 1px solid var(--border-soft); border-radius: 10px; }
+.daily-attribution-toggle { display: flex; align-items: center; gap: 7px; width: 100%; padding: 9px 12px; border: 0; background: transparent; color: var(--text2); font-size: 11px; font-weight: 700; cursor: pointer; }
+.daily-attribution-toggle > span { display: inline-flex; align-items: center; gap: 5px; }
+.daily-attribution-toggle > b { margin-left: auto; font-size: 12px; }
+.daily-attribution-body { display: grid; gap: 8px; padding: 0 12px 11px; border-top: 1px solid var(--border-soft); }
+.da-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding-top: 9px; }
+.da-metrics > span { color: var(--muted); font-size: 10.5px; }
+.da-metrics b { display: block; margin-top: 2px; font-size: 13px; }
+.da-losses { display: flex; flex-wrap: wrap; gap: 6px 10px; color: var(--muted); font-size: 10.5px; }
+.da-losses b { color: var(--green); }
+@media (max-width: 540px) { .da-metrics { grid-template-columns: 1fr; } }
 @media (max-width: 720px) { .hold-overview { grid-template-columns: repeat(2, 1fr); } }
 
 /* 明细折叠开关 */
@@ -2393,6 +2404,12 @@ button.acct-item { width: 100%; border: 0; background: transparent; font: inheri
 .adc-title .icon { color: var(--accent); }
 .adc-values { display: flex; flex-wrap: wrap; gap: 5px 12px; margin-top: 6px; color: var(--muted); font-size: 10.5px; }
 .adc-values b { color: var(--text); font-weight: 700; }
+.advice-risk-overlay { padding: 9px 11px; border: 1px solid var(--border-soft); border-radius: 9px; background: var(--panel2); }
+.advice-risk-overlay.defensive { border-color: rgba(31,157,67,.36); }
+.aro-title { display: flex; align-items: center; gap: 5px; color: var(--text); font-size: 11px; font-weight: 750; }
+.aro-title .icon { color: var(--green); }
+.aro-title b { margin-left: auto; color: var(--green); font-size: 10px; }
+.aro-reasons { margin-top: 5px; color: var(--text2); font-size: 10.5px; line-height: 1.55; }
 .advice-model-context { padding: 9px 11px; border: 1px solid var(--border-soft); border-radius: 9px; background: var(--panel2); }
 .advice-model-context.experimental { border-color: rgba(227,179,65,.36); background: rgba(227,179,65,.06); }
 .advice-model-context.fallback { border-color: rgba(91,141,239,.36); background: rgba(91,141,239,.06); }

@@ -54,8 +54,21 @@ export function buildAdviceDecisionContext(mode, payload = {}) {
     totalAssets: finite(account.totalAssets),
     position: finite(account.position),
     stockWeight: finite(account.stockWeight),
+    cashReservePct: finite(account.cashReservePct),
+    maxStockWeight: finite(account.maxStockWeight),
+    industryWeights: Array.isArray(account.industryWeights)
+      ? account.industryWeights
+        .map((item) => ({
+          industry: String(item?.industry || '').trim(),
+          weight: finite(item?.weight),
+        }))
+        .filter((item) => item.industry && item.weight != null)
+        .slice(0, 8)
+      : [],
   }
   return Object.fromEntries(
-    Object.entries(values).filter(([, value]) => value != null),
+    Object.entries(values).filter(([, value]) =>
+      value != null && (!Array.isArray(value) || value.length > 0)
+    ),
   )
 }

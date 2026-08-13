@@ -3,6 +3,7 @@
 // 保证「电脑关了浏览器,云端定时生成的 AI 操作建议」与「用户手动/浏览器定时生成」完全同源同值。
 // ⚠️ 只做纯计算,不碰网络/存储;若前端 planStore 的对应算法有变,这里需同步。
 import { deriveAccountValuation } from '../shared/accountValuation.js';
+import { portfolioExposureContext } from '../shared/portfolioExposure.js';
 
 // FIFO 配对做T流水:算未配平(挂单)净手数 + 开口腿均价(与 planStore.computeTFlows 同口径,只保留云端需要的字段)
 export function computeTFlows(flows) {
@@ -79,6 +80,7 @@ export function computePortfolio(holding, quoteMap, account) {
       id: h.id,
       code: h.code,
       name: h.name,
+      industry: h.industry || null,
       qty: liveQty,
       baseQty,
       price,
@@ -139,6 +141,7 @@ export function accountFrom(portfolio, account) {
     goalProgress: portfolio && portfolio.goalProgress != null ? portfolio.goalProgress : null,
     goalGap: portfolio && portfolio.goalGap != null ? portfolio.goalGap : null,
     goalReturnPct: portfolio && portfolio.goalReturnPct != null ? portfolio.goalReturnPct : null,
+    ...portfolioExposureContext(portfolio),
   };
 }
 
@@ -196,8 +199,11 @@ export function buildHoldPayload(holding, code, name, portfolio, account, closed
     holdQty = 0; openTNet = tNet;
   }
   const stockWeight = (() => {
-    const p = portfolio && portfolio.positions ? portfolio.positions.find((x) => x.code === code) : null;
-    return p && p.weight != null ? p.weight : null;
+    const positions = portfolio && portfolio.positions
+      ? portfolio.positions.filter((x) => x.code === code)
+      : [];
+    if (!positions.length) return null;
+    return +positions.reduce((sum, position) => sum + (Number(position.weight) || 0), 0).toFixed(1);
   })();
   // T+1 买入时间锁定字段(与前端 t1Fields 同口径)
   let t1 = {};

@@ -1308,6 +1308,12 @@ textarea:focus {
   padding: var(--space-sm) var(--space-md);
 }
 
+.plan-section .daily-attribution {
+  margin-inline: 0;
+  border-color: var(--color-rule-2);
+  background: transparent;
+}
+
 .plan-section .hold-overview > .ho-cell {
   align-items: center;
   padding-inline: var(--space-2xs);
@@ -1625,6 +1631,7 @@ textarea:focus {
 .decide-box .advice-presentation .decide-verdict,
 .decide-box .advice-presentation .advice-continuity,
 .decide-box .advice-presentation .advice-decision-context,
+.decide-box .advice-presentation .advice-risk-overlay,
 .decide-box .advice-presentation .advice-model-context,
 .decide-box .advice-presentation .advice-execution,
 .decide-box .advice-presentation .advice-execution-metrics > span,

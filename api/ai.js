@@ -30,6 +30,7 @@ import {
 } from '../shared/knowledgeAction.js';
 import { isCurrentDailyReportSummary } from '../shared/adviceDailyReportPolicy.js';
 import { buildAdviceDecisionContext } from '../shared/adviceModeContext.js';
+import { applyPortfolioRiskPolicy } from '../shared/portfolioRiskPolicy.js';
 
 function avg(arr) { return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0; }
 function std(arr) { if (arr.length < 2) return 0; const m = avg(arr); return Math.sqrt(avg(arr.map((x) => (x - m) ** 2))); }
@@ -714,6 +715,7 @@ export default async function handler(req, res) {
             indices: (mkt.indices || []).map((i) => ({ name: i.name, pct: i.pct })),
             up: b.up, down: b.down, limitUp: b.limitUp, limitDown: b.limitDown,
             upDownRatio: b.down ? +(b.up / b.down).toFixed(2) : null,
+            breadthComplete: b.complete !== false,
             amountYi: b.amountYi,        // ★两市实时成交额(亿元)
             volVsAvg5: b.volVsAvg5,      // ★较近5日均量的偏离%
             volLevel: b.volLevel,        // ★放量/平量/缩量
@@ -917,9 +919,8 @@ export default async function handler(req, res) {
           else if (envScore >= 68) { envLevel = '强势'; suggestPosition = '可积极(5~7成)'; }
           payload.marketEnv = {
             score: envScore, level: envLevel, weak, suggestPosition,
-            // 客观规律：弱市压【仓位】而非禁【看多】；逆势强票仍可小仓做多，弱票才回避
             note: weak
-              ? `大盘${envLevel}：这是【择时】信号，只压仓位不否决个股——总仓位建议${suggestPosition}、单笔试仓、严设止损；但若个股是逆势强票(抗跌/资金逆流入/创新高)，仍可小仓做多，不要因大盘弱就把好票也一律观望。弱票、破位票才回避。`
+              ? `大盘${envLevel}：新增风险进入硬闸门。只有个股逆势强势与高把握信号同时成立，且账户总仓位、现金储备、单票与行业集中度均未超限，才允许小仓试错；否则观望。总仓位上限参考${suggestPosition}。`
               : (envLevel === '强势' ? `大盘强势：可顺势积极，仓位${suggestPosition}，仍守纪律。` : `大盘中性：常规操作，仓位${suggestPosition}，跟随个股信号。`),
           };
         }
@@ -1489,6 +1490,14 @@ export default async function handler(req, res) {
     }
     if (['buy_advice', 'hold_advice', 'review'].includes(mode) && result && typeof result === 'object' && !result.raw) {
       result = reconcileAdviceNumbers({ mode, result, payload }).result;
+    }
+    if (
+      ['buy_advice', 'hold_advice'].includes(mode)
+      && result
+      && typeof result === 'object'
+      && !result.raw
+    ) {
+      result = applyPortfolioRiskPolicy({ mode, result, payload }).result;
     }
     if (
       ['buy_advice', 'hold_advice'].includes(mode)

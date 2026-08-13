@@ -45,6 +45,32 @@ async function handleNews(res) {
   }
 }
 
+export function summarizeMarketBreadth(indexRows = [], gainers = [], losers = []) {
+  const primaryCodes = new Set(['000001', '399001', '899050'])
+  const primary = (indexRows || []).filter((row) => primaryCodes.has(String(row?.f12 || '')))
+  const complete = primary.length === primaryCodes.size && primary.every((row) =>
+    [row?.f104, row?.f105, row?.f106].every((value) => Number.isFinite(Number(value)))
+  )
+  const sum = (field) => complete
+    ? primary.reduce((total, row) => total + Math.max(0, Number(row[field]) || 0), 0)
+    : null
+  const up = sum('f104')
+  const down = sum('f105')
+  const flat = sum('f106')
+  const pct = (row) => Number(row?.f3)
+  const limitUp = (gainers || []).filter((row) => pct(row) >= 9.8).length
+  const limitDown = (losers || []).filter((row) => pct(row) <= -9.8).length
+  return {
+    up,
+    down,
+    flat,
+    limitUp,
+    limitDown,
+    total: complete ? up + down + flat : null,
+    complete,
+  }
+}
+
 // 大盘情绪：指数 + 涨跌家数 + 涨停/跌停统计 + 主力净流入
 export default async function handler(req, res) {
   // 外部宏观快讯聚合分流（供盘面研究「外部宏观经济分析」使用）
@@ -52,19 +78,23 @@ export default async function handler(req, res) {
   try {
     // 1) 三大指数 + 北证
     const idxSecids = '1.000001,0.399001,0.399006,0.899050';
-    const idxFields = 'f2,f3,f4,f12,f14,f6';
+    const idxFields = 'f2,f3,f4,f12,f14,f6,f104,f105,f106';
     const idxPath =
       `/api/qt/ulist.np/get?fltt=2&invt=2&secids=${encodeURIComponent(idxSecids)}` +
       `&fields=${idxFields}`;
 
-    // 2) 全市场涨跌家数统计 (沪深京 A股) — 单次请求
+    // 2) 涨跌停榜仅取极值两端；全市场涨跌家数直接使用指数自带 f104/f105/f106。
     const marketFs = 'm:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048';
 
-    const [idxJson, upDownJson, shK, szK] = await Promise.all([
+    const [idxJson, gainersJson, losersJson, shK, szK] = await Promise.all([
       emGet(idxPath).catch(() => null),
       emGet(
-        `/api/qt/clist/get?pn=1&pz=6000&po=1&np=1&fltt=2&invt=2&fid=f3` +
-          `&fs=${encodeURIComponent(marketFs)}&fields=f3,f6`  // f6=成交额,用于全市场实时量能
+        `/api/qt/clist/get?pn=1&pz=100&po=1&np=1&fltt=2&invt=2&fid=f3` +
+          `&fs=${encodeURIComponent(marketFs)}&fields=f3`
+      ).catch(() => null),
+      emGet(
+        `/api/qt/clist/get?pn=1&pz=100&po=0&np=1&fltt=2&invt=2&fid=f3` +
+          `&fs=${encodeURIComponent(marketFs)}&fields=f3`
       ).catch(() => null),
       // 上证综指 / 深证成指 日K(取成交额 f57),用于"两市成交额"与近5日均量对比(放量/缩量)
       // 注:kline 接口仅 push2his 镜像提供,必须走 { his: true },否则默认 push2 host 返回 502 → 量能因子丢失
@@ -73,7 +103,8 @@ export default async function handler(req, res) {
     ]);
 
     // 指数
-    const indices = ((idxJson && idxJson.data && idxJson.data.diff) || []).map((d) => ({
+    const indexRows = (idxJson && idxJson.data && idxJson.data.diff) || [];
+    const indices = indexRows.map((d) => ({
       code: d.f12,
       name: d.f14,
       price: num(d.f2),
@@ -82,22 +113,16 @@ export default async function handler(req, res) {
       amount: num(d.f6),
     }));
 
-    // 涨跌家数 & 涨停跌停 & 全市场实时成交额(量能)
-    let up = 0, down = 0, flat = 0, limitUp = 0, limitDown = 0;
-    let amountSum = 0;  // 全市场成交额合计(元)
-    const diffs = (upDownJson && upDownJson.data && upDownJson.data.diff) || [];
-    for (const d of diffs) {
-      const p = num(d.f3);
-      if (p > 0) up++;
-      else if (p < 0) down++;
-      else flat++;
-      if (p >= 9.8) limitUp++;
-      if (p <= -9.8) limitDown++;
-      const a = num(d.f6);
-      if (a != null && a > 0) amountSum += a;
-    }
-    // 全市场实时成交额(亿元);盘中为进行中累计,盘后为当日收盘值
-    const clistAmountYi = amountSum > 0 ? +(amountSum / 1e8).toFixed(0) : null;
+    const marketBreadth = summarizeMarketBreadth(
+      indexRows,
+      (gainersJson && gainersJson.data && gainersJson.data.diff) || [],
+      (losersJson && losersJson.data && losersJson.data.diff) || [],
+    );
+    // 指数成交额只取上证+深证，创业板已包含在深市内，北证单列不混入两市口径。
+    const indexAmount = indices
+      .filter((item) => item.code === '000001' || item.code === '399001')
+      .reduce((total, item) => total + (Number(item.amount) || 0), 0);
+    const indexAmountYi = indexAmount > 0 ? +(indexAmount / 1e8).toFixed(0) : null;
 
     // 两市成交额 + 近5日均量对比(放量/缩量)——用沪市/深市指数日K的成交额 f57
     // klines: [{f51:date, f57:amount(元)}]；末根为今日(盘中为进行中累计,盘后为收盘值)
@@ -109,7 +134,7 @@ export default async function handler(req, res) {
       });
     };
     const shAmts = klAmt(shK), szAmts = klAmt(szK);
-    let marketAmountYi = clistAmountYi, volVsAvg5 = null, volLevel = null;
+    let marketAmountYi = indexAmountYi, volVsAvg5 = null, volLevel = null;
     if (shAmts.length && szAmts.length) {
       const n = Math.min(shAmts.length, szAmts.length);
       const sum2 = (i) => (shAmts[shAmts.length - n + i] || 0) + (szAmts[szAmts.length - n + i] || 0);
@@ -131,7 +156,13 @@ export default async function handler(req, res) {
         updatedAt: Date.now(),
         indices,
         breadth: {
-          up, down, flat, limitUp, limitDown, total: diffs.length,
+          up: marketBreadth.up,
+          down: marketBreadth.down,
+          flat: marketBreadth.flat,
+          limitUp: marketBreadth.limitUp,
+          limitDown: marketBreadth.limitDown,
+          total: marketBreadth.total,
+          complete: marketBreadth.complete,
           amountYi: marketAmountYi,   // 两市成交额(亿元)
           volVsAvg5,                  // 较近5日均量的偏离%(+放量/-缩量)
           volLevel,                   // 放量/平量/缩量

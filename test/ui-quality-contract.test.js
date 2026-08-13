@@ -276,6 +276,18 @@ test('军师建议展示本次实际使用的持仓与资金快照', () => {
     precision,
     /\.advice-decision-context/,
   )
+  assert.match(advicePresentation, /账户风险闸门/)
+  assert.match(advicePresentation, /advice\.riskOverlay/)
+  assert.match(precision, /\.advice-risk-overlay/)
+})
+
+test('持仓总览提供隔夜新买与卖出执行的当日损益归因', () => {
+  assert.match(planTab, /computeDailyAttribution/)
+  assert.match(planTab, /当日损益归因/)
+  assert.match(planTab, /隔夜持仓/)
+  assert.match(planTab, /今日新买/)
+  assert.match(planTab, /卖出执行/)
+  assert.match(precision, /\.daily-attribution/)
 })
 
 test('模型配置改为单列选择并给复杂表单足够宽度', () => {

@@ -167,6 +167,107 @@ export function computeDailyFinance({
   }
 }
 
+export function computeDailyAttribution({
+  holdings = [],
+  trades = [],
+  quoteMap = {},
+  now = Date.now(),
+} = {}) {
+  const todayKey = beijingDayKey(now)
+  const closedLegs = (trades || []).flatMap(recordLegs)
+  const openTLegs = (holdings || []).flatMap((holding) =>
+    (holding.tFlows || []).map((flow) => ({
+      code: holding.code,
+      side: flow.side,
+      qty: finite(flow.qty),
+      price: finite(flow.price),
+      fee: finite(flow.fee),
+      at: flow.at,
+    }))
+  )
+  const todayLegs = [...closedLegs, ...openTLegs].filter((leg) =>
+    leg.code && leg.at && beijingDayKey(leg.at) === todayKey
+  )
+  const names = new Map(
+    [...holdings, ...trades]
+      .filter((item) => item?.code)
+      .map((item) => [String(item.code), item.name || String(item.code)]),
+  )
+  const quantities = new Map()
+  for (const holding of holdings || []) {
+    quantities.set(
+      String(holding.code),
+      finite(quantities.get(String(holding.code))) + finite(holding.qty),
+    )
+    for (const flow of holding.tFlows || []) {
+      quantities.set(
+        String(holding.code),
+        finite(quantities.get(String(holding.code)))
+          + (flow.side === 'buy' ? 1 : -1) * finite(flow.qty),
+      )
+    }
+  }
+
+  const codes = new Set([...quantities.keys(), ...todayLegs.map((leg) => String(leg.code))])
+  const rows = []
+  let overnightPnl = 0
+  let newBuyPnl = 0
+  let sellExecutionPnl = 0
+  for (const code of codes) {
+    const quote = quoteMap?.[code] || {}
+    const price = finite(quote.price)
+    const previousClose = finite(quote.prevClose)
+    if (!(price > 0 && previousClose > 0) || quote.tradeDate !== todayKey) continue
+    const legs = todayLegs.filter((leg) => String(leg.code) === code)
+    const bought = legs
+      .filter((leg) => leg.side === 'buy')
+      .reduce((sum, leg) => sum + finite(leg.qty), 0)
+    const sold = legs
+      .filter((leg) => leg.side === 'sell')
+      .reduce((sum, leg) => sum + finite(leg.qty), 0)
+    const currentQty = Math.max(0, finite(quantities.get(code)))
+    const carriedQty = Math.max(0, currentQty - bought)
+    const overnight = (price - previousClose) * carriedQty * 100
+    const newBuy = legs
+      .filter((leg) => leg.side === 'buy')
+      .reduce((sum, leg) =>
+        sum + (price - finite(leg.price)) * finite(leg.qty) * 100 - finite(leg.fee),
+      0)
+    const sellExecution = legs
+      .filter((leg) => leg.side === 'sell')
+      .reduce((sum, leg) =>
+        sum + (finite(leg.price) - previousClose) * finite(leg.qty) * 100 - finite(leg.fee),
+      0)
+    const total = round2(overnight + newBuy + sellExecution)
+    overnightPnl += overnight
+    newBuyPnl += newBuy
+    sellExecutionPnl += sellExecution
+    rows.push({
+      code,
+      name: names.get(code) || code,
+      overnightPnl: round2(overnight),
+      newBuyPnl: round2(newBuy),
+      sellExecutionPnl: round2(sellExecution),
+      total,
+    })
+  }
+
+  return {
+    overnightPnl: round2(overnightPnl),
+    newBuyPnl: round2(newBuyPnl),
+    sellExecutionPnl: round2(sellExecutionPnl),
+    total: round2(overnightPnl + newBuyPnl + sellExecutionPnl),
+    topLosses: rows
+      .filter((row) => row.total < 0)
+      .sort((left, right) => left.total - right.total)
+      .slice(0, 5),
+    topGains: rows
+      .filter((row) => row.total > 0)
+      .sort((left, right) => right.total - left.total)
+      .slice(0, 5),
+  }
+}
+
 export function todayTradeCodes(trades = [], holdings = [], now = Date.now()) {
   const todayKey = beijingDayKey(now)
   const codes = new Set()
