@@ -67,6 +67,64 @@ test('减仓后仍留在持仓区，只有同股全部清仓才回自选', () =>
   assert.equal(planStore.get().plan.filter((item) => item.code === '600000').length, 1)
 })
 
+test('最后一笔持仓清仓后自动退役该股加减仓和止盈止损预警', () => {
+  const yesterday = Date.now() - 86400000
+  planStore.setData({
+    plan: [],
+    holding: [{
+      id: 'position_1',
+      code: '600000',
+      name: '浦发银行',
+      buyPrice: 10,
+      buyAt: yesterday,
+      qty: 1,
+      buyFee: 5,
+    }],
+    closed: [],
+    alerts: [
+      { id: 'add', code: '600000', actCode: '600000', actKind: 'add', enabled: true, phase: 'watching' },
+      { id: 'reduce', code: '600000', actCode: '600000', actKind: 'reduce', enabled: true, phase: 'armed' },
+      { id: 'stop', code: '600000', planId: 'position_1', note: '止损', enabled: true, phase: 'armed' },
+      { id: 'manual', code: '600000', type: 'pct', enabled: true },
+    ],
+  })
+
+  const result = planStore.sell('position_1', 10.5, 1)
+  const alerts = planStore.get().alerts
+
+  assert.equal(result.ok, true)
+  assert.equal(alerts.find((alert) => alert.id === 'manual').enabled, true)
+  for (const id of ['add', 'reduce', 'stop']) {
+    const alert = alerts.find((item) => item.id === id)
+    assert.equal(alert.enabled, false)
+    assert.equal(alert.phase, 'invalid')
+    assert.equal(alert.retiredPolicy === 'position-missing' || alert.retiredPolicy === 'holding-plan-missing', true)
+  }
+})
+
+test('前端自选股建议不能同步成加仓或减仓行动预警', () => {
+  planStore.setData({
+    plan: [{ code: '600519', name: '贵州茅台' }],
+    holding: [],
+    closed: [],
+    alerts: [],
+    advice: {
+      '600519': {
+        at: Date.now(),
+        advice: {
+          action: '立即买入',
+          addPrice: 1400,
+          reducePrice: 1500,
+        },
+      },
+    },
+  })
+
+  planStore.syncActionAlerts('600519')
+
+  assert.equal(planStore.get().alerts.some((alert) => alert.actCode === '600519'), false)
+})
+
 test('做T卖腿同样受今日可卖数量约束', () => {
   const now = Date.now()
   planStore.setData({

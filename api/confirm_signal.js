@@ -13,9 +13,11 @@ import { applyCors, preflight } from './_lib.js';
 import { ensureConfig } from './_llm_config.js';
 import { judgeConfirmation, sideOf } from './_confirm.js';
 import { t1GateForSide } from '../shared/t1AdvicePolicy.js';
+import { positionGateForAlert } from '../shared/alertPositionPolicy.js';
 import { buildJudgeAdviceContext } from '../shared/judgeAdviceContext.js';
 import { buildJudgeKnowledgeActionAssessment } from '../shared/knowledgeAction.js';
 import { authorizePaidRequest } from './_account_auth.js';
+import { livePositionOf, t1StatusOf } from './_portfolio.js';
 
 const rateWindows = new Map();
 const RATE_WINDOW_MS = 60 * 1000;
@@ -59,6 +61,7 @@ export function sanitizeConfirmationBody(body) {
     watchingAt,
     watchingPrice,
   };
+  if (raw.planId) alert.planId = text(raw.planId, 120);
   if (raw.judgeContext && typeof raw.judgeContext === 'object') {
     alert.judgeContext = buildJudgeAdviceContext(raw.judgeContext);
   }
@@ -126,11 +129,46 @@ export default async function handler(req, res) {
       return res.status(422).send(JSON.stringify({ ok: false, decision: 'wait', error: sanitized.error }));
     }
     const { alert, advice, quote } = sanitized.value;
-    const gate = alert.sellableTodayQty != null ? t1GateForSide(sideOf(alert), {
+    const accountData = accountAuth.account?.data;
+    const realStatus = accountData
+      ? t1StatusOf(accountData.holding || [], accountData.closed || [], alert.code)
+      : null;
+    const position = accountData ? {
+      verified: true,
+      liveQty: realStatus.liveQty,
+      sellableToday: realStatus.sellableToday,
+      holdingIds: new Set(
+        (accountData.holding || [])
+          .filter((holding) =>
+            String(holding?.code) === String(alert.code) &&
+            !!livePositionOf([holding], alert.code)
+          )
+          .map((holding) => String(holding.id)),
+      ),
+    } : null;
+    const positionGate = position ? positionGateForAlert(alert, position) : null;
+    if (positionGate && !positionGate.allowed) {
+      return res.status(200).send(JSON.stringify({
+        ok: true,
+        decision: 'invalid',
+        confidence: 100,
+        reason: positionGate.reason,
+        side: sideOf(alert),
+        source: 'account',
+        policy: positionGate.policy,
+        knowledgeAction: buildJudgeKnowledgeActionAssessment(
+          advice.knowledgeActionPlan || advice,
+        ),
+      }));
+    }
+    const clientStatus = alert.sellableTodayQty != null ? {
       liveQty: (alert.sellableTodayQty || 0) + (alert.boughtTodayQty || 0),
       boughtToday: alert.boughtTodayQty,
       sellableToday: alert.sellableTodayQty,
-    }, alert.nextTradeDay) : null;
+    } : null;
+    const gate = (realStatus || clientStatus)
+      ? t1GateForSide(sideOf(alert), realStatus || clientStatus, alert.nextTradeDay)
+      : null;
     if (gate?.blocked) {
       return res.status(200).send(JSON.stringify({
         ok: true,
@@ -151,6 +189,7 @@ export default async function handler(req, res) {
       name: alert.name,
       advice,
       quote,
+      position,
     });
     return res.status(200).send(JSON.stringify({ ok: true, ...v }));
   } catch {

@@ -48,10 +48,14 @@ function mergeAccountAlerts(clientAlerts, serverAlerts) {
       ? { ...client, judgeContext: server.judgeContext }
       : client;
     const stamp = (alert) => Math.max(
+      Number(alert?.retiredAt) || 0,
+      Number(alert?.supersededAt) || 0,
       Number(alert?.triggeredAt) || 0,
       Number(alert?.lastJudgeAt) || 0,
       Number(alert?.watchingAt) || 0,
       Number(alert?.rearmedAt) || 0,
+      Number(alert?.outcomeUpdatedAt) || 0,
+      Number(alert?.positionCheckedAt) || 0,
     );
     if (stamp(server) > stamp(client)) return { ...client, ...server };
     if (server.phase === 'confirmed' && client.phase === 'confirmed') {

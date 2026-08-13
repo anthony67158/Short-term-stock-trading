@@ -6,6 +6,11 @@ import { proposalAlertSpec, sanitizeTradeProposal } from '../shared/tradeProposa
 import { applyT1ToAlert } from '../shared/t1AdvicePolicy.js'
 import { adviceSupportsIntent, buildJudgeAdviceContext } from '../shared/judgeAdviceContext.js'
 import {
+  positionGateForAlert,
+  requiresPositionCheck,
+  retirePositionAlert,
+} from '../shared/alertPositionPolicy.js'
+import {
   applyAccountCashFlow,
   deriveAccountValuation,
 } from '../shared/accountValuation.js'
@@ -232,7 +237,46 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
   window.addEventListener('pagehide', flushSave)
   window.addEventListener('beforeunload', flushSave)
 }
-function emit() { state = { ...state }; listeners.forEach((l) => { try { l() } catch (e) { console.error('[store] listener error', e) } }); scheduleSave() }
+function positionContextFor(code) {
+  const status = t1StatusOf(code)
+  const holdingIds = new Set(
+    (state.holding || [])
+      .filter((holding) => {
+        if (String(holding?.code) !== String(code)) return false
+        const flows = computeTFlows(holding.tFlows)
+        return Math.max(
+          0,
+          (Number(holding.qty) || 0) + (flows.openBuy || 0) - (flows.openSell || 0),
+        ) > 0
+      })
+      .map((holding) => String(holding.id)),
+  )
+  return {
+    verified: true,
+    liveQty: status.liveQty,
+    sellableToday: status.sellableToday,
+    holdingIds,
+  }
+}
+
+function reconcilePositionAlerts(now = Date.now()) {
+  let changed = false
+  state.alerts = (state.alerts || []).map((alert) => {
+    if (!alert?.enabled || alert.triggeredAt || !requiresPositionCheck(alert)) return alert
+    const gate = positionGateForAlert(alert, positionContextFor(alert.code))
+    if (gate.allowed || gate.transient) return alert
+    changed = true
+    return retirePositionAlert(alert, gate, now)
+  })
+  return changed
+}
+
+function emit() {
+  reconcilePositionAlerts()
+  state = { ...state }
+  listeners.forEach((l) => { try { l() } catch (e) { console.error('[store] listener error', e) } })
+  scheduleSave()
+}
 
 // 把某笔持仓上已配对的做T收益，归档为独立的 closed 记录(kind:'T')；
 // 未配平的开口腿按净额方向归档为 加仓(BUY) / 减仓(SELL)，避免"当天没追平底仓"时无处归类。
@@ -442,6 +486,7 @@ export const planStore = {
       decisionLog: Array.isArray(d && d.decisionLog) ? d.decisionLog : [], // 建议与真实执行分离的事件账本
       settings: (d && d.settings) || {},    // 跨设备同步的个性化设置(如 AI 每日精选/自动开关等)
     }
+    reconcilePositionAlerts()
     // AI 操作建议【结果】跨设备回灌：用云端数据整体覆盖本地建议缓存(登出/空账号→清空)
     setAllAdvice((d && d.advice) || {})
     listeners.forEach((l) => { try { l() } catch (e) { console.error('[store] listener error', e) } })
@@ -505,6 +550,21 @@ export const planStore = {
         if (c.phase === 'superseded' && a.phase !== 'superseded') {
           touched = true
           return { ...a, enabled: false, phase: 'superseded', supersededBy: c.supersededBy, triggeredMsg: c.triggeredMsg || a.triggeredMsg }
+        }
+        if (c.retiredAt && Number(c.retiredAt) > Number(a.retiredAt || 0)) {
+          touched = true
+          return {
+            ...a,
+            enabled: false,
+            phase: 'invalid',
+            retiredAt: c.retiredAt,
+            retiredPolicy: c.retiredPolicy || 'position-mismatch',
+            retiredReason: c.retiredReason || '当前持仓状态已变化，预警自动失效',
+            triggeredMsg: c.triggeredMsg || a.triggeredMsg || '',
+            watchingAt: null,
+            watchingPrice: null,
+            watchingMsg: '',
+          }
         }
         // ① 服务端已确认命中(强提示已发)→ 迁移 triggered + confirmed 态,避免本地重复响铃
         if (c.triggeredAt) {
@@ -1525,16 +1585,19 @@ export const planStore = {
     let adv = null
     try { adv = (getAdvice(code) || {}).advice } catch { adv = null }
     if (!adv) { state.alerts = rest; emit(); return }
-    // 该 code 可能在持仓或自选里,静音标记落在哪就读哪(取到即用)
     const holder = state.holding.find((x) => x.code === code)
-    const cand = state.plan.find((x) => x.code === code)
-    const owner = holder || cand || {}
-    const name = adv.name || owner.name || code
+    const liveStatus = t1StatusOf(code)
+    if (!holder || !(liveStatus.liveQty > 0)) {
+      state.alerts = rest
+      emit()
+      return
+    }
+    const name = adv.name || holder.name || code
     // opQty 是「补1手/减1手」这类操作量标签;actionPlan/exitTiming 给「到价后怎么确认」
     const opQty = adv.opQty || ''
     const timing = adv.exitTiming || adv.actionPlan || ''
     const judgeContext = buildJudgeAdviceContext(adv)
-    const t1 = holder ? t1StatusOf(code) : null
+    const t1 = liveStatus
     const old = (state.alerts || []).filter((a) => a.actCode === code)
     const rebuilt = []
     const build = (kind, op, price, muted) => {
@@ -1580,9 +1643,9 @@ export const planStore = {
       }, kind === 'reduce' ? t1 : null))
     }
     if (adviceSupportsIntent('add', judgeContext)) {
-      build('add', 'lte', adv.addPrice, owner.muteAdd)
+      build('add', 'lte', adv.addPrice, holder.muteAdd)
     }
-    build('reduce', 'gte', adv.reducePrice, owner.muteReduce)
+    build('reduce', 'gte', adv.reducePrice, holder.muteReduce)
     state.alerts = [...rebuilt, ...rest]
     emit()
   },
@@ -1758,6 +1821,16 @@ export const planStore = {
     state.alerts = (state.alerts || []).map((x) => x.id === id
       ? { ...x, phase: 'invalid', triggeredAt: Date.now(), triggeredMsg: msg, enabled: false }
       : x)
+    emit()
+  },
+  retirePositionAlert(id, reason, policy = 'position-mismatch') {
+    state.alerts = (state.alerts || []).map((alert) => alert.id === id
+      ? retirePositionAlert(alert, {
+          allowed: false,
+          reason: reason || '当前持仓状态已变化，预警自动失效',
+          policy,
+        })
+      : alert)
     emit()
   },
   // 智能确认总开关:关 → 恢复「见价即触发」的旧行为(不做二段确认)。默认开启。

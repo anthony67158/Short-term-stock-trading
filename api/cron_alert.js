@@ -17,13 +17,18 @@
 //   耗尽 budgetMs(默认 55s)。Timer 事件使用 50s 预算,给相邻分钟调用留出收尾余量。
 
 import { applyCors, preflight } from './_lib.js';
-import { listAllAccounts, writeAccount } from './account.js';
+import { listAllAccounts, readAccount, writeAccount } from './account.js';
 import quoteHandler from './quote.js';
 import { sendPush, pushConfigured } from './_push_send.js';
 import { ensureConfig } from './_llm_config.js';
 import { judgeConfirmation, sideOf } from './_confirm.js';
 import { actionLabelOf } from '../shared/judgeAdviceContext.js';
-import { t1StatusOf } from './_portfolio.js';
+import {
+  positionGateForAlert,
+  requiresPositionCheck,
+  retirePositionAlert,
+} from '../shared/alertPositionPolicy.js';
+import { livePositionOf, t1StatusOf } from './_portfolio.js';
 import {
   collectOutcomeSnapshots,
   duplicateSmartAlerts,
@@ -130,6 +135,99 @@ function invokeQuote(codes) {
   });
 }
 
+function positionContextOf(data, code) {
+  const holding = Array.isArray(data?.holding) ? data.holding : [];
+  const status = t1StatusOf(holding, data?.closed || [], code);
+  return {
+    verified: true,
+    liveQty: status.liveQty,
+    boughtToday: status.boughtToday,
+    sellableToday: status.sellableToday,
+    holdingIds: new Set(
+      holding
+        .filter((item) =>
+          String(item?.code) === String(code) &&
+          !!livePositionOf([item], code)
+        )
+        .map((item) => String(item.id)),
+    ),
+  };
+}
+
+function retireIfPositionChanged(alert, context, now = Date.now()) {
+  const gate = positionGateForAlert(alert, context);
+  if (gate.allowed || gate.transient) return gate;
+  Object.assign(alert, retirePositionAlert(alert, gate, now));
+  return gate;
+}
+
+async function verifyLatestPosition(nick, alert) {
+  if (!requiresPositionCheck(alert)) {
+    return { allowed: true, context: null };
+  }
+  try {
+    const latest = await readAccount(nick);
+    if (!latest?.data) throw new Error('account snapshot missing');
+    const context = positionContextOf(latest.data, alert.code);
+    return { ...positionGateForAlert(alert, context), context };
+  } catch {
+    const context = { verified: false };
+    return { ...positionGateForAlert(alert, context), context };
+  }
+}
+
+function alertStamp(alert) {
+  return Math.max(
+    Number(alert?.retiredAt) || 0,
+    Number(alert?.supersededAt) || 0,
+    Number(alert?.triggeredAt) || 0,
+    Number(alert?.lastJudgeAt) || 0,
+    Number(alert?.watchingAt) || 0,
+    Number(alert?.rearmedAt) || 0,
+    Number(alert?.outcomeUpdatedAt) || 0,
+    Number(alert?.positionCheckedAt) || 0,
+  );
+}
+
+async function persistProcessedAccount(processed, deadEndpoints = [], storage = null) {
+  const latest = storage
+    ? await readAccount(processed.nick, storage)
+    : await readAccount(processed.nick);
+  if (!latest?.data) throw new Error('账号最新快照读取失败');
+  const processedData = processed.data || {};
+  const processedAlerts = new Map(
+    (processedData.alerts || [])
+      .filter((alert) => alert?.id)
+      .map((alert) => [alert.id, alert]),
+  );
+  latest.data.alerts = (latest.data.alerts || []).map((alert) => {
+    const server = processedAlerts.get(alert?.id);
+    return server && alertStamp(server) > alertStamp(alert) ? server : alert;
+  });
+
+  const dead = new Set(deadEndpoints);
+  latest.data.pushSubs = (latest.data.pushSubs || [])
+    .filter((subscription) => !dead.has(subscription?.endpoint));
+
+  const decisions = new Map(
+    (latest.data.decisionLog || [])
+      .filter((event) => event?.id)
+      .map((event) => [event.id, event]),
+  );
+  for (const event of (processedData.decisionLog || [])) {
+    if (!event?.id) continue;
+    const current = decisions.get(event.id);
+    const eventStamp = Math.max(Number(event.outcomeUpdatedAt) || 0, Number(event.at) || 0);
+    const currentStamp = Math.max(Number(current?.outcomeUpdatedAt) || 0, Number(current?.at) || 0);
+    if (!current || eventStamp > currentStamp) decisions.set(event.id, event);
+  }
+  latest.data.decisionLog = [...decisions.values()]
+    .sort((a, b) => (b.at || 0) - (a.at || 0))
+    .slice(0, 1000);
+  if (storage) await writeAccount(latest, storage);
+  else await writeAccount(latest);
+}
+
 async function processAccount(acc) {
   const data = acc.data || {};
   const alerts = Array.isArray(data.alerts) ? data.alerts : [];
@@ -139,12 +237,20 @@ async function processAccount(acc) {
   const smartOn = !(data.settings && data.settings.smartConfirm === false);
   let changed = false, hits = 0, sent = 0;
 
+  // 第一层硬清理：每轮先按刚从 OSS 读取的账本淘汰已清仓、持仓 ID 已消失的旧预警。
+  for (const alert of alerts) {
+    if (!alert?.enabled || alert.triggeredAt || !requiresPositionCheck(alert)) continue;
+    const gate = retireIfPositionChanged(alert, positionContextOf(data, alert.code));
+    if (!gate.allowed && !gate.transient) changed = true;
+  }
+
   // 同股、同方向、同价位的 AI 预警只保留信息更完整的一条，避免重复弱提醒和重复 Judge。
   for (const duplicate of duplicateSmartAlerts(alerts, sideOf)) {
     const alert = alerts.find((item) => item.id === duplicate.id);
     if (!alert) continue;
     alert.enabled = false;
     alert.phase = 'superseded';
+    alert.supersededAt = Date.now();
     alert.supersededBy = duplicate.primaryId;
     alert.triggeredMsg = '与同价同方向智能预警合并';
     changed = true;
@@ -167,7 +273,9 @@ async function processAccount(acc) {
     if (sideDiff) return sideDiff;
     return (a.lastJudgeAt || 0) - (b.lastJudgeAt || 0);
   });
-  if (!activeForPush.length && !outcomePending.length) return { changed, hits, sent, judgeCalls: 0 };
+  if (!activeForPush.length && !outcomePending.length) {
+    return { changed, hits, sent, judgeCalls: 0, deadEndpoints: [] };
+  }
 
   const codes = [...new Set([...activeForPush, ...outcomePending].map((a) => a.code))];
   const quoteMap = await invokeQuote(codes);
@@ -183,10 +291,14 @@ async function processAccount(acc) {
     const outcome = collectOutcomeSnapshots(alert, quote.price);
     if (!outcome.changed) continue;
     alert.judgeOutcomes = outcome.outcomes;
+    alert.outcomeUpdatedAt = Date.now();
     const judgeEvent = (data.decisionLog || []).find((event) =>
       event?.kind === 'judge' && event.alertId === alert.id
     );
-    if (judgeEvent) judgeEvent.judgeOutcomes = outcome.outcomes;
+    if (judgeEvent) {
+      judgeEvent.judgeOutcomes = outcome.outcomes;
+      judgeEvent.outcomeUpdatedAt = alert.outcomeUpdatedAt;
+    }
     changed = true;
   }
 
@@ -201,6 +313,7 @@ async function processAccount(acc) {
     );
     if (JSON.stringify(t1Alert) !== JSON.stringify(storedAlert)) {
       Object.assign(storedAlert, t1Alert);
+      storedAlert.positionCheckedAt = Date.now();
       changed = true;
     }
     const a = storedAlert;
@@ -210,6 +323,21 @@ async function processAccount(acc) {
       // —— 老逻辑:命中即强推并停用(向后兼容,不受智能确认影响)——
       const msg = hit(a, q);
       if (!msg) continue;
+      const latest = await verifyLatestPosition(acc.nick, a);
+      if (!latest.allowed) {
+        if (!latest.transient) {
+          Object.assign(a, retirePositionAlert(a, latest));
+          changed = true;
+        }
+        continue;
+      }
+      const latestT1 = latest.context ? applyT1ToAlert(a, latest.context) : a;
+      if (latestT1.t1Blocked) {
+        Object.assign(a, latestT1);
+        a.positionCheckedAt = Date.now();
+        changed = true;
+        continue;
+      }
       hits++;
       const actLabel = a.actKind === 'add' ? '补仓' : (a.actKind === 'reduce' ? '减仓' : '');
       const title = actLabel ? `🎯 到${actLabel}操作点 · ${a.name || a.code}` : `⚡ 预警触发 · ${a.name || a.code}`;
@@ -225,6 +353,21 @@ async function processAccount(acc) {
       // 阶段一:价格触及关键价位 → 发【弱提醒】,进入「观察确认中」,继续监控真正时机(不停用)
       const msg = hit(a, q);
       if (!msg) continue;
+      const latest = await verifyLatestPosition(acc.nick, a);
+      if (!latest.allowed) {
+        if (!latest.transient) {
+          Object.assign(a, retirePositionAlert(a, latest));
+          changed = true;
+        }
+        continue;
+      }
+      const latestT1 = latest.context ? applyT1ToAlert(a, latest.context) : a;
+      if (latestT1.t1Blocked) {
+        Object.assign(a, latestT1);
+        a.positionCheckedAt = Date.now();
+        changed = true;
+        continue;
+      }
       hits++;
       const actZh = actionLabelOf(a);
       const title = `👀 到点位·观察确认中 · ${a.name || a.code}`;
@@ -246,6 +389,7 @@ async function processAccount(acc) {
         a.watchingPrice = null;
         a.watchingMsg = '';
         a.lastJudgeAt = null;
+        a.rearmedAt = now;
         changed = true;
         continue;
       }
@@ -255,10 +399,31 @@ async function processAccount(acc) {
       // 现价缺失(接口异常/休市返回空)时不判定,省一次无谓的 judge 调用。
       if (!q || q.price == null || !(Number(q.price) > 0)) continue;
       if (a.lastJudgeAt && now - a.lastJudgeAt < (JUDGE_INTERVAL_MS[side] || 45000)) continue;
+      const beforeJudge = await verifyLatestPosition(acc.nick, a);
+      if (!beforeJudge.allowed) {
+        if (!beforeJudge.transient) {
+          Object.assign(a, retirePositionAlert(a, beforeJudge));
+          changed = true;
+        }
+        continue;
+      }
+      const latestT1 = beforeJudge.context ? applyT1ToAlert(a, beforeJudge.context) : a;
+      if (latestT1.t1Blocked) {
+        Object.assign(a, latestT1);
+        a.positionCheckedAt = Date.now();
+        changed = true;
+        continue;
+      }
       judgeCalls++;
       let verdict = null;
       try {
-        verdict = await judgeConfirmation({ alert: a, name: a.name, advice: adviceMap[a.code] && adviceMap[a.code].advice, quote: q });
+        verdict = await judgeConfirmation({
+          alert: a,
+          name: a.name,
+          advice: adviceMap[a.code] && adviceMap[a.code].advice,
+          quote: q,
+          position: beforeJudge.context,
+        });
       } catch (e) { verdict = { decision: 'wait', reason: '确认判定异常:' + String(e && e.message || e) }; }
       if (!verdict) continue;
       a.lastJudgeAt = now;
@@ -269,6 +434,23 @@ async function processAccount(acc) {
       a.lastKnowledgeAction = verdict.knowledgeAction || a.lastKnowledgeAction || null;
       a.judgeCount = (Number(a.judgeCount) || 0) + 1;
       changed = true;
+      if (verdict.decision === 'confirm' || verdict.decision === 'invalid') {
+        const beforePush = await verifyLatestPosition(acc.nick, a);
+        if (!beforePush.allowed) {
+          if (!beforePush.transient) {
+            Object.assign(a, retirePositionAlert(a, beforePush));
+            changed = true;
+          }
+          continue;
+        }
+        const pushT1 = beforePush.context ? applyT1ToAlert(a, beforePush.context) : a;
+        if (pushT1.t1Blocked) {
+          Object.assign(a, pushT1);
+          a.positionCheckedAt = Date.now();
+          changed = true;
+          continue;
+        }
+      }
       if (verdict.decision === 'confirm') {
         hits++;
         const actZh = actionLabelOf(a);
@@ -317,7 +499,7 @@ async function processAccount(acc) {
     }
   }
   if (dead.size) { data.pushSubs = subs.filter((s) => !dead.has(s.endpoint)); changed = true; }
-  return { changed, hits, sent, judgeCalls };
+  return { changed, hits, sent, judgeCalls, deadEndpoints: [...dead] };
 }
 
 export default async function handler(req, res) {
@@ -367,7 +549,10 @@ export default async function handler(req, res) {
       for (const acc of accounts) {
         let r;
         try { r = await processAccount(acc); } catch (e) { r = { changed: false, hits: 0, sent: 0, error: String(e.message || e) }; }
-        if (r.changed) { touched++; try { await writeAccount(acc); } catch { /* ignore */ } }
+        if (r.changed) {
+          touched++;
+          try { await persistProcessedAccount(acc, r.deadEndpoints || []); } catch { /* ignore */ }
+        }
         totalHits += r.hits || 0; totalSent += r.sent || 0;
         totalJudgeCalls += r.judgeCalls || 0;
       }
@@ -380,4 +565,11 @@ export default async function handler(req, res) {
   } catch (e) {
     return res.end(JSON.stringify({ ok: false, error: String(e.message || e), elapsedMs: Date.now() - started }));
   }
+}
+
+export const __test = {
+  alertStamp,
+  persistProcessedAccount,
+  positionContextOf,
+  retireIfPositionChanged,
 }

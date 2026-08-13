@@ -42,6 +42,34 @@ test('云端买入建议会生成候选买点预警', () => {
   assert.equal(data.plan[0].alertSyncedPrice, 1400)
 })
 
+test('未持仓自选股只生成买点预警，禁止生成加仓或减仓预警', () => {
+  const data = {
+    plan: [{ code: '600519', name: '贵州茅台' }],
+    holding: [],
+    alerts: [{
+      id: 'stale-add',
+      code: '600519',
+      actCode: '600519',
+      actKind: 'add',
+      enabled: true,
+    }],
+    settings: {},
+  }
+
+  projectAdviceAlerts(data, '600519', {
+    name: '贵州茅台',
+    action: '立即买入',
+    buyPrice: 1400,
+    addPrice: 1380,
+    reducePrice: 1500,
+  }, { now, idFactory: ids })
+
+  assert.equal(data.alerts.length, 1)
+  assert.equal(data.alerts[0].candCode, '600519')
+  assert.equal(data.alerts[0].note, '买点')
+  assert.equal(data.alerts[0].actKind, undefined)
+})
+
 test('云端持仓建议会生成补仓和减仓行动预警', () => {
   const data = {
     plan: [],

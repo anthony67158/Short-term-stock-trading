@@ -17,6 +17,7 @@ test('确认接口只保留Judge需要的白名单字段', () => {
       watchingAt: Date.now() - 120000,
       watchingPrice: 10,
       note: '止盈',
+      planId: 'holding-1',
       injected: 'drop',
     },
     advice: {
@@ -37,6 +38,7 @@ test('确认接口只保留Judge需要的白名单字段', () => {
 
   assert.equal(result.ok, true)
   assert.equal(result.value.alert.injected, undefined)
+  assert.equal(result.value.alert.planId, 'holding-1')
   assert.equal(result.value.advice.private, undefined)
   assert.equal(result.value.advice.action, '加仓')
   assert.equal(result.value.advice.addPrice, 10)

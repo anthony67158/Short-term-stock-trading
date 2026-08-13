@@ -1,11 +1,15 @@
 import { useSyncExternalStore } from 'react'
-import { planStore, t1StatusOf } from './planStore'
+import { computeTFlows, planStore, t1StatusOf } from './planStore'
 import { getAdvice } from './adviceCache'
 import { api } from './apiBase'
 import { accountRequestHeaders } from './quantModel'
 import { confirmationPolicy } from '../shared/confirmPolicy.js'
 import { applyT1ToAlert } from '../shared/t1AdvicePolicy.js'
 import { actionLabelOf } from '../shared/judgeAdviceContext.js'
+import {
+  positionGateForAlert,
+  requiresPositionCheck,
+} from '../shared/alertPositionPolicy.js'
 
 // ============ 盯盘预警引擎 ============
 // 统一轮询自选/持仓相关个股实时报价，逐条判断预警规则是否命中；
@@ -116,6 +120,30 @@ function sideOf(a) {
   if (/买点|补仓|买入/.test(note)) return 'buy'
   if (a.op === 'gte') return 'sell'
   return 'buy'
+}
+
+function currentPositionGate(alert) {
+  if (!requiresPositionCheck(alert)) return { allowed: true }
+  const book = planStore.get()
+  const status = t1StatusOf(alert.code)
+  const holdingIds = new Set(
+    (book.holding || [])
+      .filter((holding) => {
+        if (String(holding?.code) !== String(alert.code)) return false
+        const flows = computeTFlows(holding.tFlows)
+        return Math.max(
+          0,
+          (Number(holding.qty) || 0) + (flows.openBuy || 0) - (flows.openSell || 0),
+        ) > 0
+      })
+      .map((holding) => String(holding.id)),
+  )
+  return positionGateForAlert(alert, {
+    verified: true,
+    liveQty: status.liveQty,
+    sellableToday: status.sellableToday,
+    holdingIds,
+  })
 }
 
 // 判断单条规则是否命中（q=该股实时报价）
@@ -249,6 +277,13 @@ export const alertStore = {
     // 该预警是否走智能二段确认:仅【价位类 + 带 phase(AI 派生)】;手动/涨跌幅/量比/涨跌停 → 老逻辑
     const isSmart = (a) => smartOn && a.type === 'price' && !!a.phase && a.phase !== 'confirmed' && a.phase !== 'invalid'
     for (const storedAlert of alerts) {
+      const positionGate = currentPositionGate(storedAlert)
+      if (!positionGate.allowed) {
+        if (!positionGate.transient) {
+          planStore.retirePositionAlert(storedAlert.id, positionGate.reason, positionGate.policy)
+        }
+        continue
+      }
       const a = applyT1ToAlert(storedAlert, t1StatusOf(storedAlert.code))
       if (a.t1Blocked) continue
       const q = quoteMap[a.code]
@@ -318,24 +353,37 @@ export const alertStore = {
         .then((r) => r.json())
         .then((v) => {
           if (!v || !v.ok) return
-          const actZh = actionLabelOf(a)
-          planStore.markAlertJudged(a.id, v, q && q.price)
+          const current = (planStore.get().alerts || []).find((alert) => alert.id === a.id)
+          if (!current?.enabled) return
+          const positionGate = currentPositionGate(current)
+          if (!positionGate.allowed) {
+            if (!positionGate.transient) {
+              planStore.retirePositionAlert(current.id, positionGate.reason, positionGate.policy)
+            }
+            return
+          }
+          if (['position-missing', 'holding-plan-missing', 'candidate-already-held'].includes(v.policy)) {
+            planStore.retirePositionAlert(current.id, v.reason, v.policy)
+            return
+          }
+          const actZh = actionLabelOf(current)
+          planStore.markAlertJudged(current.id, v, q && q.price)
           if (v.decision === 'confirm') {
             const conf = v.confidence != null ? `(把握${v.confidence})` : ''
             const ka = v.knowledgeAction?.total != null
               ? `｜知行合一${v.knowledgeAction.total}分`
               : ''
-            const title = `✅ 可以${actZh} · ${a.name || a.code}`
-            const body = `${describeAlert(a)}｜确认时机已到${conf}${ka}\n📌${v.reason || '多项信号共振确认'}`
-            this.push({ code: a.code, name: a.name, title, body, alertId: 'confirm-' + a.id })
+            const title = `✅ 可以${actZh} · ${current.name || current.code}`
+            const body = `${describeAlert(current)}｜确认时机已到${conf}${ka}\n📌${v.reason || '多项信号共振确认'}`
+            this.push({ code: current.code, name: current.name, title, body, alertId: 'confirm-' + current.id })
             notify(title, body)
-            planStore.markAlertConfirmed(a.id, `确认${actZh}:${v.reason || ''}`, v, q && q.price)
+            planStore.markAlertConfirmed(current.id, `确认${actZh}:${v.reason || ''}`, v, q && q.price)
           } else if (v.decision === 'invalid') {
-            const title = `⛔ 已失效·暂不${actZh} · ${a.name || a.code}`
-            const body = `${describeAlert(a)}｜原${actZh}逻辑已被破坏\n📌${v.reason || '关键条件已破坏,建议重新评估'}`
-            this.push({ code: a.code, name: a.name, title, body, alertId: 'invalid-' + a.id })
+            const title = `⛔ 已失效·暂不${actZh} · ${current.name || current.code}`
+            const body = `${describeAlert(current)}｜原${actZh}逻辑已被破坏\n📌${v.reason || '关键条件已破坏,建议重新评估'}`
+            this.push({ code: current.code, name: current.name, title, body, alertId: 'invalid-' + current.id })
             notify(title, body)
-            planStore.markAlertInvalid(a.id, `已失效:${v.reason || ''}`)
+            planStore.markAlertInvalid(current.id, `已失效:${v.reason || ''}`)
           }
           // wait → 维持 watching,静默继续观察
         })

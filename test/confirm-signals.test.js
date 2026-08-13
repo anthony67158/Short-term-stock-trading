@@ -64,3 +64,30 @@ test('最新军师已转为减仓时旧加仓点直接失效', async () => {
   assert.equal(result.policy, 'advice-mismatch')
   assert.match(result.reason, /不再支持加仓/)
 })
+
+test('服务端实时账本无持仓时Judge直接拒绝加仓且不进入行情分析', async () => {
+  const result = await judgeConfirmation({
+    alert: {
+      code: '600000',
+      actKind: 'add',
+      note: '补仓点',
+      value: 10,
+    },
+    advice: {
+      action: '加仓',
+      actionPlan: '回踩10元企稳后加仓1手',
+      addPrice: 10,
+    },
+    position: {
+      verified: true,
+      liveQty: 0,
+      sellableToday: 0,
+      holdingIds: new Set(),
+    },
+  })
+
+  assert.equal(result.decision, 'invalid')
+  assert.equal(result.source, 'account')
+  assert.equal(result.policy, 'position-missing')
+  assert.match(result.reason, /未持有/)
+})

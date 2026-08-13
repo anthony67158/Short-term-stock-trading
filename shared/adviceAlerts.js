@@ -46,18 +46,22 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
 
   const holder = holding.find((x) => x && x.code === code)
   const candidate = plan.find((x) => x && x.code === code)
+  const liveHolder = holder && (
+    options.t1Status == null ||
+    Number(options.t1Status.liveQty) > 0
+  )
   const rest = alerts.filter((a) => !isOwnedAutoAlert(a))
-  if (!holder && !candidate) {
+  if (!liveHolder && !candidate) {
     if (rest.length !== alerts.length) changed = true
     data.alerts = rest
     return changed
   }
-  const owner = holder || candidate || {}
+  const owner = liveHolder || candidate || {}
   const name = advice.name || owner.name || code
   const projected = []
   const judgeContext = buildJudgeAdviceContext(advice)
 
-  if (candidate && !candidate.alertMuted) {
+  if (candidate && !liveHolder && !candidate.alertMuted) {
     const triggerZone = judgeContext.addZone
     const buyPrice = roundPrice(triggerZone?.high ?? advice.buyPrice)
     if (buyPrice != null) {
@@ -155,10 +159,12 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
     changed = true
   }
 
-  if (adviceSupportsIntent('add', judgeContext)) {
-    buildAction('add', 'lte', advice.addPrice, owner.muteAdd)
+  if (liveHolder) {
+    if (adviceSupportsIntent('add', judgeContext)) {
+      buildAction('add', 'lte', advice.addPrice, liveHolder.muteAdd)
+    }
+    buildAction('reduce', 'gte', advice.reducePrice, liveHolder.muteReduce)
   }
-  buildAction('reduce', 'gte', advice.reducePrice, owner.muteReduce)
 
   const oldProjected = alerts.filter(isOwnedAutoAlert)
   if (oldProjected.length !== projected.length) changed = true

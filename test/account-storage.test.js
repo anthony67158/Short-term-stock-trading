@@ -267,6 +267,45 @@ test('客户端旧预警快照不能覆盖服务端Judge确认与后验结果', 
   assert.deepEqual(account.data.alerts[0].judgeContext, { action: '加仓', addPrice: 10 })
 })
 
+test('客户端旧预警快照不能重新启用服务端已退役的持仓预警', () => {
+  const account = {
+    nick: '预警退役账号',
+    clientRevision: 5,
+    data: {
+      alerts: [{
+        id: 'stale-add',
+        code: '600519',
+        actKind: 'add',
+        phase: 'invalid',
+        enabled: false,
+        retiredAt: 300,
+        retiredPolicy: 'position-missing',
+      }],
+      advice: {},
+      adviceLog: [],
+      decisionLog: [],
+    },
+  }
+
+  const result = applyClientAccountSave(account, {
+    alerts: [{
+      id: 'stale-add',
+      code: '600519',
+      actKind: 'add',
+      phase: 'watching',
+      enabled: true,
+      watchingAt: 200,
+    }],
+    adviceLog: [],
+    decisionLog: [],
+  }, 5)
+
+  assert.equal(result.ok, true)
+  assert.equal(account.data.alerts[0].enabled, false)
+  assert.equal(account.data.alerts[0].phase, 'invalid')
+  assert.equal(account.data.alerts[0].retiredPolicy, 'position-missing')
+})
+
 test('客户端保存持仓时不能覆盖服务端 AI 任务队列和 Worker 锁', () => {
   const serverJobs = {
     '600000': { code: '600000', status: 'running', progressAt: 2000 },

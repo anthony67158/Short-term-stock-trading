@@ -30,6 +30,7 @@ import {
   adviceSupportsIntent,
   buildJudgeAdviceContext,
 } from '../shared/judgeAdviceContext.js';
+import { positionGateForAlert } from '../shared/alertPositionPolicy.js';
 import { buildJudgeKnowledgeActionAssessment } from '../shared/knowledgeAction.js';
 import { quantJudgeDiscipline } from '../shared/quantAdviceContext.js';
 
@@ -160,7 +161,7 @@ export function deterministicJudge(side, prim, tech) {
 // ---- LLM Judge:最终研判闸门 ----
 // 喂:交易意图 + 建议的确认条件/失效条件 + 确定性结论 + 技术面摘要 + 分时快照。
 // 要求返回严格 JSON:{decision:'confirm'|'wait'|'invalid', confidence:0-100, reason:'一句话'}。
-async function llmJudge({ a, name, advice, prim, tech, det }) {
+async function llmJudge({ a, name, advice, prim, tech, det, position }) {
   const model = getModel('judge');
   if (!model) return null;   // 未配置 judge 端点/模型 → 跳过 LLM,用确定性结论
   const intent = actionIntentOf(a);
@@ -174,6 +175,7 @@ async function llmJudge({ a, name, advice, prim, tech, det }) {
     + '你的唯一任务:结合盘中走势与建议条件,判断【此刻是否真正到了动手时机】。'
     + '军师建议是本次交易计划的上层约束：必须理解其方向、手数、仓位、盈亏比、止损目标、技术资金消息依据与失效条件；'
     + '不得脱离军师建议单独创造相反动作。单个价格只是进入观察的触发边界，不是固定锚点；'
+    + '当前持仓状态由服务端账本核验：无持仓只能买入，绝不能解释为加仓、减仓、卖出或止损；'
     + '必须围绕主计划版本、动态价格带、失效条件和触价后的分时结构判断。加仓尤其禁止下跌摊平，必须是军师仍支持加仓且触价后出现止跌确认。'
     + '买入必须保守，客观止跌信号不足一律wait；止盈要重视触价后的冲高回落，避免利润明显回撤；'
     + '止损要重视持续破位，不能因措辞犹豫而拖延。invalid必须有明确客观失效证据，不能只凭主观感觉。'
@@ -190,6 +192,10 @@ async function llmJudge({ a, name, advice, prim, tech, det }) {
         ? adv.reduceZone
         : adv.stopZone,
     当前价: prim.price,
+    服务端实时持仓: position ? {
+      当前持仓手数: position.liveQty,
+      今日可卖手数: position.sellableToday,
+    } : null,
     分时快照: {
       较昨收: prim.pctFromPre != null ? prim.pctFromPre + '%' : null,
       分时均价VWAP: prim.vwap,
@@ -258,11 +264,11 @@ async function llmJudge({ a, name, advice, prim, tech, det }) {
 }
 
 // ============ 对外主入口 ============
-// judgeConfirmation({ alert, name, advice, quote }) → { decision, confidence, reason, side, signals, source }
+// judgeConfirmation({ alert, name, advice, quote, position }) → { decision, confidence, reason, side, signals, source }
 //   decision: 'confirm' | 'wait' | 'invalid'
 //   source:   'llm+ta' | 'ta' (LLM 缺席/失败时的确定性兜底)
 // 内部自取分时(fetchTrendsTx)+日线(fetchKlineTx→computeTechnicals);取数失败 → wait(不误发)。
-export async function judgeConfirmation({ alert, name, advice, quote } = {}) {
+export async function judgeConfirmation({ alert, name, advice, quote, position } = {}) {
   const a = alert;
   if (!a || !a.code) {
     return {
@@ -283,6 +289,20 @@ export async function judgeConfirmation({ alert, name, advice, quote } = {}) {
     ...result,
     knowledgeAction: result?.knowledgeAction || knowledgeAction,
   });
+  if (position) {
+    const positionGate = positionGateForAlert(a, position);
+    if (!positionGate.allowed) {
+      return withKnowledgeAction({
+        decision: positionGate.transient ? 'wait' : 'invalid',
+        confidence: 100,
+        reason: positionGate.reason,
+        side,
+        actionIntent: intent,
+        source: 'account',
+        policy: positionGate.policy,
+      });
+    }
+  }
   if (!adviceSupportsIntent(intent, adviceContext)) {
     return withKnowledgeAction({
       decision: 'invalid',
@@ -384,7 +404,7 @@ export async function judgeConfirmation({ alert, name, advice, quote } = {}) {
   }
 
   // LLM 最终闸门(可回退)，最终结果由非对称融合策略裁决。
-  const llm = await llmJudge({ side, a, name, advice, prim, tech, det });
+  const llm = await llmJudge({ side, a, name, advice, prim, tech, det, position });
   const fused = fuseConfirmation({
     side,
     deterministic: det,
