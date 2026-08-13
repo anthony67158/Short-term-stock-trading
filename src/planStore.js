@@ -12,7 +12,6 @@ import {
 } from '../shared/alertPositionPolicy.js'
 import {
   applyAccountCashFlow,
-  deriveAccountValuation,
 } from '../shared/accountValuation.js'
 import {
   ADVICE_OUTCOME_POLICY_VERSION,
@@ -24,6 +23,12 @@ import {
 } from '../shared/adviceOutcome.js'
 import { evaluateKnowledgeActionCycle } from '../shared/knowledgeAction.js'
 import { mergeReviewsByTimestamp } from '../shared/reviewSchedule.js'
+import {
+  computePortfolio as computeSharedPortfolio,
+  computeTFlows as computeSharedTFlows,
+  livePositionOf as liveSharedPosition,
+  t1StatusOf as sharedT1Status,
+} from '../shared/portfolioAccounting.js'
 // 注意:adviceBatch 只在 mergeCloud 运行时用到,这里【不能】做顶层静态 import——
 // 否则 planStore→adviceBatch→adviceRunner→serverAdvice→authStore 形成模块初始化环,
 // 而 authStore 顶层会调用 planStore.registerSaver(),此时 planStore 尚未初始化 → 整包崩(白屏卡启动)。
@@ -2129,33 +2134,7 @@ export const planStore = {
 // 某只股的【实时持仓】口径：底仓 ± 未结算做T净腿(买腿=已加仓、卖腿=已减仓)。
 // 返回 { qty, cost, hasOpenT, tNetHands } 或 null(无持仓)。供 AI 建议/复盘统一使用。
 export function livePositionOf(code) {
-  const hs = (state.holding || []).filter((h) => h.code === code)
-  if (!hs.length) return null
-  let qty = 0, costSum = 0, hasOpenT = false, tNet = 0
-  for (const h of hs) {
-    const baseQty = h.qty || 0, baseCost = h.buyPrice || 0
-    const r = computeTFlows(h.tFlows)
-    const openBuy = r.openBuy || 0, openSell = r.openSell || 0
-    const net = openBuy - openSell
-    if (h.tFlows && h.tFlows.length && (openBuy > 0 || openSell > 0)) hasOpenT = true
-    tNet += net
-    const liveQty = Math.max(0, baseQty + net)
-    let cost = baseCost
-    if (openBuy > 0 && r.openBuyAvg != null && (baseQty + openBuy) > 0) {
-      cost = ((baseCost * baseQty) + (r.openBuyAvg * openBuy)) / (baseQty + openBuy)
-    }
-    qty += liveQty
-    costSum += cost * liveQty
-  }
-  if (qty <= 0) return null
-  return { qty, cost: +(costSum / qty).toFixed(3), hasOpenT, tNetHands: tNet }
-}
-
-// 最近一个"北京时间零点"的时间戳(epoch ms)——不依赖沙箱本地时区，纯 epoch 运算。
-// 交易流水里的 at 都是 Date.now()(epoch ms)，据此判定"是否今天(北京时间)买入"。
-function bjDayStartTs() {
-  const EIGHT_H = 8 * 3600000, DAY = 24 * 3600000
-  return Math.floor((Date.now() + EIGHT_H) / DAY) * DAY - EIGHT_H
+  return liveSharedPosition(state.holding, code)
 }
 
 // 某只股的【T+1 锁定口径】：今日(北京时间)买入的手数当日不可卖(A股T+1)。
@@ -2167,107 +2146,12 @@ function bjDayStartTs() {
 //   · buys          今日买入明细 [{price,qty,at,kind}] 供AI判断加仓成本/时间
 // 无持仓返回 null。供 AI 建议(hold/buy)与复盘统一遵守：卖出/减仓/清仓手数不得超过 sellableToday。
 export function t1StatusOf(code) {
-  const lp = livePositionOf(code)
-  const liveQty = lp ? lp.qty : 0
-  const t0 = bjDayStartTs()
-  let boughtToday = 0
-  const buys = []
-  // 1) 建仓/加仓/手动补录买入：closed 里今日的 BUY 流水
-  ;(state.closed || []).forEach((c) => {
-    if (c.code !== code) return
-    if ((c.type || c.kind) !== 'BUY') return
-    const at = c.at || c.buyAt || 0
-    if (at < t0) return
-    boughtToday += (c.qty || 0)
-    buys.push({ price: c.price, qty: c.qty, at, kind: '建仓/加仓' })
-  })
-  // 2) 今日做T买腿(未结算或已配对都算——今天买进的就是今天买的，当日锁定)
-  ;(state.holding || []).filter((h) => h.code === code).forEach((h) => {
-    ;(h.tFlows || []).forEach((f) => {
-      if (f.side === 'buy' && (f.at || 0) >= t0) {
-        boughtToday += (f.qty || 0)
-        buys.push({ price: f.price, qty: f.qty, at: f.at, kind: '做T买腿' })
-      }
-    })
-  })
-  boughtToday = +boughtToday.toFixed(3)
-  const sellableToday = Math.max(0, +(liveQty - boughtToday).toFixed(3))
-  return { liveQty, boughtToday, sellableToday, buys }
+  return sharedT1Status(state.holding, state.closed, code)
 }
 
 // FIFO 配对做T流水，算已实现净收益 + 未配对(挂单)手数 + 每笔配对明细
 export function computeTFlows(flows) {
-  const list = [...(flows || [])].sort((a, b) => a.at - b.at)
-  let realized = 0, pairs = 0
-  const pairList = [] // 每笔配对成功的做T明细（供归档/展示）
-  // 逐笔按时间配对：一个卖可对多个买、一个买可对多个卖(FIFO)
-  const queue = { buy: [], sell: [] }
-  for (const f of list) {
-    const opp = f.side === 'buy' ? 'sell' : 'buy'
-    let remain = f.qty
-    let feeLeft = f.fee
-    while (remain > 0 && queue[opp].length) {
-      const head = queue[opp][0]
-      const m = Math.min(remain, head.qty)
-      const buyLeg = f.side === 'buy' ? f : head
-      const sellLeg = f.side === 'buy' ? head : f
-      const buyP = buyLeg.price
-      const sellP = sellLeg.price
-      const shares = m * 100
-      const gross = (sellP - buyP) * shares
-      // 按配对比例分摊两腿手续费
-      const feeThisCur = feeLeft * (m / remain)
-      const feeThisHead = head.fee * (m / head.qty)
-      const feeThis = feeThisCur + feeThisHead
-      const net = +(gross - feeThis).toFixed(2)
-      realized += gross - feeThis
-      pairs++
-      // 正T=先买后卖(买腿时间在前)；反T=先卖后买(卖腿时间在前)
-      const buyAt = buyLeg.at, sellAt = sellLeg.at
-      pairList.push({
-        qty: m,
-        buyPrice: buyP, sellPrice: sellP,
-        buyFee: +((f.side === 'buy' ? feeThisCur : feeThisHead)).toFixed(2),
-        sellFee: +((f.side === 'buy' ? feeThisHead : feeThisCur)).toFixed(2),
-        grossPnl: +gross.toFixed(2), netPnl: net,
-        cashApplied: buyLeg.cashApplied === true && sellLeg.cashApplied === true,
-        tDir: buyAt <= sellAt ? 'positive' : 'reverse',
-        buyAt, sellAt, at: Math.max(buyAt, sellAt),
-      })
-      remain -= m
-      feeLeft -= feeLeft * (m / (remain + m))
-      head.qty -= m
-      head.fee -= head.fee * (m / (head.qty + m))
-      if (head.qty <= 1e-9) queue[opp].shift()
-    }
-    if (remain > 0) {
-      queue[f.side].push({
-        price: f.price,
-        qty: remain,
-        fee: feeLeft,
-        at: f.at,
-        cashApplied: f.cashApplied === true,
-      })
-    }
-  }
-  const openBuy = queue.buy.reduce((a, x) => a + x.qty, 0)
-  const openSell = queue.sell.reduce((a, x) => a + x.qty, 0)
-  // 开口腿（未配平的净头寸）明细：净买入=加仓，净卖出=减仓/清仓
-  const openBuyAmt = queue.buy.reduce((a, x) => a + x.price * x.qty * 100, 0)
-  const openBuyFee = +queue.buy.reduce((a, x) => a + x.fee, 0).toFixed(2)
-  const openSellAmt = queue.sell.reduce((a, x) => a + x.price * x.qty * 100, 0)
-  const openSellFee = +queue.sell.reduce((a, x) => a + x.fee, 0).toFixed(2)
-  const openBuyAvg = openBuy ? +(openBuyAmt / (openBuy * 100)).toFixed(3) : null
-  const openSellAvg = openSell ? +(openSellAmt / (openSell * 100)).toFixed(3) : null
-  const openBuyAt = queue.buy.length ? Math.max(...queue.buy.map((x) => x.at)) : null
-  const openSellAt = queue.sell.length ? Math.max(...queue.sell.map((x) => x.at)) : null
-  const openBuyCashApplied = queue.buy.length > 0 && queue.buy.every((x) => x.cashApplied)
-  const openSellCashApplied = queue.sell.length > 0 && queue.sell.every((x) => x.cashApplied)
-  return {
-    realized: +realized.toFixed(2), pairs, openBuy, openSell, pairList,
-    openBuyAvg, openBuyFee, openBuyAt, openSellAvg, openSellFee, openSellAt,
-    openBuyCashApplied, openSellCashApplied,
-  }
+  return computeSharedTFlows(flows)
 }
 
 export function usePlanStore() {
@@ -2281,83 +2165,7 @@ registerAdviceSync(() => { try { scheduleSave() } catch { /* ignore */ } })
 // ============ 账户全景计算：传入 holding + 实时报价 quote(按code索引) + account =============
 // 返回：持仓市值、成本、浮盈、总资产、可用现金、总仓位%、每笔持仓的市值/占比/浮盈
 export function computePortfolio(holding, quoteMap, account) {
-  // 有限数兜底:任何非有限值(NaN/字符串/Infinity)一律折成 0,防止一条脏数据把总市值/浮盈亏整列算成 NaN。
-  const fin = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0 }
-  const positions = (holding || []).map((h) => {
-    const q = quoteMap && quoteMap[h.code]
-    // 现价必须 > 0 才有效:休市/接口异常会返回 0。兜底顺序:实时现价 → 昨收 prevClose → 买入成本,
-    // 保证市值/浮盈亏永远有个合理数值,既不为 0 也不会被算成 -100%。
-    const price = fin(q && Number(q.price) > 0 ? q.price
-      : (q && Number(q.prevClose) > 0 ? Number(q.prevClose) : h.buyPrice))
-    const baseQty = fin(h.qty)
-    const tFlows = computeTFlows(h.tFlows)
-    const liveQty = Math.max(0, baseQty + fin(tFlows.openBuy) - fin(tFlows.openSell))
-    const shares = liveQty * 100
-    const mktValue = +(price * shares).toFixed(2)          // 市值
-    let costValue = fin(h.buyPrice) * baseQty * 100 + fin(h.buyFee)
-    if (tFlows.openBuy > 0 && tFlows.openBuyAvg != null) {
-      costValue += fin(tFlows.openBuyAvg) * fin(tFlows.openBuy) * 100 + fin(tFlows.openBuyFee)
-    } else if (tFlows.openSell > 0 && baseQty > 0) {
-      costValue *= Math.max(0, baseQty - fin(tFlows.openSell)) / baseQty
-    }
-    costValue = +costValue.toFixed(2) // 含费动态持仓成本
-    const floatPnl = +(mktValue - costValue).toFixed(2)     // 浮动盈亏
-    const floatPct = costValue ? +((floatPnl / costValue) * 100).toFixed(2) : 0
-    return {
-      id: h.id,
-      industry: h.industry || null,
-      code: h.code,
-      name: h.name,
-      qty: liveQty,
-      baseQty,
-      price,
-      buyPrice: h.buyPrice,
-      mktValue,
-      costValue,
-      floatPnl,
-      floatPct,
-    }
-  })
-  const holdMktValue = +positions.reduce((a, p) => a + p.mktValue, 0).toFixed(2)   // 持仓总市值
-  const holdCostValue = +positions.reduce((a, p) => a + p.costValue, 0).toFixed(2) // 持仓总成本
-  const floatPnl = +(holdMktValue - holdCostValue).toFixed(2)                       // 总浮盈
-  const {
-    cash,
-    available,
-    totalAssets,
-    initialCapital,
-    totalPnl,
-    totalPnlPct,
-  } = deriveAccountValuation({ holdMktValue, holdCostValue, account })
-  const position = totalAssets ? +((holdMktValue / totalAssets) * 100).toFixed(1) : null // 总仓位%
-  // 单票占比（对总资产）
-  positions.forEach((p) => { p.weight = totalAssets ? +((p.mktValue / totalAssets) * 100).toFixed(1) : null })
-  // ===== 目标资产（以终为始）=====
-  // goal = 用户想通过炒股达成的目标总资产(元)。派生:进度%、还需净赚缺口(元)、达标所需收益率%
-  const goal = account && account.goal != null && account.goal > 0 ? account.goal : null
-  let goalProgress = null, goalGap = null, goalReturnPct = null
-  if (goal && totalAssets != null) {
-    goalProgress = +((totalAssets / goal) * 100).toFixed(1)   // 进度%(可>100)
-    goalGap = +(goal - totalAssets).toFixed(2)                // 距目标还差(元;负=已超额)
-    goalReturnPct = totalAssets > 0 ? +(((goal - totalAssets) / totalAssets) * 100).toFixed(1) : null // 从现在到达标还需涨幅%
-  }
-  return {
-    positions,
-    holdMktValue,
-    holdCostValue,
-    floatPnl,
-    totalAssets,
-    initialCapital,
-    totalPnl,
-    totalPnlPct,
-    cash,
-    available,
-    position,
-    goal,
-    goalProgress,
-    goalGap,
-    goalReturnPct,
-  }
+  return computeSharedPortfolio(holding, quoteMap, account)
 }
 
 export function sortHoldingsByProfit(holding, quoteMap, account) {
