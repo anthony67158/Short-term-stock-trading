@@ -3,8 +3,12 @@ import assert from 'node:assert/strict'
 
 import {
   attachEvidenceSnapshot,
+  addEvidenceSnapshot,
   createCanonicalEvidenceSnapshot,
+  createEvidenceSourceTracker,
   evidencePersistenceFields,
+  evidenceSnapshotsFromData,
+  mergeEvidenceSnapshotIndexes,
   resolveEvidenceAccountRevision,
   sourceTextVersion,
 } from '../shared/evidenceSnapshot.js'
@@ -147,4 +151,137 @@ test('Prompt来源版本由实际内容稳定生成并随内容变化', () => {
   assert.equal(sourceTextVersion('advisor', '同一内容'), sourceTextVersion('advisor', '同一内容'))
   assert.notEqual(sourceTextVersion('advisor', '版本一'), sourceTextVersion('advisor', '版本二'))
   assert.match(sourceTextVersion('advisor', '内容'), /^advisor\.[a-z0-9]+$/)
+})
+
+test('数据源遥测记录成功空值异常跳过和真实耗时', async () => {
+  let now = 1000
+  const tracker = createEvidenceSourceTracker({ clock: () => now })
+
+  let resolveSuccess
+  const successPromise = new Promise((resolve) => {
+    resolveSuccess = resolve
+  })
+  const trackedSuccess = tracker.track('market', '大盘情绪', successPromise, {
+    isAvailable: (value) => value.list.length > 0,
+    dataAsOf: (value) => value.asOf,
+  })
+  now = 1025
+  resolveSuccess({ asOf: '2026-08-13', list: [1] })
+  const success = await trackedSuccess
+  let resolveEmpty
+  const trackedEmpty = tracker.track('news', '消息面', new Promise((resolve) => {
+    resolveEmpty = resolve
+  }), {
+    isAvailable: (value) => value.length > 0,
+  })
+  now = 1050
+  resolveEmpty([])
+  await trackedEmpty
+  let rejectQuant
+  const trackedError = tracker.track('quant', '量化', new Promise((resolve, reject) => {
+    rejectQuant = reject
+  }))
+  now = 1080
+  rejectQuant(new Error('timeout'))
+  await assert.rejects(trackedError, /timeout/)
+  tracker.skip('industryNews', '行业新闻', 'NO_INDUSTRY')
+
+  assert.deepEqual(success, { asOf: '2026-08-13', list: [1] })
+  assert.deepEqual(
+    tracker.snapshot().map((item) => ({
+      key: item.key,
+      status: item.status,
+      durationMs: item.durationMs,
+      dataAsOf: item.dataAsOf,
+      errorCode: item.errorCode,
+    })),
+    [
+      { key: 'market', status: 'OK', durationMs: 25, dataAsOf: '2026-08-13', errorCode: null },
+      { key: 'news', status: 'EMPTY', durationMs: 25, dataAsOf: null, errorCode: null },
+      { key: 'quant', status: 'ERROR', durationMs: 30, dataAsOf: null, errorCode: 'Error' },
+      { key: 'industryNews', status: 'SKIPPED', durationMs: 0, dataAsOf: null, errorCode: 'NO_INDUSTRY' },
+    ],
+  )
+})
+
+test('证据快照携带采集遥测且只保留安全错误类型', () => {
+  const snapshot = createCanonicalEvidenceSnapshot({
+    mode: 'hold_advice',
+    payload,
+    accountRevision: 12,
+    now: Date.parse('2026-08-13T02:31:00.000Z'),
+    sourceTrace: [{
+      key: 'quote',
+      label: '今日实时行情',
+      status: 'OK',
+      startedAt: '2026-08-13T02:30:59.900Z',
+      finishedAt: '2026-08-13T02:31:00.000Z',
+      durationMs: 100,
+      dataAsOf: '2026-08-13',
+      errorCode: null,
+    }],
+  })
+
+  assert.equal(snapshot.collection.sources[0].durationMs, 100)
+  assert.equal(snapshot.collection.sourceDurationMs, 100)
+  assert.equal(snapshot.collection.wallClockMs, 100)
+  assert.deepEqual(snapshot.collection.failedSources, [])
+})
+
+test('账号快照索引按ID去重并只保留最近80条', () => {
+  const data = {}
+  for (let index = 0; index < 85; index++) {
+    addEvidenceSnapshot(data, {
+      schemaVersion: 'canonical-evidence.v1',
+      snapshotId: `ev_${index}`,
+      asOf: new Date(1000 + index).toISOString(),
+    })
+  }
+
+  assert.equal(Object.keys(data.evidenceSnapshots).length, 80)
+  assert.equal(data.evidenceSnapshots.ev_0, undefined)
+  assert.equal(data.evidenceSnapshots.ev_84.snapshotId, 'ev_84')
+})
+
+test('快照索引合并保留两端较新的有界全集', () => {
+  const merged = mergeEvidenceSnapshotIndexes(
+    {
+      ev_server: { snapshotId: 'ev_server', asOf: '2026-08-13T02:00:00.000Z' },
+      ev_same: { snapshotId: 'ev_same', asOf: '2026-08-13T02:01:00.000Z', mode: 'old' },
+    },
+    {
+      ev_client: { snapshotId: 'ev_client', asOf: '2026-08-13T02:02:00.000Z' },
+      ev_same: { snapshotId: 'ev_same', asOf: '2026-08-13T02:03:00.000Z', mode: 'new' },
+    },
+  )
+
+  assert.deepEqual(Object.keys(merged).sort(), ['ev_client', 'ev_same', 'ev_server'])
+  assert.equal(merged.ev_same.mode, 'new')
+})
+
+test('账号持久化可从军师建议与复盘记录提取完整快照', () => {
+  const extracted = evidenceSnapshotsFromData({
+    advice: {
+      '600001': {
+        meta: {
+          evidenceSnapshot: {
+            snapshotId: 'ev_advice',
+            asOf: '2026-08-13T02:00:00.000Z',
+          },
+        },
+      },
+    },
+    reviews: {
+      '300001': {
+        meta: {
+          evidenceSnapshot: {
+            snapshotId: 'ev_review',
+            asOf: '2026-08-13T03:00:00.000Z',
+          },
+        },
+      },
+    },
+  })
+
+  assert.deepEqual(Object.keys(extracted).sort(), ['ev_advice', 'ev_review'])
 })

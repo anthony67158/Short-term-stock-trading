@@ -109,6 +109,10 @@ test('FC自动复盘先保存租约再写入成功结果且同场不重复生成
     current.data.reviews['600001'].meta.evidenceSnapshot.snapshotId,
     'ev_review_test',
   )
+  assert.equal(
+    current.data.evidenceSnapshots.ev_review_test.snapshotId,
+    'ev_review_test',
+  )
   assert.equal(current.data.reviewAuto.runs['2026-08-13:noon'].codes['600001'].status, 'done')
 })
 

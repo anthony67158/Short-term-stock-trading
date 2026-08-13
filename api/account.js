@@ -11,6 +11,10 @@ import {
   mergeReviewsByTimestamp,
   reviewsAfter,
 } from '../shared/reviewSchedule.js';
+import {
+  evidenceSnapshotsFromData,
+  mergeEvidenceSnapshotIndexes,
+} from '../shared/evidenceSnapshot.js';
 
 // ============ 云端账号 + 数据同步（阿里云 OSS 持久化）============
 // 单一入口，按 action 区分：register / login / get / save
@@ -145,6 +149,16 @@ export function applyClientAccountSave(account, incoming, baseRevision) {
   if (prev.reviewAuto && typeof prev.reviewAuto === 'object') {
     merged.reviewAuto = prev.reviewAuto;
   }
+  merged.evidenceSnapshots = mergeEvidenceSnapshotIndexes(
+    {
+      ...(prev.evidenceSnapshots || {}),
+      ...evidenceSnapshotsFromData(prev),
+    },
+    {
+      ...(incoming.evidenceSnapshots || {}),
+      ...evidenceSnapshotsFromData(incoming),
+    },
+  );
   const settings = mergeAutoRefreshSettings(prev.settings || {}, incoming.settings || {});
   for (const key of [
     'advAuto.holdLastAt', 'advAuto.holdLastTryAt',

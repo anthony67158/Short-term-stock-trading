@@ -44,6 +44,7 @@ import {
 import {
   attachEvidenceSnapshot,
   createCanonicalEvidenceSnapshot,
+  createEvidenceSourceTracker,
   resolveEvidenceAccountRevision,
   sourceTextVersion,
 } from '../shared/evidenceSnapshot.js';
@@ -506,6 +507,7 @@ export default async function handler(req, res) {
       payload,
       accountAuth.account,
     );
+    const sourceTracker = createEvidenceSourceTracker();
     let evidenceSnapshot = null;
     const ensureEvidenceSnapshot = () => {
       if (!isAdvisorMode(mode) || !payload.code) return null;
@@ -515,6 +517,7 @@ export default async function handler(req, res) {
           payload,
           accountRevision: evidenceAccountRevision,
           promptVersion: sourceTextVersion('advisor', ADVISOR_SYSTEM),
+          sourceTrace: sourceTracker.snapshot(),
         });
       }
       return evidenceSnapshot;
@@ -607,27 +610,64 @@ export default async function handler(req, res) {
           // 内部 API 调用加超时保护(原来无超时——某个内部接口卡住会拖垮整个数据采集、烧光预算)
           const c = new AbortController();
           const to = setTimeout(() => c.abort(), 15000);
-          return fetch(origin + p, { signal: c.signal }).then((r) => r.json()).catch(() => null).finally(() => clearTimeout(to));
+          return fetch(origin + p, { signal: c.signal })
+            .then((r) => {
+              if (!r.ok) {
+                const error = new Error(`HTTP ${r.status}`);
+                error.name = 'HTTPError';
+                throw error;
+              }
+              return r.json();
+            })
+            .finally(() => clearTimeout(to));
         };
         // ★采集透明化:每个数据源各自 settle 时立即推 source 事件(名称+成功/失败),
         //   让前端把"黑盒卡住"变成可见的勾选清单(查大盘✓ 查资金✓ 龙虎榜— …)。okFn 判定该源是否取到有效数据。
-        const track = (label, p, okFn) => p.then(
-          (v) => { emit('source', { label, ok: okFn ? !!okFn(v) : (v != null) }); return v; },
-          (e) => { emit('source', { label, ok: false }); throw e; },
+        const track = (
+          key,
+          label,
+          promise,
+          okFn,
+          dataAsOf = () => null,
+        ) => sourceTracker.track(key, label, promise, {
+          isAvailable: okFn,
+          dataAsOf,
+        }).then(
+          (value) => {
+            const trace = sourceTracker.snapshot().at(-1);
+            emit('source', {
+              label,
+              ok: trace?.status === 'OK',
+              status: trace?.status,
+              durationMs: trace?.durationMs,
+              dataAsOf: trace?.dataAsOf,
+            });
+            return value;
+          },
+          (error) => {
+            const trace = sourceTracker.snapshot().at(-1);
+            emit('source', {
+              label,
+              ok: false,
+              status: trace?.status || 'ERROR',
+              durationMs: trace?.durationMs,
+            });
+            return null;
+          },
         );
 
         const [mkt, sec, detail, trend, stockFund, lhb, corpus, macroNews, todayQ, dailySummary, macroFlashes] = await Promise.all([
-          track('大盘情绪', getJ('/api/market'), (v) => v && v.ok !== false),
-          track('板块资金', getJ('/api/sectors?type=industry&sort=main'), (v) => v && v.list && v.list.length),
-          track('个股K线', getJ(`/api/stock_detail?code=${payload.code}&klt=101&lmt=60`), (v) => v && v.ok !== false && v.candles && v.candles.length),
-          track('分时走势', fetchTrend(payload.code)),
-          track('个股资金流', fetchStockFund(payload.code)),
-          track('龙虎榜', fetchStockLHB(payload.code)),
-          track('消息面/公告', buildCorpus(payload.code).catch(() => null), (v) => v && v.docs && v.docs.length),  // 消息面/公告/基本面 RAG 语料
-          track('宏观要闻', fetchMacroNews(), (v) => v && v.length),                              // 国内外宏观/重大事件
-          track('今日实时行情', getJ(`/api/quote?codes=${payload.code}&_t=${Date.now()}`), (v) => v && v.list && v.list.length),  // ★今日实时行情(涨跌幅/涨停/量比)——纠正"技术面/资金是昨日口径"的滞后
-          track('策略日报摘要', resolveAdviceDailySummary(payload), (v) => v && v.text),     // ★优先复用前置闸门注入的日报；旧调用无载荷时才查 OSS
-          track('财经快讯', fetchMacroFlashes(8).catch(() => null), (v) => v && v.length),        // ★权威财经快讯(财联社系/金十)——外部实时消息面
+          track('market', '大盘情绪', getJ('/api/market'), (v) => v && v.ok !== false),
+          track('sectorFlow', '板块资金', getJ('/api/sectors?type=industry&sort=main'), (v) => v && v.list && v.list.length),
+          track('dailyCandles', '个股K线', getJ(`/api/stock_detail?code=${payload.code}&klt=101&lmt=60`), (v) => v && v.ok !== false && v.candles && v.candles.length, (v) => v?.candles?.at(-1)?.date || null),
+          track('intraday', '分时走势', fetchTrend(payload.code), (v) => Array.isArray(v) && v.length > 0, (v) => v?.at(-1)?.time || null),
+          track('stockFunds', '个股资金流', fetchStockFund(payload.code), (v) => v != null, (v) => v?.asOfDate || null),
+          track('dragonTiger', '龙虎榜', fetchStockLHB(payload.code), (v) => v != null, (v) => v?.date || null),
+          track('stockNews', '消息面/公告', buildCorpus(payload.code), (v) => v && v.docs && v.docs.length),
+          track('macroNews', '宏观要闻', fetchMacroNews(), (v) => v && v.length),
+          track('quote', '今日实时行情', getJ(`/api/quote?codes=${payload.code}&_t=${Date.now()}`), (v) => v && v.list && v.list.length, (v) => v?.list?.[0]?.tradeDate || null),
+          track('dailyReport', '策略日报摘要', resolveAdviceDailySummary(payload), (v) => v && v.text, (v) => v?.day || null),
+          track('macroFlashes', '财经快讯', fetchMacroFlashes(8), (v) => v && v.length),
         ]);
         // ★外部市场环境：把当天策略日报摘要注入，让个股建议结合大盘/板块/海外环境判断
         if (dailySummary && dailySummary.text) payload.dailyReport = dailySummary;
@@ -708,18 +748,43 @@ export default async function handler(req, res) {
         }
         const [indNews, quant] = await Promise.all([
           industry
-            ? fetchIndustryNews(industry).catch(() => null)
-            : Promise.resolve(null),
+            ? track(
+              'industryNews',
+              '行业新闻',
+              fetchIndustryNews(industry),
+              (value) => Array.isArray(value) && value.length > 0,
+            )
+            : (() => {
+              sourceTracker.skip(
+                'industryNews',
+                '行业新闻',
+                'NO_INDUSTRY',
+              );
+              return Promise.resolve(null);
+            })(),
           hasCandles
-            ? fetchSelectedQuantPredict(
-              quantModelVersion,
-              payload.code,
-              quantCandles,
-              (payload.holdCost ? { cost: payload.holdCost, qty: payload.holdQty } : null),
-              12000,
-              quantRealtime,
-            ).catch(() => null)
-            : Promise.resolve(null),
+            ? track(
+              'quant',
+              '量化预测',
+              fetchSelectedQuantPredict(
+                quantModelVersion,
+                payload.code,
+                quantCandles,
+                (payload.holdCost ? { cost: payload.holdCost, qty: payload.holdQty } : null),
+                12000,
+                quantRealtime,
+              ),
+              (value) => !!value?.ok,
+              (value) => value?.asOf || null,
+            )
+            : (() => {
+              sourceTracker.skip(
+                'quant',
+                '量化预测',
+                'INSUFFICIENT_CANDLES',
+              );
+              return Promise.resolve(null);
+            })(),
         ]);
         if (quantModelVersion !== 'default' && !quant) {
           return finish({

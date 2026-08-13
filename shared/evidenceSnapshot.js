@@ -1,5 +1,6 @@
 export const EVIDENCE_SCHEMA_VERSION = 'canonical-evidence.v1'
 export const EVIDENCE_COLLECTOR_VERSION = 'ai-collector.v1'
+export const EVIDENCE_SNAPSHOT_LIMIT = 80
 
 function finite(value) {
   if (value == null || value === '') return null
@@ -46,6 +47,75 @@ function source(available, state, dataAsOf, observedAt) {
   }
 }
 
+function isoTime(value) {
+  const date = new Date(value)
+  return Number.isFinite(date.getTime()) ? date.toISOString() : null
+}
+
+function safeErrorCode(error) {
+  const name = String(error?.name || 'Error')
+  return /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(name) ? name : 'Error'
+}
+
+export function createEvidenceSourceTracker({
+  clock = Date.now,
+} = {}) {
+  const records = []
+  return {
+    async track(key, label, promise, {
+      isAvailable = (value) => value != null,
+      dataAsOf = () => null,
+    } = {}) {
+      const startedAt = Number(clock())
+      try {
+        const value = await promise
+        const finishedAt = Number(clock())
+        const available = !!isAvailable(value)
+        records.push({
+          key: String(key),
+          label: String(label),
+          status: available ? 'OK' : 'EMPTY',
+          startedAt: isoTime(startedAt),
+          finishedAt: isoTime(finishedAt),
+          durationMs: Math.max(0, finishedAt - startedAt),
+          dataAsOf: available ? (dataAsOf(value) || null) : null,
+          errorCode: null,
+        })
+        return value
+      } catch (error) {
+        const finishedAt = Number(clock())
+        records.push({
+          key: String(key),
+          label: String(label),
+          status: 'ERROR',
+          startedAt: isoTime(startedAt),
+          finishedAt: isoTime(finishedAt),
+          durationMs: Math.max(0, finishedAt - startedAt),
+          dataAsOf: null,
+          errorCode: safeErrorCode(error),
+        })
+        throw error
+      }
+    },
+    skip(key, label, reason = 'SKIPPED') {
+      const at = Number(clock())
+      records.push({
+        key: String(key),
+        label: String(label),
+        status: 'SKIPPED',
+        startedAt: isoTime(at),
+        finishedAt: isoTime(at),
+        durationMs: 0,
+        dataAsOf: null,
+        errorCode: String(reason || 'SKIPPED').slice(0, 64),
+      })
+    },
+    snapshot() {
+      return records.map((record) => ({ ...record }))
+    },
+  }
+}
+
 export function resolveEvidenceAccountRevision(
   payload = {},
   authenticatedAccount = null,
@@ -61,6 +131,7 @@ export function createCanonicalEvidenceSnapshot({
   accountRevision = null,
   promptVersion = 'advisor-system.v1',
   collectorVersion = EVIDENCE_COLLECTOR_VERSION,
+  sourceTrace = [],
   now = Date.now(),
 } = {}) {
   const asOf = new Date(now).toISOString()
@@ -191,6 +262,33 @@ export function createCanonicalEvidenceSnapshot({
       lhb: payload.lhb,
     }),
   }
+  const collectionSources = compact(sourceTrace || [])
+  const collectionStartedAt = collectionSources
+    .map((item) => Date.parse(item?.startedAt || ''))
+    .filter(Number.isFinite)
+  const collectionFinishedAt = collectionSources
+    .map((item) => Date.parse(item?.finishedAt || ''))
+    .filter(Number.isFinite)
+  const collection = {
+    sources: collectionSources,
+    sourceDurationMs: collectionSources.reduce(
+      (sum, item) => sum + (finite(item?.durationMs) || 0),
+      0,
+    ),
+    wallClockMs: collectionStartedAt.length && collectionFinishedAt.length
+      ? Math.max(
+        0,
+        Math.max(...collectionFinishedAt)
+          - Math.min(...collectionStartedAt),
+      )
+      : 0,
+    failedSources: collectionSources
+      .filter((item) => item?.status === 'ERROR')
+      .map((item) => item.key),
+    emptySources: collectionSources
+      .filter((item) => item?.status === 'EMPTY')
+      .map((item) => item.key),
+  }
   const snapshot = {
     schemaVersion: EVIDENCE_SCHEMA_VERSION,
     snapshotId: '',
@@ -223,10 +321,65 @@ export function createCanonicalEvidenceSnapshot({
       status: freshnessStatus,
       missingSources,
     },
+    collection,
     evidence,
   }
   snapshot.snapshotId = `ev_${Math.trunc(now).toString(36)}_${hashText(JSON.stringify(snapshot))}`
   return snapshot
+}
+
+function snapshotTime(snapshot) {
+  return Date.parse(snapshot?.asOf || '') || 0
+}
+
+export function mergeEvidenceSnapshotIndexes(
+  primary = {},
+  secondary = {},
+  limit = EVIDENCE_SNAPSHOT_LIMIT,
+) {
+  const merged = new Map()
+  for (const snapshot of [
+    ...Object.values(primary || {}),
+    ...Object.values(secondary || {}),
+  ]) {
+    if (!snapshot?.snapshotId) continue
+    const current = merged.get(snapshot.snapshotId)
+    if (!current || snapshotTime(snapshot) >= snapshotTime(current)) {
+      merged.set(snapshot.snapshotId, snapshot)
+    }
+  }
+  return Object.fromEntries(
+    [...merged.values()]
+      .sort((left, right) => snapshotTime(right) - snapshotTime(left))
+      .slice(0, Math.max(1, Number(limit) || EVIDENCE_SNAPSHOT_LIMIT))
+      .map((snapshot) => [snapshot.snapshotId, snapshot]),
+  )
+}
+
+export function addEvidenceSnapshot(
+  data,
+  snapshot,
+  limit = EVIDENCE_SNAPSHOT_LIMIT,
+) {
+  if (!data || typeof data !== 'object' || !snapshot?.snapshotId) return false
+  data.evidenceSnapshots = mergeEvidenceSnapshotIndexes(
+    data.evidenceSnapshots,
+    { [snapshot.snapshotId]: snapshot },
+    limit,
+  )
+  return true
+}
+
+export function evidenceSnapshotsFromData(data = {}) {
+  const snapshots = {}
+  const collect = (value) => {
+    const snapshot = value?.meta?.evidenceSnapshot
+      || value?.evidenceSnapshot
+    if (snapshot?.snapshotId) snapshots[snapshot.snapshotId] = snapshot
+  }
+  Object.values(data.advice || {}).forEach(collect)
+  Object.values(data.reviews || {}).forEach(collect)
+  return snapshots
 }
 
 export function evidenceSnapshotRef(snapshot) {

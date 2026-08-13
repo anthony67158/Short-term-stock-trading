@@ -46,7 +46,11 @@ import {
   buildAdviceCacheEntry,
   compactAdvicePlan,
 } from '../shared/adviceContinuity.js';
-import { evidencePersistenceFields } from '../shared/evidenceSnapshot.js';
+import {
+  evidencePersistenceFields,
+  evidenceSnapshotsFromData,
+  mergeEvidenceSnapshotIndexes,
+} from '../shared/evidenceSnapshot.js';
 import { attachAdviceDailyReport } from '../shared/adviceDailyReportPolicy.js';
 import { adviceEntryMatchesMode } from '../shared/adviceModeContext.js';
 import aiHandler from './ai.js';
@@ -642,6 +646,16 @@ async function persistServer(nick, workingAcc, myId) {
       });
     }
   }
+  fdata.evidenceSnapshots = mergeEvidenceSnapshotIndexes(
+    {
+      ...(fdata.evidenceSnapshots || {}),
+      ...evidenceSnapshotsFromData(fdata),
+    },
+    {
+      ...(wdata.evidenceSnapshots || {}),
+      ...evidenceSnapshotsFromData(wdata),
+    },
+  );
   // adviceLog 按 id 并集
   const wlog = wdata.adviceLog || [];
   if (wlog.length) {

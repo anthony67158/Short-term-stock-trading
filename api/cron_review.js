@@ -20,6 +20,9 @@ import {
   failReviewClaim,
   mergeReviewAutoState,
 } from '../shared/reviewSchedule.js'
+import {
+  addEvidenceSnapshot,
+} from '../shared/evidenceSnapshot.js'
 
 const REVIEW_CONCURRENCY = 2
 const REVIEW_RUNTIME_BUDGET_MS = 300000
@@ -263,6 +266,10 @@ export async function processReviewAccount(
         review: outcome.review,
         now: Number(outcome.review.at) || Date.now(),
       })
+      addEvidenceSnapshot(
+        latest.data,
+        outcome.review.meta?.evidenceSnapshot,
+      )
       ok++
     } else {
       failReviewClaim(latest.data, {

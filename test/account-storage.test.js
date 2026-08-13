@@ -414,6 +414,56 @@ test('客户端旧快照不能覆盖服务端新生成的自动复盘及运行�
   assert.equal(account.data.reviewAuto.runs['2026-08-13:close'].codes['600001'].status, 'done')
 })
 
+test('客户端旧快照不能删除服务端证据快照索引且新增快照可合并', () => {
+  const account = {
+    nick: '证据账号',
+    clientRevision: 5,
+    data: {
+      evidenceSnapshots: {
+        ev_server: {
+          snapshotId: 'ev_server',
+          asOf: '2026-08-13T02:00:00.000Z',
+        },
+      },
+      advice: {},
+      adviceLog: [],
+      decisionLog: [],
+    },
+  }
+
+  const result = applyClientAccountSave(account, {
+    evidenceSnapshots: {
+      ev_client: {
+        snapshotId: 'ev_client',
+        asOf: '2026-08-13T02:01:00.000Z',
+      },
+    },
+    advice: {},
+    adviceLog: [],
+    decisionLog: [],
+  }, 5)
+
+  assert.equal(result.ok, true)
+  assert.deepEqual(
+    Object.keys(account.data.evidenceSnapshots).sort(),
+    ['ev_client', 'ev_server'],
+  )
+})
+
+test('运行时增量同步不返回完整证据快照索引', () => {
+  const delta = accountSyncDelta({
+    evidenceSnapshots: {
+      ev_large: {
+        snapshotId: 'ev_large',
+        asOf: '2026-08-13T02:01:00.000Z',
+        evidence: { news: { headlines: ['大型证据'] } },
+      },
+    },
+  }, 0)
+
+  assert.equal(delta.evidenceSnapshots, undefined)
+})
+
 test('客户端不能把建仓前的买入建议重新写回当前持仓', () => {
   const account = {
     nick: '建议模式账号',
