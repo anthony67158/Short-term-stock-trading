@@ -55,9 +55,8 @@ resources:
         OSS_BUCKET: ${env('OSS_BUCKET')}
         OSS_ACCESS_KEY_ID: ${env('OSS_ACCESS_KEY_ID')}
         OSS_ACCESS_KEY_SECRET: ${env('OSS_ACCESS_KEY_SECRET')}
-        # ---- 云端定时生成 AI 操作建议（/api/cron_advice 的鉴权口令）----
-        # 由 Mira 定时任务 / 外部 cron 携带 X-Cron-Key 命中,防匿名 HTTP 触发器烧 token。
-        # 未配置时 cron_advice 放行(本地/未设),线上务必设置。
+        # ---- FC Timer / 云端任务鉴权口令 ----
+        # Timer payload 与该值匹配后才允许进入 cron_advice / cron_alert / cron_v2_accuracy。
         CRON_KEY: ${env('CRON_KEY')}
         # ---- Web Push(VAPID)：后台/关页面推送盯盘预警 ----
         # 公钥同时以 public/vapid.json 暴露给前端；私钥仅存服务端 env,绝不进前端/仓库。
@@ -86,5 +85,37 @@ resources:
           triggerType: timer
           triggerConfig:
             cronExpression: "CRON_TZ=Asia/Shanghai 0 15 15 * * 1-5"
+            enable: true
+            payload: ${env('CRON_KEY')}
+        # A股盯盘预警：工作日北京时间 09:30–11:30、13:00–15:00 每分钟触发。
+        # 拆成 5 段可精确覆盖半小时时点，避免全天每分钟空调用。
+        - triggerName: alert-market-am-open
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 30-59 9 * * 1-5"
+            enable: true
+            payload: ${env('CRON_KEY')}
+        - triggerName: alert-market-am-core
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 * 10 * * 1-5"
+            enable: true
+            payload: ${env('CRON_KEY')}
+        - triggerName: alert-market-am-close
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 0-30 11 * * 1-5"
+            enable: true
+            payload: ${env('CRON_KEY')}
+        - triggerName: alert-market-pm-core
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 * 13-14 * * 1-5"
+            enable: true
+            payload: ${env('CRON_KEY')}
+        - triggerName: alert-market-pm-close
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 0 15 * * 1-5"
             enable: true
             payload: ${env('CRON_KEY')}

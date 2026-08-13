@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  alertTimerBody,
   adviceTimerBody,
   adviceWorkerBody,
   v2AccuracyTimerBody,
@@ -30,6 +31,31 @@ test('V2正确率定时事件只接受专用触发器和匹配密钥', () => {
   assert.deepEqual(v2AccuracyTimerBody(event, 'secret-key'), { scheduled: true })
   assert.equal(v2AccuracyTimerBody(event, 'wrong-key'), null)
   assert.equal(v2AccuracyTimerBody({ ...event, triggerName: 'other' }, 'secret-key'), null)
+})
+
+test('盯盘预警只接受交易时段专用Timer触发器和匹配密钥', () => {
+  const names = [
+    'alert-market-am-open',
+    'alert-market-am-core',
+    'alert-market-am-close',
+    'alert-market-pm-core',
+    'alert-market-pm-close',
+  ]
+
+  for (const triggerName of names) {
+    assert.deepEqual(alertTimerBody({
+      triggerName,
+      triggerTime: '2026-08-13T01:30:00Z',
+      payload: 'secret-key',
+    }, 'secret-key'), {
+      scheduled: true,
+      roundMs: 8000,
+      budgetMs: 50000,
+    })
+  }
+  assert.equal(alertTimerBody({ triggerName: 'alert-market-other', payload: 'secret-key' }, 'secret-key'), null)
+  assert.equal(alertTimerBody({ triggerName: names[0], payload: 'wrong-key' }, 'secret-key'), null)
+  assert.equal(alertTimerBody({ triggerName: names[0], payload: 'secret-key' }, ''), null)
 })
 
 test('异步建议Worker事件只恢复指定账号且必须验证内部密钥', () => {

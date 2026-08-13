@@ -20,3 +20,18 @@ export function v2AccuracyTimerBody(event, cronKey) {
   if (String(event.payload || '') !== String(cronKey)) return null;
   return { scheduled: true };
 }
+
+const ALERT_TIMER_NAMES = new Set([
+  'alert-market-am-open',
+  'alert-market-am-core',
+  'alert-market-am-close',
+  'alert-market-pm-core',
+  'alert-market-pm-close',
+]);
+
+export function alertTimerBody(event, cronKey) {
+  if (!cronKey || !event || typeof event !== 'object') return null;
+  if (!ALERT_TIMER_NAMES.has(String(event.triggerName || ''))) return null;
+  if (String(event.payload || '') !== String(cronKey)) return null;
+  return { scheduled: true, roundMs: 8000, budgetMs: 50000 };
+}

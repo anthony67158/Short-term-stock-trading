@@ -1,6 +1,6 @@
 // ============ 云端定时「盯盘预警」评估 + Web Push 下发(脱离浏览器) ============
 // 背景:原预警只在浏览器标签打开时由前端 alertStore.evaluate 跑;关页面/切后台就停了。
-//   本 handler 把「命中判定 + 推送」搬到服务端:定时(交易时段 curl 命中)遍历所有账号,
+//   本 handler 把「命中判定 + 推送」搬到服务端:FC Timer 在交易时段直接调用并遍历所有账号,
 //   取其启用中预警涉及的实时报价,逐条判命中 → 命中即 web-push 给该账号所有设备(关页面也收)
 //   → 并把命中的预警在 OSS 里标记 triggeredAt/enabled:false(与前端 markAlertTriggered 同口径),
 //   保证同一规则不被重复推送(幂等)。
@@ -11,10 +11,10 @@
 //   · 鉴权:X-Cron-Key(= 环境变量 CRON_KEY),防匿名 HTTP 触发器滥用。未配置则放行(本地)。
 //   · 失效订阅(410/404)自动从账号剔除,避免长期堆积。
 //
-// 触发:POST /api/cron_alert   header: X-Cron-Key: <CRON_KEY>
+// 触发:FC Timer 事件(生产)或 POST /api/cron_alert + X-Cron-Key(手动联调)
 //   body:{ nick?:'仅跑某账号', roundMs?, budgetMs? }
-//   本 handler 内部自循环:每分钟被 cron 触发一次,单次内按 roundMs(默认 8s)连续评估多轮直到
-//   耗尽 budgetMs(默认 55s)。故有效监控频率 ≈ 8 秒级,不再受 GitHub Actions cron 1 分钟粒度限制。
+//   本 handler 内部自循环:每分钟由 FC Timer 触发一次,单次内按 roundMs(默认 8s)连续评估多轮直到
+//   耗尽 budgetMs(默认 55s)。Timer 事件使用 50s 预算,给相邻分钟调用留出收尾余量。
 
 import { applyCors, preflight } from './_lib.js';
 import { listAllAccounts, writeAccount } from './account.js';
@@ -338,12 +338,12 @@ export default async function handler(req, res) {
   const onlyNick = body.nick ? String(body.nick) : null;
   const started = Date.now();
 
-  // —— 内部自循环:GitHub Actions cron 最细只有 1 分钟粒度,想「更快」就让单次拨测在函数内
+  // —— 内部自循环:FC Timer 最细为 1 分钟粒度,想「更快」就让单次调用在函数内
   //    连续跑多轮。每轮重新拉账号(拿最新 phase/新加的预警)→评估→写回,轮间 sleep 后再来一轮,
   //    直到耗尽时间预算。这样有效监控频率 = 轮间隔(默认 8s),不再受 cron 粒度限制。
   //    可调(env 优先,body 可临时覆盖):
   //      CRON_ALERT_ROUND_MS   轮间隔毫秒(默认 8000,下限 3000 防烧 token)
-  //      CRON_ALERT_BUDGET_MS  单次总预算毫秒(默认 55000,须 < workflow curl -m 与 FC timeout)
+  //      CRON_ALERT_BUDGET_MS  单次总预算毫秒(默认 55000,须小于 FC timeout)
   const clampInt = (v, def, lo, hi) => {
     const n = parseInt(v, 10);
     if (!Number.isFinite(n)) return def;

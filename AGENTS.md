@@ -12,7 +12,7 @@
 - **后端** 所有 `api/*` 由**单个 `server.js` Node 进程**承载 → 部署**阿里云函数计算 FC 3.0**。
 - **量化微服务** FastAPI + LightGBM + GARCH → 独立部署，模型每小时从 OSS 热更新。
 - **存储** 阿里云 OSS（封装成 `_blob.js`）。
-- **定时** GitHub Actions（每日重训 + 每分钟盯盘拨测）。
+- **定时** 阿里云 FC Timer（交易时段盯盘）+ GitHub Actions（每日重训）。
 
 ---
 
@@ -46,10 +46,10 @@ qlib-service/        量化微服务(FastAPI+LightGBM+GARCH,独立部署)
 src/                 前端
   App.jsx 主框架 ; apiBase.js API基址 ; planStore.js 交易账本 ; alertStore.js 预警引擎
   review.js 复盘 ; authStore.js 账号 ; advice*.js AI建议调度 ; components/ 各页面
-.github/workflows/   daily-retrain.yml(每日重训) ; cron-alert.yml(每分钟盯盘)
+.github/workflows/   daily-retrain.yml(每日重训)
 server.js            ★ FC 自定义运行时入口:单进程承载 api/* + 托管 dist/
 dev-server.js        ★ 本地开发 API 服务器
-s.yaml               FC 部署配置 ; vercel.json/vite.config.js 前端
+s.yaml               FC 部署配置 + Timer 触发器 ; vercel.json/vite.config.js 前端
 ```
 
 ---
@@ -93,8 +93,9 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST "$FC/api/ai" -H "Content-Type: 
 ### 量化服务 → 容器/CloudBase/FC（可选）
 见 `qlib-service/README.md`。部署后把地址/Key 配到后端 `QUANT_URL`/`QUANT_KEY`。不配也能跑,只是预测与融合建议不可用。
 
-### 定时任务 → GitHub Actions
-仓库 Settings→Secrets 配好 `OSS_*`、`CRON_KEY`（须与 FC 的 `CRON_KEY` 一致）后自动生效。
+### 定时任务
+- 盯盘预警：`s.yaml` 的 FC Timer 在工作日 09:30–11:30、13:00–15:00 每分钟触发。
+- 每日重训：GitHub Actions `daily-retrain.yml`，仓库 Settings→Secrets 配好 `OSS_*` 后自动生效。
 
 ---
 

@@ -15,6 +15,7 @@ import { readdirSync, existsSync, statSync, createReadStream } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import {
+  alertTimerBody,
   adviceTimerBody,
   adviceWorkerBody,
   v2AccuracyTimerBody,
@@ -78,7 +79,7 @@ const server = http.createServer(async (req, res) => {
   const pathname = url.pathname;
 
   // FC 事件源（Timer/InvokeFunction）固定 POST /invoke。仅接受部署时 CRON_KEY
-  // 匹配的 advice-resume-timer，避免公开 HTTP 地址伪造定时调用消耗模型额度。
+  // 匹配的专用触发器，避免公开 HTTP 地址伪造定时调用消耗模型额度。
   if (pathname === '/invoke' && req.method === 'POST') {
     const raw = await parseBody(req);
     let event = null;
@@ -86,15 +87,21 @@ const server = http.createServer(async (req, res) => {
     const adviceBody = adviceTimerBody(event, process.env.CRON_KEY)
       || adviceWorkerBody(event, process.env.CRON_KEY);
     const v2Body = v2AccuracyTimerBody(event, process.env.CRON_KEY);
-    if (!adviceBody && !v2Body) { res.statusCode = 403; res.end('forbidden'); return; }
+    const alertBody = alertTimerBody(event, process.env.CRON_KEY);
+    if (!adviceBody && !v2Body && !alertBody) { res.statusCode = 403; res.end('forbidden'); return; }
     req.query = {};
-    req.body = adviceBody || v2Body;
+    req.body = adviceBody || v2Body || alertBody;
     req.headers['x-cron-key'] = process.env.CRON_KEY;
     res.status = (code) => { res.statusCode = code; return res; };
     res.send = (payload) => { res.end(typeof payload === 'string' ? payload : JSON.stringify(payload)); return res; };
     res.json = (obj) => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(obj)); return res; };
     try {
-      await handlers[adviceBody ? 'cron_advice' : 'cron_v2_accuracy'](req, res);
+      const handlerName = adviceBody
+        ? 'cron_advice'
+        : v2Body
+          ? 'cron_v2_accuracy'
+          : 'cron_alert';
+      await handlers[handlerName](req, res);
     } catch (e) {
       if (!res.writableEnded) { res.statusCode = 500; res.end(JSON.stringify({ ok: false, error: String(e.message || e) })); }
     }

@@ -56,7 +56,7 @@
 └──────────────────────┘
         ▲
         │ 每日凌晨拉最新日线→冠军/挑战者对拍→过护栏才晋级→上传 OSS
-   GitHub Actions(daily-retrain) + GitHub Actions(cron-alert 每分钟盯盘推送)
+   GitHub Actions(daily-retrain) + 阿里云 FC Timer(交易时段盯盘推送)
 ```
 
 **为什么这样拆:**
@@ -66,7 +66,7 @@
   之所以不走 Vercel Serverless,是因为**军师深度研判常需 47s+、AI 走 SSE 长连接**,而 Vercel Hobby 函数超时短、外部 rewrite 对 SSE 支持不稳定;FC 单函数超时可放到 600s、单实例并发 20,更适合长连接与大 JSON 解析。
 - **量化服务独立部署**:Python 计算(LightGBM 打分 + GARCH 波动率 + 蒙特卡洛路径),与 Node 后端解耦,**模型每小时从 OSS 热更新**,训练产物一上传即上线,无需重部署。
 - **数据落 OSS**:账号数据、AI 建议、模型配置、判定日志、Web Push 订阅统一存阿里云 OSS(封装成与 Vercel Blob 同接口的 `_blob.js`,可无缝切换)。
-- **定时靠 GitHub Actions**:盯盘预警拨测(工作日每分钟)、每日模型重训(工作日凌晨),脱离浏览器也持续跑。
+- **定时分工**:盯盘预警由阿里云 FC Timer 在 A 股交易时段每分钟触发；每日模型重训仍由 GitHub Actions 执行，二者都脱离浏览器持续运行。
 
 ---
 
@@ -250,8 +250,7 @@
 │   └── styles.css            # 全站样式(暗色/白天主题 + 移动端响应式 + design tokens)
 │
 ├── .github/workflows/
-│   ├── daily-retrain.yml     # 每日量化持续训练(工作日凌晨)
-│   └── cron-alert.yml        # 盯盘预警定时拨测(工作日每分钟,服务端评估 + Web Push)
+│   └── daily-retrain.yml     # 每日量化持续训练(工作日凌晨)
 │
 ├── scripts/migrate-blob-to-oss.mjs   # Vercel Blob → 阿里云 OSS 数据迁移
 ├── CLAUDE.md                 # 部署铁律与安全约定(前后端分离,后端改动必须部署 FC)
@@ -311,7 +310,7 @@ set -a; . ./.env; set +a         # 加载 .env,让 s.yaml 的 ${env('...')} 取�
                                  # (关键!否则会把线上环境变量清空搞挂)
 npx @serverless-devs/s deploy -y
 ```
-`s.yaml` 已声明:自定义运行时 `node server.js`、内存 2GB、超时 600s(军师慢模型 + SSE)、单实例并发 20、HTTP 触发器匿名访问。
+`s.yaml` 已声明:自定义运行时 `node server.js`、内存 2GB、超时 600s(军师慢模型 + SSE)、单实例并发 20、HTTP 触发器匿名访问，以及交易时段盯盘、建议续跑、V2 正确率刷新 Timer。
 
 部署后冒烟(都应 200):
 ```bash
@@ -324,11 +323,11 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST "$FC/api/ai" -H "Content-Type: 
 
 见 `qlib-service/README.md` 与 `README-CloudBase.md`。部署后把地址与鉴权 Key 配到后端环境变量 `QUANT_URL` / `QUANT_KEY`。**不配也能运行**,只是走势预测与「量化 × 大模型」融合建议不可用。
 
-### 4) 定时任务 → GitHub Actions
+### 4) 定时任务
 
-在仓库 **Settings → Secrets** 配好 `OSS_*`、`CRON_KEY`(须与 FC 的 `CRON_KEY` 一致)后,两条 workflow 自动生效:
-- `daily-retrain.yml`:工作日凌晨重训量化模型,过护栏才晋级、上传 OSS。
-- `cron-alert.yml`:交易时段每分钟拨测 `/api/cron_alert`,服务端遍历账号评估预警 → 命中即 Web Push(单次拨测内部自循环 ~8 秒级评估,不受 cron 1 分钟粒度限制)。
+- **阿里云 FC Timer**:`s.yaml` 内 5 段北京时间 Cron 精确覆盖工作日 09:30–11:30、13:00–15:00，每分钟直接触发 `cron_alert`，服务端遍历账号评估预警并发送 Web Push。
+- **GitHub Actions**:只保留 `daily-retrain.yml`，工作日重训量化模型，过护栏才晋级并上传 OSS。仓库 Secrets 只需为该训练任务保留 `OSS_*`。
+- FC Timer 的 `payload` 使用部署时 `.env` 中的 `CRON_KEY`，与函数环境变量一致后才允许执行。
 
 ---
 
@@ -349,7 +348,7 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST "$FC/api/ai" -H "Content-Type: 
 | `OSS_REGION` / `OSS_BUCKET` | 阿里云 OSS 区域与桶 | 云端账号/存储需要 |
 | `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` | 阿里云 OSS 访问密钥 | 云端账号/存储需要 |
 | `OSS_ENDPOINT` | OSS Endpoint(训练脚本上传模型用) | 每日重训需要 |
-| `CRON_KEY` | `/api/cron_advice`、`/api/cron_alert` 的鉴权口令 | 定时任务需要(防匿名烧 token) |
+| `CRON_KEY` | FC Timer payload 与 `/api/cron_advice`、`/api/cron_alert` 的鉴权口令 | 定时任务需要(防匿名烧 token) |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | Web Push(VAPID)密钥;公钥经 `public/vapid.json` 给前端,私钥仅存服务端 | Web Push 需要 |
 | `FINNHUB_KEY` | Finnhub(海外/宏观辅助数据) | 可选 |
 | `VITE_API_BASE` | (前端构建时)后端 FC 地址,浏览器直连 | 生产前端必需 |
