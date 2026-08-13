@@ -36,7 +36,7 @@ export default function TodayTab({ interval, market, sectors, snapshot }) {
 
   return (
     <div className="today">
-      <MarketLight market={market} sectors={sectors} snapshot={snapshot} />
+      <MarketLight market={market} sectors={sectors} snapshot={snapshot} limitUp={zt.data} />
       <SentimentGauge zt={zt.data} zb={zb.data} market={market} />
       <DailyPlay snapshot={snapshot} />
       <CandidatePool zt={zt.data} movers={movers.data} speed={speed.data} sectors={sectors} />
@@ -50,8 +50,8 @@ function SentimentGauge({ zt, zb, market }) {
   const g = useMemo(() => {
     const ztList = (zt && zt.list) || []
     const zbList = (zb && zb.list) || []
-    const ztCount = ztList.length
-    const zbCount = zbList.length
+    const ztCount = Number.isFinite(Number(zt?.total)) ? Number(zt.total) : ztList.length
+    const zbCount = Number.isFinite(Number(zb?.total)) ? Number(zb.total) : zbList.length
     // 炸板率 = 炸板数 /(涨停数+炸板数)
     const breakRate = (ztCount + zbCount) ? Math.round(zbCount / (ztCount + zbCount) * 100) : null
     // 连板梯队：按 lbc(连板数) 分布
@@ -63,7 +63,7 @@ function SentimentGauge({ zt, zb, market }) {
       const key = lb >= 2 ? lb : 1
       tiers[key] = (tiers[key] || 0) + 1
     })
-    const lianban = ztCount - (tiers[1] || 0) // 连板数(>=2板)
+    const lianban = ztList.length - (tiers[1] || 0) // 连板数(>=2板)
     const b = (market && market.breadth) || {}
     // 情绪温度分：涨停多、炸板率低、连板高 → 高分
     let score = 50
@@ -90,7 +90,7 @@ function SentimentGauge({ zt, zb, market }) {
         <div className="sg-cell"><span className="sg-k">炸板率</span><span className={'sg-v ' + (g.breakRate != null && g.breakRate >= 35 ? 'green' : g.breakRate != null && g.breakRate <= 15 ? 'red' : '')}>{g.breakRate != null ? g.breakRate + '%' : '--'}</span></div>
         <div className="sg-cell"><span className="sg-k">最高板</span><span className="sg-v gold">{g.maxBoard || '--'}板</span></div>
         <div className="sg-cell"><span className="sg-k">连板数</span><span className="sg-v">{g.lianban}</span></div>
-        <div className="sg-cell"><span className="sg-k">跌停</span><span className="sg-v green">{g.b.limitDown || 0}</span></div>
+        <div className="sg-cell"><span className="sg-k">跌停</span><span className="sg-v green">{g.b.limitDown ?? '--'}</span></div>
       </div>
       <div className="legend" style={{ padding: '6px 2px 0' }}>
         炸板率低+连板高=接力意愿强、赚钱效应好；炸板率高+跌停多=情绪退潮，谨慎追高。综合评分仅供参考。
@@ -100,15 +100,16 @@ function SentimentGauge({ zt, zb, market }) {
 }
 
 // ---------- 大盘盘面（指数全景 + 情绪红绿灯 + 今日操作建议）----------
-function MarketLight({ market, sectors, snapshot }) {
+function MarketLight({ market, sectors, snapshot, limitUp }) {
   const b = (market && market.breadth) || {}
   const idx = (market && market.indices) || []
   const ratio = b.down ? b.up / b.down : (b.up ? 9 : 1)
   // 简单情绪判定
   let light = 'yellow', text = '多空胶着，轻仓试探'
-  const zt = b.limitUp || 0, dt = b.limitDown || 0
-  if (ratio >= 1.5 && zt > dt * 3) { light = 'green'; text = '情绪偏暖，可积极参与' }
-  else if (ratio < 0.7 || dt > zt) { light = 'red'; text = '情绪转弱，控制仓位' }
+  const zt = Number.isFinite(Number(limitUp?.total)) ? Number(limitUp.total) : b.limitUp
+  const dt = b.limitDown
+  if (ratio >= 1.5 && zt != null && dt != null && zt > dt * 3) { light = 'green'; text = '情绪偏暖，可积极参与' }
+  else if (ratio < 0.7 || (zt != null && dt != null && dt > zt)) { light = 'red'; text = '情绪转弱，控制仓位' }
   const topSector = (sectors && sectors.list && sectors.list[0]) || null
 
   // AI 动态盘前建议：结合指数/板块/涨停梯队/异动，不只看红绿灯
@@ -191,7 +192,7 @@ function MarketLight({ market, sectors, snapshot }) {
         <div className="mb-stats">
           <div className="mb-stat">
             <div className="mb-stat-label">涨/跌停</div>
-            <div className="mb-stat-val"><span className="red">{zt}</span><span className="sep">/</span><span className="green">{dt}</span></div>
+            <div className="mb-stat-val"><span className="red">{zt ?? '--'}</span><span className="sep">/</span><span className="green">{dt ?? '--'}</span></div>
           </div>
           <div className="mb-stat">
             <div className="mb-stat-label">涨/跌家数</div>

@@ -1,5 +1,6 @@
 import { emGet, sendJson, sendError, num } from './_lib.js';
 import { fetchClsTelegraph, fetchSinaFlash, fetchNews } from './_market_data.js';
+import { fetchLimitPool } from './_limit_pool.js';
 
 // 盘面研究·外部宏观快讯聚合（合并入 market 端点以规避 Hobby 12 函数上限）
 // GET /api/market?news=1 → { ok, macro:[{title,date,url}], flashes:[{title,src,date,url,level}] }
@@ -45,7 +46,7 @@ async function handleNews(res) {
   }
 }
 
-export function summarizeMarketBreadth(indexRows = [], gainers = [], losers = []) {
+export function summarizeMarketBreadth(indexRows = [], limits = {}) {
   const primaryCodes = new Set(['000001', '399001', '899050'])
   const primary = (indexRows || []).filter((row) => primaryCodes.has(String(row?.f12 || '')))
   const complete = primary.length === primaryCodes.size && primary.every((row) =>
@@ -57,9 +58,12 @@ export function summarizeMarketBreadth(indexRows = [], gainers = [], losers = []
   const up = sum('f104')
   const down = sum('f105')
   const flat = sum('f106')
-  const pct = (row) => Number(row?.f3)
-  const limitUp = (gainers || []).filter((row) => pct(row) >= 9.8).length
-  const limitDown = (losers || []).filter((row) => pct(row) <= -9.8).length
+  const limitUp = Number.isFinite(Number(limits.limitUp))
+    ? Number(limits.limitUp)
+    : null
+  const limitDown = Number.isFinite(Number(limits.limitDown))
+    ? Number(limits.limitDown)
+    : null
   return {
     up,
     down,
@@ -83,19 +87,11 @@ export default async function handler(req, res) {
       `/api/qt/ulist.np/get?fltt=2&invt=2&secids=${encodeURIComponent(idxSecids)}` +
       `&fields=${idxFields}`;
 
-    // 2) 涨跌停榜仅取极值两端；全市场涨跌家数直接使用指数自带 f104/f105/f106。
-    const marketFs = 'm:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048';
-
-    const [idxJson, gainersJson, losersJson, shK, szK] = await Promise.all([
+    // 2) 涨跌停必须用真实池。不能用统一 ±9.8% 阈值，否则会把创业板/科创板普通涨跌误判为涨跌停。
+    const [idxJson, ztPool, dtPool, shK, szK] = await Promise.all([
       emGet(idxPath).catch(() => null),
-      emGet(
-        `/api/qt/clist/get?pn=1&pz=100&po=1&np=1&fltt=2&invt=2&fid=f3` +
-          `&fs=${encodeURIComponent(marketFs)}&fields=f3`
-      ).catch(() => null),
-      emGet(
-        `/api/qt/clist/get?pn=1&pz=100&po=0&np=1&fltt=2&invt=2&fid=f3` +
-          `&fs=${encodeURIComponent(marketFs)}&fields=f3`
-      ).catch(() => null),
+      fetchLimitPool('zt').catch(() => null),
+      fetchLimitPool('dt').catch(() => null),
       // 上证综指 / 深证成指 日K(取成交额 f57),用于"两市成交额"与近5日均量对比(放量/缩量)
       // 注:kline 接口仅 push2his 镜像提供,必须走 { his: true },否则默认 push2 host 返回 502 → 量能因子丢失
       emGet(`/api/qt/stock/kline/get?secid=1.000001&fields1=f1&fields2=f51,f57&klt=101&fqt=1&end=20500101&lmt=6`, { his: true }).catch(() => null),
@@ -115,8 +111,10 @@ export default async function handler(req, res) {
 
     const marketBreadth = summarizeMarketBreadth(
       indexRows,
-      (gainersJson && gainersJson.data && gainersJson.data.diff) || [],
-      (losersJson && losersJson.data && losersJson.data.diff) || [],
+      {
+        limitUp: ztPool?.total,
+        limitDown: dtPool?.total,
+      },
     );
     // 指数成交额只取上证+深证，创业板已包含在深市内，北证单列不混入两市口径。
     const indexAmount = indices
