@@ -60,6 +60,10 @@ resources:
         # ---- FC Timer / 云端任务鉴权口令 ----
         # Timer payload 与该值匹配后才允许进入 cron_advice / cron_alert / cron_v2_accuracy。
         CRON_KEY: ${env('CRON_KEY')}
+        # 军师委员会仅影子运行；设为 false 可紧急关闭额外 LLM 调用。
+        ADVISOR_COUNCIL_SHADOW: ${env('ADVISOR_COUNCIL_SHADOW')}
+        # 策略人工晋级使用独立密钥；空值表示批准接口禁用。
+        STRATEGY_APPROVAL_KEY: ${env('STRATEGY_APPROVAL_KEY')}
         # ---- Web Push(VAPID)：后台/关页面推送盯盘预警 ----
         # 公钥同时以 public/vapid.json 暴露给前端；私钥仅存服务端 env,绝不进前端/仓库。
         VAPID_PUBLIC_KEY: ${env('VAPID_PUBLIC_KEY')}
