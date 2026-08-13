@@ -224,7 +224,7 @@ export function createRecoverableSerialRunner(task) {
 }
 
 // ---- 进程内调用另一个 handler:造最小 req/res,把 JSON 结果收集回来 ----
-function invoke(handler, {
+export function invoke(handler, {
   method = 'GET',
   query = {},
   body = null,
@@ -275,7 +275,7 @@ function invoke(handler, {
   });
 }
 
-function invokeSSE(handler, {
+export function invokeSSE(handler, {
   method = 'POST',
   query = {},
   body = null,

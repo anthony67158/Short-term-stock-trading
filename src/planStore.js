@@ -23,6 +23,7 @@ import {
   summarizeAdviceOutcomes,
 } from '../shared/adviceOutcome.js'
 import { evaluateKnowledgeActionCycle } from '../shared/knowledgeAction.js'
+import { mergeReviewsByTimestamp } from '../shared/reviewSchedule.js'
 // 注意:adviceBatch 只在 mergeCloud 运行时用到,这里【不能】做顶层静态 import——
 // 否则 planStore→adviceBatch→adviceRunner→serverAdvice→authStore 形成模块初始化环,
 // 而 authStore 顶层会调用 planStore.registerSaver(),此时 planStore 尚未初始化 → 整包崩(白屏卡启动)。
@@ -528,7 +529,15 @@ export const planStore = {
     if (d.advice && typeof d.advice === 'object') {
       if (mergeAdvice(d.advice)) changed = true
     }
-    // 2) 决策记录:按 id 并集(仅新增)
+    // 2) 自动/手动复盘按股票和生成时间合并。
+    if (d.reviews && typeof d.reviews === 'object') {
+      const mergedReviews = mergeReviewsByTimestamp(state.reviews, d.reviews)
+      if (Object.keys(mergedReviews).some((code) => mergedReviews[code] !== state.reviews?.[code])) {
+        state = { ...state, reviews: mergedReviews }
+        changed = true
+      }
+    }
+    // 3) 决策记录:按 id 并集(仅新增)
     if (Array.isArray(d.adviceLog) && d.adviceLog.length) {
       const seen = new Set((state.adviceLog || []).map((x) => x && x.id).filter(Boolean))
       const add = d.adviceLog.filter((x) => x && x.id && !seen.has(x.id))
@@ -539,7 +548,7 @@ export const planStore = {
         changed = true
       }
     }
-    // 3) 决策事件按 id 合并；同一建议的 executed 状态以较新的云端事件为准。
+    // 4) 决策事件按 id 合并；同一建议的 executed 状态以较新的云端事件为准。
     if (Array.isArray(d.decisionLog) && d.decisionLog.length) {
       const merged = new Map((state.decisionLog || []).filter((x) => x && x.id).map((x) => [x.id, x]))
       let touched = false
@@ -556,7 +565,7 @@ export const planStore = {
         changed = true
       }
     }
-    // 4) 预警「已触发」状态回灌(按 id):cron_alert 在服务端(关页面时)命中并推送后,会把该
+    // 5) 预警「已触发」状态回灌(按 id):cron_alert 在服务端(关页面时)命中并推送后,会把该
     //    规则标记 triggeredAt/enabled:false 存回云端。这里只把「服务端已触发」并回本地——
     //    ① 让前端「命中记录/规则」显示一致;② 避免前端仍当它监控中而重复响铃/重复推送。
     //    只迁移 triggered 状态,绝不新增/删除规则(规则增删仍由用户在本机操作,防跨设备误删复活)。
@@ -652,7 +661,7 @@ export const planStore = {
       }
     }
     if (changed) { listeners.forEach((l) => { try { l() } catch (e) { console.error('[store] listener error', e) } }); scheduleSave() }
-    // 5) 服务端批量生成进度回灌:喂给 adviceBatch,让本机进度条显示【服务端/另一设备】正在跑的批量进程。
+    // 6) 服务端批量生成进度回灌:喂给 adviceBatch,让本机进度条显示【服务端/另一设备】正在跑的批量进程。
     //    (与 advice/adviceLog 合并解耦:进度是纯展示态,不进 changed/不触发回存)
     if (d.batchProgress && typeof d.batchProgress === 'object') {
       // 按需动态 import,避免顶层静态 import 造成模块初始化环(见文件头注释)

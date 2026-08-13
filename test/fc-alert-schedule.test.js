@@ -24,3 +24,18 @@ test('盯盘预警由FC北京时间交易时段触发且GitHub定时拨测已移
     false,
   )
 })
+
+test('午间与收盘自动复盘使用FC重复触发以支持失败续跑', () => {
+  const config = read('s.yaml')
+  const schedules = [
+    ['review-noon-open', 'CRON_TZ=Asia/Shanghai 0 35,50 11 * * 1-5'],
+    ['review-noon-core', 'CRON_TZ=Asia/Shanghai 0 5,20,35,50 12 * * 1-5'],
+    ['review-close-open', 'CRON_TZ=Asia/Shanghai 0 5,20,35,50 15 * * 1-5'],
+    ['review-close-late', 'CRON_TZ=Asia/Shanghai 0 5,20,35,50 16 * * 1-5'],
+  ]
+
+  for (const [name, cron] of schedules) {
+    assert.ok(config.includes(`- triggerName: ${name}`), `缺少FC触发器 ${name}`)
+    assert.ok(config.includes(`cronExpression: "${cron}"`), `缺少调度表达式 ${cron}`)
+  }
+})

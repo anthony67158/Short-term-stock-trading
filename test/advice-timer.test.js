@@ -5,6 +5,7 @@ import {
   alertTimerBody,
   adviceTimerBody,
   adviceWorkerBody,
+  reviewTimerBody,
   v2AccuracyTimerBody,
 } from '../api/_advice_timer.js'
 
@@ -72,4 +73,29 @@ test('异步建议Worker事件只恢复指定账号且必须验证内部密钥',
   })
   assert.equal(adviceWorkerBody(event, 'wrong-key'), null)
   assert.equal(adviceWorkerBody({ ...event, nick: '' }, 'secret-key'), null)
+})
+
+test('自动复盘Timer只接受午间和收盘专用触发器', () => {
+  assert.deepEqual(reviewTimerBody({
+    triggerName: 'review-noon-open',
+    payload: 'secret-key',
+  }, 'secret-key'), {
+    scheduled: true,
+    session: 'noon',
+  })
+  assert.deepEqual(reviewTimerBody({
+    triggerName: 'review-close-late',
+    payload: 'secret-key',
+  }, 'secret-key'), {
+    scheduled: true,
+    session: 'close',
+  })
+  assert.equal(reviewTimerBody({
+    triggerName: 'review-other',
+    payload: 'secret-key',
+  }, 'secret-key'), null)
+  assert.equal(reviewTimerBody({
+    triggerName: 'review-noon-open',
+    payload: 'wrong-key',
+  }, 'secret-key'), null)
 })

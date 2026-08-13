@@ -7,6 +7,10 @@ import {
 } from '../shared/adviceAutoRefreshPolicy.js';
 import { adviceEntryMatchesMode } from '../shared/adviceModeContext.js';
 import { accountTradeStateFingerprint } from '../shared/accountSync.js';
+import {
+  mergeReviewsByTimestamp,
+  reviewsAfter,
+} from '../shared/reviewSchedule.js';
 
 // ============ 云端账号 + 数据同步（阿里云 OSS 持久化）============
 // 单一入口，按 action 区分：register / login / get / save
@@ -62,6 +66,7 @@ export function accountSyncDelta(data = {}, since = 0) {
     advice,
     adviceLog,
     decisionLog,
+    reviews: reviewsAfter(data.reviews, after),
     // 预警只有 166 KiB，整组返回可覆盖旧记录缺少 updatedAt 的兼容场景。
     alerts: Array.isArray(data.alerts) ? data.alerts : [],
     batchProgress: data.batchProgress || null,
@@ -135,6 +140,10 @@ export function applyClientAccountSave(account, incoming, baseRevision) {
   if (prev.activeAdviceBatchId) merged.activeAdviceBatchId = prev.activeAdviceBatchId;
   if (prev.adviceDailyReport?.summary?.text) {
     merged.adviceDailyReport = prev.adviceDailyReport;
+  }
+  merged.reviews = mergeReviewsByTimestamp(incoming.reviews, prev.reviews);
+  if (prev.reviewAuto && typeof prev.reviewAuto === 'object') {
+    merged.reviewAuto = prev.reviewAuto;
   }
   const settings = mergeAutoRefreshSettings(prev.settings || {}, incoming.settings || {});
   for (const key of [

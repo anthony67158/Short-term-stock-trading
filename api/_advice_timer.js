@@ -21,6 +21,21 @@ export function v2AccuracyTimerBody(event, cronKey) {
   return { scheduled: true };
 }
 
+const REVIEW_TIMER_SESSIONS = new Map([
+  ['review-noon-open', 'noon'],
+  ['review-noon-core', 'noon'],
+  ['review-close-open', 'close'],
+  ['review-close-late', 'close'],
+]);
+
+export function reviewTimerBody(event, cronKey) {
+  if (!cronKey || !event || typeof event !== 'object') return null;
+  const session = REVIEW_TIMER_SESSIONS.get(String(event.triggerName || ''));
+  if (!session) return null;
+  if (String(event.payload || '') !== String(cronKey)) return null;
+  return { scheduled: true, session };
+}
+
 const ALERT_TIMER_NAMES = new Set([
   'alert-market-am-open',
   'alert-market-am-core',

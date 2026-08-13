@@ -89,6 +89,31 @@ resources:
             cronExpression: "CRON_TZ=Asia/Shanghai 0 15 15 * * 1-5"
             enable: true
             payload: ${env('CRON_KEY')}
+        # 持仓自动复盘：每场分段重复触发，未完成股票按租约续跑，页面关闭也不丢任务。
+        - triggerName: review-noon-open
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 35,50 11 * * 1-5"
+            enable: true
+            payload: ${env('CRON_KEY')}
+        - triggerName: review-noon-core
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 5,20,35,50 12 * * 1-5"
+            enable: true
+            payload: ${env('CRON_KEY')}
+        - triggerName: review-close-open
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 5,20,35,50 15 * * 1-5"
+            enable: true
+            payload: ${env('CRON_KEY')}
+        - triggerName: review-close-late
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 5,20,35,50 16 * * 1-5"
+            enable: true
+            payload: ${env('CRON_KEY')}
         # A股盯盘预警：工作日北京时间 09:30–11:30、13:00–15:00 每分钟触发。
         # 拆成 5 段可精确覆盖半小时时点，避免全天每分钟空调用。
         - triggerName: alert-market-am-open

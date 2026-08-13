@@ -114,6 +114,10 @@ test('运行时账号同步只返回更新时间后的建议事件和轻量状�
       { id: 'old-decision', at: 100 },
       { id: 'executed', at: 100, executedAt: 360 },
     ],
+    reviews: {
+      old: { code: 'old', at: 100, session: 'noon' },
+      fresh: { code: 'fresh', at: 370, session: 'close' },
+    },
     alerts: [{ id: 'a1', createdAt: 50 }],
     batchProgress: { at: 400, running: true },
     holding: [{ code: '600000', qty: 2 }],
@@ -123,6 +127,7 @@ test('运行时账号同步只返回更新时间后的建议事件和轻量状�
   assert.deepEqual(Object.keys(delta.advice), ['fresh'])
   assert.deepEqual(delta.adviceLog.map((item) => item.id), ['verified-log'])
   assert.deepEqual(delta.decisionLog.map((item) => item.id), ['executed'])
+  assert.deepEqual(Object.keys(delta.reviews), ['fresh'])
   assert.equal(delta.alerts.length, 1)
   assert.equal(delta.batchProgress.running, true)
   assert.equal(delta.holding, undefined)
@@ -361,6 +366,52 @@ test('客户端旧预警快照不能重新启用服务端已退役的持仓预�
   assert.equal(account.data.alerts[0].enabled, false)
   assert.equal(account.data.alerts[0].phase, 'invalid')
   assert.equal(account.data.alerts[0].retiredPolicy, 'position-missing')
+})
+
+test('客户端旧快照不能覆盖服务端新生成的自动复盘及运行状态', () => {
+  const account = {
+    nick: '复盘账号',
+    clientRevision: 4,
+    data: {
+      reviews: {
+        '600001': {
+          code: '600001',
+          session: 'close',
+          dayKey: '2026-08-13',
+          at: 500,
+        },
+      },
+      reviewAuto: {
+        runs: {
+          '2026-08-13:close': {
+            codes: { '600001': { status: 'done', completedAt: 500 } },
+          },
+        },
+      },
+      advice: {},
+      adviceLog: [],
+      decisionLog: [],
+    },
+  }
+
+  const result = applyClientAccountSave(account, {
+    reviews: {
+      '600001': {
+        code: '600001',
+        session: 'noon',
+        dayKey: '2026-08-13',
+        at: 300,
+      },
+    },
+    reviewAuto: {},
+    advice: {},
+    adviceLog: [],
+    decisionLog: [],
+  }, 4)
+
+  assert.equal(result.ok, true)
+  assert.equal(account.data.reviews['600001'].session, 'close')
+  assert.equal(account.data.reviewAuto.runs['2026-08-13:close'].codes['600001'].status, 'done')
 })
 
 test('客户端不能把建仓前的买入建议重新写回当前持仓', () => {

@@ -18,6 +18,7 @@ import {
   alertTimerBody,
   adviceTimerBody,
   adviceWorkerBody,
+  reviewTimerBody,
   v2AccuracyTimerBody,
 } from './api/_advice_timer.js';
 
@@ -88,9 +89,10 @@ const server = http.createServer(async (req, res) => {
       || adviceWorkerBody(event, process.env.CRON_KEY);
     const v2Body = v2AccuracyTimerBody(event, process.env.CRON_KEY);
     const alertBody = alertTimerBody(event, process.env.CRON_KEY);
-    if (!adviceBody && !v2Body && !alertBody) { res.statusCode = 403; res.end('forbidden'); return; }
+    const reviewBody = reviewTimerBody(event, process.env.CRON_KEY);
+    if (!adviceBody && !v2Body && !alertBody && !reviewBody) { res.statusCode = 403; res.end('forbidden'); return; }
     req.query = {};
-    req.body = adviceBody || v2Body || alertBody;
+    req.body = adviceBody || v2Body || alertBody || reviewBody;
     req.headers['x-cron-key'] = process.env.CRON_KEY;
     res.status = (code) => { res.statusCode = code; return res; };
     res.send = (payload) => { res.end(typeof payload === 'string' ? payload : JSON.stringify(payload)); return res; };
@@ -100,7 +102,9 @@ const server = http.createServer(async (req, res) => {
         ? 'cron_advice'
         : v2Body
           ? 'cron_v2_accuracy'
-          : 'cron_alert';
+          : alertBody
+            ? 'cron_alert'
+            : 'cron_review';
       await handlers[handlerName](req, res);
     } catch (e) {
       if (!res.writableEnded) { res.statusCode = 500; res.end(JSON.stringify({ ok: false, error: String(e.message || e) })); }
