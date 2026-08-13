@@ -8,11 +8,15 @@ import { api } from './apiBase'
 import { authStore } from './authStore'
 import { planStore } from './planStore'
 import { ensureAdviceAccountSynced } from '../shared/adviceAccountSync.js'
+import { createAdviceCompletionPuller } from '../shared/adviceUiState.js'
 
 let statusTimer = null
 let statusPulling = false
 let statusConsumer = null
 let statusFastUntil = 0
+const pullCompletedAdvice = createAdviceCompletionPuller(
+  () => authStore.pull(),
+)
 
 export async function fetchServerAdviceStatus() {
   let creds = null
@@ -43,6 +47,7 @@ async function statusTick() {
   if (progress && statusConsumer) {
     try { statusConsumer(progress) } catch { /* ignore */ }
   }
+  if (progress) await pullCompletedAdvice(progress)
   const fast = (progress && progress.running) || Date.now() < statusFastUntil
   statusTimer = setTimeout(statusTick, fast ? 2000 : 15000)
 }

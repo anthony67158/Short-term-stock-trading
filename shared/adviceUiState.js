@@ -43,6 +43,26 @@ export function cloudAdviceLoadingState(batch, code) {
   }
 }
 
+export function createAdviceCompletionPuller(pull) {
+  let deliveredFingerprint = ''
+  return async function pullCompletedAdvice(progress) {
+    const fingerprint = (progress?.items || [])
+      .filter((item) => item?.status === 'ok' && item?.code)
+      .map((item) => `${item.code}:${item.status}:${item.progressAt || 0}`)
+      .sort()
+      .join('|')
+    if (!fingerprint || fingerprint === deliveredFingerprint) return false
+    try {
+      const pulled = await pull()
+      if (pulled === false) return false
+      deliveredFingerprint = fingerprint
+      return true
+    } catch {
+      return false
+    }
+  }
+}
+
 export async function startAdvicePersistently(
   spec,
   {

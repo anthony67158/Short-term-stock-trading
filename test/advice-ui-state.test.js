@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import {
   adviceJobState,
   cloudAdviceLoadingState,
+  createAdviceCompletionPuller,
   newestAdviceResult,
   shouldApplyCloudBatch,
 } from '../shared/adviceUiState.js'
@@ -100,4 +101,25 @@ test('卡片可从批次进度识别排队、生成中和可取消状态', () =>
   assert.equal(queued.active, true)
   assert.equal(queued.label, '排队等待云端生成')
   assert.equal(queued.cancelable, true)
+})
+
+test('服务端建议完成后立即拉取一次正文且重复状态不重复拉取', async () => {
+  const pulled = []
+  const pullCompletedAdvice = createAdviceCompletionPuller(async () => {
+    pulled.push(Date.now())
+  })
+
+  assert.equal(await pullCompletedAdvice({
+    running: true,
+    items: [{ code: '600487', status: 'running', progressAt: 100 }],
+  }), false)
+  assert.equal(await pullCompletedAdvice({
+    running: false,
+    items: [{ code: '600487', status: 'ok', progressAt: 200 }],
+  }), true)
+  assert.equal(await pullCompletedAdvice({
+    running: false,
+    items: [{ code: '600487', status: 'ok', progressAt: 200 }],
+  }), false)
+  assert.equal(pulled.length, 1)
 })
