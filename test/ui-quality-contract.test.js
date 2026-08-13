@@ -96,6 +96,22 @@ test('持仓区共用页面边线且同一行卡片操作区固定到底部', ()
   )
   assert.match(
     precision,
+    /\.plan-section \.hold-overview\s*{[^}]*grid-template-columns:\s*repeat\(7,\s*minmax\(0,\s*1fr\)\)[^}]*padding:\s*var\(--space-sm\)\s+var\(--space-md\)/s,
+  )
+  assert.match(
+    precision,
+    /\.plan-section \.hold-overview > \.ho-cell\s*{[^}]*align-items:\s*center[^}]*padding-inline:\s*var\(--space-2xs\)[^}]*text-align:\s*center/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*1360px\)\s*{[\s\S]*?\.plan-section \.hold-overview\s*{[^}]*grid-template-columns:\s*repeat\(12,\s*minmax\(0,\s*1fr\)\)[\s\S]*?\.plan-section \.hold-overview > \.ho-cell\s*{[^}]*grid-column:\s*span 3[\s\S]*?\.plan-section \.hold-overview > \.ho-cell:nth-child\(n \+ 5\)\s*{[^}]*grid-column:\s*span 4/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.plan-section \.hold-overview\s*{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)[\s\S]*?\.plan-section \.hold-overview > \.ho-cell:nth-child\(n \+ 5\)\s*{[^}]*grid-column:\s*auto[\s\S]*?\.plan-section \.hold-overview > \.ho-cell:last-child\s*{[^}]*grid-column:\s*1\s*\/\s*-1/s,
+  )
+  assert.match(
+    precision,
     /\.plan-section \.ind-tabs\s*{[^}]*margin-top:\s*0[^}]*padding-block:\s*0\s+var\(--space-3xs\)/s,
   )
   assert.match(precision, /\.hold-swipe-wrap\s*{[^}]*height:\s*100%/s)

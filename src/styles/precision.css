@@ -1249,7 +1249,16 @@ textarea:focus {
 }
 
 .plan-section .hold-overview {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: var(--space-2xs);
   margin: var(--space-sm) 0;
+  padding: var(--space-sm) var(--space-md);
+}
+
+.plan-section .hold-overview > .ho-cell {
+  align-items: center;
+  padding-inline: var(--space-2xs);
+  text-align: center;
 }
 
 .plan-section .ind-tabs {
@@ -2019,6 +2028,18 @@ button.acct-item {
   .nav-label-short {
     display: inline;
   }
+
+  .plan-section .hold-overview {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+  }
+
+  .plan-section .hold-overview > .ho-cell {
+    grid-column: span 3;
+  }
+
+  .plan-section .hold-overview > .ho-cell:nth-child(n + 5) {
+    grid-column: span 4;
+  }
 }
 
 @media (max-width: 1024px) {
@@ -2295,6 +2316,24 @@ button.acct-item {
 
   .senti-gauge .sg-cells {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .plan-section .hold-overview {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-xs) var(--space-2xs);
+    padding: var(--space-sm);
+  }
+
+  .plan-section .hold-overview > .ho-cell {
+    grid-column: auto;
+  }
+
+  .plan-section .hold-overview > .ho-cell:nth-child(n + 5) {
+    grid-column: auto;
+  }
+
+  .plan-section .hold-overview > .ho-cell:last-child {
+    grid-column: 1 / -1;
   }
 
   .btn,
