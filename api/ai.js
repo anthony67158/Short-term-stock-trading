@@ -31,6 +31,10 @@ import {
 import { isCurrentDailyReportSummary } from '../shared/adviceDailyReportPolicy.js';
 import { buildAdviceDecisionContext } from '../shared/adviceModeContext.js';
 import { applyPortfolioRiskPolicy } from '../shared/portfolioRiskPolicy.js';
+import {
+  classifyPriceLimit,
+  priceLimitRatio,
+} from '../shared/priceLimitPolicy.js';
 
 function avg(arr) { return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0; }
 function std(arr) { if (arr.length < 2) return 0; const m = avg(arr); return Math.sqrt(avg(arr.map((x) => (x - m) ** 2))); }
@@ -608,15 +612,12 @@ export default async function handler(req, res) {
             const mtc = marketTimeContext();
             const isLive = !!mtc.isLive;
             // ★涨停/跌停价:按【昨收×(1±涨跌幅限制)】四舍五入到分。限制比例按板块/ST判定:
-            //   创业板(300/301)、科创板(688) = ±20%; ST/*ST(名称含ST) = ±5%; 其余主板 = ±10%。
-            //   北交所(8/4开头)=±30%。仅盘中(isLive)才注入"今日合法价带",盘前/盘后不注入避免口径错位。
-            const nm = String((payload.name || (q0 && q0.name) || '')).toUpperCase();
-            const codeStr = String(payload.code || '');
-            const isST = nm.includes('ST');
-            let ratio = 0.10;
-            if (isST) ratio = 0.05;
-            else if (/^(30|68)/.test(codeStr)) ratio = 0.20;
-            else if (/^(8|4)/.test(codeStr)) ratio = 0.30;
+            //   创业板/科创板 = ±20%; 主板 ST/*ST = ±5%; 其余主板 = ±10%;
+            //   北交所(4/8/92开头)=±30%。仅盘中(isLive)才注入，避免盘前/盘后口径错位。
+            const ratio = priceLimitRatio({
+              code: payload.code,
+              name: payload.name || q0.name,
+            });
             const base = q0.prevClose;
             // 只有实时(盘中)才给 LLM 硬性"今日合法价带";非实时时置 null,提示词自动转收盘口径。
             const limitUpPrice = (isLive && base != null) ? +(base * (1 + ratio)).toFixed(2) : null;
@@ -752,8 +753,13 @@ export default async function handler(req, res) {
               const cs = (detail && detail.ok && detail.candles) || [];
               let streak = 0;
               for (let i = cs.length - 1; i >= 0; i--) {
-                if (cs[i] && cs[i].pct != null && cs[i].pct >= 9.8) streak++;
-                else break;
+                const state = classifyPriceLimit({
+                  code: payload.code,
+                  name: payload.name,
+                  pct: cs[i]?.pct,
+                });
+                if (!state.isLimitUp) break;
+                streak++;
               }
               ev.limitStreak = streak + 1;  // 含今日
             }

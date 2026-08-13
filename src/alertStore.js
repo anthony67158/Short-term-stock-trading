@@ -10,6 +10,10 @@ import {
   positionGateForAlert,
   requiresPositionCheck,
 } from '../shared/alertPositionPolicy.js'
+import {
+  formatPriceLimitThreshold,
+  isNearPriceLimit,
+} from '../shared/priceLimitPolicy.js'
 
 // ============ 盯盘预警引擎 ============
 // 统一轮询自选/持仓相关个股实时报价，逐条判断预警规则是否命中；
@@ -21,8 +25,8 @@ import {
 //   pct      涨跌幅：当日涨跌幅% op 阈值
 //   vol      量比：量比 op 阈值
 //   turnover 换手率%：op 阈值
-//   limitup  临近涨停：涨幅 >= 9.5
-//   limitdown 临近跌停：涨幅 <= -9.5
+//   limitup  临近涨停：达到所属板块涨停幅度的95%
+//   limitdown 临近跌停：达到所属板块跌停幅度的95%
 // op: gte(>=) | lte(<=)
 
 const OP_LABEL = { gte: '≥', lte: '≤' }
@@ -39,8 +43,8 @@ export const ALERT_TYPES = [
 export function describeAlert(a) {
   const t = ALERT_TYPES.find((x) => x.key === a.type)
   if (!t) return ''
-  if (a.type === 'limitup') return '临近涨停(涨幅≥9.5%)'
-  if (a.type === 'limitdown') return '临近跌停(跌幅≥9.5%)'
+  if (a.type === 'limitup') return `临近涨停(涨幅≥${formatPriceLimitThreshold(a, true)}%)`
+  if (a.type === 'limitdown') return `临近跌停(跌幅≥${formatPriceLimitThreshold(a, true)}%)`
   // 行动点预警(补仓/减仓):用「补仓点 ≤ X元 · 补1手」这类口径,一眼看清价位+要做什么
   if (a.type === 'price' && a.actKind) {
     const label = a.actKind === 'add' ? '补仓点' : '减仓点'
@@ -181,12 +185,14 @@ function hit(a, q) {
     }
     case 'limitup': {
       const pct = fin(q.pct)
-      if (pct != null && pct >= 9.5) return `${q.name || ''} 涨幅 ${pct.toFixed(2)}%，临近/触及涨停`
+      const security = { code: q.code || a.code, name: q.name || a.name, pct }
+      if (isNearPriceLimit(security, 'up')) return `${q.name || a.name || ''} 涨幅 ${pct.toFixed(2)}%，临近/触及涨停`
       return null
     }
     case 'limitdown': {
       const pct = fin(q.pct)
-      if (pct != null && pct <= -9.5) return `${q.name || ''} 跌幅 ${pct.toFixed(2)}%，临近/触及跌停`
+      const security = { code: q.code || a.code, name: q.name || a.name, pct }
+      if (isNearPriceLimit(security, 'down')) return `${q.name || a.name || ''} 跌幅 ${pct.toFixed(2)}%，临近/触及跌停`
       return null
     }
     default:

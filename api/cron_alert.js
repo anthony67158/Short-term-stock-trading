@@ -35,6 +35,10 @@ import {
   resolveDecisionSide,
 } from '../shared/confirmPolicy.js';
 import { applyT1ToAlert } from '../shared/t1AdvicePolicy.js';
+import {
+  formatPriceLimitThreshold,
+  isNearPriceLimit,
+} from '../shared/priceLimitPolicy.js';
 
 const OP_LABEL = { gte: '≥', lte: '≤' };
 
@@ -46,8 +50,8 @@ const WATCHING_MAX_MS = 90 * 60 * 1000;
 
 // —— 与前端 alertStore.describeAlert 同口径 ——
 function describeAlert(a) {
-  if (a.type === 'limitup') return '临近涨停(涨幅≥9.5%)';
-  if (a.type === 'limitdown') return '临近跌停(跌幅≥9.5%)';
+  if (a.type === 'limitup') return `临近涨停(涨幅≥${formatPriceLimitThreshold(a, true)}%)`;
+  if (a.type === 'limitdown') return `临近跌停(跌幅≥${formatPriceLimitThreshold(a, true)}%)`;
   // 行动点预警(补仓/减仓):补仓点 ≤ X元 · 补1手
   if (a.type === 'price' && a.actKind) {
     const l = a.actKind === 'add' ? '补仓点' : '减仓点';
@@ -96,10 +100,14 @@ function hit(a, q) {
     case 'turnover':
       if (q.turnover == null) return null;
       return cmp(q.turnover, a.op, a.value) ? `换手 ${Number(q.turnover).toFixed(2)}% ${OP_LABEL[a.op]} ${a.value}%` : null;
-    case 'limitup':
-      return (q.pct != null && q.pct >= 9.5) ? `${q.name || ''} 涨幅 ${Number(q.pct).toFixed(2)}%,临近/触及涨停` : null;
-    case 'limitdown':
-      return (q.pct != null && q.pct <= -9.5) ? `${q.name || ''} 跌幅 ${Number(q.pct).toFixed(2)}%,临近/触及跌停` : null;
+    case 'limitup': {
+      const security = { code: q.code || a.code, name: q.name || a.name, pct: q.pct };
+      return isNearPriceLimit(security, 'up') ? `${q.name || a.name || ''} 涨幅 ${Number(q.pct).toFixed(2)}%,临近/触及涨停` : null;
+    }
+    case 'limitdown': {
+      const security = { code: q.code || a.code, name: q.name || a.name, pct: q.pct };
+      return isNearPriceLimit(security, 'down') ? `${q.name || a.name || ''} 跌幅 ${Number(q.pct).toFixed(2)}%,临近/触及跌停` : null;
+    }
     default:
       return null;
   }
@@ -569,6 +577,8 @@ export default async function handler(req, res) {
 
 export const __test = {
   alertStamp,
+  describeAlert,
+  hit,
   persistProcessedAccount,
   positionContextOf,
   retireIfPositionChanged,

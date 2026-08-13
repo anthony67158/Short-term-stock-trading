@@ -1,17 +1,24 @@
 import { emGet, sendJson, sendError, num } from './_lib.js';
 import { beijingDayKey } from '../shared/tradingCalendar.js';
+import { classifyPriceLimit } from '../shared/priceLimitPolicy.js';
 
 // 任意股票实时报价（自选股用）
 // query: codes=600519,000858,300750
-function toSecid(code) {
+export function toSecid(code) {
   const c = String(code).trim();
-  // 6/9 开头沪市=1，0/3 开头深市=0，4/8 北交所=0
+  // 北交所新代码 920 不能按 9 开头误归上海市场。
+  if (/^(4|8|92)/.test(c)) return '0.' + c;
   if (/^(6|9|5)/.test(c)) return '1.' + c;
   return '0.' + c;
 }
 function toTxCode(code) {
   const c = String(code).trim();
+  if (/^(4|8|92)/.test(c)) return 'bj' + c;
   return (/^(6|9|5)/.test(c) ? 'sh' : 'sz') + c;
+}
+
+export function withPriceLimitState(quote) {
+  return { ...quote, ...classifyPriceLimit(quote) };
 }
 
 // 备用源：腾讯批量报价（海外稳、基本不限流）。只取跨版本稳定的数字字段，涨跌幅自算。
@@ -41,7 +48,7 @@ async function quoteTx(codes) {
     const rawCode = m[1].slice(2);
     const pct = prevClose ? +(((price - prevClose) / prevClose) * 100).toFixed(2) : 0;
     const quoteStamp = String(p[30] || '').match(/^(\d{4})(\d{2})(\d{2})/);
-    out.push({
+    out.push(withPriceLimitState({
       code: rawCode,
       name: '',                 // 名称留空，前端用本地已有名称
       price, pct,
@@ -54,8 +61,7 @@ async function quoteTx(codes) {
       prevClose,
       tradeDate: quoteStamp ? `${quoteStamp[1]}-${quoteStamp[2]}-${quoteStamp[3]}` : null,
       industry: null,
-      isLimitUp: pct >= 9.8, isLimitDown: pct <= -9.8,
-    });
+    }));
   }
   return out;
 }
@@ -76,7 +82,7 @@ export default async function handler(req, res) {
     try {
       const j = await emGet(path);
       const diff = (j && j.data && j.data.diff) || [];
-      list = diff.map((d) => ({
+      list = diff.map((d) => withPriceLimitState({
         code: d.f12,
         name: d.f14,
         price: num(d.f2),
@@ -93,8 +99,6 @@ export default async function handler(req, res) {
         prevClose: num(d.f18),
         tradeDate: num(d.f124) > 0 ? beijingDayKey(num(d.f124) * 1000) : null,
         industry: (d.f100 && d.f100 !== '-') ? d.f100 : null,
-        isLimitUp: num(d.f3) >= 9.8,
-        isLimitDown: num(d.f3) <= -9.8,
       }));
     } catch { /* 东财失败 → 走腾讯 */ }
 

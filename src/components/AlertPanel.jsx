@@ -11,6 +11,7 @@ import { fmtRaw } from '../format'
 import PushToggle from './PushToggle'
 import { judgeEffectStats } from '../../shared/confirmPolicy.js'
 import { applyT1ToAlert } from '../../shared/t1AdvicePolicy.js'
+import { formatPriceLimitThreshold } from '../../shared/priceLimitPolicy.js'
 
 // ============ 盯盘预警（内嵌面板，非弹窗）：规则管理 + 通知历史 ============
 export default function AlertPanel({ interval }) {
@@ -301,7 +302,12 @@ function NewAlertForm({ cands, quote, onDone }) {
           <input className="wl-input" style={{ width: 90 }} value={value} onChange={(e) => setValue(e.target.value)}
             placeholder={'阈值' + (typeDef.unit ? '(' + typeDef.unit + ')' : '')} inputMode="decimal" />
         )}
-        {!typeDef.needValue && <span className="af-hint">{type === 'limitup' ? '涨幅≥9.5% 提醒' : '跌幅≥9.5% 提醒'}</span>}
+        {!typeDef.needValue && (
+          <span className="af-hint">
+            {type === 'limitup' ? '涨幅' : '跌幅'}≥
+            {formatPriceLimitThreshold({ code, name: picked?.name }, true)}% 提醒
+          </span>
+        )}
       </div>
       <div className="af-actions">
         <button className="chip-btn done" onClick={submit}><Icon name="check" size={12} />添加预警</button>

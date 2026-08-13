@@ -1,6 +1,7 @@
 import { emGet, sendJson, sendError, num } from './_lib.js';
 import { snapshotsHandler } from './_sector_snapshots.js';
 import { fetchLimitPool, limitPoolDay } from './_limit_pool.js';
+import { classifyPriceLimit } from '../shared/priceLimitPolicy.js';
 
 // ============ 盘面数据聚合接口（合并原 limitup + movers，节省 Vercel 函数位）============
 // query:
@@ -28,18 +29,20 @@ async function movers(req, res) {
     `&fid=${fid}&fs=${encodeURIComponent(fs)}&fields=${fields}`;
   const j = await emGet(path);
   const diff = (j && j.data && j.data.diff) || [];
-  const list = diff.map((d) => ({
-    code: d.f12,
-    name: d.f14,
-    price: num(d.f2),
-    pct: num(d.f3),
-    speed: num(d.f22),
-    mainInflow: num(d.f62),
-    mainRatio: num(d.f184),
-    turnover: num(d.f8),
-    volRatio: num(d.f10),
-    isLimitUp: num(d.f3) >= 9.8,
-  }));
+  const list = diff.map((d) => {
+    const stock = {
+      code: d.f12,
+      name: d.f14,
+      price: num(d.f2),
+      pct: num(d.f3),
+      speed: num(d.f22),
+      mainInflow: num(d.f62),
+      mainRatio: num(d.f184),
+      turnover: num(d.f8),
+      volRatio: num(d.f10),
+    };
+    return { ...stock, ...classifyPriceLimit(stock) };
+  });
   sendJson(res, { ok: true, kind, updatedAt: Date.now(), list }, { cache: 15 });
 }
 

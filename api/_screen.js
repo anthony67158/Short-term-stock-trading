@@ -1,5 +1,6 @@
 import { emGetOne, num } from './_lib.js';
 import { marketPageNumbers, rankMarketCandidates } from '../shared/stockRanking.js';
+import { classifyPriceLimit } from '../shared/priceLimitPolicy.js';
 
 let marketUniverseCache = { at: 0, value: null };
 
@@ -29,12 +30,14 @@ async function fetchUniverse(opts = {}) {
     ));
     for (const page of pages) diffs.push(...((page && page.data && page.data.diff) || []));
   }
-  const mapped = diffs.map((d) => ({
-    code: d.f12, name: d.f14, price: num(d.f2), pct: num(d.f3),
-    speed: num(d.f22), mainInflow: num(d.f62), mainRatio: num(d.f184),
-    turnover: num(d.f8), volRatio: num(d.f10), amount: num(d.f6),
-    isLimitUp: num(d.f3) >= 9.8,
-  }));
+  const mapped = diffs.map((d) => {
+    const stock = {
+      code: d.f12, name: d.f14, price: num(d.f2), pct: num(d.f3),
+      speed: num(d.f22), mainInflow: num(d.f62), mainRatio: num(d.f184),
+      turnover: num(d.f8), volRatio: num(d.f10), amount: num(d.f6),
+    };
+    return { ...stock, ...classifyPriceLimit(stock) };
+  });
   const list = [...new Map(mapped.filter((item) => item.code).map((item) => [item.code, item])).values()];
   return { list, total };
 }

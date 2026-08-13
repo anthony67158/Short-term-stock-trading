@@ -1,4 +1,5 @@
 import { emGet, sendJson, sendError, num } from './_lib.js';
+import { classifyPriceLimit } from '../shared/priceLimitPolicy.js';
 
 // 板块内个股榜
 // query: code=板块代码(BKxxxx)  sort=pct(涨幅)|down(跌幅)|main(资金)
@@ -24,21 +25,22 @@ export default async function handler(req, res) {
 
     const j = await emGet(path);
     const diff = (j && j.data && j.data.diff) || [];
-    const list = diff.map((d) => ({
-      code: d.f12,
-      name: d.f14,
-      price: num(d.f2),
-      pct: num(d.f3),
-      chg: num(d.f4),
-      turnover: num(d.f8),      // 换手率
-      volRatio: num(d.f10),     // 量比
-      mainInflow: num(d.f62),   // 主力净流入
-      mainRatio: num(d.f184),   // 主力净占比
-      amount: num(d.f6),        // 成交额
-      amplitude: num(d.f7),     // 振幅
-      isLimitUp: num(d.f3) >= 9.8,   // 近似涨停判断
-      isLimitDown: num(d.f3) <= -9.8,
-    }));
+    const list = diff.map((d) => {
+      const stock = {
+        code: d.f12,
+        name: d.f14,
+        price: num(d.f2),
+        pct: num(d.f3),
+        chg: num(d.f4),
+        turnover: num(d.f8),      // 换手率
+        volRatio: num(d.f10),     // 量比
+        mainInflow: num(d.f62),   // 主力净流入
+        mainRatio: num(d.f184),   // 主力净占比
+        amount: num(d.f6),        // 成交额
+        amplitude: num(d.f7),     // 振幅
+      };
+      return { ...stock, ...classifyPriceLimit(stock) };
+    });
 
     sendJson(res, { ok: true, code, sort, updatedAt: Date.now(), list }, { cache: 20 });
   } catch (e) {
