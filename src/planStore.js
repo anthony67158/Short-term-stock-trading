@@ -312,6 +312,115 @@ function tFlowCashFlow(side, price, qty, fee) {
     : +(amount - Number(fee || 0)).toFixed(2)
 }
 
+function closedType(record) {
+  return record?.type || (record?.kind === 'T' ? 'T' : 'CLOSE')
+}
+
+function buildEditedClosedRecord(record, patch = {}) {
+  const type = closedType(record)
+  const qty = Number(patch.qty)
+  if (!Number.isInteger(qty) || qty <= 0) {
+    return { ok: false, error: '成交手数必须是大于 0 的整数' }
+  }
+
+  if (type === 'BUY' || type === 'SELL') {
+    const price = Number(patch.price)
+    if (!Number.isFinite(price) || price <= 0) {
+      return { ok: false, error: '请输入有效的成交价格' }
+    }
+    const amount = +(price * qty * 100).toFixed(2)
+    const fee = type === 'BUY' ? calcBuyFee(amount) : calcSellFee(amount)
+    if (type === 'BUY') {
+      return {
+        ok: true,
+        record: {
+          ...record,
+          type,
+          kind: record.kind || type,
+          side: 'buy',
+          qty,
+          price,
+          buyPrice: price,
+          amount,
+          fee,
+          buyFee: fee,
+          cashFlow: +(-(amount + fee)).toFixed(2),
+          realizedPnl: null,
+          editedAt: Date.now(),
+        },
+      }
+    }
+
+    const oldQty = Number(record.qty) || 0
+    const costPrice = Number(record.costPrice ?? record.buyPrice)
+    const buyFee = oldQty > 0
+      ? +((Number(record.buyFee) || 0) * (qty / oldQty)).toFixed(2)
+      : 0
+    const hasCost = Number.isFinite(costPrice) && costPrice > 0
+    const grossPnl = hasCost ? +((price - costPrice) * qty * 100).toFixed(2) : null
+    const netPnl = hasCost ? +(grossPnl - buyFee - fee).toFixed(2) : null
+    const cost = hasCost ? costPrice * qty * 100 : 0
+    return {
+      ok: true,
+      record: {
+        ...record,
+        type,
+        kind: record.kind || type,
+        side: 'sell',
+        qty,
+        price,
+        sellPrice: price,
+        amount,
+        fee,
+        sellFee: fee,
+        buyFee,
+        grossPnl,
+        netPnl,
+        realizedPnl: netPnl,
+        pnlPct: hasCost && cost ? +(netPnl / (cost + buyFee) * 100).toFixed(2) : 0,
+        cashFlow: +(amount - fee).toFixed(2),
+        editedAt: Date.now(),
+      },
+    }
+  }
+
+  const buyPrice = Number(patch.buyPrice)
+  const sellPrice = Number(patch.sellPrice)
+  if (
+    !Number.isFinite(buyPrice) || buyPrice <= 0
+    || !Number.isFinite(sellPrice) || sellPrice <= 0
+  ) {
+    return { ok: false, error: '请输入有效的买入价和卖出价' }
+  }
+  const shares = qty * 100
+  const buyAmount = +(buyPrice * shares).toFixed(2)
+  const sellAmount = +(sellPrice * shares).toFixed(2)
+  const buyFee = calcBuyFee(buyAmount)
+  const sellFee = calcSellFee(sellAmount)
+  const grossPnl = +(sellAmount - buyAmount).toFixed(2)
+  const netPnl = +(grossPnl - buyFee - sellFee).toFixed(2)
+  return {
+    ok: true,
+    record: {
+      ...record,
+      type,
+      kind: type === 'T' ? 'T' : (record.kind || type),
+      qty,
+      buyPrice,
+      sellPrice,
+      buyFee,
+      sellFee,
+      amount: sellAmount,
+      grossPnl,
+      netPnl,
+      realizedPnl: netPnl,
+      pnlPct: buyAmount ? +(netPnl / (buyAmount + buyFee) * 100).toFixed(2) : 0,
+      cashFlow: type === 'T' ? netPnl : +(sellAmount - sellFee).toFixed(2),
+      editedAt: Date.now(),
+    },
+  }
+}
+
 export const planStore = {
   subscribe(l) { listeners.add(l); return () => listeners.delete(l) },
   get() { return state },
@@ -618,6 +727,7 @@ export const planStore = {
 
     const sellTxn = {
       id: uid(), batchId, type: 'SELL', kind: 'SELL', code: h.code, name: h.name,
+      holdingId: h.id,
       side: 'sell', qty: sq, price, amount: +proceeds.toFixed(2),
       fee: sellFee, cashFlow: +(proceeds - sellFee).toFixed(2), // 卖出=现金流入
       costPrice: h.buyPrice, realizedPnl: netPnl,               // 有成本基准→带已实现盈亏
@@ -722,6 +832,167 @@ export const planStore = {
     })
     emit()
     return { ok: true, updated: ids.size }
+  },
+  updateClosedTrade(id, patch = {}) {
+    const target = state.closed.find((item) => item.id === id)
+    if (!target) return { ok: false, error: '交易记录不存在' }
+
+    const dateText = String(patch.date || '')
+    if (!replaceLocalDate(target.at || target.sellAt || target.buyAt, dateText)) {
+      return { ok: false, error: '请选择今天或更早的有效日期' }
+    }
+    const built = buildEditedClosedRecord(target, patch)
+    if (!built.ok) return built
+
+    const type = closedType(target)
+    const oldQty = Number(target.qty) || 0
+    const nextQty = Number(built.record.qty) || 0
+    let editedRecord = shiftRecordDate(built.record, dateText) || built.record
+    let nextHolding = state.holding
+    let removedHolding = null
+
+    if (type === 'BUY' && target.holdingId) {
+      const holding = state.holding.find((item) => item.id === target.holdingId)
+      if (holding) {
+        const holdingQty = +(Number(holding.qty) + nextQty - oldQty).toFixed(3)
+        if (holdingQty < 0) return { ok: false, error: '修改后的买入手数会使当前持仓小于 0' }
+        const previewClosed = state.closed.map((item) =>
+          item.id === target.id ? editedRecord : item)
+        const buys = previewClosed.filter((item) =>
+          closedType(item) === 'BUY' && item.holdingId === holding.id)
+        const totalQty = buys.reduce((sum, item) => sum + (Number(item.qty) || 0), 0)
+        const weightedPrice = buys.reduce(
+          (sum, item) => sum + (Number(item.price ?? item.buyPrice) || 0) * (Number(item.qty) || 0),
+          0,
+        )
+        const totalFee = buys.reduce(
+          (sum, item) => sum + (Number(item.fee ?? item.buyFee) || 0),
+          0,
+        )
+        const buyPrice = totalQty > 0 && totalQty >= holdingQty
+          ? +(weightedPrice / totalQty).toFixed(3)
+          : +(
+              (
+                Number(holding.buyPrice) * Number(holding.qty)
+                + Number(editedRecord.price) * nextQty
+                - Number(target.price ?? target.buyPrice) * oldQty
+              ) / Math.max(holdingQty, 1)
+            ).toFixed(3)
+        const buyFee = totalQty > 0
+          ? +(totalFee * Math.min(holdingQty, totalQty) / totalQty).toFixed(2)
+          : Number(holding.buyFee) || 0
+        const buyAt = buys.length
+          ? Math.min(...buys.map((item) => Number(item.at || item.buyAt) || Date.now()))
+          : holding.buyAt
+        if (holdingQty === 0) {
+          nextHolding = state.holding.filter((item) => item.id !== holding.id)
+          removedHolding = holding
+        } else {
+          nextHolding = state.holding.map((item) => item.id === holding.id
+            ? { ...item, qty: holdingQty, buyPrice, buyFee, buyAt }
+            : item)
+        }
+      }
+    } else if (type === 'SELL' || type === 'CLOSE') {
+      const exact = target.holdingId
+        ? state.holding.find((item) => item.id === target.holdingId)
+        : null
+      const tradeAt = Number(target.at || target.sellAt || target.buyAt) || 0
+      const byCode = state.holding.filter((item) =>
+        String(item.code) === String(target.code)
+        && (!item.buyAt || !tradeAt || tradeAt >= Number(item.buyAt)),
+      )
+      if (!exact && byCode.length > 1 && nextQty !== oldQty) {
+        return { ok: false, error: '该历史卖出记录缺少持仓关联，存在多笔同股持仓，无法安全调整手数' }
+      }
+      const holding = exact || byCode[0] || null
+      if (holding) {
+        editedRecord = { ...editedRecord, holdingId: holding.id }
+        const holdingQty = +(Number(holding.qty) + oldQty - nextQty).toFixed(3)
+        if (holdingQty < 0) {
+          return { ok: false, error: `修改后的卖出手数超过当前可恢复持仓，最多可改为 ${oldQty + Number(holding.qty)} 手` }
+        }
+        if (holdingQty === 0) {
+          nextHolding = state.holding.filter((item) => item.id !== holding.id)
+          removedHolding = holding
+        } else {
+          const buyFee = Number(holding.qty) > 0
+            ? +(Number(holding.buyFee || 0) * holdingQty / Number(holding.qty)).toFixed(2)
+            : Number(holding.buyFee) || 0
+          nextHolding = state.holding.map((item) => item.id === holding.id
+            ? { ...item, qty: holdingQty, buyFee }
+            : item)
+        }
+      } else {
+        const restoredQty = +(oldQty - nextQty).toFixed(3)
+        if (restoredQty < 0) {
+          return { ok: false, error: '当前已无该股持仓，不能把历史卖出手数调得更大' }
+        }
+        if (restoredQty > 0) {
+          const costPrice = Number(target.costPrice ?? target.buyPrice)
+          if (!Number.isFinite(costPrice) || costPrice <= 0) {
+            return { ok: false, error: '该历史卖出记录缺少成本价，无法安全恢复持仓' }
+          }
+          const holdingId = target.holdingId || uid()
+          editedRecord = { ...editedRecord, holdingId }
+          nextHolding = [...state.holding, {
+            id: holdingId,
+            code: target.code,
+            name: target.name || target.code,
+            buyPrice: costPrice,
+            buyAt: target.buyAt || target.at || Date.now(),
+            qty: restoredQty,
+            buyFee: oldQty > 0
+              ? +((Number(target.buyFee) || 0) * restoredQty / oldQty).toFixed(2)
+              : 0,
+          }]
+        }
+      }
+    }
+
+    snapshot(`修改交易流水 ${target.name || target.code || ''}`.trim())
+    const dateIds = new Set(
+      (target.batchId
+        ? state.closed.filter((item) => item.batchId === target.batchId)
+        : [target]
+      ).map((item) => item.id),
+    )
+    state.closed = state.closed.map((item) => {
+      const value = item.id === target.id ? editedRecord : item
+      if (!dateIds.has(item.id)) return value
+      return shiftRecordDate(value, dateText) || value
+    })
+    state.holding = nextHolding
+    if (removedHolding) this._backToPlan(removedHolding)
+    if ((type === 'SELL' || type === 'CLOSE') && nextQty < oldQty) {
+      state.plan = state.plan.filter((item) => String(item.code) !== String(target.code))
+    }
+
+    const oldCashFlow = Number(target.cashFlow) || 0
+    const nextCashFlow = Number(editedRecord.cashFlow) || 0
+    if (target.cashApplied && nextCashFlow !== oldCashFlow) {
+      updateAccountCash(nextCashFlow - oldCashFlow)
+    }
+    state.decisionLog = (state.decisionLog || []).map((event) => {
+      if (!dateIds.has(event?.transactionId)) return event
+      let value = event
+      if (event.transactionId === target.id) {
+        value = {
+          ...value,
+          price: type === 'BUY' || type === 'SELL'
+            ? editedRecord.price
+            : editedRecord.sellPrice,
+          qty: editedRecord.qty,
+          editedAt: Date.now(),
+        }
+      }
+      const shifted = shiftRecordDate(value, dateText)
+      return shifted
+        ? { ...shifted, executedAt: value.executedAt ? replaceLocalDate(value.executedAt, dateText) : shifted.at }
+        : value
+    })
+    emit()
+    return { ok: true, updated: dateIds.size, cloudQueued: !!_saver }
   },
   // 删除单条交易记录：连带删除同一次操作(同 batchId)产生的其他记录；
   // 并联动调整持仓手数/成本，保证「持仓」与「交易记录」始终对得上。
