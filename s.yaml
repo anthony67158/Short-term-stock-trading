@@ -53,6 +53,8 @@ resources:
         # ---- OSS 存储（替代 Vercel Blob）----
         OSS_REGION: ${env('OSS_REGION')}
         OSS_BUCKET: ${env('OSS_BUCKET')}
+        # FC 与 OSS 同在杭州，必须走内网；公网 Endpoint 会把每次 GetObject 计为 NetworkOut。
+        OSS_ENDPOINT: https://oss-cn-hangzhou-internal.aliyuncs.com
         OSS_ACCESS_KEY_ID: ${env('OSS_ACCESS_KEY_ID')}
         OSS_ACCESS_KEY_SECRET: ${env('OSS_ACCESS_KEY_SECRET')}
         # ---- FC Timer / 云端任务鉴权口令 ----

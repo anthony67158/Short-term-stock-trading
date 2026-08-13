@@ -63,6 +63,10 @@ import {
   setAdviceDailyReportPhase,
 } from './_advice_daily_report.js';
 
+export const PROGRESS_SAVE_INTERVAL_MS = 5000;
+export const CANCEL_POLL_INTERVAL_MS = 5000;
+export const WORKER_HEARTBEAT_INTERVAL_MS = 30000;
+
 export function createAdviceSSEParser(onEvent) {
   let buffer = '';
   const consume = (flush = false) => {
@@ -658,7 +662,11 @@ async function persistServer(nick, workingAcc, myId) {
   };
   stampFrom(wdata.holding, fdata.holding);
   stampFrom(wdata.plan, fdata.plan);
-  try { await writeAccount(fresh); } catch { /* 写失败不阻断 */ }
+  // Worker 进度是可重建运行态：只覆盖 current，不为每个 SSE 帧创建 4 MiB 历史快照，
+  // 也不做大对象回读校验；任务完成释放锁时仍走完整历史+校验保存。
+  try {
+    await writeAccount(fresh, undefined, { history: false, verify: false });
+  } catch { /* 写失败不阻断 */ }
   // 让 drainer 后续以 fresh 为工作副本:fresh 有用户最新 plan/holding + 我们刚写的服务端字段
   return fresh;
 }
@@ -719,7 +727,7 @@ async function drainAccount(nick, initialAcc) {
   const reportHeartbeat = setInterval(() => {
     renewWorkerLock(acc.data || (acc.data = {}), myId);
     void saveWorking().catch(() => {});
-  }, 20000);
+  }, WORKER_HEARTBEAT_INTERVAL_MS);
   if (
     reportHeartbeat
     && typeof reportHeartbeat.unref === 'function'
@@ -798,7 +806,7 @@ async function drainAccount(nick, initialAcc) {
   const queueProgressSave = (force = false) => {
     if (progressSavePending) return persistence.settle();
     const now = Date.now();
-    if (!force && now - lastProgressSaveAt < 1500) {
+    if (!force && now - lastProgressSaveAt < PROGRESS_SAVE_INTERVAL_MS) {
       return persistence.settle();
     }
     progressSavePending = true;
@@ -827,7 +835,7 @@ async function drainAccount(nick, initialAcc) {
     renewWorkerLock(d, myId);
     for (const code of inflight.keys()) renewLease(d, code);
     void queueProgressSave(true).catch(() => {});
-  }, 20000);
+  }, WORKER_HEARTBEAT_INTERVAL_MS);
   if (heartbeat && typeof heartbeat.unref === 'function') heartbeat.unref();
   const cancelPoll = setInterval(async () => {
     try {
@@ -844,7 +852,7 @@ async function drainAccount(nick, initialAcc) {
         }
       }
     } catch { /* 下一轮继续检查 */ }
-  }, 1500);
+  }, CANCEL_POLL_INTERVAL_MS);
   if (cancelPoll && typeof cancelPoll.unref === 'function') cancelPoll.unref();
   try {
     while (true) {

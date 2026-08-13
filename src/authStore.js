@@ -5,7 +5,6 @@ import { isBatchRunning } from './adviceBatch'
 import {
   accountTradeStateFingerprint,
   createCloudSaveQueue,
-  sameAccountTradeState,
   saveWithRevisionRecovery,
 } from '../shared/accountSync.js'
 
@@ -295,23 +294,28 @@ export const authStore = {
   // 供 Web Push 订阅上报:把订阅绑到当前账号(服务端据此推给对的人)。仅内存,不落盘额外副本。
   getCreds() { return (state.user && _pw) ? { nick: state.user, pw: _pw } : null },
 
-  // 运行时【定期拉取】云端数据并【非破坏式合并】到本地。
+  // 运行时【增量拉取】云端数据并【非破坏式合并】到本地。
   // 解决"手机上生成的 AI 操作建议,电脑浏览器不刷新"——之前只在 boot/login 拉一次,
-  // 运行中从不复拉,桌面端会一直停在旧数据。这里周期性 get,交给 planStore.mergeCloud 按时间戳合并
+  // 运行中从不复拉,桌面端会一直停在旧数据。这里周期性 sync,仅返回上次同步后的建议/事件,
   // (只补更新的建议/决策,绝不覆盖本机正在编辑的持仓/账户),实现"手机生成、电脑自动看到"。
   async pull() {
     if (!state.user || !_pw) return false
     if (_pulling) return false
     _pulling = true
     try {
-      const r = await api('get', { nick: state.user, pw: _pw })
+      const r = await api('sync', {
+        nick: state.user,
+        pw: _pw,
+        since: state.lastSyncedAt || 0,
+      })
       if (r && r.ok && r.data) {
-        // pull 只增量合并 AI/预警，并未合并 holding/closed。
-        // 不能在此提升 revision，否则旧持仓会带着最新 revision 通过保存校验并覆盖云端交易。
         state.lastSyncedAt = r.updatedAt || state.lastSyncedAt
-        if (sameAccountTradeState(planStore.get(), r.data)) {
+        if (
+          r.tradeFingerprint
+          && r.tradeFingerprint === accountTradeStateFingerprint(planStore.get())
+        ) {
           _cloudRevision = Number(r.revision) || _cloudRevision
-          _lastSyncedTradeFingerprint = accountTradeStateFingerprint(r.data)
+          _lastSyncedTradeFingerprint = r.tradeFingerprint
         }
         try { planStore.mergeCloud(r.data) } catch { /* ignore */ }
         return true
@@ -323,12 +327,11 @@ export const authStore = {
 
 let _pulling = false
 let _pullTimer = null
-const PULL_INTERVAL = 45 * 1000  // 常态:45s 轮询一次云端(登录态才跑);切前台/重新可见时也补拉一次
-const PULL_FAST = 8 * 1000       // 批量生成进行中:加速到 8s,让服务端批量进度近实时同步到本机进度条
+const PULL_INTERVAL = 120 * 1000 // 常态:2分钟增量同步；切前台/重新可见时立即补拉
+const PULL_FAST = 15 * 1000      // 批量生成时15秒；2秒任务状态轮询已负责实时进度
 
 // 启动跨设备同步轮询:仅在浏览器环境、登录后运行。关标签页即停(纯前端增量同步,与云端定时生成无关)。
-// 用自调度 setTimeout(而非固定 setInterval):批量生成期间自动把间隔缩到 8s,平时回落到 45s——
-// 既让「手机生成、电脑同步看到进程」够快,又不在闲时空烧请求。
+// 登录/启动已完成一次全量读取，因此首轮无需立刻重复 GET 4 MiB 快照。
 export function startCloudSync() {
   if (typeof window === 'undefined') return
   if (_pullTimer) return
@@ -338,7 +341,7 @@ export function startCloudSync() {
     try { fast = isBatchRunning() } catch { fast = false }
     _pullTimer = setTimeout(tick, fast ? PULL_FAST : PULL_INTERVAL)
   }
-  _pullTimer = setTimeout(tick, 0)
+  _pullTimer = setTimeout(tick, PULL_INTERVAL)
   // 页面重新可见/窗口聚焦 → 立刻补拉一次(用户从手机切回电脑那一刻就能看到最新建议)
   const kick = () => { if (document.visibilityState === 'visible') { try { authStore.pull() } catch { /* ignore */ } } }
   document.addEventListener('visibilitychange', kick)

@@ -6,6 +6,7 @@ import {
   newerAutoRefreshPatch,
 } from '../shared/adviceAutoRefreshPolicy.js';
 import { adviceEntryMatchesMode } from '../shared/adviceModeContext.js';
+import { accountTradeStateFingerprint } from '../shared/accountSync.js';
 
 // ============ 云端账号 + 数据同步（阿里云 OSS 持久化）============
 // 单一入口，按 action 区分：register / login / get / save
@@ -38,6 +39,33 @@ export function mergeAccountEvents(clientEvents, serverEvents, limit) {
   return [...merged.values()]
     .sort((a, b) => (b.at || 0) - (a.at || 0))
     .slice(0, limit);
+}
+
+function newestStamp(value, keys) {
+  return Math.max(...keys.map((key) => Number(value?.[key]) || 0), 0);
+}
+
+export function accountSyncDelta(data = {}, since = 0) {
+  const after = Number(since) || 0;
+  const advice = Object.fromEntries(
+    Object.entries(data.advice || {}).filter(([, entry]) =>
+      newestStamp(entry, ['at', 'cachedAt', 'updatedAt']) > after
+    ),
+  );
+  const adviceLog = (data.adviceLog || []).filter((entry) =>
+    newestStamp(entry, ['verifiedAt', 'outcomeUpdatedAt', 'at']) > after
+  );
+  const decisionLog = (data.decisionLog || []).filter((entry) =>
+    newestStamp(entry, ['outcomeUpdatedAt', 'verifiedAt', 'executedAt', 'at']) > after
+  );
+  return {
+    advice,
+    adviceLog,
+    decisionLog,
+    // 预警只有 166 KiB，整组返回可覆盖旧记录缺少 updatedAt 的兼容场景。
+    alerts: Array.isArray(data.alerts) ? data.alerts : [],
+    batchProgress: data.batchProgress || null,
+  };
 }
 
 function mergeAccountAlerts(clientAlerts, serverAlerts) {
@@ -173,6 +201,10 @@ export async function readAccount(nick, storage = defaultStorage) {
   if (!account) account = await storage.readJson(legacyPathOf(nick));
   if (!account) return null;
 
+  return applyDeactivationMarker(account, nick, storage);
+}
+
+async function applyDeactivationMarker(account, nick, storage) {
   const marker = await storage.readJson(deactivationPathOf(nick));
   return marker
     ? { ...account, status: 'deactivated', deactivatedAt: marker.deactivatedAt || account.deactivatedAt }
@@ -198,7 +230,10 @@ export async function listAllAccounts(storage = defaultStorage) {
     }
     for (const b of groups.values()) {
       const raw = await storage.readJson(b);
-      const j = raw && raw.nick ? await readAccount(raw.nick, storage) : null;
+      // 分组时已取得该账号最新对象，避免再把 4 MiB current.json 重读一遍。
+      const j = raw && raw.nick
+        ? await applyDeactivationMarker(raw, raw.nick, storage)
+        : null;
       if (!j || !j.nick || !isAccountActive(j)) continue;
       const current = byNick.get(j.nick);
       if (!current || (j.updatedAt || 0) >= (current.updatedAt || 0)) byNick.set(j.nick, j);
@@ -229,28 +264,38 @@ async function cleanupAccountHistory(nick, storage, now) {
   }
 }
 
-export async function writeAccount(acc, storage = defaultStorage) {
+export async function writeAccount(
+  acc,
+  storage = defaultStorage,
+  { history = true, verify = true } = {},
+) {
   const saved = { ...acc, updatedAt: Date.now() };
   const body = JSON.stringify(saved);
-  const snapshot = await storage.put(`${historyPrefixOf(saved.nick)}${saved.updatedAt}.json`, body, {
-    access: 'public', contentType: 'application/json',
-    addRandomSuffix: true, cacheControlMaxAge: 0,
-  });
+  const snapshot = history
+    ? await storage.put(`${historyPrefixOf(saved.nick)}${saved.updatedAt}.json`, body, {
+        access: 'public', contentType: 'application/json',
+        addRandomSuffix: true, cacheControlMaxAge: 0,
+      })
+    : null;
   await storage.put(currentPathOf(saved.nick), body, {
     access: 'public', contentType: 'application/json',
     cacheControlMaxAge: 0,
   });
 
-  const verified = await storage.readJson(currentPathOf(saved.nick));
-  if (!verified || verified.updatedAt !== saved.updatedAt || verified.nick !== saved.nick) {
-    throw new Error('OSS 账号快照写入校验失败');
+  if (verify) {
+    const verified = await storage.readJson(currentPathOf(saved.nick));
+    if (!verified || verified.updatedAt !== saved.updatedAt || verified.nick !== saved.nick) {
+      throw new Error('OSS 账号快照写入校验失败');
+    }
   }
 
   // 保留最近 20 份细粒度版本，并为最近 90 天每天保留一个恢复点。
-  try {
-    await cleanupAccountHistory(saved.nick, storage, saved.updatedAt);
-  } catch { /* ignore */ }
-  return { ...saved, storage: 'oss', snapshotKey: snapshot.pathname };
+  if (history) {
+    try {
+      await cleanupAccountHistory(saved.nick, storage, saved.updatedAt);
+    } catch { /* ignore */ }
+  }
+  return { ...saved, storage: 'oss', snapshotKey: snapshot?.pathname || null };
 }
 
 export async function deactivateStoredAccount(account, storage = defaultStorage, now = Date.now()) {
@@ -298,11 +343,25 @@ export default async function handler(req, res) {
       });
     }
 
-    if (action === 'login' || action === 'get') {
+    if (action === 'login' || action === 'get' || action === 'sync') {
       const acc = await readAccount(nick);
       if (!acc) return ok(res, { ok: false, error: '账号不存在，请先注册' });
       if (acc.pwHash !== sha(pw)) return ok(res, { ok: false, error: '密码错误' });
       if (!isAccountActive(acc)) return ok(res, { ok: false, error: '账号已注销，数据仍保存在 OSS' });
+      if (action === 'sync') {
+        const since = Math.max(0, Number(body.since) || 0);
+        const changed = Number(acc.updatedAt) > since;
+        return ok(res, {
+          ok: true,
+          nick: acc.nick,
+          data: changed ? accountSyncDelta(acc.data, since) : {},
+          changed,
+          updatedAt: acc.updatedAt,
+          revision: Number(acc.clientRevision) || 0,
+          tradeFingerprint: accountTradeStateFingerprint(acc.data),
+          storage: 'oss',
+        });
+      }
       return ok(res, {
         ok: true, nick: acc.nick,
         data: acc.data || { plan: [], holding: [], closed: [] },

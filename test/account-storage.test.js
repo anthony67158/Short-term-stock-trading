@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  accountSyncDelta,
   applyClientAccountSave,
   deactivateAccount,
   deactivateStoredAccount,
@@ -70,6 +71,62 @@ test('账号保存同时写入 OSS 当前快照和可恢复历史快照并可立
   assert.equal(saved.storage, 'oss')
   assert.equal(saved.snapshotKey, historyKey)
   assert.deepEqual((await readAccount(account.nick, storage)).data, account.data)
+})
+
+test('Worker运行态保存只覆盖当前快照且不生成历史或回读校验', async () => {
+  const storage = fakeStorage()
+  let reads = 0
+  const originalRead = storage.readJson
+  storage.readJson = async (...args) => {
+    reads += 1
+    return originalRead(...args)
+  }
+  const account = {
+    nick: '运行态账号',
+    pwHash: 'hash',
+    createdAt: 1,
+    data: { jobs: { '600000': { progressAt: 200 } } },
+  }
+
+  const saved = await writeAccount(account, storage, {
+    history: false,
+    verify: false,
+  })
+  const keys = [...storage.objects.keys()]
+
+  assert.equal(keys.filter((key) => key.endsWith('/current.json')).length, 1)
+  assert.equal(keys.some((key) => key.includes('/history/')), false)
+  assert.equal(reads, 0)
+  assert.equal(saved.snapshotKey, null)
+})
+
+test('运行时账号同步只返回更新时间后的建议事件和轻量状态', () => {
+  const delta = accountSyncDelta({
+    advice: {
+      old: { at: 100, advice: { action: '持有' } },
+      fresh: { at: 300, advice: { action: '减仓' } },
+    },
+    adviceLog: [
+      { id: 'old-log', at: 100 },
+      { id: 'verified-log', at: 100, verifiedAt: 350 },
+    ],
+    decisionLog: [
+      { id: 'old-decision', at: 100 },
+      { id: 'executed', at: 100, executedAt: 360 },
+    ],
+    alerts: [{ id: 'a1', createdAt: 50 }],
+    batchProgress: { at: 400, running: true },
+    holding: [{ code: '600000', qty: 2 }],
+    closed: [{ id: 'trade-1' }],
+  }, 200)
+
+  assert.deepEqual(Object.keys(delta.advice), ['fresh'])
+  assert.deepEqual(delta.adviceLog.map((item) => item.id), ['verified-log'])
+  assert.deepEqual(delta.decisionLog.map((item) => item.id), ['executed'])
+  assert.equal(delta.alerts.length, 1)
+  assert.equal(delta.batchProgress.running, true)
+  assert.equal(delta.holding, undefined)
+  assert.equal(delta.closed, undefined)
 })
 
 test('OSS 当前快照写后校验失败时保存必须报错', async () => {
