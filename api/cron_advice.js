@@ -67,6 +67,7 @@ import {
   failAdviceJobsForDailyReport,
   setAdviceDailyReportPhase,
 } from './_advice_daily_report.js';
+import { buildRealOutcomeLearning } from '../shared/realOutcomeLearning.js';
 
 export const PROGRESS_SAVE_INTERVAL_MS = 5000;
 export const CANCEL_POLL_INTERVAL_MS = 5000;
@@ -533,6 +534,7 @@ async function runJobGen(
   const name = (holding.find((h) => h.code === code) || watch.find((w) => w.code === code) || {}).name || code;
   const priceHint = Number(quoteMap[code]?.price) > 0 ? Number(quoteMap[code].price) : null;
   const quantModelVersion = data.settings?.quantModelVersion || 'default';
+  const realOutcomeLearning = buildRealOutcomeLearning(data);
   const mode = holdSet.has(code) ? 'hold_advice' : 'buy_advice';
   const cachedPrevious = data.advice?.[code] || null;
   const previousEntry = adviceEntryMatchesMode(cachedPrevious, mode)
@@ -542,6 +544,7 @@ async function runJobGen(
   if (mode === 'hold_advice') {
     let p = buildHoldPayload(holding, code, name, portfolio, data.account, data.closed, nextTradeDayLabel());
     p.advisorTrack = advisorTrackFrom(data, 'hold_advice');
+    p.realOutcomeLearning = realOutcomeLearning;
     p.quantModelVersion = quantModelVersion;
     p.accountRevision = Number(acc.clientRevision) || null;
     p = attachAdviceDailyReport(p, dailyReportSummary);
@@ -551,6 +554,7 @@ async function runJobGen(
   }
   let p = buildWatchPayload(code, name, portfolio, data.account);
   p.advisorTrack = advisorTrackFrom(data, 'buy_advice');
+  p.realOutcomeLearning = realOutcomeLearning;
   p.quantModelVersion = quantModelVersion;
   p.accountRevision = Number(acc.clientRevision) || null;
   p = attachAdviceDailyReport(p, dailyReportSummary);

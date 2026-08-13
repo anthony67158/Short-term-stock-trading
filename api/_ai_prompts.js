@@ -154,6 +154,10 @@ ${payload.quant.v2.executionReference ? `【当前时段实时执行层·不是�
   const advisorTrackNote = advisorTrack
     ? `\n【★军师历史战绩·按动作方向校准】这是3个交易日的建议命中统计，不等于真实成交收益率。综合命中率${advisorTrack.overallWinRate}%(${advisorTrack.overallTotal}次已验、平均结果${advisorTrack.overallAvgPct >= 0 ? '+' : ''}${advisorTrack.overallAvgPct}%)${advisorTrack.modeWinRate != null ? `；本类(${mode})命中率${advisorTrack.modeWinRate}%(${advisorTrack.modeTotal}次)` : ''}${actionScoreText ? `；动作拆分：${actionScoreText}` : ''}。低命中不等于一律更保守，也不能一律更激进。${actionDiagnosis}样本少于8次只作弱参考；无论历史高低，当前实时证据、量化方向、确认信号与盈亏比仍优先。除非共振分≥4且盈亏比≥2.5:1，否则confidence不得给“高”。`
     : '';
+  const realOutcome = payload.realOutcomeContext;
+  const realOutcomeNote = realOutcome?.sampleQualified
+    ? `\n【★★真实成交费后学习·高于建议命中统计】同模式同市场环境已有${realOutcome.samples}笔完成验证且关联真实卖出的费后样本，收缩后胜率${realOutcome.posteriorWinRate}%、Profit Factor=${realOutcome.profitFactor ?? '无亏损样本'}、单笔期望${realOutcome.expectancy >= 0 ? '+' : ''}${realOutcome.expectancy}元，校准=${realOutcome.calibration}、风险倍率=${realOutcome.riskScale}。它只用于调节本次手数/风险预算，绝不能改变当前证据方向、放松止损或绕过账户硬闸门。`
+    : `\n【★★真实成交费后学习】当前同模式同市场环境仅${realOutcome?.samples || 0}笔合格真实成交，未达到最小样本；保持风险倍率1，不得把三日建议命中、浮盈或未执行建议冒充真实收益。`;
   const theoryTrackNote = advisorTrack
     && Array.isArray(advisorTrack.theoryScores)
     && advisorTrack.theoryScores.length
@@ -200,7 +204,7 @@ ${payload.todayQuote.isLimitUp ? '⚠️该股【今日已涨停】：说明今�
   const advisorData = advisorDataRaw.replace(
     /\n【★军师历史战绩·自我校准[\s\S]*?(?=\n【★量化模型·|\n【★量化·高把握|\n【★★高把握|\n【★资金金额)/,
     `${advisorTrackNote}${theoryTrackNote}`,
-  ) + previousAdviceNote + knowledgeActionNote + knowledgeActionReviewNote;
+  ) + realOutcomeNote + previousAdviceNote + knowledgeActionNote + knowledgeActionReviewNote;
 
   // ============ 交易实况铁律：涨跌停可买性 + A股T+1 + 「下个开盘/未来」两段指导 ============
   // 解决:①卡片建议要结合涨跌停(±10%/±20%)、当前是否真能买(不追涨停、封板买不进)②A股T+1(当天买不能当天卖,自选股无底仓更不能当日做T卖)③建议要分「紧接着的下一个开盘时段」和「更远的未来」两段,今天买不了就讲后续怎么等。

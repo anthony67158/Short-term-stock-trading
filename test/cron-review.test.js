@@ -114,6 +114,10 @@ test('FC自动复盘先保存租约再写入成功结果且同场不重复生成
     'ev_review_test',
   )
   assert.equal(current.data.reviewAuto.runs['2026-08-13:noon'].codes['600001'].status, 'done')
+  assert.equal(
+    current.data.realOutcomeLearning.schemaVersion,
+    'real-outcome-learning.v1',
+  )
 })
 
 test('模型失败时记录失败并允许下一次Timer重试', async () => {

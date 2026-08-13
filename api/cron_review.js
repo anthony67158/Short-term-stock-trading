@@ -23,6 +23,7 @@ import {
 import {
   addEvidenceSnapshot,
 } from '../shared/evidenceSnapshot.js'
+import { buildRealOutcomeLearning } from '../shared/realOutcomeLearning.js'
 
 const REVIEW_CONCURRENCY = 2
 const REVIEW_RUNTIME_BUDGET_MS = 300000
@@ -282,6 +283,7 @@ export async function processReviewAccount(
       fail++
     }
   }
+  latest.data.realOutcomeLearning = buildRealOutcomeLearning(latest.data)
   await write(latest, { history: false, verify: true })
   return { claimed: claimed.length, ok, fail }
 }

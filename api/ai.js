@@ -48,6 +48,10 @@ import {
   resolveEvidenceAccountRevision,
   sourceTextVersion,
 } from '../shared/evidenceSnapshot.js';
+import {
+  buildRealOutcomeLearning,
+  realOutcomeContext,
+} from '../shared/realOutcomeLearning.js';
 
 function avg(arr) { return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0; }
 function std(arr) { if (arr.length < 2) return 0; const m = avg(arr); return Math.sqrt(avg(arr.map((x) => (x - m) ** 2))); }
@@ -502,6 +506,15 @@ export default async function handler(req, res) {
   try {
     const mode = (body && body.mode) || 'market';
     const payload = (body && body.payload) || {};
+    if (
+      isAdvisorMode(mode)
+      && !payload.realOutcomeLearning
+      && accountAuth.account?.data
+    ) {
+      payload.realOutcomeLearning = buildRealOutcomeLearning(
+        accountAuth.account.data,
+      );
+    }
     const streaming = !!(body && body.stream); // 客户端可选开启 SSE 进度流
     const evidenceAccountRevision = resolveEvidenceAccountRevision(
       payload,
@@ -1093,6 +1106,15 @@ export default async function handler(req, res) {
       }
     }
 
+    if (isAdvisorMode(mode) && payload.realOutcomeLearning) {
+      payload.realOutcomeContext = realOutcomeContext(
+        payload.realOutcomeLearning,
+        {
+          mode,
+          marketRegime: payload.marketEnv?.level,
+        },
+      );
+    }
     const isAdvisor = isAdvisorMode(mode);
     if (isAdvisor && payload.code) ensureEvidenceSnapshot();
     const useModel = isAdvisor ? ADVISOR_MODEL : MODEL;

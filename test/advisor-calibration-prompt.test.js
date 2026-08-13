@@ -104,3 +104,24 @@ test('弱市买入必须同时通过个股强势和高把握信号硬闸门', ()
   assert.match(prompt, /任一不满足.*观望/)
   assert.doesNotMatch(prompt, /共振分≥2且个股结构不坏，就应给出明确的做多/)
 })
+
+test('军师区分真实费后收益与三日建议命中统计', () => {
+  const prompt = buildUserPrompt('buy_advice', {
+    code: '600000',
+    realOutcomeContext: {
+      samples: 12,
+      sampleQualified: true,
+      posteriorWinRate: 58.3,
+      profitFactor: 1.4,
+      expectancy: 86,
+      calibration: 'constructive',
+      riskScale: 1.1,
+    },
+  })
+
+  assert.match(prompt, /真实成交费后学习/)
+  assert.match(prompt, /12笔完成验证且关联真实卖出/)
+  assert.match(prompt, /风险倍率=1\.1/)
+  assert.match(prompt, /只用于调节本次手数\/风险预算/)
+  assert.match(prompt, /绝不能.*绕过账户硬闸门/)
+})
