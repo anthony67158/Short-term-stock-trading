@@ -1,7 +1,25 @@
+import {
+  compileStrategySpec,
+  createDefaultStrategySpec,
+  evaluateStrategySignal,
+} from './strategySpec.js'
+
 const clamp = (value, min = 0, max = 1) => Math.max(min, Math.min(max, value))
 const finite = (value, fallback = 0) => {
   const n = Number(value)
   return Number.isFinite(n) ? n : fallback
+}
+
+export function assertStrategyVersion(expected = {}, received = {}) {
+  if (
+    expected.strategyId === received.strategyId
+    && expected.specVersion === received.specVersion
+    && expected.strategyId
+    && expected.specVersion
+  ) return true
+  const error = new Error('选股策略版本不一致，请刷新页面后重试')
+  error.code = 'STRATEGY_VERSION_MISMATCH'
+  throw error
 }
 
 export function stockPickSession(now = Date.now()) {
@@ -46,22 +64,79 @@ function peak(value, left, ideal, right) {
   return (right - value) / (right - ideal)
 }
 
-function scoreOf(stock) {
+function resolvedStrategy(opts = {}) {
+  const input = opts.strategySpec
+    ? structuredClone(opts.strategySpec)
+    : createDefaultStrategySpec()
+  delete input.specVersion
+  const legacyFilters = {
+    minPct: opts.minPct,
+    maxPct: opts.maxPct,
+    minTurnover: opts.minTurnover,
+    maxTurnover: opts.maxTurnover,
+    minVolRatio: opts.minVolRatio,
+    maxVolRatio: opts.maxVolRatio,
+  }
+  if (opts.minAmount != null) {
+    input.universe.minimumAmount = Number(opts.minAmount)
+  }
+  for (const [key, value] of Object.entries(legacyFilters)) {
+    if (value != null) input.marketRanking.filters[key] = Number(value)
+  }
+  return compileStrategySpec(input)
+}
+
+function scoreOf(stock, strategy) {
+  const ranking = strategy.marketRanking
+  const factors = ranking.factors
+  const weights = ranking.factorWeights
   const mainRatio = finite(stock.mainRatio)
   const mainInflowYi = finite(stock.mainInflow) / 1e8
   const fund = Math.max(
-    clamp((mainRatio + 3) / 18),
-    clamp(Math.log10(Math.max(mainInflowYi, 0) + 1) / Math.log10(8))
+    clamp(
+      (mainRatio - factors.fund.mainRatioFloor)
+        / factors.fund.mainRatioSpan
+    ),
+    clamp(
+      Math.log10(Math.max(mainInflowYi, 0) + 1)
+        / Math.log10(factors.fund.inflowScaleYi + 1)
+    )
   )
-  const volume = peak(finite(stock.volRatio), 0.5, 2.2, 8)
-  const momentum = peak(finite(stock.pct), -3, 3.5, 8.8)
-  const speed = clamp((finite(stock.speed) + 0.2) / 1.6)
+  const volume = peak(
+    finite(stock.volRatio),
+    factors.volume.left,
+    factors.volume.ideal,
+    factors.volume.right,
+  )
+  const momentum = peak(
+    finite(stock.pct),
+    factors.momentum.left,
+    factors.momentum.ideal,
+    factors.momentum.right,
+  )
+  const speed = clamp(
+    (finite(stock.speed) - factors.speed.floor) / factors.speed.span
+  )
   const liquidity = clamp(
-    Math.log10(Math.max(finite(stock.amount), 1) / 8e7) / Math.log10(25)
+    Math.log10(
+      Math.max(finite(stock.amount), 1)
+        / strategy.universe.minimumAmount
+    ) / Math.log10(factors.liquidity.amountMultiple)
   )
-  const turnover = peak(finite(stock.turnover), 0.4, 6, 25)
-  const score = fund * 30 + volume * 15 + momentum * 15 +
-    speed * 10 + liquidity * 15 + turnover * 15
+  const turnover = peak(
+    finite(stock.turnover),
+    factors.turnover.left,
+    factors.turnover.ideal,
+    factors.turnover.right,
+  )
+  const score = (
+    fund * weights.fund
+    + volume * weights.volume
+    + momentum * weights.momentum
+    + speed * weights.speed
+    + liquidity * weights.liquidity
+    + turnover * weights.turnover
+  ) * 100
   const reasons = []
   if (fund >= 0.6) reasons.push('主力资金')
   if (volume >= 0.55) reasons.push('量能放大')
@@ -70,7 +145,8 @@ function scoreOf(stock) {
   return { score: +clamp(score, 0, 100).toFixed(1), reasons }
 }
 
-function isEligible(stock, options) {
+function isEligible(stock, strategy) {
+  const filters = strategy.marketRanking.filters
   const name = String(stock.name || '')
   const code = String(stock.code || '')
   const price = finite(stock.price)
@@ -78,62 +154,99 @@ function isEligible(stock, options) {
   const pct = finite(stock.pct)
   const turnover = finite(stock.turnover)
   const volRatio = finite(stock.volRatio)
-  if (!/^\d{6}$/.test(code) || !name || /(?:\*?ST|退市|退$)/i.test(name)) return false
-  if (!(price > 0) || amount < options.minAmount) return false
-  if (pct < options.minPct || pct > options.maxPct) return false
-  if (turnover < options.minTurnover || turnover > options.maxTurnover) return false
-  if (volRatio < options.minVolRatio || volRatio > options.maxVolRatio) return false
+  if (!/^\d{6}$/.test(code) || !name || /(?:退市|退$)/i.test(name)) return false
+  if (strategy.universe.excludeSt && /(?:\*?ST)/i.test(name)) return false
+  if (!(price > 0) || amount < strategy.universe.minimumAmount) return false
+  if (
+    stock.listingDays != null
+    && finite(stock.listingDays) < strategy.universe.minimumListingDays
+  ) return false
+  if (pct < filters.minPct || pct > filters.maxPct) return false
+  if (turnover < filters.minTurnover || turnover > filters.maxTurnover) return false
+  if (volRatio < filters.minVolRatio || volRatio > filters.maxVolRatio) return false
   return true
 }
 
 export function rankMarketCandidates(rows, opts = {}) {
-  const options = {
-    limit: Math.max(1, Math.min(50, Number(opts.limit) || 30)),
-    minAmount: Number(opts.minAmount) || 8e7,
-    minPct: opts.minPct == null ? -6 : Number(opts.minPct),
-    maxPct: opts.maxPct == null ? 8.8 : Number(opts.maxPct),
-    minTurnover: opts.minTurnover == null ? 0.4 : Number(opts.minTurnover),
-    maxTurnover: opts.maxTurnover == null ? 25 : Number(opts.maxTurnover),
-    minVolRatio: opts.minVolRatio == null ? 0.5 : Number(opts.minVolRatio),
-    maxVolRatio: opts.maxVolRatio == null ? 8 : Number(opts.maxVolRatio),
-  }
+  const strategy = resolvedStrategy(opts)
+  const limit = Math.max(1, Math.min(50, Number(opts.limit) || 30))
   const universe = Array.isArray(rows) ? rows : []
-  const eligible = universe.filter((stock) => isEligible(stock, options))
+  const eligible = universe.filter((stock) => isEligible(stock, strategy))
   const list = eligible.map((stock) => {
-    const ranked = scoreOf(stock)
+    const ranked = scoreOf(stock, strategy)
     return { ...stock, marketScore: ranked.score, reasons: ranked.reasons }
   }).sort((a, b) =>
     b.marketScore - a.marketScore ||
     finite(b.amount) - finite(a.amount) ||
     String(a.code).localeCompare(String(b.code))
-  ).slice(0, options.limit)
-  return { universeCount: universe.length, eligibleCount: eligible.length, list }
+  ).slice(0, limit)
+  return {
+    strategyId: strategy.strategyId,
+    specVersion: strategy.specVersion,
+    universeCount: universe.length,
+    eligibleCount: eligible.length,
+    list,
+  }
 }
 
-export function rerankQuantCandidates(candidates, opts = {}) {
+export function rankStrategyShortlist(candidates, opts = {}) {
+  const strategy = resolvedStrategy(opts)
   const limit = Math.max(1, Math.min(30, Number(opts.limit) || 12))
-  return (Array.isArray(candidates) ? candidates : []).map((item) => {
+  const weights = strategy.score.weights
+  const normalization = strategy.score.normalization
+  const range = normalization.expectedReturnMax
+    - normalization.expectedReturnMin
+  const ranked = (Array.isArray(candidates) ? candidates : []).map((item) => {
     const quant = item.quant || {}
     const marketScore = clamp(finite(item.marketScore), 0, 100)
     const quantScore = clamp(finite(quant.score, 45), 0, 100)
     const upProb = clamp(finite(quant.upProb, 50), 0, 100)
-    const expScore = clamp((finite(quant.expRet) + 5) * 10, 0, 100)
-    const highConfidenceBonus = quant.highConfFired ? 5 : 0
+    const expScore = clamp(
+      (
+        finite(quant.expRet) - normalization.expectedReturnMin
+      ) / range * 100,
+      0,
+      100,
+    )
+    const highConfidenceBonus = quant.highConfFired
+      ? strategy.score.bonuses.highConfidence
+      : 0
     const combinedScore = clamp(
-      marketScore * 0.4 +
-      quantScore * 0.35 +
-      upProb * 0.15 +
-      expScore * 0.1 +
+      marketScore * weights.marketScore +
+      quantScore * weights.quantScore +
+      upProb * weights.upProb +
+      expScore * weights.expectedReturn +
       highConfidenceBonus,
       0,
       100
     )
-    return { ...item, combinedScore: +combinedScore.toFixed(1) }
+    const strategySignal = evaluateStrategySignal(strategy, item)
+    return {
+      ...item,
+      combinedScore: +combinedScore.toFixed(1),
+      strategySignal,
+    }
   }).sort((a, b) =>
     b.combinedScore - a.combinedScore ||
     finite(b.marketScore) - finite(a.marketScore) ||
     String(a.code).localeCompare(String(b.code))
-  ).slice(0, limit)
+  )
+  const passed = ranked.filter((item) => item.strategySignal.passed)
+  const failed = ranked.filter((item) => !item.strategySignal.passed)
+  const executable = passed.slice(0, limit)
+  const watchlist = failed.slice(0, limit)
+  return {
+    strategyId: strategy.strategyId,
+    specVersion: strategy.specVersion,
+    signalPassedCount: passed.length,
+    executable,
+    watchlist,
+    list: [...executable, ...watchlist].slice(0, limit),
+  }
+}
+
+export function rerankQuantCandidates(candidates, opts = {}) {
+  return rankStrategyShortlist(candidates, opts).list
 }
 
 function price(value) {
@@ -200,6 +313,9 @@ function conditionalFallback(item, index, noTradeReason) {
 export function normalizePickDecision(value, allowedCodes = [], fallbackCandidates = []) {
   const result = value && typeof value === 'object' ? { ...value } : {}
   const allowed = new Set((allowedCodes || []).map(String))
+  const candidates = new Map(
+    (fallbackCandidates || []).map((item) => [String(item?.code || ''), item])
+  )
   const picks = (Array.isArray(result.picks) ? result.picks : [])
     .filter((item) => item && allowed.has(String(item.code || '')))
     .slice(0, 3)
@@ -210,16 +326,26 @@ export function normalizePickDecision(value, allowedCodes = [], fallbackCandidat
       return {
         ...item,
         rank: index + 1,
-        actionability: result.noTrade === true
+        actionability: (
+          result.noTrade === true
+          || candidates.get(String(item.code))?.strategySignal?.passed === false
+        )
           ? (requested === '观察' ? '观察' : '等待触发')
           : (requested || '可执行'),
       }
     })
   if (picks.length > 0) {
+    const noTrade = result.noTrade === true
+      || picks.every((item) => item.actionability !== '可执行')
     return {
       ...result,
-      noTrade: result.noTrade === true,
-      noTradeReason: result.noTrade === true ? (result.noTradeReason || '当前没有立即买点') : '',
+      noTrade,
+      noTradeReason: noTrade
+        ? (
+            result.noTradeReason
+            || '候选未通过策略入场条件，仅保留观察'
+          )
+        : '',
       picks,
     }
   }
@@ -247,8 +373,21 @@ export function normalizePickDecision(value, allowedCodes = [], fallbackCandidat
   }
 }
 
-export function normalizeStoredPickSnapshot(snapshot) {
+export function normalizeStoredPickSnapshot(snapshot, expectedStrategy = null) {
   if (!snapshot || typeof snapshot !== 'object' || !snapshot.result) return snapshot
+  if (
+    expectedStrategy
+    && (
+      snapshot.funnel?.strategyId !== expectedStrategy.strategyId
+      || snapshot.funnel?.specVersion !== expectedStrategy.specVersion
+    )
+  ) {
+    return {
+      ...snapshot,
+      result: null,
+      strategyStale: true,
+    }
+  }
   const shortlist = Array.isArray(snapshot.shortlist) ? snapshot.shortlist : []
   if (!shortlist.length) {
     const picks = Array.isArray(snapshot.result.picks) ? snapshot.result.picks : []

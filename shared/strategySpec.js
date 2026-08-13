@@ -87,6 +87,36 @@ export function createDefaultStrategySpec(overrides = {}) {
       minimumListingDays: 20,
       minimumAmount: 8e7,
     },
+    marketRanking: {
+      filters: {
+        minPct: -6,
+        maxPct: 8.8,
+        minTurnover: 0.4,
+        maxTurnover: 25,
+        minVolRatio: 0.5,
+        maxVolRatio: 8,
+      },
+      factorWeights: {
+        fund: 0.3,
+        volume: 0.15,
+        momentum: 0.15,
+        speed: 0.1,
+        liquidity: 0.15,
+        turnover: 0.15,
+      },
+      factors: {
+        fund: {
+          mainRatioFloor: -3,
+          mainRatioSpan: 18,
+          inflowScaleYi: 7,
+        },
+        volume: { left: 0.5, ideal: 2.2, right: 8 },
+        momentum: { left: -3, ideal: 3.5, right: 8.8 },
+        speed: { floor: -0.2, span: 1.6 },
+        liquidity: { amountMultiple: 25 },
+        turnover: { left: 0.4, ideal: 6, right: 25 },
+      },
+    },
     entry: {
       type: 'ALL',
       conditions: [
@@ -106,6 +136,10 @@ export function createDefaultStrategySpec(overrides = {}) {
       },
       bonuses: {
         highConfidence: 5,
+      },
+      normalization: {
+        expectedReturnMin: -5,
+        expectedReturnMax: 5,
       },
     },
     position: {
@@ -203,6 +237,7 @@ export function compileStrategySpec(input) {
   }
   positive(spec.data?.minimumHistoryBars, 'minimumHistoryBars')
   positive(spec.universe?.minimumListingDays, 'minimumListingDays')
+  positive(spec.universe?.minimumAmount, 'minimumAmount')
   positive(spec.position?.lotSize, 'lotSize')
   positive(spec.position?.allocationPct, 'allocationPct')
   positive(spec.position?.maxPositions, 'maxPositions')
@@ -248,9 +283,38 @@ export function compileStrategySpec(input) {
   ) {
     throw new Error('评分权重之和必须为1')
   }
+  const marketWeights = Object.values(
+    spec.marketRanking?.factorWeights || {},
+  ).map(Number)
+  if (
+    !marketWeights.length
+    || marketWeights.some((value) => !Number.isFinite(value) || value < 0)
+    || Math.abs(
+      marketWeights.reduce((sum, value) => sum + value, 0) - 1
+    ) > 1e-9
+  ) {
+    throw new Error('市场因子权重之和必须为1')
+  }
+  const filters = spec.marketRanking?.filters || {}
+  for (const key of [
+    'minPct',
+    'maxPct',
+    'minTurnover',
+    'maxTurnover',
+    'minVolRatio',
+    'maxVolRatio',
+  ]) {
+    if (!Number.isFinite(Number(filters[key]))) {
+      throw new Error(`marketRanking.filters.${key}必须为有限数`)
+    }
+  }
   validateCondition(spec.entry)
   spec.specVersion = strategySpecFingerprint(spec)
   return spec
+}
+
+export function getActiveStrategySpec() {
+  return compileStrategySpec(createDefaultStrategySpec())
 }
 
 function fieldValue(context, field) {

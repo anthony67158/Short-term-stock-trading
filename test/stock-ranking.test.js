@@ -2,14 +2,20 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  assertStrategyVersion,
   marketPageNumbers,
   normalizePickDecision,
   normalizeStoredPickSnapshot,
   rankMarketCandidates,
+  rankStrategyShortlist,
   rerankQuantCandidates,
   stockPickSession,
   stockPickSavedLabel,
 } from '../shared/stockRanking.js'
+import {
+  compileStrategySpec,
+  createDefaultStrategySpec,
+} from '../shared/strategySpec.js'
 
 const row = (patch = {}) => ({
   code: '600000',
@@ -88,6 +94,33 @@ test('返回数量受 limit 约束且分数稳定在 0 到 100', () => {
     item.marketScore >= 0 &&
     item.marketScore <= 100
   ))
+  assert.equal(result.strategyId, 'market-quant-resonance')
+  assert.match(result.specVersion, /^strategy\./)
+})
+
+test('市场初排阈值和六因子权重由策略规格决定', () => {
+  const strategy = compileStrategySpec(createDefaultStrategySpec({
+    universe: { minimumAmount: 900_000_000 },
+    marketRanking: {
+      factorWeights: {
+        fund: 0,
+        volume: 0,
+        momentum: 1,
+        speed: 0,
+        liquidity: 0,
+        turnover: 0,
+      },
+    },
+  }))
+  const result = rankMarketCandidates([
+    row({ code: '600001', amount: 800_000_000, pct: 3.5 }),
+    row({ code: '600002', amount: 1_000_000_000, pct: 1 }),
+    row({ code: '600003', amount: 1_000_000_000, pct: 3.5 }),
+  ], { strategySpec: strategy })
+
+  assert.equal(result.eligibleCount, 2)
+  assert.deepEqual(result.list.map((item) => item.code), ['600003', '600002'])
+  assert.equal(result.specVersion, strategy.specVersion)
 })
 
 test('量化复排兼顾市场分与模型把握，不由单一热度决定', () => {
@@ -107,6 +140,95 @@ test('量化复排兼顾市场分与模型把握，不由单一热度决定', ()
   assert.equal(result.length, 1)
   assert.equal(result[0].code, '600021')
   assert.ok(result[0].combinedScore >= 0 && result[0].combinedScore <= 100)
+})
+
+test('策略短名单只把通过入场条件的标的标记为可执行', () => {
+  const result = rankStrategyShortlist([
+    {
+      code: '600020',
+      marketScore: 80,
+      pct: 2,
+      volRatio: 1.5,
+      quant: { score: 70, upProb: 60, expRet: 2 },
+    },
+    {
+      code: '600021',
+      marketScore: 80,
+      pct: 2,
+      volRatio: 1.5,
+      quant: { score: 40, upProb: 70, expRet: 3 },
+    },
+  ], { limit: 12 })
+
+  assert.deepEqual(result.executable.map((item) => item.code), ['600020'])
+  assert.deepEqual(result.watchlist.map((item) => item.code), ['600021'])
+  assert.equal(result.list[0].strategySignal.passed, true)
+  assert.equal(result.list[1].strategySignal.passed, false)
+  assert.equal(result.signalPassedCount, 1)
+  assert.match(result.specVersion, /^strategy\./)
+})
+
+test('量化缺失时只进入观察名单且明确记录缺失证据', () => {
+  const result = rankStrategyShortlist([
+    {
+      code: '600020',
+      marketScore: 80,
+      pct: 2,
+      volRatio: 1.5,
+      quant: null,
+    },
+  ])
+
+  assert.deepEqual(result.executable, [])
+  assert.equal(result.watchlist.length, 1)
+  assert.equal(result.watchlist[0].strategySignal.passed, false)
+  assert.ok(result.watchlist[0].strategySignal.failedRules.some(
+    (item) => item.field === 'quant.score'
+      && item.reason === 'MISSING_VALUE'
+  ))
+})
+
+test('未通过策略的股票不能被LLM输出升级为可执行', () => {
+  const result = normalizePickDecision({
+    noTrade: false,
+    picks: [
+      { code: '600001', actionability: '可执行' },
+      { code: '600002', actionability: '可执行' },
+    ],
+  }, ['600001', '600002'], [
+    { code: '600001', strategySignal: { passed: true } },
+    { code: '600002', strategySignal: { passed: false } },
+  ])
+
+  assert.equal(result.picks[0].actionability, '可执行')
+  assert.equal(result.picks[1].actionability, '等待触发')
+})
+
+test('所有LLM候选都未通过策略时自动降级为不出手', () => {
+  const result = normalizePickDecision({
+    noTrade: false,
+    picks: [{ code: '600001', actionability: '可执行' }],
+  }, ['600001'], [
+    { code: '600001', strategySignal: { passed: false } },
+  ])
+
+  assert.equal(result.noTrade, true)
+  assert.equal(result.picks[0].actionability, '等待触发')
+  assert.match(result.noTradeReason, /策略入场条件/)
+})
+
+test('前后端策略版本不一致时终止本轮选股', () => {
+  assert.doesNotThrow(() => assertStrategyVersion(
+    { strategyId: 'market-quant-resonance', specVersion: 'strategy.same' },
+    { strategyId: 'market-quant-resonance', specVersion: 'strategy.same' },
+  ))
+  assert.throws(
+    () => assertStrategyVersion(
+      { strategyId: 'market-quant-resonance', specVersion: 'strategy.new' },
+      { strategyId: 'market-quant-resonance', specVersion: 'strategy.old' },
+    ),
+    (error) => error?.code === 'STRATEGY_VERSION_MISMATCH',
+  )
 })
 
 test('全市场总数会展开为完整分页而不是停在第一页 100 只', () => {
@@ -276,6 +398,26 @@ test('没有短名单的旧版空结果自动失效以便重新生成', () => {
 
   assert.equal(saved.result, null)
   assert.equal(saved.legacyEmpty, true)
+})
+
+test('历史选股快照与当前策略版本不一致时自动失效', () => {
+  const saved = normalizeStoredPickSnapshot({
+    result: {
+      noTrade: false,
+      picks: [{ code: '600001', actionability: '可执行' }],
+    },
+    funnel: {
+      strategyId: 'market-quant-resonance',
+      specVersion: 'strategy.old',
+    },
+    shortlist: [{ code: '600001' }],
+  }, {
+    strategyId: 'market-quant-resonance',
+    specVersion: 'strategy.current',
+  })
+
+  assert.equal(saved.result, null)
+  assert.equal(saved.strategyStale, true)
 })
 
 test('休市生成结果标记为开盘观察池而不是盘中或明天', () => {

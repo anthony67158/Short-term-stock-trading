@@ -46,3 +46,27 @@ test('AI选股在V2.1回退时必须按实际V2.0解释候选分数', () => {
   assert.match(prompt, /回退V2\.0/)
   assert.match(prompt, /不得把V2\.0分数描述成V2\.1盘中结果/)
 })
+
+test('AI选股不得把未通过统一策略的候选升级为可执行', () => {
+  const prompt = buildUserPrompt('scan_pick', {
+    candidates: [{
+      code: '600001',
+      strategySignal: {
+        passed: false,
+        failedRules: [{
+          field: 'quant.score',
+          actual: 42,
+          expected: 55,
+        }],
+      },
+    }],
+    strategy: {
+      strategyId: 'market-quant-resonance',
+      specVersion: 'strategy.test',
+    },
+  })
+
+  assert.match(prompt, /strategySignal\.passed=false/)
+  assert.match(prompt, /不得升级为“可执行”/)
+  assert.match(prompt, /failedRules/)
+})

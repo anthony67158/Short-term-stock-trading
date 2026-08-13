@@ -297,7 +297,7 @@ ${payload.holdQty != null ? `4) 手数纪律:任何减仓/清仓/卖出手数 �
 数据含：大盘情绪(market)、板块资金流(sectors)、漏斗统计(funnel)、【候选池 candidates —— 已按 combinedScore 复排】。
 数据：${data}
 
-【候选池 candidates 字段说明】每只含：name/code、price现价、marketScore全市场分、combinedScore量化复排分、pct/turnover/volRatio/mainInflowYi、tags，以及 quant{ modelVersion用户选择,effectiveModelVersion候选实际运行版本,runtimeModelVersion,modelLabel,fallback,score,upProb,expRet,targetLow~targetHigh,highConfFired,credibility,buyPrice,takeProfit,stopLoss }。
+【候选池 candidates 字段说明】每只含：name/code、price现价、marketScore全市场分、combinedScore量化复排分、pct/turnover/volRatio/mainInflowYi、tags、strategySignal{passed,matchedRules,failedRules}，以及 quant{ modelVersion用户选择,effectiveModelVersion候选实际运行版本,runtimeModelVersion,modelLabel,fallback,score,upProb,expRet,targetLow~targetHigh,highConfFired,credibility,buyPrice,takeProfit,stopLoss }。
 【本次量化版本】${payload.quantModelVersion === 'v2.1' ? '分钟 Transformer V2.1（盘中实验）' : payload.quantModelVersion === 'v2' ? '分钟 Transformer V2.0' : '当前生产模型'}。候选评分只采信该版本的结果；不得混用默认模型、V2.0或V2.1的分数。V2.1未达到58%生产门槛，只能作为实验排序参考，不得因其单一高概率直接给“可执行”。
 【候选实际运行版本纪律】逐只读取 quant.effectiveModelVersion/modelLabel/fallback；出现 fallback 时必须写清“V2.1已回退V2.0”及原因，不得把V2.0分数描述成V2.1盘中结果。没有回退且 effectiveModelVersion=v2.1 时，仍按实验模型降权。
 ${payload.quantMissing ? '⚠️【本次量化服务不可用】不得给“立即买入”。但仍须按市场分、资金、量能和板块强度选出3只条件候选，actionability只能是“等待触发”或“观察”，禁止返回空名单。quantScore 填 null，禁止编造。' : ''}
@@ -312,6 +312,7 @@ ${payload.session === 'next_open' ? '【当前为休市/盘前】结论面向下
 【硬要求】：
 - candidates 非空时 picks 必须给1~3只，禁止空数组；可以全部是“等待触发/观察”，但必须说明触发条件和失效条件。
 - actionability 只能填“可执行 / 等待触发 / 观察”。noTrade=true 时不得填“可执行”。
+- strategySignal 是统一策略的确定性入场闸门：strategySignal.passed=false 的候选不得升级为“可执行”，只能“等待触发/观察”，并须引用 failedRules 解释尚缺哪项条件。
 - 理由必须引用该股的量化分/上涨概率/资金/板块等**具体数字**,用大白话讲清"为什么值得关注"。
 - 每只都要有 grade(强/中/弱),整体名单的把握度用 confidence 概括。
 

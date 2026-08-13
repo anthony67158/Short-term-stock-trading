@@ -1,11 +1,10 @@
 import { applyCors, preflight } from './_lib.js'
 import {
-  compileStrategySpec,
-  createDefaultStrategySpec,
+  getActiveStrategySpec,
 } from '../shared/strategySpec.js'
 
 const STRATEGIES = [
-  compileStrategySpec(createDefaultStrategySpec()),
+  getActiveStrategySpec(),
 ]
 
 export function strategySpecResponse(strategyId = '') {

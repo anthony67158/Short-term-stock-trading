@@ -16,12 +16,14 @@ import {
 import DailyReport from './DailyReport'
 import { fmtPct, pctClass, fmtInflow, fmtNum , fmtRaw } from '../format'
 import {
+  assertStrategyVersion,
   normalizePickDecision,
   normalizeStoredPickSnapshot,
-  rerankQuantCandidates,
+  rankStrategyShortlist,
   stockPickSession,
   stockPickSavedLabel,
 } from '../../shared/stockRanking.js'
+import { getActiveStrategySpec } from '../../shared/strategySpec.js'
 import {
   isQuantResultForVersion,
   quantModelLabel,
@@ -217,6 +219,7 @@ function MarketLight({ market, sectors, snapshot, limitUp }) {
 // ---------- AI 选股（量化模型 + LLM 结合，精选今日3只 + 怎么买）----------
 // 交易时段=「AI 选股」，结果本地持久化(刷新不丢);收盘后按钮=「看明日计划」，展示当日盘中选出的、供次日开盘参考
 const PICK_KEY = 'ai_pick_v1'
+const ACTIVE_PICK_STRATEGY = getActiveStrategySpec()
 function nowBJ() { const n = new Date(); return new Date(n.getTime() + (n.getTimezoneOffset() + 480) * 60000) }
 // 当日交易场次:9:15–15:01(含午间 11:30–13:00 休市)整体算“盘中/当日”，午休不切到“明日计划”，只有收盘后(15:01 之后)/盘前/周末才算收盘
 function isTradingNow() { return stockPickSession().trading }
@@ -226,10 +229,15 @@ function todayKey() { const d = nowBJ(); return `${d.getFullYear()}-${d.getMonth
 function loadPick() {
   try {
     const cloud = planStore.getSetting && planStore.getSetting(PICK_KEY, undefined)
-    if (cloud !== undefined && cloud !== null) return normalizeStoredPickSnapshot(cloud)
+    if (cloud !== undefined && cloud !== null) {
+      return normalizeStoredPickSnapshot(cloud, ACTIVE_PICK_STRATEGY)
+    }
   } catch { /* ignore */ }
   try {
-    return normalizeStoredPickSnapshot(JSON.parse(localStorage.getItem(PICK_KEY) || 'null'))
+    return normalizeStoredPickSnapshot(
+      JSON.parse(localStorage.getItem(PICK_KEY) || 'null'),
+      ACTIVE_PICK_STRATEGY,
+    )
   } catch { return null }
 }
 function savePick(obj) {
@@ -316,8 +324,14 @@ function DailyPlay({ snapshot }) {
       let broad = { universeCount: null, eligibleCount: null, list: [] }
       try {
         const json = await fetchJsonWithTimeout(api(`/api/screen?limit=30&_t=${Date.now()}`), 30000)
-        if (json && json.ok) broad = json
-      } catch { /* 回退热点池 */ }
+        if (json && json.ok) {
+          assertStrategyVersion(ACTIVE_PICK_STRATEGY, json)
+          broad = json
+        }
+      } catch (error) {
+        if (error?.code === 'STRATEGY_VERSION_MISMATCH') throw error
+        // 行情扫描不可用时回退页面已有热点池。
+      }
 
       // ② 多来源合并：全市场排序 + 涨停/连板 + 主力抢筹 + 涨速 + 板块龙头。
       const cand = new Map()
@@ -393,9 +407,20 @@ function DailyPlay({ snapshot }) {
       })
       const withQuant = scored.filter((x) => x.quant) // 优先把打上分的交给 LLM
       // 量化服务全挂时不再交白卷:退化为"仅盘面信号"名单,让 AI 基于资金/题材/涨速排序,并如实说明量化缺失
-      const forLLM = rerankQuantCandidates(withQuant.length ? withQuant : scored, { limit: 12 })
+      const strategyShortlist = rankStrategyShortlist(
+        withQuant.length ? withQuant : scored,
+        {
+          limit: 12,
+          strategySpec: ACTIVE_PICK_STRATEGY,
+        },
+      )
+      const forLLM = strategyShortlist.list
       const quantMissing = withQuant.length === 0
       const funnelMeta = {
+        strategyId: strategyShortlist.strategyId,
+        specVersion: strategyShortlist.specVersion,
+        signalPassedCount: strategyShortlist.signalPassedCount,
+        watchlistCount: strategyShortlist.watchlist.length,
         universeCount: broad.universeCount,
         scannedCount: broad.scannedCount,
         isComplete: broad.isComplete,
@@ -415,6 +440,11 @@ function DailyPlay({ snapshot }) {
         },
         sectors: (s.sectors?.list || []).slice(0, 8).map((x) => ({ name: x.name, pct: x.pct, mainInflowYi: +(x.mainInflow / 1e8).toFixed(2), lead: x.leadName })),
         candidates: forLLM,
+        strategy: {
+          strategyId: strategyShortlist.strategyId,
+          specVersion: strategyShortlist.specVersion,
+          signalPassedCount: strategyShortlist.signalPassedCount,
+        },
         quantMissing,
         funnel: funnelMeta,
         session: session.mode,
@@ -532,7 +562,7 @@ function DailyPlay({ snapshot }) {
             )}
             {funnel && funnel.universeCount != null && (
               <div className="pick-savedat">
-                全市场 {funnel.universeCount} 只{funnel.isComplete === false ? `（本轮扫描 ${funnel.scannedCount} 只）` : ''} → 可交易 {funnel.eligibleCount} 只 → {funnel.quantModelLabel || '量化模型'}成功 {funnel.quantCount} 只 → 决策短名单 {funnel.shortlistCount} 只
+                全市场 {funnel.universeCount} 只{funnel.isComplete === false ? `（本轮扫描 ${funnel.scannedCount} 只）` : ''} → 可交易 {funnel.eligibleCount} 只 → {funnel.quantModelLabel || '量化模型'}成功 {funnel.quantCount} 只 → 策略通过 {funnel.signalPassedCount ?? '—'} 只 → 决策短名单 {funnel.shortlistCount} 只
               </div>
             )}
             {res.marketNote && <div className="pick-market"><Icon name="pulse" size={13} /> <span className="pick-market-note">{res.marketNote}</span>{res.confidence && <span className={'pick-conf ' + (/高/.test(res.confidence) ? 'hi' : /低/.test(res.confidence) ? 'lo' : 'mid')}>把握度 {res.confidence}</span>}</div>}

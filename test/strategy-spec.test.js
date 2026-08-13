@@ -21,6 +21,8 @@ test('默认策略规格完整声明数据、信号、评分、仓位、退出�
   assert.equal(compiled.position.lotSize, 100)
   assert.equal(compiled.universe.minimumListingDays, 20)
   assert.equal(compiled.score.bonuses.highConfidence, 5)
+  assert.equal(compiled.marketRanking.filters.maxPct, 8.8)
+  assert.equal(compiled.marketRanking.factorWeights.fund, 0.3)
   assert.equal(compiled.exit.maxHoldingDays > 0, true)
   assert.match(compiled.specVersion, /^strategy\./)
 })
@@ -117,6 +119,17 @@ test('策略编译拒绝未知字段操作符和不完整风险参数', () => {
       execution: { feePolicy: 'UNKNOWN' },
     })),
     /feePolicy/,
+  )
+  assert.throws(
+    () => compileStrategySpec(createDefaultStrategySpec({
+      marketRanking: {
+        factorWeights: {
+          fund: 1,
+          volume: 1,
+        },
+      },
+    })),
+    /市场因子权重之和必须为1/,
   )
 })
 
