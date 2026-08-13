@@ -430,6 +430,7 @@ async function genOne({
   deepMode = false,
   previousEntry = null,
   reviewIntervalMin = null,
+  reviewTrigger = '',
   strategyGate = null,
   councilEnabled = true,
 }) {
@@ -501,7 +502,7 @@ async function genOne({
       news,
       truncated,
       reviewIntervalMin,
-      reviewTrigger: previousEntry ? 'scheduled' : 'initial',
+      reviewTrigger: reviewTrigger || (previousEntry ? 'scheduled' : 'initial'),
     },
     at,
   );
@@ -567,6 +568,7 @@ async function runJobGen(
   signal,
   deepMode = false,
   dailyReportSummary = null,
+  reviewEvent = null,
 ) {
   const data = acc.data || {};
   const holding = data.holding || [], watch = data.plan || [];
@@ -605,8 +607,9 @@ async function runJobGen(
     p.accountRevision = Number(acc.clientRevision) || null;
     p = attachAdviceDailyReport(p, dailyReportSummary);
     if (previousAdvice) p.previousAdvice = previousAdvice;
+    if (reviewEvent) p.reviewEvent = reviewEvent;
     const hp = (p.holdCost != null && p.holdQty != null) ? { holdCost: String(p.holdCost), holdQty: String(p.holdQty) } : {};
-    return genOne({ code, name, mode: 'hold_advice', payload: p, quantQuery: { code, klt: '101', lmt: '60', quant: '1', model: quantModelVersion, ...hp }, priceHint, onProgress, signal, deepMode, previousEntry, reviewIntervalMin, strategyGate, councilEnabled });
+    return genOne({ code, name, mode: 'hold_advice', payload: p, quantQuery: { code, klt: '101', lmt: '60', quant: '1', model: quantModelVersion, ...hp }, priceHint, onProgress, signal, deepMode, previousEntry, reviewIntervalMin, reviewTrigger: reviewEvent ? `judge_${reviewEvent.decision}` : '', strategyGate, councilEnabled });
   }
   let p = buildWatchPayload(code, name, portfolio, data.account);
   p.advisorTrack = advisorTrackFrom(data, 'buy_advice');
@@ -615,7 +618,8 @@ async function runJobGen(
   p.accountRevision = Number(acc.clientRevision) || null;
   p = attachAdviceDailyReport(p, dailyReportSummary);
   if (previousAdvice) p.previousAdvice = previousAdvice;
-  return genOne({ code, name, mode: 'buy_advice', payload: p, quantQuery: { code, klt: '101', lmt: '60', quant: '1', model: quantModelVersion }, priceHint, onProgress, signal, deepMode, previousEntry, reviewIntervalMin, strategyGate, councilEnabled });
+  if (reviewEvent) p.reviewEvent = reviewEvent;
+  return genOne({ code, name, mode: 'buy_advice', payload: p, quantQuery: { code, klt: '101', lmt: '60', quant: '1', model: quantModelVersion }, priceHint, onProgress, signal, deepMode, previousEntry, reviewIntervalMin, reviewTrigger: reviewEvent ? `judge_${reviewEvent.decision}` : '', strategyGate, councilEnabled });
 }
 
 // ---- 任务表合并:把云端最新的【外部变更】并入内存 working(捕获其它设备新入队 / 取消)----
@@ -940,7 +944,10 @@ async function drainAccount(nick, initialAcc) {
       const free = CONC - runningCount(data);
       const startable = Date.now() < startDeadline ? Object.values(jobsOf(data))
         .filter((j) => j && j.status === 'queued' && !j.cancelRequested && !inflight.has(j.code))
-        .sort((a, b) => (a.at || 0) - (b.at || 0))
+        .sort((a, b) => {
+          const eventPriority = Number(b.source === 'judge') - Number(a.source === 'judge');
+          return eventPriority || (a.at || 0) - (b.at || 0);
+        })
         .slice(0, Math.max(0, free)) : [];
       // 处理 queued 里已被外部取消意图标记的
       for (const j of Object.values(jobsOf(data))) {
@@ -958,6 +965,7 @@ async function drainAccount(nick, initialAcc) {
           controller.signal,
           !!j.deepMode,
           dailyReportSummary,
+          j.trigger || null,
         )
           .then((res) => ({ code, jobId, res }))
           .catch((err) => ({ code, jobId, err }));
@@ -1145,7 +1153,7 @@ export function enqueueAutoRefreshDue(data, now = Date.now()) {
   return count;
 }
 
-async function scheduleAdviceWorker(nick) {
+export async function scheduleAdviceWorker(nick) {
   if (process.env.ADVICE_ASYNC_WORKER === 'true' || process.env.FC_SERVER_PORT) {
     return dispatchAdviceWorker(nick);
   }

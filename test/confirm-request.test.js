@@ -1,7 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import confirmSignalHandler, { sanitizeConfirmationBody } from '../api/confirm_signal.js'
+import confirmSignalHandler, {
+  applyConfirmationVerdict,
+  sanitizeConfirmationBody,
+} from '../api/confirm_signal.js'
 import { TRUSTED_ACCOUNT_REQUEST } from '../api/_account_auth.js'
 
 test('确认接口只保留Judge需要的白名单字段', () => {
@@ -60,6 +63,76 @@ test('确认接口拒绝非watching、非法代码和非法价格', () => {
   assert.equal(sanitizeConfirmationBody({
     alert: { code: '600000', type: 'price', op: 'gte', value: 10, phase: 'watching' },
   }).ok, false)
+})
+
+test('页面内确认结果同步更新云端预警并唤醒同一军师计划', () => {
+  const now = 1786080000000
+  const data = {
+    holding: [{ id: 'h1', code: '600000', qty: 2 }],
+    alerts: [{
+      id: 'a1',
+      code: '600000',
+      name: '浦发银行',
+      enabled: true,
+      phase: 'watching',
+      judgeContext: { planId: 'plan-1', planRevision: 2 },
+    }],
+    advice: {
+      '600000': {
+        mode: 'hold_advice',
+        advice: { continuity: { planId: 'plan-1', revision: 2 } },
+      },
+    },
+  }
+
+  const result = applyConfirmationVerdict(data, data.alerts[0], {
+    decision: 'confirm',
+    confidence: 90,
+    reason: '信号确认',
+    side: 'sell',
+  }, 10.5, now)
+
+  assert.equal(result.queued, true)
+  assert.equal(data.alerts[0].phase, 'confirmed')
+  assert.equal(data.alerts[0].enabled, false)
+  assert.equal(data.alerts[0].decisionPrice, 10.5)
+  assert.equal(data.jobs['600000'].trigger.decision, 'confirm')
+})
+
+test('迟到或错股的页面确认不得覆盖云端最新预警状态', () => {
+  const data = {
+    alerts: [{
+      id: 'a1',
+      code: '600000',
+      enabled: true,
+      phase: 'watching',
+      judgeContext: { planId: 'plan-1' },
+    }],
+    advice: {
+      '600000': {
+        advice: { continuity: { planId: 'plan-1' } },
+      },
+    },
+  }
+
+  const wrongCode = applyConfirmationVerdict(data, {
+    id: 'a1',
+    code: '000001',
+    phase: 'watching',
+    judgeContext: { planId: 'plan-1' },
+  }, { decision: 'confirm' }, 10, 1000)
+  assert.deepEqual(wrongCode, { queued: false, reason: 'stale-request' })
+  assert.equal(data.alerts[0].phase, 'watching')
+
+  data.alerts[0].phase = 'confirmed'
+  data.alerts[0].enabled = false
+  const duplicate = applyConfirmationVerdict(data, {
+    id: 'a1',
+    code: '600000',
+    phase: 'watching',
+    judgeContext: { planId: 'plan-1' },
+  }, { decision: 'confirm' }, 10, 1100)
+  assert.deepEqual(duplicate, { queued: false, reason: 'alert-not-watching' })
 })
 
 test('今日无可卖仓位时确认接口直接返回 T+1 等待，不调用 Judge', async () => {

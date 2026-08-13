@@ -81,7 +81,7 @@ export default function AlertPanel({ interval }) {
 
       <div className="judge-effect">
         <div>
-          <span className="judge-effect-k">LLM Judge 实测</span>
+          <span className="judge-effect-k">军师执行确认</span>
           <b>{judgeStats.evaluated ? `${judgeStats.winRate}%` : '样本积累中'}</b>
         </div>
         <div>
@@ -89,7 +89,7 @@ export default function AlertPanel({ interval }) {
           <b>{knowledgeActionStats.average != null ? `${knowledgeActionStats.average}分` : '待评估'}</b>
         </div>
         <span>
-          已强提示 {judgeStats.confirmed} 次 · 已评估 {judgeStats.evaluated} 次
+          已触达 {judgeStats.confirmed} 次 · 已复核 {judgeStats.evaluated} 次
           {judgeStats.avgDirectionalPct != null
             ? ` · 平均方向收益 ${judgeStats.avgDirectionalPct >= 0 ? '+' : ''}${judgeStats.avgDirectionalPct}%`
             : ' · 强提示后自动跟踪5/15/30分钟'}

@@ -19,7 +19,7 @@
 import { applyCors, preflight } from './_lib.js';
 import { listAllAccounts, readAccount, writeAccount } from './account.js';
 import quoteHandler from './quote.js';
-import { sendPush, pushConfigured } from './_push_send.js';
+import { sendPush } from './_push_send.js';
 import { ensureConfig } from './_llm_config.js';
 import { judgeConfirmation, sideOf } from './_confirm.js';
 import { actionLabelOf } from '../shared/judgeAdviceContext.js';
@@ -39,6 +39,12 @@ import {
   formatPriceLimitThreshold,
   isNearPriceLimit,
 } from '../shared/priceLimitPolicy.js';
+import { needsWorkerDispatch } from './_jobs.js';
+import { scheduleAdviceWorker } from './cron_advice.js';
+import {
+  isCurrentAdvicePlan,
+  queueAdviceReviewForVerdict,
+} from './_advice_wakeup.js';
 
 const OP_LABEL = { gte: '≥', lte: '≤' };
 
@@ -47,6 +53,8 @@ const OP_LABEL = { gte: '≥', lte: '≤' };
 const JUDGE_BUDGET_PER_ROUND = 4;
 const JUDGE_INTERVAL_MS = { buy: 45000, sell: 30000, stop: 20000 };
 const WATCHING_MAX_MS = 90 * 60 * 1000;
+
+export { isCurrentAdvicePlan, queueAdviceReviewForVerdict };
 
 // —— 与前端 alertStore.describeAlert 同口径 ——
 function describeAlert(a) {
@@ -111,6 +119,14 @@ function hit(a, q) {
     default:
       return null;
   }
+}
+
+export function cloudAlertsForEvaluation(alerts = []) {
+  return alerts.filter((alert) =>
+    alert
+    && alert.enabled
+    && !alert.triggeredAt
+  );
 }
 
 // 进程内调用 quote handler 取实时报价 map(code→q)
@@ -197,7 +213,12 @@ function alertStamp(alert) {
   );
 }
 
-async function persistProcessedAccount(processed, deadEndpoints = [], storage = null) {
+async function persistProcessedAccount(
+  processed,
+  deadEndpoints = [],
+  storage = null,
+  wakeups = [],
+) {
   const latest = storage
     ? await readAccount(processed.nick, storage)
     : await readAccount(processed.nick);
@@ -232,8 +253,20 @@ async function persistProcessedAccount(processed, deadEndpoints = [], storage = 
   latest.data.decisionLog = [...decisions.values()]
     .sort((a, b) => (b.at || 0) - (a.at || 0))
     .slice(0, 1000);
+  let adviceQueued = 0;
+  for (const wakeup of wakeups) {
+    const queued = queueAdviceReviewForVerdict(
+      latest.data,
+      wakeup?.alert,
+      wakeup?.verdict,
+      wakeup?.at,
+    );
+    if (queued.queued) adviceQueued++;
+  }
+  const workerNeeded = adviceQueued > 0 && needsWorkerDispatch(latest.data);
   if (storage) await writeAccount(latest, storage);
   else await writeAccount(latest);
+  return { adviceQueued, workerNeeded };
 }
 
 async function processAccount(acc) {
@@ -244,6 +277,7 @@ async function processAccount(acc) {
   // 智能确认默认开启;账号显式关掉(settings.smartConfirm===false)则回退「见价即强推」旧行为。
   const smartOn = !(data.settings && data.settings.smartConfirm === false);
   let changed = false, hits = 0, sent = 0;
+  const wakeups = [];
 
   // 第一层硬清理：每轮先按刚从 OSS 读取的账本淘汰已清仓、持仓 ID 已消失的旧预警。
   for (const alert of alerts) {
@@ -265,7 +299,7 @@ async function processAccount(acc) {
   }
 
   // armed/watching 均需处理:enabled && 未最终触发(confirmed)
-  const active = alerts.filter((a) => a && a.enabled && !a.triggeredAt);
+  const active = cloudAlertsForEvaluation(alerts);
   const outcomePending = alerts.filter((alert) =>
     alert?.phase === 'confirmed' &&
     alert.triggeredAt &&
@@ -273,7 +307,8 @@ async function processAccount(acc) {
     !alert.judgeOutcomes?.m30
   );
   const sidePriority = { stop: 3, sell: 2, buy: 1 };
-  const activeForPush = (subs.length ? active : []).slice().sort((a, b) => {
+  // 是否执行云端闭环与浏览器通知权限无关；没有 Push 订阅时仍确认并更新军师，只是不发系统通知。
+  const activeForEvaluation = active.slice().sort((a, b) => {
     const aWatching = a.phase === 'watching' ? 1 : 0;
     const bWatching = b.phase === 'watching' ? 1 : 0;
     if (aWatching !== bWatching) return bWatching - aWatching;
@@ -281,11 +316,11 @@ async function processAccount(acc) {
     if (sideDiff) return sideDiff;
     return (a.lastJudgeAt || 0) - (b.lastJudgeAt || 0);
   });
-  if (!activeForPush.length && !outcomePending.length) {
-    return { changed, hits, sent, judgeCalls: 0, deadEndpoints: [] };
+  if (!activeForEvaluation.length && !outcomePending.length) {
+    return { changed, hits, sent, judgeCalls: 0, deadEndpoints: [], wakeups };
   }
 
-  const codes = [...new Set([...activeForPush, ...outcomePending].map((a) => a.code))];
+  const codes = [...new Set([...activeForEvaluation, ...outcomePending].map((a) => a.code))];
   const quoteMap = await invokeQuote(codes);
 
   const dead = new Set();
@@ -314,7 +349,7 @@ async function processAccount(acc) {
   //   手动到价/涨跌幅/量比/涨跌停等 → 无 phase → 老逻辑(见价即强推)。
   const isSmart = (a) => smartOn && a.type === 'price' && !!a.phase && a.phase !== 'confirmed' && a.phase !== 'invalid';
 
-  for (const storedAlert of activeForPush) {
+  for (const storedAlert of activeForEvaluation) {
     const t1Alert = applyT1ToAlert(
       storedAlert,
       t1StatusOf(data.holding || [], data.closed || [], storedAlert.code),
@@ -389,6 +424,14 @@ async function processAccount(acc) {
     if (a.phase === 'watching') {
       const now = Date.now();
       const side = sideOf(a);
+      if (!isCurrentAdvicePlan(a, adviceMap[a.code])) {
+        a.enabled = false;
+        a.phase = 'superseded';
+        a.supersededAt = now;
+        a.triggeredMsg = '军师主计划已更新，旧执行确认自动撤销';
+        changed = true;
+        continue;
+      }
       const age = a.watchingAt ? now - a.watchingAt : 0;
       // 长时间没有形成确认且价格已离开触发区：重新武装，等待下一次真正触价。
       if (age > WATCHING_MAX_MS && !hit(a, q)) {
@@ -493,6 +536,7 @@ async function processAccount(acc) {
           judgeEvent,
           ...(data.decisionLog || []).filter((event) => event?.id !== judgeEvent.id),
         ].slice(0, 1000);
+        wakeups.push({ alert: { ...a }, verdict, at: a.triggeredAt });
         changed = true;
       } else if (verdict.decision === 'invalid') {
         // 交易逻辑已被破坏(如买点却已放量跌破失效价)→ 撤下该点位,发一次说明,不再纠缠
@@ -501,13 +545,14 @@ async function processAccount(acc) {
         const body = `${describeAlert(a)}｜原${actZh}逻辑已被破坏\n📌${verdict.reason || '关键条件已破坏,建议重新评估'}`;
         collectDead(await sendPush(subs, { title, body, code: a.code, tag: 'invalid-' + a.id, url: '/' }));
         a.phase = 'invalid'; a.triggeredAt = Date.now(); a.triggeredMsg = `已失效:${verdict.reason || ''}`; a.enabled = false;
+        wakeups.push({ alert: { ...a }, verdict, at: a.triggeredAt });
         changed = true;
       }
       // wait → 维持 watching,静默继续观察
     }
   }
   if (dead.size) { data.pushSubs = subs.filter((s) => !dead.has(s.endpoint)); changed = true; }
-  return { changed, hits, sent, judgeCalls, deadEndpoints: [...dead] };
+  return { changed, hits, sent, judgeCalls, deadEndpoints: [...dead], wakeups };
 }
 
 export default async function handler(req, res) {
@@ -520,10 +565,6 @@ export default async function handler(req, res) {
     const given = req.headers['x-cron-key'] || (req.query && req.query.key) || (req.body && req.body.key);
     if (given !== CRON_KEY) { res.statusCode = 401; return res.end(JSON.stringify({ ok: false, error: 'unauthorized' })); }
   }
-  if (!pushConfigured()) {
-    return res.end(JSON.stringify({ ok: false, error: 'VAPID 未配置(缺 VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY)' }));
-  }
-
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
   const onlyNick = body.nick ? String(body.nick) : null;
   const started = Date.now();
@@ -547,7 +588,7 @@ export default async function handler(req, res) {
     // 预热 LLM 运行时配置(judge 端点/模型),供智能确认闸门使用;失败不阻断(闸门会回退确定性信号)。
     try { await ensureConfig({ maxAgeMs: 20000 }); } catch { /* ignore */ }
 
-    let totalHits = 0, totalSent = 0, totalJudgeCalls = 0, touched = 0, rounds = 0, lastAccounts = 0;
+    let totalHits = 0, totalSent = 0, totalJudgeCalls = 0, totalAdviceQueued = 0, touched = 0, rounds = 0, lastAccounts = 0;
     // 至少跑 1 轮;之后只要「距开始 + 一轮最坏耗时」仍在预算内就继续。
     while (true) {
       rounds++;
@@ -559,7 +600,18 @@ export default async function handler(req, res) {
         try { r = await processAccount(acc); } catch (e) { r = { changed: false, hits: 0, sent: 0, error: String(e.message || e) }; }
         if (r.changed) {
           touched++;
-          try { await persistProcessedAccount(acc, r.deadEndpoints || []); } catch { /* ignore */ }
+          try {
+            const persisted = await persistProcessedAccount(
+              acc,
+              r.deadEndpoints || [],
+              null,
+              r.wakeups || [],
+            );
+            totalAdviceQueued += persisted.adviceQueued || 0;
+            if (persisted.workerNeeded) {
+              try { await scheduleAdviceWorker(acc.nick); } catch { /* 5分钟兜底续跑 */ }
+            }
+          } catch { /* ignore */ }
         }
         totalHits += r.hits || 0; totalSent += r.sent || 0;
         totalJudgeCalls += r.judgeCalls || 0;
@@ -569,7 +621,7 @@ export default async function handler(req, res) {
       if (elapsed + roundMs + 3000 >= budgetMs) break;
       await sleep(roundMs);
     }
-    return res.end(JSON.stringify({ ok: true, accounts: lastAccounts, hits: totalHits, sent: totalSent, judgeCalls: totalJudgeCalls, touched, rounds, roundMs, elapsedMs: Date.now() - started }));
+    return res.end(JSON.stringify({ ok: true, accounts: lastAccounts, hits: totalHits, sent: totalSent, judgeCalls: totalJudgeCalls, adviceQueued: totalAdviceQueued, touched, rounds, roundMs, elapsedMs: Date.now() - started }));
   } catch (e) {
     return res.end(JSON.stringify({ ok: false, error: String(e.message || e), elapsedMs: Date.now() - started }));
   }

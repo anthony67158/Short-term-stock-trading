@@ -68,3 +68,55 @@ test('FC回写预警状态时保留期间刚变化的持仓和新预警', async 
   assert.equal(saved.data.alerts.find((alert) => alert.id === 'a1').enabled, false)
   assert.equal(saved.data.alerts.some((alert) => alert.id === 'new-alert'), true)
 })
+
+test('FC回写Judge决定时在最新账号快照排入军师事件复核', async () => {
+  const latest = {
+    nick: '军师闭环账号',
+    data: {
+      holding: [{ id: 'h1', code: '600000', name: '浦发银行', qty: 2 }],
+      alerts: [{ id: 'a1', code: '600000', enabled: true, phase: 'watching' }],
+      advice: {
+        '600000': {
+          mode: 'hold_advice',
+          advice: { continuity: { planId: 'plan-1', revision: 2 } },
+        },
+      },
+      pushSubs: [],
+      decisionLog: [],
+    },
+  }
+  const storage = memoryStorage(latest)
+  const alert = {
+    id: 'a1',
+    code: '600000',
+    name: '浦发银行',
+    enabled: false,
+    phase: 'confirmed',
+    triggeredAt: 3000,
+    judgeContext: { planId: 'plan-1', planRevision: 2 },
+  }
+
+  const persisted = await __test.persistProcessedAccount({
+    nick: latest.nick,
+    data: {
+      ...latest.data,
+      alerts: [alert],
+    },
+  }, [], storage, [{
+    alert,
+    verdict: {
+      decision: 'confirm',
+      confidence: 86,
+      reason: '放量突破确认',
+      side: 'sell',
+    },
+    at: 3000,
+  }])
+
+  const saved = storage.current()
+  assert.equal(persisted.adviceQueued, 1)
+  assert.equal(persisted.workerNeeded, true)
+  assert.equal(saved.data.jobs['600000'].status, 'queued')
+  assert.equal(saved.data.jobs['600000'].trigger.decision, 'confirm')
+  assert.equal(saved.data.jobs['600000'].trigger.planId, 'plan-1')
+})

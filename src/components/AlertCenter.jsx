@@ -108,7 +108,7 @@ export default function AlertCenter({ onClose }) {
                       <span className="ar-dir">{m.dirLabel}</span>
                       {Number(a.judgeCount) > 0 && (
                         <span className="ar-badge judge">
-                          已评估 {Number(a.judgeCount)} 次
+                          军师已复核 {Number(a.judgeCount)} 次
                         </span>
                       )}
                       {a.lastKnowledgeAction?.total != null && (

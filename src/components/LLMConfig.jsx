@@ -489,8 +489,8 @@ export default function LLMConfig() {
 
               <div className={'llm-judge-card' + (judgeEndpoint.enabled === false ? ' off' : '')}>
                 <div className="llm-judge-head">
-                  <span className="llm-judge-title"><Icon name="gauge" size={14} /> Judge 专用端点</span>
-                  <span className="llm-judge-badge">不参与通用资源池</span>
+                  <span className="llm-judge-title"><Icon name="gauge" size={14} /> 军师执行确认端点</span>
+                  <span className="llm-judge-badge">军师内置闸门</span>
                   {judgePool && (
                     <span className={'llm-ep-health' + (judgePool.cooling ? ' cooling' : (judgePool.fails ? ' warn' : ' ok'))}>
                       {judgePool.cooling
@@ -501,13 +501,13 @@ export default function LLMConfig() {
                   <button type="button"
                     className={'llm-reason-toggle' + (judgeEndpoint.enabled !== false ? ' on' : '')}
                     onClick={() => setJudge({ enabled: judgeEndpoint.enabled === false })}
-                    title="启用或停用 Judge 专用端点">
+                    title="启用或停用军师执行确认端点">
                     <span className="llm-reason-text">{judgeEndpoint.enabled !== false ? '启用' : '停用'}</span>
                     <span className="llm-reason-track"><span className="llm-reason-thumb" /></span>
                   </button>
                 </div>
                 <div className="llm-hint">
-                  交易时机确认只走此端点，不与操盘军师和智能体争抢连接。建议使用低延迟、结构化输出稳定的模型。
+                  只负责确认军师既有计划的执行时机，不产生第二套方向建议，也不与操盘军师和智能体争抢连接。
                 </div>
                 {judgeEndpoint.source?.startsWith('legacy-') && (
                   <div className="llm-hint llm-hint-warn">

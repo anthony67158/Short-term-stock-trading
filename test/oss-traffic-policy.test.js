@@ -18,11 +18,11 @@ test('FC与杭州OSS同地域时强制使用内网Endpoint', () => {
   )
 })
 
-test('跨设备账号同步使用增量接口并降低空闲轮询频率', () => {
+test('跨设备账号同步每30秒走FC增量接口且OSS保持内网访问', () => {
   const authStore = read('src/authStore.js')
 
   assert.match(authStore, /api\('sync'/)
-  assert.match(authStore, /PULL_INTERVAL\s*=\s*120\s*\*\s*1000/)
+  assert.match(authStore, /PULL_INTERVAL\s*=\s*30\s*\*\s*1000/)
   assert.match(authStore, /PULL_FAST\s*=\s*15\s*\*\s*1000/)
   assert.doesNotMatch(authStore, /setTimeout\(tick,\s*0\)/)
 })

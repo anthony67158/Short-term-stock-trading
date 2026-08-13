@@ -81,11 +81,31 @@ export function gcJobs(data, now = Date.now()) {
 // mode 由调用方按持仓/自选判定。返回 { job, created(bool) }。
 export function enqueueJob(data, {
   code, name, mode, source = 'ondemand', batchId = '', deepMode = false,
-  batchRequest = false,
+  batchRequest = false, trigger = null,
 }, now = Date.now()) {
   const jobs = jobsOf(data);
   const cur = jobs[code];
-  if (cur && isActive(cur)) return { job: cur, created: false };
+  if (cur && isActive(cur)) {
+    if (trigger && typeof trigger === 'object') {
+      if (cur.status === 'queued') {
+        const generation = generationOptions(false);
+        cur.source = 'judge';
+        cur.trigger = trigger;
+        cur.at = Math.max(Number(cur.at) || 0, Number(trigger.at) || now);
+        cur.maxAttempts = generation.maxAttempts;
+        cur.deepMode = false;
+        cur.batchRequest = false;
+        cur.batchId = '';
+        cur.phase = '军师执行确认已触发，等待复核';
+        cur.progressAt = now;
+        return { job: cur, created: false, deferred: false };
+      }
+      const previousAt = Number(cur.pendingTrigger?.at) || 0;
+      if ((Number(trigger.at) || now) >= previousAt) cur.pendingTrigger = trigger;
+      return { job: cur, created: false, deferred: true };
+    }
+    return { job: cur, created: false, deferred: false };
+  }
   const generation = generationOptions(deepMode);
   const job = {
     id: `${code}_${now}`,
@@ -97,6 +117,7 @@ export function enqueueJob(data, {
     batchId: String(batchId || ''),
     deepMode: generation.deepMode,
     batchRequest: !!batchRequest,
+    ...(trigger && typeof trigger === 'object' ? { trigger } : {}),
     phase: '排队等待云端生成',
     sources: [], reasoning: '', model: '', endpoint: '', progressAt: now,
   };
@@ -156,6 +177,34 @@ export function updateJobProgress(data, code, patch = {}, now = Date.now()) {
 export function completeJob(data, code, now = Date.now()) {
   const j = jobsOf(data)[code];
   if (!j) return;
+  const pendingTrigger = j.pendingTrigger;
+  if (pendingTrigger && typeof pendingTrigger === 'object') {
+    const triggerAt = Number(pendingTrigger.at) || now;
+    Object.assign(j, {
+      id: `${code}_${now}_judge`,
+      status: 'queued',
+      attempts: 0,
+      at: triggerAt,
+      startedAt: 0,
+      finishedAt: 0,
+      leaseUntil: 0,
+      error: '',
+      source: 'judge',
+      cancelRequested: false,
+      batchId: '',
+      deepMode: false,
+      batchRequest: false,
+      phase: '军师执行确认已触发，等待复核',
+      sources: [],
+      reasoning: '',
+      model: '',
+      endpoint: '',
+      progressAt: now,
+      trigger: pendingTrigger,
+      pendingTrigger: null,
+    });
+    return;
+  }
   j.status = 'done'; j.finishedAt = now; j.leaseUntil = 0; j.error = '';
   j.phase = '生成完成'; j.progressAt = now;
 }

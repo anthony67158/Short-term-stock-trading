@@ -327,7 +327,7 @@ export const authStore = {
 
 let _pulling = false
 let _pullTimer = null
-const PULL_INTERVAL = 120 * 1000 // 常态:2分钟增量同步；切前台/重新可见时立即补拉
+const PULL_INTERVAL = 30 * 1000  // 常态:30秒增量同步；浏览器只访问FC，FC通过杭州内网读取OSS
 const PULL_FAST = 15 * 1000      // 批量生成时15秒；2秒任务状态轮询已负责实时进度
 
 // 启动跨设备同步轮询:仅在浏览器环境、登录后运行。关标签页即停(纯前端增量同步,与云端定时生成无关)。

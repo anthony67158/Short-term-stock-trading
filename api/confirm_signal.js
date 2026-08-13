@@ -18,6 +18,12 @@ import { buildJudgeAdviceContext } from '../shared/judgeAdviceContext.js';
 import { buildJudgeKnowledgeActionAssessment } from '../shared/knowledgeAction.js';
 import { authorizePaidRequest } from './_account_auth.js';
 import { livePositionOf, t1StatusOf } from './_portfolio.js';
+import { readAccount, writeAccount } from './account.js';
+import {
+  isCurrentAdvicePlan,
+  queueAdviceReviewForVerdict,
+} from './_advice_wakeup.js';
+import { scheduleAdviceWorker } from './cron_advice.js';
 
 const rateWindows = new Map();
 const RATE_WINDOW_MS = 60 * 1000;
@@ -27,6 +33,69 @@ const finite = (value) => {
   return Number.isFinite(number) ? number : null;
 };
 const text = (value, max) => String(value || '').trim().slice(0, max);
+
+export function applyConfirmationVerdict(
+  data,
+  requestAlert,
+  verdict,
+  quotePrice,
+  now = Date.now(),
+) {
+  const alerts = Array.isArray(data?.alerts) ? data.alerts : [];
+  const stored = alerts.find((alert) => alert?.id === requestAlert?.id);
+  if (!stored) return { queued: false, reason: 'alert-missing' };
+  if (!stored.enabled || stored.phase !== 'watching') {
+    return { queued: false, reason: 'alert-not-watching' };
+  }
+  const requestPlanId = String(requestAlert?.judgeContext?.planId || '');
+  const storedPlanId = String(stored?.judgeContext?.planId || '');
+  if (
+    String(requestAlert?.code || '') !== String(stored.code || '')
+    || (requestPlanId && requestPlanId !== storedPlanId)
+  ) {
+    return { queued: false, reason: 'stale-request' };
+  }
+  if (!isCurrentAdvicePlan(stored, data?.advice?.[stored.code])) {
+    stored.enabled = false;
+    stored.phase = 'superseded';
+    stored.supersededAt = now;
+    stored.triggeredMsg = '军师主计划已更新，旧执行确认自动撤销';
+    return { queued: false, reason: 'stale-plan' };
+  }
+  if (!['confirm', 'invalid'].includes(verdict?.decision)) {
+    return { queued: false, reason: 'non-decisive' };
+  }
+  stored.enabled = false;
+  stored.phase = verdict.decision === 'confirm' ? 'confirmed' : 'invalid';
+  stored.triggeredAt = now;
+  stored.triggeredMsg = verdict.decision === 'confirm'
+    ? `执行确认:${verdict.reason || ''}`
+    : `已失效:${verdict.reason || ''}`;
+  stored.lastJudgeAt = now;
+  stored.lastJudgeDecision = verdict.decision;
+  stored.lastJudgeConfidence = verdict.confidence ?? null;
+  stored.decisionPrice = Number.isFinite(Number(quotePrice))
+    ? Number(quotePrice)
+    : null;
+  const queued = queueAdviceReviewForVerdict(data, stored, verdict, now);
+  return queued;
+}
+
+async function persistConfirmationVerdict(account, alert, verdict, quotePrice) {
+  if (!account?.nick || !['confirm', 'invalid'].includes(verdict?.decision)) return;
+  const fresh = await readAccount(account.nick);
+  if (!fresh?.data) return;
+  const queued = applyConfirmationVerdict(
+    fresh.data,
+    alert,
+    verdict,
+    quotePrice,
+  );
+  await writeAccount(fresh);
+  if (queued.workerNeeded) {
+    try { await scheduleAdviceWorker(account.nick); } catch { /* 5分钟定时器兜底 */ }
+  }
+}
 
 export function sanitizeConfirmationBody(body) {
   const input = body && typeof body === 'object' ? body : {};
@@ -148,7 +217,7 @@ export default async function handler(req, res) {
     } : null;
     const positionGate = position ? positionGateForAlert(alert, position) : null;
     if (positionGate && !positionGate.allowed) {
-      return res.status(200).send(JSON.stringify({
+      const verdict = {
         ok: true,
         decision: 'invalid',
         confidence: 100,
@@ -159,7 +228,16 @@ export default async function handler(req, res) {
         knowledgeAction: buildJudgeKnowledgeActionAssessment(
           advice.knowledgeActionPlan || advice,
         ),
-      }));
+      };
+      try {
+        await persistConfirmationVerdict(
+          accountAuth.account,
+          alert,
+          verdict,
+          quote.price,
+        );
+      } catch { /* 前端仍收到保守判定，云端Timer兜底 */ }
+      return res.status(200).send(JSON.stringify(verdict));
     }
     const clientStatus = alert.sellableTodayQty != null ? {
       liveQty: (alert.sellableTodayQty || 0) + (alert.boughtTodayQty || 0),
@@ -191,6 +269,14 @@ export default async function handler(req, res) {
       quote,
       position,
     });
+    try {
+      await persistConfirmationVerdict(
+        accountAuth.account,
+        alert,
+        v,
+        quote.price,
+      );
+    } catch { /* 前端仍收到判定，云端Timer兜底 */ }
     return res.status(200).send(JSON.stringify({ ok: true, ...v }));
   } catch {
     // 出错时保守返回 wait,避免前端误发强提示
