@@ -9,6 +9,7 @@ const read = (path) => readFileSync(
 )
 
 const precision = read('src/styles/precision.css')
+const legacyStyles = read('src/styles.css')
 const tokens = read('tokens.css')
 const assistant = read('src/components/AIAssistant.jsx')
 const sectorPanel = read('src/components/SectorPanel.jsx')
@@ -55,6 +56,29 @@ test('白天模式建立明确表面层级并将遗留紫色变量统一映射�
   )
   assert.doesNotMatch(fundFlowCanvas, /hub:\s*'#6c5ce7'/)
   assert.match(fundFlowCanvas, /hub:\s*'#0874d8'/)
+})
+
+test('数据块网格使用独立间距和边框，不再以1px缝隙拼成连体框', () => {
+  assert.match(
+    precision,
+    /\.acc-grid\s*{[^}]*gap:\s*var\(--space-xs\)[^}]*margin:\s*var\(--space-sm\) var\(--space-md\)[^}]*border:\s*0[^}]*background:\s*transparent/s,
+  )
+  assert.match(
+    precision,
+    /\.senti-gauge \.sg-cells\s*{[^}]*gap:\s*var\(--space-xs\)[^}]*background:\s*transparent/s,
+  )
+  assert.match(
+    precision,
+    /\.mf-summary,[\s\S]*?\.rv-attr,[\s\S]*?\.rv-kpi\s*{[^}]*gap:\s*var\(--space-xs\)[^}]*border:\s*0[^}]*background:\s*transparent/s,
+  )
+  assert.match(
+    precision,
+    /\.dq-ma,[\s\S]*?\.tech-prices,[\s\S]*?\.hcs-grid,[\s\S]*?\.sk-cells\s*{[^}]*gap:\s*var\(--space-xs\)[^}]*border:\s*0[^}]*background:\s*transparent/s,
+  )
+  assert.doesNotMatch(
+    legacyStyles,
+    /\.(?:sg-cell|acc-cell|rv-kpi-cell|rv-attr-cell|tech-price-cell)[^{]*\{[^}]*border:\s*none\s*!important/s,
+  )
 })
 
 test('今日工作台双栏等高且情绪指标桌面端为三列', () => {

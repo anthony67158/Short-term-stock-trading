@@ -84,6 +84,8 @@
 - Primary page gap: `--space-lg`.
 - Panel header: `--space-md` inline, `--space-sm` block.
 - Inner data groups: `--space-xs` or hairline separators, not nested card padding.
+- Adjacent bordered metric tiles must use `--space-xs`; hairline-only separation is reserved for table rows and continuous lists.
+- A panel header and its first bordered data group must keep at least `--space-sm` vertical separation.
 
 ## Radius and depth
 

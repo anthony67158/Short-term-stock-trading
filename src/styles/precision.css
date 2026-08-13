@@ -1155,20 +1155,22 @@ textarea:focus {
 }
 
 .market-board .mb-body {
+  gap: var(--space-xs);
+  padding: var(--space-sm);
   background: var(--color-paper-2);
 }
 
 .mb-indices,
-.mb-stats,
-.stat-grid,
-.sg-cells {
-  background: var(--color-rule-2);
+.mb-stats {
+  gap: var(--space-xs);
+  background: transparent;
 }
 
 .mb-idx,
-.mb-stat,
-.sg-cell {
-  background: var(--color-paper-2);
+.mb-stat {
+  border: 1px solid var(--color-rule-2);
+  border-radius: var(--radius-input);
+  background: var(--color-paper-3);
 }
 
 .senti-gauge {
@@ -1180,6 +1182,14 @@ textarea:focus {
 .senti-gauge .sg-cells {
   flex: 1;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-xs);
+  background: transparent;
+}
+
+.senti-gauge .sg-cell {
+  border: 1px solid var(--color-rule-2);
+  border-radius: var(--radius-input);
+  background: var(--color-paper-3);
 }
 
 .play-card {
@@ -1339,19 +1349,17 @@ textarea:focus {
 }
 
 .acc-grid {
-  gap: 1px;
-  margin: 0 var(--space-md) var(--space-sm);
+  gap: var(--space-xs);
+  margin: var(--space-sm) var(--space-md);
   padding: 0;
-  overflow: hidden;
-  border: 1px solid var(--color-rule-2);
-  border-radius: var(--radius-input);
-  background: var(--color-rule-2);
+  border: 0;
+  background: transparent;
 }
 
 .acc-hero,
 .acc-cell {
-  border: 0;
-  border-radius: 0;
+  border: 1px solid var(--color-rule-2);
+  border-radius: var(--radius-input);
   background: var(--color-paper-3);
 }
 
@@ -1391,38 +1399,51 @@ textarea:focus {
 .mf-summary,
 .rv-attr,
 .rv-kpi {
-  gap: 1px;
-  overflow: hidden;
-  border: 1px solid var(--color-rule-2);
-  border-radius: var(--radius-input);
-  background: var(--color-rule-2);
+  gap: var(--space-xs);
+  border: 0;
+  background: transparent;
 }
 
 .mf-sum-cell,
 .rv-attr-cell,
 .rv-kpi-cell {
-  border: 0;
-  border-radius: 0;
+  border: 1px solid var(--color-rule-2);
+  border-radius: var(--radius-input);
   background: var(--color-paper-3);
+}
+
+.panel-head + .rv-attr,
+.panel-head + .rv-kpi {
+  padding-top: var(--space-sm);
 }
 
 .dq-ma,
 .tech-prices,
 .hcs-grid,
 .sk-cells {
-  gap: 1px;
-  overflow: hidden;
-  border: 1px solid var(--color-rule-2);
-  border-radius: var(--radius-input);
-  background: var(--color-rule-2);
+  gap: var(--space-xs);
+  border: 0;
+  background: transparent;
 }
 
 .dq-ma-cell,
 .tech-price-cell,
 .hcs-cell,
 .sk-cell {
-  border: 0;
-  border-radius: 0;
+  border: 1px solid var(--color-rule-2);
+  border-radius: var(--radius-input);
+  background: var(--color-paper-3);
+}
+
+.stat-grid {
+  gap: var(--space-xs);
+  padding: var(--space-sm) var(--space-md);
+  background: transparent;
+}
+
+.stat-cell {
+  border: 1px solid var(--color-rule-2);
+  border-radius: var(--radius-input);
   background: var(--color-paper-3);
 }
 
