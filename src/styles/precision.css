@@ -514,7 +514,47 @@ html[data-theme="light"] .t-drawer {
   padding: 0;
 }
 
-.nav-refresh:hover,
+.nav-refresh {
+  gap: var(--space-3xs);
+  min-width: max-content;
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-accent-ink);
+  font-weight: 650;
+}
+
+.nav-refresh-count {
+  opacity: 0.78;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+}
+
+button.icon-btn.nav-undo {
+  border-color: var(--color-rule-2);
+  background: transparent;
+  color: var(--color-muted);
+}
+
+button.icon-btn.nav-undo:disabled {
+  opacity: 1;
+  border-color: var(--color-rule-2);
+  background: transparent;
+  color: var(--color-neutral);
+}
+
+.nav-refresh:hover {
+  border-color: var(--color-focus);
+  background: var(--color-focus);
+  color: var(--color-accent-ink);
+}
+
+button.icon-btn.nav-undo:not(:disabled):hover {
+  border-color: var(--color-ink-2);
+  background: var(--color-paper-3);
+  color: var(--color-ink);
+}
+
 .icon-btn:hover,
 .acct-btn:hover,
 .nav-command:hover {

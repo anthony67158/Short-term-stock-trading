@@ -11,6 +11,7 @@ const read = (path) => readFileSync(
 const precision = read('src/styles/precision.css')
 const legacyStyles = read('src/styles.css')
 const tokens = read('tokens.css')
+const app = read('src/App.jsx')
 const assistant = read('src/components/AIAssistant.jsx')
 const sectorPanel = read('src/components/SectorPanel.jsx')
 const stockPanel = read('src/components/StockPanel.jsx')
@@ -182,6 +183,25 @@ test('平板宽度进一步压缩顶栏工具避免主导航重叠', () => {
   assert.match(
     precision,
     /@media \(max-width:\s*1024px\)\s*{[\s\S]*?\.nav-refresh span\s*{[^}]*display:\s*none/s,
+  )
+})
+
+test('顶栏刷新使用强调样式且撤回使用独立图标避免误触', () => {
+  assert.match(app, /className="nav-refresh-label">刷新</)
+  assert.match(app, /className="nav-refresh-count">\{remain\}s</)
+  assert.match(app, /className="icon-btn nav-undo"[\s\S]*?<Icon name="undo"/s)
+  assert.doesNotMatch(app, /<Icon name="refresh" size=\{15\} className="flip-x"/)
+  assert.match(
+    precision,
+    /\.nav-refresh\s*{[^}]*border-color:\s*var\(--color-accent\)[^}]*background:\s*var\(--color-accent\)[^}]*color:\s*var\(--color-accent-ink\)/s,
+  )
+  assert.match(
+    precision,
+    /button\.icon-btn\.nav-undo\s*{[^}]*border-color:\s*var\(--color-rule-2\)[^}]*background:\s*transparent/s,
+  )
+  assert.match(
+    precision,
+    /button\.icon-btn\.nav-undo:disabled\s*{[^}]*opacity:\s*1[^}]*color:\s*var\(--color-neutral\)/s,
   )
 })
 

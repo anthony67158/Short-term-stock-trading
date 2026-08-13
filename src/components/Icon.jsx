@@ -45,6 +45,7 @@ const paths = {
   eye: <><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" /></>,
   info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h0" /></>,
   refresh: <><path d="M3 12a9 9 0 0 1 15-6.7L21 8" /><path d="M21 4v4h-4" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" /><path d="M3 20v-4h4" /></>,
+  undo: <><path d="M9 7 4 12l5 5" /><path d="M4 12h9a7 7 0 0 1 7 7" /></>,
   dot: <><circle cx="12" cy="12" r="5" /></>,
   send: <><path d="M4 12 20 4l-6 16-2.5-6.5L4 12Z" /></>,
   news: <><rect x="3" y="5" width="14" height="15" rx="2" /><path d="M17 8h3a1 1 0 0 1 1 1v9a2 2 0 0 1-2 2M7 9h6M7 13h6M7 17h4" /></>,

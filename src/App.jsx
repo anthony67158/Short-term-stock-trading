@@ -287,7 +287,9 @@ function MainApp() {
               <span className="status-dot" />{trading ? '交易中' : '休市'}
             </span>
             <button type="button" className="nav-refresh" onClick={triggerRefresh} title="立即刷新数据" aria-label={`刷新数据，距自动刷新 ${remain} 秒`}>
-              <Icon name="refresh" size={13} /><span>{remain}s</span>
+              <Icon name="refresh" size={14} />
+              <span className="nav-refresh-label">刷新</span>
+              <span className="nav-refresh-count">{remain}s</span>
             </button>
             <UndoButton />
             <AlertBell onOpen={() => { setHubSub('alert'); setHubNonce((n) => n + 1); setTab('hub') }} />
@@ -395,8 +397,9 @@ function UndoButton() {
   return (
     <div className="undo-wrap">
       <button className="icon-btn nav-undo" onClick={doUndo} disabled={!can}
-        title={can ? `撤回上一步：${label}（还可撤回 ${n} 步）` : '暂无可撤回的操作'}>
-        <Icon name="refresh" size={15} className="flip-x" />
+        title={can ? `撤回上一步：${label}（还可撤回 ${n} 步）` : '暂无可撤回的操作'}
+        aria-label={can ? `撤回上一步：${label}` : '暂无可撤回的操作'}>
+        <Icon name="undo" size={16} />
         {n > 0 && <span className="nav-undo-dot">{n > 9 ? '9+' : n}</span>}
       </button>
       {toast && (
