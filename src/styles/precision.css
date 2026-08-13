@@ -1582,43 +1582,38 @@ textarea:focus {
   border-radius: var(--radius-input);
 }
 
-html[data-theme="light"] .decide-box .advice-presentation {
-  --advice-surface: color-mix(
-    in oklch,
-    var(--color-paper-3) 78%,
-    var(--color-paper-2)
-  );
-}
-
-html[data-theme="light"] .decide-box .decide-verdict,
-html[data-theme="light"] .decide-box .advice-continuity,
-html[data-theme="light"] .decide-box .advice-model-context,
-html[data-theme="light"] .decide-box .advice-execution,
-html[data-theme="light"] .decide-box .advice-trigger-rows > div,
-html[data-theme="light"] .decide-box .advice-evidence-row,
-html[data-theme="light"] .decide-box .advice-plan-paths,
-html[data-theme="light"] .decide-box .advice-execution-metrics > span {
+.decide-box .advice-presentation .decide-verdict,
+.decide-box .advice-presentation .advice-continuity,
+.decide-box .advice-presentation .advice-model-context,
+.decide-box .advice-presentation .advice-execution,
+.decide-box .advice-presentation .advice-execution-metrics > span,
+.decide-box .advice-presentation .advice-trigger,
+.decide-box .advice-presentation .advice-trigger-rows > div,
+.decide-box .advice-presentation .advice-evidence-row,
+.decide-box .advice-presentation .advice-plan-paths,
+.decide-box .advice-presentation .advice-horizon .ah-row,
+.decide-box .advice-presentation .advice-exit-timing.key-block,
+.decide-box .advice-presentation .advice-adjust,
+.decide-box .advice-presentation .advice-deep-toggle,
+.decide-box .advice-presentation .knowledge-action-card,
+.decide-box .advice-presentation .knowledge-action-review-card {
   border-color: var(--color-rule-2);
-  background: var(--advice-surface);
+  background: transparent;
+  background-image: none;
 }
 
-html[data-theme="light"] .decide-box .decide-verdict.red {
-  background: color-mix(in oklch, var(--color-up) 7%, var(--advice-surface));
+.decide-box .advice-presentation .advice-prices .ap-cell {
+  background: transparent !important;
 }
 
-html[data-theme="light"] .decide-box .decide-verdict.green {
-  background: color-mix(in oklch, var(--color-down) 7%, var(--advice-surface));
+.decide-box .advice-presentation .ka-dimensions > span,
+.decide-box .advice-presentation .ka-contract > div,
+.decide-box .advice-presentation .kar-scores > span {
+  background: transparent;
 }
 
-html[data-theme="light"] .decide-box .decide-verdict.gold,
-html[data-theme="light"] .decide-box .advice-continuity.reverse {
-  background: color-mix(in oklch, var(--color-warning) 7%, var(--advice-surface));
-}
-
-html[data-theme="light"] .decide-box .advice-continuity.blocked,
-html[data-theme="light"] .decide-box .advice-model-context.fallback,
-html[data-theme="light"] .decide-box .advice-execution {
-  background: color-mix(in oklch, var(--color-accent) 6%, var(--advice-surface));
+.decide-box .advice-presentation .advice-deep-toggle:hover {
+  background: transparent;
 }
 
 .ai-fab {

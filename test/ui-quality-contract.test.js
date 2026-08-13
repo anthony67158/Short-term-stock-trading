@@ -135,15 +135,16 @@ test('持仓区共用页面边线、筛选栏留出安全区且卡片展示建�
   )
 })
 
-test('浅色军师建议使用冷灰分层表面而不是纯白卡片', () => {
+test('军师建议正文块统一透明且不再叠加分层底色', () => {
   assert.match(
     precision,
-    /html\[data-theme="light"\] \.decide-box \.advice-presentation\s*{[^}]*--advice-surface:\s*color-mix\(\s*in oklch,\s*var\(--color-paper-3\) 78%,\s*var\(--color-paper-2\)\s*\)/s,
+    /\.decide-box \.advice-presentation \.decide-verdict,[\s\S]*?\.decide-box \.advice-presentation \.knowledge-action-review-card\s*{[^}]*background:\s*transparent/s,
   )
   assert.match(
     precision,
-    /html\[data-theme="light"\] \.decide-box \.advice-continuity,[\s\S]*?\.decide-box \.advice-execution-metrics > span\s*{[^}]*background:\s*var\(--advice-surface\)/s,
+    /\.decide-box \.advice-presentation \.advice-prices \.ap-cell\s*{[^}]*background:\s*transparent\s*!important/s,
   )
+  assert.doesNotMatch(precision, /--advice-surface:/)
 })
 
 test('股票搜索框加宽并只由外层绘制一层焦点框', () => {
