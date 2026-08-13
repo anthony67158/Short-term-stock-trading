@@ -29,6 +29,10 @@ import {
   livePositionOf as liveSharedPosition,
   t1StatusOf as sharedT1Status,
 } from '../shared/portfolioAccounting.js'
+import {
+  A_SHARE_STANDARD_FEE_POLICY,
+  tradeFees,
+} from '../shared/ashareStrategyExecution.js'
 // 注意:adviceBatch 只在 mergeCloud 运行时用到,这里【不能】做顶层静态 import——
 // 否则 planStore→adviceBatch→adviceRunner→serverAdvice→authStore 形成模块初始化环,
 // 而 authStore 顶层会调用 planStore.registerSaver(),此时 planStore 尚未初始化 → 整包崩(白屏卡启动)。
@@ -172,23 +176,18 @@ export const TXN = {
 
 // ---- A股手续费参数（可调）----
 export const FEE = {
-  commissionRate: 0.0003, // 佣金 万三
-  commissionMin: 5,       // 佣金最低 5 元
-  stampRate: 0.0005,      // 印花税 千0.5（仅卖出）
-  transferRate: 0.00001,  // 过户费 万0.1（买卖都收）
+  commissionRate: A_SHARE_STANDARD_FEE_POLICY.commissionRate, // 佣金 万三
+  commissionMin: A_SHARE_STANDARD_FEE_POLICY.minimumCommission, // 佣金最低 5 元
+  stampRate: A_SHARE_STANDARD_FEE_POLICY.stampDutyRate, // 印花税 千0.5（仅卖出）
+  transferRate: A_SHARE_STANDARD_FEE_POLICY.transferRate, // 过户费 万0.1（买卖都收）
 }
 // 买入手续费 = 佣金 + 过户费
 export function calcBuyFee(amount) {
-  const commission = Math.max(amount * FEE.commissionRate, FEE.commissionMin)
-  const transfer = amount * FEE.transferRate
-  return +(commission + transfer).toFixed(2)
+  return tradeFees('BUY', amount).total
 }
 // 卖出手续费 = 佣金 + 印花税 + 过户费
 export function calcSellFee(amount) {
-  const commission = Math.max(amount * FEE.commissionRate, FEE.commissionMin)
-  const stamp = amount * FEE.stampRate
-  const transfer = amount * FEE.transferRate
-  return +(commission + stamp + transfer).toFixed(2)
+  return tradeFees('SELL', amount).total
 }
 
 // 归一化交易记录：补 type + realizedPnl（向后兼容）
