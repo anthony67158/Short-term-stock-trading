@@ -55,10 +55,17 @@ function newestStamp(value, keys) {
 
 export function accountSyncDelta(data = {}, since = 0) {
   const after = Number(since) || 0;
+  const jobs = data.jobs && typeof data.jobs === 'object'
+    ? data.jobs
+    : {};
   const advice = Object.fromEntries(
-    Object.entries(data.advice || {}).filter(([, entry]) =>
-      newestStamp(entry, ['at', 'cachedAt', 'updatedAt']) > after
-    ),
+    Object.entries(data.advice || {}).filter(([code, entry]) => {
+      const job = jobs[code];
+      const completedAfterCursor = job?.status === 'done'
+        && newestStamp(job, ['finishedAt', 'progressAt']) > after;
+      return newestStamp(entry, ['at', 'cachedAt', 'updatedAt']) > after
+        || completedAfterCursor;
+    }),
   );
   const adviceLog = (data.adviceLog || []).filter((entry) =>
     newestStamp(entry, ['verifiedAt', 'outcomeUpdatedAt', 'at']) > after

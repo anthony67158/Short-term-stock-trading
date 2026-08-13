@@ -134,6 +134,34 @@ test('运行时账号同步只返回更新时间后的建议事件和轻量状�
   assert.equal(delta.closed, undefined)
 })
 
+test('委员会复核期间同步游标前移后仍返回刚完成的建议', () => {
+  const delta = accountSyncDelta({
+    advice: {
+      '003036': {
+        at: 100,
+        mode: 'buy_advice',
+        advice: { action: '回调再买' },
+      },
+    },
+    jobs: {
+      '003036': {
+        code: '003036',
+        status: 'done',
+        progressAt: 300,
+        finishedAt: 300,
+      },
+    },
+    batchProgress: {
+      at: 300,
+      running: false,
+      items: [{ code: '003036', status: 'done' }],
+    },
+  }, 200)
+
+  assert.deepEqual(Object.keys(delta.advice), ['003036'])
+  assert.equal(delta.advice['003036'].advice.action, '回调再买')
+})
+
 test('客户端保存不能覆盖服务端收益学习委员会与人工批准状态', () => {
   const account = {
     nick: '治理状态账号',

@@ -966,8 +966,13 @@ async function drainAccount(nick, initialAcc) {
       } else if (job.cancelRequested || job.status === 'canceled') { // 运行中被取消 → 丢弃结果
         job.status = 'canceled'; job.finishedAt = Date.now(); job.leaseUntil = 0;
       } else if (done.res && done.res.cacheItem) {
-        (d.advice || (d.advice = {}))[done.code] = done.res.cacheItem;
         completeJob(d, done.code); ok++;
+        const completedAt = Number(jobsOf(d)[done.code]?.finishedAt) || Date.now();
+        done.res.cacheItem.updatedAt = Math.max(
+          Number(done.res.cacheItem.updatedAt) || 0,
+          completedAt,
+        );
+        (d.advice || (d.advice = {}))[done.code] = done.res.cacheItem;
         if (done.res.logEntry) {
           const log = d.adviceLog || (d.adviceLog = []);
           const dup = log.find((x) =>
