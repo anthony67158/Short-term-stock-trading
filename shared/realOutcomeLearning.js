@@ -95,7 +95,9 @@ function latestExecutions(events) {
   const latest = new Map()
   for (const event of events) {
     if (event?.kind !== 'execution') continue
-    const key = String(event.transactionId || event.id || '')
+    const key = event.transactionId
+      ? `transaction:${event.transactionId}`
+      : event.id ? `event:${event.id}` : ''
     if (!key) continue
     const current = latest.get(key)
     if (!current || Number(event.at || 0) >= Number(current.at || 0)) {
@@ -114,16 +116,24 @@ export function buildRealOutcomeLearning(
   const recommendations = new Map(events
     .filter((event) => event?.kind === 'recommendation' && event.id)
     .map((event) => [String(event.id), event]))
+  const executions = latestExecutions(events)
+  const linkedRecommendationIds = new Set(executions
+    .map((event) => String(event.linkedRecommendationId || ''))
+    .filter(Boolean))
   const excluded = {
     unexecutedAdviceOutcomes: (Array.isArray(data.adviceLog) ? data.adviceLog : [])
-      .filter((record) => record?.verified).length,
+      .filter((record) =>
+        record?.verified
+        && !linkedRecommendationIds.has(String(record.id || ''))
+      ).length,
     incompleteExecutions: 0,
     unlinkedExecutions: 0,
     nonExitExecutions: 0,
+    missingTransactionId: 0,
     missingNetPnl: 0,
   }
   const records = []
-  for (const execution of latestExecutions(events)) {
+  for (const execution of executions) {
     if (execution.side !== 'sell') {
       excluded.nonExitExecutions++
       continue
@@ -133,6 +143,10 @@ export function buildRealOutcomeLearning(
     )
     if (!recommendation) {
       excluded.unlinkedExecutions++
+      continue
+    }
+    if (!execution.transactionId) {
+      excluded.missingTransactionId++
       continue
     }
     if (execution.outcome?.validationComplete !== true) {

@@ -170,6 +170,7 @@ export async function runAdvisorCouncilShadow(
     opinions: outcomes.filter(Boolean),
     proposal: proposalFromAdvice({ code, name, mode, advice }),
     account: context.account,
+    quote: context.quote,
     strategyGate,
     evidenceSnapshotId,
     now,

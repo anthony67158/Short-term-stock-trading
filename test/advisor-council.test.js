@@ -135,3 +135,36 @@ test('降低风险的卖出不受策略REJECT阻断但仍保持影子不可执�
   assert.equal(result.shadowOnly, true)
   assert.equal(result.actionable, false)
 })
+
+test('委员会拒绝缺少手数、实时价带越界和账户事实不完整的提案', () => {
+  const result = compileAdvisorCouncil({
+    opinions,
+    proposal: {
+      id: 'buy',
+      code: '600001',
+      name: '样本股份',
+      action: 'buy',
+      entryPrice: 11.5,
+      targetPrice: 12,
+      stopPrice: 10,
+      triggerOp: 'lte',
+      reason: '突破买入',
+    },
+    account: {
+      holdQty: 0,
+      cash: 10000,
+    },
+    quote: {
+      live: true,
+      limitDownPrice: 9,
+      limitUpPrice: 11,
+    },
+    strategyGate: { productionEligible: true },
+    evidenceSnapshotId: 'ev_4',
+  })
+
+  assert.equal(result.compiled.hardGatePassed, false)
+  assert.ok(result.compiled.blockers.includes('缺少可执行整数手数'))
+  assert.ok(result.compiled.blockers.includes('交易价格超出实时合法价带'))
+  assert.ok(result.compiled.blockers.includes('账户风险事实不完整'))
+})

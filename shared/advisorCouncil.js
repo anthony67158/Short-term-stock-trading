@@ -93,7 +93,7 @@ export function proposalFromAdvice({
   })
 }
 
-function accountBlockers(proposal, account, strategyGate) {
+function accountBlockers(proposal, account, quote, strategyGate) {
   const blockers = []
   const holdQty = Math.max(0, Math.trunc(finite(account?.holdQty) || 0))
   const sellable = Math.max(0, Math.min(
@@ -103,6 +103,21 @@ function accountBlockers(proposal, account, strategyGate) {
   const quantity = Math.max(0, Math.trunc(finite(proposal?.qty) || 0))
   const riskIncreasing = proposal?.action === 'buy'
     || proposal?.action === 'add'
+  if (!(quantity > 0)) blockers.push('缺少可执行整数手数')
+  if (quote?.live === true) {
+    const lower = finite(quote.limitDownPrice)
+    const upper = finite(quote.limitUpPrice)
+    const price = finite(proposal?.entryPrice)
+    if (
+      lower == null
+      || upper == null
+      || price == null
+      || price < lower
+      || price > upper
+    ) {
+      blockers.push('交易价格超出实时合法价带')
+    }
+  }
   if (riskIncreasing && strategyGate?.productionEligible !== true) {
     blockers.push('策略尚未通过生产晋级门禁')
   }
@@ -119,11 +134,14 @@ function accountBlockers(proposal, account, strategyGate) {
     blockers.push('卖出手数超过今日可卖数量')
   }
   if (riskIncreasing) {
-    const required = finite(proposal?.entryPrice) * quantity * 100
     const cash = finite(account?.cash)
-    if (cash != null && required > cash) blockers.push('可用资金不足')
     const totalAssets = finite(account?.totalAssets)
     const currentPosition = finite(account?.position)
+    if (cash == null || totalAssets == null || currentPosition == null) {
+      blockers.push('账户风险事实不完整')
+    }
+    const required = (finite(proposal?.entryPrice) || 0) * quantity * 100
+    if (cash != null && required > cash) blockers.push('可用资金不足')
     const stockWeight = finite(account?.stockWeight) || 0
     const plannedWeight = totalAssets > 0 ? required / totalAssets * 100 : 0
     if (currentPosition != null && currentPosition + plannedWeight >= 85) {
@@ -141,6 +159,7 @@ export function compileAdvisorCouncil({
   opinions,
   proposal,
   account = {},
+  quote = null,
   strategyGate = {},
   evidenceSnapshotId,
   now = Date.now(),
@@ -170,7 +189,12 @@ export function compileAdvisorCouncil({
   if (!consensusReached) blockers.push('委员会未形成至少两票支持')
   if (byRole.get('risk_officer')?.veto) blockers.push('风险官否决')
   if (cleanProposal) {
-    blockers.push(...accountBlockers(cleanProposal, account, strategyGate))
+    blockers.push(...accountBlockers(
+      cleanProposal,
+      account,
+      quote,
+      strategyGate,
+    ))
   }
   const uniqueBlockers = [...new Set(blockers)]
   const hardGatePassed = uniqueBlockers.length === 0

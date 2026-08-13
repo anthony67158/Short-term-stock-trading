@@ -59,6 +59,10 @@ test('真实收益画像只统计已关联且完成验证的真实费后卖出',
       execution('e2', 'r2', -40),
       execution('e-pending', 'r3', 500, { validationComplete: false }),
       {
+        ...execution('e-no-transaction', 'r3', 300),
+        transactionId: undefined,
+      },
+      {
         id: 'e-unlinked',
         transactionId: 'tx-unlinked',
         kind: 'execution',
@@ -79,6 +83,7 @@ test('真实收益画像只统计已关联且完成验证的真实费后卖出',
   assert.equal(profile.excluded.unexecutedAdviceOutcomes, 1)
   assert.equal(profile.excluded.incompleteExecutions, 1)
   assert.equal(profile.excluded.unlinkedExecutions, 1)
+  assert.equal(profile.excluded.missingTransactionId, 1)
 })
 
 test('重复交易流水按 transactionId 只保留最新版本', () => {
