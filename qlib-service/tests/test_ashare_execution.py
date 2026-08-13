@@ -52,6 +52,14 @@ class AshareMarketRuleTest(unittest.TestCase):
             ),
             0.05,
         )
+        self.assertEqual(
+            self.execution.price_limit_pct(
+                "300750.SZ",
+                "20260810",
+                is_st=True,
+            ),
+            0.20,
+        )
 
     def test_uses_exchange_half_up_rounding_for_limit_prices(self):
         lower, upper = self.execution.limit_prices(10.05, 0.10)
@@ -117,6 +125,29 @@ class AshareFeeTest(unittest.TestCase):
         self.assertAlmostEqual(fees["stamp_duty"], 50.0)
         self.assertAlmostEqual(fees["transfer"], 1.0)
         self.assertAlmostEqual(fees["total"], 81.0)
+
+    def test_rounds_fee_components_and_total_to_cents_like_live_ledger(self):
+        buy = self.execution.trade_fees("buy", 16_667.0)
+        sell = self.execution.trade_fees("sell", 16_667.0)
+
+        self.assertEqual(buy, {
+            "commission": 5.0,
+            "stamp_duty": 0.0,
+            "transfer": 0.17,
+            "total": 5.17,
+        })
+        self.assertEqual(sell, {
+            "commission": 5.0,
+            "stamp_duty": 8.33,
+            "transfer": 0.17,
+            "total": 13.5,
+        })
+
+    def test_rounds_slippage_adjusted_execution_price_to_six_decimals(self):
+        self.assertEqual(
+            self.execution.execution_price(10.1234567, "buy", 5),
+            10.128518,
+        )
 
 
 class AshareLongTradeTest(unittest.TestCase):

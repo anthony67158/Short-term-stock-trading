@@ -7,8 +7,6 @@ import numpy as np
 
 
 def price_limit_pct(code, trade_date, *, is_st=False):
-    if is_st:
-        return 0.05
     symbol, _, exchange = str(code).upper().partition(".")
     date = str(trade_date).replace("-", "")
     if exchange == "BJ" or symbol.startswith(("4", "8")):
@@ -21,6 +19,8 @@ def price_limit_pct(code, trade_date, *, is_st=False):
         and date >= "20200824"
     ):
         return 0.20
+    if is_st:
+        return 0.05
     return 0.10
 
 
@@ -30,8 +30,25 @@ def _price_tick(value):
     )
 
 
+def _execution_tick(value):
+    return float(
+        Decimal(str(value)).quantize(
+            Decimal("0.000001"),
+            rounding=ROUND_HALF_UP,
+        )
+    )
+
+
+def _positive_finite(value):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(number) and number > 0
+
+
 def limit_prices(previous_close, limit_pct):
-    if not math.isfinite(previous_close) or previous_close <= 0:
+    if not _positive_finite(previous_close):
         raise ValueError("previous_close must be positive and finite")
     if not math.isfinite(limit_pct) or not 0 < limit_pct < 1:
         raise ValueError("limit_pct must be between zero and one")
@@ -44,10 +61,9 @@ def can_fill_open(*, side, previous_close, open_price, volume, limit_pct):
     if side not in ("buy", "sell"):
         raise ValueError("side must be 'buy' or 'sell'")
     if (
-        not math.isfinite(open_price)
-        or open_price <= 0
-        or not math.isfinite(volume)
-        or volume <= 0
+        not _positive_finite(previous_close)
+        or not _positive_finite(open_price)
+        or not _positive_finite(volume)
     ):
         return False
     lower, upper = limit_prices(previous_close, limit_pct)
@@ -69,14 +85,21 @@ def trade_fees(
         raise ValueError("side must be 'buy' or 'sell'")
     if not math.isfinite(gross_amount) or gross_amount <= 0:
         raise ValueError("gross_amount must be positive and finite")
-    commission = max(minimum_commission, gross_amount * commission_rate)
-    stamp_duty = gross_amount * stamp_duty_rate if side == "sell" else 0.0
-    transfer = gross_amount * transfer_rate
+    raw_commission = max(
+        minimum_commission,
+        gross_amount * commission_rate,
+    )
+    raw_stamp_duty = (
+        gross_amount * stamp_duty_rate if side == "sell" else 0.0
+    )
+    raw_transfer = gross_amount * transfer_rate
     return {
-        "commission": commission,
-        "stamp_duty": stamp_duty,
-        "transfer": transfer,
-        "total": commission + stamp_duty + transfer,
+        "commission": _price_tick(raw_commission),
+        "stamp_duty": _price_tick(raw_stamp_duty),
+        "transfer": _price_tick(raw_transfer),
+        "total": _price_tick(
+            raw_commission + raw_stamp_duty + raw_transfer
+        ),
     }
 
 
@@ -87,7 +110,7 @@ def execution_price(open_price, side, slippage_bps):
         raise ValueError("slippage_bps must be non-negative and finite")
     slippage = slippage_bps / 10_000.0
     multiplier = 1.0 + slippage if side == "buy" else 1.0 - slippage
-    return float(open_price) * multiplier
+    return _execution_tick(float(open_price) * multiplier)
 
 
 def simulate_long_trade(
