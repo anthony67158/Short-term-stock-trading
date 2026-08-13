@@ -275,13 +275,39 @@ export function compileStrategySpec(input) {
   if (spec.score?.method !== 'WEIGHTED_SUM') {
     throw new Error('score.method当前只支持WEIGHTED_SUM')
   }
-  const weights = Object.values(spec.score?.weights || {}).map(Number)
+  const scoreWeightKeys = [
+    'marketScore',
+    'quantScore',
+    'upProb',
+    'expectedReturn',
+  ]
+  const scoreWeights = spec.score?.weights || {}
+  if (
+    Object.keys(scoreWeights).length !== scoreWeightKeys.length
+    || scoreWeightKeys.some((key) => !Object.hasOwn(scoreWeights, key))
+  ) {
+    throw new Error('评分权重字段不完整')
+  }
+  const weights = scoreWeightKeys.map((key) => Number(scoreWeights[key]))
   if (
     !weights.length
     || weights.some((value) => !Number.isFinite(value) || value < 0)
     || Math.abs(weights.reduce((sum, value) => sum + value, 0) - 1) > 1e-9
   ) {
     throw new Error('评分权重之和必须为1')
+  }
+  const expectedReturnMin = Number(
+    spec.score?.normalization?.expectedReturnMin
+  )
+  const expectedReturnMax = Number(
+    spec.score?.normalization?.expectedReturnMax
+  )
+  if (
+    !Number.isFinite(expectedReturnMin)
+    || !Number.isFinite(expectedReturnMax)
+    || expectedReturnMax <= expectedReturnMin
+  ) {
+    throw new Error('预期收益归一化区间无效')
   }
   const marketWeights = Object.values(
     spec.marketRanking?.factorWeights || {},

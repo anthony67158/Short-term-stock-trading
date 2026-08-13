@@ -131,6 +131,26 @@ test('策略编译拒绝未知字段操作符和不完整风险参数', () => {
     })),
     /市场因子权重之和必须为1/,
   )
+  assert.throws(
+    () => {
+      const value = createDefaultStrategySpec()
+      delete value.score.weights.expectedReturn
+      value.score.weights.marketScore += 0.1
+      return compileStrategySpec(value)
+    },
+    /评分权重字段不完整/,
+  )
+  assert.throws(
+    () => compileStrategySpec(createDefaultStrategySpec({
+      score: {
+        normalization: {
+          expectedReturnMin: 5,
+          expectedReturnMax: 5,
+        },
+      },
+    })),
+    /预期收益归一化区间无效/,
+  )
 })
 
 test('条件缺失值明确失败而不是按零值参与判断', () => {
