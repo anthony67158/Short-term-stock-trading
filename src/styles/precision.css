@@ -1041,13 +1041,22 @@ textarea::placeholder {
 .wl-input:focus,
 .auth-input:focus,
 .pc-tf-in:focus,
-.ss-input:focus-within,
 textarea:focus {
   border-width: 1px;
   border-color: var(--color-accent);
   outline: 2px solid var(--color-focus);
   outline-offset: 1px;
   box-shadow: none;
+}
+
+.ss-input input:focus-visible {
+  outline: none;
+}
+
+.ss-input:focus-within {
+  border-color: var(--color-accent);
+  outline: 0;
+  box-shadow: 0 0 0 1px var(--color-accent);
 }
 
 .auth-input[aria-invalid="true"] {
@@ -1241,10 +1250,14 @@ textarea:focus {
   background: transparent;
 }
 
+.plan-search {
+  width: min(480px, 100%);
+  max-width: 100%;
+}
+
 .plan-section .plan-cand-grid,
 .plan-section .hold-grid,
-.plan-section .hold-overview,
-.plan-section .ind-tabs {
+.plan-section .hold-overview {
   padding-inline: 0;
 }
 
@@ -1262,8 +1275,30 @@ textarea:focus {
 }
 
 .plan-section .ind-tabs {
-  margin-top: 0;
-  padding-block: 0 var(--space-3xs);
+  margin-top: var(--space-sm);
+  padding: 0 var(--space-2xs) var(--space-xs);
+}
+
+.advice-updated-at {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3xs);
+  min-height: 1lh;
+  margin-top: var(--space-2xs);
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  line-height: 1.4;
+}
+
+.advice-updated-at .icon {
+  color: var(--color-accent);
+}
+
+.advice-updated-at time {
+  color: var(--color-ink-2);
+  font-weight: 650;
 }
 
 .hold-grid {
@@ -1545,6 +1580,45 @@ textarea:focus {
 .knowledge-action-card,
 .knowledge-action-review-card {
   border-radius: var(--radius-input);
+}
+
+html[data-theme="light"] .decide-box .advice-presentation {
+  --advice-surface: color-mix(
+    in oklch,
+    var(--color-paper-3) 78%,
+    var(--color-paper-2)
+  );
+}
+
+html[data-theme="light"] .decide-box .decide-verdict,
+html[data-theme="light"] .decide-box .advice-continuity,
+html[data-theme="light"] .decide-box .advice-model-context,
+html[data-theme="light"] .decide-box .advice-execution,
+html[data-theme="light"] .decide-box .advice-trigger-rows > div,
+html[data-theme="light"] .decide-box .advice-evidence-row,
+html[data-theme="light"] .decide-box .advice-plan-paths,
+html[data-theme="light"] .decide-box .advice-execution-metrics > span {
+  border-color: var(--color-rule-2);
+  background: var(--advice-surface);
+}
+
+html[data-theme="light"] .decide-box .decide-verdict.red {
+  background: color-mix(in oklch, var(--color-up) 7%, var(--advice-surface));
+}
+
+html[data-theme="light"] .decide-box .decide-verdict.green {
+  background: color-mix(in oklch, var(--color-down) 7%, var(--advice-surface));
+}
+
+html[data-theme="light"] .decide-box .decide-verdict.gold,
+html[data-theme="light"] .decide-box .advice-continuity.reverse {
+  background: color-mix(in oklch, var(--color-warning) 7%, var(--advice-surface));
+}
+
+html[data-theme="light"] .decide-box .advice-continuity.blocked,
+html[data-theme="light"] .decide-box .advice-model-context.fallback,
+html[data-theme="light"] .decide-box .advice-execution {
+  background: color-mix(in oklch, var(--color-accent) 6%, var(--advice-surface));
 }
 
 .ai-fab {

@@ -32,7 +32,7 @@ import {
   DEFAULT_WATCH,
 } from '../adviceAutoRefresh'
 import { ensureQuantScore, ensureQuantScores } from '../quantScore'
-import { fmtPct, pctClass, fmtNum, fmtInflow , fmtRaw, hasVal, opText } from '../format'
+import { fmtPct, pctClass, fmtNum, fmtInflow, fmtRaw, hasVal, opText, formatAdviceTime } from '../format'
 import { computeDailyFinance, todayTradeCodes } from '../../shared/dailyFinance.js'
 import {
   rankWatchlistCandidates,
@@ -317,7 +317,7 @@ function StockSearch() {
           value={kw} onChange={(e) => onChange(e.target.value)}
           onFocus={() => kw && setOpen(true)}
           onKeyDown={(e) => { if (e.key === 'Enter') submit(); else if (e.key === 'Escape') setOpen(false) }}
-          placeholder="搜索股票名称 / 代码 / 拼音，加入计划…"
+          placeholder="搜索股票名称、代码或拼音…"
         />
         <button className="ss-btn" onClick={submit} disabled={loading} title="搜索">
           {loading ? <span className="ss-spin" /> : <Icon name="search" size={14} />}
@@ -368,6 +368,18 @@ function QuantBadge({ score, bias, size }) {
       <span className="q-badge-k">量化</span>
       {scored ? <b className="q-badge-v">{Math.round(score)}</b> : <span className="q-badge-load" />}
     </span>
+  )
+}
+
+function AdviceUpdatedAt({ entry }) {
+  const label = formatAdviceTime(entry && entry.at)
+  if (!label) return null
+  return (
+    <div className="advice-updated-at" title={`最近一次军师操作建议生成于 ${new Date(entry.at).toLocaleString('zh-CN')}`}>
+      <Icon name="history" size={11} />
+      <span>建议更新</span>
+      <time dateTime={new Date(entry.at).toISOString()}>{label}</time>
+    </div>
   )
 }
 
@@ -482,19 +494,27 @@ function CandFocus({ code, name }) {
   const [, force] = useState(0)
   useEffect(() => subscribeAdvice(() => force((n) => n + 1)), [])
   const generation = useAdviceGeneration(code)
-  if (generation?.active) return <AdviceGenerationStatus code={code} />
+  const entry = getAdvice(code)
+  const updatedAt = <AdviceUpdatedAt entry={entry} />
+  if (generation?.active) return <>{updatedAt}<AdviceGenerationStatus code={code} /></>
   const f = adviceFocus(code)
   if (!f) return (
-    <button className="cand-focus focus-prompt" onClick={() => openStockDetail(code, name)} title="打开个股详情页生成AI操作建议">
-      <span className="cf-badge"><Icon name="spark" size={9} /> 待生成</span>
-      <span className="cf-text">尚无 AI 操作建议，点此生成 →</span>
-    </button>
+    <>
+      {updatedAt}
+      <button className="cand-focus focus-prompt" onClick={() => openStockDetail(code, name)} title="打开个股详情页生成AI操作建议">
+        <span className="cf-badge"><Icon name="spark" size={9} /> 待生成</span>
+        <span className="cf-text">尚无 AI 操作建议，点此生成 →</span>
+      </button>
+    </>
   )
   return (
-    <div className={'cand-focus focus-' + f.tone} title={f.text}>
-      {f.badge && <span className="cf-badge"><Icon name="spark" size={9} />{f.badge}</span>}
-      <span className="cf-text">{f.text}</span>
-    </div>
+    <>
+      {updatedAt}
+      <div className={'cand-focus focus-' + f.tone} title={f.text}>
+        {f.badge && <span className="cf-badge"><Icon name="spark" size={9} />{f.badge}</span>}
+        <span className="cf-text">{f.text}</span>
+      </div>
+    </>
   )
 }
 
@@ -1648,6 +1668,7 @@ function HoldingItem({ h, idx, quote: q }) {
   // 优先级：触及止盈/止损(实时纪律) > AI操作建议一句话 > 无建议则提示去生成。
   // 「踏5不破10」参考均线信号已移入个股详情页,持仓卡不再展示,避免多套指导引发混淆。
   const aiFocus = adviceFocus(h.code)
+  const adviceEntry = getAdvice(h.code)
   const focus = (() => {
     if (hitTP) return { tone: 'red', badge: '止盈', text: `已到止盈价 ${fmtRaw(h.tp)}，考虑落袋` }
     if (hitSL) return { tone: 'green', badge: '止损', text: `已到止损价 ${fmtRaw(h.sl)}，按纪律离场` }
@@ -1773,6 +1794,7 @@ function HoldingItem({ h, idx, quote: q }) {
       })()}
 
       {/* 主行动：此刻唯一最该关注的一句。数据源=AI操作建议;无建议则提示去生成 */}
+      <AdviceUpdatedAt entry={adviceEntry} />
       <AdviceGenerationStatus code={h.code} />
       {focus && (focus.prompt
         ? (

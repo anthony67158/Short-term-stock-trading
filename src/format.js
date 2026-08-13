@@ -58,6 +58,14 @@ export function timeStr(ts) {
   return d.toLocaleTimeString('zh-CN', { hour12: false });
 }
 
+export function formatAdviceTime(ts) {
+  if (ts == null || ts === '') return '';
+  const d = new Date(ts);
+  if (!Number.isFinite(d.getTime())) return '';
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 // 算账/建议字段取值净化：AI 在"持有/观望"时返回 "0"/"0手"/"不变"/"-" 等占位，
 // 字符串在 JSX 里是真值会渲染出空的 0 格子(挨一起显示成"00")。hasVal 把这些统一判为无值。
 export function hasVal(v) {

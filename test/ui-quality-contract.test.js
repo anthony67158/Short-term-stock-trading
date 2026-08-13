@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { finiteNum } from '../src/format.js'
+import { finiteNum, formatAdviceTime } from '../src/format.js'
 
 const read = (path) => readFileSync(
   new URL(`../${path}`, import.meta.url),
@@ -35,6 +35,13 @@ test('异常数值统一降级，交易复盘不会渲染 NaN', () => {
   assert.equal(finiteNum(Number.NaN), 0)
   assert.equal(finiteNum('12.5'), 12.5)
   assert.equal(finiteNum('bad', null), null)
+})
+
+test('操作建议生成时间使用固定月日时分格式且拒绝非法时间', () => {
+  const at = new Date(2026, 7, 13, 9, 5).getTime()
+  assert.equal(formatAdviceTime(at), '08-13 09:05')
+  assert.equal(formatAdviceTime(null), '')
+  assert.equal(formatAdviceTime('bad'), '')
 })
 
 test('白天模式建立明确表面层级并将遗留紫色变量统一映射到钴蓝系统', () => {
@@ -89,7 +96,7 @@ test('今日工作台双栏等高且情绪指标桌面端为三列', () => {
   )
 })
 
-test('持仓区共用页面边线且同一行卡片操作区固定到底部', () => {
+test('持仓区共用页面边线、筛选栏留出安全区且卡片展示建议更新时间', () => {
   assert.match(
     precision,
     /\.plan-section \.hold-overview\s*{[^}]*margin:\s*var\(--space-sm\)\s+0/s,
@@ -112,8 +119,11 @@ test('持仓区共用页面边线且同一行卡片操作区固定到底部', ()
   )
   assert.match(
     precision,
-    /\.plan-section \.ind-tabs\s*{[^}]*margin-top:\s*0[^}]*padding-block:\s*0\s+var\(--space-3xs\)/s,
+    /\.plan-section \.ind-tabs\s*{[^}]*margin-top:\s*var\(--space-sm\)[^}]*padding:\s*0\s+var\(--space-2xs\)\s+var\(--space-xs\)/s,
   )
+  assert.match(planTab, /function AdviceUpdatedAt\(\{ entry \}\)/)
+  assert.equal((planTab.match(/<AdviceUpdatedAt entry=/g) || []).length, 2)
+  assert.match(planTab, /className="advice-updated-at"/)
   assert.match(precision, /\.hold-swipe-wrap\s*{[^}]*height:\s*100%/s)
   assert.match(
     precision,
@@ -122,6 +132,33 @@ test('持仓区共用页面边线且同一行卡片操作区固定到底部', ()
   assert.match(
     precision,
     /\.hold-item > \.pi-actions\s*{[^}]*margin-top:\s*auto/s,
+  )
+})
+
+test('浅色军师建议使用冷灰分层表面而不是纯白卡片', () => {
+  assert.match(
+    precision,
+    /html\[data-theme="light"\] \.decide-box \.advice-presentation\s*{[^}]*--advice-surface:\s*color-mix\(\s*in oklch,\s*var\(--color-paper-3\) 78%,\s*var\(--color-paper-2\)\s*\)/s,
+  )
+  assert.match(
+    precision,
+    /html\[data-theme="light"\] \.decide-box \.advice-continuity,[\s\S]*?\.decide-box \.advice-execution-metrics > span\s*{[^}]*background:\s*var\(--advice-surface\)/s,
+  )
+})
+
+test('股票搜索框加宽并只由外层绘制一层焦点框', () => {
+  assert.match(planTab, /placeholder="搜索股票名称、代码或拼音…"/)
+  assert.match(
+    precision,
+    /\.plan-search\s*{[^}]*width:\s*min\(480px,\s*100%\)[^}]*max-width:\s*100%/s,
+  )
+  assert.match(
+    precision,
+    /\.ss-input input:focus-visible\s*{[^}]*outline:\s*none/s,
+  )
+  assert.match(
+    precision,
+    /\.ss-input:focus-within\s*{[^}]*outline:\s*0[^}]*box-shadow:\s*0 0 0 1px var\(--color-accent\)/s,
   )
 })
 
