@@ -4,6 +4,7 @@ import {
   aggregateV21Accuracy,
   settleV21Prediction,
 } from '../shared/v21Accuracy.js'
+import { resolveOssEndpoint } from '../shared/ossNetworkPolicy.js'
 
 const LAB_BUCKET = 'stock-quant-lab-1730034925594178'
 const PREDICTION_PREFIX = 'shadow/v2.1-intraday/'
@@ -20,9 +21,9 @@ function labClient(env = process.env) {
     accessKeyId: env.OSS_ACCESS_KEY_ID,
     accessKeySecret: env.OSS_ACCESS_KEY_SECRET,
     bucket,
-    endpoint: env.V2_LAB_OSS_ENDPOINT
+    endpoint: resolveOssEndpoint(env, env.V2_LAB_OSS_ENDPOINT
       || env.OSS_ENDPOINT
-      || 'https://oss-cn-hangzhou-internal.aliyuncs.com',
+      || 'https://oss-cn-hangzhou-internal.aliyuncs.com'),
     secure: true,
   })
 }

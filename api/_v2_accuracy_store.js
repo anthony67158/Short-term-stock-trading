@@ -6,6 +6,7 @@ import {
   mergeV2Accuracy,
   nextTradingSession,
 } from '../shared/v2Accuracy.js'
+import { resolveOssEndpoint } from '../shared/ossNetworkPolicy.js'
 
 const LAB_BUCKET = 'stock-quant-lab-1730034925594178'
 const PREDICTION_PREFIX = 'shadow/predictions/'
@@ -18,9 +19,9 @@ function labClient(env = process.env) {
   if (bucket !== LAB_BUCKET || !accessKeyId || !accessKeySecret) {
     throw new Error('V2效果存储未配置')
   }
-  const endpoint = env.V2_LAB_OSS_ENDPOINT
+  const endpoint = resolveOssEndpoint(env, env.V2_LAB_OSS_ENDPOINT
     || env.OSS_ENDPOINT
-    || 'https://oss-cn-hangzhou-internal.aliyuncs.com'
+    || 'https://oss-cn-hangzhou-internal.aliyuncs.com')
   return new OSS({
     accessKeyId,
     accessKeySecret,

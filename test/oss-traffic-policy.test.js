@@ -12,6 +12,10 @@ test('FC与杭州OSS同地域时强制使用内网Endpoint', () => {
     yaml,
     /^\s+OSS_ENDPOINT:\s*https:\/\/oss-cn-hangzhou-internal\.aliyuncs\.com/m,
   )
+  assert.match(
+    yaml,
+    /^\s+OSS_ALLOW_PUBLIC_NETWORK:\s*"false"/m,
+  )
 })
 
 test('跨设备账号同步使用增量接口并降低空闲轮询频率', () => {

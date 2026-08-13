@@ -21,6 +21,10 @@
 
 import OSS from 'ali-oss';
 import { randomBytes } from 'crypto';
+import {
+  allowOssPublicNetwork,
+  resolveOssEndpoint,
+} from '../shared/ossNetworkPolicy.js';
 
 let _client = null;
 function client() {
@@ -35,7 +39,9 @@ function client() {
     bucket: OSS_BUCKET,
     secure: true,
   };
-  if (OSS_ENDPOINT) cfg.endpoint = OSS_ENDPOINT; else cfg.region = OSS_REGION;
+  const endpoint = resolveOssEndpoint(process.env, OSS_ENDPOINT);
+  if (endpoint) cfg.endpoint = endpoint;
+  else cfg.region = OSS_REGION;
   _client = new OSS(cfg);
   return _client;
 }
@@ -47,6 +53,7 @@ export function hasStorage() {
 
 // 读取用的公网基址
 function publicBase() {
+  if (!allowOssPublicNetwork(process.env)) return '';
   if (process.env.OSS_PUBLIC_BASE) return process.env.OSS_PUBLIC_BASE.replace(/\/$/, '');
   const region = process.env.OSS_REGION;
   const bucket = process.env.OSS_BUCKET;
@@ -119,7 +126,7 @@ export async function del(urlOrPathname) {
   await c.delete(key);
 }
 
-// 便捷读取：优先直接从 OSS 拿对象内容（避免公网 URL 缓存/权限问题），失败再退回 fetch(url)
+// 便捷读取：默认只通过 SDK 内网读取；仅显式允许公网时才可回退 fetch(url)。
 export async function readJson(blobOrUrl) {
   const key = keyFromUrl(typeof blobOrUrl === 'string' ? blobOrUrl : (blobOrUrl && (blobOrUrl.pathname || blobOrUrl.url)));
   const c = client();
@@ -128,8 +135,11 @@ export async function readJson(blobOrUrl) {
       const r = await c.get(key);
       const content = r && r.content;
       if (content) return JSON.parse(content.toString('utf-8'));
-    } catch { /* 落到下面 fetch 兜底 */ }
+    } catch {
+      if (!allowOssPublicNetwork(process.env)) return null;
+    }
   }
+  if (!allowOssPublicNetwork(process.env)) return null;
   const url = typeof blobOrUrl === 'string' ? blobOrUrl : (blobOrUrl && (blobOrUrl.downloadUrl || blobOrUrl.url));
   if (url && /^https?:\/\//i.test(url)) {
     try { return await fetch(url, { cache: 'no-store' }).then((x) => x.ok ? x.json() : null); } catch { return null; }
