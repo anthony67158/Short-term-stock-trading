@@ -19,6 +19,7 @@ const stockDetail = read('src/components/StockDetail.jsx')
 const dailyReport = read('src/components/DailyReport.jsx')
 const llmConfig = read('src/components/LLMConfig.jsx')
 const planTab = read('src/components/PlanTab.jsx')
+const reviewTab = read('src/components/ReviewTab.jsx')
 const fundFlowCanvas = read('src/components/FundFlowCanvas.jsx')
 const semanticTabSources = [
   'src/components/AlertCenter.jsx',
@@ -202,6 +203,23 @@ test('顶栏刷新使用强调样式且撤回使用独立图标避免误触', ()
   assert.match(
     precision,
     /button\.icon-btn\.nav-undo:disabled\s*{[^}]*opacity:\s*1[^}]*color:\s*var\(--color-neutral\)/s,
+  )
+})
+
+test('每日操作流水统一编辑日期价格手数并提示OSS云端保存', () => {
+  assert.match(reviewTab, /planStore\.updateClosedTrade\(/)
+  assert.match(reviewTab, /成交价格/)
+  assert.match(reviewTab, /成交手数/)
+  assert.match(reviewTab, /买入价格/)
+  assert.match(reviewTab, /卖出价格/)
+  assert.match(reviewTab, /阿里云 OSS/)
+  assert.match(
+    precision,
+    /\.trade-edit-grid\s*{[^}]*display:\s*grid[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*520px\)\s*{[\s\S]*?\.trade-edit-grid\s*{[^}]*grid-template-columns:\s*1fr/s,
   )
 })
 

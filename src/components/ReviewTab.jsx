@@ -177,7 +177,7 @@ function feeOf(c) {
   return finiteNum(c.buyFee) + finiteNum(c.sellFee)
 }
 // 单条流水行渲染（区分 纯买入/纯卖出/平仓/做T）
-function TxnRow({ c, onDelete, onEditDate, showDate }) {
+function TxnRow({ c, onDelete, onEdit, showDate }) {
   const t = typeKey(c)
   const tag = t === 'T'
     ? { cls: c.tDir === 'reverse' ? 'rev' : 'pos', label: c.tDir === 'reverse' ? '反T' : '正T' }
@@ -207,7 +207,7 @@ function TxnRow({ c, onDelete, onEditDate, showDate }) {
       {c.live
         ? <span className="di-del-ph" title="做T在持仓中，请在「我的计划」里增删">·</span>
         : <span className="di-row-actions">
-            <button className="di-date-edit" title="修改操作日期" onClick={() => onEditDate(c)}>
+            <button className="di-date-edit" title="修改日期、价格和手数" onClick={() => onEdit(c)}>
               <Icon name="edit" size={11} />
             </button>
             <button className="del di-del" title="删除此记录" onClick={() => onDelete(c)}>×</button>
@@ -219,9 +219,13 @@ function DailyLog({ records }) {
   const [filter, setFilter] = useState('all') // all | BUY | SELL | CLOSE | T
   const [confirmClear, setConfirmClear] = useState(false)
   const [delTarget, setDelTarget] = useState(null) // 待删除的单条记录（可能级联同批）
-  const [dateTarget, setDateTarget] = useState(null)
+  const [editTarget, setEditTarget] = useState(null)
   const [tradeDate, setTradeDate] = useState('')
-  const [dateError, setDateError] = useState('')
+  const [tradePrice, setTradePrice] = useState('')
+  const [tradeBuyPrice, setTradeBuyPrice] = useState('')
+  const [tradeSellPrice, setTradeSellPrice] = useState('')
+  const [tradeQty, setTradeQty] = useState('')
+  const [editError, setEditError] = useState('')
   const [collapsed, setCollapsed] = useState({}) // key(day 或 day|code) → 是否折叠
   const [groupMode, setGroupMode] = useState('day') // day 按时间 | stock 按个股
   const toggle = (key) => setCollapsed((s) => ({ ...s, [key]: !s[key] }))
@@ -241,19 +245,38 @@ function DailyLog({ records }) {
 
   // 按个股维度：跨所有日期聚合同一只票的全部操作（groupByStock 已按最近一笔时间倒序）
   const stockGroups = groupByStock(filtered)
-  const openDateEditor = (record) => {
+  const openTradeEditor = (record) => {
     const timestamp = record.at || record.sellAt || record.buyAt || Date.now()
-    setDateTarget(record)
+    const type = typeKey(record)
+    setEditTarget(record)
     setTradeDate(dayKey(timestamp))
-    setDateError('')
+    setTradeQty(String(record.qty ?? ''))
+    setTradePrice(
+      type === 'BUY' || type === 'SELL'
+        ? String(record.price ?? (type === 'BUY' ? record.buyPrice : record.sellPrice) ?? '')
+        : '',
+    )
+    setTradeBuyPrice(type === 'T' || type === 'CLOSE' ? String(record.buyPrice ?? '') : '')
+    setTradeSellPrice(type === 'T' || type === 'CLOSE' ? String(record.sellPrice ?? '') : '')
+    setEditError('')
   }
-  const saveTradeDate = () => {
-    const result = planStore.updateClosedDate(dateTarget?.id, tradeDate)
+  const saveTradeEdit = () => {
+    const type = typeKey(editTarget)
+    const result = planStore.updateClosedTrade(editTarget?.id, {
+      date: tradeDate,
+      qty: Number(tradeQty),
+      ...(type === 'BUY' || type === 'SELL'
+        ? { price: Number(tradePrice) }
+        : {
+            buyPrice: Number(tradeBuyPrice),
+            sellPrice: Number(tradeSellPrice),
+          }),
+    })
     if (!result?.ok) {
-      setDateError(result?.error || '日期修改失败')
+      setEditError(result?.error || '交易流水修改失败')
       return
     }
-    setDateTarget(null)
+    setEditTarget(null)
   }
 
   return (
@@ -336,29 +359,84 @@ function DailyLog({ records }) {
           </div>
         </div>
       )}
-      {dateTarget && (
-        <div className="modal-mask" onClick={() => setDateTarget(null)}>
-          <div className="confirm-dialog trade-date-dialog" onClick={(event) => event.stopPropagation()}>
-            <div className="confirm-title"><Icon name="edit" size={18} /> 修改操作日期</div>
+      {editTarget && (
+        <div className="modal-mask" onClick={() => setEditTarget(null)}>
+          <div className="confirm-dialog trade-edit-dialog" onClick={(event) => event.stopPropagation()}>
+            <div className="confirm-title"><Icon name="edit" size={18} /> 修改交易流水</div>
             <div className="confirm-body">
-              <b>{dateTarget.name || dateTarget.code}</b> · {typeKey(dateTarget) === 'T' ? '做T' : typeKey(dateTarget) === 'BUY' ? '买入/加仓' : '卖出/减仓'}
-              <label className="trade-date-field">
-                <span>实际操作日期</span>
-                <input
-                  className="wl-input"
-                  type="date"
-                  value={tradeDate}
-                  max={dayKey(Date.now())}
-                  onChange={(event) => { setTradeDate(event.target.value); setDateError('') }}
-                />
-              </label>
-              <small>同一次结算产生的关联流水会同步调整，T+1 与军师建议将按新日期重新计算。</small>
-              {dateError && <div className="err">{dateError}</div>}
+              <b>{editTarget.name || editTarget.code}</b> · {typeKey(editTarget) === 'T' ? '做T' : typeKey(editTarget) === 'BUY' ? '买入/加仓' : typeKey(editTarget) === 'CLOSE' ? '平仓' : '卖出/减仓'}
+              <div className="trade-edit-grid">
+                <label className="trade-edit-field">
+                  <span>实际操作日期</span>
+                  <input
+                    className="wl-input"
+                    type="date"
+                    value={tradeDate}
+                    max={dayKey(Date.now())}
+                    onChange={(event) => { setTradeDate(event.target.value); setEditError('') }}
+                  />
+                </label>
+                <label className="trade-edit-field">
+                  <span>成交手数</span>
+                  <input
+                    className="wl-input"
+                    type="number"
+                    min="1"
+                    step="1"
+                    inputMode="numeric"
+                    value={tradeQty}
+                    onChange={(event) => { setTradeQty(event.target.value); setEditError('') }}
+                  />
+                </label>
+                {typeKey(editTarget) === 'BUY' || typeKey(editTarget) === 'SELL' ? (
+                  <label className="trade-edit-field trade-edit-wide">
+                    <span>成交价格</span>
+                    <input
+                      className="wl-input"
+                      type="number"
+                      min="0.001"
+                      step="0.001"
+                      inputMode="decimal"
+                      value={tradePrice}
+                      onChange={(event) => { setTradePrice(event.target.value); setEditError('') }}
+                    />
+                  </label>
+                ) : (
+                  <>
+                    <label className="trade-edit-field">
+                      <span>买入价格</span>
+                      <input
+                        className="wl-input"
+                        type="number"
+                        min="0.001"
+                        step="0.001"
+                        inputMode="decimal"
+                        value={tradeBuyPrice}
+                        onChange={(event) => { setTradeBuyPrice(event.target.value); setEditError('') }}
+                      />
+                    </label>
+                    <label className="trade-edit-field">
+                      <span>卖出价格</span>
+                      <input
+                        className="wl-input"
+                        type="number"
+                        min="0.001"
+                        step="0.001"
+                        inputMode="decimal"
+                        value={tradeSellPrice}
+                        onChange={(event) => { setTradeSellPrice(event.target.value); setEditError('') }}
+                      />
+                    </label>
+                  </>
+                )}
+              </div>
+              <small>保存后会重算成交额、手续费、现金、持仓与已实现盈亏，并自动同步到阿里云 OSS。同一次结算产生的关联流水日期也会同步调整。</small>
+              {editError && <div className="err">{editError}</div>}
             </div>
             <div className="confirm-actions">
-              <button className="btn" onClick={() => setDateTarget(null)}>取消</button>
-              <button className="btn btn-primary" onClick={saveTradeDate}>
-                <Icon name="check" size={13} /> 保存日期
+              <button className="btn" onClick={() => setEditTarget(null)}>取消</button>
+              <button className="btn btn-primary" onClick={saveTradeEdit}>
+                <Icon name="check" size={13} /> 保存修改
               </button>
             </div>
           </div>
@@ -399,7 +477,7 @@ function DailyLog({ records }) {
                         </span>
                       </div>
                     )}
-                    {g.items.map((c, i) => <TxnRow c={c} key={c.id || i} onDelete={setDelTarget} onEditDate={openDateEditor} showDate />)}
+                    {g.items.map((c, i) => <TxnRow c={c} key={c.id || i} onDelete={setDelTarget} onEdit={openTradeEditor} showDate />)}
                   </div>
                 )}
               </div>
@@ -462,7 +540,7 @@ function DailyLog({ records }) {
                               <span className={'ds-stock-net ' + (g.net >= 0 ? 'red' : 'green')}>{fmtMoney(g.net)}</span>
                             </button>
                           </div>
-                          {!stockFolded && g.items.map((c, i) => <TxnRow c={c} key={c.id || i} onDelete={setDelTarget} onEditDate={openDateEditor} />)}
+                          {!stockFolded && g.items.map((c, i) => <TxnRow c={c} key={c.id || i} onDelete={setDelTarget} onEdit={openTradeEditor} />)}
                         </div>
                       )
                     })}
