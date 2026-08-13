@@ -8,6 +8,7 @@
 import json
 import os
 import time
+from urllib.parse import urlparse
 
 import numpy as np
 
@@ -51,6 +52,22 @@ LOCAL_EVENT_TAGS = "/tmp/event_tags.json"
 BUNDLED_EVENT_TAGS = os.path.join(_HERE, "event_tags.json")
 
 
+def _resolve_oss_endpoint():
+    endpoint = os.environ.get("OSS_ENDPOINT", "").strip()
+    allow_public = os.environ.get(
+        "OSS_ALLOW_PUBLIC_NETWORK", ""
+    ).strip().lower() == "true"
+    if not endpoint:
+        region = os.environ.get("OSS_REGION", "oss-cn-hangzhou").strip()
+        if not region.startswith("oss-"):
+            region = "oss-" + region
+        return f"https://{region}-internal.aliyuncs.com"
+    host = (urlparse(endpoint).hostname or endpoint).strip("/").lower()
+    if host.endswith("-internal.aliyuncs.com") or allow_public:
+        return endpoint
+    raise RuntimeError("OSS public network is disabled for quant service")
+
+
 def _oss_bucket():
     try:
         import oss2
@@ -61,12 +78,7 @@ def _oss_bucket():
     bkt = os.environ.get("OSS_BUCKET")
     if not (ak and sk and bkt):
         return None
-    endpoint = os.environ.get("OSS_ENDPOINT")
-    if not endpoint:
-        region = os.environ.get("OSS_REGION", "oss-cn-hangzhou")
-        if not region.startswith("oss-"):
-            region = "oss-" + region
-        endpoint = f"https://{region}.aliyuncs.com"
+    endpoint = _resolve_oss_endpoint()
     try:
         auth = oss2.Auth(ak, sk)
         # enable_crc=False：部分环境 crc32c 计算异常会误报 InconsistentError；
