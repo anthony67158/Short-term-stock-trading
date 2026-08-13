@@ -847,6 +847,26 @@ export const planStore = {
     const type = closedType(target)
     const oldQty = Number(target.qty) || 0
     const nextQty = Number(built.record.qty) || 0
+    const now = new Date()
+    const todayText = [
+      now.getFullYear(),
+      String(now.getMonth() + 1).padStart(2, '0'),
+      String(now.getDate()).padStart(2, '0'),
+    ].join('-')
+    if (
+      (type === 'SELL' || type === 'CLOSE')
+      && dateText === todayText
+      && nextQty > oldQty
+    ) {
+      const t1 = t1StatusOf(target.code)
+      const maxQty = oldQty + Number(t1.sellableToday || 0)
+      if (nextQty > maxQty) {
+        return {
+          ok: false,
+          error: `受 T+1 限制，今天这笔卖出最多可改为 ${maxQty} 手`,
+        }
+      }
+    }
     let editedRecord = shiftRecordDate(built.record, dateText) || built.record
     let nextHolding = state.holding
     let removedHolding = null

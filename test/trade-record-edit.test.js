@@ -277,3 +277,49 @@ test('旧卖出记录不会误改后来重新买入的同股持仓', () => {
   assert.equal(planStore.get().holding.find((item) => item.id === 'reopened').qty, 2)
   assert.equal(planStore.get().holding.length, 2)
 })
+
+test('编辑今日卖出手数不能绕过T+1锁定仓位', () => {
+  planStore.setData({
+    plan: [],
+    holding: [{
+      id: 'mixed',
+      code: '000001',
+      name: '平安银行',
+      qty: 2,
+      buyPrice: 10,
+      buyFee: calcBuyFee(3000) * 2 / 3,
+      buyAt: Date.now() - 86400000,
+    }],
+    closed: [{
+      id: 'buy-today',
+      type: 'BUY',
+      code: '000001',
+      name: '平安银行',
+      holdingId: 'mixed',
+      qty: 1,
+      price: 10,
+      fee: calcBuyFee(1000),
+      at: Date.now(),
+    }, {
+      id: 'sell-today',
+      type: 'SELL',
+      code: '000001',
+      name: '平安银行',
+      holdingId: 'mixed',
+      qty: 1,
+      price: 11,
+      costPrice: 10,
+      at: Date.now(),
+    }],
+  })
+
+  const result = planStore.updateClosedTrade('sell-today', {
+    date: today(),
+    price: 11,
+    qty: 3,
+  })
+
+  assert.equal(result.ok, false)
+  assert.match(result.error, /T\+1/)
+  assert.equal(planStore.get().holding[0].qty, 2)
+})
