@@ -77,6 +77,25 @@ Walk-forward 使用扩展训练窗口、purge gap 和互不重叠的测试窗口
 全程冻结，不在训练段调参；每个 fold 重置本金，汇总收益只来自测试段。小股票池
 pilot 只能验证数据与执行链路，不能代替完整股票池的晋级结论。
 
+需要比较少量预注册候选时，先生成固定候选目录和完整指数基准，再运行嵌套
+Walk-forward。外层测试窗口不会参与候选选择：
+
+```bash
+python3 strategy_candidate_catalog.py \
+  --strategy ./research/strategy-spec.json \
+  --out /tmp/strategy-candidates.json
+
+python3 collect_strategy_benchmarks.py \
+  --predictions ./research/holdout_predictions.npz \
+  --out /tmp/strategy-benchmarks.json
+
+python3 strategy_nested_walk_forward.py \
+  --candidates /tmp/strategy-candidates.json \
+  --dataset /tmp/strategy-dataset.json.gz \
+  --benchmarks /tmp/strategy-benchmarks.json \
+  --out /tmp/strategy-nested-report.json
+```
+
 ## 一、Cloud Run 适合吗？
 
 适合，而且是这几个方案里最优的：
