@@ -33,6 +33,19 @@ OHLCV，拒绝 QFQ/未知口径；Tushare `daily.vol` 必须声明
 `volume_unit=HANDS`，构建时会转换为股。预测文件中的 `actual` 等未来标签
 不会写入策略记录。
 
+未复权面板可用可恢复采集器生成。每只股票原子写入独立 NPZ；相同请求区间
+重跑时会跳过完整文件，网络中断后可直接续跑：
+
+```bash
+set -a; . ../.env; set +a
+python3 collect_strategy_raw_panel.py \
+  --predictions ./research/holdout_predictions.npz \
+  --start 20251001 \
+  --end 20260731 \
+  --out /tmp/strategy-raw-panel \
+  --max-per-minute 135
+```
+
 ```bash
 python3 strategy_research_dataset.py \
   --panel /tmp/strategy-raw-panel \
