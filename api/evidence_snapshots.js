@@ -1,5 +1,10 @@
 import { authenticateAccountRequest } from './_account_auth.js'
 import { applyCors, preflight } from './_lib.js'
+import {
+  compareEvidenceSnapshots,
+  findSnapshotLinkedRecords,
+  replayEvidenceSnapshot,
+} from '../shared/evidenceReplay.js'
 
 export function validSnapshotId(value) {
   return /^ev_[A-Za-z0-9_-]{3,120}$/.test(String(value || ''))
@@ -15,7 +20,38 @@ export function evidenceSnapshotResponse(account, snapshotId) {
   }
   return {
     status: 200,
-    body: { ok: true, snapshot },
+    body: {
+      ok: true,
+      snapshot,
+      replay: replayEvidenceSnapshot(snapshot),
+      linkedRecords: findSnapshotLinkedRecords(
+        account?.data,
+        snapshotId,
+      ),
+    },
+  }
+}
+
+export function evidenceSnapshotComparisonResponse(
+  account,
+  snapshotId,
+  compareTo,
+) {
+  const current = evidenceSnapshotResponse(account, snapshotId)
+  if (current.status !== 200) return current
+  const previous = evidenceSnapshotResponse(account, compareTo)
+  if (previous.status !== 200) return previous
+  return {
+    status: 200,
+    body: {
+      ...current.body,
+      compareSnapshot: previous.body.snapshot,
+      compareReplay: previous.body.replay,
+      comparison: compareEvidenceSnapshots(
+        previous.body.snapshot,
+        current.body.snapshot,
+      ),
+    },
   }
 }
 
@@ -45,9 +81,22 @@ export default async function handler(req, res) {
       error: 'snapshotId格式无效',
     }))
   }
-  const response = evidenceSnapshotResponse(
-    authentication.account,
-    snapshotId,
-  )
+  const compareTo = String(req.query?.compareTo || '')
+  if (compareTo && !validSnapshotId(compareTo)) {
+    return res.status(422).send(JSON.stringify({
+      ok: false,
+      error: 'compareTo格式无效',
+    }))
+  }
+  const response = compareTo
+    ? evidenceSnapshotComparisonResponse(
+      authentication.account,
+      snapshotId,
+      compareTo,
+    )
+    : evidenceSnapshotResponse(
+      authentication.account,
+      snapshotId,
+    )
   return res.status(response.status).send(JSON.stringify(response.body))
 }
