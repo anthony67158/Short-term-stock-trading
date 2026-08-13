@@ -65,14 +65,28 @@ function ReviewCycle({ review, enabled = true }) {
         : review.changeType === 'blocked'
           ? '本轮候选反转已被纪律拦截'
           : '本轮维持原计划'
+  const statusText = review.status === 'insufficient'
+    ? '关键证据不足，已保留上一版完整计划'
+    : review.status === 'unchanged'
+      ? '关键证据无实质变化，未重复调用模型'
+      : changed
   return (
-    <section className="advice-review-cycle" aria-label="军师持续复核">
+    <section
+      className={`advice-review-cycle ${review.status || ''}`}
+      aria-label="军师持续复核"
+    >
       <div>
         <Icon name="clock" size={12} />
         <span>军师持续复核</span>
         <b>第 {review.sequence || 1} 次</b>
       </div>
-      <p>{changed}，下次将于 <time dateTime={next.toISOString()}>{nextLabel}</time> 自动检查。</p>
+      <p>
+        {statusText}
+        {review.reason && !statusText.includes(review.reason)
+          ? `（${review.reason}）`
+          : ''}
+        ，下次将于 <time dateTime={next.toISOString()}>{nextLabel}</time> 自动检查。
+      </p>
     </section>
   )
 }

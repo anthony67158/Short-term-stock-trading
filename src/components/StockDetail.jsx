@@ -26,6 +26,8 @@ import {
 import { AlertForm } from './AlertCenter'
 import { portfolioExposureContext } from '../../shared/portfolioExposure.js'
 import { isAdviceReviewEnabled } from '../../shared/adviceReviewPolicy.js'
+import { trustCalibrationText } from '../../shared/advicePresentation.js'
+import { adviceTrustBands } from '../../shared/adviceIntelligence.js'
 
 // 把公司网址补全为可点击的绝对 URL（东财 F10 常给不带协议的裸域名）
 function normalizeUrl(raw) {
@@ -232,6 +234,7 @@ export default function StockDetail({ stock, onClose }) {
           modeWinRate: g ? g.winRate : null, modeAvgPct: g ? g.avgPct : null, modeTotal: g ? g.total : 0,
           actionScores,
           theoryScores,
+          trustBands: adviceTrustBands(s),
         }
       } catch { return null }
     })()
@@ -765,6 +768,7 @@ export default function StockDetail({ stock, onClose }) {
                   }
                   const meta = quantState.meta || {}
                   const trust = meta.trustScore
+                  const trustCalibration = trustCalibrationText(trust)
                   const resonance = meta.resonance
                   const marketEnv = meta.marketEnv
                   const cachedStr = quantState.cachedAt ? new Date(quantState.cachedAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : null
@@ -786,6 +790,9 @@ export default function StockDetail({ stock, onClose }) {
                       {(trust || resonance || marketEnv || cachedStr) && (
                         <div className="advice-context-strip">
                           {trust && <span>可信度 <b>{trust.score}</b> · {trust.band}</span>}
+                          {trustCalibration && (
+                            <span className="calibrated">{trustCalibration}</span>
+                          )}
                           {resonance && <span>共振 <b>{resonance.score}/{resonance.max}</b></span>}
                           {marketEnv && <span>{marketEnv.level}</span>}
                           {cachedStr && <span className="saved"><Icon name="history" size={10} /> {cachedStr} 已保存</span>}

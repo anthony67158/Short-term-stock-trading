@@ -10,7 +10,9 @@ import {
   progressPatchForEvent,
   startJsonHeartbeat,
 } from '../api/cron_advice.js'
+import { adviceEvidenceDigest } from '../shared/adviceIntelligence.js'
 import {
+  buildScheduledReviewGateResponse,
   resolveAIBudget,
   resolveAdviceDailySummary,
   resolveReasoningMode,
@@ -47,6 +49,29 @@ test('AI SSE 事件会转换为持久任务进度补丁', () => {
     progressPatchForEvent('model', { model: 'DeepSeek-V4-Pro', endpoint: '主端点' }),
     { model: 'DeepSeek-V4-Pro', endpoint: '主端点' },
   )
+})
+
+test('自动复核门禁返回可持久化的维持原计划契约', () => {
+  const snapshot = {
+    freshness: { status: 'LIVE', missingSources: [] },
+    evidence: { quote: { price: 10.01, pct: 1.2 } },
+  }
+  const response = buildScheduledReviewGateResponse({
+    mode: 'hold_advice',
+    origin: 'auto',
+    previousDigest: adviceEvidenceDigest(snapshot),
+    snapshot,
+    hasPreviousAdvice: true,
+    meta: { trustScore: { score: 58 } },
+    news: [],
+    now: 2000,
+  })
+
+  assert.equal(response.ok, true)
+  assert.equal(response.unchanged, true)
+  assert.equal(response.reviewDisposition, 'unchanged')
+  assert.equal(response.meta.reviewReason, '关键证据无实质变化')
+  assert.equal(response.updatedAt, 2000)
 })
 
 test('批量 Worker 用标准 SSE 注释心跳保持长请求连接', () => {

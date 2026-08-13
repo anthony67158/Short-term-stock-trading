@@ -43,6 +43,11 @@ import {
   isAdviceReviewEnabled,
 } from '../shared/adviceReviewPolicy.js';
 import {
+  adviceEvidenceDigest,
+  adviceTrustBands,
+  prioritizeAdviceReviewCodes,
+} from '../shared/adviceIntelligence.js';
+import {
   acceptsGenerationResult,
   adviceConcurrency,
   generationOptions,
@@ -406,6 +411,7 @@ function advisorTrackFrom(data, mode) {
       modeAvgPct: group ? group.avgPct : null,
       modeTotal: group ? group.total : 0,
       actionScores,
+      trustBands: adviceTrustBands(stats),
     };
   } catch { return null; }
 }
@@ -419,6 +425,7 @@ export function adviceFailureReason(response, deepMode = false) {
   if (!response.ok) {
     return String(response.error || '军师未返回可用建议').slice(0, 160);
   }
+  if (response.unchanged) return '';
   if (deepMode && response.truncated) return '深度建议输出不完整';
   if (!response.result) return '军师未返回结构化建议';
   return '';
@@ -475,7 +482,15 @@ async function genOne({
       adviceFailure = adviceFailureReason(r, deepMode);
       return adviceFailure
         ? null
-        : { advice: r.result, meta: r.meta, news: r.news, truncated: r.truncated };
+        : {
+            advice: r.result,
+            meta: r.meta,
+            news: r.news,
+            truncated: r.truncated,
+            unchanged: r.unchanged === true,
+            reviewDisposition: r.reviewDisposition || '',
+            reviewReason: r.reviewReason || '',
+          };
     })
     .catch((error) => {
       adviceFailure = error?.name === 'AbortError'
@@ -491,7 +506,11 @@ async function genOne({
   const meta = adviceResp && adviceResp.meta;
   const news = adviceResp && adviceResp.news;
   const truncated = !!(adviceResp && (adviceResp.truncated || (advice && advice.truncated)));
-  if (!acceptsGenerationResult({ quant: result, advice, truncated }, deepMode)) {
+  const unchanged = adviceResp?.unchanged === true;
+  const reviewDisposition = adviceResp?.reviewDisposition
+    || (!advice && previousEntry && adviceFailure ? 'insufficient' : '');
+  const reviewReason = adviceResp?.reviewReason || adviceFailure || '';
+  if (!acceptsGenerationResult({ quant: result, advice, truncated, unchanged }, deepMode)) {
     throw new Error(
       adviceFailure
       || (deepMode ? '深度建议未完整返回' : '军师和量化均未返回可用结果'),
@@ -510,6 +529,8 @@ async function genOne({
       truncated,
       reviewIntervalMin,
       reviewTrigger: reviewTrigger || (previousEntry ? 'scheduled' : 'initial'),
+      reviewDisposition,
+      reviewReason,
     },
     at,
   );
@@ -607,6 +628,9 @@ async function runJobGen(
     ? cachedPrevious
     : null;
   const previousAdvice = compactAdvicePlan(previousEntry);
+  const previousEvidenceDigest = previousEntry?.meta?.evidenceSnapshot
+    ? adviceEvidenceDigest(previousEntry.meta.evidenceSnapshot)
+    : null;
   if (mode === 'hold_advice') {
     let p = buildHoldPayload(holding, code, name, portfolio, data.account, data.closed, nextTradeDayLabel());
     p.advisorTrack = advisorTrackFrom(data, 'hold_advice');
@@ -615,6 +639,7 @@ async function runJobGen(
     p.accountRevision = Number(acc.clientRevision) || null;
     p = attachAdviceDailyReport(p, dailyReportSummary);
     if (previousAdvice) p.previousAdvice = previousAdvice;
+    if (previousEvidenceDigest) p.previousEvidenceDigest = previousEvidenceDigest;
     if (reviewEvent) p.reviewEvent = reviewEvent;
     if (reviewOrigin) p.reviewOrigin = reviewOrigin;
     const hp = (p.holdCost != null && p.holdQty != null) ? { holdCost: String(p.holdCost), holdQty: String(p.holdQty) } : {};
@@ -627,6 +652,7 @@ async function runJobGen(
   p.accountRevision = Number(acc.clientRevision) || null;
   p = attachAdviceDailyReport(p, dailyReportSummary);
   if (previousAdvice) p.previousAdvice = previousAdvice;
+  if (previousEvidenceDigest) p.previousEvidenceDigest = previousEvidenceDigest;
   if (reviewEvent) p.reviewEvent = reviewEvent;
   if (reviewOrigin) p.reviewOrigin = reviewOrigin;
   return genOne({ code, name, mode: 'buy_advice', payload: p, quantQuery: { code, klt: '101', lmt: '60', quant: '1', model: quantModelVersion }, priceHint, onProgress, signal, deepMode, previousEntry, reviewIntervalMin, reviewTrigger: reviewEvent ? `judge_${reviewEvent.decision}` : '', strategyGate, councilEnabled });
@@ -1164,37 +1190,51 @@ export function enqueueAutoRefreshDue(data, now = Date.now()) {
     .length;
   const autoBudget = Math.max(0, MAX_AUTO_JOBS_PER_TICK - activeAutoJobs);
   let count = 0;
+  let holdCreated = 0;
+  let watchCreated = 0;
   const enqueue = (code, name, mode) => {
     const { created } = enqueueJob(data, { code, name, mode, source: 'auto', force: false, batchId }, now);
-    if (created) count++;
+    if (created) {
+      count++;
+      if (mode === 'hold_advice') holdCreated++;
+      else watchCreated++;
+    }
   };
-  if (scopes.includes('hold')) {
-    const before = count;
-    for (const code of holdCodes) {
-      if (count >= autoBudget) break;
-      if (!isAdviceReviewEnabled(settings, code)) continue;
-      if (!adviceReviewDue(advice[code], now)) continue;
-      const name = holding.find((item) => item.code === code)?.name || code;
-      enqueue(code, name, 'hold_advice');
-    }
-    if (count > before) {
-      settings['advAuto.holdLastTryAt'] = now;
-      settings['advAuto.holdLastAt'] = now;
-    }
+  const allowedCodes = [
+    ...(scopes.includes('hold') ? holdCodes : []),
+    ...(scopes.includes('watch') ? watchCodes : []),
+  ].filter((code) =>
+    isAdviceReviewEnabled(settings, code)
+    && adviceReviewDue(advice[code], now)
+  );
+  const orderedCodes = prioritizeAdviceReviewCodes({
+    codes: allowedCodes,
+    holdingCodes: holdCodes,
+    starredCodes: watch.filter((item) => item?.star).map((item) => item.code),
+    alerts: data.alerts || [],
+    advice,
+    now,
+  });
+  const names = new Map(
+    [...holding, ...watch]
+      .filter((item) => item?.code)
+      .map((item) => [item.code, item.name || item.code]),
+  );
+  for (const code of orderedCodes) {
+    if (count >= autoBudget) break;
+    enqueue(
+      code,
+      names.get(code) || code,
+      holdSet.has(code) ? 'hold_advice' : 'buy_advice',
+    );
   }
-  if (scopes.includes('watch')) {
-    const before = count;
-    for (const code of watchCodes) {
-      if (count >= autoBudget) break;
-      if (!isAdviceReviewEnabled(settings, code)) continue;
-      if (!adviceReviewDue(advice[code], now)) continue;
-      const name = watch.find((item) => item.code === code)?.name || code;
-      enqueue(code, name, 'buy_advice');
-    }
-    if (count > before) {
-      settings['advAuto.watchLastTryAt'] = now;
-      settings['advAuto.watchLastAt'] = now;
-    }
+  if (holdCreated > 0) {
+    settings['advAuto.holdLastTryAt'] = now;
+    settings['advAuto.holdLastAt'] = now;
+  }
+  if (watchCreated > 0) {
+    settings['advAuto.watchLastTryAt'] = now;
+    settings['advAuto.watchLastAt'] = now;
   }
   if (count > 0) data.activeAdviceBatchId = batchId;
   return count;

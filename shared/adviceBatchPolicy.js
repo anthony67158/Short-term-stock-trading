@@ -27,7 +27,7 @@ export function adviceConcurrency(
 }
 
 export function acceptsGenerationResult(result, deepMode = false) {
-  if (!deepMode) return !!(result?.advice || result?.quant)
+  if (!deepMode) return !!(result?.advice || result?.quant || result?.unchanged)
   return !!result?.advice && result.truncated !== true
 }
 

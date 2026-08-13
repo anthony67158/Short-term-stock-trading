@@ -66,4 +66,5 @@ test('深度任务只有完整AI建议才能计为成功', () => {
   assert.equal(acceptsGenerationResult({ advice: { action: '持有' }, truncated: true }, true), false)
   assert.equal(acceptsGenerationResult({ quant: { score: 60 } }, true), false)
   assert.equal(acceptsGenerationResult({ quant: { score: 60 } }, false), true)
+  assert.equal(acceptsGenerationResult({ unchanged: true }, false), true)
 })

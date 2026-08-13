@@ -117,6 +117,14 @@ function modelSummary(advice) {
   }
 }
 
+export function trustCalibrationText(trust = {}) {
+  if (trust?.calibrated !== true) return ''
+  const samples = Number(trust.calibrationSamples)
+  const winRate = Number(trust.historicalWinRate)
+  if (!Number.isFinite(samples) || !Number.isFinite(winRate)) return ''
+  return `已按同信心档${samples}次结果校准 · 历史命中率${winRate}%`
+}
+
 export function buildAdvicePresentation(advice = {}) {
   const contract = advice.knowledgeActionPlan || {}
   const review = advice.reviewCycle && typeof advice.reviewCycle === 'object'
@@ -127,6 +135,7 @@ export function buildAdvicePresentation(advice = {}) {
         nextReviewAt: Number(advice.reviewCycle.nextReviewAt) || 0,
         previousAction: clean(advice.reviewCycle.previousAction, 80),
         changeType: clean(advice.reviewCycle.changeType, 40),
+        reason: clean(advice.reviewCycle.reason, 160),
       }
     : null
   return {

@@ -107,7 +107,7 @@ export function buildAdviceReviewCycle(previous, data, at = Date.now()) {
     || previous?.advice?.stance
     || ''
   return {
-    status: 'scheduled',
+    status: data?.reviewDisposition || 'scheduled',
     sequence: Math.max(0, Number(priorCycle.sequence) || 0) + 1,
     reviewedAt: at,
     nextReviewAt: nextAdviceReviewAt({
@@ -119,8 +119,11 @@ export function buildAdviceReviewCycle(previous, data, at = Date.now()) {
       || DEFAULT_INTERVALS[mode]
       || DEFAULT_INTERVALS.buy_advice,
     trigger: data?.reviewTrigger || (previous ? 'scheduled' : 'initial'),
+    reason: String(data?.reviewReason || '').slice(0, 160),
     previousAction,
-    changeType: advice
+    changeType: ['unchanged', 'insufficient'].includes(data?.reviewDisposition)
+      ? 'maintain'
+      : advice
       ? advice.continuity?.changeType || (previous ? 'maintain' : 'initial')
       : 'unavailable',
   }

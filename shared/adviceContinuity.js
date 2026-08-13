@@ -137,17 +137,28 @@ export function buildAdviceCacheEntry(previous, data, at = Date.now()) {
   const existingTrail = Array.isArray(previous?.trail)
     ? previous.trail.filter(Boolean)
     : []
-  const trail = prior
+  const hasIncomingAdvice = !!(
+    data?.advice
+    && typeof data.advice === 'object'
+  )
+  const appendTrail = hasIncomingAdvice
+    && !['unchanged', 'insufficient'].includes(data?.reviewDisposition)
+  const trail = prior && appendTrail
     ? [...existingTrail, prior].slice(-8)
     : existingTrail.slice(-8)
   const reviewCycle = buildAdviceReviewCycle(previous, data, at)
+  const retainedAdvice = hasIncomingAdvice
+    ? data.advice
+    : previous?.advice && typeof previous.advice === 'object'
+      ? previous.advice
+      : null
   const nextData = {
     ...(data || {}),
     reviewCycle,
-    ...(data?.advice && typeof data.advice === 'object'
+    ...(retainedAdvice
       ? {
           advice: {
-            ...data.advice,
+            ...retainedAdvice,
             reviewCycle,
           },
         }

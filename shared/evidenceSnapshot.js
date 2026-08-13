@@ -199,6 +199,7 @@ export function createCanonicalEvidenceSnapshot({
         payload.newsHeadlines?.length
         || payload.macroNews?.length
         || payload.macroFlashes?.length
+        || payload.industryNews?.length
       ),
       'AVAILABLE',
       quote?.asOfLabel || payload.dailyReport?.day,
@@ -217,7 +218,7 @@ export function createCanonicalEvidenceSnapshot({
       asOf,
     ),
   }
-  const requiredSources = ['account', 'quote', 'market', 'quant']
+  const requiredSources = ['account', 'quote', 'market', 'technical', 'quant']
   const missingSources = Object.entries(sources)
     .filter(([, item]) => !item.available)
     .map(([key]) => key)
@@ -253,6 +254,7 @@ export function createCanonicalEvidenceSnapshot({
       headlines: payload.newsHeadlines || [],
       macro: payload.macroNews || [],
       flashes: payload.macroFlashes || [],
+      industry: payload.industryNews || [],
     }),
     decisionSignals: compact({
       resonance: payload.resonance,

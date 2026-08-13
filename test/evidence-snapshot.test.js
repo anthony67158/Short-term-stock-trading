@@ -54,6 +54,8 @@ const payload = {
   intraday: { now: 11, vwap: 10.8, rhythm: '尾段拉升' },
   stockFund: { mainNetYi: 1.2, asOfDate: '2026-08-13' },
   newsHeadlines: ['公司发布公告'],
+  macroNews: ['海外市场风险偏好回落'],
+  industryNews: ['行业监管政策调整'],
   newsDigest: ['不应复制进快照的长新闻正文'],
   dailyReport: { day: '2026-08-13', sessionCn: '盘中' },
   resonance: { score: 5, max: 6, hits: ['量化看涨'] },
@@ -81,6 +83,8 @@ test('统一证据快照包含稳定版本、来源、账户与量化上下文',
   assert.equal(snapshot.sources.quote.state, 'LIVE')
   assert.equal(snapshot.freshness.status, 'LIVE')
   assert.equal(snapshot.evidence.news.headlines[0], '公司发布公告')
+  assert.equal(snapshot.evidence.news.macro[0], '海外市场风险偏好回落')
+  assert.equal(snapshot.evidence.news.industry[0], '行业监管政策调整')
   assert.equal(JSON.stringify(snapshot).includes('不应复制进快照的长新闻正文'), false)
 })
 
@@ -95,6 +99,7 @@ test('缺失关键数据时明确标记PARTIAL和缺失来源', () => {
   assert.equal(snapshot.freshness.status, 'PARTIAL')
   assert.ok(snapshot.freshness.missingSources.includes('quote'))
   assert.ok(snapshot.freshness.missingSources.includes('market'))
+  assert.ok(snapshot.freshness.missingSources.includes('technical'))
   assert.ok(snapshot.freshness.missingSources.includes('quant'))
   assert.equal(snapshot.sources.account.available, false)
   assert.equal(snapshot.account.revision, 12)

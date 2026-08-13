@@ -52,9 +52,46 @@ import {
   buildRealOutcomeLearning,
   realOutcomeContext,
 } from '../shared/realOutcomeLearning.js';
+import {
+  calibrateAdviceTrust,
+  evaluateScheduledReview,
+} from '../shared/adviceIntelligence.js';
 
 function avg(arr) { return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0; }
 function std(arr) { if (arr.length < 2) return 0; const m = avg(arr); return Math.sqrt(avg(arr.map((x) => (x - m) ** 2))); }
+
+export function buildScheduledReviewGateResponse({
+  mode,
+  origin,
+  previousDigest,
+  snapshot,
+  hasPreviousAdvice,
+  meta = {},
+  news = [],
+  now = Date.now(),
+} = {}) {
+  const review = evaluateScheduledReview({
+    origin,
+    previousDigest,
+    snapshot,
+    hasPreviousAdvice,
+  });
+  if (review.shouldRunLLM) return null;
+  return {
+    ok: true,
+    unchanged: true,
+    reviewDisposition: review.disposition,
+    reviewReason: review.reason,
+    mode,
+    updatedAt: now,
+    meta: {
+      ...meta,
+      reviewDisposition: review.disposition,
+      reviewReason: review.reason,
+    },
+    news,
+  };
+}
 
 export function resolveAIBudget(reasoningOn, requestedMs) {
   const fallback = reasoningOn ? 560000 : 150000;
@@ -1096,8 +1133,19 @@ export default async function handler(req, res) {
           // 历史胜率过低(<40%)时进一步压制信心上限，避免"越错越自信"
           if (trackWr != null && trackWr < 40) conf = Math.min(conf, 55);
           conf = Math.min(95, Math.max(15, conf)); // 永远不给100%,也不低于15
+          const calibration = calibrateAdviceTrust(conf, at?.trustBands);
+          conf = calibration.score;
           let band = conf >= 68 ? '较可信' : conf >= 48 ? '中等' : '低(仅参考)';
-          payload.trustScore = { score: conf, band, note: '综合共振/信号回测/大盘环境/消息面/军师历史真实胜率得出，非胜率承诺' };
+          payload.trustScore = {
+            score: conf,
+            band,
+            calibrated: calibration.calibrated,
+            calibrationSamples: calibration.sampleSize,
+            historicalWinRate: calibration.historicalWinRate,
+            note: calibration.calibrated
+              ? `已按同信心档${calibration.sampleSize}次历史结果校准，非胜率承诺`
+              : '综合共振/信号回测/大盘环境/消息面/军师历史真实胜率得出，非胜率承诺',
+          };
         }
         // 风格
         payload.style = payload.style || 'balanced'
@@ -1116,7 +1164,9 @@ export default async function handler(req, res) {
       );
     }
     const isAdvisor = isAdvisorMode(mode);
-    if (isAdvisor && payload.code) ensureEvidenceSnapshot();
+    const currentEvidenceSnapshot = isAdvisor && payload.code
+      ? ensureEvidenceSnapshot()
+      : null;
     const useModel = isAdvisor ? ADVISOR_MODEL : MODEL;
     const useRole = isAdvisor ? 'advisor' : 'chat';   // 端点级模型解析:按角色让资源池各端点用各自的模型名
     // —— 编排层须与底层实际下发的 reasoning_effort 对齐 ——
@@ -1144,6 +1194,24 @@ export default async function handler(req, res) {
       todayQuote: payload.todayQuote || null,
       dailyReport: payload.dailyReport ? { sessionCn: payload.dailyReport.sessionCn, day: payload.dailyReport.day } : null,
     };
+    const scheduledReviewResponse = buildScheduledReviewGateResponse({
+      mode,
+      origin: payload.reviewOrigin,
+      previousDigest: payload.previousEvidenceDigest,
+      snapshot: currentEvidenceSnapshot,
+      hasPreviousAdvice: !!payload.previousAdvice,
+      meta: collectedMeta,
+      news: newsRefs,
+    });
+    if (scheduledReviewResponse) {
+      phase(
+        scheduledReviewResponse.reviewDisposition === 'insufficient'
+          ? '关键证据不完整，保留上一版计划'
+          : '证据无实质变化，维持上一版计划',
+        'review-gate',
+      );
+      return finish(scheduledReviewResponse);
+    }
     // 数据采集后剩余时间不足 → 直接降级返回(不硬闯 LLM 被平台强杀)。带 meta 让前端仍能展示已查到的确定性数据。
     if (remain() < 9000) {
       return finish({

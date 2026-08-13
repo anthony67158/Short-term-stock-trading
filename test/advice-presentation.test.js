@@ -1,7 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { buildAdvicePresentation } from '../shared/advicePresentation.js'
+import {
+  buildAdvicePresentation,
+  trustCalibrationText,
+} from '../shared/advicePresentation.js'
 
 test('军师展示契约固定输出结论执行价位触发和三条核心依据', () => {
   const view = buildAdvicePresentation({
@@ -34,6 +37,7 @@ test('军师展示契约固定输出结论执行价位触发和三条核心依�
       nextReviewAt: 1786328100000,
       previousAction: '观望',
       changeType: 'adjust',
+      reason: '关键证据发生实质变化',
     },
   })
 
@@ -68,7 +72,20 @@ test('军师展示契约固定输出结论执行价位触发和三条核心依�
     nextReviewAt: 1786328100000,
     previousAction: '观望',
     changeType: 'adjust',
+    reason: '关键证据发生实质变化',
   })
+})
+
+test('历史信心校准明确展示样本数和同档命中率', () => {
+  assert.equal(
+    trustCalibrationText({
+      calibrated: true,
+      calibrationSamples: 14,
+      historicalWinRate: 43,
+    }),
+    '已按同信心档14次结果校准 · 历史命中率43%',
+  )
+  assert.equal(trustCalibrationText({ calibrated: false }), '')
 })
 
 test('长段关注价说明不挤入价格格且后续路径默认收进完整分析', () => {
