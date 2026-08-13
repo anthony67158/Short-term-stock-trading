@@ -29,6 +29,7 @@ import {
   scoreKnowledgeActionPlan,
 } from '../shared/knowledgeAction.js';
 import { isCurrentDailyReportSummary } from '../shared/adviceDailyReportPolicy.js';
+import { buildAdviceDecisionContext } from '../shared/adviceModeContext.js';
 
 function avg(arr) { return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0; }
 function std(arr) { if (arr.length < 2) return 0; const m = avg(arr); return Math.sqrt(avg(arr.map((x) => (x - m) ** 2))); }
@@ -1488,6 +1489,14 @@ export default async function handler(req, res) {
     }
     if (['buy_advice', 'hold_advice', 'review'].includes(mode) && result && typeof result === 'object' && !result.raw) {
       result = reconcileAdviceNumbers({ mode, result, payload }).result;
+    }
+    if (
+      ['buy_advice', 'hold_advice'].includes(mode)
+      && result
+      && typeof result === 'object'
+      && !result.raw
+    ) {
+      result.decisionContext = buildAdviceDecisionContext(mode, payload);
     }
     if (
       isAdvisorMode(mode)

@@ -1624,6 +1624,7 @@ textarea:focus {
 
 .decide-box .advice-presentation .decide-verdict,
 .decide-box .advice-presentation .advice-continuity,
+.decide-box .advice-presentation .advice-decision-context,
 .decide-box .advice-presentation .advice-model-context,
 .decide-box .advice-presentation .advice-execution,
 .decide-box .advice-presentation .advice-execution-metrics > span,

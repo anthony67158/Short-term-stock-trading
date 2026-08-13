@@ -56,3 +56,25 @@ test('军师低命中校准按动作方向纠偏而不是一律变得更保守',
   assert.doesNotMatch(prompt, /最终JSON必须额外给出 knowledgeActionPlan/)
   assert.doesNotMatch(prompt, /说明你过去偏乐观\/追高/)
 })
+
+test('持仓建议明确列出本次决策使用的持仓和可用资金快照', () => {
+  const prompt = buildUserPrompt('hold_advice', {
+    code: '600000',
+    holdCost: 10.25,
+    holdQty: 3,
+    sellableTodayQty: 2,
+    account: {
+      cash: 18600,
+      totalAssets: 52000,
+      position: 64.2,
+      stockWeight: 18.5,
+    },
+  })
+
+  assert.match(prompt, /本次决策账户快照/)
+  assert.match(prompt, /持仓3手/)
+  assert.match(prompt, /成本10\.25元/)
+  assert.match(prompt, /可用资金18600元/)
+  assert.match(prompt, /单票占比18\.5%/)
+  assert.match(prompt, /positionNote.*可用资金/)
+})

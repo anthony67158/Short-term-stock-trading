@@ -32,6 +32,28 @@ test('个股详情优先展示生成时间更新的云端批量结果', () => {
   })
 })
 
+test('个股建仓后不再展示旧的未持仓买入建议', () => {
+  const oldBuyAdvice = {
+    mode: 'buy_advice',
+    advice: { action: '观望', tier: 'wait' },
+    at: 300,
+  }
+  const holdAdvice = {
+    mode: 'hold_advice',
+    advice: { action: '持有', pnlNote: '当前浮盈' },
+    cachedAt: 200,
+  }
+
+  assert.deepEqual(
+    newestAdviceResult(holdAdvice, oldBuyAdvice, 'hold_advice'),
+    { source: 'runner', value: holdAdvice },
+  )
+  assert.deepEqual(
+    newestAdviceResult(null, oldBuyAdvice, 'hold_advice'),
+    { source: null, value: null },
+  )
+})
+
 test('服务端单股任务回灌阶段、数据源、模型与推理文本', () => {
   const batch = {
     serverMode: true,

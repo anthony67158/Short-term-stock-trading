@@ -3,6 +3,29 @@ import assert from 'node:assert/strict'
 
 import { planStore, t1StatusOf } from '../src/planStore.js'
 
+test('刚建仓后可立即把最新持仓和现金刷新到云端生成上下文', async () => {
+  let saved = null
+  planStore.registerSaver(async (data) => {
+    saved = data
+    return true
+  })
+  planStore.setData({
+    plan: [{ code: '600519', name: '贵州茅台' }],
+    holding: [],
+    closed: [],
+    account: { cash: 200000 },
+  })
+
+  planStore.buy('600519', 1400, 1)
+  const flushed = await planStore.flushSave()
+
+  assert.equal(flushed, true)
+  assert.equal(saved.holding[0].code, '600519')
+  assert.equal(saved.holding[0].qty, 1)
+  assert.equal(saved.account.cash < 200000, true)
+  planStore.registerSaver(null)
+})
+
 test('真实账本入口阻止卖出今日买入仓位', () => {
   planStore.setData({
     plan: [{ code: '600519', name: '贵州茅台' }],

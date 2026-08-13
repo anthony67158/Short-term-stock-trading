@@ -47,6 +47,7 @@ import {
   compactAdvicePlan,
 } from '../shared/adviceContinuity.js';
 import { attachAdviceDailyReport } from '../shared/adviceDailyReportPolicy.js';
+import { adviceEntryMatchesMode } from '../shared/adviceModeContext.js';
 import aiHandler from './ai.js';
 import stockDetailHandler from './stock_detail.js';
 import quoteHandler from './quote.js';
@@ -469,7 +470,7 @@ async function genOne({
   const at = Date.now();
   const cacheItem = buildAdviceCacheEntry(
     previousEntry,
-    { result, advice, meta, news, truncated },
+    { mode, result, advice, meta, news, truncated },
     at,
   );
   let logEntry = null;
@@ -519,9 +520,13 @@ async function runJobGen(
   const name = (holding.find((h) => h.code === code) || watch.find((w) => w.code === code) || {}).name || code;
   const priceHint = Number(quoteMap[code]?.price) > 0 ? Number(quoteMap[code].price) : null;
   const quantModelVersion = data.settings?.quantModelVersion || 'default';
-  const previousEntry = data.advice?.[code] || null;
+  const mode = holdSet.has(code) ? 'hold_advice' : 'buy_advice';
+  const cachedPrevious = data.advice?.[code] || null;
+  const previousEntry = adviceEntryMatchesMode(cachedPrevious, mode)
+    ? cachedPrevious
+    : null;
   const previousAdvice = compactAdvicePlan(previousEntry);
-  if (holdSet.has(code)) {
+  if (mode === 'hold_advice') {
     let p = buildHoldPayload(holding, code, name, portfolio, data.account, data.closed, nextTradeDayLabel());
     p.advisorTrack = advisorTrackFrom(data, 'hold_advice');
     p.quantModelVersion = quantModelVersion;

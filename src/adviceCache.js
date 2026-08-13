@@ -4,6 +4,7 @@ const KEY = 'stock_advice_cache_v1'
 const TTL = 30 * 3600 * 1000 // 30 小时内有效：覆盖「收盘后生成→次日开盘查看」的隔夜跨设备场景,
                              // 让其他设备无需重新生成即可看到最近一轮完整操作建议(每日调度到点会自动重生成刷新)
 import { buildAdviceCacheEntry } from '../shared/adviceContinuity.js'
+import { adviceEntryMatchesMode } from '../shared/adviceModeContext.js'
 
 let mem = load()
 function load() {
@@ -66,11 +67,12 @@ export function mergeAdvice(map) {
   return changed
 }
 
-export function getAdvice(code) {
+export function getAdvice(code, expectedMode = '') {
   if (!code) return null
   const e = mem[code]
   if (!e) return null
   if (Date.now() - (e.at || 0) > TTL) { delete mem[code]; persist(); return null }
+  if (expectedMode && !adviceEntryMatchesMode(e, expectedMode)) return null
   return e
 }
 

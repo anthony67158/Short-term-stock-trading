@@ -394,7 +394,7 @@ function CandTarget({ p, q }) {
 
   const rnd = (v) => (v == null || isNaN(v) ? null : v < 10 ? +Number(v).toFixed(3) : +Number(v).toFixed(2))
   // AI 建议里的「建议买入价 / 建议买入手数」
-  const adv = (() => { try { const a = getAdvice(p.code); return (a && a.advice) || null } catch { return null } })()
+  const adv = (() => { try { const a = getAdvice(p.code, 'buy_advice'); return (a && a.advice) || null } catch { return null } })()
   const aiPrice = adv && adv.buyPrice != null && !isNaN(adv.buyPrice) ? Number(adv.buyPrice) : null
   // planQty 在 AI 建议里是「几手」的字符串(如 "5手""约5手""5~8手"),而非纯数字,
   // 直接 Number() 会得 NaN 导致手数传不进卡片 —— 这里从文本中稳健抽取首个整数。
@@ -494,7 +494,7 @@ function CandFocus({ code, name }) {
   const [, force] = useState(0)
   useEffect(() => subscribeAdvice(() => force((n) => n + 1)), [])
   const generation = useAdviceGeneration(code)
-  const entry = getAdvice(code)
+  const entry = getAdvice(code, 'buy_advice')
   const updatedAt = <AdviceUpdatedAt entry={entry} />
   if (generation?.active) return <>{updatedAt}<AdviceGenerationStatus code={code} /></>
   const f = adviceFocus(code)
@@ -1668,7 +1668,7 @@ function HoldingItem({ h, idx, quote: q }) {
   // 优先级：触及止盈/止损(实时纪律) > AI操作建议一句话 > 无建议则提示去生成。
   // 「踏5不破10」参考均线信号已移入个股详情页,持仓卡不再展示,避免多套指导引发混淆。
   const aiFocus = adviceFocus(h.code)
-  const adviceEntry = getAdvice(h.code)
+  const adviceEntry = getAdvice(h.code, 'hold_advice')
   const focus = (() => {
     if (hitTP) return { tone: 'red', badge: '止盈', text: `已到止盈价 ${fmtRaw(h.tp)}，考虑落袋` }
     if (hitSL) return { tone: 'green', badge: '止损', text: `已到止损价 ${fmtRaw(h.sl)}，按纪律离场` }
@@ -2268,7 +2268,7 @@ function HoldReview({ code, name, cost, qty, price }) {
   const [open, setOpen] = useState(false) // 展开完整细节
   // 订阅建议缓存：AI 操作建议刷新时本卡自动跟随更新
   useEffect(() => subscribeAdvice(() => force((n) => n + 1)), [])
-  const a = getAdvice(code)
+  const a = getAdvice(code, 'hold_advice')
   const adv = a && a.advice
   // 把 AI 操作建议标准化成复盘展示口径：动作/结论/今日回顾/下一步/理论/失效
   const r = adv ? {

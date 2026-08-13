@@ -16,6 +16,7 @@ const assistant = read('src/components/AIAssistant.jsx')
 const sectorPanel = read('src/components/SectorPanel.jsx')
 const stockPanel = read('src/components/StockPanel.jsx')
 const stockDetail = read('src/components/StockDetail.jsx')
+const advicePresentation = read('src/components/AdvicePresentation.jsx')
 const dailyReport = read('src/components/DailyReport.jsx')
 const llmConfig = read('src/components/LLMConfig.jsx')
 const planTab = read('src/components/PlanTab.jsx')
@@ -263,6 +264,17 @@ test('详情与汇报采用单层容器且不使用侧色条卡片', () => {
   assert.match(
     precision,
     /\.dr-sector\s*{[^}]*border-inline-start:\s*0/s,
+  )
+})
+
+test('军师建议展示本次实际使用的持仓与资金快照', () => {
+  assert.match(advicePresentation, /本次决策账户快照/)
+  assert.match(advicePresentation, /context\.holdQty/)
+  assert.match(advicePresentation, /context\.cash/)
+  assert.match(advicePresentation, /context\.stockWeight/)
+  assert.match(
+    precision,
+    /\.advice-decision-context/,
   )
 })
 

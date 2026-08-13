@@ -80,7 +80,10 @@ function shiftRecordDate(record, dateText) {
 // 这样「个股详情页的AI建议」与「持仓卡的止盈/止损」永远同源同值,不会各算各的。
 export function advicePlan(code) {
   try {
-    const a = getAdvice(code)
+    const expectedMode = state.holding.some((holding) => holding.code === code)
+      ? 'hold_advice'
+      : 'buy_advice'
+    const a = getAdvice(code, expectedMode)
     const adv = a && a.advice
     if (!adv) return null
     const tp = adv.targetPrice != null && !isNaN(adv.targetPrice) ? roundPx(adv.targetPrice) : null
@@ -99,7 +102,10 @@ export function advicePlan(code) {
 //   text  = actionPlan(具体操作计划) → title → reason,尽量给一句可执行的话
 export function adviceFocus(code) {
   try {
-    const a = getAdvice(code)
+    const expectedMode = state.holding.some((holding) => holding.code === code)
+      ? 'hold_advice'
+      : 'buy_advice'
+    const a = getAdvice(code, expectedMode)
     const adv = a && a.advice
     if (!adv) return null
     const badge = adv.action || adv.stance || ''
@@ -222,20 +228,31 @@ function scheduleSave() {
   }, 800)
 }
 // 立即落盘(不等 800ms 防抖):页面隐藏/关闭前把待写数据抢存一次,避免"改完立刻切走/关页 → 800ms 内没保存到云端"丢数据。
-function flushSave() {
-  if (_suspend || !_saver) return
-  if (!_saveTimer) return   // 没有待写任务(数据已存过) → 无需重复保存
+function flushPendingSave() {
+  if (_suspend || !_saver) return Promise.resolve(true)
+  if (!_saveTimer) return Promise.resolve(true) // 没有待写任务(数据已存过) → 无需重复保存
   clearTimeout(_saveTimer); _saveTimer = null
   try {
-    _saver({ plan: state.plan, holding: state.holding, closed: state.closed, account: state.account, alerts: state.alerts, reviews: state.reviews, adviceLog: state.adviceLog, decisionLog: state.decisionLog, advice: getAllAdvice(), settings: state.settings || {} })
-  } catch { /* ignore */ }
+    return Promise.resolve(_saver({
+      plan: state.plan,
+      holding: state.holding,
+      closed: state.closed,
+      account: state.account,
+      alerts: state.alerts,
+      reviews: state.reviews,
+      adviceLog: state.adviceLog,
+      decisionLog: state.decisionLog,
+      advice: getAllAdvice(),
+      settings: state.settings || {},
+    })).then((result) => result !== false).catch(() => false)
+  } catch { return Promise.resolve(false) }
 }
 // 浏览器环境:页面切后台(visibilitychange→hidden)或即将卸载(pagehide/beforeunload)时,抢存一次待写数据。
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {
-  const kick = () => { if (document.visibilityState === 'hidden') flushSave() }
+  const kick = () => { if (document.visibilityState === 'hidden') flushPendingSave() }
   document.addEventListener('visibilitychange', kick)
-  window.addEventListener('pagehide', flushSave)
-  window.addEventListener('beforeunload', flushSave)
+  window.addEventListener('pagehide', flushPendingSave)
+  window.addEventListener('beforeunload', flushPendingSave)
 }
 function positionContextFor(code) {
   const status = t1StatusOf(code)
@@ -468,6 +485,7 @@ function buildEditedClosedRecord(record, patch = {}) {
 export const planStore = {
   subscribe(l) { listeners.add(l); return () => listeners.delete(l) },
   get() { return state },
+  flushSave() { return flushPendingSave() },
   // 由 authStore 登录/登出时注入数据（不触发回存云端，避免刚拉就写回）
   setData(d) {
     _suspend = true
@@ -1583,7 +1601,7 @@ export const planStore = {
       return
     }
     let adv = null
-    try { adv = (getAdvice(code) || {}).advice } catch { adv = null }
+    try { adv = (getAdvice(code, 'hold_advice') || {}).advice } catch { adv = null }
     if (!adv) { state.alerts = rest; emit(); return }
     const holder = state.holding.find((x) => x.code === code)
     const liveStatus = t1StatusOf(code)

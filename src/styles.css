@@ -2388,6 +2388,11 @@ button.acct-item { width: 100%; border: 0; background: transparent; font: inheri
 .advice-presentation { display: flex; flex-direction: column; gap: 12px; }
 .advice-presentation .decide-verdict, .advice-presentation .advice-continuity { margin-bottom: 0; }
 .advice-confidence { margin-left: auto; color: var(--muted); font-size: 10.5px; font-weight: 650; white-space: nowrap; }
+.advice-decision-context { padding: 9px 11px; border: 1px solid var(--border-soft); border-radius: 9px; background: var(--panel2); }
+.adc-title { display: inline-flex; align-items: center; gap: 5px; color: var(--text); font-size: 11px; font-weight: 750; }
+.adc-title .icon { color: var(--accent); }
+.adc-values { display: flex; flex-wrap: wrap; gap: 5px 12px; margin-top: 6px; color: var(--muted); font-size: 10.5px; }
+.adc-values b { color: var(--text); font-weight: 700; }
 .advice-model-context { padding: 9px 11px; border: 1px solid var(--border-soft); border-radius: 9px; background: var(--panel2); }
 .advice-model-context.experimental { border-color: rgba(227,179,65,.36); background: rgba(227,179,65,.06); }
 .advice-model-context.fallback { border-color: rgba(91,141,239,.36); background: rgba(91,141,239,.06); }

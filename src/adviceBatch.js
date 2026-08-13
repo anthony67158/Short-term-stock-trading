@@ -317,7 +317,7 @@ export async function runBatchAdvice(codes, quoteMap, opts = {}) {
         else if (res.error) good = false
         else good = !!(res.advice || res.result)
       } else {
-        const a = getAdvice(code)
+        const a = getAdvice(code, spec.mode)
         good = !!(a && a.at && (Date.now() - a.at) < 5 * 60 * 1000)
       }
       setItemStatus(code, good ? 'ok' : 'fail')

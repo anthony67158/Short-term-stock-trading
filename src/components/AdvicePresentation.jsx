@@ -34,6 +34,29 @@ function Continuity({ continuity }) {
   )
 }
 
+function DecisionContext({ context }) {
+  if (!context || context.mode !== 'hold_advice') return null
+  const values = [
+    ['持仓', context.holdQty != null ? `${context.holdQty}手` : null],
+    ['成本', context.holdCost != null ? `${context.holdCost}元` : null],
+    ['今日可卖', context.sellableTodayQty != null ? `${context.sellableTodayQty}手` : null],
+    ['可用资金', context.cash != null ? `${Math.round(context.cash).toLocaleString('zh-CN')}元` : null],
+    ['总仓位', context.position != null ? `${context.position}%` : null],
+    ['单票占比', context.stockWeight != null ? `${context.stockWeight}%` : null],
+  ].filter(([, value]) => value != null)
+  if (!values.length) return null
+  return (
+    <section className="advice-decision-context" aria-label="本次决策账户快照">
+      <div className="adc-title"><Icon name="wallet" size={12} /> 本次决策账户快照</div>
+      <div className="adc-values">
+        {values.map(([label, value]) => (
+          <span key={label}>{label} <b>{value}</b></span>
+        ))}
+      </div>
+    </section>
+  )
+}
+
 export default function AdvicePresentation({ advice, knowledgeActionReview }) {
   const [expanded, setExpanded] = useState(false)
   const view = useMemo(() => buildAdvicePresentation(advice), [advice])
@@ -68,6 +91,7 @@ export default function AdvicePresentation({ advice, knowledgeActionReview }) {
       </div>
 
       <Continuity continuity={advice.continuity} />
+      <DecisionContext context={advice.decisionContext} />
 
       {view.model && (
         <section

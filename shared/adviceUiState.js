@@ -1,3 +1,5 @@
+import { adviceEntryMatchesMode } from './adviceModeContext.js'
+
 export function shouldApplyCloudBatch(progress) {
   return !!(
     progress &&
@@ -81,7 +83,13 @@ export async function startAdvicePersistently(
   return { status: 'started', mode: 'local', code }
 }
 
-export function newestAdviceResult(runnerResult, cachedResult) {
+export function newestAdviceResult(runnerResult, cachedResult, expectedMode = '') {
+  if (runnerResult && expectedMode && !adviceEntryMatchesMode(runnerResult, expectedMode)) {
+    runnerResult = null
+  }
+  if (cachedResult && expectedMode && !adviceEntryMatchesMode(cachedResult, expectedMode)) {
+    cachedResult = null
+  }
   if (!runnerResult && !cachedResult) return { source: null, value: null }
   if (!runnerResult) return { source: 'cache', value: cachedResult }
   if (!cachedResult) return { source: 'runner', value: runnerResult }

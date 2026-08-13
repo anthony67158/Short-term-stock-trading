@@ -2,6 +2,36 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import { startAdvicePersistently } from '../shared/adviceUiState.js'
+import { ensureAdviceAccountSynced } from '../shared/adviceAccountSync.js'
+
+test('提交云端军师任务前必须等待最新交易账本写入OSS', async () => {
+  const events = []
+  const result = await ensureAdviceAccountSynced({
+    flushLocal: async () => {
+      events.push('flush-local')
+      return true
+    },
+    retryCloud: async () => {
+      events.push('confirm-cloud')
+      return true
+    },
+  })
+
+  assert.deepEqual(events, ['flush-local', 'confirm-cloud'])
+  assert.deepEqual(result, { ok: true })
+})
+
+test('最新交易账本未确认写入OSS时禁止提交云端军师任务', async () => {
+  const result = await ensureAdviceAccountSynced({
+    flushLocal: async () => false,
+    retryCloud: async () => {
+      throw new Error('本地保存失败后不应继续')
+    },
+  })
+
+  assert.equal(result.ok, false)
+  assert.match(result.error, /账本/)
+})
 
 test('登录态单股建议收到服务端确认后才进入云端生成态', async () => {
   const calls = []

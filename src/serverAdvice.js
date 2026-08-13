@@ -6,6 +6,8 @@
 //   浏览器刷新/锁屏/断网不会影响执行。前端必须读取受理结果，不再做未经确认的乐观启动。
 import { api } from './apiBase'
 import { authStore } from './authStore'
+import { planStore } from './planStore'
+import { ensureAdviceAccountSynced } from '../shared/adviceAccountSync.js'
 
 let statusTimer = null
 let statusPulling = false
@@ -67,6 +69,11 @@ export async function triggerServerAdvice(codes, {
   if (!creds || !creds.nick) return { ok: false, error: '请先登录' }
   const list = [...new Set((codes || []).filter(Boolean).map(String))]
   if (!list.length) return { ok: false, error: '未选择股票' }
+  const synced = await ensureAdviceAccountSynced({
+    flushLocal: () => planStore.flushSave(),
+    retryCloud: () => authStore.retrySave(),
+  })
+  if (!synced.ok) return synced
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 15000)
   try {

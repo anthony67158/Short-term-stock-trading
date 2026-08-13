@@ -306,6 +306,37 @@ test('客户端旧预警快照不能重新启用服务端已退役的持仓预�
   assert.equal(account.data.alerts[0].retiredPolicy, 'position-missing')
 })
 
+test('客户端不能把建仓前的买入建议重新写回当前持仓', () => {
+  const account = {
+    nick: '建议模式账号',
+    clientRevision: 6,
+    data: {
+      holding: [{ id: 'h1', code: '600000', qty: 1, buyPrice: 10 }],
+      advice: {},
+      adviceLog: [],
+      decisionLog: [],
+    },
+  }
+
+  const result = applyClientAccountSave(account, {
+    plan: [],
+    holding: [{ id: 'h1', code: '600000', qty: 1, buyPrice: 10 }],
+    closed: [],
+    advice: {
+      '600000': {
+        mode: 'buy_advice',
+        at: 300,
+        advice: { action: '观望', tier: 'wait' },
+      },
+    },
+    adviceLog: [],
+    decisionLog: [],
+  }, 6)
+
+  assert.equal(result.ok, true)
+  assert.equal(account.data.advice['600000'], undefined)
+})
+
 test('客户端保存持仓时不能覆盖服务端 AI 任务队列和 Worker 锁', () => {
   const serverJobs = {
     '600000': { code: '600000', status: 'running', progressAt: 2000 },

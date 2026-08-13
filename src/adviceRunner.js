@@ -67,7 +67,7 @@ export function startAdvice(spec) {
 
 async function run(spec, record) {
   const { code, mode, name, myHold, aiPayload, quantUrl, priceHint } = spec
-  const previousAdvice = compactAdvicePlan(getAdvice(code))
+  const previousAdvice = compactAdvicePlan(getAdvice(code, mode))
   let requestPayload = {
     ...(aiPayload || {}),
     ...(previousAdvice ? { previousAdvice } : {}),
@@ -170,8 +170,8 @@ async function run(spec, record) {
 
     if (acceptsGenerationResult({ quant: result, advice, truncated }, generation.deepMode)) {
       const cachedAt = Date.now()
-      results.set(code, { result, advice, meta, news, adviceMissing, truncated, cachedAt })
-      saveAdvice(code, { result, advice, meta, news, truncated }) // 持久化：关闭再进/刷新仍可见
+      results.set(code, { mode, result, advice, meta, news, adviceMissing, truncated, cachedAt })
+      saveAdvice(code, { mode, result, advice, meta, news, truncated }) // 持久化：关闭再进/刷新仍可见
       // 行动点预警自动同步:把最新建议里的补仓价/减仓价转成到价预警,价一到就通知「现在该补/减仓了」。
       // 挂在这个唯一出口 → 手动/每日/批量/盘中自动刷新(含页面已关的后台生成)全都覆盖。
       if (advice) {

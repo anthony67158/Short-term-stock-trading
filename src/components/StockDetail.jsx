@@ -139,8 +139,9 @@ export default function StockDetail({ stock, onClose }) {
         setQuantState({ loading: true, phase: r && r.phase, sources: (r && r.sources) || [], reasoning: (r && r.reasoning) || '', quant: (r && r.quant) || null })
         return
       }
-      const cached = getAdvice(code)
-      const selectedResult = newestAdviceResult(getResult(code), cached)
+      const expectedMode = myHold ? 'hold_advice' : 'buy_advice'
+      const cached = getAdvice(code, expectedMode)
+      const selectedResult = newestAdviceResult(getResult(code), cached, expectedMode)
       const res = selectedResult.source === 'runner' ? selectedResult.value : null
       if (res && res.pending) {
         // 本地生成中断→已转云端继续,展示中转 loading,待云端回灌自动切成品
@@ -184,7 +185,7 @@ export default function StockDetail({ stock, onClose }) {
     const unBatch = subscribeBatch(sync)   // 服务端批量进度回灌 → 云端生成中/失败态实时反映
     const unAdvice = subscribeAdvice(sync) // 云端结果回灌 adviceCache → 自动切成品
     return () => { unRunner(); unBatch(); unAdvice() }
-  }, [stock && stock.code])
+  }, [stock && stock.code, !!myHold])
   const loadQuant = async () => {
     if (!stock) return
     setQuantState({

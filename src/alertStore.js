@@ -339,7 +339,8 @@ export const alertStore = {
     const timer = setTimeout(() => { try { ac.abort() } catch { /* ignore */ } }, 20000)
     const clear = () => { clearTimeout(timer); _confirming.delete(a.id) }
     try {
-      const advEntry = getAdvice(a.code)
+      const expectedMode = a.candCode ? 'buy_advice' : 'hold_advice'
+      const advEntry = getAdvice(a.code, expectedMode)
       const payload = { alert: a, advice: advEntry && advEntry.advice, quote: q }
       fetch(api('/api/confirm_signal'), {
         method: 'POST',

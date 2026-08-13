@@ -5,6 +5,7 @@ import {
   mergeAutoRefreshSettings,
   newerAutoRefreshPatch,
 } from '../shared/adviceAutoRefreshPolicy.js';
+import { adviceEntryMatchesMode } from '../shared/adviceModeContext.js';
 
 // ============ 云端账号 + 数据同步（阿里云 OSS 持久化）============
 // 单一入口，按 action 区分：register / login / get / save
@@ -125,7 +126,17 @@ export function applyClientAccountSave(account, incoming, baseRevision) {
     const current = adv[key];
     if (!current || (value.at || 0) > (current.at || 0)) adv[key] = value;
   }
-  merged.advice = adv;
+  const heldCodes = new Set(
+    (merged.holding || []).map((holding) => String(holding?.code || '')).filter(Boolean),
+  );
+  merged.advice = Object.fromEntries(
+    Object.entries(adv).filter(([code, entry]) =>
+      adviceEntryMatchesMode(
+        entry,
+        heldCodes.has(String(code)) ? 'hold_advice' : 'buy_advice',
+      )
+    ),
+  );
   merged.adviceLog = mergeAccountEvents(incoming.adviceLog, prev.adviceLog, 500);
   merged.decisionLog = mergeAccountEvents(incoming.decisionLog, prev.decisionLog, 1000);
   merged.alerts = mergeAccountAlerts(incoming.alerts, prev.alerts);

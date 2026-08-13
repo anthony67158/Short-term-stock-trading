@@ -88,8 +88,8 @@ function t1Fields(code, holdQty) {
 }
 
 // 6 小时内已有新鲜建议 → 跳过,不重复生成(节流,省算力/网关配额)
-function isFresh(code) {
-  const a = getAdvice(code)
+function isFresh(code, mode) {
+  const a = getAdvice(code, mode)
   return !!(a && a.at && (Date.now() - a.at) < GAP_MS)
 }
 
@@ -179,7 +179,7 @@ export async function runDailyAdviceIfDue(quoteMap) {
     // 持仓股(实时持仓口径,已并表反T)
     const holdCodes = [...new Set(holding.map((h) => h.code))]
     for (const code of holdCodes) {
-      if (isFresh(code)) continue
+      if (isFresh(code, 'hold_advice')) continue
       const name = (holding.find((h) => h.code === code) || {}).name || code
       startForHolding(code, name, quoteMap, portfolio, st.account)
     }
@@ -187,7 +187,7 @@ export async function runDailyAdviceIfDue(quoteMap) {
     const holdSet = new Set(holdCodes)
     const watchCodes = [...new Set(watch.map((w) => w.code))].filter((c) => !holdSet.has(c))
     for (const code of watchCodes) {
-      if (isFresh(code)) continue
+      if (isFresh(code, 'buy_advice')) continue
       const name = (watch.find((w) => w.code === code) || {}).name || code
       startForWatch(code, name, quoteMap, portfolio, st.account)
     }
