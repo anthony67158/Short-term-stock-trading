@@ -68,6 +68,15 @@ import {
   setAdviceDailyReportPhase,
 } from './_advice_daily_report.js';
 import { buildRealOutcomeLearning } from '../shared/realOutcomeLearning.js';
+import {
+  buildStrategyPromotionGate,
+  CURRENT_STRATEGY_EVALUATION,
+} from '../shared/strategyPromotionGate.js';
+import {
+  addCouncilShadowRecord,
+  councilRecordsFromData,
+} from '../shared/advisorCouncilStore.js';
+import { runAdvisorCouncilShadow } from './_advisor_council.js';
 
 export const PROGRESS_SAVE_INTERVAL_MS = 5000;
 export const CANCEL_POLL_INTERVAL_MS = 5000;
@@ -419,6 +428,8 @@ async function genOne({
   signal,
   deepMode = false,
   previousEntry = null,
+  strategyGate = null,
+  councilEnabled = true,
 }) {
   const generation = generationOptions(deepMode);
   let streamedReasoning = '';
@@ -483,6 +494,27 @@ async function genOne({
     { mode, result, advice, meta, news, truncated },
     at,
   );
+  let councilShadow = null;
+  if (advice && councilEnabled) {
+    if (typeof onProgress === 'function') {
+      onProgress({ phase: '军师委员会正在进行影子复核' });
+    }
+    try {
+      councilShadow = await runAdvisorCouncilShadow({
+        code,
+        name,
+        mode,
+        advice,
+        payload,
+        strategyGate,
+        evidenceSnapshotId: meta?.evidenceSnapshot?.snapshotId || null,
+        signal,
+      });
+      cacheItem.councilShadow = councilShadow;
+    } catch {
+      councilShadow = null;
+    }
+  }
   let logEntry = null;
   if (advice) {
     const px = (result && result.price) || priceHint || (payload && payload.holdCost) || null;
@@ -507,7 +539,7 @@ async function genOne({
   }
   const quantScore = (result && result.score != null && !isNaN(result.score))
     ? { qScore: Number(result.score), qBias: result.bias || '' } : null;
-  return { cacheItem, logEntry, quantScore };
+  return { cacheItem, logEntry, quantScore, councilShadow };
 }
 
 // 依据 code + 当前账号数据,构造该只的生成任务(持仓走 hold,自选走 buy)
@@ -535,6 +567,15 @@ async function runJobGen(
   const priceHint = Number(quoteMap[code]?.price) > 0 ? Number(quoteMap[code].price) : null;
   const quantModelVersion = data.settings?.quantModelVersion || 'default';
   const realOutcomeLearning = buildRealOutcomeLearning(data);
+  data.realOutcomeLearning = realOutcomeLearning;
+  const strategyGate = buildStrategyPromotionGate({
+    evaluation: CURRENT_STRATEGY_EVALUATION,
+    realOutcomeLearning,
+    councilRecords: councilRecordsFromData(data),
+    humanApproval: data.strategyHumanApproval,
+  });
+  const councilEnabled = process.env.ADVISOR_COUNCIL_SHADOW !== 'false'
+    && data.settings?.advisorCouncilShadow !== false;
   const mode = holdSet.has(code) ? 'hold_advice' : 'buy_advice';
   const cachedPrevious = data.advice?.[code] || null;
   const previousEntry = adviceEntryMatchesMode(cachedPrevious, mode)
@@ -550,7 +591,7 @@ async function runJobGen(
     p = attachAdviceDailyReport(p, dailyReportSummary);
     if (previousAdvice) p.previousAdvice = previousAdvice;
     const hp = (p.holdCost != null && p.holdQty != null) ? { holdCost: String(p.holdCost), holdQty: String(p.holdQty) } : {};
-    return genOne({ code, name, mode: 'hold_advice', payload: p, quantQuery: { code, klt: '101', lmt: '60', quant: '1', model: quantModelVersion, ...hp }, priceHint, onProgress, signal, deepMode, previousEntry });
+    return genOne({ code, name, mode: 'hold_advice', payload: p, quantQuery: { code, klt: '101', lmt: '60', quant: '1', model: quantModelVersion, ...hp }, priceHint, onProgress, signal, deepMode, previousEntry, strategyGate, councilEnabled });
   }
   let p = buildWatchPayload(code, name, portfolio, data.account);
   p.advisorTrack = advisorTrackFrom(data, 'buy_advice');
@@ -559,7 +600,7 @@ async function runJobGen(
   p.accountRevision = Number(acc.clientRevision) || null;
   p = attachAdviceDailyReport(p, dailyReportSummary);
   if (previousAdvice) p.previousAdvice = previousAdvice;
-  return genOne({ code, name, mode: 'buy_advice', payload: p, quantQuery: { code, klt: '101', lmt: '60', quant: '1', model: quantModelVersion }, priceHint, onProgress, signal, deepMode, previousEntry });
+  return genOne({ code, name, mode: 'buy_advice', payload: p, quantQuery: { code, klt: '101', lmt: '60', quant: '1', model: quantModelVersion }, priceHint, onProgress, signal, deepMode, previousEntry, strategyGate, councilEnabled });
 }
 
 // ---- 任务表合并:把云端最新的【外部变更】并入内存 working(捕获其它设备新入队 / 取消)----
@@ -961,6 +1002,9 @@ async function drainAccount(nick, initialAcc) {
           }
         }
         if (done.res.quantScore) applyQuantScore(d, done.code, done.res.quantScore);
+        if (done.res.councilShadow) {
+          addCouncilShadowRecord(d, done.res.councilShadow);
+        }
       } else {
         failJob(
           d,

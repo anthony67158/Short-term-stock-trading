@@ -149,6 +149,14 @@ export function applyClientAccountSave(account, incoming, baseRevision) {
   if (prev.reviewAuto && typeof prev.reviewAuto === 'object') {
     merged.reviewAuto = prev.reviewAuto;
   }
+  for (const key of [
+    'realOutcomeLearning',
+    'advisorCouncilShadow',
+    'strategyHumanApproval',
+  ]) {
+    if (prev[key] != null) merged[key] = prev[key];
+    else delete merged[key];
+  }
   merged.evidenceSnapshots = mergeEvidenceSnapshotIndexes(
     {
       ...(prev.evidenceSnapshots || {}),

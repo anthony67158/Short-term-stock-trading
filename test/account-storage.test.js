@@ -134,6 +134,42 @@ test('运行时账号同步只返回更新时间后的建议事件和轻量状�
   assert.equal(delta.closed, undefined)
 })
 
+test('客户端保存不能覆盖服务端收益学习委员会与人工批准状态', () => {
+  const account = {
+    nick: '治理状态账号',
+    clientRevision: 3,
+    data: {
+      plan: [],
+      holding: [],
+      closed: [],
+      realOutcomeLearning: { schemaVersion: 'real-outcome-learning.v1' },
+      advisorCouncilShadow: [{ at: 2, shadowOnly: true }],
+      strategyHumanApproval: {
+        specVersion: 'strategy.test',
+        approvedAt: 1,
+        approvedBy: 'owner',
+      },
+    },
+  }
+
+  const applied = applyClientAccountSave(account, {
+    plan: [],
+    holding: [],
+    closed: [],
+  }, 3)
+
+  assert.equal(applied.ok, true)
+  assert.equal(
+    account.data.realOutcomeLearning.schemaVersion,
+    'real-outcome-learning.v1',
+  )
+  assert.equal(account.data.advisorCouncilShadow.length, 1)
+  assert.equal(
+    account.data.strategyHumanApproval.specVersion,
+    'strategy.test',
+  )
+})
+
 test('OSS 当前快照写后校验失败时保存必须报错', async () => {
   const storage = fakeStorage()
   storage.readJson = async () => null
