@@ -25,6 +25,45 @@ python3 strategy_portfolio_backtest.py \
 
 撮合顺序固定为：当日收盘产生信号 → 下一交易日开盘买入；收盘触发止损、止盈或到期 → 下一交易日开盘卖出。回测包含整手买入、T+1、停牌、涨跌停拒单、滑点、佣金、印花税、过户费、现金与最大持仓约束。报告保留交易、拒单、每日权益和未平仓头寸，不会在样本末尾虚构强制成交。
 
+## Point-in-time 数据集与 Walk-forward
+
+`strategy_research_dataset.py` 将样本外预测和历史面板连接成
+`strategy-dataset.v1`。执行回测只接受 `price_adjustment=RAW` 的未复权
+OHLCV，拒绝 QFQ/未知口径；Tushare `daily.vol` 必须声明
+`volume_unit=HANDS`，构建时会转换为股。预测文件中的 `actual` 等未来标签
+不会写入策略记录。
+
+```bash
+python3 strategy_research_dataset.py \
+  --panel /tmp/strategy-raw-panel \
+  --predictions ./research/holdout_predictions.npz \
+  --score-key ensemble_prediction \
+  --source-id oos:model-version \
+  --out /tmp/strategy-dataset.json.gz \
+  --minimum-history 20 \
+  --minimum-coverage 0.95
+```
+
+质量清单记录覆盖率、未匹配预测、被拒绝的已匹配行、缺失字段、未来字段和
+每类证据来源。只有 `quality.usable=true` 的数据集能进入
+`strategy_walk_forward.py`：
+
+```bash
+python3 strategy_walk_forward.py \
+  --strategy ./research/strategy-spec.json \
+  --dataset /tmp/strategy-dataset.json.gz \
+  --out /tmp/strategy-walk-forward.json \
+  --minimum-train-days 60 \
+  --purge-days 5 \
+  --test-days 20 \
+  --step-days 20 \
+  --initial-cash 1000000
+```
+
+Walk-forward 使用扩展训练窗口、purge gap 和互不重叠的测试窗口。策略版本
+全程冻结，不在训练段调参；每个 fold 重置本金，汇总收益只来自测试段。小股票池
+pilot 只能验证数据与执行链路，不能代替完整股票池的晋级结论。
+
 ## 一、Cloud Run 适合吗？
 
 适合，而且是这几个方案里最优的：
