@@ -45,6 +45,7 @@ import {
   isCurrentAdvicePlan,
   queueAdviceReviewForVerdict,
 } from './_advice_wakeup.js';
+import { isAdviceReviewEnabled } from '../shared/adviceReviewPolicy.js';
 
 const OP_LABEL = { gte: '≥', lte: '≤' };
 
@@ -121,11 +122,15 @@ function hit(a, q) {
   }
 }
 
-export function cloudAlertsForEvaluation(alerts = []) {
+export function cloudAlertsForEvaluation(alerts = [], settings = {}) {
   return alerts.filter((alert) =>
     alert
     && alert.enabled
     && !alert.triggeredAt
+    && (
+      (!alert.candCode && !alert.actCode)
+      || isAdviceReviewEnabled(settings, alert.code)
+    )
   );
 }
 
@@ -299,12 +304,16 @@ async function processAccount(acc) {
   }
 
   // armed/watching 均需处理:enabled && 未最终触发(confirmed)
-  const active = cloudAlertsForEvaluation(alerts);
+  const active = cloudAlertsForEvaluation(alerts, data.settings);
   const outcomePending = alerts.filter((alert) =>
     alert?.phase === 'confirmed' &&
     alert.triggeredAt &&
     Date.now() - alert.triggeredAt <= 45 * 60 * 1000 &&
-    !alert.judgeOutcomes?.m30
+    !alert.judgeOutcomes?.m30 &&
+    (
+      (!alert.candCode && !alert.actCode)
+      || isAdviceReviewEnabled(data.settings, alert.code)
+    )
   );
   const sidePriority = { stop: 3, sell: 2, buy: 1 };
   // 是否执行云端闭环与浏览器通知权限无关；没有 Push 订阅时仍确认并更新军师，只是不发系统通知。

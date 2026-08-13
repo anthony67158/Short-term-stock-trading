@@ -2379,6 +2379,15 @@ button.acct-item { width: 100%; border: 0; background: transparent; font: inheri
 .decide-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 8px; flex-wrap: wrap; }
 .decide-title { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; color: var(--text); }
 .decide-title .icon { color: var(--accent, #7c6bf5); }
+.decide-review-controls { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
+.advice-review-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 4px 8px; border: 1px solid var(--border-soft); border-radius: 7px; background: var(--panel2); color: var(--muted); font-size: 10.5px; font-weight: 700; cursor: pointer; }
+.advice-review-toggle:hover { border-color: var(--border); color: var(--text2); }
+.advice-review-toggle > b { color: inherit; font-size: 10px; }
+.advice-review-toggle-track { position: relative; width: 28px; height: 16px; border-radius: 8px; background: var(--border); transition: background-color .15s; }
+.advice-review-toggle-track > span { position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--text); transition: transform .15s; }
+.advice-review-toggle.on { border-color: rgba(31,157,67,.36); color: var(--green); }
+.advice-review-toggle.on .advice-review-toggle-track { background: var(--green); }
+.advice-review-toggle.on .advice-review-toggle-track > span { transform: translateX(12px); }
 .decide-hold { font-size: 11px; font-weight: 600; color: var(--gold); background: rgba(227,179,65,.14); padding: 2px 8px; border-radius: 5px; }
 .decide-hold.none { color: var(--muted); background: var(--panel2); }
 /* 决策结论：大字醒目 */
@@ -2402,6 +2411,8 @@ button.acct-item { width: 100%; border: 0; background: transparent; font: inheri
 .advice-review-cycle > div b { margin-left: auto; color: var(--muted); font-size: 10.5px; }
 .advice-review-cycle p { margin: 3px 0 0; }
 .advice-review-cycle time { color: var(--accent); font-weight: 700; }
+.advice-review-cycle.off { border-style: dashed; }
+.advice-review-cycle.off > div, .advice-review-cycle.off > div .icon { color: var(--muted); }
 .advice-presentation { display: flex; flex-direction: column; gap: 12px; }
 .advice-presentation .decide-verdict, .advice-presentation .advice-continuity { margin-bottom: 0; }
 .advice-confidence { margin-left: auto; color: var(--muted); font-size: 10.5px; font-weight: 650; white-space: nowrap; }

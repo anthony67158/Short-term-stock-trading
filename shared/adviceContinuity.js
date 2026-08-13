@@ -181,6 +181,7 @@ export function reconcileAdviceContinuity({
   previous,
   next,
   evidence = {},
+  stabilityMode = '',
   now = Date.now(),
 } = {}) {
   const nextAdvice = next && typeof next === 'object' ? { ...next } : {}
@@ -237,6 +238,25 @@ export function reconcileAdviceContinuity({
       zones: zonesOf(held),
     }
     return { advice: held, accepted: false }
+  }
+
+  if (stabilityMode === 'scheduled' && !reversal) {
+    const held = { ...nextAdvice }
+    for (const field of CORE_FIELDS) {
+      if (prior[field] != null) held[field] = prior[field]
+      else delete held[field]
+    }
+    held.continuity = {
+      planId,
+      revision,
+      thesisVersion: priorThesis,
+      changeType: 'maintain',
+      changeReason: '自动复核未发现执行事件，锁定上一版动作与价位，避免计划频繁漂移',
+      previousAction: prior.action || '',
+      proposedAction: '',
+      zones: zonesOf(held),
+    }
+    return { advice: held, accepted: true }
   }
 
   const changeType = reversal

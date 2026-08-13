@@ -3,12 +3,14 @@ export const DEFAULT_WATCH_INTERVAL = 30
 export const MIN_AUTO_INTERVAL = 5
 export const MAX_AUTO_INTERVAL = 240
 export const AUTO_CONFIG_UPDATED_AT = 'advAuto.configUpdatedAt'
+export const ADVICE_REVIEW_DISABLED_CODES = 'advReview.disabledCodes'
 export const AUTO_CONFIG_KEYS = [
   'advAuto.enabled',
   'advAuto.holdEnabled',
   'advAuto.holdIntervalMin',
   'advAuto.watchEnabled',
   'advAuto.watchIntervalMin',
+  ADVICE_REVIEW_DISABLED_CODES,
 ]
 
 function interval(value, fallback) {

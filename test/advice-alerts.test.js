@@ -248,6 +248,25 @@ test('关闭 AI 自动预警时清理该股票的自动预警', () => {
   assert.deepEqual(data.alerts, [{ id: 'manual', code: '600519', type: 'pct' }])
 })
 
+test('单股关闭持续复核时清理军师派生预警但保留手工预警', () => {
+  const data = {
+    plan: [{ code: '600519', name: '贵州茅台' }],
+    holding: [],
+    alerts: [
+      { id: 'auto', code: '600519', candCode: '600519' },
+      { id: 'manual', code: '600519', type: 'pct' },
+    ],
+    settings: { 'advReview.disabledCodes': ['600519'] },
+  }
+
+  const changed = projectAdviceAlerts(data, '600519', {
+    buyPrice: 1400,
+  }, { now, idFactory: ids })
+
+  assert.equal(changed, true)
+  assert.deepEqual(data.alerts, [{ id: 'manual', code: '600519', type: 'pct' }])
+})
+
 test('股票已移出自选和持仓时不会从旧建议重建预警', () => {
   const data = {
     plan: [],

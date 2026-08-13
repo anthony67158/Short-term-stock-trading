@@ -34,7 +34,19 @@ function Continuity({ continuity }) {
   )
 }
 
-function ReviewCycle({ review }) {
+function ReviewCycle({ review, enabled = true }) {
+  if (!enabled) {
+    return (
+      <section className="advice-review-cycle off" aria-label="军师持续复核已关闭">
+        <div>
+          <Icon name="clock" size={12} />
+          <span>持续复核已关闭</span>
+          <b>仅手动更新</b>
+        </div>
+        <p>当前主计划保持不变，不再自动生成后续建议或军师派生预警。</p>
+      </section>
+    )
+  }
   if (!review?.nextReviewAt) return null
   const next = new Date(review.nextReviewAt)
   const nextLabel = next.toLocaleString('zh-CN', {
@@ -110,7 +122,11 @@ function RiskOverlay({ risk }) {
   )
 }
 
-export default function AdvicePresentation({ advice, knowledgeActionReview }) {
+export default function AdvicePresentation({
+  advice,
+  knowledgeActionReview,
+  reviewEnabled = true,
+}) {
   const [expanded, setExpanded] = useState(false)
   const view = useMemo(() => buildAdvicePresentation(advice), [advice])
   const hasTrigger = Object.values(view.trigger).some(Boolean)
@@ -144,7 +160,7 @@ export default function AdvicePresentation({ advice, knowledgeActionReview }) {
       </div>
 
       <Continuity continuity={advice.continuity} />
-      <ReviewCycle review={view.review} />
+      <ReviewCycle review={view.review} enabled={reviewEnabled} />
       <DecisionContext context={advice.decisionContext} />
       <RiskOverlay risk={advice.riskOverlay} />
 

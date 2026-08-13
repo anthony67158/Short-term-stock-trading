@@ -1452,6 +1452,7 @@ export default async function handler(req, res) {
         previous: payload.previousAdvice,
         next: result,
         evidence: continuityEvidenceFromPayload(payload),
+        stabilityMode: payload.reviewOrigin === 'auto' ? 'scheduled' : '',
       }).advice;
     }
     const _dbg = {

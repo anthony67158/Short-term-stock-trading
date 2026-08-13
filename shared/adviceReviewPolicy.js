@@ -1,3 +1,8 @@
+import {
+  ADVICE_REVIEW_DISABLED_CODES,
+  AUTO_CONFIG_UPDATED_AT,
+} from './adviceAutoRefreshPolicy.js'
+
 const BJ_OFFSET_MS = 8 * 60 * 60 * 1000
 
 const A_SHARE_HOLIDAYS = new Set([
@@ -127,4 +132,40 @@ export function adviceReviewDue(entry, now = Date.now()) {
       ?? entry?.advice?.reviewCycle?.nextReviewAt,
   )
   return !Number.isFinite(nextReviewAt) || nextReviewAt <= now
+}
+
+function reviewCode(value) {
+  const code = String(value || '').trim()
+  return /^\d{6}$/.test(code) ? code : ''
+}
+
+export function disabledAdviceReviewCodes(settings = {}) {
+  const values = Array.isArray(settings?.[ADVICE_REVIEW_DISABLED_CODES])
+    ? settings[ADVICE_REVIEW_DISABLED_CODES]
+    : []
+  return [...new Set(values.map(reviewCode).filter(Boolean))].slice(0, 500)
+}
+
+export function isAdviceReviewEnabled(settings = {}, code) {
+  const normalized = reviewCode(code)
+  if (!normalized) return true
+  return !disabledAdviceReviewCodes(settings).includes(normalized)
+}
+
+export function setAdviceReviewEnabled(
+  settings = {},
+  code,
+  enabled,
+  now = Date.now(),
+) {
+  const normalized = reviewCode(code)
+  if (!normalized) return { ...settings }
+  const disabled = new Set(disabledAdviceReviewCodes(settings))
+  if (enabled) disabled.delete(normalized)
+  else disabled.add(normalized)
+  return {
+    ...settings,
+    [ADVICE_REVIEW_DISABLED_CODES]: [...disabled].sort(),
+    [AUTO_CONFIG_UPDATED_AT]: now,
+  }
 }

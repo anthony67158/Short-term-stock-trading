@@ -3,7 +3,9 @@ import assert from 'node:assert/strict'
 
 import {
   adviceReviewDue,
+  isAdviceReviewEnabled,
   nextAdviceReviewAt,
+  setAdviceReviewEnabled,
 } from '../shared/adviceReviewPolicy.js'
 import { buildAdviceCacheEntry } from '../shared/adviceContinuity.js'
 
@@ -73,4 +75,18 @@ test('军师正文暂缺时也安排下次重试，避免每5分钟重复调用'
   assert.equal(entry.reviewCycle.changeType, 'unavailable')
   assert.equal(entry.reviewCycle.nextReviewAt, now + 30 * 60000)
   assert.equal(adviceReviewDue(entry, now + 5 * 60000), false)
+})
+
+test('单股持续复核默认开启且可独立关闭后再开启', () => {
+  const disabled = setAdviceReviewEnabled({}, '600000', false, 1000)
+
+  assert.equal(isAdviceReviewEnabled({}, '600000'), true)
+  assert.equal(isAdviceReviewEnabled(disabled, '600000'), false)
+  assert.equal(isAdviceReviewEnabled(disabled, '000001'), true)
+  assert.deepEqual(disabled['advReview.disabledCodes'], ['600000'])
+  assert.equal(disabled['advAuto.configUpdatedAt'], 1000)
+
+  const enabled = setAdviceReviewEnabled(disabled, '600000', true, 2000)
+  assert.equal(isAdviceReviewEnabled(enabled, '600000'), true)
+  assert.deepEqual(enabled['advReview.disabledCodes'], [])
 })

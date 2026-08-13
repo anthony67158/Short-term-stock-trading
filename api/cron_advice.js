@@ -34,8 +34,14 @@ import { endpointCountForRole } from './_llm_pool.js';
 import { projectAdviceAlerts } from '../shared/adviceAlerts.js';
 import { createRecommendation } from '../shared/decisionLedger.js';
 import { ensureAdviceReasoning } from '../shared/adviceReasoning.js';
-import { autoConfigFromSettings } from '../shared/adviceAutoRefreshPolicy.js';
-import { adviceReviewDue } from '../shared/adviceReviewPolicy.js';
+import {
+  autoConfigFromSettings,
+  mergeAutoRefreshSettings,
+} from '../shared/adviceAutoRefreshPolicy.js';
+import {
+  adviceReviewDue,
+  isAdviceReviewEnabled,
+} from '../shared/adviceReviewPolicy.js';
 import {
   acceptsGenerationResult,
   adviceConcurrency,
@@ -192,6 +198,7 @@ const A_SHARE_HOLIDAYS = new Set([
   '2026-01-01', '2026-02-16', '2026-02-17', '2026-02-18', '2026-02-19', '2026-02-20', '2026-02-21', '2026-02-22',
   '2026-04-06', '2026-05-01', '2026-06-19', '2026-09-25', '2026-10-01', '2026-10-02', '2026-10-05', '2026-10-06', '2026-10-07',
 ]);
+const MAX_AUTO_JOBS_PER_TICK = 6;
 function nowBJ() { const n = new Date(); return new Date(n.getTime() + (n.getTimezoneOffset() + 480) * 60000); }
 function ymd(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
 function nextTradeDayLabel() {
@@ -569,6 +576,7 @@ async function runJobGen(
   deepMode = false,
   dailyReportSummary = null,
   reviewEvent = null,
+  reviewOrigin = '',
 ) {
   const data = acc.data || {};
   const holding = data.holding || [], watch = data.plan || [];
@@ -608,6 +616,7 @@ async function runJobGen(
     p = attachAdviceDailyReport(p, dailyReportSummary);
     if (previousAdvice) p.previousAdvice = previousAdvice;
     if (reviewEvent) p.reviewEvent = reviewEvent;
+    if (reviewOrigin) p.reviewOrigin = reviewOrigin;
     const hp = (p.holdCost != null && p.holdQty != null) ? { holdCost: String(p.holdCost), holdQty: String(p.holdQty) } : {};
     return genOne({ code, name, mode: 'hold_advice', payload: p, quantQuery: { code, klt: '101', lmt: '60', quant: '1', model: quantModelVersion, ...hp }, priceHint, onProgress, signal, deepMode, previousEntry, reviewIntervalMin, reviewTrigger: reviewEvent ? `judge_${reviewEvent.decision}` : '', strategyGate, councilEnabled });
   }
@@ -619,6 +628,7 @@ async function runJobGen(
   p = attachAdviceDailyReport(p, dailyReportSummary);
   if (previousAdvice) p.previousAdvice = previousAdvice;
   if (reviewEvent) p.reviewEvent = reviewEvent;
+  if (reviewOrigin) p.reviewOrigin = reviewOrigin;
   return genOne({ code, name, mode: 'buy_advice', payload: p, quantQuery: { code, klt: '101', lmt: '60', quant: '1', model: quantModelVersion }, priceHint, onProgress, signal, deepMode, previousEntry, reviewIntervalMin, reviewTrigger: reviewEvent ? `judge_${reviewEvent.decision}` : '', strategyGate, councilEnabled });
 }
 
@@ -798,6 +808,10 @@ async function drainAccount(nick, initialAcc) {
   const saveWorking = () => persistence.run();
   acc = await saveWorking();                                           // 公布锁 + 回收结果
   data = acc.data;
+  if (cancelDisabledAdviceReviewJobs(data) > 0) {
+    acc = await saveWorking();
+    data = acc.data;
+  }
 
   const CONC = effectiveAdviceConcurrency(data);
   setAdviceDailyReportPhase(
@@ -923,7 +937,16 @@ async function drainAccount(nick, initialAcc) {
     try {
       const fresh = await readAccount(nick);
       const freshJobs = fresh?.data?.jobs || {};
+      acc.data.settings = mergeAutoRefreshSettings(
+        acc.data.settings || {},
+        fresh?.data?.settings || {},
+      );
+      const disabledCanceled = cancelDisabledAdviceReviewJobs(acc.data);
       for (const [code, task] of inflight.entries()) {
+        if (jobsOf(acc.data)[code]?.status === 'canceled') {
+          task.controller.abort();
+          continue;
+        }
         const remote = freshJobs[code];
         if (remote?.id && remote.id !== task.jobId) {
           jobsOf(acc.data)[code] = remote;
@@ -933,6 +956,7 @@ async function drainAccount(nick, initialAcc) {
           task.controller.abort();
         }
       }
+      if (disabledCanceled > 0) await queueProgressSave(true);
     } catch { /* 下一轮继续检查 */ }
   }, CANCEL_POLL_INTERVAL_MS);
   if (cancelPoll && typeof cancelPoll.unref === 'function') cancelPoll.unref();
@@ -966,6 +990,7 @@ async function drainAccount(nick, initialAcc) {
           !!j.deepMode,
           dailyReportSummary,
           j.trigger || null,
+          j.source || '',
         )
           .then((res) => ({ code, jobId, res }))
           .catch((err) => ({ code, jobId, err }));
@@ -1101,6 +1126,20 @@ function inAutoRefreshWindow(now = Date.now()) {
     && (inMorning || inAfternoon);
 }
 
+export function cancelDisabledAdviceReviewJobs(data, now = Date.now()) {
+  const settings = data?.settings || {};
+  let canceled = 0;
+  for (const job of Object.values(jobsOf(data || {}))) {
+    if (
+      !job?.code
+      || !['auto', 'judge'].includes(job.source)
+      || isAdviceReviewEnabled(settings, job.code)
+    ) continue;
+    if (cancelJob(data, job.code, now)) canceled++;
+  }
+  return canceled;
+}
+
 export function enqueueAutoRefreshDue(data, now = Date.now()) {
   if (!inAutoRefreshWindow(now)) return 0;
   const settings = data.settings || (data.settings = {});
@@ -1120,6 +1159,10 @@ export function enqueueAutoRefreshDue(data, now = Date.now()) {
   const holdSet = new Set(holdCodes);
   const watchCodes = [...new Set(watch.map((item) => item.code))].filter((code) => !holdSet.has(code));
   const batchId = `auto_${now}`;
+  const activeAutoJobs = Object.values(jobsOf(data))
+    .filter((job) => job?.source === 'auto' && isActive(job))
+    .length;
+  const autoBudget = Math.max(0, MAX_AUTO_JOBS_PER_TICK - activeAutoJobs);
   let count = 0;
   const enqueue = (code, name, mode) => {
     const { created } = enqueueJob(data, { code, name, mode, source: 'auto', force: false, batchId }, now);
@@ -1128,6 +1171,8 @@ export function enqueueAutoRefreshDue(data, now = Date.now()) {
   if (scopes.includes('hold')) {
     const before = count;
     for (const code of holdCodes) {
+      if (count >= autoBudget) break;
+      if (!isAdviceReviewEnabled(settings, code)) continue;
       if (!adviceReviewDue(advice[code], now)) continue;
       const name = holding.find((item) => item.code === code)?.name || code;
       enqueue(code, name, 'hold_advice');
@@ -1140,6 +1185,8 @@ export function enqueueAutoRefreshDue(data, now = Date.now()) {
   if (scopes.includes('watch')) {
     const before = count;
     for (const code of watchCodes) {
+      if (count >= autoBudget) break;
+      if (!isAdviceReviewEnabled(settings, code)) continue;
       if (!adviceReviewDue(advice[code], now)) continue;
       const name = watch.find((item) => item.code === code)?.name || code;
       enqueue(code, name, 'buy_advice');

@@ -7,7 +7,10 @@ import {
   newerAutoRefreshPatch,
   normalizeAutoConfig,
 } from '../shared/adviceAutoRefreshPolicy.js'
-import { enqueueAutoRefreshDue } from '../api/cron_advice.js'
+import {
+  cancelDisabledAdviceReviewJobs,
+  enqueueAutoRefreshDue,
+} from '../api/cron_advice.js'
 
 test('自动刷新默认常开，持仓和自选采用不同建议频率', () => {
   const config = normalizeAutoConfig({})
@@ -94,6 +97,61 @@ test('云端按每只股票自己的复核时间排队', () => {
   assert.equal(data.jobs['600001'], undefined)
 })
 
+test('单股关闭持续复核后云端不再创建定时任务', () => {
+  const now = new Date('2026-08-10T02:00:00Z').getTime()
+  const data = {
+    settings: { 'advReview.disabledCodes': ['600000'] },
+    holding: [
+      { code: '600000', name: '关闭复核' },
+      { code: '600001', name: '继续复核' },
+    ],
+  }
+
+  assert.equal(enqueueAutoRefreshDue(data, now), 1)
+  assert.equal(data.jobs['600000'], undefined)
+  assert.equal(data.jobs['600001'].source, 'auto')
+})
+
+test('单股关闭持续复核后取消排队中的自动链路但保留手动生成', () => {
+  const data = {
+    settings: { 'advReview.disabledCodes': ['600000'] },
+    jobs: {
+      '600000': {
+        code: '600000',
+        status: 'queued',
+        source: 'auto',
+      },
+      '600001': {
+        code: '600001',
+        status: 'queued',
+        source: 'ondemand',
+      },
+    },
+  }
+
+  assert.equal(cancelDisabledAdviceReviewJobs(data, 2000), 1)
+  assert.equal(data.jobs['600000'].status, 'canceled')
+  assert.equal(data.jobs['600001'].status, 'queued')
+})
+
+test('每轮最多排两波自动任务并优先处理持仓，避免长队阻塞事件建议', () => {
+  const now = new Date('2026-08-10T02:00:00Z').getTime()
+  const data = {
+    settings: {},
+    holding: Array.from({ length: 8 }, (_, index) => ({
+      code: `60000${index}`,
+      name: `持仓${index}`,
+    })),
+    plan: [{ code: '000001', name: '自选股' }],
+  }
+
+  assert.equal(enqueueAutoRefreshDue(data, now), 6)
+  assert.equal(Object.keys(data.jobs).length, 6)
+  assert.equal(data.jobs['000001'], undefined)
+  assert.equal(enqueueAutoRefreshDue(data, now + 5 * 60000), 0)
+  assert.equal(Object.keys(data.jobs).length, 6)
+})
+
 test('旧设备缺失刷新配置时不能清空云端新配置', () => {
   const previous = {
     theme: 'dark',
@@ -125,4 +183,24 @@ test('交易冲突时仍可独立保存更新时间更晚的刷新配置', () =>
 
   assert.deepEqual(newerAutoRefreshPatch(previous, incoming), incoming)
   assert.equal(newerAutoRefreshPatch(incoming, previous), null)
+})
+
+test('单股复核开关按配置更新时间跨设备合并', () => {
+  const previous = {
+    'advReview.disabledCodes': ['600000'],
+    'advAuto.configUpdatedAt': 1000,
+  }
+  const incoming = {
+    'advReview.disabledCodes': [],
+    'advAuto.configUpdatedAt': 2000,
+  }
+
+  assert.deepEqual(
+    mergeAutoRefreshSettings(previous, incoming),
+    incoming,
+  )
+  assert.deepEqual(
+    newerAutoRefreshPatch(previous, incoming),
+    incoming,
+  )
 })

@@ -1,0 +1,49 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+
+import { planStore } from '../src/planStore.js'
+import { isAdviceReviewEnabled } from '../shared/adviceReviewPolicy.js'
+
+test('个股持续复核开关关闭时立即清理派生预警并保留手工预警', () => {
+  planStore.setData({
+    plan: [{ code: '600000', name: '浦发银行' }],
+    holding: [],
+    closed: [],
+    settings: {},
+    alerts: [
+      { id: 'auto', code: '600000', candCode: '600000' },
+      { id: 'manual', code: '600000', type: 'pct' },
+    ],
+  })
+
+  planStore.setAdviceReviewEnabled('600000', false)
+
+  assert.equal(isAdviceReviewEnabled(planStore.get().settings, '600000'), false)
+  assert.deepEqual(planStore.get().alerts.map((alert) => alert.id), ['manual'])
+})
+
+test('另一设备更新的单股复核开关通过增量同步立即生效', () => {
+  planStore.setData({
+    plan: [{ code: '600000', name: '浦发银行' }],
+    holding: [],
+    closed: [],
+    settings: {
+      'advReview.disabledCodes': [],
+      'advAuto.configUpdatedAt': 1000,
+    },
+    alerts: [
+      { id: 'auto', code: '600000', candCode: '600000' },
+      { id: 'manual', code: '600000', type: 'pct' },
+    ],
+  })
+
+  planStore.mergeCloud({
+    settings: {
+      'advReview.disabledCodes': ['600000'],
+      'advAuto.configUpdatedAt': 2000,
+    },
+  })
+
+  assert.equal(isAdviceReviewEnabled(planStore.get().settings, '600000'), false)
+  assert.deepEqual(planStore.get().alerts.map((alert) => alert.id), ['manual'])
+})

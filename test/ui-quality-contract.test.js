@@ -47,6 +47,13 @@ test('操作建议生成时间使用固定月日时分格式且拒绝非法时�
   assert.equal(formatAdviceTime('bad'), '')
 })
 
+test('个股详情提供可访问的单股持续复核开关', () => {
+  assert.match(stockDetail, /className={'advice-review-toggle'/)
+  assert.match(stockDetail, /aria-pressed={reviewEnabled}/)
+  assert.match(stockDetail, /planStore\.setAdviceReviewEnabled/)
+  assert.match(legacyStyles, /\.advice-review-toggle\.on/)
+})
+
 test('白天模式建立明确表面层级并将遗留紫色变量统一映射到钴蓝系统', () => {
   assert.match(
     tokens,

@@ -171,6 +171,9 @@ ${payload.quant.v2.executionReference ? `【当前时段实时执行层·不是�
     ? `\n【★★军师执行确认事件·立即闭环】${JSON.stringify(payload.reviewEvent)}。
 这是对上一版主计划的执行确认，不是第二套独立意见。decision=confirm 表示原计划的操作条件已经通过确定性信号与执行确认闸门，必须立即把 action/actionPlan 改成此刻可执行的明确指导，并保留手数、价格、T+1和失效底线；decision=invalid 表示原计划条件已被破坏，必须撤销旧动作并给出新的等待条件。不得忽略事件，也不得脱离同一 planId 另起方向。`
     : '';
+  const scheduledReviewNote = payload.reviewOrigin === 'auto'
+    ? `\n【定时复核稳定性约束】本轮没有执行确认事件。只复核证据是否仍支持上一版主计划，不得因分钟波动改写 action、opQty、actionPlan、买卖区间、止损或目标位；未出现客观失效证据时必须维持原计划。`
+    : '';
   const knowledgeActionNote = `\n【★★知行合一·字段职责】先定义，再行动；先守纪律，再谈收益。请在已有字段中分别写清：action=明确动作、actionPlan/nextAction=当前执行指令、timing/nextOpenPlan=触发条件、positionNote/planWeight/posAfter=仓位上限、exitTiming=确认与退出规则、risk=主要风险、invalidation=可证伪的失效条件。禁止用“适量、看情况、注意风险”等模糊词替代规则。系统会在返回后统一生成知行合一交易契约与评分，你不要再额外复制一套嵌套契约。
 【★★输出格式·简洁去重】同一事实只写一次，各字段各司其职：
 1. title/headline 只写结论，控制在20字内；actionPlan/nextAction 只写当前可执行动作，控制在80字内。
@@ -208,7 +211,7 @@ ${payload.todayQuote.isLimitUp ? '⚠️该股【今日已涨停】：说明今�
   const advisorData = advisorDataRaw.replace(
     /\n【★军师历史战绩·自我校准[\s\S]*?(?=\n【★量化模型·|\n【★量化·高把握|\n【★★高把握|\n【★资金金额)/,
     `${advisorTrackNote}${theoryTrackNote}`,
-  ) + realOutcomeNote + previousAdviceNote + reviewEventNote + knowledgeActionNote + knowledgeActionReviewNote;
+  ) + realOutcomeNote + previousAdviceNote + reviewEventNote + scheduledReviewNote + knowledgeActionNote + knowledgeActionReviewNote;
 
   // ============ 交易实况铁律：涨跌停可买性 + A股T+1 + 「下个开盘/未来」两段指导 ============
   // 解决:①卡片建议要结合涨跌停(±10%/±20%)、当前是否真能买(不追涨停、封板买不进)②A股T+1(当天买不能当天卖,自选股无底仓更不能当日做T卖)③建议要分「紧接着的下一个开盘时段」和「更远的未来」两段,今天买不了就讲后续怎么等。

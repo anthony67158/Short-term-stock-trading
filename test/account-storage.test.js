@@ -120,6 +120,10 @@ test('运行时账号同步只返回更新时间后的建议事件和轻量状�
     },
     alerts: [{ id: 'a1', createdAt: 50 }],
     batchProgress: { at: 400, running: true },
+    settings: {
+      'advReview.disabledCodes': ['600000'],
+      'advAuto.configUpdatedAt': 390,
+    },
     holding: [{ code: '600000', qty: 2 }],
     closed: [{ id: 'trade-1' }],
   }, 200)
@@ -130,6 +134,7 @@ test('运行时账号同步只返回更新时间后的建议事件和轻量状�
   assert.deepEqual(Object.keys(delta.reviews), ['fresh'])
   assert.equal(delta.alerts.length, 1)
   assert.equal(delta.batchProgress.running, true)
+  assert.deepEqual(delta.settings['advReview.disabledCodes'], ['600000'])
   assert.equal(delta.holding, undefined)
   assert.equal(delta.closed, undefined)
 })

@@ -1,4 +1,5 @@
 import { actionIntentOf } from '../shared/judgeAdviceContext.js'
+import { isAdviceReviewEnabled } from '../shared/adviceReviewPolicy.js'
 import { t1StatusOf } from './_portfolio.js'
 import { enqueueJob, needsWorkerDispatch } from './_jobs.js'
 
@@ -26,6 +27,9 @@ export function queueAdviceReviewForVerdict(data, alert, verdict, now = Date.now
   }
   const code = String(alert?.code || '')
   if (!code) return { queued: false, reason: 'missing-code' }
+  if (!isAdviceReviewEnabled(data?.settings, code)) {
+    return { queued: false, reason: 'review-disabled' }
+  }
   const currentAdvice = data?.advice?.[code]?.advice
   const alertPlanId = String(alert?.judgeContext?.planId || '')
   const currentPlanId = String(currentAdvice?.continuity?.planId || '')

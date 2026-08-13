@@ -25,6 +25,7 @@ import {
 } from '../../shared/stockDetailActions.js'
 import { AlertForm } from './AlertCenter'
 import { portfolioExposureContext } from '../../shared/portfolioExposure.js'
+import { isAdviceReviewEnabled } from '../../shared/adviceReviewPolicy.js'
 
 // 把公司网址补全为可点击的绝对 URL（东财 F10 常给不带协议的裸域名）
 function normalizeUrl(raw) {
@@ -76,6 +77,10 @@ export default function StockDetail({ stock, onClose }) {
   const [showInfo, setShowInfo] = useState(false) // 公司简介默认折叠
   const [busyModal, setBusyModal] = useState(null) // 端点已满提示:{ busy:[{code,name}], concurrency } | null
   const book = usePlanStore()
+  const reviewEnabled = isAdviceReviewEnabled(
+    book.settings,
+    stock && stock.code,
+  )
   const knowledgeActionReview = useMemo(
     () => latestKnowledgeActionReview(
       book.decisionLog,
@@ -672,7 +677,27 @@ export default function StockDetail({ stock, onClose }) {
                     {myHold ? <span className="decide-hold">持仓 {myHold.qty}手 · 成本{fmtRaw(myHold.cost)}</span>
                             : <span className="decide-hold none">未持仓</span>}
                   </div>
-                  {quantState && quantState.result && quantState.result.asOf && <span className="quant-asof">量化 {quantState.result.asOf}</span>}
+                  <div className="decide-review-controls">
+                    {quantState && quantState.result && quantState.result.asOf && <span className="quant-asof">量化 {quantState.result.asOf}</span>}
+                    <button
+                      type="button"
+                      className={'advice-review-toggle' + (reviewEnabled ? ' on' : '')}
+                      aria-pressed={reviewEnabled}
+                      title={reviewEnabled
+                        ? '关闭后停止该股定时复核、事件唤醒和军师派生预警'
+                        : '开启该股持续复核'}
+                      onClick={() => planStore.setAdviceReviewEnabled(
+                        stock.code,
+                        !reviewEnabled,
+                      )}
+                    >
+                      <span className="advice-review-toggle-track" aria-hidden="true">
+                        <span />
+                      </span>
+                      <span>持续复核</span>
+                      <b>{reviewEnabled ? '开' : '关'}</b>
+                    </button>
+                  </div>
                 </div>
 
                 {!quantState && (
@@ -749,6 +774,7 @@ export default function StockDetail({ stock, onClose }) {
                         <AdvicePresentation
                           advice={adv}
                           knowledgeActionReview={knowledgeActionReview}
+                          reviewEnabled={reviewEnabled}
                         />
                       ) : (
                         <div className={'decide-verdict ' + fallbackVerdict.tone}>

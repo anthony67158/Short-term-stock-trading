@@ -33,6 +33,11 @@ import {
   A_SHARE_STANDARD_FEE_POLICY,
   tradeFees,
 } from '../shared/ashareStrategyExecution.js'
+import {
+  isAdviceReviewEnabled,
+  setAdviceReviewEnabled as withAdviceReviewEnabled,
+} from '../shared/adviceReviewPolicy.js'
+import { newerAutoRefreshPatch } from '../shared/adviceAutoRefreshPolicy.js'
 // 注意:adviceBatch 只在 mergeCloud 运行时用到,这里【不能】做顶层静态 import——
 // 否则 planStore→adviceBatch→adviceRunner→serverAdvice→authStore 形成模块初始化环,
 // 而 authStore 顶层会调用 planStore.registerSaver(),此时 planStore 尚未初始化 → 整包崩(白屏卡启动)。
@@ -529,6 +534,22 @@ export const planStore = {
   mergeCloud(d) {
     if (!d || typeof d !== 'object') return false
     let changed = false
+    const refreshPatch = newerAutoRefreshPatch(
+      state.settings || {},
+      d.settings || {},
+    )
+    if (refreshPatch) {
+      const settings = { ...(state.settings || {}), ...refreshPatch }
+      const alerts = (state.alerts || []).filter((alert) =>
+        !(
+          alert?.code
+          && (alert.candCode === alert.code || alert.actCode === alert.code)
+          && !isAdviceReviewEnabled(settings, alert.code)
+        )
+      )
+      state = { ...state, settings, alerts }
+      changed = true
+    }
     // 1) AI 操作建议:逐条时间戳合并
     if (d.advice && typeof d.advice === 'object') {
       if (mergeAdvice(d.advice)) changed = true
@@ -682,6 +703,23 @@ export const planStore = {
   setSetting(key, value) {
     if (!key) return
     state.settings = { ...(state.settings || {}), [key]: value }
+    emit()
+  },
+  setAdviceReviewEnabled(code, enabled) {
+    if (!code) return
+    state.settings = withAdviceReviewEnabled(
+      state.settings || {},
+      code,
+      !!enabled,
+    )
+    if (!enabled) {
+      state.alerts = (state.alerts || []).filter((alert) =>
+        !(
+          alert?.code === code
+          && (alert.candCode === code || alert.actCode === code)
+        )
+      )
+    }
     emit()
   },
   addPlan(stock, note = '') {

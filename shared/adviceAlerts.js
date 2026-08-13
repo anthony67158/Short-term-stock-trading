@@ -1,5 +1,6 @@
 import { applyT1ToAlert } from './t1AdvicePolicy.js'
 import { adviceSupportsIntent, buildJudgeAdviceContext } from './judgeAdviceContext.js'
+import { isAdviceReviewEnabled } from './adviceReviewPolicy.js'
 
 function roundPrice(value) {
   const n = Number(value)
@@ -37,7 +38,10 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
   let changed = !Array.isArray(data.alerts)
 
   const isOwnedAutoAlert = (a) => a && a.code === code && (a.candCode === code || a.actCode === code)
-  if (data.settings && data.settings.aiAutoAlert === false) {
+  if (
+    data.settings?.aiAutoAlert === false
+    || !isAdviceReviewEnabled(data.settings, code)
+  ) {
     const next = alerts.filter((a) => !isOwnedAutoAlert(a))
     if (next.length !== alerts.length) changed = true
     data.alerts = next

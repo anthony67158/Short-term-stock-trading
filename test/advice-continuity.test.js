@@ -161,3 +161,30 @@ test('每次刷新保留精简的计划修订历史而不是只剩最后一版',
   assert.equal(entry.trail[0].revision, 2)
   assert.equal(entry.trail[0].reasoning, undefined)
 })
+
+test('自动定时复核锁定核心动作和价位，避免同方向建议频繁漂移', () => {
+  const result = reconcileAdviceContinuity({
+    code: '600000',
+    previous,
+    next: {
+      action: '持有',
+      title: '短线震荡持有',
+      actionPlan: '回踩10.18元企稳后继续持有',
+      opQty: '持有2手',
+      addPrice: 10.18,
+      reducePrice: 10.86,
+      stopPrice: 9.72,
+      reason: '盘口轻微变化',
+    },
+    stabilityMode: 'scheduled',
+    now: 2000,
+  })
+
+  assert.equal(result.advice.action, previous.advice.action)
+  assert.equal(result.advice.actionPlan, previous.advice.actionPlan)
+  assert.equal(result.advice.addPrice, previous.advice.addPrice)
+  assert.equal(result.advice.reducePrice, previous.advice.reducePrice)
+  assert.equal(result.advice.stopPrice, previous.advice.stopPrice)
+  assert.equal(result.advice.continuity.changeType, 'maintain')
+  assert.match(result.advice.continuity.changeReason, /自动复核未发现执行事件/)
+})

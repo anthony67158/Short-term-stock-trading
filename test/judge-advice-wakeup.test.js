@@ -100,6 +100,17 @@ test('云端闭环不依赖WebPush订阅，始终评估启用中的预警', () =
   assert.deepEqual(active.map((alert) => alert.id), ['armed'])
 })
 
+test('单股关闭持续复核后云端不再评估军师派生预警但保留手工预警', () => {
+  const active = cloudAlertsForEvaluation([
+    { id: 'auto', code: '600000', candCode: '600000', enabled: true },
+    { id: 'manual', code: '600000', type: 'pct', enabled: true },
+  ], {
+    'advReview.disabledCodes': ['600000'],
+  })
+
+  assert.deepEqual(active.map((alert) => alert.id), ['manual'])
+})
+
 test('军师生成期间到达的Judge事件在当前任务完成后自动续跑', () => {
   const data = {
     holding: [{ id: 'h1', code: '600000', qty: 2 }],
@@ -132,4 +143,25 @@ test('军师生成期间到达的Judge事件在当前任务完成后自动续跑
   assert.equal(data.jobs['600000'].source, 'judge')
   assert.equal(data.jobs['600000'].trigger.decision, 'invalid')
   assert.equal(data.jobs['600000'].at, 1200)
+})
+
+test('单股关闭持续复核后执行确认不再唤醒军师', () => {
+  const data = {
+    settings: { 'advReview.disabledCodes': ['600000'] },
+    holding: [{ id: 'h1', code: '600000', qty: 2 }],
+    advice: {
+      '600000': {
+        advice: { continuity: { planId: 'plan-1' } },
+      },
+    },
+  }
+
+  const result = queueAdviceReviewForVerdict(data, {
+    id: 'a1',
+    code: '600000',
+    judgeContext: { planId: 'plan-1' },
+  }, { decision: 'confirm' }, 1000)
+
+  assert.deepEqual(result, { queued: false, reason: 'review-disabled' })
+  assert.equal(data.jobs, undefined)
 })
