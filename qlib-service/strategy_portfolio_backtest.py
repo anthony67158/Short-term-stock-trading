@@ -146,6 +146,51 @@ def _is_st(bar):
     )
 
 
+def _is_signal_eligible(spec, bar):
+    universe = spec.get("universe")
+    ranking = spec.get("marketRanking")
+    if not isinstance(universe, dict) or not isinstance(ranking, dict):
+        return True
+    filters = ranking.get("filters")
+    if not isinstance(filters, dict):
+        return True
+    if universe.get("excludeSt") and _is_st(bar):
+        return False
+    volume = _finite(bar.get("volume"))
+    if universe.get("excludeSuspended") and (
+        volume is None or volume <= 0
+    ):
+        return False
+    price = _finite(bar.get("close"))
+    amount = _finite(bar.get("amount"))
+    if (
+        price is None
+        or price <= 0
+        or amount is None
+        or amount < float(universe["minimumAmount"])
+    ):
+        return False
+    listing_days = _finite(bar.get("listingDays"))
+    if (
+        listing_days is not None
+        and listing_days < float(universe["minimumListingDays"])
+    ):
+        return False
+    for field, lower_key, upper_key in (
+        ("pct", "minPct", "maxPct"),
+        ("turnover", "minTurnover", "maxTurnover"),
+        ("volRatio", "minVolRatio", "maxVolRatio"),
+    ):
+        value = _finite(bar.get(field))
+        if (
+            value is None
+            or value < float(filters[lower_key])
+            or value > float(filters[upper_key])
+        ):
+            return False
+    return True
+
+
 def _fill_rejection(side, bar):
     if (
         not bar
@@ -432,6 +477,8 @@ def run_portfolio_backtest(strategy_spec, bars, *, initial_cash=1_000_000):
             if code in positions:
                 continue
             bar = rows[code]
+            if not _is_signal_eligible(spec, bar):
+                continue
             if not _evaluate_node(spec["entry"], bar):
                 continue
             signals.append({

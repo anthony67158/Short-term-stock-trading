@@ -81,6 +81,9 @@ def bar(
     close=10,
     previous_close=10,
     volume=100_000,
+    amount=100_000_000,
+    turnover=2.0,
+    listing_days=100,
     market_score=70,
     quant_score=0,
 ):
@@ -94,6 +97,9 @@ def bar(
         "close": close,
         "previousClose": previous_close,
         "volume": volume,
+        "amount": amount,
+        "turnover": turnover,
+        "listingDays": listing_days,
         "marketScore": market_score,
         "pct": (
             (close / previous_close - 1) * 100
@@ -111,6 +117,56 @@ def bar(
 
 
 class PortfolioBacktestTest(unittest.TestCase):
+    def test_filters_universe_and_market_ranking_before_entry_signal(self):
+        spec = strategy(
+            universe={
+                "excludeSt": True,
+                "excludeSuspended": True,
+                "minimumListingDays": 20,
+                "minimumAmount": 80_000_000,
+            },
+            marketRanking={
+                "filters": {
+                    "minPct": -6,
+                    "maxPct": 8.8,
+                    "minTurnover": 0.4,
+                    "maxTurnover": 25,
+                    "minVolRatio": 0.5,
+                    "maxVolRatio": 8,
+                },
+            },
+        )
+        bars = [
+            bar(
+                "20260810",
+                "600001.SH",
+                amount=50_000_000,
+                quant_score=80,
+            ),
+            bar(
+                "20260810",
+                "600002.SH",
+                turnover=0.2,
+                quant_score=80,
+            ),
+            bar("20260810", "600003.SH", quant_score=80),
+            bar("20260811", "600001.SH"),
+            bar("20260811", "600002.SH"),
+            bar("20260811", "600003.SH"),
+        ]
+
+        report = run_portfolio_backtest(
+            spec,
+            bars,
+            initial_cash=100_000,
+        )
+
+        self.assertEqual(report["metrics"]["openedTrades"], 1)
+        self.assertEqual(
+            [item["code"] for item in report["openPositions"]],
+            ["600003.SH"],
+        )
+
     def test_signal_at_close_enters_next_open_and_exits_t_plus_one(self):
         bars = [
             bar("20260810", "600001.SH", quant_score=75),
