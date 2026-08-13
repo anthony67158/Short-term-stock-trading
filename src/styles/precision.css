@@ -1249,7 +1249,12 @@ textarea:focus {
 }
 
 .plan-section .hold-overview {
-  margin-inline: 0;
+  margin: var(--space-sm) 0;
+}
+
+.plan-section .ind-tabs {
+  margin-top: 0;
+  padding-block: 0 var(--space-3xs);
 }
 
 .hold-grid {

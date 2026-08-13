@@ -92,7 +92,11 @@ test('今日工作台双栏等高且情绪指标桌面端为三列', () => {
 test('持仓区共用页面边线且同一行卡片操作区固定到底部', () => {
   assert.match(
     precision,
-    /\.plan-section \.hold-overview\s*{[^}]*margin-inline:\s*0/s,
+    /\.plan-section \.hold-overview\s*{[^}]*margin:\s*var\(--space-sm\)\s+0/s,
+  )
+  assert.match(
+    precision,
+    /\.plan-section \.ind-tabs\s*{[^}]*margin-top:\s*0[^}]*padding-block:\s*0\s+var\(--space-3xs\)/s,
   )
   assert.match(precision, /\.hold-swipe-wrap\s*{[^}]*height:\s*100%/s)
   assert.match(
