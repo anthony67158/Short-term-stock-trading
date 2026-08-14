@@ -255,6 +255,56 @@ test('军师输入区使用等高网格且快捷键说明不再塞入 placeholde
   )
 })
 
+test('移动端复合头部、分段按钮与批量进度使用稳定单列布局', () => {
+  assert.match(
+    precision,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.plan-head\s*{[^}]*align-items:\s*stretch[^}]*flex-direction:\s*column/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.hold-head-actions\s*{[^}]*display:\s*grid[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)[^}]*width:\s*100%/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.hold-head-actions \.advisor-score\s*{[^}]*grid-column:\s*1\s*\/\s*-1/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?button\.tab,\s*button\.ai-chip,\s*button\.qa-preset,\s*button\.expand-btn\s*{[^}]*min-height:\s*40px/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?button\.th-inner\s*{[^}]*min-height:\s*40px/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.batch-prog \.bp-head\s*{[^}]*display:\s*grid[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.batch-prog \.bp-items\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.batch-prog \.bp-chip\s*{[^}]*width:\s*100%[^}]*min-height:\s*40px/s,
+  )
+})
+
+test('移动端面板标题和说明采用单行省略而不是挤压操作按钮', () => {
+  assert.match(
+    precision,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.panel-title\s*{[^}]*min-width:\s*0/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.panel-title \.sub-name\s*{[^}]*overflow:\s*hidden[^}]*text-overflow:\s*ellipsis[^}]*white-space:\s*nowrap/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.hub-tab\s*{[^}]*min-width:\s*0[^}]*min-height:\s*44px/s,
+  )
+})
+
 test('详情与汇报采用单层容器且不使用侧色条卡片', () => {
   assert.match(
     precision,

@@ -2336,10 +2336,23 @@ button.acct-item {
     padding: 0;
   }
 
+  .nav-meta .nav-refresh {
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
+  }
+
   .nav-brand {
     min-width: 44px;
     min-height: 44px;
     justify-content: center;
+  }
+
+  .icon-btn {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
   }
 
   .nav-status {
@@ -2460,7 +2473,210 @@ button.acct-item {
   }
 
   .panel-title {
+    min-width: 0;
+    max-width: 100%;
     font-size: var(--text-sm);
+  }
+
+  .panel-title .sub-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Composite headers get explicit rows instead of squeezing title and actions
+     into one unstable line. */
+  .plan-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .plan-head > .panel-title,
+  .plan-head-r,
+  .plan-search {
+    width: 100%;
+    max-width: none;
+  }
+
+  .plan-head-r {
+    margin-left: 0;
+    justify-content: stretch;
+  }
+
+  .hold-head-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-xs);
+    width: 100%;
+  }
+
+  .hold-head-actions .advisor-score {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .hold-head-actions .auto-ref-wrap,
+  .hold-head-actions .auto-ref-btn,
+  .hold-head-actions .batch-entry {
+    width: 100%;
+  }
+
+  .hold-head-actions .auto-ref-btn,
+  .hold-head-actions .batch-entry {
+    justify-content: center;
+  }
+
+  .hold-head-actions .auto-ref-wrap:last-child {
+    grid-column: 1 / -1;
+  }
+
+  /* Mobile controls use two deliberate heights: 44px primary actions and
+     40px compact tabs/chips. No incidental 24/32/34px controls. */
+  button.tab,
+  button.ai-chip,
+  button.qa-preset,
+  button.expand-btn {
+    min-height: 40px;
+  }
+
+  button.tab,
+  button.ai-chip,
+  button.qa-preset {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding-block: 0;
+    white-space: nowrap;
+  }
+
+  .expand-btn {
+    min-width: 40px;
+    justify-content: center;
+  }
+
+  button.th-inner {
+    min-height: 40px;
+    padding-inline: var(--space-3xs);
+  }
+
+  .hub-tabs {
+    gap: var(--space-3xs);
+    flex-wrap: nowrap;
+  }
+
+  .hub-tab {
+    min-width: 0;
+    min-height: 44px;
+    padding-inline: var(--space-2xs);
+  }
+
+  .hub-tab > span:not(.hub-badge) {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Selection toolbar is a predictable two-column action sheet. */
+  .batch-bar {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-xs);
+    padding: var(--space-sm);
+  }
+
+  .batch-bar .batch-hint,
+  .batch-bar .batch-count,
+  .batch-bar .batch-mode-note {
+    grid-column: 1 / -1;
+    width: 100%;
+    text-align: left;
+  }
+
+  .batch-bar .batch-spacer {
+    display: none;
+  }
+
+  .batch-bar .chip-btn {
+    width: 100%;
+    min-width: 0;
+    justify-content: center;
+  }
+
+  /* Background generation progress is vertical on phones. The desktop row
+     was the source of crushed titles, floating counters and narrow cards. */
+  .batch-prog {
+    margin: var(--space-xs) 0;
+    padding: var(--space-sm);
+  }
+
+  .batch-prog .bp-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--space-xs);
+  }
+
+  .batch-prog .bp-title {
+    grid-column: 1 / -1;
+    min-width: 0;
+    flex-wrap: wrap;
+    line-height: 1.45;
+  }
+
+  .batch-prog .bp-title .sub-name {
+    flex-basis: 100%;
+    margin-left: 19px;
+  }
+
+  .batch-prog .bp-deep-tag {
+    margin-left: 19px;
+  }
+
+  .batch-prog .bp-stat {
+    min-width: 0;
+  }
+
+  .batch-prog .bp-cancel,
+  .batch-prog .bp-regen {
+    min-width: 96px;
+    margin-left: 0;
+    justify-content: center;
+  }
+
+  .batch-prog .bp-items {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .batch-prog .bp-chip {
+    width: 100%;
+    min-height: 40px;
+    box-sizing: border-box;
+    border-radius: var(--radius-control);
+    padding: var(--space-2xs) var(--space-xs);
+  }
+
+  .batch-prog .bp-chip .bp-chip-name {
+    flex: 1;
+    min-width: 0;
+    max-width: none;
+  }
+
+  .batch-prog .bp-chip .bp-chip-x {
+    flex: none;
+    min-width: 32px;
+    min-height: 32px;
+    margin-left: auto;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .batch-prog .bp-detail {
+    margin-top: var(--space-2xs);
+    padding: var(--space-xs);
   }
 
   .footer {
