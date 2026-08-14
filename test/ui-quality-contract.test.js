@@ -305,6 +305,33 @@ test('移动端面板标题和说明采用单行省略而不是挤压操作按�
   )
 })
 
+test('移动端个股详情铺满视口且正文不叠加大块白色底', () => {
+  assert.match(
+    precision,
+    /html\[data-theme="light"\] \.detail-panel\s*{[^}]*background:\s*var\(--color-paper\)/s,
+  )
+  assert.match(
+    precision,
+    /\.detail-panel \.detail-scroll,[\s\S]*?\.detail-panel \.detail-kline\s*{[^}]*background:\s*transparent/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.modal-mask:has\(\.detail-panel\)\s*{[^}]*padding:\s*0[^}]*background:\s*var\(--color-paper\)/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.modal-mask:has\(\.detail-panel\) \.detail-panel\s*{[^}]*height:\s*100dvh[^}]*max-height:\s*100dvh[^}]*border-radius:\s*0/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.detail-panel \.modal-bar\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.detail-panel \.detail-kline-head\s*{[^}]*flex-wrap:\s*nowrap[^}]*overflow-x:\s*auto/s,
+  )
+})
+
 test('详情与汇报采用单层容器且不使用侧色条卡片', () => {
   assert.match(
     precision,

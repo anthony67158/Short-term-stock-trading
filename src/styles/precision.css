@@ -1590,6 +1590,17 @@ textarea:focus {
   background: var(--color-paper-2);
 }
 
+html[data-theme="light"] .detail-panel {
+  background: var(--color-paper);
+}
+
+.detail-panel .detail-scroll,
+.detail-panel .detail-quote,
+.detail-panel .decide-box,
+.detail-panel .detail-kline {
+  background: transparent;
+}
+
 .detail-scroll {
   background: var(--color-paper);
 }
@@ -2817,6 +2828,65 @@ button.acct-item {
 
   .detail-scroll {
     overflow-x: clip;
+  }
+
+  .modal-mask:has(.detail-panel) {
+    padding: 0;
+    background: var(--color-paper);
+  }
+
+  .modal-mask:has(.detail-panel) .detail-panel {
+    width: 100%;
+    height: 100dvh;
+    max-width: none;
+    max-height: 100dvh;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .detail-panel .modal-bar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    padding-top: max(var(--space-xs), env(safe-area-inset-top));
+  }
+
+  .detail-panel .modal-actions {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 44px;
+    gap: var(--space-2xs);
+  }
+
+  .detail-panel .modal-title {
+    display: block;
+    min-width: 0;
+  }
+
+  .detail-panel .detail-kline-head {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: none;
+  }
+
+  .detail-panel .detail-kline-head::-webkit-scrollbar {
+    display: none;
+  }
+
+  .detail-panel .detail-kline-head > * {
+    flex: none;
+  }
+
+  .detail-panel .detail-scroll {
+    background: transparent;
+  }
+
+  .detail-panel .detail-footbar {
+    padding-bottom: max(var(--space-sm), env(safe-area-inset-bottom));
+    background: transparent;
   }
 
   .modal-mask,
