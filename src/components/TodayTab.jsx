@@ -561,8 +561,24 @@ function DailyPlay({ snapshot }) {
               </div>
             )}
             {funnel && funnel.universeCount != null && (
-              <div className="pick-savedat">
-                全市场 {funnel.universeCount} 只{funnel.isComplete === false ? `（本轮扫描 ${funnel.scannedCount} 只）` : ''} → 可交易 {funnel.eligibleCount} 只 → {funnel.quantModelLabel || '量化模型'}成功 {funnel.quantCount} 只 → 策略通过 {funnel.signalPassedCount ?? '—'} 只 → 决策短名单 {funnel.shortlistCount} 只
+              <div className="pick-funnel" aria-label="AI选股筛选漏斗">
+                {[
+                  [
+                    funnel.isComplete === false ? '扫描/全市场' : '全市场',
+                    funnel.isComplete === false
+                      ? `${funnel.scannedCount ?? '—'}/${funnel.universeCount}`
+                      : funnel.universeCount,
+                  ],
+                  ['可交易', funnel.eligibleCount],
+                  ['量化成功', funnel.quantCount],
+                  ['策略通过', funnel.signalPassedCount ?? '—'],
+                  ['决策短名单', funnel.shortlistCount],
+                ].map(([label, value]) => (
+                  <div className="pick-funnel-step" key={label}>
+                    <b>{value ?? '—'}</b>
+                    <span>{label}</span>
+                  </div>
+                ))}
               </div>
             )}
             {res.marketNote && <div className="pick-market"><Icon name="pulse" size={13} /> <span className="pick-market-note">{res.marketNote}</span>{res.confidence && <span className={'pick-conf ' + (/高/.test(res.confidence) ? 'hi' : /低/.test(res.confidence) ? 'lo' : 'mid')}>把握度 {res.confidence}</span>}</div>}
@@ -581,27 +597,39 @@ function DailyPlay({ snapshot }) {
                   return (
                     <div className="pick-card" key={c.code || i}>
                       <div className="pick-top">
-                        <span className="pick-rank">{c.rank || i + 1}</span>
-                        <div className="pick-name">
-                          <StockName code={c.code} name={c.name}><span>{c.name}<span className="cand-code">{c.code}</span></span></StockName>
+                        <div className="pick-identity">
+                          <span className="pick-rank">{c.rank || i + 1}</span>
+                          <div className="pick-name">
+                            <StockName code={c.code} name={c.name}>
+                              <span className="pick-name-copy">
+                                <b>{c.name}</b>
+                                <span className="cand-code">{c.code}</span>
+                              </span>
+                            </StockName>
+                          </div>
                         </div>
-                        {c.grade && <span className={'pick-grade ' + gcls}>{c.grade}</span>}
-                        {c.actionability && <span className={'pick-action ' + (c.actionability === '可执行' ? 'ready' : 'watch')}>{c.actionability}</span>}
-                        {c.quantScore != null && <span className={'pick-score ' + (c.quantScore >= 60 ? 'red' : c.quantScore <= 40 ? 'green' : 'gold')}>量化 {c.quantScore}</span>}
-                        <button className={'chip-btn' + (added ? ' done' : '')} disabled={added} style={{ marginLeft: 'auto' }}
+                        <button className={'chip-btn pick-add' + (added ? ' done' : '')} disabled={added}
                           onClick={() => planStore.addPlan({ code: c.code, name: c.name }, c.reason)}>
                           <Icon name={added ? 'check' : 'plus'} size={13} />{added ? '已加入' : '加自选'}
                         </button>
+                        <div className="pick-badges">
+                          {c.grade && <span className={'pick-grade ' + gcls}>{c.grade}</span>}
+                          {c.actionability && <span className={'pick-action ' + (c.actionability === '可执行' ? 'ready' : 'watch')}>{c.actionability}</span>}
+                          {c.quantScore != null && <span className={'pick-score ' + (c.quantScore >= 60 ? 'red' : c.quantScore <= 40 ? 'green' : 'gold')}>量化 {c.quantScore}</span>}
+                        </div>
                       </div>
-                      <div className="pick-reason">{c.reason}</div>
+                      <div className="pick-reason">
+                        <span className="pick-reason-label">研判</span>
+                        <span>{c.reason}</span>
+                      </div>
                       <div className="pick-rows">
-                        {c.buyPoint && <div className="pick-row"><span className="pick-k buy">买点</span>{c.buyPoint}</div>}
-                        {c.buyZone && <div className="pick-row"><span className="pick-k">买入区</span><b className="red">{c.buyZone}</b></div>}
+                        {c.buyPoint && <div className="pick-row"><span className="pick-k buy">买点</span><span className="pick-row-value">{c.buyPoint}</span></div>}
+                        {c.buyZone && <div className="pick-row"><span className="pick-k">买入区</span><b className="pick-row-value red">{c.buyZone}</b></div>}
                         <div className="pick-foot">
                           {c.target && <span className="cand-expect">目标 {c.target}</span>}
                           {c.stop && <span className="cand-stop">止损 {c.stop}</span>}
                         </div>
-                        {c.risk && <div className="pick-row"><span className="pick-k risk">风险</span>{c.risk}</div>}
+                        {c.risk && <div className="pick-row"><span className="pick-k risk">风险</span><span className="pick-row-value">{c.risk}</span></div>}
                       </div>
                     </div>
                   )

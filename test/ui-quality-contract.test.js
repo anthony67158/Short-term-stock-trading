@@ -22,6 +22,7 @@ const llmConfig = read('src/components/LLMConfig.jsx')
 const planTab = read('src/components/PlanTab.jsx')
 const reviewTab = read('src/components/ReviewTab.jsx')
 const fundFlowCanvas = read('src/components/FundFlowCanvas.jsx')
+const todayTab = read('src/components/TodayTab.jsx')
 const semanticTabSources = [
   'src/components/AlertCenter.jsx',
   'src/components/AlertPanel.jsx',
@@ -329,6 +330,34 @@ test('移动端个股详情铺满视口且正文不叠加大块白色底', () =>
   assert.match(
     precision,
     /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.detail-panel \.detail-kline-head\s*{[^}]*flex-wrap:\s*nowrap[^}]*overflow-x:\s*auto/s,
+  )
+})
+
+test('移动端AI选股使用分层卡片与可视化筛选漏斗', () => {
+  assert.match(todayTab, /className="pick-funnel"/)
+  assert.match(todayTab, /className="pick-identity"/)
+  assert.match(todayTab, /className="pick-badges"/)
+  assert.match(todayTab, /className="pick-reason-label">研判/)
+  assert.match(todayTab, /className="pick-row-value"/)
+  assert.match(
+    precision,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.pick-top\s*{[^}]*display:\s*grid[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.pick-identity\s*{[^}]*display:\s*grid[^}]*grid-template-columns:\s*32px\s+minmax\(0,\s*1fr\)/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.pick-badges\s*{[^}]*display:\s*flex[^}]*grid-column:\s*1\s*\/\s*-1/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.pick-row\s*{[^}]*display:\s*grid[^}]*grid-template-columns:\s*56px\s+minmax\(0,\s*1fr\)/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.pick-funnel\s*{[^}]*display:\s*grid[^}]*grid-template-columns:\s*repeat\(5,\s*minmax\(0,\s*1fr\)\)/s,
   )
 })
 
