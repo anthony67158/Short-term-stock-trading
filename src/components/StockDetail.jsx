@@ -16,7 +16,9 @@ import { detailStore } from '../detailStore'
 import { currentQuantModelVersion, quantModelQuery } from '../quantModel'
 import {
   cloudAdviceLoadingState,
+  mergeAdviceRefreshState,
   newestAdviceResult,
+  shouldShowAdviceResult,
 } from '../../shared/adviceUiState.js'
 import { latestKnowledgeActionReview } from '../../shared/knowledgeAction.js'
 import {
@@ -37,6 +39,20 @@ function normalizeUrl(raw) {
   if (!/^https?:\/\//i.test(u)) u = 'http://' + u
   try { new URL(u); return u } catch { return null }
 }
+
+function adviceDisplayState(entry) {
+  if (!entry || typeof entry !== 'object') return null
+  return {
+    result: entry.result,
+    advice: entry.advice,
+    meta: entry.meta,
+    news: entry.news,
+    adviceMissing: entry.adviceMissing,
+    truncated: entry.truncated,
+    cachedAt: entry.cachedAt || entry.at,
+  }
+}
+
 // 成交量（手）友好显示
 function fmtVol(v) {
   if (v == null || isNaN(v)) return '--'
@@ -142,25 +158,38 @@ export default function StockDetail({ stock, onClose }) {
     const code = stock && stock.code
     if (!code) { setQuantState(null); return }
     const sync = () => {
-      if (isRunning(code)) {
-        const r = getRunning(code)
-        setQuantState({ loading: true, phase: r && r.phase, sources: (r && r.sources) || [], reasoning: (r && r.reasoning) || '', quant: (r && r.quant) || null })
-        return
-      }
       const expectedMode = myHold ? 'hold_advice' : 'buy_advice'
       const cached = getAdvice(code, expectedMode)
+      const cachedState = adviceDisplayState(cached)
+      if (isRunning(code)) {
+        const r = getRunning(code)
+        setQuantState(mergeAdviceRefreshState({
+          loading: true,
+          phase: r && r.phase,
+          sources: (r && r.sources) || [],
+          reasoning: (r && r.reasoning) || '',
+          quant: (r && r.quant) || null,
+        }, cachedState))
+        return
+      }
       const selectedResult = newestAdviceResult(getResult(code), cached, expectedMode)
       const res = selectedResult.source === 'runner' ? selectedResult.value : null
       if (res && res.pending) {
         // 本地生成中断→已转云端继续,展示中转 loading,待云端回灌自动切成品
-        setQuantState({ loading: true, cloud: true, phase: (res.error && String(res.error)) || '云端继续生成中,稍候自动刷新…', sources: [], reasoning: '', quant: null })
+        setQuantState(mergeAdviceRefreshState({
+          loading: true,
+          cloud: true,
+          phase: (res.error && String(res.error)) || '云端继续生成中,稍候自动刷新…',
+          sources: [],
+          reasoning: '',
+          quant: null,
+        }, cachedState))
         return
       }
       if (res) {
         setQuantState(res.error
-          ? { error: res.error }
-          : { result: res.result, advice: res.advice, meta: res.meta, news: res.news,
-              adviceMissing: res.adviceMissing, truncated: res.truncated, cachedAt: res.cachedAt })
+          ? mergeAdviceRefreshState({ error: res.error }, cachedState)
+          : adviceDisplayState(res))
         return
       }
       // 服务端(云端)批量/按需生成:该股在 FC 上生成,本机 isRunning 为 false。
@@ -173,20 +202,20 @@ export default function StockDetail({ stock, onClose }) {
           const it = (bs.items || []).find((x) => String(x.code) === c)
           const cloudLoading = cloudAdviceLoadingState(bs, c)
           if (cloudLoading) {
-            setQuantState(cloudLoading)
+            setQuantState(mergeAdviceRefreshState(cloudLoading, cachedState))
             return
           }
           // 云端已把该股标记为失败 → 如实提示生成失败(不做假成功)
           if (it && it.status === 'fail') {
-            setQuantState({ error: (it.error && String(it.error)) || '生成失败,请重试' })
+            setQuantState(mergeAdviceRefreshState({
+              error: (it.error && String(it.error)) || '生成失败,请重试',
+            }, cachedState))
             return
           }
         }
       } catch { /* ignore */ }
       const latestCache = selectedResult.source === 'cache' ? selectedResult.value : cached
-      setQuantState(latestCache
-        ? { result: latestCache.result, advice: latestCache.advice, meta: latestCache.meta, news: latestCache.news, truncated: latestCache.truncated, cachedAt: latestCache.at }
-        : null)
+      setQuantState(adviceDisplayState(latestCache))
     }
     sync()
     const unRunner = subscribeRunner(sync)
@@ -196,14 +225,16 @@ export default function StockDetail({ stock, onClose }) {
   }, [stock && stock.code, !!myHold])
   const loadQuant = async () => {
     if (!stock) return
-    setQuantState({
+    const expectedMode = myHold ? 'hold_advice' : 'buy_advice'
+    const previousState = adviceDisplayState(getAdvice(stock.code, expectedMode))
+    setQuantState(mergeAdviceRefreshState({
       loading: true,
       cloud: true,
       phase: '正在提交云端生成任务…',
       sources: [],
       reasoning: '',
       quant: null,
-    })
+    }, previousState))
     const hp = myHold ? `&holdCost=${myHold.cost}&holdQty=${myHold.qty}` : ''
     const quantModelVersion = currentQuantModelVersion()
     const quantUrl = api(`/api/stock_detail?code=${stock.code}&klt=101&lmt=60&quant=1${quantModelQuery()}${hp}&_t=${Date.now()}`)
@@ -306,7 +337,7 @@ export default function StockDetail({ stock, onClose }) {
       deepMode: true,
     })
     if (r?.mode === 'server') {
-      setQuantState({
+      setQuantState(mergeAdviceRefreshState({
         loading: true,
         cloud: true,
         phase: r.status === 'queued'
@@ -317,11 +348,11 @@ export default function StockDetail({ stock, onClose }) {
         sources: [],
         reasoning: '',
         quant: null,
-      })
+      }, previousState))
     }
     if (r && r.status === 'full') {
       setBusyModal({ busy: r.busy || [], concurrency: r.concurrency || 0 })
-      setQuantState(null)
+      setQuantState(previousState)
     }
   }
   const [showAlert, setShowAlert] = useState(false) // 设预警表单开关
@@ -711,7 +742,13 @@ export default function StockDetail({ stock, onClose }) {
                 )}
                 {quantState && quantState.loading && (
                   <div className="advice-skeleton">
-                    <div className="sk-hint"><Icon name="refresh" size={13} className="spin" /> {quantState.phase || '量化模型 + AI 计算中…'}（首次冷启动约需几秒）</div>
+                    <div className="sk-hint">
+                      <Icon name="refresh" size={13} className="spin" />
+                      {quantState.phase || '量化模型 + AI 计算中…'}
+                      {quantState.showingPrevious
+                        ? ' · 下方保留最近一次结果，完成后自动替换'
+                        : '（首次冷启动约需几秒）'}
+                    </div>
                     <AdviceGenerationStatus code={stock.code} variant="detail" />
                     {/* 数据源采集清单:每个源 settle 时后端推 source 事件,这里实时勾选(✓ 成功 / — 无数据) */}
                     {quantState.sources && quantState.sources.length > 0 && (
@@ -737,7 +774,7 @@ export default function StockDetail({ stock, onClose }) {
                         <div className="adv-reasoning-body" ref={(el) => { if (el) el.scrollTop = el.scrollHeight }}>{quantState.reasoning}</div>
                       </div>
                     )}
-                    {(!quantState.sources || !quantState.sources.length) && !quantState.reasoning && !quantState.quant && (
+                    {!quantState.showingPrevious && (!quantState.sources || !quantState.sources.length) && !quantState.reasoning && !quantState.quant && (
                       <>
                         <div className="sk-line sk-verdict" />
                         <div className="sk-line sk-timing" />
@@ -753,7 +790,7 @@ export default function StockDetail({ stock, onClose }) {
                     </button>
                   </div>
                 )}
-                {quantState && !quantState.loading && !quantState.error && (quantState.result || quantState.advice) && (() => {
+                {shouldShowAdviceResult(quantState) && (() => {
                   const q = quantState.result || {}
                   const adv = quantState.advice
                   const dec = q.decision || {}

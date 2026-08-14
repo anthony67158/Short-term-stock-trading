@@ -43,6 +43,25 @@ export function cloudAdviceLoadingState(batch, code) {
   }
 }
 
+export function mergeAdviceRefreshState(refreshState, previousState) {
+  const previous = previousState && typeof previousState === 'object'
+    ? previousState
+    : null
+  const refresh = refreshState && typeof refreshState === 'object'
+    ? refreshState
+    : {}
+  const showingPrevious = !!(previous?.result || previous?.advice)
+  return {
+    ...(previous || {}),
+    ...refresh,
+    showingPrevious,
+  }
+}
+
+export function shouldShowAdviceResult(state) {
+  return !!(state && (state.result || state.advice))
+}
+
 export function createAdviceCompletionPuller(pull) {
   let deliveredFingerprint = ''
   return async function pullCompletedAdvice(progress) {

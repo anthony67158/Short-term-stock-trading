@@ -5,7 +5,9 @@ import {
   adviceJobState,
   cloudAdviceLoadingState,
   createAdviceCompletionPuller,
+  mergeAdviceRefreshState,
   newestAdviceResult,
+  shouldShowAdviceResult,
   shouldApplyCloudBatch,
 } from '../shared/adviceUiState.js'
 
@@ -31,6 +33,35 @@ test('个股详情优先展示生成时间更新的云端批量结果', () => {
     source: 'runner',
     value: { ...runner, cachedAt: 300 },
   })
+})
+
+test('手动或自动刷新期间继续展示最近一次完整建议', () => {
+  const previous = {
+    result: { score: 66 },
+    advice: { action: '持有', actionPlan: '守住支撑继续持有' },
+    cachedAt: 100,
+  }
+  const loading = {
+    loading: true,
+    cloud: true,
+    phase: '正在采集最新证据',
+    sources: [{ label: '实时行情', ok: true }],
+  }
+
+  assert.deepEqual(mergeAdviceRefreshState(loading, previous), {
+    ...previous,
+    ...loading,
+    showingPrevious: true,
+  })
+  assert.deepEqual(mergeAdviceRefreshState(loading, null), {
+    ...loading,
+    showingPrevious: false,
+  })
+  assert.equal(shouldShowAdviceResult({
+    ...previous,
+    loading: true,
+  }), true)
+  assert.equal(shouldShowAdviceResult({ loading: true }), false)
 })
 
 test('个股建仓后不再展示旧的未持仓买入建议', () => {
