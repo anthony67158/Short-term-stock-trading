@@ -1,7 +1,13 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { deterministicJudge, intradayPrimitives, judgeConfirmation } from '../api/_confirm.js'
+import {
+  buildJudgeUserPrompt,
+  deterministicJudge,
+  intradayPrimitives,
+  JUDGE_MAX_TOKENS,
+  judgeConfirmation,
+} from '../api/_confirm.js'
 
 test('分时原语包含VWAP连续性、窗口回撤和反弹幅度', () => {
   const trends = Array.from({ length: 10 }, (_, index) => ({
@@ -17,6 +23,16 @@ test('分时原语包含VWAP连续性、窗口回撤和反弹幅度', () => {
   assert.equal(prim.drawdownFromHighPct < 0, true)
   assert.equal(prim.bounceFromLowPct > 0, true)
   assert.equal(prim.volSurge, true)
+})
+
+test('Judge只生成交易时机结论，不再重复生成知行合一评分', () => {
+  const prompt = buildJudgeUserPrompt({ 股票: '贵州茅台(600519)' })
+
+  assert.match(prompt, /"decision":"confirm\|wait\|invalid"/)
+  assert.match(prompt, /"confidence":0-100/)
+  assert.match(prompt, /"reason":"一句话中文理由"/)
+  assert.doesNotMatch(prompt, /knowledgeAction|知行合一|可执行性/)
+  assert.ok(JUDGE_MAX_TOKENS <= 160)
 })
 
 test('买点下方持续走弱时客观判定为失效', () => {

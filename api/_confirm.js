@@ -34,6 +34,13 @@ import { positionGateForAlert } from '../shared/alertPositionPolicy.js';
 import { buildJudgeKnowledgeActionAssessment } from '../shared/knowledgeAction.js';
 import { quantJudgeDiscipline } from '../shared/quantAdviceContext.js';
 
+export const JUDGE_MAX_TOKENS = 140;
+
+export function buildJudgeUserPrompt(payload) {
+  return '请判断此刻交易时机。数据如下(JSON):\n' + JSON.stringify(payload)
+    + '\n输出格式:{"decision":"confirm|wait|invalid","confidence":0-100,"reason":"一句话中文理由"}';
+}
+
 // ---- 交易语义分类:把一条价位预警归成 buy / sell / stop 三类 ----
 // buy : 买点 / 补仓(回踩到位后想低吸)——确认「止跌企稳」才买。
 // sell: 止盈 / 减仓(反弹到位后想高抛)——确认「冲高滞涨/回落」才卖。
@@ -167,9 +174,6 @@ async function llmJudge({ a, name, advice, prim, tech, det, position }) {
   const intent = actionIntentOf(a);
   const sideZh = actionLabelOf(a);
   const adv = buildJudgeAdviceContext({ ...(a.judgeContext || {}), ...(advice || {}) });
-  const knowledgeActionBaseline = buildJudgeKnowledgeActionAssessment(
-    adv.knowledgeActionPlan || adv,
-  );
   const modelDiscipline = quantJudgeDiscipline(adv.quantContext);
   const sys = '你是严谨的A股短线交易确认闸门。价格已触及关键价位,但「到价≠立刻动手」。'
     + '你的唯一任务:结合盘中走势与建议条件,判断【此刻是否真正到了动手时机】。'
@@ -214,7 +218,6 @@ async function llmJudge({ a, name, advice, prim, tech, det, position }) {
     },
     技术面: techSummaryForAI(tech),
     军师完整建议: adv,
-    知行合一基线评分: knowledgeActionBaseline,
     建议给出的确认条件: adv.exitTiming || adv.actionPlan || '(未提供,按通用纪律判断)',
     建议给出的失效条件: adv.invalidation || '(未提供)',
     确定性信号: { 结论: det.decision, 评分: det.score, 命中: det.hits },
@@ -222,9 +225,7 @@ async function llmJudge({ a, name, advice, prim, tech, det, position }) {
   };
   const messages = [
     { role: 'system', content: sys },
-    { role: 'user', content: '请判断此刻交易时机。数据如下(JSON):\n' + JSON.stringify(payload)
-      + '\n\n同时评估知行合一：可执行性0-20、逻辑一致性0-20、可证伪性0-20、纪律合规0-25、可复盘性0-15。严格按计划止损即使亏损也属于高质量执行；违规侥幸盈利不得加分。'
-      + '\n输出格式:{"decision":"confirm|wait|invalid","confidence":0-100,"reason":"一句话中文理由","knowledgeAction":{"dimensions":{"executability":0,"logicConsistency":0,"falsifiability":0,"disciplineCompliance":0,"reviewability":0},"findings":["符合项"],"violations":["缺陷"]}}' },
+    { role: 'user', content: buildJudgeUserPrompt(payload) },
   ];
   try {
     // Judge 必须及时：总预算 10s 内允许一次故障转移，超时立即回退客观信号。
@@ -234,7 +235,7 @@ async function llmJudge({ a, name, advice, prim, tech, det, position }) {
       role: 'judge', model,
       messages,
       temperature: 0,
-      maxTokens: 320,
+      maxTokens: JUDGE_MAX_TOKENS,
       timeoutMs: TIMEOUT_MS,
       responseFormat: { type: 'json_object' },
       reasoning: getReasoning('judge'),
@@ -254,10 +255,6 @@ async function llmJudge({ a, name, advice, prim, tech, det, position }) {
           adv.quantContext?.experimental ? 85 : 100,
         ),
         reason: String(value.reason || '').slice(0, 200),
-        knowledgeAction: buildJudgeKnowledgeActionAssessment(
-          adv.knowledgeActionPlan || adv,
-          value.knowledgeAction,
-        ),
       };
     } finally { done(); }
   } catch { return null; }
