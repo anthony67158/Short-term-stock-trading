@@ -1,12 +1,14 @@
 # 每日量化持续训练（冠军-挑战者，只升不降）
-# 触发：每天 UTC 01:30（北京时间 09:30 前后，收盘后新成熟标签已可用）+ 手动。
+# 触发：北京时间工作日 01:15（UTC 前一日 17:15）+ 手动。
 # 机制：拉最新日线→重建数据集→挑战者 vs 冠军(leak-free holdout AUC 对拍)→过护栏才晋级→上传 OSS。
 #       量化服务 model_lib 每 1h 从 OSS 热更新，故上传即上线，无需重部署 FC。
 name: daily-retrain
 
 on:
   schedule:
-    - cron: "30 1 * * 1-5"   # 周一至周五 UTC 01:30
+    # UTC 周日至周四 17:15 = 北京时间周一至周五 01:15。
+    # 避开整点和半点，降低 GitHub Actions 定时任务拥堵延迟。
+    - cron: "15 17 * * 0-4"
   workflow_dispatch: {}       # 支持手动触发
 
 concurrency:
@@ -21,9 +23,9 @@ jobs:
       run:
         working-directory: qlib-service   # 训练代码所在子目录(按仓库实际路径调整)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -70,13 +72,44 @@ jobs:
         if: steps.preflight.outputs.reachable != 'ok'
         run: echo "::warning::行情数据源(新浪/腾讯 CN)在本次 CI 出口 IP 下不可达,已跳过当日重训(线上保持冠军不变,非代码故障)。"
 
-      - name: Show latest decision
+      - name: Publish retrain decision
         if: always()
-        run: tail -n 1 retrain_history.jsonl || echo "(no history)"
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          history = "retrain_history.jsonl"
+          summary = os.environ["GITHUB_STEP_SUMMARY"]
+          if not os.path.exists(history):
+              lines = [
+                  "## 每日重训结果",
+                  "",
+                  "本次未生成训练审计记录。若 Preflight 显示数据源不可达，则本次为安全跳过。",
+              ]
+          else:
+              with open(history, encoding="utf-8") as fh:
+                  records = [json.loads(line) for line in fh if line.strip()]
+              rec = records[-1]
+              fields = [
+                  ("决策", rec.get("decision", "unknown")),
+                  ("原因", rec.get("reason", "-")),
+                  ("样本数", rec.get("n_samples", "-")),
+                  ("冠军 AUC", rec.get("champ_baseline_auc", "-")),
+                  ("挑战者 AUC", rec.get("chall_holdout_auc", "-")),
+                  ("OSS 已上传", rec.get("oss_uploaded", "-")),
+                  ("信号头决策", rec.get("signal_decision", "-")),
+              ]
+              lines = ["## 每日重训结果", "", "| 项目 | 结果 |", "|---|---|"]
+              lines.extend(f"| {name} | {value} |" for name, value in fields)
+              print(json.dumps(rec, ensure_ascii=False))
+          with open(summary, "a", encoding="utf-8") as fh:
+              fh.write("\n".join(lines) + "\n")
+          PY
 
       - name: Upload audit log artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: retrain-history-${{ github.run_id }}
           path: qlib-service/retrain_history.jsonl
