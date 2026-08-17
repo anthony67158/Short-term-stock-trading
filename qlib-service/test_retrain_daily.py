@@ -15,6 +15,7 @@ def load_retrain_daily():
     sklearn = types.ModuleType("sklearn")
     metrics = types.ModuleType("sklearn.metrics")
     metrics.roc_auc_score = lambda y, p: 0.5
+    metrics.log_loss = lambda y, p, labels=None: 0.69
     train_lgb = types.ModuleType("train_lgb")
     train_lgb.cv_auc_and_iters = lambda *args, **kwargs: (0.5, 120)
     train_lgb.fit_final = lambda *args, **kwargs: None
@@ -86,6 +87,130 @@ class ForwardHoldoutSplitTest(unittest.TestCase):
                 min_samples=1000, min_dates=3,
             )
         )
+
+    def test_incremental_split_trains_on_early_new_dates_and_blind_tests_latest(self):
+        retrain = load_retrain_daily()
+        dates = np.array([
+            "20260728", "20260729",
+            "20260730", "20260730",
+            "20260731", "20260731",
+            "20260803", "20260803",
+            "20260804", "20260804",
+            "20260805", "20260805",
+            "20260806", "20260806",
+        ])
+
+        train_idx, blind_idx, adapt_dates, blind_dates = (
+            retrain.incremental_adaptation_split(
+                dates,
+                "20260729",
+                blind_dates=3,
+            )
+        )
+
+        self.assertEqual(
+            adapt_dates,
+            ["20260730", "20260731", "20260803"],
+        )
+        self.assertEqual(
+            blind_dates,
+            ["20260804", "20260805", "20260806"],
+        )
+        self.assertEqual(
+            dates[train_idx].tolist(),
+            [
+                "20260728", "20260729",
+                "20260730", "20260730",
+                "20260731", "20260731",
+                "20260803", "20260803",
+            ],
+        )
+        self.assertEqual(
+            dates[blind_idx].tolist(),
+            [
+                "20260804", "20260804",
+                "20260805", "20260805",
+                "20260806", "20260806",
+            ],
+        )
+
+    def test_incremental_window_requires_adaptation_and_blind_samples(self):
+        retrain = load_retrain_daily()
+
+        self.assertFalse(retrain.incremental_window_ready(
+            adapt_n=999,
+            adapt_dates=["20260730", "20260731", "20260803"],
+            blind_n=1000,
+            blind_dates=["20260804", "20260805", "20260806"],
+            min_adapt_samples=1000,
+            min_adapt_dates=3,
+            min_blind_samples=1000,
+            min_blind_dates=3,
+        ))
+        self.assertTrue(retrain.incremental_window_ready(
+            adapt_n=1000,
+            adapt_dates=["20260730", "20260731", "20260803"],
+            blind_n=1000,
+            blind_dates=["20260804", "20260805", "20260806"],
+            min_adapt_samples=1000,
+            min_adapt_dates=3,
+            min_blind_samples=1000,
+            min_blind_dates=3,
+        ))
+
+    def test_recent_and_new_samples_receive_more_training_weight(self):
+        retrain = load_retrain_daily()
+        dates = np.array([
+            "20260102", "20260401", "20260729", "20260730", "20260803",
+        ])
+
+        weights = retrain.recency_sample_weights(
+            dates,
+            champion_data_end="20260729",
+            half_life_dates=2,
+            new_sample_boost=2.0,
+            floor=0.25,
+        )
+
+        self.assertGreater(weights[-1], weights[-2])
+        self.assertGreater(weights[-2], weights[2])
+        self.assertGreater(weights[2], weights[0])
+        self.assertAlmostEqual(float(weights.mean()), 1.0, places=6)
+
+    def test_promotion_requires_non_degradation_and_a_real_improvement(self):
+        retrain = load_retrain_daily()
+        champion = {"auc": 0.610, "logloss": 0.660, "top_precision": 0.70}
+
+        within_old_tolerance_but_worse = {
+            "auc": 0.607,
+            "logloss": 0.662,
+            "top_precision": 0.70,
+        }
+        self.assertFalse(retrain.should_promote_metrics(
+            champion,
+            within_old_tolerance_but_worse,
+        )["promote"])
+
+        better_auc = {
+            "auc": 0.614,
+            "logloss": 0.659,
+            "top_precision": 0.70,
+        }
+        decision = retrain.should_promote_metrics(champion, better_auc)
+        self.assertTrue(decision["promote"])
+        self.assertIn("auc_gain", decision["improvements"])
+
+        better_precision_but_auc_stable = {
+            "auc": 0.610,
+            "logloss": 0.661,
+            "top_precision": 0.73,
+        }
+        decision = retrain.should_promote_metrics(
+            champion,
+            better_precision_but_auc_stable,
+        )
+        self.assertTrue(decision["promote"])
+        self.assertIn("top_precision_gain", decision["improvements"])
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 """
-每日持续训练编排器（冠军-挑战者，走查式，只升不降）。
+每日增量适配训练编排器（冠军-挑战者，走查式，只升不降）。
 =================================================================
 目标：让量化打分模型「随时间越训越准」，同时用护栏保证「绝不因某天数据抖动/噪声而退步」。
 
@@ -12,15 +12,18 @@
 每天凌晨的流程：
   1) 重建数据集：拉最新日线 → 因子 → ATR 锚定 5 日达标标签 → dataset.npz（新成熟样本自动进入）。
   2) 从 OSS 同步现役冠军及其训练数据截止日（CI runner 本身无状态）。
-  3) 切「前向保留集」：只取冠军训练截止日之后的新成熟样本，确保冠军从未见过。
-  4) 冠军与挑战者在同一前向保留集上计算 AUC，避免跨数据源、跨市场区间硬比历史 AUC。
-  5) 护栏放行条件（全部满足才晋级）：
-        - chall_auc >= champ_auc - TOL           （不明显更差）
+  3) 将冠军截止日之后的新成熟样本切成「适配窗 + 最新盲测窗」：
+     挑战者吸收适配窗，最新日期完全不参与训练。
+  4) 训练时对近期和新增样本加权，避免新市场状态被长期历史样本淹没；36维特征口径不变。
+  5) 冠军与挑战者在同一最新盲测窗比较 AUC、LogLoss 和 Top10% 精度。
+  6) 护栏放行条件（全部满足才晋级）：
+        - AUC / LogLoss / Top10% 精度均不得明显退化
+        - AUC 或 Top10% 精度至少一项达到最小真实增益
         - chall_auc >= AUC_FLOOR                  （高于绝对下限，避免全局退化）
         - 样本量 >= MIN_SAMPLES 且正样本率在 [0.2,0.8]（数据健康）
      放行 → 用「全量数据」重训最终模型（时序CV定迭代数）→ 覆盖 bundled → 上传 OSS（1h 内热更新自动上线）。
      否则 → 保留冠军，当天不改线上，仅记录一次「拒绝」。
-  6) 审计：无论晋级/拒绝，都向 retrain_history.jsonl 追加一行留痕（可回溯每天决策）。
+  7) 审计：无论晋级/拒绝，都向 retrain_history.jsonl 追加一行留痕（可回溯每天决策）。
 
 线上生效机制：model_lib.py 每 1 小时从 OSS 拉一次模型（TTL 热更新），故上传 OSS 即自动上线，无需重部署 FC。
 
@@ -40,7 +43,7 @@ import time
 
 import numpy as np
 import lightgbm as lgb
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import log_loss, roc_auc_score
 
 from train_lgb import cv_auc_and_iters, fit_final
 
@@ -63,6 +66,27 @@ SIGNAL_PREC_FLOOR = float(os.environ.get("RETRAIN_SIGNAL_PREC_FLOOR", "0.83"))  
 SIGNAL_MIN_N = int(os.environ.get("RETRAIN_SIGNAL_MIN_N", "100"))               # holdout 上最少信号数
 FORWARD_MIN_SAMPLES = int(os.environ.get("RETRAIN_FORWARD_MIN_SAMPLES", "1000"))
 FORWARD_MIN_DATES = int(os.environ.get("RETRAIN_FORWARD_MIN_DATES", "3"))
+ADAPT_MIN_SAMPLES = int(os.environ.get("RETRAIN_ADAPT_MIN_SAMPLES", "1000"))
+ADAPT_MIN_DATES = int(os.environ.get("RETRAIN_ADAPT_MIN_DATES", "3"))
+BLIND_MIN_SAMPLES = int(os.environ.get("RETRAIN_BLIND_MIN_SAMPLES", "1000"))
+BLIND_MIN_DATES = int(os.environ.get("RETRAIN_BLIND_MIN_DATES", "3"))
+RECENCY_HALF_LIFE_DATES = int(
+    os.environ.get("RETRAIN_RECENCY_HALF_LIFE_DATES", "120")
+)
+NEW_SAMPLE_BOOST = float(os.environ.get("RETRAIN_NEW_SAMPLE_BOOST", "2.0"))
+MIN_AUC_GAIN = float(os.environ.get("RETRAIN_MIN_AUC_GAIN", "0.002"))
+MIN_TOP_PREC_GAIN = float(
+    os.environ.get("RETRAIN_MIN_TOP_PREC_GAIN", "0.01")
+)
+MAX_AUC_REGRESSION = float(
+    os.environ.get("RETRAIN_MAX_AUC_REGRESSION", "0.001")
+)
+MAX_LOGLOSS_REGRESSION = float(
+    os.environ.get("RETRAIN_MAX_LOGLOSS_REGRESSION", "0.005")
+)
+MAX_TOP_PREC_REGRESSION = float(
+    os.environ.get("RETRAIN_MAX_TOP_PREC_REGRESSION", "0.01")
+)
 
 
 def log(*a):
@@ -211,6 +235,163 @@ def forward_holdout_ready(holdout_n, holdout_dates, min_samples=None, min_dates=
     return holdout_n >= min_samples and len(holdout_dates) >= min_dates
 
 
+def incremental_adaptation_split(dates, champion_data_end, blind_dates=3):
+    """Split post-champion mature dates into adaptation and untouched blind test.
+
+    The challenger trains on all historical rows plus early post-champion rows.
+    The latest ``blind_dates`` dates remain unseen by both champion adaptation
+    and challenger training, so the gate measures whether consuming new labels
+    actually improved forward performance.
+    """
+    end_key = _date_key(champion_data_end)
+    keys = np.asarray([_date_key(value) for value in dates])
+    new_dates = sorted(
+        {str(dates[i]) for i in np.flatnonzero(keys > end_key)},
+        key=_date_key,
+    )
+    blind_count = max(1, int(blind_dates))
+    if len(new_dates) <= blind_count:
+        return (
+            np.flatnonzero(keys <= end_key),
+            np.asarray([], dtype=int),
+            [],
+            new_dates,
+        )
+    blind = new_dates[-blind_count:]
+    adapt = new_dates[:-blind_count]
+    blind_start = _date_key(blind[0])
+    train_idx = np.flatnonzero(keys < blind_start)
+    blind_idx = np.flatnonzero(keys >= blind_start)
+    return train_idx, blind_idx, adapt, blind
+
+
+def incremental_window_ready(
+    adapt_n,
+    adapt_dates,
+    blind_n,
+    blind_dates,
+    min_adapt_samples=None,
+    min_adapt_dates=None,
+    min_blind_samples=None,
+    min_blind_dates=None,
+):
+    min_adapt_samples = (
+        ADAPT_MIN_SAMPLES
+        if min_adapt_samples is None
+        else min_adapt_samples
+    )
+    min_adapt_dates = (
+        ADAPT_MIN_DATES if min_adapt_dates is None else min_adapt_dates
+    )
+    min_blind_samples = (
+        BLIND_MIN_SAMPLES
+        if min_blind_samples is None
+        else min_blind_samples
+    )
+    min_blind_dates = (
+        BLIND_MIN_DATES if min_blind_dates is None else min_blind_dates
+    )
+    return (
+        int(adapt_n) >= int(min_adapt_samples)
+        and len(adapt_dates) >= int(min_adapt_dates)
+        and int(blind_n) >= int(min_blind_samples)
+        and len(blind_dates) >= int(min_blind_dates)
+    )
+
+
+def recency_sample_weights(
+    dates,
+    champion_data_end=None,
+    half_life_dates=None,
+    new_sample_boost=None,
+    floor=0.25,
+):
+    """Return normalized time-decay weights without changing feature shape."""
+    values = np.asarray(dates).astype(str)
+    if not len(values):
+        return np.asarray([], dtype=np.float32)
+    unique = sorted(set(values), key=_date_key)
+    ranks = {value: index for index, value in enumerate(unique)}
+    latest_rank = len(unique) - 1
+    half_life = max(
+        1,
+        int(
+            RECENCY_HALF_LIFE_DATES
+            if half_life_dates is None
+            else half_life_dates
+        ),
+    )
+    boost = float(
+        NEW_SAMPLE_BOOST if new_sample_boost is None else new_sample_boost
+    )
+    champion_key = _date_key(champion_data_end)
+    weights = []
+    for value in values:
+        age = latest_rank - ranks[value]
+        weight = max(float(floor), 0.5 ** (age / half_life))
+        if champion_key and _date_key(value) > champion_key:
+            weight *= max(1.0, boost)
+        weights.append(weight)
+    result = np.asarray(weights, dtype=np.float32)
+    mean = float(result.mean())
+    return result / mean if mean > 0 else np.ones_like(result)
+
+
+def prediction_metrics(labels, probabilities, top_fraction=0.1):
+    labels = np.asarray(labels, dtype=int)
+    probabilities = np.clip(
+        np.asarray(probabilities, dtype=float),
+        1e-6,
+        1 - 1e-6,
+    )
+    if len(labels) != len(probabilities) or not len(labels):
+        raise ValueError("labels and probabilities must be non-empty and aligned")
+    auc = (
+        float(roc_auc_score(labels, probabilities))
+        if len(set(labels)) > 1
+        else float("nan")
+    )
+    top_n = max(1, int(np.ceil(len(labels) * float(top_fraction))))
+    top_idx = np.argsort(probabilities, kind="stable")[-top_n:]
+    return {
+        "auc": auc,
+        "logloss": float(log_loss(labels, probabilities, labels=[0, 1])),
+        "top_precision": float(labels[top_idx].mean()),
+        "top_n": int(top_n),
+        "base_rate": float(labels.mean()),
+    }
+
+
+def should_promote_metrics(champion, challenger):
+    auc_delta = float(challenger["auc"]) - float(champion["auc"])
+    logloss_delta = (
+        float(challenger["logloss"]) - float(champion["logloss"])
+    )
+    top_precision_delta = (
+        float(challenger["top_precision"])
+        - float(champion["top_precision"])
+    )
+    non_degraded = (
+        float(challenger["auc"]) >= AUC_FLOOR
+        and auc_delta >= -MAX_AUC_REGRESSION
+        and logloss_delta <= MAX_LOGLOSS_REGRESSION
+        and top_precision_delta >= -MAX_TOP_PREC_REGRESSION
+    )
+    improvements = []
+    if auc_delta >= MIN_AUC_GAIN:
+        improvements.append("auc_gain")
+    if top_precision_delta >= MIN_TOP_PREC_GAIN:
+        improvements.append("top_precision_gain")
+    return {
+        "promote": bool(non_degraded and improvements),
+        "non_degraded": bool(non_degraded),
+        "improvements": improvements,
+        "auc_delta": round(auc_delta, 6),
+        "logloss_delta": round(logloss_delta, 6),
+        "top_precision_delta": round(top_precision_delta, 6),
+    }
+
+
 def align_features(meta, cur_feats, X):
     """把当前数据集的特征列，按冠军 meta 里的 feat_names 顺序对齐，供冠军打分。
     当前训练/推理同源，顺序一般一致；此处做防御式对齐，特征集不兼容则返回 None。"""
@@ -263,21 +444,50 @@ def champion_baseline():
     return None, "none"
 
 
-def train_challenger(X_tr, y_tr, dates_tr, X_hold, y_hold):
-    """仅用训练段拟合挑战者，在保留集上评测 AUC。返回 (auc, n_est_for_holdout_fit)。"""
+def train_challenger(
+    X_tr,
+    y_tr,
+    dates_tr,
+    X_hold,
+    y_hold,
+    weights=None,
+):
+    """Fit the incremental challenger and evaluate the untouched blind set."""
     # 用时序 CV 在训练段内定迭代数(避免过拟合)，再用该迭代数在训练段全量拟合
-    _, n_est = cv_auc_and_iters(X_tr, y_tr, dates_tr, n_splits=4, verbose=False)
-    booster = fit_final(X_tr, y_tr, n_est)
+    _, n_est = cv_auc_and_iters(
+        X_tr,
+        y_tr,
+        dates_tr,
+        n_splits=4,
+        verbose=False,
+        weights=weights,
+    )
+    booster = fit_final(X_tr, y_tr, n_est, weights=weights)
     p = booster.predict(X_hold)
-    auc = roc_auc_score(y_hold, p) if len(set(y_hold)) > 1 else float("nan")
-    return float(auc), n_est
+    return prediction_metrics(y_hold, p), n_est
 
 
-def promote(X, y, dates, feat_names, chall_hold_auc, champ_auc):
+def promote(
+    X,
+    y,
+    dates,
+    feat_names,
+    chall_hold_auc,
+    champ_auc,
+    weights=None,
+    evaluation_metrics=None,
+):
     """晋级：全量重训最终模型 → 覆盖 bundled → 上传 OSS。返回写入的 meta。"""
     from factors_lib import FEATURE_NAMES  # noqa: F401  (口径一致性引用)
-    cv_auc, n_est = cv_auc_and_iters(X, y, dates, n_splits=5, verbose=False)
-    final = fit_final(X, y, n_est)
+    cv_auc, n_est = cv_auc_and_iters(
+        X,
+        y,
+        dates,
+        n_splits=5,
+        verbose=False,
+        weights=weights,
+    )
+    final = fit_final(X, y, n_est, weights=weights)
     final.save_model(BUNDLED_MODEL)
     imp = dict(zip(feat_names, [int(x) for x in final.feature_importance()]))
     meta = {
@@ -296,7 +506,15 @@ def promote(X, y, dates, feat_names, chall_hold_auc, champ_auc):
         "trained_by": "retrain_daily",
         "data_source": "tencent_qfq",
         "data_end_date": str(max(dates, key=_date_key)),
-        "evaluation_protocol": "same_forward_unseen_holdout",
+        "evaluation_protocol": (
+            evaluation_metrics or {}
+        ).get("protocol", "same_forward_unseen_holdout"),
+        "incremental_training": {
+            "enabled": weights is not None,
+            "recency_half_life_dates": RECENCY_HALF_LIFE_DATES,
+            "new_sample_boost": NEW_SAMPLE_BOOST,
+        },
+        "blind_metrics": evaluation_metrics or {},
     }
     json.dump(meta, open(BUNDLED_META, "w"), ensure_ascii=False, indent=2)
     log(f"已覆盖 bundled 模型 (cv_auc={cv_auc:.4f} n_est={n_est})")
@@ -419,20 +637,50 @@ def main():
     champion, champion_meta = load_champion()
     champion_data_end = champion_meta.get("data_end_date")
     hold_dates = []
+    adapt_dates = []
+    adapt_n = 0
+    training_weights = None
+    champion_metrics = None
+    challenger_metrics = None
+    metric_gate = None
     evaluation_protocol = "legacy_recorded_holdout"
     if champion is not None and champion_data_end:
-        tr_idx, hold_idx, hold_dates = forward_holdout_split(dates, champion_data_end)
-        if not forward_holdout_ready(len(hold_idx), hold_dates):
+        tr_idx, hold_idx, adapt_dates, hold_dates = (
+            incremental_adaptation_split(
+                dates,
+                champion_data_end,
+                blind_dates=BLIND_MIN_DATES,
+            )
+        )
+        champion_end_key = _date_key(champion_data_end)
+        adapt_n = int(np.sum([
+            _date_key(dates[i]) > champion_end_key for i in tr_idx
+        ]))
+        if not incremental_window_ready(
+            adapt_n,
+            adapt_dates,
+            len(hold_idx),
+            hold_dates,
+        ):
             rec = {
-                "decision": "skip", "reason": "insufficient_forward_holdout",
+                "decision": "skip",
+                "reason": "insufficient_incremental_window",
                 "champion_data_end": champion_data_end,
-                "holdout_n": int(len(hold_idx)), "holdout_dates": hold_dates,
-                "required_samples": FORWARD_MIN_SAMPLES,
-                "required_dates": FORWARD_MIN_DATES,
+                "adapt_n": adapt_n,
+                "adapt_dates": adapt_dates,
+                "blind_n": int(len(hold_idx)),
+                "blind_dates": hold_dates,
+                "required_adapt_samples": ADAPT_MIN_SAMPLES,
+                "required_adapt_dates": ADAPT_MIN_DATES,
+                "required_blind_samples": BLIND_MIN_SAMPLES,
+                "required_blind_dates": BLIND_MIN_DATES,
             }
             if not a.dry_run:
                 append_history(rec)
-            log("冠军训练后新增成熟样本不足，等待积累:", json.dumps(rec, ensure_ascii=False))
+            log(
+                "增量适配或盲测样本不足，等待成熟标签积累:",
+                json.dumps(rec, ensure_ascii=False),
+            )
             return
         champion_X = align_features(champion_meta, feat_names, X[hold_idx])
         if champion_X is None:
@@ -446,18 +694,29 @@ def main():
             rec = {
                 "decision": "skip", "reason": "single_class_forward_holdout",
                 "champion_data_end": champion_data_end,
-                "holdout_n": int(len(hold_idx)), "holdout_dates": hold_dates,
+                "blind_n": int(len(hold_idx)), "blind_dates": hold_dates,
             }
             if not a.dry_run:
                 append_history(rec)
             log("前向保留集只有单一标签，等待更多成熟样本")
             return
-        champ_auc = float(roc_auc_score(y[hold_idx], champion.predict(champion_X)))
-        champ_src = "same_forward_unseen_holdout"
+        champion_metrics = prediction_metrics(
+            y[hold_idx],
+            champion.predict(champion_X),
+        )
+        champ_auc = champion_metrics["auc"]
+        champ_src = "incremental_blind_forward"
         cut_date = hold_dates[0]
-        evaluation_protocol = "same_forward_unseen_holdout"
-        log(f"前向评测集: champion_data_end={champion_data_end} "
-            f"dates={len(hold_dates)} train={len(tr_idx)} holdout={len(hold_idx)}")
+        evaluation_protocol = "incremental_adaptation_then_blind_forward"
+        training_weights = recency_sample_weights(
+            dates[tr_idx],
+            champion_data_end=champion_data_end,
+        )
+        log(
+            f"增量训练窗: champion_data_end={champion_data_end} "
+            f"adapt_dates={len(adapt_dates)} adapt_n={adapt_n} "
+            f"blind_dates={len(hold_dates)} blind_n={len(hold_idx)}"
+        )
     else:
         # 兼容尚未记录训练截止日的旧冠军；当前 bundled 已补齐该字段，
         # 这里只保留为部署迁移期间的兜底。
@@ -466,16 +725,43 @@ def main():
         log(f"旧版保留评测集: cut_date={cut_date} train={len(tr_idx)} holdout={len(hold_idx)}")
 
     # 挑战者与冠军严格在同一保留集上评测
-    chall_auc, _ = train_challenger(X[tr_idx], y[tr_idx], dates[tr_idx],
-                                    X[hold_idx], y[hold_idx])
-    log(f"样本外 AUC → 冠军={champ_auc if champ_auc is None else round(champ_auc,4)}"
-        f"(来源{champ_src}) 挑战者={round(chall_auc,4)} (容差 {TOL}, 下限 {AUC_FLOOR})")
+    challenger_metrics, _ = train_challenger(
+        X[tr_idx],
+        y[tr_idx],
+        dates[tr_idx],
+        X[hold_idx],
+        y[hold_idx],
+        weights=training_weights,
+    )
+    chall_auc = challenger_metrics["auc"]
 
     # ---- 护栏决策 ----
     above_floor = chall_auc >= AUC_FLOOR
     no_champ = champ_auc is None or not np.isfinite(champ_auc)
-    beats_champ = no_champ or (chall_auc >= champ_auc - TOL)
-    should_promote = above_floor and beats_champ
+    if champion_metrics is not None:
+        metric_gate = should_promote_metrics(
+            champion_metrics,
+            challenger_metrics,
+        )
+        should_promote = metric_gate["promote"]
+        log(
+            "盲测指标 → "
+            f"冠军 AUC={champion_metrics['auc']:.4f} "
+            f"logloss={champion_metrics['logloss']:.4f} "
+            f"top精度={champion_metrics['top_precision']:.4f}; "
+            f"挑战者 AUC={challenger_metrics['auc']:.4f} "
+            f"logloss={challenger_metrics['logloss']:.4f} "
+            f"top精度={challenger_metrics['top_precision']:.4f}; "
+            f"gate={metric_gate}"
+        )
+    else:
+        beats_champ = no_champ or (chall_auc >= champ_auc - TOL)
+        should_promote = above_floor and beats_champ
+        log(
+            f"旧版样本外 AUC → 冠军="
+            f"{champ_auc if champ_auc is None else round(champ_auc,4)}"
+            f"(来源{champ_src}) 挑战者={round(chall_auc,4)}"
+        )
 
     base = {
         "n_samples": n, "pos_rate": round(pos_rate, 4), "cut_date": cut_date,
@@ -486,6 +772,19 @@ def main():
         "evaluation_protocol": evaluation_protocol,
         "champion_data_end": champion_data_end,
         "holdout_dates": hold_dates,
+        "adapt_n": adapt_n,
+        "adapt_dates": adapt_dates,
+        "blind_n": int(len(hold_idx)),
+        "blind_dates": hold_dates,
+        "champion_metrics": champion_metrics,
+        "challenger_metrics": challenger_metrics,
+        "metric_gate": metric_gate,
+        "recency_half_life_dates": (
+            RECENCY_HALF_LIFE_DATES if training_weights is not None else None
+        ),
+        "new_sample_boost": (
+            NEW_SAMPLE_BOOST if training_weights is not None else None
+        ),
         "tol": TOL, "auc_floor": AUC_FLOOR,
         "elapsed_s": round(time.time() - t0, 1),
     }
@@ -497,7 +796,14 @@ def main():
         return
 
     if not should_promote:
-        reason = "below_floor" if not above_floor else "not_better_than_champion"
+        if not above_floor:
+            reason = "below_floor"
+        elif metric_gate is not None and not metric_gate["non_degraded"]:
+            reason = "metric_regression"
+        elif metric_gate is not None:
+            reason = "no_incremental_improvement"
+        else:
+            reason = "not_better_than_champion"
         rec = {**base, "decision": "reject", "reason": reason}
         # 打分模型不晋级，但高把握买点信号头仍按自身护栏独立每日重训(gate 随新样本前推)
         sig_rec = retrain_signal_head(a.pool, a.bars)
@@ -509,7 +815,34 @@ def main():
         log("拒绝晋级(保留冠军，线上不变):", reason)
         return
 
-    meta, cv_auc = promote(X, y, dates, feat_names, chall_auc, (None if no_champ else champ_auc))
+    final_weights = (
+        recency_sample_weights(
+            dates,
+            champion_data_end=champion_data_end,
+        )
+        if champion_data_end
+        else None
+    )
+    evaluation_metrics = {
+        "protocol": evaluation_protocol,
+        "champion": champion_metrics,
+        "challenger": challenger_metrics,
+        "gate": metric_gate,
+        "adapt_n": adapt_n,
+        "adapt_dates": adapt_dates,
+        "blind_n": int(len(hold_idx)),
+        "blind_dates": hold_dates,
+    }
+    meta, cv_auc = promote(
+        X,
+        y,
+        dates,
+        feat_names,
+        chall_auc,
+        (None if no_champ else champ_auc),
+        weights=final_weights,
+        evaluation_metrics=evaluation_metrics,
+    )
     # 高把握买点信号头：与主模型同批每日重训(独立精确率护栏)
     sig_rec = retrain_signal_head(a.pool, a.bars) or {}
     uploaded = upload_oss()

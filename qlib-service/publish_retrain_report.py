@@ -13,8 +13,11 @@ REASONS = {
     "data_unavailable": "行情数据源不可达，本次安全跳过",
     "unhealthy_data": "训练数据健康度未通过护栏",
     "insufficient_forward_holdout": "冠军训练后的成熟样本不足",
+    "insufficient_incremental_window": "新增成熟样本尚不足以同时构成适配窗和盲测窗",
     "single_class_forward_holdout": "前向保留集只有单一标签",
     "champion_features_incompatible": "冠军特征与当前数据集不兼容",
+    "metric_regression": "挑战者在盲测窗出现指标退化",
+    "no_incremental_improvement": "挑战者稳定但未达到最小增益门槛",
 }
 
 DECISIONS = {
@@ -74,7 +77,27 @@ def report_from(record, env=None, now_ms=None):
         f"训练时间：{training_at}",
         f"原因：{reason}",
     ]
-    if rec.get("reason") == "insufficient_forward_holdout":
+    if rec.get("reason") == "insufficient_incremental_window":
+        lines.extend([
+            (
+                f"增量适配样本：{metric(rec.get('adapt_n'))}/"
+                f"{metric(rec.get('required_adapt_samples'))}"
+            ),
+            (
+                f"增量适配交易日：{len(rec.get('adapt_dates') or [])}/"
+                f"{metric(rec.get('required_adapt_dates'))}"
+            ),
+            (
+                f"独立盲测样本：{metric(rec.get('blind_n'))}/"
+                f"{metric(rec.get('required_blind_samples'))}"
+            ),
+            (
+                f"独立盲测交易日：{len(rec.get('blind_dates') or [])}/"
+                f"{metric(rec.get('required_blind_dates'))}"
+            ),
+            f"冠军数据截止：{text(rec.get('champion_data_end'))}",
+        ])
+    elif rec.get("reason") == "insufficient_forward_holdout":
         lines.extend([
             (
                 f"前向样本：{metric(rec.get('holdout_n'))}/"
@@ -87,11 +110,34 @@ def report_from(record, env=None, now_ms=None):
             f"冠军数据截止：{text(rec.get('champion_data_end'))}",
         ])
     else:
+        champion_metrics = rec.get("champion_metrics") or {}
+        challenger_metrics = rec.get("challenger_metrics") or {}
+        metric_gate = rec.get("metric_gate") or {}
         lines.extend([
             (
                 "样本外 AUC："
                 f"冠军 {metric(rec.get('champ_baseline_auc'))} "
                 f"vs 挑战者 {metric(rec.get('chall_holdout_auc'))}"
+            ),
+            (
+                "盲测 LogLoss："
+                f"冠军 {metric(champion_metrics.get('logloss'))} "
+                f"vs 挑战者 {metric(challenger_metrics.get('logloss'))}"
+            ),
+            (
+                "Top10% 精度："
+                f"冠军 {metric(champion_metrics.get('top_precision'))} "
+                f"vs 挑战者 {metric(challenger_metrics.get('top_precision'))}"
+            ),
+            (
+                f"增量适配：{metric(rec.get('adapt_n'))} 样本/"
+                f"{len(rec.get('adapt_dates') or [])}日；"
+                f"盲测 {metric(rec.get('blind_n'))} 样本/"
+                f"{len(rec.get('blind_dates') or [])}日"
+            ),
+            (
+                "晋级增益："
+                f"{'、'.join(metric_gate.get('improvements') or []) or '未达门槛'}"
             ),
             (
                 f"样本量：{metric(rec.get('n_samples'))}，"
@@ -130,6 +176,15 @@ def report_from(record, env=None, now_ms=None):
             "holdoutDates": rec.get("holdout_dates"),
             "requiredDates": rec.get("required_dates"),
             "championDataEnd": rec.get("champion_data_end"),
+            "adaptN": rec.get("adapt_n"),
+            "adaptDates": rec.get("adapt_dates"),
+            "blindN": rec.get("blind_n"),
+            "blindDates": rec.get("blind_dates"),
+            "championMetrics": rec.get("champion_metrics"),
+            "challengerMetrics": rec.get("challenger_metrics"),
+            "metricGate": rec.get("metric_gate"),
+            "recencyHalfLifeDates": rec.get("recency_half_life_dates"),
+            "newSampleBoost": rec.get("new_sample_boost"),
         },
     }
     return f"quantreport/retrain-{run_id}.json", report

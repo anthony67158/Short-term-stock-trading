@@ -118,6 +118,33 @@ def forecast(f, days=5, sims=3000):
         "targetLow": round(p10, 2), "targetMid": round(p50, 2), "targetHigh": round(p90, 2),
         "direction": direction, "confidence": conf, "dailyVol": round(sigma * 100, 2),
         "volEngine": vol_engine,
+        "horizon": "nextTradingDay" if days == 1 else f"next{days}TradingDays",
+        "rangeType": "P10-P90",
+        "rangeConfidencePct": 80,
+        "forecastEngine": "garchMonteCarlo",
+    }
+
+
+def forecast_outputs(f):
+    """Additive multi-horizon contract; legacy ``forecast`` stays five-day."""
+    return {
+        "forecast": forecast(f, days=5),
+        "nextTradeDayForecast": forecast(f, days=1),
+    }
+
+
+def forecast_availability(realtime=None):
+    """Declare boundaries so daily outputs cannot masquerade as intraday."""
+    return {
+        "nextTradeDay": True,
+        "currentSession": False,
+        "currentSessionReason":
+            "daily_model_has_no_intraday_remaining-session_label",
+        "currentSessionAlternative": (
+            "v2.1-intraday"
+            if isinstance(realtime, dict) and realtime.get("live")
+            else None
+        ),
     }
 
 
@@ -225,7 +252,9 @@ def predict(payload: dict = Body(...), x_api_key: str = Header(default="")):
 
         f = compute_factors(closes, highs, lows, vols, opens=opens, index_closes=index_closes)
         score, bias, t_dir, engine, prob = score_stock(f)
-        fc = forecast(f, days=5)
+        forecasts = forecast_outputs(f)
+        fc = forecasts["forecast"]
+        next_fc = forecasts["nextTradeDayForecast"]
         sig = high_conf_signal(f)
         dec = decide(score, bias, fc, f, hold)
         # ★事件确认高把握层(P2:正交高精度筛子,离线每日刷新的 event_tags 查表)。
@@ -233,6 +262,16 @@ def predict(payload: dict = Body(...), x_api_key: str = Header(default="")):
         evt_tag = event_tag_for(code)
 
         reads = []
+        if next_fc:
+            reads.append(
+                f"下一交易日{next_fc['direction']}，上涨概率"
+                f"{next_fc['upProb']:.0f}%，预期{next_fc['expRet']:+.1f}%"
+            )
+            reads.append(
+                f"下一交易日价格区间 {next_fc['targetLow']} ~ "
+                f"{next_fc['targetHigh']}（中枢 {next_fc['targetMid']}，"
+                "P10-P90）"
+            )
         if fc:
             reads.append(f"未来{fc['days']}日{fc['direction']}，上涨概率{fc['upProb']:.0f}%，预期{fc['expRet']:+.1f}%")
             reads.append(f"目标价区间 {fc['targetLow']} ~ {fc['targetHigh']}（中枢 {fc['targetMid']}）")
@@ -247,7 +286,12 @@ def predict(payload: dict = Body(...), x_api_key: str = Header(default="")):
         return {
             "ok": True, "code": code,
             "score": score, "bias": bias, "tDir": t_dir,
-            "forecast": fc, "decision": dec, "reads": reads,
+            "forecast": fc,
+            "nextTradeDayForecast": next_fc,
+            "forecastAvailability": forecast_availability(
+                payload.get("realtime")
+            ),
+            "decision": dec, "reads": reads,
             "highConfSignal": sig,
             "eventTag": evt_tag,
             "engine": engine, "hitProb": (round(prob, 4) if prob is not None else None),

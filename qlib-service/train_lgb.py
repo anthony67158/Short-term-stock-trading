@@ -44,12 +44,23 @@ def time_series_folds(dates, n_splits=5):
     return splits
 
 
-def cv_auc_and_iters(X, y, dates, n_splits=5, verbose=True):
+def cv_auc_and_iters(X, y, dates, n_splits=5, verbose=True, weights=None):
     """时序 CV 估计泛化 AUC + 每折最优迭代数。返回 (cv_auc, n_estimators)。
     与 retrain_daily 共用，保证冠军/挑战者 CV 口径完全一致。"""
+    sample_weights = (
+        np.asarray(weights, dtype=np.float32)
+        if weights is not None
+        else None
+    )
+    if sample_weights is not None and len(sample_weights) != len(y):
+        raise ValueError("weights length must match labels")
     aucs, best_iters = [], []
     for i, (tr, va) in enumerate(time_series_folds(dates, n_splits)):
-        dtr = lgb.Dataset(X[tr], y[tr])
+        dtr = lgb.Dataset(
+            X[tr],
+            y[tr],
+            weight=(sample_weights[tr] if sample_weights is not None else None),
+        )
         dva = lgb.Dataset(X[va], y[va], reference=dtr)
         m = lgb.train(PARAMS, dtr, num_boost_round=3000, valid_sets=[dva],
                       callbacks=[lgb.early_stopping(120, verbose=False),
@@ -68,9 +79,16 @@ def cv_auc_and_iters(X, y, dates, n_splits=5, verbose=True):
     return cv_auc, (n_est or 300)
 
 
-def fit_final(X, y, n_est):
+def fit_final(X, y, n_est, weights=None):
     """全量重训最终模型 Booster。"""
-    dall = lgb.Dataset(X, y)
+    sample_weights = (
+        np.asarray(weights, dtype=np.float32)
+        if weights is not None
+        else None
+    )
+    if sample_weights is not None and len(sample_weights) != len(y):
+        raise ValueError("weights length must match labels")
+    dall = lgb.Dataset(X, y, weight=sample_weights)
     return lgb.train(PARAMS, dall, num_boost_round=n_est)
 
 

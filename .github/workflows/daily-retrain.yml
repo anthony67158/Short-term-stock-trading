@@ -1,6 +1,6 @@
-# 每日量化持续训练（冠军-挑战者，只升不降）
+# 每日量化增量训练（新增成熟样本适配 + 独立盲测晋级）
 # 触发：北京时间工作日 01:15（UTC 前一日 17:15）+ 手动。
-# 机制：拉最新日线→重建数据集→挑战者 vs 冠军(leak-free holdout AUC 对拍)→过护栏才晋级→上传 OSS。
+# 机制：拉最新日线→新增成熟样本进入适配窗→最新日期保留为盲测窗→多指标提升才晋级→上传 OSS。
 #       量化服务 model_lib 每 1h 从 OSS 热更新，故上传即上线，无需重部署 FC。
 name: daily-retrain
 
@@ -31,7 +31,10 @@ jobs:
 
       - name: Install deps
         # 固定大版本,避免 numpy/lightgbm/sklearn 某天发新版导致的隐性构建失败(与线上 requirements 对齐)
-        run: pip install "numpy>=1.26,<2.1" "scipy>=1.11,<1.15" "lightgbm>=4.3,<4.8" "scikit-learn>=1.3,<1.6" "oss2>=2.18,<3.0"
+        run: pip install "fastapi>=0.110,<0.116" "numpy>=1.26,<2.1" "scipy>=1.11,<1.15" "lightgbm>=4.3,<4.8" "scikit-learn>=1.3,<1.6" "oss2>=2.18,<3.0"
+
+      - name: Verify incremental training and forecast contracts
+        run: python3 -m unittest test_retrain_daily.py test_app_forecast.py test_publish_retrain_report.py
 
       - name: Preflight - 行情数据源连通性自检
         # 历史根因:海外 CI 出口 IP 访问新浪 CN 行情常超时。但股票池已有仓库内 pool_cache.json 兜底,
@@ -97,6 +100,9 @@ jobs:
                   ("样本数", rec.get("n_samples", "-")),
                   ("冠军 AUC", rec.get("champ_baseline_auc", "-")),
                   ("挑战者 AUC", rec.get("chall_holdout_auc", "-")),
+                  ("增量适配样本", rec.get("adapt_n", "-")),
+                  ("独立盲测样本", rec.get("blind_n", "-")),
+                  ("晋级增益", "、".join((rec.get("metric_gate") or {}).get("improvements") or []) or "-"),
                   ("OSS 已上传", rec.get("oss_uploaded", "-")),
                   ("信号头决策", rec.get("signal_decision", "-")),
               ]
