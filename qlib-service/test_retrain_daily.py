@@ -204,6 +204,61 @@ class ForwardHoldoutSplitTest(unittest.TestCase):
         self.assertGreater(weights[2], weights[0])
         self.assertAlmostEqual(float(weights.mean()), 1.0, places=6)
 
+    def test_only_misclassified_adaptation_samples_receive_capped_error_weight(self):
+        retrain = load_retrain_daily()
+        base_weights = np.ones(6, dtype=np.float32)
+        probabilities = np.array([0.90, 0.55, 0.10, 0.80, 0.20, 0.70])
+        labels = np.array([0, 0, 0, 1, 1, 1])
+        adaptation_mask = np.array([True, True, True, True, False, False])
+
+        weights, stats = retrain.hard_error_sample_weights(
+            base_weights,
+            probabilities,
+            labels,
+            adaptation_mask,
+            base_multiplier=2.0,
+            confidence_bonus=1.0,
+            max_multiplier=3.0,
+        )
+
+        self.assertAlmostEqual(float(weights.mean()), 1.0, places=6)
+        self.assertGreater(weights[0], weights[1])
+        self.assertGreater(weights[1], weights[2])
+        self.assertEqual(weights[2], weights[3])
+        self.assertEqual(weights[4], weights[5])
+        self.assertEqual(stats["eligible_n"], 4)
+        self.assertEqual(stats["hard_error_n"], 2)
+        self.assertEqual(stats["hard_error_rate"], 0.5)
+        self.assertEqual(stats["base_multiplier"], 2.0)
+        self.assertEqual(stats["max_applied_multiplier"], 2.8)
+
+    def test_hard_error_weighting_does_not_use_blind_or_historical_rows(self):
+        retrain = load_retrain_daily()
+        weights, stats = retrain.hard_error_sample_weights(
+            np.ones(4, dtype=np.float32),
+            np.array([0.99, 0.99, 0.01, 0.01]),
+            np.array([0, 0, 1, 1]),
+            np.array([False, False, False, False]),
+        )
+
+        np.testing.assert_allclose(weights, np.ones(4))
+        self.assertEqual(stats["eligible_n"], 0)
+        self.assertEqual(stats["hard_error_n"], 0)
+
+    def test_pending_error_queue_uses_actual_forward_backtest_counts(self):
+        retrain = load_retrain_daily()
+
+        summary = retrain.pending_hard_error_summary({
+            "overall": {"total": 1125, "correct": 712},
+        })
+
+        self.assertEqual(summary, {
+            "eligible_n": 1125,
+            "hard_error_n": 413,
+            "hard_error_rate": 0.3671,
+        })
+        self.assertIsNone(retrain.pending_hard_error_summary(None))
+
     def test_promotion_requires_non_degradation_and_a_real_improvement(self):
         retrain = load_retrain_daily()
         champion = {"auc": 0.610, "logloss": 0.660, "top_precision": 0.70}

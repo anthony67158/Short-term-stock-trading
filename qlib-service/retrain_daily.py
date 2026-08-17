@@ -14,7 +14,8 @@
   2) 从 OSS 同步现役冠军及其训练数据截止日（CI runner 本身无状态）。
   3) 将冠军截止日之后的新成熟样本切成「适配窗 + 最新盲测窗」：
      挑战者吸收适配窗，最新日期完全不参与训练。
-  4) 训练时对近期和新增样本加权，避免新市场状态被长期历史样本淹没；36维特征口径不变。
+  4) 训练时对近期和新增样本加权，并把冠军在适配窗中的误判按置信度提升到 2–3 倍权重；
+     最新盲测窗绝不参与难样本标记，避免标签泄漏；36维特征口径不变。
   5) 冠军与挑战者在同一最新盲测窗比较 AUC、LogLoss 和 Top10% 精度。
   6) 护栏放行条件（全部满足才晋级）：
         - AUC / LogLoss / Top10% 精度均不得明显退化
@@ -78,6 +79,15 @@ RECENCY_HALF_LIFE_DATES = int(
     os.environ.get("RETRAIN_RECENCY_HALF_LIFE_DATES", "120")
 )
 NEW_SAMPLE_BOOST = float(os.environ.get("RETRAIN_NEW_SAMPLE_BOOST", "2.0"))
+HARD_ERROR_BASE_MULTIPLIER = float(
+    os.environ.get("RETRAIN_HARD_ERROR_BASE_MULTIPLIER", "2.0")
+)
+HARD_ERROR_CONFIDENCE_BONUS = float(
+    os.environ.get("RETRAIN_HARD_ERROR_CONFIDENCE_BONUS", "1.0")
+)
+HARD_ERROR_MAX_MULTIPLIER = float(
+    os.environ.get("RETRAIN_HARD_ERROR_MAX_MULTIPLIER", "3.0")
+)
 MIN_AUC_GAIN = float(os.environ.get("RETRAIN_MIN_AUC_GAIN", "0.002"))
 MIN_TOP_PREC_GAIN = float(
     os.environ.get("RETRAIN_MIN_TOP_PREC_GAIN", "0.01")
@@ -368,6 +378,110 @@ def recency_sample_weights(
     return result / mean if mean > 0 else np.ones_like(result)
 
 
+def hard_error_sample_weights(
+    base_weights,
+    probabilities,
+    labels,
+    eligible_mask,
+    base_multiplier=None,
+    confidence_bonus=None,
+    max_multiplier=None,
+):
+    """Upweight only mature OOS mistakes; blind and historical rows stay neutral."""
+    weights = np.asarray(base_weights, dtype=np.float32).copy()
+    probabilities = np.asarray(probabilities, dtype=float)
+    labels = np.asarray(labels, dtype=int)
+    eligible = np.asarray(eligible_mask, dtype=bool)
+    if not (
+        len(weights)
+        == len(probabilities)
+        == len(labels)
+        == len(eligible)
+    ):
+        raise ValueError("hard error weighting arrays must be aligned")
+    base = max(
+        1.0,
+        float(
+            HARD_ERROR_BASE_MULTIPLIER
+            if base_multiplier is None
+            else base_multiplier
+        ),
+    )
+    bonus = max(
+        0.0,
+        float(
+            HARD_ERROR_CONFIDENCE_BONUS
+            if confidence_bonus is None
+            else confidence_bonus
+        ),
+    )
+    cap = max(
+        base,
+        float(
+            HARD_ERROR_MAX_MULTIPLIER
+            if max_multiplier is None
+            else max_multiplier
+        ),
+    )
+    valid = (
+        eligible
+        & np.isfinite(probabilities)
+        & np.isin(labels, (0, 1))
+    )
+    predictions = (probabilities >= 0.5).astype(int)
+    hard_errors = valid & (predictions != labels)
+    confidence = np.clip(np.abs(probabilities - 0.5) * 2.0, 0.0, 1.0)
+    multipliers = np.ones(len(weights), dtype=np.float32)
+    multipliers[hard_errors] = np.minimum(
+        cap,
+        base + bonus * confidence[hard_errors],
+    )
+    weights *= multipliers
+    mean = float(weights.mean()) if len(weights) else 0.0
+    if mean > 0:
+        weights /= mean
+    eligible_n = int(np.sum(valid))
+    hard_error_n = int(np.sum(hard_errors))
+    applied = multipliers[hard_errors]
+    return weights, {
+        "enabled": True,
+        "eligible_n": eligible_n,
+        "hard_error_n": hard_error_n,
+        "hard_error_rate": (
+            round(hard_error_n / eligible_n, 4)
+            if eligible_n
+            else None
+        ),
+        "base_multiplier": round(base, 3),
+        "confidence_bonus": round(bonus, 3),
+        "max_multiplier": round(cap, 3),
+        "mean_applied_multiplier": (
+            round(float(applied.mean()), 3)
+            if len(applied)
+            else 1.0
+        ),
+        "max_applied_multiplier": (
+            round(float(applied.max()), 3)
+            if len(applied)
+            else 1.0
+        ),
+    }
+
+
+def pending_hard_error_summary(production_report):
+    overall = (production_report or {}).get("overall") or {}
+    total = int(overall.get("total") or 0)
+    correct = int(overall.get("correct") or 0)
+    if total <= 0 or correct < 0 or correct > total:
+        return None
+    hard_error_n = total - correct
+    return {
+        "eligible_n": total,
+        "hard_error_n": hard_error_n,
+        "hard_error_rate": round(hard_error_n / total, 4),
+    }
+
+
 def prediction_metrics(labels, probabilities, top_fraction=0.1):
     labels = np.asarray(labels, dtype=int)
     probabilities = np.clip(
@@ -590,6 +704,9 @@ def promote(
             "enabled": weights is not None,
             "recency_half_life_dates": RECENCY_HALF_LIFE_DATES,
             "new_sample_boost": NEW_SAMPLE_BOOST,
+            "hard_error_mining": (
+                evaluation_metrics or {}
+            ).get("final_hard_error_mining"),
         },
         "blind_metrics": evaluation_metrics or {},
     }
@@ -731,7 +848,7 @@ def main():
         sys.exit(0)
 
     champion, champion_meta = load_champion()
-    publish_current_production_accuracy(
+    production_accuracy_report = publish_current_production_accuracy(
         champion,
         champion_meta,
         X,
@@ -743,6 +860,9 @@ def main():
         next_actual_up,
         next_range_hit,
     )
+    pending_hard_errors = pending_hard_error_summary(
+        production_accuracy_report
+    )
     champion_data_end = champion_meta.get("data_end_date")
     hold_dates = []
     adapt_dates = []
@@ -751,6 +871,7 @@ def main():
     champion_metrics = None
     challenger_metrics = None
     metric_gate = None
+    hard_error_mining = None
     evaluation_protocol = "legacy_recorded_holdout"
     if champion is not None and champion_data_end:
         tr_idx, hold_idx, adapt_dates, hold_dates = (
@@ -782,6 +903,7 @@ def main():
                 "required_adapt_dates": ADAPT_MIN_DATES,
                 "required_blind_samples": BLIND_MIN_SAMPLES,
                 "required_blind_dates": BLIND_MIN_DATES,
+                "pending_hard_errors": pending_hard_errors,
             }
             if not a.dry_run:
                 append_history(rec)
@@ -820,10 +942,41 @@ def main():
             dates[tr_idx],
             champion_data_end=champion_data_end,
         )
+        adapt_positions = np.flatnonzero([
+            _date_key(dates[index]) > champion_end_key
+            for index in tr_idx
+        ])
+        adapt_features = align_features(
+            champion_meta,
+            feat_names,
+            X[tr_idx[adapt_positions]],
+        )
+        if adapt_features is None:
+            append_history({
+                "decision": "error",
+                "stage": "hard_error_feature_alignment",
+                "reason": "champion_features_incompatible",
+            })
+            log("难样本特征与冠军不兼容，停止对拍")
+            sys.exit(1)
+        train_probabilities = np.full(len(tr_idx), np.nan, dtype=float)
+        train_probabilities[adapt_positions] = champion.predict(
+            adapt_features
+        )
+        adaptation_mask = np.zeros(len(tr_idx), dtype=bool)
+        adaptation_mask[adapt_positions] = True
+        training_weights, hard_error_mining = hard_error_sample_weights(
+            training_weights,
+            train_probabilities,
+            y[tr_idx],
+            adaptation_mask,
+        )
         log(
             f"增量训练窗: champion_data_end={champion_data_end} "
             f"adapt_dates={len(adapt_dates)} adapt_n={adapt_n} "
-            f"blind_dates={len(hold_dates)} blind_n={len(hold_idx)}"
+            f"blind_dates={len(hold_dates)} blind_n={len(hold_idx)} "
+            f"hard_errors={hard_error_mining['hard_error_n']}/"
+            f"{hard_error_mining['eligible_n']}"
         )
     else:
         # 兼容尚未记录训练截止日的旧冠军；当前 bundled 已补齐该字段，
@@ -887,6 +1040,7 @@ def main():
         "champion_metrics": champion_metrics,
         "challenger_metrics": challenger_metrics,
         "metric_gate": metric_gate,
+        "hard_error_mining": hard_error_mining,
         "recency_half_life_dates": (
             RECENCY_HALF_LIFE_DATES if training_weights is not None else None
         ),
@@ -931,6 +1085,32 @@ def main():
         if champion_data_end
         else None
     )
+    final_hard_error_mining = None
+    if champion is not None and champion_data_end and final_weights is not None:
+        champion_end_key = _date_key(champion_data_end)
+        new_positions = np.flatnonzero([
+            _date_key(value) > champion_end_key for value in dates
+        ])
+        new_features = align_features(
+            champion_meta,
+            feat_names,
+            X[new_positions],
+        )
+        if new_features is None:
+            log("最终难样本特征与冠军不兼容，取消本次晋级")
+            return
+        final_probabilities = np.full(len(y), np.nan, dtype=float)
+        final_probabilities[new_positions] = champion.predict(new_features)
+        new_sample_mask = np.zeros(len(y), dtype=bool)
+        new_sample_mask[new_positions] = True
+        final_weights, final_hard_error_mining = (
+            hard_error_sample_weights(
+                final_weights,
+                final_probabilities,
+                y,
+                new_sample_mask,
+            )
+        )
     evaluation_metrics = {
         "protocol": evaluation_protocol,
         "champion": champion_metrics,
@@ -940,6 +1120,8 @@ def main():
         "adapt_dates": adapt_dates,
         "blind_n": int(len(hold_idx)),
         "blind_dates": hold_dates,
+        "hard_error_mining": hard_error_mining,
+        "final_hard_error_mining": final_hard_error_mining,
     }
     meta, cv_auc = promote(
         X,

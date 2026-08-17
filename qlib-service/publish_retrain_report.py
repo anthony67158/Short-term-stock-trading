@@ -49,6 +49,13 @@ def metric(value):
     return str(value)
 
 
+def percent(value):
+    try:
+        return f"{float(value) * 100:.2f}".rstrip("0").rstrip(".")
+    except (TypeError, ValueError):
+        return "-"
+
+
 def report_from(record, env=None, now_ms=None):
     env = env or os.environ
     run_id = int(env["GITHUB_RUN_ID"])
@@ -78,6 +85,7 @@ def report_from(record, env=None, now_ms=None):
         f"原因：{reason}",
     ]
     if rec.get("reason") == "insufficient_incremental_window":
+        pending_errors = rec.get("pending_hard_errors") or {}
         lines.extend([
             (
                 f"增量适配样本：{metric(rec.get('adapt_n'))}/"
@@ -96,6 +104,15 @@ def report_from(record, env=None, now_ms=None):
                 f"{metric(rec.get('required_blind_dates'))}"
             ),
             f"冠军数据截止：{text(rec.get('champion_data_end'))}",
+            *([
+                (
+                    "待学习五日误判："
+                    f"{metric(pending_errors.get('hard_error_n'))}/"
+                    f"{metric(pending_errors.get('eligible_n'))}"
+                    f"（{percent(pending_errors.get('hard_error_rate'))}%），"
+                    "窗口成熟后进入加权训练"
+                )
+            ] if pending_errors.get("eligible_n") is not None else []),
         ])
     elif rec.get("reason") == "insufficient_forward_holdout":
         lines.extend([
@@ -113,6 +130,7 @@ def report_from(record, env=None, now_ms=None):
         champion_metrics = rec.get("champion_metrics") or {}
         challenger_metrics = rec.get("challenger_metrics") or {}
         metric_gate = rec.get("metric_gate") or {}
+        hard_errors = rec.get("hard_error_mining") or {}
         lines.extend([
             (
                 "样本外 AUC："
@@ -135,6 +153,18 @@ def report_from(record, env=None, now_ms=None):
                 f"盲测 {metric(rec.get('blind_n'))} 样本/"
                 f"{len(rec.get('blind_dates') or [])}日"
             ),
+            *([
+                (
+                    "五日目标难样本："
+                    f"{metric(hard_errors.get('hard_error_n'))}/"
+                    f"{metric(hard_errors.get('eligible_n'))}"
+                    f"（误判率 {percent(hard_errors.get('hard_error_rate'))}%，"
+                    "平均权重×"
+                    f"{metric(hard_errors.get('mean_applied_multiplier'))}，"
+                    "最高×"
+                    f"{metric(hard_errors.get('max_applied_multiplier'))}）"
+                )
+            ] if hard_errors.get("eligible_n") is not None else []),
             (
                 "晋级增益："
                 f"{'、'.join(metric_gate.get('improvements') or []) or '未达门槛'}"
@@ -185,6 +215,8 @@ def report_from(record, env=None, now_ms=None):
             "metricGate": rec.get("metric_gate"),
             "recencyHalfLifeDates": rec.get("recency_half_life_dates"),
             "newSampleBoost": rec.get("new_sample_boost"),
+            "hardErrorMining": rec.get("hard_error_mining"),
+            "pendingHardErrors": rec.get("pending_hard_errors"),
         },
     }
     return f"quantreport/retrain-{run_id}.json", report
