@@ -158,6 +158,33 @@ class ForwardHoldoutSplitTest(unittest.TestCase):
             min_blind_dates=3,
         ))
 
+    def test_insufficient_dates_still_report_available_blind_samples(self):
+        retrain = load_retrain_daily()
+        dates = np.array([
+            "20260805", "20260806",
+            "20260807", "20260807",
+            "20260810", "20260810",
+        ])
+
+        train_idx, blind_idx, adapt_dates, blind_dates = (
+            retrain.incremental_adaptation_split(
+                dates,
+                "20260806",
+                blind_dates=3,
+            )
+        )
+
+        self.assertEqual(
+            dates[train_idx].tolist(),
+            ["20260805", "20260806"],
+        )
+        self.assertEqual(
+            dates[blind_idx].tolist(),
+            ["20260807", "20260807", "20260810", "20260810"],
+        )
+        self.assertEqual(adapt_dates, [])
+        self.assertEqual(blind_dates, ["20260807", "20260810"])
+
     def test_recent_and_new_samples_receive_more_training_weight(self):
         retrain = load_retrain_daily()
         dates = np.array([

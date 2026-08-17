@@ -253,7 +253,7 @@ def incremental_adaptation_split(dates, champion_data_end, blind_dates=3):
     if len(new_dates) <= blind_count:
         return (
             np.flatnonzero(keys <= end_key),
-            np.asarray([], dtype=int),
+            np.flatnonzero(keys > end_key),
             [],
             new_dates,
         )
