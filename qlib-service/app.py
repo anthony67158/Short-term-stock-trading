@@ -121,7 +121,11 @@ def forecast(f, days=5, sims=3000):
         "horizon": "nextTradingDay" if days == 1 else f"next{days}TradingDays",
         "rangeType": "P10-P90",
         "rangeConfidencePct": 80,
-        "forecastEngine": "garchMonteCarlo",
+        "forecastEngine": (
+            "garchMonteCarlo"
+            if vol_engine == "garch"
+            else "historicalVolMonteCarlo"
+        ),
     }
 
 

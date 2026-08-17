@@ -52,6 +52,10 @@ class ForecastContractTest(unittest.TestCase):
         self.assertEqual(next_day["days"], 1)
         self.assertEqual(next_day["horizon"], "nextTradingDay")
         self.assertEqual(next_day["rangeType"], "P10-P90")
+        self.assertEqual(
+            next_day["forecastEngine"],
+            "historicalVolMonteCarlo",
+        )
         self.assertGreaterEqual(next_day["upProb"], 0)
         self.assertLessEqual(next_day["upProb"], 100)
         self.assertLessEqual(next_day["targetLow"], next_day["targetMid"])
