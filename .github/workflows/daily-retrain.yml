@@ -107,6 +107,22 @@ jobs:
               fh.write("\n".join(lines) + "\n")
           PY
 
+      - name: Publish result to in-app quant report
+        if: always()
+        env:
+          OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+          OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+          OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
+          OSS_ENDPOINT: ${{ secrets.OSS_ENDPOINT }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SHA: ${{ github.sha }}
+          RETRAIN_JOB_STATUS: ${{ job.status }}
+          RETRAIN_PREFLIGHT: ${{ steps.preflight.outputs.reachable }}
+        run: python3 publish_retrain_report.py
+
       - name: Upload audit log artifact
         if: always()
         uses: actions/upload-artifact@v7
