@@ -140,12 +140,33 @@ def fetch_index(symbol="sh000300", bars=900):
     return {r[0]: float(r[2]) for r in rows}
 
 
-def make_samples(o, c, h, l, v, dates, idx_map=None, horizon=5, min_hist=60, stride=1):
+def _date_key(value):
+    return "".join(ch for ch in str(value or "") if ch.isdigit())[:8]
+
+
+def make_samples(
+    o,
+    c,
+    h,
+    l,
+    v,
+    dates,
+    idx_map=None,
+    horizon=5,
+    min_hist=60,
+    stride=1,
+    forecast_after="",
+    forecast_impl=None,
+):
     """滑窗生成样本：在每个 t 用截至 t 的历史算因子，
     标签= 未来 horizon 日内最高价是否触及 close_t*(1+target)。
     idx_map: {date: index_close}，若提供则把与个股同日期对齐的大盘序列传入因子计算。"""
     X, y, ds = [], [], []
+    next_probabilities, next_actual_up, next_range_hit = [], [], []
     n = len(c)
+    forecast_cutoff = _date_key(forecast_after)
+    if forecast_cutoff and forecast_impl is None:
+        from app import forecast as forecast_impl
     # 预先构造与个股逐日对齐的大盘收盘序列（缺失日用前值前向填充，再不行用个股当日占位不参与相对计算）
     idx_series = None
     if idx_map:
@@ -168,13 +189,46 @@ def make_samples(o, c, h, l, v, dates, idx_map=None, horizon=5, min_hist=60, str
         tgt = target_price(last, f["_atr"])
         fut_high = float(np.max(h[t + 1:t + 1 + horizon]))
         label = 1 if fut_high >= last * (1 + tgt) else 0
-        if not np.isfinite(feature_vector(f)).all():
+        vector = feature_vector(f)
+        if not np.isfinite(vector).all():
             continue
-        X.append(feature_vector(f)); y.append(label); ds.append(dates[t])
+        next_probability = np.nan
+        actual_up = -1
+        range_hit = -1
+        if forecast_cutoff and _date_key(dates[t]) > forecast_cutoff:
+            try:
+                next_forecast = forecast_impl(f, days=1)
+                if next_forecast:
+                    next_probability = float(next_forecast["upProb"]) / 100.0
+                    next_close = float(c[t + 1])
+                    actual_up = int(next_close > last)
+                    range_hit = int(
+                        float(next_forecast["targetLow"])
+                        <= next_close
+                        <= float(next_forecast["targetHigh"])
+                    )
+            except Exception:
+                pass
+        X.append(vector)
+        y.append(label)
+        ds.append(dates[t])
+        next_probabilities.append(next_probability)
+        next_actual_up.append(actual_up)
+        next_range_hit.append(range_hit)
     # 下采样步长，减少相邻高相关样本
     if stride > 1:
         X, y, ds = X[::stride], y[::stride], ds[::stride]
-    return X, y, ds
+        next_probabilities = next_probabilities[::stride]
+        next_actual_up = next_actual_up[::stride]
+        next_range_hit = next_range_hit[::stride]
+    return (
+        X,
+        y,
+        ds,
+        next_probabilities,
+        next_actual_up,
+        next_range_hit,
+    )
 
 
 def main():
@@ -184,6 +238,11 @@ def main():
     ap.add_argument("--horizon", type=int, default=5)
     ap.add_argument("--stride", type=int, default=1)
     ap.add_argument("--index", default="sh000300", help="大盘指数代码（相对因子基准），空串则不用")
+    ap.add_argument(
+        "--forecast-after",
+        default="",
+        help="仅回放该日期之后的生产次日预测，用于前向准确率统计",
+    )
     ap.add_argument("--out", default="dataset.npz")
     a = ap.parse_args()
 
@@ -196,6 +255,7 @@ def main():
     print(f"[index] {a.index or 'none'} points={len(idx_map)}")
 
     X, y, codes, dates = [], [], [], []
+    next_probabilities, next_actual_up, next_range_hit = [], [], []
     ok = fail = 0
     for i, (sym, name) in enumerate(pool):
         kl = fetch_kline(sym, a.bars)
@@ -203,9 +263,22 @@ def main():
             fail += 1
             continue
         o, c, h, l, v, dts = kl
-        xs, ys, dss = make_samples(o, c, h, l, v, dts, idx_map=idx_map,
-                                   horizon=a.horizon, stride=a.stride)
+        xs, ys, dss, nps, nas, nrh = make_samples(
+            o,
+            c,
+            h,
+            l,
+            v,
+            dts,
+            idx_map=idx_map,
+            horizon=a.horizon,
+            stride=a.stride,
+            forecast_after=a.forecast_after,
+        )
         X.extend(xs); y.extend(ys); dates.extend(dss); codes.extend([sym] * len(xs))
+        next_probabilities.extend(nps)
+        next_actual_up.extend(nas)
+        next_range_hit.extend(nrh)
         ok += 1
         if (i + 1) % 50 == 0:
             pos = np.mean(y) if y else 0
@@ -214,6 +287,9 @@ def main():
 
     X = np.array(X, dtype=np.float32)
     y = np.array(y, dtype=np.int8)
+    next_probabilities = np.array(next_probabilities, dtype=np.float32)
+    next_actual_up = np.array(next_actual_up, dtype=np.int8)
+    next_range_hit = np.array(next_range_hit, dtype=np.int8)
     if len(X) == 0:
         # 拉不到任何日线(典型:GitHub 海外 runner 访问新浪/腾讯 CN 行情接口被限流/不可达)。
         # 明确 exit(2) 让上游 subprocess 判失败并区分「数据源不可用」——绝不静默写出空/旧数据集。
@@ -224,7 +300,10 @@ def main():
     print(f"[done] stocks ok={ok} fail={fail} | samples={len(X)} "
           f"pos_rate={y.mean():.3f} feats={X.shape[1]} in {time.time()-t0:.0f}s")
     np.savez_compressed(a.out, X=X, y=y, codes=np.array(codes),
-                        dates=np.array(dates), feat_names=np.array(FEATURE_NAMES))
+                        dates=np.array(dates), feat_names=np.array(FEATURE_NAMES),
+                        next_up_probabilities=next_probabilities,
+                        next_actual_up=next_actual_up,
+                        next_range_hit=next_range_hit)
     print(f"[saved] {a.out}")
 
 

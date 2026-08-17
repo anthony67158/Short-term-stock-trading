@@ -45,6 +45,10 @@ import numpy as np
 import lightgbm as lgb
 from sklearn.metrics import log_loss, roc_auc_score
 
+from production_backtest import (
+    evaluate_production_model,
+    upload_production_accuracy,
+)
 from train_lgb import cv_auc_and_iters, fit_final
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -172,13 +176,15 @@ def sync_champion_from_oss():
     return score_ok
 
 
-def build_dataset(pool, bars, horizon):
+def build_dataset(pool, bars, horizon, forecast_after=""):
     """调 build_dataset.py 重建 dataset.npz（拉最新日线，新成熟标签自动进入）。
     区分退出码:rc==2 → 数据源不可达/被限流(海外 CI 常见),抛 DataUnavailable 让上游按
     「跳过而非失败」处理;其它非 0 → 视为真实构建错误。"""
     cmd = [sys.executable, os.path.join(HERE, "build_dataset.py"),
            "--pool", str(pool), "--bars", str(bars),
            "--horizon", str(horizon), "--out", DATASET]
+    if forecast_after:
+        cmd += ["--forecast-after", str(forecast_after)]
     log("重建数据集:", " ".join(cmd[1:]))
     r = subprocess.run(cmd, cwd=HERE, capture_output=True, text=True, timeout=1500)
     sys.stdout.write(r.stdout[-1500:] if r.stdout else "")
@@ -195,8 +201,33 @@ def load_dataset():
     X = d["X"].astype(np.float32)
     y = d["y"].astype(int)
     dates = d["dates"].astype(str)
+    codes = d["codes"].astype(str)
     feat_names = [str(x) for x in d["feat_names"]]
-    return X, y, dates, feat_names
+    next_up_probabilities = (
+        d["next_up_probabilities"].astype(float)
+        if "next_up_probabilities" in d.files
+        else None
+    )
+    next_actual_up = (
+        d["next_actual_up"].astype(int)
+        if "next_actual_up" in d.files
+        else None
+    )
+    next_range_hit = (
+        d["next_range_hit"].astype(int)
+        if "next_range_hit" in d.files
+        else None
+    )
+    return (
+        X,
+        y,
+        dates,
+        codes,
+        feat_names,
+        next_up_probabilities,
+        next_actual_up,
+        next_range_hit,
+    )
 
 
 def date_holdout_split(dates, frac):
@@ -409,6 +440,52 @@ def align_features(meta, cur_feats, X):
     return X[:, idx]
 
 
+def publish_current_production_accuracy(
+    champion,
+    champion_meta,
+    X,
+    y,
+    dates,
+    codes,
+    feat_names,
+    next_up_probabilities=None,
+    next_actual_up=None,
+    next_range_hit=None,
+):
+    """Publish current champion accuracy before any retrain decision."""
+    if champion is None or not champion_meta.get("data_end_date"):
+        log("现役生产模型缺少训练截止日，跳过实际准确率回测")
+        return None
+    aligned = align_features(champion_meta, feat_names, X)
+    if aligned is None:
+        log("现役生产模型特征不兼容，跳过实际准确率回测")
+        return None
+    try:
+        report = evaluate_production_model(
+            champion,
+            champion_meta,
+            X=aligned,
+            labels=y,
+            dates=dates,
+            codes=codes,
+            next_up_probabilities=next_up_probabilities,
+            next_actual_up=next_actual_up,
+            next_range_hit=next_range_hit,
+        )
+        upload_production_accuracy(report)
+        overall = report["overall"]
+        log(
+            "生产模型前向回测:",
+            f"{overall['correct']}/{overall['total']}",
+            f"accuracy={overall['accuracyPct']}",
+            f"balanced={overall['balancedAccuracyPct']}",
+        )
+        return report
+    except Exception as error:  # noqa: BLE001
+        log("生产模型实际准确率发布失败，不阻断重训:", str(error)[:160])
+        return None
+
+
 def load_champion():
     if not (os.path.exists(BUNDLED_MODEL) and os.path.exists(BUNDLED_META)):
         return None, {}
@@ -607,10 +684,29 @@ def main():
 
     t0 = time.time()
     sync_champion_from_oss()
+    build_meta = {}
+    try:
+        build_meta = json.load(open(BUNDLED_META, encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        pass
     try:
         if not a.skip_build:
-            build_dataset(a.pool, a.bars, a.horizon)
-        X, y, dates, feat_names = load_dataset()
+            build_dataset(
+                a.pool,
+                a.bars,
+                a.horizon,
+                forecast_after=build_meta.get("data_end_date", ""),
+            )
+        (
+            X,
+            y,
+            dates,
+            codes,
+            feat_names,
+            next_up_probabilities,
+            next_actual_up,
+            next_range_hit,
+        ) = load_dataset()
     except DataUnavailable as e:
         # 数据源不可达(非代码错误):记一条 skip 审计,正常退出(不改线上、不判红报警)。
         append_history({"decision": "skip", "reason": "data_unavailable", "detail": str(e)[:200]})
@@ -635,6 +731,18 @@ def main():
         sys.exit(0)
 
     champion, champion_meta = load_champion()
+    publish_current_production_accuracy(
+        champion,
+        champion_meta,
+        X,
+        y,
+        dates,
+        codes,
+        feat_names,
+        next_up_probabilities,
+        next_actual_up,
+        next_range_hit,
+    )
     champion_data_end = champion_meta.get("data_end_date")
     hold_dates = []
     adapt_dates = []
@@ -842,6 +950,18 @@ def main():
         (None if no_champ else champ_auc),
         weights=final_weights,
         evaluation_metrics=evaluation_metrics,
+    )
+    publish_current_production_accuracy(
+        lgb.Booster(model_file=BUNDLED_MODEL),
+        meta,
+        X,
+        y,
+        dates,
+        codes,
+        feat_names,
+        next_up_probabilities,
+        next_actual_up,
+        next_range_hit,
     )
     # 高把握买点信号头：与主模型同批每日重训(独立精确率护栏)
     sig_rec = retrain_signal_head(a.pool, a.bars) or {}
