@@ -7,10 +7,51 @@
 """
 import json
 import os
+import sys
 import time
+import types
 from urllib.parse import urlparse
 
 import numpy as np
+
+
+def _dense_scipy_modules():
+    """Minimal scipy.sparse surface used only for dense LightGBM inference."""
+    scipy_module = types.ModuleType("scipy")
+    sparse_module = types.ModuleType("scipy.sparse")
+
+    class SparseMatrix:
+        pass
+
+    class CsrMatrix(SparseMatrix):
+        pass
+
+    class CscMatrix(SparseMatrix):
+        pass
+
+    def unsupported_hstack(*_args, **_kwargs):
+        raise RuntimeError(
+            "scipy sparse operations are unavailable in dense inference runtime"
+        )
+
+    sparse_module.spmatrix = SparseMatrix
+    sparse_module.csr_matrix = CsrMatrix
+    sparse_module.csc_matrix = CscMatrix
+    sparse_module.hstack = unsupported_hstack
+    sparse_module.vstack = unsupported_hstack
+    scipy_module.sparse = sparse_module
+    return scipy_module, sparse_module
+
+
+def _ensure_lightgbm_dense_imports():
+    try:
+        import scipy.sparse  # noqa: F401
+        return False
+    except ImportError:
+        scipy_module, sparse_module = _dense_scipy_modules()
+        sys.modules.setdefault("scipy", scipy_module)
+        sys.modules.setdefault("scipy.sparse", sparse_module)
+        return True
 
 _MODEL = None          # lightgbm Booster
 _META = None           # dict
@@ -138,6 +179,7 @@ def get_model():
     now = time.time()
     if _MODEL is not None and (now - _LOAD_TS) < _TTL:
         return _MODEL, _META
+    _ensure_lightgbm_dense_imports()
     try:
         import lightgbm as lgb
     except Exception:
@@ -230,6 +272,7 @@ def get_signal_model():
     now = time.time()
     if _SIGNAL is not None and (now - _SIGNAL_TS) < _TTL:
         return _SIGNAL, _SIGNAL_META
+    _ensure_lightgbm_dense_imports()
     try:
         import lightgbm as lgb
     except Exception:
