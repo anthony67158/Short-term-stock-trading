@@ -49,6 +49,10 @@ jobs:
               echo "PASS"
             else
               echo "FAIL"
+              grep '^not ok ' test-artifacts/node-tests.log |
+                while IFS= read -r failure; do
+                  echo "::error title=Node test failure::$failure"
+                done
               echo
               echo '```text'
               awk '/^not ok /,/^  \.\.\.$/' \
