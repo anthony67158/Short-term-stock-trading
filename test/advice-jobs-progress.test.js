@@ -6,6 +6,7 @@ import {
   completeJob,
   enqueueJob,
   jobsToProgress,
+  compareAdviceJobs,
   leaseJob,
   needsWorkerDispatch,
   reapOrphans,
@@ -223,4 +224,25 @@ test('没有任务时不生成虚假的空批次完成时间', () => {
   assert.equal(progress.running, false)
   assert.equal(progress.at, 0)
   assert.equal(progress.finishedAt, 0)
+})
+
+test('任务调度优先级为Judge、一次性生成、单股手动、自动复核', () => {
+  const jobs = [
+    { source: 'auto', at: 1000 },
+    { source: 'ondemand', batchRequest: false, at: 1000 },
+    { source: 'ondemand', batchRequest: true, at: 1000 },
+    { source: 'judge', at: 1000 },
+  ]
+
+  jobs.sort(compareAdviceJobs)
+
+  assert.deepEqual(
+    jobs.map((job) => [job.source, !!job.batchRequest]),
+    [
+      ['judge', false],
+      ['ondemand', true],
+      ['ondemand', false],
+      ['auto', false],
+    ],
+  )
 })

@@ -3,6 +3,8 @@ import {
   createDefaultStrategySpec,
   evaluateStrategySignal,
 } from './strategySpec.js'
+import { isQualifiedConceptLeader } from './conceptLeadership.js'
+import { isStockPickSession } from './tradingCalendar.js'
 
 const clamp = (value, min = 0, max = 1) => Math.max(min, Math.min(max, value))
 const finite = (value, fallback = 0) => {
@@ -23,10 +25,7 @@ export function assertStrategyVersion(expected = {}, received = {}) {
 }
 
 export function stockPickSession(now = Date.now()) {
-  const beijing = new Date(Number(now) + 8 * 3600000)
-  const weekday = beijing.getUTCDay()
-  const minute = beijing.getUTCHours() * 60 + beijing.getUTCMinutes()
-  const trading = weekday >= 1 && weekday <= 5 && minute >= 555 && minute <= 901
+  const trading = isStockPickSession(now)
   return {
     canRun: true,
     trading,
@@ -167,6 +166,17 @@ function isEligible(stock, strategy) {
   return true
 }
 
+export function evaluateMarketCandidate(stock, opts = {}) {
+  const strategy = resolvedStrategy(opts)
+  const ranked = scoreOf(stock || {}, strategy)
+  return {
+    ...(stock || {}),
+    marketScore: ranked.score,
+    reasons: ranked.reasons,
+    marketEligible: isEligible(stock || {}, strategy),
+  }
+}
+
 export function rankMarketCandidates(rows, opts = {}) {
   const strategy = resolvedStrategy(opts)
   const limit = Math.max(1, Math.min(50, Number(opts.limit) || 30))
@@ -174,7 +184,12 @@ export function rankMarketCandidates(rows, opts = {}) {
   const eligible = universe.filter((stock) => isEligible(stock, strategy))
   const list = eligible.map((stock) => {
     const ranked = scoreOf(stock, strategy)
-    return { ...stock, marketScore: ranked.score, reasons: ranked.reasons }
+    return {
+      ...stock,
+      marketScore: ranked.score,
+      reasons: ranked.reasons,
+      marketEligible: true,
+    }
   }).sort((a, b) =>
     b.marketScore - a.marketScore ||
     finite(b.amount) - finite(a.amount) ||
@@ -233,15 +248,44 @@ export function rankStrategyShortlist(candidates, opts = {}) {
   )
   const passed = ranked.filter((item) => item.strategySignal.passed)
   const failed = ranked.filter((item) => !item.strategySignal.passed)
-  const executable = passed.slice(0, limit)
-  const watchlist = failed.slice(0, limit)
+  const leadershipReserve = Math.max(
+    0,
+    Math.min(limit, Number(opts.leadershipReserve) || 0),
+  )
+  const selected = [...passed, ...failed].slice(0, limit)
+  const reservedLeaders = ranked
+    .filter(isQualifiedConceptLeader)
+    .slice(0, leadershipReserve)
+  for (const leader of reservedLeaders) {
+    if (selected.some((item) => item.code === leader.code)) continue
+    const replaceIndex = selected.findLastIndex(
+      (item) => !isQualifiedConceptLeader(item),
+    )
+    if (replaceIndex < 0) break
+    selected[replaceIndex] = leader
+  }
+  selected.sort((left, right) =>
+    Number(right.strategySignal.passed)
+      - Number(left.strategySignal.passed)
+    || right.combinedScore - left.combinedScore
+    || String(left.code).localeCompare(String(right.code))
+  )
+  const executable = selected.filter(
+    (item) => item.strategySignal.passed,
+  )
+  const watchlist = selected.filter(
+    (item) => !item.strategySignal.passed,
+  )
   return {
     strategyId: strategy.strategyId,
     specVersion: strategy.specVersion,
     signalPassedCount: passed.length,
+    leadershipReservedCount: selected.filter(
+      isQualifiedConceptLeader,
+    ).length,
     executable,
     watchlist,
-    list: [...executable, ...watchlist].slice(0, limit),
+    list: selected,
   }
 }
 
@@ -298,6 +342,7 @@ function conditionalFallback(item, index, noTradeReason) {
     rank: index + 1,
     code: String(item.code),
     name: item.name || String(item.code),
+    conceptLeadership: item.conceptLeadership || null,
     quantScore: quant.score ?? null,
     grade: '观察',
     actionability: '等待触发',
@@ -320,15 +365,17 @@ export function normalizePickDecision(value, allowedCodes = [], fallbackCandidat
     .filter((item) => item && allowed.has(String(item.code || '')))
     .slice(0, 3)
     .map((item, index) => {
+      const candidate = candidates.get(String(item.code))
       const requested = ['可执行', '等待触发', '观察'].includes(item.actionability)
         ? item.actionability
         : null
       return {
         ...item,
         rank: index + 1,
+        conceptLeadership: candidate?.conceptLeadership || null,
         actionability: (
           result.noTrade === true
-          || candidates.get(String(item.code))?.strategySignal?.passed === false
+          || candidate?.strategySignal?.passed === false
         )
           ? (requested === '观察' ? '观察' : '等待触发')
           : (requested || '可执行'),

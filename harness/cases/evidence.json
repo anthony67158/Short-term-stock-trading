@@ -1,0 +1,205 @@
+{
+  "schemaVersion": "harness-case-set.v1",
+  "cases": [
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "evidence-live-t1-quant-fallback",
+      "adapter": "evidence",
+      "tags": ["evidence", "t1", "quant-version"],
+      "input": {
+        "snapshot": {
+          "schemaVersion": "canonical-evidence.v1",
+          "snapshotId": "ev_harness_live",
+          "asOf": "2026-08-17T02:30:00.000Z",
+          "mode": "hold_advice",
+          "security": {
+            "code": "600001",
+            "name": "证据样本"
+          },
+          "marketTime": {
+            "phase": "盘中",
+            "dataDayLabel": "2026-08-17",
+            "isLive": true
+          },
+          "account": {
+            "revision": 8,
+            "holdCost": 10,
+            "holdQty": 3,
+            "sellableTodayQty": 2,
+            "cash": 2000,
+            "totalAssets": 20000,
+            "position": 90,
+            "stockWeight": 30,
+            "cashReservePct": 10
+          },
+          "quant": {
+            "selectedModelVersion": "v2.1",
+            "runtimeModelVersion": "v2"
+          },
+          "sourceVersion": {
+            "collector": "ai-collector.v1",
+            "prompt": "advisor.harness",
+            "quant": "v2",
+            "accountRevision": 8
+          },
+          "freshness": {
+            "status": "LIVE",
+            "missingSources": []
+          },
+          "collection": {
+            "sources": [
+              { "key": "quote", "status": "OK" },
+              { "key": "market", "status": "OK" },
+              { "key": "quant", "status": "OK" },
+              { "key": "account", "status": "OK" }
+            ],
+            "failedSources": [],
+            "emptySources": [],
+            "wallClockMs": 480
+          },
+          "evidence": {
+            "quote": {
+              "price": 11,
+              "pct": -2.5,
+              "prevClose": 11.28
+            },
+            "market": {
+              "environment": {
+                "score": 40,
+                "level": "弱势",
+                "weak": true
+              }
+            },
+            "quant": {
+              "score": 72,
+              "bias": "偏多",
+              "forecast": {
+                "upProb": 61,
+                "expRet": 2.2,
+                "direction": "上涨"
+              }
+            }
+          }
+        }
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "replayable": true,
+        "allowedFreshness": ["LIVE"],
+        "minSourceCount": 4,
+        "didFallback": true,
+        "requiredFacts": [
+          "account.holdQty",
+          "account.sellableTodayQty",
+          "quote.price",
+          "market.score",
+          "quant.score"
+        ],
+        "constraints": {
+          "t1Locked": true,
+          "totalPositionHigh": true,
+          "stockConcentrated": true,
+          "weakMarket": true
+        }
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "evidence-partial-no-sellable",
+      "adapter": "evidence",
+      "tags": ["evidence", "partial", "risk"],
+      "input": {
+        "snapshot": {
+          "schemaVersion": "canonical-evidence.v1",
+          "snapshotId": "ev_harness_partial",
+          "asOf": "2026-08-17T07:00:00.000Z",
+          "mode": "hold_advice",
+          "security": {
+            "code": "300001",
+            "name": "部分证据样本"
+          },
+          "marketTime": {
+            "phase": "收盘",
+            "dataDayLabel": "2026-08-17",
+            "isLive": false
+          },
+          "account": {
+            "revision": 9,
+            "holdCost": 20,
+            "holdQty": 2,
+            "sellableTodayQty": 0,
+            "cash": 8000,
+            "totalAssets": 12000,
+            "position": 33,
+            "stockWeight": 33,
+            "cashReservePct": 67
+          },
+          "quant": {
+            "selectedModelVersion": "default",
+            "runtimeModelVersion": "default"
+          },
+          "sourceVersion": {
+            "collector": "ai-collector.v1",
+            "prompt": "advisor.harness",
+            "quant": "default",
+            "accountRevision": 9
+          },
+          "freshness": {
+            "status": "PARTIAL",
+            "missingSources": ["news"]
+          },
+          "collection": {
+            "sources": [
+              { "key": "quote", "status": "OK" },
+              { "key": "account", "status": "OK" }
+            ],
+            "failedSources": ["news"],
+            "emptySources": [],
+            "wallClockMs": 900
+          },
+          "evidence": {
+            "quote": {
+              "price": 19.5,
+              "pct": -1.2,
+              "prevClose": 19.74
+            },
+            "market": {
+              "environment": {
+                "score": 55,
+                "level": "中性",
+                "weak": false
+              }
+            },
+            "quant": {
+              "score": 50,
+              "bias": "中性",
+              "forecast": {
+                "upProb": 50,
+                "expRet": 0,
+                "direction": "震荡"
+              }
+            }
+          }
+        }
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "replayable": true,
+        "allowedFreshness": ["PARTIAL"],
+        "minSourceCount": 2,
+        "didFallback": false,
+        "requiredFacts": [
+          "account.holdQty",
+          "account.sellableTodayQty",
+          "quote.price"
+        ],
+        "constraints": {
+          "t1Locked": true,
+          "noSellableShares": true,
+          "stockConcentrated": true,
+          "weakMarket": false
+        }
+      }
+    }
+  ]
+}

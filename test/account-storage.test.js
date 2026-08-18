@@ -120,10 +120,6 @@ test('运行时账号同步只返回更新时间后的建议事件和轻量状�
     },
     alerts: [{ id: 'a1', createdAt: 50 }],
     batchProgress: { at: 400, running: true },
-    settings: {
-      'advReview.disabledCodes': ['600000'],
-      'advAuto.configUpdatedAt': 390,
-    },
     holding: [{ code: '600000', qty: 2 }],
     closed: [{ id: 'trade-1' }],
   }, 200)
@@ -134,7 +130,6 @@ test('运行时账号同步只返回更新时间后的建议事件和轻量状�
   assert.deepEqual(Object.keys(delta.reviews), ['fresh'])
   assert.equal(delta.alerts.length, 1)
   assert.equal(delta.batchProgress.running, true)
-  assert.deepEqual(delta.settings['advReview.disabledCodes'], ['600000'])
   assert.equal(delta.holding, undefined)
   assert.equal(delta.closed, undefined)
 })
@@ -165,6 +160,42 @@ test('委员会复核期间同步游标前移后仍返回刚完成的建议', ()
 
   assert.deepEqual(Object.keys(delta.advice), ['003036'])
   assert.equal(delta.advice['003036'].advice.action, '回调再买')
+})
+
+test('客户端旧快照不能覆盖服务端复核遥测', () => {
+  const account = {
+    nick: 'review-metrics',
+    clientRevision: 1,
+    data: {
+      plan: [],
+      holding: [],
+      closed: [],
+      adviceReviewLog: [{
+        id: 'review-2',
+        code: '600000',
+        at: 2000,
+        disposition: 'material-change',
+      }],
+    },
+  }
+
+  const result = applyClientAccountSave(account, {
+    plan: [],
+    holding: [],
+    closed: [],
+    adviceReviewLog: [{
+      id: 'review-1',
+      code: '600000',
+      at: 1000,
+      disposition: 'unchanged',
+    }],
+  }, 1)
+
+  assert.equal(result.ok, true)
+  assert.deepEqual(
+    account.data.adviceReviewLog.map((item) => item.id),
+    ['review-2', 'review-1'],
+  )
 })
 
 test('客户端保存不能覆盖服务端收益学习委员会与人工批准状态', () => {
@@ -568,6 +599,21 @@ test('客户端保存持仓时不能覆盖服务端 AI 任务队列和 Worker �
   const serverJobs = {
     '600000': { code: '600000', status: 'running', progressAt: 2000 },
   }
+  const portfolioAnalysisJob = {
+    id: 'portfolio_2000',
+    status: 'running',
+    updatedAt: 2000,
+  }
+  const portfolioAnalysisLatest = {
+    id: 'portfolio_1000',
+    generatedAt: 1000,
+    result: { ok: true },
+  }
+  const portfolioAnalysisHistory = [portfolioAnalysisLatest]
+  const portfolioAnalysisReview = {
+    enabled: true,
+    updatedAt: 2000,
+  }
   const account = {
     clientRevision: 3,
     data: {
@@ -575,6 +621,10 @@ test('客户端保存持仓时不能覆盖服务端 AI 任务队列和 Worker �
       jobs: serverJobs,
       jobWorker: { id: 'worker-server', lockUntil: 9999 },
       activeAdviceBatchId: 'batch-server',
+      portfolioAnalysisJob,
+      portfolioAnalysisLatest,
+      portfolioAnalysisHistory,
+      portfolioAnalysisReview,
     },
   }
 
@@ -583,12 +633,32 @@ test('客户端保存持仓时不能覆盖服务端 AI 任务队列和 Worker �
     jobs: {},
     jobWorker: { id: '', lockUntil: 0 },
     activeAdviceBatchId: 'batch-client-old',
+    portfolioAnalysisJob: null,
+    portfolioAnalysisLatest: null,
+    portfolioAnalysisHistory: [],
+    portfolioAnalysisReview: { enabled: false },
   }, 3)
 
   assert.equal(result.ok, true)
   assert.deepEqual(account.data.jobs, serverJobs)
   assert.deepEqual(account.data.jobWorker, { id: 'worker-server', lockUntil: 9999 })
   assert.equal(account.data.activeAdviceBatchId, 'batch-server')
+  assert.deepEqual(
+    account.data.portfolioAnalysisJob,
+    portfolioAnalysisJob,
+  )
+  assert.deepEqual(
+    account.data.portfolioAnalysisLatest,
+    portfolioAnalysisLatest,
+  )
+  assert.deepEqual(
+    account.data.portfolioAnalysisHistory,
+    portfolioAnalysisHistory,
+  )
+  assert.deepEqual(
+    account.data.portfolioAnalysisReview,
+    portfolioAnalysisReview,
+  )
   assert.deepEqual(account.data.holding, [{ code: '000001', qty: 1 }])
 })
 

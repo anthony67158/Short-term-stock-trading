@@ -9,6 +9,8 @@ let state = {
   loading: false,
   error: '',
   control: null,
+  productionModel: null,
+  productionAccuracy: null,
   accuracy: null,
   v21Accuracy: null,
 }
@@ -64,6 +66,10 @@ async function run(action, extra = {}, { background = false } = {}) {
   try {
     const body = await request(action, extra)
     state.control = body.control || state.control
+    state.productionModel = body.productionModel || state.productionModel
+    if (Object.hasOwn(body, 'productionAccuracy')) {
+      state.productionAccuracy = body.productionAccuracy
+    }
     state.accuracy = body.accuracy || state.accuracy
     state.v21Accuracy = body.v21Accuracy || state.v21Accuracy
     if (body.control) {

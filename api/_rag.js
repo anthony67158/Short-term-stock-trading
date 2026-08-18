@@ -1,4 +1,5 @@
 import { num } from './_lib.js';
+import { fetchStockNews } from './_market_data.js';
 
 // ============ RAG 核心：语料构建 + 向量检索 ============
 
@@ -33,7 +34,10 @@ async function jget(url, timeout = 7000, referer = 'https://quote.eastmoney.com/
 }
 
 // 抓取个股近5日行情 + 资金 + 主营 + 新闻，构建 RAG 文档块
-export async function buildCorpus(code) {
+export async function buildCorpus(code, {
+  name: preferredName = '',
+  fetchStockNewsImpl = fetchStockNews,
+} = {}) {
   const secid = toSecid(code);
   const docs = [];
   let profile = null;
@@ -45,17 +49,11 @@ export async function buildCorpus(code) {
     `&fields1=f1,f2,f3&fields2=f51,f52,f53,f54,f55,f56,f57,f59,f61&klt=101&fqt=1&end=20500101&lmt=8`;
   // 2) 公司简介
   const f10Url = `https://emweb.securities.eastmoney.com/PC_HSF10/CompanySurvey/PageAjax?code=${toF10Code(code)}`;
-  // 3) 个股新闻（东财搜索）
-  const newsParam = encodeURIComponent(JSON.stringify({
-    uid: '', keyword: code, type: ['cmsArticleWebOld'], client: 'web', clientType: 'web',
-    param: { cmsArticleWebOld: { searchScope: 'default', sort: 'time', pageIndex: 1, pageSize: 8 } },
-  }));
-  const newsUrl = `https://search-api-web.eastmoney.com/search/jsonp?cb=x&param=${newsParam}`;
-
-  const [klTxt, f10Txt, newsTxt] = await Promise.all([
+  // 3) 个股消息（媒体检索 + 公司公告 + 机构研报，多源失败隔离）
+  const [klTxt, f10Txt, newsItems] = await Promise.all([
     jget(klUrl).catch(() => null),
     jget(f10Url, 7000, 'https://emweb.securities.eastmoney.com/').catch(() => null),
-    jget(newsUrl, 7000, 'https://so.eastmoney.com/').catch(() => null),
+    fetchStockNewsImpl(preferredName || code, 8, code).catch(() => []),
   ]);
 
   // 解析 K线 -> 近5日文档
@@ -96,21 +94,26 @@ export async function buildCorpus(code) {
     if (profile.intro) docs.push({ type: 'profile', text: `【${profile.name} 公司简介】${profile.intro.slice(0, 300)}` });
   } catch {}
 
-  // 解析新闻（联网信息）
-  try {
-    const clean = newsTxt.replace(/^x\(/, '').replace(/\);?$/, '');
-    const nj = JSON.parse(clean);
-    const arr = (nj.result && nj.result.cmsArticleWebOld) || [];
-    news = arr.slice(0, 8).map((a) => ({
-      title: (a.title || '').replace(/<[^>]+>/g, ''),
-      date: (a.date || '').slice(0, 10),
-      summary: (a.content || '').replace(/<[^>]+>/g, '').slice(0, 160),
-      url: a.url || (a.code ? `https://finance.eastmoney.com/a/${a.code}.html` : ''),
-    }));
-    news.forEach((n) => {
-      docs.push({ type: 'news', text: `【新闻 ${n.date}】${n.title}。${n.summary}`, url: n.url, title: n.title, date: n.date });
+  // 多源消息已统一清洗；公告是事实，研报是观点，明确标记避免模型混淆。
+  news = Array.isArray(newsItems) ? newsItems.slice(0, 8) : [];
+  news.forEach((item) => {
+    const kindLabel = item.kind === 'announcement'
+      ? '公司公告'
+      : item.kind === 'research'
+        ? '机构研报观点'
+        : '媒体新闻';
+    const source = item.src ? `·${item.src}` : '';
+    const summary = item.summary ? `。${item.summary}` : '';
+    docs.push({
+      type: 'news',
+      text: `【${kindLabel}${source} ${item.date || '日期未标注'}】${item.title}${summary}`,
+      url: item.url,
+      title: item.title,
+      date: item.date,
+      src: item.src,
+      kind: item.kind,
     });
-  } catch {}
+  });
 
   return { name, profile, news, docs };
 }

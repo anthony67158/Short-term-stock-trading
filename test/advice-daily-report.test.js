@@ -12,6 +12,7 @@ import {
   failAdviceJobsForDailyReport,
   setAdviceDailyReportPhase,
 } from '../api/_advice_daily_report.js'
+import { buildDailySummary } from '../api/_daily_summary.js'
 
 const NOW = Date.parse('2026-08-12T02:30:00.000Z')
 const SUMMARY = {
@@ -19,6 +20,8 @@ const SUMMARY = {
   session: 'morning',
   sessionCn: '盘前早报',
   text: '今日策略以等待确认、控制仓位为主。',
+  searchEnabled: true,
+  searchConfigUpdatedAt: 100,
 }
 
 test('当天已有策略日报时直接复用且不重复生成', async () => {
@@ -79,6 +82,35 @@ test('昨天的摘要不会冒充今日日报且无有效摘要时阻断建议',
     }),
     /日报模型超时/,
   )
+})
+
+test('检索开关或Key版本变化时旧日报摘要必须失效', () => {
+  assert.equal(isCurrentDailyReportSummary(SUMMARY, NOW, {
+    enabled: true,
+    updatedAt: 100,
+  }), true)
+  assert.equal(isCurrentDailyReportSummary(SUMMARY, NOW, {
+    enabled: false,
+    updatedAt: 200,
+  }), false)
+  assert.equal(isCurrentDailyReportSummary(SUMMARY, NOW, {
+    enabled: true,
+    updatedAt: 200,
+  }), false)
+})
+
+test('日报摘要保留检索配置版本供军师复用校验', () => {
+  const summary = buildDailySummary({
+    day: '2026-08-12',
+    session: 'morning',
+    sessionCn: '盘前早报',
+    searchEnabled: false,
+    searchConfigUpdatedAt: 300,
+    report: { overview: '市场震荡', sectors: [] },
+  })
+
+  assert.equal(summary.searchEnabled, false)
+  assert.equal(summary.searchConfigUpdatedAt, 300)
 })
 
 test('云端等待任务展示日报阶段且日报失败后明确终止', () => {

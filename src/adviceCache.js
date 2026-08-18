@@ -89,10 +89,3 @@ export function saveAdvice(code, data) {
   notify()
   syncCloud()
 }
-
-export function clearAdvice(code) {
-  if (code) { delete mem[code] } else { mem = {} }
-  persist()
-  notify()
-  syncCloud()
-}

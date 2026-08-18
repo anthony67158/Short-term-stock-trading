@@ -28,6 +28,8 @@ import {
   CONCURRENCY, jobsOf, enqueueJob, leaseJob, completeJob, failJob, cancelJob, cancelAll,
   reapOrphans, gcJobs, runningCount, hasPendingWork, needsWorkerDispatch, isActive, jobsToProgress,
   acquireWorkerLock, renewWorkerLock, renewLease, releaseWorkerLock, workerHeldByOther, updateJobProgress,
+  compareAdviceJobs, hasActiveManualBatch, shouldContinueAdviceWorker,
+  suspendAutomaticJobsForManualBatch,
 } from './_jobs.js';
 import { ensureConfig, currentConfig } from './_llm_config.js';
 import { endpointCountForRole } from './_llm_pool.js';
@@ -66,13 +68,13 @@ import {
 import { attachAdviceDailyReport } from '../shared/adviceDailyReportPolicy.js';
 import { adviceEntryMatchesMode } from '../shared/adviceModeContext.js';
 import aiHandler from './ai.js';
-import stockDetailHandler from './stock_detail.js';
 import quoteHandler from './quote.js';
 import { TRUSTED_QUANT_VERSION } from './_quant_access.js';
 import { TRUSTED_ACCOUNT_REQUEST } from './_account_auth.js';
 import { dispatchAdviceWorker } from './_advice_dispatch.js';
 import dailyReportHandler from './daily_report.js';
 import { getLatestDailySummary } from './_daily_summary.js';
+import { ensureAiSearchConfig } from './_ai_search_config.js';
 import {
   collectAdviceDailyReportHoldings,
   ensureAdviceDailyReport,
@@ -88,10 +90,14 @@ import {
   addCouncilShadowRecord,
   councilRecordsFromData,
 } from '../shared/advisorCouncilStore.js';
+import {
+  isContinuousTrading,
+  nextTradingDayLabel,
+} from '../shared/tradingCalendar.js';
 import { runAdvisorCouncilShadow } from './_advisor_council.js';
 
 export const PROGRESS_SAVE_INTERVAL_MS = 5000;
-export const CANCEL_POLL_INTERVAL_MS = 5000;
+export const CANCEL_POLL_INTERVAL_MS = 2000;
 export const WORKER_HEARTBEAT_INTERVAL_MS = 30000;
 
 export function createAdviceSSEParser(onEvent) {
@@ -198,27 +204,7 @@ function effectiveAdviceConcurrency(data, deepMode, batchRequest) {
   });
 }
 
-// 北京时间"下一交易日"友好标签(跳过周末/A股节假日),告诉军师今日买入的 T+1 最早哪天可卖。
-const A_SHARE_HOLIDAYS = new Set([
-  '2026-01-01', '2026-02-16', '2026-02-17', '2026-02-18', '2026-02-19', '2026-02-20', '2026-02-21', '2026-02-22',
-  '2026-04-06', '2026-05-01', '2026-06-19', '2026-09-25', '2026-10-01', '2026-10-02', '2026-10-05', '2026-10-06', '2026-10-07',
-]);
 const MAX_AUTO_JOBS_PER_TICK = 6;
-function nowBJ() { const n = new Date(); return new Date(n.getTime() + (n.getTimezoneOffset() + 480) * 60000); }
-function ymd(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
-function nextTradeDayLabel() {
-  const d = nowBJ(); d.setHours(0, 0, 0, 0);
-  for (let i = 1; i <= 12; i++) {
-    const n = new Date(d.getTime() + i * 86400000);
-    const g = n.getDay();
-    if (g === 0 || g === 6) continue;
-    if (A_SHARE_HOLIDAYS.has(ymd(n))) continue;
-    const wk = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][g];
-    const md = `${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
-    return i === 1 ? `明天(${wk} ${md})` : `下一交易日${wk}(${md})`;
-  }
-  return '下一交易日';
-}
 
 export function internalRequestHeaders(env = process.env) {
   const rawPort = String(env.FC_SERVER_PORT || env.PORT || '3000').trim();
@@ -316,6 +302,9 @@ export function invokeSSE(handler, {
   return new Promise((resolve) => {
     let done = false;
     let result = null;
+    const requestController = new AbortController();
+    let timer = null;
+    let externalAbort = null;
     const parser = createAdviceSSEParser((event, data) => {
       if (event === 'result') result = data;
       if (typeof onEvent === 'function') onEvent(event, data);
@@ -324,6 +313,9 @@ export function invokeSSE(handler, {
       if (done) return;
       done = true;
       clearTimeout(timer);
+      if (signal && externalAbort) {
+        signal.removeEventListener('abort', externalAbort);
+      }
       parser.end();
       resolve(result);
     };
@@ -354,16 +346,23 @@ export function invokeSSE(handler, {
       query,
       body: body || {},
       headers: internalRequestHeaders(),
-      signal,
+      signal: requestController.signal,
     };
     if (trustedQuantVersion) {
       req[TRUSTED_QUANT_VERSION] = trustedQuantVersion;
     }
     if (trustedAccount) req[TRUSTED_ACCOUNT_REQUEST] = true;
-    const timer = setTimeout(finish, timeoutMs);
+    timer = setTimeout(() => {
+      requestController.abort();
+      finish();
+    }, timeoutMs);
     if (signal) {
-      if (signal.aborted) return finish();
-      signal.addEventListener('abort', finish, { once: true });
+      externalAbort = () => {
+        requestController.abort();
+        finish();
+      };
+      if (signal.aborted) return externalAbort();
+      signal.addEventListener('abort', externalAbort, { once: true });
     }
     try {
       const promise = handler(req, res);
@@ -431,13 +430,67 @@ export function adviceFailureReason(response, deepMode = false) {
   return '';
 }
 
-// 生成单只:进程内并发跑 量化(stock_detail?quant=1) + 军师(ai.js) → 组装缓存项(对齐前端 saveAdvice 结构)
+export function quantResultFromAdviceResponse(response, priceHint = null) {
+  const quant = response?.meta?.quantResult;
+  if (!quant || typeof quant !== 'object') return null;
+  return {
+    ...quant,
+    price: Number(quant.price) > 0
+      ? Number(quant.price)
+      : Number(priceHint) > 0 ? Number(priceHint) : null,
+  };
+}
+
+export function buildAdviceReviewRecord({
+  code,
+  mode,
+  origin,
+  previousEntry,
+  cacheItem,
+  llmRan,
+  durationMs,
+} = {}) {
+  if (!previousEntry && !['auto', 'judge'].includes(origin)) return null;
+  const cycle = cacheItem?.advice?.reviewCycle || cacheItem?.reviewCycle || {};
+  const previousAction = previousEntry?.advice?.action
+    || previousEntry?.advice?.stance
+    || '';
+  const nextAction = cacheItem?.advice?.action
+    || cacheItem?.advice?.stance
+    || previousAction;
+  const at = Number(cacheItem?.at) || Date.now();
+  return {
+    schemaVersion: 'advice-review.v1',
+    id: `review_${at}_${String(code || '')}`,
+    code: String(code || ''),
+    mode: String(mode || ''),
+    origin: String(origin || ''),
+    at,
+    durationMs: Math.max(0, Math.round(Number(durationMs) || 0)),
+    llmRan: llmRan === true,
+    disposition: String(cycle.status || ''),
+    reason: String(cycle.reason || '').slice(0, 160),
+    changeType: String(cycle.changeType || ''),
+    previousAction: String(previousAction),
+    nextAction: String(nextAction),
+    configuredIntervalMin: Number(cycle.configuredIntervalMin) || null,
+    intervalMin: Number(cycle.intervalMin) || null,
+    riskLevel: String(cycle.riskLevel || 'normal'),
+    riskReasons: Array.isArray(cycle.riskReasons)
+      ? cycle.riskReasons.map(String).slice(0, 4)
+      : [],
+    evidenceSnapshotId: String(
+      cacheItem?.meta?.evidenceSnapshot?.snapshotId || '',
+    ),
+  };
+}
+
+// 生成单只:军师内部完成统一证据采集与量化预测，任务层直接复用同一份结果。
 async function genOne({
   code,
   name,
   mode,
   payload,
-  quantQuery,
   priceHint,
   onProgress,
   signal,
@@ -448,16 +501,10 @@ async function genOne({
   strategyGate = null,
   councilEnabled = true,
 }) {
+  const startedAt = Date.now();
   const generation = generationOptions(deepMode);
   let streamedReasoning = '';
   let adviceFailure = '';
-  const quantP = invoke(stockDetailHandler, {
-    method: 'GET',
-    query: quantQuery,
-    signal,
-    trustedQuantVersion: quantQuery.model,
-  })
-    .then((j) => (j && j.quant) ? j.quant : null).catch(() => null);
   const adviceP = invokeSSE(aiHandler, {
     method: 'POST',
     body: {
@@ -498,7 +545,8 @@ async function genOne({
         : '军师生成请求异常';
       return null;
     });
-  const [result, adviceResp] = await Promise.all([quantP, adviceP]);
+  const adviceResp = await adviceP;
+  const result = quantResultFromAdviceResponse(adviceResp, priceHint);
 
   const advice = adviceResp && adviceResp.advice
     ? ensureAdviceReasoning(adviceResp.advice, streamedReasoning)
@@ -579,7 +627,22 @@ async function genOne({
   }
   const quantScore = (result && result.score != null && !isNaN(result.score))
     ? { qScore: Number(result.score), qBias: result.bias || '' } : null;
-  return { cacheItem, logEntry, quantScore, councilShadow };
+  const reviewRecord = buildAdviceReviewRecord({
+    code,
+    mode,
+    origin: payload.reviewOrigin,
+    previousEntry,
+    cacheItem,
+    llmRan: !!advice,
+    durationMs: Date.now() - startedAt,
+  });
+  return {
+    cacheItem,
+    logEntry,
+    quantScore,
+    councilShadow,
+    reviewRecord,
+  };
 }
 
 // 依据 code + 当前账号数据,构造该只的生成任务(持仓走 hold,自选走 buy)
@@ -632,7 +695,7 @@ async function runJobGen(
     ? adviceEvidenceDigest(previousEntry.meta.evidenceSnapshot)
     : null;
   if (mode === 'hold_advice') {
-    let p = buildHoldPayload(holding, code, name, portfolio, data.account, data.closed, nextTradeDayLabel());
+    let p = buildHoldPayload(holding, code, name, portfolio, data.account, data.closed, nextTradingDayLabel());
     p.advisorTrack = advisorTrackFrom(data, 'hold_advice');
     p.realOutcomeLearning = realOutcomeLearning;
     p.quantModelVersion = quantModelVersion;
@@ -642,8 +705,7 @@ async function runJobGen(
     if (previousEvidenceDigest) p.previousEvidenceDigest = previousEvidenceDigest;
     if (reviewEvent) p.reviewEvent = reviewEvent;
     if (reviewOrigin) p.reviewOrigin = reviewOrigin;
-    const hp = (p.holdCost != null && p.holdQty != null) ? { holdCost: String(p.holdCost), holdQty: String(p.holdQty) } : {};
-    return genOne({ code, name, mode: 'hold_advice', payload: p, quantQuery: { code, klt: '101', lmt: '60', quant: '1', model: quantModelVersion, ...hp }, priceHint, onProgress, signal, deepMode, previousEntry, reviewIntervalMin, reviewTrigger: reviewEvent ? `judge_${reviewEvent.decision}` : '', strategyGate, councilEnabled });
+    return genOne({ code, name, mode: 'hold_advice', payload: p, priceHint, onProgress, signal, deepMode, previousEntry, reviewIntervalMin, reviewTrigger: reviewEvent ? `judge_${reviewEvent.decision}` : '', strategyGate, councilEnabled });
   }
   let p = buildWatchPayload(code, name, portfolio, data.account);
   p.advisorTrack = advisorTrackFrom(data, 'buy_advice');
@@ -655,7 +717,7 @@ async function runJobGen(
   if (previousEvidenceDigest) p.previousEvidenceDigest = previousEvidenceDigest;
   if (reviewEvent) p.reviewEvent = reviewEvent;
   if (reviewOrigin) p.reviewOrigin = reviewOrigin;
-  return genOne({ code, name, mode: 'buy_advice', payload: p, quantQuery: { code, klt: '101', lmt: '60', quant: '1', model: quantModelVersion }, priceHint, onProgress, signal, deepMode, previousEntry, reviewIntervalMin, reviewTrigger: reviewEvent ? `judge_${reviewEvent.decision}` : '', strategyGate, councilEnabled });
+  return genOne({ code, name, mode: 'buy_advice', payload: p, priceHint, onProgress, signal, deepMode, previousEntry, reviewIntervalMin, reviewTrigger: reviewEvent ? `judge_${reviewEvent.decision}` : '', strategyGate, councilEnabled });
 }
 
 // ---- 任务表合并:把云端最新的【外部变更】并入内存 working(捕获其它设备新入队 / 取消)----
@@ -742,7 +804,7 @@ async function persistServer(nick, workingAcc, myId) {
     if (effective && effective.advice) {
       projectAdviceAlerts(fdata, k, effective.advice, {
         t1Status: t1StatusOf(fdata.holding || [], fdata.closed || [], k),
-        nextTradeDay: nextTradeDayLabel(),
+        nextTradeDay: nextTradingDayLabel(),
       });
     }
   }
@@ -756,6 +818,21 @@ async function persistServer(nick, workingAcc, myId) {
       ...evidenceSnapshotsFromData(wdata),
     },
   );
+  const reviewRecords = new Map(
+    (fdata.adviceReviewLog || [])
+      .filter((record) => record?.id)
+      .map((record) => [record.id, record]),
+  );
+  for (const record of (wdata.adviceReviewLog || [])) {
+    if (!record?.id) continue;
+    const current = reviewRecords.get(record.id);
+    if (!current || Number(record.at) >= Number(current.at)) {
+      reviewRecords.set(record.id, record);
+    }
+  }
+  fdata.adviceReviewLog = [...reviewRecords.values()]
+    .sort((left, right) => Number(right.at) - Number(left.at))
+    .slice(0, 500);
   // adviceLog 按 id 并集
   const wlog = wdata.adviceLog || [];
   if (wlog.length) {
@@ -857,6 +934,7 @@ async function drainAccount(nick, initialAcc) {
 
   let dailyReportResult;
   try {
+    const aiSearchConfig = await ensureAiSearchConfig();
     setAdviceDailyReportPhase(
       data,
       '策略日报缺失时将先自动生成，请稍候',
@@ -865,6 +943,7 @@ async function drainAccount(nick, initialAcc) {
       scopeKey: nick,
       existingSummary: data.adviceDailyReport?.summary || null,
       getSummary: () => getLatestDailySummary(),
+      searchConfig: aiSearchConfig,
       generate: () => generateAdviceDailyReport(
         collectAdviceDailyReportHoldings(data),
       ),
@@ -994,10 +1073,7 @@ async function drainAccount(nick, initialAcc) {
       const free = CONC - runningCount(data);
       const startable = Date.now() < startDeadline ? Object.values(jobsOf(data))
         .filter((j) => j && j.status === 'queued' && !j.cancelRequested && !inflight.has(j.code))
-        .sort((a, b) => {
-          const eventPriority = Number(b.source === 'judge') - Number(a.source === 'judge');
-          return eventPriority || (a.at || 0) - (b.at || 0);
-        })
+        .sort(compareAdviceJobs)
         .slice(0, Math.max(0, free)) : [];
       // 处理 queued 里已被外部取消意图标记的
       for (const j of Object.values(jobsOf(data))) {
@@ -1084,6 +1160,16 @@ async function drainAccount(nick, initialAcc) {
         if (done.res.councilShadow) {
           addCouncilShadowRecord(d, done.res.councilShadow);
         }
+        if (done.res.reviewRecord) {
+          const records = d.adviceReviewLog || (d.adviceReviewLog = []);
+          const withoutCurrent = records.filter(
+            (record) => record?.id !== done.res.reviewRecord.id,
+          );
+          d.adviceReviewLog = [
+            done.res.reviewRecord,
+            ...withoutCurrent,
+          ].slice(0, 500);
+        }
       } else {
         failJob(
           d,
@@ -1105,7 +1191,13 @@ async function drainAccount(nick, initialAcc) {
     await persistence.settle();
     await releaseDrainLock(nick, acc, myId, CONC);
   }
-  return { drained: true, ok, fail };
+  let continued = false;
+  if (shouldContinueAdviceWorker(acc.data)) {
+    try {
+      continued = !!(await scheduleAdviceWorker(nick))?.accepted;
+    } catch { /* 5分钟恢复定时器仍会兜底 */ }
+  }
+  return { drained: true, ok, fail, continued };
 }
 
 // 排入某账号的"过期/缺建议"任务(定时兜底 & 全量刷新用)。scope 过滤 hold/watch/all。
@@ -1140,16 +1232,7 @@ function enqueueStale(data, { scope = 'all', force = false } = {}) {
 }
 
 function inAutoRefreshWindow(now = Date.now()) {
-  const d = new Date(now + 8 * 3600 * 1000);
-  const day = d.getUTCDay();
-  const dayKey = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
-  const minutes = d.getUTCHours() * 60 + d.getUTCMinutes();
-  const inMorning = minutes >= 570 && minutes <= 690;
-  const inAfternoon = minutes >= 780 && minutes <= 900;
-  return day >= 1
-    && day <= 5
-    && !A_SHARE_HOLIDAYS.has(dayKey)
-    && (inMorning || inAfternoon);
+  return isContinuousTrading(now);
 }
 
 export function cancelDisabledAdviceReviewJobs(data, now = Date.now()) {
@@ -1168,6 +1251,7 @@ export function cancelDisabledAdviceReviewJobs(data, now = Date.now()) {
 
 export function enqueueAutoRefreshDue(data, now = Date.now()) {
   if (!inAutoRefreshWindow(now)) return 0;
+  if (hasActiveManualBatch(data)) return 0;
   const settings = data.settings || (data.settings = {});
   const config = autoConfigFromSettings(settings);
   const scopes = [
@@ -1309,9 +1393,36 @@ export default async function handler(req, res) {
         }));
       }
       if (op === 'cancel') {
-        const codes = Array.isArray(body.codes) ? body.codes.filter(Boolean).map(String) : [];
+        const targets = Array.isArray(body.targets)
+          ? body.targets
+            .filter((target) => target?.code)
+            .map((target) => ({
+              code: String(target.code),
+              jobId: String(target.jobId || ''),
+              batchId: String(target.batchId || ''),
+            }))
+          : [];
+        const codes = targets.length
+          ? []
+          : Array.isArray(body.codes)
+            ? body.codes.filter(Boolean).map(String)
+            : [];
         const batchId = String(body.batchId || '');
-        let n = 0; for (const c of codes) if (cancelJob(data, c, Date.now(), batchId)) n++;
+        let n = 0;
+        for (const target of targets) {
+          if (
+            cancelJob(
+              data,
+              target.code,
+              Date.now(),
+              target.batchId || batchId,
+              target.jobId,
+            )
+          ) n++;
+        }
+        for (const code of codes) {
+          if (cancelJob(data, code, Date.now(), batchId)) n++;
+        }
         await persistServer(nick, acc, 'cancel');
         return res.end(JSON.stringify({ ok: true, canceled: n, progress: jobsToProgress(data, Date.now(), CONC) }));
       }
@@ -1342,6 +1453,9 @@ export default async function handler(req, res) {
         ? requestedBatchId.slice(0, 100)
         : `ondemand_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
       let enq = 0, dup = 0;
+      if (batchRequest) {
+        suspendAutomaticJobsForManualBatch(data, Date.now());
+      }
       for (const code of codes) {
         if (scope === 'hold' && !holdSet.has(code)) continue;
         if (scope === 'watch' && holdSet.has(code)) continue;

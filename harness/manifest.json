@@ -1,0 +1,76 @@
+{
+  "schemaVersion": "harness-manifest.v1",
+  "dimensions": {
+    "contract": 0.2,
+    "groundedness": 0.2,
+    "feasibility": 0.25,
+    "actionability": 0.2,
+    "consistency": 0.15
+  },
+  "defaults": {
+    "minOverall": 0.85
+  },
+  "baselineFile": "baselines/current.json",
+  "regressionTolerance": {
+    "overall": 0.03,
+    "dimension": 0.05
+  },
+  "suites": {
+    "portfolio": {
+      "adapter": "portfolio",
+      "caseFile": "cases/portfolio.json",
+      "minOverall": 0.9,
+      "mode": "offline",
+      "description": "持仓再平衡、候选白名单、现金整手与T+1约束"
+    },
+    "evidence": {
+      "adapter": "evidence",
+      "caseFile": "cases/evidence.json",
+      "minOverall": 0.9,
+      "mode": "offline",
+      "description": "CanonicalEvidenceSnapshot确定性回放、时效和版本归因"
+    },
+    "advice": {
+      "adapter": "advice",
+      "caseFile": "cases/advice.json",
+      "minOverall": 0.9,
+      "mode": "offline",
+      "description": "军师数值修正、现金、T+1和价格关系"
+    },
+    "judge": {
+      "adapter": "judge",
+      "caseFile": "cases/judge.json",
+      "minOverall": 0.9,
+      "mode": "offline",
+      "description": "两段式确认、置信度、观察期和止损覆盖"
+    },
+    "screen": {
+      "adapter": "screen",
+      "caseFile": "cases/screen.json",
+      "minOverall": 0.9,
+      "mode": "offline",
+      "description": "统一策略短名单、候选白名单和条件回退"
+    },
+    "daily": {
+      "adapter": "daily",
+      "caseFile": "cases/daily.json",
+      "minOverall": 0.9,
+      "mode": "offline",
+      "description": "策略日报事实、场次、板块方向和检索版本"
+    },
+    "endpoint": {
+      "adapter": "endpoint",
+      "caseFile": "cases/endpoint.json",
+      "minOverall": 0.9,
+      "mode": "online",
+      "description": "运行时全部LLM端点能力、延迟与Token预算"
+    },
+    "shadow": {
+      "adapter": "shadow",
+      "caseFile": "cases/shadow.json",
+      "minOverall": 0.9,
+      "mode": "online",
+      "description": "多端点同题影子对拍、一致率与版本归因"
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "harness-case-set.v1",
+  "cases": [
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "shadow-portfolio-wait-consensus",
+      "adapter": "shadow",
+      "tags": ["online", "shadow", "portfolio", "consensus"],
+      "input": {
+        "role": "portfolio",
+        "prompt": "这是只读影子评估。股票600000只有证据E1：实时行情、量化与技术面均缺失。必须返回wait，目标权重0，并给出重新评估触发器。严格输出JSON：{\"decision\":\"wait\",\"code\":\"600000\",\"targetWeightPct\":0,\"reason\":\"具体理由\",\"trigger\":\"补齐哪些证据后重评\",\"evidenceIds\":[\"E1\"]}",
+        "allowedCodes": ["600000"],
+        "allowedEvidenceIds": ["E1"],
+        "timeoutMs": 180000
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "minResponses": 1,
+        "minAgreement": 0.67,
+        "maxLatencyMs": 180000,
+        "maxTotalTokens": 50000
+      }
+    }
+  ]
+}

@@ -137,8 +137,18 @@ export function pickEndpoint(config, now = Date.now(), role) {
   if (!eps.length) return null;
   const usable = eps.filter((e) => h(e.id).cooldownUntil <= now);
   const pool = usable.length ? usable : eps;
+  const primary = pool.find((endpoint) => endpoint.id === 'default');
+  const primaryThreshold = Math.max(
+    1,
+    Math.min(20, Number(config?.primaryMaxInflight) || 2),
+  );
+  if (primary && h(primary.id).inflight < primaryThreshold) {
+    return primary;
+  }
+  const routedPool = pool.filter((endpoint) => endpoint.id !== 'default');
+  const candidates = routedPool.length ? routedPool : pool;
   let best = null, bestScore = Infinity;
-  for (const e of pool) {
+  for (const e of candidates) {
     const s = h(e.id);
     const score = (s.inflight + 1) / (e.weight || 1);   // 在途越多、权重越低 → 分越高越不优先
     if (score < bestScore) { bestScore = score; best = e; }
@@ -159,6 +169,10 @@ export function markEndpointUnusable(id, now = Date.now(), releaseInflight = fal
   if (releaseInflight) state.inflight = Math.max(0, state.inflight - 1);
   state.fails = Math.max(state.fails, FAIL_THRESHOLD);
   state.cooldownUntil = now + COOLDOWN_MS;
+}
+
+export function resetPoolHealthForTests() {
+  health.clear();
 }
 
 // 池化 fetch:自动选端点 + 失败故障转移到下一个可用端点(最多试 maxTries 个)。

@@ -24,7 +24,14 @@ export function buildDailySummary(result) {
   }
   if (rep.strategy) parts.push('整体策略:' + String(rep.strategy).slice(0, 120));
   if (Array.isArray(rep.risks) && rep.risks.length) parts.push('风险:' + rep.risks.slice(0, 2).join('；'));
-  return { day: result.day, session: result.session, sessionCn: result.sessionCn, text: parts.join(' ') };
+  return {
+    day: result.day,
+    session: result.session,
+    sessionCn: result.sessionCn,
+    text: parts.join(' '),
+    searchEnabled: result.searchEnabled === true,
+    searchConfigUpdatedAt: Number(result.searchConfigUpdatedAt) || 0,
+  };
 }
 
 // 读取当天最新一份日报的摘要(任意场次，取最近生成的)；无则 null。给 ai.js 调用。

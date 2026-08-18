@@ -1,13 +1,14 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import ReactECharts from 'echarts-for-react'
 import Icon from './Icon'
+import StockTags from './StockTags'
 import AdviceGenerationStatus from './AdviceGenerationStatus'
 import AdvicePresentation from './AdvicePresentation'
 import { usePolling } from '../hooks'
 import { fmtPct, pctClass, fmtRaw, fmtNum } from '../format'
 import { api } from '../apiBase'
 import { usePlanStore, planStore, computeTFlows, computePortfolio, t1StatusOf } from '../planStore'
-import { nextTradingDayLabel } from '../review'
+import { nextTradingDayLabel } from '../../shared/tradingCalendar.js'
 import { getAdvice, subscribeAdvice } from '../adviceCache'
 import { subscribeRunner, isRunning, getRunning, getResult } from '../adviceRunner'
 import { tryStartAdvice, generatingList } from '../adviceGate'
@@ -28,8 +29,12 @@ import {
 import { AlertForm } from './AlertCenter'
 import { portfolioExposureContext } from '../../shared/portfolioExposure.js'
 import { isAdviceReviewEnabled } from '../../shared/adviceReviewPolicy.js'
+import { visibleAiSources } from '../../shared/aiSearchUi.js'
+import { useAiSearchConfig } from '../aiSearchConfigStore'
 import { trustCalibrationText } from '../../shared/advicePresentation.js'
 import { adviceTrustBands } from '../../shared/adviceIntelligence.js'
+import { tradeActivityContext } from '../../shared/portfolioAccounting.js'
+import { productionForecastWindow } from '../../shared/productionForecastWindow.js'
 
 // 把公司网址补全为可点击的绝对 URL（东财 F10 常给不带协议的裸域名）
 function normalizeUrl(raw) {
@@ -61,6 +66,14 @@ function fmtVol(v) {
   if (a >= 1e4) return (v / 1e4).toFixed(1) + '万手'
   return Math.round(v) + '手'
 }
+
+function formatQuantAsOf(value) {
+  const match = String(value || '').match(
+    /(?:\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})/,
+  )
+  return match ? `${match[1]}/${match[2]} ${match[3]}:${match[4]}` : String(value || '')
+}
+
 // 把纯文本里的网址/域名渲染成可点击链接（公司简介里常带参考网站）
 function Linkify({ text }) {
   if (!text) return null
@@ -94,6 +107,7 @@ export default function StockDetail({ stock, onClose }) {
   const [showMa, setShowMa] = useState(false) // OHLC/MA 网格默认折叠
   const [showInfo, setShowInfo] = useState(false) // 公司简介默认折叠
   const [busyModal, setBusyModal] = useState(null) // 端点已满提示:{ busy:[{code,name}], concurrency } | null
+  const searchConfig = useAiSearchConfig()
   const book = usePlanStore()
   const reviewEnabled = isAdviceReviewEnabled(
     book.settings,
@@ -289,6 +303,10 @@ export default function StockDetail({ stock, onClose }) {
           holdCost: myHold.cost,
           holdQty: myHold.qty,
           openTNet: myHold.hasOpenT ? myHold.tNetHands : 0,
+          tradeContext: tradeActivityContext(
+            book.closed || [],
+            stock.code,
+          ),
           // T+1 买入时间锁定:今日买入手数当日不可卖,注入军师使其不建议卖/减超过今日可卖手数
           ...(() => {
             try {
@@ -646,11 +664,25 @@ export default function StockDetail({ stock, onClose }) {
   return (
     <div className="modal-mask" onClick={onClose}>
       <div className="detail-panel" role="dialog" aria-modal="true" aria-label={`${stock.name || stock.code} 个股详情`} onClick={(e) => e.stopPropagation()}>
-        <div className="modal-bar">
-          <div className="modal-title">
-            {(profile && profile.name) || stock.name}
-            <span className="detail-code">{stock.code}</span>
-            {profile && profile.market && <span className="detail-market">{profile.market}</span>}
+        <div className="modal-bar detail-header">
+          <div className="detail-title-block">
+            <div className="detail-title-primary">
+              <span className="detail-stock-name">
+                {(profile && profile.name) || stock.name}
+              </span>
+              <span className="detail-code">{stock.code}</span>
+            </div>
+            <div className="detail-title-meta">
+              {profile?.market && (
+                <span className="detail-market">{profile.market}</span>
+              )}
+              <StockTags
+                code={stock.code}
+                fallbackIndustry={profile?.industry}
+                variant="detail"
+                className="detail-title-tags"
+              />
+            </div>
           </div>
           <div className="modal-actions">
             <button
@@ -659,6 +691,7 @@ export default function StockDetail({ stock, onClose }) {
                 + (watchAction.active ? ' active' : '')
               }
               type="button"
+              aria-label={watchAction.label}
               title={
                 isHeldStock
                   ? '持仓股票已纳入持续关注，无需重复加入自选'
@@ -674,16 +707,15 @@ export default function StockDetail({ stock, onClose }) {
               }}
             >
               <Icon name={watchAction.icon} size={14} />
-              <span>{watchAction.label}</span>
             </button>
             <button
               className="icon-btn detail-refresh"
               title="刷新最新价格 / K线"
+              aria-label={refreshing ? '刷新中' : '刷新最新价格和K线'}
               disabled={refreshing || loading}
               onClick={doRefresh}
             >
               <Icon name="refresh" size={15} className={refreshing || loading ? 'spin' : ''} />
-              <span className="detail-refresh-txt">{refreshing ? '刷新中' : '刷新'}</span>
             </button>
             <button type="button" className="modal-close" aria-label="关闭个股详情" onClick={onClose}><Icon name="close" size={16} /></button>
           </div>
@@ -707,12 +739,23 @@ export default function StockDetail({ stock, onClose }) {
               {/* ===== AI 操作建议（核心：紧跟价格，第一优先展示）===== */}
               <div className="decide-box">
                 <div className="decide-head">
-                  <div className="decide-title"><Icon name="target" size={14} /> 军师 · AI 操作建议
+                  <div className="decide-primary">
+                    <div className="decide-title">
+                      <Icon name="target" size={14} />
+                      <span>军师 · AI 操作建议</span>
+                    </div>
                     {myHold ? <span className="decide-hold">持仓 {myHold.qty}手 · 成本{fmtRaw(myHold.cost)}</span>
                             : <span className="decide-hold none">未持仓</span>}
                   </div>
-                  <div className="decide-review-controls">
-                    {quantState && quantState.result && quantState.result.asOf && <span className="quant-asof">量化 {quantState.result.asOf}</span>}
+                  <div className="decide-status">
+                    {quantState && quantState.result && quantState.result.asOf
+                      ? (
+                        <span className="quant-asof">
+                          <Icon name="clock" size={12} />
+                          量化信号 · {formatQuantAsOf(quantState.result.asOf)}
+                        </span>
+                      )
+                      : <span className="quant-asof muted">等待量化信号</span>}
                     <button
                       type="button"
                       className={'advice-review-toggle' + (reviewEnabled ? ' on' : '')}
@@ -728,8 +771,7 @@ export default function StockDetail({ stock, onClose }) {
                       <span className="advice-review-toggle-track" aria-hidden="true">
                         <span />
                       </span>
-                      <span>持续复核</span>
-                      <b>{reviewEnabled ? '开' : '关'}</b>
+                      <span>{reviewEnabled ? '复核已开启' : '复核已关闭'}</span>
                     </button>
                   </div>
                 </div>
@@ -751,9 +793,9 @@ export default function StockDetail({ stock, onClose }) {
                     </div>
                     <AdviceGenerationStatus code={stock.code} variant="detail" />
                     {/* 数据源采集清单:每个源 settle 时后端推 source 事件,这里实时勾选(✓ 成功 / — 无数据) */}
-                    {quantState.sources && quantState.sources.length > 0 && (
+                    {visibleAiSources(searchConfig.enabled, quantState.sources).length > 0 && (
                       <div className="adv-sources">
-                        {quantState.sources.map((s, i) => (
+                        {visibleAiSources(searchConfig.enabled, quantState.sources).map((s, i) => (
                           <span className={'adv-src' + (s.ok ? ' ok' : ' none')} key={s.label + i}>
                             <Icon name={s.ok ? 'check' : 'close'} size={11} /> {s.label}
                           </span>
@@ -798,6 +840,26 @@ export default function StockDetail({ stock, onClose }) {
                   const isV21 = q.modelVersion === 'v2.1' && !!q.v21
                   const isV2 = q.modelVersion === 'v2' && !!q.v2
                   const isMinuteModel = isV21 || isV2
+                  const nextFc = !isMinuteModel
+                    ? q.nextTradeDayForecast
+                    : null
+                  const currentDayFc = !isMinuteModel
+                    ? q.currentTradingDayForecast
+                    : null
+                  const currentDayWindow = currentDayFc
+                    ? productionForecastWindow({
+                        asOf: currentDayFc.sourceAsOf,
+                        targetDate: currentDayFc.targetDate,
+                      })
+                    : null
+                  const primaryFc = currentDayWindow?.isTodayTarget
+                    ? currentDayFc
+                    : nextFc
+                  const primaryWindow = primaryFc === currentDayFc
+                    ? currentDayWindow
+                    : (nextFc
+                    ? productionForecastWindow({ asOf: q.asOf })
+                    : null)
                   const fallbackVerdict = {
                     tone: dec.tone || 'muted',
                     title: dec.title || '—',
@@ -861,6 +923,11 @@ export default function StockDetail({ stock, onClose }) {
                         <div className="fc-fold-wrap">
                           <button className="fc-fold" onClick={() => setShowForecast((v) => !v)}>
                             <span className="fc-fold-summary">
+                              {primaryFc && (
+                                <span className={'fc-dir-inline production ' + (primaryFc.direction === '看涨' ? 'red' : primaryFc.direction === '看跌' ? 'green' : 'muted')}>
+                                  {primaryWindow.shortLabel}{primaryFc.direction}·概率{primaryFc.upProb}%·{fmtRaw(primaryFc.targetLow)}~{fmtRaw(primaryFc.targetHigh)}
+                                </span>
+                              )}
                               {fc && <span className={'fc-dir-inline ' + (fc.direction === '看涨' ? 'red' : fc.direction === '看跌' ? 'green' : 'muted')}>量化{isMinuteModel ? (fc.horizon || '下一交易日') : `${fc.days || 5}日`}{fc.direction}·概率{fc.upProb}%</span>}
                               {q.score != null && <span className={'quant-chip sm ' + (q.score >= 62 ? 'red' : q.score <= 38 ? 'green' : 'gold')}>量化 {q.score}·{q.bias}</span>}
                             </span>
@@ -871,10 +938,12 @@ export default function StockDetail({ stock, onClose }) {
                               {fc && (
                                 <div className="forecast-box">
                                   <div className="fc-row1">
-                                    <span className={'fc-dir ' + (fc.direction === '看涨' ? 'red' : fc.direction === '看跌' ? 'green' : 'muted')}>
-                                      {isMinuteModel ? (fc.horizon || '下一交易日') : `未来${fc.days || 5}日`} {fc.direction}
+                                    <span className={'fc-dir ' + ((primaryFc || fc).direction === '看涨' ? 'red' : (primaryFc || fc).direction === '看跌' ? 'green' : 'muted')}>
+                                      {primaryFc
+                                        ? `${primaryWindow.label} ${primaryFc.direction}`
+                                        : `${isMinuteModel ? (fc.horizon || '下一交易日') : `未来${fc.days || 5}日`} ${fc.direction}`}
                                     </span>
-                                    <span className="fc-conf">预测信心 {fc.confidence}</span>
+                                    <span className="fc-conf">预测信心 {(primaryFc || fc).confidence}</span>
                                   </div>
                                   {isV21 ? (
                                     <div className="v21-heads">
@@ -967,12 +1036,34 @@ export default function StockDetail({ stock, onClose }) {
                                       )}
                                     </>
                                   ) : (
-                                    <div className="fc-grid">
-                                      <div className="fc-cell"><span className="fc-k">上涨概率</span><span className={'fc-v ' + (fc.upProb >= 55 ? 'red' : fc.upProb <= 45 ? 'green' : '')}>{fc.upProb}%</span></div>
-                                      <div className="fc-cell"><span className="fc-k">预期涨跌</span><span className={'fc-v ' + (fc.expRet >= 0 ? 'red' : 'green')}>{fc.expRet >= 0 ? '+' : ''}{fc.expRet}%</span></div>
-                                      <div className="fc-cell"><span className="fc-k">目标区间</span><span className="fc-v"><b className="green">{fc.targetLow}</b> ~ <b className="red">{fc.targetHigh}</b></span></div>
-                                      <div className="fc-cell"><span className="fc-k">中枢价</span><span className="fc-v">{fc.targetMid}</span></div>
-                                    </div>
+                                    <>
+                                      {primaryFc && (
+                                        <div className="production-next-forecast">
+                                          <div className="fc-grid">
+                                            <div className="fc-cell"><span className="fc-k">上涨概率</span><span className={'fc-v ' + (primaryFc.upProb >= 55 ? 'red' : primaryFc.upProb <= 45 ? 'green' : '')}>{primaryFc.upProb}%</span></div>
+                                            <div className="fc-cell"><span className="fc-k">预期涨跌</span><span className={'fc-v ' + (primaryFc.expRet >= 0 ? 'red' : 'green')}>{primaryFc.expRet >= 0 ? '+' : ''}{primaryFc.expRet}%</span></div>
+                                            <div className="fc-cell"><span className="fc-k">P10-P90 价格区间</span><span className="fc-v"><b className="green">{fmtRaw(primaryFc.targetLow)}</b> ~ <b className="red">{fmtRaw(primaryFc.targetHigh)}</b></span></div>
+                                            <div className="fc-cell"><span className="fc-k">价格中枢</span><span className="fc-v">{fmtRaw(primaryFc.targetMid)}</span></div>
+                                          </div>
+                                          <div className="production-forecast-note">
+                                            <Icon name="info" size={12} />
+                                            {primaryWindow?.note || '不是当前时点到收盘的剩余时段预测'}；统计区间，不是保证价格
+                                          </div>
+                                        </div>
+                                      )}
+                                      {primaryFc && (
+                                        <div className="fc-subhead">
+                                          <span>未来{fc.days || 5}日预测</span>
+                                          <b className={fc.direction === '看涨' ? 'red' : fc.direction === '看跌' ? 'green' : ''}>{fc.direction} · {fc.upProb}%</b>
+                                        </div>
+                                      )}
+                                      <div className="fc-grid">
+                                        <div className="fc-cell"><span className="fc-k">上涨概率</span><span className={'fc-v ' + (fc.upProb >= 55 ? 'red' : fc.upProb <= 45 ? 'green' : '')}>{fc.upProb}%</span></div>
+                                        <div className="fc-cell"><span className="fc-k">预期涨跌</span><span className={'fc-v ' + (fc.expRet >= 0 ? 'red' : 'green')}>{fc.expRet >= 0 ? '+' : ''}{fc.expRet}%</span></div>
+                                        <div className="fc-cell"><span className="fc-k">P10-P90 价格区间</span><span className="fc-v"><b className="green">{fmtRaw(fc.targetLow)}</b> ~ <b className="red">{fmtRaw(fc.targetHigh)}</b></span></div>
+                                        <div className="fc-cell"><span className="fc-k">价格中枢</span><span className="fc-v">{fmtRaw(fc.targetMid)}</span></div>
+                                      </div>
+                                    </>
                                   )}
                                 </div>
                               )}
@@ -1249,6 +1340,7 @@ export default function StockDetail({ stock, onClose }) {
                     title="查看该股详情与生成进度"
                   >
                     <span className="busy-item-name">{x.name}</span>
+                    <StockTags code={x.code} variant="inline" />
                     <span className="busy-item-code">{x.code}</span>
                     <Icon name="refresh" size={12} className="spin" />
                     <Icon name="chevronRight" size={13} />

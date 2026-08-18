@@ -14,6 +14,46 @@ import {
 import { poolStatus, endpointCountForRole, judgeEndpointStatus } from './_llm_pool.js';
 import { authorizePaidRequest } from './_account_auth.js';
 
+export const MODEL_TEST_TIMEOUT_MS = 120000;
+
+const normalizeBaseUrl = (value) => String(value || '').trim().replace(/\/+$/, '');
+
+export function resolveLlmConfigTarget(config = {}, body = {}) {
+  const endpointId = String(body.endpointId || (body.target === 'judge' ? 'judge' : 'default'));
+  let stored = null;
+  if (endpointId === 'judge') {
+    stored = resolveJudgeEndpoint(config);
+  } else if (endpointId === 'default') {
+    stored = {
+      baseUrl: config.baseUrl,
+      apiKey: config.apiKey,
+    };
+  } else {
+    stored = (config.endpoints || []).find((endpoint) => endpoint?.id === endpointId) || null;
+    if (!stored) {
+      return {
+        endpointId,
+        baseUrl: '',
+        apiKey: '',
+        error: '指定端点不存在',
+      };
+    }
+  }
+
+  const storedBase = normalizeBaseUrl(stored?.baseUrl);
+  const requestedBase = normalizeBaseUrl(body.baseUrl);
+  const baseUrl = requestedBase || storedBase;
+  const providedKey = body.apiKey && !/\*/.test(String(body.apiKey))
+    ? String(body.apiKey).trim()
+    : '';
+  const canReuseStoredKey = !requestedBase || requestedBase === storedBase;
+  return {
+    endpointId,
+    baseUrl,
+    apiKey: providedKey || (canReuseStoredKey ? String(stored?.apiKey || '') : ''),
+  };
+}
+
 // 用一对 base/key 拉可用模型列表（OpenAI 兼容 GET /models）
 async function fetchModels(baseUrl, apiKey) {
   const base = String(baseUrl || '').replace(/\/+$/, '');
@@ -44,7 +84,7 @@ async function fetchModels(baseUrl, apiKey) {
 async function pingModel(baseUrl, apiKey, model) {
   const base = String(baseUrl || '').replace(/\/+$/, '');
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 20000);
+  const t = setTimeout(() => ctrl.abort(), MODEL_TEST_TIMEOUT_MS);
   const t0 = Date.now();
   try {
     const r = await fetch(`${base}/chat/completions`, {
@@ -101,8 +141,14 @@ export default async function handler(req, res) {
     const cur = currentConfig();
     const judgeTarget = body && body.target === 'judge';
     const judgeEndpoint = resolveJudgeEndpoint(cur);
-    const baseUrl = (body && body.baseUrl) || (judgeTarget ? judgeEndpoint?.baseUrl : cur.baseUrl);
-    const apiKey = (body && body.apiKey) || (judgeTarget ? judgeEndpoint?.apiKey : cur.apiKey);
+    const target = resolveLlmConfigTarget(cur, body || {});
+    if (target.error) {
+      return res.status(200).send(JSON.stringify({
+        ok: false,
+        error: target.error,
+      }));
+    }
+    const { baseUrl, apiKey } = target;
 
     if (action === 'verify') {
       const r = await fetchModels(baseUrl, apiKey);
@@ -129,6 +175,7 @@ export default async function handler(req, res) {
         apiKey: body && body.apiKey,     // 空则 saveConfig 内部保留原 key
         models: body && body.models,
         reasoning: body && body.reasoning,
+        primaryMaxInflight: body && body.primaryMaxInflight,
         endpoints: body && body.endpoints,   // 多端点资源池(整组替换;掩码 key 不覆盖旧值)
       };
       if (body && Object.prototype.hasOwnProperty.call(body, 'judgeEndpoint')) {

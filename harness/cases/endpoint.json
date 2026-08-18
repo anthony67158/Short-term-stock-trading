@@ -1,0 +1,70 @@
+{
+  "schemaVersion": "harness-case-set.v1",
+  "cases": [
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "endpoint-portfolio-capability-matrix",
+      "adapter": "endpoint",
+      "tags": ["online", "endpoint", "portfolio"],
+      "input": {
+        "role": "portfolio",
+        "capabilities": [
+          "models",
+          "chat",
+          "function",
+          "stream",
+          "reasoning"
+        ],
+        "timeoutMs": 180000
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "minEndpoints": 1,
+        "maxLatencyMs": 180000,
+        "maxTotalTokens": 50000
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "endpoint-advisor-capability-matrix",
+      "adapter": "endpoint",
+      "tags": ["online", "endpoint", "advisor"],
+      "input": {
+        "role": "advisor",
+        "capabilities": [
+          "models",
+          "chat",
+          "stream",
+          "reasoning"
+        ],
+        "timeoutMs": 180000
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "minEndpoints": 1,
+        "maxLatencyMs": 180000,
+        "maxTotalTokens": 50000
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "endpoint-judge-capability-matrix",
+      "adapter": "endpoint",
+      "tags": ["online", "endpoint", "judge"],
+      "input": {
+        "role": "judge",
+        "capabilities": [
+          "models",
+          "chat"
+        ],
+        "timeoutMs": 90000
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "minEndpoints": 1,
+        "maxLatencyMs": 90000,
+        "maxTotalTokens": 10000
+      }
+    }
+  ]
+}

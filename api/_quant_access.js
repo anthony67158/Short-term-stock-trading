@@ -17,6 +17,13 @@ export async function canUseQuantModel(
   const selected = normalizeQuantModelVersion(version)
   if (selected === 'default') return true
   if (req?.[TRUSTED_QUANT_VERSION] === selected) return true
+  const internalKey = String(
+    req?.headers?.['x-cron-key'] || '',
+  )
+  if (
+    process.env.CRON_KEY
+    && internalKey === String(process.env.CRON_KEY)
+  ) return true
 
   const authentication = await authenticateAccountRequest(
     req,

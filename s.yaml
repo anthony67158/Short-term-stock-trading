@@ -37,10 +37,14 @@ resources:
         # 模型沿用代码内默认值（保持与线上一致）
         LLM_MODEL: DeepSeek-V3.2-Pro
         ADVISOR_MODEL: DeepSeek-V4-Pro
+        PORTFOLIO_MODEL: DeepSeek-V4-Pro
         AGENT_MODEL: Qwen3-Max-A
         DAILY_MODEL: Qwen3-Max-A
         # ---- 第三方数据 ----
         FINNHUB_KEY: ${env('FINNHUB_KEY')}
+        # Anspire 标准版国内搜索：军师个股/行业/舆情补盲，设 false 可立即停用。
+        ANSPIRE_API_KEY: ${env('ANSPIRE_API_KEY')}
+        ANSPIRE_SEARCH_ENABLED: "true"
         QUANT_URL: ${env('QUANT_URL')}
         QUANT_KEY: ${env('QUANT_KEY')}
         # ---- V2 分钟 Transformer（独立 EAS，可手动启停）----
@@ -61,6 +65,8 @@ resources:
         # ---- FC Timer / 云端任务鉴权口令 ----
         # Timer payload 与该值匹配后才允许进入 cron_advice / cron_alert / cron_v2_accuracy。
         CRON_KEY: ${env('CRON_KEY')}
+        # 新备案域名设备授权码的 HMAC 摘要；签名密钥复用 CRON_KEY，明文授权码不入库。
+        SITE_ACCESS_CODE_HMAC: "lowdmv8a1a48u9Bdws4_vjCHZReAjhhBsEx0ndSChFc"
         # 军师委员会仅影子运行；设为 false 可紧急关闭额外 LLM 调用。
         ADVISOR_COUNCIL_SHADOW: ${env('ADVISOR_COUNCIL_SHADOW')}
         # 策略人工晋级使用独立密钥；空值表示批准接口禁用。
@@ -83,6 +89,12 @@ resources:
               - PUT
               - OPTIONS
         - triggerName: advice-resume-timer
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "@every 5m"
+            enable: true
+            payload: ${env('CRON_KEY')}
+        - triggerName: portfolio-analysis-resume-timer
           triggerType: timer
           triggerConfig:
             cronExpression: "@every 5m"
@@ -151,3 +163,31 @@ resources:
             cronExpression: "CRON_TZ=Asia/Shanghai 0 0 15 * * 1-5"
             enable: true
             payload: ${env('CRON_KEY')}
+      # 已备案生产域名。免费证书有效至 2026-11-15，续签后需更新 certId。
+      customDomain:
+        domainName: www.tedixtf.cn
+        protocol: HTTP,HTTPS
+        certConfig:
+          certId: "26673093"
+        tlsConfig:
+          minVersion: TLSv1.2
+          maxVersion: TLSv1.3
+          cipherSuites:
+            - TLS_RSA_WITH_AES_128_GCM_SHA256
+            - TLS_RSA_WITH_AES_256_GCM_SHA384
+            - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+            - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+            - TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305
+        route:
+          qualifier: LATEST
+          path: /*
+          methods:
+            - GET
+            - POST
+            - PUT
+            - DELETE
+            - HEAD
+            - PATCH
+            - OPTIONS
+        authConfig:
+          authType: anonymous

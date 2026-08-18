@@ -51,6 +51,7 @@ async function quoteTx(codes) {
     out.push(withPriceLimitState({
       code: rawCode,
       name: '',                 // 名称留空，前端用本地已有名称
+      source: '腾讯财经',
       price, pct,
       chg: prevClose ? +(price - prevClose).toFixed(3) : 0,
       turnover: num(p[38]) || null,   // 换手率(腾讯常见位)
@@ -85,6 +86,7 @@ export default async function handler(req, res) {
       list = diff.map((d) => withPriceLimitState({
         code: d.f12,
         name: d.f14,
+        source: '东方财富',
         price: num(d.f2),
         pct: num(d.f3),
         chg: num(d.f4),

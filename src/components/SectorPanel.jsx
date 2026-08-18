@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import ReactECharts from 'echarts-for-react'
 import Icon from './Icon'
+import StockName from './StockName'
 import { fmtPct, pctClass, fmtInflow, fmtNum } from '../format'
 
 export default function SectorPanel({ data, loading, error, type, setType, selected, onSelect }) {
@@ -150,8 +151,10 @@ export default function SectorPanel({ data, loading, error, type, setType, selec
                     <td className={pctClass(s.mainInflow)}>{fmtInflow(s.mainInflow)}</td>
                     <td className={pctClass(s.mainRatio)}>{fmtNum(s.mainRatio, 1)}%</td>
                     <td>
-                      <span>{s.leadName || '--'}</span>
-                      {s.leadPct ? <span className={'sub-name ' + pctClass(s.leadPct)}>{fmtPct(s.leadPct)}</span> : null}
+                      {s.leadCode
+                        ? <StockName code={s.leadCode} name={s.leadName} stopPropagation />
+                        : <span>--</span>}
+                      {s.leadPct != null ? <span className={'sub-name ' + pctClass(s.leadPct)}>{fmtPct(s.leadPct)}</span> : null}
                     </td>
                   </tr>
                 ))}

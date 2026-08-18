@@ -7,6 +7,7 @@ import { getV2RuntimeConfig } from './_quant_model_control.js'
 
 const CODE_RE = /^\d{6}$/
 const EAS_HOST_RE = /(^|\.)pai-eas\.aliyuncs\.com$/i
+const RUNTIME_REFRESH_STATUSES = new Set([401, 403, 404])
 let runtimeConfigOverride = null
 const MINUTE_HOSTS = [
   'https://push2his.eastmoney.com',
@@ -473,6 +474,73 @@ function v2Config(env) {
   return { url, easToken, apiKey }
 }
 
+function v2ConfigFromRuntime(env, runtime, fallback = {}) {
+  return v2Config({
+    ...env,
+    V2_QUANT_URL: runtime?.url || fallback.url,
+    V2_EAS_TOKEN: runtime?.easToken || fallback.easToken,
+    V2_API_KEY: runtime?.apiKey || fallback.apiKey || env.V2_API_KEY,
+  })
+}
+
+function rememberRuntimeConfig(env, config) {
+  if (env !== process.env) return
+  runtimeConfigOverride = {
+    url: config.url,
+    easToken: config.easToken,
+    apiKey: config.apiKey,
+  }
+}
+
+async function resolveInitialV2Config(env, resolveRuntimeConfig) {
+  const configuredEnv = env === process.env && runtimeConfigOverride
+    ? {
+        ...env,
+        V2_QUANT_URL: runtimeConfigOverride.url,
+        V2_EAS_TOKEN: runtimeConfigOverride.easToken,
+        V2_API_KEY: runtimeConfigOverride.apiKey,
+      }
+    : env
+  if (
+    typeof resolveRuntimeConfig === 'function'
+    && !(env === process.env && runtimeConfigOverride)
+  ) {
+    let runtime
+    try {
+      runtime = await resolveRuntimeConfig()
+    } catch {
+      return v2Config(configuredEnv)
+    }
+    if (runtime?.status !== 'Running') {
+      throw new Error('V2模型服务未运行')
+    }
+    const recovered = v2ConfigFromRuntime(env, runtime, {
+      url: configuredEnv.V2_QUANT_URL,
+      easToken: configuredEnv.V2_EAS_TOKEN,
+      apiKey: configuredEnv.V2_API_KEY,
+    })
+    rememberRuntimeConfig(env, recovered)
+    return recovered
+  }
+  try {
+    return v2Config(configuredEnv)
+  } catch (configError) {
+    if (typeof resolveRuntimeConfig !== 'function') throw configError
+    let runtime
+    try {
+      runtime = await resolveRuntimeConfig()
+    } catch {
+      throw configError
+    }
+    if (runtime?.status !== 'Running') {
+      throw new Error('V2模型服务未运行')
+    }
+    const recovered = v2ConfigFromRuntime(env, runtime)
+    rememberRuntimeConfig(env, recovered)
+    return recovered
+  }
+}
+
 export async function fetchV21QuantPredict(code, {
   bars,
   requestId = '',
@@ -480,16 +548,13 @@ export async function fetchV21QuantPredict(code, {
   activeHead = 'next30m',
   env = process.env,
   fetchImpl = fetch,
-  resolveRuntimeConfig = getV2RuntimeConfig,
+  resolveRuntimeConfig,
   timeoutMs = 8000,
 } = {}) {
-  let config = env === process.env && runtimeConfigOverride
-    ? v2Config({
-        ...env,
-        V2_QUANT_URL: runtimeConfigOverride.url,
-        V2_EAS_TOKEN: runtimeConfigOverride.easToken,
-      })
-    : v2Config(env)
+  const runtimeResolver = resolveRuntimeConfig === undefined
+    ? (env === process.env ? getV2RuntimeConfig : null)
+    : resolveRuntimeConfig
+  let config = await resolveInitialV2Config(env, runtimeResolver)
   const payload = buildV21Request(code, bars, requestId)
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
@@ -508,23 +573,24 @@ export async function fetchV21QuantPredict(code, {
       },
     )
     let response = await request(config)
-    if (response.status === 401 && typeof resolveRuntimeConfig === 'function') {
+    if (
+      RUNTIME_REFRESH_STATUSES.has(response.status)
+      && typeof runtimeResolver === 'function'
+    ) {
       try {
-        const runtime = await resolveRuntimeConfig()
-        const recovered = v2Config({
-          ...env,
-          V2_QUANT_URL: runtime.url,
-          V2_EAS_TOKEN: runtime.easToken,
-        })
+        const runtime = await runtimeResolver()
+        const recovered = v2ConfigFromRuntime(env, runtime, config)
         if (
           runtime?.status === 'Running'
           && (
             recovered.url !== config.url
             || recovered.easToken !== config.easToken
+            || recovered.apiKey !== config.apiKey
           )
         ) {
           config = recovered
           response = await request(config)
+          if (response.ok) rememberRuntimeConfig(env, config)
         }
       } catch {
         // Preserve the inference response when control-plane recovery fails.
@@ -546,16 +612,13 @@ export async function fetchV2QuantPredict(code, {
   price = null,
   env = process.env,
   fetchImpl = fetch,
-  resolveRuntimeConfig = getV2RuntimeConfig,
+  resolveRuntimeConfig,
   timeoutMs = 8000,
 } = {}) {
-  let config = env === process.env && runtimeConfigOverride
-    ? v2Config({
-        ...env,
-        V2_QUANT_URL: runtimeConfigOverride.url,
-        V2_EAS_TOKEN: runtimeConfigOverride.easToken,
-      })
-    : v2Config(env)
+  const runtimeResolver = resolveRuntimeConfig === undefined
+    ? (env === process.env ? getV2RuntimeConfig : null)
+    : resolveRuntimeConfig
+  let config = await resolveInitialV2Config(env, runtimeResolver)
   const payload = buildV2Request(
     code,
     selectCompletedDayEndBars(bars),
@@ -575,26 +638,23 @@ export async function fetchV2QuantPredict(code, {
       body: JSON.stringify(payload),
     })
     let response = await request(config)
-    if (response.status === 401 && typeof resolveRuntimeConfig === 'function') {
+    if (
+      RUNTIME_REFRESH_STATUSES.has(response.status)
+      && typeof runtimeResolver === 'function'
+    ) {
       try {
-        const runtime = await resolveRuntimeConfig()
+        const runtime = await runtimeResolver()
         if (runtime?.status === 'Running') {
-          const recoveredConfig = v2Config({
-            ...env,
-            V2_QUANT_URL: runtime.url,
-            V2_EAS_TOKEN: runtime.easToken,
-          })
+          const recoveredConfig = v2ConfigFromRuntime(env, runtime, config)
           if (
             recoveredConfig.url !== config.url
             || recoveredConfig.easToken !== config.easToken
+            || recoveredConfig.apiKey !== config.apiKey
           ) {
             config = recoveredConfig
             response = await request(config)
             if (env === process.env && response.ok) {
-              runtimeConfigOverride = {
-                url: config.url,
-                easToken: config.easToken,
-              }
+              rememberRuntimeConfig(env, config)
             }
           }
         }

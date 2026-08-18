@@ -139,6 +139,7 @@ test('V2三分类概率适配为军师可消费的统一量化结构', () => {
   assert.equal(result.highConfSignal.takeProfit, 10.1)
   assert.equal(result.highConfSignal.stopLoss, 9.94)
   assert.equal(result.highConfSignal.fired, true)
+  assert.equal(result.highConfSignal.gate, 65)
   assert.equal(result.reads.length >= 6, true)
 })
 

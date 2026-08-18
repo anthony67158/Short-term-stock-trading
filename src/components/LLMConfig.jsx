@@ -45,6 +45,7 @@ export default function LLMConfig() {
   const [endpoints, setEndpoints] = useState([])   // [{id, baseUrl, apiKeyMask, hasKey, weight, enabled, apiKey?(仅本地新输入)}]
   const [pool, setPool] = useState([])             // [{id, baseUrl, inflight, fails, cooling, cooldownMsLeft}]
   const [showPool, setShowPool] = useState(false)  // 展开多端点面板
+  const [primaryMaxInflight, setPrimaryMaxInflight] = useState(2)
   const [epTesting, setEpTesting] = useState({})   // { [id]: {ok, msg} } 单端点验证结果
   const [judgeRole, setJudgeRole] = useState({})
   const [judgeEndpoint, setJudgeEndpoint] = useState({
@@ -80,6 +81,7 @@ export default function LLMConfig() {
         setJudgeRole(j.judgeRole || {})
         setModels({ ...(c.models || {}) })
         setReasoning({ ...(c.reasoning || {}) })
+        setPrimaryMaxInflight(Math.max(1, Math.min(20, Number(c.primaryMaxInflight) || 2)))
         setJudgeEndpoint({
           baseUrl: c.judgeEndpoint?.baseUrl || '',
           apiKey: '',
@@ -207,8 +209,14 @@ export default function LLMConfig() {
           toVerify.push({ id: ep.id, baseUrl: ep.baseUrl.trim(), key: k, hasKey: ep.hasKey })
         })
         const results = await Promise.all(toVerify.map(async (t) => {
-          if (!t.key) return { id: t.id, ok: null, listable: false, models: [], reason: t.hasKey ? '已存 Key,无法在线列举' : '缺少 Key' }
-          const j = await callConfig('verify', { baseUrl: t.baseUrl, apiKey: t.key })
+          if (!t.key && !t.hasKey) {
+            return { id: t.id, ok: null, listable: false, models: [], reason: '缺少 Key' }
+          }
+          const j = await callConfig('verify', {
+            endpointId: t.id,
+            baseUrl: t.baseUrl,
+            apiKey: t.key,
+          })
           return { id: t.id, ok: !!(j && j.ok), listable: !!(j && j.listable), models: Array.isArray(j && j.models) ? j.models : [], reason: (j && j.ok) ? '' : ((j && j.error) || '验证失败') }
         }))
         const map = {}; results.forEach((r) => { map[r.id] = r })
@@ -238,7 +246,11 @@ export default function LLMConfig() {
     if (!apiKey.trim() && !hasKey) { setErr('请填写 API Key'); return }
     setBusy(true)
     try {
-      const j = await callConfig('verify', { baseUrl: baseUrl.trim(), apiKey: apiKey.trim() })
+      const j = await callConfig('verify', {
+        endpointId: 'default',
+        baseUrl: baseUrl.trim(),
+        apiKey: apiKey.trim(),
+      })
       if (!j || !j.ok) { setErr((j && j.error) || 'API Key 或 Base URL 无效'); setBusy(false); return }
       const list = Array.isArray(j.models) ? j.models : []
       setModelList(list)
@@ -262,39 +274,49 @@ export default function LLMConfig() {
   // —— Step 2 → 3：测试所选模型可用性 ——
   const testAndNext = async () => {
     setErr(''); setNotice(''); setTestResults(null)
-    // 通用角色和 Judge 必须分别用各自端点测试，避免“模型可用”结论测错网关。
-    const gathered = new Set(Object.keys(roles).map((role) => models[role]).filter(Boolean))
-    if (poolMode) {
-      activeEndpoints().forEach((ep) => {
-        Object.entries(ep.models || {}).forEach(([role, model]) => {
-          if (role !== 'judge' && model) gathered.add(model)
-        })
+    // 每个端点使用自己的已保存 Key 与角色模型单独测试，避免主 Key 的结果污染整个资源池。
+    const generalTargets = cardEndpoints()
+      .map((card) => {
+        const chosen = [...new Set(
+          Object.keys(roles)
+            .map((role) => cardModel(card, role))
+            .filter(Boolean),
+        )]
+        const key = card.isMain
+          ? (apiKey.trim() && !/\*/.test(apiKey) ? apiKey.trim() : '')
+          : (card.ep.apiKey && !/\*/.test(card.ep.apiKey)
+              ? card.ep.apiKey.trim()
+              : '')
+        return {
+          id: card.id,
+          label: `${card.label} · ${card.host}`,
+          baseUrl: card.isMain ? baseUrl.trim() : card.ep.baseUrl.trim(),
+          key,
+          hasKey: card.isMain ? hasKey : !!card.ep.hasKey,
+          models: chosen,
+        }
       })
-    }
-    const chosen = [...gathered]
-    if (!chosen.length && judgeEndpoint.enabled === false) {
+      .filter((target) =>
+        target.baseUrl
+        && target.models.length
+        && (target.key || target.hasKey)
+      )
+    if (!generalTargets.length && judgeEndpoint.enabled === false) {
       setErr('请至少为一个角色选择模型')
       return
-    }
-
-    let testBase = baseUrl.trim(), testKey = apiKey.trim()
-    if (poolMode) {
-      if (!testBase || (!testKey && !hasKey)) {
-        const ep = activeEndpoints().find((e) => e.apiKey && !/\*/.test(e.apiKey))
-        if (ep) { testBase = ep.baseUrl.trim(); testKey = ep.apiKey.trim() }
-      }
     }
 
     setStep(3)
     setBusy(true)
     try {
-      const requests = []
-      if (chosen.length && testBase && (testKey || hasKey)) {
-        requests.push(
-          callConfig('test', { baseUrl: testBase, apiKey: testKey, models: chosen })
-            .then((result) => ({ target: '通用端点', result }))
-        )
-      }
+      const requests = generalTargets.map((target) =>
+        callConfig('test', {
+          endpointId: target.id,
+          baseUrl: target.baseUrl,
+          apiKey: target.key,
+          models: target.models,
+        }).then((result) => ({ target: target.label, result }))
+      )
       if (judgeEndpoint.enabled !== false) {
         requests.push(
           callConfig('test', {
@@ -335,6 +357,7 @@ export default function LLMConfig() {
         apiKey: apiKey.trim(),
         models: Object.fromEntries(Object.keys(roles).map((role) => [role, models[role] || ''])),
         reasoning: Object.fromEntries(Object.keys(roles).map((role) => [role, !!reasoning[role]])),
+        primaryMaxInflight,
         judgeEndpoint: {
           baseUrl: judgeEndpoint.baseUrl.trim(),
           apiKey: judgeEndpoint.apiKey.trim(),
@@ -396,15 +419,18 @@ export default function LLMConfig() {
   }
   const setEp = (id, patch) => setEndpoints((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)))
 
-  // 单端点连通性验证(复用后端 verify)。掩码/空 key 时用已存 key(后端按 id 沿用不了 verify,故此处需明文;掩码则提示)
+  // 单端点连通性验证：明文 Key 直接测试，留空时后端按 endpointId 安全复用已保存 Key。
   const verifyEndpoint = async (ep) => {
     setEpTesting((prev) => ({ ...prev, [ep.id]: { busy: true } }))
     try {
       const key = (ep.apiKey && !/\*/.test(ep.apiKey)) ? ep.apiKey.trim() : ''
       if (!ep.baseUrl.trim()) { setEpTesting((p) => ({ ...p, [ep.id]: { ok: false, msg: '缺少 Base URL' } })); return }
       if (!key && !ep.hasKey) { setEpTesting((p) => ({ ...p, [ep.id]: { ok: false, msg: '请填写 API Key' } })); return }
-      if (!key && ep.hasKey) { setEpTesting((p) => ({ ...p, [ep.id]: { ok: false, msg: '已存 Key 无法在线验证，请重输后测' } })); return }
-      const j = await callConfig('verify', { baseUrl: ep.baseUrl.trim(), apiKey: key })
+      const j = await callConfig('verify', {
+        endpointId: ep.id,
+        baseUrl: ep.baseUrl.trim(),
+        apiKey: key,
+      })
       setEpTesting((p) => ({ ...p, [ep.id]: { ok: !!(j && j.ok), msg: (j && j.ok) ? (j.listable ? `可用·${(j.models || []).length} 模型` : '可用') : ((j && j.error) || '验证失败') } }))
     } catch (e) {
       setEpTesting((p) => ({ ...p, [ep.id]: { ok: false, msg: e.message || String(e) } }))
@@ -563,6 +589,23 @@ export default function LLMConfig() {
                   <div className="llm-ep-body">
                     <div className="llm-hint" style={{ marginBottom: 8 }}>
                       配置多个网关后，请求按「最少在途×权重」自动路由，连续失败自动熔断并转移；留空则仅用上方单端点。
+                    </div>
+                    <div className="llm-primary-limit">
+                      <label htmlFor="llm-primary-max-inflight">主端点最大在途</label>
+                      <input
+                        id="llm-primary-max-inflight"
+                        className="wl-input auth-input"
+                        type="number"
+                        min="1"
+                        max="20"
+                        step="1"
+                        inputMode="numeric"
+                        value={primaryMaxInflight}
+                        onChange={(event) => setPrimaryMaxInflight(
+                          Math.max(1, Math.min(20, Number(event.target.value) || 1)),
+                        )}
+                      />
+                      <span>达到阈值后自动分流到可承接对应角色的备用端点</span>
                     </div>
                     {endpoints.length === 0 && (
                       <div className="llm-ep-empty">暂无端点，点下方「添加端点」开始配置</div>

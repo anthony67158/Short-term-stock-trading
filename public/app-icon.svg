@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 768 768">
+  <defs>
+    <linearGradient id="background" x1="88" y1="24" x2="690" y2="744" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#30343B"/>
+      <stop offset="0.32" stop-color="#15171B"/>
+      <stop offset="0.7" stop-color="#08090B"/>
+      <stop offset="1" stop-color="#010102"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientTransform="matrix(60 390 -520 80 174 66)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" stop-opacity="0.24"/>
+      <stop offset="0.42" stop-color="#FFFFFF" stop-opacity="0.07"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="sheen" x1="384" y1="4" x2="384" y2="342" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" stop-opacity="0.2"/>
+      <stop offset="0.56" stop-color="#FFFFFF" stop-opacity="0.045"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="300" y1="228" x2="470" y2="566" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="0.42" stop-color="#F7F7F8"/>
+      <stop offset="0.72" stop-color="#E4E5E8"/>
+      <stop offset="1" stop-color="#BFC2C8"/>
+    </linearGradient>
+    <filter id="mark-shadow" x="-22%" y="-32%" width="144%" height="180%">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#000000" flood-opacity="0.72"/>
+      <feDropShadow dx="0" dy="-3" stdDeviation="3" flood-color="#FFFFFF" flood-opacity="0.2"/>
+    </filter>
+  </defs>
+  <rect width="768" height="768" fill="url(#background)"/>
+  <rect width="768" height="768" fill="url(#glow)"/>
+  <path d="M0 0H768V248C568 316 309 310 0 226Z" fill="url(#sheen)"/>
+  <path d="M96 72C260 23 516 24 672 83" fill="none" stroke="#FFFFFF" stroke-linecap="round" stroke-width="5" opacity="0.17"/>
+  <path
+    fill="url(#mark)"
+    filter="url(#mark-shadow)"
+    stroke="#FFFFFF"
+    stroke-linejoin="round"
+    stroke-width="2.5"
+    transform="translate(400.5 388) scale(1.22 1.7) translate(-400.5 -403)"
+    d="M199 294H502L521 328L646 329L155 512V506L413 361Z"
+  />
+</svg>

@@ -1,3 +1,5 @@
+import { reviewPriceMateriality } from './adviceReviewRisk.js'
+
 function finite(value) {
   const number = Number(value)
   return Number.isFinite(number) ? number : null
@@ -11,6 +13,10 @@ function rounded(value, step) {
 function sign(value) {
   const number = finite(value)
   return number == null ? null : number > 0 ? 1 : number < 0 ? -1 : 0
+}
+
+function atrValue(value) {
+  return finite(value?.atr ?? value)
 }
 
 function text(value, max = 80) {
@@ -62,6 +68,7 @@ export function adviceEvidenceDigest(snapshot = {}) {
     technical: {
       maTrend: text(indicators.maTrend, 30),
       maCross: text(indicators.maCross, 30),
+      atr: rounded(atrValue(indicators.atr), 0.01),
       rsi: rounded(indicators.rsi, 5),
       macdHistSign: sign(indicators.macd?.hist),
       bollPctB: rounded(indicators.boll?.pctB, 10),
@@ -95,21 +102,13 @@ export function adviceEvidenceDigest(snapshot = {}) {
   }
 }
 
-function changedByThreshold(previous, current) {
-  const previousPrice = finite(previous?.quote?.price)
-  const currentPrice = finite(current?.quote?.price)
-  if (
-    previousPrice != null
-    && currentPrice != null
-    && Math.abs(currentPrice / previousPrice - 1) >= 0.004
-  ) return true
-  const previousPct = finite(previous?.quote?.pct)
-  const currentPct = finite(current?.quote?.pct)
-  if (
-    previousPct != null
-    && currentPct != null
-    && Math.abs(currentPct - previousPct) >= 0.4
-  ) return true
+function materialChange(previous, current, previousAdvice) {
+  const priceChange = reviewPriceMateriality({
+    previous,
+    current,
+    previousAdvice,
+  })
+  if (priceChange.changed) return priceChange
   const withoutPrice = (value) => JSON.stringify({
     ...value,
     quote: {
@@ -118,7 +117,13 @@ function changedByThreshold(previous, current) {
       pct: null,
     },
   })
-  return withoutPrice(previous) !== withoutPrice(current)
+  if (withoutPrice(previous) !== withoutPrice(current)) {
+    return {
+      changed: true,
+      reason: '资金、技术、量化或消息证据发生实质变化',
+    }
+  }
+  return { changed: false, reason: '' }
 }
 
 export function evaluateScheduledReview({
@@ -126,6 +131,7 @@ export function evaluateScheduledReview({
   previousDigest,
   snapshot,
   hasPreviousAdvice,
+  previousAdvice,
 } = {}) {
   if (origin !== 'auto') {
     return {
@@ -150,7 +156,10 @@ export function evaluateScheduledReview({
     }
   }
   const currentDigest = adviceEvidenceDigest(snapshot)
-  if (previousDigest && !changedByThreshold(previousDigest, currentDigest)) {
+  const change = previousDigest
+    ? materialChange(previousDigest, currentDigest, previousAdvice)
+    : { changed: true, reason: '缺少上一版证据摘要' }
+  if (previousDigest && !change.changed) {
     return {
       shouldRunLLM: false,
       disposition: 'unchanged',
@@ -160,7 +169,7 @@ export function evaluateScheduledReview({
   return {
     shouldRunLLM: true,
     disposition: previousDigest ? 'material-change' : 'full-review',
-    reason: previousDigest ? '关键证据发生实质变化' : '缺少上一版证据摘要',
+    reason: change.reason,
   }
 }
 

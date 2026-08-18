@@ -46,7 +46,7 @@ test('工作台支持数字键和命令快捷键且不干扰输入', () => {
   )
 })
 
-test('Precision Cobalt tokens 固化主题、字体、间距和动效契约', () => {
+test('Precision tokens 固化主题、字体、间距和动效契约', () => {
   const css = readFileSync(
     new URL('../tokens.css', import.meta.url),
     'utf8',

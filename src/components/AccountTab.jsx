@@ -1,9 +1,11 @@
 import { useState } from 'react'
 import Icon from './Icon'
-import StockName from './StockName'
+import PortfolioHeatmap from './PortfolioHeatmap'
+import PortfolioAnalysis from './PortfolioAnalysis'
 import { usePolling } from '../hooks'
 import { computePortfolio, planStore, usePlanStore } from '../planStore'
-import { fmtRaw, pctClass } from '../format'
+import { useStockTags } from '../stockTagStore'
+import { buildPortfolioDistribution } from '../../shared/portfolioDistribution.js'
 
 // 金额显示：万以上转万，保留2位
 function money(v) {
@@ -35,24 +37,14 @@ export default function AccountTab({ interval }) {
   const { data } = usePolling(codes.length ? `/api/quote?codes=${codes.join(',')}` : null, interval, [codes.join(',')])
   const quote = {}
   ;(data?.list || []).forEach((s) => { quote[s.code] = s })
+  const stockTags = useStockTags(codes)
   const portfolio = computePortfolio(book.holding, quote, account)
-  const positionById = new Map(portfolio.positions.map((position) => [position.id, position]))
-
-  // 逐笔持仓市值 / 成本 / 浮盈
-  const rows = book.holding.map((h) => {
-    const q = quote[h.code]
-    const position = positionById.get(h.id)
-    return {
-      h,
-      q,
-      qty: position?.qty ?? h.qty,
-      price: position?.price ?? h.buyPrice,
-      mktVal: position?.mktValue ?? 0,
-      cost: position?.costValue ?? 0,
-      floatPnl: position?.floatPnl ?? 0,
-      pct: q ? q.pct : null,
-    }
-  })
+  const distribution = buildPortfolioDistribution(
+    portfolio,
+    stockTags,
+    {},
+    quote,
+  )
   const holdMktVal = portfolio.holdMktValue
   const cashVal = portfolio.cash ?? 0
   const equity = portfolio.totalAssets
@@ -142,7 +134,7 @@ export default function AccountTab({ interval }) {
           <div className="acc-cell">
             <div className="acc-cell-k">持仓市值</div>
             <div className="acc-cell-v">{money(holdMktVal)}</div>
-            <div className="acc-cell-s">{rows.length} 只</div>
+            <div className="acc-cell-s">{distribution.stocks.length} 只</div>
           </div>
           <div className="acc-cell">
             <div className="acc-cell-k">可用资金</div>
@@ -197,35 +189,16 @@ export default function AccountTab({ interval }) {
         )}
       </div>
 
-      {/* 持仓明细（占比 + 浮盈） */}
+      {/* 核心概念 → 个股两层持仓热力图 */}
       <div className="panel">
-        <div className="panel-head"><div role="heading" aria-level="2" className="panel-title"><Icon name="wallet" size={16} /> 持仓分布 <span className="sub-name">{rows.length} 只 · 按市值占比</span></div></div>
-        {rows.length === 0 ? (
-          <div className="empty">暂无持仓。在「持仓·做T」里建仓后，这里展示每只票的市值占比与浮盈。</div>
+        <div className="panel-head"><div role="heading" aria-level="2" className="panel-title"><Icon name="wallet" size={16} /> 持仓分布 <span className="sub-name">{distribution.stocks.length} 只 · 面积看仓位 · 红涨绿跌</span></div></div>
+        {distribution.stocks.length === 0 ? (
+          <div className="empty">暂无持仓。在「持仓·做T」里建仓后，这里按核心概念展示持仓结构。</div>
         ) : (
-          <div className="acc-holdlist">
-            {rows.sort((a, b) => b.mktVal - a.mktVal).map((r) => {
-              const weight = equity > 0 ? (r.mktVal / equity) * 100 : 0
-              const over = weight > 20 // 单票超20%告警
-              return (
-                <div className="acc-hold" key={r.h.id}>
-                  <div className="acc-hold-top">
-                    <StockName code={r.h.code} name={r.h.name}><span className="acc-hold-name">{r.h.name}</span></StockName>
-                    <span className="acc-hold-code">{r.h.code}</span>
-                    {over && <span className="acc-hold-warn" title="单票占比过高">超配</span>}
-                    <span className={'acc-hold-pnl ' + (r.floatPnl >= 0 ? 'red' : 'green')} style={{ marginLeft: 'auto' }}>{signMoney(r.floatPnl)}</span>
-                  </div>
-                  <div className="acc-hold-bar"><div className={'acc-hold-bar-fill' + (over ? ' over' : '')} style={{ width: Math.min(weight, 100) + '%' }} /></div>
-                  <div className="acc-hold-meta">
-                    <span>占比 <b>{weight.toFixed(1)}%</b></span>
-                    <span>市值 {money(r.mktVal)}</span>
-                    <span>{r.qty}手 · 成本 {fmtRaw(r.h.buyPrice)}</span>
-                    {r.q && <span>现价 <b className={pctClass(r.q.pct)}>{fmtRaw(r.price)}</b></span>}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
+          <>
+            <PortfolioHeatmap distribution={distribution} />
+            <PortfolioAnalysis distribution={distribution} />
+          </>
         )}
       </div>
     </div>

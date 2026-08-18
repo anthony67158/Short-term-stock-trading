@@ -1,5 +1,10 @@
 import { put, list, readJson, hasStorage } from './_blob.js';
 import { emGet, num, sendJson } from './_lib.js';
+import {
+  beijingDayKey,
+  beijingMinutes,
+  isContinuousTrading,
+} from '../shared/tradingCalendar.js';
 
 // ============ 板块资金分时快照（A+B：真回放的数据底座）============
 // 盘中每次被访问就把"当前板块主力净额快照"追加存入 Vercel Blob（按交易日分桶）。
@@ -8,15 +13,6 @@ import { emGet, num, sendJson } from './_lib.js';
 // GET /api/sector_snapshots?capture=1  → 抓当前快照并追加存储，再返回全序列
 //
 // 说明：只存每个时点的 TopN(净额最强/最弱各若干)，控制体积；非交易时段不写入。
-
-function nowBJ() { const n = new Date(); return new Date(n.getTime() + (n.getTimezoneOffset() + 480) * 60000); }
-function bjDayKey() { const d = nowBJ(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
-function bjMinutes() { const d = nowBJ(); return d.getHours() * 60 + d.getMinutes(); }
-function isTradingNow() {
-  const d = nowBJ(); const g = d.getDay(); if (g === 0 || g === 6) return false;
-  const hm = bjMinutes();
-  return (hm >= 570 && hm <= 690) || (hm >= 780 && hm <= 900); // 9:30-11:30 / 13:00-15:00
-}
 const PREFIX = 'sectorflow/';
 const dayPrefix = (day) => `${PREFIX}${day}/`;
 
@@ -47,16 +43,16 @@ function pickSnapshot(list, n = 10) {
 export async function snapshotsHandler(req, res) {
   // 响应头(CORS/Content-Type)由 sendJson 统一设置
   try {
-    const day = bjDayKey();
+    const day = beijingDayKey();
     const wantCapture = req.query.capture === '1';
     const hasBlob = hasStorage();
 
     // 1) 盘中 + 允许写 → 抓当前快照并追加存储（做去重：同一分钟内不重复写）
-    if (wantCapture && hasBlob && isTradingNow()) {
+    if (wantCapture && hasBlob && isContinuousTrading()) {
       try {
         const sectors = await fetchSectors();
         if (sectors.length) {
-          const t = bjMinutes();
+          const t = beijingMinutes();
           // 查当天已存的时点，避免同一分钟重复写（前端会频繁轮询）
           const { blobs } = await list({ prefix: dayPrefix(day), limit: 200 });
           const existMin = new Set(blobs.map((b) => {

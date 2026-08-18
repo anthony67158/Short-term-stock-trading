@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef, useCallback, useSyncExternalStore } from 'react'
 import { api } from './apiBase'
+import { isContinuousTrading } from '../shared/tradingCalendar.js'
 
 // 全局手动刷新总线：点刷新按钮 → 所有 usePolling 立即重拉
 let refreshTick = 0
@@ -102,11 +103,7 @@ export function useMediaQuery(query) {
 
 // 判断当前是否 A 股交易时段
 export function isTradingHours() {
-  const now = new Date()
-  const day = now.getDay()
-  if (day === 0 || day === 6) return false
-  const m = now.getHours() * 60 + now.getMinutes()
-  return (m >= 9 * 60 + 15 && m <= 11 * 60 + 30) || (m >= 13 * 60 && m <= 15 * 60 + 5)
+  return isContinuousTrading()
 }
 
 // B-7 移动端横滑手势:返回 { bind, dx, swiping }。

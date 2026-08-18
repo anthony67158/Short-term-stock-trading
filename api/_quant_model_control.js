@@ -25,6 +25,83 @@ const STARTING_STATUSES = new Set([
 const STOPPING_STATUSES = new Set(['Stopping'])
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
+function unavailableProductionModelMetrics() {
+  return {
+    available: false,
+    loaded: false,
+    primaryLabel: '样本外 AUC',
+    primaryAucPct: null,
+    holdoutAucPct: null,
+    cvAucPct: null,
+    sampleCount: null,
+    dataEndDate: '',
+    featureCount: null,
+    horizonDays: null,
+  }
+}
+
+function aucPct(value) {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric) || numeric < 0 || numeric > 1) return null
+  return +(numeric * 100).toFixed(2)
+}
+
+function positiveInteger(value) {
+  const numeric = Number(value)
+  return Number.isFinite(numeric) && numeric > 0
+    ? Math.round(numeric)
+    : null
+}
+
+export function normalizeProductionModelMetrics(payload) {
+  const meta = payload?.meta
+  if (!payload?.loaded || !meta || typeof meta !== 'object') {
+    return unavailableProductionModelMetrics()
+  }
+  const holdoutAucPct = aucPct(meta.holdout_auc)
+  const cvAucPct = aucPct(meta.cv_auc)
+  const primaryAucPct = holdoutAucPct ?? cvAucPct
+  const featureCount = Array.isArray(meta.feat_names)
+    ? meta.feat_names.length
+    : positiveInteger(meta.feature_count)
+  return {
+    available: primaryAucPct != null,
+    loaded: true,
+    primaryLabel: holdoutAucPct != null ? '样本外 AUC' : '时序 CV AUC',
+    primaryAucPct,
+    holdoutAucPct,
+    cvAucPct,
+    sampleCount: positiveInteger(meta.n_samples),
+    dataEndDate: String(meta.data_end_date || ''),
+    featureCount,
+    horizonDays: positiveInteger(meta.horizon),
+  }
+}
+
+export async function getProductionModelMetrics({
+  env = process.env,
+  fetchImpl = fetch,
+  timeoutMs = 5000,
+} = {}) {
+  const baseUrl = String(env.QUANT_URL || '').trim().replace(/\/+$/, '')
+  if (!baseUrl) return unavailableProductionModelMetrics()
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const apiKey = String(env.QUANT_KEY || '')
+    const response = await fetchImpl(`${baseUrl}/model_info`, {
+      signal: controller.signal,
+      headers: apiKey ? { 'X-API-Key': apiKey } : {},
+    })
+    if (!response.ok) return unavailableProductionModelMetrics()
+    return normalizeProductionModelMetrics(await response.json())
+  } catch {
+    return unavailableProductionModelMetrics()
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 export function normalizeV2ServiceEndpoint(value) {
   const raw = String(value || '').trim()
   if (!raw) throw new Error('EAS服务入口缺失')
@@ -37,6 +114,26 @@ export function normalizeV2ServiceEndpoint(value) {
     throw new Error('EAS服务入口必须使用阿里云HTTPS地址')
   }
   return parsed.toString().replace(/\/+$/, '')
+}
+
+function v2ApiKeyFromServiceConfig(serviceConfig) {
+  let config
+  try {
+    config = typeof serviceConfig === 'string'
+      ? JSON.parse(serviceConfig || '{}')
+      : (serviceConfig || {})
+  } catch {
+    throw new Error('EAS服务配置无效')
+  }
+  const containers = Array.isArray(config?.containers)
+    ? config.containers
+    : []
+  const entry = containers
+    .flatMap((container) => Array.isArray(container?.env) ? container.env : [])
+    .find((item) => item?.name === 'SHADOW_API_KEY')
+  const apiKey = String(entry?.value || '')
+  if (!apiKey) throw new Error('EAS服务API Key缺失')
+  return apiKey
 }
 
 function easClient(env = process.env) {
@@ -134,6 +231,7 @@ export async function getV2RuntimeConfig({
       return {
         url: normalizeV2ServiceEndpoint(body.internetEndpoint),
         easToken,
+        apiKey: v2ApiKeyFromServiceConfig(body.serviceConfig),
         status: String(body.status || 'Unknown'),
       }
     } catch (error) {

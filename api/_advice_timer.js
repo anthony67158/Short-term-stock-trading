@@ -14,6 +14,28 @@ export function adviceWorkerBody(event, cronKey) {
   return { resumeOnly: true, worker: true, nick };
 }
 
+export function portfolioAnalysisWorkerBody(event, cronKey) {
+  if (!cronKey || !event || typeof event !== 'object') return null;
+  if (
+    event.source
+    !== 'stock-dashboard.portfolio-analysis-worker'
+  ) return null;
+  if (String(event.key || '') !== String(cronKey)) return null;
+  const nick = String(event.nick || '').trim();
+  const jobId = String(event.jobId || '').trim();
+  if (!nick || !/^portfolio_\d+$/.test(jobId)) return null;
+  return { op: 'worker', nick, jobId };
+}
+
+export function portfolioAnalysisTimerBody(event, cronKey) {
+  if (!cronKey || !event || typeof event !== 'object') return null;
+  if (
+    event.triggerName !== 'portfolio-analysis-resume-timer'
+  ) return null;
+  if (String(event.payload || '') !== String(cronKey)) return null;
+  return { op: 'resume' };
+}
+
 export function v2AccuracyTimerBody(event, cronKey) {
   if (!cronKey || !event || typeof event !== 'object') return null;
   if (event.triggerName !== 'v2-accuracy-timer') return null;

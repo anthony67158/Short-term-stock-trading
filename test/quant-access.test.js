@@ -59,6 +59,28 @@ test('V2允许已选择V2的有效账号和服务端可信调用', async () => {
   assert.equal(await canUseQuantModel(trusted, 'v2'), true)
 })
 
+test('FC后台任务只在内部密钥匹配时可调用选定量化模型', async () => {
+  const previous = process.env.CRON_KEY
+  process.env.CRON_KEY = 'internal-cron-key'
+  try {
+    assert.equal(await canUseQuantModel({
+      headers: {
+        'x-cron-key': 'internal-cron-key',
+      },
+    }, 'v2.1'), true)
+    assert.equal(await canUseQuantModel({
+      headers: {
+        'x-cron-key': 'wrong-key',
+      },
+    }, 'v2.1', {
+      readAccount: async () => null,
+    }), false)
+  } finally {
+    if (previous == null) delete process.env.CRON_KEY
+    else process.env.CRON_KEY = previous
+  }
+})
+
 test('V2.1只允许当前账号明确选择V2.1，不复用V2.0授权', async () => {
   const readAccount = async (nick) => ({
     status: 'active',

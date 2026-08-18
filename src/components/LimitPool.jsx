@@ -72,7 +72,7 @@ export default function LimitPool({ interval }) {
             <tbody>
               {list.map((s, i) => (
                 <tr key={s.code}>
-                  <td><span className="rank">{i + 1}</span><StockName code={s.code} name={s.name} showCode={false} /></td>
+                  <td><span className="rank">{i + 1}</span><StockName code={s.code} name={s.name} /></td>
                   <td className={pctClass(s.pct)}>{fmtPct(s.pct)}</td>
                   {kind === 'zt' ? (
                     <td className={s.lbc >= 2 ? 'gold' : ''} style={{ fontWeight: s.lbc >= 2 ? 700 : 400 }}>

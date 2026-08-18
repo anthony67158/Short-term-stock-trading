@@ -7,6 +7,9 @@ import {
   createCloudSaveQueue,
   saveWithRevisionRecovery,
 } from '../shared/accountSync.js'
+import {
+  createAdviceRuntimeSyncCursor,
+} from '../shared/adviceAccountSync.js'
 
 // ============ 云端账号体系（阿里云 OSS 持久化，跨设备同步）============
 // 会话（昵称+密码）持久化在本机 localStorage，保持长期登录（关标签页/切后台不掉线）；数据存云端。
@@ -85,6 +88,7 @@ function emit() { state = { ...state }; listeners.forEach((l) => { try { l() } c
 let _pw = null // 密码仅保存在内存 + sessionStorage，用于后续保存
 let _cloudRevision = 0
 let _lastSyncedTradeFingerprint = ''
+const _runtimeSyncCursor = createAdviceRuntimeSyncCursor()
 
 // 读取本机旧数据（首次注册可导入）
 export function readLegacyData() {
@@ -188,6 +192,7 @@ export const authStore = {
         _cloudRevision = Number(r.revision) || 0
         _lastSyncedTradeFingerprint = accountTradeStateFingerprint(r.data)
         state.syncStatus = 'synced'; state.syncError = ''; state.lastSyncedAt = r.updatedAt || 0
+        _runtimeSyncCursor.noteSnapshot(r.updatedAt)
         planStore.setData(r.data)
         resumeOutbox(s.nick, s.pw)
       } else {
@@ -214,6 +219,7 @@ export const authStore = {
     _lastSyncedTradeFingerprint = accountTradeStateFingerprint(r.data)
     state.user = nick; state.status = 'ready'; state.error = ''
     state.syncStatus = 'synced'; state.syncError = ''; state.lastSyncedAt = r.updatedAt || Date.now()
+    _runtimeSyncCursor.noteSnapshot(r.updatedAt)
     planStore.setData(r.data)
     resumeOutbox(nick, _pw)
     emit()
@@ -230,6 +236,7 @@ export const authStore = {
     _lastSyncedTradeFingerprint = accountTradeStateFingerprint(r.data)
     state.user = nick; state.status = 'ready'; state.error = ''
     state.syncStatus = 'synced'; state.syncError = ''; state.lastSyncedAt = r.updatedAt || 0
+    _runtimeSyncCursor.noteSnapshot(r.updatedAt)
     planStore.setData(r.data)
     resumeOutbox(nick, _pw)
     emit()
@@ -240,6 +247,7 @@ export const authStore = {
     cloudSaveQueue.reset()
     saveSession(null); _pw = null; _cloudRevision = 0
     _lastSyncedTradeFingerprint = ''
+    _runtimeSyncCursor.reset()
     state.user = null; state.status = 'idle'
     state.syncStatus = 'idle'; state.syncError = ''; state.lastSyncedAt = 0
     planStore.setData({ plan: [], holding: [], closed: [] })
@@ -306,10 +314,11 @@ export const authStore = {
       const r = await api('sync', {
         nick: state.user,
         pw: _pw,
-        since: state.lastSyncedAt || 0,
+        since: _runtimeSyncCursor.since(),
       })
       if (r && r.ok && r.data) {
         state.lastSyncedAt = r.updatedAt || state.lastSyncedAt
+        _runtimeSyncCursor.notePull(r.updatedAt)
         if (
           r.tradeFingerprint
           && r.tradeFingerprint === accountTradeStateFingerprint(planStore.get())

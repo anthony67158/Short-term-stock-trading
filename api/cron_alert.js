@@ -46,6 +46,7 @@ import {
   queueAdviceReviewForVerdict,
 } from './_advice_wakeup.js';
 import { isAdviceReviewEnabled } from '../shared/adviceReviewPolicy.js';
+import { isContinuousTrading } from '../shared/tradingCalendar.js';
 
 const OP_LABEL = { gte: '≥', lte: '≤' };
 
@@ -56,6 +57,10 @@ const JUDGE_INTERVAL_MS = { buy: 45000, sell: 30000, stop: 20000 };
 const WATCHING_MAX_MS = 90 * 60 * 1000;
 
 export { isCurrentAdvicePlan, queueAdviceReviewForVerdict };
+
+export function shouldRunAlertCron(now = Date.now()) {
+  return isContinuousTrading(now);
+}
 
 // —— 与前端 alertStore.describeAlert 同口径 ——
 function describeAlert(a) {
@@ -573,6 +578,9 @@ export default async function handler(req, res) {
   if (CRON_KEY) {
     const given = req.headers['x-cron-key'] || (req.query && req.query.key) || (req.body && req.body.key);
     if (given !== CRON_KEY) { res.statusCode = 401; return res.end(JSON.stringify({ ok: false, error: 'unauthorized' })); }
+  }
+  if (!shouldRunAlertCron()) {
+    return res.end(JSON.stringify({ ok: true, skipped: 'outside-trading-hours' }));
   }
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
   const onlyNick = body.nick ? String(body.nick) : null;

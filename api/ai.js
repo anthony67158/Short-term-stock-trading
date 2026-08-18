@@ -9,7 +9,14 @@ import {
 import { buildQuantAdviceContext } from '../shared/quantAdviceContext.js';
 import { marketTimePromptBlock, marketTimeContext } from './_market_time.js';
 import { getLatestDailySummary } from './_daily_summary.js';
-import { fetchNews, fetchClsTelegraph, fetchSinaFlash } from './_market_data.js';
+import { fetchNews, fetchMarketFlashes } from './_market_data.js';
+import {
+  buildSearchReference,
+  fetchAdvisorSearch,
+  fetchAiSearchReference,
+  stripClientSearchFields,
+} from './_ai_search.js';
+import { ensureAiSearchConfig } from './_ai_search_config.js';
 import { callChat, callChatWithRetry, parseLLMJson, pumpChatStream } from './_llm.js';
 import { ensureConfig, currentConfig, getModel, getReasoning } from './_llm_config.js';
 import { endpointCountForRole, endpointsFrom } from './_llm_pool.js';
@@ -66,15 +73,18 @@ export function buildScheduledReviewGateResponse({
   previousDigest,
   snapshot,
   hasPreviousAdvice,
+  previousAdvice,
+  evaluation,
   meta = {},
   news = [],
   now = Date.now(),
 } = {}) {
-  const review = evaluateScheduledReview({
+  const review = evaluation || evaluateScheduledReview({
     origin,
     previousDigest,
     snapshot,
     hasPreviousAdvice,
+    previousAdvice,
   });
   if (review.shouldRunLLM) return null;
   return {
@@ -107,12 +117,16 @@ export function resolveReasoningMode(configuredReasoning, fastMode = false, forc
 export async function resolveAdviceDailySummary(
   payload,
   getSummary = getLatestDailySummary,
+  searchConfig = null,
 ) {
-  if (isCurrentDailyReportSummary(payload?.dailyReport)) {
+  if (isCurrentDailyReportSummary(payload?.dailyReport, Date.now(), searchConfig)) {
     return payload.dailyReport
   }
   try {
-    return await getSummary()
+    const summary = await getSummary()
+    return isCurrentDailyReportSummary(summary, Date.now(), searchConfig)
+      ? summary
+      : null
   } catch {
     return null
   }
@@ -415,43 +429,62 @@ async function fetchStockLHB(code) {
 }
 
 // 宏观/国内外重大事件新闻（当日财经要闻）——让军师把大环境纳入分析，而非只看个股技术
-// 用东财财经要闻搜索(全球宏观/政策/市场关键词)，取当日最新几条标题
+function labeledNewsTitle(item) {
+  if (!item?.title) return '';
+  const type = item.kind === 'announcement'
+    ? '公告'
+    : item.kind === 'research'
+      ? '研报观点'
+      : '';
+  const source = item.src || type;
+  return source ? `[${source}]${item.title}` : item.title;
+}
+
+function aiSearchEvidenceText(item) {
+  if (!item?.title) return '';
+  const source = item.src || 'AI Search';
+  const date = item.date || '时间未标注';
+  const summary = item.summary ? `。${item.summary}` : '';
+  return `【AI Search待核验·${source}·${date}】${item.title}${summary}`;
+}
+
+function searchQueryForMode(mode, payload = {}) {
+  if (mode === 'scan_pick' || mode === 'scan') {
+    const sectors = (payload.sectors || [])
+      .slice(0, 4)
+      .map((item) => item?.name)
+      .filter(Boolean);
+    const stocks = (payload.candidates || [])
+      .slice(0, 4)
+      .map((item) => item?.name)
+      .filter(Boolean);
+    return `A股 今日行业热点 政策 舆情 风险 ${sectors.join(' ')} ${stocks.join(' ')}`;
+  }
+  if (mode === 'stock' && payload.code) {
+    return `${payload.name || ''} ${payload.code} 最新公告 行业 舆情 风险`;
+  }
+  if (mode === 'sector') {
+    return `A股 ${payload.name || payload.sector || ''} 行业 最新政策 景气 舆情 风险`;
+  }
+  if (mode === 'market' || mode === 'daily') {
+    return 'A股 今日宏观政策 行业热点 市场舆情 风险';
+  }
+  return '';
+}
+
+// 东财与华尔街见闻双检索；搜索均失败时退化到三路实时快讯。
 async function fetchMacroNews() {
-  // 主源：东财财经要闻搜索(宏观/政策关键词)
   try {
     const kw = '宏观 政策 央行 美股 关税 A股 市场';
-    const param = encodeURIComponent(JSON.stringify({
-      uid: '', keyword: kw, type: ['cmsArticleWebOld'], client: 'web', clientType: 'web',
-      param: { cmsArticleWebOld: { searchScope: 'default', sort: 'time', pageIndex: 1, pageSize: 10 } },
-    }));
-    const url = `https://search-api-web.eastmoney.com/search/jsonp?cb=x&param=${param}`;
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 8000);
-    const r = await fetch(url, { signal: ctrl.signal, headers: { Referer: 'https://so.eastmoney.com/', 'User-Agent': 'Mozilla/5.0' } });
-    clearTimeout(t);
-    const txt = await r.text();
-    const clean = txt.replace(/^x\(/, '').replace(/\);?$/, '');
-    const nj = JSON.parse(clean);
-    const arr = (nj.result && nj.result.cmsArticleWebOld) || [];
-    const heads = arr.map((a) => ({ title: (a.title || '').replace(/<[^>]+>/g, ''), date: a.date || '', url: a.url || '' }))
-      .filter((x) => x.title).slice(0, 8);
+    const heads = await fetchNews(kw, 8);
     if (heads.length) return heads;
-  } catch { /* 主源失败 → 走兜底聚合 */ }
-  // 兜底：东财搜索在 Vercel egress IP 上偶发限流/超时,改用不限流的权威快讯聚合(财联社/金十)+新浪7×24,
-  // 挑出带宏观/政策/央行/海外关键词的条目当"国内外要闻",确保"宏观要闻"因子不再空缺。
+  } catch { /* 双检索失败后走实时流兜底 */ }
   try {
     const MACRO_RE = /(央行|货币|政策|降准|降息|LPR|财政|关税|美股|美联储|加息|经济|GDP|CPI|PPI|地缘|大盘|A股|外资|人民币|国常会|会议|监管|出口|贸易|指数)/;
-    const [cls, sina] = await Promise.all([
-      fetchClsTelegraph(20).catch(() => []),
-      fetchSinaFlash(20).catch(() => []),
-    ]);
-    const pool = [...(cls || []), ...(sina || [])].filter((x) => x && x.title);
+    const pool = await fetchMarketFlashes(24);
     let macro = pool.filter((x) => MACRO_RE.test(x.title));
     if (!macro.length) macro = pool; // 关键词一条没命中时退化为最新快讯,总比空缺强
-    const seen = new Set();
-    const heads = macro.filter((x) => { const k = x.title.slice(0, 24); if (seen.has(k)) return false; seen.add(k); return true; })
-      .map((x) => ({ title: (x.src ? `[${x.src}]${x.title}` : x.title).slice(0, 120), date: x.date || '', url: x.url || '' }))
-      .slice(0, 8);
+    const heads = macro.slice(0, 8);
     return heads.length ? heads : null;
   } catch { return null; }
 }
@@ -471,8 +504,10 @@ async function fetchIndustryNews(industry) {
 // 与 fetchMacroNews(深度稿件) 互补:快讯更新鲜、更贴近盘面异动
 async function fetchMacroFlashes(size = 8) {
   try {
-    const arr = await fetchClsTelegraph(size);
-    return (arr && arr.length) ? arr.map((n) => (n.src ? `[${n.src}]${n.title}` : n.title)).slice(0, size) : null;
+    const arr = await fetchMarketFlashes(size);
+    return (arr && arr.length)
+      ? arr.map(labeledNewsTitle).filter(Boolean).slice(0, size)
+      : null;
   } catch { return null; }
 }
 
@@ -512,6 +547,7 @@ export default async function handler(req, res) {
   const KEY = process.env.LLM_API_KEY;
   // 运行时配置优先（前端「AI 模型配置」写入 OSS）：先预热同步缓存，再取 BASE/KEY/模型
   await ensureConfig();
+  const aiSearchConfig = await ensureAiSearchConfig();
   const cfg = currentConfig();
   // 深度思考「真实生效值」:全局开(config.reasoning[role]=true)或【承接该角色的任一端点】开了
   //   (ep.reasoning[role]=true)即视为开。用于超时预算/maxTokens/中文思维链指令与底层 poolFetch 实际
@@ -542,7 +578,7 @@ export default async function handler(req, res) {
   let hbTimer = null;
   try {
     const mode = (body && body.mode) || 'market';
-    const payload = (body && body.payload) || {};
+    const payload = stripClientSearchFields((body && body.payload) || {});
     if (
       isAdvisorMode(mode)
       && !payload.realOutcomeLearning
@@ -634,9 +670,10 @@ export default async function handler(req, res) {
     // stock 模式：接入 RAG（近5日走势+主营+联网新闻）
     let ragText = '';
     let newsRefs = [];
+    let searchReference = null;
     if (mode === 'stock' && payload.code) {
       try {
-        const corpus = await buildCorpus(payload.code);
+        const corpus = await buildCorpus(payload.code, { name: payload.name });
         const hits = await retrieve(
           `${corpus.name} 短线 资金 走势 消息面 基本面`,
           corpus.docs,
@@ -713,10 +750,14 @@ export default async function handler(req, res) {
           track('intraday', '分时走势', fetchTrend(payload.code), (v) => Array.isArray(v) && v.length > 0, (v) => v?.at(-1)?.time || null),
           track('stockFunds', '个股资金流', fetchStockFund(payload.code), (v) => v != null, (v) => v?.asOfDate || null),
           track('dragonTiger', '龙虎榜', fetchStockLHB(payload.code), (v) => v != null, (v) => v?.date || null),
-          track('stockNews', '消息面/公告', buildCorpus(payload.code), (v) => v && v.docs && v.docs.length),
+          track('stockNews', '消息面/公告', buildCorpus(payload.code, { name: payload.name }), (v) => v && v.docs && v.docs.length),
           track('macroNews', '宏观要闻', fetchMacroNews(), (v) => v && v.length),
           track('quote', '今日实时行情', getJ(`/api/quote?codes=${payload.code}&_t=${Date.now()}`), (v) => v && v.list && v.list.length, (v) => v?.list?.[0]?.tradeDate || null),
-          track('dailyReport', '策略日报摘要', resolveAdviceDailySummary(payload), (v) => v && v.text, (v) => v?.day || null),
+          track('dailyReport', '策略日报摘要', resolveAdviceDailySummary(
+            payload,
+            getLatestDailySummary,
+            aiSearchConfig,
+          ), (v) => v && v.text, (v) => v?.day || null),
           track('macroFlashes', '财经快讯', fetchMacroFlashes(8), (v) => v && v.length),
         ]);
         // ★外部市场环境：把当天策略日报摘要注入，让个股建议结合大盘/板块/海外环境判断
@@ -756,7 +797,9 @@ export default async function handler(req, res) {
             };
           }
         }
-        if (macroNews && macroNews.length) payload.macroNews = macroNews.map((n) => n.title).slice(0, 6);
+        if (macroNews && macroNews.length) {
+          payload.macroNews = macroNews.map(labeledNewsTitle).filter(Boolean).slice(0, 6);
+        }
         if (macroFlashes && macroFlashes.length) payload.macroFlashes = macroFlashes.slice(0, 8);
         phase('行情 / 资金 / 消息面已就位，正在量化打分…', 'quant');
         // 消息面：直接取新闻/公告/基本面文档(不做向量检索，省3~5s，避免函数超时)
@@ -765,7 +808,10 @@ export default async function handler(req, res) {
             .filter((d) => d.type === 'news' || d.type === 'profile' || d.type === 'summary')
             .map((d) => d.text).slice(0, 6);
           if (corpus.news && corpus.news.length) {
-            payload.newsHeadlines = corpus.news.slice(0, 6).map((n) => n.title).filter(Boolean);
+            payload.newsHeadlines = corpus.news
+              .slice(0, 6)
+              .map(labeledNewsTitle)
+              .filter(Boolean);
             newsRefs = corpus.news.filter((n) => n.url).slice(0, 5);  // 供前端引用消息来源
           }
         }
@@ -796,7 +842,7 @@ export default async function handler(req, res) {
             marketVolLevel: (mkt && mkt.ok && mkt.breadth) ? mkt.breadth.volLevel : null,
           };
         }
-        const [indNews, quant] = await Promise.all([
+        const [indNews, quant, advisorSearch] = await Promise.all([
           industry
             ? track(
               'industryNews',
@@ -835,6 +881,29 @@ export default async function handler(req, res) {
               );
               return Promise.resolve(null);
             })(),
+          aiSearchConfig.enabled && aiSearchConfig.apiKey
+            ? track(
+              'aiSearch',
+              'AI联网搜索',
+              fetchAdvisorSearch({
+                code: payload.code,
+                name: payload.name || corpus?.name || '',
+                industry,
+                reviewOrigin: payload.reviewOrigin,
+              }, { runtimeConfig: aiSearchConfig }),
+              (value) => Array.isArray(value?.items) && value.items.length > 0,
+              (value) => value?.items
+                ?.map((item) => item.date)
+                .filter(Boolean)
+                .sort()
+                .at(-1) || null,
+            )
+            : Promise.resolve({
+              items: [],
+              status: 'disabled',
+              billed: false,
+              enabled: false,
+            }),
         ]);
         if (quantModelVersion !== 'default' && !quant) {
           return finish({
@@ -845,7 +914,32 @@ export default async function handler(req, res) {
         }
         if (industry && indNews && indNews.length) {
           payload.industry = industry;
-          payload.industryNews = indNews.map((n) => n.title).filter(Boolean).slice(0, 5);
+          payload.industryNews = indNews
+            .map(labeledNewsTitle)
+            .filter(Boolean)
+            .slice(0, 5);
+        }
+        if (advisorSearch?.enabled !== false) {
+          payload.aiSearchMeta = {
+            status: advisorSearch?.status || 'unavailable',
+            billed: advisorSearch?.billed === true,
+            count: advisorSearch?.items?.length || 0,
+            fetchedAt: advisorSearch?.fetchedAt || null,
+          };
+        }
+        if (advisorSearch?.items?.length) {
+          searchReference = buildSearchReference(advisorSearch);
+          payload.aiSearchEvidence = advisorSearch.items
+            .map(aiSearchEvidenceText)
+            .filter(Boolean)
+            .slice(0, 6);
+          const seenUrls = new Set(newsRefs.map((item) => item?.url).filter(Boolean));
+          for (const item of advisorSearch.items) {
+            if (!item.url || seenUrls.has(item.url)) continue;
+            seenUrls.add(item.url);
+            newsRefs.push(item);
+            if (newsRefs.length >= 8) break;
+          }
         }
         if (lhb) payload.lhb = lhb;
         // 信号回测：用历史K线检验该股"金叉后上涨"的命中率，给预测一个可信度自评(纯计算,无网络)
@@ -962,6 +1056,10 @@ export default async function handler(req, res) {
           payload.quant = {
             score: quant.score, bias: quant.bias, tDir: quant.tDir,
             forecast: quant.forecast,   // {upProb,expRet,targetLow/Mid/High,direction,confidence}
+            nextTradeDayForecast: quant.nextTradeDayForecast || null,
+            currentTradingDayForecast:
+              quant.currentTradingDayForecast || null,
+            forecastAvailability: quant.forecastAvailability || null,
             hitProb: quant.hitProb,     // LGB达标概率(0~1,原始分辨力,未做isotonic校准)
             reads: quant.reads, asOf: quant.asOf,
             modelVersion: quant.modelVersion || 'default',
@@ -993,8 +1091,17 @@ export default async function handler(req, res) {
           //   让用户在军师推理前先看到"量化模型给出了什么结论",军师也会显式引用它。
           {
             const f = payload.quant.forecast || {};
+            const next = payload.quant.nextTradeDayForecast || {};
+            const current = payload.quant.currentTradingDayForecast || {};
             const parts = [];
             if (payload.quant.score != null) parts.push(`综合分${payload.quant.score}${payload.quant.bias ? `(${payload.quant.bias})` : ''}`);
+            if (current.direction) parts.push(`今日整日${current.direction}`);
+            if (current.upProb != null) parts.push(`今日整日上涨概率${current.upProb}%`);
+            if (next.direction) parts.push(`次日${next.direction}`);
+            if (next.upProb != null) parts.push(`次日上涨概率${next.upProb}%`);
+            if (next.targetLow != null || next.targetHigh != null) {
+              parts.push(`次日区间${next.targetLow ?? '—'}~${next.targetHigh ?? '—'}`);
+            }
             if (f.horizon) parts.push(`窗口${f.horizon}`);
             if (f.direction) parts.push(`走势${f.direction}`);
             if (f.upProb != null) parts.push(`上涨概率${f.upProb}%`);
@@ -1012,6 +1119,10 @@ export default async function handler(req, res) {
               targetMid: f.targetMid ?? null,
               targetHigh: f.targetHigh ?? null,
               horizon: f.horizon ?? null,
+              nextTradeDayForecast: payload.quant.nextTradeDayForecast || null,
+              currentTradingDayForecast:
+                payload.quant.currentTradingDayForecast || null,
+              forecastAvailability: payload.quant.forecastAvailability || null,
               executionReference: payload.quant.v2?.executionReference || null,
               reads: payload.quant.reads || null,
               highConfFired: hc ? !!hc.fired : null,
@@ -1154,6 +1265,35 @@ export default async function handler(req, res) {
       }
     }
 
+    if (!isAdvisorMode(mode)) {
+      const query = searchQueryForMode(mode, payload);
+      if (query) {
+        const genericSearch = await fetchAiSearchReference({
+          query,
+          cacheScope: mode === 'scan_pick' ? 'scan' : `ai-${mode}`,
+          cacheMinutes: mode === 'daily' ? 60 : 30,
+        }, { runtimeConfig: aiSearchConfig });
+        searchReference = buildSearchReference(genericSearch);
+        if (searchReference) {
+          payload.aiSearchEvidence = genericSearch.items
+            .map(aiSearchEvidenceText)
+            .filter(Boolean)
+            .slice(0, 6);
+          payload.aiSearchMeta = {
+            status: genericSearch.status,
+            billed: genericSearch.billed === true,
+            count: genericSearch.items.length,
+            fetchedAt: genericSearch.fetchedAt || null,
+          };
+          for (const item of genericSearch.items) {
+            if (!item.url || newsRefs.some((existing) => existing?.url === item.url)) continue;
+            newsRefs.push(item);
+            if (newsRefs.length >= 8) break;
+          }
+        }
+      }
+    }
+
     if (isAdvisorMode(mode) && payload.realOutcomeLearning) {
       payload.realOutcomeContext = realOutcomeContext(
         payload.realOutcomeLearning,
@@ -1189,17 +1329,28 @@ export default async function handler(req, res) {
       hasNegNews: payload.resonance ? payload.resonance.hasNegNews : null,
       newsHeadlines: payload.newsHeadlines || null,
       macroNews: payload.macroNews || null,
+      aiSearch: payload.aiSearchMeta || null,
       fundAsOf: payload.stockFund ? { date: payload.stockFund.asOfDate, historical: payload.stockFund.isHistorical, main5dAvg: payload.stockFund.main5dAvgYi, inflowDays: payload.stockFund.inflowDays, mainStreak: payload.stockFund.mainStreak ?? null } : null,
       marketPhase: payload.marketPhase || null,
       todayQuote: payload.todayQuote || null,
       dailyReport: payload.dailyReport ? { sessionCn: payload.dailyReport.sessionCn, day: payload.dailyReport.day } : null,
+      quantResult: payload.quant || null,
     };
+    const scheduledReviewEvaluation = evaluateScheduledReview({
+      origin: payload.reviewOrigin,
+      previousDigest: payload.previousEvidenceDigest,
+      snapshot: currentEvidenceSnapshot,
+      hasPreviousAdvice: !!payload.previousAdvice,
+      previousAdvice: payload.previousAdvice,
+    });
     const scheduledReviewResponse = buildScheduledReviewGateResponse({
       mode,
       origin: payload.reviewOrigin,
       previousDigest: payload.previousEvidenceDigest,
       snapshot: currentEvidenceSnapshot,
       hasPreviousAdvice: !!payload.previousAdvice,
+      previousAdvice: payload.previousAdvice,
+      evaluation: scheduledReviewEvaluation,
       meta: collectedMeta,
       news: newsRefs,
     });
@@ -1732,6 +1883,10 @@ export default async function handler(req, res) {
     } else if (result && typeof result === 'object' && !result.raw && result.reasoning) {
       result.reasoning = zhReasonPiece(String(result.reasoning));
     }
+    if (result && typeof result === 'object' && !result.raw) {
+      if (searchReference) result.searchReference = searchReference;
+      else delete result.searchReference;
+    }
     return finish({
       ok: true,
       mode,
@@ -1741,6 +1896,9 @@ export default async function handler(req, res) {
       result,
       truncated,
       news: newsRefs,
+      searchReference,
+      reviewDisposition: scheduledReviewEvaluation.disposition,
+      reviewReason: scheduledReviewEvaluation.reason,
       // 可信度元信息：供前端展示共振灯/环境/龙虎榜/消息面(不依赖模型自报)
       meta: collectedMeta,
       usedRag: !!ragText,

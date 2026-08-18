@@ -2,6 +2,8 @@ import { useState, useRef, useMemo, useEffect } from 'react'
 import Icon from './Icon'
 import { HL } from './RichText'
 import StockName from './StockName'
+import StockTags from './StockTags'
+import StockGroupFilter from './StockGroupFilter'
 import Reasoning from './Reasoning'
 import ConfirmDialog from './ConfirmDialog'
 import OverlayPortal from './OverlayPortal'
@@ -35,12 +37,26 @@ import { fmtPct, pctClass, fmtNum, fmtInflow, fmtRaw, hasVal, opText, formatAdvi
 import {
   computeDailyAttribution,
   computeDailyFinance,
+  computeTodayOperationPnl,
   todayTradeCodes,
 } from '../../shared/dailyFinance.js'
+import {
+  tradeActivityContext,
+} from '../../shared/portfolioAccounting.js'
 import {
   rankWatchlistCandidates,
   watchlistReadiness,
 } from '../../shared/watchlistRanking.js'
+import { visibleAiSources } from '../../shared/aiSearchUi.js'
+import { useAiSearchConfig } from '../aiSearchConfigStore'
+import { useStockTags } from '../stockTagStore'
+import {
+  buildStockGroups,
+  filterStocksByGroup,
+  selectBatchGroupCodes,
+  toggleBatchGroupSelection,
+} from '../../shared/stockGroupFilter.js'
+import { adviceRecency } from '../../shared/adviceRecency.js'
 
 // —— 搜索结果 → 定位到卡片:轻量模块级事件总线 ——
 // 搜索框(StockSearch)、自选区(PlanList)、持仓区(HoldingList)同在本文件,用一个 Set 广播即可:
@@ -236,6 +252,7 @@ function groupTFlowsByDay(flows) {
 // ============ 我的计划 Tab：交易闭环（候选→买入→持仓→卖出） ============
 export default function PlanTab({ interval }) {
   const book = usePlanStore()
+  const searchConfig = useAiSearchConfig()
   const tradedToday = todayTradeCodes(book.closed, book.holding)
   const codes = [...new Set([
     ...book.plan.map((x) => x.code),
@@ -249,20 +266,44 @@ export default function PlanTab({ interval }) {
   )
   const quote = {}
   ;(data?.list || []).forEach((s) => { quote[s.code] = s })
-
+  const stockTags = useStockTags(codes)
   // ===== 批量一次性生成 AI 操作建议:统一入口(军师战绩旁),勾选可跨【持仓+自选】 =====
   // 状态上提到 PlanTab,持仓区与自选区共享同一套 selectMode/selected → 只有一个入口、一条进度。
   const [selectMode, setSelectMode] = useState(false)
   const [selected, setSelected] = useState(() => new Set())
-  const toggleSel = (code) => setSelected((prev) => {
-    const nx = new Set(prev); nx.has(code) ? nx.delete(code) : nx.add(code); return nx
-  })
-  const batchSel = { selectMode, setSelectMode, selected, setSelected, toggleSel }
+  const [batchScope, setBatchScope] = useState('all')
+  const [batchDimension, setBatchDimension] = useState('concept')
+  const [batchGroup, setBatchGroup] = useState(() => [])
+  const toggleSel = (code) => {
+    setBatchGroup([])
+    setSelected((prev) => {
+      const nx = new Set(prev); nx.has(code) ? nx.delete(code) : nx.add(code); return nx
+    })
+  }
+  const batchSel = {
+    selectMode,
+    setSelectMode,
+    selected,
+    setSelected,
+    toggleSel,
+    batchScope,
+    setBatchScope,
+    batchDimension,
+    setBatchDimension,
+    batchGroup,
+    setBatchGroup,
+  }
 
   return (
     <div className="plan">
-      <HoldingList book={book} quote={quote} batchSel={batchSel} />
-      <PlanList book={book} quote={quote} batchSel={batchSel} />
+      <HoldingList
+        book={book}
+        quote={quote}
+        stockTags={stockTags}
+        searchConfig={searchConfig}
+        batchSel={batchSel}
+      />
+      <PlanList book={book} quote={quote} stockTags={stockTags} batchSel={batchSel} />
     </div>
   )
 }
@@ -344,7 +385,13 @@ function StockSearch() {
             return (
               <button type="button" className={'ss-item' + (inBook ? ' locatable' : '')} key={s.code} onClick={onItem}
                 title={inBook ? '点击定位到已有卡片' : '点击加入自选'}>
-                <span className="ss-name">{s.name}<span className="sub-name">{s.code}</span></span>
+                <span className="ss-name">
+                  <StockName
+                    code={s.code}
+                    name={s.name}
+                    interactive={false}
+                  />
+                </span>
                 <span className="ss-type">{s.type}</span>
                 {inBook
                   ? <span className="ss-add locate"><Icon name="target" size={13} />{held ? '已持有 · 定位' : '已加 · 定位'}</span>
@@ -376,12 +423,16 @@ function QuantBadge({ score, bias, size }) {
 
 function AdviceUpdatedAt({ entry }) {
   const label = formatAdviceTime(entry && entry.at)
-  if (!label) return null
+  const recency = adviceRecency(entry && entry.at)
+  if (!label || !recency) return null
   return (
-    <div className="advice-updated-at" title={`最近一次军师操作建议生成于 ${new Date(entry.at).toLocaleString('zh-CN')}`}>
+    <div className="advice-updated-at" data-recency={recency.tone} title={`最近一次军师操作建议生成于 ${new Date(entry.at).toLocaleString('zh-CN')}`}>
       <Icon name="history" size={11} />
-      <span>建议更新</span>
-      <time dateTime={new Date(entry.at).toISOString()}>{label}</time>
+      <span>最近生成</span>
+      <strong>{recency.label}</strong>
+      {recency.tone === 'fresh' && (
+        <time dateTime={new Date(entry.at).toISOString()}>{label}</time>
+      )}
     </div>
   )
 }
@@ -522,12 +573,14 @@ function CandFocus({ code, name }) {
 }
 
 // ---------- 自选 / 候选（合并自选监控 + 计划买入）----------
-function PlanList({ book, quote, batchSel }) {
+function PlanList({ book, quote, stockTags, batchSel }) {
   const [buying, setBuying] = useState(null) // code
   const [price, setPrice] = useState('')
   const [qty, setQty] = useState('1')
   const [delTarget, setDelTarget] = useState(null) // 待删除的候选 {code,name}
   const [alerting, setAlerting] = useState(null) // 正在设预警的 code
+  const [dimension, setDimension] = useState('concept')
+  const [tab, setTab] = useState('全部')
 
   // ===== 批量一次性生成:入口/工具条/进度条统一收敛到「持仓区(军师战绩旁)」。=====
   // 这里只消费上提到 PlanTab 的共享勾选状态,给候选卡渲染复选框;不再自带入口与进度。
@@ -554,8 +607,13 @@ function PlanList({ book, quote, batchSel }) {
         {/* 顶行：左=股名/代码/标签，右=量化得分徽标 + 现价 */}
         <div className="pc-top">
           <div className="pc-name">
-            <StockName code={p.code} name={(q && q.name) || p.name}><span className="pc-nm">{(q && q.name) || p.name}</span></StockName>
-            <span className="pc-code">{p.code}</span>
+            <StockName
+              code={p.code}
+              name={(q && q.name) || p.name}
+              industry={(q && q.industry) || p.industry}
+            >
+              <span className="pc-nm">{(q && q.name) || p.name}</span>
+            </StockName>
             {/^(300|301)/.test(String(p.code)) && <span className="tag tag-cy" title="创业板(涨跌幅±20%)">创</span>}
             {String(p.code).startsWith('688') && <span className="tag tag-kc" title="科创板(涨跌幅±20%、门槛更高)">科创板</span>}
             {q && q.isLimitUp && <span className="tag tag-lu">涨停</span>}
@@ -621,12 +679,6 @@ function PlanList({ book, quote, batchSel }) {
     )
   }
 
-  // 行业归类：优先用实时行情的 industry，其次用已缓存到候选上的 industry，否则「其他」
-  const [tab, setTab] = useState('全部') // 当前选中行业 tab
-  const industryOf = (p) => {
-    const q = quote[p.code]
-    return (q && q.industry) || p.industry || '其他'
-  }
   // 行情返回行业后，回写缓存到候选，保证行情缺失时仍能分类（且持久化到云端）
   useEffect(() => {
     ;(book.plan || []).forEach((p) => {
@@ -646,41 +698,27 @@ function PlanList({ book, quote, batchSel }) {
     // eslint-disable-next-line
   }, [book.plan.map((p) => p.code).join(',')])
 
-  // 汇总每个行业的只数 + 平均涨幅（用于 tab 排序：热门行业靠前）
-  const industries = useMemo(() => {
-    const map = new Map()
-    ;(book.plan || []).forEach((p) => {
-      const ind = industryOf(p)
-      const q = quote[p.code]
-      const o = map.get(ind) || { name: ind, count: 0, pctSum: 0, pctN: 0 }
-      o.count++
-      if (q && q.pct != null) { o.pctSum += q.pct; o.pctN++ }
-      map.set(ind, o)
-    })
-    const arr = [...map.values()].map((o) => ({ ...o, avgPct: o.pctN ? o.pctSum / o.pctN : null }))
-    // 行业排序：「其他」永远最后；其余按 只数降序 → 平均涨幅降序
-    arr.sort((a, b) => {
-      if (a.name === '其他') return 1
-      if (b.name === '其他') return -1
-      if (b.count !== a.count) return b.count - a.count
-      return (b.avgPct ?? -999) - (a.avgPct ?? -999)
-    })
-    return arr
-    // eslint-disable-next-line
-  }, [book.plan, quote])
-
-  // 当前 tab 下要显示的候选（全部=所有；否则=该行业）
+  const groups = useMemo(() => buildStockGroups(book.plan, {
+    dimension,
+    tagMap: stockTags,
+    quoteMap: quote,
+  }), [book.plan, dimension, stockTags, quote])
+  const tagsLoading = dimension === 'concept'
+    && (book.plan || []).some((item) => stockTags[item.code] == null)
+  // 当前胶囊下要显示的候选，排序仍沿用买入准备度口径。
   const shown = rankWatchlistCandidates(
-    tab === '全部'
-      ? book.plan
-      : book.plan.filter((p) => industryOf(p) === tab),
+    filterStocksByGroup(book.plan, tab, {
+      dimension,
+      tagMap: stockTags,
+      quoteMap: quote,
+    }),
     quote,
   )
-  // tab 可能因删票失效 → 回退到全部
+  // 当前胶囊可能因删票或切换维度失效 → 回退到全部。
   useEffect(() => {
-    if (tab !== '全部' && !industries.some((i) => i.name === tab)) setTab('全部')
+    if (tab !== '全部' && !groups.some((group) => group.name === tab)) setTab('全部')
     // eslint-disable-next-line
-  }, [industries])
+  }, [groups])
 
   // 搜索结果「定位」:命中本区(自选/候选)名下的 code → 先切回「全部」保证卡片被渲染,再滚动+高亮
   useEffect(() => subscribeLocate((code) => {
@@ -691,29 +729,30 @@ function PlanList({ book, quote, batchSel }) {
 
   return (
     <section className="panel plan-section plan-section-watch">
-      <div className="panel-head plan-head">
-        <div role="heading" aria-level="2" className="panel-title"><Icon name="eye" size={16} /> 自选 / 候选 <span className="sub-name">{book.plan.length} 只 · 按买入准备度排序</span></div>
-        <div className="plan-head-r">
-          <div className="plan-search"><StockSearch /></div>
+      <div className="plan-section-sticky">
+        <div className="panel-head plan-head">
+          <div role="heading" aria-level="2" className="panel-title"><Icon name="eye" size={16} /> 自选 / 候选 <span className="sub-name">{book.plan.length} 只 · 按买入准备度排序</span></div>
+          <div className="plan-head-r">
+            <div className="plan-search"><StockSearch /></div>
+          </div>
         </div>
+        {book.plan.length > 0 && (
+          <StockGroupFilter
+            dimension={dimension}
+            onDimensionChange={(next) => { setDimension(next); setTab('全部') }}
+            groups={groups}
+            active={tab}
+            onActiveChange={setTab}
+            total={[...new Set(book.plan.map((item) => item.code))].length}
+            loading={tagsLoading}
+          />
+        )}
       </div>
 
       {book.plan.length === 0 ? (
-        <div className="empty small">搜索股票加入自选，或在「今日选股」点「加自选」。这里实时盯盘资金/量比，并按行业分类；点每张卡左上的星标可置顶重点关注。</div>
+        <div className="empty small">搜索股票加入自选，或在「今日选股」点「加自选」。这里实时盯盘资金/量比，并按概念或行业分类；点每张卡左上的星标可置顶重点关注。</div>
       ) : (
         <>
-          {/* 行业 Tab 栏：全部 + 各行业(按只数/强度排序) + 其他 */}
-          <div className="ind-tabs">
-            <button className={'ind-tab' + (tab === '全部' ? ' on' : '')} onClick={() => setTab('全部')}>
-              全部 <span className="ind-tab-n">{book.plan.length}</span>
-            </button>
-            {industries.map((i) => (
-              <button key={i.name} className={'ind-tab' + (tab === i.name ? ' on' : '') + (i.name === '其他' ? ' other' : '')} onClick={() => setTab(i.name)}>
-                {i.name} <span className="ind-tab-n">{i.count}</span>
-                {i.avgPct != null && <span className={'ind-tab-pct ' + (i.avgPct >= 0 ? 'red' : 'green')}>{i.avgPct >= 0 ? '+' : ''}{i.avgPct.toFixed(1)}%</span>}
-              </button>
-            ))}
-          </div>
           {/* 当前 tab：重点关注置顶，其余按量化55% + 买点接近度45%排序 */}
           <div className="plan-cand-grid">{shown.map(Card)}</div>
         </>
@@ -721,7 +760,7 @@ function PlanList({ book, quote, batchSel }) {
       {delTarget && (
         <ConfirmDialog
           title="从自选中删除？"
-          body={<>确定把 <b>{delTarget.name}</b>（{delTarget.code}）从自选 / 候选中移除？此操作不影响你已有的持仓和交易记录。</>}
+          body={<>确定把 <b>{delTarget.name}</b>（{delTarget.code}）<StockTags code={delTarget.code} variant="inline" /> 从自选 / 候选中移除？此操作不影响你已有的持仓和交易记录。</>}
           confirmText="删除"
           onConfirm={() => { planStore.removePlan(delTarget.code); setDelTarget(null) }}
           onCancel={() => setDelTarget(null)}
@@ -859,7 +898,7 @@ function holdSnapshot(h, q) {
   return { costWithFee, pnl, hitTP, hitSL, urgency, flag }
 }
 
-// ---------- 持仓作战总览条：总浮盈亏 / 今日做T / 仓位 / 需立即处理 ----------
+// ---------- 持仓作战总览条：总浮盈亏 / 今日操作盈亏 / 仓位 / 需立即处理 ----------
 function HoldOverview({ book, quote }) {
   const holding = book.holding || []
   const pf = computePortfolio(holding, quote, book.account)
@@ -873,25 +912,19 @@ function HoldOverview({ book, quote }) {
     trades: book.closed || [],
     quoteMap: quote,
   })
+  const operationPnl = computeTodayOperationPnl({
+    holdings: holding,
+    trades: book.closed || [],
+  })
   const [showAttribution, setShowAttribution] = useState(false)
-  // 今日做T已实现 = 未结算流水配对差价 + 今日已结算入账的做T记录(kind:'T')
-  // 关键：结算(或跨天自动结算)后 tFlows 会清空、收益转入 closed，只看 tFlows 会漏掉今天已入账的T
-  let tRealized = 0
-  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0); const t0 = todayStart.getTime()
-  holding.forEach((h) => {
-    const todayFlows = (h.tFlows || []).filter((f) => f.at >= t0)
-    if (todayFlows.length) tRealized += computeTFlows(todayFlows).realized || 0
-  })
-  ;(book.closed || []).forEach((c) => {
-    if ((c.kind || c.type) !== 'T') return
-    const at = c.at || c.sellAt || c.buyAt || 0
-    if (at >= t0) tRealized += (c.netPnl != null ? c.netPnl : c.realizedPnl) || 0
-  })
-  tRealized = +tRealized.toFixed(2)
+  const [showOperationPnl, setShowOperationPnl] = useState(false)
   // 需立即处理的只数(触止损/止盈/破纪律)
   const urgent = holding.filter((h) => holdSnapshot(h, quote[h.code]).urgency >= 80)
   const pnlTone = daily.floatPnl >= 0 ? 'red' : 'green'
   const dayTone = daily.dayChangeAmount == null ? 'muted' : daily.dayChangeAmount >= 0 ? 'red' : 'green'
+  const operationTone = operationPnl.realizedCount
+    ? operationPnl.total >= 0 ? 'red' : 'green'
+    : 'muted'
   const dayStatus = {
     closed: '今日休市',
     preopen: '待开盘',
@@ -927,10 +960,25 @@ function HoldOverview({ book, quote }) {
             : `${daily.dayChangePct >= 0 ? '+' : ''}${daily.dayChangePct.toFixed(2)}% · ${dayStatus}`}
         </span>
       </div>
-      <div className="ho-cell">
-        <span className="ho-k">今日做T</span>
-        <span className={'ho-v ' + (tRealized >= 0 ? 'red' : 'green')}>{tRealized === 0 ? '—' : fmtMoney(tRealized)}</span>
-      </div>
+      <button
+        type="button"
+        className="ho-cell ho-operation-pnl"
+        onClick={() => setShowOperationPnl((value) => !value)}
+        aria-expanded={showOperationPnl}
+        aria-controls="today-operation-pnl-detail"
+        title="查看今日减仓、清仓和做T产生的扣费后已实现盈亏"
+      >
+        <span className="ho-k">
+          今日操作盈亏
+          <Icon name={showOperationPnl ? 'chevronDown' : 'chevronRight'} size={11} />
+        </span>
+        <span className={'ho-v ' + operationTone}>
+          {operationPnl.realizedCount ? fmtMoney(operationPnl.total) : '—'}
+        </span>
+        <span className="ho-sub muted">
+          {operationPnl.realizedCount ? `${operationPnl.realizedCount} 笔 · 扣费后` : '暂无已实现'}
+        </span>
+      </button>
       <div className="ho-cell">
         <span className="ho-k">当前仓位</span>
         <span className="ho-v">{pf.position != null ? pf.position + '%' : '—'}</span>
@@ -944,6 +992,31 @@ function HoldOverview({ book, quote }) {
         {urgent.length > 0 && <span className="ho-sub green">{urgent.slice(0, 2).map((h) => h.name).join(' ')}{urgent.length > 2 ? '…' : ''}</span>}
       </div>
     </div>
+    {showOperationPnl && (
+      <div className="operation-pnl-detail" id="today-operation-pnl-detail">
+        <div className="operation-pnl-head">
+          <span><Icon name="coins" size={13} /> 今日操作已实现</span>
+          <b className={operationTone}>{operationPnl.realizedCount ? fmtMoney(operationPnl.total) : '—'}</b>
+        </div>
+        <div className="operation-pnl-breakdown">
+          <div>
+            <span>减仓 / 清仓</span>
+            <b className={operationPnl.positionCount ? (operationPnl.positionPnl >= 0 ? 'red' : 'green') : 'muted'}>
+              {operationPnl.positionCount ? fmtMoney(operationPnl.positionPnl) : '—'}
+            </b>
+            <small>{operationPnl.positionCount} 笔</small>
+          </div>
+          <div>
+            <span>做T</span>
+            <b className={operationPnl.tCount ? (operationPnl.tPnl >= 0 ? 'red' : 'green') : 'muted'}>
+              {operationPnl.tCount ? fmtMoney(operationPnl.tPnl) : '—'}
+            </b>
+            <small>{operationPnl.tCount} 组</small>
+          </div>
+        </div>
+        <p><Icon name="info" size={12} />仅统计今天完成卖出及做T的扣费后已实现盈亏；今日买入、未卖持仓浮盈不计入。</p>
+      </div>
+    )}
     {daily.dayChangeAmount != null && (
       <div className="daily-attribution">
         <button
@@ -967,7 +1040,9 @@ function HoldOverview({ book, quote }) {
               <div className="da-losses">
                 <span>主要拖累</span>
                 {attribution.topLosses.slice(0, 3).map((item) => (
-                  <b key={item.code}>{item.name} {fmtMoney(item.total)}</b>
+                  <b key={item.code}>
+                    {item.name} <StockTags code={item.code} variant="inline" /> {fmtMoney(item.total)}
+                  </b>
                 ))}
               </div>
             )}
@@ -982,7 +1057,7 @@ function HoldOverview({ book, quote }) {
 // ---------- 盘中定时刷新 AI 建议：任务配置 ----------
 // 用户可开启一个后台定时任务:交易时段内,每隔 N 分钟对选定范围(自选/持仓/两者)
 // 批量重生成 AI 操作建议(复用 runBatchAdvice,与手动/每日同源,保证连续性一致性)。
-// 展示最近一次更新时间;实际调度在 App.jsx 的分钟级 tick 里执行(runAutoRefreshIfDue)。
+// 展示最近一次更新时间；自动调度由 FC Timer 执行，浏览器只负责配置和手动触发。
 function AutoRefreshControl({ quote }) {
   usePlanStore()  // 订阅 settings/holding/plan 变化,配置改动即时反映
   const [open, setOpen] = useState(false)
@@ -1117,9 +1192,21 @@ function AutoRefreshControl({ quote }) {
 }
 
 // ---------- 当前持仓 ----------
-function HoldingList({ book, quote, batchSel }) {
-  // ===== 批量一次性生成:唯一入口(军师战绩旁)。勾选可跨【持仓+自选】,共享上提到 PlanTab 的状态 =====
-  const { selectMode, setSelectMode, selected, setSelected, toggleSel } = batchSel
+function HoldingList({ book, quote, stockTags, searchConfig, batchSel }) {
+  // ===== 批量一次性生成:整体账户入口。勾选可跨【持仓+自选】,共享上提到 PlanTab 的状态 =====
+  const {
+    selectMode,
+    setSelectMode,
+    selected,
+    setSelected,
+    toggleSel,
+    batchScope,
+    setBatchScope,
+    batchDimension,
+    setBatchDimension,
+    batchGroup,
+    setBatchGroup,
+  } = batchSel
   const [, forceBatch] = useState(0)
   useEffect(() => subscribeBatch(() => forceBatch((n) => n + 1)), [])
   const batch = getBatchState()
@@ -1145,12 +1232,8 @@ function HoldingList({ book, quote, batchSel }) {
     [book.holding, quote, book.account],
   )
 
-  // ===== 持仓区行业分类(全部 + 板块),与自选区同口径 =====
-  const [holdTab, setHoldTab] = useState('全部') // 当前选中行业 tab
-  const industryOf = (h) => {
-    const q = quote[h.code]
-    return (q && q.industry) || h.industry || '其他'
-  }
+  const [holdDimension, setHoldDimension] = useState('concept')
+  const [holdTab, setHoldTab] = useState('全部')
   // 行情返回行业后，回写缓存到持仓，保证行情缺失时仍能分类（且持久化到云端）
   useEffect(() => {
     ;(book.holding || []).forEach((h) => {
@@ -1161,44 +1244,87 @@ function HoldingList({ book, quote, batchSel }) {
     })
     // eslint-disable-next-line
   }, [Object.keys(quote).length, book.holding.length])
-  // 汇总每个行业的只数 + 平均涨幅（用于 tab 排序：热门行业靠前）
-  const holdIndustries = useMemo(() => {
-    const map = new Map()
-    ;(book.holding || []).forEach((h) => {
-      const ind = (quote[h.code] && quote[h.code].industry) || h.industry || '其他'
-      const q = quote[h.code]
-      const o = map.get(ind) || { name: ind, count: 0, pctSum: 0, pctN: 0 }
-      o.count++
-      if (q && q.pct != null) { o.pctSum += q.pct; o.pctN++ }
-      map.set(ind, o)
-    })
-    const arr = [...map.values()].map((o) => ({ ...o, avgPct: o.pctN ? o.pctSum / o.pctN : null }))
-    arr.sort((a, b) => {
-      if (a.name === '其他') return 1
-      if (b.name === '其他') return -1
-      if (b.count !== a.count) return b.count - a.count
-      return (b.avgPct ?? -999) - (a.avgPct ?? -999)
-    })
-    return arr
-    // eslint-disable-next-line
-  }, [book.holding, quote])
-  // tab 可能因清仓失效 → 回退到全部
+  const holdGroups = useMemo(() => buildStockGroups(book.holding, {
+    dimension: holdDimension,
+    tagMap: stockTags,
+    quoteMap: quote,
+  }), [book.holding, holdDimension, stockTags, quote])
+  const holdTagsLoading = holdDimension === 'concept'
+    && (book.holding || []).some((item) => stockTags[item.code] == null)
+  // 当前胶囊可能因清仓或切换维度失效 → 回退到全部。
   useEffect(() => {
-    if (holdTab !== '全部' && !holdIndustries.some((i) => i.name === holdTab)) setHoldTab('全部')
+    if (holdTab !== '全部' && !holdGroups.some((group) => group.name === holdTab)) setHoldTab('全部')
     // eslint-disable-next-line
-  }, [holdIndustries])
+  }, [holdGroups])
   // 搜索结果「定位」:命中本区(持仓)名下的 code → 先切回「全部」保证卡片被渲染,再滚动+高亮
   useEffect(() => subscribeLocate((code) => {
     if (!(book.holding || []).some((h) => h.code === code)) return
     setHoldTab('全部')
     scrollToCard(code)
   }), [book.holding])
-  // 当前 tab 下要显示的持仓（全部=所有；否则=该行业）
-  const shownHolding = holdTab === '全部' ? sortedHolding : sortedHolding.filter((h) => industryOf(h) === holdTab)
+  const shownHolding = filterStocksByGroup(sortedHolding, holdTab, {
+    dimension: holdDimension,
+    tagMap: stockTags,
+    quoteMap: quote,
+  })
   // 持仓 / 自选 去重代码集(同股多笔只算一只);用于全选/生成
   const holdCodes = [...new Set(sortedHolding.map((h) => h.code))]
   const watchCodes = [...new Set((book.plan || []).map((p) => p.code))]
   const allCodes = [...new Set([...holdCodes, ...watchCodes])]
+  const batchPool = batchScope === 'holding'
+    ? book.holding
+    : batchScope === 'watchlist'
+      ? book.plan
+      : [...book.holding, ...book.plan]
+  const batchGroups = useMemo(() => buildStockGroups(batchPool, {
+    dimension: batchDimension,
+    tagMap: stockTags,
+    quoteMap: quote,
+  }), [batchPool, batchDimension, stockTags, quote])
+  const batchScopeCodes = selectBatchGroupCodes({
+    holdings: book.holding,
+    watchlist: book.plan,
+    scope: batchScope,
+    dimension: batchDimension,
+    group: '全部',
+    tagMap: stockTags,
+    quoteMap: quote,
+  })
+  const batchTagsLoading = batchDimension === 'concept'
+    && batchPool.some((item) => stockTags[item.code] == null)
+  const selectScope = (scope) => {
+    const codes = selectBatchGroupCodes({
+      holdings: book.holding,
+      watchlist: book.plan,
+      scope,
+      dimension: batchDimension,
+      group: '全部',
+      tagMap: stockTags,
+      quoteMap: quote,
+    })
+    setBatchScope(scope)
+    setBatchGroup(['全部'])
+    setSelected(new Set(codes))
+  }
+  const selectGroup = (group) => {
+    const nextGroups = toggleBatchGroupSelection(batchGroup, group)
+    const codes = selectBatchGroupCodes({
+      holdings: book.holding,
+      watchlist: book.plan,
+      scope: batchScope,
+      dimension: batchDimension,
+      groups: nextGroups,
+      tagMap: stockTags,
+      quoteMap: quote,
+    })
+    setBatchGroup(nextGroups)
+    setSelected(new Set(codes))
+  }
+  const selectDimension = (dimension) => {
+    setBatchDimension(dimension)
+    setBatchGroup([])
+    setSelected(new Set())
+  }
   // 补分：历史持仓(建仓早于本功能)没有量化得分 → 按需评分,徽标从"计算中"变为分数
   useEffect(() => {
     const codes = (book.holding || []).filter((h) => h.qScore == null).map((h) => h.code)
@@ -1213,30 +1339,27 @@ function HoldingList({ book, quote, batchSel }) {
 
   return (
     <section className="panel plan-section plan-section-hold">
-      <div className="panel-head plan-head">
-        <div role="heading" aria-level="2" className="panel-title"><Icon name="wallet" size={16} /> 当前持仓 <span className="sub-name">{book.holding.length} 只 · 按浮盈金额排序</span></div>
-        <div className="hold-head-actions">
+      <div className="portfolio-overview-zone">
+        <HoldOverview book={book} quote={quote} />
+        <div className="portfolio-command-actions">
           <AdvisorScore book={book} />
           <AutoRefreshControl quote={quote} />
           {canBatch && !selectMode && (
-            <button className="mini-btn batch-entry" onClick={() => { setSelectMode(true); setSelected(new Set()) }}
+            <button className="mini-btn batch-entry" onClick={() => {
+              setSelectMode(true)
+              setSelected(new Set())
+              setBatchScope('all')
+              setBatchDimension('concept')
+              setBatchGroup([])
+            }}
               disabled={batch.running} title="勾选持仓 / 自选里的若干只股票，一次性批量生成 AI 操作建议（后台处理）">
               <Icon name="spark" size={13} /> 一次性生成
             </button>
           )}
         </div>
-      </div>
 
-      {/* 统一批量勾选工具条:可分别「全选持仓 / 全选自选」,已选计数跨两区合计;进入勾选模式时出现 */}
+      {/* 批量工具条：第一层选股票池，第二层按概念/行业板块选中；卡片仍可手动增删。 */}
       {selectMode && (() => {
-        const selectRegion = (codes, on) => setSelected((prev) => {
-          const nx = new Set(prev)
-          if (on) codes.forEach((c) => nx.delete(c))
-          else codes.forEach((c) => nx.add(c))
-          return nx
-        })
-        const allHoldSel = holdCodes.length > 0 && holdCodes.every((c) => selected.has(c))
-        const allWatchSel = watchCodes.length > 0 && watchCodes.every((c) => selected.has(c))
         const doRun = async (deepMode = false) => {
           const codes = allCodes.filter((c) => selected.has(c))
           if (!codes.length) return
@@ -1254,18 +1377,39 @@ function HoldingList({ book, quote, batchSel }) {
         }
         return (
           <div className="batch-bar">
-            <span className="batch-hint"><Icon name="spark" size={12} /> 勾选持仓 / 下方自选的股票，一次性生成</span>
-            {holdCodes.length > 0 && (
-              <button className="chip-btn ghost" onClick={() => selectRegion(holdCodes, allHoldSel)}>
-                <Icon name={allHoldSel ? 'checkSquare' : 'square'} size={13} />{allHoldSel ? '取消持仓' : `全选持仓(${holdCodes.length})`}
-              </button>
-            )}
-            {watchCodes.length > 0 && (
-              <button className="chip-btn ghost" onClick={() => selectRegion(watchCodes, allWatchSel)}>
-                <Icon name={allWatchSel ? 'checkSquare' : 'square'} size={13} />{allWatchSel ? '取消自选' : `全选自选(${watchCodes.length})`}
-              </button>
-            )}
-            <button className="chip-btn ghost" onClick={() => setSelected(new Set())} disabled={!selCount}>清空</button>
+            <span className="batch-hint"><Icon name="spark" size={12} /> 选择股票池，再多选概念或行业板块</span>
+            <div className="batch-filter-stack">
+              <div className="batch-filter-row">
+                <span className="batch-filter-label">股票池</span>
+                <div className="batch-scope-options" role="group" aria-label="选择批量生成股票池">
+                  <button type="button" className={batchScope === 'holding' ? 'on' : ''}
+                    aria-pressed={batchScope === 'holding'} onClick={() => selectScope('holding')}>
+                    持仓 ({holdCodes.length})
+                  </button>
+                  <button type="button" className={batchScope === 'watchlist' ? 'on' : ''}
+                    aria-pressed={batchScope === 'watchlist'} onClick={() => selectScope('watchlist')}>
+                    自选 ({watchCodes.length})
+                  </button>
+                  <button type="button" className={batchScope === 'all' ? 'on' : ''}
+                    aria-pressed={batchScope === 'all'} onClick={() => selectScope('all')}>
+                    两者 ({allCodes.length})
+                  </button>
+                </div>
+              </div>
+              <StockGroupFilter
+                compact
+                label="板块维度"
+                dimension={batchDimension}
+                onDimensionChange={selectDimension}
+                groups={batchGroups}
+                active={batchGroup}
+                onActiveChange={selectGroup}
+                total={batchScopeCodes.length}
+                loading={batchTagsLoading}
+                multiSelect
+              />
+            </div>
+            <button className="chip-btn ghost" onClick={() => { setBatchGroup([]); setSelected(new Set()) }} disabled={!selCount}>清空</button>
             <span className="batch-count">已选 <b>{selCount}</b> 只
               {(selHold > 0 || selWatch > 0) && <span className="sub-name">（持仓 {selHold} · 自选 {selWatch}）</span>}
             </span>
@@ -1278,7 +1422,7 @@ function HoldingList({ book, quote, batchSel }) {
               title="强制使用深度思考，最多2路并行，全部选中股票会依次完成">
               <Icon name="brain" size={12} />深度生成（2路并行）
             </button>
-            <button className="chip-btn ghost" onClick={() => { setSelectMode(false); setSelected(new Set()) }}>退出</button>
+            <button className="chip-btn ghost" onClick={() => { setSelectMode(false); setBatchGroup([]); setSelected(new Set()) }}>退出</button>
             {batchNotice && (
               <span className="batch-mode-note" role="status">
                 {batchNotice}
@@ -1302,9 +1446,10 @@ function HoldingList({ book, quote, batchSel }) {
               {batch.ok > 0 && <span className="bp-ok"> · 成功 {batch.ok}</span>}
               {batch.fail > 0 && <span className="bp-fail"> · 失败 {batch.fail}</span>}
               {batch.skipped > 0 && <span className="sub-name"> · 已取消 {batch.skipped}</span>}
+              {batch.cancelError && <span className="bp-fail"> · {batch.cancelError}</span>}
             </span>
             {batch.running
-              ? <button className="chip-btn ghost bp-cancel" onClick={cancelBatch} disabled={batch.cancelRequested}>{batch.cancelRequested ? '停止中…' : '全部取消'}</button>
+              ? <button className="chip-btn ghost bp-cancel" onClick={cancelBatch} disabled={batch.cancelRequested}>{batch.cancelRequested ? '停止中…' : '全部停止'}</button>
               : (batch.fail > 0
                 ? <button className="chip-btn buy bp-regen" onClick={() => regenerateFailed(quote)}><Icon name="refresh" size={12} /> 重生成失败({batch.fail})</button>
                 : null)}
@@ -1327,6 +1472,7 @@ function HoldingList({ book, quote, batchSel }) {
                       {st === 'running' && <Icon name="refresh" size={10} className="spin" />}
                       {st === 'ok' && <Icon name="check" size={10} />}
                       <b className="bp-chip-name">{it.name}</b>
+                      <StockTags code={it.code} variant="inline" />
                       <span className="bp-chip-st">{label}</span>
                       {(st === 'running' || st === 'pending' || st === 'queued') && (
                         <button className="bp-chip-x" title="取消这一只"
@@ -1341,9 +1487,9 @@ function HoldingList({ book, quote, batchSel }) {
                         {(it.model || it.endpoint) && (
                           <div className="bp-route">{[it.model, it.endpoint].filter(Boolean).join(' · ')}</div>
                         )}
-                        {Array.isArray(it.sources) && it.sources.length > 0 && (
+                        {visibleAiSources(searchConfig.enabled, it.sources).length > 0 && (
                           <div className="bp-sources">
-                            {it.sources.map((source, index) => (
+                            {visibleAiSources(searchConfig.enabled, it.sources).map((source, index) => (
                               <span key={`${source.label}-${index}`} className={source.ok ? 'ok' : 'off'}>
                                 {source.ok ? '✓' : '—'} {source.label}
                               </span>
@@ -1360,6 +1506,29 @@ function HoldingList({ book, quote, batchSel }) {
           )}
         </div>
       )}
+      </div>
+
+      <div className="plan-section-hold-sticky">
+        <div className="plan-section-sticky plan-section-head-sticky">
+          <div className="panel-head plan-head">
+            <div role="heading" aria-level="2" className="panel-title"><Icon name="wallet" size={16} /> 当前持仓 <span className="sub-name">{book.holding.length} 只 · 按浮盈金额排序</span></div>
+          </div>
+        </div>
+
+        {book.holding.length > 0 && (
+          <div className="plan-section-sticky plan-section-filter-sticky">
+            <StockGroupFilter
+              dimension={holdDimension}
+              onDimensionChange={(next) => { setHoldDimension(next); setHoldTab('全部') }}
+              groups={holdGroups}
+              active={holdTab}
+              onActiveChange={setHoldTab}
+              total={holdCodes.length}
+              loading={holdTagsLoading}
+            />
+          </div>
+        )}
+      </div>
 
       {/* 一次性生成时端点已满:列出正在生成的个股(可点击跳转),端点空出后本弹窗自动关闭 */}
       {busyModal && (
@@ -1382,6 +1551,7 @@ function HoldingList({ book, quote, batchSel }) {
                   title="查看该股详情与生成进度"
                 >
                   <span className="busy-item-name">{x.name}</span>
+                  <StockTags code={x.code} variant="inline" />
                   <span className="busy-item-code">{x.code}</span>
                   <Icon name="refresh" size={12} className="spin" />
                   <Icon name="chevronRight" size={13} />
@@ -1392,23 +1562,10 @@ function HoldingList({ book, quote, batchSel }) {
         </div>
       )}
 
-      <HoldOverview book={book} quote={quote} />
       {book.holding.length === 0 ? (
         <div className="empty">在下方「自选 / 候选」里点「建仓」后，持仓出现在这里。做T：在每笔持仓上高抛低吸、摊薄成本。</div>
       ) : (
         <>
-          {/* 行业 Tab 栏：全部 + 各行业(按只数/强度排序) + 其他 —— 与自选区同口径 */}
-          <div className="ind-tabs">
-            <button className={'ind-tab' + (holdTab === '全部' ? ' on' : '')} onClick={() => setHoldTab('全部')}>
-              全部 <span className="ind-tab-n">{[...new Set(book.holding.map((h) => h.code))].length}</span>
-            </button>
-            {holdIndustries.map((i) => (
-              <button key={i.name} className={'ind-tab' + (holdTab === i.name ? ' on' : '') + (i.name === '其他' ? ' other' : '')} onClick={() => setHoldTab(i.name)}>
-                {i.name} <span className="ind-tab-n">{i.count}</span>
-                {i.avgPct != null && <span className={'ind-tab-pct ' + (i.avgPct >= 0 ? 'red' : 'green')}>{i.avgPct >= 0 ? '+' : ''}{i.avgPct.toFixed(1)}%</span>}
-              </button>
-            ))}
-          </div>
           <div className="hold-grid">
             {shownHolding.map((h, idx) => (
               selectMode ? (
@@ -1434,12 +1591,14 @@ function HoldingList({ book, quote, batchSel }) {
 
 // ---------- 单笔持仓 ----------
 function HoldingItem({ h, idx, quote: q }) {
-  const [mode, setMode] = useState(null) // null | 'sell' | 'T' | 'add'
+  const searchConfig = useAiSearchConfig()
+  const [mode, setMode] = useState(null) // null | 'sell' | 'T' | 'add' | 'cost'
   const detail = useDetailStore() // 监听个股详情弹窗：从个股页生成AI建议返回后自动代入价格
   const [sellPrice, setSellPrice] = useState('')
   const [sellQty, setSellQty] = useState('1')
   const [addPrice, setAddPrice] = useState('')
   const [addQty, setAddQty] = useState('1')
+  const [costPrice, setCostPrice] = useState('')
   const [confirmDel, setConfirmDel] = useState(false) // 删除持仓二次确认
   const [confirmSettle, setConfirmSettle] = useState(false) // 手动结算做T二次确认
   // B-7 移动端横滑:右滑=看详情(左滑做T已移除——改为点「做T」按钮打开全屏页,避免误触/内容裁切)
@@ -1462,6 +1621,13 @@ function HoldingItem({ h, idx, quote: q }) {
   const mobileOperations = useMediaQuery('(max-width: 720px)')
 
   const book = usePlanStore()
+  const manualTradePairs = useMemo(
+    () => tradeActivityContext(book.closed || [], h.code)
+      .t.pairRecords
+      .filter((record) => record.manualPair)
+      .sort((left, right) => Number(right.at) - Number(left.at)),
+    [book.closed, h.code],
+  )
 
   const baseQty = h.baseQty || h.qty
   const tStat = computeTFlows(h.tFlows)
@@ -1640,6 +1806,19 @@ function HoldingItem({ h, idx, quote: q }) {
 
   const startAdd = () => { setTradeErr(''); setMode('add'); setAddPrice(q ? String(q.price) : ''); setAddQty('1') }
   const confirmAdd = () => { if (addPrice && Number(addQty) > 0) { planStore.addToHolding(h.id, addPrice, Number(addQty)); setMode(null) } }
+  const startCostEdit = () => {
+    setTradeErr('')
+    setCostPrice(String(costWithFee))
+    setMode('cost')
+  }
+  const confirmCostEdit = () => {
+    const result = planStore.updateHoldingCost(h.id, Number(costPrice))
+    if (!result?.ok) {
+      setTradeErr(result?.error || '成本价修改失败')
+      return
+    }
+    setMode(null)
+  }
 
   const startT = () => { setTradeErr(''); setMode('T'); setTPrice(q ? String(q.price) : ''); setTQty('1'); setTAdvice(null) }
   const addTFlow = () => {
@@ -1716,7 +1895,15 @@ function HoldingItem({ h, idx, quote: q }) {
     if (aiFocus) return { tone: aiFocus.tone, badge: aiFocus.badge, text: aiFocus.text, ai: true }
     return { prompt: true }  // 无AI操作建议 → 引导用户去个股页生成
   })()
-  const operationTitle = mode === 'add' ? '加仓' : mode === 'sell' ? '减仓 / 清仓' : mode === 'plan' ? '设置交易计划' : ''
+  const operationTitle = mode === 'add'
+    ? '加仓'
+    : mode === 'sell'
+      ? '减仓 / 清仓'
+      : mode === 'plan'
+        ? '设置交易计划'
+        : mode === 'cost'
+          ? '修改成本价'
+          : ''
   const operationForm = mode === 'add' ? (
     <div className="buy-inline-wrap">
       <div className="buy-inline">
@@ -1735,6 +1922,31 @@ function HoldingItem({ h, idx, quote: q }) {
         <span className="qty-hint">今日可卖 / {h.qty}手</span>
         {sellPrice && Number(sellQty) > 0 && <span className="fee-hint">费≈{calcSellFee(Number(sellPrice) * Number(sellQty) * 100).toFixed(2)}</span>}
         <button className={'chip-btn solid ' + (Number(sellQty) >= h.qty ? 'act-clear' : 'act-reduce')} onClick={confirmSell}><Icon name="check" size={13} />{Number(sellQty) >= h.qty ? '确认清仓' : '确认减仓'}</button>
+        <button className="chip-btn ghost" onClick={() => setMode(null)}>取消</button>
+      </div>
+    </div>
+  ) : mode === 'cost' ? (
+    <div className="cost-edit-form">
+      <label className="cost-edit-field">
+        <span>持仓成本价（含费）</span>
+        <input
+          className="wl-input"
+          type="number"
+          min="0.001"
+          step="0.001"
+          inputMode="decimal"
+          value={costPrice}
+          onChange={(event) => {
+            setCostPrice(event.target.value)
+            setTradeErr('')
+          }}
+        />
+      </label>
+      <div className="cost-edit-note">
+        只校准当前持仓成本，不改变现金、手数、T+1和历史成交；原手续费继续保留。
+      </div>
+      <div className="cost-edit-actions">
+        <button className="chip-btn done" onClick={confirmCostEdit}><Icon name="check" size={12} />保存成本</button>
         <button className="chip-btn ghost" onClick={() => setMode(null)}>取消</button>
       </div>
     </div>
@@ -1778,8 +1990,13 @@ function HoldingItem({ h, idx, quote: q }) {
       {/* 决策条：股名 + 特大号浮盈亏（第一视觉焦点）*/}
       <div className="hold-head">
         <div className="hold-head-l">
-          <StockName code={h.code} name={h.name}><span className="hh-name">{h.name}</span></StockName>
-          <span className="hh-code">{h.code}</span>
+          <StockName
+            code={h.code}
+            name={h.name}
+            industry={(q && q.industry) || h.industry}
+          >
+            <span className="hh-name">{h.name}</span>
+          </StockName>
           <QuantBadge score={h.qScore} bias={h.qBias} size="sm" />
           {q && (validPx != null
             ? <span className={'hh-price ' + pctClass(q.pct)}>{fmtRaw(validPx)} <span className="hh-chg">{fmtPct(q.pct)}</span></span>
@@ -1800,8 +2017,17 @@ function HoldingItem({ h, idx, quote: q }) {
         <span title={netT !== 0 ? `底仓 ${h.qty} 手，今日做T未结算净${netT > 0 ? '买入+' : '卖出'}${netT} 手` : '当前持仓手数'}>
           持仓 {liveQty}手{netT !== 0 && <span className="sub-name"> (底仓{h.qty}{netT > 0 ? '+' : ''}{netT})</span>}
         </span>
-        <span title={`裸买入价 ${fmtRaw(h.buyPrice)} + 买入手续费 ${(h.buyFee || 0).toFixed(2)}${tStat.realized ? `；做T差价摊薄 ${fmtMoney(tStat.realized)}` : ''}`}>
+        <span className="hold-cost-value" title={`裸买入价 ${fmtRaw(h.buyPrice)} + 买入手续费 ${(h.buyFee || 0).toFixed(2)}${tStat.realized ? `；做T差价摊薄 ${fmtMoney(tStat.realized)}` : ''}`}>
           成本 {fmtRaw(liveCost)} <span className="sub-name">{tStat.realized ? '(做T后)' : '(含费)'}</span>
+          <button
+            type="button"
+            className="hold-cost-edit"
+            aria-label={`修改${h.name}成本价`}
+            title="修改成本价"
+            onClick={startCostEdit}
+          >
+            <Icon name="edit" size={11} />
+          </button>
         </span>
       </div>
 
@@ -1985,7 +2211,10 @@ function HoldingItem({ h, idx, quote: q }) {
             >
               <div className="mobile-trade-head">
                 <div>
-                  <div className="modal-title">{operationTitle} · {h.name}</div>
+                  <div className="modal-title">
+                    {operationTitle} · {h.name}
+                    <StockTags code={h.code} variant="inline" />
+                  </div>
                   <span className="detail-code">{h.code}</span>
                 </div>
                 <button type="button" className="modal-close" aria-label={`关闭${operationTitle}弹框`} onClick={() => setMode(null)}><Icon name="close" size={16} /></button>
@@ -2002,7 +2231,7 @@ function HoldingItem({ h, idx, quote: q }) {
       {confirmDel && (
         <ConfirmDialog
           title="删除此持仓？"
-          body={<>确定删除持仓 <b>{h.name}</b>（{h.code}，{h.qty}手）？该持仓上已配对的做T收益会归档进交易记录，不会丢失；但这笔持仓本身将从列表移除。</>}
+          body={<>确定删除持仓 <b>{h.name}</b>（{h.code}，{h.qty}手）<StockTags code={h.code} variant="inline" />？该持仓上已配对的做T收益会归档进交易记录，不会丢失；但这笔持仓本身将从列表移除。</>}
           confirmText="删除持仓"
           onConfirm={() => { planStore.removeHolding(h.id); setConfirmDel(false) }}
           onCancel={() => setConfirmDel(false)}
@@ -2013,7 +2242,7 @@ function HoldingItem({ h, idx, quote: q }) {
         <ConfirmDialog
           title="结算做T入账？"
           body={<>
-            确定把 <b>{h.name}</b> 今天的 {h.tFlows?.length || 0} 笔做T流水结算入账吗？结算后：
+            确定把 <b>{h.name}</b><StockTags code={h.code} variant="inline" /> 今天的 {h.tFlows?.length || 0} 笔做T流水结算入账吗？结算后：
             <ul style={{ margin: '8px 0 0', paddingLeft: 18, lineHeight: 1.7 }}>
               {tStat.realized !== 0 && <li>配对差价 <b className={tStat.realized >= 0 ? 'red' : 'green'}>{fmtMoney(tStat.realized)}</b> 计入交易记录（做T）</li>}
               {tStat.openBuy > 0 && <li>净买入 <b className="red">{tStat.openBuy}手</b> → 加仓，底仓成本按加权平均更新</li>}
@@ -2039,7 +2268,11 @@ function HoldingItem({ h, idx, quote: q }) {
               onClick={(e) => e.stopPropagation()}
             >
               <div className="t-drawer-head">
-                <div className="modal-title" id={`t-dialog-title-${h.id}`}><Icon name="refresh" size={16} /> 做T · {h.name}<span className="detail-code">{h.code}</span></div>
+                <div className="modal-title" id={`t-dialog-title-${h.id}`}>
+                  <Icon name="refresh" size={16} /> 做T · {h.name}
+                  <span className="detail-code">{h.code}</span>
+                  <StockTags code={h.code} variant="inline" />
+                </div>
                 <button type="button" className="modal-close" aria-label="关闭做T弹层" onClick={() => setMode(null)}><Icon name="close" size={16} /></button>
               </div>
               <div className="t-drawer-body">
@@ -2055,6 +2288,27 @@ function HoldingItem({ h, idx, quote: q }) {
                   </button>
                 )}
               </div>
+              {manualTradePairs.length > 0 && (
+                <div className="t-record-pairs">
+                  <div className="t-record-pairs-head">
+                    <Icon name="refresh" size={12} />
+                    <span>交易记录已配对</span>
+                    <b>{manualTradePairs.length}组</b>
+                  </div>
+                  <div className="t-record-pairs-list">
+                    {manualTradePairs.slice(0, 5).map((record) => (
+                      <div className="t-record-pair" key={record.id}>
+                        <span>{dayKeyOf(record.at).slice(5)}</span>
+                        <span>{fmtRaw(record.buyPrice)} → {fmtRaw(record.sellPrice)}</span>
+                        <span>{record.qty}手</span>
+                        <b className={record.realizedPnl >= 0 ? 'red' : 'green'}>
+                          {fmtMoney(record.realizedPnl)}
+                        </b>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
         <div className="t-panel">
           {/* AI 做T参考 */}
           <div className="t-ai">
@@ -2071,9 +2325,9 @@ function HoldingItem({ h, idx, quote: q }) {
             {tAdvice && tAdvice.loading && (
               <div className="t-ai-loading-wrap">
                 <div className="t-ai-loading"><Icon name="refresh" size={13} className="spin" />{tAdvice.phase || 'AI 正在分析历史规律/分时/大盘/资金…'}</div>
-                {tAdvice.sources && tAdvice.sources.length > 0 && (
+                {visibleAiSources(searchConfig.enabled, tAdvice.sources).length > 0 && (
                   <div className="adv-sources">
-                    {tAdvice.sources.map((s, i) => (
+                    {visibleAiSources(searchConfig.enabled, tAdvice.sources).map((s, i) => (
                       <span className={'adv-src' + (s.ok ? ' ok' : ' none')} key={s.label + i}>
                         <Icon name={s.ok ? 'check' : 'close'} size={11} /> {s.label}
                       </span>
@@ -2221,20 +2475,6 @@ function HoldingItem({ h, idx, quote: q }) {
     </div>
   )
 }
-
-// 预估本次做T净收益（第二腿输入时）
-function estT(pending, price2) {
-  const { dir, leg1Price, qty } = pending
-  const shares = qty * 100
-  const p2 = Number(price2)
-  const buyP = dir === 'positive' ? leg1Price : p2
-  const sellP = dir === 'positive' ? p2 : leg1Price
-  const gross = (sellP - buyP) * shares
-  const buyFee = Math.max(buyP * shares * 0.0003, 5) + buyP * shares * 0.00001
-  const sellFee = Math.max(sellP * shares * 0.0003, 5) + sellP * shares * 0.0005 + sellP * shares * 0.00001
-  return +(gross - buyFee - sellFee).toFixed(2)
-}
-void estT
 
 // 单条做T流水行：展示 + 就地编辑（价格精确到3位小数、可改方向/手数）
 function TFlowRow({ f, holdingId }) {

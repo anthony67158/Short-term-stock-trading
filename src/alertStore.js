@@ -233,7 +233,7 @@ function notify(title, body) {
   // 浏览器系统通知
   try {
     if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-      new Notification(title, { body, icon: '/favicon.svg', tag: 'alert-' + Date.now() })
+      new Notification(title, { body, icon: '/icon-192.png', tag: 'alert-' + Date.now() })
     }
   } catch { /* ignore */ }
   beep()

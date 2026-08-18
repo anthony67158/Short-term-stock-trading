@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import numpy as np
 
 from factors_lib import compute_factors, feature_vector, FEATURE_NAMES
-from model_lib import model_score, garch_sigma, get_model, signal_prob
+from model_lib import model_score, garch_sigma, get_model, signal_prob, event_tag_for
 
 app = FastAPI(title="Quant Score & Forecast", version="3.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -118,6 +118,56 @@ def forecast(f, days=5, sims=3000):
         "targetLow": round(p10, 2), "targetMid": round(p50, 2), "targetHigh": round(p90, 2),
         "direction": direction, "confidence": conf, "dailyVol": round(sigma * 100, 2),
         "volEngine": vol_engine,
+        "horizon": "nextTradingDay" if days == 1 else f"next{days}TradingDays",
+        "rangeType": "P10-P90",
+        "rangeConfidencePct": 80,
+        "forecastEngine": (
+            "garchMonteCarlo"
+            if vol_engine == "garch"
+            else "historicalVolMonteCarlo"
+        ),
+    }
+
+
+def forecast_outputs(
+    f,
+    previous_f=None,
+    source_as_of="",
+    target_date="",
+):
+    """Additive multi-horizon contract; legacy ``forecast`` stays five-day."""
+    current_trading_day = (
+        forecast(previous_f, days=1)
+        if previous_f is not None
+        else None
+    )
+    if current_trading_day:
+        current_trading_day = {
+            **current_trading_day,
+            "sourceAsOf": source_as_of,
+            "targetDate": target_date,
+            "scope": "fullTradingDayFromPreviousClose",
+        }
+    return {
+        "forecast": forecast(f, days=5),
+        "nextTradeDayForecast": forecast(f, days=1),
+        "currentTradingDayForecast": current_trading_day,
+    }
+
+
+def forecast_availability(realtime=None, current_trading_day=False):
+    """Declare boundaries so daily outputs cannot masquerade as intraday."""
+    return {
+        "nextTradeDay": True,
+        "currentTradingDayFullSession": bool(current_trading_day),
+        "currentSession": False,
+        "currentSessionReason":
+            "daily_model_has_no_intraday_remaining-session_label",
+        "currentSessionAlternative": (
+            "v2.1-intraday"
+            if isinstance(realtime, dict) and realtime.get("live")
+            else None
+        ),
     }
 
 
@@ -224,12 +274,54 @@ def predict(payload: dict = Body(...), x_api_key: str = Header(default="")):
                 index_closes = None
 
         f = compute_factors(closes, highs, lows, vols, opens=opens, index_closes=index_closes)
+        previous_f = None
+        source_as_of = ""
+        target_date = ""
+        if len(cs) >= 26:
+            source_as_of = str(cs[-2].get("date") or "")
+            target_date = str(cs[-1].get("date") or "")
+            if source_as_of and target_date and source_as_of != target_date:
+                previous_index_closes = (
+                    index_closes[:-1]
+                    if index_closes is not None
+                    and len(index_closes) == len(closes)
+                    else None
+                )
+                previous_f = compute_factors(
+                    closes[:-1],
+                    highs[:-1],
+                    lows[:-1],
+                    vols[:-1],
+                    opens=(opens[:-1] if opens is not None else None),
+                    index_closes=previous_index_closes,
+                )
         score, bias, t_dir, engine, prob = score_stock(f)
-        fc = forecast(f, days=5)
+        forecasts = forecast_outputs(
+            f,
+            previous_f=previous_f,
+            source_as_of=source_as_of,
+            target_date=target_date,
+        )
+        fc = forecasts["forecast"]
+        next_fc = forecasts["nextTradeDayForecast"]
+        current_fc = forecasts["currentTradingDayForecast"]
         sig = high_conf_signal(f)
         dec = decide(score, bias, fc, f, hold)
+        # ★事件确认高把握层(P2:正交高精度筛子,离线每日刷新的 event_tags 查表)。
+        #   仅"查表附加",绝不参与上面的 36 维打分/信号头计算 —— 线上口径零改动。
+        evt_tag = event_tag_for(code)
 
         reads = []
+        if next_fc:
+            reads.append(
+                f"下一交易日{next_fc['direction']}，上涨概率"
+                f"{next_fc['upProb']:.0f}%，预期{next_fc['expRet']:+.1f}%"
+            )
+            reads.append(
+                f"下一交易日价格区间 {next_fc['targetLow']} ~ "
+                f"{next_fc['targetHigh']}（中枢 {next_fc['targetMid']}，"
+                "P10-P90）"
+            )
         if fc:
             reads.append(f"未来{fc['days']}日{fc['direction']}，上涨概率{fc['upProb']:.0f}%，预期{fc['expRet']:+.1f}%")
             reads.append(f"目标价区间 {fc['targetLow']} ~ {fc['targetHigh']}（中枢 {fc['targetMid']}）")
@@ -237,12 +329,23 @@ def predict(payload: dict = Body(...), x_api_key: str = Header(default="")):
         if sig and sig.get("fired"):
             reads.append(f"⭐高把握买点：可信度{sig['credibility']:.0f}% · 买入{sig['buyPrice']} "
                          f"止盈{sig['takeProfit']} 止损{sig['stopLoss']}（{sig['label']}）")
+        if evt_tag and evt_tag.get("confirmed"):
+            reads.append(f"🎯事件确认(离线筛子·历史精度≈{evt_tag.get('precisionRef')}%)："
+                         f"{'、'.join(evt_tag.get('reasons') or [])}")
 
         return {
             "ok": True, "code": code,
             "score": score, "bias": bias, "tDir": t_dir,
-            "forecast": fc, "decision": dec, "reads": reads,
+            "forecast": fc,
+            "nextTradeDayForecast": next_fc,
+            "currentTradingDayForecast": current_fc,
+            "forecastAvailability": forecast_availability(
+                payload.get("realtime"),
+                current_trading_day=current_fc is not None,
+            ),
+            "decision": dec, "reads": reads,
             "highConfSignal": sig,
+            "eventTag": evt_tag,
             "engine": engine, "hitProb": (round(prob, 4) if prob is not None else None),
             "asOf": (cs[-1].get("date") or ""),
             "note": "统计口径，非投资建议",

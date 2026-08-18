@@ -162,29 +162,75 @@ test('每次刷新保留精简的计划修订历史而不是只剩最后一版',
   assert.equal(entry.trail[0].reasoning, undefined)
 })
 
-test('自动定时复核锁定核心动作和价位，避免同方向建议频繁漂移', () => {
+test('自动定时复核锁定方向和手数但允许受控更新执行价位', () => {
   const result = reconcileAdviceContinuity({
     code: '600000',
-    previous,
+    previous: {
+      ...previous,
+      advice: {
+        ...previous.advice,
+        opQty: '持有2手',
+      },
+    },
     next: {
       action: '持有',
       title: '短线震荡持有',
       actionPlan: '回踩10.18元企稳后继续持有',
-      opQty: '持有2手',
+      opQty: '减仓1手',
       addPrice: 10.18,
       reducePrice: 10.86,
       stopPrice: 9.72,
       reason: '盘口轻微变化',
+    },
+    evidence: {
+      currentPrice: 10.1,
+      atr: 0.2,
     },
     stabilityMode: 'scheduled',
     now: 2000,
   })
 
   assert.equal(result.advice.action, previous.advice.action)
-  assert.equal(result.advice.actionPlan, previous.advice.actionPlan)
-  assert.equal(result.advice.addPrice, previous.advice.addPrice)
-  assert.equal(result.advice.reducePrice, previous.advice.reducePrice)
+  assert.equal(result.advice.opQty, '持有2手')
+  assert.equal(result.advice.actionPlan, '回踩10.18元企稳后继续持有')
+  assert.equal(result.advice.addPrice, 10.05)
+  assert.equal(result.advice.reducePrice, 10.86)
   assert.equal(result.advice.stopPrice, previous.advice.stopPrice)
-  assert.equal(result.advice.continuity.changeType, 'maintain')
-  assert.match(result.advice.continuity.changeReason, /自动复核未发现执行事件/)
+  assert.equal(result.advice.continuity.changeType, 'adjust')
+  assert.match(result.advice.continuity.changeReason, /方向不变/)
+})
+
+test('定时复核同为多头但动作变化时保留与锁定动作一致的执行说明', () => {
+  const result = reconcileAdviceContinuity({
+    code: '600000',
+    previous: {
+      ...previous,
+      advice: {
+        ...previous.advice,
+        action: '加仓',
+        actionPlan: '回踩9.90元加仓1手',
+        opQty: '加仓1手',
+      },
+    },
+    next: {
+      action: '持有',
+      title: '继续持有',
+      actionPlan: '暂不加仓，仅持有观察',
+      opQty: '持有0手',
+      addPrice: 9.95,
+      stopPrice: 9.85,
+      targetPrice: 10.85,
+    },
+    evidence: {
+      currentPrice: 10.1,
+      atr: 0.2,
+    },
+    stabilityMode: 'scheduled',
+    now: 2000,
+  })
+
+  assert.equal(result.advice.action, '加仓')
+  assert.equal(result.advice.opQty, '加仓1手')
+  assert.equal(result.advice.actionPlan, '回踩9.90元加仓1手')
+  assert.equal(result.advice.addPrice, 9.95)
 })

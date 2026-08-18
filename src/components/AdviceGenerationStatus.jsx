@@ -34,8 +34,12 @@ export default function AdviceGenerationStatus({ code, variant = 'card' }) {
 
   const cancel = (event) => {
     event.stopPropagation()
-    cancelAdvice(code)
-    cancelOne(code)
+    if (generation.cloud) {
+      void cancelOne(code)
+    } else {
+      cancelAdvice(code)
+      void cancelOne(code)
+    }
   }
 
   return (

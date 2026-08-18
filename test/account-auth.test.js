@@ -5,6 +5,7 @@ import aiHandler from '../api/ai.js'
 import agentHandler from '../api/agent.js'
 import dailyReportHandler from '../api/daily_report.js'
 import llmConfigHandler from '../api/llm_config.js'
+import aiSearchConfigHandler from '../api/ai_search_config.js'
 import confirmSignalHandler from '../api/confirm_signal.js'
 import {
   TRUSTED_ACCOUNT_REQUEST,
@@ -99,6 +100,7 @@ test('匿名调用智能体和策略日报同样必须返回401', async () => {
     agentHandler,
     dailyReportHandler,
     llmConfigHandler,
+    aiSearchConfigHandler,
     confirmSignalHandler,
   ]) {
     const req = { method: 'POST', headers: {}, body: {}, query: {} }

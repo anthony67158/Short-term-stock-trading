@@ -30,6 +30,14 @@ import {
   t1StatusOf as sharedT1Status,
 } from '../shared/portfolioAccounting.js'
 import {
+  tradeIntentOf,
+  validateTradeIntent,
+} from '../shared/tradeIntent.js'
+import {
+  manualTradePairId,
+  validateManualTradePair,
+} from '../shared/tradePairing.js'
+import {
   A_SHARE_STANDARD_FEE_POLICY,
   tradeFees,
 } from '../shared/ashareStrategyExecution.js'
@@ -198,10 +206,16 @@ export function calcSellFee(amount) {
 // 归一化交易记录：补 type + realizedPnl（向后兼容）
 function normalizeClosed(closed) {
   return (closed || []).map((c) => {
-    if (c.type) return c
     const type = c.kind === 'T' ? 'T' : 'CLOSE'
-    const realizedPnl = c.realizedPnl != null ? c.realizedPnl : (c.netPnl != null ? c.netPnl : null)
-    return { ...c, type, realizedPnl }
+    const normalizedType = c.type || type
+    const realizedPnl = c.realizedPnl != null
+      ? c.realizedPnl
+      : (c.netPnl != null ? c.netPnl : null)
+    const normalized = { ...c, type: normalizedType, realizedPnl }
+    return {
+      ...normalized,
+      tradeIntent: tradeIntentOf(normalized),
+    }
   })
 }
 
@@ -316,6 +330,7 @@ function archiveTFlows(h, batchId) {
   for (const p of (r.pairList || [])) {
     out.push({
       id: uid(), batchId, type: 'T', kind: 'T', code: h.code, name: h.name,
+      tradeIntent: 't',
       qty: p.qty, buyPrice: p.buyPrice, sellPrice: p.sellPrice,
       buyFee: p.buyFee, sellFee: p.sellFee,
       grossPnl: p.grossPnl, netPnl: p.netPnl, realizedPnl: p.netPnl,
@@ -330,6 +345,7 @@ function archiveTFlows(h, batchId) {
     const amount = +(r.openBuyAvg * r.openBuy * 100).toFixed(2)
     out.push({
       id: uid(), batchId, type: 'BUY', code: h.code, name: h.name, side: 'buy',
+      tradeIntent: 'position',
       qty: r.openBuy, price: r.openBuyAvg, fee: r.openBuyFee, amount,
       cashFlow: -(amount + r.openBuyFee), realizedPnl: null,
       cashApplied: !!r.openBuyCashApplied,
@@ -346,6 +362,7 @@ function archiveTFlows(h, batchId) {
     const netPnl = +((amount - cost) - r.openSellFee - buyFeePart).toFixed(2)
     out.push({
       id: uid(), batchId, type: 'SELL', kind: 'SELL', code: h.code, name: h.name, side: 'sell',
+      tradeIntent: 'position',
       qty: r.openSell, price: r.openSellAvg, amount, fee: r.openSellFee,
       cashFlow: +(amount - r.openSellFee).toFixed(2),
       cashApplied: !!r.openSellCashApplied,
@@ -360,10 +377,18 @@ function archiveTFlows(h, batchId) {
 }
 
 // 生成一条纯买入(BUY)交易记录：单腿，现金流出，无已实现盈亏
-function makeBuyTxn(code, name, price, qty, fee, holdingId) {
+function makeBuyTxn(
+  code,
+  name,
+  price,
+  qty,
+  fee,
+  holdingId,
+  tradeIntent = 'position',
+) {
   const amount = +(price * qty * 100).toFixed(2)
   return {
-    id: uid(), type: 'BUY', code, name, side: 'buy',
+    id: uid(), type: 'BUY', tradeIntent, code, name, side: 'buy',
     qty, price, fee, amount,
     cashFlow: -(amount + fee),        // 买入=现金流出
     realizedPnl: null,                // 纯买入无已实现盈亏
@@ -388,8 +413,28 @@ function closedType(record) {
   return record?.type || (record?.kind === 'T' ? 'T' : 'CLOSE')
 }
 
+function clearManualTradePair(record, tradeIntent) {
+  if (!record) return record
+  const {
+    tPairId,
+    tPairTradeId,
+    tPairPreviousIntent,
+    ...rest
+  } = record
+  return {
+    ...rest,
+    tradeIntent: tradeIntent
+      ?? (tPairPreviousIntent === 't' ? 't' : 'position'),
+  }
+}
+
 function buildEditedClosedRecord(record, patch = {}) {
   const type = closedType(record)
+  const intent = validateTradeIntent(
+    record,
+    patch.tradeIntent ?? tradeIntentOf(record),
+  )
+  if (!intent.ok) return intent
   const qty = Number(patch.qty)
   if (!Number.isInteger(qty) || qty <= 0) {
     return { ok: false, error: '成交手数必须是大于 0 的整数' }
@@ -408,6 +453,7 @@ function buildEditedClosedRecord(record, patch = {}) {
         record: {
           ...record,
           type,
+          tradeIntent: intent.value,
           kind: record.kind || type,
           side: 'buy',
           qty,
@@ -437,6 +483,7 @@ function buildEditedClosedRecord(record, patch = {}) {
       record: {
         ...record,
         type,
+        tradeIntent: intent.value,
         kind: record.kind || type,
         side: 'sell',
         qty,
@@ -476,6 +523,7 @@ function buildEditedClosedRecord(record, patch = {}) {
     record: {
       ...record,
       type,
+      tradeIntent: intent.value,
       kind: type === 'T' ? 'T' : (record.kind || type),
       qty,
       buyPrice,
@@ -857,6 +905,7 @@ export const planStore = {
 
     const sellTxn = {
       id: uid(), batchId, type: 'SELL', kind: 'SELL', code: h.code, name: h.name,
+      tradeIntent: opts.tradeIntent === 't' ? 't' : 'position',
       holdingId: h.id,
       side: 'sell', qty: sq, price, amount: +proceeds.toFixed(2),
       fee: sellFee, cashFlow: +(proceeds - sellFee).toFixed(2), // 卖出=现金流入
@@ -909,9 +958,18 @@ export const planStore = {
     const amount = +(p * q * 100).toFixed(2)
     const fee = type === 'BUY' ? calcBuyFee(amount) : calcSellFee(amount)
     const rec = type === 'BUY'
-      ? makeBuyTxn(stock.code, stock.name, p, q, fee, null)
+      ? makeBuyTxn(
+          stock.code,
+          stock.name,
+          p,
+          q,
+          fee,
+          null,
+          opts.tradeIntent === 't' ? 't' : 'position',
+        )
       : {
           id: uid(), type: 'SELL', kind: 'SELL', code: stock.code, name: stock.name,
+          tradeIntent: opts.tradeIntent === 't' ? 't' : 'position',
           side: 'sell', qty: q, price: p, amount, fee, cashFlow: +(amount - fee).toFixed(2),
           costPrice: opts.costPrice ?? null,
           realizedPnl: opts.costPrice ? +((p - opts.costPrice) * q * 100 - fee).toFixed(2) : null,
@@ -929,6 +987,41 @@ export const planStore = {
     const archived = archiveTFlows(h, uid()) // 删除持仓前，先归档已实现做T收益
     if (archived.length) state.closed = [...archived, ...state.closed].slice(0, 300)
     state.holding = state.holding.filter((x) => x.id !== id); emit()
+  },
+  updateHoldingCost(id, costPrice) {
+    const holding = state.holding.find((item) => item.id === id)
+    if (!holding) return { ok: false, error: '持仓不存在或已被删除' }
+    const nextCost = Number(costPrice)
+    const qty = Number(holding.qty)
+    if (!Number.isFinite(nextCost) || nextCost <= 0) {
+      return { ok: false, error: '请输入有效的持仓成本价' }
+    }
+    if (!Number.isFinite(qty) || qty <= 0) {
+      return { ok: false, error: '当前持仓手数无效，无法校准成本' }
+    }
+    const feePerShare = (Number(holding.buyFee) || 0) / (qty * 100)
+    const rawBuyPrice = nextCost - feePerShare
+    if (!(rawBuyPrice > 0)) {
+      return { ok: false, error: '成本价不能低于每股已摊手续费' }
+    }
+
+    snapshot(`修改持仓成本 ${holding.name || holding.code}`)
+    const adjustedAt = Date.now()
+    state.holding = state.holding.map((item) => item.id === id
+      ? {
+          ...item,
+          buyPrice: +rawBuyPrice.toFixed(3),
+          costAdjustedPrice: +nextCost.toFixed(3),
+          costAdjustedAt: adjustedAt,
+        }
+      : item)
+    emit()
+    return {
+      ok: true,
+      costPrice: +nextCost.toFixed(3),
+      adjustedAt,
+      cloudQueued: !!_saver,
+    }
   },
   clearClosed() {
     snapshot('清空交易记录')
@@ -998,6 +1091,74 @@ export const planStore = {
       }
     }
     let editedRecord = shiftRecordDate(built.record, dateText) || built.record
+    const pairUpdates = new Map()
+    const requestedPairTradeId = patch.tPairTradeId == null
+      ? ''
+      : String(patch.tPairTradeId)
+    const currentPairTradeId = String(target.tPairTradeId || '')
+    const pairChanged = currentPairTradeId
+      && currentPairTradeId !== requestedPairTradeId
+
+    if (
+      currentPairTradeId
+      && (built.record.tradeIntent !== 't' || pairChanged)
+    ) {
+      const oldCounterpart = state.closed.find((item) =>
+        String(item.id) === currentPairTradeId
+      )
+      if (oldCounterpart) {
+        pairUpdates.set(
+          oldCounterpart.id,
+          clearManualTradePair(oldCounterpart),
+        )
+      }
+      editedRecord = clearManualTradePair(
+        editedRecord,
+        built.record.tradeIntent,
+      )
+    }
+
+    if (built.record.tradeIntent === 't' && requestedPairTradeId) {
+      const counterpart = pairUpdates.get(requestedPairTradeId)
+        || state.closed.find((item) =>
+          String(item.id) === requestedPairTradeId
+        )
+      const validation = validateManualTradePair(
+        editedRecord,
+        counterpart,
+      )
+      if (!validation.ok) return validation
+
+      const pairId = manualTradePairId(target.id, counterpart.id)
+      const targetPreviousIntent = currentPairTradeId === requestedPairTradeId
+        ? target.tPairPreviousIntent
+        : tradeIntentOf(target)
+      const counterpartPreviousIntent =
+        counterpart.tPairTradeId === target.id
+          ? counterpart.tPairPreviousIntent
+          : tradeIntentOf(counterpart)
+      editedRecord = {
+        ...editedRecord,
+        tradeIntent: 't',
+        tPairId: pairId,
+        tPairTradeId: counterpart.id,
+        tPairPreviousIntent:
+          targetPreviousIntent === 't' ? 't' : 'position',
+      }
+      pairUpdates.set(counterpart.id, {
+        ...counterpart,
+        tradeIntent: 't',
+        tPairId: pairId,
+        tPairTradeId: target.id,
+        tPairPreviousIntent:
+          counterpartPreviousIntent === 't' ? 't' : 'position',
+      })
+    } else if (built.record.tradeIntent !== 't') {
+      editedRecord = clearManualTradePair(
+        editedRecord,
+        built.record.tradeIntent,
+      )
+    }
     let nextHolding = state.holding
     let removedHolding = null
 
@@ -1108,7 +1269,9 @@ export const planStore = {
       ).map((item) => item.id),
     )
     state.closed = state.closed.map((item) => {
-      const value = item.id === target.id ? editedRecord : item
+      const value = item.id === target.id
+        ? editedRecord
+        : (pairUpdates.get(item.id) || item)
       if (!dateIds.has(item.id)) return value
       return shiftRecordDate(value, dateText) || value
     })
@@ -1123,16 +1286,46 @@ export const planStore = {
     if (target.cashApplied && nextCashFlow !== oldCashFlow) {
       updateAccountCash(nextCashFlow - oldCashFlow)
     }
+    const touchedIds = new Set([
+      ...dateIds,
+      target.id,
+      ...pairUpdates.keys(),
+    ])
+    const changedRecords = new Map(
+      state.closed
+        .filter((item) => touchedIds.has(item.id))
+        .map((item) => [item.id, item]),
+    )
     state.decisionLog = (state.decisionLog || []).map((event) => {
-      if (!dateIds.has(event?.transactionId)) return event
+      if (!touchedIds.has(event?.transactionId)) return event
       let value = event
-      if (event.transactionId === target.id) {
+      const changedRecord = changedRecords.get(event.transactionId)
+      if (changedRecord) {
         value = {
           ...value,
-          price: type === 'BUY' || type === 'SELL'
-            ? editedRecord.price
-            : editedRecord.sellPrice,
-          qty: editedRecord.qty,
+          ...(event.transactionId === target.id
+            ? {
+                price: type === 'BUY' || type === 'SELL'
+                  ? editedRecord.price
+                  : editedRecord.sellPrice,
+                qty: editedRecord.qty,
+              }
+            : {}),
+          tradeIntent: changedRecord.tradeIntent,
+          tPairId: changedRecord.tPairId || null,
+          tPairTradeId: changedRecord.tPairTradeId || null,
+          outcome: {
+            ...(value.outcome || {}),
+            pnl: changedRecord.realizedPnl
+              ?? changedRecord.netPnl
+              ?? null,
+            validationComplete: value.side === 'sell'
+              && changedRecord.tradeIntent !== 't'
+              && (
+                changedRecord.realizedPnl != null
+                || changedRecord.netPnl != null
+              ),
+          },
           editedAt: Date.now(),
         }
       }
@@ -1142,7 +1335,7 @@ export const planStore = {
         : value
     })
     emit()
-    return { ok: true, updated: dateIds.size, cloudQueued: !!_saver }
+    return { ok: true, updated: touchedIds.size, cloudQueued: !!_saver }
   },
   // 删除单条交易记录：连带删除同一次操作(同 batchId)产生的其他记录；
   // 并联动调整持仓手数/成本，保证「持仓」与「交易记录」始终对得上。
@@ -1155,6 +1348,11 @@ export const planStore = {
       ? state.closed.filter((x) => x.batchId === target.batchId)
       : [target]
     const delIds = new Set(toDelete.map((x) => x.id))
+    const pairPartnerIds = new Set(
+      toDelete
+        .map((record) => record.tPairTradeId)
+        .filter((pairId) => pairId && !delIds.has(pairId)),
+    )
     const appliedCashFlow = toDelete.reduce(
       (sum, record) => sum + (record.cashApplied ? Number(record.cashFlow) || 0 : 0),
       0,
@@ -1169,8 +1367,27 @@ export const planStore = {
     }
 
     // 先移除记录
-    state.closed = state.closed.filter((x) => !delIds.has(x.id))
-    state.decisionLog = removeExecutions(state.decisionLog, [...delIds])
+    state.closed = state.closed
+      .filter((x) => !delIds.has(x.id))
+      .map((record) => pairPartnerIds.has(record.id)
+        ? clearManualTradePair(record)
+        : record)
+    state.decisionLog = removeExecutions(
+      state.decisionLog,
+      [...delIds],
+    ).map((event) => {
+      if (!pairPartnerIds.has(event?.transactionId)) return event
+      const record = state.closed.find((item) =>
+        item.id === event.transactionId
+      )
+      return {
+        ...event,
+        tradeIntent: record?.tradeIntent || 'position',
+        tPairId: null,
+        tPairTradeId: null,
+        editedAt: Date.now(),
+      }
+    })
     if (appliedCashFlow) updateAccountCash(-appliedCashFlow)
 
     // 再联动持仓
@@ -1975,11 +2192,17 @@ export const planStore = {
     const pnl = transaction?.realizedPnl
       ?? transaction?.netPnl
       ?? null
+    const tradeIntent = entry.tradeIntent
+      || transaction?.tradeIntent
+      || 'position'
     state.decisionLog = appendExecution(state.decisionLog, {
       ...entry,
+      tradeIntent,
       outcome: entry.outcome || {
         pnl,
-        validationComplete: entry.side === 'sell' && pnl != null,
+        validationComplete: entry.side === 'sell'
+          && tradeIntent !== 't'
+          && pnl != null,
         invalidated: false,
         targetHit: false,
       },

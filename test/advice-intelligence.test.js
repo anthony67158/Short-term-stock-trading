@@ -88,6 +88,70 @@ test('自动复核证据无实质变化时跳过LLM', () => {
   })
 })
 
+test('价格门槛按个股ATR自适应而不是固定0.4%', () => {
+  const highVolatility = snapshot({
+    evidence: {
+      ...snapshot().evidence,
+      technical: {
+        ...snapshot().evidence.technical,
+        indicators: {
+          ...snapshot().evidence.technical.indicators,
+          atr: { atr: 0.5 },
+        },
+      },
+    },
+  })
+  const current = snapshot({
+    evidence: {
+      ...highVolatility.evidence,
+      quote: { price: 10.05, pct: 1.3 },
+    },
+  })
+
+  assert.equal(evaluateScheduledReview({
+    origin: 'auto',
+    previousDigest: adviceEvidenceDigest(highVolatility),
+    snapshot: current,
+    hasPreviousAdvice: true,
+  }).disposition, 'unchanged')
+})
+
+test('高波动股票穿越止损位仍立即进入实质变化复核', () => {
+  const previousSnapshot = snapshot({
+    evidence: {
+      ...snapshot().evidence,
+      quote: { price: 9.85, pct: -1.2 },
+      technical: {
+        ...snapshot().evidence.technical,
+        indicators: {
+          ...snapshot().evidence.technical.indicators,
+          atr: { atr: 0.5 },
+        },
+      },
+    },
+  })
+  const current = snapshot({
+    evidence: {
+      ...previousSnapshot.evidence,
+      quote: { price: 9.79, pct: -1.3 },
+    },
+  })
+  const result = evaluateScheduledReview({
+    origin: 'auto',
+    previousDigest: adviceEvidenceDigest(previousSnapshot),
+    snapshot: current,
+    hasPreviousAdvice: true,
+    previousAdvice: {
+      action: '持有',
+      stopPrice: 9.8,
+      targetPrice: 10.8,
+    },
+  })
+
+  assert.equal(result.disposition, 'material-change')
+  assert.match(result.reason, /止损/)
+})
+
 test('关键证据缺失时保留上一版而不是让LLM猜测', () => {
   const partial = snapshot({
     freshness: { status: 'PARTIAL', missingSources: ['quant'] },

@@ -72,7 +72,7 @@ export default function LhbBoard({ interval }) {
               <tbody>
                 {stocks.map((s, i) => (
                   <tr key={s.code}>
-                    <td><span className="rank">{i + 1}</span><StockName code={s.code} name={s.name} showCode={false} /></td>
+                    <td><span className="rank">{i + 1}</span><StockName code={s.code} name={s.name} /></td>
                     <td>{fmtRaw(s.price)}</td>
                     <td className={pctClass(s.pct)}>{fmtPct(s.pct)}</td>
                     <td className={s.turnover > 20 ? 'gold' : ''}>{fmtNum(s.turnover, 1)}%</td>
@@ -108,7 +108,7 @@ export default function LhbBoard({ interval }) {
                   <div className="lhb-picks">
                     {s.picks.map((p) => (
                       <span className="lhb-pick" key={p.code}>
-                        <StockName code={p.code} name={p.name} showCode={false} stopPropagation><span>{p.name}</span></StockName>
+                        <StockName code={p.code} name={p.name} stopPropagation><span>{p.name}</span></StockName>
                         <b className="red">{signMoney(p.net)}</b>
                       </span>
                     ))}

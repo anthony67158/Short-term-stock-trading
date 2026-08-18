@@ -13,7 +13,7 @@ if (!existsSync(path.join(root, 'dist', 'index.html'))) {
 rmSync(output, { recursive: true, force: true })
 mkdirSync(output, { recursive: true })
 
-for (const name of ['api', 'shared', 'dist', 'public']) {
+for (const name of ['api', 'shared', 'dist', 'public', 'harness']) {
   cpSync(path.join(root, name), path.join(output, name), { recursive: true })
 }
 cpSync(path.join(root, 'server.js'), path.join(output, 'server.js'))
@@ -23,6 +23,13 @@ const runtimePackage = {
   version: rootPackage.version,
   private: true,
   type: 'module',
+  scripts: {
+    start: rootPackage.scripts.start,
+    harness: rootPackage.scripts.harness,
+    'harness:portfolio': rootPackage.scripts['harness:portfolio'],
+    'harness:online': rootPackage.scripts['harness:online'],
+    'harness:shadow': rootPackage.scripts['harness:shadow'],
+  },
   dependencies: {
     '@alicloud/eas20210701': rootPackage.dependencies['@alicloud/eas20210701'],
     '@alicloud/fc20230330': rootPackage.dependencies['@alicloud/fc20230330'],

@@ -6,8 +6,11 @@ import {
   createRecoverableSerialRunner,
   createAdviceSSEParser,
   internalRequestHeaders,
+  invokeSSE,
   mergeExternalJobs,
   progressPatchForEvent,
+  buildAdviceReviewRecord,
+  quantResultFromAdviceResponse,
   startJsonHeartbeat,
 } from '../api/cron_advice.js'
 import { adviceEvidenceDigest } from '../shared/adviceIntelligence.js'
@@ -30,6 +33,21 @@ test('服务端可解析跨分片的 AI SSE 事件', () => {
     { event: 'phase', data: { text: '正在采集行情' } },
     { event: 'reasoning', data: { text: '正在判断支撑位。' } },
   ])
+})
+
+test('服务端单只超时会中止原模型请求避免与重试重叠', async () => {
+  let aborted = false
+  const result = await invokeSSE((req) => new Promise((resolve) => {
+    req.signal.addEventListener('abort', () => {
+      aborted = true
+      resolve()
+    }, { once: true })
+  }), {
+    timeoutMs: 10,
+  })
+
+  assert.equal(result, null)
+  assert.equal(aborted, true)
 })
 
 test('AI SSE 事件会转换为持久任务进度补丁', () => {
@@ -111,6 +129,60 @@ test('持久任务保留安全的军师失败原因而不是泛化为空结果',
     adviceFailureReason({ ok: true, truncated: true }, true),
     '深度建议输出不完整',
   )
+})
+
+test('任务层直接复用军师统一证据中的量化结果', () => {
+  const result = quantResultFromAdviceResponse({
+    meta: {
+      quantResult: {
+        score: 68,
+        bias: '偏多',
+        forecast: { direction: '上涨', upProb: 58 },
+      },
+    },
+  }, 10.25)
+
+  assert.equal(result.score, 68)
+  assert.equal(result.price, 10.25)
+  assert.equal(result.forecast.direction, '上涨')
+})
+
+test('自动复核记录是否调用LLM及风险周期', () => {
+  const record = buildAdviceReviewRecord({
+    code: '600000',
+    mode: 'hold_advice',
+    origin: 'auto',
+    previousEntry: {
+      advice: { action: '持有' },
+    },
+    cacheItem: {
+      at: 2000,
+      advice: {
+        action: '持有',
+        reviewCycle: {
+          status: 'unchanged',
+          reason: '关键证据无实质变化',
+          changeType: 'maintain',
+          configuredIntervalMin: 15,
+          intervalMin: 5,
+          riskLevel: 'urgent',
+          riskReasons: ['现价接近止损位'],
+        },
+      },
+      meta: {
+        evidenceSnapshot: { snapshotId: 'ev-1' },
+      },
+    },
+    llmRan: false,
+    durationMs: 3200,
+  })
+
+  assert.equal(record.schemaVersion, 'advice-review.v1')
+  assert.equal(record.llmRan, false)
+  assert.equal(record.disposition, 'unchanged')
+  assert.equal(record.riskLevel, 'urgent')
+  assert.equal(record.intervalMin, 5)
+  assert.equal(record.evidenceSnapshotId, 'ev-1')
 })
 
 test('旧批次的取消状态不能污染同股票的新一轮强制生成', () => {

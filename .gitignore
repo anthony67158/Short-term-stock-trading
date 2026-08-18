@@ -14,9 +14,11 @@ qlib-service/.env.lab
 # 构建/部署产物(体积大,不进仓库;可按需重建)
 *.tar.gz
 *.zip
+pwa-icons/
 qlib-service/fcbuild/
 qlib-service/__pycache__/
-api/__pycache__/
+**/__pycache__/
+*.py[cod]
 .s/
 
 # 量化服务部署包的 vendored 依赖(300M,由 build_deploy_pkg 重建);源码/bootstrap/模型仍进仓库
@@ -40,8 +42,12 @@ qlib-service/ortho_sub.npz
 qlib-service/ortho_raw_cache.json
 qlib-service/panel_cache/
 qlib-service/sweep.npz
+qlib-service/challengers/
 # 上线前备份快照(本地回滚用,不进仓库)
 qlib-service/*.bak
+
+# Harness运行报告(由npm run harness生成,CI以artifact保存)
+harness-artifacts/
 
 # 明文密钥清单(仅本人自用,绝不入库)
 CREDENTIALS.md

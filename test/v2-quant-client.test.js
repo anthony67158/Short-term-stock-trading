@@ -176,7 +176,7 @@ test('V2客户端携带双层鉴权并返回统一量化结构', async () => {
   assert.equal(Number.isFinite(result.v2.outlook.convictionScore), true)
 })
 
-test('V2旧入口返回401时自动改用EAS当前入口重试', async () => {
+test('V2预测前优先同步EAS当前运行配置', async () => {
   const calls = []
   const result = await fetchV2QuantPredict('600519', {
     bars: parseFiveMinuteKlines(minuteLines()),
@@ -192,8 +192,60 @@ test('V2旧入口返回401时自动改用EAS当前入口重试', async () => {
     }),
     fetchImpl: async (url, options) => {
       calls.push({ url, authorization: options.headers.Authorization })
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            ok: true,
+            shadowOnly: true,
+            asOf: '2026-08-10 15:00:00',
+            predictedClass: 'TAKE_PROFIT',
+            probabilities: { stopLoss: 0.2, timeout: 0.1, takeProfit: 0.7 },
+            outlook: { direction: 'bullish' },
+            model: { runId: 'run-v2', architecture: 'transformer', sha256: 'a'.repeat(64) },
+          }
+        },
+      }
+    },
+  })
+
+  assert.equal(calls.length, 1)
+  assert.match(calls[0].url, /current\.cn-hangzhou/)
+  assert.equal(calls[0].authorization, 'current-token')
+  assert.equal(result.modelVersion, 'v2')
+})
+
+test('V2网关拒绝旧运行配置时刷新后重试', async () => {
+  const calls = []
+  let runtimeReads = 0
+  const result = await fetchV2QuantPredict('600519', {
+    bars: parseFiveMinuteKlines(minuteLines()),
+    env: {
+      V2_QUANT_URL: 'https://old.cn-hangzhou.pai-eas.aliyuncs.com/api/predict/stock_quant_lab_shadow',
+      V2_EAS_TOKEN: 'old-token',
+      V2_API_KEY: 'shadow-key',
+    },
+    resolveRuntimeConfig: async () => {
+      runtimeReads++
+      return runtimeReads === 1
+        ? {
+            url: 'https://old.cn-hangzhou.pai-eas.aliyuncs.com/api/predict/stock_quant_lab_shadow',
+            easToken: 'old-token',
+            apiKey: 'shadow-key',
+            status: 'Running',
+          }
+        : {
+            url: 'https://current.cn-hangzhou.pai-eas.aliyuncs.com/api/predict/stock_quant_lab_shadow',
+            easToken: 'current-token',
+            apiKey: 'shadow-key',
+            status: 'Running',
+          }
+    },
+    fetchImpl: async (url, options) => {
+      calls.push({ url, authorization: options.headers.Authorization })
       if (url.includes('old.cn-hangzhou')) {
-        return { ok: false, status: 401 }
+        return { ok: false, status: 403 }
       }
       return {
         ok: true,
@@ -213,10 +265,47 @@ test('V2旧入口返回401时自动改用EAS当前入口重试', async () => {
     },
   })
 
+  assert.equal(runtimeReads, 2)
   assert.equal(calls.length, 2)
-  assert.match(calls[0].url, /old\.cn-hangzhou/)
   assert.match(calls[1].url, /current\.cn-hangzhou/)
   assert.equal(calls[1].authorization, 'current-token')
+  assert.equal(result.modelVersion, 'v2')
+})
+
+test('V2静态配置缺失时自动使用EAS当前运行配置', async () => {
+  let captured = null
+  const result = await fetchV2QuantPredict('600519', {
+    bars: parseFiveMinuteKlines(minuteLines()),
+    env: {},
+    resolveRuntimeConfig: async () => ({
+      url: 'https://current.cn-hangzhou.pai-eas.aliyuncs.com/api/predict/stock_quant_lab_shadow',
+      easToken: 'current-token',
+      apiKey: 'current-shadow-key',
+      status: 'Running',
+    }),
+    fetchImpl: async (url, options) => {
+      captured = { url, headers: options.headers }
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            ok: true,
+            shadowOnly: true,
+            asOf: '2026-08-10 15:00:00',
+            predictedClass: 'TAKE_PROFIT',
+            probabilities: { stopLoss: 0.2, timeout: 0.1, takeProfit: 0.7 },
+            outlook: { direction: 'bullish' },
+            model: { runId: 'run-v2', architecture: 'transformer', sha256: 'a'.repeat(64) },
+          }
+        },
+      }
+    },
+  })
+
+  assert.match(captured.url, /current\.cn-hangzhou/)
+  assert.equal(captured.headers.Authorization, 'current-token')
+  assert.equal(captured.headers['X-Shadow-Key'], 'current-shadow-key')
   assert.equal(result.modelVersion, 'v2')
 })
 

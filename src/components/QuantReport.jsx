@@ -8,7 +8,71 @@ import { quantReportUiStore } from '../quantReportUiStore'
 const DECISION_META = {
   promote: { label: '晋级', tone: 'ok' },
   reject: { label: '拒绝', tone: 'neutral' },
+  skip: { label: '跳过', tone: 'neutral' },
   error: { label: '异常', tone: 'warn' },
+}
+
+const RUN_META = {
+  queued: { label: '排队中', tone: 'running' },
+  running: { label: '训练中', tone: 'running' },
+  success: { label: '运行成功', tone: 'ok' },
+  failed: { label: '运行失败', tone: 'warn' },
+  cancelled: { label: '已取消', tone: 'neutral' },
+  unknown: { label: '状态未知', tone: 'neutral' },
+}
+
+function formatTime(timestamp) {
+  if (!timestamp) return '--'
+  return new Date(timestamp).toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function formatDuration(seconds) {
+  const total = Number(seconds)
+  if (!Number.isFinite(total)) return '--'
+  const minutes = Math.floor(total / 60)
+  const remain = Math.round(total % 60)
+  return minutes > 0 ? `${minutes}分${remain}秒` : `${remain}秒`
+}
+
+function WorkflowStatus({ workflow }) {
+  const run = workflow?.current || workflow?.latest
+  if (!run) {
+    return (
+      <section className="qrp-runtime qrp-runtime-neutral">
+        <div className="qrp-runtime-title">
+          <Icon name="activity" size={15} />
+          <span>每日重训任务</span>
+          <b>状态暂不可用</b>
+        </div>
+      </section>
+    )
+  }
+  const meta = RUN_META[run.state] || RUN_META.unknown
+  return (
+    <section className={`qrp-runtime qrp-runtime-${meta.tone}`}>
+      <div className="qrp-runtime-title">
+        <Icon name={run.state === 'running' ? 'refresh' : 'activity'} size={15} className={run.state === 'running' ? 'spin' : ''} />
+        <span>每日重训任务</span>
+        <b>{meta.label}</b>
+      </div>
+      <div className="qrp-runtime-facts">
+        <span>任务 <b>#{run.runNumber || '--'}</b></span>
+        <span>启动 <b>{formatTime(run.startedAt)}</b></span>
+        <span>耗时 <b>{formatDuration(run.durationSec)}</b></span>
+        <span>触发 <b>{run.event === 'schedule' ? '定时' : '手动'}</b></span>
+      </div>
+      {run.url && (
+        <a className="qrp-runtime-link" href={run.url} target="_blank" rel="noreferrer">
+          运行详情
+        </a>
+      )}
+    </section>
+  )
 }
 
 // 把后台生成的多行中文正文解析成结构化字段：每行 "标签：值"。
@@ -34,8 +98,9 @@ function ReportCard({ r }) {
   return (
     <div className={'qrp-card' + (meta ? ' qrp-' + meta.tone : '')}>
       <div className="qrp-card-head">
-        <span className="qrp-card-title">量化每日重训</span>
+        <span className="qrp-card-title">{r.title || '量化每日重训'}</span>
         {meta && <span className={'qrp-chip qrp-chip-' + meta.tone}>{meta.label}</span>}
+        {r.meta?.runNumber && <span className="qrp-run">#{r.meta.runNumber}</span>}
         <span className="qrp-time">{time}</span>
         <button className="qrp-del" title="删除这条汇报" onClick={() => quantReportStore.remove(r.id)}>
           <Icon name="trash" size={13} />
@@ -57,7 +122,7 @@ function ReportCard({ r }) {
 }
 
 export default function QuantReport() {
-  const { reports, loading, error } = useQuantReportStore()
+  const { reports, workflow, loading, error } = useQuantReportStore()
   const onClose = () => quantReportUiStore.close()
 
   // 打开即拉取每日汇报（后台定时任务写入 OSS）
@@ -84,6 +149,7 @@ export default function QuantReport() {
         </div>
 
         <div className="qrp-scroll">
+          <WorkflowStatus workflow={workflow} />
           {loading && reports.length === 0 ? (
             <div className="qrp-empty"><Icon name="refresh" size={16} className="spin" /><span>正在加载量化每日汇报…</span></div>
           ) : error && reports.length === 0 ? (

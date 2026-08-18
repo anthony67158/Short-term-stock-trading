@@ -18,6 +18,36 @@ test('持仓建议在交易时段按15分钟安排下一次自动复核', () => 
   )
 })
 
+test('接近止损位时自动把持仓复核周期压缩到5分钟', () => {
+  const now = new Date('2026-08-10T02:00:00Z').getTime()
+  const entry = buildAdviceCacheEntry(null, {
+    mode: 'hold_advice',
+    reviewIntervalMin: 15,
+    advice: {
+      action: '持有',
+      stopPrice: 9.8,
+      targetPrice: 10.8,
+      continuity: { changeType: 'initial' },
+    },
+    meta: {
+      evidenceSnapshot: {
+        evidence: {
+          quote: { price: 9.84, pct: -1.2 },
+          technical: {
+            indicators: { atr: { atr: 0.2 } },
+          },
+        },
+      },
+    },
+  }, now)
+
+  assert.equal(entry.advice.reviewCycle.configuredIntervalMin, 15)
+  assert.equal(entry.advice.reviewCycle.intervalMin, 5)
+  assert.equal(entry.advice.reviewCycle.riskLevel, 'urgent')
+  assert.match(entry.advice.reviewCycle.riskReasons.join('、'), /止损/)
+  assert.equal(entry.advice.reviewCycle.nextReviewAt, now + 5 * 60000)
+})
+
 test('午间到期的复核顺延到下午开盘', () => {
   const now = new Date('2026-08-10T03:25:00Z').getTime()
 

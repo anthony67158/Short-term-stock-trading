@@ -1,0 +1,204 @@
+{
+  "schemaVersion": "harness-case-set.v1",
+  "cases": [
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "screen-strategy-gate-and-fabrication-filter",
+      "adapter": "screen",
+      "tags": ["screen", "strategy", "grounding"],
+      "input": {
+        "options": {
+          "limit": 12
+        },
+        "candidates": [
+          {
+            "code": "600020",
+            "name": "通过样本",
+            "price": 10,
+            "marketScore": 80,
+            "pct": 2,
+            "volRatio": 1.5,
+            "mainInflowYi": 1.5,
+            "quant": {
+              "score": 70,
+              "upProb": 60,
+              "expRet": 2,
+              "buyPrice": 9.9,
+              "takeProfit": 10.8,
+              "stopLoss": 9.5
+            }
+          },
+          {
+            "code": "600021",
+            "name": "未通过样本",
+            "price": 8,
+            "marketScore": 80,
+            "pct": 2,
+            "volRatio": 1.5,
+            "mainInflowYi": 1.2,
+            "quant": {
+              "score": 40,
+              "upProb": 70,
+              "expRet": 3,
+              "buyPrice": 7.9,
+              "takeProfit": 8.6,
+              "stopLoss": 7.5
+            }
+          }
+        ],
+        "modelOutput": {
+          "noTrade": false,
+          "noTradeReason": "",
+          "picks": [
+            {
+              "code": "600020",
+              "name": "通过样本",
+              "actionability": "可执行",
+              "buyPoint": "回踩9.9企稳",
+              "buyZone": "9.85~9.95",
+              "target": "10.8",
+              "stop": "9.5",
+              "risk": "跌破9.5失效"
+            },
+            {
+              "code": "600021",
+              "name": "未通过样本",
+              "actionability": "可执行",
+              "buyPoint": "等待量化重新转强",
+              "risk": "量化分不足"
+            },
+            {
+              "code": "000000",
+              "name": "模型编造股票",
+              "actionability": "可执行"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "requiredPickCodes": ["600020", "600021"],
+        "forbiddenPickCodes": ["000000"]
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "screen-no-trade-conditional-fallback",
+      "adapter": "screen",
+      "tags": ["screen", "fallback", "actionability"],
+      "input": {
+        "options": {
+          "limit": 12
+        },
+        "candidates": [
+          {
+            "code": "600030",
+            "name": "条件候选",
+            "price": 10,
+            "marketScore": 82,
+            "pct": 2,
+            "volRatio": 1.5,
+            "mainInflowYi": 1.2,
+            "tags": ["主力资金", "量能放大"],
+            "quant": {
+              "score": 45,
+              "upProb": 51,
+              "expRet": 1,
+              "buyPrice": 9.9,
+              "takeProfit": 10.8,
+              "stopLoss": 9.5
+            }
+          }
+        ],
+        "modelOutput": {
+          "noTrade": true,
+          "noTradeReason": "量化方向尚未确认",
+          "picks": []
+        }
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "requiredPickCodes": ["600030"],
+        "forbiddenPickCodes": []
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "screen-concept-leader-reserve-keeps-strategy-gate",
+      "adapter": "screen",
+      "tags": ["screen", "concept-leader", "strategy", "grounding"],
+      "input": {
+        "options": {
+          "limit": 3,
+          "leadershipReserve": 1
+        },
+        "candidates": [
+          {
+            "code": "603001",
+            "name": "普通候选一",
+            "price": 10,
+            "marketScore": 85,
+            "pct": 2,
+            "volRatio": 1.5,
+            "quant": { "score": 75, "upProb": 62, "expRet": 2.5 }
+          },
+          {
+            "code": "603002",
+            "name": "普通候选二",
+            "price": 11,
+            "marketScore": 83,
+            "pct": 2,
+            "volRatio": 1.5,
+            "quant": { "score": 73, "upProb": 61, "expRet": 2.2 }
+          },
+          {
+            "code": "603003",
+            "name": "普通候选三",
+            "price": 12,
+            "marketScore": 81,
+            "pct": 2,
+            "volRatio": 1.5,
+            "quant": { "score": 71, "upProb": 60, "expRet": 2 }
+          },
+          {
+            "code": "600001",
+            "name": "机器人总龙头",
+            "price": 20,
+            "marketScore": 58,
+            "pct": 8,
+            "volRatio": 1.5,
+            "quant": { "score": 40, "upProb": 55, "expRet": 1 },
+            "conceptLeadership": {
+              "schemaVersion": "concept-leadership.v1",
+              "conceptCode": "BK1000",
+              "conceptName": "机器人",
+              "conceptStrength": 82,
+              "role": "leader",
+              "roleLabel": "总龙头",
+              "leaderScore": 86,
+              "memberVerified": true
+            }
+          }
+        ],
+        "modelOutput": {
+          "noTrade": false,
+          "noTradeReason": "",
+          "picks": [
+            {
+              "code": "600001",
+              "name": "机器人总龙头",
+              "actionability": "可执行",
+              "buyPoint": "等待量化重新站上策略阈值",
+              "risk": "量化分不足，龙头身份不能替代买点"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "requiredPickCodes": ["600001"],
+        "forbiddenPickCodes": []
+      }
+    }
+  ]
+}

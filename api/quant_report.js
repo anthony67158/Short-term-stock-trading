@@ -1,5 +1,9 @@
 import { put, list, del, readJson, hasStorage } from './_blob.js';
 import { sendJson, preflight } from './_lib.js';
+import {
+  dedupeQuantReports,
+  normalizeRetrainRun,
+} from '../shared/quantRetrainReport.js';
 
 // ============ 量化每日重训「中文汇报」台账（阿里云 OSS 持久化）============
 // 每天的持续训练定时任务跑完后 POST 一条中文汇报到这里；前端「预警中心 · 量化」页读取展示，
@@ -13,8 +17,66 @@ import { sendJson, preflight } from './_lib.js';
 // 存储：每条一个 blob，pathname = quantreport/<ts>.json，读取取全部按时间倒序。
 
 const PREFIX = 'quantreport/';
+const WORKFLOW_RUNS_URL =
+  'https://api.github.com/repos/anthony67158/Short-term-stock-trading/actions/workflows/daily-retrain.yml/runs?per_page=10';
+const WORKFLOW_CACHE_MS = 60 * 1000;
+let workflowCache = { at: 0, value: null };
 
 function ok(res, obj) { sendJson(res, obj, { cache: 0 }); }
+
+async function workflowStatus() {
+  const now = Date.now();
+  if (
+    workflowCache.value
+    && now - workflowCache.at < WORKFLOW_CACHE_MS
+  ) {
+    return workflowCache.value;
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5000);
+  try {
+    const response = await fetch(WORKFLOW_RUNS_URL, {
+      signal: controller.signal,
+      headers: {
+        Accept: 'application/vnd.github+json',
+        'User-Agent': 'stock-dashboard-quant-report',
+        'X-GitHub-Api-Version': '2022-11-28',
+      },
+    });
+    if (!response.ok) throw new Error(`GitHub HTTP ${response.status}`);
+    const payload = await response.json();
+    const recent = (Array.isArray(payload?.workflow_runs)
+      ? payload.workflow_runs
+      : [])
+      .map((run) => normalizeRetrainRun(run, now))
+      .filter(Boolean);
+    const value = {
+      available: true,
+      checkedAt: now,
+      current: recent.find(
+        (run) => run.state === 'running' || run.state === 'queued',
+      ) || null,
+      latest: recent.find(
+        (run) => run.status === 'completed',
+      ) || recent[0] || null,
+      recent: recent.slice(0, 10),
+    };
+    workflowCache = { at: now, value };
+    return value;
+  } catch {
+    const value = {
+      available: false,
+      checkedAt: now,
+      current: null,
+      latest: workflowCache.value?.latest || null,
+      recent: workflowCache.value?.recent || [],
+    };
+    workflowCache = { at: now, value };
+    return value;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 // 读全部汇报（倒序，最新在前）
 async function listReports(limit) {
@@ -27,7 +89,7 @@ async function listReports(limit) {
     const j = await readJson(b);
     if (j) out.push({ id: b.pathname, ...j });
   }
-  return out;
+  return dedupeQuantReports(out).slice(0, limit);
 }
 
 export default async function handler(req, res) {
@@ -37,8 +99,11 @@ export default async function handler(req, res) {
   try {
     if (req.method === 'GET') {
       const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
-      const reports = await listReports(limit);
-      return ok(res, { ok: true, reports });
+      const [reports, workflow] = await Promise.all([
+        listReports(limit),
+        workflowStatus(),
+      ]);
+      return ok(res, { ok: true, reports, workflow });
     }
 
     if (req.method === 'POST') {

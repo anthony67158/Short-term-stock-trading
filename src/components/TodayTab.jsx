@@ -14,15 +14,22 @@ import {
   withQuantModelPayload,
 } from '../quantModel'
 import DailyReport from './DailyReport'
+import SearchReference from './SearchReference'
 import { fmtPct, pctClass, fmtInflow, fmtNum , fmtRaw } from '../format'
 import {
   assertStrategyVersion,
+  evaluateMarketCandidate,
   normalizePickDecision,
   normalizeStoredPickSnapshot,
   rankStrategyShortlist,
   stockPickSession,
   stockPickSavedLabel,
 } from '../../shared/stockRanking.js'
+import {
+  buildConceptLeaderCandidates,
+  rankActiveConcepts,
+  selectConceptAwareCandidatePool,
+} from '../../shared/conceptLeadership.js'
 import { getActiveStrategySpec } from '../../shared/strategySpec.js'
 import {
   isQuantResultForVersion,
@@ -285,6 +292,80 @@ async function mapWithConcurrency(items, concurrency, worker) {
   return output
 }
 
+function mergeStockRows(...lists) {
+  const rows = new Map()
+  for (const list of lists) {
+    for (const item of Array.isArray(list) ? list : []) {
+      const code = String(item?.code || '')
+      if (!/^\d{6}$/.test(code)) continue
+      const current = rows.get(code) || {}
+      rows.set(code, Object.fromEntries(
+        Object.entries({ ...current, ...item }).filter(
+          ([, value]) => value != null,
+        ),
+      ))
+    }
+  }
+  return [...rows.values()]
+}
+
+async function discoverConceptLeadership(limitPool = []) {
+  const payload = await fetchJsonWithTimeout(
+    api(`/api/sectors?type=concept&sort=main&_t=${Date.now()}`),
+    18000,
+  )
+  if (!payload?.ok) return { concepts: [], candidates: [] }
+  const concepts = rankActiveConcepts(payload.list || [], { limit: 4 })
+  const entries = await mapWithConcurrency(
+    concepts,
+    4,
+    async (concept) => {
+      const [mainResult, pctResult] = await Promise.allSettled([
+        fetchJsonWithTimeout(
+          api(`/api/stocks?code=${concept.code}&sort=main&_t=${Date.now()}`),
+          12000,
+        ),
+        fetchJsonWithTimeout(
+          api(`/api/stocks?code=${concept.code}&sort=pct&_t=${Date.now()}`),
+          12000,
+        ),
+      ])
+      const main = mainResult.status === 'fulfilled'
+        ? mainResult.value?.list
+        : []
+      const pct = pctResult.status === 'fulfilled'
+        ? pctResult.value?.list
+        : []
+      return [concept.code, mergeStockRows(main, pct)]
+    },
+  )
+  const membersByConcept = new Map(entries)
+  const candidates = buildConceptLeaderCandidates(
+    concepts,
+    membersByConcept,
+    {
+      perConcept: 2,
+      limit: 8,
+      limitPool: (Array.isArray(limitPool) ? limitPool : []).map(
+        (item) => ({ ...item, isLimitUp: true }),
+      ),
+    },
+  ).map((item) => {
+    const evaluated = evaluateMarketCandidate(item, {
+      strategySpec: ACTIVE_PICK_STRATEGY,
+    })
+    return {
+      ...item,
+      marketScore: evaluated.marketEligible
+        ? evaluated.marketScore
+        : 0,
+      marketReasons: evaluated.reasons,
+      marketEligible: evaluated.marketEligible,
+    }
+  })
+  return { concepts, candidates }
+}
+
 function DailyPlay({ snapshot }) {
   const [loading, setLoading] = useState(false)
   const [stage, setStage] = useState('') // 进度文案
@@ -333,34 +414,81 @@ function DailyPlay({ snapshot }) {
         // 行情扫描不可用时回退页面已有热点池。
       }
 
-      // ② 多来源合并：全市场排序 + 涨停/连板 + 主力抢筹 + 涨速 + 板块龙头。
-      const cand = new Map()
-      const add = (x, tag, extra) => {
-        if (!x || !x.code) return
-        if (!cand.has(x.code)) cand.set(x.code, { code: x.code, name: x.name, tags: [], ...extra })
-        const o = cand.get(x.code)
-        Object.entries(extra || {}).forEach(([k, v]) => { if (o[k] == null && v != null) o[k] = v }) // 补齐缺失字段
-        if (tag && !o.tags.includes(tag)) o.tags.push(tag)
+      // ② 确定性概念龙头识别：概念强度→真实成分股→角色评分。
+      // 失败时只降级到原市场/事件候选，不阻断本轮选股。
+      setStage('正在核验活跃概念与真实成分股龙头…')
+      let conceptDiscovery = { concepts: [], candidates: [] }
+      try {
+        conceptDiscovery = await discoverConceptLeadership(
+          s.limitPool?.list || [],
+        )
+      } catch {
+        conceptDiscovery = { concepts: [], candidates: [] }
       }
-      ;(broad.list || []).forEach((x) => add(x, `全市场${x.marketScore}分`, {
-        price: x.price, pct: x.pct, speed: x.speed,
-        turnover: x.turnover, volRatio: x.volRatio,
-        mainInflow: x.mainInflow, amount: x.amount,
-        marketScore: x.marketScore, marketReasons: x.reasons,
+
+      // ③ 候选配额：10只市场共振 + 6只概念龙头 + 4只事件股。
+      const marketCandidates = (broad.list || []).map((x) => ({
+        ...x,
+        tags: [`全市场${x.marketScore}分`],
+        marketReasons: x.reasons,
       }))
-      ;(s.limitPool?.list || []).slice(0, 10).forEach((x) => add(x, x.lbc >= 2 ? `${x.lbc}连板` : '涨停', { pct: x.pct, turnover: x.turnover, mainInflow: x.fundAmount }))
-      ;(s.movers?.list || []).slice(0, 10).forEach((x) => add(x, '主力抢筹', { pct: x.pct, turnover: x.turnover, volRatio: x.volRatio, mainInflow: x.mainInflow }))
-      ;(s.speed?.list || []).slice(0, 8).forEach((x) => add(x, '涨速', { pct: x.pct, speed: x.speed }))
-      // 强势板块的领涨龙头：拓宽题材面，纳入非涨停但当日领涨主线的核心票
-      ;(s.sectors?.list || []).slice(0, 6).forEach((sec) => {
-        if (sec && sec.leadCode) add({ code: sec.leadCode, name: sec.leadName }, `${sec.name}领涨`, { pct: sec.leadPct })
+      const eventMap = new Map()
+      const addEvent = (item, tag, extra = {}) => {
+        if (!item?.code) return
+        const current = eventMap.get(item.code) || {
+          code: item.code,
+          name: item.name,
+          tags: [],
+        }
+        const next = { ...extra, ...current }
+        for (const [key, value] of Object.entries({
+          price: item.price,
+          pct: item.pct,
+          speed: item.speed,
+          turnover: item.turnover,
+          volRatio: item.volRatio,
+          mainInflow: item.mainInflow,
+          amount: item.amount,
+          ...extra,
+        })) {
+          if (next[key] == null && value != null) next[key] = value
+        }
+        if (tag && !next.tags.includes(tag)) next.tags.push(tag)
+        eventMap.set(item.code, next)
+      }
+      ;(s.limitPool?.list || []).slice(0, 10).forEach((item) =>
+        addEvent(
+          item,
+          item.lbc >= 2 ? `${item.lbc}连板` : '涨停',
+          { mainInflow: item.fundAmount },
+        )
+      )
+      ;(s.movers?.list || []).slice(0, 10).forEach((item) =>
+        addEvent(item, '主力抢筹')
+      )
+      ;(s.speed?.list || []).slice(0, 8).forEach((item) =>
+        addEvent(item, '涨速')
+      )
+      ;(s.sectors?.list || []).slice(0, 6).forEach((sector) => {
+        if (!sector?.leadCode) return
+        addEvent({
+          code: sector.leadCode,
+          name: sector.leadName,
+          pct: sector.leadPct,
+        }, `${sector.name}领涨`)
       })
-      const codes = [...cand.values()]
-        .sort((a, b) => (b.marketScore || 0) - (a.marketScore || 0) || b.tags.length - a.tags.length)
-        .slice(0, 20)
+      const codes = selectConceptAwareCandidatePool({
+        marketCandidates,
+        conceptCandidates: conceptDiscovery.candidates,
+        eventCandidates: [...eventMap.values()],
+        limit: 20,
+        marketQuota: 10,
+        conceptQuota: 6,
+        eventQuota: 4,
+      })
       if (!codes.length) { setErr('暂无候选数据，开盘后再试（休市时段候选池为空）'); setLoading(false); return }
 
-      // ③ 最多 5 路并发量化，避免 20 只同时冲击 FC/量化冷启动。
+      // ④ 最多 5 路并发量化，避免 20 只同时冲击 FC/量化冷启动。
       const quantModelVersion = currentQuantModelVersion()
       const selectedModelLabel = quantModelLabel(quantModelVersion)
       setStage(`${selectedModelLabel}正在给 ${codes.length} 只候选打分…`)
@@ -371,12 +499,15 @@ function DailyPlay({ snapshot }) {
             25000,
             { headers: quantModelHeaders(quantModelVersion) },
           )
-          const q = j.quant, fc = q && q.forecast
+          const q = j.quant
+          const fc = q && q.forecast
+          const next = q && q.nextTradeDayForecast
           if (!isQuantResultForVersion(j, quantModelVersion)) {
             throw new Error('量化模型版本不匹配')
           }
           return {
             code: c.code, name: c.name, tags: c.tags,
+            conceptLeadership: c.conceptLeadership,
             marketScore: c.marketScore, marketReasons: c.marketReasons,
             price: c.price, pct: c.pct, turnover: c.turnover, volRatio: c.volRatio,
             mainInflowYi: c.mainInflow != null ? +(c.mainInflow / 1e8).toFixed(2) : null,
@@ -390,6 +521,10 @@ function DailyPlay({ snapshot }) {
               score: q.score, bias: q.bias,
               upProb: fc && fc.upProb, expRet: fc && fc.expRet,
               targetLow: fc && fc.targetLow, targetHigh: fc && fc.targetHigh,
+              nextUpProb: next && next.upProb,
+              nextExpRet: next && next.expRet,
+              nextTargetLow: next && next.targetLow,
+              nextTargetHigh: next && next.targetHigh,
               highConfFired: !!(q.highConfSignal && q.highConfSignal.fired),
               credibility: q.highConfSignal && q.highConfSignal.credibility,
               buyPrice: q.highConfSignal && q.highConfSignal.buyPrice,
@@ -412,6 +547,7 @@ function DailyPlay({ snapshot }) {
         {
           limit: 12,
           strategySpec: ACTIVE_PICK_STRATEGY,
+            leadershipReserve: 4,
         },
       )
       const forLLM = strategyShortlist.list
@@ -421,6 +557,10 @@ function DailyPlay({ snapshot }) {
         specVersion: strategyShortlist.specVersion,
         signalPassedCount: strategyShortlist.signalPassedCount,
         watchlistCount: strategyShortlist.watchlist.length,
+        activeConceptCount: conceptDiscovery.concepts.length,
+        conceptLeaderCount: conceptDiscovery.candidates.length,
+        leadershipReservedCount:
+          strategyShortlist.leadershipReservedCount,
         universeCount: broad.universeCount,
         scannedCount: broad.scannedCount,
         isComplete: broad.isComplete,
@@ -431,7 +571,7 @@ function DailyPlay({ snapshot }) {
         quantModelLabel: selectedModelLabel,
       }
 
-      // ③ 带量化分 + 盘面 → LLM 精选 3 只
+      // ⑤ 带量化分 + 盘面 → LLM 精选 3 只
       setStage('AI 正在结合量化与盘面精选 3 只…')
       const payload = withQuantModelPayload({
         market: {
@@ -439,6 +579,13 @@ function DailyPlay({ snapshot }) {
           indices: (s.market?.indices || []).map((i) => ({ name: i.name, pct: i.pct })),
         },
         sectors: (s.sectors?.list || []).slice(0, 8).map((x) => ({ name: x.name, pct: x.pct, mainInflowYi: +(x.mainInflow / 1e8).toFixed(2), lead: x.leadName })),
+        activeConcepts: conceptDiscovery.concepts.map((item) => ({
+          code: item.code,
+          name: item.name,
+          conceptStrength: item.conceptStrength,
+          pct: item.pct,
+          mainInflowYi: +(item.mainInflow / 1e8).toFixed(2),
+        })),
         candidates: forLLM,
         strategy: {
           strategyId: strategyShortlist.strategyId,
@@ -570,6 +717,12 @@ function DailyPlay({ snapshot }) {
                       : funnel.universeCount,
                   ],
                   ['可交易', funnel.eligibleCount],
+                  ...(funnel.activeConceptCount != null
+                    ? [['强概念', funnel.activeConceptCount]]
+                    : []),
+                  ...(funnel.conceptLeaderCount != null
+                    ? [['龙头候选', funnel.conceptLeaderCount]]
+                    : []),
                   ['量化成功', funnel.quantCount],
                   ['策略通过', funnel.signalPassedCount ?? '—'],
                   ['决策短名单', funnel.shortlistCount],
@@ -582,6 +735,7 @@ function DailyPlay({ snapshot }) {
               </div>
             )}
             {res.marketNote && <div className="pick-market"><Icon name="pulse" size={13} /> <span className="pick-market-note">{res.marketNote}</span>{res.confidence && <span className={'pick-conf ' + (/高/.test(res.confidence) ? 'hi' : /低/.test(res.confidence) ? 'lo' : 'mid')}>把握度 {res.confidence}</span>}</div>}
+            <SearchReference reference={res.searchReference} compact />
             {(res.noTrade || !Array.isArray(res.picks) || res.picks.length === 0) && (
               <div className="play-risk"><Icon name="shield" size={14} /><span>
                 <b>{Array.isArray(res.picks) && res.picks.length > 0 ? '当前不追，等待触发' : '数据不足，暂无候选'}</b>
@@ -594,6 +748,7 @@ function DailyPlay({ snapshot }) {
                 {res.picks.map((c, i) => {
                   const added = book.plan.some((x) => x.code === c.code)
                   const gcls = c.grade === '强' ? 'strong' : c.grade === '弱' ? 'weak' : 'mid'
+                  const leadership = c.conceptLeadership
                   return (
                     <div className="pick-card" key={c.code || i}>
                       <div className="pick-top">
@@ -603,7 +758,6 @@ function DailyPlay({ snapshot }) {
                             <StockName code={c.code} name={c.name}>
                               <span className="pick-name-copy">
                                 <b>{c.name}</b>
-                                <span className="cand-code">{c.code}</span>
                               </span>
                             </StockName>
                           </div>
@@ -618,6 +772,22 @@ function DailyPlay({ snapshot }) {
                           {c.quantScore != null && <span className={'pick-score ' + (c.quantScore >= 60 ? 'red' : c.quantScore <= 40 ? 'green' : 'gold')}>量化 {c.quantScore}</span>}
                         </div>
                       </div>
+                      {leadership && (
+                        <div
+                          className="pick-leadership"
+                          data-role={leadership.role}
+                          title="龙头身份由概念资金和真实成分股确定性计算；是否可买仍以量化与策略闸门为准"
+                        >
+                          <span className="pick-leadership-concept">
+                            {leadership.conceptName}
+                          </span>
+                          <span className="pick-leadership-role">
+                            {leadership.roleLabel}
+                          </span>
+                          <span>概念强度 <b>{leadership.conceptStrength}</b></span>
+                          <span>领导力 <b>{leadership.leaderScore}</b></span>
+                        </div>
+                      )}
                       <div className="pick-reason">
                         <span className="pick-reason-label">研判</span>
                         <span>{c.reason}</span>
@@ -728,7 +898,7 @@ function CandidatePool({ zt, movers, speed, sectors }) {
               return (
                 <tr key={s.code}>
                   <td>
-                    <StockName code={s.code} name={s.name}><span>{s.name}<span className="sub-name">{s.code}</span></span></StockName>
+                    <StockName code={s.code} name={s.name}><span>{s.name}</span></StockName>
                   </td>
                   <td className={pctClass(s.pct)}>{s.price ? fmtRaw(s.price) : '--'}</td>
                   <td className={pctClass(s.pct)}>{fmtPct(s.pct)}</td>

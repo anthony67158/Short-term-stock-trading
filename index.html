@@ -3,11 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href="/brand-light.svg" media="(prefers-color-scheme: light)" />
+    <link rel="icon" type="image/svg+xml" href="/brand-dark.svg" media="(prefers-color-scheme: dark)" />
+    <link id="app-favicon" rel="icon" type="image/svg+xml" href="/brand-dark.svg" />
     <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
     <link rel="manifest" href="/manifest.json" />
+    <script>
+      try {
+        document.documentElement.dataset.theme =
+          localStorage.getItem('theme_v1') || 'dark'
+      } catch {}
+    </script>
     <link rel="stylesheet" href="/src/styles/boot.css" />
-    <!-- iOS 不支持 SVG 的 apple-touch-icon,必须提供 PNG,否则会退化为"首字母(操)"图标 -->
+    <!-- iOS 主屏幕固定使用曜石黑高光底与银白标；系统负责最终圆角蒙版。 -->
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -21,7 +29,10 @@
   <body>
     <div id="root">
       <div id="app-splash">
-        <img class="sp-logo" src="/favicon.svg" alt="" width="58" height="58" />
+        <span class="sp-logo" aria-hidden="true">
+          <img class="sp-logo-light" src="/brand-light.svg" alt="" width="58" height="58" />
+          <img class="sp-logo-dark" src="/brand-dark.svg" alt="" width="58" height="58" />
+        </span>
         <div class="sp-name">短线操盘台</div>
         <div class="sp-sub">正在加载行情与持仓…</div>
         <div class="sp-bar"></div>

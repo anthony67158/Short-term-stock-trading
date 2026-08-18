@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, lazy, Suspense } from 'react'
 import Icon from './components/Icon'
+import BrandMark from './components/BrandMark'
 import StockDetail from './components/StockDetail'
 import ErrorBoundary from './components/ErrorBoundary'
 import AuthGate, { AccountMenu } from './components/AuthGate'
@@ -13,6 +14,10 @@ import { alertStore, useAlertStore } from './alertStore'
 import { useLLMConfigOpen } from './llmConfigStore'
 import { useQuantReportOpen } from './quantReportUiStore'
 import { useQuantModelStore } from './quantModelStore'
+import {
+  aiSearchConfigStore,
+  useAiSearchConfig,
+} from './aiSearchConfigStore'
 import { timeStr } from './format'
 import { api } from './apiBase'
 import { accountRequestHeaders } from './quantModel'
@@ -51,6 +56,8 @@ const AIAssistant = lazyWithReload(() => import('./components/AIAssistant'), 'as
 const LLMConfig = lazyWithReload(() => import('./components/LLMConfig'), 'llm-config')
 const QuantReport = lazyWithReload(() => import('./components/QuantReport'), 'quant-report')
 const QuantModelControl = lazyWithReload(() => import('./components/QuantModelControl'), 'quant-model-control')
+const AISearchConfig = lazyWithReload(() => import('./components/AISearchConfig'), 'ai-search-config')
+const ICP_NUMBER = '沪ICP备2026040243号-1'
 
 // Tab 切换时的轻量骨架占位（避免 Suspense fallback 空白闪一下）
 function TabSkeleton() {
@@ -70,6 +77,7 @@ export default function App() {
   }, [])
   useEffect(() => {
     if (!user) return
+    void aiSearchConfigStore.load(true)
     // 刷新后账号恢复成功，立即拉取云端任务状态；不要等空登录态启动的 15 秒慢轮询。
     import('./serverAdvice').then((m) => m.kickServerAdviceStatusSync()).catch(() => {})
     // 预置并发上限=承接 advisor 角色的端点数(首屏即可门控;之后随云端 batchProgress.concurrency 覆盖为权威值)
@@ -86,11 +94,16 @@ export default function App() {
   }, [user])
   if (booting) return (
     <div className="auth-gate"><div className="auth-card auth-card-loading">
-      <div className="auth-brand"><span className="nav-logo"><Icon name="logo" size={20} /></span><span>短线操盘台</span></div>
+      <div className="auth-brand"><BrandMark size={34} /><span>短线操盘台</span></div>
       <div className="play-hint"><Icon name="refresh" size={14} className="spin" /> 正在恢复登录…</div>
     </div></div>
   )
-  if (!user) return <AuthGate />   // 未登录 → 全屏登录/注册门户
+  if (!user) return (              // 未登录 → 全屏登录/注册门户
+    <>
+      <AuthGate />
+      <RegulatoryFooter />
+    </>
+  )
   return <MainApp key={user} />    // key=user：切换账号时整树重挂
 }
 
@@ -114,6 +127,7 @@ function MainApp() {
   const llmConfigOpen = useLLMConfigOpen()
   const quantReportOpen = useQuantReportOpen()
   const quantModelState = useQuantModelStore()
+  const aiSearchConfig = useAiSearchConfig()
   const trading = isTradingHours()
   const interval = trading ? 20000 : 120000
 
@@ -251,7 +265,7 @@ function MainApp() {
             onClick={() => setTab('today')}
             aria-label="返回今日决策"
           >
-            <span className="nav-logo"><Icon name="logo" size={18} /></span>
+            <BrandMark className="nav-brand-mark" />
             <span className="nav-name">短线操盘台</span>
           </button>
           <nav className="nav-tabs" aria-label="主工作区">
@@ -322,9 +336,7 @@ function MainApp() {
         </ErrorBoundary>
       </main>
 
-      <footer className="footer">
-        数据来源：东方财富公开接口 · AI 分析由大模型基于实时数据生成，仅供研究参考，非投资建议 · 资金流为已发生数据，追高有滞后风险，注意止损
-      </footer>
+      <RegulatoryFooter showDisclaimer />
 
       <ErrorBoundary label="军师">
         <Suspense fallback={null}>
@@ -365,7 +377,34 @@ function MainApp() {
           </Suspense>
         </ErrorBoundary>
       )}
+      {aiSearchConfig.open && (
+        <ErrorBoundary label="AI消息检索设置">
+          <Suspense fallback={null}>
+            <AISearchConfig />
+          </Suspense>
+        </ErrorBoundary>
+      )}
     </div>
+  )
+}
+
+function RegulatoryFooter({ showDisclaimer = false }) {
+  return (
+    <footer className="footer">
+      {showDisclaimer && (
+        <span className="footer-disclaimer">
+          数据来源：东方财富公开接口 · AI 分析由大模型基于实时数据生成，仅供研究参考，非投资建议 · 资金流为已发生数据，追高有滞后风险，注意止损
+        </span>
+      )}
+      <a
+        className="footer-icp"
+        href="https://beian.miit.gov.cn/"
+        target="_blank"
+        rel="noreferrer"
+      >
+        {ICP_NUMBER}
+      </a>
+    </footer>
   )
 }
 

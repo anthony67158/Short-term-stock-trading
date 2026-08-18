@@ -3,6 +3,7 @@ import { buildAdvicePresentation } from '../../shared/advicePresentation.js'
 import AdviceDetails from './AdviceDetails'
 import Icon from './Icon'
 import { HL } from './RichText'
+import SearchReference from './SearchReference'
 
 const CONTINUITY_LABELS = {
   initial: '已建立主计划',
@@ -272,6 +273,7 @@ export default function AdvicePresentation({
           ))}
         </section>
       )}
+      <SearchReference reference={advice.searchReference} />
 
       {advice.serverAdjust && (
         <div className="advice-adjust">

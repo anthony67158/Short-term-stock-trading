@@ -1,0 +1,85 @@
+{
+  "schemaVersion": "harness-baseline.v1",
+  "generatedAt": 1786952605612,
+  "versions": {
+    "app": "1.0.0",
+    "git": "working-tree",
+    "node": "v22.22.1",
+    "adapters": [
+      "advice",
+      "daily",
+      "evidence",
+      "judge",
+      "portfolio",
+      "screen"
+    ]
+  },
+  "suites": {
+    "portfolio": {
+      "overall": 1,
+      "dimensions": {
+        "contract": 1,
+        "groundedness": 1,
+        "feasibility": 1,
+        "actionability": 1,
+        "consistency": 1
+      },
+      "cases": 3
+    },
+    "evidence": {
+      "overall": 1,
+      "dimensions": {
+        "contract": 1,
+        "groundedness": 1,
+        "feasibility": 1,
+        "actionability": 1,
+        "consistency": 1
+      },
+      "cases": 2
+    },
+    "advice": {
+      "overall": 1,
+      "dimensions": {
+        "contract": 1,
+        "groundedness": 1,
+        "feasibility": 1,
+        "actionability": 1,
+        "consistency": 1
+      },
+      "cases": 3
+    },
+    "judge": {
+      "overall": 1,
+      "dimensions": {
+        "contract": 1,
+        "groundedness": 1,
+        "feasibility": 1,
+        "actionability": 1,
+        "consistency": 1
+      },
+      "cases": 4
+    },
+    "screen": {
+      "overall": 1,
+      "dimensions": {
+        "contract": 1,
+        "groundedness": 1,
+        "feasibility": 1,
+        "actionability": 1,
+        "consistency": 1
+      },
+      "cases": 3
+    },
+    "daily": {
+      "overall": 1,
+      "dimensions": {
+        "contract": 1,
+        "groundedness": 1,
+        "feasibility": 1,
+        "actionability": 1,
+        "consistency": 1
+      },
+      "cases": 2
+    }
+  }
+}

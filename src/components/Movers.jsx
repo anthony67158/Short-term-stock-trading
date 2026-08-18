@@ -36,7 +36,7 @@ export default function Movers({ interval }) {
             <tbody>
               {list.map((s, i) => (
                 <tr key={s.code}>
-                  <td><span className="rank">{i + 1}</span><StockName code={s.code} name={s.name} showCode={false} />{s.isLimitUp && <span className="tag tag-lu">涨停</span>}</td>
+                  <td><span className="rank">{i + 1}</span><StockName code={s.code} name={s.name} />{s.isLimitUp && <span className="tag tag-lu">涨停</span>}</td>
                   <td>{fmtRaw(s.price)}</td>
                   <td className={pctClass(s.pct)}>{fmtPct(s.pct)}</td>
                   {kind === 'speed'

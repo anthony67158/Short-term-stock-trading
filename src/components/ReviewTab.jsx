@@ -2,8 +2,21 @@ import { useState, useMemo } from 'react'
 import ReactECharts from 'echarts-for-react'
 import Icon from './Icon'
 import StockName from './StockName'
+import StockTags from './StockTags'
 import { planStore, usePlanStore, computeTFlows } from '../planStore'
 import { finiteNum, fmtPct, pctClass, fmtRaw } from '../format'
+import {
+  tradeAnalyticsRecords,
+} from '../../shared/portfolioAccounting.js'
+import {
+  editableTradeIntent,
+  tradeIntentLabel,
+  tradeIntentOf,
+  tradeIntentOptions,
+} from '../../shared/tradeIntent.js'
+import {
+  manualTradePairCandidates,
+} from '../../shared/tradePairing.js'
 
 // 汇总所有交易记录：已存 closed（BUY/SELL/CLOSE/T）+ 持仓中实时做T（未归档）
 function useRealizedRecords(book) {
@@ -28,6 +41,7 @@ function useRealizedRecords(book) {
       const costBasis = buyPrice * qty * 100 + buyFee
       liveT.push({
         id: h.id + '_' + p.at, type: 'T', kind: 'T', live: true, code: h.code, name: h.name,
+        tradeIntent: 't',
         qty, buyPrice, sellPrice, buyFee, sellFee,
         grossPnl: finiteNum(p.grossPnl), netPnl, realizedPnl: netPnl,
         pnlPct: costBasis > 0 ? +(netPnl / costBasis * 100).toFixed(2) : 0,
@@ -43,6 +57,7 @@ function useRealizedRecords(book) {
       const amount = +(openBuyAvg * openBuy * 100).toFixed(2)
       liveT.push({
         id: h.id + '_openbuy', type: 'BUY', live: true, pending: true, code: h.code, name: h.name, side: 'buy',
+        tradeIntent: 't',
         qty: openBuy, price: openBuyAvg, buyPrice: openBuyAvg,
         fee: finiteNum(r.openBuyFee), amount,
         realizedPnl: null, holdingId: h.id, at: r.openBuyAt || Date.now(),
@@ -61,6 +76,7 @@ function useRealizedRecords(book) {
       const netPnl = +((amount - cost) - sellFee - buyFeePart).toFixed(2)
       liveT.push({
         id: h.id + '_opensell', type: 'SELL', kind: 'SELL', live: true, pending: true, code: h.code, name: h.name, side: 'sell',
+        tradeIntent: 't',
         qty: openSell, price: openSellAvg, sellPrice: openSellAvg, buyPrice: costPrice, costPrice,
         fee: sellFee, buyFee: buyFeePart, sellFee, amount,
         grossPnl: +(amount - cost).toFixed(2), netPnl, realizedPnl: netPnl,
@@ -76,12 +92,16 @@ function useRealizedRecords(book) {
 export default function ReviewTab({ interval, snapshot }) {
   const book = usePlanStore()
   const records = useRealizedRecords(book)
+  const analyticsRecords = useMemo(
+    () => tradeAnalyticsRecords(records),
+    [records],
+  )
 
   return (
     <div className="review">
       <DecisionClosure book={book} />
-      <TradeStat records={records} />
-      <ReviewCharts records={records} />
+      <TradeStat records={records} analyticsRecords={analyticsRecords} />
+      <ReviewCharts records={analyticsRecords} />
       <DailyLog records={records} />
     </div>
   )
@@ -160,17 +180,23 @@ function groupByStock(items) {
       g.sq += q; g.sa += finiteNum(c.sellPrice) * sh; g.sf += sellFee
       g.fee += buyFee + sellFee
     }
-    g.net += finiteNum(c.realizedPnl) // BUY 的 realizedPnl 为 null，不计入
   }
   return [...map.values()].map((g) => ({
     ...g,
     items: g.items.sort((a, b) => (b.at || b.sellAt || 0) - (a.at || a.sellAt || 0)),
+    net: tradeAnalyticsRecords(g.items).reduce(
+      (sum, item) => sum + finiteNum(item.realizedPnl),
+      0,
+    ),
     buyAvg: g.bq ? (g.ba + g.bf) / (g.bq * 100) : null,   // 含费买入均价
     sellAvg: g.sq ? (g.sa - g.sf) / (g.sq * 100) : null,  // 含费卖出均价
   })).sort((a, b) => (b.items[0]?.at || 0) - (a.items[0]?.at || 0))
 }
 // 交易类型归一化 key
 function typeKey(c) { return c.type || (c.kind === 'T' ? 'T' : 'CLOSE') }
+function filterKey(c) {
+  return tradeIntentOf(c) === 't' ? 'T' : typeKey(c)
+}
 // 单条记录的手续费（单腿用 fee，回合用买+卖）
 function feeOf(c) {
   if (c.fee != null && (c.type === 'BUY' || c.type === 'SELL')) return finiteNum(c.fee)
@@ -179,10 +205,13 @@ function feeOf(c) {
 // 单条流水行渲染（区分 纯买入/纯卖出/平仓/做T）
 function TxnRow({ c, onDelete, onEdit, showDate }) {
   const t = typeKey(c)
+  const intent = tradeIntentOf(c)
   const tag = t === 'T'
-    ? { cls: c.tDir === 'reverse' ? 'rev' : 'pos', label: c.tDir === 'reverse' ? '反T' : '正T' }
-    : t === 'BUY' ? { cls: 'buy', label: '买入' }
-    : t === 'SELL' ? { cls: 'sell', label: '卖出' }
+    ? { cls: c.tDir === 'reverse' ? 'rev' : 'pos', label: tradeIntentLabel(c) }
+    : intent === 't'
+      ? { cls: t === 'BUY' ? 't-buy' : 't-sell', label: t === 'BUY' ? 'T买' : 'T卖' }
+    : t === 'BUY' ? { cls: 'buy', label: '建/加' }
+    : t === 'SELL' ? { cls: 'sell', label: '减/清' }
     : { cls: 'close', label: '平仓' }
   const single = t === 'BUY' || t === 'SELL'
   const priceText = single
@@ -201,13 +230,19 @@ function TxnRow({ c, onDelete, onEdit, showDate }) {
       <span className="di-amt" title={single ? (t === 'BUY' ? '本笔花费(成交额)' : '本笔回收(成交额)') : '本回合卖出成交额'}>
         {t === 'BUY' ? '花 ' : t === 'SELL' ? '收 ' : ''}{fmtAmt(amountOf(c))}
       </span>
-      {c.realizedPnl != null
+      {intent === 't' && t !== 'T'
+        ? <span className={'di-net ' + (c.tPairTradeId ? 'di-paired' : 'di-cash')}>
+            {c.tPairTradeId ? '已配对' : '待配对'}
+          </span>
+        : c.realizedPnl != null
         ? <span className={'di-net ' + (c.realizedPnl >= 0 ? 'red' : 'green')}>{fmtMoney(c.realizedPnl)}</span>
-        : <span className="di-net di-cash">{t === 'BUY' ? '建/加仓' : '—'}</span>}
+        : <span className="di-net di-cash">
+            {t === 'BUY' ? '建/加仓' : '—'}
+          </span>}
       {c.live
         ? <span className="di-del-ph" title="做T在持仓中，请在「我的计划」里增删">·</span>
         : <span className="di-row-actions">
-            <button className="di-date-edit" title="修改日期、价格和手数" onClick={() => onEdit(c)}>
+            <button className="di-date-edit" title="修改操作类型、日期、价格和手数" onClick={() => onEdit(c)}>
               <Icon name="edit" size={11} />
             </button>
             <button className="del di-del" title="删除此记录" onClick={() => onDelete(c)}>×</button>
@@ -225,11 +260,15 @@ function DailyLog({ records }) {
   const [tradeBuyPrice, setTradeBuyPrice] = useState('')
   const [tradeSellPrice, setTradeSellPrice] = useState('')
   const [tradeQty, setTradeQty] = useState('')
+  const [tradeIntent, setTradeIntent] = useState('position')
+  const [pairTradeId, setPairTradeId] = useState('')
   const [editError, setEditError] = useState('')
   const [collapsed, setCollapsed] = useState({}) // key(day 或 day|code) → 是否折叠
   const [groupMode, setGroupMode] = useState('day') // day 按时间 | stock 按个股
   const toggle = (key) => setCollapsed((s) => ({ ...s, [key]: !s[key] }))
-  const filtered = records.filter((c) => filter === 'all' || typeKey(c) === filter)
+  const filtered = records.filter((c) =>
+    filter === 'all' || filterKey(c) === filter
+  )
   const delBatch = delTarget ? planStore.batchSize(delTarget.id) : 1
   const delImpact = delTarget ? (planStore.removeClosedImpact(delTarget.id) || []) : []
 
@@ -249,6 +288,8 @@ function DailyLog({ records }) {
     const timestamp = record.at || record.sellAt || record.buyAt || Date.now()
     const type = typeKey(record)
     setEditTarget(record)
+    setTradeIntent(tradeIntentOf(record))
+    setPairTradeId(String(record.tPairTradeId || ''))
     setTradeDate(dayKey(timestamp))
     setTradeQty(String(record.qty ?? ''))
     setTradePrice(
@@ -260,11 +301,37 @@ function DailyLog({ records }) {
     setTradeSellPrice(type === 'T' || type === 'CLOSE' ? String(record.sellPrice ?? '') : '')
     setEditError('')
   }
+  const pairTarget = editTarget ? (() => {
+    const timestamp = editTarget.at
+      || editTarget.sellAt
+      || editTarget.buyAt
+      || Date.now()
+    const source = new Date(timestamp)
+    const match = tradeDate.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+    if (match) {
+      source.setFullYear(
+        Number(match[1]),
+        Number(match[2]) - 1,
+        Number(match[3]),
+      )
+    }
+    return {
+      ...editTarget,
+      qty: Number(tradeQty),
+      at: source.getTime(),
+    }
+  })() : null
+  const pairCandidates = tradeIntent === 't'
+    && editableTradeIntent(editTarget)
+    ? manualTradePairCandidates(records, pairTarget)
+    : []
   const saveTradeEdit = () => {
     const type = typeKey(editTarget)
     const result = planStore.updateClosedTrade(editTarget?.id, {
       date: tradeDate,
       qty: Number(tradeQty),
+      tradeIntent: tradeIntent,
+      tPairTradeId: tradeIntent === 't' ? pairTradeId : null,
       ...(type === 'BUY' || type === 'SELL'
         ? { price: Number(tradePrice) }
         : {
@@ -336,14 +403,15 @@ function DailyLog({ records }) {
                 <>这条记录与另外 <b className="red">{delBatch - 1}</b> 条是<b>同一次操作</b>产生的（如清仓时的卖出 + 做T差价 + 加/减仓），
                 为保持「全部/买入/卖出/平仓/做T」各分类一致，将<b>一并删除这 {delBatch} 条</b>。</>
               ) : (
-                <>确定删除 <b>{delTarget.name}</b> 的这条记录？</>
+                <>确定删除 <b>{delTarget.name}</b><StockTags code={delTarget.code} variant="inline" /> 的这条记录？</>
               )}
               {delImpact.length > 0 && (
                 <div className="del-impact">
                   <Icon name="info" size={12} /> 持仓将同步调整：
                   {delImpact.map((im, i) => (
                     <span key={i} className="del-impact-item">
-                      {im.name} <b className={im.delta > 0 ? 'red' : 'green'}>{im.delta > 0 ? '+' : ''}{im.delta}手</b>
+                      {im.name} <StockTags code={im.code} variant="inline" />
+                      <b className={im.delta > 0 ? 'red' : 'green'}>{im.delta > 0 ? '+' : ''}{im.delta}手</b>
                     </span>
                   ))}
                 </div>
@@ -364,8 +432,68 @@ function DailyLog({ records }) {
           <div className="confirm-dialog trade-edit-dialog" onClick={(event) => event.stopPropagation()}>
             <div className="confirm-title"><Icon name="edit" size={18} /> 修改交易流水</div>
             <div className="confirm-body">
-              <b>{editTarget.name || editTarget.code}</b> · {typeKey(editTarget) === 'T' ? '做T' : typeKey(editTarget) === 'BUY' ? '买入/加仓' : typeKey(editTarget) === 'CLOSE' ? '平仓' : '卖出/减仓'}
+              <b>{editTarget.name || editTarget.code}</b>
+              {' · '}
+              {tradeIntentLabel({
+                ...editTarget,
+                tradeIntent,
+              })}
               <div className="trade-edit-grid">
+                {editableTradeIntent(editTarget) && (
+                  <label className="trade-edit-field trade-edit-wide trade-edit-intent">
+                    <span>操作类型</span>
+                    <select
+                      className="wl-input"
+                      value={tradeIntent}
+                      onChange={(event) => {
+                        const nextIntent = event.target.value
+                        setTradeIntent(nextIntent)
+                        if (nextIntent !== 't') setPairTradeId('')
+                        setEditError('')
+                      }}
+                    >
+                      {tradeIntentOptions(editTarget).map((option) => (
+                        <option value={option.value} key={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                {tradeIntent === 't' && editableTradeIntent(editTarget) && (
+                  <label className="trade-edit-field trade-edit-wide trade-edit-pair">
+                    <span>配对另一腿</span>
+                    <select
+                      className="wl-input"
+                      value={pairTradeId}
+                      onChange={(event) => {
+                        setPairTradeId(event.target.value)
+                        setEditError('')
+                      }}
+                    >
+                      <option value="">暂不指定，继续按时间 FIFO</option>
+                      {pairCandidates.map((record) => {
+                        const type = typeKey(record)
+                        const price = record.price
+                          ?? (type === 'BUY'
+                            ? record.buyPrice
+                            : record.sellPrice)
+                        const at = record.at
+                          || record.sellAt
+                          || record.buyAt
+                        return (
+                          <option value={record.id} key={record.id}>
+                            {hm(at)} {type === 'BUY' ? '买入' : '卖出'} {fmtRaw(price)} × {record.qty}手
+                          </option>
+                        )
+                      })}
+                    </select>
+                    <small>
+                      仅列出同股、同日、买卖方向相反且手数一致的记录。
+                      {pairTradeId ? ' 保存后两条记录会建立固定配对。' : ' 不指定时仍按原 FIFO 自动匹配。'}
+                    </small>
+                  </label>
+                )}
                 <label className="trade-edit-field">
                   <span>实际操作日期</span>
                   <input
@@ -430,7 +558,12 @@ function DailyLog({ records }) {
                   </>
                 )}
               </div>
-              <small>保存后会重算成交额、手续费、现金、持仓与已实现盈亏，并自动同步到阿里云 OSS。同一次结算产生的关联流水日期也会同步调整。</small>
+              <small>
+                {tradeIntent === 't' && editableTradeIntent(editTarget)
+                  ? '手动选择的另一腿优先固定配对；未指定时按同股、同交易日和时间顺序自动配对。未配对腿仍按真实买卖影响现金、持仓与T+1。'
+                  : '保存后会重算成交额、手续费、现金、持仓与已实现盈亏。'}
+                {' '}修改会自动同步到阿里云 OSS。
+              </small>
               {editError && <div className="err">{editError}</div>}
             </div>
             <div className="confirm-actions">
@@ -489,21 +622,28 @@ function DailyLog({ records }) {
         <div className="scroll" style={{ maxHeight: 520 }}>
           {days.map((day) => {
             const items = groups[day].slice().sort((a, b) => (b.at || b.sellAt || 0) - (a.at || a.sellAt || 0))
-            // 已实现盈亏只统计有 realizedPnl 的（BUY 不计）
-            const net = items.reduce((a, c) => a + finiteNum(c.realizedPnl), 0)
+            const analytics = tradeAnalyticsRecords(items)
+            const net = analytics.reduce(
+              (sum, item) => sum + finiteNum(item.realizedPnl),
+              0,
+            )
             const fee = items.reduce((a, c) => a + feeOf(c), 0)
             // 当天现金进出：买入花费(成交额+买费)、卖出回收(成交额−卖费)
             const daySpend = items.filter((c) => typeKey(c) === 'BUY').reduce((a, c) => a + amountOf(c) + finiteNum(c.fee ?? c.buyFee), 0)
             const dayRecover = items.filter((c) => typeKey(c) === 'SELL').reduce((a, c) => a + amountOf(c) - finiteNum(c.fee ?? c.sellFee), 0)
-            const nBuy = items.filter((c) => typeKey(c) === 'BUY').length
-            const nSell = items.filter((c) => typeKey(c) === 'SELL').length
+            const nBuy = items.filter((c) => filterKey(c) === 'BUY').length
+            const nSell = items.filter((c) => filterKey(c) === 'SELL').length
             const nClose = items.filter((c) => typeKey(c) === 'CLOSE').length
-            const nT = items.filter((c) => typeKey(c) === 'T').length
+            const nTPairs = items.filter((c) => typeKey(c) === 'T').length
+            const nTLegs = items.filter((c) =>
+              typeKey(c) !== 'T' && tradeIntentOf(c) === 't'
+            ).length
             const parts = []
             if (nBuy) parts.push(`买入${nBuy}`)
             if (nSell) parts.push(`卖出${nSell}`)
             if (nClose) parts.push(`平仓${nClose}`)
-            if (nT) parts.push(`做T${nT}`)
+            if (nTPairs) parts.push(`做T${nTPairs}`)
+            if (nTLegs) parts.push(`T腿${nTLegs}`)
             const dayFolded = collapsed[day] ?? (day !== today) // 非今天默认折叠
             return (
               <div className="day-block" key={day}>
@@ -595,7 +735,7 @@ function statOf(arr) {
 // 导出交易记录为 CSV（Excel 可直接打开）
 function exportCsv(records) {
   const head = ['日期时间', '类型', '代码', '名称', '手数', '买入价', '卖出价', '成交额', '手续费', '已实现盈亏']
-  const typeLabel = (c) => { const t = c.type || (c.kind === 'T' ? 'T' : 'CLOSE'); return { BUY: '买入', SELL: '卖出', CLOSE: '平仓', T: '做T' }[t] || t }
+  const typeLabel = (c) => tradeIntentLabel(c)
   const rows = records.filter((c) => !c.live).map((c) => {
     const ts = c.at || c.sellAt || c.buyAt
     return [
@@ -614,10 +754,12 @@ function exportCsv(records) {
   a.href = url; a.download = `交易记录_${dayKey(Date.now())}.csv`
   a.click(); URL.revokeObjectURL(url)
 }
-function TradeStat({ records }) {
-  const buys = records.filter((c) => typeKey(c) === 'BUY')
-  const sells = records.filter((c) => typeKey(c) === 'SELL' || typeKey(c) === 'CLOSE') // 卖出兑现(含旧平仓)
-  const ts = records.filter((c) => typeKey(c) === 'T')
+function TradeStat({ records, analyticsRecords }) {
+  const buys = analyticsRecords.filter((c) => typeKey(c) === 'BUY')
+  const sells = analyticsRecords.filter((c) =>
+    typeKey(c) === 'SELL' || typeKey(c) === 'CLOSE'
+  )
+  const ts = analyticsRecords.filter((c) => typeKey(c) === 'T')
   const sStat = statOf(sells)
   const tStat = statOf(ts)
   const totalNet = sStat.net + tStat.net // 已实现净收益(买入不计盈亏)

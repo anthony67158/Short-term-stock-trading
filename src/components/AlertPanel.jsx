@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import Icon from './Icon'
 import StockName from './StockName'
+import StockTags from './StockTags'
 import ConfirmDialog from './ConfirmDialog'
 import ActionQuickExec from './ActionQuickExec'
 import { openStockDetail } from '../detailStore'
@@ -12,6 +13,7 @@ import PushToggle from './PushToggle'
 import { judgeEffectStats } from '../../shared/confirmPolicy.js'
 import { applyT1ToAlert } from '../../shared/t1AdvicePolicy.js'
 import { formatPriceLimitThreshold } from '../../shared/priceLimitPolicy.js'
+import { useStockTags } from '../stockTagStore'
 
 // ============ 盯盘预警（内嵌面板，非弹窗）：规则管理 + 通知历史 ============
 export default function AlertPanel({ interval }) {
@@ -81,7 +83,7 @@ export default function AlertPanel({ interval }) {
 
       <div className="judge-effect">
         <div>
-          <span className="judge-effect-k">军师执行确认</span>
+          <span className="judge-effect-k">LLM Judge 实测</span>
           <b>{judgeStats.evaluated ? `${judgeStats.winRate}%` : '样本积累中'}</b>
         </div>
         <div>
@@ -89,7 +91,7 @@ export default function AlertPanel({ interval }) {
           <b>{knowledgeActionStats.average != null ? `${knowledgeActionStats.average}分` : '待评估'}</b>
         </div>
         <span>
-          已触达 {judgeStats.confirmed} 次 · 已复核 {judgeStats.evaluated} 次
+          已强提示 {judgeStats.confirmed} 次 · 已评估 {judgeStats.evaluated} 次
           {judgeStats.avgDirectionalPct != null
             ? ` · 平均方向收益 ${judgeStats.avgDirectionalPct >= 0 ? '+' : ''}${judgeStats.avgDirectionalPct}%`
             : ' · 强提示后自动跟踪5/15/30分钟'}
@@ -187,7 +189,7 @@ export default function AlertPanel({ interval }) {
       {delTarget && (
         <ConfirmDialog
           title="删除此预警？"
-          body={<>确定删除 <b>{delTarget.name}</b> 的「{describeAlert(delTarget)}」预警？{(delTarget.planId || delTarget.candCode || delTarget.actCode) && <><br /><span className="sub-name">这是 AI 自动预警，删除后不会再被自动加回（除非在该股「恢复自动预警」）。</span></>}</>}
+          body={<>确定删除 <b>{delTarget.name}</b><StockTags code={delTarget.code} variant="inline" /> 的「{describeAlert(delTarget)}」预警？{(delTarget.planId || delTarget.candCode || delTarget.actCode) && <><br /><span className="sub-name">这是 AI 自动预警，删除后不会再被自动加回（除非在该股「恢复自动预警」）。</span></>}</>}
           confirmText="删除"
           onConfirm={() => { planStore.removeAlert(delTarget.id); setDelTarget(null) }}
           onCancel={() => setDelTarget(null)}
@@ -217,8 +219,11 @@ function renderRule(a, quote, setDelTarget, holding) {
     <div className={'alert-rule dir-' + m.dir + (a.enabled ? '' : ' off') + (m.near ? ' is-near' : '')} key={a.id}>
       <button type="button" className="ar-main ar-main-clickable" onClick={() => openStockDetail(a.code, a.name)} title="点击查看个股详情与K线">
         <div className="ar-name">
-          <span>{a.name || a.code}</span>
-          <span className="ar-code">{a.code}</span>
+          <StockName
+            code={a.code}
+            name={a.name || a.code}
+            interactive={false}
+          />
           <span className="ar-dir">{m.dirLabel}</span>
           {isAuto && <span className="ar-badge">AI</span>}
           {t1View.t1Blocked && <span className="ar-badge t1">T+1锁定 · 今日不可卖</span>}
@@ -266,6 +271,7 @@ function NewAlertForm({ cands, quote, onDone }) {
   const typeDef = ALERT_TYPES.find((t) => t.key === type) || {}
   const picked = cands.find((c) => c.code === code)
   const q = quote[code]
+  const stockTags = useStockTags(cands.map((item) => item.code))
 
   const submit = () => {
     if (!picked) return
@@ -283,7 +289,16 @@ function NewAlertForm({ cands, quote, onDone }) {
       <div className="af-row">
         <label>股票</label>
         <select className="wl-select" value={code} onChange={(e) => setCode(e.target.value)}>
-          {cands.map((c) => <option key={c.code} value={c.code}>{c.name} {c.code}</option>)}
+          {cands.map((c) => {
+            const tagText = (stockTags[c.code]?.displayTags || [])
+              .map((tag) => tag.name)
+              .join('/')
+            return (
+              <option key={c.code} value={c.code}>
+                {c.name} {c.code}{tagText ? ` · ${tagText}` : ''}
+              </option>
+            )
+          })}
         </select>
         {q && <span className="af-now">现价 {fmtRaw(q.price)} · {q.pct >= 0 ? '+' : ''}{q.pct}%</span>}
       </div>

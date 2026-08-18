@@ -3,6 +3,8 @@ import ReactECharts from 'echarts-for-react'
 import { fmtPct, pctClass, fmtInflow, fmtNum , fmtRaw } from '../format'
 import StockDetail from './StockDetail'
 import Icon from './Icon'
+import StockName from './StockName'
+import { useStockTags } from '../stockTagStore'
 
 // 个股热力图配色：红涨绿跌，涨跌幅越大颜色越深（与板块热力图一致）
 function colorByPct(pct) {
@@ -12,12 +14,22 @@ function colorByPct(pct) {
   return '#2a2d36'
 }
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;')
+}
+
 export default function StockPanel({ sector, data, loading, error, sort, setSort }) {
   const list = (data && data.list) || []
   const [detail, setDetail] = useState(null) // 点击查看详情的个股
   const [colSort, setColSort] = useState(null) // { key, dir } 表头点击排序；null=用后端 sort
   const [view, setView] = useState('list') // list | heat 榜单/热力图
   const [fullscreen, setFullscreen] = useState(false)
+  const stockTags = useStockTags(list.map((item) => item.code))
 
   // 点表头：无→降序→升序→取消(回到后端排序)
   const clickHead = (key) => {
@@ -53,13 +65,18 @@ export default function StockPanel({ sector, data, loading, error, sort, setSort
     () => list.map((s) => `${s.code}:${s.pct}:${s.amount}`).join('|'),
     [list]
   )
+  const tagSig = list.map((item) => {
+    const tags = stockTags[item.code]?.displayTags || []
+    return `${item.code}:${tags.map((tag) => tag.name).join('/')}`
+  }).join('|')
   const buildHeatOption = (count) => ({
     animation: false,
     tooltip: {
       backgroundColor: '#16181f', borderColor: '#23252d',
       textStyle: { color: '#e6e7ea', fontSize: 12 },
       formatter: (p) =>
-        `<b>${p.name}</b> <span style="color:#8a8d96">${p.data.code}</span><br/>`
+        `<b>${escapeHtml(p.name)}</b> <span style="color:#8a8d96">${escapeHtml(p.data.code)}</span><br/>`
+        + (p.data.tagText ? `题材/行业: ${escapeHtml(p.data.tagText)}<br/>` : '')
         + `现价: ${fmtRaw(p.data.price)}<br/>涨跌: ${fmtPct(p.data.pct)}<br/>`
         + `换手: ${fmtNum(p.data.turnover, 1)}% · 量比: ${fmtNum(p.data.volRatio, 1)}<br/>`
         + `主力净流入: ${fmtInflow(p.data.inflow)}`,
@@ -70,23 +87,28 @@ export default function StockPanel({ sector, data, loading, error, sort, setSort
       width: '100%', height: '100%', top: 2, left: 2, right: 2, bottom: 2,
       label: {
         show: true,
-        formatter: (p) => `{name|${p.name}}\n{pct|${fmtPct(p.data.pct)}}`,
+        formatter: (p) => `{name|${p.name}}\n${p.data.tagText ? `{tag|${p.data.tagText}}\n` : ''}{pct|${fmtPct(p.data.pct)}}`,
         rich: {
           name: { color: '#fff', fontSize: 12, fontWeight: 600, lineHeight: 18 },
+          tag: { color: 'rgba(255,255,255,.72)', fontSize: 9, lineHeight: 12 },
           pct: { color: 'rgba(255,255,255,.85)', fontSize: 11, lineHeight: 15 },
         },
       },
       itemStyle: { borderColor: '#08090c', borderWidth: 2, gapWidth: 2, borderRadius: 4 },
-      data: list.slice(0, count).map((s) => ({
-        name: s.name, value: Math.abs(s.amount) || Math.abs(s.mainInflow) || 1,
-        code: s.code, price: s.price, pct: s.pct, turnover: s.turnover, volRatio: s.volRatio,
-        inflow: s.mainInflow,
-        itemStyle: { color: colorByPct(s.pct) },
-      })),
+      data: list.slice(0, count).map((s) => {
+        const tags = stockTags[s.code]?.displayTags || []
+        return {
+          name: s.name, value: Math.abs(s.amount) || Math.abs(s.mainInflow) || 1,
+          code: s.code, price: s.price, pct: s.pct, turnover: s.turnover, volRatio: s.volRatio,
+          inflow: s.mainInflow,
+          tagText: tags.map((tag) => tag.name).join(' · '),
+          itemStyle: { color: colorByPct(s.pct) },
+        }
+      }),
     }],
   })
-  const heatOption = useMemo(() => buildHeatOption(60), [heatSig])
-  const heatOptionFull = useMemo(() => buildHeatOption(120), [heatSig])
+  const heatOption = useMemo(() => buildHeatOption(60), [heatSig, tagSig])
+  const heatOptionFull = useMemo(() => buildHeatOption(120), [heatSig, tagSig])
   const heatEvents = { click: (params) => { const d = params && params.data; if (d && d.code) { setDetail({ code: d.code, name: d.name, price: d.price, pct: d.pct }); setFullscreen(false) } } }
 
   return (
@@ -130,7 +152,7 @@ export default function StockPanel({ sector, data, loading, error, sort, setSort
         </div>
       ) : (
         <div className="scroll">
-          <table className="tbl">
+          <table className="tbl stock-panel-table">
             <thead>
               <tr>
                 <th>名称</th>
@@ -144,11 +166,13 @@ export default function StockPanel({ sector, data, loading, error, sort, setSort
             <tbody>
               {rows.map((s, i) => (
                 <tr key={s.code} onClick={() => setDetail(s)}>
-                  <td>
-                    <span className="rank">{i + 1}</span>
-                    {s.name}
-                    {s.isLimitUp && <span className="tag tag-lu">涨停</span>}
-                    {s.isLimitDown && <span className="tag tag-ld">跌停</span>}
+                  <td className="stock-panel-identity">
+                    <span className="stock-panel-identity-inner">
+                      <span className="rank">{i + 1}</span>
+                      <StockName code={s.code} name={s.name} stopPropagation />
+                      {s.isLimitUp && <span className="tag tag-lu">涨停</span>}
+                      {s.isLimitDown && <span className="tag tag-ld">跌停</span>}
+                    </span>
                   </td>
                   <td>{fmtRaw(s.price)}</td>
                   <td className={pctClass(s.pct)}>{fmtPct(s.pct)}</td>

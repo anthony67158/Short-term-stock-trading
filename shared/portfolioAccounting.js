@@ -1,4 +1,10 @@
 import { deriveAccountValuation } from './accountValuation.js'
+import { beijingDayKey } from './tradingCalendar.js'
+import {
+  tradeIntentLabel,
+  tradeIntentOf,
+  tradeRecordType,
+} from './tradeIntent.js'
 
 // FIFO 配对做T流水，返回已实现收益、配对明细与未配平净头寸。
 export function computeTFlows(flows) {
@@ -39,6 +45,12 @@ export function computeTFlows(flows) {
         buyAt,
         sellAt,
         at: Math.max(buyAt, sellAt),
+        buyTradeId: buyLeg.id || null,
+        sellTradeId: sellLeg.id || null,
+        tPairId: buyLeg.tPairId
+          && buyLeg.tPairId === sellLeg.tPairId
+          ? buyLeg.tPairId
+          : null,
       })
       remain -= matched
       feeLeft -= feeLeft * (matched / (remain + matched))
@@ -48,11 +60,13 @@ export function computeTFlows(flows) {
     }
     if (remain > 0) {
       queue[flow.side].push({
+        id: flow.id || null,
         price: flow.price,
         qty: remain,
         fee: feeLeft,
         at: flow.at,
         cashApplied: flow.cashApplied === true,
+        tPairId: flow.tPairId || null,
       })
     }
   }
@@ -98,6 +112,175 @@ export function computeTFlows(flows) {
     openSellCashApplied: queue.sell.length > 0
       && queue.sell.every((item) => item.cashApplied),
   }
+}
+
+export function tradeActivityContext(
+  trades = [],
+  code = '',
+) {
+  const wantedCode = String(code || '')
+  const records = (Array.isArray(trades) ? trades : [])
+    .filter((record) =>
+      record?.code
+      && (!wantedCode || String(record.code) === wantedCode)
+    )
+  const recent = records
+    .slice()
+    .sort((left, right) =>
+      Number(right.at || right.sellAt || right.buyAt || 0)
+      - Number(left.at || left.sellAt || left.buyAt || 0)
+    )
+    .slice(0, 8)
+    .map((record) => ({
+      id: String(record.id || ''),
+      code: String(record.code || ''),
+      side: tradeRecordType(record) === 'SELL' ? 'sell'
+        : tradeRecordType(record) === 'BUY' ? 'buy'
+          : 'paired',
+      intent: tradeIntentOf(record),
+      label: tradeIntentLabel(record),
+      qty: Number(record.qty) || 0,
+      price: Number(
+        record.price
+        ?? record.sellPrice
+        ?? record.buyPrice,
+      ) || 0,
+      at: Number(record.at || record.sellAt || record.buyAt || 0),
+      tPairId: record.tPairId || null,
+      tPairTradeId: record.tPairTradeId || null,
+    }))
+
+  const groups = new Map()
+  const names = new Map(
+    records.map((record) => [
+      String(record.code || ''),
+      record.name || String(record.code || ''),
+    ]),
+  )
+  for (const record of records) {
+    const type = tradeRecordType(record)
+    if (
+      (type !== 'BUY' && type !== 'SELL')
+      || tradeIntentOf(record) !== 't'
+    ) continue
+    const at = Number(record.at || record.sellAt || record.buyAt || 0)
+    if (!(at > 0)) continue
+    const key = `${record.code}|${beijingDayKey(at)}`
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key).push({
+      id: String(record.id || ''),
+      side: type === 'BUY' ? 'buy' : 'sell',
+      price: Number(
+        record.price
+        ?? (type === 'BUY' ? record.buyPrice : record.sellPrice),
+      ) || 0,
+      qty: Number(record.qty) || 0,
+      fee: Number(record.fee)
+        || Number(type === 'BUY' ? record.buyFee : record.sellFee)
+        || 0,
+      cashApplied: record.cashApplied === true,
+      at,
+      tPairId: record.tPairId || null,
+    })
+  }
+
+  const pairRecords = []
+  let openBuyQty = 0
+  let openSellQty = 0
+  for (const [key, flows] of groups) {
+    const [groupCode, day] = key.split('|')
+    const manualGroups = new Map()
+    const fifoFlows = []
+    flows.forEach((flow) => {
+      if (flow.tPairId) {
+        if (!manualGroups.has(flow.tPairId)) {
+          manualGroups.set(flow.tPairId, [])
+        }
+        manualGroups.get(flow.tPairId).push(flow)
+      } else {
+        fifoFlows.push(flow)
+      }
+    })
+    let pairIndex = 0
+    const appendComputed = (computed, manualPair = false) => {
+      openBuyQty += Number(computed.openBuy) || 0
+      openSellQty += Number(computed.openSell) || 0
+      computed.pairList.forEach((pair) => {
+        pairRecords.push({
+          id: pair.tPairId
+            ? `classified-t:${pair.tPairId}`
+            : `classified-t:${groupCode}:${day}:${pairIndex}`,
+          type: 'T',
+          kind: 'T',
+          tradeIntent: 't',
+          classified: true,
+          manualPair,
+          tPairId: pair.tPairId || null,
+          buyTradeId: pair.buyTradeId || null,
+          sellTradeId: pair.sellTradeId || null,
+          code: groupCode,
+          name: names.get(groupCode) || groupCode,
+          qty: pair.qty,
+          buyPrice: pair.buyPrice,
+          sellPrice: pair.sellPrice,
+          buyFee: pair.buyFee,
+          sellFee: pair.sellFee,
+          grossPnl: pair.grossPnl,
+          netPnl: pair.netPnl,
+          realizedPnl: pair.netPnl,
+          tDir: pair.tDir,
+          buyAt: pair.buyAt,
+          sellAt: pair.sellAt,
+          at: pair.at,
+        })
+        pairIndex++
+      })
+    }
+    manualGroups.forEach((pairFlows) => {
+      appendComputed(computeTFlows(pairFlows), true)
+    })
+    if (fifoFlows.length) {
+      appendComputed(computeTFlows(fifoFlows), false)
+    }
+  }
+
+  const archived = records.filter((record) =>
+    tradeRecordType(record) === 'T'
+  )
+  const archivedPnl = archived.reduce(
+    (sum, record) =>
+      sum + (Number(record.realizedPnl ?? record.netPnl) || 0),
+    0,
+  )
+  const classifiedPnl = pairRecords.reduce(
+    (sum, record) => sum + (Number(record.realizedPnl) || 0),
+    0,
+  )
+  return {
+    schemaVersion: 'trade-activity.v1',
+    recent,
+    t: {
+      pairCount: archived.length + pairRecords.length,
+      classifiedPairCount: pairRecords.length,
+      realizedPnl: +(archivedPnl + classifiedPnl).toFixed(2),
+      openBuyQty: +openBuyQty.toFixed(3),
+      openSellQty: +openSellQty.toFixed(3),
+      pairRecords,
+    },
+  }
+}
+
+export function tradeAnalyticsRecords(trades = []) {
+  const source = Array.isArray(trades) ? trades : []
+  const context = tradeActivityContext(source)
+  const regular = source.filter((record) => {
+    const type = tradeRecordType(record)
+    return !(
+      (type === 'BUY' || type === 'SELL')
+      && tradeIntentOf(record) === 't'
+    )
+  })
+  return [...regular, ...context.t.pairRecords]
 }
 
 export function livePositionOf(holding, code) {
@@ -166,7 +349,9 @@ export function t1StatusOf(
       price: trade.price,
       qty: trade.qty,
       at,
-      kind: '建仓/加仓',
+      kind: tradeIntentOf(trade) === 't'
+        ? '做T买腿'
+        : '建仓/加仓',
     })
   }
   for (const position of (holding || []).filter((item) => item.code === code)) {

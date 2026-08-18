@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import {
   computeDailyAttribution,
   computeDailyFinance,
+  computeTodayOperationPnl,
   todayTradeCodes,
 } from '../shared/dailyFinance.js'
 
@@ -25,6 +26,132 @@ test('今日买卖现金流按含费实际支出和净入账计算', () => {
   assert.equal(result.buyCount, 1)
   assert.equal(result.sellCount, 1)
   assert.equal(result.netCashFlow, 489)
+})
+
+test('今日操作盈亏只汇总已实现的减仓清仓和做T净收益', () => {
+  const result = computeTodayOperationPnl({
+    now: at('2026-08-10T14:00:00'),
+    holdings: [],
+    trades: [
+      {
+        type: 'SELL',
+        tradeIntent: 'position',
+        code: '000001',
+        qty: 1,
+        realizedPnl: 300,
+        at: at('2026-08-10T10:00:00'),
+      },
+      {
+        type: 'T',
+        code: '000002',
+        qty: 1,
+        netPnl: 147,
+        at: at('2026-08-10T11:00:00'),
+      },
+      {
+        type: 'BUY',
+        code: '000003',
+        qty: 1,
+        at: at('2026-08-10T09:40:00'),
+      },
+      {
+        type: 'SELL',
+        tradeIntent: 'position',
+        code: '000004',
+        qty: 1,
+        realizedPnl: 999,
+        at: at('2026-08-07T10:00:00'),
+      },
+    ],
+  })
+
+  assert.deepEqual(result, {
+    total: 447,
+    positionPnl: 300,
+    tPnl: 147,
+    positionCount: 1,
+    tCount: 1,
+    realizedCount: 2,
+  })
+})
+
+test('今日操作盈亏纳入已配对但尚未结算的做T流水', () => {
+  const result = computeTodayOperationPnl({
+    now: at('2026-08-10T14:00:00'),
+    holdings: [{
+      code: '600000',
+      tFlows: [
+        {
+          id: 'buy-today',
+          side: 'buy',
+          price: 10,
+          qty: 1,
+          fee: 5,
+          at: at('2026-08-10T10:00:00'),
+        },
+        {
+          id: 'sell-today',
+          side: 'sell',
+          price: 11,
+          qty: 1,
+          fee: 6,
+          at: at('2026-08-10T11:00:00'),
+        },
+        {
+          id: 'open-buy',
+          side: 'buy',
+          price: 9.8,
+          qty: 1,
+          fee: 5,
+          at: at('2026-08-10T13:00:00'),
+        },
+      ],
+    }],
+    trades: [],
+  })
+
+  assert.equal(result.total, 89)
+  assert.equal(result.positionPnl, 0)
+  assert.equal(result.tPnl, 89)
+  assert.equal(result.tCount, 1)
+  assert.equal(result.realizedCount, 1)
+})
+
+test('今日操作盈亏按手动选择的做T配对计算差价且不重复计算卖出盈亏', () => {
+  const result = computeTodayOperationPnl({
+    now: at('2026-08-10T14:00:00'),
+    holdings: [],
+    trades: [
+      {
+        id: 'manual-buy',
+        type: 'BUY',
+        tradeIntent: 't',
+        tPairId: 'pair-1',
+        code: '600000',
+        qty: 1,
+        price: 10,
+        fee: 5,
+        at: at('2026-08-10T10:00:00'),
+      },
+      {
+        id: 'manual-sell',
+        type: 'SELL',
+        tradeIntent: 't',
+        tPairId: 'pair-1',
+        code: '600000',
+        qty: 1,
+        price: 11,
+        fee: 6,
+        realizedPnl: 480,
+        at: at('2026-08-10T11:00:00'),
+      },
+    ],
+  })
+
+  assert.equal(result.total, 89)
+  assert.equal(result.positionPnl, 0)
+  assert.equal(result.tPnl, 89)
+  assert.equal(result.tCount, 1)
 })
 
 test('较前收收益按持仓市值和当日现金流还原前收资产', () => {

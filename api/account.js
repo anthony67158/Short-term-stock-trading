@@ -2,14 +2,10 @@ import { put, list, del, readJsonStrict, hasStorage } from './_blob.js';
 import { sendJson, preflight } from './_lib.js';
 import { createHash } from 'crypto';
 import {
-  ADVICE_REVIEW_DISABLED_CODES,
-  AUTO_CONFIG_KEYS,
-  AUTO_CONFIG_UPDATED_AT,
   mergeAutoRefreshSettings,
   newerAutoRefreshPatch,
 } from '../shared/adviceAutoRefreshPolicy.js';
 import { adviceEntryMatchesMode } from '../shared/adviceModeContext.js';
-import { disabledAdviceReviewCodes } from '../shared/adviceReviewPolicy.js';
 import { accountTradeStateFingerprint } from '../shared/accountSync.js';
 import {
   mergeReviewsByTimestamp,
@@ -77,14 +73,6 @@ export function accountSyncDelta(data = {}, since = 0) {
   const decisionLog = (data.decisionLog || []).filter((entry) =>
     newestStamp(entry, ['outcomeUpdatedAt', 'verifiedAt', 'executedAt', 'at']) > after
   );
-  const settings = {};
-  for (const key of [AUTO_CONFIG_UPDATED_AT, ...AUTO_CONFIG_KEYS]) {
-    if (Object.prototype.hasOwnProperty.call(data.settings || {}, key)) {
-      settings[key] = key === ADVICE_REVIEW_DISABLED_CODES
-        ? disabledAdviceReviewCodes(data.settings)
-        : data.settings[key];
-    }
-  }
   return {
     advice,
     adviceLog,
@@ -92,7 +80,6 @@ export function accountSyncDelta(data = {}, since = 0) {
     reviews: reviewsAfter(data.reviews, after),
     // 预警只有 166 KiB，整组返回可覆盖旧记录缺少 updatedAt 的兼容场景。
     alerts: Array.isArray(data.alerts) ? data.alerts : [],
-    settings,
     batchProgress: data.batchProgress || null,
   };
 }
@@ -162,6 +149,27 @@ export function applyClientAccountSave(account, incoming, baseRevision) {
   if (prev.jobs && typeof prev.jobs === 'object') merged.jobs = prev.jobs;
   if (prev.jobWorker && typeof prev.jobWorker === 'object') merged.jobWorker = prev.jobWorker;
   if (prev.activeAdviceBatchId) merged.activeAdviceBatchId = prev.activeAdviceBatchId;
+  if (
+    prev.portfolioAnalysisJob
+    && typeof prev.portfolioAnalysisJob === 'object'
+  ) {
+    merged.portfolioAnalysisJob = prev.portfolioAnalysisJob;
+  }
+  if (
+    prev.portfolioAnalysisLatest
+    && typeof prev.portfolioAnalysisLatest === 'object'
+  ) {
+    merged.portfolioAnalysisLatest = prev.portfolioAnalysisLatest;
+  }
+  if (Array.isArray(prev.portfolioAnalysisHistory)) {
+    merged.portfolioAnalysisHistory = prev.portfolioAnalysisHistory;
+  }
+  if (
+    prev.portfolioAnalysisReview
+    && typeof prev.portfolioAnalysisReview === 'object'
+  ) {
+    merged.portfolioAnalysisReview = prev.portfolioAnalysisReview;
+  }
   if (prev.adviceDailyReport?.summary?.text) {
     merged.adviceDailyReport = prev.adviceDailyReport;
   }
@@ -218,6 +226,11 @@ export function applyClientAccountSave(account, incoming, baseRevision) {
   );
   merged.adviceLog = mergeAccountEvents(incoming.adviceLog, prev.adviceLog, 500);
   merged.decisionLog = mergeAccountEvents(incoming.decisionLog, prev.decisionLog, 1000);
+  merged.adviceReviewLog = mergeAccountEvents(
+    incoming.adviceReviewLog,
+    prev.adviceReviewLog,
+    500,
+  );
   merged.alerts = mergeAccountAlerts(incoming.alerts, prev.alerts);
   account.data = merged;
   account.clientRevision = currentRevision + 1;

@@ -21,6 +21,7 @@ const hasOwn = (obj, key) => !!obj && Object.prototype.hasOwnProperty.call(obj, 
 export const ROLES = {
   chat:    { envs: ['LLM_MODEL'],     def: 'DeepSeek-V3.2-Pro', label: '对话/盘面分析' },
   advisor: { envs: ['ADVISOR_MODEL'], def: 'DeepSeek-V4-Pro',   label: '操盘军师(深度研判)' },
+  portfolio: { envs: ['PORTFOLIO_MODEL'], def: 'DeepSeek-V4-Pro', label: '持仓分布分析' },
   agent:   { envs: ['AGENT_MODEL'],   def: 'Qwen3-Max-A',       label: '智能体/策略日报(需函数调用)' },
   judge:   { envs: ['JUDGE_MODEL'],   def: 'gemini-2.5-flash',  label: '交易时机判定(确认闸门)' },
 };
@@ -41,6 +42,7 @@ function envConfig() {
     models,
     reasoning,
     endpoints: [],   // 多端点资源池(默认空 → 走单 baseUrl/apiKey);由前端配置写入 OSS
+    primaryMaxInflight: 2,
     source: 'env',
     updatedAt: 0,
   };
@@ -118,6 +120,10 @@ function merge(base, over) {
     models,
     reasoning,
     endpoints,
+    primaryMaxInflight: Math.max(
+      1,
+      Math.min(20, Number(over.primaryMaxInflight ?? base.primaryMaxInflight) || 2),
+    ),
     source: over.__stored ? 'oss' : base.source,
     updatedAt: over.updatedAt || base.updatedAt,
   };
@@ -192,6 +198,7 @@ export async function saveConfig(patch = {}) {
     models: { ...cur.models },
     reasoning: { ...cur.reasoning },
     endpoints: Array.isArray(cur.endpoints) ? cur.endpoints.slice() : [],
+    primaryMaxInflight: cur.primaryMaxInflight || 2,
     judgeEndpoint: resolveJudgeEndpoint(cur),
     updatedAt: Date.now(),
   };
@@ -200,6 +207,12 @@ export async function saveConfig(patch = {}) {
   }
   if (patch.reasoning) for (const role of Object.keys(ROLES)) {
     if (patch.reasoning[role] != null) next.reasoning[role] = !!patch.reasoning[role];
+  }
+  if (patch.primaryMaxInflight != null) {
+    next.primaryMaxInflight = Math.max(
+      1,
+      Math.min(20, Number(patch.primaryMaxInflight) || 2),
+    );
   }
   if (hasOwn(patch, 'judgeEndpoint')) {
     const previous = resolveJudgeEndpoint(cur) || {};
@@ -276,6 +289,7 @@ export function publicView() {
     hasKey: !!c.apiKey,
     models: c.models,
     reasoning: c.reasoning || {},
+    primaryMaxInflight: c.primaryMaxInflight || 2,
     judgeEndpoint: (() => {
       const endpoint = resolveJudgeEndpoint(c);
       if (!endpoint) return null;

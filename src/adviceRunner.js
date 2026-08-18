@@ -28,8 +28,6 @@ export function getRunningList() {
 }
 // 取本次会话内刚跑完的结果（含 error/adviceMissing/truncated 等瞬时态；跨刷新则读 adviceCache）
 export function getResult(code) { return (code && results.get(code)) || null }
-// 组件消费完瞬时结果后可清掉，避免旧结果盖住后续从缓存恢复的值（可选）
-export function clearResult(code) { if (code) { results.delete(code); } }
 export function cancelAdvice(code) {
   const record = code && running.get(code)
   if (!record) return false

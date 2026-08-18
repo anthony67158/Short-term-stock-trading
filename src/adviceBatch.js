@@ -22,6 +22,12 @@ import {
   generationOptions,
   validateBatchMode,
 } from '../shared/adviceBatchPolicy.js'
+import {
+  activeAdviceCancellationTargets,
+  beginAdviceCancellation,
+  completeAdviceCancellation,
+  settleQueuedAdviceCancellations,
+} from '../shared/adviceCancellation.js'
 
 // 本地兜底并发不再写死为 1:改为「动态并行填槽」——容量 = 端点数 − 非本批占用数,
 // 谁跑完就补谁的槽,与服务端 drainAccount 的调度模型一致(见 runBatchAdvice 末尾的 worker)。
@@ -37,10 +43,16 @@ const state = {
   items: [],           // 有序:每只 {code, name, status:'pending'|'running'|'ok'|'fail'|'skipped'}
   startedAt: 0, finishedAt: 0,
   cancelRequested: false,
+  cancelError: '',
   batchId: '',
   deepMode: false,
   serverMode: false,   // true=进度来自服务端(本机点了「服务端生成」或另一设备正在生成,经云端回灌)
   _cloudAt: 0,         // 已消费的云端进度时间戳(去重/防旧盖新)
+  _submissionPromise: null,
+  _cancelingCodes: new Set(),
+  _cancelAllRequested: false,
+  _cancelBatchPromise: null,
+  _cancelOnePromises: new Map(),
   concurrency: 1,      // 并发上限=服务端 advisor 端点数(云端进度回灌覆盖;首屏由 seedConcurrency 预置)
 }
 const subs = new Set()
@@ -67,6 +79,7 @@ export function getBatchState() {
     items: state.items.map((x) => ({ ...x })),
     startedAt: state.startedAt, finishedAt: state.finishedAt,
     cancelRequested: state.cancelRequested,
+    cancelError: state.cancelError,
     batchId: state.batchId,
     deepMode: state.deepMode,
     serverMode: state.serverMode,
@@ -76,45 +89,180 @@ export function getBatchState() {
 }
 export function isBatchRunning() { return state.running }
 // 取消整批:
-//   · 服务端模式 → 通知 FC 取消全部活跃任务(queued 立即取消、running 协作式停),状态经云端回灌;
-//   · 本地模式 → 置 cancelRequested,已在途那只跑完即止。
-export function cancelBatch() {
-  if (!state.running) return
+//   · 服务端模式 → 按 jobId 取消所有跨批次活跃任务并等待云端确认;
+//   · 本地模式 → 立即 Abort 所有在途请求并停止后续派发。
+function prepareBatchCancellation() {
+  const previous = new Map(
+    state.items.map((item) => [String(item.code), { ...item }]),
+  )
+  const targets = activeAdviceCancellationTargets(state.items)
+  for (const target of targets) state._cancelingCodes.add(target.code)
+  state._cancelAllRequested = true
+  const canceling = beginAdviceCancellation(state.items)
+  state.items = canceling.items
+  state.cancelRequested = true
+  state.cancelError = ''
+  notify()
+  return { previous, targets, abortCodes: canceling.abortCodes }
+}
+
+function cancelLocalBatch(prepared) {
+  const settled = settleQueuedAdviceCancellations(state.items)
+  state.items = settled.items
+  for (const code of prepared.abortCodes) cancelAdvice(code)
+  state.skipped = state.items.filter((item) => item.status === 'skipped').length
+  state.done = state.items.filter((item) =>
+    ['ok', 'fail', 'skipped'].includes(item.status)
+  ).length
+  notify()
+  return {
+    ok: true,
+    confirmed: true,
+    canceled: prepared.targets.length,
+  }
+}
+
+async function cancelBatchInternal() {
+  if (!state.running) return { ok: true, confirmed: true, canceled: 0 }
+  let prepared = prepareBatchCancellation()
   if (state.serverMode) {
-    cancelServerAdvice([], state.batchId)
-    state.cancelRequested = true
-    for (const item of state.items) {
-      if (item.status === 'pending' || item.status === 'queued' || item.status === 'running' || item.status === 'canceling') {
-        item.status = 'skipped'
-      }
+    if (state._submissionPromise) {
+      try { await state._submissionPromise } catch { /* 后续按当前模式处理 */ }
     }
-    state.skipped = state.items.filter((item) => item.status === 'skipped').length
-    state.done = state.items.filter((item) => ['ok', 'fail', 'skipped'].includes(item.status)).length
-    state.current = new Set()
+    if (!state.serverMode) {
+      state._cancelingCodes.clear()
+      prepared = prepareBatchCancellation()
+      return cancelLocalBatch(prepared)
+    }
+    const currentTargets = activeAdviceCancellationTargets(state.items)
+    const result = await cancelServerAdvice(currentTargets)
+    if (result.progress) applyCloudBatch(result.progress, true)
+    for (const target of [...prepared.targets, ...currentTargets]) {
+      state._cancelingCodes.delete(target.code)
+    }
+    state._cancelAllRequested = false
+    state.cancelRequested = false
+    if (!result.confirmed) {
+      state.cancelError = result.error || '停止请求未确认，请重试'
+      for (const item of state.items) {
+        if (item.status !== 'canceling') continue
+        const old = prepared.previous.get(String(item.code))
+        item.status = item.cancelPreviousStatus || old?.status || 'running'
+        item.phase = state.cancelError
+        delete item.cancelPreviousStatus
+      }
+      notify()
+    }
+    return result
+  }
+  return cancelLocalBatch(prepared)
+}
+
+export function cancelBatch() {
+  if (state._cancelBatchPromise) return state._cancelBatchPromise
+  const operation = cancelBatchInternal()
+  state._cancelBatchPromise = operation
+  const cleanup = () => {
+    if (state._cancelBatchPromise === operation) {
+      state._cancelBatchPromise = null
+    }
+  }
+  void operation.then(cleanup, cleanup)
+  return operation
+}
+
+function cancelLocalOne(key) {
+  cancelAdvice(key)
+  state._cancelingCodes.delete(key)
+  const index = state.items.findIndex(
+    (item) => String(item.code) === key,
+  )
+  if (index < 0) {
+    return { ok: true, confirmed: true, canceled: 1 }
+  }
+  const item = state.items[index]
+  if (['pending', 'queued'].includes(item.status)) {
+    const completed = completeAdviceCancellation(item)
+    state.items[index] = completed.item
+    if (completed.changed) {
+      state.skipped++
+      state.done++
+    }
+  } else if (['running', 'canceling'].includes(item.status)) {
+    state.items[index] = {
+      ...item,
+      cancelPreviousStatus: item.cancelPreviousStatus || item.status,
+      status: 'canceling',
+      phase: '正在取消生成',
+    }
+  }
+  if (state.done >= state.total) {
     state.running = false
     state.finishedAt = Date.now()
-    notify()
-    return
   }
-  state.cancelRequested = true; notify()
+  notify()
+  return { ok: true, confirmed: true, canceled: 1 }
 }
-// 取消单只(服务端模式):只取消这一只,其余继续。乐观地把该项标记为 skipped,真实态随云端回灌覆盖。
-export function cancelOne(code) {
-  if (!code) return
-  if (state.serverMode) cancelServerAdvice([String(code)], state.batchId)
-  else cancelAdvice(String(code))
-  const it = state.items.find((x) => x.code === code)
-  if (it && (it.status === 'pending' || it.status === 'queued' || it.status === 'running')) {
-    it.status = 'skipped'
-    state.current.delete(String(code))
-    state.skipped = state.items.filter((item) => item.status === 'skipped').length
-    state.done = state.items.filter((item) => ['ok', 'fail', 'skipped'].includes(item.status)).length
-    if (state.done >= state.total) {
-      state.running = false
-      state.finishedAt = Date.now()
-    }
+
+async function cancelOneInternal(code) {
+  if (!code) return { ok: true, confirmed: true, canceled: 0 }
+  const key = String(code)
+  let it = state.items.find((item) => String(item.code) === key)
+  if (state.serverMode && it) {
+    const previous = { ...it }
+    state._cancelingCodes.add(key)
+    it.cancelPreviousStatus = it.status
+    it.status = 'canceling'
+    it.phase = '正在确认停止'
     notify()
+    if (state._submissionPromise) {
+      try { await state._submissionPromise } catch { /* 后续按当前模式处理 */ }
+    }
+    if (!state.serverMode) {
+      state._cancelingCodes.delete(key)
+      return cancelLocalOne(key)
+    }
+    it = state.items.find((item) => String(item.code) === key)
+    const result = await cancelServerAdvice(it ? [it] : [])
+    if (result.progress) applyCloudBatch(result.progress, true)
+    state._cancelingCodes.delete(key)
+    if (!result.confirmed) {
+      const current = state.items.find(
+        (item) => String(item.code) === key,
+      )
+      if (current?.status === 'canceling') {
+        current.status = current.cancelPreviousStatus
+          || previous.status
+          || 'running'
+        current.phase = result.error || '停止失败，点击重试'
+        delete current.cancelPreviousStatus
+      }
+      notify()
+    }
+    return result
   }
+  return cancelLocalOne(key)
+}
+
+// 取消单只:云端等待权威终态，本地等待 Abort 后由原 worker 结算。
+export function cancelOne(code) {
+  const key = String(code || '')
+  if (!key) return Promise.resolve({
+    ok: true,
+    confirmed: true,
+    canceled: 0,
+  })
+  const existing = state._cancelOnePromises.get(key)
+  if (existing) return existing
+  const operation = cancelOneInternal(key)
+  state._cancelOnePromises.set(key, operation)
+  const cleanup = () => {
+    if (state._cancelOnePromises.get(key) === operation) {
+      state._cancelOnePromises.delete(key)
+    }
+  }
+  void operation.then(cleanup, cleanup)
+  return operation
 }
 // 失败重生成:把 items 里 status==='fail' 的重新入队(服务端优先)。返回重生成的只数。
 export function regenerateFailed(quoteMap) {
@@ -131,7 +279,7 @@ export function regenerateFailed(quoteMap) {
 //   · 仅当云端进度的 at 比已消费的更新才应用(防旧盖新/重复渲染);
 //   · 本机正在跑【本地】批量(serverMode=false 且 running)时不被云端覆盖,避免两套进度打架;
 //   · finished 后 8s 由 UI 自行淡出(与本地一致)。
-export function applyCloudBatch(bp) {
+export function applyCloudBatch(bp, force = false) {
   if (!bp || typeof bp !== 'object') return
   const at = Number(bp.at || 0)
   if (state.running && !state.serverMode) return           // 本机本地批量进行中 → 不打架
@@ -141,14 +289,18 @@ export function applyCloudBatch(bp) {
     state.serverMode = true
     state.running = false
     state.deepMode = false
+    state.cancelRequested = false
+    state.cancelError = ''
     state.total = 0; state.done = 0; state.ok = 0; state.fail = 0; state.skipped = 0
     state.current = new Set(); state.items = []; state.startedAt = 0; state.finishedAt = 0
     if (hadVisibleBatch) notify()
     return
   }
-  if (!at || at <= state._cloudAt) return                 // 不是更新的进度 → 忽略
-  state._cloudAt = at
+  if (!force && (!at || at <= state._cloudAt)) return     // 不是更新的进度 → 忽略
+  state._cloudAt = Math.max(state._cloudAt, at)
   state.serverMode = true
+  state.cancelRequested = state._cancelAllRequested
+  state.cancelError = ''
   state.batchId = String(bp.batchId || state.batchId || '')
   state.deepMode = !!bp.deepMode
   if (Number(bp.concurrency) > 0) state.concurrency = Number(bp.concurrency)   // 权威并发上限=服务端 advisor 端点数
@@ -160,6 +312,16 @@ export function applyCloudBatch(bp) {
   state.skipped = bp.skipped || 0
   state.current = new Set(Array.isArray(bp.current) ? bp.current : [])
   state.items = Array.isArray(bp.items) ? bp.items.map((x) => ({ ...x })) : []
+  for (const item of state.items) {
+    if (
+      state._cancelingCodes.has(String(item.code))
+      && ['pending', 'queued', 'running'].includes(item.status)
+    ) {
+      item.cancelPreviousStatus = item.status
+      item.status = 'canceling'
+      item.phase = '正在确认停止'
+    }
+  }
   state.startedAt = bp.startedAt || at
   state.finishedAt = bp.running ? 0 : (bp.finishedAt || at)
   notify()
@@ -236,6 +398,9 @@ export async function runBatchAdvice(codes, quoteMap, opts = {}) {
     state.serverMode = true
     state.running = true
     state.cancelRequested = false
+    state.cancelError = ''
+    state._cancelingCodes.clear()
+    state._cancelAllRequested = false
     state.batchId = batchId
     state.deepMode = generation.deepMode
     state.total = uniq.length
@@ -244,18 +409,28 @@ export async function runBatchAdvice(codes, quoteMap, opts = {}) {
     state.items = uniq.map((code) => ({
       code,
       name: nameOf(code),
+      batchId,
       status: 'pending',
       phase: '正在提交云端任务',
     }))
     state.startedAt = Date.now(); state.finishedAt = 0
     state._cloudAt = 0
     notify()
-    const submission = await triggerServerAdvice(uniq, {
+    const submissionPromise = triggerServerAdvice(uniq, {
       scope: opts.scope || 'all',
       force: true,
       batchId,
       deepMode: generation.deepMode,
     })
+    state._submissionPromise = submissionPromise
+    let submission
+    try {
+      submission = await submissionPromise
+    } finally {
+      if (state._submissionPromise === submissionPromise) {
+        state._submissionPromise = null
+      }
+    }
     if (submission === true || submission?.ok || submission?.queued) {
       return {
         status: 'started',
@@ -263,6 +438,20 @@ export async function runBatchAdvice(codes, quoteMap, opts = {}) {
         queued: !!submission?.queued,
         error: submission?.error || '',
       }
+    }
+    if (state._cancelAllRequested) {
+      for (const item of state.items) {
+        if (['pending', 'queued', 'running', 'canceling'].includes(item.status)) {
+          item.status = 'skipped'
+        }
+      }
+      state._cancelingCodes.clear()
+      state._cancelAllRequested = false
+      state.cancelRequested = false
+      state.running = false
+      state.finishedAt = Date.now()
+      notify()
+      return { status: 'canceled', mode: 'server' }
     }
     state.running = false
     notify()
@@ -273,6 +462,9 @@ export async function runBatchAdvice(codes, quoteMap, opts = {}) {
   state.serverMode = false
   state.running = true
   state.cancelRequested = false
+  state.cancelError = ''
+  state._cancelingCodes.clear()
+  state._cancelAllRequested = false
   state.batchId = `local_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
   state.deepMode = generation.deepMode
   state.total = uniq.length
@@ -284,7 +476,8 @@ export async function runBatchAdvice(codes, quoteMap, opts = {}) {
 
   // 单只任务:构造 spec(持仓走 hold,自选走 buy)→ 后台 runner → await 完成
   const runOne = async (code) => {
-    if (state.cancelRequested) { setItemStatus(code, 'skipped'); state.skipped++; state.done++; notify(); return }
+    const queuedItem = state.items.find((item) => item.code === code)
+    if (!queuedItem || queuedItem.status === 'skipped') return
     const name = nameOf(code)
     const spec = holdSet.has(code)
       ? buildHoldSpec(code, name, quoteMap || {}, portfolio, st.account)
@@ -301,8 +494,18 @@ export async function runBatchAdvice(codes, quoteMap, opts = {}) {
         new Promise((resolve) => setTimeout(resolve, generation.timeoutMs)),
       ])
       const item = state.items.find((entry) => entry.code === code)
-      if (item && item.status === 'skipped') {
-        state.skipped++
+      if (
+        item
+        && (
+          state.cancelRequested
+          || item.status === 'canceling'
+          || item.status === 'skipped'
+        )
+      ) {
+        const index = state.items.indexOf(item)
+        const completed = completeAdviceCancellation(item)
+        state.items[index] = completed.item
+        if (completed.changed) state.skipped++
         return
       }
       // ★成功判定★ 直接读本次运行的权威结果(runner 的 results),不再用脆弱的「60 秒新鲜度」:
@@ -323,7 +526,22 @@ export async function runBatchAdvice(codes, quoteMap, opts = {}) {
       setItemStatus(code, good ? 'ok' : 'fail')
       good ? state.ok++ : state.fail++
     } catch {
-      setItemStatus(code, 'fail'); state.fail++
+      const item = state.items.find((entry) => entry.code === code)
+      if (
+        item
+        && (
+          state.cancelRequested
+          || item.status === 'canceling'
+          || item.status === 'skipped'
+        )
+      ) {
+        const index = state.items.indexOf(item)
+        const completed = completeAdviceCancellation(item)
+        state.items[index] = completed.item
+        if (completed.changed) state.skipped++
+      } else {
+        setItemStatus(code, 'fail'); state.fail++
+      }
     } finally {
       state.current.delete(code); state.done++; notify()
     }
@@ -345,6 +563,8 @@ export async function runBatchAdvice(codes, quoteMap, opts = {}) {
     while (cursor < uniq.length) {
       if (state.cancelRequested) { drainMarkSkipped(); break }
       const code = uniq[cursor++]
+      const item = state.items.find((entry) => entry.code === code)
+      if (!item || item.status === 'skipped') continue
       await runOne(code)
     }
   }
@@ -358,6 +578,9 @@ export async function runBatchAdvice(codes, quoteMap, opts = {}) {
   } finally {
     // ★无论 worker 是否抛错,都必须复位 running,否则整个批量入口会被永久锁死。
     state.running = false
+    state.cancelRequested = false
+    state._cancelAllRequested = false
+    state._cancelingCodes.clear()
     state.finishedAt = Date.now()
     notify()
   }

@@ -5,6 +5,9 @@ import {
   buildAdviceWorkerEvent,
   dispatchAdviceWorker,
 } from '../api/_advice_dispatch.js'
+import {
+  shouldContinueAdviceWorker,
+} from '../api/_jobs.js'
 
 test('建议Worker使用FC异步调用并携带最小账号事件', async () => {
   const calls = []
@@ -47,4 +50,19 @@ test('建议Worker缺少内部密钥时拒绝伪异步调度', async () => {
     }),
     /内部调度密钥未配置/,
   )
+})
+
+test('本轮达到启动预算但仍有排队任务时立即接力Worker', () => {
+  assert.equal(shouldContinueAdviceWorker({
+    jobs: {
+      a: { status: 'done' },
+      b: { status: 'queued' },
+    },
+  }), true)
+  assert.equal(shouldContinueAdviceWorker({
+    jobs: {
+      a: { status: 'done' },
+      b: { status: 'failed' },
+    },
+  }), false)
 })

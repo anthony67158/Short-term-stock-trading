@@ -6,7 +6,13 @@ import { api } from './apiBase'
 // 这里在「预警中心 · 量化」页打开时拉取展示，支持单条删除 + 一键清空。
 // 因为汇报由后台定时任务在另一个进程生成，故不能像预警通知那样存在内存，必须从后端拉取。
 
-let state = { reports: [], loading: false, loaded: false, error: '' }
+let state = {
+  reports: [],
+  workflow: null,
+  loading: false,
+  loaded: false,
+  error: '',
+}
 const listeners = new Set()
 function emit() { state = { ...state }; listeners.forEach((l) => { try { l() } catch (e) { console.error('[store] listener error', e) } }) }
 
@@ -24,6 +30,7 @@ export const quantReportStore = {
       const j = await r.json().catch(() => null)
       if (j && j.ok && Array.isArray(j.reports)) {
         state.reports = j.reports
+        state.workflow = j.workflow || null
       } else {
         state.error = (j && j.error) || '加载失败'
       }

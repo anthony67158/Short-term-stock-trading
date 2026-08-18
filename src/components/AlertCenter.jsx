@@ -77,7 +77,14 @@ export default function AlertCenter({ onClose }) {
                     title={n.code ? '点击查看个股详情与K线' : undefined}>
                     <div className="an-dot" />
                     <div className="an-main">
-                      <div className="an-title"><span>{n.name || n.code}</span>{n.code && <span className="an-jump"><Icon name="chevronRight" size={12} /></span>}</div>
+                      <div className="an-title">
+                        <StockName
+                          code={n.code}
+                          name={n.name || n.code}
+                          interactive={false}
+                        />
+                        {n.code && <span className="an-jump"><Icon name="chevronRight" size={12} /></span>}
+                      </div>
                       <div className="an-body">{n.body}</div>
                       <div className="an-time">{new Date(n.at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</div>
                     </div>
@@ -103,8 +110,11 @@ export default function AlertCenter({ onClose }) {
                 <div className={'alert-rule dir-' + m.dir + (a.enabled ? '' : ' off') + (m.near ? ' is-near' : '')} key={a.id}>
                   <button type="button" className="ar-main ar-main-clickable" onClick={() => openStockDetail(a.code, a.name)} title="点击查看个股详情与K线">
                     <div className="ar-name">
-                      <span>{a.name || a.code}</span>
-                      <span className="ar-code">{a.code}</span>
+                      <StockName
+                        code={a.code}
+                        name={a.name || a.code}
+                        interactive={false}
+                      />
                       <span className="ar-dir">{m.dirLabel}</span>
                       {Number(a.judgeCount) > 0 && (
                         <span className="ar-badge judge">

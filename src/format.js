@@ -4,16 +4,6 @@ export function finiteNum(v, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
-export function fmtYi(v) {
-  // 元 -> 亿
-  const n = Number(v);
-  if (!Number.isFinite(n)) return '--';
-  const yi = n / 1e8;
-  if (Math.abs(yi) >= 100) return yi.toFixed(0);
-  if (Math.abs(yi) >= 1) return yi.toFixed(2);
-  return (n / 1e4).toFixed(0) + 'w';
-}
-
 export function fmtInflow(v) {
   const n = Number(v);
   if (!Number.isFinite(n)) return '--';

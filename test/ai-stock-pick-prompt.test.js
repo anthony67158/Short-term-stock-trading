@@ -70,3 +70,29 @@ test('AI选股不得把未通过统一策略的候选升级为可执行', () => 
   assert.match(prompt, /不得升级为“可执行”/)
   assert.match(prompt, /failedRules/)
 })
+
+test('AI选股只解释确定性龙头身份且买点仍由量化与策略闸门决定', () => {
+  const prompt = buildUserPrompt('scan_pick', {
+    candidates: [{
+      code: '600001',
+      conceptLeadership: {
+        conceptName: '机器人',
+        conceptStrength: 82,
+        role: 'leader',
+        roleLabel: '总龙头',
+        leaderScore: 86,
+        memberVerified: true,
+      },
+      strategySignal: {
+        passed: false,
+        failedRules: [{ field: 'quant.score', actual: 45, expected: 55 }],
+      },
+    }],
+  })
+
+  assert.match(prompt, /conceptLeadership/)
+  assert.match(prompt, /确定性/)
+  assert.match(prompt, /不得重新猜测或改写龙头身份/)
+  assert.match(prompt, /龙头身份不等于买点/)
+  assert.match(prompt, /量化与strategySignal/)
+})

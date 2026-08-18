@@ -5,6 +5,7 @@ import {
   computePortfolio,
   computeTFlows,
   livePositionOf,
+  tradeActivityContext,
   t1StatusOf,
 } from '../shared/portfolioAccounting.js';
 export {
@@ -70,6 +71,7 @@ export function buildHoldPayload(holding, code, name, portfolio, account, closed
   return {
     code, name, holdCost, holdQty, openTNet,
     ...t1,
+    tradeContext: tradeActivityContext(closed, code),
     account: { ...accountFrom(portfolio, account), stockWeight },
   };
 }

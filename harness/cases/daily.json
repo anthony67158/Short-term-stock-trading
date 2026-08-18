@@ -1,0 +1,109 @@
+{
+  "schemaVersion": "harness-case-set.v1",
+  "cases": [
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "daily-morning-grounded-summary",
+      "adapter": "daily",
+      "tags": ["daily", "market", "search-version"],
+      "input": {
+        "result": {
+          "day": "2026-08-17",
+          "session": "morning",
+          "sessionCn": "盘前早报",
+          "searchEnabled": true,
+          "searchConfigUpdatedAt": 100,
+          "report": {
+            "overview": "上证指数上涨0.6%，主力资金回流科技方向。",
+            "overseas": "纳指上涨1.1%，科技风险偏好改善。",
+            "strategy": "总仓位控制在六成，优先等待科技主线回踩确认。",
+            "risks": [
+              "量能未持续放大",
+              "高位题材分化"
+            ],
+            "sectors": [
+              {
+                "name": "AI/科技",
+                "rating": "看多",
+                "view": "资金回流",
+                "strategy": "回踩关注",
+                "risk": "高位分化"
+              },
+              {
+                "name": "房地产",
+                "rating": "看空",
+                "view": "资金流出",
+                "strategy": "回避",
+                "risk": "趋势偏弱"
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "searchEnabled": true,
+        "requiredSectors": ["AI/科技", "房地产"],
+        "requiredText": [
+          "2026-08-17",
+          "上证指数上涨0.6%",
+          "看多板块:AI/科技",
+          "看空板块:房地产",
+          "总仓位控制在六成"
+        ],
+        "forbiddenText": ["编造指数"]
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "daily-evening-search-disabled",
+      "adapter": "daily",
+      "tags": ["daily", "evening", "risk"],
+      "input": {
+        "result": {
+          "day": "2026-08-17",
+          "session": "evening",
+          "sessionCn": "收盘晚报",
+          "searchEnabled": false,
+          "searchConfigUpdatedAt": 0,
+          "report": {
+            "overview": "两市缩量震荡，涨跌家数接近平衡。",
+            "overseas": "海外数据等待更新。",
+            "strategy": "维持五成仓位，次日只做确认后的强势方向。",
+            "risks": [
+              "缩量环境突破可靠性不足"
+            ],
+            "sectors": [
+              {
+                "name": "创新药",
+                "rating": "看多",
+                "view": "资金连续流入",
+                "strategy": "回踩观察",
+                "risk": "追高风险"
+              },
+              {
+                "name": "周期资源",
+                "rating": "中性",
+                "view": "价格分化",
+                "strategy": "等待",
+                "risk": "商品波动"
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "searchEnabled": false,
+        "requiredSectors": ["创新药", "周期资源"],
+        "requiredText": [
+          "2026-08-17",
+          "两市缩量震荡",
+          "看多板块:创新药",
+          "维持五成仓位"
+        ],
+        "forbiddenText": ["检索参考"]
+      }
+    }
+  ]
+}

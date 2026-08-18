@@ -19,6 +19,7 @@ const stockDetail = read('src/components/StockDetail.jsx')
 const advicePresentation = read('src/components/AdvicePresentation.jsx')
 const dailyReport = read('src/components/DailyReport.jsx')
 const llmConfig = read('src/components/LLMConfig.jsx')
+const quantModelControl = read('src/components/QuantModelControl.jsx')
 const planTab = read('src/components/PlanTab.jsx')
 const reviewTab = read('src/components/ReviewTab.jsx')
 const fundFlowCanvas = read('src/components/FundFlowCanvas.jsx')
@@ -55,7 +56,60 @@ test('个股详情提供可访问的单股持续复核开关', () => {
   assert.match(legacyStyles, /\.advice-review-toggle\.on/)
 })
 
-test('白天模式建立明确表面层级并将遗留紫色变量统一映射到钴蓝系统', () => {
+test('军师建议头部固定为标题层与状态层且双端不随机换行', () => {
+  assert.match(stockDetail, /className="decide-primary"/)
+  assert.match(stockDetail, /className="decide-status"/)
+  assert.match(stockDetail, /formatQuantAsOf\(quantState\.result\.asOf\)/)
+  assert.match(stockDetail, /reviewEnabled \? '复核已开启' : '复核已关闭'/)
+  assert.doesNotMatch(stockDetail, /<span>持续复核<\/span>/)
+  assert.match(
+    legacyStyles,
+    /\.decide-primary,\s*\.decide-status\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/s,
+  )
+  assert.match(
+    legacyStyles,
+    /@media \(max-width:\s*540px\)\s*{[\s\S]*?\.decide-head\s*{[^}]*gap:\s*8px/s,
+  )
+})
+
+test('持仓与自选卡片共用真实股票题材标签且移动端可换行', () => {
+  assert.match(planTab, /<StockName[\s\S]{0,80}code={p\.code}/)
+  assert.match(planTab, /<StockName[\s\S]{0,80}code={h\.code}/)
+  assert.doesNotMatch(planTab, /<StockTags code={p\.code}[^>]*variant="card"/)
+  assert.doesNotMatch(planTab, /<StockTags code={h\.code}[^>]*variant="card"/)
+  assert.match(legacyStyles, /\.stock-theme-tags\s*{[^}]*flex-wrap:\s*wrap/s)
+  assert.match(legacyStyles, /\.stock-theme-tag\.concept/)
+  assert.match(legacyStyles, /\.stock-theme-tag\.industry/)
+})
+
+test('持仓与自选卡片顶部信息固定单行且长名称省略', () => {
+  assert.match(
+    legacyStyles,
+    /\.hold-head\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto[^}]*flex-wrap:\s*nowrap/s,
+  )
+  assert.match(
+    legacyStyles,
+    /\.hold-head-l\s*{[^}]*flex-wrap:\s*nowrap[^}]*overflow:\s*hidden/s,
+  )
+  assert.match(
+    legacyStyles,
+    /\.hold-pnl\s*{[^}]*flex-direction:\s*row[^}]*white-space:\s*nowrap/s,
+  )
+  assert.match(
+    legacyStyles,
+    /\.pc-top\s*{[^}]*flex-wrap:\s*nowrap/s,
+  )
+  assert.match(
+    legacyStyles,
+    /\.pc-name\s*{[^}]*flex-wrap:\s*nowrap[^}]*overflow:\s*hidden/s,
+  )
+  assert.match(
+    legacyStyles,
+    /\.pc-top-r\s*{[^}]*flex-direction:\s*row[^}]*white-space:\s*nowrap/s,
+  )
+})
+
+test('白天模式建立明确表面层级并将遗留强调色统一映射到钴蓝系统', () => {
   assert.match(
     tokens,
     /html\[data-theme="light"\]\s*{[\s\S]*?--color-paper:\s*oklch\(96% 0\.01 255\)[\s\S]*?--color-paper-2:\s*oklch\(99% 0\.004 255\)[\s\S]*?--color-paper-3:\s*oklch\(93\.5% 0\.012 255\)[\s\S]*?--color-rule:\s*oklch\(78% 0\.016 255\)/s,
@@ -130,7 +184,15 @@ test('持仓区共用页面边线、筛选栏留出安全区且卡片展示建�
   )
   assert.match(
     precision,
-    /\.plan-section \.ind-tabs\s*{[^}]*margin-top:\s*var\(--space-sm\)[^}]*padding:\s*0\s+var\(--space-2xs\)\s+var\(--space-xs\)/s,
+    /\.stock-group-filter-track\s*{[^}]*display:\s*flex[^}]*overflow:\s*hidden[^}]*padding:\s*var\(--space-2xs\)/s,
+  )
+  assert.match(
+    precision,
+    /\.stock-group-tabs-viewport\s*{[^}]*flex:\s*1 1 auto[^}]*min-width:\s*0[^}]*overflow-x:\s*auto/s,
+  )
+  assert.match(
+    precision,
+    /\.stock-group-filter \.stock-group-tabs\s*{[^}]*padding-inline-start:\s*var\(--space-2xs\)[^}]*border-inline-start:\s*1px solid var\(--color-rule-2\)/s,
   )
   assert.match(planTab, /function AdviceUpdatedAt\(\{ entry \}\)/)
   assert.equal((planTab.match(/<AdviceUpdatedAt entry=/g) || []).length, 2)
@@ -143,6 +205,21 @@ test('持仓区共用页面边线、筛选栏留出安全区且卡片展示建�
   assert.match(
     precision,
     /\.hold-item > \.pi-actions\s*{[^}]*margin-top:\s*auto/s,
+  )
+})
+
+test('置顶自选卡保留独立金色层级且不被普通卡背景覆盖', () => {
+  assert.match(
+    precision,
+    /\.plan-cand\.starred\s*{[^}]*border-color:\s*color-mix\([^}]*var\(--color-warning\)[^}]*background:\s*color-mix\([^}]*var\(--color-warning\)[^}]*box-shadow:\s*inset\s+0\s+3px\s+0/s,
+  )
+  assert.match(
+    precision,
+    /html\[data-theme="light"\] \.plan-cand\.starred\s*{[^}]*border-color:\s*color-mix\([^}]*var\(--color-warning\)[^}]*background:\s*color-mix\([^}]*var\(--color-warning\)/s,
+  )
+  assert.match(
+    precision,
+    /\.plan-cand\.starred \.pc-pin\.on\s*{[^}]*color:\s*var\(--color-warning\)/s,
   )
 })
 
@@ -263,11 +340,11 @@ test('移动端复合头部、分段按钮与批量进度使用稳定单列布�
   )
   assert.match(
     precision,
-    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.hold-head-actions\s*{[^}]*display:\s*grid[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)[^}]*width:\s*100%/s,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.portfolio-command-actions\s*{[^}]*display:\s*grid[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)[^}]*width:\s*100%/s,
   )
   assert.match(
     precision,
-    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.hold-head-actions \.advisor-score\s*{[^}]*grid-column:\s*1\s*\/\s*-1/s,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.portfolio-command-actions \.advisor-score\s*{[^}]*grid-column:\s*1\s*\/\s*-1/s,
   )
   assert.match(
     precision,
@@ -291,6 +368,23 @@ test('移动端复合头部、分段按钮与批量进度使用稳定单列布�
   )
 })
 
+test('移动端军师入口并入底部五栏导航且不再悬浮遮挡内容', () => {
+  assert.match(assistant, /className={'ai-fab'/)
+  assert.match(assistant, /<span className="ai-fab-text">军师<\/span>/)
+  assert.match(
+    precision,
+    /@media \(max-width:\s*900px\)\s*{[\s\S]*?\.nav-tabs\s*{[^}]*grid-template-columns:\s*repeat\(5,\s*minmax\(0,\s*1fr\)\)/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*900px\)\s*{[\s\S]*?\.ai-fab\s*{[^}]*bottom:\s*calc\(var\(--space-2xs\)\s*\+\s*env\(safe-area-inset-bottom\)\)[^}]*width:\s*calc\(20vw\s*-\s*var\(--space-2xs\)\)/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*900px\)\s*{[\s\S]*?\.ai-fab-text\s*{[^}]*display:\s*block/s,
+  )
+})
+
 test('移动端面板标题和说明采用单行省略而不是挤压操作按钮', () => {
   assert.match(
     precision,
@@ -306,14 +400,14 @@ test('移动端面板标题和说明采用单行省略而不是挤压操作按�
   )
 })
 
-test('移动端个股详情铺满视口且正文不叠加大块白色底', () => {
+test('移动端个股详情铺满视口且上下结构共用同一底色', () => {
   assert.match(
     precision,
     /html\[data-theme="light"\] \.detail-panel\s*{[^}]*background:\s*var\(--color-paper\)/s,
   )
   assert.match(
     precision,
-    /\.detail-panel \.detail-scroll,[\s\S]*?\.detail-panel \.detail-kline\s*{[^}]*background:\s*transparent/s,
+    /\.detail-panel \.modal-bar,[\s\S]*?\.detail-panel \.detail-footbar,[\s\S]*?\.detail-panel \.detail-kline\s*{[^}]*background:\s*transparent/s,
   )
   assert.match(
     precision,
@@ -330,6 +424,28 @@ test('移动端个股详情铺满视口且正文不叠加大块白色底', () =>
   assert.match(
     precision,
     /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.detail-panel \.detail-kline-head\s*{[^}]*flex-wrap:\s*nowrap[^}]*overflow-x:\s*auto/s,
+  )
+})
+
+test('个股详情头部按身份、标签、图标操作分层且禁止挤压换行', () => {
+  assert.match(stockDetail, /className="detail-title-block"/)
+  assert.match(stockDetail, /className="detail-title-primary"/)
+  assert.match(stockDetail, /className="detail-title-meta"/)
+  assert.match(stockDetail, /className="detail-stock-name"/)
+  assert.match(stockDetail, /aria-label={watchAction\.label}/)
+  assert.doesNotMatch(stockDetail, /<span>{watchAction\.label}<\/span>/)
+  assert.doesNotMatch(stockDetail, /className="detail-refresh-txt"/)
+  assert.match(
+    legacyStyles,
+    /\.detail-title-primary\s*{[^}]*flex-wrap:\s*nowrap[^}]*white-space:\s*nowrap/s,
+  )
+  assert.match(
+    legacyStyles,
+    /\.detail-title-meta\s*{[^}]*flex-wrap:\s*nowrap[^}]*overflow:\s*hidden/s,
+  )
+  assert.match(
+    legacyStyles,
+    /\.detail-panel \.modal-actions\s*{[^}]*grid-template-columns:\s*repeat\(3,\s*40px\)/s,
   )
 })
 
@@ -403,6 +519,18 @@ test('持仓总览提供隔夜新买与卖出执行的当日损益归因', () =>
   assert.match(precision, /\.daily-attribution/)
 })
 
+test('持仓总览将做T收入收进可展开的今日操作盈亏', () => {
+  assert.match(planTab, /computeTodayOperationPnl/)
+  assert.match(planTab, /今日操作盈亏/)
+  assert.match(planTab, /className="ho-cell ho-operation-pnl"/)
+  assert.match(planTab, /aria-expanded={showOperationPnl}/)
+  assert.match(planTab, /减仓 \/ 清仓/)
+  assert.match(planTab, /扣费后已实现/)
+  assert.doesNotMatch(planTab, /<span className="ho-k">今日做T<\/span>/)
+  assert.match(precision, /\.ho-operation-pnl/)
+  assert.match(precision, /\.operation-pnl-detail/)
+})
+
 test('模型配置改为单列选择并给复杂表单足够宽度', () => {
   assert.match(
     precision,
@@ -416,6 +544,24 @@ test('模型配置改为单列选择并给复杂表单足够宽度', () => {
     precision,
     /\.qmc-option\s*{[^}]*min-height:\s*0/s,
   )
+})
+
+test('量化模型配置以生产模型前向回测命中率为主并按日展示', () => {
+  assert.match(quantModelControl, /function ProductionAccuracyPanel/)
+  assert.match(quantModelControl, /生产模型实际回测/)
+  assert.match(quantModelControl, /productionAccuracy\.overall\.accuracyPct/)
+  assert.match(quantModelControl, /productionAccuracy\.overall\.correct/)
+  assert.match(quantModelControl, /productionAccuracy\.nextTradeDayDirection/)
+  assert.match(quantModelControl, /productionAccuracy\.nextTradeDayRange/)
+  assert.match(quantModelControl, /次日方向/)
+  assert.match(quantModelControl, /次日区间覆盖/)
+  assert.match(quantModelControl, /平衡准确率/)
+  assert.match(quantModelControl, /强信号命中/)
+  assert.match(quantModelControl, /productionAccuracy\.days/)
+  assert.match(quantModelControl, /只统计训练截止日后/)
+  assert.match(quantModelControl, /AUC仅衡量排序能力/)
+  assert.match(precision, /\.qmc-production-metrics/)
+  assert.match(precision, /\.qmc-backtest-meta/)
 })
 
 test('做T使用独立居中弹窗而不是与策略日报共用右侧抽屉定位', () => {

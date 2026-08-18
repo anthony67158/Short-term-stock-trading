@@ -9,6 +9,10 @@ import { authStore } from './authStore'
 import { planStore } from './planStore'
 import { ensureAdviceAccountSynced } from '../shared/adviceAccountSync.js'
 import { createAdviceCompletionPuller } from '../shared/adviceUiState.js'
+import {
+  activeAdviceCancellationTargets,
+  confirmAdviceCancellation,
+} from '../shared/adviceCancellation.js'
 
 let statusTimer = null
 let statusPulling = false
@@ -121,23 +125,63 @@ export function canServerAdvice() {
   try { const c = authStore.getCreds && authStore.getCreds(); return !!(c && c.nick) } catch { return false }
 }
 
-// 取消服务端任务:codes 为空/未传 → 取消全部(op:'cancelAll'),否则取消指定 codes(op:'cancel')。
-// fire-and-forget + keepalive:即使随后切后台/关页面也已送达 FC;取消结果经 authStore.pull 轮询云端回灌。
-// 返回 true=已发出,false=无登录态。
-export function cancelServerAdvice(codes, batchId = '') {
-  let creds = null
-  try { creds = authStore.getCreds && authStore.getCreds() } catch { creds = null }
-  if (!creds || !creds.nick) return false
-  const list = [...new Set((codes || []).filter(Boolean).map(String))]
-  const op = list.length ? 'cancel' : 'cancelAll'
+async function sendCancellationRequest(creds, targets, batchId = '') {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 8000)
   try {
-    fetch(api('/api/cron_advice'), {
+    const response = await fetch(api('/api/cron_advice'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ op, codes: list, nick: creds.nick, pw: creds.pw, batchId }),
+      body: JSON.stringify({
+        op: 'cancel',
+        targets,
+        codes: targets.map((target) => target.code),
+        nick: creds.nick,
+        pw: creds.pw,
+        batchId,
+      }),
+      signal: controller.signal,
       keepalive: true,
-    }).catch(() => { /* 取消结果靠云端轮询,忽略网络层错误 */ })
-    kickServerAdviceStatusSync()
-    return true
-  } catch { return false }
+    })
+    const data = await response.json().catch(() => null)
+    if (!data || typeof data !== 'object') {
+      throw new Error(`停止接口返回异常(${response.status})`)
+    }
+    return data
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+// 取消必须等云端权威状态确认。请求失败会重试；每个目标携带 jobId，
+// 防止旧页面延迟到达的取消误伤同股票的新一轮任务。
+export async function cancelServerAdvice(items, batchId = '') {
+  let creds = null
+  try { creds = authStore.getCreds && authStore.getCreds() } catch { creds = null }
+  if (!creds || !creds.nick) {
+    return { ok: false, confirmed: false, error: '请先登录' }
+  }
+  const normalizedItems = (items || []).map((item) =>
+    typeof item === 'string'
+      ? { code: item, status: 'running', jobId: '' }
+      : item
+  )
+  const targets = activeAdviceCancellationTargets(normalizedItems)
+  if (!targets.length) {
+    return { ok: true, confirmed: true, canceled: 0, progress: null }
+  }
+  kickServerAdviceStatusSync()
+  const result = await confirmAdviceCancellation({
+    targets,
+    attempts: 5,
+    delayMs: 1000,
+    send: (currentTargets) =>
+      sendCancellationRequest(creds, currentTargets, batchId),
+    readStatus: fetchServerAdviceStatus,
+  })
+  if (result.progress && statusConsumer) {
+    try { statusConsumer(result.progress) } catch { /* ignore */ }
+  }
+  kickServerAdviceStatusSync()
+  return result
 }

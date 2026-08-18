@@ -1,8 +1,7 @@
-// 盘中自动刷新 AI 操作建议：用户主动开启后，持仓与自选按各自频率调度。
-// 手动立即刷新独立于自动开关和交易时段，始终保留用户控制权。
+// 军师持续复核配置与浏览器手动刷新。
+// 自动调度由 FC Timer 执行；浏览器只维护跨设备配置并保留立即刷新入口。
 import { planStore } from './planStore'
 import { runBatchAdvice, isBatchRunning } from './adviceBatch'
-import { isWeekday, bjMinutes } from './review'
 import {
   DEFAULT_HOLD_INTERVAL,
   DEFAULT_WATCH_INTERVAL,
@@ -10,10 +9,8 @@ import {
   MIN_AUTO_INTERVAL,
   AUTO_CONFIG_UPDATED_AT,
   autoConfigFromSettings,
-  dueAutoScopes,
 } from '../shared/adviceAutoRefreshPolicy'
 
-export const K_ENABLED = 'advAuto.enabled'
 export const K_HOLD_ENABLED = 'advAuto.holdEnabled'
 export const K_HOLD_INTERVAL = 'advAuto.holdIntervalMin'
 export const K_HOLD_LAST = 'advAuto.holdLastAt'
@@ -22,12 +19,6 @@ export const K_WATCH_ENABLED = 'advAuto.watchEnabled'
 export const K_WATCH_INTERVAL = 'advAuto.watchIntervalMin'
 export const K_WATCH_LAST = 'advAuto.watchLastAt'
 export const K_WATCH_LASTTRY = 'advAuto.watchLastTryAt'
-
-// 旧配置只用于无感迁移。
-export const K_INTERVAL = 'advAuto.intervalMin'
-export const K_SCOPE = 'advAuto.scope'
-export const K_LAST = 'advAuto.lastAt'
-export const K_LASTTRY = 'advAuto.lastTryAt'
 
 export const DEFAULT_HOLD = DEFAULT_HOLD_INTERVAL
 export const DEFAULT_WATCH = DEFAULT_WATCH_INTERVAL
@@ -41,12 +32,6 @@ export function setAutoConfigSetting(key, value) {
 
 export function getAutoConfig() {
   return autoConfigFromSettings(planStore.get().settings || {})
-}
-
-function inRefreshWindow() {
-  if (!isWeekday()) return false
-  const hm = bjMinutes()
-  return hm >= 555 && hm <= 900
 }
 
 function codesForScopes(scopes) {
@@ -94,13 +79,4 @@ async function startRefresh(scopes, quoteMap, { manual = false } = {}) {
 export async function runManualAdviceRefresh(scope = 'both', quoteMap = {}) {
   const scopes = scope === 'hold' ? ['hold'] : scope === 'watch' ? ['watch'] : ['hold', 'watch']
   return startRefresh(scopes, quoteMap, { manual: true })
-}
-
-export async function runAutoRefreshIfDue(quoteMap) {
-  if (running || isBatchRunning() || !inRefreshWindow()) return false
-  const config = getAutoConfig()
-  const scopes = dueAutoScopes(config, Date.now())
-  if (!scopes.length) return false
-  const result = await startRefresh(scopes, quoteMap)
-  return result?.status === 'started'
 }

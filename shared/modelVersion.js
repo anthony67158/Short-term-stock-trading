@@ -1,6 +1,7 @@
 export const QUANT_MODEL_DEFAULT = 'default'
 export const QUANT_MODEL_V2 = 'v2'
 export const QUANT_MODEL_V21 = 'v2.1'
+export const V2_HIGH_CONFIDENCE_GATE_PCT = 65
 export const V21_EXPERIMENTAL_RELIABILITY = Object.freeze({
   productionGatePassed: false,
   thresholdPct: 58,
@@ -290,7 +291,7 @@ export function adaptV2Prediction(prediction, { price = null } = {}) {
   const confidence = round(outlook.confidencePct)
   const margin = Number(outlook.probabilityMarginPct)
   const fired = predictedClass === 'TAKE_PROFIT'
-    && confidence >= 65
+    && confidence >= V2_HIGH_CONFIDENCE_GATE_PCT
     && Number.isFinite(margin)
     && margin >= 20
     && outlook.expectedBarrierReturnPct > 0.2
@@ -322,7 +323,7 @@ export function adaptV2Prediction(prediction, { price = null } = {}) {
     highConfSignal: {
       fired,
       credibility: confidence,
-      gate: 0.65,
+      gate: V2_HIGH_CONFIDENCE_GATE_PCT,
       buyPrice: Number.isFinite(anchorPrice) ? anchorPrice : null,
       takeProfit: Number.isFinite(takeProfitPrice) ? takeProfitPrice : null,
       stopLoss: Number.isFinite(stopLossPrice) ? stopLossPrice : null,

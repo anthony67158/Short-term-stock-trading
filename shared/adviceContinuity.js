@@ -23,6 +23,33 @@ const CORE_FIELDS = [
   'knowledgeActionScore',
 ]
 
+const SCHEDULED_STABLE_FIELDS = [
+  'action',
+  'tier',
+  'tone',
+  'opQty',
+  'positionNote',
+  'posAfter',
+]
+
+const SCHEDULED_ACTION_TEXT_FIELDS = [
+  'title',
+  'actionPlan',
+  'exitTiming',
+  'invalidation',
+  'knowledgeActionPlan',
+  'knowledgeActionScore',
+]
+
+const EXECUTION_PRICE_FIELDS = [
+  'addPrice',
+  'buyPrice',
+  'watchPrice',
+  'reducePrice',
+  'stopPrice',
+  'targetPrice',
+]
+
 const number = (value) => {
   const parsed = Number(value)
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null
@@ -64,6 +91,20 @@ function coreChanged(previous, next) {
     JSON.stringify(previous?.[field] ?? null)
       !== JSON.stringify(next?.[field] ?? null)
   )
+}
+
+function boundedScheduledPrice(field, previous, proposed, evidence, direction) {
+  const prior = number(previous)
+  const next = number(proposed)
+  if (prior == null || next == null) return proposed
+  const atr = number(evidence?.atr)
+  const maxMove = Math.max(prior * 0.015, atr != null ? atr * 0.75 : 0)
+  let bounded = Math.max(prior - maxMove, Math.min(prior + maxMove, next))
+  if (field === 'stopPrice' && direction === 'long') {
+    bounded = Math.max(prior, bounded)
+  }
+  const digits = prior < 10 ? 3 : 2
+  return +bounded.toFixed(digits)
 }
 
 function reversalEvidence(previous, next, evidence = {}) {
@@ -184,6 +225,7 @@ export function continuityEvidenceFromPayload(payload = {}) {
     hasNegNews: !!payload.resonance?.hasNegNews,
     mainStreak: payload.stockFund?.mainStreak ?? null,
     highConfFired: !!quant.highConfSignal?.fired,
+    atr: payload.tech?.atr?.atr ?? payload.tech?.atr ?? null,
   }
 }
 
@@ -253,16 +295,38 @@ export function reconcileAdviceContinuity({
 
   if (stabilityMode === 'scheduled' && !reversal) {
     const held = { ...nextAdvice }
-    for (const field of CORE_FIELDS) {
+    for (const field of SCHEDULED_STABLE_FIELDS) {
       if (prior[field] != null) held[field] = prior[field]
       else delete held[field]
     }
+    if (
+      text(prior.action || prior.stance, 80)
+      !== text(nextAdvice.action || nextAdvice.stance, 80)
+    ) {
+      for (const field of SCHEDULED_ACTION_TEXT_FIELDS) {
+        if (prior[field] != null) held[field] = prior[field]
+        else delete held[field]
+      }
+    }
+    for (const field of EXECUTION_PRICE_FIELDS) {
+      if (nextAdvice[field] == null) continue
+      held[field] = boundedScheduledPrice(
+        field,
+        prior[field],
+        nextAdvice[field],
+        evidence,
+        previousDirection,
+      )
+    }
+    const changeType = coreChanged(prior, held) ? 'adjust' : 'maintain'
     held.continuity = {
       planId,
       revision,
       thesisVersion: priorThesis,
-      changeType: 'maintain',
-      changeReason: '自动复核未发现执行事件，锁定上一版动作与价位，避免计划频繁漂移',
+      changeType,
+      changeReason: changeType === 'adjust'
+        ? '自动复核确认方向不变，按最新风险与波动受控更新执行价位'
+        : '自动复核未发现执行事件，继续执行上一版主计划',
       previousAction: prior.action || '',
       proposedAction: '',
       zones: zonesOf(held),

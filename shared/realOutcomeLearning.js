@@ -129,6 +129,7 @@ export function buildRealOutcomeLearning(
     incompleteExecutions: 0,
     unlinkedExecutions: 0,
     nonExitExecutions: 0,
+    tradeIntentT: 0,
     missingTransactionId: 0,
     missingNetPnl: 0,
   }
@@ -136,6 +137,10 @@ export function buildRealOutcomeLearning(
   for (const execution of executions) {
     if (execution.side !== 'sell') {
       excluded.nonExitExecutions++
+      continue
+    }
+    if (execution.tradeIntent === 't') {
+      excluded.tradeIntentT++
       continue
     }
     const recommendation = recommendations.get(

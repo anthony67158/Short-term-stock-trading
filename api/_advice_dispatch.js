@@ -73,9 +73,21 @@ export async function dispatchAdviceWorker(
     invoke = invokeFC,
   } = {},
 ) {
+  return dispatchFcEvent(
+    buildAdviceWorkerEvent(nick, env.CRON_KEY),
+    { env, invoke },
+  )
+}
+
+export async function dispatchFcEvent(
+  event,
+  {
+    env = process.env,
+    invoke = invokeFC,
+  } = {},
+) {
   const region = String(env.ADVICE_FC_REGION || 'cn-hangzhou')
   const functionName = String(env.ADVICE_FC_FUNCTION_NAME || 'stock-dashboard')
-  const event = buildAdviceWorkerEvent(nick, env.CRON_KEY)
   const result = await invoke({
     functionName,
     region,

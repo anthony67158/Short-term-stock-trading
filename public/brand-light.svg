@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 768 768">
+  <defs>
+    <linearGradient id="brand-bg-light" x1="80" y1="28" x2="694" y2="744" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#34383F"/>
+      <stop offset="0.38" stop-color="#17191D"/>
+      <stop offset="1" stop-color="#020203"/>
+    </linearGradient>
+    <linearGradient id="brand-mark-light" x1="304" y1="224" x2="472" y2="570" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="0.58" stop-color="#F3F3F4"/>
+      <stop offset="1" stop-color="#C9CBD0"/>
+    </linearGradient>
+    <filter id="brand-shadow-light" x="-18%" y="-24%" width="136%" height="160%">
+      <feDropShadow dx="0" dy="14" stdDeviation="13" flood-color="#000000" flood-opacity="0.7"/>
+    </filter>
+  </defs>
+  <rect width="768" height="768" fill="url(#brand-bg-light)"/>
+  <path d="M0 0H768V232C562 298 304 296 0 214Z" fill="#FFFFFF" opacity="0.08"/>
+  <path d="M94 72C258 24 516 24 674 84" fill="none" stroke="#FFFFFF" stroke-linecap="round" stroke-width="5" opacity="0.16"/>
+  <path
+    fill="url(#brand-mark-light)"
+    filter="url(#brand-shadow-light)"
+    stroke="#FFFFFF"
+    stroke-linejoin="round"
+    stroke-width="2.5"
+    transform="translate(400.5 388) scale(1.22 1.7) translate(-400.5 -403)"
+    d="M199 294H502L521 328L646 329L155 512V506L413 361Z"
+  />
+</svg>

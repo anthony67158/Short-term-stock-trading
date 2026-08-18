@@ -2,28 +2,10 @@ import {
   ADVICE_REVIEW_DISABLED_CODES,
   AUTO_CONFIG_UPDATED_AT,
 } from './adviceAutoRefreshPolicy.js'
+import { adaptiveAdviceReviewInterval } from './adviceReviewRisk.js'
+import { isTradingDayAt } from './tradingCalendar.js'
 
 const BJ_OFFSET_MS = 8 * 60 * 60 * 1000
-
-const A_SHARE_HOLIDAYS = new Set([
-  '2026-01-01',
-  '2026-02-16',
-  '2026-02-17',
-  '2026-02-18',
-  '2026-02-19',
-  '2026-02-20',
-  '2026-02-21',
-  '2026-02-22',
-  '2026-04-06',
-  '2026-05-01',
-  '2026-06-19',
-  '2026-09-25',
-  '2026-10-01',
-  '2026-10-02',
-  '2026-10-05',
-  '2026-10-06',
-  '2026-10-07',
-])
 
 const DEFAULT_INTERVALS = {
   hold_advice: 15,
@@ -36,20 +18,12 @@ function bjParts(timestamp) {
     year: date.getUTCFullYear(),
     month: date.getUTCMonth(),
     day: date.getUTCDate(),
-    weekday: date.getUTCDay(),
     minutes: date.getUTCHours() * 60 + date.getUTCMinutes(),
   }
 }
 
-function dayKey(parts) {
-  return `${parts.year}-${String(parts.month + 1).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`
-}
-
 function isTradeDay(timestamp) {
-  const parts = bjParts(timestamp)
-  return parts.weekday >= 1
-    && parts.weekday <= 5
-    && !A_SHARE_HOLIDAYS.has(dayKey(parts))
+  return isTradingDayAt(timestamp)
 }
 
 function atBjMinutes(timestamp, minutes) {
@@ -103,6 +77,16 @@ export function buildAdviceReviewCycle(previous, data, at = Date.now()) {
     : null
   const mode = data?.mode || previous?.mode || 'buy_advice'
   const priorCycle = previous?.advice?.reviewCycle || {}
+  const effectiveAdvice = advice
+    || (previous?.advice && typeof previous.advice === 'object'
+      ? previous.advice
+      : null)
+  const schedule = adaptiveAdviceReviewInterval({
+    mode,
+    configuredIntervalMin: data?.reviewIntervalMin,
+    snapshot: data?.meta?.evidenceSnapshot,
+    advice: effectiveAdvice,
+  })
   const previousAction = previous?.advice?.action
     || previous?.advice?.stance
     || ''
@@ -113,11 +97,12 @@ export function buildAdviceReviewCycle(previous, data, at = Date.now()) {
     nextReviewAt: nextAdviceReviewAt({
       now: at,
       mode,
-      intervalMin: data?.reviewIntervalMin,
+      intervalMin: schedule.intervalMin,
     }),
-    intervalMin: Number(data?.reviewIntervalMin)
-      || DEFAULT_INTERVALS[mode]
-      || DEFAULT_INTERVALS.buy_advice,
+    configuredIntervalMin: schedule.configuredIntervalMin,
+    intervalMin: schedule.intervalMin,
+    riskLevel: schedule.riskLevel,
+    riskReasons: schedule.riskReasons,
     trigger: data?.reviewTrigger || (previous ? 'scheduled' : 'initial'),
     reason: String(data?.reviewReason || '').slice(0, 160),
     previousAction,

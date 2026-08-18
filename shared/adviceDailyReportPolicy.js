@@ -7,12 +7,22 @@ function bjDayKey(now = Date.now()) {
   ].join('-')
 }
 
-export function isCurrentDailyReportSummary(summary, now = Date.now()) {
+export function isCurrentDailyReportSummary(
+  summary,
+  now = Date.now(),
+  searchConfig = null,
+) {
+  const searchMatches = !searchConfig || (
+    summary?.searchEnabled === (searchConfig.enabled === true)
+    && Number(summary?.searchConfigUpdatedAt || 0)
+      === Number(searchConfig.updatedAt || 0)
+  )
   return Boolean(
     summary
     && typeof summary === 'object'
     && summary.day === bjDayKey(now)
-    && String(summary.text || '').trim(),
+    && String(summary.text || '').trim()
+    && searchMatches
   )
 }
 
@@ -47,9 +57,10 @@ export function createAdviceDailyReportGate({
     existingSummary = null,
     getSummary,
     generate,
+    searchConfig = null,
   } = {}) => {
     const timestamp = now()
-    if (isCurrentDailyReportSummary(existingSummary, timestamp)) {
+    if (isCurrentDailyReportSummary(existingSummary, timestamp, searchConfig)) {
       ready = existingSummary
       return {
         ok: true,
@@ -58,7 +69,7 @@ export function createAdviceDailyReportGate({
         summary: existingSummary,
       }
     }
-    if (isCurrentDailyReportSummary(ready, timestamp)) {
+    if (isCurrentDailyReportSummary(ready, timestamp, searchConfig)) {
       return {
         ok: true,
         generated: false,
@@ -72,7 +83,7 @@ export function createAdviceDailyReportGate({
       const cached = typeof getSummary === 'function'
         ? await getSummary()
         : null
-      if (isCurrentDailyReportSummary(cached, now())) {
+      if (isCurrentDailyReportSummary(cached, now(), searchConfig)) {
         ready = cached
         return {
           ok: true,
@@ -91,7 +102,7 @@ export function createAdviceDailyReportGate({
         )
       }
       const summary = resultSummary(result, summarize)
-      if (!isCurrentDailyReportSummary(summary, now())) {
+      if (!isCurrentDailyReportSummary(summary, now(), searchConfig)) {
         throw new Error('策略日报已返回，但摘要无效')
       }
       ready = summary

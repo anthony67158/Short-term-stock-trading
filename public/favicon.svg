@@ -1,27 +1,25 @@
-<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 768 768">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#232329"/>
-      <stop offset="1" stop-color="#0b0b0e"/>
+    <linearGradient id="favicon-bg" x1="80" y1="28" x2="694" y2="744" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#34383F"/>
+      <stop offset="0.38" stop-color="#17191D"/>
+      <stop offset="1" stop-color="#020203"/>
     </linearGradient>
-    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="64" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#ffffff" stop-opacity="0.12"/>
-      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0"/>
+    <linearGradient id="favicon-mark" x1="304" y1="224" x2="472" y2="570" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="0.58" stop-color="#F3F3F4"/>
+      <stop offset="1" stop-color="#C9CBD0"/>
     </linearGradient>
   </defs>
-  <!-- 圆角徽章底 -->
-  <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#bg)"/>
-  <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#sheen)"/>
-  <rect x="2.6" y="2.6" width="58.8" height="58.8" rx="15.4" stroke="#ffffff" stroke-opacity="0.10" stroke-width="1.2"/>
-  <!-- 上升折线（趋势） -->
-  <path d="M12 42 L26 30 L36 37 L52 18" stroke="#ffffff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.98"/>
-  <!-- 折线终点强调点 -->
-  <circle cx="52" cy="18" r="3.4" fill="#fff"/>
-  <!-- K线蜡烛（短线操盘意象） -->
-  <g>
-    <rect x="19.5" y="34" width="4.2" height="12" rx="2" fill="#ffffff" opacity="0.92"/>
-    <rect x="20.6" y="30" width="2" height="4" rx="1" fill="#ffffff" opacity="0.92"/>
-    <rect x="20.6" y="46" width="2" height="3" rx="1" fill="#ffffff" opacity="0.92"/>
-    <rect x="33.5" y="40" width="4.2" height="9" rx="2" fill="#ffffff" opacity="0.62"/>
-  </g>
+  <rect width="768" height="768" fill="url(#favicon-bg)"/>
+  <path d="M0 0H768V232C562 298 304 296 0 214Z" fill="#FFFFFF" opacity="0.08"/>
+  <path d="M94 72C258 24 516 24 674 84" fill="none" stroke="#FFFFFF" stroke-linecap="round" stroke-width="5" opacity="0.16"/>
+  <path
+    fill="url(#favicon-mark)"
+    stroke="#FFFFFF"
+    stroke-linejoin="round"
+    stroke-width="2.5"
+    transform="translate(400.5 388) scale(1.22 1.7) translate(-400.5 -403)"
+    d="M199 294H502L521 328L646 329L155 512V506L413 361Z"
+  />
 </svg>

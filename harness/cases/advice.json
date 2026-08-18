@@ -1,0 +1,120 @@
+{
+  "schemaVersion": "harness-case-set.v1",
+  "cases": [
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "advice-buy-cash-cap",
+      "adapter": "advice",
+      "tags": ["advice", "cash", "actionability"],
+      "input": {
+        "mode": "buy_advice",
+        "payload": {
+          "todayQuote": {
+            "limitDownPrice": 8,
+            "limitUpPrice": 12
+          },
+          "account": {
+            "cash": 2500,
+            "totalAssets": 10000
+          }
+        },
+        "result": {
+          "action": "立即买入",
+          "tier": "now",
+          "buyPrice": 10,
+          "stopPrice": 9,
+          "targetPrice": 12,
+          "planQty": 5,
+          "actionPlan": "立即买入5手，约需5000元",
+          "invalidation": "跌破9元离场"
+        }
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "expectedValid": true,
+        "expectedAction": "立即买入",
+        "expectedQty": 2,
+        "requiredIssueIncludes": ["买入手数超过可用资金"],
+        "forbiddenIssueIncludes": [],
+        "forbiddenText": ["买入5手"]
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "advice-hold-t1-no-sellable",
+      "adapter": "advice",
+      "tags": ["advice", "t1", "risk"],
+      "input": {
+        "mode": "hold_advice",
+        "payload": {
+          "holdCost": 10,
+          "holdQty": 2,
+          "sellableTodayQty": 0,
+          "todayQuote": {
+            "limitDownPrice": 8,
+            "limitUpPrice": 12
+          },
+          "account": {
+            "cash": 5000,
+            "totalAssets": 10000
+          }
+        },
+        "result": {
+          "action": "减仓",
+          "reducePrice": 11,
+          "stopPrice": 9,
+          "targetPrice": 12,
+          "opQty": "减仓2手",
+          "actionPlan": "反弹到11元减仓2手",
+          "invalidation": "放量突破12元暂停减仓"
+        }
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "expectedValid": true,
+        "expectedAction": "持有",
+        "expectedQty": 0,
+        "requiredIssueIncludes": ["今日无可卖数量"],
+        "forbiddenIssueIncludes": [],
+        "forbiddenText": ["反弹到11元减仓2手"]
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "advice-invalid-price-downgrade",
+      "adapter": "advice",
+      "tags": ["advice", "price", "guardrail"],
+      "input": {
+        "mode": "buy_advice",
+        "payload": {
+          "todayQuote": {
+            "limitDownPrice": 8,
+            "limitUpPrice": 12
+          },
+          "account": {
+            "cash": 10000,
+            "totalAssets": 20000
+          }
+        },
+        "result": {
+          "action": "立即买入",
+          "buyPrice": 10,
+          "stopPrice": 11,
+          "targetPrice": 9,
+          "planQty": 1,
+          "actionPlan": "价格关系错误时不得执行",
+          "invalidation": "止损高于买价"
+        }
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "expectedValid": false,
+        "expectedAction": "观望",
+        "expectedQty": 0,
+        "requiredIssueIncludes": ["关系非法"],
+        "forbiddenIssueIncludes": [],
+        "forbiddenText": []
+      }
+    }
+  ]
+}

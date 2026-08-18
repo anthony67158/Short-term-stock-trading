@@ -1,0 +1,109 @@
+{
+  "schemaVersion": "harness-case-set.v1",
+  "cases": [
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "judge-buy-consensus-confirm",
+      "adapter": "judge",
+      "tags": ["judge", "buy", "consensus"],
+      "input": {
+        "side": "buy",
+        "deterministic": {
+          "decision": "confirm",
+          "score": 3,
+          "hits": ["站回VWAP", "量价共振"]
+        },
+        "llm": {
+          "decision": "confirm",
+          "confidence": 85,
+          "reason": "客观信号与模型共振"
+        },
+        "observationAgeMs": 180000
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "decision": "confirm",
+        "policy": "consensus",
+        "reasonIncludes": ["共振"]
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "judge-buy-confidence-gate",
+      "adapter": "judge",
+      "tags": ["judge", "confidence", "guardrail"],
+      "input": {
+        "side": "buy",
+        "deterministic": {
+          "decision": "confirm",
+          "score": 3,
+          "hits": ["站回VWAP"]
+        },
+        "llm": {
+          "decision": "confirm",
+          "confidence": 70,
+          "reason": "方向偏多但把握不足"
+        },
+        "observationAgeMs": 180000
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "decision": "wait",
+        "policy": "confidence-gated",
+        "reasonIncludes": ["把握不足"]
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "judge-observation-window",
+      "adapter": "judge",
+      "tags": ["judge", "observation", "timing"],
+      "input": {
+        "side": "sell",
+        "deterministic": {
+          "decision": "confirm",
+          "score": 2,
+          "hits": ["冲高回落"]
+        },
+        "llm": {
+          "decision": "confirm",
+          "confidence": 80,
+          "reason": "高位滞涨"
+        },
+        "observationAgeMs": 30000
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "decision": "wait",
+        "policy": "observation",
+        "reasonIncludes": ["刚触价"]
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "judge-stop-risk-override",
+      "adapter": "judge",
+      "tags": ["judge", "stop", "risk"],
+      "input": {
+        "side": "stop",
+        "deterministic": {
+          "decision": "confirm",
+          "score": 3,
+          "hits": ["放量跌破止损线", "连续未站回VWAP"]
+        },
+        "llm": {
+          "decision": "wait",
+          "confidence": 40,
+          "reason": "模型仍在犹豫"
+        },
+        "observationAgeMs": 120000
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "decision": "confirm",
+        "policy": "risk-override",
+        "reasonIncludes": ["跌破止损线"]
+      }
+    }
+  ]
+}

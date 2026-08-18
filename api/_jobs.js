@@ -222,10 +222,17 @@ export function failJob(data, code, err, now = Date.now()) {
 }
 
 // 取消一只:立即进入 canceled 终态并释放租约。Worker 看到 cancelRequested 后中止上游请求并丢弃结果。
-export function cancelJob(data, code, now = Date.now(), batchId = '') {
+export function cancelJob(
+  data,
+  code,
+  now = Date.now(),
+  batchId = '',
+  jobId = '',
+) {
   const j = jobsOf(data)[code];
   if (!j || !isActive(j)) return false;
   if (batchId && j.batchId !== batchId) return false;
+  if (jobId && j.id !== jobId) return false;
   j.cancelRequested = true;
   j.status = 'canceled';
   j.finishedAt = now;
@@ -285,6 +292,44 @@ export function needsWorkerDispatch(data, now = Date.now()) {
   );
 }
 
+export function hasActiveManualBatch(data) {
+  return Object.values(jobsOf(data)).some((job) =>
+    isActive(job)
+    && job.source === 'ondemand'
+    && job.batchRequest === true
+  );
+}
+
+export function suspendAutomaticJobsForManualBatch(
+  data,
+  now = Date.now(),
+) {
+  let suspended = 0
+  for (const job of Object.values(jobsOf(data))) {
+    if (
+      job?.source === 'auto'
+      && isActive(job)
+      && cancelJob(data, job.code, now)
+    ) suspended++
+  }
+  return suspended
+}
+
+export function compareAdviceJobs(left, right) {
+  const priority = (job) => {
+    if (job?.source === 'judge') return 0
+    if (job?.source === 'ondemand' && job?.batchRequest === true) return 1
+    if (job?.source === 'ondemand') return 2
+    return 3
+  }
+  return priority(left) - priority(right)
+    || (Number(left?.at) || 0) - (Number(right?.at) || 0)
+}
+
+export function shouldContinueAdviceWorker(data, now = Date.now()) {
+  return hasPendingWork(data, now)
+}
+
 // 生成对旧前端兼容的 batchProgress 快照(老逻辑仍消费 data.batchProgress)。
 // running/total/done/ok/fail/skipped/items([{code,name,status}])/startedAt/finishedAt/at/source/concurrency
 // concurrency:本轮生效的并发上限(运行时由承接 advisor 角色的端点数决定;前端据此做单股触发门控)。
@@ -308,6 +353,8 @@ export function jobsToProgress(data, now = Date.now(), concurrency = CONCURRENCY
     .sort((a, b) => (a.at || 0) - (b.at || 0))
     .map((j) => ({
       code: j.code,
+      jobId: j.id || '',
+      batchId: j.batchId || '',
       name: j.name,
       status: mapStatus(j),
       error: j.error || '',

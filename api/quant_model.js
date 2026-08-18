@@ -2,6 +2,7 @@ import { applyCors, preflight } from './_lib.js'
 import {
   applyModelSelection,
   canControlV2Service,
+  getProductionModelMetrics,
   getV2ServiceStatus,
   modelControlView,
   resolveV2ServiceStatus,
@@ -15,6 +16,7 @@ import {
 } from './account.js'
 import { loadV2Accuracy } from './_v2_accuracy_store.js'
 import { loadV21Accuracy } from './_v21_accuracy_store.js'
+import { loadProductionAccuracy } from './_production_accuracy_store.js'
 
 function reply(res, body, status = 200) {
   applyCors(res)
@@ -59,10 +61,18 @@ export default async function handler(req, res) {
     } else if (action !== 'get') {
       return reply(res, { ok: false, error: '未知操作' }, 422)
     }
-    const [status, accuracy, v21Accuracy] = await Promise.all([
+    const [
+      status,
+      productionModel,
+      productionAccuracy,
+      accuracy,
+      v21Accuracy,
+    ] = await Promise.all([
       transitionStatus
         ? resolveV2ServiceStatus(transitionStatus)
         : getV2ServiceStatus(),
+      getProductionModelMetrics(),
+      loadProductionAccuracy().catch(() => null),
       loadV2Accuracy().catch(() => null),
       loadV21Accuracy().catch(() => null),
     ])
@@ -72,6 +82,8 @@ export default async function handler(req, res) {
         v2Status: status,
         canControlV2: canControlV2Service(auth.account),
       }),
+      productionModel,
+      productionAccuracy,
       accuracy,
       v21Accuracy,
     })

@@ -1,0 +1,363 @@
+{
+  "schemaVersion": "harness-case-set.v1",
+  "cases": [
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "portfolio-concentration-rotation",
+      "adapter": "portfolio",
+      "tags": ["portfolio", "rebalance", "grounding"],
+      "input": {
+        "distribution": {
+          "totalAssets": 100000,
+          "investedValue": 78000,
+          "cash": 22000,
+          "positionPct": 78,
+          "cashReservePct": 22,
+          "groups": [
+            {
+              "name": "PCB",
+              "accountWeightPct": 48,
+              "holdingWeightPct": 61.54
+            },
+            {
+              "name": "创新药",
+              "accountWeightPct": 30,
+              "holdingWeightPct": 38.46
+            }
+          ],
+          "stocks": [
+            {
+              "code": "300476",
+              "name": "胜宏科技",
+              "concept": "PCB",
+              "qty": 5,
+              "sellableQty": 3,
+              "price": 90,
+              "marketValue": 48000,
+              "accountWeightPct": 48,
+              "holdingWeightPct": 61.54,
+              "category": "核心仓"
+            },
+            {
+              "code": "600276",
+              "name": "恒瑞医药",
+              "concept": "创新药",
+              "qty": 6,
+              "sellableQty": 6,
+              "price": 50,
+              "marketValue": 30000,
+              "accountWeightPct": 30,
+              "holdingWeightPct": 38.46,
+              "category": "标准仓"
+            }
+          ]
+        },
+        "modelOutput": {
+          "executionSummary": {
+            "verdict": "rebalance",
+            "todayGoal": "降低PCB并补充机器人",
+            "nextReviewTrigger": "成交后重新核验"
+          },
+          "allocation": {
+            "targetPositionPct": 66,
+            "categoryTargets": {
+              "corePct": 30,
+              "standardPct": 30,
+              "satellitePct": 6
+            }
+          },
+          "stockActions": [
+            {
+              "priority": 1,
+              "code": "300476",
+              "action": "reduce",
+              "targetWeightPct": 30,
+              "triggerPrice": 90,
+              "invalidation": "放量突破前高",
+              "reason": "集中度48%且量化偏弱",
+              "evidenceIds": ["E1"]
+            }
+          ],
+          "recommendations": [
+            {
+              "priority": 2,
+              "concept": "机器人",
+              "code": "002747",
+              "targetWeightPct": 6,
+              "maxWeightPct": 6,
+              "triggerPrice": 30,
+              "trigger": "放量站稳30元",
+              "invalidation": "跌破28元",
+              "reason": "概念资金和量化共振",
+              "evidenceIds": ["E2"]
+            }
+          ],
+          "conceptActions": [
+            {
+              "concept": "PCB",
+              "targetWeightPct": 30,
+              "reason": "降低集中度",
+              "evidenceIds": ["E1"]
+            },
+            {
+              "concept": "创新药",
+              "targetWeightPct": 30,
+              "reason": "维持配置",
+              "evidenceIds": ["E1"]
+            },
+            {
+              "concept": "机器人",
+              "targetWeightPct": 6,
+              "reason": "补充缺失方向",
+              "evidenceIds": ["E2"]
+            }
+          ],
+          "scenarioPlan": [
+            {
+              "regime": "strong",
+              "signal": "指数放量",
+              "targetPositionPct": 76,
+              "actions": ["确认后增加仓位"]
+            },
+            {
+              "regime": "weak",
+              "signal": "指数跌破支撑",
+              "targetPositionPct": 50,
+              "actions": ["继续降低集中仓"]
+            }
+          ]
+        },
+        "allowedEvidenceIds": ["E1", "E2"],
+        "allowedHoldingCodes": ["300476", "600276"],
+        "allowedRecommendationCodes": ["002747"],
+        "recommendationCatalog": {
+          "002747": {
+            "code": "002747",
+            "name": "埃斯顿",
+            "concept": "机器人",
+            "price": 30
+          }
+        }
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "requiredOrderCodes": ["300476", "002747"],
+        "forbiddenOrderCodes": ["000000"],
+        "maxT1Violations": 0
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "portfolio-t1-sell-cap",
+      "adapter": "portfolio",
+      "tags": ["portfolio", "t1", "feasibility"],
+      "input": {
+        "distribution": {
+          "totalAssets": 100000,
+          "investedValue": 90000,
+          "cash": 10000,
+          "positionPct": 90,
+          "cashReservePct": 10,
+          "groups": [
+            {
+              "name": "高集中概念",
+              "accountWeightPct": 90,
+              "holdingWeightPct": 100
+            }
+          ],
+          "stocks": [
+            {
+              "code": "300001",
+              "name": "T1样本",
+              "concept": "高集中概念",
+              "qty": 5,
+              "sellableQty": 1,
+              "boughtTodayQty": 4,
+              "t1Locked": true,
+              "price": 180,
+              "marketValue": 90000,
+              "accountWeightPct": 90,
+              "holdingWeightPct": 100,
+              "category": "核心仓"
+            }
+          ]
+        },
+        "modelOutput": {
+          "executionSummary": {
+            "verdict": "defensive",
+            "todayGoal": "降低高集中概念",
+            "nextReviewTrigger": "下一交易日解锁后继续复核"
+          },
+          "allocation": {
+            "targetPositionPct": 72,
+            "categoryTargets": {
+              "corePct": 72,
+              "standardPct": 0,
+              "satellitePct": 0
+            }
+          },
+          "stockActions": [
+            {
+              "priority": 1,
+              "code": "300001",
+              "action": "reduce",
+              "targetWeightPct": 50,
+              "triggerPrice": 180,
+              "invalidation": "重新站稳压力位",
+              "reason": "单票占比90%且今日风险上升",
+              "evidenceIds": ["E1"]
+            }
+          ],
+          "conceptActions": [
+            {
+              "concept": "高集中概念",
+              "targetWeightPct": 50,
+              "reason": "降低单一风险",
+              "evidenceIds": ["E1"]
+            }
+          ],
+          "scenarioPlan": [
+            {
+              "regime": "strong",
+              "signal": "指数与个股同步转强",
+              "targetPositionPct": 72,
+              "actions": ["停止继续减仓"]
+            },
+            {
+              "regime": "weak",
+              "signal": "指数继续跌破",
+              "targetPositionPct": 54,
+              "actions": ["解锁后继续降低仓位"]
+            }
+          ]
+        },
+        "allowedEvidenceIds": ["E1"],
+        "allowedHoldingCodes": ["300001"],
+        "allowedRecommendationCodes": [],
+        "recommendationCatalog": {}
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "requiredOrderCodes": ["300001"],
+        "forbiddenOrderCodes": [],
+        "maxT1Violations": 0
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "portfolio-fabricated-stock-filter",
+      "adapter": "portfolio",
+      "tags": ["portfolio", "grounding", "security"],
+      "input": {
+        "distribution": {
+          "totalAssets": 100000,
+          "investedValue": 48000,
+          "cash": 52000,
+          "positionPct": 48,
+          "cashReservePct": 52,
+          "groups": [
+            {
+              "name": "PCB",
+              "accountWeightPct": 48,
+              "holdingWeightPct": 100
+            }
+          ],
+          "stocks": [
+            {
+              "code": "300476",
+              "name": "胜宏科技",
+              "concept": "PCB",
+              "qty": 5,
+              "sellableQty": 5,
+              "price": 90,
+              "marketValue": 48000,
+              "accountWeightPct": 48,
+              "holdingWeightPct": 100,
+              "category": "核心仓"
+            }
+          ]
+        },
+        "modelOutput": {
+          "executionSummary": {
+            "verdict": "defensive",
+            "todayGoal": "降低PCB且拒绝未知候选",
+            "nextReviewTrigger": "执行后重新核验"
+          },
+          "allocation": {
+            "targetPositionPct": 30,
+            "categoryTargets": {
+              "corePct": 30,
+              "standardPct": 0,
+              "satellitePct": 0
+            }
+          },
+          "stockActions": [
+            {
+              "priority": 1,
+              "code": "300476",
+              "action": "reduce",
+              "targetWeightPct": 30,
+              "triggerPrice": 90,
+              "invalidation": "重新突破前高",
+              "reason": "当前占比48%超过上限",
+              "evidenceIds": ["E1"]
+            }
+          ],
+          "recommendations": [
+            {
+              "priority": 2,
+              "concept": "模型编造概念",
+              "code": "000000",
+              "targetWeightPct": 6,
+              "maxWeightPct": 6,
+              "triggerPrice": 10,
+              "trigger": "模型自行编造",
+              "invalidation": "无",
+              "reason": "没有真实证据",
+              "evidenceIds": ["E999"]
+            }
+          ],
+          "conceptActions": [
+            {
+              "concept": "PCB",
+              "targetWeightPct": 30,
+              "reason": "降低集中度",
+              "evidenceIds": ["E1"]
+            }
+          ],
+          "scenarioPlan": [
+            {
+              "regime": "strong",
+              "signal": "重新转强",
+              "targetPositionPct": 40,
+              "actions": ["保留底仓"]
+            },
+            {
+              "regime": "weak",
+              "signal": "继续转弱",
+              "targetPositionPct": 30,
+              "actions": ["继续降仓"]
+            }
+          ]
+        },
+        "allowedEvidenceIds": ["E1"],
+        "allowedHoldingCodes": ["300476"],
+        "allowedRecommendationCodes": ["002747"],
+        "recommendationCatalog": {
+          "002747": {
+            "code": "002747",
+            "name": "埃斯顿",
+            "concept": "机器人",
+            "price": 30
+          }
+        }
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "requiredOrderCodes": ["300476"],
+        "forbiddenOrderCodes": ["000000"],
+        "maxT1Violations": 0
+      }
+    }
+  ]
+}

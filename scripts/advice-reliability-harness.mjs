@@ -3,11 +3,13 @@ import { reconcileAdviceNumbers } from '../shared/adviceValidation.js'
 
 const apiBase = String(process.env.HARNESS_API_URL || 'http://localhost:3001').replace(/\/+$/, '')
 const nick = String(process.env.HARNESS_NICK || '').trim()
+const password = String(process.env.HARNESS_PASSWORD || '')
 const runs = Math.max(1, Math.min(12, Number(process.env.HARNESS_RUNS) || 4))
 const concurrency = Math.max(1, Math.min(runs, Number(process.env.HARNESS_CONCURRENCY) || 2))
 const budgetMs = Math.max(30000, Math.min(560000, Number(process.env.HARNESS_BUDGET_MS) || 210000))
 
 if (!nick) throw new Error('请通过 HARNESS_NICK 指定用于只读取样的账号')
+if (!password) throw new Error('请通过 HARNESS_PASSWORD 提供Harness账号密码')
 const account = await readAccount(nick)
 if (!account?.data) throw new Error('Harness 账号不存在或无法读取')
 const holding = (account.data.holding || [])[0]
@@ -65,7 +67,11 @@ async function execute(testCase) {
   try {
     const response = await fetch(`${apiBase}/api/ai`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-account-nick': encodeURIComponent(nick),
+        'x-account-password': encodeURIComponent(password),
+      },
       body: JSON.stringify({
         mode: testCase.mode,
         payload: testCase.payload,

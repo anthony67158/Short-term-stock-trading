@@ -1,9 +1,14 @@
 import { useState } from 'react'
 import Icon from './Icon'
+import BrandMark from './BrandMark'
 import { authStore, useAuthStore, hasLegacyData } from '../authStore'
 import { llmConfigStore } from '../llmConfigStore'
 import { quantReportUiStore } from '../quantReportUiStore'
 import { quantModelStore } from '../quantModelStore'
+import {
+  aiSearchConfigStore,
+  useAiSearchConfig,
+} from '../aiSearchConfigStore'
 import { themeStore, useTheme } from '../themeStore'
 import ConfirmDialog from './ConfirmDialog'
 
@@ -27,7 +32,7 @@ export default function AuthGate() {
     <div className="auth-gate">
       <div className="auth-card">
         <div className="auth-brand">
-          <span className="nav-logo"><Icon name="pulse" size={20} /></span>
+          <BrandMark size={36} />
           <span>短线操盘台</span>
         </div>
         <div className="auth-tabs" aria-label="账号操作">
@@ -98,6 +103,7 @@ export default function AuthGate() {
 export function AccountMenu() {
   const { user, syncStatus, syncError } = useAuthStore()
   const theme = useTheme()
+  const searchConfig = useAiSearchConfig()
   const [open, setOpen] = useState(false)
   const [deactivateOpen, setDeactivateOpen] = useState(false)
   const [deactivateBusy, setDeactivateBusy] = useState(false)
@@ -142,6 +148,27 @@ export function AccountMenu() {
             )}
             <button type="button" role="menuitem" className="acct-item" onClick={() => { llmConfigStore.open(); setOpen(false) }}>
               <Icon name="brain" size={13} />AI 模型配置
+            </button>
+            <button
+              type="button"
+              role="menuitemcheckbox"
+              aria-checked={searchConfig.enabled}
+              className={'acct-item acct-search-toggle' + (searchConfig.enabled ? ' on' : '')}
+              disabled={searchConfig.status === 'saving'}
+              onClick={async () => {
+                const needsKey = !searchConfig.hasKey && !searchConfig.enabled
+                await aiSearchConfigStore.toggle()
+                if (needsKey) setOpen(false)
+              }}
+            >
+              <Icon name="search" size={13} />
+              <span>AI消息检索</span>
+              <span className="acct-search-state">{searchConfig.enabled ? '开' : '关'}</span>
+              <span className="acct-search-track"><span /></span>
+            </button>
+            <button type="button" role="menuitem" className="acct-item" onClick={() => { aiSearchConfigStore.open(); setOpen(false) }}>
+              <Icon name="edit" size={13} />
+              {searchConfig.hasKey ? '更换 Search API Key' : '配置 Search API Key'}
             </button>
             <button type="button" role="menuitem" className="acct-item" onClick={() => { quantModelStore.open(); setOpen(false) }}>
               <Icon name="activity" size={13} />量化模型配置

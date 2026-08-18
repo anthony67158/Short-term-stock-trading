@@ -11,6 +11,9 @@ import {
   cancelDisabledAdviceReviewJobs,
   enqueueAutoRefreshDue,
 } from '../api/cron_advice.js'
+import {
+  suspendAutomaticJobsForManualBatch,
+} from '../api/_jobs.js'
 
 test('自动刷新默认常开，持仓和自选采用不同建议频率', () => {
   const config = normalizeAutoConfig({})
@@ -150,6 +153,54 @@ test('每轮最多排两波自动任务并优先处理持仓，避免长队阻�
   assert.equal(data.jobs['000001'], undefined)
   assert.equal(enqueueAutoRefreshDue(data, now + 5 * 60000), 0)
   assert.equal(Object.keys(data.jobs).length, 6)
+})
+
+test('一次性生成运行期间不再插入持续复核任务', () => {
+  const now = new Date('2026-08-10T02:00:00Z').getTime()
+  const data = {
+    settings: {},
+    holding: [{ code: '600000', name: '持仓股' }],
+    jobs: {
+      '000001': {
+        code: '000001',
+        status: 'running',
+        source: 'ondemand',
+        batchRequest: true,
+        batchId: 'manual-batch',
+      },
+    },
+  }
+
+  assert.equal(enqueueAutoRefreshDue(data, now), 0)
+  assert.equal(data.jobs['600000'], undefined)
+  assert.equal(data.settings['advAuto.holdLastTryAt'], undefined)
+})
+
+test('启动一次性生成时暂停已有自动复核但保留Judge任务', () => {
+  const data = {
+    jobs: {
+      autoQueued: {
+        code: 'autoQueued',
+        status: 'queued',
+        source: 'auto',
+      },
+      autoRunning: {
+        code: 'autoRunning',
+        status: 'running',
+        source: 'auto',
+      },
+      judge: {
+        code: 'judge',
+        status: 'queued',
+        source: 'judge',
+      },
+    },
+  }
+
+  assert.equal(suspendAutomaticJobsForManualBatch(data, 2000), 2)
+  assert.equal(data.jobs.autoQueued.status, 'canceled')
+  assert.equal(data.jobs.autoRunning.status, 'canceled')
+  assert.equal(data.jobs.judge.status, 'queued')
 })
 
 test('旧设备缺失刷新配置时不能清空云端新配置', () => {

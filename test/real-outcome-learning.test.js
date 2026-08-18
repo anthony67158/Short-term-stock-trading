@@ -102,6 +102,19 @@ test('重复交易流水按 transactionId 只保留最新版本', () => {
   assert.equal(profile.overall.wins, 0)
 })
 
+test('做T卖腿不会误计为普通减仓或清仓的收益学习样本', () => {
+  const tExecution = {
+    ...execution('e-t', 'r1', 80),
+    tradeIntent: 't',
+  }
+  const profile = buildRealOutcomeLearning({
+    decisionLog: [recommendation('r1'), tExecution],
+  }, { minimumSamples: 1 })
+
+  assert.equal(profile.overall.samples, 0)
+  assert.equal(profile.excluded.tradeIntentT, 1)
+})
+
 test('上下文只在同模式同市场样本足够时约束风险倍率', () => {
   const decisionLog = [
     recommendation('r1'),

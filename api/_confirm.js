@@ -23,7 +23,7 @@ import { getModel, getReasoning } from './_llm_config.js';
 import { put, hasStorage } from './_blob.js';
 import { marketTimeContext } from './_market_time.js';
 import { isConfirmationPhase, isMinuteSnapshotFresh, normalizeConfidence } from '../shared/decisionGuards.js';
-import { fuseConfirmation } from '../shared/confirmPolicy.js';
+import { confirmationPolicy, fuseConfirmation } from '../shared/confirmPolicy.js';
 import {
   actionIntentOf,
   actionLabelOf,
@@ -160,7 +160,7 @@ export function deterministicJudge(side, prim, tech) {
     if (prim.volSurge && prim.mom5Pct < 0) { score += 1; hits.push('放量下跌,跌破有效'); }
     if (macd && macd.cross === 'dead') { score += 0.5; hits.push('日线MACD死叉共振'); }
   }
-  const threshold = side === 'buy' ? 2.5 : 1.5;
+  const threshold = confirmationPolicy(side).deterministicConfirm;
   const decision = score >= threshold ? 'confirm' : 'wait';
   return { decision, score: round(score, 1), hits };
 }

@@ -24,6 +24,132 @@ function StatusBadge({ control }) {
   )
 }
 
+function ProductionAccuracyPanel({
+  productionAccuracy,
+  productionModel,
+  loading,
+}) {
+  const days = productionAccuracy && Array.isArray(productionAccuracy.days)
+    ? productionAccuracy.days
+    : []
+  const hasSamples = Number(productionAccuracy?.overall?.total) > 0
+  const strong = productionAccuracy?.strongSignals || {}
+  const nextDirection = productionAccuracy?.nextTradeDayDirection || {}
+  const nextRange = productionAccuracy?.nextTradeDayRange || {}
+  return (
+    <section className="qmc-effect qmc-production-metrics">
+      <div className="qmc-section-head">
+        <div>
+          <b>生产模型实际回测</b>
+          <span>只统计训练截止日后、已完成未来5日标签的前向样本</span>
+        </div>
+        {hasSamples && (
+          <strong>
+            {productionAccuracy.overall.accuracyPct}%
+          </strong>
+        )}
+      </div>
+      {hasSamples ? (
+        <>
+          <div className="qmc-days">
+            <div className="qmc-day">
+              <span>5日目标命中</span>
+              <b>{productionAccuracy.overall.accuracyPct}%</b>
+              <small>
+                {productionAccuracy.overall.correct}/
+                {productionAccuracy.overall.total} 正确
+              </small>
+            </div>
+            <div className="qmc-day">
+              <span>次日方向</span>
+              <b>
+                {productionAccuracy.nextTradeDayDirection?.accuracyPct != null
+                  ? `${productionAccuracy.nextTradeDayDirection.accuracyPct}%`
+                  : '—'}
+              </b>
+              <small>{nextDirection.correct || 0}/{nextDirection.total || 0} 正确</small>
+            </div>
+            <div className="qmc-day">
+              <span>次日区间覆盖</span>
+              <b>
+                {productionAccuracy.nextTradeDayRange?.coveragePct != null
+                  ? `${productionAccuracy.nextTradeDayRange.coveragePct}%`
+                  : '—'}
+              </b>
+              <small>
+                {nextRange.covered || 0}/{nextRange.total || 0} 落入 P10–P90
+              </small>
+            </div>
+          </div>
+          <div className="qmc-days qmc-days-spaced qmc-secondary-metrics">
+            <div className="qmc-day">
+              <span>平衡准确率</span>
+              <b>
+                {productionAccuracy.overall.balancedAccuracyPct != null
+                  ? `${productionAccuracy.overall.balancedAccuracyPct}%`
+                  : '—'}
+              </b>
+              <small>同时平衡达标与未达标样本</small>
+            </div>
+            <div className="qmc-day">
+              <span>强信号命中</span>
+              <b>
+                {strong.accuracyPct != null
+                  ? `${strong.accuracyPct}%`
+                  : '—'}
+              </b>
+              <small>
+                {strong.correct || 0}/{strong.total || 0} 正确
+                {strong.coveragePct != null
+                  ? ` · 覆盖 ${strong.coveragePct}%`
+                  : ''}
+              </small>
+            </div>
+          </div>
+          {days.length > 0 && (
+            <div className="qmc-days qmc-days-spaced">
+              {days.slice(0, 6).map((day) => (
+                <div className="qmc-day" key={day.date}>
+                  <span>{day.date}</span>
+                  <b>{day.accuracyPct}%</b>
+                  <small>{day.correct}/{day.total} 正确</small>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="qmc-backtest-meta">
+            <span>
+              回测窗口 {productionAccuracy.sampleWindow?.from || '—'}
+              {' 至 '}
+              {productionAccuracy.sampleWindow?.to || '—'}
+            </span>
+            <span>
+              {productionAccuracy.sampleWindow?.tradingDates || 0} 个成熟交易日
+            </span>
+            <span>
+              训练截止 {productionAccuracy.model?.dataEndDate || '—'}
+            </span>
+          </div>
+          <div className="qmc-metric-note">
+            AUC仅衡量排序能力，不计入上述实际命中率
+            {productionModel?.holdoutAucPct != null
+              ? `；当前样本外 AUC ${productionModel.holdoutAucPct.toFixed(2)}%`
+              : ''}
+          </div>
+        </>
+      ) : (
+        <div className="qmc-empty">
+          <Icon name="gauge" size={18} />
+          <div>
+            <b>{loading ? '正在读取实际回测' : '前向样本积累中'}</b>
+            <span>每日重训会回测当前冠军训练截止日之后的成熟样本，并自动更新这里。</span>
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
 function AccuracyPanel({ accuracy }) {
   const days = Array.isArray(accuracy?.days) ? accuracy.days : []
   return (
@@ -123,6 +249,8 @@ export default function QuantModelControl() {
     loading,
     error,
     control,
+    productionModel,
+    productionAccuracy,
     accuracy,
     v21Accuracy,
   } = useQuantModelStore()
@@ -201,6 +329,12 @@ export default function QuantModelControl() {
               {selected === 'v2.1' && <StatusBadge control={control} />}
             </button>
           </div>
+
+          <ProductionAccuracyPanel
+            productionAccuracy={productionAccuracy}
+            productionModel={productionModel}
+            loading={loading}
+          />
 
           {selected !== 'default' && (
             <section className="qmc-service">

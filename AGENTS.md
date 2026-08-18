@@ -66,6 +66,31 @@ npm run dev                  # 终端B: 前端Vite(5173, /api 已代理到3000)
 
 ---
 
+## Harness 质量门禁
+
+系统级 Harness 规格见 `docs/harness-engineering.md`。修改 AI 决策、账户约束、
+证据、量化适配或风险策略时，除单元测试外必须运行对应 Harness：
+
+```bash
+npm run harness             # 全部离线 suite + JSON/Markdown episode 报告
+npm run harness:portfolio   # 仅持仓再平衡
+npm run harness:ci          # CI 同口径，失败返回非零退出码
+npm run harness:online      # 显式付费：FC内运行端点能力矩阵
+npm run harness:shadow      # 显式付费：多端点同题影子对拍
+npm run harness:export -- --input failure.json
+                            # 生产失败脱敏导出为回归case
+HARNESS_NICK=... HARNESS_PASSWORD=... npm run harness:advice
+                            # 需显式账号与本地 API 的在线军师抽样
+```
+
+默认 Harness 不联网、不读取生产账号、不调用付费模型。场景只能放脱敏事实，
+严禁把昵称、密码、Token、API Key 或完整账户快照写入 `harness/cases/`。
+每次线上 AI 事故必须先归因，再沉淀为最小回归 case；不得只改 Prompt。
+在线 suite 必须显式 `--online`，不得加入默认 CI。基线只能通过
+`node harness/run.mjs --update-baseline` 人工更新并随代码审查。
+
+---
+
 ## 部署（Codex 请严格按此顺序）
 
 ### 前端 → Vercel（改了 `src/**`）
@@ -101,9 +126,10 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST "$FC/api/ai" -H "Content-Type: 
 
 ## 关键约定与坑
 
-- **四 AI 角色**（`_llm_config.js` ROLES）：`chat` / `advisor`(军师) / `agent`(FunctionCalling) / `judge`(确认闸门)。可各配不同网关与模型,配置存 OSS `config/llm.json`,优先级 **OSS > env > 默认**,改完即时生效免重部署。
+- **五 AI 角色**（`_llm_config.js` ROLES）：`chat` / `advisor`(军师) / `portfolio`(持仓分布分析) / `agent`(FunctionCalling) / `judge`(确认闸门)。可各配不同网关与模型,配置存 OSS `config/llm.json`,优先级 **OSS > env > 默认**,改完即时生效免重部署。
 - **LLM 端点池**（`_llm_pool.js`）：多 Base URL/Key 路由(轮询/最少在途)+ 熔断(连续失败3次冷却60s)+ 自动半开恢复。附加端点必须自带该角色模型才承接该角色。
-- **两段式确认**（`_confirm.js`）：价到点→watching(弱提醒);确定性信号+LLM Judge 双判→confirm 才发强提示;置信度 `<75` 降级 wait;LLM 挂了回退确定性结论。
+- **AI Search 补盲**（`_ai_search.js` / `_ai_search_config.js`）：运行时开关与Key保存在 OSS `config/ai-search.json`，右上角个人菜单可即时修改，环境变量仅作回退。开启后军师、助手、策略日报、AI选股统一增加“检索参考”；关闭后禁止调用与展示。军师单次最多一次，个股缓存30分钟、行业缓存60分钟，自动复核/Judge只读缓存。搜索摘要是待核验外部证据，不能替代公告、行情、资金或龙虎榜。
+- **两段式确认**（`_confirm.js`）：价到点→watching(弱提醒);确定性信号+LLM Judge 双判→confirm 才发强提示;LLM 置信度门槛按动作分级（买入78、止盈/减仓70、止损65），未达标降级 wait;LLM 挂了回退确定性结论。
 - **每日重训**（`retrain_daily.py`）：冠军-挑战者,leak-free holdout AUC 过护栏才晋级、只升不降;腾讯为硬性前置,新浪仅参考(海外 CI 出口 IP 拉不到新浪),股票池有 `pool_cache.json` 兜底。
 - **A股规则**：T+1(今日买入手数当日锁定)、手续费(佣金万3最低5/印花税千0.5仅卖/过户费万0.1)、做T FIFO 配对、含费均价。
 - **健壮性**：各模块 ErrorBoundary 隔离、事件订阅 try-catch、网络请求带超时、数值渲染 `Number.isFinite` 守卫。改动时保持这些防护,勿裸 fetch、勿无超时。

@@ -6,7 +6,16 @@ let theme = (() => { try { return localStorage.getItem(KEY) || 'dark' } catch { 
 const listeners = new Set()
 
 function apply() {
-  try { document.documentElement.setAttribute('data-theme', theme) } catch { /* ignore */ }
+  try {
+    document.documentElement.setAttribute('data-theme', theme)
+    const favicon = document.getElementById('app-favicon')
+    if (favicon) {
+      favicon.setAttribute(
+        'href',
+        theme === 'light' ? '/brand-light.svg' : '/brand-dark.svg',
+      )
+    }
+  } catch { /* ignore */ }
 }
 apply()
 

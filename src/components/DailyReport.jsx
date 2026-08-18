@@ -3,7 +3,9 @@ import Icon from './Icon'
 import Md from './Md'
 import { fetchDailyReport } from '../ai'
 import { planStore } from '../planStore'
-import { openStockDetail } from '../detailStore'
+import { useAiSearchConfig } from '../aiSearchConfigStore'
+import SearchReference from './SearchReference'
+import StockName from './StockName'
 
 // ============ 全市场投资策略日报（抽屉）============
 // 早/午/晚三场次；数据来自开源免费接口(东财/腾讯/新浪)综合，LLM 撰写；Blob 按日+场次缓存。
@@ -21,24 +23,46 @@ export default function DailyReport({ onClose }) {
   const [state, setState] = useState({}) // {loading,phase}|{data}|{error} per session cached in memory
   const cacheRef = useRef({}) // session -> result
   const abortRef = useRef(null)
+  const loadSeqRef = useRef(0)
+  const searchConfig = useAiSearchConfig()
 
   const load = async (sess, refresh) => {
     if (!refresh && cacheRef.current[sess]) { setState({ data: cacheRef.current[sess] }); return }
+    if (abortRef.current) abortRef.current.abort()
+    const sequence = ++loadSeqRef.current
     setState({ loading: true, phase: '正在准备日报…' })
     const ctrl = new AbortController(); abortRef.current = ctrl
     const holdings = (planStore.get().holding || []).map((h) => ({ code: h.code, name: h.name }))
     // 去重持仓
     const seen = new Set(); const uniq = holdings.filter((h) => (seen.has(h.code) ? false : seen.add(h.code)))
-    const r = await fetchDailyReport({ session: sess, holdings: uniq, refresh, signal: ctrl.signal, onPhase: (p) => setState((s) => (s.loading ? { ...s, phase: p.text } : s)) })
+    const r = await fetchDailyReport({
+      session: sess,
+      holdings: uniq,
+      refresh,
+      signal: ctrl.signal,
+      onPhase: (p) => {
+        if (sequence === loadSeqRef.current) {
+          setState((s) => (s.loading ? { ...s, phase: p.text } : s))
+        }
+      },
+    })
+    if (sequence !== loadSeqRef.current) return
     if (r && r.ok) { cacheRef.current[sess] = r; setState({ data: r }) }
     else setState({ error: (r && r.error) || '生成失败' })
   }
-  useEffect(() => { load(session) /* eslint-disable-next-line */ }, [session])
+  useEffect(() => {
+    cacheRef.current = {}
+    load(session)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, searchConfig.enabled, searchConfig.updatedAt])
   useEffect(() => () => { if (abortRef.current) abortRef.current.abort() }, [])
 
   const r = state.data
   const rep = r && r.report
   const dt = r && r.data
+  const newsRefs = (r?.newsRefs || []).filter((item) =>
+    searchConfig.enabled || item?.kind !== 'ai_search'
+  )
 
   return (
     <div className="modal-mask mask-drawer" onClick={onClose}>
@@ -85,7 +109,10 @@ export default function DailyReport({ onClose }) {
                   <div className="dr-block-t"><Icon name="wallet" size={13} /> 你的持仓 · 今日信息</div>
                   {rep.holdings.map((h, k) => (
                     <div className="dr-hold-item" key={k}>
-                      <button type="button" className="dr-hold-name" onClick={() => h.code && openStockDetail(h.code, h.name)}>{h.name}</button>
+                      <StockName code={h.code}
+                        name={h.name}
+                        className="dr-hold-name"
+                      />
                       <div className="dr-hold-info">{h.info}</div>
                       {h.impact && <div className="dr-hold-impact">{h.impact}</div>}
                     </div>
@@ -118,12 +145,13 @@ export default function DailyReport({ onClose }) {
               {Array.isArray(rep.risks) && rep.risks.length > 0 && (
                 <div className="dr-block"><div className="dr-block-t"><Icon name="shield" size={13} /> 风险提示</div>{rep.risks.map((x, k) => <div key={k} className="dr-risk-item">· {x}</div>)}</div>
               )}
+              <SearchReference reference={r.searchReference} />
 
               {/* 数据来源 */}
-              {Array.isArray(r.newsRefs) && r.newsRefs.length > 0 && (
+              {newsRefs.length > 0 && (
                 <div className="dr-refs">
                   <div className="dr-refs-t">参考来源</div>
-                  {r.newsRefs.map((n, k) => <a key={k} className="dr-ref" href={n.url} target="_blank" rel="noreferrer"><span className="dr-ref-d">{n.date}</span>{n.title}</a>)}
+                  {newsRefs.map((n, k) => <a key={k} className="dr-ref" href={n.url} target="_blank" rel="noreferrer"><span className="dr-ref-d">{n.date}</span>{n.title}</a>)}
                 </div>
               )}
               <div className="dr-disclaimer">数据来自东财/腾讯/新浪等公开免费接口，海外与商品多为延迟/昨收，仅供研究参考，非投资建议。</div>

@@ -5,10 +5,81 @@ import {
   canControlV2Service,
   getV2RuntimeConfig,
   getV2ServiceStatus,
+  getProductionModelMetrics,
   modelControlView,
+  normalizeProductionModelMetrics,
   resolveV2ServiceStatus,
   setV2ServiceEnabled,
 } from '../api/_quant_model_control.js'
+
+test('生产模型元数据以样本外AUC展示泛化准确性且不泄露内部配置', () => {
+  const metrics = normalizeProductionModelMetrics({
+    loaded: true,
+    meta: {
+      holdout_auc: 0.5739396428725843,
+      cv_auc: 0.6091897079763262,
+      n_samples: 360890,
+      data_end_date: '2026-08-06',
+      feat_names: Array.from({ length: 36 }, (_, index) => `f${index}`),
+      horizon: 5,
+      secret: 'must-not-leak',
+    },
+  })
+
+  assert.deepEqual(metrics, {
+    available: true,
+    loaded: true,
+    primaryLabel: '样本外 AUC',
+    primaryAucPct: 57.39,
+    holdoutAucPct: 57.39,
+    cvAucPct: 60.92,
+    sampleCount: 360890,
+    dataEndDate: '2026-08-06',
+    featureCount: 36,
+    horizonDays: 5,
+  })
+  assert.equal(JSON.stringify(metrics).includes('must-not-leak'), false)
+})
+
+test('生产模型准确率从量化服务读取且服务失败时安全降级', async () => {
+  const success = await getProductionModelMetrics({
+    env: {
+      QUANT_URL: 'https://quant.example.com/',
+      QUANT_KEY: 'private-key',
+    },
+    fetchImpl: async (url, options) => {
+      assert.equal(url, 'https://quant.example.com/model_info')
+      assert.equal(options.headers['X-API-Key'], 'private-key')
+      return {
+        ok: true,
+        async json() {
+          return {
+            loaded: true,
+            meta: { holdout_auc: 0.58, feat_names: ['a', 'b'] },
+          }
+        },
+      }
+    },
+  })
+  assert.equal(success.primaryAucPct, 58)
+
+  const unavailable = await getProductionModelMetrics({
+    env: { QUANT_URL: 'https://quant.example.com' },
+    fetchImpl: async () => { throw new Error('network down') },
+  })
+  assert.deepEqual(unavailable, {
+    available: false,
+    loaded: false,
+    primaryLabel: '样本外 AUC',
+    primaryAucPct: null,
+    holdoutAucPct: null,
+    cvAucPct: null,
+    sampleCount: null,
+    dataEndDate: '',
+    featureCount: null,
+    horizonDays: null,
+  })
+})
 
 test('默认模型无需V2开关且始终可用', () => {
   const view = modelControlView({
@@ -108,6 +179,13 @@ test('EAS运行配置会规范化当前服务入口并返回实时Token', async 
             status: 'Running',
             internetEndpoint: 'current.cn-hangzhou.pai-eas.aliyuncs.com/api/predict/stock_quant_lab_shadow',
             accessToken: 'current-token',
+            serviceConfig: JSON.stringify({
+              containers: [{
+                env: [
+                  { name: 'SHADOW_API_KEY', value: 'current-shadow-key' },
+                ],
+              }],
+            }),
           },
         }
       },
@@ -117,6 +195,7 @@ test('EAS运行配置会规范化当前服务入口并返回实时Token', async 
   assert.deepEqual(runtime, {
     url: 'https://current.cn-hangzhou.pai-eas.aliyuncs.com/api/predict/stock_quant_lab_shadow',
     easToken: 'current-token',
+    apiKey: 'current-shadow-key',
     status: 'Running',
   })
 })

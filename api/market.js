@@ -1,25 +1,17 @@
 import { emGet, sendJson, sendError, num } from './_lib.js';
-import { fetchClsTelegraph, fetchSinaFlash, fetchNews } from './_market_data.js';
+import { fetchMarketFlashes, fetchNews } from './_market_data.js';
 import { fetchLimitPool } from './_limit_pool.js';
 
 // 盘面研究·外部宏观快讯聚合（合并入 market 端点以规避 Hobby 12 函数上限）
 // GET /api/market?news=1 → { ok, macro:[{title,date,url}], flashes:[{title,src,date,url,level}] }
-// 数据源：财联社系/金十/东财聚合(fetchClsTelegraph) + 新浪7×24(fetchSinaFlash) + 东财宏观检索(fetchNews)。
+// 数据源：金十/财联社系/东财聚合 + 新浪7×24 + 华尔街见闻 + 东财/见闻定向检索。
 async function handleNews(res) {
   try {
-    const [cls, sina, macro] = await Promise.all([
-      fetchClsTelegraph(20).catch(() => []),
-      fetchSinaFlash(16).catch(() => []),
+    const [flashPool, macro] = await Promise.all([
+      fetchMarketFlashes(30).catch(() => []),
       fetchNews('宏观 政策 央行 A股 美联储 关税 市场', 10).catch(() => []),
     ]);
-    const seen = new Set();
-    const flashes = [...(cls || []), ...(sina || [])]
-      .filter((n) => {
-        const k = (n.title || '').slice(0, 24);
-        if (!k || seen.has(k)) return false;
-        seen.add(k);
-        return true;
-      })
+    const flashes = (flashPool || [])
       .map((n) => ({ title: n.title, src: n.src || '快讯', date: n.date || '', url: n.url || '', level: n.level }))
       .slice(0, 30);
     let macroList = (macro || [])
@@ -31,7 +23,7 @@ async function handleNews(res) {
     // 与 AI 侧 fetchMacroNews 的降级逻辑保持一致,确保面板不再出现"暂无"。
     if (!macroList.length) {
       const MACRO_RE = /(央行|货币|政策|降准|降息|LPR|财政|关税|美股|美联储|加息|经济|GDP|CPI|PPI|地缘|大盘|A股|外资|人民币|国常会|会议|监管|出口|贸易|指数)/;
-      const pool = [...(cls || []), ...(sina || [])].filter((x) => x && x.title);
+      const pool = (flashPool || []).filter((x) => x && x.title);
       let cand = pool.filter((x) => MACRO_RE.test(x.title));
       if (!cand.length) cand = pool; // 关键词一条没命中→退化为最新快讯,总比空缺强
       const seen2 = new Set();

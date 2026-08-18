@@ -1,4 +1,6 @@
 import { beijingDate, beijingDayKey, isTradingDay } from './tradingCalendar.js'
+import { computeTFlows, tradeActivityContext } from './portfolioAccounting.js'
+import { tradeIntentOf, tradeRecordType } from './tradeIntent.js'
 
 const round2 = (value) => +Number(value || 0).toFixed(2)
 const finite = (value) => {
@@ -77,6 +79,75 @@ function currentPositions(holdings, quoteMap, todayKey) {
     }
   })
   return { positions, quoteComplete, tradeDateComplete }
+}
+
+export function computeTodayOperationPnl({
+  holdings = [],
+  trades = [],
+  now = Date.now(),
+} = {}) {
+  const todayKey = beijingDayKey(now)
+  let positionPnl = 0
+  let tPnl = 0
+  let positionCount = 0
+  let tCount = 0
+
+  for (const record of trades || []) {
+    const type = tradeRecordType(record)
+    const realizedAt = record?.sellAt ?? record?.at ?? record?.buyAt
+    if (!realizedAt || beijingDayKey(realizedAt) !== todayKey) continue
+    const pnl = record?.realizedPnl ?? record?.netPnl
+    if (pnl == null || !Number.isFinite(Number(pnl))) continue
+
+    if (type === 'T') {
+      tPnl += Number(pnl)
+      tCount++
+      continue
+    }
+    if (
+      (type === 'SELL' || type === 'CLOSE')
+      && tradeIntentOf(record) !== 't'
+    ) {
+      positionPnl += Number(pnl)
+      positionCount++
+    }
+  }
+
+  const classifiedT = tradeActivityContext(trades).t.pairRecords
+    .filter((record) =>
+      record.at
+      && beijingDayKey(record.at) === todayKey
+    )
+  tPnl += classifiedT.reduce(
+    (sum, record) => sum + finite(record.realizedPnl),
+    0,
+  )
+  tCount += classifiedT.length
+
+  for (const holding of holdings || []) {
+    const todayFlows = (holding.tFlows || []).filter((flow) =>
+      flow.at
+      && beijingDayKey(flow.at) === todayKey
+    )
+    if (!todayFlows.length) continue
+    const pairs = computeTFlows(todayFlows).pairList
+    tPnl += pairs.reduce(
+      (sum, pair) => sum + finite(pair.netPnl),
+      0,
+    )
+    tCount += pairs.length
+  }
+
+  positionPnl = round2(positionPnl)
+  tPnl = round2(tPnl)
+  return {
+    total: round2(positionPnl + tPnl),
+    positionPnl,
+    tPnl,
+    positionCount,
+    tCount,
+    realizedCount: positionCount + tCount,
+  }
 }
 
 export function computeDailyFinance({

@@ -1,17 +1,22 @@
 import { useState, useRef, useEffect } from 'react'
 import { useAIStore, aiStore } from '../aiStore'
-import { openStockDetail } from '../detailStore'
 import { chatStore } from '../chatStore'
 import { callAI } from '../ai'
 import { api } from '../apiBase'
 import { accountRequestHeaders } from '../quantModel'
 import { computePortfolio, livePositionOf, planStore, t1StatusOf, usePlanStore } from '../planStore'
-import { sanitizeAccountContext } from '../../shared/assistantContext.js'
+import {
+  formatEvidenceTime,
+  sanitizeAccountContext,
+} from '../../shared/assistantContext.js'
 import { sanitizeTradeProposal } from '../../shared/tradeProposal.js'
+import { useAiSearchConfig } from '../aiSearchConfigStore'
 import Icon from './Icon'
 import Md from './Md'
 import Reasoning from './Reasoning'
 import ConfirmDialog from './ConfirmDialog'
+import StockName from './StockName'
+import StockTags from './StockTags'
 
 // ============ 统一 AI 助手：一个入口，对话为核心 ============
 // 能力：个股多轮问答(RAG+新闻) + 快捷指令(全盘扫描/盘面复盘/板块选股/个股诊断)
@@ -44,6 +49,12 @@ function buildAccountContext(book, snapshot) {
     .slice(0, 10)
     .map((item) => ({ ...item, type: item.type || item.kind }))
   return sanitizeAccountContext({
+    capturedAt: Date.now(),
+    counts: {
+      positions: positions.length,
+      watchlist: (book.plan || []).length,
+      recentTrades: (book.closed || []).length,
+    },
     account: {
       totalAssets: portfolio.totalAssets,
       cash: portfolio.available,
@@ -73,6 +84,7 @@ export default function AIAssistant({ snapshot }) {
   const [confirmProposal, setConfirmProposal] = useState(null)
   const [proposalNotice, setProposalNotice] = useState('')
   const book = usePlanStore()
+  const searchConfig = useAiSearchConfig()
   const today = chatStore.today()
   const [day, setDay] = useState(today) // 当前查看的日期
   const [msgs, setMsgs] = useState(() => chatStore.load(today)) // 从今天的持久化对话恢复
@@ -149,7 +161,16 @@ export default function AIAssistant({ snapshot }) {
     setQ('')
     let base = msgs
     if (!isToday) { base = chatStore.load(today); setDay(today); setMsgs(base) }
-    const history = base.filter((m) => m.kind === 'text').map((m) => ({ role: m.role, content: typeof m.content === 'string' ? m.content : '' })).slice(-12)
+    const history = base
+      .filter((m) =>
+        m.kind === 'text'
+        && (searchConfig.enabled || !m.searchReference)
+      )
+      .map((m) => ({
+        role: m.role,
+        content: typeof m.content === 'string' ? m.content : '',
+      }))
+      .slice(-12)
     pushUser(query)
     setLoading(true)
     const ctrl = new AbortController()
@@ -185,7 +206,7 @@ export default function AIAssistant({ snapshot }) {
         let j = null; try { j = JSON.parse(raw) } catch { /* 非 JSON */ }
         if (j && j.ok) {
           const evidence = j.evidence || []
-          patchAI({ content: j.answer || '', toolTrace: j.toolTrace || [], theoryRefs: j.theoryRefs || [], evidence, actionProposals: sanitizeProposals(j.actionProposals, evidence), streaming: false, status: null })
+          patchAI({ content: j.answer || '', toolTrace: j.toolTrace || [], theoryRefs: j.theoryRefs || [], evidence, searchReference: j.searchReference || null, actionProposals: sanitizeProposals(j.actionProposals, evidence), streaming: false, status: null })
         }
         else patchAI({ content: '抱歉，' + ((j && j.error) || '分析超时，请换个更聚焦的问法重试。'), streaming: false, status: null })
       } else {
@@ -221,7 +242,7 @@ export default function AIAssistant({ snapshot }) {
           } else if (event === 'done') {
             patchAI((prev) => {
               const evidence = data.evidence || prev.evidence || []
-              return { ...prev, content: data.answer || prev.content, toolTrace: data.toolTrace || [], theoryRefs: data.theoryRefs || prev.theoryRefs, evidence, actionProposals: sanitizeProposals(data.actionProposals, evidence), streaming: false, status: null }
+              return { ...prev, content: data.answer || prev.content, toolTrace: data.toolTrace || [], theoryRefs: data.theoryRefs || prev.theoryRefs, evidence, searchReference: data.searchReference || null, actionProposals: sanitizeProposals(data.actionProposals, evidence), streaming: false, status: null }
             })
           } else if (event === 'error') {
             patchAI((prev) => ({ ...prev, content: prev.content || ('抱歉，' + (data.error || '分析失败')), streaming: false, status: null }))
@@ -281,7 +302,7 @@ export default function AIAssistant({ snapshot }) {
       {/* 悬浮球 */}
       <button type="button" className={'ai-fab' + (open ? ' hidden' : '')} onClick={() => aiStore.open()} title="问军师" aria-label="问军师">
         <span className="ai-fab-spark"><Icon name="spark" size={18} /></span>
-        <span className="ai-fab-text">问军师</span>
+        <span className="ai-fab-text">军师</span>
       </button>
 
       {/* 抽屉 */}
@@ -403,9 +424,13 @@ const TOOL_LABEL = {
   propose_trade_plan: '生成交易提案',
 }
 function Message({ m, canApply, appliedProposalIds, onApplyProposal }) {
+  const searchConfig = useAiSearchConfig()
   if (m.role === 'user') {
     return <div className="qa-msg user"><div className="qa-bubble"><div className="qa-bubble-text">{m.content}</div></div></div>
   }
+  const visibleEvidence = (m.evidence || []).filter((item) =>
+    searchConfig.enabled || item?.dimension !== 'search'
+  )
   return (
     <div className="qa-msg assistant"><div className="qa-bubble">
       {m.kind === 'text' && (
@@ -441,13 +466,13 @@ function Message({ m, canApply, appliedProposalIds, onApplyProposal }) {
           {Array.isArray(m.actionProposals) && m.actionProposals.length > 0 && (
             <ProposalList
               proposals={m.actionProposals}
-              evidence={m.evidence}
+              evidence={visibleEvidence}
               canApply={canApply}
               appliedProposalIds={appliedProposalIds}
               onApply={onApplyProposal}
             />
           )}
-          {Array.isArray(m.evidence) && m.evidence.length > 0 && <EvidenceList evidence={m.evidence} />}
+          {visibleEvidence.length > 0 && <EvidenceList evidence={visibleEvidence} />}
           {Array.isArray(m.theoryRefs) && m.theoryRefs.length > 0 && (
             <div className="theory-refs">
               <span className="theory-refs-label"><Icon name="book" size={11} /> 参考理论</span>
@@ -491,7 +516,9 @@ function ProposalList({ proposals, evidence, canApply, appliedProposalIds, onApp
         return (
           <div className="proposal-card" key={proposal.id}>
             <div className="proposal-card-head">
-              <span><b>{proposal.name}</b> <span className="muted">{proposal.code}</span></span>
+              <StockName code={proposal.code} name={proposal.name}>
+                <span><b>{proposal.name}</b></span>
+              </StockName>
               <span className={'proposal-action ' + action.cls}>{action.label}</span>
             </div>
             <div className="proposal-prices">
@@ -524,7 +551,11 @@ function ProposalConfirmBody({ proposal }) {
   const action = PROPOSAL_ACTION[proposal.action] || { label: proposal.action }
   return (
     <div className="proposal-dialog-body">
-      <p>将 <b>{proposal.name}（{proposal.code}）</b> 的“{action.label}”写入账号：</p>
+      <p>
+        将 <b>{proposal.name}（{proposal.code}）</b>
+        <StockTags code={proposal.code} variant="inline" />
+        的“{action.label}”写入账号：
+      </p>
       <div className="proposal-dialog-grid">
         <span>触发价</span><b>{proposal.triggerOp === 'lte' ? '≤' : '≥'} {proposal.entryPrice}</b>
         <span>计划手数</span><b>{proposal.qty != null ? `${proposal.qty} 手` : '未指定'}</b>
@@ -538,22 +569,18 @@ function ProposalConfirmBody({ proposal }) {
 }
 
 function EvidenceList({ evidence }) {
-  const formatTime = (value) => {
-    const date = new Date(value)
-    return Number.isFinite(date.getTime())
-      ? date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-      : '时间未知'
-  }
-  return (
-    <div className="evidence-list">
-      <div className="evidence-head"><Icon name="shield" size={12} /> 数据证据</div>
-      {evidence.map((item) => {
+  const dataEvidence = evidence.filter((item) => item?.dimension !== 'search')
+  const searchEvidence = evidence.filter((item) => item?.dimension === 'search')
+  const group = (title, icon, items, className = '') => items.length > 0 && (
+    <div className={'evidence-list ' + className}>
+      <div className="evidence-head"><Icon name={icon} size={12} /> {title}</div>
+      {items.map((item) => {
         const body = (
           <>
             <span className="evidence-id">[{item.id}]</span>
             <span className="evidence-main">
               <span className="evidence-title">{item.title}</span>
-              <span className="evidence-meta">{item.source} · {formatTime(item.asOf)}</span>
+              <span className="evidence-meta">{item.source} · {formatEvidenceTime(item.asOf, item.timeKind)}</span>
               {item.summary && <span className="evidence-summary">{item.summary}</span>}
             </span>
             {item.url && <Icon name="chevronRight" size={11} />}
@@ -564,6 +591,12 @@ function EvidenceList({ evidence }) {
           : <div className="evidence-item" key={item.id}>{body}</div>
       })}
     </div>
+  )
+  return (
+    <>
+      {group('数据证据', 'shield', dataEvidence)}
+      {group('检索参考', 'search', searchEvidence, 'search-dimension')}
+    </>
   )
 }
 
@@ -595,7 +628,16 @@ function Scan({ r }) {
           <div className="ai-line">{d.logic}</div>
           {Array.isArray(d.representStocks) && d.representStocks.length > 0 && (
             <div className="dir-stocks" style={{ marginTop: 4 }}>
-              {d.representStocks.map((s, j) => <button type="button" key={j} className="dir-stock" disabled={!s.code} onClick={() => s.code && openStockDetail(s.code, s.name)}>{s.name} {s.code}</button>)}
+              {d.representStocks.map((s, j) => (
+                <StockName
+                  key={j}
+                  code={s.code}
+                  name={s.name}
+                  className="dir-stock"
+                >
+                  <span>{s.name}</span>
+                </StockName>
+              ))}
             </div>
           )}
         </div>
@@ -623,7 +665,11 @@ function SectorPick({ r }) {
       {r.sectorView && <div className="ai-summary" style={{ marginBottom: 8 }}>{r.sectorView}</div>}
       {Array.isArray(r.picks) && r.picks.map((p, i) => (
         <div key={i} className="ai-pick">
-          <div className="ai-pick-head"><b>{p.name}</b> <button type="button" className="dir-stock" disabled={!p.code} onClick={() => p.code && openStockDetail(p.code, p.name)}>{p.code}</button></div>
+          <div className="ai-pick-head">
+            <StockName code={p.code} name={p.name}>
+              <span><b>{p.name}</b></span>
+            </StockName>
+          </div>
           <div className="ai-line"><span className="ai-tag-reason">逻辑</span>{p.reason}</div>
           <div className="ai-line"><span className="ai-tag-watch">关注</span>{p.watch}</div>
         </div>

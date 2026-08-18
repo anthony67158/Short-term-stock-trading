@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#101318" />
+    <title>设备授权 · 短线操盘台</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #101318;
+        color: #f3f5f7;
+      }
+      * { box-sizing: border-box; }
+      body {
+        min-width: 320px;
+        min-height: 100dvh;
+        margin: 0;
+        display: grid;
+        place-items: center;
+        padding: max(24px, env(safe-area-inset-top)) 20px max(24px, env(safe-area-inset-bottom));
+        background: #101318;
+      }
+      main {
+        width: min(420px, 100%);
+        border: 1px solid #303640;
+        border-radius: 8px;
+        background: #171b21;
+        padding: 28px;
+        box-shadow: 0 24px 70px rgba(0, 0, 0, .34);
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 30px;
+      }
+      .brand img {
+        width: 40px;
+        height: 40px;
+        border-radius: 7px;
+      }
+      .brand strong { font-size: 18px; letter-spacing: 0; }
+      .eyebrow {
+        margin: 0 0 8px;
+        color: #8f99a7;
+        font-size: 12px;
+      }
+      h1 {
+        margin: 0;
+        font-size: 25px;
+        line-height: 1.25;
+        letter-spacing: 0;
+      }
+      .description {
+        margin: 10px 0 24px;
+        color: #aeb6c1;
+        font-size: 14px;
+        line-height: 1.65;
+      }
+      label {
+        display: block;
+        margin-bottom: 8px;
+        color: #cbd1d9;
+        font-size: 13px;
+        font-weight: 600;
+      }
+      input {
+        width: 100%;
+        height: 48px;
+        border: 1px solid #3b434f;
+        border-radius: 6px;
+        outline: 0;
+        background: #101318;
+        padding: 0 14px;
+        color: #f3f5f7;
+        font: 600 18px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+        letter-spacing: 0;
+      }
+      input:focus {
+        border-color: #4c9aff;
+        box-shadow: 0 0 0 3px rgba(76, 154, 255, .16);
+      }
+      button {
+        width: 100%;
+        min-height: 46px;
+        margin-top: 14px;
+        border: 0;
+        border-radius: 6px;
+        background: #4c9aff;
+        color: #07101d;
+        font: 700 14px/1 inherit;
+        cursor: pointer;
+      }
+      button:hover { background: #6aabff; }
+      button:disabled { cursor: wait; opacity: .68; }
+      .message {
+        min-height: 20px;
+        margin: 10px 0 0;
+        color: #ff7b72;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+      .device {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 22px;
+        padding-top: 18px;
+        border-top: 1px solid #2b313a;
+        color: #8f99a7;
+        font-size: 12px;
+        line-height: 1.5;
+      }
+      .device-dot {
+        width: 7px;
+        height: 7px;
+        flex: 0 0 7px;
+        border-radius: 50%;
+        background: #3fb950;
+      }
+      @media (max-width: 480px) {
+        main { padding: 24px 20px; }
+        h1 { font-size: 22px; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="brand">
+        <img src="/brand-dark.svg" width="40" height="40" alt="" />
+        <strong>短线操盘台</strong>
+      </div>
+      <p class="eyebrow">PRIVATE ACCESS</p>
+      <h1>验证此设备</h1>
+      <p class="description">输入授权码后，此浏览器会被记为已授权设备，后续访问无需重复验证。</p>
+      <form id="access-form">
+        <label for="access-code">授权码</label>
+        <input
+          id="access-code"
+          name="code"
+          type="password"
+          inputmode="numeric"
+          pattern="[0-9]{8}"
+          maxlength="8"
+          autocomplete="one-time-code"
+          required
+          autofocus
+        />
+        <button id="submit-button" type="submit">授权并进入</button>
+        <p id="message" class="message" role="alert" aria-live="polite"></p>
+      </form>
+      <div class="device">
+        <span class="device-dot" aria-hidden="true"></span>
+        <span>授权凭证仅保存在当前浏览器的安全 Cookie 中。</span>
+      </div>
+    </main>
+    <script>
+      const form = document.querySelector('#access-form')
+      const input = document.querySelector('#access-code')
+      const button = document.querySelector('#submit-button')
+      const message = document.querySelector('#message')
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault()
+        const code = input.value.trim()
+        if (!/^\d{8}$/.test(code)) {
+          message.textContent = '请输入 8 位数字授权码。'
+          input.focus()
+          return
+        }
+
+        button.disabled = true
+        button.textContent = '正在验证'
+        message.textContent = ''
+        const controller = new AbortController()
+        const timeout = setTimeout(() => controller.abort(), 10000)
+
+        try {
+          const response = await fetch('/api/site_access', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code }),
+            signal: controller.signal,
+          })
+          const result = await response.json().catch(() => ({}))
+          if (!response.ok || !result.ok) {
+            message.textContent = response.status === 429
+              ? '尝试次数过多，请稍后再试。'
+              : '授权码不正确。'
+            input.select()
+            return
+          }
+          window.location.replace('/')
+        } catch (error) {
+          message.textContent = error && error.name === 'AbortError'
+            ? '验证超时，请重试。'
+            : '暂时无法验证，请稍后重试。'
+        } finally {
+          clearTimeout(timeout)
+          button.disabled = false
+          button.textContent = '授权并进入'
+        }
+      })
+    </script>
+  </body>
+</html>
