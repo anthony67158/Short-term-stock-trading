@@ -15,6 +15,8 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      TZ: Asia/Shanghai
     permissions:
       contents: read
     steps:
@@ -33,7 +35,12 @@ jobs:
         run: npm run harness:ci
 
       - name: Run unit and contract tests
-        run: npm test
+        shell: bash
+        run: |
+          mkdir -p test-artifacts
+          set -o pipefail
+          npm test -- --test-concurrency=2 \
+            2>&1 | tee test-artifacts/node-tests.log
 
       - name: Build production frontend
         run: npm run build
@@ -43,5 +50,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: harness-report-${{ github.run_id }}
-          path: harness-artifacts/
+          path: |
+            harness-artifacts/
+            test-artifacts/
           if-no-files-found: error
