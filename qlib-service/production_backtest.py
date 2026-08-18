@@ -1,14 +1,19 @@
 """Forward-only accuracy report for the current production LightGBM model."""
 
 import json
+import re
 import time
+from datetime import datetime, timedelta
 
 import numpy as np
 
 
 PRODUCTION_ACCURACY_KEY = "quantmodel/production_accuracy.json"
+HARD_ERROR_MEMORY_KEY = "quantmodel/hard_error_memory.json"
+HARD_ERROR_MEMORY_SCHEMA = "production-hard-errors.v1"
 POSITIVE_THRESHOLD = 0.62
 NEGATIVE_THRESHOLD = 0.38
+CODE_RE = re.compile(r"^(?:sh|sz)\d{6}$")
 
 
 def _date_key(value):
@@ -42,6 +47,212 @@ def _balanced_accuracy(labels, predictions):
     if len(recalls) != 2:
         return None
     return round(float(np.mean(recalls)) * 100, 1)
+
+
+def collect_hard_error_samples(
+    booster,
+    meta,
+    *,
+    X,
+    labels,
+    dates,
+    codes,
+    now=None,
+):
+    """Collect whitelisted OOS mistakes; never persist raw bars or features."""
+    X = np.asarray(X)
+    labels = np.asarray(labels, dtype=int)
+    dates = np.asarray(dates).astype(str)
+    codes = np.asarray(codes).astype(str)
+    if not (len(X) == len(labels) == len(dates) == len(codes)):
+        raise ValueError("hard error arrays must have equal length")
+    cutoff = _date_key((meta or {}).get("data_end_date"))
+    if len(cutoff) != 8:
+        raise ValueError("production model data_end_date is required")
+    date_keys = np.asarray([_date_key(value) for value in dates])
+    selected = np.flatnonzero(date_keys > cutoff)
+    if not len(selected):
+        return []
+    probabilities = np.asarray(booster.predict(X[selected]), dtype=float)
+    if len(probabilities) != len(selected) or not np.isfinite(probabilities).all():
+        raise ValueError("production model returned invalid probabilities")
+    predicted = (probabilities >= 0.5).astype(int)
+    actual = labels[selected]
+    observed_at = int(time.time() * 1000 if now is None else now)
+    samples = []
+    for position, probability, prediction, label in zip(
+        selected,
+        probabilities,
+        predicted,
+        actual,
+    ):
+        code = str(codes[position])
+        date = str(date_keys[position])
+        if (
+            prediction == label
+            or not CODE_RE.fullmatch(code)
+            or len(date) != 8
+        ):
+            continue
+        samples.append({
+            "sampleKey": f"{date}:{code}",
+            "date": date,
+            "code": code,
+            "label": int(label),
+            "probability": round(float(probability), 6),
+            "predicted": int(prediction),
+            "confidence": round(
+                float(abs(probability - 0.5) * 2.0),
+                6,
+            ),
+            "modelTrainedAt": int((meta or {}).get("trained_at") or 0),
+            "firstSeenAt": observed_at,
+            "lastSeenAt": observed_at,
+            "timesSeen": 1,
+        })
+    return samples
+
+
+def _valid_hard_error_sample(value):
+    if not isinstance(value, dict):
+        return None
+    date = _date_key(value.get("date"))
+    code = str(value.get("code") or "")
+    label = value.get("label")
+    probability = value.get("probability")
+    try:
+        label = int(label)
+        probability = float(probability)
+    except (TypeError, ValueError):
+        return None
+    if (
+        len(date) != 8
+        or not CODE_RE.fullmatch(code)
+        or label not in (0, 1)
+        or not np.isfinite(probability)
+        or probability < 0
+        or probability > 1
+    ):
+        return None
+    predicted = int(probability >= 0.5)
+    if predicted == label:
+        return None
+    return {
+        "sampleKey": f"{date}:{code}",
+        "date": date,
+        "code": code,
+        "label": label,
+        "probability": round(probability, 6),
+        "predicted": predicted,
+        "confidence": round(abs(probability - 0.5) * 2.0, 6),
+        "modelTrainedAt": int(value.get("modelTrainedAt") or 0),
+        "firstSeenAt": int(value.get("firstSeenAt") or 0),
+        "lastSeenAt": int(value.get("lastSeenAt") or 0),
+        "timesSeen": max(1, int(value.get("timesSeen") or 1)),
+    }
+
+
+def merge_hard_error_memory(
+    existing,
+    incoming,
+    *,
+    now=None,
+    max_samples=4000,
+    max_per_class=2000,
+    max_age_days=365,
+):
+    """Deduplicate mistakes and retain a balanced, bounded replay memory."""
+    observed_at = int(time.time() * 1000 if now is None else now)
+    by_key = {}
+    for value in (existing or {}).get("samples") or []:
+        sample = _valid_hard_error_sample(value)
+        if sample:
+            by_key[sample["sampleKey"]] = sample
+    for value in incoming or []:
+        sample = _valid_hard_error_sample(value)
+        if not sample:
+            continue
+        previous = by_key.get(sample["sampleKey"])
+        if previous:
+            sample["firstSeenAt"] = previous["firstSeenAt"]
+            sample["timesSeen"] = previous["timesSeen"] + 1
+        sample["lastSeenAt"] = observed_at
+        by_key[sample["sampleKey"]] = sample
+
+    samples = list(by_key.values())
+    if samples and max_age_days > 0:
+        latest = max(
+            datetime.strptime(sample["date"], "%Y%m%d")
+            for sample in samples
+        )
+        cutoff = latest - timedelta(days=int(max_age_days))
+        samples = [
+            sample for sample in samples
+            if datetime.strptime(sample["date"], "%Y%m%d") >= cutoff
+        ]
+
+    retained = []
+    for label in (0, 1):
+        group = [sample for sample in samples if sample["label"] == label]
+        group.sort(
+            key=lambda sample: (
+                sample["timesSeen"],
+                sample["date"],
+                sample["confidence"],
+                sample["lastSeenAt"],
+            ),
+            reverse=True,
+        )
+        retained.extend(group[:max(0, int(max_per_class))])
+    retained.sort(
+        key=lambda sample: (
+            sample["date"],
+            sample["timesSeen"],
+            sample["confidence"],
+        ),
+        reverse=True,
+    )
+    retained = retained[:max(0, int(max_samples))]
+    by_class = {
+        str(label): sum(sample["label"] == label for sample in retained)
+        for label in (0, 1)
+    }
+    return {
+        "schemaVersion": HARD_ERROR_MEMORY_SCHEMA,
+        "updatedAt": observed_at,
+        "total": len(retained),
+        "byClass": by_class,
+        "samples": retained,
+    }
+
+
+def load_hard_error_memory(*, bucket=None):
+    if bucket is None:
+        from upload_model import bucket as create_bucket
+        bucket = create_bucket()
+    try:
+        payload = json.loads(
+            bucket.get_object(HARD_ERROR_MEMORY_KEY)
+            .read()
+            .decode("utf-8")
+        )
+    except Exception as error:
+        if (
+            getattr(error, "status", None) == 404
+            or getattr(error, "code", None) == "NoSuchKey"
+        ):
+            payload = {}
+        else:
+            raise
+    if payload.get("schemaVersion") != HARD_ERROR_MEMORY_SCHEMA:
+        return {
+            "schemaVersion": HARD_ERROR_MEMORY_SCHEMA,
+            "updatedAt": 0,
+            "total": 0,
+            "byClass": {"0": 0, "1": 0},
+            "samples": [],
+        }
+    return payload
 
 
 def evaluate_production_model(
@@ -225,3 +436,23 @@ def upload_production_accuracy(report, *, bucket=None):
         },
     )
     return PRODUCTION_ACCURACY_KEY
+
+
+def upload_hard_error_memory(memory, *, bucket=None):
+    if bucket is None:
+        from upload_model import bucket as create_bucket
+        bucket = create_bucket()
+    payload = json.dumps(
+        memory,
+        ensure_ascii=False,
+        sort_keys=True,
+    ).encode("utf-8")
+    bucket.put_object(
+        HARD_ERROR_MEMORY_KEY,
+        payload,
+        headers={
+            "Content-Type": "application/json",
+            "Cache-Control": "no-cache",
+        },
+    )
+    return HARD_ERROR_MEMORY_KEY

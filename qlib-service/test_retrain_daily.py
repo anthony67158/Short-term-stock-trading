@@ -204,47 +204,6 @@ class ForwardHoldoutSplitTest(unittest.TestCase):
         self.assertGreater(weights[2], weights[0])
         self.assertAlmostEqual(float(weights.mean()), 1.0, places=6)
 
-    def test_only_misclassified_adaptation_samples_receive_capped_error_weight(self):
-        retrain = load_retrain_daily()
-        base_weights = np.ones(6, dtype=np.float32)
-        probabilities = np.array([0.90, 0.55, 0.10, 0.80, 0.20, 0.70])
-        labels = np.array([0, 0, 0, 1, 1, 1])
-        adaptation_mask = np.array([True, True, True, True, False, False])
-
-        weights, stats = retrain.hard_error_sample_weights(
-            base_weights,
-            probabilities,
-            labels,
-            adaptation_mask,
-            base_multiplier=2.0,
-            confidence_bonus=1.0,
-            max_multiplier=3.0,
-        )
-
-        self.assertAlmostEqual(float(weights.mean()), 1.0, places=6)
-        self.assertGreater(weights[0], weights[1])
-        self.assertGreater(weights[1], weights[2])
-        self.assertEqual(weights[2], weights[3])
-        self.assertEqual(weights[4], weights[5])
-        self.assertEqual(stats["eligible_n"], 4)
-        self.assertEqual(stats["hard_error_n"], 2)
-        self.assertEqual(stats["hard_error_rate"], 0.5)
-        self.assertEqual(stats["base_multiplier"], 2.0)
-        self.assertEqual(stats["max_applied_multiplier"], 2.8)
-
-    def test_hard_error_weighting_does_not_use_blind_or_historical_rows(self):
-        retrain = load_retrain_daily()
-        weights, stats = retrain.hard_error_sample_weights(
-            np.ones(4, dtype=np.float32),
-            np.array([0.99, 0.99, 0.01, 0.01]),
-            np.array([0, 0, 1, 1]),
-            np.array([False, False, False, False]),
-        )
-
-        np.testing.assert_allclose(weights, np.ones(4))
-        self.assertEqual(stats["eligible_n"], 0)
-        self.assertEqual(stats["hard_error_n"], 0)
-
     def test_pending_error_queue_uses_actual_forward_backtest_counts(self):
         retrain = load_retrain_daily()
 
@@ -258,6 +217,73 @@ class ForwardHoldoutSplitTest(unittest.TestCase):
             "hard_error_rate": 0.3671,
         })
         self.assertIsNone(retrain.pending_hard_error_summary(None))
+
+    def test_persistent_hard_errors_are_replayed_on_every_training_with_decay(self):
+        retrain = load_retrain_daily()
+        memory = {
+            "schemaVersion": "production-hard-errors.v1",
+            "samples": [
+                {
+                    "sampleKey": "20260807:sh000002",
+                    "date": "20260807",
+                    "code": "sh000002",
+                    "label": 0,
+                    "confidence": 0.8,
+                },
+                {
+                    "sampleKey": "20260810:sh000003",
+                    "date": "20260810",
+                    "code": "sh000003",
+                    "label": 1,
+                    "confidence": 0.8,
+                },
+                {
+                    "sampleKey": "20260810:sh999999",
+                    "date": "20260810",
+                    "code": "sh999999",
+                    "label": 0,
+                    "confidence": 1.0,
+                },
+            ],
+        }
+
+        weights, stats = retrain.persistent_hard_error_weights(
+            np.ones(4, dtype=np.float32),
+            np.array(["20260102", "20260807", "20260810", "20260811"]),
+            np.array(["sh000001", "sh000002", "sh000003", "sh000004"]),
+            memory,
+            half_life_dates=2,
+        )
+
+        self.assertAlmostEqual(float(weights.mean()), 1.0, places=6)
+        self.assertGreater(weights[1], weights[0])
+        self.assertGreater(weights[2], weights[1])
+        self.assertEqual(weights[0], weights[3])
+        self.assertEqual(stats["memory_total"], 3)
+        self.assertEqual(stats["matched_n"], 2)
+        self.assertEqual(stats["matched_by_class"], {"0": 1, "1": 1})
+
+    def test_replay_memory_cannot_weight_rows_absent_from_training_slice(self):
+        retrain = load_retrain_daily()
+        memory = {
+            "samples": [{
+                "sampleKey": "20260812:sh000003",
+                "date": "20260812",
+                "code": "sh000003",
+                "label": 1,
+                "confidence": 1.0,
+            }],
+        }
+
+        weights, stats = retrain.persistent_hard_error_weights(
+            np.ones(2, dtype=np.float32),
+            np.array(["20260807", "20260810"]),
+            np.array(["sh000001", "sh000002"]),
+            memory,
+        )
+
+        np.testing.assert_allclose(weights, np.ones(2))
+        self.assertEqual(stats["matched_n"], 0)
 
     def test_promotion_requires_non_degradation_and_a_real_improvement(self):
         retrain = load_retrain_daily()

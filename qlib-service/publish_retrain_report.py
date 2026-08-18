@@ -86,6 +86,7 @@ def report_from(record, env=None, now_ms=None):
     ]
     if rec.get("reason") == "insufficient_incremental_window":
         pending_errors = rec.get("pending_hard_errors") or {}
+        hard_error_memory = rec.get("hard_error_memory") or {}
         lines.extend([
             (
                 f"增量适配样本：{metric(rec.get('adapt_n'))}/"
@@ -113,6 +114,15 @@ def report_from(record, env=None, now_ms=None):
                     "窗口成熟后进入加权训练"
                 )
             ] if pending_errors.get("eligible_n") is not None else []),
+            *([
+                (
+                    "持续难样本池："
+                    f"{metric(hard_error_memory.get('total'))}"
+                    "（未达标/达标 "
+                    f"{metric((hard_error_memory.get('byClass') or {}).get('0'))}/"
+                    f"{metric((hard_error_memory.get('byClass') or {}).get('1'))}）"
+                )
+            ] if hard_error_memory.get("total") is not None else []),
         ])
     elif rec.get("reason") == "insufficient_forward_holdout":
         lines.extend([
@@ -155,16 +165,18 @@ def report_from(record, env=None, now_ms=None):
             ),
             *([
                 (
-                    "五日目标难样本："
-                    f"{metric(hard_errors.get('hard_error_n'))}/"
-                    f"{metric(hard_errors.get('eligible_n'))}"
-                    f"（误判率 {percent(hard_errors.get('hard_error_rate'))}%，"
+                    "持续难样本重放："
+                    f"{metric(hard_errors.get('matched_n'))}/"
+                    f"{metric(hard_errors.get('memory_total'))}"
+                    "（未达标/达标 "
+                    f"{metric((hard_errors.get('matched_by_class') or {}).get('0'))}/"
+                    f"{metric((hard_errors.get('matched_by_class') or {}).get('1'))}，"
                     "平均权重×"
                     f"{metric(hard_errors.get('mean_applied_multiplier'))}，"
                     "最高×"
                     f"{metric(hard_errors.get('max_applied_multiplier'))}）"
                 )
-            ] if hard_errors.get("eligible_n") is not None else []),
+            ] if hard_errors.get("matched_n") is not None else []),
             (
                 "晋级增益："
                 f"{'、'.join(metric_gate.get('improvements') or []) or '未达门槛'}"
@@ -217,6 +229,7 @@ def report_from(record, env=None, now_ms=None):
             "newSampleBoost": rec.get("new_sample_boost"),
             "hardErrorMining": rec.get("hard_error_mining"),
             "pendingHardErrors": rec.get("pending_hard_errors"),
+            "hardErrorMemory": rec.get("hard_error_memory"),
         },
     }
     return f"quantreport/retrain-{run_id}.json", report

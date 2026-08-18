@@ -52,6 +52,10 @@ class PublishRetrainReportTest(unittest.TestCase):
                 "hard_error_n": 413,
                 "hard_error_rate": 0.3671,
             },
+            "hard_error_memory": {
+                "total": 413,
+                "byClass": {"0": 220, "1": 193},
+            },
         }, ENV, 1)
 
         self.assertIn("增量适配样本：900/1000", report["body"])
@@ -60,6 +64,10 @@ class PublishRetrainReportTest(unittest.TestCase):
         self.assertIn("独立盲测交易日：3/3", report["body"])
         self.assertIn(
             "待学习五日误判：413/1125（36.71%），窗口成熟后进入加权训练",
+            report["body"],
+        )
+        self.assertIn(
+            "持续难样本池：413（未达标/达标 220/193）",
             report["body"],
         )
         self.assertEqual(
@@ -89,9 +97,10 @@ class PublishRetrainReportTest(unittest.TestCase):
             "blind_n": 1300,
             "blind_dates": ["20260813", "20260814", "20260817"],
             "hard_error_mining": {
-                "eligible_n": 1200,
-                "hard_error_n": 400,
-                "hard_error_rate": 0.3333,
+                "memory_total": 800,
+                "matched_n": 400,
+                "matched_by_class": {"0": 220, "1": 180},
+                "half_life_dates": 60,
                 "mean_applied_multiplier": 2.4,
                 "max_applied_multiplier": 2.9,
             },
@@ -101,11 +110,11 @@ class PublishRetrainReportTest(unittest.TestCase):
         self.assertIn("Top10% 精度：冠军 0.7 vs 挑战者 0.73", report["body"])
         self.assertIn("晋级增益：auc_gain、top_precision_gain", report["body"])
         self.assertIn(
-            "五日目标难样本：400/1200（误判率 33.33%，平均权重×2.4，最高×2.9）",
+            "持续难样本重放：400/800（未达标/达标 220/180，平均权重×2.4，最高×2.9）",
             report["body"],
         )
         self.assertEqual(
-            report["meta"]["hardErrorMining"]["hard_error_n"],
+            report["meta"]["hardErrorMining"]["matched_n"],
             400,
         )
 
