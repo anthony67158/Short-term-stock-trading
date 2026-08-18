@@ -53,6 +53,11 @@ jobs:
                 while IFS= read -r failure; do
                   echo "::error title=Node test failure::$failure"
                 done
+              diagnostic=$(tail -n 80 test-artifacts/node-tests.log)
+              diagnostic=${diagnostic//'%'/'%25'}
+              diagnostic=${diagnostic//$'\r'/'%0D'}
+              diagnostic=${diagnostic//$'\n'/'%0A'}
+              echo "::error file=.github/workflows/harness-ci.yml,line=1,title=Node test diagnostics::$diagnostic"
               echo
               echo '```text'
               awk '/^not ok /,/^  \.\.\.$/' \
