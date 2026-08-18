@@ -7,7 +7,7 @@
     "dev": "vite",
     "dev:api": "node dev-server.js",
     "test": "node --test test/*.test.js",
-    "test:ci": "node --test --test-concurrency=2 test/*.test.js",
+    "test:ci": "node --test --test-concurrency=1 test/*.test.js",
     "build": "vite build",
     "package:fc": "node scripts/build-fc-package.mjs",
     "preview": "vite preview",
