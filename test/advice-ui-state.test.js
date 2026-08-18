@@ -22,8 +22,30 @@ test('空任务快照不显示批量完成条', () => {
 })
 
 test('个股详情优先展示生成时间更新的云端批量结果', () => {
-  const runner = { advice: { title: '旧结果' }, cachedAt: 100 }
-  const cloud = { advice: { title: '本次批量结果' }, at: 200 }
+  const runner = {
+    mode: 'hold_advice',
+    advice: {
+      action: '持有',
+      title: '旧结果',
+      actionPlan: '守住10元继续持有',
+      invalidation: '跌破9.8元失效',
+      quantNote: '量化中性',
+      fundNote: '资金稳定',
+    },
+    cachedAt: 100,
+  }
+  const cloud = {
+    mode: 'hold_advice',
+    advice: {
+      action: '持有',
+      title: '本次批量结果',
+      actionPlan: '守住10.1元继续持有',
+      invalidation: '跌破9.9元失效',
+      quantNote: '量化偏多',
+      fundNote: '资金流入',
+    },
+    at: 200,
+  }
 
   assert.deepEqual(newestAdviceResult(runner, cloud), {
     source: 'cache',
@@ -33,6 +55,36 @@ test('个股详情优先展示生成时间更新的云端批量结果', () => {
     source: 'runner',
     value: { ...runner, cachedAt: 300 },
   })
+})
+
+test('更新的截断半成品不能覆盖上一版完整建议', () => {
+  const complete = {
+    mode: 'hold_advice',
+    advice: {
+      action: '持有',
+      title: '上一版完整结论',
+      actionPlan: '守住3.10元继续持有',
+      invalidation: '放量跌破3.10元失效',
+      quantNote: '量化中性',
+      fundNote: '资金承压',
+    },
+    cachedAt: 100,
+  }
+  const partial = {
+    mode: 'hold_advice',
+    advice: { action: '持有' },
+    truncated: true,
+    at: 200,
+  }
+
+  assert.deepEqual(
+    newestAdviceResult(complete, partial, 'hold_advice'),
+    { source: 'runner', value: complete },
+  )
+  assert.deepEqual(
+    newestAdviceResult(null, partial, 'hold_advice'),
+    { source: null, value: null },
+  )
 })
 
 test('手动或自动刷新期间继续展示最近一次完整建议', () => {
@@ -72,7 +124,15 @@ test('个股建仓后不再展示旧的未持仓买入建议', () => {
   }
   const holdAdvice = {
     mode: 'hold_advice',
-    advice: { action: '持有', pnlNote: '当前浮盈' },
+    advice: {
+      action: '持有',
+      title: '继续持有',
+      actionPlan: '守住10元继续持有',
+      invalidation: '跌破9.8元失效',
+      quantNote: '量化中性',
+      fundNote: '资金稳定',
+      pnlNote: '当前浮盈',
+    },
     cachedAt: 200,
   }
 

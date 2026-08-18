@@ -51,6 +51,7 @@ import {
 } from '../shared/adviceIntelligence.js';
 import {
   acceptsGenerationResult,
+  adviceCompleteness,
   adviceConcurrency,
   generationOptions,
   validateBatchMode,
@@ -419,14 +420,18 @@ function applyQuantScore(data, code, qs) {
   stamp(data.holding); stamp(data.plan);
 }
 
-export function adviceFailureReason(response, deepMode = false) {
+export function adviceFailureReason(response, mode = '') {
   if (!response) return '军师未返回结果';
   if (!response.ok) {
     return String(response.error || '军师未返回可用建议').slice(0, 160);
   }
   if (response.unchanged) return '';
-  if (deepMode && response.truncated) return '深度建议输出不完整';
+  if (response.truncated) return '军师建议输出被截断';
   if (!response.result) return '军师未返回结构化建议';
+  const quality = adviceCompleteness(response.result, mode);
+  if (!quality.complete) {
+    return `军师建议缺少：${quality.missing.join('、')}`;
+  }
   return '';
 }
 
@@ -526,7 +531,7 @@ async function genOne({
     },
   })
     .then((r) => {
-      adviceFailure = adviceFailureReason(r, deepMode);
+      adviceFailure = adviceFailureReason(r, mode);
       return adviceFailure
         ? null
         : {
@@ -558,10 +563,15 @@ async function genOne({
   const reviewDisposition = adviceResp?.reviewDisposition
     || (!advice && previousEntry && adviceFailure ? 'insufficient' : '');
   const reviewReason = adviceResp?.reviewReason || adviceFailure || '';
-  if (!acceptsGenerationResult({ quant: result, advice, truncated, unchanged }, deepMode)) {
+  if (!acceptsGenerationResult({
+    quant: result,
+    advice,
+    truncated,
+    unchanged,
+  }, mode)) {
     throw new Error(
       adviceFailure
-      || (deepMode ? '深度建议未完整返回' : '军师和量化均未返回可用结果'),
+      || '军师建议未完整返回',
     );
   }
 

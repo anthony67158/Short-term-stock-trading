@@ -26,8 +26,8 @@ export function isAdvisorMode(mode) { return ADVISOR_MODES.has(mode); }
 export function maxTokensForMode(mode, reasoning = false) {
   let base;
   if (mode === "scan" || mode === "daily" || mode === "scan_pick") base = 3200;
-  else if (mode === "t_advice") base = 3600;
-  else if (mode === "hold_advice" || mode === "buy_advice" || mode === "review") base = 3200;
+  else if (mode === "t_advice") base = 6000;
+  else if (mode === "hold_advice" || mode === "buy_advice" || mode === "review") base = 6000;
   else base = 1600;
   return reasoning ? Math.max(base + 30000, 32000) : base;
 }

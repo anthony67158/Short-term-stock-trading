@@ -114,6 +114,20 @@ export function resolveReasoningMode(configuredReasoning, fastMode = false, forc
   return !!configuredReasoning && !fastMode;
 }
 
+export function shouldRepairAdvisorBody({
+  advisor = false,
+  aborted = false,
+  budgetMs = 0,
+  parsed = null,
+} = {}) {
+  return !!(
+    advisor
+    && !aborted
+    && Number(budgetMs) > 15000
+    && (!parsed?.value || parsed?.repaired)
+  )
+}
+
 export async function resolveAdviceDailySummary(
   payload,
   getSummary = getLatestDailySummary,
@@ -1493,17 +1507,18 @@ export default async function handler(req, res) {
         }
         fallback.done(!!(content.trim() || streamedReasoning.trim()));
       }
-      // ★「思考完就生成失败」根因修复:深度思考模式下,网关把【思维链 token】计入 max_tokens,
-      //   复杂军师题的超长思维链会把正文 JSON 的额度吃穿 → 思维链吐完即 finish_reason=length、
-      //   正文 content 为空/半截 → 命中下方"空内容硬降级",前端"思考完直接生成失败"。
-      //   此时思维链已实时下发并捕获(streamedReasoning),再补发一次【不带思维链】的生成拿正文
-      //   (base token 足够、无 CoT 更快),把已捕获思维链拼回。既保留"军师推理过程",又保证
-      //   正文完整,不再一思考完就失败。仅在正文缺失/真截断且仍有充足时间预算时才救援。
-      if (!req.signal?.aborted && useReasoning && remain() > 15000) {
-        const probe = content.trim() ? parseLLMJson(content) : { value: null };
-        const bodyBroken = !probe.value || probe.repaired;   // 空/解析不出/需补齐才成立(真残缺)
-        if (bodyBroken) {
-          phase('思维链已完成，正在整理最终结论…', 'llm');
+      // 军师长 JSON 在深度/快速模式都可能达到输出上限。正文为空、不可解析或靠补括号
+      // 才解析成功时，立即关闭思考并重新输出完整对象；仍不完整则由任务层拒绝完成并重试。
+      const bodyProbe = content.trim()
+        ? parseLLMJson(content)
+        : { value: null };
+      if (shouldRepairAdvisorBody({
+        advisor: isAdvisor,
+        aborted: req.signal?.aborted,
+        budgetMs: remain(),
+        parsed: bodyProbe,
+      })) {
+          phase('模型正文不完整，正在重新整理完整结论…', 'llm');
           _salvDbg.tried = true;
           const salvTimeout = Math.max(8000, Math.min(120000, remain() - 3000));
           _salvDbg.timeout = salvTimeout;
@@ -1511,22 +1526,32 @@ export default async function handler(req, res) {
           //   非流式补生成是"全有或全无"——要等完整 CoT+正文,90s 到点 abort → 前功尽弃(实测两次都 AbortError)。
           //   改流式后:① token 边到边收,即使慢也不会因 abort 整段丢失;② 思维链继续实时下发,前端"生成过程"不中断。
           //   同时把【已完成的思维链尾段】回喂,并下达"立即停止思考、只输出 JSON"的硬指令,让模型直接落结论而非重头再想。
-          const priorTail = (streamedReasoning || '').slice(-2000);
+          const priorTail = (
+            streamedReasoning
+            || content
+            || ''
+          ).slice(-3000);
           const salvMessages = [
             { role: 'system', content: sysPrompt },
             { role: 'system', content: marketTimePromptBlock() },
             { role: 'user', content: userPrompt },
           ];
           if (priorTail.trim()) {
-            salvMessages.push({ role: 'assistant', content: `（我已完成分析，思考过程节选）\n${priorTail}` });
-            salvMessages.push({ role: 'user', content: '你已完成上述分析。现在【立即停止思考】，严格依据前述分析，仅输出符合系统要求的最终 JSON 对象——不要再输出任何分析、解释、思考或 markdown 包裹，直接以 { 开头输出 JSON。' });
+            salvMessages.push({
+              role: 'assistant',
+              content: `（上一次输出的尾段，可能被截断）\n${priorTail}`,
+            });
+            salvMessages.push({
+              role: 'user',
+              content: '上一次最终JSON不完整。现在【立即停止思考】，重新从头输出一个字段齐全、完整闭合、可直接解析的最终 JSON 对象。不要续写半截，不要省略字段，不要输出分析、解释或 markdown，直接以 { 开头、以 } 结束。',
+            });
           }
           const salv = await callChat({
             model: useModel,
             role: useRole,
             messages: salvMessages,
             temperature: 0.2,
-            maxTokens: maxTokensForMode(mode, true),   // 仍给推理原生模型足够额度(短 CoT + 完整正文)
+            maxTokens: maxTokensForMode(mode, false),
             timeoutMs: salvTimeout,
             reasoning: false,                            // 尽力关思维链
             forceNoReason: true,                         // ★硬关端点级/全局 reasoning 注入
@@ -1558,7 +1583,6 @@ export default async function handler(req, res) {
             }
           }
           salv.done();
-        }
       }
     } else {
       const routed = await callChatWithRetry({

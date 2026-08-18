@@ -3,11 +3,21 @@ import assert from 'node:assert/strict'
 
 import {
   acceptsGenerationResult,
+  adviceCompleteness,
   adviceConcurrency,
   batchConcurrency,
   generationOptions,
   validateBatchMode,
 } from '../shared/adviceBatchPolicy.js'
+
+const completeAdvice = {
+  action: '持有',
+  title: '守住支撑继续持有',
+  actionPlan: '守住3.10元继续持有，跌破后减仓10手',
+  invalidation: '放量跌破3.10元且无法收回时计划失效',
+  quantNote: '量化评分51.1分，方向中性',
+  fundNote: '主力资金连续流出，反弹承压',
+}
 
 test('深度批量允许全选，不限制总股票数量', () => {
   const codes = Array.from({ length: 24 }, (_, index) => String(index + 1))
@@ -61,10 +71,57 @@ test('深度模式启用长预算并自动重试', () => {
   })
 })
 
-test('深度任务只有完整AI建议才能计为成功', () => {
-  assert.equal(acceptsGenerationResult({ advice: { action: '持有' }, truncated: false }, true), true)
-  assert.equal(acceptsGenerationResult({ advice: { action: '持有' }, truncated: true }, true), false)
-  assert.equal(acceptsGenerationResult({ quant: { score: 60 } }, true), false)
-  assert.equal(acceptsGenerationResult({ quant: { score: 60 } }, false), true)
-  assert.equal(acceptsGenerationResult({ unchanged: true }, false), true)
+test('所有任务只有完整AI建议才能计为成功', () => {
+  assert.equal(
+    acceptsGenerationResult({
+      advice: completeAdvice,
+      truncated: false,
+    }, 'hold_advice'),
+    true,
+  )
+  assert.equal(
+    acceptsGenerationResult({
+      quant: { score: 60 },
+      advice: completeAdvice,
+      truncated: true,
+    }, 'hold_advice'),
+    false,
+  )
+  assert.equal(
+    acceptsGenerationResult({
+      quant: { score: 60 },
+      advice: { action: '持有' },
+      truncated: false,
+    }, 'hold_advice'),
+    false,
+  )
+  assert.equal(
+    acceptsGenerationResult({
+      quant: { score: 60 },
+    }, 'hold_advice'),
+    false,
+  )
+  assert.equal(
+    acceptsGenerationResult({ unchanged: true }, 'hold_advice'),
+    true,
+  )
+})
+
+test('完整度契约要求结论执行失效条件与至少两类依据', () => {
+  assert.deepEqual(adviceCompleteness(completeAdvice, 'hold_advice'), {
+    complete: true,
+    missing: [],
+  })
+  assert.deepEqual(
+    adviceCompleteness({
+      action: '持有',
+      title: '继续持有',
+      actionPlan: '守住3.10元继续持有',
+      quantNote: '量化中性',
+    }, 'hold_advice'),
+    {
+      complete: false,
+      missing: ['失效条件', '核心依据'],
+    },
+  )
 })

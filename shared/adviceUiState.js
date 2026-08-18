@@ -1,4 +1,5 @@
 import { adviceEntryMatchesMode } from './adviceModeContext.js'
+import { isCompleteAdviceEntry } from './adviceBatchPolicy.js'
 
 export function shouldApplyCloudBatch(progress) {
   return !!(
@@ -127,6 +128,20 @@ export function newestAdviceResult(runnerResult, cachedResult, expectedMode = ''
     runnerResult = null
   }
   if (cachedResult && expectedMode && !adviceEntryMatchesMode(cachedResult, expectedMode)) {
+    cachedResult = null
+  }
+  if (
+    runnerResult
+    && !runnerResult.error
+    && !runnerResult.pending
+    && !isCompleteAdviceEntry(runnerResult, expectedMode)
+  ) {
+    runnerResult = null
+  }
+  if (
+    cachedResult
+    && !isCompleteAdviceEntry(cachedResult, expectedMode)
+  ) {
     cachedResult = null
   }
   if (!runnerResult && !cachedResult) return { source: null, value: null }

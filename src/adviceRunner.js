@@ -167,7 +167,11 @@ async function run(spec, record) {
     const adviceMissing = !myHold && !advice
     const result = (j && j.quant) ? j.quant : null
 
-    if (acceptsGenerationResult({ quant: result, advice, truncated }, generation.deepMode)) {
+    if (acceptsGenerationResult({
+      quant: result,
+      advice,
+      truncated,
+    }, mode)) {
       const cachedAt = Date.now()
       results.set(code, { mode, result, advice, meta, news, adviceMissing, truncated, cachedAt })
       saveAdvice(code, { mode, result, advice, meta, news, truncated }) // 持久化：关闭再进/刷新仍可见

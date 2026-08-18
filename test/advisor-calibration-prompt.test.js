@@ -1,7 +1,16 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { buildUserPrompt } from '../api/_ai_prompts.js'
+import {
+  buildUserPrompt,
+  maxTokensForMode,
+} from '../api/_ai_prompts.js'
+
+test('快速持仓建议保留足够正文预算避免长JSON截断', () => {
+  assert.equal(maxTokensForMode('hold_advice', false), 6000)
+  assert.equal(maxTokensForMode('buy_advice', false), 6000)
+  assert.equal(maxTokensForMode('review', false), 6000)
+})
 
 test('军师低命中校准按动作方向纠偏而不是一律变得更保守', () => {
   const prompt = buildUserPrompt('hold_advice', {

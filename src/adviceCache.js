@@ -5,6 +5,7 @@ const TTL = 30 * 3600 * 1000 // 30 小时内有效：覆盖「收盘后生成→
                              // 让其他设备无需重新生成即可看到最近一轮完整操作建议(每日调度到点会自动重生成刷新)
 import { buildAdviceCacheEntry } from '../shared/adviceContinuity.js'
 import { adviceEntryMatchesMode } from '../shared/adviceModeContext.js'
+import { isCompleteAdviceEntry } from '../shared/adviceBatchPolicy.js'
 
 let mem = load()
 function load() {
@@ -42,7 +43,11 @@ export function setAllAdvice(map) {
   const now = Date.now()
   const next = {}
   for (const [k, v] of Object.entries(map)) {
-    if (v && (now - (v.at || 0) <= TTL)) next[k] = v
+    if (
+      v
+      && (now - (v.at || 0) <= TTL)
+      && isCompleteAdviceEntry(v)
+    ) next[k] = v
   }
   mem = next
   persist()
@@ -60,6 +65,7 @@ export function mergeAdvice(map) {
   let changed = false
   for (const [k, v] of Object.entries(map)) {
     if (!v || (now - (v.at || 0) > TTL)) continue   // 过期的不收
+    if (!isCompleteAdviceEntry(v)) continue
     const cur = mem[k]
     if (!cur || (v.at || 0) > (cur.at || 0)) { mem[k] = v; changed = true }
   }
@@ -73,12 +79,19 @@ export function getAdvice(code, expectedMode = '') {
   if (!e) return null
   if (Date.now() - (e.at || 0) > TTL) { delete mem[code]; persist(); return null }
   if (expectedMode && !adviceEntryMatchesMode(e, expectedMode)) return null
+  if (!isCompleteAdviceEntry(e, expectedMode)) {
+    delete mem[code]
+    persist()
+    return null
+  }
   return e
 }
 
 export function saveAdvice(code, data) {
   if (!code) return
-  mem[code] = buildAdviceCacheEntry(mem[code], data, Date.now())
+  const entry = buildAdviceCacheEntry(mem[code], data, Date.now())
+  if (!isCompleteAdviceEntry(entry, entry.mode)) return
+  mem[code] = entry
   // 控制体积：最多保留最近 60 只
   const keys = Object.keys(mem)
   if (keys.length > 60) {

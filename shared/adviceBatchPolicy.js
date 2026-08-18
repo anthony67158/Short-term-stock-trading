@@ -26,9 +26,59 @@ export function adviceConcurrency(
     : available
 }
 
-export function acceptsGenerationResult(result, deepMode = false) {
-  if (!deepMode) return !!(result?.advice || result?.quant || result?.unchanged)
-  return !!result?.advice && result.truncated !== true
+const text = (value) => String(value || '').trim()
+
+export function adviceCompleteness(advice, mode = '') {
+  const value = advice && typeof advice === 'object' ? advice : {}
+  const contract = value.knowledgeActionPlan
+    && typeof value.knowledgeActionPlan === 'object'
+    ? value.knowledgeActionPlan
+    : {}
+  const action = text(value.action || value.stance)
+  const title = text(value.title || value.headline)
+  const primaryInstruction = mode === 'review'
+    ? value.nextAction || value.actionPlan
+    : value.actionPlan || value.nextAction
+  const instruction = text(
+    primaryInstruction
+    || value.timing
+    || contract.executionPlan,
+  )
+  const invalidation = text(
+    value.invalidation
+    || contract.invalidation,
+  )
+  const evidenceCount = [
+    value.quantNote,
+    value.fundNote,
+    value.techNote,
+    value.newsNote,
+    value.intradayNote,
+    value.macroNote,
+  ].filter((item) => text(item)).length
+  const missing = []
+  if (!action) missing.push('动作结论')
+  if (!title) missing.push('标题')
+  if (!instruction) missing.push('执行指令')
+  if (!invalidation) missing.push('失效条件')
+  if (evidenceCount < 2) missing.push('核心依据')
+  return {
+    complete: missing.length === 0,
+    missing,
+  }
+}
+
+export function isCompleteAdviceEntry(entry, expectedMode = '') {
+  if (!entry || typeof entry !== 'object') return false
+  if (entry.truncated === true || entry.advice?.truncated === true) return false
+  const mode = expectedMode || entry.mode || ''
+  return adviceCompleteness(entry.advice, mode).complete
+}
+
+export function acceptsGenerationResult(result, mode = '') {
+  if (result?.unchanged === true) return true
+  if (result?.truncated === true) return false
+  return adviceCompleteness(result?.advice, mode).complete
 }
 
 export function generationOptions(deepMode = false) {

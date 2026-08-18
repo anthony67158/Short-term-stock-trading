@@ -19,6 +19,7 @@ import {
   resolveAIBudget,
   resolveAdviceDailySummary,
   resolveReasoningMode,
+  shouldRepairAdvisorBody,
 } from '../api/ai.js'
 
 test('服务端可解析跨分片的 AI SSE 事件', () => {
@@ -126,8 +127,20 @@ test('持久任务保留安全的军师失败原因而不是泛化为空结果',
     '模型未返回有效内容，请稍后重试。',
   )
   assert.equal(
-    adviceFailureReason({ ok: true, truncated: true }, true),
-    '深度建议输出不完整',
+    adviceFailureReason({
+      ok: true,
+      truncated: true,
+      result: { action: '持有' },
+    }, 'hold_advice'),
+    '军师建议输出被截断',
+  )
+  assert.equal(
+    adviceFailureReason({
+      ok: true,
+      truncated: false,
+      result: { action: '持有' },
+    }, 'hold_advice'),
+    '军师建议缺少：标题、执行指令、失效条件、核心依据',
   )
 })
 
@@ -293,6 +306,24 @@ test('批量快速模式会关闭深度思考，普通单股生成保持原配�
   assert.equal(resolveReasoningMode(true, false), true)
   assert.equal(resolveReasoningMode(false, false), false)
   assert.equal(resolveReasoningMode(false, false, true), true)
+})
+
+test('快速与深度军师的截断正文都会在任务内自动重整', () => {
+  assert.equal(shouldRepairAdvisorBody({
+    advisor: true,
+    budgetMs: 20000,
+    parsed: { value: { action: '持有' }, repaired: true },
+  }), true)
+  assert.equal(shouldRepairAdvisorBody({
+    advisor: true,
+    budgetMs: 20000,
+    parsed: { value: null, repaired: false },
+  }), true)
+  assert.equal(shouldRepairAdvisorBody({
+    advisor: true,
+    budgetMs: 20000,
+    parsed: { value: { action: '持有' }, repaired: false },
+  }), false)
 })
 
 test('军师优先使用前置闸门注入的策略日报而不是再次查询覆盖', async () => {
