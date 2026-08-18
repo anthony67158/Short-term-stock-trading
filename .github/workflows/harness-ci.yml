@@ -29,7 +29,7 @@ jobs:
           cache: npm
 
       - name: Install locked dependencies
-        run: npm ci
+        run: npm ci --prefer-online
 
       - name: Run system harness gate
         run: npm run harness:ci
