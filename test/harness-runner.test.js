@@ -404,8 +404,9 @@ test('真实manifest与case可通过统一CLI离线执行', async () => {
 test('Harness接入npm命令、CI门禁与报告artifact', () => {
   assert.match(packageJson.scripts.harness, /harness\/run\.mjs/)
   assert.match(packageJson.scripts['harness:ci'], /harness\/run\.mjs/)
+  assert.match(packageJson.scripts['test:ci'], /--test-concurrency=2/)
   assert.match(workflow, /npm run harness:ci/)
-  assert.match(workflow, /npm test/)
+  assert.match(workflow, /npm run test:ci/)
   assert.match(workflow, /npm run build/)
   assert.match(workflow, /actions\/upload-artifact@v7/)
   assert.match(gitignore, /harness-artifacts\//)

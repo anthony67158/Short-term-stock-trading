@@ -39,7 +39,7 @@ jobs:
         run: |
           mkdir -p test-artifacts
           set -o pipefail
-          npm test -- --test-concurrency=2 \
+          npm run test:ci \
             2>&1 | tee test-artifacts/node-tests.log
 
       - name: Build production frontend
