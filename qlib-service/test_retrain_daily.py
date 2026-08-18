@@ -285,6 +285,33 @@ class ForwardHoldoutSplitTest(unittest.TestCase):
         np.testing.assert_allclose(weights, np.ones(2))
         self.assertEqual(stats["matched_n"], 0)
 
+    def test_replay_balances_error_class_contribution(self):
+        retrain = load_retrain_daily()
+        samples = []
+        for index, label in enumerate([0, 0, 0, 1]):
+            samples.append({
+                "sampleKey": f"20260810:sh00000{index}",
+                "date": "20260810",
+                "code": f"sh00000{index}",
+                "label": label,
+                "confidence": 0.8,
+            })
+
+        weights, stats = retrain.persistent_hard_error_weights(
+            np.ones(5, dtype=np.float32),
+            np.array(["20260810"] * 5),
+            np.array([
+                "sh000000", "sh000001", "sh000002", "sh000003", "sh000004",
+            ]),
+            {"samples": samples},
+        )
+
+        self.assertGreater(weights[3], weights[0])
+        self.assertEqual(stats["class_balance_scales"], {
+            "0": 0.3333,
+            "1": 1.0,
+        })
+
     def test_promotion_requires_non_degradation_and_a_real_improvement(self):
         retrain = load_retrain_daily()
         champion = {"auc": 0.610, "logloss": 0.660, "top_precision": 0.70}

@@ -416,6 +416,7 @@ def persistent_hard_error_weights(
         ),
     )
     multipliers = np.ones(len(weights), dtype=np.float32)
+    matched_labels = np.full(len(weights), -1, dtype=np.int8)
     matched_by_class = {"0": 0, "1": 0}
     for index, (date, code) in enumerate(zip(dates, codes)):
         sample = sample_map.get(f"{_date_key(date)}:{code}")
@@ -437,7 +438,26 @@ def persistent_hard_error_weights(
         age = latest_rank - ranks[date]
         decay = 0.5 ** (age / half_life)
         multipliers[index] = 1.0 + (target - 1.0) * decay
+        matched_labels[index] = label
         matched_by_class[str(label)] += 1
+    nonzero_counts = [
+        count for count in matched_by_class.values() if count > 0
+    ]
+    minority_count = min(nonzero_counts) if nonzero_counts else 0
+    class_balance_scales = {
+        label: (
+            round(minority_count / count, 4)
+            if count > 0 and minority_count > 0
+            else 1.0
+        )
+        for label, count in matched_by_class.items()
+    }
+    for label in (0, 1):
+        selected = matched_labels == label
+        scale = class_balance_scales[str(label)]
+        multipliers[selected] = (
+            1.0 + (multipliers[selected] - 1.0) * scale
+        )
     weights *= multipliers
     mean = float(weights.mean()) if len(weights) else 0.0
     if mean > 0:
@@ -448,6 +468,7 @@ def persistent_hard_error_weights(
         "memory_total": len(samples),
         "matched_n": int(np.sum(matched)),
         "matched_by_class": matched_by_class,
+        "class_balance_scales": class_balance_scales,
         "half_life_dates": half_life,
         "mean_applied_multiplier": (
             round(float(multipliers[matched].mean()), 3)
