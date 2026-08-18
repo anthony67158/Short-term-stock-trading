@@ -2,7 +2,7 @@ import EASPackage, {
   DescribeServiceRequest,
   StartServiceRequest,
   StopServiceRequest,
-} from '@alicloud/eas20210701'
+} from '@alicloud/eas20210701/dist/client.js'
 import { $OpenApiUtil } from '@alicloud/openapi-core'
 import {
   normalizeQuantModelVersion,

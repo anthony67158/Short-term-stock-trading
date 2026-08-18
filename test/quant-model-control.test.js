@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import {
   applyModelSelection,
   canControlV2Service,
@@ -11,6 +12,18 @@ import {
   resolveV2ServiceStatus,
   setV2ServiceEnabled,
 } from '../api/_quant_model_control.js'
+
+const controlSource = readFileSync(
+  new URL('../api/_quant_model_control.js', import.meta.url),
+  'utf8',
+)
+
+test('EAS SDK显式使用已发布的dist入口避免Node20回退index.js', () => {
+  assert.match(
+    controlSource,
+    /@alicloud\/eas20210701\/dist\/client\.js/,
+  )
+})
 
 test('生产模型元数据以样本外AUC展示泛化准确性且不泄露内部配置', () => {
   const metrics = normalizeProductionModelMetrics({
