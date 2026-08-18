@@ -129,18 +129,37 @@ def forecast(f, days=5, sims=3000):
     }
 
 
-def forecast_outputs(f):
+def forecast_outputs(
+    f,
+    previous_f=None,
+    source_as_of="",
+    target_date="",
+):
     """Additive multi-horizon contract; legacy ``forecast`` stays five-day."""
+    current_trading_day = (
+        forecast(previous_f, days=1)
+        if previous_f is not None
+        else None
+    )
+    if current_trading_day:
+        current_trading_day = {
+            **current_trading_day,
+            "sourceAsOf": source_as_of,
+            "targetDate": target_date,
+            "scope": "fullTradingDayFromPreviousClose",
+        }
     return {
         "forecast": forecast(f, days=5),
         "nextTradeDayForecast": forecast(f, days=1),
+        "currentTradingDayForecast": current_trading_day,
     }
 
 
-def forecast_availability(realtime=None):
+def forecast_availability(realtime=None, current_trading_day=False):
     """Declare boundaries so daily outputs cannot masquerade as intraday."""
     return {
         "nextTradeDay": True,
+        "currentTradingDayFullSession": bool(current_trading_day),
         "currentSession": False,
         "currentSessionReason":
             "daily_model_has_no_intraday_remaining-session_label",
@@ -255,10 +274,37 @@ def predict(payload: dict = Body(...), x_api_key: str = Header(default="")):
                 index_closes = None
 
         f = compute_factors(closes, highs, lows, vols, opens=opens, index_closes=index_closes)
+        previous_f = None
+        source_as_of = ""
+        target_date = ""
+        if len(cs) >= 26:
+            source_as_of = str(cs[-2].get("date") or "")
+            target_date = str(cs[-1].get("date") or "")
+            if source_as_of and target_date and source_as_of != target_date:
+                previous_index_closes = (
+                    index_closes[:-1]
+                    if index_closes is not None
+                    and len(index_closes) == len(closes)
+                    else None
+                )
+                previous_f = compute_factors(
+                    closes[:-1],
+                    highs[:-1],
+                    lows[:-1],
+                    vols[:-1],
+                    opens=(opens[:-1] if opens is not None else None),
+                    index_closes=previous_index_closes,
+                )
         score, bias, t_dir, engine, prob = score_stock(f)
-        forecasts = forecast_outputs(f)
+        forecasts = forecast_outputs(
+            f,
+            previous_f=previous_f,
+            source_as_of=source_as_of,
+            target_date=target_date,
+        )
         fc = forecasts["forecast"]
         next_fc = forecasts["nextTradeDayForecast"]
+        current_fc = forecasts["currentTradingDayForecast"]
         sig = high_conf_signal(f)
         dec = decide(score, bias, fc, f, hold)
         # ★事件确认高把握层(P2:正交高精度筛子,离线每日刷新的 event_tags 查表)。
@@ -292,8 +338,10 @@ def predict(payload: dict = Body(...), x_api_key: str = Header(default="")):
             "score": score, "bias": bias, "tDir": t_dir,
             "forecast": fc,
             "nextTradeDayForecast": next_fc,
+            "currentTradingDayForecast": current_fc,
             "forecastAvailability": forecast_availability(
-                payload.get("realtime")
+                payload.get("realtime"),
+                current_trading_day=current_fc is not None,
             ),
             "decision": dec, "reads": reads,
             "highConfSignal": sig,

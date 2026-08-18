@@ -73,6 +73,23 @@ class ForecastContractTest(unittest.TestCase):
             "daily_model_has_no_intraday_remaining-session_label",
         )
 
+    def test_current_trading_day_forecast_uses_previous_completed_daily_bar(self):
+        app = load_app()
+
+        output = app.forecast_outputs(
+            factors(),
+            previous_f=factors(),
+            source_as_of="2026-08-17",
+            target_date="2026-08-18",
+        )
+
+        current = output["currentTradingDayForecast"]
+        self.assertEqual(current["days"], 1)
+        self.assertEqual(current["sourceAsOf"], "2026-08-17")
+        self.assertEqual(current["targetDate"], "2026-08-18")
+        self.assertEqual(current["scope"], "fullTradingDayFromPreviousClose")
+        self.assertEqual(current["rangeType"], "P10-P90")
+
 
 if __name__ == "__main__":
     unittest.main()
