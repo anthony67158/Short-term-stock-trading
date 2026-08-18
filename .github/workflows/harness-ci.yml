@@ -38,9 +38,26 @@ jobs:
         shell: bash
         run: |
           mkdir -p test-artifacts
-          set -o pipefail
+          set +e
           npm run test:ci \
             2>&1 | tee test-artifacts/node-tests.log
+          test_status=${PIPESTATUS[0]}
+          {
+            echo "## Node test result"
+            echo
+            if [ "$test_status" -eq 0 ]; then
+              echo "PASS"
+            else
+              echo "FAIL"
+              echo
+              echo '```text'
+              awk '/^not ok /,/^  \.\.\.$/' \
+                test-artifacts/node-tests.log | tail -n 240
+              tail -n 20 test-artifacts/node-tests.log
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$test_status"
 
       - name: Build production frontend
         run: npm run build
