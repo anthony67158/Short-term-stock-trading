@@ -130,3 +130,42 @@ export function productionForecastWindow({
     note: '生产日线模型预测下一交易日，不提供今日剩余时段概率',
   }
 }
+
+export function selectPrimaryProductionForecast({
+  currentTradingDayForecast,
+  nextTradeDayForecast,
+  nextSignalAsOf,
+  latestCandleDate,
+  now = Date.now(),
+} = {}) {
+  const currentWindow = currentTradingDayForecast
+    ? productionForecastWindow({
+        asOf: currentTradingDayForecast.sourceAsOf,
+        targetDate: currentTradingDayForecast.targetDate,
+        latestCandleDate,
+        now,
+      })
+    : null
+  const useCurrent = (
+    currentWindow?.isTodayTarget === true
+    && currentWindow?.needsRefresh !== true
+  )
+  const forecast = useCurrent
+    ? currentTradingDayForecast
+    : nextTradeDayForecast || null
+  const window = useCurrent
+    ? currentWindow
+    : (nextTradeDayForecast
+      ? productionForecastWindow({
+          asOf: nextSignalAsOf,
+          targetDate: nextTradeDayForecast.targetDate,
+          latestCandleDate,
+          now,
+        })
+      : currentWindow)
+  return {
+    forecast,
+    window,
+    currentWindow,
+  }
+}

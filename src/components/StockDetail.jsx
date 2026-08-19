@@ -39,7 +39,7 @@ import { trustCalibrationText } from '../../shared/advicePresentation.js'
 import { adviceTrustBands } from '../../shared/adviceIntelligence.js'
 import { tradeActivityContext } from '../../shared/portfolioAccounting.js'
 import {
-  productionForecastWindow,
+  selectPrimaryProductionForecast,
   shouldRefreshProductionForecast,
 } from '../../shared/productionForecastWindow.js'
 
@@ -902,24 +902,14 @@ export default function StockDetail({ stock, onClose }) {
                   const currentDayFc = !isMinuteModel
                     ? q.currentTradingDayForecast
                     : null
-                  const currentDayWindow = currentDayFc
-                    ? productionForecastWindow({
-                        asOf: currentDayFc.sourceAsOf,
-                        targetDate: currentDayFc.targetDate,
-                        latestCandleDate,
-                      })
-                    : null
-                  const primaryFc = currentDayWindow?.isTodayTarget
-                    ? currentDayFc
-                    : nextFc
-                  const primaryWindow = primaryFc === currentDayFc
-                    ? currentDayWindow
-                    : (nextFc
-                    ? productionForecastWindow({
-                        asOf: q.asOf,
-                        latestCandleDate,
-                      })
-                    : null)
+                  const primarySelection = selectPrimaryProductionForecast({
+                    currentTradingDayForecast: currentDayFc,
+                    nextTradeDayForecast: nextFc,
+                    nextSignalAsOf: q.asOf,
+                    latestCandleDate,
+                  })
+                  const primaryFc = primarySelection.forecast
+                  const primaryWindow = primarySelection.window
                   const fallbackVerdict = {
                     tone: dec.tone || 'muted',
                     title: dec.title || '—',

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
   productionForecastWindow,
+  selectPrimaryProductionForecast,
   shouldRefreshProductionForecast,
 } from '../shared/productionForecastWindow.js'
 
@@ -89,6 +90,33 @@ test('收盘K线已到今天时旧预测明确过期并要求立即刷新', () =
   }), false)
 })
 
+test('旧今日预测过期后主区域必须切换到新下一交易日预测', () => {
+  const currentTradingDayForecast = {
+    sourceAsOf: '2026-08-18',
+    targetDate: '2026-08-19',
+    direction: '震荡',
+    upProb: 46,
+  }
+  const nextTradeDayForecast = {
+    direction: '震荡',
+    upProb: 49,
+    targetDate: '2026-08-20',
+  }
+
+  const selected = selectPrimaryProductionForecast({
+    currentTradingDayForecast,
+    nextTradeDayForecast,
+    nextSignalAsOf: '2026-08-19',
+    latestCandleDate: '2026-08-19',
+    now: Date.parse('2026-08-19T08:00:00Z'),
+  })
+
+  assert.equal(selected.forecast, nextTradeDayForecast)
+  assert.equal(selected.window.kind, 'next-trading-day')
+  assert.equal(selected.window.label, '下一交易日预测')
+  assert.equal(selected.currentWindow.kind, 'stale-result')
+})
+
 test('盘中今天的未完成日K不能触发下一交易日预测刷新', () => {
   assert.equal(shouldRefreshProductionForecast({
     asOf: '2026-08-17',
@@ -114,6 +142,7 @@ test('个股详情展示生产模型今日方向概率与价格区间', () => {
   assert.match(stockDetail, /不是当前时点到收盘/)
   assert.match(stockDetail, /latestCandleDate/)
   assert.match(stockDetail, /shouldRefreshProductionForecast/)
+  assert.match(stockDetail, /selectPrimaryProductionForecast/)
   assert.match(stockDetail, /quantModelHeaders/)
 })
 
