@@ -6,13 +6,23 @@ const TTL = 30 * 3600 * 1000 // 30 小时内有效：覆盖「收盘后生成→
 import { buildAdviceCacheEntry } from '../shared/adviceContinuity.js'
 import { adviceEntryMatchesMode } from '../shared/adviceModeContext.js'
 import { isCompleteAdviceEntry } from '../shared/adviceBatchPolicy.js'
+import {
+  accountScopedStorageKey,
+  subscribeAccountSession,
+} from '../shared/accountSessionScope.js'
 
 let mem = load()
 function load() {
-  try { return JSON.parse(localStorage.getItem(KEY) || '{}') } catch { return {} }
+  try {
+    return JSON.parse(localStorage.getItem(accountScopedStorageKey(KEY)) || '{}')
+  } catch {
+    return {}
+  }
 }
 function persist() {
-  try { localStorage.setItem(KEY, JSON.stringify(mem)) } catch { /* ignore */ }
+  try {
+    localStorage.setItem(accountScopedStorageKey(KEY), JSON.stringify(mem))
+  } catch { /* ignore */ }
 }
 
 // 轻量订阅：建议刷新时通知（供自选卡片自动跟随「建议买入价/手数」）
@@ -102,3 +112,8 @@ export function saveAdvice(code, data) {
   notify()
   syncCloud()
 }
+
+subscribeAccountSession(() => {
+  mem = load()
+  notify()
+})

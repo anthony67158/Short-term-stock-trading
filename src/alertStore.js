@@ -1,8 +1,8 @@
 import { useSyncExternalStore } from 'react'
-import { computeTFlows, planStore, t1StatusOf } from './planStore'
-import { getAdvice } from './adviceCache'
-import { api } from './apiBase'
-import { accountRequestHeaders } from './quantModel'
+import { computeTFlows, planStore, t1StatusOf } from './planStore.js'
+import { getAdvice } from './adviceCache.js'
+import { api } from './apiBase.js'
+import { accountRequestHeaders } from './quantModel.js'
 import { confirmationPolicy } from '../shared/confirmPolicy.js'
 import { applyT1ToAlert } from '../shared/t1AdvicePolicy.js'
 import { actionLabelOf } from '../shared/judgeAdviceContext.js'
@@ -14,6 +14,12 @@ import {
   formatPriceLimitThreshold,
   isNearPriceLimit,
 } from '../shared/priceLimitPolicy.js'
+import {
+  accountSessionMatches,
+  currentAccountSession,
+  subscribeAccountSession,
+} from '../shared/accountSessionScope.js'
+import { buildAlertNotification } from '../shared/alertNotification.js'
 
 // ============ 盯盘预警引擎 ============
 // 统一轮询自选/持仓相关个股实时报价，逐条判断预警规则是否命中；
@@ -52,26 +58,6 @@ export function describeAlert(a) {
     return `${label} ${OP_LABEL[a.op] || ''} ${a.value}元${qty}`
   }
   return `${t.label} ${OP_LABEL[a.op] || ''} ${a.value}${t.unit}`
-}
-
-// 到价后的"确认再动手"提示：价位预警(止盈/止损/买点/补仓/减仓)只是触发观察线，不是见价即成交。
-// 依据 note/actKind 给一句时机提醒，引导用户去详情页看AI建议的"到价后怎么做"。
-function confirmHint(a) {
-  if (!a || a.type !== 'price') return ''
-  // 行动点(补仓/减仓):带上建议里的具体确认口径(timing),没有则给通用一句
-  if (a.actKind === 'add') {
-    const tail = a.timing ? '：' + a.timing : '：等分时止跌/站回均价线再补，别追一瞬价。'
-    return '\n🎯到操作点=开始盯，先确认再动手' + tail + ' 详情见AI建议「到价后怎么做」。'
-  }
-  if (a.actKind === 'reduce') {
-    const tail = a.timing ? '：' + a.timing : '：反弹放量滞涨/冲高回落再减，锁定部分利润即可。'
-    return '\n🎯到操作点=开始盯，先确认再动手' + tail + ' 详情见AI建议「到价后怎么做」。'
-  }
-  const note = a.note || ''
-  if (/止损/.test(note)) return '\n⚠️到价=开始盯，别急砍：确认是否放量/收盘跌破，只是瞬时插针又拉回可先缓一手。详情见AI建议「到价后怎么做」。'
-  if (/止盈/.test(note)) return '\n💡到价=开始盯，别一次清光：可先减一部分锁利，剩余用移动止盈跟着走。详情见AI建议「到价后怎么做」。'
-  if (/买点/.test(note)) return '\n💡到价=开始盯，别追一瞬价：等缩量企稳/站回均线再进。详情见AI建议「到价后怎么做」。'
-  return ''
 }
 
 // ============ 到价预警「距触发」可视化元数据 (A-2) ============
@@ -256,14 +242,54 @@ export const alertStore = {
   push(n) {
     if (n && n.alertId) {
       const dup = state.notifications.find((x) => x.alertId === n.alertId && (Date.now() - (x.at || 0)) < 1800000)
-      if (dup) return
+      if (dup) return false
     }
     state.notifications = [{ id: Date.now() + '_' + Math.random().toString(36).slice(2, 6), at: Date.now(), read: false, ...n }, ...state.notifications].slice(0, 100)
     state.unread += 1
     emit()
+    return true
   },
   markAllRead() { state.notifications = state.notifications.map((x) => ({ ...x, read: true })); state.unread = 0; emit() },
   clearAll() { state.notifications = []; state.unread = 0; emit() },
+
+  syncCloudNotifications(alerts, now = Date.now()) {
+    const recent = (at) => at && now - Number(at) >= 0 && now - Number(at) < 1800000
+    const add = (event) => {
+      if (this.push(event)) notify(event.title, event.body)
+    }
+    for (const a of (alerts || [])) {
+      if (!a?.id) continue
+      if (recent(a.watchingAt)) {
+        const notification = buildAlertNotification({
+          alert: a,
+          stage: 'watch',
+          reason: a.watchingMsg,
+        })
+        add({
+          at: Number(a.watchingAt),
+          code: a.code,
+          name: a.name,
+          ...notification,
+          alertId: 'watch-' + a.id,
+        })
+      }
+      if (!recent(a.triggeredAt)) continue
+      const invalid = a.phase === 'invalid'
+      const confirmed = a.phase === 'confirmed'
+      const notification = buildAlertNotification({
+        alert: a,
+        stage: invalid ? 'invalid' : confirmed ? 'confirm' : 'trigger',
+        reason: a.triggeredMsg,
+      })
+      add({
+        at: Number(a.triggeredAt),
+        code: a.code,
+        name: a.name,
+        ...notification,
+        alertId: `${invalid ? 'invalid' : confirmed ? 'confirm' : 'trigger'}-${a.id}`,
+      })
+    }
+  },
 
   // 核心：对一批实时报价 quotes(map code→q) 跑一遍所有启用的规则
   // 智能确认(两段式,与后端 cron_alert.processAccount 同口径):
@@ -297,14 +323,14 @@ export const alertStore = {
         // —— 老逻辑:命中即强推并停用(向后兼容)——
         const msg = hit(a, q)
         if (!msg) continue
-        const actLabel = a.actKind === 'add' ? '补仓' : (a.actKind === 'reduce' ? '减仓' : '')
-        const title = actLabel
-          ? `🎯 到${actLabel}操作点 · ${a.name || a.code}`
-          : `⚡ 预警触发 · ${a.name || a.code}`
-        const tail = confirmHint(a)
-        const body = `${describeAlert(a)}｜${msg}${tail}`
-        this.push({ code: a.code, name: a.name, title, body, alertId: a.id })
-        notify(title, body)
+        const notification = buildAlertNotification({
+          alert: a,
+          quote: q,
+          stage: 'trigger',
+          reason: msg,
+        })
+        this.push({ code: a.code, name: a.name, ...notification, alertId: a.id })
+        notify(notification.title, notification.body)
         planStore.markAlertTriggered(a.id, msg) // 触发后自动停用，防重复
         continue
       }
@@ -314,11 +340,14 @@ export const alertStore = {
         // 阶段一:价格触及关键价位 → 发【弱提醒】,进入「观察确认中」,继续监控真正时机(不停用)
         const msg = hit(a, q)
         if (!msg) continue
-        const actZh = actionLabelOf(a)
-        const title = `👀 到点位·观察确认中 · ${a.name || a.code}`
-        const body = `${describeAlert(a)}｜${msg}\n⏳已到${actZh}价位,但「到价≠立刻动手」。系统正在盯盘确认真正时机,确认后会再发一次「✅ 可以${actZh}」的强提示,先别急。`
-        this.push({ code: a.code, name: a.name, title, body, alertId: 'watch-' + a.id })
-        notify(title, body)
+        const notification = buildAlertNotification({
+          alert: a,
+          quote: q,
+          stage: 'watch',
+          reason: msg,
+        })
+        this.push({ code: a.code, name: a.name, ...notification, alertId: 'watch-' + a.id })
+        notify(notification.title, notification.body)
         planStore.markAlertWatching(a.id, msg, q && q.price)
         continue
       }
@@ -338,6 +367,7 @@ export const alertStore = {
     if (a.lastJudgeAt && Date.now() - a.lastJudgeAt < interval) return
     const minObserveMs = confirmationPolicy(side).minObserveMs
     if (a.watchingAt && Date.now() - a.watchingAt < minObserveMs) return
+    const session = currentAccountSession()
     _confirming.add(a.id)
     // ★超时护栏 + 同步异常兜底:若 fetch 同步抛错(URL 异常)或请求长时间不回,
     //   必须保证 _confirming 里的 id 最终被清除,否则该预警将永久卡在「判定中」再也无法确认。
@@ -359,6 +389,7 @@ export const alertStore = {
       })
         .then((r) => r.json())
         .then((v) => {
+          if (!accountSessionMatches(session)) return
           if (!v || !v.ok) return
           const current = (planStore.get().alerts || []).find((alert) => alert.id === a.id)
           if (!current?.enabled) return
@@ -376,20 +407,24 @@ export const alertStore = {
           const actZh = actionLabelOf(current)
           planStore.markAlertJudged(current.id, v, q && q.price)
           if (v.decision === 'confirm') {
-            const conf = v.confidence != null ? `(把握${v.confidence})` : ''
-            const ka = v.knowledgeAction?.total != null
-              ? `｜知行合一${v.knowledgeAction.total}分`
-              : ''
-            const title = `✅ 可以${actZh} · ${current.name || current.code}`
-            const body = `${describeAlert(current)}｜确认时机已到${conf}${ka}\n📌${v.reason || '多项信号共振确认'}`
-            this.push({ code: current.code, name: current.name, title, body, alertId: 'confirm-' + current.id })
-            notify(title, body)
+            const notification = buildAlertNotification({
+              alert: current,
+              quote: q,
+              stage: 'confirm',
+              reason: v.reason || '多项信号共振确认',
+            })
+            this.push({ code: current.code, name: current.name, ...notification, alertId: 'confirm-' + current.id })
+            notify(notification.title, notification.body)
             planStore.markAlertConfirmed(current.id, `确认${actZh}:${v.reason || ''}`, v, q && q.price)
           } else if (v.decision === 'invalid') {
-            const title = `⛔ 已失效·暂不${actZh} · ${current.name || current.code}`
-            const body = `${describeAlert(current)}｜原${actZh}逻辑已被破坏\n📌${v.reason || '关键条件已破坏,建议重新评估'}`
-            this.push({ code: current.code, name: current.name, title, body, alertId: 'invalid-' + current.id })
-            notify(title, body)
+            const notification = buildAlertNotification({
+              alert: current,
+              quote: q,
+              stage: 'invalid',
+              reason: v.reason || '关键条件已破坏',
+            })
+            this.push({ code: current.code, name: current.name, ...notification, alertId: 'invalid-' + current.id })
+            notify(notification.title, notification.body)
             planStore.markAlertInvalid(current.id, `已失效:${v.reason || ''}`)
           }
           // wait → 维持 watching,静默继续观察
@@ -403,3 +438,13 @@ export const alertStore = {
 export function useAlertStore() {
   return useSyncExternalStore(alertStore.subscribe, alertStore.get)
 }
+
+planStore.subscribe(() => {
+  alertStore.syncCloudNotifications(planStore.get().alerts)
+})
+
+subscribeAccountSession(() => {
+  state.notifications = []
+  state.unread = 0
+  emit()
+})

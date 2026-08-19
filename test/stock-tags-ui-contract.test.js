@@ -19,6 +19,7 @@ const dailyReport = read('src/components/DailyReport.jsx')
 const assistant = read('src/components/AIAssistant.jsx')
 const stockTags = read('src/components/StockTags.jsx')
 const stockTagStore = read('src/stockTagStore.js')
+const styles = read('src/styles.css')
 
 test('通用股票身份默认按名称代码在上、题材行业在下排列', () => {
   assert.match(stockName, /import StockTags from '\.\/StockTags'/)
@@ -27,6 +28,25 @@ test('通用股票身份默认按名称代码在上、题材行业在下排列',
   assert.match(stockName, /className="stock-name-code"/)
   assert.match(stockName, /variant="stacked"/)
   assert.match(stockName, /stock-name-cluster/)
+})
+
+test('通用股票身份在窄列内约束两层内容并使用省略号', () => {
+  assert.match(
+    styles,
+    /\.stock-name-cluster > \.stock-name-link,[\s\S]*?\.stock-name-cluster > \.stock-name-static\s*{[^}]*overflow:\s*hidden/s,
+  )
+  assert.match(
+    styles,
+    /\.stock-name-primary\s*{[^}]*width:\s*100%[^}]*overflow:\s*hidden/s,
+  )
+  assert.match(
+    styles,
+    /\.stock-theme-tags\.stacked\s*{[^}]*width:\s*100%[^}]*max-width:\s*100%/s,
+  )
+  assert.match(
+    styles,
+    /\.stock-theme-tags\.stacked \.stock-theme-tag\s*{[^}]*flex:\s*0 1 auto[^}]*min-width:\s*0/s,
+  )
 })
 
 test('持仓自选复用两层股票身份且不再渲染独立标签横条', () => {

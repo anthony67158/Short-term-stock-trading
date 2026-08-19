@@ -771,7 +771,7 @@ body {
 .stock-name-link:hover { color: #58a6ff; border-bottom-color: rgba(88,166,255,.5); }
 .stock-name-cluster { display: inline-grid; grid-template-columns: minmax(0, 1fr); align-items: start; min-width: 0; max-width: 100%; vertical-align: middle; }
 .stock-name-cluster > .stock-name-link,
-.stock-name-cluster > .stock-name-static { min-width: 0; }
+.stock-name-cluster > .stock-name-static { min-width: 0; overflow: hidden; }
 .stock-name-cluster > .stock-name-link,
 .stock-name-cluster > .stock-name-static {
   display: inline-flex;
@@ -781,7 +781,7 @@ body {
   gap: 3px;
   max-width: 100%;
 }
-.stock-name-primary { display: flex; align-items: baseline; flex-wrap: nowrap; gap: 5px; min-width: 0; white-space: nowrap; }
+.stock-name-primary { display: flex; align-items: baseline; flex-wrap: nowrap; gap: 5px; width: 100%; max-width: 100%; min-width: 0; overflow: hidden; white-space: nowrap; }
 .stock-name-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .stock-name-code { flex: none; color: var(--muted); font-size: 10.5px; font-weight: 500; font-variant-numeric: tabular-nums; }
 .stock-name-static { min-height: 28px; color: inherit; }
@@ -1274,6 +1274,7 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 .buy-inline .wl-input { width: auto; flex: 1 1 76px; min-width: 64px; max-width: 120px; }
 .buy-inline .chip-btn { flex-shrink: 0; }
 .buy-inline .fee-hint, .buy-inline .qty-hint { flex: 0 0 auto; }
+.buy-inline .buy-inline-error { flex: 1 0 100%; min-width: 0; }
 .sell-advice { display: flex; align-items: flex-start; gap: 8px; margin-top: 9px; padding: 9px 11px; background: var(--panel2); border-radius: var(--radius-sm); font-size: 12px; color: var(--text2); line-height: 1.55; }
 
 /* ---------- 复盘 ---------- */
@@ -1734,8 +1735,8 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 .stock-theme-tag.industry { color: var(--text2); background: var(--panel3, rgba(255,255,255,.03)); }
 .stock-theme-tags.inline { display: inline-flex; flex-wrap: nowrap; gap: 3px; margin: 0; vertical-align: middle; }
 .stock-theme-tags.inline .stock-theme-tag { padding: 1px 5px; font-size: 9.5px; line-height: 1.3; }
-.stock-theme-tags.stacked { display: flex; flex-wrap: nowrap; gap: 3px; min-width: 0; margin: 0; overflow: hidden; }
-.stock-theme-tags.stacked .stock-theme-tag { flex: none; padding: 1px 5px; font-size: 9.5px; line-height: 1.3; }
+.stock-theme-tags.stacked { display: flex; flex-wrap: nowrap; gap: 3px; width: 100%; max-width: 100%; min-width: 0; margin: 0; overflow: hidden; }
+.stock-theme-tags.stacked .stock-theme-tag { flex: 0 1 auto; min-width: 0; padding: 1px 5px; font-size: 9.5px; line-height: 1.3; }
 .stock-theme-tags.detail { display: inline-flex; flex-wrap: nowrap; gap: 4px; min-width: 0; margin: 0; overflow: hidden; vertical-align: middle; }
 .stock-theme-tags.detail .stock-theme-tag { flex: none; padding: 1px 6px; font-size: 10px; }
 /* 目标价 + 买入手数 + 买点进度条 */

@@ -9,9 +9,9 @@ import {
   setV2ServiceEnabled,
 } from './_quant_model_control.js'
 import {
+  accountCredentialMatches,
   isAccountActive,
   readAccount,
-  sha,
   writeAccount,
 } from './account.js'
 import { loadV2Accuracy } from './_v2_accuracy_store.js'
@@ -29,9 +29,14 @@ function reply(res, body, status = 200) {
 async function authenticate(body) {
   const nick = String(body?.nick || '').trim()
   const pw = body?.pw != null ? String(body.pw) : ''
-  if (!nick || !pw) return { error: '请先登录' }
+  const token = body?.token != null ? String(body.token) : ''
+  if (!nick || (!token && !pw)) return { error: '请先登录' }
   const account = await readAccount(nick)
-  if (!account || !isAccountActive(account) || account.pwHash !== sha(pw)) {
+  if (
+    !account
+    || !isAccountActive(account)
+    || !accountCredentialMatches(account, { pw, token })
+  ) {
     return { error: '账号鉴权失败' }
   }
   return { account }

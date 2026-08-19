@@ -187,6 +187,10 @@ export function tradeActivityContext(
   const pairRecords = []
   let openBuyQty = 0
   let openSellQty = 0
+  let openBuyAmount = 0
+  let openSellAmount = 0
+  let openBuyAt = null
+  let openSellAt = null
   for (const [key, flows] of groups) {
     const [groupCode, day] = key.split('|')
     const manualGroups = new Map()
@@ -205,6 +209,20 @@ export function tradeActivityContext(
     const appendComputed = (computed, manualPair = false) => {
       openBuyQty += Number(computed.openBuy) || 0
       openSellQty += Number(computed.openSell) || 0
+      openBuyAmount += (
+        (Number(computed.openBuy) || 0)
+        * (Number(computed.openBuyAvg) || 0)
+      )
+      openSellAmount += (
+        (Number(computed.openSell) || 0)
+        * (Number(computed.openSellAvg) || 0)
+      )
+      if (Number(computed.openBuyAt) > 0) {
+        openBuyAt = Math.max(openBuyAt || 0, Number(computed.openBuyAt))
+      }
+      if (Number(computed.openSellAt) > 0) {
+        openSellAt = Math.max(openSellAt || 0, Number(computed.openSellAt))
+      }
       computed.pairList.forEach((pair) => {
         pairRecords.push({
           id: pair.tPairId
@@ -265,8 +283,162 @@ export function tradeActivityContext(
       realizedPnl: +(archivedPnl + classifiedPnl).toFixed(2),
       openBuyQty: +openBuyQty.toFixed(3),
       openSellQty: +openSellQty.toFixed(3),
+      openBuyAvg: openBuyQty > 0
+        ? +(openBuyAmount / openBuyQty).toFixed(3)
+        : null,
+      openSellAvg: openSellQty > 0
+        ? +(openSellAmount / openSellQty).toFixed(3)
+        : null,
+      openBuyAt,
+      openSellAt,
       pairRecords,
     },
+  }
+}
+
+export function buildTActionContext(
+  holding = [],
+  closed = [],
+  code = '',
+  now = Date.now(),
+) {
+  const positions = (holding || []).filter(
+    (position) => String(position?.code) === String(code),
+  )
+  const liveFlows = positions.flatMap((position) =>
+    (position.tFlows || []).map((flow) => ({
+      ...flow,
+      holdingId: position.id || null,
+    }))
+  )
+  const liveComputed = computeTFlows(liveFlows)
+  const closedContext = tradeActivityContext(closed, code)
+  const closedT = closedContext.t || {}
+  const combineAverage = (leftQty, leftAvg, rightQty, rightAvg) => {
+    const qty = Number(leftQty || 0) + Number(rightQty || 0)
+    if (!(qty > 0)) return null
+    return +(
+      (
+        Number(leftQty || 0) * Number(leftAvg || 0)
+        + Number(rightQty || 0) * Number(rightAvg || 0)
+      ) / qty
+    ).toFixed(3)
+  }
+  const openBuyQty = +(
+    Number(liveComputed.openBuy || 0)
+    + Number(closedT.openBuyQty || 0)
+  ).toFixed(3)
+  const openSellQty = +(
+    Number(liveComputed.openSell || 0)
+    + Number(closedT.openSellQty || 0)
+  ).toFixed(3)
+  const openBuyAvg = combineAverage(
+    liveComputed.openBuy,
+    liveComputed.openBuyAvg,
+    closedT.openBuyQty,
+    closedT.openBuyAvg,
+  )
+  const openSellAvg = combineAverage(
+    liveComputed.openSell,
+    liveComputed.openSellAvg,
+    closedT.openSellQty,
+    closedT.openSellAvg,
+  )
+  const openBuyAt = Math.max(
+    Number(liveComputed.openBuyAt) || 0,
+    Number(closedT.openBuyAt) || 0,
+  ) || null
+  const openSellAt = Math.max(
+    Number(liveComputed.openSellAt) || 0,
+    Number(closedT.openSellAt) || 0,
+  ) || null
+  const livePairs = (liveComputed.pairList || []).map((pair, index) => ({
+    id: pair.tPairId || `live-t:${code}:${pair.at || now}:${index}`,
+    code: String(code),
+    qty: pair.qty,
+    buyPrice: pair.buyPrice,
+    sellPrice: pair.sellPrice,
+    netPnl: pair.netPnl,
+    realizedPnl: pair.netPnl,
+    buyAt: pair.buyAt,
+    sellAt: pair.sellAt,
+    at: pair.at,
+    source: 'holding',
+  }))
+  const archivedPairs = (closed || [])
+    .filter((record) =>
+      String(record?.code) === String(code)
+      && tradeRecordType(record) === 'T'
+    )
+    .map((record) => ({
+      id: String(record.id || ''),
+      code: String(code),
+      qty: Number(record.qty) || 0,
+      buyPrice: Number(record.buyPrice) || 0,
+      sellPrice: Number(record.sellPrice) || 0,
+      netPnl: Number(record.netPnl ?? record.realizedPnl) || 0,
+      realizedPnl: Number(record.realizedPnl ?? record.netPnl) || 0,
+      buyAt: Number(record.buyAt) || 0,
+      sellAt: Number(record.sellAt) || 0,
+      at: Number(record.at || record.sellAt || record.buyAt) || 0,
+      source: 'closed',
+    }))
+  const pairs = [
+    ...livePairs,
+    ...(closedT.pairRecords || []).map((pair) => ({
+      ...pair,
+      source: 'classified',
+    })),
+    ...archivedPairs,
+  ].sort((left, right) => Number(right.at || 0) - Number(left.at || 0))
+  const dayStart = beijingDayStartTs(now)
+  const completedToday = pairs.filter((pair) =>
+    Number(pair.at || pair.sellAt || pair.buyAt || 0) >= dayStart
+  )
+  const t1 = t1StatusOf(holding, closed, code, now)
+  const lockedTodayQty = Math.min(
+    Number(t1.liveQty) || 0,
+    Number(t1.boughtToday) || 0,
+  )
+  let stage = 'idle'
+  let pendingQty = 0
+  let firstLegPrice = null
+  let firstLegAt = null
+  if (openBuyQty > 0 && (!openSellQty || (openBuyAt || 0) >= (openSellAt || 0))) {
+    stage = 'buy_wait_sell'
+    pendingQty = openBuyQty
+    firstLegPrice = openBuyAvg
+    firstLegAt = openBuyAt
+  } else if (openSellQty > 0) {
+    stage = 'sell_wait_buy'
+    pendingQty = openSellQty
+    firstLegPrice = openSellAvg
+    firstLegAt = openSellAt
+  } else if (completedToday.length > 0) {
+    stage = Number(t1.sellableToday) > 0 ? 'completed' : 'completed_locked'
+  }
+  return {
+    schemaVersion: 't-action.v1',
+    stage,
+    pendingQty,
+    firstLegPrice,
+    firstLegAt,
+    openBuyQty,
+    openBuyAvg,
+    openSellQty,
+    openSellAvg,
+    pairCount: pairs.length,
+    completedTodayCount: completedToday.length,
+    completedTodayQty: +completedToday
+      .reduce((sum, pair) => sum + (Number(pair.qty) || 0), 0)
+      .toFixed(3),
+    realizedPnl: +pairs
+      .reduce((sum, pair) => sum + (Number(pair.realizedPnl) || 0), 0)
+      .toFixed(2),
+    latestPair: pairs[0] || null,
+    lockedTodayQty: +lockedTodayQty.toFixed(3),
+    sellableTodayQty: Number(t1.sellableToday) || 0,
+    liveQty: Number(t1.liveQty) || 0,
   }
 }
 
@@ -288,6 +460,7 @@ export function livePositionOf(holding, code) {
   if (!positions.length) return null
   let qty = 0
   let costSum = 0
+  let costValueWithFees = 0
   let hasOpenT = false
   let tNetHands = 0
   for (const position of positions) {
@@ -311,13 +484,27 @@ export function livePositionOf(holding, code) {
         + (flows.openBuyAvg * openBuy)
       ) / (baseQty + openBuy)
     }
+    let positionCostValue = (
+      baseCost * baseQty * 100
+      + (Number(position.buyFee) || 0)
+    )
+    if (openBuy > 0 && flows.openBuyAvg != null) {
+      positionCostValue += (
+        flows.openBuyAvg * openBuy * 100
+        + (Number(flows.openBuyFee) || 0)
+      )
+    } else if (openSell > 0 && baseQty > 0) {
+      positionCostValue *= Math.max(0, baseQty - openSell) / baseQty
+    }
     qty += liveQty
     costSum += cost * liveQty
+    costValueWithFees += positionCostValue
   }
   if (qty <= 0) return null
   return {
     qty,
     cost: +(costSum / qty).toFixed(3),
+    costWithFees: +(costValueWithFees / (qty * 100)).toFixed(3),
     hasOpenT,
     tNetHands,
   }
@@ -341,15 +528,20 @@ export function t1StatusOf(
   let boughtToday = 0
   const buys = []
   for (const trade of (closed || [])) {
-    if (trade.code !== code || (trade.type || trade.kind) !== 'BUY') continue
-    const at = trade.at || trade.buyAt || 0
+    if (trade.code !== code) continue
+    const type = trade.type || trade.kind
+    const pairedTBuy = type === 'T' && Number(trade.buyAt) > 0
+    if (type !== 'BUY' && !pairedTBuy) continue
+    const at = pairedTBuy
+      ? trade.buyAt
+      : trade.at || trade.buyAt || 0
     if (at < dayStart) continue
     boughtToday += trade.qty || 0
     buys.push({
-      price: trade.price,
+      price: pairedTBuy ? trade.buyPrice : trade.price,
       qty: trade.qty,
       at,
-      kind: tradeIntentOf(trade) === 't'
+      kind: pairedTBuy || tradeIntentOf(trade) === 't'
         ? '做T买腿'
         : '建仓/加仓',
     })

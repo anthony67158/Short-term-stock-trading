@@ -2,11 +2,13 @@
 
 import argparse
 import json
-import math
 import os
 import time
 
 import numpy as np
+from time_splits import (
+    three_way_purged_split as shared_three_way_purged_split,
+)
 
 
 def three_way_purged_split(
@@ -16,60 +18,12 @@ def three_way_purged_split(
     holdout_fraction=0.15,
     purge_dates=5,
 ):
-    dates = np.asarray(dates).astype(str)
-    if dates.ndim != 1 or not len(dates):
-        raise ValueError("dates must be a non-empty one-dimensional array")
-    if not 0 < calibration_fraction < 0.5:
-        raise ValueError("calibration_fraction must be between zero and 0.5")
-    if not 0 < holdout_fraction < 0.5:
-        raise ValueError("holdout_fraction must be between zero and 0.5")
-    if calibration_fraction + holdout_fraction >= 0.8:
-        raise ValueError("calibration and holdout fractions are too large")
-    if not isinstance(purge_dates, int) or purge_dates < 0:
-        raise ValueError("purge_dates must be a non-negative integer")
-
-    unique_dates = np.unique(dates)
-    calibration_count = max(
-        1,
-        math.ceil(len(unique_dates) * calibration_fraction),
+    return shared_three_way_purged_split(
+        dates,
+        calibration_fraction=calibration_fraction,
+        holdout_fraction=holdout_fraction,
+        purge_dates=purge_dates,
     )
-    holdout_count = max(1, math.ceil(len(unique_dates) * holdout_fraction))
-    holdout_position = len(unique_dates) - holdout_count
-    holdout_purge_position = holdout_position - purge_dates
-    calibration_position = holdout_purge_position - calibration_count
-    calibration_purge_position = calibration_position - purge_dates
-    if calibration_purge_position <= 0:
-        raise ValueError("dataset is too short for the requested purges")
-
-    calibration_start = unique_dates[calibration_position]
-    holdout_purge_start = unique_dates[holdout_purge_position]
-    holdout_start = unique_dates[holdout_position]
-    calibration_purge_start = unique_dates[calibration_purge_position]
-    train_index = np.flatnonzero(dates < calibration_purge_start)
-    calibration_index = np.flatnonzero(
-        (dates >= calibration_start) & (dates < holdout_purge_start)
-    )
-    holdout_index = np.flatnonzero(dates >= holdout_start)
-    if not all(map(len, (train_index, calibration_index, holdout_index))):
-        raise ValueError("purged split produced an empty partition")
-
-    metadata = {
-        "train_end_date": str(unique_dates[calibration_purge_position - 1]),
-        "calibration_start_date": str(calibration_start),
-        "calibration_end_date": str(unique_dates[holdout_purge_position - 1]),
-        "holdout_start_date": str(holdout_start),
-        "purge_dates": purge_dates,
-        "calibration_purge_dates": unique_dates[
-            calibration_purge_position:calibration_position
-        ].astype(str).tolist(),
-        "holdout_purge_dates": unique_dates[
-            holdout_purge_position:holdout_position
-        ].astype(str).tolist(),
-        "train_samples": int(len(train_index)),
-        "calibration_samples": int(len(calibration_index)),
-        "holdout_samples": int(len(holdout_index)),
-    }
-    return train_index, calibration_index, holdout_index, metadata
 
 
 def date_grouped_indices(dates, indices):

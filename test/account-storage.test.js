@@ -52,6 +52,20 @@ function fakeStorage() {
   }
 }
 
+test('列举账号时OSS故障必须向上抛出而不是伪装成空账号', async () => {
+  await assert.rejects(
+    () => listAllAccounts({
+      async list() {
+        throw new Error('OSS unavailable')
+      },
+      async readJson() {
+        return null
+      },
+    }),
+    /OSS unavailable/,
+  )
+})
+
 test('账号保存同时写入 OSS 当前快照和可恢复历史快照并可立即读回', async () => {
   const storage = fakeStorage()
   const account = {
@@ -393,6 +407,41 @@ test('同版本客户端保存成功并递增云端版本号', () => {
   assert.equal(account.data.holding.length, 1)
   assert.equal(account.data.closed.length, 1)
   assert.equal(account.data.decisionLog.length, 1)
+})
+
+test('客户端账本保存不删除服务端维护的Web Push订阅', () => {
+  const pushSubs = [{
+    endpoint: 'https://fcm.googleapis.com/fcm/send/example',
+    keys: { p256dh: 'public-key', auth: 'auth-key' },
+    at: 100,
+  }]
+  const account = {
+    nick: '推送账号',
+    clientRevision: 2,
+    data: {
+      plan: [],
+      holding: [],
+      closed: [],
+      alerts: [],
+      advice: {},
+      adviceLog: [],
+      decisionLog: [],
+      pushSubs,
+    },
+  }
+
+  const result = applyClientAccountSave(account, {
+    plan: [{ code: '600519' }],
+    holding: [],
+    closed: [],
+    alerts: [],
+    advice: {},
+    adviceLog: [],
+    decisionLog: [],
+  }, 2)
+
+  assert.equal(result.ok, true)
+  assert.deepEqual(account.data.pushSubs, pushSubs)
 })
 
 test('客户端旧预警快照不能覆盖服务端Judge确认与后验结果', () => {

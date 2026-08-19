@@ -1,7 +1,7 @@
 // 「服务端按需生成 AI 操作建议」触发器(fire-and-forget)。
 // 为什么存在:原先建议生成 100% 在浏览器里跑(callAIStream 走 SSE,无重试)——
 //   手机上一旦切到后台/锁屏,iOS 会冻结页面并掐断在途网络连接 → SSE 断流 → "生成失败"。
-// 这里把生成搬到服务端:向 /api/cron_advice 的【按需分支】发一个带账号密码的 POST,
+// 这里把生成搬到服务端:向 /api/cron_advice 的【按需分支】发一个带账号令牌的 POST,
 //   enqueue 只在任务持久化且 FC 异步 Worker 已受理后返回；Worker 是独立函数调用，
 //   浏览器刷新/锁屏/断网不会影响执行。前端必须读取受理结果，不再做未经确认的乐观启动。
 import { api } from './apiBase'
@@ -33,7 +33,7 @@ export async function fetchServerAdviceStatus() {
     const response = await fetch(api('/api/cron_advice'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ op: 'status', nick: creds.nick, pw: creds.pw }),
+      body: JSON.stringify({ op: 'status', ...creds }),
       signal: controller.signal,
     })
     const data = await response.json()
@@ -90,7 +90,7 @@ export async function triggerServerAdvice(codes, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        ondemand: true, codes: list, nick: creds.nick, pw: creds.pw, scope, force, batchId, deepMode,
+        ondemand: true, codes: list, ...creds, scope, force, batchId, deepMode,
       }),
       signal: controller.signal,
       keepalive: true,
@@ -136,8 +136,7 @@ async function sendCancellationRequest(creds, targets, batchId = '') {
         op: 'cancel',
         targets,
         codes: targets.map((target) => target.code),
-        nick: creds.nick,
-        pw: creds.pw,
+        ...creds,
         batchId,
       }),
       signal: controller.signal,

@@ -1,10 +1,14 @@
 import { execFileSync } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import path from 'node:path'
 
 const root = process.cwd()
 const output = path.join(root, '.fc-package')
+const runtime = path.join(root, 'fc-runtime')
 const rootPackage = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'))
+const runtimePackage = JSON.parse(
+  readFileSync(path.join(runtime, 'package.json'), 'utf8'),
+)
 
 if (!existsSync(path.join(root, 'dist', 'index.html'))) {
   throw new Error('dist is missing; run npm run build first')
@@ -18,29 +22,20 @@ for (const name of ['api', 'shared', 'dist', 'public', 'harness']) {
 }
 cpSync(path.join(root, 'server.js'), path.join(output, 'server.js'))
 
-const runtimePackage = {
-  name: rootPackage.name,
-  version: rootPackage.version,
-  private: true,
-  type: 'module',
-  scripts: {
-    start: rootPackage.scripts.start,
-    harness: rootPackage.scripts.harness,
-    'harness:portfolio': rootPackage.scripts['harness:portfolio'],
-    'harness:online': rootPackage.scripts['harness:online'],
-    'harness:shadow': rootPackage.scripts['harness:shadow'],
-  },
-  dependencies: {
-    '@alicloud/eas20210701': rootPackage.dependencies['@alicloud/eas20210701'],
-    '@alicloud/fc20230330': rootPackage.dependencies['@alicloud/fc20230330'],
-    '@alicloud/openapi-core': rootPackage.dependencies['@alicloud/openapi-core'],
-    'ali-oss': rootPackage.dependencies['ali-oss'],
-    'web-push': rootPackage.dependencies['web-push'],
-  },
+for (const [name, version] of Object.entries(runtimePackage.dependencies || {})) {
+  if (rootPackage.dependencies?.[name] !== version) {
+    throw new Error(
+      `FC runtime dependency mismatch for ${name}: ${version} != ${rootPackage.dependencies?.[name] || 'missing'}`,
+    )
+  }
 }
-writeFileSync(path.join(output, 'package.json'), JSON.stringify(runtimePackage, null, 2) + '\n')
+cpSync(path.join(runtime, 'package.json'), path.join(output, 'package.json'))
+cpSync(
+  path.join(runtime, 'package-lock.json'),
+  path.join(output, 'package-lock.json'),
+)
 
-execFileSync('npm', ['install', '--omit=dev', '--no-audit', '--no-fund'], {
+execFileSync('npm', ['ci', '--omit=dev', '--no-audit', '--no-fund'], {
   cwd: output,
   stdio: 'inherit',
 })

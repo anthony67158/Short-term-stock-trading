@@ -8,7 +8,7 @@
 ## 一句话定位
 
 面向 A 股短线 / 做 T 的 **AI 交易决策 + 量化预测 + 纪律执行工作台**。前后端分离：
-- **前端** React 18 + Vite 5 静态站 → 部署 **Vercel**。
+- **前端** React 18 + Vite 5 静态站 → 必须同时部署 **Vercel + 阿里云 FC 自定义域名 `https://www.tedixtf.cn/`**。
 - **后端** 所有 `api/*` 由**单个 `server.js` Node 进程**承载 → 部署**阿里云函数计算 FC 3.0**。
 - **量化微服务** FastAPI + LightGBM + GARCH → 独立部署，模型每小时从 OSS 热更新。
 - **存储** 阿里云 OSS（封装成 `_blob.js`）。
@@ -18,14 +18,19 @@
 
 ## ⛔ 铁律（违反会搞挂线上，务必遵守）
 
-1. **后端改动必须部署到阿里云 FC，不能只推 Vercel。**
+1. **前端改动必须双部署到 Vercel 和阿里云 FC，缺一不可。**
+   改到 `src/**`、`public/**`、`index.html`、`tokens.css` 或任何影响 `dist/` 的前端文件后，必须把同一前端版本依次部署：
+   - Vercel 稳定域名：`https://stock-dashboard-one-plum.vercel.app`
+   - 阿里云 FC 自定义域名：`https://www.tedixtf.cn/`
+   只部署 Vercel 或只部署 FC 都视为**部署未完成**；两边都必须做线上验收。
+2. **后端改动必须部署到阿里云 FC，不能只推 Vercel。**
    改到 `api/**`、`server.js`、或被后端 import 的任何模块（如 `api/_ai_prompts.js`）→ 必须 `s deploy`。
    仅推 Vercel 不会更新任何后端逻辑。
-2. **部署 FC 前必须先 `set -a; . ./.env; set +a` 加载 `.env`**，否则 `s.yaml` 里的 `${env('...')}` 取到空值，会把**线上环境变量清空**搞挂服务。
-3. **密钥绝不入库**：`.env` / `.env.local` / `.vercel/` / `CREDENTIALS.md` / 运行日志 已在 `.gitignore`。
+3. **部署 FC 前必须先 `set -a; . ./.env; set +a` 加载 `.env`**，否则 `s.yaml` 里的 `${env('...')}` 取到空值，会把**线上环境变量清空**搞挂服务。
+4. **密钥绝不入库**：`.env` / `.env.local` / `.vercel/` / `CREDENTIALS.md` / 运行日志 已在 `.gitignore`。
    - GitHub Token 只在一次性 `git push` 命令 URL 里内联使用，绝不写 `.git/config`。
    - 阿里云 / OSS / LLM Key 绝不打印明文、绝不提交。
-4. **不要改量化 `/predict` 的 36 维 OHLCV 模型口径**（`qlib-service/factors_lib.py` 训练/推理共用）——改了会训练/线上不一致。确认闸门 `_confirm.js` 只用公开行情 + 通用技术指标 + LLM，绝不触碰该口径。
+5. **不要改量化 `/predict` 的 36 维 OHLCV 模型口径**（`qlib-service/factors_lib.py` 训练/推理共用）——改了会训练/线上不一致。确认闸门 `_confirm.js` 只用公开行情 + 通用技术指标 + LLM，绝不触碰该口径。
 
 ---
 
@@ -93,11 +98,21 @@ HARNESS_NICK=... HARNESS_PASSWORD=... npm run harness:advice
 
 ## 部署（Codex 请严格按此顺序）
 
-### 前端 → Vercel（改了 `src/**`）
+### 前端 → Vercel + 阿里云 FC（改了任何影响 `dist/` 的文件）
 ```bash
 npm run build
 npx vercel --prod --yes --token "$VC_TOKEN"
 # alias 到 one-plum 稳定域名并验 HTTP 200
+
+# 同一前端源码版本必须继续部署到 FC，更新 www.tedixtf.cn
+npm run package:fc
+set -a; . ./.env; set +a
+npx @serverless-devs/s deploy -y
+
+# 两端都验收；备案域名未授权时返回 401 设备授权页也说明域名已到 FC，
+# 完整页面验收需在已授权设备浏览器中完成。
+curl -s -o /dev/null -w "%{http_code}\n" https://stock-dashboard-one-plum.vercel.app/
+curl -s -o /dev/null -w "%{http_code}\n" https://www.tedixtf.cn/
 ```
 
 ### 后端 → 阿里云 FC（改了 `api/**`、`server.js`）

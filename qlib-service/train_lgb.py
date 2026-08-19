@@ -14,6 +14,7 @@ import time
 import numpy as np
 import lightgbm as lgb
 from sklearn.metrics import roc_auc_score
+from time_splits import expanding_date_folds
 
 
 # LightGBM 超参：训练管道与每日重训编排器(retrain_daily.py)共用，单一真源。
@@ -30,18 +31,13 @@ PARAMS = dict(
 )
 
 
-def time_series_folds(dates, n_splits=5):
-    """按日期排序后做扩张窗口切分，返回 (train_idx, val_idx) 列表。"""
-    order = np.argsort(dates, kind="stable")
-    N = len(order)
-    fold = N // (n_splits + 1)
-    splits = []
-    for k in range(1, n_splits + 1):
-        tr = order[: fold * k]
-        va = order[fold * k: fold * (k + 1)]
-        if len(va) > 0 and len(tr) > 0:
-            splits.append((tr, va))
-    return splits
+def time_series_folds(dates, n_splits=5, purge_dates=5):
+    """按唯一交易日做扩张窗口切分，并 purge 前瞻标签重叠日期。"""
+    return expanding_date_folds(
+        dates,
+        n_splits=n_splits,
+        purge_dates=purge_dates,
+    )
 
 
 def cv_auc_and_iters(X, y, dates, n_splits=5, verbose=True, weights=None):

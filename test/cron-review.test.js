@@ -52,9 +52,9 @@ test('服务端复盘载荷使用实时持仓、行情、账户和当日成交',
     },
   )
 
-  assert.equal(payload.holdCost, 10)
+  assert.equal(payload.holdCost, 10.025)
   assert.equal(payload.holdQty, 2)
-  assert.equal(payload.hold.pnlPct, 10)
+  assert.equal(payload.hold.pnlPct, 9.73)
   assert.equal(payload.account.totalAssets, 10200)
   assert.equal(payload.todayTrades.length, 1)
   assert.equal(payload.todayTrades[0].side, 'buy')

@@ -1,4 +1,7 @@
-import { authorizePaidRequest } from './_account_auth.js';
+import {
+  authorizePaidRequest,
+  isRuntimeConfigAdmin,
+} from './_account_auth.js';
 import {
   ensureAiSearchConfig,
   publicAiSearchConfig,
@@ -35,6 +38,12 @@ export default async function handler(req, res) {
       }));
     }
     if (action === 'save') {
+      if (!isRuntimeConfigAdmin(accountAuth.account)) {
+        return res.status(403).send(JSON.stringify({
+          ok: false,
+          error: '仅运行时配置管理员可执行此操作',
+        }));
+      }
       const patch = {};
       if (typeof body?.enabled === 'boolean') patch.enabled = body.enabled;
       if (typeof body?.apiKey === 'string') patch.apiKey = body.apiKey;

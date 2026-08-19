@@ -2,6 +2,7 @@
 // 用 VAPID 私钥给一批订阅发同一条通知。返回失效(410/404)的 endpoint,供调用方从账号里剔除。
 // 环境变量:VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT(mailto:...)
 import webpush from 'web-push';
+import { assertSafeWebPushEndpoint } from './_safe_remote_url.js';
 
 let _ready = false;
 function ensure() {
@@ -25,12 +26,17 @@ export async function sendPush(subs, payload) {
   await Promise.all(subs.map(async (s) => {
     if (!s || !s.endpoint || !s.keys) return;
     try {
-      await webpush.sendNotification({ endpoint: s.endpoint, keys: s.keys }, data, { TTL: 3600 });
+      const endpoint = await assertSafeWebPushEndpoint(s.endpoint);
+      await webpush.sendNotification({ endpoint, keys: s.keys }, data, { TTL: 3600 });
       out.sent++;
     } catch (e) {
       out.failed++;
       const code = e && e.statusCode;
-      if (code === 404 || code === 410) out.deadEndpoints.push(s.endpoint); // 订阅已失效 → 标记删除
+      if (
+        code === 404
+        || code === 410
+        || /Push Service|公网|本机|HTTPS/.test(String(e?.message || ''))
+      ) out.deadEndpoints.push(s.endpoint); // 订阅已失效或不安全 → 标记删除
     }
   }));
   return out;

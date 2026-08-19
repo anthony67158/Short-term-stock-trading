@@ -7,8 +7,10 @@
 
 import { api as apiUrl } from './apiBase'
 import { authStore } from './authStore'
+import { requestPushPermission } from '../shared/pushPermission.js'
 
 let _vapidPub = null
+let _syncedBinding = ''
 
 // 能力探测:是否可能支持 Web Push
 export function pushSupported() {
@@ -63,6 +65,38 @@ export async function pushStatus() {
   } catch { return 'off' }
 }
 
+async function uploadSubscription(sub, creds, { force = false } = {}) {
+  if (!sub || !creds) return { ok: false, error: '推送订阅或账号不可用' }
+  const binding = `${creds.nick}|${sub.endpoint}`
+  if (!force && binding === _syncedBinding) return { ok: true }
+  const r = await fetch(apiUrl('/api/push'), {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'subscribe', ...creds, subscription: sub, ua: navigator.userAgent }),
+  })
+  const j = await r.json().catch(() => ({ ok: false }))
+  if (!j.ok) return { ok: false, error: j.error || '订阅上报失败' }
+  _syncedBinding = binding
+  return { ok: true }
+}
+
+// 兼容历史账号保存曾误删服务端 pushSubs 的情况：浏览器本地订阅仍存在时，
+// 登录恢复后静默重新绑定，无需用户先关闭再开启。
+export async function syncPushSubscription() {
+  if (!pushSupported() || Notification.permission !== 'granted') {
+    return { ok: false, skipped: true }
+  }
+  const creds = authStore.getCreds()
+  if (!creds) return { ok: false, skipped: true }
+  try {
+    const reg = await navigator.serviceWorker.getRegistration()
+    const sub = reg && (await reg.pushManager.getSubscription())
+    if (!sub) return { ok: false, skipped: true }
+    return await uploadSubscription(sub, creds)
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) }
+  }
+}
+
 // 开启推送:请求授权 → 订阅 → 上报绑定账号。返回 { ok, error? }
 export async function enablePush() {
   if (!pushSupported()) return { ok: false, error: '当前环境不支持系统推送' }
@@ -71,7 +105,7 @@ export async function enablePush() {
   const pub = await getVapidKey()
   if (!pub) return { ok: false, error: '推送公钥未配置' }
   try {
-    const perm = await Notification.requestPermission()
+    const perm = await requestPushPermission(Notification)
     if (perm !== 'granted') return { ok: false, error: '通知权限被拒绝' }
     const reg = (await navigator.serviceWorker.getRegistration()) || (await registerSW())
     if (!reg) return { ok: false, error: 'Service Worker 注册失败' }
@@ -83,13 +117,7 @@ export async function enablePush() {
         applicationServerKey: urlBase64ToUint8Array(pub),
       })
     }
-    const r = await fetch(apiUrl('/api/push'), {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'subscribe', ...creds, subscription: sub, ua: navigator.userAgent }),
-    })
-    const j = await r.json().catch(() => ({ ok: false }))
-    if (!j.ok) return { ok: false, error: j.error || '订阅上报失败' }
-    return { ok: true }
+    return await uploadSubscription(sub, creds, { force: true })
   } catch (e) {
     return { ok: false, error: String((e && e.message) || e) }
   }
@@ -110,6 +138,7 @@ export async function disablePush() {
       } catch { /* ignore */ }
       await sub.unsubscribe()
     }
+    _syncedBinding = ''
     return { ok: true }
   } catch (e) { return { ok: false, error: String((e && e.message) || e) } }
 }

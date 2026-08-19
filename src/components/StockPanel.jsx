@@ -115,6 +115,7 @@ export default function StockPanel({ sector, data, loading, error, sort, setSort
     <div className="panel">
       <div className="panel-head">
         <div role="heading" aria-level="2" className="panel-title">
+          <Icon name="layers" size={16} />
           {sector ? sector.name : '个股'} <span className="sub-name">成分股 · {view === 'heat' ? '面积=成交额 · 红涨绿跌 · 点方块看详情' : '点表头排序 · 点行看详情'}</span>
         </div>
         <div className="panel-head-actions">

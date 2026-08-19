@@ -16,6 +16,7 @@ import argparse, json, os, time, numpy as np, lightgbm as lgb
 from sklearn.metrics import roc_auc_score
 from sklearn.isotonic import IsotonicRegression
 from train_lgb import PARAMS
+from time_splits import three_way_purged_split
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TARGET_PCT = 0.02
@@ -59,10 +60,14 @@ def main():
     fmax = d[f"fmax{HORIZON}"].astype(float)
     y = (fmax >= TARGET_PCT).astype(int)
 
-    order = np.argsort(dates, kind="stable"); N = len(order)
-    cut = int(N * (1 - HOLDOUT_FRAC)); tr_all, ho = order[:cut], order[cut:]
-    icut = int(len(tr_all) * (1 - CAL_FRAC)); fit_idx, cal_idx = tr_all[:icut], tr_all[icut:]
-    cut_date = dates[order[cut]]
+    N = len(dates)
+    fit_idx, cal_idx, ho, split_meta = three_way_purged_split(
+        dates,
+        calibration_fraction=CAL_FRAC,
+        holdout_fraction=HOLDOUT_FRAC,
+        purge_dates=HORIZON,
+    )
+    cut_date = split_meta["holdout_start_date"]
     print(f"[split] fit={len(fit_idx)} cal={len(cal_idx)} holdout={len(ho)} "
           f"cut_date={cut_date} base_rate={y.mean():.3f}")
 
@@ -104,6 +109,7 @@ def main():
         "holdout_precision": prec, "coverage": cov, "n_signal_holdout": nh,
         "base_rate": float(y.mean()), "auc": float(auc),
         "cut_date": cut_date, "n_samples": int(N), "n_estimators": int(it),
+        "split": split_meta,
         "target_prec": a.target_prec,
         "trained_at": int(time.time()), "model_format": "lightgbm_text",
         "feat_dim": int(X.shape[1]),

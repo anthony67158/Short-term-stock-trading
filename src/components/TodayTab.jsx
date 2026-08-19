@@ -35,6 +35,7 @@ import {
   isQuantResultForVersion,
   quantModelLabel,
 } from '../../shared/modelVersion.js'
+import { accountScopedStorageKey } from '../../shared/accountSessionScope.js'
 
 // ============ 今日选股 Tab：今天买什么 ============
 export default function TodayTab({ interval, market, sectors, snapshot }) {
@@ -242,14 +243,18 @@ function loadPick() {
   } catch { /* ignore */ }
   try {
     return normalizeStoredPickSnapshot(
-      JSON.parse(localStorage.getItem(PICK_KEY) || 'null'),
+      JSON.parse(
+        localStorage.getItem(accountScopedStorageKey(PICK_KEY)) || 'null',
+      ),
       ACTIVE_PICK_STRATEGY,
     )
   } catch { return null }
 }
 function savePick(obj) {
   try { planStore.setSetting && planStore.setSetting(PICK_KEY, obj) } catch { /* ignore */ }
-  try { localStorage.setItem(PICK_KEY, JSON.stringify(obj)) } catch { /* ignore */ }
+  try {
+    localStorage.setItem(accountScopedStorageKey(PICK_KEY), JSON.stringify(obj))
+  } catch { /* ignore */ }
 }
 const AUTO_KEY = 'ai_pick_auto_v1'
 const AUTO_MIN = 20 // 自动刷新间隔(分钟)
@@ -258,11 +263,15 @@ function loadAuto() {
     const cloud = planStore.getSetting && planStore.getSetting(AUTO_KEY, undefined)
     if (cloud !== undefined && cloud !== null) return !!cloud
   } catch { /* ignore */ }
-  try { return localStorage.getItem(AUTO_KEY) === '1' } catch { return false }
+  try {
+    return localStorage.getItem(accountScopedStorageKey(AUTO_KEY)) === '1'
+  } catch { return false }
 }
 function saveAuto(v) {
   try { planStore.setSetting && planStore.setSetting(AUTO_KEY, !!v) } catch { /* ignore */ }
-  try { localStorage.setItem(AUTO_KEY, v ? '1' : '0') } catch { /* ignore */ }
+  try {
+    localStorage.setItem(accountScopedStorageKey(AUTO_KEY), v ? '1' : '0')
+  } catch { /* ignore */ }
 }
 
 async function fetchJsonWithTimeout(url, timeoutMs = 30000, options = {}) {

@@ -7,7 +7,7 @@ import {
   resolveAppShortcut,
 } from '../shared/appShell.js'
 
-test('工作台固定四个核心入口并为每页提供任务描述', () => {
+test('工作台固定四个核心入口并只保留页面任务描述', () => {
   assert.deepEqual(
     APP_SECTIONS.map((section) => section.key),
     ['today', 'plan', 'hub', 'research'],
@@ -16,6 +16,7 @@ test('工作台固定四个核心入口并为每页提供任务描述', () => {
     assert.ok(section.label)
     assert.ok(section.description)
     assert.ok(section.icon)
+    assert.equal('steps' in section, false)
   }
 })
 

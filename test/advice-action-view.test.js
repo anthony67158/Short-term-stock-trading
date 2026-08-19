@@ -1,0 +1,231 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+
+import {
+  buildActionProgress,
+  buildAdviceActionView,
+} from '../shared/adviceActionView.js'
+import { planStore } from '../src/planStore.js'
+
+test('买入建议把买入价和首笔手数编译为同一动作视图', () => {
+  const view = buildAdviceActionView({
+    action: '回调再买',
+    actionPlan: '回踩61.20元企稳后买入2手',
+    buyPrice: 61.2,
+    planQty: 2,
+    stopPrice: 58.8,
+    targetPrice: 67.5,
+  }, { mode: 'buy_advice' })
+
+  assert.equal(view.kind, 'buy')
+  assert.equal(view.quantity, '2手')
+  assert.deepEqual(view.levels[0], {
+    key: 'entry',
+    label: '买入执行价',
+    price: 61.2,
+    tone: 'buy',
+    active: true,
+  })
+  assert.deepEqual(view.trigger, {
+    direction: 'lte',
+    price: 61.2,
+    label: '买入位',
+    metricLabel: '买入准备',
+  })
+})
+
+test('观望建议隐藏买入价和买入手数，只保留重新评估条件', () => {
+  const view = buildAdviceActionView({
+    action: '观望',
+    actionPlan: '站稳63.50元并放量后再评估',
+    buyPrice: 61.2,
+    planQty: 0,
+    watchPrice: 63.5,
+  }, { mode: 'buy_advice' })
+
+  assert.equal(view.kind, 'wait')
+  assert.equal(view.quantity, '')
+  assert.deepEqual(view.levels, [{
+    key: 'watch',
+    label: '重新评估',
+    price: 63.5,
+    tone: 'neutral',
+    active: true,
+  }])
+  assert.equal(view.trigger.direction, 'inactive')
+  assert.equal(view.trigger.metricLabel, '暂不下单')
+})
+
+test('观望建议缺少结构化关注价时仍显示暂不下单状态', () => {
+  const view = buildAdviceActionView({
+    action: '观望',
+    actionPlan: '量能与趋势尚未确认，等待站稳压力位再评估',
+    planQty: 0,
+  }, { mode: 'buy_advice' })
+
+  assert.deepEqual(view.levels, [])
+  assert.deepEqual(view.trigger, {
+    direction: 'inactive',
+    price: null,
+    label: '重新评估',
+    metricLabel: '暂不下单',
+  })
+})
+
+test('加仓建议展示加仓点而不是通用买入点', () => {
+  const view = buildAdviceActionView({
+    action: '加仓',
+    actionPlan: '回踩10.20元企稳后加仓2手',
+    buyPrice: 10.5,
+    addPrice: 10.2,
+    reducePrice: 11.4,
+    stopPrice: 9.8,
+    opQty: '加仓2手',
+  }, { mode: 'hold_advice' })
+
+  assert.equal(view.kind, 'add')
+  assert.equal(view.quantity, '加仓2手')
+  assert.equal(view.levels[0].key, 'add')
+  assert.equal(view.levels[0].label, '加仓执行价')
+  assert.equal(view.levels[0].price, 10.2)
+  assert.equal(view.levels[0].active, true)
+  assert.equal(view.trigger.direction, 'lte')
+  assert.equal(view.trigger.price, 10.2)
+})
+
+test('减仓建议以减仓点和向上触发进度为主', () => {
+  const view = buildAdviceActionView({
+    action: '减仓',
+    actionPlan: '反弹到11.40元减仓1手',
+    addPrice: 10.2,
+    reducePrice: 11.4,
+    stopPrice: 9.8,
+    opQty: '减仓1手',
+  }, { mode: 'hold_advice' })
+
+  assert.equal(view.kind, 'reduce')
+  assert.equal(view.levels[0].key, 'reduce')
+  assert.equal(view.levels[0].active, true)
+  assert.equal(view.trigger.direction, 'gte')
+  assert.equal(view.trigger.metricLabel, '减仓准备')
+})
+
+test('持有建议把加仓和减仓价降级为观察边界并生成区间进度', () => {
+  const view = buildAdviceActionView({
+    action: '持有',
+    actionPlan: '守住10.20元继续持有，反弹11.40元再评估',
+    addPrice: 10.2,
+    reducePrice: 11.4,
+    stopPrice: 9.8,
+    opQty: '无需操作',
+  }, { mode: 'hold_advice' })
+
+  assert.equal(view.kind, 'hold')
+  assert.equal(view.quantity, '')
+  assert.deepEqual(
+    view.levels.map(({ key, label, active }) => ({ key, label, active })),
+    [
+      { key: 'add', label: '回踩观察', active: false },
+      { key: 'reduce', label: '反弹观察', active: false },
+      { key: 'stop', label: '止损线', active: false },
+    ],
+  )
+  assert.deepEqual(view.trigger, {
+    direction: 'range',
+    low: 10.2,
+    high: 11.4,
+    label: '观察区间',
+    metricLabel: '继续持有',
+  })
+})
+
+test('持有建议缺少回踩价时使用止损线补全观察区间', () => {
+  const view = buildAdviceActionView({
+    action: '持有',
+    actionPlan: '持有1手，反弹67.87元再评估，跌破59.31元清仓',
+    reducePrice: 67.87,
+    stopPrice: 59.31,
+    opQty: '无需操作',
+  }, { mode: 'hold_advice' })
+
+  assert.deepEqual(
+    view.levels.map(({ key, label, price }) => ({ key, label, price })),
+    [
+      { key: 'reduce', label: '反弹观察', price: 67.87 },
+      { key: 'stop', label: '止损线', price: 59.31 },
+    ],
+  )
+  assert.deepEqual(view.trigger, {
+    direction: 'range',
+    low: 59.31,
+    high: 67.87,
+    label: '观察区间',
+    metricLabel: '继续持有',
+  })
+})
+
+test('动作进度按买入向下、减仓向上和持有区间分别计算', () => {
+  const buy = buildActionProgress({
+    direction: 'lte',
+    price: 61.2,
+    label: '买入位',
+    metricLabel: '买入准备',
+  }, 65.4)
+  const reduce = buildActionProgress({
+    direction: 'gte',
+    price: 11.4,
+    label: '减仓位',
+    metricLabel: '减仓准备',
+  }, 10.8)
+  const hold = buildActionProgress({
+    direction: 'range',
+    low: 10.2,
+    high: 11.4,
+    label: '观察区间',
+    metricLabel: '继续持有',
+  }, 10.8)
+  const reached = buildActionProgress({
+    direction: 'gte',
+    price: 11.4,
+    label: '减仓位',
+    metricLabel: '减仓准备',
+  }, 11.5)
+
+  assert.equal(buy.tone, 'buy')
+  assert.match(buy.label, /距买入位 6\.9%/)
+  assert.equal(buy.score, 14.2)
+  assert.equal(buy.stateLabel, '等待回踩')
+  assert.equal(reduce.tone, 'sell')
+  assert.match(reduce.label, /距减仓位 5\.3%/)
+  assert.equal(reduce.score, 34.2)
+  assert.equal(reduce.stateLabel, '等待反弹')
+  assert.equal(hold.tone, 'range')
+  assert.equal(hold.label, '现价位于区间中部')
+  assert.equal(hold.score, 50)
+  assert.equal(hold.stateLabel, '区间内持有')
+  assert.equal(reached.reached, true)
+  assert.equal(reached.stateLabel, '已到减仓位')
+  assert.equal(reached.currentPrice, 11.5)
+})
+
+test('候选转为观望时只撤下系统买点预警', () => {
+  planStore.setData({
+    plan: [{
+      code: '600001',
+      name: '测试股票',
+      alertSyncedPrice: 10.2,
+    }],
+    holding: [],
+    closed: [],
+    alerts: [
+      { id: 'auto', code: '600001', candCode: '600001', value: 10.2 },
+      { id: 'manual', code: '600001', type: 'price', value: 11 },
+    ],
+  })
+
+  planStore.clearCandBuyAlert('600001')
+
+  const state = planStore.get()
+  assert.deepEqual(state.alerts.map((item) => item.id), ['manual'])
+  assert.equal(state.plan[0].alertSyncedPrice, null)
+})

@@ -15,6 +15,10 @@ import {
   evidenceSnapshotsFromData,
   mergeEvidenceSnapshotIndexes,
 } from '../shared/evidenceSnapshot.js';
+import {
+  createAccountSessionToken,
+  verifyAccountSessionToken,
+} from './_account_session.js';
 
 // ============ 云端账号 + 数据同步（阿里云 OSS 持久化）============
 // 单一入口，按 action 区分：register / login / get / save
@@ -173,6 +177,9 @@ export function applyClientAccountSave(account, incoming, baseRevision) {
   if (prev.adviceDailyReport?.summary?.text) {
     merged.adviceDailyReport = prev.adviceDailyReport;
   }
+  // Web Push 订阅只允许 /api/push 增删。普通账本保存不携带该字段，
+  // 不能用客户端快照把服务端已绑定的设备订阅清空。
+  if (Array.isArray(prev.pushSubs)) merged.pushSubs = prev.pushSubs;
   merged.reviews = mergeReviewsByTimestamp(incoming.reviews, prev.reviews);
   if (prev.reviewAuto && typeof prev.reviewAuto === 'object') {
     merged.reviewAuto = prev.reviewAuto;
@@ -248,6 +255,17 @@ function ok(res, obj) {
   sendJson(res, obj, { cache: 0 });
 }
 
+export function accountCredentialMatches(account, { pw = '', token = '' } = {}) {
+  return (
+    (!!token && verifyAccountSessionToken(account, token))
+    || (!!pw && account.pwHash === sha(pw))
+  );
+}
+
+function accountSessionToken(account) {
+  return createAccountSessionToken(account);
+}
+
 // 读取某账号：优先读取权威当前快照；没有则从历史/旧格式中取最新版本。
 // OSS 故障必须向上抛出，不能伪装成“账号不存在”。
 export async function readAccount(nick, storage = defaultStorage) {
@@ -280,29 +298,27 @@ async function applyDeactivationMarker(account, nick, storage) {
 // 按 hash 目录分组,每组取 uploadedAt 最新的一份读出 → 返回账号对象数组(含 nick/pwHash/data)。
 export async function listAllAccounts(storage = defaultStorage) {
   const byNick = new Map();
-  try {
-    const { blobs } = await storage.list({ prefix: PREFIX, limit: 10000 });
-    const groups = new Map(); // key: hash 目录(或旧单文件 key) → 该组最新 blob
-    for (const b of (blobs || [])) {
-      if (b.pathname.endsWith('/deactivated.json')) continue;
-      const rest = b.pathname.slice(PREFIX.length);      // <hash>/<ts>.json 或 <hash>.json
-      const key = rest.includes('/') ? rest.split('/')[0] : rest; // 目录 hash 或旧文件名
-      const cur = groups.get(key);
-      if (!cur || new Date(b.uploadedAt).getTime() > new Date(cur.uploadedAt).getTime()) {
-        groups.set(key, b);
-      }
+  const { blobs } = await storage.list({ prefix: PREFIX, limit: 10000 });
+  const groups = new Map(); // key: hash 目录(或旧单文件 key) → 该组最新 blob
+  for (const b of (blobs || [])) {
+    if (b.pathname.endsWith('/deactivated.json')) continue;
+    const rest = b.pathname.slice(PREFIX.length);      // <hash>/<ts>.json 或 <hash>.json
+    const key = rest.includes('/') ? rest.split('/')[0] : rest; // 目录 hash 或旧文件名
+    const cur = groups.get(key);
+    if (!cur || new Date(b.uploadedAt).getTime() > new Date(cur.uploadedAt).getTime()) {
+      groups.set(key, b);
     }
-    for (const b of groups.values()) {
-      const raw = await storage.readJson(b);
-      // 分组时已取得该账号最新对象，避免再把 4 MiB current.json 重读一遍。
-      const j = raw && raw.nick
-        ? await applyDeactivationMarker(raw, raw.nick, storage)
-        : null;
-      if (!j || !j.nick || !isAccountActive(j)) continue;
-      const current = byNick.get(j.nick);
-      if (!current || (j.updatedAt || 0) >= (current.updatedAt || 0)) byNick.set(j.nick, j);
-    }
-  } catch { /* ignore */ }
+  }
+  for (const b of groups.values()) {
+    const raw = await storage.readJson(b);
+    // 分组时已取得该账号最新对象，避免再把 4 MiB current.json 重读一遍。
+    const j = raw && raw.nick
+      ? await applyDeactivationMarker(raw, raw.nick, storage)
+      : null;
+    if (!j || !j.nick || !isAccountActive(j)) continue;
+    const current = byNick.get(j.nick);
+    if (!current || (j.updatedAt || 0) >= (current.updatedAt || 0)) byNick.set(j.nick, j);
+  }
   return [...byNick.values()];
 }
 
@@ -385,6 +401,7 @@ export default async function handler(req, res) {
     const action = body.action;
     const nick = String(body.nick || '').trim();
     const pw = body.pw != null ? String(body.pw) : '';
+    const token = body.token != null ? String(body.token) : '';
 
     if (action === 'register') {
       if (!nick) return ok(res, { ok: false, error: '请输入昵称' });
@@ -404,13 +421,22 @@ export default async function handler(req, res) {
       return ok(res, {
         ok: true, nick: acc.nick, data: acc.data,
         updatedAt: acc.updatedAt, revision: acc.clientRevision, storage: acc.storage,
+        token: accountSessionToken(acc),
       });
     }
 
     if (action === 'login' || action === 'get' || action === 'sync') {
       const acc = await readAccount(nick);
       if (!acc) return ok(res, { ok: false, error: '账号不存在，请先注册' });
-      if (acc.pwHash !== sha(pw)) return ok(res, { ok: false, error: '密码错误' });
+      const authorized = action === 'login'
+        ? !!pw && acc.pwHash === sha(pw)
+        : accountCredentialMatches(acc, { pw, token });
+      if (!authorized) {
+        return ok(res, {
+          ok: false,
+          error: action === 'login' ? '密码错误' : '登录已过期，请重新登录',
+        });
+      }
       if (!isAccountActive(acc)) return ok(res, { ok: false, error: '账号已注销，数据仍保存在 OSS' });
       if (action === 'sync') {
         const since = Math.max(0, Number(body.since) || 0);
@@ -430,13 +456,16 @@ export default async function handler(req, res) {
         ok: true, nick: acc.nick,
         data: acc.data || { plan: [], holding: [], closed: [] },
         updatedAt: acc.updatedAt, revision: Number(acc.clientRevision) || 0, storage: 'oss',
+        token: accountSessionToken(acc),
       });
     }
 
     if (action === 'save') {
       const acc = await readAccount(nick);
       if (!acc) return ok(res, { ok: false, error: '账号不存在' });
-      if (acc.pwHash !== sha(pw)) return ok(res, { ok: false, error: '密码错误' });
+      if (!accountCredentialMatches(acc, { pw, token })) {
+        return ok(res, { ok: false, error: '登录已过期，请重新登录' });
+      }
       if (!isAccountActive(acc)) return ok(res, { ok: false, error: '账号已注销，不能继续保存' });
       const incoming = (body.data && typeof body.data === 'object') ? body.data : null;
       if (incoming) {
@@ -471,7 +500,9 @@ export default async function handler(req, res) {
     if (action === 'deactivate') {
       const acc = await readAccount(nick);
       if (!acc) return ok(res, { ok: false, error: '账号不存在' });
-      if (acc.pwHash !== sha(pw)) return ok(res, { ok: false, error: '密码错误' });
+      if (!accountCredentialMatches(acc, { pw, token })) {
+        return ok(res, { ok: false, error: '登录已过期，请重新登录' });
+      }
       if (!isAccountActive(acc)) {
         return ok(res, {
           ok: true, deactivated: true, retainedInOss: true,
@@ -489,7 +520,9 @@ export default async function handler(req, res) {
     if (action === 'delete') {
       const acc = await readAccount(nick);
       if (!acc) return ok(res, { ok: false, error: '账号不存在' });
-      if (acc.pwHash !== sha(pw)) return ok(res, { ok: false, error: '密码错误' });
+      if (!accountCredentialMatches(acc, { pw, token })) {
+        return ok(res, { ok: false, error: '登录已过期，请重新登录' });
+      }
       try {
         const { blobs } = await list({ prefix: prefixOf(nick), limit: 5000 });
         for (const b of (blobs || [])) { try { await del(b.url); } catch { /* ignore */ } }

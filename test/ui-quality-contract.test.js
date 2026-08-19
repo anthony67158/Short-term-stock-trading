@@ -14,6 +14,7 @@ const tokens = read('tokens.css')
 const app = read('src/App.jsx')
 const assistant = read('src/components/AIAssistant.jsx')
 const sectorPanel = read('src/components/SectorPanel.jsx')
+const sectorHistory = read('src/components/SectorHistory.jsx')
 const stockPanel = read('src/components/StockPanel.jsx')
 const stockDetail = read('src/components/StockDetail.jsx')
 const advicePresentation = read('src/components/AdvicePresentation.jsx')
@@ -34,6 +35,89 @@ const semanticTabSources = [
   'src/components/SectorPanel.jsx',
   'src/components/StockPanel.jsx',
 ].map(read)
+
+test('四个工作区共用紧凑页面身份头部且不展示流程指导', () => {
+  assert.match(app, /className="workspace-identity"/)
+  assert.doesNotMatch(app, /className="workspace-icon"/)
+  assert.doesNotMatch(app, /className="workspace-path"/)
+  assert.doesNotMatch(app, /currentSection\.steps/)
+  assert.doesNotMatch(app, /className="workspace-state"/)
+  assert.match(app, /data-section=\{currentSection\.key\}/)
+  assert.match(
+    precision,
+    /\.workspace-head\s*{[^}]*display:\s*grid[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s,
+  )
+  assert.doesNotMatch(
+    precision,
+    /\.workspace-head\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/s,
+  )
+  assert.doesNotMatch(precision, /\.workspace-path(?:-step|-index|-copy|-next)?\s*[,{]/)
+  assert.doesNotMatch(precision, /\.workspace-state(?:-dot|-copy)?\s*[,{.]/)
+  assert.doesNotMatch(precision, /\.workspace-icon\s*{/)
+})
+
+test('所有按钮受父容器约束且卖出按钮保持短标签', () => {
+  assert.match(
+    precision,
+    /button\s*{[^}]*min-width:\s*0[^}]*max-width:\s*100%[^}]*overflow:\s*hidden/s,
+  )
+  assert.match(
+    precision,
+    /\.btn,[\s\S]*?\.sug-price-btn\s*{[^}]*text-overflow:\s*ellipsis/s,
+  )
+  assert.match(
+    precision,
+    /\.hold-item > \.pi-actions > \.chip-btn\s*{[^}]*padding-inline:\s*var\(--space-2xs\)[^}]*font-size:\s*var\(--text-xs\)[^}]*white-space:\s*nowrap/s,
+  )
+  assert.match(planTab, /onClick=\{startAdd\}>加仓<\/button>/)
+  assert.match(planTab, /onClick=\{startT\}>做T<\/button>/)
+  assert.match(planTab, /onClick=\{startSell\}>减仓\/清仓<\/button>/)
+  assert.doesNotMatch(planTab, /按指令(?:加仓|卖出)/)
+  assert.doesNotMatch(planTab, /按浮盈金额排序/)
+})
+
+test('全站面板、指标、表格与反馈状态使用统一视觉语法', () => {
+  assert.match(
+    stockPanel,
+    /className="panel-title"[\s\S]*?<Icon name="layers" size=\{16\}/,
+  )
+  assert.match(
+    sectorHistory,
+    /className="panel-title"[\s\S]*?<Icon name="history" size=\{16\}/,
+  )
+  assert.match(
+    precision,
+    /\.panel-title:has\(> \.icon\)\s*{[^}]*display:\s*inline-flex[^}]*align-items:\s*center/s,
+  )
+  assert.match(
+    precision,
+    /\.panel-title > \.sub-name,[\s\S]*?\.panel-head > \.panel-sub,[\s\S]*?\.rv-chart-title > \.sub-name,[\s\S]*?\.heatmap-modal-copy > \.sub-name,[\s\S]*?\.detail-kline-head \.sub-name\s*{[^}]*display:\s*none/s,
+  )
+  assert.match(
+    precision,
+    /\.panel-title > \.icon\s*{[^}]*width:\s*30px[^}]*height:\s*30px[^}]*background:\s*color-mix\(/s,
+  )
+  assert.match(
+    precision,
+    /\.mb-idx-price,[\s\S]*?\.sg-v,[\s\S]*?\.acc-hero-val,[\s\S]*?\.acc-cell-v,[\s\S]*?\.ho-v\s*{[^}]*font-weight:\s*700[^}]*line-height:\s*1\.1/s,
+  )
+  assert.match(
+    precision,
+    /\.tbl tbody tr\s*{[^}]*height:\s*44px/s,
+  )
+  assert.match(
+    precision,
+    /\.panel > \.loading,[\s\S]*?\.panel > \.empty\s*{[^}]*min-height:\s*128px/s,
+  )
+  assert.match(
+    precision,
+    /\.panel > \.loading,[\s\S]*?\.panel > \.empty\s*{[^}]*place-items:\s*center/s,
+  )
+  assert.match(
+    precision,
+    /\.hub-tabs\s*{[^}]*min-height:\s*48px[^}]*background:\s*var\(--color-paper-3\)/s,
+  )
+})
 
 test('异常数值统一降级，交易复盘不会渲染 NaN', () => {
   assert.equal(finiteNum(undefined), 0)
@@ -106,6 +190,22 @@ test('持仓与自选卡片顶部信息固定单行且长名称省略', () => {
   assert.match(
     legacyStyles,
     /\.pc-top-r\s*{[^}]*flex-direction:\s*row[^}]*white-space:\s*nowrap/s,
+  )
+})
+
+test('持仓手数与成本在同一水平线且成本加粗', () => {
+  assert.match(planTab, /className="hold-qty-value"/)
+  assert.match(
+    precision,
+    /\.hold-meta\s*{[^}]*align-items:\s*center/s,
+  )
+  assert.match(
+    precision,
+    /\.hold-qty-value,[\s\S]*?\.hold-cost-value\s*{[^}]*display:\s*inline-flex[^}]*align-items:\s*center[^}]*min-height:\s*24px/s,
+  )
+  assert.match(
+    precision,
+    /\.hold-cost-value\s*{[^}]*font-weight:\s*700/s,
   )
 })
 
@@ -184,7 +284,7 @@ test('持仓区共用页面边线、筛选栏留出安全区且卡片展示建�
   )
   assert.match(
     precision,
-    /\.stock-group-filter-track\s*{[^}]*display:\s*flex[^}]*overflow:\s*hidden[^}]*padding:\s*var\(--space-2xs\)/s,
+    /\.stock-group-filter-track\s*{[^}]*display:\s*flex[^}]*overflow:\s*hidden[^}]*padding:\s*var\(--space-2xs\)\s+0/s,
   )
   assert.match(
     precision,
@@ -197,14 +297,167 @@ test('持仓区共用页面边线、筛选栏留出安全区且卡片展示建�
   assert.match(planTab, /function AdviceUpdatedAt\(\{ entry \}\)/)
   assert.equal((planTab.match(/<AdviceUpdatedAt entry=/g) || []).length, 2)
   assert.match(planTab, /className="advice-updated-at"/)
-  assert.match(precision, /\.hold-swipe-wrap\s*{[^}]*height:\s*100%/s)
+  assert.match(precision, /\.hold-grid\s*{[^}]*align-items:\s*stretch/s)
   assert.match(
     precision,
     /\.hold-swipe-wrap > \.hold-item\s*{[^}]*height:\s*100%[^}]*display:\s*flex[^}]*flex-direction:\s*column/s,
   )
   assert.match(
     precision,
-    /\.hold-item > \.pi-actions\s*{[^}]*margin-top:\s*auto/s,
+    /\.hold-item > \.pi-actions\s*{[^}]*margin-top:\s*auto[^}]*padding-top:\s*var\(--space-xs\)/s,
+  )
+})
+
+test('移动端持续复核弹层高于导航和持仓吸顶区域', () => {
+  assert.match(
+    planTab,
+    /<OverlayPortal>\s*<div className="auto-ref-mask"/,
+  )
+  assert.match(
+    precision,
+    /\.auto-ref-mask\s*{[^}]*z-index:\s*var\(--z-modal\)/s,
+  )
+})
+
+test('操作建议卡使用固定价位列且数量与动作保持同组', () => {
+  assert.match(planTab, /className="action-command-badge"[\s\S]*?className="action-command-qty"/)
+  assert.match(planTab, /'action-levels levels-' \+ Math\.min\(view\.levels\.length,\s*3\)/)
+  assert.doesNotMatch(planTab, />当前指令</)
+  assert.match(planTab, /progress\.stateLabel/)
+  assert.doesNotMatch(planTab, /progress\.metricLabel\}\s*\{progress\.score/)
+  assert.match(
+    precision,
+    /\.action-command\s*{[^}]*grid-template-columns:\s*auto\s+minmax\(0,\s*1fr\)/s,
+  )
+  assert.match(
+    precision,
+    /\.action-levels\.levels-3\s*{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s,
+  )
+  assert.match(
+    precision,
+    /\.action-levels\.editable\s*{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s,
+  )
+})
+
+test('尚无操作建议使用紧凑单行生成入口', () => {
+  assert.match(
+    planTab,
+    /function AdviceActionPanel\(\{ view, currentPrice, onPrompt \}\)/,
+  )
+  assert.match(planTab, /className="action-prompt-label">尚无操作建议<\/span>/)
+  assert.match(planTab, /className="action-prompt-action">生成<\/span>/)
+  assert.doesNotMatch(planTab, /尚无 AI 操作建议，点此生成|>待生成</)
+  assert.match(
+    precision,
+    /\.action-prompt\s*{[^}]*display:\s*grid[^}]*grid-template-columns:\s*20px\s+minmax\(0,\s*1fr\)\s+auto\s+16px[^}]*min-height:\s*48px[^}]*border:\s*1px solid var\(--color-rule-2\)/s,
+  )
+  assert.doesNotMatch(
+    precision,
+    /\.action-prompt\s*{[^}]*border:\s*1px dashed/s,
+  )
+})
+
+test('价格路线图放大价格并在到价后有限脉冲提醒', () => {
+  assert.match(planTab, /className="action-level-icon"/)
+  assert.match(planTab, /className="action-level-price"/)
+  assert.match(planTab, /className="action-current-marker"/)
+  assert.match(planTab, /progress\.reached\s*&&\s*\([\s\S]*?<span className="action-reached"/)
+  assert.match(
+    precision,
+    /\.action-level-price\s*{[^}]*font-size:\s*var\(--text-xl\)/s,
+  )
+  assert.match(
+    precision,
+    /\.action-level:not\(\.active\) \.action-level-price\s*{[^}]*font-size:\s*var\(--text-lg\)/s,
+  )
+  assert.match(
+    precision,
+    /\.action-level\.reached\s*{[^}]*animation:\s*action-price-reached[^}]*3/s,
+  )
+  assert.match(
+    precision,
+    /@media \(prefers-reduced-motion:\s*reduce\)\s*{[\s\S]*?\.action-level\.reached\s*{[^}]*animation:\s*none/s,
+  )
+})
+
+test('价格路线图标题使用固定图标列并允许完整换行', () => {
+  assert.match(
+    precision,
+    /\.action-level-name\s*{[^}]*display:\s*grid[^}]*grid-template-columns:\s*22px\s+minmax\(0,\s*1fr\)[^}]*white-space:\s*normal[^}]*overflow:\s*visible/s,
+  )
+  assert.doesNotMatch(
+    precision,
+    /\.action-level-name\s*{[^}]*overflow:\s*hidden/s,
+  )
+})
+
+test('持仓页大型展开层统一挂到顶层Portal避免被吸顶区遮盖', () => {
+  assert.match(
+    planTab,
+    /<OverlayPortal>[\s\S]*?className="advisor-score-mask"/,
+  )
+  assert.match(
+    planTab,
+    /<OverlayPortal>[\s\S]*?className="auto-ref-mask"/,
+  )
+  assert.doesNotMatch(
+    planTab,
+    /open && \(mobile[\s\S]*?auto-ref-mask/,
+  )
+  assert.match(
+    planTab,
+    /busyModal && \([\s\S]*?<OverlayPortal>[\s\S]*?className="busy-modal-mask"/,
+  )
+  assert.match(
+    precision,
+    /\.advisor-score-mask\s*{[^}]*z-index:\s*var\(--z-modal\)[^}]*overflow-y:\s*auto/s,
+  )
+})
+
+test('持仓卡桌面同高且移动端恢复自然高度', () => {
+  assert.match(precision, /\.hold-swipe-wrap\s*{[^}]*height:\s*100%/s)
+  assert.match(precision, /\.hold-item > \.pi-actions\s*{[^}]*margin-top:\s*auto/s)
+  assert.match(
+    precision,
+    /\.advice-updated-at\s*{[^}]*border:\s*0[^}]*background:\s*transparent/s,
+  )
+  assert.match(
+    precision,
+    /\.hold-item > \.pi-actions\s*{[^}]*display:\s*grid[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/s,
+  )
+  assert.match(
+    precision,
+    /\.hold-item > \.pi-actions \.chip-btn:not\(\.recommended\)[^}]*background:\s*transparent/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*50rem\)\s*{[\s\S]*?\.hold-grid\s*{[^}]*align-items:\s*start[^}]*}[\s\S]*?\.hold-swipe-wrap,[\s\S]*?\.hold-select-wrap\s*{[^}]*height:\s*auto[^}]*}[\s\S]*?\.hold-swipe-wrap > \.hold-item\s*{[^}]*height:\s*auto[^}]*}[\s\S]*?\.hold-item > \.pi-actions\s*{[^}]*margin-top:\s*var\(--space-xs\)/s,
+  )
+})
+
+test('完整建议只在真实截断时支持点击原位展开', () => {
+  assert.match(planTab, /function ActionCommand\(\{ view \}\)/)
+  assert.match(planTab, /const \[isTruncated, setIsTruncated\] = useState\(false\)/)
+  assert.match(planTab, /textNode\.scrollHeight > textNode\.clientHeight \+ 1/)
+  assert.match(planTab, /new ResizeObserver\(measure\)/)
+  assert.match(planTab, /isTruncated \? \([\s\S]*?className="action-command-copy"/)
+  assert.match(planTab, /className="action-command-copy action-command-copy-static"/)
+  assert.doesNotMatch(planTab, /action-command-popover|完整建议<\/strong>/)
+  assert.match(planTab, /aria-expanded=\{expanded\}/)
+  assert.match(planTab, /document\.addEventListener\('keydown', closeWithEscape\)/)
+  assert.match(planTab, /event\.key !== 'Escape'[\s\S]*?setExpanded\(false\)[\s\S]*?\.blur\(\)/)
+  assert.match(
+    precision,
+    /\.action-command-text\s*{[^}]*min-height:\s*4\.5em[^}]*-webkit-line-clamp:\s*3/s,
+  )
+  assert.doesNotMatch(precision, /action-command-popover/)
+  assert.match(
+    precision,
+    /\.action-command-disclosure\.is-expanded \.action-command-text\s*{[^}]*display:\s*block[^}]*max-height:\s*none[^}]*-webkit-line-clamp:\s*unset/s,
+  )
+  assert.match(
+    precision,
+    /\.action-command-copy-static\s*{[^}]*display:\s*block[^}]*cursor:\s*default/s,
   )
 })
 
@@ -289,6 +542,10 @@ test('顶栏刷新使用强调样式且撤回使用独立图标避免误触', ()
   assert.match(
     precision,
     /button\.icon-btn\.nav-undo:disabled\s*{[^}]*opacity:\s*1[^}]*color:\s*var\(--color-neutral\)/s,
+  )
+  assert.match(
+    precision,
+    /\.icon-btn\.nav-bell,[\s\S]*?\.icon-btn\.nav-undo\s*{[^}]*overflow:\s*visible/s,
   )
 })
 

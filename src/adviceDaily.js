@@ -8,7 +8,10 @@ import { currentQuantModelVersion, quantModelQuery } from './quantModel'
 import { portfolioExposureContext } from '../shared/portfolioExposure.js'
 import { adviceTrustBands } from '../shared/adviceIntelligence.js'
 import { nextTradingDayLabel } from '../shared/tradingCalendar.js'
-import { tradeActivityContext } from '../shared/portfolioAccounting.js'
+import {
+  buildTActionContext,
+  tradeActivityContext,
+} from '../shared/portfolioAccounting.js'
 
 // 军师历史战绩(真实回测胜率)→ 传后端做自我校准(与 StockDetail.loadQuant 同口径)
 function advisorTrackFor(mode) {
@@ -79,19 +82,30 @@ export function buildHoldSpec(code, name, quoteMap, portfolio, account) {
   const lp = livePositionOf(code)  // {qty,cost,hasOpenT,tNetHands} 或 null(底仓被反T卖光)
   let holdCost, holdQty, openTNet
   if (lp) {
-    holdCost = lp.cost; holdQty = lp.qty; openTNet = lp.hasOpenT ? lp.tNetHands : 0
+    holdCost = lp.costWithFees ?? lp.cost
+    holdQty = lp.qty
+    openTNet = lp.hasOpenT ? lp.tNetHands : 0
   } else {
     // 反T卖光未接回:用底仓成本作参考,holdQty=0,openTNet为负 → 让军师指导"接回/加仓"
     const hs = (planStore.get().holding || []).filter((h) => h.code === code)
-    let tNet = 0, baseCostSum = 0, baseQtySum = 0
+    let tNet = 0, baseCostValue = 0, baseQtySum = 0
     for (const h of hs) {
       const rr = computeTFlows(h.tFlows)
       tNet += (rr.openBuy || 0) - (rr.openSell || 0)
-      baseCostSum += (h.buyPrice || 0) * (h.qty || 0); baseQtySum += (h.qty || 0)
+      baseCostValue += (
+        (h.buyPrice || 0) * (h.qty || 0) * 100
+        + (Number(h.buyFee) || 0)
+      )
+      baseQtySum += (h.qty || 0)
     }
-    holdCost = baseQtySum > 0 ? +(baseCostSum / baseQtySum).toFixed(3) : null
+    holdCost = baseQtySum > 0
+      ? +(baseCostValue / (baseQtySum * 100)).toFixed(3)
+      : null
     holdQty = 0; openTNet = tNet
   }
+  const currentPrice = Number(quoteMap?.[code]?.price) > 0
+    ? Number(quoteMap[code].price)
+    : null
   const hp = (holdCost != null && holdQty != null) ? `&holdCost=${holdCost}&holdQty=${holdQty}` : ''
   const quantModelVersion = currentQuantModelVersion()
   const quantUrl = api(`/api/stock_detail?code=${code}&klt=101&lmt=60&quant=1${quantModelQuery()}${hp}&_t=${Date.now()}`)
@@ -105,9 +119,14 @@ export function buildHoldSpec(code, name, quoteMap, portfolio, account) {
   const aiPayload = {
     code, name,
     quantModelVersion,
-    holdCost, holdQty,
+    holdCost, holdQty, currentPrice,
     openTNet,
     tradeContext: tradeActivityContext(
+      planStore.get().closed || [],
+      code,
+    ),
+    tContext: buildTActionContext(
+      planStore.get().holding || [],
       planStore.get().closed || [],
       code,
     ),

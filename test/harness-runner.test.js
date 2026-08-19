@@ -53,6 +53,10 @@ const buildFcPackage = readFileSync(
   new URL('../scripts/build-fc-package.mjs', import.meta.url),
   'utf8',
 )
+const fcRuntimePackage = JSON.parse(readFileSync(
+  new URL('../fc-runtime/package.json', import.meta.url),
+  'utf8',
+))
 
 const weights = {
   contract: 0.2,
@@ -413,13 +417,11 @@ test('Harness接入npm命令、CI门禁与报告artifact', () => {
 })
 
 test('FC最小运行包保留Harness离线与显式在线命令', () => {
-  assert.match(buildFcPackage, /scripts:\s*\{/)
-  assert.match(
-    buildFcPackage,
-    /harness:\s*rootPackage\.scripts\.harness/,
-  )
-  assert.match(buildFcPackage, /['"]harness:online['"]:/)
-  assert.match(buildFcPackage, /['"]harness:shadow['"]:/)
+  assert.match(buildFcPackage, /package-lock\.json/)
+  assert.match(buildFcPackage, /\['ci', '--omit=dev'/)
+  assert.match(fcRuntimePackage.scripts.harness, /harness\/run\.mjs/)
+  assert.match(fcRuntimePackage.scripts['harness:online'], /--online/)
+  assert.match(fcRuntimePackage.scripts['harness:shadow'], /--online/)
 })
 
 test('在线军师Harness显式鉴权且不把密码写入结果', () => {
@@ -596,6 +598,48 @@ test('Harness基线阻止低于允许回撤的静默质量退化', () => {
   ))
   assert.ok(compared.regressions.some((item) =>
     item.metric === 'feasibility'
+  ))
+})
+
+test('Harness基线拒绝通过删除困难case维持高分', () => {
+  const baseline = {
+    schemaVersion: 'harness-baseline.v1',
+    suites: {
+      judge: {
+        overall: 1,
+        dimensions: {
+          contract: 1,
+          groundedness: 1,
+          feasibility: 1,
+          actionability: 1,
+          consistency: 1,
+        },
+        cases: 2,
+        caseIds: ['judge-easy', 'judge-hard'],
+      },
+    },
+  }
+  const compared = compareHarnessBaseline([{
+    suiteId: 'judge',
+    summary: {
+      total: 1,
+      overall: 1,
+      dimensions: {
+        contract: 1,
+        groundedness: 1,
+        feasibility: 1,
+        actionability: 1,
+        consistency: 1,
+      },
+    },
+    episodes: [{ caseId: 'judge-easy' }],
+  }], baseline)
+
+  assert.equal(compared.passed, false)
+  assert.ok(compared.regressions.some((item) => item.metric === 'cases'))
+  assert.ok(compared.regressions.some((item) =>
+    item.metric === 'caseIds'
+    && item.message.includes('judge-hard')
   ))
 })
 

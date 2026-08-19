@@ -179,6 +179,32 @@ test('做T卖腿同样受今日可卖数量约束', () => {
   assert.equal((planStore.get().holding[0].tFlows || []).length, 0)
 })
 
+test('当日反向做T结算后买回手数继续受T+1锁定', () => {
+  planStore.setData({
+    plan: [],
+    holding: [{
+      id: 'old_holding',
+      code: '600000',
+      name: '浦发银行',
+      buyPrice: 10,
+      buyAt: Date.now() - 86400000,
+      qty: 2,
+      buyFee: 6,
+    }],
+    closed: [],
+    account: { cash: 10000 },
+  })
+
+  assert.equal(planStore.addTFlow('old_holding', 'sell', 11, 1).ok, true)
+  assert.equal(planStore.addTFlow('old_holding', 'buy', 10, 1).ok, true)
+  planStore.settleTFlows('old_holding')
+
+  const status = t1StatusOf('600000')
+  assert.equal(status.liveQty, 2)
+  assert.equal(status.boughtToday, 1)
+  assert.equal(status.sellableToday, 1)
+})
+
 test('今日新建仓的止盈止损预警保留观察价但标记 T+1 锁定', () => {
   const now = Date.now()
   planStore.setData({

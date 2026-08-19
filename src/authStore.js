@@ -3,6 +3,7 @@ import { planStore } from './planStore'
 import { api as apiUrl } from './apiBase'
 import { isBatchRunning } from './adviceBatch'
 import {
+  accountSnapshotForRestore,
   accountTradeStateFingerprint,
   createCloudSaveQueue,
   saveWithRevisionRecovery,
@@ -10,9 +11,19 @@ import {
 import {
   createAdviceRuntimeSyncCursor,
 } from '../shared/adviceAccountSync.js'
+import {
+  accountCredentialPayload,
+  parseStoredAccountSession,
+  storedAccountSession,
+} from '../shared/accountCredentials.js'
+import {
+  accountSessionMatches,
+  activateAccountSession,
+  currentAccountSession,
+} from '../shared/accountSessionScope.js'
 
 // ============ 云端账号体系（阿里云 OSS 持久化，跨设备同步）============
-// 会话（昵称+密码）持久化在本机 localStorage，保持长期登录（关标签页/切后台不掉线）；数据存云端。
+// localStorage 只保存昵称和签名会话令牌；旧版本密码会话仅在首次启动时用于换票。
 const SESS = 'cloud_session_v1'
 const LEGACY_KEY = 'trade_book_v2' // 旧的无账号本机数据(供首次注册导入)
 const OUTBOX_KEY = 'cloud_save_outbox_v1'
@@ -61,7 +72,7 @@ function loadSession() {
     // 兼容旧版本存在 sessionStorage 的会话：迁移到 localStorage，避免掉线
     if (!raw) {
       const legacy = sessionStorage.getItem(SESS)
-      if (legacy) { localStorage.setItem(SESS, legacy); sessionStorage.removeItem(SESS); raw = legacy }
+      if (legacy) { sessionStorage.removeItem(SESS); raw = legacy }
     }
     return JSON.parse(raw || 'null')
   } catch { return null }
@@ -85,7 +96,7 @@ let state = {
 const listeners = new Set()
 function emit() { state = { ...state }; listeners.forEach((l) => { try { l() } catch (e) { console.error('[store] listener error', e) } }) }
 
-let _pw = null // 密码仅保存在内存 + sessionStorage，用于后续保存
+let _credentials = null
 let _cloudRevision = 0
 let _lastSyncedTradeFingerprint = ''
 const _runtimeSyncCursor = createAdviceRuntimeSyncCursor()
@@ -123,16 +134,20 @@ async function api(action, payload) {
 const cloudSaveQueue = createCloudSaveQueue({
   async save({
     nick,
-    pw,
+    token,
+    session,
     data,
     outboxId,
     lockedBaseRevision,
     baseTradeFingerprint,
   }) {
+    if (!accountSessionMatches(session)) {
+      return { ok: false, retryable: false, error: '账号会话已切换' }
+    }
+    const credentials = accountCredentialPayload({ nick, token })
     const response = await saveWithRevisionRecovery({
       payload: {
-        nick,
-        pw,
+        ...credentials,
         data,
         baseRevision: Number.isInteger(lockedBaseRevision)
           ? lockedBaseRevision
@@ -141,9 +156,12 @@ const cloudSaveQueue = createCloudSaveQueue({
           || _lastSyncedTradeFingerprint,
       },
       save: (payload) => api('save', payload),
-      getLatest: () => api('get', { nick, pw }),
-      onRevision: (revision) => { _cloudRevision = revision },
+      getLatest: () => api('get', credentials),
+      onRevision: (revision) => {
+        if (accountSessionMatches(session)) _cloudRevision = revision
+      },
     })
+    if (!accountSessionMatches(session)) return response
     if (response?.ok && Number.isInteger(response.revision)) {
       _cloudRevision = response.revision
       _lastSyncedTradeFingerprint = accountTradeStateFingerprint(data)
@@ -159,12 +177,15 @@ const cloudSaveQueue = createCloudSaveQueue({
   },
 })
 
-function resumeOutbox(nick, pw) {
-  const pending = readOutbox(nick)
+function resumeOutbox(
+  credentials,
+  session = currentAccountSession(),
+  pending = readOutbox(credentials?.nick),
+) {
   if (!pending) return false
   void cloudSaveQueue.enqueue({
-    nick,
-    pw,
+    ...credentials,
+    session,
     data: pending.data,
     outboxId: pending.id,
     lockedBaseRevision: Number.isInteger(pending.baseRevision)
@@ -175,32 +196,53 @@ function resumeOutbox(nick, pw) {
   return true
 }
 
+function resetAccountRuntime() {
+  cloudSaveQueue.reset()
+  _credentials = null
+  _cloudRevision = 0
+  _lastSyncedTradeFingerprint = ''
+  _runtimeSyncCursor.reset()
+}
+
+function establishAccountSession(nick, token) {
+  const credentials = accountCredentialPayload({ nick, token })
+  if (!credentials?.token) return null
+  _credentials = credentials
+  saveSession(storedAccountSession(credentials.nick, credentials.token))
+  return activateAccountSession(credentials.nick)
+}
+
 export const authStore = {
   subscribe(l) { listeners.add(l); return () => listeners.delete(l) },
   get() { return state },
 
-  // 启动时尝试用 sessionStorage 里的会话恢复登录并拉云端数据
+  // 启动时用签名令牌恢复登录；旧密码会话成功换票后立即从本地删除。
   async boot() {
-    // ★必须保证无论成功/失败都清 booting,否则 api('get') 网络抛错会让应用永久卡在启动页。
+    resetAccountRuntime()
+    const attempt = activateAccountSession('')
     try {
-      const s = loadSession()
-      if (!s || !s.nick) { return }
-      _pw = s.pw
-      const r = await api('get', { nick: s.nick, pw: s.pw })
-      if (r.ok) {
-        state.user = s.nick; state.status = 'ready'
+      const stored = parseStoredAccountSession(loadSession())
+      if (!stored) return
+      if (stored.legacyPassword) saveSession(null)
+      const r = await api('get', stored.credentials)
+      if (!accountSessionMatches(attempt)) return
+      if (r.ok && r.token) {
+        const session = establishAccountSession(stored.credentials.nick, r.token)
+        state.user = stored.credentials.nick; state.status = 'ready'
         _cloudRevision = Number(r.revision) || 0
         _lastSyncedTradeFingerprint = accountTradeStateFingerprint(r.data)
         state.syncStatus = 'synced'; state.syncError = ''; state.lastSyncedAt = r.updatedAt || 0
         _runtimeSyncCursor.noteSnapshot(r.updatedAt)
-        planStore.setData(r.data)
-        resumeOutbox(s.nick, s.pw)
+        const pending = readOutbox(_credentials.nick)
+        planStore.setData(accountSnapshotForRestore(r.data, pending))
+        resumeOutbox(_credentials, session, pending)
       } else {
-        saveSession(null); _pw = null
+        saveSession(null)
+        resetAccountRuntime()
+        if (accountSessionMatches(attempt)) activateAccountSession('')
       }
     } catch {
-      // 网络/接口异常:保持未登录态,让用户可手动登录(而不是白屏卡死)
-      _pw = null
+      if (accountSessionMatches(attempt)) resetAccountRuntime()
     } finally {
       state.booting = false; emit()
     }
@@ -210,44 +252,60 @@ export const authStore = {
     nick = String(nick || '').trim()
     if (!nick) return { ok: false, error: '请输入昵称' }
     if (!pw) return { ok: false, error: '请输入密码' }
+    resetAccountRuntime()
+    saveSession(null)
+    const attempt = activateAccountSession('')
     state.status = 'loading'; state.error = ''; emit()
     const data = importLegacy ? (readLegacyData() || { plan: [], holding: [], closed: [] }) : { plan: [], holding: [], closed: [] }
     const r = await api('register', { nick, pw, data })
+    if (!accountSessionMatches(attempt)) return { ok: false, error: '注册请求已失效' }
     if (!r.ok) { state.status = 'error'; state.error = r.error; emit(); return r }
-    _pw = String(pw); saveSession({ nick, pw: _pw })
+    const session = establishAccountSession(nick, r.token)
+    if (!session) {
+      state.status = 'error'; state.error = '服务端未签发账号会话'; emit()
+      return { ok: false, error: state.error }
+    }
     _cloudRevision = Number(r.revision) || 0
     _lastSyncedTradeFingerprint = accountTradeStateFingerprint(r.data)
     state.user = nick; state.status = 'ready'; state.error = ''
     state.syncStatus = 'synced'; state.syncError = ''; state.lastSyncedAt = r.updatedAt || Date.now()
     _runtimeSyncCursor.noteSnapshot(r.updatedAt)
     planStore.setData(r.data)
-    resumeOutbox(nick, _pw)
+    resumeOutbox(_credentials, session)
     emit()
     return { ok: true }
   },
 
   async login(nick, pw) {
     nick = String(nick || '').trim()
+    resetAccountRuntime()
+    saveSession(null)
+    const attempt = activateAccountSession('')
     state.status = 'loading'; state.error = ''; emit()
     const r = await api('login', { nick, pw })
+    if (!accountSessionMatches(attempt)) return { ok: false, error: '登录请求已失效' }
     if (!r.ok) { state.status = 'error'; state.error = r.error; emit(); return r }
-    _pw = String(pw); saveSession({ nick, pw: _pw })
+    const session = establishAccountSession(nick, r.token)
+    if (!session) {
+      state.status = 'error'; state.error = '服务端未签发账号会话'; emit()
+      return { ok: false, error: state.error }
+    }
     _cloudRevision = Number(r.revision) || 0
     _lastSyncedTradeFingerprint = accountTradeStateFingerprint(r.data)
     state.user = nick; state.status = 'ready'; state.error = ''
     state.syncStatus = 'synced'; state.syncError = ''; state.lastSyncedAt = r.updatedAt || 0
     _runtimeSyncCursor.noteSnapshot(r.updatedAt)
-    planStore.setData(r.data)
-    resumeOutbox(nick, _pw)
+    const pending = readOutbox(_credentials.nick)
+    planStore.setData(accountSnapshotForRestore(r.data, pending))
+    resumeOutbox(_credentials, session, pending)
     emit()
     return { ok: true }
   },
 
   logout() {
-    cloudSaveQueue.reset()
-    saveSession(null); _pw = null; _cloudRevision = 0
-    _lastSyncedTradeFingerprint = ''
-    _runtimeSyncCursor.reset()
+    resetAccountRuntime()
+    saveSession(null)
+    activateAccountSession('')
     state.user = null; state.status = 'idle'
     state.syncStatus = 'idle'; state.syncError = ''; state.lastSyncedAt = 0
     planStore.setData({ plan: [], holding: [], closed: [] })
@@ -256,29 +314,35 @@ export const authStore = {
 
   // 供 planStore 保存数据到云端
   async saveData(data) {
-    if (!state.user || !_pw) return false
+    const session = currentAccountSession()
+    const credentials = accountCredentialPayload(_credentials)
+    if (!credentials || !accountSessionMatches(session)) return false
     const outboxId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
     writeOutbox({
       id: outboxId,
-      nick: state.user,
+      nick: credentials.nick,
       data,
       at: Date.now(),
       baseRevision: _cloudRevision,
       baseTradeFingerprint: _lastSyncedTradeFingerprint,
     })
     return cloudSaveQueue.enqueue({
-      nick: state.user,
-      pw: _pw,
+      ...credentials,
+      session,
       data,
       outboxId,
     })
   },
   retrySave() {
-    const pending = state.user && _pw ? readOutbox(state.user) : null
+    const session = currentAccountSession()
+    const credentials = accountCredentialPayload(_credentials)
+    const pending = credentials && accountSessionMatches(session)
+      ? readOutbox(credentials.nick)
+      : null
     if (pending) {
       return cloudSaveQueue.enqueue({
-        nick: state.user,
-        pw: _pw,
+        ...credentials,
+        session,
         data: pending.data,
         outboxId: pending.id,
         lockedBaseRevision: Number.isInteger(pending.baseRevision)
@@ -290,32 +354,45 @@ export const authStore = {
     return cloudSaveQueue.retry()
   },
   async deactivate() {
-    if (!state.user || !_pw) return { ok: false, error: '当前未登录' }
+    const session = currentAccountSession()
+    const credentials = accountCredentialPayload(_credentials)
+    if (!credentials || !accountSessionMatches(session)) {
+      return { ok: false, error: '当前未登录' }
+    }
     const flushed = await this.retrySave()
+    if (!accountSessionMatches(session)) return { ok: false, error: '账号会话已切换' }
     if (!flushed) return { ok: false, error: '最新账号数据尚未保存到 OSS，请稍后重试' }
-    const response = await api('deactivate', { nick: state.user, pw: _pw })
+    const response = await api('deactivate', credentials)
+    if (!accountSessionMatches(session)) return { ok: false, error: '账号会话已切换' }
     if (!response.ok) return response
     this.logout()
     return response
   },
   currentUser() { return state.user },
-  // 供 Web Push 订阅上报:把订阅绑到当前账号(服务端据此推给对的人)。仅内存,不落盘额外副本。
-  getCreds() { return (state.user && _pw) ? { nick: state.user, pw: _pw } : null },
+  getCreds() {
+    const session = currentAccountSession()
+    const credentials = accountCredentialPayload(_credentials)
+    return credentials && accountSessionMatches(session)
+      ? { ...credentials }
+      : null
+  },
 
   // 运行时【增量拉取】云端数据并【非破坏式合并】到本地。
   // 解决"手机上生成的 AI 操作建议,电脑浏览器不刷新"——之前只在 boot/login 拉一次,
   // 运行中从不复拉,桌面端会一直停在旧数据。这里周期性 sync,仅返回上次同步后的建议/事件,
   // (只补更新的建议/决策,绝不覆盖本机正在编辑的持仓/账户),实现"手机生成、电脑自动看到"。
   async pull() {
-    if (!state.user || !_pw) return false
+    const session = currentAccountSession()
+    const credentials = accountCredentialPayload(_credentials)
+    if (!credentials || !accountSessionMatches(session)) return false
     if (_pulling) return false
     _pulling = true
     try {
       const r = await api('sync', {
-        nick: state.user,
-        pw: _pw,
+        ...credentials,
         since: _runtimeSyncCursor.since(),
       })
+      if (!accountSessionMatches(session)) return false
       if (r && r.ok && r.data) {
         state.lastSyncedAt = r.updatedAt || state.lastSyncedAt
         _runtimeSyncCursor.notePull(r.updatedAt)

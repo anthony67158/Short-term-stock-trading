@@ -36,6 +36,10 @@ test('普通筛选保持单行布局并让胶囊在独立视口横向滚动', ()
   assert.match(groupFilter, /{compact && <span className="stock-group-filter-label">{label}<\/span>}/)
   assert.match(styles, /\.stock-group-filter-track\s*\{[\s\S]*display:\s*flex/)
   assert.match(styles, /\.stock-group-filter-track\s*\{[^}]*overflow:\s*hidden/s)
+  assert.match(
+    styles,
+    /\.stock-group-filter-track\s*\{[^}]*padding:\s*var\(--space-2xs\)\s+0/s,
+  )
   assert.match(styles, /\.stock-group-tabs-viewport\s*\{[^}]*overflow-x:\s*auto/s)
 })
 
@@ -102,9 +106,9 @@ test('持仓总览位于当前持仓标题和筛选胶囊上方', () => {
   assert.ok(heading > overview, '当前持仓标题应位于持仓总览下方')
   assert.ok(filter > heading, '筛选胶囊应位于当前持仓标题下方')
   assert.match(styles, /\.plan-section-filter-sticky\s*\{[\s\S]*position:\s*sticky/)
-  assert.match(
+  assert.doesNotMatch(
     styles,
-    /@media \(max-width:\s*720px\)\s*\{[\s\S]*?\.plan-section-filter-sticky\s*\{[^}]*position:\s*static/s,
+    /@media \(max-width:\s*720px\)\s*\{[\s\S]*?\.plan-section-hold-sticky\s*\{[^}]*display:\s*contents/s,
   )
 })
 
@@ -131,7 +135,7 @@ test('胜率、复核、批量生成与进度统一归入整体总览区', () =>
   assert.match(styles, /\.portfolio-command-actions\s*\{/)
 })
 
-test('桌面持仓标题与筛选轨道共用吸顶容器并消除固定偏移空白', () => {
+test('桌面与移动端持仓标题和筛选轨道共用吸顶容器', () => {
   const holdingSection = planTab.slice(planTab.indexOf('function HoldingList'))
 
   assert.match(
@@ -148,6 +152,6 @@ test('桌面持仓标题与筛选轨道共用吸顶容器并消除固定偏移�
   )
   assert.match(
     styles,
-    /@media \(max-width:\s*720px\)\s*\{[\s\S]*?\.plan-section-hold-sticky\s*\{[^}]*display:\s*contents[\s\S]*?\.plan-section-hold-sticky > \.plan-section-head-sticky\s*\{[^}]*position:\s*sticky/s,
+    /@media \(max-width:\s*720px\)\s*\{[\s\S]*?\.plan-section-hold-sticky\s*\{[^}]*display:\s*block[^}]*position:\s*sticky[^}]*top:\s*calc\(60px \+ env\(safe-area-inset-top\)\)[^}]*background:\s*var\(--color-paper\)/s,
   )
 })

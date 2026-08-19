@@ -62,6 +62,11 @@ test('做T分类支持手动选择另一腿并在持仓做T弹窗展示配对结
   assert.match(planTab, /交易记录已配对/)
 })
 
+test('做T建议采纳当前待执行腿而不是重复第一腿', () => {
+  assert.match(planTab, /r\.result\.nextSide/)
+  assert.match(planTab, /r\.nextPrice\s*\?\?\s*r\.leg1Price/)
+})
+
 test('持仓卡提供成本价直接修改入口', () => {
   assert.match(planTab, /updateHoldingCost/)
   assert.match(planTab, /修改成本价/)

@@ -46,6 +46,11 @@ export function createHarnessBaseline(
         ]),
       ),
       cases: Number(run.summary.total) || 0,
+      caseIds: [...new Set(
+        (run.episodes || [])
+          .map((episode) => String(episode?.caseId || ''))
+          .filter(Boolean),
+      )].sort(),
     }
   }
   return {
@@ -81,11 +86,60 @@ export function compareHarnessBaseline(
   }
   const regressions = []
   const unbaselined = []
+  const currentSuiteIds = new Set(
+    (runs || []).map((run) => run?.suiteId).filter(Boolean),
+  )
+  for (const suiteId of Object.keys(baseline.suites || {})) {
+    if (currentSuiteIds.has(suiteId)) continue
+    regressions.push({
+      suiteId,
+      metric: 'suite',
+      current: 0,
+      baseline: 1,
+      tolerance: 0,
+      delta: -1,
+      message: `${suiteId}基线suite未执行`,
+    })
+  }
   for (const run of runs || []) {
     const reference = baseline.suites?.[run.suiteId]
     if (!reference) {
       unbaselined.push(run.suiteId)
       continue
+    }
+    const currentCases = Number(run.summary?.total) || 0
+    const baselineCases = Number(reference.cases) || 0
+    if (currentCases < baselineCases) {
+      regressions.push({
+        suiteId: run.suiteId,
+        metric: 'cases',
+        current: currentCases,
+        baseline: baselineCases,
+        tolerance: 0,
+        delta: currentCases - baselineCases,
+        message: `${run.suiteId}.cases由${baselineCases}减少到${currentCases}`,
+      })
+    }
+    if (Array.isArray(reference.caseIds) && reference.caseIds.length) {
+      const currentCaseIds = new Set(
+        (run.episodes || [])
+          .map((episode) => String(episode?.caseId || ''))
+          .filter(Boolean),
+      )
+      const missing = reference.caseIds.filter(
+        (caseId) => !currentCaseIds.has(caseId),
+      )
+      if (missing.length) {
+        regressions.push({
+          suiteId: run.suiteId,
+          metric: 'caseIds',
+          current: currentCaseIds.size,
+          baseline: reference.caseIds.length,
+          tolerance: 0,
+          delta: -missing.length,
+          message: `${run.suiteId}缺少基线case: ${missing.join(', ')}`,
+        })
+      }
     }
     const metrics = [
       ['overall', run.summary?.overall, reference.overall, overall],

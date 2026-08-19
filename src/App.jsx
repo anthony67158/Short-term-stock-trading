@@ -8,6 +8,7 @@ import { usePolling, isTradingHours, useCountdown, triggerRefresh, useRefreshTic
 import { usePlanStore, planStore } from './planStore'
 import { useAIStore, aiStore } from './aiStore'
 import { useAuthStore, authStore, startCloudSync } from './authStore'
+import { syncPushSubscription } from './push'
 import { useTheme, themeStore } from './themeStore'
 import { useDetailStore, detailStore } from './detailStore'
 import { alertStore, useAlertStore } from './alertStore'
@@ -78,6 +79,7 @@ export default function App() {
   useEffect(() => {
     if (!user) return
     void aiSearchConfigStore.load(true)
+    void syncPushSubscription()
     // 刷新后账号恢复成功，立即拉取云端任务状态；不要等空登录态启动的 15 秒慢轮询。
     import('./serverAdvice').then((m) => m.kickServerAdviceStatusSync()).catch(() => {})
     // 预置并发上限=承接 advisor 角色的端点数(首屏即可门控;之后随云端 batchProgress.concurrency 覆盖为权威值)
@@ -315,15 +317,13 @@ function MainApp() {
         </div>
       </header>
 
-      <main className="main">
+      <main className="main" data-section={currentSection.key}>
         <div className="workspace-head">
-          <div className="workspace-title">
-            <h1>{currentSection.label}</h1>
-            <p>{currentSection.description}</p>
-          </div>
-          <div className="workspace-state" aria-label={trading ? '当前为交易时段' : '当前为休市时段'}>
-            <span className={'workspace-state-dot ' + (trading ? 'on' : 'off')} />
-            <span>{trading ? '行情实时更新' : '休市数据复核'}</span>
+          <div className="workspace-identity">
+            <div className="workspace-title">
+              <h1>{currentSection.label}</h1>
+              <p>{currentSection.description}</p>
+            </div>
           </div>
         </div>
         <ErrorBoundary key={tab} label="页面">

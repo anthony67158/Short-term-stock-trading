@@ -5,6 +5,7 @@ import {
   formatSectorFlowTooltip,
 } from '../../shared/sectorFlowHistory.js'
 import { fmtInflow, pctClass } from '../format'
+import Icon from './Icon'
 
 const EMPTY_SERIES = []
 
@@ -93,7 +94,7 @@ export default function SectorHistory({ sector }) {
   return (
     <div className="panel sector-flow-panel">
       <div className="panel-head">
-        <div role="heading" aria-level="2" className="panel-title">{sector.name} · 近10日资金强度</div>
+        <div role="heading" aria-level="2" className="panel-title"><Icon name="history" size={16} />{sector.name} · 近10日资金强度</div>
         <div className="sector-flow-legend" aria-label="图表图例">
           <span><i className="sector-flow-key flow" />主力净占比</span>
           <span><i className="sector-flow-key price" />板块涨跌</span>

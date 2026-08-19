@@ -402,11 +402,44 @@ function updateAccountCash(cashFlow) {
   return result.applied
 }
 
+function ensureCashAvailable(cashFlow) {
+  const rawCash = state.account?.cash
+  if (rawCash == null || rawCash === '') return { ok: true }
+  const cash = Number(rawCash)
+  const flow = Number(cashFlow)
+  if (!Number.isFinite(cash) || !Number.isFinite(flow) || flow >= 0) {
+    return { ok: true }
+  }
+  const required = Math.abs(flow)
+  if (cash + flow >= -0.005) return { ok: true }
+  return {
+    ok: false,
+    error: `可用现金不足：需要 ${required.toFixed(2)} 元，当前 ${cash.toFixed(2)} 元`,
+  }
+}
+
 function tFlowCashFlow(side, price, qty, fee) {
   const amount = Number(price) * Number(qty) * 100
   return side === 'buy'
     ? +(-(amount + Number(fee || 0))).toFixed(2)
     : +(amount - Number(fee || 0)).toFixed(2)
+}
+
+function settledTPositionPatch(holding, computed, newQty) {
+  let buyPrice = holding.buyPrice
+  let buyFee = Number(holding.buyFee) || 0
+  if (computed.openBuy > 0 && computed.openBuyAvg != null) {
+    buyPrice = +(
+      (
+        holding.buyPrice * holding.qty
+        + computed.openBuyAvg * computed.openBuy
+      ) / (holding.qty + computed.openBuy)
+    ).toFixed(3)
+    buyFee = +(buyFee + Number(computed.openBuyFee || 0)).toFixed(2)
+  } else if (computed.openSell > 0 && holding.qty > 0) {
+    buyFee = +(buyFee * Math.max(0, newQty) / holding.qty).toFixed(2)
+  }
+  return { qty: newQty, buyPrice, buyFee, tFlows: [] }
 }
 
 function closedType(record) {
@@ -548,6 +581,7 @@ export const planStore = {
   // 由 authStore 登录/登出时注入数据（不触发回存云端，避免刚拉就写回）
   setData(d) {
     _suspend = true
+    _undoStack.length = 0
     const holding = Array.isArray(d && d.holding) ? d.holding : []
     const heldCodes = new Set(holding.map((item) => String(item && item.code || '')).filter(Boolean))
     const plan = (Array.isArray(d && d.plan) ? d.plan : [])
@@ -638,14 +672,38 @@ export const planStore = {
         changed = true
       }
     }
-    // 5) 预警「已触发」状态回灌(按 id):cron_alert 在服务端(关页面时)命中并推送后,会把该
-    //    规则标记 triggeredAt/enabled:false 存回云端。这里只把「服务端已触发」并回本地——
-    //    ① 让前端「命中记录/规则」显示一致;② 避免前端仍当它监控中而重复响铃/重复推送。
-    //    只迁移 triggered 状态,绝不新增/删除规则(规则增删仍由用户在本机操作,防跨设备误删复活)。
-    if (Array.isArray(d.alerts) && d.alerts.length && Array.isArray(state.alerts) && state.alerts.length) {
+    // 5) 云端预警回灌：服务端军师会创建行动预警，cron_alert 会继续推进其
+    //    armed/watching/confirmed 状态。新增仅接收可由本地持仓/自选验证且未静音的自动预警，
+    //    避免把用户刚删除的规则复活；已有规则仍按 id 合并权威运行态。
+    if (Array.isArray(d.alerts) && d.alerts.length && Array.isArray(state.alerts)) {
       const cloudById = new Map(d.alerts.map((a) => a && a.id ? [a.id, a] : [null, null]))
-      let touched = false
-      const next = state.alerts.map((a) => {
+      const localIds = new Set(state.alerts.map((alert) => alert?.id).filter(Boolean))
+      const canImportAutoAlert = (alert) => {
+        if (!alert?.id || !(alert.planId || alert.candCode || alert.actCode)) return false
+        if (state.settings?.aiAutoAlert === false) return false
+        if (
+          (alert.candCode || alert.actCode)
+          && !isAdviceReviewEnabled(state.settings || {}, alert.code)
+        ) return false
+        if (alert.planId) {
+          const holding = state.holding.find((item) => String(item.id) === String(alert.planId))
+          if (!holding) return false
+          return alert.op === 'gte' ? !holding.muteTp : !holding.muteSl
+        }
+        if (alert.candCode) {
+          const candidate = state.plan.find((item) => item.code === alert.candCode)
+          return !!candidate && !candidate.alertMuted
+        }
+        const owner = state.holding.find((item) => item.code === alert.actCode)
+          || state.plan.find((item) => item.code === alert.actCode)
+        if (!owner) return false
+        return alert.actKind === 'add' ? !owner.muteAdd : !owner.muteReduce
+      }
+      const additions = d.alerts
+        .filter((alert) => !localIds.has(alert?.id) && canImportAutoAlert(alert))
+        .map((alert) => ({ ...alert }))
+      let touched = additions.length > 0
+      const next = [...additions, ...state.alerts].map((a) => {
         const c = cloudById.get(a.id)
         if (!c) return a
         if (c.phase === 'superseded' && a.phase !== 'superseded') {
@@ -812,12 +870,17 @@ export const planStore = {
   // 计划 → 持仓（每次买入都是独立一笔，同股可多笔并存）
   buy(code, buyPrice, qty = 1) {
     const p = state.plan.find((x) => x.code === code)
-    if (!p) return
-    snapshot(`建仓 ${p.name || code}`)
-    const q = Number(qty) || 1
+    if (!p) return { ok: false, error: '候选股票不存在或已建仓' }
+    const q = Number(qty)
     const price = Number(buyPrice)
+    if (!Number.isInteger(q) || q <= 0 || !Number.isFinite(price) || price <= 0) {
+      return { ok: false, error: '请输入有效的买入价格和整手数量' }
+    }
     const buyAmount = price * q * 100
     const fee = calcBuyFee(buyAmount)
+    const cashGuard = ensureCashAvailable(-(buyAmount + fee))
+    if (!cashGuard.ok) return cashGuard
+    snapshot(`建仓 ${p.name || code}`)
     const hid = uid()
     state.plan = state.plan.filter((x) => x.code !== code)
     state.alerts = (state.alerts || []).filter((a) => a.candCode !== code) // 已买入 → 移除买点预警(改由持仓计划联动)
@@ -838,15 +901,22 @@ export const planStore = {
     this._recordExecution({ code: p.code, name: p.name, side: 'buy', price, qty: q, transactionId: txn.id })
     this._syncPlanAlerts(hid)
     emit()
+    void flushPendingSave()
+    return { ok: true, holdingId: hid, transactionId: txn.id }
   },
   // 直接建仓（同股也可多笔，不去重）
   buyDirect(stock, buyPrice, qty = 1) {
-    if (!stock || !stock.code) return
-    snapshot(`建仓 ${stock.name || stock.code}`)
-    const q = Number(qty) || 1
+    if (!stock || !stock.code) return { ok: false, error: '股票信息不完整' }
+    const q = Number(qty)
     const price = Number(buyPrice)
+    if (!Number.isInteger(q) || q <= 0 || !Number.isFinite(price) || price <= 0) {
+      return { ok: false, error: '请输入有效的买入价格和整手数量' }
+    }
     const buyAmount = price * q * 100
     const fee = calcBuyFee(buyAmount)
+    const cashGuard = ensureCashAvailable(-(buyAmount + fee))
+    if (!cashGuard.ok) return cashGuard
+    snapshot(`建仓 ${stock.name || stock.code}`)
     const hid = uid()
     const ap = advicePlan(stock.code)
     state.holding = [...state.holding, {
@@ -862,6 +932,8 @@ export const planStore = {
     this._recordExecution({ code: stock.code, name: stock.name, side: 'buy', price, qty: q, transactionId: txn.id })
     this._syncPlanAlerts(hid)
     emit()
+    void flushPendingSave()
+    return { ok: true, holdingId: hid, transactionId: txn.id }
   },
 
   // 持仓 → 平仓（按持仓笔 id 卖出，支持部分卖出）
@@ -919,6 +991,8 @@ export const planStore = {
     state.closed = [sellTxn, ...archived, ...state.closed].slice(0, 300)
     this._recordExecution({ code: h.code, name: h.name, side: 'sell', price, qty: sq, source: opts.source, transactionId: sellTxn.id })
     emit()
+    // 成交事实必须先于后续云端复核到达 OSS，避免页面已减仓而 Worker 仍按旧手数生成。
+    void flushPendingSave()
     return {
       ok: true,
       qty: sq,
@@ -930,13 +1004,17 @@ export const planStore = {
   // 加仓：对已有持仓追加买入，按加权平均更新成本价，并记一条 BUY 流水
   addToHolding(id, addPrice, addQty, opts = {}) {
     const h = state.holding.find((x) => x.id === id)
-    if (!h) return
-    const q = Number(addQty) || 0
+    if (!h) return { ok: false, error: '持仓不存在或已被删除' }
+    const q = Number(addQty)
     const price = Number(addPrice)
-    if (q <= 0 || !price) return
-    snapshot(`加仓 ${h.name || h.code}`)
+    if (!Number.isInteger(q) || q <= 0 || !Number.isFinite(price) || price <= 0) {
+      return { ok: false, error: '请输入有效的加仓价格和整手数量' }
+    }
     const addAmount = price * q * 100
     const addFee = calcBuyFee(addAmount)
+    const cashGuard = ensureCashAvailable(-(addAmount + addFee))
+    if (!cashGuard.ok) return cashGuard
+    snapshot(`加仓 ${h.name || h.code}`)
     const newQty = h.qty + q
     // 加权平均成本价（原成本×原量 + 加仓价×加量）/ 总量
     const newAvg = +(((h.buyPrice * h.qty) + (price * q)) / newQty).toFixed(3)
@@ -949,6 +1027,8 @@ export const planStore = {
     state.closed = [txn, ...state.closed].slice(0, 300)
     this._recordExecution({ code: h.code, name: h.name, side: 'buy', price, qty: q, source: opts.source, transactionId: txn.id })
     emit()
+    void flushPendingSave()
+    return { ok: true, qty: q, transactionId: txn.id }
   },
 
   // 纯买入/纯卖出：不走持仓，直接记一笔交易流水（手动补录场景）
@@ -1463,10 +1543,14 @@ export const planStore = {
       }
       q = allowance.allowed
     }
-    snapshot(`做T ${side === 'buy' ? '低吸' : '高抛'} ${h.name || h.code}`)
     const amount = p * q * 100
     const fee = side === 'buy' ? calcBuyFee(amount) : calcSellFee(amount)
     const cashFlow = tFlowCashFlow(side, p, q, fee)
+    if (side === 'buy') {
+      const cashGuard = ensureCashAvailable(cashFlow)
+      if (!cashGuard.ok) return cashGuard
+    }
+    snapshot(`做T ${side === 'buy' ? '低吸' : '高抛'} ${h.name || h.code}`)
     const flow = {
       id: uid(),
       side,
@@ -1482,6 +1566,7 @@ export const planStore = {
       ? { ...x, baseQty, tFlows: [...(x.tFlows || []), flow] }
       : x)
     emit()
+    void flushPendingSave()
     return {
       ok: true,
       qty: q,
@@ -1543,10 +1628,16 @@ export const planStore = {
       }
       finalQty = allowance.allowed
     }
-    snapshot('编辑做T流水')
     const amount = p * finalQty * 100
     const fee = side === 'buy' ? calcBuyFee(amount) : calcSellFee(amount)
     const cashFlow = tFlowCashFlow(side, p, finalQty, fee)
+    if (oldFlow.cashApplied) {
+      const cashGuard = ensureCashAvailable(
+        cashFlow - Number(oldFlow.cashFlow || 0),
+      )
+      if (!cashGuard.ok) return cashGuard
+    }
+    snapshot('编辑做T流水')
     const cashApplied = oldFlow.cashApplied
       ? updateAccountCash(cashFlow - Number(oldFlow.cashFlow || 0))
       : false
@@ -1584,13 +1675,9 @@ export const planStore = {
       state.holding = state.holding.filter((x) => x.id !== id)
       this._backToPlan(h) // 清仓自动回归自选股
     } else {
-      // 加仓时按加权平均更新成本价；减仓成本价不变
-      let newBuyPrice = h.buyPrice
-      if (r.openBuy > 0 && r.openBuyAvg != null) {
-        newBuyPrice = +(((h.buyPrice * h.qty) + (r.openBuyAvg * r.openBuy)) / (h.qty + r.openBuy)).toFixed(3)
-      }
+      const patch = settledTPositionPatch(h, r, newQty)
       state.holding = state.holding.map((x) => x.id === id
-        ? { ...x, qty: newQty, buyPrice: newBuyPrice, tFlows: [] }
+        ? { ...x, ...patch }
         : x)
     }
     emit()
@@ -1618,12 +1705,9 @@ export const planStore = {
         state.holding = state.holding.filter((x) => x.id !== cur.id)
         this._backToPlan(cur) // 次日自动结算净卖光 → 清仓回归自选股
       } else {
-        let newBuyPrice = cur.buyPrice
-        if (r.openBuy > 0 && r.openBuyAvg != null) {
-          newBuyPrice = +(((cur.buyPrice * cur.qty) + (r.openBuyAvg * r.openBuy)) / (cur.qty + r.openBuy)).toFixed(3)
-        }
+        const patch = settledTPositionPatch(cur, r, newQty)
         state.holding = state.holding.map((x) => x.id === cur.id
-          ? { ...x, qty: newQty, buyPrice: newBuyPrice, tFlows: [] }
+          ? { ...x, ...patch }
           : x)
       }
     }
@@ -1847,6 +1931,22 @@ export const planStore = {
       }, ...(state.alerts || [])]
     }
     state.plan = state.plan.map((x) => x.code === code ? { ...x, alertSyncedPrice: v } : x)
+    emit()
+  },
+  // 最新候选建议已转为观望/回避时，旧买点不再具备执行意义。
+  // 只清理系统自动生成的 candCode 预警，不影响用户手动设置的普通预警。
+  clearCandBuyAlert(code) {
+    if (!code) return
+    const nextAlerts = (state.alerts || []).filter((alert) => alert.candCode !== code)
+    const candidate = state.plan.find((item) => item.code === code)
+    if (
+      nextAlerts.length === (state.alerts || []).length
+      && candidate?.alertSyncedPrice == null
+    ) return
+    state.alerts = nextAlerts
+    state.plan = state.plan.map((item) => item.code === code
+      ? { ...item, alertSyncedPrice: null }
+      : item)
     emit()
   },
 

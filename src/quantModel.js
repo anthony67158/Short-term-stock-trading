@@ -1,5 +1,9 @@
 import { planStore } from './planStore.js'
 import { normalizeQuantModelVersion } from '../shared/modelVersion.js'
+import {
+  accountCredentialHeaders,
+  parseStoredAccountSession,
+} from '../shared/accountCredentials.js'
 
 export const QUANT_MODEL_SETTING = 'quantModelVersion'
 const ACCOUNT_SESSION_KEY = 'cloud_session_v1'
@@ -7,7 +11,10 @@ const ACCOUNT_SESSION_KEY = 'cloud_session_v1'
 function accountCredentials() {
   try {
     const value = JSON.parse(localStorage.getItem(ACCOUNT_SESSION_KEY) || 'null')
-    return value?.nick && value?.pw ? value : null
+    const session = parseStoredAccountSession(value)
+    return session && !session.legacyPassword
+      ? session.credentials
+      : null
   } catch {
     return null
   }
@@ -28,12 +35,7 @@ export function quantModelQuery(version = currentQuantModelVersion()) {
 }
 
 export function accountRequestHeaders() {
-  const credentials = accountCredentials()
-  if (!credentials) return {}
-  return {
-    'X-Account-Nick': encodeURIComponent(credentials.nick),
-    'X-Account-Password': encodeURIComponent(credentials.pw),
-  }
+  return accountCredentialHeaders(accountCredentials())
 }
 
 export function quantModelHeaders(version = currentQuantModelVersion()) {

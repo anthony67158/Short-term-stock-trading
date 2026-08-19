@@ -1,0 +1,20 @@
+{
+  "name": "stock-fundflow-dashboard-fc-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "harness": "node harness/run.mjs",
+    "harness:portfolio": "node harness/run.mjs --suite portfolio",
+    "harness:online": "node harness/run.mjs --suite endpoint --online --no-baseline",
+    "harness:shadow": "node harness/run.mjs --suite shadow --online --no-baseline"
+  },
+  "dependencies": {
+    "@alicloud/eas20210701": "^7.9.0",
+    "@alicloud/fc20230330": "^4.7.9",
+    "@alicloud/openapi-core": "^1.0.8",
+    "ali-oss": "^6.23.0",
+    "web-push": "^3.6.7"
+  }
+}

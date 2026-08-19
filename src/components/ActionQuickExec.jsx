@@ -38,8 +38,12 @@ export default function ActionQuickExec({ alert, holding, onDone }) {
     if (timer.current) clearTimeout(timer.current)
     let result
     if (isAdd) {
-      planStore.addToHolding(h.id, price, 1, { source: 'ai-alert' })
-      result = { ok: true }
+      result = planStore.addToHolding(
+        h.id,
+        price,
+        1,
+        { source: 'ai-alert' },
+      )
     } else {
       result = planStore.sell(h.id, price, 1, { source: 'ai-alert' })
     }

@@ -3,6 +3,7 @@ import {
   readAccount as readStoredAccount,
   sha,
 } from './account.js'
+import { verifyAccountSessionToken } from './_account_session.js'
 
 export const TRUSTED_ACCOUNT_REQUEST = Symbol('trustedAccountRequest')
 
@@ -21,6 +22,8 @@ export async function authenticateAccountRequest(
   {
     readAccount = readStoredAccount,
     hashPassword = sha,
+    verifySession = verifyAccountSessionToken,
+    sessionSecret,
   } = {},
 ) {
   if (req?.[TRUSTED_ACCOUNT_REQUEST] === true) {
@@ -28,14 +31,18 @@ export async function authenticateAccountRequest(
   }
 
   const nick = decodedHeader(req, 'x-account-nick').trim()
+  const token = decodedHeader(req, 'x-account-token')
   const password = decodedHeader(req, 'x-account-password')
-  if (!nick || !password) return { ok: false, error: '请先登录' }
+  if (!nick || (!token && !password)) return { ok: false, error: '请先登录' }
 
   const account = await readAccount(nick)
   if (
     !account
     || !isAccountActive(account)
-    || account.pwHash !== hashPassword(password)
+    || (
+      !verifySession(account, token, { secret: sessionSecret })
+      && account.pwHash !== hashPassword(password)
+    )
   ) {
     return { ok: false, error: '账号鉴权失败' }
   }
@@ -51,6 +58,13 @@ function authorizedHashes(env) {
   )
 }
 
+function configuredHashes(env, key) {
+  return String(env?.[key] || '')
+    .split(',')
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean)
+}
+
 export function isAuthorizedAccount(
   account,
   {
@@ -62,6 +76,21 @@ export function isAuthorizedAccount(
   const allowed = authorizedHashes(env)
   if (!allowed.size) return false
   return allowed.has(String(hashAccount(account.nick)).toLowerCase())
+}
+
+export function isRuntimeConfigAdmin(
+  account,
+  {
+    env = process.env,
+    hashAccount = (nick) => sha(`u:${nick}`),
+  } = {},
+) {
+  if (!account?.nick) return false
+  const accountHash = String(hashAccount(account.nick)).toLowerCase()
+  const admins = configuredHashes(env, 'RUNTIME_CONFIG_ADMIN_HASHES')
+  if (admins.length) return admins.includes(accountHash)
+  const paid = configuredHashes(env, 'AUTHORIZED_ACCOUNT_HASHES')
+  return paid.length === 1 && paid[0] === accountHash
 }
 
 export async function authorizePaidRequest(req, options = {}) {

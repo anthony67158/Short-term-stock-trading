@@ -119,6 +119,8 @@ export function buildReviewPayload(
     data.account,
     data.closed,
     nextTradeDay,
+    quoteMap?.[code] || null,
+    now,
   )
   const price = Number(quoteMap?.[code]?.price)
   const pnlPct = price > 0 && Number(payload.holdCost) > 0

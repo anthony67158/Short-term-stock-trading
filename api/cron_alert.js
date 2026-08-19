@@ -47,6 +47,7 @@ import {
 } from './_advice_wakeup.js';
 import { isAdviceReviewEnabled } from '../shared/adviceReviewPolicy.js';
 import { isContinuousTrading } from '../shared/tradingCalendar.js';
+import { buildAlertNotification } from '../shared/alertNotification.js';
 
 const OP_LABEL = { gte: '≥', lte: '≤' };
 
@@ -75,24 +76,6 @@ function describeAlert(a) {
   const label = { price: '到价', pct: '涨跌幅', vol: '量比', turnover: '换手率' }[a.type] || a.type;
   const unit = { price: '元', pct: '%', turnover: '%' }[a.type] || '';
   return `${label} ${OP_LABEL[a.op] || ''} ${a.value}${unit}`;
-}
-
-// —— 与前端 alertStore.confirmHint 同口径:到操作点的「先确认再动手」提示 ——
-function confirmHint(a) {
-  if (!a || a.type !== 'price') return '';
-  if (a.actKind === 'add') {
-    const tail = a.timing ? '：' + a.timing : '：等分时止跌/站回均价线再补，别追一瞬价。';
-    return '\n🎯到操作点=开始盯，先确认再动手' + tail + ' 详情见AI建议「到价后怎么做」。';
-  }
-  if (a.actKind === 'reduce') {
-    const tail = a.timing ? '：' + a.timing : '：反弹放量滞涨/冲高回落再减，锁定部分利润即可。';
-    return '\n🎯到操作点=开始盯，先确认再动手' + tail + ' 详情见AI建议「到价后怎么做」。';
-  }
-  const note = a.note || '';
-  if (/止损/.test(note)) return '\n⚠️到价=开始盯，别急砍：确认是否放量/收盘跌破，只是瞬时插针又拉回可先缓一手。';
-  if (/止盈/.test(note)) return '\n💡到价=开始盯，别一次清光：可先减一部分锁利，剩余用移动止盈跟着走。';
-  if (/买点/.test(note)) return '\n💡到价=开始盯，别追一瞬价：等缩量企稳/站回均线再进。';
-  return '';
 }
 
 // —— 与前端 alertStore.hit 同口径 ——
@@ -143,6 +126,7 @@ export function cloudAlertsForEvaluation(alerts = [], settings = {}) {
 function invokeQuote(codes) {
   return new Promise((resolve) => {
     const chunks = [];
+    let timer = null;
     const res = {
       statusCode: 200, _h: {},
       setHeader() {}, getHeader() {}, status(c) { this.statusCode = c; return this; },
@@ -153,7 +137,12 @@ function invokeQuote(codes) {
     };
     let done = false;
     function finish(p) {
-      if (done) return; done = true;
+      if (done) return;
+      done = true;
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
       let out = p;
       if (typeof out === 'string') { try { out = JSON.parse(out); } catch { /* keep */ } }
       if (out == null && chunks.length) { try { out = JSON.parse(chunks.join('')); } catch { out = null; } }
@@ -161,11 +150,12 @@ function invokeQuote(codes) {
       for (const it of (out && out.list) || []) if (it && it.code) map[it.code] = it;
       resolve(map);
     }
+    timer = setTimeout(() => finish(null), 12000);
+    if (timer && typeof timer.unref === 'function') timer.unref();
     try {
       const r = quoteHandler({ method: 'GET', query: { codes: codes.join(',') }, headers: {} }, res);
       if (r && typeof r.then === 'function') r.catch(() => finish(null));
     } catch { finish(null); }
-    setTimeout(() => finish(null), 12000);
   });
 }
 
@@ -396,10 +386,13 @@ async function processAccount(acc) {
         continue;
       }
       hits++;
-      const actLabel = a.actKind === 'add' ? '补仓' : (a.actKind === 'reduce' ? '减仓' : '');
-      const title = actLabel ? `🎯 到${actLabel}操作点 · ${a.name || a.code}` : `⚡ 预警触发 · ${a.name || a.code}`;
-      const body = `${describeAlert(a)}｜${msg}${confirmHint(a)}`;
-      collectDead(await sendPush(subs, { title, body, code: a.code, tag: 'alert-' + a.id, url: '/' }));
+      const notification = buildAlertNotification({
+        alert: a,
+        quote: q,
+        stage: 'trigger',
+        reason: msg,
+      });
+      collectDead(await sendPush(subs, { ...notification, code: a.code, tag: 'alert-' + a.id, url: '/' }));
       a.triggeredAt = Date.now(); a.triggeredMsg = msg; a.enabled = false;
       changed = true;
       continue;
@@ -426,10 +419,13 @@ async function processAccount(acc) {
         continue;
       }
       hits++;
-      const actZh = actionLabelOf(a);
-      const title = `👀 到点位·观察确认中 · ${a.name || a.code}`;
-      const body = `${describeAlert(a)}｜${msg}\n⏳已到${actZh}价位,但「到价≠立刻动手」。系统正在盯盘确认真正时机,确认后会再发一次「✅ 可以${actZh}」的强提示,先别急。`;
-      collectDead(await sendPush(subs, { title, body, code: a.code, tag: 'watch-' + a.id, url: '/' }));
+      const notification = buildAlertNotification({
+        alert: a,
+        quote: q,
+        stage: 'watch',
+        reason: msg,
+      });
+      collectDead(await sendPush(subs, { ...notification, code: a.code, tag: 'watch-' + a.id, url: '/' }));
       a.phase = 'watching'; a.watchingAt = Date.now(); a.watchingPrice = Number(q?.price) || null; a.watchingMsg = msg;
       changed = true;
       continue;
@@ -519,13 +515,13 @@ async function processAccount(acc) {
       if (verdict.decision === 'confirm') {
         hits++;
         const actZh = actionLabelOf(a);
-        const conf = verdict.confidence != null ? `(把握${verdict.confidence})` : '';
-        const ka = verdict.knowledgeAction?.total != null
-          ? `｜知行合一${verdict.knowledgeAction.total}分`
-          : '';
-        const title = `✅ 可以${actZh} · ${a.name || a.code}`;
-        const body = `${describeAlert(a)}｜确认时机已到${conf}${ka}\n📌${verdict.reason || '多项信号共振确认'}`;
-        collectDead(await sendPush(subs, { title, body, code: a.code, tag: 'confirm-' + a.id, url: '/' }));
+        const notification = buildAlertNotification({
+          alert: a,
+          quote: q,
+          stage: 'confirm',
+          reason: verdict.reason || '多项信号共振确认',
+        });
+        collectDead(await sendPush(subs, { ...notification, code: a.code, tag: 'confirm-' + a.id, url: '/' }));
         a.phase = 'confirmed'; a.triggeredAt = Date.now(); a.triggeredMsg = `确认${actZh}:${verdict.reason || ''}`; a.enabled = false;
         a.decisionPrice = Number(q.price);
         const decisionSide = resolveDecisionSide(verdict, side);
@@ -554,10 +550,13 @@ async function processAccount(acc) {
         changed = true;
       } else if (verdict.decision === 'invalid') {
         // 交易逻辑已被破坏(如买点却已放量跌破失效价)→ 撤下该点位,发一次说明,不再纠缠
-        const actZh = actionLabelOf(a);
-        const title = `⛔ 已失效·暂不${actZh} · ${a.name || a.code}`;
-        const body = `${describeAlert(a)}｜原${actZh}逻辑已被破坏\n📌${verdict.reason || '关键条件已破坏,建议重新评估'}`;
-        collectDead(await sendPush(subs, { title, body, code: a.code, tag: 'invalid-' + a.id, url: '/' }));
+        const notification = buildAlertNotification({
+          alert: a,
+          quote: q,
+          stage: 'invalid',
+          reason: verdict.reason || '关键条件已破坏',
+        });
+        collectDead(await sendPush(subs, { ...notification, code: a.code, tag: 'invalid-' + a.id, url: '/' }));
         a.phase = 'invalid'; a.triggeredAt = Date.now(); a.triggeredMsg = `已失效:${verdict.reason || ''}`; a.enabled = false;
         wakeups.push({ alert: { ...a }, verdict, at: a.triggeredAt });
         changed = true;

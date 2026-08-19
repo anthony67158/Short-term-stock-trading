@@ -3,14 +3,17 @@ import assert from 'node:assert/strict'
 
 import {
   adviceFailureReason,
+  adviceTradeStateMatches,
   createRecoverableSerialRunner,
   createAdviceSSEParser,
   internalRequestHeaders,
+  invoke,
   invokeSSE,
   mergeExternalJobs,
   progressPatchForEvent,
   buildAdviceReviewRecord,
   quantResultFromAdviceResponse,
+  requeueAdviceForTradeChange,
   startJsonHeartbeat,
 } from '../api/cron_advice.js'
 import { adviceEvidenceDigest } from '../shared/adviceIntelligence.js'
@@ -49,6 +52,98 @@ test('服务端单只超时会中止原模型请求避免与重试重叠', async
 
   assert.equal(result, null)
   assert.equal(aborted, true)
+})
+
+test('服务端进程内调用完成后立即清理长超时与中止监听', async () => {
+  const originalSetTimeout = globalThis.setTimeout
+  const originalClearTimeout = globalThis.clearTimeout
+  const timers = new Set()
+  let abortAdds = 0
+  let abortRemoves = 0
+  globalThis.setTimeout = (callback, delay) => {
+    const timer = { callback, delay }
+    timers.add(timer)
+    return timer
+  }
+  globalThis.clearTimeout = (timer) => {
+    timers.delete(timer)
+  }
+  const signal = {
+    aborted: false,
+    addEventListener() { abortAdds++ },
+    removeEventListener() { abortRemoves++ },
+  }
+
+  try {
+    const result = await invoke((_req, res) => {
+      res.json({ ok: true })
+    }, { signal })
+
+    assert.deepEqual(result, { ok: true })
+    assert.equal(timers.size, 0)
+    assert.equal(abortAdds, 1)
+    assert.equal(abortRemoves, 1)
+  } finally {
+    globalThis.setTimeout = originalSetTimeout
+    globalThis.clearTimeout = originalClearTimeout
+  }
+})
+
+test('军师生成期间持仓或成交变化时旧结果必须失效', () => {
+  const source = {
+    plan: [],
+    holding: [{
+      id: 'holding-1',
+      code: '002309',
+      qty: 25,
+      buyPrice: 3.26,
+      buyFee: 5.08,
+    }],
+    closed: [],
+    account: { cash: 58000 },
+  }
+  const latest = {
+    ...source,
+    holding: [{
+      ...source.holding[0],
+      qty: 16,
+      buyFee: 3.25,
+    }],
+    closed: [{
+      id: 'sell-9',
+      type: 'SELL',
+      code: '002309',
+      qty: 9,
+      price: 3.05,
+      at: 1000,
+    }],
+  }
+
+  assert.equal(adviceTradeStateMatches(source, source), true)
+  assert.equal(adviceTradeStateMatches(source, latest), false)
+})
+
+test('交易变化导致的旧建议不消耗重试次数并按最新账本重新排队', () => {
+  const data = {
+    jobs: {
+      '002309': {
+        id: 'job-1',
+        code: '002309',
+        status: 'running',
+        attempts: 1,
+        startedAt: 900,
+        leaseUntil: 999999,
+      },
+    },
+  }
+
+  const job = requeueAdviceForTradeChange(data, '002309', 1000)
+
+  assert.equal(job.status, 'queued')
+  assert.equal(job.attempts, 0)
+  assert.equal(job.startedAt, 0)
+  assert.equal(job.leaseUntil, 0)
+  assert.match(job.phase, /最新持仓重新复核/)
 })
 
 test('AI SSE 事件会转换为持久任务进度补丁', () => {

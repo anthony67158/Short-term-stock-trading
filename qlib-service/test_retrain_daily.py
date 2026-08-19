@@ -56,7 +56,7 @@ class ForwardHoldoutSplitTest(unittest.TestCase):
         ])
 
         train_idx, hold_idx, hold_dates = retrain.forward_holdout_split(
-            dates, "20260729"
+            dates, "20260729", purge_dates=0
         )
 
         self.assertEqual(dates[train_idx].tolist(), ["20260728", "20260729"])
@@ -105,6 +105,7 @@ class ForwardHoldoutSplitTest(unittest.TestCase):
                 dates,
                 "20260729",
                 blind_dates=3,
+                purge_dates=0,
             )
         )
 
@@ -171,6 +172,7 @@ class ForwardHoldoutSplitTest(unittest.TestCase):
                 dates,
                 "20260806",
                 blind_dates=3,
+                purge_dates=0,
             )
         )
 
@@ -184,6 +186,34 @@ class ForwardHoldoutSplitTest(unittest.TestCase):
         )
         self.assertEqual(adapt_dates, [])
         self.assertEqual(blind_dates, ["20260807", "20260810"])
+
+    def test_forward_and_blind_windows_purge_overlapping_label_dates(self):
+        retrain = load_retrain_daily()
+        dates = np.asarray([
+            f"202607{day:02d}"
+            for day in range(1, 21)
+        ])
+
+        _train, holdout, holdout_dates = retrain.forward_holdout_split(
+            dates,
+            "20260705",
+            purge_dates=2,
+        )
+        self.assertEqual(holdout_dates[0], "20260708")
+        self.assertEqual(dates[holdout][0], "20260708")
+
+        train, blind, adapt_dates, blind_dates = (
+            retrain.incremental_adaptation_split(
+                dates,
+                "20260705",
+                blind_dates=3,
+                purge_dates=2,
+            )
+        )
+        self.assertEqual(blind_dates, ["20260718", "20260719", "20260720"])
+        self.assertEqual(dates[blind][0], "20260718")
+        self.assertEqual(dates[train][-1], "20260715")
+        self.assertEqual(adapt_dates[-1], "20260715")
 
     def test_recent_and_new_samples_receive_more_training_weight(self):
         retrain = load_retrain_daily()

@@ -44,6 +44,7 @@ import {
 import { isCurrentDailyReportSummary } from '../shared/adviceDailyReportPolicy.js';
 import { buildAdviceDecisionContext } from '../shared/adviceModeContext.js';
 import { applyPortfolioRiskPolicy } from '../shared/portfolioRiskPolicy.js';
+import { applyTActionAdvicePolicy } from '../shared/tAdvicePolicy.js';
 import {
   classifyPriceLimit,
   priceLimitRatio,
@@ -1866,6 +1867,14 @@ export default async function handler(req, res) {
       && !result.raw
     ) {
       result = applyPortfolioRiskPolicy({ mode, result, payload }).result;
+    }
+    if (
+      ['t_advice', 'hold_advice', 'review'].includes(mode)
+      && result
+      && typeof result === 'object'
+      && !result.raw
+    ) {
+      result = applyTActionAdvicePolicy({ mode, result, payload });
     }
     if (
       ['buy_advice', 'hold_advice'].includes(mode)

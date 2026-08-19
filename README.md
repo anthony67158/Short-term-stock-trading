@@ -86,18 +86,18 @@
 
 | 层 | 运行位置 | 主要职责 |
 |---|---|---|
-| 前端 | Vercel | React SPA、PWA、交互和可视化 |
+| 前端主入口 | Vercel | React SPA、PWA、交互和可视化 |
 | 后端 | 阿里云 FC 3.0 | API、账号、任务、AI、预警、定时器、OSS 访问 |
-| 静态备用入口 | 阿里云 FC 3.0 | 托管 `dist/`，服务备案域名 |
+| 前端备案入口 | 阿里云 FC 3.0 | 托管与 Vercel 同一前端源码版本的 `dist/`，服务 `www.tedixtf.cn` |
 | 量化服务 | 独立 Python 服务 | 日线/V2/V2.1 预测、模型元数据和准确率 |
 | 存储 | 阿里云 OSS | 账号快照、配置、任务、报告、模型和难样本 |
 | 定时 | FC Timer + GitHub Actions | 盯盘、复盘、任务恢复、准确率刷新、每日训练 |
 
 ### 部署铁律
 
-- 修改 `src/**`：构建并部署 Vercel。
+- 修改任何影响 `dist/` 的前端文件：必须把同一前端源码版本双部署到 Vercel 和 `www.tedixtf.cn` 所在的阿里云 FC；缺一边视为未完成。
 - 修改 `api/**`、`server.js` 或后端引用模块：必须部署阿里云 FC。
-- 前后端都修改：两边都部署。
+- 前后端都修改：Vercel 与 FC 都部署，并分别验收两个前端域名和 FC API。
 - FC 部署前必须加载 `.env`，否则 `s.yaml` 中的环境变量会解析为空。
 
 详细规则见 [AGENTS.md](AGENTS.md) 和 [CLAUDE.md](CLAUDE.md)。
@@ -296,6 +296,7 @@ npm run dev
 - `OSS_ALLOW_PUBLIC_NETWORK`
 - `CRON_KEY`
 - `AUTHORIZED_ACCOUNT_HASHES`
+- `RUNTIME_CONFIG_ADMIN_HASHES`
 - `ADVISOR_COUNCIL_SHADOW`
 - `STRATEGY_APPROVAL_KEY`
 
@@ -337,14 +338,25 @@ git diff --check
 
 ## 部署
 
-### 前端到 Vercel
+### 前端双部署到 Vercel 与阿里云 FC
 
 ```bash
 npm run build
 npx vercel --prod --yes --token "$VC_TOKEN"
+
+npm run package:fc
+set -a
+. ./.env
+set +a
+npx @serverless-devs/s deploy -y
 ```
 
-部署后确认稳定域名返回 HTTP 200。
+两次部署必须来自同一份前端源码版本。部署后同时确认：
+
+- `https://stock-dashboard-one-plum.vercel.app`
+- `https://www.tedixtf.cn/`
+
+备案域名启用了设备授权；未授权的普通 HTTP 请求可能返回 `401` 授权页，完整应用需在已授权设备浏览器验收。
 
 ### 后端到阿里云 FC
 

@@ -2,6 +2,7 @@
 // 浏览器与 FC 只保留各自签名适配，避免做T、T+1 和估值口径再次漂移。
 import { portfolioExposureContext } from '../shared/portfolioExposure.js';
 import {
+  buildTActionContext,
   computePortfolio,
   computeTFlows,
   livePositionOf,
@@ -31,22 +32,41 @@ export function accountFrom(portfolio, account) {
 }
 
 // 构造【持仓个股】hold_advice 的 payload(与前端 buildHoldSpec 的 aiPayload 同口径)
-export function buildHoldPayload(holding, code, name, portfolio, account, closed, nextTradeDay) {
+export function buildHoldPayload(
+  holding,
+  code,
+  name,
+  portfolio,
+  account,
+  closed,
+  nextTradeDay,
+  quote = null,
+  now = Date.now(),
+) {
   const lp = livePositionOf(holding, code);
   let holdCost, holdQty, openTNet;
   if (lp) {
-    holdCost = lp.cost; holdQty = lp.qty; openTNet = lp.hasOpenT ? lp.tNetHands : 0;
+    holdCost = lp.costWithFees ?? lp.cost;
+    holdQty = lp.qty;
+    openTNet = lp.hasOpenT ? lp.tNetHands : 0;
   } else {
     const hs = (holding || []).filter((h) => h.code === code);
-    let tNet = 0, baseCostSum = 0, baseQtySum = 0;
+    let tNet = 0, baseCostValue = 0, baseQtySum = 0;
     for (const h of hs) {
       const rr = computeTFlows(h.tFlows);
       tNet += (rr.openBuy || 0) - (rr.openSell || 0);
-      baseCostSum += (h.buyPrice || 0) * (h.qty || 0); baseQtySum += (h.qty || 0);
+      baseCostValue += (
+        (h.buyPrice || 0) * (h.qty || 0) * 100
+        + (Number(h.buyFee) || 0)
+      );
+      baseQtySum += (h.qty || 0);
     }
-    holdCost = baseQtySum > 0 ? +(baseCostSum / baseQtySum).toFixed(3) : null;
+    holdCost = baseQtySum > 0
+      ? +(baseCostValue / (baseQtySum * 100)).toFixed(3)
+      : null;
     holdQty = 0; openTNet = tNet;
   }
+  const currentPrice = Number(quote?.price) > 0 ? Number(quote.price) : null;
   const stockWeight = (() => {
     const positions = portfolio && portfolio.positions
       ? portfolio.positions.filter((x) => x.code === code)
@@ -57,7 +77,7 @@ export function buildHoldPayload(holding, code, name, portfolio, account, closed
   // T+1 买入时间锁定字段(与前端 t1Fields 同口径)
   let t1 = {};
   try {
-    const st = t1StatusOf(holding, closed, code);
+    const st = t1StatusOf(holding, closed, code, now);
     if (st) {
       t1 = {
         boughtTodayQty: st.boughtToday,
@@ -69,9 +89,10 @@ export function buildHoldPayload(holding, code, name, portfolio, account, closed
     }
   } catch { /* ignore */ }
   return {
-    code, name, holdCost, holdQty, openTNet,
+    code, name, holdCost, holdQty, openTNet, currentPrice,
     ...t1,
     tradeContext: tradeActivityContext(closed, code),
+    tContext: buildTActionContext(holding, closed, code, now),
     account: { ...accountFrom(portfolio, account), stockWeight },
   };
 }

@@ -22,7 +22,13 @@
 //   · 每次 persist 都【重读云端最新账号】做保护式叠加(防止盖回用户本机刚编辑的持仓)。
 
 import { applyCors, preflight } from './_lib.js';
-import { isAccountActive, writeAccount, readAccount, listAllAccounts, sha } from './account.js';
+import {
+  accountCredentialMatches,
+  isAccountActive,
+  writeAccount,
+  readAccount,
+  listAllAccounts,
+} from './account.js';
 import { buildHoldPayload, buildWatchPayload, computePortfolio, t1StatusOf } from './_portfolio.js';
 import {
   CONCURRENCY, jobsOf, enqueueJob, leaseJob, completeJob, failJob, cancelJob, cancelAll,
@@ -34,6 +40,7 @@ import {
 import { ensureConfig, currentConfig } from './_llm_config.js';
 import { endpointCountForRole } from './_llm_pool.js';
 import { projectAdviceAlerts } from '../shared/adviceAlerts.js';
+import { accountTradeStateFingerprint } from '../shared/accountSync.js';
 import { createRecommendation } from '../shared/decisionLedger.js';
 import { ensureAdviceReasoning } from '../shared/adviceReasoning.js';
 import {
@@ -250,8 +257,22 @@ export function invoke(handler, {
   return new Promise((resolve) => {
     let done = false;
     const chunks = [];
+    let timer = null;
+    let externalAbort = null;
+    const cleanup = () => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      if (signal && externalAbort) {
+        signal.removeEventListener('abort', externalAbort);
+        externalAbort = null;
+      }
+    };
     const finishWith = (payload) => {
-      if (done) return; done = true;
+      if (done) return;
+      done = true;
+      cleanup();
       let out = payload;
       if (typeof out === 'string') { try { out = JSON.parse(out); } catch { /* 保留字符串 */ } }
       if (out == null && chunks.length) { try { out = JSON.parse(chunks.join('')); } catch { out = chunks.join(''); } }
@@ -278,15 +299,20 @@ export function invoke(handler, {
       req[TRUSTED_QUANT_VERSION] = trustedQuantVersion;
     }
     if (trustedAccount) req[TRUSTED_ACCOUNT_REQUEST] = true;
+    timer = setTimeout(
+      () => finishWith(null),
+      595000,
+    );
+    if (timer && typeof timer.unref === 'function') timer.unref();
     if (signal) {
       if (signal.aborted) return finishWith(null);
-      signal.addEventListener('abort', () => finishWith(null), { once: true });
+      externalAbort = () => finishWith(null);
+      signal.addEventListener('abort', externalAbort, { once: true });
     }
     try {
       const r = handler(req, res);
       if (r && typeof r.then === 'function') r.catch(() => finishWith(null));
     } catch { finishWith(null); }
-    setTimeout(() => finishWith(null), 595000);  // 兜底超时:放到 595s——覆盖 ai.js 深度思考总预算(560s)+ 数据采集(~20s),避免思维链未完就被掐断造成"假失败"(FC 函数 timeout=600s,只留 5s 余量给收尾)
   });
 }
 
@@ -662,6 +688,26 @@ function buildTask(data, code) {
   const nameOf = (holding.find((h) => h.code === code) || watch.find((w) => w.code === code) || {}).name || code;
   return { holdSet, nameOf };
 }
+
+export function adviceTradeStateMatches(sourceData, latestData) {
+  return accountTradeStateFingerprint(sourceData)
+    === accountTradeStateFingerprint(latestData);
+}
+
+export function requeueAdviceForTradeChange(data, code, now = Date.now()) {
+  const job = jobsOf(data)[code];
+  if (!job) return null;
+  job.status = 'queued';
+  job.attempts = Math.max(0, (Number(job.attempts) || 1) - 1);
+  job.startedAt = 0;
+  job.finishedAt = 0;
+  job.leaseUntil = 0;
+  job.error = '';
+  job.phase = '交易账本已更新，正在按最新持仓重新复核';
+  job.progressAt = now;
+  return job;
+}
+
 async function runJobGen(
   acc,
   code,
@@ -672,7 +718,12 @@ async function runJobGen(
   reviewEvent = null,
   reviewOrigin = '',
 ) {
-  const data = acc.data || {};
+  let sourceAcc = acc;
+  try {
+    sourceAcc = (await readAccount(acc.nick)) || acc;
+  } catch { /* 当前副本仍可进入生成，完成前还会再次校验 */ }
+  const data = sourceAcc.data || {};
+  const sourceTradeFingerprint = accountTradeStateFingerprint(data);
   const holding = data.holding || [], watch = data.plan || [];
   const holdSet = new Set(holding.map((h) => h.code));
   const allCodes = [...new Set([...holding.map((h) => h.code), ...watch.map((w) => w.code)])];
@@ -705,29 +756,40 @@ async function runJobGen(
     ? adviceEvidenceDigest(previousEntry.meta.evidenceSnapshot)
     : null;
   if (mode === 'hold_advice') {
-    let p = buildHoldPayload(holding, code, name, portfolio, data.account, data.closed, nextTradingDayLabel());
+    let p = buildHoldPayload(
+      holding,
+      code,
+      name,
+      portfolio,
+      data.account,
+      data.closed,
+      nextTradingDayLabel(),
+      quoteMap[code],
+    );
     p.advisorTrack = advisorTrackFrom(data, 'hold_advice');
     p.realOutcomeLearning = realOutcomeLearning;
     p.quantModelVersion = quantModelVersion;
-    p.accountRevision = Number(acc.clientRevision) || null;
+    p.accountRevision = Number(sourceAcc.clientRevision) || null;
     p = attachAdviceDailyReport(p, dailyReportSummary);
     if (previousAdvice) p.previousAdvice = previousAdvice;
     if (previousEvidenceDigest) p.previousEvidenceDigest = previousEvidenceDigest;
     if (reviewEvent) p.reviewEvent = reviewEvent;
     if (reviewOrigin) p.reviewOrigin = reviewOrigin;
-    return genOne({ code, name, mode: 'hold_advice', payload: p, priceHint, onProgress, signal, deepMode, previousEntry, reviewIntervalMin, reviewTrigger: reviewEvent ? `judge_${reviewEvent.decision}` : '', strategyGate, councilEnabled });
+    const result = await genOne({ code, name, mode: 'hold_advice', payload: p, priceHint, onProgress, signal, deepMode, previousEntry, reviewIntervalMin, reviewTrigger: reviewEvent ? `judge_${reviewEvent.decision}` : '', strategyGate, councilEnabled });
+    return { ...result, sourceTradeFingerprint };
   }
   let p = buildWatchPayload(code, name, portfolio, data.account);
   p.advisorTrack = advisorTrackFrom(data, 'buy_advice');
   p.realOutcomeLearning = realOutcomeLearning;
   p.quantModelVersion = quantModelVersion;
-  p.accountRevision = Number(acc.clientRevision) || null;
+  p.accountRevision = Number(sourceAcc.clientRevision) || null;
   p = attachAdviceDailyReport(p, dailyReportSummary);
   if (previousAdvice) p.previousAdvice = previousAdvice;
   if (previousEvidenceDigest) p.previousEvidenceDigest = previousEvidenceDigest;
   if (reviewEvent) p.reviewEvent = reviewEvent;
   if (reviewOrigin) p.reviewOrigin = reviewOrigin;
-  return genOne({ code, name, mode: 'buy_advice', payload: p, priceHint, onProgress, signal, deepMode, previousEntry, reviewIntervalMin, reviewTrigger: reviewEvent ? `judge_${reviewEvent.decision}` : '', strategyGate, councilEnabled });
+  const result = await genOne({ code, name, mode: 'buy_advice', payload: p, priceHint, onProgress, signal, deepMode, previousEntry, reviewIntervalMin, reviewTrigger: reviewEvent ? `judge_${reviewEvent.decision}` : '', strategyGate, councilEnabled });
+  return { ...result, sourceTradeFingerprint };
 }
 
 // ---- 任务表合并:把云端最新的【外部变更】并入内存 working(捕获其它设备新入队 / 取消)----
@@ -952,7 +1014,7 @@ async function drainAccount(nick, initialAcc) {
     dailyReportResult = await ensureAdviceDailyReport({
       scopeKey: nick,
       existingSummary: data.adviceDailyReport?.summary || null,
-      getSummary: () => getLatestDailySummary(),
+      getSummary: () => getLatestDailySummary(nick),
       searchConfig: aiSearchConfig,
       generate: () => generateAdviceDailyReport(
         collectAdviceDailyReportHoldings(data),
@@ -1121,10 +1183,25 @@ async function drainAccount(nick, initialAcc) {
       // 应用结果到内存,再保护式落盘
       const d = acc.data;
       const job = jobsOf(d)[done.code];
+      let tradeStateCurrent = true;
+      if (done.res?.sourceTradeFingerprint) {
+        try {
+          const latest = await readAccount(nick);
+          tradeStateCurrent = !!latest?.data
+            && accountTradeStateFingerprint(latest.data)
+              === done.res.sourceTradeFingerprint;
+        } catch {
+          tradeStateCurrent = false;
+        }
+      }
       if (!job || job.id !== done.jobId) {
         // 同一股票已被新批次替换，旧结果必须丢弃。
       } else if (job.cancelRequested || job.status === 'canceled') { // 运行中被取消 → 丢弃结果
         job.status = 'canceled'; job.finishedAt = Date.now(); job.leaseUntil = 0;
+      } else if (!tradeStateCurrent) {
+        // 生成期间若用户加/减仓、改成本或补录成交，旧结果里的手数和成本已失效。
+        // 不消耗重试次数，直接以最新 OSS 账本重跑，绝不把旧建议落盘。
+        requeueAdviceForTradeChange(d, done.code);
       } else if (done.res && done.res.cacheItem) {
         completeJob(d, done.code); ok++;
         const completedAt = Number(jobsOf(d)[done.code]?.finishedAt) || Date.now();
@@ -1360,15 +1437,20 @@ export default async function handler(req, res) {
   const scope = ['all', 'hold', 'watch'].includes(body.scope) ? body.scope : 'all';
   const force = body.force != null ? !!body.force : true;   // 用户主动生成默认强制重生成
 
-  // ====== 分支 A:账号密码鉴权的按需操作(enqueue / cancel / cancelAll / status / drain)======
-  const isUser = !!(body.nick && body.pw != null);
+  // ====== 分支 A:账号会话鉴权的按需操作(enqueue / cancel / cancelAll / status / drain)======
+  const isUser = !!(body.nick && (body.token != null || body.pw != null));
   if (isUser) {
     const nick = String(body.nick || '').trim();
     const pw = String(body.pw || '');
-    if (!nick || !pw) return res.end(JSON.stringify({ ok: false, error: '缺少账号或密码' }));
+    const token = String(body.token || '');
+    if (!nick || (!token && !pw)) {
+      return res.end(JSON.stringify({ ok: false, error: '缺少账号凭证' }));
+    }
     const acc = await readAccount(nick);
     if (!acc) return res.end(JSON.stringify({ ok: false, error: '账号不存在' }));
-    if (acc.pwHash !== sha(pw)) return res.end(JSON.stringify({ ok: false, error: '密码错误' }));
+    if (!accountCredentialMatches(acc, { pw, token })) {
+      return res.end(JSON.stringify({ ok: false, error: '账号鉴权失败' }));
+    }
     if (!isAccountActive(acc)) return res.end(JSON.stringify({ ok: false, error: '账号已注销' }));
     const data = acc.data || (acc.data = {});
     const op = body.op || 'enqueue';

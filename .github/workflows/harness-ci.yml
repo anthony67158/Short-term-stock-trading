@@ -14,7 +14,7 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     env:
       TZ: Asia/Shanghai
     permissions:
@@ -30,6 +30,16 @@ jobs:
 
       - name: Install locked dependencies
         run: npm ci --prefer-online
+
+      - name: Use Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: qlib-service/requirements.txt
+
+      - name: Install quant test dependencies
+        run: python -m pip install -r qlib-service/requirements.txt
 
       - name: Run system harness gate
         run: npm run harness:ci
@@ -81,8 +91,35 @@ jobs:
           echo "::error file=.github/workflows/harness-ci.yml,line=1,title=Node test diagnostics::$diagnostic"
           exit 1
 
+      - name: Run quant service tests
+        shell: bash
+        run: |
+          python -m unittest discover \
+            -s qlib-service/tests -p 'test_*.py' \
+            2>&1 | tee test-artifacts/python-tests-nested.log
+          python -m unittest discover \
+            -s qlib-service -p 'test_*.py' \
+            2>&1 | tee test-artifacts/python-tests-root.log
+
       - name: Build production frontend
         run: npm run build
+
+      - name: Build and smoke-test FC runtime package
+        shell: bash
+        run: |
+          npm run package:fc
+          PORT=9010 node .fc-package/server.js \
+            > test-artifacts/fc-package.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:9010/__health; then
+              exit 0
+            fi
+            sleep 1
+          done
+          tail -n 120 test-artifacts/fc-package.log
+          exit 1
 
       - name: Upload harness episodes
         if: always()

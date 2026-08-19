@@ -205,10 +205,14 @@ async function mapWithConcurrency(items, concurrency, mapper) {
 
 function authHeaders(req) {
   const nick = req?.headers?.['x-account-nick']
+  const token = req?.headers?.['x-account-token']
   const password = req?.headers?.['x-account-password']
   const cronKey = req?.headers?.['x-cron-key']
   return {
     ...(typeof nick === 'string' ? { 'x-account-nick': nick } : {}),
+    ...(typeof token === 'string'
+      ? { 'x-account-token': token }
+      : {}),
     ...(typeof password === 'string'
       ? { 'x-account-password': password }
       : {}),

@@ -55,6 +55,7 @@ from production_backtest import (
     upload_production_accuracy,
 )
 from train_lgb import cv_auc_and_iters, fit_final
+from time_splits import purged_holdout_split
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BUNDLED_MODEL = os.path.join(HERE, "lgb_score.txt")
@@ -247,32 +248,35 @@ def load_dataset():
     )
 
 
-def date_holdout_split(dates, frac):
+def date_holdout_split(dates, frac, purge_dates=5):
     """按日期排序切分：最近 frac 比例为保留评测集(样本外)，其余为训练集。
     返回 (train_idx, holdout_idx)。用日期阈值切，保证同一天不跨集(避免泄漏)。"""
-    order = np.argsort(dates, kind="stable")
-    sorted_dates = dates[order]
-    cut_pos = int(len(order) * (1 - frac))
-    cut_pos = max(1, min(cut_pos, len(order) - 1))
-    cut_date = sorted_dates[cut_pos]
-    train_idx = order[sorted_dates < cut_date]
-    hold_idx = order[sorted_dates >= cut_date]
-    # 若某侧为空(日期高度集中)，退化为按位置切
-    if len(train_idx) == 0 or len(hold_idx) == 0:
-        train_idx, hold_idx = order[:cut_pos], order[cut_pos:]
-    return np.asarray(train_idx), np.asarray(hold_idx), str(cut_date)
+    train_idx, hold_idx, metadata = purged_holdout_split(
+        dates,
+        holdout_fraction=frac,
+        purge_dates=purge_dates,
+    )
+    return train_idx, hold_idx, metadata["holdout_start_date"]
 
 
 def _date_key(value):
     return "".join(ch for ch in str(value) if ch.isdigit())
 
 
-def forward_holdout_split(dates, champion_data_end):
+def forward_holdout_split(dates, champion_data_end, purge_dates=5):
     """用冠军训练截止日之后的成熟样本做真正的前向样本外评测。"""
     end_key = _date_key(champion_data_end)
     keys = np.asarray([_date_key(value) for value in dates])
     train_idx = np.flatnonzero(keys <= end_key)
-    hold_idx = np.flatnonzero(keys > end_key)
+    new_dates = sorted(
+        {str(dates[i]) for i in np.flatnonzero(keys > end_key)},
+        key=_date_key,
+    )
+    evaluation_dates = new_dates[max(0, int(purge_dates)):]
+    evaluation_keys = {_date_key(value) for value in evaluation_dates}
+    hold_idx = np.flatnonzero(
+        np.asarray([value in evaluation_keys for value in keys])
+    )
     hold_dates = sorted({str(dates[i]) for i in hold_idx}, key=_date_key)
     return train_idx, hold_idx, hold_dates
 
@@ -283,7 +287,12 @@ def forward_holdout_ready(holdout_n, holdout_dates, min_samples=None, min_dates=
     return holdout_n >= min_samples and len(holdout_dates) >= min_dates
 
 
-def incremental_adaptation_split(dates, champion_data_end, blind_dates=3):
+def incremental_adaptation_split(
+    dates,
+    champion_data_end,
+    blind_dates=3,
+    purge_dates=5,
+):
     """Split post-champion mature dates into adaptation and untouched blind test.
 
     The challenger trains on all historical rows plus early post-champion rows.
@@ -299,17 +308,43 @@ def incremental_adaptation_split(dates, champion_data_end, blind_dates=3):
     )
     blind_count = max(1, int(blind_dates))
     if len(new_dates) <= blind_count:
+        blind_start = _date_key(new_dates[0]) if new_dates else ""
+        all_dates = sorted({str(value) for value in dates}, key=_date_key)
+        blind_position = next(
+            (
+                index for index, value in enumerate(all_dates)
+                if _date_key(value) == blind_start
+            ),
+            len(all_dates),
+        )
+        train_end = max(0, blind_position - max(0, int(purge_dates)))
+        train_keys = {_date_key(value) for value in all_dates[:train_end]}
         return (
-            np.flatnonzero(keys <= end_key),
+            np.flatnonzero(
+                np.asarray([value in train_keys for value in keys])
+            ),
             np.flatnonzero(keys > end_key),
             [],
             new_dates,
         )
     blind = new_dates[-blind_count:]
-    adapt = new_dates[:-blind_count]
     blind_start = _date_key(blind[0])
-    train_idx = np.flatnonzero(keys < blind_start)
+    all_dates = sorted({str(value) for value in dates}, key=_date_key)
+    blind_position = next(
+        index for index, value in enumerate(all_dates)
+        if _date_key(value) == blind_start
+    )
+    train_end = max(0, blind_position - max(0, int(purge_dates)))
+    train_dates = all_dates[:train_end]
+    train_keys = {_date_key(value) for value in train_dates}
+    train_idx = np.flatnonzero(
+        np.asarray([value in train_keys for value in keys])
+    )
     blind_idx = np.flatnonzero(keys >= blind_start)
+    adapt = [
+        value for value in new_dates[:-blind_count]
+        if _date_key(value) in train_keys
+    ]
     return train_idx, blind_idx, adapt, blind
 
 

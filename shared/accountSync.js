@@ -41,6 +41,13 @@ export function accountTradeStateFingerprint(data) {
   return `${(first >>> 0).toString(16).padStart(8, '0')}${(second >>> 0).toString(16).padStart(8, '0')}`
 }
 
+export function accountSnapshotForRestore(cloudData, pendingOutbox) {
+  const pendingData = pendingOutbox?.data
+  return pendingData && typeof pendingData === 'object'
+    ? pendingData
+    : cloudData
+}
+
 export async function saveWithRevisionRecovery({
   payload,
   save,

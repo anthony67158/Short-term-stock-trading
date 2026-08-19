@@ -12,6 +12,11 @@ import { quantModelHeaders } from './quantModel'
 import { compactAdvicePlan } from '../shared/adviceContinuity.js'
 import { attachAdviceDailyReport } from '../shared/adviceDailyReportPolicy.js'
 import { ensureLocalAdviceDailyReport } from './adviceDailyReport.js'
+import {
+  accountSessionMatches,
+  currentAccountSession,
+  subscribeAccountSession,
+} from '../shared/accountSessionScope.js'
 
 const running = new Map()  // code -> { phase, startedAt }
 const results = new Map()  // code -> { result, advice, meta, news, adviceMissing, truncated, error, cachedAt }
@@ -50,6 +55,7 @@ export function startAdvice(spec) {
   const rec = {
     phase: '正在准备分析…',
     startedAt: Date.now(),
+    session: currentAccountSession(),
     name: (spec && spec.name) || code,
     sources: [],
     reasoning: '',
@@ -59,13 +65,17 @@ export function startAdvice(spec) {
   }
   running.set(code, rec)
   notify()
-  const p = run(spec, rec).finally(() => { running.delete(code); notify() })
+  const p = run(spec, rec).finally(() => {
+    if (running.get(code) === rec) running.delete(code)
+    notify()
+  })
   rec.promise = p                // 挂到运行记录上：批量生成器据此 await 完成
   return p
 }
 
 async function run(spec, record) {
   const { code, mode, name, myHold, aiPayload, quantUrl, priceHint } = spec
+  const belongsToCurrentAccount = () => accountSessionMatches(record.session)
   const previousAdvice = compactAdvicePlan(getAdvice(code, mode))
   let requestPayload = {
     ...(aiPayload || {}),
@@ -73,11 +83,13 @@ async function run(spec, record) {
   }
   const generation = generationOptions(!!spec.deepMode)
   const onPhase = (p) => {
+    if (!belongsToCurrentAccount()) return
     const r = running.get(code)
     if (r && p && p.text) { r.phase = p.text; notify() }
   }
   // 细粒度事件:source(数据源勾选清单) / reasoning(模型思维链增量)
   const onEvent = (event, data) => {
+    if (!belongsToCurrentAccount()) return
     const r = running.get(code)
     if (!r) return
     if (event === 'source' && data && data.label) {
@@ -103,6 +115,7 @@ async function run(spec, record) {
         })),
         signal: record.controller.signal,
         onPhase: (text) => {
+          if (!belongsToCurrentAccount()) return
           record.phase = `策略日报：${text}`
           notify()
         },
@@ -111,6 +124,7 @@ async function run(spec, record) {
         requestPayload,
         report.summary,
       )
+      if (!belongsToCurrentAccount()) return
       record.sources = [
         ...(record.sources || []).filter(
           (source) => source.label !== '策略日报摘要',
@@ -120,6 +134,7 @@ async function run(spec, record) {
       record.phase = '策略日报已就绪，正在准备军师分析…'
       notify()
     } catch (error) {
+      if (!belongsToCurrentAccount()) return
       if (record.cancelRequested || record.controller.signal.aborted) {
         results.delete(code)
         return
@@ -153,6 +168,7 @@ async function run(spec, record) {
       .then((r) => (r && r.ok ? { advice: r.result, meta: r.meta, news: r.news, truncated: r.truncated } : null))
       .catch(() => null)
     const [j, adviceResp] = await Promise.all([quantP, adviceP])
+    if (!belongsToCurrentAccount()) return
     if (record.cancelRequested) {
       results.delete(code)
       return
@@ -219,6 +235,7 @@ async function run(spec, record) {
       }
     }
   } catch (e) {
+    if (!belongsToCurrentAccount()) return
     if (record.cancelRequested) {
       results.delete(code)
       return
@@ -229,7 +246,7 @@ async function run(spec, record) {
       results.set(code, { error: '获取失败：' + String((e && e.message) || e) })
     }
   }
-  notify()
+  if (belongsToCurrentAccount()) notify()
 }
 
 // 单只服务端兜底:已登录云端账号才可用。触发一次「按需服务端生成」(仅这一只 code),
@@ -241,3 +258,14 @@ function serverFallback(code, deepMode = false) {
     return true
   } catch { return false }
 }
+
+subscribeAccountSession(() => {
+  for (const record of running.values()) {
+    record.cancelRequested = true
+    try { record.controller.abort() } catch { /* ignore */ }
+    try { record.quantController?.abort() } catch { /* ignore */ }
+  }
+  running.clear()
+  results.clear()
+  notify()
+})

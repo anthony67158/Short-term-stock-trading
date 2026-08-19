@@ -132,7 +132,7 @@ export function applyCors(res) {
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   res.setHeader(
     'Access-Control-Allow-Headers',
-    'Content-Type, x-internal, X-Account-Nick, X-Account-Password',
+    'Content-Type, x-internal, X-Account-Nick, X-Account-Token, X-Account-Password',
   );
 }
 

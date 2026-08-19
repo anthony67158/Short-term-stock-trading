@@ -303,6 +303,22 @@ ${payload.holdQty != null ? `4) 手数纪律:任何减仓/清仓/卖出手数 �
     ).join('、')}。
 其中做T已配对${classifiedT?.pairCount || 0}组，已实现${classifiedT?.realizedPnl || 0}元，待配对买腿${classifiedT?.openBuyQty || 0}手、待配对卖腿${classifiedT?.openSellQty || 0}手。用户手动修改后的“做T买入/做T卖出”分类是权威事实：做T卖出是高抛腿，不得误判为趋势减仓；做T买入是低吸/接回腿，不得重复当成新增加仓。未配对腿已经按真实买卖计入当前持仓和现金，不要再次加减 holdQty。tradeReview 必须按这些分类点评。`
     : '';
+  const tAction = payload.tContext && typeof payload.tContext === 'object'
+    ? payload.tContext
+    : null;
+  const tActionNote = !tAction || tAction.stage === 'idle'
+    ? ''
+    : tAction.stage === 'buy_wait_sell'
+      ? `
+
+【做T当前阶段·第一腿已买】已买${tAction.pendingQty || 0}手@${tAction.firstLegPrice ?? '—'}元，尚未卖出。本轮任务是给出【第二腿卖出价】与卖出条件，不得重新建议第一腿买入；卖出手数不得超过待卖${tAction.pendingQty || 0}手和今日可卖${tAction.sellableTodayQty ?? 0}手。`
+      : tAction.stage === 'sell_wait_buy'
+        ? `
+
+【做T当前阶段·第一腿已卖】已卖${tAction.pendingQty || 0}手@${tAction.firstLegPrice ?? '—'}元，尚未买回。本轮任务是给出【第二腿接回价】与企稳条件，不得再次建议卖出；接回手数不得超过待接${tAction.pendingQty || 0}手。`
+        : `
+
+【做T当前阶段·本轮做T已完成】今日已完成${tAction.completedTodayCount || 0}组、锁定${tAction.lockedTodayQty || 0}手、今日可卖${tAction.sellableTodayQty ?? 0}手。不得把已完成两腿重复当成待买/待卖；${Number(tAction.sellableTodayQty) > 0 ? '后续只按剩余可卖老仓给持仓管理建议，不重复发起本轮做T。' : `当前持股今日不可再卖，后续卖出类动作只能放到${payload.nextTradeDay || '下一交易日'}。`}`;
 
 
   if (mode === 'market') {
@@ -359,7 +375,7 @@ ${payload.session === 'next_open' ? '【当前为休市/盘前】结论面向下
     const styleText = isAuto
       ? '【自动】用户没有指定风格，请你根据 stockProfile(这只股自己的历史规律) 自动选定最合适的风格：波动大/振幅大的妖股→偏激进博差价；温吞小波动→偏稳健小做；居中→均衡。并在 chosenStyle 字段回填你选的风格。'
       : (styleMap[payload.style] || styleMap.balanced)
-    return `${zhReason}【做T参考请求】用户持有一只票想日内做T摊薄成本。做T有两个方向，你要根据此刻盘面对称判断、不要默认只做正T：正T=先低吸后高抛(现价偏低时)，反T=先高抛后低接(现价偏高/浮盈时)。数据含：个股实时量价、当日分时结构(intraday: vwap均价/日内高低/现价位置posInDay/节奏rhythm/是否触及日内高低)、大盘情绪(market)、大盘资金流向(marketFlow)、个股近20日走势(history)、【个股历史规律画像 stockProfile】、【专业技术指标 tech(ATR真实波幅/布林带/RSI/KDJ/MACD/支撑压力/买卖带/止损止盈)】、用户持仓(holdCost/holdQty/baseQty)。
+    return `${zhReason}【做T参考请求】用户持有一只票想日内做T摊薄成本。做T有两个方向，你要根据此刻盘面对称判断、不要默认只做正T：正T=先低吸后高抛(现价偏低时)，反T=先高抛后低接(现价偏高/浮盈时)。数据含：个股实时量价、当日分时结构(intraday: vwap均价/日内高低/现价位置posInDay/节奏rhythm/是否触及日内高低)、大盘情绪(market)、大盘资金流向(marketFlow)、个股近20日走势(history)、【个股历史规律画像 stockProfile】、【专业技术指标 tech(ATR真实波幅/布林带/RSI/KDJ/MACD/支撑压力/买卖带/止损止盈)】、用户持仓(holdCost/holdQty/baseQty)。${tActionNote}${t1Note}
 ${payload.openTNet < 0 ? `【重要·反T未接回口径】用户当前有一笔【反T(先卖后买)尚未接回】：底仓${payload.baseQty ?? ''}手里已经卖出${Math.abs(payload.openTNet)}手、还没买回，所以他【当前实际可再卖的底仓 holdQty=${payload.holdQty}手】(已扣掉卖出未接回的那部分)。${payload.holdQty > 0 ? `不要把已卖出的${Math.abs(payload.openTNet)}手当成还在手里、更不能建议"把剩余${Math.abs(payload.openTNet)}手拿到收盘/清掉"——那些手已经不在手里了。` : `底仓已被反T全部卖光、当前可卖手数为0，绝对不能再建议任何"卖出/减仓/拿到收盘/清掉X手"——他手里没有可卖的底仓了。`}此刻更贴切的做T动作通常是【把之前反T卖出的${Math.abs(payload.openTNet)}手在更低价接回(先买)以完成这笔反T并降低成本】：请优先据当前盘面给出"在什么价接回这${Math.abs(payload.openTNet)}手"的正向(先买)建议;若现价仍偏高不宜接、则建议等回落到某价再接回。` : ''}${payload.openTNet > 0 ? `【持仓口径】用户有未结算做T净买入${payload.openTNet}手已计入当前持仓，holdQty=${payload.holdQty}手为含此加仓后的实时可卖手数。` : ''}
 数据：${data}${advisorData}
 
@@ -419,9 +435,9 @@ ${isAuto ? '你要基于历史规律自动决策，并在 chosenStyle 明确回�
   }
   if (mode === 'hold_advice') {
     return `${zhReason}【持仓个股操作建议请求】用户持有一只票，需要你像贴身操盘顾问一样，明确告诉他现在该 **加仓 / 减仓 / 持有 / 清仓**，并且**给出具体的参考价位（一个数字或一个窄区间）**让他能直接照着挂单。本次输出是整体持仓管理决策；近期做T腿只作为操作事实和节奏依据，不得重复计入仓位。
-【本次决策账户快照·必须逐项使用】持仓${payload.holdQty ?? '未提供'}手，成本${payload.holdCost ?? '未提供'}元，今日可卖${payload.sellableTodayQty ?? payload.holdQty ?? '未提供'}手，可用资金${payload.account?.cash ?? '未提供'}元，现金储备${payload.account?.cashReservePct ?? '未提供'}%，总资产${payload.account?.totalAssets ?? '未提供'}元，总仓位${payload.account?.position ?? '未提供'}%，单票占比${payload.account?.stockWeight ?? '未提供'}%${payload.account?.industryWeights?.[0] ? `，最高行业暴露${payload.account.industryWeights[0].industry}${payload.account.industryWeights[0].weight}%` : ''}。pnlNote 必须引用成本与实际盈亏；positionNote 必须引用当前持仓、可用资金、现金储备、单票和行业集中度，明确说明还能否加仓以及最多可操作几手。
+【本次决策账户快照·必须逐项使用】当前持仓${payload.holdQty ?? '未提供'}手，含费成本${payload.holdCost ?? '未提供'}元，当前价${payload.currentPrice ?? payload.todayQuote?.price ?? '未提供'}元，今日可卖${payload.sellableTodayQty ?? payload.holdQty ?? '未提供'}手，可用资金${payload.account?.cash ?? '未提供'}元，现金储备${payload.account?.cashReservePct ?? '未提供'}%，总资产${payload.account?.totalAssets ?? '未提供'}元，总仓位${payload.account?.position ?? '未提供'}%，单票占比${payload.account?.stockWeight ?? '未提供'}%${payload.account?.industryWeights?.[0] ? `，最高行业暴露${payload.account.industryWeights[0].industry}${payload.account.industryWeights[0].weight}%` : ''}。pnlNote 必须逐字引用本快照的当前手数、含费成本、当前价与实际盈亏；positionNote 必须引用当前持仓、可用资金、现金储备、单票和行业集中度，明确说明还能否加仓以及最多可操作几手。
 ${payload.openTNet ? `【重要·持仓口径】holdCost/holdQty 已按【实时持仓】计算——用户有未结算的做T腿，净${payload.openTNet > 0 ? '买入' : '卖出'}${Math.abs(payload.openTNet)}手在做T未结算前【就当作已经${payload.openTNet > 0 ? '加仓' : '减仓'}】计入了当前持仓(手数与成本都已反映)。请直接以这个 holdQty=${payload.holdQty}手、holdCost=${payload.holdCost} 为当前真实持仓来判断加/减/持有/清仓，不要再把那部分当"待结算做T"。` : ''}
-数据含：个股实时量价(nowPrice/dayHigh/dayLow/open/prevClose)、当日分时(intraday: now实时价/vwap均价/日内高低/posInDay位置/rhythm节奏/是否触及日内高低)、大盘情绪(market)、资金流向(marketFlow)、个股近20日走势(history: ma5/ma10/ma20、20日高低)、【个股历史规律画像 stockProfile】、【专业技术指标 tech(ATR真实波幅/布林带上下轨/RSI/KDJ/MACD/支撑support压力resistance/买入带buyZone卖出带sellZone/止损stopLoss/止盈takeProfit)】、**用户持仓成本 holdCost 与手数 holdQty（决策基准，已含未结算做T净腿）**${payload.account && payload.account.totalAssets ? `、账户总资产${payload.account.totalAssets}元${payload.account.cash != null ? '/可用' + payload.account.cash + '元' : ''}${payload.account.position != null ? '/当前总仓位' + payload.account.position + '%' : ''}${payload.account.stockWeight != null ? '/该股当前占总资产' + payload.account.stockWeight + '%' : ''}(用于按账户全景算补仓金额、仓位占比、最多可买几手)` : ''}${payload.quant ? '、量化模型 quant(score多因子分/bias/forecast走势预测)' : ''}。
+数据含：个股实时量价(nowPrice/dayHigh/dayLow/open/prevClose)、当日分时(intraday: now实时价/vwap均价/日内高低/posInDay位置/rhythm节奏/是否触及日内高低)、大盘情绪(market)、资金流向(marketFlow)、个股近20日走势(history: ma5/ma10/ma20、20日高低)、【个股历史规律画像 stockProfile】、【专业技术指标 tech(ATR真实波幅/布林带上下轨/RSI/KDJ/MACD/支撑support压力resistance/买入带buyZone卖出带sellZone/止损stopLoss/止盈takeProfit)】、**用户含费持仓成本 holdCost、当前手数 holdQty 与当前价 currentPrice（决策基准，已含未结算做T净腿）**${payload.account && payload.account.totalAssets ? `、账户总资产${payload.account.totalAssets}元${payload.account.cash != null ? '/可用' + payload.account.cash + '元' : ''}${payload.account.position != null ? '/当前总仓位' + payload.account.position + '%' : ''}${payload.account.stockWeight != null ? '/该股当前占总资产' + payload.account.stockWeight + '%' : ''}(用于按账户全景算补仓金额、仓位占比、最多可买几手)` : ''}${payload.quant ? '、量化模型 quant(score多因子分/bias/forecast走势预测)' : ''}。
 【账户全景优先】若给了 account.totalAssets / account.cash / account.position / account.stockWeight，你必须先按账户约束算建议，而不是只按K线拍脑袋：
 - 加仓：先判断可用资金 account.cash 最多还能买几手(整数手=100股)，再按 marketEnv.suggestPosition 与该股当前占比 stockWeight 判断是否该补；弱市/单票占比已偏高时，只能小补或不补。
 - 减仓：若单票占比 stockWeight 已过高，优先给减仓几手把单票降到更合理区间；别只说“减仓”，要明确减几手、减完后仓位大概降到多少。
@@ -435,7 +451,7 @@ ${payload.openTNet ? `【重要·持仓口径】holdCost/holdQty 已按【实时
 - 默认把单票控制在总资产的合理范围：弱市尽量不超过约10%~15%，中性市约15%~20%，强市龙头可放宽但仍要讲清楚理由；若当前 stockWeight 已偏高，优先减仓/持有，不要继续建议重仓加。
 - 总仓位达到85%、现金储备低于10%、单票将达到25%或所属行业将达到30%时，不得继续买入/加仓。
 - 若是做T/减仓，也要结合 holdQty 给出可执行的整数手数，不能超过当前手数。
-数据：${data}${advisorData}${tradingReality}${t1Note}${tradeContextNote}${execDiscipline}
+数据：${data}${advisorData}${tradingReality}${t1Note}${tradeContextNote}${tActionNote}${execDiscipline}
 
 【决策逻辑，逐条结合数据，不许空谈】：：用 nowPrice 与 holdCost 比，判断此刻是浮盈还是套牢、幅度多少。这决定基调：浮盈可考虑落袋/减仓，套牢要看该补还是该止损。
 2. **趋势与位置**：用 history(均线多空/20日区间位置) + tech(布林/RSI/KDJ/MACD/支撑压力) + intraday(现价vs均价/日内位置) 判断这只股现在是强势该拿住、还是转弱该减、还是超跌可补。
@@ -493,7 +509,7 @@ ${(payload.openTNet < 0 && (payload.holdQty === 0 || payload.holdQty == null)) ?
 ✅ stance 只能是"加仓"(接回/买回也算加仓方向)或"观望"(等更好的接回点),【绝对不能是"持有""减仓""清仓"】。
 ✅ nextAction/headline/opQty 必须写成"接回/买回X手 @ 某价"或"等回踩到X再接回",opQty 写"买回X手"或"接回X手",不能写"持有""减仓""清仓"。` : ''}
 数据含：个股实时量价、当日分时(intraday: vwap均价/日内高低/posInDay位置/rhythm节奏)、大盘情绪(market)、资金流向(marketFlow)、近20日走势(history)、【个股历史规律画像 stockProfile】、【专业技术指标 tech】${payload.quant ? '、量化模型 quant(score/bias/forecast走势预测)' : ''}${payload.hold ? '、用户持仓 hold(cost成本/qty手数/pnlPct浮盈亏%)' : ''}${payload.todayTrades ? '、用户今日在该股的成交 todayTrades(买卖价/手数)' : ''}${payload.tradeHistory ? '、用户过往交易记录 tradeHistory' : ''}。
-数据：${data}${advisorData}${execDiscipline}
+数据：${data}${advisorData}${t1Note}${tradeContextNote}${tActionNote}${execDiscipline}
 
 【复盘逻辑，逐条结合数据】：
 1. **今日表现回顾**：用当日涨跌/分时节奏(rhythm)/量比，一句话概括这只股今天走成什么样、强还是弱。

@@ -2,12 +2,15 @@
 
 import argparse
 import json
-import math
 import os
 import time
 
 import numpy as np
 
+from time_splits import (
+    purged_holdout_split as shared_purged_holdout_split,
+    three_way_purged_split,
+)
 
 COMMON_PARAMS = {
     "boosting_type": "gbdt",
@@ -27,34 +30,11 @@ COMMON_PARAMS = {
 
 
 def purged_holdout_split(dates, *, holdout_fraction=0.15, purge_dates=5):
-    dates = np.asarray(dates).astype(str)
-    if dates.ndim != 1 or not len(dates):
-        raise ValueError("dates must be a non-empty one-dimensional array")
-    if not 0 < holdout_fraction < 0.5:
-        raise ValueError("holdout_fraction must be between zero and 0.5")
-    if not isinstance(purge_dates, int) or purge_dates < 0:
-        raise ValueError("purge_dates must be a non-negative integer")
-
-    unique_dates = np.unique(dates)
-    holdout_count = max(1, math.ceil(len(unique_dates) * holdout_fraction))
-    holdout_position = len(unique_dates) - holdout_count
-    purge_position = holdout_position - purge_dates
-    if purge_position <= 0:
-        raise ValueError("dataset is too short for the requested purge")
-
-    holdout_start = unique_dates[holdout_position]
-    purge_start = unique_dates[purge_position]
-    train_index = np.flatnonzero(dates < purge_start)
-    holdout_index = np.flatnonzero(dates >= holdout_start)
-    if not len(train_index) or not len(holdout_index):
-        raise ValueError("purged split produced an empty partition")
-    return train_index, holdout_index, {
-        "holdout_start_date": str(holdout_start),
-        "purge_start_date": str(purge_start),
-        "purge_dates": purge_dates,
-        "train_samples": int(len(train_index)),
-        "holdout_samples": int(len(holdout_index)),
-    }
+    return shared_purged_holdout_split(
+        dates,
+        holdout_fraction=holdout_fraction,
+        purge_dates=purge_dates,
+    )
 
 
 def map_barrier_labels(labels):
@@ -64,14 +44,18 @@ def map_barrier_labels(labels):
     return labels + 1
 
 
-def _balanced_weights(labels):
+def _balanced_weights(labels, reference_index=None):
     labels = np.asarray(labels, dtype=int)
-    classes, counts = np.unique(labels, return_counts=True)
+    reference = labels if reference_index is None else labels[reference_index]
+    classes, counts = np.unique(reference, return_counts=True)
     weights = {
-        value: len(labels) / (len(classes) * count)
+        value: len(reference) / (len(classes) * count)
         for value, count in zip(classes, counts)
     }
-    return np.asarray([weights[value] for value in labels], dtype=np.float32)
+    return np.asarray(
+        [weights.get(value, 1.0) for value in labels],
+        dtype=np.float32,
+    )
 
 
 def _fit_with_holdout(
@@ -111,7 +95,7 @@ def _fit_with_holdout(
         X[holdout_index],
         num_iteration=iterations,
     )
-    return prediction, iterations
+    return model, prediction, iterations
 
 
 def _fit_final(*, X, y, params, iterations, weights=None):
@@ -141,11 +125,18 @@ def train_models(dataset_path, output_dir):
             for horizon in (1, 3, 5)
         }
 
-    train_index, holdout_index, split = purged_holdout_split(
-        dates,
-        holdout_fraction=0.15,
-        purge_dates=5,
+    train_index, calibration_index, holdout_index, split = (
+        three_way_purged_split(
+            dates,
+            calibration_fraction=0.15,
+            holdout_fraction=0.15,
+            purge_dates=5,
+        )
     )
+    final_index = np.sort(np.concatenate([
+        train_index,
+        calibration_index,
+    ]))
     os.makedirs(output_dir, exist_ok=True)
     metrics = {
         "samples": int(len(X)),
@@ -161,14 +152,18 @@ def train_models(dataset_path, output_dir):
         "metric": "multi_logloss",
         "num_class": 3,
     }
-    barrier_weights = _balanced_weights(barrier)
-    barrier_prob, barrier_iterations = _fit_with_holdout(
+    train_barrier_weights = _balanced_weights(barrier, train_index)
+    calibration_model, _calibration_prob, barrier_iterations = _fit_with_holdout(
         X=X,
         y=barrier,
         train_index=train_index,
-        holdout_index=holdout_index,
+        holdout_index=calibration_index,
         params=barrier_params,
-        weights=barrier_weights,
+        weights=train_barrier_weights,
+    )
+    barrier_prob = calibration_model.predict(
+        X[holdout_index],
+        num_iteration=barrier_iterations,
     )
     barrier_prediction = np.argmax(barrier_prob, axis=1)
     prediction_snapshot = {
@@ -201,12 +196,13 @@ def train_models(dataset_path, output_dir):
             )
         ),
     }
+    final_barrier_weights = _balanced_weights(barrier, final_index)
     barrier_model = _fit_final(
-        X=X,
-        y=barrier,
+        X=X[final_index],
+        y=barrier[final_index],
         params=barrier_params,
         iterations=barrier_iterations,
-        weights=barrier_weights,
+        weights=final_barrier_weights[final_index],
     )
     barrier_model.save_model(os.path.join(output_dir, "barrier.txt"))
 
@@ -217,12 +213,18 @@ def train_models(dataset_path, output_dir):
     }
     metrics["returns"] = {}
     for horizon, target in returns.items():
-        prediction, iterations = _fit_with_holdout(
-            X=X,
-            y=target,
-            train_index=train_index,
-            holdout_index=holdout_index,
-            params=regression_params,
+        calibration_model, _calibration_prediction, iterations = (
+            _fit_with_holdout(
+                X=X,
+                y=target,
+                train_index=train_index,
+                holdout_index=calibration_index,
+                params=regression_params,
+            )
+        )
+        prediction = calibration_model.predict(
+            X[holdout_index],
+            num_iteration=iterations,
         )
         correlation = spearmanr(
             target[holdout_index],
@@ -245,8 +247,8 @@ def train_models(dataset_path, output_dir):
             dtype=np.float32,
         )
         model = _fit_final(
-            X=X,
-            y=target,
+            X=X[final_index],
+            y=target[final_index],
             params=regression_params,
             iterations=iterations,
         )

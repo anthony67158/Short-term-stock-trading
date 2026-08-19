@@ -121,6 +121,31 @@
 - Destructive: semantic red, never cobalt.
 - Buttons never use a purple-to-blue gradient.
 
+## Global visual grammar
+
+- Every core workspace starts with a compact text-only page identity. Do not
+  repeat the global market state or add icons, tutorial steps and process rails.
+- Panel headers use one 30px cobalt icon anchor, one primary title and a
+  right-aligned action area. Do not place explanatory secondary copy under titles.
+- Panel-local filter rows share the same inline edge as the header icon anchor;
+  do not add hidden horizontal padding that shifts segmented controls.
+- KPI values use mono tabular figures, weight 700 and tight leading. Labels are
+  smaller and muted; red/green always retain icon, sign or direction context.
+- Data-table rows use a stable 44px rhythm. Selection uses cobalt; market
+  direction continues to use A-share red-up / green-down semantics.
+- Loading, empty and error states occupy a stable region and explain status
+  without decorative illustration or celebratory motion.
+- Actionable empty states use one compact row with status and a direct command;
+  they do not reuse large dashed content placeholders.
+- Buttons must stay inside their parent at every viewport. Command labels remain
+  one line and use concise copy plus ellipsis instead of widening the layout.
+- In dense equal-width command rows, prefer short text-only labels when icons
+  would reduce the required inner padding.
+- Long advice stays clamped while collapsed and expands inline only after click.
+  Do not add a hover card or duplicate the advice in a floating layer.
+- Measure advice overflow from the rendered text. If the full sentence already
+  fits, render plain text without a disclosure button, arrow or hover card.
+
 ## Per-page hierarchy
 
 - 今日决策: market verdict → action plan → AI candidates → supporting market evidence.

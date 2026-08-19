@@ -13,9 +13,15 @@ import http from 'node:http'
 import { readdirSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import path from 'node:path'
+import {
+  RequestBodyError,
+  readRequestBody,
+} from './api/_http_body.js'
 
 const PORT = process.env.PORT || 3000
 const API_DIR = path.join(process.cwd(), 'api')
+const API_BODY_LIMIT = 8 * 1024 * 1024
+const BODY_READ_TIMEOUT_MS = 15_000
 
 // 预加载所有非下划线开头的函数模块
 const handlers = {}
@@ -27,16 +33,15 @@ for (const f of readdirSync(API_DIR)) {
 }
 console.log('[dev-api] 已加载函数:', Object.keys(handlers).join(', '))
 
-function parseBody(req) {
-  return new Promise((resolve) => {
-    let data = ''
-    req.on('data', (c) => { data += c })
-    req.on('end', () => resolve(data))
-  })
-}
-
-const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, `http://localhost:${PORT}`)
+async function handleRequest(req, res) {
+  let url
+  try {
+    url = new URL(req.url, `http://localhost:${PORT}`)
+  } catch {
+    res.statusCode = 400
+    res.end('Bad request')
+    return
+  }
   if (!url.pathname.startsWith('/api/')) { res.statusCode = 404; res.end('Not found'); return }
   const name = url.pathname.slice(5)
   const handler = handlers[name]
@@ -44,7 +49,12 @@ const server = http.createServer(async (req, res) => {
 
   // 适配 Vercel req/res
   req.query = Object.fromEntries(url.searchParams.entries())
-  const raw = (req.method === 'POST' || req.method === 'PUT') ? await parseBody(req) : ''
+  const raw = (req.method === 'POST' || req.method === 'PUT')
+    ? await readRequestBody(req, {
+        maxBytes: API_BODY_LIMIT,
+        timeoutMs: BODY_READ_TIMEOUT_MS,
+      })
+    : ''
   try { req.body = raw ? JSON.parse(raw) : {} } catch { req.body = raw }
 
   res.status = (code) => { res.statusCode = code; return res }
@@ -54,8 +64,29 @@ const server = http.createServer(async (req, res) => {
   try {
     await handler(req, res)
   } catch (e) {
-    if (!res.writableEnded) { res.statusCode = 500; res.end(JSON.stringify({ ok: false, error: String(e.message || e) })) }
+    console.error('[dev-api] handler failed', name, e?.code || e?.name || e?.message)
+    if (!res.writableEnded) {
+      res.statusCode = 500
+      res.end(JSON.stringify({ ok: false, error: '接口执行失败' }))
+    }
   }
+}
+
+const server = http.createServer((req, res) => {
+  handleRequest(req, res).catch((error) => {
+    if (res.writableEnded) return
+    console.error('[dev-api] request failed', error?.code || error?.name || error?.message)
+    res.statusCode = error instanceof RequestBodyError
+      ? error.statusCode
+      : 500
+    res.setHeader('Content-Type', 'application/json; charset=utf-8')
+    res.end(JSON.stringify({
+      ok: false,
+      error: error instanceof RequestBodyError
+        ? error.message
+        : '服务内部错误',
+    }))
+  })
 })
 
 server.listen(PORT, () => console.log(`[dev-api] 本地 API 运行在 http://localhost:${PORT}`))

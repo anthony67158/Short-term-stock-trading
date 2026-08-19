@@ -3,7 +3,11 @@ import { emGet, num, preflight, applyCors } from './_lib.js';
 import { authorizePaidRequest } from './_account_auth.js';
 import { marketTimePromptBlock } from './_market_time.js';
 import { fetchOverseas, fetchAIndices, fetchNews, fetchStockNews, fetchClsTelegraph, fetchSinaFlash, fetchWallstreetLive, fetchFinnhubNews } from './_market_data.js';
-import { buildDailySummary } from './_daily_summary.js';
+import {
+  buildDailySummary,
+  dailyReportCacheKey,
+  isCompleteDailyReport,
+} from './_daily_summary.js';
 import { llmEnv, makeSSE, callChat, parseLLMJson } from './_llm.js';
 import { ensureConfig, getModel, getReasoning } from './_llm_config.js';
 import {
@@ -22,8 +26,6 @@ function bjMinutes() { const d = nowBJ(); return d.getHours() * 60 + d.getMinute
 // 按当前时刻自动判定默认场次：<11:30 早报 / 11:30-15:00 午报 / >=15:00 晚报
 function autoSession() { const hm = bjMinutes(); if (hm < 690) return 'morning'; if (hm < 900) return 'noon'; return 'evening'; }
 const SESSION_CN = { morning: '盘前早报', noon: '午间午报', evening: '收盘晚报' };
-const PREFIX = 'dailyreport/';
-const cacheKey = (day, session) => `${PREFIX}${day}-${session}`;
 
 // 日报模型改为运行时读取；原独立 daily 角色已移除，复用 agent 模型，见 handler 内 getModel('agent')
 
@@ -69,17 +71,19 @@ export default async function handler(req, res) {
     const refresh = req.query.refresh === '1';
     const day = bjDayKey();
     const hasBlob = hasStorage();
+    const accountNick = accountAuth.account.nick;
+    const accountCacheKey = dailyReportCacheKey(day, session, accountNick);
 
     // 1) 命中缓存(同日同场次且非强制刷新)→ 直接返回
     if (hasBlob && !refresh) {
       try {
-        const { blobs } = await list({ prefix: cacheKey(day, session), limit: 5 });
+        const { blobs } = await list({ prefix: accountCacheKey, limit: 5 });
         if (blobs.length) {
           const latest = blobs.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt))[0];
           const cached = await readJson(latest);
           if (
             cached
-            && cached.report
+            && isCompleteDailyReport(cached)
             && cached.searchEnabled === aiSearchConfig.enabled
             && Number(cached.searchConfigUpdatedAt || 0) === Number(aiSearchConfig.updatedAt || 0)
           ) {
@@ -229,6 +233,10 @@ export default async function handler(req, res) {
       holdings: (partA && partA.holdings) || [],
       sectors: [...((partB && partB.sectors) || []), ...((partC && partC.sectors) || [])],
     };
+    if (!isCompleteDailyReport({ report })) {
+      emit('result', { ok: false, error: '日报核心内容不完整，请稍后重试' });
+      return endOnce();
+    }
 
     const result = {
       ok: true, cached: false, day, session, sessionCn: SESSION_CN[session], updatedAt: Date.now(),
@@ -245,7 +253,7 @@ export default async function handler(req, res) {
 
     // 4) 写缓存
     if (hasBlob) {
-      try { await put(`${cacheKey(day, session)}-${Date.now()}.json`, JSON.stringify(result), { access: 'public', contentType: 'application/json', addRandomSuffix: true, cacheControlMaxAge: 0 }); } catch { /* ignore */ }
+      try { await put(`${accountCacheKey}-${Date.now()}.json`, JSON.stringify(result), { access: 'public', contentType: 'application/json', addRandomSuffix: true, cacheControlMaxAge: 0 }); } catch { /* ignore */ }
     }
 
     emit('result', result);

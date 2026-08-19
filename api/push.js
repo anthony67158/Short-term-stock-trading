@@ -9,7 +9,13 @@
 //   { action:'unsubscribe', nick, pw, endpoint }         → 删除本设备订阅
 
 import { applyCors, preflight } from './_lib.js';
-import { isAccountActive, readAccount, sha, writeAccount } from './account.js';
+import {
+  accountCredentialMatches,
+  isAccountActive,
+  readAccount,
+  writeAccount,
+} from './account.js';
+import { assertSafeWebPushEndpoint } from './_safe_remote_url.js';
 
 function json(res, obj, code = 200) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -30,11 +36,14 @@ export default async function handler(req, res) {
   const action = body.action;
   const nick = String(body.nick || '').trim();
   const pw = body.pw != null ? String(body.pw) : '';
-  if (!nick || !pw) return json(res, { ok: false, error: '缺少账号凭证' });
+  const token = body.token != null ? String(body.token) : '';
+  if (!nick || (!token && !pw)) return json(res, { ok: false, error: '缺少账号凭证' });
 
   const acc = await readAccount(nick);
   if (!acc) return json(res, { ok: false, error: '账号不存在' });
-  if (acc.pwHash !== sha(pw)) return json(res, { ok: false, error: '密码错误' });
+  if (!accountCredentialMatches(acc, { pw, token })) {
+    return json(res, { ok: false, error: '账号鉴权失败' });
+  }
   if (!isAccountActive(acc)) return json(res, { ok: false, error: '账号已注销' });
 
   const data = acc.data || (acc.data = {});
@@ -46,7 +55,13 @@ export default async function handler(req, res) {
       if (!s || !s.endpoint || !s.keys || !s.keys.p256dh || !s.keys.auth) {
         return json(res, { ok: false, error: '订阅信息不完整' });
       }
-      const clean = { endpoint: s.endpoint, keys: { p256dh: s.keys.p256dh, auth: s.keys.auth }, ua: String(body.ua || '').slice(0, 200), at: Date.now() };
+      let endpoint;
+      try {
+        endpoint = await assertSafeWebPushEndpoint(s.endpoint);
+      } catch {
+        return json(res, { ok: false, error: '订阅端点不受支持' }, 400);
+      }
+      const clean = { endpoint, keys: { p256dh: s.keys.p256dh, auth: s.keys.auth }, ua: String(body.ua || '').slice(0, 200), at: Date.now() };
       const idx = subs.findIndex((x) => x && x.endpoint === clean.endpoint);
       if (idx >= 0) subs[idx] = clean; else subs.push(clean);
       // 上限保护:每账号最多留 10 个设备,超出淘汰最旧

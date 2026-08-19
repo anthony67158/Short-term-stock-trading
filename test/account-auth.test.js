@@ -11,7 +11,12 @@ import {
   TRUSTED_ACCOUNT_REQUEST,
   authenticateAccountRequest,
   isAuthorizedAccount,
+  isRuntimeConfigAdmin,
 } from '../api/_account_auth.js'
+import {
+  createAccountSessionToken,
+  verifyAccountSessionToken,
+} from '../api/_account_session.js'
 
 function encodedHeaders(nick = '测试账号', pw = '测试密码') {
   return {
@@ -78,6 +83,53 @@ test('付费能力只允许部署白名单中的账号', () => {
     env: {},
     hashAccount,
   }), false)
+})
+
+test('账号会话令牌绑定账号密码摘要并在过期后失效', () => {
+  const account = { nick: '已有账号', pwHash: 'password-hash' }
+  const secret = 'session-secret'
+  const now = Date.parse('2026-08-19T00:00:00.000Z')
+  const token = createAccountSessionToken(account, {
+    secret,
+    now,
+    maxAgeSeconds: 60,
+  })
+
+  assert.equal(verifyAccountSessionToken(account, token, {
+    secret,
+    now: now + 30_000,
+  }), true)
+  assert.equal(verifyAccountSessionToken(
+    { ...account, pwHash: 'changed' },
+    token,
+    { secret, now: now + 30_000 },
+  ), false)
+  assert.equal(verifyAccountSessionToken(account, token, {
+    secret,
+    now: now + 61_000,
+  }), false)
+})
+
+test('运行时全局配置只允许显式管理员且单付费账号兼容回退', () => {
+  const account = { nick: '已有账号' }
+  const accountHash = 'authorized-hash'
+  const hashAccount = () => accountHash
+
+  assert.equal(isRuntimeConfigAdmin(account, {
+    env: {
+      AUTHORIZED_ACCOUNT_HASHES: `${accountHash},other`,
+      RUNTIME_CONFIG_ADMIN_HASHES: accountHash,
+    },
+    hashAccount,
+  }), true)
+  assert.equal(isRuntimeConfigAdmin(account, {
+    env: { AUTHORIZED_ACCOUNT_HASHES: `${accountHash},other` },
+    hashAccount,
+  }), false)
+  assert.equal(isRuntimeConfigAdmin(account, {
+    env: { AUTHORIZED_ACCOUNT_HASHES: accountHash },
+    hashAccount,
+  }), true)
 })
 
 test('匿名调用付费AI接口必须在触发模型前返回401', async () => {

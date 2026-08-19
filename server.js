@@ -36,12 +36,19 @@ import {
   verifySiteAccessCode,
   verifySiteAccessToken,
 } from './api/_site_access.js';
+import {
+  RequestBodyError,
+  readRequestBody,
+} from './api/_http_body.js';
 
 const PORT = process.env.FC_SERVER_PORT || process.env.PORT || 9000;
 const ROOT = process.cwd();
 const API_DIR = path.join(ROOT, 'api');
 const DIST_DIR = path.join(ROOT, 'dist');
 const siteAccessLimiter = createSiteAccessLimiter();
+const API_BODY_LIMIT = 8 * 1024 * 1024;
+const INVOKE_BODY_LIMIT = 256 * 1024;
+const BODY_READ_TIMEOUT_MS = 15_000;
 
 // 预加载所有非下划线开头的函数模块
 const handlers = {};
@@ -60,14 +67,6 @@ const MIME = {
   '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.ico': 'image/x-icon',
   '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.map': 'application/json',
 };
-
-function parseBody(req) {
-  return new Promise((resolve) => {
-    let data = '';
-    req.on('data', (c) => { data += c; });
-    req.on('end', () => resolve(data));
-  });
-}
 
 function protectedSiteHost(req) {
   return req.headers['x-forwarded-host'] || req.headers.host || '';
@@ -218,17 +217,36 @@ function serveSiteAccess(req, res) {
     res.end();
     return;
   }
-  createReadStream(file).pipe(res);
+  createReadStream(file)
+    .on('error', () => {
+      if (!res.writableEnded) {
+        res.statusCode = 500;
+        res.end('read failed');
+      }
+    })
+    .pipe(res);
 }
 
 // 静态资源：命中文件则回传；未命中且非静态扩展名 → 回退 index.html（SPA 路由）
 function serveStatic(_req, res, pathname) {
   if (!existsSync(DIST_DIR)) { res.statusCode = 404; res.end('dist not built'); return; }
-  let rel = decodeURIComponent(pathname).replace(/^\/+/, '');
+  let rel;
+  try {
+    rel = decodeURIComponent(pathname).replace(/^\/+/, '');
+  } catch {
+    res.statusCode = 400;
+    res.end('bad path');
+    return;
+  }
   if (rel === '' || rel.endsWith('/')) rel += 'index.html';
-  let file = path.join(DIST_DIR, rel);
+  let file = path.resolve(DIST_DIR, rel);
   // 防目录穿越
-  if (!file.startsWith(DIST_DIR)) { res.statusCode = 403; res.end('forbidden'); return; }
+  const relative = path.relative(DIST_DIR, file);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    res.statusCode = 403;
+    res.end('forbidden');
+    return;
+  }
   if (!existsSync(file) || !statSync(file).isFile()) {
     // 有扩展名却找不到 → 404；否则按 SPA 路由回退 index.html
     if (path.extname(rel)) { res.statusCode = 404; res.end('not found'); return; }
@@ -240,17 +258,51 @@ function serveStatic(_req, res, pathname) {
   // index.html 不缓存；带 hash 的 assets 长缓存（对齐原 vercel.json）
   if (file.endsWith('index.html')) res.setHeader('Cache-Control', 'no-cache');
   else if (rel.startsWith('assets/')) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-  createReadStream(file).pipe(res);
+  createReadStream(file)
+    .on('error', () => {
+      if (!res.writableEnded) {
+        res.statusCode = 500;
+        res.end('read failed');
+      }
+    })
+    .pipe(res);
 }
 
-const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, `http://localhost:${PORT}`);
+function sendRequestFailure(req, res, error) {
+  if (res.writableEnded) return;
+  const requestError = error instanceof RequestBodyError;
+  const statusCode = requestError ? error.statusCode : 500;
+  if (statusCode === 408) {
+    res.shouldKeepAlive = false;
+    res.setHeader('Connection', 'close');
+  }
+  res.statusCode = statusCode;
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.end(JSON.stringify({
+    ok: false,
+    error: requestError ? error.message : '服务内部错误',
+  }));
+  if (statusCode === 408) req.destroy();
+}
+
+async function handleRequest(req, res) {
+  let url;
+  try {
+    url = new URL(req.url, `http://localhost:${PORT}`);
+  } catch {
+    res.statusCode = 400;
+    res.end('bad request');
+    return;
+  }
   const pathname = url.pathname;
 
   // FC 事件源（Timer/InvokeFunction）固定 POST /invoke。仅接受部署时 CRON_KEY
   // 匹配的专用触发器，避免公开 HTTP 地址伪造定时调用消耗模型额度。
   if (pathname === '/invoke' && req.method === 'POST') {
-    const raw = await parseBody(req);
+    const raw = await readRequestBody(req, {
+      maxBytes: INVOKE_BODY_LIMIT,
+      timeoutMs: BODY_READ_TIMEOUT_MS,
+    });
     let event = null;
     try { event = JSON.parse(raw || '{}'); } catch { /* ignore */ }
     const adviceBody = adviceTimerBody(event, process.env.CRON_KEY)
@@ -291,7 +343,11 @@ const server = http.createServer(async (req, res) => {
               : 'portfolio_analysis';
       await handlers[handlerName](req, res);
     } catch (e) {
-      if (!res.writableEnded) { res.statusCode = 500; res.end(JSON.stringify({ ok: false, error: String(e.message || e) })); }
+      console.error('[fc] invoke handler failed', e?.code || e?.name || e?.message);
+      if (!res.writableEnded) {
+        res.statusCode = 500;
+        res.end(JSON.stringify({ ok: false, error: '定时任务执行失败' }));
+      }
     }
     return;
   }
@@ -338,7 +394,12 @@ const server = http.createServer(async (req, res) => {
 
   // 适配 Vercel req/res
   req.query = Object.fromEntries(url.searchParams.entries());
-  const raw = (req.method === 'POST' || req.method === 'PUT') ? await parseBody(req) : '';
+  const raw = (req.method === 'POST' || req.method === 'PUT')
+    ? await readRequestBody(req, {
+        maxBytes: API_BODY_LIMIT,
+        timeoutMs: BODY_READ_TIMEOUT_MS,
+      })
+    : '';
   try { req.body = raw ? JSON.parse(raw) : {}; } catch { req.body = raw; }
 
   res.status = (code) => { res.statusCode = code; return res; };
@@ -348,8 +409,19 @@ const server = http.createServer(async (req, res) => {
   try {
     await handler(req, res);
   } catch (e) {
-    if (!res.writableEnded) { res.statusCode = 500; res.end(JSON.stringify({ ok: false, error: String(e.message || e) })); }
+    console.error('[fc] api handler failed', name, e?.code || e?.name || e?.message);
+    if (!res.writableEnded) {
+      res.statusCode = 500;
+      res.end(JSON.stringify({ ok: false, error: '接口执行失败' }));
+    }
   }
+}
+
+const server = http.createServer((req, res) => {
+  handleRequest(req, res).catch((error) => {
+    console.error('[fc] request failed', error?.code || error?.name || error?.message);
+    sendRequestFailure(req, res, error);
+  });
 });
 
 server.listen(PORT, () => console.log(`[fc] server listening on ${PORT}`));

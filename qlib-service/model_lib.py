@@ -185,11 +185,10 @@ def get_model():
     except Exception:
         return None, None
     # 1) 尝试 OSS 热更新（失败不影响后续 bundled 兜底）
-    if not os.path.exists(LOCAL_MODEL):
-        try:
-            _download_model()
-        except Exception:
-            pass
+    try:
+        _download_model()
+    except Exception:
+        pass
     # 选定要加载的文件：优先 OSS 拉下来的，其次 bundled
     model_path, meta_path = None, None
     if os.path.exists(LOCAL_MODEL):
@@ -277,11 +276,10 @@ def get_signal_model():
         import lightgbm as lgb
     except Exception:
         return None, None
-    if not os.path.exists(LOCAL_SIGNAL):
-        try:
-            _download_signal()
-        except Exception:
-            pass
+    try:
+        _download_signal()
+    except Exception:
+        pass
     model_path, meta_path = None, None
     if os.path.exists(LOCAL_SIGNAL):
         model_path, meta_path = LOCAL_SIGNAL, LOCAL_SIGNAL_META

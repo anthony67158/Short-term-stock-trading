@@ -12,7 +12,11 @@ import {
   failAdviceJobsForDailyReport,
   setAdviceDailyReportPhase,
 } from '../api/_advice_daily_report.js'
-import { buildDailySummary } from '../api/_daily_summary.js'
+import {
+  buildDailySummary,
+  dailyReportCacheKey,
+  isCompleteDailyReport,
+} from '../api/_daily_summary.js'
 
 const NOW = Date.parse('2026-08-12T02:30:00.000Z')
 const SUMMARY = {
@@ -106,11 +110,44 @@ test('日报摘要保留检索配置版本供军师复用校验', () => {
     sessionCn: '盘前早报',
     searchEnabled: false,
     searchConfigUpdatedAt: 300,
-    report: { overview: '市场震荡', sectors: [] },
+    report: {
+      overview: '市场震荡',
+      strategy: '控制仓位，等待确认。',
+      sectors: [],
+    },
   })
 
   assert.equal(summary.searchEnabled, false)
   assert.equal(summary.searchConfigUpdatedAt, 300)
+})
+
+test('日报缓存按账号摘要隔离且路径不包含明文昵称', () => {
+  const left = dailyReportCacheKey('2026-08-12', 'morning', '账号A')
+  const right = dailyReportCacheKey('2026-08-12', 'morning', '账号B')
+
+  assert.notEqual(left, right)
+  assert.equal(left.includes('账号A'), false)
+  assert.match(left, /^dailyreport\/[a-f0-9]{64}\/2026-08-12-morning$/)
+})
+
+test('缺少总览或整体策略的部分日报不能标记成功', () => {
+  const partial = {
+    day: '2026-08-12',
+    session: 'morning',
+    sessionCn: '盘前早报',
+    report: {
+      overview: '市场震荡',
+      strategy: '',
+      sectors: [{ name: 'AI/科技', rating: '看多' }],
+    },
+  }
+
+  assert.equal(isCompleteDailyReport(partial), false)
+  assert.equal(buildDailySummary(partial), null)
+  assert.equal(isCompleteDailyReport({
+    ...partial,
+    report: { ...partial.report, strategy: '控制仓位，等待确认。' },
+  }), true)
 })
 
 test('云端等待任务展示日报阶段且日报失败后明确终止', () => {

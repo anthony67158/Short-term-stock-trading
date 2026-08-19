@@ -4,9 +4,30 @@ import assert from 'node:assert/strict'
 import {
   createCloudSaveQueue,
   accountTradeStateFingerprint,
+  accountSnapshotForRestore,
   sameAccountTradeState,
   saveWithRevisionRecovery,
 } from '../shared/accountSync.js'
+
+test('刷新恢复账号时优先保留尚未上传完成的本地交易快照', () => {
+  const cloud = {
+    holding: [{ id: 'h1', code: '002309', qty: 25 }],
+    closed: [],
+    alerts: [{ id: 'cloud-alert' }],
+  }
+  const pending = {
+    data: {
+      holding: [{ id: 'h1', code: '002309', qty: 16 }],
+      closed: [{ id: 'sell-1', code: '002309', type: 'SELL', qty: 9 }],
+      alerts: [{ id: 'cloud-alert' }],
+    },
+  }
+
+  const restored = accountSnapshotForRestore(cloud, pending)
+
+  assert.equal(restored.holding[0].qty, 16)
+  assert.equal(restored.closed[0].id, 'sell-1')
+})
 
 test('云端保存失败后保留最新数据并自动重试到成功', async () => {
   const calls = []

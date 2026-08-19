@@ -12,6 +12,7 @@
 //   - API Key 只在后端与 OSS 之间流动，绝不回传前端（getMasked 只给掩码）。
 
 import { put, readJson, hasStorage } from './_blob.js';
+import { assertSafeRemoteUrl } from './_safe_remote_url.js';
 
 const KEY_PATH = 'config/llm.json';
 const hasOwn = (obj, key) => !!obj && Object.prototype.hasOwnProperty.call(obj, key);
@@ -146,6 +147,18 @@ function merge(base, over) {
 let _cache = null;   // 已合并的当前配置（同步取）
 let _loadedAt = 0;
 
+export async function assertSafeLlmConfig(config = {}) {
+  const candidates = [
+    config.baseUrl,
+    config.judgeEndpoint?.baseUrl,
+    ...(Array.isArray(config.endpoints)
+      ? config.endpoints.map((endpoint) => endpoint?.baseUrl)
+      : []),
+  ].filter(Boolean);
+  await Promise.all(candidates.map((value) => assertSafeRemoteUrl(value)));
+  return config;
+}
+
 // ---- 异步预热/刷新缓存：handler 入口 await 一次即可 ----
 // maxAgeMs 内不重复读 OSS；读失败保留旧缓存或回退 env，绝不抛出。
 export async function ensureConfig({ maxAgeMs = 20000 } = {}) {
@@ -155,7 +168,10 @@ export async function ensureConfig({ maxAgeMs = 20000 } = {}) {
   if (!hasStorage()) { _cache = base; _loadedAt = now; return _cache; }
   try {
     const stored = await readJson(KEY_PATH);
-    if (stored && typeof stored === 'object') stored.__stored = true;
+    if (stored && typeof stored === 'object') {
+      await assertSafeLlmConfig(stored);
+      stored.__stored = true;
+    }
     _cache = merge(base, stored);
   } catch { _cache = _cache || base; }
   _loadedAt = now;
@@ -264,6 +280,7 @@ export async function saveConfig(patch = {}) {
     }).filter((e) => e.baseUrl && e.apiKey);
   }
   if (!hasStorage()) throw new Error('存储未配置(OSS)，无法保存配置');
+  await assertSafeLlmConfig(next);
   // 覆盖写固定对象名（不加随机后缀，保证下次可读到同一路径）
   await put(KEY_PATH, JSON.stringify(next), { contentType: 'application/json', addRandomSuffix: false, cacheControlMaxAge: 0 });
   next.__stored = true;

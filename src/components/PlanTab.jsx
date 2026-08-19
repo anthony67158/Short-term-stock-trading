@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo, useEffect } from 'react'
+import { useState, useRef, useMemo, useEffect, useLayoutEffect } from 'react'
 import Icon from './Icon'
 import { HL } from './RichText'
 import StockName from './StockName'
@@ -12,7 +12,7 @@ import { AlertForm } from './AlertCenter'
 import { useMediaQuery, usePolling, useSwipe } from '../hooks'
 import { callAIStream } from '../ai'
 import { api } from '../apiBase'
-import { planStore, usePlanStore, calcBuyFee, calcSellFee, computeTFlows, computePortfolio, sortHoldingsByProfit, livePositionOf, t1StatusOf, advicePlan, adviceFocus } from '../planStore'
+import { planStore, usePlanStore, calcBuyFee, calcSellFee, computeTFlows, computePortfolio, sortHoldingsByProfit, livePositionOf, t1StatusOf, advicePlan } from '../planStore'
 import { aiStore } from '../aiStore'
 import { openStockDetail, useDetailStore } from '../detailStore'
 import { getAdvice, subscribeAdvice } from '../adviceCache'
@@ -41,12 +41,17 @@ import {
   todayTradeCodes,
 } from '../../shared/dailyFinance.js'
 import {
+  buildTActionContext,
   tradeActivityContext,
 } from '../../shared/portfolioAccounting.js'
+import { nextTradingDayLabel } from '../../shared/tradingCalendar.js'
 import {
   rankWatchlistCandidates,
-  watchlistReadiness,
 } from '../../shared/watchlistRanking.js'
+import {
+  buildActionProgress,
+  buildAdviceActionView,
+} from '../../shared/adviceActionView.js'
 import { visibleAiSources } from '../../shared/aiSearchUi.js'
 import { useAiSearchConfig } from '../aiSearchConfigStore'
 import { useStockTags } from '../stockTagStore'
@@ -437,138 +442,402 @@ function AdviceUpdatedAt({ entry }) {
   )
 }
 
-// ---------- 候选卡：目标价 + 买入手数 + 买点进度条 ----------
-// 取值可手动填写/编辑，也可自动来源于「AI 操作建议」的建议买入价 / 建议买入手数；
-// 个股详情刷新建议后（saveAdvice 触发 subscribeAdvice），未被手动覆盖的字段自动跟随更新。
-// 进度条：可视化「建议买入价 ↔ 当前价」的差距（当前价越接近/低于目标买价，越接近买点）。
-function CandTarget({ p, q }) {
-  const [, force] = useState(0)
-  // 订阅 AI 建议缓存：详情页刷新建议 → 重渲染 → 未手动覆盖的字段自动跟随
-  useEffect(() => subscribeAdvice(() => force((n) => n + 1)), [])
+const roundActionPrice = (value) => (
+  value == null || isNaN(value)
+    ? null
+    : Number(value) < 10
+      ? +Number(value).toFixed(3)
+      : +Number(value).toFixed(2)
+)
 
-  const rnd = (v) => (v == null || isNaN(v) ? null : v < 10 ? +Number(v).toFixed(3) : +Number(v).toFixed(2))
-  // AI 建议里的「建议买入价 / 建议买入手数」
-  const adv = (() => { try { const a = getAdvice(p.code, 'buy_advice'); return (a && a.advice) || null } catch { return null } })()
-  const aiPrice = adv && adv.buyPrice != null && !isNaN(adv.buyPrice) ? Number(adv.buyPrice) : null
-  // planQty 在 AI 建议里是「几手」的字符串(如 "5手""约5手""5~8手"),而非纯数字,
-  // 直接 Number() 会得 NaN 导致手数传不进卡片 —— 这里从文本中稳健抽取首个整数。
-  const parseQty = (v) => {
-    if (v == null) return null
-    if (typeof v === 'number') return isNaN(v) ? null : Math.trunc(v)
-    const m = String(v).match(/-?\d+(?:\.\d+)?/)
-    if (!m) return null
-    const n = Math.trunc(Number(m[0]))
-    return isNaN(n) ? null : n
+const actionHands = (value) => {
+  const match = String(value ?? '').match(/\d+(?:\.\d+)?/)
+  if (!match) return null
+  const number = Math.trunc(Number(match[0]))
+  return Number.isFinite(number) && number > 0 ? number : null
+}
+
+const actionQtyLabel = (value) => {
+  const hands = actionHands(value)
+  return hands ? `${hands}手` : ''
+}
+
+const actionTone = (kind) => (
+  kind === 'buy' || kind === 'add'
+    ? 'buy'
+    : kind === 'reduce' || kind === 'sell'
+      ? 'sell'
+      : kind === 'wait'
+        ? 'wait'
+        : 'hold'
+)
+
+const actionLevelIcon = (level) => {
+  if (level.key === 'reduce' || level.key === 'target') return 'arrowUp'
+  if (level.key === 'stop') return 'shield'
+  if (level.key === 'watch') return 'eye'
+  return 'arrowDown'
+}
+
+const reachedLevelKey = (view, progress) => {
+  if (!progress?.reached) return ''
+  if (view.trigger?.direction === 'range') {
+    if (progress.currentPrice < view.trigger.low) return 'add'
+    if (progress.currentPrice > view.trigger.high) return 'reduce'
+    return ''
   }
-  const aiQty = adv ? (adv.planQtyNum != null ? parseQty(adv.planQtyNum) : parseQty(adv.planQty)) : null
+  return view.levels.find((item) => item.active)?.key || ''
+}
 
-  // 自动跟随:未手动覆盖时,用 AI 建议回写候选(持久化到云),保证卡片跟着刷新
-  useEffect(() => {
-    const patch = {}
-    if (!p.targetManual && aiPrice != null && rnd(aiPrice) !== rnd(p.targetPrice)) patch.targetPrice = rnd(aiPrice)
-    if (!p.qtyManual && aiQty != null && aiQty !== p.buyQty) patch.buyQty = aiQty
-    if (Object.keys(patch).length) planStore.setCandPlan(p.code, patch)
-    // 买点预警自动同步:跟随 AI 建议买入价,自动建/刷新一条「到价 ≤ 买入价」预警(到买点即提醒)
-    if (aiPrice != null) planStore.autoSyncCandAlert(p.code, p.name, aiPrice, adv)
-    // eslint-disable-next-line
-  }, [aiPrice, aiQty, p.targetManual, p.qtyManual])
-
-  // 生效值:手动优先,否则 AI
-  const target = p.targetPrice != null ? Number(p.targetPrice) : (aiPrice != null ? rnd(aiPrice) : null)
-  const qty = p.buyQty != null ? p.buyQty : (aiQty != null ? aiQty : null)
-  const cur = q && q.price != null ? Number(q.price) : null
-
-  const onPrice = (e) => {
-    const v = e.target.value.trim()
-    if (v === '') planStore.setCandPlan(p.code, { targetPrice: null, targetManual: false })
-    else if (!isNaN(Number(v))) planStore.setCandPlan(p.code, { targetPrice: Number(v), targetManual: true })
-  }
-  const onQty = (e) => {
-    const v = e.target.value.trim()
-    if (v === '') planStore.setCandPlan(p.code, { buyQty: null, qtyManual: false })
-    else if (!isNaN(Number(v))) planStore.setCandPlan(p.code, { buyQty: Math.max(0, Math.trunc(Number(v))), qtyManual: true })
-  }
-  const resetPrice = () => planStore.setCandPlan(p.code, { targetPrice: aiPrice != null ? rnd(aiPrice) : null, targetManual: false })
-
-  // 准备度与列表排序共用同一口径：量化55% + 买点接近度45%。
-  // 明显跌穿买入价会降分，避免把失效下跌误判为“最接近买点”。
-  let bar = null
-  if (target != null && cur != null && target > 0) {
-    const readiness = watchlistReadiness(
-      { ...p, targetPrice: target },
-      q || {},
-    )
-    const tone = readiness.status === 'broken'
-      ? 'broken'
-      : readiness.status === 'waiting'
-        ? 'far'
-        : readiness.status
-    bar = {
-      pct: readiness.proximityScore,
-      tone,
-      label: readiness.label,
-      score: readiness.score,
-    }
-  }
-
-  return (
-    <div className="pc-target">
-      <div className="pc-tfields">
-        <label className="pc-tf">
-          <span className="pc-tf-k">买入参考</span>
-          <input className="pc-tf-in" inputMode="decimal" placeholder={aiPrice != null ? String(rnd(aiPrice)) : '手填'}
-            value={p.targetPrice != null ? String(p.targetPrice) : ''} onChange={onPrice} />
-          {p.targetManual
-            ? <button type="button" className="pc-tf-src manual" title="点击恢复跟随 AI 建议买入价" onClick={resetPrice}><Icon name="close" size={9} />手填</button>
-            : (aiPrice != null && <span className="pc-tf-src ai" title="来源:AI 建议买入价,详情刷新后自动跟随"><Icon name="spark" size={9} />AI</span>)}
-        </label>
-        <label className="pc-tf">
-          <span className="pc-tf-k">买入手数</span>
-          <input className="pc-tf-in" inputMode="numeric" placeholder={aiQty != null ? String(aiQty) : '手'}
-            value={p.buyQty != null ? String(p.buyQty) : ''} onChange={onQty} />
-          {!p.qtyManual && aiQty != null && <span className="pc-tf-src ai" title="来源:AI 建议买入手数"><Icon name="spark" size={9} />AI</span>}
-        </label>
+function ActionProgress({ trigger, currentPrice, progress: preparedProgress }) {
+  if (!trigger) return null
+  if (trigger.direction === 'inactive') {
+    return (
+      <div className="action-progress inactive">
+        <div className="action-progress-track" />
+        <span className="action-progress-label">
+          <span>等待重新评估信号</span>
+          <b>{trigger.metricLabel}</b>
+        </span>
       </div>
-      {bar && (
-        <div className={'pc-tbar ' + bar.tone} title={`当前 ${fmtRaw(cur)} → 目标 ${target}`}>
-          <div className="pc-tbar-track"><div className="pc-tbar-fill" style={{ width: bar.pct + '%' }} /></div>
-          <span className="pc-tbar-lb">
-            {bar.label}<b>准备度 {bar.score}</b>
+    )
+  }
+  const progress = preparedProgress || buildActionProgress(trigger, currentPrice)
+  if (!progress) return null
+  const directionIcon = trigger.direction === 'gte'
+    ? 'arrowUp'
+    : trigger.direction === 'lte'
+      ? 'arrowDown'
+      : 'activity'
+  const targetText = trigger.direction === 'range'
+    ? `${fmtRaw(trigger.low)}–${fmtRaw(trigger.high)}`
+    : `${trigger.label} ${fmtRaw(trigger.price)}`
+  return (
+    <div className={'action-progress ' + progress.tone + (progress.reached ? ' reached' : '')}>
+      <div className="action-progress-head">
+        <span className="action-current-marker">
+          <Icon name="activity" size={13} />
+          现价 <strong>{fmtRaw(progress.currentPrice)}</strong>
+        </span>
+        <span className="action-direction">
+          <Icon name={directionIcon} size={13} />
+          {progress.stateLabel}
+        </span>
+        {progress.reached && (
+          <span className="action-reached" role="status" aria-live="polite">
+            <Icon name="bell" size={13} />已到价
           </span>
-        </div>
-      )}
+        )}
+      </div>
+      <div className="action-progress-track">
+        <div className="action-progress-fill" style={{ width: progress.pct + '%' }} />
+      </div>
+      <span className="action-progress-label">
+        <span>{progress.label}</span>
+        <b>{targetText}</b>
+      </span>
     </div>
   )
 }
 
-// ---------- 候选卡：一句话操作建议（唯一数据源 = AI 操作建议）----------
-// 复用持仓卡「主行动条」同款取值(adviceFocus)：有建议→展示动作徽标+一句话;
-// 无建议→引导按钮，点击打开个股详情页生成一次即可(saveAdvice 触发 subscribeAdvice 自动回填)。
-function CandFocus({ code, name }) {
+function ActionLevel({ level, reached = false }) {
+  return (
+    <div className={'action-level level-' + level.tone + (level.active ? ' active' : '') + (reached ? ' reached' : '')}>
+      <span className="action-level-name">
+        <span className="action-level-icon"><Icon name={actionLevelIcon(level)} size={13} /></span>
+        {level.label}
+      </span>
+      <strong className="action-level-price">{fmtRaw(level.price)}</strong>
+      {reached && <span className="action-level-hit" aria-hidden="true"><Icon name="bell" size={11} />已到价</span>}
+    </div>
+  )
+}
+
+function ActionCommand({ view }) {
+  const [expanded, setExpanded] = useState(false)
+  const [isTruncated, setIsTruncated] = useState(false)
+  const rootRef = useRef(null)
+  const instruction = view.instruction || '等待下一步执行条件'
+  const quantity = actionQtyLabel(view.quantity)
+
+  useEffect(() => setExpanded(false), [instruction])
+
+  useLayoutEffect(() => {
+    const root = rootRef.current
+    if (!root) return undefined
+    let active = true
+
+    const measure = () => {
+      if (!active || expanded) return
+      const textNode = root.querySelector('.action-command-text')
+      if (!textNode) return
+      setIsTruncated(textNode.scrollHeight > textNode.clientHeight + 1)
+    }
+
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(root)
+    document.fonts?.ready.then(measure).catch(() => {})
+    return () => {
+      active = false
+      observer.disconnect()
+    }
+  }, [instruction, expanded])
+
+  useEffect(() => {
+    if (!expanded) return undefined
+    const closeOutside = (event) => {
+      if (!rootRef.current?.contains(event.target)) setExpanded(false)
+    }
+    const closeWithEscape = (event) => {
+      if (event.key !== 'Escape') return
+      setExpanded(false)
+      rootRef.current?.querySelector('.action-command-copy')?.blur()
+    }
+    document.addEventListener('pointerdown', closeOutside)
+    document.addEventListener('keydown', closeWithEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOutside)
+      document.removeEventListener('keydown', closeWithEscape)
+    }
+  }, [expanded])
+
+  return (
+    <div className="action-command">
+      <span className="action-command-badge">
+        <Icon name="spark" size={10} />
+        <span>{view.action}</span>
+        {quantity && <strong className="action-command-qty">{quantity}</strong>}
+      </span>
+      <div
+        ref={rootRef}
+        className={
+          'action-command-disclosure'
+          + (isTruncated ? ' is-truncated' : ' is-complete')
+          + (expanded ? ' is-expanded' : '')
+        }
+      >
+        {isTruncated ? (
+          <button
+            type="button"
+            className="action-command-copy"
+            aria-expanded={expanded}
+            aria-label={`${expanded ? '收起' : '查看'}完整操作建议：${instruction}`}
+            onClick={() => setExpanded((value) => !value)}
+          >
+            <span className="action-command-text">{instruction}</span>
+            <span className="action-command-toggle" aria-hidden="true">
+              <Icon name="chevronDown" size={13} />
+            </span>
+          </button>
+        ) : (
+          <div className="action-command-copy action-command-copy-static">
+            <span className="action-command-text">{instruction}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function AdviceActionPanel({ view, currentPrice, onPrompt }) {
+  if (!view) {
+    return (
+      <button type="button" className="action-prompt" onClick={onPrompt} aria-label="生成 AI 操作建议">
+        <Icon name="spark" size={14} />
+        <span className="action-prompt-label">尚无操作建议</span>
+        <span className="action-prompt-action">生成</span>
+        <Icon name="chevronRight" size={14} />
+      </button>
+    )
+  }
+  const tone = actionTone(view.kind)
+  const progress = buildActionProgress(view.trigger, currentPrice)
+  const reachedKey = reachedLevelKey(view, progress)
+  return (
+    <div className={'action-decision tone-' + tone}>
+      <ActionCommand view={view} />
+      {view.levels.length > 0 && (
+        <div className={'action-levels levels-' + Math.min(view.levels.length, 3)}>
+          {view.levels.map((item) => (
+            <ActionLevel key={item.key} level={item} reached={item.key === reachedKey} />
+          ))}
+        </div>
+      )}
+      <ActionProgress trigger={view.trigger} currentPrice={currentPrice} progress={progress} />
+    </div>
+  )
+}
+
+// 候选卡的动作、价位、手数和进度只由同一份 AI 建议驱动。
+// 观望时撤下买入控件与旧买点进度，只显示重新评估条件。
+function CandDecision({ p, q }) {
   const [, force] = useState(0)
   useEffect(() => subscribeAdvice(() => force((n) => n + 1)), [])
-  const generation = useAdviceGeneration(code)
-  const entry = getAdvice(code, 'buy_advice')
-  const updatedAt = <AdviceUpdatedAt entry={entry} />
-  if (generation?.active) return <>{updatedAt}<AdviceGenerationStatus code={code} /></>
-  const f = adviceFocus(code)
-  if (!f) return (
-    <>
-      {updatedAt}
-      <button className="cand-focus focus-prompt" onClick={() => openStockDetail(code, name)} title="打开个股详情页生成AI操作建议">
-        <span className="cf-badge"><Icon name="spark" size={9} /> 待生成</span>
-        <span className="cf-text">尚无 AI 操作建议，点此生成 →</span>
-      </button>
-    </>
-  )
+  const generation = useAdviceGeneration(p.code)
+  const entry = getAdvice(p.code, 'buy_advice')
+  const advice = entry?.advice || null
+  const baseView = advice
+    ? buildAdviceActionView(advice, { mode: 'buy_advice' })
+    : null
+  const actionable = baseView?.kind === 'buy'
+  const aiPrice = actionable ? roundActionPrice(advice?.buyPrice) : null
+  const aiQty = actionable
+    ? actionHands(advice?.planQtyNum ?? advice?.planQty)
+    : null
+
+  useEffect(() => {
+    if (!advice) return
+    const patch = {}
+    if (!p.targetManual) {
+      const nextPrice = actionable ? aiPrice : null
+      if (roundActionPrice(p.targetPrice) !== nextPrice) patch.targetPrice = nextPrice
+    }
+    if (!p.qtyManual) {
+      const nextQty = actionable ? aiQty : null
+      if ((p.buyQty ?? null) !== nextQty) patch.buyQty = nextQty
+    }
+    if (Object.keys(patch).length) planStore.setCandPlan(p.code, patch)
+    if (actionable && aiPrice != null) {
+      planStore.autoSyncCandAlert(p.code, p.name, aiPrice, advice)
+    } else {
+      planStore.clearCandBuyAlert(p.code)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entry?.at, actionable, aiPrice, aiQty, p.targetManual, p.qtyManual])
+
+  const target = p.targetPrice != null
+    ? Number(p.targetPrice)
+    : aiPrice
+  const qty = p.buyQty != null ? p.buyQty : aiQty
+  const view = advice
+    ? buildAdviceActionView({
+        ...advice,
+        ...(actionable ? { buyPrice: target, planQty: qty } : {}),
+      }, { mode: 'buy_advice' })
+    : null
+  const progress = view?.trigger
+  const progressState = buildActionProgress(progress, q?.price)
+  const reachedKey = view ? reachedLevelKey(view, progressState) : ''
+  const otherLevels = view?.levels.filter((item) => item.key !== 'entry') || []
+
+  const onPrice = (event) => {
+    const value = event.target.value.trim()
+    if (value === '') {
+      planStore.setCandPlan(p.code, { targetPrice: aiPrice, targetManual: false })
+    } else if (!isNaN(Number(value))) {
+      planStore.setCandPlan(p.code, { targetPrice: Number(value), targetManual: true })
+    }
+  }
+  const onQty = (event) => {
+    const value = event.target.value.trim()
+    if (value === '') {
+      planStore.setCandPlan(p.code, { buyQty: aiQty, qtyManual: false })
+    } else if (!isNaN(Number(value))) {
+      planStore.setCandPlan(p.code, {
+        buyQty: Math.max(0, Math.trunc(Number(value))),
+        qtyManual: true,
+      })
+    }
+  }
+
   return (
     <>
-      {updatedAt}
-      <div className={'cand-focus focus-' + f.tone} title={f.text}>
-        {f.badge && <span className="cf-badge"><Icon name="spark" size={9} />{f.badge}</span>}
-        <span className="cf-text">{f.text}</span>
-      </div>
+      <AdviceUpdatedAt entry={entry} />
+      {generation?.active && <AdviceGenerationStatus code={p.code} />}
+      {!view ? (
+        !generation?.active && (
+          <AdviceActionPanel
+            onPrompt={() => openStockDetail(p.code, q?.name || p.name)}
+          />
+        )
+      ) : (
+        <div className={'action-decision cand-decision tone-' + actionTone(view.kind)}>
+          <ActionCommand view={view} />
+          {actionable ? (
+            <>
+              <div className="action-levels editable">
+                <label className={'action-level action-field active level-buy' + (reachedKey === 'entry' ? ' reached' : '')}>
+                  <span className="action-level-name">
+                    <span className="action-level-icon"><Icon name="arrowDown" size={13} /></span>
+                    买入执行价
+                  </span>
+                  <input
+                    className="action-level-price"
+                    inputMode="decimal"
+                    placeholder={aiPrice != null ? String(aiPrice) : '手填'}
+                    value={p.targetPrice != null ? String(p.targetPrice) : ''}
+                    onChange={onPrice}
+                  />
+                  <em className="action-level-source">{reachedKey === 'entry' ? '已到价' : (p.targetManual ? '手填' : 'AI')}</em>
+                </label>
+                <label className="action-level action-field active level-buy">
+                  <span className="action-level-name">
+                    <span className="action-level-icon"><Icon name="cart" size={13} /></span>
+                    买入手数
+                  </span>
+                  <input
+                    className="action-level-price"
+                    inputMode="numeric"
+                    placeholder={aiQty != null ? String(aiQty) : '手'}
+                    value={p.buyQty != null ? String(p.buyQty) : ''}
+                    onChange={onQty}
+                  />
+                  <em className="action-level-source">{p.qtyManual ? '手填' : 'AI'}</em>
+                </label>
+                {otherLevels.map((item) => (
+                  <ActionLevel key={item.key} level={item} reached={item.key === reachedKey} />
+                ))}
+              </div>
+              <ActionProgress trigger={progress} currentPrice={q?.price} progress={progressState} />
+            </>
+          ) : (
+            <>
+              {view.levels.length > 0 && (
+                <div className={'action-levels levels-' + Math.min(view.levels.length, 3)}>
+                  {view.levels.map((item) => (
+                    <ActionLevel key={item.key} level={item} reached={item.key === reachedKey} />
+                  ))}
+                </div>
+              )}
+              <ActionProgress trigger={progress} currentPrice={q?.price} progress={progressState} />
+            </>
+          )}
+        </div>
+      )}
     </>
+  )
+}
+
+function CandidateActions({ p, q, onBuy, onAlert, onDelete }) {
+  const [, force] = useState(0)
+  useEffect(() => subscribeAdvice(() => force((n) => n + 1)), [])
+  const entry = getAdvice(p.code, 'buy_advice')
+  const baseView = entry?.advice
+    ? buildAdviceActionView(entry.advice, { mode: 'buy_advice' })
+    : null
+  const view = baseView?.kind === 'buy'
+    ? buildAdviceActionView({
+        ...entry.advice,
+        buyPrice: p.targetPrice ?? entry.advice.buyPrice,
+        planQty: p.buyQty ?? entry.advice.planQty,
+      }, { mode: 'buy_advice' })
+    : baseView
+  const actionable = !view || view.kind === 'buy'
+  return (
+    <div className="pc-actions">
+      {actionable ? (
+        <button className="chip-btn act-buy" onClick={() => onBuy(p, view)}>
+          <Icon name="cart" size={12} />{view ? '按指令建仓' : '建仓'}
+        </button>
+      ) : (
+        <button className="chip-btn ghost" onClick={() => openStockDetail(p.code, q?.name || p.name)}>
+          <Icon name="spark" size={12} />复核建议
+        </button>
+      )}
+      <button className="chip-btn ghost" onClick={onAlert}><Icon name="bell" size={12} />预警</button>
+      <button className="icon-btn" aria-label={`删除${q?.name || p.name}`} title="删除" onClick={onDelete}><Icon name="trash" size={13} /></button>
+    </div>
   )
 }
 
@@ -577,6 +846,7 @@ function PlanList({ book, quote, stockTags, batchSel }) {
   const [buying, setBuying] = useState(null) // code
   const [price, setPrice] = useState('')
   const [qty, setQty] = useState('1')
+  const [buyErr, setBuyErr] = useState('')
   const [delTarget, setDelTarget] = useState(null) // 待删除的候选 {code,name}
   const [alerting, setAlerting] = useState(null) // 正在设预警的 code
   const [dimension, setDimension] = useState('concept')
@@ -586,8 +856,26 @@ function PlanList({ book, quote, stockTags, batchSel }) {
   // 这里只消费上提到 PlanTab 的共享勾选状态,给候选卡渲染复选框;不再自带入口与进度。
   const { selectMode, selected, toggleSel } = batchSel
 
-  const startBuy = (s) => { setBuying(s.code); setPrice(quote[s.code] ? String(quote[s.code].price) : ''); setQty('1') }
-  const confirmBuy = (code) => { if (price && Number(qty) > 0) { planStore.buy(code, price, Number(qty)); setBuying(null); setPrice(''); setQty('1') } }
+  const startBuy = (stock, view) => {
+    const entry = view?.levels.find((item) => item.active)?.price
+    const suggestedQty = actionHands(view?.quantity)
+    setBuying(stock.code)
+    setBuyErr('')
+    setPrice(entry != null ? String(entry) : (quote[stock.code] ? String(quote[stock.code].price) : ''))
+    setQty(String(suggestedQty || 1))
+  }
+  const confirmBuy = (code) => {
+    if (!price || !(Number(qty) > 0)) return
+    const result = planStore.buy(code, price, Number(qty))
+    if (!result?.ok) {
+      setBuyErr(result?.error || '建仓记录失败')
+      return
+    }
+    setBuying(null)
+    setPrice('')
+    setQty('1')
+    setBuyErr('')
+  }
 
   // 单张候选卡
   const Card = (p) => {
@@ -635,10 +923,8 @@ function PlanList({ book, quote, stockTags, batchSel }) {
             <span>主力 <b className={pctClass(q.mainInflow)}>{fmtInflow(q.mainInflow)}</b></span>
           </div>
         )}
-        {/* 目标价 + 买入手数 + 买点进度条（可手填/编辑，缺省跟随 AI 建议买入价/手数）*/}
-        <CandTarget p={p} q={q} />
-        {/* 一句话操作建议：唯一数据源 = AI 操作建议；有则展示，无则提示去生成 */}
-        <CandFocus code={p.code} name={(q && q.name) || p.name} />
+        {/* 当前指令、有效价位、手数与进度共用同一建议视图，避免方向脱节。 */}
+        <CandDecision p={p} q={q} />
         {/* 买点预警提示：跟随 AI 建议买入价自动设的「到价 ≤ 买入价」预警，到点即提醒买入 */}
         {(() => {
           const bpa = (book.alerts || []).find((a) => a.candCode === p.code)
@@ -659,6 +945,7 @@ function PlanList({ book, quote, stockTags, batchSel }) {
               <input className="wl-input" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="买入价" />
               <input className="wl-input" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="手" />
               {price && Number(qty) > 0 && <span className="fee-hint">费≈{calcBuyFee(Number(price) * Number(qty) * 100).toFixed(0)}</span>}
+              {buyErr && <span className="err buy-inline-error">{buyErr}</span>}
               <button className="chip-btn act-buy solid" onClick={() => confirmBuy(p.code)}><Icon name="check" size={12} />确认</button>
               <button className="chip-btn ghost" onClick={() => setBuying(null)}>取消</button>
             </div>
@@ -669,11 +956,13 @@ function PlanList({ book, quote, stockTags, batchSel }) {
             <button className="chip-btn ghost" style={{ marginTop: 6 }} onClick={() => setAlerting(null)}>收起</button>
           </div>
         ) : (
-          <div className="pc-actions">
-            <button className="chip-btn act-buy" onClick={() => startBuy(p)}><Icon name="cart" size={12} />建仓</button>
-            <button className="chip-btn ghost" onClick={() => setAlerting(p.code)}><Icon name="bell" size={12} />预警</button>
-            <button className="icon-btn" onClick={() => setDelTarget(p)}><Icon name="trash" size={13} /></button>
-          </div>
+          <CandidateActions
+            p={p}
+            q={q}
+            onBuy={startBuy}
+            onAlert={() => setAlerting(p.code)}
+            onDelete={() => setDelTarget(p)}
+          />
         )}
       </div>
     )
@@ -777,6 +1066,14 @@ const ADVICE_MODE_LABEL = {
 function AdvisorScore({ book }) {
   const [open, setOpen] = useState(false)
   const stats = planStore.adviceStats()
+  useEffect(() => {
+    if (!open) return undefined
+    const close = (event) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('keydown', close)
+    return () => document.removeEventListener('keydown', close)
+  }, [open])
   if (!stats || (stats.total === 0 && stats.pending === 0)) return null
   const wr = stats.winRate
   const tone = wr == null ? 'muted' : wr >= 55 ? 'red' : wr >= 45 ? 'gold' : 'green'
@@ -789,6 +1086,8 @@ function AdvisorScore({ book }) {
       <button
         className="advisor-score"
         onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="dialog"
         title="点击查看军师战绩的详细口径与分类命中率"
       >
         <Icon name="target" size={13} />
@@ -799,8 +1098,22 @@ function AdvisorScore({ book }) {
         <Icon name={open ? 'arrowUp' : 'chevronDown'} size={12} />
       </button>
       {open && (
-        <div className="advisor-pop">
-          <div className="ap-title"><Icon name="target" size={13} /> 军师战绩怎么看</div>
+        <OverlayPortal>
+          <div className="advisor-score-mask" onClick={() => setOpen(false)}>
+            <div
+              className="advisor-pop advisor-score-dialog"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="advisor-score-title"
+              onClick={(event) => event.stopPropagation()}
+            >
+          <div className="ap-title" id="advisor-score-title">
+            <Icon name="target" size={13} />
+            <span>军师战绩怎么看</span>
+            <button type="button" className="modal-close" aria-label="关闭军师战绩" onClick={() => setOpen(false)}>
+              <Icon name="close" size={14} />
+            </button>
+          </div>
           <p className="ap-desc">
             这是<b>独立决策回合命中率</b>，不是账户真实成交胜率；同股同一主计划的重复刷新只计一次。
             买入/加仓看 3 日内是否触及目标
@@ -872,7 +1185,9 @@ function AdvisorScore({ book }) {
             {stats.duplicateRefreshes > 0 && ` 已合并 ${stats.duplicateRefreshes} 条重复刷新；原始刷新样本 ${stats.raw?.total || 0} 条。`}
             样本越多越可信；胜率高≠稳赚，仓位与止损纪律仍是第一位。
           </p>
-        </div>
+            </div>
+          </div>
+        </OverlayPortal>
       )}
     </div>
   )
@@ -1063,7 +1378,6 @@ function AutoRefreshControl({ quote }) {
   const [open, setOpen] = useState(false)
   const [manualNotice, setManualNotice] = useState('')
   const [, forceBatch] = useState(0)
-  const mobile = useMediaQuery('(max-width: 720px)')
   useEffect(() => subscribeBatch(() => forceBatch((n) => n + 1)), [])
   const cfg = getAutoConfig()
   const enabled = cfg.enabled
@@ -1119,7 +1433,7 @@ function AutoRefreshControl({ quote }) {
   )
 
   const panel = (
-    <div className={'auto-ref-panel' + (mobile ? ' mobile' : '')} role="dialog" aria-modal={mobile || undefined}
+    <div className="auto-ref-panel auto-ref-dialog" role="dialog" aria-modal="true"
       aria-label="AI 操作建议刷新设置" onClick={(event) => event.stopPropagation()}>
       <div className="arp-head">
         <span className="arp-title"><Icon name="clock" size={13} /> AI 操作建议刷新</span>
@@ -1184,9 +1498,11 @@ function AutoRefreshControl({ quote }) {
         {`持续复核·持${cfg.holdIntervalMin}/自${cfg.watchIntervalMin}分`}
       </button>
 
-      {open && (mobile
-        ? <OverlayPortal><div className="auto-ref-mask" onClick={() => setOpen(false)}>{panel}</div></OverlayPortal>
-        : panel)}
+      {open && (
+        <OverlayPortal>
+          <div className="auto-ref-mask" onClick={() => setOpen(false)}>{panel}</div>
+        </OverlayPortal>
+      )}
     </div>
   )
 }
@@ -1511,7 +1827,7 @@ function HoldingList({ book, quote, stockTags, searchConfig, batchSel }) {
       <div className="plan-section-hold-sticky">
         <div className="plan-section-sticky plan-section-head-sticky">
           <div className="panel-head plan-head">
-            <div role="heading" aria-level="2" className="panel-title"><Icon name="wallet" size={16} /> 当前持仓 <span className="sub-name">{book.holding.length} 只 · 按浮盈金额排序</span></div>
+            <div role="heading" aria-level="2" className="panel-title"><Icon name="wallet" size={16} />当前持仓</div>
           </div>
         </div>
 
@@ -1532,8 +1848,9 @@ function HoldingList({ book, quote, stockTags, searchConfig, batchSel }) {
 
       {/* 一次性生成时端点已满:列出正在生成的个股(可点击跳转),端点空出后本弹窗自动关闭 */}
       {busyModal && (
-        <div className="busy-modal-mask" onClick={() => setBusyModal(null)}>
-          <div className="busy-modal" onClick={(e) => e.stopPropagation()}>
+        <OverlayPortal>
+          <div className="busy-modal-mask" onClick={() => setBusyModal(null)}>
+            <div className="busy-modal" onClick={(e) => e.stopPropagation()}>
             <div className="busy-modal-head">
               <span className="busy-modal-title"><Icon name="gauge" size={15} /> AI 端点已满</span>
               <button className="icon-btn" onClick={() => setBusyModal(null)} title="关闭"><Icon name="close" size={15} /></button>
@@ -1558,8 +1875,9 @@ function HoldingList({ book, quote, stockTags, searchConfig, batchSel }) {
                 </button>
               ))}
             </div>
+            </div>
           </div>
-        </div>
+        </OverlayPortal>
       )}
 
       {book.holding.length === 0 ? (
@@ -1650,7 +1968,6 @@ function HoldingItem({ h, idx, quote: q }) {
   })()
   // 有效价:优先实时现价,否则用收盘价兜底 → 盈亏/进度轨用它计算,绝不留空、也绝不会除零
   const effPx = validPx != null ? validPx : closePx
-  const priceIsClose = validPx == null && effPx != null  // 当前展示的是收盘价(非实时)
 
   // 浮盈(净)：有效价市值 − 裸成本市值 − 已付买入手续费
   const floatPnl = effPx != null && h.buyPrice ? (effPx - h.buyPrice) * shares - (h.buyFee || 0) : null
@@ -1789,12 +2106,42 @@ function HoldingItem({ h, idx, quote: q }) {
     })
   }
 
+  const adviceEntry = getAdvice(h.code, 'hold_advice')
+  const holdAdvice = adviceEntry?.advice || null
+  const decisionView = hitTP
+    ? buildAdviceActionView({
+        action: '止盈',
+        actionPlan: `现价已到止盈参考 ${fmtRaw(h.tp)}，按确认信号分批落袋`,
+        reducePrice: h.tp,
+        stopPrice: h.sl,
+      }, { mode: 'hold_advice' })
+    : hitSL
+      ? buildAdviceActionView({
+          action: '止损',
+          actionPlan: `现价已到止损参考 ${fmtRaw(h.sl)}，按纪律确认后退出`,
+          stopPrice: h.sl,
+          targetPrice: h.tp,
+        }, { mode: 'hold_advice' })
+      : holdAdvice
+        ? buildAdviceActionView(holdAdvice, { mode: 'hold_advice' })
+        : null
+
   const startSell = () => {
     const t1 = t1StatusOf(h.code)
+    const suggestedLevel = decisionView?.levels.find((item) => item.key === 'reduce')
+      || decisionView?.levels.find((item) => item.key === 'stop')
+    const suggestedQty = (
+      decisionView?.kind === 'reduce' || decisionView?.kind === 'sell'
+    ) ? actionHands(decisionView.quantity) : null
     setTradeErr(t1.sellableToday > 0 ? '' : `今日买入 ${t1.boughtToday} 手仍受 T+1 锁定，当前没有可卖仓位`)
     setMode('sell')
-    setSellPrice(q ? String(q.price) : '')
-    setSellQty(String(Math.min(h.qty || 1, t1.sellableToday || 0)))
+    setSellPrice(suggestedLevel?.price != null
+      ? String(suggestedLevel.price)
+      : (q ? String(q.price) : ''))
+    setSellQty(String(Math.min(
+      suggestedQty || h.qty || 1,
+      t1.sellableToday || 0,
+    )))
   }
   const confirmSell = () => {
     if (!sellPrice || !(Number(sellQty) > 0)) return
@@ -1804,8 +2151,32 @@ function HoldingItem({ h, idx, quote: q }) {
     setMode(null)
   }
 
-  const startAdd = () => { setTradeErr(''); setMode('add'); setAddPrice(q ? String(q.price) : ''); setAddQty('1') }
-  const confirmAdd = () => { if (addPrice && Number(addQty) > 0) { planStore.addToHolding(h.id, addPrice, Number(addQty)); setMode(null) } }
+  const startAdd = () => {
+    const suggestedLevel = decisionView?.levels.find((item) => item.key === 'add')
+    const suggestedQty = decisionView?.kind === 'add'
+      ? actionHands(decisionView.quantity)
+      : null
+    setTradeErr('')
+    setMode('add')
+    setAddPrice(suggestedLevel?.price != null
+      ? String(suggestedLevel.price)
+      : (q ? String(q.price) : ''))
+    setAddQty(String(suggestedQty || 1))
+  }
+  const confirmAdd = () => {
+    if (!addPrice || !(Number(addQty) > 0)) return
+    const result = planStore.addToHolding(
+      h.id,
+      addPrice,
+      Number(addQty),
+    )
+    if (!result?.ok) {
+      setTradeErr(result?.error || '加仓记录失败')
+      return
+    }
+    setTradeErr('')
+    setMode(null)
+  }
   const startCostEdit = () => {
     setTradeErr('')
     setCostPrice(String(costWithFee))
@@ -1851,20 +2222,40 @@ function HoldingItem({ h, idx, quote: q }) {
       // 可再做反T(先卖)的手数 = 底仓 + 净做T腿(openBuy-openSell)，卖光则为 0，绝不能拿原始底仓 h.qty 误当作还持有。
       const tNet = (tStat.openBuy || 0) - (tStat.openSell || 0)
       const liveHoldQty = Math.max(0, (h.qty || 0) + tNet)
+      const latestBook = planStore.get()
+      const t1 = t1StatusOf(h.code)
+      const tContext = buildTActionContext(
+        latestBook.holding || [],
+        latestBook.closed || [],
+        h.code,
+      )
       const r = await callAIStream('t_advice', {
         name: h.name, code: h.code,
         nowPrice: q?.price, pct: q?.pct,
         dayHigh: q?.high, dayLow: q?.low, open: q?.open, prevClose: q?.prevClose,
         turnover: q?.turnover, volRatio: q?.volRatio,
         mainInflowYi: q ? +(q.mainInflow / 1e8).toFixed(2) : null,
-        holdCost: h.buyPrice, holdQty: liveHoldQty, baseQty,
+        holdCost: costWithFee, holdQty: liveHoldQty, baseQty,
         openTNet: tNet,  // 未结算做T净手数(正=已净加仓;负=已净卖出/反T未接回，底仓被占用)
+        boughtTodayQty: t1.boughtToday,
+        sellableTodayQty: t1.sellableToday,
+        t1Locked: t1.boughtToday > 0,
+        todayBuys: (t1.buys || []).map((buy) => ({
+          price: buy.price,
+          qty: buy.qty,
+          kind: buy.kind,
+        })),
+        nextTradeDay: nextTradingDayLabel(),
+        tradeContext: tradeActivityContext(latestBook.closed || [], h.code),
+        tContext,
         style: useStyle,
       }, onPhase, undefined, onEvent)
       if (r.ok) {
         setTAdvice({ result: r.result })
-        // 建议方向自动切到对应买/卖
-        if (r.result.dir === 'positive') setTSide('buy')
+        // 已经完成第一腿时按 nextSide 落到待执行的第二腿；新一轮建议才按 dir 选择第一腿。
+        if (r.result.nextSide === 'buy' || r.result.nextSide === 'sell') {
+          setTSide(r.result.nextSide)
+        } else if (r.result.dir === 'positive') setTSide('buy')
         else if (r.result.dir === 'reverse') setTSide('sell')
       } else setTAdvice({ error: r.error || 'AI 调用失败' })
     } catch (e) { setTAdvice({ error: String(e.message || e) }) }
@@ -1873,9 +2264,11 @@ function HoldingItem({ h, idx, quote: q }) {
   const adoptAdvice = () => {
     const r = tAdvice && tAdvice.result
     if (!r) return
-    if (r.dir === 'positive') setTSide('buy')
+    if (r.nextSide === 'buy' || r.nextSide === 'sell') setTSide(r.nextSide)
+    else if (r.dir === 'positive') setTSide('buy')
     else if (r.dir === 'reverse') setTSide('sell')
-    if (r.leg1Price) setTPrice(String(r.leg1Price))
+    const nextPrice = r.nextPrice ?? r.leg1Price
+    if (nextPrice) setTPrice(String(nextPrice))
     if (r.suggestQty) setTQty(String(r.suggestQty))
   }
 
@@ -1884,17 +2277,6 @@ function HoldingItem({ h, idx, quote: q }) {
   const netT = (tStat.openBuy || 0) - (tStat.openSell || 0)
   const liveQty = h.qty + netT
   const liveCost = tStat.realized ? effCost : costWithFee
-  // 主行动：此刻最该做的一件事。数据源唯一 = AI操作建议(与个股详情页同源)。
-  // 优先级：触及止盈/止损(实时纪律) > AI操作建议一句话 > 无建议则提示去生成。
-  // 「踏5不破10」参考均线信号已移入个股详情页,持仓卡不再展示,避免多套指导引发混淆。
-  const aiFocus = adviceFocus(h.code)
-  const adviceEntry = getAdvice(h.code, 'hold_advice')
-  const focus = (() => {
-    if (hitTP) return { tone: 'red', badge: '止盈', text: `已到止盈价 ${fmtRaw(h.tp)}，考虑落袋` }
-    if (hitSL) return { tone: 'green', badge: '止损', text: `已到止损价 ${fmtRaw(h.sl)}，按纪律离场` }
-    if (aiFocus) return { tone: aiFocus.tone, badge: aiFocus.badge, text: aiFocus.text, ai: true }
-    return { prompt: true }  // 无AI操作建议 → 引导用户去个股页生成
-  })()
   const operationTitle = mode === 'add'
     ? '加仓'
     : mode === 'sell'
@@ -2014,7 +2396,7 @@ function HoldingItem({ h, idx, quote: q }) {
 
       {/* 数据行：只留 持仓手数 · 成本（现价已并入顶部）*/}
       <div className="hold-meta">
-        <span title={netT !== 0 ? `底仓 ${h.qty} 手，今日做T未结算净${netT > 0 ? '买入+' : '卖出'}${netT} 手` : '当前持仓手数'}>
+        <span className="hold-qty-value" title={netT !== 0 ? `底仓 ${h.qty} 手，今日做T未结算净${netT > 0 ? '买入+' : '卖出'}${netT} 手` : '当前持仓手数'}>
           持仓 {liveQty}手{netT !== 0 && <span className="sub-name"> (底仓{h.qty}{netT > 0 ? '+' : ''}{netT})</span>}
         </span>
         <span className="hold-cost-value" title={`裸买入价 ${fmtRaw(h.buyPrice)} + 买入手续费 ${(h.buyFee || 0).toFixed(2)}${tStat.realized ? `；做T差价摊薄 ${fmtMoney(tStat.realized)}` : ''}`}>
@@ -2031,52 +2413,14 @@ function HoldingItem({ h, idx, quote: q }) {
         </span>
       </div>
 
-      {/* 止损↔止盈 进度轨：一眼看清现价离两条防线的距离 */}
-      {(() => {
-        // 用有效价(实时现价,否则收盘价兜底);两者皆无(如无K线数据)才不渲染。effPx 一定 >0,不会除零。
-        if (effPx == null || h.sl == null || h.tp == null) return null
-        const sl = Number(h.sl), tp = Number(h.tp), price = effPx
-        if (!(tp > sl)) return null
-        const clamp = (v) => Math.max(0, Math.min(100, v))
-        const pos = clamp(((price - sl) / (tp - sl)) * 100)
-        // 成本线位置（含费成本落在轨道上的相对位置）
-        const costPos = costWithFee != null && costWithFee >= sl && costWithFee <= tp
-          ? clamp(((costWithFee - sl) / (tp - sl)) * 100) : null
-        const toTP = +(((tp - price) / price) * 100).toFixed(2)
-        const toSL = +(((price - sl) / price) * 100).toFixed(2)
-        return (
-          <div className="hold-track" title={`${priceIsClose ? '收盘价' : '现价'}距止盈 ${toTP >= 0 ? '+' : ''}${toTP}% · 距止损 ${toSL >= 0 ? '-' : '+'}${Math.abs(toSL)}%`}>
-            <div className="ht-bar">
-              <div className="ht-fill" style={{ width: pos + '%' }} />
-              {costPos != null && <span className="ht-cost" style={{ left: costPos + '%' }} title={`成本 ${fmtRaw(costWithFee)}`} />}
-              <span className="ht-cursor" style={{ left: pos + '%' }} />
-            </div>
-            <div className="ht-labels">
-              <span className="ht-sl">止损 {fmtRaw(sl)}<em>-{Math.abs(toSL)}%</em></span>
-              <span className="ht-now">{priceIsClose ? '收' : '现'} {fmtRaw(price)}</span>
-              <span className="ht-tp">止盈 {fmtRaw(tp)}<em>+{toTP}%</em></span>
-            </div>
-          </div>
-        )
-      })()}
-
-      {/* 主行动：此刻唯一最该关注的一句。数据源=AI操作建议;无建议则提示去生成 */}
+      {/* 当前指令、加减仓位与动作进度使用同一建议，不再并排展示互相冲突的价格体系。 */}
       <AdviceUpdatedAt entry={adviceEntry} />
       <AdviceGenerationStatus code={h.code} />
-      {focus && (focus.prompt
-        ? (
-          <button className="hold-focus focus-prompt" onClick={() => openStockDetail(h.code, h.name)} title="打开个股详情页生成AI操作建议">
-            <span className="hf-badge"><Icon name="spark" size={10} /> 待生成</span>
-            <span className="hf-text">尚无 AI 操作建议，点此在个股详情页生成 →</span>
-          </button>
-        )
-        : (
-          <div className={'hold-focus focus-' + focus.tone}>
-            {focus.badge && <span className="hf-badge">{focus.ai && <Icon name="spark" size={9} />}{focus.badge}</span>}
-            <span className="hf-text">{focus.text}</span>
-          </div>
-        )
-      )}
+      <AdviceActionPanel
+        view={decisionView}
+        currentPrice={effPx}
+        onPrompt={() => openStockDetail(h.code, h.name)}
+      />
 
       {/* 明细展开开关：把计划/做T 收纳,展开后手风琴分段(一次看一类)。
           复盘已与「AI操作建议」同源,直接点进个股详情页看即可,不再单列分段;
@@ -2192,10 +2536,10 @@ function HoldingItem({ h, idx, quote: q }) {
       {!mobileOperations && tradeErr && <div className="err" style={{ margin: '8px 0' }}>{tradeErr}</div>}
       {operationForm && !mobileOperations ? operationForm : (
         <div className="pi-actions">
-          <button className="chip-btn act-add" onClick={startAdd}><Icon name="cart" size={13} />加仓</button>
-          <button className="chip-btn act-t" onClick={startT}><Icon name="refresh" size={13} />做T</button>
-          <button className="chip-btn act-reduce" onClick={startSell}><Icon name="sell" size={13} />减仓/清仓</button>
-          {!(h.tp || h.sl || h.planReason) && <button className="chip-btn ghost" onClick={() => openPlan(false)}><Icon name="target" size={12} />设计划</button>}
+          <button className={'chip-btn act-add' + (decisionView?.kind === 'add' ? ' recommended' : '')} onClick={startAdd}>加仓</button>
+          <button className="chip-btn act-t" onClick={startT}>做T</button>
+          <button className={'chip-btn act-reduce' + (['reduce', 'sell'].includes(decisionView?.kind) ? ' recommended' : '')} onClick={startSell}>减仓/清仓</button>
+          {!(h.tp || h.sl || h.planReason) && <button className="chip-btn ghost" onClick={() => openPlan(false)}>设计划</button>}
           <button className="icon-btn act-del" onClick={() => setConfirmDel(true)}><Icon name="trash" size={14} /></button>
         </div>
       )}

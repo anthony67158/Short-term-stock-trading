@@ -89,6 +89,37 @@ test('买入后自动扣减可用现金并把手续费计入总资产亏损', ()
   assert.equal(planStore.get().closed[0].cashApplied, true)
 })
 
+test('现金不足时拒绝建仓、加仓和做T买腿且账本保持不变', () => {
+  planStore.setData({
+    plan: [{ code: '000001', name: '平安银行' }],
+    holding: [{
+      id: 'hold_1',
+      code: '600000',
+      name: '浦发银行',
+      qty: 1,
+      buyPrice: 10,
+      buyFee: calcBuyFee(1000),
+      buyAt: Date.now() - 86400000,
+    }],
+    closed: [],
+    account: { ...baseAccount, cash: 500 },
+  })
+
+  const buy = planStore.buy('000001', 10, 1)
+  const add = planStore.addToHolding('hold_1', 10, 1)
+  const tBuy = planStore.addTFlow('hold_1', 'buy', 10, 1)
+
+  assert.equal(buy.ok, false)
+  assert.equal(add.ok, false)
+  assert.equal(tBuy.ok, false)
+  assert.match(buy.error, /现金不足/)
+  assert.equal(planStore.get().account.cash, 500)
+  assert.equal(planStore.get().plan.length, 1)
+  assert.equal(planStore.get().holding[0].qty, 1)
+  assert.equal(planStore.get().closed.length, 0)
+  assert.equal((planStore.get().holding[0].tFlows || []).length, 0)
+})
+
 test('卖出后自动增加可用现金并保留扣费后的已实现盈亏', () => {
   const startingCash = +(10000 - 1000 - calcBuyFee(1000)).toFixed(2)
   planStore.setData({
@@ -158,6 +189,41 @@ test('做T买卖腿实时更新现金，结算归档不重复记账', () => {
   assert.equal(planStore.get().account.cash, expectedCash)
   assert.equal(planStore.get().closed[0].type, 'T')
   assert.equal(planStore.get().closed[0].cashApplied, true)
+})
+
+test('未配平做T净腿结算后同步维护持仓买入手续费', () => {
+  planStore.setData({
+    plan: [],
+    holding: [{
+      id: 'hold_buy',
+      code: '000001',
+      name: '平安银行',
+      qty: 2,
+      buyPrice: 10,
+      buyFee: 6,
+      buyAt: Date.now() - 86400000,
+    }, {
+      id: 'hold_sell',
+      code: '600000',
+      name: '浦发银行',
+      qty: 2,
+      buyPrice: 10,
+      buyFee: 6,
+      buyAt: Date.now() - 86400000,
+    }],
+    closed: [],
+    account: { ...baseAccount, cash: 10000 },
+  })
+
+  planStore.addTFlow('hold_buy', 'buy', 9, 1)
+  planStore.settleTFlows('hold_buy')
+  planStore.addTFlow('hold_sell', 'sell', 11, 1)
+  planStore.settleTFlows('hold_sell')
+
+  const buyPosition = planStore.get().holding.find((item) => item.id === 'hold_buy')
+  const sellPosition = planStore.get().holding.find((item) => item.id === 'hold_sell')
+  assert.equal(buyPosition.buyFee, +(6 + calcBuyFee(900)).toFixed(2))
+  assert.equal(sellPosition.buyFee, 3)
 })
 
 test('删除尚未结算的做T腿会恢复已应用现金', () => {

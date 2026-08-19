@@ -1,5 +1,15 @@
 [
   {
+    "date": "2026-08-18",
+    "scope": "app",
+    "macrostructure": "Workbench",
+    "theme": "custom",
+    "theme_axes": "light + dark / geometric-sans / cool",
+    "vibe": "task-led precision, aligned data, restrained cobalt",
+    "enrichment": "none",
+    "brief": "短线操盘台 · 四工作区任务路径与全局视觉语法升级"
+  },
+  {
     "date": "2026-08-13",
     "scope": "app",
     "macrostructure": "Workbench",

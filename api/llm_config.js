@@ -12,7 +12,11 @@ import {
   ensureConfig, currentConfig, saveConfig, publicView, resolveJudgeEndpoint, ROLES,
 } from './_llm_config.js';
 import { poolStatus, endpointCountForRole, judgeEndpointStatus } from './_llm_pool.js';
-import { authorizePaidRequest } from './_account_auth.js';
+import {
+  authorizePaidRequest,
+  isRuntimeConfigAdmin,
+} from './_account_auth.js';
+import { assertSafeRemoteUrl } from './_safe_remote_url.js';
 
 export const MODEL_TEST_TIMEOUT_MS = 120000;
 
@@ -63,6 +67,7 @@ async function fetchModels(baseUrl, apiKey) {
   try {
     const r = await fetch(`${base}/models`, {
       signal: ctrl.signal,
+      redirect: 'error',
       headers: { Authorization: `Bearer ${apiKey}` },
     });
     if (!r.ok) {
@@ -90,6 +95,7 @@ async function pingModel(baseUrl, apiKey, model) {
     const r = await fetch(`${base}/chat/completions`, {
       method: 'POST',
       signal: ctrl.signal,
+      redirect: 'error',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model, messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, temperature: 0 }),
     });
@@ -136,6 +142,12 @@ export default async function handler(req, res) {
         concurrency: endpointCountForRole(config, 'advisor'),
       }));
     }
+    if (!isRuntimeConfigAdmin(accountAuth.account)) {
+      return res.status(403).send(JSON.stringify({
+        ok: false,
+        error: '仅运行时配置管理员可执行此操作',
+      }));
+    }
 
     // verify / test / save 都可能带明文 key；留空则用已存 key
     const cur = currentConfig();
@@ -151,7 +163,8 @@ export default async function handler(req, res) {
     const { baseUrl, apiKey } = target;
 
     if (action === 'verify') {
-      const r = await fetchModels(baseUrl, apiKey);
+      const safeBaseUrl = await assertSafeRemoteUrl(baseUrl);
+      const r = await fetchModels(safeBaseUrl, apiKey);
       return res.status(200).send(JSON.stringify({
         ok: r.ok, error: r.ok ? undefined : (r.error || '验证失败'),
         listable: !!r.listable, models: r.models || [],
@@ -159,13 +172,14 @@ export default async function handler(req, res) {
     }
 
     if (action === 'test') {
+      const safeBaseUrl = await assertSafeRemoteUrl(baseUrl);
       const models = Array.isArray(body && body.models) ? body.models.filter(Boolean)
         : (judgeTarget
           ? [judgeEndpoint?.model].filter(Boolean)
           : Object.values((body && body.modelMap) || cur.models || {}).filter(Boolean));
       const uniq = [...new Set(models)];
       if (!uniq.length) return res.status(200).send(JSON.stringify({ ok: false, error: '没有要测试的模型' }));
-      const results = await Promise.all(uniq.map((m) => pingModel(baseUrl, apiKey, m)));
+      const results = await Promise.all(uniq.map((m) => pingModel(safeBaseUrl, apiKey, m)));
       return res.status(200).send(JSON.stringify({ ok: results.every((x) => x.ok), results }));
     }
 

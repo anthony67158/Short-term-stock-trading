@@ -309,3 +309,45 @@ test('服务端军师载荷携带做T分类、配对收益和待配对手数', (
   assert.equal(payload.tradeContext.t.openBuyQty, 1)
   assert.equal(payload.tradeContext.recent[0].label, '做T买入')
 })
+
+test('减仓后军师载荷使用剩余手数、含费成本、当前价和最新成交', () => {
+  const now = Date.now()
+  const holding = [{
+    id: 'holding-reduced',
+    code: '002309',
+    name: '中利集团',
+    qty: 16,
+    buyPrice: 3.26,
+    buyFee: 3.25,
+    buyAt: now - 86400000,
+  }]
+  const closed = [{
+    id: 'sell-9',
+    type: 'SELL',
+    side: 'sell',
+    tradeIntent: 'position',
+    code: '002309',
+    qty: 9,
+    price: 3.05,
+    at: now,
+  }]
+
+  const payload = buildHoldPayload(
+    holding,
+    '002309',
+    '中利集团',
+    { positions: [], totalAssets: 10000 },
+    { cash: 8000 },
+    closed,
+    '2026-08-20(周四)',
+    { price: 3.05 },
+  )
+
+  assert.equal(payload.holdQty, 16)
+  assert.equal(payload.holdCost, 3.262)
+  assert.equal(payload.currentPrice, 3.05)
+  assert.equal(payload.sellableTodayQty, 16)
+  assert.equal(payload.tradeContext.recent[0].label, '减仓 / 清仓')
+  assert.equal(payload.tradeContext.recent[0].qty, 9)
+  assert.equal(payload.tradeContext.recent[0].price, 3.05)
+})

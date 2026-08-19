@@ -47,3 +47,41 @@ test('另一设备更新的单股复核开关通过增量同步立即生效', ()
   assert.equal(isAdviceReviewEnabled(planStore.get().settings, '600000'), false)
   assert.deepEqual(planStore.get().alerts.map((alert) => alert.id), ['manual'])
 })
+
+test('云端生成的新行动预警增量同步到当前页面', () => {
+  planStore.setData({
+    plan: [],
+    holding: [{
+      id: 'holding-1',
+      code: '002309',
+      name: '中利集团',
+      qty: 25,
+      buyPrice: 3.1,
+      buyAt: Date.now() - 86400000,
+    }],
+    closed: [],
+    settings: {},
+    alerts: [],
+  })
+
+  const changed = planStore.mergeCloud({
+    alerts: [{
+      id: 'cloud-reduce',
+      code: '002309',
+      name: '中利集团',
+      type: 'price',
+      op: 'gte',
+      value: 3.052,
+      actCode: '002309',
+      actKind: 'reduce',
+      enabled: true,
+      phase: 'armed',
+      createdAt: Date.now(),
+      triggeredAt: null,
+    }],
+  })
+
+  assert.equal(changed, true)
+  assert.equal(planStore.get().alerts.length, 1)
+  assert.equal(planStore.get().alerts[0].id, 'cloud-reduce')
+})
