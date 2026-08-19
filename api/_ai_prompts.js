@@ -133,8 +133,12 @@ export function buildUserPrompt(mode, payload, ragText, theoryHits = []) {
 ${payload.quant.v2.executionReference ? `【当前时段实时执行层·不是新模型概率】窗口=${payload.quant.v2.executionReference.horizon}，锚点${payload.quant.v2.executionReference.anchorPrice}、VWAP${payload.quant.v2.executionReference.vwap}、动态区间${payload.quant.v2.executionReference.rangeLow}~${payload.quant.v2.executionReference.rangeHigh}、30分钟动量${payload.quant.v2.executionReference.momentum30mPct}%。该层只用于此刻执行和动态价带，不得冒充V2概率，也不计入V2正确率。` : ''}
 军师必须在 quantNote 里明确引用上述概率、方向分、至少两个5分钟行情维度和价格参考；不得把止盈概率误写成传统5日上涨概率，也不得把参考锚点写成模型保证到达的目标价。`
     : '';
-  const quantVersionNote = v21QuantNote
-    || `${v21FallbackNote}${v2QuantNote}`;
+  const quantInputNote = payload.quant?.inputAsOf
+    ? `\n【★量化输入时效】输入截止 ${payload.quant.inputAsOf}；${payload.quant.inputSource === 'completed-5m-aggregated' ? `生产日线模型已把截至该时点的已完成5分钟K聚合为当日OHLCV后再运行，模型仍保持原36因子口径${payload.quant.inputBarCount ? `（聚合${payload.quant.inputBarCount}根）` : ''}` : '使用最新可用完整行情输入'}。必须按这个时间解释量化结论，不得写成旧收盘数据。`
+    : '';
+  const quantVersionNote = `${quantInputNote}${
+    v21QuantNote || `${v21FallbackNote}${v2QuantNote}`
+  }`;
   const advisorTrack = payload.advisorTrack;
   const actionScores = Array.isArray(advisorTrack?.actionScores)
     ? advisorTrack.actionScores

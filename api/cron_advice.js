@@ -29,6 +29,9 @@ import {
   readAccount,
   listAllAccounts,
 } from './account.js';
+import {
+  quantResultFromAdviceMeta,
+} from '../shared/adviceQuantResult.js';
 import { buildHoldPayload, buildWatchPayload, computePortfolio, t1StatusOf } from './_portfolio.js';
 import {
   CONCURRENCY, jobsOf, enqueueJob, leaseJob, completeJob, failJob, cancelJob, cancelAll,
@@ -462,14 +465,7 @@ export function adviceFailureReason(response, mode = '') {
 }
 
 export function quantResultFromAdviceResponse(response, priceHint = null) {
-  const quant = response?.meta?.quantResult;
-  if (!quant || typeof quant !== 'object') return null;
-  return {
-    ...quant,
-    price: Number(quant.price) > 0
-      ? Number(quant.price)
-      : Number(priceHint) > 0 ? Number(priceHint) : null,
-  };
+  return quantResultFromAdviceMeta(response?.meta, priceHint);
 }
 
 export function buildAdviceReviewRecord({

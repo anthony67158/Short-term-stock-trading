@@ -217,7 +217,9 @@ export default function AdvicePresentation({
           </div>
           <div className="amc-meta">
             {view.model.horizon && <span>窗口 {view.model.horizon}</span>}
-            {view.model.asOf && <span>信号 {view.model.asOf}</span>}
+            {view.model.asOf && (
+              <span>{view.model.asOfLabel || '信号'} {view.model.asOf}</span>
+            )}
           </div>
           {view.model.reliabilityText && (
             <div className="amc-reliability">{view.model.reliabilityText}</div>

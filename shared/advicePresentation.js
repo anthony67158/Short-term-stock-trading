@@ -110,7 +110,8 @@ function modelSummary(advice) {
   return {
     label: clean(context.modelLabel, 120),
     horizon: clean(context.horizon, 120),
-    asOf: clean(context.asOf, 40),
+    asOf: clean(context.inputAsOf || context.asOf, 40),
+    ...(context.inputAsOf ? { asOfLabel: '输入截至' } : {}),
     experimental: context.experimental === true,
     fallback: context.fallback || null,
     reliabilityText,

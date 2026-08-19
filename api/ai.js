@@ -894,6 +894,7 @@ export default async function handler(req, res) {
                 (payload.holdCost ? { cost: payload.holdCost, qty: payload.holdQty } : null),
                 12000,
                 quantRealtime,
+                { refreshDailyFromMinutes: true },
               ),
               (value) => !!value?.ok,
               (value) => value?.asOf || null,
@@ -1087,6 +1088,9 @@ export default async function handler(req, res) {
             forecastAvailability: quant.forecastAvailability || null,
             hitProb: quant.hitProb,     // LGB达标概率(0~1,原始分辨力,未做isotonic校准)
             reads: quant.reads, asOf: quant.asOf,
+            inputAsOf: quant.inputAsOf || quant.asOf || null,
+            inputSource: quant.inputSource || null,
+            inputBarCount: quant.inputBarCount || null,
             modelVersion: quant.modelVersion || 'default',
             selectedModelVersion: quant.selectedModelVersion
               || quantModelVersion,
@@ -1150,6 +1154,8 @@ export default async function handler(req, res) {
               forecastAvailability: payload.quant.forecastAvailability || null,
               executionReference: payload.quant.v2?.executionReference || null,
               reads: payload.quant.reads || null,
+              inputAsOf: payload.quant.inputAsOf || null,
+              inputSource: payload.quant.inputSource || null,
               highConfFired: hc ? !!hc.fired : null,
               highConfCredibility: hc ? (hc.credibility ?? null) : null,
               summary: parts.join(' · '),

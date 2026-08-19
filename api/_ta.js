@@ -345,6 +345,93 @@ export async function fetchQuantPredict(code, candles, hold, timeoutMs = 8000, r
   } catch { return null; }
 }
 
+function completedMinuteStamp(context = {}) {
+  const match = String(context.bjNow || '').match(
+    /^(\d{4}-\d{2}-\d{2}) (\d{2}):(\d{2})/,
+  )
+  if (!match || !context.tradingToday || !context.isLive) return null
+  const total = Number(match[2]) * 60 + Number(match[3])
+  const completed = Math.floor((total - 1) / 5) * 5
+  return `${match[1]} ${String(Math.floor(completed / 60)).padStart(2, '0')}:${String(completed % 60).padStart(2, '0')}:00`
+}
+
+export function mergeLatestMinuteSessionIntoDailyCandles(
+  candles,
+  bars,
+  context = {},
+) {
+  const daily = Array.isArray(candles)
+    ? candles.filter((item) => item?.date).map((item) => ({ ...item }))
+    : []
+  const cutoff = completedMinuteStamp(context)
+  const ordered = (Array.isArray(bars) ? bars : [])
+    .filter((bar) =>
+      bar?.tradeTime
+      && Number.isFinite(Number(bar.open))
+      && Number.isFinite(Number(bar.high))
+      && Number.isFinite(Number(bar.low))
+      && Number.isFinite(Number(bar.close))
+      && Number.isFinite(Number(bar.volume))
+      && (!cutoff || String(bar.tradeTime) <= cutoff)
+    )
+    .sort((left, right) =>
+      String(left.tradeTime).localeCompare(String(right.tradeTime)),
+    )
+  if (!daily.length || !ordered.length) {
+    return {
+      candles: daily,
+      inputAsOf: daily.at(-1)?.date || null,
+      inputSource: 'daily-kline',
+      inputBarCount: 0,
+    }
+  }
+  const inputAsOf = String(ordered.at(-1).tradeTime)
+  const sessionDate = inputAsOf.slice(0, 10)
+  const session = ordered.filter(
+    (bar) => String(bar.tradeTime).slice(0, 10) === sessionDate,
+  )
+  const lastDailyDate = String(daily.at(-1)?.date || '')
+  if (!session.length || sessionDate < lastDailyDate) {
+    return {
+      candles: daily,
+      inputAsOf: daily.at(-1)?.date || null,
+      inputSource: 'daily-kline',
+      inputBarCount: 0,
+    }
+  }
+  const replaceLast = sessionDate === lastDailyDate
+  const previous = replaceLast ? daily.at(-2) : daily.at(-1)
+  const first = session[0]
+  const last = session.at(-1)
+  const close = Number(last.close)
+  const high = Math.max(...session.map((bar) => Number(bar.high)))
+  const low = Math.min(...session.map((bar) => Number(bar.low)))
+  const previousClose = Number(previous?.close)
+  const pct = previousClose > 0
+    ? +((close / previousClose - 1) * 100).toFixed(2)
+    : null
+  const aggregated = {
+    date: sessionDate,
+    open: Number(first.open),
+    high,
+    low,
+    close,
+    volume: session.reduce(
+      (sum, bar) => sum + Number(bar.volume),
+      0,
+    ),
+    ...(pct == null ? {} : { pct }),
+  }
+  return {
+    candles: replaceLast
+      ? [...daily.slice(0, -1), aggregated]
+      : [...daily, aggregated],
+    inputAsOf,
+    inputSource: 'completed-5m-aggregated',
+    inputBarCount: session.length,
+  }
+}
+
 export async function fetchSelectedQuantPredict(
   version,
   code,
@@ -354,14 +441,52 @@ export async function fetchSelectedQuantPredict(
   realtime = null,
   {
     fetchBars = fetchFiveMinuteBars,
+    fetchDefault = fetchQuantPredict,
     fetchV2 = fetchV2QuantPredict,
     fetchV21 = fetchV21QuantPredict,
     timeContext = marketTimeContext(),
+    refreshDailyFromMinutes = false,
   } = {},
 ) {
   const selectedVersion = normalizeQuantModelVersion(version)
   if (selectedVersion === 'default') {
-    return fetchQuantPredict(code, candles, hold, timeoutMs, realtime)
+    let prepared = {
+      candles,
+      inputAsOf: candles?.at(-1)?.date || null,
+      inputSource: 'daily-kline',
+      inputBarCount: 0,
+    }
+    if (refreshDailyFromMinutes) {
+      try {
+        const bars = await fetchBars(code, {
+          timeoutMs: Math.min(timeoutMs, 2500),
+          limit: 300,
+          completedWindowOnly: false,
+        })
+        prepared = mergeLatestMinuteSessionIntoDailyCandles(
+          candles,
+          bars,
+          timeContext,
+        )
+      } catch {
+        // 分钟源不可用时保留最新日K，生产模型仍可降级运行。
+      }
+    }
+    const prediction = await fetchDefault(
+      code,
+      prepared.candles,
+      hold,
+      timeoutMs,
+      realtime,
+    )
+    return prediction
+      ? {
+          ...prediction,
+          inputAsOf: prepared.inputAsOf || prediction.asOf || null,
+          inputSource: prepared.inputSource,
+          inputBarCount: prepared.inputBarCount,
+        }
+      : null
   }
   const bars = await fetchBars(code, {
     timeoutMs: Math.min(timeoutMs, 6000),

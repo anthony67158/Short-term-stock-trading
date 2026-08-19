@@ -8,7 +8,7 @@ import { triggerServerAdvice, canServerAdvice } from './serverAdvice'
 import { acceptsGenerationResult, generationOptions } from '../shared/adviceBatchPolicy.js'
 import { ensureAdviceReasoning } from '../shared/adviceReasoning.js'
 import { evidencePersistenceFields } from '../shared/evidenceSnapshot.js'
-import { quantModelHeaders } from './quantModel'
+import { quantResultFromAdviceMeta } from '../shared/adviceQuantResult.js'
 import { compactAdvicePlan } from '../shared/adviceContinuity.js'
 import { attachAdviceDailyReport } from '../shared/adviceDailyReportPolicy.js'
 import { ensureLocalAdviceDailyReport } from './adviceDailyReport.js'
@@ -38,14 +38,13 @@ export function cancelAdvice(code) {
   if (!record) return false
   record.cancelRequested = true
   try { record.controller.abort() } catch { /* ignore */ }
-  try { record.quantController?.abort() } catch { /* ignore */ }
   notify()
   return true
 }
 
 // spec: {
 //   code, mode('buy_advice'|'hold_advice'), name, myHold(bool),
-//   aiPayload(对象), quantUrl(字符串), priceHint(数字|null)
+//   aiPayload(对象), priceHint(数字|null)
 // }
 export function startAdvice(spec) {
   const code = spec && spec.code
@@ -74,7 +73,7 @@ export function startAdvice(spec) {
 }
 
 async function run(spec, record) {
-  const { code, mode, name, myHold, aiPayload, quantUrl, priceHint } = spec
+  const { code, mode, name, myHold, aiPayload, priceHint } = spec
   const belongsToCurrentAccount = () => accountSessionMatches(record.session)
   const previousAdvice = compactAdvicePlan(getAdvice(code, mode))
   let requestPayload = {
@@ -147,27 +146,11 @@ async function run(spec, record) {
       notify()
       return
     }
-    // 量化服务（走势预测/多因子分）与 LLM 操作建议（带具体价位）并发
-    // ★超时护栏:量化端点冷启动/挂起时,不加超时会让下面的 Promise.all 永久 pending →
-    //   running 永不释放 → 该股再也无法重新生成。加 15s AbortController,超时按「不可用」(null)处理,
-    //   与原有 .catch(()=>null) 的降级语义完全一致(不改服务端 /predict 打分逻辑)。
-    const quantP = (async () => {
-      if (!quantUrl) return null
-      const ac = new AbortController()
-      record.quantController = ac
-      const t = setTimeout(() => { try { ac.abort() } catch { /* ignore */ } }, 15000)
-      try {
-        const r = await fetch(quantUrl, {
-          signal: ac.signal,
-          headers: quantModelHeaders(requestPayload.quantModelVersion),
-        })
-        return await r.json()
-      } catch { return null } finally { clearTimeout(t) }
-    })()
-    const adviceP = callAIStream(mode, requestPayload, onPhase, record.controller.signal, onEvent, generation)
+    // 军师服务端在同一轮内采集分时并运行所选量化模型，最终 meta.quantResult
+    // 就是 LLM 实际采用的结果。这里只消费这一份，避免并行日线请求覆盖它。
+    const adviceResp = await callAIStream(mode, requestPayload, onPhase, record.controller.signal, onEvent, generation)
       .then((r) => (r && r.ok ? { advice: r.result, meta: r.meta, news: r.news, truncated: r.truncated } : null))
       .catch(() => null)
-    const [j, adviceResp] = await Promise.all([quantP, adviceP])
     if (!belongsToCurrentAccount()) return
     if (record.cancelRequested) {
       results.delete(code)
@@ -181,7 +164,7 @@ async function run(spec, record) {
     const news = adviceResp && adviceResp.news
     const truncated = !!(adviceResp && (adviceResp.truncated || (advice && advice.truncated)))
     const adviceMissing = !myHold && !advice
-    const result = (j && j.quant) ? j.quant : null
+    const result = quantResultFromAdviceMeta(meta, priceHint)
 
     if (acceptsGenerationResult({
       quant: result,

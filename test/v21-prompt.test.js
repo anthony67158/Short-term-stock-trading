@@ -47,6 +47,23 @@ test('军师明确区分V2.1双头盘中概率与日终V2', () => {
   assert.match(prompt, /confidence最多为“中”/)
 })
 
+test('建议量化上下文优先展示模型实际输入截止时间', () => {
+  const prompt = buildUserPrompt('buy_advice', {
+    code: '600519',
+    quantModelVersion: 'default',
+    quant: {
+      modelVersion: 'default',
+      asOf: '2026-08-19',
+      inputAsOf: '2026-08-19 14:35:00',
+      inputSource: 'completed-5m-aggregated',
+      forecast: { direction: '看涨', upProb: 60 },
+    },
+  })
+
+  assert.match(prompt, /输入截止.*2026-08-19 14:35:00/)
+  assert.match(prompt, /已完成5分钟K聚合/)
+})
+
 test('军师明确显示V2.1回退V2.0且不冒充盘中双头', () => {
   const prompt = buildUserPrompt('hold_advice', {
     quant: {

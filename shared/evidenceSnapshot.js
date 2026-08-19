@@ -208,7 +208,7 @@ export function createCanonicalEvidenceSnapshot({
     quant: source(
       !!quant,
       'AVAILABLE',
-      quant?.asOf,
+      quant?.inputAsOf || quant?.asOf,
       asOf,
     ),
     dailyReport: source(
@@ -310,6 +310,10 @@ export function createCanonicalEvidenceSnapshot({
       selectedModelVersion: selectedQuantVersion,
       runtimeModelVersion: runtimeQuantVersion,
       asOf: quant?.asOf || null,
+      ...(quant?.inputAsOf ? {
+        inputAsOf: quant.inputAsOf,
+        inputSource: quant.inputSource || null,
+      } : {}),
     },
     sourceVersion: {
       schema: EVIDENCE_SCHEMA_VERSION,

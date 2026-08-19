@@ -2,9 +2,8 @@
 // 持仓与自选共用这里的载荷口径，自动调度由 FC cron_advice 负责：
 //   持仓股 → mode='hold_advice'(加/减/持/清 + 具体价位,含账户/目标资产/做T净手数上下文)
 //   自选股 → mode='buy_advice'(立即买入/回调再买/小仓试错/观望 四档),二者内容差异由后端 prompt 区分。
-import { api } from './apiBase'
 import { planStore, livePositionOf, computeTFlows, t1StatusOf } from './planStore'
-import { currentQuantModelVersion, quantModelQuery } from './quantModel'
+import { currentQuantModelVersion } from './quantModel'
 import { portfolioExposureContext } from '../shared/portfolioExposure.js'
 import { adviceTrustBands } from '../shared/adviceIntelligence.js'
 import { nextTradingDayLabel } from '../shared/tradingCalendar.js'
@@ -106,9 +105,7 @@ export function buildHoldSpec(code, name, quoteMap, portfolio, account) {
   const currentPrice = Number(quoteMap?.[code]?.price) > 0
     ? Number(quoteMap[code].price)
     : null
-  const hp = (holdCost != null && holdQty != null) ? `&holdCost=${holdCost}&holdQty=${holdQty}` : ''
   const quantModelVersion = currentQuantModelVersion()
-  const quantUrl = api(`/api/stock_detail?code=${code}&klt=101&lmt=60&quant=1${quantModelQuery()}${hp}&_t=${Date.now()}`)
   const stockWeight = (() => {
     const positions = portfolio && portfolio.positions
       ? portfolio.positions.filter((x) => x.code === code)
@@ -136,13 +133,12 @@ export function buildHoldSpec(code, name, quoteMap, portfolio, account) {
     account: { ...accountFrom(portfolio, account), stockWeight },
   }
   const priceHint = (quoteMap && quoteMap[code] && quoteMap[code].price) || holdCost || null
-  return { code, mode: 'hold_advice', name, myHold: true, aiPayload, quantUrl, priceHint }
+  return { code, mode: 'hold_advice', name, myHold: true, aiPayload, priceHint }
 }
 
 // 生成【自选/非持仓个股】的 AI 操作建议(buy_advice):四档买点结论,不含持仓上下文
 export function buildWatchSpec(code, name, quoteMap, portfolio, account) {
   const quantModelVersion = currentQuantModelVersion()
-  const quantUrl = api(`/api/stock_detail?code=${code}&klt=101&lmt=60&quant=1${quantModelQuery()}&_t=${Date.now()}`)
   const aiPayload = {
     code, name,
     quantModelVersion,
@@ -150,5 +146,5 @@ export function buildWatchSpec(code, name, quoteMap, portfolio, account) {
     account: accountFrom(portfolio, account),
   }
   const priceHint = (quoteMap && quoteMap[code] && quoteMap[code].price) || null
-  return { code, mode: 'buy_advice', name, myHold: false, aiPayload, quantUrl, priceHint }
+  return { code, mode: 'buy_advice', name, myHold: false, aiPayload, priceHint }
 }

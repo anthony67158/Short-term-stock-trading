@@ -69,6 +69,10 @@ export function buildQuantAdviceContext(
     ),
     horizon: clean(quant.horizon || quant.forecast?.horizon, 120),
     asOf: clean(quant.asOf, 40),
+    ...(quant.inputAsOf ? {
+      inputAsOf: clean(quant.inputAsOf, 40),
+      inputSource: clean(quant.inputSource, 80),
+    } : {}),
     experimental: selectedModelVersion === QUANT_MODEL_V21,
     fallback: fallbackOf(quant.fallback),
     reliability: reliabilityOf(

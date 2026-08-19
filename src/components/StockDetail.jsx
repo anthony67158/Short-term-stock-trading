@@ -235,9 +235,7 @@ export default function StockDetail({ stock, onClose }) {
       reasoning: '',
       quant: null,
     }, previousState))
-    const hp = myHold ? `&holdCost=${myHold.cost}&holdQty=${myHold.qty}` : ''
     const quantModelVersion = currentQuantModelVersion()
-    const quantUrl = api(`/api/stock_detail?code=${stock.code}&klt=101&lmt=60&quant=1${quantModelQuery()}${hp}&_t=${Date.now()}`)
     // 军师历史战绩（真实回测胜率），传给后端做自我校准：历史越差越收紧信心
     const advisorTrack = (() => {
       try {
@@ -336,7 +334,6 @@ export default function StockDetail({ stock, onClose }) {
       name: (profile && profile.name) || stock.name,
       myHold: !!myHold,
       aiPayload,
-      quantUrl,
       priceHint,
       deepMode: true,
     })

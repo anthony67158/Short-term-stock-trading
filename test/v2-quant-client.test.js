@@ -13,7 +13,10 @@ import {
   v2ExecutionHorizon,
   v2ForecastHorizon,
 } from '../api/_v2_quant.js'
-import { fetchSelectedQuantPredict } from '../api/_ta.js'
+import {
+  fetchSelectedQuantPredict,
+  mergeLatestMinuteSessionIntoDailyCandles,
+} from '../api/_ta.js'
 
 function minuteLines() {
   const rows = []
@@ -356,6 +359,189 @@ test('选择V2后预测不可用必须明确失败而不是静默返回空', asy
     ),
     /V2模型服务未运行或预测不可用/,
   )
+})
+
+test('生产模型用最新已完成五分钟K聚合更新当天日线OHLCV', () => {
+  const daily = [
+    {
+      date: '2026-08-18',
+      open: 10,
+      high: 10.4,
+      low: 9.8,
+      close: 10.2,
+      volume: 1000,
+      pct: 1,
+    },
+    {
+      date: '2026-08-19',
+      open: 10.2,
+      high: 10.3,
+      low: 10.1,
+      close: 10.2,
+      volume: 100,
+      pct: 0,
+    },
+  ]
+  const minute = [
+    {
+      tradeTime: '2026-08-19 09:35:00',
+      open: 10.2,
+      high: 10.5,
+      low: 10.1,
+      close: 10.4,
+      volume: 300,
+    },
+    {
+      tradeTime: '2026-08-19 09:40:00',
+      open: 10.4,
+      high: 10.8,
+      low: 10.3,
+      close: 10.7,
+      volume: 500,
+    },
+    {
+      tradeTime: '2026-08-19 09:45:00',
+      open: 10.7,
+      high: 11,
+      low: 10.6,
+      close: 10.9,
+      volume: 700,
+    },
+  ]
+
+  const merged = mergeLatestMinuteSessionIntoDailyCandles(
+    daily,
+    minute,
+    {
+      tradingToday: true,
+      isLive: true,
+      phase: '早盘(盘中)',
+      bjNow: '2026-08-19 09:47',
+    },
+  )
+
+  assert.equal(merged.inputAsOf, '2026-08-19 09:45:00')
+  assert.equal(merged.inputSource, 'completed-5m-aggregated')
+  assert.deepEqual(merged.candles.at(-1), {
+    date: '2026-08-19',
+    open: 10.2,
+    high: 11,
+    low: 10.1,
+    close: 10.9,
+    volume: 1500,
+    pct: 6.86,
+  })
+})
+
+test('生产模型选择器把最新分时聚合日线送入原36因子模型', async () => {
+  const daily = Array.from({ length: 30 }, (_, index) => ({
+    date: `2026-07-${String(index + 1).padStart(2, '0')}`,
+    open: 10,
+    high: 10.2,
+    low: 9.8,
+    close: 10,
+    volume: 1000,
+  }))
+  daily.push({
+    date: '2026-08-19',
+    open: 10,
+    high: 10.1,
+    low: 9.9,
+    close: 10,
+    volume: 50,
+  })
+  const bars = [
+    {
+      tradeTime: '2026-08-19 09:35:00',
+      open: 10,
+      high: 10.4,
+      low: 9.9,
+      close: 10.3,
+      volume: 400,
+    },
+    {
+      tradeTime: '2026-08-19 09:40:00',
+      open: 10.3,
+      high: 10.6,
+      low: 10.2,
+      close: 10.5,
+      volume: 600,
+    },
+  ]
+  let received = null
+
+  const result = await fetchSelectedQuantPredict(
+    'default',
+    '600519',
+    daily,
+    null,
+    1000,
+    { price: 10.55, live: true },
+    {
+      fetchBars: async () => bars,
+      fetchDefault: async (
+        _code,
+        candles,
+        _hold,
+        _timeout,
+        realtime,
+      ) => {
+        received = { candles, realtime }
+        return {
+          ok: true,
+          modelVersion: 'default',
+          asOf: '2026-08-19',
+        }
+      },
+      timeContext: {
+        tradingToday: true,
+        isLive: true,
+        phase: '早盘(盘中)',
+        bjNow: '2026-08-19 09:42',
+      },
+      refreshDailyFromMinutes: true,
+    },
+  )
+
+  assert.equal(received.candles.at(-1).close, 10.5)
+  assert.equal(received.candles.at(-1).volume, 1000)
+  assert.equal(result.inputAsOf, '2026-08-19 09:40:00')
+  assert.equal(result.inputSource, 'completed-5m-aggregated')
+})
+
+test('非军师生产量化保持原日线快路径不额外下载分钟线', async () => {
+  let minuteCalls = 0
+  const candles = Array.from({ length: 30 }, (_, index) => ({
+    date: `2026-07-${String(index + 1).padStart(2, '0')}`,
+    open: 10,
+    high: 10.2,
+    low: 9.8,
+    close: 10,
+    volume: 1000,
+  }))
+
+  const result = await fetchSelectedQuantPredict(
+    'default',
+    '600519',
+    candles,
+    null,
+    1000,
+    null,
+    {
+      fetchBars: async () => {
+        minuteCalls++
+        return []
+      },
+      fetchDefault: async () => ({
+        ok: true,
+        modelVersion: 'default',
+        asOf: '2026-07-30',
+      }),
+    },
+  )
+
+  assert.equal(minuteCalls, 0)
+  assert.equal(result.inputSource, 'daily-kline')
 })
 
 test('V2展示时段随市场阶段变化但不篡改训练标签', () => {
