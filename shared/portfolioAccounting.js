@@ -455,6 +455,54 @@ export function tradeAnalyticsRecords(trades = []) {
   return [...regular, ...context.t.pairRecords]
 }
 
+export function positionCostBasis(position = {}) {
+  const finite = (value) => {
+    const number = Number(value)
+    return Number.isFinite(number) ? number : 0
+  }
+  const baseQty = Math.max(0, finite(position.qty))
+  const buyPrice = finite(position.buyPrice)
+  const buyFee = finite(position.buyFee)
+  const flows = computeTFlows(position.tFlows)
+  const openBuy = Math.max(0, finite(flows.openBuy))
+  const openSell = Math.max(0, finite(flows.openSell))
+  const liveQty = Math.max(0, +(baseQty + openBuy - openSell).toFixed(3))
+
+  let rawCostValue = buyPrice * baseQty * 100 + buyFee
+  if (openBuy > 0 && flows.openBuyAvg != null) {
+    rawCostValue += (
+      finite(flows.openBuyAvg) * openBuy * 100
+      + finite(flows.openBuyFee)
+    )
+  } else if (openSell > 0 && baseQty > 0) {
+    rawCostValue *= Math.max(0, baseQty - openSell) / baseQty
+  }
+  rawCostValue = +rawCostValue.toFixed(2)
+
+  const tRealizedPnl = +(
+    finite(position.tRealizedPnl)
+    + finite(flows.realized)
+  ).toFixed(2)
+  const costValue = +(rawCostValue - tRealizedPnl).toFixed(2)
+  const rawCostWithFees = liveQty > 0
+    ? +(rawCostValue / (liveQty * 100)).toFixed(3)
+    : null
+  const costWithFees = liveQty > 0
+    ? +(costValue / (liveQty * 100)).toFixed(3)
+    : null
+
+  return {
+    baseQty,
+    liveQty,
+    flows,
+    rawCostValue,
+    costValue,
+    rawCostWithFees,
+    costWithFees,
+    tRealizedPnl,
+  }
+}
+
 export function livePositionOf(holding, code) {
   const positions = (holding || []).filter((item) => item.code === code)
   if (!positions.length) return null
@@ -464,9 +512,8 @@ export function livePositionOf(holding, code) {
   let hasOpenT = false
   let tNetHands = 0
   for (const position of positions) {
-    const baseQty = position.qty || 0
-    const baseCost = position.buyPrice || 0
-    const flows = computeTFlows(position.tFlows)
+    const basis = positionCostBasis(position)
+    const { flows, liveQty } = basis
     const openBuy = flows.openBuy || 0
     const openSell = flows.openSell || 0
     const net = openBuy - openSell
@@ -476,29 +523,9 @@ export function livePositionOf(holding, code) {
       && (openBuy > 0 || openSell > 0)
     ) hasOpenT = true
     tNetHands += net
-    const liveQty = Math.max(0, baseQty + net)
-    let cost = baseCost
-    if (openBuy > 0 && flows.openBuyAvg != null && baseQty + openBuy > 0) {
-      cost = (
-        (baseCost * baseQty)
-        + (flows.openBuyAvg * openBuy)
-      ) / (baseQty + openBuy)
-    }
-    let positionCostValue = (
-      baseCost * baseQty * 100
-      + (Number(position.buyFee) || 0)
-    )
-    if (openBuy > 0 && flows.openBuyAvg != null) {
-      positionCostValue += (
-        flows.openBuyAvg * openBuy * 100
-        + (Number(flows.openBuyFee) || 0)
-      )
-    } else if (openSell > 0 && baseQty > 0) {
-      positionCostValue *= Math.max(0, baseQty - openSell) / baseQty
-    }
     qty += liveQty
-    costSum += cost * liveQty
-    costValueWithFees += positionCostValue
+    costSum += basis.costValue / 100
+    costValueWithFees += basis.costValue
   }
   if (qty <= 0) return null
   return {
@@ -581,29 +608,10 @@ export function computePortfolio(holding, quoteMap, account) {
           ? Number(quote.prevClose)
           : position.buyPrice,
     )
-    const baseQty = finite(position.qty)
-    const flows = computeTFlows(position.tFlows)
-    const liveQty = Math.max(
-      0,
-      baseQty + finite(flows.openBuy) - finite(flows.openSell),
-    )
+    const basis = positionCostBasis(position)
+    const { baseQty, liveQty } = basis
     const marketValue = +(price * liveQty * 100).toFixed(2)
-    let costValue = (
-      finite(position.buyPrice) * baseQty * 100
-      + finite(position.buyFee)
-    )
-    if (flows.openBuy > 0 && flows.openBuyAvg != null) {
-      costValue += (
-        finite(flows.openBuyAvg) * finite(flows.openBuy) * 100
-        + finite(flows.openBuyFee)
-      )
-    } else if (flows.openSell > 0 && baseQty > 0) {
-      costValue *= (
-        Math.max(0, baseQty - finite(flows.openSell))
-        / baseQty
-      )
-    }
-    costValue = +costValue.toFixed(2)
+    const costValue = basis.costValue
     const floatPnl = +(marketValue - costValue).toFixed(2)
     return {
       id: position.id,
@@ -616,6 +624,8 @@ export function computePortfolio(holding, quoteMap, account) {
       buyPrice: position.buyPrice,
       mktValue: marketValue,
       costValue,
+      costWithFees: basis.costWithFees,
+      tRealizedPnl: basis.tRealizedPnl,
       floatPnl,
       floatPct: costValue
         ? +((floatPnl / costValue) * 100).toFixed(2)

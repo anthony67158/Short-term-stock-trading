@@ -27,6 +27,7 @@ import {
   computePortfolio as computeSharedPortfolio,
   computeTFlows as computeSharedTFlows,
   livePositionOf as liveSharedPosition,
+  positionCostBasis,
   t1StatusOf as sharedT1Status,
 } from '../shared/portfolioAccounting.js'
 import {
@@ -217,6 +218,51 @@ function normalizeClosed(closed) {
       tradeIntent: tradeIntentOf(normalized),
     }
   })
+}
+
+function restoreLegacyTRealizedPnl(holding, closed) {
+  let migrated = false
+  const finite = (value) => {
+    const number = Number(value)
+    return Number.isFinite(number) ? number : 0
+  }
+  const nextHolding = (holding || []).map((position) => {
+    if (
+      Object.prototype.hasOwnProperty.call(position || {}, 'tRealizedPnl')
+      || !position?.id
+    ) return position
+
+    const archived = (closed || []).filter((record) =>
+      closedType(record) === 'T'
+      && String(record.holdingId || '') === String(position.id),
+    )
+    if (!archived.length) return position
+
+    const latestAt = Math.max(...archived.map((record) =>
+      Number(record.at || record.sellAt || record.buyAt) || 0,
+    ))
+    if (Number(position.costAdjustedAt || 0) > latestAt) return position
+
+    const hasLaterPositionChange = (closed || []).some((record) => {
+      if (String(record.holdingId || '') !== String(position.id)) return false
+      const type = closedType(record)
+      const at = Number(record.at || record.sellAt || record.buyAt) || 0
+      return (
+        at > latestAt
+        && (type === 'BUY' || type === 'SELL' || type === 'CLOSE')
+        && tradeIntentOf(record) !== 't'
+      )
+    })
+    if (hasLaterPositionChange) return position
+
+    const tRealizedPnl = +archived.reduce(
+      (sum, record) => sum + finite(record.realizedPnl ?? record.netPnl),
+      0,
+    ).toFixed(2)
+    migrated = true
+    return { ...position, tRealizedPnl }
+  })
+  return { holding: nextHolding, migrated }
 }
 
 let state = { plan: [], holding: [], closed: [], account: null, alerts: [], reviews: {}, adviceLog: [], decisionLog: [], settings: {} }
@@ -439,7 +485,11 @@ function settledTPositionPatch(holding, computed, newQty) {
   } else if (computed.openSell > 0 && holding.qty > 0) {
     buyFee = +(buyFee * Math.max(0, newQty) / holding.qty).toFixed(2)
   }
-  return { qty: newQty, buyPrice, buyFee, tFlows: [] }
+  const tRealizedPnl = +(
+    (Number(holding.tRealizedPnl) || 0)
+    + (Number(computed.realized) || 0)
+  ).toFixed(2)
+  return { qty: newQty, buyPrice, buyFee, tRealizedPnl, tFlows: [] }
 }
 
 function closedType(record) {
@@ -582,14 +632,19 @@ export const planStore = {
   setData(d) {
     _suspend = true
     _undoStack.length = 0
-    const holding = Array.isArray(d && d.holding) ? d.holding : []
+    const closed = normalizeClosed(Array.isArray(d && d.closed) ? d.closed : [])
+    const restored = restoreLegacyTRealizedPnl(
+      Array.isArray(d && d.holding) ? d.holding : [],
+      closed,
+    )
+    const holding = restored.holding
     const heldCodes = new Set(holding.map((item) => String(item && item.code || '')).filter(Boolean))
     const plan = (Array.isArray(d && d.plan) ? d.plan : [])
       .filter((item) => !heldCodes.has(String(item && item.code || '')))
     state = {
       plan,
       holding,
-      closed: normalizeClosed(Array.isArray(d && d.closed) ? d.closed : []),
+      closed,
       account: (d && d.account) || null,   // { totalAssets, cash, goal, updatedAt }
       alerts: Array.isArray(d && d.alerts) ? d.alerts : [],        // 预警规则集
       reviews: (d && d.reviews) || {},      // 复盘结论：key=code → { code,name,at,session(noon/close/manual),text,... }
@@ -604,6 +659,7 @@ export const planStore = {
     _suspend = false
     // 登录/切换账号载入后，自动结算跨天未结算的做T（会触发一次云端回存）
     this.autoSettleTFlows()
+    if (restored.migrated && _saver) scheduleSave()
   },
   // authStore 注册云端保存回调
   registerSaver(fn) { _saver = fn },
@@ -970,7 +1026,14 @@ export const planStore = {
     } else {
       const remainQty = h.qty - sq
       state.holding = state.holding.map((x) => x.id === id
-        ? { ...x, qty: remainQty, buyFee: +((h.buyFee || 0) * (remainQty / h.qty)).toFixed(2) }
+        ? {
+            ...x,
+            qty: remainQty,
+            buyFee: +((h.buyFee || 0) * (remainQty / h.qty)).toFixed(2),
+            tRealizedPnl: +(
+              (Number(h.tRealizedPnl) || 0) * (remainQty / h.qty)
+            ).toFixed(2),
+          }
         : x)
       state.plan = state.plan.filter((item) => String(item.code) !== String(h.code))
     }
@@ -1072,15 +1135,26 @@ export const planStore = {
     const holding = state.holding.find((item) => item.id === id)
     if (!holding) return { ok: false, error: '持仓不存在或已被删除' }
     const nextCost = Number(costPrice)
-    const qty = Number(holding.qty)
     if (!Number.isFinite(nextCost) || nextCost <= 0) {
       return { ok: false, error: '请输入有效的持仓成本价' }
     }
-    if (!Number.isFinite(qty) || qty <= 0) {
+    const basis = positionCostBasis(holding)
+    if (!(basis.liveQty > 0)) {
       return { ok: false, error: '当前持仓手数无效，无法校准成本' }
     }
-    const feePerShare = (Number(holding.buyFee) || 0) / (qty * 100)
-    const rawBuyPrice = nextCost - feePerShare
+    const openSell = Number(basis.flows.openSell) || 0
+    const priceShares = (
+      openSell > 0
+        ? Math.max(0, Number(holding.qty) - openSell)
+        : Number(holding.qty)
+    ) * 100
+    if (!(priceShares > 0)) {
+      return { ok: false, error: '当前做T腿已卖空，无法校准成本' }
+    }
+    const targetCostValue = nextCost * basis.liveQty * 100
+    const rawBuyPrice = Number(holding.buyPrice) + (
+      (targetCostValue - basis.costValue) / priceShares
+    )
     if (!(rawBuyPrice > 0)) {
       return { ok: false, error: '成本价不能低于每股已摊手续费' }
     }
@@ -1341,6 +1415,21 @@ export const planStore = {
       }
     }
 
+    if (type === 'T' && target.holdingId) {
+      const oldPnl = Number(target.realizedPnl ?? target.netPnl)
+      const nextPnl = Number(editedRecord.realizedPnl ?? editedRecord.netPnl)
+      if (Number.isFinite(oldPnl) && Number.isFinite(nextPnl) && oldPnl !== nextPnl) {
+        nextHolding = nextHolding.map((holding) => String(holding.id) === String(target.holdingId)
+          ? {
+              ...holding,
+              tRealizedPnl: +(
+                (Number(holding.tRealizedPnl) || 0) + nextPnl - oldPnl
+              ).toFixed(2),
+            }
+          : holding)
+      }
+    }
+
     snapshot(`修改交易流水 ${target.name || target.code || ''}`.trim())
     const dateIds = new Set(
       (target.batchId
@@ -1437,6 +1526,17 @@ export const planStore = {
       (sum, record) => sum + (record.cashApplied ? Number(record.cashFlow) || 0 : 0),
       0,
     )
+    const tPnlByHoldingId = new Map()
+    for (const record of toDelete) {
+      if (closedType(record) !== 'T' || !record.holdingId) continue
+      const pnl = Number(record.realizedPnl ?? record.netPnl)
+      if (!Number.isFinite(pnl)) continue
+      const holdingId = String(record.holdingId)
+      tPnlByHoldingId.set(
+        holdingId,
+        (tPnlByHoldingId.get(holdingId) || 0) + pnl,
+      )
+    }
 
     // 按个股汇总这批记录对持仓手数的净影响：删 BUY→减手数、删 SELL→加回手数（T 不影响底仓）
     const deltaByCode = {}
@@ -1469,6 +1569,18 @@ export const planStore = {
       }
     })
     if (appliedCashFlow) updateAccountCash(-appliedCashFlow)
+    if (tPnlByHoldingId.size) {
+      state.holding = state.holding.map((holding) => {
+        const pnl = tPnlByHoldingId.get(String(holding.id))
+        if (!pnl) return holding
+        return {
+          ...holding,
+          tRealizedPnl: +(
+            (Number(holding.tRealizedPnl) || 0) - pnl
+          ).toFixed(2),
+        }
+      })
+    }
 
     // 再联动持仓
     for (const [code, delta] of Object.entries(deltaByCode)) {

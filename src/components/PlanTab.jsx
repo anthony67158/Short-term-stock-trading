@@ -42,6 +42,7 @@ import {
 } from '../../shared/dailyFinance.js'
 import {
   buildTActionContext,
+  positionCostBasis,
   tradeActivityContext,
 } from '../../shared/portfolioAccounting.js'
 import { nextTradingDayLabel } from '../../shared/tradingCalendar.js'
@@ -1197,8 +1198,7 @@ function AdvisorScore({ book }) {
 // 单笔持仓的"含费成本 / 浮盈% / 紧急度"轻量测算（列表级排序用，只依赖实时报价）
 // urgency：数值越大越该先处理。止损触及/破8%纪律 > 止盈触及 > 常规
 function holdSnapshot(h, q) {
-  const shares = (h.qty || 0) * 100
-  const costWithFee = shares ? +(((h.buyPrice * shares) + (h.buyFee || 0)) / shares).toFixed(3) : h.buyPrice
+  const costWithFee = positionCostBasis(h).costWithFees ?? h.buyPrice
   // 现价有效性:必须 > 0。休市/接口异常返回 0 时,盈亏用昨收兜底展示;但触价判定只认实时价,避免误触止损
   const px = q && Number(q.price) > 0 ? q.price : null
   const pcClose = q && Number(q.prevClose) > 0 ? Number(q.prevClose) : null
@@ -1949,11 +1949,12 @@ function HoldingItem({ h, idx, quote: q }) {
   )
 
   const baseQty = h.baseQty || h.qty
-  const tStat = computeTFlows(h.tFlows)
-  // 含费成本价：把买入手续费摊进每股成本，才是真实持仓成本
-  const shares = (h.qty || 0) * 100
-  const costWithFee = shares ? +(((h.buyPrice * shares) + (h.buyFee || 0)) / shares).toFixed(3) : h.buyPrice
-  const effCost = tStat.realized ? +(costWithFee - tStat.realized / (baseQty * 100)).toFixed(3) : costWithFee
+  const costBasis = positionCostBasis(h)
+  const tStat = costBasis.flows
+  const liveQty = costBasis.liveQty
+  const shares = liveQty * 100
+  const rawCostWithFee = costBasis.rawCostWithFees ?? h.buyPrice
+  const effectiveCost = costBasis.costWithFees ?? rawCostWithFee
   // 现价有效性:必须为有限数且 > 0。休市/接口异常会返回 0(或 null/NaN),此时不能拿 0 去算盈亏。
   const validPx = q && Number.isFinite(Number(q.price)) && Number(q.price) > 0 ? Number(q.price) : null
 
@@ -1970,13 +1971,17 @@ function HoldingItem({ h, idx, quote: q }) {
   // 有效价:优先实时现价,否则用收盘价兜底 → 盈亏/进度轨用它计算,绝不留空、也绝不会除零
   const effPx = validPx != null ? validPx : closePx
 
-  // 浮盈(净)：有效价市值 − 裸成本市值 − 已付买入手续费
-  const floatPnl = effPx != null && h.buyPrice ? (effPx - h.buyPrice) * shares - (h.buyFee || 0) : null
-  const pnl = effPx != null && costWithFee ? ((effPx - costWithFee) / costWithFee) * 100 : null
+  // 持仓浮盈与展示成本必须同源：已实现做T收益已摊入有效成本。
+  const floatPnl = effPx != null && shares > 0
+    ? +(effPx * shares - costBasis.costValue).toFixed(2)
+    : null
+  const pnl = floatPnl != null && costBasis.costValue
+    ? (floatPnl / costBasis.costValue) * 100
+    : null
 
   const signal = validPx != null ? tap5break10({
     price: validPx, prevClose: q.prevClose, volRatio: q.volRatio,
-    candles, cost: costWithFee, pnlPct: pnl,
+    candles, cost: effectiveCost, pnlPct: pnl,
   }) : null
   // 盘中时段操盘提示（时段 + 实时盘面 → 此刻该怎么做）
   const play = validPx != null ? intradayPlaybook(q) : null
@@ -2008,7 +2013,7 @@ function HoldingItem({ h, idx, quote: q }) {
 
   // 依据该股 + 短线操作逻辑，给出默认止盈/止损/理由（用户可再改）
   const suggestPlan = () => {
-    const base = costWithFee || (q && q.price) || h.buyPrice
+    const base = effectiveCost || (q && q.price) || h.buyPrice
     if (!base) return { tp: '', sl: '', reason: '' }
     // 止损：成本 -8%（短线纪律）与 MA10 生命线取较高者，更靠上的防线先触发
     const stopByPct = base * 0.92
@@ -2173,7 +2178,7 @@ function HoldingItem({ h, idx, quote: q }) {
   }
   const startCostEdit = () => {
     setTradeErr('')
-    setCostPrice(String(costWithFee))
+    setCostPrice(String(effectiveCost))
     setMode('cost')
   }
   const confirmCostEdit = () => {
@@ -2229,7 +2234,7 @@ function HoldingItem({ h, idx, quote: q }) {
         dayHigh: q?.high, dayLow: q?.low, open: q?.open, prevClose: q?.prevClose,
         turnover: q?.turnover, volRatio: q?.volRatio,
         mainInflowYi: q ? +(q.mainInflow / 1e8).toFixed(2) : null,
-        holdCost: costWithFee, holdQty: liveHoldQty, baseQty,
+        holdCost: effectiveCost, holdQty: liveHoldQty, baseQty,
         openTNet: tNet,  // 未结算做T净手数(正=已净加仓;负=已净卖出/反T未接回，底仓被占用)
         boughtTodayQty: t1.boughtToday,
         sellableTodayQty: t1.sellableToday,
@@ -2269,8 +2274,7 @@ function HoldingItem({ h, idx, quote: q }) {
   const flowDays = groupTFlowsByDay(h.tFlows)
   // 实时持仓手数/成本（做T后即时反映）
   const netT = (tStat.openBuy || 0) - (tStat.openSell || 0)
-  const liveQty = h.qty + netT
-  const liveCost = tStat.realized ? effCost : costWithFee
+  const liveCost = effectiveCost
   const operationTitle = mode === 'add'
     ? '加仓'
     : mode === 'sell'
@@ -2381,7 +2385,9 @@ function HoldingItem({ h, idx, quote: q }) {
               : <span className="hh-price muted" title="暂无行情">现价 —</span>)}
         </div>
         {pnl != null && (
-          <div className={'hold-pnl ' + (pnl >= 0 ? 'red' : 'green')} title="相对含费成本的浮动盈亏">
+          <div className={'hold-pnl ' + (pnl >= 0 ? 'red' : 'green')} title={costBasis.tRealizedPnl
+            ? '相对做T后有效成本的持仓总盈亏（含已实现做T收益）'
+            : '相对含费成本的浮动盈亏'}>
             <span className="hp-pct">{pnl >= 0 ? '+' : ''}{pnl.toFixed(2)}%</span>
             {floatPnl != null && <span className="hp-amt">{fmtMoney(floatPnl)}</span>}
           </div>
@@ -2393,8 +2399,8 @@ function HoldingItem({ h, idx, quote: q }) {
         <span className="hold-qty-value" title={netT !== 0 ? `底仓 ${h.qty} 手，今日做T未结算净${netT > 0 ? '买入+' : '卖出'}${netT} 手` : '当前持仓手数'}>
           持仓 {liveQty}手{netT !== 0 && <span className="sub-name"> (底仓{h.qty}{netT > 0 ? '+' : ''}{netT})</span>}
         </span>
-        <span className="hold-cost-value" title={`裸买入价 ${fmtRaw(h.buyPrice)} + 买入手续费 ${(h.buyFee || 0).toFixed(2)}${tStat.realized ? `；做T差价摊薄 ${fmtMoney(tStat.realized)}` : ''}`}>
-          成本 {fmtRaw(liveCost)} <span className="sub-name">{tStat.realized ? '(做T后)' : '(含费)'}</span>
+        <span className="hold-cost-value" title={`裸买入价 ${fmtRaw(h.buyPrice)} + 买入手续费 ${(h.buyFee || 0).toFixed(2)}${costBasis.tRealizedPnl ? `；累计做T收益摊薄 ${fmtMoney(costBasis.tRealizedPnl)}` : ''}`}>
+          成本 {fmtRaw(liveCost)} <span className="sub-name">{costBasis.tRealizedPnl ? '(做T后)' : '(含费)'}</span>
           <button
             type="button"
             className="hold-cost-edit"
@@ -2508,7 +2514,7 @@ function HoldingItem({ h, idx, quote: q }) {
                     <div className="t-stat-row">
                       <span className="t-badge"><Icon name="refresh" size={12} />做T {h.tFlows.length}笔</span>
                       <span>差价已实现 <b className={tStat.realized >= 0 ? 'red' : 'green'}>{fmtMoney(tStat.realized)}</b></span>
-                      {tStat.realized !== 0 && <span>实际成本 <b className="red">{fmtRaw(effCost)}</b> <span className="t-down">↓{fmtRaw(h.buyPrice - effCost)}</span></span>}
+                      {tStat.realized !== 0 && <span>实际成本 <b className="red">{fmtRaw(effectiveCost)}</b> <span className="t-down">↓{fmtRaw(rawCostWithFee - effectiveCost)}</span></span>}
                       {tStat.openBuy > 0 && <span className="t-open" style={{ color: 'var(--red)' }}>净买入 {tStat.openBuy}手 → 加仓</span>}
                       {tStat.openSell > 0 && <span className="t-open" style={{ color: 'var(--green)' }}>净卖出 {tStat.openSell}手 → {tStat.openSell >= h.qty ? '清仓' : '减仓'}</span>}
                     </div>
@@ -2617,9 +2623,9 @@ function HoldingItem({ h, idx, quote: q }) {
                 {tradeErr && <div className="err" style={{ marginBottom: 10 }}>{tradeErr}</div>}
               {/* 持仓概览 */}
               <div className="t-drawer-meta">
-                <span>{h.qty}手</span><span title={`裸买入价 ${fmtRaw(h.buyPrice)} + 买入手续费 ${(h.buyFee || 0).toFixed(2)}`}>成本 {fmtRaw(costWithFee)} <span className="sub-name">(含费)</span></span>
+                <span>{liveQty}手</span><span title={`原始含费成本 ${fmtRaw(rawCostWithFee)}${costBasis.tRealizedPnl ? `；累计做T收益 ${fmtMoney(costBasis.tRealizedPnl)}` : ''}`}>成本 {fmtRaw(effectiveCost)} <span className="sub-name">{costBasis.tRealizedPnl ? '(做T后)' : '(含费)'}</span></span>
                 {q && <span>现价 <b className={pctClass(q.pct)}>{fmtRaw(q.price)}</b></span>}
-                {tStat.realized !== 0 && <span>做T已实现 <b className={tStat.realized >= 0 ? 'red' : 'green'}>{fmtMoney(tStat.realized)}</b></span>}
+                {costBasis.tRealizedPnl !== 0 && <span>累计做T收益 <b className={costBasis.tRealizedPnl >= 0 ? 'red' : 'green'}>{fmtMoney(costBasis.tRealizedPnl)}</b></span>}
                 {h.tFlows && h.tFlows.length > 0 && (
                   <button className="chip-btn done t-settle-btn" style={{ marginLeft: 'auto' }} onClick={() => { setConfirmSettle(true) }} title="把今天的做T流水固化进交易记录并调整底仓">
                     <Icon name="check" size={12} />结算入账

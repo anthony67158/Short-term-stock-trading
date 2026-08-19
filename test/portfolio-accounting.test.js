@@ -8,6 +8,7 @@ import {
 import {
   calcBuyFee,
   calcSellFee,
+  computeTFlows,
   computePortfolio,
   sortHoldingsByProfit,
   planStore,
@@ -189,6 +190,237 @@ test('做T买卖腿实时更新现金，结算归档不重复记账', () => {
   assert.equal(planStore.get().account.cash, expectedCash)
   assert.equal(planStore.get().closed[0].type, 'T')
   assert.equal(planStore.get().closed[0].cashApplied, true)
+})
+
+test('做T已实现收益摊薄有效成本，浮盈金额与百分比使用同一成本口径', () => {
+  const portfolio = computePortfolio([{
+    id: 'hold_t_cost',
+    code: '003036',
+    name: '泰坦股份',
+    qty: 1,
+    buyPrice: 52.8,
+    buyFee: 2.6,
+    tRealizedPnl: 135,
+  }], {
+    '003036': { price: 54.7 },
+  }, { cash: 0 })
+
+  const position = portfolio.positions[0]
+  assert.equal(position.costValue, 5147.6)
+  assert.equal(position.floatPnl, 322.4)
+  assert.equal(position.floatPct, 6.26)
+})
+
+test('加载旧版已结算做T记录时恢复缺失的成本摊薄收益', () => {
+  const settledAt = Date.now() - 3600000
+  planStore.setData({
+    plan: [],
+    holding: [{
+      id: 'hold_t_legacy',
+      code: '003036',
+      name: '泰坦股份',
+      qty: 1,
+      buyPrice: 52.8,
+      buyFee: 2.6,
+      buyAt: settledAt - 3600000,
+    }],
+    closed: [{
+      id: 'legacy_t_record',
+      type: 'T',
+      holdingId: 'hold_t_legacy',
+      code: '003036',
+      qty: 1,
+      netPnl: 135,
+      realizedPnl: 135,
+      at: settledAt,
+    }],
+  })
+
+  const holding = planStore.get().holding[0]
+  const position = computePortfolio(planStore.get().holding, {
+    '003036': { price: 54.7 },
+  }, { cash: 0 }).positions[0]
+
+  assert.equal(holding.tRealizedPnl, 135)
+  assert.equal(position.costWithFees, 51.476)
+  assert.equal(position.floatPnl, 322.4)
+})
+
+test('删除已结算做T记录时恢复剩余持仓的原始成本', () => {
+  planStore.setData({
+    plan: [],
+    holding: [{
+      id: 'hold_t_delete',
+      code: '003036',
+      name: '泰坦股份',
+      qty: 1,
+      buyPrice: 52.8,
+      buyFee: 2.6,
+      tRealizedPnl: 135,
+    }],
+    closed: [{
+      id: 'settled_t_record',
+      type: 'T',
+      holdingId: 'hold_t_delete',
+      code: '003036',
+      qty: 1,
+      netPnl: 135,
+      realizedPnl: 135,
+      at: Date.now() - 3600000,
+    }],
+  })
+
+  planStore.removeClosed('settled_t_record')
+
+  const holding = planStore.get().holding[0]
+  const position = computePortfolio(planStore.get().holding, {
+    '003036': { price: 54.7 },
+  }, { cash: 0 }).positions[0]
+
+  assert.equal(holding.tRealizedPnl, 0)
+  assert.equal(position.costWithFees, 52.826)
+  assert.equal(position.floatPnl, 187.4)
+})
+
+test('编辑已结算做T记录时同步更新剩余持仓的成本摊薄收益', () => {
+  const now = new Date()
+  const date = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, '0'),
+    String(now.getDate()).padStart(2, '0'),
+  ].join('-')
+  planStore.setData({
+    plan: [],
+    holding: [{
+      id: 'hold_t_edit',
+      code: '003036',
+      name: '泰坦股份',
+      qty: 1,
+      buyPrice: 52.8,
+      buyFee: 2.6,
+      tRealizedPnl: 135,
+    }],
+    closed: [{
+      id: 'settled_t_edit',
+      type: 'T',
+      holdingId: 'hold_t_edit',
+      code: '003036',
+      qty: 1,
+      buyPrice: 50,
+      sellPrice: 51.4,
+      buyFee: 2.6,
+      sellFee: 2.6,
+      netPnl: 135,
+      realizedPnl: 135,
+      at: Date.now() - 3600000,
+    }],
+  })
+
+  const result = planStore.updateClosedTrade('settled_t_edit', {
+    date,
+    buyPrice: 50,
+    sellPrice: 52,
+    qty: 1,
+  })
+
+  const record = planStore.get().closed[0]
+  const holding = planStore.get().holding[0]
+  assert.equal(result.ok, true)
+  assert.equal(holding.tRealizedPnl, record.realizedPnl)
+})
+
+test('结算做T后保留结算前的有效成本和浮盈', () => {
+  planStore.setData({
+    plan: [],
+    holding: [{
+      id: 'hold_t_settle',
+      code: '003036',
+      name: '泰坦股份',
+      qty: 1,
+      buyPrice: 52.8,
+      buyFee: 2.6,
+      buyAt: Date.now() - 86400000,
+    }],
+    closed: [],
+  })
+
+  planStore.addTFlow('hold_t_settle', 'buy', 50, 1)
+  planStore.addTFlow('hold_t_settle', 'sell', 51.4, 1)
+  const beforeHolding = planStore.get().holding[0]
+  const realized = computeTFlows(beforeHolding.tFlows).realized
+  const before = computePortfolio(planStore.get().holding, {
+    '003036': { price: 54.7 },
+  }, { cash: 0 }).positions[0]
+
+  planStore.settleTFlows('hold_t_settle')
+
+  const afterHolding = planStore.get().holding[0]
+  const after = computePortfolio(planStore.get().holding, {
+    '003036': { price: 54.7 },
+  }, { cash: 0 }).positions[0]
+
+  assert.equal(afterHolding.tRealizedPnl, realized)
+  assert.equal(after.costValue, before.costValue)
+  assert.equal(after.floatPnl, before.floatPnl)
+  assert.equal(after.floatPct, before.floatPct)
+})
+
+test('结算做T后减仓按剩余手数分摊累计做T收益', () => {
+  planStore.setData({
+    plan: [],
+    holding: [{
+      id: 'hold_t_reduce',
+      code: '003036',
+      name: '泰坦股份',
+      qty: 2,
+      buyPrice: 52.8,
+      buyFee: 5.2,
+      buyAt: Date.now() - 86400000,
+      tRealizedPnl: 135,
+    }],
+    closed: [],
+  })
+
+  const before = computePortfolio(planStore.get().holding, {
+    '003036': { price: 54.7 },
+  }, { cash: 0 }).positions[0]
+
+  planStore.sell('hold_t_reduce', 54.7, 1)
+
+  const afterHolding = planStore.get().holding[0]
+  const after = computePortfolio(planStore.get().holding, {
+    '003036': { price: 54.7 },
+  }, { cash: 0 }).positions[0]
+
+  assert.equal(afterHolding.tRealizedPnl, 67.5)
+  assert.equal(after.costValue, +(before.costValue / 2).toFixed(2))
+  assert.equal(after.costWithFees, before.costWithFees)
+  assert.equal(after.floatPct, before.floatPct)
+})
+
+test('修改做T后显示成本不会重复扣减累计做T收益', () => {
+  planStore.setData({
+    plan: [],
+    holding: [{
+      id: 'hold_t_adjust',
+      code: '003036',
+      name: '泰坦股份',
+      qty: 1,
+      buyPrice: 52.8,
+      buyFee: 2.6,
+      tRealizedPnl: 135,
+    }],
+    closed: [],
+  })
+
+  const result = planStore.updateHoldingCost('hold_t_adjust', 51.476)
+  const position = computePortfolio(planStore.get().holding, {
+    '003036': { price: 54.7 },
+  }, { cash: 0 }).positions[0]
+
+  assert.equal(result.ok, true)
+  assert.equal(position.costWithFees, 51.476)
+  assert.equal(position.floatPnl, 322.4)
 })
 
 test('未配平做T净腿结算后同步维护持仓买入手续费', () => {

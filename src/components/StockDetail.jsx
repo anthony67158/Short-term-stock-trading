@@ -7,7 +7,7 @@ import AdvicePresentation from './AdvicePresentation'
 import { usePolling } from '../hooks'
 import { fmtPct, pctClass, fmtRaw, fmtNum } from '../format'
 import { api } from '../apiBase'
-import { usePlanStore, planStore, computeTFlows, computePortfolio, t1StatusOf } from '../planStore'
+import { usePlanStore, planStore, computePortfolio, livePositionOf, t1StatusOf } from '../planStore'
 import { nextTradingDayLabel } from '../../shared/tradingCalendar.js'
 import { getAdvice, subscribeAdvice } from '../adviceCache'
 import { subscribeRunner, isRunning, getRunning, getResult } from '../adviceRunner'
@@ -126,39 +126,15 @@ export default function StockDetail({ stock, onClose }) {
   const portfolio = useMemo(() => {
     return computePortfolio(book.holding || [], {}, book.account || null)
   }, [book.holding, book.account])
-  // 该股持仓（可能多笔）→ 加权成本，用于给"加/减/做T"建议；未持仓则给"买/观望"
-  // ★关键：做T在结算前，未配对的那条腿实质已改变持仓——净买入腿=已加仓、净卖出腿=已减仓。
-  //   所以传给 AI 的"当前持仓"必须按【实时持仓】口径(底仓±未结算做T净额)，而不是原始底仓。
+  // 个股详情与持仓卡共用实时仓位及有效成本口径，避免做T收益只在其中一侧生效。
   const myHold = useMemo(() => {
-    const hs = (book.holding || []).filter((h) => h.code === (stock && stock.code))
-    if (!hs.length) return null
-    let qty = 0, costSum = 0     // 实时持仓手数 / 成本×手数(用于加权)
-    let hasOpenT = false, tNetHands = 0
-    for (const h of hs) {
-      const baseQty = h.qty || 0
-      const baseCost = h.buyPrice || 0
-      // 该笔未结算做T流水的净额
-      const r = computeTFlows(h.tFlows)
-      const openBuy = r.openBuy || 0, openSell = r.openSell || 0
-      const net = openBuy - openSell
-      if (h.tFlows && h.tFlows.length) hasOpenT = hasOpenT || (openBuy > 0 || openSell > 0)
-      tNetHands += net
-      // 实时手数 = 底仓 + 净做T腿(可正可负)
-      const liveQty = Math.max(0, baseQty + net)
-      // 实时成本：净买入按其挂单均价并入加权；净卖出减手数、成本沿用底仓成本(卖出不改单位成本)
-      let cost = baseCost
-      if (openBuy > 0 && r.openBuyAvg != null && (baseQty + openBuy) > 0) {
-        cost = ((baseCost * baseQty) + (r.openBuyAvg * openBuy)) / (baseQty + openBuy)
-      }
-      qty += liveQty
-      costSum += cost * liveQty
-    }
-    if (qty <= 0) return null
+    const live = livePositionOf(stock && stock.code)
+    if (!live) return null
     return {
-      cost: +(costSum / qty).toFixed(3),
-      qty,
-      hasOpenT,          // 是否有未结算做T
-      tNetHands,         // 未结算做T净手数(正=已净加仓/负=已净减仓)
+      cost: live.costWithFees ?? live.cost,
+      qty: live.qty,
+      hasOpenT: live.hasOpenT,
+      tNetHands: live.tNetHands,
     }
   }, [book.holding, stock && stock.code])
   // 切换股票时：重置各折叠区
