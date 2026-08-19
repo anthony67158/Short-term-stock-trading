@@ -428,7 +428,7 @@ function QuantBadge({ score, bias, size }) {
   )
 }
 
-function AdviceUpdatedAt({ entry }) {
+function AdviceUpdatedAt({ entry, score, bias }) {
   const label = formatAdviceTime(entry && entry.at)
   const recency = adviceRecency(entry && entry.at)
   if (!label || !recency) return null
@@ -440,6 +440,7 @@ function AdviceUpdatedAt({ entry }) {
       {recency.tone === 'fresh' && (
         <time dateTime={new Date(entry.at).toISOString()}>{label}</time>
       )}
+      <QuantBadge score={score} bias={bias} size="auxiliary" />
     </div>
   )
 }
@@ -745,7 +746,7 @@ function CandDecision({ p, q }) {
 
   return (
     <>
-      <AdviceUpdatedAt entry={entry} />
+      <AdviceUpdatedAt entry={entry} score={p.qScore} bias={p.qBias} />
       {generation?.active && <AdviceGenerationStatus code={p.code} />}
       {!view ? (
         !generation?.active && (
@@ -894,7 +895,7 @@ function PlanList({ book, quote, stockTags, batchSel }) {
             <Icon name={checked ? 'checkSquare' : 'square'} size={16} />
           </span>
         )}
-        {/* 顶行：左=股名/代码/标签，右=量化得分徽标 + 现价 */}
+        {/* 顶行：左=股名/代码/标签，右=现价；量化分跟随建议生成信息显示。 */}
         <div className="pc-top">
           <div className="pc-name">
             <StockName
@@ -910,7 +911,6 @@ function PlanList({ book, quote, stockTags, batchSel }) {
           </div>
           <div className="pc-top-r">
             {q && <span className={'pc-price ' + pctClass(q.pct)}>{fmtRaw(q.price)} <span className="pc-pct">{fmtPct(q.pct)}</span></span>}
-            <QuantBadge score={p.qScore} bias={p.qBias} size="sm" />
           </div>
         </div>
         {/* 置顶别针：右上角浮标，点亮=重点关注(参与置顶分组并按量化分排序) */}
@@ -2410,11 +2410,10 @@ function HoldingItem({ h, idx, quote: q }) {
             <Icon name="edit" size={11} />
           </button>
         </span>
-        <QuantBadge score={h.qScore} bias={h.qBias} size="holding" />
       </div>
 
       {/* 当前指令、加减仓位与动作进度使用同一建议，不再并排展示互相冲突的价格体系。 */}
-      <AdviceUpdatedAt entry={adviceEntry} />
+      <AdviceUpdatedAt entry={adviceEntry} score={h.qScore} bias={h.qBias} />
       <AdviceGenerationStatus code={h.code} />
       <AdviceActionPanel
         view={decisionView}

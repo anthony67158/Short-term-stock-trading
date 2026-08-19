@@ -193,25 +193,27 @@ test('持仓与自选卡片顶部信息固定单行且长名称省略', () => {
   )
 })
 
-test('持仓卡把量化分放入成本信息行而不是混入行情首行', () => {
+test('持仓与自选卡把量化分收进建议元信息而不是混入行情首行', () => {
   const holdHeadStart = planTab.indexOf('<div className="hold-head">')
   const holdMetaStart = planTab.indexOf('<div className="hold-meta">', holdHeadStart)
   const adviceStart = planTab.indexOf('<AdviceUpdatedAt', holdMetaStart)
   const holdHead = planTab.slice(holdHeadStart, holdMetaStart)
   const holdMeta = planTab.slice(holdMetaStart, adviceStart)
+  const candTopStart = planTab.indexOf('<div className="pc-top">')
+  const candMetricsStart = planTab.indexOf('<div className="pc-metrics">', candTopStart)
+  const candTop = planTab.slice(candTopStart, candMetricsStart)
 
   assert.doesNotMatch(holdHead, /<QuantBadge score=\{h\.qScore\}/)
-  assert.match(
-    holdMeta,
-    /<QuantBadge score=\{h\.qScore\} bias=\{h\.qBias\} size="holding"\s*\/>/,
+  assert.doesNotMatch(holdMeta, /<QuantBadge score=\{h\.qScore\}/)
+  assert.doesNotMatch(candTop, /<QuantBadge score=\{p\.qScore\}/)
+  assert.match(planTab, /function AdviceUpdatedAt\(\{ entry, score, bias \}\)/)
+  assert.equal(
+    (planTab.match(/<AdviceUpdatedAt entry=\{[^}]+\} score=\{[^}]+\.qScore\} bias=\{[^}]+\.qBias\}\s*\/>/g) || []).length,
+    2,
   )
   assert.match(
     legacyStyles,
-    /\.hold-meta \.q-badge\.holding\s*{[^}]*padding:[^}]*border:/s,
-  )
-  assert.match(
-    legacyStyles,
-    /\.hold-meta \.q-badge\.holding \.q-badge-k\s*{[^}]*font-size:\s*10px/s,
+    /\.advice-updated-at \.q-badge\.auxiliary\s*{[^}]*border:\s*0[^}]*background:\s*transparent/s,
   )
 })
 
@@ -316,7 +318,7 @@ test('持仓区共用页面边线、筛选栏留出安全区且卡片展示建�
     precision,
     /\.stock-group-filter \.stock-group-tabs\s*{[^}]*padding-inline-start:\s*var\(--space-2xs\)[^}]*border-inline-start:\s*1px solid var\(--color-rule-2\)/s,
   )
-  assert.match(planTab, /function AdviceUpdatedAt\(\{ entry \}\)/)
+  assert.match(planTab, /function AdviceUpdatedAt\(\{ entry, score, bias \}\)/)
   assert.equal((planTab.match(/<AdviceUpdatedAt entry=/g) || []).length, 2)
   assert.match(planTab, /className="advice-updated-at"/)
   assert.match(precision, /\.hold-grid\s*{[^}]*align-items:\s*stretch/s)
