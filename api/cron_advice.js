@@ -651,7 +651,7 @@ async function genOne({
       trust: meta && meta.trustScore ? meta.trustScore.score : null,
       resonance: meta && meta.resonance ? meta.resonance.score : null,
       priceAtAdvice: px,
-      theoryNote: advice.theoryNote || '',
+      theoryNote: advice.theoryNote || advice.theory || '',
       planId: advice.continuity?.planId || '',
       planRevision: advice.continuity?.revision || null,
       thesisVersion: advice.continuity?.thesisVersion || null,

@@ -47,6 +47,10 @@ import {
   setAdviceReviewEnabled as withAdviceReviewEnabled,
 } from '../shared/adviceReviewPolicy.js'
 import { newerAutoRefreshPatch } from '../shared/adviceAutoRefreshPolicy.js'
+import {
+  adviceTheoryTextOf,
+  theoryTagsOf,
+} from '../shared/advisorTheory.js'
 // 注意:adviceBatch 只在 mergeCloud 运行时用到,这里【不能】做顶层静态 import——
 // 否则 planStore→adviceBatch→adviceRunner→serverAdvice→authStore 形成模块初始化环,
 // 而 authStore 顶层会调用 planStore.registerSaver(),此时 planStore 尚未初始化 → 整包崩(白屏卡启动)。
@@ -146,32 +150,6 @@ export function adviceFocus(code) {
     return { badge, text, tone, at: a.at, action: adv.action || adv.stance || '', actionPlan: adv.actionPlan || '', title: adv.title || '' }
   } catch { return null }
 }
-
-// ---- 理论归因：把军师 theoryNote 自由文本归一化成【规范理论标签】，供事后按理论算胜率 ----
-// 每条建议可能引用 1~2 个理论；命中多个则都记入。顺序 = 优先级(靠前更具体)。
-const THEORY_TAGS = [
-  { tag: '利弗莫尔关键点',   re: /利弗莫尔|关键点|飞刀|金字塔加仓|错了.{0,3}认错|绝不摊亏/ },
-  { tag: '欧奈尔CANSLIM',    re: /欧奈尔|奈尔|can\s*slim|canslim|8%.{0,3}止损|buy\s*point|买点突破/i },
-  { tag: '米勒维尼VCP',      re: /米勒维尼|维尼|vcp|缩量收缩|均线多头排列/i },
-  { tag: '威科夫量价',       re: /威科夫|wyckoff|吸筹|派发|聪明钱|主力.{0,3}脚印/i },
-  { tag: '温斯坦阶段',       re: /温斯坦|weinstein|阶段分析|第二上升|30周线|生命线/i },
-  { tag: '道氏趋势',         re: /道氏|dow|趋势三级|顺大势|顺势/ },
-  { tag: '均值回归',         re: /均值回归|超买超卖|布林|回归中轨|震荡区间|高抛低吸/ },
-  { tag: '凯利/R风控',       re: /凯利|kelly|撒普|r\s*倍数|盈亏比|风险敞口|单笔风险|仓位管理/i },
-  { tag: '处置效应',         re: /处置效应|让利润奔跑|亏损快砍|截短亏损|赚一点就跑|亏了死扛/ },
-  { tag: '索罗斯反身性',     re: /索罗斯|反身性|泡沫|拐点/ },
-  { tag: '科斯托拉尼钟摆',   re: /科斯托拉尼|情绪钟摆|众人贪婪|众人恐慌|追顶|割底/ },
-]
-// 返回命中的规范标签数组(最多2个)；无匹配 → []
-function theoryTagsOf(note) {
-  if (!note || typeof note !== 'string') return []
-  const hits = []
-  for (const t of THEORY_TAGS) {
-    if (t.re.test(note)) { hits.push(t.tag); if (hits.length >= 2) break }
-  }
-  return hits
-}
-
 
 // 计划 / 持仓 交易闭环 store（云端账号驱动：数据由 authStore 登录后注入，变更自动回存云端）
 // plan:   候选   { code, name, note, addedAt }
@@ -2559,15 +2537,15 @@ export const planStore = {
   adviceStats() {
     return summarizeAdviceOutcomes(state.adviceLog)
   },
-  // 按【理论】统计真实胜率（军师"融会贯通"哪个理论在你的票上最灵）。
-  // 一条建议引用多个理论 → 每个理论都计入(该建议命中则各+1胜)。
+  // 只统计模型最终采用的 theoryNote/theory；检索候选 theoryRefs 不计入。
+  // 一条建议实际采用2~3个理论 → 每个理论都计入(该建议命中则各+1胜)。
   theoryStats() {
     const log = dedupeAdviceEpisodes(
       (state.adviceLog || []).filter(isAdviceOutcomeCurrent),
     )
     const by = {}
     for (const r of log) {
-      const tags = theoryTagsOf(r.theoryNote)
+      const tags = theoryTagsOf(adviceTheoryTextOf(r))
       for (const tag of tags) {
         if (!by[tag]) by[tag] = { theory: tag, total: 0, hit: 0, sumPct: 0 }
         by[tag].total++; if (r.hit) by[tag].hit++
@@ -2580,7 +2558,9 @@ export const planStore = {
       avgPct: g.total ? +(g.sumPct / g.total).toFixed(2) : null,
     })).sort((a, b) => (b.winRate - a.winRate) || (b.total - a.total))
     // 待归因：已落库但尚未验证的建议里，能识别出理论标签的条数
-    const taggedTotal = (state.adviceLog || []).filter((r) => theoryTagsOf(r.theoryNote).length).length
+    const taggedTotal = (state.adviceLog || []).filter(
+      (record) => theoryTagsOf(adviceTheoryTextOf(record)).length,
+    ).length
     return { groups, taggedTotal }
   },
 

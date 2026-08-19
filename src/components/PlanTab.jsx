@@ -1160,7 +1160,7 @@ function AdvisorScore({ book }) {
               )}
               {theoryGroups.length > 0 && (
                 <div className="ap-theory">
-                  <div className="ap-subtitle"><Icon name="spark" size={12} /> 理论引用后的建议归因 <span className="muted">（至少8次才用于校准）</span></div>
+                  <div className="ap-subtitle"><Icon name="spark" size={12} /> 实际采用理论的建议归因 <span className="muted">（至少8次才用于校准）</span></div>
                   <div className="ap-rows">
                     {theoryGroups.map((g) => (
                       <div className="ap-row" key={g.theory}>
@@ -1173,8 +1173,8 @@ function AdvisorScore({ book }) {
                     ))}
                   </div>
                   <p className="ap-desc muted" style={{ marginTop: 6 }}>
-                    同一条建议可能同时引用两个理论，因此这里是相关性归因，不是理论本身的独立因果检验。
-                    样本达到8次后才会用于军师校准。
+                    仅统计建议正文 theoryNote 实际采用2至3个理论，6条检索候选不计入。
+                    这里是相关性归因，不是理论本身的独立因果检验；样本达到8次后才用于军师校准。
                   </p>
                 </div>
               )}

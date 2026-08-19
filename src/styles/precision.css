@@ -4911,6 +4911,17 @@ html[data-theme="light"] .portfolio-heatmap {
   margin-inline-start: auto;
 }
 
+.advisor-score-dialog .ap-row {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.advisor-score-dialog .ap-mode {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .auto-ref-mask {
   z-index: var(--z-modal);
 }
