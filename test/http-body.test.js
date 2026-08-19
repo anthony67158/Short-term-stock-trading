@@ -3,8 +3,11 @@ import assert from 'node:assert/strict'
 import { PassThrough, Readable } from 'node:stream'
 
 import {
+  accountRequestBodyLimit,
+  defaultApiRequestBodyLimit,
   RequestBodyError,
   readRequestBody,
+  requestBodyLimitForPath,
 } from '../api/_http_body.js'
 
 test('请求体按字节读取并保留UTF-8内容', async () => {
@@ -29,6 +32,28 @@ test('请求体超过上限时返回413错误', async () => {
       && error.statusCode === 413
       && error.code === 'BODY_TOO_LARGE'
     ),
+  )
+})
+
+test('账号快照可超过通用API上限但受独立上限约束', async () => {
+  const body = Buffer.alloc(9 * 1024 * 1024)
+  const req = Readable.from([body])
+  req.headers = { 'content-length': String(body.length) }
+
+  assert.ok(accountRequestBodyLimit > body.length)
+  assert.equal(
+    requestBodyLimitForPath('/api/account'),
+    accountRequestBodyLimit,
+  )
+  assert.equal(
+    requestBodyLimitForPath('/api/ai'),
+    defaultApiRequestBodyLimit,
+  )
+  assert.equal(
+    (await readRequestBody(req, {
+      maxBytes: requestBodyLimitForPath('/api/account'),
+    })).length,
+    body.length,
   )
 })
 

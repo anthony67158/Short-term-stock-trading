@@ -39,6 +39,7 @@ import {
 import {
   RequestBodyError,
   readRequestBody,
+  requestBodyLimitForPath,
 } from './api/_http_body.js';
 
 const PORT = process.env.FC_SERVER_PORT || process.env.PORT || 9000;
@@ -46,7 +47,6 @@ const ROOT = process.cwd();
 const API_DIR = path.join(ROOT, 'api');
 const DIST_DIR = path.join(ROOT, 'dist');
 const siteAccessLimiter = createSiteAccessLimiter();
-const API_BODY_LIMIT = 8 * 1024 * 1024;
 const INVOKE_BODY_LIMIT = 256 * 1024;
 const BODY_READ_TIMEOUT_MS = 15_000;
 
@@ -396,7 +396,7 @@ async function handleRequest(req, res) {
   req.query = Object.fromEntries(url.searchParams.entries());
   const raw = (req.method === 'POST' || req.method === 'PUT')
     ? await readRequestBody(req, {
-        maxBytes: API_BODY_LIMIT,
+        maxBytes: requestBodyLimitForPath(pathname),
         timeoutMs: BODY_READ_TIMEOUT_MS,
       })
     : '';

@@ -7,6 +7,17 @@ export class RequestBodyError extends Error {
   }
 }
 
+export const defaultApiRequestBodyLimit = 8 * 1024 * 1024
+// FC synchronous HTTP accepts 32 MB. Keep an 8 MB margin for request parsing
+// while allowing a full account snapshot to round-trip through /api/account.
+export const accountRequestBodyLimit = 24 * 1024 * 1024
+
+export function requestBodyLimitForPath(pathname) {
+  return pathname === '/api/account'
+    ? accountRequestBodyLimit
+    : defaultApiRequestBodyLimit
+}
+
 function bodyError(message, code, statusCode) {
   return new RequestBodyError(message, { code, statusCode })
 }
@@ -14,7 +25,7 @@ function bodyError(message, code, statusCode) {
 export function readRequestBody(
   req,
   {
-    maxBytes = 8 * 1024 * 1024,
+    maxBytes = defaultApiRequestBodyLimit,
     timeoutMs = 15_000,
   } = {},
 ) {

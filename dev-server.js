@@ -16,11 +16,11 @@ import path from 'node:path'
 import {
   RequestBodyError,
   readRequestBody,
+  requestBodyLimitForPath,
 } from './api/_http_body.js'
 
 const PORT = process.env.PORT || 3000
 const API_DIR = path.join(process.cwd(), 'api')
-const API_BODY_LIMIT = 8 * 1024 * 1024
 const BODY_READ_TIMEOUT_MS = 15_000
 
 // 预加载所有非下划线开头的函数模块
@@ -51,7 +51,7 @@ async function handleRequest(req, res) {
   req.query = Object.fromEntries(url.searchParams.entries())
   const raw = (req.method === 'POST' || req.method === 'PUT')
     ? await readRequestBody(req, {
-        maxBytes: API_BODY_LIMIT,
+        maxBytes: requestBodyLimitForPath(url.pathname),
         timeoutMs: BODY_READ_TIMEOUT_MS,
       })
     : ''
