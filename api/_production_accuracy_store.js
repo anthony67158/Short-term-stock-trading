@@ -21,6 +21,30 @@ function accuracy(correct, total) {
   return total > 0 ? +(correct / total * 100).toFixed(1) : null
 }
 
+function normalizeHistoryDays(values, model) {
+  const byDate = new Map()
+  for (const item of Array.isArray(values) ? values : []) {
+    const total = count(item?.total)
+    const correct = Math.min(total, count(item?.correct))
+    const date = String(item?.date || '').slice(0, 10)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || total <= 0 || byDate.has(date)) {
+      continue
+    }
+    byDate.set(date, {
+      date,
+      total,
+      correct,
+      accuracyPct: accuracy(correct, total),
+      modelDataEndDate: String(
+        item?.modelDataEndDate || model.dataEndDate || '',
+      ).slice(0, 10),
+      modelTrainedAt: count(item?.modelTrainedAt || model.trainedAt),
+    })
+  }
+  return [...byDate.values()]
+    .sort((left, right) => right.date.localeCompare(left.date))
+}
+
 function emptyProductionAccuracy() {
   return {
     available: false,
@@ -58,6 +82,7 @@ function emptyProductionAccuracy() {
       nominalCoveragePct: 80,
     },
     days: [],
+    historyDays: [],
     sampleWindow: {
       from: '',
       to: '',
@@ -109,17 +134,23 @@ export function normalizeProductionAccuracy(payload) {
     })
     .filter((item) => /^\d{4}-\d{2}-\d{2}$/.test(item.date) && item.total > 0)
     .sort((left, right) => right.date.localeCompare(left.date))
-    .slice(0, 30)
+  const model = {
+    trainedAt: count(payload?.model?.trainedAt),
+    dataEndDate: String(payload?.model?.dataEndDate || '').slice(0, 10),
+    horizonDays: count(payload?.model?.horizonDays) || 5,
+    featureCount: count(payload?.model?.featureCount),
+  }
+  const historyDays = normalizeHistoryDays(
+    Array.isArray(payload?.historyDays) && payload.historyDays.length
+      ? payload.historyDays
+      : days,
+    model,
+  )
   return {
     available: total > 0,
     mode: 'forwardUnseenBacktest',
     updatedAt: count(payload?.updatedAt),
-    model: {
-      trainedAt: count(payload?.model?.trainedAt),
-      dataEndDate: String(payload?.model?.dataEndDate || '').slice(0, 10),
-      horizonDays: count(payload?.model?.horizonDays) || 5,
-      featureCount: count(payload?.model?.featureCount),
-    },
+    model,
     overall: {
       total,
       correct,
@@ -151,6 +182,7 @@ export function normalizeProductionAccuracy(payload) {
         optionalNumber(payload?.nextTradeDayRange?.nominalCoveragePct) ?? 80,
     },
     days,
+    historyDays,
     sampleWindow: {
       from: String(payload?.sampleWindow?.from || '').slice(0, 10),
       to: String(payload?.sampleWindow?.to || '').slice(0, 10),

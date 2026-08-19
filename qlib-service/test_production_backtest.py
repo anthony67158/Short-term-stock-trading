@@ -9,6 +9,7 @@ from production_backtest import (
     collect_hard_error_samples,
     evaluate_production_model,
     load_hard_error_memory,
+    merge_production_accuracy_history,
     merge_hard_error_memory,
     upload_hard_error_memory,
     upload_production_accuracy,
@@ -253,6 +254,66 @@ class ProductionBacktestTest(unittest.TestCase):
         self.assertEqual(
             bucket.writes[0][2],
             {"Content-Type": "application/json", "Cache-Control": "no-cache"},
+        )
+
+    def test_daily_accuracy_history_keeps_first_published_model_per_date(self):
+        previous = {
+            "model": {
+                "dataEndDate": "2026-08-01",
+                "trainedAt": 100,
+            },
+            "days": [
+                {
+                    "date": "2026-08-07",
+                    "total": 100,
+                    "correct": 70,
+                    "accuracyPct": 70.0,
+                },
+            ],
+        }
+        current = {
+            "model": {
+                "dataEndDate": "2026-08-06",
+                "trainedAt": 200,
+            },
+            "days": [
+                {
+                    "date": "2026-08-10",
+                    "total": 100,
+                    "correct": 62,
+                    "accuracyPct": 62.0,
+                },
+                {
+                    "date": "2026-08-07",
+                    "total": 100,
+                    "correct": 99,
+                    "accuracyPct": 99.0,
+                },
+            ],
+        }
+
+        merged = merge_production_accuracy_history(previous, current)
+
+        self.assertEqual(
+            merged["historyDays"],
+            [
+                {
+                    "date": "2026-08-10",
+                    "total": 100,
+                    "correct": 62,
+                    "accuracyPct": 62.0,
+                    "modelDataEndDate": "2026-08-06",
+                    "modelTrainedAt": 200,
+                },
+                {
+                    "date": "2026-08-07",
+                    "total": 100,
+                    "correct": 70,
+                    "accuracyPct": 70.0,
+                    "modelDataEndDate": "2026-08-01",
+                    "modelTrainedAt": 100,
+                },
+            ],
         )
 
     def test_hard_error_memory_uploads_to_its_own_stable_key(self):

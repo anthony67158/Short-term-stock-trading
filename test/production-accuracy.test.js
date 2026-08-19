@@ -94,6 +94,24 @@ test('生产模型回测报告只公开实际命中汇总并重新计算百分�
       { date: '2026-08-10', total: 300, correct: 190, accuracyPct: 63.3 },
       { date: '2026-08-07', total: 300, correct: 182, accuracyPct: 60.7 },
     ],
+    historyDays: [
+      {
+        date: '2026-08-10',
+        total: 300,
+        correct: 190,
+        accuracyPct: 63.3,
+        modelDataEndDate: '2026-08-06',
+        modelTrainedAt: 1786593727,
+      },
+      {
+        date: '2026-08-07',
+        total: 300,
+        correct: 182,
+        accuracyPct: 60.7,
+        modelDataEndDate: '2026-08-06',
+        modelTrainedAt: 1786593727,
+      },
+    ],
     sampleWindow: {
       from: '2026-08-07',
       to: '2026-08-10',
@@ -126,4 +144,22 @@ test('生产模型回测从稳定OSS对象读取，缺失时返回待积累状�
   assert.equal(missing.overall.total, 0)
   assert.equal(missing.nextTradeDayDirection.total, 0)
   assert.equal(missing.nextTradeDayRange.total, 0)
+})
+
+test('生产模型回测保留全部日记录而不是只返回最近三十日', () => {
+  const days = Array.from({ length: 35 }, (_, index) => ({
+    date: `2026-07-${String(index + 1).padStart(2, '0')}`,
+    total: 10,
+    correct: index % 10,
+  }))
+
+  const normalized = normalizeProductionAccuracy({
+    schemaVersion: 'production-accuracy.v1',
+    overall: { total: 350, correct: 175 },
+    days,
+  })
+
+  assert.equal(normalized.days.length, 35)
+  assert.equal(normalized.days[0].date, '2026-07-35')
+  assert.equal(normalized.days.at(-1).date, '2026-07-01')
 })

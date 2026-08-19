@@ -418,12 +418,98 @@ def evaluate_production_model(
     return report
 
 
+def _positive_int(value):
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, number)
+
+
+def _history_day(value, fallback_model):
+    if not isinstance(value, dict):
+        return None
+    date = _display_date(value.get("date"))
+    total = _positive_int(value.get("total"))
+    correct = min(total, _positive_int(value.get("correct")))
+    if not date or total <= 0:
+        return None
+    return {
+        "date": date,
+        "total": total,
+        "correct": correct,
+        "accuracyPct": _pct(correct, total),
+        "modelDataEndDate": _display_date(
+            value.get("modelDataEndDate")
+            or (fallback_model or {}).get("dataEndDate")
+            or (fallback_model or {}).get("data_end_date"),
+        ),
+        "modelTrainedAt": _positive_int(
+            value.get("modelTrainedAt")
+            or (fallback_model or {}).get("trainedAt")
+            or (fallback_model or {}).get("trained_at"),
+        ),
+    }
+
+
+def merge_production_accuracy_history(existing, report):
+    """Keep one immutable forward result per signal date across model releases."""
+    existing = existing if isinstance(existing, dict) else {}
+    report = report if isinstance(report, dict) else {}
+    by_date = {}
+    existing_rows = existing.get("historyDays") or existing.get("days") or []
+    for value in existing_rows:
+        row = _history_day(value, existing.get("model") or {})
+        if row and row["date"] not in by_date:
+            by_date[row["date"]] = row
+
+    current_model = report.get("model") or {}
+    for value in report.get("days") or []:
+        row = _history_day(value, current_model)
+        if not row:
+            continue
+        prior = by_date.get(row["date"])
+        if prior is None or prior["modelDataEndDate"] == row["modelDataEndDate"]:
+            by_date[row["date"]] = row
+
+    merged = dict(report)
+    merged["historyDays"] = sorted(
+        by_date.values(),
+        key=lambda value: value["date"],
+        reverse=True,
+    )
+    return merged
+
+
+def _load_production_accuracy(bucket):
+    get_object = getattr(bucket, "get_object", None)
+    if not callable(get_object):
+        return {}
+    try:
+        return json.loads(
+            get_object(PRODUCTION_ACCURACY_KEY).read().decode("utf-8"),
+        )
+    except Exception as error:  # noqa: BLE001
+        if (
+            getattr(error, "status", None) == 404
+            or getattr(error, "code", None) == "NoSuchKey"
+        ):
+            return {}
+        raise
+
+
 def upload_production_accuracy(report, *, bucket=None):
     if bucket is None:
         from upload_model import bucket as create_bucket
         bucket = create_bucket()
-    payload = json.dumps(
+    merged_report = merge_production_accuracy_history(
+        _load_production_accuracy(bucket),
         report,
+    )
+    report.clear()
+    report.update(merged_report)
+    payload = json.dumps(
+        merged_report,
         ensure_ascii=False,
         sort_keys=True,
     ).encode("utf-8")
