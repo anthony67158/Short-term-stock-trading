@@ -1100,15 +1100,13 @@ button.tech-fold {
     width: auto;
   }
 
-  .trade-period-metric:first-child {
-    border-inline-start: 0;
-  }
-}
-
-@media (max-width: 520px) {
   .trade-period-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--space-xs) 0;
+  }
+
+  .trade-period-metric:first-child {
+    border-inline-start: 0;
   }
 
   .trade-period-metric:nth-child(3) {

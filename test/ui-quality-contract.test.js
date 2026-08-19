@@ -617,6 +617,15 @@ test('交易流水在工具栏下方提供紧凑的周月收益汇总带', () =>
     precision,
     /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.trade-period-performance\s*{[^}]*grid-template-columns:\s*1fr/s,
   )
+  const periodStyles = precision.slice(precision.indexOf('.trade-period-performance'))
+  const tabletStyles = periodStyles.slice(
+    periodStyles.indexOf('@media (max-width: 720px)'),
+    periodStyles.indexOf('@media (max-width: 520px)'),
+  )
+  assert.match(
+    tabletStyles,
+    /\.trade-period-metrics\s*{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s,
+  )
 })
 
 test('军师抽屉打开时顶栏不被压窄且隐藏重复工具区', () => {
