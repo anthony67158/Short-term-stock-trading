@@ -193,6 +193,28 @@ test('持仓与自选卡片顶部信息固定单行且长名称省略', () => {
   )
 })
 
+test('持仓卡把量化分放入成本信息行而不是混入行情首行', () => {
+  const holdHeadStart = planTab.indexOf('<div className="hold-head">')
+  const holdMetaStart = planTab.indexOf('<div className="hold-meta">', holdHeadStart)
+  const adviceStart = planTab.indexOf('<AdviceUpdatedAt', holdMetaStart)
+  const holdHead = planTab.slice(holdHeadStart, holdMetaStart)
+  const holdMeta = planTab.slice(holdMetaStart, adviceStart)
+
+  assert.doesNotMatch(holdHead, /<QuantBadge score=\{h\.qScore\}/)
+  assert.match(
+    holdMeta,
+    /<QuantBadge score=\{h\.qScore\} bias=\{h\.qBias\} size="holding"\s*\/>/,
+  )
+  assert.match(
+    legacyStyles,
+    /\.hold-meta \.q-badge\.holding\s*{[^}]*padding:[^}]*border:/s,
+  )
+  assert.match(
+    legacyStyles,
+    /\.hold-meta \.q-badge\.holding \.q-badge-k\s*{[^}]*font-size:\s*10px/s,
+  )
+})
+
 test('持仓手数与成本在同一水平线且成本加粗', () => {
   assert.match(planTab, /className="hold-qty-value"/)
   assert.match(

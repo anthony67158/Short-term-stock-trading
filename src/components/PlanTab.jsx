@@ -420,7 +420,7 @@ function QuantBadge({ score, bias, size }) {
   const tone = quantTone(score)
   const scored = score != null && !isNaN(score)
   return (
-    <span className={'q-badge ' + tone + (size === 'sm' ? ' sm' : '')}
+    <span className={'q-badge ' + tone + (size ? ` ${size}` : '')}
       title={scored ? `量化得分 ${score}（${bias || (tone === 'red' ? '偏多' : tone === 'green' ? '偏空' : '中性')}）· LightGBM+GARCH，统计口径非投资建议` : '正在计算量化得分…'}>
       <span className="q-badge-k">量化</span>
       {scored ? <b className="q-badge-v">{Math.round(score)}</b> : <span className="q-badge-load" />}
@@ -2367,7 +2367,7 @@ function HoldingItem({ h, idx, quote: q }) {
       <div className="hold-item" {...swipe.bind}
         data-code={h.code}
         style={swipe.dx ? { transform: `translateX(${swipe.dx}px)`, transition: swipe.swiping ? 'none' : 'transform .2s ease' } : undefined}>
-      {/* 决策条：股名 + 特大号浮盈亏（第一视觉焦点）*/}
+      {/* 决策条：股名/代码/现价 + 特大号盈亏；量化分移到成本信息行。 */}
       <div className="hold-head">
         <div className="hold-head-l">
           <StockName
@@ -2377,7 +2377,6 @@ function HoldingItem({ h, idx, quote: q }) {
           >
             <span className="hh-name">{h.name}</span>
           </StockName>
-          <QuantBadge score={h.qScore} bias={h.qBias} size="sm" />
           {q && (validPx != null
             ? <span className={'hh-price ' + pctClass(q.pct)}>{fmtRaw(validPx)} <span className="hh-chg">{fmtPct(q.pct)}</span></span>
             : effPx != null
@@ -2411,6 +2410,7 @@ function HoldingItem({ h, idx, quote: q }) {
             <Icon name="edit" size={11} />
           </button>
         </span>
+        <QuantBadge score={h.qScore} bias={h.qBias} size="holding" />
       </div>
 
       {/* 当前指令、加减仓位与动作进度使用同一建议，不再并排展示互相冲突的价格体系。 */}
