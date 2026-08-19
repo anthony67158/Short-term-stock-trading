@@ -96,3 +96,32 @@ test('AI选股只解释确定性龙头身份且买点仍由量化与策略闸门
   assert.match(prompt, /龙头身份不等于买点/)
   assert.match(prompt, /量化与strategySignal/)
 })
+
+test('AI选股先比较战略产业与公司价值再用资金量化确认', () => {
+  const prompt = buildUserPrompt('scan_pick', {
+    investmentConcepts: [{
+      name: '工业母机',
+      investmentTheme: {
+        strategicScore: 88,
+        thesis: '高端制造自主可控',
+      },
+    }],
+    candidates: [{
+      code: '600001',
+      name: '制造公司',
+      investmentProfile: {
+        conceptName: '工业母机',
+        investmentScore: 82,
+        companyQualityScore: 78,
+        memberVerified: true,
+      },
+      strategySignal: { passed: false, failedRules: [] },
+    }],
+  })
+
+  assert.match(prompt, /先选产业方向，再选真实成分股/)
+  assert.match(prompt, /国家战略/)
+  assert.match(prompt, /公司质量代理分/)
+  assert.match(prompt, /不能把涨停、连板或短期热度作为主要入选理由/)
+  assert.match(prompt, /investmentProfile/)
+})

@@ -18,8 +18,10 @@ test('AI选股请求活跃概念与真实成分股并使用两级龙头保留位
   assert.match(todayTab, /rankActiveConcepts\(/)
   assert.match(todayTab, /buildConceptLeaderCandidates\(/)
   assert.match(todayTab, /selectConceptAwareCandidatePool\(/)
-  assert.match(todayTab, /conceptQuota:\s*6/)
-  assert.match(todayTab, /leadershipReserve:\s*4/)
+  assert.match(todayTab, /conceptQuota:\s*4/)
+  assert.match(todayTab, /leadershipReserve:\s*3/)
+  assert.match(todayTab, /investmentQuota:\s*6/)
+  assert.match(todayTab, /investmentReserve:\s*4/)
 })
 
 test('龙头身份贯穿量化与LLM短名单并在结果卡展示', () => {
@@ -31,4 +33,13 @@ test('龙头身份贯穿量化与LLM短名单并在结果卡展示', () => {
   assert.match(todayTab, /leaderScore/)
   assert.match(styles, /\.pick-leadership/)
   assert.match(styles, /\.pick-leadership-role/)
+})
+
+test('AI选股展示产业方向与公司价值筛选层级', () => {
+  assert.match(todayTab, /rankInvestmentConcepts/)
+  assert.match(todayTab, /buildInvestmentCandidates/)
+  assert.match(todayTab, /investmentQuota:\s*6/)
+  assert.match(todayTab, /产业方向/)
+  assert.match(todayTab, /价值候选/)
+  assert.match(todayTab, /公司质量/)
 })

@@ -4,6 +4,9 @@ import {
   evaluateStrategySignal,
 } from './strategySpec.js'
 import { isQualifiedConceptLeader } from './conceptLeadership.js'
+import {
+  isQualifiedInvestmentCandidate,
+} from './investmentSelection.js'
 import { isStockPickSession } from './tradingCalendar.js'
 
 const clamp = (value, min = 0, max = 1) => Math.max(min, Math.min(max, value))
@@ -235,13 +238,27 @@ export function rankStrategyShortlist(candidates, opts = {}) {
       0,
       100
     )
+    const investmentScore = isQualifiedInvestmentCandidate(item)
+      ? clamp(
+          finite(item.investmentProfile?.investmentScore, 35),
+          0,
+          100,
+        )
+      : 35
+    const attentionScore = clamp(
+      combinedScore * 0.72 + investmentScore * 0.28,
+      0,
+      100,
+    )
     const strategySignal = evaluateStrategySignal(strategy, item)
     return {
       ...item,
       combinedScore: +combinedScore.toFixed(1),
+      attentionScore: +attentionScore.toFixed(1),
       strategySignal,
     }
   }).sort((a, b) =>
+    b.attentionScore - a.attentionScore ||
     b.combinedScore - a.combinedScore ||
     finite(b.marketScore) - finite(a.marketScore) ||
     String(a.code).localeCompare(String(b.code))
@@ -264,9 +281,27 @@ export function rankStrategyShortlist(candidates, opts = {}) {
     if (replaceIndex < 0) break
     selected[replaceIndex] = leader
   }
+  const investmentReserve = Math.max(
+    0,
+    Math.min(limit, Number(opts.investmentReserve) || 0),
+  )
+  const reservedInvestments = ranked
+    .filter(isQualifiedInvestmentCandidate)
+    .slice(0, investmentReserve)
+  for (const candidate of reservedInvestments) {
+    if (selected.some((item) => item.code === candidate.code)) continue
+    const replaceIndex = selected.findLastIndex(
+      (item) =>
+        !isQualifiedInvestmentCandidate(item)
+        && !isQualifiedConceptLeader(item),
+    )
+    if (replaceIndex < 0) break
+    selected[replaceIndex] = candidate
+  }
   selected.sort((left, right) =>
     Number(right.strategySignal.passed)
       - Number(left.strategySignal.passed)
+    || right.attentionScore - left.attentionScore
     || right.combinedScore - left.combinedScore
     || String(left.code).localeCompare(String(right.code))
   )
@@ -282,6 +317,9 @@ export function rankStrategyShortlist(candidates, opts = {}) {
     signalPassedCount: passed.length,
     leadershipReservedCount: selected.filter(
       isQualifiedConceptLeader,
+    ).length,
+    investmentReservedCount: selected.filter(
+      isQualifiedInvestmentCandidate,
     ).length,
     executable,
     watchlist,
@@ -332,6 +370,9 @@ function conditionalFallback(item, index, noTradeReason) {
     quant.score != null ? `量化${quant.score}` : '',
     quant.upProb != null ? `方向概率${quant.upProb}%` : '',
     item.mainInflowYi != null ? `主力净流入${item.mainInflowYi}亿` : '',
+    item.investmentProfile?.investmentScore != null
+      ? `产业价值${item.investmentProfile.investmentScore}`
+      : '',
     ...(item.tags || []).slice(0, 2),
   ].filter(Boolean)
   const buyPoint = buyLow != null && buyHigh != null
@@ -343,6 +384,7 @@ function conditionalFallback(item, index, noTradeReason) {
     code: String(item.code),
     name: item.name || String(item.code),
     conceptLeadership: item.conceptLeadership || null,
+    investmentProfile: item.investmentProfile || null,
     quantScore: quant.score ?? null,
     grade: '观察',
     actionability: '等待触发',
@@ -373,6 +415,7 @@ export function normalizePickDecision(value, allowedCodes = [], fallbackCandidat
         ...item,
         rank: index + 1,
         conceptLeadership: candidate?.conceptLeadership || null,
+        investmentProfile: candidate?.investmentProfile || null,
         actionability: (
           result.noTrade === true
           || candidate?.strategySignal?.passed === false

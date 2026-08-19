@@ -470,7 +470,10 @@ function aiSearchEvidenceText(item) {
 
 function searchQueryForMode(mode, payload = {}) {
   if (mode === 'scan_pick' || mode === 'scan') {
-    const sectors = (payload.sectors || [])
+    const sectors = [
+      ...(payload.investmentConcepts || []),
+      ...(payload.sectors || []),
+    ]
       .slice(0, 4)
       .map((item) => item?.name)
       .filter(Boolean);
@@ -478,7 +481,7 @@ function searchQueryForMode(mode, payload = {}) {
       .slice(0, 4)
       .map((item) => item?.name)
       .filter(Boolean);
-    return `A股 今日行业热点 政策 舆情 风险 ${sectors.join(' ')} ${stocks.join(' ')}`;
+    return `A股 国家战略 产业趋势 政策 景气 资金 风险 ${sectors.join(' ')} ${stocks.join(' ')}`;
   }
   if (mode === 'stock' && payload.code) {
     return `${payload.name || ''} ${payload.code} 最新公告 行业 舆情 风险`;

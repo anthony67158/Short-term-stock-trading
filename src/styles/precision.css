@@ -1677,6 +1677,31 @@ textarea:focus {
   font-weight: 750;
 }
 
+.pick-investment {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  margin: var(--space-xs) 0;
+  padding: var(--space-2xs) var(--space-xs);
+  border-inline-start: 2px solid var(--color-warning);
+  background: color-mix(in oklch, var(--color-warning) 6%, transparent);
+  color: var(--color-muted);
+  font-size: var(--text-2xs);
+  line-height: 1.35;
+  flex-wrap: wrap;
+}
+
+.pick-investment-concept {
+  color: var(--color-ink);
+  font-weight: 750;
+}
+
+.pick-investment b {
+  color: var(--color-ink-2);
+  font-family: var(--font-mono);
+  font-weight: 750;
+}
+
 .pick-reason-label {
   color: var(--color-accent);
   font-size: var(--text-2xs);

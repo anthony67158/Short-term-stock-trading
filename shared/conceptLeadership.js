@@ -1,3 +1,7 @@
+import {
+  isQualifiedInvestmentCandidate,
+} from './investmentSelection.js'
+
 export const CONCEPT_LEADERSHIP_SCHEMA_VERSION = 'concept-leadership.v1'
 
 const ROLE_LABELS = Object.freeze({
@@ -395,6 +399,8 @@ function mergeCandidate(current, incoming) {
     conceptLeadership: useIncomingLeadership
       ? incomingLeadership
       : currentLeadership,
+    investmentProfile:
+      current.investmentProfile || incoming.investmentProfile || null,
     tags: [...new Set([
       ...(current.tags || []),
       ...(incoming.tags || []),
@@ -405,10 +411,12 @@ function mergeCandidate(current, incoming) {
 export function selectConceptAwareCandidatePool({
   marketCandidates = [],
   conceptCandidates = [],
+  investmentCandidates = [],
   eventCandidates = [],
   limit = 20,
   marketQuota = 10,
   conceptQuota = 6,
+  investmentQuota = 6,
   eventQuota = 4,
 } = {}) {
   const maximum = Math.max(1, Math.min(50, Number(limit) || 20))
@@ -438,9 +446,15 @@ export function selectConceptAwareCandidatePool({
       .filter(isQualifiedConceptLeader),
     conceptQuota,
   )
+  take(
+    (Array.isArray(investmentCandidates) ? investmentCandidates : [])
+      .filter(isQualifiedInvestmentCandidate),
+    investmentQuota,
+  )
   take(eventCandidates, eventQuota)
   for (const item of [
     ...marketCandidates,
+    ...investmentCandidates,
     ...conceptCandidates,
     ...eventCandidates,
   ]) {

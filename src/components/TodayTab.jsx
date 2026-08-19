@@ -30,6 +30,10 @@ import {
   rankActiveConcepts,
   selectConceptAwareCandidatePool,
 } from '../../shared/conceptLeadership.js'
+import {
+  buildInvestmentCandidates,
+  rankInvestmentConcepts,
+} from '../../shared/investmentSelection.js'
 import { getActiveStrategySpec } from '../../shared/strategySpec.js'
 import {
   isQuantResultForVersion,
@@ -226,7 +230,7 @@ function MarketLight({ market, sectors, snapshot, limitUp }) {
 
 // ---------- AI 选股（量化模型 + LLM 结合，精选今日3只 + 怎么买）----------
 // 交易时段=「AI 选股」，结果本地持久化(刷新不丢);收盘后按钮=「看明日计划」，展示当日盘中选出的、供次日开盘参考
-const PICK_KEY = 'ai_pick_v1'
+const PICK_KEY = 'ai_pick_v2'
 const ACTIVE_PICK_STRATEGY = getActiveStrategySpec()
 function nowBJ() { const n = new Date(); return new Date(n.getTime() + (n.getTimezoneOffset() + 480) * 60000) }
 // 当日交易场次:9:15–15:01(含午间 11:30–13:00 休市)整体算“盘中/当日”，午休不切到“明日计划”，只有收盘后(15:01 之后)/盘前/周末才算收盘
@@ -323,8 +327,30 @@ async function discoverConceptLeadership(limitPool = []) {
     api(`/api/sectors?type=concept&sort=main&_t=${Date.now()}`),
     18000,
   )
-  if (!payload?.ok) return { concepts: [], candidates: [] }
-  const concepts = rankActiveConcepts(payload.list || [], { limit: 4 })
+  if (!payload?.ok) {
+    return {
+      concepts: [],
+      candidates: [],
+      investmentConcepts: [],
+      investmentCandidates: [],
+    }
+  }
+  const activeConcepts = rankActiveConcepts(
+    payload.list || [],
+    { limit: 4 },
+  )
+  const investmentConcepts = rankInvestmentConcepts(
+    payload.list || [],
+    { limit: 5 },
+  )
+  const conceptMap = new Map()
+  for (const concept of [...investmentConcepts, ...activeConcepts]) {
+    conceptMap.set(concept.code, {
+      ...(conceptMap.get(concept.code) || {}),
+      ...concept,
+    })
+  }
+  const concepts = [...conceptMap.values()]
   const entries = await mapWithConcurrency(
     concepts,
     4,
@@ -350,7 +376,7 @@ async function discoverConceptLeadership(limitPool = []) {
   )
   const membersByConcept = new Map(entries)
   const candidates = buildConceptLeaderCandidates(
-    concepts,
+    activeConcepts,
     membersByConcept,
     {
       perConcept: 2,
@@ -372,7 +398,29 @@ async function discoverConceptLeadership(limitPool = []) {
       marketEligible: evaluated.marketEligible,
     }
   })
-  return { concepts, candidates }
+  const investmentCandidates = buildInvestmentCandidates(
+    investmentConcepts,
+    membersByConcept,
+    { perConcept: 2, limit: 10 },
+  ).map((item) => {
+    const evaluated = evaluateMarketCandidate(item, {
+      strategySpec: ACTIVE_PICK_STRATEGY,
+    })
+    return {
+      ...item,
+      marketScore: evaluated.marketEligible
+        ? evaluated.marketScore
+        : 0,
+      marketReasons: evaluated.reasons,
+      marketEligible: evaluated.marketEligible,
+    }
+  })
+  return {
+    concepts: activeConcepts,
+    candidates,
+    investmentConcepts,
+    investmentCandidates,
+  }
 }
 
 function DailyPlay({ snapshot }) {
@@ -423,19 +471,28 @@ function DailyPlay({ snapshot }) {
         // 行情扫描不可用时回退页面已有热点池。
       }
 
-      // ② 确定性概念龙头识别：概念强度→真实成分股→角色评分。
-      // 失败时只降级到原市场/事件候选，不阻断本轮选股。
-      setStage('正在核验活跃概念与真实成分股龙头…')
-      let conceptDiscovery = { concepts: [], candidates: [] }
+      // ② 先筛产业方向，再核验真实成分股及概念龙头。
+      setStage('正在筛选产业方向与真实成分股…')
+      let conceptDiscovery = {
+        concepts: [],
+        candidates: [],
+        investmentConcepts: [],
+        investmentCandidates: [],
+      }
       try {
         conceptDiscovery = await discoverConceptLeadership(
           s.limitPool?.list || [],
         )
       } catch {
-        conceptDiscovery = { concepts: [], candidates: [] }
+        conceptDiscovery = {
+          concepts: [],
+          candidates: [],
+          investmentConcepts: [],
+          investmentCandidates: [],
+        }
       }
 
-      // ③ 候选配额：10只市场共振 + 6只概念龙头 + 4只事件股。
+      // ③ 产业价值优先，同时保留市场、龙头和事件确认。
       const marketCandidates = (broad.list || []).map((x) => ({
         ...x,
         tags: [`全市场${x.marketScore}分`],
@@ -488,12 +545,14 @@ function DailyPlay({ snapshot }) {
       })
       const codes = selectConceptAwareCandidatePool({
         marketCandidates,
+        investmentCandidates: conceptDiscovery.investmentCandidates,
         conceptCandidates: conceptDiscovery.candidates,
         eventCandidates: [...eventMap.values()],
         limit: 20,
-        marketQuota: 10,
-        conceptQuota: 6,
-        eventQuota: 4,
+        marketQuota: 8,
+        investmentQuota: 6,
+        conceptQuota: 4,
+        eventQuota: 2,
       })
       if (!codes.length) { setErr('暂无候选数据，开盘后再试（休市时段候选池为空）'); setLoading(false); return }
 
@@ -517,6 +576,7 @@ function DailyPlay({ snapshot }) {
           return {
             code: c.code, name: c.name, tags: c.tags,
             conceptLeadership: c.conceptLeadership,
+            investmentProfile: c.investmentProfile,
             marketScore: c.marketScore, marketReasons: c.marketReasons,
             price: c.price, pct: c.pct, turnover: c.turnover, volRatio: c.volRatio,
             mainInflowYi: c.mainInflow != null ? +(c.mainInflow / 1e8).toFixed(2) : null,
@@ -556,7 +616,8 @@ function DailyPlay({ snapshot }) {
         {
           limit: 12,
           strategySpec: ACTIVE_PICK_STRATEGY,
-            leadershipReserve: 4,
+          leadershipReserve: 3,
+          investmentReserve: 4,
         },
       )
       const forLLM = strategyShortlist.list
@@ -568,8 +629,14 @@ function DailyPlay({ snapshot }) {
         watchlistCount: strategyShortlist.watchlist.length,
         activeConceptCount: conceptDiscovery.concepts.length,
         conceptLeaderCount: conceptDiscovery.candidates.length,
+        investmentConceptCount:
+          conceptDiscovery.investmentConcepts.length,
+        investmentCandidateCount:
+          conceptDiscovery.investmentCandidates.length,
         leadershipReservedCount:
           strategyShortlist.leadershipReservedCount,
+        investmentReservedCount:
+          strategyShortlist.investmentReservedCount,
         universeCount: broad.universeCount,
         scannedCount: broad.scannedCount,
         isComplete: broad.isComplete,
@@ -595,6 +662,14 @@ function DailyPlay({ snapshot }) {
           pct: item.pct,
           mainInflowYi: +(item.mainInflow / 1e8).toFixed(2),
         })),
+        investmentConcepts:
+          conceptDiscovery.investmentConcepts.map((item) => ({
+            code: item.code,
+            name: item.name,
+            pct: item.pct,
+            mainInflowYi: +(item.mainInflow / 1e8).toFixed(2),
+            investmentTheme: item.investmentTheme,
+          })),
         candidates: forLLM,
         strategy: {
           strategyId: strategyShortlist.strategyId,
@@ -726,6 +801,12 @@ function DailyPlay({ snapshot }) {
                       : funnel.universeCount,
                   ],
                   ['可交易', funnel.eligibleCount],
+                  ...(funnel.investmentConceptCount != null
+                    ? [['产业方向', funnel.investmentConceptCount]]
+                    : []),
+                  ...(funnel.investmentCandidateCount != null
+                    ? [['价值候选', funnel.investmentCandidateCount]]
+                    : []),
                   ...(funnel.activeConceptCount != null
                     ? [['强概念', funnel.activeConceptCount]]
                     : []),
@@ -758,6 +839,7 @@ function DailyPlay({ snapshot }) {
                   const added = book.plan.some((x) => x.code === c.code)
                   const gcls = c.grade === '强' ? 'strong' : c.grade === '弱' ? 'weak' : 'mid'
                   const leadership = c.conceptLeadership
+                  const investment = c.investmentProfile
                   return (
                     <div className="pick-card" key={c.code || i}>
                       <div className="pick-top">
@@ -795,6 +877,19 @@ function DailyPlay({ snapshot }) {
                           </span>
                           <span>概念强度 <b>{leadership.conceptStrength}</b></span>
                           <span>领导力 <b>{leadership.leaderScore}</b></span>
+                        </div>
+                      )}
+                      {investment && (
+                        <div className="pick-investment">
+                          <span className="pick-investment-concept">
+                            {investment.conceptName}
+                          </span>
+                          <span>{investment.themeLabel}</span>
+                          <span>产业价值 <b>{investment.investmentScore}</b></span>
+                          <span>公司质量 <b>{investment.companyQualityScore}</b></span>
+                          {!investment.fundConfirmed && (
+                            <span className="muted">资金待确认</span>
+                          )}
                         </div>
                       )}
                       <div className="pick-reason">

@@ -338,12 +338,14 @@ ${payload.holdQty != null ? `4) 手数纪律:任何减仓/清仓/卖出手数 �
     return `${zhReason}【当日全盘综合数据：大盘情绪 + 板块资金流 + 涨停连板 + 盘中异动】\n${data}\n\n你是短线策略总监，请综合以上所有维度，给出今日最值得关注的 TOP3 方向。输出 JSON：{"reasoning":"一句话研判思路(先点明数据对应哪个交易日、结论面向哪个交易日开盘)","marketMood":"一句话大盘定调","topDirections":[{"rank":1,"direction":"方向/板块名","logic":"入选逻辑(必须结合资金流/涨停/异动的具体数据)","representStocks":[{"name":"代表股(必须来自给定数据)","code":"代码"}],"strength":"强/中/弱"}],"strategy":"今日短线操作策略(仓位/节奏/风格)","topRisk":"最需警惕的风险"}`;
   }
   if (mode === 'scan_pick') {
-    return `${zhReason}【AI 选股请求】用户不知道今天有哪些股票值得关注。系统已完成“全市场可交易性过滤→活跃概念与真实成分股龙头确定性识别→量化复排→统一策略闸门”，你只负责对最终短名单做交易价值比较与解释。
-核心目标是从真实短名单中找出相对最优机会，并把“现在能买”与“值得跟踪但要等触发”分开。noTrade=true 只表示【当前没有立即买点】，绝不表示整个市场没有值得观察的股票，也绝不能因此清空 picks。
-数据含：大盘情绪(market)、板块资金流(sectors)、活跃概念(activeConcepts)、漏斗统计(funnel)、【候选池 candidates —— 已按 combinedScore 复排】。
+    return `${zhReason}【AI 选股请求】用户要找有产业前景和公司价值、同时具备资金与量化确认的股票。系统已完成“全市场可交易性过滤→战略产业方向识别→真实概念成分股公司质量初筛→资金与量化复排→统一策略闸门”，你只负责对最终短名单做交易价值比较与解释。
+核心流程必须是【先选产业方向，再选真实成分股】：先比较国家战略、产业生命周期、未来需求空间和当前资金认可度，再比较概念内公司的估值、规模、资金质量与量化信号。涨停、连板和短期热门只能作为时点确认，不能把涨停、连板或短期热度作为主要入选理由。
+核心目标是从真实短名单中找出相对最优机会，并把“长期值得跟踪”“当前具备交易条件”分开。noTrade=true 只表示【当前没有立即买点】，绝不表示整个市场没有值得观察的股票，也绝不能因此清空 picks。
+数据含：大盘情绪(market)、板块资金流(sectors)、产业方向(investmentConcepts)、活跃概念(activeConcepts)、漏斗统计(funnel)、【候选池 candidates —— 已按 attentionScore 复排】。
 数据：${data}
 
-【候选池 candidates 字段说明】每只含：name/code、price现价、marketScore全市场分、combinedScore量化复排分、pct/turnover/volRatio/mainInflowYi、tags、strategySignal{passed,matchedRules,failedRules}，以及 quant{ modelVersion用户选择,effectiveModelVersion候选实际运行版本,runtimeModelVersion,modelLabel,fallback,score,upProb/expRet/targetLow~targetHigh为原5日窗口，nextUpProb/nextExpRet/nextTargetLow~nextTargetHigh为下一交易日窗口，highConfFired,credibility,buyPrice,takeProfit,stopLoss }。部分候选带 conceptLeadership{conceptName,conceptStrength,role,roleLabel,leaderScore,memberVerified,evidence}，这是系统基于概念资金横截面和真实成分股计算出的确定性身份。
+【候选池 candidates 字段说明】每只含：name/code、price现价、marketScore全市场分、combinedScore交易复排分、attentionScore产业价值加权关注分、pct/turnover/volRatio/mainInflowYi、tags、strategySignal{passed,matchedRules,failedRules}，以及 quant{ modelVersion用户选择,effectiveModelVersion候选实际运行版本,runtimeModelVersion,modelLabel,fallback,score,upProb/expRet/targetLow~targetHigh为原5日窗口，nextUpProb/nextExpRet/nextTargetLow~nextTargetHigh为下一交易日窗口，highConfFired,credibility,buyPrice,takeProfit,stopLoss }。部分候选带 investmentProfile{conceptName,themeLabel,thesis,strategicScore,conceptInvestmentScore,companyQualityScore,investmentScore,fundConfirmed,memberVerified,evidence}；其中公司质量代理分只基于估值、规模、资金和交易稳定性，不等同于完整基本面结论。部分候选还带 conceptLeadership{conceptName,conceptStrength,role,roleLabel,leaderScore,memberVerified,evidence}。
+【产业价值纪律】investmentProfile 只在 memberVerified=true 时有效；战略主题是结构化初筛，不是最新政策事实。必须结合 AI Search 待核验政策/产业证据、当前资金和量化结果复核。若 fundConfirmed=false，应明确“产业逻辑存在但资金尚未确认”，不能给高把握。
 【概念龙头纪律】conceptLeadership 只在 memberVerified=true 时有效；你不得重新猜测或改写龙头身份，也不得把无该字段的股票自行称为龙头。龙头身份不等于买点：它只用于解释“为何值得优先观察”，能否立即买必须继续服从量化与strategySignal；strategySignal.passed=false 时即使是总龙头也只能等待触发或观察。
 【本次量化版本】${payload.quantModelVersion === 'v2.1' ? '分钟 Transformer V2.1（盘中实验）' : payload.quantModelVersion === 'v2' ? '分钟 Transformer V2.0' : '当前生产模型'}。候选评分只采信该版本的结果；不得混用默认模型、V2.0或V2.1的分数。V2.1未达到58%生产门槛，只能作为实验排序参考，不得因其单一高概率直接给“可执行”。
 【候选实际运行版本纪律】逐只读取 quant.effectiveModelVersion/modelLabel/fallback；出现 fallback 时必须写清“V2.1已回退V2.0”及原因，不得把V2.0分数描述成V2.1盘中结果。没有回退且 effectiveModelVersion=v2.1 时，仍按实验模型降权。
@@ -351,17 +353,17 @@ ${payload.quantMissing ? '⚠️【本次量化服务不可用】不得给“立
 ${payload.session === 'next_open' ? '【当前为休市/盘前】结论面向下一交易日开盘；actionability原则上写“等待触发”，买点必须是开盘后可验证的回踩企稳或放量突破条件。' : '【当前为交易时段】可根据现价与分时位置判断“可执行”或“等待触发”。'}
 
 【选股逻辑，逐条执行】：
-1. **先定大盘基调**：逆风(跌多/跌停多)→整体从严、标的把握度普遍下调、并在 marketNote 里提示今日不宜追高、控制仓位;顺风→可积极。
-2. **绝对闸门决定能否立即买，相对排名决定观察谁**：若没有一只同时满足方向不弱、位置不追高、盈亏比合理，就 noTrade=true；但仍从 candidates 中保留相对最优的1~3只，并将 actionability 标为“等待触发”或“观察”。
-3. **龙头只参与同等条件比较**：若量化、策略和位置质量接近，优先解释 conceptStrength/leaderScore 更高的真实总龙头或趋势中军；若量化或策略不合格，龙头标签不能抵消缺陷。
-4. **诚实分级 grade**：每只给"强/中/弱"把握度——强=量化+资金+题材+位置多维共振;中=有亮点但有瑕疵;弱=矮子里拔高个/信号不足,仅供观察。宁愿多标"弱",不要虚高。
-5. **可买性**：给出明确买点(回踩不破/放量突破/开盘竞价低吸)、参考买入价区间(可结合 quant 目标区间下沿)、止损位。若该股当下只适合观察不适合买,buyPoint 写清"暂不追,等回踩到X再看"。
+1. **先选产业方向**：优先比较 investmentConcepts 的战略价值、未来需求、产业化阶段和资金确认；必须说明政策/产业证据是否来自待核验检索，不能把静态主题标签写成最新政策。
+2. **再选公司**：只从真实成分股选，比较 investmentProfile 的公司质量代理分、估值/规模证据、资金持续性；高热度但高估值、小市值、资金流出者降级。
+3. **再看交易时点**：用量化、趋势、资金与股票理论验证当前是否值得介入。彼得林奇/好行业好公司好价格用于价值筛选，趋势与量价理论用于时点确认，龙头战法只在真实连板和板块证据成立时使用。
+4. **绝对闸门决定能否立即买，相对排名决定观察谁**：若没有一只同时满足方向不弱、位置不追高、盈亏比合理，就 noTrade=true；但仍保留相对最优的1~3只。
+5. **诚实分级与可买性**：强=产业+公司+资金+量化多维共振；产业逻辑好但资金或量化未确认只能“等待触发/观察”。给出明确买点、买入区、止损与失效条件。
 
 【硬要求】：
 - candidates 非空时 picks 必须给1~3只，禁止空数组；可以全部是“等待触发/观察”，但必须说明触发条件和失效条件。
 - actionability 只能填“可执行 / 等待触发 / 观察”。noTrade=true 时不得填“可执行”。
 - strategySignal 是统一策略的确定性入场闸门：strategySignal.passed=false 的候选不得升级为“可执行”，只能“等待触发/观察”，并须引用 failedRules 解释尚缺哪项条件。
-- 理由必须引用该股的量化分/上涨概率/资金/板块等**具体数字**,用大白话讲清"为什么值得关注"。
+- 理由必须先讲产业与公司价值，再引用量化分/上涨概率/资金/板块等**具体数字**说明交易时点；不得只写涨停、连板、热门或龙头。
 - 每只都要有 grade(强/中/弱),整体名单的把握度用 confidence 概括。
 
 请输出 JSON：{"reasoning":"一句话研判思路(数据日期→市场环境→相对排名→把握与赔率闸门)","marketNote":"一句话大盘环境与选股基调","confidence":"高/中/低及简短原因","noTrade":true或false,"noTradeReason":"没有立即买点时说明缺哪项确认；存在可执行标的时为空字符串","picks":[{"rank":1,"name":"股票名","code":"代码","quantScore":量化分数字或null,"grade":"强或中或弱","actionability":"可执行或等待触发或观察","reason":"引用marketScore/combinedScore/量化/资金等具体数字","buyPoint":"买点与确认信号","buyZone":"必须基于price或quant.buyPrice的窄区间","target":"优先采用quant.takeProfit/target区间","stop":"优先采用quant.stopLoss","risk":"主要风险与失效条件"}],"note":"整体仓位与节奏"}。只输出 JSON。`;
