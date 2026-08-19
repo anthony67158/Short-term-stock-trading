@@ -121,9 +121,13 @@ export function listTradePeriods(records = [], mode = 'month') {
   )
 }
 
-export function summarizeTradePeriod(records = [], period = {}) {
+export function summarizeTradePeriod(records = [], period = {}, options = {}) {
   const startKey = String(period.startKey || '')
   const endKey = String(period.endKey || '')
+  const rawTotalAssets = Number(options.totalAssets)
+  const totalAssets = Number.isFinite(rawTotalAssets) && rawTotalAssets > 0
+    ? round2(rawTotalAssets)
+    : null
   const periodRecords = (Array.isArray(records) ? records : []).filter(
     (record) => {
       const date = recordDay(record)
@@ -161,7 +165,11 @@ export function summarizeTradePeriod(records = [], period = {}) {
     realizedPnl,
     ratedPnl,
     costBasis,
-    returnPct: costBasis > 0
+    totalAssets,
+    accountReturnPct: totalAssets > 0
+      ? +((realizedPnl / totalAssets) * 100).toFixed(2)
+      : null,
+    tradeReturnPct: costBasis > 0
       ? +((ratedPnl / costBasis) * 100).toFixed(2)
       : null,
     fee: round2(periodRecords.reduce(

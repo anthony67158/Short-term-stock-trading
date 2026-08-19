@@ -608,7 +608,9 @@ test('交易流水在工具栏下方提供紧凑的周月收益汇总带', () =>
   assert.match(reviewTab, /periodMode === 'week'/)
   assert.match(reviewTab, /listTradePeriods/)
   assert.match(reviewTab, /summarizeTradePeriod/)
-  assert.match(reviewTab, /成本基数/)
+  assert.match(reviewTab, /账户收益率/)
+  assert.match(reviewTab, /当前总资产/)
+  assert.match(reviewTab, /交易收益率/)
   assert.match(
     precision,
     /\.trade-period-performance\s*{[^}]*display:\s*grid[^}]*grid-template-columns:/s,

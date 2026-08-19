@@ -42,7 +42,7 @@ export default function AccountHub({ interval, snapshot, initialSub, jumpNonce }
       <div className="hub-body">
         {sub === 'account' && <AccountTab interval={interval} />}
         {sub === 'alert' && <AlertPanel interval={interval} />}
-        {sub === 'review' && <ReviewTab interval={interval} snapshot={snapshot} />}
+        {sub === 'review' && <ReviewTab snapshot={snapshot} />}
       </div>
     </div>
   )

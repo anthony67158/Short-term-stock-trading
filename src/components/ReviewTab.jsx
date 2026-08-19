@@ -3,7 +3,12 @@ import ReactECharts from 'echarts-for-react'
 import Icon from './Icon'
 import StockName from './StockName'
 import StockTags from './StockTags'
-import { planStore, usePlanStore, computeTFlows } from '../planStore'
+import {
+  computePortfolio,
+  computeTFlows,
+  planStore,
+  usePlanStore,
+} from '../planStore'
 import { finiteNum, fmtPct, pctClass, fmtRaw } from '../format'
 import {
   tradeAnalyticsRecords,
@@ -93,9 +98,17 @@ function useRealizedRecords(book) {
 }
 
 // ============ 复盘 Tab：兑现 + 迭代（情绪复盘已整合进 AI 助手）============
-export default function ReviewTab({ interval, snapshot }) {
+export default function ReviewTab({ snapshot }) {
   const book = usePlanStore()
   const records = useRealizedRecords(book)
+  const quoteMap = Object.fromEntries(
+    (snapshot?.()?.quotes || []).map((quote) => [quote.code, quote]),
+  )
+  const totalAssets = computePortfolio(
+    book.holding,
+    quoteMap,
+    book.account,
+  ).totalAssets
   const analyticsRecords = useMemo(
     () => tradeAnalyticsRecords(records),
     [records],
@@ -106,7 +119,7 @@ export default function ReviewTab({ interval, snapshot }) {
       <DecisionClosure book={book} />
       <TradeStat records={records} analyticsRecords={analyticsRecords} />
       <ReviewCharts records={analyticsRecords} />
-      <DailyLog records={records} />
+      <DailyLog records={records} totalAssets={totalAssets} />
     </div>
   )
 }
@@ -255,7 +268,7 @@ function TxnRow({ c, onDelete, onEdit, showDate }) {
   )
 }
 
-function PeriodPerformance({ records }) {
+function PeriodPerformance({ records, totalAssets }) {
   const [periodMode, setPeriodMode] = useState('month')
   const [periodKey, setPeriodKey] = useState('')
   const periods = useMemo(
@@ -265,8 +278,8 @@ function PeriodPerformance({ records }) {
   const selected = periods.find((period) => period.key === periodKey)
     || periods[0]
   const summary = useMemo(
-    () => summarizeTradePeriod(records, selected),
-    [records, selected],
+    () => summarizeTradePeriod(records, selected, { totalAssets }),
+    [records, selected, totalAssets],
   )
   if (!selected) return null
 
@@ -274,9 +287,12 @@ function PeriodPerformance({ records }) {
     setPeriodMode(mode)
     setPeriodKey('')
   }
-  const rateTitle = summary.realizedCount > summary.ratedCount
+  const accountRateTitle = summary.totalAssets > 0
+    ? '账户收益率按本周期已实现净收益除以当前总资产计算，暂不包含未实现浮盈变化'
+    : '当前总资产暂缺，无法计算账户收益率'
+  const tradeRateTitle = summary.realizedCount > summary.ratedCount
     ? `收益率仅按 ${summary.ratedCount}/${summary.realizedCount} 笔有真实成本依据的已实现交易计算`
-    : '收益率按本周期已实现交易盈亏除以对应含费成本计算'
+    : '交易收益率按本周期已实现交易盈亏除以对应含费成本计算'
 
   return (
     <div className="trade-period-performance" aria-label="周期收益统计">
@@ -314,12 +330,16 @@ function PeriodPerformance({ records }) {
         </select>
       </div>
       <div className="trade-period-metrics">
-        <div className="trade-period-metric trade-period-return" title={rateTitle}>
-          <span>收益率</span>
-          <b className={pctClass(summary.returnPct)}>
-            {summary.returnPct == null ? '--' : fmtPct(summary.returnPct)}
+        <div className="trade-period-metric trade-period-return" title={accountRateTitle}>
+          <span>账户收益率</span>
+          <b className={pctClass(summary.accountReturnPct)}>
+            {summary.accountReturnPct == null ? '--' : fmtPct(summary.accountReturnPct)}
           </b>
-          <small>{summary.ratedCount}/{summary.realizedCount} 笔可计算</small>
+          <small>
+            {summary.totalAssets > 0
+              ? `总资产 ${fmtAmt(summary.totalAssets)}`
+              : '当前总资产暂缺'}
+          </small>
         </div>
         <div className="trade-period-metric">
           <span>已实现</span>
@@ -328,10 +348,16 @@ function PeriodPerformance({ records }) {
           </b>
           <small>{summary.realizedCount} 笔</small>
         </div>
-        <div className="trade-period-metric">
-          <span>成本基数</span>
-          <b>{summary.costBasis > 0 ? fmtAmt(summary.costBasis) : '--'}</b>
-          <small>含分摊买入费</small>
+        <div className="trade-period-metric" title={tradeRateTitle}>
+          <span>交易收益率</span>
+          <b className={pctClass(summary.tradeReturnPct)}>
+            {summary.tradeReturnPct == null ? '--' : fmtPct(summary.tradeReturnPct)}
+          </b>
+          <small>
+            {summary.costBasis > 0
+              ? `成本 ${fmtAmt(summary.costBasis)}`
+              : '成本基数暂缺'}
+          </small>
         </div>
         <div className="trade-period-metric">
           <span>手续费</span>
@@ -343,7 +369,7 @@ function PeriodPerformance({ records }) {
   )
 }
 
-function DailyLog({ records }) {
+function DailyLog({ records, totalAssets }) {
   const [filter, setFilter] = useState('all') // all | BUY | SELL | CLOSE | T
   const [confirmClear, setConfirmClear] = useState(false)
   const [delTarget, setDelTarget] = useState(null) // 待删除的单条记录（可能级联同批）
@@ -467,7 +493,7 @@ function DailyLog({ records }) {
         </div>
       </div>
 
-      <PeriodPerformance records={records} />
+      <PeriodPerformance records={records} totalAssets={totalAssets} />
 
       {/* 清空二次确认弹窗 */}
       {confirmClear && (

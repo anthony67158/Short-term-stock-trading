@@ -8,7 +8,7 @@ import {
 
 const at = (text) => new Date(`${text}+08:00`).getTime()
 
-test('月收益率按已实现交易的真实成本基数计算且不受当月买入额干扰', () => {
+test('月账户收益率以总资产为分母并保留交易成本收益率', () => {
   const records = [
     {
       type: 'SELL',
@@ -50,11 +50,15 @@ test('月收益率按已实现交易的真实成本基数计算且不受当月�
     },
   ]
 
-  const summary = summarizeTradePeriod(records, {
-    startKey: '2026-08-01',
-    endKey: '2026-08-31',
-    label: '2026年8月',
-  })
+  const summary = summarizeTradePeriod(
+    records,
+    {
+      startKey: '2026-08-01',
+      endKey: '2026-08-31',
+      label: '2026年8月',
+    },
+    { totalAssets: 100000 },
+  )
 
   assert.deepEqual(summary, {
     startKey: '2026-08-01',
@@ -66,9 +70,34 @@ test('月收益率按已实现交易的真实成本基数计算且不受当月�
     realizedPnl: 228,
     ratedPnl: 178,
     costBasis: 3010,
-    returnPct: 5.91,
+    totalAssets: 100000,
+    accountReturnPct: 0.23,
+    tradeReturnPct: 5.91,
     fee: 36,
   })
+})
+
+test('总资产缺失时账户收益率不可计算但交易收益率仍可展示', () => {
+  const summary = summarizeTradePeriod([
+    {
+      type: 'SELL',
+      code: '000001',
+      qty: 1,
+      costPrice: 10,
+      buyFee: 5,
+      sellFee: 6,
+      realizedPnl: 89,
+      at: at('2026-08-18T10:00:00'),
+    },
+  ], {
+    startKey: '2026-08-01',
+    endKey: '2026-08-31',
+    label: '2026年8月',
+  })
+
+  assert.equal(summary.totalAssets, null)
+  assert.equal(summary.accountReturnPct, null)
+  assert.equal(summary.tradeReturnPct, 8.86)
 })
 
 test('自然周列表按周一到周日分组并按最近周期倒序', () => {
