@@ -1,3 +1,5 @@
+import { t1GateForSide } from './t1AdvicePolicy.js'
+
 const finite = (value) => {
   if (value == null || value === '') return null
   const number = Number(value)
@@ -163,6 +165,71 @@ export function buildAdviceActionView(advice = {}, { mode = '' } = {}) {
     levels,
     trigger: triggerFor(kind, levels),
   }
+}
+
+function holdingPriceText(value) {
+  const number = finite(value)
+  if (number == null) return '计划价'
+  return String(number < 10 ? +number.toFixed(3) : +number.toFixed(2))
+}
+
+export function buildHoldingCardDecisionView({
+  advice = null,
+  hitTarget = false,
+  hitStop = false,
+  targetPrice = null,
+  stopPrice = null,
+  t1Status = null,
+  nextTradeDay = '',
+} = {}) {
+  const source = advice && typeof advice === 'object' ? advice : {}
+  const exitSide = hitStop ? 'stop' : hitTarget ? 'sell' : ''
+  const gate = exitSide && t1Status
+    ? t1GateForSide(exitSide, t1Status, nextTradeDay)
+    : null
+  const existingPlan = clean(source.actionPlan || source.nextAction)
+  const persistedExitBlocked = /今日不可卖|T\+1锁定/.test(
+    `${clean(source.opQty, 80)} ${existingPlan}`,
+  )
+
+  if (gate?.blocked || persistedExitBlocked) {
+    const reached = hitStop
+      ? `止损参考${holdingPriceText(stopPrice)}已触及`
+      : `止盈参考${holdingPriceText(targetPrice)}已触及`
+    const instruction = persistedExitBlocked && existingPlan
+      ? existingPlan
+      : `${reached}，但${gate?.reason || '今日买入仓位受T+1锁定，今日不可卖'}；${nextTradeDay || '下一交易日'}再按盘面操作`
+    return buildAdviceActionView({
+      ...source,
+      action: '持有',
+      stance: '持有',
+      opQty: '今日不可卖',
+      actionPlan: instruction,
+      reducePrice: source.reducePrice ?? targetPrice,
+      stopPrice: source.stopPrice ?? stopPrice,
+      targetPrice: source.targetPrice ?? targetPrice,
+    }, { mode: 'hold_advice' })
+  }
+
+  if (hitTarget) {
+    return buildAdviceActionView({
+      action: '止盈',
+      actionPlan: `现价已到止盈参考 ${holdingPriceText(targetPrice)}，按确认信号分批落袋`,
+      reducePrice: targetPrice,
+      stopPrice,
+    }, { mode: 'hold_advice' })
+  }
+  if (hitStop) {
+    return buildAdviceActionView({
+      action: '止损',
+      actionPlan: `现价已到止损参考 ${holdingPriceText(stopPrice)}，按纪律确认后退出`,
+      stopPrice,
+      targetPrice,
+    }, { mode: 'hold_advice' })
+  }
+  return advice
+    ? buildAdviceActionView(advice, { mode: 'hold_advice' })
+    : null
 }
 
 export function buildActionProgress(trigger, currentPrice) {

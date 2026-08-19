@@ -4,8 +4,54 @@ import assert from 'node:assert/strict'
 import {
   buildActionProgress,
   buildAdviceActionView,
+  buildHoldingCardDecisionView,
 } from '../shared/adviceActionView.js'
 import { planStore } from '../src/planStore.js'
+
+test('止损触及但做T买回仓位受T加一锁定时卡片保留不可卖指令', () => {
+  const view = buildHoldingCardDecisionView({
+    advice: {
+      action: '持有',
+      opQty: '今日不可卖',
+      actionPlan: '本轮做T已完成，买回1手今日T+1锁定、今日可卖0手；明天再按盘面操作',
+      reducePrice: 56.39,
+      stopPrice: 55.5,
+    },
+    hitStop: true,
+    stopPrice: 55.5,
+    targetPrice: 56.39,
+    t1Status: { liveQty: 1, boughtToday: 1, sellableToday: 0 },
+    nextTradeDay: '2026-08-20(周四)',
+  })
+
+  assert.equal(view.kind, 'hold')
+  assert.equal(view.action, '持有')
+  assert.equal(view.quantity, '')
+  assert.match(view.instruction, /本轮做T已完成/)
+  assert.doesNotMatch(view.instruction, /按纪律确认后退出/)
+})
+
+test('卡片优先遵从军师已持久化的今日不可卖约束', () => {
+  const view = buildHoldingCardDecisionView({
+    advice: {
+      action: '持有',
+      opQty: '今日不可卖',
+      actionPlan: '本轮做T已完成，买回1手今日T+1锁定、今日可卖0手；明天再按盘面操作',
+      reducePrice: 56.39,
+      stopPrice: 55.5,
+    },
+    hitStop: true,
+    stopPrice: 55.5,
+    targetPrice: 56.39,
+    // 模拟浏览器端旧账本暂时未识别已配对买回腿的锁定。
+    t1Status: { liveQty: 1, boughtToday: 0, sellableToday: 1 },
+    nextTradeDay: '2026-08-20(周四)',
+  })
+
+  assert.equal(view.action, '持有')
+  assert.match(view.instruction, /今日可卖0手/)
+  assert.doesNotMatch(view.instruction, /按纪律确认后退出/)
+})
 
 test('买入建议把买入价和首笔手数编译为同一动作视图', () => {
   const view = buildAdviceActionView({

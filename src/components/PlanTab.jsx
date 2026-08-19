@@ -51,6 +51,7 @@ import {
 import {
   buildActionProgress,
   buildAdviceActionView,
+  buildHoldingCardDecisionView,
 } from '../../shared/adviceActionView.js'
 import { visibleAiSources } from '../../shared/aiSearchUi.js'
 import { useAiSearchConfig } from '../aiSearchConfigStore'
@@ -2108,26 +2109,19 @@ function HoldingItem({ h, idx, quote: q }) {
 
   const adviceEntry = getAdvice(h.code, 'hold_advice')
   const holdAdvice = adviceEntry?.advice || null
-  const decisionView = hitTP
-    ? buildAdviceActionView({
-        action: '止盈',
-        actionPlan: `现价已到止盈参考 ${fmtRaw(h.tp)}，按确认信号分批落袋`,
-        reducePrice: h.tp,
-        stopPrice: h.sl,
-      }, { mode: 'hold_advice' })
-    : hitSL
-      ? buildAdviceActionView({
-          action: '止损',
-          actionPlan: `现价已到止损参考 ${fmtRaw(h.sl)}，按纪律确认后退出`,
-          stopPrice: h.sl,
-          targetPrice: h.tp,
-        }, { mode: 'hold_advice' })
-      : holdAdvice
-        ? buildAdviceActionView(holdAdvice, { mode: 'hold_advice' })
-        : null
+  const currentT1 = t1StatusOf(h.code)
+  const decisionView = buildHoldingCardDecisionView({
+    advice: holdAdvice,
+    hitTarget: hitTP,
+    hitStop: hitSL,
+    targetPrice: h.tp,
+    stopPrice: h.sl,
+    t1Status: currentT1,
+    nextTradeDay: nextTradingDayLabel(),
+  })
 
   const startSell = () => {
-    const t1 = t1StatusOf(h.code)
+    const t1 = currentT1
     const suggestedLevel = decisionView?.levels.find((item) => item.key === 'reduce')
       || decisionView?.levels.find((item) => item.key === 'stop')
     const suggestedQty = (
