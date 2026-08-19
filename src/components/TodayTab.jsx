@@ -992,7 +992,15 @@ function CandidatePool({ zt, movers, speed, sectors }) {
         </div>
       </div>
       <div className="scroll" style={{ maxHeight: 520 }}>
-        <table className="tbl">
+        <table className="tbl candidate-pool-table">
+          <colgroup>
+            <col className="candidate-col-name" />
+            <col className="candidate-col-price" />
+            <col className="candidate-col-pct" />
+            <col className="candidate-col-signal" />
+            <col className="candidate-col-flow" />
+            <col className="candidate-col-action" />
+          </colgroup>
           <thead>
             <tr><th>名称</th><Th label="现价" k="price" /><Th label="涨幅" k="pct" /><th>信号</th><Th label="主力/封资" k="mainInflow" /><th style={{ textAlign: 'center' }}>操作</th></tr>
           </thead>
@@ -1002,7 +1010,12 @@ function CandidatePool({ zt, movers, speed, sectors }) {
               return (
                 <tr key={s.code}>
                   <td>
-                    <StockName code={s.code} name={s.name}><span>{s.name}</span></StockName>
+                      <StockName
+                        code={s.code}
+                        name={s.name}
+                        showTags={false}
+                        className="candidate-stock-name"
+                      />
                   </td>
                   <td className={pctClass(s.pct)}>{s.price ? fmtRaw(s.price) : '--'}</td>
                   <td className={pctClass(s.pct)}>{fmtPct(s.pct)}</td>

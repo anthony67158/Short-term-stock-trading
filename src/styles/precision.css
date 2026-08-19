@@ -1381,6 +1381,70 @@ textarea:focus {
   box-shadow: inset 2px 0 0 var(--color-accent);
 }
 
+.candidate-pool-table {
+  min-width: 760px;
+  table-layout: fixed;
+}
+
+.candidate-pool-table .candidate-col-name {
+  width: 180px;
+}
+
+.candidate-pool-table .candidate-col-price {
+  width: 78px;
+}
+
+.candidate-pool-table .candidate-col-pct {
+  width: 86px;
+}
+
+.candidate-pool-table .candidate-col-signal {
+  width: 160px;
+}
+
+.candidate-pool-table .candidate-col-flow {
+  width: 108px;
+}
+
+.candidate-pool-table .candidate-col-action {
+  width: 96px;
+}
+
+.candidate-pool-table :is(th, td):first-child {
+  width: 180px;
+  min-width: 180px;
+  max-width: 180px;
+  box-sizing: border-box;
+}
+
+.candidate-stock-name .stock-name-text {
+  width: 100%;
+  font-family: var(--font-sans);
+  font-weight: 650;
+}
+
+@media (max-width: 720px) {
+  .candidate-pool-table {
+    min-width: 680px;
+  }
+
+  .candidate-pool-table .candidate-col-name {
+    width: 132px;
+  }
+
+  .candidate-pool-table :is(th, td):first-child {
+    width: 132px;
+    min-width: 132px;
+    max-width: 132px;
+  }
+
+  .candidate-stock-name .stock-name-primary {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+}
+
 .mb-idx-price,
 .sg-v,
 .acc-hero-val,
