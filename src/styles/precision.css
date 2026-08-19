@@ -1371,9 +1371,17 @@ textarea:focus {
 }
 
 .senti-gauge .sg-cell {
+  justify-content: center;
+  text-align: center;
   border: 1px solid var(--color-rule-2);
   border-radius: var(--radius-input);
   background: var(--color-paper-3);
+}
+
+.senti-gauge .sg-k,
+.senti-gauge .sg-v {
+  width: 100%;
+  text-align: center;
 }
 
 .play-card {

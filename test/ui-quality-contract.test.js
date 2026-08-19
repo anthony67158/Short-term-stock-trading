@@ -285,6 +285,17 @@ test('今日工作台双栏等高且情绪指标桌面端为三列', () => {
   )
 })
 
+test('市场情绪指标卡的标签与数值保持水平居中', () => {
+  assert.match(
+    precision,
+    /\.senti-gauge \.sg-cell\s*{[^}]*justify-content:\s*center[^}]*text-align:\s*center/s,
+  )
+  assert.match(
+    precision,
+    /\.senti-gauge \.sg-k,[\s\S]*?\.senti-gauge \.sg-v\s*{[^}]*width:\s*100%[^}]*text-align:\s*center/s,
+  )
+})
+
 test('持仓区共用页面边线、筛选栏留出安全区且卡片展示建议更新时间', () => {
   assert.match(
     precision,
