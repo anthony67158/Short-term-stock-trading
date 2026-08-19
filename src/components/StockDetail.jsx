@@ -14,7 +14,11 @@ import { subscribeRunner, isRunning, getRunning, getResult } from '../adviceRunn
 import { tryStartAdvice, generatingList } from '../adviceGate'
 import { subscribeBatch, getBatchState } from '../adviceBatch'
 import { detailStore } from '../detailStore'
-import { currentQuantModelVersion, quantModelQuery } from '../quantModel'
+import {
+  currentQuantModelVersion,
+  quantModelHeaders,
+  quantModelQuery,
+} from '../quantModel'
 import {
   cloudAdviceLoadingState,
   mergeAdviceRefreshState,
@@ -34,7 +38,10 @@ import { useAiSearchConfig } from '../aiSearchConfigStore'
 import { trustCalibrationText } from '../../shared/advicePresentation.js'
 import { adviceTrustBands } from '../../shared/adviceIntelligence.js'
 import { tradeActivityContext } from '../../shared/portfolioAccounting.js'
-import { productionForecastWindow } from '../../shared/productionForecastWindow.js'
+import {
+  productionForecastWindow,
+  shouldRefreshProductionForecast,
+} from '../../shared/productionForecastWindow.js'
 
 // 把公司网址补全为可点击的绝对 URL（东财 F10 常给不带协议的裸域名）
 function normalizeUrl(raw) {
@@ -107,6 +114,7 @@ export default function StockDetail({ stock, onClose }) {
   const [showMa, setShowMa] = useState(false) // OHLC/MA 网格默认折叠
   const [showInfo, setShowInfo] = useState(false) // 公司简介默认折叠
   const [busyModal, setBusyModal] = useState(null) // 端点已满提示:{ busy:[{code,name}], concurrency } | null
+  const quantRefreshRef = useRef('')
   const searchConfig = useAiSearchConfig()
   const book = usePlanStore()
   const reviewEnabled = isAdviceReviewEnabled(
@@ -140,6 +148,7 @@ export default function StockDetail({ stock, onClose }) {
   // 切换股票时：重置各折叠区
   useEffect(() => {
     setShowTech(false); setShowForecast(false); setShowMa(false); setShowInfo(false)
+    quantRefreshRef.current = ''
   }, [stock && stock.code])
   // 操作建议状态源（三级优先）：①后台 runner 正在跑 → 展示实时进度；②本会话刚跑完的瞬时结果
   // (含 error/adviceMissing/truncated)；③持久缓存(关闭再进/刷新仍可见)。订阅 runner：即使
@@ -215,6 +224,7 @@ export default function StockDetail({ stock, onClose }) {
   }, [stock && stock.code, !!myHold])
   const loadQuant = async () => {
     if (!stock) return
+    quantRefreshRef.current = ''
     const expectedMode = myHold ? 'hold_advice' : 'buy_advice'
     const previousState = adviceDisplayState(getAdvice(stock.code, expectedMode))
     setQuantState(mergeAdviceRefreshState({
@@ -374,6 +384,7 @@ export default function StockDetail({ stock, onClose }) {
   const doRefresh = async () => {
     if (refreshing) return
     setRefreshing(true)
+    quantRefreshRef.current = ''
     retryRef.current = 0
     const started = Date.now()
     try { await reload() } catch { /* usePolling 内部已兜底 */ }
@@ -383,6 +394,9 @@ export default function StockDetail({ stock, onClose }) {
 
   const profile = data && data.profile
   const candles = (data && data.candles) || []
+  const latestCandleDate = candles.length
+    ? String(candles[candles.length - 1]?.date || '')
+    : ''
   const trends = (data && data.trends) || []
   const preClose = data && data.preClose
   const tech = data && data.tech
@@ -404,6 +418,75 @@ export default function StockDetail({ stock, onClose }) {
   }, [loading, data, candles.length])
 
   const retrying = !loading && data && candles.length === 0 && retryRef.current < 2
+
+  // 收盘后详情K线已更新、但建议缓存仍保留上一交易日量化结果时，
+  // 单独刷新量化，不必等待整套军师LLM生成完成。
+  useEffect(() => {
+    const code = stock && stock.code
+    const resultAsOf = quantState?.result?.asOf
+    if (
+      !code
+      || klt !== '101'
+      || !quantState?.result
+      || !shouldRefreshProductionForecast({
+        asOf: resultAsOf,
+        latestCandleDate,
+      })
+    ) return undefined
+
+    const version = currentQuantModelVersion()
+    const refreshKey = `${code}:${version}:${latestCandleDate}`
+    if (quantRefreshRef.current === refreshKey) return undefined
+    quantRefreshRef.current = refreshKey
+
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 20000)
+    const holdQuery = myHold
+      ? `&holdCost=${encodeURIComponent(myHold.cost)}&holdQty=${encodeURIComponent(myHold.qty)}`
+      : ''
+    const url = api(
+      `/api/stock_detail?code=${encodeURIComponent(code)}&klt=101&lmt=60&quant=1`
+      + `${quantModelQuery(version)}${holdQuery}&_t=${Date.now()}`,
+    )
+    fetch(url, {
+      signal: controller.signal,
+      headers: quantModelHeaders(version),
+    })
+      .then((response) => response.json())
+      .then((payload) => {
+        const nextQuant = payload?.ok ? payload.quant : null
+        if (
+          !nextQuant
+          || !nextQuant.asOf
+          || shouldRefreshProductionForecast({
+            asOf: nextQuant.asOf,
+            latestCandleDate,
+          })
+        ) return
+        setQuantState((current) => current
+          ? {
+              ...current,
+              result: nextQuant,
+              quantRefreshedAt: Date.now(),
+            }
+          : current)
+      })
+      .catch(() => {})
+      .finally(() => clearTimeout(timeout))
+    return () => {
+      clearTimeout(timeout)
+      controller.abort()
+    }
+  }, [
+    stock && stock.code,
+    klt,
+    latestCandleDate,
+    quantState?.result?.asOf,
+    myHold?.cost,
+    myHold?.qty,
+    book.settings?.quantModelVersion,
+    refreshedAt,
+  ])
 
   // 计算 N 日均线
   const ma = (arr, n) =>
@@ -826,6 +909,7 @@ export default function StockDetail({ stock, onClose }) {
                     ? productionForecastWindow({
                         asOf: currentDayFc.sourceAsOf,
                         targetDate: currentDayFc.targetDate,
+                        latestCandleDate,
                       })
                     : null
                   const primaryFc = currentDayWindow?.isTodayTarget
@@ -834,7 +918,10 @@ export default function StockDetail({ stock, onClose }) {
                   const primaryWindow = primaryFc === currentDayFc
                     ? currentDayWindow
                     : (nextFc
-                    ? productionForecastWindow({ asOf: q.asOf })
+                    ? productionForecastWindow({
+                        asOf: q.asOf,
+                        latestCandleDate,
+                      })
                     : null)
                   const fallbackVerdict = {
                     tone: dec.tone || 'muted',

@@ -34,9 +34,29 @@ function nextTradingDayAfter(value) {
   return ''
 }
 
+export function shouldRefreshProductionForecast({
+  asOf,
+  latestCandleDate,
+  now = Date.now(),
+} = {}) {
+  const signalDate = dateKey(asOf)
+  const candleDate = dateKey(latestCandleDate)
+  if (!signalDate || !candleDate || candleDate <= signalDate) return false
+  const today = beijingDayKey(now)
+  if (candleDate < today) return true
+  const currentDate = beijingDate(now)
+  const minutes = beijingMinutes(now)
+  return (
+    candleDate === today
+    && isTradingDay(currentDate)
+    && (minutes > 900 || (minutes === 900 && currentDate.getSeconds() > 0))
+  )
+}
+
 export function productionForecastWindow({
   asOf,
   targetDate: requestedTargetDate,
+  latestCandleDate,
   now = Date.now(),
 } = {}) {
   const signalDate = dateKey(asOf)
@@ -74,6 +94,22 @@ export function productionForecastWindow({
     }
   }
   if (targetsToday) {
+    if (shouldRefreshProductionForecast({
+      asOf,
+      latestCandleDate,
+      now,
+    })) {
+      return {
+        kind: 'stale-result',
+        label: '旧预测已过期',
+        shortLabel: '旧预测',
+        signalDate,
+        targetDate,
+        isTodayTarget: true,
+        needsRefresh: true,
+        note: `今日收盘K线已更新至 ${dateKey(latestCandleDate)}，正在刷新下一交易日预测`,
+      }
+    }
     return {
       kind: 'stale-session',
       label: '最近交易日预测',
