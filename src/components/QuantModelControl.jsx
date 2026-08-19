@@ -32,6 +32,10 @@ function ProductionAccuracyPanel({
   const days = productionAccuracy && Array.isArray(productionAccuracy.days)
     ? productionAccuracy.days
     : []
+  const historyDays = Array.isArray(productionAccuracy?.historyDays)
+    && productionAccuracy.historyDays.length
+    ? productionAccuracy.historyDays
+    : days
   const hasSamples = Number(productionAccuracy?.overall?.total) > 0
   const strong = productionAccuracy?.strongSignals || {}
   const nextDirection = productionAccuracy?.nextTradeDayDirection || {}
@@ -106,16 +110,27 @@ function ProductionAccuracyPanel({
               </small>
             </div>
           </div>
-          {days.length > 0 && (
-            <div className="qmc-days qmc-days-spaced">
-              {days.slice(0, 6).map((day) => (
-                <div className="qmc-day" key={day.date}>
-                  <span>{day.date}</span>
-                  <b>{day.accuracyPct}%</b>
-                  <small>{day.correct}/{day.total} 正确</small>
-                </div>
-              ))}
-            </div>
+          {historyDays.length > 0 && (
+            <details className="qmc-backtest-history">
+              <summary>
+                <span>每日前向回测</span>
+                <small>已记录 {historyDays.length} 个交易日</small>
+              </summary>
+              <div className="qmc-days qmc-backtest-days">
+                {historyDays.map((day) => (
+                  <div className="qmc-day" key={day.date}>
+                    <span>{day.date}</span>
+                    <b>{day.accuracyPct}%</b>
+                    <small>
+                      {day.correct}/{day.total} 正确
+                      {day.modelDataEndDate
+                        ? ` · 训练截止 ${day.modelDataEndDate}`
+                        : ''}
+                    </small>
+                  </div>
+                ))}
+              </div>
+            </details>
           )}
           <div className="qmc-backtest-meta">
             <span>

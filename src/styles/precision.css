@@ -5126,6 +5126,57 @@ html[data-theme="light"] .detail-panel {
   font-variant-numeric: tabular-nums;
 }
 
+.qmc-backtest-history {
+  margin-top: var(--space-xs);
+  border-top: 1px solid var(--color-rule-2);
+}
+
+.qmc-backtest-history > summary {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2xs);
+  min-height: 36px;
+  color: var(--color-ink-2);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  list-style: none;
+}
+
+.qmc-backtest-history > summary::-webkit-details-marker {
+  display: none;
+}
+
+.qmc-backtest-history > summary::before {
+  content: '+';
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  text-align: center;
+}
+
+.qmc-backtest-history[open] > summary::before {
+  content: '-';
+}
+
+.qmc-backtest-history > summary > span {
+  color: var(--color-ink);
+  font-weight: 650;
+}
+
+.qmc-backtest-history > summary > small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-2xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qmc-backtest-days {
+  margin-bottom: var(--space-xs);
+}
+
 .qmc-metric-note {
   margin-top: var(--space-2xs);
   color: var(--color-text-tertiary);
