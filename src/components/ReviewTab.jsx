@@ -17,6 +17,10 @@ import {
 import {
   manualTradePairCandidates,
 } from '../../shared/tradePairing.js'
+import {
+  listTradePeriods,
+  summarizeTradePeriod,
+} from '../../shared/tradePeriodPerformance.js'
 
 // 汇总所有交易记录：已存 closed（BUY/SELL/CLOSE/T）+ 持仓中实时做T（未归档）
 function useRealizedRecords(book) {
@@ -250,6 +254,95 @@ function TxnRow({ c, onDelete, onEdit, showDate }) {
     </div>
   )
 }
+
+function PeriodPerformance({ records }) {
+  const [periodMode, setPeriodMode] = useState('month')
+  const [periodKey, setPeriodKey] = useState('')
+  const periods = useMemo(
+    () => listTradePeriods(records, periodMode),
+    [records, periodMode],
+  )
+  const selected = periods.find((period) => period.key === periodKey)
+    || periods[0]
+  const summary = useMemo(
+    () => summarizeTradePeriod(records, selected),
+    [records, selected],
+  )
+  if (!selected) return null
+
+  const setMode = (mode) => {
+    setPeriodMode(mode)
+    setPeriodKey('')
+  }
+  const rateTitle = summary.realizedCount > summary.ratedCount
+    ? `收益率仅按 ${summary.ratedCount}/${summary.realizedCount} 笔有真实成本依据的已实现交易计算`
+    : '收益率按本周期已实现交易盈亏除以对应含费成本计算'
+
+  return (
+    <div className="trade-period-performance" aria-label="周期收益统计">
+      <div className="trade-period-controls">
+        <span className="trade-period-label">周期收益</span>
+        <div className="tabs trade-period-tabs" aria-label="收益统计周期">
+          <button
+            type="button"
+            className={'tab' + (periodMode === 'month' ? ' active' : '')}
+            aria-pressed={periodMode === 'month'}
+            onClick={() => setMode('month')}
+          >
+            月
+          </button>
+          <button
+            type="button"
+            className={'tab' + (periodMode === 'week' ? ' active' : '')}
+            aria-pressed={periodMode === 'week'}
+            onClick={() => setMode('week')}
+          >
+            周
+          </button>
+        </div>
+        <select
+          className="trade-period-select"
+          aria-label={periodMode === 'month' ? '选择收益月份' : '选择收益周'}
+          value={selected.key}
+          onChange={(event) => setPeriodKey(event.target.value)}
+        >
+          {periods.map((period) => (
+            <option value={period.key} key={period.key}>
+              {period.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="trade-period-metrics">
+        <div className="trade-period-metric trade-period-return" title={rateTitle}>
+          <span>收益率</span>
+          <b className={pctClass(summary.returnPct)}>
+            {summary.returnPct == null ? '--' : fmtPct(summary.returnPct)}
+          </b>
+          <small>{summary.ratedCount}/{summary.realizedCount} 笔可计算</small>
+        </div>
+        <div className="trade-period-metric">
+          <span>已实现</span>
+          <b className={pctClass(summary.realizedPnl)}>
+            {fmtMoney(summary.realizedPnl)}
+          </b>
+          <small>{summary.realizedCount} 笔</small>
+        </div>
+        <div className="trade-period-metric">
+          <span>成本基数</span>
+          <b>{summary.costBasis > 0 ? fmtAmt(summary.costBasis) : '--'}</b>
+          <small>含分摊买入费</small>
+        </div>
+        <div className="trade-period-metric">
+          <span>手续费</span>
+          <b>{fmtAmt(summary.fee)}</b>
+          <small>{summary.transactionCount} 笔流水</small>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function DailyLog({ records }) {
   const [filter, setFilter] = useState('all') // all | BUY | SELL | CLOSE | T
   const [confirmClear, setConfirmClear] = useState(false)
@@ -373,6 +466,8 @@ function DailyLog({ records }) {
           )}
         </div>
       </div>
+
+      <PeriodPerformance records={records} />
 
       {/* 清空二次确认弹窗 */}
       {confirmClear && (

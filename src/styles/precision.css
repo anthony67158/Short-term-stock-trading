@@ -990,6 +990,132 @@ button.tech-fold {
   justify-content: flex-end;
 }
 
+.trade-period-performance {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.8fr) minmax(0, 1.2fr);
+  align-items: stretch;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-md);
+  border-bottom: 1px solid var(--color-rule-2);
+  background: var(--color-paper-3);
+}
+
+.trade-period-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  min-width: 0;
+}
+
+.trade-period-label {
+  flex: none;
+  color: var(--color-ink-2);
+  font-size: var(--font-size-xs);
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.trade-period-tabs {
+  flex: none;
+}
+
+.trade-period-tabs .tab {
+  min-width: 34px;
+  padding-inline: var(--space-2xs);
+}
+
+.trade-period-select {
+  min-width: 0;
+  width: min(190px, 100%);
+  min-height: 32px;
+  padding: 4px 28px 4px 9px;
+  border: 1px solid var(--color-rule-2);
+  border-radius: var(--radius-control);
+  background: var(--color-paper-2);
+  color: var(--color-ink);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.trade-period-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  min-width: 0;
+}
+
+.trade-period-metric {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-content: center;
+  gap: 2px var(--space-2xs);
+  min-width: 0;
+  padding-inline: var(--space-sm);
+  border-inline-start: 1px solid var(--color-rule-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.trade-period-metric > span {
+  overflow: hidden;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-2xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trade-period-metric > b {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  align-self: center;
+  color: var(--color-ink);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+}
+
+.trade-period-metric > b.red {
+  color: var(--color-up);
+}
+
+.trade-period-metric > b.green {
+  color: var(--color-down);
+}
+
+.trade-period-metric > small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-neutral);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .trade-period-performance {
+    grid-template-columns: 1fr;
+    gap: var(--space-xs);
+  }
+
+  .trade-period-select {
+    flex: 1;
+    width: auto;
+  }
+
+  .trade-period-metric:first-child {
+    border-inline-start: 0;
+  }
+}
+
+@media (max-width: 520px) {
+  .trade-period-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-xs) 0;
+  }
+
+  .trade-period-metric:nth-child(3) {
+    border-inline-start: 0;
+  }
+}
+
 .ds-stock-summary {
   flex: 1;
 }

@@ -601,6 +601,24 @@ test('每日操作流水统一编辑日期价格手数并提示OSS云端保存',
   )
 })
 
+test('交易流水在工具栏下方提供紧凑的周月收益汇总带', () => {
+  assert.match(reviewTab, /className="trade-period-performance"/)
+  assert.match(reviewTab, /周期收益/)
+  assert.match(reviewTab, /periodMode === 'month'/)
+  assert.match(reviewTab, /periodMode === 'week'/)
+  assert.match(reviewTab, /listTradePeriods/)
+  assert.match(reviewTab, /summarizeTradePeriod/)
+  assert.match(reviewTab, /成本基数/)
+  assert.match(
+    precision,
+    /\.trade-period-performance\s*{[^}]*display:\s*grid[^}]*grid-template-columns:/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.trade-period-performance\s*{[^}]*grid-template-columns:\s*1fr/s,
+  )
+})
+
 test('军师抽屉打开时顶栏不被压窄且隐藏重复工具区', () => {
   assert.match(
     precision,
