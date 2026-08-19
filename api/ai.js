@@ -1,6 +1,7 @@
 // AI 分析代理：服务端调用 LLM，Key 从环境变量读取，绝不暴露给前端
 // POST body: { mode: 'market'|'sector'|'stock'|'scan', payload: {...} }
 import { buildCorpus, retrieve } from './_rag.js';
+import { retrieveTheoryKeywords } from './_kb.js';
 import { techSummaryForAI, fetchSelectedQuantPredict, backtestSignal } from './_ta.js';
 import {
   normalizeQuantModelVersion,
@@ -60,6 +61,10 @@ import {
   buildRealOutcomeLearning,
   realOutcomeContext,
 } from '../shared/realOutcomeLearning.js';
+import {
+  buildAdvisorTheoryQuery,
+  theoryReferencesOf,
+} from '../shared/advisorTheory.js';
 import {
   calibrateAdviceTrust,
   evaluateScheduledReview,
@@ -686,6 +691,8 @@ export default async function handler(req, res) {
     let ragText = '';
     let newsRefs = [];
     let searchReference = null;
+    let theoryHits = [];
+    let theoryRefs = [];
     if (mode === 'stock' && payload.code) {
       try {
         const corpus = await buildCorpus(payload.code, { name: payload.name });
@@ -1378,6 +1385,34 @@ export default async function handler(req, res) {
       );
       return finish(scheduledReviewResponse);
     }
+    if (isAdvisor && payload.code) {
+      phase('正在匹配经典操盘理论…', 'theory');
+      const theoryQuery = buildAdvisorTheoryQuery(mode, payload);
+      try {
+        theoryHits = await sourceTracker.track(
+          'theoryKnowledge',
+          '经典理论库',
+          Promise.resolve(retrieveTheoryKeywords(theoryQuery, 6)),
+          {
+            isAvailable: (value) =>
+              Array.isArray(value) && value.length > 0,
+          },
+        );
+        theoryRefs = theoryReferencesOf(theoryHits);
+      } catch {
+        theoryHits = [];
+        theoryRefs = [];
+      }
+      const theoryTrace = sourceTracker.snapshot()
+        .findLast((item) => item.key === 'theoryKnowledge');
+      emit('source', {
+        label: '经典理论库',
+        ok: theoryRefs.length > 0,
+        status: theoryTrace?.status || 'ERROR',
+        durationMs: theoryTrace?.durationMs,
+      });
+      collectedMeta.theoryRefs = theoryRefs;
+    }
     // 数据采集后剩余时间不足 → 直接降级返回(不硬闯 LLM 被平台强杀)。带 meta 让前端仍能展示已查到的确定性数据。
     if (remain() < 9000) {
       return finish({
@@ -1412,7 +1447,12 @@ export default async function handler(req, res) {
     const zhTail = useReasoning
       ? '\n\n【★最终语言指令·优先级最高·必须遵守】从现在起，你的【全部思考过程/思维链，包括每一个分步小标题】都【必须用简体中文书写】，禁止出现任何英文句子或英文小标题(如禁止"Calculating...""Assessing..."这类)。请用中文思考，例如"正在计算盈亏比""正在评估回调买点"。最终 JSON 输出同样全程中文。'
       : '';
-    const userPrompt = buildUserPrompt(mode, payload, ragText) + zhTail;
+    const userPrompt = buildUserPrompt(
+      mode,
+      payload,
+      ragText,
+      theoryHits,
+    ) + zhTail;
     if (streaming) {
       // ★流式路径(客户端开了 SSE):以 stream:true 调上游,把模型【思维链 reasoning_content】
       //   增量实时推为 reasoning 事件(军师在想什么),正文 content 累积到流结束后再统一解析。
@@ -1919,6 +1959,7 @@ export default async function handler(req, res) {
     if (result && typeof result === 'object' && !result.raw) {
       if (searchReference) result.searchReference = searchReference;
       else delete result.searchReference;
+      result.theoryRefs = theoryRefs;
     }
     return finish({
       ok: true,

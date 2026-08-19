@@ -1089,6 +1089,12 @@ button.tech-fold {
   white-space: nowrap;
 }
 
+.advice-presentation .theory-chip {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 @media (max-width: 720px) {
   .trade-period-performance {
     grid-template-columns: 1fr;

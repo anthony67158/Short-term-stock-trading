@@ -137,6 +137,29 @@ function RiskOverlay({ risk }) {
   )
 }
 
+function TheoryReferences({ references }) {
+  const items = Array.isArray(references)
+    ? references.filter((item) => item?.book && item?.topic).slice(0, 6)
+    : []
+  if (!items.length) return null
+  return (
+    <section className="theory-refs" aria-label="本次参考理论">
+      <span className="theory-refs-label">
+        <Icon name="book" size={11} /> 参考理论
+      </span>
+      {items.map((item) => (
+        <span
+          className="theory-chip"
+          key={`${item.book}:${item.topic}`}
+          title={`${item.book} · ${item.topic}`}
+        >
+          {item.book}·{item.topic}
+        </span>
+      ))}
+    </section>
+  )
+}
+
 export default function AdvicePresentation({
   advice,
   knowledgeActionReview,
@@ -273,6 +296,7 @@ export default function AdvicePresentation({
           ))}
         </section>
       )}
+      <TheoryReferences references={advice.theoryRefs} />
       <SearchReference reference={advice.searchReference} />
 
       {advice.serverAdjust && (

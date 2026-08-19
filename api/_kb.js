@@ -101,6 +101,18 @@ async function ensureVectors() {
 }
 
 // 检索与 query 最相关的 k 条投资理论
+function keywordTheoryHits(store, query, k) {
+  const kw = String(query).split(/\s+|[，,。、；;]/).filter((w) => w.length >= 2);
+  const scored = store
+    .map((d) => ({ book: d.book, topic: d.topic, text: d.text, score: kw.reduce((s, w) => s + (d.text.includes(w) ? 1 : 0), 0) }))
+    .sort((a, b) => b.score - a.score);
+  return scored.slice(0, k);
+}
+
+export function retrieveTheoryKeywords(query, k = 4) {
+  return keywordTheoryHits(kbDocs(), query, k);
+}
+
 export async function retrieveTheory(query, k = 4) {
   const store = await ensureVectors();
   const hasVec = store[0] && store[0].vec;
@@ -116,9 +128,5 @@ export async function retrieveTheory(query, k = 4) {
     } catch { /* fallthrough */ }
   }
   // 关键词兜底
-  const kw = String(query).split(/\s+|[，,。、；;]/).filter((w) => w.length >= 2);
-  const scored = store
-    .map((d) => ({ book: d.book, topic: d.topic, text: d.text, score: kw.reduce((s, w) => s + (d.text.includes(w) ? 1 : 0), 0) }))
-    .sort((a, b) => b.score - a.score);
-  return scored.slice(0, k);
+  return keywordTheoryHits(store, query, k);
 }
