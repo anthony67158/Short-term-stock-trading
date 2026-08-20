@@ -48,14 +48,17 @@ function timeLabel(value) {
   })
 }
 
-function SectorExplanation({ sector }) {
+function SectorExplanation({ sector, session }) {
   const explanation = sector.explanation || {}
   const catalysts = explanation.catalysts || []
   const risks = explanation.risks?.length
     ? explanation.risks
     : (sector.risks || [])
   const evidence = explanation.evidence || []
-  const action = sectorForecastActionView(sector.actionability)
+  const action = sectorForecastActionView(
+    sector.actionability,
+    { session },
+  )
   return (
     <div className="sector-forecast-expanded">
       <div
@@ -132,6 +135,9 @@ export default function SectorForecast() {
   const [horizon, setHorizon] = useState('next')
   const [sortMode, setSortMode] = useState('conclusion')
   const [latest, setLatest] = useState(null)
+  const [intraday, setIntraday] = useState(null)
+  const [market, setMarket] = useState(null)
+  const [versionMode, setVersionMode] = useState('auto')
   const [history, setHistory] = useState([])
   const [settings, setSettings] = useState(null)
   const [task, setTask] = useState(null)
@@ -153,6 +159,8 @@ export default function SectorForecast() {
     ])
     return {
       latest: current.latest || null,
+      intraday: current.intraday || null,
+      market: current.market || null,
       settings: current.settings || null,
       history: archive.history || [],
       task: status.task || null,
@@ -166,6 +174,8 @@ export default function SectorForecast() {
       .then((result) => {
         if (ignore) return
         setLatest(result.latest)
+        setIntraday(result.intraday)
+        setMarket(result.market)
         setSettings(result.settings)
         setHistory(result.history)
         setTask(result.task)
@@ -193,6 +203,8 @@ export default function SectorForecast() {
         if (stopped) return
         setTask(status.task || null)
         if (current.latest) setLatest(current.latest)
+        if (current.intraday) setIntraday(current.intraday)
+        if (current.market) setMarket(current.market)
         if (
           !status.task?.active
           && !generationRequestRef.current
@@ -207,16 +219,56 @@ export default function SectorForecast() {
     }
   }, [generating, task?.active?.key])
 
+  useEffect(() => {
+    if (settings?.intradayEnabled === false) return undefined
+    let stopped = false
+    const refreshIntraday = async () => {
+      try {
+        const current = await sectorForecastRequest()
+        if (stopped) return
+        if (current.latest) setLatest(current.latest)
+        if (current.intraday) setIntraday(current.intraday)
+        if (current.market) setMarket(current.market)
+      } catch { /* 下一轮继续读取全局盘中快照 */ }
+    }
+    const timer = setInterval(refreshIntraday, 60000)
+    return () => {
+      stopped = true
+      clearInterval(timer)
+    }
+  }, [settings?.intradayEnabled])
+
+  const currentIntraday = !!(
+    intraday?.signalDate
+    && intraday.signalDate === market?.day
+  )
+  const effectiveVersion = versionMode === 'formal'
+    ? 'formal'
+    : versionMode === 'intraday'
+      ? (currentIntraday ? 'intraday' : 'formal')
+      : (
+        currentIntraday
+        && ['live', 'lunch'].includes(market?.phase)
+          ? 'intraday'
+          : 'formal'
+      )
+  const snapshot = effectiveVersion === 'intraday'
+    ? intraday
+    : latest
+  const generationSession = market?.intradayAvailable
+    ? 'intraday'
+    : 'close'
+
   const ranked = useMemo(() => {
-    return sortSectorForecasts(latest?.sectors || [], {
+    return sortSectorForecasts(snapshot?.sectors || [], {
       horizon,
       sortMode,
     })
-  }, [horizon, latest, sortMode])
+  }, [horizon, snapshot, sortMode])
 
   const actionSummary = useMemo(
-    () => summarizeSectorForecastActions(latest?.sectors || []),
-    [latest],
+    () => summarizeSectorForecastActions(snapshot?.sectors || []),
+    [snapshot],
   )
 
   const generate = async () => {
@@ -227,19 +279,29 @@ export default function SectorForecast() {
       const response = await sectorForecastRequest({
         action: 'generate',
         method: 'POST',
-        body: { session: 'close' },
+        body: { session: generationSession },
         timeoutMs: 300000,
       })
-      if (response.snapshot) setLatest(response.snapshot)
-      const [archive, status] = await Promise.all([
+      if (response.snapshot?.session === 'intraday') {
+        setIntraday(response.snapshot)
+        setVersionMode('intraday')
+      } else if (response.snapshot) {
+        setLatest(response.snapshot)
+        setVersionMode('formal')
+      }
+      const [archive, status, current] = await Promise.all([
         sectorForecastRequest({
           action: 'history',
           query: { limit: 30 },
         }),
         sectorForecastRequest({ action: 'status' }),
+        sectorForecastRequest(),
       ])
       setHistory(archive.history || [])
       setTask(status.task || null)
+      if (current.latest) setLatest(current.latest)
+      if (current.intraday) setIntraday(current.intraday)
+      if (current.market) setMarket(current.market)
     } catch (reason) {
       setError(reason?.message || '生成失败')
     } finally {
@@ -279,7 +341,11 @@ export default function SectorForecast() {
           <button type="button" className="row-btn sector-forecast-generate" disabled={generating}
             onClick={generate}>
             <Icon name={generating ? 'pulse' : 'refresh'} size={14} />
-            {generating ? '生成中' : '生成正式版'}
+            {generating
+              ? (generationSession === 'intraday' ? '刷新中' : '生成中')
+              : generationSession === 'intraday'
+                ? '刷新盘中版'
+                : '生成正式版'}
           </button>
           <button type="button" className="icon-btn sector-forecast-settings-trigger"
             aria-label="板块前瞻自动设置" title="自动设置"
@@ -291,7 +357,7 @@ export default function SectorForecast() {
 
       {settingsOpen && (
         <SectorForecastSettings
-          key={`${settings?.closeTime}-${settings?.overnightTime}`}
+          key={`${settings?.closeTime}-${settings?.overnightTime}-${settings?.intradayIntervalMinutes}`}
           initial={settings}
           onClose={() => setSettingsOpen(false)}
           onSaved={setSettings}
@@ -305,17 +371,65 @@ export default function SectorForecast() {
 
       {loading ? (
         <div className="loading sector-forecast-loading">正在读取板块前瞻…</div>
-      ) : error && !latest ? (
+      ) : error && !snapshot ? (
         <div className="empty err">{error}</div>
-      ) : !latest ? (
+      ) : !snapshot ? (
         <div className="empty">尚无正式版板块前瞻</div>
       ) : (
         <>
+          <div className="sector-forecast-version-bar">
+            <div
+              className="sector-forecast-version-switch"
+              role="group"
+              aria-label="板块前瞻版本"
+            >
+              <button
+                type="button"
+                className={effectiveVersion === 'intraday' ? 'active' : ''}
+                aria-pressed={effectiveVersion === 'intraday'}
+                disabled={!currentIntraday}
+                onClick={() => setVersionMode('intraday')}
+              >
+                <Icon name="pulse" size={13} />
+                盘中动态
+              </button>
+              <button
+                type="button"
+                className={effectiveVersion === 'formal' ? 'active' : ''}
+                aria-pressed={effectiveVersion === 'formal'}
+                onClick={() => setVersionMode('formal')}
+              >
+                <Icon name="history" size={13} />
+                正式基线
+              </button>
+            </div>
+            <span>
+              {effectiveVersion === 'intraday'
+                ? market?.phase === 'lunch'
+                  ? '午间暂停，13:00后继续更新'
+                  : '实时资金与成分股扩散重算，日终量化概率仅作先验'
+                : market?.phase === 'live'
+                  ? '当前查看收盘/盘前基线，可切换盘中动态版'
+                  : '收盘正式排名与盘前证据复核'}
+            </span>
+          </div>
           <div className="sector-forecast-meta">
-            <span>排名截至 <b>{latest.dataAsOf || latest.signalDate}</b></span>
-            <span>{latest.session === 'overnight' ? '盘前证据已复核' : '收盘正式版'}</span>
-            <span>量化 <b>{latest.model?.quant === 'lightgbm' ? 'LightGBM' : 'V1降级'}</b></span>
-            <span>生成 <b>{timeLabel(latest.generatedAt)}</b></span>
+            <span>排名截至 <b>{snapshot.dataAsOf || snapshot.signalDate}</b></span>
+            <span>
+              {snapshot.session === 'intraday'
+                ? '盘中动态版'
+                : snapshot.session === 'overnight'
+                  ? '盘前证据已复核'
+                  : '收盘正式版'}
+            </span>
+            <span>量化 <b>
+              {snapshot.model?.quant === 'lightgbm'
+                ? 'LightGBM'
+                : snapshot.model?.quant === 'lightgbm-prior'
+                  ? '日终先验 + 实时'
+                  : 'V1降级'}
+            </b></span>
+            <span>生成 <b>{timeLabel(snapshot.generatedAt)}</b></span>
           </div>
           <div
             className="sector-forecast-action-summary"
@@ -355,6 +469,7 @@ export default function SectorForecast() {
               const forecast = sector.forecast?.[horizon] || {}
               const action = sectorForecastActionView(
                 sector.actionability,
+                { session: snapshot.session },
               )
               const isOpen = expanded === sector.code
               return (
@@ -400,7 +515,12 @@ export default function SectorForecast() {
                     </span>
                     <Icon name={isOpen ? 'chevronDown' : 'chevronRight'} size={15} />
                   </button>
-                  {isOpen && <SectorExplanation sector={sector} />}
+                  {isOpen && (
+                    <SectorExplanation
+                      sector={sector}
+                      session={snapshot.session}
+                    />
+                  )}
                 </div>
               )
             })}

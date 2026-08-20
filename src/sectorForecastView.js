@@ -72,12 +72,31 @@ function compareScore(left, right, horizon, direction) {
   return (leftScore - rightScore) * direction
 }
 
-export function sectorForecastActionView(actionability) {
-  return ACTION_VIEWS[actionability] || {
+export function sectorForecastActionView(
+  actionability,
+  { session = 'close' } = {},
+) {
+  const base = ACTION_VIEWS[actionability] || {
     label: '待判断',
     intent: 'watch',
     instruction: '先不买：等待数据完整后再判断。',
   }
+  if (session !== 'intraday') return base
+  if (actionability === 'LAYOUT') {
+    return {
+      ...base,
+      instruction:
+        '可以小仓分批：优先核心或中军，盘中回踩不破且未明显冲高时介入。',
+    }
+  }
+  if (actionability === 'WAIT_PULLBACK') {
+    return {
+      ...base,
+      instruction:
+        '先不买：等盘中缩量回踩企稳且资金继续流入，再考虑低吸。',
+    }
+  }
+  return base
 }
 
 export function summarizeSectorForecastActions(items = []) {

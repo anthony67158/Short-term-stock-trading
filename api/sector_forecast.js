@@ -549,6 +549,7 @@ export default async function handler(req, res) {
         market: {
           intradayAvailable: isContinuousTrading(),
           phase: sectorForecastMarketPhase(),
+          day: beijingDayKey(),
           asOf: Date.now(),
         },
       })

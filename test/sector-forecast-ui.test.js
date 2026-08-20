@@ -79,9 +79,21 @@ test('生成中展示权威任务阶段、百分比和完整步骤', () => {
 
 test('板块前瞻支持手动生成和运行时自动时间设置', () => {
   assert.match(component, /action:\s*'generate'/)
+  assert.match(component, /session:\s*generationSession/)
+  assert.match(component, /刷新盘中版/)
+  assert.match(component, /sector-forecast-version-switch/)
+  assert.match(component, /盘中动态/)
+  assert.match(component, /正式基线/)
+  assert.match(component, /market\?\.phase === 'lunch'/)
   assert.match(component, /SectorForecastSettings/)
   assert.match(settings, /autoEnabled/)
   assert.match(settings, /overnightEnabled/)
+  assert.match(settings, /intradayEnabled/)
+  assert.match(settings, /intradayIntervalMinutes/)
+  assert.match(settings, /盘中自动刷新/)
+  assert.match(settings, /<option value=\{5\}>5分钟<\/option>/)
+  assert.match(settings, /<option value=\{10\}>10分钟<\/option>/)
+  assert.match(settings, /<option value=\{15\}>15分钟<\/option>/)
   assert.match(settings, /type="time"/)
   assert.match(settings, /15:05/)
   assert.match(settings, /09:25/)
@@ -100,6 +112,7 @@ test('板块前瞻桌面信息密集且移动端稳定单列', () => {
   assert.match(styles, /\.sector-forecast-row\s*{/)
   assert.match(styles, /@media[\s\S]*\.sector-forecast-row\s*{[\s\S]*grid-template-columns:\s*1fr/)
   assert.match(styles, /\.sector-forecast-settings\s*{/)
+  assert.match(styles, /\.sector-forecast-version-switch\s*{/)
   assert.match(
     styles,
     /\.sector-forecast-head-actions\s*{[\s\S]*--sector-control-height:\s*36px/,

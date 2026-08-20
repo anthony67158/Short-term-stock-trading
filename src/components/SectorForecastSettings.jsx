@@ -12,6 +12,9 @@ export default function SectorForecastSettings({
     closeTime: initial?.closeTime || '15:10',
     overnightEnabled: initial?.overnightEnabled !== false,
     overnightTime: initial?.overnightTime || '08:50',
+    intradayEnabled: initial?.intradayEnabled !== false,
+    intradayIntervalMinutes:
+      Number(initial?.intradayIntervalMinutes) || 5,
   }))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -89,6 +92,34 @@ export default function SectorForecastSettings({
               overnightTime: event.target.value,
             }))}
           />
+        </label>
+      </div>
+      <div className="sector-setting-group">
+        <label className="sector-setting-toggle">
+          <input
+            type="checkbox"
+            checked={draft.intradayEnabled}
+            onChange={(event) => setDraft((current) => ({
+              ...current,
+              intradayEnabled: event.target.checked,
+            }))}
+          />
+          <span>盘中自动刷新</span>
+        </label>
+        <label>
+          <span>刷新间隔</span>
+          <select
+            value={draft.intradayIntervalMinutes}
+            disabled={!draft.intradayEnabled}
+            onChange={(event) => setDraft((current) => ({
+              ...current,
+              intradayIntervalMinutes: Number(event.target.value),
+            }))}
+          >
+            <option value={5}>5分钟</option>
+            <option value={10}>10分钟</option>
+            <option value={15}>15分钟</option>
+          </select>
         </label>
       </div>
       <div className="sector-setting-actions">

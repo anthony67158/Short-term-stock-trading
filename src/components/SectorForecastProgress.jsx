@@ -18,6 +18,14 @@ const OVERNIGHT_STEPS = Object.freeze([
   ['saving', '保存复核版'],
 ])
 
+const INTRADAY_STEPS = Object.freeze([
+  ['loading', '读取基线'],
+  ['collecting', '采集实时盘面'],
+  ['scoring', '重算可买性'],
+  ['finalizing', '校验结论'],
+  ['saving', '保存盘中版'],
+])
+
 function safePercent(value) {
   const number = Number(value)
   return Number.isFinite(number)
@@ -40,7 +48,9 @@ export default function SectorForecastProgress({
   const percent = safePercent(progress.percent)
   const steps = active?.session === 'overnight'
     ? OVERNIGHT_STEPS
-    : CLOSE_STEPS
+    : active?.session === 'intraday'
+      ? INTRADAY_STEPS
+      : CLOSE_STEPS
   const currentIndex = steps.findIndex(
     ([stage]) => stage === progress.stage,
   )

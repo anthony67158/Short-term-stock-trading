@@ -153,6 +153,17 @@ test('板块结论翻译为明确的买入或不买指令', () => {
     sectorForecastActionView('AVOID').instruction,
     /^不买：/,
   )
+  assert.deepEqual(
+    sectorForecastActionView('LAYOUT', {
+      session: 'intraday',
+    }),
+    {
+      label: '可以买入',
+      intent: 'buy',
+      instruction:
+        '可以小仓分批：优先核心或中军，盘中回踩不破且未明显冲高时介入。',
+    },
+  )
 })
 
 test('板块结论汇总能直接说明当前有几个可以买入', () => {
