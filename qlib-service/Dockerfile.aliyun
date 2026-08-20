@@ -17,7 +17,7 @@ RUN pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app.py factors_lib.py model_lib.py sector_factors.py sector_model.py ./
+COPY app.py factors_lib.py model_lib.py sector_contract.py sector_factors.py sector_model.py ./
 
 # FC 容器函数会注入 PORT；s.yaml 里 port 设为 80，与此默认一致
 CMD exec uvicorn app:app --host 0.0.0.0 --port ${PORT:-80} --workers 1

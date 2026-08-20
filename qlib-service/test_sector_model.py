@@ -1,4 +1,6 @@
 import unittest
+import subprocess
+import sys
 
 import numpy as np
 
@@ -20,6 +22,22 @@ class FakeBooster:
 
 
 class SectorModelTest(unittest.TestCase):
+    def test_runtime_model_import_does_not_require_pandas(self):
+        script = (
+            "import sys; "
+            "sys.modules['pandas']=None; "
+            "import sector_model; "
+            "assert len(sector_model.FEATURE_NAMES)==14"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=".",
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_runtime_vector_uses_explicit_feature_order(self):
         factors = {
             name: index + 0.5
