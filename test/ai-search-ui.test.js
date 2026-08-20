@@ -16,7 +16,8 @@ test('前端AI检索配置只接受安全公开字段', () => {
     updatedAt: 123,
     cachePolicy: {
       stockMinutes: 30,
-      industryMinutes: 60,
+      industryMinutes: 240,
+      industryFailureCooldownMinutes: 15,
       scheduledCacheOnly: true,
     },
   })
@@ -28,7 +29,8 @@ test('前端AI检索配置只接受安全公开字段', () => {
     updatedAt: 123,
     cachePolicy: {
       stockMinutes: 30,
-      industryMinutes: 60,
+      industryMinutes: 240,
+      industryFailureCooldownMinutes: 15,
       scheduledCacheOnly: true,
     },
   })

@@ -5,7 +5,8 @@ const API_KEY_PATTERN = /^sk-[A-Za-z0-9_-]{20,200}$/;
 
 export const AI_SEARCH_CACHE_POLICY = Object.freeze({
   stockMinutes: 30,
-  industryMinutes: 60,
+  industryMinutes: 240,
+  industryFailureCooldownMinutes: 15,
   scheduledCacheOnly: true,
 });
 

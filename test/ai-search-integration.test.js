@@ -20,6 +20,10 @@ test('军师助手日报选股统一接入AI检索配置', () => {
   const daily = read('api/daily_report.js')
 
   assert.match(ai, /fetchAdvisorSearch/)
+  assert.match(ai, /fetchIndustrySearchSupplement/)
+  assert.match(ai, /行业新闻主源/)
+  assert.match(ai, /AI联网行业补盲/)
+  assert.match(ai, /industryNewsSource/)
   assert.match(ai, /fetchAiSearchReference/)
   assert.match(ai, /searchReference/)
   assert.match(agent, /fetchAiSearchReference/)
@@ -52,4 +56,6 @@ test('前端配置状态不持久化或回显明文Key', () => {
   assert.doesNotMatch(store, /apiKey:\s*state/)
   assert.match(dialog, /type="password"/)
   assert.match(dialog, /Key 仅保存在服务端 OSS/)
+  assert.match(dialog, /失败冷却/)
+  assert.match(dialog, /industryFailureCooldownMinutes/)
 })

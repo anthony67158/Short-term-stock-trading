@@ -66,7 +66,8 @@ test('公开配置只返回掩码和缓存策略，绝不返回明文Key', () =>
   assert.equal(JSON.stringify(view).includes('secret-value'), false)
   assert.deepEqual(view.cachePolicy, {
     stockMinutes: 30,
-    industryMinutes: 60,
+    industryMinutes: 240,
+    industryFailureCooldownMinutes: 15,
     scheduledCacheOnly: true,
   })
 })

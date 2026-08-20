@@ -3,10 +3,13 @@ import { put, readJson } from './_blob.js';
 import { ensureAiSearchConfig } from './_ai_search_config.js';
 
 const ENDPOINT = 'https://plugin.anspire.cn/api/ntsearch/search';
-const INDUSTRY_CACHE_MS = 60 * 60 * 1000;
+const INDUSTRY_CACHE_MS = 4 * 60 * 60 * 1000;
+const INDUSTRY_FAILURE_COOLDOWN_MS = 15 * 60 * 1000;
 const DEFAULT_TOP_K = 6;
 const MAX_RESPONSE_BYTES = 1024 * 1024;
 const sharedMemoryCache = new Map();
+const sharedInflightSearch = new Map();
+const sharedIndustryFailureCooldown = new Map();
 
 function cleanText(value, limit = 320) {
   return String(value || '')
@@ -70,6 +73,14 @@ export function buildAdvisorSearchQuery({
     '最新 公告 政策 行业 舆情 风险',
   ].filter(Boolean);
   return Array.from(tokens.join(' ')).slice(0, 64).join('');
+}
+
+export function buildIndustrySearchQuery(industry = '') {
+  const value = cleanText(industry, 28);
+  if (!value) return '';
+  return Array.from(
+    `${value} 行业 最新 政策 景气 供需 价格 风险`,
+  ).slice(0, 64).join('');
 }
 
 export function stripClientSearchFields(payload) {
@@ -161,6 +172,52 @@ async function saveCache(scope, value, items, ttlMs, {
     await writeCache(cachePath(scope, value), envelope);
   } catch {
     // 内存缓存仍可用；OSS 写失败不影响本次建议。
+  }
+}
+
+async function loadFailureCooldown(value, {
+  now,
+  failureCooldown,
+  readCache,
+}) {
+  const key = String(value || '').trim().toLowerCase();
+  if (!key) return false;
+  const memoryExpiry = Number(failureCooldown.get(key)) || 0;
+  if (memoryExpiry > now) return true;
+  try {
+    const stored = await readCache(
+      cachePath('industry-failure', key),
+    );
+    if (Number(stored?.expiresAt) > now) {
+      failureCooldown.set(key, Number(stored.expiresAt));
+      return true;
+    }
+  } catch {
+    // 冷却缓存故障不阻断正常检索。
+  }
+  return false;
+}
+
+async function saveFailureCooldown(value, {
+  now,
+  failureCooldown,
+  writeCache,
+}) {
+  const key = String(value || '').trim().toLowerCase();
+  if (!key) return;
+  const envelope = cacheEnvelope(
+    [],
+    now,
+    INDUSTRY_FAILURE_COOLDOWN_MS,
+  );
+  failureCooldown.set(key, envelope.expiresAt);
+  try {
+    await writeCache(
+      cachePath('industry-failure', key),
+      envelope,
+    );
+  } catch {
+    // 内存冷却仍有效；OSS 写失败不影响本次建议。
   }
 }
 
@@ -296,25 +353,49 @@ export async function fetchAiSearchReference({
       configUpdatedAt: Number(config.updatedAt) || 0,
     };
   }
-  const result = await requestSearch(normalizedQuery, {
-    apiKey: config.apiKey,
-    fetchImpl: options.fetchImpl || fetch,
-    now,
-    timeoutMs: options.timeoutMs || 5500,
-    topK: options.topK || DEFAULT_TOP_K,
-  });
-  await saveCache(
-    scope,
-    key,
-    result.items,
-    Math.max(1, Math.min(1440, Number(cacheMinutes) || 30)) * 60000,
-    cacheOptions,
-  );
-  return {
-    ...result,
-    enabled: true,
-    configUpdatedAt: Number(config.updatedAt) || 0,
-  };
+  const inflightSearch = options.inflightSearch || sharedInflightSearch;
+  const flightKey = `${scope}:${key.toLowerCase()}`;
+  const existing = inflightSearch.get(flightKey);
+  if (existing) {
+    const shared = await existing;
+    return {
+      ...shared,
+      status: `${scope}-coalesced`,
+      billed: false,
+    };
+  }
+  const request = (async () => {
+    const result = await requestSearch(normalizedQuery, {
+      apiKey: config.apiKey,
+      fetchImpl: options.fetchImpl || fetch,
+      now,
+      timeoutMs: options.timeoutMs || 5500,
+      topK: options.topK || DEFAULT_TOP_K,
+    });
+    await saveCache(
+      scope,
+      key,
+      result.items,
+      Math.max(
+        1,
+        Math.min(1440, Number(cacheMinutes) || 30),
+      ) * 60000,
+      cacheOptions,
+    );
+    return {
+      ...result,
+      enabled: true,
+      configUpdatedAt: Number(config.updatedAt) || 0,
+    };
+  })();
+  inflightSearch.set(flightKey, request);
+  try {
+    return await request;
+  } finally {
+    if (inflightSearch.get(flightKey) === request) {
+      inflightSearch.delete(flightKey);
+    }
+  }
 }
 
 export function buildSearchReference(result) {
@@ -350,6 +431,100 @@ function industryOnlyItems(items, industry, name, code) {
   });
 }
 
+export async function fetchIndustrySearchSupplement({
+  industry = '',
+  reviewOrigin = '',
+} = {}, options = {}) {
+  const config = await runtimeConfig(options);
+  if (config.enabled !== true || !String(config.apiKey || '').trim()) {
+    return {
+      items: [],
+      status: 'disabled',
+      billed: false,
+      enabled: false,
+      configUpdatedAt: Number(config.updatedAt) || 0,
+    };
+  }
+  const key = cleanText(industry, 40);
+  if (!key) {
+    return {
+      items: [],
+      status: 'empty-industry',
+      billed: false,
+      enabled: true,
+    };
+  }
+  const clock = options.now || Date.now;
+  const now = Number(clock());
+  const memoryCache = options.memoryCache || sharedMemoryCache;
+  const readCache = options.readCache || ((path) => readJson(path));
+  const writeCache = options.writeCache || ((path, value) =>
+    put(path, JSON.stringify(value), {
+      contentType: 'application/json',
+      addRandomSuffix: false,
+      cacheControlMaxAge: 0,
+    }));
+  const cachedItems = await loadCache('industry', key, {
+    now,
+    memoryCache,
+    readCache,
+  });
+  if (cachedItems?.length) {
+    return {
+      items: cachedItems,
+      status: 'industry-cache',
+      billed: false,
+      enabled: true,
+      configUpdatedAt: Number(config.updatedAt) || 0,
+    };
+  }
+  const failureCooldown = options.failureCooldown
+    || sharedIndustryFailureCooldown;
+  const failureKey = key.toLowerCase();
+  if (await loadFailureCooldown(failureKey, {
+    now,
+    failureCooldown,
+    readCache,
+  })) {
+    return {
+      items: [],
+      status: 'industry-failure-cooldown',
+      billed: false,
+      enabled: true,
+      configUpdatedAt: Number(config.updatedAt) || 0,
+    };
+  }
+  const scheduled = ['auto', 'judge'].includes(
+    String(reviewOrigin || ''),
+  );
+  const result = await fetchAiSearchReference({
+    query: buildIndustrySearchQuery(key),
+    cacheScope: 'industry',
+    cacheKey: key,
+    cacheMinutes: INDUSTRY_CACHE_MS / 60000,
+  }, {
+    ...options,
+    runtimeConfig: config,
+    memoryCache,
+    readCache,
+    writeCache,
+    cacheOnly: scheduled,
+  });
+  if (result.items?.length) {
+    failureCooldown.delete(failureKey);
+  } else if (
+    !scheduled
+    && !['disabled', 'cache-only-miss'].includes(result.status)
+  ) {
+    await saveFailureCooldown(failureKey, {
+      now,
+      failureCooldown,
+      writeCache,
+    });
+  }
+  return result;
+}
+
 export async function fetchAdvisorSearch({
   code = '',
   name = '',
@@ -381,17 +556,35 @@ export async function fetchAdvisorSearch({
   const cacheOptions = { now, memoryCache, readCache, writeCache };
   const stockCached = await loadCache('stock', stockKey, cacheOptions);
   if (stockCached?.length) {
-    return { items: stockCached, status: 'stock-cache', billed: false };
+    return {
+      items: stockCached,
+      status: 'stock-cache',
+      billed: false,
+      enabled: true,
+      configUpdatedAt: Number(config.updatedAt) || 0,
+    };
   }
   const scheduled = ['auto', 'judge'].includes(String(reviewOrigin || ''));
   if (scheduled && industry) {
     const industryCached = await loadCache('industry', industry, cacheOptions);
     if (industryCached?.length) {
-      return { items: industryCached, status: 'industry-cache', billed: false };
+      return {
+        items: industryCached,
+        status: 'industry-cache',
+        billed: false,
+        enabled: true,
+        configUpdatedAt: Number(config.updatedAt) || 0,
+      };
     }
   }
   if (scheduled) {
-    return { items: [], status: 'scheduled-cache-miss', billed: false };
+    return {
+      items: [],
+      status: 'scheduled-cache-miss',
+      billed: false,
+      enabled: true,
+      configUpdatedAt: Number(config.updatedAt) || 0,
+    };
   }
 
   const result = await fetchAiSearchReference({

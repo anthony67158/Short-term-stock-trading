@@ -14,7 +14,11 @@ export function normalizeAiSearchPublicConfig(input = {}) {
     updatedAt: Math.max(0, finite(input.updatedAt)),
     cachePolicy: {
       stockMinutes: Math.max(1, finite(policy.stockMinutes, 30)),
-      industryMinutes: Math.max(1, finite(policy.industryMinutes, 60)),
+      industryMinutes: Math.max(1, finite(policy.industryMinutes, 240)),
+      industryFailureCooldownMinutes: Math.max(
+        1,
+        finite(policy.industryFailureCooldownMinutes, 15),
+      ),
       scheduledCacheOnly: policy.scheduledCacheOnly !== false,
     },
   }

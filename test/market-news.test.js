@@ -7,7 +7,11 @@ import {
   fetchWallstreetSearch,
   mergeNewsItems,
 } from '../api/_market_data.js'
-import { ADVISOR_SYSTEM, SYSTEM_PROMPT } from '../api/_ai_prompts.js'
+import {
+  ADVISOR_SYSTEM,
+  SYSTEM_PROMPT,
+  buildUserPrompt,
+} from '../api/_ai_prompts.js'
 
 test('新闻聚合跨来源轮转、去重并保留来源类型', () => {
   const merged = mergeNewsItems([
@@ -125,4 +129,18 @@ test('军师把外部新闻视为不可信证据而不是可执行指令', () =>
   assert.match(ADVISOR_SYSTEM, /任何指令/)
   assert.match(ADVISOR_SYSTEM, /aiSearchEvidence/)
   assert.match(ADVISOR_SYSTEM, /待核验/)
+})
+
+test('行业AI补盲在提示词中明确标记待核验且不得单独升级动作', () => {
+  const prompt = buildUserPrompt('buy_advice', {
+    industry: '半导体设备',
+    industryNewsSource: 'ai-search-fallback',
+    industryNews: [
+      '【AI Search待核验】半导体设备订单改善',
+    ],
+  })
+
+  assert.match(prompt, /AI联网行业补盲/)
+  assert.match(prompt, /待核验/)
+  assert.match(prompt, /不得单独升级买入或加仓/)
 })

@@ -15,6 +15,7 @@ import {
   buildSearchReference,
   fetchAdvisorSearch,
   fetchAiSearchReference,
+  fetchIndustrySearchSupplement,
   stripClientSearchFields,
 } from './_ai_search.js';
 import { ensureAiSearchConfig } from './_ai_search_config.js';
@@ -867,57 +868,75 @@ export default async function handler(req, res) {
             marketVolLevel: (mkt && mkt.ok && mkt.breadth) ? mkt.breadth.volLevel : null,
           };
         }
-        const [indNews, quant, advisorSearch] = await Promise.all([
-          industry
-            ? track(
+        const industryNewsPromise = industry
+          ? track(
+            'industryNews',
+            '行业新闻主源',
+            fetchIndustryNews(industry),
+            (value) => Array.isArray(value) && value.length > 0,
+          )
+          : (() => {
+            sourceTracker.skip(
               'industryNews',
-              '行业新闻',
-              fetchIndustryNews(industry),
-              (value) => Array.isArray(value) && value.length > 0,
-            )
-            : (() => {
-              sourceTracker.skip(
-                'industryNews',
-                '行业新闻',
-                'NO_INDUSTRY',
-              );
-              return Promise.resolve(null);
-            })(),
-          hasCandles
-            ? track(
+              '行业新闻主源',
+              'NO_INDUSTRY',
+            );
+            return Promise.resolve(null);
+          })();
+        const quantPromise = hasCandles
+          ? track(
+            'quant',
+            '量化预测',
+            fetchSelectedQuantPredict(
+              quantModelVersion,
+              payload.code,
+              quantCandles,
+              (payload.holdCost ? {
+                cost: payload.holdCost,
+                qty: payload.holdQty,
+              } : null),
+              12000,
+              quantRealtime,
+              { refreshDailyFromMinutes: true },
+            ),
+            (value) => !!value?.ok,
+            (value) => value?.asOf || null,
+          )
+          : (() => {
+            sourceTracker.skip(
               'quant',
               '量化预测',
-              fetchSelectedQuantPredict(
-                quantModelVersion,
-                payload.code,
-                quantCandles,
-                (payload.holdCost ? { cost: payload.holdCost, qty: payload.holdQty } : null),
-                12000,
-                quantRealtime,
-                { refreshDailyFromMinutes: true },
-              ),
-              (value) => !!value?.ok,
-              (value) => value?.asOf || null,
-            )
-            : (() => {
-              sourceTracker.skip(
-                'quant',
-                '量化预测',
-                'INSUFFICIENT_CANDLES',
-              );
-              return Promise.resolve(null);
-            })(),
+              'INSUFFICIENT_CANDLES',
+            );
+            return Promise.resolve(null);
+          })();
+        const indNews = await industryNewsPromise;
+        const industryFallback = !!(
+          industry
+          && (!Array.isArray(indNews) || !indNews.length)
+        );
+        const advisorSearchPromise =
           aiSearchConfig.enabled && aiSearchConfig.apiKey
             ? track(
-              'aiSearch',
-              'AI联网搜索',
-              fetchAdvisorSearch({
-                code: payload.code,
-                name: payload.name || corpus?.name || '',
-                industry,
-                reviewOrigin: payload.reviewOrigin,
-              }, { runtimeConfig: aiSearchConfig }),
-              (value) => Array.isArray(value?.items) && value.items.length > 0,
+              industryFallback
+                ? 'industrySearchFallback'
+                : 'aiSearch',
+              industryFallback
+                ? 'AI联网行业补盲'
+                : 'AI联网搜索',
+              industryFallback
+                ? fetchIndustrySearchSupplement({
+                  industry,
+                  reviewOrigin: payload.reviewOrigin,
+                }, { runtimeConfig: aiSearchConfig })
+                : fetchAdvisorSearch({
+                  code: payload.code,
+                  name: payload.name || corpus?.name || '',
+                  industry,
+                  reviewOrigin: payload.reviewOrigin,
+                }, { runtimeConfig: aiSearchConfig }),
+              (value) =>
+                Array.isArray(value?.items) && value.items.length > 0,
               (value) => value?.items
                 ?.map((item) => item.date)
                 .filter(Boolean)
@@ -929,7 +948,10 @@ export default async function handler(req, res) {
               status: 'disabled',
               billed: false,
               enabled: false,
-            }),
+            });
+        const [quant, advisorSearch] = await Promise.all([
+          quantPromise,
+          advisorSearchPromise,
         ]);
         if (quantModelVersion !== 'default' && !quant) {
           return finish({
@@ -944,6 +966,17 @@ export default async function handler(req, res) {
             .map(labeledNewsTitle)
             .filter(Boolean)
             .slice(0, 5);
+          payload.industryNewsSource = 'market-news';
+        } else if (
+          industryFallback
+          && advisorSearch?.items?.length
+        ) {
+          payload.industry = industry;
+          payload.industryNews = advisorSearch.items
+            .map(aiSearchEvidenceText)
+            .filter(Boolean)
+            .slice(0, 5);
+          payload.industryNewsSource = 'ai-search-fallback';
         }
         if (advisorSearch?.enabled !== false) {
           payload.aiSearchMeta = {
@@ -951,6 +984,7 @@ export default async function handler(req, res) {
             billed: advisorSearch?.billed === true,
             count: advisorSearch?.items?.length || 0,
             fetchedAt: advisorSearch?.fetchedAt || null,
+            industryFallback,
           };
         }
         if (advisorSearch?.items?.length) {

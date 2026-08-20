@@ -92,6 +92,7 @@ export default function AISearchConfig() {
         <div className="search-cfg-policy">
           <span>个股缓存 <b>{config.cachePolicy.stockMinutes} 分钟</b></span>
           <span>行业缓存 <b>{config.cachePolicy.industryMinutes} 分钟</b></span>
+          <span>失败冷却 <b>{config.cachePolicy.industryFailureCooldownMinutes} 分钟</b></span>
           <span>自动复核 <b>仅用缓存</b></span>
         </div>
 

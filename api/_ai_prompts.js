@@ -196,6 +196,10 @@ ${payload.quant.v2.executionReference ? `【当前时段实时执行层·不是�
     ? `\n【★下一交易日量化预测】方向${payload.quant.nextTradeDayForecast.direction ?? '—'}、上涨概率${payload.quant.nextTradeDayForecast.upProb ?? '—'}%、预期涨跌${payload.quant.nextTradeDayForecast.expRet != null ? (payload.quant.nextTradeDayForecast.expRet >= 0 ? '+' : '') + payload.quant.nextTradeDayForecast.expRet + '%' : '—'}、P10-P90价格区间${payload.quant.nextTradeDayForecast.targetLow ?? '—'}~${payload.quant.nextTradeDayForecast.targetHigh ?? '—'}${payload.quant.nextTradeDayForecast.targetMid != null ? `(中枢${payload.quant.nextTradeDayForecast.targetMid})` : ''}。这是日线/GARCH统计区间，不是保证到达的目标价。
 【使用优先级·强制】收盘后/盘前制定下一交易日动作时，必须把本段次日预测作为量化主依据；通用 forecast 的5日预测只能作为中期辅助，不得用5日概率覆盖次日概率。quantNote 必须明确写出次日方向、上涨概率${payload.quant.nextTradeDayForecast.upProb ?? '—'}%、预期${payload.quant.nextTradeDayForecast.expRet != null ? (payload.quant.nextTradeDayForecast.expRet >= 0 ? '+' : '') + payload.quant.nextTradeDayForecast.expRet + '%' : '—'}和区间${payload.quant.nextTradeDayForecast.targetLow ?? '—'}~${payload.quant.nextTradeDayForecast.targetHigh ?? '—'}，并说明它如何影响下一交易日的动作和价位。当前生产日线模型没有“今日剩余时段”监督标签，禁止把盘中支撑压力或实时执行价带冒充同日模型预测；盘中方向只可引用明确标记的V2.1实验头。`
     : '';
+  const industryFallbackNote =
+    payload.industryNewsSource === 'ai-search-fallback'
+      ? '\n【AI联网行业补盲·待核验】原行业新闻源本轮不可用，以上行业消息来自AI Search网页摘要，只能作为交叉核验线索；不得单独升级买入或加仓，必须与公告、实时行情、资金和量化证据共振。'
+      : '';
   // 军师五面数据说明：把技术金叉多头、主力资金、盘口、消息面、龙虎榜、大盘环境、共振分全部显式点名，强制引用
   const advisorDataRaw = `${payload.todayQuote ? (payload.todayQuote.live ? `\n【★今日实时行情(最高优先·当下事实)】现价${payload.todayQuote.price}、今日涨跌${payload.todayQuote.pct >= 0 ? '+' : ''}${payload.todayQuote.pct}%${payload.todayQuote.isLimitUp ? '、【已涨停】' : payload.todayQuote.isLimitDown ? '、【已跌停】' : ''}${payload.todayQuote.bigMove && !payload.todayQuote.isLimitUp && !payload.todayQuote.isLimitDown ? `、【当日大幅${payload.todayQuote.pct >= 0 ? '异动上涨' : '异动下跌'}】` : ''}、量比${payload.todayQuote.volRatio ?? '—'}、换手${payload.todayQuote.turnover ?? '—'}%。
 ⚠️数据时效铁律：下面的 tech(技术面均线/金叉)、stockFund(主力资金)、backtest 都是【昨日收盘口径】，会滞后！必须以本行"今日实时行情"为当下事实基准，两者矛盾时【以今日实时为准】。
@@ -223,7 +227,7 @@ ${payload.todayQuote.isLimitUp ? '⚠️该股【今日已涨停】：说明今�
   const advisorData = advisorDataRaw.replace(
     /\n【★军师历史战绩·自我校准[\s\S]*?(?=\n【★量化模型·|\n【★量化·高把握|\n【★★高把握|\n【★资金金额)/,
     `${advisorTrackNote}${theoryTrackNote}`,
-  ) + currentTradingDayQuantNote + nextTradeDayQuantNote + realOutcomeNote + previousAdviceNote + knowledgeActionNote + knowledgeActionReviewNote;
+  ) + industryFallbackNote + currentTradingDayQuantNote + nextTradeDayQuantNote + realOutcomeNote + previousAdviceNote + knowledgeActionNote + knowledgeActionReviewNote;
 
   // ============ 交易实况铁律：涨跌停可买性 + A股T+1 + 「下个开盘/未来」两段指导 ============
   // 解决:①卡片建议要结合涨跌停(±10%/±20%)、当前是否真能买(不追涨停、封板买不进)②A股T+1(当天买不能当天卖,自选股无底仓更不能当日做T卖)③建议要分「紧接着的下一个开盘时段」和「更远的未来」两段,今天买不了就讲后续怎么等。

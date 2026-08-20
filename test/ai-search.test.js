@@ -3,9 +3,11 @@ import assert from 'node:assert/strict'
 
 import {
   buildAdvisorSearchQuery,
+  buildIndustrySearchQuery,
   buildSearchReference,
   fetchAdvisorSearch,
   fetchAiSearchReference,
+  fetchIndustrySearchSupplement,
   normalizeAdvisorSearchResults,
   stripClientSearchFields,
 } from '../api/_ai_search.js'
@@ -21,6 +23,16 @@ test('军师搜索词覆盖个股行业舆情且不超过官方64字符限制', 
   assert.match(query, /600519/)
   assert.match(query, /白酒/)
   assert.match(query, /舆情/)
+  assert.ok(Array.from(query).length <= 64)
+})
+
+test('行业补盲搜索词只围绕行业政策景气供需与风险', () => {
+  const query = buildIndustrySearchQuery('半导体设备')
+
+  assert.match(query, /半导体设备/)
+  assert.match(query, /政策/)
+  assert.match(query, /景气/)
+  assert.match(query, /供需/)
   assert.ok(Array.from(query).length <= 64)
 })
 
@@ -118,7 +130,7 @@ test('手动生成30分钟复用个股缓存且每次最多发起一次搜索', 
   assert.equal(requests, 1)
 })
 
-test('自动复核优先复用60分钟行业缓存而不产生搜索费用', async () => {
+test('自动复核优先复用4小时行业缓存而不产生搜索费用', async () => {
   const memoryCache = new Map()
   const storage = new Map()
   let requests = 0
@@ -188,6 +200,179 @@ test('自动复核缓存缺失时跳过联网搜索避免高频计费', async ()
   assert.equal(result.billed, false)
   assert.deepEqual(result.items, [])
   assert.equal(requests, 0)
+})
+
+test('行业新闻主源失败后同一行业四小时只付费检索一次', async () => {
+  const memoryCache = new Map()
+  const failureCooldown = new Map()
+  let requests = 0
+  const now = Date.parse('2026-08-20T02:00:00.000Z')
+  const options = {
+    apiKey: 'test-key',
+    now: () => now,
+    memoryCache,
+    failureCooldown,
+    readCache: async () => null,
+    writeCache: async () => {},
+    fetchImpl: async () => {
+      requests++
+      return {
+        ok: true,
+        headers: { get: () => null },
+        async json() {
+          return {
+            results: [{
+              title: '半导体设备行业订单回暖',
+              content: '行业资本开支与国产替代需求改善。',
+              url: 'https://finance.example.com/semiconductor',
+              score: 0.91,
+              date: '2026-08-20 09:30:00',
+            }],
+          }
+        },
+      }
+    },
+  }
+
+  const first = await fetchIndustrySearchSupplement({
+    industry: '半导体设备',
+  }, options)
+  const second = await fetchIndustrySearchSupplement({
+    industry: '半导体设备',
+    reviewOrigin: 'auto',
+  }, options)
+
+  assert.equal(first.billed, true)
+  assert.equal(second.billed, false)
+  assert.equal(second.status, 'industry-cache')
+  assert.equal(requests, 1)
+})
+
+test('同一行业并发补盲单飞合并避免并发重复计费', async () => {
+  const memoryCache = new Map()
+  let requests = 0
+  const options = {
+    apiKey: 'test-key',
+    now: () => Date.parse('2026-08-20T02:00:00.000Z'),
+    memoryCache,
+    failureCooldown: new Map(),
+    readCache: async () => null,
+    writeCache: async () => {},
+    fetchImpl: async () => {
+      requests++
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      return {
+        ok: true,
+        headers: { get: () => null },
+        async json() {
+          return {
+            results: [{
+              title: '创新药行业政策更新',
+              content: '审评审批节奏保持稳定。',
+              url: 'https://finance.example.com/medicine',
+              score: 0.88,
+              date: '2026-08-20 09:00:00',
+            }],
+          }
+        },
+      }
+    },
+  }
+
+  const [first, second] = await Promise.all([
+    fetchIndustrySearchSupplement(
+      { industry: '创新药' },
+      options,
+    ),
+    fetchIndustrySearchSupplement(
+      { industry: '创新药' },
+      options,
+    ),
+  ])
+
+  assert.equal(requests, 1)
+  assert.equal([first.billed, second.billed].filter(Boolean).length, 1)
+  assert.ok(
+    [first.status, second.status].includes('industry-coalesced'),
+  )
+})
+
+test('行业补盲失败后十五分钟冷却且自动复核永不联网', async () => {
+  const memoryCache = new Map()
+  const failureCooldown = new Map()
+  let requests = 0
+  const options = {
+    apiKey: 'test-key',
+    now: () => Date.parse('2026-08-20T02:00:00.000Z'),
+    memoryCache,
+    failureCooldown,
+    readCache: async () => null,
+    writeCache: async () => {},
+    fetchImpl: async () => {
+      requests++
+      return {
+        ok: false,
+        status: 500,
+        headers: { get: () => null },
+      }
+    },
+  }
+
+  const failed = await fetchIndustrySearchSupplement({
+    industry: '银行',
+  }, options)
+  const cooled = await fetchIndustrySearchSupplement({
+    industry: '银行',
+  }, options)
+  const auto = await fetchIndustrySearchSupplement({
+    industry: '电力',
+    reviewOrigin: 'auto',
+  }, options)
+
+  assert.equal(failed.billed, false)
+  assert.equal(cooled.status, 'industry-failure-cooldown')
+  assert.equal(auto.status, 'cache-only-miss')
+  assert.equal(requests, 1)
+})
+
+test('行业失败冷却写入OSS后跨FC实例仍阻止重复付费', async () => {
+  const storage = new Map()
+  let requests = 0
+  const base = {
+    apiKey: 'test-key',
+    now: () => Date.parse('2026-08-20T02:00:00.000Z'),
+    readCache: async (key) => storage.get(key) || null,
+    writeCache: async (key, value) => {
+      storage.set(key, value)
+    },
+    fetchImpl: async () => {
+      requests++
+      return {
+        ok: false,
+        status: 503,
+        headers: { get: () => null },
+      }
+    },
+  }
+
+  await fetchIndustrySearchSupplement({
+    industry: '电力设备',
+  }, {
+    ...base,
+    memoryCache: new Map(),
+    failureCooldown: new Map(),
+  })
+  const coldInstance = await fetchIndustrySearchSupplement({
+    industry: '电力设备',
+  }, {
+    ...base,
+    memoryCache: new Map(),
+    failureCooldown: new Map(),
+  })
+
+  assert.equal(coldInstance.status, 'industry-failure-cooldown')
+  assert.equal(coldInstance.billed, false)
+  assert.equal(requests, 1)
 })
 
 test('持仓自动复核使用通用检索缓存且缺失时禁止联网', async () => {
