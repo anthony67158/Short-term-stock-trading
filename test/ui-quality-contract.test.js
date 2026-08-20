@@ -24,7 +24,6 @@ const quantModelControl = read('src/components/QuantModelControl.jsx')
 const planTab = read('src/components/PlanTab.jsx')
 const reviewTab = read('src/components/ReviewTab.jsx')
 const fundFlowCanvas = read('src/components/FundFlowCanvas.jsx')
-const todayTab = read('src/components/TodayTab.jsx')
 const semanticTabSources = [
   'src/components/AlertCenter.jsx',
   'src/components/AlertPanel.jsx',
@@ -767,34 +766,6 @@ test('个股详情头部按身份、标签、图标操作分层且禁止挤压�
   assert.match(
     legacyStyles,
     /\.detail-panel \.modal-actions\s*{[^}]*grid-template-columns:\s*repeat\(3,\s*40px\)/s,
-  )
-})
-
-test('移动端AI选股使用分层卡片与可视化筛选漏斗', () => {
-  assert.match(todayTab, /className="pick-funnel"/)
-  assert.match(todayTab, /className="pick-identity"/)
-  assert.match(todayTab, /className="pick-badges"/)
-  assert.match(todayTab, /className="pick-reason-label">研判/)
-  assert.match(todayTab, /className="pick-row-value"/)
-  assert.match(
-    precision,
-    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.pick-top\s*{[^}]*display:\s*grid[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/s,
-  )
-  assert.match(
-    precision,
-    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.pick-identity\s*{[^}]*display:\s*grid[^}]*grid-template-columns:\s*32px\s+minmax\(0,\s*1fr\)/s,
-  )
-  assert.match(
-    precision,
-    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.pick-badges\s*{[^}]*display:\s*flex[^}]*grid-column:\s*1\s*\/\s*-1/s,
-  )
-  assert.match(
-    precision,
-    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.pick-row\s*{[^}]*display:\s*grid[^}]*grid-template-columns:\s*56px\s+minmax\(0,\s*1fr\)/s,
-  )
-  assert.match(
-    precision,
-    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.pick-funnel\s*{[^}]*display:\s*grid[^}]*grid-template-columns:\s*repeat\(5,\s*minmax\(0,\s*1fr\)\)/s,
   )
 })
 

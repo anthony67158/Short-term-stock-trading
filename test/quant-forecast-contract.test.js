@@ -10,7 +10,6 @@ const read = (path) => readFileSync(
 const quantApp = read('qlib-service/app.py')
 const aiApi = read('api/ai.js')
 const prompts = read('api/_ai_prompts.js')
-const today = read('src/components/TodayTab.jsx')
 
 test('生产日线量化保持五日契约并新增下一交易日概率与区间', () => {
   assert.match(quantApp, /"forecast": forecast\(f, days=5\)/)
@@ -31,10 +30,8 @@ test('日线模型明确拒绝把今日盘中价带冒充同日概率预测', ()
   assert.match(prompts, /V2\.1实验头/)
 })
 
-test('下一交易日量化结果贯穿军师载荷、进度事件和选股候选', () => {
+test('下一交易日量化结果贯穿军师载荷和进度事件', () => {
   assert.match(aiApi, /nextTradeDayForecast: quant\.nextTradeDayForecast/)
   assert.match(aiApi, /nextTradeDayForecast: payload\.quant\.nextTradeDayForecast/)
-  assert.match(today, /nextUpProb: next && next\.upProb/)
-  assert.match(today, /nextTargetLow: next && next\.targetLow/)
   assert.match(prompts, /nextUpProb\/nextExpRet\/nextTargetLow~nextTargetHigh/)
 })

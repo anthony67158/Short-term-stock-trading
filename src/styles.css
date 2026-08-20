@@ -607,16 +607,6 @@ body {
 .dq-sig-text { font-size: 12px; color: var(--text2); line-height: 1.6; }
 @media (max-width: 560px){ .dq-ma { grid-template-columns: repeat(2, 1fr); } .dq-price { font-size: 26px; } .dq-sig { flex-direction: column; } }
 
-.pick-card {
-  background: var(--panel2); border: 1px solid var(--border-soft);
-  border-radius: var(--radius-sm); padding: 11px 13px; cursor: pointer;
-  transition: border-color .18s, transform .18s, background .18s;
-}
-.pick-card:hover { border-color: rgba(124,107,245,.4); transform: translateY(-1px); background: var(--panel3); }
-.pick-top { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-.pick-name { font-size: 14px; font-weight: 650; letter-spacing: -0.01em; }
-.pick-row { display: flex; gap: 8px; font-size: 12px; color: var(--text2); line-height: 1.6; margin-top: 4px; }
-
 /* ===== 个股 AI 问答 (RAG) ===== */
 .qa-box {
   margin-top: 14px; padding: 14px; border-radius: var(--radius-sm);
@@ -1103,29 +1093,6 @@ body {
   .mb-indices { grid-template-columns: repeat(2, 1fr); }
 }
 
-/* ---------- AI 今日操盘 ---------- */
-.play-card {
-  border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow);
-  border: 1px solid rgba(124,107,245,.24);
-  background: radial-gradient(700px 240px at 8% -30%, rgba(124,107,245,.13), transparent 60%), var(--panel);
-}
-.play-head { display: flex; align-items: center; justify-content: space-between; padding: 15px 18px; gap: 12px; flex-wrap: wrap; }
-.play-title { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 650; }
-.play-title .icon { color: var(--accent); }
-.play-sub { color: var(--muted); font-size: 12px; font-weight: 400; margin-left: 2px; }
-.play-body { padding: 0 18px 18px; }
-.play-hint { color: var(--muted); font-size: 12.5px; line-height: 1.75; padding: 4px 0 8px; }
-
-.play-verdict { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-radius: var(--radius-sm); margin-bottom: 14px; }
-.play-verdict.green { background: rgba(63,185,80,.08); border: 1px solid rgba(63,185,80,.2); }
-.play-verdict.yellow { background: rgba(227,179,65,.07); border: 1px solid rgba(227,179,65,.2); }
-.play-verdict.red { background: rgba(244,97,78,.07); border: 1px solid rgba(244,97,78,.2); }
-.pv-badge { font-size: 16px; font-weight: 700; padding: 6px 14px; border-radius: 8px; background: var(--panel3); white-space: nowrap; }
-.play-verdict.green .pv-badge { color: var(--green); } .play-verdict.yellow .pv-badge { color: var(--gold); } .play-verdict.red .pv-badge { color: var(--red); }
-.pv-main { font-size: 13.5px; color: var(--text); line-height: 1.6; }
-.pv-meta { margin-top: 5px; display: flex; gap: 18px; font-size: 12px; color: var(--muted); }
-.pv-meta b { color: var(--text2); }
-
 .cand-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 11px; }
 .cand-card { background: var(--panel2); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); padding: 12px 13px; transition: border-color .15s; }
 .cand-card:hover { border-color: rgba(124,107,245,.32); }
@@ -1139,9 +1106,6 @@ body {
 .cand-tag.buy { background: rgba(244,97,78,.14); color: var(--red); }
 .cand-foot { display: flex; gap: 12px; margin-top: 6px; padding-top: 8px; border-top: 1px dashed var(--border); font-size: 11px; }
 .cand-expect { color: var(--text2); } .cand-stop { color: var(--gold); }
-.play-risk { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 10px 12px; border-radius: var(--radius-sm); background: rgba(227,179,65,.07); border: 1px solid rgba(227,179,65,.18); font-size: 12.5px; color: var(--text2); }
-.play-risk .icon { color: var(--gold); }
-.play-disclaimer { margin-top: 12px; color: var(--muted); font-size: 11px; }
 
 /* ---------- 信号标签（候选池） ---------- */
 .sig-tag { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 4px; margin-right: 4px; font-weight: 600; }
@@ -3017,60 +2981,10 @@ button.acct-item { width: 100%; border: 0; background: transparent; font: inheri
 .hr-p { display: inline-flex; align-items: baseline; gap: 5px; padding: 5px 10px; border-radius: 8px; background: var(--panel3, rgba(255,255,255,.04)); border: 1px solid var(--border-soft); max-width: 100%; }
 .hr-pk { font-size: 10.5px; color: var(--muted); }
 .hr-p b { font-size: 14px; font-weight: 800; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-
-
-
-/* ===== AI 选股结果 ===== */
-.pick-market { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; font-size: 12.5px; color: var(--text2); line-height: 1.5; margin-bottom: 10px; padding: 8px 11px; border-radius: 8px; background: rgba(124,107,245,.08); border: 1px solid rgba(124,107,245,.22); }
-.pick-market .icon { color: var(--accent, #7c6bf5); flex-shrink: 0; align-self: center; }
-.pick-market-note { flex: 1 1 auto; min-width: 0; }
-.pick-list { display: flex; flex-direction: column; gap: 10px; }
-.pick-card { padding: 12px 14px; border-radius: 12px; background: var(--panel2); border: 1px solid var(--border-soft); }
-.pick-top { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-.pick-rank { flex: none; width: 22px; height: 22px; border-radius: 50%; background: linear-gradient(135deg, #5b8def, #7c6bf5); color: #fff; font-size: 12px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
-.pick-name { font-weight: 650; font-size: 14px; }
-.pick-score { flex: none; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 5px; }
-.pick-score.red { color: var(--red); background: rgba(224,67,47,.12); }
-.pick-score.green { color: var(--green); background: rgba(31,157,67,.12); }
-.pick-score.gold { color: var(--gold); background: rgba(227,179,65,.12); }
-/* 名单整体把握度徽标 */
-.pick-conf { margin-left: auto; flex: none; max-width: 100%; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 5px; line-height: 1.5; white-space: normal; word-break: break-word; }
-.pick-conf.hi { color: var(--red); background: rgba(224,67,47,.12); }
-.pick-conf.mid { color: var(--gold); background: rgba(227,179,65,.12); }
-.pick-conf.lo { color: var(--muted); background: var(--panel3, rgba(255,255,255,.05)); }
-/* 单只把握度分级 强/中/弱 */
-.pick-grade { flex: none; font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 5px; }
-.pick-grade.strong { color: var(--red); background: rgba(224,67,47,.14); }
-.pick-grade.mid { color: var(--gold); background: rgba(227,179,65,.14); }
-.pick-grade.weak { color: var(--muted); background: var(--panel3, rgba(255,255,255,.05)); }
-.pick-action { flex: none; font-size: 10.5px; font-weight: 750; padding: 2px 7px; border-radius: 5px; }
-.pick-action.ready { color: var(--red); background: rgba(224,67,47,.12); }
-.pick-action.watch { color: var(--accent2); background: rgba(91,141,239,.12); }
-/* 头部动作区 + 定时刷新开关 */
-.play-actions { display: flex; align-items: center; gap: 8px; }
-.play-auto { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; padding: 6px 11px; border-radius: 8px; cursor: pointer; color: var(--text2); background: var(--panel); border: 1px solid var(--border-soft); transition: background-color .15s, border-color .15s, color .15s, opacity .15s; }
-.play-auto:hover { color: var(--text); border-color: var(--border); }
-.play-auto.on { color: var(--accent, #7c6bf5); background: rgba(124,107,245,.1); border-color: rgba(124,107,245,.3); }
-/* 开启态:图标常亮呼吸,让用户一眼确认"自动刷新已待命/运行中"(直击"看起来没启动"的疑虑) */
-.play-auto.on .icon { animation: auto-armed 2.4s ease-in-out infinite; }
-@keyframes auto-armed { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
-@media (prefers-reduced-motion: reduce) { .play-auto.on .icon { animation: none; } }
-.pick-reason { font-size: 12.5px; color: var(--text2); line-height: 1.55; margin-bottom: 8px; }
-.pick-rows { display: flex; flex-direction: column; gap: 5px; }
-.pick-row { font-size: 12px; color: var(--text2); line-height: 1.5; }
-.pick-k { display: inline-block; min-width: 34px; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px; margin-right: 7px; color: var(--muted); background: var(--panel3, rgba(255,255,255,.05)); }
-.pick-k.buy { color: var(--red); background: rgba(224,67,47,.12); }
-.pick-k.risk { color: var(--gold); background: rgba(227,179,65,.12); }
-.pick-foot { display: flex; gap: 14px; font-size: 11.5px; margin: 2px 0; }
-
 /* 做T·一句话行动指令(最醒目) */
 .t-ai-plan { display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; margin: 8px 0; padding: 10px 12px; border-radius: 9px; font-size: 13.5px; font-weight: 600; line-height: 1.55; color: var(--text); background: linear-gradient(100deg, rgba(91,141,239,.14), rgba(124,107,245,.06)); border: 1px solid rgba(91,141,239,.32); }
 .t-ai-plan .icon { color: #5b8def; flex-shrink: 0; align-self: center; }
 .t-ai-plan-k { flex: none; font-size: 10.5px; font-weight: 800; color: #5b8def; background: rgba(91,141,239,.16); padding: 2px 8px; border-radius: 5px; }
-
-/* AI选股·上次选股时间提示 */
-.pick-savedat { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); margin-bottom: 8px; }
-.pick-savedat .icon { color: var(--muted); }
 
 /* ============================================================
    持仓卡·层级扁平化精修 (v2)
@@ -3313,15 +3227,10 @@ button.acct-item { width: 100%; border: 0; background: transparent; font: inheri
 .fc-fold { background: var(--surface-quiet) !important; border: none !important; }
 .fc-fold:hover { background: var(--panel3) !important; }
 .fc-cell { background: var(--surface-quiet) !important; }
-
-/* ---- AI 助手 / AI 选股:结果块去盒,靠标题+留白分层 ---- */
 .ai-result, .ai-summary { background: none !important; }
 .ai-result .ai-block { border-top: 1px solid var(--surface-hair); padding-top: 10px; }
 .ai-result .ai-block:first-child { border-top: none; padding-top: 0; }
-
-/* ---- 候选卡 / AI选股卡:保留卡形(它们确是独立对象),但去掉 hover 位移的浮夸,反馈更克制 ---- */
-.cand-card, .pick-card { transition: border-color var(--t-fast), background-color var(--t-fast) !important; }
-.pick-card:hover { transform: none !important; }
+.cand-card { transition: border-color var(--t-fast), background-color var(--t-fast) !important; }
 
 /* ---- 龙虎榜席位:席位块去盒,发丝缝分隔 ---- */
 .lhb-seats { gap: var(--field-gap); }
@@ -3518,7 +3427,6 @@ button.acct-item { width: 100%; border: 0; background: transparent; font: inheri
 .dr-row { display: flex; align-items: baseline; gap: 7px; font-size: 12px; line-height: 1.6; color: var(--text2); margin-top: 3px; }
 .dr-k { flex: none; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px; color: var(--muted); background: var(--panel3, rgba(255,255,255,.05)); }
 .dr-k.ev { color: var(--accent2); background: rgba(91,141,239,.14); }
-.dr-k.pick { color: var(--red); background: rgba(224,67,47,.12); }
 .dr-k.st { color: var(--accent); background: rgba(124,107,245,.14); }
 .dr-k.rk { color: var(--gold); background: rgba(227,179,65,.14); }
 .dr-final .dr-block-c { padding: 10px 12px; border-radius: 9px; background: rgba(124,107,245,.07); border: 1px solid rgba(124,107,245,.2); color: var(--text); }
@@ -3848,18 +3756,9 @@ a.mn-flash:hover { color: var(--accent); }
   .mobile-trade-body .plan-edit-row { grid-template-columns: auto 1fr; }
 
   /* ---- nuxt-ui 设计原则移动端增强:更大触控目标 + 更清晰的操作区 ---- */
-  /* AI 选股头部:标题与操作纵向排布,操作按钮撑满一行便于拇指点按 */
-  .play-head { padding: 14px 14px 4px; }
-  .play-actions { width: 100%; gap: 8px; }
-  .play-actions .play-auto,
-  .play-actions .btn-primary { flex: 1; justify-content: center; min-height: 42px; font-size: 13px; }
-  .play-body { padding: 0 14px 16px; }
   /* 主行动按钮/次要按钮全局最小触控高度,符合移动端可点性基线 */
   .btn-primary, .btn, .chip-btn { min-height: 40px; }
   .chip-btn { padding: 7px 12px; }
-  /* 选股结果卡:内边距与圆角略增,信息更透气 */
-  .pick-card { padding: 13px 13px; border-radius: var(--radius-sm); }
-  .pick-list { gap: 10px; }
 
   /* ---- 输入框防 iOS 聚焦自动缩放:字号统一抬到 16px ----
      iOS Safari 对 font-size<16px 的输入框会在聚焦时自动放大整页,造成布局错位。
@@ -4228,7 +4127,7 @@ a.mn-flash:hover { color: var(--accent); }
   body { overflow-x: hidden; max-width: 100%; }
   .main, .nav-inner, .footer { max-width: 100vw; }
   .main { min-width: 0; }
-  .panel, .card, .cand-card, .pick-card { min-width: 0; max-width: 100%; }
+  .panel, .card, .cand-card { min-width: 0; max-width: 100%; }
 
   /* 2) 军师建议浮层:与 .auto-ref-panel/.acct-menu 同口径钳制,320~375px 不越右边缘 */
   .advisor-pop { width: auto; max-width: calc(100vw - 24px); }

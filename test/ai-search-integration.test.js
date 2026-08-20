@@ -62,11 +62,10 @@ test('策略日报单次豆包调用获取十条跨市场补盲信息', () => {
   assert.equal(plan.version, 2)
 })
 
-test('关闭开关时各展示区域动态移除检索参考', () => {
+test('关闭开关时军师助手与日报动态移除检索参考', () => {
   const component = read('src/components/SearchReference.jsx')
   const assistant = read('src/components/AIAssistant.jsx')
   const daily = read('src/components/DailyReport.jsx')
-  const picker = read('src/components/TodayTab.jsx')
   const advice = read('src/components/AdvicePresentation.jsx')
 
   assert.match(component, /visibleSearchReference/)
@@ -74,7 +73,6 @@ test('关闭开关时各展示区域动态移除检索参考', () => {
   assert.match(assistant, /searchConfig\.enabled \|\| !m\.searchReference/)
   assert.match(daily, /item\?\.kind !== 'doubao_search'/)
   assert.match(daily, /<SearchReference/)
-  assert.match(picker, /<SearchReference/)
   assert.match(advice, /<SearchReference/)
 })
 

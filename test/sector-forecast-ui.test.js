@@ -27,6 +27,12 @@ test('板块前瞻迁入今日决策并替代AI选股入口', () => {
   )
   assert.doesNotMatch(research, /SectorForecast/)
   assert.doesNotMatch(today, /<DailyPlay/)
+  assert.doesNotMatch(today, /function DailyPlay/)
+  assert.doesNotMatch(today, /AI 选股/)
+  assert.doesNotMatch(today, /下一交易日观察池/)
+  assert.doesNotMatch(today, /ai_pick_v2/)
+  assert.doesNotMatch(today, /callAI\('scan_pick'/)
+  assert.doesNotMatch(today, /\/api\/screen/)
 })
 
 test('板块前瞻提供双周期排名、展开解释与真实成分股', () => {
