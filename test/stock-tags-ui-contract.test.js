@@ -19,6 +19,7 @@ const dailyReport = read('src/components/DailyReport.jsx')
 const assistant = read('src/components/AIAssistant.jsx')
 const stockTags = read('src/components/StockTags.jsx')
 const stockTagStore = read('src/stockTagStore.js')
+const stockTagApi = read('api/stock_tags.js')
 const styles = read('src/styles.css')
 
 test('通用股票身份默认按名称代码在上、题材行业在下排列', () => {
@@ -76,7 +77,13 @@ test('核心个股场景全部接入统一标签', () => {
 })
 
 test('概念标签区分F10精确题材与资料回退并升级缓存版本', () => {
-  assert.match(stockTagStore, /\/api\/stock_tags\?codes=\$\{codes\.join\(','\)\}&v=4/)
+  assert.match(stockTagStore, /\/api\/stock_tags\?codes=\$\{codes\.join\(','\)\}&v=5/)
+  assert.match(stockTagStore, /cache:\s*'no-store'/)
+  assert.match(stockTagStore, /STOCK_TAG_REVALIDATE_MS/)
+  assert.match(stockTagStore, /stockTagStore\.watch/)
+  assert.match(stockTagApi, /TAG_CACHE_TTL_MS = 5 \* 60 \* 1000/)
+  assert.match(stockTagApi, /EMPTY_CACHE_TTL_MS = 2 \* 60 \* 1000/)
+  assert.doesNotMatch(stockTagApi, /\{ cache: 21600 \}/)
   assert.match(stockTags, /info\?\.conceptVerified/)
   assert.match(stockTags, /东方财富 F10 精确题材/)
   assert.match(stockTags, /data-verified=/)

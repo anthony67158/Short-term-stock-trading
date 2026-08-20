@@ -51,3 +51,37 @@ test('已有缓存与在途股票不会重复请求', async () => {
 
   assert.equal(calls, 1)
 })
+
+test('概念标签超过重验周期后自动请求并替换旧题材', async () => {
+  let now = 1000
+  let calls = 0
+  const store = createStockTagStore({
+    now: () => now,
+    revalidateMs: 5 * 60 * 1000,
+    fetchBatch: async (codes) => {
+      calls++
+      return codes.map((code) => ({
+        code,
+        displayTags: [{
+          name: calls === 1 ? '旧题材' : '新题材',
+          kind: 'concept',
+        }],
+      }))
+    },
+  })
+
+  store.ensure('300476')
+  await store.flush()
+  assert.equal(store.get('300476').displayTags[0].name, '旧题材')
+
+  now += 4 * 60 * 1000
+  store.ensure('300476')
+  await store.flush()
+  assert.equal(calls, 1)
+
+  now += 2 * 60 * 1000
+  store.ensure('300476')
+  await store.flush()
+  assert.equal(calls, 2)
+  assert.equal(store.get('300476').displayTags[0].name, '新题材')
+})

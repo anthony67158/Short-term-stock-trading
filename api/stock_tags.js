@@ -9,8 +9,8 @@ import {
   normalizeStockTagCodes,
 } from '../shared/stockTags.js'
 
-const TAG_CACHE_TTL_MS = 6 * 60 * 60 * 1000
-const EMPTY_CACHE_TTL_MS = 30 * 60 * 1000
+const TAG_CACHE_TTL_MS = 5 * 60 * 1000
+const EMPTY_CACHE_TTL_MS = 2 * 60 * 1000
 const tagCache = new Map()
 
 function toSecid(code) {
@@ -210,7 +210,7 @@ export default async function handler(req, res) {
         ok: true,
         updatedAt: Date.now(),
         list: [],
-      }, { cache: 1800 })
+      }, { cache: 60 })
     }
     const list = await mapWithConcurrency(
       codes,
@@ -220,10 +220,10 @@ export default async function handler(req, res) {
     return sendJson(res, {
       ok: true,
       updatedAt: Date.now(),
-      schemaVersion: 'stock-tags.v4',
+      schemaVersion: 'stock-tags.v5',
       source: '东方财富个股资料+F10核心题材',
       list,
-    }, { cache: 21600 })
+    }, { cache: 60 })
   } catch (error) {
     return sendError(res, error)
   }
