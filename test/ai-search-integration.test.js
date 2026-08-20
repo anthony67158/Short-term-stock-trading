@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { buildDailyReportSearchPlan } from '../api/daily_report.js'
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8')
 
@@ -33,6 +34,26 @@ test('军师助手日报选股统一接入AI检索配置', () => {
   for (const source of [ai, agent, daily]) {
     assert.doesNotMatch(source, /anspire|ANSPIRE/)
   }
+})
+
+test('策略日报单次豆包调用获取十条跨市场补盲信息', () => {
+  const plan = buildDailyReportSearchPlan({
+    day: '2026-08-20',
+    session: 'noon',
+  })
+
+  assert.match(plan.query, /宏观政策/)
+  assert.match(plan.query, /产业趋势/)
+  assert.match(plan.query, /行业催化/)
+  assert.match(plan.query, /海外市场/)
+  assert.match(plan.query, /大宗商品/)
+  assert.match(plan.query, /突发风险/)
+  assert.ok(Array.from(plan.query).length <= 64)
+  assert.equal(plan.cacheScope, 'daily-report')
+  assert.equal(plan.cacheKey, '2026-08-20-noon-v2')
+  assert.equal(plan.cacheMinutes, 60)
+  assert.equal(plan.topK, 10)
+  assert.equal(plan.version, 2)
 })
 
 test('关闭开关时各展示区域动态移除检索参考', () => {

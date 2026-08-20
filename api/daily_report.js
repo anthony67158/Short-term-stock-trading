@@ -26,6 +26,23 @@ function bjMinutes() { const d = nowBJ(); return d.getHours() * 60 + d.getMinute
 // 按当前时刻自动判定默认场次：<11:30 早报 / 11:30-15:00 午报 / >=15:00 晚报
 function autoSession() { const hm = bjMinutes(); if (hm < 690) return 'morning'; if (hm < 900) return 'noon'; return 'evening'; }
 const SESSION_CN = { morning: '盘前早报', noon: '午间午报', evening: '收盘晚报' };
+const DAILY_SEARCH_PLAN_VERSION = 2;
+
+export function buildDailyReportSearchPlan({
+  day = '',
+  session = 'morning',
+} = {}) {
+  const sessionKey = SESSION_CN[session] ? session : 'morning';
+  const dayKey = String(day || '').trim() || bjDayKey();
+  return {
+    query: `A股 ${SESSION_CN[sessionKey]} 最新宏观政策 产业趋势 行业催化 海外市场 大宗商品 突发风险`,
+    cacheScope: 'daily-report',
+    cacheKey: `${dayKey}-${sessionKey}-v${DAILY_SEARCH_PLAN_VERSION}`,
+    cacheMinutes: 60,
+    topK: 10,
+    version: DAILY_SEARCH_PLAN_VERSION,
+  };
+}
 
 // 日报模型改为运行时读取；原独立 daily 角色已移除，复用 agent 模型，见 handler 内 getModel('agent')
 
@@ -86,6 +103,7 @@ export default async function handler(req, res) {
             && isCompleteDailyReport(cached)
             && cached.searchEnabled === aiSearchConfig.enabled
             && Number(cached.searchConfigUpdatedAt || 0) === Number(aiSearchConfig.updatedAt || 0)
+            && Number(cached.searchPlanVersion || 0) === DAILY_SEARCH_PLAN_VERSION
           ) {
             emit('result', { ok: true, cached: true, ...cached });
             return endOnce();
@@ -97,11 +115,21 @@ export default async function handler(req, res) {
     if (!BASE || !KEY) { emit('result', { ok: false, error: 'LLM 未配置' }); return endOnce(); }
 
     // 2) 并行抓全市场数据
-    phase('正在采集 A股板块资金 / 涨停 / 指数…');
+    phase(
+      aiSearchConfig.enabled === true
+        && String(aiSearchConfig.apiKey || '').trim()
+        ? '正在采集市场数据并调用豆包搜索补盲…'
+        : '正在采集 A股板块资金 / 涨停 / 指数…',
+    );
     const proto = req.headers['x-forwarded-proto'] || 'https';
     const host = req.headers['x-forwarded-host'] || req.headers.host;
     const origin = `${proto}://${host}`;
     const getJ = (p) => { const c = new AbortController(); const to = setTimeout(() => c.abort(), 8000); return fetch(origin + p, { headers: { 'x-internal': '1' }, signal: c.signal }).then((r) => r.json()).catch(() => null).finally(() => clearTimeout(to)); };
+    const {
+      topK: dailySearchTopK,
+      version: dailySearchPlanVersion,
+      ...dailySearchInput
+    } = buildDailyReportSearchPlan({ day, session });
 
     const [sectors, aIdx, overseas, limitPool, sectorNews, macroNews, holdingInfo, holdingQuotes, clsNews, sinaNews, wallstreetNews, finnhubNews, aiSearch] = await Promise.all([
       getJ('/api/sectors?type=industry&sort=main'),
@@ -121,12 +149,10 @@ export default async function handler(req, res) {
       fetchSinaFlash(10),
       fetchWallstreetLive(10),
       fetchFinnhubNews(6),
-      fetchAiSearchReference({
-        query: `A股 ${SESSION_CN[session]} 宏观政策 行业热点 市场舆情 风险`,
-        cacheScope: 'daily-report',
-        cacheKey: `${day}-${session}`,
-        cacheMinutes: 60,
-      }, { runtimeConfig: aiSearchConfig }),
+      fetchAiSearchReference(dailySearchInput, {
+        runtimeConfig: aiSearchConfig,
+        topK: dailySearchTopK,
+      }),
     ]);
     const searchReference = buildSearchReference(aiSearch);
     // ★海外/商品兜底:fetchOverseas 异常返回 null 时,下方多处 overseas.indices / overseas.commodities 会抛
@@ -243,6 +269,7 @@ export default async function handler(req, res) {
       report,
       searchEnabled: aiSearchConfig.enabled === true,
       searchConfigUpdatedAt: Number(aiSearchConfig.updatedAt) || 0,
+      searchPlanVersion: dailySearchPlanVersion,
       searchReference,
       // 附上关键数据供前端展示与"数据来源"标注
       data: { aIndices: aIdx, overseas: overseasSafe.indices, commodities: overseasSafe.commodities, sectorFlow, limitUpCount: limitCount },
