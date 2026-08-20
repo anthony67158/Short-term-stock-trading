@@ -10,7 +10,11 @@ import SectorForecastProgress from './SectorForecastProgress'
 import SectorForecastSettings from './SectorForecastSettings'
 import { openStockDetail } from '../detailStore.js'
 import { sectorForecastRequest } from '../sectorForecastClient.js'
-import { sortSectorForecasts } from '../sectorForecastView.js'
+import {
+  sectorForecastActionView,
+  sortSectorForecasts,
+  summarizeSectorForecastActions,
+} from '../sectorForecastView.js'
 
 const PHASE_LABELS = {
   ACCUMULATION: '潜伏吸筹',
@@ -20,18 +24,11 @@ const PHASE_LABELS = {
   RETREAT: '退潮转弱',
 }
 
-const ACTION_LABELS = {
-  LAYOUT: '可提前布局',
-  WAIT_PULLBACK: '等回踩',
-  WATCH_ONLY: '只观察',
-  AVOID: '回避',
-}
-
 export const phaseLabel = (value) =>
   PHASE_LABELS[value] || '待识别'
 
 export const actionLabel = (value) =>
-  ACTION_LABELS[value] || '观察'
+  sectorForecastActionView(value).label
 
 const finite = (value) => Number.isFinite(Number(value))
 
@@ -58,8 +55,27 @@ function SectorExplanation({ sector }) {
     ? explanation.risks
     : (sector.risks || [])
   const evidence = explanation.evidence || []
+  const action = sectorForecastActionView(sector.actionability)
   return (
     <div className="sector-forecast-expanded">
+      <div
+        className="sector-forecast-execution"
+        data-intent={action.intent}
+        role="note"
+        aria-label={`操作指引：${action.label}`}
+      >
+        <Icon
+          name={action.intent === 'buy' ? 'check' : 'shield'}
+          size={16}
+        />
+        <div>
+          <b>现在怎么做 · {action.label}</b>
+          <p>
+            {action.instruction}
+            {' '}操作前点开成分股，核对个股买点与止损。
+          </p>
+        </div>
+      </div>
       <div className="sector-forecast-thesis">
         <section>
           <h3>为什么现在</h3>
@@ -114,7 +130,7 @@ function SectorExplanation({ sector }) {
 
 export default function SectorForecast() {
   const [horizon, setHorizon] = useState('next')
-  const [sortMode, setSortMode] = useState('rank')
+  const [sortMode, setSortMode] = useState('conclusion')
   const [latest, setLatest] = useState(null)
   const [history, setHistory] = useState([])
   const [settings, setSettings] = useState(null)
@@ -198,6 +214,11 @@ export default function SectorForecast() {
     })
   }, [horizon, latest, sortMode])
 
+  const actionSummary = useMemo(
+    () => summarizeSectorForecastActions(latest?.sectors || []),
+    [latest],
+  )
+
   const generate = async () => {
     generationRequestRef.current = true
     setGenerating(true)
@@ -255,12 +276,12 @@ export default function SectorForecast() {
               <option value="score_asc">分数从低到高</option>
             </select>
           </label>
-          <button type="button" className="row-btn" disabled={generating}
+          <button type="button" className="row-btn sector-forecast-generate" disabled={generating}
             onClick={generate}>
             <Icon name={generating ? 'pulse' : 'refresh'} size={14} />
             {generating ? '生成中' : '生成正式版'}
           </button>
-          <button type="button" className="icon-btn"
+          <button type="button" className="icon-btn sector-forecast-settings-trigger"
             aria-label="板块前瞻自动设置" title="自动设置"
             onClick={() => setSettingsOpen((value) => !value)}>
             <Icon name="gauge" size={15} />
@@ -296,6 +317,32 @@ export default function SectorForecast() {
             <span>量化 <b>{latest.model?.quant === 'lightgbm' ? 'LightGBM' : 'V1降级'}</b></span>
             <span>生成 <b>{timeLabel(latest.generatedAt)}</b></span>
           </div>
+          <div
+            className="sector-forecast-action-summary"
+            data-has-buy={actionSummary.counts.buy > 0}
+            role="status"
+          >
+            <Icon
+              name={actionSummary.counts.buy > 0 ? 'check' : 'shield'}
+              size={16}
+            />
+            <div>
+              <strong>
+                {actionSummary.counts.buy > 0
+                  ? `当前可买 ${actionSummary.counts.buy} 个`
+                  : '当前没有通过买入闸门的板块'}
+              </strong>
+              <span>
+                {actionSummary.counts.buy > 0
+                  ? `${actionSummary.buyable.slice(0, 3).map((item) => item.name).join('、')}；列表已按结论优先排列`
+                  : '今天先不买，等待资金、位置和量化信号重新共振'}
+              </span>
+            </div>
+            <small>
+              暂不买 {actionSummary.counts.wait} ·
+              {' '}观察/回避 {actionSummary.noBuy}
+            </small>
+          </div>
           {error && <div className="sector-forecast-inline-error" role="status">{error}</div>}
           <div className="sector-forecast-list">
             {ranked.map((sector, index) => {
@@ -306,6 +353,9 @@ export default function SectorForecast() {
                 ? rank
                 : index + 1
               const forecast = sector.forecast?.[horizon] || {}
+              const action = sectorForecastActionView(
+                sector.actionability,
+              )
               const isOpen = expanded === sector.code
               return (
                 <div className={'sector-forecast-item' + (isOpen ? ' expanded' : '')}
@@ -326,14 +376,27 @@ export default function SectorForecast() {
                     </span>
                     <span className="sector-forecast-state">
                       <b data-phase={sector.phase}>{phaseLabel(sector.phase)}</b>
-                      <em data-action={sector.actionability}>{actionLabel(sector.actionability)}</em>
+                      <em
+                        data-action={sector.actionability}
+                        data-intent={action.intent}
+                      >
+                        {action.label}
+                      </em>
                     </span>
                     <span className="sector-forecast-score">
                       <strong>{finite(forecast.score) ? Number(forecast.score).toFixed(1) : '--'}</strong>
                       <small>{forecast.probability == null ? 'V1评分' : `概率 ${percent(forecast.probability)}`}</small>
                     </span>
-                    <span className="sector-forecast-why">
-                      {sector.explanation?.whyNow || sector.reasons?.[0] || '等待解释'}
+                    <span
+                      className="sector-forecast-guidance"
+                      data-intent={action.intent}
+                    >
+                      <strong>{action.instruction}</strong>
+                      <small>
+                        {sector.explanation?.whyNow
+                          || sector.reasons?.[0]
+                          || '等待解释'}
+                      </small>
                     </span>
                     <Icon name={isOpen ? 'chevronDown' : 'chevronRight'} size={15} />
                   </button>

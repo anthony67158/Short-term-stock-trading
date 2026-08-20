@@ -40,6 +40,7 @@ test('板块前瞻提供双周期排名、展开解释与真实成分股', () =>
 
 test('板块前瞻支持结论优先和预测分数升降序', () => {
   assert.match(component, /sector-forecast-sort/)
+  assert.match(component, /useState\('conclusion'\)/)
   assert.match(component, /结论优先/)
   assert.match(component, /分数从高到低/)
   assert.match(component, /分数从低到高/)
@@ -47,6 +48,15 @@ test('板块前瞻支持结论优先和预测分数升降序', () => {
   assert.match(view, /actionability/)
   assert.match(view, /score_desc/)
   assert.match(view, /score_asc/)
+})
+
+test('板块前瞻直接展示可买数量和每个板块的操作指令', () => {
+  assert.match(component, /sector-forecast-action-summary/)
+  assert.match(component, /当前可买/)
+  assert.match(component, /sector-forecast-guidance/)
+  assert.match(component, /sectorForecastActionView/)
+  assert.match(view, /可以买入/)
+  assert.match(view, /暂不买/)
 })
 
 test('板块前瞻成分股点击后打开全局个股详情侧栏', () => {
@@ -90,4 +100,38 @@ test('板块前瞻桌面信息密集且移动端稳定单列', () => {
   assert.match(styles, /\.sector-forecast-row\s*{/)
   assert.match(styles, /@media[\s\S]*\.sector-forecast-row\s*{[\s\S]*grid-template-columns:\s*1fr/)
   assert.match(styles, /\.sector-forecast-settings\s*{/)
+  assert.match(
+    styles,
+    /\.sector-forecast-head-actions\s*{[\s\S]*--sector-control-height:\s*36px/,
+  )
+  assert.match(
+    styles,
+    /\.sector-forecast-head-actions\s*>\s*\.tabs,[\s\S]*\.sector-forecast-sort,[\s\S]*\.sector-forecast-generate,[\s\S]*\.sector-forecast-settings-trigger\s*{[\s\S]*height:\s*var\(--sector-control-height\)/,
+  )
+  assert.match(
+    styles,
+    /@media[\s\S]*\.sector-forecast-head-actions\s*{[\s\S]*--sector-control-height:\s*44px/,
+  )
+  const headBlocks = [
+    ...styles.matchAll(
+      /\.sector-forecast-head-actions\s*\{([^}]*)\}/g,
+    ),
+  ].map((match) => match[1])
+  const mobileHead = headBlocks.find((block) =>
+    block.includes('--sector-control-height: 44px'))
+  assert.match(mobileHead, /display:\s*grid/)
+  assert.match(
+    mobileHead,
+    /grid-template-columns:[^;]*minmax\(0,\s*0\.9fr\)[^;]*minmax\(0,\s*1\.1fr\)[^;]*44px/,
+  )
+  assert.match(mobileHead, /overflow:\s*visible/)
+
+  const guidanceBlocks = [
+    ...styles.matchAll(
+      /\.sector-forecast-guidance strong,\s*\.sector-forecast-guidance small\s*\{([^}]*)\}/g,
+    ),
+  ].map((match) => match[1])
+  const mobileGuidance = guidanceBlocks.find((block) =>
+    block.includes('white-space: normal'))
+  assert.match(mobileGuidance, /line-clamp:\s*2/)
 })

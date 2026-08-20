@@ -3,7 +3,9 @@ import assert from 'node:assert/strict'
 
 import {
   SECTOR_FORECAST_SORTS,
+  sectorForecastActionView,
   sortSectorForecasts,
+  summarizeSectorForecastActions,
 } from '../src/sectorForecastView.js'
 
 const rows = [{
@@ -127,4 +129,41 @@ test('无效分数始终排在末尾且同分按原始排名稳定排序', () =>
     sorted.map((item) => item.code),
     ['BK2001', 'BK2000', 'BK2002'],
   )
+})
+
+test('板块结论翻译为明确的买入或不买指令', () => {
+  assert.deepEqual(
+    sectorForecastActionView('LAYOUT'),
+    {
+      label: '可以买入',
+      intent: 'buy',
+      instruction:
+        '可以小仓分批：优先核心或中军，下一交易日不高开再介入。',
+    },
+  )
+  assert.match(
+    sectorForecastActionView('WAIT_PULLBACK').instruction,
+    /^先不买：/,
+  )
+  assert.match(
+    sectorForecastActionView('WATCH_ONLY').instruction,
+    /^不要追：/,
+  )
+  assert.match(
+    sectorForecastActionView('AVOID').instruction,
+    /^不买：/,
+  )
+})
+
+test('板块结论汇总能直接说明当前有几个可以买入', () => {
+  const summary = summarizeSectorForecastActions(rows)
+
+  assert.deepEqual(summary.counts, {
+    buy: 1,
+    wait: 1,
+    watch: 1,
+    avoid: 1,
+  })
+  assert.equal(summary.buyable[0].code, 'BK1001')
+  assert.equal(summary.noBuy, 2)
 })

@@ -12,6 +12,33 @@ const ACTION_ORDER = Object.freeze({
   AVOID: 3,
 })
 
+const ACTION_VIEWS = Object.freeze({
+  LAYOUT: Object.freeze({
+    label: '可以买入',
+    intent: 'buy',
+    instruction:
+      '可以小仓分批：优先核心或中军，下一交易日不高开再介入。',
+  }),
+  WAIT_PULLBACK: Object.freeze({
+    label: '暂不买',
+    intent: 'wait',
+    instruction:
+      '先不买：等缩量回踩企稳且资金继续流入，再考虑低吸。',
+  }),
+  WATCH_ONLY: Object.freeze({
+    label: '不要买',
+    intent: 'watch',
+    instruction:
+      '不要追：当前仅观察，等拥挤度下降或结构重新转强。',
+  }),
+  AVOID: Object.freeze({
+    label: '回避',
+    intent: 'avoid',
+    instruction:
+      '不买：资金或结构未通过风控闸门，暂时回避。',
+  }),
+})
+
 const PHASE_ORDER = Object.freeze({
   ACCUMULATION: 0,
   STARTUP: 1,
@@ -43,6 +70,42 @@ function compareScore(left, right, horizon, direction) {
   if (leftScore === null) return 1
   if (rightScore === null) return -1
   return (leftScore - rightScore) * direction
+}
+
+export function sectorForecastActionView(actionability) {
+  return ACTION_VIEWS[actionability] || {
+    label: '待判断',
+    intent: 'watch',
+    instruction: '先不买：等待数据完整后再判断。',
+  }
+}
+
+export function summarizeSectorForecastActions(items = []) {
+  const rows = Array.isArray(items) ? items : []
+  const counts = {
+    buy: 0,
+    wait: 0,
+    watch: 0,
+    avoid: 0,
+  }
+  const buyable = []
+  for (const item of rows) {
+    if (item?.actionability === 'LAYOUT') {
+      counts.buy += 1
+      buyable.push(item)
+    } else if (item?.actionability === 'WAIT_PULLBACK') {
+      counts.wait += 1
+    } else if (item?.actionability === 'WATCH_ONLY') {
+      counts.watch += 1
+    } else {
+      counts.avoid += 1
+    }
+  }
+  return {
+    counts,
+    buyable,
+    noBuy: counts.watch + counts.avoid,
+  }
 }
 
 export function sortSectorForecasts(items = [], {
