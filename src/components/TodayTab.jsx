@@ -15,6 +15,8 @@ import {
 } from '../quantModel'
 import DailyReport from './DailyReport'
 import SearchReference from './SearchReference'
+import SectorForecast from './SectorForecast'
+import ErrorBoundary from './ErrorBoundary'
 import { fmtPct, pctClass, fmtInflow, fmtNum , fmtRaw } from '../format'
 import {
   assertStrategyVersion,
@@ -52,7 +54,9 @@ export default function TodayTab({ interval, market, sectors, snapshot }) {
     <div className="today">
       <MarketLight market={market} sectors={sectors} snapshot={snapshot} limitUp={zt.data} />
       <SentimentGauge zt={zt.data} zb={zb.data} market={market} />
-      <DailyPlay snapshot={snapshot} />
+      <ErrorBoundary label="板块前瞻">
+        <SectorForecast />
+      </ErrorBoundary>
       <CandidatePool zt={zt.data} movers={movers.data} speed={speed.data} sectors={sectors} />
       <LimitPool interval={interval} />
     </div>

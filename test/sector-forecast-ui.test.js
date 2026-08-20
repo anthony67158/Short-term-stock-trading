@@ -8,6 +8,7 @@ const read = (path) => readFileSync(
 )
 
 const research = read('src/components/ResearchTab.jsx')
+const today = read('src/components/TodayTab.jsx')
 const component = read('src/components/SectorForecast.jsx')
 const progress = read('src/components/SectorForecastProgress.jsx')
 const settings = read('src/components/SectorForecastSettings.jsx')
@@ -15,15 +16,17 @@ const client = read('src/sectorForecastClient.js')
 const view = read('src/sectorForecastView.js')
 const styles = read('src/styles/precision.css')
 
-test('板块前瞻位于盘面研究的概念走势之前', () => {
+test('板块前瞻迁入今日决策并替代AI选股入口', () => {
   assert.match(
-    research,
+    today,
     /import SectorForecast from '\.\/SectorForecast'/,
   )
   assert.ok(
-    research.indexOf('<SectorForecast')
-      < research.indexOf('<ConceptTrendPanel'),
+    today.indexOf('<SectorForecast')
+      < today.indexOf('<CandidatePool'),
   )
+  assert.doesNotMatch(research, /SectorForecast/)
+  assert.doesNotMatch(today, /<DailyPlay/)
 })
 
 test('板块前瞻提供双周期排名、展开解释与真实成分股', () => {
