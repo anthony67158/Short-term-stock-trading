@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import SectorPanel from './SectorPanel'
 import StockPanel from './StockPanel'
 import SectorHistory from './SectorHistory'
+import SectorForecast from './SectorForecast'
 import ConceptTrendPanel from './ConceptTrendPanel'
 import MarketFlow from './FundFlowCanvas'
 import Movers from './Movers'
@@ -42,6 +43,9 @@ export default function ResearchTab({ interval }) {
 
   return (
     <div className="research">
+      <ErrorBoundary label="板块前瞻">
+        <SectorForecast />
+      </ErrorBoundary>
       <ErrorBoundary label="概念走势">
         <ConceptTrendPanel
           interval={interval}

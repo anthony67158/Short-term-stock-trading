@@ -397,11 +397,11 @@ test('真实manifest与case可通过统一CLI离线执行', async () => {
 
   assert.equal(result.exitCode, 0)
   assert.equal(payload.ok, true)
-  assert.equal(payload.summary.total, 17)
-  assert.equal(payload.summary.passed, 17)
+  assert.equal(payload.summary.total, 22)
+  assert.equal(payload.summary.passed, 22)
   assert.deepEqual(
     [...new Set(payload.episodes.map((item) => item.adapter))].sort(),
-    ['advice', 'daily', 'evidence', 'judge', 'portfolio', 'screen'],
+    ['advice', 'daily', 'evidence', 'judge', 'portfolio', 'screen', 'sector'],
   )
 })
 

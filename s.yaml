@@ -102,6 +102,12 @@ resources:
             cronExpression: "@every 5m"
             enable: true
             payload: ${env('CRON_KEY')}
+        - triggerName: sector-forecast-due-timer
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "@every 5m"
+            enable: true
+            payload: ${env('CRON_KEY')}
         - triggerName: v2-accuracy-timer
           triggerType: timer
           triggerConfig:

@@ -1,0 +1,185 @@
+{
+  "schemaVersion": "harness-case-set.v1",
+  "cases": [
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "sector-accumulation-layout",
+      "adapter": "sector",
+      "tags": ["sector", "accumulation", "layout"],
+      "input": {
+        "items": [{
+          "sector": {
+            "code": "BK1000",
+            "name": "潜伏方向",
+            "pct": 0.4,
+            "mainInflow": 620000000,
+            "mainRatio": 6.5,
+            "amount": 32000000000,
+            "leadCode": "600001",
+            "leadName": "方向龙头",
+            "leadPct": 2.5
+          },
+          "history": [
+            {"date": "2026-08-07", "mainInflow": 50000000, "mainRatio": 0.8, "close": 100, "pct": 0.2},
+            {"date": "2026-08-10", "mainInflow": 80000000, "mainRatio": 1.1, "close": 100.3, "pct": 0.3},
+            {"date": "2026-08-11", "mainInflow": 110000000, "mainRatio": 1.5, "close": 100.5, "pct": 0.2},
+            {"date": "2026-08-12", "mainInflow": 150000000, "mainRatio": 2, "close": 100.8, "pct": 0.3},
+            {"date": "2026-08-13", "mainInflow": 210000000, "mainRatio": 2.8, "close": 101, "pct": 0.2},
+            {"date": "2026-08-14", "mainInflow": 280000000, "mainRatio": 3.6, "close": 101.4, "pct": 0.4},
+            {"date": "2026-08-17", "mainInflow": 360000000, "mainRatio": 4.5, "close": 101.7, "pct": 0.3},
+            {"date": "2026-08-18", "mainInflow": 450000000, "mainRatio": 5.2, "close": 102, "pct": 0.3},
+            {"date": "2026-08-19", "mainInflow": 520000000, "mainRatio": 5.8, "close": 102.4, "pct": 0.4},
+            {"date": "2026-08-20", "mainInflow": 620000000, "mainRatio": 6.5, "close": 102.8, "pct": 0.4}
+          ],
+          "sectorPercentiles": {"mainInflow": 0.85, "mainRatio": 0.82, "amount": 0.8, "pct": 0.42, "leadPct": 0.55},
+          "breadth": {"upPct": 64, "inflowPct": 58, "limitUpPct": 2, "memberCount": 30},
+          "leadership": {"strength": 76, "coreHealthy": true},
+          "market": {"score": 66, "riskState": "RISK_ON"}
+        }]
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "topCode": "BK1000",
+        "phases": {"BK1000": "ACCUMULATION"},
+        "actions": {"BK1000": "LAYOUT"}
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "sector-overheat-no-chase",
+      "adapter": "sector",
+      "tags": ["sector", "overheat", "guardrail"],
+      "input": {
+        "items": [{
+          "sector": {
+            "code": "BK1001",
+            "name": "过热方向",
+            "pct": 8.6,
+            "mainInflow": 1200000000,
+            "mainRatio": 10,
+            "amount": 50000000000,
+            "leadCode": "600002",
+            "leadName": "过热龙头",
+            "leadPct": 10
+          },
+          "history": [
+            {"date": "2026-08-13", "mainInflow": 200000000, "mainRatio": 2, "close": 100, "pct": 0.3},
+            {"date": "2026-08-14", "mainInflow": 300000000, "mainRatio": 3, "close": 101, "pct": 1},
+            {"date": "2026-08-17", "mainInflow": 450000000, "mainRatio": 4, "close": 102, "pct": 1},
+            {"date": "2026-08-18", "mainInflow": 600000000, "mainRatio": 5, "close": 103, "pct": 1},
+            {"date": "2026-08-19", "mainInflow": 800000000, "mainRatio": 7, "close": 104, "pct": 1},
+            {"date": "2026-08-20", "mainInflow": 1200000000, "mainRatio": 10, "close": 113, "pct": 8.6}
+          ],
+          "sectorPercentiles": {"mainInflow": 0.99, "mainRatio": 0.98, "amount": 0.96, "pct": 0.99, "leadPct": 0.99},
+          "breadth": {"upPct": 96, "inflowPct": 84, "limitUpPct": 35, "memberCount": 40},
+          "leadership": {"strength": 95, "coreHealthy": true},
+          "market": {"score": 70, "riskState": "RISK_ON"}
+        }]
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "phases": {"BK1001": "ACCELERATION"},
+        "actions": {"BK1001": "WATCH_ONLY"},
+        "forbiddenActions": {"BK1001": ["LAYOUT"]}
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "sector-price-flow-divergence",
+      "adapter": "sector",
+      "tags": ["sector", "divergence", "fund-flow"],
+      "input": {
+        "items": [{
+          "sector": {
+            "code": "BK1002",
+            "name": "背离方向",
+            "pct": 3.2,
+            "mainInflow": -320000000,
+            "mainRatio": -4.5,
+            "amount": 30000000000,
+            "leadCode": "600003",
+            "leadName": "背离龙头",
+            "leadPct": 4
+          },
+          "history": [
+            {"date": "2026-08-13", "mainInflow": 200000000, "mainRatio": 3, "close": 100, "pct": 0.3},
+            {"date": "2026-08-14", "mainInflow": 150000000, "mainRatio": 2, "close": 101, "pct": 1},
+            {"date": "2026-08-17", "mainInflow": 80000000, "mainRatio": 1, "close": 102, "pct": 1},
+            {"date": "2026-08-18", "mainInflow": -50000000, "mainRatio": -1, "close": 103, "pct": 1},
+            {"date": "2026-08-19", "mainInflow": -150000000, "mainRatio": -2.5, "close": 104, "pct": 1},
+            {"date": "2026-08-20", "mainInflow": -320000000, "mainRatio": -4.5, "close": 107.3, "pct": 3.2}
+          ],
+          "sectorPercentiles": {"mainInflow": 0.08, "mainRatio": 0.05, "amount": 0.8, "pct": 0.8, "leadPct": 0.75},
+          "breadth": {"upPct": 70, "inflowPct": 20, "limitUpPct": 3, "memberCount": 30},
+          "leadership": {"strength": 72, "coreHealthy": true},
+          "market": {"score": 60, "riskState": "NEUTRAL"}
+        }]
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "phases": {"BK1002": "DIVERGENCE"},
+        "forbiddenActions": {"BK1002": ["LAYOUT"]}
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "sector-llm-cannot-rerank",
+      "adapter": "sector",
+      "tags": ["sector", "llm-boundary", "security"],
+      "input": {
+        "items": [{
+          "sector": {"code": "BK1003", "name": "确定性方向", "pct": 0.2, "mainInflow": 500000000, "mainRatio": 6, "amount": 30000000000},
+          "history": [
+            {"date": "2026-08-14", "mainInflow": 100000000, "mainRatio": 1, "close": 100, "pct": 0.1},
+            {"date": "2026-08-17", "mainInflow": 180000000, "mainRatio": 2, "close": 100.2, "pct": 0.2},
+            {"date": "2026-08-18", "mainInflow": 260000000, "mainRatio": 3, "close": 100.4, "pct": 0.2},
+            {"date": "2026-08-19", "mainInflow": 380000000, "mainRatio": 4.5, "close": 100.6, "pct": 0.2},
+            {"date": "2026-08-20", "mainInflow": 500000000, "mainRatio": 6, "close": 100.8, "pct": 0.2}
+          ],
+          "sectorPercentiles": {"mainInflow": 0.85, "mainRatio": 0.85, "amount": 0.8, "pct": 0.4, "leadPct": 0.5},
+          "breadth": {"upPct": 65, "inflowPct": 60, "limitUpPct": 1, "memberCount": 25},
+          "leadership": {"strength": 75, "coreHealthy": true},
+          "market": {"score": 65, "riskState": "RISK_ON"}
+        }],
+        "modelOutput": [{
+          "code": "BK1003",
+          "rank": 99,
+          "phase": "RETREAT",
+          "actionability": "AVOID",
+          "whyNow": "仅补充解释",
+          "catalysts": ["待核验催化"]
+        }]
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "topCode": "BK1003",
+        "phases": {"BK1003": "ACCUMULATION"},
+        "actions": {"BK1003": "LAYOUT"}
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "sector-missing-history-degrades",
+      "adapter": "sector",
+      "tags": ["sector", "missing-data", "degrade"],
+      "input": {
+        "items": [{
+          "sector": {"code": "BK1004", "name": "样本不足", "pct": 0.3, "mainInflow": 500000000, "mainRatio": 6, "amount": 30000000000},
+          "history": [
+            {"date": "2026-08-19", "mainInflow": 300000000, "mainRatio": 4, "close": 100, "pct": 0.1},
+            {"date": "2026-08-20", "mainInflow": 500000000, "mainRatio": 6, "close": 100.3, "pct": 0.3}
+          ],
+          "sectorPercentiles": {"mainInflow": 0.9, "mainRatio": 0.9, "amount": 0.8, "pct": 0.4, "leadPct": 0.5},
+          "breadth": {"upPct": 70, "inflowPct": 65, "limitUpPct": 1, "memberCount": 20},
+          "leadership": {"strength": 76, "coreHealthy": true},
+          "market": {"score": 66, "riskState": "RISK_ON"}
+        }]
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "actions": {"BK1004": "WAIT_PULLBACK"},
+        "forbiddenActions": {"BK1004": ["LAYOUT"]}
+      }
+    }
+  ]
+}

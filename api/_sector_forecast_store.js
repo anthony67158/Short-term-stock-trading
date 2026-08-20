@@ -4,6 +4,7 @@ import {
   isTradingDayAt,
 } from '../shared/tradingCalendar.js'
 import {
+  del,
   hasStorage,
   list,
   put,
@@ -24,6 +25,7 @@ const PATHS = Object.freeze({
   task: `${SECTOR_FORECAST_PREFIX}task.json`,
   history: `${SECTOR_FORECAST_PREFIX}history/`,
   outcomes: `${SECTOR_FORECAST_PREFIX}outcomes/`,
+  locks: `${SECTOR_FORECAST_PREFIX}locks/`,
 })
 
 function timeMinutes(value) {
@@ -132,6 +134,7 @@ function historySummary(snapshot) {
 }
 
 export function createSectorForecastStore(storage = {
+  del,
   hasStorage,
   list,
   put,
@@ -219,6 +222,45 @@ export function createSectorForecastStore(storage = {
           ? task.completed
           : {},
       })
+    },
+    async claimRun(runKey, now = Date.now()) {
+      ensureStorage()
+      const safeKey = String(runKey || '')
+        .replace(/[^0-9A-Za-z:_-]/g, '')
+        .replaceAll(':', '-')
+      if (!safeKey) throw new Error('板块前瞻任务锁键无效')
+      const bucket = Math.floor((Number(now) || Date.now()) / 900000)
+      const path = `${PATHS.locks}${safeKey}-${bucket}.json`
+      try {
+        await storage.put(path, JSON.stringify({
+          runKey: String(runKey),
+          claimedAt: Number(now) || Date.now(),
+        }), {
+          ...jsonOptions(),
+          forbidOverwrite: true,
+        })
+        return { acquired: true, path }
+      } catch (error) {
+        if (
+          error?.status === 409
+          || [
+            'FileAlreadyExists',
+            'ObjectAlreadyExists',
+            'PositionNotEqualToLength',
+          ].includes(error?.code)
+        ) return { acquired: false, path }
+        throw error
+      }
+    },
+    async releaseRun(claim) {
+      const path = String(claim?.path || '')
+      if (
+        claim?.acquired !== true
+        || !path.startsWith(PATHS.locks)
+        || typeof storage.del !== 'function'
+      ) return false
+      await storage.del(path)
+      return true
     },
     async saveOutcomes(signalDate, outcomes) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(String(signalDate || ''))) {

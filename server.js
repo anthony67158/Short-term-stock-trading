@@ -21,6 +21,7 @@ import {
   portfolioAnalysisTimerBody,
   portfolioAnalysisWorkerBody,
   reviewTimerBody,
+  sectorForecastTimerBody,
   v2AccuracyTimerBody,
 } from './api/_advice_timer.js';
 import {
@@ -310,6 +311,10 @@ async function handleRequest(req, res) {
     const v2Body = v2AccuracyTimerBody(event, process.env.CRON_KEY);
     const alertBody = alertTimerBody(event, process.env.CRON_KEY);
     const reviewBody = reviewTimerBody(event, process.env.CRON_KEY);
+    const sectorForecastBody = sectorForecastTimerBody(
+      event,
+      process.env.CRON_KEY,
+    );
     const portfolioAnalysisBody = portfolioAnalysisWorkerBody(
       event,
       process.env.CRON_KEY,
@@ -319,6 +324,7 @@ async function handleRequest(req, res) {
       && !v2Body
       && !alertBody
       && !reviewBody
+      && !sectorForecastBody
       && !portfolioAnalysisBody
     ) { res.statusCode = 403; res.end('forbidden'); return; }
     req.query = {};
@@ -326,6 +332,7 @@ async function handleRequest(req, res) {
       || v2Body
       || alertBody
       || reviewBody
+      || sectorForecastBody
       || portfolioAnalysisBody;
     req.headers['x-cron-key'] = process.env.CRON_KEY;
     res.status = (code) => { res.statusCode = code; return res; };
@@ -340,7 +347,9 @@ async function handleRequest(req, res) {
             ? 'cron_alert'
             : reviewBody
               ? 'cron_review'
-              : 'portfolio_analysis';
+              : sectorForecastBody
+                ? 'sector_forecast'
+                : 'portfolio_analysis';
       await handlers[handlerName](req, res);
     } catch (e) {
       console.error('[fc] invoke handler failed', e?.code || e?.name || e?.message);

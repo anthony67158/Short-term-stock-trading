@@ -1,6 +1,6 @@
 {
   "schemaVersion": "harness-baseline.v1",
-  "generatedAt": 1786952605612,
+  "generatedAt": 1787223648219,
   "versions": {
     "app": "1.0.0",
     "git": "working-tree",
@@ -11,7 +11,8 @@
       "evidence",
       "judge",
       "portfolio",
-      "screen"
+      "screen",
+      "sector"
     ]
   },
   "suites": {
@@ -24,7 +25,12 @@
         "actionability": 1,
         "consistency": 1
       },
-      "cases": 3
+      "cases": 3,
+      "caseIds": [
+        "portfolio-concentration-rotation",
+        "portfolio-fabricated-stock-filter",
+        "portfolio-t1-sell-cap"
+      ]
     },
     "evidence": {
       "overall": 1,
@@ -35,7 +41,11 @@
         "actionability": 1,
         "consistency": 1
       },
-      "cases": 2
+      "cases": 2,
+      "caseIds": [
+        "evidence-live-t1-quant-fallback",
+        "evidence-partial-no-sellable"
+      ]
     },
     "advice": {
       "overall": 1,
@@ -46,7 +56,12 @@
         "actionability": 1,
         "consistency": 1
       },
-      "cases": 3
+      "cases": 3,
+      "caseIds": [
+        "advice-buy-cash-cap",
+        "advice-hold-t1-no-sellable",
+        "advice-invalid-price-downgrade"
+      ]
     },
     "judge": {
       "overall": 1,
@@ -57,7 +72,13 @@
         "actionability": 1,
         "consistency": 1
       },
-      "cases": 4
+      "cases": 4,
+      "caseIds": [
+        "judge-buy-confidence-gate",
+        "judge-buy-consensus-confirm",
+        "judge-observation-window",
+        "judge-stop-risk-override"
+      ]
     },
     "screen": {
       "overall": 1,
@@ -68,7 +89,12 @@
         "actionability": 1,
         "consistency": 1
       },
-      "cases": 3
+      "cases": 3,
+      "caseIds": [
+        "screen-concept-leader-reserve-keeps-strategy-gate",
+        "screen-no-trade-conditional-fallback",
+        "screen-strategy-gate-and-fabrication-filter"
+      ]
     },
     "daily": {
       "overall": 1,
@@ -79,7 +105,29 @@
         "actionability": 1,
         "consistency": 1
       },
-      "cases": 2
+      "cases": 2,
+      "caseIds": [
+        "daily-evening-search-disabled",
+        "daily-morning-grounded-summary"
+      ]
+    },
+    "sector": {
+      "overall": 1,
+      "dimensions": {
+        "contract": 1,
+        "groundedness": 1,
+        "feasibility": 1,
+        "actionability": 1,
+        "consistency": 1
+      },
+      "cases": 5,
+      "caseIds": [
+        "sector-accumulation-layout",
+        "sector-llm-cannot-rerank",
+        "sector-missing-history-degrades",
+        "sector-overheat-no-chase",
+        "sector-price-flow-divergence"
+      ]
     }
   }
 }

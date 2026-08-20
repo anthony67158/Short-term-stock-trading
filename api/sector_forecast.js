@@ -91,6 +91,17 @@ export function runSectorForecastGeneration({
       )
       return { ok: true, skipped: true, snapshot }
     }
+    const claim = !force && typeof store.claimRun === 'function'
+      ? await store.claimRun(key, Number(now()) || Date.now())
+      : null
+    if (claim && !claim.acquired) {
+      return {
+        ok: true,
+        skipped: true,
+        reason: 'already-running',
+        snapshot: await store.readLatest(),
+      }
+    }
     const startedAt = Number(now()) || Date.now()
     await store.saveTask({
       ...previousTask,
@@ -139,6 +150,9 @@ export function runSectorForecastGeneration({
       })
       return { ok: true, skipped: false, snapshot }
     } catch (error) {
+      if (claim?.acquired && typeof store.releaseRun === 'function') {
+        await store.releaseRun(claim).catch(() => {})
+      }
       const currentTask = await store.readTask()
       await store.saveTask({
         ...currentTask,

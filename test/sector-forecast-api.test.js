@@ -9,6 +9,7 @@ import {
 } from '../api/_sector_forecast_store.js'
 import {
   buildSectorForecastSnapshot,
+  sectorProbabilityScore,
   selectSectorForecastUniverse,
 } from '../api/_sector_forecast_data.js'
 import {
@@ -43,9 +44,17 @@ function memoryStorage(initial = {}) {
       const value = values.get(path)
       return value == null ? null : JSON.parse(value)
     },
-    async put(path, body) {
+    async put(path, body, options = {}) {
+      if (options.forbidOverwrite && values.has(path)) {
+        const error = new Error('object already exists')
+        error.status = 409
+        throw error
+      }
       values.set(path, String(body))
       return { pathname: path }
+    },
+    async del(path) {
+      values.delete(path)
     },
     async list({ prefix = '', limit = 1000 } = {}) {
       return {
@@ -224,6 +233,32 @@ test('同进程同场次并发生成合并为一次并持久化完成标记', as
   assert.equal((await store.readTask()).completed['2026-08-20:close'], true)
 })
 
+test('同场次OSS原子锁阻止跨FC实例重复生成且失败可释放', async () => {
+  const storage = memoryStorage()
+  const firstStore = createSectorForecastStore(storage)
+  const secondStore = createSectorForecastStore(storage)
+
+  const first = await firstStore.claimRun(
+    '2026-08-20:close',
+    1787209800000,
+  )
+  const second = await secondStore.claimRun(
+    '2026-08-20:close',
+    1787209800000,
+  )
+
+  assert.equal(first.acquired, true)
+  assert.equal(second.acquired, false)
+  await firstStore.releaseRun(first)
+  assert.equal(
+    (await secondStore.claimRun(
+      '2026-08-20:close',
+      1787209800000,
+    )).acquired,
+    true,
+  )
+})
+
 test('候选初筛保留资金强但价格未启动的潜伏板块', () => {
   const selected = selectSectorForecastUniverse([
     {
@@ -342,6 +377,58 @@ test('快照以真实成分股计算扩散并输出双周期确定性排名', ()
   assert.ok(snapshot.sectors[0].forecast.week.score >= 0)
 })
 
+test('LightGBM横截面概率按20%基准校准并约束布局动作', () => {
+  assert.equal(sectorProbabilityScore(20), 50)
+  assert.equal(sectorProbabilityScore(35), 87.5)
+  assert.equal(sectorProbabilityScore(10), 25)
+
+  const sectors = ['BK1000', 'BK1001'].map((code) => ({
+    code,
+    name: code,
+    price: 103,
+    pct: 0.4,
+    mainInflow: 620e6,
+    mainRatio: 6.5,
+    amount: 32e9,
+    leadCode: '600001',
+    leadName: '龙头股份',
+    leadPct: 2.5,
+  }))
+  const history = Array.from({ length: 10 }, (_, index) => ({
+    date: `2026-08-${String(7 + index).padStart(2, '0')}`,
+    close: 100 + index * 0.3,
+    pct: 0.3,
+    mainInflow: (50 + index * 60) * 1e6,
+    mainRatio: 0.8 + index * 0.6,
+  }))
+  const memberRows = [{
+    code: '600001',
+    name: '龙头股份',
+    price: 20,
+    pct: 3,
+    mainInflow: 80e6,
+    mainRatio: 6,
+    amount: 1.2e9,
+  }]
+  const snapshot = buildSectorForecastSnapshot({
+    signalDate: '2026-08-20',
+    sectors,
+    histories: new Map(sectors.map((item) => [item.code, history])),
+    members: new Map(sectors.map((item) => [item.code, memberRows])),
+    quantPredictions: new Map([
+      ['BK1000', { nextProbability: 35, weekProbability: 34 }],
+      ['BK1001', { nextProbability: 10, weekProbability: 12 }],
+    ]),
+  })
+
+  assert.equal(snapshot.sectors[0].code, 'BK1000')
+  assert.ok(
+    snapshot.sectors[0].forecast.next.score
+      > snapshot.sectors[1].forecast.next.score,
+  )
+  assert.notEqual(snapshot.sectors[1].actionability, 'LAYOUT')
+})
+
 test('sector角色默认使用gpt-5.6-terra并开启深度思考', () => {
   assert.equal(ROLES.sector.def, 'gpt-5.6-terra')
   assert.equal(ROLES.sector.label, '板块前瞻')
@@ -421,6 +508,7 @@ test('板块解释只做一次合并检索且模型不能覆盖确定性排名',
     enriched.sectors[0].explanation.evidence[0].pendingVerification,
     true,
   )
+  assert.equal(enriched.sectors[1].explanation.evidence.length, 0)
   assert.equal(enriched.search.billed, true)
 })
 

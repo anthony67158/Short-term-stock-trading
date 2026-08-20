@@ -58,6 +58,13 @@
       "mode": "offline",
       "description": "策略日报事实、场次、板块方向和检索版本"
     },
+    "sector": {
+      "adapter": "sector",
+      "caseFile": "cases/sector.json",
+      "minOverall": 0.9,
+      "mode": "offline",
+      "description": "板块前瞻潜伏、追高、背离、解释边界与缺失降级"
+    },
     "endpoint": {
       "adapter": "endpoint",
       "caseFile": "cases/endpoint.json",

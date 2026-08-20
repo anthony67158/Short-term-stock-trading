@@ -39,3 +39,13 @@ test('午间与收盘自动复盘使用FC重复触发以支持失败续跑', () 
     assert.ok(config.includes(`cronExpression: "${cron}"`), `缺少调度表达式 ${cron}`)
   }
 })
+
+test('板块前瞻每五分钟唤醒且具体时间由OSS设置决定', () => {
+  const config = read('s.yaml')
+  const server = read('server.js')
+
+  assert.ok(config.includes('- triggerName: sector-forecast-due-timer'))
+  assert.ok(config.includes('cronExpression: "@every 5m"'))
+  assert.match(server, /sectorForecastTimerBody\(/)
+  assert.match(server, /sectorForecastBody[\s\S]*'sector_forecast'/)
+})

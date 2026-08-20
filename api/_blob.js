@@ -87,6 +87,7 @@ export async function put(pathname, body, opts = {}) {
   const buf = Buffer.isBuffer(body) ? body : Buffer.from(String(body));
   const headers = {};
   if (opts.contentType) headers['Content-Type'] = opts.contentType;
+  if (opts.forbidOverwrite) headers['x-oss-forbid-overwrite'] = 'true';
   const maxAge = opts.cacheControlMaxAge;
   headers['Cache-Control'] = (maxAge === 0 || maxAge) ? `max-age=${maxAge}` : 'no-cache';
   await c.put(key, buf, { headers });

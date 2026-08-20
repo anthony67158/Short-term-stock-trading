@@ -43,6 +43,13 @@ export function v2AccuracyTimerBody(event, cronKey) {
   return { scheduled: true };
 }
 
+export function sectorForecastTimerBody(event, cronKey) {
+  if (!cronKey || !event || typeof event !== 'object') return null;
+  if (event.triggerName !== 'sector-forecast-due-timer') return null;
+  if (String(event.payload || '') !== String(cronKey)) return null;
+  return { action: 'run_due' };
+}
+
 const REVIEW_TIMER_SESSIONS = new Map([
   ['review-noon-open', 'noon'],
   ['review-noon-core', 'noon'],

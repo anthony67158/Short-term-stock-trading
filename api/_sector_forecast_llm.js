@@ -38,9 +38,20 @@ function searchQuery(snapshot) {
     + '订单 供需变化 隔夜消息 风险 未来一周'
 }
 
-function evidenceFromSearch(result) {
+function relevanceText(value) {
+  return safeText(value, 600)
+    .toLowerCase()
+    .replace(/[\s·_()（）\-—]+/g, '')
+}
+
+function evidenceFromSearch(result, sector) {
+  const needle = relevanceText(sector?.name)
+  if (!needle) return []
   return (Array.isArray(result?.items) ? result.items : [])
-    .filter((item) => item?.title)
+    .filter((item) => {
+      const text = relevanceText(item?.title)
+      return item?.title && text.includes(needle)
+    })
     .slice(0, 8)
     .map((item) => ({
       title: safeText(item.title, 160),
@@ -111,7 +122,7 @@ async function defaultCallModel(payload) {
     forceReason: getReasoning('sector'),
     temperature: 0.15,
     maxTokens: 5000,
-    timeoutMs: 120000,
+    timeoutMs: 240000,
     responseFormat: { type: 'json_object' },
     messages: [{
       role: 'system',
@@ -127,7 +138,7 @@ async function defaultCallModel(payload) {
     }],
   }, {
     retries: 1,
-    budgetLeftMs: 125000,
+    budgetLeftMs: 250000,
   })
   try {
     if (!resp || resp.__err) {
@@ -196,11 +207,11 @@ export async function enrichSectorForecastSnapshot(snapshot, {
       .filter((item) => item?.code)
       .map((item) => [String(item.code), item]),
   )
-  const evidence = evidenceFromSearch(searchResult)
   const sectors = snapshot.sectors.map((sector) => {
     const raw = byCode.get(String(sector.code))
       || fallbackExplanation(sector, searchResult)
     const explained = mergeSectorForecastExplanation(sector, raw)
+    const evidence = evidenceFromSearch(searchResult, sector)
     return {
       ...explained,
       explanation: {
@@ -217,7 +228,9 @@ export async function enrichSectorForecastSnapshot(snapshot, {
       provider: 'doubao-global',
       status: searchResult.status || 'unavailable',
       billed: searchResult.billed === true,
-      itemCount: evidence.length,
+      itemCount: Array.isArray(searchResult.items)
+        ? searchResult.items.length
+        : 0,
       pendingVerification: true,
     },
     theories: theories.map((item) => ({

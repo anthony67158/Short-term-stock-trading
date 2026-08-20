@@ -6,6 +6,7 @@ import {
   adviceTimerBody,
   adviceWorkerBody,
   reviewTimerBody,
+  sectorForecastTimerBody,
   v2AccuracyTimerBody,
 } from '../api/_advice_timer.js'
 
@@ -32,6 +33,23 @@ test('V2正确率定时事件只接受专用触发器和匹配密钥', () => {
   assert.deepEqual(v2AccuracyTimerBody(event, 'secret-key'), { scheduled: true })
   assert.equal(v2AccuracyTimerBody(event, 'wrong-key'), null)
   assert.equal(v2AccuracyTimerBody({ ...event, triggerName: 'other' }, 'secret-key'), null)
+})
+
+test('板块前瞻Timer只负责唤醒运行时到期判断', () => {
+  const event = {
+    triggerName: 'sector-forecast-due-timer',
+    payload: 'secret-key',
+  }
+
+  assert.deepEqual(
+    sectorForecastTimerBody(event, 'secret-key'),
+    { action: 'run_due' },
+  )
+  assert.equal(sectorForecastTimerBody(event, 'wrong-key'), null)
+  assert.equal(sectorForecastTimerBody({
+    ...event,
+    triggerName: 'other',
+  }, 'secret-key'), null)
 })
 
 test('盯盘预警只接受交易时段专用Timer触发器和匹配密钥', () => {

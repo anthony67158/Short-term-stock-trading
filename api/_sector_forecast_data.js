@@ -30,6 +30,14 @@ const rounded = (value, digits = 2) =>
     ? +Number(value).toFixed(digits)
     : null
 
+export function sectorProbabilityScore(value) {
+  if (!Number.isFinite(Number(value))) return null
+  return rounded(
+    clamp(50 + (Number(value) - 20) * 2.5),
+    1,
+  )
+}
+
 function percentile(value, values = []) {
   const usable = values
     .map(Number)
@@ -240,22 +248,43 @@ export function buildSectorForecastSnapshot({
     const weekProbability = Number.isFinite(Number(quant?.weekProbability))
       ? clamp(Number(quant.weekProbability))
       : null
+    const nextModelScore = sectorProbabilityScore(nextProbability)
+    const weekModelScore = sectorProbabilityScore(weekProbability)
     const nextScore = nextProbability === null
       ? baseline.forecast.next.score
       : rounded(
           baseline.forecast.next.score * 0.45
-            + nextProbability * 0.55,
+            + nextModelScore * 0.55,
           1,
         )
     const weekScore = weekProbability === null
       ? baseline.forecast.week.score
       : rounded(
           baseline.forecast.week.score * 0.45
-            + weekProbability * 0.55,
+            + weekModelScore * 0.55,
           1,
         )
+    const modelProbabilities = [
+      nextProbability,
+      weekProbability,
+    ].filter((value) => value !== null)
+    const maximumProbability = modelProbabilities.length
+      ? Math.max(...modelProbabilities)
+      : null
+    let actionability = baseline.actionability
+    if (
+      actionability === 'LAYOUT'
+      && maximumProbability !== null
+      && maximumProbability < 26
+    ) actionability = 'WAIT_PULLBACK'
+    if (
+      !['AVOID', 'WATCH_ONLY'].includes(actionability)
+      && maximumProbability !== null
+      && maximumProbability < 16
+    ) actionability = 'WATCH_ONLY'
     return {
       ...baseline,
+      actionability,
       breadth: features.breadth,
       raw: features.raw,
       forecast: {

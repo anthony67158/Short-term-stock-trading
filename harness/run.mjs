@@ -38,6 +38,9 @@ import {
   runShadowHarnessCase,
 } from './adapters/shadow.mjs'
 import {
+  runSectorHarnessCase,
+} from './adapters/sector.mjs'
+import {
   compareHarnessBaseline,
   createHarnessBaseline,
   loadHarnessBaseline,
@@ -53,6 +56,7 @@ const ADAPTERS = {
   daily: runDailyHarnessCase,
   endpoint: runEndpointHarnessCase,
   shadow: runShadowHarnessCase,
+  sector: runSectorHarnessCase,
 }
 
 function parseArgs(argv) {
