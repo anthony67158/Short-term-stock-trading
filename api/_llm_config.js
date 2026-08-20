@@ -24,6 +24,7 @@ export const ROLES = {
   advisor: { envs: ['ADVISOR_MODEL'], def: 'DeepSeek-V4-Pro',   label: '操盘军师(深度研判)' },
   portfolio: { envs: ['PORTFOLIO_MODEL'], def: 'DeepSeek-V4-Pro', label: '持仓分布分析' },
   agent:   { envs: ['AGENT_MODEL'],   def: 'Qwen3-Max-A',       label: '智能体/策略日报(需函数调用)' },
+  sector:  { envs: ['SECTOR_MODEL'],  def: 'gpt-5.6-terra',     label: '板块前瞻' },
   judge:   { envs: ['JUDGE_MODEL'],   def: 'gemini-2.5-flash',  label: '交易时机判定(确认闸门)' },
 };
 
@@ -35,7 +36,7 @@ function envConfig() {
     let v = '';
     for (const e of m.envs) { if (process.env[e]) { v = process.env[e]; break; } }
     models[role] = v || m.def;
-    reasoning[role] = false;   // 深度思考默认关闭
+    reasoning[role] = role === 'sector';
   }
   const config = {
     baseUrl: process.env.LLM_BASE_URL || '',
