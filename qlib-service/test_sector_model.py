@@ -1,8 +1,10 @@
 import unittest
+from unittest.mock import patch
 import subprocess
 import sys
 
 import numpy as np
+import sector_model
 
 from sector_model import (
     FEATURE_NAMES,
@@ -37,6 +39,17 @@ class SectorModelTest(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_runtime_model_loads_with_dense_scipy_compatibility(self):
+        with patch.object(
+            sector_model,
+            "_ensure_lightgbm_dense_imports",
+        ) as ensure_dense:
+            models, _ = sector_model.get_sector_models(force=True)
+
+        ensure_dense.assert_called_once_with()
+        self.assertIsNotNone(models[0])
+        self.assertIsNotNone(models[1])
 
     def test_runtime_vector_uses_explicit_feature_order(self):
         factors = {

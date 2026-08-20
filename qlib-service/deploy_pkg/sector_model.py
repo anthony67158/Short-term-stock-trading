@@ -7,7 +7,7 @@ import time
 import numpy as np
 
 from sector_contract import FEATURE_NAMES
-from model_lib import _oss_bucket
+from model_lib import _ensure_lightgbm_dense_imports, _oss_bucket
 
 
 SECTOR_PREFIX = os.environ.get("SECTOR_MODEL_PREFIX", "sectormodel/")
@@ -82,6 +82,7 @@ def get_sector_models(force=False):
         and now - _LOADED_AT < MODEL_TTL_SECONDS
     ):
         return _MODELS, _META
+    _ensure_lightgbm_dense_imports()
     try:
         import lightgbm as lgb
     except Exception:
