@@ -140,6 +140,7 @@ const cloudSaveQueue = createCloudSaveQueue({
     outboxId,
     lockedBaseRevision,
     baseTradeFingerprint,
+    forceTradeState = false,
   }) {
     if (!accountSessionMatches(session)) {
       return { ok: false, retryable: false, error: '账号会话已切换' }
@@ -154,6 +155,7 @@ const cloudSaveQueue = createCloudSaveQueue({
           : _cloudRevision,
         baseTradeFingerprint: baseTradeFingerprint
           || _lastSyncedTradeFingerprint,
+        ...(forceTradeState ? { forceTradeState: true } : {}),
       },
       save: (payload) => api('save', payload),
       getLatest: () => api('get', credentials),
@@ -352,6 +354,40 @@ export const authStore = {
       })
     }
     return cloudSaveQueue.retry()
+  },
+  async resolveTradeConflict() {
+    const session = currentAccountSession()
+    const credentials = accountCredentialPayload(_credentials)
+    if (!credentials || !accountSessionMatches(session)) {
+      return { ok: false, error: '当前未登录' }
+    }
+    const pending = readOutbox(credentials.nick)
+    const data = pending?.data || planStore.get()
+    const outboxId = pending?.id
+      || `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    if (!pending) {
+      writeOutbox({
+        id: outboxId,
+        nick: credentials.nick,
+        data,
+        at: Date.now(),
+        baseRevision: _cloudRevision,
+        baseTradeFingerprint: _lastSyncedTradeFingerprint,
+      })
+    }
+    return cloudSaveQueue.enqueue({
+      ...credentials,
+      session,
+      data,
+      outboxId,
+      lockedBaseRevision: Number.isInteger(pending?.baseRevision)
+        ? pending.baseRevision
+        : _cloudRevision,
+      baseTradeFingerprint:
+        pending?.baseTradeFingerprint
+        || _lastSyncedTradeFingerprint,
+      forceTradeState: true,
+    })
   },
   async deactivate() {
     const session = currentAccountSession()

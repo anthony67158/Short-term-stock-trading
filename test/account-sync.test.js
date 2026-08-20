@@ -197,6 +197,45 @@ test('两端交易账本都变化时拒绝自动覆盖', async () => {
   assert.equal(calls.length, 1)
 })
 
+test('用户明确选择本机账本后使用云端最新版本强制保存一次', async () => {
+  const local = {
+    holding: [],
+    closed: [{ id: 'sell-1', code: '000636', type: 'SELL' }],
+  }
+  const calls = []
+  const result = await saveWithRevisionRecovery({
+    payload: {
+      data: local,
+      baseRevision: 7,
+      forceTradeState: true,
+    },
+    save: async (payload) => {
+      calls.push(payload)
+      return calls.length === 1
+        ? {
+            ok: false,
+            code: 'ACCOUNT_VERSION_CONFLICT',
+            revision: 8,
+            retryable: false,
+          }
+        : { ok: true, storage: 'oss', revision: 9 }
+    },
+    getLatest: async () => ({
+      ok: true,
+      revision: 8,
+      data: {
+        holding: [{ id: 'h1', code: '000636', qty: 1 }],
+        closed: [],
+      },
+    }),
+  })
+
+  assert.equal(result.ok, true)
+  assert.equal(calls.length, 2)
+  assert.equal(calls[1].baseRevision, 8)
+  assert.equal(calls[1].forceTradeState, true)
+})
+
 test('交易账本比较忽略AI建议和运行状态变化', () => {
   const base = {
     plan: [{ code: '600519' }],

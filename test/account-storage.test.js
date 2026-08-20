@@ -743,3 +743,54 @@ test('客户端保存持仓时不能清掉服务端已生成的策略日报摘�
   assert.deepEqual(account.data.adviceDailyReport, adviceDailyReport)
   assert.deepEqual(account.data.holding, [{ code: '000001', qty: 1 }])
 })
+
+test('显式冲突覆盖采用本机交易账本并取消已清仓股票的持仓任务', () => {
+  const account = {
+    clientRevision: 9,
+    data: {
+      holding: [{
+        id: 'hold-fenghua',
+        code: '000636',
+        name: '风华高科',
+        qty: 1,
+      }],
+      plan: [],
+      closed: [],
+      jobs: {
+        '000636': {
+          id: 'job-fenghua',
+          code: '000636',
+          mode: 'hold_advice',
+          status: 'queued',
+        },
+      },
+    },
+  }
+  const incoming = {
+    holding: [],
+    plan: [{ code: '000636', name: '风华高科' }],
+    closed: [{
+      id: 'sell-fenghua',
+      code: '000636',
+      type: 'SELL',
+      qty: 1,
+      holdingId: 'hold-fenghua',
+    }],
+  }
+
+  const result = applyClientAccountSave(
+    account,
+    incoming,
+    8,
+    { forceTradeState: true },
+  )
+
+  assert.equal(result.ok, true)
+  assert.deepEqual(account.data.holding, [])
+  assert.equal(account.data.closed[0].id, 'sell-fenghua')
+  assert.equal(account.data.jobs['000636'].status, 'canceled')
+  assert.equal(
+    account.data.jobs['000636'].phase,
+    '持仓已清仓，旧持仓复核已取消',
+  )
+})

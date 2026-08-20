@@ -117,9 +117,20 @@ function mergeAccountAlerts(clientAlerts, serverAlerts) {
   });
 }
 
-export function applyClientAccountSave(account, incoming, baseRevision) {
+export function applyClientAccountSave(
+  account,
+  incoming,
+  baseRevision,
+  { forceTradeState = false } = {},
+) {
   const currentRevision = Number(account.clientRevision) || 0;
-  if (!Number.isInteger(baseRevision) || baseRevision !== currentRevision) {
+  if (
+    !forceTradeState
+    && (
+      !Number.isInteger(baseRevision)
+      || baseRevision !== currentRevision
+    )
+  ) {
     return {
       ok: false,
       code: 'ACCOUNT_VERSION_CONFLICT',
@@ -139,7 +150,7 @@ export function applyClientAccountSave(account, incoming, baseRevision) {
     !incomingClosedIds.has(record.id) &&
     incomingExecutionTxnIds.has(record.id)
   );
-  if (missingExecutedTrade) {
+  if (missingExecutedTrade && !forceTradeState) {
     return {
       ok: false,
       code: 'TRADE_STATE_CONFLICT',
@@ -232,6 +243,22 @@ export function applyClientAccountSave(account, incoming, baseRevision) {
   const heldCodes = new Set(
     (merged.holding || []).map((holding) => String(holding?.code || '')).filter(Boolean),
   );
+  if (merged.jobs && typeof merged.jobs === 'object') {
+    for (const job of Object.values(merged.jobs)) {
+      if (
+        !job
+        || job.mode !== 'hold_advice'
+        || heldCodes.has(String(job.code || ''))
+        || !['queued', 'running'].includes(job.status)
+      ) continue;
+      job.cancelRequested = true;
+      job.status = 'canceled';
+      job.finishedAt = Date.now();
+      job.leaseUntil = 0;
+      job.phase = '持仓已清仓，旧持仓复核已取消';
+      job.progressAt = job.finishedAt;
+    }
+  }
   merged.advice = Object.fromEntries(
     Object.entries(adv).filter(([code, entry]) =>
       adviceEntryMatchesMode(
@@ -478,7 +505,12 @@ export default async function handler(req, res) {
       if (!isAccountActive(acc)) return ok(res, { ok: false, error: '账号已注销，不能继续保存' });
       const incoming = (body.data && typeof body.data === 'object') ? body.data : null;
       if (incoming) {
-        const applied = applyClientAccountSave(acc, incoming, Number(body.baseRevision));
+        const applied = applyClientAccountSave(
+          acc,
+          incoming,
+          Number(body.baseRevision),
+          { forceTradeState: body.forceTradeState === true },
+        );
         if (!applied.ok) {
           const refreshPatch = newerAutoRefreshPatch(acc.data?.settings || {}, incoming.settings || {});
           let settingsSaved = false;

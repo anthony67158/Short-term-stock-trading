@@ -1,5 +1,9 @@
 import { beijingDate, beijingDayKey, isTradingDay } from './tradingCalendar.js'
-import { computeTFlows, tradeActivityContext } from './portfolioAccounting.js'
+import {
+  computeTFlows,
+  positionCostBasis,
+  tradeActivityContext,
+} from './portfolioAccounting.js'
 import { tradeIntentOf, tradeRecordType } from './tradeIntent.js'
 
 const round2 = (value) => +Number(value || 0).toFixed(2)
@@ -49,21 +53,9 @@ function currentPositions(holdings, quoteMap, todayKey) {
   let quoteComplete = true
   let tradeDateComplete = true
   const positions = (holdings || []).map((holding) => {
-    let shares = finite(holding.qty) * 100
-    let cost = finite(holding.buyPrice) * shares + finite(holding.buyFee)
-    const flows = [...(holding.tFlows || [])].sort((a, b) => finite(a.at) - finite(b.at))
-    for (const flow of flows) {
-      const flowShares = finite(flow.qty) * 100
-      if (!(flowShares > 0)) continue
-      if (flow.side === 'buy') {
-        shares += flowShares
-        cost += finite(flow.price) * flowShares + finite(flow.fee)
-      } else if (shares > 0) {
-        const removed = Math.min(shares, flowShares)
-        cost -= cost / shares * removed
-        shares -= removed
-      }
-    }
+    const basis = positionCostBasis(holding)
+    const shares = basis.liveQty * 100
+    const cost = basis.costValue
     const quote = quoteMap?.[holding.code] || {}
     const livePrice = finite(quote.price)
     const previousClose = finite(quote.prevClose)

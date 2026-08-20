@@ -141,9 +141,26 @@ export function AccountMenu() {
           <div className="acct-menu" role="menu">
             <div className="acct-menu-label" title={syncError || ''}>当前账号 · {syncLabel}</div>
             {(syncStatus === 'error' || syncStatus === 'conflict') && (
-              <button type="button" role="menuitem" className="acct-item" onClick={() => authStore.retrySave()}>
+              <button
+                type="button"
+                role="menuitem"
+                className="acct-item"
+                onClick={() => {
+                  if (syncStatus !== 'conflict') {
+                    void authStore.retrySave()
+                    return
+                  }
+                  const confirmed = window.confirm(
+                    '将以本机账本为准，覆盖云端冲突版本。'
+                    + '请只在持仓与交易流水正确的设备上继续。',
+                  )
+                  if (confirmed) void authStore.resolveTradeConflict()
+                }}
+              >
                 <Icon name="refresh" size={13} />
-                {syncStatus === 'conflict' ? '重新对齐并保存' : '立即重试 OSS 同步'}
+                {syncStatus === 'conflict'
+                  ? '以本机交易账本覆盖云端'
+                  : '立即重试 OSS 同步'}
               </button>
             )}
             <button type="button" role="menuitem" className="acct-item" onClick={() => { llmConfigStore.open(); setOpen(false) }}>

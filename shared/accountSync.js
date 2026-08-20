@@ -78,6 +78,7 @@ export async function saveWithRevisionRecovery({
   if (
     !remoteMatchesBase
     && !sameAccountTradeState(payload?.data, latest.data)
+    && payload?.forceTradeState !== true
   ) {
     return {
       ...response,

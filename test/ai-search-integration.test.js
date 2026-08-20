@@ -59,3 +59,13 @@ test('前端配置状态不持久化或回显明文Key', () => {
   assert.match(dialog, /失败冷却/)
   assert.match(dialog, /industryFailureCooldownMinutes/)
 })
+
+test('交易冲突必须提供明确的本机账本覆盖动作而不是无效重试', () => {
+  const auth = read('src/authStore.js')
+  const menu = read('src/components/AuthGate.jsx')
+
+  assert.match(auth, /resolveTradeConflict/)
+  assert.match(auth, /forceTradeState:\s*true/)
+  assert.match(menu, /以本机交易账本覆盖云端/)
+  assert.match(menu, /本机账本为准/)
+})

@@ -185,6 +185,31 @@ test('隔夜持仓按昨收市值计算当日涨跌金额与百分比', () => {
   assert.equal(result.floatPnl, 295)
 })
 
+test('持仓浮盈汇总与卡片共用做T收益摊薄后的有效成本', () => {
+  const result = computeDailyFinance({
+    now: at('2026-08-20T10:53:00'),
+    holdings: [{
+      id: 'hold-titan',
+      code: '003036',
+      qty: 1,
+      buyPrice: 52.8,
+      buyFee: 2.6,
+      tRealizedPnl: 135,
+    }],
+    trades: [],
+    quoteMap: {
+      '003036': {
+        price: 53.79,
+        prevClose: 53.85,
+        tradeDate: '2026-08-20',
+      },
+    },
+  })
+
+  assert.equal(result.floatPnl, 231.4)
+  assert.equal(result.floatPct, 4.5)
+})
+
 test('周末休市和交易日盘前不把旧行情显示成今日涨跌', () => {
   const base = {
     holdings: [{ code: '600000', qty: 1, buyPrice: 9, buyFee: 5 }],
