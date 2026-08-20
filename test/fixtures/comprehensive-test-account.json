@@ -1,0 +1,400 @@
+{
+  "fixtureProfile": "system-capability-demo.v1",
+  "fixtureNotice": "全部数据均为自动化测试假数据，不代表真实持仓或投资建议。",
+  "tradeStateResetAt": 1787191200000,
+  "account": {
+    "totalAssets": 250000,
+    "cash": 118000,
+    "goal": 300000,
+    "updatedAt": 1787191200000
+  },
+  "holding": [
+    {
+      "id": "demo-hold-core",
+      "code": "000001",
+      "name": "演示核心仓",
+      "qty": 10,
+      "buyPrice": 10.8,
+      "buyFee": 5,
+      "buyAt": 1786759200000,
+      "industry": "银行",
+      "concept": "金融科技",
+      "tRealizedPnl": 186,
+      "tFlows": [],
+      "muteAdd": false,
+      "muteReduce": false,
+      "muteTp": false,
+      "muteSl": false
+    },
+    {
+      "id": "demo-hold-standard",
+      "code": "600036",
+      "name": "演示标准仓",
+      "qty": 5,
+      "buyPrice": 43.2,
+      "buyFee": 6.48,
+      "buyAt": 1786845600000,
+      "industry": "银行",
+      "concept": "高股息",
+      "tRealizedPnl": 0,
+      "tFlows": [],
+      "muteAdd": false,
+      "muteReduce": false,
+      "muteTp": false,
+      "muteSl": false
+    },
+    {
+      "id": "demo-hold-satellite",
+      "code": "300750",
+      "name": "演示卫星仓",
+      "qty": 2,
+      "buyPrice": 205.5,
+      "buyFee": 12.33,
+      "buyAt": 1786932000000,
+      "industry": "电池",
+      "concept": "固态电池",
+      "tRealizedPnl": 0,
+      "tFlows": [
+        {
+          "id": "demo-open-t-buy",
+          "type": "BUY",
+          "qty": 1,
+          "price": 201.2,
+          "fee": 5,
+          "at": 1787184000000,
+          "tradeDate": "2026-08-20",
+          "cashApplied": true
+        }
+      ],
+      "muteAdd": false,
+      "muteReduce": false,
+      "muteTp": false,
+      "muteSl": false
+    }
+  ],
+  "plan": [
+    {
+      "id": "demo-plan-1",
+      "code": "002594",
+      "name": "演示候选A",
+      "buyPrice": 88.5,
+      "targetPrice": 96,
+      "stopPrice": 84.8,
+      "industry": "汽车",
+      "concept": "新能源汽车",
+      "star": true,
+      "alertMuted": false,
+      "createdAt": 1787104800000
+    },
+    {
+      "id": "demo-plan-2",
+      "code": "688981",
+      "name": "演示候选B",
+      "buyPrice": 102,
+      "targetPrice": 112,
+      "stopPrice": 97,
+      "industry": "半导体",
+      "concept": "国产芯片",
+      "star": false,
+      "alertMuted": false,
+      "createdAt": 1787104860000
+    },
+    {
+      "id": "demo-plan-3",
+      "code": "600519",
+      "name": "演示候选C",
+      "buyPrice": 1380,
+      "targetPrice": 1460,
+      "stopPrice": 1330,
+      "industry": "食品饮料",
+      "concept": "消费",
+      "star": false,
+      "alertMuted": false,
+      "createdAt": 1787104920000
+    }
+  ],
+  "closed": [
+    {
+      "id": "demo-buy-1",
+      "code": "000001",
+      "name": "演示核心仓",
+      "type": "BUY",
+      "tradeIntent": "build",
+      "qty": 10,
+      "price": 10.8,
+      "amount": 10800,
+      "fee": 5,
+      "cashFlow": -10805,
+      "at": 1786759200000,
+      "tradeDate": "2026-08-15"
+    },
+    {
+      "id": "demo-sell-1",
+      "code": "601318",
+      "name": "演示已减仓",
+      "type": "SELL",
+      "tradeIntent": "reduce",
+      "qty": 3,
+      "price": 58.6,
+      "amount": 17580,
+      "fee": 14.67,
+      "realizedPnl": 762.33,
+      "pnlPct": 4.55,
+      "cashFlow": 17565.33,
+      "at": 1787018400000,
+      "tradeDate": "2026-08-18"
+    },
+    {
+      "id": "demo-t-1",
+      "code": "000001",
+      "name": "演示核心仓",
+      "type": "T",
+      "tradeIntent": "t",
+      "qty": 2,
+      "buyPrice": 10.55,
+      "sellPrice": 11.52,
+      "buyFee": 5,
+      "sellFee": 6.02,
+      "grossPnl": 194,
+      "netPnl": 182.98,
+      "realizedPnl": 182.98,
+      "pnlPct": 8.63,
+      "cashFlow": 182.98,
+      "at": 1787108400000,
+      "tradeDate": "2026-08-19",
+      "settled": true
+    }
+  ],
+  "advice": {
+    "000001": {
+      "mode": "hold_advice",
+      "at": 1787190000000,
+      "cachedAt": 1787190000000,
+      "advice": {
+        "action": "持有",
+        "tier": "hold",
+        "title": "演示：核心仓继续持有",
+        "actionPlan": "守住10.60元继续持有，11.60元附近分批止盈。",
+        "invalidation": "收盘跌破10.40元且资金连续流出则失效。",
+        "quantNote": "演示量化分68，方向偏多。",
+        "fundNote": "演示资金连续两日净流入。",
+        "pnlNote": "演示做T收益已摊薄成本。",
+        "confidence": "中",
+        "reviewCycle": {
+          "nextReviewAt": 1893456000000,
+          "riskLevel": "normal"
+        }
+      }
+    },
+    "002594": {
+      "mode": "buy_advice",
+      "at": 1787189400000,
+      "cachedAt": 1787189400000,
+      "advice": {
+        "action": "观望",
+        "tier": "wait",
+        "title": "演示：等待买点确认",
+        "actionPlan": "回踩88.50元并出现量价承接后试仓1手。",
+        "invalidation": "跌破84.80元或行业资金转弱则取消关注。",
+        "quantNote": "演示量化分61，尚未触发高把握信号。",
+        "fundNote": "演示资金分歧。",
+        "pnlNote": "尚未建仓，无持仓盈亏。",
+        "confidence": "中"
+      }
+    }
+  },
+  "adviceLog": [
+    {
+      "id": "demo-advice-log-1",
+      "code": "000001",
+      "name": "演示核心仓",
+      "mode": "hold_advice",
+      "action": "持有",
+      "at": 1786849200000,
+      "verified": true,
+      "verifiedAt": 1787101200000,
+      "hit": true,
+      "outcomePct": 2.4,
+      "theoryNote": "趋势交易、凯利公式"
+    },
+    {
+      "id": "demo-advice-log-2",
+      "code": "002594",
+      "name": "演示候选A",
+      "mode": "buy_advice",
+      "action": "观望",
+      "at": 1787189400000,
+      "verified": false,
+      "theoryNote": "情绪周期"
+    }
+  ],
+  "decisionLog": [
+    {
+      "id": "demo-recommendation-1",
+      "kind": "recommendation",
+      "code": "000001",
+      "name": "演示核心仓",
+      "side": "hold",
+      "at": 1786849200000
+    },
+    {
+      "id": "demo-execution-1",
+      "kind": "execution",
+      "code": "000001",
+      "name": "演示核心仓",
+      "side": "buy",
+      "qty": 10,
+      "price": 10.8,
+      "transactionId": "demo-buy-1",
+      "recommendationId": "demo-recommendation-1",
+      "executedAt": 1786759200000,
+      "at": 1786759200000
+    }
+  ],
+  "alerts": [
+    {
+      "id": "demo-alert-confirmed",
+      "code": "000001",
+      "name": "演示核心仓",
+      "kind": "take-profit",
+      "op": "gte",
+      "price": 11.6,
+      "enabled": false,
+      "phase": "confirmed",
+      "triggeredAt": 1787104800000,
+      "triggeredMsg": "演示止盈提醒已确认"
+    },
+    {
+      "id": "demo-alert-invalid",
+      "code": "002594",
+      "name": "演示候选A",
+      "kind": "buy",
+      "op": "lte",
+      "price": 88.5,
+      "enabled": false,
+      "phase": "invalid",
+      "retiredAt": 1787187600000,
+      "retiredReason": "演示：策略条件失效"
+    }
+  ],
+  "reviews": {
+    "000001": {
+      "code": "000001",
+      "name": "演示核心仓",
+      "session": "noon",
+      "at": 1787108400000,
+      "text": "演示午间复盘：计划执行良好，继续控制仓位。"
+    },
+    "601318": {
+      "code": "601318",
+      "name": "演示已减仓",
+      "session": "close",
+      "at": 1787191200000,
+      "text": "演示收盘复盘：减仓纪律执行正确。"
+    }
+  },
+  "portfolioAnalysisLatest": {
+    "id": "demo-portfolio-analysis-1",
+    "generatedAt": 1787190600000,
+    "result": {
+      "summary": "演示组合：金融为核心仓，新能源为卫星仓，现金储备充足。",
+      "targetCashPct": 35,
+      "actions": [
+        {
+          "code": "000001",
+          "action": "持有",
+          "qty": 0,
+          "reason": "演示核心仓趋势稳定"
+        },
+        {
+          "code": "300750",
+          "action": "减仓",
+          "qty": 1,
+          "reason": "演示卫星仓控制波动"
+        }
+      ],
+      "scenarioPlan": {
+        "strong": "指数放量时维持核心仓。",
+        "neutral": "震荡时通过做T降低成本。",
+        "weak": "跌破风控线时提高现金比例。"
+      }
+    }
+  },
+  "portfolioAnalysisHistory": [
+    {
+      "id": "demo-portfolio-analysis-1",
+      "generatedAt": 1787190600000,
+      "summary": "演示组合：金融为核心仓，新能源为卫星仓。"
+    }
+  ],
+  "portfolioAnalysisReview": {
+    "enabled": false,
+    "intervalMinutes": 60,
+    "updatedAt": 1787191200000
+  },
+  "realOutcomeLearning": {
+    "schemaVersion": "real-outcome-learning.v1",
+    "overall": {
+      "samples": 3,
+      "winRate": 66.67,
+      "avgNetPct": 1.82
+    }
+  },
+  "settings": {
+    "theme": "light",
+    "advAuto.enabled": true,
+    "advAuto.holdEnabled": false,
+    "advAuto.watchEnabled": false,
+    "advAuto.holdIntervalMin": 15,
+    "advAuto.watchIntervalMin": 30,
+    "advAuto.configUpdatedAt": 1787191200000,
+    "advReview.disabledCodes": [
+      "000001",
+      "600036",
+      "300750",
+      "002594",
+      "688981",
+      "600519"
+    ]
+  },
+  "jobs": {
+    "demo-finished-job": {
+      "id": "demo-finished-job",
+      "code": "000001",
+      "name": "演示核心仓",
+      "mode": "hold_advice",
+      "status": "canceled",
+      "source": "ondemand",
+      "batchId": "demo-finished-batch",
+      "cancelRequested": true,
+      "at": 1787187600000,
+      "finishedAt": 1787187660000,
+      "phase": "演示任务已取消"
+    }
+  },
+  "batchProgress": {
+    "running": false,
+    "total": 1,
+    "done": 1,
+    "ok": 0,
+    "fail": 0,
+    "skipped": 1,
+    "current": [],
+    "items": [
+      {
+        "code": "000001",
+        "name": "演示核心仓",
+        "status": "skipped"
+      }
+    ],
+    "batchId": "demo-finished-batch",
+    "batchCanceled": true,
+    "at": 1787187660000,
+    "finishedAt": 1787187660000,
+    "source": "server",
+    "concurrency": 2
+  },
+  "adviceBatchCancellations": {
+    "demo-finished-batch": 1787187660000
+  }
+}
