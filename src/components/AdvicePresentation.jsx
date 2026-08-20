@@ -221,6 +221,9 @@ export default function AdvicePresentation({
               <span>{view.model.asOfLabel || '信号'} {view.model.asOf}</span>
             )}
           </div>
+          {view.model.nextTradeDayText && (
+            <div className="amc-next">{view.model.nextTradeDayText}</div>
+          )}
           {view.model.reliabilityText && (
             <div className="amc-reliability">{view.model.reliabilityText}</div>
           )}

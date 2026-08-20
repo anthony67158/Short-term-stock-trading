@@ -64,6 +64,36 @@ test('建议量化上下文优先展示模型实际输入截止时间', () => {
   assert.match(prompt, /已完成5分钟K聚合/)
 })
 
+test('生产模型军师在收盘后必须优先使用次日预测', () => {
+  const prompt = buildUserPrompt('hold_advice', {
+    code: '003036',
+    quantModelVersion: 'default',
+    marketPhase: '非交易时段',
+    quant: {
+      modelVersion: 'default',
+      asOf: '2026-08-19',
+      forecast: {
+        direction: '震荡',
+        upProb: 45,
+        expRet: -1.28,
+      },
+      nextTradeDayForecast: {
+        targetDate: '2026-08-20',
+        direction: '震荡',
+        upProb: 49,
+        expRet: -0.36,
+        targetLow: 49.17,
+        targetMid: 53.75,
+        targetHigh: 58.08,
+      },
+    },
+  })
+
+  assert.match(prompt, /收盘后\/盘前.*次日预测.*主依据/)
+  assert.match(prompt, /5日预测.*辅助/)
+  assert.match(prompt, /quantNote.*49%.*-0.36%.*49.17.*58.08/)
+})
+
 test('军师明确显示V2.1回退V2.0且不冒充盘中双头', () => {
   const prompt = buildUserPrompt('hold_advice', {
     quant: {

@@ -68,6 +68,39 @@ test('V2.1回退时同时保留用户选择和实际V2.0运行事实', () => {
   })
 })
 
+test('生产模型军师上下文固化次日预测而不是只保留五日窗口', () => {
+  const context = buildQuantAdviceContext({
+    modelVersion: 'default',
+    modelLabel: '当前生产模型',
+    asOf: '2026-08-19',
+    forecast: {
+      direction: '震荡',
+      upProb: 45,
+      expRet: -1.28,
+      horizon: 'next5TradingDays',
+    },
+    nextTradeDayForecast: {
+      targetDate: '2026-08-20',
+      direction: '震荡',
+      upProb: 49,
+      expRet: -0.36,
+      targetLow: 49.17,
+      targetMid: 53.75,
+      targetHigh: 58.08,
+    },
+  })
+
+  assert.deepEqual(context.nextTradeDayForecast, {
+    targetDate: '2026-08-20',
+    direction: '震荡',
+    upProb: 49,
+    expRet: -0.36,
+    targetLow: 49.17,
+    targetMid: 53.75,
+    targetHigh: 58.08,
+  })
+})
+
 test('Judge对实验V2.1禁止单模型确认并识别实际回退', () => {
   assert.match(quantJudgeDiscipline({
     selectedModelVersion: 'v2.1',

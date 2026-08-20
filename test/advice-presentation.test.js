@@ -185,3 +185,35 @@ test('军师默认展示所选模型、实际窗口与V2.1实验风险', () => {
     reliabilityText: '30分钟 53.92% · 收盘 54.58% · 门槛 58%',
   })
 })
+
+test('军师模型摘要直接展示本次采用的生产模型次日预测', () => {
+  const view = buildAdvicePresentation({
+    action: '持有',
+    title: '等待次日确认',
+    quantContext: {
+      selectedModelVersion: 'default',
+      effectiveModelVersion: 'default',
+      runtimeModelVersion: '',
+      modelLabel: '当前生产模型',
+      horizon: 'next5TradingDays',
+      asOf: '2026-08-19',
+      experimental: false,
+      fallback: null,
+      reliability: null,
+      nextTradeDayForecast: {
+        targetDate: '2026-08-20',
+        direction: '震荡',
+        upProb: 49,
+        expRet: -0.36,
+        targetLow: 49.17,
+        targetMid: 53.75,
+        targetHigh: 58.08,
+      },
+    },
+  })
+
+  assert.equal(
+    view.model.nextTradeDayText,
+    '次日 08-20 · 震荡 · 上涨49% · 预期-0.36% · 49.17~58.08',
+  )
+})

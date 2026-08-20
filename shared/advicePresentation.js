@@ -107,6 +107,16 @@ function modelSummary(advice) {
   const reliabilityText = next30m || sessionClose || threshold
     ? `30分钟 ${next30m || '—'}% · 收盘 ${sessionClose || '—'}% · 门槛 ${threshold || '—'}%`
     : ''
+  const next = context.nextTradeDayForecast
+  const nextTradeDayText = next && typeof next === 'object'
+    ? [
+        `次日 ${clean(next.targetDate, 20).slice(5) || '—'}`,
+        clean(next.direction, 20) || '方向待定',
+        `上涨${displayNumber(next.upProb) || '—'}%`,
+        `预期${Number(next.expRet) >= 0 ? '+' : ''}${displayNumber(next.expRet) || '—'}%`,
+        `${displayNumber(next.targetLow) || '—'}~${displayNumber(next.targetHigh) || '—'}`,
+      ].join(' · ')
+    : ''
   return {
     label: clean(context.modelLabel, 120),
     horizon: clean(context.horizon, 120),
@@ -115,6 +125,7 @@ function modelSummary(advice) {
     experimental: context.experimental === true,
     fallback: context.fallback || null,
     reliabilityText,
+    ...(nextTradeDayText ? { nextTradeDayText } : {}),
   }
 }
 

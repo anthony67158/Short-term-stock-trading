@@ -2533,6 +2533,7 @@ button.acct-item { width: 100%; border: 0; background: transparent; font: inheri
 .amc-head .icon { color: var(--accent); flex: none; }
 .amc-head b { flex: none; padding: 2px 7px; border-radius: 5px; color: var(--gold); background: rgba(227,179,65,.14); font-size: 10px; }
 .amc-meta { display: flex; flex-wrap: wrap; gap: 5px 10px; margin-top: 5px; color: var(--muted); font-size: 10.5px; }
+.amc-next { margin-top: 5px; color: var(--text2); font-size: 10.5px; font-variant-numeric: tabular-nums; line-height: 1.5; }
 .amc-reliability { margin-top: 5px; color: var(--gold); font-size: 10.5px; line-height: 1.5; }
 .amc-fallback { margin-top: 5px; color: var(--accent2); font-size: 10.5px; line-height: 1.5; }
 .advice-section-title { display: flex; align-items: center; gap: 5px; margin-bottom: 9px; color: var(--text); font-size: 12px; font-weight: 800; letter-spacing: .02em; }

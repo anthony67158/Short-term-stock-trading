@@ -43,6 +43,24 @@ function fallbackOf(value) {
   return reason ? { from, to, reason } : null
 }
 
+function forecastOf(value) {
+  if (!value || typeof value !== 'object') return null
+  const forecast = {
+    targetDate: clean(value.targetDate, 20),
+    direction: clean(value.direction, 20),
+    upProb: finite(value.upProb),
+    expRet: finite(value.expRet),
+    targetLow: finite(value.targetLow),
+    targetMid: finite(value.targetMid),
+    targetHigh: finite(value.targetHigh),
+  }
+  return Object.values(forecast).some(
+    (item) => item !== null && item !== '',
+  )
+    ? forecast
+    : null
+}
+
 export function buildQuantAdviceContext(
   quant,
   requestedVersion = 'default',
@@ -59,6 +77,9 @@ export function buildQuantAdviceContext(
       || (effectiveModelVersion === 'v2' ? 'v2.0-daily' : ''),
     80,
   )
+  const nextTradeDayForecast = forecastOf(
+    quant.nextTradeDayForecast,
+  )
   return {
     selectedModelVersion,
     effectiveModelVersion,
@@ -73,6 +94,7 @@ export function buildQuantAdviceContext(
       inputAsOf: clean(quant.inputAsOf, 40),
       inputSource: clean(quant.inputSource, 80),
     } : {}),
+    ...(nextTradeDayForecast ? { nextTradeDayForecast } : {}),
     experimental: selectedModelVersion === QUANT_MODEL_V21,
     fallback: fallbackOf(quant.fallback),
     reliability: reliabilityOf(
