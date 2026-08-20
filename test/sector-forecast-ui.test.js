@@ -147,4 +147,33 @@ test('板块前瞻桌面信息密集且移动端稳定单列', () => {
   const mobileGuidance = guidanceBlocks.find((block) =>
     block.includes('white-space: normal'))
   assert.match(mobileGuidance, /line-clamp:\s*2/)
+
+  const rankBlocks = [
+    ...styles.matchAll(
+      /\.sector-forecast-rank\s*\{([^}]*)\}/g,
+    ),
+  ].map((match) => match[1])
+  const mobileRank = rankBlocks.find((block) =>
+    block.includes('position: absolute'))
+  assert.match(
+    mobileRank,
+    /inset-inline-start:\s*var\(--space-sm\)/,
+  )
+  assert.match(
+    mobileRank,
+    /top:\s*calc\(var\(--space-sm\)\s*\+\s*2px\)/,
+  )
+
+  const scoreBlocks = [
+    ...styles.matchAll(
+      /\.sector-forecast-score\s*\{([^}]*)\}/g,
+    ),
+  ].map((match) => match[1])
+  const mobileScore = scoreBlocks.find((block) =>
+    block.includes('position: absolute'))
+  assert.match(
+    mobileScore,
+    /inset-inline-end:\s*var\(--space-sm\)/,
+  )
+  assert.match(mobileScore, /top:\s*var\(--space-sm\)/)
 })

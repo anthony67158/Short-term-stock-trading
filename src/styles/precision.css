@@ -7305,7 +7305,9 @@ button.acct-item {
 
   .sector-forecast-rank {
     position: absolute;
-    margin-top: 1px;
+    top: calc(var(--space-sm) + 2px);
+    inset-inline-start: var(--space-sm);
+    width: 20px;
     text-align: start;
   }
 
@@ -7324,6 +7326,9 @@ button.acct-item {
 
   .sector-forecast-score {
     position: absolute;
+    top: var(--space-sm);
+    inset-inline-end: var(--space-sm);
+    width: 68px;
     align-self: start;
     justify-self: end;
     text-align: end;
