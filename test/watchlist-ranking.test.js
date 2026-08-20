@@ -69,7 +69,7 @@ test('重点关注仍置顶且缺少买入价时不会获得虚假接近度', ()
   assert.equal(ranked[0].readiness.proximityScore, null)
 })
 
-test('自选排序按立即买入回调再买试错无建议观望分层', () => {
+test('人工置顶绝对优先，其余自选按建议档位分层', () => {
   const candidates = [
     { code: '600001', qScore: 30, targetPrice: 10 },
     { code: '600002', qScore: 95, targetPrice: 10 },
@@ -107,11 +107,11 @@ test('自选排序按立即买入回调再买试错无建议观望分层', () =>
 
   assert.deepEqual(
     ranked.map((item) => item.code),
-    ['600001', '600002', '600005', '600004', '600003'],
+    ['600003', '600001', '600002', '600005', '600004'],
   )
   assert.deepEqual(
     ranked.map((item) => item.advicePriority.label),
-    ['立即买入', '回调再买', '小仓试错', '尚无建议', '观望'],
+    ['观望', '立即买入', '回调再买', '小仓试错', '尚无建议'],
   )
 })
 
@@ -157,5 +157,5 @@ test('自选列表订阅建议更新并把建议映射传入排序器', () => {
     source,
     /rankWatchlistCandidates\([\s\S]*?quote,[\s\S]*?adviceByCode/,
   )
-  assert.match(source, /按建议档位与买入准备度排序/)
+  assert.match(source, /置顶优先，再按建议档位排序/)
 })

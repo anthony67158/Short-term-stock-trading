@@ -1041,7 +1041,7 @@ function PlanList({ book, quote, stockTags, batchSel }) {
     <section className="panel plan-section plan-section-watch">
       <div className="plan-section-sticky">
         <div className="panel-head plan-head">
-          <div role="heading" aria-level="2" className="panel-title"><Icon name="eye" size={16} /> 自选 / 候选 <span className="sub-name">{book.plan.length} 只 · 按建议档位与买入准备度排序</span></div>
+          <div role="heading" aria-level="2" className="panel-title"><Icon name="eye" size={16} /> 自选 / 候选 <span className="sub-name">{book.plan.length} 只 · 置顶优先，再按建议档位排序</span></div>
           <div className="plan-head-r">
             <div className="plan-search"><StockSearch /></div>
           </div>

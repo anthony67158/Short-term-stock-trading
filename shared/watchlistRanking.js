@@ -121,11 +121,11 @@ export function rankWatchlistCandidates(
     ),
     _rankingIndex: index,
   })).sort((left, right) => {
-    if (left.advicePriority.score !== right.advicePriority.score) {
-      return right.advicePriority.score - left.advicePriority.score
-    }
     if (Boolean(left.star) !== Boolean(right.star)) {
       return left.star ? -1 : 1
+    }
+    if (left.advicePriority.score !== right.advicePriority.score) {
+      return right.advicePriority.score - left.advicePriority.score
     }
     if (left.readiness.score !== right.readiness.score) {
       return right.readiness.score - left.readiness.score
