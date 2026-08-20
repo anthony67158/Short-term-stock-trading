@@ -9,7 +9,7 @@ import SectorForecast from './SectorForecast'
 import ErrorBoundary from './ErrorBoundary'
 import { fmtPct, pctClass, fmtInflow, fmtRaw } from '../format'
 
-// ============ 今日选股 Tab：今天买什么 ============
+// ============ 今日决策：先定方向，再核验个股 ============
 export default function TodayTab({ interval, market, sectors }) {
   const zt = usePolling('/api/board?type=limitup&kind=zt', interval)
   const zb = usePolling('/api/board?type=limitup&kind=zb', interval)
