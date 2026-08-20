@@ -467,7 +467,7 @@ function aiSearchEvidenceText(item) {
   const scopeLabel = item.searchScope === 'stock'
     ? '豆包个股信息'
     : item.searchScope === 'industry'
-      ? '豆包行业补盲'
+      ? '豆包行业资讯'
       : '豆包搜索';
   const source = item.src || scopeLabel;
   const date = item.date || '时间未标注';
@@ -516,17 +516,6 @@ async function fetchMacroNews() {
     if (!macro.length) macro = pool; // 关键词一条没命中时退化为最新快讯,总比空缺强
     const heads = macro.slice(0, 8);
     return heads.length ? heads : null;
-  } catch { return null; }
-}
-
-// 行业/板块新闻——个股不仅要看宏观与自身消息，还要看所属行业的风向
-// 用该股所属行业名做定向检索(东财资讯)，取当日最新几条标题
-async function fetchIndustryNews(industry) {
-  if (!industry) return null;
-  try {
-    const kw = `${industry} 行业`;
-    const heads = await fetchNews(kw, 5);
-    return (heads && heads.length) ? heads : null;
   } catch { return null; }
 }
 
@@ -847,8 +836,8 @@ export default async function handler(req, res) {
             newsRefs = corpus.news.filter((n) => n.url).slice(0, 5);  // 供前端引用消息来源
           }
         }
-        // ★行业新闻 + 量化预测：二者相互独立，并行取(原来串行，白白多花一次网络往返)。
-        //   行业新闻依赖 corpus.profile.industry；量化预测依赖 detail.candles，均已在上面 Promise.all 就绪。
+        // 行业资讯统一使用豆包搜索。旧定向新闻接口在 FC 云出口持续返回空，
+        // 豆包行业结果按四小时缓存并单飞合并，自动复核仍只读缓存。
         const industry = corpus && corpus.profile && corpus.profile.industry;
         const hasCandles = detail && detail.ok && Array.isArray(detail.candles) && detail.candles.length >= 25;
         // ★让量化模型"基于现在预测未来":盘中把实时价/量并入送模型的最后一根K线。
@@ -874,21 +863,6 @@ export default async function handler(req, res) {
             marketVolLevel: (mkt && mkt.ok && mkt.breadth) ? mkt.breadth.volLevel : null,
           };
         }
-        const industryNewsPromise = industry
-          ? track(
-            'industryNews',
-            '行业新闻主源',
-            fetchIndustryNews(industry),
-            (value) => Array.isArray(value) && value.length > 0,
-          )
-          : (() => {
-            sourceTracker.skip(
-              'industryNews',
-              '行业新闻主源',
-              'NO_INDUSTRY',
-            );
-            return Promise.resolve(null);
-          })();
         const quantPromise = hasCandles
           ? track(
             'quant',
@@ -916,11 +890,6 @@ export default async function handler(req, res) {
             );
             return Promise.resolve(null);
           })();
-        const indNews = await industryNewsPromise;
-        const industryFallback = !!(
-          industry
-          && (!Array.isArray(indNews) || !indNews.length)
-        );
         const searchAvailable = (value) =>
           Array.isArray(value?.items) && value.items.length > 0;
         const searchAsOf = (value) => value?.items
@@ -935,7 +904,7 @@ export default async function handler(req, res) {
               name: payload.name || corpus?.name || '',
               industry,
               reviewOrigin: payload.reviewOrigin,
-              industryFallback,
+              includeIndustry: !!industry,
             }, {
               stockFetcher: (input) => track(
                 'stockSearch',
@@ -947,8 +916,8 @@ export default async function handler(req, res) {
                 searchAsOf,
               ),
               industryFetcher: (input) => track(
-                'industrySearchFallback',
-                '豆包行业补盲',
+                'industrySearch',
+                '豆包行业资讯',
                 fetchIndustrySearchSupplement(input, {
                   runtimeConfig: aiSearchConfig,
                 }),
@@ -981,17 +950,7 @@ export default async function handler(req, res) {
             quantModelVersion,
           });
         }
-        if (industry && indNews && indNews.length) {
-          payload.industry = industry;
-          payload.industryNews = indNews
-            .map(labeledNewsTitle)
-            .filter(Boolean)
-            .slice(0, 5);
-          payload.industryNewsSource = 'market-news';
-        } else if (
-          industryFallback
-          && industrySearch?.items?.length
-        ) {
+        if (industry && industrySearch?.items?.length) {
           payload.industry = industry;
           payload.industryNews = industrySearch.items
             .map((item) => aiSearchEvidenceText({
@@ -1000,7 +959,7 @@ export default async function handler(req, res) {
             }))
             .filter(Boolean)
             .slice(0, 5);
-          payload.industryNewsSource = 'ai-search-fallback';
+          payload.industryNewsSource = 'doubao-search';
         }
         if (advisorSearch?.enabled !== false) {
           payload.aiSearchMeta = {
@@ -1011,12 +970,12 @@ export default async function handler(req, res) {
             fetchedAt: advisorSearch?.fetchedAt || null,
             requestId: advisorSearch?.requestId || null,
             errorCode: advisorSearch?.errorCode ?? null,
-            industryFallback,
+            industryProvider: industry ? 'doubao-global' : null,
             stockStatus: advisorSearch?.stock?.status || 'unavailable',
             stockCount: advisorSearch?.stock?.items?.length || 0,
             stockBilled: advisorSearch?.stock?.billed === true,
             industryStatus: industrySearch?.status || (
-              industryFallback ? 'unavailable' : 'not-needed'
+              industry ? 'unavailable' : 'not-needed'
             ),
             industryCount: industrySearch?.items?.length || 0,
             industryBilled: industrySearch?.billed === true,

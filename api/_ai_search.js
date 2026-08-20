@@ -759,6 +759,7 @@ export async function fetchAdvisorSearchBundle({
   name = '',
   industry = '',
   reviewOrigin = '',
+  includeIndustry = false,
   industryFallback = false,
 } = {}, options = {}) {
   const stockFetcher = options.stockFetcher
@@ -784,7 +785,10 @@ export async function fetchAdvisorSearchBundle({
       status: 'scheduled-cache-miss',
     }
     : fetchedStock;
-  const fetchedIndustry = industryFallback && industry
+  const fetchedIndustry =
+    (includeIndustry || industryFallback)
+    && industry
+    && !stockUsedIndustryCache
     ? await industryFetcher({ industry, reviewOrigin })
     : null;
   const industryResult = fetchedIndustry

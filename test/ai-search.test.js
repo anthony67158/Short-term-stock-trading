@@ -355,12 +355,55 @@ test('行业主源失败时仍搜索个股并额外合并行业补盲', async ()
   assert.equal(result.billed, true)
 })
 
+test('军师行业资讯可直接使用豆包主源而不依赖旧新闻源失败', async () => {
+  const calls = []
+  const result = await fetchAdvisorSearchBundle({
+    code: '688981',
+    name: '中芯国际',
+    industry: '半导体',
+    includeIndustry: true,
+  }, {
+    stockFetcher: async (input) => {
+      calls.push({ type: 'stock', input })
+      return {
+        items: [{
+          title: '中芯国际披露经营进展',
+          url: 'https://example.com/stock',
+        }],
+        status: 'network',
+        billed: true,
+        enabled: true,
+      }
+    },
+    industryFetcher: async (input) => {
+      calls.push({ type: 'industry', input })
+      return {
+        items: [{
+          title: '半导体行业景气改善',
+          url: 'https://example.com/industry',
+        }],
+        status: 'network',
+        billed: true,
+        enabled: true,
+      }
+    },
+  })
+
+  assert.deepEqual(
+    calls.map((item) => item.type),
+    ['stock', 'industry'],
+  )
+  assert.equal(result.industry.items[0].title, '半导体行业景气改善')
+  assert.equal(result.items[1].searchScope, 'industry')
+})
+
 test('自动复核命中的行业缓存不会冒充个股信息', async () => {
   const result = await fetchAdvisorSearchBundle({
     code: '000858',
     name: '五粮液',
     industry: '白酒',
     reviewOrigin: 'auto',
+    includeIndustry: true,
   }, {
     stockFetcher: async () => ({
       items: [{
@@ -372,7 +415,7 @@ test('自动复核命中的行业缓存不会冒充个股信息', async () => {
       enabled: true,
     }),
     industryFetcher: async () => {
-      throw new Error('行业主源正常时不应额外搜索')
+      throw new Error('已命中行业缓存时不应重复读取')
     },
   })
 

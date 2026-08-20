@@ -22,8 +22,9 @@ test('军师助手日报选股统一接入AI检索配置', () => {
 
   assert.match(ai, /fetchAdvisorSearch/)
   assert.match(ai, /fetchIndustrySearchSupplement/)
-  assert.match(ai, /行业新闻主源/)
-  assert.match(ai, /豆包行业补盲/)
+  assert.doesNotMatch(ai, /行业新闻主源/)
+  assert.match(ai, /豆包行业资讯/)
+  assert.match(ai, /includeIndustry/)
   assert.match(ai, /industryNewsSource/)
   assert.match(ai, /fetchAiSearchReference/)
   assert.match(ai, /fetchAdvisorSearchBundle/)

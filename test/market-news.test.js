@@ -147,3 +147,17 @@ test('行业AI补盲在提示词中明确标记待核验且不得单独升级动
   assert.match(prompt, /待核验/)
   assert.match(prompt, /不得单独升级买入或加仓/)
 })
+
+test('豆包作为行业资讯主源时仍明确标记待核验', () => {
+  const prompt = buildUserPrompt('buy_advice', {
+    industry: '半导体',
+    industryNewsSource: 'doubao-search',
+    industryNews: [
+      '【豆包行业资讯待核验】半导体资本开支改善',
+    ],
+  })
+
+  assert.match(prompt, /豆包行业资讯/)
+  assert.match(prompt, /待核验/)
+  assert.match(prompt, /不得单独升级买入或加仓/)
+})
