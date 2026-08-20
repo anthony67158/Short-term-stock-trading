@@ -6,6 +6,8 @@ import {
 } from '../shared/sectorForecastProgress.js'
 import {
   beijingDayKey,
+  beijingDate,
+  isContinuousTrading,
 } from '../shared/tradingCalendar.js'
 import {
   authorizePaidRequest,
@@ -25,11 +27,79 @@ import {
 } from './_sector_quant.js'
 import {
   dueSectorForecastSession,
+  sectorForecastIntradaySlot,
+  sectorForecastMarketPhase,
   sectorForecastRunKey,
   sectorForecastStore,
 } from './_sector_forecast_store.js'
 
 const generationFlights = new Map()
+
+function normalizedSession(value) {
+  return ['close', 'overnight', 'intraday'].includes(value)
+    ? value
+    : 'close'
+}
+
+function beijingTimeLabel(timestamp = Date.now()) {
+  const date = beijingDate(timestamp)
+  return `${beijingDayKey(timestamp)} `
+    + `${String(date.getHours()).padStart(2, '0')}:`
+    + String(date.getMinutes()).padStart(2, '0')
+}
+
+function quantPriorsFromSnapshot(snapshot) {
+  return new Map(
+    (Array.isArray(snapshot?.sectors) ? snapshot.sectors : [])
+      .filter((item) => item?.code)
+      .map((item) => [String(item.code), {
+        nextProbability: item.forecast?.next?.probability,
+        weekProbability: item.forecast?.week?.probability,
+        drawdownEstimate: item.forecast?.week?.drawdownEstimate,
+      }]),
+  )
+}
+
+function mergeIntradayContext(snapshot, base, now = Date.now()) {
+  const byCode = new Map(
+    (Array.isArray(base?.sectors) ? base.sectors : [])
+      .filter((item) => item?.code)
+      .map((item) => [String(item.code), item]),
+  )
+  return {
+    ...snapshot,
+    session: 'intraday',
+    baseSession: base?.session || null,
+    baseGeneratedAt: Number(base?.generatedAt) || null,
+    generatedAt: Number(now) || Date.now(),
+    rankingGeneratedAt: Number(now) || Date.now(),
+    dataAsOf: beijingTimeLabel(now),
+    intradayEstimate: true,
+    model: {
+      ...snapshot.model,
+      quant: quantPriorsFromSnapshot(base).size
+        ? 'lightgbm-prior'
+        : 'unavailable',
+    },
+    sectors: snapshot.sectors.map((sector) => {
+      const formal = byCode.get(String(sector.code))
+      return {
+        ...sector,
+        formalRank: formal?.rank || null,
+        formalWeekRank: formal?.weekRank || null,
+        formalActionability: formal?.actionability || null,
+        explanation: {
+          ...(formal?.explanation || {}),
+          whyNow: (sector.reasons || []).join('；')
+            || `盘中资金与成分股结构支持当前${sector.rank}名。`,
+          risks: sector.risks?.length
+            ? sector.risks
+            : (formal?.explanation?.risks || formal?.risks || []),
+        },
+      }
+    }),
+  }
+}
 
 function reply(res, status, body) {
   res.status(status)
@@ -72,12 +142,13 @@ export function runSectorForecastGeneration({
   session = 'close',
   signalDate,
   runDate = signalDate,
+  runSlot = '',
   generate,
   force = false,
   now = Date.now,
 } = {}) {
-  const runSession = session === 'overnight' ? 'overnight' : 'close'
-  const key = sectorForecastRunKey(runDate, runSession)
+  const runSession = normalizedSession(session)
+  const key = sectorForecastRunKey(runDate, runSession, runSlot)
   if (!key) return Promise.reject(new Error('板块前瞻任务日期无效'))
   if (typeof generate !== 'function') {
     return Promise.reject(new Error('板块前瞻生成器未配置'))
@@ -88,11 +159,14 @@ export function runSectorForecastGeneration({
   const task = (async () => {
     const previousTask = await store.readTask()
     if (!force && previousTask.completed?.[key]) {
-      const snapshot = await store.readHistorySnapshot(
-        signalDate,
-        runSession,
-      )
-      return { ok: true, skipped: true, snapshot }
+      const snapshot = runSession === 'intraday'
+        ? await store.readIntraday()
+        : await store.readHistorySnapshot(signalDate, runSession)
+      return {
+        ok: true,
+        skipped: true,
+        snapshot,
+      }
     }
     const claim = !force && typeof store.claimRun === 'function'
       ? await store.claimRun(key, Number(now()) || Date.now())
@@ -166,7 +240,9 @@ export function runSectorForecastGeneration({
         percent: 94,
         message: runSession === 'overnight'
           ? '正在保存盘前证据复核版'
-          : '正在保存收盘正式版',
+          : runSession === 'intraday'
+            ? '正在保存盘中动态版'
+            : '正在保存收盘正式版',
       })
       await store.saveSnapshot(snapshot)
       const currentTask = await store.readTask()
@@ -272,6 +348,50 @@ export async function generateSectorForecastSnapshot({
     }
   }
 
+  if (session === 'intraday') {
+    await onProgress({
+      stage: 'loading',
+      percent: 12,
+      message: '正在读取正式版量化先验与隔夜证据',
+    })
+    const base = await store.readLatest()
+    await onProgress({
+      stage: 'collecting',
+      percent: 36,
+      message: '正在采集实时板块资金与成分股扩散',
+    })
+    const collected = await collect()
+    await onProgress({
+      stage: 'scoring',
+      percent: 72,
+      message: '正在重算盘中可买性与反追高闸门',
+    })
+    const modeled = buildSectorForecastSnapshot({
+      signalDate,
+      generatedAt: now(),
+      sectors: collected.sectors,
+      histories: collected.histories,
+      members: collected.members,
+      quantPredictions: quantPriorsFromSnapshot(base),
+    })
+    await onProgress({
+      stage: 'finalizing',
+      percent: 90,
+      message: '正在合并正式版证据并校验盘中结论',
+    })
+    return {
+      ...mergeIntradayContext(modeled, base, now()),
+      source: {
+        sectorProvider: 'eastmoney-realtime',
+        sectorUniverseCount: collected.allSectors.length,
+        candidateCount: collected.sectors.length,
+        historyDays: 30,
+        memberVerified: true,
+        quantPrior: base?.session || null,
+      },
+    }
+  }
+
   await onProgress({
     stage: 'collecting',
     percent: 14,
@@ -344,6 +464,12 @@ export async function runDueSectorForecast(timestamp = Date.now(), {
     }
   }
   const runDate = beijingDayKey(timestamp)
+  const runSlot = session === 'intraday'
+    ? sectorForecastIntradaySlot(
+      timestamp,
+      settings.intradayIntervalMinutes,
+    )
+    : ''
   const latest = session === 'overnight'
     ? await store.readLatest()
     : null
@@ -362,6 +488,7 @@ export async function runDueSectorForecast(timestamp = Date.now(), {
     session,
     signalDate,
     runDate,
+    runSlot,
     generate,
     now,
   })
@@ -417,7 +544,13 @@ export default async function handler(req, res) {
       return reply(res, 200, {
         ok: true,
         latest: await sectorForecastStore.readLatest(),
+        intraday: await sectorForecastStore.readIntraday(),
         settings: await sectorForecastStore.readSettings(),
+        market: {
+          intradayAvailable: isContinuousTrading(),
+          phase: sectorForecastMarketPhase(),
+          asOf: Date.now(),
+        },
       })
     }
 
@@ -458,9 +591,13 @@ export default async function handler(req, res) {
       })
     }
     if (action === 'generate') {
-      const session = body.session === 'overnight'
-        ? 'overnight'
-        : 'close'
+      const session = normalizedSession(body.session)
+      if (session === 'intraday' && !isContinuousTrading()) {
+        return reply(res, 409, {
+          ok: false,
+          error: '盘中动态版仅在交易日09:30-11:30、13:00-15:00可刷新',
+        })
+      }
       const runDate = beijingDayKey()
       const latest = session === 'overnight'
         ? await sectorForecastStore.readLatest()
@@ -478,6 +615,13 @@ export default async function handler(req, res) {
         session,
         signalDate,
         runDate,
+        runSlot: session === 'intraday'
+          ? sectorForecastIntradaySlot(
+            Date.now(),
+            (await sectorForecastStore.readSettings())
+              .intradayIntervalMinutes,
+          )
+          : '',
         force: true,
         generate: generateSectorForecastSnapshot,
       })

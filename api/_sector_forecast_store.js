@@ -1,6 +1,7 @@
 import {
   beijingDayKey,
   beijingMinutes,
+  isContinuousTrading,
   isTradingDayAt,
 } from '../shared/tradingCalendar.js'
 import {
@@ -17,10 +18,13 @@ export const DEFAULT_SECTOR_FORECAST_SETTINGS = Object.freeze({
   closeTime: '15:10',
   overnightEnabled: true,
   overnightTime: '08:50',
+  intradayEnabled: true,
+  intradayIntervalMinutes: 5,
 })
 
 const PATHS = Object.freeze({
   latest: `${SECTOR_FORECAST_PREFIX}latest.json`,
+  intraday: `${SECTOR_FORECAST_PREFIX}intraday.json`,
   settings: `${SECTOR_FORECAST_PREFIX}settings.json`,
   task: `${SECTOR_FORECAST_PREFIX}task.json`,
   history: `${SECTOR_FORECAST_PREFIX}history/`,
@@ -49,6 +53,13 @@ function normalizedTime(value, fallback, range, label) {
 }
 
 export function normalizeSectorForecastSettings(input = {}) {
+  const interval = Number(
+    input.intradayIntervalMinutes
+      ?? DEFAULT_SECTOR_FORECAST_SETTINGS.intradayIntervalMinutes,
+  )
+  if (![5, 10, 15].includes(interval)) {
+    throw new Error('盘中刷新间隔只能为5、10或15分钟')
+  }
   return {
     autoEnabled: typeof input.autoEnabled === 'boolean'
       ? input.autoEnabled
@@ -68,15 +79,52 @@ export function normalizeSectorForecastSettings(input = {}) {
       [6 * 60, 9 * 60 + 25, '06:00-09:25'],
       '盘前任务时间',
     ),
+    intradayEnabled: typeof input.intradayEnabled === 'boolean'
+      ? input.intradayEnabled
+      : DEFAULT_SECTOR_FORECAST_SETTINGS.intradayEnabled,
+    intradayIntervalMinutes: interval,
   }
 }
 
-export function sectorForecastRunKey(signalDate, session) {
+export function sectorForecastIntradaySlot(
+  timestamp = Date.now(),
+  intervalMinutes = 5,
+) {
+  const interval = [5, 10, 15].includes(Number(intervalMinutes))
+    ? Number(intervalMinutes)
+    : 5
+  const minutes = beijingMinutes(timestamp)
+  const slot = Math.floor(minutes / interval) * interval
+  return `${String(Math.floor(slot / 60)).padStart(2, '0')}:`
+    + String(slot % 60).padStart(2, '0')
+}
+
+export function sectorForecastMarketPhase(timestamp = Date.now()) {
+  if (!isTradingDayAt(timestamp)) return 'closed'
+  if (isContinuousTrading(timestamp)) return 'live'
+  const minutes = beijingMinutes(timestamp)
+  if (minutes < 570) return 'preopen'
+  if (minutes > 690 && minutes < 780) return 'lunch'
+  return 'closed'
+}
+
+export function sectorForecastRunKey(
+  signalDate,
+  session,
+  slot = '',
+) {
   const day = /^\d{4}-\d{2}-\d{2}$/.test(String(signalDate || ''))
     ? String(signalDate)
     : ''
-  const runSession = session === 'overnight' ? 'overnight' : 'close'
-  return day ? `${day}:${runSession}` : ''
+  const runSession = ['close', 'overnight', 'intraday'].includes(session)
+    ? session
+    : 'close'
+  if (!day) return ''
+  if (runSession !== 'intraday') return `${day}:${runSession}`
+  const runSlot = /^\d{2}:\d{2}$/.test(String(slot || ''))
+    ? String(slot)
+    : ''
+  return runSlot ? `${day}:${runSession}:${runSlot}` : ''
 }
 
 export function dueSectorForecastSession(
@@ -89,6 +137,14 @@ export function dueSectorForecastSession(
   const day = beijingDayKey(timestamp)
   const minutes = beijingMinutes(timestamp)
   const completed = task?.completed || {}
+  if (normalized.intradayEnabled && isContinuousTrading(timestamp)) {
+    const slot = sectorForecastIntradaySlot(
+      timestamp,
+      normalized.intradayIntervalMinutes,
+    )
+    const intradayKey = sectorForecastRunKey(day, 'intraday', slot)
+    if (!completed[intradayKey]) return 'intraday'
+  }
   const overnightKey = sectorForecastRunKey(day, 'overnight')
   if (
     normalized.overnightEnabled
@@ -113,9 +169,18 @@ function jsonOptions() {
   }
 }
 
+function compactCompleted(value, limit = 400) {
+  const entries = Object.entries(
+    value && typeof value === 'object' ? value : {},
+  )
+  return Object.fromEntries(entries.slice(-limit))
+}
+
 function snapshotPath(snapshot) {
   const day = String(snapshot?.signalDate || '')
-  const session = snapshot?.session === 'overnight' ? 'overnight' : 'close'
+  const session = snapshot?.session === 'overnight'
+    ? 'overnight'
+    : 'close'
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) {
     throw new Error('板块前瞻快照缺少有效signalDate')
   }
@@ -174,7 +239,15 @@ export function createSectorForecastStore(storage = {
       if (!storage.hasStorage()) return null
       return storage.readJson(PATHS.latest).catch(() => null)
     },
+    async readIntraday() {
+      if (!storage.hasStorage()) return null
+      return storage.readJson(PATHS.intraday).catch(() => null)
+    },
     async saveSnapshot(snapshot) {
+      if (snapshot?.session === 'intraday') {
+        await writeJson(PATHS.intraday, snapshot)
+        return snapshot
+      }
       await writeJson(snapshotPath(snapshot), snapshot)
       await writeJson(PATHS.latest, snapshot)
       return snapshot
@@ -218,9 +291,7 @@ export function createSectorForecastStore(storage = {
     async saveTask(task) {
       return writeJson(PATHS.task, {
         ...task,
-        completed: task?.completed && typeof task.completed === 'object'
-          ? task.completed
-          : {},
+        completed: compactCompleted(task?.completed),
       })
     },
     async claimRun(runKey, now = Date.now()) {

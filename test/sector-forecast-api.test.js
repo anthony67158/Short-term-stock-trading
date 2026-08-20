@@ -6,6 +6,9 @@ import {
   createSectorForecastStore,
   dueSectorForecastSession,
   normalizeSectorForecastSettings,
+  sectorForecastIntradaySlot,
+  sectorForecastMarketPhase,
+  sectorForecastRunKey,
 } from '../api/_sector_forecast_store.js'
 import {
   buildSectorForecastSnapshot,
@@ -73,17 +76,23 @@ test('板块前瞻默认自动运行并严格限制收盘与盘前时间范围',
     closeTime: '15:10',
     overnightEnabled: true,
     overnightTime: '08:50',
+    intradayEnabled: true,
+    intradayIntervalMinutes: 5,
   })
   assert.deepEqual(normalizeSectorForecastSettings({
     autoEnabled: false,
     closeTime: '16:20',
     overnightEnabled: false,
     overnightTime: '07:30',
+    intradayEnabled: false,
+    intradayIntervalMinutes: 15,
   }), {
     autoEnabled: false,
     closeTime: '16:20',
     overnightEnabled: false,
     overnightTime: '07:30',
+    intradayEnabled: false,
+    intradayIntervalMinutes: 15,
   })
   assert.throws(
     () => normalizeSectorForecastSettings({ closeTime: '14:59' }),
@@ -92,6 +101,12 @@ test('板块前瞻默认自动运行并严格限制收盘与盘前时间范围',
   assert.throws(
     () => normalizeSectorForecastSettings({ overnightTime: '09:30' }),
     /盘前任务时间/,
+  )
+  assert.throws(
+    () => normalizeSectorForecastSettings({
+      intradayIntervalMinutes: 3,
+    }),
+    /盘中刷新间隔/,
   )
 })
 
@@ -129,6 +144,60 @@ test('到期判断使用北京时间且开关关闭后不产生付费任务', ()
   )
 })
 
+test('盘中动态版只在连续交易时段按设置时间桶到期', () => {
+  const morning = Date.parse('2026-08-20T01:35:00.000Z')
+  const lunch = Date.parse('2026-08-20T04:00:00.000Z')
+  const afternoon = Date.parse('2026-08-20T05:10:00.000Z')
+  const settings = {
+    ...DEFAULT_SECTOR_FORECAST_SETTINGS,
+    intradayIntervalMinutes: 10,
+  }
+
+  assert.equal(sectorForecastIntradaySlot(morning, 10), '09:30')
+  assert.equal(
+    dueSectorForecastSession(morning, settings, {}),
+    'intraday',
+  )
+  assert.equal(
+    dueSectorForecastSession(morning, settings, {
+      completed: {
+        [sectorForecastRunKey(
+          '2026-08-20',
+          'intraday',
+          '09:30',
+        )]: true,
+      },
+    }),
+    null,
+  )
+  assert.equal(dueSectorForecastSession(lunch, settings, {}), null)
+  assert.equal(
+    dueSectorForecastSession(afternoon, settings, {}),
+    'intraday',
+  )
+  assert.equal(
+    dueSectorForecastSession(morning, {
+      ...settings,
+      intradayEnabled: false,
+    }, {}),
+    null,
+  )
+  assert.equal(sectorForecastMarketPhase(morning), 'live')
+  assert.equal(sectorForecastMarketPhase(lunch), 'lunch')
+  assert.equal(
+    sectorForecastMarketPhase(
+      Date.parse('2026-08-20T01:00:00.000Z'),
+    ),
+    'preopen',
+  )
+  assert.equal(
+    sectorForecastMarketPhase(
+      Date.parse('2026-08-20T07:10:00.000Z'),
+    ),
+    'closed',
+  )
+})
+
 test('市场级快照与设置使用独立OSS前缀并可读取历史摘要', async () => {
   const storage = memoryStorage()
   const store = createSectorForecastStore(storage)
@@ -155,6 +224,54 @@ test('市场级快照与设置使用独立OSS前缀并可读取历史摘要', as
     [...storage.values.keys()].every((path) =>
       path.startsWith('market/sector-forecast/')
     ),
+  )
+})
+
+test('盘中快照独立保存且不会覆盖收盘正式版或历史', async () => {
+  const storage = memoryStorage()
+  const store = createSectorForecastStore(storage)
+  const close = {
+    schemaVersion: 'sector-forecast.v1',
+    signalDate: '2026-08-20',
+    session: 'close',
+    generatedAt: 100,
+    sectors: [{ code: 'BK1000', rank: 1 }],
+  }
+  const intraday = {
+    ...close,
+    session: 'intraday',
+    generatedAt: 200,
+    sectors: [{ code: 'BK1001', rank: 1 }],
+  }
+
+  await store.saveSnapshot(close)
+  await store.saveSnapshot(intraday)
+
+  assert.deepEqual(await store.readLatest(), close)
+  assert.deepEqual(await store.readIntraday(), intraday)
+  assert.deepEqual(await store.readHistory(5), [{
+    signalDate: '2026-08-20',
+    session: 'close',
+    generatedAt: 100,
+    sectorCount: 1,
+  }])
+})
+
+test('盘中完成时间桶限制数量避免任务状态无限增长', async () => {
+  const storage = memoryStorage()
+  const store = createSectorForecastStore(storage)
+  const completed = Object.fromEntries(
+    Array.from({ length: 450 }, (_, index) => [
+      `2026-08-20:intraday:slot-${index}`,
+      true,
+    ]),
+  )
+
+  await store.saveTask({ completed })
+
+  assert.equal(
+    Object.keys((await store.readTask()).completed).length,
+    400,
   )
 })
 
@@ -774,6 +891,93 @@ test('盘前生成只复用收盘快照并且不重新采集或量化排名', as
   assert.equal(result.sectors[0].explanation.whyNow, '隔夜证据更新')
 })
 
+test('盘中生成使用实时盘面和正式版量化先验且不调用LLM', async () => {
+  let quantified = 0
+  let enriched = 0
+  const base = {
+    schemaVersion: 'sector-forecast.v1',
+    signalDate: '2026-08-20',
+    session: 'close',
+    generatedAt: 100,
+    sectors: [{
+      code: 'BK1000',
+      rank: 1,
+      phase: 'STARTUP',
+      actionability: 'WAIT_PULLBACK',
+      forecast: {
+        next: { score: 70, probability: 32 },
+        week: {
+          score: 68,
+          probability: 28,
+          drawdownEstimate: -2.1,
+        },
+      },
+      explanation: {
+        whyNow: '正式版解释',
+        catalysts: ['正式版催化'],
+        risks: ['正式版风险'],
+        evidence: [],
+      },
+    }],
+  }
+  const collected = {
+    allSectors: [{ code: 'BK1000' }],
+    sectors: [{
+      code: 'BK1000',
+      name: '机器人',
+      price: 101,
+      pct: 0.8,
+      mainInflow: 600e6,
+      mainRatio: 6,
+      amount: 20e9,
+    }],
+    histories: new Map(),
+    members: new Map(),
+  }
+  const stages = []
+
+  const result = await generateSectorForecastSnapshot({
+    signalDate: '2026-08-20',
+    session: 'intraday',
+    onProgress: async (progress) => {
+      stages.push(progress.stage)
+    },
+  }, {
+    store: { readLatest: async () => base },
+    collect: async () => collected,
+    fetchQuant: async () => {
+      quantified += 1
+      return new Map()
+    },
+    enrich: async () => {
+      enriched += 1
+      return null
+    },
+    now: () => 200,
+  })
+
+  assert.equal(quantified, 0)
+  assert.equal(enriched, 0)
+  assert.equal(result.session, 'intraday')
+  assert.equal(result.baseGeneratedAt, 100)
+  assert.equal(result.model.quant, 'lightgbm-prior')
+  assert.equal(result.sectors[0].forecast.next.probability, 32)
+  assert.equal(
+    result.sectors[0].explanation.catalysts[0],
+    '正式版催化',
+  )
+  assert.notEqual(
+    result.sectors[0].explanation.whyNow,
+    '正式版解释',
+  )
+  assert.deepEqual(stages, [
+    'loading',
+    'collecting',
+    'scoring',
+    'finalizing',
+  ])
+})
+
 test('自动开关关闭时run_due不会进入生成函数', async () => {
   let generated = 0
   const result = await runDueSectorForecast(
@@ -792,6 +996,38 @@ test('自动开关关闭时run_due不会进入生成函数', async () => {
 
   assert.equal(result.skipped, true)
   assert.equal(generated, 0)
+})
+
+test('盘中到期任务携带时间桶并保存到独立快照', async () => {
+  const storage = memoryStorage()
+  const store = createSectorForecastStore(storage)
+  const timestamp = Date.parse('2026-08-20T01:35:00.000Z')
+  let sessionSeen = null
+  const result = await runDueSectorForecast(timestamp, {
+    store,
+    generate: async ({ session }) => {
+      sessionSeen = session
+      return {
+        schemaVersion: 'sector-forecast.v1',
+        signalDate: '2026-08-20',
+        session,
+        generatedAt: timestamp,
+        sectors: [{ code: 'BK1000', rank: 1 }],
+      }
+    },
+    now: () => timestamp,
+  })
+
+  assert.equal(result.ok, true)
+  assert.equal(sessionSeen, 'intraday')
+  assert.equal((await store.readIntraday()).session, 'intraday')
+  assert.equal(await store.readLatest(), null)
+  assert.equal(
+    (await store.readTask()).completed[
+      '2026-08-20:intraday:09:35'
+    ],
+    true,
+  )
 })
 
 test('匿名读取板块前瞻不会泄露全局快照', async () => {
