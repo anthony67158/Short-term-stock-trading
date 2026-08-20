@@ -3,6 +3,7 @@ import os
 import sys
 import types
 import unittest
+from unittest import mock
 
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -11,13 +12,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 def load_publisher():
     upload_model = types.ModuleType("upload_model")
     upload_model.bucket = lambda: None
-    sys.modules["upload_model"] = upload_model
     spec = importlib.util.spec_from_file_location(
         "publish_retrain_report_under_test",
         os.path.join(HERE, "publish_retrain_report.py"),
     )
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    with mock.patch.dict(sys.modules, {"upload_model": upload_model}):
+        spec.loader.exec_module(module)
     return module
 
 
@@ -33,6 +34,13 @@ ENV = {
 
 
 class PublishRetrainReportTest(unittest.TestCase):
+    def test_upload_model_stub_does_not_leak_between_test_modules(self):
+        previous = sys.modules.get("upload_model")
+
+        load_publisher()
+
+        self.assertIs(sys.modules.get("upload_model"), previous)
+
     def test_incremental_wait_report_explains_both_windows(self):
         publisher = load_publisher()
         _, report = publisher.report_from({

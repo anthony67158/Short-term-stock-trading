@@ -3,6 +3,7 @@ import os
 import sys
 import types
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -19,20 +20,37 @@ def load_retrain_daily():
     train_lgb = types.ModuleType("train_lgb")
     train_lgb.cv_auc_and_iters = lambda *args, **kwargs: (0.5, 120)
     train_lgb.fit_final = lambda *args, **kwargs: None
-    sys.modules["lightgbm"] = lightgbm
-    sys.modules["sklearn"] = sklearn
-    sys.modules["sklearn.metrics"] = metrics
-    sys.modules["train_lgb"] = train_lgb
-
     spec = importlib.util.spec_from_file_location(
         "retrain_daily_under_test", os.path.join(HERE, "retrain_daily.py")
     )
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    with mock.patch.dict(sys.modules, {
+        "lightgbm": lightgbm,
+        "sklearn": sklearn,
+        "sklearn.metrics": metrics,
+        "train_lgb": train_lgb,
+    }):
+        spec.loader.exec_module(module)
     return module
 
 
 class ForwardHoldoutSplitTest(unittest.TestCase):
+    def test_dependency_stubs_do_not_leak_between_test_modules(self):
+        before = {
+            name: sys.modules.get(name)
+            for name in (
+                "lightgbm",
+                "sklearn",
+                "sklearn.metrics",
+                "train_lgb",
+            )
+        }
+
+        load_retrain_daily()
+
+        for name, previous in before.items():
+            self.assertIs(sys.modules.get(name), previous)
+
     def test_sync_preserves_migration_fields_for_the_same_champion(self):
         retrain = load_retrain_daily()
         remote = {"trained_at": 1785929794, "holdout_auc": 0.6521}

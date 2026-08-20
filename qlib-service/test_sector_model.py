@@ -1,5 +1,6 @@
 import unittest
 from unittest.mock import patch
+import os
 import subprocess
 import sys
 
@@ -11,6 +12,8 @@ from sector_model import (
     feature_vector,
     predict_sector_items,
 )
+
+HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 class FakeBooster:
@@ -33,7 +36,7 @@ class SectorModelTest(unittest.TestCase):
         )
         result = subprocess.run(
             [sys.executable, "-c", script],
-            cwd=".",
+            cwd=HERE,
             capture_output=True,
             text=True,
         )
