@@ -165,3 +165,101 @@ export async function confirmAdviceCancellation({
     error: error || '停止请求未确认，请重试',
   }
 }
+
+function batchCancellationConfirmed(
+  response,
+  progress,
+  batchId,
+  targets,
+) {
+  const responseBatchId = String(response?.batchId || '')
+  if (
+    response?.confirmed === true
+    && (!responseBatchId || responseBatchId === batchId)
+  ) return true
+  if (
+    progress?.batchCanceled === true
+    && String(progress.batchId || '') === batchId
+  ) return true
+  return targets.length > 0
+    && isAdviceCancellationConfirmed(progress, targets)
+}
+
+export async function confirmAdviceBatchCancellation({
+  batchId,
+  targets = [],
+  send,
+  readStatus,
+  attempts = 4,
+  delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  delayMs = 350,
+} = {}) {
+  const key = String(batchId || '')
+  if (!key) {
+    return {
+      ok: false,
+      confirmed: false,
+      canceled: 0,
+      batchId: '',
+      progress: null,
+      error: '缺少批次标识',
+    }
+  }
+  let progress = null
+  let error = ''
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      const response = await send(key, targets)
+      progress = response?.progress || progress
+      error = response?.ok === false
+        ? String(response.error || '停止请求未受理')
+        : ''
+      if (batchCancellationConfirmed(
+        response,
+        progress,
+        key,
+        targets,
+      )) {
+        return {
+          ok: true,
+          confirmed: true,
+          canceled: Number(response?.canceled) || targets.length,
+          batchId: key,
+          progress,
+        }
+      }
+    } catch (caught) {
+      error = String(caught?.message || caught || '停止请求失败')
+    }
+
+    try {
+      const latest = await readStatus()
+      if (latest) progress = latest
+      if (batchCancellationConfirmed(
+        null,
+        progress,
+        key,
+        targets,
+      )) {
+        return {
+          ok: true,
+          confirmed: true,
+          canceled: targets.length,
+          batchId: key,
+          progress,
+        }
+      }
+    } catch (caught) {
+      error = String(caught?.message || caught || error)
+    }
+    if (attempt + 1 < attempts) await delay(delayMs)
+  }
+  return {
+    ok: false,
+    confirmed: false,
+    canceled: 0,
+    batchId: key,
+    progress,
+    error: error || '停止请求未确认，请重试',
+  }
+}

@@ -1766,7 +1766,17 @@ function HoldingList({ book, quote, stockTags, searchConfig, batchSel }) {
               {batch.cancelError && <span className="bp-fail"> · {batch.cancelError}</span>}
             </span>
             {batch.running
-              ? <button className="chip-btn ghost bp-cancel" onClick={cancelBatch} disabled={batch.cancelRequested}>{batch.cancelRequested ? '停止中…' : '全部停止'}</button>
+              ? <button
+                  type="button"
+                  className="chip-btn ghost bp-cancel"
+                  onClick={() => { void cancelBatch() }}
+                  disabled={batch.cancelRequested}
+                  aria-busy={batch.cancelRequested}
+                >
+                  {batch.cancelRequested
+                    ? '停止中…'
+                    : batch.cancelError ? '重试停止' : '全部停止'}
+                </button>
               : (batch.fail > 0
                 ? <button className="chip-btn buy bp-regen" onClick={() => regenerateFailed(quote)}><Icon name="refresh" size={12} /> 重生成失败({batch.fail})</button>
                 : null)}

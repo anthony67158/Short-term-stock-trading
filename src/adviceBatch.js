@@ -2,10 +2,10 @@
 // 用户在自选/候选区多选(或全选)若干只股票 → 一键后台批量生成 AI 操作建议。
 // 特点:
 //   1) 模块级单例 + pub/sub —— 关闭面板/切 Tab 也照跑,回来还能看到实时进度(后台处理)。
-//   2) 串行生成(CONCURRENCY=1):一次只生成一只,且每只都完整生成完再进行下一只,避免半成品/打爆网关配额。
+//   2) 动态并发:快速模式按 advisor 端点数填槽，深度模式最多两路。
 //   3) 复用与手动生成完全同源的 spec 构造(buildHoldSpec/buildWatchSpec)与后台 runner(startAdvice)。
 //   4) 不做新鲜度节流:用户勾选了哪些就重生成哪些(选择权完全交给用户)。
-//   5) 可取消:cancel() 停止派发后续任务(已在途的那批跑完即止)。
+//   5) 可取消:批次墓碑立即阻止后续派发，并协作中止在途请求。
 import { planStore, computePortfolio } from './planStore'
 import { getAdvice } from './adviceCache'
 import { startAdvice, getRunningList, getResult, cancelAdvice } from './adviceRunner'
@@ -13,6 +13,7 @@ import { buildHoldSpec, buildWatchSpec } from './adviceDaily'
 import {
   triggerServerAdvice,
   canServerAdvice,
+  cancelServerAdviceBatch,
   cancelServerAdvice,
   startServerAdviceStatusSync,
 } from './serverAdvice'
@@ -51,6 +52,7 @@ const state = {
   _submissionPromise: null,
   _cancelingCodes: new Set(),
   _cancelAllRequested: false,
+  _canceledBatchIds: new Set(),
   _cancelBatchPromise: null,
   _cancelOnePromises: new Map(),
   concurrency: 1,      // 并发上限=服务端 advisor 端点数(云端进度回灌覆盖;首屏由 seedConcurrency 预置)
@@ -88,22 +90,30 @@ export function getBatchState() {
   }
 }
 export function isBatchRunning() { return state.running }
+function rememberCanceledBatch(batchId) {
+  const key = String(batchId || '')
+  if (!key) return
+  state._canceledBatchIds.add(key)
+  while (state._canceledBatchIds.size > 20) {
+    state._canceledBatchIds.delete(
+      state._canceledBatchIds.values().next().value,
+    )
+  }
+}
 // 取消整批:
-//   · 服务端模式 → 按 jobId 取消所有跨批次活跃任务并等待云端确认;
+//   · 服务端模式 → 当前批次写取消墓碑，跨批次任务按 jobId 精确取消;
 //   · 本地模式 → 立即 Abort 所有在途请求并停止后续派发。
 function prepareBatchCancellation() {
-  const previous = new Map(
-    state.items.map((item) => [String(item.code), { ...item }]),
-  )
   const targets = activeAdviceCancellationTargets(state.items)
   for (const target of targets) state._cancelingCodes.add(target.code)
   state._cancelAllRequested = true
+  rememberCanceledBatch(state.batchId)
   const canceling = beginAdviceCancellation(state.items)
   state.items = canceling.items
   state.cancelRequested = true
   state.cancelError = ''
   notify()
-  return { previous, targets, abortCodes: canceling.abortCodes }
+  return { targets, abortCodes: canceling.abortCodes }
 }
 
 function cancelLocalBatch(prepared) {
@@ -124,32 +134,45 @@ function cancelLocalBatch(prepared) {
 
 async function cancelBatchInternal() {
   if (!state.running) return { ok: true, confirmed: true, canceled: 0 }
-  let prepared = prepareBatchCancellation()
+  const prepared = prepareBatchCancellation()
   if (state.serverMode) {
-    if (state._submissionPromise) {
-      try { await state._submissionPromise } catch { /* 后续按当前模式处理 */ }
+    const batchId = state.batchId
+    const pendingSubmission = state._submissionPromise
+    if (pendingSubmission) {
+      const itemSnapshot = state.items.map((item) => ({ ...item }))
+      void pendingSubmission.finally(() => {
+        if (!state._canceledBatchIds.has(batchId)) return
+        void cancelServerAdviceBatch(batchId, itemSnapshot)
+      })
     }
-    if (!state.serverMode) {
-      state._cancelingCodes.clear()
-      prepared = prepareBatchCancellation()
-      return cancelLocalBatch(prepared)
-    }
-    const currentTargets = activeAdviceCancellationTargets(state.items)
-    const result = await cancelServerAdvice(currentTargets)
+    const result = await cancelServerAdviceBatch(
+      batchId,
+      state.items,
+    )
     if (result.progress) applyCloudBatch(result.progress, true)
-    for (const target of [...prepared.targets, ...currentTargets]) {
-      state._cancelingCodes.delete(target.code)
-    }
-    state._cancelAllRequested = false
-    state.cancelRequested = false
-    if (!result.confirmed) {
+    if (result.confirmed) {
+      state.items = state.items.map((item) =>
+        completeAdviceCancellation(item).item
+      )
+      state.skipped = state.items.filter(
+        (item) => item.status === 'skipped',
+      ).length
+      state.done = state.items.filter((item) =>
+        ['ok', 'fail', 'skipped'].includes(item.status)
+      ).length
+      state.current = new Set()
+      state.running = false
+      state.finishedAt = Date.now()
+      state._cancelingCodes.clear()
+      state._cancelAllRequested = false
+      state.cancelRequested = false
+      state.cancelError = ''
+      notify()
+    } else {
       state.cancelError = result.error || '停止请求未确认，请重试'
+      state.cancelRequested = false
       for (const item of state.items) {
-        if (item.status !== 'canceling') continue
-        const old = prepared.previous.get(String(item.code))
-        item.status = item.cancelPreviousStatus || old?.status || 'running'
-        item.phase = state.cancelError
-        delete item.cancelPreviousStatus
+        if (item.status === 'canceling') item.phase = state.cancelError
       }
       notify()
     }
@@ -282,6 +305,19 @@ export function regenerateFailed(quoteMap) {
 export function applyCloudBatch(bp, force = false) {
   if (!bp || typeof bp !== 'object') return
   const at = Number(bp.at || 0)
+  const cloudBatchId = String(bp.batchId || '')
+  if (
+    cloudBatchId
+    && state._canceledBatchIds.has(cloudBatchId)
+    && (
+      (bp.running && bp.batchCanceled !== true)
+      || (
+        state.running
+        && state.batchId
+        && cloudBatchId !== state.batchId
+      )
+    )
+  ) return
   if (state.running && !state.serverMode) return           // 本机本地批量进行中 → 不打架
   if (!shouldApplyCloudBatch(bp)) {
     const hadVisibleBatch = state.total > 0 || state.items.length > 0 || state.finishedAt > 0
@@ -299,8 +335,11 @@ export function applyCloudBatch(bp, force = false) {
   if (!force && (!at || at <= state._cloudAt)) return     // 不是更新的进度 → 忽略
   state._cloudAt = Math.max(state._cloudAt, at)
   state.serverMode = true
-  state.cancelRequested = state._cancelAllRequested
-  state.cancelError = ''
+  state.cancelRequested = (
+    state._cancelAllRequested
+    && !state.cancelError
+  )
+  if (!state._cancelAllRequested) state.cancelError = ''
   state.batchId = String(bp.batchId || state.batchId || '')
   state.deepMode = !!bp.deepMode
   if (Number(bp.concurrency) > 0) state.concurrency = Number(bp.concurrency)   // 权威并发上限=服务端 advisor 端点数
@@ -431,6 +470,12 @@ export async function runBatchAdvice(codes, quoteMap, opts = {}) {
         state._submissionPromise = null
       }
     }
+    if (
+      state._canceledBatchIds.has(batchId)
+      || submission?.canceled === true
+    ) {
+      return { status: 'canceled', mode: 'server' }
+    }
     if (submission === true || submission?.ok || submission?.queued) {
       return {
         status: 'started',
@@ -438,20 +483,6 @@ export async function runBatchAdvice(codes, quoteMap, opts = {}) {
         queued: !!submission?.queued,
         error: submission?.error || '',
       }
-    }
-    if (state._cancelAllRequested) {
-      for (const item of state.items) {
-        if (['pending', 'queued', 'running', 'canceling'].includes(item.status)) {
-          item.status = 'skipped'
-        }
-      }
-      state._cancelingCodes.clear()
-      state._cancelAllRequested = false
-      state.cancelRequested = false
-      state.running = false
-      state.finishedAt = Date.now()
-      notify()
-      return { status: 'canceled', mode: 'server' }
     }
     state.running = false
     notify()

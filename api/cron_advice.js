@@ -36,6 +36,8 @@ import { buildHoldPayload, buildWatchPayload, computePortfolio, t1StatusOf } fro
 import {
   CONCURRENCY, jobsOf, enqueueJob, leaseJob, completeJob, failJob, cancelJob, cancelAll,
   reapOrphans, gcJobs, runningCount, hasPendingWork, needsWorkerDispatch, isActive, jobsToProgress,
+  isAdviceBatchCanceled, markAdviceBatchCanceled,
+  mergeAdviceBatchCancellations,
   acquireWorkerLock, renewWorkerLock, renewLease, releaseWorkerLock, workerHeldByOther, updateJobProgress,
   compareAdviceJobs, hasActiveManualBatch, shouldContinueAdviceWorker,
   suspendAutomaticJobsForManualBatch,
@@ -793,6 +795,7 @@ async function runJobGen(
 // 对它不知道的 code(其它设备刚 enqueue 的第4只)从 fresh 补入;
 // 传播外部取消:fresh 里被标记 canceled/cancelRequested 的,回灌到内存。
 export function mergeExternalJobs(workingData, freshData) {
+  mergeAdviceBatchCancellations(workingData, freshData);
   const wj = jobsOf(workingData);
   const fj = (freshData && freshData.jobs && typeof freshData.jobs === 'object') ? freshData.jobs : {};
   for (const [code, fjob] of Object.entries(fj)) {
@@ -814,6 +817,7 @@ export function mergeExternalJobs(workingData, freshData) {
     // 外部对同 code 的强制重生成(新 id 且更新)→ 采纳新任务；旧在途请求由 cancelPoll 按 jobId 中止。
     else if (fjob.id !== cur.id && (fjob.at || 0) >= (cur.at || 0) && isActive(fjob)) wj[code] = fjob;
   }
+  mergeAdviceBatchCancellations(workingData, {}, Date.now());
   const withBatch = Object.values(wj).filter((job) => job?.batchId);
   const active = withBatch.filter((job) => isActive(job));
   const latest = (active.length ? active : withBatch)
@@ -835,6 +839,9 @@ async function persistServer(nick, workingAcc, myId) {
   // 先把云端外部变更并入内存(其它设备新入队/取消),再整体回写 jobs(服务端权威)
   mergeExternalJobs(wdata, fdata);
   fdata.jobs = wdata.jobs;
+  fdata.adviceBatchCancellations = {
+    ...(wdata.adviceBatchCancellations || {}),
+  };
   fdata.jobWorker = wdata.jobWorker;
   fdata.activeAdviceBatchId = wdata.activeAdviceBatchId || fdata.activeAdviceBatchId || '';
   if (
@@ -1515,9 +1522,29 @@ export default async function handler(req, res) {
         return res.end(JSON.stringify({ ok: true, canceled: n, progress: jobsToProgress(data, Date.now(), CONC) }));
       }
       if (op === 'cancelAll') {
-        const n = cancelAll(data, Date.now(), String(body.batchId || ''));
-        await persistServer(nick, acc, 'cancelAll');
-        return res.end(JSON.stringify({ ok: true, canceled: n, progress: jobsToProgress(data, Date.now(), CONC) }));
+        const batchId = String(body.batchId || '').trim().slice(0, 100);
+        if (!batchId) {
+          return res.end(JSON.stringify({
+            ok: false,
+            confirmed: false,
+            error: '缺少批次标识',
+          }));
+        }
+        markAdviceBatchCanceled(data, batchId, Date.now());
+        const n = cancelAll(data, Date.now(), batchId);
+        const persisted = await persistServer(
+          nick,
+          acc,
+          'cancelAll',
+        );
+        const finalData = persisted?.data || data;
+        return res.end(JSON.stringify({
+          ok: true,
+          confirmed: isAdviceBatchCanceled(finalData, batchId),
+          batchId,
+          canceled: n,
+          progress: jobsToProgress(finalData, Date.now(), CONC),
+        }));
       }
       // enqueue(默认):把 codes 排入队列(防重),随后 drain(拿不到锁则由在跑的 drainer 接手)
       const codes = Array.isArray(body.codes) ? [...new Set(body.codes.filter(Boolean).map(String))] : [];
@@ -1540,7 +1567,21 @@ export default async function handler(req, res) {
       const batchId = requestedBatchId
         ? requestedBatchId.slice(0, 100)
         : `ondemand_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-      let enq = 0, dup = 0;
+      if (
+        batchRequest
+        && isAdviceBatchCanceled(data, batchId)
+      ) {
+        return res.end(JSON.stringify({
+          ok: false,
+          accepted: false,
+          canceled: true,
+          confirmed: true,
+          batchId,
+          error: '该批次已停止',
+          progress: jobsToProgress(data, Date.now(), CONC),
+        }));
+      }
+      let enq = 0, dup = 0, canceledBeforeQueue = 0;
       if (batchRequest) {
         suspendAutomaticJobsForManualBatch(data, Date.now());
       }
@@ -1548,18 +1589,45 @@ export default async function handler(req, res) {
         if (scope === 'hold' && !holdSet.has(code)) continue;
         if (scope === 'watch' && holdSet.has(code)) continue;
         const mode = holdSet.has(code) ? 'hold_advice' : 'buy_advice';
-        const { created } = enqueueJob(data, {
+        const { created, canceled } = enqueueJob(data, {
           code, name: nameOf(code), mode, source: 'ondemand', force, batchId, deepMode,
           batchRequest,
         });
-        created ? enq++ : dup++;
+        if (canceled) canceledBeforeQueue++;
+        else if (created) enq++;
+        else dup++;
       }
       if (enq > 0) data.activeAdviceBatchId = batchId;
       CONC = effectiveAdviceConcurrency(data, deepMode, batchRequest);
-      await persistServer(nick, acc, 'enqueue');   // 立刻公布队列(另一设备可见)
+      const persisted = await persistServer(
+        nick,
+        acc,
+        'enqueue',
+      );   // 立刻公布队列(另一设备可见)
+      const persistedData = persisted?.data || data;
+      if (
+        canceledBeforeQueue > 0
+        || isAdviceBatchCanceled(persistedData, batchId)
+      ) {
+        return res.end(JSON.stringify({
+          ok: false,
+          accepted: false,
+          canceled: true,
+          confirmed: true,
+          batchId,
+          error: '该批次已停止',
+          progress: jobsToProgress(
+            persistedData,
+            Date.now(),
+            CONC,
+          ),
+        }));
+      }
       let worker = null;
       try {
-        if (needsWorkerDispatch(data)) worker = await scheduleAdviceWorker(nick);
+        if (needsWorkerDispatch(persistedData)) {
+          worker = await scheduleAdviceWorker(nick);
+        }
       } catch (error) {
         console.error(
           '[cron_advice] worker dispatch failed',
@@ -1576,7 +1644,11 @@ export default async function handler(req, res) {
           dedup: dup,
           concurrency: CONC,
           deepMode,
-          progress: jobsToProgress(data, Date.now(), CONC),
+          progress: jobsToProgress(
+            persistedData,
+            Date.now(),
+            CONC,
+          ),
         }));
       }
       res.statusCode = 202;
@@ -1589,7 +1661,11 @@ export default async function handler(req, res) {
         dedup: dup,
         concurrency: CONC,
         deepMode,
-        progress: jobsToProgress(data, Date.now(), CONC),
+        progress: jobsToProgress(
+          persistedData,
+          Date.now(),
+          CONC,
+        ),
       }));
     } catch (e) {
       stopHeartbeat();

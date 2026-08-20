@@ -670,6 +670,7 @@ test('客户端保存持仓时不能覆盖服务端 AI 任务队列和 Worker �
       jobs: serverJobs,
       jobWorker: { id: 'worker-server', lockUntil: 9999 },
       activeAdviceBatchId: 'batch-server',
+      adviceBatchCancellations: { 'batch-stopped': 3000 },
       portfolioAnalysisJob,
       portfolioAnalysisLatest,
       portfolioAnalysisHistory,
@@ -682,6 +683,7 @@ test('客户端保存持仓时不能覆盖服务端 AI 任务队列和 Worker �
     jobs: {},
     jobWorker: { id: '', lockUntil: 0 },
     activeAdviceBatchId: 'batch-client-old',
+    adviceBatchCancellations: {},
     portfolioAnalysisJob: null,
     portfolioAnalysisLatest: null,
     portfolioAnalysisHistory: [],
@@ -692,6 +694,10 @@ test('客户端保存持仓时不能覆盖服务端 AI 任务队列和 Worker �
   assert.deepEqual(account.data.jobs, serverJobs)
   assert.deepEqual(account.data.jobWorker, { id: 'worker-server', lockUntil: 9999 })
   assert.equal(account.data.activeAdviceBatchId, 'batch-server')
+  assert.deepEqual(
+    account.data.adviceBatchCancellations,
+    { 'batch-stopped': 3000 },
+  )
   assert.deepEqual(
     account.data.portfolioAnalysisJob,
     portfolioAnalysisJob,

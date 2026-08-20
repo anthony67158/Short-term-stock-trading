@@ -11,6 +11,7 @@ import { ensureAdviceAccountSynced } from '../shared/adviceAccountSync.js'
 import { createAdviceCompletionPuller } from '../shared/adviceUiState.js'
 import {
   activeAdviceCancellationTargets,
+  confirmAdviceBatchCancellation,
   confirmAdviceCancellation,
 } from '../shared/adviceCancellation.js'
 
@@ -150,6 +151,101 @@ async function sendCancellationRequest(creds, targets, batchId = '') {
   } finally {
     clearTimeout(timeout)
   }
+}
+
+async function sendBatchCancellationRequest(creds, batchId) {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 5000)
+  try {
+    const response = await fetch(api('/api/cron_advice'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        op: 'cancelAll',
+        ...creds,
+        batchId,
+      }),
+      signal: controller.signal,
+      keepalive: true,
+    })
+    const data = await response.json().catch(() => null)
+    if (!data || typeof data !== 'object') {
+      throw new Error(`停止接口返回异常(${response.status})`)
+    }
+    return data
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+export async function cancelServerAdviceBatch(batchId, items = []) {
+  let creds = null
+  try {
+    creds = authStore.getCreds && authStore.getCreds()
+  } catch {
+    creds = null
+  }
+  const key = String(batchId || '')
+  if (!creds?.nick || !key) {
+    return {
+      ok: false,
+      confirmed: false,
+      canceled: 0,
+      batchId: key,
+      error: !creds?.nick ? '请先登录' : '缺少批次标识',
+    }
+  }
+  const targets = activeAdviceCancellationTargets(items)
+  const batchTargets = targets.filter(
+    (target) => !target.batchId || target.batchId === key,
+  )
+  const outsideTargets = targets.filter(
+    (target) => target.batchId && target.batchId !== key,
+  )
+  kickServerAdviceStatusSync()
+  const [batchResult, outsideResult] = await Promise.all([
+    confirmAdviceBatchCancellation({
+      batchId: key,
+      targets: batchTargets,
+      attempts: 4,
+      delayMs: 350,
+      send: () => sendBatchCancellationRequest(creds, key),
+      readStatus: fetchServerAdviceStatus,
+    }),
+    outsideTargets.length
+      ? confirmAdviceCancellation({
+          targets: outsideTargets,
+          attempts: 4,
+          delayMs: 350,
+          send: (currentTargets) =>
+            sendCancellationRequest(creds, currentTargets),
+          readStatus: fetchServerAdviceStatus,
+        })
+      : Promise.resolve({
+          ok: true,
+          confirmed: true,
+          canceled: 0,
+          progress: null,
+        }),
+  ])
+  const result = {
+    ok: batchResult.ok && outsideResult.ok,
+    confirmed:
+      batchResult.confirmed && outsideResult.confirmed,
+    canceled:
+      Number(batchResult.canceled || 0)
+      + Number(outsideResult.canceled || 0),
+    batchId: key,
+    progress: outsideResult.progress || batchResult.progress || null,
+    error: [batchResult.error, outsideResult.error]
+      .filter(Boolean)
+      .join('；'),
+  }
+  if (result.progress && statusConsumer) {
+    try { statusConsumer(result.progress) } catch { /* ignore */ }
+  }
+  kickServerAdviceStatusSync()
+  return result
 }
 
 // 取消必须等云端权威状态确认。请求失败会重试；每个目标携带 jobId，

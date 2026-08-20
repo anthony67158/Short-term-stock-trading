@@ -24,6 +24,7 @@ export const LEASE_MS = 270 * 1000;      // 单只运行租约:大于批量单�
 export const LOCK_TTL_MS = 60 * 1000;    // Worker 锁 TTL:drainer 周期续租;崩溃后此后过期,他人接管
 export const MAX_ATTEMPTS = 3;           // 失败最多重试次数
 const JOB_TTL_MS = 24 * 3600 * 1000;     // 终态任务保留 24h 后清理(避免无限堆积)
+const BATCH_CANCEL_TTL_MS = 24 * 3600 * 1000;
 
 const ACTIVE = new Set(['queued', 'running']);
 export const isActive = (j) => !!(j && ACTIVE.has(j.status));
@@ -37,6 +38,81 @@ export function isOrphan(j, now = Date.now()) {
 export function jobsOf(data) {
   if (!data.jobs || typeof data.jobs !== 'object') data.jobs = {};
   return data.jobs;
+}
+
+function batchCancellationsOf(data) {
+  if (
+    !data.adviceBatchCancellations
+    || typeof data.adviceBatchCancellations !== 'object'
+  ) data.adviceBatchCancellations = {};
+  return data.adviceBatchCancellations;
+}
+
+function gcAdviceBatchCancellations(data, now = Date.now()) {
+  const cancellations = batchCancellationsOf(data);
+  for (const [batchId, canceledAt] of Object.entries(cancellations)) {
+    if (now - (Number(canceledAt) || 0) > BATCH_CANCEL_TTL_MS) {
+      delete cancellations[batchId];
+    }
+  }
+}
+
+export function markAdviceBatchCanceled(
+  data,
+  batchId,
+  now = Date.now(),
+) {
+  const key = String(batchId || '').trim().slice(0, 100);
+  if (!key) return false;
+  const cancellations = batchCancellationsOf(data);
+  cancellations[key] = Math.max(
+    Number(cancellations[key]) || 0,
+    Number(now) || Date.now(),
+  );
+  gcAdviceBatchCancellations(data, now);
+  return true;
+}
+
+export function isAdviceBatchCanceled(
+  data,
+  batchId,
+  now = Date.now(),
+) {
+  const key = String(batchId || '').trim();
+  if (!key) return false;
+  const canceledAt = Number(
+    data?.adviceBatchCancellations?.[key],
+  );
+  return Number.isFinite(canceledAt)
+    && canceledAt > 0
+    && now - canceledAt <= BATCH_CANCEL_TTL_MS;
+}
+
+export function mergeAdviceBatchCancellations(
+  target,
+  source,
+  now = Date.now(),
+) {
+  const merged = batchCancellationsOf(target);
+  for (const [batchId, canceledAt] of Object.entries(
+    source?.adviceBatchCancellations || {},
+  )) {
+    merged[batchId] = Math.max(
+      Number(merged[batchId]) || 0,
+      Number(canceledAt) || 0,
+    );
+  }
+  gcAdviceBatchCancellations(target, now);
+  let canceled = 0;
+  for (const job of Object.values(jobsOf(target))) {
+    if (
+      isActive(job)
+      && job.batchId
+      && isAdviceBatchCanceled(target, job.batchId, now)
+      && cancelJob(target, job.code, now, job.batchId)
+    ) canceled++;
+  }
+  return canceled;
 }
 
 // 当前"占用槽位"的任务数:running 且租约未过期。孤儿不计(已可被回收)。
@@ -74,6 +150,7 @@ export function gcJobs(data, now = Date.now()) {
     if (!j) { delete jobs[code]; continue; }
     if (!ACTIVE.has(j.status) && (now - (j.finishedAt || j.at || 0)) > JOB_TTL_MS) delete jobs[code];
   }
+  gcAdviceBatchCancellations(data, now);
 }
 
 // 入队一只。dedup:同 code 已有活跃任务时始终返回既有任务；终态任务可以重建。
@@ -83,6 +160,18 @@ export function enqueueJob(data, {
   code, name, mode, source = 'ondemand', batchId = '', deepMode = false,
   batchRequest = false, trigger = null,
 }, now = Date.now()) {
+  if (
+    batchRequest
+    && batchId
+    && isAdviceBatchCanceled(data, batchId, now)
+  ) {
+    return {
+      job: null,
+      created: false,
+      canceled: true,
+      deferred: false,
+    };
+  }
   const jobs = jobsOf(data);
   const cur = jobs[code];
   if (cur && isActive(cur)) {
@@ -244,6 +333,7 @@ export function cancelJob(
 
 // 取消全部活跃任务
 export function cancelAll(data, now = Date.now(), batchId = '') {
+  if (batchId) markAdviceBatchCanceled(data, batchId, now);
   const jobs = jobsOf(data);
   let n = 0;
   for (const code of Object.keys(jobs)) {
@@ -382,6 +472,13 @@ export function jobsToProgress(data, now = Date.now(), concurrency = CONCURRENCY
   const finishedAt = active.length
     ? 0
     : recent.reduce((latest, j) => Math.max(latest, j.finishedAt || 0), 0);
+  const progressBatchId = activeBatchId
+    || recent.reduce((latest, job) =>
+      !latest || (job.at || 0) >= (latest.at || 0)
+        ? job
+        : latest
+    , null)?.batchId
+    || '';
   return {
     running: active.length > 0,
     total, done, ok, fail, skipped,
@@ -391,7 +488,8 @@ export function jobsToProgress(data, now = Date.now(), concurrency = CONCURRENCY
     finishedAt: finishedAt || snapshotAt,
     at: snapshotAt,
     source: 'server',
-    batchId: activeBatchId,
+    batchId: progressBatchId,
+    batchCanceled: isAdviceBatchCanceled(data, progressBatchId, now),
     deepMode: recent.some((job) => !!job.deepMode),
     concurrency: Math.max(1, Number(concurrency) || CONCURRENCY),
   };

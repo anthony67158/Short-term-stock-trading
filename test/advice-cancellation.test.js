@@ -6,15 +6,20 @@ import {
   activeAdviceCancellationTargets,
   beginAdviceCancellation,
   completeAdviceCancellation,
+  confirmAdviceBatchCancellation,
   confirmAdviceCancellation,
   isAdviceCancellationConfirmed,
   settleQueuedAdviceCancellations,
 } from '../shared/adviceCancellation.js'
 import {
   cancelJob,
+  cancelAll,
   enqueueJob,
+  isAdviceBatchCanceled,
   jobsToProgress,
   leaseJob,
+  markAdviceBatchCanceled,
+  mergeAdviceBatchCancellations,
 } from '../api/_jobs.js'
 
 const generationStatusSource = readFileSync(
@@ -23,6 +28,18 @@ const generationStatusSource = readFileSync(
 )
 const planTabSource = readFileSync(
   new URL('../src/components/PlanTab.jsx', import.meta.url),
+  'utf8',
+)
+const adviceBatchSource = readFileSync(
+  new URL('../src/adviceBatch.js', import.meta.url),
+  'utf8',
+)
+const serverAdviceSource = readFileSync(
+  new URL('../src/serverAdvice.js', import.meta.url),
+  'utf8',
+)
+const cronAdviceSource = readFileSync(
+  new URL('../api/cron_advice.js', import.meta.url),
   'utf8',
 )
 
@@ -185,10 +202,120 @@ test('服务端取消必须匹配jobId并在进度中返回任务身份', () => 
   assert.equal(item.status, 'skipped')
 })
 
+test('批次取消墓碑阻止迟到的云端入队请求复活任务', () => {
+  const data = {}
+  markAdviceBatchCanceled(data, 'batch-late', 1000)
+
+  const result = enqueueJob(data, {
+    code: '600000',
+    mode: 'buy_advice',
+    batchId: 'batch-late',
+    batchRequest: true,
+  }, 1100)
+
+  assert.equal(result.created, false)
+  assert.equal(result.canceled, true)
+  assert.equal(data.jobs?.['600000'], undefined)
+  assert.equal(isAdviceBatchCanceled(data, 'batch-late', 1200), true)
+})
+
+test('取消与入队并发落盘时墓碑合并后终止迟到任务', () => {
+  const cancelWorking = {}
+  const enqueueWorking = {}
+  markAdviceBatchCanceled(cancelWorking, 'batch-race', 1000)
+  enqueueJob(enqueueWorking, {
+    code: '600000',
+    mode: 'buy_advice',
+    batchId: 'batch-race',
+    batchRequest: true,
+  }, 1001)
+
+  mergeAdviceBatchCancellations(enqueueWorking, cancelWorking, 1100)
+
+  assert.equal(
+    enqueueWorking.jobs['600000'].status,
+    'canceled',
+  )
+  assert.equal(
+    enqueueWorking.jobs['600000'].cancelRequested,
+    true,
+  )
+})
+
+test('批次全部取消幂等并在进度中返回权威确认', () => {
+  const data = {}
+  enqueueJob(data, {
+    code: '600000',
+    mode: 'buy_advice',
+    batchId: 'batch-all',
+    batchRequest: true,
+  }, 1000)
+  leaseJob(data, '600000', 1100)
+  enqueueJob(data, {
+    code: '000001',
+    mode: 'buy_advice',
+    batchId: 'batch-other',
+    batchRequest: true,
+  }, 1101)
+  data.activeAdviceBatchId = 'batch-all'
+
+  assert.equal(cancelAll(data, 1200, 'batch-all'), 1)
+  assert.equal(cancelAll(data, 1300, 'batch-all'), 0)
+  assert.equal(data.jobs['000001'].status, 'queued')
+  assert.equal(isAdviceBatchCanceled(data, 'batch-all', 1300), true)
+  const progress = jobsToProgress(data, 1400, 2)
+  assert.equal(progress.batchId, 'batch-all')
+  assert.equal(progress.batchCanceled, true)
+  assert.equal(progress.running, true)
+})
+
+test('批次取消响应丢失后重试仍可由服务端墓碑确认', async () => {
+  let sends = 0
+  const result = await confirmAdviceBatchCancellation({
+    batchId: 'batch-retry',
+    targets: [{ code: '600000', batchId: 'batch-retry' }],
+    attempts: 3,
+    delay: async () => {},
+    send: async () => {
+      sends++
+      if (sends === 1) throw new Error('response lost')
+      return {
+        ok: true,
+        confirmed: true,
+        batchId: 'batch-retry',
+        progress: {
+          batchId: 'batch-retry',
+          batchCanceled: true,
+          items: [],
+        },
+      }
+    },
+    readStatus: async () => null,
+  })
+
+  assert.equal(result.confirmed, true)
+  assert.equal(result.batchId, 'batch-retry')
+  assert.equal(sends, 2)
+})
+
 test('本地个股停止同时中止runner并更新批量项且全部按钮语义明确', () => {
   assert.match(
     generationStatusSource,
     /else\s*\{\s*cancelAdvice\(code\)\s*void cancelOne\(code\)/,
   )
   assert.match(planTabSource, /全部停止/)
+})
+
+test('全部停止不等待提交请求并使用批次级取消协议', () => {
+  const cancelAllBlock = adviceBatchSource.match(
+    /async function cancelBatchInternal\(\)[\s\S]*?(?=export function cancelBatch)/,
+  )?.[0] || ''
+  assert.match(adviceBatchSource, /cancelServerAdviceBatch\(/)
+  assert.doesNotMatch(
+    cancelAllBlock,
+    /await state\._submissionPromise/,
+  )
+  assert.match(serverAdviceSource, /op:\s*'cancelAll'/)
+  assert.match(cronAdviceSource, /markAdviceBatchCanceled/)
+  assert.match(planTabSource, /batch\.cancelError\s*\?\s*'重试停止'/)
 })

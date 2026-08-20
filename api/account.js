@@ -154,6 +154,15 @@ export function applyClientAccountSave(account, incoming, baseRevision) {
   if (prev.jobWorker && typeof prev.jobWorker === 'object') merged.jobWorker = prev.jobWorker;
   if (prev.activeAdviceBatchId) merged.activeAdviceBatchId = prev.activeAdviceBatchId;
   if (
+    prev.adviceBatchCancellations
+    && typeof prev.adviceBatchCancellations === 'object'
+  ) {
+    merged.adviceBatchCancellations = {
+      ...(incoming.adviceBatchCancellations || {}),
+      ...prev.adviceBatchCancellations,
+    };
+  }
+  if (
     prev.portfolioAnalysisJob
     && typeof prev.portfolioAnalysisJob === 'object'
   ) {
