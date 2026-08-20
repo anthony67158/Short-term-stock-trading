@@ -25,6 +25,7 @@ export const LOCK_TTL_MS = 60 * 1000;    // Worker 锁 TTL:drainer 周期续租;
 export const MAX_ATTEMPTS = 3;           // 失败最多重试次数
 const JOB_TTL_MS = 24 * 3600 * 1000;     // 终态任务保留 24h 后清理(避免无限堆积)
 const BATCH_CANCEL_TTL_MS = 24 * 3600 * 1000;
+const ADVICE_AUTO_PAUSE_MS = 30 * 60 * 1000;
 
 const ACTIVE = new Set(['queued', 'running']);
 export const isActive = (j) => !!(j && ACTIVE.has(j.status));
@@ -341,6 +342,12 @@ export function cancelAll(data, now = Date.now(), batchId = '') {
       .filter(Boolean),
   );
   if (batchId) canceledBatchIds.add(String(batchId).trim());
+  if (batchId) {
+    data.adviceAutoPauseUntil = Math.max(
+      Number(data.adviceAutoPauseUntil) || 0,
+      Number(now) + ADVICE_AUTO_PAUSE_MS,
+    );
+  }
   for (const canceledBatchId of canceledBatchIds) {
     markAdviceBatchCanceled(data, canceledBatchId, now);
   }

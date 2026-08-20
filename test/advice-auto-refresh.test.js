@@ -12,6 +12,7 @@ import {
   enqueueAutoRefreshDue,
 } from '../api/cron_advice.js'
 import {
+  cancelAll,
   suspendAutomaticJobsForManualBatch,
 } from '../api/_jobs.js'
 
@@ -201,6 +202,35 @@ test('启动一次性生成时暂停已有自动复核但保留Judge任务', () 
   assert.equal(data.jobs.autoQueued.status, 'canceled')
   assert.equal(data.jobs.autoRunning.status, 'canceled')
   assert.equal(data.jobs.judge.status, 'queued')
+})
+
+test('人工全部停止后自动复核冷却三十分钟且手动任务不受限', () => {
+  const now = new Date('2026-08-10T02:00:00Z').getTime()
+  const data = {
+    settings: {},
+    holding: [{ code: '600000', name: '持仓股' }],
+    jobs: {},
+  }
+  data.jobs.manual = {
+    code: 'manual',
+    status: 'running',
+    source: 'ondemand',
+    batchId: 'manual-batch',
+  }
+
+  assert.equal(cancelAll(data, now, 'manual-batch'), 1)
+  assert.equal(
+    data.adviceAutoPauseUntil,
+    now + 30 * 60000,
+  )
+  assert.equal(
+    enqueueAutoRefreshDue(data, now + 5 * 60000),
+    0,
+  )
+  assert.equal(
+    enqueueAutoRefreshDue(data, now + 31 * 60000),
+    1,
+  )
 })
 
 test('旧设备缺失刷新配置时不能清空云端新配置', () => {

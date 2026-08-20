@@ -173,6 +173,12 @@ export function applyClientAccountSave(
       ...prev.adviceBatchCancellations,
     };
   }
+  if (Number(prev.adviceAutoPauseUntil) > 0) {
+    merged.adviceAutoPauseUntil = Math.max(
+      Number(incoming.adviceAutoPauseUntil) || 0,
+      Number(prev.adviceAutoPauseUntil) || 0,
+    );
+  }
   if (
     prev.portfolioAnalysisJob
     && typeof prev.portfolioAnalysisJob === 'object'

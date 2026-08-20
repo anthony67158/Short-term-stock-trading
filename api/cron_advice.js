@@ -842,6 +842,10 @@ async function persistServer(nick, workingAcc, myId) {
   fdata.adviceBatchCancellations = {
     ...(wdata.adviceBatchCancellations || {}),
   };
+  fdata.adviceAutoPauseUntil = Math.max(
+    Number(fdata.adviceAutoPauseUntil) || 0,
+    Number(wdata.adviceAutoPauseUntil) || 0,
+  );
   fdata.jobWorker = wdata.jobWorker;
   fdata.activeAdviceBatchId = wdata.activeAdviceBatchId || fdata.activeAdviceBatchId || '';
   if (
@@ -1341,6 +1345,7 @@ export function cancelDisabledAdviceReviewJobs(data, now = Date.now()) {
 
 export function enqueueAutoRefreshDue(data, now = Date.now()) {
   if (!inAutoRefreshWindow(now)) return 0;
+  if (Number(data?.adviceAutoPauseUntil) > now) return 0;
   if (hasActiveManualBatch(data)) return 0;
   const settings = data.settings || (data.settings = {});
   const config = autoConfigFromSettings(settings);
