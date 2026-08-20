@@ -5912,10 +5912,6 @@ html[data-theme="light"] .detail-panel {
   padding: var(--space-xl);
 }
 
-.auth-card-loading {
-  text-align: center;
-}
-
 .auth-brand {
   justify-content: flex-start;
   color: var(--color-ink);

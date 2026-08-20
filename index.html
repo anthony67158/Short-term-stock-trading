@@ -27,17 +27,16 @@
     <title>短线操盘台 · 资金流向短线看板</title>
   </head>
   <body>
-    <div id="root">
-      <div id="app-splash">
-        <span class="sp-logo" aria-hidden="true">
-          <img class="sp-logo-light" src="/brand-light.svg" alt="" width="58" height="58" />
-          <img class="sp-logo-dark" src="/brand-dark.svg" alt="" width="58" height="58" />
-        </span>
-        <div class="sp-name">短线操盘台</div>
-        <div class="sp-sub">正在加载行情与持仓…</div>
-        <div class="sp-bar"></div>
-      </div>
+    <div id="app-splash" role="status" aria-live="polite">
+      <span class="sp-logo" aria-hidden="true">
+        <img class="sp-logo-light" src="/brand-light.svg" alt="" width="58" height="58" />
+        <img class="sp-logo-dark" src="/brand-dark.svg" alt="" width="58" height="58" />
+      </span>
+      <div class="sp-name">短线操盘台</div>
+      <div class="sp-sub">正在载入操盘台…</div>
+      <div class="sp-bar"></div>
     </div>
+    <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

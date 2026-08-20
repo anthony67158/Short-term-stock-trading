@@ -15,14 +15,3 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     <App />
   </React.StrictMode>
 )
-
-// D-15 首屏挂载后淡出启动闪屏(消除白屏);双 rAF 确保首帧已绘制
-function hideSplash() {
-  const sp = document.getElementById('app-splash')
-  if (!sp) return
-  sp.classList.add('hide')
-  setTimeout(() => { try { sp.remove() } catch { /* ignore */ } }, 360)
-}
-requestAnimationFrame(() => requestAnimationFrame(hideSplash))
-// 兜底:极端情况下 rAF 未触发也不至于卡住闪屏
-setTimeout(hideSplash, 4000)

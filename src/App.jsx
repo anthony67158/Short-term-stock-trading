@@ -60,6 +60,15 @@ const QuantModelControl = lazyWithReload(() => import('./components/QuantModelCo
 const AISearchConfig = lazyWithReload(() => import('./components/AISearchConfig'), 'ai-search-config')
 const ICP_NUMBER = '沪ICP备2026040243号-1'
 
+function dismissBootSplash() {
+  const splash = document.getElementById('app-splash')
+  if (!splash || splash.classList.contains('hide')) return
+  splash.classList.add('hide')
+  setTimeout(() => {
+    try { splash.remove() } catch { /* ignore */ }
+  }, 360)
+}
+
 // Tab 切换时的轻量骨架占位（避免 Suspense fallback 空白闪一下）
 function TabSkeleton() {
   return (
@@ -76,6 +85,9 @@ export default function App() {
     authStore.boot(); startCloudSync()   // 启动时尝试恢复会话 + 开启跨设备同步轮询
     import('./adviceBatch').then((m) => m.startBatchStatusSync()).catch(() => {})
   }, [])
+  useEffect(() => {
+    if (!booting) dismissBootSplash()
+  }, [booting])
   useEffect(() => {
     if (!user) return
     void aiSearchConfigStore.load(true)
@@ -94,12 +106,7 @@ export default function App() {
       .then((r) => r.json()).then((j) => { if (j && j.ok && Number(j.concurrency) > 0) import('./adviceBatch').then((m) => m.seedConcurrency(Number(j.concurrency))).catch(() => {}) })
       .catch(() => { /* 拿不到就用默认 1,不阻断 */ })
   }, [user])
-  if (booting) return (
-    <div className="auth-gate"><div className="auth-card auth-card-loading">
-      <div className="auth-brand"><BrandMark size={34} /><span>短线操盘台</span></div>
-      <div className="play-hint"><Icon name="refresh" size={14} className="spin" /> 正在恢复登录…</div>
-    </div></div>
-  )
+  if (booting) return null
   if (!user) return (              // 未登录 → 全屏登录/注册门户
     <>
       <AuthGate />

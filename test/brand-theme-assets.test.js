@@ -82,7 +82,7 @@ test('PWA主图标使用黑白高光方形源图并为maskable保留安全区', 
   assert.doesNotMatch(maskableIcon, /#0874D8|#42A7FF|#1389ED|#0052B5/)
 })
 
-test('导航、恢复登录和登录门户统一使用主题品牌标记', () => {
+test('导航和登录门户统一使用主题品牌标记', () => {
   assert.match(app, /import BrandMark from '\.\/components\/BrandMark'/)
   assert.match(app, /<BrandMark/)
   assert.match(authGate, /import BrandMark from '\.\/BrandMark'/)
