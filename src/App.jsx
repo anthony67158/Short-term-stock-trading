@@ -335,7 +335,13 @@ function MainApp() {
         </div>
         <ErrorBoundary key={tab} label="页面">
           <Suspense fallback={<TabSkeleton />}>
-            {tab === 'today' && <TodayTab interval={interval} market={market.data} sectors={sectors.data} snapshot={snapshot} />}
+            {tab === 'today' && (
+              <TodayTab
+                interval={interval}
+                market={market.data}
+                sectors={sectors.data}
+              />
+            )}
             {tab === 'plan' && <PlanTab interval={interval} />}
             {tab === 'hub' && <AccountHub interval={interval} snapshot={snapshot} initialSub={hubSub} jumpNonce={hubNonce} />}
             {tab === 'research' && <ResearchTab interval={interval} />}
