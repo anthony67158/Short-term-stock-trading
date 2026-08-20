@@ -219,6 +219,57 @@ class TushareClient:
                     fields="ts_code,symbol,name,market,list_date"):
         return self.rows("stock_basic", {"list_status": list_status}, fields)
 
+    def ths_index(self, exchange="A", index_type=None,
+                  fields="ts_code,name,count,exchange,list_date,type"):
+        params = {"exchange": exchange}
+        if index_type:
+            params["type"] = index_type
+        return self.rows("ths_index", params, fields)
+
+    def ths_daily(self, ts_code=None, trade_date=None, start_date=None,
+                  end_date=None, fields="ts_code,trade_date,open,high,low,"
+                  "close,pct_change,vol,turnover_rate,total_mv,float_mv"):
+        params = {}
+        if ts_code:
+            params["ts_code"] = ts_code
+        if trade_date:
+            params["trade_date"] = trade_date
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+        return self.rows("ths_daily", params, fields)
+
+    def moneyflow_ind_ths(
+        self,
+        ts_code=None,
+        trade_date=None,
+        start_date=None,
+        end_date=None,
+        fields="trade_date,ts_code,industry,lead_stock,close,pct_change,"
+        "company_num,pct_change_stock,close_price,net_buy_amount,"
+        "net_sell_amount,net_amount",
+    ):
+        params = {}
+        if ts_code:
+            params["ts_code"] = ts_code
+        if trade_date:
+            params["trade_date"] = trade_date
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+        return self.rows("moneyflow_ind_ths", params, fields)
+
+    def trade_cal(self, start_date=None, end_date=None,
+                  fields="cal_date,is_open,pretrade_date"):
+        params = {"exchange": "SSE"}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+        return self.rows("trade_cal", params, fields)
+
 
 if __name__ == "__main__":
     # 自检：需先 `set -a; . ../.env; set +a` 或 export TUSHARE_TOKEN

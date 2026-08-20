@@ -17,7 +17,7 @@ RUN pip config set global.index-url https://mirrors.cloud.tencent.com/pypi/simpl
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app.py factors_lib.py model_lib.py ./
+COPY app.py factors_lib.py model_lib.py sector_factors.py sector_model.py ./
 
 # CloudBase 默认监听 80；Cloud Run 默认 8080。用 $PORT 自适应两者
 CMD exec uvicorn app:app --host 0.0.0.0 --port ${PORT:-80} --workers 1

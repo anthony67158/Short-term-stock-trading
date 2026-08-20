@@ -93,6 +93,20 @@ class TushareClientSecurityTest(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 client.TushareClient()
 
+    def test_sector_helpers_use_official_tushare_api_names(self):
+        client = load_client()
+        instance = client.TushareClient(token="test-only-token")
+        instance.rows = Mock(return_value=[])
+
+        instance.ths_index(exchange="A", index_type="N")
+        instance.ths_daily(ts_code="885001.TI", start_date="20230101")
+        instance.moneyflow_ind_ths(trade_date="20260820")
+
+        self.assertEqual(
+            [call.args[0] for call in instance.rows.call_args_list],
+            ["ths_index", "ths_daily", "moneyflow_ind_ths"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

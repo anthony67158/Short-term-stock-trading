@@ -15,6 +15,7 @@ import numpy as np
 
 from factors_lib import compute_factors, feature_vector, FEATURE_NAMES
 from model_lib import model_score, garch_sigma, get_model, signal_prob, event_tag_for
+from sector_model import get_sector_models, predict_sector_items
 
 app = FastAPI(title="Quant Score & Forecast", version="3.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -241,6 +242,38 @@ def decide(score, bias, fc, f, hold):
 @app.get("/health")
 def health():
     return {"ok": True, "ts": int(time.time()), "ver": "3.0-lgb-garch"}
+
+
+@app.post("/sector-predict")
+def sector_predict(
+    payload: dict = Body(...),
+    x_api_key: str = Header(default=""),
+):
+    _check_key(x_api_key)
+    items = payload.get("items") if isinstance(payload, dict) else None
+    if not isinstance(items, list) or not 1 <= len(items) <= 80:
+        raise HTTPException(
+            status_code=400,
+            detail="items必须包含1到80个板块",
+        )
+    try:
+        predictions = predict_sector_items(items)
+        _, meta = get_sector_models()
+        return {
+            "ok": True,
+            "signalDate": str(payload.get("signalDate") or "")[:10],
+            "predictions": predictions,
+            "model": {
+                "loaded": True,
+                "version": (meta or {}).get("modelVersion"),
+                "dataEndDate": (meta or {}).get("data_end_date"),
+            },
+            "note": "统计口径，非投资建议",
+        }
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)[:120])
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail=str(error)[:120])
 
 
 @app.post("/predict")

@@ -37,6 +37,9 @@ dsw_*_tmp.png
 # P1(Tushare)训练中间产物/缓存/大文件——可由源码脚本重生成,不进仓库
 qlib-service/dataset_ts_base.npz
 qlib-service/dataset_ts_ext.npz
+qlib-service/sector_dataset.npz
+qlib-service/sector_raw_cache.json.gz
+qlib-service/sector_hard_errors.json
 qlib-service/ortho.npz
 qlib-service/ortho_sub.npz
 qlib-service/ortho_raw_cache.json

@@ -53,7 +53,11 @@ find "$PKG/deps" -name "*.pyc" -delete 2>/dev/null || true
 
 # --- 5) 拷贝源码 + bundled 模型 + bootstrap(这些进 git) ---
 cp "$HERE/app.py" "$HERE/factors_lib.py" "$HERE/model_lib.py" \
+   "$HERE/sector_factors.py" "$HERE/sector_model.py" \
    "$HERE/lgb_score.txt" "$HERE/meta.json" "$HERE/bootstrap" "$PKG/"
+for f in sector_next_lgb.txt sector_week_lgb.txt sector_meta.json; do
+  if [ -f "$HERE/$f" ]; then cp "$HERE/$f" "$PKG/"; fi
+done
 chmod +x "$PKG/bootstrap"
 
 echo "[done] deploy_pkg ready: $(du -sh "$PKG" | cut -f1)"

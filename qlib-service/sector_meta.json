@@ -1,0 +1,88 @@
+{
+  "modelVersion": "sector-lgb-1787220406",
+  "feat_names": [
+    "flowPersistence",
+    "flowAcceleration",
+    "fundStrength",
+    "priceFund",
+    "breadth",
+    "leadership",
+    "liquidity",
+    "marketFit",
+    "flowStreak",
+    "currentPct",
+    "momentum5Pct",
+    "upBreadthPct",
+    "inflowBreadthPct",
+    "limitUpPct"
+  ],
+  "trained_at": 1787220406,
+  "data_end_date": "20260812",
+  "n_samples": 611897,
+  "blind_dates": [
+    "20260716",
+    "20260717",
+    "20260720",
+    "20260721",
+    "20260722",
+    "20260723",
+    "20260724",
+    "20260727",
+    "20260728",
+    "20260729",
+    "20260730",
+    "20260731",
+    "20260803",
+    "20260804",
+    "20260805",
+    "20260806",
+    "20260807",
+    "20260810",
+    "20260811",
+    "20260812"
+  ],
+  "challenger_metrics": {
+    "next": {
+      "ndcg_at_5": 0.406992677898804,
+      "top5_precision": 0.4,
+      "auc": 0.5985903556578004,
+      "logloss": 0.49117964105988104,
+      "samples": 21193
+    },
+    "week": {
+      "ndcg_at_5": 0.23569472186439203,
+      "top5_precision": 0.24,
+      "auc": 0.5335283123820597,
+      "logloss": 0.506911880862595,
+      "samples": 21193
+    }
+  },
+  "champion_metrics": null,
+  "promotion_gate": {
+    "promote": true,
+    "improvements": [
+      "initial-model"
+    ],
+    "heads": {}
+  },
+  "hard_error_weighting": {
+    "next": {
+      "matched_n": 0,
+      "memory_total": 0,
+      "half_life_dates": 60,
+      "max_multiplier": 1.0
+    },
+    "week": {
+      "matched_n": 0,
+      "memory_total": 0,
+      "half_life_dates": 60,
+      "max_multiplier": 1.0
+    }
+  },
+  "hard_error_memory": {
+    "total": 5000,
+    "uploaded": true
+  },
+  "week_drawdown_estimate": -1.9,
+  "data_source": "tushare_ths_daily+moneyflow_ind_ths"
+}
