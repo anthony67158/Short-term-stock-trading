@@ -41,8 +41,22 @@ export function accountTradeStateFingerprint(data) {
   return `${(first >>> 0).toString(16).padStart(8, '0')}${(second >>> 0).toString(16).padStart(8, '0')}`
 }
 
+export function pendingOutboxAfterReset(cloudData, pendingOutbox) {
+  if (!pendingOutbox?.data || typeof pendingOutbox.data !== 'object') {
+    return null
+  }
+  const resetAt = Number(cloudData?.tradeStateResetAt) || 0
+  if (resetAt > 0 && (Number(pendingOutbox.at) || 0) <= resetAt) {
+    return null
+  }
+  return pendingOutbox
+}
+
 export function accountSnapshotForRestore(cloudData, pendingOutbox) {
-  const pendingData = pendingOutbox?.data
+  const pendingData = pendingOutboxAfterReset(
+    cloudData,
+    pendingOutbox,
+  )?.data
   return pendingData && typeof pendingData === 'object'
     ? pendingData
     : cloudData

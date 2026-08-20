@@ -6,6 +6,7 @@ import {
   accountSnapshotForRestore,
   accountTradeStateFingerprint,
   createCloudSaveQueue,
+  pendingOutboxAfterReset,
   saveWithRevisionRecovery,
 } from '../shared/accountSync.js'
 import {
@@ -43,6 +44,24 @@ function writeOutbox(value) {
     values[value.nick] = value
     localStorage.setItem(OUTBOX_KEY, JSON.stringify(values))
   } catch { /* ignore */ }
+}
+function removeOutbox(nick) {
+  try {
+    const values = JSON.parse(localStorage.getItem(OUTBOX_KEY) || '{}')
+    if (!Object.prototype.hasOwnProperty.call(values, nick)) return
+    delete values[nick]
+    if (Object.keys(values).length) {
+      localStorage.setItem(OUTBOX_KEY, JSON.stringify(values))
+    } else {
+      localStorage.removeItem(OUTBOX_KEY)
+    }
+  } catch { /* ignore */ }
+}
+function outboxAfterCloudReset(nick, cloudData) {
+  const pending = readOutbox(nick)
+  const accepted = pendingOutboxAfterReset(cloudData, pending)
+  if (pending && !accepted) removeOutbox(nick)
+  return accepted
 }
 function settleOutbox(nick, id, revision, syncedData) {
   try {
@@ -99,6 +118,7 @@ function emit() { state = { ...state }; listeners.forEach((l) => { try { l() } c
 let _credentials = null
 let _cloudRevision = 0
 let _lastSyncedTradeFingerprint = ''
+let _tradeStateResetAt = 0
 const _runtimeSyncCursor = createAdviceRuntimeSyncCursor()
 
 // 读取本机旧数据（首次注册可导入）
@@ -203,6 +223,7 @@ function resetAccountRuntime() {
   _credentials = null
   _cloudRevision = 0
   _lastSyncedTradeFingerprint = ''
+  _tradeStateResetAt = 0
   _runtimeSyncCursor.reset()
 }
 
@@ -233,9 +254,13 @@ export const authStore = {
         state.user = stored.credentials.nick; state.status = 'ready'
         _cloudRevision = Number(r.revision) || 0
         _lastSyncedTradeFingerprint = accountTradeStateFingerprint(r.data)
+        _tradeStateResetAt = Number(r.data?.tradeStateResetAt) || 0
         state.syncStatus = 'synced'; state.syncError = ''; state.lastSyncedAt = r.updatedAt || 0
         _runtimeSyncCursor.noteSnapshot(r.updatedAt)
-        const pending = readOutbox(_credentials.nick)
+        const pending = outboxAfterCloudReset(
+          _credentials.nick,
+          r.data,
+        )
         planStore.setData(accountSnapshotForRestore(r.data, pending))
         resumeOutbox(_credentials, session, pending)
       } else {
@@ -269,6 +294,7 @@ export const authStore = {
     }
     _cloudRevision = Number(r.revision) || 0
     _lastSyncedTradeFingerprint = accountTradeStateFingerprint(r.data)
+    _tradeStateResetAt = Number(r.data?.tradeStateResetAt) || 0
     state.user = nick; state.status = 'ready'; state.error = ''
     state.syncStatus = 'synced'; state.syncError = ''; state.lastSyncedAt = r.updatedAt || Date.now()
     _runtimeSyncCursor.noteSnapshot(r.updatedAt)
@@ -294,10 +320,14 @@ export const authStore = {
     }
     _cloudRevision = Number(r.revision) || 0
     _lastSyncedTradeFingerprint = accountTradeStateFingerprint(r.data)
+    _tradeStateResetAt = Number(r.data?.tradeStateResetAt) || 0
     state.user = nick; state.status = 'ready'; state.error = ''
     state.syncStatus = 'synced'; state.syncError = ''; state.lastSyncedAt = r.updatedAt || 0
     _runtimeSyncCursor.noteSnapshot(r.updatedAt)
-    const pending = readOutbox(_credentials.nick)
+    const pending = outboxAfterCloudReset(
+      _credentials.nick,
+      r.data,
+    )
     planStore.setData(accountSnapshotForRestore(r.data, pending))
     resumeOutbox(_credentials, session, pending)
     emit()
@@ -432,6 +462,27 @@ export const authStore = {
       if (r && r.ok && r.data) {
         state.lastSyncedAt = r.updatedAt || state.lastSyncedAt
         _runtimeSyncCursor.notePull(r.updatedAt)
+        const remoteResetAt = Number(r.data.tradeStateResetAt) || 0
+        const pending = outboxAfterCloudReset(
+          credentials.nick,
+          r.data,
+        )
+        if (remoteResetAt > _tradeStateResetAt && !pending) {
+          const full = await api('get', credentials)
+          if (full?.ok && full.data) {
+            cloudSaveQueue.reset()
+            _cloudRevision = Number(full.revision) || _cloudRevision
+            _lastSyncedTradeFingerprint =
+              accountTradeStateFingerprint(full.data)
+            _tradeStateResetAt =
+              Number(full.data.tradeStateResetAt) || remoteResetAt
+            _runtimeSyncCursor.noteSnapshot(full.updatedAt)
+            planStore.setData(full.data)
+            state.syncStatus = 'synced'
+            state.syncError = ''
+            return true
+          }
+        }
         if (
           r.tradeFingerprint
           && r.tradeFingerprint === accountTradeStateFingerprint(planStore.get())

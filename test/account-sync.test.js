@@ -5,6 +5,7 @@ import {
   createCloudSaveQueue,
   accountTradeStateFingerprint,
   accountSnapshotForRestore,
+  pendingOutboxAfterReset,
   sameAccountTradeState,
   saveWithRevisionRecovery,
 } from '../shared/accountSync.js'
@@ -27,6 +28,39 @@ test('刷新恢复账号时优先保留尚未上传完成的本地交易快照',
 
   assert.equal(restored.holding[0].qty, 16)
   assert.equal(restored.closed[0].id, 'sell-1')
+})
+
+test('权威账本重置后淘汰旧outbox但保留重置后的新修改', () => {
+  const cloud = {
+    tradeStateResetAt: 500,
+    holding: [{ id: 'titan', code: '003036', qty: 1 }],
+    closed: [],
+  }
+  const stale = {
+    at: 400,
+    data: {
+      holding: [{ id: 'old', code: '600556', qty: 6 }],
+      closed: [],
+    },
+  }
+  const fresh = {
+    at: 600,
+    data: {
+      holding: [{ id: 'titan', code: '003036', qty: 2 }],
+      closed: [],
+    },
+  }
+
+  assert.equal(pendingOutboxAfterReset(cloud, stale), null)
+  assert.equal(pendingOutboxAfterReset(cloud, fresh), fresh)
+  assert.equal(
+    accountSnapshotForRestore(cloud, stale).holding[0].code,
+    '003036',
+  )
+  assert.equal(
+    accountSnapshotForRestore(cloud, fresh).holding[0].qty,
+    2,
+  )
 })
 
 test('云端保存失败后保留最新数据并自动重试到成功', async () => {

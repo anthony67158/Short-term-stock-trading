@@ -85,6 +85,7 @@ export function accountSyncDelta(data = {}, since = 0) {
     // 预警只有 166 KiB，整组返回可覆盖旧记录缺少 updatedAt 的兼容场景。
     alerts: Array.isArray(data.alerts) ? data.alerts : [],
     batchProgress: data.batchProgress || null,
+    tradeStateResetAt: Number(data.tradeStateResetAt) || 0,
   };
 }
 
@@ -177,6 +178,12 @@ export function applyClientAccountSave(
     merged.adviceAutoPauseUntil = Math.max(
       Number(incoming.adviceAutoPauseUntil) || 0,
       Number(prev.adviceAutoPauseUntil) || 0,
+    );
+  }
+  if (Number(prev.tradeStateResetAt) > 0) {
+    merged.tradeStateResetAt = Math.max(
+      Number(incoming.tradeStateResetAt) || 0,
+      Number(prev.tradeStateResetAt) || 0,
     );
   }
   if (

@@ -134,6 +134,7 @@ test('运行时账号同步只返回更新时间后的建议事件和轻量状�
     },
     alerts: [{ id: 'a1', createdAt: 50 }],
     batchProgress: { at: 400, running: true },
+    tradeStateResetAt: 450,
     holding: [{ code: '600000', qty: 2 }],
     closed: [{ id: 'trade-1' }],
   }, 200)
@@ -144,6 +145,7 @@ test('运行时账号同步只返回更新时间后的建议事件和轻量状�
   assert.deepEqual(Object.keys(delta.reviews), ['fresh'])
   assert.equal(delta.alerts.length, 1)
   assert.equal(delta.batchProgress.running, true)
+  assert.equal(delta.tradeStateResetAt, 450)
   assert.equal(delta.holding, undefined)
   assert.equal(delta.closed, undefined)
 })
@@ -672,6 +674,7 @@ test('客户端保存持仓时不能覆盖服务端 AI 任务队列和 Worker �
       activeAdviceBatchId: 'batch-server',
       adviceBatchCancellations: { 'batch-stopped': 3000 },
       adviceAutoPauseUntil: 5000,
+      tradeStateResetAt: 4000,
       portfolioAnalysisJob,
       portfolioAnalysisLatest,
       portfolioAnalysisHistory,
@@ -686,6 +689,7 @@ test('客户端保存持仓时不能覆盖服务端 AI 任务队列和 Worker �
     activeAdviceBatchId: 'batch-client-old',
     adviceBatchCancellations: {},
     adviceAutoPauseUntil: 0,
+    tradeStateResetAt: 0,
     portfolioAnalysisJob: null,
     portfolioAnalysisLatest: null,
     portfolioAnalysisHistory: [],
@@ -701,6 +705,7 @@ test('客户端保存持仓时不能覆盖服务端 AI 任务队列和 Worker �
     { 'batch-stopped': 3000 },
   )
   assert.equal(account.data.adviceAutoPauseUntil, 5000)
+  assert.equal(account.data.tradeStateResetAt, 4000)
   assert.deepEqual(
     account.data.portfolioAnalysisJob,
     portfolioAnalysisJob,
