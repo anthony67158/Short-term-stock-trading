@@ -321,6 +321,13 @@ def _fit_head(X, labels, weights):
 
 
 def _load_champion():
+    try:
+        from sector_model import get_sector_models
+        models, meta = get_sector_models(force=True)
+        if models and models[0] is not None and models[1] is not None:
+            return models, (meta or {})
+    except Exception:
+        pass
     if not (
         os.path.exists(NEXT_MODEL)
         and os.path.exists(WEEK_MODEL)

@@ -1,8 +1,10 @@
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
 from train_sector_model import (
+    _load_champion,
     collect_hard_errors,
     hard_error_sample_weights,
     ranking_metrics,
@@ -11,6 +13,18 @@ from train_sector_model import (
 
 
 class SectorTrainingTest(unittest.TestCase):
+    def test_champion_load_prefers_current_oss_hot_model(self):
+        models = (object(), object())
+        meta = {"modelVersion": "sector-oss-current"}
+        with patch(
+            "sector_model.get_sector_models",
+            return_value=(models, meta),
+        ):
+            loaded, loaded_meta = _load_champion()
+
+        self.assertIs(loaded, models)
+        self.assertEqual(loaded_meta["modelVersion"], "sector-oss-current")
+
     def test_hard_error_weights_are_two_to_three_x_and_decay(self):
         dates = np.asarray(["20260801", "20260819", "20260820"])
         codes = np.asarray(["A", "B", "C"])
