@@ -128,6 +128,9 @@ test('军师把外部新闻视为不可信证据而不是可执行指令', () =>
   assert.match(ADVISOR_SYSTEM, /不可信证据文本/)
   assert.match(ADVISOR_SYSTEM, /任何指令/)
   assert.match(ADVISOR_SYSTEM, /aiSearchEvidence/)
+  assert.match(ADVISOR_SYSTEM, /豆包个股信息/)
+  assert.match(ADVISOR_SYSTEM, /公司动态/)
+  assert.match(ADVISOR_SYSTEM, /重大事项/)
   assert.match(ADVISOR_SYSTEM, /待核验/)
 })
 

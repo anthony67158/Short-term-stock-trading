@@ -6,6 +6,7 @@ import {
   buildIndustrySearchQuery,
   buildSearchReference,
   fetchAdvisorSearch,
+  fetchAdvisorSearchBundle,
   fetchAiSearchReference,
   fetchIndustrySearchSupplement,
   normalizeAdvisorSearchResults,
@@ -55,7 +56,12 @@ test('军师搜索词覆盖个股行业舆情且不超过官方64字符限制', 
   assert.match(query, /贵州茅台/)
   assert.match(query, /600519/)
   assert.match(query, /白酒/)
+  assert.match(query, /新闻/)
+  assert.match(query, /公告/)
+  assert.match(query, /公司动态/)
+  assert.match(query, /重大事项/)
   assert.match(query, /舆情/)
+  assert.match(query, /风险/)
   assert.ok(Array.from(query).length <= 64)
 })
 
@@ -200,6 +206,54 @@ test('手动生成30分钟复用个股缓存且每次最多发起一次搜索', 
   assert.equal(requests, 1)
 })
 
+test('新版个股新闻查询不复用旧口径缓存', async () => {
+  const now = Date.parse('2026-08-20T03:00:00.000Z')
+  const memoryCache = new Map([
+    ['stock:600519', {
+      expiresAt: now + 30 * 60000,
+      items: [{
+        title: '旧口径行业摘要',
+        url: 'https://example.com/legacy',
+      }],
+    }],
+  ])
+  let requests = 0
+  const result = await fetchAdvisorSearch({
+    code: '600519',
+    name: '贵州茅台',
+    industry: '白酒',
+  }, {
+    apiKey: 'test-key',
+    now: () => now,
+    memoryCache,
+    readCache: async () => null,
+    writeCache: async () => {},
+    rateLimitState: {
+      tail: Promise.resolve(),
+      starts: [],
+    },
+    fetchImpl: async () => {
+      requests++
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        async json() {
+          return doubaoResponse({
+            title: '贵州茅台发布最新经营公告',
+            content: '公司披露最新经营情况。',
+            url: 'https://example.com/current',
+          })
+        },
+      }
+    },
+  })
+
+  assert.equal(requests, 1)
+  assert.equal(result.status, 'network')
+  assert.equal(result.items[0].title, '贵州茅台发布最新经营公告')
+})
+
 test('自动复核优先复用4小时行业缓存而不产生搜索费用', async () => {
   const memoryCache = new Map()
   const storage = new Map()
@@ -243,6 +297,88 @@ test('自动复核优先复用4小时行业缓存而不产生搜索费用', asyn
   assert.equal(auto.billed, false)
   assert.equal(auto.items[0].title, '白酒行业政策保持稳定')
   assert.equal(requests, 1)
+})
+
+test('行业主源失败时仍搜索个股并额外合并行业补盲', async () => {
+  const calls = []
+  const result = await fetchAdvisorSearchBundle({
+    code: '000636',
+    name: '风华高科',
+    industry: '元件',
+    industryFallback: true,
+  }, {
+    stockFetcher: async (input) => {
+      calls.push({ type: 'stock', input })
+      return {
+        items: [{
+          title: '风华高科披露经营进展',
+          url: 'https://example.com/stock',
+        }],
+        status: 'network',
+        billed: true,
+        enabled: true,
+        fetchedAt: '2026-08-20T03:00:00.000Z',
+      }
+    },
+    industryFetcher: async (input) => {
+      calls.push({ type: 'industry', input })
+      return {
+        items: [{
+          title: '元件行业需求改善',
+          url: 'https://example.com/industry',
+        }],
+        status: 'network',
+        billed: true,
+        enabled: true,
+        fetchedAt: '2026-08-20T03:01:00.000Z',
+      }
+    },
+  })
+
+  assert.deepEqual(
+    calls.map((item) => item.type),
+    ['stock', 'industry'],
+  )
+  assert.equal(calls[0].input.code, '000636')
+  assert.equal(calls[0].input.name, '风华高科')
+  assert.equal(calls[1].input.industry, '元件')
+  assert.deepEqual(
+    result.items.map((item) => item.title),
+    ['风华高科披露经营进展', '元件行业需求改善'],
+  )
+  assert.deepEqual(
+    result.items.map((item) => item.searchScope),
+    ['stock', 'industry'],
+  )
+  assert.equal(result.stock.status, 'network')
+  assert.equal(result.industry.status, 'network')
+  assert.equal(result.billed, true)
+})
+
+test('自动复核命中的行业缓存不会冒充个股信息', async () => {
+  const result = await fetchAdvisorSearchBundle({
+    code: '000858',
+    name: '五粮液',
+    industry: '白酒',
+    reviewOrigin: 'auto',
+  }, {
+    stockFetcher: async () => ({
+      items: [{
+        title: '白酒行业政策保持稳定',
+        url: 'https://example.com/industry-cache',
+      }],
+      status: 'industry-cache',
+      billed: false,
+      enabled: true,
+    }),
+    industryFetcher: async () => {
+      throw new Error('行业主源正常时不应额外搜索')
+    },
+  })
+
+  assert.equal(result.stock.items.length, 0)
+  assert.equal(result.industry.status, 'industry-cache')
+  assert.equal(result.items[0].searchScope, 'industry')
 })
 
 test('自动复核缓存缺失时跳过联网搜索避免高频计费', async () => {

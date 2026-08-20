@@ -14,6 +14,7 @@ import { fetchNews, fetchMarketFlashes } from './_market_data.js';
 import {
   buildSearchReference,
   fetchAdvisorSearch,
+  fetchAdvisorSearchBundle,
   fetchAiSearchReference,
   fetchIndustrySearchSupplement,
   stripClientSearchFields,
@@ -463,10 +464,15 @@ function labeledNewsTitle(item) {
 
 function aiSearchEvidenceText(item) {
   if (!item?.title) return '';
-  const source = item.src || '豆包搜索';
+  const scopeLabel = item.searchScope === 'stock'
+    ? '豆包个股信息'
+    : item.searchScope === 'industry'
+      ? '豆包行业补盲'
+      : '豆包搜索';
+  const source = item.src || scopeLabel;
   const date = item.date || '时间未标注';
   const summary = item.summary ? `。${item.summary}` : '';
-  return `【豆包搜索待核验·${source}·${date}】${item.title}${summary}`;
+  return `【${scopeLabel}待核验·${source}·${date}】${item.title}${summary}`;
 }
 
 function searchQueryForMode(mode, payload = {}) {
@@ -915,44 +921,59 @@ export default async function handler(req, res) {
           industry
           && (!Array.isArray(indNews) || !indNews.length)
         );
+        const searchAvailable = (value) =>
+          Array.isArray(value?.items) && value.items.length > 0;
+        const searchAsOf = (value) => value?.items
+          ?.map((item) => item.date)
+          .filter(Boolean)
+          .sort()
+          .at(-1) || null;
         const advisorSearchPromise =
           aiSearchConfig.enabled && aiSearchConfig.apiKey
-            ? track(
-              industryFallback
-                ? 'industrySearchFallback'
-                : 'aiSearch',
-              industryFallback
-                ? '豆包行业补盲'
-                : '豆包联网搜索',
-              industryFallback
-                ? fetchIndustrySearchSupplement({
-                  industry,
-                  reviewOrigin: payload.reviewOrigin,
-                }, { runtimeConfig: aiSearchConfig })
-                : fetchAdvisorSearch({
-                  code: payload.code,
-                  name: payload.name || corpus?.name || '',
-                  industry,
-                  reviewOrigin: payload.reviewOrigin,
-                }, { runtimeConfig: aiSearchConfig }),
-              (value) =>
-                Array.isArray(value?.items) && value.items.length > 0,
-              (value) => value?.items
-                ?.map((item) => item.date)
-                .filter(Boolean)
-                .sort()
-                .at(-1) || null,
-            )
+            ? fetchAdvisorSearchBundle({
+              code: payload.code,
+              name: payload.name || corpus?.name || '',
+              industry,
+              reviewOrigin: payload.reviewOrigin,
+              industryFallback,
+            }, {
+              stockFetcher: (input) => track(
+                'stockSearch',
+                '豆包个股信息',
+                fetchAdvisorSearch(input, {
+                  runtimeConfig: aiSearchConfig,
+                }),
+                searchAvailable,
+                searchAsOf,
+              ),
+              industryFetcher: (input) => track(
+                'industrySearchFallback',
+                '豆包行业补盲',
+                fetchIndustrySearchSupplement(input, {
+                  runtimeConfig: aiSearchConfig,
+                }),
+                searchAvailable,
+                searchAsOf,
+              ),
+            })
             : Promise.resolve({
               items: [],
               status: 'disabled',
               billed: false,
               enabled: false,
+              stock: {
+                items: [],
+                status: 'disabled',
+                billed: false,
+                enabled: false,
+              },
+              industry: null,
             });
         const [quant, advisorSearch] = await Promise.all([
           quantPromise,
           advisorSearchPromise,
         ]);
+        const industrySearch = advisorSearch?.industry;
         if (quantModelVersion !== 'default' && !quant) {
           return finish({
             ok: false,
@@ -969,11 +990,14 @@ export default async function handler(req, res) {
           payload.industryNewsSource = 'market-news';
         } else if (
           industryFallback
-          && advisorSearch?.items?.length
+          && industrySearch?.items?.length
         ) {
           payload.industry = industry;
-          payload.industryNews = advisorSearch.items
-            .map(aiSearchEvidenceText)
+          payload.industryNews = industrySearch.items
+            .map((item) => aiSearchEvidenceText({
+              ...item,
+              searchScope: 'industry',
+            }))
             .filter(Boolean)
             .slice(0, 5);
           payload.industryNewsSource = 'ai-search-fallback';
@@ -988,6 +1012,14 @@ export default async function handler(req, res) {
             requestId: advisorSearch?.requestId || null,
             errorCode: advisorSearch?.errorCode ?? null,
             industryFallback,
+            stockStatus: advisorSearch?.stock?.status || 'unavailable',
+            stockCount: advisorSearch?.stock?.items?.length || 0,
+            stockBilled: advisorSearch?.stock?.billed === true,
+            industryStatus: industrySearch?.status || (
+              industryFallback ? 'unavailable' : 'not-needed'
+            ),
+            industryCount: industrySearch?.items?.length || 0,
+            industryBilled: industrySearch?.billed === true,
           };
         }
         if (advisorSearch?.items?.length) {
@@ -995,7 +1027,7 @@ export default async function handler(req, res) {
           payload.aiSearchEvidence = advisorSearch.items
             .map(aiSearchEvidenceText)
             .filter(Boolean)
-            .slice(0, 6);
+            .slice(0, 8);
           const seenUrls = new Set(newsRefs.map((item) => item?.url).filter(Boolean));
           for (const item of advisorSearch.items) {
             if (!item.url || seenUrls.has(item.url)) continue;

@@ -129,8 +129,8 @@ export function buildAdvisorSearchQuery({
   const tokens = [
     cleanText(name, 24),
     /^\d{6}$/.test(String(code || '').trim()) ? String(code).trim() : '',
+    '最新 新闻 公告 公司动态 重大事项 舆情 风险',
     cleanText(industry, 20),
-    '最新 公告 政策 行业 舆情 风险',
   ].filter(Boolean);
   return Array.from(tokens.join(' ')).slice(0, 64).join('');
 }
@@ -685,8 +685,9 @@ export async function fetchAdvisorSearch({
   const stockKey = /^\d{6}$/.test(String(code).trim())
     ? String(code).trim()
     : cleanText(name, 40);
+  const stockCacheKey = `v2:${stockKey}`;
   const cacheOptions = { now, memoryCache, readCache, writeCache };
-  const stockCached = await loadCache('stock', stockKey, cacheOptions);
+  const stockCached = await loadCache('stock', stockCacheKey, cacheOptions);
   if (stockCached?.length) {
     return {
       items: stockCached,
@@ -722,7 +723,7 @@ export async function fetchAdvisorSearch({
   const result = await fetchAiSearchReference({
     query: buildAdvisorSearchQuery({ code, name, industry }),
     cacheScope: 'stock',
-    cacheKey: stockKey,
+    cacheKey: stockCacheKey,
     cacheMinutes: 30,
   }, {
     ...options,
@@ -734,4 +735,86 @@ export async function fetchAdvisorSearch({
   const industryItems = industryOnlyItems(result.items, industry, name, code);
   await saveCache('industry', industry, industryItems, INDUSTRY_CACHE_MS, cacheOptions);
   return result;
+}
+
+function mergeSearchItems(entries, limit = 10) {
+  const seen = new Set();
+  const items = [];
+  for (const { scope, result } of entries) {
+    for (const item of result?.items || []) {
+      const key = item?.url
+        ? `url:${item.url}`
+        : `title:${String(item?.title || '').trim().toLowerCase()}`;
+      if (!item?.title || seen.has(key)) continue;
+      seen.add(key);
+      items.push({ ...item, searchScope: scope });
+      if (items.length >= limit) return items;
+    }
+  }
+  return items;
+}
+
+export async function fetchAdvisorSearchBundle({
+  code = '',
+  name = '',
+  industry = '',
+  reviewOrigin = '',
+  industryFallback = false,
+} = {}, options = {}) {
+  const stockFetcher = options.stockFetcher
+    || ((input) => fetchAdvisorSearch(input, options));
+  const industryFetcher = options.industryFetcher
+    || ((input) => fetchIndustrySearchSupplement(input, options));
+  const fetchedStock = await stockFetcher({
+    code,
+    name,
+    industry,
+    reviewOrigin,
+  }) || {
+    items: [],
+    status: 'unavailable',
+    billed: false,
+    enabled: false,
+  };
+  const stockUsedIndustryCache = fetchedStock.status === 'industry-cache';
+  const stock = stockUsedIndustryCache
+    ? {
+      ...fetchedStock,
+      items: [],
+      status: 'scheduled-cache-miss',
+    }
+    : fetchedStock;
+  const fetchedIndustry = industryFallback && industry
+    ? await industryFetcher({ industry, reviewOrigin })
+    : null;
+  const industryResult = fetchedIndustry
+    || (stockUsedIndustryCache ? fetchedStock : null);
+  const results = [stock, industryResult].filter(Boolean);
+  const scopedResults = [
+    { scope: 'stock', result: stock },
+    ...(industryResult
+      ? [{ scope: 'industry', result: industryResult }]
+      : []),
+  ];
+  const fetchedAt = results
+    .map((result) => result.fetchedAt)
+    .filter(Boolean)
+    .sort()
+    .at(-1) || null;
+  return {
+    items: mergeSearchItems(scopedResults),
+    status: results
+      .map((result, index) =>
+        `${index === 0 ? 'stock' : 'industry'}:${result.status || 'unavailable'}`
+      )
+      .join('|'),
+    billed: results.some((result) => result.billed === true),
+    enabled: results.some((result) => result.enabled !== false),
+    fetchedAt,
+    requestId: stock.requestId || industryResult?.requestId || null,
+    errorCode: stock.errorCode ?? industryResult?.errorCode ?? null,
+    retried: results.some((result) => result.retried === true),
+    stock,
+    industry: industryResult,
+  };
 }
