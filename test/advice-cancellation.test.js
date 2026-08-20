@@ -259,14 +259,66 @@ test('批次全部取消幂等并在进度中返回权威确认', () => {
   }, 1101)
   data.activeAdviceBatchId = 'batch-all'
 
-  assert.equal(cancelAll(data, 1200, 'batch-all'), 1)
+  assert.equal(cancelAll(data, 1200, 'batch-all'), 2)
   assert.equal(cancelAll(data, 1300, 'batch-all'), 0)
-  assert.equal(data.jobs['000001'].status, 'queued')
+  assert.equal(data.jobs['000001'].status, 'canceled')
   assert.equal(isAdviceBatchCanceled(data, 'batch-all', 1300), true)
+  assert.equal(isAdviceBatchCanceled(data, 'batch-other', 1300), true)
   const progress = jobsToProgress(data, 1400, 2)
   assert.equal(progress.batchId, 'batch-all')
   assert.equal(progress.batchCanceled, true)
-  assert.equal(progress.running, true)
+  assert.equal(progress.running, false)
+})
+
+test('全部停止原子取消跨批次任务且刷新后不再恢复生成中', () => {
+  const data = {}
+  enqueueJob(data, {
+    code: '600000',
+    mode: 'buy_advice',
+    batchId: 'batch-current',
+    batchRequest: true,
+  }, 1000)
+  leaseJob(data, '600000', 1050)
+  enqueueJob(data, {
+    code: '000001',
+    mode: 'buy_advice',
+    batchId: 'batch-race',
+    batchRequest: true,
+  }, 1100)
+  enqueueJob(data, {
+    code: '000002',
+    mode: 'buy_advice',
+    batchId: 'auto-1100',
+    source: 'auto',
+  }, 1101)
+  data.activeAdviceBatchId = 'batch-current'
+
+  assert.equal(cancelAll(data, 1200, 'batch-current'), 3)
+  const afterCancel = jobsToProgress(data, 1300, 2)
+  const afterRefresh = jobsToProgress(
+    structuredClone(data),
+    1400,
+    2,
+  )
+
+  assert.equal(afterCancel.running, false)
+  assert.equal(afterRefresh.running, false)
+  assert.deepEqual(
+    Object.values(data.jobs).map((job) => job.status),
+    ['canceled', 'canceled', 'canceled'],
+  )
+  assert.equal(
+    isAdviceBatchCanceled(data, 'batch-current', 1400),
+    true,
+  )
+  assert.equal(
+    isAdviceBatchCanceled(data, 'batch-race', 1400),
+    true,
+  )
+  assert.equal(
+    isAdviceBatchCanceled(data, 'auto-1100', 1400),
+    true,
+  )
 })
 
 test('批次取消响应丢失后重试仍可由服务端墓碑确认', async () => {

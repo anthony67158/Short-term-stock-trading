@@ -333,11 +333,20 @@ export function cancelJob(
 
 // 取消全部活跃任务
 export function cancelAll(data, now = Date.now(), batchId = '') {
-  if (batchId) markAdviceBatchCanceled(data, batchId, now);
   const jobs = jobsOf(data);
+  const canceledBatchIds = new Set(
+    Object.values(jobs)
+      .filter(isActive)
+      .map((job) => String(job?.batchId || '').trim())
+      .filter(Boolean),
+  );
+  if (batchId) canceledBatchIds.add(String(batchId).trim());
+  for (const canceledBatchId of canceledBatchIds) {
+    markAdviceBatchCanceled(data, canceledBatchId, now);
+  }
   let n = 0;
   for (const code of Object.keys(jobs)) {
-    if (isActive(jobs[code]) && cancelJob(data, code, now, batchId)) n++;
+    if (isActive(jobs[code]) && cancelJob(data, code, now)) n++;
   }
   return n;
 }
