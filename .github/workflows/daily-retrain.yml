@@ -289,19 +289,27 @@ jobs:
         run: |
           python - <<'PY'
           import datetime as dt
+          import urllib.error
           from tushare_client import TushareClient
 
           state = "skip"
           try:
               end = dt.date.today()
               start = end - dt.timedelta(days=14)
-              rows = TushareClient().trade_cal(
+              rows = TushareClient(timeout=20, retries=1).trade_cal(
                   start_date=start.strftime("%Y%m%d"),
                   end_date=end.strftime("%Y%m%d"),
               )
               state = "ok" if rows else "skip"
               print(f"[preflight] tushare rows={len(rows)}")
-          except Exception as error:
+          except urllib.error.HTTPError as error:
+              if error.code not in (408, 425, 429, 500, 502, 503, 504):
+                  raise
+              print(
+                  "::warning title=Tushare preflight failed::"
+                  + str(error)[:180]
+              )
+          except (urllib.error.URLError, TimeoutError, ConnectionError) as error:
               print(
                   "::warning title=Tushare preflight failed::"
                   + str(error)[:180]

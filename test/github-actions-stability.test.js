@@ -33,6 +33,12 @@ test('重训主模型与板块模型分离运行并使用明确OSS公网出口',
   assert.match(retrain, /Verify stock model OSS connectivity/)
   assert.match(retrain, /Verify sector model OSS connectivity/)
   assert.match(retrain, /Preflight - Tushare板块数据源/)
+  assert.match(retrain, /TushareClient\(timeout=20, retries=1\)/)
+  assert.match(retrain, /except urllib\.error\.HTTPError as error:/)
+  assert.match(
+    retrain,
+    /except \(urllib\.error\.URLError, TimeoutError, ConnectionError\) as error:/,
+  )
   assert.match(retrain, /Skip sector retrain \(数据源不可达\)/)
 })
 
