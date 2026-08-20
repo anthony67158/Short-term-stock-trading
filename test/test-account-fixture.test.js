@@ -26,6 +26,12 @@ test('测试账号假数据覆盖系统能力且不会自动触发付费任务',
   assert.ok(Object.values(fixture.advice).some(
     (entry) => entry.mode === 'buy_advice',
   ))
+  assert.deepEqual(
+    new Set(Object.values(fixture.advice)
+      .filter((entry) => entry.mode === 'buy_advice')
+      .map((entry) => entry.advice?.tier)),
+    new Set(['now', 'pullback', 'wait']),
+  )
   assert.ok(fixture.adviceLog.some((item) => item.verified === true))
   assert.ok(fixture.decisionLog.some((item) => item.kind === 'execution'))
   assert.ok(Object.keys(fixture.reviews).length >= 2)

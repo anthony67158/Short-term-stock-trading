@@ -201,6 +201,44 @@
         "pnlNote": "尚未建仓，无持仓盈亏。",
         "confidence": "中"
       }
+    },
+    "688981": {
+      "mode": "buy_advice",
+      "at": 1787189460000,
+      "cachedAt": 1787189460000,
+      "advice": {
+        "action": "立即买入",
+        "tier": "now",
+        "title": "演示：买点已确认",
+        "actionPlan": "102.00元附近量价共振，演示首笔买入1手。",
+        "buyPrice": 102,
+        "stopPrice": 97,
+        "targetPrice": 112,
+        "planQty": 1,
+        "invalidation": "放量跌破97.00元则买入逻辑失效。",
+        "quantNote": "演示量化分72，高把握信号已触发。",
+        "fundNote": "演示主力资金连续流入。",
+        "confidence": "高"
+      }
+    },
+    "600519": {
+      "mode": "buy_advice",
+      "at": 1787189520000,
+      "cachedAt": 1787189520000,
+      "advice": {
+        "action": "回调再买",
+        "tier": "pullback",
+        "title": "演示：等待回踩买入",
+        "actionPlan": "回踩1380.00元缩量企稳后演示买入1手。",
+        "buyPrice": 1380,
+        "stopPrice": 1330,
+        "targetPrice": 1460,
+        "planQty": 1,
+        "invalidation": "跌破1330.00元或消费板块转弱则取消计划。",
+        "quantNote": "演示量化分66，方向偏多但位置偏高。",
+        "fundNote": "演示资金稳定，等待更优赔率。",
+        "confidence": "中"
+      }
     }
   },
   "adviceLog": [

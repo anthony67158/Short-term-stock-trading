@@ -14,6 +14,34 @@ export const WATCHLIST_RANKING_WEIGHTS = Object.freeze({
   proximity: 0.45,
 })
 
+const BUY_ADVICE_PRIORITY = Object.freeze({
+  now: { score: 5, label: '立即买入' },
+  pullback: { score: 4, label: '回调再买' },
+  probe: { score: 3, label: '小仓试错' },
+  unknown: { score: 2, label: '尚无建议' },
+  wait: { score: 1, label: '观望' },
+  avoid: { score: 0, label: '不建议' },
+})
+
+export function watchlistAdvicePriority(entry) {
+  const advice = entry?.advice || entry
+  if (!advice || typeof advice !== 'object') {
+    return { key: 'unknown', ...BUY_ADVICE_PRIORITY.unknown }
+  }
+  const tier = String(advice.tier || '').trim().toLowerCase()
+  if (BUY_ADVICE_PRIORITY[tier]) {
+    return { key: tier, ...BUY_ADVICE_PRIORITY[tier] }
+  }
+  const action = String(advice.action || advice.stance || '').trim()
+  let key = 'unknown'
+  if (/不建议|回避|放弃/.test(action)) key = 'avoid'
+  else if (/观望|等待|暂不/.test(action)) key = 'wait'
+  else if (/小仓|试错|试仓/.test(action)) key = 'probe'
+  else if (/回调|回踩|低吸/.test(action)) key = 'pullback'
+  else if (/立即|现在|马上|买入|建仓/.test(action)) key = 'now'
+  return { key, ...BUY_ADVICE_PRIORITY[key] }
+}
+
 export function watchlistReadiness(candidate = {}, quote = {}) {
   const quantScore = clamp(finite(candidate.qScore) ?? 45)
   const currentPrice = finite(quote.price)
@@ -77,15 +105,25 @@ export function watchlistReadiness(candidate = {}, quote = {}) {
   }
 }
 
-export function rankWatchlistCandidates(candidates = [], quotes = {}) {
+export function rankWatchlistCandidates(
+  candidates = [],
+  quotes = {},
+  adviceByCode = {},
+) {
   return candidates.map((candidate, index) => ({
     ...candidate,
+    advicePriority: watchlistAdvicePriority(
+      adviceByCode[candidate.code],
+    ),
     readiness: watchlistReadiness(
       candidate,
       quotes[candidate.code] || {},
     ),
     _rankingIndex: index,
   })).sort((left, right) => {
+    if (left.advicePriority.score !== right.advicePriority.score) {
+      return right.advicePriority.score - left.advicePriority.score
+    }
     if (Boolean(left.star) !== Boolean(right.star)) {
       return left.star ? -1 : 1
     }

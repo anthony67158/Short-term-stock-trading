@@ -854,6 +854,11 @@ function PlanList({ book, quote, stockTags, batchSel }) {
   const [alerting, setAlerting] = useState(null) // 正在设预警的 code
   const [dimension, setDimension] = useState('concept')
   const [tab, setTab] = useState('全部')
+  const [adviceVersion, setAdviceVersion] = useState(0)
+  useEffect(
+    () => subscribeAdvice(() => setAdviceVersion((value) => value + 1)),
+    [],
+  )
 
   // ===== 批量一次性生成:入口/工具条/进度条统一收敛到「持仓区(军师战绩旁)」。=====
   // 这里只消费上提到 PlanTab 的共享勾选状态,给候选卡渲染复选框;不再自带入口与进度。
@@ -996,14 +1001,28 @@ function PlanList({ book, quote, stockTags, batchSel }) {
   }), [book.plan, dimension, stockTags, quote])
   const tagsLoading = dimension === 'concept'
     && (book.plan || []).some((item) => stockTags[item.code] == null)
-  // 当前胶囊下要显示的候选，排序仍沿用买入准备度口径。
-  const shown = rankWatchlistCandidates(
-    filterStocksByGroup(book.plan, tab, {
+  const filteredCandidates = useMemo(
+    () => filterStocksByGroup(book.plan, tab, {
       dimension,
       tagMap: stockTags,
       quoteMap: quote,
     }),
-    quote,
+    [book.plan, tab, dimension, stockTags, quote],
+  )
+  const adviceByCode = useMemo(
+    () => Object.fromEntries(filteredCandidates.map((candidate) => [
+      candidate.code,
+      getAdvice(candidate.code, 'buy_advice'),
+    ])),
+    [filteredCandidates, adviceVersion],
+  )
+  const shown = useMemo(
+    () => rankWatchlistCandidates(
+      filteredCandidates,
+      quote,
+      adviceByCode,
+    ),
+    [filteredCandidates, quote, adviceByCode],
   )
   // 当前胶囊可能因删票或切换维度失效 → 回退到全部。
   useEffect(() => {
@@ -1022,7 +1041,7 @@ function PlanList({ book, quote, stockTags, batchSel }) {
     <section className="panel plan-section plan-section-watch">
       <div className="plan-section-sticky">
         <div className="panel-head plan-head">
-          <div role="heading" aria-level="2" className="panel-title"><Icon name="eye" size={16} /> 自选 / 候选 <span className="sub-name">{book.plan.length} 只 · 按买入准备度排序</span></div>
+          <div role="heading" aria-level="2" className="panel-title"><Icon name="eye" size={16} /> 自选 / 候选 <span className="sub-name">{book.plan.length} 只 · 按建议档位与买入准备度排序</span></div>
           <div className="plan-head-r">
             <div className="plan-search"><StockSearch /></div>
           </div>
