@@ -2966,6 +2966,149 @@ html[data-theme="light"] .plan-cand.starred {
   min-width: 0;
 }
 
+.sector-forecast-sort {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  min-height: 34px;
+  padding-inline-start: var(--space-xs);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-control);
+  background: var(--color-paper-2);
+  color: var(--color-muted);
+  font-size: var(--text-2xs);
+}
+
+.sector-forecast-sort select {
+  min-height: 32px;
+  padding: 0 var(--space-sm) 0 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--color-ink-2);
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.sector-forecast-progress {
+  padding: var(--space-xs) var(--space-md) var(--space-sm);
+  border-bottom: 1px solid var(--color-rule-2);
+  background: var(--color-paper-3);
+}
+
+.sector-progress-current {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  min-height: 24px;
+  color: var(--color-ink-2);
+  font-size: var(--text-xs);
+}
+
+.sector-progress-current .icon {
+  color: var(--color-accent);
+  animation: sector-progress-pulse 1.4s ease-in-out infinite;
+}
+
+.sector-progress-current span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sector-progress-current b {
+  margin-inline-start: auto;
+  color: var(--color-accent);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+}
+
+.sector-progress-track {
+  height: 3px;
+  margin-top: var(--space-2xs);
+  overflow: hidden;
+  background: var(--color-rule-2);
+}
+
+.sector-progress-track i {
+  display: block;
+  width: var(--sector-progress);
+  height: 100%;
+  background: var(--color-accent);
+  transition: width var(--t-med);
+}
+
+.sector-progress-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+  gap: var(--space-xs);
+  margin: var(--space-xs) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sector-progress-steps li {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--color-muted);
+  font-size: var(--text-2xs);
+}
+
+.sector-progress-steps li > span {
+  display: grid;
+  flex: 0 0 17px;
+  width: 17px;
+  height: 17px;
+  place-items: center;
+  border: 1px solid var(--color-rule);
+  border-radius: 50%;
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+
+.sector-progress-steps li > b {
+  overflow: hidden;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sector-progress-steps li[data-state="done"],
+.sector-progress-steps li[data-state="active"] {
+  color: var(--color-ink-2);
+}
+
+.sector-progress-steps li[data-state="done"] > span {
+  border-color: var(--sem-buy);
+  color: var(--sem-buy);
+}
+
+.sector-progress-steps li[data-state="active"] > span {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-paper);
+}
+
+@keyframes sector-progress-pulse {
+  0%,
+  100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sector-progress-current .icon {
+    animation: none;
+  }
+
+  .sector-progress-track i {
+    transition: none;
+  }
+}
+
 .sector-forecast-settings {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
@@ -3229,18 +3372,52 @@ html[data-theme="light"] .plan-cand.starred {
   gap: var(--space-sm);
 }
 
-.sector-forecast-stocks span {
-  display: flex;
-  flex-direction: column;
+.sector-forecast-stock {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2xs);
   min-width: 0;
+  padding: var(--space-2xs) var(--space-xs);
+  border: 0;
+  border-inline-start: 2px solid transparent;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: start;
 }
 
-.sector-forecast-stocks strong {
+.sector-forecast-stock:hover,
+.sector-forecast-stock:focus-visible {
+  border-inline-start-color: var(--color-accent);
+  background: color-mix(
+    in oklch,
+    var(--color-accent) 6%,
+    transparent
+  );
+  outline: 0;
+}
+
+.sector-forecast-stock strong,
+.sector-forecast-stock small {
   overflow: hidden;
-  color: var(--color-ink);
-  font-size: var(--text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.sector-forecast-stock strong {
+  color: var(--color-ink);
+  font-size: var(--text-xs);
+}
+
+.sector-forecast-stock small {
+  grid-column: 1;
+}
+
+.sector-forecast-stock .icon {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  color: var(--color-muted);
 }
 
 .sector-forecast-stocks small,
@@ -6794,6 +6971,29 @@ button.acct-item {
 
   .sector-forecast-head-actions .tabs {
     flex: none;
+  }
+
+  .sector-forecast-sort {
+    flex: none;
+  }
+
+  .sector-forecast-sort > span {
+    display: none;
+  }
+
+  .sector-forecast-progress {
+    padding: var(--space-xs) var(--space-sm) var(--space-sm);
+  }
+
+  .sector-progress-steps {
+    display: flex;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .sector-progress-steps li {
+    flex: 0 0 auto;
+    min-width: 86px;
   }
 
   .sector-forecast-settings {

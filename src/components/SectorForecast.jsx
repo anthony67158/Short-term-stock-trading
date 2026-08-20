@@ -2,11 +2,15 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react'
 import Icon from './Icon'
+import SectorForecastProgress from './SectorForecastProgress'
 import SectorForecastSettings from './SectorForecastSettings'
+import { openStockDetail } from '../detailStore.js'
 import { sectorForecastRequest } from '../sectorForecastClient.js'
+import { sortSectorForecasts } from '../sectorForecastView.js'
 
 const PHASE_LABELS = {
   ACCUMULATION: '潜伏吸筹',
@@ -75,10 +79,18 @@ function SectorExplanation({ sector }) {
           <b>真实成分股</b>
           <div>
             {sector.stocks.map((stock) => (
-              <span key={stock.code}>
+              <button
+                type="button"
+                className="sector-forecast-stock"
+                key={stock.code}
+                aria-label={`查看个股详情：${stock.name}`}
+                title={`查看${stock.name}个股详情`}
+                onClick={() => openStockDetail(stock.code, stock.name)}
+              >
                 <strong>{stock.name}</strong>
                 <small>{stock.roleLabel} · {stock.code}</small>
-              </span>
+                <Icon name="chevronRight" size={14} />
+              </button>
             ))}
           </div>
         </div>
@@ -102,6 +114,7 @@ function SectorExplanation({ sector }) {
 
 export default function SectorForecast() {
   const [horizon, setHorizon] = useState('next')
+  const [sortMode, setSortMode] = useState('rank')
   const [latest, setLatest] = useState(null)
   const [history, setHistory] = useState([])
   const [settings, setSettings] = useState(null)
@@ -111,6 +124,7 @@ export default function SectorForecast() {
   const [generating, setGenerating] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [error, setError] = useState('')
+  const generationRequestRef = useRef(false)
 
   const load = useCallback(async () => {
     const [current, archive, status] = await Promise.all([
@@ -154,7 +168,7 @@ export default function SectorForecast() {
   useEffect(() => {
     if (!generating && !task?.active) return undefined
     let stopped = false
-    const timer = setInterval(async () => {
+    const poll = async () => {
       try {
         const [status, current] = await Promise.all([
           sectorForecastRequest({ action: 'status' }),
@@ -163,23 +177,29 @@ export default function SectorForecast() {
         if (stopped) return
         setTask(status.task || null)
         if (current.latest) setLatest(current.latest)
-        if (!status.task?.active) setGenerating(false)
+        if (
+          !status.task?.active
+          && !generationRequestRef.current
+        ) setGenerating(false)
       } catch { /* 下一轮继续读取权威任务状态 */ }
-    }, 4000)
+    }
+    poll()
+    const timer = setInterval(poll, 3000)
     return () => {
       stopped = true
       clearInterval(timer)
     }
-  }, [generating, task?.active])
+  }, [generating, task?.active?.key])
 
   const ranked = useMemo(() => {
-    const key = horizon === 'week' ? 'weekRank' : 'rank'
-    return (latest?.sectors || []).slice().sort((left, right) =>
-      (Number(left[key]) || 999) - (Number(right[key]) || 999)
-    )
-  }, [horizon, latest])
+    return sortSectorForecasts(latest?.sectors || [], {
+      horizon,
+      sortMode,
+    })
+  }, [horizon, latest, sortMode])
 
   const generate = async () => {
+    generationRequestRef.current = true
     setGenerating(true)
     setError('')
     try {
@@ -190,14 +210,19 @@ export default function SectorForecast() {
         timeoutMs: 300000,
       })
       if (response.snapshot) setLatest(response.snapshot)
-      const archive = await sectorForecastRequest({
-        action: 'history',
-        query: { limit: 30 },
-      })
+      const [archive, status] = await Promise.all([
+        sectorForecastRequest({
+          action: 'history',
+          query: { limit: 30 },
+        }),
+        sectorForecastRequest({ action: 'status' }),
+      ])
       setHistory(archive.history || [])
+      setTask(status.task || null)
     } catch (reason) {
       setError(reason?.message || '生成失败')
     } finally {
+      generationRequestRef.current = false
       setGenerating(false)
     }
   }
@@ -216,6 +241,20 @@ export default function SectorForecast() {
             <button type="button" className={'tab' + (horizon === 'week' ? ' active' : '')}
               aria-pressed={horizon === 'week'} onClick={() => setHorizon('week')}>一周</button>
           </div>
+          <label className="sector-forecast-sort">
+            <Icon name="filter" size={14} />
+            <span>排序</span>
+            <select
+              aria-label="板块前瞻排序"
+              value={sortMode}
+              onChange={(event) => setSortMode(event.target.value)}
+            >
+              <option value="rank">原始排名</option>
+              <option value="conclusion">结论优先</option>
+              <option value="score_desc">分数从高到低</option>
+              <option value="score_asc">分数从低到高</option>
+            </select>
+          </label>
           <button type="button" className="row-btn" disabled={generating}
             onClick={generate}>
             <Icon name={generating ? 'pulse' : 'refresh'} size={14} />
@@ -238,6 +277,11 @@ export default function SectorForecast() {
         />
       )}
 
+      <SectorForecastProgress
+        task={task}
+        generating={generating}
+      />
+
       {loading ? (
         <div className="loading sector-forecast-loading">正在读取板块前瞻…</div>
       ) : error && !latest ? (
@@ -254,8 +298,13 @@ export default function SectorForecast() {
           </div>
           {error && <div className="sector-forecast-inline-error" role="status">{error}</div>}
           <div className="sector-forecast-list">
-            {ranked.map((sector) => {
-              const rank = horizon === 'week' ? sector.weekRank : sector.rank
+            {ranked.map((sector, index) => {
+              const rank = horizon === 'week'
+                ? sector.weekRank
+                : sector.rank
+              const displayRank = sortMode === 'rank'
+                ? rank
+                : index + 1
               const forecast = sector.forecast?.[horizon] || {}
               const isOpen = expanded === sector.code
               return (
@@ -264,10 +313,16 @@ export default function SectorForecast() {
                   <button type="button" className="sector-forecast-row"
                     aria-expanded={isOpen}
                     onClick={() => setExpanded(isOpen ? '' : sector.code)}>
-                    <span className="sector-forecast-rank">{rank || '--'}</span>
+                    <span className="sector-forecast-rank">
+                      {displayRank || '--'}
+                    </span>
                     <span className="sector-forecast-name">
                       <strong>{sector.name}</strong>
-                      <small>{sector.code}</small>
+                      <small>
+                        {sortMode === 'rank'
+                          ? sector.code
+                          : `原排名 #${rank || '--'} · ${sector.code}`}
+                      </small>
                     </span>
                     <span className="sector-forecast-state">
                       <b data-phase={sector.phase}>{phaseLabel(sector.phase)}</b>

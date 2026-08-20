@@ -2,6 +2,9 @@ import {
   mergeSectorForecastExplanation,
 } from '../shared/sectorForecast.js'
 import {
+  normalizeSectorForecastProgress,
+} from '../shared/sectorForecastProgress.js'
+import {
   beijingDayKey,
 } from '../shared/tradingCalendar.js'
 import {
@@ -103,22 +106,51 @@ export function runSectorForecastGeneration({
       }
     }
     const startedAt = Number(now()) || Date.now()
+    const baseActive = {
+      key,
+      runDate,
+      signalDate,
+      session: runSession,
+      status: 'running',
+      startedAt,
+    }
     await store.saveTask({
       ...previousTask,
       active: {
-        key,
-        runDate,
-        signalDate,
-        session: runSession,
-        status: 'running',
-        startedAt,
+        ...baseActive,
+        progress: normalizeSectorForecastProgress({
+          stage: 'preparing',
+          percent: 3,
+          message: '正在初始化板块前瞻任务',
+        }, startedAt),
       },
       updatedAt: startedAt,
     })
+    const onProgress = async (progress) => {
+      const currentTask = await store.readTask()
+      if (
+        currentTask.active?.key
+        && currentTask.active.key !== key
+      ) return
+      const updatedAt = Number(now()) || Date.now()
+      await store.saveTask({
+        ...currentTask,
+        active: {
+          ...baseActive,
+          ...(currentTask.active || {}),
+          progress: normalizeSectorForecastProgress(
+            progress,
+            updatedAt,
+          ),
+        },
+        updatedAt,
+      })
+    }
     try {
       const generated = await generate({
         signalDate,
         session: runSession,
+        onProgress,
       })
       if (!generated || !Array.isArray(generated.sectors)) {
         throw new Error('板块前瞻生成结果无效')
@@ -129,6 +161,13 @@ export function runSectorForecastGeneration({
         session: runSession,
         generatedAt: Number(generated.generatedAt) || startedAt,
       }
+      await onProgress({
+        stage: 'saving',
+        percent: 94,
+        message: runSession === 'overnight'
+          ? '正在保存盘前证据复核版'
+          : '正在保存收盘正式版',
+      })
       await store.saveSnapshot(snapshot)
       const currentTask = await store.readTask()
       await store.saveTask({
@@ -145,6 +184,11 @@ export function runSectorForecastGeneration({
           session: runSession,
           status: 'done',
           finishedAt: Number(now()) || Date.now(),
+          progress: {
+            stage: 'done',
+            percent: 100,
+            message: '板块前瞻生成完成',
+          },
         },
         updatedAt: Number(now()) || Date.now(),
       })
@@ -165,6 +209,11 @@ export function runSectorForecastGeneration({
           status: 'failed',
           finishedAt: Number(now()) || Date.now(),
           error: String(error?.message || error).slice(0, 240),
+          progress: {
+            ...(currentTask.active?.progress || {}),
+            stage: 'failed',
+            message: '板块前瞻生成失败',
+          },
         },
         updatedAt: Number(now()) || Date.now(),
       })
@@ -181,6 +230,7 @@ export function runSectorForecastGeneration({
 export async function generateSectorForecastSnapshot({
   signalDate,
   session = 'close',
+  onProgress = async () => {},
 } = {}, {
   store = sectorForecastStore,
   collect = collectSectorForecastData,
@@ -189,6 +239,11 @@ export async function generateSectorForecastSnapshot({
   now = Date.now,
 } = {}) {
   if (session === 'overnight') {
+    await onProgress({
+      stage: 'loading',
+      percent: 16,
+      message: '正在读取收盘正式版排名',
+    })
     const base = await store.readLatest()
     if (!base?.signalDate || !Array.isArray(base.sectors)) {
       throw new Error('没有可供盘前复核的收盘正式版')
@@ -196,7 +251,12 @@ export async function generateSectorForecastSnapshot({
     const refreshed = await enrich({
       ...base,
       session: 'overnight',
-    }, { now })
+    }, { now, onProgress })
+    await onProgress({
+      stage: 'finalizing',
+      percent: 90,
+      message: '正在合并隔夜证据且保持原排名',
+    })
     return {
       ...mergeOvernightEvidence(
         base,
@@ -212,13 +272,28 @@ export async function generateSectorForecastSnapshot({
     }
   }
 
+  await onProgress({
+    stage: 'collecting',
+    percent: 14,
+    message: '正在采集全量概念、历史资金与真实成分股',
+  })
   const collected = await collect()
+  await onProgress({
+    stage: 'scoring',
+    percent: 36,
+    message: '正在计算生命周期、扩散度与反追高评分',
+  })
   const baseline = buildSectorForecastSnapshot({
     signalDate,
     generatedAt: now(),
     sectors: collected.sectors,
     histories: collected.histories,
     members: collected.members,
+  })
+  await onProgress({
+    stage: 'quant',
+    percent: 52,
+    message: '正在调用LightGBM次日与一周双头模型',
   })
   const quantPredictions = await fetchQuant(baseline)
   const modeled = buildSectorForecastSnapshot({
@@ -229,7 +304,12 @@ export async function generateSectorForecastSnapshot({
     members: collected.members,
     quantPredictions,
   })
-  const enriched = await enrich(modeled, { now })
+  const enriched = await enrich(modeled, { now, onProgress })
+  await onProgress({
+    stage: 'finalizing',
+    percent: 90,
+    message: '正在校验结论、证据和成分股',
+  })
   return {
     ...enriched,
     rankingGeneratedAt: enriched.generatedAt,

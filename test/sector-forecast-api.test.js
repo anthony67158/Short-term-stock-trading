@@ -233,6 +233,105 @@ test('同进程同场次并发生成合并为一次并持久化完成标记', as
   assert.equal((await store.readTask()).completed['2026-08-20:close'], true)
 })
 
+test('生成中的阶段和百分比写入OSS任务状态供刷新恢复', async () => {
+  const storage = memoryStorage()
+  const store = createSectorForecastStore(storage)
+  let progressSaved
+  const progressReady = new Promise((resolve) => {
+    progressSaved = resolve
+  })
+  let release
+  const gate = new Promise((resolve) => { release = resolve })
+  const running = runSectorForecastGeneration({
+    store,
+    session: 'close',
+    signalDate: '2026-08-20',
+    generate: async ({ onProgress }) => {
+      await onProgress({
+        stage: 'quant',
+        percent: 52,
+        message: '正在调用LightGBM双头模型',
+      })
+      progressSaved()
+      await gate
+      return {
+        schemaVersion: 'sector-forecast.v1',
+        sectors: [{ code: 'BK1000', rank: 1 }],
+      }
+    },
+    now: () => 400,
+  })
+
+  await progressReady
+  const active = (await store.readTask()).active
+  assert.equal(active.status, 'running')
+  assert.deepEqual(active.progress, {
+    stage: 'quant',
+    percent: 52,
+    message: '正在调用LightGBM双头模型',
+    updatedAt: 400,
+  })
+
+  release()
+  await running
+  assert.equal((await store.readTask()).active, null)
+})
+
+test('正式版生成按采集、评分、量化、检索、解释顺序报告进度', async () => {
+  const stages = []
+  const collected = {
+    allSectors: [{ code: 'BK1000' }],
+    sectors: [{
+      code: 'BK1000',
+      name: '机器人',
+      price: 100,
+      pct: 0.2,
+      mainInflow: 100e6,
+      mainRatio: 3,
+      amount: 10e9,
+    }],
+    histories: new Map(),
+    members: new Map(),
+  }
+
+  await generateSectorForecastSnapshot({
+    signalDate: '2026-08-20',
+    session: 'close',
+    onProgress: async (progress) => {
+      stages.push(progress.stage)
+    },
+  }, {
+    collect: async () => collected,
+    fetchQuant: async () => new Map(),
+    enrich: async (snapshot, { onProgress }) => {
+      await onProgress({
+        stage: 'searching',
+        percent: 66,
+        message: '正在检索板块催化与风险',
+      })
+      await onProgress({
+        stage: 'explaining',
+        percent: 80,
+        message: 'sector模型正在深度解释',
+      })
+      return {
+        ...snapshot,
+        sectors: snapshot.sectors,
+      }
+    },
+    now: () => 500,
+  })
+
+  assert.deepEqual(stages, [
+    'collecting',
+    'scoring',
+    'quant',
+    'searching',
+    'explaining',
+    'finalizing',
+  ])
+})
+
 test('同场次OSS原子锁阻止跨FC实例重复生成且失败可释放', async () => {
   const storage = memoryStorage()
   const firstStore = createSectorForecastStore(storage)
@@ -548,6 +647,47 @@ test('检索和模型失败时仍保留确定性榜单及降级解释', async ()
     ['市场风险偏好转弱'],
   )
   assert.equal(enriched.explanationStatus, 'degraded')
+})
+
+test('模型降级时不得把其他板块检索标题挂到当前板块催化', async () => {
+  const snapshot = {
+    signalDate: '2026-08-20',
+    session: 'close',
+    sectors: [{
+      code: 'BK1000',
+      name: '创业板综',
+      rank: 1,
+      phase: 'STARTUP',
+      actionability: 'WAIT_PULLBACK',
+      forecast: {
+        next: { score: 70 },
+        week: { score: 66 },
+      },
+      reasons: ['资金改善'],
+      risks: [],
+    }],
+  }
+  const enriched = await enrichSectorForecastSnapshot(snapshot, {
+    search: async () => ({
+      status: 'cache',
+      billed: false,
+      items: [{
+        title: '黄金概念最新动态',
+        src: '公开检索',
+      }, {
+        title: '创业板综成分结构更新',
+        src: '公开检索',
+      }],
+    }),
+    callModel: async () => {
+      throw new Error('model unavailable')
+    },
+  })
+
+  assert.deepEqual(
+    enriched.sectors[0].explanation.catalysts,
+    ['创业板综成分结构更新'],
+  )
 })
 
 test('板块量化只调用独立sector-predict并规范化双头概率', async () => {

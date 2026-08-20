@@ -62,9 +62,8 @@ function evidenceFromSearch(result, sector) {
 }
 
 function fallbackExplanation(sector, searchResult) {
-  const catalysts = (searchResult?.items || [])
-    .map((item) => safeText(item?.title, 160))
-    .filter(Boolean)
+  const catalysts = evidenceFromSearch(searchResult, sector)
+    .map((item) => item.title)
     .slice(0, 3)
   return {
     code: sector.code,
@@ -161,11 +160,20 @@ export async function enrichSectorForecastSnapshot(snapshot, {
   search = (input, options) => fetchAiSearchReference(input, options),
   callModel = defaultCallModel,
   now = Date.now,
+  onProgress = async () => {},
 } = {}) {
   if (!snapshot || !Array.isArray(snapshot.sectors)) {
     throw new Error('板块前瞻快照无效')
   }
   const evidenceDay = beijingDayKey(now())
+  const overnight = snapshot.session === 'overnight'
+  await onProgress({
+    stage: 'searching',
+    percent: overnight ? 42 : 66,
+    message: overnight
+      ? '正在检索隔夜催化、公告与风险'
+      : '正在检索板块催化、公告与风险',
+  })
   let searchResult
   try {
     searchResult = await search({
@@ -191,6 +199,13 @@ export async function enrichSectorForecastSnapshot(snapshot, {
     `板块轮动 资金搬家 题材生命周期 ${theoryQuery}`,
     5,
   )
+  await onProgress({
+    stage: 'explaining',
+    percent: overnight ? 70 : 80,
+    message: overnight
+      ? 'sector模型正在深度复核隔夜证据'
+      : 'sector模型正在深度解释确定性排名',
+  })
   let modelResult = null
   try {
     modelResult = await callModel(
