@@ -127,7 +127,7 @@ const PORTFOLIO_TOOLS = [
     type: 'function',
     function: {
       name: 'get_search_reference',
-      description: '读取AI Search返回的近7日市场政策、题材与风险网页摘要，仅作待核验参考。',
+      description: '读取豆包搜索 Global版返回的近期市场政策、题材与风险网页摘要，仅作待核验参考。',
       parameters: { type: 'object', properties: {} },
     },
   },
@@ -1501,7 +1501,7 @@ export default async function handler(req, res) {
           title: item.title,
           summary: item.summary,
           asOf: item.date || searchReference.fetchedAt,
-          source: item.src || 'AI Search',
+          source: item.src || '豆包搜索',
           url: item.url,
           trusted: false,
         })

@@ -42,9 +42,10 @@ resources:
         DAILY_MODEL: Qwen3-Max-A
         # ---- 第三方数据 ----
         FINNHUB_KEY: ${env('FINNHUB_KEY')}
-        # Anspire 标准版国内搜索：军师个股/行业/舆情补盲，设 false 可立即停用。
-        ANSPIRE_API_KEY: ${env('ANSPIRE_API_KEY')}
-        ANSPIRE_SEARCH_ENABLED: "true"
+        # 豆包搜索 Global版：军师个股/行业/舆情补盲，设 false 可立即停用。
+        DOUBAO_SEARCH_API_KEY: ${env('DOUBAO_SEARCH_API_KEY')}
+        DOUBAO_SEARCH_KEY_NAME: ${env('DOUBAO_SEARCH_KEY_NAME')}
+        DOUBAO_SEARCH_ENABLED: "true"
         QUANT_URL: ${env('QUANT_URL')}
         QUANT_KEY: ${env('QUANT_KEY')}
         # ---- V2 分钟 Transformer（独立 EAS，可手动启停）----

@@ -378,7 +378,7 @@ function MainApp() {
         </ErrorBoundary>
       )}
       {aiSearchConfig.open && (
-        <ErrorBoundary label="AI消息检索设置">
+        <ErrorBoundary label="豆包联网搜索设置">
           <Suspense fallback={null}>
             <AISearchConfig />
           </Suspense>

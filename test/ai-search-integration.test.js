@@ -4,13 +4,13 @@ import { readFileSync } from 'node:fs'
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8')
 
-test('个人菜单提供AI检索开关和API Key更换入口', () => {
+test('个人菜单提供豆包联网搜索开关和API Key更换入口', () => {
   const menu = read('src/components/AuthGate.jsx')
   const app = read('src/App.jsx')
 
   assert.match(menu, /role="menuitemcheckbox"/)
-  assert.match(menu, /AI消息检索/)
-  assert.match(menu, /更换 Search API Key/)
+  assert.match(menu, /豆包联网搜索/)
+  assert.match(menu, /更换豆包 API Key/)
   assert.match(app, /AISearchConfig/)
 })
 
@@ -22,7 +22,7 @@ test('军师助手日报选股统一接入AI检索配置', () => {
   assert.match(ai, /fetchAdvisorSearch/)
   assert.match(ai, /fetchIndustrySearchSupplement/)
   assert.match(ai, /行业新闻主源/)
-  assert.match(ai, /AI联网行业补盲/)
+  assert.match(ai, /豆包行业补盲/)
   assert.match(ai, /industryNewsSource/)
   assert.match(ai, /fetchAiSearchReference/)
   assert.match(ai, /searchReference/)
@@ -30,6 +30,9 @@ test('军师助手日报选股统一接入AI检索配置', () => {
   assert.match(agent, /检索参考·必须引用/)
   assert.match(daily, /fetchAiSearchReference/)
   assert.match(daily, /searchConfigUpdatedAt/)
+  for (const source of [ai, agent, daily]) {
+    assert.doesNotMatch(source, /anspire|ANSPIRE/)
+  }
 })
 
 test('关闭开关时各展示区域动态移除检索参考', () => {
@@ -42,7 +45,7 @@ test('关闭开关时各展示区域动态移除检索参考', () => {
   assert.match(component, /visibleSearchReference/)
   assert.match(assistant, /item\?\.dimension !== 'search'/)
   assert.match(assistant, /searchConfig\.enabled \|\| !m\.searchReference/)
-  assert.match(daily, /item\?\.kind !== 'ai_search'/)
+  assert.match(daily, /item\?\.kind !== 'doubao_search'/)
   assert.match(daily, /<SearchReference/)
   assert.match(picker, /<SearchReference/)
   assert.match(advice, /<SearchReference/)
@@ -56,6 +59,9 @@ test('前端配置状态不持久化或回显明文Key', () => {
   assert.doesNotMatch(store, /apiKey:\s*state/)
   assert.match(dialog, /type="password"/)
   assert.match(dialog, /Key 仅保存在服务端 OSS/)
+  assert.match(dialog, /豆包搜索 Global版/)
+  assert.match(dialog, /API Key 名称/)
+  assert.match(dialog, /freeCallsPerMonth/)
   assert.match(dialog, /失败冷却/)
   assert.match(dialog, /industryFailureCooldownMinutes/)
 })

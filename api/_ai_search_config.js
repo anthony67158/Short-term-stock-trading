@@ -1,7 +1,8 @@
 import { hasStorage, put, readJson } from './_blob.js';
 
-const CONFIG_PATH = 'config/ai-search.json';
-const API_KEY_PATTERN = /^sk-[A-Za-z0-9_-]{20,200}$/;
+const CONFIG_PATH = 'config/doubao-search.json';
+const API_KEY_PATTERN = /^[A-Za-z0-9_-]{20,200}$/;
+const KEY_NAME_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/;
 
 export const AI_SEARCH_CACHE_POLICY = Object.freeze({
   stockMinutes: 30,
@@ -19,8 +20,9 @@ function maskKey(value) {
 
 export function envAiSearchConfig(env = process.env) {
   return {
-    enabled: env.ANSPIRE_SEARCH_ENABLED !== 'false',
-    apiKey: String(env.ANSPIRE_API_KEY || ''),
+    enabled: env.DOUBAO_SEARCH_ENABLED !== 'false',
+    apiKey: String(env.DOUBAO_SEARCH_API_KEY || ''),
+    keyName: String(env.DOUBAO_SEARCH_KEY_NAME || 'stock'),
     source: 'env',
     updatedAt: 0,
   };
@@ -33,6 +35,7 @@ export function mergeAiSearchConfig(base, stored) {
       ? stored.enabled
       : base.enabled,
     apiKey: String(stored.apiKey || base.apiKey || ''),
+    keyName: String(stored.keyName || base.keyName || 'stock'),
     source: stored.__stored ? 'oss' : (stored.source || base.source || 'env'),
     updatedAt: Number(stored.updatedAt) || Number(base.updatedAt) || 0,
   };
@@ -43,11 +46,18 @@ export function updateAiSearchConfig(current, patch = {}, now = Date.now()) {
   if (nextKey && !API_KEY_PATTERN.test(nextKey)) {
     throw new Error('API Key 格式无效');
   }
+  const nextKeyName = String(
+    patch.keyName || current.keyName || 'stock',
+  ).trim();
+  if (!KEY_NAME_PATTERN.test(nextKeyName)) {
+    throw new Error('API Key 名称格式无效');
+  }
   const next = {
     enabled: typeof patch.enabled === 'boolean'
       ? patch.enabled
       : current.enabled !== false,
     apiKey: nextKey || String(current.apiKey || ''),
+    keyName: nextKeyName,
     source: 'oss',
     updatedAt: Number(now),
   };
@@ -64,6 +74,12 @@ export function publicAiSearchConfig(config) {
     hasKey: !!key,
     apiKeyMask: maskKey(key),
     source: config?.source || 'env',
+    provider: 'doubao-global',
+    keyName: String(config?.keyName || 'stock').slice(0, 64),
+    limits: {
+      qps: 5,
+      freeCallsPerMonth: 500,
+    },
     updatedAt: Number(config?.updatedAt) || 0,
     cachePolicy: AI_SEARCH_CACHE_POLICY,
   };
@@ -118,6 +134,7 @@ export async function saveAiSearchConfig(patch = {}, {
   await storage.put(CONFIG_PATH, JSON.stringify({
     enabled: next.enabled,
     apiKey: next.apiKey,
+    keyName: next.keyName,
     updatedAt: next.updatedAt,
   }), {
     contentType: 'application/json',

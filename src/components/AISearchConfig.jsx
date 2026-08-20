@@ -19,6 +19,7 @@ export default function AISearchConfig() {
     const result = await aiSearchConfigStore.save({
       enabled: config.hasKey ? config.enabled : true,
       apiKey,
+      keyName: config.keyName || 'stock',
     })
     if (result.ok) setApiKey('')
   }
@@ -39,12 +40,12 @@ export default function AISearchConfig() {
       >
         <div className="modal-bar">
           <div className="modal-title" id="search-config-title">
-            <Icon name="search" size={18} /> AI消息检索
+            <Icon name="search" size={18} /> 豆包联网搜索
           </div>
           <button
             type="button"
             className="modal-close"
-            aria-label="关闭AI消息检索设置"
+            aria-label="关闭豆包联网搜索设置"
             onClick={() => aiSearchConfigStore.close()}
           >
             <Icon name="close" size={16} />
@@ -53,7 +54,7 @@ export default function AISearchConfig() {
 
         <div className="search-cfg-status">
           <div>
-            <b>检索服务</b>
+            <b>豆包搜索 Global版</b>
             <span>{config.enabled ? '生成时引用检索参考' : '所有AI生成排除检索数据'}</span>
           </div>
           <button
@@ -80,7 +81,7 @@ export default function AISearchConfig() {
             spellCheck={false}
             placeholder={config.hasKey
               ? `已保存（${config.apiKeyMask}），留空则保留`
-              : 'sk-...'}
+              : '输入豆包搜索 API Key'}
             value={apiKey}
             onChange={(event) => setApiKey(event.target.value)}
             onKeyDown={(event) => {
@@ -88,6 +89,12 @@ export default function AISearchConfig() {
             }}
           />
         </label>
+
+        <div className="search-cfg-policy">
+          <span>API Key 名称 <b>{config.keyName || 'stock'}</b></span>
+          <span>接口限流 <b>{config.limits.qps} QPS</b></span>
+          <span>免费额度 <b>每月 {config.limits.freeCallsPerMonth} 次</b></span>
+        </div>
 
         <div className="search-cfg-policy">
           <span>个股缓存 <b>{config.cachePolicy.stockMinutes} 分钟</b></span>

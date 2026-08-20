@@ -463,10 +463,10 @@ function labeledNewsTitle(item) {
 
 function aiSearchEvidenceText(item) {
   if (!item?.title) return '';
-  const source = item.src || 'AI Search';
+  const source = item.src || '豆包搜索';
   const date = item.date || '时间未标注';
   const summary = item.summary ? `。${item.summary}` : '';
-  return `【AI Search待核验·${source}·${date}】${item.title}${summary}`;
+  return `【豆包搜索待核验·${source}·${date}】${item.title}${summary}`;
 }
 
 function searchQueryForMode(mode, payload = {}) {
@@ -922,8 +922,8 @@ export default async function handler(req, res) {
                 ? 'industrySearchFallback'
                 : 'aiSearch',
               industryFallback
-                ? 'AI联网行业补盲'
-                : 'AI联网搜索',
+                ? '豆包行业补盲'
+                : '豆包联网搜索',
               industryFallback
                 ? fetchIndustrySearchSupplement({
                   industry,
@@ -980,10 +980,13 @@ export default async function handler(req, res) {
         }
         if (advisorSearch?.enabled !== false) {
           payload.aiSearchMeta = {
+            provider: 'doubao-global',
             status: advisorSearch?.status || 'unavailable',
             billed: advisorSearch?.billed === true,
             count: advisorSearch?.items?.length || 0,
             fetchedAt: advisorSearch?.fetchedAt || null,
+            requestId: advisorSearch?.requestId || null,
+            errorCode: advisorSearch?.errorCode ?? null,
             industryFallback,
           };
         }
@@ -1345,10 +1348,13 @@ export default async function handler(req, res) {
             .filter(Boolean)
             .slice(0, 6);
           payload.aiSearchMeta = {
+            provider: 'doubao-global',
             status: genericSearch.status,
             billed: genericSearch.billed === true,
             count: genericSearch.items.length,
             fetchedAt: genericSearch.fetchedAt || null,
+            requestId: genericSearch.requestId || null,
+            errorCode: genericSearch.errorCode ?? null,
           };
           for (const item of genericSearch.items) {
             if (!item.url || newsRefs.some((existing) => existing?.url === item.url)) continue;

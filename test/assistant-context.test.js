@@ -74,13 +74,13 @@ test('联网新闻生成逐条可点击证据并拒绝非 HTTP 链接', () => {
   assert.equal(evidence[1].url, '')
 })
 
-test('AI Search新闻单独标记为检索参考维度', () => {
+test('豆包搜索新闻单独标记为检索参考维度', () => {
   const evidence = evidenceFromTool('web_news', { query: '半导体' }, {
     news: [{
       title: '半导体行业订单回升',
       summary: '产业链订单改善',
-      src: 'AI Search·example.com',
-      kind: 'ai_search',
+      src: '豆包搜索·example.com',
+      kind: 'doubao_search',
       date: '2026-08-14',
       url: 'https://example.com/chip',
     }],

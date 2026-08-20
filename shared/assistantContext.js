@@ -162,7 +162,7 @@ export function evidenceFromTool(tool, args = {}, result = {}, options = {}) {
         iso(item.date),
         item.url,
         'published',
-        item.kind === 'ai_search' ? 'search' : 'data',
+        item.kind === 'doubao_search' ? 'search' : 'data',
       )
     )
   }

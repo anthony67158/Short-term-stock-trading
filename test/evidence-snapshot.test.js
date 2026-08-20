@@ -55,7 +55,7 @@ const payload = {
   stockFund: { mainNetYi: 1.2, asOfDate: '2026-08-13' },
   newsHeadlines: ['公司发布公告'],
   newsDigest: ['不应复制进快照的长新闻正文'],
-  aiSearchEvidence: ['[AI Search待核验][2026-08-13]白酒行业需求平稳'],
+  aiSearchEvidence: ['[豆包搜索待核验][2026-08-13]白酒行业需求平稳'],
   dailyReport: { day: '2026-08-13', sessionCn: '盘中' },
   resonance: { score: 5, max: 6, hits: ['量化看涨'] },
   trustScore: { score: 76, band: '较可信' },
@@ -82,7 +82,7 @@ test('统一证据快照包含稳定版本、来源、账户与量化上下文',
   assert.equal(snapshot.sources.quote.state, 'LIVE')
   assert.equal(snapshot.freshness.status, 'LIVE')
   assert.equal(snapshot.evidence.news.headlines[0], '公司发布公告')
-  assert.match(snapshot.evidence.news.aiSearch[0], /AI Search待核验/)
+  assert.match(snapshot.evidence.news.aiSearch[0], /豆包搜索待核验/)
   assert.equal(JSON.stringify(snapshot).includes('不应复制进快照的长新闻正文'), false)
 })
 

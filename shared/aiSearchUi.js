@@ -11,6 +11,15 @@ export function normalizeAiSearchPublicConfig(input = {}) {
     enabled: input.enabled === true,
     hasKey: input.hasKey === true,
     apiKeyMask: String(input.apiKeyMask || '').slice(0, 40),
+    provider: 'doubao-global',
+    keyName: String(input.keyName || 'stock').slice(0, 64),
+    limits: {
+      qps: Math.max(1, finite(input.limits?.qps, 5)),
+      freeCallsPerMonth: Math.max(
+        0,
+        finite(input.limits?.freeCallsPerMonth, 500),
+      ),
+    },
     updatedAt: Math.max(0, finite(input.updatedAt)),
     cachePolicy: {
       stockMinutes: Math.max(1, finite(policy.stockMinutes, 30)),
@@ -40,6 +49,7 @@ export function visibleAiSources(enabled, sources) {
   if (enabled === true) return list
   return list.filter((item) =>
     item?.key !== 'aiSearch'
-    && !/AI联网搜索|AI Search/i.test(String(item?.label || ''))
+    && !/豆包联网搜索|豆包搜索/i
+      .test(String(item?.label || ''))
   )
 }

@@ -38,7 +38,7 @@
 - 板块资金流、成分股、涨停池、炸板池、异动和龙虎榜。
 - 概念分时、日 K、周 K、月 K 与成交量。
 - 个股分时、K 线、技术指标、量化预测和 AI 操作建议。
-- AI Search 作为独立“检索参考”维度，不替代公告、行情、资金和量化证据。
+- 豆包搜索 Global版作为独立“检索参考”维度，不替代公告、行情、资金和量化证据。
 
 ### 云端与多设备
 
@@ -287,7 +287,7 @@ npm run dev
 - `AGENT_MODEL`
 - `JUDGE_MODEL`
 - `EMBED_MODEL`
-- `ANSPIRE_API_KEY`
+- `DOUBAO_SEARCH_API_KEY` / `DOUBAO_SEARCH_KEY_NAME`
 
 ### 存储与后台任务
 

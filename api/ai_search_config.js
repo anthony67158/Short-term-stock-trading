@@ -47,6 +47,7 @@ export default async function handler(req, res) {
       const patch = {};
       if (typeof body?.enabled === 'boolean') patch.enabled = body.enabled;
       if (typeof body?.apiKey === 'string') patch.apiKey = body.apiKey;
+      if (typeof body?.keyName === 'string') patch.keyName = body.keyName;
       const saved = await saveAiSearchConfig(patch);
       return res.status(200).send(JSON.stringify({
         ok: true,
@@ -62,7 +63,7 @@ export default async function handler(req, res) {
     const invalid = /格式无效|未知 action/.test(message);
     return res.status(invalid ? 400 : 500).send(JSON.stringify({
       ok: false,
-      error: invalid ? message : 'AI检索配置保存失败',
+      error: invalid ? message : '豆包联网搜索配置保存失败',
     }));
   }
 }

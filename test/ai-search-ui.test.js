@@ -11,8 +11,14 @@ test('前端AI检索配置只接受安全公开字段', () => {
   const config = normalizeAiSearchPublicConfig({
     enabled: true,
     hasKey: true,
-    apiKeyMask: 'sk-********7890',
-    apiKey: 'sk-secret-must-not-survive',
+    apiKeyMask: '2NW*********8GbH',
+    apiKey: 'secret-must-not-survive',
+    provider: 'doubao-global',
+    keyName: 'stock',
+    limits: {
+      qps: 5,
+      freeCallsPerMonth: 500,
+    },
     updatedAt: 123,
     cachePolicy: {
       stockMinutes: 30,
@@ -25,7 +31,13 @@ test('前端AI检索配置只接受安全公开字段', () => {
   assert.deepEqual(config, {
     enabled: true,
     hasKey: true,
-    apiKeyMask: 'sk-********7890',
+    apiKeyMask: '2NW*********8GbH',
+    provider: 'doubao-global',
+    keyName: 'stock',
+    limits: {
+      qps: 5,
+      freeCallsPerMonth: 500,
+    },
     updatedAt: 123,
     cachePolicy: {
       stockMinutes: 30,
@@ -37,10 +49,10 @@ test('前端AI检索配置只接受安全公开字段', () => {
   assert.equal('apiKey' in config, false)
 })
 
-test('关闭开关后生成进度不展示AI联网搜索来源', () => {
+test('关闭开关后生成进度不展示豆包联网搜索来源', () => {
   const sources = [
     { label: '实时行情', ok: true },
-    { label: 'AI联网搜索', ok: true },
+    { label: '豆包联网搜索', ok: true },
   ]
 
   assert.deepEqual(visibleAiSources(false, sources), [sources[0]])

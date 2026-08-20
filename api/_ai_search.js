@@ -2,14 +2,67 @@ import { createHash } from 'node:crypto';
 import { put, readJson } from './_blob.js';
 import { ensureAiSearchConfig } from './_ai_search_config.js';
 
-const ENDPOINT = 'https://plugin.anspire.cn/api/ntsearch/search';
+const ENDPOINT = 'https://open.feedcoopapi.com/search_api/global_search';
 const INDUSTRY_CACHE_MS = 4 * 60 * 60 * 1000;
 const INDUSTRY_FAILURE_COOLDOWN_MS = 15 * 60 * 1000;
 const DEFAULT_TOP_K = 6;
 const MAX_RESPONSE_BYTES = 1024 * 1024;
+const PROVIDER_QPS = 5;
+const PROVIDER_RATE_WINDOW_MS = 1000;
+const PROVIDER_RETRY_DELAY_MS = 250;
 const sharedMemoryCache = new Map();
 const sharedInflightSearch = new Map();
 const sharedIndustryFailureCooldown = new Map();
+const sharedRateLimitState = {
+  tail: Promise.resolve(),
+  starts: [],
+};
+
+function delay(delayMs) {
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+async function waitForProviderSlot({
+  state = sharedRateLimitState,
+  now = Date.now,
+  wait = delay,
+} = {}) {
+  const previous = state.tail || Promise.resolve();
+  let release;
+  state.tail = new Promise((resolve) => {
+    release = resolve;
+  });
+  await previous;
+  try {
+    const clockValue = Number(now());
+    let effectiveNow = Number.isFinite(clockValue)
+      ? clockValue
+      : Date.now();
+    const starts = (Array.isArray(state.starts) ? state.starts : [])
+      .map(Number)
+      .filter(Number.isFinite)
+      .filter((startedAt) => startedAt > effectiveNow - PROVIDER_RATE_WINDOW_MS)
+      .sort((a, b) => a - b);
+    if (starts.length >= PROVIDER_QPS) {
+      const waitMs = Math.max(
+        0,
+        starts[0] + PROVIDER_RATE_WINDOW_MS - effectiveNow,
+      );
+      if (waitMs > 0) {
+        await wait(waitMs);
+        const afterWait = Number(now());
+        effectiveNow = Number.isFinite(afterWait)
+          ? Math.max(afterWait, effectiveNow + waitMs)
+          : effectiveNow + waitMs;
+      }
+    }
+    state.starts = starts
+      .filter((startedAt) => startedAt > effectiveNow - PROVIDER_RATE_WINDOW_MS);
+    state.starts.push(effectiveNow);
+  } finally {
+    release();
+  }
+}
 
 function cleanText(value, limit = 320) {
   return String(value || '')
@@ -46,7 +99,14 @@ function safeDate(value, now) {
   const raw = String(value || '').trim();
   const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
   if (!match) return '';
-  const timestamp = Date.parse(`${match[1]}T00:00:00Z`);
+  const [year, month, day] = match[1].split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year
+    || date.getUTCMonth() !== month - 1
+    || date.getUTCDate() !== day
+  ) return '';
+  const timestamp = date.getTime();
   if (!Number.isFinite(timestamp)) return '';
   const oldest = Date.parse('2000-01-01T00:00:00Z');
   if (timestamp < oldest || timestamp > now + 86400000) return '';
@@ -95,30 +155,47 @@ export function normalizeAdvisorSearchResults(data, {
   now = Date.now(),
   limit = DEFAULT_TOP_K,
 } = {}) {
-  const results = Array.isArray(data?.results) ? data.results : [];
+  const results = Array.isArray(data?.Result?.Documents)
+    ? data.Result.Documents
+    : [];
   const seen = new Set();
   const items = [];
   for (const raw of results) {
-    const title = sanitizeEvidenceText(raw?.title, 160);
-    const url = safeUrl(raw?.url);
+    const title = sanitizeEvidenceText(raw?.Title, 160);
+    const url = safeUrl(raw?.Url);
     if (!title || !url) continue;
     const dedupeKey = `${title.toLowerCase()}|${url}`;
     if (seen.has(dedupeKey)) continue;
     seen.add(dedupeKey);
-    const score = Number(raw?.score);
+    const summary = (Array.isArray(raw?.Snippet) ? raw.Snippet : [])
+      .filter((snippet) => snippet?.Type === 'text')
+      .map((snippet) => snippet.Text)
+      .filter(Boolean)
+      .join(' ');
+    const rawHost = cleanText(raw?.HostInfo?.Hostname, 80);
+    const sanitizedHost = sanitizeEvidenceText(rawHost, 80);
+    const host = (sanitizedHost === rawHost ? sanitizedHost : '')
+      || sourceOf(url)
+      || '网页';
+    const authority = ['very_high', 'high', 'normal'].includes(
+      String(raw?.HostInfo?.AuthorityLevel || ''),
+    )
+      ? String(raw.HostInfo.AuthorityLevel)
+      : '';
     items.push({
       title,
-      summary: sanitizeEvidenceText(raw?.content || raw?.summary, 320),
+      summary: sanitizeEvidenceText(summary, 320),
       url,
-      date: safeDate(raw?.date, Number(now)),
-      score: Number.isFinite(score) ? Math.max(0, Math.min(1, score)) : null,
-      src: `AI Search·${sourceOf(url) || '网页'}`,
-      kind: 'ai_search',
+      date: safeDate(raw?.DocumentInfo?.PublishTime, Number(now)),
+      score: null,
+      src: `豆包搜索·${host}`,
+      kind: 'doubao_search',
+      authority,
       trusted: false,
     });
     if (items.length >= Math.max(1, Math.min(10, Number(limit) || DEFAULT_TOP_K))) break;
   }
-  return items.sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
+  return items;
 }
 
 function cachePath(scope, value) {
@@ -126,12 +203,12 @@ function cachePath(scope, value) {
     .update(`${scope}:${String(value || '').trim().toLowerCase()}`)
     .digest('hex')
     .slice(0, 32);
-  return `cache/ai-search/v1/${scope}-${digest}.json`;
+  return `cache/doubao-search/v1/${scope}-${digest}.json`;
 }
 
 function cacheEnvelope(items, now, ttlMs) {
   return {
-    schemaVersion: 'ai-search-cache.v1',
+    schemaVersion: 'doubao-search-cache.v1',
     savedAt: now,
     expiresAt: now + ttlMs,
     items,
@@ -221,13 +298,6 @@ async function saveFailureCooldown(value, {
   }
 }
 
-function beijingTime(timestamp) {
-  const date = new Date(timestamp + 8 * 3600000);
-  const pad = (value) => String(value).padStart(2, '0');
-  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`
-    + ` ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`;
-}
-
 async function runtimeConfig(options = {}) {
   if (options.runtimeConfig && typeof options.runtimeConfig === 'object') {
     return options.runtimeConfig;
@@ -250,26 +320,38 @@ async function requestSearch(query, {
   now,
   timeoutMs,
   topK,
+  rateLimitState,
+  rateLimitNow,
+  rateLimitDelay,
 }) {
-  const limit = Math.max(1, Math.min(10, Number(topK) || DEFAULT_TOP_K));
-  const params = new URLSearchParams({
-    query,
-    top_k: String(limit),
-    FromTime: beijingTime(now - 7 * 86400000),
-    ToTime: beijingTime(now),
-    search_type: 'web',
-    region_mode: '0',
+  await waitForProviderSlot({
+    state: rateLimitState,
+    now: rateLimitNow,
+    wait: rateLimitDelay,
   });
+  const limit = Math.max(1, Math.min(10, Number(topK) || DEFAULT_TOP_K));
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), Math.max(1000, Number(timeoutMs) || 5500));
+  const timer = setTimeout(
+    () => controller.abort(),
+    Math.max(1000, Number(timeoutMs) || 8000),
+  );
   try {
-    const response = await fetchImpl(`${ENDPOINT}?${params}`, {
-      method: 'GET',
+    const response = await fetchImpl(ENDPOINT, {
+      method: 'POST',
       signal: controller.signal,
       headers: {
         Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
         Accept: 'application/json',
       },
+      body: JSON.stringify({
+        Query: query,
+        SearchType: 'web',
+        DocCount: limit,
+        MaxSnippetLength: 500,
+        MaxImageCountPerDoc: 0,
+        Filter: { IcpHostOnly: true },
+      }),
     });
     if (!response.ok) {
       return {
@@ -283,12 +365,44 @@ async function requestSearch(query, {
       return { items: [], status: 'response-too-large', billed: true };
     }
     const data = await response.json();
+    const requestId = cleanText(
+      data?.ResponseMetadata?.RequestId,
+      100,
+    );
+    const metadataError = data?.ResponseMetadata?.Error;
+    const errorCode = Number(
+      data?.Result?.ErrorCode
+      ?? metadataError?.CodeN
+      ?? metadataError?.Code,
+    );
+    if (metadataError || (Number.isFinite(errorCode) && errorCode !== 0)) {
+      const status = errorCode === 700429
+        ? 'provider-rate-limited'
+        : errorCode === 700901
+          ? 'provider-invalid-key'
+          : [10403, 10408, 10409, 10410].includes(errorCode)
+            ? 'provider-not-authorized'
+            : errorCode === 10412
+              ? 'provider-quota-exhausted'
+              : [10500, 10501].includes(errorCode)
+                ? 'provider-temporary-error'
+                : `provider-${Number.isFinite(errorCode) ? errorCode : 'error'}`;
+      return {
+        items: [],
+        status,
+        billed: false,
+        requestId: requestId || null,
+        errorCode: Number.isFinite(errorCode) ? errorCode : null,
+      };
+    }
     return {
       items: normalizeAdvisorSearchResults(data, { now, limit }),
       query,
       status: 'network',
       billed: true,
       fetchedAt: new Date(now).toISOString(),
+      requestId: requestId || null,
+      errorCode: 0,
     };
   } catch (error) {
     return {
@@ -299,6 +413,19 @@ async function requestSearch(query, {
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function requestSearchWithRetry(query, options) {
+  const first = await requestSearch(query, options);
+  if (![10500, 10501].includes(first.errorCode)) return first;
+  await (options.retryDelay || delay)(
+    Math.max(0, Number(options.retryDelayMs) || PROVIDER_RETRY_DELAY_MS),
+  );
+  const second = await requestSearch(query, options);
+  return {
+    ...second,
+    retried: true,
+  };
 }
 
 export async function fetchAiSearchReference({
@@ -365,12 +492,17 @@ export async function fetchAiSearchReference({
     };
   }
   const request = (async () => {
-    const result = await requestSearch(normalizedQuery, {
+    const result = await requestSearchWithRetry(normalizedQuery, {
       apiKey: config.apiKey,
       fetchImpl: options.fetchImpl || fetch,
       now,
-      timeoutMs: options.timeoutMs || 5500,
+      timeoutMs: options.timeoutMs || 8000,
       topK: options.topK || DEFAULT_TOP_K,
+      retryDelay: options.retryDelay,
+      retryDelayMs: options.retryDelayMs,
+      rateLimitState: options.rateLimitState,
+      rateLimitNow: options.rateLimitNow,
+      rateLimitDelay: options.rateLimitDelay,
     });
     await saveCache(
       scope,
@@ -413,7 +545,7 @@ export function buildSearchReference(result) {
       url: item.url,
       date: item.date,
       src: item.src,
-      kind: 'ai_search',
+      kind: 'doubao_search',
     })),
   };
 }

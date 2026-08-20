@@ -179,13 +179,13 @@ export function AccountMenu() {
               }}
             >
               <Icon name="search" size={13} />
-              <span>AI消息检索</span>
+              <span>豆包联网搜索</span>
               <span className="acct-search-state">{searchConfig.enabled ? '开' : '关'}</span>
               <span className="acct-search-track"><span /></span>
             </button>
             <button type="button" role="menuitem" className="acct-item" onClick={() => { aiSearchConfigStore.open(); setOpen(false) }}>
               <Icon name="edit" size={13} />
-              {searchConfig.hasKey ? '更换 Search API Key' : '配置 Search API Key'}
+              {searchConfig.hasKey ? '更换豆包 API Key' : '配置豆包 API Key'}
             </button>
             <button type="button" role="menuitem" className="acct-item" onClick={() => { quantModelStore.open(); setOpen(false) }}>
               <Icon name="activity" size={13} />量化模型配置

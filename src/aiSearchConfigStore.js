@@ -63,7 +63,7 @@ async function savePatch(patch, {
       ...config,
       status: 'ready',
       error: '',
-      notice: 'AI消息检索设置已更新',
+      notice: '豆包联网搜索设置已更新',
     })
     return { ok: true, config }
   } catch (error) {
@@ -115,10 +115,15 @@ export const aiSearchConfigStore = {
     const enabled = !state.enabled
     return savePatch({ enabled }, { optimisticEnabled: enabled })
   },
-  async save({ enabled = state.enabled, apiKey = '' } = {}) {
+  async save({
+    enabled = state.enabled,
+    apiKey = '',
+    keyName = state.keyName || 'stock',
+  } = {}) {
     return savePatch({
       enabled: !!enabled,
       apiKey: String(apiKey || '').trim(),
+      keyName: String(keyName || 'stock').trim(),
     }, { optimisticEnabled: !!enabled })
   },
 }

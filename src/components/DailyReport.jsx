@@ -61,7 +61,7 @@ export default function DailyReport({ onClose }) {
   const rep = r && r.report
   const dt = r && r.data
   const newsRefs = (r?.newsRefs || []).filter((item) =>
-    searchConfig.enabled || item?.kind !== 'ai_search'
+    searchConfig.enabled || item?.kind !== 'doubao_search'
   )
 
   return (

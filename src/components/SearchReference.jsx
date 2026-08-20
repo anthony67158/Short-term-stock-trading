@@ -22,7 +22,7 @@ export default function SearchReference({ reference, compact = false }) {
             <>
               <span className="search-reference-title">{item.title}</span>
               <span className="search-reference-meta">
-                {item.src || 'AI Search'}{item.date ? ` · ${item.date}` : ''}
+                {item.src || '豆包搜索'}{item.date ? ` · ${item.date}` : ''}
               </span>
               {!compact && item.summary && (
                 <span className="search-reference-summary">{item.summary}</span>

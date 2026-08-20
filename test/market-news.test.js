@@ -136,11 +136,11 @@ test('行业AI补盲在提示词中明确标记待核验且不得单独升级动
     industry: '半导体设备',
     industryNewsSource: 'ai-search-fallback',
     industryNews: [
-      '【AI Search待核验】半导体设备订单改善',
+      '【豆包搜索待核验】半导体设备订单改善',
     ],
   })
 
-  assert.match(prompt, /AI联网行业补盲/)
+  assert.match(prompt, /豆包行业补盲/)
   assert.match(prompt, /待核验/)
   assert.match(prompt, /不得单独升级买入或加仓/)
 })
