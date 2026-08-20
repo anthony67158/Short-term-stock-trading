@@ -69,7 +69,7 @@ test('每日重训工作流把结果按run_id写入量化汇报OSS', () => {
   const publisher = read('qlib-service/publish_retrain_report.py')
 
   assert.match(workflow, /Publish result to in-app quant report/)
-  assert.match(workflow, /python3 publish_retrain_report\.py/)
+  assert.match(workflow, /python publish_retrain_report\.py/)
   assert.match(workflow, /Verify incremental training and forecast contracts/)
   assert.match(workflow, /test_retrain_daily\.py/)
   assert.match(workflow, /test_build_dataset_forecast\.py/)

@@ -15,35 +15,124 @@ concurrency:
   group: daily-retrain
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
-  retrain:
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     defaults:
       run:
-        working-directory: qlib-service   # 训练代码所在子目录(按仓库实际路径调整)
+        working-directory: qlib-service
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      PIP_DEFAULT_TIMEOUT: "90"
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v6
+      - name: Use Python 3.11
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
+          cache: pip
+          cache-dependency-path: qlib-service/requirements-ci.txt
 
-      - name: Install deps
-        # 固定大版本,避免 numpy/lightgbm/sklearn 某天发新版导致的隐性构建失败(与线上 requirements 对齐)
-        run: pip install "fastapi>=0.110,<0.116" "numpy>=1.26,<2.1" "pandas>=2.0,<2.3" "scipy>=1.11,<1.15" "lightgbm>=4.3,<4.8" "scikit-learn>=1.3,<1.6" "oss2>=2.18,<3.0"
+      - name: Install locked training dependencies
+        run: |
+          python -m pip install --retries 5 -r requirements-ci.txt
+          python -m pip check
 
       - name: Verify incremental training and forecast contracts
-        run: python3 -m unittest test_retrain_daily.py test_build_dataset_forecast.py test_production_backtest.py test_app_forecast.py test_publish_retrain_report.py test_model_lib_dense_runtime.py test_sector_factors.py test_sector_model.py test_train_sector_model.py test_build_sector_dataset.py test_sector_app.py
+        shell: bash
+        run: |
+          mkdir -p ../test-artifacts
+          set -o pipefail
+          python -m unittest \
+            test_retrain_daily.py \
+            test_build_dataset_forecast.py \
+            test_production_backtest.py \
+            test_app_forecast.py \
+            test_publish_retrain_report.py \
+            test_model_lib_dense_runtime.py \
+            test_sector_factors.py \
+            test_sector_model.py \
+            test_train_sector_model.py \
+            test_build_sector_dataset.py \
+            test_sector_app.py \
+            2>&1 | tee ../test-artifacts/retrain-contract-tests.log
+
+      - name: Upload contract diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: retrain-contract-tests-${{ github.run_id }}
+          path: test-artifacts/
+          if-no-files-found: warn
+
+  stock-retrain:
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: qlib-service
+    env:
+      PYTHONUNBUFFERED: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      PIP_DEFAULT_TIMEOUT: "90"
+      OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+      OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+      OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
+      OSS_ENDPOINT: https://oss-cn-hangzhou.aliyuncs.com
+      OSS_ALLOW_PUBLIC_NETWORK: "true"
+      OSS_REGION: oss-cn-hangzhou
+      QUANT_MODEL_PREFIX: quantmodel/
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Use Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: qlib-service/requirements-ci.txt
+
+      - name: Install locked training dependencies
+        run: |
+          python -m pip install --retries 5 -r requirements-ci.txt
+          python -m pip check
+
+      - name: Verify required OSS configuration
+        run: |
+          missing=0
+          for name in \
+            OSS_ACCESS_KEY_ID \
+            OSS_ACCESS_KEY_SECRET \
+            OSS_BUCKET
+          do
+            if [ -z "${!name}" ]; then
+              echo "::error title=Missing Actions secret::$name 未配置"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Verify stock model OSS connectivity
+        run: |
+          python - <<'PY'
+          from upload_model import bucket
+          meta = bucket().head_object("quantmodel/meta.json")
+          if int(meta.content_length or 0) <= 0:
+              raise RuntimeError("quantmodel/meta.json is empty")
+          print("[preflight] stock model OSS reachable")
+          PY
 
       - name: Preflight - 行情数据源连通性自检
-        # 历史根因:海外 CI 出口 IP 访问新浪 CN 行情常超时。但股票池已有仓库内 pool_cache.json 兜底,
-        # 个股日线/指数走腾讯(海外可达)。故此处**只把腾讯作为硬性前置**——腾讯通即可训练;
-        # 新浪仅作参考探测(不通不影响,build_dataset 会自动回落缓存池)。
         id: preflight
         run: |
-          python3 - <<'PY'
-          import urllib.request, sys
+          python - <<'PY'
+          import urllib.request
           H={'User-Agent':'Mozilla/5.0','Referer':'https://finance.sina.com.cn/'}
           def ok(u):
               try:
@@ -53,49 +142,22 @@ jobs:
           sina=ok('https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData?page=1&num=3&sort=amount&asc=0&node=hs_a')
           tx=ok('https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=sh600000,day,,,60,qfq')
           print(f'[preflight] sina={sina}(仅参考) tencent={tx}(硬性)')
-          # 腾讯(个股日线源)通即可训练:股票池有仓库内缓存兜底,不再依赖新浪。
-          # 仅当腾讯也不可达时才 skip(此时确实拉不到任何日线)。
           open('preflight.txt','w').write('ok' if tx else 'skip')
           PY
           echo "reachable=$(cat preflight.txt)" >> "$GITHUB_OUTPUT"
 
       - name: Run champion-challenger retrain
         if: steps.preflight.outputs.reachable == 'ok'
-        env:
-          PYTHONUNBUFFERED: "1"
-          OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
-          OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
-          OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
-          OSS_ENDPOINT: ${{ secrets.OSS_ENDPOINT }}
-          QUANT_MODEL_PREFIX: quantmodel/
-        run: |
-          python3 retrain_daily.py --pool 600 --bars 700 --horizon 5
+        run: python retrain_daily.py --pool 600 --bars 700 --horizon 5
 
       - name: Skip notice (数据源不可达)
         if: steps.preflight.outputs.reachable != 'ok'
         run: echo "::warning::行情数据源(新浪/腾讯 CN)在本次 CI 出口 IP 下不可达,已跳过当日重训(线上保持冠军不变,非代码故障)。"
 
-      - name: Run sector forecast incremental retrain
-        env:
-          PYTHONUNBUFFERED: "1"
-          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
-          OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
-          OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
-          OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
-          OSS_ENDPOINT: ${{ secrets.OSS_ENDPOINT }}
-          SECTOR_MODEL_PREFIX: sectormodel/
-        run: |
-          if [ -z "$TUSHARE_TOKEN" ]; then
-            echo "::warning::TUSHARE_TOKEN 未配置，安全跳过板块模型增量训练"
-            exit 0
-          fi
-          python3 build_sector_dataset.py --start-date 20230911
-          python3 train_sector_model.py
-
       - name: Publish retrain decision
         if: always()
         run: |
-          python3 - <<'PY'
+          python - <<'PY'
           import json
           import os
 
@@ -132,11 +194,8 @@ jobs:
 
       - name: Publish result to in-app quant report
         if: always()
+        continue-on-error: true
         env:
-          OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
-          OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
-          OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
-          OSS_ENDPOINT: ${{ secrets.OSS_ENDPOINT }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
@@ -144,15 +203,148 @@ jobs:
           GITHUB_SHA: ${{ github.sha }}
           RETRAIN_JOB_STATUS: ${{ job.status }}
           RETRAIN_PREFLIGHT: ${{ steps.preflight.outputs.reachable }}
-        run: python3 publish_retrain_report.py
+        run: python publish_retrain_report.py
 
-      - name: Upload audit log artifact
+      - name: Upload stock retrain diagnostics
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: retrain-history-${{ github.run_id }}
+          name: stock-retrain-${{ github.run_id }}
           path: |
             qlib-service/retrain_history.jsonl
+            qlib-service/dataset_build_meta.json
+            qlib-service/production_accuracy.json
+          if-no-files-found: warn
+
+  sector-retrain:
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: qlib-service
+    env:
+      PYTHONUNBUFFERED: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      PIP_DEFAULT_TIMEOUT: "90"
+      TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+      OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+      OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+      OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
+      OSS_ENDPOINT: https://oss-cn-hangzhou.aliyuncs.com
+      OSS_ALLOW_PUBLIC_NETWORK: "true"
+      OSS_REGION: oss-cn-hangzhou
+      SECTOR_MODEL_PREFIX: sectormodel/
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Use Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: qlib-service/requirements-ci.txt
+
+      - name: Install locked training dependencies
+        run: |
+          python -m pip install --retries 5 -r requirements-ci.txt
+          python -m pip check
+
+      - name: Verify required training secrets
+        run: |
+          missing=0
+          for name in \
+            TUSHARE_TOKEN \
+            OSS_ACCESS_KEY_ID \
+            OSS_ACCESS_KEY_SECRET \
+            OSS_BUCKET
+          do
+            if [ -z "${!name}" ]; then
+              echo "::error title=Missing Actions secret::$name 未配置"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Verify sector model OSS connectivity
+        run: |
+          python - <<'PY'
+          from upload_model import bucket
+          meta = bucket().head_object("sectormodel/meta.json")
+          if int(meta.content_length or 0) <= 0:
+              raise RuntimeError("sectormodel/meta.json is empty")
+          print("[preflight] sector model OSS reachable")
+          PY
+
+      - name: Restore sector history cache
+        uses: actions/cache@v5
+        with:
+          path: qlib-service/sector_raw_cache.json.gz
+          key: sector-raw-${{ runner.os }}-${{ github.run_number }}
+          restore-keys: |
+            sector-raw-${{ runner.os }}-
+
+      - name: Preflight - Tushare板块数据源
+        id: sector-preflight
+        run: |
+          python - <<'PY'
+          import datetime as dt
+          from tushare_client import TushareClient
+
+          state = "skip"
+          try:
+              end = dt.date.today()
+              start = end - dt.timedelta(days=14)
+              rows = TushareClient().trade_cal(
+                  start_date=start.strftime("%Y%m%d"),
+                  end_date=end.strftime("%Y%m%d"),
+              )
+              state = "ok" if rows else "skip"
+              print(f"[preflight] tushare rows={len(rows)}")
+          except Exception as error:
+              print(
+                  "::warning title=Tushare preflight failed::"
+                  + str(error)[:180]
+              )
+          with open("sector_preflight.txt", "w") as handle:
+              handle.write(state)
+          PY
+          echo "reachable=$(cat sector_preflight.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Build incremental sector dataset
+        if: steps.sector-preflight.outputs.reachable == 'ok'
+        shell: bash
+        run: |
+          status=1
+          for attempt in 1 2 3; do
+            if python build_sector_dataset.py --start-date 20230911; then
+              status=0
+              break
+            fi
+            echo "::warning::板块数据更新第 ${attempt} 次失败，准备重试"
+            sleep $((attempt * 20))
+          done
+          exit "$status"
+
+      - name: Skip sector retrain (数据源不可达)
+        if: steps.sector-preflight.outputs.reachable != 'ok'
+        run: echo "::warning::Tushare本轮不可达，已安全保留现役板块冠军"
+
+      - name: Run sector champion-challenger retrain
+        if: steps.sector-preflight.outputs.reachable == 'ok'
+        shell: bash
+        run: |
+          set -o pipefail
+          python train_sector_model.py |
+            tee sector_retrain_result.json
+
+      - name: Upload sector retrain diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sector-retrain-${{ github.run_id }}
+          path: |
+            qlib-service/sector_retrain_result.json
             qlib-service/sector_meta.json
             qlib-service/sector_hard_errors.json
-          if-no-files-found: ignore
+          if-no-files-found: warn

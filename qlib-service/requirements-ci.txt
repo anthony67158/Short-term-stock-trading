@@ -1,0 +1,11 @@
+# Reproducible Python 3.11 environment shared by all GitHub Actions jobs.
+fastapi==0.115.14
+uvicorn[standard]==0.34.3
+numpy==2.0.2
+pandas==2.2.3
+scipy==1.14.1
+scikit-learn==1.5.2
+lightgbm==4.7.0
+arch==8.0.0
+oss2==2.19.1
+httpx==0.28.1
