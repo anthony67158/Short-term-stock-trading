@@ -48,10 +48,23 @@ function beijingTimeLabel(timestamp = Date.now()) {
     + String(date.getMinutes()).padStart(2, '0')
 }
 
+function finiteOptional(value) {
+  return value !== null
+    && value !== undefined
+    && value !== ''
+    && Number.isFinite(Number(value))
+}
+
 function quantPriorsFromSnapshot(snapshot) {
   return new Map(
     (Array.isArray(snapshot?.sectors) ? snapshot.sectors : [])
-      .filter((item) => item?.code)
+      .filter((item) =>
+        item?.code
+        && (
+          finiteOptional(item.forecast?.next?.probability)
+          || finiteOptional(item.forecast?.week?.probability)
+        )
+      )
       .map((item) => [String(item.code), {
         nextProbability: item.forecast?.next?.probability,
         weekProbability: item.forecast?.week?.probability,
@@ -158,6 +171,22 @@ export function runSectorForecastGeneration({
 
   const task = (async () => {
     const previousTask = await store.readTask()
+    const observedAt = Number(now()) || Date.now()
+    if (
+      previousTask.active?.status === 'running'
+      && Number(previousTask.active.startedAt) > 0
+      && observedAt - Number(previousTask.active.startedAt)
+        < 15 * 60 * 1000
+    ) {
+      return {
+        ok: true,
+        skipped: true,
+        reason: 'active-generation',
+        snapshot: runSession === 'intraday'
+          ? await store.readIntraday()
+          : await store.readLatest(),
+      }
+    }
     if (!force && previousTask.completed?.[key]) {
       const snapshot = runSession === 'intraday'
         ? await store.readIntraday()

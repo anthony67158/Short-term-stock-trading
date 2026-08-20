@@ -30,6 +30,12 @@ const rounded = (value, digits = 2) =>
     ? +Number(value).toFixed(digits)
     : null
 
+const finiteOptional = (value) =>
+  value !== null
+  && value !== undefined
+  && value !== ''
+  && Number.isFinite(Number(value))
+
 export function sectorProbabilityScore(value) {
   if (!Number.isFinite(Number(value))) return null
   return rounded(
@@ -242,10 +248,10 @@ export function buildSectorForecastSnapshot({
     const quant = quantPredictions instanceof Map
       ? quantPredictions.get(String(sector.code))
       : quantPredictions?.[sector.code]
-    const nextProbability = Number.isFinite(Number(quant?.nextProbability))
+    const nextProbability = finiteOptional(quant?.nextProbability)
       ? clamp(Number(quant.nextProbability))
       : null
-    const weekProbability = Number.isFinite(Number(quant?.weekProbability))
+    const weekProbability = finiteOptional(quant?.weekProbability)
       ? clamp(Number(quant.weekProbability))
       : null
     const nextModelScore = sectorProbabilityScore(nextProbability)

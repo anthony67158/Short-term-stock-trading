@@ -182,6 +182,16 @@ test('盘中动态版只在连续交易时段按设置时间桶到期', () => {
     }, {}),
     null,
   )
+  assert.equal(
+    dueSectorForecastSession(morning, settings, {
+      active: {
+        status: 'running',
+        startedAt: morning - 60_000,
+      },
+      completed: {},
+    }),
+    null,
+  )
   assert.equal(sectorForecastMarketPhase(morning), 'live')
   assert.equal(sectorForecastMarketPhase(lunch), 'lunch')
   assert.equal(
@@ -348,6 +358,67 @@ test('同进程同场次并发生成合并为一次并持久化完成标记', as
   assert.equal(generated, 1)
   assert.deepEqual(left.snapshot, right.snapshot)
   assert.equal((await store.readTask()).completed['2026-08-20:close'], true)
+})
+
+test('近期已有跨时间桶任务时拒绝并发且超时后允许恢复', async () => {
+  let generated = 0
+  const now = Date.parse('2026-08-20T02:00:00.000Z')
+  const recentStore = {
+    readTask: async () => ({
+      active: {
+        key: '2026-08-20:intraday:09:55',
+        status: 'running',
+        startedAt: now - 60_000,
+      },
+      completed: {},
+    }),
+    readIntraday: async () => ({ session: 'intraday' }),
+  }
+  const skipped = await runSectorForecastGeneration({
+    store: recentStore,
+    session: 'intraday',
+    signalDate: '2026-08-20',
+    runSlot: '10:00',
+    force: true,
+    generate: async () => {
+      generated += 1
+      return null
+    },
+    now: () => now,
+  })
+
+  assert.equal(skipped.skipped, true)
+  assert.equal(skipped.reason, 'active-generation')
+  assert.equal(generated, 0)
+
+  const staleStore = createSectorForecastStore(memoryStorage())
+  await staleStore.saveTask({
+    active: {
+      key: '2026-08-20:intraday:09:40',
+      status: 'running',
+      startedAt: now - 16 * 60_000,
+    },
+    completed: {},
+  })
+  const recovered = await runSectorForecastGeneration({
+    store: staleStore,
+    session: 'intraday',
+    signalDate: '2026-08-20',
+    runSlot: '10:00',
+    force: true,
+    generate: async () => {
+      generated += 1
+      return {
+        signalDate: '2026-08-20',
+        session: 'intraday',
+        sectors: [{ code: 'BK1000', rank: 1 }],
+      }
+    },
+    now: () => now,
+  })
+
+  assert.equal(recovered.ok, true)
+  assert.equal(generated, 1)
 })
 
 test('生成中的阶段和百分比写入OSS任务状态供刷新恢复', async () => {
@@ -976,6 +1047,45 @@ test('盘中生成使用实时盘面和正式版量化先验且不调用LLM', as
     'scoring',
     'finalizing',
   ])
+})
+
+test('正式版没有有效模型概率时盘中版不得冒充LightGBM先验', async () => {
+  const result = await generateSectorForecastSnapshot({
+    signalDate: '2026-08-20',
+    session: 'intraday',
+  }, {
+    store: {
+      readLatest: async () => ({
+        signalDate: '2026-08-19',
+        session: 'close',
+        sectors: [{
+          code: 'BK1000',
+          forecast: {
+            next: { probability: null },
+            week: { probability: null },
+          },
+        }],
+      }),
+    },
+    collect: async () => ({
+      allSectors: [{ code: 'BK1000' }],
+      sectors: [{
+        code: 'BK1000',
+        name: '机器人',
+        price: 100,
+        pct: 0.5,
+        mainInflow: 100e6,
+        mainRatio: 3,
+        amount: 10e9,
+      }],
+      histories: new Map(),
+      members: new Map(),
+    }),
+    now: () => 200,
+  })
+
+  assert.equal(result.model.quant, 'unavailable')
+  assert.equal(result.sectors[0].forecast.next.probability, null)
 })
 
 test('自动开关关闭时run_due不会进入生成函数', async () => {

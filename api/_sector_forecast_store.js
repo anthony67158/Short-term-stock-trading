@@ -137,6 +137,11 @@ export function dueSectorForecastSession(
   const day = beijingDayKey(timestamp)
   const minutes = beijingMinutes(timestamp)
   const completed = task?.completed || {}
+  if (
+    task?.active?.status === 'running'
+    && Number(task.active.startedAt) > 0
+    && timestamp - Number(task.active.startedAt) < 15 * 60 * 1000
+  ) return null
   if (normalized.intradayEnabled && isContinuousTrading(timestamp)) {
     const slot = sectorForecastIntradaySlot(
       timestamp,
