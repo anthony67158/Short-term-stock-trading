@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
   SECTOR_FORECAST_SORTS,
+  resolveSectorForecastGenerationSession,
   sectorForecastActionView,
   sortSectorForecasts,
   summarizeSectorForecastActions,
@@ -177,4 +178,23 @@ test('板块结论汇总能直接说明当前有几个可以买入', () => {
   })
   assert.equal(summary.buyable[0].code, 'BK1001')
   assert.equal(summary.noBuy, 2)
+})
+
+test('手动生成按市场阶段选择盘前复核、盘中动态或收盘正式版', () => {
+  assert.equal(resolveSectorForecastGenerationSession({
+    phase: 'preopen',
+    intradayAvailable: false,
+  }), 'overnight')
+  assert.equal(resolveSectorForecastGenerationSession({
+    phase: 'live',
+    intradayAvailable: true,
+  }), 'intraday')
+  assert.equal(resolveSectorForecastGenerationSession({
+    phase: 'lunch',
+    intradayAvailable: false,
+  }), 'intraday')
+  assert.equal(resolveSectorForecastGenerationSession({
+    phase: 'closed',
+    intradayAvailable: false,
+  }), 'close')
 })

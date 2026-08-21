@@ -360,6 +360,40 @@ test('同进程同场次并发生成合并为一次并持久化完成标记', as
   assert.equal((await store.readTask()).completed['2026-08-20:close'], true)
 })
 
+test('空板块结果必须失败且不得覆盖上一份有效正式版', async () => {
+  const storage = memoryStorage()
+  const store = createSectorForecastStore(storage)
+  const previous = {
+    schemaVersion: 'sector-forecast.v1',
+    signalDate: '2026-08-20',
+    session: 'close',
+    generatedAt: 100,
+    sectors: [{ code: 'BK1000', rank: 1 }],
+  }
+  await store.saveSnapshot(previous)
+
+  await assert.rejects(
+    runSectorForecastGeneration({
+      store,
+      session: 'close',
+      signalDate: '2026-08-21',
+      force: true,
+      generate: async () => ({
+        schemaVersion: 'sector-forecast.v1',
+        signalDate: '2026-08-21',
+        session: 'close',
+        generatedAt: 200,
+        sectors: [],
+      }),
+      now: () => 200,
+    }),
+    /没有有效板块/,
+  )
+
+  assert.deepEqual(await store.readLatest(), previous)
+  assert.equal((await store.readTask()).latest.status, 'failed')
+})
+
 test('近期已有跨时间桶任务时拒绝并发且超时后允许恢复', async () => {
   let generated = 0
   const now = Date.parse('2026-08-20T02:00:00.000Z')

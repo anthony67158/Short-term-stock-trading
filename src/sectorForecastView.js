@@ -5,6 +5,16 @@ export const SECTOR_FORECAST_SORTS = Object.freeze([
   'score_asc',
 ])
 
+export function resolveSectorForecastGenerationSession(market = {}) {
+  if (
+    market?.phase === 'live'
+    || market?.intradayAvailable === true
+  ) return 'intraday'
+  if (market?.phase === 'lunch') return 'intraday'
+  if (market?.phase === 'preopen') return 'overnight'
+  return 'close'
+}
+
 const ACTION_ORDER = Object.freeze({
   LAYOUT: 0,
   WAIT_PULLBACK: 1,

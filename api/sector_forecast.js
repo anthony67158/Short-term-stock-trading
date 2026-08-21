@@ -255,8 +255,14 @@ export function runSectorForecastGeneration({
         session: runSession,
         onProgress,
       })
-      if (!generated || !Array.isArray(generated.sectors)) {
-        throw new Error('板块前瞻生成结果无效')
+      if (
+        !generated
+        || !Array.isArray(generated.sectors)
+        || generated.sectors.length === 0
+      ) {
+        throw new Error(
+          '没有有效板块数据，已保留上一版结果；盘前请执行证据复核，开盘后再刷新实时排名',
+        )
       }
       const snapshot = {
         ...generated,

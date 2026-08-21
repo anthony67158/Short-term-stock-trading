@@ -3109,6 +3109,34 @@ html[data-theme="light"] .plan-cand.starred {
   font-size: var(--text-2xs);
 }
 
+.sector-forecast-empty-result {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-md);
+  border-bottom: 1px solid var(--color-rule-2);
+  background: var(--color-paper-2);
+  color: var(--color-warning);
+}
+
+.sector-forecast-empty-result > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sector-forecast-empty-result strong {
+  color: var(--color-ink);
+  font-size: var(--text-xs);
+}
+
+.sector-forecast-empty-result span {
+  color: var(--color-muted);
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+}
+
 .sector-forecast-action-summary {
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr) auto;

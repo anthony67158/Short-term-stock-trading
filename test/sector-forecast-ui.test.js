@@ -90,6 +90,9 @@ test('板块前瞻支持手动生成和运行时自动时间设置', () => {
   assert.match(component, /action:\s*'generate'/)
   assert.match(component, /session:\s*generationSession/)
   assert.match(component, /刷新盘中版/)
+  assert.match(component, /复核盘前证据/)
+  assert.match(component, /resolveSectorForecastGenerationSession/)
+  assert.match(component, /本版没有有效板块数据/)
   assert.match(component, /sector-forecast-version-switch/)
   assert.match(component, /盘中动态/)
   assert.match(component, /正式基线/)
@@ -122,6 +125,7 @@ test('板块前瞻桌面信息密集且移动端稳定单列', () => {
   assert.match(styles, /@media[\s\S]*\.sector-forecast-row\s*{[\s\S]*grid-template-columns:\s*1fr/)
   assert.match(styles, /\.sector-forecast-settings\s*{/)
   assert.match(styles, /\.sector-forecast-version-switch\s*{/)
+  assert.match(styles, /\.sector-forecast-empty-result\s*{/)
   assert.match(
     styles,
     /\.sector-forecast-head-actions\s*{[\s\S]*--sector-control-height:\s*36px/,

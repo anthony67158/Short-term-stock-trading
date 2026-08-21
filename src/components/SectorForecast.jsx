@@ -11,6 +11,7 @@ import SectorForecastSettings from './SectorForecastSettings'
 import { openStockDetail } from '../detailStore.js'
 import { sectorForecastRequest } from '../sectorForecastClient.js'
 import {
+  resolveSectorForecastGenerationSession,
   sectorForecastActionView,
   sortSectorForecasts,
   summarizeSectorForecastActions,
@@ -255,9 +256,9 @@ export default function SectorForecast() {
   const snapshot = effectiveVersion === 'intraday'
     ? intraday
     : latest
-  const generationSession = market?.intradayAvailable
-    ? 'intraday'
-    : 'close'
+  const generationSession =
+    resolveSectorForecastGenerationSession(market)
+  const generationPaused = market?.phase === 'lunch'
 
   const ranked = useMemo(() => {
     return sortSectorForecasts(snapshot?.sectors || [], {
@@ -338,14 +339,23 @@ export default function SectorForecast() {
               <option value="score_asc">分数从低到高</option>
             </select>
           </label>
-          <button type="button" className="row-btn sector-forecast-generate" disabled={generating}
+          <button type="button" className="row-btn sector-forecast-generate"
+            disabled={generating || generationPaused}
             onClick={generate}>
             <Icon name={generating ? 'pulse' : 'refresh'} size={14} />
-            {generating
-              ? (generationSession === 'intraday' ? '刷新中' : '生成中')
+            {generationPaused
+              ? '午间暂停'
+              : generating
+              ? generationSession === 'intraday'
+                ? '刷新中'
+                : generationSession === 'overnight'
+                  ? '复核中'
+                  : '生成中'
               : generationSession === 'intraday'
                 ? '刷新盘中版'
-                : '生成正式版'}
+                : generationSession === 'overnight'
+                  ? '复核盘前证据'
+                  : '生成正式版'}
           </button>
           <button type="button" className="icon-btn sector-forecast-settings-trigger"
             aria-label="板块前瞻自动设置" title="自动设置"
@@ -431,32 +441,44 @@ export default function SectorForecast() {
             </b></span>
             <span>生成 <b>{timeLabel(snapshot.generatedAt)}</b></span>
           </div>
-          <div
-            className="sector-forecast-action-summary"
-            data-has-buy={actionSummary.counts.buy > 0}
-            role="status"
-          >
-            <Icon
-              name={actionSummary.counts.buy > 0 ? 'check' : 'shield'}
-              size={16}
-            />
-            <div>
-              <strong>
-                {actionSummary.counts.buy > 0
-                  ? `当前可买 ${actionSummary.counts.buy} 个`
-                  : '当前没有通过买入闸门的板块'}
-              </strong>
-              <span>
-                {actionSummary.counts.buy > 0
-                  ? `${actionSummary.buyable.slice(0, 3).map((item) => item.name).join('、')}；列表已按结论优先排列`
-                  : '今天先不买，等待资金、位置和量化信号重新共振'}
-              </span>
+          {ranked.length ? (
+            <div
+              className="sector-forecast-action-summary"
+              data-has-buy={actionSummary.counts.buy > 0}
+              role="status"
+            >
+              <Icon
+                name={actionSummary.counts.buy > 0 ? 'check' : 'shield'}
+                size={16}
+              />
+              <div>
+                <strong>
+                  {actionSummary.counts.buy > 0
+                    ? `当前可买 ${actionSummary.counts.buy} 个`
+                    : '当前没有通过买入闸门的板块'}
+                </strong>
+                <span>
+                  {actionSummary.counts.buy > 0
+                    ? `${actionSummary.buyable.slice(0, 3).map((item) => item.name).join('、')}；列表已按结论优先排列`
+                    : '今天先不买，等待资金、位置和量化信号重新共振'}
+                </span>
+              </div>
+              <small>
+                暂不买 {actionSummary.counts.wait} ·
+                {' '}观察/回避 {actionSummary.noBuy}
+              </small>
             </div>
-            <small>
-              暂不买 {actionSummary.counts.wait} ·
-              {' '}观察/回避 {actionSummary.noBuy}
-            </small>
-          </div>
+          ) : (
+            <div className="sector-forecast-empty-result" role="alert">
+              <Icon name="info" size={16} />
+              <div>
+                <strong>本版没有有效板块数据</strong>
+                <span>
+                  未形成买卖结论，系统会保留上一份有效基线；盘前只复核证据，开盘后再刷新实时排名。
+                </span>
+              </div>
+            </div>
+          )}
           {error && <div className="sector-forecast-inline-error" role="status">{error}</div>}
           <div className="sector-forecast-list">
             {ranked.map((sector, index) => {
