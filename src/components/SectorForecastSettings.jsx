@@ -40,22 +40,35 @@ export default function SectorForecastSettings({
 
   return (
     <form className="sector-forecast-settings" onSubmit={submit}>
-      <div className="sector-setting-group">
-        <label className="sector-setting-toggle">
-          <input
-            type="checkbox"
-            checked={draft.autoEnabled}
-            onChange={(event) => setDraft((current) => ({
+      <div className="sector-setting-list">
+        <div
+          className="sector-setting-row"
+          data-enabled={draft.autoEnabled}
+        >
+          <button
+            type="button"
+            role="switch"
+            aria-checked={draft.autoEnabled}
+            aria-label="自动收盘生成正式排名"
+            className={'sector-setting-switch' + (
+              draft.autoEnabled ? ' on' : ''
+            )}
+            onClick={() => setDraft((current) => ({
               ...current,
-              autoEnabled: event.target.checked,
+              autoEnabled: !current.autoEnabled,
             }))}
-          />
-          <span>收盘正式版</span>
-        </label>
-        <label>
-          <span>生成时间</span>
+          >
+            <span><i /></span>
+          </button>
+          <div className="sector-setting-name">
+            <Icon name="history" size={15} />
+            <strong>收盘生成正式排名</strong>
+          </div>
+          <label className="sector-setting-control">
+            <span>执行时间</span>
           <input
             type="time"
+            aria-label="收盘生成执行时间"
             min="15:05"
             max="23:59"
             value={draft.closeTime}
@@ -65,24 +78,36 @@ export default function SectorForecastSettings({
               closeTime: event.target.value,
             }))}
           />
-        </label>
-      </div>
-      <div className="sector-setting-group">
-        <label className="sector-setting-toggle">
-          <input
-            type="checkbox"
-            checked={draft.overnightEnabled}
-            onChange={(event) => setDraft((current) => ({
+          </label>
+        </div>
+        <div
+          className="sector-setting-row"
+          data-enabled={draft.overnightEnabled}
+        >
+          <button
+            type="button"
+            role="switch"
+            aria-checked={draft.overnightEnabled}
+            aria-label="自动盘前更新隔夜证据"
+            className={'sector-setting-switch' + (
+              draft.overnightEnabled ? ' on' : ''
+            )}
+            onClick={() => setDraft((current) => ({
               ...current,
-              overnightEnabled: event.target.checked,
+              overnightEnabled: !current.overnightEnabled,
             }))}
-          />
-          <span>盘前证据复核</span>
-        </label>
-        <label>
-          <span>复核时间</span>
+          >
+            <span><i /></span>
+          </button>
+          <div className="sector-setting-name">
+            <Icon name="sun" size={15} />
+            <strong>盘前更新隔夜证据</strong>
+          </div>
+          <label className="sector-setting-control">
+            <span>执行时间</span>
           <input
             type="time"
+            aria-label="盘前证据更新执行时间"
             min="06:00"
             max="09:25"
             value={draft.overnightTime}
@@ -92,23 +117,35 @@ export default function SectorForecastSettings({
               overnightTime: event.target.value,
             }))}
           />
-        </label>
-      </div>
-      <div className="sector-setting-group">
-        <label className="sector-setting-toggle">
-          <input
-            type="checkbox"
-            checked={draft.intradayEnabled}
-            onChange={(event) => setDraft((current) => ({
+          </label>
+        </div>
+        <div
+          className="sector-setting-row"
+          data-enabled={draft.intradayEnabled}
+        >
+          <button
+            type="button"
+            role="switch"
+            aria-checked={draft.intradayEnabled}
+            aria-label="自动盘中刷新实时排名"
+            className={'sector-setting-switch' + (
+              draft.intradayEnabled ? ' on' : ''
+            )}
+            onClick={() => setDraft((current) => ({
               ...current,
-              intradayEnabled: event.target.checked,
+              intradayEnabled: !current.intradayEnabled,
             }))}
-          />
-          <span>盘中自动刷新</span>
-        </label>
-        <label>
-          <span>刷新间隔</span>
+          >
+            <span><i /></span>
+          </button>
+          <div className="sector-setting-name">
+            <Icon name="activity" size={15} />
+            <strong>盘中刷新实时排名</strong>
+          </div>
+          <label className="sector-setting-control">
+            <span>更新频率</span>
           <select
+            aria-label="盘中实时排名更新频率"
             value={draft.intradayIntervalMinutes}
             disabled={!draft.intradayEnabled}
             onChange={(event) => setDraft((current) => ({
@@ -120,7 +157,8 @@ export default function SectorForecastSettings({
             <option value={10}>10分钟</option>
             <option value={15}>15分钟</option>
           </select>
-        </label>
+          </label>
+        </div>
       </div>
       <div className="sector-setting-actions">
         {error && <span role="alert">{error}</span>}
@@ -129,7 +167,7 @@ export default function SectorForecastSettings({
         </button>
         <button type="submit" className="row-btn primary" disabled={saving}>
           <Icon name={saving ? 'pulse' : 'check'} size={14} />
-          {saving ? '保存中' : '保存'}
+          {saving ? '保存中' : '保存自动设置'}
         </button>
       </div>
     </form>

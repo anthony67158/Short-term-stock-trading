@@ -102,7 +102,16 @@ test('板块前瞻支持手动生成和运行时自动时间设置', () => {
   assert.match(settings, /overnightEnabled/)
   assert.match(settings, /intradayEnabled/)
   assert.match(settings, /intradayIntervalMinutes/)
-  assert.match(settings, /盘中自动刷新/)
+  assert.match(settings, /收盘生成正式排名/)
+  assert.match(settings, /盘前更新隔夜证据/)
+  assert.match(settings, /盘中刷新实时排名/)
+  assert.match(settings, /sector-setting-list/)
+  assert.match(settings, /sector-setting-row/)
+  assert.match(settings, /sector-setting-switch/)
+  assert.match(settings, /保存自动设置/)
+  assert.doesNotMatch(settings, />生成时间</)
+  assert.doesNotMatch(settings, />复核时间</)
+  assert.doesNotMatch(settings, />刷新间隔</)
   assert.match(settings, /<option value=\{5\}>5分钟<\/option>/)
   assert.match(settings, /<option value=\{10\}>10分钟<\/option>/)
   assert.match(settings, /<option value=\{15\}>15分钟<\/option>/)
@@ -129,6 +138,14 @@ test('板块前瞻桌面信息密集且移动端稳定单列', () => {
   assert.match(styles, /\.sector-forecast-row\s*{/)
   assert.match(styles, /@media[\s\S]*\.sector-forecast-row\s*{[\s\S]*grid-template-columns:\s*1fr/)
   assert.match(styles, /\.sector-forecast-settings\s*{/)
+  assert.match(
+    styles,
+    /\.sector-setting-row\s*{[\s\S]*grid-template-columns:\s*32px minmax\(0,\s*1fr\) minmax\(150px,\s*auto\)/,
+  )
+  assert.match(
+    styles,
+    /@media[\s\S]*\.sector-setting-row\s*{[\s\S]*grid-template-columns:\s*32px minmax\(0,\s*1fr\)/,
+  )
   assert.match(styles, /\.sector-forecast-version-switch\s*{/)
   assert.match(styles, /\.sector-forecast-empty-result\s*{/)
   assert.match(
