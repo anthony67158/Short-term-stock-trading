@@ -58,6 +58,16 @@ function envConfig() {
       source: 'env',
     };
   }
+  if (process.env.SECTOR_BASE_URL && process.env.SECTOR_API_KEY) {
+    config.sectorEndpoint = {
+      baseUrl: String(process.env.SECTOR_BASE_URL).replace(/\/+$/, ''),
+      apiKey: process.env.SECTOR_API_KEY,
+      model: process.env.SECTOR_MODEL || ROLES.sector.def,
+      reasoning: process.env.SECTOR_REASONING !== 'false',
+      enabled: true,
+      source: 'env',
+    };
+  }
   return config;
 }
 
@@ -68,6 +78,18 @@ function normalizeJudgeEndpoint(raw, source = 'dedicated') {
     apiKey: String(raw.apiKey || ''),
     model: String(raw.model || ''),
     reasoning: !!raw.reasoning,
+    enabled: raw.enabled !== false,
+    source,
+  };
+}
+
+function normalizeSectorEndpoint(raw, source = 'dedicated') {
+  if (!raw || typeof raw !== 'object') return null;
+  return {
+    baseUrl: String(raw.baseUrl || '').replace(/\/+$/, ''),
+    apiKey: String(raw.apiKey || ''),
+    model: String(raw.model || ''),
+    reasoning: raw.reasoning !== false,
     enabled: raw.enabled !== false,
     source,
   };
@@ -97,6 +119,41 @@ export function resolveJudgeEndpoint(config = {}) {
       apiKey: config.apiKey,
       model: config.models.judge,
       reasoning: !!config.reasoning?.judge,
+      enabled: true,
+    }, 'legacy-main');
+  }
+  return null;
+}
+
+export function resolveSectorEndpoint(config = {}) {
+  if (hasOwn(config, 'sectorEndpoint')) {
+    return normalizeSectorEndpoint(
+      config.sectorEndpoint,
+      config.sectorEndpoint?.source || 'dedicated',
+    );
+  }
+  const legacy = (config.endpoints || []).find((endpoint) =>
+    endpoint
+    && endpoint.enabled !== false
+    && endpoint.baseUrl
+    && endpoint.apiKey
+    && endpoint.models?.sector
+  );
+  if (legacy) {
+    return normalizeSectorEndpoint({
+      baseUrl: legacy.baseUrl,
+      apiKey: legacy.apiKey,
+      model: legacy.models.sector,
+      reasoning: legacy.reasoning?.sector !== false,
+      enabled: true,
+    }, 'legacy-pool');
+  }
+  if (config.baseUrl && config.apiKey && config.models?.sector) {
+    return normalizeSectorEndpoint({
+      baseUrl: config.baseUrl,
+      apiKey: config.apiKey,
+      model: config.models.sector,
+      reasoning: config.reasoning?.sector !== false,
       enabled: true,
     }, 'legacy-main');
   }
@@ -142,6 +199,19 @@ function merge(base, over) {
   } else {
     merged.judgeEndpoint = resolveJudgeEndpoint(merged);
   }
+  if (hasOwn(over, 'sectorEndpoint')) {
+    const previous = resolveSectorEndpoint(base) || {};
+    const incoming = over.sectorEndpoint && typeof over.sectorEndpoint === 'object' ? over.sectorEndpoint : {};
+    merged.sectorEndpoint = normalizeSectorEndpoint({
+      ...previous,
+      ...incoming,
+      apiKey: incoming.apiKey || previous.apiKey || '',
+    }, incoming.source || 'dedicated');
+  } else if (hasOwn(base, 'sectorEndpoint')) {
+    merged.sectorEndpoint = resolveSectorEndpoint(base);
+  } else {
+    merged.sectorEndpoint = resolveSectorEndpoint(merged);
+  }
   return merged;
 }
 
@@ -152,6 +222,7 @@ export async function assertSafeLlmConfig(config = {}) {
   const candidates = [
     config.baseUrl,
     config.judgeEndpoint?.baseUrl,
+    config.sectorEndpoint?.baseUrl,
     ...(Array.isArray(config.endpoints)
       ? config.endpoints.map((endpoint) => endpoint?.baseUrl)
       : []),
@@ -193,6 +264,12 @@ export function getModel(role) {
       ? endpoint.model
       : '';
   }
+  if (role === 'sector') {
+    const endpoint = resolveSectorEndpoint(c);
+    return endpoint && endpoint.enabled !== false && endpoint.baseUrl && endpoint.apiKey
+      ? endpoint.model
+      : ((c.models && c.models[role]) || ROLES.sector.def);
+  }
   return (c.models && c.models[role]) || (ROLES[role] && ROLES[role].def) || '';
 }
 
@@ -202,6 +279,12 @@ export function getReasoning(role) {
   if (role === 'judge') {
     const endpoint = resolveJudgeEndpoint(c);
     return !!(endpoint && endpoint.enabled !== false && endpoint.reasoning);
+  }
+  if (role === 'sector') {
+    const endpoint = resolveSectorEndpoint(c);
+    return endpoint
+      ? !!(endpoint.enabled !== false && endpoint.reasoning)
+      : !!(c.reasoning && c.reasoning[role]);
   }
   return !!(c.reasoning && c.reasoning[role]);
 }
@@ -217,6 +300,7 @@ export async function saveConfig(patch = {}) {
     endpoints: Array.isArray(cur.endpoints) ? cur.endpoints.slice() : [],
     primaryMaxInflight: cur.primaryMaxInflight || 2,
     judgeEndpoint: resolveJudgeEndpoint(cur),
+    sectorEndpoint: resolveSectorEndpoint(cur),
     updatedAt: Date.now(),
   };
   if (patch.models) for (const role of Object.keys(ROLES)) {
@@ -245,6 +329,20 @@ export async function saveConfig(patch = {}) {
       enabled: incoming.enabled ?? previous.enabled ?? true,
     }, 'dedicated');
   }
+  if (hasOwn(patch, 'sectorEndpoint')) {
+    const previous = resolveSectorEndpoint(cur) || {};
+    const incoming = patch.sectorEndpoint && typeof patch.sectorEndpoint === 'object' ? patch.sectorEndpoint : {};
+    const apiKey = (incoming.apiKey != null && incoming.apiKey !== '' && !/\*/.test(String(incoming.apiKey)))
+      ? String(incoming.apiKey)
+      : (previous.apiKey || '');
+    next.sectorEndpoint = normalizeSectorEndpoint({
+      baseUrl: incoming.baseUrl ?? previous.baseUrl,
+      apiKey,
+      model: incoming.model ?? previous.model ?? ROLES.sector.def,
+      reasoning: incoming.reasoning ?? previous.reasoning,
+      enabled: incoming.enabled ?? previous.enabled ?? true,
+    }, 'dedicated');
+  }
   // endpoints:整组替换(前端传全量)。每项 apiKey 留空则沿用同 id 旧 key(前端只回传掩码 → 不覆盖)。
   //   每个端点可携带自己的 models:{chat,advisor,agent}——不同网关上同一角色可能是不同模型名。
   //   某角色留空 → 运行时回退到全局 models[role] → 再回退到角色默认(见 _llm_pool.modelForEndpoint)。
@@ -258,7 +356,7 @@ export async function saveConfig(patch = {}) {
       const epModels = {};
       const src = (e.models && typeof e.models === 'object') ? e.models : (prev.models || {});
       for (const role of Object.keys(ROLES)) {
-        if (role === 'judge') continue;
+        if (['judge', 'sector'].includes(role)) continue;
         const v = src[role];
         if (v != null && String(v).trim()) epModels[role] = String(v).trim();
       }
@@ -266,7 +364,7 @@ export async function saveConfig(patch = {}) {
       const epReason = {};
       const rsrc = (e.reasoning && typeof e.reasoning === 'object') ? e.reasoning : (prev.reasoning || {});
       for (const role of Object.keys(ROLES)) {
-        if (role === 'judge') continue;
+        if (['judge', 'sector'].includes(role)) continue;
         if (rsrc[role]) epReason[role] = true;
       }
       return {
@@ -321,14 +419,31 @@ export function publicView() {
         source: endpoint.source,
       };
     })(),
+    sectorEndpoint: (() => {
+      const endpoint = resolveSectorEndpoint(c);
+      if (!endpoint) return null;
+      return {
+        baseUrl: endpoint.baseUrl,
+        apiKeyMask: maskKey(endpoint.apiKey),
+        hasKey: !!endpoint.apiKey,
+        model: endpoint.model,
+        reasoning: !!endpoint.reasoning,
+        enabled: endpoint.enabled !== false,
+        source: endpoint.source,
+      };
+    })(),
     endpoints: (c.endpoints || []).map((e) => ({
       id: e.id, baseUrl: e.baseUrl || '', weight: e.weight || 1,
       enabled: e.enabled !== false, apiKeyMask: maskKey(e.apiKey), hasKey: !!e.apiKey,
       models: e.models && typeof e.models === 'object'
-        ? Object.fromEntries(Object.entries(e.models).filter(([role]) => role !== 'judge'))
+        ? Object.fromEntries(Object.entries(e.models).filter(([role]) =>
+            !['judge', 'sector'].includes(role)
+          ))
         : {},
       reasoning: e.reasoning && typeof e.reasoning === 'object'
-        ? Object.fromEntries(Object.entries(e.reasoning).filter(([role]) => role !== 'judge'))
+        ? Object.fromEntries(Object.entries(e.reasoning).filter(([role]) =>
+            !['judge', 'sector'].includes(role)
+          ))
         : {},
     })),
     source: c.source,

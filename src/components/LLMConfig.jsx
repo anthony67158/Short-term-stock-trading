@@ -55,6 +55,14 @@ export default function LLMConfig() {
   const [judgePool, setJudgePool] = useState(null)
   const [judgeTesting, setJudgeTesting] = useState({})
   const [judgeModelList, setJudgeModelList] = useState([])
+  const [sectorRole, setSectorRole] = useState({})
+  const [sectorEndpoint, setSectorEndpoint] = useState({
+    baseUrl: '', apiKey: '', apiKeyMask: '', hasKey: false,
+    model: '', reasoning: true, enabled: true,
+  })
+  const [sectorPool, setSectorPool] = useState(null)
+  const [sectorTesting, setSectorTesting] = useState({})
+  const [sectorModelList, setSectorModelList] = useState([])
 
   // 角色 & 模型
   const [roles, setRoles] = useState({})           // { chat:{label,def}, ... }
@@ -79,6 +87,7 @@ export default function LLMConfig() {
         setKeyMask(c.apiKeyMask || '')
         setRoles(j.roles || {})
         setJudgeRole(j.judgeRole || {})
+        setSectorRole(j.sectorRole || {})
         setModels({ ...(c.models || {}) })
         setReasoning({ ...(c.reasoning || {}) })
         setPrimaryMaxInflight(Math.max(1, Math.min(20, Number(c.primaryMaxInflight) || 2)))
@@ -93,6 +102,17 @@ export default function LLMConfig() {
           source: c.judgeEndpoint?.source || '',
         })
         setJudgePool(j.judgePool || null)
+        setSectorEndpoint({
+          baseUrl: c.sectorEndpoint?.baseUrl || '',
+          apiKey: '',
+          apiKeyMask: c.sectorEndpoint?.apiKeyMask || '',
+          hasKey: !!c.sectorEndpoint?.hasKey,
+          model: c.sectorEndpoint?.model || j.sectorRole?.def || '',
+          reasoning: c.sectorEndpoint?.reasoning !== false,
+          enabled: c.sectorEndpoint?.enabled !== false,
+          source: c.sectorEndpoint?.source || '',
+        })
+        setSectorPool(j.sectorPool || null)
         const eps = Array.isArray(c.endpoints) ? c.endpoints : []
         setEndpoints(eps)
         setPool(Array.isArray(j.pool) ? j.pool : [])
@@ -150,6 +170,7 @@ export default function LLMConfig() {
   }
 
   const setJudge = (patch) => setJudgeEndpoint((current) => ({ ...current, ...patch }))
+  const setSector = (patch) => setSectorEndpoint((current) => ({ ...current, ...patch }))
   const verifyJudgeEndpoint = async ({ required = false } = {}) => {
     if (judgeEndpoint.enabled === false) return true
     if (!judgeEndpoint.baseUrl.trim()) {
@@ -189,10 +210,59 @@ export default function LLMConfig() {
     }
   }
 
+  const verifySectorEndpoint = async ({ required = false } = {}) => {
+    if (sectorEndpoint.enabled === false) return true
+    if (!sectorEndpoint.baseUrl.trim()) {
+      if (required) setErr('请填写板块前瞻专用端点地址')
+      return false
+    }
+    if (!sectorEndpoint.model.trim()) {
+      if (required) setErr('请填写板块前瞻专用模型')
+      return false
+    }
+    if (!sectorEndpoint.apiKey.trim() && !sectorEndpoint.hasKey) {
+      if (required) setErr('请填写板块前瞻专用端点密钥')
+      return false
+    }
+    setSectorTesting({ busy: true })
+    try {
+      const response = await callConfig('verify', {
+        target: 'sector',
+        baseUrl: sectorEndpoint.baseUrl.trim(),
+        apiKey: sectorEndpoint.apiKey.trim(),
+      })
+      const ok = !!(response && response.ok)
+      const available = Array.isArray(response?.models)
+        ? response.models
+        : []
+      setSectorModelList(available)
+      setSectorTesting({
+        ok,
+        msg: ok
+          ? (response.listable
+              ? `可用 · ${available.length} 个模型`
+              : '端点可用')
+          : (response?.error || '验证失败'),
+      })
+      if (!ok && required) {
+        setErr(`板块前瞻专用端点验证失败：${response?.error || '请检查连接信息'}`)
+      }
+      return ok
+    } catch (error) {
+      setSectorTesting({
+        ok: false,
+        msg: error.message || String(error),
+      })
+      if (required) setErr('板块前瞻专用端点验证失败')
+      return false
+    }
+  }
+
   // —— Step 1 → 2：验证连接、拉取模型清单 ——
   const verifyAndNext = async () => {
     setErr(''); setNotice('')
     if (!(await verifyJudgeEndpoint({ required: true }))) return
+    if (!(await verifySectorEndpoint({ required: true }))) return
     // ===== 池模式:逐端点验证(含主端点),各端点分别记录可用模型清单 =====
     if (poolMode) {
       const eps = activeEndpoints()
@@ -301,7 +371,11 @@ export default function LLMConfig() {
         && target.models.length
         && (target.key || target.hasKey)
       )
-    if (!generalTargets.length && judgeEndpoint.enabled === false) {
+    if (
+      !generalTargets.length
+      && judgeEndpoint.enabled === false
+      && sectorEndpoint.enabled === false
+    ) {
       setErr('请至少为一个角色选择模型')
       return
     }
@@ -325,6 +399,19 @@ export default function LLMConfig() {
             apiKey: judgeEndpoint.apiKey.trim(),
             models: [judgeEndpoint.model.trim()],
           }).then((result) => ({ target: 'Judge 专用端点', result }))
+        )
+      }
+      if (sectorEndpoint.enabled !== false) {
+        requests.push(
+          callConfig('test', {
+            target: 'sector',
+            baseUrl: sectorEndpoint.baseUrl.trim(),
+            apiKey: sectorEndpoint.apiKey.trim(),
+            models: [sectorEndpoint.model.trim()],
+          }).then((result) => ({
+            target: '板块前瞻专用端点',
+            result,
+          }))
         )
       }
       if (!requests.length) {
@@ -365,6 +452,13 @@ export default function LLMConfig() {
           reasoning: !!judgeEndpoint.reasoning,
           enabled: judgeEndpoint.enabled !== false,
         },
+        sectorEndpoint: {
+          baseUrl: sectorEndpoint.baseUrl.trim(),
+          apiKey: sectorEndpoint.apiKey.trim(),
+          model: sectorEndpoint.model.trim(),
+          reasoning: !!sectorEndpoint.reasoning,
+          enabled: sectorEndpoint.enabled !== false,
+        },
       }
       // 仅当用户启用了多端点面板时才提交 endpoints(整组替换);未启用则传空数组=清空池,退回单端点
       if (showPool) {
@@ -375,15 +469,17 @@ export default function LLMConfig() {
           apiKey: (e.apiKey != null && e.apiKey !== '') ? e.apiKey.trim() : '',
           weight: e.weight,
           enabled: e.enabled !== false,
-          // 通用端点只承接通用角色，Judge 使用上面的独立端点。
+          // 通用端点只承接通用角色，Judge/板块前瞻使用独立端点。
           models: e.models && typeof e.models === 'object'
             ? Object.fromEntries(Object.entries(e.models).filter(([role, value]) =>
-              role !== 'judge' && value && String(value).trim()
+              !['judge', 'sector'].includes(role)
+              && value
+              && String(value).trim()
             ))
             : {},
           reasoning: e.reasoning && typeof e.reasoning === 'object'
             ? Object.fromEntries(Object.entries(e.reasoning).filter(([role, value]) =>
-              role !== 'judge' && value != null
+              !['judge', 'sector'].includes(role) && value != null
             ).map(([role, value]) => [role, !!value]))
             : {},
         }))
@@ -394,6 +490,7 @@ export default function LLMConfig() {
       if (!j || !j.ok) { setErr((j && j.error) || '保存失败'); setBusy(false); return }
       if (Array.isArray(j.pool)) setPool(j.pool)
       setJudgePool(j.judgePool || null)
+      setSectorPool(j.sectorPool || null)
       setNotice('已保存，全系统即时生效')
       setTimeout(() => close(), 800)
     } catch (e) {
@@ -575,6 +672,71 @@ export default function LLMConfig() {
                 </div>
                 {judgeTesting.msg && (
                   <div className={'llm-ep-msg' + (judgeTesting.ok ? ' ok' : ' bad')}>{judgeTesting.msg}</div>
+                )}
+              </div>
+
+              <div className={'llm-judge-card' + (sectorEndpoint.enabled === false ? ' off' : '')}>
+                <div className="llm-judge-head">
+                  <span className="llm-judge-title"><Icon name="layers" size={14} /> 板块前瞻专用端点</span>
+                  <span className="llm-judge-badge">独立资源</span>
+                  {sectorPool && (
+                    <span className={'llm-ep-health' + (sectorPool.cooling ? ' cooling' : (sectorPool.fails ? ' warn' : ' ok'))}>
+                      {sectorPool.cooling
+                        ? `熔断中 ${Math.ceil((sectorPool.cooldownMsLeft || 0) / 1000)}秒`
+                        : `在途${sectorPool.inflight || 0} · 失败${sectorPool.fails || 0}`}
+                    </span>
+                  )}
+                  <button type="button"
+                    className={'llm-reason-toggle' + (sectorEndpoint.enabled !== false ? ' on' : '')}
+                    onClick={() => setSector({ enabled: sectorEndpoint.enabled === false })}
+                    title="启用或停用板块前瞻专用端点">
+                    <span className="llm-reason-text">{sectorEndpoint.enabled !== false ? '启用' : '停用'}</span>
+                    <span className="llm-reason-track"><span className="llm-reason-thumb" /></span>
+                  </button>
+                </div>
+                <div className="llm-hint">
+                  只承接板块前瞻的深度解释，不与操盘军师批量生成共享连接或并发额度。
+                </div>
+                {sectorEndpoint.source?.startsWith('legacy-') && (
+                  <div className="llm-hint llm-hint-warn">
+                    <Icon name="info" size={12} /> 当前为旧配置迁移值；请指定独立网关或独立密钥后保存。
+                  </div>
+                )}
+                <div className="llm-judge-grid">
+                  <input className="wl-input auth-input" placeholder="板块前瞻专用 Base URL"
+                    value={sectorEndpoint.baseUrl} spellCheck={false}
+                    onChange={(event) => setSector({ baseUrl: event.target.value })} />
+                  <input className="wl-input auth-input" type="password" spellCheck={false}
+                    placeholder={sectorEndpoint.hasKey
+                      ? `已保存（${sectorEndpoint.apiKeyMask || '****'}），留空沿用`
+                      : '板块前瞻专用 API Key'}
+                    value={sectorEndpoint.apiKey}
+                    onChange={(event) => setSector({ apiKey: event.target.value })} />
+                </div>
+                <div className="llm-judge-model-row">
+                  <input className="wl-input auth-input" list="llm-sector-model-list" spellCheck={false}
+                    placeholder={sectorRole.def || '深度模型名'}
+                    value={sectorEndpoint.model}
+                    onChange={(event) => setSector({ model: event.target.value })} />
+                  <datalist id="llm-sector-model-list">
+                    {sectorModelList.map((model) => <option key={model} value={model} />)}
+                  </datalist>
+                  <button type="button"
+                    className={'llm-reason-toggle' + (sectorEndpoint.reasoning ? ' on' : '')}
+                    onClick={() => setSector({ reasoning: !sectorEndpoint.reasoning })}
+                    title="板块前瞻建议开启深度思考">
+                    <span className="llm-reason-text"><Icon name="brain" size={12} /> 深度思考</span>
+                    <span className="llm-reason-track"><span className="llm-reason-thumb" /></span>
+                  </button>
+                  <button type="button" className="btn llm-ep-verify"
+                    disabled={sectorTesting.busy || sectorEndpoint.enabled === false}
+                    onClick={() => verifySectorEndpoint()}>
+                    <Icon name={sectorTesting.busy ? 'refresh' : 'bolt'} size={13} className={sectorTesting.busy ? 'spin' : ''} />
+                    验证专用端点
+                  </button>
+                </div>
+                {sectorTesting.msg && (
+                  <div className={'llm-ep-msg' + (sectorTesting.ok ? ' ok' : ' bad')}>{sectorTesting.msg}</div>
                 )}
               </div>
 

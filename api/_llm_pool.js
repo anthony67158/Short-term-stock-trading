@@ -10,7 +10,10 @@
 // 运行时健康态(内存,进程级):{ inflight, fails, cooldownUntil }
 //   连续失败达阈值 → 熔断冷却 COOLDOWN_MS;冷却到期自动半开重试(一次成功即清零恢复)。
 
-import { resolveJudgeEndpoint } from './_llm_config.js';
+import {
+  resolveJudgeEndpoint,
+  resolveSectorEndpoint,
+} from './_llm_config.js';
 
 const COOLDOWN_MS = 60 * 1000;   // 熔断冷却:连续失败达阈值后暂时不选它
 const FAIL_THRESHOLD = 3;        // 连续失败多少次触发熔断
@@ -79,6 +82,7 @@ export function endpointServesRole(ep, role) {
   if (!ep) return false;
   if (!role) return true;
   if (role === 'judge') return ep.id === 'judge-dedicated';
+  if (role === 'sector') return ep.id === 'sector-dedicated';
   if (ep.id === 'default') return true;
   return !!(ep.models && ep.models[role]);
 }
@@ -94,6 +98,18 @@ export function endpointsForRole(config, role) {
       weight: 1,
       models: { judge: judge.model },
       reasoning: { judge: !!judge.reasoning },
+    }];
+  }
+  if (role === 'sector') {
+    const sector = resolveSectorEndpoint(config);
+    if (!sector || sector.enabled === false || !sector.baseUrl || !sector.apiKey || !sector.model) return [];
+    return [{
+      id: 'sector-dedicated',
+      baseUrl: sector.baseUrl,
+      apiKey: sector.apiKey,
+      weight: 1,
+      models: { sector: sector.model },
+      reasoning: { sector: !!sector.reasoning },
     }];
   }
   const all = endpointsFrom(config);
@@ -263,6 +279,20 @@ export function poolStatus(config, now = Date.now()) {
 
 export function judgeEndpointStatus(config, now = Date.now()) {
   const endpoint = endpointsForRole(config, 'judge')[0];
+  if (!endpoint) return null;
+  const state = h(endpoint.id);
+  return {
+    id: endpoint.id,
+    baseUrl: endpoint.baseUrl,
+    inflight: state.inflight,
+    fails: state.fails,
+    cooling: state.cooldownUntil > now,
+    cooldownMsLeft: Math.max(0, state.cooldownUntil - now),
+  };
+}
+
+export function sectorEndpointStatus(config, now = Date.now()) {
+  const endpoint = endpointsForRole(config, 'sector')[0];
   if (!endpoint) return null;
   const state = h(endpoint.id);
   return {

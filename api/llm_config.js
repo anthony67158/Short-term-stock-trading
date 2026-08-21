@@ -9,9 +9,15 @@
 
 import { applyCors, preflight } from './_lib.js';
 import {
-  ensureConfig, currentConfig, saveConfig, publicView, resolveJudgeEndpoint, ROLES,
+  ensureConfig, currentConfig, saveConfig, publicView, resolveJudgeEndpoint,
+  resolveSectorEndpoint, ROLES,
 } from './_llm_config.js';
-import { poolStatus, endpointCountForRole, judgeEndpointStatus } from './_llm_pool.js';
+import {
+  poolStatus,
+  endpointCountForRole,
+  judgeEndpointStatus,
+  sectorEndpointStatus,
+} from './_llm_pool.js';
 import {
   authorizePaidRequest,
   isRuntimeConfigAdmin,
@@ -23,10 +29,17 @@ export const MODEL_TEST_TIMEOUT_MS = 120000;
 const normalizeBaseUrl = (value) => String(value || '').trim().replace(/\/+$/, '');
 
 export function resolveLlmConfigTarget(config = {}, body = {}) {
-  const endpointId = String(body.endpointId || (body.target === 'judge' ? 'judge' : 'default'));
+  const endpointId = String(
+    body.endpointId
+    || (body.target === 'judge'
+      ? 'judge'
+      : body.target === 'sector' ? 'sector' : 'default'),
+  );
   let stored = null;
   if (endpointId === 'judge') {
     stored = resolveJudgeEndpoint(config);
+  } else if (endpointId === 'sector') {
+    stored = resolveSectorEndpoint(config);
   } else if (endpointId === 'default') {
     stored = {
       baseUrl: config.baseUrl,
@@ -131,14 +144,20 @@ export default async function handler(req, res) {
 
     if (action === 'get') {
       const config = currentConfig();
-      const roles = Object.fromEntries(Object.entries(ROLES).filter(([role]) => role !== 'judge'));
+      const roles = Object.fromEntries(
+        Object.entries(ROLES).filter(([role]) =>
+          !['judge', 'sector'].includes(role)
+        ),
+      );
       return res.status(200).send(JSON.stringify({
         ok: true,
         config: publicView(),
         roles,
         judgeRole: ROLES.judge,
+        sectorRole: ROLES.sector,
         pool: poolStatus(config),
         judgePool: judgeEndpointStatus(config),
+        sectorPool: sectorEndpointStatus(config),
         concurrency: endpointCountForRole(config, 'advisor'),
       }));
     }
@@ -152,7 +171,9 @@ export default async function handler(req, res) {
     // verify / test / save 都可能带明文 key；留空则用已存 key
     const cur = currentConfig();
     const judgeTarget = body && body.target === 'judge';
+    const sectorTarget = body && body.target === 'sector';
     const judgeEndpoint = resolveJudgeEndpoint(cur);
+    const sectorEndpoint = resolveSectorEndpoint(cur);
     const target = resolveLlmConfigTarget(cur, body || {});
     if (target.error) {
       return res.status(200).send(JSON.stringify({
@@ -176,6 +197,8 @@ export default async function handler(req, res) {
       const models = Array.isArray(body && body.models) ? body.models.filter(Boolean)
         : (judgeTarget
           ? [judgeEndpoint?.model].filter(Boolean)
+          : sectorTarget
+            ? [sectorEndpoint?.model].filter(Boolean)
           : Object.values((body && body.modelMap) || cur.models || {}).filter(Boolean));
       const uniq = [...new Set(models)];
       if (!uniq.length) return res.status(200).send(JSON.stringify({ ok: false, error: '没有要测试的模型' }));
@@ -195,6 +218,9 @@ export default async function handler(req, res) {
       if (body && Object.prototype.hasOwnProperty.call(body, 'judgeEndpoint')) {
         patch.judgeEndpoint = body.judgeEndpoint;
       }
+      if (body && Object.prototype.hasOwnProperty.call(body, 'sectorEndpoint')) {
+        patch.sectorEndpoint = body.sectorEndpoint;
+      }
       const saved = await saveConfig(patch);
       return res.status(200).send(JSON.stringify({
         ok: true,
@@ -202,6 +228,7 @@ export default async function handler(req, res) {
         source: saved.source,
         pool: poolStatus(currentConfig()),
         judgePool: judgeEndpointStatus(currentConfig()),
+        sectorPool: sectorEndpointStatus(currentConfig()),
       }));
     }
 
