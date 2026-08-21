@@ -117,6 +117,11 @@ test('板块前瞻请求携带账号令牌且有明确超时', () => {
   assert.match(client, /\/api\/sector_forecast/)
   assert.match(client, /AbortController/)
   assert.match(client, /clearTimeout/)
+  assert.match(component, /action:\s*'bootstrap'/)
+  assert.doesNotMatch(
+    component,
+    /Promise\.all\(\[\s*sectorForecastRequest\(\),\s*sectorForecastRequest\(\{\s*action:\s*'history'/,
+  )
 })
 
 test('板块前瞻桌面信息密集且移动端稳定单列', () => {

@@ -150,21 +150,18 @@ export default function SectorForecast() {
   const generationRequestRef = useRef(false)
 
   const load = useCallback(async () => {
-    const [current, archive, status] = await Promise.all([
-      sectorForecastRequest(),
-      sectorForecastRequest({
-        action: 'history',
-        query: { limit: 30 },
-      }),
-      sectorForecastRequest({ action: 'status' }),
-    ])
+    const current = await sectorForecastRequest({
+      action: 'bootstrap',
+      query: { limit: 30 },
+      timeoutMs: 30000,
+    })
     return {
       latest: current.latest || null,
       intraday: current.intraday || null,
       market: current.market || null,
       settings: current.settings || null,
-      history: archive.history || [],
-      task: status.task || null,
+      history: current.history || [],
+      task: current.task || null,
     }
   }, [])
 
@@ -290,16 +287,13 @@ export default function SectorForecast() {
         setLatest(response.snapshot)
         setVersionMode('formal')
       }
-      const [archive, status, current] = await Promise.all([
-        sectorForecastRequest({
-          action: 'history',
-          query: { limit: 30 },
-        }),
-        sectorForecastRequest({ action: 'status' }),
-        sectorForecastRequest(),
-      ])
-      setHistory(archive.history || [])
-      setTask(status.task || null)
+      const current = await sectorForecastRequest({
+        action: 'bootstrap',
+        query: { limit: 30 },
+        timeoutMs: 30000,
+      })
+      setHistory(current.history || [])
+      setTask(current.task || null)
       if (current.latest) setLatest(current.latest)
       if (current.intraday) setIntraday(current.intraday)
       if (current.market) setMarket(current.market)

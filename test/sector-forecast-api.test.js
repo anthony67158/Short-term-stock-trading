@@ -29,6 +29,7 @@ import {
   default as sectorForecastHandler,
   generateSectorForecastSnapshot,
   mergeOvernightEvidence,
+  readSectorForecastBootstrap,
   runDueSectorForecast,
   runSectorForecastGeneration,
 } from '../api/sector_forecast.js'
@@ -265,6 +266,73 @@ test('盘中快照独立保存且不会覆盖收盘正式版或历史', async ()
     generatedAt: 100,
     sectorCount: 1,
   }])
+})
+
+test('板块历史摘要写入独立索引且后续读取不再扫描全部快照', async () => {
+  const storage = memoryStorage()
+  let listCalls = 0
+  const originalList = storage.list
+  storage.list = async (...args) => {
+    listCalls++
+    return originalList(...args)
+  }
+  const store = createSectorForecastStore(storage)
+  await store.saveSnapshot({
+    schemaVersion: 'sector-forecast.v1',
+    signalDate: '2026-08-19',
+    session: 'close',
+    generatedAt: 100,
+    sectors: [{ code: 'BK1000', rank: 1 }],
+  })
+  await store.saveSnapshot({
+    schemaVersion: 'sector-forecast.v1',
+    signalDate: '2026-08-20',
+    session: 'close',
+    generatedAt: 200,
+    sectors: [{ code: 'BK1001', rank: 1 }],
+  })
+
+  listCalls = 0
+  assert.deepEqual(await store.readHistory(5), [{
+    signalDate: '2026-08-20',
+    session: 'close',
+    generatedAt: 200,
+    sectorCount: 1,
+  }, {
+    signalDate: '2026-08-19',
+    session: 'close',
+    generatedAt: 100,
+    sectorCount: 1,
+  }])
+  assert.equal(listCalls, 0)
+})
+
+test('板块首屏bootstrap一次读取快照、任务、设置和历史', async () => {
+  const storage = memoryStorage()
+  const store = createSectorForecastStore(storage)
+  await store.saveSnapshot({
+    schemaVersion: 'sector-forecast.v1',
+    signalDate: '2026-08-20',
+    session: 'close',
+    generatedAt: 200,
+    sectors: [{ code: 'BK1000', rank: 1 }],
+  })
+  await store.saveTask({
+    active: null,
+    completed: { '2026-08-20:close': true },
+  })
+
+  const bootstrap = await readSectorForecastBootstrap({
+    store,
+    timestamp: Date.parse('2026-08-21T02:00:00.000Z'),
+    historyLimit: 30,
+  })
+
+  assert.equal(bootstrap.latest.sectors.length, 1)
+  assert.equal(bootstrap.task.active, null)
+  assert.equal(bootstrap.settings.intradayEnabled, true)
+  assert.equal(bootstrap.history.length, 1)
+  assert.equal(bootstrap.market.phase, 'live')
 })
 
 test('盘中完成时间桶限制数量避免任务状态无限增长', async () => {

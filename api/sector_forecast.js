@@ -529,6 +529,34 @@ export async function runDueSectorForecast(timestamp = Date.now(), {
   })
 }
 
+export async function readSectorForecastBootstrap({
+  store = sectorForecastStore,
+  timestamp = Date.now(),
+  historyLimit = 30,
+} = {}) {
+  const [latest, intraday, settings, task, history] =
+    await Promise.all([
+      store.readLatest(),
+      store.readIntraday(),
+      store.readSettings(),
+      store.readTask(),
+      store.readHistory(historyLimit),
+    ])
+  return {
+    latest,
+    intraday,
+    settings,
+    task,
+    history,
+    market: {
+      intradayAvailable: isContinuousTrading(timestamp),
+      phase: sectorForecastMarketPhase(timestamp),
+      day: beijingDayKey(timestamp),
+      asOf: timestamp,
+    },
+  }
+}
+
 async function readAuthentication(req) {
   const authentication = await authenticateAccountRequest(req)
   return authentication.ok && !authentication.trusted
@@ -574,6 +602,14 @@ export default async function handler(req, res) {
         return reply(res, 200, {
           ok: true,
           task: await sectorForecastStore.readTask(),
+        })
+      }
+      if (action === 'bootstrap') {
+        return reply(res, 200, {
+          ok: true,
+          ...await readSectorForecastBootstrap({
+            historyLimit: req.query?.limit,
+          }),
         })
       }
       return reply(res, 200, {

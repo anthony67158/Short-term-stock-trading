@@ -28,6 +28,7 @@ const PATHS = Object.freeze({
   settings: `${SECTOR_FORECAST_PREFIX}settings.json`,
   task: `${SECTOR_FORECAST_PREFIX}task.json`,
   history: `${SECTOR_FORECAST_PREFIX}history/`,
+  historyIndex: `${SECTOR_FORECAST_PREFIX}history-index.json`,
   outcomes: `${SECTOR_FORECAST_PREFIX}outcomes/`,
   locks: `${SECTOR_FORECAST_PREFIX}locks/`,
 })
@@ -199,8 +200,23 @@ function historySummary(snapshot) {
     generatedAt: Number(snapshot?.generatedAt) || 0,
     sectorCount: Array.isArray(snapshot?.sectors)
       ? snapshot.sectors.length
-      : 0,
+      : Math.max(0, Number(snapshot?.sectorCount) || 0),
   }
+}
+
+function sortedHistorySummaries(items, limit = 120) {
+  const byKey = new Map()
+  for (const item of (Array.isArray(items) ? items : [])) {
+    if (!item?.signalDate) continue
+    const summary = historySummary(item)
+    byKey.set(`${summary.signalDate}:${summary.session}`, summary)
+  }
+  return [...byKey.values()]
+    .sort((left, right) =>
+      Number(right.generatedAt || 0) - Number(left.generatedAt || 0)
+      || String(right.signalDate).localeCompare(String(left.signalDate))
+    )
+    .slice(0, Math.max(1, Math.min(120, Number(limit) || 120)))
 }
 
 export function createSectorForecastStore(storage = {
@@ -255,11 +271,28 @@ export function createSectorForecastStore(storage = {
       }
       await writeJson(snapshotPath(snapshot), snapshot)
       await writeJson(PATHS.latest, snapshot)
+      const index = await storage.readJson(PATHS.historyIndex)
+        .catch(() => null)
+      const indexedItems = Array.isArray(index?.items)
+        ? index.items
+        : await this.rebuildHistoryIndex().catch(() => [])
+      await writeJson(PATHS.historyIndex, {
+        updatedAt: Date.now(),
+        items: sortedHistorySummaries([
+          snapshot,
+          ...indexedItems,
+        ]),
+      }).catch(() => {})
       return snapshot
     },
     async readHistory(limit = 20) {
       if (!storage.hasStorage()) return []
       const max = Math.max(1, Math.min(120, Number(limit) || 20))
+      const index = await storage.readJson(PATHS.historyIndex)
+        .catch(() => null)
+      if (Array.isArray(index?.items)) {
+        return sortedHistorySummaries(index.items, max)
+      }
       const { blobs } = await storage.list({
         prefix: PATHS.history,
         limit: 500,
@@ -269,14 +302,25 @@ export function createSectorForecastStore(storage = {
           storage.readJson(blob?.pathname || blob).catch(() => null)
         ),
       )
-      return snapshots
-        .filter((item) => item?.signalDate)
-        .sort((left, right) =>
-          Number(right.generatedAt || 0) - Number(left.generatedAt || 0)
-          || String(right.signalDate).localeCompare(String(left.signalDate))
-        )
-        .slice(0, max)
-        .map(historySummary)
+      return sortedHistorySummaries(snapshots, max)
+    },
+    async rebuildHistoryIndex(limit = 120) {
+      if (!storage.hasStorage()) return []
+      const { blobs } = await storage.list({
+        prefix: PATHS.history,
+        limit: 500,
+      })
+      const snapshots = await Promise.all(
+        (blobs || []).map((blob) =>
+          storage.readJson(blob?.pathname || blob).catch(() => null)
+        ),
+      )
+      const items = sortedHistorySummaries(snapshots, limit)
+      await writeJson(PATHS.historyIndex, {
+        updatedAt: Date.now(),
+        items,
+      })
+      return items
     },
     async readHistorySnapshot(signalDate, session = 'close') {
       if (!storage.hasStorage()) return null
