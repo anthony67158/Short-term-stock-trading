@@ -68,10 +68,11 @@ test('持仓模型失败或自动切换时展示真实恢复状态', () => {
   assert.match(styles, /\.portfolio-analysis-warning\.recovered\s*{/)
 })
 
-test('LLM配置页可设置主端点最大在途请求数并保存', () => {
-  assert.match(config, /primaryMaxInflight/)
-  assert.match(config, /主端点最大在途/)
-  assert.match(apiConfig, /primaryMaxInflight:\s*body/)
+test('LLM配置页为持仓分析提供独立角色端点并保存', () => {
+  assert.match(config, /portfolio:\s*\{[^}]*label:\s*'持仓分布分析'/)
+  assert.match(config, /roleEndpoints:\s*payload/)
+  assert.match(apiConfig, /roleEndpoints:\s*body/)
+  assert.doesNotMatch(config, /主端点最大在途/)
 })
 
 test('诊断面板具有稳定的桌面与移动端布局', () => {

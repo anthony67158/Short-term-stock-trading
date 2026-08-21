@@ -20,9 +20,15 @@ import {
   stripClientSearchFields,
 } from './_ai_search.js';
 import { ensureAiSearchConfig } from './_ai_search_config.js';
-import { callChat, callChatWithRetry, parseLLMJson, pumpChatStream } from './_llm.js';
+import {
+  callChat,
+  callChatWithRetry,
+  llmReady,
+  parseLLMJson,
+  pumpChatStream,
+} from './_llm.js';
 import { ensureConfig, currentConfig, getModel, getReasoning } from './_llm_config.js';
-import { endpointCountForRole, endpointsFrom } from './_llm_pool.js';
+import { endpointCountForRole } from './_llm_pool.js';
 import { applyCors, preflight } from './_lib.js';
 import { zhReasonPiece } from './_zh_reason.js';
 import {
@@ -562,41 +568,27 @@ export default async function handler(req, res) {
     }));
   }
 
-  const BASE = process.env.LLM_BASE_URL;
-  const KEY = process.env.LLM_API_KEY;
-  // 运行时配置优先（前端「AI 模型配置」写入 OSS）：先预热同步缓存，再取 BASE/KEY/模型
+  const mode = (body && body.mode) || 'market';
+  const useRole = isAdvisorMode(mode) ? 'advisor' : 'chat';
+  // 运行时配置优先（前端「AI 模型配置」写入 OSS）：先预热同步缓存，再按角色取端点和模型。
   await ensureConfig();
   const aiSearchConfig = await ensureAiSearchConfig();
   const cfg = currentConfig();
-  // 深度思考「真实生效值」:全局开(config.reasoning[role]=true)或【承接该角色的任一端点】开了
-  //   (ep.reasoning[role]=true)即视为开。用于超时预算/maxTokens/中文思维链指令与底层 poolFetch 实际
-  //   下发的 reasoning_effort 对齐——避免用户只在端点卡片开深度思考时,编排层按"不思考"短预算把思维链掐断。
-  const effectiveReasoning = (role) => {
-    if (getReasoning(role)) return true;
-    try {
-      // 只要【任一端点】为该角色开了深度思考,就视为开——不再要求该端点必须自带该角色模型。
-      //   根因:用户在端点卡片开了深度思考、但没在该端点单独填 advisor 模型时,旧代码用
-      //   endpointServesRole 把这个端点从判定里剔除 → useReasoning 误判为 false → 不下发
-      //   reasoning_effort → 军师思维链整体不生成、不回显。用户"开了深度思考"就是明确意图,
-      //   底层 poolFetch 会把 reasoning_effort=high 真实发给【实际承接 advisor 的那个端点】
-      //   (配合下方 reasonFallback=true 与 reasoningForEndpoint 的兜底),故此处只认意图。
-      return endpointsFrom(cfg).some((ep) => ep.reasoning && ep.reasoning[role]);
-    } catch { return false; }
-  };
-  const RT_BASE = cfg.baseUrl || BASE;
-  const RT_KEY = cfg.apiKey || KEY;
+  const effectiveReasoning = (role) => getReasoning(role);
   const MODEL = getModel('chat');
   // 顶级操盘军师专用模型：深度个股研判(做T/加减仓/买入/复盘)用更强、更快、原生JSON稳定的模型
   const ADVISOR_MODEL = getModel('advisor');
-  if (!RT_BASE || !RT_KEY) {
+  if (!llmReady(useRole)) {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    return res.status(200).send(JSON.stringify({ ok: false, error: 'LLM 未配置' }));
+    return res.status(200).send(JSON.stringify({
+      ok: false,
+      error: `${useRole} 角色端点未配置`,
+    }));
   }
 
   // 心跳定时器提到 try 外层声明,保证下方 catch 也能兜底清理(异常绕过 finish 时不泄漏 interval)
   let hbTimer = null;
   try {
-    const mode = (body && body.mode) || 'market';
     const payload = stripClientSearchFields((body && body.payload) || {});
     if (
       isAdvisorMode(mode)
@@ -1370,7 +1362,6 @@ export default async function handler(req, res) {
       ? ensureEvidenceSnapshot()
       : null;
     const useModel = isAdvisor ? ADVISOR_MODEL : MODEL;
-    const useRole = isAdvisor ? 'advisor' : 'chat';   // 端点级模型解析:按角色让资源池各端点用各自的模型名
     // —— 编排层须与底层实际下发的 reasoning_effort 对齐 ——
     // 深度思考开关既可开在全局(config.reasoning[role]),也可开在【端点级】(ep.reasoning[role])。
     // poolFetch/reasoningForEndpoint 会按端点把 reasoning_effort=high 真实发给上游,但本文件的超时预算、

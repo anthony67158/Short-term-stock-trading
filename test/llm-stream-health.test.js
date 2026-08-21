@@ -12,33 +12,39 @@ import { pumpChatStream } from '../api/_llm.js'
 
 test('空流端点立即冷却，下一次请求切换到备用端点', () => {
   const config = {
-    baseUrl: 'https://main.example/v1',
-    apiKey: 'main-key',
-    models: { advisor: 'main-model' },
-    endpoints: [{
-      id: 'backup',
-      baseUrl: 'https://backup.example/v1',
-      apiKey: 'backup-key',
-      models: { advisor: 'backup-model' },
-    }],
+    roleEndpoints: {
+      advisor: [{
+        baseUrl: 'https://advisor-1.example/v1',
+        apiKey: 'advisor-1-key',
+        model: 'advisor-1-model',
+        enabled: true,
+      }, {
+        baseUrl: 'https://advisor-2.example/v1',
+        apiKey: 'advisor-2-key',
+        model: 'advisor-2-model',
+        enabled: true,
+      }],
+    },
   }
   const first = pickEndpoint(config, 1000, 'advisor')
-  assert.equal(first.id, 'default')
+  assert.equal(first.id, 'advisor-1')
 
   markEndpointUnusable(first.id, 1000)
   const second = pickEndpoint(config, 1001, 'advisor')
 
-  assert.equal(second.id, 'backup')
+  assert.equal(second.id, 'advisor-2')
 })
 
 test('流式请求在响应体消费完成前持续占用端点', async () => {
   const config = {
-    endpoints: [{
-      id: 'stream-health-test',
-      baseUrl: 'https://stream.example/v1',
-      apiKey: 'key',
-      models: { advisor: 'model' },
-    }],
+    roleEndpoints: {
+      advisor: [{
+        baseUrl: 'https://stream.example/v1',
+        apiKey: 'key',
+        model: 'model',
+        enabled: true,
+      }],
+    },
   }
   const originalFetch = globalThis.fetch
   globalThis.fetch = async () => new Response('{}', { status: 200 })

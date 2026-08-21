@@ -1,938 +1,542 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Icon from './Icon'
 import { llmConfigStore } from '../llmConfigStore'
 import { api } from '../apiBase'
 import { accountRequestHeaders } from '../quantModel'
 
-// ============ AI 模型配置向导（低频操作，入口藏在账号菜单）============
-// 三步走，但同屏切换：
-//   1) 连接：Base URL + API Key → 「验证并继续」调 verify 拉取可用模型
-//   2) 分工：为系统里 4 个 AI 角色各选一个模型（下拉来自 verify 的模型清单，可手填）
-//   3) 测试:逐个模型 ping 可用性 + 时延 → 「完成并保存」写入 OSS，全系统即时生效
-// 设计要点:Key 只在提交时上送后端,后端只回 mask;重开向导时 get 读取当前配置(Key 显示掩码)。
-
-const STEPS = [
-  { n: 1, label: '连接', icon: 'bolt' },
-  { n: 2, label: '分工', icon: 'brain' },
-  { n: 3, label: '测试', icon: 'gauge' },
+const ROLE_ORDER = [
+  'chat',
+  'advisor',
+  'portfolio',
+  'agent',
+  'daily',
+  'sector',
+  'judge',
 ]
 
-async function callConfig(action, payload) {
-  const res = await fetch(api('/api/llm_config'), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...accountRequestHeaders(),
-    },
-    body: JSON.stringify({ action, ...payload }),
-  })
-  return res.json()
+const ROLE_META = {
+  chat: { icon: 'spark', label: '对话/盘面分析', badge: '交互' },
+  advisor: { icon: 'spark', label: '一次性生成军师', badge: '2 路并行' },
+  portfolio: { icon: 'layers', label: '持仓分布分析', badge: '组合' },
+  agent: { icon: 'brain', label: '智能体助手', badge: '工具调用' },
+  daily: { icon: 'history', label: '策略日报', badge: '日报' },
+  sector: { icon: 'chart', label: '板块前瞻', badge: '板块' },
+  judge: { icon: 'gauge', label: '交易确认 Judge', badge: '低延迟' },
+}
+
+const CONFIG_REQUEST_TIMEOUT_MS = {
+  get: 30000,
+  verify: 20000,
+  test: 130000,
+  save: 30000,
+}
+
+async function callConfig(action, payload = {}) {
+  const controller = new AbortController()
+  const timer = setTimeout(
+    () => controller.abort(),
+    CONFIG_REQUEST_TIMEOUT_MS[action] || 30000,
+  )
+  try {
+    const response = await fetch(api('/api/llm_config'), {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        ...accountRequestHeaders(),
+      },
+      body: JSON.stringify({ action, ...payload }),
+    })
+    return response.json()
+  } catch (reason) {
+    if (reason?.name === 'AbortError') {
+      throw new Error('配置请求超时，请稍后重试')
+    }
+    throw reason
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+function emptyEndpoint(role, index, definition = {}) {
+  return {
+    id: `${role}-${index + 1}`,
+    role,
+    slot: index + 1,
+    baseUrl: '',
+    apiKey: '',
+    apiKeyMask: '',
+    hasKey: false,
+    model: definition.def || '',
+    reasoning: role === 'sector',
+    enabled: true,
+    source: '',
+  }
+}
+
+function normalizeRoleEndpoints(config, roles, roleSlots) {
+  return Object.fromEntries(ROLE_ORDER.map((role) => {
+    const count = Math.max(1, Number(roleSlots?.[role]) || 1)
+    const stored = Array.isArray(config?.roleEndpoints?.[role])
+      ? config.roleEndpoints[role]
+      : []
+    return [
+      role,
+      Array.from({ length: count }, (_, index) => ({
+        ...emptyEndpoint(role, index, roles?.[role]),
+        ...(stored[index] || {}),
+        apiKey: '',
+      })),
+    ]
+  }))
+}
+
+function endpointKey(role, index) {
+  return `${role}-${index + 1}`
+}
+
+function healthClass(health) {
+  if (!health) return ''
+  if (health.cooling) return ' cooling'
+  if (health.fails) return ' warn'
+  return ' ok'
+}
+
+function healthLabel(health) {
+  if (!health) return '待验证'
+  if (health.cooling) {
+    return `熔断 ${Math.ceil((health.cooldownMsLeft || 0) / 1000)}s`
+  }
+  return `在途 ${health.inflight || 0} · 失败 ${health.fails || 0}`
 }
 
 export default function LLMConfig() {
-  const [step, setStep] = useState(1)
   const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState('')
+  const [roles, setRoles] = useState({})
+  const [roleSlots, setRoleSlots] = useState({})
+  const [roleEndpoints, setRoleEndpoints] = useState({})
+  const [pool, setPool] = useState([])
+  const [testing, setTesting] = useState({})
+  const [modelLists, setModelLists] = useState({})
   const [notice, setNotice] = useState('')
+  const [error, setError] = useState('')
 
-  // 连接信息
-  const [baseUrl, setBaseUrl] = useState('')
-  const [apiKey, setApiKey] = useState('')
-  const [hasKey, setHasKey] = useState(false)      // 后端是否已存有 Key（留空则沿用）
-  const [keyMask, setKeyMask] = useState('')
-
-  // 多端点资源池（可选：配置后覆盖单端点，提供轮询/最少在途路由 + 熔断故障转移）
-  const [endpoints, setEndpoints] = useState([])   // [{id, baseUrl, apiKeyMask, hasKey, weight, enabled, apiKey?(仅本地新输入)}]
-  const [pool, setPool] = useState([])             // [{id, baseUrl, inflight, fails, cooling, cooldownMsLeft}]
-  const [showPool, setShowPool] = useState(false)  // 展开多端点面板
-  const [primaryMaxInflight, setPrimaryMaxInflight] = useState(2)
-  const [epTesting, setEpTesting] = useState({})   // { [id]: {ok, msg} } 单端点验证结果
-  const [judgeRole, setJudgeRole] = useState({})
-  const [judgeEndpoint, setJudgeEndpoint] = useState({
-    baseUrl: '', apiKey: '', apiKeyMask: '', hasKey: false,
-    model: '', reasoning: false, enabled: true,
-  })
-  const [judgePool, setJudgePool] = useState(null)
-  const [judgeTesting, setJudgeTesting] = useState({})
-  const [judgeModelList, setJudgeModelList] = useState([])
-  const [sectorRole, setSectorRole] = useState({})
-  const [sectorEndpoint, setSectorEndpoint] = useState({
-    baseUrl: '', apiKey: '', apiKeyMask: '', hasKey: false,
-    model: '', reasoning: true, enabled: true,
-  })
-  const [sectorPool, setSectorPool] = useState(null)
-  const [sectorTesting, setSectorTesting] = useState({})
-  const [sectorModelList, setSectorModelList] = useState([])
-
-  // 角色 & 模型
-  const [roles, setRoles] = useState({})           // { chat:{label,def}, ... }
-  const [models, setModels] = useState({})         // { chat:'x', advisor:'y', ... }
-  const [reasoning, setReasoning] = useState({})   // { chat:true/false, ... } 深度思考开关
-  const [modelList, setModelList] = useState([])   // 可选模型清单（来自 verify，池模式下为各端点并集）
-  const [listable, setListable] = useState(false)  // 端点是否支持 /models 列举
-  const [epModels, setEpModels] = useState({})     // { [id]: {ok, listable, models:[], reason} } 各端点可用模型(池模式)
-
-  // 测试结果
-  const [testResults, setTestResults] = useState(null) // [{model, ok, ms, error?}]
-
-  // 打开时读取当前配置
   const loadCurrent = useCallback(async () => {
-    setBusy(true); setErr('')
+    setBusy(true)
+    setError('')
     try {
-      const j = await callConfig('get', {})
-      if (j && j.ok) {
-        const c = j.config || {}
-        setBaseUrl(c.baseUrl || '')
-        setHasKey(!!c.hasKey)
-        setKeyMask(c.apiKeyMask || '')
-        setRoles(j.roles || {})
-        setJudgeRole(j.judgeRole || {})
-        setSectorRole(j.sectorRole || {})
-        setModels({ ...(c.models || {}) })
-        setReasoning({ ...(c.reasoning || {}) })
-        setPrimaryMaxInflight(Math.max(1, Math.min(20, Number(c.primaryMaxInflight) || 2)))
-        setJudgeEndpoint({
-          baseUrl: c.judgeEndpoint?.baseUrl || '',
-          apiKey: '',
-          apiKeyMask: c.judgeEndpoint?.apiKeyMask || '',
-          hasKey: !!c.judgeEndpoint?.hasKey,
-          model: c.judgeEndpoint?.model || j.judgeRole?.def || '',
-          reasoning: !!c.judgeEndpoint?.reasoning,
-          enabled: c.judgeEndpoint?.enabled !== false,
-          source: c.judgeEndpoint?.source || '',
-        })
-        setJudgePool(j.judgePool || null)
-        setSectorEndpoint({
-          baseUrl: c.sectorEndpoint?.baseUrl || '',
-          apiKey: '',
-          apiKeyMask: c.sectorEndpoint?.apiKeyMask || '',
-          hasKey: !!c.sectorEndpoint?.hasKey,
-          model: c.sectorEndpoint?.model || j.sectorRole?.def || '',
-          reasoning: c.sectorEndpoint?.reasoning !== false,
-          enabled: c.sectorEndpoint?.enabled !== false,
-          source: c.sectorEndpoint?.source || '',
-        })
-        setSectorPool(j.sectorPool || null)
-        const eps = Array.isArray(c.endpoints) ? c.endpoints : []
-        setEndpoints(eps)
-        setPool(Array.isArray(j.pool) ? j.pool : [])
-        setShowPool(eps.length > 0)
-      } else {
-        setErr((j && j.error) || '读取配置失败')
-      }
-    } catch (e) {
-      setErr('读取配置失败：' + (e.message || e))
+      const result = await callConfig('get')
+      if (!result?.ok) throw new Error(result?.error || '读取配置失败')
+      const nextRoles = result.roles || {}
+      const nextSlots = result.roleSlots || {}
+      setRoles(nextRoles)
+      setRoleSlots(nextSlots)
+      setRoleEndpoints(normalizeRoleEndpoints(
+        result.config || {},
+        nextRoles,
+        nextSlots,
+      ))
+      setPool(Array.isArray(result.pool) ? result.pool : [])
+    } catch (reason) {
+      setError(reason?.message || '读取配置失败')
     } finally {
       setBusy(false)
     }
   }, [])
 
-  useEffect(() => { loadCurrent() }, [loadCurrent])
+  useEffect(() => {
+    loadCurrent()
+  }, [loadCurrent])
 
-  const close = () => llmConfigStore.close()
+  const poolById = useMemo(
+    () => Object.fromEntries((pool || []).map((item) => [item.id, item])),
+    [pool],
+  )
 
-  // 池模式下有效端点(启用+有 baseUrl)
-  const activeEndpoints = () => endpoints.filter((e) => e.enabled !== false && (e.baseUrl || '').trim())
-  const poolMode = showPool && activeEndpoints().length > 0
-  // 已配置但被停用的端点(有 baseUrl 却 enabled===false)——用于提示"为何没列出来"
-  const disabledEndpoints = () => endpoints.filter((e) => e.enabled === false && (e.baseUrl || '').trim())
-
-  // host 简写(用于端点标签)
-  const hostLabel = (url, i) => (url ? String(url).replace(/^https?:\/\//, '').replace(/\/.*$/, '') : `端点${i + 1}`)
-
-  // Step 2 要罗列的端点卡片:主端点(默认,模型=全局 models) + 各资源池端点(模型=端点自带 models)。
-  // 主端点始终作为第一张卡(只要填了 Base URL);poolMode 下再追加各附加端点。
-  const cardEndpoints = () => {
-    const list = []
-    if (baseUrl.trim()) list.push({ id: 'default', label: '主端点', host: hostLabel(baseUrl, 0), isMain: true })
-    if (poolMode) {
-      activeEndpoints().forEach((ep, i) => {
-        list.push({ id: ep.id, label: `端点 #${i + 1}`, host: hostLabel(ep.baseUrl, i), isMain: false, ep })
-      })
-    }
-    return list
+  const updateEndpoint = (role, index, patch) => {
+    setRoleEndpoints((current) => ({
+      ...current,
+      [role]: (current[role] || []).map((endpoint, itemIndex) =>
+        itemIndex === index ? { ...endpoint, ...patch } : endpoint
+      ),
+    }))
   }
 
-  // 取/设某端点某角色的模型:主端点走全局 models;附加端点走该端点自带 models
-  const cardModel = (card, role) => (card.isMain ? (models[role] || '') : ((card.ep.models && card.ep.models[role]) || ''))
-  const setCardModel = (card, role, v) => {
-    if (card.isMain) { setModel(role, v); return }
-    setEp(card.ep.id, { models: { ...(card.ep.models || {}), [role]: v } })
-  }
-  // 附加端点某角色留空 = 该端点不承接此角色(见 _llm_pool.endpointServesRole);不再借用主端点模型。
-
-  // 取/设某端点某角色的「深度思考」开关:主端点走全局 reasoning;附加端点走该端点自带 reasoning
-  //   (不同网关同名角色可能是不同模型,是否支持/需要推理各不相同 → 每端点独立)
-  const cardReason = (card, role) => (card.isMain ? !!reasoning[role] : !!(card.ep.reasoning && card.ep.reasoning[role]))
-  const setCardReason = (card, role, v) => {
-    if (card.isMain) { setReason(role, v); return }
-    setEp(card.ep.id, { reasoning: { ...(card.ep.reasoning || {}), [role]: !!v } })
+  const validateEndpoint = (role, index) => {
+    const endpoint = roleEndpoints?.[role]?.[index]
+    if (!endpoint || endpoint.enabled === false) return ''
+    if (!String(endpoint.baseUrl || '').trim()) return '缺少 Base URL'
+    if (!String(endpoint.model || '').trim()) return '缺少模型'
+    if (!String(endpoint.apiKey || '').trim() && !endpoint.hasKey) {
+      return '缺少 API Key'
+    }
+    return ''
   }
 
-  const setJudge = (patch) => setJudgeEndpoint((current) => ({ ...current, ...patch }))
-  const setSector = (patch) => setSectorEndpoint((current) => ({ ...current, ...patch }))
-  const verifyJudgeEndpoint = async ({ required = false } = {}) => {
-    if (judgeEndpoint.enabled === false) return true
-    if (!judgeEndpoint.baseUrl.trim()) {
-      if (required) setErr('请填写 Judge 专用端点地址')
+  const verifyEndpoint = async (role, index) => {
+    const key = endpointKey(role, index)
+    const endpoint = roleEndpoints?.[role]?.[index]
+    const invalid = validateEndpoint(role, index)
+    if (invalid) {
+      setTesting((current) => ({
+        ...current,
+        [key]: { ok: false, message: invalid },
+      }))
       return false
     }
-    if (!judgeEndpoint.model.trim()) {
-      if (required) setErr('请填写 Judge 专用模型')
-      return false
-    }
-    if (!judgeEndpoint.apiKey.trim() && !judgeEndpoint.hasKey) {
-      if (required) setErr('请填写 Judge 专用端点密钥')
-      return false
-    }
-    setJudgeTesting({ busy: true })
+    if (endpoint.enabled === false) return true
+    setTesting((current) => ({
+      ...current,
+      [key]: { busy: true, message: '' },
+    }))
     try {
-      const response = await callConfig('verify', {
-        target: 'judge',
-        baseUrl: judgeEndpoint.baseUrl.trim(),
-        apiKey: judgeEndpoint.apiKey.trim(),
+      const result = await callConfig('verify', {
+        role,
+        slot: index + 1,
+        baseUrl: endpoint.baseUrl.trim(),
+        apiKey: endpoint.apiKey.trim(),
       })
-      const ok = !!(response && response.ok)
-      const available = Array.isArray(response?.models) ? response.models : []
-      setJudgeModelList(available)
-      setJudgeTesting({
-        ok,
-        msg: ok
-          ? (response.listable ? `可用 · ${available.length} 个模型` : '端点可用')
-          : (response?.error || '验证失败'),
-      })
-      if (!ok && required) setErr(`Judge 专用端点验证失败：${response?.error || '请检查连接信息'}`)
-      return ok
-    } catch (error) {
-      setJudgeTesting({ ok: false, msg: error.message || String(error) })
-      if (required) setErr('Judge 专用端点验证失败')
-      return false
-    }
-  }
-
-  const verifySectorEndpoint = async ({ required = false } = {}) => {
-    if (sectorEndpoint.enabled === false) return true
-    if (!sectorEndpoint.baseUrl.trim()) {
-      if (required) setErr('请填写板块前瞻专用端点地址')
-      return false
-    }
-    if (!sectorEndpoint.model.trim()) {
-      if (required) setErr('请填写板块前瞻专用模型')
-      return false
-    }
-    if (!sectorEndpoint.apiKey.trim() && !sectorEndpoint.hasKey) {
-      if (required) setErr('请填写板块前瞻专用端点密钥')
-      return false
-    }
-    setSectorTesting({ busy: true })
-    try {
-      const response = await callConfig('verify', {
-        target: 'sector',
-        baseUrl: sectorEndpoint.baseUrl.trim(),
-        apiKey: sectorEndpoint.apiKey.trim(),
-      })
-      const ok = !!(response && response.ok)
-      const available = Array.isArray(response?.models)
-        ? response.models
+      const available = Array.isArray(result?.models)
+        ? result.models
         : []
-      setSectorModelList(available)
-      setSectorTesting({
-        ok,
-        msg: ok
-          ? (response.listable
-              ? `可用 · ${available.length} 个模型`
-              : '端点可用')
-          : (response?.error || '验证失败'),
-      })
-      if (!ok && required) {
-        setErr(`板块前瞻专用端点验证失败：${response?.error || '请检查连接信息'}`)
-      }
-      return ok
-    } catch (error) {
-      setSectorTesting({
-        ok: false,
-        msg: error.message || String(error),
-      })
-      if (required) setErr('板块前瞻专用端点验证失败')
+      setModelLists((current) => ({ ...current, [key]: available }))
+      setTesting((current) => ({
+        ...current,
+        [key]: {
+          ok: !!result?.ok,
+          message: result?.ok
+            ? (result.listable
+                ? `可用 · ${available.length} 个模型`
+                : '端点可用')
+            : (result?.error || '验证失败'),
+        },
+      }))
+      return !!result?.ok
+    } catch (reason) {
+      setTesting((current) => ({
+        ...current,
+        [key]: {
+          ok: false,
+          message: reason?.message || '验证失败',
+        },
+      }))
       return false
     }
   }
 
-  // —— Step 1 → 2：验证连接、拉取模型清单 ——
-  const verifyAndNext = async () => {
-    setErr(''); setNotice('')
-    if (!(await verifyJudgeEndpoint({ required: true }))) return
-    if (!(await verifySectorEndpoint({ required: true }))) return
-    // ===== 池模式:逐端点验证(含主端点),各端点分别记录可用模型清单 =====
-    if (poolMode) {
-      const eps = activeEndpoints()
-      setBusy(true)
-      try {
-        // 待验证清单:主端点(id 'default',用 step-1 的 baseUrl/apiKey) + 各附加端点
-        const toVerify = []
-        if (baseUrl.trim()) {
-          const mk = apiKey.trim() && !/\*/.test(apiKey) ? apiKey.trim() : ''
-          toVerify.push({ id: 'default', baseUrl: baseUrl.trim(), key: mk, hasKey })
-        }
-        eps.forEach((ep) => {
-          const k = (ep.apiKey && !/\*/.test(ep.apiKey)) ? ep.apiKey.trim() : ''
-          toVerify.push({ id: ep.id, baseUrl: ep.baseUrl.trim(), key: k, hasKey: ep.hasKey })
-        })
-        const results = await Promise.all(toVerify.map(async (t) => {
-          if (!t.key && !t.hasKey) {
-            return { id: t.id, ok: null, listable: false, models: [], reason: '缺少 Key' }
-          }
-          const j = await callConfig('verify', {
-            endpointId: t.id,
-            baseUrl: t.baseUrl,
-            apiKey: t.key,
-          })
-          return { id: t.id, ok: !!(j && j.ok), listable: !!(j && j.listable), models: Array.isArray(j && j.models) ? j.models : [], reason: (j && j.ok) ? '' : ((j && j.error) || '验证失败') }
+  const activeTargets = () => ROLE_ORDER.flatMap((role) =>
+    (roleEndpoints[role] || [])
+      .map((endpoint, index) => ({ role, index, endpoint }))
+      .filter(({ endpoint }) => endpoint.enabled !== false)
+  )
+
+  const testAll = async () => {
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const targets = activeTargets()
+      const invalid = targets
+        .map(({ role, index }) => ({
+          role,
+          index,
+          error: validateEndpoint(role, index),
         }))
-        const map = {}; results.forEach((r) => { map[r.id] = r })
-        setEpModels(map)
-        // 并集:供各端点 datalist 兜底提示
-        const union = [...new Set(results.flatMap((r) => r.models))]
-        setModelList(union)
-        const anyListable = results.some((r) => r.listable)
-        setListable(anyListable)
-        // 主端点各角色若空,用角色默认兜底
-        setModels((prev) => {
-          const next = { ...prev }
-          Object.keys(roles).forEach((k) => { if (!next[k]) next[k] = roles[k].def })
-          return next
+        .filter((item) => item.error)
+      if (invalid.length) {
+        throw new Error(`${roles[invalid[0].role]?.label || invalid[0].role} · 端点 ${invalid[0].index + 1}：${invalid[0].error}`)
+      }
+      const results = await Promise.all(targets.map(async ({
+        role,
+        index,
+        endpoint,
+      }) => {
+        const key = endpointKey(role, index)
+        setTesting((current) => ({
+          ...current,
+          [key]: { busy: true, message: '' },
+        }))
+        const result = await callConfig('test', {
+          role,
+          slot: index + 1,
+          baseUrl: endpoint.baseUrl.trim(),
+          apiKey: endpoint.apiKey.trim(),
+          models: [endpoint.model.trim()],
         })
-        const failed = results.filter((r) => r.ok === false)
-        if (failed.length) setNotice(`${failed.length} 个端点验证失败,请回上一步检查;仍可继续为可用端点分配模型`)
-        else if (!anyListable) setNotice('端点未提供模型列表,请手动填写模型名(下一步可测可用性)')
-        setStep(2)
-      } catch (e) {
-        setErr('验证失败:' + (e.message || e))
-      } finally { setBusy(false) }
-      return
-    }
-    // ===== 单端点模式(原逻辑) =====
-    if (!baseUrl.trim()) { setErr('请填写 Base URL'); return }
-    if (!apiKey.trim() && !hasKey) { setErr('请填写 API Key'); return }
-    setBusy(true)
-    try {
-      const j = await callConfig('verify', {
-        endpointId: 'default',
-        baseUrl: baseUrl.trim(),
-        apiKey: apiKey.trim(),
-      })
-      if (!j || !j.ok) { setErr((j && j.error) || 'API Key 或 Base URL 无效'); setBusy(false); return }
-      const list = Array.isArray(j.models) ? j.models : []
-      setModelList(list)
-      setListable(!!j.listable)
-      setEpModels({})
-      // 若某角色尚未选模型，用默认值兜底
-      setModels((prev) => {
-        const next = { ...prev }
-        Object.keys(roles).forEach((k) => { if (!next[k]) next[k] = roles[k].def })
-        return next
-      })
-      if (!j.listable) setNotice('该端点未提供模型列表，请手动填写模型名（可在下一步测试其可用性）')
-      setStep(2)
-    } catch (e) {
-      setErr('验证失败：' + (e.message || e))
+        const item = result?.results?.[0]
+        setTesting((current) => ({
+          ...current,
+          [key]: {
+            ok: !!item?.ok,
+            message: item?.ok
+              ? `可用 · ${item.ms}ms`
+              : (item?.error || result?.error || '测试失败'),
+          },
+        }))
+        return !!item?.ok
+      }))
+      if (!results.every(Boolean)) throw new Error('部分端点测试失败')
+      setNotice(`全部 ${targets.length} 个端点可用`)
+    } catch (reason) {
+      setError(reason?.message || '端点测试失败')
     } finally {
       setBusy(false)
     }
   }
 
-  // —— Step 2 → 3：测试所选模型可用性 ——
-  const testAndNext = async () => {
-    setErr(''); setNotice(''); setTestResults(null)
-    // 每个端点使用自己的已保存 Key 与角色模型单独测试，避免主 Key 的结果污染整个资源池。
-    const generalTargets = cardEndpoints()
-      .map((card) => {
-        const chosen = [...new Set(
-          Object.keys(roles)
-            .map((role) => cardModel(card, role))
-            .filter(Boolean),
-        )]
-        const key = card.isMain
-          ? (apiKey.trim() && !/\*/.test(apiKey) ? apiKey.trim() : '')
-          : (card.ep.apiKey && !/\*/.test(card.ep.apiKey)
-              ? card.ep.apiKey.trim()
-              : '')
-        return {
-          id: card.id,
-          label: `${card.label} · ${card.host}`,
-          baseUrl: card.isMain ? baseUrl.trim() : card.ep.baseUrl.trim(),
-          key,
-          hasKey: card.isMain ? hasKey : !!card.ep.hasKey,
-          models: chosen,
-        }
-      })
-      .filter((target) =>
-        target.baseUrl
-        && target.models.length
-        && (target.key || target.hasKey)
-      )
-    if (
-      !generalTargets.length
-      && judgeEndpoint.enabled === false
-      && sectorEndpoint.enabled === false
-    ) {
-      setErr('请至少为一个角色选择模型')
-      return
-    }
-
-    setStep(3)
-    setBusy(true)
-    try {
-      const requests = generalTargets.map((target) =>
-        callConfig('test', {
-          endpointId: target.id,
-          baseUrl: target.baseUrl,
-          apiKey: target.key,
-          models: target.models,
-        }).then((result) => ({ target: target.label, result }))
-      )
-      if (judgeEndpoint.enabled !== false) {
-        requests.push(
-          callConfig('test', {
-            target: 'judge',
-            baseUrl: judgeEndpoint.baseUrl.trim(),
-            apiKey: judgeEndpoint.apiKey.trim(),
-            models: [judgeEndpoint.model.trim()],
-          }).then((result) => ({ target: 'Judge 专用端点', result }))
-        )
-      }
-      if (sectorEndpoint.enabled !== false) {
-        requests.push(
-          callConfig('test', {
-            target: 'sector',
-            baseUrl: sectorEndpoint.baseUrl.trim(),
-            apiKey: sectorEndpoint.apiKey.trim(),
-            models: [sectorEndpoint.model.trim()],
-          }).then((result) => ({
-            target: '板块前瞻专用端点',
-            result,
-          }))
-        )
-      }
-      if (!requests.length) {
-        setNotice('当前没有可在线测试的端点，可直接保存配置')
-        setTestResults([])
-        return
-      }
-      const responses = await Promise.all(requests)
-      const results = responses.flatMap(({ target, result }) =>
-        (Array.isArray(result?.results) ? result.results : []).map((item) => ({ ...item, target }))
-      )
-      setTestResults(results)
-      if (responses.some(({ result }) => !result?.ok)) {
-        setNotice('部分模型不可用，可返回上一步检查端点或更换模型')
-      }
-    } catch (e) {
-      setErr('测试失败：' + (e.message || e))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  // —— Step 3：保存 ——
   const save = async () => {
-    setErr(''); setNotice('')
     setBusy(true)
+    setError('')
+    setNotice('')
     try {
-      const payload = {
-        baseUrl: baseUrl.trim(),
-        apiKey: apiKey.trim(),
-        models: Object.fromEntries(Object.keys(roles).map((role) => [role, models[role] || ''])),
-        reasoning: Object.fromEntries(Object.keys(roles).map((role) => [role, !!reasoning[role]])),
-        primaryMaxInflight,
-        judgeEndpoint: {
-          baseUrl: judgeEndpoint.baseUrl.trim(),
-          apiKey: judgeEndpoint.apiKey.trim(),
-          model: judgeEndpoint.model.trim(),
-          reasoning: !!judgeEndpoint.reasoning,
-          enabled: judgeEndpoint.enabled !== false,
-        },
-        sectorEndpoint: {
-          baseUrl: sectorEndpoint.baseUrl.trim(),
-          apiKey: sectorEndpoint.apiKey.trim(),
-          model: sectorEndpoint.model.trim(),
-          reasoning: !!sectorEndpoint.reasoning,
-          enabled: sectorEndpoint.enabled !== false,
-        },
-      }
-      // 仅当用户启用了多端点面板时才提交 endpoints(整组替换);未启用则传空数组=清空池,退回单端点
-      if (showPool) {
-        payload.endpoints = endpoints.map((e) => ({
-          id: e.id,
-          baseUrl: (e.baseUrl || '').trim(),
-          // 新输入的明文 key 才上送;掩码/留空则不传(后端按 id 保留原 key)
-          apiKey: (e.apiKey != null && e.apiKey !== '') ? e.apiKey.trim() : '',
-          weight: e.weight,
-          enabled: e.enabled !== false,
-          // 通用端点只承接通用角色，Judge/板块前瞻使用独立端点。
-          models: e.models && typeof e.models === 'object'
-            ? Object.fromEntries(Object.entries(e.models).filter(([role, value]) =>
-              !['judge', 'sector'].includes(role)
-              && value
-              && String(value).trim()
-            ))
-            : {},
-          reasoning: e.reasoning && typeof e.reasoning === 'object'
-            ? Object.fromEntries(Object.entries(e.reasoning).filter(([role, value]) =>
-              !['judge', 'sector'].includes(role) && value != null
-            ).map(([role, value]) => [role, !!value]))
-            : {},
+      const targets = activeTargets()
+      const invalid = targets
+        .map(({ role, index }) => ({
+          role,
+          index,
+          error: validateEndpoint(role, index),
         }))
-      } else {
-        payload.endpoints = []
+        .find((item) => item.error)
+      if (invalid) {
+        throw new Error(`${roles[invalid.role]?.label || invalid.role} · 端点 ${invalid.index + 1}：${invalid.error}`)
       }
-      const j = await callConfig('save', payload)
-      if (!j || !j.ok) { setErr((j && j.error) || '保存失败'); setBusy(false); return }
-      if (Array.isArray(j.pool)) setPool(j.pool)
-      setJudgePool(j.judgePool || null)
-      setSectorPool(j.sectorPool || null)
-      setNotice('已保存，全系统即时生效')
-      setTimeout(() => close(), 800)
-    } catch (e) {
-      setErr('保存失败：' + (e.message || e))
+      const payload = Object.fromEntries(ROLE_ORDER.map((role) => [
+        role,
+        (roleEndpoints[role] || []).map((endpoint, index) => ({
+          id: endpointKey(role, index),
+          baseUrl: String(endpoint.baseUrl || '').trim(),
+          apiKey: String(endpoint.apiKey || '').trim(),
+          model: String(endpoint.model || '').trim(),
+          reasoning: !!endpoint.reasoning,
+          enabled: endpoint.enabled !== false,
+        })),
+      ]))
+      const result = await callConfig('save', {
+        roleEndpoints: payload,
+      })
+      if (!result?.ok) throw new Error(result?.error || '保存失败')
+      setPool(Array.isArray(result.pool) ? result.pool : [])
+      setRoleEndpoints(normalizeRoleEndpoints(
+        result.config || {},
+        roles,
+        roleSlots,
+      ))
+      setNotice('已保存，所有角色即时切换到独立端点')
+    } catch (reason) {
+      setError(reason?.message || '保存失败')
     } finally {
       setBusy(false)
     }
   }
 
-  const setModel = (role, v) => setModels((prev) => ({ ...prev, [role]: v }))
-  const setReason = (role, v) => setReasoning((prev) => ({ ...prev, [role]: !!v }))
-  const okCount = testResults ? testResults.filter((r) => r.ok).length : 0
-
-  // —— 多端点资源池：增删改 ——
-  const addEndpoint = () => {
-    const id = 'ep' + Date.now().toString(36)
-    setEndpoints((prev) => [...prev, { id, baseUrl: '', apiKey: '', weight: 1, enabled: true, hasKey: false }])
-    setShowPool(true)
+  const renderEndpoint = (role, endpoint, index) => {
+    const key = endpointKey(role, index)
+    const status = testing[key] || {}
+    const health = poolById[endpoint.id] || poolById[key]
+    const modelList = modelLists[key] || []
+    return (
+      <div
+        className={'llm-role-endpoint' + (
+          endpoint.enabled === false ? ' off' : ''
+        )}
+        key={key}
+      >
+        <div className="llm-role-endpoint-head">
+          <strong>
+            {role === 'advisor' ? `端点 ${index + 1}` : '独立端点'}
+          </strong>
+          <span className={'llm-ep-health' + healthClass(health)}>
+            {healthLabel(health)}
+          </span>
+          <button
+            type="button"
+            className={'llm-reason-toggle' + (
+              endpoint.enabled !== false ? ' on' : ''
+            )}
+            aria-label={`${roles[role]?.label || role}端点${endpoint.enabled !== false ? '已启用' : '已停用'}`}
+            onClick={() => updateEndpoint(role, index, {
+              enabled: endpoint.enabled === false,
+            })}
+          >
+            <span className="llm-reason-text">
+              {endpoint.enabled !== false ? '启用' : '停用'}
+            </span>
+            <span className="llm-reason-track">
+              <span className="llm-reason-thumb" />
+            </span>
+          </button>
+        </div>
+        <div className="llm-role-endpoint-grid">
+          <label>
+            <span>Base URL</span>
+            <input
+              className="wl-input auth-input"
+              placeholder="https://gateway.example/v1"
+              value={endpoint.baseUrl || ''}
+              spellCheck={false}
+              onChange={(event) => updateEndpoint(role, index, {
+                baseUrl: event.target.value,
+              })}
+            />
+          </label>
+          <label>
+            <span>API Key</span>
+            <input
+              className="wl-input auth-input"
+              type="password"
+              placeholder={endpoint.hasKey
+                ? `已保存（${endpoint.apiKeyMask || '****'}），留空沿用`
+                : '填写专用 API Key'}
+              value={endpoint.apiKey || ''}
+              spellCheck={false}
+              onChange={(event) => updateEndpoint(role, index, {
+                apiKey: event.target.value,
+              })}
+            />
+          </label>
+        </div>
+        <div className="llm-role-endpoint-model">
+          <label>
+            <span>模型</span>
+            <input
+              className="wl-input auth-input"
+              list={`llm-models-${key}`}
+              placeholder={roles[role]?.def || '模型名称'}
+              value={endpoint.model || ''}
+              spellCheck={false}
+              onChange={(event) => updateEndpoint(role, index, {
+                model: event.target.value,
+              })}
+            />
+            <datalist id={`llm-models-${key}`}>
+              {modelList.map((model) => (
+                <option key={model} value={model} />
+              ))}
+            </datalist>
+          </label>
+          <button
+            type="button"
+            className={'llm-reason-toggle' + (
+              endpoint.reasoning ? ' on' : ''
+            )}
+            aria-label={`${roles[role]?.label || role}深度思考${endpoint.reasoning ? '已开启' : '已关闭'}`}
+            onClick={() => updateEndpoint(role, index, {
+              reasoning: !endpoint.reasoning,
+            })}
+          >
+            <span className="llm-reason-text">
+              <Icon name="brain" size={12} />
+              深度思考
+            </span>
+            <span className="llm-reason-track">
+              <span className="llm-reason-thumb" />
+            </span>
+          </button>
+          <button
+            type="button"
+            className="btn llm-ep-verify"
+            disabled={busy || status.busy || endpoint.enabled === false}
+            onClick={() => verifyEndpoint(role, index)}
+          >
+            <Icon
+              name={status.busy ? 'refresh' : 'bolt'}
+              size={13}
+              className={status.busy ? 'spin' : ''}
+            />
+            验证
+          </button>
+        </div>
+        {status.message && (
+          <div className={'llm-ep-msg' + (status.ok ? ' ok' : ' bad')}>
+            {status.message}
+          </div>
+        )}
+      </div>
+    )
   }
-  const removeEndpoint = (id) => {
-    setEndpoints((prev) => prev.filter((e) => e.id !== id))
-    setEpTesting((prev) => { const n = { ...prev }; delete n[id]; return n })
-  }
-  const setEp = (id, patch) => setEndpoints((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)))
-
-  // 单端点连通性验证：明文 Key 直接测试，留空时后端按 endpointId 安全复用已保存 Key。
-  const verifyEndpoint = async (ep) => {
-    setEpTesting((prev) => ({ ...prev, [ep.id]: { busy: true } }))
-    try {
-      const key = (ep.apiKey && !/\*/.test(ep.apiKey)) ? ep.apiKey.trim() : ''
-      if (!ep.baseUrl.trim()) { setEpTesting((p) => ({ ...p, [ep.id]: { ok: false, msg: '缺少 Base URL' } })); return }
-      if (!key && !ep.hasKey) { setEpTesting((p) => ({ ...p, [ep.id]: { ok: false, msg: '请填写 API Key' } })); return }
-      const j = await callConfig('verify', {
-        endpointId: ep.id,
-        baseUrl: ep.baseUrl.trim(),
-        apiKey: key,
-      })
-      setEpTesting((p) => ({ ...p, [ep.id]: { ok: !!(j && j.ok), msg: (j && j.ok) ? (j.listable ? `可用·${(j.models || []).length} 模型` : '可用') : ((j && j.error) || '验证失败') } }))
-    } catch (e) {
-      setEpTesting((p) => ({ ...p, [ep.id]: { ok: false, msg: e.message || String(e) } }))
-    }
-  }
-  const poolById = Object.fromEntries((pool || []).map((p) => [p.id, p]))
 
   return (
-    <div className="modal-mask" onClick={(e) => { if (e.target === e.currentTarget) close() }}>
-      <div className="llm-cfg" role="dialog" aria-modal="true" aria-label="AI 模型配置" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="modal-mask"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) llmConfigStore.close()
+      }}
+    >
+      <div
+        className="llm-cfg"
+        role="dialog"
+        aria-modal="true"
+        aria-label="AI 模型配置"
+        onClick={(event) => event.stopPropagation()}
+      >
         <div className="modal-bar">
-          <div className="modal-title"><Icon name="brain" size={18} /> AI 模型配置</div>
-          <button type="button" className="modal-close" aria-label="关闭 AI 模型配置" onClick={close}><Icon name="close" size={16} /></button>
+          <div className="modal-title">
+            <Icon name="brain" size={18} />
+            AI 角色端点
+            <span className="llm-role-count">7 个角色 · 8 个端点</span>
+          </div>
+          <button
+            type="button"
+            className="modal-close"
+            aria-label="关闭 AI 模型配置"
+            onClick={() => llmConfigStore.close()}
+          >
+            <Icon name="close" size={16} />
+          </button>
         </div>
 
-        {/* 步骤指示器 */}
-        <div className="llm-steps">
-          {STEPS.map((s, i) => (
-            <div key={s.n} className="llm-step-wrap">
-              <div className={'llm-step' + (step === s.n ? ' active' : '') + (step > s.n ? ' done' : '')}>
-                <span className="llm-step-dot">
-                  {step > s.n ? <Icon name="check" size={12} /> : <Icon name={s.icon} size={13} />}
-                </span>
-                <span className="llm-step-label">{s.label}</span>
-              </div>
-              {i < STEPS.length - 1 && <span className={'llm-step-line' + (step > s.n ? ' done' : '')} />}
+        <div className="llm-body llm-role-list">
+          {busy && !Object.keys(roleEndpoints).length ? (
+            <div className="llm-testing">
+              <Icon name="refresh" size={14} className="spin" />
+              正在读取角色端点
             </div>
-          ))}
-        </div>
-
-        <div className="llm-body">
-          {/* Step 1：连接 */}
-          {step === 1 && (
-            <div className="llm-pane">
-              <div className="llm-field">
-                <label>Base URL</label>
-                <input className="wl-input auth-input" placeholder="https://your-gateway/v1"
-                  value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} spellCheck={false} />
-                <div className="llm-hint">OpenAI 兼容网关地址，通常以 /v1 结尾</div>
-              </div>
-              <div className="llm-field">
-                <label>API Key</label>
-                <input className="wl-input auth-input" type="password" spellCheck={false}
-                  placeholder={hasKey ? `已保存（${keyMask}），留空则沿用` : 'sk-...'}
-                  value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
-                <div className="llm-hint">仅用于后端调用，保存在服务端，前端不回显明文</div>
-              </div>
-
-              {/* 各角色模型速配（主端点）：无需先验证即可直接为每个 AI 角色指定模型 + 深度思考。
-                  与第 2 步「分工」共享同一份 models/reasoning，改这里等于改主端点各角色配置。 */}
-              {Object.keys(roles).length > 0 && (
-                <div className="llm-field">
-                  <label>各角色模型</label>
-                  <div className="llm-hint" style={{ marginBottom: 8 }}>
-                    为系统各处 AI 分别指定模型（对应主端点）。留空则用默认模型。多端点资源池可在下方展开单独配置。
-                  </div>
-                  <div className="llm-role-quick">
-                    {Object.keys(roles).map((k) => (
-                      <div className="llm-eprole" key={k}>
-                        <div className="llm-eprole-head">
-                          <label>{roles[k].label || k}</label>
-                          <button type="button"
-                            className={'llm-reason-toggle' + (reasoning[k] ? ' on' : '')}
-                            onClick={() => setReason(k, !reasoning[k])}
-                            title="开启后该角色调用支持推理的模型时启用深度思考(reasoning),响应更慎密但更慢">
-                            <span className="llm-reason-text"><Icon name="brain" size={12} /> 深度思考 <em className="llm-reason-state">{reasoning[k] ? '已开' : '关'}</em></span>
-                            <span className="llm-reason-track"><span className="llm-reason-thumb" /></span>
-                          </button>
-                        </div>
-                        <input className="wl-input auth-input" list="llm-model-list-step1" spellCheck={false}
-                          placeholder={roles[k].def}
-                          value={models[k] || ''}
-                          onChange={(e) => setModel(k, e.target.value)} />
-                      </div>
-                    ))}
-                    <datalist id="llm-model-list-step1">
-                      {modelList.map((m) => <option key={m} value={m} />)}
-                    </datalist>
-                  </div>
-                </div>
-              )}
-
-              <div className={'llm-judge-card' + (judgeEndpoint.enabled === false ? ' off' : '')}>
-                <div className="llm-judge-head">
-                  <span className="llm-judge-title"><Icon name="gauge" size={14} /> 军师执行确认端点</span>
-                  <span className="llm-judge-badge">军师内置闸门</span>
-                  {judgePool && (
-                    <span className={'llm-ep-health' + (judgePool.cooling ? ' cooling' : (judgePool.fails ? ' warn' : ' ok'))}>
-                      {judgePool.cooling
-                        ? `熔断中 ${Math.ceil((judgePool.cooldownMsLeft || 0) / 1000)}秒`
-                        : `在途${judgePool.inflight || 0} · 失败${judgePool.fails || 0}`}
-                    </span>
+          ) : ROLE_ORDER.map((role) => {
+            const meta = ROLE_META[role] || ROLE_META.chat
+            const endpoints = roleEndpoints[role] || []
+            return (
+              <section className="llm-role-group" key={role}>
+                <header>
+                  <span className="llm-role-icon">
+                    <Icon name={meta.icon} size={14} />
+                  </span>
+                  <strong>{roles[role]?.label || meta.label}</strong>
+                  <small>{meta.badge}</small>
+                </header>
+                <div className={'llm-role-endpoints' + (
+                  endpoints.length > 1 ? ' dual' : ''
+                )}>
+                  {endpoints.map((endpoint, index) =>
+                    renderEndpoint(role, endpoint, index)
                   )}
-                  <button type="button"
-                    className={'llm-reason-toggle' + (judgeEndpoint.enabled !== false ? ' on' : '')}
-                    onClick={() => setJudge({ enabled: judgeEndpoint.enabled === false })}
-                    title="启用或停用军师执行确认端点">
-                    <span className="llm-reason-text">{judgeEndpoint.enabled !== false ? '启用' : '停用'}</span>
-                    <span className="llm-reason-track"><span className="llm-reason-thumb" /></span>
-                  </button>
                 </div>
-                <div className="llm-hint">
-                  只负责确认军师既有计划的执行时机，不产生第二套方向建议，也不与操盘军师和智能体争抢连接。
-                </div>
-                {judgeEndpoint.source?.startsWith('legacy-') && (
-                  <div className="llm-hint llm-hint-warn">
-                    <Icon name="info" size={12} /> 已从旧配置迁移，目前仍沿用原连接；请改成独立网关或独立密钥后保存。
-                  </div>
-                )}
-                <div className="llm-judge-grid">
-                  <input className="wl-input auth-input" placeholder="Judge 专用 Base URL"
-                    value={judgeEndpoint.baseUrl} spellCheck={false}
-                    onChange={(event) => setJudge({ baseUrl: event.target.value })} />
-                  <input className="wl-input auth-input" type="password" spellCheck={false}
-                    placeholder={judgeEndpoint.hasKey
-                      ? `已保存（${judgeEndpoint.apiKeyMask || '****'}），留空沿用`
-                      : 'Judge 专用 API Key'}
-                    value={judgeEndpoint.apiKey}
-                    onChange={(event) => setJudge({ apiKey: event.target.value })} />
-                </div>
-                <div className="llm-judge-model-row">
-                  <input className="wl-input auth-input" list="llm-judge-model-list" spellCheck={false}
-                    placeholder={judgeRole.def || '低延迟模型名'}
-                    value={judgeEndpoint.model}
-                    onChange={(event) => setJudge({ model: event.target.value })} />
-                  <datalist id="llm-judge-model-list">
-                    {judgeModelList.map((model) => <option key={model} value={model} />)}
-                  </datalist>
-                  <button type="button"
-                    className={'llm-reason-toggle' + (judgeEndpoint.reasoning ? ' on' : '')}
-                    onClick={() => setJudge({ reasoning: !judgeEndpoint.reasoning })}
-                    title="Judge 通常建议关闭深度思考以降低确认延迟">
-                    <span className="llm-reason-text"><Icon name="brain" size={12} /> 深度思考</span>
-                    <span className="llm-reason-track"><span className="llm-reason-thumb" /></span>
-                  </button>
-                  <button type="button" className="btn llm-ep-verify"
-                    disabled={judgeTesting.busy || judgeEndpoint.enabled === false}
-                    onClick={() => verifyJudgeEndpoint()}>
-                    <Icon name={judgeTesting.busy ? 'refresh' : 'bolt'} size={13} className={judgeTesting.busy ? 'spin' : ''} />
-                    验证专用端点
-                  </button>
-                </div>
-                {judgeTesting.msg && (
-                  <div className={'llm-ep-msg' + (judgeTesting.ok ? ' ok' : ' bad')}>{judgeTesting.msg}</div>
-                )}
-              </div>
-
-              <div className={'llm-judge-card' + (sectorEndpoint.enabled === false ? ' off' : '')}>
-                <div className="llm-judge-head">
-                  <span className="llm-judge-title"><Icon name="layers" size={14} /> 板块前瞻专用端点</span>
-                  <span className="llm-judge-badge">独立资源</span>
-                  {sectorPool && (
-                    <span className={'llm-ep-health' + (sectorPool.cooling ? ' cooling' : (sectorPool.fails ? ' warn' : ' ok'))}>
-                      {sectorPool.cooling
-                        ? `熔断中 ${Math.ceil((sectorPool.cooldownMsLeft || 0) / 1000)}秒`
-                        : `在途${sectorPool.inflight || 0} · 失败${sectorPool.fails || 0}`}
-                    </span>
-                  )}
-                  <button type="button"
-                    className={'llm-reason-toggle' + (sectorEndpoint.enabled !== false ? ' on' : '')}
-                    onClick={() => setSector({ enabled: sectorEndpoint.enabled === false })}
-                    title="启用或停用板块前瞻专用端点">
-                    <span className="llm-reason-text">{sectorEndpoint.enabled !== false ? '启用' : '停用'}</span>
-                    <span className="llm-reason-track"><span className="llm-reason-thumb" /></span>
-                  </button>
-                </div>
-                <div className="llm-hint">
-                  只承接板块前瞻的深度解释，不与操盘军师批量生成共享连接或并发额度。
-                </div>
-                {sectorEndpoint.source?.startsWith('legacy-') && (
-                  <div className="llm-hint llm-hint-warn">
-                    <Icon name="info" size={12} /> 当前为旧配置迁移值；请指定独立网关或独立密钥后保存。
-                  </div>
-                )}
-                <div className="llm-judge-grid">
-                  <input className="wl-input auth-input" placeholder="板块前瞻专用 Base URL"
-                    value={sectorEndpoint.baseUrl} spellCheck={false}
-                    onChange={(event) => setSector({ baseUrl: event.target.value })} />
-                  <input className="wl-input auth-input" type="password" spellCheck={false}
-                    placeholder={sectorEndpoint.hasKey
-                      ? `已保存（${sectorEndpoint.apiKeyMask || '****'}），留空沿用`
-                      : '板块前瞻专用 API Key'}
-                    value={sectorEndpoint.apiKey}
-                    onChange={(event) => setSector({ apiKey: event.target.value })} />
-                </div>
-                <div className="llm-judge-model-row">
-                  <input className="wl-input auth-input" list="llm-sector-model-list" spellCheck={false}
-                    placeholder={sectorRole.def || '深度模型名'}
-                    value={sectorEndpoint.model}
-                    onChange={(event) => setSector({ model: event.target.value })} />
-                  <datalist id="llm-sector-model-list">
-                    {sectorModelList.map((model) => <option key={model} value={model} />)}
-                  </datalist>
-                  <button type="button"
-                    className={'llm-reason-toggle' + (sectorEndpoint.reasoning ? ' on' : '')}
-                    onClick={() => setSector({ reasoning: !sectorEndpoint.reasoning })}
-                    title="板块前瞻建议开启深度思考">
-                    <span className="llm-reason-text"><Icon name="brain" size={12} /> 深度思考</span>
-                    <span className="llm-reason-track"><span className="llm-reason-thumb" /></span>
-                  </button>
-                  <button type="button" className="btn llm-ep-verify"
-                    disabled={sectorTesting.busy || sectorEndpoint.enabled === false}
-                    onClick={() => verifySectorEndpoint()}>
-                    <Icon name={sectorTesting.busy ? 'refresh' : 'bolt'} size={13} className={sectorTesting.busy ? 'spin' : ''} />
-                    验证专用端点
-                  </button>
-                </div>
-                {sectorTesting.msg && (
-                  <div className={'llm-ep-msg' + (sectorTesting.ok ? ' ok' : ' bad')}>{sectorTesting.msg}</div>
-                )}
-              </div>
-
-              {/* 多端点资源池（可选）：折叠区，配置后覆盖上方单端点，提供路由+熔断+故障转移 */}
-              <div className="llm-ep">
-                <button type="button" className="llm-ep-toggle" onClick={() => setShowPool((v) => !v)}>
-                  <Icon name={showPool ? 'chevronDown' : 'chevronRight'} size={13} />
-                  <span>多端点资源池</span>
-                  <span className="llm-ep-badge">{endpoints.length ? `${endpoints.length} 个端点` : '可选'}</span>
-                </button>
-                {showPool && (
-                  <div className="llm-ep-body">
-                    <div className="llm-hint" style={{ marginBottom: 8 }}>
-                      配置多个网关后，请求按「最少在途×权重」自动路由，连续失败自动熔断并转移；留空则仅用上方单端点。
-                    </div>
-                    <div className="llm-primary-limit">
-                      <label htmlFor="llm-primary-max-inflight">主端点最大在途</label>
-                      <input
-                        id="llm-primary-max-inflight"
-                        className="wl-input auth-input"
-                        type="number"
-                        min="1"
-                        max="20"
-                        step="1"
-                        inputMode="numeric"
-                        value={primaryMaxInflight}
-                        onChange={(event) => setPrimaryMaxInflight(
-                          Math.max(1, Math.min(20, Number(event.target.value) || 1)),
-                        )}
-                      />
-                      <span>达到阈值后自动分流到可承接对应角色的备用端点</span>
-                    </div>
-                    {endpoints.length === 0 && (
-                      <div className="llm-ep-empty">暂无端点，点下方「添加端点」开始配置</div>
-                    )}
-                    {endpoints.map((ep, i) => {
-                      const st = epTesting[ep.id] || {}
-                      const ph = poolById[ep.id]
-                      return (
-                        <div className={'llm-ep-row' + (ep.enabled === false ? ' off' : '')} key={ep.id}>
-                          <div className="llm-ep-row-head">
-                            <span className="llm-ep-idx">#{i + 1}</span>
-                            <button type="button"
-                              className={'llm-reason-toggle' + (ep.enabled !== false ? ' on' : '')}
-                              onClick={() => setEp(ep.id, { enabled: ep.enabled === false })}
-                              title="启用/停用该端点">
-                              <span className="llm-reason-text">{ep.enabled !== false ? '启用' : '停用'}</span>
-                              <span className="llm-reason-track"><span className="llm-reason-thumb" /></span>
-                            </button>
-                            {ph && (
-                              <span className={'llm-ep-health' + (ph.cooling ? ' cooling' : (ph.fails ? ' warn' : ' ok'))}>
-                                {ph.cooling ? `熔断中 ${Math.ceil((ph.cooldownMsLeft || 0) / 1000)}s`
-                                  : `在途${ph.inflight || 0}·失败${ph.fails || 0}`}
-                              </span>
-                            )}
-                            <button type="button" className="llm-ep-del" onClick={() => removeEndpoint(ep.id)} title="删除">
-                              <Icon name="close" size={13} />
-                            </button>
-                          </div>
-                          <input className="wl-input auth-input" placeholder="Base URL，如 https://gateway/v1"
-                            value={ep.baseUrl || ''} spellCheck={false}
-                            onChange={(e) => setEp(ep.id, { baseUrl: e.target.value })} />
-                          <div className="llm-ep-row2">
-                            <input className="wl-input auth-input" type="password" spellCheck={false}
-                              placeholder={ep.hasKey ? `已保存（${ep.apiKeyMask || '****'}），留空沿用` : 'API Key'}
-                              value={ep.apiKey || ''}
-                              onChange={(e) => setEp(ep.id, { apiKey: e.target.value })} />
-                            <input className="wl-input auth-input llm-ep-weight" type="number" min="1" step="1"
-                              title="权重（越大分到越多请求）" placeholder="权重"
-                              value={ep.weight ?? 1}
-                              onChange={(e) => setEp(ep.id, { weight: Number(e.target.value) || 1 })} />
-                            <button type="button" className="btn llm-ep-verify" disabled={st.busy}
-                              onClick={() => verifyEndpoint(ep)}>
-                              <Icon name={st.busy ? 'refresh' : 'bolt'} size={13} className={st.busy ? 'spin' : ''} />
-                              验证
-                            </button>
-                          </div>
-                          {st.msg && <div className={'llm-ep-msg' + (st.ok ? ' ok' : ' bad')}>{st.msg}</div>}
-                        </div>
-                      )
-                    })}
-                    <button type="button" className="llm-ep-add" onClick={addEndpoint}>
-                      <Icon name="plus" size={13} /> 添加端点
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Step 2：分工——按【端点】分别设置各角色模型 */}
-          {step === 2 && (
-            <div className="llm-pane">
-              <div className="llm-hint" style={{ marginBottom: 10 }}>
-                {poolMode
-                  ? `资源池已启用。下方只配置对话、操盘军师和智能体；Judge 已在上一步使用独立端点，不再作为资源池角色。附加端点某角色留空，表示该端点不承接该角色。`
-                  : `为通用 AI 能力分别指定模型${listable ? `（共 ${modelList.length} 个可选）` : '（手动填写模型名）'}。Judge 已单独配置。`}
-              </div>
-              {/* 有已配置但被停用的端点 → 说明为何没在下方列出,引导回上一步启用 */}
-              {disabledEndpoints().length > 0 && (
-                <div className="llm-hint llm-hint-warn" style={{ marginBottom: 10 }}>
-                  <Icon name="info" size={12} /> 另有 {disabledEndpoints().length} 个端点处于「停用」状态,不参与分发,故未在此列出。如需为其单独设模型,请回「上一步」把对应端点切到「启用」。
-                </div>
-              )}
-
-              {/* 端点卡片:主端点 + 各资源池端点 */}
-              {cardEndpoints().map((card) => {
-                const info = epModels[card.id]
-                const epList = info && info.models && info.models.length ? info.models : modelList
-                return (
-                  <div className={'llm-epcard' + (card.isMain ? ' main' : '')} key={card.id}>
-                    <div className="llm-epcard-head">
-                      <span className="llm-epcard-tag">{card.isMain ? <Icon name="star" size={12} /> : <Icon name="layers" size={12} />}{card.label}</span>
-                      <span className="llm-epcard-host">{card.host}</span>
-                      {info && info.listable && <span className="llm-epcard-count">{info.models.length} 模型</span>}
-                      {info && info.ok === false && <span className="llm-epcard-count bad">验证失败</span>}
-                      {info && info.ok === null && <span className="llm-epcard-count warn">未列举</span>}
-                    </div>
-                    {Object.keys(roles).map((k) => (
-                      <div className="llm-eprole" key={k}>
-                        <div className="llm-eprole-head">
-                          <label>{roles[k].label || k}</label>
-                          <button type="button"
-                            className={'llm-reason-toggle' + (cardReason(card, k) ? ' on' : '')}
-                            onClick={() => setCardReason(card, k, !cardReason(card, k))}
-                            title="开启后该角色在本端点调用支持推理的模型时启用深度思考(reasoning),响应更慎密但更慢">
-                            <span className="llm-reason-text"><Icon name="brain" size={12} /> 深度思考 <em className="llm-reason-state">{cardReason(card, k) ? '已开' : '关'}</em></span>
-                            <span className="llm-reason-track"><span className="llm-reason-thumb" /></span>
-                          </button>
-                        </div>
-                        <input className="wl-input auth-input" list={`llm-model-list-${card.id}`} spellCheck={false}
-                          placeholder={card.isMain ? roles[k].def : '留空=该端点不承接此角色'}
-                          value={cardModel(card, k)}
-                          onChange={(e) => setCardModel(card, k, e.target.value)} />
-                        <datalist id={`llm-model-list-${card.id}`}>
-                          {epList.map((m) => <option key={m} value={m} />)}
-                        </datalist>
-                      </div>
-                    ))}
-                  </div>
-                )
-              })}
-            </div>
-          )}
-
-          {/* Step 3：测试 */}
-          {step === 3 && (
-            <div className="llm-pane">
-              {busy && !testResults && (
-                <div className="llm-testing"><Icon name="refresh" size={14} className="spin" /> 正在逐个测试模型可用性…</div>
-              )}
-              {testResults && (
-                <>
-                  <div className="llm-hint" style={{ marginBottom: 8 }}>
-                    {okCount}/{testResults.length} 个模型可用
-                  </div>
-                  <div className="llm-results">
-                    {testResults.map((r) => (
-                      <div className={'llm-result' + (r.ok ? ' ok' : ' bad')} key={`${r.target || '通用'}-${r.model}`}>
-                        <Icon name={r.ok ? 'check' : 'close'} size={13} />
-                        <span className="llm-result-model">{r.target ? `${r.target} · ` : ''}{r.model}</span>
-                        <span className="llm-result-meta">{r.ok ? `${r.ms}ms` : (r.error || '不可用')}</span>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          {err && <div className="err llm-msg">{err}</div>}
+              </section>
+            )
+          })}
+          {error && <div className="err llm-msg">{error}</div>}
           {notice && <div className="llm-msg ok">{notice}</div>}
         </div>
 
-        {/* 底部操作 */}
         <div className="llm-actions">
-          {step > 1
-            ? <button className="btn" onClick={() => { setErr(''); setNotice(''); setStep(step - 1) }} disabled={busy}>上一步</button>
-            : <span />}
-          {step === 1 && (
-            <button className="btn btn-primary" onClick={verifyAndNext} disabled={busy}>
-              <Icon name={busy ? 'refresh' : 'check'} size={14} className={busy ? 'spin' : ''} />
-              {busy ? '验证中…' : '验证并继续'}
-            </button>
-          )}
-          {step === 2 && (
-            <button className="btn btn-primary" onClick={testAndNext} disabled={busy}>
-              <Icon name="gauge" size={14} /> 测试可用性
-            </button>
-          )}
-          {step === 3 && (
-            <button className="btn btn-primary" onClick={save} disabled={busy}>
-              <Icon name={busy ? 'refresh' : 'check'} size={14} className={busy ? 'spin' : ''} />
-              {busy ? '保存中…' : '完成并保存'}
-            </button>
-          )}
+          <button
+            type="button"
+            className="btn"
+            disabled={busy}
+            onClick={testAll}
+          >
+            <Icon name={busy ? 'refresh' : 'gauge'} size={14}
+              className={busy ? 'spin' : ''} />
+            验证全部
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={busy}
+            onClick={save}
+          >
+            <Icon name="check" size={14} />
+            保存配置
+          </button>
         </div>
       </div>
     </div>

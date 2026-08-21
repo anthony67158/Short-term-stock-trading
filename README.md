@@ -104,14 +104,16 @@
 
 ## AI 运行层
 
-### 五个角色
+### 七个角色、八个端点槽位
 
 | 角色 | 用途 | 默认模型 |
 |---|---|---|
 | `chat` | 对话与盘面分析 | `DeepSeek-V3.2-Pro` |
-| `advisor` | 单股军师和操作建议 | `DeepSeek-V4-Pro` |
+| `advisor` | 一次性生成军师（固定两个端点） | `DeepSeek-V4-Pro` |
 | `portfolio` | 持仓组合分析 | `DeepSeek-V4-Pro` |
-| `agent` | Function Calling 与策略日报 | `Qwen3-Max-A` |
+| `agent` | Function Calling 智能体助手 | `Qwen3-Max-A` |
+| `daily` | 策略日报 | `Qwen3-Max-A` |
+| `sector` | 板块前瞻 | `gpt-5.6-terra` |
 | `judge` | 交易时机确认 | `gemini-2.5-flash` |
 
 模型配置保存在 OSS `config/llm.json`，优先级为：
@@ -120,7 +122,7 @@
 OSS 运行时配置 > FC 环境变量 > 代码默认值
 ```
 
-每个角色可使用不同端点和模型。端点池支持最少在途路由、连续失败熔断、冷却和半开恢复。
+配置使用 `roleEndpoints` 按角色严格隔离。除 `advisor` 使用两个端点按最少在途路由外，其余角色各使用一个独立端点；任何角色都不会回退到其他角色。端点连续失败后会熔断、冷却并半开恢复。
 
 ### 后台任务
 
@@ -285,6 +287,8 @@ npm run dev
 - `ADVISOR_MODEL`
 - `PORTFOLIO_MODEL`
 - `AGENT_MODEL`
+- `DAILY_MODEL`
+- `SECTOR_MODEL`
 - `JUDGE_MODEL`
 - `EMBED_MODEL`
 - `DOUBAO_SEARCH_API_KEY` / `DOUBAO_SEARCH_KEY_NAME`

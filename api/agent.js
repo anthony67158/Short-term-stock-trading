@@ -5,7 +5,7 @@ import { retrieveTheory } from './_kb.js';
 import { screenStocks } from './_screen.js';
 import { marketTimePromptBlock } from './_market_time.js';
 import { fetchMarketFlashes, fetchNews } from './_market_data.js';
-import { makeSSE, callChat, pumpStream, llmEnv } from './_llm.js';
+import { makeSSE, callChat, pumpStream, llmReady } from './_llm.js';
 import { ensureConfig, getModel, getReasoning } from './_llm_config.js';
 import {
   buildSearchReference,
@@ -341,15 +341,12 @@ export default async function handler(req, res) {
       .send(JSON.stringify({ ok: false, error: accountAuth.error }));
   }
 
-  const BASE = process.env.LLM_BASE_URL;
-  const KEY = process.env.LLM_API_KEY;
-  // 运行时配置优先：预热同步缓存后取 BASE/KEY/模型（前端「AI 模型配置」写入 OSS）
+  // 运行时配置优先：预热同步缓存后取 agent 独立端点和模型。
   await ensureConfig();
   const aiSearchConfig = await ensureAiSearchConfig();
-  const { BASE: RT_BASE, KEY: RT_KEY } = llmEnv();
   const AGENT_MODEL = getModel('agent');
   const AGENT_REASONING = getReasoning('agent');
-  if (!RT_BASE || !RT_KEY) { applyCors(res); res.setHeader('Content-Type', 'application/json; charset=utf-8'); return res.status(200).send(JSON.stringify({ ok: false, error: 'LLM 未配置' })); }
+  if (!llmReady('agent')) { applyCors(res); res.setHeader('Content-Type', 'application/json; charset=utf-8'); return res.status(200).send(JSON.stringify({ ok: false, error: 'agent 角色端点未配置' })); }
 
   // ===== SSE 流式：边分析边推送(工具进度 + 答案 token)，用户实时看到进展、不再"超时空手" =====
   const { emit: send } = makeSSE(res);

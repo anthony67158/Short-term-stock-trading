@@ -725,18 +725,21 @@ test('基线更新拒绝单suite、在线suite与临时case', async () => {
 
 test('端点Harness逐个验证模型、对话、Function Calling与流式输出', async () => {
   const config = {
-    baseUrl: 'https://main.example/v1',
-    apiKey: 'main-key',
-    models: { portfolio: 'gpt-5.6-terra' },
-    reasoning: { portfolio: true },
-    endpoints: [{
-      id: 'backup-a',
-      baseUrl: 'https://backup.example/v1',
-      apiKey: 'backup-key',
-      enabled: true,
-      models: { portfolio: 'gpt-5.6-terra' },
-      reasoning: { portfolio: true },
-    }],
+    roleEndpoints: {
+      advisor: [{
+        baseUrl: 'https://advisor-1.example/v1',
+        apiKey: 'advisor-1-key',
+        model: 'gpt-5.6-terra',
+        reasoning: true,
+        enabled: true,
+      }, {
+        baseUrl: 'https://advisor-2.example/v1',
+        apiKey: 'advisor-2-key',
+        model: 'gpt-5.6-terra',
+        reasoning: true,
+        enabled: true,
+      }],
+    },
   }
   const fetchImpl = async (url, init = {}) => {
     if (String(url).endsWith('/models')) {
@@ -773,7 +776,7 @@ test('端点Harness逐个验证模型、对话、Function Calling与流式输出
   }
   const result = await runEndpointHarnessCase({
     input: {
-      role: 'portfolio',
+      role: 'advisor',
       capabilities: ['models', 'chat', 'function', 'stream'],
       timeoutMs: 1000,
     },
@@ -797,8 +800,8 @@ test('端点Harness逐个验证模型、对话、Function Calling与流式输出
     item.capabilities.function.ok
     && item.capabilities.stream.ok
   ), true)
-  assert.equal(JSON.stringify(result.output).includes('main-key'), false)
-  assert.equal(JSON.stringify(result.output).includes('backup-key'), false)
+  assert.equal(JSON.stringify(result.output).includes('advisor-1-key'), false)
+  assert.equal(JSON.stringify(result.output).includes('advisor-2-key'), false)
 })
 
 test('端点Harness按完整响应体统计延迟预算', async () => {
@@ -906,16 +909,19 @@ test('在线Harness错误输出按端点实际Key精确脱敏', async () => {
 
 test('影子Harness对拍多端点结构化结论且不影响生产', async () => {
   const config = {
-    baseUrl: 'https://main.example/v1',
-    apiKey: 'main-key',
-    models: { portfolio: 'gpt-5.6-terra' },
-    endpoints: [{
-      id: 'backup-a',
-      baseUrl: 'https://backup.example/v1',
-      apiKey: 'backup-key',
-      enabled: true,
-      models: { portfolio: 'gpt-5.6-terra' },
-    }],
+    roleEndpoints: {
+      advisor: [{
+        baseUrl: 'https://advisor-1.example/v1',
+        apiKey: 'advisor-1-key',
+        model: 'gpt-5.6-terra',
+        enabled: true,
+      }, {
+        baseUrl: 'https://advisor-2.example/v1',
+        apiKey: 'advisor-2-key',
+        model: 'gpt-5.6-terra',
+        enabled: true,
+      }],
+    },
   }
   const fetchImpl = async () => Response.json({
     choices: [{
@@ -934,7 +940,7 @@ test('影子Harness对拍多端点结构化结论且不影响生产', async () =
   })
   const result = await runShadowHarnessCase({
     input: {
-      role: 'portfolio',
+      role: 'advisor',
       prompt: '根据E1评估600000，只输出JSON。',
       allowedCodes: ['600000'],
       allowedEvidenceIds: ['E1'],
@@ -959,7 +965,8 @@ test('影子Harness对拍多端点结构化结论且不影响生产', async () =
   assert.equal(result.output.shadowOnly, true)
   assert.equal(result.output.actionable, false)
   assert.equal(result.output.agreement, 1)
-  assert.equal(JSON.stringify(result.output).includes('main-key'), false)
+  assert.equal(JSON.stringify(result.output).includes('advisor-1-key'), false)
+  assert.equal(JSON.stringify(result.output).includes('advisor-2-key'), false)
 })
 
 test('影子Harness必须显式拦截模型尝试引用的未知证据', async () => {

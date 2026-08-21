@@ -41,7 +41,7 @@ test('板块前瞻只路由到独立端点且不占用军师资源池', () => {
   const advisor = endpointsForRole(config, 'advisor')
 
   assert.equal(sector.length, 1)
-  assert.equal(sector[0].id, 'sector-dedicated')
+  assert.equal(sector[0].id, 'sector-1')
   assert.equal(sector[0].models.sector, 'sector-deep')
   assert.equal(
     advisor.some((endpoint) =>
@@ -76,7 +76,7 @@ test('旧版资源池中的sector模型可迁移为独立端点', () => {
 })
 
 test('模型配置页提供板块前瞻专用端点', () => {
-  assert.match(frontend, /板块前瞻专用端点/)
-  assert.match(frontend, /sectorEndpoint/)
-  assert.match(frontend, /target:\s*'sector'/)
+  assert.match(frontend, /sector:\s*\{[^}]*label:\s*'板块前瞻'/)
+  assert.match(frontend, /roleEndpoints/)
+  assert.match(frontend, /role,\s*\n\s*slot:\s*index \+ 1/)
 })

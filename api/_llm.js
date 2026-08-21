@@ -5,7 +5,13 @@
 
 import { applyCors } from './_lib.js';
 import { currentConfig } from './_llm_config.js';
-import { markEndpointUnusable, markSuccess, modelForEndpoint, poolFetch } from './_llm_pool.js';
+import {
+  endpointsForRole,
+  markEndpointUnusable,
+  markSuccess,
+  modelForEndpoint,
+  poolFetch,
+} from './_llm_pool.js';
 
 // ---- 环境读取 ----
 // 优先用运行时配置（前端「AI 模型配置」写入 OSS，经 ensureConfig 预热到同步缓存）；
@@ -17,7 +23,10 @@ export function llmEnv() {
     KEY: c.apiKey || process.env.LLM_API_KEY,
   };
 }
-export function llmReady() {
+export function llmReady(role) {
+  if (role) {
+    return endpointsForRole(currentConfig(), role).length > 0;
+  }
   const { BASE, KEY } = llmEnv();
   return !!(BASE && KEY);
 }

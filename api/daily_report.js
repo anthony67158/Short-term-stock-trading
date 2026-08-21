@@ -8,7 +8,12 @@ import {
   dailyReportCacheKey,
   isCompleteDailyReport,
 } from './_daily_summary.js';
-import { llmEnv, makeSSE, callChat, parseLLMJson } from './_llm.js';
+import {
+  llmReady,
+  makeSSE,
+  callChat,
+  parseLLMJson,
+} from './_llm.js';
 import { ensureConfig, getModel, getReasoning } from './_llm_config.js';
 import {
   buildSearchReference,
@@ -53,7 +58,7 @@ export function buildDailyReportSearchPlan({
   };
 }
 
-// 日报模型改为运行时读取；原独立 daily 角色已移除，复用 agent 模型，见 handler 内 getModel('agent')
+// 策略日报使用独立 daily 角色端点，不与智能体助手争抢连接。
 
 // 板块清单（全市场覆盖）→ 每个用关键词做定向新闻检索
 const SECTORS = [
@@ -77,9 +82,8 @@ export default async function handler(req, res) {
   }
   await ensureConfig();               // 预热运行时配置（前端可改 Base/Key/模型）
   const aiSearchConfig = await ensureAiSearchConfig();
-  const MODEL = getModel('agent');    // 策略日报复用「智能体」模型(原独立 daily 角色已移除)
-  const REASONING = getReasoning('agent');
-  const { BASE, KEY } = llmEnv();
+  const MODEL = getModel('daily');
+  const REASONING = getReasoning('daily');
   const streaming = true; // 本接口一律 SSE
 
   const { emit, phase, stopHeartbeat } = makeSSE(res); // makeSSE 内已统一应用 CORS
@@ -128,7 +132,13 @@ export default async function handler(req, res) {
       } catch { /* 无缓存继续生成 */ }
     }
 
-    if (!BASE || !KEY) { emit('result', { ok: false, error: 'LLM 未配置' }); return endOnce(); }
+    if (!llmReady('daily')) {
+      emit('result', {
+        ok: false,
+        error: 'daily 角色端点未配置',
+      });
+      return endOnce();
+    }
 
     // 2) 并行抓全市场数据
     phase(
@@ -237,7 +247,7 @@ export default async function handler(req, res) {
     const callLLM = async (userPrompt, maxTokens) => {
       const { resp, done } = await callChat({
         model: MODEL,
-        role: 'agent',   // 策略日报复用 agent 角色 → 端点级模型解析走 agent
+        role: 'daily',
         messages: [{ role: 'system', content: SYS }, { role: 'user', content: userPrompt }],
         temperature: 0.4,
         maxTokens,

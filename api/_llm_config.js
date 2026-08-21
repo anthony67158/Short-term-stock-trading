@@ -1,9 +1,9 @@
 // ============ LLM 运行时配置层（OSS 持久化 + 环境变量回退）============
-// 目的：让前端「AI 模型配置」入口能在线修改 Base URL / API Key / 各角色模型，
-// 改完即时对全系统生效（对话、操盘军师、智能体、每日日报），无需重新部署。
+// 目的：让前端「AI 角色端点」入口能在线修改每个角色自己的 Base URL / API Key / 模型，
+// 改完即时对全系统生效，无需重新部署。
 //
 // 存储：OSS 对象 config/llm.json（复用 _blob.js，与账号数据同桶）。
-//   { baseUrl, apiKey, models:{chat,advisor,agent}, updatedAt }
+//   { roleEndpoints:{chat,advisor,portfolio,agent,daily,sector,judge}, updatedAt }
 // 读取优先级：OSS 配置 > 环境变量 > 内置默认。
 //
 // 关键约束：
@@ -17,16 +17,27 @@ import { assertSafeRemoteUrl } from './_safe_remote_url.js';
 const KEY_PATH = 'config/llm.json';
 const hasOwn = (obj, key) => !!obj && Object.prototype.hasOwnProperty.call(obj, key);
 
-// 三个 AI 角色 → 各自的环境变量名与内置默认（与改造前 handler 里的默认保持一致）
-// 注：已移除的功能(如「每日复盘日报」)不再单列模型角色；策略日报复用 agent 模型。
+// 所有生成式 AI 能力均有独立角色；advisor 固定两个槽位，其余角色各一个。
+// 环境变量与旧版主端点/资源池仅用于首次迁移，保存后运行时严格按角色隔离。
 export const ROLES = {
   chat:    { envs: ['LLM_MODEL'],     def: 'DeepSeek-V3.2-Pro', label: '对话/盘面分析' },
-  advisor: { envs: ['ADVISOR_MODEL'], def: 'DeepSeek-V4-Pro',   label: '操盘军师(深度研判)' },
+  advisor: { envs: ['ADVISOR_MODEL'], def: 'DeepSeek-V4-Pro',   label: '一次性生成军师' },
   portfolio: { envs: ['PORTFOLIO_MODEL'], def: 'DeepSeek-V4-Pro', label: '持仓分布分析' },
-  agent:   { envs: ['AGENT_MODEL'],   def: 'Qwen3-Max-A',       label: '智能体/策略日报(需函数调用)' },
+  agent:   { envs: ['AGENT_MODEL'],   def: 'Qwen3-Max-A',       label: '智能体助手(需函数调用)' },
+  daily:   { envs: ['DAILY_MODEL', 'AGENT_MODEL'], def: 'Qwen3-Max-A', label: '策略日报' },
   sector:  { envs: ['SECTOR_MODEL'],  def: 'gpt-5.6-terra',     label: '板块前瞻' },
   judge:   { envs: ['JUDGE_MODEL'],   def: 'gemini-2.5-flash',  label: '交易时机判定(确认闸门)' },
 };
+
+export const ROLE_ENDPOINT_SLOTS = Object.freeze({
+  chat: 1,
+  advisor: 2,
+  portfolio: 1,
+  agent: 1,
+  daily: 1,
+  sector: 1,
+  judge: 1,
+});
 
 // ---- 从环境变量拼出基线配置（OSS 无配置时的回退）----
 function envConfig() {
@@ -95,9 +106,50 @@ function normalizeSectorEndpoint(raw, source = 'dedicated') {
   };
 }
 
+function normalizeRoleEndpoint(
+  raw,
+  role,
+  index = 0,
+  source = 'dedicated',
+) {
+  if (!raw || typeof raw !== 'object') return null;
+  return {
+    id: `${role}-${index + 1}`,
+    role,
+    slot: index + 1,
+    baseUrl: String(raw.baseUrl || '').replace(/\/+$/, ''),
+    apiKey: String(raw.apiKey || ''),
+    model: String(raw.model || raw.models?.[role] || ''),
+    reasoning: !!(
+      raw.reasoning === true
+      || raw.reasoning?.[role] === true
+    ),
+    enabled: raw.enabled !== false,
+    source: raw.source || source,
+  };
+}
+
+function explicitRoleEndpoints(config, role) {
+  if (
+    !config?.roleEndpoints
+    || !hasOwn(config.roleEndpoints, role)
+  ) return null;
+  const raw = Array.isArray(config.roleEndpoints[role])
+    ? config.roleEndpoints[role]
+    : [config.roleEndpoints[role]];
+  return raw
+    .slice(0, ROLE_ENDPOINT_SLOTS[role] || 1)
+    .map((endpoint, index) =>
+      normalizeRoleEndpoint(endpoint, role, index)
+    )
+    .filter(Boolean);
+}
+
 // 兼容旧配置：优先迁移附加端点里的 models.judge，其次迁移主端点 judge 模型。
 // 一旦显式保存 judgeEndpoint（包括 enabled:false），就绝不再回退通用池。
 export function resolveJudgeEndpoint(config = {}) {
+  const explicit = explicitRoleEndpoints(config, 'judge');
+  if (explicit) return explicit[0] || null;
   if (hasOwn(config, 'judgeEndpoint')) {
     return normalizeJudgeEndpoint(config.judgeEndpoint, config.judgeEndpoint?.source || 'dedicated');
   }
@@ -126,6 +178,8 @@ export function resolveJudgeEndpoint(config = {}) {
 }
 
 export function resolveSectorEndpoint(config = {}) {
+  const explicit = explicitRoleEndpoints(config, 'sector');
+  if (explicit) return explicit[0] || null;
   if (hasOwn(config, 'sectorEndpoint')) {
     return normalizeSectorEndpoint(
       config.sectorEndpoint,
@@ -160,6 +214,87 @@ export function resolveSectorEndpoint(config = {}) {
   return null;
 }
 
+export function resolveRoleEndpoints(config = {}, role) {
+  if (!ROLES[role]) return [];
+  const explicit = explicitRoleEndpoints(config, role);
+  if (explicit) return explicit;
+  if (role === 'judge') {
+    const endpoint = resolveJudgeEndpoint(config);
+    return endpoint
+      ? [normalizeRoleEndpoint(endpoint, role, 0, endpoint.source)]
+      : [];
+  }
+  if (role === 'sector') {
+    const endpoint = resolveSectorEndpoint(config);
+    return endpoint
+      ? [normalizeRoleEndpoint(endpoint, role, 0, endpoint.source)]
+      : [];
+  }
+
+  const modelRole = role === 'daily' ? 'agent' : role;
+  const model = config.models?.[role]
+    || config.models?.[modelRole]
+    || ROLES[role].def;
+  const reasoning = config.reasoning?.[role]
+    ?? config.reasoning?.[modelRole]
+    ?? false;
+  const candidates = [];
+  if (config.baseUrl && config.apiKey) {
+    candidates.push(normalizeRoleEndpoint({
+      baseUrl: config.baseUrl,
+      apiKey: config.apiKey,
+      model,
+      reasoning,
+      enabled: true,
+    }, role, 0, 'legacy-main'));
+  }
+  for (const endpoint of (config.endpoints || [])) {
+    if (
+      endpoint?.enabled === false
+      || !endpoint?.baseUrl
+      || !endpoint?.apiKey
+      || !endpoint?.models?.[modelRole]
+    ) continue;
+    candidates.push(normalizeRoleEndpoint({
+      ...endpoint,
+      model: endpoint.models[modelRole],
+      reasoning: endpoint.reasoning?.[modelRole] === true,
+    }, role, candidates.length, 'legacy-pool'));
+  }
+  return candidates
+    .filter(Boolean)
+    .slice(0, ROLE_ENDPOINT_SLOTS[role] || 1)
+    .map((endpoint, index) => ({
+      ...endpoint,
+      id: `${role}-${index + 1}`,
+      slot: index + 1,
+    }));
+}
+
+export function roleEndpointSlots(config = {}, role) {
+  if (!ROLES[role]) return [];
+  const resolved = resolveRoleEndpoints(config, role);
+  return Array.from(
+    { length: ROLE_ENDPOINT_SLOTS[role] || 1 },
+    (_, index) => {
+      const endpoint = resolved[index];
+      if (endpoint) {
+        return normalizeRoleEndpoint(
+          endpoint,
+          role,
+          index,
+          endpoint.source,
+        );
+      }
+      return normalizeRoleEndpoint({
+        model: ROLES[role].def,
+        reasoning: role === 'sector',
+        enabled: false,
+      }, role, index, 'unconfigured');
+    },
+  );
+}
+
 // 合并：OSS 覆盖 env，缺项回退 env/默认
 function merge(base, over) {
   if (!over) return base;
@@ -173,7 +308,7 @@ function merge(base, over) {
   }
   // endpoints:多端点资源池。OSS 里存了(即使空数组)则以其为准;未存则保留 base(env 默认空)。
   const endpoints = Array.isArray(over.endpoints) ? over.endpoints : (base.endpoints || []);
-  const merged = {
+  const merged = /** @type {any} */ ({
     baseUrl: over.baseUrl || base.baseUrl,
     apiKey: over.apiKey || base.apiKey,   // OSS 里没存 key 时保留 env key
     models,
@@ -185,7 +320,30 @@ function merge(base, over) {
     ),
     source: over.__stored ? 'oss' : base.source,
     updatedAt: over.updatedAt || base.updatedAt,
-  };
+  });
+  if (hasOwn(over, 'roleEndpoints')) {
+    merged.roleEndpoints = {};
+    for (const role of Object.keys(ROLES)) {
+      const previous = roleEndpointSlots(base, role);
+      const incoming = Array.isArray(over.roleEndpoints?.[role])
+        ? over.roleEndpoints[role]
+        : [];
+      merged.roleEndpoints[role] = Array.from({
+        length: ROLE_ENDPOINT_SLOTS[role],
+      }, (_, index) => {
+        const prior = previous[index] || {};
+        const next = incoming[index];
+        if (!next || typeof next !== 'object') return prior;
+        return normalizeRoleEndpoint({
+          ...prior,
+          ...next,
+          apiKey: next.apiKey || prior.apiKey || '',
+        }, role, index, next.source || prior.source || 'dedicated');
+      });
+    }
+  } else if (hasOwn(base, 'roleEndpoints')) {
+    merged.roleEndpoints = base.roleEndpoints;
+  }
   if (hasOwn(over, 'judgeEndpoint')) {
     const previous = resolveJudgeEndpoint(base) || {};
     const incoming = over.judgeEndpoint && typeof over.judgeEndpoint === 'object' ? over.judgeEndpoint : {};
@@ -226,6 +384,9 @@ export async function assertSafeLlmConfig(config = {}) {
     ...(Array.isArray(config.endpoints)
       ? config.endpoints.map((endpoint) => endpoint?.baseUrl)
       : []),
+    ...Object.values(config.roleEndpoints || {})
+      .flat()
+      .map((endpoint) => endpoint?.baseUrl),
   ].filter(Boolean);
   await Promise.all(candidates.map((value) => assertSafeRemoteUrl(value)));
   return config;
@@ -258,6 +419,14 @@ export function currentConfig() {
 // ---- 同步取某角色模型 ----
 export function getModel(role) {
   const c = currentConfig();
+  const dedicated = resolveRoleEndpoints(c, role)
+    .find((endpoint) =>
+      endpoint.enabled !== false
+      && endpoint.baseUrl
+      && endpoint.apiKey
+      && endpoint.model
+    );
+  if (dedicated) return dedicated.model;
   if (role === 'judge') {
     const endpoint = resolveJudgeEndpoint(c);
     return endpoint && endpoint.enabled !== false && endpoint.baseUrl && endpoint.apiKey
@@ -276,6 +445,16 @@ export function getModel(role) {
 // ---- 同步取某角色是否开启深度思考(reasoning) ----
 export function getReasoning(role) {
   const c = currentConfig();
+  const dedicated = resolveRoleEndpoints(c, role)
+    .filter((endpoint) =>
+      endpoint.enabled !== false
+      && endpoint.baseUrl
+      && endpoint.apiKey
+      && endpoint.model
+    );
+  if (dedicated.length) {
+    return dedicated.some((endpoint) => endpoint.reasoning);
+  }
   if (role === 'judge') {
     const endpoint = resolveJudgeEndpoint(c);
     return !!(endpoint && endpoint.enabled !== false && endpoint.reasoning);
@@ -301,6 +480,12 @@ export async function saveConfig(patch = {}) {
     primaryMaxInflight: cur.primaryMaxInflight || 2,
     judgeEndpoint: resolveJudgeEndpoint(cur),
     sectorEndpoint: resolveSectorEndpoint(cur),
+    roleEndpoints: Object.fromEntries(
+      Object.keys(ROLES).map((role) => [
+        role,
+        roleEndpointSlots(cur, role),
+      ]),
+    ),
     updatedAt: Date.now(),
   };
   if (patch.models) for (const role of Object.keys(ROLES)) {
@@ -314,6 +499,41 @@ export async function saveConfig(patch = {}) {
       1,
       Math.min(20, Number(patch.primaryMaxInflight) || 2),
     );
+  }
+  if (patch.roleEndpoints && typeof patch.roleEndpoints === 'object') {
+    for (const role of Object.keys(ROLES)) {
+      const previous = roleEndpointSlots(cur, role);
+      const incoming = Array.isArray(patch.roleEndpoints[role])
+        ? patch.roleEndpoints[role]
+        : [];
+      next.roleEndpoints[role] = Array.from({
+        length: ROLE_ENDPOINT_SLOTS[role],
+      }, (_, index) => {
+        const prior = previous[index] || {};
+        const value = incoming[index] || {};
+        const apiKey = (
+          value.apiKey != null
+          && value.apiKey !== ''
+          && !/\*/.test(String(value.apiKey))
+        )
+          ? String(value.apiKey)
+          : (prior.apiKey || '');
+        return normalizeRoleEndpoint({
+          ...prior,
+          ...value,
+          apiKey,
+          model: value.model || prior.model || ROLES[role].def,
+        }, role, index, 'dedicated');
+      });
+    }
+    for (const [role, endpoints] of Object.entries(next.roleEndpoints)) {
+      const primary = endpoints.find((endpoint) =>
+        endpoint.enabled !== false && endpoint.model
+      ) || endpoints[0];
+      if (!primary) continue;
+      next.models[role] = primary.model || next.models[role];
+      next.reasoning[role] = !!primary.reasoning;
+    }
   }
   if (hasOwn(patch, 'judgeEndpoint')) {
     const previous = resolveJudgeEndpoint(cur) || {};
@@ -406,6 +626,23 @@ export function publicView() {
     models: c.models,
     reasoning: c.reasoning || {},
     primaryMaxInflight: c.primaryMaxInflight || 2,
+    roleEndpoints: Object.fromEntries(
+      Object.keys(ROLES).map((role) => [
+        role,
+        roleEndpointSlots(c, role).map((endpoint) => ({
+          id: endpoint.id,
+          role,
+          slot: endpoint.slot,
+          baseUrl: endpoint.baseUrl,
+          apiKeyMask: maskKey(endpoint.apiKey),
+          hasKey: !!endpoint.apiKey,
+          model: endpoint.model,
+          reasoning: !!endpoint.reasoning,
+          enabled: endpoint.enabled !== false,
+          source: endpoint.source,
+        })),
+      ]),
+    ),
     judgeEndpoint: (() => {
       const endpoint = resolveJudgeEndpoint(c);
       if (!endpoint) return null;

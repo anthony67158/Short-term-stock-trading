@@ -5,37 +5,24 @@ import { ROLES } from '../api/_llm_config.js'
 import {
   endpointsForRole,
   pickEndpoint,
-  resetPoolHealthForTests,
-  markStart,
 } from '../api/_llm_pool.js'
 
 const config = {
-  baseUrl: 'https://main.example/v1',
-  apiKey: 'main-key',
-  models: {
-    portfolio: 'portfolio-main',
-  },
-  reasoning: {
-    portfolio: true,
-  },
-  primaryMaxInflight: 2,
-  endpoints: [
-    {
-      id: 'backup-a',
-      baseUrl: 'https://backup-a.example/v1',
-      apiKey: 'backup-a-key',
-      models: { portfolio: 'portfolio-a' },
-      weight: 2,
+  roleEndpoints: {
+    portfolio: [{
+      baseUrl: 'https://portfolio.example/v1',
+      apiKey: 'portfolio-key',
+      model: 'portfolio-model',
+      reasoning: true,
       enabled: true,
-    },
-    {
-      id: 'backup-no-role',
-      baseUrl: 'https://backup-b.example/v1',
-      apiKey: 'backup-b-key',
-      models: { advisor: 'advisor-b' },
+    }],
+    advisor: [{
+      baseUrl: 'https://advisor.example/v1',
+      apiKey: 'advisor-key',
+      model: 'advisor-model',
       enabled: true,
-    },
-  ],
+    }],
+  },
 }
 
 test('LLM配置公开持仓分布分析专用角色', () => {
@@ -46,19 +33,23 @@ test('LLM配置公开持仓分布分析专用角色', () => {
   })
 })
 
-test('持仓分析只路由到配置了portfolio模型的端点', () => {
+test('持仓分析只路由到portfolio独立端点', () => {
   const endpoints = endpointsForRole(config, 'portfolio')
   assert.deepEqual(
     endpoints.map((endpoint) => endpoint.id),
-    ['default', 'backup-a'],
+    ['portfolio-1'],
+  )
+  assert.equal(endpoints[0].baseUrl, 'https://portfolio.example/v1')
+  assert.equal(
+    endpoints.some((endpoint) =>
+      endpoint.baseUrl === 'https://advisor.example/v1'),
+    false,
   )
 })
 
-test('主端点未达并发阈值时优先，达到阈值后自动分流备用端点', () => {
-  resetPoolHealthForTests()
-  assert.equal(pickEndpoint(config, 1000, 'portfolio').id, 'default')
-  markStart('default')
-  assert.equal(pickEndpoint(config, 1000, 'portfolio').id, 'default')
-  markStart('default')
-  assert.equal(pickEndpoint(config, 1000, 'portfolio').id, 'backup-a')
+test('持仓分析选路不会跨到其他角色端点', () => {
+  assert.equal(
+    pickEndpoint(config, 1000, 'portfolio').id,
+    'portfolio-1',
+  )
 })

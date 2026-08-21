@@ -823,10 +823,14 @@ test('持仓总览将做T收入收进可展开的今日操作盈亏', () => {
   assert.match(precision, /\.operation-pnl-detail/)
 })
 
-test('模型配置改为单列选择并给复杂表单足够宽度', () => {
+test('模型配置为角色端点网格提供足够宽度', () => {
   assert.match(
     precision,
-    /\.llm-cfg\s*{[^}]*width:\s*min\(720px,/s,
+    /\.llm-cfg\s*{[^}]*width:\s*min\(960px,/s,
+  )
+  assert.match(
+    precision,
+    /\.llm-role-endpoints\.dual\s*{[^}]*grid-template-columns:\s*repeat\(2,/s,
   )
   assert.match(
     precision,

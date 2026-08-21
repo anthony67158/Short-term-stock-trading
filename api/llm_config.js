@@ -10,7 +10,7 @@
 import { applyCors, preflight } from './_lib.js';
 import {
   ensureConfig, currentConfig, saveConfig, publicView, resolveJudgeEndpoint,
-  resolveSectorEndpoint, ROLES,
+  resolveRoleEndpoints, resolveSectorEndpoint, ROLE_ENDPOINT_SLOTS, ROLES,
 } from './_llm_config.js';
 import {
   poolStatus,
@@ -29,6 +29,46 @@ export const MODEL_TEST_TIMEOUT_MS = 120000;
 const normalizeBaseUrl = (value) => String(value || '').trim().replace(/\/+$/, '');
 
 export function resolveLlmConfigTarget(config = {}, body = {}) {
+  const role = String(body.role || '').trim();
+  if (role) {
+    if (!ROLES[role]) {
+      return {
+        endpointId: '',
+        baseUrl: normalizeBaseUrl(body.baseUrl),
+        apiKey: '',
+        error: '指定角色不存在',
+      };
+    }
+    const requestedSlot = Number(body.slot ?? 1);
+    const roleSlot = Number.isInteger(requestedSlot)
+      ? requestedSlot
+      : 0;
+    if (
+      roleSlot < 1
+      || roleSlot > (ROLE_ENDPOINT_SLOTS[role] || 0)
+    ) {
+      return {
+        endpointId: `${role}-${body.slot ?? ''}`,
+        baseUrl: normalizeBaseUrl(body.baseUrl),
+        apiKey: '',
+        error: '指定角色槽位不存在',
+      };
+    }
+    const stored = resolveRoleEndpoints(config, role)[roleSlot - 1] || null;
+    const endpointId = `${role}-${roleSlot}`;
+    const storedBase = normalizeBaseUrl(stored?.baseUrl);
+    const requestedBase = normalizeBaseUrl(body.baseUrl);
+    const providedKey = body.apiKey && !/\*/.test(String(body.apiKey))
+      ? String(body.apiKey).trim()
+      : '';
+    const canReuseStoredKey = !requestedBase || requestedBase === storedBase;
+    return {
+      endpointId,
+      baseUrl: requestedBase || storedBase,
+      apiKey: providedKey
+        || (canReuseStoredKey ? String(stored?.apiKey || '') : ''),
+    };
+  }
   const endpointId = String(
     body.endpointId
     || (body.target === 'judge'
@@ -144,15 +184,11 @@ export default async function handler(req, res) {
 
     if (action === 'get') {
       const config = currentConfig();
-      const roles = Object.fromEntries(
-        Object.entries(ROLES).filter(([role]) =>
-          !['judge', 'sector'].includes(role)
-        ),
-      );
       return res.status(200).send(JSON.stringify({
         ok: true,
         config: publicView(),
-        roles,
+        roles: ROLES,
+        roleSlots: ROLE_ENDPOINT_SLOTS,
         judgeRole: ROLES.judge,
         sectorRole: ROLES.sector,
         pool: poolStatus(config),
@@ -214,6 +250,7 @@ export default async function handler(req, res) {
         reasoning: body && body.reasoning,
         primaryMaxInflight: body && body.primaryMaxInflight,
         endpoints: body && body.endpoints,   // 多端点资源池(整组替换;掩码 key 不覆盖旧值)
+        roleEndpoints: body && body.roleEndpoints,
       };
       if (body && Object.prototype.hasOwnProperty.call(body, 'judgeEndpoint')) {
         patch.judgeEndpoint = body.judgeEndpoint;

@@ -1,17 +1,16 @@
-// ============ LLM 端点资源池(可选多 Base URL/Key + 路由 + 熔断 + 故障转移)============
-// 为什么存在(直接回应"3 路并发是否要 3 个 Base URL/Key/模型实例"):
-//   · callChat 每次都用【独立 messages + 独立 fetch】,是无状态 HTTP → 3 并发不会串上下文、不需要 3 个模型实例。
-//   · 一个 Key 通常够 3 并发;唯一风险是 429 限流(非正确性问题)。所以本池是【可选冗余】:
-//     - 不配 endpoints → 退化为单 { baseUrl, apiKey }(现状,完全向后兼容);
-//     - 配了多个 endpoints → 提供路由(轮询/最少在途)+ 连续失败熔断冷却 + 自动恢复,提升并发下的稳定性。
-//   · 每个"请求上下文"天然隔离(各自 messages/AbortController/timeout),池只负责"这次请求用哪个端点连"。
+// ============ LLM 角色端点路由（角色隔离 + 熔断 + 故障转移）============
+// 新配置按角色保存固定槽位：advisor 两路，其余角色一路。请求只能进入自身角色槽位；
+// advisor 两路按最少在途选择，并在网络错误/5xx/429 后切换备用端点。
+// 旧 baseUrl/endpoints 结构只在迁移期读取，保存新配置后不再跨角色共享。
 //
 // endpoint 形态:{ id, baseUrl, apiKey, weight?, enabled? }
 // 运行时健康态(内存,进程级):{ inflight, fails, cooldownUntil }
 //   连续失败达阈值 → 熔断冷却 COOLDOWN_MS;冷却到期自动半开重试(一次成功即清零恢复)。
 
 import {
+  ROLES,
   resolveJudgeEndpoint,
+  resolveRoleEndpoints,
   resolveSectorEndpoint,
 } from './_llm_config.js';
 
@@ -25,7 +24,7 @@ function h(id) {
   return s;
 }
 
-// 从运行时配置解析端点列表。config 来自 _llm_config.currentConfig()。
+// 从旧版运行时配置解析端点列表。config 来自 _llm_config.currentConfig()。
 //   主端点(step-1 的 baseUrl/apiKey)始终作为 id 'default' 的一等成员参与池路由;
 //   config.endpoints[] 里的附加端点在其后追加(按 enabled 过滤、按 id 去重)。
 //   每个端点携带自己的 models:{chat,advisor,agent}——不同网关同一角色可能是不同模型名。
@@ -81,6 +80,7 @@ export function modelForEndpoint(config, ep, role, fallback) {
 export function endpointServesRole(ep, role) {
   if (!ep) return false;
   if (!role) return true;
+  if (ep.role) return ep.role === role;
   if (role === 'judge') return ep.id === 'judge-dedicated';
   if (role === 'sector') return ep.id === 'sector-dedicated';
   if (ep.id === 'default') return true;
@@ -88,6 +88,33 @@ export function endpointServesRole(ep, role) {
 }
 
 export function endpointsForRole(config, role) {
+  if (role) {
+    const dedicated = resolveRoleEndpoints(config, role)
+      .filter((endpoint) =>
+        endpoint
+        && endpoint.enabled !== false
+        && endpoint.baseUrl
+        && endpoint.apiKey
+        && endpoint.model
+      )
+      .map((endpoint, index) => ({
+        id: endpoint.id || `${role}-${index + 1}`,
+        role,
+        slot: endpoint.slot || index + 1,
+        baseUrl: endpoint.baseUrl,
+        apiKey: endpoint.apiKey,
+        weight: 1,
+        models: { [role]: endpoint.model },
+        reasoning: { [role]: !!endpoint.reasoning },
+      }));
+    if (
+      dedicated.length
+      || Object.prototype.hasOwnProperty.call(
+        config?.roleEndpoints || {},
+        role,
+      )
+    ) return dedicated;
+  }
   if (role === 'judge') {
     const judge = resolveJudgeEndpoint(config);
     if (!judge || judge.enabled === false || !judge.baseUrl || !judge.apiKey || !judge.model) return [];
@@ -118,13 +145,12 @@ export function endpointsForRole(config, role) {
   return served.length ? served : all;
 }
 
-// 承接某角色的【可用端点数】——用作「AI 操作建议」并发上限的权威来源:
-//   系统并行生成的最大数量 = 用户为该角色配置的端点数(完全一致)。
-//   role 传入时只数承接该角色的端点(附加端点须自带该角色模型;主端点始终算);
-//   一个端点都没配(理论上主端点缺 base/key)→ 至少返回 1,避免并发上限为 0 导致完全不生成。
+// 承接某角色的【可用端点数】。advisor 的数量是一次性生成并发上限的权威来源。
+// 通用生成角色保留最小 1，避免任务调度器因配置缺失进入零并发死锁；
+// 真正调用前仍由 llmReady(role)/poolFetch 拒绝无可用端点的请求。
 export function endpointCountForRole(config, role) {
   const eps = endpointsForRole(config, role);
-  if (role === 'judge') return eps.length;
+  if (['judge', 'sector'].includes(role)) return eps.length;
   return Math.max(1, eps.length);
 }
 
@@ -267,10 +293,13 @@ export async function poolFetch(config, path, {
 
 // 池健康快照(供 /api/llm_config 的 pool 视图 / 监控)——绝不含明文 Key。
 export function poolStatus(config, now = Date.now()) {
-  return endpointsFrom(config).map((e) => {
+  const endpoints = Object.keys(ROLES)
+    .flatMap((role) => endpointsForRole(config, role));
+  return endpoints.map((e) => {
     const s = h(e.id);
     return {
-      id: e.id, baseUrl: e.baseUrl, weight: e.weight,
+      id: e.id, role: e.role || '', slot: e.slot || null,
+      baseUrl: e.baseUrl, weight: e.weight,
       inflight: s.inflight, fails: s.fails,
       cooling: s.cooldownUntil > now, cooldownMsLeft: Math.max(0, s.cooldownUntil - now),
     };

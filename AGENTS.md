@@ -44,7 +44,7 @@
 ```
 api/                后端(下划线开头=共享模块,非独立路由)
   server.js 入口相关 ; _lib.js 行情多镜像容错 ; _ta.js 技术指标+量化调用
-  _llm.js LLM层 ; _llm_config.js 运行时配置(OSS+env+四角色) ; _llm_pool.js 端点池
+  _llm.js LLM层 ; _llm_config.js 运行时配置(OSS+env+七角色八槽位) ; _llm_pool.js 角色端点路由
   _confirm.js 两段式交易确认闸门 ; _ai_prompts.js 各模式prompt(含军师)
   _rag.js/_kb.js RAG ; _screen.js 选股 ; _blob.js OSS抽象 ; _portfolio.js 持仓计算
   _jobs.js 服务端任务表 ; ai.js 结构化AI ; agent.js 工具增强Agent
@@ -146,9 +146,9 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST "$FC/api/ai" -H "Content-Type: 
 
 ## 关键约定与坑
 
-- **五 AI 角色**（`_llm_config.js` ROLES）：`chat` / `advisor`(军师) / `portfolio`(持仓分布分析) / `agent`(FunctionCalling) / `judge`(确认闸门)。可各配不同网关与模型,配置存 OSS `config/llm.json`,优先级 **OSS > env > 默认**,改完即时生效免重部署。
-- **LLM 端点池**（`_llm_pool.js`）：多 Base URL/Key 路由(轮询/最少在途)+ 熔断(连续失败3次冷却60s)+ 自动半开恢复。附加端点必须自带该角色模型才承接该角色。
-- **板块前瞻专用端点**：`sector` 使用独立 Base URL/Key/模型配置，不得回退或占用军师 `advisor` 通用资源池；配置存 OSS `config/llm.json` 并支持在线验证。
+- **七个 LLM 角色、八个固定槽位**（`_llm_config.js`）：`chat` / `advisor` / `portfolio` / `agent` / `daily` / `sector` / `judge`。除一次性生成军师 `advisor` 固定两路外，其余角色各一路；配置存 OSS `config/llm.json` 的 `roleEndpoints`，优先级 **OSS > env > 默认**，改完即时生效免重部署。
+- **角色端点严格隔离**（`_llm_pool.js`）：请求只能进入本角色槽位，禁止跨角色回退；`advisor` 两路按最少在途调度，连续失败 3 次冷却 60 秒并自动半开恢复。旧 `baseUrl` / `endpoints` / `judgeEndpoint` / `sectorEndpoint` 只允许迁移读取，不得作为新功能配置入口。
+- **策略日报与板块前瞻独立**：`daily` 不得复用 `agent`，`sector` 不得复用或占用 `advisor`；每个槽位独立配置 Base URL、Key、模型、深度思考、启停与在线验证。
 - **批量建议增量持久化**：每只股票生成完成后先写入账号 `runtime/advice/<code>.json` 小对象，任务运行态写 `runtime/state.json`；禁止每只完成都重写整份账号快照。整批收尾再压实 `current.json`，其他设备通过增量同步立即看到单股结果。
 - **板块前瞻读取性能**：首屏统一使用 `bootstrap` 聚合快照、设置、任务与历史摘要；历史列表读取 `history-index.json`，不得在每次进入页面时扫描并下载全部历史快照。
 - **豆包联网检索**（`_ai_search.js` / `_ai_search_config.js`）：仅调用豆包搜索 Global版，运行时开关、API Key 名称和 Key 保存在 OSS `config/doubao-search.json`，环境变量 `DOUBAO_SEARCH_*` 仅作回退。开启后军师的个股信息与行业资讯均以豆包为正式检索源，助手、策略日报统一增加“检索参考”；关闭后禁止调用与展示。军师个股检索每轮最多一次；行业优先复用240分钟缓存，缺失时每轮最多补一次；个股缓存30分钟、失败冷却15分钟，自动复核/Judge只读缓存；同键并发请求单飞合并。搜索摘要是待核验外部证据，不能替代公告、行情、资金或龙虎榜。
