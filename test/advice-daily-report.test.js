@@ -17,6 +17,9 @@ import {
   dailyReportCacheKey,
   isCompleteDailyReport,
 } from '../api/_daily_summary.js'
+import {
+  dailyReportAccountNick,
+} from '../api/daily_report.js'
 
 const NOW = Date.parse('2026-08-12T02:30:00.000Z')
 const SUMMARY = {
@@ -27,6 +30,21 @@ const SUMMARY = {
   searchEnabled: true,
   searchConfigUpdatedAt: 100,
 }
+
+test('可信Worker必须显式传入账号作用域生成策略日报', () => {
+  assert.equal(dailyReportAccountNick(
+    { trusted: true, account: null },
+    { accountNick: '测试账号' },
+  ), '测试账号')
+  assert.equal(dailyReportAccountNick(
+    { trusted: false, account: { nick: '登录账号' } },
+    { accountNick: '伪造账号' },
+  ), '登录账号')
+  assert.equal(dailyReportAccountNick(
+    { trusted: true, account: null },
+    {},
+  ), '')
+})
 
 test('当天已有策略日报时直接复用且不重复生成', async () => {
   let generated = 0

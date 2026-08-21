@@ -1106,10 +1106,10 @@ async function releaseDrainLock(nick, acc, myId, concurrency) {
   }
 }
 
-async function generateAdviceDailyReport(holdings) {
+async function generateAdviceDailyReport(nick, holdings) {
   return invokeSSE(dailyReportHandler, {
     method: 'POST',
-    body: { holdings },
+    body: { holdings, accountNick: nick },
     timeoutMs: 140000,
     trustedAccount: true,
   });
@@ -1166,6 +1166,7 @@ async function drainAccount(nick, initialAcc) {
       getSummary: () => getLatestDailySummary(nick),
       searchConfig: aiSearchConfig,
       generate: () => generateAdviceDailyReport(
+        nick,
         collectAdviceDailyReportHoldings(data),
       ),
     });

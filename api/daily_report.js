@@ -28,6 +28,15 @@ function autoSession() { const hm = bjMinutes(); if (hm < 690) return 'morning';
 const SESSION_CN = { morning: '盘前早报', noon: '午间午报', evening: '收盘晚报' };
 const DAILY_SEARCH_PLAN_VERSION = 2;
 
+export function dailyReportAccountNick(accountAuth, body = {}) {
+  if (accountAuth?.account?.nick) {
+    return String(accountAuth.account.nick).trim();
+  }
+  if (!accountAuth?.trusted) return '';
+  const nick = String(body?.accountNick || '').trim();
+  return nick && nick.length <= 80 ? nick : '';
+}
+
 export function buildDailyReportSearchPlan({
   day = '',
   session = 'morning',
@@ -88,7 +97,14 @@ export default async function handler(req, res) {
     const refresh = req.query.refresh === '1';
     const day = bjDayKey();
     const hasBlob = hasStorage();
-    const accountNick = accountAuth.account.nick;
+    const accountNick = dailyReportAccountNick(accountAuth, body);
+    if (!accountNick) {
+      emit('result', {
+        ok: false,
+        error: '策略日报缺少账号作用域',
+      });
+      return endOnce();
+    }
     const accountCacheKey = dailyReportCacheKey(day, session, accountNick);
 
     // 1) 命中缓存(同日同场次且非强制刷新)→ 直接返回
