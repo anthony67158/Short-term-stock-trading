@@ -57,6 +57,10 @@ const fcRuntimePackage = JSON.parse(readFileSync(
   new URL('../fc-runtime/package.json', import.meta.url),
   'utf8',
 ))
+const fcRuntimeLock = readFileSync(
+  new URL('../fc-runtime/package-lock.json', import.meta.url),
+  'utf8',
+)
 
 const weights = {
   contract: 0.2,
@@ -418,7 +422,15 @@ test('Harness接入npm命令、CI门禁与报告artifact', () => {
 
 test('FC最小运行包保留Harness离线与显式在线命令', () => {
   assert.match(buildFcPackage, /package-lock\.json/)
-  assert.match(buildFcPackage, /\['ci', '--omit=dev'/)
+  assert.match(buildFcPackage, /'ci'/)
+  assert.match(buildFcPackage, /'--omit=dev'/)
+  assert.match(
+    buildFcPackage,
+    /'--registry=https:\/\/registry\.npmjs\.org\/'/,
+  )
+  assert.match(buildFcPackage, /'--fetch-retries=5'/)
+  assert.doesNotMatch(fcRuntimeLock, /bnpm\.byted\.org/)
+  assert.match(fcRuntimeLock, /registry\.npmjs\.org/)
   assert.match(fcRuntimePackage.scripts.harness, /harness\/run\.mjs/)
   assert.match(fcRuntimePackage.scripts['harness:online'], /--online/)
   assert.match(fcRuntimePackage.scripts['harness:shadow'], /--online/)

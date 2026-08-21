@@ -35,7 +35,19 @@ cpSync(
   path.join(output, 'package-lock.json'),
 )
 
-execFileSync('npm', ['ci', '--omit=dev', '--no-audit', '--no-fund'], {
+const installArgs = [
+  'ci',
+  '--omit=dev',
+  '--no-audit',
+  '--no-fund',
+  '--prefer-offline',
+  '--registry=https://registry.npmjs.org/',
+  '--fetch-retries=5',
+  '--fetch-retry-mintimeout=10000',
+  '--fetch-retry-maxtimeout=120000',
+]
+
+execFileSync('npm', installArgs, {
   cwd: output,
   stdio: 'inherit',
 })
