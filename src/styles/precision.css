@@ -1960,6 +1960,28 @@ textarea:focus {
   scroll-snap-align: start;
 }
 
+.stock-group-tabs > .ind-tab.pinned .icon {
+  color: var(--color-warning);
+}
+
+.stock-group-tabs > .ind-tab.pinned.on {
+  border-color: color-mix(
+    in srgb,
+    var(--color-warning) 55%,
+    var(--color-rule)
+  );
+  background: color-mix(
+    in srgb,
+    var(--color-warning) 14%,
+    var(--color-paper-2)
+  );
+  color: var(--color-ink);
+}
+
+.stock-group-tabs > .ind-tab.pinned.on .icon {
+  color: var(--color-warning);
+}
+
 .batch-filter-stack {
   display: grid;
   flex: 1 0 100%;

@@ -147,17 +147,21 @@ export function selectBatchGroupCodes({
   holdings = [],
   watchlist = [],
   scope = 'all',
+  pinnedOnly = false,
   dimension = 'concept',
   group = ALL_GROUP,
   groups = null,
   tagMap = {},
   quoteMap = {},
 } = {}) {
-  const pool = scope === 'holding'
+  const scopedPool = scope === 'holding'
     ? holdings
     : scope === 'watchlist'
       ? watchlist
       : [...holdings, ...watchlist]
+  const pool = pinnedOnly
+    ? scopedPool.filter((item) => item?.star === true)
+    : scopedPool
   const selectedGroups = [...new Set(
     (Array.isArray(groups) ? groups : [group])
       .map(text)

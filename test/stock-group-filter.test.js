@@ -17,7 +17,7 @@ const holdings = [
 ]
 
 const watchlist = [
-  { code: '000001', name: '平安银行', industry: '银行' },
+  { code: '000001', name: '平安银行', industry: '银行', star: true },
   { code: '300750', name: '宁德时代', industry: '电池' },
 ]
 
@@ -147,6 +147,45 @@ test('一次性生成支持多选概念组并按股票代码合并去重', () =>
       scope: 'all',
       dimension: 'concept',
       groups: [],
+      tagMap,
+      quoteMap,
+    }),
+    [],
+  )
+})
+
+test('自选置顶可单独生成并继续与概念板块取交集', () => {
+  assert.deepEqual(
+    selectBatchGroupCodes({
+      holdings,
+      watchlist,
+      scope: 'watchlist',
+      pinnedOnly: true,
+      group: '全部',
+      tagMap,
+      quoteMap,
+    }),
+    ['000001'],
+  )
+  assert.deepEqual(
+    selectBatchGroupCodes({
+      holdings,
+      watchlist,
+      scope: 'watchlist',
+      pinnedOnly: true,
+      groups: ['跨境支付'],
+      tagMap,
+      quoteMap,
+    }),
+    ['000001'],
+  )
+  assert.deepEqual(
+    selectBatchGroupCodes({
+      holdings,
+      watchlist,
+      scope: 'watchlist',
+      pinnedOnly: true,
+      groups: ['固态电池'],
       tagMap,
       quoteMap,
     }),

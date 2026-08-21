@@ -1,3 +1,5 @@
+import Icon from './Icon'
+
 export default function StockGroupFilter({
   dimension = 'concept',
   onDimensionChange,
@@ -9,6 +11,7 @@ export default function StockGroupFilter({
   label = '筛选方式',
   compact = false,
   multiSelect = false,
+  pinnedOption = null,
 }) {
   const dimensionLabel = dimension === 'concept' ? '概念' : '行业'
   const activeNames = new Set(
@@ -37,12 +40,26 @@ export default function StockGroupFilter({
           <div className="ind-tabs stock-group-tabs" role="group" aria-label={`按${dimensionLabel}${multiSelect ? '多选' : '筛选'}股票`}>
             <button
               type="button"
-              className={'ind-tab' + (isActive('全部') ? ' on' : '')}
-              aria-pressed={isActive('全部')}
+              className={'ind-tab' + (
+                isActive('全部') && !pinnedOption?.active ? ' on' : ''
+              )}
+              aria-pressed={isActive('全部') && !pinnedOption?.active}
               onClick={() => onActiveChange?.('全部')}
             >
               全部 <span className="ind-tab-n">{total}</span>
             </button>
+            {pinnedOption && (
+              <button
+                type="button"
+                className={'ind-tab pinned' + (pinnedOption.active ? ' on' : '')}
+                aria-pressed={!!pinnedOption.active}
+                disabled={!pinnedOption.count}
+                onClick={() => pinnedOption.onChange?.()}
+              >
+                <Icon name="starFill" size={12} />
+                置顶 <span className="ind-tab-n">{pinnedOption.count}</span>
+              </button>
+            )}
             {groups.map((group) => (
               <button
                 type="button"

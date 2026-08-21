@@ -279,9 +279,11 @@ export default function PlanTab({ interval }) {
   const [selectMode, setSelectMode] = useState(false)
   const [selected, setSelected] = useState(() => new Set())
   const [batchScope, setBatchScope] = useState('all')
+  const [batchPinnedOnly, setBatchPinnedOnly] = useState(false)
   const [batchDimension, setBatchDimension] = useState('concept')
   const [batchGroup, setBatchGroup] = useState(() => [])
   const toggleSel = (code) => {
+    setBatchPinnedOnly(false)
     setBatchGroup([])
     setSelected((prev) => {
       const nx = new Set(prev); nx.has(code) ? nx.delete(code) : nx.add(code); return nx
@@ -295,6 +297,8 @@ export default function PlanTab({ interval }) {
     toggleSel,
     batchScope,
     setBatchScope,
+    batchPinnedOnly,
+    setBatchPinnedOnly,
     batchDimension,
     setBatchDimension,
     batchGroup,
@@ -1538,6 +1542,8 @@ function HoldingList({ book, quote, stockTags, searchConfig, batchSel }) {
     toggleSel,
     batchScope,
     setBatchScope,
+    batchPinnedOnly,
+    setBatchPinnedOnly,
     batchDimension,
     setBatchDimension,
     batchGroup,
@@ -1606,12 +1612,20 @@ function HoldingList({ book, quote, stockTags, searchConfig, batchSel }) {
   // 持仓 / 自选 去重代码集(同股多笔只算一只);用于全选/生成
   const holdCodes = [...new Set(sortedHolding.map((h) => h.code))]
   const watchCodes = [...new Set((book.plan || []).map((p) => p.code))]
+  const pinnedWatchCodes = [...new Set(
+    (book.plan || [])
+      .filter((item) => item.star === true)
+      .map((item) => item.code),
+  )]
   const allCodes = [...new Set([...holdCodes, ...watchCodes])]
+  const batchWatchlist = batchPinnedOnly
+    ? (book.plan || []).filter((item) => item.star === true)
+    : book.plan
   const batchPool = batchScope === 'holding'
     ? book.holding
     : batchScope === 'watchlist'
-      ? book.plan
-      : [...book.holding, ...book.plan]
+      ? batchWatchlist
+      : [...book.holding, ...batchWatchlist]
   const batchGroups = useMemo(() => buildStockGroups(batchPool, {
     dimension: batchDimension,
     tagMap: stockTags,
@@ -1621,6 +1635,7 @@ function HoldingList({ book, quote, stockTags, searchConfig, batchSel }) {
     holdings: book.holding,
     watchlist: book.plan,
     scope: batchScope,
+    pinnedOnly: false,
     dimension: batchDimension,
     group: '全部',
     tagMap: stockTags,
@@ -1633,31 +1648,58 @@ function HoldingList({ book, quote, stockTags, searchConfig, batchSel }) {
       holdings: book.holding,
       watchlist: book.plan,
       scope,
+      pinnedOnly: false,
       dimension: batchDimension,
       group: '全部',
       tagMap: stockTags,
       quoteMap: quote,
     })
     setBatchScope(scope)
+    setBatchPinnedOnly(false)
     setBatchGroup(['全部'])
     setSelected(new Set(codes))
   }
+  const selectPinned = () => {
+    const nextPinnedOnly = !batchPinnedOnly
+    const groups = batchGroup.length ? batchGroup : ['全部']
+    const codes = selectBatchGroupCodes({
+      holdings: book.holding,
+      watchlist: book.plan,
+      scope: 'watchlist',
+      pinnedOnly: nextPinnedOnly,
+      dimension: batchDimension,
+      groups,
+      tagMap: stockTags,
+      quoteMap: quote,
+    })
+    setBatchPinnedOnly(nextPinnedOnly)
+    setBatchGroup(groups)
+    setSelected(new Set(codes))
+  }
   const selectGroup = (group) => {
-    const nextGroups = toggleBatchGroupSelection(batchGroup, group)
+    const nextGroups = group === '全部' && batchPinnedOnly
+      ? ['全部']
+      : toggleBatchGroupSelection(batchGroup, group)
+    const nextPinnedOnly = group === '全部'
+      ? false
+      : batchPinnedOnly
     const codes = selectBatchGroupCodes({
       holdings: book.holding,
       watchlist: book.plan,
       scope: batchScope,
+      pinnedOnly: nextPinnedOnly,
       dimension: batchDimension,
       groups: nextGroups,
       tagMap: stockTags,
       quoteMap: quote,
     })
+    setBatchPinnedOnly(nextPinnedOnly)
     setBatchGroup(nextGroups)
     setSelected(new Set(codes))
   }
   const selectDimension = (dimension) => {
     setBatchDimension(dimension)
+    setBatchPinnedOnly(false)
     setBatchGroup([])
     setSelected(new Set())
   }
@@ -1685,6 +1727,7 @@ function HoldingList({ book, quote, stockTags, searchConfig, batchSel }) {
               setSelectMode(true)
               setSelected(new Set())
               setBatchScope('all')
+              setBatchPinnedOnly(false)
               setBatchDimension('concept')
               setBatchGroup([])
             }}
@@ -1713,7 +1756,7 @@ function HoldingList({ book, quote, stockTags, searchConfig, batchSel }) {
         }
         return (
           <div className="batch-bar">
-            <span className="batch-hint"><Icon name="spark" size={12} /> 选择股票池，再多选概念或行业板块</span>
+            <span className="batch-hint"><Icon name="spark" size={12} /> 选择股票池，可优先选置顶，再多选概念或行业板块</span>
             <div className="batch-filter-stack">
               <div className="batch-filter-row">
                 <span className="batch-filter-label">股票池</span>
@@ -1743,9 +1786,20 @@ function HoldingList({ book, quote, stockTags, searchConfig, batchSel }) {
                 total={batchScopeCodes.length}
                 loading={batchTagsLoading}
                 multiSelect
+                pinnedOption={batchScope === 'watchlist'
+                  ? {
+                      active: batchPinnedOnly,
+                      count: pinnedWatchCodes.length,
+                      onChange: selectPinned,
+                    }
+                  : null}
               />
             </div>
-            <button className="chip-btn ghost" onClick={() => { setBatchGroup([]); setSelected(new Set()) }} disabled={!selCount}>清空</button>
+            <button className="chip-btn ghost" onClick={() => {
+              setBatchPinnedOnly(false)
+              setBatchGroup([])
+              setSelected(new Set())
+            }} disabled={!selCount}>清空</button>
             <span className="batch-count">已选 <b>{selCount}</b> 只
               {(selHold > 0 || selWatch > 0) && <span className="sub-name">（持仓 {selHold} · 自选 {selWatch}）</span>}
             </span>
@@ -1758,7 +1812,12 @@ function HoldingList({ book, quote, stockTags, searchConfig, batchSel }) {
               title="强制使用深度思考，最多2路并行，全部选中股票会依次完成">
               <Icon name="brain" size={12} />深度生成（2路并行）
             </button>
-            <button className="chip-btn ghost" onClick={() => { setSelectMode(false); setBatchGroup([]); setSelected(new Set()) }}>退出</button>
+            <button className="chip-btn ghost" onClick={() => {
+              setSelectMode(false)
+              setBatchPinnedOnly(false)
+              setBatchGroup([])
+              setSelected(new Set())
+            }}>退出</button>
             {batchNotice && (
               <span className="batch-mode-note" role="status">
                 {batchNotice}
