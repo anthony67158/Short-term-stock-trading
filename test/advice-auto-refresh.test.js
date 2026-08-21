@@ -6,6 +6,7 @@ import {
   mergeAutoRefreshSettings,
   newerAutoRefreshPatch,
   normalizeAutoConfig,
+  selectAutoRefreshCodes,
 } from '../shared/adviceAutoRefreshPolicy.js'
 import {
   cancelDisabledAdviceReviewJobs,
@@ -15,6 +16,7 @@ import {
   cancelAll,
   suspendAutomaticJobsForManualBatch,
 } from '../api/_jobs.js'
+import { isAdviceReviewEnabled } from '../shared/adviceReviewPolicy.js'
 
 test('自动刷新默认常开，持仓和自选采用不同建议频率', () => {
   const config = normalizeAutoConfig({})
@@ -24,6 +26,71 @@ test('自动刷新默认常开，持仓和自选采用不同建议频率', () =>
   assert.equal(config.holdIntervalMin, 15)
   assert.equal(config.watchEnabled, true)
   assert.equal(config.watchIntervalMin, 30)
+  assert.equal(config.holdCodes, null)
+  assert.equal(config.watchCodes, null)
+})
+
+test('旧账号默认复核全部，新账号显式名单只复核选中股票', () => {
+  const holdings = [
+    { code: '600000', name: '持仓A' },
+    { code: '600001', name: '持仓B' },
+  ]
+  const watchlist = [
+    { code: '000001', name: '自选A' },
+    { code: '000002', name: '自选B', star: true },
+    { code: '600000', name: '已持仓重复项' },
+  ]
+
+  assert.deepEqual(selectAutoRefreshCodes({
+    config: normalizeAutoConfig({}),
+    holdings,
+    watchlist,
+    scopes: ['hold', 'watch'],
+  }), {
+    holdCodes: ['600000', '600001'],
+    watchCodes: ['000001', '000002'],
+    allCodes: ['600000', '600001', '000001', '000002'],
+  })
+
+  assert.deepEqual(selectAutoRefreshCodes({
+    config: normalizeAutoConfig({
+      holdCodes: ['600001', 'invalid'],
+      watchCodes: ['000002'],
+    }),
+    holdings,
+    watchlist,
+    scopes: ['hold', 'watch'],
+  }), {
+    holdCodes: ['600001'],
+    watchCodes: ['000002'],
+    allCodes: ['600001', '000002'],
+  })
+})
+
+test('显式名单不会自动纳入后续新增股票', () => {
+  const selected = selectAutoRefreshCodes({
+    config: normalizeAutoConfig({
+      holdCodes: ['600000'],
+      watchCodes: [],
+    }),
+    holdings: [
+      { code: '600000' },
+      { code: '600001' },
+    ],
+    watchlist: [{ code: '000001' }],
+    scopes: ['hold', 'watch'],
+  })
+
+  assert.deepEqual(selected.holdCodes, ['600000'])
+  assert.deepEqual(selected.watchCodes, [])
+  assert.equal(isAdviceReviewEnabled({
+    'advAuto.holdCodes': ['600000'],
+    'advAuto.watchCodes': [],
+  }, '600000'), true)
+  assert.equal(isAdviceReviewEnabled({
+    'advAuto.holdCodes': ['600000'],
+    'advAuto.watchCodes': [],
+  }, '600001'), false)
 })
 
 test('持仓到期但自选未到期时只刷新持仓', () => {
@@ -99,6 +166,66 @@ test('云端按每只股票自己的复核时间排队', () => {
   assert.equal(enqueueAutoRefreshDue(data, now), 1)
   assert.equal(data.jobs['600000'].source, 'auto')
   assert.equal(data.jobs['600001'], undefined)
+})
+
+test('云端定时器只为持续复核白名单中的股票排队', () => {
+  const now = new Date('2026-08-10T02:00:00Z').getTime()
+  const data = {
+    settings: {
+      'advAuto.holdCodes': ['600001'],
+      'advAuto.watchCodes': ['000002'],
+    },
+    holding: [
+      { code: '600000', name: '未选持仓' },
+      { code: '600001', name: '已选持仓' },
+    ],
+    plan: [
+      { code: '000001', name: '未选自选' },
+      { code: '000002', name: '已选自选', star: true },
+    ],
+  }
+
+  assert.equal(enqueueAutoRefreshDue(data, now), 2)
+  assert.equal(data.jobs['600000'], undefined)
+  assert.equal(data.jobs['000001'], undefined)
+  assert.equal(data.jobs['600001'].mode, 'hold_advice')
+  assert.equal(data.jobs['000002'].mode, 'buy_advice')
+})
+
+test('移出白名单后取消排队中的自动复核任务', () => {
+  const data = {
+    settings: {
+      'advAuto.holdCodes': ['600001'],
+      'advAuto.watchCodes': [],
+    },
+    holding: [
+      { code: '600000' },
+      { code: '600001' },
+    ],
+    plan: [{ code: '000001' }],
+    jobs: {
+      '600000': {
+        code: '600000',
+        status: 'queued',
+        source: 'auto',
+      },
+      '600001': {
+        code: '600001',
+        status: 'queued',
+        source: 'auto',
+      },
+      '000001': {
+        code: '000001',
+        status: 'queued',
+        source: 'auto',
+      },
+    },
+  }
+
+  assert.equal(cancelDisabledAdviceReviewJobs(data, 2000), 2)
+  assert.equal(data.jobs['600000'].status, 'canceled')
+  assert.equal(data.jobs['000001'].status, 'canceled')
+  assert.equal(data.jobs['600001'].status, 'queued')
 })
 
 test('单股关闭持续复核后云端不再创建定时任务', () => {
@@ -238,6 +365,8 @@ test('旧设备缺失刷新配置时不能清空云端新配置', () => {
     theme: 'dark',
     'advAuto.enabled': true,
     'advAuto.holdIntervalMin': 15,
+    'advAuto.holdCodes': ['600000'],
+    'advAuto.watchCodes': ['000001'],
     'advAuto.configUpdatedAt': 2000,
   }
   const incoming = { theme: 'light' }
@@ -246,6 +375,8 @@ test('旧设备缺失刷新配置时不能清空云端新配置', () => {
     theme: 'light',
     'advAuto.enabled': true,
     'advAuto.holdIntervalMin': 15,
+    'advAuto.holdCodes': ['600000'],
+    'advAuto.watchCodes': ['000001'],
     'advAuto.configUpdatedAt': 2000,
   })
 })
@@ -258,7 +389,9 @@ test('交易冲突时仍可独立保存更新时间更晚的刷新配置', () =>
   const incoming = {
     'advAuto.enabled': true,
     'advAuto.holdIntervalMin': 15,
+    'advAuto.holdCodes': ['600000'],
     'advAuto.watchIntervalMin': 30,
+    'advAuto.watchCodes': ['000001'],
     'advAuto.configUpdatedAt': 2000,
   }
 

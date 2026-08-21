@@ -1,5 +1,7 @@
 import {
   ADVICE_REVIEW_DISABLED_CODES,
+  AUTO_HOLD_CODES,
+  AUTO_WATCH_CODES,
   AUTO_CONFIG_UPDATED_AT,
 } from './adviceAutoRefreshPolicy.js'
 import { adaptiveAdviceReviewInterval } from './adviceReviewRisk.js'
@@ -137,6 +139,16 @@ export function disabledAdviceReviewCodes(settings = {}) {
 export function isAdviceReviewEnabled(settings = {}, code) {
   const normalized = reviewCode(code)
   if (!normalized) return true
+  const holdCodes = settings?.[AUTO_HOLD_CODES]
+  const watchCodes = settings?.[AUTO_WATCH_CODES]
+  if (
+    Array.isArray(holdCodes)
+    && Array.isArray(watchCodes)
+    && ![
+      ...holdCodes.slice(0, 500),
+      ...watchCodes.slice(0, 500),
+    ].map(reviewCode).includes(normalized)
+  ) return false
   return !disabledAdviceReviewCodes(settings).includes(normalized)
 }
 

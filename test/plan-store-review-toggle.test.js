@@ -48,6 +48,52 @@ test('另一设备更新的单股复核开关通过增量同步立即生效', ()
   assert.deepEqual(planStore.get().alerts.map((alert) => alert.id), ['manual'])
 })
 
+test('个股重新开启持续复核时加入对应的显式白名单', () => {
+  const previousUpdatedAt = Date.now() + 1000
+  planStore.setData({
+    plan: [{ code: '000001', name: '平安银行' }],
+    holding: [{ code: '600000', name: '浦发银行' }],
+    closed: [],
+    settings: {
+      'advAuto.holdCodes': [],
+      'advAuto.watchCodes': [],
+      'advReview.disabledCodes': ['600000', '000001'],
+      'advAuto.configUpdatedAt': previousUpdatedAt,
+    },
+    alerts: [],
+  })
+
+  planStore.setAdviceReviewEnabled('600000', true)
+  planStore.setAdviceReviewEnabled('000001', true)
+
+  assert.deepEqual(
+    planStore.get().settings['advAuto.holdCodes'],
+    ['600000'],
+  )
+  assert.deepEqual(
+    planStore.get().settings['advAuto.watchCodes'],
+    ['000001'],
+  )
+  assert.equal(isAdviceReviewEnabled(
+    planStore.get().settings,
+    '600000',
+  ), true)
+  assert.equal(isAdviceReviewEnabled(
+    planStore.get().settings,
+    '000001',
+  ), true)
+  assert.ok(
+    planStore.get().settings['advAuto.configUpdatedAt']
+      > previousUpdatedAt,
+  )
+
+  planStore.setAdviceReviewEnabled('600000', false)
+  assert.deepEqual(
+    planStore.get().settings['advAuto.holdCodes'],
+    [],
+  )
+})
+
 test('云端生成的新行动预警增量同步到当前页面', () => {
   planStore.setData({
     plan: [],

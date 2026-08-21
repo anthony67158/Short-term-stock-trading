@@ -46,7 +46,12 @@ import {
   isAdviceReviewEnabled,
   setAdviceReviewEnabled as withAdviceReviewEnabled,
 } from '../shared/adviceReviewPolicy.js'
-import { newerAutoRefreshPatch } from '../shared/adviceAutoRefreshPolicy.js'
+import {
+  AUTO_CONFIG_UPDATED_AT,
+  AUTO_HOLD_CODES,
+  AUTO_WATCH_CODES,
+  newerAutoRefreshPatch,
+} from '../shared/adviceAutoRefreshPolicy.js'
 import {
   adviceTheoryTextOf,
   theoryTagsOf,
@@ -852,11 +857,45 @@ export const planStore = {
   },
   setAdviceReviewEnabled(code, enabled) {
     if (!code) return
+    const normalizedCode = String(code)
+    const configUpdatedAt = Math.max(
+      Date.now(),
+      (Number(state.settings?.[AUTO_CONFIG_UPDATED_AT]) || 0) + 1,
+    )
     state.settings = withAdviceReviewEnabled(
       state.settings || {},
-      code,
+      normalizedCode,
       !!enabled,
+      configUpdatedAt,
     )
+    if (enabled) {
+      const scopeKey = state.holding.some(
+        (item) => String(item?.code || '') === normalizedCode,
+      )
+        ? AUTO_HOLD_CODES
+        : state.plan.some(
+            (item) => String(item?.code || '') === normalizedCode,
+          )
+          ? AUTO_WATCH_CODES
+          : ''
+      if (scopeKey && Array.isArray(state.settings[scopeKey])) {
+        state.settings = {
+          ...state.settings,
+          [scopeKey]: [...new Set([
+            ...state.settings[scopeKey],
+            normalizedCode,
+          ])],
+        }
+      }
+    } else {
+      const nextSettings = { ...state.settings }
+      for (const scopeKey of [AUTO_HOLD_CODES, AUTO_WATCH_CODES]) {
+        if (!Array.isArray(nextSettings[scopeKey])) continue
+        nextSettings[scopeKey] = nextSettings[scopeKey]
+          .filter((itemCode) => String(itemCode) !== normalizedCode)
+      }
+      state.settings = nextSettings
+    }
     if (!enabled) {
       state.alerts = (state.alerts || []).filter((alert) =>
         !(

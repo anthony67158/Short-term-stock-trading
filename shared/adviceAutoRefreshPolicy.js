@@ -4,12 +4,16 @@ export const MIN_AUTO_INTERVAL = 5
 export const MAX_AUTO_INTERVAL = 240
 export const AUTO_CONFIG_UPDATED_AT = 'advAuto.configUpdatedAt'
 export const ADVICE_REVIEW_DISABLED_CODES = 'advReview.disabledCodes'
+export const AUTO_HOLD_CODES = 'advAuto.holdCodes'
+export const AUTO_WATCH_CODES = 'advAuto.watchCodes'
 export const AUTO_CONFIG_KEYS = [
   'advAuto.enabled',
   'advAuto.holdEnabled',
   'advAuto.holdIntervalMin',
+  AUTO_HOLD_CODES,
   'advAuto.watchEnabled',
   'advAuto.watchIntervalMin',
+  AUTO_WATCH_CODES,
   ADVICE_REVIEW_DISABLED_CODES,
 ]
 
@@ -19,6 +23,14 @@ function interval(value, fallback) {
   return Math.max(MIN_AUTO_INTERVAL, Math.min(MAX_AUTO_INTERVAL, Math.trunc(n)))
 }
 
+function codeList(value) {
+  if (!Array.isArray(value)) return null
+  return [...new Set(value
+    .map((code) => String(code || '').trim())
+    .filter((code) => /^\d{6}$/.test(code)))]
+    .slice(0, 500)
+}
+
 export function normalizeAutoConfig(input = {}) {
   return {
     enabled: true,
@@ -26,10 +38,12 @@ export function normalizeAutoConfig(input = {}) {
     holdIntervalMin: interval(input.holdIntervalMin, DEFAULT_HOLD_INTERVAL),
     holdLastAt: Number(input.holdLastAt) || 0,
     holdLastTryAt: Number(input.holdLastTryAt) || 0,
+    holdCodes: codeList(input.holdCodes),
     watchEnabled: input.watchEnabled !== false,
     watchIntervalMin: interval(input.watchIntervalMin, DEFAULT_WATCH_INTERVAL),
     watchLastAt: Number(input.watchLastAt) || 0,
     watchLastTryAt: Number(input.watchLastTryAt) || 0,
+    watchCodes: codeList(input.watchCodes),
   }
 }
 
@@ -52,6 +66,9 @@ export function autoConfigFromSettings(settings = {}) {
       : (Number.isFinite(legacyInterval) ? legacyInterval : DEFAULT_HOLD_INTERVAL),
     holdLastAt: settings['advAuto.holdLastAt'] ?? legacyLast,
     holdLastTryAt: settings['advAuto.holdLastTryAt'] ?? legacyLastTry,
+    holdCodes: has(AUTO_HOLD_CODES)
+      ? settings[AUTO_HOLD_CODES]
+      : null,
     watchEnabled: has('advAuto.watchEnabled')
       ? settings['advAuto.watchEnabled'] !== false
       : (hasLegacy ? legacyScope !== 'hold' : true),
@@ -60,7 +77,46 @@ export function autoConfigFromSettings(settings = {}) {
       : (Number.isFinite(legacyInterval) ? legacyInterval : DEFAULT_WATCH_INTERVAL),
     watchLastAt: settings['advAuto.watchLastAt'] ?? legacyLast,
     watchLastTryAt: settings['advAuto.watchLastTryAt'] ?? legacyLastTry,
+    watchCodes: has(AUTO_WATCH_CODES)
+      ? settings[AUTO_WATCH_CODES]
+      : null,
   })
+}
+
+function uniqueCodes(items = []) {
+  return [...new Set(items
+    .map((item) => String(item?.code || '').trim())
+    .filter((code) => /^\d{6}$/.test(code)))]
+}
+
+function selectedCodes(available, configured) {
+  if (!Array.isArray(configured)) return available
+  const selected = new Set(configured)
+  return available.filter((code) => selected.has(code))
+}
+
+export function selectAutoRefreshCodes({
+  config = {},
+  holdings = [],
+  watchlist = [],
+  scopes = ['hold', 'watch'],
+} = {}) {
+  const scopeSet = new Set(scopes)
+  const availableHoldCodes = uniqueCodes(holdings)
+  const holdSet = new Set(availableHoldCodes)
+  const availableWatchCodes = uniqueCodes(watchlist)
+    .filter((code) => !holdSet.has(code))
+  const holdCodes = scopeSet.has('hold') && config.holdEnabled !== false
+    ? selectedCodes(availableHoldCodes, config.holdCodes)
+    : []
+  const watchCodes = scopeSet.has('watch') && config.watchEnabled !== false
+    ? selectedCodes(availableWatchCodes, config.watchCodes)
+    : []
+  return {
+    holdCodes,
+    watchCodes,
+    allCodes: [...holdCodes, ...watchCodes],
+  }
 }
 
 export function dueAutoScopes(config, now = Date.now()) {

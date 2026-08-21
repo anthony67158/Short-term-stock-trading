@@ -4,6 +4,7 @@ import { HL } from './RichText'
 import StockName from './StockName'
 import StockTags from './StockTags'
 import StockGroupFilter from './StockGroupFilter'
+import AutoRefreshStockSelector from './AutoRefreshStockSelector'
 import Reasoning from './Reasoning'
 import ConfirmDialog from './ConfirmDialog'
 import OverlayPortal from './OverlayPortal'
@@ -23,6 +24,7 @@ import {
   getAutoConfig,
   runManualAdviceRefresh,
   setAutoConfigSetting,
+  setAutoSelectedCodes,
   K_HOLD_ENABLED,
   K_HOLD_INTERVAL,
   K_WATCH_ENABLED,
@@ -64,6 +66,7 @@ import {
   toggleBatchGroupSelection,
 } from '../../shared/stockGroupFilter.js'
 import { adviceRecency } from '../../shared/adviceRecency.js'
+import { selectAutoRefreshCodes } from '../../shared/adviceAutoRefreshPolicy.js'
 
 // —— 搜索结果 → 定位到卡片:轻量模块级事件总线 ——
 // 搜索框(StockSearch)、自选区(PlanList)、持仓区(HoldingList)同在本文件,用一个 Set 广播即可:
@@ -1397,15 +1400,40 @@ function HoldOverview({ book, quote }) {
 // 用户可开启一个后台定时任务:交易时段内,每隔 N 分钟对选定范围(自选/持仓/两者)
 // 批量重生成 AI 操作建议(复用 runBatchAdvice,与手动/每日同源,保证连续性一致性)。
 // 展示最近一次更新时间；自动调度由 FC Timer 执行，浏览器只负责配置和手动触发。
-function AutoRefreshControl({ quote }) {
-  usePlanStore()  // 订阅 settings/holding/plan 变化,配置改动即时反映
+function AutoRefreshControl({ quote, stockTags }) {
+  const book = usePlanStore()
   const [open, setOpen] = useState(false)
+  const [expandedScope, setExpandedScope] = useState('hold')
   const [manualNotice, setManualNotice] = useState('')
   const [, forceBatch] = useState(0)
   useEffect(() => subscribeBatch(() => forceBatch((n) => n + 1)), [])
   const cfg = getAutoConfig()
-  const enabled = cfg.enabled
+  const availableSelection = selectAutoRefreshCodes({
+    config: {
+      ...cfg,
+      holdEnabled: true,
+      watchEnabled: true,
+    },
+    holdings: book.holding || [],
+    watchlist: book.plan || [],
+  })
+  const runnableSelection = selectAutoRefreshCodes({
+    config: cfg,
+    holdings: book.holding || [],
+    watchlist: book.plan || [],
+  })
+  const enabled = cfg.enabled && runnableSelection.allCodes.length > 0
   const batch = getBatchState()
+  const updateSelectedCodes = (scope, codes) => {
+    setAutoSelectedCodes({
+      holdCodes: scope === 'hold'
+        ? codes
+        : availableSelection.holdCodes,
+      watchCodes: scope === 'watch'
+        ? codes
+        : availableSelection.watchCodes,
+    })
+  }
 
   const fmtLast = (t) => {
     if (!t) return '尚未刷新'
@@ -1427,7 +1455,7 @@ function AutoRefreshControl({ quote }) {
     setManualNotice('正在发起…')
     const result = await runManualAdviceRefresh('both', quote || {})
     const text = result?.status === 'started'
-      ? '已开始刷新全部股票'
+      ? `已开始复核 ${result.selectedCount || 0} 只股票`
       : result?.status === 'running'
         ? '已有生成任务正在运行'
         : result?.status === 'full'
@@ -1436,25 +1464,71 @@ function AutoRefreshControl({ quote }) {
     setManualNotice(text)
   }
 
-  const scheduleRow = ({ label, hint, checked, enabledKey, intervalKey, intervalMin, fallback, lastAt }) => (
-    <div className={'arp-schedule' + (checked ? ' on' : '')}>
-      <div className="arp-schedule-main">
-        <label className="arp-scope-check">
-          <input type="checkbox" checked={checked}
-            onChange={(event) => setAutoConfigSetting(enabledKey, event.target.checked)} />
-          <span><b>{label}</b><small>{hint}</small></span>
-        </label>
-        <span className="arp-v">
-          <input className="arp-num" type="number" min={MIN_INTERVAL} max={MAX_INTERVAL}
-            aria-label={`${label}自动刷新间隔`}
-            value={intervalMin}
-            onChange={(event) => setInterval_(intervalKey, event.target.value, fallback)} />
-          分钟
-        </span>
+  const scheduleRow = ({
+    scope,
+    label,
+    hint,
+    checked,
+    enabledKey,
+    intervalKey,
+    intervalMin,
+    fallback,
+    lastAt,
+    items,
+    selectedCodes,
+  }) => {
+    const availableCount = new Set(
+      items.map((item) => item?.code).filter(Boolean),
+    ).size
+    return (
+      <div className={'arp-schedule' + (checked ? ' on' : '')}>
+        <div className="arp-schedule-main">
+          <label className="arp-scope-check">
+            <input type="checkbox" checked={checked}
+              onChange={(event) => setAutoConfigSetting(enabledKey, event.target.checked)} />
+            <span><b>{label}</b><small>{hint}</small></span>
+          </label>
+          <span className="arp-v">
+            <input className="arp-num" type="number" min={MIN_INTERVAL} max={MAX_INTERVAL}
+              aria-label={`${label}自动刷新间隔`}
+              value={intervalMin}
+              onChange={(event) => setInterval_(intervalKey, event.target.value, fallback)} />
+            分钟
+          </span>
+        </div>
+        <div className="arp-schedule-meta">
+          <span className="arp-schedule-last">
+            最近刷新：{fmtLast(lastAt)}
+          </span>
+          <button
+            type="button"
+            className="arp-selection-toggle"
+            aria-expanded={expandedScope === scope}
+            onClick={() => setExpandedScope((current) =>
+              current === scope ? '' : scope)}
+          >
+            已选 {selectedCodes.length}/{availableCount}
+            <Icon
+              name={expandedScope === scope
+                ? 'chevronDown'
+                : 'chevronRight'}
+              size={12}
+            />
+          </button>
+        </div>
+        {expandedScope === scope && (
+          <AutoRefreshStockSelector
+            scope={scope}
+            items={items}
+            selectedCodes={selectedCodes}
+            quoteMap={quote || {}}
+            tagMap={stockTags || {}}
+            onChange={(codes) => updateSelectedCodes(scope, codes)}
+          />
+        )}
       </div>
-      <div className="arp-schedule-last">最近刷新：{fmtLast(lastAt)}</div>
-    </div>
-  )
+    )
+  }
 
   const panel = (
     <div className="auto-ref-panel auto-ref-dialog" role="dialog" aria-modal="true"
@@ -1468,14 +1542,19 @@ function AutoRefreshControl({ quote }) {
 
       <div className="arp-row toggle">
         <span>
-          <b className="arp-master-title">持续复核已开启</b>
+          <b className="arp-master-title">
+            {enabled ? '持续复核已开启' : '尚未选择复核股票'}
+          </b>
           <small className="arp-master-note">云端交易时段自动运行，无需打开页面</small>
         </span>
-        <b className="arp-always-on">运行中</b>
+        <b className={'arp-always-on' + (enabled ? '' : ' idle')}>
+          {enabled ? '运行中' : '未运行'}
+        </b>
       </div>
 
       <div className="arp-schedules">
         {scheduleRow({
+          scope: 'hold',
           label: '持仓股票',
           hint: '建议 15 分钟',
           checked: cfg.holdEnabled,
@@ -1484,8 +1563,11 @@ function AutoRefreshControl({ quote }) {
           intervalMin: cfg.holdIntervalMin,
           fallback: DEFAULT_HOLD,
           lastAt: cfg.holdLastAt,
+          items: book.holding || [],
+          selectedCodes: availableSelection.holdCodes,
         })}
         {scheduleRow({
+          scope: 'watch',
           label: '自选股票',
           hint: '建议 30 分钟',
           checked: cfg.watchEnabled,
@@ -1494,12 +1576,18 @@ function AutoRefreshControl({ quote }) {
           intervalMin: cfg.watchIntervalMin,
           fallback: DEFAULT_WATCH,
           lastAt: cfg.watchLastAt,
+          items: book.plan || [],
+          selectedCodes: availableSelection.watchCodes,
         })}
       </div>
 
-      <button className="arp-manual" onClick={manualRefresh} disabled={batch.running}>
+      <button
+        className="arp-manual"
+        onClick={manualRefresh}
+        disabled={batch.running || runnableSelection.allCodes.length === 0}
+      >
         <Icon name="refresh" size={13} className={batch.running ? 'spin' : ''} />
-        {batch.running ? '正在生成建议…' : '立即刷新全部'}
+        {batch.running ? '正在生成建议…' : '立即复核已选股票'}
       </button>
       {manualNotice && <div className="arp-manual-note" role="status">{manualNotice}</div>}
 
@@ -1519,7 +1607,7 @@ function AutoRefreshControl({ quote }) {
         title="设置盘中定时刷新 AI 操作建议(可配间隔与范围)"
       >
         <Icon name={enabled ? 'refresh' : 'clock'} size={13} className={enabled ? 'spin-slow' : ''} />
-        {`持续复核·持${cfg.holdIntervalMin}/自${cfg.watchIntervalMin}分`}
+        {`持续复核·已选${runnableSelection.allCodes.length}只`}
       </button>
 
       {open && (
@@ -1721,7 +1809,7 @@ function HoldingList({ book, quote, stockTags, searchConfig, batchSel }) {
         <HoldOverview book={book} quote={quote} />
         <div className="portfolio-command-actions">
           <AdvisorScore book={book} />
-          <AutoRefreshControl quote={quote} />
+          <AutoRefreshControl quote={quote} stockTags={stockTags} />
           {canBatch && !selectMode && (
             <button className="mini-btn batch-entry" onClick={() => {
               setSelectMode(true)

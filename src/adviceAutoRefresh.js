@@ -7,27 +7,67 @@ import {
   DEFAULT_WATCH_INTERVAL,
   MAX_AUTO_INTERVAL,
   MIN_AUTO_INTERVAL,
+  AUTO_HOLD_CODES,
+  AUTO_WATCH_CODES,
   AUTO_CONFIG_UPDATED_AT,
+  ADVICE_REVIEW_DISABLED_CODES,
   autoConfigFromSettings,
+  selectAutoRefreshCodes,
 } from '../shared/adviceAutoRefreshPolicy'
+import { isAdviceReviewEnabled } from '../shared/adviceReviewPolicy.js'
 
 export const K_HOLD_ENABLED = 'advAuto.holdEnabled'
 export const K_HOLD_INTERVAL = 'advAuto.holdIntervalMin'
 export const K_HOLD_LAST = 'advAuto.holdLastAt'
 export const K_HOLD_LASTTRY = 'advAuto.holdLastTryAt'
+export const K_HOLD_CODES = AUTO_HOLD_CODES
 export const K_WATCH_ENABLED = 'advAuto.watchEnabled'
 export const K_WATCH_INTERVAL = 'advAuto.watchIntervalMin'
 export const K_WATCH_LAST = 'advAuto.watchLastAt'
 export const K_WATCH_LASTTRY = 'advAuto.watchLastTryAt'
+export const K_WATCH_CODES = AUTO_WATCH_CODES
 
 export const DEFAULT_HOLD = DEFAULT_HOLD_INTERVAL
 export const DEFAULT_WATCH = DEFAULT_WATCH_INTERVAL
 export const MIN_INTERVAL = MIN_AUTO_INTERVAL
 export const MAX_INTERVAL = MAX_AUTO_INTERVAL
 
+function nextConfigUpdatedAt() {
+  const previous = Number(
+    planStore.get().settings?.[AUTO_CONFIG_UPDATED_AT],
+  ) || 0
+  return Math.max(Date.now(), previous + 1)
+}
+
 export function setAutoConfigSetting(key, value) {
   planStore.setSetting(key, value)
-  planStore.setSetting(AUTO_CONFIG_UPDATED_AT, Date.now())
+  planStore.setSetting(AUTO_CONFIG_UPDATED_AT, nextConfigUpdatedAt())
+}
+
+export function setAutoSelectedCodes({
+  holdCodes = [],
+  watchCodes = [],
+} = {}) {
+  const normalized = autoConfigFromSettings({
+    [AUTO_HOLD_CODES]: holdCodes,
+    [AUTO_WATCH_CODES]: watchCodes,
+  })
+  const selected = new Set([
+    ...(normalized.holdCodes || []),
+    ...(normalized.watchCodes || []),
+  ])
+  const currentSettings = planStore.get().settings || {}
+  const disabled = Array.isArray(
+    currentSettings[ADVICE_REVIEW_DISABLED_CODES],
+  )
+    ? currentSettings[ADVICE_REVIEW_DISABLED_CODES]
+      .filter((code) => !selected.has(String(code)))
+    : []
+  const updatedAt = nextConfigUpdatedAt()
+  planStore.setSetting(K_HOLD_CODES, normalized.holdCodes || [])
+  planStore.setSetting(K_WATCH_CODES, normalized.watchCodes || [])
+  planStore.setSetting(ADVICE_REVIEW_DISABLED_CODES, disabled)
+  planStore.setSetting(AUTO_CONFIG_UPDATED_AT, updatedAt)
 }
 
 export function getAutoConfig() {
@@ -36,15 +76,13 @@ export function getAutoConfig() {
 
 function codesForScopes(scopes) {
   const st = planStore.get()
-  const holdCodes = [...new Set((st.holding || []).map((item) => item.code))]
-  const holdSet = new Set(holdCodes)
-  const watchCodes = [...new Set((st.plan || []).map((item) => item.code))]
-    .filter((code) => !holdSet.has(code))
-  const scopeSet = new Set(scopes)
-  return [
-    ...(scopeSet.has('hold') ? holdCodes : []),
-    ...(scopeSet.has('watch') ? watchCodes : []),
-  ]
+  return selectAutoRefreshCodes({
+    config: autoConfigFromSettings(st.settings || {}),
+    holdings: st.holding || [],
+    watchlist: st.plan || [],
+    scopes,
+  }).allCodes.filter((code) =>
+    isAdviceReviewEnabled(st.settings || {}, code))
 }
 
 function markTry(scopes, at) {
@@ -70,7 +108,7 @@ async function startRefresh(scopes, quoteMap, { manual = false } = {}) {
   try {
     const result = await runBatchAdvice(codes, quoteMap || {}, { force: true })
     if (result?.status === 'started') markStarted(scopes, Date.now())
-    return { ...result, manual }
+    return { ...result, manual, selectedCount: codes.length }
   } finally {
     running = false
   }

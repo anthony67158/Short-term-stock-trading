@@ -54,6 +54,7 @@ import { ensureAdviceReasoning } from '../shared/adviceReasoning.js';
 import {
   autoConfigFromSettings,
   mergeAutoRefreshSettings,
+  selectAutoRefreshCodes,
 } from '../shared/adviceAutoRefreshPolicy.js';
 import {
   adviceReviewDue,
@@ -1492,12 +1493,29 @@ function inAutoRefreshWindow(now = Date.now()) {
 
 export function cancelDisabledAdviceReviewJobs(data, now = Date.now()) {
   const settings = data?.settings || {};
+  const config = autoConfigFromSettings(settings);
+  const hasExplicitSelection = Array.isArray(config.holdCodes)
+    || Array.isArray(config.watchCodes);
+  const selectedCodes = hasExplicitSelection
+    ? new Set(selectAutoRefreshCodes({
+        config,
+        holdings: data?.holding || [],
+        watchlist: data?.plan || [],
+      }).allCodes)
+    : null;
   let canceled = 0;
   for (const job of Object.values(jobsOf(data || {}))) {
     if (
       !job?.code
       || !['auto', 'judge'].includes(job.source)
-      || isAdviceReviewEnabled(settings, job.code)
+      || (
+        isAdviceReviewEnabled(settings, job.code)
+        && !(
+          job.source === 'auto'
+          && selectedCodes
+          && !selectedCodes.has(String(job.code))
+        )
+      )
     ) continue;
     if (cancelJob(data, job.code, now)) canceled++;
   }
@@ -1521,9 +1539,17 @@ export function enqueueAutoRefreshDue(data, now = Date.now()) {
   const advice = data.advice && typeof data.advice === 'object'
     ? data.advice
     : {};
-  const holdCodes = [...new Set(holding.map((item) => item.code))];
-  const holdSet = new Set(holdCodes);
-  const watchCodes = [...new Set(watch.map((item) => item.code))].filter((code) => !holdSet.has(code));
+  const holdSet = new Set(
+    holding.map((item) => String(item?.code || '')).filter(Boolean),
+  );
+  const selected = selectAutoRefreshCodes({
+    config,
+    holdings: holding,
+    watchlist: watch,
+    scopes,
+  });
+  const holdCodes = selected.holdCodes;
+  const watchCodes = selected.watchCodes;
   const batchId = `auto_${now}`;
   const activeAutoJobs = Object.values(jobsOf(data))
     .filter((job) => job?.source === 'auto' && isActive(job))
