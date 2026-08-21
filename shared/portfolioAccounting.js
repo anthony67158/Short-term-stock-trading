@@ -8,7 +8,36 @@ import {
 
 // FIFO 配对做T流水，返回已实现收益、配对明细与未配平净头寸。
 export function computeTFlows(flows) {
-  const list = [...(flows || [])].sort((a, b) => a.at - b.at)
+  const list = (Array.isArray(flows) ? flows : [])
+    .map((flow) => {
+      const type = tradeRecordType(flow)
+      const side = flow?.side === 'buy' || type === 'BUY'
+        ? 'buy'
+        : flow?.side === 'sell' || type === 'SELL'
+          ? 'sell'
+          : ''
+      const qty = Number(flow?.qty)
+      const price = Number(flow?.price)
+      if (
+        !side
+        || !Number.isFinite(qty)
+        || qty <= 0
+        || !Number.isFinite(price)
+        || price <= 0
+      ) return null
+      return {
+        ...flow,
+        side,
+        qty,
+        price,
+        fee: Number.isFinite(Number(flow?.fee))
+          ? Number(flow.fee)
+          : 0,
+        at: Number(flow?.at) || 0,
+      }
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.at - b.at)
   let realized = 0
   let pairs = 0
   const pairList = []

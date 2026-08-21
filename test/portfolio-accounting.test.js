@@ -21,6 +21,29 @@ const baseAccount = {
   goal: 20000,
 }
 
+test('旧版做T流水只有BUY/SELL类型时仍可恢复买卖方向', () => {
+  const result = computeTFlows([{
+    id: 'legacy-buy',
+    type: 'BUY',
+    qty: 1,
+    price: 10,
+    fee: 5,
+    at: 100,
+  }, {
+    id: 'legacy-sell',
+    type: 'SELL',
+    qty: 1,
+    price: 11,
+    fee: 5.11,
+    at: 200,
+  }])
+
+  assert.equal(result.pairs, 1)
+  assert.equal(result.openBuy, 0)
+  assert.equal(result.openSell, 0)
+  assert.equal(result.realized, 89.89)
+})
+
 test('总资产随持仓市值变化而变化，不再被设置金额固定', () => {
   const holding = [{
     id: 'hold_1',
