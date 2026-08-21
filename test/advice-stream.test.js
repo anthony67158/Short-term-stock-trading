@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  adviceRuntimeUpdateFromData,
   adviceFailureReason,
   adviceTradeStateMatches,
   createRecoverableSerialRunner,
@@ -482,4 +483,73 @@ test('串行保存单次失败后仍可执行下一次保存', async () => {
   await assert.rejects(() => runner.run(), /OSS瞬时失败/)
   assert.equal(await runner.run(), 2)
   await runner.settle()
+})
+
+test('单股完成增量只携带该股建议和必要运行态', () => {
+  const data = {
+    advice: {
+      '600519': {
+        at: 300,
+        advice: { action: '持有', reasoning: 'a'.repeat(1000) },
+      },
+      '000001': {
+        at: 200,
+        advice: { action: '观望', reasoning: 'b'.repeat(1000) },
+      },
+    },
+    jobs: {
+      '600519': {
+        id: 'job-1',
+        code: '600519',
+        status: 'done',
+        progressAt: 300,
+      },
+      '000001': {
+        id: 'job-2',
+        code: '000001',
+        status: 'running',
+        progressAt: 250,
+      },
+    },
+    adviceLog: [
+      { id: 'log-a', code: '600519', at: 300 },
+      { id: 'log-b', code: '000001', at: 200 },
+    ],
+    decisionLog: [
+      { id: 'decision-a', code: '600519', at: 300 },
+      { id: 'decision-b', code: '000001', at: 200 },
+    ],
+    alerts: [
+      { id: 'alert-a', code: '600519', updatedAt: 300 },
+      { id: 'alert-b', code: '000001', updatedAt: 200 },
+    ],
+    plan: [
+      { code: '600519', qScore: 72, qBias: '偏多', qAt: 300 },
+      { code: '000001', qScore: 48, qBias: '中性', qAt: 200 },
+    ],
+  }
+
+  const update = adviceRuntimeUpdateFromData(
+    data,
+    '600519',
+    320,
+    2,
+  )
+
+  assert.equal(update.code, '600519')
+  assert.equal(update.advice.advice.action, '持有')
+  assert.equal(update.job.status, 'done')
+  assert.deepEqual(update.adviceLog.map((item) => item.id), ['log-a'])
+  assert.deepEqual(
+    update.decisionLog.map((item) => item.id),
+    ['decision-a'],
+  )
+  assert.deepEqual(update.alerts.map((item) => item.id), ['alert-a'])
+  assert.deepEqual(update.planPatch, {
+    code: '600519',
+    qScore: 72,
+    qBias: '偏多',
+    qAt: 300,
+  })
+  assert.ok(Buffer.byteLength(JSON.stringify(update)) < 100_000)
 })

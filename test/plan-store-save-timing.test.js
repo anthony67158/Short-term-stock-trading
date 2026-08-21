@@ -3,6 +3,35 @@ import assert from 'node:assert/strict'
 
 import { planStore } from '../src/planStore.js'
 
+test('云端增量回灌不会回写整份账号快照', async () => {
+  let saves = 0
+  planStore.registerSaver(async () => {
+    saves++
+    return true
+  })
+  planStore.setData({
+    plan: [],
+    holding: [],
+    closed: [],
+    alerts: [],
+    adviceLog: [],
+    decisionLog: [],
+    settings: {},
+  })
+
+  const changed = planStore.mergeCloud({
+    adviceLog: [{
+      id: 'cloud-advice-log',
+      code: '600519',
+      at: Date.now(),
+    }],
+  })
+  await new Promise((resolve) => setTimeout(resolve, 900))
+
+  assert.equal(changed, true)
+  assert.equal(saves, 0)
+})
+
 test('确认建仓后在当前事件循环立即提交账号账本', async () => {
   let saved = null
   planStore.registerSaver(async (data) => {

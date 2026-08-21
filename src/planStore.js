@@ -646,7 +646,8 @@ export const planStore = {
   //   · AI操作建议(advice):按逐条时间戳合并,只补更新的,不删本机更新的(见 mergeAdvice)
   //   · adviceLog(决策记录):按 id 去重并入,保留两端全集(仅新增,不删)
   // 绝不触碰 plan/holding/closed/account —— 那些是用户正在本机编辑的,交由用户操作+防抖回存,
-  // 避免"电脑正在改持仓,却被云端旧值盖回"。合并若有变化,防抖回存一次让两端最终一致。
+  // 避免"电脑正在改持仓,却被云端旧值盖回"。云端增量本身已持久化，
+  // 合并后只刷新本机视图，禁止再回写整份账号快照形成同步回声。
   mergeCloud(d) {
     if (!d || typeof d !== 'object') return false
     let changed = false
@@ -825,7 +826,11 @@ export const planStore = {
         changed = true
       }
     }
-    if (changed) { listeners.forEach((l) => { try { l() } catch (e) { console.error('[store] listener error', e) } }); scheduleSave() }
+    if (changed) {
+      listeners.forEach((l) => {
+        try { l() } catch (e) { console.error('[store] listener error', e) }
+      })
+    }
     // 6) 服务端批量生成进度回灌:喂给 adviceBatch,让本机进度条显示【服务端/另一设备】正在跑的批量进程。
     //    (与 advice/adviceLog 合并解耦:进度是纯展示态,不进 changed/不触发回存)
     if (d.batchProgress && typeof d.batchProgress === 'object') {

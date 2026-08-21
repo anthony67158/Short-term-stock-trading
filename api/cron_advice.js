@@ -19,12 +19,15 @@
 // 关键约束(承接旧版):
 //   · 线上 /predict 的 36 维 OHLCV 打分【零改动】——本 handler 只是"调用方"。
 //   · 只写 data.jobs/jobWorker/advice/adviceLog/batchProgress/qScore,绝不覆盖 plan/holding/closed/account。
-//   · 每次 persist 都【重读云端最新账号】做保护式叠加(防止盖回用户本机刚编辑的持仓)。
+//   · 运行态写账号 runtime/state 小对象，单股完成写 runtime/advice/<code>；
+//     整批收尾才压实完整账号快照，且始终先重读最新账本做保护式叠加。
 
 import { applyCors, preflight } from './_lib.js';
 import {
   accountCredentialMatches,
   isAccountActive,
+  writeAdviceRuntimeState,
+  writeAdviceRuntimeUpdate,
   writeAccount,
   readAccount,
   listAllAccounts,
@@ -248,6 +251,134 @@ export function createRecoverableSerialRunner(task) {
       return tail;
     },
   };
+}
+
+function codeMatches(item, code) {
+  const target = String(code || '');
+  return [
+    item?.code,
+    item?.candCode,
+    item?.actCode,
+  ].some((value) => String(value || '') === target);
+}
+
+function quantPatchFrom(items, code) {
+  const item = (items || []).find((entry) =>
+    String(entry?.code || '') === String(code || '')
+  );
+  if (!item || item.qScore == null) return null;
+  return {
+    code: String(code),
+    qScore: item.qScore,
+    qBias: item.qBias,
+    qAt: item.qAt,
+  };
+}
+
+export function adviceRuntimeUpdateFromData(
+  data,
+  code,
+  updatedAt = Date.now(),
+  concurrency = effectiveAdviceConcurrency(data),
+) {
+  const key = String(code || '');
+  const advice = data?.advice?.[key] || null;
+  return {
+    schemaVersion: 'advice-runtime-update.v1',
+    code: key,
+    updatedAt: Number(updatedAt) || Date.now(),
+    advice,
+    job: data?.jobs?.[key] || null,
+    batchProgress: jobsToProgress(
+      data || {},
+      Number(updatedAt) || Date.now(),
+      concurrency,
+    ),
+    adviceLog: (data?.adviceLog || [])
+      .filter((item) => codeMatches(item, key))
+      .slice(0, 5),
+    decisionLog: (data?.decisionLog || [])
+      .filter((item) => codeMatches(item, key))
+      .slice(0, 5),
+    adviceReviewLog: (data?.adviceReviewLog || [])
+      .filter((item) => codeMatches(item, key))
+      .slice(0, 5),
+    alerts: (data?.alerts || [])
+      .filter((item) => codeMatches(item, key)),
+    councilShadow: councilRecordsFromData(data)
+      .filter((item) => codeMatches(item, key))
+      .slice(0, 3),
+    evidenceSnapshots: evidenceSnapshotsFromData({
+      advice: advice ? { [key]: advice } : {},
+    }),
+    holdingPatch: quantPatchFrom(data?.holding, key),
+    planPatch: quantPatchFrom(data?.plan, key),
+  };
+}
+
+function adviceRuntimeStateFromData(data, updatedAt = Date.now()) {
+  const runtimeSettings = {};
+  for (const key of [
+    'advAuto.holdLastAt',
+    'advAuto.holdLastTryAt',
+    'advAuto.watchLastAt',
+    'advAuto.watchLastTryAt',
+  ]) {
+    if (data?.settings?.[key] != null) {
+      runtimeSettings[key] = data.settings[key];
+    }
+  }
+  return {
+    schemaVersion: 'advice-runtime-state.v1',
+    updatedAt: Number(updatedAt) || Date.now(),
+    jobs: data?.jobs || {},
+    jobWorker: data?.jobWorker || null,
+    activeAdviceBatchId: data?.activeAdviceBatchId || '',
+    adviceBatchCancellations: data?.adviceBatchCancellations || {},
+    adviceAutoPauseUntil: Number(data?.adviceAutoPauseUntil) || 0,
+    batchProgress: data?.batchProgress || null,
+    adviceDailyReport: data?.adviceDailyReport || null,
+    settings: runtimeSettings,
+  };
+}
+
+async function retryRuntimeWrite(task, attempts = 3) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await task();
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, attempt * 150)
+        );
+      }
+    }
+  }
+  throw lastError || new Error('OSS 建议增量保存失败');
+}
+
+async function persistAdviceCompletion(
+  nick,
+  data,
+  code,
+  concurrency,
+) {
+  const update = adviceRuntimeUpdateFromData(
+    data,
+    code,
+    Date.now(),
+    concurrency,
+  );
+  await retryRuntimeWrite(() =>
+    writeAdviceRuntimeUpdate(nick, update)
+  );
+  data.runtimeAdviceAppliedAt = {
+    ...(data.runtimeAdviceAppliedAt || {}),
+    [code]: update.updatedAt,
+  };
+  return update;
 }
 
 // ---- 进程内调用另一个 handler:造最小 req/res,把 JSON 结果收集回来 ----
@@ -832,7 +963,11 @@ export function mergeExternalJobs(workingData, freshData) {
 
 // ---- 保护式落盘:重读云端最新账号,只叠加服务端权威字段,绝不覆盖用户 plan/holding/account ----
 async function persistServer(nick, workingAcc, myId) {
-  const fresh = (await readAccount(nick)) || workingAcc;
+  const fresh = (await readAccount(
+    nick,
+    undefined,
+    { includeAdviceUpdates: false },
+  )) || workingAcc;
   if (!isAccountActive(fresh)) return fresh;
   const fdata = fresh.data || (fresh.data = {});
   const wdata = workingAcc.data || {};
@@ -846,6 +981,10 @@ async function persistServer(nick, workingAcc, myId) {
     Number(fdata.adviceAutoPauseUntil) || 0,
     Number(wdata.adviceAutoPauseUntil) || 0,
   );
+  fdata.runtimeAdviceAppliedAt = {
+    ...(fdata.runtimeAdviceAppliedAt || {}),
+    ...(wdata.runtimeAdviceAppliedAt || {}),
+  };
   fdata.jobWorker = wdata.jobWorker;
   fdata.activeAdviceBatchId = wdata.activeAdviceBatchId || fdata.activeAdviceBatchId || '';
   if (
@@ -936,11 +1075,14 @@ async function persistServer(nick, workingAcc, myId) {
   };
   stampFrom(wdata.holding, fdata.holding);
   stampFrom(wdata.plan, fdata.plan);
-  // Worker 进度是可重建运行态：只覆盖 current，不为每个 SSE 帧创建 4 MiB 历史快照，
-  // 也不做大对象回读校验；任务完成释放锁时仍走完整历史+校验保存。
-  try {
-    await writeAccount(fresh, undefined, { history: false, verify: false });
-  } catch { /* 写失败不阻断 */ }
+  const runtimeState = adviceRuntimeStateFromData(
+    fdata,
+    Date.now(),
+  );
+  await retryRuntimeWrite(() =>
+    writeAdviceRuntimeState(nick, runtimeState)
+  );
+  fdata.runtimeStateAppliedAt = runtimeState.updatedAt;
   // 让 drainer 后续以 fresh 为工作副本:fresh 有用户最新 plan/holding + 我们刚写的服务端字段
   return fresh;
 }
@@ -1276,7 +1418,24 @@ async function drainAccount(nick, initialAcc) {
         );
         if (jobsOf(d)[done.code] && jobsOf(d)[done.code].status === 'failed') fail++;
       }
-      await queueProgressSave(true);
+      if (job && job.id === done.jobId) {
+        try {
+          await persistAdviceCompletion(
+            nick,
+            d,
+            done.code,
+            CONC,
+          );
+        } catch (runtimeError) {
+          // 小对象增量写连续失败时才回退完整快照，避免生成结果丢失。
+          await writeAccount(acc, undefined, {
+            history: false,
+            verify: true,
+          });
+        }
+      }
+      // 单股结果已独立持久化；完整账号快照交给节流进度或批次收尾压实。
+      void queueProgressSave(false).catch(() => {});
     }
   } finally {
     clearInterval(heartbeat);

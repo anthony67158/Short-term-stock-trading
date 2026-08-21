@@ -186,6 +186,21 @@ export function applyClientAccountSave(
       Number(prev.tradeStateResetAt) || 0,
     );
   }
+  if (Number(prev.runtimeStateAppliedAt) > 0) {
+    merged.runtimeStateAppliedAt = Math.max(
+      Number(incoming.runtimeStateAppliedAt) || 0,
+      Number(prev.runtimeStateAppliedAt) || 0,
+    );
+  }
+  if (
+    prev.runtimeAdviceAppliedAt
+    && typeof prev.runtimeAdviceAppliedAt === 'object'
+  ) {
+    merged.runtimeAdviceAppliedAt = {
+      ...(incoming.runtimeAdviceAppliedAt || {}),
+      ...prev.runtimeAdviceAppliedAt,
+    };
+  }
   if (
     prev.portfolioAnalysisJob
     && typeof prev.portfolioAnalysisJob === 'object'
@@ -298,6 +313,270 @@ const currentPathOf = (nick) => `${prefixOf(nick)}current.json`;
 const historyPrefixOf = (nick) => `${prefixOf(nick)}history/`;
 const deactivationPathOf = (nick) => `${prefixOf(nick)}deactivated.json`;
 const legacyPathOf = (nick) => `${PREFIX}${sha('u:' + nick)}.json`; // 旧的单文件覆盖式路径（兼容迁移）
+const adviceRuntimePrefixOf = (nick) => `${prefixOf(nick)}runtime/advice/`;
+const adviceRuntimeStatePathOf = (nick) => `${prefixOf(nick)}runtime/state.json`;
+const adviceRuntimeUpdatePathOf = (nick, code) =>
+  `${adviceRuntimePrefixOf(nick)}${String(code || '').replace(/[^0-9A-Za-z_-]/g, '')}.json`;
+
+function runtimeStamp(value) {
+  return Math.max(
+    Number(value?.updatedAt) || 0,
+    Number(value?.progressAt) || 0,
+    Number(value?.finishedAt) || 0,
+    Number(value?.at) || 0,
+  );
+}
+
+function runtimeRecordKey(item) {
+  if (item?.id) return String(item.id);
+  if (item?.schemaVersion === 'advisor-council-shadow.v1') {
+    return [
+      item.code,
+      item.at,
+      item.evidenceSnapshotId,
+      item.baseAdviceAction,
+    ].join('|');
+  }
+  return '';
+}
+
+function mergeRuntimeRecords(current = [], incoming = [], limit = 1000) {
+  const records = new Map(
+    (Array.isArray(current) ? current : [])
+      .map((item) => [runtimeRecordKey(item), item])
+      .filter(([key]) => key),
+  );
+  for (const item of (Array.isArray(incoming) ? incoming : [])) {
+    const key = runtimeRecordKey(item);
+    if (!key) continue;
+    const previous = records.get(key);
+    if (!previous || runtimeStamp(item) >= runtimeStamp(previous)) {
+      records.set(key, item);
+    }
+  }
+  return [...records.values()]
+    .sort((left, right) => runtimeStamp(right) - runtimeStamp(left))
+    .slice(0, limit);
+}
+
+function mergeRuntimeJob(current, incoming) {
+  if (!incoming) return current;
+  if (!current || runtimeStamp(incoming) >= runtimeStamp(current)) {
+    return incoming;
+  }
+  return current;
+}
+
+export function mergeAdviceRuntimeState(account, runtime) {
+  if (!account || !runtime || typeof runtime !== 'object') return account;
+  const updatedAt = Number(runtime.updatedAt) || 0;
+  const data = account.data || (account.data = {});
+  if (updatedAt <= (Number(data.runtimeStateAppliedAt) || 0)) {
+    return account;
+  }
+  if (runtime.jobs && typeof runtime.jobs === 'object') {
+    const jobs = { ...(data.jobs || {}) };
+    for (const [code, job] of Object.entries(runtime.jobs)) {
+      jobs[code] = mergeRuntimeJob(jobs[code], job);
+    }
+    data.jobs = jobs;
+  }
+  for (const key of [
+    'jobWorker',
+    'activeAdviceBatchId',
+    'adviceBatchCancellations',
+    'adviceAutoPauseUntil',
+  ]) {
+    if (runtime[key] != null) data[key] = runtime[key];
+  }
+  if (
+    runtime.batchProgress
+    && runtimeStamp(runtime.batchProgress)
+      >= runtimeStamp(data.batchProgress)
+  ) data.batchProgress = runtime.batchProgress;
+  if (
+    runtime.adviceDailyReport
+    && runtimeStamp(runtime.adviceDailyReport)
+      >= runtimeStamp(data.adviceDailyReport)
+  ) data.adviceDailyReport = runtime.adviceDailyReport;
+  if (runtime.settings && typeof runtime.settings === 'object') {
+    data.settings = {
+      ...(data.settings || {}),
+      ...runtime.settings,
+    };
+  }
+  data.runtimeStateAppliedAt = updatedAt;
+  account.updatedAt = Math.max(Number(account.updatedAt) || 0, updatedAt);
+  return account;
+}
+
+export function mergeAdviceRuntimeUpdate(account, update) {
+  if (!account || !update?.code) return account;
+  const updatedAt = Number(update.updatedAt) || 0;
+  const data = account.data || (account.data = {});
+  const cursors = data.runtimeAdviceAppliedAt
+    && typeof data.runtimeAdviceAppliedAt === 'object'
+    ? data.runtimeAdviceAppliedAt
+    : {};
+  const code = String(update.code);
+  if (updatedAt <= (Number(cursors[code]) || 0)) return account;
+
+  if (update.advice) {
+    const advice = data.advice || (data.advice = {});
+    if (
+      !advice[code]
+      || runtimeStamp(update.advice) >= runtimeStamp(advice[code])
+    ) advice[code] = update.advice;
+  }
+  if (update.job) {
+    const jobs = data.jobs || (data.jobs = {});
+    jobs[code] = mergeRuntimeJob(jobs[code], update.job);
+  }
+  data.adviceLog = mergeRuntimeRecords(
+    data.adviceLog,
+    update.adviceLog,
+    500,
+  );
+  data.decisionLog = mergeRuntimeRecords(
+    data.decisionLog,
+    update.decisionLog,
+    1000,
+  );
+  data.adviceReviewLog = mergeRuntimeRecords(
+    data.adviceReviewLog,
+    update.adviceReviewLog,
+    500,
+  );
+  data.advisorCouncilShadow = mergeRuntimeRecords(
+    data.advisorCouncilShadow,
+    update.councilShadow,
+    200,
+  );
+  data.evidenceSnapshots = mergeEvidenceSnapshotIndexes(
+    data.evidenceSnapshots,
+    update.evidenceSnapshots,
+  );
+  data.alerts = mergeRuntimeRecords(data.alerts, update.alerts, 1000);
+  if (
+    update.batchProgress
+    && runtimeStamp(update.batchProgress)
+      >= runtimeStamp(data.batchProgress)
+  ) data.batchProgress = update.batchProgress;
+  for (const [collection, patch] of [
+    ['holding', update.holdingPatch],
+    ['plan', update.planPatch],
+  ]) {
+    if (!patch?.code || !Array.isArray(data[collection])) continue;
+    data[collection] = data[collection].map((item) =>
+      String(item?.code) === code
+        ? {
+            ...item,
+            ...(patch.qScore != null ? { qScore: patch.qScore } : {}),
+            ...(patch.qBias != null ? { qBias: patch.qBias } : {}),
+            ...(patch.qAt != null ? { qAt: patch.qAt } : {}),
+          }
+        : item
+    );
+  }
+  data.runtimeAdviceAppliedAt = {
+    ...cursors,
+    [code]: updatedAt,
+  };
+  account.updatedAt = Math.max(Number(account.updatedAt) || 0, updatedAt);
+  return account;
+}
+
+async function writeAdviceRuntimeObject(
+  path,
+  value,
+  storage,
+  { verify = true } = {},
+) {
+  const body = JSON.stringify(value);
+  await storage.put(path, body, {
+    access: 'public',
+    contentType: 'application/json',
+    addRandomSuffix: false,
+    cacheControlMaxAge: 0,
+  });
+  if (verify) {
+    const verified = await storage.readJson(path);
+    if (
+      !verified
+      || Number(verified.updatedAt) !== Number(value.updatedAt)
+    ) {
+      throw new Error('OSS 建议增量写入校验失败');
+    }
+  }
+  return value;
+}
+
+export async function writeAdviceRuntimeState(
+  nick,
+  runtime,
+  storage = defaultStorage,
+) {
+  if (!nick || !runtime || typeof runtime !== 'object') {
+    throw new Error('建议运行态无效');
+  }
+  return writeAdviceRuntimeObject(
+    adviceRuntimeStatePathOf(nick),
+    runtime,
+    storage,
+    { verify: false },
+  );
+}
+
+export async function writeAdviceRuntimeUpdate(
+  nick,
+  update,
+  storage = defaultStorage,
+) {
+  const path = adviceRuntimeUpdatePathOf(nick, update?.code);
+  if (!nick || !update?.code || path.endsWith('/.json')) {
+    throw new Error('单股建议增量无效');
+  }
+  return writeAdviceRuntimeObject(path, update, storage);
+}
+
+async function applyAdviceRuntime(
+  account,
+  nick,
+  storage,
+  { runtimeSince = 0, includeAdviceUpdates = true } = {},
+) {
+  if (!account || !storage?.list || !storage?.readJson) return account;
+  const state = await storage.readJson(adviceRuntimeStatePathOf(nick))
+    .catch(() => null);
+  mergeAdviceRuntimeState(account, state);
+  if (!includeAdviceUpdates) return account;
+  const cursor = Math.max(0, Number(runtimeSince) || 0);
+  const { blobs } = await storage.list({
+    prefix: adviceRuntimePrefixOf(nick),
+    limit: 500,
+  }).catch(() => ({ blobs: [] }));
+  const candidates = (blobs || []).filter((blob) => {
+    if (!cursor) return true;
+    const uploadedAt = new Date(blob?.uploadedAt || 0).getTime();
+    // 运行态进度可能在单股结果之后写入并推进客户端游标。
+    // 保留五分钟重叠窗口，避免状态写入盖过刚完成的建议增量。
+    return !Number.isFinite(uploadedAt)
+      || uploadedAt > cursor - 5 * 60 * 1000;
+  });
+  const updates = await Promise.all(
+    candidates.map((blob) =>
+      storage.readJson(blob?.pathname || blob).catch(() => null)
+    ),
+  );
+  for (const update of updates
+    .filter(Boolean)
+    .sort((left, right) =>
+      Number(left.updatedAt || 0) - Number(right.updatedAt || 0)
+    )) {
+    mergeAdviceRuntimeUpdate(account, update);
+  }
+  return account;
+}
 
 // 账号响应绝不缓存(登录/保存态)，走统一 sendJson(cache:0) 契约
 function ok(res, obj) {
@@ -317,7 +596,15 @@ function accountSessionToken(account) {
 
 // 读取某账号：优先读取权威当前快照；没有则从历史/旧格式中取最新版本。
 // OSS 故障必须向上抛出，不能伪装成“账号不存在”。
-export async function readAccount(nick, storage = defaultStorage) {
+export async function readAccount(
+  nick,
+  storage = defaultStorage,
+  {
+    includeAdviceRuntime = true,
+    includeAdviceUpdates = true,
+    runtimeSince = 0,
+  } = {},
+) {
   const current = await storage.readJson(currentPathOf(nick));
   let account = current;
 
@@ -332,7 +619,13 @@ export async function readAccount(nick, storage = defaultStorage) {
   if (!account) account = await storage.readJson(legacyPathOf(nick));
   if (!account) return null;
 
-  return applyDeactivationMarker(account, nick, storage);
+  account = await applyDeactivationMarker(account, nick, storage);
+  return includeAdviceRuntime
+    ? applyAdviceRuntime(account, nick, storage, {
+        runtimeSince,
+        includeAdviceUpdates,
+      })
+    : account;
 }
 
 async function applyDeactivationMarker(account, nick, storage) {
@@ -352,6 +645,7 @@ export async function listAllAccounts(storage = defaultStorage) {
   for (const b of (blobs || [])) {
     if (b.pathname.endsWith('/deactivated.json')) continue;
     const rest = b.pathname.slice(PREFIX.length);      // <hash>/<ts>.json 或 <hash>.json
+    if (rest.includes('/runtime/')) continue;
     const key = rest.includes('/') ? rest.split('/')[0] : rest; // 目录 hash 或旧文件名
     const cur = groups.get(key);
     if (!cur || new Date(b.uploadedAt).getTime() > new Date(cur.uploadedAt).getTime()) {
@@ -475,7 +769,14 @@ export default async function handler(req, res) {
     }
 
     if (action === 'login' || action === 'get' || action === 'sync') {
-      const acc = await readAccount(nick);
+      const syncSince = action === 'sync'
+        ? Math.max(0, Number(body.since) || 0)
+        : 0;
+      const acc = await readAccount(
+        nick,
+        defaultStorage,
+        { runtimeSince: syncSince },
+      );
       if (!acc) return ok(res, { ok: false, error: '账号不存在，请先注册' });
       const authorized = action === 'login'
         ? !!pw && acc.pwHash === sha(pw)
@@ -488,7 +789,7 @@ export default async function handler(req, res) {
       }
       if (!isAccountActive(acc)) return ok(res, { ok: false, error: '账号已注销，数据仍保存在 OSS' });
       if (action === 'sync') {
-        const since = Math.max(0, Number(body.since) || 0);
+        const since = syncSince;
         const changed = Number(acc.updatedAt) > since;
         return ok(res, {
           ok: true,

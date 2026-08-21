@@ -10,6 +10,8 @@ import {
   listAllAccounts,
   readAccount,
   sha,
+  writeAdviceRuntimeState,
+  writeAdviceRuntimeUpdate,
   writeAccount,
 } from '../api/account.js'
 
@@ -112,6 +114,85 @@ test('Worker运行态保存只覆盖当前快照且不生成历史或回读校�
   assert.equal(keys.some((key) => key.includes('/history/')), false)
   assert.equal(reads, 0)
   assert.equal(saved.snapshotKey, null)
+})
+
+test('单股建议完成后通过独立OSS小对象立即进入跨设备增量同步', async () => {
+  const storage = fakeStorage()
+  const account = {
+    nick: '增量账号',
+    pwHash: 'hash',
+    createdAt: 1,
+    updatedAt: 100,
+    data: {
+      plan: [{ code: '600519', name: '贵州茅台' }],
+      holding: [],
+      closed: [],
+      advice: {},
+      jobs: {},
+    },
+  }
+  const saved = await writeAccount(account, storage, {
+    history: false,
+    verify: false,
+  })
+  const stateAt = saved.updatedAt + 10
+  const adviceAt = saved.updatedAt + 20
+  await writeAdviceRuntimeState(account.nick, {
+    updatedAt: stateAt,
+    jobs: {
+      '600519': {
+        id: 'job-1',
+        code: '600519',
+        status: 'done',
+        finishedAt: stateAt,
+        progressAt: stateAt,
+      },
+    },
+    batchProgress: { at: stateAt, done: 1, total: 2 },
+  }, storage)
+  await writeAdviceRuntimeUpdate(account.nick, {
+    code: '600519',
+    updatedAt: adviceAt,
+    advice: {
+      at: adviceAt,
+      advice: { action: '持有', title: '继续持有' },
+    },
+    job: {
+      id: 'job-1',
+      code: '600519',
+      status: 'done',
+      finishedAt: stateAt,
+      progressAt: stateAt,
+    },
+    batchProgress: { at: adviceAt, done: 1, total: 2 },
+  }, storage)
+
+  const rawCurrent = storage.objects.get(
+    `accounts/${sha('u:增量账号')}/current.json`,
+  )?.value
+  assert.deepEqual(rawCurrent.data.advice, {})
+
+  const hydrated = await readAccount(account.nick, storage)
+  assert.equal(hydrated.data.advice['600519'].advice.title, '继续持有')
+  assert.equal(hydrated.data.jobs['600519'].status, 'done')
+  assert.equal(hydrated.data.batchProgress.done, 1)
+  assert.equal(hydrated.updatedAt, adviceAt)
+  assert.equal(
+    accountSyncDelta(hydrated.data, saved.updatedAt).advice['600519']
+      .advice.title,
+    '继续持有',
+  )
+  const overlapped = await readAccount(account.nick, storage, {
+    runtimeSince: adviceAt + 10,
+  })
+  assert.equal(
+    overlapped.data.advice['600519'].advice.title,
+    '继续持有',
+  )
+  assert.deepEqual(
+    (await listAllAccounts(storage)).map((item) => item.nick),
+    ['增量账号'],
+  )
 })
 
 test('运行时账号同步只返回更新时间后的建议事件和轻量状态', () => {

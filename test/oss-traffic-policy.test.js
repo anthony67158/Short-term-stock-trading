@@ -32,6 +32,10 @@ test('军师Worker控制进度落盘频率且两秒内感知取消', () => {
 
   assert.match(cronAdvice, /PROGRESS_SAVE_INTERVAL_MS\s*=\s*5000/)
   assert.match(cronAdvice, /CANCEL_POLL_INTERVAL_MS\s*=\s*2000/)
+  assert.match(cronAdvice, /writeAdviceRuntimeState/)
+  assert.match(cronAdvice, /writeAdviceRuntimeUpdate/)
+  assert.match(cronAdvice, /persistAdviceCompletion/)
+  assert.match(cronAdvice, /queueProgressSave\(false\)/)
   assert.match(cronAdvice, /history:\s*false/)
-  assert.match(cronAdvice, /verify:\s*false/)
+  assert.match(cronAdvice, /verify:\s*true/)
 })
