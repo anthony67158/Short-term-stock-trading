@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useAIStore, aiStore } from '../aiStore'
 import { chatStore } from '../chatStore'
-import { callAI } from '../ai'
 import { api } from '../apiBase'
 import { accountRequestHeaders } from '../quantModel'
 import { computePortfolio, livePositionOf, planStore, t1StatusOf, usePlanStore } from '../planStore'

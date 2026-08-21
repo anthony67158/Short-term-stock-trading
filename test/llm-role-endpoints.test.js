@@ -30,9 +30,8 @@ const agent = readFileSync(
   'utf8',
 )
 
-test('所有实际LLM能力映射为七个独立角色和八个固定端点槽位', () => {
+test('所有实际LLM能力映射为六个独立角色和七个固定端点槽位', () => {
   assert.deepEqual(Object.keys(ROLES), [
-    'chat',
     'advisor',
     'portfolio',
     'agent',
@@ -41,7 +40,6 @@ test('所有实际LLM能力映射为七个独立角色和八个固定端点槽�
     'judge',
   ])
   assert.deepEqual(ROLE_ENDPOINT_SLOTS, {
-    chat: 1,
     advisor: 2,
     portfolio: 1,
     agent: 1,
@@ -119,10 +117,6 @@ test('旧版主端点和资源池可无损迁移到角色端点槽位', () => {
     }],
   )
   assert.equal(
-    resolveRoleEndpoints(legacy, 'chat')[0].apiKey,
-    'main-key',
-  )
-  assert.equal(
     resolveRoleEndpoints(legacy, 'daily')[0].model,
     'agent-model',
   )
@@ -150,16 +144,20 @@ test('策略日报使用独立daily角色而不是复用agent', () => {
 
 test('各入口按自己的角色判断专用端点是否可用', () => {
   assert.match(ai, /llmReady\(useRole\)/)
+  assert.match(ai, /isAdvisorMode\(mode\) \? 'advisor' : 'agent'/)
+  assert.doesNotMatch(ai, /getModel\('chat'\)/)
   assert.match(agent, /llmReady\('agent'\)/)
   assert.match(dailyReport, /llmReady\('daily'\)/)
 })
 
 test('配置界面按角色展示端点且不再暴露通用资源池', () => {
-  assert.match(frontend, /7 个角色/)
-  assert.match(frontend, /8 个端点/)
+  assert.match(frontend, /6 个角色/)
+  assert.match(frontend, /7 个端点/)
   assert.match(frontend, /roleEndpoints/)
-  assert.match(frontend, /一次性生成军师/)
+  assert.match(frontend, /军师AI操作建议生成/)
   assert.match(frontend, /role === 'advisor'/)
+  assert.match(frontend, /role !== 'advisor'/)
+  assert.doesNotMatch(frontend, /对话\/盘面分析/)
   assert.match(frontend, /`端点 \$\{index \+ 1\}`/)
   assert.doesNotMatch(frontend, /多端点资源池/)
   assert.doesNotMatch(frontend, /主端点最大在途/)

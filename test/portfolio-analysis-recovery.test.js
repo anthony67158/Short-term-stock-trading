@@ -56,40 +56,29 @@ function chatSequence(steps) {
         ? { __err: step }
         : response(step),
       selectedModel: options.model,
-      endpoint: options.role === 'advisor'
-        ? 'advisor-backup'
-        : 'portfolio-main',
+      endpoint: 'portfolio-main',
       done() {},
     }
   }
   return { chat, calls }
 }
 
-test('持仓专用模型404时自动切换可用军师模型完成结论', async () => {
+test('持仓专用模型404时不得跨角色占用军师端点', async () => {
   const { chat, calls } = chatSequence([
     { status: 404 },
-    { content: '{"headline":"已恢复完整结论"}' },
   ])
 
   const result = await generateAnalysis(context, {
     model: 'missing-portfolio-model',
-    fallbackModel: 'advisor-model',
-    deepMode: true,
+    deepMode: false,
     functionMessages: [],
     chat,
   })
 
-  assert.equal(result.raw.headline, '已恢复完整结论')
-  assert.equal(result.recovered, true)
+  assert.equal(result.raw, null)
   assert.equal(result.failureCode, 'http_404')
-  assert.equal(result.model, 'advisor-model')
-  assert.equal(result.endpoint, 'advisor-backup')
-  assert.match(result.warning, /自动切换/)
-  assert.deepEqual(calls.map((call) => call.role), [
-    'portfolio',
-    'advisor',
-  ])
-  assert.equal(calls[1].forceNoReason, true)
+  assert.equal(calls.length, 1)
+  assert.deepEqual(calls.map((call) => call.role), ['portfolio'])
 })
 
 test('深度模型只有思考没有正文时先关闭思考重试同一模型', async () => {
@@ -104,7 +93,6 @@ test('深度模型只有思考没有正文时先关闭思考重试同一模型',
 
   const result = await generateAnalysis(context, {
     model: 'portfolio-model',
-    fallbackModel: 'advisor-model',
     deepMode: true,
     functionMessages: [],
     chat,
@@ -121,26 +109,22 @@ test('深度模型只有思考没有正文时先关闭思考重试同一模型',
   assert.equal(calls[1].forceNoReason, true)
 })
 
-test('专用模型与备用模型都失败时保留可定位的安全失败原因', async () => {
+test('专用模型失败时保留可定位的安全失败原因', async () => {
   const timeout = new Error('aborted')
   timeout.name = 'AbortError'
   const { chat, calls } = chatSequence([
-    { status: 404 },
     timeout,
   ])
 
   const result = await generateAnalysis(context, {
-    model: 'missing-portfolio-model',
-    fallbackModel: 'advisor-model',
+    model: 'portfolio-model',
     deepMode: false,
     functionMessages: [],
     chat,
   })
 
   assert.equal(result.raw, null)
-  assert.equal(result.failureCode, 'http_404')
-  assert.equal(result.recoveryFailureCode, 'timeout')
-  assert.match(result.error, /模型不存在或无权限/)
-  assert.match(result.error, /备用模型/)
-  assert.equal(calls.length, 2)
+  assert.equal(result.failureCode, 'timeout')
+  assert.doesNotMatch(result.error, /备用模型/)
+  assert.equal(calls.length, 1)
 })

@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 import {
   acceptsGenerationResult,
@@ -9,6 +10,11 @@ import {
   generationOptions,
   validateBatchMode,
 } from '../shared/adviceBatchPolicy.js'
+
+const planTab = readFileSync(
+  new URL('../src/components/PlanTab.jsx', import.meta.url),
+  'utf8',
+)
 
 const completeAdvice = {
   action: '持有',
@@ -28,7 +34,7 @@ test('深度批量允许全选，不限制总股票数量', () => {
   })
 })
 
-test('深度批量固定最多两路并行，快速模式保持端点并发数', () => {
+test('深度批量固定最多两路并行，普通模式保持端点并发数', () => {
   assert.equal(batchConcurrency(3, true), 2)
   assert.equal(batchConcurrency(1, true), 1)
   assert.equal(batchConcurrency(3, false), 3)
@@ -49,7 +55,7 @@ test('单股深度生成使用全部军师端点，只有一次性深度批量�
   }), 3)
 })
 
-test('快速模式关闭深度思考并使用短预算', () => {
+test('普通模式关闭深度思考并使用短预算', () => {
   assert.deepEqual(generationOptions(false), {
     deepMode: false,
     fastMode: true,
@@ -69,6 +75,13 @@ test('深度模式启用长预算并自动重试', () => {
     timeoutMs: 495000,
     maxAttempts: 3,
   })
+})
+
+test('一次性生成界面明确区分普通生成与深度生成', () => {
+  assert.match(planTab, /普通生成（\{selCount\}）/)
+  assert.match(planTab, /深度生成（2路并行）/)
+  assert.match(planTab, /正在后台\{batch\.deepMode \? '深度' : '普通'\}生成/)
+  assert.doesNotMatch(planTab, /快速生成（\{selCount\}）/)
 })
 
 test('所有任务只有完整AI建议才能计为成功', () => {

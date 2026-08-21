@@ -700,7 +700,6 @@ async function requestAnalysisJson({
 
 export async function generateAnalysis(context, {
   model,
-  fallbackModel,
   deepMode,
   functionMessages,
   chat = callChat,
@@ -753,41 +752,18 @@ export async function generateAnalysis(context, {
     lastFailure = withoutReasoning
   }
 
-  if (fallbackModel) {
-    const fallback = await requestAnalysisJson({
-      chat,
-      messages,
-      model: fallbackModel,
-      role: 'advisor',
-      reasoning: false,
-      forceReason: false,
-      forceNoReason: true,
-      maxTokens: 5200,
-      timeoutMs: 180000,
-    })
-    if (fallback.raw) {
-      return {
-        ...fallback,
-        recovered: true,
-        failureCode: primary.failureCode,
-        warning: `${primary.error}，已自动切换操盘军师模型完成分析`,
-      }
-    }
-    lastFailure = fallback
-  }
-
-  const fallbackError = lastFailure !== primary
-    ? `；备用模型${lastFailure.error || '未返回有效结论'}`
+  const retryError = lastFailure !== primary
+    ? `；关闭深度思考重试${lastFailure.error || '未返回有效结论'}`
     : ''
   return {
     raw: null,
-    model: primary.model || model,
-    endpoint: primary.endpoint || '',
+    model: lastFailure.model || primary.model || model,
+    endpoint: lastFailure.endpoint || primary.endpoint || '',
     failureCode: primary.failureCode,
     recoveryFailureCode: lastFailure !== primary
       ? lastFailure.failureCode
       : '',
-    error: `${primary.error}${fallbackError}`,
+    error: `${primary.error}${retryError}`,
   }
 }
 
@@ -1569,7 +1545,6 @@ export default async function handler(req, res) {
     })
     const generated = await generateAnalysis(context, {
       model,
-      fallbackModel: getModel('advisor'),
       deepMode,
       functionMessages: planned.messages,
     })

@@ -35,7 +35,6 @@ resources:
         LLM_BASE_URL: ${env('LLM_BASE_URL')}
         LLM_API_KEY: ${env('LLM_API_KEY')}
         # 模型沿用代码内默认值（保持与线上一致）
-        LLM_MODEL: DeepSeek-V3.2-Pro
         ADVISOR_MODEL: DeepSeek-V4-Pro
         PORTFOLIO_MODEL: DeepSeek-V4-Pro
         AGENT_MODEL: Qwen3-Max-A

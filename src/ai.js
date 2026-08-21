@@ -2,30 +2,6 @@
 import { api } from './apiBase'
 import { accountRequestHeaders, quantModelHeaders } from './quantModel'
 
-export async function callAI(mode, payload) {
-  try {
-    const res = await fetch(api('/api/ai'), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...accountRequestHeaders(),
-        ...quantModelHeaders(payload?.quantModelVersion),
-      },
-      body: JSON.stringify({ mode, payload }),
-    })
-    const raw = await res.text()
-    try {
-      return JSON.parse(raw)
-    } catch {
-      // 非 JSON = 平台层错误（504 超时 / 函数崩溃返回 "An error occurred..."）
-      const timeout = res.status === 504 || /timed? ?out|An error occurred/i.test(raw)
-      return { ok: false, error: timeout ? '分析超时，请稍后重试或缩小问题范围' : `服务暂时不可用（${res.status}）` }
-    }
-  } catch (e) {
-    return { ok: false, error: '网络异常：' + String(e.message || e) }
-  }
-}
-
 // 盘面研究·外部宏观快讯聚合：一次性拉取宏观要闻 + 7×24 快讯（非流式）
 export async function fetchMarketNews() {
   try {

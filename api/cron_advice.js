@@ -762,6 +762,7 @@ async function genOne({
         strategyGate,
         evidenceSnapshotId: meta?.evidenceSnapshot?.snapshotId || null,
         signal,
+        deepMode,
       });
       cacheItem.councilShadow = councilShadow;
     } catch {

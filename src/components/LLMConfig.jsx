@@ -5,7 +5,6 @@ import { api } from '../apiBase'
 import { accountRequestHeaders } from '../quantModel'
 
 const ROLE_ORDER = [
-  'chat',
   'advisor',
   'portfolio',
   'agent',
@@ -15,8 +14,7 @@ const ROLE_ORDER = [
 ]
 
 const ROLE_META = {
-  chat: { icon: 'spark', label: '对话/盘面分析', badge: '交互' },
-  advisor: { icon: 'spark', label: '一次性生成军师', badge: '2 路并行' },
+  advisor: { icon: 'spark', label: '军师AI操作建议生成', badge: '2 路并行' },
   portfolio: { icon: 'layers', label: '持仓分布分析', badge: '组合' },
   agent: { icon: 'brain', label: '智能体助手', badge: '工具调用' },
   daily: { icon: 'history', label: '策略日报', badge: '日报' },
@@ -414,24 +412,26 @@ export default function LLMConfig() {
               ))}
             </datalist>
           </label>
-          <button
-            type="button"
-            className={'llm-reason-toggle' + (
-              endpoint.reasoning ? ' on' : ''
-            )}
-            aria-label={`${roles[role]?.label || role}深度思考${endpoint.reasoning ? '已开启' : '已关闭'}`}
-            onClick={() => updateEndpoint(role, index, {
-              reasoning: !endpoint.reasoning,
-            })}
-          >
-            <span className="llm-reason-text">
-              <Icon name="brain" size={12} />
-              深度思考
-            </span>
-            <span className="llm-reason-track">
-              <span className="llm-reason-thumb" />
-            </span>
-          </button>
+          {role !== 'advisor' && (
+            <button
+              type="button"
+              className={'llm-reason-toggle' + (
+                endpoint.reasoning ? ' on' : ''
+              )}
+              aria-label={`${roles[role]?.label || role}深度思考${endpoint.reasoning ? '已开启' : '已关闭'}`}
+              onClick={() => updateEndpoint(role, index, {
+                reasoning: !endpoint.reasoning,
+              })}
+            >
+              <span className="llm-reason-text">
+                <Icon name="brain" size={12} />
+                深度思考
+              </span>
+              <span className="llm-reason-track">
+                <span className="llm-reason-thumb" />
+              </span>
+            </button>
+          )}
           <button
             type="button"
             className="btn llm-ep-verify"
@@ -473,7 +473,7 @@ export default function LLMConfig() {
           <div className="modal-title">
             <Icon name="brain" size={18} />
             AI 角色端点
-            <span className="llm-role-count">7 个角色 · 8 个端点</span>
+            <span className="llm-role-count">6 个角色 · 7 个端点</span>
           </div>
           <button
             type="button"
@@ -492,7 +492,7 @@ export default function LLMConfig() {
               正在读取角色端点
             </div>
           ) : ROLE_ORDER.map((role) => {
-            const meta = ROLE_META[role] || ROLE_META.chat
+            const meta = ROLE_META[role] || ROLE_META.agent
             const endpoints = roleEndpoints[role] || []
             return (
               <section className="llm-role-group" key={role}>

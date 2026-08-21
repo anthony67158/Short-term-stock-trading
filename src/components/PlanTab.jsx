@@ -1745,7 +1745,7 @@ function HoldingList({ book, quote, stockTags, searchConfig, batchSel }) {
           // 端点占用门控:端点被单股生成占满 → 不启动,弹「端点已满」;未满则用剩余空槽并行(空出再补)
           const peek = peekBatchBusy(codes, deepMode)
           if (peek.full) { setBusyModal({ busy: peek.busy, concurrency: peek.concurrency }); return }
-          setBatchNotice(deepMode ? '正在提交云端深度生成任务…' : '正在提交云端快速生成任务…')
+          setBatchNotice(deepMode ? '正在提交云端深度生成任务…' : '正在提交云端普通生成任务…')
           const result = await runBatchAdvice(codes, quote, { deepMode })
           if (result?.status === 'started') {
             setSelectMode(false)
@@ -1805,7 +1805,7 @@ function HoldingList({ book, quote, stockTags, searchConfig, batchSel }) {
             </span>
             <span className="batch-spacer" />
             <button className="chip-btn buy" onClick={() => doRun(false)} disabled={!selCount || batch.running}>
-              <Icon name="spark" size={12} />快速生成（{selCount}）
+              <Icon name="spark" size={12} />普通生成（{selCount}）
             </button>
             <button className="chip-btn batch-deep" onClick={() => doRun(true)}
               disabled={!selCount || batch.running}
@@ -1833,7 +1833,7 @@ function HoldingList({ book, quote, stockTags, searchConfig, batchSel }) {
           <div className="bp-head">
             <span className="bp-title">
               {batch.running
-                ? <><Icon name="refresh" size={13} className="spin" /> 正在后台{batch.deepMode ? '深度' : '快速'}生成 AI 操作建议…{batch.serverMode ? <span className="sub-name"> · 云端(退后台/关页面照跑)</span> : null}{batch.deepMode ? <span className="bp-deep-tag">深度思考·耗时较长</span> : null}</>
+                ? <><Icon name="refresh" size={13} className="spin" /> 正在后台{batch.deepMode ? '深度' : '普通'}生成 AI 操作建议…{batch.serverMode ? <span className="sub-name"> · 云端(退后台/关页面照跑)</span> : null}{batch.deepMode ? <span className="bp-deep-tag">深度思考·耗时较长</span> : null}</>
                 : <><Icon name="check" size={13} /> {batch.deepMode ? '深度' : '批量'}生成完成</>}
             </span>
             <span className="bp-stat">

@@ -1,10 +1,17 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 import {
+  advisorReasoningOptions,
   buildCouncilContext,
   runAdvisorCouncilShadow,
 } from '../api/_advisor_council.js'
+
+const cronAdvice = readFileSync(
+  new URL('../api/cron_advice.js', import.meta.url),
+  'utf8',
+)
 
 test('委员会上下文只保留决策所需字段并限制外部文本长度', () => {
   const context = buildCouncilContext({
@@ -34,6 +41,7 @@ test('委员会上下文只保留决策所需字段并限制外部文本长度',
 
 test('三个角色并行完成后生成不可执行的委员会影子记录', async () => {
   const called = []
+  const modes = []
   const result = await runAdvisorCouncilShadow({
     code: '600001',
     name: '样本股份',
@@ -54,9 +62,11 @@ test('三个角色并行完成后生成不可执行的委员会影子记录', as
     },
     strategyGate: { productionEligible: false },
     evidenceSnapshotId: 'ev_test',
+    deepMode: true,
   }, {
-    callOpinion: async (role) => {
+    callOpinion: async (role, _context, options) => {
       called.push(role)
+      modes.push(options.deepMode)
       return {
         verdict: role === 'skeptic' ? 'oppose' : 'support',
         confidence: 70,
@@ -72,12 +82,30 @@ test('三个角色并行完成后生成不可执行的委员会影子记录', as
     'risk_officer',
     'skeptic',
   ])
+  assert.deepEqual(modes, [true, true, true])
   assert.equal(result.at, 123)
   assert.equal(result.shadowOnly, true)
   assert.equal(result.actionable, false)
   assert.equal(result.opinions.length, 3)
   assert.equal(result.compiled.consensusReached, true)
   assert.equal(result.compiled.hardGatePassed, false)
+})
+
+test('委员会普通生成强制关闭思考且深度生成强制开启', () => {
+  assert.deepEqual(advisorReasoningOptions(false), {
+    reasoning: false,
+    forceReason: false,
+    forceNoReason: true,
+  })
+  assert.deepEqual(advisorReasoningOptions(true), {
+    reasoning: true,
+    forceReason: true,
+    forceNoReason: false,
+  })
+  assert.match(
+    cronAdvice,
+    /runAdvisorCouncilShadow\(\{[\s\S]*?deepMode,[\s\S]*?\}\)/,
+  )
 })
 
 test('单角色超时不会阻断主流程但委员会必须保守失败', async () => {

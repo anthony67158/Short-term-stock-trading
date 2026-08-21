@@ -569,13 +569,13 @@ export default async function handler(req, res) {
   }
 
   const mode = (body && body.mode) || 'market';
-  const useRole = isAdvisorMode(mode) ? 'advisor' : 'chat';
+  const useRole = isAdvisorMode(mode) ? 'advisor' : 'agent';
   // 运行时配置优先（前端「AI 模型配置」写入 OSS）：先预热同步缓存，再按角色取端点和模型。
   await ensureConfig();
   const aiSearchConfig = await ensureAiSearchConfig();
   const cfg = currentConfig();
   const effectiveReasoning = (role) => getReasoning(role);
-  const MODEL = getModel('chat');
+  const MODEL = getModel('agent');
   // 顶级操盘军师专用模型：深度个股研判(做T/加减仓/买入/复盘)用更强、更快、原生JSON稳定的模型
   const ADVISOR_MODEL = getModel('advisor');
   if (!llmReady(useRole)) {
@@ -671,7 +671,7 @@ export default async function handler(req, res) {
     const START = Date.now();
     const fastMode = body?.fastMode === true && isAdvisorMode(mode);
     const forceReasoning = body?.forceReasoning === true && isAdvisorMode(mode);
-    const configuredReasoning = effectiveReasoning(isAdvisorMode(mode) ? 'advisor' : 'chat');
+    const configuredReasoning = effectiveReasoning(useRole);
     const reasoningOn = resolveReasoningMode(configuredReasoning, fastMode, forceReasoning);
     // 时间窗口拉到 FC 平台上限(600s)附近:深度思考+大量参考内容时模型很慢,总预算给到 560s,
     // 只留 ~40s 给"数据回传/SSE 收尾/平台调度",绝不逼近 600s 硬墙被强杀。非深度思考仍给较小预算省成本。
@@ -1579,7 +1579,7 @@ export default async function handler(req, res) {
         }
         fallback.done(!!(content.trim() || streamedReasoning.trim()));
       }
-      // 军师长 JSON 在深度/快速模式都可能达到输出上限。正文为空、不可解析或靠补括号
+      // 军师长 JSON 在深度/普通模式都可能达到输出上限。正文为空、不可解析或靠补括号
       // 才解析成功时，立即关闭思考并重新输出完整对象；仍不完整则由任务层拒绝完成并重试。
       const bodyProbe = content.trim()
         ? parseLLMJson(content)

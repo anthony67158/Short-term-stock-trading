@@ -104,12 +104,11 @@
 
 ## AI 运行层
 
-### 七个角色、八个端点槽位
+### 六个角色、七个端点槽位
 
 | 角色 | 用途 | 默认模型 |
 |---|---|---|
-| `chat` | 对话与盘面分析 | `DeepSeek-V3.2-Pro` |
-| `advisor` | 一次性生成军师（固定两个端点） | `DeepSeek-V4-Pro` |
+| `advisor` | 军师 AI 操作建议生成（固定两个端点） | `DeepSeek-V4-Pro` |
 | `portfolio` | 持仓组合分析 | `DeepSeek-V4-Pro` |
 | `agent` | Function Calling 智能体助手 | `Qwen3-Max-A` |
 | `daily` | 策略日报 | `Qwen3-Max-A` |
@@ -122,7 +121,7 @@
 OSS 运行时配置 > FC 环境变量 > 代码默认值
 ```
 
-配置使用 `roleEndpoints` 按角色严格隔离。除 `advisor` 使用两个端点按最少在途路由外，其余角色各使用一个独立端点；任何角色都不会回退到其他角色。端点连续失败后会熔断、冷却并半开恢复。
+配置使用 `roleEndpoints` 按角色严格隔离。除 `advisor` 使用两个端点按最少在途路由外，其余角色各使用一个独立端点；任何角色都不会回退到其他角色。侧边栏对话统一使用 `agent`。普通军师生成强制关闭深度思考，选择深度生成时强制开启。端点连续失败后会熔断、冷却并半开恢复。
 
 ### 后台任务
 
@@ -283,7 +282,6 @@ npm run dev
 ### AI
 
 - `LLM_BASE_URL` / `LLM_API_KEY`
-- `LLM_MODEL`
 - `ADVISOR_MODEL`
 - `PORTFOLIO_MODEL`
 - `AGENT_MODEL`
