@@ -10,6 +10,24 @@ export const SITE_ACCESS_COOKIE = '__Host-tedixtf_access';
 export const SITE_ACCESS_MAX_AGE_SECONDS = 365 * 24 * 60 * 60;
 
 const TOKEN_VERSION = 'v1';
+const PUBLIC_SITE_ASSETS = new Set([
+  '/manifest.json',
+  '/sw.js',
+  '/favicon.svg',
+  '/favicon-32.png',
+  '/favicon-48.png',
+  '/safari-pinned-tab.svg',
+  '/apple-touch-icon.png',
+  '/apple-touch-icon-v2.png',
+  '/app-icon.svg',
+  '/app-icon-maskable.svg',
+  '/app-icon-192.png',
+  '/app-icon-512.png',
+  '/app-icon-1024.png',
+  '/app-icon-maskable-512.png',
+  '/brand-light.svg',
+  '/brand-dark.svg',
+]);
 
 function sign(value, secret, context) {
   if (!secret) return '';
@@ -31,6 +49,10 @@ export function normalizeSiteHost(host) {
 
 export function isProtectedSiteHost(host) {
   return normalizeSiteHost(host) === PROTECTED_SITE_HOST;
+}
+
+export function isPublicSiteAsset(pathname) {
+  return PUBLIC_SITE_ASSETS.has(String(pathname || ''));
 }
 
 export function siteAccessCodeDigest(code, secret) {

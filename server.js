@@ -32,6 +32,7 @@ import {
   cookieValue,
   createSiteAccessLimiter,
   createSiteAccessToken,
+  isPublicSiteAsset,
   isProtectedSiteHost,
   siteAccessCookie,
   verifySiteAccessCode,
@@ -259,11 +260,25 @@ function serveStatic(_req, res, pathname) {
     if (!existsSync(file)) { res.statusCode = 404; res.end('not found'); return; }
   }
   const ext = path.extname(file).toLowerCase();
-  res.setHeader('Content-Type', MIME[ext] || 'application/octet-stream');
+  res.setHeader(
+    'Content-Type',
+    rel === 'manifest.json'
+      ? 'application/manifest+json; charset=utf-8'
+      : MIME[ext] || 'application/octet-stream',
+  );
   res.setHeader('Content-Disposition', 'inline');
   // index.html 不缓存；带 hash 的 assets 长缓存（对齐原 vercel.json）
   if (file.endsWith('index.html')) res.setHeader('Cache-Control', 'no-cache');
   else if (rel.startsWith('assets/')) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  else if (rel === 'manifest.json' || rel === 'apple-touch-icon.png') {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  } else if (
+    rel.startsWith('app-icon-')
+    || rel === 'apple-touch-icon-v2.png'
+    || rel.startsWith('favicon-')
+  ) {
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  }
   createReadStream(file)
     .on('error', () => {
       if (!res.writableEnded) {
@@ -385,7 +400,10 @@ async function handleRequest(req, res) {
       return;
     }
     if (!siteAccessAuthorized(req)) {
-      if (pathname === '/brand-dark.svg' && req.method === 'GET') {
+      if (
+        ['GET', 'HEAD'].includes(req.method)
+        && isPublicSiteAsset(pathname)
+      ) {
         serveStatic(req, res, pathname);
       } else if (
         !pathname.startsWith('/api/')

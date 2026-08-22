@@ -30,6 +30,19 @@
 
 ## Theme — Precision Cobalt
 
+## Brand mark
+
+- The app icon uses one cross-platform master: graphite field, cobalt monitoring
+  ring and bars, silver execution path.
+- The ring represents continuous market monitoring, the bars represent
+  quantitative evidence, and the rising checked path represents disciplined
+  human execution.
+- Website chrome, loading state, notifications, PWA manifests and Apple Home
+  Screen icons must use the same mark. Platform-specific files may only change
+  crop safety and raster size.
+- Apple Touch Icon is an opaque 180×180 PNG. Maskable PWA artwork keeps all
+  essential geometry inside the central safe zone.
+
 ### Dark default
 
 - `--color-paper` `oklch(14.5% 0.012 255)`

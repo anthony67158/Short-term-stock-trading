@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { isPublicSiteAsset } from '../api/_site_access.js'
 
 const read = (path) => readFileSync(
   new URL(`../${path}`, import.meta.url),
@@ -13,6 +14,7 @@ function pngSize(path) {
   return {
     width: buffer.readUInt32BE(16),
     height: buffer.readUInt32BE(20),
+    hasAlpha: [4, 6].includes(buffer[25]),
   }
 }
 
@@ -21,65 +23,98 @@ const manifest = JSON.parse(read('public/manifest.json'))
 const tokens = read('tokens.css')
 const app = read('src/App.jsx')
 const authGate = read('src/components/AuthGate.jsx')
+const brandMark = read('src/components/BrandMark.jsx')
+const server = read('server.js')
 const themeStore = read('src/themeStore.js')
 const precision = read('src/styles/precision.css')
 const appIcon = read('public/app-icon.svg')
 const maskableIcon = read('public/app-icon-maskable.svg')
 
-test('品牌图标按亮暗主题切换且统一使用黑底银白高光', () => {
-  assert.match(index, /href="\/brand-light\.svg"[^>]*prefers-color-scheme:\s*light/)
-  assert.match(index, /href="\/brand-dark\.svg"[^>]*prefers-color-scheme:\s*dark/)
+test('网站、启动页与主题切换统一使用同一套新版品牌图标', () => {
+  assert.doesNotMatch(index, /brand-light\.svg|brand-dark\.svg/)
   assert.match(index, /id="app-favicon"/)
-  assert.match(themeStore, /theme === 'light' \? '\/brand-light\.svg' : '\/brand-dark\.svg'/)
-  assert.match(index, /rel="apple-touch-icon"[^>]*href="\/apple-touch-icon\.png"/)
+  assert.match(index, /href="\/favicon\.svg\?v=2"/)
+  assert.match(index, /href="\/favicon-48\.png\?v=2"/)
+  assert.match(index, /rel="mask-icon"[^>]*href="\/safari-pinned-tab\.svg\?v=2"/)
+  assert.match(index, /rel="apple-touch-icon"[^>]*href="\/apple-touch-icon-v2\.png"/)
+  assert.match(index, /href="\/manifest\.json\?v=2"/)
+  assert.match(index, /src="\/app-icon-192\.png"/)
+  assert.match(themeStore, /favicon\.svg\?v=2/)
+  assert.doesNotMatch(themeStore, /brand-light\.svg|brand-dark\.svg/)
+  assert.match(brandMark, /src="\/app-icon-192\.png"/)
+  assert.doesNotMatch(brandMark, /brand-light\.svg|brand-dark\.svg/)
+  assert.deepEqual(pngSize('public/apple-touch-icon-v2.png'), {
+    width: 180,
+    height: 180,
+    hasAlpha: false,
+  })
   assert.deepEqual(pngSize('public/apple-touch-icon.png'), {
     width: 180,
     height: 180,
+    hasAlpha: false,
   })
-  const lightBrand = read('public/brand-light.svg')
-  const darkBrand = read('public/brand-dark.svg')
-  assert.match(lightBrand, /id="brand-bg-light"/)
-  assert.match(lightBrand, /id="brand-mark-light"/)
-  assert.match(lightBrand, /id="brand-shadow-light"/)
-  assert.match(lightBrand, /scale\(1\.22 1\.7\)/)
-  assert.doesNotMatch(lightBrand, /#0874D8|#42A7FF|#1389ED/)
-  assert.match(darkBrand, /id="brand-bg-dark"/)
-  assert.match(darkBrand, /id="brand-mark-dark"/)
-  assert.match(darkBrand, /id="brand-shadow-dark"/)
-  assert.match(darkBrand, /scale\(1\.22 1\.7\)/)
-  assert.doesNotMatch(darkBrand, /#0874D8|#42A7FF|#1389ED/)
 })
 
-test('PWA主图标使用黑白高光方形源图并为maskable保留安全区', () => {
-  assert.deepEqual(pngSize('public/icon-192.png'), {
+test('PWA图标来自同一钴蓝交易信号母版且为maskable保留安全区', () => {
+  assert.deepEqual(pngSize('public/app-icon-192.png'), {
     width: 192,
     height: 192,
+    hasAlpha: false,
   })
-  assert.deepEqual(pngSize('public/icon-512.png'), {
+  assert.deepEqual(pngSize('public/app-icon-512.png'), {
     width: 512,
     height: 512,
+    hasAlpha: false,
   })
-  assert.deepEqual(pngSize('public/icon-maskable-512.png'), {
+  assert.deepEqual(pngSize('public/app-icon-maskable-512.png'), {
     width: 512,
     height: 512,
+    hasAlpha: false,
+  })
+  assert.deepEqual(pngSize('public/app-icon-1024.png'), {
+    width: 1024,
+    height: 1024,
+    hasAlpha: false,
+  })
+  assert.deepEqual(pngSize('public/favicon-48.png'), {
+    width: 48,
+    height: 48,
+    hasAlpha: false,
   })
   assert.ok(manifest.icons.some((icon) =>
-    icon.src === '/icon-192.png' && icon.purpose === 'any'
+    icon.src === '/app-icon-192.png' && icon.purpose === 'any'
   ))
   assert.ok(manifest.icons.some((icon) =>
-    icon.src === '/icon-maskable-512.png' && icon.purpose === 'maskable'
+    icon.src === '/app-icon-maskable-512.png'
+      && icon.purpose === 'maskable'
   ))
-  assert.ok(manifest.icons.some((icon) =>
-    icon.src === '/app-icon.svg' && icon.purpose === 'any'
-  ))
+  assert.ok(manifest.icons.every((icon) => icon.type === 'image/png'))
   assert.match(appIcon, /id="background"/)
-  assert.match(appIcon, /id="glow"/)
-  assert.match(appIcon, /id="sheen"/)
-  assert.match(appIcon, /id="mark-shadow"/)
-  assert.match(appIcon, /scale\(1\.22 1\.7\)/)
-  assert.doesNotMatch(appIcon, /#0874D8|#42A7FF|#1389ED|#0052B5/)
-  assert.match(maskableIcon, /scale\(1\.02 1\.48\)/)
-  assert.doesNotMatch(maskableIcon, /#0874D8|#42A7FF|#1389ED|#0052B5/)
+  assert.match(appIcon, /id="signal-ring"/)
+  assert.match(appIcon, /id="execution-mark"/)
+  assert.match(appIcon, /#0874D8|#1389ED/)
+  assert.match(maskableIcon, /id="maskable-safe-zone"/)
+  assert.match(maskableIcon, /#0874D8|#1389ED/)
+})
+
+test('受保护域名允许系统在未登录时读取PWA元数据和图标', () => {
+  for (const path of [
+    '/manifest.json',
+    '/favicon.svg',
+    '/favicon-48.png',
+    '/safari-pinned-tab.svg',
+    '/apple-touch-icon.png',
+    '/apple-touch-icon-v2.png',
+    '/app-icon-192.png',
+    '/app-icon-512.png',
+    '/app-icon-maskable-512.png',
+  ]) {
+    assert.equal(isPublicSiteAsset(path), true, path)
+  }
+  assert.equal(isPublicSiteAsset('/index.html'), false)
+  assert.equal(isPublicSiteAsset('/api/account'), false)
+  assert.match(server, /isPublicSiteAsset\(pathname\)/)
+  assert.match(server, /application\/manifest\+json/)
 })
 
 test('导航和登录门户统一使用主题品牌标记', () => {

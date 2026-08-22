@@ -10,10 +10,7 @@ function apply() {
     document.documentElement.setAttribute('data-theme', theme)
     const favicon = document.getElementById('app-favicon')
     if (favicon) {
-      favicon.setAttribute(
-        'href',
-        theme === 'light' ? '/brand-light.svg' : '/brand-dark.svg',
-      )
+      favicon.setAttribute('href', '/favicon.svg?v=2')
     }
   } catch { /* ignore */ }
 }

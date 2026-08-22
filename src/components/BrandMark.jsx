@@ -11,13 +11,8 @@ export default function BrandMark({
       aria-hidden="true"
     >
       <img
-        className="brand-mark-image brand-mark-light"
-        src="/brand-light.svg"
-        alt=""
-      />
-      <img
-        className="brand-mark-image brand-mark-dark"
-        src="/brand-dark.svg"
+        className="brand-mark-image"
+        src="/app-icon-192.png"
         alt=""
       />
     </span>

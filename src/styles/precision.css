@@ -353,12 +353,6 @@ html[data-theme="light"] .t-drawer {
   object-fit: cover;
 }
 
-.brand-mark-light { display: none; }
-.brand-mark-dark { display: block; }
-
-html[data-theme="light"] .brand-mark-light { display: block; }
-html[data-theme="light"] .brand-mark-dark { display: none; }
-
 .nav-brand-mark {
   width: 36px;
   height: 36px;
