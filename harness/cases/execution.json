@@ -1,0 +1,143 @@
+{
+  "schemaVersion": "harness-case-set.v1",
+  "cases": [
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "execution-manual-lifecycle",
+      "adapter": "execution",
+      "tags": ["execution", "manual-fill", "lifecycle"],
+      "input": {
+        "scenario": "lifecycle",
+        "code": "600000",
+        "action": "REDUCE",
+        "lots": 2,
+        "referencePrice": 10,
+        "triggeredPrice": 10.1,
+        "fillPrice": 10.1
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "evidenceIds": ["ev_harness"]
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "execution-event-idempotency",
+      "adapter": "execution",
+      "tags": ["execution", "event", "idempotency"],
+      "input": {
+        "scenario": "event",
+        "eventType": "QUOTE_UPDATE",
+        "code": "600000",
+        "sourceAsOf": "2026-08-21T10:30:00+08:00",
+        "payload": {
+          "price": 10
+        }
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "runLlm": false
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "execution-account-circuit-breaker",
+      "adapter": "execution",
+      "tags": ["execution", "account-risk", "cash"],
+      "input": {
+        "scenario": "circuit",
+        "account": {
+          "totalAssets": 100000,
+          "cash": 20000,
+          "dayStartAssets": 105000
+        },
+        "portfolio": {
+          "position": 82,
+          "industryWeights": [
+            {
+              "industry": "电子",
+              "weight": 32
+            }
+          ]
+        },
+        "closed": [
+          {
+            "type": "SELL",
+            "realizedPnl": -2200,
+            "at": 1787279399000
+          }
+        ],
+        "executionPlans": [
+          {
+            "status": "ARMED",
+            "side": "BUY",
+            "reservedCash": 8000
+          },
+          {
+            "status": "USER_CONFIRMED",
+            "side": "SELL",
+            "expectedNetProceeds": 5000
+          }
+        ],
+        "now": 1787279400000
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "allowRiskIncrease": false,
+        "availableCashAfterReservations": 12000,
+        "blockerCodes": [
+          "DAILY_REALIZED_LOSS",
+          "DAILY_DRAWDOWN",
+          "INDUSTRY_CONCENTRATION"
+        ]
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "execution-range-grid-guardrail",
+      "adapter": "execution",
+      "tags": ["execution", "t-grid", "manual-only"],
+      "input": {
+        "scenario": "grid",
+        "marketRegime": "RANGE",
+        "hasBasePosition": true,
+        "sellableLots": 4,
+        "adv20": 150000000,
+        "atrPct": 2.4,
+        "amplitudePct": 4.2,
+        "completedToday": 0,
+        "netBuyLots": 0,
+        "now": 1787279400000,
+        "referencePrice": 10,
+        "baseLots": 4,
+        "maxNetBuyLots": 1
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "eligible": true,
+        "reasonCodes": []
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "execution-real-fill-attribution",
+      "adapter": "execution",
+      "tags": ["execution", "attribution", "learning-gate"],
+      "input": {
+        "scenario": "attribution",
+        "code": "600000",
+        "action": "REDUCE",
+        "lots": 2,
+        "referencePrice": 10,
+        "triggeredPrice": 10.1,
+        "fillPrice": 10.1,
+        "vwap": 10.05,
+        "netPnl": 120
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "learningEligible": true
+      }
+    }
+  ]
+}

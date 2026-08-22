@@ -1,6 +1,6 @@
 {
   "schemaVersion": "harness-baseline.v1",
-  "generatedAt": 1787397326749,
+  "generatedAt": 1787402037966,
   "versions": {
     "app": "1.0.0",
     "git": "working-tree",
@@ -9,6 +9,7 @@
       "advice",
       "daily",
       "evidence",
+      "execution",
       "judge",
       "portfolio",
       "screen",
@@ -147,6 +148,24 @@
         "strategy-multi-factor-ranking-shadow",
         "strategy-range-mean-reversion-shadow",
         "strategy-trend-breakout-shadow"
+      ]
+    },
+    "execution": {
+      "overall": 1,
+      "dimensions": {
+        "contract": 1,
+        "groundedness": 1,
+        "feasibility": 1,
+        "actionability": 1,
+        "consistency": 1
+      },
+      "cases": 5,
+      "caseIds": [
+        "execution-account-circuit-breaker",
+        "execution-event-idempotency",
+        "execution-manual-lifecycle",
+        "execution-range-grid-guardrail",
+        "execution-real-fill-attribution"
       ]
     }
   }

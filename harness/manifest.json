@@ -72,6 +72,13 @@
       "mode": "offline",
       "description": "五类策略状态适配、证据命中、生产隔离与路由优先级"
     },
+    "execution": {
+      "adapter": "execution",
+      "caseFile": "cases/execution.json",
+      "minOverall": 0.9,
+      "mode": "offline",
+      "description": "人工执行状态、事件幂等、账户熔断、做T边界与真实成交归因"
+    },
     "endpoint": {
       "adapter": "endpoint",
       "caseFile": "cases/endpoint.json",
