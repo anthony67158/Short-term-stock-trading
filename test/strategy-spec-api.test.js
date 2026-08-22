@@ -23,16 +23,33 @@ function responseCapture() {
   }
 }
 
-test('策略目录返回唯一编译版本并支持按ID读取', () => {
+test('策略目录返回五类v2策略并支持按ID读取', () => {
   const list = strategySpecResponse('')
   const one = strategySpecResponse('market-quant-resonance')
 
   assert.equal(list.status, 200)
   assert.equal(list.body.ok, true)
-  assert.equal(list.body.data.length, 1)
+  assert.equal(list.body.schemaVersion, 'strategy-catalog.v2')
+  assert.equal(list.body.data.length, 5)
+  assert.deepEqual(
+    new Set(list.body.data.map((item) => item.family)),
+    new Set([
+      'TREND_BREAKOUT',
+      'CROSS_SECTIONAL_MOMENTUM',
+      'RANGE_MEAN_REVERSION',
+      'MULTI_FACTOR_RANKING',
+      'DEFENSIVE_EXIT',
+    ]),
+  )
   assert.match(list.body.data[0].specVersion, /^strategy\./)
   assert.equal(one.body.strategy.strategyId, 'market-quant-resonance')
-  assert.equal(one.body.strategy.specVersion, list.body.data[0].specVersion)
+  assert.equal(one.body.strategy.schemaVersion, 'strategy-spec.v2')
+  assert.equal(
+    one.body.strategy.specVersion,
+    list.body.data.find(
+      (item) => item.strategyId === 'market-quant-resonance',
+    ).specVersion,
+  )
 })
 
 test('未知策略返回404', () => {

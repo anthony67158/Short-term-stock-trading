@@ -380,6 +380,13 @@ test('客户端保存不能覆盖服务端收益学习委员会与人工批准�
         approvedAt: 1,
         approvedBy: 'owner',
       },
+      strategyGovernanceV2: {
+        schemaVersion: 'strategy-governance.v2',
+        strategies: [{
+          strategyId: 'trend-breakout',
+          state: 'draft',
+        }],
+      },
     },
   }
 
@@ -387,6 +394,13 @@ test('客户端保存不能覆盖服务端收益学习委员会与人工批准�
     plan: [],
     holding: [],
     closed: [],
+    strategyGovernanceV2: {
+      schemaVersion: 'strategy-governance.v2',
+      strategies: [{
+        strategyId: 'trend-breakout',
+        state: 'active',
+      }],
+    },
   }, 3)
 
   assert.equal(applied.ok, true)
@@ -398,6 +412,10 @@ test('客户端保存不能覆盖服务端收益学习委员会与人工批准�
   assert.equal(
     account.data.strategyHumanApproval.specVersion,
     'strategy.test',
+  )
+  assert.equal(
+    account.data.strategyGovernanceV2.strategies[0].state,
+    'draft',
   )
 })
 

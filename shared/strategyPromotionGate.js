@@ -23,7 +23,7 @@ export const CURRENT_STRATEGY_EVALUATION = Object.freeze({
 })
 
 const THRESHOLDS = Object.freeze({
-  minimumFolds: 4,
+  minimumFolds: 6,
   minimumPositiveFoldRate: 0.67,
   maximumDrawdown: 0.1,
   minimumRealExecutions: 30,
@@ -65,12 +65,30 @@ function councilMetrics(records) {
 }
 
 export function buildStrategyPromotionGate({
+  strategySpec = null,
   evaluation = CURRENT_STRATEGY_EVALUATION,
   realOutcomeLearning = {},
   councilRecords = [],
   humanApproval = null,
 } = {}) {
   const blocks = []
+  const targetStrategyId = strategySpec?.strategyId
+    || evaluation?.strategyId
+    || null
+  const targetSpecVersion = strategySpec?.specVersion
+    || evaluation?.specVersion
+    || null
+  const evaluationMatches = !!(
+    evaluation?.specVersion
+    && targetSpecVersion
+    && evaluation.specVersion === targetSpecVersion
+  )
+  if (!evaluationMatches) {
+    blocks.push(blocker(
+      'SPEC_VERSION_MISMATCH',
+      '样本外评估版本与待晋级策略版本不一致',
+    ))
+  }
   const folds = Math.max(0, Number(evaluation?.folds) || 0)
   const positiveFolds = Math.max(
     0,
@@ -158,7 +176,7 @@ export function buildStrategyPromotionGate({
 
   const approved = !!(
     humanApproval
-    && humanApproval.specVersion === evaluation?.specVersion
+    && humanApproval.specVersion === targetSpecVersion
     && humanApproval.approvedBy
     && Number(humanApproval.approvedAt) > 0
   )
@@ -170,9 +188,10 @@ export function buildStrategyPromotionGate({
   }
   return {
     schemaVersion: 'strategy-promotion-gate.v1',
-    strategyId: evaluation?.strategyId || null,
-    specVersion: evaluation?.specVersion || null,
-    shadowEligible: !!evaluation?.specVersion,
+    strategyId: targetStrategyId,
+    specVersion: targetSpecVersion,
+    evaluationSpecVersion: evaluation?.specVersion || null,
+    shadowEligible: !!evaluation?.specVersion && evaluationMatches,
     productionEligible: blocks.length === 0,
     decision: blocks.length === 0 ? 'promote' : 'reject',
     thresholds: THRESHOLDS,

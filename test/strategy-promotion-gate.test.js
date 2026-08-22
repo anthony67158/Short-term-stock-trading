@@ -88,3 +88,28 @@ test('离线超额真实收益委员会与人工批准全部达标才允许晋�
   assert.deepEqual(gate.blockers, [])
   assert.equal(gate.metrics.council.hardGatePassRate, 87.5)
 })
+
+test('旧回测版本不能为新的StrategySpec版本解锁生产', () => {
+  const evaluation = passingEvaluation()
+  const gate = buildStrategyPromotionGate({
+    strategySpec: {
+      strategyId: evaluation.strategyId,
+      specVersion: 'strategy.new-version',
+    },
+    evaluation,
+    realOutcomeLearning: liveLearning(),
+    councilRecords: councilRecords(),
+    humanApproval: {
+      specVersion: 'strategy.new-version',
+      approvedAt: 100,
+      approvedBy: 'owner',
+    },
+  })
+
+  assert.equal(gate.productionEligible, false)
+  assert.equal(gate.specVersion, 'strategy.new-version')
+  assert.equal(gate.evaluationSpecVersion, evaluation.specVersion)
+  assert.ok(gate.blockers.some(
+    (item) => item.code === 'SPEC_VERSION_MISMATCH',
+  ))
+})

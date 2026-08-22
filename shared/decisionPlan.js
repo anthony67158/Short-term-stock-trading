@@ -8,6 +8,10 @@ import {
   evaluateStrategySignal,
   getActiveStrategySpec,
 } from './strategySpec.js'
+import {
+  evaluateStrategySignalV2,
+  STRATEGY_SPEC_V2_SCHEMA_VERSION,
+} from './strategySpecV2.js'
 
 export const DECISION_PLAN_SCHEMA_VERSION = 'decision-plan.v2'
 
@@ -112,6 +116,10 @@ function actionFrom(mode, advice = {}) {
     || /买入|建仓|试错|试仓|回调再买/.test(value)
   ) return 'BUY'
   return 'WATCH'
+}
+
+export function decisionActionFromAdvice(mode, advice = {}) {
+  return actionFrom(mode, advice)
 }
 
 function actionLabel(action) {
@@ -292,6 +300,7 @@ export function compileDecisionPlan({
   evidenceSnapshot = null,
   strategySpec = getActiveStrategySpec(),
   strategyGate = {},
+  strategyRoute = null,
   now = Date.now(),
 } = {}) {
   const requestedAction = actionFrom(mode, advice)
@@ -311,13 +320,43 @@ export function compileDecisionPlan({
   const requestedLots = requestedLotsFor(requestedAction, advice)
   const slippageBps = Math.max(
     0,
-    finite(strategySpec?.execution?.slippageBps) ?? 5,
+    finite(
+      strategySpec?.execution?.baseSlippageBps
+      ?? strategySpec?.execution?.slippageBps,
+    ) ?? 5,
   )
   const productionEligible = strategyGate?.productionEligible === true
+  const routedStrategy = strategyRoute?.production
+    || strategyRoute?.research
+    || null
   const strategySignal = riskIncreasing && strategySpec
-    ? evaluateStrategySignal(
-        strategySpec,
-        signalContext(payload, market),
+    ? (
+        routedStrategy?.strategyId === strategySpec.strategyId
+          ? {
+              passed: routedStrategy.signalPassed,
+              matchedRules: routedStrategy.matchedRules || [],
+              failedRules: routedStrategy.failedRules || [],
+            }
+          : strategySpec.schemaVersion === STRATEGY_SPEC_V2_SCHEMA_VERSION
+            ? evaluateStrategySignalV2(
+                strategySpec,
+                {
+                  ...signalContext(payload, market),
+                  marketRegime: market.regime,
+                  account: {
+                    hasBasePosition: (
+                      (finite(payload.holdQty) || 0) > 0
+                      || (finite(payload.holding?.qty) || 0) > 0
+                    ),
+                  },
+                  sector: payload.sector || payload.sectorContext || {},
+                  technical: payload.tech || {},
+                },
+              )
+            : evaluateStrategySignal(
+                strategySpec,
+                signalContext(payload, market),
+              )
       )
     : null
   const blockedReasons = []
@@ -448,12 +487,31 @@ export function compileDecisionPlan({
     ? 15 * 60 * 1000
     : 12 * 60 * 60 * 1000
   const strategy = {
+    schemaVersion: strategySpec?.schemaVersion || null,
     strategyId: strategySpec?.strategyId || null,
     specVersion: strategySpec?.specVersion || null,
+    name: strategySpec?.name || routedStrategy?.name || null,
+    family: strategySpec?.family || routedStrategy?.family || null,
+    purpose: strategySpec?.purpose || routedStrategy?.purpose || null,
+    eligibleRegimes: strategySpec?.eligibleRegimes
+      || routedStrategy?.eligibleRegimes
+      || [],
+    horizon: strategySpec?.horizon || null,
+    signalTimeframe: strategySpec?.signalTimeframe
+      || strategySpec?.data?.timeframe
+      || null,
+    executionTimeframe: strategySpec?.executionTimeframe
+      || strategySpec?.execution?.entryAt
+      || null,
     signalPassed: strategySignal?.passed ?? null,
     matchedRules: strategySignal?.matchedRules || [],
     failedRules: strategySignal?.failedRules || [],
     productionEligible,
+    governanceState: routedStrategy?.state || null,
+    routeMode: strategyRoute?.production
+      ? 'PRODUCTION'
+      : strategyRoute?.research ? 'SHADOW_ONLY' : null,
+    outOfSample: routedStrategy?.outOfSample || null,
     gateBlockerCodes: (strategyGate?.blockers || [])
       .map((item) => text(item?.code, 80))
       .filter(Boolean),
@@ -501,6 +559,17 @@ export function compileDecisionPlan({
       targetPositionPct: market.targetPositionPct || { min: 0, max: 0 },
     },
     strategy,
+    strategyRoute: strategyRoute
+      ? {
+          schemaVersion: strategyRoute.schemaVersion,
+          catalogVersion: strategyRoute.catalogVersion,
+          marketRegime: strategyRoute.marketRegime,
+          requestedAction: strategyRoute.requestedAction,
+          policyPriority: strategyRoute.policyPriority,
+          production: strategyRoute.production,
+          research: strategyRoute.research,
+        }
+      : null,
     currentWeightPct: round(currentWeightPct, 1),
     targetWeightPct,
     deltaWeightPct,

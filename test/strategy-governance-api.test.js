@@ -65,8 +65,17 @@ test('治理快照公开拒绝原因但不返回委员会完整提示上下文',
     }],
   })
 
+  assert.equal(snapshot.schemaVersion, 'strategy-governance.v2')
+  assert.equal(snapshot.strategies.length, 5)
+  assert.equal(snapshot.productionStrategies.length, 0)
   assert.equal(snapshot.gate.productionEligible, false)
   assert.equal(snapshot.evaluation.decision, 'reject')
+  assert.equal(
+    snapshot.strategies.find(
+      (item) => item.strategyId === 'market-quant-resonance',
+    ).state,
+    'rejected',
+  )
   assert.equal(snapshot.council.latest.length, 1)
   assert.equal(snapshot.council.latest[0].opinions, undefined)
   assert.equal(snapshot.council.latest[0].hardGatePassed, false)

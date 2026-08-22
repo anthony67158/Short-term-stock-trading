@@ -81,8 +81,18 @@ import { deriveMarketRegime } from '../shared/marketRegime.js';
 import {
   buildFallbackDecisionAdvice,
   compileDecisionPlan,
+  decisionActionFromAdvice,
 } from '../shared/decisionPlan.js';
-import { getActiveStrategySpec } from '../shared/strategySpec.js';
+import {
+  getStrategySpecV2,
+} from '../shared/strategyCatalogV2.js';
+import {
+  buildDefaultStrategyGovernance,
+} from '../shared/strategyGovernanceV2.js';
+import {
+  buildStrategyRoutingContext,
+  routeStrategyPortfolio,
+} from '../shared/strategyRouter.js';
 import {
   buildStrategyPromotionGate,
   CURRENT_STRATEGY_EVALUATION,
@@ -610,9 +620,15 @@ export default async function handler(req, res) {
         accountAuth.account.data,
       );
     }
-    const activeStrategySpec = getActiveStrategySpec();
+    const activeStrategySpec = getStrategySpecV2(
+      'market-quant-resonance',
+    );
+    const strategyGovernance = buildDefaultStrategyGovernance(
+      accountAuth.account?.data?.strategyGovernanceV2 || {},
+    );
     const advisorStrategyGate = isAdvisorMode(mode)
       ? buildStrategyPromotionGate({
+          strategySpec: activeStrategySpec,
           evaluation: CURRENT_STRATEGY_EVALUATION,
           realOutcomeLearning: payload.realOutcomeLearning || {},
           councilRecords: councilRecordsFromData(
@@ -1440,6 +1456,7 @@ export default async function handler(req, res) {
           .map((item) => item.code)
           .slice(0, 12),
       } : null,
+      strategyRoute: null,
     };
     const scheduledReviewEvaluation = evaluateScheduledReview({
       origin: payload.reviewOrigin,
@@ -2021,14 +2038,56 @@ export default async function handler(req, res) {
       result.knowledgeActionScore = scoreKnowledgeActionPlan(
         result.knowledgeActionPlan,
       );
+      const requestedAction = decisionActionFromAdvice(mode, result);
+      const strategyRoute = routeStrategyPortfolio({
+        marketRegime: payload.marketEnv?.regime || 'UNKNOWN',
+        context: buildStrategyRoutingContext(
+          payload,
+          payload.marketEnv || {},
+        ),
+        governance: strategyGovernance,
+        requestedAction,
+      });
+      const routedStrategy = strategyRoute.production
+        || strategyRoute.research;
+      const decisionStrategySpec = getStrategySpecV2(
+        routedStrategy?.strategyId,
+      ) || activeStrategySpec;
+      const decisionStrategyGate = routedStrategy?.strategyId
+        === activeStrategySpec.strategyId
+        ? advisorStrategyGate
+        : {
+            strategyId: routedStrategy?.strategyId || null,
+            specVersion: routedStrategy?.specVersion || null,
+            productionEligible:
+              routedStrategy?.productionEligible === true,
+            decision: routedStrategy?.productionEligible
+              ? 'promote'
+              : 'reject',
+            blockers: routedStrategy?.blockers?.length
+              ? routedStrategy.blockers
+              : [{
+                  code: 'BACKTEST_REQUIRED',
+                  message: '策略尚未完成生产晋级',
+                }],
+          };
       result.decisionPlan = compileDecisionPlan({
         mode,
         advice: result,
         payload,
         evidenceSnapshot: currentEvidenceSnapshot,
-        strategySpec: activeStrategySpec,
-        strategyGate: advisorStrategyGate || {},
+        strategySpec: decisionStrategySpec,
+        strategyGate: decisionStrategyGate || {},
+        strategyRoute,
       });
+      collectedMeta.strategyRoute = {
+        schemaVersion: strategyRoute.schemaVersion,
+        catalogVersion: strategyRoute.catalogVersion,
+        marketRegime: strategyRoute.marketRegime,
+        requestedAction: strategyRoute.requestedAction,
+        production: strategyRoute.production,
+        research: strategyRoute.research,
+      };
     }
     // 明确输出「买入手数」的规范化整数字段:planQty 原文常为 "5手"/"约5手"/"5~8手" 等字符串,
     // 这里抽取首个整数为 planQtyNum,供自选卡「买入手数」直接消费,避免 Number() 得 NaN。

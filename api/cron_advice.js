@@ -103,6 +103,7 @@ import {
   buildStrategyPromotionGate,
   CURRENT_STRATEGY_EVALUATION,
 } from '../shared/strategyPromotionGate.js';
+import { getStrategySpecV2 } from '../shared/strategyCatalogV2.js';
 import {
   addCouncilShadowRecord,
   councilRecordsFromData,
@@ -870,7 +871,11 @@ async function runJobGen(
   const quantModelVersion = data.settings?.quantModelVersion || 'default';
   const realOutcomeLearning = buildRealOutcomeLearning(data);
   data.realOutcomeLearning = realOutcomeLearning;
+  const activeStrategySpec = getStrategySpecV2(
+    'market-quant-resonance',
+  );
   const strategyGate = buildStrategyPromotionGate({
+    strategySpec: activeStrategySpec,
     evaluation: CURRENT_STRATEGY_EVALUATION,
     realOutcomeLearning,
     councilRecords: councilRecordsFromData(data),

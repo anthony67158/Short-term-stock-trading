@@ -12,6 +12,11 @@ import {
 import {
   councilRecordsFromData,
 } from '../shared/advisorCouncilStore.js'
+import { getStrategyCatalogV2 } from '../shared/strategyCatalogV2.js'
+import {
+  buildDefaultStrategyGovernance,
+  strategyCanInfluenceProduction,
+} from '../shared/strategyGovernanceV2.js'
 
 function secureEqual(left, right) {
   const expected = Buffer.from(String(right || ''))
@@ -38,8 +43,46 @@ export function strategyGovernanceSnapshot(
     councilRecords,
     humanApproval: data.strategyHumanApproval,
   })
+  const catalog = getStrategyCatalogV2()
+  const governance = buildDefaultStrategyGovernance(
+    data.strategyGovernanceV2 || {},
+  )
+  const strategies = governance.strategies.map((record) => {
+    const spec = catalog.strategies.find(
+      (item) => item.strategyId === record.strategyId,
+    )
+    return {
+      ...record,
+      name: spec?.name || record.strategyId,
+      purpose: spec?.purpose || null,
+      eligibleRegimes: spec?.eligibleRegimes || [],
+      signalTimeframe: spec?.signalTimeframe || null,
+      executionTimeframe: spec?.executionTimeframe || null,
+      productionEligible: strategyCanInfluenceProduction(record),
+    }
+  })
   return {
-    schemaVersion: 'strategy-governance.v1',
+    schemaVersion: 'strategy-governance.v2',
+    catalogVersion: catalog.catalogVersion,
+    strategies,
+    productionStrategies: strategies
+      .filter((record) => record.productionEligible)
+      .map((record) => record.strategyId),
+    routingPolicy: {
+      schemaVersion: 'strategy-route.v1',
+      priority: [
+        'HARD_EXIT',
+        'RISK_REDUCTION',
+        'POSITION_MANAGEMENT',
+        'NEW_ENTRY',
+        'T_OPTIMIZATION',
+      ],
+      recentProfitWeighting: false,
+      minimumShadowSamplesForRanking: 30,
+    },
+    legacy: {
+      schemaVersion: 'strategy-governance.v1',
+    },
     evaluation,
     gate,
     realOutcome: learningOf(data).overall || { samples: 0 },

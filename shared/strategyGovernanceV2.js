@@ -174,6 +174,15 @@ export function transitionStrategyState(record, nextState, metadata = {}) {
       throw new Error('进入approved必须绑定同版本人工批准')
     }
   }
+  if (
+    nextState === 'active'
+    && (
+      record.productionGate?.productionEligible !== true
+      || record.productionGate?.specVersion !== record.specVersion
+    )
+  ) {
+    throw new Error('进入active必须绑定同版本且已通过的生产门禁')
+  }
   return {
     ...structuredClone(record),
     ...structuredClone(metadata),
@@ -188,5 +197,8 @@ export function transitionStrategyState(record, nextState, metadata = {}) {
 export function strategyCanInfluenceProduction(record) {
   return record?.state === 'active'
     && record?.approval?.specVersion === record?.specVersion
+    && record?.productionGate?.productionEligible === true
+    && record?.productionGate?.specVersion === record?.specVersion
+    && /^sha256:[0-9a-f]{64}$/.test(String(record?.artifactHash || ''))
     && !(record?.blockers || []).length
 }

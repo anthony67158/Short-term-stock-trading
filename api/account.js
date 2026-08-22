@@ -249,6 +249,7 @@ export function applyClientAccountSave(
     'realOutcomeLearning',
     'advisorCouncilShadow',
     'strategyHumanApproval',
+    'strategyGovernanceV2',
   ]) {
     if (prev[key] != null) merged[key] = prev[key];
     else delete merged[key];

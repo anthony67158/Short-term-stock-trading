@@ -8,6 +8,8 @@ import {
 } from '../shared/decisionPlan.js'
 import { adviceCompleteness } from '../shared/adviceBatchPolicy.js'
 import { getActiveStrategySpec } from '../shared/strategySpec.js'
+import { getStrategySpecV2 } from '../shared/strategyCatalogV2.js'
+import { routeStrategyPortfolio } from '../shared/strategyRouter.js'
 
 const now = Date.parse('2026-08-21T02:30:00.000Z')
 const snapshot = {
@@ -107,6 +109,60 @@ test('未晋级策略的买入建议被编译为研究级计划且手数受风�
   assert.ok(first.targetWeightPct <= 20)
   assert.match(first.blockedReasons.join(' '), /策略尚未通过生产晋级/)
   assert.equal(first.decisionId, second.decisionId)
+})
+
+test('v2影子路由写入策略族、适用状态、样本外成绩和治理级别', () => {
+  const strategySpec = getStrategySpecV2('trend-breakout')
+  const strategyRoute = routeStrategyPortfolio({
+    marketRegime: 'TREND_STRONG',
+    requestedAction: 'BUY',
+    context: {
+      marketRegime: 'TREND_STRONG',
+      marketScore: 76,
+      pct: 2,
+      volRatio: 1.8,
+      quant: { score: 72 },
+      technical: {
+        donchianBreakout: true,
+        maSlope20: 0.8,
+      },
+    },
+  })
+  const plan = compileDecisionPlan({
+    mode: 'buy_advice',
+    advice: {
+      action: '立即买入',
+      buyPrice: 10,
+      stopPrice: 9,
+      targetPrice: 12,
+      planQtyNum: 2,
+    },
+    evidenceSnapshot: snapshot,
+    strategySpec,
+    strategyRoute,
+    payload: {
+      ...payload,
+      tech: {
+        donchianBreakout: true,
+        maSlope20: 0.8,
+      },
+    },
+    strategyGate: {
+      productionEligible: false,
+      blockers: [{ code: 'BACKTEST_REQUIRED' }],
+    },
+    now,
+  })
+
+  assert.equal(plan.actionability, 'RESEARCH_ONLY')
+  assert.equal(plan.strategy.schemaVersion, 'strategy-spec.v2')
+  assert.equal(plan.strategy.strategyId, 'trend-breakout')
+  assert.equal(plan.strategy.family, 'TREND_BREAKOUT')
+  assert.equal(plan.strategy.governanceState, 'draft')
+  assert.deepEqual(plan.strategy.eligibleRegimes, ['TREND_STRONG'])
+  assert.equal(plan.strategy.outOfSample, null)
+  assert.equal(plan.strategy.routeMode, 'SHADOW_ONLY')
+  assert.equal(plan.strategyRoute.schemaVersion, 'strategy-route.v1')
 })
 
 test('没有通过策略信号的风险增加动作被阻断', () => {

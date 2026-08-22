@@ -1,11 +1,9 @@
 import { applyCors, preflight } from './_lib.js'
 import {
-  getActiveStrategySpec,
-} from '../shared/strategySpec.js'
+  getStrategyCatalogV2,
+} from '../shared/strategyCatalogV2.js'
 
-const STRATEGIES = [
-  getActiveStrategySpec(),
-]
+const CATALOG = getStrategyCatalogV2()
 
 export function strategySpecResponse(strategyId = '') {
   const id = String(strategyId || '').trim()
@@ -14,12 +12,15 @@ export function strategySpecResponse(strategyId = '') {
       status: 200,
       body: {
         ok: true,
-        schemaVersion: 'strategy-catalog.v1',
-        data: STRATEGIES,
+        schemaVersion: CATALOG.schemaVersion,
+        catalogVersion: CATALOG.catalogVersion,
+        data: CATALOG.strategies,
       },
     }
   }
-  const strategy = STRATEGIES.find((item) => item.strategyId === id)
+  const strategy = CATALOG.strategies.find(
+    (item) => item.strategyId === id,
+  )
   if (!strategy) {
     return {
       status: 404,
