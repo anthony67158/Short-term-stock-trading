@@ -401,17 +401,27 @@ test('真实manifest与case可通过统一CLI离线执行', async () => {
 
   assert.equal(result.exitCode, 0)
   assert.equal(payload.ok, true)
-  assert.equal(payload.summary.total, 23)
-  assert.equal(payload.summary.passed, 23)
+  assert.equal(payload.summary.total, 28)
+  assert.equal(payload.summary.passed, 28)
   assert.deepEqual(
     [...new Set(payload.episodes.map((item) => item.adapter))].sort(),
-    ['advice', 'daily', 'evidence', 'judge', 'portfolio', 'screen', 'sector'],
+    [
+      'advice',
+      'daily',
+      'evidence',
+      'judge',
+      'portfolio',
+      'screen',
+      'sector',
+      'strategy',
+    ],
   )
 })
 
 test('Harness接入npm命令、CI门禁与报告artifact', () => {
   assert.match(packageJson.scripts.harness, /harness\/run\.mjs/)
   assert.match(packageJson.scripts['harness:ci'], /harness\/run\.mjs/)
+  assert.match(packageJson.scripts['harness:strategy'], /--suite strategy/)
   assert.match(packageJson.scripts['test:ci'], /--test-concurrency=1/)
   assert.match(workflow, /npm run harness:ci/)
   assert.match(workflow, /npm run test:ci/)
