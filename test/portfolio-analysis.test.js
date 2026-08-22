@@ -343,14 +343,25 @@ test('持仓诊断生成金额手数明确且资金守恒的组合执行单', ()
         currentWeightPct: 0,
         targetWeightPct: 6,
         deltaWeightPct: 6,
-        estimatedAmount: 6000,
-        estimatedLots: 2,
+        estimatedAmount: 3000,
+        estimatedLots: 1,
       },
     ],
   )
-  assert.equal(result.executionPlan.buyBudget, 6000)
-  assert.equal(result.executionPlan.estimatedBuyAmount, 6000)
+  assert.equal(result.executionPlan.buyBudget < 6000, true)
+  assert.equal(result.executionPlan.estimatedBuyAmount, 3000)
   assert.equal(result.executionPlan.estimatedSellAmount, 18000)
+  assert.equal(
+    result.executionPlan.estimatedBuyCashOutflow
+      > result.executionPlan.estimatedBuyAmount,
+    true,
+  )
+  assert.equal(
+    result.executionPlan.estimatedSellNetProceeds
+      < result.executionPlan.estimatedSellAmount,
+    true,
+  )
+  assert.equal(result.executionPlan.estimatedFees > 0, true)
   assert.deepEqual(
     result.conceptActions.map((item) => [
       item.concept,

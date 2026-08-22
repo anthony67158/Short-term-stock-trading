@@ -62,7 +62,11 @@ function ActionOrder({ order }) {
       </span>
       <span className="portfolio-execution-size">
         <b>{order.estimatedLots} 手</b>
-        <small>{money(order.estimatedAmount)}</small>
+        <small>
+          {order.action === 'buy' || order.action === 'add'
+            ? `含费 ${money(order.estimatedCashImpact ?? order.estimatedAmount)}`
+            : `净回笼 ${money(order.estimatedCashImpact ?? order.estimatedAmount)}`}
+        </small>
       </span>
       <span className="portfolio-execution-weight">
         <small>总资产占比</small>
@@ -184,8 +188,9 @@ export default function PortfolioExecutionPlan({ analysis = {} }) {
           </p>
         </div>
         <div className="portfolio-execution-totals">
-          <span>预计卖出<b>{money(executionPlan.estimatedSellAmount)}</b></span>
-          <span>预计买入<b>{money(executionPlan.estimatedBuyAmount)}</b></span>
+          <span>卖出净回笼<b>{money(executionPlan.estimatedSellNetProceeds ?? executionPlan.estimatedSellAmount)}</b></span>
+          <span>买入含费支出<b>{money(executionPlan.estimatedBuyCashOutflow ?? executionPlan.estimatedBuyAmount)}</b></span>
+          <span>预计费用<b>{money(executionPlan.estimatedFees)}</b></span>
           <span>
             执行后仓位
             <b>{percent(projectedPositionPct)}</b>

@@ -1,3 +1,8 @@
+import {
+  executionPrice,
+  tradeFees,
+} from './ashareStrategyExecution.js'
+
 function finite(value, fallback = 0) {
   const number = Number(value)
   return Number.isFinite(number) ? number : fallback
@@ -262,6 +267,47 @@ function normalizeScenarioPlan(value) {
     .slice(0, 3)
 }
 
+function estimateExecution(side, referencePrice, lots, slippageBps = 5) {
+  if (!(referencePrice > 0 && lots > 0)) {
+    return {
+      estimatedFillPrice: referencePrice > 0 ? rounded(referencePrice, 3) : 0,
+      estimatedFees: 0,
+      estimatedCashImpact: 0,
+    }
+  }
+  const fillPrice = executionPrice(referencePrice, side, slippageBps)
+  const gross = fillPrice * lots * 100
+  const fees = tradeFees(side, gross)
+  return {
+    estimatedFillPrice: rounded(fillPrice, 3),
+    estimatedFees: rounded(fees.total, 2),
+    estimatedCashImpact: rounded(
+      side === 'BUY' ? gross + fees.total : gross - fees.total,
+      2,
+    ),
+  }
+}
+
+function affordableBuyLots(referencePrice, desiredLots, cash, slippageBps = 5) {
+  let lots = Math.max(0, Math.trunc(desiredLots))
+  while (lots > 0) {
+    const estimate = estimateExecution(
+      'BUY',
+      referencePrice,
+      lots,
+      slippageBps,
+    )
+    if (estimate.estimatedCashImpact <= cash) {
+      return { lots, estimate }
+    }
+    lots -= 1
+  }
+  return {
+    lots: 0,
+    estimate: estimateExecution('BUY', referencePrice, 0, slippageBps),
+  }
+}
+
 function buildExecutionPlan({
   distribution,
   targetPositionPct,
@@ -302,6 +348,11 @@ function buildExecutionPlan({
       const estimatedAmount = rounded(
         estimatedLots * referencePrice * 100,
       )
+      const execution = estimateExecution(
+        'SELL',
+        referencePrice,
+        estimatedLots,
+      )
       const projectedDeltaWeightPct = totalAssets > 0
         ? rounded(-estimatedAmount / totalAssets * 100)
         : 0
@@ -321,6 +372,7 @@ function buildExecutionPlan({
         projectedDeltaWeightPct,
         referencePrice: rounded(referencePrice, 3),
         estimatedAmount,
+        ...execution,
         estimatedLots,
         sellableLots,
         remainingLots: Math.max(0, desiredLots - estimatedLots),
@@ -338,10 +390,18 @@ function buildExecutionPlan({
       0,
     ),
   )
+  const estimatedSellNetProceeds = rounded(
+    sellOrders.reduce(
+      (sum, item) => sum + item.estimatedCashImpact,
+      0,
+    ),
+    2,
+  )
   const targetCash = totalAssets * (100 - targetPositionPct) / 100
   let remainingBuyCapacity = positive(
-    distribution.cash - targetCash + estimatedSellAmount,
+    distribution.cash - targetCash + estimatedSellNetProceeds,
   )
+  const buyBudget = rounded(remainingBuyCapacity, 2)
   const buySeeds = [
     ...stockActions
       .filter((item) => item.action === 'add')
@@ -373,10 +433,14 @@ function buildExecutionPlan({
     const desiredLots = referencePrice > 0
       ? Math.floor(desiredAmount / (referencePrice * 100) + 1e-9)
       : 0
-    const affordableLots = referencePrice > 0
-      ? Math.floor(remainingBuyCapacity / (referencePrice * 100) + 1e-9)
-      : 0
-    const estimatedLots = Math.min(desiredLots, affordableLots)
+    const affordable = referencePrice > 0
+      ? affordableBuyLots(
+          referencePrice,
+          desiredLots,
+          remainingBuyCapacity,
+        )
+      : { lots: 0, estimate: estimateExecution('BUY', 0, 0) }
+    const estimatedLots = affordable.lots
     const estimatedAmount = rounded(
       estimatedLots * referencePrice * 100,
     )
@@ -385,7 +449,7 @@ function buildExecutionPlan({
       : 0
     remainingBuyCapacity = Math.max(
       0,
-      remainingBuyCapacity - estimatedAmount,
+      remainingBuyCapacity - affordable.estimate.estimatedCashImpact,
     )
     return {
       priority: item.priority,
@@ -403,6 +467,7 @@ function buildExecutionPlan({
       projectedDeltaWeightPct,
       referencePrice: rounded(referencePrice, 3),
       estimatedAmount,
+      ...affordable.estimate,
       estimatedLots,
       sellableLots: 0,
       remainingLots: Math.max(0, desiredLots - estimatedLots),
@@ -420,6 +485,20 @@ function buildExecutionPlan({
       (sum, item) => sum + item.estimatedAmount,
       0,
     ),
+  )
+  const estimatedBuyCashOutflow = rounded(
+    buyOrders.reduce(
+      (sum, item) => sum + item.estimatedCashImpact,
+      0,
+    ),
+    2,
+  )
+  const estimatedFees = rounded(
+    orders.reduce(
+      (sum, item) => sum + item.estimatedFees,
+      0,
+    ),
+    2,
   )
   const projectedPositionPct = totalAssets > 0
     ? rounded(
@@ -499,8 +578,11 @@ function buildExecutionPlan({
     projectedPositionPct,
     projectedCashReservePct: rounded(100 - projectedPositionPct),
     estimatedSellAmount,
+    estimatedSellNetProceeds,
     estimatedBuyAmount,
-    buyBudget: estimatedBuyAmount,
+    estimatedBuyCashOutflow,
+    estimatedFees,
+    buyBudget,
     orders,
     conceptActions: executableConceptActions,
     quality: {
