@@ -695,14 +695,27 @@ button.icon-btn.nav-undo:not(:disabled):hover {
   display: block;
 }
 
+.footer-regulatory {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  margin-top: var(--space-xs);
+}
+
 .footer-icp {
   display: inline-flex;
-  margin-top: var(--space-xs);
   color: inherit;
   text-decoration: none;
 }
 
-.footer-icp:hover {
+.footer-public-security {
+  display: inline-flex;
+  color: inherit;
+  text-decoration: none;
+}
+
+.footer-icp:hover,
+.footer-public-security:hover {
   color: var(--color-accent);
   text-decoration: underline;
 }
@@ -8364,6 +8377,15 @@ button.acct-item {
   }
 
   .footer-icp {
+    margin-top: 0;
+  }
+
+  .footer-regulatory {
+    justify-content: center;
+    margin-top: 0;
+  }
+
+  .footer-public-security {
     margin-top: 0;
   }
 

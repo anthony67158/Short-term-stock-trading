@@ -59,6 +59,7 @@ const QuantReport = lazyWithReload(() => import('./components/QuantReport'), 'qu
 const QuantModelControl = lazyWithReload(() => import('./components/QuantModelControl'), 'quant-model-control')
 const AISearchConfig = lazyWithReload(() => import('./components/AISearchConfig'), 'ai-search-config')
 const ICP_NUMBER = '沪ICP备2026040243号-1'
+const PUBLIC_SECURITY_NUMBER = '沪公网安备31011002008126号'
 
 function dismissBootSplash() {
   const splash = document.getElementById('app-splash')
@@ -409,14 +410,24 @@ function RegulatoryFooter({ showDisclaimer = false }) {
           数据来源：东方财富公开接口 · AI 分析由大模型基于实时数据生成，仅供研究参考，非投资建议 · 资金流为已发生数据，追高有滞后风险，注意止损
         </span>
       )}
-      <a
-        className="footer-icp"
-        href="https://beian.miit.gov.cn/"
-        target="_blank"
-        rel="noreferrer"
-      >
-        {ICP_NUMBER}
-      </a>
+      <span className="footer-regulatory">
+        <a
+          className="footer-icp"
+          href="https://beian.miit.gov.cn/"
+          target="_blank"
+          rel="noreferrer"
+        >
+          {ICP_NUMBER}
+        </a>
+        <a
+          className="footer-public-security"
+          href="https://beian.mps.gov.cn/#/query/webSearch?code=31011002008126"
+          target="_blank"
+          rel="noreferrer"
+        >
+          {PUBLIC_SECURITY_NUMBER}
+        </a>
+      </span>
     </footer>
   )
 }

@@ -50,6 +50,7 @@ const DIST_DIR = path.join(ROOT, 'dist');
 const siteAccessLimiter = createSiteAccessLimiter();
 const INVOKE_BODY_LIMIT = 256 * 1024;
 const BODY_READ_TIMEOUT_MS = 15_000;
+const ROBOTS_TAG = 'noindex, nofollow, noarchive, nosnippet, noimageindex';
 
 // 预加载所有非下划线开头的函数模块
 const handlers = {};
@@ -64,6 +65,7 @@ console.log('[fc] 已加载 API 函数:', Object.keys(handlers).join(', '));
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8',
   '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.ico': 'image/x-icon',
   '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.map': 'application/json',
@@ -83,6 +85,7 @@ function protectedSiteHeaders(res) {
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader('X-Robots-Tag', ROBOTS_TAG);
 }
 
 function siteAccessAuthorized(req) {
@@ -231,6 +234,7 @@ function serveSiteAccess(req, res) {
 // 静态资源：命中文件则回传；未命中且非静态扩展名 → 回退 index.html（SPA 路由）
 function serveStatic(_req, res, pathname) {
   if (!existsSync(DIST_DIR)) { res.statusCode = 404; res.end('dist not built'); return; }
+  res.setHeader('X-Robots-Tag', ROBOTS_TAG);
   let rel;
   try {
     rel = decodeURIComponent(pathname).replace(/^\/+/, '');
