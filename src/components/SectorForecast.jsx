@@ -11,6 +11,7 @@ import SectorForecastSettings from './SectorForecastSettings'
 import { openStockDetail } from '../detailStore.js'
 import { sectorForecastRequest } from '../sectorForecastClient.js'
 import {
+  assessSectorForecastGeneration,
   resolveSectorForecastGenerationSession,
   sectorForecastActionView,
   sortSectorForecasts,
@@ -147,7 +148,11 @@ export default function SectorForecast() {
   const [generating, setGenerating] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [error, setError] = useState('')
+  const [generationNotice, setGenerationNotice] = useState(null)
   const generationRequestRef = useRef(false)
+  const generationBaselineRef = useRef(0)
+  const generationSession =
+    resolveSectorForecastGenerationSession(market)
 
   const load = useCallback(async () => {
     const current = await sectorForecastRequest({
@@ -177,6 +182,12 @@ export default function SectorForecast() {
         setSettings(result.settings)
         setHistory(result.history)
         setTask(result.task)
+        if (result.task?.active?.status === 'running') {
+          generationBaselineRef.current = Math.max(
+            Number(result.latest?.generatedAt) || 0,
+            Number(result.intraday?.generatedAt) || 0,
+          )
+        }
         setGenerating(result.task?.active?.status === 'running')
         setError('')
       })
@@ -206,7 +217,28 @@ export default function SectorForecast() {
         if (
           !status.task?.active
           && !generationRequestRef.current
-        ) setGenerating(false)
+        ) {
+          setGenerating(false)
+          const outcome = assessSectorForecastGeneration({
+            previousGeneratedAt: generationBaselineRef.current,
+            response: { ok: true, skipped: false },
+            current: {
+              ...current,
+              task: status.task,
+            },
+            session: generationSession,
+          })
+          if (outcome.status === 'completed') {
+            setError('')
+            setGenerationNotice({
+              tone: 'success',
+              message: outcome.message,
+            })
+          } else if (status.task?.latest?.status === 'failed') {
+            setGenerationNotice(null)
+            setError(outcome.message)
+          }
+        }
       } catch { /* 下一轮继续读取权威任务状态 */ }
     }
     poll()
@@ -215,7 +247,7 @@ export default function SectorForecast() {
       stopped = true
       clearInterval(timer)
     }
-  }, [generating, task?.active?.key])
+  }, [generating, generationSession, task?.active?.key])
 
   useEffect(() => {
     if (settings?.intradayEnabled === false) return undefined
@@ -253,8 +285,6 @@ export default function SectorForecast() {
   const snapshot = effectiveVersion === 'intraday'
     ? intraday
     : latest
-  const generationSession =
-    resolveSectorForecastGenerationSession(market)
   const generationPaused = market?.phase === 'lunch'
 
   const ranked = useMemo(() => {
@@ -270,9 +300,16 @@ export default function SectorForecast() {
   )
 
   const generate = async () => {
+    const previousSnapshot = generationSession === 'intraday'
+      ? intraday
+      : latest
+    generationBaselineRef.current =
+      Number(previousSnapshot?.generatedAt) || 0
     generationRequestRef.current = true
     setGenerating(true)
     setError('')
+    setGenerationNotice(null)
+    let keepGenerating = false
     try {
       const response = await sectorForecastRequest({
         action: 'generate',
@@ -297,11 +334,31 @@ export default function SectorForecast() {
       if (current.latest) setLatest(current.latest)
       if (current.intraday) setIntraday(current.intraday)
       if (current.market) setMarket(current.market)
+      const outcome = assessSectorForecastGeneration({
+        previousGeneratedAt: generationBaselineRef.current,
+        response,
+        current,
+        session: generationSession,
+      })
+      keepGenerating = outcome.status === 'running'
+      if (outcome.status === 'completed') {
+        setGenerationNotice({
+          tone: 'success',
+          message: outcome.message,
+        })
+      } else if (outcome.status === 'running') {
+        setGenerationNotice({
+          tone: 'running',
+          message: outcome.message,
+        })
+      } else {
+        setError(outcome.message)
+      }
     } catch (reason) {
       setError(reason?.message || '生成失败')
     } finally {
       generationRequestRef.current = false
-      setGenerating(false)
+      setGenerating(keepGenerating)
     }
   }
 
@@ -349,7 +406,9 @@ export default function SectorForecast() {
                 ? '刷新盘中版'
                 : generationSession === 'overnight'
                   ? '复核盘前证据'
-                  : '生成正式版'}
+                    : market?.tradingDay === false
+                      ? '重算最近正式版'
+                      : '生成正式版'}
           </button>
           <button type="button" className="icon-btn sector-forecast-settings-trigger"
             aria-label="板块前瞻自动设置" title="自动设置"
@@ -372,6 +431,18 @@ export default function SectorForecast() {
         task={task}
         generating={generating}
       />
+      {generationNotice && (
+        <div
+          className={`sector-forecast-generation-notice ${generationNotice.tone}`}
+          role="status"
+        >
+          <Icon
+            name={generationNotice.tone === 'success' ? 'check' : 'pulse'}
+            size={14}
+          />
+          <span>{generationNotice.message}</span>
+        </div>
+      )}
 
       {loading ? (
         <div className="loading sector-forecast-loading">正在读取板块前瞻…</div>

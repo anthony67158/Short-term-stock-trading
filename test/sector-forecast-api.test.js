@@ -30,6 +30,7 @@ import {
   generateSectorForecastSnapshot,
   mergeOvernightEvidence,
   readSectorForecastBootstrap,
+  resolveManualSectorForecastRun,
   runDueSectorForecast,
   runSectorForecastGeneration,
 } from '../api/sector_forecast.js'
@@ -109,6 +110,28 @@ test('板块前瞻默认自动运行并严格限制收盘与盘前时间范围',
     }),
     /盘中刷新间隔/,
   )
+})
+
+test('休市日手动正式生成沿用最近交易日而不是伪造周末信号日', () => {
+  const saturday = Date.parse('2026-08-22T04:00:00.000Z')
+  assert.deepEqual(resolveManualSectorForecastRun({
+    session: 'close',
+    timestamp: saturday,
+    latest: {
+      signalDate: '2026-08-21',
+      session: 'close',
+    },
+  }), {
+    ok: true,
+    runDate: '2026-08-22',
+    signalDate: '2026-08-21',
+    replayingLatestTradingDay: true,
+  })
+  assert.equal(resolveManualSectorForecastRun({
+    session: 'close',
+    timestamp: saturday,
+    latest: null,
+  }).ok, false)
 })
 
 test('到期判断使用北京时间且开关关闭后不产生付费任务', () => {

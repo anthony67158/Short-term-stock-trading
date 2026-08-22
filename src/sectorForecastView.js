@@ -15,6 +15,66 @@ export function resolveSectorForecastGenerationSession(market = {}) {
   return 'close'
 }
 
+export function assessSectorForecastGeneration({
+  previousGeneratedAt = 0,
+  response = {},
+  current = {},
+  session = 'close',
+} = {}) {
+  const active = current.task?.active
+  if (active?.status === 'running') {
+    return {
+      status: 'running',
+      message: active.progress?.message || '已有任务正在生成',
+      snapshot: null,
+    }
+  }
+  const responseSnapshot = response.snapshot
+  const currentSnapshot = session === 'intraday'
+    ? current.intraday
+    : current.latest
+  const snapshot = [responseSnapshot, currentSnapshot].find((candidate) =>
+    candidate
+    && Array.isArray(candidate.sectors)
+    && candidate.sectors.length > 0
+  ) || null
+  const fresh = Number(snapshot?.generatedAt || 0)
+    > Number(previousGeneratedAt || 0)
+  const taskDone = current.task?.latest?.status === 'done'
+
+  if (
+    fresh
+    && response.ok !== false
+    && response.skipped !== true
+    && (
+      !current.task?.latest
+      || taskDone
+    )
+  ) {
+    return {
+      status: 'completed',
+      message: '新版本已完成并保存',
+      snapshot,
+    }
+  }
+  if (current.task?.latest?.status === 'failed') {
+    return {
+      status: 'failed',
+      message:
+        current.task.latest.error
+        || '本次生成失败，继续显示上一份有效结果',
+      snapshot: null,
+    }
+  }
+  return {
+    status: 'failed',
+    message: response.reason === 'active-generation'
+      ? '生成任务状态已结束，但没有取得更新结果'
+      : '本次没有生成新版本，继续显示上一份有效结果',
+    snapshot: null,
+  }
+}
+
 const ACTION_ORDER = Object.freeze({
   LAYOUT: 0,
   WAIT_PULLBACK: 1,

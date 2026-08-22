@@ -8,6 +8,7 @@ import {
   beijingDayKey,
   beijingDate,
   isContinuousTrading,
+  isTradingDayAt,
 } from '../shared/tradingCalendar.js'
 import {
   authorizePaidRequest,
@@ -39,6 +40,47 @@ function normalizedSession(value) {
   return ['close', 'overnight', 'intraday'].includes(value)
     ? value
     : 'close'
+}
+
+export function resolveManualSectorForecastRun({
+  session = 'close',
+  timestamp = Date.now(),
+  latest = null,
+} = {}) {
+  const runSession = normalizedSession(session)
+  const runDate = beijingDayKey(timestamp)
+  if (runSession === 'overnight') {
+    return latest?.signalDate
+      ? {
+          ok: true,
+          runDate,
+          signalDate: latest.signalDate,
+          replayingLatestTradingDay: false,
+        }
+      : {
+          ok: false,
+          error: '没有可供盘前复核的收盘正式版',
+        }
+  }
+  if (runSession === 'close' && !isTradingDayAt(timestamp)) {
+    return latest?.signalDate
+      ? {
+          ok: true,
+          runDate,
+          signalDate: latest.signalDate,
+          replayingLatestTradingDay: true,
+        }
+      : {
+          ok: false,
+          error: '休市日没有可重新生成的最近交易日正式版',
+        }
+  }
+  return {
+    ok: true,
+    runDate,
+    signalDate: runDate,
+    replayingLatestTradingDay: false,
+  }
 }
 
 function beijingTimeLabel(timestamp = Date.now()) {
@@ -550,6 +592,7 @@ export async function readSectorForecastBootstrap({
     history,
     market: {
       intradayAvailable: isContinuousTrading(timestamp),
+      tradingDay: isTradingDayAt(timestamp),
       phase: sectorForecastMarketPhase(timestamp),
       day: beijingDayKey(timestamp),
       asOf: timestamp,
@@ -619,6 +662,7 @@ export default async function handler(req, res) {
         settings: await sectorForecastStore.readSettings(),
         market: {
           intradayAvailable: isContinuousTrading(),
+          tradingDay: isTradingDayAt(),
           phase: sectorForecastMarketPhase(),
           day: beijingDayKey(),
           asOf: Date.now(),
@@ -664,32 +708,37 @@ export default async function handler(req, res) {
     }
     if (action === 'generate') {
       const session = normalizedSession(body.session)
-      if (session === 'intraday' && !isContinuousTrading()) {
+      const requestedAt = Date.now()
+      if (session === 'intraday' && !isContinuousTrading(requestedAt)) {
         return reply(res, 409, {
           ok: false,
           error: '盘中动态版仅在交易日09:30-11:30、13:00-15:00可刷新',
         })
       }
-      const runDate = beijingDayKey()
-      const latest = session === 'overnight'
+      const latest = (
+        session === 'overnight'
+        || (session === 'close' && !isTradingDayAt(requestedAt))
+      )
         ? await sectorForecastStore.readLatest()
         : null
-      if (session === 'overnight' && !latest?.signalDate) {
+      const manualRun = resolveManualSectorForecastRun({
+        session,
+        timestamp: requestedAt,
+        latest,
+      })
+      if (!manualRun.ok) {
         return reply(res, 409, {
           ok: false,
-          error: '没有可供盘前复核的收盘正式版',
+          error: manualRun.error,
         })
       }
-      const signalDate = session === 'overnight'
-        ? latest.signalDate
-        : runDate
       const result = await runSectorForecastGeneration({
         session,
-        signalDate,
-        runDate,
+        signalDate: manualRun.signalDate,
+        runDate: manualRun.runDate,
         runSlot: session === 'intraday'
           ? sectorForecastIntradaySlot(
-            Date.now(),
+            requestedAt,
             (await sectorForecastStore.readSettings())
               .intradayIntervalMinutes,
           )
@@ -697,7 +746,11 @@ export default async function handler(req, res) {
         force: true,
         generate: generateSectorForecastSnapshot,
       })
-      return reply(res, 200, result)
+      return reply(res, 200, {
+        ...result,
+        replayingLatestTradingDay:
+          manualRun.replayingLatestTradingDay,
+      })
     }
     return reply(res, 400, { ok: false, error: 'unknown action' })
   } catch (error) {

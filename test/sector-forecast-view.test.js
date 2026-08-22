@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
   SECTOR_FORECAST_SORTS,
+  assessSectorForecastGeneration,
   resolveSectorForecastGenerationSession,
   sectorForecastActionView,
   sortSectorForecasts,
@@ -197,4 +198,59 @@ test('手动生成按市场阶段选择盘前复核、盘中动态或收盘正�
     phase: 'closed',
     intradayAvailable: false,
   }), 'close')
+})
+
+test('板块前瞻只有拿到更新且完整的快照才算生成完成', () => {
+  const previousGeneratedAt = 100
+  const snapshot = {
+    session: 'close',
+    generatedAt: 200,
+    sectors: [{ code: 'BK1000' }],
+  }
+
+  assert.equal(assessSectorForecastGeneration({
+    previousGeneratedAt,
+    response: { ok: true, skipped: false, snapshot },
+    current: {
+      latest: snapshot,
+      task: { active: null, latest: { status: 'done' } },
+    },
+  }).status, 'completed')
+
+  assert.equal(assessSectorForecastGeneration({
+    previousGeneratedAt,
+    response: {
+      ok: true,
+      skipped: true,
+      reason: 'active-generation',
+      snapshot: {
+        ...snapshot,
+        generatedAt: previousGeneratedAt,
+      },
+    },
+    current: {
+      latest: { ...snapshot, generatedAt: previousGeneratedAt },
+      task: {
+        active: { status: 'running', progress: { percent: 36 } },
+      },
+    },
+  }).status, 'running')
+
+  const stale = assessSectorForecastGeneration({
+    previousGeneratedAt,
+    response: {
+      ok: true,
+      skipped: true,
+      snapshot: {
+        ...snapshot,
+        generatedAt: previousGeneratedAt,
+      },
+    },
+    current: {
+      latest: { ...snapshot, generatedAt: previousGeneratedAt },
+      task: { active: null, latest: { status: 'done' } },
+    },
+  })
+  assert.equal(stale.status, 'failed')
+  assert.match(stale.message, /没有生成新版本/)
 })
