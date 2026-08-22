@@ -658,7 +658,7 @@ async function applyDeactivationMarker(account, nick, storage) {
 
 // 列出【全部账号】的最新快照(供云端定时任务遍历所有用户生成 AI 建议)。
 // accounts/ 下形如 accounts/<hash>/<ts>-<rand>.json(新)或 accounts/<hash>.json(旧单文件)。
-// 按 hash 目录分组,每组取 uploadedAt 最新的一份读出 → 返回账号对象数组(含 nick/pwHash/data)。
+// 按 hash 目录分组。current.json 永远优先；只有 current 缺失时才回退最新历史或旧文件。
 export async function listAllAccounts(storage = defaultStorage) {
   const byNick = new Map();
   const { blobs } = await storage.list({ prefix: PREFIX, limit: 10000 });
@@ -669,7 +669,17 @@ export async function listAllAccounts(storage = defaultStorage) {
     if (rest.includes('/runtime/')) continue;
     const key = rest.includes('/') ? rest.split('/')[0] : rest; // 目录 hash 或旧文件名
     const cur = groups.get(key);
-    if (!cur || new Date(b.uploadedAt).getTime() > new Date(cur.uploadedAt).getTime()) {
+    const isCurrent = rest.endsWith('/current.json');
+    const currentSelected = cur?.pathname?.endsWith('/current.json');
+    if (
+      !cur
+      || (isCurrent && !currentSelected)
+      || (
+        isCurrent === currentSelected
+        && new Date(b.uploadedAt).getTime()
+          > new Date(cur.uploadedAt).getTime()
+      )
+    ) {
       groups.set(key, b);
     }
   }

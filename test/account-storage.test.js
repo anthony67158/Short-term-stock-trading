@@ -132,7 +132,9 @@ test('两个实例基于同一ETag写入时只有第一份可以覆盖权威快�
     (error) => error?.code === 'OSS_WRITE_CONFLICT',
   )
   const saved = await readAccount('并发条件写账号', storage)
+  const listed = await listAllAccounts(storage)
   assert.equal(saved.data.plan[0].code, '600519')
+  assert.equal(listed[0].data.plan[0].code, '600519')
 })
 
 test('同一服务端实例连续保存会推进ETag而不是误报冲突', async () => {
