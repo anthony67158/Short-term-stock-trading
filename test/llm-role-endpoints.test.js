@@ -138,8 +138,8 @@ test('旧配置缺少的固定槽位以停用状态补齐', () => {
 
 test('策略日报使用独立daily角色而不是复用agent', () => {
   assert.match(dailyReport, /getModel\('daily'\)/)
-  assert.match(dailyReport, /getReasoning\('daily'\)/)
   assert.match(dailyReport, /role:\s*'daily'/)
+  assert.match(dailyReport, /forceNoReason:\s*true/)
 })
 
 test('各入口按自己的角色判断专用端点是否可用', () => {

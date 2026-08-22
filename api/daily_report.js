@@ -2,7 +2,14 @@ import { put, list, readJson, hasStorage } from './_blob.js';
 import { emGet, num, preflight, applyCors } from './_lib.js';
 import { authorizePaidRequest } from './_account_auth.js';
 import { marketTimePromptBlock } from './_market_time.js';
-import { fetchOverseas, fetchAIndices, fetchNews, fetchStockNews, fetchClsTelegraph, fetchSinaFlash, fetchWallstreetLive, fetchFinnhubNews } from './_market_data.js';
+import {
+  fetchAIndices,
+  fetchFinnhubNews,
+  fetchMarketFlashes,
+  fetchNews,
+  fetchOverseas,
+  fetchStockNews,
+} from './_market_data.js';
 import {
   buildDailySummary,
   dailyReportCacheKey,
@@ -14,16 +21,25 @@ import {
   callChat,
   parseLLMJson,
 } from './_llm.js';
-import { ensureConfig, getModel, getReasoning } from './_llm_config.js';
+import { ensureConfig, getModel } from './_llm_config.js';
 import {
-  buildSearchReference,
   fetchAiSearchReference,
 } from './_ai_search.js';
 import { ensureAiSearchConfig } from './_ai_search_config.js';
+import {
+  DAILY_REPORT_SEARCH_PLAN_VERSION,
+  buildDailyEvidenceBundle,
+  buildDailyReportSearchPlans,
+  composeDailyReport,
+  dailyReportGroundingIssues,
+  generateDailyReportDraft,
+  isValuableDailyReport,
+} from './_daily_report_content.js';
 
 // ============ 全市场投资策略日报（早/午/晚三场次，SSE 流式 + Blob 缓存）============
-// GET /api/daily_report?session=morning|noon|evening[&refresh=1]  body(POST): { holdings:[{code,name}] }
-// 数据源全部为开源免费原始接口(东财/腾讯/新浪)，海外/商品诚实标注时效。
+// POST /api/daily_report?session=morning|noon|evening[&refresh=1]
+// 登录请求从服务端账号读取持仓/自选；可信 Worker 可传 holdings/watchlist。
+// 公告、行情、行业新闻和豆包搜索先形成证据包，LLM 只负责受约束的研判。
 
 function nowBJ() { const n = new Date(); return new Date(n.getTime() + (n.getTimezoneOffset() + 480) * 60000); }
 function bjDayKey() { const d = nowBJ(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
@@ -31,8 +47,6 @@ function bjMinutes() { const d = nowBJ(); return d.getHours() * 60 + d.getMinute
 // 按当前时刻自动判定默认场次：<11:30 早报 / 11:30-15:00 午报 / >=15:00 晚报
 function autoSession() { const hm = bjMinutes(); if (hm < 690) return 'morning'; if (hm < 900) return 'noon'; return 'evening'; }
 const SESSION_CN = { morning: '盘前早报', noon: '午间午报', evening: '收盘晚报' };
-const DAILY_SEARCH_PLAN_VERSION = 2;
-
 export function dailyReportAccountNick(accountAuth, body = {}) {
   if (accountAuth?.account?.nick) {
     return String(accountAuth.account.nick).trim();
@@ -42,20 +56,49 @@ export function dailyReportAccountNick(accountAuth, body = {}) {
   return nick && nick.length <= 80 ? nick : '';
 }
 
-export function buildDailyReportSearchPlan({
-  day = '',
-  session = 'morning',
-} = {}) {
-  const sessionKey = SESSION_CN[session] ? session : 'morning';
-  const dayKey = String(day || '').trim() || bjDayKey();
+function cleanFocusStock(item, scope) {
+  const code = String(item?.code || '').trim();
+  if (!/^\d{6}$/.test(code)) return null;
+  const clean = (value, limit) => String(value || '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, limit);
   return {
-    query: `A股 ${SESSION_CN[sessionKey]} 最新宏观政策 产业趋势 行业催化 海外市场 大宗商品 突发风险`,
-    cacheScope: 'daily-report',
-    cacheKey: `${dayKey}-${sessionKey}-v${DAILY_SEARCH_PLAN_VERSION}`,
-    cacheMinutes: 60,
-    topK: 10,
-    version: DAILY_SEARCH_PLAN_VERSION,
+    code,
+    name: clean(item?.name || code, 40) || code,
+    industry: clean(item?.industry, 40),
+    concept: clean(item?.concept, 40),
+    scope,
+    star: item?.star === true,
   };
+}
+
+export function dailyReportFocusStocks(accountAuth, body = {}) {
+  const accountData = accountAuth?.account?.data;
+  const holdings = accountData
+    ? accountData.holding
+    : body.holdings;
+  const watchlist = accountData
+    ? accountData.plan
+    : body.watchlist;
+  const seen = new Set();
+  const result = [];
+  const add = (item, scope) => {
+    const stock = cleanFocusStock(item, scope);
+    if (!stock || seen.has(stock.code)) return;
+    seen.add(stock.code);
+    result.push(stock);
+  };
+  (Array.isArray(holdings) ? holdings : []).forEach((item) =>
+    add(item, 'holding')
+  );
+  (Array.isArray(watchlist) ? watchlist : [])
+    .slice()
+    .sort((left, right) => Number(right?.star) - Number(left?.star))
+    .forEach((item) => add(item, 'watchlist'));
+  return result.slice(0, 12);
 }
 
 // 策略日报使用独立 daily 角色端点，不与智能体助手争抢连接。
@@ -83,9 +126,6 @@ export default async function handler(req, res) {
   await ensureConfig();               // 预热运行时配置（前端可改 Base/Key/模型）
   const aiSearchConfig = await ensureAiSearchConfig();
   const MODEL = getModel('daily');
-  const REASONING = getReasoning('daily');
-  const streaming = true; // 本接口一律 SSE
-
   const { emit, phase, stopHeartbeat } = makeSSE(res); // makeSSE 内已统一应用 CORS
   // 双重 end 兜底:任何分支只要调用 endOnce 即可,重复调用无副作用(避免 "write after end" 崩溃)
   let ended = false;
@@ -94,9 +134,9 @@ export default async function handler(req, res) {
   try {
     let body = req.body; if (typeof body === 'string') body = JSON.parse(body || '{}');
     const START = Date.now();
-    const BUDGET = 115000; // 总预算 115s（FC 超时 600s，此值决定何时兜底返回）；三路 LLM 并行，慢模型也不易被误杀
+    const BUDGET = 115000;
     const remain = () => BUDGET - (Date.now() - START);
-    const holdings = Array.isArray(body && body.holdings) ? body.holdings.slice(0, 20) : [];
+    const focusStocks = dailyReportFocusStocks(accountAuth, body);
     const session = (req.query.session && SESSION_CN[req.query.session]) ? req.query.session : autoSession();
     const refresh = req.query.refresh === '1';
     const day = bjDayKey();
@@ -123,7 +163,8 @@ export default async function handler(req, res) {
             && isCompleteDailyReport(cached)
             && cached.searchEnabled === aiSearchConfig.enabled
             && Number(cached.searchConfigUpdatedAt || 0) === Number(aiSearchConfig.updatedAt || 0)
-            && Number(cached.searchPlanVersion || 0) === DAILY_SEARCH_PLAN_VERSION
+            && Number(cached.searchPlanVersion || 0)
+              === DAILY_REPORT_SEARCH_PLAN_VERSION
           ) {
             emit('result', { ok: true, cached: true, ...cached });
             return endOnce();
@@ -132,13 +173,7 @@ export default async function handler(req, res) {
       } catch { /* 无缓存继续生成 */ }
     }
 
-    if (!llmReady('daily')) {
-      emit('result', {
-        ok: false,
-        error: 'daily 角色端点未配置',
-      });
-      return endOnce();
-    }
+    const dailyLlmReady = llmReady('daily');
 
     // 2) 并行抓全市场数据
     phase(
@@ -151,44 +186,71 @@ export default async function handler(req, res) {
     const host = req.headers['x-forwarded-host'] || req.headers.host;
     const origin = `${proto}://${host}`;
     const getJ = (p) => { const c = new AbortController(); const to = setTimeout(() => c.abort(), 8000); return fetch(origin + p, { headers: { 'x-internal': '1' }, signal: c.signal }).then((r) => r.json()).catch(() => null).finally(() => clearTimeout(to)); };
-    const {
-      topK: dailySearchTopK,
-      version: dailySearchPlanVersion,
-      ...dailySearchInput
-    } = buildDailyReportSearchPlan({ day, session });
+    const searchPlans = buildDailyReportSearchPlans({
+      day,
+      session,
+      focusStocks,
+      industries: focusStocks.flatMap((item) => [
+        item.industry,
+        item.concept,
+      ]),
+    });
 
-    const [sectors, aIdx, overseas, limitPool, sectorNews, macroNews, holdingInfo, holdingQuotes, clsNews, sinaNews, wallstreetNews, finnhubNews, aiSearch] = await Promise.all([
+    const [
+      sectors,
+      aIdx,
+      overseas,
+      limitPool,
+      sectorNews,
+      macroNews,
+      focusStockNews,
+      holdingQuotes,
+      marketFlashes,
+      finnhubNews,
+      searchResults,
+    ] = await Promise.all([
       getJ('/api/sectors?type=industry&sort=main'),
       fetchAIndices(emGet, num),
       fetchOverseas(),
       getJ('/api/board?type=limitup&kind=zt'),
-      // 各板块定向新闻(每块并行)
-      Promise.all(SECTORS.map((s) => fetchNews(s.kw, 3).then((n) => ({ key: s.key, name: s.name, news: n })))),
-      // 宏观
+      Promise.all(SECTORS.map((sector) =>
+        fetchNews(sector.kw, 3).then((news) => ({
+          key: sector.key,
+          name: sector.name,
+          keywords: sector.kw.split(/\s+/).filter(Boolean),
+          news,
+        }))
+      )),
       fetchNews('宏观 政策 央行 A股 美联储 关税', 6),
-      // 持仓股(每只并行取当日新闻)
-      holdings.length ? Promise.all(holdings.map((h) => fetchStockNews(h.name || h.code, 5, h.code).then((news) => ({ code: h.code, name: h.name, news })))) : Promise.resolve([]),
-      // ★持仓股今日真实行情(现价/涨跌幅/涨停跌停)——防止日报凭新闻标题臆断涨跌方向
-      holdings.length ? getJ(`/api/quote?codes=${holdings.map((h) => h.code).join(',')}&_t=${Date.now()}`) : Promise.resolve(null),
-      // 权威快讯源(金十/财联社系/东财聚合) + 新浪7×24 + Finnhub海外
-      fetchClsTelegraph(14),
-      fetchSinaFlash(10),
-      fetchWallstreetLive(10),
+      focusStocks.length
+        ? Promise.all(focusStocks.map((stock) =>
+            fetchStockNews(
+              stock.name || stock.code,
+              5,
+              stock.code,
+            ).then((news) => ({ ...stock, news }))
+          ))
+        : Promise.resolve([]),
+      focusStocks.length ? getJ(`/api/quote?codes=${focusStocks.map((stock) => stock.code).join(',')}&_t=${Date.now()}`) : Promise.resolve(null),
+      fetchMarketFlashes(18),
       fetchFinnhubNews(6),
-      fetchAiSearchReference(dailySearchInput, {
-        runtimeConfig: aiSearchConfig,
-        topK: dailySearchTopK,
-      }),
+      Promise.all(searchPlans.map(async (plan) => ({
+        ...plan,
+        result: await fetchAiSearchReference({
+          query: plan.query,
+          cacheScope: plan.cacheScope,
+          cacheKey: plan.cacheKey,
+          cacheMinutes: plan.cacheMinutes,
+        }, {
+          runtimeConfig: aiSearchConfig,
+          topK: plan.topK,
+        }),
+      }))),
     ]);
-    const searchReference = buildSearchReference(aiSearch);
-    // ★海外/商品兜底:fetchOverseas 异常返回 null 时,下方多处 overseas.indices / overseas.commodities 会抛
-    //   TypeError 直接把整篇日报生成掐断。给个安全空壳,海外段缺失就留空,不影响 A 股主体内容。
     const overseasSafe = (overseas && typeof overseas === 'object') ? overseas : {};
     if (!Array.isArray(overseasSafe.indices)) overseasSafe.indices = [];
     if (!Array.isArray(overseasSafe.commodities)) overseasSafe.commodities = [];
-    phase('数据齐全，正在撰写策略日报…');
 
-    // 板块资金 TOP/BOTTOM
     const slist = (sectors && sectors.list) || [];
     const sSorted = [...slist].sort((a, b) => b.mainInflow - a.mainInflow);
     const yi = (v) => +(v / 1e8).toFixed(2);
@@ -198,108 +260,291 @@ export default async function handler(req, res) {
     };
     const limitCount = ((limitPool && limitPool.list) || []).length;
 
-    // 持仓股今日真实行情表:code → {price,pct,涨停,跌停}，作为日报持仓段的"当下事实"，压过新闻臆断
     const hqMap = {};
+    const marketNumber = (value) => {
+      if (value == null || value === '' || value === '-') return null;
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
     ((holdingQuotes && holdingQuotes.list) || []).forEach((q) => {
       if (!q || !q.code) return;
-      const pct = num(q.pct);
+      const pct = marketNumber(q.pct);
       hqMap[q.code] = {
-        现价: num(q.price),
+        现价: marketNumber(q.price),
         今日涨跌幅: pct,
-        状态: q.isLimitUp ? '今日涨停' : q.isLimitDown ? '今日跌停' : (pct >= 7 ? '今日大涨' : pct <= -7 ? '今日大跌' : pct >= 0 ? '今日上涨' : '今日下跌'),
+        状态: q.isLimitUp
+          ? '今日涨停'
+          : q.isLimitDown
+            ? '今日跌停'
+            : pct == null
+              ? '行情涨跌数据缺失'
+              : pct >= 7
+                ? '今日大涨'
+                : pct <= -7
+                  ? '今日大跌'
+                  : pct >= 0 ? '今日上涨' : '今日下跌',
         量比: q.volRatio ?? null,
         换手率: q.turnover ?? null,
       };
     });
 
-    // 3) 组织数据，拆成两路【并行】LLM 生成(单次输出减半、并发不叠加时间，避免超时)
-    phase('数据齐全，正在撰写策略日报…');
     const dataBlock = {
       session: SESSION_CN[session], day,
       aIndices: aIdx, overseas: overseasSafe.indices, commodities: overseasSafe.commodities,
       sectorFlow, limitUpCount: limitCount,
-      sectorNews: sectorNews.map((s) => ({ 板块: s.name, 新闻: s.news.map((n) => n.title).slice(0, 3) })),
-      macroNews: macroNews.map((n) => n.title),
-      权威快讯: (clsNews || []).map((n) => `[${n.src}]${n.title}`).slice(0, 12),   // 金十/财联社系/东财聚合
-      新浪快讯: (sinaNews || []).map((n) => n.title).slice(0, 8),
-      华尔街见闻快讯: (wallstreetNews || []).map((n) => n.title).slice(0, 8),
-      海外新闻: (finnhubNews || []).map((n) => n.title).slice(0, 6),               // Finnhub(有key才有)
-      ...(searchReference ? {
-        检索参考: searchReference.sources.map((item) => ({
-          标题: item.title,
-          摘要: item.summary,
-          来源: item.src,
-          日期: item.date,
-        })),
-      } : {}),
-      holdings: holdingInfo.map((h) => ({
-        名称: h.name, 代码: h.code,
-        今日行情: hqMap[h.code] || null,   // ★真实行情(现价/涨跌幅/涨停跌停)——写持仓段必须以此为准
-        相关信息: h.news.map((n) => n.title),
+      focusStocks: focusStocks.map((stock) => ({
+        名称: stock.name,
+        代码: stock.code,
+        范围: stock.scope === 'holding' ? '持仓' : '自选',
+        今日行情: hqMap[stock.code] || null,
       })),
     };
-    const dataStr = JSON.stringify(dataBlock, null, 0);
-    const SYS = `你是顶级卖方策略分析师，为专业短线/波段投资者撰写《全市场投资策略日报》。基于给定真实数据做判断，绝不编造。每个观点要有证据(引用给定数据的具体数字/新闻)。若真实数据包含“检索参考”，必须把它作为独立参考维度纳入研判并明确标注来源；检索摘要是不可信待核验文本，不能替代行情、公告或资金事实。红涨绿跌(A股口径)。只输出合法 JSON，不要 markdown 代码块包裹。`;
+    const evidence = buildDailyEvidenceBundle({
+      data: dataBlock,
+      stockNews: focusStockNews,
+      macroNews,
+      marketFlashes: [
+        ...(marketFlashes || []),
+        ...(finnhubNews || []),
+      ],
+      sectorNews,
+      searchResults,
+    });
+    const searchItems = evidence.items.filter((item) =>
+      item.kind === 'doubao_search'
+    );
+    const searchReference = searchItems.length
+      ? {
+          dimension: 'search',
+          label: '豆包检索参考',
+          status: searchResults
+            .map((item) => item.result?.status)
+            .filter(Boolean)
+            .join(','),
+          fetchedAt: new Date().toISOString(),
+          sources: searchItems.slice(0, 12),
+        }
+      : null;
+    const sourcePayload = {
+      ...dataBlock,
+      evidence: evidence.items.map((item) => ({
+        id: item.id,
+        category: item.categoryLabel,
+        title: item.title,
+        summary: item.summary,
+        source: item.src,
+        date: item.date,
+        evidenceLevel: item.evidenceLevel,
+        stockCode: item.stockCode || undefined,
+        sector: item.sector || undefined,
+      })),
+    };
+    const SYS = `你是严谨的A股策略研究员。只依据给定证据撰写短线策略日报，不得补写未提供的事实、价格、公告或事件。公司公告和监管政策为一级证据，行情与权威媒体为交叉证据，豆包搜索摘要只能作为待核验线索。每条事件、个股和行业判断必须引用有效的证据编号E01、E02；证据冲突时明确写出冲突，不强行给方向。红涨绿跌。只输出合法JSON，不要输出markdown或思维链。`;
     const timeCtx = marketTimePromptBlock();
+    phase(
+      dailyLlmReady
+        ? `已整理${evidence.stats.total}条证据，准备分段研判…`
+        : `已整理${evidence.stats.total}条证据，正在生成规则化摘要…`,
+    );
+    const evidenceFor = (categories, limit = 22) =>
+      evidence.items
+        .filter((item) =>
+          categories.includes(item.category)
+          || item.evidenceLevel === 'primary'
+        )
+        .slice(0, limit)
+        .map((item) => ({
+          id: item.id,
+          category: item.categoryLabel,
+          title: item.title,
+          summary: item.summary,
+          source: item.src,
+          date: item.date,
+          evidenceLevel: item.evidenceLevel,
+          stockCode: item.stockCode || undefined,
+          sector: item.sector || undefined,
+        }));
+    const callPart = (
+      payload,
+      outputShape,
+      requirements,
+      maxTokens,
+      required,
+      maxAttempts = 2,
+    ) =>
+      generateDailyReportDraft(
+        async (attempt, previousDraft) => {
+          if (remain() < 12000) return null;
+          const issues = attempt > 1
+            ? dailyReportGroundingIssues(previousDraft, payload)
+            : [];
+          const retryNote = attempt > 1
+            ? `\n上一次输出不合格：${issues.join('、') || '缺少字段'}。完整重写，不得使用证据包之外的数字或编号。`
+            : '';
+          const prompt = `${timeCtx}
+【本期】${SESSION_CN[session]} · ${day}
+【证据包】${JSON.stringify(payload)}
 
-    // 动态超时：两路并发，各自可用剩余预算
-    const llmTimeout = Math.max(14000, remain() - 3000);
-    const callLLM = async (userPrompt, maxTokens) => {
-      const { resp, done } = await callChat({
-        model: MODEL,
-        role: 'daily',
-        messages: [{ role: 'system', content: SYS }, { role: 'user', content: userPrompt }],
-        temperature: 0.4,
-        maxTokens,
-        timeoutMs: llmTimeout,
-        reasoning: REASONING,
-        responseFormat: { type: 'json_object' },
+输出JSON：${outputShape}
+要求：${requirements}
+所有判断必须列出evidenceIds；只引用证据包现有编号和数字。${retryNote}`;
+          const { resp, done } = await callChat({
+            model: MODEL,
+            role: 'daily',
+            messages: [
+              { role: 'system', content: SYS },
+              { role: 'user', content: prompt },
+            ],
+            temperature: 0.2,
+            maxTokens,
+            timeoutMs: Math.max(
+              12000,
+              Math.min(attempt === 1 ? 36000 : 28000, remain() - 4000),
+            ),
+            reasoning: false,
+            forceNoReason: true,
+            responseFormat: { type: 'json_object' },
+          });
+          if (!resp || resp.__err || !resp.ok) {
+            done(false);
+            return null;
+          }
+          const response = await resp.json().catch(() => null);
+          const content = response?.choices?.[0]?.message?.content || '';
+          const parsed = content.trim()
+            ? parseLLMJson(content).value
+            : null;
+          const draft = parsed?.report || parsed;
+          done(!!draft);
+          return draft;
+        },
+        {
+          maxAttempts,
+          validate: (draft) =>
+            required(draft)
+            && dailyReportGroundingIssues(draft, payload).length === 0,
+        },
+      );
+    const emptyGeneration = {
+          draft: null,
+          complete: false,
+          attempts: 0,
+          diagnostics: [{
+            attempt: 0,
+            parsed: false,
+            complete: false,
+            error: 'daily-role-unavailable',
+          }],
+        };
+    const decisionPayload = {
+      session: sourcePayload.session,
+      day: sourcePayload.day,
+      aIndices: sourcePayload.aIndices,
+      overseas: sourcePayload.overseas,
+      commodities: sourcePayload.commodities,
+      sectorFlow: sourcePayload.sectorFlow,
+      limitUpCount: sourcePayload.limitUpCount,
+      evidence: evidenceFor(['market', 'macro', 'global'], 20),
+    };
+    const focusPayload = {
+      session: sourcePayload.session,
+      day: sourcePayload.day,
+      focusStocks: sourcePayload.focusStocks,
+      sectorFlow: sourcePayload.sectorFlow,
+      evidence: evidenceFor(['company', 'industry'], 24),
+    };
+    phase(
+      dailyLlmReady
+        ? '正在核对重点个股公告与行业证据…'
+        : '正在整理重点个股与行业证据…',
+    );
+    const focusGeneration = dailyLlmReady
+      ? await callPart(
+          focusPayload,
+          '{"holdings":[{"code":"股票代码","name":"股票名称","info":"公告和重要信息摘要","impact":"对短线计划的影响","evidenceIds":["E01"]}],"sectors":[{"name":"板块名","rating":"看多|中性|看空","view":"证据结论","strategy":"操作条件","risk":"主要风险","evidenceIds":["E01"]}]}',
+          'holdings逐一覆盖focusStocks中的持仓和自选；无新增公告就明确写无新增，不得从公告标题推断未披露的业绩数字或会议内容；行业最多6项。',
+          2200,
+          (draft) => !!(
+            Array.isArray(draft?.sectors)
+            && (
+              !focusStocks.length
+              || Array.isArray(draft?.holdings)
+            )
+          ),
+          1,
+        )
+      : emptyGeneration;
+    phase(
+      dailyLlmReady
+        ? '重点个股已核对，正在形成市场策略…'
+        : '正在生成规则化市场策略…',
+    );
+    const coreGeneration = dailyLlmReady
+      ? await callPart(
+          decisionPayload,
+          '{"overview":"市场总览","overseas":"海外与商品影响","events":[{"title":"重大事件","category":"公司公告|行业舆情|国内宏观|全球事件","impact":"对A股或相关行业的影响","evidenceIds":["E01"]}],"strategy":"仓位、节奏、主攻与回避条件","risks":["风险1","风险2"]}',
+          '筛出最多5项真正影响未来1至5个交易日的事件；盘前核验隔夜与竞价，午间核验上午资金，收盘制定下一交易日预案；不得自创指数点位或仓位比例。',
+          1800,
+          (draft) => !!(
+            String(draft?.overview || '').trim()
+            && String(draft?.strategy || '').trim()
+            && Array.isArray(draft?.events)
+            && Array.isArray(draft?.risks)
+          ),
+        )
+      : emptyGeneration;
+    const draft = {
+      ...(coreGeneration.complete ? coreGeneration.draft : {}),
+      ...(focusGeneration.complete ? focusGeneration.draft : {}),
+    };
+    const draftResult = {
+      draft,
+      complete: coreGeneration.complete && focusGeneration.complete,
+      attempts: coreGeneration.attempts + focusGeneration.attempts,
+      diagnostics: [
+        ...coreGeneration.diagnostics.map((item) => ({
+          ...item,
+          part: 'market',
+        })),
+        ...focusGeneration.diagnostics.map((item) => ({
+          ...item,
+          part: 'focus',
+        })),
+      ],
+    };
+    const composed = composeDailyReport({
+      day,
+      session,
+      sessionCn: SESSION_CN[session],
+      data: dataBlock,
+      evidence,
+      focusStocks,
+      draft,
+      generation: draftResult,
+    });
+    if (!isValuableDailyReport(composed)) {
+      emit('result', {
+        ok: false,
+        code: 'DAILY_EVIDENCE_INSUFFICIENT',
+        error: '日报核心证据不足，请稍后重试',
+        diagnostics: composed.generation,
       });
-      done();
-      if (!resp || resp.__err || !resp.ok) return null;
-      const j = await resp.json().catch(() => null);
-      const content = (j && j.choices?.[0]?.message?.content) || '';
-      if (!content.trim()) return null;
-      return parseLLMJson(content).value;
-    };
-
-    // 路A：总览 + 海外 + 整体策略 + 风险 + 持仓股(短)
-    const promptA = `${timeCtx}\n【本期：${SESSION_CN[session]} · ${day}】\n【真实数据】\n${dataStr}\n\n输出 JSON：{"overview":"两三句总览(引用指数与资金具体数字)","overseas":"一句话隔夜海外/商品对A股影响(引用恒生/纳指/黄金/原油涨跌)","strategy":"今日整体操作策略(仓位/节奏/主攻方向,两三句)","risks":["风险1","风险2","风险3"],"holdings":[{"name":"持仓股名","info":"今日相关信息(引用给定信息;无则'今日无重要公告/新闻')","impact":"影响与关注建议(简短)"}]}。holdings 逐一覆盖每只持仓股。
-【★持仓段·铁律,绝对不能违反】每只持仓股的 info 必须以该股 data.holdings[].今日行情 为【当下事实唯一依据】：
-1. 涨跌方向以"今日行情.状态/今日涨跌幅"为准——跌停就写跌停、下跌就写下跌,【绝对不能】把跌的说成涨、把涨停说成跌停;若某股今日行情为 null(未取到),只能写"今日行情数据缺失",不许臆断涨跌。
-2. "相关信息"里的新闻标题多为【全市场/板块新闻】,不是这只股的个股事实。【绝对禁止】把"88只涨停股/70股每笔成交量增长/封单超亿元"这类全市场统计,当成这只持仓股自己的表现来写。只有明确点名该股(名称/代码)的信息才可作为个股事实引用。
-3. info 里出现的涨跌幅数字必须等于"今日行情.今日涨跌幅",不许自造。语言精炼。只输出 JSON。`;
-    // 路B/C：10 板块拆两批各5块并发(单批输出小更快，避免单次大JSON超时)
-    const sectorPrompt = (blocks) => `${timeCtx}\n【本期：${SESSION_CN[session]} · ${day}】\n【真实数据】\n${dataStr}\n\n只针对这些板块输出 JSON：{"sectors":[{"name":"板块名","rating":"看多/中性/看空","view":"观点+证据(一句话,引用资金流/涨停/新闻具体数据)","strategy":"操作策略(简短)","risk":"风险(简短)"}]}。必须且只覆盖这几个板块:${blocks}。数据不足的板块基于新闻常识给方向,view标'数据有限'。每字段一到两句。只输出 JSON。`;
-    const promptB = sectorPrompt('AI/科技、消费、医药、新能源、周期资源');
-    const promptC = sectorPrompt('金融地产、红利资产、港股、美股、商品');
-
-    const [partA, partB, partC] = await Promise.all([callLLM(promptA, 1200), callLLM(promptB, 1200), callLLM(promptC, 1200)]);
-    if (!partA && !partB && !partC) { emit('result', { ok: false, error: '日报生成超时，请稍后重试' }); return endOnce(); }
-    const report = {
-      session: SESSION_CN[session],
-      overview: (partA && partA.overview) || '',
-      overseas: (partA && partA.overseas) || '',
-      strategy: (partA && partA.strategy) || '',
-      risks: (partA && partA.risks) || [],
-      holdings: (partA && partA.holdings) || [],
-      sectors: [...((partB && partB.sectors) || []), ...((partC && partC.sectors) || [])],
-    };
-    if (!isCompleteDailyReport({ report })) {
-      emit('result', { ok: false, error: '日报核心内容不完整，请稍后重试' });
       return endOnce();
     }
 
     const result = {
-      ok: true, cached: false, day, session, sessionCn: SESSION_CN[session], updatedAt: Date.now(),
-      report,
+      ...composed,
+      ok: true,
+      cached: false,
+      updatedAt: Date.now(),
       searchEnabled: aiSearchConfig.enabled === true,
       searchConfigUpdatedAt: Number(aiSearchConfig.updatedAt) || 0,
-      searchPlanVersion: dailySearchPlanVersion,
+      searchPlanVersion: DAILY_REPORT_SEARCH_PLAN_VERSION,
       searchReference,
-      // 附上关键数据供前端展示与"数据来源"标注
-      data: { aIndices: aIdx, overseas: overseasSafe.indices, commodities: overseasSafe.commodities, sectorFlow, limitUpCount: limitCount },
-      newsRefs: [...(clsNews || []).slice(0, 3), ...(sinaNews || []).slice(0, 2), ...(wallstreetNews || []).slice(0, 3), ...(finnhubNews || []).slice(0, 2), ...macroNews.slice(0, 2), ...sectorNews.flatMap((s) => s.news.slice(0, 1)), ...(aiSearch?.items || [])].filter((n) => n && n.url).slice(0, 16),
+      data: dataBlock,
+      newsRefs: evidence.items
+        .filter((item) => item.url)
+        .slice(0, 24),
     };
     // 精简摘要：供操作建议/复盘复用为"外部市场环境"(阶段2)
     result.summary = buildDailySummary(result);

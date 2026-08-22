@@ -38,9 +38,35 @@ export function buildDailySummary(result) {
   if (!isCompleteDailyReport(result)) return null;
   const rep = result.report;
   const parts = [];
+  const evidenceSuffix = (item) => {
+    const ids = Array.isArray(item?.evidenceIds)
+      ? item.evidenceIds.filter(Boolean).slice(0, 3)
+      : [];
+    return ids.length ? `[${ids.join('、')}]` : '';
+  };
   parts.push(`【${result.sessionCn || ''}·${result.day || ''}】`);
   if (rep.overview) parts.push('总览:' + String(rep.overview).slice(0, 160));
   if (rep.overseas) parts.push('海外:' + String(rep.overseas).slice(0, 100));
+  if (Array.isArray(rep.events) && rep.events.length) {
+    parts.push(
+      '重大事件:'
+      + rep.events.slice(0, 3).map((item) =>
+        `${String(item?.title || '').slice(0, 70)}${evidenceSuffix(item)}`
+      ).filter(Boolean).join('；'),
+    );
+  }
+  if (Array.isArray(rep.holdings) && rep.holdings.length) {
+    parts.push(
+      '重点个股:'
+      + rep.holdings.slice(0, 5).map((item) => {
+        const name = String(item?.name || item?.code || '').slice(0, 30);
+        const code = String(item?.code || '').slice(0, 12);
+        const impact = String(item?.impact || item?.info || '').slice(0, 80);
+        if (!name) return '';
+        return `${name}${code ? `(${code})` : ''}:${impact}${evidenceSuffix(item)}`;
+      }).filter(Boolean).join('；'),
+    );
+  }
   // 板块只留评级(看多/看空)，省 token
   if (Array.isArray(rep.sectors) && rep.sectors.length) {
     const bull = rep.sectors.filter((s) => String(s.rating).includes('多')).map((s) => s.name);

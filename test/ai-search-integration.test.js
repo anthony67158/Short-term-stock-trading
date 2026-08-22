@@ -1,7 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { buildDailyReportSearchPlan } from '../api/daily_report.js'
+import {
+  buildDailyReportSearchPlans,
+} from '../api/_daily_report_content.js'
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8')
 
@@ -42,24 +44,28 @@ test('军师助手日报选股统一接入AI检索配置', () => {
   }
 })
 
-test('策略日报单次豆包调用获取十条跨市场补盲信息', () => {
-  const plan = buildDailyReportSearchPlan({
+test('策略日报用三类豆包检索分别补齐公司行业与全球信息', () => {
+  const plans = buildDailyReportSearchPlans({
     day: '2026-08-20',
     session: 'noon',
+    focusStocks: [{ code: '000001', name: '平安银行' }],
+    industries: ['银行'],
   })
 
-  assert.match(plan.query, /宏观政策/)
-  assert.match(plan.query, /产业趋势/)
-  assert.match(plan.query, /行业催化/)
-  assert.match(plan.query, /海外市场/)
-  assert.match(plan.query, /大宗商品/)
-  assert.match(plan.query, /突发风险/)
-  assert.ok(Array.from(plan.query).length <= 64)
-  assert.equal(plan.cacheScope, 'daily-report')
-  assert.equal(plan.cacheKey, '2026-08-20-noon-v2')
-  assert.equal(plan.cacheMinutes, 60)
-  assert.equal(plan.topK, 10)
-  assert.equal(plan.version, 2)
+  assert.deepEqual(plans.map((item) => item.key), [
+    'company',
+    'industry',
+    'global',
+  ])
+  assert.match(plans[0].query, /公告/)
+  assert.match(plans[1].query, /行业政策/)
+  assert.match(plans[2].query, /全球市场/)
+  assert.ok(plans.every((plan) => Array.from(plan.query).length <= 64))
+  assert.ok(plans.every((plan) => plan.cacheScope.startsWith('daily-')))
+  assert.ok(plans.every((plan) => plan.cacheKey.includes('-v3:')))
+  assert.ok(plans.every((plan) => plan.cacheMinutes === 60))
+  assert.ok(plans.every((plan) => plan.topK === 8))
+  assert.ok(plans.every((plan) => plan.version === 3))
 })
 
 test('关闭开关时军师助手与日报动态移除检索参考', () => {
@@ -71,7 +77,7 @@ test('关闭开关时军师助手与日报动态移除检索参考', () => {
   assert.match(component, /visibleSearchReference/)
   assert.match(assistant, /item\?\.dimension !== 'search'/)
   assert.match(assistant, /searchConfig\.enabled \|\| !m\.searchReference/)
-  assert.match(daily, /item\?\.kind !== 'doubao_search'/)
+  assert.match(daily, /\.filter\(\s*\(item\) => item\?\.kind !== 'doubao_search'/)
   assert.match(daily, /<SearchReference/)
   assert.match(advice, /<SearchReference/)
 })

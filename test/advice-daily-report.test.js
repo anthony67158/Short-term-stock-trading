@@ -19,6 +19,7 @@ import {
 } from '../api/_daily_summary.js'
 import {
   dailyReportAccountNick,
+  dailyReportFocusStocks,
 } from '../api/daily_report.js'
 
 const NOW = Date.parse('2026-08-12T02:30:00.000Z')
@@ -44,6 +45,31 @@ test('可信Worker必须显式传入账号作用域生成策略日报', () => {
     { trusted: true, account: null },
     {},
   ), '')
+})
+
+test('登录用户日报焦点股只读取服务端账本且持仓优先于自选', () => {
+  const stocks = dailyReportFocusStocks({
+    account: {
+      data: {
+        holding: [{ code: '000001', name: '平安银行' }],
+        plan: [
+          { code: '000001', name: '重复自选', star: true },
+          { code: '300750', name: '宁德时代', star: true },
+        ],
+      },
+    },
+  }, {
+    holdings: [{ code: '600000', name: '伪造持仓' }],
+  })
+
+  assert.deepEqual(stocks.map(({ code, name, scope }) => ({
+    code,
+    name,
+    scope,
+  })), [
+    { code: '000001', name: '平安银行', scope: 'holding' },
+    { code: '300750', name: '宁德时代', scope: 'watchlist' },
+  ])
 })
 
 test('当天已有策略日报时直接复用且不重复生成', async () => {
@@ -137,6 +163,35 @@ test('日报摘要保留检索配置版本供军师复用校验', () => {
 
   assert.equal(summary.searchEnabled, false)
   assert.equal(summary.searchConfigUpdatedAt, 300)
+})
+
+test('军师日报摘要包含重大事件与重点个股证据编号', () => {
+  const summary = buildDailySummary({
+    day: '2026-08-12',
+    session: 'morning',
+    sessionCn: '盘前早报',
+    searchEnabled: true,
+    searchConfigUpdatedAt: 300,
+    report: {
+      overview: '市场震荡。',
+      strategy: '等待确认。',
+      events: [{
+        title: '央行发布公开市场操作公告',
+        evidenceIds: ['E01'],
+      }],
+      holdings: [{
+        code: '000001',
+        name: '平安银行',
+        impact: '核对半年报后再调整仓位。',
+        evidenceIds: ['E02'],
+      }],
+      sectors: [],
+      risks: [],
+    },
+  })
+
+  assert.match(summary.text, /重大事件:央行发布公开市场操作公告\[E01\]/)
+  assert.match(summary.text, /重点个股:平安银行\(000001\).*\[E02\]/)
 })
 
 test('日报缓存按账号摘要隔离且路径不包含明文昵称', () => {
