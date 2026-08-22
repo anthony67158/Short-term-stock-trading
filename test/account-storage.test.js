@@ -24,11 +24,23 @@ function fakeStorage() {
       const key = options.addRandomSuffix
         ? pathname.replace(/\.json$/, `-${++seq}.json`)
         : pathname
+      const current = objects.get(key)
+      if (
+        options.ifMatch
+        && current?.etag !== options.ifMatch
+      ) {
+        const error = new Error('Pre condition failed')
+        error.status = 412
+        error.code = 'PreconditionFailed'
+        throw error
+      }
+      const etag = `etag-${++seq}`
       objects.set(key, {
         value: JSON.parse(String(body)),
         uploadedAt: new Date(Date.now() + seq).toISOString(),
+        etag,
       })
-      return { pathname: key, url: key, downloadUrl: key }
+      return { pathname: key, url: key, downloadUrl: key, etag }
     },
     async list({ prefix = '', limit = 1000 } = {}) {
       return {
@@ -41,6 +53,7 @@ function fakeStorage() {
             downloadUrl: pathname,
             uploadedAt: item.uploadedAt,
             size: JSON.stringify(item.value).length,
+            etag: item.etag,
           })),
       }
     },
@@ -50,6 +63,15 @@ function fakeStorage() {
     async readJson(blobOrPath) {
       const key = typeof blobOrPath === 'string' ? blobOrPath : blobOrPath?.pathname
       return objects.get(key)?.value || null
+    },
+    async readJsonWithMeta(blobOrPath) {
+      const key = typeof blobOrPath === 'string'
+        ? blobOrPath
+        : blobOrPath?.pathname
+      const item = objects.get(key)
+      return item
+        ? { value: structuredClone(item.value), etag: item.etag }
+        : { value: null, etag: null }
     },
   }
 }
@@ -87,6 +109,52 @@ test('账号保存同时写入 OSS 当前快照和可恢复历史快照并可立
   assert.equal(saved.storage, 'oss')
   assert.equal(saved.snapshotKey, historyKey)
   assert.deepEqual((await readAccount(account.nick, storage)).data, account.data)
+})
+
+test('两个实例基于同一ETag写入时只有第一份可以覆盖权威快照', async () => {
+  const storage = fakeStorage()
+  await writeAccount({
+    nick: '并发条件写账号',
+    pwHash: 'hash',
+    createdAt: 1,
+    clientRevision: 1,
+    data: { plan: [], holding: [], closed: [] },
+  }, storage)
+  const first = await readAccount('并发条件写账号', storage)
+  const second = await readAccount('并发条件写账号', storage)
+
+  first.data.plan = [{ code: '600519' }]
+  await writeAccount(first, storage)
+  second.data.plan = [{ code: '000001' }]
+
+  await assert.rejects(
+    writeAccount(second, storage),
+    (error) => error?.code === 'OSS_WRITE_CONFLICT',
+  )
+  const saved = await readAccount('并发条件写账号', storage)
+  assert.equal(saved.data.plan[0].code, '600519')
+})
+
+test('同一服务端实例连续保存会推进ETag而不是误报冲突', async () => {
+  const storage = fakeStorage()
+  await writeAccount({
+    nick: '连续写账号',
+    pwHash: 'hash',
+    createdAt: 1,
+    data: { plan: [], holding: [], closed: [] },
+  }, storage)
+  const account = await readAccount('连续写账号', storage)
+
+  account.data.plan = [{ code: '600519' }]
+  await writeAccount(account, storage)
+  account.data.plan.push({ code: '000001' })
+  await writeAccount(account, storage)
+
+  const saved = await readAccount('连续写账号', storage)
+  assert.deepEqual(
+    saved.data.plan.map((item) => item.code),
+    ['600519', '000001'],
+  )
 })
 
 test('Worker运行态保存只覆盖当前快照且不生成历史或回读校验', async () => {
@@ -384,12 +452,18 @@ test('独立 OSS 注销标记不会被旧设备的延迟保存覆盖', async () 
   await deactivateStoredAccount(account, storage, 123)
 
   // 模拟另一台设备在注销后才完成的旧快照写入。
-  await writeAccount({ ...account, data: { plan: [{ code: '000001' }] } }, storage)
+  await assert.rejects(
+    writeAccount(
+      { ...account, data: { plan: [{ code: '000001' }] } },
+      storage,
+    ),
+    (error) => error?.code === 'OSS_WRITE_CONFLICT',
+  )
   const retained = await readAccount(account.nick, storage)
 
   assert.equal(isAccountActive(retained), false)
   assert.equal(retained.deactivatedAt, 123)
-  assert.equal(retained.data.plan[0].code, '000001')
+  assert.equal(retained.data.plan[0].code, '600519')
 })
 
 test('旧客户端不能覆盖更新版本的持仓和交易流水', () => {

@@ -88,10 +88,16 @@ export async function put(pathname, body, opts = {}) {
   const headers = {};
   if (opts.contentType) headers['Content-Type'] = opts.contentType;
   if (opts.forbidOverwrite) headers['x-oss-forbid-overwrite'] = 'true';
+  if (opts.ifMatch) headers['If-Match'] = String(opts.ifMatch);
   const maxAge = opts.cacheControlMaxAge;
   headers['Cache-Control'] = (maxAge === 0 || maxAge) ? `max-age=${maxAge}` : 'no-cache';
-  await c.put(key, buf, { headers });
-  return { url: urlOf(key), downloadUrl: urlOf(key), pathname: key };
+  const result = await c.put(key, buf, { headers });
+  return {
+    url: urlOf(key),
+    downloadUrl: urlOf(key),
+    pathname: key,
+    etag: result?.res?.headers?.etag || null,
+  };
 }
 
 // list：按前缀列出对象。返回结构对齐 @vercel/blob 的 { blobs:[...] }
@@ -110,6 +116,7 @@ export async function list({ prefix = '', limit = 1000 } = {}) {
         downloadUrl: urlOf(o.name),
         uploadedAt: o.lastModified,   // ISO 字符串，new Date() 可解析，对齐原用法
         size: o.size,
+        etag: o.etag || null,
       });
       if (blobs.length >= limit) break;
     }
@@ -151,19 +158,27 @@ export async function readJson(blobOrUrl) {
 // 账号等关键数据使用严格读取：对象不存在返回 null，OSS 连接/鉴权/解析异常必须抛出，
 // 避免把存储故障误判成“账号不存在”。
 export async function readJsonStrict(blobOrPathname) {
+  const result = await readJsonWithMetaStrict(blobOrPathname);
+  return result.value;
+}
+
+export async function readJsonWithMetaStrict(blobOrPathname) {
   const key = keyFromUrl(typeof blobOrPathname === 'string'
     ? blobOrPathname
     : (blobOrPathname && (blobOrPathname.pathname || blobOrPathname.url)));
   const c = client();
   if (!c) throw new Error('OSS 未配置');
-  if (!key) return null;
+  if (!key) return { value: null, etag: null };
   try {
     const r = await c.get(key);
     const content = r && r.content;
-    return content ? JSON.parse(content.toString('utf-8')) : null;
+    return {
+      value: content ? JSON.parse(content.toString('utf-8')) : null,
+      etag: r?.res?.headers?.etag || null,
+    };
   } catch (error) {
     if (error && (error.status === 404 || error.code === 'NoSuchKey' || error.name === 'NoSuchKeyError')) {
-      return null;
+      return { value: null, etag: null };
     }
     throw error;
   }

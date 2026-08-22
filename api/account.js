@@ -1,4 +1,11 @@
-import { put, list, del, readJsonStrict, hasStorage } from './_blob.js';
+import {
+  put,
+  list,
+  del,
+  readJsonStrict,
+  readJsonWithMetaStrict,
+  hasStorage,
+} from './_blob.js';
 import { sendJson, preflight } from './_lib.js';
 import { createHash } from 'crypto';
 import {
@@ -28,7 +35,13 @@ import {
 
 const PREFIX = 'accounts/';
 export const sha = (s) => createHash('sha256').update(String(s)).digest('hex');
-const defaultStorage = { put, list, del, readJson: readJsonStrict };
+const defaultStorage = {
+  put,
+  list,
+  del,
+  readJson: readJsonStrict,
+  readJsonWithMeta: readJsonWithMetaStrict,
+};
 const RECENT_HISTORY = 20;
 const DAILY_HISTORY_DAYS = 90;
 export const isAccountActive = (account) => !!account && account.status !== 'deactivated';
@@ -605,8 +618,16 @@ export async function readAccount(
     runtimeSince = 0,
   } = {},
 ) {
-  const current = await storage.readJson(currentPathOf(nick));
-  let account = current;
+  const currentRecord = storage.readJsonWithMeta
+    ? await storage.readJsonWithMeta(currentPathOf(nick))
+    : {
+        value: await storage.readJson(currentPathOf(nick)),
+        etag: null,
+      };
+  let account = currentRecord?.value || null;
+  if (account && currentRecord?.etag) {
+    account._storageEtag = currentRecord.etag;
+  }
 
   if (!account) {
     const { blobs } = await storage.list({ prefix: prefixOf(nick), limit: 5000 });
@@ -659,6 +680,10 @@ export async function listAllAccounts(storage = defaultStorage) {
       ? await applyDeactivationMarker(raw, raw.nick, storage)
       : null;
     if (!j || !j.nick || !isAccountActive(j)) continue;
+    if (
+      b.pathname === currentPathOf(j.nick)
+      && b.etag
+    ) j._storageEtag = b.etag;
     const current = byNick.get(j.nick);
     if (!current || (j.updatedAt || 0) >= (current.updatedAt || 0)) byNick.set(j.nick, j);
   }
@@ -690,9 +715,17 @@ async function cleanupAccountHistory(nick, storage, now) {
 export async function writeAccount(
   acc,
   storage = defaultStorage,
-  { history = true, verify = true } = {},
+  {
+    history = true,
+    verify = true,
+    createOnly = false,
+  } = {},
 ) {
-  const saved = { ...acc, updatedAt: Date.now() };
+  const {
+    _storageEtag: expectedEtag,
+    ...persistedAccount
+  } = acc || {};
+  const saved = { ...persistedAccount, updatedAt: Date.now() };
   const body = JSON.stringify(saved);
   const snapshot = history
     ? await storage.put(`${historyPrefixOf(saved.nick)}${saved.updatedAt}.json`, body, {
@@ -700,10 +733,27 @@ export async function writeAccount(
         addRandomSuffix: true, cacheControlMaxAge: 0,
       })
     : null;
-  await storage.put(currentPathOf(saved.nick), body, {
-    access: 'public', contentType: 'application/json',
-    cacheControlMaxAge: 0,
-  });
+  let currentWrite;
+  try {
+    currentWrite = await storage.put(currentPathOf(saved.nick), body, {
+      access: 'public',
+      contentType: 'application/json',
+      cacheControlMaxAge: 0,
+      ...(expectedEtag ? { ifMatch: expectedEtag } : {}),
+      ...(createOnly ? { forbidOverwrite: true } : {}),
+    });
+  } catch (error) {
+    if (
+      error?.status === 412
+      || error?.code === 'PreconditionFailed'
+    ) {
+      const conflict = new Error('OSS 权威快照已被其他实例更新');
+      conflict.code = 'OSS_WRITE_CONFLICT';
+      conflict.status = 409;
+      throw conflict;
+    }
+    throw error;
+  }
 
   if (verify) {
     const verified = await storage.readJson(currentPathOf(saved.nick));
@@ -718,7 +768,15 @@ export async function writeAccount(
       await cleanupAccountHistory(saved.nick, storage, saved.updatedAt);
     } catch { /* ignore */ }
   }
-  return { ...saved, storage: 'oss', snapshotKey: snapshot?.pathname || null };
+  if (acc && typeof acc === 'object') {
+    acc._storageEtag = currentWrite?.etag || expectedEtag || null;
+  }
+  return {
+    ...saved,
+    _storageEtag: currentWrite?.etag || expectedEtag || null,
+    storage: 'oss',
+    snapshotKey: snapshot?.pathname || null,
+  };
 }
 
 export async function deactivateStoredAccount(account, storage = defaultStorage, now = Date.now()) {
@@ -760,7 +818,7 @@ export default async function handler(req, res) {
       const acc = await writeAccount({
         nick, pwHash: sha(pw), createdAt: Date.now(),
         clientRevision: 1, data,
-      });
+      }, undefined, { createOnly: true });
       return ok(res, {
         ok: true, nick: acc.nick, data: acc.data,
         updatedAt: acc.updatedAt, revision: acc.clientRevision, storage: acc.storage,
@@ -889,6 +947,14 @@ export default async function handler(req, res) {
     return ok(res, { ok: false, error: '未知 action' });
   } catch (e) {
     console.error('[account] OSS operation failed', e && (e.code || e.name || e.message));
+    if (e?.code === 'OSS_WRITE_CONFLICT') {
+      return ok(res, {
+        ok: false,
+        code: 'ACCOUNT_VERSION_CONFLICT',
+        error: '云端账号数据已更新，请刷新页面后重试',
+        retryable: true,
+      });
+    }
     return ok(res, { ok: false, error: '阿里云 OSS 存储访问失败，请稍后重试' });
   }
 }
