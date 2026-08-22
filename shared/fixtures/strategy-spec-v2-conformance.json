@@ -1,0 +1,149 @@
+{
+  "schemaVersion": "strategy-spec-conformance.v1",
+  "cases": [
+    {
+      "name": "valid-trend-breakout",
+      "valid": true,
+      "spec": {
+        "schemaVersion": "strategy-spec.v2",
+        "strategyId": "trend-breakout",
+        "name": "趋势突破",
+        "family": "TREND_BREAKOUT",
+        "purpose": "ENTRY",
+        "horizon": {
+          "unit": "TRADING_DAY",
+          "value": 5
+        },
+        "eligibleRegimes": [
+          "TREND_STRONG"
+        ],
+        "signalTimeframe": "1d",
+        "executionTimeframe": "NEXT_OPEN",
+        "data": {
+          "signalPrice": "QFQ",
+          "executionPrice": "RAW",
+          "pointInTime": true,
+          "completedBarsOnly": true,
+          "minimumHistoryBars": 60
+        },
+        "entry": {
+          "type": "ALL",
+          "conditions": [
+            {
+              "field": "technical.donchianBreakout",
+              "op": "EQ",
+              "value": true
+            },
+            {
+              "field": "technical.maSlope20",
+              "op": "GT",
+              "value": 0
+            },
+            {
+              "field": "volRatio",
+              "op": "GTE",
+              "value": 1.2
+            },
+            {
+              "field": "quant.score",
+              "op": "GTE",
+              "value": 60
+            }
+          ]
+        },
+        "exit": {
+          "stopLossPct": 3,
+          "takeProfitPct": 8,
+          "maxHoldingBars": 8,
+          "signal": null
+        },
+        "trailingStop": {
+          "enabled": true,
+          "activationPct": 4,
+          "atrMultiple": 2
+        },
+        "positionSizing": {
+          "method": "RISK_BUDGET",
+          "riskPerTradePct": 0.6,
+          "allocationPct": 20,
+          "maxPositions": 5,
+          "lotSize": 100
+        },
+        "riskLimits": {
+          "maxPortfolioExposurePct": 70,
+          "maxStockWeightPct": 20,
+          "maxSectorExposurePct": 35,
+          "maxLossPct": 3,
+          "allowRiskIncrease": true
+        },
+        "liquidityLimits": {
+          "minimumAmount": 80000000,
+          "minimumAdv20": 100000000,
+          "maximumParticipationRate": 0.05,
+          "maximumSpreadBps": 20
+        },
+        "benchmark": [
+          "CSI300",
+          "CSI1000"
+        ],
+        "capacityAssumptions": {
+          "capitalScenarios": [
+            100000,
+            500000,
+            1000000,
+            5000000
+          ],
+          "slippageScenariosBps": [
+            5,
+            10,
+            20
+          ],
+          "baseParticipationRate": 0.05
+        },
+        "modelDependencies": [
+          {
+            "id": "lgb-score-36",
+            "type": "MODEL",
+            "version": "production",
+            "featureCount": 36,
+            "required": true
+          }
+        ],
+        "execution": {
+          "feePolicy": "A_SHARE_STANDARD_V1",
+          "tPlusOne": true,
+          "rejectLimitUpBuy": true,
+          "rejectLimitDownSell": true,
+          "carryUnfilledExit": true,
+          "baseSlippageBps": 5,
+          "spreadBps": 10
+        },
+        "score": {
+          "method": "WEIGHTED_SUM",
+          "weights": {
+            "marketScore": 0.25,
+            "quantScore": 0.3,
+            "trend": 0.3,
+            "liquidity": 0.15
+          }
+        },
+        "specVersion": "strategy.u4pyow"
+      },
+      "expectedSpecVersion": "strategy.u4pyow"
+    },
+    {
+      "name": "rejects-adjusted-execution-price",
+      "valid": false,
+      "patch": {
+        "data.executionPrice": "QFQ"
+      }
+    },
+    {
+      "name": "rejects-unbounded-participation",
+      "valid": false,
+      "patch": {
+        "liquidityLimits.maximumParticipationRate": 0.5
+      }
+    }
+  ]
+}
