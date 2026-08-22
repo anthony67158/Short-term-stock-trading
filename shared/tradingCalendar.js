@@ -12,7 +12,19 @@ const A_SHARE_HOLIDAYS = new Set([
   '2026-10-01', '2026-10-02', '2026-10-05', '2026-10-06', '2026-10-07',
 ])
 
+export const TRADING_CALENDAR_COVERAGE_END = '2026-12-31'
+
+export function tradingCalendarCoverage(value = Date.now()) {
+  const date = value instanceof Date ? value : beijingDate(value)
+  const day = localDateKey(date)
+  return {
+    covered: day <= TRADING_CALENDAR_COVERAGE_END,
+    through: TRADING_CALENDAR_COVERAGE_END,
+  }
+}
+
 export function isTradingDay(date) {
+  if (!tradingCalendarCoverage(date).covered) return false
   const weekday = date.getDay()
   return weekday !== 0 && weekday !== 6 && !A_SHARE_HOLIDAYS.has(localDateKey(date))
 }
@@ -55,13 +67,14 @@ export function nextTradingDate(timestamp = Date.now()) {
     const candidate = new Date(current.getTime() + offset * 86400000)
     if (isTradingDay(candidate)) return candidate
   }
-  return new Date(current.getTime() + 86400000)
+  return null
 }
 
 export function nextTradingDayLabel(timestamp = Date.now()) {
   const today = beijingDate(timestamp)
   today.setHours(0, 0, 0, 0)
   const next = nextTradingDate(timestamp)
+  if (!next) return '交易日历待更新'
   const diffDays = Math.round((next.getTime() - today.getTime()) / 86400000)
   const weekday = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][next.getDay()]
   const monthDay = `${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`

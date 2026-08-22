@@ -48,6 +48,7 @@ import {
 import { isAdviceReviewEnabled } from '../shared/adviceReviewPolicy.js';
 import { isContinuousTrading } from '../shared/tradingCalendar.js';
 import { buildAlertNotification } from '../shared/alertNotification.js';
+import { isFreshAlertQuote } from '../shared/alertQuotePolicy.js';
 
 const OP_LABEL = { gte: '≥', lte: '≤' };
 
@@ -80,7 +81,7 @@ function describeAlert(a) {
 
 // —— 与前端 alertStore.hit 同口径 ——
 function hit(a, q) {
-  if (!q) return null;
+  if (!isFreshAlertQuote(q)) return null;
   const cmp = (v, op, t) => (op === 'lte' ? v <= t : v >= t);
   switch (a.type) {
     case 'price': {

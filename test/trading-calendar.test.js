@@ -9,6 +9,7 @@ import {
   localDateKey,
   nextTradingDate,
   nextTradingDayLabel,
+  tradingCalendarCoverage,
 } from '../shared/tradingCalendar.js'
 
 test('交易日历统一按北京时间识别节假日和连续竞价窗口', () => {
@@ -39,4 +40,15 @@ test('下一交易日跳过国庆休市和周末', () => {
 
   assert.equal(localDateKey(next), '2026-10-08')
   assert.equal(nextTradingDayLabel(beforeHoliday), '下一交易日周四(10-08)')
+})
+
+test('交易日历超出维护范围时自动任务失败关闭', () => {
+  const future = Date.parse('2027-01-04T02:00:00Z')
+  const coverage = tradingCalendarCoverage(future)
+
+  assert.equal(coverage.covered, false)
+  assert.equal(coverage.through, '2026-12-31')
+  assert.equal(isTradingDayAt(future), false)
+  assert.equal(isContinuousTrading(future), false)
+  assert.equal(nextTradingDayLabel(future), '交易日历待更新')
 })

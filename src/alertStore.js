@@ -20,6 +20,7 @@ import {
   subscribeAccountSession,
 } from '../shared/accountSessionScope.js'
 import { buildAlertNotification } from '../shared/alertNotification.js'
+import { isFreshAlertQuote } from '../shared/alertQuotePolicy.js'
 
 // ============ 盯盘预警引擎 ============
 // 统一轮询自选/持仓相关个股实时报价，逐条判断预警规则是否命中；
@@ -138,7 +139,7 @@ function currentPositionGate(alert) {
 
 // 判断单条规则是否命中（q=该股实时报价）
 function hit(a, q) {
-  if (!q) return null
+  if (!isFreshAlertQuote(q)) return null
   // 数值型字段统一取有限数:接口异常/字符串/NaN 时返回 null(不判定),
   // 避免后续 .toFixed 在字符串上抛错(会中断整个 evaluate 预警循环)或渲染出字面 "NaN"。
   const fin = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null }
