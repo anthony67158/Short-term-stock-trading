@@ -77,6 +77,7 @@ import {
   calibrateAdviceTrust,
   evaluateScheduledReview,
 } from '../shared/adviceIntelligence.js';
+import { deriveMarketRegime } from '../shared/marketRegime.js';
 
 function avg(arr) { return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0; }
 function std(arr) { if (arr.length < 2) return 0; const m = avg(arr); return Math.sqrt(avg(arr.map((x) => (x - m) ** 2))); }
@@ -1217,25 +1218,9 @@ export default async function handler(req, res) {
           const trading = wd >= 1 && wd <= 5 && ((hm >= 570 && hm <= 690) || (hm >= 780 && hm <= 900));
           payload.marketPhase = trading ? '盘中(实时数据)' : '非交易时段(以下分时/盘口/资金为最近收盘数据，请按收盘后口径分析，为下一交易时段做准备)';
         }
-        // 大盘环境自适应：只影响【仓位/择时】，不再一票否决【个股方向/择股】(择时与择股分离)
+        // 统一市场状态：军师、组合分析和今日决策共用同一确定性口径。
         if (payload.market) {
-          const m = payload.market;
-          let envScore = 50; // 0~100，越低越弱
-          if (m.upDownRatio != null) envScore += Math.min(25, Math.max(-25, (m.upDownRatio - 1) * 25));
-          if (m.limitUp != null && m.limitDown != null) envScore += Math.min(15, Math.max(-15, (m.limitUp - m.limitDown * 3) / 5));
-          const idxAvg = (m.indices || []).length ? avg(m.indices.map((i) => i.pct || 0)) : 0;
-          envScore += Math.min(20, Math.max(-20, idxAvg * 8));
-          envScore = Math.round(Math.min(100, Math.max(0, envScore)));
-          let envLevel = '中性', suggestPosition = '常规(3~5成)', weak = false;
-          if (envScore <= 30) { envLevel = '极弱(冰点)'; suggestPosition = '轻仓(≤2成)'; weak = true; }
-          else if (envScore <= 44) { envLevel = '偏弱'; suggestPosition = '控仓(2~3成)'; weak = true; }
-          else if (envScore >= 68) { envLevel = '强势'; suggestPosition = '可积极(5~7成)'; }
-          payload.marketEnv = {
-            score: envScore, level: envLevel, weak, suggestPosition,
-            note: weak
-              ? `大盘${envLevel}：新增风险进入硬闸门。只有个股逆势强势与高把握信号同时成立，且账户总仓位、现金储备、单票与行业集中度均未超限，才允许小仓试错；否则观望。总仓位上限参考${suggestPosition}。`
-              : (envLevel === '强势' ? `大盘强势：可顺势积极，仓位${suggestPosition}，仍守纪律。` : `大盘中性：常规操作，仓位${suggestPosition}，跟随个股信号。`),
-          };
+          payload.marketEnv = deriveMarketRegime(payload.market);
         }
         // 逆势强票识别(D)：个股相对大盘的强弱——大盘跌它抗跌/资金逆势流入/创近期新高
         {

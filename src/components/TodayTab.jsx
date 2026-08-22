@@ -8,6 +8,7 @@ import DailyReport from './DailyReport'
 import SectorForecast from './SectorForecast'
 import ErrorBoundary from './ErrorBoundary'
 import { fmtPct, pctClass, fmtInflow, fmtRaw } from '../format'
+import { deriveMarketRegime } from '../../shared/marketRegime.js'
 
 // ============ 今日决策：先定方向，再核验个股 ============
 export default function TodayTab({ interval, market, sectors }) {
@@ -96,12 +97,61 @@ function MarketLight({ market, sectors, limitUp }) {
   const b = (market && market.breadth) || {}
   const idx = (market && market.indices) || []
   const ratio = b.down ? b.up / b.down : (b.up ? 9 : 1)
-  // 简单情绪判定
-  let light = 'yellow', text = '多空胶着，轻仓试探'
-  const zt = Number.isFinite(Number(limitUp?.total)) ? Number(limitUp.total) : b.limitUp
+  const zt = Number.isFinite(Number(limitUp?.total))
+    ? Number(limitUp.total)
+    : b.limitUp
   const dt = b.limitDown
-  if (ratio >= 1.5 && zt != null && dt != null && zt > dt * 3) { light = 'green'; text = '情绪偏暖，可积极参与' }
-  else if (ratio < 0.7 || (zt != null && dt != null && dt > zt)) { light = 'red'; text = '情绪转弱，控制仓位' }
+  const regime = deriveMarketRegime({
+    ...(market || {}),
+    breadth: {
+      ...b,
+      limitUp: zt,
+      limitDown: dt,
+    },
+  })
+  const regimeView = {
+    TREND_STRONG: {
+      light: 'green',
+      status: '可以做',
+      text: '趋势偏强，可在风险预算内顺势参与',
+      icon: 'target',
+      title: '今日按强势趋势执行',
+      sub: `优先主线强势股，目标总仓位 ${regime.targetPositionPct.min}~${regime.targetPositionPct.max}%`,
+    },
+    RANGE: {
+      light: 'yellow',
+      status: '震荡应对',
+      text: '震荡均衡，低吸高抛但不追涨',
+      icon: 'gauge',
+      title: '今日以持仓管理为主',
+      sub: `优先做T与回踩确认，目标总仓位 ${regime.targetPositionPct.min}~${regime.targetPositionPct.max}%`,
+    },
+    TRANSITION: {
+      light: 'yellow',
+      status: '等待确认',
+      text: '方向切换，降低试错频率',
+      icon: 'gauge',
+      title: '今日轻仓等待共振',
+      sub: `只处理确定性较高的机会，目标总仓位 ${regime.targetPositionPct.min}~${regime.targetPositionPct.max}%`,
+    },
+    RISK_OFF: {
+      light: 'red',
+      status: '控制风险',
+      text: '风险偏高，暂停普通新增仓位',
+      icon: 'shield',
+      title: '今日优先降低风险',
+      sub: `先处理弱势持仓，目标总仓位 ${regime.targetPositionPct.min}~${regime.targetPositionPct.max}%`,
+    },
+    UNKNOWN: {
+      light: 'red',
+      status: '数据不足',
+      text: '关键市场证据不足',
+      icon: 'shield',
+      title: '今日暂停新增风险',
+      sub: '等待指数与市场广度恢复后再评估',
+    },
+  }[regime.regime]
+  const { light } = regimeView
   const topSector = (sectors && sectors.list && sectors.list[0]) || null
 
   const [reportOpen, setReportOpen] = useState(false) // 策略日报抽屉
@@ -115,18 +165,22 @@ function MarketLight({ market, sectors, limitUp }) {
             <Icon name="clipboard" size={13} />
             策略日报
           </button>
-          <div className={'mb-light ' + light}><span className="orb-dot" />{light === 'green' ? '可以做' : light === 'red' ? '谨慎/空仓' : '轻仓试探'} · {text}</div>
+          <div className={'mb-light ' + light}>
+            <span className="orb-dot" />
+            {regimeView.status} · {regimeView.text}
+          </div>
         </div>
       </div>
       {reportOpen && <DailyReport onClose={() => setReportOpen(false)} />}
 
       {/* 今日操作建议：盘面纪律由实时涨跌家数与涨跌停结构确定。 */}
       {(() => {
-        const plan = light === 'green'
-          ? { icon: 'target', title: '今日可积极做短线', sub: '顺势选强势主线龙头开新仓；持仓正常做T滚成本', tone: 'green' }
-          : light === 'red'
-          ? { icon: 'shield', title: '今日不宜开新仓', sub: '暂停短线建仓，空仓观望；仅在已有持仓上谨慎做T降成本', tone: 'red' }
-          : { icon: 'gauge', title: '今日轻仓 + 以做T为主', sub: '短线只试仓最强龙头、控制仓位；重点在持仓上高抛低吸做T', tone: 'yellow' }
+        const plan = {
+          icon: regimeView.icon,
+          title: regimeView.title,
+          sub: regimeView.sub,
+          tone: regimeView.light,
+        }
         return (
           <div className={'mb-plan ' + plan.tone}>
             <span className="mb-plan-icon"><Icon name={plan.icon} size={18} /></span>

@@ -35,6 +35,7 @@ import {
   sanitizePortfolioAnalysisRequest,
   selectPortfolioCandidates,
 } from '../shared/portfolioAnalysis.js'
+import { deriveMarketRegime } from '../shared/marketRegime.js'
 import {
   normalizeQuantModelVersion,
   quantModelLabel,
@@ -223,74 +224,12 @@ function authHeaders(req) {
 }
 
 export function derivePortfolioMarketContext(payload = {}) {
-  const indices = (Array.isArray(payload.indices)
-    ? payload.indices
-    : [])
-    .map((item) => ({
-      code: text(item?.code, 12),
-      name: text(item?.name, 30),
-      pct: finite(item?.pct),
-    }))
-    .filter((item) => item.name && item.pct != null)
-  const breadth = payload.breadth || {}
-  const up = finite(breadth.up)
-  const down = finite(breadth.down)
-  const total = up != null && down != null
-    ? Math.max(1, up + down + (finite(breadth.flat) || 0))
-    : null
-  const averageIndexPct = indices.length
-    ? indices.reduce((sum, item) => sum + item.pct, 0)
-      / indices.length
-    : 0
-  let score = 50 + averageIndexPct * 12
-  if (total) score += ((up - down) / total) * 28
-  if (
-    finite(breadth.limitUp) != null
-    && finite(breadth.limitDown) != null
-  ) {
-    score += Math.max(
-      -8,
-      Math.min(
-        8,
-        (finite(breadth.limitUp) - finite(breadth.limitDown)) / 10,
-      ),
-    )
-  }
-  if (breadth.volLevel === '放量' && averageIndexPct > 0) score += 5
-  if (breadth.volLevel === '放量' && averageIndexPct < 0) score -= 5
-  score = Math.max(0, Math.min(100, Math.round(score)))
-  const regime = score >= 62
-    ? 'offensive'
-    : score <= 42 ? 'defensive' : 'balanced'
-  const regimeLabel = {
-    offensive: '偏进攻',
-    balanced: '均衡',
-    defensive: '偏防守',
-  }[regime]
-  const indexText = indices
-    .slice(0, 4)
-    .map((item) => `${item.name}${item.pct >= 0 ? '+' : ''}${item.pct}%`)
-    .join('，')
-  const breadthText = total
-    ? `上涨${up}家、下跌${down}家`
-    : '涨跌家数暂缺'
+  const context = deriveMarketRegime(payload)
   return {
-    regime,
-    regimeLabel,
-    score,
-    indices,
-    breadth: {
-      up,
-      down,
-      flat: finite(breadth.flat),
-      limitUp: finite(breadth.limitUp),
-      limitDown: finite(breadth.limitDown),
-      amountYi: finite(breadth.amountYi),
-      volVsAvg5: finite(breadth.volVsAvg5),
-      volLevel: text(breadth.volLevel, 20),
-    },
-    asOf: payload.updatedAt || Date.now(),
-    note: `市场环境${regimeLabel}（${score}分）：${indexText || '指数数据暂缺'}；${breadthText}${breadth.volLevel ? `，当前${breadth.volLevel}` : ''}。`,
+    ...context,
+    regimeCode: context.regime,
+    regime: context.portfolioRegime,
+    regimeLabel: context.label,
   }
 }
 
