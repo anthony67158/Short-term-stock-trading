@@ -3,14 +3,17 @@ import assert from 'node:assert/strict'
 
 import {
   ADVISOR_SYSTEM,
+  ADVISOR_FAST_SYSTEM,
   buildUserPrompt,
   maxTokensForMode,
 } from '../api/_ai_prompts.js'
 
-test('快速持仓建议保留足够正文预算避免长JSON截断', () => {
-  assert.equal(maxTokensForMode('hold_advice', false), 6000)
-  assert.equal(maxTokensForMode('buy_advice', false), 6000)
-  assert.equal(maxTokensForMode('review', false), 6000)
+test('快速持仓建议使用精简正文预算而深度模式保留长上下文', () => {
+  assert.equal(maxTokensForMode('hold_advice', false), 3200)
+  assert.equal(maxTokensForMode('buy_advice', false), 3200)
+  assert.equal(maxTokensForMode('review', false), 3200)
+  assert.ok(maxTokensForMode('hold_advice', true) >= 32000)
+  assert.ok(ADVISOR_FAST_SYSTEM.length < ADVISOR_SYSTEM.length / 4)
 })
 
 test('军师低命中校准按动作方向纠偏而不是一律变得更保守', () => {
@@ -143,4 +146,24 @@ test('军师明确把动作价位手数视为候选并服从统一决策编译�
   assert.match(ADVISOR_SYSTEM, /研究级条件建议/)
   assert.match(ADVISOR_SYSTEM, /strategyRoute/)
   assert.match(ADVISOR_SYSTEM, /SHADOW_ONLY/)
+})
+
+test('快速军师输出限制重复文案并保留核心证据', () => {
+  const prompt = buildUserPrompt('buy_advice', {
+    code: '600000',
+    generationProfile: 'FAST',
+    todayQuote: {
+      price: 10,
+      pct: 1,
+      live: true,
+      limitDownPrice: 9,
+      limitUpPrice: 11,
+    },
+  }, '')
+
+  assert.match(prompt, /军师快速决策/)
+  assert.match(prompt, /只做一次结论/)
+  assert.match(prompt, /每类证据最多一句/)
+  assert.match(prompt, /不得换词重复/)
+  assert.ok(prompt.length < 6000)
 })

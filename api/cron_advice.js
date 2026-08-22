@@ -774,6 +774,14 @@ async function genOne({
       councilShadow = null;
     }
   }
+  cacheItem.generationMetrics = {
+    schemaVersion: 'advice-generation-metrics.v1',
+    profile: deepMode ? 'DEEP' : 'FAST',
+    durationMs: Math.max(0, Date.now() - startedAt),
+    mainLlmCalls: advice ? 1 : 0,
+    councilLlmCalls: councilShadow ? 3 : 0,
+    councilCallsSaved: advice && !runCouncilShadow ? 3 : 0,
+  };
   let logEntry = null;
   if (advice) {
     const px = (result && result.price) || priceHint || (payload && payload.holdCost) || null;

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
   buildAdvicePresentation,
+  compileAdvicePresentationV3,
   trustCalibrationText,
 } from '../shared/advicePresentation.js'
 
@@ -74,6 +75,45 @@ test('军师展示契约固定输出结论执行价位触发和三条核心依�
     changeType: 'adjust',
     reason: '关键证据发生实质变化',
   })
+  assert.equal(view.schemaVersion, 'advice-presentation.v3')
+})
+
+test('后端展示契约携带人工执行计划摘要且前端优先消费该契约', () => {
+  const advice = {
+    action: '减仓',
+    title: '反弹减仓一手',
+    actionPlan: '10元附近减仓1手',
+    executionPlan: {
+      schemaVersion: 'execution-plan.v1',
+      planId: 'execution.demo',
+      decisionId: 'decision.demo',
+      status: 'DRAFT',
+      canArm: true,
+      side: 'SELL',
+      targetLots: 1,
+      filledLots: 0,
+      remainingLots: 1,
+      referencePrice: 10,
+      validUntil: '2026-08-21T03:00:00.000Z',
+      executionMethod: {
+        type: 'SINGLE_LIMIT',
+        label: '单笔限价',
+      },
+      slices: [{ lots: 1 }],
+    },
+  }
+  const contract = compileAdvicePresentationV3(advice)
+  const consumed = buildAdvicePresentation({
+    ...advice,
+    title: '不应覆盖服务端契约',
+    presentation: contract,
+  })
+
+  assert.equal(contract.schemaVersion, 'advice-presentation.v3')
+  assert.equal(contract.executionPlan.planId, 'execution.demo')
+  assert.equal(contract.executionPlan.canArm, true)
+  assert.equal(contract.executionPlan.methodLabel, '单笔限价')
+  assert.equal(consumed.verdict.title, '反弹减仓一手')
 })
 
 test('历史信心校准明确展示样本数和同档命中率', () => {

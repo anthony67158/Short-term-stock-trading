@@ -9,6 +9,7 @@ import Reasoning from './Reasoning'
 import ConfirmDialog from './ConfirmDialog'
 import OverlayPortal from './OverlayPortal'
 import AdviceGenerationStatus, { useAdviceGeneration } from './AdviceGenerationStatus'
+import ExecutionQueue from './ExecutionQueue'
 import { AlertForm } from './AlertCenter'
 import { useMediaQuery, usePolling, useSwipe } from '../hooks'
 import { callAIStream } from '../ai'
@@ -276,6 +277,14 @@ export default function PlanTab({ interval }) {
   )
   const quote = {}
   ;(data?.list || []).forEach((s) => { quote[s.code] = s })
+  const executionQuoteKey = codes
+    .map((code) => `${code}:${quote[code]?.price || ''}`)
+    .join('|')
+  useEffect(() => {
+    planStore.refreshExecutionPlans(quote)
+    // 只按价格变化推进 ARMED -> ALERTED，避免 store emit 形成渲染循环。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [executionQuoteKey])
   const stockTags = useStockTags(codes)
   // ===== 批量一次性生成 AI 操作建议:统一入口(军师战绩旁),勾选可跨【持仓+自选】 =====
   // 状态上提到 PlanTab,持仓区与自选区共享同一套 selectMode/selected → 只有一个入口、一条进度。
@@ -310,6 +319,11 @@ export default function PlanTab({ interval }) {
 
   return (
     <div className="plan">
+      <ExecutionQueue
+        plans={book.executionPlans || []}
+        attributions={book.executionAttributions || []}
+        onOpen={openStockDetail}
+      />
       <HoldingList
         book={book}
         quote={quote}

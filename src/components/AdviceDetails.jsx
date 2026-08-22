@@ -130,12 +130,34 @@ function FullEvidence({ advice }) {
   )
 }
 
+function TGridExperiment({ experiment }) {
+  if (!experiment?.eligible || !experiment.levels?.length) return null
+  return (
+    <section className="t-grid-experiment" aria-label="受限做T区间实验">
+      <div className="ka-head">
+        <span><Icon name="activity" size={13} /> 做T区间实验</span>
+        <strong>最多{experiment.maximumRounds}轮 · {experiment.restoreBy}前复原</strong>
+      </div>
+      <div className="t-grid-levels">
+        {experiment.levels.map((level) => (
+          <div key={`${level.sequence}:${level.side}`}>
+            <span>{level.side === 'BUY' ? '低吸' : '高抛'}</span>
+            <b>{level.lots}手 @ {level.price}</b>
+            <small>{level.condition}</small>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
 export default function AdviceDetails({ advice, review }) {
   return (
     <div className="advice-deep-body">
       {advice.reasoning && <Reasoning text={advice.reasoning} />}
       {advice.reason && <div className="advice-detail-reason"><HL text={advice.reason} /></div>}
       <KnowledgeAction advice={advice} />
+      <TGridExperiment experiment={advice.tGridExperiment} />
       {advice.knowledgeActionPlan && <ExecutionReview review={review} />}
       <FullEvidence advice={advice} />
     </div>

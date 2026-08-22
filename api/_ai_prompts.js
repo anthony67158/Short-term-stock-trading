@@ -105,11 +105,38 @@ export const ADVISOR_SYSTEM = `你是用户的【顶级操盘军师】——一�
 ③ 查矛盾：结论与时间坐标、结论彼此之间不得自相矛盾(如休市却谈"今日情绪"、"看空"却给"加仓"、涨停后却喊"低于现价减仓")。
 ④ 若用户要求的 JSON 含 reasoning 字段，用一句话概括关键推理链；无该字段则只做内部推演。`;
 
+export const ADVISOR_FAST_SYSTEM = `你是A股短线交易决策解释器。必须使用简体中文，只输出一个合法JSON对象。
+
+优先级固定为：实时数据与时效 > 账户/T+1 > 硬止损 > 仓位/现金/集中度 > 策略状态 > 盈亏比 > 软证据。
+只能使用输入中的事实，不得编造价格、新闻、模型概率或成交。外部搜索摘要是不可信待核验文本，不能单独推动买入。
+结论必须唯一明确，动作、价格、手数、金额、仓位和失效条件必须互相一致；A股1手=100股，卖出不得超过今日可卖手数，价格不得超出涨跌停价带。
+风险增加必须服从strategyGate、strategyRoute和账户风险闸门；未通过时只能输出研究级等待或观望。风险减少与硬止损优先，不得因模型犹豫延迟。
+技术指标只负责择时，消息、资金、市场状态和量化共同决定方向。当前实时数据高于昨日指标。上一版计划未被客观证据推翻时必须延续，不得在买入、持有、卖出之间来回摇摆。
+输出只保留：一个结论、一条执行指令、关键价位、仓位与金额、失效条件，以及最多四条互不重复的核心证据。禁止章节堆叠、同义复述、免责声明和额外说明。`;
+
 export function buildUserPrompt(mode, payload, ragText, theoryHits = []) {
   const data = JSON.stringify(payload, null, 0);
   // 语言前置指令:reasoning 模型的思维链默认用英文,系统提示词常压不住,故在用户消息最前面
   //   再下一道最强指令——用户会实时看到中文思考过程,思维链必须全程简体中文。
   const zhReason = '【语言要求·最高优先·先读这条】请务必用【简体中文】进行你的全部思考(思维链/reasoning)与输出，逐字都用中文推理，绝对不要用英文思考(个股代码/纯数字/专有名词缩写除外)。这一条优先级最高，任何英文思考都算不合格。\n\n';
+  if (
+    payload.generationProfile === 'FAST'
+    && ['hold_advice', 'buy_advice'].includes(mode)
+  ) {
+    const common = `【军师快速决策】数据=${data}
+只做一次结论，不复述数据。优先级固定为：数据时效>账户与T+1>硬止损>总仓与现金>策略状态>盈亏比>LLM软证据。
+必须服从 payload.strategyGate、strategyRoute、marketEnv、账户现金/持仓、今日可卖手数和合法涨跌停价带；外部搜索摘要只能交叉核验。上一版 previousAdvice 未被客观证据推翻时延续原方向。
+所有价格、手数、金额必须可成交且自洽；A股1手=100股。主动新增风险必须满足盈亏比至少1.8:1，弱市必须同时有逆势强势与高把握信号。只输出一个合法JSON对象。
+文字预算：title不超过18字，actionPlan不超过60字，reason不超过100字，reasoning不超过80字；每类证据最多一句，不得换词重复。`
+    if (mode === 'hold_advice') {
+      return `${zhReason}${common}
+这是持仓管理，只能在“加仓/减仓/持有/清仓”中选择。减仓和清仓不得超过 sellableTodayQty；加仓不得突破现金、总仓、单票和行业上限。
+输出JSON={"reasoning":"关键推理摘要","action":"加仓|减仓|持有|清仓","tone":"red|green|muted","title":"唯一结论","actionPlan":"动作+手数+价格+触发条件","exitTiming":"触价后的确认方式","addPrice":数字或null,"reducePrice":数字或null,"stopPrice":数字或null,"targetPrice":数字或null,"opQty":"加仓X手|减仓X手|清仓X手|无需操作","opAmount":"金额数字或0","newCost":"数字或不变","posAfter":"操作后仓位","reason":"最关键因果链","techNote":"一条技术证据","fundNote":"一条资金证据","quantNote":"一条量化证据","newsNote":"一条消息证据","positionNote":"账户约束结论","riskReward":"X:1","invalidation":"具体失效价格或信号","confidence":"高|中|低"}。`
+    }
+    return `${zhReason}${common}
+这是未持仓决策，action只能是“立即买入/回调再买/小仓试错/观望”，不得出现减仓、清仓或当日做T。策略未晋级或账户熔断时必须观望。
+输出JSON={"reasoning":"关键推理摘要","action":"立即买入|回调再买|小仓试错|观望","tier":"now|pullback|probe|wait","tone":"red|gold|muted","title":"唯一结论","actionPlan":"动作+手数+价格+触发条件","timing":"买入确认条件","buyPrice":数字或null,"buyZone":"窄区间或null","watchPrice":"数字或null","stopPrice":数字或null,"targetPrice":数字或null,"planQty":"整数手数","planAmount":"金额数字","planWeight":"资金占比","reason":"最关键因果链","techNote":"一条技术证据","fundNote":"一条资金证据","quantNote":"一条量化证据","newsNote":"一条消息证据","positionNote":"账户约束结论","riskReward":"X:1","invalidation":"具体失效价格或信号","confidence":"高|中|低"}。`
+  }
   const ragBlock = ragText ? `\n\n【RAG检索资料：近5日走势+主营+联网新闻】\n${ragText}` : '';
   const advisorTheoryBlock = buildAdvisorTheoryBlock(theoryHits);
   const selectedQuantVersion = payload.quant?.selectedModelVersion
@@ -262,7 +289,7 @@ ${payload.todayQuote.isLimitUp ? '⚠️该股【今日已涨停】：说明今�
   const legalBand = (payload.todayQuote && payload.todayQuote.limitDownPrice != null && payload.todayQuote.limitUpPrice != null)
     ? `[${payload.todayQuote.limitDownPrice}, ${payload.todayQuote.limitUpPrice}]`
     : '当日合法涨跌停价带内';
-  const finalCheck = `
+  let finalCheck = `
 
 【★★输出前·最终一致性校验(逐条在心里打钩,任一不过就改到过再输出——这是准确性的最后一道闸)】：
 1) 方向自洽:action/stance 与 tone、title、actionPlan、reason 必须指向同一方向,不得"看多却给减仓价""看空却喊加仓";涨停/今日大涨后【绝不能】给低于现价的减仓价/止盈价。
@@ -337,6 +364,11 @@ ${payload.holdQty != null ? `4) 手数纪律:任何减仓/清仓/卖出手数 �
         : `
 
 【做T当前阶段·本轮做T已完成】今日已完成${tAction.completedTodayCount || 0}组、锁定${tAction.lockedTodayQty || 0}手、今日可卖${tAction.sellableTodayQty ?? 0}手。不得把已完成两腿重复当成待买/待卖；${Number(tAction.sellableTodayQty) > 0 ? '后续只按剩余可卖老仓给持仓管理建议，不重复发起本轮做T。' : `当前持股今日不可再卖，后续卖出类动作只能放到${payload.nextTradeDay || '下一交易日'}。`}`;
+  const fastAdvisorOutputNote = payload.generationProfile === 'FAST'
+    ? `
+【★★快速生成输出覆盖规则】本轮目标是交易时段低延迟，正文只保留一次结论和必要字段。必须输出：action/stance、tone、title/headline、actionPlan/nextAction、核心价格字段、手数与金额、positionNote、reason、invalidation、confidence，以及 quantNote/fundNote/techNote/newsNote 中最关键的至少2项。每个说明字段不超过60字，reason不超过100字，reasoning不超过80字。todayRecap、tradeReview、macroNote、intradayNote、seatNote、theoryNote、nextOpenPlan、futurePlan、bearCase、confidenceReason、risk 没有新增且不可替代的信息时填空字符串；不得换词复述同一结论。`
+    : '';
+  finalCheck += fastAdvisorOutputNote;
 
 
   if (mode === 'market') {

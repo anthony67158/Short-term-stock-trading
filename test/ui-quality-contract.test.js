@@ -143,7 +143,7 @@ test('军师建议头部固定为标题层与状态层且双端不随机换行',
   assert.match(stockDetail, /className="decide-primary"/)
   assert.match(stockDetail, /className="decide-status"/)
   assert.match(stockDetail, /formatQuantAsOf\(quantState\.result\.asOf\)/)
-  assert.match(stockDetail, /reviewEnabled \? '复核已开启' : '复核已关闭'/)
+  assert.match(stockDetail, /reviewEnabled \? '事件监控' : '仅手动'/)
   assert.doesNotMatch(stockDetail, /<span>持续复核<\/span>/)
   assert.match(
     legacyStyles,
@@ -766,6 +766,13 @@ test('个股详情头部按身份、标签、图标操作分层且禁止挤压�
   assert.match(
     legacyStyles,
     /\.detail-panel \.modal-actions\s*{[^}]*grid-template-columns:\s*repeat\(3,\s*40px\)/s,
+  )
+})
+
+test('个股图表延迟调整尺寸前确认实例仍然存活', () => {
+  assert.match(
+    stockDetail,
+    /if \(!chart\.isDisposed\(\)\) chart\.resize\(\)/,
   )
 })
 

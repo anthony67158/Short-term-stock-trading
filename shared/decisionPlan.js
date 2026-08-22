@@ -301,6 +301,7 @@ export function compileDecisionPlan({
   strategySpec = getActiveStrategySpec(),
   strategyGate = {},
   strategyRoute = null,
+  accountCircuitBreaker = null,
   now = Date.now(),
 } = {}) {
   const requestedAction = actionFrom(mode, advice)
@@ -401,6 +402,16 @@ export function compileDecisionPlan({
   }
   if (advice.riskOverlay?.blocked) {
     blockedReasons.push(...(advice.riskOverlay.reasons || []))
+  }
+  if (
+    riskIncreasing
+    && accountCircuitBreaker?.allowRiskIncrease === false
+  ) {
+    blockedReasons.push(
+      ...(accountCircuitBreaker.blockers || [])
+        .map((item) => text(item?.message, 160))
+        .filter(Boolean),
+    )
   }
 
   let capacity = {
@@ -591,6 +602,15 @@ export function compileDecisionPlan({
       estimatedLossPerLot: capacity.lossPerLot,
       stockLimitPct: capacity.stockLimitPct,
       marketPositionLimitPct: capacity.marketPositionLimitPct,
+      accountCircuitBreaker: accountCircuitBreaker
+        ? {
+            schemaVersion: accountCircuitBreaker.schemaVersion,
+            allowRiskIncrease:
+              accountCircuitBreaker.allowRiskIncrease === true,
+            blockerCodes:
+              accountCircuitBreaker.blockerCodes || [],
+          }
+        : null,
     },
     costs,
     trigger: text(

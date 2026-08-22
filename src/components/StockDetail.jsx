@@ -61,6 +61,7 @@ function adviceDisplayState(entry) {
     news: entry.news,
     adviceMissing: entry.adviceMissing,
     truncated: entry.truncated,
+    generationMetrics: entry.generationMetrics || null,
     cachedAt: entry.cachedAt || entry.at,
   }
 }
@@ -716,6 +717,11 @@ export default function StockDetail({ stock, onClose }) {
     loading: Boolean(quantState?.loading),
     hasAdvice: Boolean(quantState?.result || quantState?.advice),
   })
+  const adviceActionCompactLabel = quantState?.loading
+    ? '生成中'
+    : quantState?.result || quantState?.advice
+      ? '刷新建议'
+      : '快速建议'
 
   return (
     <div className="modal-mask" onClick={onClose}>
@@ -817,8 +823,8 @@ export default function StockDetail({ stock, onClose }) {
                       className={'advice-review-toggle' + (reviewEnabled ? ' on' : '')}
                       aria-pressed={reviewEnabled}
                       title={reviewEnabled
-                        ? '关闭后停止该股定时复核、事件唤醒和军师派生预警'
-                        : '开启该股持续复核'}
+                        ? '关闭后停止该股事件监控与军师派生预警'
+                        : '开启该股事件监控'}
                       onClick={() => planStore.setAdviceReviewEnabled(
                         stock.code,
                         !reviewEnabled,
@@ -827,7 +833,7 @@ export default function StockDetail({ stock, onClose }) {
                       <span className="advice-review-toggle-track" aria-hidden="true">
                         <span />
                       </span>
-                      <span>{reviewEnabled ? '复核已开启' : '复核已关闭'}</span>
+                      <span>{reviewEnabled ? '事件监控' : '仅手动'}</span>
                     </button>
                   </div>
                 </div>
@@ -927,6 +933,7 @@ export default function StockDetail({ stock, onClose }) {
                   const trustCalibration = trustCalibrationText(trust)
                   const resonance = meta.resonance
                   const marketEnv = meta.marketEnv
+                  const generationMetrics = quantState.generationMetrics
                   const cachedStr = quantState.cachedAt ? new Date(quantState.cachedAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : null
                   return (
                     <>
@@ -935,6 +942,19 @@ export default function StockDetail({ stock, onClose }) {
                           advice={adv}
                           knowledgeActionReview={knowledgeActionReview}
                           reviewEnabled={reviewEnabled}
+                          executionPlanState={
+                            (book.executionPlans || []).find(
+                              (plan) =>
+                                plan.planId === adv.executionPlan?.planId,
+                            ) || null
+                          }
+                          onArmExecutionPlan={() =>
+                            planStore.armExecutionPlan(
+                              adv.executionPlan,
+                              Date.now(),
+                              overview?.price,
+                            )
+                          }
                         />
                       ) : (
                         <div className={'decide-verdict ' + fallbackVerdict.tone}>
@@ -943,7 +963,7 @@ export default function StockDetail({ stock, onClose }) {
                         </div>
                       )}
 
-                      {(trust || resonance || marketEnv || cachedStr) && (
+                      {(trust || resonance || marketEnv || generationMetrics || cachedStr) && (
                         <div className="advice-context-strip">
                           {trust && <span>可信度 <b>{trust.score}</b> · {trust.band}</span>}
                           {trustCalibration && (
@@ -951,6 +971,13 @@ export default function StockDetail({ stock, onClose }) {
                           )}
                           {resonance && <span>共振 <b>{resonance.score}/{resonance.max}</b></span>}
                           {marketEnv && <span>{marketEnv.level}</span>}
+                          {generationMetrics?.durationMs > 0 && (
+                            <span>
+                              {generationMetrics.profile === 'DEEP' ? '深度' : '快速'}
+                              {' · '}
+                              {(generationMetrics.durationMs / 1000).toFixed(1)}秒
+                            </span>
+                          )}
                           {cachedStr && <span className="saved"><Icon name="history" size={10} /> {cachedStr} 已保存</span>}
                         </div>
                       )}
@@ -1281,7 +1308,11 @@ export default function StockDetail({ stock, onClose }) {
                   style={{ height: 340, width: '100%' }}
                   notMerge lazyUpdate={false}
                   opts={{ renderer: 'canvas' }}
-                  onChartReady={(chart) => { setTimeout(() => chart.resize(), 60) }}
+                  onChartReady={(chart) => {
+                    setTimeout(() => {
+                      if (!chart.isDisposed()) chart.resize()
+                    }, 60)
+                  }}
                 />
               ) : (
                 <div className="empty">暂无分时数据（非交易时段或数据源繁忙）。可切到「K线」查看，或点右上刷新。</div>
@@ -1295,7 +1326,11 @@ export default function StockDetail({ stock, onClose }) {
                 style={{ height: 340, width: '100%' }}
                 notMerge lazyUpdate={false}
                 opts={{ renderer: 'canvas' }}
-                onChartReady={(chart) => { setTimeout(() => chart.resize(), 60) }}
+                onChartReady={(chart) => {
+                  setTimeout(() => {
+                    if (!chart.isDisposed()) chart.resize()
+                  }, 60)
+                }}
               />
             ) : (
               <div className="empty">
@@ -1368,7 +1403,22 @@ export default function StockDetail({ stock, onClose }) {
               size={14}
               className={quantState?.loading ? 'spin' : ''}
             />
-            {adviceAction.label}
+            <span className="footbar-main-label full">
+              {adviceAction.label}
+            </span>
+            <span className="footbar-main-label compact">
+              {adviceActionCompactLabel}
+            </span>
+          </button>
+          <button
+            className="icon-btn footbar-deep"
+            type="button"
+            aria-label="深度研判"
+            title="深度研判"
+            disabled={adviceAction.disabled}
+            onClick={() => loadQuant(true)}
+          >
+            <Icon name="brain" size={15} />
           </button>
           <button className={'btn footbar-alert' + (showAlert ? ' on' : '')} onClick={() => setShowAlert((v) => !v)}>
             <Icon name="bell" size={14} /> {showAlert ? '收起预警' : '盯盘预警'}

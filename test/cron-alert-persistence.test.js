@@ -69,7 +69,7 @@ test('FC回写预警状态时保留期间刚变化的持仓和新预警', async 
   assert.equal(saved.data.alerts.some((alert) => alert.id === 'new-alert'), true)
 })
 
-test('FC回写Judge决定时在最新账号快照排入军师事件复核', async () => {
+test('FC回写Judge确认时只持久化确定性事件不重复排队军师', async () => {
   const latest = {
     nick: '军师闭环账号',
     data: {
@@ -114,9 +114,12 @@ test('FC回写Judge决定时在最新账号快照排入军师事件复核', asyn
   }])
 
   const saved = storage.current()
-  assert.equal(persisted.adviceQueued, 1)
-  assert.equal(persisted.workerNeeded, true)
-  assert.equal(saved.data.jobs['600000'].status, 'queued')
-  assert.equal(saved.data.jobs['600000'].trigger.decision, 'confirm')
-  assert.equal(saved.data.jobs['600000'].trigger.planId, 'plan-1')
+  assert.equal(persisted.adviceQueued, 0)
+  assert.equal(persisted.workerNeeded, false)
+  assert.equal(saved.data.jobs, undefined)
+  assert.equal(saved.data.executionEventState.history.length, 1)
+  assert.equal(
+    saved.data.executionEventState.history[0].planId,
+    'plan-1',
+  )
 })

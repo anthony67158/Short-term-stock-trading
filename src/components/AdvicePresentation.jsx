@@ -38,13 +38,13 @@ function Continuity({ continuity }) {
 function ReviewCycle({ review, enabled = true }) {
   if (!enabled) {
     return (
-      <section className="advice-review-cycle off" aria-label="军师持续复核已关闭">
+      <section className="advice-review-cycle off" aria-label="军师事件监控已关闭">
         <div>
           <Icon name="clock" size={12} />
-          <span>持续复核已关闭</span>
+          <span>事件监控已关闭</span>
           <b>仅手动更新</b>
         </div>
-        <p>当前主计划保持不变，不再自动生成后续建议或军师派生预警。</p>
+        <p>当前主计划保持不变。</p>
       </section>
     )
   }
@@ -74,11 +74,11 @@ function ReviewCycle({ review, enabled = true }) {
   return (
     <section
       className={`advice-review-cycle ${review.status || ''}`}
-      aria-label="军师持续复核"
+      aria-label="军师事件监控"
     >
       <div>
         <Icon name="clock" size={12} />
-        <span>军师持续复核</span>
+        <span>事件监控</span>
         <b>第 {review.sequence || 1} 次</b>
       </div>
       <p>
@@ -86,7 +86,7 @@ function ReviewCycle({ review, enabled = true }) {
         {review.reason && !statusText.includes(review.reason)
           ? `（${review.reason}）`
           : ''}
-        ，下次将于 <time dateTime={next.toISOString()}>{nextLabel}</time> 自动检查。
+        ，下次数据检查 <time dateTime={next.toISOString()}>{nextLabel}</time>。
       </p>
     </section>
   )
@@ -204,6 +204,42 @@ function DecisionPlanSummary({ plan }) {
   )
 }
 
+function ExecutionPlanControl({
+  plan,
+  storedPlan,
+  onArmExecutionPlan,
+}) {
+  if (!plan) return null
+  const status = storedPlan?.status || plan.status
+  const statusLabel = {
+    DRAFT: '尚未加入队列',
+    ARMED: '等待条件',
+    ALERTED: '已到价',
+    USER_CONFIRMED: '已确认待记录',
+    PARTIALLY_RECORDED: '部分成交',
+    COMPLETED: '已完成',
+    CANCELED: '已取消',
+    EXPIRED: '已过期',
+  }[status] || status
+  return (
+    <div className="advice-execution-queue-action">
+      <div>
+        <span>{plan.methodLabel || '人工限价'}</span>
+        <b>{statusLabel}</b>
+      </div>
+      {plan.canArm && !storedPlan && (
+        <button
+          type="button"
+          className="btn advice-arm-btn"
+          onClick={() => onArmExecutionPlan?.()}
+        >
+          <Icon name="checkSquare" size={13} /> 加入执行队列
+        </button>
+      )}
+    </div>
+  )
+}
+
 function TheoryReferences({ references }) {
   const items = Array.isArray(references)
     ? references.filter((item) => item?.book && item?.topic).slice(0, 6)
@@ -231,6 +267,8 @@ export default function AdvicePresentation({
   advice,
   knowledgeActionReview,
   reviewEnabled = true,
+  executionPlanState = null,
+  onArmExecutionPlan,
 }) {
   const [expanded, setExpanded] = useState(false)
   const view = useMemo(() => buildAdvicePresentation(advice), [advice])
@@ -252,69 +290,43 @@ export default function AdvicePresentation({
 
   return (
     <div className="advice-presentation">
-      <div className={'decide-verdict ' + view.verdict.tone}>
-        <div className="dv-head">
-          {view.verdict.action && (
-            <span className={'dv-badge ' + view.verdict.tone}>{view.verdict.action}</span>
-          )}
-          <div className="dv-action">{view.verdict.title || '暂无明确结论'}</div>
+      <section
+        className={`advice-command-center ${view.verdict.tone}`}
+        aria-label="军师执行摘要"
+      >
+        <div className="advice-command-head">
+          <span className={`dv-badge ${view.verdict.tone}`}>
+            {view.verdict.action || '等待'}
+          </span>
+          <div className="advice-command-title">
+            {view.verdict.title || '暂无明确结论'}
+          </div>
           {view.verdict.confidence && (
-            <span className="advice-confidence">信心 {view.verdict.confidence}</span>
+            <span className="advice-confidence">
+              信心 {view.verdict.confidence}
+            </span>
           )}
         </div>
-      </div>
-
-      <Continuity continuity={advice.continuity} />
-      <ReviewCycle review={view.review} enabled={reviewEnabled} />
-      <DecisionContext context={advice.decisionContext} />
-      <DecisionPlanSummary plan={view.decisionPlan} />
-      <RiskOverlay risk={advice.riskOverlay} />
-
-      {view.model && (
-        <section
-          className={
-            'advice-model-context'
-            + (view.model.experimental ? ' experimental' : '')
-            + (view.model.fallback ? ' fallback' : '')
-          }
-          aria-label="本次量化模型"
-        >
-          <div className="amc-head">
-            <span><Icon name="activity" size={13} /> {view.model.label}</span>
-            {view.model.experimental && <b>实验</b>}
-          </div>
-          <div className="amc-meta">
-            {view.model.horizon && <span>窗口 {view.model.horizon}</span>}
-            {view.model.asOf && (
-              <span>{view.model.asOfLabel || '信号'} {view.model.asOf}</span>
-            )}
-          </div>
-          {view.model.nextTradeDayText && (
-            <div className="amc-next">{view.model.nextTradeDayText}</div>
-          )}
-          {view.model.reliabilityText && (
-            <div className="amc-reliability">{view.model.reliabilityText}</div>
-          )}
-          {view.model.fallback && (
-            <div className="amc-fallback">
-              已回退 V2.0：{view.model.fallback.reason}
-            </div>
-          )}
-        </section>
-      )}
-
-      <section className="advice-execution" aria-label="现在怎么做">
-        <div className="advice-section-title">
-          <Icon name="target" size={13} /> 执行指令
+        <div className="advice-command-label">
+          <Icon name="target" size={13} /> 执行摘要
         </div>
-        <div className="advice-execution-main">
-          <HL text={view.execution.instruction || '本次无需操作，等待触发条件出现后再行动。'} />
+        <div className="advice-command-instruction">
+          <HL text={
+            view.execution.instruction
+            || '本次无需操作，等待触发条件出现后再行动。'
+          } />
         </div>
         {(view.execution.quantity || view.execution.amount || advice.riskReward) && (
           <div className="advice-execution-metrics">
-            {view.execution.quantity && <span>操作 <b>{view.execution.quantity}</b></span>}
-            {view.execution.amount && <span>资金 <b>{view.execution.amount}</b></span>}
-            {advice.riskReward && <span>盈亏比 <b>{advice.riskReward}</b></span>}
+            {view.execution.quantity && (
+              <span>操作 <b>{view.execution.quantity}</b></span>
+            )}
+            {view.execution.amount && (
+              <span>资金 <b>{view.execution.amount}</b></span>
+            )}
+            {advice.riskReward && (
+              <span>盈亏比 <b>{advice.riskReward}</b></span>
+            )}
           </div>
         )}
         {view.execution.position && (
@@ -322,7 +334,14 @@ export default function AdvicePresentation({
             <span>仓位</span><HL text={view.execution.position} />
           </div>
         )}
+        <ExecutionPlanControl
+          plan={view.executionPlan}
+          storedPlan={executionPlanState}
+          onArmExecutionPlan={onArmExecutionPlan}
+        />
       </section>
+
+      <RiskOverlay risk={advice.riskOverlay} />
 
       {view.levels.length > 0 && (
         <section className="advice-levels" aria-label="关键价位">
@@ -369,9 +388,6 @@ export default function AdvicePresentation({
           ))}
         </section>
       )}
-      <TheoryReferences references={advice.theoryRefs} />
-      <SearchReference reference={advice.searchReference} />
-
       {advice.serverAdjust && (
         <div className="advice-adjust">
           <Icon name="shield" size={12} /> 已按合规校正：{advice.serverAdjust}
@@ -387,12 +403,58 @@ export default function AdvicePresentation({
             aria-expanded={expanded}
           >
             <span className="adt-label">
-              <Icon name="layers" size={12} /> 完整分析 · 推理、契约与复盘
+              <Icon name="layers" size={12} /> 完整依据与复核
             </span>
             <Icon name={expanded ? 'chevronDown' : 'chevronRight'} size={13} />
           </button>
           {expanded && (
             <>
+              <Continuity continuity={advice.continuity} />
+              <ReviewCycle review={view.review} enabled={reviewEnabled} />
+              <DecisionContext context={advice.decisionContext} />
+              <DecisionPlanSummary plan={view.decisionPlan} />
+              {view.model && (
+                <section
+                  className={
+                    'advice-model-context'
+                    + (view.model.experimental ? ' experimental' : '')
+                    + (view.model.fallback ? ' fallback' : '')
+                  }
+                  aria-label="本次量化模型"
+                >
+                  <div className="amc-head">
+                    <span>
+                      <Icon name="activity" size={13} /> {view.model.label}
+                    </span>
+                    {view.model.experimental && <b>实验</b>}
+                  </div>
+                  <div className="amc-meta">
+                    {view.model.horizon && (
+                      <span>窗口 {view.model.horizon}</span>
+                    )}
+                    {view.model.asOf && (
+                      <span>
+                        {view.model.asOfLabel || '信号'} {view.model.asOf}
+                      </span>
+                    )}
+                  </div>
+                  {view.model.nextTradeDayText && (
+                    <div className="amc-next">
+                      {view.model.nextTradeDayText}
+                    </div>
+                  )}
+                  {view.model.reliabilityText && (
+                    <div className="amc-reliability">
+                      {view.model.reliabilityText}
+                    </div>
+                  )}
+                  {view.model.fallback && (
+                    <div className="amc-fallback">
+                      已回退 V2.0：{view.model.fallback.reason}
+                    </div>
+                  )}
+                </section>
+              )}
               {view.planSteps.length > 0 && (
                 <section className="advice-plan-paths" aria-label="完整执行路径">
                   <div className="advice-section-title">完整执行路径</div>
@@ -404,6 +466,8 @@ export default function AdvicePresentation({
                   ))}
                 </section>
               )}
+              <TheoryReferences references={advice.theoryRefs} />
+              <SearchReference reference={advice.searchReference} />
               <AdviceDetails advice={advice} review={knowledgeActionReview} />
             </>
           )}

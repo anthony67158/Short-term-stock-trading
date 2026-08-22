@@ -6,9 +6,9 @@ import {
   isCurrentAdvicePlan,
   queueAdviceReviewForVerdict,
 } from '../api/cron_alert.js'
-import { completeJob, leaseJob } from '../api/_jobs.js'
+import { completeJob, enqueueJob, leaseJob } from '../api/_jobs.js'
 
-test('Judge确认同一军师计划后立即排入事件复核', () => {
+test('Judge确认同一军师计划后只推进确定性执行状态不重复调用军师', () => {
   const data = {
     holding: [{ id: 'h1', code: '600000', qty: 2 }],
     advice: {
@@ -35,21 +35,50 @@ test('Judge确认同一军师计划后立即排入事件复核', () => {
     side: 'sell',
   }, 1000)
 
-  assert.equal(result.queued, true)
+  assert.equal(result.queued, false)
+  assert.equal(result.reason, 'deterministic-event')
+  assert.equal(result.eventDecision.runLlm, false)
+  assert.equal(data.jobs, undefined)
+  assert.equal(data.executionEventState.history.length, 1)
+})
+
+test('Judge判定计划失效时才排入一次军师复核', () => {
+  const data = {
+    holding: [{ id: 'h1', code: '600000', qty: 2 }],
+    advice: {
+      '600000': {
+        mode: 'hold_advice',
+        advice: {
+          continuity: { planId: 'plan-600000', revision: 2 },
+        },
+      },
+    },
+  }
+  const alert = {
+    id: 'alert-invalid',
+    code: '600000',
+    name: '浦发银行',
+    actKind: 'reduce',
+    judgeContext: { planId: 'plan-600000', planRevision: 2 },
+  }
+  const first = queueAdviceReviewForVerdict(
+    data,
+    alert,
+    { decision: 'invalid', reason: '原计划已失效' },
+    1000,
+  )
+  const replay = queueAdviceReviewForVerdict(
+    data,
+    alert,
+    { decision: 'invalid', reason: '原计划已失效' },
+    1001,
+  )
+
+  assert.equal(first.queued, true)
+  assert.equal(first.created, true)
+  assert.equal(replay.queued, false)
+  assert.equal(replay.reason, 'duplicate-event')
   assert.equal(data.jobs['600000'].source, 'judge')
-  assert.equal(data.jobs['600000'].mode, 'hold_advice')
-  assert.deepEqual(data.jobs['600000'].trigger, {
-    kind: 'judge',
-    decision: 'confirm',
-    alertId: 'alert-1',
-    planId: 'plan-600000',
-    planRevision: 2,
-    side: 'sell',
-    confidence: 88,
-    reason: '放量冲高回落',
-    price: null,
-    at: 1000,
-  })
 })
 
 test('旧计划的Judge结果不得唤醒或改写当前军师建议', () => {
@@ -121,11 +150,11 @@ test('军师生成期间到达的Judge事件在当前任务完成后自动续跑
       },
     },
   }
-  queueAdviceReviewForVerdict(data, {
-    id: 'initial',
+  enqueueJob(data, {
     code: '600000',
-    judgeContext: { planId: 'plan-1', planRevision: 1 },
-  }, { decision: 'confirm' }, 1000)
+    mode: 'hold_advice',
+    source: 'ondemand',
+  }, 1000)
   leaseJob(data, '600000', 1100)
 
   const deferred = queueAdviceReviewForVerdict(data, {

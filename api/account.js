@@ -23,6 +23,10 @@ import {
   mergeEvidenceSnapshotIndexes,
 } from '../shared/evidenceSnapshot.js';
 import {
+  mergeExecutionAttributions,
+  mergeExecutionPlans,
+} from '../shared/executionPlanStore.js';
+import {
   createAccountSessionToken,
   verifyAccountSessionToken,
 } from './_account_session.js';
@@ -90,10 +94,20 @@ export function accountSyncDelta(data = {}, since = 0) {
   const decisionLog = (data.decisionLog || []).filter((entry) =>
     newestStamp(entry, ['outcomeUpdatedAt', 'verifiedAt', 'executedAt', 'at']) > after
   );
+  const executionPlans = (data.executionPlans || []).filter((entry) =>
+    newestStamp(entry, ['updatedAt', 'createdAt']) > after
+  );
+  const executionAttributions = (
+    data.executionAttributions || []
+  ).filter((entry) =>
+    newestStamp(entry, ['updatedAt']) > after
+  );
   return {
     advice,
     adviceLog,
     decisionLog,
+    executionPlans,
+    executionAttributions,
     reviews: reviewsAfter(data.reviews, after),
     // 预警只有 166 KiB，整组返回可覆盖旧记录缺少 updatedAt 的兼容场景。
     alerts: Array.isArray(data.alerts) ? data.alerts : [],
@@ -251,6 +265,7 @@ export function applyClientAccountSave(
     'strategyHumanApproval',
     'strategyGovernanceV2',
     'adviceEventKeys',
+    'executionEventState',
   ]) {
     if (prev[key] != null) merged[key] = prev[key];
     else delete merged[key];
@@ -312,6 +327,14 @@ export function applyClientAccountSave(
   );
   merged.adviceLog = mergeAccountEvents(incoming.adviceLog, prev.adviceLog, 500);
   merged.decisionLog = mergeAccountEvents(incoming.decisionLog, prev.decisionLog, 1000);
+  merged.executionPlans = mergeExecutionPlans(
+    incoming.executionPlans,
+    prev.executionPlans,
+  );
+  merged.executionAttributions = mergeExecutionAttributions(
+    incoming.executionAttributions,
+    prev.executionAttributions,
+  );
   merged.adviceReviewLog = mergeAccountEvents(
     incoming.adviceReviewLog,
     prev.adviceReviewLog,

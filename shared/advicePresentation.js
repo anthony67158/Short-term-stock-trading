@@ -199,6 +199,20 @@ function decisionInstruction(plan, fallback = '') {
   return core || fallback
 }
 
+function reviewSummary(advice = {}) {
+  return advice.reviewCycle && typeof advice.reviewCycle === 'object'
+    ? {
+        status: advice.reviewCycle.status || '',
+        sequence: Number(advice.reviewCycle.sequence) || 0,
+        reviewedAt: Number(advice.reviewCycle.reviewedAt) || 0,
+        nextReviewAt: Number(advice.reviewCycle.nextReviewAt) || 0,
+        previousAction: clean(advice.reviewCycle.previousAction, 80),
+        changeType: clean(advice.reviewCycle.changeType, 40),
+        reason: clean(advice.reviewCycle.reason, 160),
+      }
+    : null
+}
+
 export function trustCalibrationText(trust = {}) {
   if (trust?.calibrated !== true) return ''
   const samples = Number(trust.calibrationSamples)
@@ -207,7 +221,7 @@ export function trustCalibrationText(trust = {}) {
   return `已按同信心档${samples}次结果校准 · 历史命中率${winRate}%`
 }
 
-export function buildAdvicePresentation(advice = {}) {
+function buildLegacyAdvicePresentation(advice = {}) {
   const plan = advice.decisionPlan?.schemaVersion === 'decision-plan.v2'
     ? advice.decisionPlan
     : null
@@ -250,17 +264,7 @@ export function buildAdvicePresentation(advice = {}) {
     targetPrice: plan.prices?.target,
   } : advice
   const contract = advice.knowledgeActionPlan || {}
-  const review = advice.reviewCycle && typeof advice.reviewCycle === 'object'
-    ? {
-        status: advice.reviewCycle.status || '',
-        sequence: Number(advice.reviewCycle.sequence) || 0,
-        reviewedAt: Number(advice.reviewCycle.reviewedAt) || 0,
-        nextReviewAt: Number(advice.reviewCycle.nextReviewAt) || 0,
-        previousAction: clean(advice.reviewCycle.previousAction, 80),
-        changeType: clean(advice.reviewCycle.changeType, 40),
-        reason: clean(advice.reviewCycle.reason, 160),
-      }
-    : null
+  const review = reviewSummary(advice)
   return {
     verdict: {
       action: first(planAdvice.action, planAdvice.stance),
@@ -323,4 +327,44 @@ export function buildAdvicePresentation(advice = {}) {
     decisionPlan: decisionPlanSummary(plan),
     review,
   }
+}
+
+function executionPlanSummary(plan) {
+  if (plan?.schemaVersion !== 'execution-plan.v1') return null
+  return {
+    schemaVersion: plan.schemaVersion,
+    planId: clean(plan.planId, 100),
+    decisionId: clean(plan.decisionId, 100),
+    status: clean(plan.status, 30),
+    canArm: plan.canArm === true,
+    side: clean(plan.side, 10),
+    targetLots: Number(plan.targetLots) || 0,
+    filledLots: Number(plan.filledLots) || 0,
+    remainingLots: Number(plan.remainingLots) || 0,
+    referencePrice: displayNumber(plan.referencePrice),
+    validUntil: clean(plan.validUntil, 40),
+    methodType: clean(plan.executionMethod?.type, 40),
+    methodLabel: clean(plan.executionMethod?.label, 40),
+    sliceCount: Array.isArray(plan.slices) ? plan.slices.length : 0,
+  }
+}
+
+export function compileAdvicePresentationV3(advice = {}) {
+  const view = buildLegacyAdvicePresentation(advice)
+  return {
+    schemaVersion: 'advice-presentation.v3',
+    ...view,
+    executionPlan: executionPlanSummary(advice.executionPlan),
+  }
+}
+
+export function buildAdvicePresentation(advice = {}) {
+  if (advice.presentation?.schemaVersion === 'advice-presentation.v3') {
+    return {
+      ...advice.presentation,
+      review: reviewSummary(advice),
+      executionPlan: executionPlanSummary(advice.executionPlan),
+    }
+  }
+  return compileAdvicePresentationV3(advice)
 }

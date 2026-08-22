@@ -14,6 +14,9 @@ import {
   applyAccountCashFlow,
 } from '../shared/accountValuation.js'
 import {
+  accountTradeStateFingerprint,
+} from '../shared/accountSync.js'
+import {
   ADVICE_OUTCOME_POLICY_VERSION,
   adviceActionKind,
   adviceNeedsVerification,
@@ -26,6 +29,7 @@ import { mergeReviewsByTimestamp } from '../shared/reviewSchedule.js'
 import {
   computePortfolio as computeSharedPortfolio,
   computeTFlows as computeSharedTFlows,
+  beijingDayStartTs,
   livePositionOf as liveSharedPosition,
   positionCostBasis,
   t1StatusOf as sharedT1Status,
@@ -42,6 +46,19 @@ import {
   A_SHARE_STANDARD_FEE_POLICY,
   tradeFees,
 } from '../shared/ashareStrategyExecution.js'
+import {
+  activeExecutionPlanForTrade,
+  expireExecutionPlansForAccountChange,
+  mergeExecutionAttributions,
+  mergeExecutionPlans,
+  recordExecutionFillInList,
+  refreshExecutionPlanList,
+  transitionExecutionPlanInList,
+  upsertExecutionPlan,
+} from '../shared/executionPlanStore.js'
+import {
+  attributeExecution,
+} from '../shared/executionAttribution.js'
 import {
   isAdviceReviewEnabled,
   setAdviceReviewEnabled as withAdviceReviewEnabled,
@@ -248,7 +265,19 @@ function restoreLegacyTRealizedPnl(holding, closed) {
   return { holding: nextHolding, migrated }
 }
 
-let state = { plan: [], holding: [], closed: [], account: null, alerts: [], reviews: {}, adviceLog: [], decisionLog: [], settings: {} }
+let state = {
+  plan: [],
+  holding: [],
+  closed: [],
+  account: null,
+  alerts: [],
+  reviews: {},
+  adviceLog: [],
+  decisionLog: [],
+  executionPlans: [],
+  executionAttributions: [],
+  settings: {},
+}
 const listeners = new Set()
 
 // ===== 撤销栈：交易类操作前存快照，支持一步步撤回 =====
@@ -263,6 +292,8 @@ function snapshot(label) {
       data: JSON.parse(JSON.stringify({
         plan: state.plan, holding: state.holding, closed: state.closed,
         account: state.account, alerts: state.alerts, reviews: state.reviews, adviceLog: state.adviceLog, decisionLog: state.decisionLog,
+        executionPlans: state.executionPlans,
+        executionAttributions: state.executionAttributions,
       })),
     })
     if (_undoStack.length > UNDO_LIMIT) _undoStack.shift()
@@ -278,7 +309,7 @@ function scheduleSave() {
   if (_saveTimer) clearTimeout(_saveTimer)
   _saveTimer = setTimeout(() => {
     _saveTimer = null
-    _saver({ plan: state.plan, holding: state.holding, closed: state.closed, account: state.account, alerts: state.alerts, reviews: state.reviews, adviceLog: state.adviceLog, decisionLog: state.decisionLog, advice: getAllAdvice(), settings: state.settings || {} })
+    _saver({ plan: state.plan, holding: state.holding, closed: state.closed, account: state.account, alerts: state.alerts, reviews: state.reviews, adviceLog: state.adviceLog, decisionLog: state.decisionLog, executionPlans: state.executionPlans, executionAttributions: state.executionAttributions, advice: getAllAdvice(), settings: state.settings || {} })
   }, 800)
 }
 // 立即落盘(不等 800ms 防抖):页面隐藏/关闭前把待写数据抢存一次,避免"改完立刻切走/关页 → 800ms 内没保存到云端"丢数据。
@@ -296,6 +327,8 @@ function flushPendingSave() {
       reviews: state.reviews,
       adviceLog: state.adviceLog,
       decisionLog: state.decisionLog,
+      executionPlans: state.executionPlans,
+      executionAttributions: state.executionAttributions,
       advice: getAllAdvice(),
       settings: state.settings || {},
     })).then((result) => result !== false).catch(() => false)
@@ -429,6 +462,25 @@ function updateAccountCash(cashFlow) {
   const result = applyAccountCashFlow(state.account, cashFlow)
   if (result.applied) state.account = result.account
   return result.applied
+}
+
+function withDailyRiskBaseline(account, now = Date.now()) {
+  if (!account || typeof account !== 'object') return account || null
+  const dayStart = beijingDayStartTs(now)
+  const totalAssets = Number(account.totalAssets)
+  if (
+    Number(account.riskDayStartAt) === dayStart
+    && Number.isFinite(Number(account.dayStartAssets))
+    && Number(account.dayStartAssets) > 0
+  ) return account
+  return {
+    ...account,
+    riskDayStartAt: dayStart,
+    dayStartAssets:
+      Number.isFinite(totalAssets) && totalAssets > 0
+        ? totalAssets
+        : null,
+  }
 }
 
 function ensureCashAvailable(cashFlow) {
@@ -611,6 +663,165 @@ export const planStore = {
   subscribe(l) { listeners.add(l); return () => listeners.delete(l) },
   get() { return state },
   flushSave() { return flushPendingSave() },
+  armExecutionPlan(draft, now = Date.now(), currentPrice = null) {
+    if (draft?.schemaVersion !== 'execution-plan.v1') {
+      throw new Error('执行计划版本无效')
+    }
+    const existing = (state.executionPlans || []).find(
+      (plan) => plan.planId === draft.planId,
+    )
+    if (existing && existing.status !== 'DRAFT') return existing
+    let armed = transitionExecutionPlanInList(
+      [existing || draft],
+      draft.planId,
+      'ARM',
+      { now },
+    )[0]
+    if (Number.isFinite(Number(currentPrice))) {
+      armed = refreshExecutionPlanList([armed], {
+        quoteMap: {
+          [draft.code]: { price: Number(currentPrice) },
+        },
+        now,
+      })[0]
+    }
+    state.executionPlans = upsertExecutionPlan(
+      state.executionPlans,
+      armed,
+    )
+    emit()
+    return armed
+  },
+  refreshExecutionPlans(quoteMap = {}, now = Date.now()) {
+    const refreshed = refreshExecutionPlanList(
+      state.executionPlans,
+      {
+        quoteMap,
+        now,
+        accountTradeFingerprint:
+          accountTradeStateFingerprint(state),
+      },
+    )
+    if (JSON.stringify(refreshed) === JSON.stringify(state.executionPlans)) {
+      return false
+    }
+    state.executionPlans = refreshed
+    emit()
+    return true
+  },
+  confirmExecutionPlan(planId, now = Date.now()) {
+    const current = (state.executionPlans || []).find(
+      (plan) => plan.planId === planId,
+    )
+    if (!current || current.status !== 'ALERTED') {
+      throw new Error('执行计划尚未到价或已结束')
+    }
+    state.executionPlans = transitionExecutionPlanInList(
+      state.executionPlans,
+      planId,
+      'USER_CONFIRM',
+      { now },
+    )
+    emit()
+    return state.executionPlans.find((plan) => plan.planId === planId)
+  },
+  cancelExecutionPlan(planId, now = Date.now()) {
+    state.executionPlans = transitionExecutionPlanInList(
+      state.executionPlans,
+      planId,
+      'CANCEL',
+      { now, reason: '用户取消人工执行计划' },
+    )
+    emit()
+    return state.executionPlans.find((plan) => plan.planId === planId)
+  },
+  recordExecutionPlanTrade(
+    planId,
+    price,
+    lots,
+    _now = Date.now(),
+  ) {
+    const plan = (state.executionPlans || []).find(
+      (item) => item.planId === planId,
+    )
+    if (
+      !plan
+      || !['USER_CONFIRMED', 'PARTIALLY_RECORDED'].includes(plan.status)
+    ) {
+      return { ok: false, error: '执行计划尚未确认或已结束' }
+    }
+    const quantity = Math.trunc(Number(lots))
+    const fillPrice = Number(price)
+    if (
+      !Number.isInteger(quantity)
+      || quantity <= 0
+      || quantity > plan.remainingLots
+      || !Number.isFinite(fillPrice)
+      || fillPrice <= 0
+    ) {
+      return { ok: false, error: '请输入有效且不超过剩余计划的成交价与手数' }
+    }
+    const options = {
+      source: 'execution-plan',
+      executionPlanId: planId,
+    }
+    if (plan.side === 'BUY') {
+      const holder = state.holding.find(
+        (item) => item.code === plan.code,
+      )
+      if (holder) {
+        return this.addToHolding(
+          holder.id,
+          fillPrice,
+          quantity,
+          options,
+        )
+      }
+      if (state.plan.some((item) => item.code === plan.code)) {
+        return this.buy(plan.code, fillPrice, quantity, options)
+      }
+      return this.buyDirect({
+        code: plan.code,
+        name: plan.name,
+      }, fillPrice, quantity, options)
+    }
+    if (plan.side === 'SELL') {
+      let remaining = quantity
+      const transactions = []
+      for (const holding of state.holding.filter(
+        (item) => item.code === plan.code,
+      )) {
+        if (remaining <= 0) break
+        const sellable = t1StatusOf(plan.code).sellableToday
+        const currentLots = Math.min(
+          remaining,
+          Number(holding.qty) || 0,
+          Number(sellable) || 0,
+        )
+        if (currentLots <= 0) continue
+        const result = this.sell(
+          holding.id,
+          fillPrice,
+          currentLots,
+          options,
+        )
+        if (!result?.ok) return result
+        remaining -= Number(result.qty) || 0
+        if (result.transactionId) {
+          transactions.push(result.transactionId)
+        }
+      }
+      if (remaining > 0) {
+        return {
+          ok: false,
+          error: `受持仓或T+1限制，仍有${remaining}手未记录`,
+          transactions,
+        }
+      }
+      return { ok: true, qty: quantity, transactions }
+    }
+    return { ok: false, error: '当前计划没有可记录的买卖方向' }
+  },
   // 由 authStore 登录/登出时注入数据（不触发回存云端，避免刚拉就写回）
   setData(d) {
     _suspend = true
@@ -621,6 +832,17 @@ export const planStore = {
       closed,
     )
     const holding = restored.holding
+    const incomingAccount = (d && d.account) || null
+    const account = withDailyRiskBaseline(incomingAccount)
+    const riskBaselineCreated = !!(
+      account
+      && (
+        Number(account.riskDayStartAt)
+          !== Number(incomingAccount?.riskDayStartAt)
+        || Number(account.dayStartAssets)
+          !== Number(incomingAccount?.dayStartAssets)
+      )
+    )
     const heldCodes = new Set(holding.map((item) => String(item && item.code || '')).filter(Boolean))
     const plan = (Array.isArray(d && d.plan) ? d.plan : [])
       .filter((item) => !heldCodes.has(String(item && item.code || '')))
@@ -628,11 +850,17 @@ export const planStore = {
       plan,
       holding,
       closed,
-      account: (d && d.account) || null,   // { totalAssets, cash, goal, updatedAt }
+      account,   // { totalAssets, cash, goal, updatedAt }
       alerts: Array.isArray(d && d.alerts) ? d.alerts : [],        // 预警规则集
       reviews: (d && d.reviews) || {},      // 复盘结论：key=code → { code,name,at,session(noon/close/manual),text,... }
       adviceLog: Array.isArray(d && d.adviceLog) ? d.adviceLog : [],  // AI建议决策记录：{id,code,name,mode,at,action,entry,stop,target,trust,resonance,verified,hit,...}
       decisionLog: Array.isArray(d && d.decisionLog) ? d.decisionLog : [], // 建议与真实执行分离的事件账本
+      executionPlans: Array.isArray(d && d.executionPlans)
+        ? d.executionPlans
+        : [],
+      executionAttributions: Array.isArray(d && d.executionAttributions)
+        ? d.executionAttributions
+        : [],
       settings: (d && d.settings) || {},    // 跨设备同步的个性化设置(如 AI 每日精选/自动开关等)
     }
     reconcilePositionAlerts()
@@ -642,7 +870,9 @@ export const planStore = {
     _suspend = false
     // 登录/切换账号载入后，自动结算跨天未结算的做T（会触发一次云端回存）
     this.autoSettleTFlows()
-    if (restored.migrated && _saver) scheduleSave()
+    if ((restored.migrated || riskBaselineCreated) && _saver) {
+      scheduleSave()
+    }
   },
   // authStore 注册云端保存回调
   registerSaver(fn) { _saver = fn },
@@ -712,7 +942,34 @@ export const planStore = {
         changed = true
       }
     }
-    // 5) 云端预警回灌：服务端军师会创建行动预警，cron_alert 会继续推进其
+    // 5) 人工执行计划与归因按更新时间合并，避免多设备覆盖新状态。
+    if (Array.isArray(d.executionPlans)) {
+      const mergedPlans = mergeExecutionPlans(
+        state.executionPlans,
+        d.executionPlans,
+      )
+      if (JSON.stringify(mergedPlans) !== JSON.stringify(state.executionPlans)) {
+        state = { ...state, executionPlans: mergedPlans }
+        changed = true
+      }
+    }
+    if (Array.isArray(d.executionAttributions)) {
+      const mergedAttributions = mergeExecutionAttributions(
+        state.executionAttributions,
+        d.executionAttributions,
+      )
+      if (
+        JSON.stringify(mergedAttributions)
+          !== JSON.stringify(state.executionAttributions)
+      ) {
+        state = {
+          ...state,
+          executionAttributions: mergedAttributions,
+        }
+        changed = true
+      }
+    }
+    // 6) 云端预警回灌：服务端军师会创建行动预警，cron_alert 会继续推进其
     //    armed/watching/confirmed 状态。新增仅接收可由本地持仓/自选验证且未静音的自动预警，
     //    避免把用户刚删除的规则复活；已有规则仍按 id 合并权威运行态。
     if (Array.isArray(d.alerts) && d.alerts.length && Array.isArray(state.alerts)) {
@@ -946,7 +1203,7 @@ export const planStore = {
   },
 
   // 计划 → 持仓（每次买入都是独立一笔，同股可多笔并存）
-  buy(code, buyPrice, qty = 1) {
+  buy(code, buyPrice, qty = 1, opts = {}) {
     const p = state.plan.find((x) => x.code === code)
     if (!p) return { ok: false, error: '候选股票不存在或已建仓' }
     const q = Number(qty)
@@ -976,14 +1233,23 @@ export const planStore = {
     const txn = makeBuyTxn(p.code, p.name, price, q, fee, hid)
     txn.cashApplied = updateAccountCash(txn.cashFlow)
     state.closed = [txn, ...state.closed].slice(0, 300)
-    this._recordExecution({ code: p.code, name: p.name, side: 'buy', price, qty: q, transactionId: txn.id })
+    this._recordExecution({
+      code: p.code,
+      name: p.name,
+      side: 'buy',
+      price,
+      qty: q,
+      source: opts.source,
+      executionPlanId: opts.executionPlanId,
+      transactionId: txn.id,
+    })
     this._syncPlanAlerts(hid)
     emit()
     void flushPendingSave()
     return { ok: true, holdingId: hid, transactionId: txn.id }
   },
   // 直接建仓（同股也可多笔，不去重）
-  buyDirect(stock, buyPrice, qty = 1) {
+  buyDirect(stock, buyPrice, qty = 1, opts = {}) {
     if (!stock || !stock.code) return { ok: false, error: '股票信息不完整' }
     const q = Number(qty)
     const price = Number(buyPrice)
@@ -1007,7 +1273,16 @@ export const planStore = {
     const txn = makeBuyTxn(stock.code, stock.name, price, q, fee, hid)
     txn.cashApplied = updateAccountCash(txn.cashFlow)
     state.closed = [txn, ...state.closed].slice(0, 300)
-    this._recordExecution({ code: stock.code, name: stock.name, side: 'buy', price, qty: q, transactionId: txn.id })
+    this._recordExecution({
+      code: stock.code,
+      name: stock.name,
+      side: 'buy',
+      price,
+      qty: q,
+      source: opts.source,
+      executionPlanId: opts.executionPlanId,
+      transactionId: txn.id,
+    })
     this._syncPlanAlerts(hid)
     emit()
     void flushPendingSave()
@@ -1074,13 +1349,23 @@ export const planStore = {
     }
     sellTxn.cashApplied = updateAccountCash(sellTxn.cashFlow)
     state.closed = [sellTxn, ...archived, ...state.closed].slice(0, 300)
-    this._recordExecution({ code: h.code, name: h.name, side: 'sell', price, qty: sq, source: opts.source, transactionId: sellTxn.id })
+    this._recordExecution({
+      code: h.code,
+      name: h.name,
+      side: 'sell',
+      price,
+      qty: sq,
+      source: opts.source,
+      executionPlanId: opts.executionPlanId,
+      transactionId: sellTxn.id,
+    })
     emit()
     // 成交事实必须先于后续云端复核到达 OSS，避免页面已减仓而 Worker 仍按旧手数生成。
     void flushPendingSave()
     return {
       ok: true,
       qty: sq,
+      transactionId: sellTxn.id,
       adjusted: sq < Number(sellQty),
       message: sq < Number(sellQty) ? `受 T+1 限制，本次仅记录卖出 ${sq} 手` : '',
     }
@@ -1110,7 +1395,16 @@ export const planStore = {
     const txn = makeBuyTxn(h.code, h.name, price, q, addFee, id)
     txn.cashApplied = updateAccountCash(txn.cashFlow)
     state.closed = [txn, ...state.closed].slice(0, 300)
-    this._recordExecution({ code: h.code, name: h.name, side: 'buy', price, qty: q, source: opts.source, transactionId: txn.id })
+    this._recordExecution({
+      code: h.code,
+      name: h.name,
+      side: 'buy',
+      price,
+      qty: q,
+      source: opts.source,
+      executionPlanId: opts.executionPlanId,
+      transactionId: txn.id,
+    })
     emit()
     void flushPendingSave()
     return { ok: true, qty: q, transactionId: txn.id }
@@ -1141,7 +1435,16 @@ export const planStore = {
           sellPrice: p, buyPrice: opts.costPrice ?? null, sellFee: fee, at: Date.now(), sellAt: Date.now(),
         }
     state.closed = [rec, ...state.closed].slice(0, 300)
-    this._recordExecution({ code: stock.code, name: stock.name, side: type === 'BUY' ? 'buy' : 'sell', price: p, qty: q, source: opts.source, transactionId: rec.id })
+    this._recordExecution({
+      code: stock.code,
+      name: stock.name,
+      side: type === 'BUY' ? 'buy' : 'sell',
+      price: p,
+      qty: q,
+      source: opts.source,
+      executionPlanId: opts.executionPlanId,
+      transactionId: rec.id,
+    })
     emit()
   },
 
@@ -1857,7 +2160,11 @@ export const planStore = {
   // ===== 账户资产（仓位/资金管理）=====
   // account: { totalAssets(总资产,元), cash(可用资金,元), goal(目标总资产,元), updatedAt }
   setAccount(patch) {
-    state.account = { ...(state.account || {}), ...patch, updatedAt: Date.now() }
+    state.account = withDailyRiskBaseline({
+      ...(state.account || {}),
+      ...patch,
+      updatedAt: Date.now(),
+    })
     emit()
   },
 
@@ -2456,6 +2763,91 @@ export const planStore = {
         targetHit: false,
       },
     })
+    const executionPlan = activeExecutionPlanForTrade(
+      state.executionPlans,
+      {
+        code: entry.code,
+        side: entry.side === 'sell' ? 'SELL' : 'BUY',
+        executionPlanId: entry.executionPlanId,
+      },
+    )
+    if (executionPlan && transaction) {
+      try {
+        state.executionPlans = recordExecutionFillInList(
+          state.executionPlans,
+          executionPlan.planId,
+          {
+            fillId: transaction.id,
+            transactionId: transaction.id,
+            lots: Number(entry.qty) || 0,
+            price: Number(entry.price) || 0,
+            fee: Number(
+              transaction.fee
+              ?? (
+                Number(transaction.buyFee || 0)
+                + Number(transaction.sellFee || 0)
+              ),
+            ) || 0,
+            at: Number(
+              transaction.at
+              || transaction.sellAt
+              || transaction.buyAt,
+            ) || Date.now(),
+            manuallyRecorded: true,
+          },
+        )
+        const updated = state.executionPlans.find(
+          (plan) => plan.planId === executionPlan.planId,
+        )
+        const planTransactions = (updated.fills || [])
+          .map((fill) => (state.closed || []).find(
+            (item) => item?.id === fill.transactionId,
+          ))
+          .filter(Boolean)
+        const realizedValues = planTransactions.map((item) =>
+          Number(item.realizedPnl ?? item.netPnl),
+        )
+        const hasCompleteRealizedPnl = (
+          updated.status === 'COMPLETED'
+          && updated.side === 'SELL'
+          && planTransactions.length === updated.fills.length
+          && planTransactions.every(
+            (item) => tradeIntentOf(item) !== 't',
+          )
+          && realizedValues.every(Number.isFinite)
+        )
+        const planNetPnl = hasCompleteRealizedPnl
+          ? realizedValues.reduce((sum, value) => sum + value, 0)
+          : pnl
+        const attribution = {
+          ...attributeExecution(updated, {
+            fills: updated.fills,
+            netPnl: planNetPnl,
+            validationComplete: hasCompleteRealizedPnl,
+          }),
+          updatedAt: Date.now(),
+        }
+        state.executionAttributions = [
+          attribution,
+          ...(state.executionAttributions || []).filter(
+            (item) => item?.planId !== attribution.planId,
+          ),
+        ].slice(0, 500)
+      } catch {
+        // 交易流水仍是权威事实；计划归因失败不能回滚真实成交。
+      }
+    }
+    state.executionPlans = expireExecutionPlansForAccountChange(
+      state.executionPlans,
+      {
+        exceptPlanId: executionPlan?.planId || '',
+        now: Number(
+          transaction?.at
+          || transaction?.sellAt
+          || transaction?.buyAt,
+        ) || Date.now(),
+      },
+    )
     return state.decisionLog[0] || null
   },
   decisionStats() {
@@ -2635,6 +3027,8 @@ export const planStore = {
       plan: d.plan || [], holding: d.holding || [], closed: d.closed || [],
       account: d.account || null, alerts: d.alerts || [], reviews: d.reviews || {},
       adviceLog: d.adviceLog || [], decisionLog: d.decisionLog || [],
+      executionPlans: d.executionPlans || [],
+      executionAttributions: d.executionAttributions || [],
       settings: d.settings || state.settings || {},
     }
     emit() // 恢复后正常回存云端，保证撤回结果也持久化

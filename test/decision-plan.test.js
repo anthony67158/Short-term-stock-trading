@@ -287,6 +287,58 @@ test('研究级或被阻断的新增风险计划不能被Judge升级为确认', 
   )
 })
 
+test('账户级熔断会阻止新增风险但不阻止减仓退出', () => {
+  const accountCircuitBreaker = {
+    schemaVersion: 'account-circuit-breaker.v1',
+    allowRiskIncrease: false,
+    blockerCodes: ['DAILY_DRAWDOWN'],
+    blockers: [{
+      code: 'DAILY_DRAWDOWN',
+      message: '当日总资产回撤达到熔断线',
+    }],
+  }
+  const buy = compileDecisionPlan({
+    mode: 'buy_advice',
+    advice: {
+      action: '立即买入',
+      buyPrice: 10,
+      stopPrice: 9,
+      targetPrice: 12,
+      planQtyNum: 2,
+    },
+    payload,
+    evidenceSnapshot: snapshot,
+    strategySpec: getActiveStrategySpec(),
+    strategyGate: { productionEligible: true, blockers: [] },
+    accountCircuitBreaker,
+    now,
+  })
+  const reduce = compileDecisionPlan({
+    mode: 'hold_advice',
+    advice: {
+      action: '减仓',
+      reducePrice: 10,
+      stopPrice: 9,
+      targetPrice: 12,
+      opQty: '减仓1手',
+    },
+    payload: {
+      ...payload,
+      holdQty: 2,
+      sellableTodayQty: 2,
+    },
+    evidenceSnapshot: snapshot,
+    strategySpec: getActiveStrategySpec(),
+    strategyGate: { productionEligible: true, blockers: [] },
+    accountCircuitBreaker,
+    now,
+  })
+
+  assert.equal(buy.actionability, 'BLOCKED')
+  assert.ok(buy.blockedReasons.some((item) => /回撤/.test(item)))
+  assert.equal(reduce.actionability, 'READY')
+})
+
 test('首次LLM失败时返回不含交易数字的确定性等待计划', () => {
   const fallback = buildFallbackDecisionAdvice({
     mode: 'buy_advice',

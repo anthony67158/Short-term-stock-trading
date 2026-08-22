@@ -78,7 +78,7 @@ test('确认接口拒绝非watching、非法代码和非法价格', () => {
   }).ok, false)
 })
 
-test('页面内确认结果同步更新云端预警并唤醒同一军师计划', () => {
+test('页面内确认结果同步更新预警且不重复调用军师', () => {
   const now = 1786080000000
   const data = {
     holding: [{ id: 'h1', code: '600000', qty: 2 }],
@@ -105,11 +105,13 @@ test('页面内确认结果同步更新云端预警并唤醒同一军师计划',
     side: 'sell',
   }, 10.5, now)
 
-  assert.equal(result.queued, true)
+  assert.equal(result.queued, false)
+  assert.equal(result.reason, 'deterministic-event')
   assert.equal(data.alerts[0].phase, 'confirmed')
   assert.equal(data.alerts[0].enabled, false)
   assert.equal(data.alerts[0].decisionPrice, 10.5)
-  assert.equal(data.jobs['600000'].trigger.decision, 'confirm')
+  assert.equal(data.jobs, undefined)
+  assert.equal(data.executionEventState.history.length, 1)
 })
 
 test('迟到或错股的页面确认不得覆盖云端最新预警状态', () => {

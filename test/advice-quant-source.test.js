@@ -30,3 +30,14 @@ test('本地建议生成不再独立请求旧口径quantUrl覆盖军师量化', 
   assert.doesNotMatch(runnerSource, /fetch\(quantUrl/)
   assert.match(runnerSource, /quantResultFromAdviceMeta\(meta/)
 })
+
+test('本地建议完成后立即回传生成耗时而不是等待缓存重载', () => {
+  assert.match(
+    runnerSource,
+    /results\.set\(code,\s*\{[\s\S]*generationMetrics,[\s\S]*cachedAt,/,
+  )
+  assert.match(
+    runnerSource,
+    /saveAdvice\(code,\s*\{[\s\S]*generationMetrics,/,
+  )
+})

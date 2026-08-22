@@ -285,6 +285,14 @@ test('运行时账号同步只返回更新时间后的建议事件和轻量状�
     },
     alerts: [{ id: 'a1', createdAt: 50 }],
     batchProgress: { at: 400, running: true },
+    executionPlans: [
+      { planId: 'old-plan', updatedAt: 100 },
+      { planId: 'fresh-plan', updatedAt: 420 },
+    ],
+    executionAttributions: [
+      { planId: 'old-plan', updatedAt: 100 },
+      { planId: 'fresh-plan', updatedAt: 430 },
+    ],
     tradeStateResetAt: 450,
     holding: [{ code: '600000', qty: 2 }],
     closed: [{ id: 'trade-1' }],
@@ -296,6 +304,14 @@ test('运行时账号同步只返回更新时间后的建议事件和轻量状�
   assert.deepEqual(Object.keys(delta.reviews), ['fresh'])
   assert.equal(delta.alerts.length, 1)
   assert.equal(delta.batchProgress.running, true)
+  assert.deepEqual(
+    delta.executionPlans.map((item) => item.planId),
+    ['fresh-plan'],
+  )
+  assert.deepEqual(
+    delta.executionAttributions.map((item) => item.planId),
+    ['fresh-plan'],
+  )
   assert.equal(delta.tradeStateResetAt, 450)
   assert.equal(delta.holding, undefined)
   assert.equal(delta.closed, undefined)
@@ -426,6 +442,79 @@ test('客户端保存不能覆盖服务端收益学习委员会与人工批准�
   assert.deepEqual(account.data.adviceEventKeys, {
     'judge:alert-1': 1000,
   })
+})
+
+test('客户端保存按更新时间合并执行计划与成交归因', () => {
+  const account = {
+    nick: 'execution-merge',
+    clientRevision: 4,
+    data: {
+      plan: [],
+      holding: [],
+      closed: [],
+      executionPlans: [{
+        schemaVersion: 'execution-plan.v1',
+        planId: 'execution.shared',
+        status: 'COMPLETED',
+        filledLots: 2,
+        transitions: [{ to: 'DRAFT' }, { to: 'COMPLETED' }],
+        updatedAt: 300,
+      }],
+      executionAttributions: [{
+        schemaVersion: 'execution-attribution.v1',
+        planId: 'execution.shared',
+        status: 'COMPLETED',
+        totalFees: 8,
+        validationComplete: true,
+        learningEligible: true,
+        updatedAt: 300,
+      }],
+    },
+  }
+
+  const applied = applyClientAccountSave(account, {
+    plan: [],
+    holding: [],
+    closed: [],
+    executionPlans: [
+      {
+        schemaVersion: 'execution-plan.v1',
+        planId: 'execution.shared',
+        status: 'ARMED',
+        filledLots: 0,
+        transitions: [{ to: 'DRAFT' }, { to: 'ARMED' }],
+        updatedAt: 500,
+      },
+      {
+        schemaVersion: 'execution-plan.v1',
+        planId: 'execution.client',
+        status: 'ARMED',
+        updatedAt: 400,
+      },
+    ],
+    executionAttributions: [{
+      schemaVersion: 'execution-attribution.v1',
+      planId: 'execution.shared',
+      status: 'PARTIAL',
+      totalFees: 5,
+      validationComplete: false,
+      learningEligible: false,
+      updatedAt: 500,
+    }],
+  }, 4)
+
+  assert.equal(applied.ok, true)
+  assert.equal(account.data.executionPlans.length, 2)
+  assert.equal(
+    account.data.executionPlans.find(
+      (plan) => plan.planId === 'execution.shared',
+    ).status,
+    'COMPLETED',
+  )
+  assert.equal(
+    account.data.executionAttributions[0].totalFees,
+    8,
+  )
 })
 
 test('OSS 当前快照写后校验失败时保存必须报错', async () => {

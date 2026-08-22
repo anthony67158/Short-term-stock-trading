@@ -33,6 +33,7 @@ import { applyCors, preflight } from './_lib.js';
 import { zhReasonPiece } from './_zh_reason.js';
 import {
   SYSTEM_PROMPT,
+  ADVISOR_FAST_SYSTEM,
   ADVISOR_SYSTEM,
   buildUserPrompt,
   isAdvisorMode,
@@ -83,6 +84,20 @@ import {
   compileDecisionPlan,
   decisionActionFromAdvice,
 } from '../shared/decisionPlan.js';
+import {
+  accountTradeStateFingerprint,
+} from '../shared/accountSync.js';
+import { compileExecutionPlan } from '../shared/executionPlan.js';
+import {
+  evaluateAccountCircuitBreaker,
+} from '../shared/accountCircuitBreaker.js';
+import {
+  compileAdvicePresentationV3,
+} from '../shared/advicePresentation.js';
+import {
+  buildTGridExperiment,
+  evaluateTGridEligibility,
+} from '../shared/tGridPolicy.js';
 import {
   getStrategySpecV2,
 } from '../shared/strategyCatalogV2.js';
@@ -746,6 +761,9 @@ export default async function handler(req, res) {
     const START = Date.now();
     const fastMode = body?.fastMode === true && isAdvisorMode(mode);
     const forceReasoning = body?.forceReasoning === true && isAdvisorMode(mode);
+    if (isAdvisorMode(mode)) {
+      payload.generationProfile = fastMode ? 'FAST' : 'DEEP';
+    }
     const configuredReasoning = effectiveReasoning(useRole);
     const reasoningOn = resolveReasoningMode(configuredReasoning, fastMode, forceReasoning);
     // 时间窗口拉到 FC 平台上限(600s)附近:深度思考+大量参考内容时模型很慢,总预算给到 560s,
@@ -1450,7 +1468,9 @@ export default async function handler(req, res) {
     // 导致军师思维链还没吐完就被短超时掐断、且不回显。此处改为读【真实生效值】:全局开 OR 任一承接该
     // 角色的端点开 → 视为开,撑起长超时+大 token+中文思维链指令,思维链才能完整生成并回显。
     const useReasoning = resolveReasoningMode(effectiveReasoning(useRole), fastMode, forceReasoning);
-    const sysPrompt = isAdvisor ? ADVISOR_SYSTEM : SYSTEM_PROMPT;
+    const sysPrompt = isAdvisor
+      ? (fastMode ? ADVISOR_FAST_SYSTEM : ADVISOR_SYSTEM)
+      : SYSTEM_PROMPT;
 
     // 已采集到的数据 meta——即便 LLM 超时降级，也把这些"确定性数据"回传前端展示(有价值、不空手)
     const collectedMeta = {
@@ -2093,6 +2113,19 @@ export default async function handler(req, res) {
                   message: '策略尚未完成生产晋级',
                 }],
           };
+      const accountCircuitBreaker = evaluateAccountCircuitBreaker({
+        account: {
+          ...(accountAuth.account?.data?.account || {}),
+          ...(payload.account || {}),
+        },
+        portfolio: {
+          position: payload.account?.position,
+          industryWeights: payload.account?.industryWeights || [],
+        },
+        closed: accountAuth.account?.data?.closed || [],
+        executionPlans:
+          accountAuth.account?.data?.executionPlans || [],
+      });
       result.decisionPlan = compileDecisionPlan({
         mode,
         advice: result,
@@ -2101,7 +2134,83 @@ export default async function handler(req, res) {
         strategySpec: decisionStrategySpec,
         strategyGate: decisionStrategyGate || {},
         strategyRoute,
+        accountCircuitBreaker,
       });
+      result.executionPlan = compileExecutionPlan({
+        decisionPlan: result.decisionPlan,
+        code: payload.code,
+        name: payload.name,
+        accountRevision: evidenceAccountRevision,
+        accountTradeFingerprint: accountTradeStateFingerprint(
+          accountAuth.account?.data || {},
+        ),
+        adv20:
+          payload.liquidity?.adv20
+          ?? payload.todayQuote?.amount
+          ?? null,
+        urgency: ['EXIT', 'REDUCE'].includes(
+          result.decisionPlan.action,
+        ) ? 'HIGH' : 'NORMAL',
+      });
+      if (['hold_advice', 't_advice'].includes(mode)) {
+        const currentPrice = Number(
+          payload.todayQuote?.price
+          ?? payload.intraday?.now
+          ?? payload.currentPrice,
+        );
+        const atr = Number(
+          payload.tech?.atr?.atr
+          ?? payload.tech?.atr,
+        );
+        const atrPct = Number(payload.tech?.atrPct)
+          || (
+            Number.isFinite(atr)
+            && atr > 0
+            && Number.isFinite(currentPrice)
+            && currentPrice > 0
+              ? atr / currentPrice * 100
+              : null
+          );
+        const dayHigh = Number(
+          payload.todayQuote?.high
+          ?? payload.intraday?.dayHigh,
+        );
+        const dayLow = Number(
+          payload.todayQuote?.low
+          ?? payload.intraday?.dayLow,
+        );
+        const amplitudePct = (
+          Number.isFinite(dayHigh)
+          && Number.isFinite(dayLow)
+          && Number.isFinite(currentPrice)
+          && currentPrice > 0
+        ) ? (dayHigh - dayLow) / currentPrice * 100 : null;
+        const tEligibility = evaluateTGridEligibility({
+          marketRegime: payload.marketEnv?.regime || 'UNKNOWN',
+          hasBasePosition: Number(payload.holdQty) > 0,
+          sellableLots: Number(payload.sellableTodayQty) || 0,
+          adv20:
+            payload.liquidity?.adv20
+            ?? payload.todayQuote?.amount
+            ?? 0,
+          atrPct,
+          amplitudePct,
+          materialNegativeNews:
+            payload.resonance?.hasNegNews === true,
+          isLimitDown: payload.todayQuote?.isLimitDown === true,
+          completedToday:
+            Number(payload.tContext?.completedTodayCount) || 0,
+          netBuyLots: Math.max(0, Number(payload.openTNet) || 0),
+        });
+        result.tGridExperiment = buildTGridExperiment({
+          eligibility: tEligibility,
+          referencePrice: currentPrice,
+          baseLots: Number(payload.holdQty) || 0,
+          maxNetBuyLots: 1,
+          atrPct,
+        });
+      }
+      result.presentation = compileAdvicePresentationV3(result);
       collectedMeta.strategyRoute = {
         schemaVersion: strategyRoute.schemaVersion,
         catalogVersion: strategyRoute.catalogVersion,
@@ -2109,6 +2218,13 @@ export default async function handler(req, res) {
         requestedAction: strategyRoute.requestedAction,
         production: strategyRoute.production,
         research: strategyRoute.research,
+      };
+      collectedMeta.accountCircuitBreaker = {
+        schemaVersion: accountCircuitBreaker.schemaVersion,
+        allowRiskIncrease:
+          accountCircuitBreaker.allowRiskIncrease,
+        blockerCodes: accountCircuitBreaker.blockerCodes,
+        reservedBuyCash: accountCircuitBreaker.reservedBuyCash,
       };
     }
     // 明确输出「买入手数」的规范化整数字段:planQty 原文常为 "5手"/"约5手"/"5~8手" 等字符串,

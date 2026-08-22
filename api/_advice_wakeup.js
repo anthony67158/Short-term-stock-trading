@@ -2,6 +2,10 @@ import { actionIntentOf } from '../shared/judgeAdviceContext.js'
 import { isAdviceReviewEnabled } from '../shared/adviceReviewPolicy.js'
 import { t1StatusOf } from './_portfolio.js'
 import { enqueueJob, needsWorkerDispatch } from './_jobs.js'
+import {
+  createExecutionEvent,
+  processExecutionEvent,
+} from '../shared/executionEvents.js'
 
 function decisionSideOf(alert, verdict) {
   if (verdict?.side) return String(verdict.side)
@@ -56,19 +60,54 @@ export function queueAdviceReviewForVerdict(data, alert, verdict, now = Date.now
       : null,
     at: now,
   }
+  const idempotencyKey = [
+    'judge',
+    trigger.alertId || code,
+    trigger.planId || 'no-plan',
+    trigger.planRevision || 0,
+    trigger.decision,
+  ].join(':')
+  const event = createExecutionEvent({
+    type: 'PRICE_TRIGGERED',
+    code,
+    planId: trigger.planId,
+    sourceAsOf: String(trigger.at),
+    idempotencyKey,
+    payload: {
+      hardRisk:
+        trigger.side === 'stop'
+        || verdict?.policy === 'risk-override',
+      planConflict: decision === 'invalid',
+      decision,
+    },
+  }, now)
+  const processed = processExecutionEvent(
+    data.executionEventState,
+    event,
+    now,
+  )
+  data.executionEventState = processed.state
+  if (processed.duplicate) {
+    return {
+      queued: false,
+      reason: 'duplicate-event',
+      eventDecision: processed.decision,
+    }
+  }
+  if (!processed.decision.runLlm) {
+    return {
+      queued: false,
+      reason: 'deterministic-event',
+      eventDecision: processed.decision,
+    }
+  }
   const queued = enqueueJob(data, {
     code,
     name: alert?.name || code,
     mode,
     source: 'judge',
     trigger,
-    idempotencyKey: [
-      'judge',
-      trigger.alertId || code,
-      trigger.planId || 'no-plan',
-      trigger.planRevision || 0,
-      trigger.decision,
-    ].join(':'),
+    idempotencyKey,
   }, now)
   return {
     queued: true,

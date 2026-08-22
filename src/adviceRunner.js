@@ -172,8 +172,34 @@ async function run(spec, record) {
       truncated,
     }, mode)) {
       const cachedAt = Date.now()
-      results.set(code, { mode, result, advice, meta, news, adviceMissing, truncated, cachedAt })
-      saveAdvice(code, { mode, result, advice, meta, news, truncated }) // 持久化：关闭再进/刷新仍可见
+      const generationMetrics = {
+        schemaVersion: 'advice-generation-metrics.v1',
+        profile: spec.deepMode ? 'DEEP' : 'FAST',
+        durationMs: Math.max(0, Date.now() - record.startedAt),
+        mainLlmCalls: 1,
+        councilLlmCalls: 0,
+        councilCallsSaved: 3,
+      }
+      results.set(code, {
+        mode,
+        result,
+        advice,
+        meta,
+        news,
+        adviceMissing,
+        truncated,
+        generationMetrics,
+        cachedAt,
+      })
+      saveAdvice(code, {
+        mode,
+        result,
+        advice,
+        meta,
+        news,
+        truncated,
+        generationMetrics,
+      }) // 持久化：关闭再进/刷新仍可见
       // 行动点预警自动同步:把最新建议里的补仓价/减仓价转成到价预警,价一到就通知「现在该补/减仓了」。
       // 挂在这个唯一出口 → 手动/每日/批量/盘中自动刷新(含页面已关的后台生成)全都覆盖。
       if (advice) {
