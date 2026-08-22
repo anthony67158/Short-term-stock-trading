@@ -5,7 +5,11 @@
   python3 upload_model.py --model lgb_score.txt --meta meta.json
 """
 import argparse
+import hashlib
+import json
 import os
+import re
+import time
 
 
 def bucket():
@@ -22,6 +26,68 @@ def bucket():
     return oss2.Bucket(oss2.Auth(ak, sk), endpoint, bkt)
 
 
+def release_id(meta):
+    value = str(meta.get("run_id") or "").strip()
+    if not value:
+        trained_at = int(meta.get("trained_at") or time.time())
+        value = f"run-{trained_at}"
+    if (
+        not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{2,95}", value)
+        or ".." in value
+    ):
+        raise ValueError("run_id 格式无效")
+    return value
+
+
+def _sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def publish_release(
+    target_bucket,
+    files,
+    *,
+    prefix,
+    run_id,
+    activated_at=None,
+):
+    normalized_prefix = str(prefix or "quantmodel/").strip("/")
+    base = f"{normalized_prefix}/runs/{run_id}"
+    manifest_files = {}
+    for slot, local, filename in files:
+        if not os.path.isfile(local):
+            raise FileNotFoundError(local)
+        key = f"{base}/{filename}"
+        target_bucket.put_object_from_file(key, local)
+        manifest_files[slot] = {
+            "key": key,
+            "sha256": _sha256(local),
+            "size": os.path.getsize(local),
+        }
+        print(f"[uploaded] {local} -> {key}")
+    manifest = {
+        "schema_version": 1,
+        "run_id": run_id,
+        "activated_at": int(activated_at or time.time()),
+        "files": manifest_files,
+    }
+    manifest_key = f"{normalized_prefix}/manifest.json"
+    target_bucket.put_object(
+        manifest_key,
+        json.dumps(
+            manifest,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8"),
+    )
+    print(f"[activated] {manifest_key} -> {run_id}")
+    return manifest
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default="lgb_score.txt")
@@ -32,19 +98,27 @@ def main():
     ap.add_argument("--prefix", default=os.environ.get("QUANT_MODEL_PREFIX", "quantmodel/"))
     a = ap.parse_args()
     b = bucket()
-    pairs = [(a.model, a.prefix + "lgb_score.txt"),
-             (a.meta, a.prefix + "meta.json")]
+    with open(a.meta, encoding="utf-8") as handle:
+        metadata = json.load(handle)
+    run_id = release_id(metadata)
+    pairs = [
+        ("model", a.model, "lgb_score.txt"),
+        ("meta", a.meta, "meta.json"),
+    ]
     if a.signal and os.path.exists(a.signal):
-        pairs.append((a.signal, a.prefix + "lgb_signal.txt"))
+        pairs.append(("signal_model", a.signal, "lgb_signal.txt"))
     if a.signal_meta and os.path.exists(a.signal_meta):
-        pairs.append((a.signal_meta, a.prefix + "signal_meta.json"))
+        pairs.append(("signal_meta", a.signal_meta, "signal_meta.json"))
     if a.event_tags and os.path.exists(a.event_tags):
-        pairs.append((a.event_tags, a.prefix + "event_tags.json"))
-    for local, key in pairs:
-        b.put_object_from_file(key, local)
-        print(f"[uploaded] {local} -> oss://{os.environ['OSS_BUCKET']}/{key}")
+        pairs.append(("event_tags", a.event_tags, "event_tags.json"))
+    manifest = publish_release(
+        b,
+        pairs,
+        prefix=a.prefix,
+        run_id=run_id,
+    )
     # 读回校验
-    got = b.head_object(a.prefix + "lgb_score.txt")
+    got = b.head_object(manifest["files"]["model"]["key"])
     print(f"[verify] model size on OSS = {got.content_length} bytes")
 
 

@@ -55,6 +55,7 @@ jobs:
             test_app_forecast.py \
             test_publish_retrain_report.py \
             test_model_lib_dense_runtime.py \
+            test_model_release.py \
             test_sector_factors.py \
             test_sector_model.py \
             test_train_sector_model.py \
