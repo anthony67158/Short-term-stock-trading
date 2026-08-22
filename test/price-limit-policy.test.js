@@ -87,11 +87,17 @@ test('北交所新旧代码使用正确的东方财富市场前缀', () => {
 test('FC预警按股票自身限制判断并显示动态阈值', () => {
   const growthAlert = { type: 'limitup', code: '300001', name: '创业板示例' }
   const stAlert = { type: 'limitdown', code: '600001', name: 'ST示例' }
-  const tradeDate = beijingDayKey()
-
-  assert.equal(cronAlert.hit(growthAlert, { pct: 9.5, price: 10, tradeDate }), null)
-  assert.match(cronAlert.hit(growthAlert, { pct: 19, price: 10, tradeDate }), /临近\/触及涨停/)
-  assert.match(cronAlert.hit(stAlert, { pct: -4.75, price: 10, tradeDate }), /临近\/触及跌停/)
-  assert.equal(cronAlert.describeAlert(growthAlert), '临近涨停(涨幅≥19%)')
-  assert.equal(cronAlert.describeAlert(stAlert), '临近跌停(跌幅≥4.75%)')
+  const now = Date.parse('2026-08-21T02:00:00.000Z')
+  const tradeDate = beijingDayKey(now)
+  const originalNow = Date.now
+  Date.now = () => now
+  try {
+    assert.equal(cronAlert.hit(growthAlert, { pct: 9.5, price: 10, tradeDate }), null)
+    assert.match(cronAlert.hit(growthAlert, { pct: 19, price: 10, tradeDate }), /临近\/触及涨停/)
+    assert.match(cronAlert.hit(stAlert, { pct: -4.75, price: 10, tradeDate }), /临近\/触及跌停/)
+    assert.equal(cronAlert.describeAlert(growthAlert), '临近涨停(涨幅≥19%)')
+    assert.equal(cronAlert.describeAlert(stAlert), '临近跌停(跌幅≥4.75%)')
+  } finally {
+    Date.now = originalNow
+  }
 })
