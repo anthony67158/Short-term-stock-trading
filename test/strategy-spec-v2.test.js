@@ -76,6 +76,13 @@ test('StrategySpec v2 拒绝错误价格流、容量和模型依赖', () => {
     }),
     /36维/,
   )
+  assert.throws(
+    () => compileStrategySpecV2({
+      ...structuredClone(source),
+      untrustedRuntimeFlag: true,
+    }),
+    /顶层字段/,
+  )
 })
 
 test('五类策略均有独立版本、状态适配和风险口径', () => {

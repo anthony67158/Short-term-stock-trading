@@ -141,4 +141,6 @@ test('军师明确把动作价位手数视为候选并服从统一决策编译�
   assert.match(ADVISOR_SYSTEM, /候选草案/)
   assert.match(ADVISOR_SYSTEM, /strategyGate\.productionEligible=false/)
   assert.match(ADVISOR_SYSTEM, /研究级条件建议/)
+  assert.match(ADVISOR_SYSTEM, /strategyRoute/)
+  assert.match(ADVISOR_SYSTEM, /SHADOW_ONLY/)
 })

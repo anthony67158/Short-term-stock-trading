@@ -25,6 +25,27 @@ const STATE_PRIORITY = Object.freeze({
   retired: -10,
 })
 const MINIMUM_SHADOW_SAMPLES = 30
+const REGIME_FAMILY_PRIORITY = Object.freeze({
+  TREND_STRONG: {
+    TREND_BREAKOUT: 50,
+    CROSS_SECTIONAL_MOMENTUM: 40,
+    MULTI_FACTOR_RANKING: 30,
+  },
+  TRANSITION: {
+    CROSS_SECTIONAL_MOMENTUM: 50,
+    MULTI_FACTOR_RANKING: 40,
+  },
+  RANGE: {
+    RANGE_MEAN_REVERSION: 50,
+    MULTI_FACTOR_RANKING: 30,
+  },
+  RISK_OFF: {
+    DEFENSIVE_EXIT: 100,
+  },
+  UNKNOWN: {
+    DEFENSIVE_EXIT: 100,
+  },
+})
 
 function finite(value) {
   if (value == null || value === '') return null
@@ -44,6 +65,14 @@ export function buildStrategyRoutingContext(
   const tech = payload.tech || {}
   const quant = payload.quant || {}
   const sector = payload.sector || payload.sectorContext || {}
+  const quotePrice = finite(quote.price)
+  const resistance = finite(tech.resistance ?? tech.sr?.resistance)
+  const support = finite(tech.support ?? tech.sr?.support)
+  const vwap = finite(payload.intraday?.vwap)
+  const bollPosition = finite(tech.bollPct ?? tech.boll?.pctB)
+  const trend = String(tech.maTrend || '')
+  const maSlope20 = finite(tech.maSlope20 ?? tech.ma20Slope)
+    ?? (/多头|bull/i.test(trend) ? 1 : /空头|bear/i.test(trend) ? -1 : 0)
   return {
     account: {
       hasBasePosition: (
@@ -94,17 +123,27 @@ export function buildStrategyRoutingContext(
       atrStopBroken: boolean(
         tech.atrStopBroken ?? payload.atrStopBroken,
       ),
-      bollPct: finite(tech.bollPct ?? tech.bollPosition),
-      donchianBreakout: boolean(
-        tech.donchianBreakout ?? tech.breakout,
-      ),
-      maSlope20: finite(tech.maSlope20 ?? tech.ma20Slope),
+      bollPct: bollPosition == null
+        ? null
+        : bollPosition > 1 ? +(bollPosition / 100).toFixed(4) : bollPosition,
+      donchianBreakout: tech.donchianBreakout != null
+        ? boolean(tech.donchianBreakout)
+        : quotePrice != null
+          && resistance != null
+          && quotePrice >= resistance,
+      maSlope20,
       rsi6: finite(tech.rsi6 ?? tech.rsi),
-      structureBreak: boolean(
-        tech.structureBreak ?? payload.structureBreak,
-      ),
+      structureBreak: tech.structureBreak != null
+        ? boolean(tech.structureBreak)
+        : quotePrice != null
+          && support != null
+          && quotePrice < support,
       vwapDeviationPct: finite(
         tech.vwapDeviationPct ?? tech.vwapDeviation,
+      ) ?? (
+        quotePrice != null && vwap > 0
+          ? +((quotePrice / vwap - 1) * 100).toFixed(2)
+          : null
       ),
     },
     turnover: finite(quote.turnover),
@@ -179,12 +218,19 @@ function candidateRecord(strategy, governance, context, requestedAction) {
     outOfSample: record?.evaluation || null,
     blockers: record?.blockers || [],
     _priority: purposePriority(strategy.purpose, requestedAction),
+    _regimePriority:
+      REGIME_FAMILY_PRIORITY[context.marketRegime]?.[strategy.family] || 0,
     _statePriority: STATE_PRIORITY[record?.state] ?? 0,
   }
 }
 
 function publicCandidate(candidate) {
-  const { _priority, _statePriority, ...output } = candidate
+  const {
+    _priority,
+    _regimePriority,
+    _statePriority,
+    ...output
+  } = candidate
   return output
 }
 
@@ -217,6 +263,7 @@ export function routeStrategyPortfolio({
   ).sort((left, right) =>
     Number(right.signalPassed) - Number(left.signalPassed)
     || right._priority - left._priority
+    || right._regimePriority - left._regimePriority
     || right._statePriority - left._statePriority
     || right.shadowScore - left.shadowScore
     || left.strategyId.localeCompare(right.strategyId)

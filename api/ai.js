@@ -1416,6 +1416,28 @@ export default async function handler(req, res) {
         },
       );
     }
+    if (isAdvisorMode(mode)) {
+      const requestedAction = mode === 'buy_advice'
+        ? 'BUY'
+        : mode === 't_advice' ? 'T_BUY_FIRST' : 'HOLD';
+      const strategyRoute = routeStrategyPortfolio({
+        marketRegime: payload.marketEnv?.regime || 'UNKNOWN',
+        context: buildStrategyRoutingContext(
+          payload,
+          payload.marketEnv || {},
+        ),
+        governance: strategyGovernance,
+        requestedAction,
+      });
+      payload.strategyRoute = {
+        schemaVersion: strategyRoute.schemaVersion,
+        catalogVersion: strategyRoute.catalogVersion,
+        marketRegime: strategyRoute.marketRegime,
+        requestedAction: strategyRoute.requestedAction,
+        production: strategyRoute.production,
+        research: strategyRoute.research,
+      };
+    }
     const isAdvisor = isAdvisorMode(mode);
     const currentEvidenceSnapshot = isAdvisor && payload.code
       ? ensureEvidenceSnapshot()
@@ -1456,7 +1478,7 @@ export default async function handler(req, res) {
           .map((item) => item.code)
           .slice(0, 12),
       } : null,
-      strategyRoute: null,
+      strategyRoute: payload.strategyRoute || null,
     };
     const scheduledReviewEvaluation = evaluateScheduledReview({
       origin: payload.reviewOrigin,

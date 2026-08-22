@@ -67,6 +67,30 @@ const ALLOWED_FIELDS = new Set([
 ])
 const REQUIRED_CAPITAL_SCENARIOS = [100000, 500000, 1000000, 5000000]
 const REQUIRED_SLIPPAGE_SCENARIOS = [5, 10, 20]
+const REQUIRED_TOP_LEVEL_FIELDS = new Set([
+  'benchmark',
+  'capacityAssumptions',
+  'data',
+  'eligibleRegimes',
+  'entry',
+  'execution',
+  'executionTimeframe',
+  'exit',
+  'family',
+  'horizon',
+  'liquidityLimits',
+  'modelDependencies',
+  'name',
+  'positionSizing',
+  'purpose',
+  'riskLimits',
+  'schemaVersion',
+  'score',
+  'signalTimeframe',
+  'specVersion',
+  'strategyId',
+  'trailingStop',
+])
 
 function clone(value) {
   return structuredClone(value)
@@ -282,6 +306,27 @@ function evaluateNode(node, context) {
 
 export function compileStrategySpecV2(input) {
   const spec = clone(input || {})
+  const fields = Object.keys(spec)
+  const requiredInputFields = [...REQUIRED_TOP_LEVEL_FIELDS]
+    .filter((field) => field !== 'specVersion')
+  const unexpectedFields = fields.filter(
+    (field) => !REQUIRED_TOP_LEVEL_FIELDS.has(field),
+  )
+  const missingFields = requiredInputFields.filter(
+    (field) => !Object.hasOwn(spec, field),
+  )
+  if (
+    unexpectedFields.length
+    || missingFields.length
+    || ![requiredInputFields.length, REQUIRED_TOP_LEVEL_FIELDS.size]
+      .includes(fields.length)
+  ) {
+    throw new Error(
+      `策略顶层字段与StrategySpec v2不一致`
+      + `（缺少:${missingFields.join(',') || '无'}`
+      + `；多余:${unexpectedFields.join(',') || '无'}）`,
+    )
+  }
   if (spec.schemaVersion !== STRATEGY_SPEC_V2_SCHEMA_VERSION) {
     throw new Error(`不支持的策略Schema: ${spec.schemaVersion || 'missing'}`)
   }

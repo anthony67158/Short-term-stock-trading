@@ -234,8 +234,19 @@ test('决策计划v2优先提供最终动作手数费用和策略等级', () => 
       asOf: '2026-08-21T02:30:00.000Z',
       validUntil: '2026-08-21T02:45:00.000Z',
       strategy: {
+        schemaVersion: 'strategy-spec.v2',
         strategyId: 'market-quant-resonance',
         specVersion: 'strategy.15im9g7',
+        name: '多因子排名',
+        family: 'MULTI_FACTOR_RANKING',
+        eligibleRegimes: ['TREND_STRONG', 'TRANSITION', 'RANGE'],
+        governanceState: 'rejected',
+        routeMode: 'SHADOW_ONLY',
+        outOfSample: {
+          folds: 4,
+          positiveFolds: 2,
+          compoundedReturn: -0.0119,
+        },
         productionEligible: false,
         signalPassed: true,
       },
@@ -269,6 +280,12 @@ test('决策计划v2优先提供最终动作手数费用和策略等级', () => 
   assert.match(view.execution.instruction, /5手/)
   assert.doesNotMatch(view.execution.instruction, /10手/)
   assert.equal(view.decisionPlan.actionability, 'RESEARCH_ONLY')
+  assert.equal(view.decisionPlan.strategyName, '多因子排名')
+  assert.equal(view.decisionPlan.strategyFamily, 'MULTI_FACTOR_RANKING')
+  assert.equal(view.decisionPlan.governanceState, 'rejected')
+  assert.equal(view.decisionPlan.routeMode, 'SHADOW_ONLY')
+  assert.equal(view.decisionPlan.outOfSample.folds, 4)
+  assert.equal(view.decisionPlan.outOfSample.returnPct, -1.19)
   assert.match(view.decisionPlan.statusText, /未通过生产晋级/)
   assert.deepEqual(
     view.levels.map((item) => item.value),

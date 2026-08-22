@@ -167,3 +167,32 @@ test('路由上下文只投影已知证据字段', () => {
   assert.equal(context.technical.rsi6, 38)
   assert.equal(context.unsafe, undefined)
 })
+
+test('路由上下文把线上技术摘要转换为策略字段', () => {
+  const context = buildStrategyRoutingContext({
+    todayQuote: {
+      price: 10,
+      amount: 2e8,
+      pct: 1.2,
+      volRatio: 1.5,
+    },
+    intraday: {
+      now: 10,
+      vwap: 10.2,
+    },
+    tech: {
+      maTrend: '均线多头排列(5>10>20>60)',
+      atrPct: 2.4,
+      boll: { pctB: 25 },
+      rsi: 38,
+      support: 9.5,
+      resistance: 9.9,
+    },
+  }, { regime: 'TREND_STRONG', score: 70 })
+
+  assert.equal(context.technical.donchianBreakout, true)
+  assert.equal(context.technical.maSlope20, 1)
+  assert.equal(context.technical.bollPct, 0.25)
+  assert.equal(context.technical.rsi6, 38)
+  assert.equal(context.technical.vwapDeviationPct, -1.96)
+})

@@ -139,6 +139,17 @@ function RiskOverlay({ risk }) {
 
 function DecisionPlanSummary({ plan }) {
   if (!plan) return null
+  const governanceLabel = {
+    draft: '草稿',
+    backtested: '已回测',
+    rejected: '已拒绝',
+    shadow: '影子运行',
+    'paper-qualified': '模拟达标',
+    approved: '已批准',
+    active: '生产启用',
+    suspended: '已暂停',
+    retired: '已退役',
+  }[plan.governanceState] || plan.governanceState
   const statusLabel = {
     READY: '确定性校验通过',
     RESEARCH_ONLY: '研究级条件建议',
@@ -164,7 +175,22 @@ function DecisionPlanSummary({ plan }) {
           <span>市场 <b>{plan.marketRegime}{plan.marketScore ? ` ${plan.marketScore}分` : ''}</b></span>
         )}
         {plan.strategyId && (
-          <span>策略 <b>{plan.strategyId}</b></span>
+          <span title={`${plan.strategyId} · ${plan.specVersion || ''}`}>
+            策略 <b>{plan.strategyName || plan.strategyId}</b>
+          </span>
+        )}
+        {governanceLabel && (
+          <span>级别 <b>{governanceLabel}</b></span>
+        )}
+        {plan.outOfSample?.folds > 0 && (
+          <span>
+            样本外 <b>
+              {plan.outOfSample.positiveFolds}/{plan.outOfSample.folds} fold
+              {' · '}
+              {plan.outOfSample.returnPct > 0 ? '+' : ''}
+              {plan.outOfSample.returnPct}%
+            </b>
+          </span>
         )}
         {plan.maxLossAmount && (
           <span>风险预算 <b>¥{Number(plan.maxLossAmount).toLocaleString('zh-CN')}</b></span>

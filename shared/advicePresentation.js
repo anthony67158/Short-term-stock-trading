@@ -139,6 +139,8 @@ function decisionPlanSummary(plan) {
       : actionability === 'BLOCKED'
         ? (plan.blockedReasons || []).join('；') || '确定性闸门未通过'
         : '等待触发条件'
+  const outOfSample = plan.strategy?.outOfSample
+  const compoundedReturn = Number(outOfSample?.compoundedReturn)
   return {
     decisionId: clean(plan.decisionId, 100),
     action: clean(plan.action, 30),
@@ -147,6 +149,24 @@ function decisionPlanSummary(plan) {
     statusText: clean(statusText, 320),
     strategyId: clean(plan.strategy?.strategyId, 80),
     specVersion: clean(plan.strategy?.specVersion, 80),
+    strategyName: clean(plan.strategy?.name, 80),
+    strategyFamily: clean(plan.strategy?.family, 80),
+    governanceState: clean(plan.strategy?.governanceState, 40),
+    routeMode: clean(plan.strategy?.routeMode, 40),
+    eligibleRegimes: Array.isArray(plan.strategy?.eligibleRegimes)
+      ? plan.strategy.eligibleRegimes.map(
+          (item) => clean(item, 40),
+        ).filter(Boolean)
+      : [],
+    outOfSample: outOfSample
+      ? {
+          folds: Number(outOfSample.folds) || 0,
+          positiveFolds: Number(outOfSample.positiveFolds) || 0,
+          returnPct: Number.isFinite(compoundedReturn)
+            ? +(compoundedReturn * 100).toFixed(2)
+            : null,
+        }
+      : null,
     strategySignalPassed: plan.strategy?.signalPassed,
     productionEligible: plan.strategy?.productionEligible === true,
     marketRegime: clean(plan.marketRegime?.label, 40),
