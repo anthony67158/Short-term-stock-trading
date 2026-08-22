@@ -15,7 +15,7 @@ import {
   writeAccount,
 } from '../api/account.js'
 
-function fakeStorage() {
+function fakeStorage({ rejectIfMatch = false } = {}) {
   const objects = new Map()
   let seq = 0
   return {
@@ -25,6 +25,14 @@ function fakeStorage() {
         ? pathname.replace(/\.json$/, `-${++seq}.json`)
         : pathname
       const current = objects.get(key)
+      if (options.ifMatch && rejectIfMatch) {
+        const error = new Error(
+          'A header you provided implies functionality that is not implemented.',
+        )
+        error.status = 400
+        error.code = 'NotImplemented'
+        throw error
+      }
       if (
         options.ifMatch
         && current?.etag !== options.ifMatch
@@ -32,6 +40,12 @@ function fakeStorage() {
         const error = new Error('Pre condition failed')
         error.status = 412
         error.code = 'PreconditionFailed'
+        throw error
+      }
+      if (options.forbidOverwrite && current) {
+        const error = new Error('object already exists')
+        error.status = 409
+        error.code = 'FileAlreadyExists'
         throw error
       }
       const etag = `etag-${++seq}`
@@ -135,6 +149,24 @@ test('两个实例基于同一ETag写入时只有第一份可以覆盖权威快�
   const listed = await listAllAccounts(storage)
   assert.equal(saved.data.plan[0].code, '600519')
   assert.equal(listed[0].data.plan[0].code, '600519')
+})
+
+test('OSS PutObject不支持If-Match时通过原子锁完成条件写', async () => {
+  const storage = fakeStorage({ rejectIfMatch: true })
+  await writeAccount({
+    nick: 'OSS条件写兼容账号',
+    pwHash: 'hash',
+    createdAt: 1,
+    clientRevision: 1,
+    data: { plan: [], holding: [], closed: [] },
+  }, storage)
+  const account = await readAccount('OSS条件写兼容账号', storage)
+  account.data.plan = [{ code: '600519' }]
+
+  await writeAccount(account, storage)
+
+  const saved = await readAccount('OSS条件写兼容账号', storage)
+  assert.equal(saved.data.plan[0].code, '600519')
 })
 
 test('同一服务端实例连续保存会推进ETag而不是误报冲突', async () => {

@@ -7,7 +7,7 @@ import {
   hasStorage,
 } from './_blob.js';
 import { sendJson, preflight } from './_lib.js';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import {
   mergeAutoRefreshSettings,
   newerAutoRefreshPatch,
@@ -48,6 +48,7 @@ const defaultStorage = {
 };
 const RECENT_HISTORY = 20;
 const DAILY_HISTORY_DAYS = 90;
+const ACCOUNT_WRITE_LOCK_TTL_MS = 60 * 1000;
 export const isAccountActive = (account) => !!account && account.status !== 'deactivated';
 export function deactivateAccount(account, now = Date.now()) {
   return {
@@ -747,6 +748,65 @@ async function cleanupAccountHistory(nick, storage, now) {
   }
 }
 
+function accountWriteLockPath(nick) {
+  return `${prefixOf(nick)}write.lock`;
+}
+
+function accountWriteConflict() {
+  const conflict = new Error('OSS 权威快照已被其他实例更新');
+  conflict.code = 'OSS_WRITE_CONFLICT';
+  conflict.status = 409;
+  return conflict;
+}
+
+async function acquireAccountWriteLock(
+  nick,
+  storage,
+  now = Date.now(),
+) {
+  const pathname = accountWriteLockPath(nick);
+  const owner = randomUUID();
+  const payload = JSON.stringify({
+    owner,
+    expiresAt: now + ACCOUNT_WRITE_LOCK_TTL_MS,
+  });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await storage.put(pathname, payload, {
+        contentType: 'application/json',
+        cacheControlMaxAge: 0,
+        forbidOverwrite: true,
+      });
+      return async () => {
+        try {
+          const current = await storage.readJson(pathname);
+          if (current?.owner === owner) await storage.del(pathname);
+        } catch { /* 过期锁由下一位写入者回收 */ }
+      };
+    } catch (error) {
+      const occupied = (
+        error?.status === 409
+        || error?.statusCode === 409
+        || error?.code === 'FileAlreadyExists'
+      );
+      if (!occupied) throw error;
+      let current = null;
+      try {
+        current = await storage.readJson(pathname);
+      } catch { /* 按有效锁处理 */ }
+      if (
+        Number(current?.expiresAt) > 0
+        && Number(current.expiresAt) <= Date.now()
+      ) {
+        try { await storage.del(pathname); } catch { /* 重新竞争 */ }
+        continue;
+      }
+      throw accountWriteConflict();
+    }
+  }
+  throw accountWriteConflict();
+}
+
 export async function writeAccount(
   acc,
   storage = defaultStorage,
@@ -762,21 +822,42 @@ export async function writeAccount(
   } = acc || {};
   const saved = { ...persistedAccount, updatedAt: Date.now() };
   const body = JSON.stringify(saved);
-  const snapshot = history
-    ? await storage.put(`${historyPrefixOf(saved.nick)}${saved.updatedAt}.json`, body, {
-        access: 'public', contentType: 'application/json',
-        addRandomSuffix: true, cacheControlMaxAge: 0,
-      })
-    : null;
-  let currentWrite;
+  const releaseLock = expectedEtag || createOnly
+    ? await acquireAccountWriteLock(saved.nick, storage)
+    : async () => {};
+  let snapshot = null;
+  let currentWrite = null;
   try {
+    if (expectedEtag) {
+      const current = await storage.readJsonWithMeta(
+        currentPathOf(saved.nick),
+      );
+      if (!current?.etag || current.etag !== expectedEtag) {
+        throw accountWriteConflict();
+      }
+    }
+    snapshot = history
+      ? await storage.put(`${historyPrefixOf(saved.nick)}${saved.updatedAt}.json`, body, {
+          access: 'public', contentType: 'application/json',
+          addRandomSuffix: true, cacheControlMaxAge: 0,
+        })
+      : null;
     currentWrite = await storage.put(currentPathOf(saved.nick), body, {
       access: 'public',
       contentType: 'application/json',
       cacheControlMaxAge: 0,
-      ...(expectedEtag ? { ifMatch: expectedEtag } : {}),
       ...(createOnly ? { forbidOverwrite: true } : {}),
     });
+    if (verify) {
+      const verified = await storage.readJson(currentPathOf(saved.nick));
+      if (
+        !verified
+        || verified.updatedAt !== saved.updatedAt
+        || verified.nick !== saved.nick
+      ) {
+        throw new Error('OSS 账号快照写入校验失败');
+      }
+    }
   } catch (error) {
     if (
       error?.status === 412
@@ -788,13 +869,8 @@ export async function writeAccount(
       throw conflict;
     }
     throw error;
-  }
-
-  if (verify) {
-    const verified = await storage.readJson(currentPathOf(saved.nick));
-    if (!verified || verified.updatedAt !== saved.updatedAt || verified.nick !== saved.nick) {
-      throw new Error('OSS 账号快照写入校验失败');
-    }
+  } finally {
+    await releaseLock();
   }
 
   // 保留最近 20 份细粒度版本，并为最近 90 天每天保留一个恢复点。
