@@ -268,8 +268,8 @@ export function enqueueJob(data, {
     deepMode: generation.deepMode,
     batchRequest: !!batchRequest,
     ...(trigger && typeof trigger === 'object' ? { trigger } : {}),
-    phase: '排队等待云端生成',
-    sources: [], reasoning: '', model: '', endpoint: '', progressAt: now,
+    stage: 'queued', phase: '排队等待云端生成',
+    sources: [], reasoning: '', quant: null, model: '', endpoint: '', progressAt: now,
   };
   jobs[code] = job;
   return { job, created: true };
@@ -281,6 +281,7 @@ export function leaseJob(data, code, now = Date.now()) {
   const j = jobs[code];
   if (!j || j.status !== 'queued') return null;
   j.status = 'running';
+  j.stage = 'preparing';
   j.attempts = (j.attempts || 0) + 1;
   j.startedAt = j.startedAt || now;
   j.leaseUntil = now + LEASE_MS;
@@ -310,6 +311,9 @@ export function updateJobProgress(data, code, patch = {}, now = Date.now()) {
   const job = jobsOf(data)[code]
   if (!job) return null
   if (job.status === 'canceled') return job
+  if (patch.stage != null) {
+    job.stage = String(patch.stage).slice(0, 40)
+  }
   if (patch.phase != null) job.phase = String(patch.phase).slice(0, 160)
   if (Array.isArray(patch.sources)) {
     job.sources = patch.sources.slice(-12).map((source) => ({
@@ -318,6 +322,11 @@ export function updateJobProgress(data, code, patch = {}, now = Date.now()) {
     }))
   }
   if (patch.reasoning != null) job.reasoning = visibleChineseReasoning(patch.reasoning)
+  if (patch.quant && typeof patch.quant === 'object') {
+    job.quant = {
+      summary: String(patch.quant.summary || '').slice(0, 300),
+    }
+  }
   if (patch.model != null) job.model = String(patch.model).slice(0, 100)
   if (patch.endpoint != null) job.endpoint = String(patch.endpoint).slice(0, 120)
   job.progressAt = now
@@ -357,6 +366,7 @@ export function completeJob(
       j.finishedAt = now;
       j.leaseUntil = 0;
       j.error = '';
+      j.stage = 'done';
       j.phase = '生成完成';
       j.progressAt = now;
       return;
@@ -376,9 +386,11 @@ export function completeJob(
       batchId: '',
       deepMode: false,
       batchRequest: false,
+      stage: 'queued',
       phase: '军师执行确认已触发，等待复核',
       sources: [],
       reasoning: '',
+      quant: null,
       model: '',
       endpoint: '',
       progressAt: now,
@@ -388,7 +400,7 @@ export function completeJob(
     });
     return;
   }
-  j.status = 'done'; j.finishedAt = now; j.leaseUntil = 0; j.error = '';
+  j.status = 'done'; j.stage = 'done'; j.finishedAt = now; j.leaseUntil = 0; j.error = '';
   j.phase = '生成完成'; j.progressAt = now;
 }
 
@@ -398,9 +410,9 @@ export function failJob(data, code, err, now = Date.now()) {
   if (!j) return;
   j.error = String(err || '生成失败');
   if ((j.attempts || 0) < (j.maxAttempts || MAX_ATTEMPTS)) {
-    j.status = 'queued'; j.leaseUntil = 0; j.phase = `生成失败，准备第${(j.attempts || 0) + 1}次重试`; j.progressAt = now;
+    j.status = 'queued'; j.stage = 'retrying'; j.leaseUntil = 0; j.phase = `生成失败，准备第${(j.attempts || 0) + 1}次重试`; j.progressAt = now;
   } else {
-    j.status = 'failed'; j.finishedAt = now; j.leaseUntil = 0; j.phase = '生成失败'; j.progressAt = now;
+    j.status = 'failed'; j.stage = 'failed'; j.finishedAt = now; j.leaseUntil = 0; j.phase = '生成失败'; j.progressAt = now;
   }
 }
 
@@ -557,9 +569,12 @@ export function jobsToProgress(data, now = Date.now(), concurrency = CONCURRENCY
       name: j.name,
       status: mapStatus(j),
       error: j.error || '',
+      warning: j.dailyReportWarning || '',
+      stage: j.stage || '',
       phase: j.phase || '',
       sources: Array.isArray(j.sources) ? j.sources : [],
       reasoning: j.reasoning || '',
+      quant: j.quant || null,
       model: j.model || '',
       endpoint: j.endpoint || '',
       progressAt: j.progressAt || j.at || 0,

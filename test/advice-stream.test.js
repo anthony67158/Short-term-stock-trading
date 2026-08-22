@@ -40,6 +40,23 @@ test('服务端可解析跨分片的 AI SSE 事件', () => {
   ])
 })
 
+test('军师阶段事件保留稳定阶段键供前端展示完整流程', () => {
+  assert.deepEqual(progressPatchForEvent('phase', {
+    key: 'quant',
+    text: '正在量化打分',
+  }), {
+    stage: 'quant',
+    phase: '正在量化打分',
+  })
+  assert.deepEqual(progressPatchForEvent('quant', {
+    summary: '上涨概率48%，当前只适合回调低吸。',
+  }), {
+    quant: {
+      summary: '上涨概率48%，当前只适合回调低吸。',
+    },
+  })
+})
+
 test('服务端单只超时会中止原模型请求避免与重试重叠', async () => {
   let aborted = false
   const result = await invokeSSE((req) => new Promise((resolve) => {

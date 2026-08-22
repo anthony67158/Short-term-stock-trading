@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
   adviceJobState,
+  adviceGenerationSteps,
   cloudAdviceLoadingState,
   createAdviceCompletionPuller,
   mergeAdviceRefreshState,
@@ -10,6 +11,25 @@ import {
   shouldShowAdviceResult,
   shouldApplyCloudBatch,
 } from '../shared/adviceUiState.js'
+
+test('快速军师用可验证阶段展示流程而不依赖隐藏思维链', () => {
+  const steps = adviceGenerationSteps({
+    stage: 'quant',
+    phase: '行情 / 资金 / 消息面已就位，正在量化打分',
+    deepMode: false,
+  })
+
+  assert.deepEqual(
+    steps.map((step) => [step.key, step.state]),
+    [
+      ['prepare', 'done'],
+      ['collect', 'done'],
+      ['quant', 'active'],
+      ['decision', 'pending'],
+    ],
+  )
+  assert.equal(steps.some((step) => step.key === 'reasoning'), false)
+})
 
 test('空任务快照不显示批量完成条', () => {
   assert.equal(shouldApplyCloudBatch({
@@ -152,11 +172,13 @@ test('服务端单股任务回灌阶段、数据源、模型与推理文本', ()
     items: [{
       code: '600519',
       status: 'running',
+      stage: 'llm',
       phase: '正在生成操作建议',
       sources: [{ label: '个股K线', ok: true }],
       reasoning: '先判断趋势，再核对量化概率和价格锚点。',
       model: 'DeepSeek-V4-Pro',
       endpoint: '主端点',
+      deepMode: false,
     }],
   }
 
@@ -165,6 +187,8 @@ test('服务端单股任务回灌阶段、数据源、模型与推理文本', ()
   assert.equal(loading.loading, true)
   assert.equal(loading.cloud, true)
   assert.equal(loading.phase, '正在生成操作建议')
+  assert.equal(loading.stage, 'llm')
+  assert.equal(loading.deepMode, false)
   assert.deepEqual(loading.sources, [{ label: '个股K线', ok: true }])
   assert.match(loading.reasoning, /判断趋势/)
   assert.equal(loading.model, 'DeepSeek-V4-Pro')
@@ -185,9 +209,11 @@ test('卡片可从批次进度识别排队、生成中和可取消状态', () =>
   assert.deepEqual(running, {
     active: true,
     status: 'running',
+    stage: '',
     label: '正在分析量价',
     cancelable: true,
     cloud: true,
+    deepMode: false,
   })
   assert.equal(queued.active, true)
   assert.equal(queued.label, '排队等待云端生成')

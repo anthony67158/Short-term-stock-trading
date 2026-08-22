@@ -1,6 +1,12 @@
 export const QUICK_ADVICE_TARGET_MS = 75 * 1000
 export const DEEP_ADVICE_TARGET_MS = 8 * 60 * 1000
 
+export function shouldGenerateAdviceDailyReport({
+  deepMode = false,
+} = {}) {
+  return deepMode === true
+}
+
 export function shouldRunAdvisorCouncil({
   enabled = true,
   deepMode = false,

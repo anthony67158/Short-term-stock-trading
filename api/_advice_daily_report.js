@@ -44,6 +44,7 @@ export function setAdviceDailyReportPhase(
   let changed = 0
   for (const job of Object.values(data?.jobs || {})) {
     if (!job || !['queued', 'running'].includes(job.status)) continue
+    job.stage = 'preparing'
     job.phase = String(phase || '').slice(0, 160)
     job.progressAt = now
     changed++
@@ -51,21 +52,22 @@ export function setAdviceDailyReportPhase(
   return changed
 }
 
-export function failAdviceJobsForDailyReport(
+export function continueAdviceJobsWithoutDailyReport(
   data,
   error,
   now = Date.now(),
 ) {
-  let failed = 0
+  let continued = 0
   for (const job of Object.values(data?.jobs || {})) {
     if (!job || !['queued', 'running'].includes(job.status)) continue
-    job.status = 'failed'
-    job.error = String(error || '策略日报生成失败').slice(0, 300)
-    job.phase = '策略日报生成失败，军师任务未启动'
-    job.finishedAt = now
-    job.leaseUntil = 0
+    job.error = ''
+    job.dailyReportWarning = String(
+      error || '策略日报暂不可用',
+    ).slice(0, 300)
+    job.stage = 'collect'
+    job.phase = '策略日报不可用，继续生成个股建议'
     job.progressAt = now
-    failed++
+    continued++
   }
-  return failed
+  return continued
 }

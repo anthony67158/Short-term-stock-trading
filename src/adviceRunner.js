@@ -6,6 +6,9 @@ import { getAdvice, saveAdvice } from './adviceCache'
 import { planStore } from './planStore'
 import { triggerServerAdvice, canServerAdvice } from './serverAdvice'
 import { acceptsGenerationResult, generationOptions } from '../shared/adviceBatchPolicy.js'
+import {
+  shouldGenerateAdviceDailyReport,
+} from '../shared/adviceGenerationPolicy.js'
 import { ensureAdviceReasoning } from '../shared/adviceReasoning.js'
 import { evidencePersistenceFields } from '../shared/evidenceSnapshot.js'
 import { quantResultFromAdviceMeta } from '../shared/adviceQuantResult.js'
@@ -53,12 +56,14 @@ export function startAdvice(spec) {
   results.delete(code)           // 清掉上次的瞬时结果，UI 立即进入 loading
   const rec = {
     phase: '正在准备分析…',
+    stage: 'preparing',
     startedAt: Date.now(),
     session: currentAccountSession(),
     name: (spec && spec.name) || code,
     sources: [],
     reasoning: '',
     quant: null,
+    deepMode: spec.deepMode === true,
     controller: new AbortController(),
     cancelRequested: false,
   }
@@ -84,7 +89,11 @@ async function run(spec, record) {
   const onPhase = (p) => {
     if (!belongsToCurrentAccount()) return
     const r = running.get(code)
-    if (r && p && p.text) { r.phase = p.text; notify() }
+    if (r && p && p.text) {
+      r.phase = p.text
+      r.stage = String(p.key || '')
+      notify()
+    }
   }
   // 细粒度事件:source(数据源勾选清单) / reasoning(模型思维链增量)
   const onEvent = (event, data) => {
@@ -103,48 +112,56 @@ async function run(spec, record) {
     }
   }
   try {
-    record.phase = '正在检查今日策略日报…'
-    notify()
-    try {
-      const report = await ensureLocalAdviceDailyReport({
-        existingSummary: requestPayload.dailyReport || null,
-        holdings: (planStore.get().holding || []).map((holding) => ({
-          code: holding.code,
-          name: holding.name,
-        })),
-        signal: record.controller.signal,
-        onPhase: (text) => {
-          if (!belongsToCurrentAccount()) return
-          record.phase = `策略日报：${text}`
-          notify()
-        },
-      })
-      requestPayload = attachAdviceDailyReport(
-        requestPayload,
-        report.summary,
-      )
-      if (!belongsToCurrentAccount()) return
-      record.sources = [
-        ...(record.sources || []).filter(
-          (source) => source.label !== '策略日报摘要',
-        ),
-        { label: '策略日报摘要', ok: true },
-      ]
-      record.phase = '策略日报已就绪，正在准备军师分析…'
+    if (shouldGenerateAdviceDailyReport({
+      deepMode: generation.deepMode,
+    })) {
+      record.phase = '深度研判：正在检查今日策略日报…'
       notify()
-    } catch (error) {
-      if (!belongsToCurrentAccount()) return
-      if (record.cancelRequested || record.controller.signal.aborted) {
-        results.delete(code)
-        return
+      try {
+        const report = await ensureLocalAdviceDailyReport({
+          existingSummary: requestPayload.dailyReport || null,
+          holdings: (planStore.get().holding || []).map((holding) => ({
+            code: holding.code,
+            name: holding.name,
+          })),
+          signal: record.controller.signal,
+          onPhase: (text) => {
+            if (!belongsToCurrentAccount()) return
+            record.phase = `策略日报：${text}`
+            notify()
+          },
+        })
+        requestPayload = attachAdviceDailyReport(
+          requestPayload,
+          report.summary,
+        )
+        if (!belongsToCurrentAccount()) return
+        record.sources = [
+          ...(record.sources || []).filter(
+            (source) => source.label !== '策略日报摘要',
+          ),
+          { label: '策略日报摘要', ok: true },
+        ]
+        record.phase = '策略日报已就绪，正在准备军师分析…'
+        notify()
+      } catch (error) {
+        if (!belongsToCurrentAccount()) return
+        if (record.cancelRequested || record.controller.signal.aborted) {
+          results.delete(code)
+          return
+        }
+        record.sources = [
+          ...(record.sources || []).filter(
+            (source) => source.label !== '策略日报摘要',
+          ),
+          { label: '策略日报摘要', ok: false },
+        ]
+        record.phase = '策略日报不可用，继续生成个股建议'
+        notify()
       }
-      results.set(code, {
-        error: `策略日报生成失败，未启动军师分析：${String(
-          error?.message || error,
-        )}`,
-      })
+    } else {
+      record.phase = '快速模式：正在采集个股证据…'
       notify()
-      return
     }
     // 军师服务端在同一轮内采集分时并运行所选量化模型，最终 meta.quantResult
     // 就是 LLM 实际采用的结果。这里只消费这一份，避免并行日线请求覆盖它。

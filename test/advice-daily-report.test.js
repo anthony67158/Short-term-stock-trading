@@ -8,8 +8,8 @@ import {
 } from '../shared/adviceDailyReportPolicy.js'
 import {
   collectAdviceDailyReportHoldings,
+  continueAdviceJobsWithoutDailyReport,
   ensureAdviceDailyReport,
-  failAdviceJobsForDailyReport,
   setAdviceDailyReportPhase,
 } from '../api/_advice_daily_report.js'
 import {
@@ -168,7 +168,7 @@ test('缺少总览或整体策略的部分日报不能标记成功', () => {
   }), true)
 })
 
-test('云端等待任务展示日报阶段且日报失败后明确终止', () => {
+test('策略日报失败只降级证据且不阻断军师任务', () => {
   const data = {
     jobs: {
       '600000': { code: '600000', status: 'queued', phase: '排队中' },
@@ -182,16 +182,23 @@ test('云端等待任务展示日报阶段且日报失败后明确终止', () =>
   assert.equal(data.jobs['000001'].phase, '首次生成：正在准备策略日报')
   assert.equal(data.jobs['300001'].phase, '完成')
 
-  const failed = failAdviceJobsForDailyReport(
+  const continued = continueAdviceJobsWithoutDailyReport(
     data,
     '策略日报生成失败：模型超时',
     3000,
   )
-  assert.equal(failed, 2)
-  assert.equal(data.jobs['600000'].status, 'failed')
-  assert.equal(data.jobs['000001'].status, 'failed')
-  assert.equal(data.jobs['600000'].error, '策略日报生成失败：模型超时')
-  assert.equal(data.jobs['600000'].finishedAt, 3000)
+  assert.equal(continued, 2)
+  assert.equal(data.jobs['600000'].status, 'queued')
+  assert.equal(data.jobs['000001'].status, 'running')
+  assert.equal(data.jobs['600000'].error, '')
+  assert.equal(
+    data.jobs['600000'].dailyReportWarning,
+    '策略日报生成失败：模型超时',
+  )
+  assert.equal(
+    data.jobs['600000'].phase,
+    '策略日报不可用，继续生成个股建议',
+  )
 })
 
 test('军师载荷直接携带闸门确认的日报摘要', () => {

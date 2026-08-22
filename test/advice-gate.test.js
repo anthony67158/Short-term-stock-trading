@@ -42,7 +42,18 @@ test('登录态单股建议收到服务端确认后才进入云端生成态', as
     canUseServer: () => true,
     triggerServer: async (codes, options) => {
       calls.push({ codes, options })
-      return { ok: true, accepted: true }
+      return {
+        ok: true,
+        accepted: true,
+        progress: {
+          items: [{
+            code: '600519',
+            status: 'running',
+            stage: 'collect',
+            phase: '正在采集证据',
+          }],
+        },
+      }
     },
     startLocal: () => {
       throw new Error('不应启动浏览器本地任务')
@@ -51,6 +62,7 @@ test('登录态单股建议收到服务端确认后才进入云端生成态', as
 
   assert.equal(result.status, 'started')
   assert.equal(result.mode, 'server')
+  assert.equal(result.progress.items[0].stage, 'collect')
   assert.deepEqual(calls[0].codes, ['600519'])
   assert.equal(calls[0].options.force, true)
 })

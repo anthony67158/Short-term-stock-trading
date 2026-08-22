@@ -94,8 +94,8 @@ import { getLatestDailySummary } from './_daily_summary.js';
 import { ensureAiSearchConfig } from './_ai_search_config.js';
 import {
   collectAdviceDailyReportHoldings,
+  continueAdviceJobsWithoutDailyReport,
   ensureAdviceDailyReport,
-  failAdviceJobsForDailyReport,
   setAdviceDailyReportPhase,
 } from './_advice_daily_report.js';
 import { buildRealOutcomeLearning } from '../shared/realOutcomeLearning.js';
@@ -114,6 +114,7 @@ import {
 } from '../shared/tradingCalendar.js';
 import { runAdvisorCouncilShadow } from './_advisor_council.js';
 import {
+  shouldGenerateAdviceDailyReport,
   shouldRunAdvisorCouncil,
 } from '../shared/adviceGenerationPolicy.js';
 
@@ -151,10 +152,15 @@ export function createAdviceSSEParser(onEvent) {
 
 export function progressPatchForEvent(event, data) {
   if (!data || typeof data !== 'object') return null;
-  if (event === 'phase' && data.text) return { phase: String(data.text) };
+  if (event === 'phase' && data.text) {
+    const patch = { phase: String(data.text) };
+    if (data.key) patch.stage = String(data.key).slice(0, 40);
+    return patch;
+  }
   if (event === 'source' && data.label) {
     return { source: { label: String(data.label), ok: !!data.ok } };
   }
+  if (event === 'quant') return { quant: data };
   if (event === 'reasoning' && data.text) return { reasoningDelta: String(data.text) };
   if (event === 'model') {
     return {
@@ -1170,68 +1176,73 @@ async function drainAccount(nick, initialAcc) {
   }
 
   const CONC = effectiveAdviceConcurrency(data);
-  setAdviceDailyReportPhase(
-    data,
-    '首次生成前：正在读取策略日报',
-  );
+  const generateDailyReport = shouldGenerateAdviceDailyReport({
+    deepMode: hasDeepAdviceWork(data),
+  });
+  setAdviceDailyReportPhase(data, generateDailyReport
+    ? '深度研判：正在读取策略日报'
+    : '快速模式：直接采集个股证据');
   acc = await saveWorking();
   data = acc.data;
-  const reportHeartbeat = setInterval(() => {
-    renewWorkerLock(acc.data || (acc.data = {}), myId);
-    void saveWorking().catch(() => {});
-  }, WORKER_HEARTBEAT_INTERVAL_MS);
-  if (
-    reportHeartbeat
-    && typeof reportHeartbeat.unref === 'function'
-  ) reportHeartbeat.unref();
+  let dailyReportResult = {
+    generated: false,
+    source: 'optional',
+    summary: data.adviceDailyReport?.summary || null,
+  };
+  if (generateDailyReport) {
+    const reportHeartbeat = setInterval(() => {
+      renewWorkerLock(acc.data || (acc.data = {}), myId);
+      void saveWorking().catch(() => {});
+    }, WORKER_HEARTBEAT_INTERVAL_MS);
+    if (
+      reportHeartbeat
+      && typeof reportHeartbeat.unref === 'function'
+    ) reportHeartbeat.unref();
 
-  let dailyReportResult;
-  try {
-    const aiSearchConfig = await ensureAiSearchConfig();
-    setAdviceDailyReportPhase(
-      data,
-      '策略日报缺失时将先自动生成，请稍候',
-    );
-    dailyReportResult = await ensureAdviceDailyReport({
-      scopeKey: nick,
-      existingSummary: data.adviceDailyReport?.summary || null,
-      getSummary: () => getLatestDailySummary(nick),
-      searchConfig: aiSearchConfig,
-      generate: () => generateAdviceDailyReport(
-        nick,
-        collectAdviceDailyReportHoldings(data),
-      ),
-    });
-    data.adviceDailyReport = {
-      summary: dailyReportResult.summary,
-      at: Date.now(),
-      source: dailyReportResult.source,
-    };
-    setAdviceDailyReportPhase(
-      data,
-      '策略日报已就绪，等待军师生成',
-    );
-    acc = await saveWorking();
-    data = acc.data;
-  } catch (error) {
-    const message = `策略日报生成失败：${String(
-      error?.message || error,
-    )}`;
-    const failed = failAdviceJobsForDailyReport(
-      data,
-      message,
-    );
-    acc = await saveWorking();
-    clearInterval(reportHeartbeat);
-    await releaseDrainLock(nick, acc, myId, CONC);
-    return {
-      drained: true,
-      ok: 0,
-      fail: failed,
-      reportError: message,
-    };
+    try {
+      const aiSearchConfig = await ensureAiSearchConfig();
+      setAdviceDailyReportPhase(
+        data,
+        '深度研判：策略日报缺失时将先自动生成',
+      );
+      dailyReportResult = await ensureAdviceDailyReport({
+        scopeKey: nick,
+        existingSummary: data.adviceDailyReport?.summary || null,
+        getSummary: () => getLatestDailySummary(nick),
+        searchConfig: aiSearchConfig,
+        generate: () => generateAdviceDailyReport(
+          nick,
+          collectAdviceDailyReportHoldings(data),
+        ),
+      });
+      data.adviceDailyReport = {
+        summary: dailyReportResult.summary,
+        at: Date.now(),
+        source: dailyReportResult.source,
+      };
+      setAdviceDailyReportPhase(
+        data,
+        '策略日报已就绪，等待军师生成',
+      );
+      acc = await saveWorking();
+      data = acc.data;
+    } catch (error) {
+      const message = `策略日报生成失败：${String(
+        error?.message || error,
+      )}`;
+      continueAdviceJobsWithoutDailyReport(data, message);
+      dailyReportResult = {
+        generated: false,
+        source: 'unavailable',
+        summary: null,
+        warning: message,
+      };
+      acc = await saveWorking();
+      data = acc.data;
+    } finally {
+      clearInterval(reportHeartbeat);
+    }
   }
-  clearInterval(reportHeartbeat);
 
   // 首次生成日报与军师分析拆成两次 FC 异步调用，避免日报耗时挤占
   // 深度建议的 600 秒平台预算。第二次调用会直接命中账号摘要。

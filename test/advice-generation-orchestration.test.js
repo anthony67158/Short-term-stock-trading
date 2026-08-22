@@ -9,6 +9,7 @@ import {
 } from '../api/_jobs.js'
 import {
   shouldRunAdvisorCouncil,
+  shouldGenerateAdviceDailyReport,
 } from '../shared/adviceGenerationPolicy.js'
 import {
   generationOptions,
@@ -23,6 +24,10 @@ const stockDetailSource = readFileSync(
 )
 const cronAdviceSource = readFileSync(
   new URL('../api/cron_advice.js', import.meta.url),
+  'utf8',
+)
+const adviceRunnerSource = readFileSync(
+  new URL('../src/adviceRunner.js', import.meta.url),
   'utf8',
 )
 
@@ -151,6 +156,35 @@ test('委员会只在显式深度生成时同步执行', () => {
     deepMode: true,
     source: 'auto',
   }), false)
+})
+
+test('快速军师不等待策略日报而深度研判仍尝试补齐', () => {
+  assert.equal(shouldGenerateAdviceDailyReport({
+    deepMode: false,
+  }), false)
+  assert.equal(shouldGenerateAdviceDailyReport({
+    deepMode: true,
+  }), true)
+  assert.match(
+    cronAdviceSource,
+    /const generateDailyReport = shouldGenerateAdviceDailyReport/,
+  )
+  assert.match(
+    cronAdviceSource,
+    /if \(generateDailyReport\) \{/,
+  )
+  assert.doesNotMatch(
+    cronAdviceSource,
+    /failAdviceJobsForDailyReport/,
+  )
+  assert.match(
+    adviceRunnerSource,
+    /if \(shouldGenerateAdviceDailyReport\(/,
+  )
+  assert.doesNotMatch(
+    adviceRunnerSource,
+    /策略日报生成失败，未启动军师分析/,
+  )
 })
 
 test('个股页默认快速生成且普通路径不再无条件同步委员会', () => {

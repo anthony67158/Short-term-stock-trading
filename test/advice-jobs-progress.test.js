@@ -172,16 +172,20 @@ test('进度快照携带单股阶段、数据源、模型端点和简体中文�
   enqueueJob(data, { code: '600000', name: '浦发银行', mode: 'buy_advice' }, 1000)
   leaseJob(data, '600000', 1000)
   updateJobProgress(data, '600000', {
+    stage: 'llm',
     phase: '正在分析量价与资金共振',
     sources: [{ label: '实时行情', ok: true }],
     reasoning: '正在判断支撑位是否有效，并计算盈亏比。',
+    quant: { summary: '上涨概率48%，等待回踩。' },
     model: 'DeepSeek-V4-Pro',
     endpoint: '主端点',
   }, 2000)
 
   const item = jobsToProgress(data, 2500, 2).items[0]
   assert.equal(item.phase, '正在分析量价与资金共振')
+  assert.equal(item.stage, 'llm')
   assert.equal(item.reasoning, '正在判断支撑位是否有效，并计算盈亏比。')
+  assert.equal(item.quant.summary, '上涨概率48%，等待回踩。')
   assert.deepEqual(item.sources, [{ label: '实时行情', ok: true }])
   assert.equal(item.model, 'DeepSeek-V4-Pro')
   assert.equal(item.endpoint, '主端点')

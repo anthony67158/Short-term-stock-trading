@@ -2,6 +2,52 @@ import { adviceEntryMatchesMode } from './adviceModeContext.js'
 import { isCompleteAdviceEntry } from './adviceBatchPolicy.js'
 import { adviceRequestId } from './adviceGenerationPolicy.js'
 
+const QUICK_GENERATION_STEPS = Object.freeze([
+  { key: 'prepare', label: '准备上下文' },
+  { key: 'collect', label: '采集证据' },
+  { key: 'quant', label: '量化校验' },
+  { key: 'decision', label: '生成结论' },
+])
+
+function inferredGenerationStage(generation = {}) {
+  const explicit = String(generation.stage || '')
+  if (['queued', 'preparing'].includes(explicit)) return 'prepare'
+  if (explicit === 'collect') return 'collect'
+  if (explicit === 'quant') return 'quant'
+  if (['theory', 'llm', 'failover'].includes(explicit)) {
+    return 'decision'
+  }
+  if (explicit === 'council') return 'council'
+  if (['done', 'failed'].includes(explicit)) return explicit
+  const phase = String(generation.phase || generation.label || '')
+  if (/委员会/.test(phase)) return 'council'
+  if (/量化/.test(phase)) return 'quant'
+  if (/采集|行情|资金|证据/.test(phase)) return 'collect'
+  if (/生成|整理|模型|端点/.test(phase)) return 'decision'
+  return 'prepare'
+}
+
+export function adviceGenerationSteps(generation = {}) {
+  const steps = generation.deepMode === true
+    ? [
+        ...QUICK_GENERATION_STEPS,
+        { key: 'council', label: '深度复核' },
+      ]
+    : QUICK_GENERATION_STEPS
+  const stage = inferredGenerationStage(generation)
+  const activeIndex = steps.findIndex((step) => step.key === stage)
+  return steps.map((step, index) => ({
+    ...step,
+    state: stage === 'done'
+      ? 'done'
+      : index < Math.max(0, activeIndex)
+        ? 'done'
+        : index === Math.max(0, activeIndex)
+          ? 'active'
+          : 'pending',
+  }))
+}
+
 export function shouldApplyCloudBatch(progress) {
   return !!(
     progress &&
@@ -21,9 +67,11 @@ export function adviceJobState(batch, code) {
   return {
     active: true,
     status: item.status,
+    stage: String(item.stage || ''),
     label: canceling ? '正在取消生成' : (item.phase || (running ? 'AI 操作建议生成中' : '排队等待云端生成')),
     cancelable: !canceling,
     cloud: !!batch.serverMode,
+    deepMode: item.deepMode === true,
   }
 }
 
@@ -36,12 +84,15 @@ export function cloudAdviceLoadingState(batch, code) {
   return {
     loading: true,
     cloud: true,
+    stage: String(item.stage || ''),
     phase: item.phase || active.label,
+    warning: String(item.warning || ''),
     sources: Array.isArray(item.sources) ? item.sources : [],
     reasoning: String(item.reasoning || ''),
     quant: item.quant || null,
     model: String(item.model || ''),
     endpoint: String(item.endpoint || ''),
+    deepMode: item.deepMode === true,
   }
 }
 
@@ -110,7 +161,12 @@ export async function startAdvicePersistently(
         requestId,
       })
       if (submission === true || submission?.ok) {
-        return { status: 'started', mode: 'server', code }
+        return {
+          status: 'started',
+          mode: 'server',
+          code,
+          progress: submission?.progress || null,
+        }
       }
       if (submission?.queued) {
         return {
