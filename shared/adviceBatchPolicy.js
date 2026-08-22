@@ -1,6 +1,11 @@
+import {
+  DEEP_ADVICE_TARGET_MS,
+  QUICK_ADVICE_TARGET_MS,
+} from './adviceGenerationPolicy.js'
+
 export const DEEP_BATCH_CONCURRENCY = 2
-export const QUICK_ADVICE_BUDGET_MS = 120000
-export const DEEP_ADVICE_BUDGET_MS = 480000
+export const QUICK_ADVICE_BUDGET_MS = QUICK_ADVICE_TARGET_MS
+export const DEEP_ADVICE_BUDGET_MS = DEEP_ADVICE_TARGET_MS
 
 export function validateBatchMode(codes = [], deepMode = false) {
   const count = new Set((codes || []).filter(Boolean).map(String)).size
@@ -97,6 +102,6 @@ export function generationOptions(deepMode = false) {
         forceReasoning: false,
         runtimeBudgetMs: QUICK_ADVICE_BUDGET_MS,
         timeoutMs: QUICK_ADVICE_BUDGET_MS + 15000,
-        maxAttempts: 3,
+        maxAttempts: 2,
       }
 }

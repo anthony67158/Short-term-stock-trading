@@ -73,6 +73,7 @@ export function kickServerAdviceStatusSync() {
 // 触发服务端生成。codes=要生成的股票代码数组;成功发出返回 true,无登录态/空列表返回 false。
 export async function triggerServerAdvice(codes, {
   scope = 'all', force = true, batchId = '', deepMode = false,
+  requestId = '',
 } = {}) {
   let creds = null
   try { creds = authStore.getCreds && authStore.getCreds() } catch { creds = null }
@@ -91,7 +92,14 @@ export async function triggerServerAdvice(codes, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        ondemand: true, codes: list, ...creds, scope, force, batchId, deepMode,
+        ondemand: true,
+        codes: list,
+        ...creds,
+        scope,
+        force,
+        batchId,
+        deepMode,
+        requestId,
       }),
       signal: controller.signal,
       keepalive: true,

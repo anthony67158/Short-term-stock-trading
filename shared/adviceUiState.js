@@ -1,5 +1,6 @@
 import { adviceEntryMatchesMode } from './adviceModeContext.js'
 import { isCompleteAdviceEntry } from './adviceBatchPolicy.js'
+import { adviceRequestId } from './adviceGenerationPolicy.js'
 
 export function shouldApplyCloudBatch(progress) {
   return !!(
@@ -92,6 +93,9 @@ export async function startAdvicePersistently(
   },
 ) {
   const code = String(spec?.code || '')
+  const requestId = String(
+    spec?.requestId || adviceRequestId(spec),
+  )
   if (
     code
     && typeof canUseServer === 'function'
@@ -103,6 +107,7 @@ export async function startAdvicePersistently(
         scope: 'all',
         force: true,
         deepMode: !!spec?.deepMode,
+        requestId,
       })
       if (submission === true || submission?.ok) {
         return { status: 'started', mode: 'server', code }

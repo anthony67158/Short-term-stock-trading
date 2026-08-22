@@ -1,0 +1,179 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+
+import {
+  completeJob,
+  enqueueJob,
+  leaseJob,
+} from '../api/_jobs.js'
+import {
+  shouldRunAdvisorCouncil,
+} from '../shared/adviceGenerationPolicy.js'
+import {
+  generationOptions,
+} from '../shared/adviceBatchPolicy.js'
+import {
+  maxTokensForMode,
+} from '../api/_ai_prompts.js'
+
+const stockDetailSource = readFileSync(
+  new URL('../src/components/StockDetail.jsx', import.meta.url),
+  'utf8',
+)
+const cronAdviceSource = readFileSync(
+  new URL('../api/cron_advice.js', import.meta.url),
+  'utf8',
+)
+
+test('同一用户请求在任务完成后重放也不能再次创建生成任务', () => {
+  const data = {}
+  const first = enqueueJob(data, {
+    code: '600000',
+    mode: 'buy_advice',
+    source: 'ondemand',
+    idempotencyKey: 'user-request:req-1:600000',
+  }, 1000)
+  leaseJob(data, '600000', 1100)
+  completeJob(data, '600000', 2000, {
+    evidenceAsOf: 1500,
+    planRevision: 1,
+  })
+
+  const replay = enqueueJob(data, {
+    code: '600000',
+    mode: 'buy_advice',
+    source: 'ondemand',
+    idempotencyKey: 'user-request:req-1:600000',
+  }, 2100)
+
+  assert.equal(first.created, true)
+  assert.equal(replay.created, false)
+  assert.equal(replay.replayed, true)
+  assert.equal(data.jobs['600000'].status, 'done')
+  assert.equal(data.jobs['600000'].id, first.job.id)
+})
+
+test('生成期间到达但已被本次证据覆盖的Judge事件不会触发第二轮生成', () => {
+  const data = {}
+  enqueueJob(data, {
+    code: '600000',
+    mode: 'hold_advice',
+    source: 'ondemand',
+    idempotencyKey: 'user-request:req-2:600000',
+  }, 1000)
+  leaseJob(data, '600000', 1050)
+  const deferred = enqueueJob(data, {
+    code: '600000',
+    mode: 'hold_advice',
+    source: 'judge',
+    trigger: {
+      kind: 'judge',
+      decision: 'confirm',
+      planId: 'plan-1',
+      planRevision: 1,
+      at: 1200,
+    },
+    idempotencyKey: 'judge:alert-1:plan-1:1:confirm',
+  }, 1200)
+
+  completeJob(data, '600000', 1300, {
+    evidenceAsOf: 1250,
+    planRevision: 2,
+  })
+
+  assert.equal(deferred.deferred, true)
+  assert.equal(data.jobs['600000'].status, 'done')
+  assert.equal(data.jobs['600000'].pendingTrigger, null)
+})
+
+test('证据快照之后才到达的新事件只续跑一次', () => {
+  const data = {}
+  enqueueJob(data, {
+    code: '600000',
+    mode: 'hold_advice',
+    source: 'ondemand',
+    idempotencyKey: 'user-request:req-3:600000',
+  }, 1000)
+  leaseJob(data, '600000', 1050)
+  enqueueJob(data, {
+    code: '600000',
+    mode: 'hold_advice',
+    source: 'judge',
+    trigger: {
+      kind: 'judge',
+      decision: 'invalid',
+      planId: 'plan-1',
+      planRevision: 1,
+      at: 1400,
+    },
+    idempotencyKey: 'judge:alert-2:plan-1:1:invalid',
+  }, 1400)
+
+  completeJob(data, '600000', 1500, {
+    evidenceAsOf: 1300,
+    planRevision: 2,
+  })
+  const continuedId = data.jobs['600000'].id
+  const duplicate = enqueueJob(data, {
+    code: '600000',
+    mode: 'hold_advice',
+    source: 'judge',
+    trigger: {
+      kind: 'judge',
+      decision: 'invalid',
+      planId: 'plan-1',
+      planRevision: 1,
+      at: 1600,
+    },
+    idempotencyKey: 'judge:alert-2:plan-1:1:invalid',
+  }, 1600)
+
+  assert.equal(data.jobs['600000'].status, 'queued')
+  assert.equal(data.jobs['600000'].id, continuedId)
+  assert.equal(duplicate.created, false)
+  assert.equal(duplicate.replayed, true)
+})
+
+test('委员会只在显式深度生成时同步执行', () => {
+  assert.equal(shouldRunAdvisorCouncil({
+    enabled: true,
+    deepMode: false,
+    source: 'ondemand',
+  }), false)
+  assert.equal(shouldRunAdvisorCouncil({
+    enabled: true,
+    deepMode: true,
+    source: 'ondemand',
+  }), true)
+  assert.equal(shouldRunAdvisorCouncil({
+    enabled: true,
+    deepMode: true,
+    source: 'auto',
+  }), false)
+})
+
+test('个股页默认快速生成且普通路径不再无条件同步委员会', () => {
+  assert.match(
+    stockDetailSource,
+    /const loadQuant = async \(deepMode = false\)/,
+  )
+  assert.doesNotMatch(stockDetailSource, /deepMode:\s*true/)
+  assert.doesNotMatch(
+    cronAdviceSource,
+    /if \(advice && councilEnabled\) \{[\s\S]*?await runAdvisorCouncilShadow/,
+  )
+})
+
+test('普通军师生成有明确的低延迟预算且保留深度模式', () => {
+  const quick = generationOptions(false)
+  const deep = generationOptions(true)
+
+  assert.equal(quick.fastMode, true)
+  assert.equal(quick.runtimeBudgetMs, 75000)
+  assert.equal(quick.maxAttempts, 2)
+  assert.equal(deep.forceReasoning, true)
+  assert.ok(deep.runtimeBudgetMs > quick.runtimeBudgetMs)
+  assert.equal(maxTokensForMode('hold_advice', false), 3200)
+  assert.ok(maxTokensForMode('hold_advice', true) >= 32000)
+})

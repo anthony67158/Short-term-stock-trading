@@ -113,6 +113,9 @@ import {
   nextTradingDayLabel,
 } from '../shared/tradingCalendar.js';
 import { runAdvisorCouncilShadow } from './_advisor_council.js';
+import {
+  shouldRunAdvisorCouncil,
+} from '../shared/adviceGenerationPolicy.js';
 
 export const PROGRESS_SAVE_INTERVAL_MS = 5000;
 export const CANCEL_POLL_INTERVAL_MS = 2000;
@@ -661,7 +664,7 @@ async function genOne({
   reviewIntervalMin = null,
   reviewTrigger = '',
   strategyGate = null,
-  councilEnabled = true,
+  runCouncilShadow = false,
 }) {
   const startedAt = Date.now();
   const generation = generationOptions(deepMode);
@@ -750,7 +753,7 @@ async function genOne({
     at,
   );
   let councilShadow = null;
-  if (advice && councilEnabled) {
+  if (advice && runCouncilShadow) {
     if (typeof onProgress === 'function') {
       onProgress({ phase: '军师委员会正在进行影子复核' });
     }
@@ -883,6 +886,11 @@ async function runJobGen(
   });
   const councilEnabled = process.env.ADVISOR_COUNCIL_SHADOW !== 'false'
     && data.settings?.advisorCouncilShadow !== false;
+  const runCouncilShadow = shouldRunAdvisorCouncil({
+    enabled: councilEnabled,
+    deepMode,
+    source: reviewOrigin || 'ondemand',
+  });
   const mode = holdSet.has(code) ? 'hold_advice' : 'buy_advice';
   const autoConfig = autoConfigFromSettings(data.settings || {});
   const reviewIntervalMin = mode === 'hold_advice'
@@ -916,7 +924,7 @@ async function runJobGen(
     if (previousEvidenceDigest) p.previousEvidenceDigest = previousEvidenceDigest;
     if (reviewEvent) p.reviewEvent = reviewEvent;
     if (reviewOrigin) p.reviewOrigin = reviewOrigin;
-    const result = await genOne({ code, name, mode: 'hold_advice', payload: p, priceHint, onProgress, signal, deepMode, previousEntry, reviewIntervalMin, reviewTrigger: reviewEvent ? `judge_${reviewEvent.decision}` : '', strategyGate, councilEnabled });
+    const result = await genOne({ code, name, mode: 'hold_advice', payload: p, priceHint, onProgress, signal, deepMode, previousEntry, reviewIntervalMin, reviewTrigger: reviewEvent ? `judge_${reviewEvent.decision}` : '', strategyGate, runCouncilShadow });
     return { ...result, sourceTradeFingerprint };
   }
   let p = buildWatchPayload(code, name, portfolio, data.account);
@@ -929,7 +937,7 @@ async function runJobGen(
   if (previousEvidenceDigest) p.previousEvidenceDigest = previousEvidenceDigest;
   if (reviewEvent) p.reviewEvent = reviewEvent;
   if (reviewOrigin) p.reviewOrigin = reviewOrigin;
-  const result = await genOne({ code, name, mode: 'buy_advice', payload: p, priceHint, onProgress, signal, deepMode, previousEntry, reviewIntervalMin, reviewTrigger: reviewEvent ? `judge_${reviewEvent.decision}` : '', strategyGate, councilEnabled });
+  const result = await genOne({ code, name, mode: 'buy_advice', payload: p, priceHint, onProgress, signal, deepMode, previousEntry, reviewIntervalMin, reviewTrigger: reviewEvent ? `judge_${reviewEvent.decision}` : '', strategyGate, runCouncilShadow });
   return { ...result, sourceTradeFingerprint };
 }
 
@@ -986,6 +994,10 @@ async function persistServer(nick, workingAcc, myId) {
   // 先把云端外部变更并入内存(其它设备新入队/取消),再整体回写 jobs(服务端权威)
   mergeExternalJobs(wdata, fdata);
   fdata.jobs = wdata.jobs;
+  fdata.adviceEventKeys = {
+    ...(fdata.adviceEventKeys || {}),
+    ...(wdata.adviceEventKeys || {}),
+  };
   fdata.adviceBatchCancellations = {
     ...(wdata.adviceBatchCancellations || {}),
   };
@@ -1365,7 +1377,15 @@ async function drainAccount(nick, initialAcc) {
         // 不消耗重试次数，直接以最新 OSS 账本重跑，绝不把旧建议落盘。
         requeueAdviceForTradeChange(d, done.code);
       } else if (done.res && done.res.cacheItem) {
-        completeJob(d, done.code); ok++;
+        completeJob(d, done.code, Date.now(), {
+          evidenceAsOf: Date.parse(
+            done.res.cacheItem?.meta?.evidenceSnapshot?.asOf || '',
+          ) || 0,
+          planRevision: Number(
+            done.res.cacheItem?.advice?.continuity?.revision,
+          ) || 0,
+        });
+        ok++;
         const completedAt = Number(jobsOf(d)[done.code]?.finishedAt) || Date.now();
         done.res.cacheItem.updatedAt = Math.max(
           Number(done.res.cacheItem.updatedAt) || 0,
@@ -1476,7 +1496,15 @@ function enqueueStale(data, { scope = 'all', force = false } = {}) {
   let n = 0;
   const batchId = `cron_${Date.now()}`;
   const add = (code, name, mode) => {
-    const { created } = enqueueJob(data, { code, name, mode, source: 'cron', force, batchId });
+    const { created } = enqueueJob(data, {
+      code,
+      name,
+      mode,
+      source: 'cron',
+      force,
+      batchId,
+      idempotencyKey: `cron:${batchId}:${code}:${mode}`,
+    });
     if (created) n++;
   };
   if (scope === 'all' || scope === 'hold') {
@@ -1569,7 +1597,19 @@ export function enqueueAutoRefreshDue(data, now = Date.now()) {
   let holdCreated = 0;
   let watchCreated = 0;
   const enqueue = (code, name, mode) => {
-    const { created } = enqueueJob(data, { code, name, mode, source: 'auto', force: false, batchId }, now);
+    const reviewAt = Number(
+      advice?.[code]?.reviewCycle?.nextReviewAt
+      ?? advice?.[code]?.advice?.reviewCycle?.nextReviewAt,
+    ) || now;
+    const { created } = enqueueJob(data, {
+      code,
+      name,
+      mode,
+      source: 'auto',
+      force: false,
+      batchId,
+      idempotencyKey: `auto:${code}:${mode}:${reviewAt}`,
+    }, now);
     if (created) {
       count++;
       if (mode === 'hold_advice') holdCreated++;
@@ -1769,6 +1809,9 @@ export default async function handler(req, res) {
       const batchId = requestedBatchId
         ? requestedBatchId.slice(0, 100)
         : `ondemand_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      const requestId = String(
+        body.requestId || requestedBatchId || batchId,
+      ).trim().slice(0, 140);
       if (
         batchRequest
         && isAdviceBatchCanceled(data, batchId)
@@ -1794,6 +1837,7 @@ export default async function handler(req, res) {
         const { created, canceled } = enqueueJob(data, {
           code, name: nameOf(code), mode, source: 'ondemand', force, batchId, deepMode,
           batchRequest,
+          idempotencyKey: `ondemand:${requestId}:${code}:${mode}`,
         });
         if (canceled) canceledBeforeQueue++;
         else if (created) enq++;

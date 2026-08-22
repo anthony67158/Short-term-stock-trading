@@ -26,9 +26,44 @@ export const MAX_ATTEMPTS = 3;           // 失败最多重试次数
 const JOB_TTL_MS = 24 * 3600 * 1000;     // 终态任务保留 24h 后清理(避免无限堆积)
 const BATCH_CANCEL_TTL_MS = 24 * 3600 * 1000;
 const ADVICE_AUTO_PAUSE_MS = 30 * 60 * 1000;
+const EVENT_KEY_TTL_MS = 24 * 3600 * 1000;
+const EVENT_KEY_LIMIT = 1000;
 
 const ACTIVE = new Set(['queued', 'running']);
 export const isActive = (j) => !!(j && ACTIVE.has(j.status));
+
+function eventKeysOf(data) {
+  if (
+    !data.adviceEventKeys
+    || typeof data.adviceEventKeys !== 'object'
+    || Array.isArray(data.adviceEventKeys)
+  ) data.adviceEventKeys = {};
+  return data.adviceEventKeys;
+}
+
+function gcAdviceEventKeys(data, now = Date.now()) {
+  const keys = eventKeysOf(data);
+  for (const [key, at] of Object.entries(keys)) {
+    if (now - (Number(at) || 0) > EVENT_KEY_TTL_MS) delete keys[key];
+  }
+  const entries = Object.entries(keys)
+    .sort((left, right) => Number(right[1]) - Number(left[1]));
+  for (const [key] of entries.slice(EVENT_KEY_LIMIT)) delete keys[key];
+}
+
+function eventKeySeen(data, key, now = Date.now()) {
+  const normalized = String(key || '').trim();
+  if (!normalized) return false;
+  gcAdviceEventKeys(data, now);
+  return Number(eventKeysOf(data)[normalized]) > 0;
+}
+
+function rememberEventKey(data, key, now = Date.now()) {
+  const normalized = String(key || '').trim();
+  if (!normalized) return;
+  eventKeysOf(data)[normalized] = Number(now) || Date.now();
+  gcAdviceEventKeys(data, now);
+}
 
 // 运行中但租约已过期 → 孤儿(FC 崩了/被回收)
 export function isOrphan(j, now = Date.now()) {
@@ -152,6 +187,7 @@ export function gcJobs(data, now = Date.now()) {
     if (!ACTIVE.has(j.status) && (now - (j.finishedAt || j.at || 0)) > JOB_TTL_MS) delete jobs[code];
   }
   gcAdviceBatchCancellations(data, now);
+  gcAdviceEventKeys(data, now);
 }
 
 // 入队一只。dedup:同 code 已有活跃任务时始终返回既有任务；终态任务可以重建。
@@ -159,7 +195,7 @@ export function gcJobs(data, now = Date.now()) {
 // mode 由调用方按持仓/自选判定。返回 { job, created(bool) }。
 export function enqueueJob(data, {
   code, name, mode, source = 'ondemand', batchId = '', deepMode = false,
-  batchRequest = false, trigger = null,
+  batchRequest = false, trigger = null, idempotencyKey = '',
 }, now = Date.now()) {
   if (
     batchRequest
@@ -175,6 +211,23 @@ export function enqueueJob(data, {
   }
   const jobs = jobsOf(data);
   const cur = jobs[code];
+  const eventKey = String(idempotencyKey || '').trim().slice(0, 180);
+  if (
+    eventKey
+    && (
+      eventKeySeen(data, eventKey, now)
+      || cur?.idempotencyKey === eventKey
+      || cur?.pendingTrigger?.idempotencyKey === eventKey
+    )
+  ) {
+    return {
+      job: cur || null,
+      created: false,
+      canceled: false,
+      deferred: false,
+      replayed: true,
+    };
+  }
   if (cur && isActive(cur)) {
     if (trigger && typeof trigger === 'object') {
       if (cur.status === 'queued') {
@@ -188,10 +241,16 @@ export function enqueueJob(data, {
         cur.batchId = '';
         cur.phase = '军师执行确认已触发，等待复核';
         cur.progressAt = now;
+        cur.idempotencyKey = eventKey;
         return { job: cur, created: false, deferred: false };
       }
       const previousAt = Number(cur.pendingTrigger?.at) || 0;
-      if ((Number(trigger.at) || now) >= previousAt) cur.pendingTrigger = trigger;
+      if ((Number(trigger.at) || now) >= previousAt) {
+        cur.pendingTrigger = {
+          ...trigger,
+          idempotencyKey: eventKey,
+        };
+      }
       return { job: cur, created: false, deferred: true };
     }
     return { job: cur, created: false, deferred: false };
@@ -205,6 +264,7 @@ export function enqueueJob(data, {
     at: now, startedAt: 0, finishedAt: 0, leaseUntil: 0,
     error: '', source, cancelRequested: false,
     batchId: String(batchId || ''),
+    idempotencyKey: eventKey,
     deepMode: generation.deepMode,
     batchRequest: !!batchRequest,
     ...(trigger && typeof trigger === 'object' ? { trigger } : {}),
@@ -264,11 +324,43 @@ export function updateJobProgress(data, code, patch = {}, now = Date.now()) {
   return job
 }
 
-export function completeJob(data, code, now = Date.now()) {
+export function completeJob(
+  data,
+  code,
+  now = Date.now(),
+  {
+    evidenceAsOf = 0,
+    planRevision = 0,
+  } = {},
+) {
   const j = jobsOf(data)[code];
   if (!j) return;
+  rememberEventKey(data, j.idempotencyKey, now);
   const pendingTrigger = j.pendingTrigger;
   if (pendingTrigger && typeof pendingTrigger === 'object') {
+    const pendingAt = Number(pendingTrigger.at) || 0;
+    const pendingRevision = Number(pendingTrigger.planRevision) || 0;
+    const coveredByEvidence = (
+      Number(evidenceAsOf) > 0
+      && pendingAt > 0
+      && pendingAt <= Number(evidenceAsOf)
+    );
+    const coveredByPlan = (
+      Number(planRevision) > 0
+      && pendingRevision > 0
+      && pendingRevision >= Number(planRevision)
+    );
+    if (coveredByEvidence || coveredByPlan) {
+      rememberEventKey(data, pendingTrigger.idempotencyKey, now);
+      j.pendingTrigger = null;
+      j.status = 'done';
+      j.finishedAt = now;
+      j.leaseUntil = 0;
+      j.error = '';
+      j.phase = '生成完成';
+      j.progressAt = now;
+      return;
+    }
     const triggerAt = Number(pendingTrigger.at) || now;
     Object.assign(j, {
       id: `${code}_${now}_judge`,
@@ -291,6 +383,7 @@ export function completeJob(data, code, now = Date.now()) {
       endpoint: '',
       progressAt: now,
       trigger: pendingTrigger,
+      idempotencyKey: pendingTrigger.idempotencyKey || '',
       pendingTrigger: null,
     });
     return;

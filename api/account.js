@@ -250,6 +250,7 @@ export function applyClientAccountSave(
     'advisorCouncilShadow',
     'strategyHumanApproval',
     'strategyGovernanceV2',
+    'adviceEventKeys',
   ]) {
     if (prev[key] != null) merged[key] = prev[key];
     else delete merged[key];

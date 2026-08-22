@@ -387,6 +387,9 @@ test('客户端保存不能覆盖服务端收益学习委员会与人工批准�
           state: 'draft',
         }],
       },
+      adviceEventKeys: {
+        'judge:alert-1': 1000,
+      },
     },
   }
 
@@ -400,6 +403,9 @@ test('客户端保存不能覆盖服务端收益学习委员会与人工批准�
         strategyId: 'trend-breakout',
         state: 'active',
       }],
+    },
+    adviceEventKeys: {
+      'judge:forged': 2000,
     },
   }, 3)
 
@@ -417,6 +423,9 @@ test('客户端保存不能覆盖服务端收益学习委员会与人工批准�
     account.data.strategyGovernanceV2.strategies[0].state,
     'draft',
   )
+  assert.deepEqual(account.data.adviceEventKeys, {
+    'judge:alert-1': 1000,
+  })
 })
 
 test('OSS 当前快照写后校验失败时保存必须报错', async () => {

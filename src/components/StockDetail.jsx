@@ -222,7 +222,7 @@ export default function StockDetail({ stock, onClose }) {
     const unAdvice = subscribeAdvice(sync) // 云端结果回灌 adviceCache → 自动切成品
     return () => { unRunner(); unBatch(); unAdvice() }
   }, [stock && stock.code, !!myHold])
-  const loadQuant = async () => {
+  const loadQuant = async (deepMode = false) => {
     if (!stock) return
     quantRefreshRef.current = ''
     const expectedMode = myHold ? 'hold_advice' : 'buy_advice'
@@ -335,7 +335,7 @@ export default function StockDetail({ stock, onClose }) {
       myHold: !!myHold,
       aiPayload,
       priceHint,
-      deepMode: true,
+      deepMode,
     })
     if (r?.mode === 'server') {
       setQuantState(mergeAdviceRefreshState({
@@ -834,7 +834,14 @@ export default function StockDetail({ stock, onClose }) {
 
                 {!quantState && (
                   <div className="quant-cta">
-                    <button className="quant-btn" onClick={loadQuant}><Icon name="spark" size={14} /> 军师生成操作建议</button>
+                    <div className="quant-cta-actions">
+                      <button className="quant-btn" onClick={() => loadQuant(false)}>
+                        <Icon name="spark" size={14} /> 快速生成建议
+                      </button>
+                      <button className="btn advice-deep-generate" onClick={() => loadQuant(true)}>
+                        <Icon name="brain" size={14} /> 深度研判
+                      </button>
+                    </div>
                     <span className="quant-cta-hint">{myHold ? '结合你的持仓，告诉你该加仓 / 减仓 / 持有做T' : '结合量化+技术+历史规律+当日盘面，先给结论(买入/回调再买/观望/不建议)，再给对应买点与止损'}</span>
                   </div>
                 )}
@@ -883,7 +890,7 @@ export default function StockDetail({ stock, onClose }) {
                 )}
                 {quantState && quantState.error && (
                   <div className="quant-err">{quantState.error}
-                    <button type="button" className="advice-regenerate-btn" onClick={loadQuant}>
+                    <button type="button" className="advice-regenerate-btn" onClick={() => loadQuant(false)}>
                       <Icon name="refresh" size={13} />重新生成
                     </button>
                   </div>
@@ -952,7 +959,7 @@ export default function StockDetail({ stock, onClose }) {
                       {quantState.adviceMissing && !adv && (
                         <div className="advice-retry">
                           <Icon name="spark" size={13} /> AI 操作建议(结论/买点/时机/止损)生成超时，
-                          <button type="button" className="advice-regenerate-btn" onClick={loadQuant}>
+                          <button type="button" className="advice-regenerate-btn" onClick={() => loadQuant(false)}>
                             <Icon name="refresh" size={13} />重新生成
                           </button>
                         </div>
@@ -962,7 +969,7 @@ export default function StockDetail({ stock, onClose }) {
                       {quantState.truncated && adv && (
                         <div className="advice-retry">
                           <Icon name="spark" size={13} /> 本次分析内容较长被截断，下方可能不完整，
-                          <button type="button" className="advice-regenerate-btn" onClick={loadQuant}>
+                          <button type="button" className="advice-regenerate-btn" onClick={() => loadQuant(false)}>
                             <Icon name="refresh" size={13} />重新生成完整版
                           </button>
                         </div>
@@ -1159,7 +1166,7 @@ export default function StockDetail({ stock, onClose }) {
                               {q.score != null && (q.reads || []).length > 0 && (
                                 <div className="quant-line">
                                   {(q.reads || []).slice(-1).map((r, i) => <span className="quant-line-read" key={i}>{r}</span>)}
-                                  <button type="button" className="expand-btn push-end" onClick={loadQuant}>刷新</button>
+                                  <button type="button" className="expand-btn push-end" onClick={() => loadQuant(false)}>刷新</button>
                                 </div>
                               )}
                             </>
@@ -1354,7 +1361,7 @@ export default function StockDetail({ stock, onClose }) {
             className="btn btn-primary footbar-main"
             type="button"
             disabled={adviceAction.disabled}
-            onClick={loadQuant}
+            onClick={() => loadQuant(false)}
           >
             <Icon
               name={adviceAction.icon}

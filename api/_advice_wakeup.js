@@ -62,6 +62,13 @@ export function queueAdviceReviewForVerdict(data, alert, verdict, now = Date.now
     mode,
     source: 'judge',
     trigger,
+    idempotencyKey: [
+      'judge',
+      trigger.alertId || code,
+      trigger.planId || 'no-plan',
+      trigger.planRevision || 0,
+      trigger.decision,
+    ].join(':'),
   }, now)
   return {
     queued: true,
