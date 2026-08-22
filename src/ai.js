@@ -16,7 +16,14 @@ export async function fetchMarketNews() {
 }
 
 // 全市场策略日报：SSE 流式(phase 进度 + result 结果)。session: morning|noon|evening
-export async function fetchDailyReport({ session, holdings, refresh, onPhase, signal }) {
+export async function fetchDailyReport({
+  session,
+  holdings,
+  watchlist,
+  refresh,
+  onPhase,
+  signal,
+}) {
   try {
     const qs = `?session=${session || ''}${refresh ? '&refresh=1' : ''}`
     const res = await fetch(api('/api/daily_report' + qs), {
@@ -25,7 +32,11 @@ export async function fetchDailyReport({ session, holdings, refresh, onPhase, si
         'Content-Type': 'application/json',
         ...accountRequestHeaders(),
       },
-      body: JSON.stringify({ holdings: holdings || [] }), signal,
+      body: JSON.stringify({
+        holdings: holdings || [],
+        watchlist: watchlist || [],
+      }),
+      signal,
     })
     const reader = res.body.getReader()
     const decoder = new TextDecoder('utf-8')
@@ -53,6 +64,44 @@ export async function fetchDailyReport({ session, holdings, refresh, onPhase, si
     if (e.name === 'AbortError') return { ok: false, aborted: true, error: '已取消' }
     return { ok: false, error: '网络异常：' + String(e.message || e) }
   }
+}
+
+async function dailyReportScheduleRequest(action, settings) {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 20000)
+  try {
+    const response = await fetch(api('/api/daily_report_schedule'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...accountRequestHeaders(),
+      },
+      body: JSON.stringify({
+        action,
+        ...(settings ? { settings } : {}),
+      }),
+      signal: controller.signal,
+    })
+    const raw = await response.text()
+    let payload = null
+    try { payload = JSON.parse(raw) } catch {
+      throw new Error(`服务暂时不可用（${response.status}）`)
+    }
+    if (!response.ok || payload?.ok === false) {
+      throw new Error(payload?.error || `服务暂时不可用（${response.status}）`)
+    }
+    return payload
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+export async function fetchDailyReportSchedule() {
+  return dailyReportScheduleRequest('get')
+}
+
+export async function saveDailyReportSchedule(settings) {
+  return dailyReportScheduleRequest('save', settings)
 }
 // onPhase({text,key}) 每到一个采集里程碑触发一次；signal 可选 AbortSignal。
 // 第 5 参 onEvent(event,data) 可选：转发细粒度事件——

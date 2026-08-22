@@ -19,6 +19,7 @@ const stockPanel = read('src/components/StockPanel.jsx')
 const stockDetail = read('src/components/StockDetail.jsx')
 const advicePresentation = read('src/components/AdvicePresentation.jsx')
 const dailyReport = read('src/components/DailyReport.jsx')
+const dailyReportSchedule = read('src/components/DailyReportSchedule.jsx')
 const llmConfig = read('src/components/LLMConfig.jsx')
 const quantModelControl = read('src/components/QuantModelControl.jsx')
 const planTab = read('src/components/PlanTab.jsx')
@@ -1031,4 +1032,26 @@ test('核心 Tab 与关闭控件使用真实 button 元素', () => {
   ]) {
     assert.doesNotMatch(source, /<div[^>]+className="modal-close"/)
   }
+})
+
+test('策略日报提供云端自动生成开关与三个场次时间', () => {
+  const aiClient = read('src/ai.js')
+
+  assert.match(dailyReport, /<DailyReportSchedule/)
+  assert.match(dailyReportSchedule, /fetchDailyReportSchedule/)
+  assert.match(dailyReportSchedule, /saveDailyReportSchedule/)
+  assert.match(dailyReportSchedule, /role="switch"/)
+  assert.match(dailyReportSchedule, /aria-label="开启或关闭日报自动生成"/)
+  assert.match(dailyReportSchedule, /SESSIONS\.map\(\(item\)/)
+  assert.match(dailyReportSchedule, /type="time"/)
+  assert.match(dailyReportSchedule, /盘前日报/)
+  assert.match(dailyReportSchedule, /午间日报/)
+  assert.match(dailyReportSchedule, /收盘日报/)
+  assert.match(dailyReport, /watchlist,\s*refresh,/s)
+  assert.match(aiClient, /export async function fetchDailyReportSchedule/)
+  assert.match(aiClient, /export async function saveDailyReportSchedule/)
+  assert.match(
+    precision,
+    /\.dr-auto-grid\s*{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s,
+  )
 })
