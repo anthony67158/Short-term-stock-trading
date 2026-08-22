@@ -1107,3 +1107,49 @@ test('显式冲突覆盖采用本机交易账本并取消已清仓股票的持�
     '持仓已清仓，旧持仓复核已取消',
   )
 })
+
+test('客户端旧设置不能覆盖服务端较新的日报计划和自动运行状态', () => {
+  const account = {
+    nick: '测试账号',
+    clientRevision: 4,
+    data: {
+      holding: [],
+      plan: [],
+      closed: [],
+      settings: {
+        'dailyReport.schedule': {
+          enabled: true,
+          morning: { enabled: true, time: '08:10' },
+          noon: { enabled: true, time: '11:40' },
+          evening: { enabled: true, time: '15:20' },
+          updatedAt: 300,
+        },
+      },
+      dailyReportAuto: {
+        latest: { status: 'done', runKey: '2026-08-24:morning' },
+        updatedAt: 400,
+      },
+    },
+  }
+  const result = applyClientAccountSave(account, {
+    holding: [],
+    plan: [],
+    closed: [],
+    settings: {
+      'dailyReport.schedule': {
+        enabled: false,
+        morning: { enabled: true, time: '09:00' },
+        noon: { enabled: false, time: '11:50' },
+        evening: { enabled: false, time: '15:30' },
+        updatedAt: 200,
+      },
+    },
+  }, 4)
+
+  assert.equal(result.ok, true)
+  assert.equal(
+    account.data.settings['dailyReport.schedule'].morning.time,
+    '08:10',
+  )
+  assert.equal(account.data.dailyReportAuto.latest.status, 'done')
+})

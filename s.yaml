@@ -95,6 +95,13 @@ resources:
             cronExpression: "@every 5m"
             enable: true
             payload: ${env('CRON_KEY')}
+        # 策略日报自动计划：每 5 分钟检查各账号设置，到期后异步分发独立 Worker。
+        - triggerName: daily-report-schedule-timer
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "@every 5m"
+            enable: true
+            payload: ${env('CRON_KEY')}
         - triggerName: portfolio-analysis-resume-timer
           triggerType: timer
           triggerConfig:

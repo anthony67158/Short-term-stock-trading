@@ -12,6 +12,10 @@ import {
   mergeAutoRefreshSettings,
   newerAutoRefreshPatch,
 } from '../shared/adviceAutoRefreshPolicy.js';
+import {
+  mergeDailyReportScheduleSettings,
+  newerDailyReportSchedulePatch,
+} from '../shared/dailyReportSchedule.js';
 import { adviceEntryMatchesMode } from '../shared/adviceModeContext.js';
 import { accountTradeStateFingerprint } from '../shared/accountSync.js';
 import {
@@ -253,6 +257,9 @@ export function applyClientAccountSave(
   if (prev.adviceDailyReport?.summary?.text) {
     merged.adviceDailyReport = prev.adviceDailyReport;
   }
+  if (prev.dailyReportAuto && typeof prev.dailyReportAuto === 'object') {
+    merged.dailyReportAuto = prev.dailyReportAuto;
+  }
   // Web Push 订阅只允许 /api/push 增删。普通账本保存不携带该字段，
   // 不能用客户端快照把服务端已绑定的设备订阅清空。
   if (Array.isArray(prev.pushSubs)) merged.pushSubs = prev.pushSubs;
@@ -281,7 +288,10 @@ export function applyClientAccountSave(
       ...evidenceSnapshotsFromData(incoming),
     },
   );
-  const settings = mergeAutoRefreshSettings(prev.settings || {}, incoming.settings || {});
+  const settings = mergeDailyReportScheduleSettings(
+    prev.settings || {},
+    mergeAutoRefreshSettings(prev.settings || {}, incoming.settings || {}),
+  );
   for (const key of [
     'advAuto.holdLastAt', 'advAuto.holdLastTryAt',
     'advAuto.watchLastAt', 'advAuto.watchLastTryAt',
@@ -996,10 +1006,18 @@ export default async function handler(req, res) {
         );
         if (!applied.ok) {
           const refreshPatch = newerAutoRefreshPatch(acc.data?.settings || {}, incoming.settings || {});
+          const dailyReportPatch = newerDailyReportSchedulePatch(
+            acc.data?.settings || {},
+            incoming.settings || {},
+          );
           let settingsSaved = false;
-          if (refreshPatch) {
+          if (refreshPatch || dailyReportPatch) {
             acc.data = acc.data || {};
-            acc.data.settings = { ...(acc.data.settings || {}), ...refreshPatch };
+            acc.data.settings = {
+              ...(acc.data.settings || {}),
+              ...(refreshPatch || {}),
+              ...(dailyReportPatch || {}),
+            };
             await writeAccount(acc);
             settingsSaved = true;
           }

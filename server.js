@@ -18,6 +18,8 @@ import {
   alertTimerBody,
   adviceTimerBody,
   adviceWorkerBody,
+  dailyReportTimerBody,
+  dailyReportWorkerBody,
   portfolioAnalysisTimerBody,
   portfolioAnalysisWorkerBody,
   reviewTimerBody,
@@ -328,6 +330,10 @@ async function handleRequest(req, res) {
     try { event = JSON.parse(raw || '{}'); } catch { /* ignore */ }
     const adviceBody = adviceTimerBody(event, process.env.CRON_KEY)
       || adviceWorkerBody(event, process.env.CRON_KEY);
+    const dailyReportBody = dailyReportTimerBody(
+      event,
+      process.env.CRON_KEY,
+    ) || dailyReportWorkerBody(event, process.env.CRON_KEY);
     const v2Body = v2AccuracyTimerBody(event, process.env.CRON_KEY);
     const alertBody = alertTimerBody(event, process.env.CRON_KEY);
     const reviewBody = reviewTimerBody(event, process.env.CRON_KEY);
@@ -341,6 +347,7 @@ async function handleRequest(req, res) {
     ) || portfolioAnalysisTimerBody(event, process.env.CRON_KEY);
     if (
       !adviceBody
+      && !dailyReportBody
       && !v2Body
       && !alertBody
       && !reviewBody
@@ -349,6 +356,7 @@ async function handleRequest(req, res) {
     ) { res.statusCode = 403; res.end('forbidden'); return; }
     req.query = {};
     req.body = adviceBody
+      || dailyReportBody
       || v2Body
       || alertBody
       || reviewBody
@@ -361,15 +369,17 @@ async function handleRequest(req, res) {
     try {
       const handlerName = adviceBody
         ? 'cron_advice'
-        : v2Body
-          ? 'cron_v2_accuracy'
-          : alertBody
-            ? 'cron_alert'
-            : reviewBody
-              ? 'cron_review'
-              : sectorForecastBody
-                ? 'sector_forecast'
-                : 'portfolio_analysis';
+        : dailyReportBody
+          ? 'cron_daily_report'
+          : v2Body
+            ? 'cron_v2_accuracy'
+            : alertBody
+              ? 'cron_alert'
+              : reviewBody
+                ? 'cron_review'
+                : sectorForecastBody
+                  ? 'sector_forecast'
+                  : 'portfolio_analysis';
       await handlers[handlerName](req, res);
     } catch (e) {
       console.error('[fc] invoke handler failed', e?.code || e?.name || e?.message);

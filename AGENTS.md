@@ -141,6 +141,7 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST "$FC/api/ai" -H "Content-Type: 
 
 ### 定时任务
 - 盯盘预警：`s.yaml` 的 FC Timer 在工作日 09:30–11:30、13:00–15:00 每分钟触发。
+- 策略日报：`daily-report-schedule-timer` 每 5 分钟检查账号级盘前/午间/收盘计划，到期后异步生成。
 - 每日重训：GitHub Actions `daily-retrain.yml`，仓库 Settings→Secrets 配好 `OSS_*` 后自动生效。
 
 ---
@@ -151,6 +152,8 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST "$FC/api/ai" -H "Content-Type: 
 - **角色端点严格隔离**（`_llm_pool.js`）：请求只能进入本角色槽位，禁止跨角色回退；`advisor` 两路按最少在途调度，连续失败 3 次冷却 60 秒并自动半开恢复。旧 `baseUrl` / `endpoints` / `judgeEndpoint` / `sectorEndpoint` 只允许迁移读取，不得作为新功能配置入口。
 - **军师生成模式决定推理模式**：普通生成必须强制关闭深度思考、最多两次尝试且不等待委员会；只有用户显式选择深度研判才开启深度思考和三角色委员会。`advisor` 端点不得被持仓诊断或其他角色借用。
 - **策略日报是军师软证据**：快速建议不得等待或自动生成策略日报；深度研判可尝试补齐，但日报缺失、超时或内容不完整只能降级该证据，禁止阻断个股行情、量化和军师主模型。
+- **策略日报必须可追溯且可降级**：`daily-report.v2` 先汇总公司公告、行情/资金、行业新闻、国内外快讯与豆包搜索，再用 `E##` 编号绑定结论。公告/政策优先，豆包摘要只作待核验线索；模型缺字段、引用不存在编号或使用证据包外行情数字时必须重试，仍失败则返回明确标记的规则化证据摘要，禁止整页假成功或无依据扩写。
+- **日报自动计划按账号隔离**：配置保存在 `settings["dailyReport.schedule"]`，默认关闭；`daily-report-schedule-timer` 每五分钟只判断到期场次并异步分发独立 Worker。盘前可每日运行，午间/收盘仅交易日运行；同一 `日期:场次` 使用租约、完成记录和最多三次尝试防重，不得占用 `advisor` 端点。
 - **军师事件幂等**：相同用户请求在任务终态后仍不得重复创建；Judge `confirm` 只推进确定性执行状态，不重新调用军师，只有 `invalid`/计划冲突或证据快照之后的新实质事件才允许续跑。
 - **人工执行状态**（`executionPlan.js` / `executionPlanStore.js`）：`USER_CONFIRMED` 只表示用户确认人工计划，不代表券商已报单；`PARTIALLY_RECORDED/COMPLETED` 只能由真实人工成交推进。执行计划与归因按成交进度、状态历史和时间合并，禁止旧设备回滚完成状态。
 - **账户执行风控**（`accountCircuitBreaker.js` / `executionAttribution.js`）：未完成买入占用现金，未完成卖出不得提前释放现金；账户熔断只阻止新增风险，不阻止减仓/退出。只有完整且已核验的真实费后结果可进入策略学习。

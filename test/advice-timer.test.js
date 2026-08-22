@@ -5,6 +5,8 @@ import {
   alertTimerBody,
   adviceTimerBody,
   adviceWorkerBody,
+  dailyReportTimerBody,
+  dailyReportWorkerBody,
   reviewTimerBody,
   sectorForecastTimerBody,
   v2AccuracyTimerBody,
@@ -91,6 +93,42 @@ test('异步建议Worker事件只恢复指定账号且必须验证内部密钥',
   })
   assert.equal(adviceWorkerBody(event, 'wrong-key'), null)
   assert.equal(adviceWorkerBody({ ...event, nick: '' }, 'secret-key'), null)
+})
+
+test('日报定时扫描只接受专用触发器和匹配密钥', () => {
+  const event = {
+    triggerName: 'daily-report-schedule-timer',
+    payload: 'secret-key',
+  }
+
+  assert.deepEqual(
+    dailyReportTimerBody(event, 'secret-key'),
+    { scheduled: true },
+  )
+  assert.equal(dailyReportTimerBody(event, 'wrong-key'), null)
+  assert.equal(dailyReportTimerBody({
+    ...event,
+    triggerName: 'other',
+  }, 'secret-key'), null)
+})
+
+test('异步日报Worker事件只运行指定账号与场次', () => {
+  const event = {
+    source: 'stock-dashboard.daily-report-worker',
+    key: 'secret-key',
+    nick: '测试账号',
+    session: 'morning',
+    runKey: '2026-08-24:morning',
+  }
+
+  assert.deepEqual(dailyReportWorkerBody(event, 'secret-key'), {
+    dailyReportWorker: true,
+    nick: '测试账号',
+    session: 'morning',
+    runKey: '2026-08-24:morning',
+  })
+  assert.equal(dailyReportWorkerBody(event, 'wrong-key'), null)
+  assert.equal(dailyReportWorkerBody({ ...event, session: 'other' }, 'secret-key'), null)
 })
 
 test('自动复盘Timer只接受午间和收盘专用触发器', () => {

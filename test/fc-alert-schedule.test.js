@@ -49,3 +49,13 @@ test('板块前瞻每五分钟唤醒且具体时间由OSS设置决定', () => {
   assert.match(server, /sectorForecastTimerBody\(/)
   assert.match(server, /sectorForecastBody[\s\S]*'sector_forecast'/)
 })
+
+test('策略日报每五分钟检查账号计划并路由到独立日报Worker', () => {
+  const config = read('s.yaml')
+  const server = read('server.js')
+
+  assert.ok(config.includes('- triggerName: daily-report-schedule-timer'))
+  assert.match(server, /dailyReportTimerBody\(/)
+  assert.match(server, /dailyReportWorkerBody\(/)
+  assert.match(server, /dailyReportBody[\s\S]*'cron_daily_report'/)
+})

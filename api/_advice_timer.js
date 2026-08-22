@@ -14,6 +14,34 @@ export function adviceWorkerBody(event, cronKey) {
   return { resumeOnly: true, worker: true, nick };
 }
 
+export function dailyReportWorkerBody(event, cronKey) {
+  if (!cronKey || !event || typeof event !== 'object') return null;
+  if (event.source !== 'stock-dashboard.daily-report-worker') return null;
+  if (String(event.key || '') !== String(cronKey)) return null;
+  const nick = String(event.nick || '').trim();
+  const session = String(event.session || '').trim();
+  const runKey = String(event.runKey || '').trim();
+  if (
+    !nick
+    || !['morning', 'noon', 'evening'].includes(session)
+    || !/^\d{4}-\d{2}-\d{2}:(morning|noon|evening)$/.test(runKey)
+    || !runKey.endsWith(`:${session}`)
+  ) return null;
+  return {
+    dailyReportWorker: true,
+    nick,
+    session,
+    runKey,
+  };
+}
+
+export function dailyReportTimerBody(event, cronKey) {
+  if (!cronKey || !event || typeof event !== 'object') return null;
+  if (event.triggerName !== 'daily-report-schedule-timer') return null;
+  if (String(event.payload || '') !== String(cronKey)) return null;
+  return { scheduled: true };
+}
+
 export function portfolioAnalysisWorkerBody(event, cronKey) {
   if (!cronKey || !event || typeof event !== 'object') return null;
   if (
