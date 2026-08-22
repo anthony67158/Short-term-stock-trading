@@ -24,6 +24,9 @@ import {
   queueAdviceReviewForVerdict,
 } from './_advice_wakeup.js';
 import { scheduleAdviceWorker } from './cron_advice.js';
+import {
+  decisionPlanConfirmationGate,
+} from '../shared/decisionPlan.js';
 
 const rateWindows = new Map();
 const RATE_WINDOW_MS = 60 * 1000;
@@ -238,6 +241,24 @@ export default async function handler(req, res) {
         );
       } catch { /* 前端仍收到保守判定，云端Timer兜底 */ }
       return res.status(200).send(JSON.stringify(verdict));
+    }
+    const decisionGate = decisionPlanConfirmationGate(
+      advice.decisionPlan,
+      sideOf(alert),
+    );
+    if (!decisionGate.allowed) {
+      return res.status(200).send(JSON.stringify({
+        ok: true,
+        decision: 'wait',
+        confidence: 100,
+        reason: decisionGate.reason,
+        side: sideOf(alert),
+        source: 'decision-plan',
+        policy: decisionGate.policy,
+        knowledgeAction: buildJudgeKnowledgeActionAssessment(
+          advice.knowledgeActionPlan || advice,
+        ),
+      }));
     }
     const clientStatus = alert.sellableTodayQty != null ? {
       liveQty: (alert.sellableTodayQty || 0) + (alert.boughtTodayQty || 0),

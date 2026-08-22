@@ -129,6 +129,36 @@ function modelSummary(advice) {
   }
 }
 
+function decisionPlanSummary(plan) {
+  if (plan?.schemaVersion !== 'decision-plan.v2') return null
+  const actionability = clean(plan.actionability, 30)
+  const statusText = actionability === 'READY'
+    ? '已通过确定性策略与风险校验'
+    : actionability === 'RESEARCH_ONLY'
+      ? (plan.blockedReasons || []).join('；') || '仅供研究，尚未通过生产晋级'
+      : actionability === 'BLOCKED'
+        ? (plan.blockedReasons || []).join('；') || '确定性闸门未通过'
+        : '等待触发条件'
+  return {
+    decisionId: clean(plan.decisionId, 100),
+    action: clean(plan.action, 30),
+    actionLabel: clean(plan.actionLabel, 40),
+    actionability,
+    statusText: clean(statusText, 320),
+    strategyId: clean(plan.strategy?.strategyId, 80),
+    specVersion: clean(plan.strategy?.specVersion, 80),
+    strategySignalPassed: plan.strategy?.signalPassed,
+    productionEligible: plan.strategy?.productionEligible === true,
+    marketRegime: clean(plan.marketRegime?.label, 40),
+    marketScore: displayNumber(plan.marketRegime?.score),
+    asOf: clean(plan.asOf, 40),
+    validUntil: clean(plan.validUntil, 40),
+    maxLossAmount: displayNumber(plan.risk?.maxLossAmount),
+    budgetPct: displayNumber(plan.risk?.budgetPct),
+    estimatedFees: displayNumber(plan.costs?.estimatedFees),
+  }
+}
+
 export function trustCalibrationText(trust = {}) {
   if (trust?.calibrated !== true) return ''
   const samples = Number(trust.calibrationSamples)
@@ -138,6 +168,41 @@ export function trustCalibrationText(trust = {}) {
 }
 
 export function buildAdvicePresentation(advice = {}) {
+  const plan = advice.decisionPlan?.schemaVersion === 'decision-plan.v2'
+    ? advice.decisionPlan
+    : null
+  const planAdvice = plan ? {
+    ...advice,
+    action: plan.actionability === 'RESEARCH_ONLY'
+      ? `研究级·${plan.actionLabel || '建议'}`
+      : plan.actionability === 'BLOCKED'
+        ? '观望'
+        : plan.actionLabel || advice.action,
+    planQty: plan.quantity?.lots,
+    opQty: plan.action === 'BUY'
+      ? null
+      : plan.quantity?.lots > 0
+        ? `${plan.actionLabel || '操作'}${plan.quantity.lots}手`
+        : '无需操作',
+    planAmount: plan.costs?.estimatedNetAmount,
+    opAmount: plan.costs?.estimatedNetAmount,
+    planWeight: (
+      plan.currentWeightPct != null
+      && plan.targetWeightPct != null
+    )
+      ? `${plan.currentWeightPct}% → ${plan.targetWeightPct}%`
+      : advice.planWeight,
+    buyZone: null,
+    buyPrice: plan.prices?.reference,
+    addPrice: plan.action === 'ADD'
+      ? plan.prices?.reference
+      : advice.addPrice,
+    reducePrice: ['REDUCE', 'EXIT'].includes(plan.action)
+      ? plan.prices?.reference
+      : advice.reducePrice,
+    stopPrice: plan.prices?.stop,
+    targetPrice: plan.prices?.target,
+  } : advice
   const contract = advice.knowledgeActionPlan || {}
   const review = advice.reviewCycle && typeof advice.reviewCycle === 'object'
     ? {
@@ -152,29 +217,29 @@ export function buildAdvicePresentation(advice = {}) {
     : null
   return {
     verdict: {
-      action: first(advice.action, advice.stance),
+      action: first(planAdvice.action, planAdvice.stance),
       title: first(
-        advice.title,
-        advice.headline,
-        advice.action,
-        advice.stance,
+        planAdvice.title,
+        planAdvice.headline,
+        planAdvice.action,
+        planAdvice.stance,
       ),
-      tone: first(advice.tone, 'muted'),
-      confidence: first(advice.confidence),
+      tone: first(planAdvice.tone, 'muted'),
+      confidence: first(planAdvice.confidence),
     },
     execution: {
       instruction: first(
-        advice.actionPlan,
-        advice.nextAction,
-        advice.timing,
+        planAdvice.actionPlan,
+        planAdvice.nextAction,
+        planAdvice.timing,
         contract.executionPlan,
       ),
-      quantity: quantity(advice),
-      amount: first(advice.opAmount, advice.planAmount),
+      quantity: quantity(planAdvice),
+      amount: first(planAdvice.opAmount, planAdvice.planAmount),
       position: first(
-        advice.posAfter,
-        advice.planWeight,
-        advice.positionNote,
+        planAdvice.posAfter,
+        planAdvice.planWeight,
+        planAdvice.positionNote,
         contract.positionRule,
       ),
     },
@@ -190,7 +255,7 @@ export function buildAdvicePresentation(advice = {}) {
         text: clean(advice.futurePlan),
       },
     ].filter(Boolean),
-    levels: priceLevels(advice),
+    levels: priceLevels(planAdvice),
     trigger: {
       condition: first(
         contract.triggerConditions,
@@ -209,6 +274,7 @@ export function buildAdvicePresentation(advice = {}) {
     },
     evidence: coreEvidence(advice),
     model: modelSummary(advice),
+    decisionPlan: decisionPlanSummary(plan),
     review,
   }
 }

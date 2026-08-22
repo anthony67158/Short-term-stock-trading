@@ -137,6 +137,47 @@ function RiskOverlay({ risk }) {
   )
 }
 
+function DecisionPlanSummary({ plan }) {
+  if (!plan) return null
+  const statusLabel = {
+    READY: '确定性校验通过',
+    RESEARCH_ONLY: '研究级条件建议',
+    BLOCKED: '已被确定性闸门阻止',
+    WATCH: '等待触发',
+  }[plan.actionability] || '等待确认'
+  const statusTone = plan.actionability === 'READY'
+    ? 'ready'
+    : plan.actionability === 'BLOCKED'
+      ? 'blocked'
+      : plan.actionability === 'RESEARCH_ONLY' ? 'research' : 'watch'
+  return (
+    <section
+      className={`advice-decision-plan ${statusTone}`}
+      aria-label="统一决策计划"
+    >
+      <div className="adp-head">
+        <span><Icon name="shield" size={12} /> 统一决策计划</span>
+        <b>{statusLabel}</b>
+      </div>
+      <div className="adp-facts">
+        {plan.marketRegime && (
+          <span>市场 <b>{plan.marketRegime}{plan.marketScore ? ` ${plan.marketScore}分` : ''}</b></span>
+        )}
+        {plan.strategyId && (
+          <span>策略 <b>{plan.strategyId}</b></span>
+        )}
+        {plan.maxLossAmount && (
+          <span>风险预算 <b>¥{Number(plan.maxLossAmount).toLocaleString('zh-CN')}</b></span>
+        )}
+        {plan.estimatedFees && (
+          <span>预计费用 <b>¥{plan.estimatedFees}</b></span>
+        )}
+      </div>
+      <p>{plan.statusText}</p>
+    </section>
+  )
+}
+
 function TheoryReferences({ references }) {
   const items = Array.isArray(references)
     ? references.filter((item) => item?.book && item?.topic).slice(0, 6)
@@ -200,6 +241,7 @@ export default function AdvicePresentation({
       <Continuity continuity={advice.continuity} />
       <ReviewCycle review={view.review} enabled={reviewEnabled} />
       <DecisionContext context={advice.decisionContext} />
+      <DecisionPlanSummary plan={view.decisionPlan} />
       <RiskOverlay risk={advice.riskOverlay} />
 
       {view.model && (

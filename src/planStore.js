@@ -2019,6 +2019,13 @@ export const planStore = {
   //   AI 买价变化时(≠ alertSyncedPrice)才会重新同步/重新武装。
   autoSyncCandAlert(code, name, buyPrice, advice = null) {
     if (buyPrice == null || isNaN(buyPrice)) return
+    if (
+      advice?.decisionPlan?.schemaVersion === 'decision-plan.v2'
+      && advice.decisionPlan.actionability !== 'READY'
+    ) {
+      this.clearCandBuyAlert(code)
+      return
+    }
     if (state.settings && state.settings.aiAutoAlert === false) return // 全局关闭 AI 自动预警
     const judgeContext = buildJudgeAdviceContext(advice || {})
     const triggerZone = judgeContext.addZone
@@ -2106,6 +2113,14 @@ export const planStore = {
     let adv = null
     try { adv = (getAdvice(code, 'hold_advice') || {}).advice } catch { adv = null }
     if (!adv) { state.alerts = rest; emit(); return }
+    if (
+      adv.decisionPlan?.schemaVersion === 'decision-plan.v2'
+      && adv.decisionPlan.actionability !== 'READY'
+    ) {
+      state.alerts = rest
+      emit()
+      return
+    }
     const holder = state.holding.find((x) => x.code === code)
     const liveStatus = t1StatusOf(code)
     if (!holder || !(liveStatus.liveQty > 0)) {

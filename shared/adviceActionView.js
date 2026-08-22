@@ -135,20 +135,59 @@ function triggerFor(kind, levels) {
 }
 
 export function buildAdviceActionView(advice = {}, { mode = '' } = {}) {
-  const kind = actionKind(advice, mode)
-  const levels = levelsFor(kind, advice)
+  const plan = advice.decisionPlan?.schemaVersion === 'decision-plan.v2'
+    ? advice.decisionPlan
+    : null
+  const planAction = {
+    BUY: '买入',
+    ADD: '加仓',
+    HOLD: '持有',
+    REDUCE: '减仓',
+    EXIT: '清仓',
+    T_BUY_FIRST: '买回',
+    T_SELL_FIRST: '减仓',
+    WATCH: '观望',
+  }[plan?.action]
+  const source = plan ? {
+    ...advice,
+    action: plan.actionability === 'BLOCKED'
+      ? '观望'
+      : planAction || advice.action,
+    planQty: plan.quantity?.lots,
+    planQtyNum: plan.quantity?.lots,
+    opQty: plan.action === 'BUY'
+      ? advice.opQty
+      : plan.quantity?.lots > 0
+        ? `${planAction || '操作'}${plan.quantity.lots}手`
+        : '无需操作',
+    buyPrice: plan.action === 'BUY'
+      ? plan.prices?.reference
+      : advice.buyPrice,
+    addPrice: plan.action === 'ADD'
+      ? plan.prices?.reference
+      : advice.addPrice,
+    reducePrice: ['REDUCE', 'EXIT', 'T_SELL_FIRST'].includes(plan.action)
+      ? plan.prices?.reference
+      : advice.reducePrice,
+    stopPrice: plan.prices?.stop,
+    targetPrice: plan.prices?.target,
+  } : advice
+  const kind = actionKind(source, mode)
+  const levels = levelsFor(kind, source)
   const buySide = kind === 'buy'
   const quantity = buySide
-    ? quantityText(advice.planQtyNum ?? advice.planQty)
-    : quantityText(advice.opQty)
-  const action = clean(advice.action || advice.stance, 80)
+    ? quantityText(source.planQtyNum ?? source.planQty)
+    : quantityText(source.opQty)
+  const action = clean(source.action || source.stance, 80)
   const instruction = clean(
-    advice.actionPlan
-      || advice.nextAction
-      || advice.title
-      || advice.headline
-      || advice.timing
-      || advice.reason,
+    plan?.actionability === 'BLOCKED'
+      ? (plan.blockedReasons || []).join('；')
+      : source.actionPlan
+        || source.nextAction
+        || source.title
+        || source.headline
+        || source.timing
+        || source.reason,
   )
   return {
     kind,
@@ -164,6 +203,10 @@ export function buildAdviceActionView(advice = {}, { mode = '' } = {}) {
     quantity,
     levels,
     trigger: triggerFor(kind, levels),
+    actionability: plan?.actionability || null,
+    actionable: plan
+      ? plan.actionability === 'READY'
+      : !['wait', 'hold'].includes(kind),
   }
 }
 

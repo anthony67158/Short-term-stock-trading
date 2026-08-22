@@ -691,6 +691,7 @@ function CandDecision({ p, q }) {
     ? buildAdviceActionView(advice, { mode: 'buy_advice' })
     : null
   const actionable = baseView?.kind === 'buy'
+    && baseView.actionable !== false
   const aiPrice = actionable ? roundActionPrice(advice?.buyPrice) : null
   const aiQty = actionable
     ? actionHands(advice?.planQtyNum ?? advice?.planQty)

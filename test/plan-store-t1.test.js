@@ -148,6 +148,27 @@ test('前端自选股建议不能同步成加仓或减仓行动预警', () => {
   assert.equal(planStore.get().alerts.some((alert) => alert.actCode === '600519'), false)
 })
 
+test('研究级买入计划不会生成可执行买点预警', () => {
+  planStore.setData({
+    plan: [{ code: '600519', name: '贵州茅台' }],
+    holding: [],
+    closed: [],
+    alerts: [],
+  })
+
+  planStore.autoSyncCandAlert('600519', '贵州茅台', 1400, {
+    action: '立即买入',
+    decisionPlan: {
+      schemaVersion: 'decision-plan.v2',
+      action: 'BUY',
+      actionability: 'RESEARCH_ONLY',
+    },
+  })
+
+  assert.equal(planStore.get().alerts.length, 0)
+  assert.equal(planStore.get().plan[0].alertSyncedPrice ?? null, null)
+})
+
 test('做T卖腿同样受今日可卖数量约束', () => {
   const now = Date.now()
   planStore.setData({

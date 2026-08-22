@@ -49,10 +49,26 @@ export function buildJudgeAdviceContext(advice = {}) {
     advice.quantContext,
     advice.quantContext?.selectedModelVersion,
   )
+  const decisionPlan = advice.decisionPlan?.schemaVersion === 'decision-plan.v2'
+    ? {
+        schemaVersion: 'decision-plan.v2',
+        decisionId: text(advice.decisionPlan.decisionId, 100),
+        action: text(advice.decisionPlan.action, 30),
+        actionability: text(advice.decisionPlan.actionability, 30),
+        validUntil: text(advice.decisionPlan.validUntil, 40),
+        blockedReasons: (Array.isArray(advice.decisionPlan.blockedReasons)
+          ? advice.decisionPlan.blockedReasons
+          : [])
+          .map((item) => text(item, 160))
+          .filter(Boolean)
+          .slice(0, 8),
+      }
+    : null
   return {
     ...planContext,
     ...knowledgeActionContext,
     ...(quantContext ? { quantContext } : {}),
+    ...(decisionPlan ? { decisionPlan } : {}),
     action: text(advice.action || advice.stance, 40),
     tier: text(advice.tier, 30),
     title: text(advice.title || advice.headline, 200),

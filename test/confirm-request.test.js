@@ -34,6 +34,14 @@ test('确认接口只保留Judge需要的白名单字段', () => {
       fundNote: '主力资金连续流入',
       bearCase: '跌破支撑则判断错误',
       invalidation: '跌破9.6元失效',
+      decisionPlan: {
+        schemaVersion: 'decision-plan.v2',
+        decisionId: 'decision.test',
+        action: 'ADD',
+        actionability: 'RESEARCH_ONLY',
+        validUntil: '2026-08-21T03:00:00.000Z',
+        blockedReasons: ['策略尚未通过生产晋级'],
+      },
       private: 'drop',
     },
     quote: { price: 10.1, pct: 1, unknown: 'drop' },
@@ -49,6 +57,11 @@ test('确认接口只保留Judge需要的白名单字段', () => {
   assert.equal(result.value.advice.riskReward, '2.5:1')
   assert.equal(result.value.advice.fundNote, '主力资金连续流入')
   assert.equal(result.value.advice.bearCase, '跌破支撑则判断错误')
+  assert.equal(
+    result.value.advice.decisionPlan.actionability,
+    'RESEARCH_ONLY',
+  )
+  assert.equal(result.value.advice.decisionPlan.private, undefined)
   assert.equal(result.value.quote.unknown, undefined)
 })
 
@@ -175,4 +188,51 @@ test('今日无可卖仓位时确认接口直接返回 T+1 等待，不调用 Ju
   assert.equal(response.source, 't1')
   assert.equal(response.policy, 't1-blocked')
   assert.match(response.reason, /今日不可卖/)
+})
+
+test('研究级买入计划不能被Judge升级为执行确认', async () => {
+  let response = null
+  const req = {
+    method: 'POST',
+    headers: {},
+    [TRUSTED_ACCOUNT_REQUEST]: true,
+    socket: { remoteAddress: 'decision-plan-test' },
+    body: {
+      alert: {
+        id: 'a-research',
+        code: '600000',
+        name: '浦发银行',
+        type: 'price',
+        op: 'lte',
+        value: 10,
+        note: '买点',
+        phase: 'watching',
+        watchingAt: Date.now() - 120000,
+        watchingPrice: 10,
+      },
+      advice: {
+        action: '立即买入',
+        decisionPlan: {
+          schemaVersion: 'decision-plan.v2',
+          decisionId: 'decision.research',
+          action: 'BUY',
+          actionability: 'RESEARCH_ONLY',
+        },
+      },
+      quote: { price: 10, pct: 0.5 },
+    },
+  }
+  const res = {
+    setHeader() {},
+    status(code) { this.statusCode = code; return this },
+    send(value) { response = JSON.parse(value); return this },
+    end(value) { response = JSON.parse(value); return this },
+  }
+
+  await confirmSignalHandler(req, res)
+
+  assert.equal(response.ok, true)
+  assert.equal(response.decision, 'wait')
+  assert.equal(response.source, 'decision-plan')
+  assert.equal(response.policy, 'decision-plan-not-ready')
 })

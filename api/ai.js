@@ -78,6 +78,13 @@ import {
   evaluateScheduledReview,
 } from '../shared/adviceIntelligence.js';
 import { deriveMarketRegime } from '../shared/marketRegime.js';
+import { compileDecisionPlan } from '../shared/decisionPlan.js';
+import { getActiveStrategySpec } from '../shared/strategySpec.js';
+import {
+  buildStrategyPromotionGate,
+  CURRENT_STRATEGY_EVALUATION,
+} from '../shared/strategyPromotionGate.js';
+import { councilRecordsFromData } from '../shared/advisorCouncilStore.js';
 
 function avg(arr) { return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0; }
 function std(arr) { if (arr.length < 2) return 0; const m = avg(arr); return Math.sqrt(avg(arr.map((x) => (x - m) ** 2))); }
@@ -600,6 +607,18 @@ export default async function handler(req, res) {
         accountAuth.account.data,
       );
     }
+    const activeStrategySpec = getActiveStrategySpec();
+    const advisorStrategyGate = isAdvisorMode(mode)
+      ? buildStrategyPromotionGate({
+          evaluation: CURRENT_STRATEGY_EVALUATION,
+          realOutcomeLearning: payload.realOutcomeLearning || {},
+          councilRecords: councilRecordsFromData(
+            accountAuth.account?.data || {},
+          ),
+          humanApproval:
+            accountAuth.account?.data?.strategyHumanApproval || null,
+        })
+      : null;
     const streaming = !!(body && body.stream); // 客户端可选开启 SSE 进度流
     const evidenceAccountRevision = resolveEvidenceAccountRevision(
       payload,
@@ -1373,6 +1392,15 @@ export default async function handler(req, res) {
       todayQuote: payload.todayQuote || null,
       dailyReport: payload.dailyReport ? { sessionCn: payload.dailyReport.sessionCn, day: payload.dailyReport.day } : null,
       quantResult: payload.quant || null,
+      strategyGate: advisorStrategyGate ? {
+        strategyId: advisorStrategyGate.strategyId,
+        specVersion: advisorStrategyGate.specVersion,
+        productionEligible: advisorStrategyGate.productionEligible,
+        decision: advisorStrategyGate.decision,
+        blockerCodes: advisorStrategyGate.blockers
+          .map((item) => item.code)
+          .slice(0, 12),
+      } : null,
     };
     const scheduledReviewEvaluation = evaluateScheduledReview({
       origin: payload.reviewOrigin,
@@ -1954,6 +1982,14 @@ export default async function handler(req, res) {
       result.knowledgeActionScore = scoreKnowledgeActionPlan(
         result.knowledgeActionPlan,
       );
+      result.decisionPlan = compileDecisionPlan({
+        mode,
+        advice: result,
+        payload,
+        evidenceSnapshot: currentEvidenceSnapshot,
+        strategySpec: activeStrategySpec,
+        strategyGate: advisorStrategyGate || {},
+      });
     }
     // 明确输出「买入手数」的规范化整数字段:planQty 原文常为 "5手"/"约5手"/"5~8手" 等字符串,
     // 这里抽取首个整数为 planQtyNum,供自选卡「买入手数」直接消费,避免 Number() 得 NaN。

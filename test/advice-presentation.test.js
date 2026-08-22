@@ -217,3 +217,58 @@ test('军师模型摘要直接展示本次采用的生产模型次日预测', ()
     '次日 08-20 · 震荡 · 上涨49% · 预期-0.36% · 49.17~58.08',
   )
 })
+
+test('决策计划v2优先提供最终动作手数费用和策略等级', () => {
+  const view = buildAdvicePresentation({
+    action: '立即买入',
+    title: '模型建议买入',
+    actionPlan: '买入10手',
+    planQty: 10,
+    planAmount: 10000,
+    decisionPlan: {
+      schemaVersion: 'decision-plan.v2',
+      decisionId: 'decision.demo',
+      action: 'BUY',
+      actionLabel: '买入',
+      actionability: 'RESEARCH_ONLY',
+      asOf: '2026-08-21T02:30:00.000Z',
+      validUntil: '2026-08-21T02:45:00.000Z',
+      strategy: {
+        strategyId: 'market-quant-resonance',
+        specVersion: 'strategy.15im9g7',
+        productionEligible: false,
+        signalPassed: true,
+      },
+      marketRegime: {
+        regime: 'TREND_STRONG',
+        label: '强势趋势',
+        score: 76,
+      },
+      quantity: { lots: 5, requestedLots: 10 },
+      prices: { reference: 10, stop: 9, target: 12 },
+      currentWeightPct: 0,
+      targetWeightPct: 5,
+      deltaWeightPct: 5,
+      risk: { maxLossAmount: 600, budgetPct: 0.6 },
+      costs: {
+        side: 'BUY',
+        estimatedNetAmount: 5010,
+        estimatedFees: 7.5,
+      },
+      blockedReasons: ['策略尚未通过生产晋级，仅作为研究级条件建议'],
+      trigger: '回踩企稳',
+      invalidation: '跌破9元',
+    },
+  })
+
+  assert.equal(view.verdict.action, '研究级·买入')
+  assert.equal(view.execution.quantity, '5手')
+  assert.equal(view.execution.amount, '5010')
+  assert.equal(view.execution.position, '0% → 5%')
+  assert.equal(view.decisionPlan.actionability, 'RESEARCH_ONLY')
+  assert.match(view.decisionPlan.statusText, /未通过生产晋级/)
+  assert.deepEqual(
+    view.levels.map((item) => item.value),
+    ['10', '12', '9'],
+  )
+})

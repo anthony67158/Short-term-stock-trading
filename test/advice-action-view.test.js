@@ -210,6 +210,53 @@ test('持有建议缺少回踩价时使用止损线补全观察区间', () => {
   })
 })
 
+test('研究级买入计划保留价格研究但不进入可执行状态', () => {
+  const view = buildAdviceActionView({
+    action: '立即买入',
+    buyPrice: 10,
+    stopPrice: 9,
+    targetPrice: 12,
+    planQty: 5,
+    actionPlan: '立即买入5手',
+    decisionPlan: {
+      schemaVersion: 'decision-plan.v2',
+      action: 'BUY',
+      actionLabel: '买入',
+      actionability: 'RESEARCH_ONLY',
+      quantity: { lots: 3 },
+      prices: { reference: 10, stop: 9, target: 12 },
+    },
+  }, { mode: 'buy_advice' })
+
+  assert.equal(view.kind, 'buy')
+  assert.equal(view.actionable, false)
+  assert.equal(view.quantity, '3手')
+  assert.equal(view.trigger.price, 10)
+})
+
+test('被决策内核阻断的买入建议统一降级为观望', () => {
+  const view = buildAdviceActionView({
+    action: '立即买入',
+    buyPrice: 10,
+    planQty: 5,
+    actionPlan: '立即买入5手',
+    decisionPlan: {
+      schemaVersion: 'decision-plan.v2',
+      action: 'WATCH',
+      actionLabel: '观望',
+      actionability: 'BLOCKED',
+      quantity: { lots: 0 },
+      prices: { reference: 10, stop: 9, target: 12 },
+      blockedReasons: ['策略入场条件未通过'],
+    },
+  }, { mode: 'buy_advice' })
+
+  assert.equal(view.kind, 'wait')
+  assert.equal(view.actionable, false)
+  assert.equal(view.quantity, '')
+  assert.equal(view.trigger.direction, 'inactive')
+})
+
 test('动作进度按买入向下、减仓向上和持有区间分别计算', () => {
   const buy = buildActionProgress({
     direction: 'lte',
