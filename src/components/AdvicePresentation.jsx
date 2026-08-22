@@ -285,6 +285,9 @@ export default function AdvicePresentation({
     || advice.theoryNote
     || advice.bearCase
     || advice.risk
+    || view.model
+    || view.decisionPlan
+    || view.review
     || view.planSteps.length > 0,
   )
 
@@ -295,11 +298,13 @@ export default function AdvicePresentation({
         aria-label="军师执行摘要"
       >
         <div className="advice-command-head">
-          <span className={`dv-badge ${view.verdict.tone}`}>
-            {view.verdict.action || '等待'}
-          </span>
-          <div className="advice-command-title">
-            {view.verdict.title || '暂无明确结论'}
+          <div className="advice-command-verdict">
+            <span className={`dv-badge ${view.verdict.tone}`}>
+              {view.verdict.action || '等待'}
+            </span>
+            <div className="advice-command-title">
+              {view.verdict.title || '暂无明确结论'}
+            </div>
           </div>
           {view.verdict.confidence && (
             <span className="advice-confidence">
@@ -307,33 +312,37 @@ export default function AdvicePresentation({
             </span>
           )}
         </div>
-        <div className="advice-command-label">
-          <Icon name="target" size={13} /> 执行摘要
-        </div>
-        <div className="advice-command-instruction">
-          <HL text={
-            view.execution.instruction
-            || '本次无需操作，等待触发条件出现后再行动。'
-          } />
-        </div>
-        {(view.execution.quantity || view.execution.amount || advice.riskReward) && (
-          <div className="advice-execution-metrics">
-            {view.execution.quantity && (
-              <span>操作 <b>{view.execution.quantity}</b></span>
-            )}
-            {view.execution.amount && (
-              <span>资金 <b>{view.execution.amount}</b></span>
-            )}
-            {advice.riskReward && (
-              <span>盈亏比 <b>{advice.riskReward}</b></span>
+        <div className="advice-command-body">
+          <div className="advice-command-copy">
+            <div className="advice-command-label">
+              <Icon name="target" size={13} /> 执行指令
+            </div>
+            <div className="advice-command-instruction">
+              <HL text={
+                view.execution.instruction
+                || '本次无需操作，等待触发条件出现后再行动。'
+              } />
+            </div>
+            {view.execution.position && (
+              <div className="advice-execution-position">
+                <span>执行后仓位</span><HL text={view.execution.position} />
+              </div>
             )}
           </div>
-        )}
-        {view.execution.position && (
-          <div className="advice-execution-position">
-            <span>仓位</span><HL text={view.execution.position} />
-          </div>
-        )}
+          {(view.execution.quantity || view.execution.amount || advice.riskReward) && (
+            <div className="advice-execution-metrics">
+              {view.execution.quantity && (
+                <span>操作 <b>{view.execution.quantity}</b></span>
+              )}
+              {view.execution.amount && (
+                <span>资金 <b>{view.execution.amount}</b></span>
+              )}
+              {advice.riskReward && (
+                <span>盈亏比 <b>{advice.riskReward}</b></span>
+              )}
+            </div>
+          )}
+        </div>
         <ExecutionPlanControl
           plan={view.executionPlan}
           storedPlan={executionPlanState}
@@ -343,38 +352,44 @@ export default function AdvicePresentation({
 
       <RiskOverlay risk={advice.riskOverlay} />
 
-      {view.levels.length > 0 && (
-        <section className="advice-levels" aria-label="关键价位">
-          <div className="advice-section-title">关键价位</div>
-          <div className="advice-prices compact">
-            {view.levels.map((level) => (
-              <div className={'ap-cell ' + level.key} key={level.key}>
-                <span className="ap-k">{level.label}</span>
-                <span className={'ap-v ' + level.tone}>{level.value}</span>
+      {(view.levels.length > 0 || hasTrigger) && (
+        <div className="advice-tactical-grid">
+          {view.levels.length > 0 && (
+            <section className="advice-levels" aria-label="关键价位">
+              <div className="advice-section-title">关键价位</div>
+              <div className="advice-prices compact">
+                {view.levels.map((level) => (
+                  <div className={'ap-cell ' + level.key} key={level.key}>
+                    <span className="ap-k">{level.label}</span>
+                    <span className={'ap-v ' + level.tone}>{level.value}</span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        </section>
-      )}
+            </section>
+          )}
 
-      {hasTrigger && (
-        <section className="advice-trigger" aria-label="触发与失效">
-          <div className="advice-section-title"><Icon name="shield" size={13} /> 触发与失效</div>
-          <div className="advice-trigger-rows">
-            {view.trigger.condition && (
-              <div><span>触发</span><HL text={view.trigger.condition} /></div>
-            )}
-            {view.trigger.confirmation && (
-              <div><span>确认</span><HL text={view.trigger.confirmation} /></div>
-            )}
-            {view.trigger.invalidation && (
-              <div className="invalid"><span>失效</span><HL text={view.trigger.invalidation} /></div>
-            )}
-            {view.trigger.validationWindow && (
-              <div><span>验证</span>{view.trigger.validationWindow}</div>
-            )}
-          </div>
-        </section>
+          {hasTrigger && (
+            <section className="advice-trigger" aria-label="触发与失效">
+              <div className="advice-section-title">
+                <Icon name="shield" size={13} /> 触发与失效
+              </div>
+              <div className="advice-trigger-rows">
+                {view.trigger.condition && (
+                  <div><span>触发</span><HL text={view.trigger.condition} /></div>
+                )}
+                {view.trigger.confirmation && (
+                  <div><span>确认</span><HL text={view.trigger.confirmation} /></div>
+                )}
+                {view.trigger.invalidation && (
+                  <div className="invalid"><span>失效</span><HL text={view.trigger.invalidation} /></div>
+                )}
+                {view.trigger.validationWindow && (
+                  <div><span>验证</span>{view.trigger.validationWindow}</div>
+                )}
+              </div>
+            </section>
+          )}
+        </div>
       )}
 
       {view.evidence.length > 0 && (

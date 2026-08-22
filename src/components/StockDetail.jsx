@@ -33,7 +33,6 @@ import {
 import { AlertForm } from './AlertCenter'
 import { portfolioExposureContext } from '../../shared/portfolioExposure.js'
 import { isAdviceReviewEnabled } from '../../shared/adviceReviewPolicy.js'
-import { visibleAiSources } from '../../shared/aiSearchUi.js'
 import { useAiSearchConfig } from '../aiSearchConfigStore'
 import { trustCalibrationText } from '../../shared/advicePresentation.js'
 import { adviceTrustBands } from '../../shared/adviceIntelligence.js'
@@ -165,10 +164,12 @@ export default function StockDetail({ stock, onClose }) {
         const r = getRunning(code)
         setQuantState(mergeAdviceRefreshState({
           loading: true,
+          stage: r?.stage || 'preparing',
           phase: r && r.phase,
           sources: (r && r.sources) || [],
           reasoning: (r && r.reasoning) || '',
           quant: (r && r.quant) || null,
+          deepMode: r?.deepMode === true,
         }, cachedState))
         return
       }
@@ -231,6 +232,8 @@ export default function StockDetail({ stock, onClose }) {
     setQuantState(mergeAdviceRefreshState({
       loading: true,
       cloud: true,
+      stage: 'preparing',
+      deepMode,
       phase: '正在提交云端生成任务…',
       sources: [],
       reasoning: '',
@@ -339,17 +342,26 @@ export default function StockDetail({ stock, onClose }) {
       deepMode,
     })
     if (r?.mode === 'server') {
+      const acceptedState = cloudAdviceLoadingState({
+        ...(r.progress || {}),
+        serverMode: true,
+      }, stock.code)
       setQuantState(mergeAdviceRefreshState({
         loading: true,
         cloud: true,
+        stage: acceptedState?.stage || 'queued',
+        deepMode: acceptedState?.deepMode ?? deepMode,
         phase: r.status === 'queued'
           ? (r.error || '任务已排队，等待云端Worker恢复')
           : r.status === 'already'
             ? '云端已有同一任务，正在恢复实时进度'
-            : '云端已受理，刷新或切到后台也会继续生成',
-        sources: [],
-        reasoning: '',
-        quant: null,
+            : (
+                acceptedState?.phase
+                || '云端已受理，刷新或切到后台也会继续生成'
+              ),
+        sources: acceptedState?.sources || [],
+        reasoning: acceptedState?.reasoning || '',
+        quant: acceptedState?.quant || null,
       }, previousState))
     }
     if (r && r.status === 'full') {
@@ -852,47 +864,12 @@ export default function StockDetail({ stock, onClose }) {
                   </div>
                 )}
                 {quantState && quantState.loading && (
-                  <div className="advice-skeleton">
-                    <div className="sk-hint">
-                      <Icon name="refresh" size={13} className="spin" />
-                      {quantState.phase || '量化模型 + AI 计算中…'}
-                      {quantState.showingPrevious
-                        ? ' · 下方保留最近一次结果，完成后自动替换'
-                        : '（首次冷启动约需几秒）'}
-                    </div>
-                    <AdviceGenerationStatus code={stock.code} variant="detail" />
-                    {/* 数据源采集清单:每个源 settle 时后端推 source 事件,这里实时勾选(✓ 成功 / — 无数据) */}
-                    {visibleAiSources(searchConfig.enabled, quantState.sources).length > 0 && (
-                      <div className="adv-sources">
-                        {visibleAiSources(searchConfig.enabled, quantState.sources).map((s, i) => (
-                          <span className={'adv-src' + (s.ok ? ' ok' : ' none')} key={s.label + i}>
-                            <Icon name={s.ok ? 'check' : 'close'} size={11} /> {s.label}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    {/* 量化模型结论:后端量化打分完成后推 quant 事件,先于军师推理展示"量化模型给了什么" */}
-                    {quantState.quant && (
-                      <div className="adv-quant">
-                        <div className="adv-quant-head"><Icon name="activity" size={12} /> 量化模型结论</div>
-                        <div className="adv-quant-body">{quantState.quant.summary || '已完成打分'}</div>
-                      </div>
-                    )}
-                    {/* 模型思维链:开启「深度思考」时后端把 reasoning_content 增量推来,这里滚动展示"军师在想什么" */}
-                    {quantState.reasoning && (
-                      <div className="adv-reasoning">
-                        <div className="adv-reasoning-head"><Icon name="brain" size={12} /> 军师推理过程</div>
-                        <div className="adv-reasoning-body" ref={(el) => { if (el) el.scrollTop = el.scrollHeight }}>{quantState.reasoning}</div>
-                      </div>
-                    )}
-                    {!quantState.showingPrevious && (!quantState.sources || !quantState.sources.length) && !quantState.reasoning && !quantState.quant && (
-                      <>
-                        <div className="sk-line sk-verdict" />
-                        <div className="sk-line sk-timing" />
-                        <div className="sk-cells"><div className="sk-cell" /><div className="sk-cell" /><div className="sk-cell" /></div>
-                      </>
-                    )}
-                  </div>
+                  <AdviceGenerationStatus
+                    code={stock.code}
+                    variant="detail"
+                    detailState={quantState}
+                    searchEnabled={searchConfig.enabled}
+                  />
                 )}
                 {quantState && quantState.error && (
                   <div className="quant-err">{quantState.error}
@@ -1409,16 +1386,6 @@ export default function StockDetail({ stock, onClose }) {
             <span className="footbar-main-label compact">
               {adviceActionCompactLabel}
             </span>
-          </button>
-          <button
-            className="icon-btn footbar-deep"
-            type="button"
-            aria-label="深度研判"
-            title="深度研判"
-            disabled={adviceAction.disabled}
-            onClick={() => loadQuant(true)}
-          >
-            <Icon name="brain" size={15} />
           </button>
           <button className={'btn footbar-alert' + (showAlert ? ' on' : '')} onClick={() => setShowAlert((v) => !v)}>
             <Icon name="bell" size={14} /> {showAlert ? '收起预警' : '盯盘预警'}

@@ -25,6 +25,7 @@ test('持仓执行顶部只有一个人工动作队列入口', () => {
 test('个股建议只保留一个主结论并把扩展信息收进详情', () => {
   const presentation = read('src/components/AdvicePresentation.jsx')
   const stockDetail = read('src/components/StockDetail.jsx')
+  const generation = read('src/components/AdviceGenerationStatus.jsx')
 
   assert.match(presentation, /advice-command-center/)
   assert.match(presentation, /执行摘要/)
@@ -35,6 +36,12 @@ test('个股建议只保留一个主结论并把扩展信息收进详情', () =>
   assert.match(stockDetail, /深度研判/)
   assert.match(stockDetail, /adviceActionCompactLabel/)
   assert.match(stockDetail, /footbar-main-label compact/)
+  assert.doesNotMatch(stockDetail, /footbar-deep/)
+  assert.doesNotMatch(stockDetail, /className="sk-hint"/)
+  assert.match(generation, /advice-generation-flow/)
+  assert.match(generation, /adviceGenerationSteps/)
+  assert.match(generation, /generation-flow-steps/)
+  assert.match(generation, /下方为上次已保存结果/)
 })
 
 test('执行队列与建议摘要具备移动端单列布局', () => {

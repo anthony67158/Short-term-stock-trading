@@ -85,17 +85,13 @@ function ExecutionReview({ review }) {
 
 function FullEvidence({ advice }) {
   const basis = [
-    ['tech', '技术', advice.techNote],
-    ['fund', '资金', advice.fundNote],
     ['news', '消息', advice.newsNote],
     ['macro', '宏观', advice.macroNote],
     ['seat', '席位', advice.seatNote],
-    ['quant', '量化', advice.quantNote],
     ['theory', '理论', advice.theoryNote],
   ].filter((item) => item[2])
   const risks = [
     ['rev', '反方', advice.bearCase],
-    ['warn', '失效', advice.invalidation],
     ['warn', '风险', advice.risk],
   ].filter((item) => item[2])
   return (
