@@ -761,7 +761,10 @@ async function genOne({
   let councilShadow = null;
   if (advice && runCouncilShadow) {
     if (typeof onProgress === 'function') {
-      onProgress({ phase: '军师委员会正在进行影子复核' });
+      onProgress({
+        stage: 'council',
+        phase: '军师委员会正在进行影子复核',
+      });
     }
     try {
       councilShadow = await runAdvisorCouncilShadow({

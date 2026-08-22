@@ -197,6 +197,10 @@ test('个股页默认快速生成且普通路径不再无条件同步委员会',
     cronAdviceSource,
     /if \(advice && councilEnabled\) \{[\s\S]*?await runAdvisorCouncilShadow/,
   )
+  assert.match(
+    cronAdviceSource,
+    /onProgress\(\{\s*stage:\s*'council',\s*phase:\s*'军师委员会正在进行影子复核'/,
+  )
 })
 
 test('普通军师生成有明确的低延迟预算且保留深度模式', () => {
