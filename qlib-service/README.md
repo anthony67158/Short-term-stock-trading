@@ -4,6 +4,13 @@
 返回 **0~100 综合分 + 偏多/偏空/中性 + 做T方向建议 + 可解释因子**。
 数据用 AKShare（东财，免费），CPU 秒级推理，无需预训练下载。
 
+## 原子模型发布
+
+生产模型不再直接覆盖一组固定文件。`upload_model.py` 会先把模型、元数据、
+信号头和事件标签写入 `quantmodel/runs/<run-id>/`，逐文件记录 SHA-256，
+全部成功后最后更新 `quantmodel/manifest.json`。推理进程只加载同一 manifest
+引用且校验值一致的整套产物；manifest 缺失时才兼容读取旧固定路径。
+
 ## 统一策略组合回测
 
 `strategy_portfolio_backtest.py` 直接读取线上
