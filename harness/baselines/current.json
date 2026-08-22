@@ -1,6 +1,6 @@
 {
   "schemaVersion": "harness-baseline.v1",
-  "generatedAt": 1787223648219,
+  "generatedAt": 1787397326749,
   "versions": {
     "app": "1.0.0",
     "git": "working-tree",
@@ -12,7 +12,8 @@
       "judge",
       "portfolio",
       "screen",
-      "sector"
+      "sector",
+      "strategy"
     ]
   },
   "suites": {
@@ -56,9 +57,10 @@
         "actionability": 1,
         "consistency": 1
       },
-      "cases": 3,
+      "cases": 4,
       "caseIds": [
         "advice-buy-cash-cap",
+        "advice-decision-plan-research-only",
         "advice-hold-t1-no-sellable",
         "advice-invalid-price-downgrade"
       ]
@@ -127,6 +129,24 @@
         "sector-missing-history-degrades",
         "sector-overheat-no-chase",
         "sector-price-flow-divergence"
+      ]
+    },
+    "strategy": {
+      "overall": 1,
+      "dimensions": {
+        "contract": 1,
+        "groundedness": 1,
+        "feasibility": 1,
+        "actionability": 1,
+        "consistency": 1
+      },
+      "cases": 5,
+      "caseIds": [
+        "strategy-cross-sectional-momentum-shadow",
+        "strategy-defensive-exit-shadow",
+        "strategy-multi-factor-ranking-shadow",
+        "strategy-range-mean-reversion-shadow",
+        "strategy-trend-breakout-shadow"
       ]
     }
   }

@@ -65,6 +65,13 @@
       "mode": "offline",
       "description": "板块前瞻潜伏、追高、背离、解释边界与缺失降级"
     },
+    "strategy": {
+      "adapter": "strategy",
+      "caseFile": "cases/strategy.json",
+      "minOverall": 0.9,
+      "mode": "offline",
+      "description": "五类策略状态适配、证据命中、生产隔离与路由优先级"
+    },
     "endpoint": {
       "adapter": "endpoint",
       "caseFile": "cases/endpoint.json",

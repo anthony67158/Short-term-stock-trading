@@ -103,6 +103,57 @@ python3 strategy_nested_walk_forward.py \
   --out /tmp/strategy-nested-report.json
 ```
 
+## StrategySpec v2 研究链
+
+第二阶段研究使用共享契约
+`../shared/contracts/strategy-spec.v2.schema.json`。JS 与 Python Adapter
+共同验证 `specVersion`，并强制信号使用 QFQ、撮合使用 RAW，生产
+`lgb-score-36` 仍保持 36 维。
+
+```bash
+set -a; source ../.env; set +a
+python3 collect_strategy_dual_panel.py \
+  --predictions ./research/holdout_predictions.npz \
+  --market-regimes ./research/market-regimes.json \
+  --start 20251001 \
+  --end 20260731 \
+  --out /tmp/strategy-dual-panel
+
+python3 strategy_research_dataset_v2.py \
+  --panel /tmp/strategy-dual-panel \
+  --predictions ./research/holdout_predictions.npz \
+  --score-key ensemble_prediction \
+  --timeframe 1d \
+  --dataset-version tushare-20260822 \
+  --out /tmp/strategy-dataset-v2.json.gz
+
+python3 strategy_backtest_v2.py \
+  --strategy ./research/strategy-spec-v2.json \
+  --dataset /tmp/strategy-dataset-v2.json.gz \
+  --stress \
+  --out /tmp/strategy-capacity-v2.json
+
+python3 factor_research_v2.py \
+  --records ./research/factor-records-v2.json \
+  --factors momentum,volume,liquidity \
+  --out /tmp/factor-research-v2.json
+
+python3 strategy_walk_forward_v2.py \
+  --candidates ./research/strategy-candidates-v2.json \
+  --dataset /tmp/strategy-dataset-v2.json.gz \
+  --benchmarks /tmp/strategy-benchmarks.json \
+  --out /tmp/strategy-walk-forward-v2.json
+```
+
+`strategy-backtest.v2` 增加成交额/ADV 参与率容量、部分成交、未成交延续、
+价差与冲击成本，并输出 Sharpe、Sortino、Calmar、回撤恢复、换手、持仓期及
+行业/现金暴露。容量压力矩阵固定覆盖 10万、50万、100万、500万元和
+5/10/20 bps。
+
+新策略默认只有研究资格。少于 6 个外层 fold、正收益 fold 不足 67%、费后
+回撤超过 10%、任一基准超额不稳定、容量退化过大或版本不一致时，晋级结果
+必须为 `reject`；研究结果不会直接改变生产建议。
+
 ## 一、Cloud Run 适合吗？
 
 适合，而且是这几个方案里最优的：

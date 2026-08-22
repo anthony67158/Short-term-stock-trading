@@ -41,6 +41,9 @@ import {
   runSectorHarnessCase,
 } from './adapters/sector.mjs'
 import {
+  runStrategyHarnessCase,
+} from './adapters/strategy.mjs'
+import {
   compareHarnessBaseline,
   createHarnessBaseline,
   loadHarnessBaseline,
@@ -57,6 +60,7 @@ const ADAPTERS = {
   endpoint: runEndpointHarnessCase,
   shadow: runShadowHarnessCase,
   sector: runSectorHarnessCase,
+  strategy: runStrategyHarnessCase,
 }
 
 function parseArgs(argv) {

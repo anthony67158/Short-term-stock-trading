@@ -56,6 +56,12 @@ jobs:
             test_publish_retrain_report.py \
             test_model_lib_dense_runtime.py \
             test_model_release.py \
+            tests/test_collect_strategy_dual_panel.py \
+            tests/test_strategy_contract_v2.py \
+            tests/test_strategy_research_dataset_v2.py \
+            tests/test_strategy_backtest_v2.py \
+            tests/test_strategy_walk_forward_v2.py \
+            tests/test_factor_research_v2.py \
             test_sector_factors.py \
             test_sector_model.py \
             test_train_sector_model.py \

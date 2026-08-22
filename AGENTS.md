@@ -157,6 +157,7 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST "$FC/api/ai" -H "Content-Type: 
 - **板块前瞻是唯一方向决策入口**（`sector_forecast.js` / `SectorForecast.jsx`）：前端位于“今日决策”，不得在“盘面研究”或其他页面重复挂载独立 AI 选股模块。交易日 09:30–11:30、13:00–15:00 按运行时设置每 5/10/15 分钟生成独立 `intraday.json`；只复用最近正式版 LightGBM 概率作为日终先验，再用实时资金、涨幅和成分股扩散重算可买性。盘中版禁止覆盖 `latest.json`、正式历史或 08:50 盘前排名，也禁止每轮重复调用 LLM/豆包。
 - **概念标签动态同步**（`stock_tags.js` / `stockTagStore.js`）：标签来自东方财富个股资料与 F10 精确题材，不得写死到持仓或自选数据。服务端成功缓存 5 分钟、空结果 2 分钟；前端只对当前正在展示的股票定期重验，变化后通过统一 store 同步所有页面。
 - **两段式确认**（`_confirm.js`）：价到点→watching(弱提醒);确定性信号+LLM Judge 双判→confirm 才发强提示;LLM 置信度门槛按动作分级（买入78、止盈/减仓70、止损65），未达标降级 wait;LLM 挂了回退确定性结论。
+- **多策略研究隔离**（`strategySpecV2.js` / `strategyRouter.js`）：五类策略使用 `strategy-spec.v2` 和不可变 `specVersion`；信号价固定 QFQ、撮合价固定 RAW。新策略默认 `draft/rejected` 且只进入 `SHADOW_ONLY`，只有同版本六折样本外、双基准、容量压力、真实成交和人工批准全部通过并标记 `active` 后才可影响生产。
 - **每日重训**（`retrain_daily.py`）：冠军-挑战者,leak-free holdout AUC 过护栏才晋级、只升不降;腾讯为硬性前置,新浪仅参考(海外 CI 出口 IP 拉不到新浪),股票池有 `pool_cache.json` 兜底。
 - **A股规则**：T+1(今日买入手数当日锁定)、手续费(佣金万3最低5/印花税千0.5仅卖/过户费万0.1)、做T FIFO 配对、含费均价。
 - **健壮性**：各模块 ErrorBoundary 隔离、事件订阅 try-catch、网络请求带超时、数值渲染 `Number.isFinite` 守卫。改动时保持这些防护,勿裸 fetch、勿无超时。
