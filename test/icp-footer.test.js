@@ -93,3 +93,10 @@ test('FC 部署固化备案域名、证书与 TLS 1.2 以上协议', () => {
   assert.match(serverless, /minVersion:\s*TLSv1\.2/)
   assert.match(serverless, /maxVersion:\s*TLSv1\.3/)
 })
+
+test('FC 静态页面显式内联展示而不是触发浏览器下载', () => {
+  assert.match(
+    server,
+    /function serveStatic[\s\S]*?res\.setHeader\('Content-Disposition', 'inline'\)/,
+  )
+})

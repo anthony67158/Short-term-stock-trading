@@ -260,6 +260,7 @@ function serveStatic(_req, res, pathname) {
   }
   const ext = path.extname(file).toLowerCase();
   res.setHeader('Content-Type', MIME[ext] || 'application/octet-stream');
+  res.setHeader('Content-Disposition', 'inline');
   // index.html 不缓存；带 hash 的 assets 长缓存（对齐原 vercel.json）
   if (file.endsWith('index.html')) res.setHeader('Cache-Control', 'no-cache');
   else if (rel.startsWith('assets/')) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
