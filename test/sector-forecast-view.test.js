@@ -236,6 +236,26 @@ test('板块前瞻只有拿到更新且完整的快照才算生成完成', () =>
     },
   }).status, 'running')
 
+  assert.equal(assessSectorForecastGeneration({
+    previousGeneratedAt,
+    response: {
+      ok: true,
+      skipped: true,
+      reason: 'active-generation',
+      snapshot: {
+        ...snapshot,
+        generatedAt: previousGeneratedAt,
+      },
+    },
+    current: {
+      latest: snapshot,
+      task: {
+        active: null,
+        latest: { status: 'done' },
+      },
+    },
+  }).status, 'completed')
+
   const stale = assessSectorForecastGeneration({
     previousGeneratedAt,
     response: {

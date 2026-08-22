@@ -33,23 +33,35 @@ export function assessSectorForecastGeneration({
   const currentSnapshot = session === 'intraday'
     ? current.intraday
     : current.latest
-  const snapshot = [responseSnapshot, currentSnapshot].find((candidate) =>
-    candidate
-    && Array.isArray(candidate.sectors)
-    && candidate.sectors.length > 0
-  ) || null
+  const snapshot = [responseSnapshot, currentSnapshot]
+    .filter((candidate) =>
+      candidate
+      && Array.isArray(candidate.sectors)
+      && candidate.sectors.length > 0
+    )
+    .sort((left, right) =>
+      Number(right.generatedAt || 0)
+      - Number(left.generatedAt || 0)
+    )[0] || null
   const fresh = Number(snapshot?.generatedAt || 0)
     > Number(previousGeneratedAt || 0)
   const taskDone = current.task?.latest?.status === 'done'
-
-  if (
-    fresh
-    && response.ok !== false
-    && response.skipped !== true
+  const directCompletion = (
+    response.skipped !== true
     && (
       !current.task?.latest
       || taskDone
     )
+  )
+  const joinedCompletion = (
+    response.skipped === true
+    && taskDone
+  )
+
+  if (
+    fresh
+    && response.ok !== false
+    && (directCompletion || joinedCompletion)
   ) {
     return {
       status: 'completed',

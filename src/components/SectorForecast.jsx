@@ -183,10 +183,13 @@ export default function SectorForecast() {
         setHistory(result.history)
         setTask(result.task)
         if (result.task?.active?.status === 'running') {
-          generationBaselineRef.current = Math.max(
-            Number(result.latest?.generatedAt) || 0,
-            Number(result.intraday?.generatedAt) || 0,
-          )
+          generationBaselineRef.current = Number(
+            (
+              result.task.active.session === 'intraday'
+                ? result.intraday
+                : result.latest
+            )?.generatedAt,
+          ) || 0
         }
         setGenerating(result.task?.active?.status === 'running')
         setError('')
