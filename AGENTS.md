@@ -84,6 +84,7 @@ npm run dev                  # 终端B: 前端Vite(5173, /api 已代理到3000)
 ```bash
 npm run harness             # 全部离线 suite + JSON/Markdown episode 报告
 npm run harness:portfolio   # 仅持仓再平衡
+npm run harness:execution   # 仅人工执行、事件、熔断、做T与成交归因
 npm run harness:ci          # CI 同口径，失败返回非零退出码
 npm run harness:online      # 显式付费：FC内运行端点能力矩阵
 npm run harness:shadow      # 显式付费：多端点同题影子对拍
@@ -148,7 +149,10 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST "$FC/api/ai" -H "Content-Type: 
 
 - **六个 LLM 角色、七个固定槽位**（`_llm_config.js`）：`advisor` / `portfolio` / `agent` / `daily` / `sector` / `judge`。军师 AI 操作建议 `advisor` 固定两路，其余角色各一路；侧边栏对话统一使用 `agent`，不再单列 `chat`。配置存 OSS `config/llm.json` 的 `roleEndpoints`，优先级 **OSS > env > 默认**，改完即时生效免重部署。
 - **角色端点严格隔离**（`_llm_pool.js`）：请求只能进入本角色槽位，禁止跨角色回退；`advisor` 两路按最少在途调度，连续失败 3 次冷却 60 秒并自动半开恢复。旧 `baseUrl` / `endpoints` / `judgeEndpoint` / `sectorEndpoint` 只允许迁移读取，不得作为新功能配置入口。
-- **军师生成模式决定推理模式**：一次性普通生成必须强制关闭深度思考，深度生成必须强制开启；军师主结论和内部委员会保持同一模式。`advisor` 端点不得被持仓诊断或其他角色借用。
+- **军师生成模式决定推理模式**：普通生成必须强制关闭深度思考、最多两次尝试且不等待委员会；只有用户显式选择深度研判才开启深度思考和三角色委员会。`advisor` 端点不得被持仓诊断或其他角色借用。
+- **军师事件幂等**：相同用户请求在任务终态后仍不得重复创建；Judge `confirm` 只推进确定性执行状态，不重新调用军师，只有 `invalid`/计划冲突或证据快照之后的新实质事件才允许续跑。
+- **人工执行状态**（`executionPlan.js` / `executionPlanStore.js`）：`USER_CONFIRMED` 只表示用户确认人工计划，不代表券商已报单；`PARTIALLY_RECORDED/COMPLETED` 只能由真实人工成交推进。执行计划与归因按成交进度、状态历史和时间合并，禁止旧设备回滚完成状态。
+- **账户执行风控**（`accountCircuitBreaker.js` / `executionAttribution.js`）：未完成买入占用现金，未完成卖出不得提前释放现金；账户熔断只阻止新增风险，不阻止减仓/退出。只有完整且已核验的真实费后结果可进入策略学习。
 - **持续复核使用显式股票白名单**：持仓和自选分别保存 `advAuto.holdCodes` / `advAuto.watchCodes`，FC Timer 只为名单内股票排队；字段缺失仅用于兼容旧账号“全部”，一旦用户选择后，后续新增股票不得自动加入。前端筛选复用一次性生成的概念/行业多选，自选额外支持“置顶”；个股持续复核开关必须与白名单保持一致。
 - **策略日报与板块前瞻独立**：`daily` 不得复用 `agent`，`sector` 不得复用或占用 `advisor`；每个槽位独立配置 Base URL、Key、模型、深度思考、启停与在线验证。
 - **批量建议增量持久化**：每只股票生成完成后先写入账号 `runtime/advice/<code>.json` 小对象，任务运行态写 `runtime/state.json`；禁止每只完成都重写整份账号快照。整批收尾再压实 `current.json`，其他设备通过增量同步立即看到单股结果。
