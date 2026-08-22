@@ -24,10 +24,12 @@ class FakeBucket:
         self.objects = {}
         self.order = []
 
-    def put_object_from_file(self, key, path):
+    def put_object_from_file(self, key, path, headers=None):
         with open(path, "rb") as handle:
             self.objects[key] = handle.read()
         self.order.append(key)
+        if headers != {"x-oss-forbid-overwrite": "true"}:
+            raise AssertionError("release files must be immutable")
 
     def put_object(self, key, body):
         self.objects[key] = bytes(body)

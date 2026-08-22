@@ -62,7 +62,11 @@ def publish_release(
         if not os.path.isfile(local):
             raise FileNotFoundError(local)
         key = f"{base}/{filename}"
-        target_bucket.put_object_from_file(key, local)
+        target_bucket.put_object_from_file(
+            key,
+            local,
+            headers={"x-oss-forbid-overwrite": "true"},
+        )
         manifest_files[slot] = {
             "key": key,
             "sha256": _sha256(local),
