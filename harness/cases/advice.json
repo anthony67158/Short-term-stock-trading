@@ -115,6 +115,96 @@
         "forbiddenIssueIncludes": [],
         "forbiddenText": []
       }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "advice-decision-plan-research-only",
+      "adapter": "advice",
+      "tags": ["advice", "decision-plan", "strategy-gate", "fees"],
+      "input": {
+        "compileDecisionPlan": true,
+        "now": 1787279400000,
+        "mode": "buy_advice",
+        "payload": {
+          "code": "600519",
+          "name": "样本股票",
+          "todayQuote": {
+            "price": 10,
+            "pct": 2,
+            "volRatio": 2,
+            "limitDownPrice": 9,
+            "limitUpPrice": 11,
+            "live": true
+          },
+          "marketEnv": {
+            "schemaVersion": "market-regime.v1",
+            "regime": "TREND_STRONG",
+            "label": "强势趋势",
+            "score": 76,
+            "dataQuality": "COMPLETE",
+            "riskMultiplier": 1,
+            "allowRiskIncrease": true,
+            "targetPositionPct": {
+              "min": 50,
+              "max": 70
+            }
+          },
+          "quant": {
+            "score": 72,
+            "forecast": {
+              "upProb": 62,
+              "expRet": 2.4
+            },
+            "highConfSignal": {
+              "fired": true
+            }
+          },
+          "account": {
+            "cash": 50000,
+            "totalAssets": 100000,
+            "position": 40,
+            "stockWeight": 0
+          }
+        },
+        "evidenceSnapshot": {
+          "snapshotId": "evidence.harness",
+          "asOf": "2026-08-21T02:30:00.000Z",
+          "freshness": {
+            "status": "LIVE",
+            "missingSources": []
+          }
+        },
+        "strategyGate": {
+          "productionEligible": false,
+          "blockers": [
+            {
+              "code": "OFFLINE_REJECTED"
+            }
+          ]
+        },
+        "result": {
+          "action": "立即买入",
+          "tier": "now",
+          "buyPrice": 10,
+          "stopPrice": 9,
+          "targetPrice": 12,
+          "planQty": 10,
+          "planAmount": 10000,
+          "actionPlan": "回踩确认后买入",
+          "invalidation": "跌破9元离场"
+        }
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "expectedValid": true,
+        "expectedAction": "立即买入",
+        "expectedQty": 10,
+        "expectedDecisionActionability": "RESEARCH_ONLY",
+        "expectedDecisionAction": "BUY",
+        "requiredIssueIncludes": [],
+        "forbiddenIssueIncludes": [],
+        "forbiddenText": []
+      }
     }
   ]
 }

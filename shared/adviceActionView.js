@@ -148,11 +148,24 @@ export function buildAdviceActionView(advice = {}, { mode = '' } = {}) {
     T_SELL_FIRST: '减仓',
     WATCH: '观望',
   }[plan?.action]
+  const planReasons = (Array.isArray(plan?.blockedReasons)
+    ? plan.blockedReasons
+    : []).map((item) => clean(item, 160)).filter(Boolean)
+  const planLots = Number(plan?.quantity?.lots) || 0
+  const planPrice = finite(plan?.prices?.reference)
+  const planInstruction = plan?.actionability === 'BLOCKED'
+    ? `暂不执行：${planReasons.join('；') || '确定性闸门未通过'}`
+    : plan?.actionability === 'RESEARCH_ONLY'
+      ? `研究级条件建议：${planAction || '操作'}${planLots}手${planPrice != null ? `，参考${planPrice}元` : ''}；策略晋级前不进入强执行确认`
+      : ''
   const source = plan ? {
     ...advice,
     action: plan.actionability === 'BLOCKED'
       ? '观望'
-      : planAction || advice.action,
+      : plan.actionability === 'RESEARCH_ONLY'
+        ? `研究级·${planAction || '建议'}`
+        : planAction || advice.action,
+    actionPlan: planInstruction || advice.actionPlan,
     planQty: plan.quantity?.lots,
     planQtyNum: plan.quantity?.lots,
     opQty: plan.action === 'BUY'

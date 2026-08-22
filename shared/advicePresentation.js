@@ -159,6 +159,26 @@ function decisionPlanSummary(plan) {
   }
 }
 
+function decisionInstruction(plan, fallback = '') {
+  if (!plan) return fallback
+  const reasons = (Array.isArray(plan.blockedReasons)
+    ? plan.blockedReasons
+    : []).map((item) => clean(item, 160)).filter(Boolean)
+  if (plan.actionability === 'BLOCKED') {
+    return `暂不执行：${reasons.join('；') || '确定性闸门未通过'}`
+  }
+  if (plan.actionability === 'WATCH') {
+    return clean(plan.trigger, 500) || fallback || '等待触发条件后重新评估'
+  }
+  const lots = Number(plan.quantity?.lots) || 0
+  const price = displayNumber(plan.prices?.reference)
+  const core = `${plan.actionLabel || '操作'}${lots > 0 ? `${lots}手` : ''}${price ? `，参考${price}元` : ''}`
+  if (plan.actionability === 'RESEARCH_ONLY') {
+    return `研究级条件建议：${core}；策略晋级前不进入强执行确认`
+  }
+  return core || fallback
+}
+
 export function trustCalibrationText(trust = {}) {
   if (trust?.calibrated !== true) return ''
   const samples = Number(trust.calibrationSamples)
@@ -178,6 +198,12 @@ export function buildAdvicePresentation(advice = {}) {
       : plan.actionability === 'BLOCKED'
         ? '观望'
         : plan.actionLabel || advice.action,
+    title: plan.actionability === 'BLOCKED'
+      ? '确定性闸门未通过，暂不操作'
+      : plan.actionability === 'RESEARCH_ONLY'
+        ? `研究级条件建议：${advice.title || advice.headline || plan.actionLabel || '等待确认'}`
+        : advice.title,
+    actionPlan: decisionInstruction(plan, advice.actionPlan),
     planQty: plan.quantity?.lots,
     opQty: plan.action === 'BUY'
       ? null

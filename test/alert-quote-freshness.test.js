@@ -16,6 +16,18 @@ test('盯盘预警只接受北京时间当日行情', () => {
   )
 })
 
+test('收盘后即使报价日期为当天也不触发盘中预警', () => {
+  const afterClose = Date.parse('2026-08-21T07:30:00Z')
+
+  assert.equal(
+    isFreshAlertQuote(
+      { price: 10, tradeDate: '2026-08-21' },
+      afterClose,
+    ),
+    false,
+  )
+})
+
 test('缺失交易日期或无效价格不能触发预警', () => {
   assert.equal(isFreshAlertQuote({ price: 10 }, now), false)
   assert.equal(

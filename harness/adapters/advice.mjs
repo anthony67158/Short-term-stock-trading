@@ -1,6 +1,8 @@
 import {
   reconcileAdviceNumbers,
 } from '../../shared/adviceValidation.js'
+import { compileDecisionPlan } from '../../shared/decisionPlan.js'
+import { getActiveStrategySpec } from '../../shared/strategySpec.js'
 
 function finite(value) {
   const number = Number(value)
@@ -34,6 +36,18 @@ export async function runAdviceHarnessCase(testCase) {
     payload: input.payload,
   })
   const result = reconciled.result
+  const decisionPlan = input.compileDecisionPlan === true
+    ? compileDecisionPlan({
+        mode: input.mode,
+        advice: result,
+        payload: input.payload,
+        evidenceSnapshot: input.evidenceSnapshot || null,
+        strategySpec: getActiveStrategySpec(),
+        strategyGate: input.strategyGate || {},
+        now: Number(input.now) || Date.now(),
+      })
+    : null
+  if (decisionPlan) result.decisionPlan = decisionPlan
   const action = String(result.action || result.stance || '')
   const isBuy = input.mode === 'buy_advice'
   const quantity = isBuy
@@ -177,6 +191,53 @@ export async function runAdviceHarnessCase(testCase) {
         ),
       '买入、止损和目标价关系不一致',
       { hard: true, code: 'ADVICE_PRICE_RELATION_INVALID' },
+    ),
+    item(
+      'decision-plan-contract',
+      'contract',
+      input.compileDecisionPlan !== true
+        || decisionPlan?.schemaVersion === 'decision-plan.v2',
+      '统一决策计划契约缺失',
+      { hard: true, code: 'DECISION_PLAN_CONTRACT_INVALID' },
+    ),
+    item(
+      'decision-plan-actionability',
+      'actionability',
+      !expected.expectedDecisionActionability
+        || decisionPlan?.actionability
+          === expected.expectedDecisionActionability,
+      '统一决策计划可执行等级与预期不一致',
+      {
+        hard: true,
+        code: 'DECISION_PLAN_ACTIONABILITY_MISMATCH',
+        details: {
+          actual: decisionPlan?.actionability,
+          expected: expected.expectedDecisionActionability,
+        },
+      },
+    ),
+    item(
+      'decision-plan-final-action',
+      'consistency',
+      !expected.expectedDecisionAction
+        || decisionPlan?.action === expected.expectedDecisionAction,
+      '统一决策计划最终动作与预期不一致',
+      {
+        hard: true,
+        code: 'DECISION_PLAN_ACTION_MISMATCH',
+      },
+    ),
+    item(
+      'decision-plan-costs',
+      'feasibility',
+      input.compileDecisionPlan !== true
+        || decisionPlan?.quantity?.lots === 0
+        || (
+          Number(decisionPlan?.costs?.estimatedFees) > 0
+          && Number(decisionPlan?.costs?.estimatedNetAmount) > 0
+        ),
+      '统一决策计划没有计入交易费用',
+      { hard: true, code: 'DECISION_PLAN_COSTS_MISSING' },
     ),
   ]
   return {

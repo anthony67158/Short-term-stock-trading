@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  ADVISOR_SYSTEM,
   buildUserPrompt,
   maxTokensForMode,
 } from '../api/_ai_prompts.js'
@@ -133,4 +134,11 @@ test('军师区分真实费后收益与三日建议命中统计', () => {
   assert.match(prompt, /风险倍率=1\.1/)
   assert.match(prompt, /只用于调节本次手数\/风险预算/)
   assert.match(prompt, /绝不能.*绕过账户硬闸门/)
+})
+
+test('军师明确把动作价位手数视为候选并服从统一决策编译器', () => {
+  assert.match(ADVISOR_SYSTEM, /Decision Compiler/)
+  assert.match(ADVISOR_SYSTEM, /候选草案/)
+  assert.match(ADVISOR_SYSTEM, /strategyGate\.productionEligible=false/)
+  assert.match(ADVISOR_SYSTEM, /研究级条件建议/)
 })

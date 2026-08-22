@@ -338,7 +338,7 @@ test('持仓套件生成可审计episode并使用生产标准化逻辑', async (
     ),
     [
       ['300476', 2],
-      ['002747', 2],
+      ['002747', 1],
     ],
   )
 })
@@ -401,8 +401,8 @@ test('真实manifest与case可通过统一CLI离线执行', async () => {
 
   assert.equal(result.exitCode, 0)
   assert.equal(payload.ok, true)
-  assert.equal(payload.summary.total, 22)
-  assert.equal(payload.summary.passed, 22)
+  assert.equal(payload.summary.total, 23)
+  assert.equal(payload.summary.passed, 23)
   assert.deepEqual(
     [...new Set(payload.episodes.map((item) => item.adapter))].sort(),
     ['advice', 'daily', 'evidence', 'judge', 'portfolio', 'screen', 'sector'],

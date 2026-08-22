@@ -265,6 +265,9 @@ test('决策计划v2优先提供最终动作手数费用和策略等级', () => 
   assert.equal(view.execution.quantity, '5手')
   assert.equal(view.execution.amount, '5010')
   assert.equal(view.execution.position, '0% → 5%')
+  assert.match(view.execution.instruction, /研究级/)
+  assert.match(view.execution.instruction, /5手/)
+  assert.doesNotMatch(view.execution.instruction, /10手/)
   assert.equal(view.decisionPlan.actionability, 'RESEARCH_ONLY')
   assert.match(view.decisionPlan.statusText, /未通过生产晋级/)
   assert.deepEqual(

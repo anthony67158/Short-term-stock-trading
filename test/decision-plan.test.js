@@ -2,9 +2,11 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  buildFallbackDecisionAdvice,
   compileDecisionPlan,
   decisionPlanConfirmationGate,
 } from '../shared/decisionPlan.js'
+import { adviceCompleteness } from '../shared/adviceBatchPolicy.js'
 import { getActiveStrategySpec } from '../shared/strategySpec.js'
 
 const now = Date.parse('2026-08-21T02:30:00.000Z')
@@ -227,4 +229,27 @@ test('研究级或被阻断的新增风险计划不能被Judge升级为确认', 
     }, 'sell').allowed,
     true,
   )
+})
+
+test('首次LLM失败时返回不含交易数字的确定性等待计划', () => {
+  const fallback = buildFallbackDecisionAdvice({
+    mode: 'buy_advice',
+    payload: {
+      ...payload,
+      quant: null,
+      tech: null,
+    },
+    evidenceSnapshot: snapshot,
+    strategySpec: getActiveStrategySpec(),
+    strategyGate: { productionEligible: false, blockers: [] },
+    error: '模型超时',
+    now,
+  })
+
+  assert.equal(fallback.action, '观望')
+  assert.equal(fallback.decisionPlan.action, 'WATCH')
+  assert.equal(fallback.decisionPlan.actionability, 'WATCH')
+  assert.equal(fallback.planQty, 0)
+  assert.equal(fallback.buyPrice, null)
+  assert.equal(adviceCompleteness(fallback, 'buy_advice').complete, true)
 })

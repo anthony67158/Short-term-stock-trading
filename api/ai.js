@@ -78,7 +78,10 @@ import {
   evaluateScheduledReview,
 } from '../shared/adviceIntelligence.js';
 import { deriveMarketRegime } from '../shared/marketRegime.js';
-import { compileDecisionPlan } from '../shared/decisionPlan.js';
+import {
+  buildFallbackDecisionAdvice,
+  compileDecisionPlan,
+} from '../shared/decisionPlan.js';
 import { getActiveStrategySpec } from '../shared/strategySpec.js';
 import {
   buildStrategyPromotionGate,
@@ -619,6 +622,17 @@ export default async function handler(req, res) {
             accountAuth.account?.data?.strategyHumanApproval || null,
         })
       : null;
+    if (advisorStrategyGate) {
+      payload.strategyGate = {
+        strategyId: advisorStrategyGate.strategyId,
+        specVersion: advisorStrategyGate.specVersion,
+        productionEligible: advisorStrategyGate.productionEligible,
+        decision: advisorStrategyGate.decision,
+        blockerCodes: advisorStrategyGate.blockers
+          .map((item) => item.code)
+          .slice(0, 12),
+      };
+    }
     const streaming = !!(body && body.stream); // 客户端可选开启 SSE 进度流
     const evidenceAccountRevision = resolveEvidenceAccountRevision(
       payload,
@@ -668,7 +682,32 @@ export default async function handler(req, res) {
     const stopHeartbeat = () => { if (hbTimer) { clearInterval(hbTimer); hbTimer = null; } };
     const finish = (obj) => {
       stopHeartbeat();
-      const output = attachEvidenceSnapshot(obj, ensureEvidenceSnapshot());
+      const snapshot = ensureEvidenceSnapshot();
+      let finalized = obj;
+      if (
+        isAdvisorMode(mode)
+        && payload.code
+        && obj?.ok === false
+        && !payload.previousAdvice
+      ) {
+        const { error, ...rest } = obj;
+        finalized = {
+          ...rest,
+          ok: true,
+          degraded: true,
+          fallbackOnly: true,
+          warning: error || '解释服务未返回完整结果',
+          result: buildFallbackDecisionAdvice({
+            mode,
+            payload,
+            evidenceSnapshot: snapshot,
+            strategySpec: activeStrategySpec,
+            strategyGate: advisorStrategyGate || {},
+            error,
+          }),
+        };
+      }
+      const output = attachEvidenceSnapshot(finalized, snapshot);
       if (streaming) { emit('result', output); return res.end(); }
       return res.status(200).send(JSON.stringify(output));
     };

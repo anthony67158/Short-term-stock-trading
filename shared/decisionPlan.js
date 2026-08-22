@@ -543,3 +543,55 @@ export function compileDecisionPlan({
     explanation: text(advice.reason || advice.reasoning, 500),
   }
 }
+
+export function buildFallbackDecisionAdvice({
+  mode,
+  payload = {},
+  evidenceSnapshot = null,
+  strategySpec = getActiveStrategySpec(),
+  strategyGate = {},
+  error = '',
+  now = Date.now(),
+} = {}) {
+  const holdingMode = mode === 'hold_advice' || mode === 'review'
+  const advice = {
+    action: holdingMode ? '持有' : '观望',
+    stance: holdingMode ? '持有' : '观望',
+    tier: 'wait',
+    tone: 'muted',
+    title: holdingMode
+      ? '解释服务暂不可用，维持现有仓位纪律'
+      : '解释服务暂不可用，暂停新增风险',
+    actionPlan: holdingMode
+      ? '本轮不新增仓位，也不依据不完整解释改变原计划；等待数据与解释服务恢复后重新评估。'
+      : '本轮不下单；等待数据与解释服务恢复并重新生成统一决策计划。',
+    opQty: '无需操作',
+    planQty: 0,
+    planQtyNum: 0,
+    planAmount: 0,
+    buyPrice: null,
+    addPrice: null,
+    reducePrice: null,
+    stopPrice: null,
+    targetPrice: null,
+    invalidation: '关键数据或解释服务恢复后，本等待计划自动失效并必须重新计算。',
+    reason: `确定性降级：${text(error, 160) || 'LLM 未返回有效内容'}`,
+    quantNote: payload.quant
+      ? '量化结果已保留，但本轮没有获得完整解释，不能单独升级为交易动作。'
+      : '量化证据暂缺，本轮不据此产生交易动作。',
+    techNote: payload.tech
+      ? '技术指标已保留，只作为下次重算输入，不单独产生交易动作。'
+      : '技术证据暂缺，本轮不据此产生交易动作。',
+    confidence: '低',
+  }
+  advice.decisionPlan = compileDecisionPlan({
+    mode,
+    advice,
+    payload,
+    evidenceSnapshot,
+    strategySpec,
+    strategyGate,
+    now,
+  })
+  return advice
+}
