@@ -264,6 +264,55 @@ export function createRecoverableSerialRunner(task) {
   };
 }
 
+export function createAdviceProgressSaveScheduler(
+  save,
+  {
+    now = () => Date.now(),
+    intervalMs = PROGRESS_SAVE_INTERVAL_MS,
+  } = {},
+) {
+  let lastSavedAt = 0;
+  let running = false;
+  let forceAfterCurrent = false;
+  let tail = Promise.resolve();
+
+  const drain = async () => {
+    running = true;
+    let firstError = null;
+    try {
+      do {
+        forceAfterCurrent = false;
+        lastSavedAt = now();
+        try {
+          await save();
+        } catch (error) {
+          firstError ||= error;
+        }
+      } while (forceAfterCurrent);
+      if (firstError) throw firstError;
+    } finally {
+      running = false;
+    }
+  };
+
+  return {
+    schedule(force = false) {
+      const currentTime = now();
+      if (running) {
+        if (force) forceAfterCurrent = true;
+        return tail;
+      }
+      if (!force && currentTime - lastSavedAt < intervalMs) return tail;
+      const current = drain();
+      tail = current.catch(() => {});
+      return current;
+    },
+    settle() {
+      return tail;
+    },
+  };
+}
+
 function codeMatches(item, code) {
   const target = String(code || '');
   return [
@@ -1270,22 +1319,17 @@ async function drainAccount(nick, initialAcc) {
   // 深度任务最坏可占约 495s，只允许在本次 FC 前 85s 内启动新任务，
   // 保证在 600s 硬上限前有收尾时间；剩余队列由 5 分钟云端定时器接力。
   const startDeadline = Date.now() + (hasDeepAdviceWork(data) ? 85000 : 300000);
-  let lastProgressSaveAt = 0;
-  let progressSavePending = false;
-  const queueProgressSave = (force = false) => {
-    if (progressSavePending) return persistence.settle();
-    const now = Date.now();
-    if (!force && now - lastProgressSaveAt < PROGRESS_SAVE_INTERVAL_MS) {
-      return persistence.settle();
-    }
-    progressSavePending = true;
-    lastProgressSaveAt = now;
-    return saveWorking().finally(() => { progressSavePending = false; });
-  };
+  const progressSaver = createAdviceProgressSaveScheduler(saveWorking);
+  const queueProgressSave = (force = false) =>
+    progressSaver.schedule(force);
   const recordProgress = (code, patch) => {
     const d = acc.data || (acc.data = {});
     const job = jobsOf(d)[code];
     if (!job) return;
+    const stageChanged = !!(
+      patch.stage
+      && patch.stage !== job.stage
+    );
     if (patch.source) {
       const sources = [...(job.sources || [])];
       const idx = sources.findIndex((item) => item.label === patch.source.label);
@@ -1297,7 +1341,7 @@ async function drainAccount(nick, initialAcc) {
     } else {
       updateJobProgress(d, code, patch);
     }
-    void queueProgressSave(false).catch(() => {});
+    void queueProgressSave(stageChanged).catch(() => {});
   };
   const heartbeat = setInterval(() => {
     const d = acc.data || (acc.data = {});
@@ -1496,6 +1540,7 @@ async function drainAccount(nick, initialAcc) {
     clearInterval(heartbeat);
     clearInterval(cancelPoll);
     for (const task of inflight.values()) task.controller.abort();
+    await progressSaver.settle();
     await persistence.settle();
     await releaseDrainLock(nick, acc, myId, CONC);
   }

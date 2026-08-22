@@ -5,6 +5,7 @@ import {
   adviceRuntimeUpdateFromData,
   adviceFailureReason,
   adviceTradeStateMatches,
+  createAdviceProgressSaveScheduler,
   createRecoverableSerialRunner,
   createAdviceSSEParser,
   internalRequestHeaders,
@@ -500,6 +501,35 @@ test('串行保存单次失败后仍可执行下一次保存', async () => {
   await assert.rejects(() => runner.run(), /OSS瞬时失败/)
   assert.equal(await runner.run(), 2)
   await runner.settle()
+})
+
+test('关键生成阶段在前一次保存尚未完成时仍会补写最新阶段', async () => {
+  let releaseFirst
+  let stage = 'collect'
+  const savedStages = []
+  const scheduler = createAdviceProgressSaveScheduler(
+    async () => {
+      savedStages.push(stage)
+      if (savedStages.length === 1) {
+        await new Promise((resolve) => { releaseFirst = resolve })
+      }
+    },
+    {
+      now: () => 10000,
+      intervalMs: 5000,
+    },
+  )
+
+  const first = scheduler.schedule(true)
+  await new Promise((resolve) => setImmediate(resolve))
+  stage = 'llm'
+  const second = scheduler.schedule(true)
+
+  assert.deepEqual(savedStages, ['collect'])
+  releaseFirst()
+  await Promise.all([first, second])
+  await scheduler.settle()
+  assert.deepEqual(savedStages, ['collect', 'llm'])
 })
 
 test('单股完成增量只携带该股建议和必要运行态', () => {
