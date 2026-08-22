@@ -1,5 +1,15 @@
 [
   {
+    "date": "2026-08-23",
+    "scope": "app",
+    "macrostructure": "Workbench",
+    "theme": "custom",
+    "theme_axes": "light + dark / geometric-sans / cool",
+    "vibe": "single-boundary sections, safer inset spacing, quieter reading rhythm",
+    "enrichment": "none",
+    "brief": "全系统内容贴边与重复细横线收敛"
+  },
+  {
     "date": "2026-08-22",
     "scope": "app",
     "macrostructure": "Workbench",

@@ -10441,3 +10441,131 @@ button.acct-item {
     inset: -10px;
   }
 }
+
+/* Global rhythm refinement: one boundary per section, space before rules. */
+.panel > .panel-head + .empty:not(.err),
+.panel > .panel-head + .loading {
+  border-top: 0;
+}
+
+.panel > .panel-head:last-child {
+  border-bottom: 0;
+}
+
+.plan-section .panel-head {
+  border-bottom: 0;
+}
+
+.hub-tabs {
+  border: 0;
+  box-shadow: none;
+}
+
+.hub-tab {
+  border: 0;
+}
+
+.hub-tab.active {
+  border: 0;
+  box-shadow: inset 0 -2px 0 var(--color-accent);
+}
+
+.detail-panel .modal-bar {
+  min-height: 80px;
+  padding-block: var(--space-sm);
+}
+
+.detail-title-block {
+  gap: var(--space-2xs);
+}
+
+.detail-title-meta {
+  min-height: var(--space-sm);
+}
+
+.dq-price-row {
+  border-bottom: 0;
+}
+
+.detail-panel .decide-box {
+  margin-top: var(--space-md);
+  border: 0;
+}
+
+.stock-card-metrics {
+  border: 0;
+  border-radius: var(--radius-control);
+  overflow: hidden;
+}
+
+.action-decision {
+  margin-top: var(--space-sm);
+  border: 0;
+}
+
+.action-levels {
+  gap: var(--space-2xs);
+  border: 0;
+}
+
+.action-level {
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--color-paper-3);
+}
+
+.action-levels.levels-2 > .action-level:nth-child(2n),
+.action-levels.levels-3 > .action-level:not(:nth-child(3n + 1)),
+.action-levels.editable > .action-level:nth-child(2n) {
+  border-inline-start: 0;
+}
+
+.advice-execution-metrics {
+  border: 0;
+}
+
+.advice-tactical-grid {
+  border: 0;
+}
+
+.advice-trigger-rows {
+  gap: var(--space-xs);
+  border: 0;
+}
+
+.advice-trigger-rows > div {
+  border: 0;
+}
+
+.advice-core-evidence {
+  gap: var(--space-xs);
+  border: 0;
+}
+
+.advice-evidence-row {
+  border: 0;
+}
+
+.advice-context-strip {
+  border-bottom: 0;
+}
+
+@media (max-width: 720px) {
+  .detail-panel .modal-bar {
+    min-height: 76px;
+    padding-block:
+      max(var(--space-xs), env(safe-area-inset-top))
+      var(--space-xs);
+  }
+
+  .advice-trigger {
+    border-top: 0;
+  }
+}
+
+@media (max-width: 30rem) {
+  .pi-card-tools {
+    padding-top: 0;
+    border-top: 0;
+  }
+}

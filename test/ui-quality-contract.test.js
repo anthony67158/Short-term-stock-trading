@@ -173,7 +173,11 @@ test('持仓与自选卡片使用独立身份行和三列指标带避免首行�
   assert.match(planTab, /className={'pc-pin'/)
   assert.match(
     precision,
-    /\.stock-card-metrics\s*{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)[^}]*border-block:\s*1px solid var\(--color-rule-2\)/s,
+    /\.stock-card-metrics\s*{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s,
+  )
+  assert.match(
+    precision,
+    /\.stock-card-metrics\s*{[^}]*border:\s*0[^}]*border-radius:\s*var\(--radius-control\)/s,
   )
   assert.match(
     precision,
@@ -186,6 +190,83 @@ test('持仓与自选卡片使用独立身份行和三列指标带避免首行�
   assert.match(
     precision,
     /\.hold-head\s*{[^}]*align-items:\s*start[^}]*padding-bottom:\s*var\(--space-sm\)/s,
+  )
+})
+
+test('面板标题、空态与账户标签只绘制单层边界', () => {
+  assert.match(
+    precision,
+    /\.panel > \.panel-head \+ \.empty:not\(\.err\),[\s\S]*?\.panel > \.panel-head \+ \.loading\s*{[^}]*border-top:\s*0/s,
+  )
+  assert.match(
+    precision,
+    /\.panel > \.panel-head:last-child\s*{[^}]*border-bottom:\s*0/s,
+  )
+  assert.match(
+    precision,
+    /\.plan-section \.panel-head\s*{[^}]*border-bottom:\s*0/s,
+  )
+  assert.match(
+    precision,
+    /\.hub-tabs\s*{[^}]*border:\s*0/s,
+  )
+  assert.match(
+    precision,
+    /\.hub-tab\s*{[^}]*border:\s*0/s,
+  )
+  assert.match(
+    precision,
+    /\.hub-tab\.active\s*{[^}]*border:\s*0[^}]*box-shadow:\s*inset 0 -2px 0 var\(--color-accent\)/s,
+  )
+})
+
+test('个股详情标题与边界保持安全距离', () => {
+  assert.match(
+    precision,
+    /\.detail-panel \.modal-bar\s*{[^}]*min-height:\s*80px[^}]*padding-block:\s*var\(--space-sm\)/s,
+  )
+  assert.match(
+    precision,
+    /\.detail-title-block\s*{[^}]*gap:\s*var\(--space-2xs\)/s,
+  )
+  assert.match(
+    precision,
+    /\.detail-title-meta\s*{[^}]*min-height:\s*var\(--space-sm\)/s,
+  )
+})
+
+test('卡片指标与阅读型建议用留白和底色分组而不连续画横线', () => {
+  assert.match(
+    precision,
+    /\.action-decision\s*{[^}]*border:\s*0/s,
+  )
+  assert.match(
+    precision,
+    /\.action-levels\s*{[^}]*gap:\s*var\(--space-2xs\)[^}]*border:\s*0/s,
+  )
+  assert.match(
+    precision,
+    /\.action-level\s*{[^}]*border:\s*0[^}]*border-radius:\s*var\(--radius-control\)[^}]*background:\s*var\(--color-paper-3\)/s,
+  )
+  assert.match(
+    precision,
+    /\.detail-panel \.decide-box\s*{[^}]*border:\s*0/s,
+  )
+  assert.match(
+    precision,
+    /\.advice-execution-metrics\s*{[^}]*border:\s*0/s,
+  )
+  assert.match(
+    precision,
+    /\.advice-tactical-grid\s*{[^}]*border:\s*0/s,
+  )
+  assert.match(
+    precision,
+    /\.advice-core-evidence\s*{[^}]*gap:\s*var\(--space-xs\)[^}]*border:\s*0/s,
+  )
+  assert.match(
+    precision,
+    /\.advice-evidence-row\s*{[^}]*border:\s*0/s,
   )
 })
 
