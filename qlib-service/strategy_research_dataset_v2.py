@@ -30,6 +30,7 @@ REQUIRED_ARRAYS = (
     "is_suspended",
     "listing_days",
     "bar_complete",
+    "market_regime",
 )
 TECHNICAL_FIELDS = {
     "f_atr_pct": "atrPct",
@@ -71,6 +72,18 @@ def _array_value(panel, key, index):
     if values is None or index >= len(values):
         return None
     return values[index]
+
+
+def _text_value(panel, key, index, default=""):
+    value = panel.get(key, default)
+    if isinstance(value, np.ndarray):
+        if value.size == 1:
+            value = value.reshape(-1)[0]
+        elif index < len(value):
+            value = value[index]
+        else:
+            value = default
+    return str(value)
 
 
 def _price_stream(panel, prefix, index, adjustment):
@@ -123,6 +136,129 @@ def _average_amount(panel, index, window=20):
     return sum(values) / len(values) if values else None
 
 
+def _volume_ratio(panel, index):
+    direct = _finite(_array_value(panel, "volume_ratio", index))
+    if direct is not None:
+        return direct
+    current = _volume_shares(panel, index)
+    history = [
+        _volume_shares(panel, cursor)
+        for cursor in range(max(0, index - 5), index)
+    ]
+    history = [value for value in history if value is not None and value > 0]
+    baseline = sum(history) / len(history) if history else None
+    return current / baseline if current is not None and baseline else None
+
+
+def _clamp(value, lower=0.0, upper=1.0):
+    return max(lower, min(upper, value))
+
+
+def _peak(value, left, ideal, right):
+    if value <= left or value >= right:
+        return 0.0
+    if value <= ideal:
+        return (value - left) / (ideal - left)
+    return (right - value) / (right - ideal)
+
+
+def _market_score(amount, pct, turnover, volume_ratio, main_ratio):
+    fund = _clamp((main_ratio + 3.0) / 18.0)
+    volume = _peak(volume_ratio, 0.5, 2.2, 8.0)
+    momentum = _peak(pct, -3.0, 3.5, 8.8)
+    liquidity = _clamp(
+        math.log10(max(amount, 1.0) / 8e7) / math.log10(25.0)
+    )
+    turnover_score = _peak(turnover, 0.4, 6.0, 25.0)
+    return _clamp(
+        (
+            fund * 0.30
+            + volume * 0.15
+            + momentum * 0.15
+            + 0.125 * 0.10
+            + liquidity * 0.15
+            + turnover_score * 0.15
+        ) * 100.0,
+        0.0,
+        100.0,
+    )
+
+
+def _derived_technical(panel, index, timeframe):
+    closes = np.asarray(panel["qfq_c"][:index + 1], dtype=float)
+    highs = np.asarray(panel["qfq_h"][:index + 1], dtype=float)
+    lows = np.asarray(panel["qfq_l"][:index + 1], dtype=float)
+    output = {}
+    if len(closes) >= 2 and np.isfinite(closes[-2:]).all():
+        previous = closes[-2]
+        change = closes[-1] - previous
+        if previous > 0:
+            output["maSlope20"] = change / previous * 100.0
+    if len(closes) >= 7:
+        changes = np.diff(closes[-7:])
+        gains = np.maximum(changes, 0.0)
+        losses = np.maximum(-changes, 0.0)
+        average_gain = float(np.mean(gains))
+        average_loss = float(np.mean(losses))
+        output["rsi6"] = (
+            100.0
+            if average_loss == 0 and average_gain > 0
+            else 50.0
+            if average_loss == 0
+            else 100.0 - 100.0 / (1.0 + average_gain / average_loss)
+        )
+    if len(closes) >= 20:
+        window = closes[-20:]
+        mean = float(np.mean(window))
+        deviation = float(np.std(window))
+        lower = mean - 2.0 * deviation
+        upper = mean + 2.0 * deviation
+        output["bollPct"] = (
+            _clamp((closes[-1] - lower) / (upper - lower))
+            if upper > lower
+            else 0.5
+        )
+        previous_high = float(np.max(highs[-21:-1])) if len(highs) >= 21 else None
+        previous_low = float(np.min(lows[-21:-1])) if len(lows) >= 21 else None
+        if previous_high is not None:
+            output["donchianBreakout"] = bool(closes[-1] >= previous_high)
+        if previous_low is not None:
+            output["structureBreak"] = bool(closes[-1] < previous_low)
+    if len(closes) >= 2:
+        previous_closes = closes[:-1]
+        previous_highs = highs[1:]
+        previous_lows = lows[1:]
+        true_ranges = np.maximum(
+            previous_highs - previous_lows,
+            np.maximum(
+                np.abs(previous_highs - previous_closes),
+                np.abs(previous_lows - previous_closes),
+            ),
+        )
+        if len(true_ranges):
+            atr = float(np.mean(true_ranges[-14:]))
+            if closes[-1] > 0:
+                output["atrPct"] = atr / closes[-1] * 100.0
+    if timeframe == "5m":
+        timestamps = np.asarray(panel["dates"]).astype(str)
+        day = str(timestamps[index])[:8]
+        indexes = [
+            cursor for cursor in range(index + 1)
+            if str(timestamps[cursor])[:8] == day
+        ]
+        amounts = [_amount_yuan(panel, cursor) for cursor in indexes]
+        volumes = [_volume_shares(panel, cursor) for cursor in indexes]
+        total_amount = sum(value or 0 for value in amounts)
+        total_volume = sum(value or 0 for value in volumes)
+        vwap = total_amount / total_volume if total_volume > 0 else None
+        raw_close = _finite(_array_value(panel, "c", index))
+        if vwap and raw_close:
+            output["vwapDeviationPct"] = (
+                raw_close / vwap - 1.0
+            ) * 100.0
+    return output
+
+
 def _technical(panel, index):
     output = {}
     for source, target in TECHNICAL_FIELDS.items():
@@ -164,6 +300,12 @@ def _build_bar(code, panel, index, prediction, timeframe):
     is_suspended = _bool(_array_value(panel, "is_suspended", index))
     listing_days = _finite(_array_value(panel, "listing_days", index))
     bar_closed = _bool(_array_value(panel, "bar_complete", index))
+    market_regime = _text_value(
+        panel,
+        "market_regime",
+        index,
+        "UNKNOWN",
+    )
     required = {
         "rawPrice": raw,
         "signalPrice": signal,
@@ -175,6 +317,11 @@ def _build_bar(code, panel, index, prediction, timeframe):
         "is_suspended": is_suspended,
         "listing_days": listing_days,
         "bar_complete": bar_closed,
+        "marketRegime": (
+            market_regime
+            if market_regime != "UNKNOWN"
+            else None
+        ),
     }
     missing = [key for key, value in required.items() if value is None]
     if timeframe == "5m" and bar_closed is not True:
@@ -194,6 +341,24 @@ def _build_bar(code, panel, index, prediction, timeframe):
     if quant_score is None:
         return None, ["quantScore"]
     pct = (raw["close"] / previous_close - 1.0) * 100.0
+    volume_ratio = _volume_ratio(panel, index)
+    turnover = _finite(_array_value(panel, "b_turnover_rate_f", index)) or 0.0
+    net_moneyflow = _finite(
+        _array_value(panel, "m_net_mf_amount", index)
+    )
+    main_inflow = (net_moneyflow or 0.0) * 10_000.0
+    main_ratio = main_inflow / amount * 100.0 if amount > 0 else 0.0
+    market_score = _finite(_array_value(panel, "market_score", index))
+    if market_score is None and volume_ratio is not None:
+        market_score = _market_score(
+            amount,
+            pct,
+            turnover,
+            volume_ratio,
+            main_ratio,
+        )
+    technical = _derived_technical(panel, index, timeframe)
+    technical.update(_technical(panel, index))
     date = timestamp[:8]
     return {
         "timestamp": timestamp,
@@ -215,12 +380,13 @@ def _build_bar(code, panel, index, prediction, timeframe):
         "listingDays": int(listing_days),
         "isSt": is_st,
         "isSuspended": is_suspended,
-        "marketRegime": _metadata(panel, "market_regime", "UNKNOWN"),
-        "marketScore": _finite(
-            _array_value(panel, "market_score", index)
-        ),
+        "marketRegime": market_regime,
+        "marketScore": market_score,
         "pct": round(pct, 6),
-        "volRatio": _finite(_array_value(panel, "volume_ratio", index)),
+        "turnover": turnover,
+        "volRatio": volume_ratio,
+        "mainRatio": main_ratio,
+        "fund": {"mainRatio": main_ratio},
         "relativeStrength20": _finite(
             _array_value(panel, "f_relative_strength20", index)
         ),
@@ -229,7 +395,7 @@ def _build_bar(code, panel, index, prediction, timeframe):
                 _array_value(panel, "f_sector_breadth", index)
             ),
         },
-        "technical": _technical(panel, index),
+        "technical": technical,
         "quant": {
             "score": quant_score,
             "upProb": _finite(prediction.get("upProb")),

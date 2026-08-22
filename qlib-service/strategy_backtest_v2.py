@@ -346,7 +346,7 @@ def run_strategy_backtest_v2(
     rejections = []
     equity_curve = []
     total_requested = 0
-    total_capacity = 0
+    total_buy_capacity = 0
     partial_fills = 0
     gross_turnover = 0.0
     impact_cost = 0.0
@@ -364,7 +364,6 @@ def run_strategy_backtest_v2(
                 continue
             allowed, reason = _can_fill("SELL", bar)
             capacity = _capacity_quantity(spec, bar)
-            total_capacity += capacity
             if not allowed or capacity < lot_size:
                 rejections.append({
                     "timestamp": timestamp,
@@ -448,7 +447,7 @@ def run_strategy_backtest_v2(
                 continue
             allowed, reason = _can_fill("BUY", bar)
             capacity = _capacity_quantity(spec, bar)
-            total_capacity += capacity
+            total_buy_capacity += capacity
             if not allowed or capacity < lot_size:
                 rejections.append({
                     "timestamp": timestamp,
@@ -501,9 +500,10 @@ def run_strategy_backtest_v2(
             if position:
                 position["quantity"] += quantity
                 position["openedQuantity"] += quantity
+                position["entryGross"] += gross
                 position["entryCost"] += total_cost
                 position["entryPrice"] = (
-                    position["entryCost"] / position["openedQuantity"]
+                    position["entryGross"] / position["openedQuantity"]
                 )
             else:
                 positions[code] = {
@@ -512,6 +512,7 @@ def run_strategy_backtest_v2(
                     "entryTimestamp": timestamp,
                     "entryDate": bar["date"],
                     "entryPrice": fill["price"],
+                    "entryGross": gross,
                     "entryCost": total_cost,
                     "quantity": quantity,
                     "openedQuantity": quantity,
@@ -743,7 +744,7 @@ def run_strategy_backtest_v2(
                         for fill in fills
                         if fill["side"] == "BUY"
                     )
-                    / max(1, total_capacity)
+                    / max(1, total_buy_capacity)
                     * 100.0
                 ),
             )

@@ -207,6 +207,30 @@ class TushareClient:
             p["end_date"] = end_date
         return self.rows("adj_factor", p, "trade_date,adj_factor")
 
+    def namechange(self, ts_code, start_date=None, end_date=None):
+        p = {"ts_code": ts_code}
+        if start_date:
+            p["start_date"] = start_date
+        if end_date:
+            p["end_date"] = end_date
+        return self.rows(
+            "namechange",
+            p,
+            "ts_code,name,start_date,end_date,change_reason",
+        )
+
+    def suspend_d(self, ts_code, start_date=None, end_date=None):
+        p = {"ts_code": ts_code}
+        if start_date:
+            p["start_date"] = start_date
+        if end_date:
+            p["end_date"] = end_date
+        return self.rows(
+            "suspend_d",
+            p,
+            "ts_code,trade_date,suspend_timing,suspend_type",
+        )
+
     def index_daily(self, ts_code="000300.SH", start_date=None, end_date=None):
         p = {"ts_code": ts_code}
         if start_date:

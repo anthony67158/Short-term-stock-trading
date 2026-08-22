@@ -107,6 +107,27 @@ class TushareClientSecurityTest(unittest.TestCase):
             ["ths_index", "ths_daily", "moneyflow_ind_ths"],
         )
 
+    def test_strategy_history_helpers_use_read_only_tushare_apis(self):
+        client = load_client()
+        instance = client.TushareClient(token="test-only-token")
+        instance.rows = Mock(return_value=[])
+
+        instance.namechange(
+            "600001.SH",
+            start_date="20260101",
+            end_date="20260131",
+        )
+        instance.suspend_d(
+            "600001.SH",
+            start_date="20260101",
+            end_date="20260131",
+        )
+
+        self.assertEqual(
+            [call.args[0] for call in instance.rows.call_args_list],
+            ["namechange", "suspend_d"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

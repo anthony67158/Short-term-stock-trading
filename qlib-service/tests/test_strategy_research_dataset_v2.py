@@ -41,6 +41,11 @@ def panel(*, timeframe="1d", final_signal_close=10.7):
         "is_suspended": np.array([False, False, False]),
         "listing_days": np.array([200, 201, 202]),
         "bar_complete": np.array([True, True, True]),
+        "market_regime": np.array([
+            "TREND_STRONG",
+            "TREND_STRONG",
+            "TREND_STRONG",
+        ]),
         "amount_unit": "THOUSAND_CNY",
         "volume_unit": "SHARES",
         "f_atr_pct": np.array([2.0, 2.1, 2.2]),
@@ -78,6 +83,8 @@ class StrategyResearchDatasetV2Test(unittest.TestCase):
         self.assertEqual(row["executionPrice"]["close"], 10.3)
         self.assertEqual(row["adjustmentFactor"], 1.0)
         self.assertEqual(row["technical"]["atrPct"], 2.1)
+        self.assertAlmostEqual(row["volRatio"], 1.2)
+        self.assertIsNotNone(row["marketScore"])
         self.assertEqual(row["isSt"], False)
         self.assertEqual(row["isSuspended"], False)
         self.assertEqual(
