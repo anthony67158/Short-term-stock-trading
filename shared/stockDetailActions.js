@@ -26,22 +26,24 @@ export function stockWatchAction({
   }
 }
 
-export function adviceGenerationAction({
+export function adviceGenerationActions({
   loading = false,
-  hasAdvice = false,
+  deepMode = false,
 } = {}) {
-  if (loading) {
-    return {
-      label: '军师生成中…',
-      icon: 'refresh',
-      disabled: true,
-    }
-  }
+  const quickActive = loading && deepMode !== true
+  const deepActive = loading && deepMode === true
   return {
-    label: hasAdvice
-      ? '重新生成军师 AI 操作建议'
-      : '军师生成 AI 操作建议',
-    icon: hasAdvice ? 'refresh' : 'spark',
-    disabled: false,
+    quick: {
+      label: quickActive ? '快速生成中' : '快速生成',
+      icon: quickActive ? 'refresh' : 'spark',
+      disabled: loading,
+      active: quickActive,
+    },
+    deep: {
+      label: deepActive ? '深度生成中' : '深度生成',
+      icon: deepActive ? 'refresh' : 'brain',
+      disabled: loading,
+      active: deepActive,
+    },
   }
 }

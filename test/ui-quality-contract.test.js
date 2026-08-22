@@ -723,7 +723,7 @@ test('移动端面板标题和说明采用单行省略而不是挤压操作按�
 test('移动端个股详情铺满视口且上下结构共用同一底色', () => {
   assert.match(
     precision,
-    /html\[data-theme="light"\] \.detail-panel\s*{[^}]*background:\s*var\(--color-paper\)/s,
+    /html\[data-theme="light"\] \.detail-panel\s*{[^}]*background:\s*var\(--color-paper-2\)/s,
   )
   assert.match(
     precision,
@@ -792,6 +792,25 @@ test('详情与汇报采用单层容器且不使用侧色条卡片', () => {
   assert.match(
     precision,
     /\.dr-sector\s*{[^}]*border-inline-start:\s*0/s,
+  )
+})
+
+test('白天模式的军师建议区铺满详情宽度且不露出纯白侧边底框', () => {
+  assert.match(
+    precision,
+    /\.detail-panel\s*{[^}]*--detail-inline:\s*var\(--space-lg\)/s,
+  )
+  assert.match(
+    precision,
+    /\.detail-panel \.decide-box\s*{[^}]*width:\s*calc\(100% \+ var\(--detail-inline\) \+ var\(--detail-inline\)\)[^}]*max-width:\s*none[^}]*margin-inline:\s*calc\(-1 \* var\(--detail-inline\)\)[^}]*padding-inline:\s*var\(--detail-inline\)[^}]*background:\s*color-mix/s,
+  )
+  assert.match(
+    precision,
+    /html\[data-theme="light"\] \.detail-panel \.decide-box\s*{[^}]*background:\s*var\(--color-paper\)/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.detail-panel\s*{[^}]*--detail-inline:\s*var\(--space-sm\)/s,
   )
 })
 

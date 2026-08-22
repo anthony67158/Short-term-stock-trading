@@ -27,7 +27,7 @@ import {
 } from '../../shared/adviceUiState.js'
 import { latestKnowledgeActionReview } from '../../shared/knowledgeAction.js'
 import {
-  adviceGenerationAction,
+  adviceGenerationActions,
   stockWatchAction,
 } from '../../shared/stockDetailActions.js'
 import { AlertForm } from './AlertCenter'
@@ -725,15 +725,10 @@ export default function StockDetail({ stock, onClose }) {
     inWatchlist,
     isHeld: isHeldStock,
   })
-  const adviceAction = adviceGenerationAction({
+  const adviceActions = adviceGenerationActions({
     loading: Boolean(quantState?.loading),
-    hasAdvice: Boolean(quantState?.result || quantState?.advice),
+    deepMode: quantState?.deepMode === true,
   })
-  const adviceActionCompactLabel = quantState?.loading
-    ? '生成中'
-    : quantState?.result || quantState?.advice
-      ? '刷新建议'
-      : '快速建议'
 
   return (
     <div className="modal-mask" onClick={onClose}>
@@ -851,16 +846,9 @@ export default function StockDetail({ stock, onClose }) {
                 </div>
 
                 {!quantState && (
-                  <div className="quant-cta">
-                    <div className="quant-cta-actions">
-                      <button className="quant-btn" onClick={() => loadQuant(false)}>
-                        <Icon name="spark" size={14} /> 快速生成建议
-                      </button>
-                      <button className="btn advice-deep-generate" onClick={() => loadQuant(true)}>
-                        <Icon name="brain" size={14} /> 深度研判
-                      </button>
-                    </div>
-                    <span className="quant-cta-hint">{myHold ? '结合你的持仓，告诉你该加仓 / 减仓 / 持有做T' : '结合量化+技术+历史规律+当日盘面，先给结论(买入/回调再买/观望/不建议)，再给对应买点与止损'}</span>
+                  <div className="quant-cta" role="status">
+                    <Icon name="spark" size={14} />
+                    <span>尚无操作建议</span>
                   </div>
                 )}
                 {quantState && quantState.loading && (
@@ -949,8 +937,9 @@ export default function StockDetail({ stock, onClose }) {
                           {resonance && <span>共振 <b>{resonance.score}/{resonance.max}</b></span>}
                           {marketEnv && <span>{marketEnv.level}</span>}
                           {generationMetrics?.durationMs > 0 && (
-                            <span>
-                              {generationMetrics.profile === 'DEEP' ? '深度' : '快速'}
+                            <span className="generation-proof">
+                              <Icon name="check" size={10} />
+                              完整结果 · {generationMetrics.profile === 'DEEP' ? '深度生成' : '快速生成'}
                               {' · '}
                               {(generationMetrics.durationMs / 1000).toFixed(1)}秒
                             </span>
@@ -1367,25 +1356,37 @@ export default function StockDetail({ stock, onClose }) {
           </div>
         </div>
 
-        {/* 固定底部动作栏：军师建议 / 预警，随详情始终可点 */}
+        {/* 固定底部动作栏：快速建议 / 深度建议 / 预警 */}
         <div className="detail-footbar">
           <button
-            className="btn btn-primary footbar-main"
+            className="btn btn-primary footbar-generate footbar-quick"
             type="button"
-            disabled={adviceAction.disabled}
+            disabled={adviceActions.quick.disabled}
+            aria-busy={adviceActions.quick.active}
+            title="关闭深度思考，直接生成单模型操作建议"
             onClick={() => loadQuant(false)}
           >
             <Icon
-              name={adviceAction.icon}
+              name={adviceActions.quick.icon}
               size={14}
-              className={quantState?.loading ? 'spin' : ''}
+              className={adviceActions.quick.active ? 'spin' : ''}
             />
-            <span className="footbar-main-label full">
-              {adviceAction.label}
-            </span>
-            <span className="footbar-main-label compact">
-              {adviceActionCompactLabel}
-            </span>
+            <span>{adviceActions.quick.label}</span>
+          </button>
+          <button
+            className="btn footbar-generate footbar-deep"
+            type="button"
+            disabled={adviceActions.deep.disabled}
+            aria-busy={adviceActions.deep.active}
+            title="开启深度思考，并进行三角色委员会复核"
+            onClick={() => loadQuant(true)}
+          >
+            <Icon
+              name={adviceActions.deep.icon}
+              size={14}
+              className={adviceActions.deep.active ? 'spin' : ''}
+            />
+            <span>{adviceActions.deep.label}</span>
           </button>
           <button className={'btn footbar-alert' + (showAlert ? ' on' : '')} onClick={() => setShowAlert((v) => !v)}>
             <Icon name="bell" size={14} /> {showAlert ? '收起预警' : '盯盘预警'}

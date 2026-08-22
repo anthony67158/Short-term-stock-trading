@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-  adviceGenerationAction,
+  adviceGenerationActions,
   stockWatchAction,
 } from '../shared/stockDetailActions.js'
 
@@ -31,17 +31,40 @@ test('详情页自选按钮明确区分加入、取消与持仓状态', () => {
   })
 })
 
-test('底栏主按钮始终表达军师生成操作建议而不是AI助手', () => {
-  assert.equal(adviceGenerationAction({
+test('底栏明确区分快速生成与深度生成且只标记当前模式', () => {
+  const idle = adviceGenerationActions({
     loading: false,
-    hasAdvice: false,
-  }).label, '军师生成 AI 操作建议')
-  assert.equal(adviceGenerationAction({
+  })
+  assert.deepEqual(idle.quick, {
+    label: '快速生成',
+    icon: 'spark',
+    disabled: false,
+    active: false,
+  })
+  assert.deepEqual(idle.deep, {
+    label: '深度生成',
+    icon: 'brain',
+    disabled: false,
+    active: false,
+  })
+
+  const quickRunning = adviceGenerationActions({
     loading: true,
-    hasAdvice: false,
-  }).label, '军师生成中…')
-  assert.equal(adviceGenerationAction({
-    loading: false,
-    hasAdvice: true,
-  }).label, '重新生成军师 AI 操作建议')
+    deepMode: false,
+  })
+  assert.equal(quickRunning.quick.label, '快速生成中')
+  assert.equal(quickRunning.quick.active, true)
+  assert.equal(quickRunning.deep.label, '深度生成')
+  assert.equal(quickRunning.deep.active, false)
+  assert.equal(quickRunning.quick.disabled, true)
+  assert.equal(quickRunning.deep.disabled, true)
+
+  const deepRunning = adviceGenerationActions({
+    loading: true,
+    deepMode: true,
+  })
+  assert.equal(deepRunning.quick.label, '快速生成')
+  assert.equal(deepRunning.quick.active, false)
+  assert.equal(deepRunning.deep.label, '深度生成中')
+  assert.equal(deepRunning.deep.active, true)
 })
