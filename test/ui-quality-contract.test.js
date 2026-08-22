@@ -165,45 +165,42 @@ test('持仓与自选卡片共用真实股票题材标签且移动端可换行',
   assert.match(legacyStyles, /\.stock-theme-tag\.industry/)
 })
 
-test('持仓与自选卡片顶部信息固定单行且长名称省略', () => {
+test('持仓与自选卡片使用独立身份行和三列指标带避免首行拥挤', () => {
+  assert.match(planTab, /className="trade-card hold-item"/)
+  assert.match(planTab, /className="stock-card-metrics hold-card-metrics"/)
+  assert.match(planTab, /className={'trade-card plan-cand'/)
+  assert.match(planTab, /className="stock-card-metrics pc-metrics"/)
+  assert.match(planTab, /className={'pc-pin'/)
   assert.match(
-    legacyStyles,
-    /\.hold-head\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto[^}]*flex-wrap:\s*nowrap/s,
+    precision,
+    /\.stock-card-metrics\s*{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)[^}]*border-block:\s*1px solid var\(--color-rule-2\)/s,
   )
   assert.match(
-    legacyStyles,
-    /\.hold-head-l\s*{[^}]*flex-wrap:\s*nowrap[^}]*overflow:\s*hidden/s,
+    precision,
+    /\.stock-card-metric\s*{[^}]*min-width:\s*0[^}]*padding:\s*var\(--space-xs\)/s,
   )
   assert.match(
-    legacyStyles,
-    /\.hold-pnl\s*{[^}]*flex-direction:\s*row[^}]*white-space:\s*nowrap/s,
+    precision,
+    /\.pc-top\s*{[^}]*display:\s*grid[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto\s+var\(--space-xl\)/s,
   )
   assert.match(
-    legacyStyles,
-    /\.pc-top\s*{[^}]*flex-wrap:\s*nowrap/s,
-  )
-  assert.match(
-    legacyStyles,
-    /\.pc-name\s*{[^}]*flex-wrap:\s*nowrap[^}]*overflow:\s*hidden/s,
-  )
-  assert.match(
-    legacyStyles,
-    /\.pc-top-r\s*{[^}]*flex-direction:\s*row[^}]*white-space:\s*nowrap/s,
+    precision,
+    /\.hold-head\s*{[^}]*align-items:\s*start[^}]*padding-bottom:\s*var\(--space-sm\)/s,
   )
 })
 
 test('持仓与自选卡把量化分收进建议元信息而不是混入行情首行', () => {
   const holdHeadStart = planTab.indexOf('<div className="hold-head">')
-  const holdMetaStart = planTab.indexOf('<div className="hold-meta">', holdHeadStart)
-  const adviceStart = planTab.indexOf('<AdviceUpdatedAt', holdMetaStart)
-  const holdHead = planTab.slice(holdHeadStart, holdMetaStart)
-  const holdMeta = planTab.slice(holdMetaStart, adviceStart)
+  const holdMetricsStart = planTab.indexOf('<div className="stock-card-metrics hold-card-metrics">', holdHeadStart)
+  const adviceStart = planTab.indexOf('<AdviceUpdatedAt', holdMetricsStart)
+  const holdHead = planTab.slice(holdHeadStart, holdMetricsStart)
+  const holdMetrics = planTab.slice(holdMetricsStart, adviceStart)
   const candTopStart = planTab.indexOf('<div className="pc-top">')
-  const candMetricsStart = planTab.indexOf('<div className="pc-metrics">', candTopStart)
+  const candMetricsStart = planTab.indexOf('<div className="stock-card-metrics pc-metrics">', candTopStart)
   const candTop = planTab.slice(candTopStart, candMetricsStart)
 
   assert.doesNotMatch(holdHead, /<QuantBadge score=\{h\.qScore\}/)
-  assert.doesNotMatch(holdMeta, /<QuantBadge score=\{h\.qScore\}/)
+  assert.doesNotMatch(holdMetrics, /<QuantBadge score=\{h\.qScore\}/)
   assert.doesNotMatch(candTop, /<QuantBadge score=\{p\.qScore\}/)
   assert.match(planTab, /function AdviceUpdatedAt\(\{ entry, score, bias \}\)/)
   assert.equal(
@@ -216,19 +213,18 @@ test('持仓与自选卡把量化分收进建议元信息而不是混入行情�
   )
 })
 
-test('持仓手数与成本在同一水平线且成本加粗', () => {
-  assert.match(planTab, /className="hold-qty-value"/)
+test('持仓现价手数成本使用稳定三列指标带', () => {
+  assert.match(planTab, /className="stock-card-metrics hold-card-metrics"/)
+  assert.match(planTab, />现价<\/span>/)
+  assert.match(planTab, />持仓<\/span>/)
+  assert.match(planTab, />成本<\/span>/)
   assert.match(
     precision,
-    /\.hold-meta\s*{[^}]*align-items:\s*center/s,
+    /\.hold-card-metrics \.stock-card-metric-value\s*{[^}]*font-family:\s*var\(--font-mono\)[^}]*font-variant-numeric:\s*tabular-nums/s,
   )
   assert.match(
     precision,
-    /\.hold-qty-value,[\s\S]*?\.hold-cost-value\s*{[^}]*display:\s*inline-flex[^}]*align-items:\s*center[^}]*min-height:\s*24px/s,
-  )
-  assert.match(
-    precision,
-    /\.hold-cost-value\s*{[^}]*font-weight:\s*700/s,
+    /\.hold-card-metrics \.stock-card-metric\s*\+\s*\.stock-card-metric\s*{[^}]*border-inline-start:\s*1px solid var\(--color-rule-2\)/s,
   )
 })
 
@@ -448,24 +444,25 @@ test('持仓页大型展开层统一挂到顶层Portal避免被吸顶区遮盖',
   )
 })
 
-test('持仓卡桌面同高且移动端恢复自然高度', () => {
-  assert.match(precision, /\.hold-swipe-wrap\s*{[^}]*height:\s*100%/s)
-  assert.match(precision, /\.hold-item > \.pi-actions\s*{[^}]*margin-top:\s*auto/s)
+test('持仓与自选卡采用自然高度且操作栏分组稳定', () => {
+  assert.match(precision, /\.hold-grid,[\s\S]*?\.plan-cand-grid\s*{[^}]*align-items:\s*start/s)
+  assert.match(precision, /\.hold-swipe-wrap,[\s\S]*?\.hold-select-wrap\s*{[^}]*height:\s*auto/s)
+  assert.match(precision, /\.hold-swipe-wrap > \.hold-item,[\s\S]*?\.plan-cand\s*{[^}]*height:\s*auto/s)
   assert.match(
     precision,
     /\.advice-updated-at\s*{[^}]*border:\s*0[^}]*background:\s*transparent/s,
   )
   assert.match(
-    precision,
-    /\.hold-item > \.pi-actions\s*{[^}]*display:\s*grid[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/s,
+    planTab,
+    /className="pi-trade-actions"[\s\S]*?className="pi-card-tools"/s,
   )
   assert.match(
     precision,
-    /\.hold-item > \.pi-actions \.chip-btn:not\(\.recommended\)[^}]*background:\s*transparent/s,
+    /\.pi-trade-actions\s*{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s,
   )
   assert.match(
     precision,
-    /@media \(max-width:\s*50rem\)\s*{[\s\S]*?\.hold-grid\s*{[^}]*align-items:\s*start[^}]*}[\s\S]*?\.hold-swipe-wrap,[\s\S]*?\.hold-select-wrap\s*{[^}]*height:\s*auto[^}]*}[\s\S]*?\.hold-swipe-wrap > \.hold-item\s*{[^}]*height:\s*auto[^}]*}[\s\S]*?\.hold-item > \.pi-actions\s*{[^}]*margin-top:\s*var\(--space-xs\)/s,
+    /@media \(max-width:\s*30rem\)\s*{[\s\S]*?\.hold-item > \.pi-actions\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s,
   )
 })
 
@@ -482,7 +479,7 @@ test('完整建议只在真实截断时支持点击原位展开', () => {
   assert.match(planTab, /event\.key !== 'Escape'[\s\S]*?setExpanded\(false\)[\s\S]*?\.blur\(\)/)
   assert.match(
     precision,
-    /\.action-command-text\s*{[^}]*min-height:\s*4\.5em[^}]*-webkit-line-clamp:\s*3/s,
+    /\.action-command-text\s*{[^}]*min-height:\s*0[^}]*max-height:\s*3em[^}]*-webkit-line-clamp:\s*2/s,
   )
   assert.doesNotMatch(precision, /action-command-popover/)
   assert.match(
@@ -811,6 +808,29 @@ test('白天模式的军师建议区铺满详情宽度且不露出纯白侧边�
   assert.match(
     precision,
     /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.detail-panel\s*{[^}]*--detail-inline:\s*var\(--space-sm\)/s,
+  )
+})
+
+test('个股详情执行摘要改为纵向节奏并与边线保持稳定留白', () => {
+  assert.match(
+    precision,
+    /\.modal-mask:has\(\.detail-panel\) \.detail-panel\s*{[^}]*width:\s*min\(1040px,\s*calc\(100vw - 48px\)\)/s,
+  )
+  assert.match(
+    precision,
+    /\.decide-head\s*{[^}]*padding-block:\s*var\(--space-md\)[^}]*border-bottom:\s*0/s,
+  )
+  assert.match(
+    precision,
+    /\.advice-command-body\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)[^}]*gap:\s*var\(--space-md\)/s,
+  )
+  assert.match(
+    precision,
+    /\.advice-execution-metrics\s*{[^}]*width:\s*100%[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)[^}]*border:\s*1px solid var\(--color-rule-2\)/s,
+  )
+  assert.match(
+    precision,
+    /\.advice-tactical-grid\s*{[^}]*gap:\s*var\(--space-xl\)[^}]*padding-block:\s*var\(--space-lg\)/s,
   )
 })
 

@@ -9933,3 +9933,517 @@ button.acct-item {
     animation: none;
   }
 }
+
+/* Trade workspace refinement: roomy decision sheet + natural-height cards. */
+.modal-mask:has(.detail-panel) .detail-panel {
+  width: min(1040px, calc(100vw - 48px));
+}
+
+.detail-panel .decide-box {
+  padding-top: 0;
+  padding-bottom: var(--space-md);
+}
+
+.decide-head {
+  padding-block: var(--space-md);
+  border-bottom: 0;
+}
+
+.advice-command-center {
+  gap: 0;
+  padding-block: var(--space-lg) var(--space-xl);
+  border-block: 0;
+}
+
+.advice-command-head {
+  align-items: center;
+}
+
+.advice-command-body {
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-md);
+  margin-top: var(--space-md);
+}
+
+.advice-command-instruction {
+  max-width: 72ch;
+  line-height: 1.65;
+}
+
+.advice-execution-metrics {
+  width: 100%;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border: 1px solid var(--color-rule-2);
+  border-radius: var(--radius-input);
+  background: var(--color-paper-2);
+  overflow: hidden;
+}
+
+.advice-execution-metrics:has(> span:only-child) {
+  width: min(220px, 100%);
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.advice-execution-metrics:has(> span:nth-child(2):last-child) {
+  width: min(440px, 100%);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.advice-execution-metrics > span {
+  min-width: 0;
+  padding: var(--space-sm);
+}
+
+.advice-tactical-grid {
+  gap: var(--space-xl);
+  padding-block: var(--space-lg);
+  border-top: 1px solid var(--color-rule-2);
+  border-bottom: 0;
+}
+
+.advice-tactical-grid:has(> .advice-levels:only-child),
+.advice-tactical-grid:has(> .advice-trigger:only-child) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.advice-tactical-grid > .advice-trigger:only-child {
+  padding-inline-start: 0;
+  border-inline-start: 0;
+}
+
+.advice-levels,
+.advice-trigger {
+  padding: 0;
+}
+
+.advice-levels {
+  padding-inline-end: 0;
+}
+
+.advice-trigger {
+  padding-inline-start: var(--space-xl);
+}
+
+.advice-core-evidence {
+  padding-block: var(--space-xl);
+  border-top: 1px solid var(--color-rule-2);
+}
+
+.hold-grid,
+.plan-cand-grid {
+  align-items: start;
+}
+
+.hold-grid {
+  grid-template-columns:
+    repeat(auto-fit, minmax(min(100%, 380px), 1fr));
+  gap: var(--space-sm);
+}
+
+.plan-cand-grid {
+  grid-template-columns:
+    repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+  gap: var(--space-sm);
+}
+
+.hold-swipe-wrap,
+.hold-select-wrap {
+  height: auto;
+}
+
+.hold-swipe-wrap > .hold-item,
+.plan-cand {
+  height: auto;
+}
+
+.trade-card,
+.plan-cand,
+.hold-grid .hold-item {
+  padding: var(--space-sm);
+  border: 1px solid var(--color-rule-2);
+  border-radius: var(--radius-card);
+  background: var(--color-paper-2);
+  box-shadow: none;
+}
+
+.hold-grid .hold-item {
+  overflow: visible;
+}
+
+.hold-grid .hold-item:hover,
+.plan-cand:hover {
+  border-color: var(--color-rule);
+  transform: none;
+  box-shadow: none;
+}
+
+.hold-head {
+  align-items: start;
+  gap: var(--space-sm);
+  padding-bottom: var(--space-sm);
+}
+
+.hold-head-l {
+  align-items: flex-start;
+  overflow: visible;
+}
+
+.hold-head-l .stock-name-cluster,
+.pc-name .stock-name-cluster {
+  overflow: visible;
+}
+
+.hold-pnl {
+  align-items: flex-end;
+  flex-direction: column;
+  gap: var(--space-3xs);
+}
+
+.hp-pct {
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  line-height: 1;
+}
+
+.hp-amt {
+  font-size: var(--text-xs);
+}
+
+.pc-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto var(--space-xl);
+  align-items: start;
+  gap: var(--space-xs);
+  margin: 0;
+  padding-bottom: var(--space-sm);
+}
+
+.pc-name {
+  align-items: flex-start;
+  overflow: visible;
+}
+
+.pc-top-r {
+  align-items: flex-end;
+  padding-right: 0;
+}
+
+.pc-price {
+  font-size: var(--text-base);
+}
+
+.pc-pin {
+  position: static;
+  width: var(--space-xl);
+  height: var(--space-xl);
+  opacity: 0.72;
+}
+
+.stock-card-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+  margin-block: 0 var(--space-xs);
+  border-block: 1px solid var(--color-rule-2);
+  background: color-mix(
+    in oklch,
+    var(--color-paper-3) 54%,
+    var(--color-paper-2)
+  );
+}
+
+.stock-card-metric {
+  display: flex;
+  min-width: 0;
+  min-height: 58px;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-3xs);
+  padding: var(--space-xs);
+  color: var(--color-muted);
+  font-size: var(--text-2xs);
+  font-style: normal;
+  line-height: 1.25;
+}
+
+.stock-card-metric + .stock-card-metric {
+  border-inline-start: 1px solid var(--color-rule-2);
+}
+
+.stock-card-metric > b,
+.stock-card-metric-value {
+  min-width: 0;
+  color: var(--color-ink);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.stock-card-metric > b.red,
+.stock-card-metric-value.red {
+  color: var(--color-up);
+}
+
+.stock-card-metric > b.green,
+.stock-card-metric-value.green {
+  color: var(--color-down);
+}
+
+.stock-card-metric-value small {
+  margin-inline-start: var(--space-3xs);
+  color: inherit;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+}
+
+.stock-card-metric > em,
+.stock-card-metric-value-row > em {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-muted);
+  font-size: var(--text-2xs);
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stock-card-metric-value-row {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: var(--space-3xs);
+}
+
+.hold-card-metrics .stock-card-metric {
+  position: relative;
+}
+
+.hold-card-metrics .stock-card-metric-value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.hold-card-metrics .stock-card-metric + .stock-card-metric {
+  border-inline-start: 1px solid var(--color-rule-2);
+}
+
+.hold-card-metrics .hold-cost-edit {
+  position: absolute;
+  top: var(--space-2xs);
+  right: var(--space-2xs);
+}
+
+.pc-metrics {
+  display: grid;
+  gap: 0;
+  margin-bottom: var(--space-xs);
+}
+
+.advice-updated-at {
+  margin-top: var(--space-xs);
+}
+
+.action-decision {
+  margin-top: var(--space-xs);
+}
+
+.action-command {
+  padding-block: var(--space-sm);
+}
+
+.action-command-text {
+  min-height: 0;
+  max-height: 3em;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.action-command-copy {
+  min-height: 0;
+}
+
+.action-level {
+  min-height: 68px;
+  padding: var(--space-xs);
+}
+
+.hold-item > .pi-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: var(--space-xs);
+  margin-top: var(--space-sm);
+  padding-top: var(--space-sm);
+}
+
+.pi-trade-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2xs);
+}
+
+.pi-card-tools {
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+  gap: var(--space-2xs);
+}
+
+.pi-trade-actions > .chip-btn,
+.pi-card-tools > .chip-btn,
+.pi-card-tools > .icon-btn {
+  min-width: 0;
+  min-height: 40px;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.pi-card-tools > .icon-btn {
+  width: 40px;
+}
+
+.plan-cand .pc-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 40px;
+  gap: var(--space-2xs);
+  margin-top: var(--space-sm);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--color-rule-2);
+}
+
+.plan-cand .pc-actions > button {
+  min-width: 0;
+  min-height: 40px;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .modal-mask:has(.detail-panel) .detail-panel {
+    width: 100%;
+  }
+
+  .decide-head {
+    gap: var(--space-sm);
+    padding-block: var(--space-sm);
+  }
+
+  .advice-command-center {
+    padding-block: var(--space-md);
+  }
+
+  .advice-execution-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .advice-execution-metrics > span {
+    padding: var(--space-xs);
+  }
+
+  .advice-tactical-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+    padding-block: var(--space-md);
+  }
+
+  .advice-levels {
+    padding-bottom: var(--space-md);
+  }
+
+  .advice-trigger {
+    padding-top: var(--space-md);
+    padding-inline-start: 0;
+    border-top: 1px solid var(--color-rule-2);
+    border-inline-start: 0;
+  }
+
+  .trade-card,
+  .plan-cand,
+  .hold-grid .hold-item {
+    padding: var(--space-sm);
+  }
+}
+
+@media (max-width: 30rem) {
+  .hold-item > .pi-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .pi-card-tools {
+    padding-top: var(--space-2xs);
+    border-top: 1px solid var(--color-rule-2);
+  }
+
+  .pi-card-tools > .chip-btn {
+    flex: 1;
+  }
+
+  .pc-top {
+    grid-template-columns:
+      minmax(0, 1fr)
+      calc(var(--space-xl) + var(--space-xs));
+    grid-template-areas:
+      "identity pin"
+      "quote quote";
+    gap: var(--space-2xs) var(--space-xs);
+  }
+
+  .pc-name {
+    grid-area: identity;
+  }
+
+  .pc-top-r {
+    grid-area: quote;
+    justify-content: flex-start;
+  }
+
+  .pc-pin {
+    grid-area: pin;
+  }
+}
+
+@media (max-width: 380px) {
+  .hold-head .stock-name-code,
+  .pc-top .stock-name-code,
+  .hold-card-metrics .stock-card-metric:last-child em {
+    display: none;
+  }
+
+  .stock-card-metric {
+    min-height: 54px;
+    padding-inline: var(--space-2xs);
+  }
+
+  .stock-card-metric > b,
+  .stock-card-metric-value {
+    font-size: var(--text-xs);
+  }
+
+  .advice-execution-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (pointer: coarse) {
+  .pc-pin,
+  .pi-card-tools > .icon-btn {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
+  }
+
+  .action-command-copy {
+    min-height: 44px;
+  }
+
+  .hold-cost-edit::before {
+    content: "";
+    position: absolute;
+    inset: -10px;
+  }
+}

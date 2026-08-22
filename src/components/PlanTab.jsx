@@ -912,7 +912,7 @@ function PlanList({ book, quote, stockTags, batchSel }) {
     const q = quote[p.code]
     const checked = selected.has(p.code)
     return (
-      <div className={'plan-cand' + (p.star ? ' starred' : '') + (selectMode ? ' selectable' : '') + (checked ? ' sel-on' : '')}
+      <div className={'trade-card plan-cand' + (p.star ? ' starred' : '') + (selectMode ? ' selectable' : '') + (checked ? ' sel-on' : '')}
         key={p.code}
         data-code={p.code}
         onClickCapture={selectMode ? (e) => { e.stopPropagation(); toggleSel(p.code) } : undefined}>
@@ -939,17 +939,32 @@ function PlanList({ book, quote, stockTags, batchSel }) {
           <div className="pc-top-r">
             {q && <span className={'pc-price ' + pctClass(q.pct)}>{fmtRaw(q.price)} <span className="pc-pct">{fmtPct(q.pct)}</span></span>}
           </div>
+          <button
+            className={'pc-pin' + (p.star ? ' on' : '')}
+            type="button"
+            aria-label={p.star ? `取消置顶${p.name}` : `置顶${p.name}`}
+            aria-pressed={p.star === true}
+            title={p.star ? '取消置顶重点关注' : '置顶重点关注（按量化分排序）'}
+            onClick={() => planStore.toggleStar(p.code)}
+          >
+            <Icon name={p.star ? 'starFill' : 'star'} size={13} />
+          </button>
         </div>
-        {/* 置顶别针：右上角浮标，点亮=重点关注(参与置顶分组并按量化分排序) */}
-        <button className={'pc-pin' + (p.star ? ' on' : '')} title={p.star ? '取消置顶重点关注' : '置顶重点关注（按量化分排序）'} onClick={() => planStore.toggleStar(p.code)}>
-          <Icon name={p.star ? 'starFill' : 'star'} size={13} />
-        </button>
         {/* 盯盘监控指标（原自选股监控能力）*/}
         {q && (
-          <div className="pc-metrics">
-            <span>换手 <b className={q.turnover > 10 ? 'gold' : ''}>{fmtNum(q.turnover, 1)}%</b></span>
-            <span>量比 <b className={q.volRatio > 2 ? 'gold' : ''}>{fmtNum(q.volRatio, 1)}</b></span>
-            <span>主力 <b className={pctClass(q.mainInflow)}>{fmtInflow(q.mainInflow)}</b></span>
+          <div className="stock-card-metrics pc-metrics">
+            <span className="stock-card-metric">
+              <span>换手</span>
+              <b className={q.turnover > 10 ? 'gold' : ''}>{fmtNum(q.turnover, 1)}%</b>
+            </span>
+            <span className="stock-card-metric">
+              <span>量比</span>
+              <b className={q.volRatio > 2 ? 'gold' : ''}>{fmtNum(q.volRatio, 1)}</b>
+            </span>
+            <span className="stock-card-metric">
+              <span>主力</span>
+              <b className={pctClass(q.mainInflow)}>{fmtInflow(q.mainInflow)}</b>
+            </span>
           </div>
         )}
         {/* 当前指令、有效价位、手数与进度共用同一建议视图，避免方向脱节。 */}
@@ -2555,10 +2570,10 @@ function HoldingItem({ h, idx, quote: q }) {
       {swipe.swiping && isTouch && swipe.dx > 0 && (
         <div className={'hsw-hint hsw-right' + (swipe.dx >= 64 ? ' armed' : '')}><Icon name="chart" size={16} /><span>详情</span></div>
       )}
-      <div className="hold-item" {...swipe.bind}
+      <div className="trade-card hold-item" {...swipe.bind}
         data-code={h.code}
         style={swipe.dx ? { transform: `translateX(${swipe.dx}px)`, transition: swipe.swiping ? 'none' : 'transform .2s ease' } : undefined}>
-      {/* 决策条：股名/代码/现价 + 特大号盈亏；量化分移到成本信息行。 */}
+      {/* 身份行只承担股票身份和持仓盈亏，行情与成本下沉到稳定指标带。 */}
       <div className="hold-head">
         <div className="hold-head-l">
           <StockName
@@ -2568,11 +2583,6 @@ function HoldingItem({ h, idx, quote: q }) {
           >
             <span className="hh-name">{h.name}</span>
           </StockName>
-          {q && (validPx != null
-            ? <span className={'hh-price ' + pctClass(q.pct)}>{fmtRaw(validPx)} <span className="hh-chg">{fmtPct(q.pct)}</span></span>
-            : effPx != null
-              ? <span className="hh-price muted" title="休市/行情暂不可用,显示最近收盘价">{fmtRaw(effPx)} <span className="hh-chg">收盘</span></span>
-              : <span className="hh-price muted" title="暂无行情">现价 —</span>)}
         </div>
         {pnl != null && (
           <div className={'hold-pnl ' + (pnl >= 0 ? 'red' : 'green')} title={costBasis.tRealizedPnl
@@ -2584,13 +2594,33 @@ function HoldingItem({ h, idx, quote: q }) {
         )}
       </div>
 
-      {/* 数据行：只留 持仓手数 · 成本（现价已并入顶部）*/}
-      <div className="hold-meta">
-        <span className="hold-qty-value" title={netT !== 0 ? `底仓 ${h.qty} 手，今日做T未结算净${netT > 0 ? '买入+' : '卖出'}${netT} 手` : '当前持仓手数'}>
-          持仓 {liveQty}手{netT !== 0 && <span className="sub-name"> (底仓{h.qty}{netT > 0 ? '+' : ''}{netT})</span>}
+      <div className="stock-card-metrics hold-card-metrics">
+        <span className="stock-card-metric" title={validPx == null && effPx != null ? '休市或行情暂不可用，显示最近收盘价' : '当前价格'}>
+          <span>现价</span>
+          {validPx != null
+            ? (
+                <strong className={'stock-card-metric-value ' + pctClass(q?.pct)}>
+                  {fmtRaw(validPx)}
+                  <small>{fmtPct(q?.pct)}</small>
+                </strong>
+              )
+            : effPx != null
+              ? <strong className="stock-card-metric-value muted">{fmtRaw(effPx)}<small>收盘</small></strong>
+              : <strong className="stock-card-metric-value muted">—</strong>}
         </span>
-        <span className="hold-cost-value" title={`裸买入价 ${fmtRaw(h.buyPrice)} + 买入手续费 ${(h.buyFee || 0).toFixed(2)}${costBasis.tRealizedPnl ? `；累计做T收益摊薄 ${fmtMoney(costBasis.tRealizedPnl)}` : ''}`}>
-          成本 {fmtRaw(liveCost)} <span className="sub-name">{costBasis.tRealizedPnl ? '(做T后)' : '(含费)'}</span>
+        <span className="stock-card-metric" title={netT !== 0 ? `底仓 ${h.qty} 手，今日做T未结算净${netT > 0 ? '买入+' : '卖出'}${netT} 手` : '当前持仓手数'}>
+          <span>持仓</span>
+          <strong className="stock-card-metric-value">
+            {liveQty}<small>手</small>
+          </strong>
+          {netT !== 0 && <em>底仓 {h.qty}{netT > 0 ? '+' : ''}{netT}</em>}
+        </span>
+        <span className="stock-card-metric" title={`裸买入价 ${fmtRaw(h.buyPrice)} + 买入手续费 ${(h.buyFee || 0).toFixed(2)}${costBasis.tRealizedPnl ? `；累计做T收益摊薄 ${fmtMoney(costBasis.tRealizedPnl)}` : ''}`}>
+          <span>成本</span>
+          <span className="stock-card-metric-value-row">
+            <strong className="stock-card-metric-value">{fmtRaw(liveCost)}</strong>
+            <em>{costBasis.tRealizedPnl ? '做T后' : '含费'}</em>
+          </span>
           <button
             type="button"
             className="hold-cost-edit"
@@ -2726,11 +2756,15 @@ function HoldingItem({ h, idx, quote: q }) {
       {!mobileOperations && tradeErr && <div className="err" style={{ margin: '8px 0' }}>{tradeErr}</div>}
       {operationForm && !mobileOperations ? operationForm : (
         <div className="pi-actions">
-          <button className={'chip-btn act-add' + (decisionView?.kind === 'add' ? ' recommended' : '')} onClick={startAdd}>加仓</button>
-          <button className="chip-btn act-t" onClick={startT}>做T</button>
-          <button className={'chip-btn act-reduce' + (['reduce', 'sell'].includes(decisionView?.kind) ? ' recommended' : '')} onClick={startSell}>减仓/清仓</button>
-          {!(h.tp || h.sl || h.planReason) && <button className="chip-btn ghost" onClick={() => openPlan(false)}>设计划</button>}
-          <button className="icon-btn act-del" onClick={() => setConfirmDel(true)}><Icon name="trash" size={14} /></button>
+          <div className="pi-trade-actions">
+            <button className={'chip-btn act-add' + (decisionView?.kind === 'add' ? ' recommended' : '')} onClick={startAdd}>加仓</button>
+            <button className="chip-btn act-t" onClick={startT}>做T</button>
+            <button className={'chip-btn act-reduce' + (['reduce', 'sell'].includes(decisionView?.kind) ? ' recommended' : '')} onClick={startSell}>减仓/清仓</button>
+          </div>
+          <div className="pi-card-tools">
+            {!(h.tp || h.sl || h.planReason) && <button className="chip-btn ghost" onClick={() => openPlan(false)}>设计划</button>}
+            <button className="icon-btn act-del" aria-label={`删除${h.name}持仓`} title="删除持仓" onClick={() => setConfirmDel(true)}><Icon name="trash" size={14} /></button>
+          </div>
         </div>
       )}
       {operationForm && mobileOperations && (

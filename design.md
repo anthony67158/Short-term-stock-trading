@@ -145,6 +145,13 @@
   Do not add a hover card or duplicate the advice in a floating layer.
 - Measure advice overflow from the rendered text. If the full sentence already
   fits, render plain text without a disclosure button, arrow or hover card.
+- Holding and watchlist cards share one anatomy: identity row, three-column
+  metric strip, decision block, then actions. Cards use natural content height;
+  never stretch a sparse card to match a dense sibling.
+- Stock detail keeps the execution instruction full width. Position size,
+  capital and risk/reward sit in a separate metric strip below it, never in a
+  competing side column. Major sections use one rule plus internal spacing,
+  not stacked separator lines.
 
 ## Per-page hierarchy
 

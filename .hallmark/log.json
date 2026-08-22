@@ -1,5 +1,15 @@
 [
   {
+    "date": "2026-08-22",
+    "scope": "app",
+    "macrostructure": "Workbench",
+    "theme": "custom",
+    "theme_axes": "light + dark / geometric-sans / cool",
+    "vibe": "natural-height trade cards, full-width decisions, calm metric bands",
+    "enrichment": "none",
+    "brief": "个股详情、持仓卡与自选卡的信息层级和响应式布局重构"
+  },
+  {
     "date": "2026-08-18",
     "scope": "app",
     "macrostructure": "Workbench",
