@@ -34,7 +34,19 @@
       ]
     },
     {
-      "source": "/(app-icon-(.*)\\.png|apple-touch-icon-v2\\.png|favicon-(.*)\\.png)",
+      "source": "/app-icon-(.*).png",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    },
+    {
+      "source": "/apple-touch-icon-v2.png",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    },
+    {
+      "source": "/favicon-(.*).png",
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
       ]
