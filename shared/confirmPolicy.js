@@ -49,6 +49,16 @@ export function fuseConfirmation({
     }
   }
 
+  if (side === 'stop' && det.decision === 'confirm' && score >= policy.hardOverride) {
+    return {
+      decision: 'confirm',
+      confidence: llm?.confidence ?? null,
+      reason: det.hits?.join('、') || '强客观破位信号确认止损',
+      policy: 'risk-override',
+      rawDecision: llm?.decision || det.decision,
+    }
+  }
+
   if (!observed) {
     return {
       decision: 'wait',
@@ -68,16 +78,6 @@ export function fuseConfirmation({
       gated: true,
       rawDecision: 'invalid',
       policy: 'invalid-gated',
-    }
-  }
-
-  if (side === 'stop' && det.decision === 'confirm' && score >= policy.hardOverride) {
-    return {
-      decision: 'confirm',
-      confidence: llm?.confidence ?? null,
-      reason: det.hits?.join('、') || '强客观破位信号确认止损',
-      policy: 'risk-override',
-      rawDecision: llm?.decision || det.decision,
     }
   }
 

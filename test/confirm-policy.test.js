@@ -61,6 +61,18 @@ test('止损出现强客观破位时可覆盖 LLM 犹豫', () => {
   assert.equal(result.policy, 'risk-override')
 })
 
+test('灾难性止损不等待观察窗口或LLM确认', () => {
+  const result = fuseConfirmation({
+    side: 'stop',
+    deterministic: det(3.5, 'confirm'),
+    llm: null,
+    observationAgeMs: 5000,
+  })
+
+  assert.equal(result.decision, 'confirm')
+  assert.equal(result.policy, 'risk-override')
+})
+
 test('LLM 未提供置信度时不能发买卖强提示', () => {
   const result = fuseConfirmation({
     side: 'buy',
