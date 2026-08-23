@@ -1047,7 +1047,8 @@ test('策略日报提供云端自动生成开关与三个场次时间', () => {
   assert.match(dailyReportSchedule, /盘前日报/)
   assert.match(dailyReportSchedule, /午间日报/)
   assert.match(dailyReportSchedule, /收盘日报/)
-  assert.match(dailyReport, /watchlist,\s*refresh,/s)
+  assert.doesNotMatch(dailyReport, /planStore|holdings|watchlist/)
+  assert.match(aiClient, /body:\s*'\{\}'/)
   assert.match(aiClient, /export async function fetchDailyReportSchedule/)
   assert.match(aiClient, /export async function saveDailyReportSchedule/)
   assert.match(
