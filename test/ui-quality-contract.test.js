@@ -930,6 +930,25 @@ test('军师建议展示本次实际使用的持仓与资金快照', () => {
   assert.match(precision, /\.advice-risk-overlay/)
 })
 
+test('完整依据与复核使用独立卡片栈间距且内部证据块延续同一节奏', () => {
+  assert.match(
+    advicePresentation,
+    /expanded && \(\s*<div className="advice-deep-content">/,
+  )
+  assert.match(
+    precision,
+    /\.advice-deep-content\s*{[^}]*display:\s*grid[^}]*gap:\s*var\(--space-sm\)[^}]*padding-block:\s*var\(--space-xs\)\s*var\(--space-lg\)/s,
+  )
+  assert.match(
+    precision,
+    /\.advice-deep-body\s*{[^}]*display:\s*grid[^}]*gap:\s*var\(--space-sm\)/s,
+  )
+  assert.match(
+    precision,
+    /\.advice-deep-content\s*>\s*\*[^}]*margin-block:\s*0/s,
+  )
+})
+
 test('持仓总览提供隔夜新买与卖出执行的当日损益归因', () => {
   assert.match(planTab, /computeDailyAttribution/)
   assert.match(planTab, /当日损益归因/)

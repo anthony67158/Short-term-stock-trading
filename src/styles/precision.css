@@ -3243,6 +3243,32 @@ html[data-theme="light"] .plan-cand.starred {
   background: transparent;
 }
 
+.advice-deep-content {
+  display: grid;
+  gap: var(--space-sm);
+  padding-block: var(--space-xs) var(--space-lg);
+}
+
+.advice-deep-content > * {
+  min-width: 0;
+  margin-block: 0;
+}
+
+.advice-deep-body {
+  display: grid;
+  gap: var(--space-sm);
+}
+
+.advice-deep-body > * {
+  min-width: 0;
+  margin-block: 0;
+}
+
+.advice-deep-content > .theory-refs,
+.advice-deep-content > .search-reference {
+  padding-top: var(--space-sm);
+}
+
 .detail-kline {
   margin-top: 0;
   padding: var(--space-lg) 0 0;

@@ -423,7 +423,7 @@ export default function AdvicePresentation({
             <Icon name={expanded ? 'chevronDown' : 'chevronRight'} size={13} />
           </button>
           {expanded && (
-            <>
+            <div className="advice-deep-content">
               <Continuity continuity={advice.continuity} />
               <ReviewCycle review={view.review} enabled={reviewEnabled} />
               <DecisionContext context={advice.decisionContext} />
@@ -484,7 +484,7 @@ export default function AdvicePresentation({
               <TheoryReferences references={advice.theoryRefs} />
               <SearchReference reference={advice.searchReference} />
               <AdviceDetails advice={advice} review={knowledgeActionReview} />
-            </>
+            </div>
           )}
         </div>
       )}
