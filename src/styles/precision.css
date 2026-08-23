@@ -2192,11 +2192,11 @@ html[data-theme="light"] .plan-cand.starred {
 .action-command {
   position: relative;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: start;
-  gap: var(--space-xs);
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2xs);
   min-width: 0;
-  padding: var(--space-xs) 0 var(--space-sm);
+  padding: var(--space-xs) 0;
 }
 
 .action-command-badge {
@@ -2230,84 +2230,61 @@ html[data-theme="light"] .plan-cand.starred {
 }
 
 .action-command-text {
-  display: -webkit-box;
+  display: block;
   min-width: 0;
-  min-height: 4.5em;
-  max-height: 4.5em;
   overflow: hidden;
   color: var(--color-ink);
   font-size: var(--text-sm);
   font-weight: 600;
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  line-clamp: 3;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.action-command-disclosure {
-  position: relative;
-  min-width: 0;
-}
-
-.action-command-copy {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--space-md);
-  align-items: start;
-  gap: var(--space-2xs);
-  width: 100%;
-  min-width: 0;
-  min-height: 4.5em;
-  padding: 0;
+.action-command-open {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3xs);
+  min-width: 54px;
+  min-height: 32px;
+  padding: 0 var(--space-2xs);
   border: 0;
   border-radius: var(--radius-control);
   background: transparent;
-  color: inherit;
+  color: var(--color-accent);
   cursor: pointer;
-  text-align: start;
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  white-space: nowrap;
 }
 
-.action-command-copy:focus-visible {
+.action-command-open:focus-visible {
   outline: 2px solid var(--color-focus);
   outline-offset: 2px;
 }
 
-.action-command-copy:active {
+.action-command-open:active {
   transform: translateY(1px);
 }
 
-.action-command-copy:disabled {
+.action-command-open:disabled,
+.action-command-open[aria-disabled="true"] {
+  color: var(--color-muted);
   cursor: not-allowed;
   opacity: 0.55;
 }
 
-.action-command-copy-static {
-  display: block;
-  cursor: default;
+.action-command-open[aria-busy="true"] {
+  cursor: progress;
 }
 
-.action-command-toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: var(--space-md);
-  height: var(--space-md);
-  border-radius: var(--radius-control);
-  color: var(--color-muted);
-  transition: transform var(--dur-short) var(--ease-in-out);
+.action-command-open[data-state="error"] {
+  color: var(--color-danger);
 }
 
-.action-command-disclosure.is-expanded .action-command-toggle {
-  transform: rotate(180deg);
-}
-
-.action-command-disclosure.is-expanded .action-command-text {
-  display: block;
-  min-height: 0;
-  max-height: none;
-  overflow: visible;
-  -webkit-line-clamp: unset;
-  line-clamp: unset;
+.action-command-open[data-state="success"] {
+  color: var(--color-down);
 }
 
 .action-command-qty {
@@ -2341,6 +2318,30 @@ html[data-theme="light"] .plan-cand.starred {
 
 .action-levels.editable {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.action-levels-empty {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2xs);
+  min-height: 56px;
+  padding: var(--space-2xs) var(--space-xs);
+  border-radius: var(--radius-control);
+  background: var(--color-paper-3);
+  color: var(--color-muted);
+  font-size: var(--text-2xs);
+}
+
+.action-levels-empty .icon {
+  color: var(--color-accent);
+}
+
+.action-levels-empty strong {
+  color: var(--color-ink-2);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .action-level {
@@ -2535,10 +2536,10 @@ html[data-theme="light"] .plan-cand.starred {
 }
 
 .action-progress {
-  padding: var(--space-xs) 0 var(--space-2xs);
+  padding: var(--space-2xs) 0 0;
 }
 
-.action-progress-head {
+.action-progress-summary {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
@@ -2558,20 +2559,16 @@ html[data-theme="light"] .plan-cand.starred {
 }
 
 .action-current-marker {
+  overflow: hidden;
   color: var(--color-muted);
   font-size: var(--text-2xs);
   font-weight: 650;
-}
-
-.action-current-marker strong {
-  color: var(--color-ink);
-  font-family: var(--font-mono);
-  font-size: var(--text-md);
-  font-variant-numeric: tabular-nums;
+  text-align: end;
+  text-overflow: ellipsis;
 }
 
 .action-direction {
-  justify-self: end;
+  justify-self: start;
   color: var(--color-ink-2);
   font-size: var(--text-2xs);
   font-weight: 700;
@@ -2588,7 +2585,7 @@ html[data-theme="light"] .plan-cand.starred {
 }
 
 .action-progress-track {
-  height: 8px;
+  height: 5px;
   overflow: hidden;
   border-radius: var(--radius-pill);
   background: var(--color-paper-4);
@@ -2626,39 +2623,21 @@ html[data-theme="light"] .plan-cand.starred {
   background: transparent;
 }
 
-.action-progress-label {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-2xs);
-  margin-top: var(--space-2xs);
-  color: var(--color-muted);
-  font-size: var(--text-2xs);
-  font-weight: 650;
-  line-height: 1.35;
-}
-
-.action-progress-label > span {
+.action-progress-target {
   min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.action-progress-label > b {
-  flex: none;
+  overflow: hidden;
   color: var(--color-ink-2);
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .action-level.reached {
     animation: none;
-  }
-
-  .action-command-toggle {
-    transition: none;
   }
 }
 
@@ -3975,6 +3954,10 @@ html[data-theme="light"] .plan-cand.starred {
   .action-prompt:hover {
     border-color: var(--color-accent);
     background: color-mix(in oklch, var(--color-accent) 6%, var(--color-paper-3));
+  }
+
+  .action-command-open:hover {
+    background: var(--color-paper-3);
   }
 
   .action-field input:hover {
@@ -8577,25 +8560,6 @@ button.acct-item {
     margin-top: var(--space-xs);
   }
 
-  .action-command-copy {
-    min-height: 44px;
-  }
-
-  .action-command-text {
-    min-height: 3em;
-    max-height: 3em;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-  }
-
-  .action-command-disclosure.is-expanded .action-command-text {
-    display: block;
-    min-height: 0;
-    max-height: none;
-    overflow: visible;
-    -webkit-line-clamp: unset;
-    line-clamp: unset;
-  }
 }
 
 @media (max-width: 720px) {
@@ -10118,26 +10082,6 @@ button.acct-item {
     margin-top: var(--space-xs);
   }
 
-  .action-command-copy {
-    min-height: 44px;
-  }
-
-  .action-command-text {
-    min-height: 3em;
-    max-height: 3em;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-  }
-
-  .action-command-disclosure.is-expanded .action-command-text {
-    display: block;
-    min-height: 0;
-    max-height: none;
-    overflow: visible;
-    -webkit-line-clamp: unset;
-    line-clamp: unset;
-  }
-
   .nav-command,
   .nav-tab,
   .nav-refresh,
@@ -10280,7 +10224,7 @@ button.acct-item {
 
 .hold-grid,
 .plan-cand-grid {
-  align-items: start;
+  align-items: stretch;
 }
 
 .hold-grid {
@@ -10297,12 +10241,12 @@ button.acct-item {
 
 .hold-swipe-wrap,
 .hold-select-wrap {
-  height: auto;
+  height: 100%;
 }
 
 .hold-swipe-wrap > .hold-item,
 .plan-cand {
-  height: auto;
+  height: 100%;
 }
 
 .trade-card,
@@ -10491,6 +10435,28 @@ button.acct-item {
   margin-bottom: var(--space-xs);
 }
 
+.card-decision-slot {
+  display: flex;
+  flex: 1;
+  min-height: 148px;
+  flex-direction: column;
+}
+
+.card-decision-slot > .action-decision,
+.card-decision-slot > .action-prompt,
+.card-decision-slot > .advice-generation-status {
+  flex: 1;
+}
+
+.card-decision-slot > .action-decision {
+  display: flex;
+  flex-direction: column;
+}
+
+.card-decision-slot > .action-prompt {
+  min-height: 112px;
+}
+
 .advice-updated-at {
   margin-top: var(--space-xs);
 }
@@ -10499,24 +10465,49 @@ button.acct-item {
   margin-top: var(--space-xs);
 }
 
-.action-command {
-  padding-block: var(--space-sm);
+.card-decision-slot .action-command {
+  padding-block: var(--space-xs);
 }
 
-.action-command-text {
+.card-decision-slot .action-command-text {
+  display: block;
   min-height: 0;
-  max-height: 3em;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
+  max-height: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.action-command-copy {
-  min-height: 0;
+.card-decision-slot .action-level {
+  min-height: 56px;
+  gap: var(--space-3xs);
+  padding: var(--space-2xs) var(--space-xs);
 }
 
-.action-level {
-  min-height: 68px;
-  padding: var(--space-xs);
+.card-decision-slot .action-levels.editable {
+  grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+}
+
+.card-decision-slot .action-levels-empty {
+  flex: 1;
+  align-content: center;
+}
+
+.card-decision-slot .action-field {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.card-decision-slot .action-level-source {
+  position: absolute;
+  top: var(--space-2xs);
+  right: var(--space-2xs);
+  grid-column: auto;
+  grid-row: auto;
+}
+
+.card-decision-slot .action-level-price,
+.card-decision-slot .action-level:not(.active) .action-level-price,
+.card-decision-slot .action-field input {
+  font-size: var(--text-md);
 }
 
 .hold-item > .pi-actions {
@@ -10568,6 +10559,33 @@ button.acct-item {
   min-height: 40px;
   justify-content: center;
   white-space: nowrap;
+}
+
+@media (max-width: 50rem) {
+  .hold-grid,
+  .plan-cand-grid {
+    align-items: start;
+  }
+
+  .hold-swipe-wrap,
+  .hold-select-wrap,
+  .hold-swipe-wrap > .hold-item,
+  .plan-cand {
+    height: auto;
+  }
+
+  .card-decision-slot {
+    flex: none;
+    min-height: 0;
+  }
+
+  .card-decision-slot > .action-prompt {
+    min-height: 48px;
+  }
+
+  .card-decision-slot .action-levels.editable {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 720px) {
@@ -10685,7 +10703,14 @@ button.acct-item {
     min-height: 44px;
   }
 
-  .action-command-copy {
+  .action-command-open {
+    width: auto;
+    min-width: 58px;
+    min-height: 44px;
+  }
+
+  .plan-cand .pc-actions > button,
+  .hold-item > .pi-actions button {
     min-height: 44px;
   }
 

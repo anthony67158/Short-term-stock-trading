@@ -526,10 +526,14 @@ test('持仓页大型展开层统一挂到顶层Portal避免被吸顶区遮盖',
   )
 })
 
-test('持仓与自选卡采用自然高度且操作栏分组稳定', () => {
-  assert.match(precision, /\.hold-grid,[\s\S]*?\.plan-cand-grid\s*{[^}]*align-items:\s*start/s)
-  assert.match(precision, /\.hold-swipe-wrap,[\s\S]*?\.hold-select-wrap\s*{[^}]*height:\s*auto/s)
-  assert.match(precision, /\.hold-swipe-wrap > \.hold-item,[\s\S]*?\.plan-cand\s*{[^}]*height:\s*auto/s)
+test('持仓与自选卡桌面使用同高摘要且移动端恢复自然高度', () => {
+  assert.match(precision, /\.hold-grid,[\s\S]*?\.plan-cand-grid\s*{[^}]*align-items:\s*stretch/s)
+  assert.match(precision, /\.hold-swipe-wrap,[\s\S]*?\.hold-select-wrap\s*{[^}]*height:\s*100%/s)
+  assert.match(precision, /\.hold-swipe-wrap > \.hold-item,[\s\S]*?\.plan-cand\s*{[^}]*height:\s*100%/s)
+  assert.match(
+    precision,
+    /@media \(max-width:\s*50rem\)\s*{[\s\S]*?\.card-decision-slot\s*{[^}]*min-height:\s*0/s,
+  )
   assert.match(
     precision,
     /\.advice-updated-at\s*{[^}]*border:\s*0[^}]*background:\s*transparent/s,
@@ -548,29 +552,22 @@ test('持仓与自选卡采用自然高度且操作栏分组稳定', () => {
   )
 })
 
-test('完整建议只在真实截断时支持点击原位展开', () => {
-  assert.match(planTab, /function ActionCommand\(\{ view \}\)/)
-  assert.match(planTab, /const \[isTruncated, setIsTruncated\] = useState\(false\)/)
-  assert.match(planTab, /textNode\.scrollHeight > textNode\.clientHeight \+ 1/)
-  assert.match(planTab, /new ResizeObserver\(measure\)/)
-  assert.match(planTab, /isTruncated \? \([\s\S]*?className="action-command-copy"/)
-  assert.match(planTab, /className="action-command-copy action-command-copy-static"/)
-  assert.doesNotMatch(planTab, /action-command-popover|完整建议<\/strong>/)
-  assert.match(planTab, /aria-expanded=\{expanded\}/)
-  assert.match(planTab, /document\.addEventListener\('keydown', closeWithEscape\)/)
-  assert.match(planTab, /event\.key !== 'Escape'[\s\S]*?setExpanded\(false\)[\s\S]*?\.blur\(\)/)
+test('卡片内只保留单行建议摘要且完整内容进入个股详情', () => {
+  assert.match(planTab, /function ActionCommand\(\{ view, onOpen \}\)/)
+  assert.match(planTab, /className="action-command-open"/)
+  assert.match(planTab, /aria-label="查看完整操作建议"/)
+  assert.doesNotMatch(planTab, /action-command-disclosure|new ResizeObserver\(measure\)/)
   assert.match(
     precision,
-    /\.action-command-text\s*{[^}]*min-height:\s*0[^}]*max-height:\s*3em[^}]*-webkit-line-clamp:\s*2/s,
-  )
-  assert.doesNotMatch(precision, /action-command-popover/)
-  assert.match(
-    precision,
-    /\.action-command-disclosure\.is-expanded \.action-command-text\s*{[^}]*display:\s*block[^}]*max-height:\s*none[^}]*-webkit-line-clamp:\s*unset/s,
+    /\.card-decision-slot \.action-command-text\s*{[^}]*text-overflow:\s*ellipsis[^}]*white-space:\s*nowrap/s,
   )
   assert.match(
     precision,
-    /\.action-command-copy-static\s*{[^}]*display:\s*block[^}]*cursor:\s*default/s,
+    /\.action-command-open\s*{[^}]*min-height:\s*32px[^}]*color:\s*var\(--color-accent\)/s,
+  )
+  assert.match(
+    precision,
+    /@media \(pointer:\s*coarse\)\s*{[\s\S]*?\.action-command-open\s*{[^}]*min-width:\s*58px[^}]*min-height:\s*44px/s,
   )
 })
 

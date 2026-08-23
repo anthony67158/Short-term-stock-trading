@@ -5,6 +5,16 @@
     "macrostructure": "Workbench",
     "theme": "custom",
     "theme_axes": "light + dark / geometric-sans / cool",
+    "vibe": "uniform compact summaries, aligned actions, detail-first depth",
+    "enrichment": "none",
+    "brief": "持仓与自选卡统一摘要骨架并将完整策略收进个股详情"
+  },
+  {
+    "date": "2026-08-23",
+    "scope": "app",
+    "macrostructure": "Workbench",
+    "theme": "custom",
+    "theme_axes": "light + dark / geometric-sans / cool",
     "vibe": "single-boundary sections, safer inset spacing, quieter reading rhythm",
     "enrichment": "none",
     "brief": "全系统内容贴边与重复细横线收敛"

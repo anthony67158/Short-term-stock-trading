@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo, useEffect, useLayoutEffect } from 'react'
+import { useState, useRef, useMemo, useEffect } from 'react'
 import Icon from './Icon'
 import { HL } from './RichText'
 import StockName from './StockName'
@@ -518,11 +518,15 @@ function ActionProgress({ trigger, currentPrice, progress: preparedProgress }) {
   if (trigger.direction === 'inactive') {
     return (
       <div className="action-progress inactive">
+        <div className="action-progress-summary">
+          <span className="action-direction">
+            <Icon name="activity" size={13} />
+            等待重新评估
+          </span>
+          <span className="action-current-marker">尚未触发</span>
+          <b className="action-progress-target">{trigger.metricLabel}</b>
+        </div>
         <div className="action-progress-track" />
-        <span className="action-progress-label">
-          <span>等待重新评估信号</span>
-          <b>{trigger.metricLabel}</b>
-        </span>
       </div>
     )
   }
@@ -538,28 +542,22 @@ function ActionProgress({ trigger, currentPrice, progress: preparedProgress }) {
     : `${trigger.label} ${fmtRaw(trigger.price)}`
   return (
     <div className={'action-progress ' + progress.tone + (progress.reached ? ' reached' : '')}>
-      <div className="action-progress-head">
-        <span className="action-current-marker">
-          <Icon name="activity" size={13} />
-          现价 <strong>{fmtRaw(progress.currentPrice)}</strong>
-        </span>
+      <div className="action-progress-summary">
         <span className="action-direction">
           <Icon name={directionIcon} size={13} />
           {progress.stateLabel}
+          {progress.reached && (
+            <span className="action-reached" role="status" aria-live="polite">
+              <Icon name="bell" size={11} />已到价
+            </span>
+          )}
         </span>
-        {progress.reached && (
-          <span className="action-reached" role="status" aria-live="polite">
-            <Icon name="bell" size={13} />已到价
-          </span>
-        )}
+        <span className="action-current-marker">{progress.label}</span>
+        <b className="action-progress-target">{targetText}</b>
       </div>
       <div className="action-progress-track">
         <div className="action-progress-fill" style={{ width: progress.pct + '%' }} />
       </div>
-      <span className="action-progress-label">
-        <span>{progress.label}</span>
-        <b>{targetText}</b>
-      </span>
     </div>
   )
 }
@@ -577,54 +575,19 @@ function ActionLevel({ level, reached = false }) {
   )
 }
 
-function ActionCommand({ view }) {
-  const [expanded, setExpanded] = useState(false)
-  const [isTruncated, setIsTruncated] = useState(false)
-  const rootRef = useRef(null)
+function EmptyActionLevels() {
+  return (
+    <div className="action-levels-empty" aria-label="关键价位等待信号确认">
+      <Icon name="target" size={13} />
+      <span>关键价位</span>
+      <strong>等待信号确认</strong>
+    </div>
+  )
+}
+
+function ActionCommand({ view, onOpen }) {
   const instruction = view.instruction || '等待下一步执行条件'
   const quantity = actionQtyLabel(view.quantity)
-
-  useEffect(() => setExpanded(false), [instruction])
-
-  useLayoutEffect(() => {
-    const root = rootRef.current
-    if (!root) return undefined
-    let active = true
-
-    const measure = () => {
-      if (!active || expanded) return
-      const textNode = root.querySelector('.action-command-text')
-      if (!textNode) return
-      setIsTruncated(textNode.scrollHeight > textNode.clientHeight + 1)
-    }
-
-    measure()
-    const observer = new ResizeObserver(measure)
-    observer.observe(root)
-    document.fonts?.ready.then(measure).catch(() => {})
-    return () => {
-      active = false
-      observer.disconnect()
-    }
-  }, [instruction, expanded])
-
-  useEffect(() => {
-    if (!expanded) return undefined
-    const closeOutside = (event) => {
-      if (!rootRef.current?.contains(event.target)) setExpanded(false)
-    }
-    const closeWithEscape = (event) => {
-      if (event.key !== 'Escape') return
-      setExpanded(false)
-      rootRef.current?.querySelector('.action-command-copy')?.blur()
-    }
-    document.addEventListener('pointerdown', closeOutside)
-    document.addEventListener('keydown', closeWithEscape)
-    return () => {
-      document.removeEventListener('pointerdown', closeOutside)
-      document.removeEventListener('keydown', closeWithEscape)
-    }
-  }, [expanded])
 
   return (
     <div className="action-command">
@@ -633,33 +596,17 @@ function ActionCommand({ view }) {
         <span>{view.action}</span>
         {quantity && <strong className="action-command-qty">{quantity}</strong>}
       </span>
-      <div
-        ref={rootRef}
-        className={
-          'action-command-disclosure'
-          + (isTruncated ? ' is-truncated' : ' is-complete')
-          + (expanded ? ' is-expanded' : '')
-        }
+      <span className="action-command-text" title={instruction}>{instruction}</span>
+      <button
+        type="button"
+        className="action-command-open"
+        aria-label="查看完整操作建议"
+        title="查看完整操作建议"
+        onClick={onOpen}
       >
-        {isTruncated ? (
-          <button
-            type="button"
-            className="action-command-copy"
-            aria-expanded={expanded}
-            aria-label={`${expanded ? '收起' : '查看'}完整操作建议：${instruction}`}
-            onClick={() => setExpanded((value) => !value)}
-          >
-            <span className="action-command-text">{instruction}</span>
-            <span className="action-command-toggle" aria-hidden="true">
-              <Icon name="chevronDown" size={13} />
-            </span>
-          </button>
-        ) : (
-          <div className="action-command-copy action-command-copy-static">
-            <span className="action-command-text">{instruction}</span>
-          </div>
-        )}
-      </div>
+        <span>详情</span>
+        <Icon name="chevronRight" size={13} />
+      </button>
     </div>
   )
 }
@@ -680,7 +627,7 @@ function AdviceActionPanel({ view, currentPrice, onPrompt }) {
   const reachedKey = reachedLevelKey(view, progress)
   return (
     <div className={'action-decision tone-' + tone}>
-      <ActionCommand view={view} />
+      <ActionCommand view={view} onOpen={onPrompt} />
       {view.levels.length > 0 && (
         <div className={'action-levels levels-' + Math.min(view.levels.length, 3)}>
           {view.levels.map((item) => (
@@ -688,6 +635,7 @@ function AdviceActionPanel({ view, currentPrice, onPrompt }) {
           ))}
         </div>
       )}
+      {view.levels.length === 0 && <EmptyActionLevels />}
       <ActionProgress trigger={view.trigger} currentPrice={currentPrice} progress={progress} />
     </div>
   )
@@ -767,7 +715,7 @@ function CandDecision({ p, q }) {
   }
 
   return (
-    <>
+    <div className="card-decision-slot">
       <AdviceUpdatedAt entry={entry} score={p.qScore} bias={p.qBias} />
       {generation?.active && <AdviceGenerationStatus code={p.code} />}
       {!view ? (
@@ -778,14 +726,17 @@ function CandDecision({ p, q }) {
         )
       ) : (
         <div className={'action-decision cand-decision tone-' + actionTone(view.kind)}>
-          <ActionCommand view={view} />
+          <ActionCommand
+            view={view}
+            onOpen={() => openStockDetail(p.code, q?.name || p.name)}
+          />
           {actionable ? (
             <>
               <div className="action-levels editable">
                 <label className={'action-level action-field active level-buy' + (reachedKey === 'entry' ? ' reached' : '')}>
                   <span className="action-level-name">
                     <span className="action-level-icon"><Icon name="arrowDown" size={13} /></span>
-                    买入执行价
+                      买入价
                   </span>
                   <input
                     className="action-level-price"
@@ -799,7 +750,7 @@ function CandDecision({ p, q }) {
                 <label className="action-level action-field active level-buy">
                   <span className="action-level-name">
                     <span className="action-level-icon"><Icon name="cart" size={13} /></span>
-                    买入手数
+                      手数
                   </span>
                   <input
                     className="action-level-price"
@@ -818,19 +769,21 @@ function CandDecision({ p, q }) {
             </>
           ) : (
             <>
-              {view.levels.length > 0 && (
+              {view.levels.length > 0 ? (
                 <div className={'action-levels levels-' + Math.min(view.levels.length, 3)}>
                   {view.levels.map((item) => (
                     <ActionLevel key={item.key} level={item} reached={item.key === reachedKey} />
                   ))}
                 </div>
+              ) : (
+                <EmptyActionLevels />
               )}
               <ActionProgress trigger={progress} currentPrice={q?.price} progress={progressState} />
             </>
           )}
         </div>
       )}
-    </>
+    </div>
   )
 }
 
@@ -2634,13 +2587,15 @@ function HoldingItem({ h, idx, quote: q }) {
       </div>
 
       {/* 当前指令、加减仓位与动作进度使用同一建议，不再并排展示互相冲突的价格体系。 */}
-      <AdviceUpdatedAt entry={adviceEntry} score={h.qScore} bias={h.qBias} />
-      <AdviceGenerationStatus code={h.code} />
-      <AdviceActionPanel
-        view={decisionView}
-        currentPrice={effPx}
-        onPrompt={() => openStockDetail(h.code, h.name)}
-      />
+      <div className="card-decision-slot">
+        <AdviceUpdatedAt entry={adviceEntry} score={h.qScore} bias={h.qBias} />
+        <AdviceGenerationStatus code={h.code} />
+        <AdviceActionPanel
+          view={decisionView}
+          currentPrice={effPx}
+          onPrompt={() => openStockDetail(h.code, h.name)}
+        />
+      </div>
 
       {/* 明细展开开关：把计划/做T 收纳,展开后手风琴分段(一次看一类)。
           复盘已与「AI操作建议」同源,直接点进个股详情页看即可,不再单列分段;
