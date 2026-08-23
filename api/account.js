@@ -84,12 +84,20 @@ export function accountSyncDelta(data = {}, since = 0) {
   const jobs = data.jobs && typeof data.jobs === 'object'
     ? data.jobs
     : {};
+  const runtimeAdviceObservedAt = (
+    data.runtimeAdviceObservedAt
+    && typeof data.runtimeAdviceObservedAt === 'object'
+  )
+    ? data.runtimeAdviceObservedAt
+    : {};
+  // 事件时间可能早于 OSS 实际可见时间；按可见水位补发可避免游标越过迟到对象。
   const advice = Object.fromEntries(
     Object.entries(data.advice || {}).filter(([code, entry]) => {
       const job = jobs[code];
       const completedAfterCursor = job?.status === 'done'
         && newestStamp(job, ['finishedAt', 'progressAt']) > after;
       return newestStamp(entry, ['at', 'cachedAt', 'updatedAt']) > after
+        || Number(runtimeAdviceObservedAt[code]) > after
         || completedAfterCursor;
     }),
   );
@@ -234,6 +242,15 @@ export function applyClientAccountSave(
     merged.runtimeAdviceAppliedAt = {
       ...(incoming.runtimeAdviceAppliedAt || {}),
       ...prev.runtimeAdviceAppliedAt,
+    };
+  }
+  if (
+    prev.runtimeAdviceObservedAt
+    && typeof prev.runtimeAdviceObservedAt === 'object'
+  ) {
+    merged.runtimeAdviceObservedAt = {
+      ...(incoming.runtimeAdviceObservedAt || {}),
+      ...prev.runtimeAdviceObservedAt,
     };
   }
   if (
@@ -462,79 +479,101 @@ export function mergeAdviceRuntimeState(account, runtime) {
   return account;
 }
 
-export function mergeAdviceRuntimeUpdate(account, update) {
+export function mergeAdviceRuntimeUpdate(
+  account,
+  update,
+  observedAt = update?.updatedAt,
+) {
   if (!account || !update?.code) return account;
   const updatedAt = Number(update.updatedAt) || 0;
+  const deliveredAt = Math.max(
+    updatedAt,
+    Number(observedAt) || 0,
+  );
   const data = account.data || (account.data = {});
   const cursors = data.runtimeAdviceAppliedAt
     && typeof data.runtimeAdviceAppliedAt === 'object'
     ? data.runtimeAdviceAppliedAt
     : {};
+  const observed = data.runtimeAdviceObservedAt
+    && typeof data.runtimeAdviceObservedAt === 'object'
+    ? data.runtimeAdviceObservedAt
+    : {};
   const code = String(update.code);
-  if (updatedAt <= (Number(cursors[code]) || 0)) return account;
-
-  if (update.advice) {
-    const advice = data.advice || (data.advice = {});
-    if (
-      !advice[code]
-      || runtimeStamp(update.advice) >= runtimeStamp(advice[code])
-    ) advice[code] = update.advice;
-  }
-  if (update.job) {
-    const jobs = data.jobs || (data.jobs = {});
-    jobs[code] = mergeRuntimeJob(jobs[code], update.job);
-  }
-  data.adviceLog = mergeRuntimeRecords(
-    data.adviceLog,
-    update.adviceLog,
-    500,
-  );
-  data.decisionLog = mergeRuntimeRecords(
-    data.decisionLog,
-    update.decisionLog,
-    1000,
-  );
-  data.adviceReviewLog = mergeRuntimeRecords(
-    data.adviceReviewLog,
-    update.adviceReviewLog,
-    500,
-  );
-  data.advisorCouncilShadow = mergeRuntimeRecords(
-    data.advisorCouncilShadow,
-    update.councilShadow,
-    200,
-  );
-  data.evidenceSnapshots = mergeEvidenceSnapshotIndexes(
-    data.evidenceSnapshots,
-    update.evidenceSnapshots,
-  );
-  data.alerts = mergeRuntimeRecords(data.alerts, update.alerts, 1000);
-  if (
-    update.batchProgress
-    && runtimeStamp(update.batchProgress)
-      >= runtimeStamp(data.batchProgress)
-  ) data.batchProgress = update.batchProgress;
-  for (const [collection, patch] of [
-    ['holding', update.holdingPatch],
-    ['plan', update.planPatch],
-  ]) {
-    if (!patch?.code || !Array.isArray(data[collection])) continue;
-    data[collection] = data[collection].map((item) =>
-      String(item?.code) === code
-        ? {
-            ...item,
-            ...(patch.qScore != null ? { qScore: patch.qScore } : {}),
-            ...(patch.qBias != null ? { qBias: patch.qBias } : {}),
-            ...(patch.qAt != null ? { qAt: patch.qAt } : {}),
-          }
-        : item
+  if (updatedAt > (Number(cursors[code]) || 0)) {
+    if (update.advice) {
+      const advice = data.advice || (data.advice = {});
+      if (
+        !advice[code]
+        || runtimeStamp(update.advice) >= runtimeStamp(advice[code])
+      ) advice[code] = update.advice;
+    }
+    if (update.job) {
+      const jobs = data.jobs || (data.jobs = {});
+      jobs[code] = mergeRuntimeJob(jobs[code], update.job);
+    }
+    data.adviceLog = mergeRuntimeRecords(
+      data.adviceLog,
+      update.adviceLog,
+      500,
     );
+    data.decisionLog = mergeRuntimeRecords(
+      data.decisionLog,
+      update.decisionLog,
+      1000,
+    );
+    data.adviceReviewLog = mergeRuntimeRecords(
+      data.adviceReviewLog,
+      update.adviceReviewLog,
+      500,
+    );
+    data.advisorCouncilShadow = mergeRuntimeRecords(
+      data.advisorCouncilShadow,
+      update.councilShadow,
+      200,
+    );
+    data.evidenceSnapshots = mergeEvidenceSnapshotIndexes(
+      data.evidenceSnapshots,
+      update.evidenceSnapshots,
+    );
+    data.alerts = mergeRuntimeRecords(data.alerts, update.alerts, 1000);
+    if (
+      update.batchProgress
+      && runtimeStamp(update.batchProgress)
+        >= runtimeStamp(data.batchProgress)
+    ) data.batchProgress = update.batchProgress;
+    for (const [collection, patch] of [
+      ['holding', update.holdingPatch],
+      ['plan', update.planPatch],
+    ]) {
+      if (!patch?.code || !Array.isArray(data[collection])) continue;
+      data[collection] = data[collection].map((item) =>
+        String(item?.code) === code
+          ? {
+              ...item,
+              ...(patch.qScore != null ? { qScore: patch.qScore } : {}),
+              ...(patch.qBias != null ? { qBias: patch.qBias } : {}),
+              ...(patch.qAt != null ? { qAt: patch.qAt } : {}),
+            }
+          : item
+      );
+    }
+    data.runtimeAdviceAppliedAt = {
+      ...cursors,
+      [code]: updatedAt,
+    };
   }
-  data.runtimeAdviceAppliedAt = {
-    ...cursors,
-    [code]: updatedAt,
+  data.runtimeAdviceObservedAt = {
+    ...observed,
+    [code]: Math.max(
+      Number(observed[code]) || 0,
+      deliveredAt,
+    ),
   };
-  account.updatedAt = Math.max(Number(account.updatedAt) || 0, updatedAt);
+  account.updatedAt = Math.max(
+    Number(account.updatedAt) || 0,
+    deliveredAt,
+  );
   return account;
 }
 
@@ -616,16 +655,23 @@ async function applyAdviceRuntime(
       || uploadedAt > cursor - 5 * 60 * 1000;
   });
   const updates = await Promise.all(
-    candidates.map((blob) =>
-      storage.readJson(blob?.pathname || blob).catch(() => null)
-    ),
+    candidates.map(async (blob) => ({
+      update: await storage.readJson(blob?.pathname || blob)
+        .catch(() => null),
+      observedAt: new Date(blob?.uploadedAt || 0).getTime(),
+    })),
   );
-  for (const update of updates
-    .filter(Boolean)
+  for (const item of updates
+    .filter((entry) => entry.update)
     .sort((left, right) =>
-      Number(left.updatedAt || 0) - Number(right.updatedAt || 0)
+      Number(left.update.updatedAt || 0)
+        - Number(right.update.updatedAt || 0)
     )) {
-    mergeAdviceRuntimeUpdate(account, update);
+    mergeAdviceRuntimeUpdate(
+      account,
+      item.update,
+      item.observedAt,
+    );
   }
   return account;
 }
@@ -973,10 +1019,11 @@ export default async function handler(req, res) {
       if (action === 'sync') {
         const since = syncSince;
         const changed = Number(acc.updatedAt) > since;
+        const delta = changed ? accountSyncDelta(acc.data, since) : {};
         return ok(res, {
           ok: true,
           nick: acc.nick,
-          data: changed ? accountSyncDelta(acc.data, since) : {},
+          data: delta,
           changed,
           updatedAt: acc.updatedAt,
           revision: Number(acc.clientRevision) || 0,

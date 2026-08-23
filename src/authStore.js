@@ -454,14 +454,13 @@ export const authStore = {
     if (_pulling) return false
     _pulling = true
     try {
+      const requestedSince = _runtimeSyncCursor.since()
       const r = await api('sync', {
         ...credentials,
-        since: _runtimeSyncCursor.since(),
+        since: requestedSince,
       })
       if (!accountSessionMatches(session)) return false
       if (r && r.ok && r.data) {
-        state.lastSyncedAt = r.updatedAt || state.lastSyncedAt
-        _runtimeSyncCursor.notePull(r.updatedAt)
         const remoteResetAt = Number(r.data.tradeStateResetAt) || 0
         const pending = outboxAfterCloudReset(
           credentials.nick,
@@ -490,7 +489,9 @@ export const authStore = {
           _cloudRevision = Number(r.revision) || _cloudRevision
           _lastSyncedTradeFingerprint = r.tradeFingerprint
         }
-        try { planStore.mergeCloud(r.data) } catch { /* ignore */ }
+        try { planStore.mergeCloud(r.data) } catch { return false }
+        _runtimeSyncCursor.notePull(r.updatedAt)
+        state.lastSyncedAt = r.updatedAt || state.lastSyncedAt
         return true
       }
       return false

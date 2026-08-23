@@ -297,6 +297,74 @@ test('单股建议完成后通过独立OSS小对象立即进入跨设备增量�
   )
 })
 
+test('迟到上传的单股建议不能被较新的运行态游标永久跳过', async () => {
+  const storage = fakeStorage()
+  const account = await writeAccount({
+    nick: '乱序增量账号',
+    pwHash: 'hash',
+    createdAt: 1,
+    clientRevision: 1,
+    data: {
+      plan: [{ code: '600519', name: '贵州茅台' }],
+      holding: [],
+      closed: [],
+      advice: {},
+      jobs: {},
+    },
+  }, storage, {
+    history: false,
+    verify: false,
+  })
+  const stateAt = account.updatedAt + 1
+  await writeAdviceRuntimeState(account.nick, {
+    updatedAt: stateAt,
+    jobs: {
+      '600519': {
+        id: 'job-late',
+        code: '600519',
+        status: 'running',
+        progressAt: stateAt,
+      },
+    },
+  }, storage)
+
+  const firstPull = await readAccount(account.nick, storage, {
+    runtimeSince: account.updatedAt,
+  })
+  const cursor = firstPull.updatedAt
+  assert.equal(firstPull.data.advice['600519'], undefined)
+
+  await writeAdviceRuntimeUpdate(account.nick, {
+    code: '600519',
+    updatedAt: stateAt,
+    advice: {
+      at: stateAt,
+      advice: { action: '持有', title: '迟到但必须送达的建议' },
+    },
+    job: {
+      id: 'job-late',
+      code: '600519',
+      status: 'done',
+      progressAt: stateAt,
+      finishedAt: stateAt,
+    },
+  }, storage)
+
+  const secondPull = await readAccount(account.nick, storage, {
+    runtimeSince: cursor,
+  })
+  const changed = Number(secondPull.updatedAt) > cursor
+  const delta = changed
+    ? accountSyncDelta(secondPull.data, cursor)
+    : {}
+
+  assert.equal(changed, true)
+  assert.equal(
+    delta.advice['600519'].advice.title,
+    '迟到但必须送达的建议',
+  )
+})
+
 test('运行时账号同步只返回更新时间后的建议事件和轻量状态', () => {
   const delta = accountSyncDelta({
     advice: {

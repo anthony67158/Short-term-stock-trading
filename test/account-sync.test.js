@@ -10,6 +10,39 @@ import {
   saveWithRevisionRecovery,
 } from '../shared/accountSync.js'
 
+function legacyTradeFingerprint(data = {}) {
+  const volatile = new Set([
+    'qScore',
+    'qBias',
+    'qAt',
+    'alertSyncedPrice',
+  ])
+  const canonical = (value) => {
+    if (Array.isArray(value)) return value.map(canonical)
+    if (!value || typeof value !== 'object') return value
+    const next = {}
+    for (const key of Object.keys(value).sort()) {
+      if (key === 'updatedAt' || volatile.has(key)) continue
+      next[key] = canonical(value[key])
+    }
+    return next
+  }
+  const value = JSON.stringify(canonical({
+    plan: data.plan || [],
+    holding: data.holding || [],
+    closed: data.closed || [],
+    account: data.account || null,
+  }))
+  let first = 0x811c9dc5
+  let second = 0x9e3779b9
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index)
+    first = Math.imul(first ^ code, 0x01000193)
+    second = Math.imul(second ^ code, 0x85ebca6b)
+  }
+  return `${(first >>> 0).toString(16).padStart(8, '0')}${(second >>> 0).toString(16).padStart(8, '0')}`
+}
+
 test('刷新恢复账号时优先保留尚未上传完成的本地交易快照', () => {
   const cloud = {
     holding: [{ id: 'h1', code: '002309', qty: 25 }],
@@ -289,6 +322,125 @@ test('交易账本比较忽略AI建议和运行状态变化', () => {
     ...base,
     holding: [{ id: 'h1', code: '600000', qty: 1 }],
   }), false)
+})
+
+test('旧版自动做T结算只差随机记录ID时视为同一交易账本', () => {
+  const baseRecord = {
+    type: 'BUY',
+    tradeIntent: 'position',
+    code: '600000',
+    holdingId: 'holding-1',
+    qty: 1,
+    price: 9.8,
+    amount: 980,
+    fee: 5,
+    cashFlow: -985,
+    at: 1000,
+    note: '做T净买入(加仓)',
+  }
+  const left = {
+    holding: [{ id: 'holding-1', code: '600000', qty: 3, tFlows: [] }],
+    closed: [{ ...baseRecord, id: 'random-a', batchId: 'batch-a' }],
+  }
+  const right = {
+    holding: [{ id: 'holding-1', code: '600000', qty: 3, tFlows: [] }],
+    closed: [{ ...baseRecord, id: 'random-b', batchId: 'batch-b' }],
+  }
+
+  assert.equal(sameAccountTradeState(left, right), true)
+})
+
+test('普通成交记录ID不同仍视为真实交易冲突', () => {
+  const baseRecord = {
+    type: 'BUY',
+    tradeIntent: 'position',
+    code: '600000',
+    holdingId: 'holding-1',
+    qty: 1,
+    price: 9.8,
+    amount: 980,
+    fee: 5,
+    cashFlow: -985,
+    at: 1000,
+  }
+  const left = { closed: [{ ...baseRecord, id: 'trade-a' }] }
+  const right = { closed: [{ ...baseRecord, id: 'trade-b' }] }
+
+  assert.equal(sameAccountTradeState(left, right), false)
+})
+
+test('旧版outbox指纹在云端账本未变化时仍可自动重放', async () => {
+  const remote = {
+    holding: [{
+      id: 'holding-1',
+      code: '600000',
+      qty: 3,
+      buyPrice: 9.933,
+      tFlows: [],
+    }],
+    closed: [{
+      id: 'legacy-random-id',
+      batchId: 'legacy-random-batch',
+      type: 'BUY',
+      tradeIntent: 'position',
+      code: '600000',
+      holdingId: 'holding-1',
+      qty: 1,
+      price: 9.8,
+      at: 1000,
+      note: '做T净买入(加仓)',
+    }],
+  }
+  const localSettled = {
+    holding: [{
+      id: 'holding-1',
+      code: '600000',
+      qty: 4,
+      buyPrice: 9.95,
+      tFlows: [],
+    }],
+    closed: [
+      {
+        id: 'new-buy',
+        type: 'BUY',
+        tradeIntent: 'position',
+        code: '600000',
+        holdingId: 'holding-1',
+        qty: 1,
+        price: 10,
+        at: 2000,
+      },
+      ...remote.closed,
+    ],
+  }
+  const calls = []
+  const result = await saveWithRevisionRecovery({
+    payload: {
+      data: localSettled,
+      baseRevision: 7,
+      baseTradeFingerprint: legacyTradeFingerprint(remote),
+    },
+    save: async (payload) => {
+      calls.push(payload)
+      return calls.length === 1
+        ? {
+            ok: false,
+            code: 'ACCOUNT_VERSION_CONFLICT',
+            revision: 8,
+            retryable: false,
+          }
+        : { ok: true, storage: 'oss', revision: 9 }
+    },
+    getLatest: async () => ({
+      ok: true,
+      revision: 8,
+      data: remote,
+    }),
+  })
+
+  assert.equal(result.ok, true)
+  assert.equal(calls.length, 2)
+  assert.equal(calls[1].baseRevision, 8)
 })
 
 test('本地待办基于的云端交易指纹未变时允许重放本地交易', async () => {

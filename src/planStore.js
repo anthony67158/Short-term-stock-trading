@@ -385,13 +385,17 @@ function emit() {
 // 把某笔持仓上已配对的做T收益，归档为独立的 closed 记录(kind:'T')；
 // 未配平的开口腿按净额方向归档为 加仓(BUY) / 减仓(SELL)，避免"当天没追平底仓"时无处归类。
 // batchId：同一次结算/清仓产生的记录共享，删除时可按批级联，保证各分类联动一致。
-function archiveTFlows(h, batchId) {
+function archiveTFlows(h, batchId, { deterministicIds = false } = {}) {
   const r = computeTFlows(h.tFlows)
   const out = []
+  let recordIndex = 0
+  const nextRecordId = (kind) => deterministicIds
+    ? `${batchId}_${kind}_${recordIndex++}`
+    : uid()
   // 1) 已配对的做T差价
   for (const p of (r.pairList || [])) {
     out.push({
-      id: uid(), batchId, type: 'T', kind: 'T', code: h.code, name: h.name,
+      id: nextRecordId('pair'), batchId, type: 'T', kind: 'T', code: h.code, name: h.name,
       tradeIntent: 't',
       qty: p.qty, buyPrice: p.buyPrice, sellPrice: p.sellPrice,
       buyFee: p.buyFee, sellFee: p.sellFee,
@@ -406,7 +410,7 @@ function archiveTFlows(h, batchId) {
   if (r.openBuy > 0 && r.openBuyAvg != null) {
     const amount = +(r.openBuyAvg * r.openBuy * 100).toFixed(2)
     out.push({
-      id: uid(), batchId, type: 'BUY', code: h.code, name: h.name, side: 'buy',
+      id: nextRecordId('buy'), batchId, type: 'BUY', code: h.code, name: h.name, side: 'buy',
       tradeIntent: 'position',
       qty: r.openBuy, price: r.openBuyAvg, fee: r.openBuyFee, amount,
       cashFlow: -(amount + r.openBuyFee), realizedPnl: null,
@@ -423,7 +427,7 @@ function archiveTFlows(h, batchId) {
     const buyFeePart = h.qty ? +(((h.buyFee || 0) * (r.openSell / h.qty))).toFixed(2) : 0
     const netPnl = +((amount - cost) - r.openSellFee - buyFeePart).toFixed(2)
     out.push({
-      id: uid(), batchId, type: 'SELL', kind: 'SELL', code: h.code, name: h.name, side: 'sell',
+      id: nextRecordId('sell'), batchId, type: 'SELL', kind: 'SELL', code: h.code, name: h.name, side: 'sell',
       tradeIntent: 'position',
       qty: r.openSell, price: r.openSellAvg, amount, fee: r.openSellFee,
       cashFlow: +(amount - r.openSellFee).toFixed(2),
@@ -436,6 +440,19 @@ function archiveTFlows(h, batchId) {
     })
   }
   return out
+}
+
+function automaticTSettlementBatchId(holding) {
+  return `auto_t_${accountTradeStateFingerprint({
+    holding: [{
+      id: holding?.id,
+      code: holding?.code,
+      qty: holding?.qty,
+      buyPrice: holding?.buyPrice,
+      buyFee: holding?.buyFee,
+      tFlows: holding?.tFlows || [],
+    }],
+  })}`
 }
 
 // 生成一条纯买入(BUY)交易记录：单腿，现金流出，无已实现盈亏
@@ -2134,7 +2151,10 @@ export const planStore = {
       const cur = state.holding.find((x) => x.id === h.id)
       if (!cur || !(cur.tFlows && cur.tFlows.length)) continue
       const r = computeTFlows(cur.tFlows)
-      const archived = archiveTFlows(cur, uid())
+      const batchId = automaticTSettlementBatchId(cur)
+      const archived = archiveTFlows(cur, batchId, {
+        deterministicIds: true,
+      })
       const net = (r.openBuy || 0) - (r.openSell || 0)
       const newQty = cur.qty + net
       if (archived.length) state.closed = [...archived, ...state.closed].slice(0, 300)
