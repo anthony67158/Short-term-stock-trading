@@ -25,6 +25,87 @@ test('分时原语包含VWAP连续性、窗口回撤和反弹幅度', () => {
   assert.equal(prim.volSurge, true)
 })
 
+test('触价后的确认原语不使用触价前分钟线', () => {
+  const trends = Array.from({ length: 10 }, (_, index) => ({
+    time: `10:${String(index).padStart(2, '0')}`,
+    price: index < 8 ? 9 + index * 0.1 : 10 + (index - 8) * 0.1,
+    volume: 100,
+    avg: 9.8,
+  }))
+  const watchingAt = new Date('2026-08-24T02:08:00.000Z').getTime()
+
+  const prim = intradayPrimitives(trends, 10, {
+    watchingAt,
+    now: new Date('2026-08-24T02:09:30.000Z').getTime(),
+  })
+
+  assert.equal(prim.postTouchBars, 2)
+  assert.equal(prim.analysisStartTime, '10:08')
+  assert.equal(prim.winLow, 10)
+  assert.equal(prim.mom5Pct, 1)
+})
+
+test('触价后样本不足时不伪造持续创新低信号', () => {
+  const trends = Array.from({ length: 10 }, (_, index) => ({
+    time: `10:${String(index).padStart(2, '0')}`,
+    price: 10 - index * 0.02,
+    volume: 100,
+    avg: 10,
+  }))
+  const watchingAt = new Date('2026-08-24T02:08:00.000Z').getTime()
+  const prim = intradayPrimitives(trends, 10, {
+    watchingAt,
+    now: new Date('2026-08-24T02:09:30.000Z').getTime(),
+  })
+  prim.keyDistancePct = -0.1
+  prim.sinceTouchPct = -0.1
+
+  const result = deterministicJudge('stop', prim, null)
+
+  assert.equal(prim.higherLows, null)
+  assert.equal(result.hits.includes('分时不断创新低,未见企稳'), false)
+})
+
+test('触价后样本不足时不把未知结构判成买点失效', () => {
+  const trends = Array.from({ length: 10 }, (_, index) => ({
+    time: `10:${String(index).padStart(2, '0')}`,
+    price: 10 - index * 0.02,
+    volume: 100,
+    avg: 10,
+  }))
+  const watchingAt = new Date('2026-08-24T02:08:00.000Z').getTime()
+  const prim = intradayPrimitives(trends, 10, {
+    watchingAt,
+    now: new Date('2026-08-24T02:09:30.000Z').getTime(),
+  })
+  prim.keyDistancePct = -1.3
+
+  const result = deterministicJudge('buy', prim, null)
+
+  assert.equal(prim.higherLows, null)
+  assert.notEqual(result.decision, 'invalid')
+})
+
+test('午休后的确认窗口不拼接上午分钟线', () => {
+  const trends = [
+    { time: '11:27', price: 10.2, volume: 100, avg: 10.1 },
+    { time: '11:28', price: 10.1, volume: 100, avg: 10.1 },
+    { time: '11:29', price: 10, volume: 100, avg: 10.1 },
+    { time: '11:30', price: 9.9, volume: 100, avg: 10.05 },
+    { time: '13:00', price: 10.3, volume: 120, avg: 10.1 },
+    { time: '13:01', price: 10.4, volume: 130, avg: 10.12 },
+  ]
+  const prim = intradayPrimitives(trends, 10, {
+    watchingAt: new Date('2026-08-24T03:29:00.000Z').getTime(),
+    now: new Date('2026-08-24T05:01:30.000Z').getTime(),
+  })
+
+  assert.equal(prim.analysisStartTime, '13:00')
+  assert.equal(prim.postTouchBars, 2)
+  assert.equal(prim.observedTradingMs, 60 * 1000)
+  assert.equal(prim.winLow, 10.3)
+})
+
 test('Judge只生成交易时机结论，不再重复生成知行合一评分', () => {
   const prompt = buildJudgeUserPrompt({ 股票: '贵州茅台(600519)' })
 

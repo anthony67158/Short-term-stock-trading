@@ -47,3 +47,27 @@ export function adviceGenerationActions({
     },
   }
 }
+
+const ADVICE_MODE_GUIDANCE_ITEMS = Object.freeze([
+  { key: 'deep', icon: 'brain', label: '深度生成', purpose: '定计划' },
+  { key: 'quick', icon: 'spark', label: '快速生成', purpose: '看变化' },
+  { key: 'judge', icon: 'bell', label: '盯盘 Judge', purpose: '定时机' },
+  {
+    key: 'discipline',
+    icon: 'shield',
+    label: '止损纪律',
+    purpose: '优先于 AI',
+  },
+])
+
+export function adviceModeGuidance({ hasAdvice = false } = {}) {
+  const firstGeneration = hasAdvice !== true
+  return {
+    firstGeneration,
+    deepBadge: firstGeneration ? '首次推荐' : '',
+    deepUseCase: '建仓·明显加仓·隔夜前',
+    deepTitle:
+      '首次生成、准备建仓、计划明显提高仓位或决定隔夜持有时，优先使用深度生成',
+    items: ADVICE_MODE_GUIDANCE_ITEMS,
+  }
+}

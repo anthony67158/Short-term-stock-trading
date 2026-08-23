@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
+import { __test as cronAlert } from '../api/cron_alert.js'
 
 const root = new URL('../', import.meta.url)
 const read = (path) => readFileSync(new URL(path, root), 'utf8')
@@ -23,6 +24,17 @@ test('盯盘预警由FC北京时间交易时段触发且GitHub定时拨测已移
     existsSync(new URL('.github/workflows/cron-alert.yml', root)),
     false,
   )
+})
+
+test('云端Judge按时间片轮转账号并在截止时间前停止启动新调用', () => {
+  const accounts = [{ nick: 'a' }, { nick: 'b' }, { nick: 'c' }]
+
+  assert.deepEqual(
+    cronAlert.rotateAccounts(accounts, 1).map((item) => item.nick),
+    ['b', 'c', 'a'],
+  )
+  assert.equal(cronAlert.hasJudgeBudget(10000, 1000, 8000), true)
+  assert.equal(cronAlert.hasJudgeBudget(10000, 2500, 8000), false)
 })
 
 test('午间与收盘自动复盘使用FC重复触发以支持失败续跑', () => {

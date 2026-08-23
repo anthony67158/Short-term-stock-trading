@@ -310,7 +310,7 @@ function visibleChineseReasoning(value) {
 export function updateJobProgress(data, code, patch = {}, now = Date.now()) {
   const job = jobsOf(data)[code]
   if (!job) return null
-  if (job.status === 'canceled') return job
+  if (['done', 'failed', 'canceled'].includes(job.status)) return job
   if (patch.stage != null) {
     job.stage = String(patch.stage).slice(0, 40)
   }

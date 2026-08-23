@@ -27,6 +27,49 @@ export function confirmationPolicy(side) {
   return POLICY[side] || POLICY.buy
 }
 
+export function shouldRequestConfirmation(
+  side,
+  watchingAt,
+  now = Date.now(),
+) {
+  if (side === 'stop') return true
+  const startedAt = Number(watchingAt)
+  if (!Number.isFinite(startedAt) || startedAt <= 0) return true
+  return now - startedAt >= confirmationPolicy(side).minObserveMs
+}
+
+export function shouldConfirmImmediatelyAfterTouch(side) {
+  return side === 'stop'
+}
+
+export async function resolveImmediateConfirmationAlert({
+  side,
+  alertId,
+  flushSave,
+  getAlerts,
+} = {}) {
+  if (
+    !shouldConfirmImmediatelyAfterTouch(side)
+    || typeof flushSave !== 'function'
+    || typeof getAlerts !== 'function'
+  ) {
+    return null
+  }
+  const saved = await flushSave()
+  if (!saved) return null
+  return (getAlerts() || []).find((alert) =>
+    String(alert?.id || '') === String(alertId || '')
+    && alert.enabled
+    && alert.phase === 'watching'
+  ) || null
+}
+
+export function shouldCallLlmJudge(side, deterministic) {
+  const policy = confirmationPolicy(side)
+  return deterministic?.decision === 'confirm'
+    && Number(deterministic.score) >= policy.deterministicConfirm
+}
+
 export function fuseConfirmation({
   side,
   deterministic,

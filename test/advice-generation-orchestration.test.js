@@ -26,6 +26,10 @@ const cronAdviceSource = readFileSync(
   new URL('../api/cron_advice.js', import.meta.url),
   'utf8',
 )
+const aiSource = readFileSync(
+  new URL('../api/ai.js', import.meta.url),
+  'utf8',
+)
 const adviceRunnerSource = readFileSync(
   new URL('../src/adviceRunner.js', import.meta.url),
   'utf8',
@@ -199,7 +203,15 @@ test('个股页默认快速生成且普通路径不再无条件同步委员会',
   )
   assert.match(
     cronAdviceSource,
-    /onProgress\(\{\s*stage:\s*'council',\s*phase:\s*'军师委员会正在进行影子复核'/,
+    /onProgress\(\{\s*stage:\s*'council',\s*phase:\s*'委员会正在复核候选方案，尚未发布最终结论'/,
+  )
+  assert.match(
+    cronAdviceSource,
+    /onProgress\(\{\s*stage:\s*'finalize',\s*phase:\s*'复核完成，正在发布最终结论'/,
+  )
+  assert.match(
+    aiSource,
+    /forceReasoning\s*\?\s*'数据齐全，正在形成候选方案…'\s*:\s*'数据齐全，正在生成操作建议…'/,
   )
 })
 

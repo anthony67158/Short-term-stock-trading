@@ -55,6 +55,28 @@ test('运行中任务取消后立即终止且不会被孤儿回收重新排队',
   assert.equal(data.jobs['600000'].phase, '已取消生成')
 })
 
+test('最终结论发布后迟到的复核进度不能把任务改回处理中', () => {
+  const data = {}
+  enqueueJob(data, {
+    code: '600000',
+    name: '浦发银行',
+    mode: 'buy_advice',
+    deepMode: true,
+  }, 1000)
+  leaseJob(data, '600000', 1000)
+  completeJob(data, '600000', 2000)
+
+  updateJobProgress(data, '600000', {
+    stage: 'council',
+    phase: '迟到的委员会复核事件',
+  }, 3000)
+
+  assert.equal(data.jobs['600000'].status, 'done')
+  assert.equal(data.jobs['600000'].stage, 'done')
+  assert.equal(data.jobs['600000'].phase, '生成完成')
+  assert.equal(data.jobs['600000'].progressAt, 2000)
+})
+
 test('新批次进度只包含本批任务，不混入最近取消的旧任务', () => {
   const data = {}
   enqueueJob(data, {

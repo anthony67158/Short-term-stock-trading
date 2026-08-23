@@ -17,6 +17,12 @@ export const DECISION_PLAN_SCHEMA_VERSION = 'decision-plan.v2'
 
 const RISK_INCREASING = new Set(['BUY', 'ADD', 'T_BUY_FIRST'])
 const RISK_REDUCING = new Set(['REDUCE', 'EXIT', 'T_SELL_FIRST'])
+const REQUIRED_EVIDENCE_SOURCES = new Set([
+  'account',
+  'quote',
+  'market',
+  'quant',
+])
 
 export function decisionPlanConfirmationGate(plan, side) {
   if (plan?.schemaVersion !== DECISION_PLAN_SCHEMA_VERSION) {
@@ -362,33 +368,109 @@ export function compileDecisionPlan({
     : null
   const blockedReasons = []
   const freshness = evidenceSnapshot?.freshness || {}
+  const missingRequiredSources = Array.isArray(
+    freshness.missingRequiredSources,
+  )
+    ? freshness.missingRequiredSources
+    : (freshness.missingSources || []).filter(
+        (source) => REQUIRED_EVIDENCE_SOURCES.has(source),
+      )
+  const missingRequired = new Set(missingRequiredSources)
+  const evidenceIssues = (Array.isArray(freshness.missingDetails)
+    ? freshness.missingDetails
+    : [])
+    .filter((issue) =>
+      issue?.required === true
+      || missingRequired.has(issue?.source)
+    )
+    .map((issue) => ({
+      source: text(issue.source, 40),
+      label: text(issue.label, 60),
+      status: text(issue.status, 30),
+      reason: text(issue.reason, 160),
+      impact: text(issue.impact, 200),
+      recovery: text(issue.recovery, 200),
+      required: true,
+    }))
+  const marketTime = evidenceSnapshot?.marketTime || {}
+  const basisSource = evidenceSnapshot?.sources?.quote
+    || evidenceSnapshot?.sources?.market
+    || null
+  const evidenceBasis = (
+    marketTime.basisLabel
+    || basisSource?.basisLabel
+    || marketTime.dataDayLabel
+    || basisSource?.dataAsOf
+  )
+    ? {
+        state: text(
+          marketTime.evidenceState
+          || basisSource?.state
+          || freshness.status,
+          30,
+        ),
+        label: text(
+          marketTime.basisLabel || basisSource?.basisLabel,
+          80,
+        ),
+        dataAsOf: text(
+          marketTime.dataDayLabel || basisSource?.dataAsOf,
+          60,
+        ),
+        phase: text(marketTime.phase, 60),
+        isLive: marketTime.isLive === true,
+      }
+    : null
   if (
     riskIncreasing
     && (
       freshness.status === 'PARTIAL'
-      || (freshness.missingSources || []).length > 0
+      || missingRequired.size > 0
     )
   ) {
+    const detail = evidenceIssues.length
+      ? evidenceIssues
+          .map((issue) =>
+            `${issue.label || issue.source}（${issue.reason || '未取得有效数据'}）`
+          )
+          .join('；')
+      : missingRequiredSources.join('、') || '来源状态未提供'
     blockedReasons.push(
-      `关键证据不完整：${(freshness.missingSources || []).join('、') || 'unknown'}`,
+      `关键证据不完整：${detail}`,
     )
   }
-  if (riskIncreasing && market.regime === 'UNKNOWN') {
-    blockedReasons.push('市场状态无法确认')
+  const marketUnknown = market.regime === 'UNKNOWN'
+  if (
+    riskIncreasing
+    && marketUnknown
+    && !missingRequired.has('market')
+  ) {
+    blockedReasons.push('市场状态无法确认：市场数据存在但无法归类')
   }
   const dualConfirmation = payload.counterTrend?.isStrong === true
     && payload.quant?.highConfSignal?.fired === true
   if (
     riskIncreasing
+    && !marketUnknown
     && market.allowRiskIncrease !== true
     && !dualConfirmation
   ) {
     blockedReasons.push('当前市场状态禁止新增风险')
   }
-  if (riskIncreasing && strategySignal?.passed !== true) {
+  const strategyEvidenceMissing = ['quote', 'market', 'quant']
+    .some((source) => missingRequired.has(source))
+  if (
+    riskIncreasing
+    && !strategyEvidenceMissing
+    && strategySignal?.passed !== true
+  ) {
     blockedReasons.push('策略入场条件未通过')
   }
-  if (riskIncreasing && !(positive(account.totalAssets) && finite(account.cash) != null)) {
+  if (
+    riskIncreasing
+    && !missingRequired.has('account')
+    && !(positive(account.totalAssets) && finite(account.cash) != null)
+  ) {
     blockedReasons.push('账户风险事实不完整')
   }
   if (riskIncreasing && !(referencePrice > 0 && stopPrice > 0)) {
@@ -430,6 +512,9 @@ export function compileDecisionPlan({
     && referencePrice > 0
     && stopPrice > 0
     && positive(account.totalAssets)
+    && !missingRequired.has('account')
+    && !missingRequired.has('market')
+    && !marketUnknown
   ) {
     capacity = computeBuyCapacity({
       requestedLots,
@@ -468,6 +553,7 @@ export function compileDecisionPlan({
   if (
     riskIncreasing
     && !productionEligible
+    && actionability === 'RESEARCH_ONLY'
     && !uniqueBlockers.some((item) => item.includes('策略尚未通过'))
   ) {
     uniqueBlockers.push('策略尚未通过生产晋级，仅作为研究级条件建议')
@@ -627,6 +713,8 @@ export function compileDecisionPlan({
     evidenceIds: evidenceSnapshot?.snapshotId
       ? [evidenceSnapshot.snapshotId]
       : [],
+    evidenceBasis,
+    evidenceIssues,
     blockedReasons: uniqueBlockers,
     executionStyle: 'SINGLE_LIMIT',
     explanation: text(advice.reason || advice.reasoning, 500),

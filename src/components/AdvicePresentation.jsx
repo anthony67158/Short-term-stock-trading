@@ -137,6 +137,46 @@ function RiskOverlay({ risk }) {
   )
 }
 
+function EvidenceGapNotice({ issues = [] }) {
+  if (!Array.isArray(issues) || !issues.length) return null
+  const statusLabel = {
+    ERROR: '请求失败',
+    EMPTY: '空数据',
+    SKIPPED: '未运行',
+    MISSING: '未采集',
+  }
+  return (
+    <section className="advice-evidence-gap" aria-label="缺失证据说明">
+      <div className="aeg-head">
+        <span><Icon name="info" size={13} /> 本轮缺失证据</span>
+        <b>已阻止新增风险</b>
+      </div>
+      <div className="aeg-list">
+        {issues.map((item) => (
+          <div className="aeg-item" key={item.source}>
+            <div className="aeg-source">
+              <b>{item.label || item.source}</b>
+              <span>{statusLabel[item.status] || item.status || '不可用'}</span>
+            </div>
+            <div className="aeg-detail">
+              <span>失败原因</span>
+              <p>{item.reason || '本轮未取得有效数据'}</p>
+            </div>
+            <div className="aeg-detail">
+              <span>决策影响</span>
+              <p>{item.impact || '该项证据无法参与本轮决策'}</p>
+            </div>
+            <div className="aeg-detail">
+              <span>恢复方式</span>
+              <p>{item.recovery || '数据恢复后重新生成'}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
 function DecisionPlanSummary({ plan }) {
   if (!plan) return null
   const governanceLabel = {
@@ -173,6 +213,16 @@ function DecisionPlanSummary({ plan }) {
       <div className="adp-facts">
         {plan.marketRegime && (
           <span>市场 <b>{plan.marketRegime}{plan.marketScore ? ` ${plan.marketScore}分` : ''}</b></span>
+        )}
+        {plan.evidenceBasis?.label && (
+          <span title={plan.evidenceBasis.phase || undefined}>
+            数据口径 <b>
+              {plan.evidenceBasis.label}
+              {plan.evidenceBasis.dataAsOf
+                ? ` · 截至 ${plan.evidenceBasis.dataAsOf}`
+                : ''}
+            </b>
+          </span>
         )}
         {plan.strategyId && (
           <span title={`${plan.strategyId} · ${plan.specVersion || ''}`}>
@@ -351,6 +401,9 @@ export default function AdvicePresentation({
       </section>
 
       <RiskOverlay risk={advice.riskOverlay} />
+      <EvidenceGapNotice
+        issues={view.decisionPlan?.evidenceIssues}
+      />
 
       {(view.levels.length > 0 || hasTrigger) && (
         <div className="advice-tactical-grid">

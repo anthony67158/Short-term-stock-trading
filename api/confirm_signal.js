@@ -27,6 +27,11 @@ import { scheduleAdviceWorker } from './cron_advice.js';
 import {
   decisionPlanConfirmationGate,
 } from '../shared/decisionPlan.js';
+import {
+  acquireConfirmationLease,
+  isAuthoritativeWatchingAlert,
+  ownsConfirmationLease,
+} from './_confirm_lease.js';
 
 const rateWindows = new Map();
 const RATE_WINDOW_MS = 60 * 1000;
@@ -36,6 +41,24 @@ const finite = (value) => {
   return Number.isFinite(number) ? number : null;
 };
 const text = (value, max) => String(value || '').trim().slice(0, max);
+
+export function resolveConfirmationAdvice(accountData, alert, clientAdvice) {
+  if (!accountData) return clientAdvice || {};
+  return buildJudgeAdviceContext({
+    ...(alert?.judgeContext || {}),
+    ...(accountData.advice?.[alert?.code]?.advice || {}),
+  });
+}
+
+export function confirmationVerdictApplied(result) {
+  return !new Set([
+    'alert-missing',
+    'alert-not-watching',
+    'stale-request',
+    'stale-plan',
+    'non-decisive',
+  ]).has(String(result?.reason || ''));
+}
 
 export function applyConfirmationVerdict(
   data,
@@ -84,20 +107,40 @@ export function applyConfirmationVerdict(
   return queued;
 }
 
-async function persistConfirmationVerdict(account, alert, verdict, quotePrice) {
-  if (!account?.nick || !['confirm', 'invalid'].includes(verdict?.decision)) return;
+async function persistConfirmationVerdict(
+  account,
+  alert,
+  verdict,
+  quotePrice,
+  leaseOwner = null,
+) {
+  if (!account?.nick || !['confirm', 'invalid'].includes(verdict?.decision)) {
+    return { applied: false, queued: null };
+  }
   const fresh = await readAccount(account.nick);
-  if (!fresh?.data) return;
+  if (
+    !fresh?.data
+    || !ownsConfirmationLease(fresh.data, alert?.id, leaseOwner)
+  ) {
+    return { applied: false, queued: null };
+  }
   const queued = applyConfirmationVerdict(
     fresh.data,
     alert,
     verdict,
     quotePrice,
   );
+  const stored = (fresh.data.alerts || [])
+    .find((item) => String(item?.id || '') === String(alert?.id || ''));
+  if (stored?.confirmLease?.owner === leaseOwner) delete stored.confirmLease;
   await writeAccount(fresh);
   if (queued.workerNeeded) {
     try { await scheduleAdviceWorker(account.nick); } catch { /* 5分钟定时器兜底 */ }
   }
+  return {
+    applied: confirmationVerdictApplied(queued),
+    queued,
+  };
 }
 
 export function sanitizeConfirmationBody(body) {
@@ -201,7 +244,47 @@ export default async function handler(req, res) {
       return res.status(422).send(JSON.stringify({ ok: false, decision: 'wait', error: sanitized.error }));
     }
     const { alert, advice, quote } = sanitized.value;
-    const accountData = accountAuth.account?.data;
+    const accountNick = accountAuth.account?.nick;
+    const lease = accountNick
+      ? await acquireConfirmationLease({
+          nick: accountNick,
+          alertId: alert.id,
+          requestedAlert: alert,
+        })
+      : { acquired: true, release: async () => {} };
+    if (!lease.acquired) {
+      return res.status(200).send(JSON.stringify({
+        ok: true,
+        decision: 'wait',
+        reason: '另一确认任务正在复核该预警',
+        side: sideOf(alert),
+        source: 'lease',
+        policy: 'confirmation-in-flight',
+      }));
+    }
+    try {
+    const freshAccount = accountNick ? lease.account : accountAuth.account;
+    if (accountNick && !isAuthoritativeWatchingAlert(freshAccount?.data, alert)) {
+      return res.status(200).send(JSON.stringify({
+        ok: true,
+        decision: 'wait',
+        reason: '该预警已由其他设备处理或计划已更新',
+        side: sideOf(alert),
+        source: 'account',
+        policy: 'stale-alert',
+      }));
+    }
+    if (accountNick) {
+      const authoritativeAlert = freshAccount.data.alerts
+        .find((item) => String(item?.id || '') === String(alert.id || ''));
+      Object.assign(alert, authoritativeAlert);
+    }
+    const accountData = freshAccount?.data;
+    const effectiveAdvice = resolveConfirmationAdvice(
+      accountNick ? accountData : null,
+      alert,
+      advice,
+    );
     const realStatus = accountData
       ? t1StatusOf(accountData.holding || [], accountData.closed || [], alert.code)
       : null;
@@ -229,21 +312,30 @@ export default async function handler(req, res) {
         source: 'account',
         policy: positionGate.policy,
         knowledgeAction: buildJudgeKnowledgeActionAssessment(
-          advice.knowledgeActionPlan || advice,
+          effectiveAdvice.knowledgeActionPlan || effectiveAdvice,
         ),
       };
-      try {
-        await persistConfirmationVerdict(
-          accountAuth.account,
-          alert,
-          verdict,
-          quote.price,
-        );
-      } catch { /* 前端仍收到保守判定，云端Timer兜底 */ }
+      const persisted = await persistConfirmationVerdict(
+        freshAccount,
+        alert,
+        verdict,
+        quote.price,
+        lease.owner,
+      );
+      if (!persisted.applied) {
+        return res.status(200).send(JSON.stringify({
+          ok: true,
+          decision: 'wait',
+          reason: '确认租约已变化，本次旧结果已丢弃',
+          side: sideOf(alert),
+          source: 'lease',
+          policy: 'stale-confirmation-result',
+        }));
+      }
       return res.status(200).send(JSON.stringify(verdict));
     }
     const decisionGate = decisionPlanConfirmationGate(
-      advice.decisionPlan,
+      effectiveAdvice.decisionPlan,
       sideOf(alert),
     );
     if (!decisionGate.allowed) {
@@ -256,7 +348,7 @@ export default async function handler(req, res) {
         source: 'decision-plan',
         policy: decisionGate.policy,
         knowledgeAction: buildJudgeKnowledgeActionAssessment(
-          advice.knowledgeActionPlan || advice,
+          effectiveAdvice.knowledgeActionPlan || effectiveAdvice,
         ),
       }));
     }
@@ -278,7 +370,7 @@ export default async function handler(req, res) {
         source: 't1',
         policy: 't1-blocked',
         knowledgeAction: buildJudgeKnowledgeActionAssessment(
-          advice.knowledgeActionPlan || advice,
+          effectiveAdvice.knowledgeActionPlan || effectiveAdvice,
         ),
       }));
     }
@@ -286,19 +378,33 @@ export default async function handler(req, res) {
     const v = await judgeConfirmation({
       alert,
       name: alert.name,
-      advice,
+      advice: effectiveAdvice,
       quote,
       position,
     });
-    try {
-      await persistConfirmationVerdict(
-        accountAuth.account,
+    if (['confirm', 'invalid'].includes(v?.decision)) {
+      const persisted = await persistConfirmationVerdict(
+        freshAccount,
         alert,
         v,
         quote.price,
+        lease.owner,
       );
-    } catch { /* 前端仍收到判定，云端Timer兜底 */ }
+      if (!persisted.applied) {
+        return res.status(200).send(JSON.stringify({
+          ok: true,
+          decision: 'wait',
+          reason: '确认租约已变化，本次旧结果已丢弃',
+          side: sideOf(alert),
+          source: 'lease',
+          policy: 'stale-confirmation-result',
+        }));
+      }
+    }
     return res.status(200).send(JSON.stringify({ ok: true, ...v }));
+    } finally {
+      await lease.release();
+    }
   } catch {
     // 出错时保守返回 wait,避免前端误发强提示
     return res.status(200).send(JSON.stringify({ ok: false, decision: 'wait', error: 'confirm_failed' }));

@@ -26,6 +26,7 @@ test('个股建议只保留一个主结论并把扩展信息收进详情', () =>
   const presentation = read('src/components/AdvicePresentation.jsx')
   const stockDetail = read('src/components/StockDetail.jsx')
   const generation = read('src/components/AdviceGenerationStatus.jsx')
+  const css = read('src/styles/precision.css')
 
   assert.match(presentation, /advice-command-center/)
   assert.match(presentation, /执行摘要/)
@@ -44,7 +45,55 @@ test('个股建议只保留一个主结论并把扩展信息收进详情', () =>
   assert.match(generation, /advice-generation-flow/)
   assert.match(generation, /adviceGenerationSteps/)
   assert.match(generation, /generation-flow-steps/)
-  assert.match(generation, /下方为上次已保存结果/)
+  assert.match(generation, /下方是上次结论，不是本轮结果/)
+  assert.match(
+    css,
+    /\.advice-generation-flow\.deep \.generation-flow-steps\s*{[^}]*grid-template-columns:\s*repeat\(6,\s*minmax\(0,\s*1fr\)\)/s,
+  )
+  assert.match(
+    css,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.advice-generation-flow\.deep \.generation-flow-steps\s*{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s,
+  )
+})
+
+test('个股详情用紧凑提示说明生成模式、Judge 与止损纪律', () => {
+  const stockDetail = read('src/components/StockDetail.jsx')
+  const css = read('src/styles/precision.css')
+
+  assert.match(stockDetail, /adviceModeGuidance/)
+  assert.match(stockDetail, /role="note"/)
+  assert.match(stockDetail, /aria-label="AI 建议使用顺序"/)
+  assert.match(stockDetail, /id="advice-mode-guide"/)
+  assert.match(stockDetail, /modeGuidance\.items\.map/)
+  assert.match(stockDetail, /modeGuidance\.deepBadge/)
+  assert.match(stockDetail, /modeGuidance\.deepUseCase/)
+  assert.match(stockDetail, /modeGuidance\.deepTitle/)
+  assert.match(stockDetail, /className="footbar-mode-usecase"/)
+  assert.match(stockDetail, /aria-describedby="advice-mode-guide"/)
+  assert.match(
+    css,
+    /\.advice-mode-guide\s*{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/s,
+  )
+  assert.match(
+    css,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.advice-mode-guide\s*{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s,
+  )
+})
+
+test('证据缺失时主视图展示来源原因影响与恢复方式', () => {
+  const presentation = read('src/components/AdvicePresentation.jsx')
+  const css = read('src/styles/precision.css')
+
+  assert.match(presentation, /function EvidenceGapNotice/)
+  assert.match(presentation, /aria-label="缺失证据说明"/)
+  assert.match(presentation, /失败原因/)
+  assert.match(presentation, /决策影响/)
+  assert.match(presentation, /恢复方式/)
+  assert.match(presentation, /view\.decisionPlan\?\.evidenceIssues/)
+  assert.match(presentation, /数据口径/)
+  assert.match(presentation, /evidenceBasis/)
+  assert.match(css, /\.advice-evidence-gap\s*{/)
+  assert.match(css, /\.aeg-item\s*{/)
 })
 
 test('执行队列与建议摘要具备移动端单列布局', () => {

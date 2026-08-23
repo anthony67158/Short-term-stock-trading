@@ -132,6 +132,25 @@ function modelSummary(advice) {
 function decisionPlanSummary(plan) {
   if (plan?.schemaVersion !== 'decision-plan.v2') return null
   const actionability = clean(plan.actionability, 30)
+  const evidenceBasis = plan.evidenceBasis
+    ? {
+        state: clean(plan.evidenceBasis.state, 30),
+        label: clean(plan.evidenceBasis.label, 80),
+        dataAsOf: clean(plan.evidenceBasis.dataAsOf, 60),
+        phase: clean(plan.evidenceBasis.phase, 60),
+        isLive: plan.evidenceBasis.isLive === true,
+      }
+    : null
+  const evidenceIssues = Array.isArray(plan.evidenceIssues)
+    ? plan.evidenceIssues.map((issue) => ({
+        source: clean(issue?.source, 40),
+        label: clean(issue?.label, 60),
+        status: clean(issue?.status, 30),
+        reason: clean(issue?.reason, 160),
+        impact: clean(issue?.impact, 200),
+        recovery: clean(issue?.recovery, 200),
+      })).filter((issue) => issue.source && issue.label)
+    : []
   const statusText = actionability === 'READY'
     ? '已通过确定性策略与风险校验'
     : actionability === 'RESEARCH_ONLY'
@@ -176,6 +195,8 @@ function decisionPlanSummary(plan) {
     maxLossAmount: displayNumber(plan.risk?.maxLossAmount),
     budgetPct: displayNumber(plan.risk?.budgetPct),
     estimatedFees: displayNumber(plan.costs?.estimatedFees),
+    evidenceBasis,
+    evidenceIssues,
   }
 }
 

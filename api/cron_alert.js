@@ -49,6 +49,11 @@ import { isAdviceReviewEnabled } from '../shared/adviceReviewPolicy.js';
 import { isContinuousTrading } from '../shared/tradingCalendar.js';
 import { buildAlertNotification } from '../shared/alertNotification.js';
 import { isFreshAlertQuote } from '../shared/alertQuotePolicy.js';
+import {
+  acquireConfirmationLease,
+  isAuthoritativeWatchingAlert,
+  ownsConfirmationLease,
+} from './_confirm_lease.js';
 
 const OP_LABEL = { gte: '≥', lte: '≤' };
 
@@ -57,8 +62,25 @@ const OP_LABEL = { gte: '≥', lte: '≤' };
 const JUDGE_BUDGET_PER_ROUND = 4;
 const JUDGE_INTERVAL_MS = { buy: 45000, sell: 30000, stop: 20000 };
 const WATCHING_MAX_MS = 90 * 60 * 1000;
+const JUDGE_DEADLINE_RESERVE_MS = 30000;
 
 export { isCurrentAdvicePlan, queueAdviceReviewForVerdict };
+
+function rotateAccounts(accounts, slot = 0) {
+  const list = Array.isArray(accounts) ? accounts.slice() : [];
+  if (list.length < 2) return list;
+  const offset = Math.abs(Math.trunc(Number(slot) || 0)) % list.length;
+  return [...list.slice(offset), ...list.slice(0, offset)];
+}
+
+function hasJudgeBudget(
+  deadline,
+  now = Date.now(),
+  reserveMs = JUDGE_DEADLINE_RESERVE_MS,
+) {
+  return !Number.isFinite(deadline)
+    || deadline - now >= Math.max(0, Number(reserveMs) || 0);
+}
 
 export function shouldRunAlertCron(now = Date.now()) {
   return isContinuousTrading(now);
@@ -219,6 +241,7 @@ async function persistProcessedAccount(
   deadEndpoints = [],
   storage = null,
   wakeups = [],
+  leaseOwners = new Map(),
 ) {
   const latest = storage
     ? await readAccount(processed.nick, storage)
@@ -230,8 +253,22 @@ async function persistProcessedAccount(
       .filter((alert) => alert?.id)
       .map((alert) => [alert.id, alert]),
   );
+  const acceptedLeaseIds = new Set();
   latest.data.alerts = (latest.data.alerts || []).map((alert) => {
     const server = processedAlerts.get(alert?.id);
+    const requiredOwner = leaseOwners.get(String(alert?.id || ''));
+    if (requiredOwner) {
+      if (!server) return alert;
+      if (!ownsConfirmationLease(
+        latest.data,
+        alert.id,
+        requiredOwner,
+      )) return alert;
+      acceptedLeaseIds.add(String(alert.id));
+      const accepted = { ...server };
+      delete accepted.confirmLease;
+      return accepted;
+    }
     return server && alertStamp(server) > alertStamp(alert) ? server : alert;
   });
 
@@ -246,6 +283,10 @@ async function persistProcessedAccount(
   );
   for (const event of (processedData.decisionLog || [])) {
     if (!event?.id) continue;
+    if (
+      leaseOwners.has(String(event.alertId || ''))
+      && !acceptedLeaseIds.has(String(event.alertId || ''))
+    ) continue;
     const current = decisions.get(event.id);
     const eventStamp = Math.max(Number(event.outcomeUpdatedAt) || 0, Number(event.at) || 0);
     const currentStamp = Math.max(Number(current?.outcomeUpdatedAt) || 0, Number(current?.at) || 0);
@@ -256,6 +297,10 @@ async function persistProcessedAccount(
     .slice(0, 1000);
   let adviceQueued = 0;
   for (const wakeup of wakeups) {
+    if (
+      leaseOwners.has(String(wakeup?.alert?.id || ''))
+      && !acceptedLeaseIds.has(String(wakeup?.alert?.id || ''))
+    ) continue;
     const queued = queueAdviceReviewForVerdict(
       latest.data,
       wakeup?.alert,
@@ -267,10 +312,20 @@ async function persistProcessedAccount(
   const workerNeeded = adviceQueued > 0 && needsWorkerDispatch(latest.data);
   if (storage) await writeAccount(latest, storage);
   else await writeAccount(latest);
-  return { adviceQueued, workerNeeded };
+  return {
+    adviceQueued,
+    workerNeeded,
+    acceptedLeaseIds: [...acceptedLeaseIds],
+  };
 }
 
-async function processAccount(acc) {
+async function processAccount(
+  acc,
+  {
+    judgeLimit = JUDGE_BUDGET_PER_ROUND,
+    deadline = Number.POSITIVE_INFINITY,
+  } = {},
+) {
   const data = acc.data || {};
   const alerts = Array.isArray(data.alerts) ? data.alerts : [];
   const subs = Array.isArray(data.pushSubs) ? data.pushSubs : [];
@@ -279,6 +334,8 @@ async function processAccount(acc) {
   const smartOn = !(data.settings && data.settings.smartConfirm === false);
   let changed = false, hits = 0, sent = 0;
   const wakeups = [];
+  const confirmationLeases = [];
+  const pendingPushes = [];
 
   // 第一层硬清理：每轮先按刚从 OSS 读取的账本淘汰已清仓、持仓 ID 已消失的旧预警。
   for (const alert of alerts) {
@@ -322,7 +379,16 @@ async function processAccount(acc) {
     return (a.lastJudgeAt || 0) - (b.lastJudgeAt || 0);
   });
   if (!activeForEvaluation.length && !outcomePending.length) {
-    return { changed, hits, sent, judgeCalls: 0, deadEndpoints: [], wakeups };
+    return {
+      changed,
+      hits,
+      sent,
+      judgeCalls: 0,
+      deadEndpoints: [],
+      wakeups,
+      confirmationLeases,
+      pendingPushes,
+    };
   }
 
   const codes = [...new Set([...activeForEvaluation, ...outcomePending].map((a) => a.code))];
@@ -457,7 +523,7 @@ async function processAccount(acc) {
       }
       // 阶段二:调用智能确认闸门,判定真正交易时机是否到。
       // ★预算护栏:本轮 judge 调用达上限 → 跳过(维持 watching,下轮再判),避免 watching 堆积时烧光 token/超时。
-      if (judgeCalls >= JUDGE_BUDGET_PER_ROUND) continue;
+      if (judgeCalls >= judgeLimit || !hasJudgeBudget(deadline)) continue;
       // 现价缺失(接口异常/休市返回空)时不判定,省一次无谓的 judge 调用。
       if (!q || q.price == null || !(Number(q.price) > 0)) continue;
       if (a.lastJudgeAt && now - a.lastJudgeAt < (JUDGE_INTERVAL_MS[side] || 45000)) continue;
@@ -476,15 +542,49 @@ async function processAccount(acc) {
         changed = true;
         continue;
       }
+      let lease;
+      try {
+        lease = await acquireConfirmationLease({
+          nick: acc.nick,
+          alertId: a.id,
+          requestedAlert: a,
+        });
+      } catch {
+        continue;
+      }
+      if (!lease.acquired) continue;
+      const authoritativeAccount = lease.account;
+      if (!isAuthoritativeWatchingAlert(authoritativeAccount?.data, a)) {
+        await lease.release();
+        continue;
+      }
+      const authoritativeAlert = authoritativeAccount.data.alerts
+        .find((item) => String(item?.id || '') === String(a.id || ''));
+      Object.assign(a, authoritativeAlert);
+      confirmationLeases.push(lease);
+      const authoritativeAdviceEntry = authoritativeAccount.data.advice?.[a.code];
+      if (!isCurrentAdvicePlan(a, authoritativeAdviceEntry)) {
+        a.enabled = false;
+        a.phase = 'superseded';
+        a.supersededAt = Date.now();
+        a.triggeredMsg = '军师主计划已更新，旧执行确认自动撤销';
+        delete a.confirmLease;
+        changed = true;
+        continue;
+      }
+      const authoritativePosition = positionContextOf(
+        authoritativeAccount.data,
+        a.code,
+      );
       judgeCalls++;
       let verdict = null;
       try {
         verdict = await judgeConfirmation({
           alert: a,
           name: a.name,
-          advice: adviceMap[a.code] && adviceMap[a.code].advice,
+          advice: authoritativeAdviceEntry?.advice || {},
           quote: q,
-          position: beforeJudge.context,
+          position: authoritativePosition,
         });
       } catch (e) { verdict = { decision: 'wait', reason: '确认判定异常:' + String(e && e.message || e) }; }
       if (!verdict) continue;
@@ -495,6 +595,7 @@ async function processAccount(acc) {
       a.lastJudgePrice = Number(q.price);
       a.lastKnowledgeAction = verdict.knowledgeAction || a.lastKnowledgeAction || null;
       a.judgeCount = (Number(a.judgeCount) || 0) + 1;
+      delete a.confirmLease;
       changed = true;
       if (verdict.decision === 'confirm' || verdict.decision === 'invalid') {
         const beforePush = await verifyLatestPosition(acc.nick, a);
@@ -522,7 +623,11 @@ async function processAccount(acc) {
           stage: 'confirm',
           reason: verdict.reason || '多项信号共振确认',
         });
-        collectDead(await sendPush(subs, { ...notification, code: a.code, tag: 'confirm-' + a.id, url: '/' }));
+        pendingPushes.push({
+          alertId: a.id,
+          countedHit: true,
+          payload: { ...notification, code: a.code, tag: 'confirm-' + a.id, url: '/' },
+        });
         a.phase = 'confirmed'; a.triggeredAt = Date.now(); a.triggeredMsg = `确认${actZh}:${verdict.reason || ''}`; a.enabled = false;
         a.decisionPrice = Number(q.price);
         const decisionSide = resolveDecisionSide(verdict, side);
@@ -557,7 +662,11 @@ async function processAccount(acc) {
           stage: 'invalid',
           reason: verdict.reason || '关键条件已破坏',
         });
-        collectDead(await sendPush(subs, { ...notification, code: a.code, tag: 'invalid-' + a.id, url: '/' }));
+        pendingPushes.push({
+          alertId: a.id,
+          countedHit: false,
+          payload: { ...notification, code: a.code, tag: 'invalid-' + a.id, url: '/' },
+        });
         a.phase = 'invalid'; a.triggeredAt = Date.now(); a.triggeredMsg = `已失效:${verdict.reason || ''}`; a.enabled = false;
         wakeups.push({ alert: { ...a }, verdict, at: a.triggeredAt });
         changed = true;
@@ -566,7 +675,16 @@ async function processAccount(acc) {
     }
   }
   if (dead.size) { data.pushSubs = subs.filter((s) => !dead.has(s.endpoint)); changed = true; }
-  return { changed, hits, sent, judgeCalls, deadEndpoints: [...dead], wakeups };
+  return {
+    changed,
+    hits,
+    sent,
+    judgeCalls,
+    deadEndpoints: [...dead],
+    wakeups,
+    confirmationLeases,
+    pendingPushes,
+  };
 }
 
 export default async function handler(req, res) {
@@ -599,6 +717,7 @@ export default async function handler(req, res) {
   };
   const roundMs = clampInt(body.roundMs != null ? body.roundMs : process.env.CRON_ALERT_ROUND_MS, 8000, 3000, 60000);
   const budgetMs = clampInt(body.budgetMs != null ? body.budgetMs : process.env.CRON_ALERT_BUDGET_MS, 55000, 5000, 110000);
+  const deadline = started + budgetMs;
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   try {
@@ -612,30 +731,80 @@ export default async function handler(req, res) {
       let accounts = await listAllAccounts();
       if (onlyNick) accounts = accounts.filter((a) => a.nick === onlyNick);
       lastAccounts = accounts.length;
+      accounts = rotateAccounts(
+        accounts.sort((left, right) =>
+          String(left?.nick || '').localeCompare(String(right?.nick || ''))
+        ),
+        Math.floor(started / 60000) + rounds - 1,
+      );
       for (const acc of accounts) {
+        if (Date.now() + 3000 >= deadline) break;
         let r;
-        try { r = await processAccount(acc); } catch (e) { r = { changed: false, hits: 0, sent: 0, error: String(e.message || e) }; }
-        if (r.changed) {
-          touched++;
-          try {
-            const persisted = await persistProcessedAccount(
-              acc,
-              r.deadEndpoints || [],
-              null,
-              r.wakeups || [],
-            );
-            totalAdviceQueued += persisted.adviceQueued || 0;
-            if (persisted.workerNeeded) {
-              try { await scheduleAdviceWorker(acc.nick); } catch { /* 5分钟兜底续跑 */ }
-            }
-          } catch { /* ignore */ }
+        try {
+          r = await processAccount(acc, {
+            judgeLimit: 1,
+            deadline,
+          });
+        } catch (e) {
+          r = { changed: false, hits: 0, sent: 0, error: String(e.message || e) };
         }
-        totalHits += r.hits || 0; totalSent += r.sent || 0;
-        totalJudgeCalls += r.judgeCalls || 0;
+        try {
+          const leaseOwners = new Map(
+            (r.confirmationLeases || [])
+              .filter((lease) => lease?.alertId && lease?.owner)
+              .map((lease) => [String(lease.alertId), lease.owner]),
+          );
+          let acceptedLeaseIds = new Set();
+          if (r.changed) {
+            touched++;
+            try {
+              const persisted = await persistProcessedAccount(
+                acc,
+                r.deadEndpoints || [],
+                null,
+                r.wakeups || [],
+                leaseOwners,
+              );
+              acceptedLeaseIds = new Set(persisted.acceptedLeaseIds || []);
+              totalAdviceQueued += persisted.adviceQueued || 0;
+              if (persisted.workerNeeded) {
+                try { await scheduleAdviceWorker(acc.nick); } catch { /* 5分钟兜底续跑 */ }
+              }
+            } catch { /* ignore */ }
+          }
+          const rejectedCountedHits = (r.pendingPushes || [])
+            .filter((item) =>
+              item.countedHit
+              && !acceptedLeaseIds.has(String(item.alertId || ''))
+            ).length;
+          totalHits += Math.max(0, (r.hits || 0) - rejectedCountedHits);
+          totalSent += r.sent || 0;
+          const deadAfterPush = new Set();
+          for (const pending of (r.pendingPushes || [])) {
+            if (!acceptedLeaseIds.has(String(pending.alertId || ''))) continue;
+            const pushed = await sendPush(
+              Array.isArray(acc.data?.pushSubs) ? acc.data.pushSubs : [],
+              pending.payload,
+            );
+            totalSent += pushed.sent || 0;
+            for (const endpoint of (pushed.deadEndpoints || [])) {
+              deadAfterPush.add(endpoint);
+            }
+          }
+          if (deadAfterPush.size) {
+            try {
+              await persistProcessedAccount(acc, [...deadAfterPush]);
+            } catch { /* 下轮继续清理失效订阅 */ }
+          }
+          totalJudgeCalls += r.judgeCalls || 0;
+        } finally {
+          await Promise.allSettled(
+            (r.confirmationLeases || []).map((lease) => lease.release()),
+          );
+        }
       }
       // 预算判断:若「再睡一轮 + 预留一轮评估余量」会超预算,则收尾退出。
-      const elapsed = Date.now() - started;
-      if (elapsed + roundMs + 3000 >= budgetMs) break;
+      if (Date.now() + roundMs + 3000 >= deadline) break;
       await sleep(roundMs);
     }
     return res.end(JSON.stringify({ ok: true, accounts: lastAccounts, hits: totalHits, sent: totalSent, judgeCalls: totalJudgeCalls, adviceQueued: totalAdviceQueued, touched, rounds, roundMs, elapsedMs: Date.now() - started }));
@@ -647,8 +816,10 @@ export default async function handler(req, res) {
 export const __test = {
   alertStamp,
   describeAlert,
+  hasJudgeBudget,
   hit,
   persistProcessedAccount,
   positionContextOf,
+  rotateAccounts,
   retireIfPositionChanged,
 }

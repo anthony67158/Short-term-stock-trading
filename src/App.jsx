@@ -4,7 +4,7 @@ import BrandMark from './components/BrandMark'
 import StockDetail from './components/StockDetail'
 import ErrorBoundary from './components/ErrorBoundary'
 import AuthGate, { AccountMenu } from './components/AuthGate'
-import { usePolling, isTradingHours, useCountdown, triggerRefresh, useRefreshTick } from './hooks'
+import { usePolling, useCountdown, triggerRefresh, useRefreshTick } from './hooks'
 import { usePlanStore, planStore } from './planStore'
 import { useAIStore, aiStore } from './aiStore'
 import { useAuthStore, authStore, startCloudSync } from './authStore'
@@ -31,6 +31,7 @@ import {
   APP_SECTIONS,
   resolveAppShortcut,
 } from '../shared/appShell.js'
+import { tradingPollingIntervals } from '../shared/pollingPolicy.js'
 
 // 按需分包：四个主 Tab 与 AI 助手拆成独立 chunk，首屏只加载当前 Tab，
 // 切换时才拉取对应 chunk（配合 Rolldown codeSplitting），缩短首屏体积与白屏时间。
@@ -138,8 +139,9 @@ function MainApp() {
   const quantReportOpen = useQuantReportOpen()
   const quantModelState = useQuantModelStore()
   const aiSearchConfig = useAiSearchConfig()
-  const trading = isTradingHours()
-  const interval = trading ? 20000 : 120000
+  const polling = tradingPollingIntervals()
+  const trading = polling.trading
+  const interval = polling.marketMs
 
   // 主流程共享数据（今日选股 / 复盘 / 助手 用）
   const market = usePolling('/api/market', interval)
@@ -157,7 +159,7 @@ function MainApp() {
 
   // ===== 盯盘预警：轮询所有“启用中预警”涉及的个股报价 → 逐条判断命中 =====
   const alertCodes = [...new Set((book.alerts || []).filter((a) => a.enabled).map((a) => a.code))]
-  const alertInterval = trading ? 15000 : 60000
+  const alertInterval = polling.alertMs
   const alertQuotes = usePolling(
     alertCodes.length ? `/api/quote?codes=${alertCodes.join(',')}` : null,
     alertInterval,

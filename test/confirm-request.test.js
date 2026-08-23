@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
 
 import confirmSignalHandler, {
   applyConfirmationVerdict,
+  confirmationVerdictApplied,
+  resolveConfirmationAdvice,
   sanitizeConfirmationBody,
 } from '../api/confirm_signal.js'
 import { TRUSTED_ACCOUNT_REQUEST } from '../api/_account_auth.js'
@@ -78,6 +80,32 @@ test('确认接口拒绝非watching、非法代码和非法价格', () => {
   }).ok, false)
 })
 
+test('登录态Judge只使用权威账号中的最新建议', () => {
+  const alert = {
+    code: '600000',
+    judgeContext: { planId: 'plan-1' },
+  }
+  const clientAdvice = {
+    action: '立即买入',
+    continuity: { planId: 'plan-1', revision: 1 },
+  }
+  const accountData = {
+    advice: {
+      600000: {
+        advice: {
+          action: '观望',
+          continuity: { planId: 'plan-1', revision: 2 },
+        },
+      },
+    },
+  }
+
+  const resolved = resolveConfirmationAdvice(accountData, alert, clientAdvice)
+
+  assert.equal(resolved.action, '观望')
+  assert.equal(resolved.planRevision, 2)
+})
+
 test('页面内确认结果同步更新预警且不重复调用军师', () => {
   const now = 1786080000000
   const data = {
@@ -148,6 +176,33 @@ test('迟到或错股的页面确认不得覆盖云端最新预警状态', () =>
     judgeContext: { planId: 'plan-1' },
   }, { decision: 'confirm' }, 10, 1100)
   assert.deepEqual(duplicate, { queued: false, reason: 'alert-not-watching' })
+})
+
+test('租约期间主计划更新时旧确认只能淘汰预警不能视为已应用', () => {
+  const data = {
+    alerts: [{
+      id: 'a1',
+      code: '600000',
+      enabled: true,
+      phase: 'watching',
+      judgeContext: { planId: 'plan-old' },
+    }],
+    advice: {
+      600000: {
+        advice: { continuity: { planId: 'plan-new' } },
+      },
+    },
+  }
+
+  const result = applyConfirmationVerdict(data, data.alerts[0], {
+    decision: 'confirm',
+    reason: '旧计划确认',
+  }, 10, 2000)
+
+  assert.deepEqual(result, { queued: false, reason: 'stale-plan' })
+  assert.equal(confirmationVerdictApplied(result), false)
+  assert.equal(data.alerts[0].phase, 'superseded')
+  assert.equal(data.alerts[0].enabled, false)
 })
 
 test('今日无可卖仓位时确认接口直接返回 T+1 等待，不调用 Judge', async () => {

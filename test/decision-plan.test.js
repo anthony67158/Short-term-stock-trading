@@ -264,6 +264,125 @@ test('关键证据不完整时风险增加动作必须阻断', () => {
   assert.match(plan.blockedReasons.join(' '), /关键证据不完整/)
 })
 
+test('休市快照进入决策计划时保留数据口径和截至交易日', () => {
+  const plan = compileDecisionPlan({
+    mode: 'buy_advice',
+    advice: {
+      action: '回调再买',
+      buyPrice: 10,
+      stopPrice: 9,
+      targetPrice: 12,
+      planQty: 1,
+    },
+    payload: {
+      ...payload,
+      todayQuote: {
+        ...payload.todayQuote,
+        live: false,
+        phase: '休市(周末)',
+        asOfLabel: '2026-08-21(周五)',
+      },
+    },
+    evidenceSnapshot: {
+      ...snapshot,
+      marketTime: {
+        phase: '休市(周末)',
+        dataDayLabel: '2026-08-21(周五)',
+        isLive: false,
+        evidenceState: 'PREVIOUS_CLOSE',
+        basisLabel: '最近交易日完整数据',
+      },
+      freshness: {
+        status: 'PREVIOUS_CLOSE',
+        missingSources: [],
+        missingRequiredSources: [],
+      },
+    },
+    strategySpec: getActiveStrategySpec(),
+    strategyGate: { productionEligible: true, blockers: [] },
+    now,
+  })
+
+  assert.deepEqual(plan.evidenceBasis, {
+    state: 'PREVIOUS_CLOSE',
+    label: '最近交易日完整数据',
+    dataAsOf: '2026-08-21(周五)',
+    phase: '休市(周末)',
+    isLive: false,
+  })
+  assert.doesNotMatch(plan.blockedReasons.join('；'), /关键证据不完整/)
+})
+
+test('证据缺失只报告根因并抑制市场策略与预算派生误判', () => {
+  const missingDetails = [
+    {
+      source: 'quote',
+      label: '实时行情',
+      status: 'ERROR',
+      reason: '接口返回 HTTP 401',
+      impact: '无法确认当前价和价格时效',
+      recovery: '行情接口恢复后重新生成',
+      required: true,
+    },
+    {
+      source: 'market',
+      label: '市场状态',
+      status: 'ERROR',
+      reason: '接口返回 HTTP 401',
+      impact: '无法判断是否允许新增风险',
+      recovery: '大盘数据恢复后重新生成',
+      required: true,
+    },
+    {
+      source: 'quant',
+      label: '量化预测',
+      status: 'SKIPPED',
+      reason: '个股K线数据不足，量化预测未启动',
+      impact: '无法验证方向概率和目标价区间',
+      recovery: 'K线和量化服务恢复后重新生成',
+      required: true,
+    },
+  ]
+  const plan = compileDecisionPlan({
+    mode: 'buy_advice',
+    advice: {
+      action: '立即买入',
+      buyPrice: 10,
+      stopPrice: 9,
+      targetPrice: 12,
+      planQtyNum: 1,
+    },
+    payload: {
+      code: '600519',
+      name: '贵州茅台',
+      account,
+    },
+    evidenceSnapshot: {
+      ...snapshot,
+      freshness: {
+        status: 'PARTIAL',
+        missingSources: ['quote', 'market', 'quant'],
+        missingRequiredSources: ['quote', 'market', 'quant'],
+        missingDetails,
+      },
+    },
+    strategySpec: getActiveStrategySpec(),
+    strategyGate: {
+      productionEligible: false,
+      blockers: [{ code: 'BACKTEST_REQUIRED' }],
+    },
+    now,
+  })
+  const reasons = plan.blockedReasons.join('；')
+
+  assert.deepEqual(plan.evidenceIssues, missingDetails)
+  assert.match(reasons, /实时行情.*HTTP 401/)
+  assert.match(reasons, /量化预测.*K线数据不足/)
+  assert.doesNotMatch(reasons, /当前市场状态禁止新增风险/)
+  assert.doesNotMatch(reasons, /策略入场条件未通过/)
+  assert.doesNotMatch(reasons, /风险预算或现金不足一手/)
+})
+
 test('研究级或被阻断的新增风险计划不能被Judge升级为确认', () => {
   assert.deepEqual(
     decisionPlanConfirmationGate({

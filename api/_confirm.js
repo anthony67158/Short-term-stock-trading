@@ -23,7 +23,11 @@ import { getModel, getReasoning } from './_llm_config.js';
 import { put, hasStorage } from './_blob.js';
 import { marketTimeContext } from './_market_time.js';
 import { isConfirmationPhase, isMinuteSnapshotFresh, normalizeConfidence } from '../shared/decisionGuards.js';
-import { confirmationPolicy, fuseConfirmation } from '../shared/confirmPolicy.js';
+import {
+  confirmationPolicy,
+  fuseConfirmation,
+  shouldCallLlmJudge,
+} from '../shared/confirmPolicy.js';
 import {
   actionIntentOf,
   actionLabelOf,
@@ -65,36 +69,96 @@ function round(v, d = 2) {
   return Math.round(n * p) / p;
 }
 
+function minuteOfDay(value) {
+  const match = String(value || '').match(/^(\d{2}):(\d{2})/);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  return hour <= 23 && minute <= 59 ? hour * 60 + minute : null;
+}
+
+function continuousSessionOf(minute) {
+  if (minute >= 9 * 60 + 30 && minute <= 11 * 60 + 30) return 'morning';
+  if (minute >= 13 * 60 && minute <= 15 * 60) return 'afternoon';
+  return null;
+}
+
+function beijingStamp(epoch) {
+  const value = Number(epoch);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  const iso = new Date(value + 8 * 60 * 60 * 1000).toISOString();
+  return {
+    day: iso.slice(0, 10),
+    minuteOfDay: Number(iso.slice(11, 13)) * 60 + Number(iso.slice(14, 16)),
+  };
+}
+
 // ---- 从分时序列提取「盘中确认原语」----
 // trends: [{time, price, volume, avg(VWAP)}] 升序;preClose 昨收。
 // 返回一组人类可读 + 机器可判的原语,后续确定性判定与 LLM 都消费它。
-export function intradayPrimitives(trends, preClose) {
+export function intradayPrimitives(
+  trends,
+  preClose,
+  { watchingAt = null, now = Date.now() } = {},
+) {
   const ts = Array.isArray(trends) ? trends.filter((t) => t && Number(t.price) > 0) : [];
   if (ts.length < 5) return null;
   const last = ts[ts.length - 1];
   const price = Number(last.price);
   const vwap = Number(last.avg) > 0 ? Number(last.avg) : null;
-  // 近 N 分钟窗口(最多取 10 根)
-  const win = ts.slice(-10);
+  const touch = beijingStamp(watchingAt);
+  const current = beijingStamp(now);
+  const touchMinute = touch && current && touch.day === current.day
+    ? touch.minuteOfDay
+    : null;
+  const currentSession = continuousSessionOf(minuteOfDay(last.time));
+  const sessionTrends = currentSession
+    ? ts.filter((item) =>
+        continuousSessionOf(minuteOfDay(item.time)) === currentSession
+      )
+    : ts;
+  const touchInCurrentSession = touchMinute != null
+    && continuousSessionOf(touchMinute) === currentSession;
+  const postTouch = !touchInCurrentSession
+    ? sessionTrends
+    : sessionTrends.filter((item) => {
+        const minute = minuteOfDay(item.time);
+        return minute != null && minute >= touchMinute;
+      });
+  if (!postTouch.length) return null;
+  // 形态、动量和量能只使用触价后的分钟线，避免用触价前走势确认未来动作。
+  const win = postTouch.slice(-10);
   const prices = win.map((t) => Number(t.price));
   const winLow = Math.min(...prices);
   const winHigh = Math.max(...prices);
-  // 最近 5 分钟 vs 前 5 分钟量能(判缩量/放量)
-  const recent = ts.slice(-5).reduce((s, t) => s + (Number(t.volume) || 0), 0);
-  const prior = ts.slice(-10, -5).reduce((s, t) => s + (Number(t.volume) || 0), 0);
-  const volShrink = prior > 0 ? recent < prior * 0.85 : false;   // 明显缩量
-  const volSurge = prior > 0 ? recent > prior * 1.5 : false;     // 明显放量
+  // 至少积累4根触价后分钟线才比较前后半段量能，样本不足不加分。
+  const volumeWindow = win.length >= 4 ? win : [];
+  const volumeHalf = Math.floor(volumeWindow.length / 2);
+  const priorVolumes = volumeWindow.slice(0, volumeHalf);
+  const recentVolumes = volumeWindow.slice(-volumeHalf);
+  const averageVolume = (items) => items.length
+    ? items.reduce((sum, item) => sum + (Number(item.volume) || 0), 0) / items.length
+    : 0;
+  const prior = averageVolume(priorVolumes);
+  const recent = averageVolume(recentVolumes);
+  const volShrink = prior > 0 ? recent < prior * 0.85 : false;
+  const volSurge = prior > 0 ? recent > prior * 1.5 : false;
   // 5 分钟动量(正=近 5 分钟在涨)
   const ref5 = prices.length >= 6 ? prices[prices.length - 6] : prices[0];
-  const mom5Pct = ref5 > 0 ? round((price - ref5) / ref5 * 100, 2) : 0;
+  const mom5Pct = prices.length >= 2 && ref5 > 0
+    ? round((price - ref5) / ref5 * 100, 2)
+    : 0;
   // 抬高低点 / 压低高点(用窗口前半段与后半段的极值比较)
   const half = Math.floor(win.length / 2);
-  const lowA = Math.min(...prices.slice(0, half)), lowB = Math.min(...prices.slice(half));
-  const highA = Math.max(...prices.slice(0, half)), highB = Math.max(...prices.slice(half));
-  const higherLows = lowB >= lowA;   // 后半段最低点不再创新低 → 止跌迹象
-  const lowerHighs = highB <= highA; // 后半段最高点不再创新高 → 滞涨迹象
+  const enoughForStructure = win.length >= 4;
+  const lowA = enoughForStructure ? Math.min(...prices.slice(0, half)) : null;
+  const lowB = enoughForStructure ? Math.min(...prices.slice(half)) : null;
+  const highA = enoughForStructure ? Math.max(...prices.slice(0, half)) : null;
+  const highB = enoughForStructure ? Math.max(...prices.slice(half)) : null;
+  const higherLows = enoughForStructure ? lowB >= lowA : null;
+  const lowerHighs = enoughForStructure ? highB <= highA : null;
   const aboveVwap = vwap != null ? price >= vwap : null;
-  const recent3 = ts.slice(-3);
+  const recent3 = win.slice(-3);
   const aboveVwapCount3 = recent3.filter((item) =>
     Number(item.avg) > 0 && Number(item.price) >= Number(item.avg)
   ).length;
@@ -107,6 +171,8 @@ export function intradayPrimitives(trends, preClose) {
     aboveVwap, mom5Pct, volShrink, volSurge, higherLows, lowerHighs,
     aboveVwapCount3, vwapDistancePct, bounceFromLowPct, drawdownFromHighPct,
     winLow: round(winLow), winHigh: round(winHigh), bars: ts.length,
+    postTouchBars: win.length, analysisStartTime: win[0]?.time || null,
+    observedTradingMs: Math.max(0, win.length - 1) * 60 * 1000,
     lastTime: last.time,
   };
 }
@@ -120,7 +186,7 @@ export function deterministicJudge(side, prim, tech) {
   const macd = tech && tech.macd;
   const rsi = tech && typeof tech.rsi === 'number' ? tech.rsi : null;
   if (side === 'buy') {
-    if (prim.keyDistancePct <= -1.2 && prim.aboveVwap === false && prim.mom5Pct <= -0.2 && !prim.higherLows) {
+    if (prim.keyDistancePct <= -1.2 && prim.aboveVwap === false && prim.mom5Pct <= -0.2 && prim.higherLows === false) {
       return {
         decision: 'invalid', score: 3,
         hits: [`买点下方${Math.abs(prim.keyDistancePct)}%且仍在走弱，低吸逻辑失效`],
@@ -134,7 +200,7 @@ export function deterministicJudge(side, prim, tech) {
     }
     if (prim.higherLows) { score += 1; hits.push('分时低点抬高,止跌迹象'); }
     if (prim.aboveVwap) { score += 1; hits.push('站回分时均价线(VWAP)上方'); }
-    if (prim.aboveVwapCount3 === 3) { score += 0.5; hits.push('连续3分钟站在VWAP上方'); }
+    if (prim.postTouchBars >= 3 && prim.aboveVwapCount3 === 3) { score += 0.5; hits.push('连续3分钟站在VWAP上方'); }
     if (prim.mom5Pct >= 0.2) { score += 1; hits.push(`近5分钟企稳回升(+${prim.mom5Pct}%)`); }
     if (prim.bounceFromLowPct >= 0.3) { score += 0.5; hits.push(`较窗口低点反弹${prim.bounceFromLowPct}%`); }
     if (prim.sinceTouchPct >= 0.15) { score += 0.5; hits.push(`触价后回升${prim.sinceTouchPct}%`); }
@@ -153,10 +219,10 @@ export function deterministicJudge(side, prim, tech) {
   } else { // stop:止损须「真跌破」而非瞬时插针
     if (prim.keyDistancePct <= -0.3) { score += 1; hits.push(`已跌破止损线${Math.abs(prim.keyDistancePct)}%`); }
     if (prim.aboveVwap === false) { score += 1; hits.push('运行在分时均价线下方(弱势)'); }
-    if (prim.aboveVwapCount3 === 0) { score += 0.5; hits.push('连续3分钟未站回VWAP'); }
+    if (prim.postTouchBars >= 3 && prim.aboveVwapCount3 === 0) { score += 0.5; hits.push('连续3分钟未站回VWAP'); }
     if (prim.mom5Pct <= -0.3) { score += 1; hits.push(`近5分钟持续走弱(${prim.mom5Pct}%)`); }
     if (prim.sinceTouchPct <= -0.2) { score += 0.5; hits.push(`触价后继续下跌${Math.abs(prim.sinceTouchPct)}%`); }
-    if (!prim.higherLows) { score += 1; hits.push('分时不断创新低,未见企稳'); }
+    if (prim.higherLows === false) { score += 1; hits.push('分时不断创新低,未见企稳'); }
     if (prim.volSurge && prim.mom5Pct < 0) { score += 1; hits.push('放量下跌,跌破有效'); }
     if (macd && macd.cross === 'dead') { score += 0.5; hits.push('日线MACD死叉共振'); }
   }
@@ -323,7 +389,11 @@ export async function judgeConfirmation({ alert, name, advice, quote, position }
   // 盘中分时(主依据)
   let trendsData = null;
   try { trendsData = await fetchTrendsTx(a.code); } catch { trendsData = null; }
-  const prim = trendsData ? intradayPrimitives(trendsData.trends, trendsData.preClose) : null;
+  const prim = trendsData ? intradayPrimitives(
+    trendsData.trends,
+    trendsData.preClose,
+    { watchingAt: a.watchingAt },
+  ) : null;
   if (!prim) {
     return withKnowledgeAction({ decision: 'wait', reason: '分时数据不足,继续观察', side, source: 'ta' });
   }
@@ -353,7 +423,12 @@ export async function judgeConfirmation({ alert, name, advice, quote, position }
   const watchingAt = Number(a.watchingAt);
   prim.keyDistancePct = keyPrice > 0 ? round((prim.price - keyPrice) / keyPrice * 100, 2) : null;
   prim.sinceTouchPct = watchingPrice > 0 ? round((prim.price - watchingPrice) / watchingPrice * 100, 2) : null;
-  prim.observationAgeMs = watchingAt > 0 ? Math.max(0, Date.now() - watchingAt) : null;
+  const wallObservationMs = watchingAt > 0
+    ? Math.max(0, Date.now() - watchingAt)
+    : null;
+  prim.observationAgeMs = wallObservationMs == null
+    ? null
+    : Math.min(wallObservationMs, Number(prim.observedTradingMs) || 0);
   prim.observationAgeMin = prim.observationAgeMs != null ? round(prim.observationAgeMs / 60000, 1) : null;
 
   // 最短观察期内不调用 LLM；但买点明确跌破/追高失效可立即撤销。
@@ -398,6 +473,25 @@ export async function judgeConfirmation({ alert, name, advice, quote, position }
     const enriched = withKnowledgeAction(result);
     await logVerdict(a, name, prim, enriched);
     return enriched;
+  }
+
+  if (!shouldCallLlmJudge(side, det)) {
+    const fused = fuseConfirmation({
+      side,
+      deterministic: det,
+      llm: null,
+      observationAgeMs: prim.observationAgeMs,
+    });
+    const result = {
+      ...fused,
+      side,
+      signals,
+      source: 'ta',
+      actionIntent: intent,
+      knowledgeAction,
+    };
+    await logVerdict(a, name, prim, result);
+    return result;
   }
 
   // LLM 最终闸门(可回退)，最终结果由非对称融合策略裁决。

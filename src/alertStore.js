@@ -3,7 +3,10 @@ import { computeTFlows, planStore, t1StatusOf } from './planStore.js'
 import { getAdvice } from './adviceCache.js'
 import { api } from './apiBase.js'
 import { accountRequestHeaders } from './quantModel.js'
-import { confirmationPolicy } from '../shared/confirmPolicy.js'
+import {
+  resolveImmediateConfirmationAlert,
+  shouldRequestConfirmation,
+} from '../shared/confirmPolicy.js'
 import { applyT1ToAlert } from '../shared/t1AdvicePolicy.js'
 import { actionLabelOf } from '../shared/judgeAdviceContext.js'
 import {
@@ -192,6 +195,15 @@ let state = { notifications: [], unread: 0, permission: (typeof Notification !==
 const listeners = new Set()
 // 智能确认在途去重:记录正在请求 /api/confirm_signal 的预警 id,避免同一预警跨轮并发重复判定
 const _confirming = new Set()
+let _watchingFlushPromise = null
+function flushWatchingState() {
+  if (!_watchingFlushPromise) {
+    _watchingFlushPromise = Promise.resolve()
+      .then(() => planStore.flushSave())
+      .finally(() => { _watchingFlushPromise = null })
+  }
+  return _watchingFlushPromise
+}
 function emit() { state = { ...state }; listeners.forEach((l) => { try { l() } catch (e) { console.error('[store] listener error', e) } }) }
 
 // 声音：用 WebAudio 生成短促“叮”，无需外部资源。
@@ -220,7 +232,7 @@ function notify(title, body) {
   // 浏览器系统通知
   try {
     if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-      new Notification(title, { body, icon: '/app-icon-192.png', tag: 'alert-' + Date.now() })
+      new Notification(title, { body, icon: '/app-icon-192.png?v=5', tag: 'alert-' + Date.now() })
     }
   } catch { /* ignore */ }
   beep()
@@ -350,6 +362,7 @@ export const alertStore = {
         this.push({ code: a.code, name: a.name, ...notification, alertId: 'watch-' + a.id })
         notify(notification.title, notification.body)
         planStore.markAlertWatching(a.id, msg, q && q.price)
+        this._confirmAfterTouch(sideOf(a), a.id, q)
         continue
       }
 
@@ -360,14 +373,35 @@ export const alertStore = {
     }
   },
 
+  _confirmAfterTouch(side, alertId, q) {
+    if (_confirming.has(alertId)) return
+    const session = currentAccountSession()
+    if (!session.account) return
+    _confirming.add(alertId)
+    void resolveImmediateConfirmationAlert({
+      side,
+      alertId,
+      flushSave: flushWatchingState,
+      getAlerts: () => accountSessionMatches(session)
+        ? planStore.get().alerts
+        : [],
+    })
+      .then((current) => {
+        _confirming.delete(alertId)
+        if (current) this._confirmWatching(current, q)
+      })
+      .catch(() => {
+        _confirming.delete(alertId)
+      })
+  },
+
   // 观察确认中 → 请求后端 /api/confirm_signal 判定真正交易时机(即发即忘,带在途去重)
   _confirmWatching(a, q) {
     if (_confirming.has(a.id)) return // 同一预警上一次判定还没回来,跳过,避免并发重复请求
     const side = sideOf(a)
     const interval = side === 'stop' ? 20000 : side === 'sell' ? 30000 : 45000
     if (a.lastJudgeAt && Date.now() - a.lastJudgeAt < interval) return
-    const minObserveMs = confirmationPolicy(side).minObserveMs
-    if (a.watchingAt && Date.now() - a.watchingAt < minObserveMs) return
+    if (!shouldRequestConfirmation(side, a.watchingAt)) return
     const session = currentAccountSession()
     _confirming.add(a.id)
     // ★超时护栏 + 同步异常兜底:若 fetch 同步抛错(URL 异常)或请求长时间不回,

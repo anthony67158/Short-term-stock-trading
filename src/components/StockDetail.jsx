@@ -28,6 +28,7 @@ import {
 import { latestKnowledgeActionReview } from '../../shared/knowledgeAction.js'
 import {
   adviceGenerationActions,
+  adviceModeGuidance,
   stockWatchAction,
 } from '../../shared/stockDetailActions.js'
 import { AlertForm } from './AlertCenter'
@@ -729,6 +730,9 @@ export default function StockDetail({ stock, onClose }) {
     loading: Boolean(quantState?.loading),
     deepMode: quantState?.deepMode === true,
   })
+  const modeGuidance = adviceModeGuidance({
+    hasAdvice: Boolean(quantState?.advice),
+  })
 
   return (
     <div className="modal-mask" onClick={onClose}>
@@ -1358,11 +1362,41 @@ export default function StockDetail({ stock, onClose }) {
 
         {/* 固定底部动作栏：快速建议 / 深度建议 / 预警 */}
         <div className="detail-footbar">
+          <div
+            id="advice-mode-guide"
+            className={
+              'advice-mode-guide'
+              + (modeGuidance.firstGeneration ? ' first-generation' : '')
+            }
+            role="note"
+            aria-label="AI 建议使用顺序"
+          >
+            {modeGuidance.items.map((item) => (
+              <div
+                key={item.key}
+                className={
+                  `advice-mode-guide-item ${item.key}`
+                  + (
+                    modeGuidance.firstGeneration && item.key === 'deep'
+                      ? ' recommended'
+                      : ''
+                  )
+                }
+              >
+                <Icon name={item.icon} size={13} />
+                <span>
+                  <b>{item.label}</b>
+                  <small>{item.purpose}</small>
+                </span>
+              </div>
+            ))}
+          </div>
           <button
             className="btn btn-primary footbar-generate footbar-quick"
             type="button"
             disabled={adviceActions.quick.disabled}
             aria-busy={adviceActions.quick.active}
+            aria-describedby="advice-mode-guide"
             title="关闭深度思考，直接生成单模型操作建议"
             onClick={() => loadQuant(false)}
           >
@@ -1371,24 +1405,44 @@ export default function StockDetail({ stock, onClose }) {
               size={14}
               className={adviceActions.quick.active ? 'spin' : ''}
             />
-            <span>{adviceActions.quick.label}</span>
+            <span className="footbar-action-copy">
+              <span>{adviceActions.quick.label}</span>
+            </span>
           </button>
           <button
             className="btn footbar-generate footbar-deep"
             type="button"
             disabled={adviceActions.deep.disabled}
             aria-busy={adviceActions.deep.active}
-            title="开启深度思考，并进行三角色委员会复核"
+            aria-describedby="advice-mode-guide"
+            data-recommended={
+              modeGuidance.firstGeneration ? 'true' : undefined
+            }
+            title={modeGuidance.deepTitle}
             onClick={() => loadQuant(true)}
           >
-            <Icon
-              name={adviceActions.deep.icon}
-              size={14}
-              className={adviceActions.deep.active ? 'spin' : ''}
-            />
-            <span>{adviceActions.deep.label}</span>
+            <span className="footbar-action-main">
+              <Icon
+                name={adviceActions.deep.icon}
+                size={14}
+                className={adviceActions.deep.active ? 'spin' : ''}
+              />
+              <span>{adviceActions.deep.label}</span>
+              {modeGuidance.deepBadge && (
+                <small className="footbar-mode-badge">
+                  {modeGuidance.deepBadge}
+                </small>
+              )}
+            </span>
+            <small className="footbar-mode-usecase">
+              {modeGuidance.deepUseCase}
+            </small>
           </button>
-          <button className={'btn footbar-alert' + (showAlert ? ' on' : '')} onClick={() => setShowAlert((v) => !v)}>
+          <button
+            className={'btn footbar-alert' + (showAlert ? ' on' : '')}
+            aria-describedby="advice-mode-guide"
+            onClick={() => setShowAlert((v) => !v)}
+          >
             <Icon name="bell" size={14} /> {showAlert ? '收起预警' : '盯盘预警'}
           </button>
         </div>

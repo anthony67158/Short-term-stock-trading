@@ -812,7 +812,7 @@ async function genOne({
     if (typeof onProgress === 'function') {
       onProgress({
         stage: 'council',
-        phase: '军师委员会正在进行影子复核',
+        phase: '委员会正在复核候选方案，尚未发布最终结论',
       });
     }
     try {
@@ -830,6 +830,12 @@ async function genOne({
       cacheItem.councilShadow = councilShadow;
     } catch {
       councilShadow = null;
+    }
+    if (typeof onProgress === 'function') {
+      onProgress({
+        stage: 'finalize',
+        phase: '复核完成，正在发布最终结论',
+      });
     }
   }
   cacheItem.generationMetrics = {

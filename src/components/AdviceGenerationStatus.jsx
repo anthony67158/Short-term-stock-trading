@@ -116,7 +116,7 @@ export default function AdviceGenerationStatus({
         {view.showingPrevious && (
           <div className="generation-previous-note">
             <Icon name="history" size={12} />
-            <span>下方为上次已保存结果，新版本完成前不会替换。</span>
+            <span>下方是上次结论，不是本轮结果；本轮只在最终完成后一次性替换。</span>
           </div>
         )}
         {!!sources.length && (

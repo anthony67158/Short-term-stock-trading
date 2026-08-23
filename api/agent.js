@@ -12,6 +12,7 @@ import {
   fetchAiSearchReference,
 } from './_ai_search.js';
 import { ensureAiSearchConfig } from './_ai_search_config.js';
+import { internalApiOrigin } from './_internal_origin.js';
 import {
   accountEvidence,
   amountInYi,
@@ -385,9 +386,7 @@ export default async function handler(req, res) {
     };
     if (hasAccountContext) appendEvidence([accountEvidence(accountContext)]);
 
-    const proto = req.headers['x-forwarded-proto'] || 'https';
-    const host = req.headers['x-forwarded-host'] || req.headers.host;
-    const origin = `${proto}://${host}`;
+    const origin = internalApiOrigin(req);
     const sysExtra = focusStock ? `\n\n【当前用户聚焦的股票】${focusStock.name}（${focusStock.code}），如无特别说明，"这只票/它"指这只。` : '';
 
     // ===== 量化服务预热（fire-and-forget）=====

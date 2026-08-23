@@ -307,6 +307,21 @@ test('决策计划v2优先提供最终动作手数费用和策略等级', () => 
         estimatedFees: 7.5,
       },
       blockedReasons: ['策略尚未通过生产晋级，仅作为研究级条件建议'],
+      evidenceBasis: {
+        state: 'PREVIOUS_CLOSE',
+        label: '最近交易日完整数据',
+        dataAsOf: '2026-08-21(周五)',
+        phase: '休市(周末)',
+        isLive: false,
+      },
+      evidenceIssues: [{
+        source: 'quote',
+        label: '个股行情',
+        status: 'ERROR',
+        reason: '接口返回 HTTP 401',
+        impact: '无法确认当前价和价格时效',
+        recovery: '行情接口恢复后重新生成',
+      }],
       trigger: '回踩企稳',
       invalidation: '跌破9元',
     },
@@ -326,6 +341,21 @@ test('决策计划v2优先提供最终动作手数费用和策略等级', () => 
   assert.equal(view.decisionPlan.routeMode, 'SHADOW_ONLY')
   assert.equal(view.decisionPlan.outOfSample.folds, 4)
   assert.equal(view.decisionPlan.outOfSample.returnPct, -1.19)
+  assert.deepEqual(view.decisionPlan.evidenceBasis, {
+    state: 'PREVIOUS_CLOSE',
+    label: '最近交易日完整数据',
+    dataAsOf: '2026-08-21(周五)',
+    phase: '休市(周末)',
+    isLive: false,
+  })
+  assert.deepEqual(view.decisionPlan.evidenceIssues, [{
+    source: 'quote',
+    label: '个股行情',
+    status: 'ERROR',
+    reason: '接口返回 HTTP 401',
+    impact: '无法确认当前价和价格时效',
+    recovery: '行情接口恢复后重新生成',
+  }])
   assert.match(view.decisionPlan.statusText, /未通过生产晋级/)
   assert.deepEqual(
     view.levels.map((item) => item.value),

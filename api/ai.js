@@ -113,6 +113,7 @@ import {
   CURRENT_STRATEGY_EVALUATION,
 } from '../shared/strategyPromotionGate.js';
 import { councilRecordsFromData } from '../shared/advisorCouncilStore.js';
+import { internalApiOrigin } from './_internal_origin.js';
 
 function avg(arr) { return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0; }
 function std(arr) { if (arr.length < 2) return 0; const m = avg(arr); return Math.sqrt(avg(arr.map((x) => (x - m) ** 2))); }
@@ -796,9 +797,7 @@ export default async function handler(req, res) {
     if ((mode === 't_advice' || mode === 'plan' || mode === 'hold_advice' || mode === 'buy_advice' || mode === 'review') && payload.code) {
       try {
         phase('正在采集大盘 / 资金 / 分时 / 龙虎榜 / 量化数据…', 'collect');
-        const proto = req.headers['x-forwarded-proto'] || 'https';
-        const host = req.headers['x-forwarded-host'] || req.headers.host;
-        const origin = `${proto}://${host}`;
+        const origin = internalApiOrigin(req);
         const getJ = (p) => {
           // 内部 API 调用加超时保护(原来无超时——某个内部接口卡住会拖垮整个数据采集、烧光预算)
           const c = new AbortController();
@@ -808,6 +807,7 @@ export default async function handler(req, res) {
               if (!r.ok) {
                 const error = new Error(`HTTP ${r.status}`);
                 error.name = 'HTTPError';
+                error.code = `HTTP_${r.status}`;
                 throw error;
               }
               return r.json();
@@ -1564,7 +1564,12 @@ export default async function handler(req, res) {
       });
     }
 
-    phase('数据齐全，正在生成操作建议…', 'llm');
+    phase(
+      forceReasoning
+        ? '数据齐全，正在形成候选方案…'
+        : '数据齐全，正在生成操作建议…',
+      'llm',
+    );
     // LLM 超时按【剩余预算】动态给：预留 2.5s 兜底返回时间，最少给 8s。
     // 军师模式(t_advice/hold_advice/buy_advice/review/price/plan)走深度研判模型,实测常需 47s+;
     // 开启深度思考(reasoning)后需先跑思维链,参考内容多时军师级复杂题可远超 2 分钟——

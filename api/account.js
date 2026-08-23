@@ -129,6 +129,9 @@ function mergeAccountAlerts(clientAlerts, serverAlerts) {
     const withServerContext = server.judgeContext && !client.judgeContext
       ? { ...client, judgeContext: server.judgeContext }
       : client;
+    const withServerRuntime = Number(server.confirmLease?.expiresAt) > Date.now()
+      ? { ...withServerContext, confirmLease: server.confirmLease }
+      : withServerContext;
     const stamp = (alert) => Math.max(
       Number(alert?.retiredAt) || 0,
       Number(alert?.supersededAt) || 0,
@@ -142,11 +145,11 @@ function mergeAccountAlerts(clientAlerts, serverAlerts) {
     if (stamp(server) > stamp(client)) return { ...client, ...server };
     if (server.phase === 'confirmed' && client.phase === 'confirmed') {
       return {
-        ...withServerContext,
+        ...withServerRuntime,
         judgeOutcomes: { ...(client.judgeOutcomes || {}), ...(server.judgeOutcomes || {}) },
       };
     }
-    return withServerContext;
+    return withServerRuntime;
   });
 }
 

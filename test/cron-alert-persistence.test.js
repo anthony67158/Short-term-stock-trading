@@ -123,3 +123,62 @@ test('FC回写Judge确认时只持久化确定性事件不重复排队军师', a
     'plan-1',
   )
 })
+
+test('FC只接受当前租约owner的Judge结果并在落盘时清除租约', async () => {
+  const latest = {
+    nick: 'Judge租约账号',
+    data: {
+      alerts: [{
+        id: 'a1',
+        code: '600000',
+        enabled: true,
+        phase: 'watching',
+        watchingAt: 1000,
+        confirmLease: {
+          owner: 'current-owner',
+          acquiredAt: Date.now() - 1000,
+          expiresAt: Date.now() + 60000,
+        },
+      }],
+      pushSubs: [],
+      decisionLog: [],
+    },
+  }
+  const storage = memoryStorage(latest)
+  const confirmed = {
+    id: 'a1',
+    code: '600000',
+    enabled: false,
+    phase: 'confirmed',
+    watchingAt: 1000,
+    lastJudgeAt: 2000,
+    triggeredAt: 2000,
+  }
+
+  const rejected = await __test.persistProcessedAccount({
+    nick: latest.nick,
+    data: {
+      ...latest.data,
+      alerts: [confirmed],
+      decisionLog: [{ id: 'judge:a1', alertId: 'a1', at: 2000 }],
+    },
+  }, [], storage, [], new Map([['a1', 'stale-owner']]))
+
+  assert.deepEqual(rejected.acceptedLeaseIds, [])
+  assert.equal(storage.current().data.alerts[0].phase, 'watching')
+  assert.equal(storage.current().data.decisionLog.length, 0)
+
+  const accepted = await __test.persistProcessedAccount({
+    nick: latest.nick,
+    data: {
+      ...latest.data,
+      alerts: [confirmed],
+      decisionLog: [{ id: 'judge:a1', alertId: 'a1', at: 2000 }],
+    },
+  }, [], storage, [], new Map([['a1', 'current-owner']]))
+
+  assert.deepEqual(accepted.acceptedLeaseIds, ['a1'])
+  assert.equal(storage.current().data.alerts[0].phase, 'confirmed')
+  assert.equal(storage.current().data.alerts[0].confirmLease, undefined)
+  assert.equal(storage.current().data.decisionLog.length, 1)
+})

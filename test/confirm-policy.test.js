@@ -7,7 +7,11 @@ import {
   directionalOutcome,
   fuseConfirmation,
   judgeEffectStats,
+  resolveImmediateConfirmationAlert,
   resolveDecisionSide,
+  shouldCallLlmJudge,
+  shouldConfirmImmediatelyAfterTouch,
+  shouldRequestConfirmation,
 } from '../shared/confirmPolicy.js'
 
 const det = (score, decision = 'wait') => ({ score, decision, hits: [] })
@@ -71,6 +75,66 @@ test('灾难性止损不等待观察窗口或LLM确认', () => {
 
   assert.equal(result.decision, 'confirm')
   assert.equal(result.policy, 'risk-override')
+})
+
+test('前端止损触价后立即请求后端以允许强破位快通道', () => {
+  const now = Date.now()
+
+  assert.equal(shouldRequestConfirmation('stop', now - 5000, now), true)
+  assert.equal(shouldRequestConfirmation('buy', now - 5000, now), false)
+  assert.equal(
+    shouldRequestConfirmation('buy', now - 2 * 60 * 1000, now),
+    true,
+  )
+})
+
+test('只有止损在首次触价落盘后立即进入确认', () => {
+  assert.equal(shouldConfirmImmediatelyAfterTouch('stop'), true)
+  assert.equal(shouldConfirmImmediatelyAfterTouch('sell'), false)
+  assert.equal(shouldConfirmImmediatelyAfterTouch('buy'), false)
+})
+
+test('止损即时确认必须等待权威状态落盘并重读watching预警', async () => {
+  const events = []
+  const current = {
+    id: 'stop-1',
+    enabled: true,
+    phase: 'watching',
+  }
+  const resolved = await resolveImmediateConfirmationAlert({
+    side: 'stop',
+    alertId: 'stop-1',
+    flushSave: async () => {
+      events.push('saved')
+      return true
+    },
+    getAlerts: () => {
+      events.push('read')
+      return [current]
+    },
+  })
+
+  assert.deepEqual(events, ['saved', 'read'])
+  assert.equal(resolved, current)
+  assert.equal(await resolveImmediateConfirmationAlert({
+    side: 'buy',
+    alertId: 'stop-1',
+    flushSave: async () => {
+      throw new Error('买入不应立即落盘确认')
+    },
+    getAlerts: () => [current],
+  }), null)
+})
+
+test('确定性信号未达到确认门槛时不调用LLM', () => {
+  assert.equal(
+    shouldCallLlmJudge('buy', { decision: 'wait', score: 2 }),
+    false,
+  )
+  assert.equal(
+    shouldCallLlmJudge('buy', { decision: 'confirm', score: 2.5 }),
+    true,
+  )
 })
 
 test('LLM 未提供置信度时不能发买卖强提示', () => {

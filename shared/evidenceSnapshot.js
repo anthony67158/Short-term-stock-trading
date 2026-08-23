@@ -2,6 +2,66 @@ export const EVIDENCE_SCHEMA_VERSION = 'canonical-evidence.v1'
 export const EVIDENCE_COLLECTOR_VERSION = 'ai-collector.v1'
 export const EVIDENCE_SNAPSHOT_LIMIT = 80
 
+const REQUIRED_SOURCE_KEYS = Object.freeze([
+  'account',
+  'quote',
+  'market',
+  'quant',
+])
+
+const SOURCE_DIAGNOSTICS = Object.freeze({
+  account: {
+    label: '账户风险事实',
+    impact: '无法计算可用现金、当前仓位和单票风险预算',
+    recovery: '等待账号同步完成后重新生成',
+  },
+  quote: {
+    label: '个股行情',
+    impact: '无法确认当前价、涨跌幅和行情时效',
+    recovery: '等待行情接口恢复后重新生成',
+  },
+  market: {
+    label: '市场状态',
+    impact: '无法判断当前环境是否允许新增风险及目标仓位上限',
+    recovery: '等待大盘广度与量能数据恢复后重新生成',
+  },
+  quant: {
+    label: '量化预测',
+    impact: '无法验证方向概率、预期收益和目标价区间',
+    recovery: '等待K线与量化服务恢复后重新生成',
+  },
+  technical: {
+    label: '技术面',
+    impact: '无法校验趋势结构与关键支撑压力',
+    recovery: '等待K线数据恢复后重新生成',
+  },
+  funds: {
+    label: '资金面',
+    impact: '无法确认主力资金方向',
+    recovery: '等待资金流接口恢复后重新生成',
+  },
+  news: {
+    label: '消息面',
+    impact: '无法核验近期公告、政策和舆情',
+    recovery: '等待检索或公告数据恢复后重新生成',
+  },
+  dailyReport: {
+    label: '策略日报',
+    impact: '缺少全市场场次背景，只能降低该项证据权重',
+    recovery: '日报恢复后在下一轮复核补齐',
+  },
+})
+
+const SOURCE_TRACE_KEYS = Object.freeze({
+  quote: ['quote'],
+  market: ['market'],
+  quant: ['quant', 'dailyCandles'],
+  technical: ['dailyCandles', 'intraday'],
+  funds: ['stockFunds', 'sectorFlow'],
+  news: ['stockNews', 'macroNews', 'stockSearch', 'industrySearch'],
+  dailyReport: ['dailyReport'],
+})
+
 function finite(value) {
   if (value == null || value === '') return null
   const number = Number(value)
@@ -38,12 +98,51 @@ export function sourceTextVersion(prefix, text) {
   return `${String(prefix || 'source')}.${hashText(String(text || ''))}`
 }
 
-function source(available, state, dataAsOf, observedAt) {
+function source(available, state, dataAsOf, observedAt, basisLabel = null) {
   return {
     available: !!available,
     state: available ? state : 'MISSING',
     dataAsOf: dataAsOf || null,
     observedAt,
+    basisLabel: available ? (basisLabel || null) : null,
+  }
+}
+
+function marketEvidenceContext(payload, quote) {
+  const phase = String(quote?.phase || payload?.marketPhase || '')
+  if (quote?.stale === true || payload?.evidenceStale === true) {
+    return {
+      state: 'STALE',
+      basisLabel: '过期快照，仅作背景参考',
+    }
+  }
+  if (phase.includes('午间')) {
+    return {
+      state: 'SESSION_CLOSE',
+      basisLabel: '今日上午收盘快照',
+    }
+  }
+  if (phase.includes('盘后') || phase.includes('已收盘')) {
+    return {
+      state: 'DAY_CLOSE',
+      basisLabel: '今日完整收盘数据',
+    }
+  }
+  if (phase.includes('休市') || phase.includes('盘前')) {
+    return {
+      state: 'PREVIOUS_CLOSE',
+      basisLabel: '最近交易日完整数据',
+    }
+  }
+  if (quote?.live === true) {
+    return {
+      state: 'LIVE',
+      basisLabel: '当前交易时段实时数据',
+    }
+  }
+  return {
+    state: 'PREVIOUS_CLOSE',
+    basisLabel: '最近有效收盘数据',
   }
 }
 
@@ -53,8 +152,63 @@ function isoTime(value) {
 }
 
 function safeErrorCode(error) {
-  const name = String(error?.name || 'Error')
-  return /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(name) ? name : 'Error'
+  const code = String(error?.code || error?.name || 'Error')
+  return /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(code) ? code : 'Error'
+}
+
+function traceForSource(sourceKey, sourceTrace = []) {
+  const keys = SOURCE_TRACE_KEYS[sourceKey] || []
+  for (const key of keys) {
+    const trace = sourceTrace.find((item) => item?.key === key)
+    if (trace) return trace
+  }
+  return null
+}
+
+function missingReason(sourceKey, trace) {
+  const code = String(trace?.errorCode || '')
+  const http = code.match(/^HTTP_(\d{3})$/)
+  if (http) return `接口返回 HTTP ${http[1]}`
+  if (code === 'INSUFFICIENT_CANDLES') {
+    return '个股K线数据不足，量化预测未启动'
+  }
+  if (code === 'AbortError') return '数据采集超时'
+  if (trace?.status === 'OK') {
+    return '接口返回成功，但证据组装未完成'
+  }
+  if (trace?.status === 'EMPTY') return '接口已响应，但没有返回可用数据'
+  if (trace?.status === 'SKIPPED') {
+    return code
+      ? `依赖条件未满足，本轮未执行（${code}）`
+      : '依赖条件未满足，本轮未执行'
+  }
+  if (trace?.status === 'ERROR') {
+    return code ? `数据采集失败（${code}）` : '数据采集失败'
+  }
+  if (sourceKey === 'account') return '账号快照未包含完整资金或持仓事实'
+  return '本轮未取得有效数据，且没有可用采集记录'
+}
+
+function missingEvidenceDetails(missingSources, sourceTrace) {
+  return missingSources.map((sourceKey) => {
+    const trace = traceForSource(sourceKey, sourceTrace)
+    const metadata = SOURCE_DIAGNOSTICS[sourceKey] || {
+      label: sourceKey,
+      impact: '该项证据无法参与本轮决策',
+      recovery: '数据恢复后重新生成',
+    }
+    return {
+      source: sourceKey,
+      label: metadata.label,
+      status: trace?.status || 'MISSING',
+      reason: missingReason(sourceKey, trace),
+      impact: metadata.impact,
+      recovery: metadata.recovery,
+      required: REQUIRED_SOURCE_KEYS.includes(sourceKey),
+      traceKey: trace?.key || null,
+      errorCode: trace?.errorCode || null,
+    }
+  })
 }
 
 export function createEvidenceSourceTracker({
@@ -137,6 +291,7 @@ export function createCanonicalEvidenceSnapshot({
   const asOf = new Date(now).toISOString()
   const quote = payload.todayQuote || null
   const quant = payload.quant || null
+  const marketEvidence = marketEvidenceContext(payload, quote)
   const account = payload.account || {}
   const accountEvidence = {
     revision: finite(accountRevision),
@@ -172,21 +327,24 @@ export function createCanonicalEvidenceSnapshot({
     ),
     quote: source(
       !!quote,
-      quote?.live ? 'LIVE' : 'CLOSE',
+      marketEvidence.state,
       quote?.asOfLabel,
       asOf,
+      marketEvidence.basisLabel,
     ),
     market: source(
       !!payload.market,
-      'AVAILABLE',
+      marketEvidence.state,
       quote?.asOfLabel || payload.dailyReport?.day,
       asOf,
+      marketEvidence.basisLabel,
     ),
     technical: source(
       !!(payload.tech || payload.history || payload.intraday),
-      quote?.live ? 'LIVE' : 'CLOSE',
+      marketEvidence.state,
       quote?.asOfLabel,
       asOf,
+      marketEvidence.basisLabel,
     ),
     funds: source(
       !!(payload.stockFund || payload.marketFlow),
@@ -207,9 +365,10 @@ export function createCanonicalEvidenceSnapshot({
     ),
     quant: source(
       !!quant,
-      'AVAILABLE',
+      marketEvidence.state,
       quant?.inputAsOf || quant?.asOf,
       asOf,
+      marketEvidence.basisLabel,
     ),
     dailyReport: source(
       !!payload.dailyReport,
@@ -218,16 +377,19 @@ export function createCanonicalEvidenceSnapshot({
       asOf,
     ),
   }
-  const requiredSources = ['account', 'quote', 'market', 'quant']
   const missingSources = Object.entries(sources)
     .filter(([, item]) => !item.available)
     .map(([key]) => key)
-  const missingRequired = requiredSources.some((key) => !sources[key].available)
+  const missingRequiredSources = REQUIRED_SOURCE_KEYS
+    .filter((key) => !sources[key].available)
+  const missingRequired = missingRequiredSources.length > 0
+  const missingDetails = missingEvidenceDetails(
+    missingSources,
+    sourceTrace,
+  )
   const freshnessStatus = missingRequired
     ? 'PARTIAL'
-    : quote?.live
-      ? 'LIVE'
-      : 'CLOSE'
+    : marketEvidence.state
   const evidence = {
     quote: compact(quote),
     market: compact({
@@ -304,6 +466,8 @@ export function createCanonicalEvidenceSnapshot({
       phase: quote?.phase || payload.marketPhase || null,
       dataDayLabel: quote?.asOfLabel || payload.dailyReport?.day || null,
       isLive: !!quote?.live,
+      evidenceState: marketEvidence.state,
+      basisLabel: marketEvidence.basisLabel,
     },
     account: compact(accountEvidence),
     quant: {
@@ -326,6 +490,8 @@ export function createCanonicalEvidenceSnapshot({
     freshness: {
       status: freshnessStatus,
       missingSources,
+      missingRequiredSources,
+      missingDetails,
     },
     collection,
     evidence,

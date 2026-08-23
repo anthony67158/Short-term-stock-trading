@@ -9,30 +9,40 @@ const QUICK_GENERATION_STEPS = Object.freeze([
   { key: 'decision', label: '生成结论' },
 ])
 
+const DEEP_GENERATION_STEPS = Object.freeze([
+  { key: 'prepare', label: '准备上下文' },
+  { key: 'collect', label: '采集证据' },
+  { key: 'quant', label: '量化校验' },
+  { key: 'draft', label: '形成候选方案' },
+  { key: 'council', label: '委员会复核' },
+  { key: 'decision', label: '发布最终结论' },
+])
+
 function inferredGenerationStage(generation = {}) {
   const explicit = String(generation.stage || '')
   if (['queued', 'preparing'].includes(explicit)) return 'prepare'
   if (explicit === 'collect') return 'collect'
   if (explicit === 'quant') return 'quant'
   if (['theory', 'llm', 'failover'].includes(explicit)) {
-    return 'decision'
+    return generation.deepMode === true ? 'draft' : 'decision'
   }
   if (explicit === 'council') return 'council'
+  if (explicit === 'finalize') return 'decision'
   if (['done', 'failed'].includes(explicit)) return explicit
   const phase = String(generation.phase || generation.label || '')
   if (/委员会/.test(phase)) return 'council'
   if (/量化/.test(phase)) return 'quant'
   if (/采集|行情|资金|证据/.test(phase)) return 'collect'
-  if (/生成|整理|模型|端点/.test(phase)) return 'decision'
+  if (/发布最终|最终结论/.test(phase)) return 'decision'
+  if (/生成|整理|模型|端点|候选/.test(phase)) {
+    return generation.deepMode === true ? 'draft' : 'decision'
+  }
   return 'prepare'
 }
 
 export function adviceGenerationSteps(generation = {}) {
   const steps = generation.deepMode === true
-    ? [
-        ...QUICK_GENERATION_STEPS,
-        { key: 'council', label: '深度复核' },
-      ]
+    ? DEEP_GENERATION_STEPS
     : QUICK_GENERATION_STEPS
   const stage = inferredGenerationStage(generation)
   const activeIndex = steps.findIndex((step) => step.key === stage)

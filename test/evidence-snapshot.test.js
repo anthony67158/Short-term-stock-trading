@@ -86,11 +86,123 @@ test('统一证据快照包含稳定版本、来源、账户与量化上下文',
   assert.equal(JSON.stringify(snapshot).includes('不应复制进快照的长新闻正文'), false)
 })
 
+test('午间休市保留上午完整行情并标记为上午收盘快照', () => {
+  const snapshot = createCanonicalEvidenceSnapshot({
+    mode: 'hold_advice',
+    payload: {
+      ...payload,
+      todayQuote: {
+        ...payload.todayQuote,
+        phase: '午间休市',
+        asOfLabel: '2026-08-13(周四)',
+      },
+    },
+    now: Date.parse('2026-08-13T04:00:00.000Z'),
+  })
+
+  assert.equal(snapshot.sources.quote.state, 'SESSION_CLOSE')
+  assert.equal(snapshot.sources.market.state, 'SESSION_CLOSE')
+  assert.equal(snapshot.sources.technical.state, 'SESSION_CLOSE')
+  assert.equal(snapshot.sources.quote.basisLabel, '今日上午收盘快照')
+  assert.equal(snapshot.freshness.status, 'SESSION_CLOSE')
+  assert.equal(snapshot.freshness.missingSources.includes('quote'), false)
+  assert.equal(snapshot.freshness.missingSources.includes('market'), false)
+  assert.equal(snapshot.freshness.missingSources.includes('quant'), false)
+})
+
+test('盘后使用当日完整数据而不是把非实时行情判为缺失', () => {
+  const snapshot = createCanonicalEvidenceSnapshot({
+    mode: 'hold_advice',
+    payload: {
+      ...payload,
+      todayQuote: {
+        ...payload.todayQuote,
+        live: false,
+        phase: '盘后(已收盘)',
+        asOfLabel: '2026-08-13(周四)',
+      },
+    },
+    now: Date.parse('2026-08-13T08:30:00.000Z'),
+  })
+
+  assert.equal(snapshot.sources.quote.state, 'DAY_CLOSE')
+  assert.equal(snapshot.sources.market.state, 'DAY_CLOSE')
+  assert.equal(snapshot.sources.quote.basisLabel, '今日完整收盘数据')
+  assert.equal(snapshot.freshness.status, 'DAY_CLOSE')
+  assert.deepEqual(snapshot.freshness.missingRequiredSources, [])
+})
+
+test('周末使用最近交易日完整数据而不是把历史快照判为缺失', () => {
+  const snapshot = createCanonicalEvidenceSnapshot({
+    mode: 'buy_advice',
+    payload: {
+      ...payload,
+      todayQuote: {
+        ...payload.todayQuote,
+        live: false,
+        phase: '休市(周末)',
+        asOfLabel: '2026-08-21(周五)',
+      },
+    },
+    now: Date.parse('2026-08-23T02:00:00.000Z'),
+  })
+
+  assert.equal(snapshot.sources.quote.state, 'PREVIOUS_CLOSE')
+  assert.equal(snapshot.sources.market.state, 'PREVIOUS_CLOSE')
+  assert.equal(snapshot.sources.technical.state, 'PREVIOUS_CLOSE')
+  assert.equal(snapshot.sources.quote.basisLabel, '最近交易日完整数据')
+  assert.equal(snapshot.sources.quote.dataAsOf, '2026-08-21(周五)')
+  assert.equal(snapshot.freshness.status, 'PREVIOUS_CLOSE')
+  assert.deepEqual(snapshot.freshness.missingRequiredSources, [])
+})
+
+test('只有没有任何有效收盘或历史快照时才标记行情缺失', () => {
+  const snapshot = createCanonicalEvidenceSnapshot({
+    mode: 'buy_advice',
+    payload: {
+      code: '600004',
+      account: { cash: 5000, totalAssets: 20000 },
+      marketPhase: '休市(周末)',
+    },
+    now: Date.parse('2026-08-23T02:00:00.000Z'),
+  })
+
+  assert.equal(snapshot.sources.quote.state, 'MISSING')
+  assert.equal(snapshot.sources.quote.basisLabel, null)
+  assert.ok(snapshot.freshness.missingSources.includes('quote'))
+})
+
 test('缺失关键数据时明确标记PARTIAL和缺失来源', () => {
   const snapshot = createCanonicalEvidenceSnapshot({
     mode: 'buy_advice',
     payload: { code: '600002', name: '缺失样本', account: {} },
     accountRevision: 12,
+    sourceTrace: [
+      {
+        key: 'market',
+        label: '大盘情绪',
+        status: 'ERROR',
+        errorCode: 'HTTP_401',
+      },
+      {
+        key: 'quote',
+        label: '今日实时行情',
+        status: 'ERROR',
+        errorCode: 'HTTP_401',
+      },
+      {
+        key: 'dailyCandles',
+        label: '个股K线',
+        status: 'ERROR',
+        errorCode: 'HTTP_401',
+      },
+      {
+        key: 'quant',
+        label: '量化预测',
+        status: 'SKIPPED',
+        errorCode: 'INSUFFICIENT_CANDLES',
+      },
+    ],
     now: Date.parse('2026-08-13T08:00:00.000Z'),
   })
 
@@ -98,8 +210,64 @@ test('缺失关键数据时明确标记PARTIAL和缺失来源', () => {
   assert.ok(snapshot.freshness.missingSources.includes('quote'))
   assert.ok(snapshot.freshness.missingSources.includes('market'))
   assert.ok(snapshot.freshness.missingSources.includes('quant'))
+  assert.deepEqual(
+    snapshot.freshness.missingRequiredSources,
+    ['account', 'quote', 'market', 'quant'],
+  )
+  assert.match(
+    snapshot.freshness.missingDetails
+      .find((item) => item.source === 'quote').reason,
+    /HTTP 401/,
+  )
+  assert.match(
+    snapshot.freshness.missingDetails
+      .find((item) => item.source === 'quant').reason,
+    /K线.*不足/,
+  )
+  assert.ok(
+    snapshot.freshness.missingDetails
+      .every((item) => item.impact && item.recovery),
+  )
   assert.equal(snapshot.sources.account.available, false)
   assert.equal(snapshot.account.revision, 12)
+})
+
+test('采集追踪优先保留安全错误码而不是泛化错误类型', async () => {
+  const tracker = createEvidenceSourceTracker()
+  const error = Object.assign(new Error('HTTP 401'), {
+    name: 'HTTPError',
+    code: 'HTTP_401',
+  })
+
+  await assert.rejects(
+    tracker.track('quote', '今日实时行情', Promise.reject(error)),
+  )
+
+  assert.equal(tracker.snapshot()[0].errorCode, 'HTTP_401')
+})
+
+test('接口成功但载荷未写入时明确归因为证据组装失败', () => {
+  const snapshot = createCanonicalEvidenceSnapshot({
+    mode: 'buy_advice',
+    payload: {
+      code: '600003',
+      account: { cash: 5000, totalAssets: 20000 },
+      market: { up: 1, down: 1 },
+      quant: { score: 50 },
+    },
+    sourceTrace: [{
+      key: 'quote',
+      label: '今日实时行情',
+      status: 'OK',
+      errorCode: null,
+    }],
+  })
+
+  assert.match(
+    snapshot.freshness.missingDetails
+      .find((item) => item.source === 'quote').reason,
+    /组装/,
+  )
 })
 
 test('响应只在meta保存完整快照并给建议附轻量引用', () => {
