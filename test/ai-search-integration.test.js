@@ -44,28 +44,24 @@ test('军师助手日报选股统一接入AI检索配置', () => {
   }
 })
 
-test('策略日报用三类豆包检索分别补齐公司行业与全球信息', () => {
+test('策略日报按场次使用差异化网页检索计划', () => {
   const plans = buildDailyReportSearchPlans({
     day: '2026-08-20',
     session: 'noon',
-    focusStocks: [{ code: '000001', name: '平安银行' }],
-    industries: ['银行'],
   })
 
   assert.deepEqual(plans.map((item) => item.key), [
-    'company',
-    'industry',
-    'global',
+    'market',
+    'macro',
   ])
-  assert.match(plans[0].query, /公告/)
-  assert.match(plans[1].query, /行业政策/)
-  assert.match(plans[2].query, /全球市场/)
+  assert.match(plans[0].query, /上午/)
+  assert.match(plans[1].query, /盘中/)
   assert.ok(plans.every((plan) => Array.from(plan.query).length <= 64))
   assert.ok(plans.every((plan) => plan.cacheScope.startsWith('daily-')))
-  assert.ok(plans.every((plan) => plan.cacheKey.includes('-v3:')))
+  assert.ok(plans.every((plan) => plan.cacheKey.includes('-v4:')))
   assert.ok(plans.every((plan) => plan.cacheMinutes === 60))
   assert.ok(plans.every((plan) => plan.topK === 8))
-  assert.ok(plans.every((plan) => plan.version === 3))
+  assert.ok(plans.every((plan) => plan.version === 4))
 })
 
 test('关闭开关时军师助手与日报动态移除检索参考', () => {

@@ -2,9 +2,16 @@ import { visibleSearchReference } from '../../shared/aiSearchUi.js'
 import { useAiSearchConfig } from '../aiSearchConfigStore'
 import Icon from './Icon'
 
-export default function SearchReference({ reference, compact = false }) {
+export default function SearchReference({
+  reference,
+  compact = false,
+  enabled,
+}) {
   const config = useAiSearchConfig()
-  const visible = visibleSearchReference(config.enabled, reference)
+  const visible = visibleSearchReference(
+    enabled == null ? config.enabled : enabled,
+    reference,
+  )
   if (!visible) return null
 
   return (

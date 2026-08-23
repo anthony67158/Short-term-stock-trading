@@ -5,7 +5,7 @@ const SESSION_LABELS = Object.freeze({
 });
 
 export const DAILY_REPORT_SCHEMA_VERSION = 'daily-report.v2';
-export const DAILY_REPORT_SEARCH_PLAN_VERSION = 3;
+export const DAILY_REPORT_SEARCH_PLAN_VERSION = 4;
 
 function text(value, limit = 320) {
   return String(value || '')
@@ -63,44 +63,84 @@ function boundedQuery(parts) {
 export function buildDailyReportSearchPlans({
   day = '',
   session = 'morning',
-  focusStocks = [],
   industries = [],
 } = {}) {
   const sessionKey = SESSION_LABELS[session] ? session : 'morning';
-  const names = uniqueStrings(
-    focusStocks.map((item) => item?.name || item?.code),
-    3,
-  );
   const industryNames = uniqueStrings(industries, 4);
   const prefix = `${text(day, 10)} ${SESSION_LABELS[sessionKey]}`;
-  const rows = [
-    {
-      key: 'company',
-      label: '公司公告与重大事项',
-      query: boundedQuery([
-        ...names,
-        prefix,
-        '最新公告 业绩 订单 增减持 问询 重组',
-      ]),
-    },
-    {
-      key: 'industry',
-      label: '行业舆情与产业变化',
-      query: boundedQuery([
-        ...industryNames,
-        prefix,
-        '行业政策 景气 供需 价格 产业链 风险',
-      ]),
-    },
-    {
-      key: 'global',
-      label: '国内外重大事件',
-      query: boundedQuery([
-        prefix,
-        '影响A股 全球市场 美联储 地缘 汇率 原油 黄金',
-      ]),
-    },
-  ];
+  const rows = sessionKey === 'morning'
+    ? [
+        {
+          key: 'global',
+          label: '隔夜海外与商品',
+          query: boundedQuery([
+            prefix,
+            '隔夜 美股 美债 美元 人民币 原油 黄金 对A股影响',
+          ]),
+        },
+        {
+          key: 'macro',
+          label: '政策与产业催化',
+          query: boundedQuery([
+            ...industryNames,
+            prefix,
+            '昨晚 今早 政策 产业 催化 供需 价格',
+          ]),
+        },
+        {
+          key: 'institution',
+          label: '机构观点与金股',
+          query: boundedQuery([
+            prefix,
+            '券商 机构 金股 调研 资金预期',
+          ]),
+        },
+      ]
+    : sessionKey === 'noon'
+      ? [
+          {
+            key: 'market',
+            label: '上午盘面',
+            query: boundedQuery([
+              prefix,
+              'A股 上午 收盘 主线 异动 成交额',
+            ]),
+          },
+          {
+            key: 'macro',
+            label: '盘中政策与突发',
+            query: boundedQuery([
+              prefix,
+              '盘中 政策 突发 财联社 证券时报',
+            ]),
+          },
+        ]
+      : [
+          {
+            key: 'market',
+            label: '收盘复盘',
+            query: boundedQuery([
+              prefix,
+              'A股 收盘 主线 轮动 龙虎榜',
+            ]),
+          },
+          {
+            key: 'macro',
+            label: '盘后政策与产业',
+            query: boundedQuery([
+              prefix,
+              '盘后 政策 产业 公告 催化 风险',
+            ]),
+          },
+          {
+            key: 'global',
+            label: '次日海外事件',
+            query: boundedQuery([
+              prefix,
+              '今晚 明日 海外 财经日历 美联储 商品 风险事件',
+            ]),
+          },
+        ];
   return rows.map((row) => ({
     ...row,
     cacheScope: `daily-${row.key}`,
@@ -119,12 +159,16 @@ function sourceWeight(item) {
   if (item.authority === 'high') return 82;
   if (item.kind === 'flash') return 74;
   if (item.kind === 'research') return 62;
+  if (item.kind === 'web_search') return 56;
   if (item.kind === 'doubao_search') return 52;
   return 58;
 }
 
 function evidenceLevel(item) {
-  if (item.kind === 'doubao_search') return 'search-lead';
+  if (
+    item.kind === 'doubao_search'
+    || item.kind === 'web_search'
+  ) return 'search-lead';
   if (item.kind === 'announcement' || item.kind === 'policy') {
     return 'primary';
   }
@@ -145,7 +189,7 @@ function evidenceKey(item) {
 }
 
 function highQualitySearchLead(item) {
-  if (item?.kind !== 'doubao_search') return true;
+  if (!['doubao_search', 'web_search'].includes(item?.kind)) return true;
   if (['very_high', 'high'].includes(String(item.authority || ''))) {
     return true;
   }
@@ -172,6 +216,7 @@ function normalizedEvidence(item, defaults = {}) {
     title,
     summary: evidenceText(item?.summary, 360),
     date: text(item?.date, 20),
+    publishedAt: text(item?.publishedAt || item?.date, 32),
     url: safeUrl(item?.url),
     src: text(item?.src || defaults.src || '公开信息', 60),
     kind,
@@ -334,14 +379,20 @@ export function buildDailyEvidenceBundle({
   const boundedLimit = Math.max(1, Math.min(60, Number(limit) || 40));
   const searchReserve = Math.min(
     12,
-    scored.filter((item) => item.kind === 'doubao_search').length,
+    scored.filter((item) =>
+      ['doubao_search', 'web_search'].includes(item.kind)
+    ).length,
   );
   const picked = [
     ...scored
-      .filter((item) => item.kind !== 'doubao_search')
+      .filter((item) =>
+        !['doubao_search', 'web_search'].includes(item.kind)
+      )
       .slice(0, boundedLimit - searchReserve),
     ...scored
-      .filter((item) => item.kind === 'doubao_search')
+      .filter((item) =>
+        ['doubao_search', 'web_search'].includes(item.kind)
+      )
       .slice(0, searchReserve),
   ].sort((left, right) =>
     right._score - left._score
@@ -445,6 +496,41 @@ export function dailyReportGroundingIssues(draft, source = {}) {
   return issues;
 }
 
+export function sanitizeDailyReportDraft(draft, source = {}) {
+  const availableEvidence = new Set(
+    (source.evidence || []).map((item) => String(item?.id || '')),
+  );
+  const sourceNumbers = collectSourceNumbers(source);
+  const sanitizeString = (value) => String(value || '')
+    .replace(/\[?(E\d{2})\]?/g, (match, id) =>
+      availableEvidence.has(id) ? match : ''
+    )
+    .replace(
+      /-?\d+(?:\.\d+)?\s*(?:%|亿元|万元|亿|万|元|点|只|手|成|小时|分钟)/g,
+      (match) => {
+        const number = match.match(/-?\d+(?:\.\d+)?/)?.[0];
+        return number && sourceNumbers.has(String(Number(number)))
+          ? match
+          : '未核验数值';
+      },
+    )
+    .replace(/\s+/g, ' ')
+    .trim();
+  const visit = (value) => {
+    if (typeof value === 'string') return sanitizeString(value);
+    if (Array.isArray(value)) {
+      return value.map(visit).filter((item) => item !== '');
+    }
+    if (value && typeof value === 'object') {
+      return Object.fromEntries(
+        Object.entries(value).map(([key, item]) => [key, visit(item)]),
+      );
+    }
+    return value;
+  };
+  return visit(draft);
+}
+
 function draftScore(draft) {
   if (!draft || typeof draft !== 'object') return -1;
   return [
@@ -469,13 +555,17 @@ export async function generateDailyReportDraft(produce, {
     try {
       const candidate = await produce(attempt, best);
       if (draftScore(candidate) > draftScore(best)) best = candidate;
-      const complete = typeof validate === 'function'
-        ? !!validate(candidate)
+      const validation = typeof validate === 'function'
+        ? validate(candidate)
         : generatedCoreComplete(candidate);
+      const complete = validation === true || validation?.ok === true;
       diagnostics.push({
         attempt,
         parsed: !!candidate,
         complete,
+        issues: Array.isArray(validation?.issues)
+          ? validation.issues.slice(0, 12)
+          : [],
         fields: candidate && typeof candidate === 'object'
           ? Object.keys(candidate).slice(0, 16)
           : [],

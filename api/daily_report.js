@@ -1,18 +1,22 @@
 import { put, list, readJson, hasStorage } from './_blob.js';
-import { emGet, num, preflight, applyCors } from './_lib.js';
+import { preflight, applyCors } from './_lib.js';
 import { authorizePaidRequest } from './_account_auth.js';
+import { fetchLhbData, fetchMovers } from './board.js';
+import { fetchMarketSnapshot } from './market.js';
+import { fetchSectorList } from './sectors.js';
+import { fetchKlineTx } from './stock_detail.js';
+import { computeTechnicals } from './_ta.js';
 import { marketTimePromptBlock } from './_market_time.js';
 import {
-  fetchAIndices,
   fetchFinnhubNews,
   fetchMarketFlashes,
   fetchNews,
   fetchOverseas,
-  fetchStockNews,
 } from './_market_data.js';
 import {
   buildDailySummary,
   dailyReportCacheKey,
+  getDailyReportSession,
   isCompleteDailyReport,
 } from './_daily_summary.js';
 import {
@@ -30,23 +34,82 @@ import {
   DAILY_REPORT_SEARCH_PLAN_VERSION,
   buildDailyEvidenceBundle,
   buildDailyReportSearchPlans,
-  composeDailyReport,
   dailyReportGroundingIssues,
   generateDailyReportDraft,
-  isValuableDailyReport,
+  sanitizeDailyReportDraft,
 } from './_daily_report_content.js';
+import {
+  DAILY_REPORT_SCHEMA_VERSION,
+  buildDailyReportV3,
+  buildMorningCandidatePools,
+  isValuableDailyReportV3,
+} from './_daily_report_v3.js';
+import { fetchNorthboundData } from './_northbound.js';
+import {
+  fetchSearxngNews,
+  searxngSearchEnabled,
+} from './_searxng_search.js';
+import { sectorForecastStore } from './_sector_forecast_store.js';
 
 // ============ 全市场投资策略日报（早/午/晚三场次，SSE 流式 + Blob 缓存）============
 // POST /api/daily_report?session=morning|noon|evening[&refresh=1]
-// 登录请求从服务端账号读取持仓/自选；可信 Worker 可传 holdings/watchlist。
-// 公告、行情、行业新闻和豆包搜索先形成证据包，LLM 只负责受约束的研判。
+// 登录信息只用于账号级缓存；v3 不读取持仓/自选，避免重复个股军师。
+// 行情、资金、板块前瞻和新闻搜索先形成事实层，LLM 只负责受约束的研判。
 
 function nowBJ() { const n = new Date(); return new Date(n.getTime() + (n.getTimezoneOffset() + 480) * 60000); }
 function bjDayKey() { const d = nowBJ(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
 function bjMinutes() { const d = nowBJ(); return d.getHours() * 60 + d.getMinutes(); }
+function bjTimeLabel() {
+  const d = nowBJ();
+  return `${bjDayKey()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
 // 按当前时刻自动判定默认场次：<11:30 早报 / 11:30-15:00 午报 / >=15:00 晚报
 function autoSession() { const hm = bjMinutes(); if (hm < 690) return 'morning'; if (hm < 900) return 'noon'; return 'evening'; }
 const SESSION_CN = { morning: '盘前早报', noon: '午间午报', evening: '收盘晚报' };
+
+const SESSION_GENERATION = Object.freeze({
+  morning: {
+    phase: '正在形成开盘预案与候选池动作…',
+    maxTokens: 2600,
+    outputShape:
+      '{"overview":"隔夜与今日核心判断","transmission":[{"signal":"海外/商品信号","reasoning":"传导到A股的推理","action":"开盘如何验证","evidenceIds":["E01"]}],"sectorViews":[{"name":"候选板块","logic":"催化+资金/模型逻辑","action":"可执行条件","evidenceIds":["E01"]}],"stockViews":[{"code":"候选股代码","logic":"入池逻辑","action":"围绕给定价位的动作","evidenceIds":["E01"]}],"openingPlan":"开盘验证顺序","strategy":"整体执行纪律","risks":["风险"]}',
+    requirements:
+      '早报只回答今日预判与预案。逐一覆盖给定板块池和个股池；关键价位完全沿用输入，不得输出或改写价格。海外传导、催化、机构观点必须说明推理与开盘验证条件。不得复述用户持仓。',
+    required: (draft) => !!(
+      String(draft?.overview || '').trim()
+      && String(draft?.strategy || '').trim()
+      && Array.isArray(draft?.sectorViews)
+      && Array.isArray(draft?.stockViews)
+    ),
+  },
+  noon: {
+    phase: '正在核验早报并形成午后纠偏动作…',
+    maxTokens: 1500,
+    outputShape:
+      '{"overview":"上午盘面结论","afternoonActions":[{"target":"板块或个股","action":"加|减|观望","condition":"午后执行条件","invalidation":"取消条件","evidenceIds":["E01"]}],"strategy":"午后总策略","risks":["风险"]}',
+    requirements:
+      '午报只回答确认与纠偏，保持精简。必须基于输入中的早报验证结果、上午量能、资金前五板块和异动股给出加/减/观望条件；不得重新写一份新闻综述。',
+    required: (draft) => !!(
+      String(draft?.overview || '').trim()
+      && String(draft?.strategy || '').trim()
+      && Array.isArray(draft?.afternoonActions)
+    ),
+  },
+  evening: {
+    phase: '正在复盘早报并形成次日观察清单…',
+    maxTokens: 1900,
+    outputShape:
+      '{"overview":"全天主线与早报得失","nextDayPlan":[{"target":"次日方向","action":"次日动作","trigger":"触发条件","invalidation":"证伪条件","evidenceIds":["E01"]}],"overseasWatch":[{"event":"今晚或明日海外事件","watch":"对A股传导与观察项","evidenceIds":["E01"]}],"strategy":"次日总策略","risks":["风险"]}',
+    requirements:
+      '晚报只回答复盘与次日预判。结合早报验证、全天量能、板块主线、龙虎榜和北向真实成交数据；北向净买额未披露时不得推断流入流出。龙虎榜单日席位行为只能作为结构证据。',
+    required: (draft) => !!(
+      String(draft?.overview || '').trim()
+      && String(draft?.strategy || '').trim()
+      && Array.isArray(draft?.nextDayPlan)
+      && Array.isArray(draft?.overseasWatch)
+    ),
+  },
+});
 export function dailyReportAccountNick(accountAuth, body = {}) {
   if (accountAuth?.account?.nick) {
     return String(accountAuth.account.nick).trim();
@@ -54,51 +117,6 @@ export function dailyReportAccountNick(accountAuth, body = {}) {
   if (!accountAuth?.trusted) return '';
   const nick = String(body?.accountNick || '').trim();
   return nick && nick.length <= 80 ? nick : '';
-}
-
-function cleanFocusStock(item, scope) {
-  const code = String(item?.code || '').trim();
-  if (!/^\d{6}$/.test(code)) return null;
-  const clean = (value, limit) => String(value || '')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/[\u0000-\u001f\u007f]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, limit);
-  return {
-    code,
-    name: clean(item?.name || code, 40) || code,
-    industry: clean(item?.industry, 40),
-    concept: clean(item?.concept, 40),
-    scope,
-    star: item?.star === true,
-  };
-}
-
-export function dailyReportFocusStocks(accountAuth, body = {}) {
-  const accountData = accountAuth?.account?.data;
-  const holdings = accountData
-    ? accountData.holding
-    : body.holdings;
-  const watchlist = accountData
-    ? accountData.plan
-    : body.watchlist;
-  const seen = new Set();
-  const result = [];
-  const add = (item, scope) => {
-    const stock = cleanFocusStock(item, scope);
-    if (!stock || seen.has(stock.code)) return;
-    seen.add(stock.code);
-    result.push(stock);
-  };
-  (Array.isArray(holdings) ? holdings : []).forEach((item) =>
-    add(item, 'holding')
-  );
-  (Array.isArray(watchlist) ? watchlist : [])
-    .slice()
-    .sort((left, right) => Number(right?.star) - Number(left?.star))
-    .forEach((item) => add(item, 'watchlist'));
-  return result.slice(0, 12);
 }
 
 // 策略日报使用独立 daily 角色端点，不与智能体助手争抢连接。
@@ -136,7 +154,6 @@ export default async function handler(req, res) {
     const START = Date.now();
     const BUDGET = 115000;
     const remain = () => BUDGET - (Date.now() - START);
-    const focusStocks = dailyReportFocusStocks(accountAuth, body);
     const session = (req.query.session && SESSION_CN[req.query.session]) ? req.query.session : autoSession();
     const refresh = req.query.refresh === '1';
     const day = bjDayKey();
@@ -161,8 +178,10 @@ export default async function handler(req, res) {
           if (
             cached
             && isCompleteDailyReport(cached)
+            && cached.schemaVersion === DAILY_REPORT_SCHEMA_VERSION
             && cached.searchEnabled === aiSearchConfig.enabled
             && Number(cached.searchConfigUpdatedAt || 0) === Number(aiSearchConfig.updatedAt || 0)
+            && cached.searxngEnabled === searxngSearchEnabled()
             && Number(cached.searchPlanVersion || 0)
               === DAILY_REPORT_SEARCH_PLAN_VERSION
           ) {
@@ -182,61 +201,88 @@ export default async function handler(req, res) {
         ? '正在采集市场数据并调用豆包搜索补盲…'
         : '正在采集 A股板块资金 / 涨停 / 指数…',
     );
-    const proto = req.headers['x-forwarded-proto'] || 'https';
-    const host = req.headers['x-forwarded-host'] || req.headers.host;
-    const origin = `${proto}://${host}`;
-    const getJ = (p) => { const c = new AbortController(); const to = setTimeout(() => c.abort(), 8000); return fetch(origin + p, { headers: { 'x-internal': '1' }, signal: c.signal }).then((r) => r.json()).catch(() => null).finally(() => clearTimeout(to)); };
     const searchPlans = buildDailyReportSearchPlans({
       day,
       session,
-      focusStocks,
-      industries: focusStocks.flatMap((item) => [
-        item.industry,
-        item.concept,
-      ]),
     });
 
     const [
       sectors,
-      aIdx,
+      marketSnapshot,
       overseas,
-      limitPool,
+      sectorForecast,
+      morningBaseline,
+    ] = await Promise.all([
+      fetchSectorList({
+        type: 'industry',
+        sort: 'main',
+      }).catch(() => null),
+      fetchMarketSnapshot().catch(() => null),
+      fetchOverseas(),
+      Promise.all([
+        sectorForecastStore.readLatest().catch(() => null),
+        sectorForecastStore.readIntraday().catch(() => null),
+      ]).then(([latest, intraday]) =>
+        session === 'noon' ? (intraday || latest) : latest
+      ),
+      session === 'morning'
+        ? Promise.resolve(null)
+        : getDailyReportSession(day, 'morning', accountNick),
+    ]);
+    phase('核心行情已就绪，正在采集本场资金与事件…');
+    const [
+      moversInflow,
+      moversSpeed,
+      moversOutflow,
+      lhb,
+      northbound,
+    ] = await Promise.all([
+      session === 'noon'
+        ? fetchMovers('inflow').catch(() => null)
+        : Promise.resolve(null),
+      session === 'noon'
+        ? fetchMovers('speed').catch(() => null)
+        : Promise.resolve(null),
+      session === 'noon'
+        ? fetchMovers('outflow').catch(() => null)
+        : Promise.resolve(null),
+      session === 'evening'
+        ? fetchLhbData().catch(() => null)
+        : Promise.resolve(null),
+      session === 'evening'
+        ? fetchNorthboundData()
+        : Promise.resolve(null),
+    ]);
+    phase('硬数据已核对，正在补充政策与事件证据…');
+    const [
       sectorNews,
       macroNews,
-      focusStockNews,
-      holdingQuotes,
       marketFlashes,
       finnhubNews,
       searchResults,
     ] = await Promise.all([
-      getJ('/api/sectors?type=industry&sort=main'),
-      fetchAIndices(emGet, num),
-      fetchOverseas(),
-      getJ('/api/board?type=limitup&kind=zt'),
-      Promise.all(SECTORS.map((sector) =>
-        fetchNews(sector.kw, 3).then((news) => ({
-          key: sector.key,
-          name: sector.name,
-          keywords: sector.kw.split(/\s+/).filter(Boolean),
-          news,
-        }))
-      )),
-      fetchNews('宏观 政策 央行 A股 美联储 关税', 6),
-      focusStocks.length
-        ? Promise.all(focusStocks.map((stock) =>
-            fetchStockNews(
-              stock.name || stock.code,
-              5,
-              stock.code,
-            ).then((news) => ({ ...stock, news }))
+      session === 'morning'
+        ? Promise.all(SECTORS.map((sector) =>
+            fetchNews(sector.kw, 3).then((news) => ({
+              key: sector.key,
+              name: sector.name,
+              keywords: sector.kw.split(/\s+/).filter(Boolean),
+              news,
+            }))
           ))
         : Promise.resolve([]),
-      focusStocks.length ? getJ(`/api/quote?codes=${focusStocks.map((stock) => stock.code).join(',')}&_t=${Date.now()}`) : Promise.resolve(null),
+      fetchNews(
+        session === 'morning'
+          ? '昨晚 今早 宏观 政策 央行 A股 产业催化'
+          : session === 'noon'
+            ? '今日 上午 A股 政策 突发'
+            : '今日 收盘 A股 政策 产业 明日事件',
+        session === 'noon' ? 4 : 8,
+      ),
       fetchMarketFlashes(18),
-      fetchFinnhubNews(6),
-      Promise.all(searchPlans.map(async (plan) => ({
-        ...plan,
-        result: await fetchAiSearchReference({
+      session === 'noon' ? Promise.resolve([]) : fetchFinnhubNews(6),
+      Promise.all(searchPlans.flatMap((plan) => [
+        fetchAiSearchReference({
           query: plan.query,
           cacheScope: plan.cacheScope,
           cacheKey: plan.cacheKey,
@@ -244,64 +290,140 @@ export default async function handler(req, res) {
         }, {
           runtimeConfig: aiSearchConfig,
           topK: plan.topK,
-        }),
-      }))),
+        }).then((result) => ({
+          ...plan,
+          provider: 'doubao-global',
+          result,
+        })),
+        fetchSearxngNews(plan.query, {
+          limit: plan.topK,
+        }).then((result) => ({
+          ...plan,
+          provider: 'searxng',
+          result,
+        })),
+      ])),
     ]);
     const overseasSafe = (overseas && typeof overseas === 'object') ? overseas : {};
     if (!Array.isArray(overseasSafe.indices)) overseasSafe.indices = [];
     if (!Array.isArray(overseasSafe.commodities)) overseasSafe.commodities = [];
 
-    const slist = (sectors && sectors.list) || [];
-    const sSorted = [...slist].sort((a, b) => b.mainInflow - a.mainInflow);
-    const yi = (v) => +(v / 1e8).toFixed(2);
-    const sectorFlow = {
-      top: sSorted.slice(0, 8).map((s) => ({ name: s.name, pct: s.pct, inflowYi: yi(s.mainInflow), lead: s.leadName })),
-      bottom: sSorted.slice(-6).reverse().map((s) => ({ name: s.name, pct: s.pct, inflowYi: yi(s.mainInflow) })),
-    };
-    const limitCount = ((limitPool && limitPool.list) || []).length;
-
-    const hqMap = {};
     const marketNumber = (value) => {
       if (value == null || value === '' || value === '-') return null;
       const parsed = Number(value);
       return Number.isFinite(parsed) ? parsed : null;
     };
-    ((holdingQuotes && holdingQuotes.list) || []).forEach((q) => {
-      if (!q || !q.code) return;
-      const pct = marketNumber(q.pct);
-      hqMap[q.code] = {
-        现价: marketNumber(q.price),
-        今日涨跌幅: pct,
-        状态: q.isLimitUp
-          ? '今日涨停'
-          : q.isLimitDown
-            ? '今日跌停'
-            : pct == null
-              ? '行情涨跌数据缺失'
-              : pct >= 7
-                ? '今日大涨'
-                : pct <= -7
-                  ? '今日大跌'
-                  : pct >= 0 ? '今日上涨' : '今日下跌',
-        量比: q.volRatio ?? null,
-        换手率: q.turnover ?? null,
-      };
-    });
+    const slist = (sectors && sectors.list) || [];
+    const sSorted = [...slist].sort((a, b) =>
+      (marketNumber(b.mainInflow) || 0)
+      - (marketNumber(a.mainInflow) || 0)
+    );
+    const yi = (value) => {
+      const parsed = marketNumber(value);
+      return parsed == null ? null : +(parsed / 1e8).toFixed(2);
+    };
+    const sectorFlow = {
+      top: sSorted
+        .filter((item) => marketNumber(item.mainInflow) != null)
+        .slice(0, 8)
+        .map((item) => ({
+          name: item.name,
+          pct: marketNumber(item.pct),
+          inflowYi: yi(item.mainInflow),
+          mainRatio: marketNumber(item.mainRatio),
+          amountYi: yi(item.amount),
+          lead: item.leadName,
+          leadCode: item.leadCode,
+        })),
+      bottom: sSorted
+        .filter((item) => marketNumber(item.mainInflow) != null)
+        .slice(-6)
+        .reverse()
+        .map((item) => ({
+          name: item.name,
+          pct: marketNumber(item.pct),
+          inflowYi: yi(item.mainInflow),
+          mainRatio: marketNumber(item.mainRatio),
+          amountYi: yi(item.amount),
+          lead: item.leadName,
+          leadCode: item.leadCode,
+        })),
+    };
+    const limitCount = marketNumber(marketSnapshot?.breadth?.limitUp);
 
+    const basePools = buildMorningCandidatePools({
+      sectorForecast,
+      sectorFlow,
+    });
+    const technicalRows = session === 'morning'
+      ? await Promise.all(basePools.stocks.map(async (stock) => {
+          const detail = await fetchKlineTx(stock.code, '101', 120)
+            .catch(() => null);
+          return [
+            stock.code,
+            detail?.candles?.length
+              ? computeTechnicals(detail.candles, '日')
+              : null,
+          ];
+        }))
+      : [];
+    const candidatePools = buildMorningCandidatePools({
+      sectorForecast,
+      sectorFlow,
+      technicalsByCode: Object.fromEntries(technicalRows),
+    });
     const dataBlock = {
-      session: SESSION_CN[session], day,
-      aIndices: aIdx, overseas: overseasSafe.indices, commodities: overseasSafe.commodities,
-      sectorFlow, limitUpCount: limitCount,
-      focusStocks: focusStocks.map((stock) => ({
-        名称: stock.name,
-        代码: stock.code,
-        范围: stock.scope === 'holding' ? '持仓' : '自选',
-        今日行情: hqMap[stock.code] || null,
-      })),
+      session: SESSION_CN[session],
+      day,
+      asOf: bjTimeLabel(),
+      aIndices: marketSnapshot?.indices || [],
+      overseas: overseasSafe.indices,
+      commodities: overseasSafe.commodities,
+      market: session === 'noon'
+        ? {
+            ...(marketSnapshot?.breadth || {}),
+            volVsAvg5: null,
+            volLevel: '上午累计',
+            volumeBasis: '上午累计成交额，不与近5个完整交易日直接比较',
+          }
+        : {
+            ...(marketSnapshot?.breadth || {}),
+            volumeBasis: '全日成交额与近5个完整交易日比较',
+          },
+      sectorFlow,
+      sectorSnapshot: (session === 'morning'
+        ? []
+        : (sectorForecast?.sectors || []).slice(0, 12))
+        .map((item) => ({
+          code: item.code,
+          name: item.name,
+          rank: item.rank,
+          actionability: item.actionability,
+          raw: {
+            currentPct: item.raw?.currentPct,
+            mainInflow: item.raw?.mainInflow,
+            mainRatio: item.raw?.mainRatio,
+          },
+        })),
+      limitUpCount: limitCount,
+      movers: {
+        inflow: (moversInflow?.list || []).slice(0, 8),
+        speed: (moversSpeed?.list || []).slice(0, 8),
+        outflow: (moversOutflow?.list || []).slice(0, 8),
+      },
+      lhb: lhb?.ok
+        ? {
+            date: lhb.date,
+            updatedAt: lhb.updatedAt,
+            stocks: (lhb.stocks || []).slice(0, 12),
+            seats: (lhb.seats || []).slice(0, 10),
+          }
+        : null,
+      northbound,
+      candidatePools,
     };
     const evidence = buildDailyEvidenceBundle({
       data: dataBlock,
-      stockNews: focusStockNews,
       macroNews,
       marketFlashes: [
         ...(marketFlashes || []),
@@ -311,59 +433,81 @@ export default async function handler(req, res) {
       searchResults,
     });
     const searchItems = evidence.items.filter((item) =>
-      item.kind === 'doubao_search'
+      ['doubao_search', 'web_search'].includes(item.kind)
     );
     const searchReference = searchItems.length
       ? {
           dimension: 'search',
-          label: '豆包检索参考',
+          label: '网页检索参考',
           status: searchResults
-            .map((item) => item.result?.status)
+            .map((item) => `${item.provider}:${item.result?.status || 'unknown'}`)
             .filter(Boolean)
             .join(','),
           fetchedAt: new Date().toISOString(),
           sources: searchItems.slice(0, 12),
         }
       : null;
-    const sourcePayload = {
-      ...dataBlock,
-      evidence: evidence.items.map((item) => ({
+    const evidenceCategories = session === 'morning'
+      ? ['macro', 'industry', 'global', 'institution']
+      : ['market', 'macro', 'global'];
+    const promptEvidence = evidence.items
+      .filter((item) =>
+        evidenceCategories.includes(item.category)
+        || item.evidenceLevel === 'primary'
+      )
+      .slice(0, session === 'morning' ? 24 : session === 'noon' ? 18 : 22)
+      .map((item) => ({
         id: item.id,
         category: item.categoryLabel,
         title: item.title,
         summary: item.summary,
         source: item.src,
-        date: item.date,
+        publishedAt: item.publishedAt || item.date,
         evidenceLevel: item.evidenceLevel,
         stockCode: item.stockCode || undefined,
         sector: item.sector || undefined,
-      })),
+      }));
+    const sourcePayload = {
+      session: dataBlock.session,
+      day: dataBlock.day,
+      asOf: dataBlock.asOf,
+      aIndices: dataBlock.aIndices,
+      ...(session === 'morning'
+        ? {
+            overseas: dataBlock.overseas,
+            commodities: dataBlock.commodities,
+            candidatePools: dataBlock.candidatePools,
+          }
+        : session === 'noon'
+          ? {
+              market: dataBlock.market,
+              sectorFlow: dataBlock.sectorFlow,
+              sectorSnapshot: dataBlock.sectorSnapshot,
+              movers: dataBlock.movers,
+            }
+          : {
+              market: dataBlock.market,
+              sectorFlow: dataBlock.sectorFlow,
+              sectorSnapshot: dataBlock.sectorSnapshot,
+              lhb: dataBlock.lhb,
+              northbound: dataBlock.northbound,
+            }),
+      evidence: promptEvidence,
+      morningBaseline: morningBaseline
+        ? {
+            day: morningBaseline.day,
+            overview: morningBaseline.report?.overview,
+            sectorPool: morningBaseline.report?.analysis?.sectorPool || [],
+            stockPool: morningBaseline.report?.analysis?.stockPool || [],
+          }
+        : null,
     };
-    const SYS = `你是严谨的A股策略研究员。只依据给定证据撰写短线策略日报，不得补写未提供的事实、价格、公告或事件。公司公告和监管政策为一级证据，行情与权威媒体为交叉证据，豆包搜索摘要只能作为待核验线索。每条事件、个股和行业判断必须引用有效的证据编号E01、E02；证据冲突时明确写出冲突，不强行给方向。红涨绿跌。只输出合法JSON，不要输出markdown或思维链。`;
+    const SYS = `你是严谨的A股短线策略研究员。硬数据与分析师观点必须分离：输入中的行情、资金、龙虎榜、北向成交和技术价位是只读事实，不得篡改、补写或推算缺失值。网页搜索摘要只用于发现线索，不能替代原文。每个软判断必须给出推理、可执行条件和有效证据编号；没有对应证据时明确写待验证。红涨绿跌。只输出合法JSON，不输出markdown或思维链。`;
     const timeCtx = marketTimePromptBlock();
-    phase(
-      dailyLlmReady
-        ? `已整理${evidence.stats.total}条证据，准备分段研判…`
-        : `已整理${evidence.stats.total}条证据，正在生成规则化摘要…`,
-    );
-    const evidenceFor = (categories, limit = 22) =>
-      evidence.items
-        .filter((item) =>
-          categories.includes(item.category)
-          || item.evidenceLevel === 'primary'
-        )
-        .slice(0, limit)
-        .map((item) => ({
-          id: item.id,
-          category: item.categoryLabel,
-          title: item.title,
-          summary: item.summary,
-          source: item.src,
-          date: item.date,
-          evidenceLevel: item.evidenceLevel,
-          stockCode: item.stockCode || undefined,
-          sector: item.sector || undefined,
-        }));
+    const generationConfig = SESSION_GENERATION[session];
+    phase(dailyLlmReady
+      ? generationConfig.phase
+      : '模型暂不可用，正在生成硬数据规则版…');
     const callPart = (
       payload,
       outputShape,
@@ -399,7 +543,11 @@ export default async function handler(req, res) {
             maxTokens,
             timeoutMs: Math.max(
               12000,
-              Math.min(attempt === 1 ? 36000 : 28000, remain() - 4000),
+              Math.min(
+                attempt === 1 && session === 'morning' ? 60000
+                  : attempt === 1 ? 36000 : 30000,
+                remain() - 4000,
+              ),
             ),
             reasoning: false,
             forceNoReason: true,
@@ -414,115 +562,55 @@ export default async function handler(req, res) {
           const parsed = content.trim()
             ? parseLLMJson(content).value
             : null;
-          const draft = parsed?.report || parsed;
+          const draft = sanitizeDailyReportDraft(
+            parsed?.report || parsed,
+            payload,
+          );
           done(!!draft);
           return draft;
         },
         {
           maxAttempts,
-          validate: (draft) =>
-            required(draft)
-            && dailyReportGroundingIssues(draft, payload).length === 0,
+          validate: (draft) => {
+            const issues = dailyReportGroundingIssues(draft, payload);
+            if (!required(draft)) issues.unshift('missing-required-fields');
+            return {
+              ok: issues.length === 0,
+              issues,
+            };
+          },
         },
       );
     const emptyGeneration = {
-          draft: null,
-          complete: false,
-          attempts: 0,
-          diagnostics: [{
-            attempt: 0,
-            parsed: false,
-            complete: false,
-            error: 'daily-role-unavailable',
-          }],
-        };
-    const decisionPayload = {
-      session: sourcePayload.session,
-      day: sourcePayload.day,
-      aIndices: sourcePayload.aIndices,
-      overseas: sourcePayload.overseas,
-      commodities: sourcePayload.commodities,
-      sectorFlow: sourcePayload.sectorFlow,
-      limitUpCount: sourcePayload.limitUpCount,
-      evidence: evidenceFor(['market', 'macro', 'global'], 20),
+      draft: null,
+      complete: false,
+      attempts: 0,
+      diagnostics: [{
+        attempt: 0,
+        parsed: false,
+        complete: false,
+        error: 'daily-role-unavailable',
+      }],
     };
-    const focusPayload = {
-      session: sourcePayload.session,
-      day: sourcePayload.day,
-      focusStocks: sourcePayload.focusStocks,
-      sectorFlow: sourcePayload.sectorFlow,
-      evidence: evidenceFor(['company', 'industry'], 24),
-    };
-    phase(
-      dailyLlmReady
-        ? '正在核对重点个股公告与行业证据…'
-        : '正在整理重点个股与行业证据…',
-    );
-    const focusGeneration = dailyLlmReady
+    const draftResult = dailyLlmReady
       ? await callPart(
-          focusPayload,
-          '{"holdings":[{"code":"股票代码","name":"股票名称","info":"公告和重要信息摘要","impact":"对短线计划的影响","evidenceIds":["E01"]}],"sectors":[{"name":"板块名","rating":"看多|中性|看空","view":"证据结论","strategy":"操作条件","risk":"主要风险","evidenceIds":["E01"]}]}',
-          'holdings逐一覆盖focusStocks中的持仓和自选；无新增公告就明确写无新增，不得从公告标题推断未披露的业绩数字或会议内容；行业最多6项。',
-          2200,
-          (draft) => !!(
-            Array.isArray(draft?.sectors)
-            && (
-              !focusStocks.length
-              || Array.isArray(draft?.holdings)
-            )
-          ),
-          1,
+          sourcePayload,
+          generationConfig.outputShape,
+          generationConfig.requirements,
+          generationConfig.maxTokens,
+          generationConfig.required,
         )
       : emptyGeneration;
-    phase(
-      dailyLlmReady
-        ? '重点个股已核对，正在形成市场策略…'
-        : '正在生成规则化市场策略…',
-    );
-    const coreGeneration = dailyLlmReady
-      ? await callPart(
-          decisionPayload,
-          '{"overview":"市场总览","overseas":"海外与商品影响","events":[{"title":"重大事件","category":"公司公告|行业舆情|国内宏观|全球事件","impact":"对A股或相关行业的影响","evidenceIds":["E01"]}],"strategy":"仓位、节奏、主攻与回避条件","risks":["风险1","风险2"]}',
-          '筛出最多5项真正影响未来1至5个交易日的事件；盘前核验隔夜与竞价，午间核验上午资金，收盘制定下一交易日预案；不得自创指数点位或仓位比例。',
-          1800,
-          (draft) => !!(
-            String(draft?.overview || '').trim()
-            && String(draft?.strategy || '').trim()
-            && Array.isArray(draft?.events)
-            && Array.isArray(draft?.risks)
-          ),
-        )
-      : emptyGeneration;
-    const draft = {
-      ...(coreGeneration.complete ? coreGeneration.draft : {}),
-      ...(focusGeneration.complete ? focusGeneration.draft : {}),
-    };
-    const draftResult = {
-      draft,
-      complete: coreGeneration.complete && focusGeneration.complete,
-      attempts: coreGeneration.attempts + focusGeneration.attempts,
-      diagnostics: [
-        ...coreGeneration.diagnostics.map((item) => ({
-          ...item,
-          part: 'market',
-        })),
-        ...focusGeneration.diagnostics.map((item) => ({
-          ...item,
-          part: 'focus',
-        })),
-      ],
-    };
-    const composed = composeDailyReport({
+    const composed = buildDailyReportV3({
       day,
       session,
-      sessionCn: SESSION_CN[session],
       data: dataBlock,
       evidence,
-      focusStocks,
-      draft,
+      morningReport: morningBaseline,
+      draft: draftResult.complete ? draftResult.draft : null,
       generation: draftResult,
     });
-    if (!isValuableDailyReport(composed)) {
+    if (!isValuableDailyReportV3(composed)) {
       emit('result', {
         ok: false,
         code: 'DAILY_EVIDENCE_INSUFFICIENT',
@@ -538,6 +626,7 @@ export default async function handler(req, res) {
       cached: false,
       updatedAt: Date.now(),
       searchEnabled: aiSearchConfig.enabled === true,
+      searxngEnabled: searxngSearchEnabled(),
       searchConfigUpdatedAt: Number(aiSearchConfig.updatedAt) || 0,
       searchPlanVersion: DAILY_REPORT_SEARCH_PLAN_VERSION,
       searchReference,

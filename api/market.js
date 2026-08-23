@@ -67,97 +67,105 @@ export function summarizeMarketBreadth(indexRows = [], limits = {}) {
   }
 }
 
+export async function fetchMarketSnapshot() {
+  const idxSecids = '1.000001,0.399001,0.399006,0.899050';
+  const idxFields = 'f2,f3,f4,f12,f14,f6,f104,f105,f106';
+  const idxPath =
+    `/api/qt/ulist.np/get?fltt=2&invt=2&secids=${encodeURIComponent(idxSecids)}` +
+    `&fields=${idxFields}`;
+
+  // 涨跌停必须用真实池；统一涨跌幅阈值会误判创业板和科创板。
+  const [idxJson, ztPool, dtPool, shK, szK] = await Promise.all([
+    emGet(idxPath).catch(() => null),
+    fetchLimitPool('zt').catch(() => null),
+    fetchLimitPool('dt').catch(() => null),
+    emGet(`/api/qt/stock/kline/get?secid=1.000001&fields1=f1&fields2=f51,f57&klt=101&fqt=1&end=20500101&lmt=6`, { his: true }).catch(() => null),
+    emGet(`/api/qt/stock/kline/get?secid=0.399001&fields1=f1&fields2=f51,f57&klt=101&fqt=1&end=20500101&lmt=6`, { his: true }).catch(() => null),
+  ]);
+
+  const indexRows = (idxJson && idxJson.data && idxJson.data.diff) || [];
+  const indices = indexRows.map((d) => ({
+    code: d.f12,
+    name: d.f14,
+    price: num(d.f2),
+    pct: num(d.f3),
+    chg: num(d.f4),
+    amount: num(d.f6),
+  }));
+
+  const marketBreadth = summarizeMarketBreadth(
+    indexRows,
+    {
+      limitUp: ztPool?.total,
+      limitDown: dtPool?.total,
+    },
+  );
+  // 指数成交额只取上证+深证，创业板已包含在深市内，北证单列不混入两市口径。
+  const indexAmount = indices
+    .filter((item) => item.code === '000001' || item.code === '399001')
+    .reduce((total, item) => total + (Number(item.amount) || 0), 0);
+  const indexAmountYi = indexAmount > 0
+    ? +(indexAmount / 1e8).toFixed(0)
+    : null;
+
+  // 两市成交额 + 近5日均量对比，盘中调用方必须标明这是累计值。
+  const klAmt = (kJson) => {
+    const kl = (kJson && kJson.data && kJson.data.klines) || [];
+    return kl.map((s) => {
+      const parts = String(s).split(',');
+      return +parts[1] || 0;
+    });
+  };
+  const shAmts = klAmt(shK), szAmts = klAmt(szK);
+  let marketAmountYi = indexAmountYi, volVsAvg5 = null, volLevel = null;
+  if (shAmts.length && szAmts.length) {
+    const n = Math.min(shAmts.length, szAmts.length);
+    const sum2 = (i) =>
+      (shAmts[shAmts.length - n + i] || 0)
+      + (szAmts[szAmts.length - n + i] || 0);
+    const todayAmt = sum2(n - 1);
+    const previous = [];
+    for (let i = 0; i < n - 1; i++) previous.push(sum2(i));
+    const avg5 = previous.length
+      ? previous.slice(-5).reduce((a, b) => a + b, 0)
+        / Math.min(5, previous.length)
+      : 0;
+    if (todayAmt > 0) marketAmountYi = +(todayAmt / 1e8).toFixed(0);
+    if (todayAmt > 0 && avg5 > 0) {
+      volVsAvg5 = +((todayAmt / avg5 - 1) * 100).toFixed(1);
+      volLevel = volVsAvg5 >= 15
+        ? '放量'
+        : volVsAvg5 <= -15 ? '缩量' : '平量';
+    }
+  }
+
+  return {
+    ok: true,
+    updatedAt: Date.now(),
+    indices,
+    breadth: {
+      up: marketBreadth.up,
+      down: marketBreadth.down,
+      flat: marketBreadth.flat,
+      limitUp: marketBreadth.limitUp,
+      limitDown: marketBreadth.limitDown,
+      total: marketBreadth.total,
+      complete: marketBreadth.complete,
+      amountYi: marketAmountYi,
+      volVsAvg5,
+      volLevel,
+    },
+  };
+}
+
 // 大盘情绪：指数 + 涨跌家数 + 涨停/跌停统计 + 主力净流入
 export default async function handler(req, res) {
   // 外部宏观快讯聚合分流（供盘面研究「外部宏观经济分析」使用）
   if (req.query && req.query.news === '1') return handleNews(res);
   try {
-    // 1) 三大指数 + 北证
-    const idxSecids = '1.000001,0.399001,0.399006,0.899050';
-    const idxFields = 'f2,f3,f4,f12,f14,f6,f104,f105,f106';
-    const idxPath =
-      `/api/qt/ulist.np/get?fltt=2&invt=2&secids=${encodeURIComponent(idxSecids)}` +
-      `&fields=${idxFields}`;
-
-    // 2) 涨跌停必须用真实池。不能用统一 ±9.8% 阈值，否则会把创业板/科创板普通涨跌误判为涨跌停。
-    const [idxJson, ztPool, dtPool, shK, szK] = await Promise.all([
-      emGet(idxPath).catch(() => null),
-      fetchLimitPool('zt').catch(() => null),
-      fetchLimitPool('dt').catch(() => null),
-      // 上证综指 / 深证成指 日K(取成交额 f57),用于"两市成交额"与近5日均量对比(放量/缩量)
-      // 注:kline 接口仅 push2his 镜像提供,必须走 { his: true },否则默认 push2 host 返回 502 → 量能因子丢失
-      emGet(`/api/qt/stock/kline/get?secid=1.000001&fields1=f1&fields2=f51,f57&klt=101&fqt=1&end=20500101&lmt=6`, { his: true }).catch(() => null),
-      emGet(`/api/qt/stock/kline/get?secid=0.399001&fields1=f1&fields2=f51,f57&klt=101&fqt=1&end=20500101&lmt=6`, { his: true }).catch(() => null),
-    ]);
-
-    // 指数
-    const indexRows = (idxJson && idxJson.data && idxJson.data.diff) || [];
-    const indices = indexRows.map((d) => ({
-      code: d.f12,
-      name: d.f14,
-      price: num(d.f2),
-      pct: num(d.f3),
-      chg: num(d.f4),
-      amount: num(d.f6),
-    }));
-
-    const marketBreadth = summarizeMarketBreadth(
-      indexRows,
-      {
-        limitUp: ztPool?.total,
-        limitDown: dtPool?.total,
-      },
-    );
-    // 指数成交额只取上证+深证，创业板已包含在深市内，北证单列不混入两市口径。
-    const indexAmount = indices
-      .filter((item) => item.code === '000001' || item.code === '399001')
-      .reduce((total, item) => total + (Number(item.amount) || 0), 0);
-    const indexAmountYi = indexAmount > 0 ? +(indexAmount / 1e8).toFixed(0) : null;
-
-    // 两市成交额 + 近5日均量对比(放量/缩量)——用沪市/深市指数日K的成交额 f57
-    // klines: [{f51:date, f57:amount(元)}]；末根为今日(盘中为进行中累计,盘后为收盘值)
-    const klAmt = (kJson) => {
-      const kl = (kJson && kJson.data && kJson.data.klines) || [];
-      return kl.map((s) => {
-        const parts = String(s).split(',');
-        return +parts[1] || 0;  // fields2=f51,f57 → [date, amount]
-      });
-    };
-    const shAmts = klAmt(shK), szAmts = klAmt(szK);
-    let marketAmountYi = indexAmountYi, volVsAvg5 = null, volLevel = null;
-    if (shAmts.length && szAmts.length) {
-      const n = Math.min(shAmts.length, szAmts.length);
-      const sum2 = (i) => (shAmts[shAmts.length - n + i] || 0) + (szAmts[szAmts.length - n + i] || 0);
-      const todayAmt = sum2(n - 1);                         // 今日两市成交额(元)
-      const prev = [];
-      for (let i = 0; i < n - 1; i++) prev.push(sum2(i));   // 之前若干日
-      const avg5 = prev.length ? prev.slice(-5).reduce((a, b) => a + b, 0) / Math.min(5, prev.length) : 0;
-      if (todayAmt > 0) marketAmountYi = +(todayAmt / 1e8).toFixed(0);
-      if (todayAmt > 0 && avg5 > 0) {
-        volVsAvg5 = +((todayAmt / avg5 - 1) * 100).toFixed(1);  // 较5日均量的百分比(±)
-        volLevel = volVsAvg5 >= 15 ? '放量' : volVsAvg5 <= -15 ? '缩量' : '平量';
-      }
-    }
-
     sendJson(
       res,
-      {
-        ok: true,
-        updatedAt: Date.now(),
-        indices,
-        breadth: {
-          up: marketBreadth.up,
-          down: marketBreadth.down,
-          flat: marketBreadth.flat,
-          limitUp: marketBreadth.limitUp,
-          limitDown: marketBreadth.limitDown,
-          total: marketBreadth.total,
-          complete: marketBreadth.complete,
-          amountYi: marketAmountYi,   // 两市成交额(亿元)
-          volVsAvg5,                  // 较近5日均量的偏离%(+放量/-缩量)
-          volLevel,                   // 放量/平量/缩量
-        },
-      },
+      await fetchMarketSnapshot(),
       { cache: 20 }
     );
   } catch (e) {

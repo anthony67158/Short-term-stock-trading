@@ -56,7 +56,7 @@
       "caseFile": "cases/daily.json",
       "minOverall": 0.9,
       "mode": "offline",
-      "description": "策略日报事实、场次、板块方向和检索版本"
+      "description": "三场日报模板、早报复盘、硬数据披露与执行动作"
     },
     "sector": {
       "adapter": "sector",

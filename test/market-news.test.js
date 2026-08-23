@@ -74,6 +74,7 @@ test('公司公告接口映射为可追溯的硬信息', async () => {
   assert.deepEqual(items, [{
     title: '贵州茅台重大事项公告',
     date: '2026-08-14',
+    publishedAt: '2026-08-14 00:00:00',
     url: 'https://data.eastmoney.com/notices/detail/600519/AN202608140001.html',
     src: '公司公告',
     kind: 'announcement',

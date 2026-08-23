@@ -8,6 +8,7 @@ import {
   dailyReportGroundingIssues,
   generateDailyReportDraft,
   isValuableDailyReport,
+  sanitizeDailyReportDraft,
 } from '../api/_daily_report_content.js'
 
 const DATA = {
@@ -42,36 +43,37 @@ const STOCK_NEWS = [{
   }],
 }]
 
-test('日报检索计划分别覆盖公司公告、行业舆情和全球事件', () => {
+test('日报检索计划按场次覆盖隔夜、盘中纠偏和次日事件', () => {
   const plans = buildDailyReportSearchPlans({
     day: '2026-08-24',
     session: 'morning',
-    focusStocks: [
-      { code: '000001', name: '平安银行' },
-      { code: '300750', name: '宁德时代' },
-    ],
     industries: ['银行', '新能源'],
   })
 
   assert.deepEqual(plans.map((item) => item.key), [
-    'company',
-    'industry',
     'global',
+    'macro',
+    'institution',
   ])
-  assert.match(plans[0].query, /公告|业绩|重大事项/)
-  assert.match(plans[0].query, /平安银行/)
-  assert.match(plans[1].query, /行业|政策|景气|供需/)
-  assert.match(plans[2].query, /全球|美联储|地缘|商品/)
+  assert.match(plans[0].query, /隔夜|美股|商品/)
+  assert.match(plans[1].query, /政策|产业|催化/)
+  assert.match(plans[2].query, /机构|金股/)
   assert.ok(plans.every((item) => Array.from(item.query).length <= 64))
   assert.ok(plans.every((item) => item.topK >= 6))
-  const otherPlans = buildDailyReportSearchPlans({
+  const noonPlans = buildDailyReportSearchPlans({
     day: '2026-08-24',
-    session: 'morning',
-    focusStocks: [{ code: '600519', name: '贵州茅台' }],
-    industries: ['白酒'],
+    session: 'noon',
   })
-  assert.notEqual(plans[0].cacheKey, otherPlans[0].cacheKey)
-  assert.notEqual(plans[1].cacheKey, otherPlans[1].cacheKey)
+  const eveningPlans = buildDailyReportSearchPlans({
+    day: '2026-08-24',
+    session: 'evening',
+  })
+  assert.deepEqual(noonPlans.map((item) => item.key), ['market', 'macro'])
+  assert.deepEqual(
+    eveningPlans.map((item) => item.key),
+    ['market', 'macro', 'global'],
+  )
+  assert.notEqual(plans[0].cacheKey, eveningPlans[2].cacheKey)
 })
 
 test('日报证据优先保留公司公告并对跨来源重复标题去重', () => {
@@ -360,4 +362,21 @@ test('日报草稿存在无依据数字时触发语义重试', async () => {
   assert.equal(calls, 2)
   assert.equal(result.complete, true)
   assert.match(result.draft.overview, /0\.82%/)
+})
+
+test('模型四舍五入或自创的数字会被显式降级而不是污染日报', () => {
+  const source = {
+    aIndices: [{ name: '上证指数', pct: 0.82 }],
+    evidence: [{ id: 'E01', title: '指数收涨0.82%' }],
+  }
+  const sanitized = sanitizeDailyReportDraft({
+    overview: '上证指数收涨0.82%[E01]，预计明日上涨4.96%[E99]。',
+    strategy: '仓位提高到70%。',
+  }, source)
+
+  assert.match(sanitized.overview, /0\.82%/)
+  assert.doesNotMatch(sanitized.overview, /4\.96%|E99/)
+  assert.doesNotMatch(sanitized.strategy, /70%/)
+  assert.match(sanitized.strategy, /未核验数值/)
+  assert.deepEqual(dailyReportGroundingIssues(sanitized, source), [])
 })

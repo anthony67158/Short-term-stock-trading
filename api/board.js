@@ -17,8 +17,7 @@ async function limitup(req, res) {
 }
 
 // ---- 盘中异动 ----
-async function movers(req, res) {
-  const kind = req.query.kind || 'inflow';
+export async function fetchMovers(kind = 'inflow') {
   let fid = 'f62', po = '1';
   if (kind === 'speed') { fid = 'f22'; po = '1'; }
   if (kind === 'outflow') { fid = 'f62'; po = '0'; }
@@ -43,7 +42,15 @@ async function movers(req, res) {
     };
     return { ...stock, ...classifyPriceLimit(stock) };
   });
-  sendJson(res, { ok: true, kind, updatedAt: Date.now(), list }, { cache: 15 });
+  return { ok: true, kind, updatedAt: Date.now(), list };
+}
+
+async function movers(req, res) {
+  sendJson(
+    res,
+    await fetchMovers(req.query.kind || 'inflow'),
+    { cache: 15 },
+  );
 }
 
 // ---- 游资龙虎榜（东方财富数据中心公开接口）----
@@ -94,7 +101,7 @@ async function dcGet(reportName, extra) {
   }
 }
 
-async function lhb(req, res) {
+export async function fetchLhbData() {
   // 1. 探测最新交易日
   const probe = await dcGet(
     'RPT_DAILYBILLBOARD_DETAILSNEW',
@@ -147,7 +154,11 @@ async function lhb(req, res) {
     .sort((a, b) => b.net - a.net)
     .slice(0, 24);
 
-  sendJson(res, { ok: true, date, updatedAt: Date.now(), stocks, seats }, { cache: 300 });
+  return { ok: true, date, updatedAt: Date.now(), stocks, seats };
+}
+
+async function lhb(_req, res) {
+  sendJson(res, await fetchLhbData(), { cache: 300 });
 }
 
 export default async function handler(req, res) {

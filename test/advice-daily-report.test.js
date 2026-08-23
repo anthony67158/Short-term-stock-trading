@@ -15,12 +15,10 @@ import {
 import {
   buildDailySummary,
   dailyReportCacheKey,
+  getDailyReportSession,
   isCompleteDailyReport,
 } from '../api/_daily_summary.js'
-import {
-  dailyReportAccountNick,
-  dailyReportFocusStocks,
-} from '../api/daily_report.js'
+import { dailyReportAccountNick } from '../api/daily_report.js'
 
 const NOW = Date.parse('2026-08-12T02:30:00.000Z')
 const SUMMARY = {
@@ -45,31 +43,6 @@ test('可信Worker必须显式传入账号作用域生成策略日报', () => {
     { trusted: true, account: null },
     {},
   ), '')
-})
-
-test('登录用户日报焦点股只读取服务端账本且持仓优先于自选', () => {
-  const stocks = dailyReportFocusStocks({
-    account: {
-      data: {
-        holding: [{ code: '000001', name: '平安银行' }],
-        plan: [
-          { code: '000001', name: '重复自选', star: true },
-          { code: '300750', name: '宁德时代', star: true },
-        ],
-      },
-    },
-  }, {
-    holdings: [{ code: '600000', name: '伪造持仓' }],
-  })
-
-  assert.deepEqual(stocks.map(({ code, name, scope }) => ({
-    code,
-    name,
-    scope,
-  })), [
-    { code: '000001', name: '平安银行', scope: 'holding' },
-    { code: '300750', name: '宁德时代', scope: 'watchlist' },
-  ])
 })
 
 test('当天已有策略日报时直接复用且不重复生成', async () => {
@@ -201,6 +174,61 @@ test('日报缓存按账号摘要隔离且路径不包含明文昵称', () => {
   assert.notEqual(left, right)
   assert.equal(left.includes('账号A'), false)
   assert.match(left, /^dailyreport\/[a-f0-9]{64}\/2026-08-12-morning$/)
+})
+
+test('午报和晚报只读取同账号同日盘前报告作为复盘基线', async () => {
+  const prefix = dailyReportCacheKey(
+    '2026-08-12',
+    'morning',
+    '测试账号',
+  )
+  const report = {
+    day: '2026-08-12',
+    session: 'morning',
+    report: {
+      overview: '盘前预判。',
+      strategy: '等待确认。',
+    },
+  }
+  const storage = {
+    hasStorage: () => true,
+    list: async ({ prefix: actual }) => {
+      assert.equal(actual, prefix)
+      return {
+        blobs: [{
+          pathname: `${prefix}-new.json`,
+          uploadedAt: '2026-08-12T01:00:00Z',
+        }, {
+          pathname: `${prefix}-old.json`,
+          uploadedAt: '2026-08-12T00:30:00Z',
+        }],
+      }
+    },
+    readJson: async (blob) =>
+      blob.pathname.endsWith('-new.json') ? report : null,
+  }
+
+  assert.equal(
+    await getDailyReportSession(
+      '2026-08-12',
+      'morning',
+      '测试账号',
+      storage,
+    ),
+    report,
+  )
+  assert.equal(
+    await getDailyReportSession(
+      '2026-08-12',
+      'morning',
+      '其他账号',
+      {
+        ...storage,
+        list: async () => ({ blobs: [] }),
+      },
+    ),
+    null,
+  )
 })
 
 test('缺少总览或整体策略的部分日报不能标记成功', () => {

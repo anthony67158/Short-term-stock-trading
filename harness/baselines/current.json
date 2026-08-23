@@ -1,6 +1,6 @@
 {
   "schemaVersion": "harness-baseline.v1",
-  "generatedAt": 1787402037966,
+  "generatedAt": 1787443003707,
   "versions": {
     "app": "1.0.0",
     "git": "working-tree",
@@ -108,10 +108,13 @@
         "actionability": 1,
         "consistency": 1
       },
-      "cases": 2,
+      "cases": 5,
       "caseIds": [
         "daily-evening-search-disabled",
-        "daily-morning-grounded-summary"
+        "daily-morning-grounded-summary",
+        "daily-v3-evening-review",
+        "daily-v3-morning-plan",
+        "daily-v3-noon-correction"
       ]
     },
     "sector": {

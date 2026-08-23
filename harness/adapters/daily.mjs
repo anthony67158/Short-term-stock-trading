@@ -23,9 +23,16 @@ export async function runDailyHarnessCase(testCase) {
   const text = String(output?.text || '')
   const requiredText = expected.requiredText || []
   const forbiddenText = expected.forbiddenText || []
-  const sectors = Array.isArray(report.sectors) ? report.sectors : []
+  const sectors = Array.isArray(report.sectors)
+    ? report.sectors
+    : (
+        report.analysis?.sectorPool
+        || report.analysis?.mainlines
+        || []
+      )
   const invalidRatings = sectors.filter(
-    (item) => !['看多', '中性', '看空'].includes(item?.rating),
+    (item) => item?.rating
+      && !['看多', '中性', '看空'].includes(item.rating),
   )
   const namedSectors = new Set(
     sectors.map((item) => String(item?.name || '')),
@@ -101,12 +108,51 @@ export async function runDailyHarnessCase(testCase) {
     check(
       'daily-direction-summary',
       'actionability',
-      sectors.length > 0
-        && sectors.some((item) =>
-          ['看多', '看空'].includes(item.rating)
-        ),
+      result.schemaVersion === 'daily-report.v3'
+        ? (
+            result.session === 'morning'
+              ? report.analysis?.sectorPool?.length > 0
+              : result.session === 'noon'
+                ? report.analysis?.afternoonActions?.length > 0
+                : report.analysis?.nextDayPlan?.length > 0
+          )
+        : sectors.length > 0
+          && sectors.some((item) =>
+            ['看多', '看空'].includes(item.rating)
+          ),
       '日报没有形成可识别的板块方向',
       { code: 'DAILY_DIRECTION_MISSING' },
+    ),
+    check(
+      'daily-v3-session-contract',
+      'contract',
+      result.schemaVersion !== 'daily-report.v3'
+        || (
+          result.template === {
+            morning: 'morning-plan',
+            noon: 'noon-correction',
+            evening: 'evening-review',
+          }[result.session]
+          && !!report.objective
+          && !!report.hardData
+          && !!report.analysis
+        ),
+      '日报 v3 场次模板不完整',
+      { hard: true, code: 'DAILY_V3_SESSION_INVALID' },
+    ),
+    check(
+      'daily-v3-disclosure',
+      'groundedness',
+      result.schemaVersion !== 'daily-report.v3'
+        || (
+          /不构成投资建议/.test(String(report.disclaimer || ''))
+          && (
+            result.session !== 'evening'
+            || report.hardData?.northbound?.netBuyYi == null
+          )
+        ),
+      '日报风险声明或北向披露口径不正确',
+      { hard: true, code: 'DAILY_V3_DISCLOSURE_INVALID' },
     ),
     check(
       'daily-search-version',

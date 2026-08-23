@@ -82,6 +82,13 @@ function newsDate(value) {
   return String(value || '').slice(0, 10);
 }
 
+function newsTimestamp(value) {
+  if (Number.isFinite(Number(value)) && Number(value) > 1000000000) {
+    try { return new Date(Number(value) * 1000).toISOString(); } catch { return ''; }
+  }
+  return cleanNewsText(value, 32);
+}
+
 function newsKey(title) {
   return cleanNewsText(title, 200)
     .toLowerCase()
@@ -93,9 +100,11 @@ function normalizedNews(item) {
   const title = cleanNewsText(item?.title || item?.summary || item?.content);
   if (!title) return null;
   const summary = cleanNewsText(item?.summary || '', 180);
+  const timestamp = newsTimestamp(item?.publishedAt || item?.date);
   return {
     title,
     date: newsDate(item?.date),
+    ...(timestamp ? { publishedAt: timestamp } : {}),
     url: /^https?:\/\//i.test(String(item?.url || '')) ? String(item.url) : '',
     src: cleanNewsText(item?.src || '财经资讯', 30),
     kind: String(item?.kind || 'media'),
@@ -340,6 +349,7 @@ export async function fetchClsTelegraph(size = 12, {
     return data.map((x) => ({
       title: (x.title || x.summary || '').replace(/<[^>]+>/g, '').slice(0, 120),
       date: (x.publishedAt || '').slice(0, 10),
+      publishedAt: String(x.publishedAt || '').slice(0, 32),
       url: x.url || '',
       src: srcCn[x.sourceId] || x.sourceId || '快讯',
       kind: 'flash',
@@ -366,6 +376,7 @@ export async function fetchSinaFlash(size = 12, {
     return list.map((x) => ({
       title: (x.rich_text || x.content || '').replace(/<[^>]+>/g, '').slice(0, 120),
       date: (x.create_time || '').slice(0, 10),
+      publishedAt: String(x.create_time || '').slice(0, 32),
       url: (x.docurl || (x.ext && (() => { try { return JSON.parse(x.ext).docurl } catch { return '' } })()) || ''),
       src: '新浪财经',
       kind: 'flash',
@@ -397,6 +408,9 @@ export async function fetchFinnhubNews(size = 8) {
     return arr.map((x) => ({
       title: x.headline || '',
       date: x.datetime ? new Date(x.datetime * 1000).toISOString().slice(0, 10) : '',
+      publishedAt: x.datetime
+        ? new Date(x.datetime * 1000).toISOString()
+        : '',
       url: x.url || '', src: (x.source || 'Finnhub'),
     })).filter((x) => x.title).slice(0, size);
   } catch { return []; }

@@ -56,30 +56,42 @@ export function mapSectorRow(d = {}) {
   };
 }
 
+export async function fetchSectorList({
+  type = 'industry',
+  sort = 'main',
+  order = '1',
+} = {}) {
+  const normalizedType = type === 'concept' ? 'concept' : 'industry';
+  const fs = normalizedType === 'concept' ? 'm:90+t:3' : 'm:90+t:2';
+  const fid = sort === 'pct' ? 'f3' : 'f62';
+  const po = order === '0' ? '0' : '1';
+  const fields =
+    'f12,f14,f2,f3,f62,f184,f66,f72,f78,f84,f128,f140,f136,f8,f6';
+  const fetchPage = (page) => {
+    const path =
+      `/api/qt/clist/get?pn=${page}&pz=100&po=${po}&np=1&fltt=2&invt=2` +
+      `&fid=${fid}&fs=${encodeURIComponent(fs)}&fields=${fields}`;
+    return emGetOne(path, { hostIndex: 2, maxAttempts: 3 });
+  };
+  const diff = await collectSectorRows(fetchPage);
+  return {
+    ok: true,
+    type: normalizedType,
+    updatedAt: Date.now(),
+    list: diff.map(mapSectorRow),
+  };
+}
+
 // 板块资金流向排行
 // query: type=industry|concept   sort=main(主力净流入)|pct(涨跌幅)
 export default async function handler(req, res) {
   try {
-    const type = (req.query.type || 'industry') === 'concept' ? 'concept' : 'industry';
-    const fs = type === 'concept' ? 'm:90+t:3' : 'm:90+t:2';
-    const fid = req.query.sort === 'pct' ? 'f3' : 'f62'; // f62=主力净流入
-    // po=1 降序（默认）；分页拉全量板块，确保流入/流出两端都覆盖
-    const po = req.query.po === '0' ? '0' : '1';
-
-    // f128/f140/f136 才是领涨股名/代码/涨幅；f206 是市场标识(沪1深0)。
-    const fields =
-      'f12,f14,f2,f3,f62,f184,f66,f72,f78,f84,f128,f140,f136,f8,f6';
-    // 东方财富实际单页上限为100，即便 pz=500 也只回100条；概念约300+，必须分页。
-    const fetchPage = (page) => {
-      const path =
-        `/api/qt/clist/get?pn=${page}&pz=100&po=${po}&np=1&fltt=2&invt=2` +
-        `&fid=${fid}&fs=${encodeURIComponent(fs)}&fields=${fields}`;
-      return emGetOne(path, { hostIndex: 2, maxAttempts: 3 });
-    };
-    const diff = await collectSectorRows(fetchPage);
-    const list = diff.map(mapSectorRow);
-
-    sendJson(res, { ok: true, type, updatedAt: Date.now(), list }, { cache: 30 });
+    const result = await fetchSectorList({
+      type: req.query.type,
+      sort: req.query.sort,
+      order: req.query.po,
+    });
+    sendJson(res, result, { cache: 30 });
   } catch (e) {
     sendError(res, e);
   }

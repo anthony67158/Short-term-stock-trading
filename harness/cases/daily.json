@@ -104,6 +104,169 @@
         ],
         "forbiddenText": ["检索参考"]
       }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "daily-v3-morning-plan",
+      "adapter": "daily",
+      "tags": ["daily", "v3", "morning", "actionability"],
+      "input": {
+        "result": {
+          "schemaVersion": "daily-report.v3",
+          "template": "morning-plan",
+          "day": "2026-08-18",
+          "session": "morning",
+          "sessionCn": "盘前早报",
+          "searchEnabled": true,
+          "searchConfigUpdatedAt": 101,
+          "report": {
+            "objective": "预判与预案",
+            "overview": "隔夜科技风险偏好改善，开盘仍需验证承接。",
+            "strategy": "只在回踩计划区并出现资金承接时关注。",
+            "risks": ["高开脱离计划区不追。"],
+            "disclaimer": "本报告不构成投资建议；行情、资金与披露数据以交易所及官方最终披露为准。",
+            "hardData": {
+              "overseas": [{"label": "纳斯达克", "pct": 1.1}]
+            },
+            "analysis": {
+              "sectorPool": [{
+                "name": "半导体",
+                "actionability": "LAYOUT",
+                "action": "回踩承接后关注。"
+              }],
+              "stockPool": [{
+                "code": "688981",
+                "name": "中芯国际",
+                "action": "进入买入区后观察。",
+                "pricePlan": {
+                  "buyZone": {"low": 96.8, "high": 98.3},
+                  "stopLoss": 94.9
+                }
+              }]
+            }
+          }
+        }
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "searchEnabled": true,
+        "requiredSectors": ["半导体"],
+        "requiredText": [
+          "2026-08-18",
+          "预判与预案",
+          "板块池:半导体",
+          "个股池:中芯国际"
+        ],
+        "forbiddenText": ["持仓公告汇总"]
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "daily-v3-noon-correction",
+      "adapter": "daily",
+      "tags": ["daily", "v3", "noon", "correction"],
+      "input": {
+        "result": {
+          "schemaVersion": "daily-report.v3",
+          "template": "noon-correction",
+          "day": "2026-08-18",
+          "session": "noon",
+          "sessionCn": "盘中午报",
+          "searchEnabled": true,
+          "searchConfigUpdatedAt": 101,
+          "report": {
+            "objective": "确认与纠偏",
+            "overview": "上午半导体资金与价格同向。",
+            "strategy": "午后只保留已确认方向。",
+            "risks": ["午后资金可能反转。"],
+            "disclaimer": "本报告不构成投资建议；行情、资金与披露数据以交易所及官方最终披露为准。",
+            "hardData": {
+              "sectorFlowTop5": [{"name": "半导体", "inflowYi": 35.2}]
+            },
+            "analysis": {
+              "morningReview": [{
+                "subject": "半导体",
+                "status": "confirmed"
+              }],
+              "afternoonActions": [{
+                "target": "半导体",
+                "action": "观望"
+              }]
+            }
+          }
+        }
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "searchEnabled": true,
+        "requiredText": [
+          "2026-08-18",
+          "确认与纠偏",
+          "早报验证:半导体=confirmed",
+          "执行计划:半导体:观望"
+        ],
+        "forbiddenText": ["持仓公告汇总"]
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "daily-v3-evening-review",
+      "adapter": "daily",
+      "tags": ["daily", "v3", "evening", "disclosure"],
+      "input": {
+        "result": {
+          "schemaVersion": "daily-report.v3",
+          "template": "evening-review",
+          "day": "2026-08-18",
+          "session": "evening",
+          "sessionCn": "盘后晚报",
+          "searchEnabled": false,
+          "searchConfigUpdatedAt": 0,
+          "report": {
+            "objective": "复盘与次日预判",
+            "overview": "全天主线为半导体，早报方向得到验证。",
+            "strategy": "次日只观察主线延续，不追一致性高开。",
+            "risks": ["龙虎榜单日席位行为不可直接外推。"],
+            "disclaimer": "本报告不构成投资建议；行情、资金与披露数据以交易所及官方最终披露为准。",
+            "hardData": {
+              "lhb": {
+                "stocks": [{"code": "688981", "name": "中芯国际"}]
+              },
+              "northbound": {
+                "totalTurnoverYi": 1500,
+                "netBuyYi": null,
+                "netBuyDisclosure": "未披露"
+              }
+            },
+            "analysis": {
+              "morningReview": [{
+                "subject": "半导体",
+                "status": "confirmed"
+              }],
+              "mainlines": [{
+                "name": "半导体",
+                "conclusion": "资金与价格同向。"
+              }],
+              "nextDayPlan": [{
+                "target": "半导体",
+                "action": "观察竞价承接。"
+              }]
+            }
+          }
+        }
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "searchEnabled": false,
+        "requiredSectors": ["半导体"],
+        "requiredText": [
+          "2026-08-18",
+          "复盘与次日预判",
+          "早报验证:半导体=confirmed",
+          "执行计划:半导体"
+        ],
+        "forbiddenText": ["北向净流入"]
+      }
     }
   ]
 }

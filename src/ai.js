@@ -18,8 +18,6 @@ export async function fetchMarketNews() {
 // 全市场策略日报：SSE 流式(phase 进度 + result 结果)。session: morning|noon|evening
 export async function fetchDailyReport({
   session,
-  holdings,
-  watchlist,
   refresh,
   onPhase,
   signal,
@@ -32,10 +30,7 @@ export async function fetchDailyReport({
         'Content-Type': 'application/json',
         ...accountRequestHeaders(),
       },
-      body: JSON.stringify({
-        holdings: holdings || [],
-        watchlist: watchlist || [],
-      }),
+      body: '{}',
       signal,
     })
     const reader = res.body.getReader()

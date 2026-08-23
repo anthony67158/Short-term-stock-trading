@@ -45,6 +45,9 @@ resources:
         DOUBAO_SEARCH_API_KEY: ${env('DOUBAO_SEARCH_API_KEY')}
         DOUBAO_SEARCH_KEY_NAME: ${env('DOUBAO_SEARCH_KEY_NAME')}
         DOUBAO_SEARCH_ENABLED: "true"
+        # 可选自托管 SearXNG；未配置时不发请求，不依赖公共实例。
+        SEARXNG_ENABLED: ${env('SEARXNG_ENABLED')}
+        SEARXNG_BASE_URL: ${env('SEARXNG_BASE_URL')}
         QUANT_URL: ${env('QUANT_URL')}
         QUANT_KEY: ${env('QUANT_KEY')}
         # ---- V2 分钟 Transformer（独立 EAS，可手动启停）----
