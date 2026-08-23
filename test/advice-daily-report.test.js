@@ -18,7 +18,10 @@ import {
   getDailyReportSession,
   isCompleteDailyReport,
 } from '../api/_daily_summary.js'
-import { dailyReportAccountNick } from '../api/daily_report.js'
+import {
+  dailyReportAccountNick,
+  dailyReportCachedResponse,
+} from '../api/daily_report.js'
 
 const NOW = Date.parse('2026-08-12T02:30:00.000Z')
 const SUMMARY = {
@@ -43,6 +46,21 @@ test('可信Worker必须显式传入账号作用域生成策略日报', () => {
     { trusted: true, account: null },
     {},
   ), '')
+})
+
+test('日报缓存命中时不能被缓存对象里的旧标记覆盖', () => {
+  assert.deepEqual(
+    dailyReportCachedResponse({
+      ok: false,
+      cached: false,
+      schemaVersion: 'daily-report.v3',
+    }),
+    {
+      ok: true,
+      cached: true,
+      schemaVersion: 'daily-report.v3',
+    },
+  )
 })
 
 test('当天已有策略日报时直接复用且不重复生成', async () => {

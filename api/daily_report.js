@@ -110,6 +110,11 @@ const SESSION_GENERATION = Object.freeze({
     ),
   },
 });
+
+export function dailyReportCachedResponse(cached = {}) {
+  return { ...cached, ok: true, cached: true };
+}
+
 export function dailyReportAccountNick(accountAuth, body = {}) {
   if (accountAuth?.account?.nick) {
     return String(accountAuth.account.nick).trim();
@@ -185,7 +190,7 @@ export default async function handler(req, res) {
             && Number(cached.searchPlanVersion || 0)
               === DAILY_REPORT_SEARCH_PLAN_VERSION
           ) {
-            emit('result', { ok: true, cached: true, ...cached });
+            emit('result', dailyReportCachedResponse(cached));
             return endOnce();
           }
         }
