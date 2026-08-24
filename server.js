@@ -277,6 +277,7 @@ function serveStatic(_req, res, pathname) {
   } else if (
     rel.startsWith('app-icon-')
     || rel === 'apple-touch-icon-v2.png'
+    || rel === 'apple-touch-icon-v7.png'
     || rel.startsWith('favicon-')
   ) {
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');

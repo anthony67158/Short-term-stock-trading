@@ -13,8 +13,8 @@ self.addEventListener('push', (event) => {
   const title = data.title || '⚡ 盯盘预警';
   const options = {
     body: data.body || '',
-    icon: data.icon || '/app-icon-192.png?v=6',
-    badge: '/app-icon-192.png?v=6',
+    icon: data.icon || '/app-icon-192.png?v=7',
+    badge: '/app-icon-192.png?v=7',
     tag: data.tag || ('alert-' + Date.now()),
     renotify: true,
     data: { url: data.url || '/', code: data.code || '' },

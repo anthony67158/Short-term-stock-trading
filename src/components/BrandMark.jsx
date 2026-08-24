@@ -12,7 +12,7 @@ export default function BrandMark({
     >
       <img
         className="brand-mark-image"
-        src="/app-icon-192.png?v=6"
+        src="/app-icon-192.png?v=7"
         alt=""
       />
     </span>

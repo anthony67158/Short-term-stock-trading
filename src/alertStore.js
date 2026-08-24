@@ -232,7 +232,7 @@ function notify(title, body) {
   // 浏览器系统通知
   try {
     if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-      new Notification(title, { body, icon: '/app-icon-192.png?v=6', tag: 'alert-' + Date.now() })
+      new Notification(title, { body, icon: '/app-icon-192.png?v=7', tag: 'alert-' + Date.now() })
     }
   } catch { /* ignore */ }
   beep()

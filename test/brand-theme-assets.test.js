@@ -32,15 +32,15 @@ test('网站、启动页与主题切换统一使用同一套新版品牌图标',
   assert.doesNotMatch(index, /brand-light\.svg|brand-dark\.svg/)
   assert.match(index, /id="app-favicon"/)
   assert.doesNotMatch(index, /\.svg/)
-  assert.match(index, /href="\/favicon-48\.png\?v=6"/)
-  assert.match(index, /rel="apple-touch-icon"[^>]*href="\/apple-touch-icon-v6\.png"/)
-  assert.match(index, /href="\/manifest\.json\?v=6"/)
-  assert.match(index, /src="\/app-icon-192\.png\?v=6"/)
-  assert.match(themeStore, /favicon-48\.png\?v=6/)
+  assert.match(index, /href="\/favicon-48\.png\?v=7"/)
+  assert.match(index, /rel="apple-touch-icon"[^>]*href="\/apple-touch-icon-v7\.png"/)
+  assert.match(index, /href="\/manifest\.json\?v=7"/)
+  assert.match(index, /src="\/app-icon-192\.png\?v=7"/)
+  assert.match(themeStore, /favicon-48\.png\?v=7/)
   assert.doesNotMatch(themeStore, /brand-light\.svg|brand-dark\.svg/)
-  assert.match(brandMark, /src="\/app-icon-192\.png\?v=6"/)
+  assert.match(brandMark, /src="\/app-icon-192\.png\?v=7"/)
   assert.doesNotMatch(brandMark, /brand-light\.svg|brand-dark\.svg/)
-  assert.deepEqual(pngSize('public/apple-touch-icon-v6.png'), {
+  assert.deepEqual(pngSize('public/apple-touch-icon-v7.png'), {
     width: 180,
     height: 180,
     hasAlpha: false,
@@ -80,10 +80,10 @@ test('PWA和网站图标由用户提供的同一位图母版生成', () => {
     hasAlpha: false,
   })
   assert.ok(manifest.icons.some((icon) =>
-    icon.src === '/app-icon-192.png?v=6' && icon.purpose === 'any'
+    icon.src === '/app-icon-192.png?v=7' && icon.purpose === 'any'
   ))
   assert.ok(manifest.icons.some((icon) =>
-    icon.src === '/app-icon-maskable-512.png?v=6'
+    icon.src === '/app-icon-maskable-512.png?v=7'
       && icon.purpose === 'maskable'
   ))
   assert.ok(manifest.icons.every((icon) => icon.type === 'image/png'))
@@ -107,6 +107,7 @@ test('受保护域名允许系统在未登录时读取PWA元数据和图标', ()
     '/apple-touch-icon.png',
     '/apple-touch-icon-v5.png',
     '/apple-touch-icon-v6.png',
+    '/apple-touch-icon-v7.png',
     '/app-icon-192.png',
     '/app-icon-512.png',
     '/app-icon-maskable-512.png',

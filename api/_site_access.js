@@ -18,6 +18,7 @@ const PUBLIC_SITE_ASSETS = new Set([
   '/apple-touch-icon.png',
   '/apple-touch-icon-v5.png',
   '/apple-touch-icon-v6.png',
+  '/apple-touch-icon-v7.png',
   '/app-icon-source.webp',
   '/app-icon-192.png',
   '/app-icon-512.png',
