@@ -122,7 +122,7 @@ export default function AlertPanel({ interval }) {
               <div className="alert-toolbar">
                 <label className="ai-auto-switch" title="关闭后不再自动生成买点/止盈/止损预警,已有的自动预警会被清除">
                   <input type="checkbox" checked={aiAutoOn} onChange={(e) => planStore.setAiAutoAlert(e.target.checked)} />
-                  <span>AI 自动预警</span>
+                  <span>自动预警</span>
                 </label>
                 <label className="ai-auto-switch" title="开启后:价位预警到点先发弱提醒(观察确认中),系统盯盘确认真正时机后再发「可以买入/卖出」强提示。关闭则见价即强提示。">
                   <input type="checkbox" checked={smartConfirmOn} onChange={(e) => planStore.setSmartConfirm(e.target.checked)} />
@@ -140,8 +140,8 @@ export default function AlertPanel({ interval }) {
               {autoAlerts.length > 0 && (
                 <div className="alert-group">
                   <div className="alert-group-head">
-                    <span className="sub-name">AI 自动预警 · {autoAlerts.length} 条(跟随军师建议自动维护)</span>
-                    <button className="btn tiny" onClick={() => setDelBatch({ ids: autoAlerts.map((a) => a.id), label: `全部 ${autoAlerts.length} 条 AI 自动预警` })}>
+                    <span className="sub-name">自动预警 · {autoAlerts.length} 条（随军师建议维护）</span>
+                    <button className="btn tiny" onClick={() => setDelBatch({ ids: autoAlerts.map((a) => a.id), label: `全部 ${autoAlerts.length} 条自动预警` })}>
                       <Icon name="trash" size={11} /> 全部删除
                     </button>
                   </div>
@@ -189,7 +189,7 @@ export default function AlertPanel({ interval }) {
       {delTarget && (
         <ConfirmDialog
           title="删除此预警？"
-          body={<>确定删除 <b>{delTarget.name}</b><StockTags code={delTarget.code} variant="inline" /> 的「{describeAlert(delTarget)}」预警？{(delTarget.planId || delTarget.candCode || delTarget.actCode) && <><br /><span className="sub-name">这是 AI 自动预警，删除后不会再被自动加回（除非在该股「恢复自动预警」）。</span></>}</>}
+          body={<>确定删除 <b>{delTarget.name}</b><StockTags code={delTarget.code} variant="inline" /> 的「{describeAlert(delTarget)}」预警？{(delTarget.planId || delTarget.candCode || delTarget.actCode) && <><br /><span className="sub-name">这是自动维护的预警，删除后不会再被自动加回（除非在该股「恢复自动预警」）。</span></>}</>}
           confirmText="删除"
           onConfirm={() => { planStore.removeAlert(delTarget.id); setDelTarget(null) }}
           onCancel={() => setDelTarget(null)}
@@ -198,7 +198,7 @@ export default function AlertPanel({ interval }) {
       {delBatch && (
         <ConfirmDialog
           title="批量删除预警？"
-          body={<>确定删除 <b>{delBatch.label}</b>？<br /><span className="sub-name">其中的 AI 自动预警删除后不会再被自动加回。</span></>}
+          body={<>确定删除 <b>{delBatch.label}</b>？<br /><span className="sub-name">其中自动维护的预警删除后不会再被自动加回。</span></>}
           confirmText="删除"
           onConfirm={() => { planStore.removeAlerts(delBatch.ids); setDelBatch(null) }}
           onCancel={() => setDelBatch(null)}
@@ -225,7 +225,7 @@ function renderRule(a, quote, setDelTarget, holding) {
             interactive={false}
           />
           <span className="ar-dir">{m.dirLabel}</span>
-          {isAuto && <span className="ar-badge">AI</span>}
+          {isAuto && <span className="ar-badge">自动</span>}
           {t1View.t1Blocked && <span className="ar-badge t1">T+1锁定 · 今日不可卖</span>}
           {a.phase === 'watching' && <span className="ar-badge watching">观察确认中</span>}
           {q && <span className="ar-now">现 {fmtRaw(q.price)}</span>}

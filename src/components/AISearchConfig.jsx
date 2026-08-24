@@ -55,7 +55,7 @@ export default function AISearchConfig() {
         <div className="search-cfg-status">
           <div>
             <b>豆包搜索 Global版</b>
-            <span>{config.enabled ? '生成时引用检索参考' : '所有AI生成排除检索数据'}</span>
+            <span>{config.enabled ? '生成时引用检索参考' : '所有智能生成均排除检索数据'}</span>
           </div>
           <button
             type="button"

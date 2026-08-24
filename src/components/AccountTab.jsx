@@ -184,7 +184,7 @@ export default function AccountTab({ interval }) {
           </div>
         ) : (
           <div className="acc-goal-hint">
-            <Icon name="target" size={12} /> 设置「目标资产」后，AI 操作建议 / 复盘 / 加减仓都会围绕你的目标给节奏与仓位。点右上「校准账户」填写。
+            <Icon name="target" size={12} /> 设置「目标资产」后，军师建议、复盘与加减仓都会围绕你的目标给节奏与仓位。点右上「校准账户」填写。
           </div>
         )}
       </div>

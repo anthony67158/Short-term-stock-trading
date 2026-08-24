@@ -890,7 +890,7 @@ export default function StockDetail({ stock, onClose }) {
                   <div className="decide-primary">
                     <div className="decide-title">
                       <Icon name="target" size={14} />
-                      <span>军师 · AI 操作建议</span>
+                      <span>军师 · 操作建议</span>
                     </div>
                     {myHold ? <span className="decide-hold">持仓 {myHold.qty}手 · 成本{fmtRaw(myHold.cost)}</span>
                             : <span className="decide-hold none">未持仓</span>}
@@ -1030,7 +1030,7 @@ export default function StockDetail({ stock, onClose }) {
                       {/* 未持仓但 AI 建议没返回 → 提示重试（避免只给模糊量化结论）*/}
                       {quantState.adviceMissing && !adv && (
                         <div className="advice-retry">
-                          <Icon name="spark" size={13} /> AI 操作建议(结论/买点/时机/止损)生成超时，
+                          <Icon name="spark" size={13} /> 操作建议（结论、买点、时机、止损）生成超时，
                           <button type="button" className="advice-regenerate-btn" onClick={() => loadQuant(false)}>
                             <Icon name="refresh" size={13} />重新生成
                           </button>
@@ -1246,7 +1246,7 @@ export default function StockDetail({ stock, onClose }) {
                         </div>
                       )}
 
-                      <div className="dq-hint">{adv ? (myHold ? 'AI 操作建议由大模型结合量化预测/技术面/你的持仓成本生成' : 'AI 操作建议由大模型结合量化走势预测/技术面/历史规律/当日盘面生成') : '走势预测=基于历史波动的蒙特卡洛模拟，量化=多因子打分'}；均为统计口径，仅供参考，非投资建议</div>
+                      <div className="dq-hint">{adv ? (myHold ? '军师建议结合量化预测、技术面和你的持仓成本生成' : '军师建议结合量化走势预测、技术面、历史规律和当日盘面生成') : '走势预测=基于历史波动的蒙特卡洛模拟，量化=多因子打分'}；均为统计口径，仅供参考，非投资建议</div>
                     </>
                   )
                 })()}
@@ -1444,7 +1444,7 @@ export default function StockDetail({ stock, onClose }) {
               + (modeGuidance.firstGeneration ? ' first-generation' : '')
             }
             role="note"
-            aria-label="AI 建议使用顺序"
+            aria-label="建议生成方式说明"
           >
             {modeGuidance.items.map((item) => (
               <div
@@ -1528,11 +1528,11 @@ export default function StockDetail({ stock, onClose }) {
           <div className="busy-modal-mask" onClick={() => setBusyModal(null)}>
             <div className="busy-modal" onClick={(e) => e.stopPropagation()}>
               <div className="busy-modal-head">
-                <span className="busy-modal-title"><Icon name="gauge" size={15} /> AI 分析通道已满</span>
+                <span className="busy-modal-title"><Icon name="gauge" size={15} /> 生成通道已满</span>
                 <button className="icon-btn" onClick={() => setBusyModal(null)} title="关闭"><Icon name="close" size={15} /></button>
               </div>
               <div className="busy-modal-desc">
-                当前 {busyModal.concurrency || busyModal.busy.length} 个 AI 分析通道都在使用中，请等待其中一个完成。
+                当前 {busyModal.concurrency || busyModal.busy.length} 个生成通道都在使用中，请等待其中一个完成。
                 下列个股正在生成，完成后会自动腾出端点，届时可再次点击生成。
               </div>
               <div className="busy-modal-list">

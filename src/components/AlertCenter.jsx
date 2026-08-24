@@ -98,7 +98,7 @@ export default function AlertCenter({ onClose }) {
               <div className="empty-state">
                 <span className="es-icon"><Icon name="bell" size={20} /></span>
                 <div className="es-title">还没有预警规则</div>
-                <div className="es-desc">在「持仓·做T」的自选/持仓卡片，或个股详情弹窗里点「设预警」即可添加。AI 生成操作建议时也会自动挂上补仓/减仓行动预警。</div>
+                <div className="es-desc">在「持仓·做T」的自选/持仓卡片，或个股详情弹窗里点「设预警」即可添加。生成操作建议时也会自动挂上补仓/减仓行动预警。</div>
               </div>
             ) : (
               alerts.map((a) => {

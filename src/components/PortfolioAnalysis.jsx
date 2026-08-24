@@ -677,7 +677,7 @@ export default function PortfolioAnalysis({ distribution }) {
     : '已关闭'
 
   return (
-    <section className="portfolio-analysis" aria-label="仓位与仓位类别AI诊断">
+    <section className="portfolio-analysis" aria-label="仓位与仓位类别诊断">
       <div className="portfolio-analysis-head">
         <div>
           <div role="heading" aria-level="3" className="portfolio-analysis-title">

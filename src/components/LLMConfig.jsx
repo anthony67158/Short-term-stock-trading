@@ -15,7 +15,7 @@ const ROLE_ORDER = [
 ]
 
 const ROLE_META = {
-  advisor: { icon: 'spark', label: '军师AI操作建议生成', badge: '2 路并行' },
+  advisor: { icon: 'spark', label: '军师操作建议生成', badge: '2 路并行' },
   review: { icon: 'shield', label: '复核角色', badge: '2 路并行' },
   portfolio: { icon: 'layers', label: '持仓分布分析', badge: '组合' },
   agent: { icon: 'brain', label: '智能体助手', badge: '工具调用' },
@@ -470,19 +470,19 @@ export default function LLMConfig() {
         className="llm-cfg"
         role="dialog"
         aria-modal="true"
-        aria-label="AI 模型配置"
+        aria-label="模型配置"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="modal-bar">
           <div className="modal-title">
             <Icon name="brain" size={18} />
-            AI 角色端点
+            模型角色与端点
             <span className="llm-role-count">7 个角色 · 9 个端点</span>
           </div>
           <button
             type="button"
             className="modal-close"
-            aria-label="关闭 AI 模型配置"
+            aria-label="关闭模型配置"
             onClick={() => llmConfigStore.close()}
           >
             <Icon name="close" size={16} />

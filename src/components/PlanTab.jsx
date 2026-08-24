@@ -632,7 +632,7 @@ function ActionCommand({ view, onOpen }) {
 function AdviceActionPanel({ view, currentPrice, onPrompt }) {
   if (!view) {
     return (
-      <button type="button" className="action-prompt" onClick={onPrompt} aria-label="生成 AI 操作建议">
+      <button type="button" className="action-prompt" onClick={onPrompt} aria-label="生成操作建议">
         <Icon name="spark" size={14} />
         <span className="action-prompt-label">尚无操作建议</span>
         <span className="action-prompt-action">生成</span>
@@ -773,7 +773,7 @@ function CandDecision({ p, q }) {
                     value={p.targetPrice != null ? String(p.targetPrice) : ''}
                     onChange={onPrice}
                   />
-                  <em className="action-level-source">{reachedKey === 'entry' ? '已到价' : (p.targetManual ? '手填' : 'AI')}</em>
+                  <em className="action-level-source">{reachedKey === 'entry' ? '已到价' : (p.targetManual ? '手填' : '建议')}</em>
                 </label>
                 <label className="action-level action-field active level-buy">
                   <span className="action-level-name">
@@ -787,7 +787,7 @@ function CandDecision({ p, q }) {
                     value={p.buyQty != null ? String(p.buyQty) : ''}
                     onChange={onQty}
                   />
-                  <em className="action-level-source">{p.qtyManual ? '手填' : 'AI'}</em>
+                  <em className="action-level-source">{p.qtyManual ? '手填' : '建议'}</em>
                 </label>
                 {otherLevels.map((item) => (
                   <ActionLevel key={item.key} level={item} reached={item.key === reachedKey} />
@@ -1509,7 +1509,7 @@ function AutoRefreshControl({ quote, stockTags }) {
       : result?.status === 'running'
         ? '已有生成任务正在运行'
         : result?.status === 'full'
-          ? 'AI 分析通道正忙，请稍后再试'
+          ? '生成通道正忙，请稍后再试'
           : '当前没有可刷新的股票'
     setManualNotice(text)
   }
@@ -1582,9 +1582,9 @@ function AutoRefreshControl({ quote, stockTags }) {
 
   const panel = (
     <div className="auto-ref-panel auto-ref-dialog" role="dialog" aria-modal="true"
-      aria-label="AI 操作建议刷新设置" onClick={(event) => event.stopPropagation()}>
+      aria-label="操作建议刷新设置" onClick={(event) => event.stopPropagation()}>
       <div className="arp-head">
-        <span className="arp-title"><Icon name="clock" size={13} /> AI 操作建议刷新</span>
+        <span className="arp-title"><Icon name="clock" size={13} /> 操作建议刷新</span>
         <button className="arp-x" aria-label="关闭刷新设置" onClick={() => setOpen(false)}>
           <Icon name="close" size={13} />
         </button>
@@ -1654,7 +1654,7 @@ function AutoRefreshControl({ quote, stockTags }) {
       <button
         className={'mini-btn auto-ref-btn' + (enabled ? ' on' : '')}
         onClick={() => setOpen((v) => !v)}
-        title="设置盘中定时刷新 AI 操作建议(可配间隔与范围)"
+        title="设置盘中定时刷新操作建议（可配间隔与范围）"
       >
         <Icon name={enabled ? 'refresh' : 'clock'} size={13} className={enabled ? 'spin-slow' : ''} />
         {`持续复核·已选${runnableSelection.allCodes.length}只`}
@@ -1869,7 +1869,7 @@ function HoldingList({ book, quote, stockTags, searchConfig, batchSel }) {
               setBatchDimension('concept')
               setBatchGroup([])
             }}
-              disabled={batch.running} title="勾选持仓 / 自选里的若干只股票，一次性批量生成 AI 操作建议（后台处理）">
+              disabled={batch.running} title="勾选持仓 / 自选里的若干只股票，一次性批量生成操作建议（后台处理）">
               <Icon name="spark" size={13} /> 一次性生成
             </button>
           )}
@@ -1971,7 +1971,7 @@ function HoldingList({ book, quote, stockTags, searchConfig, batchSel }) {
           <div className="bp-head">
             <span className="bp-title">
               {batch.running
-                ? <><Icon name="refresh" size={13} className="spin" /> 正在后台{batch.deepMode ? '深度' : '普通'}生成 AI 操作建议…{batch.serverMode ? <span className="sub-name"> · 云端(退后台/关页面照跑)</span> : null}{batch.deepMode ? <span className="bp-deep-tag">深度思考·耗时较长</span> : null}</>
+                ? <><Icon name="refresh" size={13} className="spin" /> 正在后台{batch.deepMode ? '深度' : '普通'}生成操作建议…{batch.serverMode ? <span className="sub-name"> · 云端（退后台或关页面仍会继续）</span> : null}{batch.deepMode ? <span className="bp-deep-tag">深度思考 · 耗时较长</span> : null}</>
                 : <><Icon name="check" size={13} /> {batch.deepMode ? '深度' : '批量'}生成完成</>}
             </span>
             <span className="bp-stat">
@@ -2079,11 +2079,11 @@ function HoldingList({ book, quote, stockTags, searchConfig, batchSel }) {
           <div className="busy-modal-mask" onClick={() => setBusyModal(null)}>
             <div className="busy-modal" onClick={(e) => e.stopPropagation()}>
             <div className="busy-modal-head">
-              <span className="busy-modal-title"><Icon name="gauge" size={15} /> AI 分析通道已满</span>
+              <span className="busy-modal-title"><Icon name="gauge" size={15} /> 生成通道已满</span>
               <button className="icon-btn" onClick={() => setBusyModal(null)} title="关闭"><Icon name="close" size={15} /></button>
             </div>
             <div className="busy-modal-desc">
-              当前 {busyModal.concurrency || busyModal.busy.length} 个 AI 分析通道都在使用中，请等待其中一个完成。
+              当前 {busyModal.concurrency || busyModal.busy.length} 个生成通道都在使用中，请等待其中一个完成。
               下列个股正在生成，完成后会自动腾出端点，届时可再次点击「一次性生成」。
             </div>
             <div className="busy-modal-list">
@@ -2280,7 +2280,7 @@ function HoldingItem({ h, quote: q }) {
       const s = suggestPlan()
       setPlanTP(adv.tp != null ? String(round(adv.tp)) : s.tp)
       setPlanSL(adv.sl != null ? String(round(adv.sl)) : s.sl)
-      setPlanReason(h.planReason || `复用AI操作建议${adv.action ? `(${adv.action})` : ''}的止盈/止损价`)
+      setPlanReason(h.planReason || `复用军师建议${adv.action ? `（${adv.action}）` : ''}的止盈止损价`)
       setPlanBasis({ from: 'advice', action: adv.action, tone: adv.tone, at: adv.at })
       setMode('plan')
       return
@@ -2303,7 +2303,7 @@ function HoldingItem({ h, quote: q }) {
       if (adv && (adv.tp != null || adv.sl != null)) {
         if (adv.tp != null) setPlanTP(String(round(adv.tp)))
         if (adv.sl != null) setPlanSL(String(round(adv.sl)))
-        setPlanReason((r) => r || `复用AI操作建议${adv.action ? `(${adv.action})` : ''}的止盈/止损价`)
+        setPlanReason((r) => r || `复用军师建议${adv.action ? `（${adv.action}）` : ''}的止盈止损价`)
         setPlanBasis({ from: 'advice', action: adv.action, tone: adv.tone, at: adv.at })
       }
     }
@@ -2482,7 +2482,7 @@ function HoldingItem({ h, quote: q }) {
           setTSide(r.result.nextSide)
         } else if (r.result.dir === 'positive') setTSide('buy')
         else if (r.result.dir === 'reverse') setTSide('sell')
-      } else setTAdvice({ error: r.error || 'AI 调用失败' })
+      } else setTAdvice({ error: r.error || '生成失败' })
     } catch (e) { setTAdvice({ error: String(e.message || e) }) }
   }
   // 采纳建议：填入第一腿方向/价位/手数
@@ -2898,15 +2898,15 @@ function HoldingItem({ h, quote: q }) {
             <div className="t-style">
               <span className="t-style-label">风格</span>
               {[['auto', '自动'], ['conservative', '稳健'], ['balanced', '均衡'], ['aggressive', '激进']].map(([k, label]) => (
-                <button key={k} className={'t-style-btn' + (tStyle === k ? ' active ' + k : '')} onClick={() => askTAdvice(k)} title={k === 'auto' ? 'AI 分析这只股的历史规律，自动选激进/均衡/稳健并定正T或反T' : ''}>{label}</button>
+                <button key={k} className={'t-style-btn' + (tStyle === k ? ' active ' + k : '')} onClick={() => askTAdvice(k)} title={k === 'auto' ? '根据这只股的历史规律自动选择风格和做T方向' : ''}>{label}</button>
               ))}
             </div>
             {!tAdvice && (
-              <button className="t-ai-btn" onClick={() => askTAdvice()}><Icon name="spark" size={14} />{tStyle === 'auto' ? 'AI 按历史规律自动决策做T策略' : `获取 AI 做T参考（${tStyle === 'conservative' ? '稳健' : tStyle === 'aggressive' ? '激进' : '均衡'}）`}</button>
+              <button className="t-ai-btn" onClick={() => askTAdvice()}><Icon name="spark" size={14} />{tStyle === 'auto' ? '按历史规律生成做T策略' : `生成做T参考（${tStyle === 'conservative' ? '稳健' : tStyle === 'aggressive' ? '激进' : '均衡'}）`}</button>
             )}
             {tAdvice && tAdvice.loading && (
               <div className="t-ai-loading-wrap">
-                <div className="t-ai-loading"><Icon name="refresh" size={13} className="spin" />{tAdvice.phase || 'AI 正在分析历史规律/分时/大盘/资金…'}</div>
+                <div className="t-ai-loading"><Icon name="refresh" size={13} className="spin" />{tAdvice.phase || '正在分析历史规律、分时、大盘和资金…'}</div>
                 {visibleAiSources(searchConfig.enabled, tAdvice.sources).length > 0 && (
                   <div className="adv-sources">
                     {visibleAiSources(searchConfig.enabled, tAdvice.sources).map((s, i) => (
@@ -3158,7 +3158,7 @@ function HoldReview({ code, name, cost, qty, price }) {
         </div>
         <button className="hr-goadvice" onClick={() => openStockDetail(code, name)}>
           <Icon name="target" size={12} />
-          <span>复盘与操作指导已合并到 <b>AI 操作建议</b>，点此生成一次即可</span>
+          <span>复盘与操作指导已合并到 <b>军师建议</b>，点此生成一次即可</span>
           <Icon name="chevronRight" size={13} />
         </button>
       </div>
@@ -3169,7 +3169,7 @@ function HoldReview({ code, name, cost, qty, price }) {
       {/* ① 顶部元信息条：徽标 + 时间（内容取自 AI 操作建议，无按钮/无定时任务）*/}
       <div className="hr-top minimal">
         <span className="hr-badge"><Icon name="history" size={12} /> 复盘</span>
-        <span className="hr-sess close">同源 AI 建议</span>
+        <span className="hr-sess close">同源军师建议</span>
         {ts && <span className="hr-time">{ts}</span>}
       </div>
 
@@ -3218,7 +3218,7 @@ function HoldReview({ code, name, cost, qty, price }) {
       {/* ⑤ 分工引导：想看此刻具体买卖价/加减仓算账 → 去详情页看完整 AI 操作建议 */}
       <button className="hr-goadvice" onClick={() => openStockDetail(code, name)}>
         <Icon name="target" size={12} />
-        <span>想看此刻<b>具体买卖价 / 加减仓算账</b>？打开 AI 操作建议</span>
+        <span>想看此刻<b>具体买卖价 / 加减仓算账</b>？打开军师建议</span>
         <Icon name="chevronRight" size={13} />
       </button>
 

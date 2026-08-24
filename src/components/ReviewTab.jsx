@@ -130,14 +130,14 @@ function DecisionClosure({ book }) {
     <div className="panel">
       <div className="panel-head">
         <div role="heading" aria-level="2" className="panel-title"><Icon name="target" size={16} /> 决策闭环</div>
-        <span className="panel-sub">AI 建议不等于真实操作，只统计实际落账</span>
+        <span className="panel-sub">军师建议不等于真实操作，只统计实际落账</span>
       </div>
       {stats.recommendations === 0 && stats.executions === 0 ? (
-        <div className="empty">生成 AI 操作建议并记录真实买卖后，这里会显示建议采纳与执行关联。</div>
+        <div className="empty">生成军师建议并记录真实买卖后，这里会显示建议采纳与执行关联。</div>
       ) : (
         <div className="rv-attr">
           <div className="rv-attr-cell">
-            <div className="rv-attr-k">AI 建议</div>
+            <div className="rv-attr-k">军师建议</div>
             <div className="rv-attr-v">{stats.recommendations}</div>
             <div className="rv-attr-s">{stats.actionableRecommendations} 条可执行 · {stats.pending} 条待执行</div>
           </div>

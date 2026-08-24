@@ -450,7 +450,7 @@ export function normalizePickDecision(value, allowedCodes = [], fallbackCandidat
         noTrade: true,
         noTradeReason: result.noTradeReason || '当前没有立即买点，以下为条件候选',
         fallback: true,
-        fallbackReason: result.noTradeReason || 'AI未形成主动出手结论，已展示确定性条件候选',
+        fallbackReason: result.noTradeReason || '研判未形成主动出手结论，已展示确定性条件候选',
         picks: fallback,
       }
     }

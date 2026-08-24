@@ -25,7 +25,7 @@ export function useAdviceGeneration(code) {
       active: true,
       status: canceling ? 'canceling' : 'running',
       stage: String(running?.stage || ''),
-      label: canceling ? '正在取消生成' : (running?.phase || 'AI 操作建议生成中'),
+      label: canceling ? '正在取消生成' : (running?.phase || '操作建议生成中'),
       cancelable: !canceling,
       cloud: false,
       deepMode: running?.deepMode === true,
@@ -100,7 +100,7 @@ export default function AdviceGenerationStatus({
               type="button"
               className="generation-cancel"
               onClick={cancel}
-              aria-label={`停止${code}的 AI 操作建议生成`}
+              aria-label={`停止${code}的操作建议生成`}
               title="停止本次生成"
             >
               <Icon name="close" size={13} />
@@ -168,8 +168,8 @@ export default function AdviceGenerationStatus({
     <button type="button" className={`advice-generation-status ${variant}`} onClick={generation.cancelable ? cancel : undefined}
       disabled={!generation.cancelable}
       aria-label={reviewing
-        ? `${code}的 AI 建议正在后台复核`
-        : `取消${code}的 AI 操作建议生成`}
+        ? `${code}的建议正在后台复核`
+        : `取消${code}的操作建议生成`}
       title={reviewing ? '复核使用独立端点，不占用军师生成' : '点击取消本次生成'}>
       <Icon name="refresh" size={12} className="spin" />
       <span>{generation.label}</span>

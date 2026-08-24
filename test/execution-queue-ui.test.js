@@ -62,7 +62,7 @@ test('个股详情用紧凑提示说明生成模式、Judge 与止损纪律', ()
 
   assert.match(stockDetail, /adviceModeGuidance/)
   assert.match(stockDetail, /role="note"/)
-  assert.match(stockDetail, /aria-label="AI 建议使用顺序"/)
+  assert.match(stockDetail, /aria-label="建议生成方式说明"/)
   assert.match(stockDetail, /id="advice-mode-guide"/)
   assert.match(stockDetail, /modeGuidance\.items\.map/)
   assert.match(stockDetail, /modeGuidance\.deepBadge/)

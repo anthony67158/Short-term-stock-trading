@@ -178,7 +178,7 @@ test('配置界面按角色展示端点且不再暴露通用资源池', () => {
   assert.match(frontend, /7 个角色/)
   assert.match(frontend, /9 个端点/)
   assert.match(frontend, /roleEndpoints/)
-  assert.match(frontend, /军师AI操作建议生成/)
+  assert.match(frontend, /军师操作建议生成/)
   assert.match(frontend, /复核角色/)
   assert.match(frontend, /Number\(roleSlots\?\.\[role\]\) > 1/)
   assert.match(frontend, /role !== 'advisor'/)

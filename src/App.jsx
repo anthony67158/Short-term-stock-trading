@@ -370,7 +370,7 @@ function MainApp() {
 
       {/* AI 模型配置向导:低频操作,入口藏在账号菜单;懒加载,仅打开时挂载 */}
       {llmConfigOpen && (
-        <ErrorBoundary label="AI 模型配置">
+        <ErrorBoundary label="模型配置">
           <Suspense fallback={null}>
             <LLMConfig />
           </Suspense>
@@ -409,7 +409,7 @@ function RegulatoryFooter({ showDisclaimer = false }) {
     <footer className="footer">
       {showDisclaimer && (
         <span className="footer-disclaimer">
-          数据来源：东方财富公开接口 · AI 分析由大模型基于实时数据生成，仅供研究参考，非投资建议 · 资金流为已发生数据，追高有滞后风险，注意止损
+          数据来源：东方财富公开接口 · 智能分析由大模型基于实时数据生成，仅供研究参考，非投资建议 · 资金流为已发生数据，追高有滞后风险，注意止损
         </span>
       )}
       <span className="footer-regulatory">

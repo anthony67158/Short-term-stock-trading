@@ -56,7 +56,7 @@ const ADVICE_MODE_GUIDANCE_ITEMS = Object.freeze([
     key: 'discipline',
     icon: 'shield',
     label: '止损纪律',
-    purpose: '优先于 AI',
+    purpose: '始终优先',
   },
 ])
 

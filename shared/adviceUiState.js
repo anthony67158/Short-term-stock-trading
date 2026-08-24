@@ -85,8 +85,8 @@ export function adviceJobState(
   const canceling = item.status === 'canceling'
   const review = role === 'review'
   const defaultLabel = review
-    ? running ? 'AI 建议复核中' : '排队等待云端复核'
-    : running ? 'AI 操作建议生成中' : '排队等待云端生成'
+    ? running ? '建议复核中' : '排队等待云端复核'
+    : running ? '操作建议生成中' : '排队等待云端生成'
   return {
     active: true,
     status: item.status,

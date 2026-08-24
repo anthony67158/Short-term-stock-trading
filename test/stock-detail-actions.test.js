@@ -80,7 +80,7 @@ test('首次生成推荐深度模式并固定展示决策分工', () => {
       { key: 'deep', icon: 'brain', label: '深度生成', purpose: '定计划' },
       { key: 'quick', icon: 'spark', label: '快速生成', purpose: '看变化' },
       { key: 'judge', icon: 'bell', label: '盯盘 Judge', purpose: '定时机' },
-      { key: 'discipline', icon: 'shield', label: '止损纪律', purpose: '优先于 AI' },
+      { key: 'discipline', icon: 'shield', label: '止损纪律', purpose: '始终优先' },
     ],
   })
 })

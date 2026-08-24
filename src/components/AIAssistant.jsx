@@ -398,7 +398,7 @@ export default function AIAssistant({ snapshot }) {
               : <button className="btn btn-primary" onClick={() => ask()}><Icon name="send" size={14} />发送</button>}
           </div>
           <div className="ai-input-help">Enter 发送 · Shift+Enter 换行</div>
-          <div className="ai-disclaimer ai-drawer-disclaimer">AI 基于实时行情/RAG/联网新闻分析，仅供研究参考，非投资建议</div>
+          <div className="ai-disclaimer ai-drawer-disclaimer">内容基于实时行情、知识库与联网新闻生成，仅供研究参考，非投资建议</div>
         </div>
       )}
       {confirmProposal && (

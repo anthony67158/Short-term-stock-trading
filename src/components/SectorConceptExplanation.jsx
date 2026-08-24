@@ -40,7 +40,7 @@ export default function SectorConceptExplanation({
             onClick={onExplain}
           >
             <Icon name={loading ? 'pulse' : 'spark'} size={13} />
-            {loading ? '解释中' : 'AI解释'}
+            {loading ? '解释中' : '解释'}
           </button>
         </div>
         {status && (

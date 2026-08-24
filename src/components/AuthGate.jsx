@@ -164,7 +164,7 @@ export function AccountMenu() {
               </button>
             )}
             <button type="button" role="menuitem" className="acct-item" onClick={() => { llmConfigStore.open(); setOpen(false) }}>
-              <Icon name="brain" size={13} />AI 模型配置
+              <Icon name="brain" size={13} />模型配置
             </button>
             <button
               type="button"

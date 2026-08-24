@@ -96,7 +96,7 @@ export default function MarketNews() {
         </div>
       )}
 
-      <div className="mn-disclaimer">数据来自财联社系/金十/新浪财经等公开免费接口，海外多为延迟，仅供研究参考，非投资建议。AI 操作建议/复盘/加减仓/问答会自动参考这些外部消息面。</div>
+      <div className="mn-disclaimer">数据来自财联社系/金十/新浪财经等公开免费接口，海外多为延迟，仅供研究参考，非投资建议。军师建议、复盘、加减仓与问答会自动参考这些外部消息面。</div>
     </div>
   )
 }

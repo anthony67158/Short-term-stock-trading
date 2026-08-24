@@ -280,7 +280,7 @@ test('板块展开区按需调用智能体并持久展示解释', () => {
   assert.match(conceptComponent, /一句话看懂/)
   assert.match(conceptComponent, /为什么形成/)
   assert.match(conceptComponent, /怎么辨认/)
-  assert.match(conceptComponent, /AI解释/)
+  assert.match(conceptComponent, /\{loading \? '解释中' : '解释'\}/)
   assert.match(conceptComponent, /重新解释/)
   assert.match(
     conceptComponent,
