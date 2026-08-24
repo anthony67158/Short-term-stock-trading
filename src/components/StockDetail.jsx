@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef } from 'react'
 import ReactECharts from 'echarts-for-react'
 import Icon from './Icon'
 import StockTags from './StockTags'
+import { StockNoteEditor } from './StockNote'
 import AdviceGenerationStatus from './AdviceGenerationStatus'
 import AdvicePresentation from './AdvicePresentation'
 import { usePolling } from '../hooks'
@@ -42,6 +43,7 @@ import {
   selectPrimaryProductionForecast,
   shouldRefreshProductionForecast,
 } from '../../shared/productionForecastWindow.js'
+import { stockNoteText } from '../../shared/stockNotes.js'
 
 // 把公司网址补全为可点击的绝对 URL（东财 F10 常给不带协议的裸域名）
 function normalizeUrl(raw) {
@@ -741,6 +743,7 @@ export default function StockDetail({ stock, onClose }) {
   const modeGuidance = adviceModeGuidance({
     hasAdvice: Boolean(quantState?.advice),
   })
+  const stockNote = stockNoteText(book.stockNotes, stock.code)
 
   return (
     <div className="modal-mask" onClick={onClose}>
@@ -803,6 +806,11 @@ export default function StockDetail({ stock, onClose }) {
         </div>
 
         <div className="detail-scroll">
+          <StockNoteEditor
+            code={stock.code}
+            note={stockNote}
+            initialEditing={stock.editNote === true}
+          />
           {/* 价格 & 均线概览 */}
           {overview && (
             <div className="detail-quote">

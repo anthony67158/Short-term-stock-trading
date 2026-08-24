@@ -3,6 +3,7 @@ import Icon from './Icon'
 import { HL } from './RichText'
 import StockName from './StockName'
 import StockTags from './StockTags'
+import { StockNoteSummary } from './StockNote'
 import StockGroupFilter from './StockGroupFilter'
 import AutoRefreshStockSelector from './AutoRefreshStockSelector'
 import Reasoning from './Reasoning'
@@ -68,6 +69,7 @@ import {
 } from '../../shared/stockGroupFilter.js'
 import { adviceRecency } from '../../shared/adviceRecency.js'
 import { selectAutoRefreshCodes } from '../../shared/adviceAutoRefreshPolicy.js'
+import { stockNoteText } from '../../shared/stockNotes.js'
 
 // —— 搜索结果 → 定位到卡片:轻量模块级事件总线 ——
 // 搜索框(StockSearch)、自选区(PlanList)、持仓区(HoldingList)同在本文件,用一个 Set 广播即可:
@@ -892,6 +894,7 @@ function PlanList({ book, quote, stockTags, batchSel }) {
   const Card = (p) => {
     const q = quote[p.code]
     const checked = selected.has(p.code)
+    const stockNote = stockNoteText(book.stockNotes, p.code)
     return (
       <div className={'trade-card plan-cand' + (p.star ? ' starred' : '') + (selectMode ? ' selectable' : '') + (checked ? ' sel-on' : '')}
         key={p.code}
@@ -954,6 +957,16 @@ function PlanList({ book, quote, stockTags, batchSel }) {
         )}
         {/* 当前指令、有效价位、手数与进度共用同一建议视图，避免方向脱节。 */}
         <CandDecision p={p} q={q} />
+        <StockNoteSummary
+          code={p.code}
+          name={q?.name || p.name}
+          text={stockNote}
+          onEdit={() => openStockDetail(
+            p.code,
+            q?.name || p.name,
+            { editNote: true },
+          )}
+        />
         {/* 买点预警提示：跟随 AI 建议买入价自动设的「到价 ≤ 买入价」预警，到点即提醒买入 */}
         {(() => {
           const currentAdvice = getAdvice(p.code, 'buy_advice')?.advice
@@ -2140,6 +2153,7 @@ function HoldingItem({ h, idx, quote: q }) {
   const mobileOperations = useMediaQuery('(max-width: 720px)')
 
   const book = usePlanStore()
+  const stockNote = stockNoteText(book.stockNotes, h.code)
   const manualTradePairs = useMemo(
     () => tradeActivityContext(book.closed || [], h.code)
       .t.pairRecords
@@ -2667,6 +2681,17 @@ function HoldingItem({ h, idx, quote: q }) {
         />
       </div>
 
+      <StockNoteSummary
+        code={h.code}
+        name={h.name}
+        text={stockNote}
+        onEdit={() => openStockDetail(
+          h.code,
+          h.name,
+          { editNote: true },
+        )}
+      />
+
       {/* 明细展开开关：把计划/做T 收纳,展开后手风琴分段(一次看一类)。
           复盘已与「AI操作建议」同源,直接点进个股详情页看即可,不再单列分段;
           「踏5不破10」参考均线信号也已移入个股详情页。 */}
@@ -2788,6 +2813,19 @@ function HoldingItem({ h, idx, quote: q }) {
           </div>
           <div className="pi-card-tools">
             {!(h.tp || h.sl || h.planReason) && <button className="chip-btn ghost" onClick={() => openPlan(false)}>设计划</button>}
+            <button
+              type="button"
+              className={'icon-btn stock-note-edit-button' + (stockNote ? ' active' : '')}
+              aria-label={`${stockNote ? '编辑' : '添加'}${h.name}备注`}
+              title={stockNote ? '编辑备注' : '添加备注'}
+              onClick={() => openStockDetail(
+                h.code,
+                h.name,
+                { editNote: true },
+              )}
+            >
+              <Icon name="edit" size={14} />
+            </button>
             <button className="icon-btn act-del" aria-label={`删除${h.name}持仓`} title="删除持仓" onClick={() => setConfirmDel(true)}><Icon name="trash" size={14} /></button>
           </div>
         </div>

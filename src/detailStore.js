@@ -19,6 +19,6 @@ export function useDetailStore() {
 }
 
 // 便捷：给任意股票名/单元格用的点击处理器
-export function openStockDetail(code, name) {
-  detailStore.open({ code, name })
+export function openStockDetail(code, name, options = {}) {
+  detailStore.open({ code, name, ...options })
 }
