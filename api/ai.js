@@ -97,6 +97,9 @@ import {
   compileAdvicePresentationV3,
 } from '../shared/advicePresentation.js';
 import {
+  humanizeAdviceTextFields,
+} from '../shared/userFacingLanguage.js';
+import {
   buildTGridExperiment,
   evaluateTGridEligibility,
 } from '../shared/tGridPolicy.js';
@@ -2281,7 +2284,6 @@ export default async function handler(req, res) {
           atrPct,
         });
       }
-      result.presentation = compileAdvicePresentationV3(result);
       collectedMeta.strategyRoute = {
         schemaVersion: strategyRoute.schemaVersion,
         catalogVersion: strategyRoute.catalogVersion,
@@ -2319,6 +2321,10 @@ export default async function handler(req, res) {
       if (searchReference) result.searchReference = searchReference;
       else delete result.searchReference;
       result.theoryRefs = theoryRefs;
+      result = humanizeAdviceTextFields(result);
+      if (isAdvisorMode(mode)) {
+        result.presentation = compileAdvicePresentationV3(result);
+      }
     }
     return finish({
       ok: true,

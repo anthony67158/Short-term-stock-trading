@@ -1,4 +1,5 @@
 import { t1GateForSide } from './t1AdvicePolicy.js'
+import { humanizeUserFacingText } from './userFacingLanguage.js'
 
 const finite = (value) => {
   if (value == null || value === '') return null
@@ -7,7 +8,9 @@ const finite = (value) => {
 }
 
 const clean = (value, limit = 240) => {
-  const text = String(value ?? '').trim().replace(/\s+/g, ' ')
+  const text = humanizeUserFacingText(value ?? '')
+    .trim()
+    .replace(/\s+/g, ' ')
   return text.length > limit ? `${text.slice(0, limit - 1)}…` : text
 }
 
@@ -154,16 +157,16 @@ export function buildAdviceActionView(advice = {}, { mode = '' } = {}) {
   const planLots = Number(plan?.quantity?.lots) || 0
   const planPrice = finite(plan?.prices?.reference)
   const planInstruction = plan?.actionability === 'BLOCKED'
-    ? `暂不执行：${planReasons.join('；') || '确定性闸门未通过'}`
+    ? `暂不执行：${planReasons.join('；') || '执行条件未满足'}`
     : plan?.actionability === 'RESEARCH_ONLY'
-      ? `研究级条件建议：${planAction || '操作'}${planLots}手${planPrice != null ? `，参考${planPrice}元` : ''}；策略晋级前不进入强执行确认`
+      ? `仅供观察：${planAction || '操作'}${planLots}手${planPrice != null ? `，参考${planPrice}元` : ''}；策略通过实盘启用审核前，不能直接执行`
       : ''
   const source = plan ? {
     ...advice,
     action: plan.actionability === 'BLOCKED'
       ? '观望'
       : plan.actionability === 'RESEARCH_ONLY'
-        ? `研究级·${planAction || '建议'}`
+        ? `观察·${planAction || '建议'}`
         : planAction || advice.action,
     actionPlan: planInstruction || advice.actionPlan,
     planQty: plan.quantity?.lots,

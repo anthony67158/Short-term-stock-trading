@@ -1480,7 +1480,7 @@ function AutoRefreshControl({ quote, stockTags }) {
       : result?.status === 'running'
         ? '已有生成任务正在运行'
         : result?.status === 'full'
-          ? 'AI 端点忙，请稍后再试'
+          ? 'AI 分析通道正忙，请稍后再试'
           : '当前没有可刷新的股票'
     setManualNotice(text)
   }
@@ -2050,11 +2050,11 @@ function HoldingList({ book, quote, stockTags, searchConfig, batchSel }) {
           <div className="busy-modal-mask" onClick={() => setBusyModal(null)}>
             <div className="busy-modal" onClick={(e) => e.stopPropagation()}>
             <div className="busy-modal-head">
-              <span className="busy-modal-title"><Icon name="gauge" size={15} /> AI 端点已满</span>
+              <span className="busy-modal-title"><Icon name="gauge" size={15} /> AI 分析通道已满</span>
               <button className="icon-btn" onClick={() => setBusyModal(null)} title="关闭"><Icon name="close" size={15} /></button>
             </div>
             <div className="busy-modal-desc">
-              当前 {busyModal.concurrency || busyModal.busy.length} 个 AI 端点已全部占用（并发数=已配置端点数）。
+              当前 {busyModal.concurrency || busyModal.busy.length} 个 AI 分析通道都在使用中，请等待其中一个完成。
               下列个股正在生成，完成后会自动腾出端点，届时可再次点击「一次性生成」。
             </div>
             <div className="busy-modal-list">
@@ -2933,7 +2933,7 @@ function HoldingItem({ h, idx, quote: q }) {
                 {tAdvice.reasoning && (
                   <div className="adv-reasoning">
                     <div className="adv-reasoning-head"><Icon name="brain" size={12} /> 军师推理过程</div>
-                    <div className="adv-reasoning-body" ref={(el) => { if (el) el.scrollTop = el.scrollHeight }}>{tAdvice.reasoning}</div>
+                    <div className="adv-reasoning-body" ref={(el) => { if (el) el.scrollTop = el.scrollHeight }}><HL text={tAdvice.reasoning} /></div>
                   </div>
                 )}
               </div>
@@ -2954,33 +2954,33 @@ function HoldingItem({ h, idx, quote: q }) {
                   <div className="t-ai-warn"><Icon name="shield" size={12} /> 内容较长被截断，已展示已生成部分，可点「重新生成」重试</div>
                 )}
                 {tAdvice.result.raw && (
-                  <div className="t-ai-plain" style={{ whiteSpace: 'pre-wrap' }}>{tAdvice.result.raw}</div>
+                  <div className="t-ai-plain" style={{ whiteSpace: 'pre-wrap' }}><HL text={tAdvice.result.raw} /></div>
                 )}
                 {tAdvice.result.reasoning && (
                   <Reasoning text={tAdvice.result.reasoning} />
                 )}
                 {tAdvice.result.actionPlan && (
-                  <div className="t-ai-plan"><Icon name="target" size={13} /><span className="t-ai-plan-k">这样操作</span>{tAdvice.result.actionPlan}</div>
+                  <div className="t-ai-plan"><Icon name="target" size={13} /><span className="t-ai-plan-k">这样操作</span><HL text={tAdvice.result.actionPlan} /></div>
                 )}
                 {tAdvice.result.histPattern && (
-                  <div className="t-ai-hist"><Icon name="history" size={12} /><span>历史规律</span>{tAdvice.result.histPattern}</div>
+                  <div className="t-ai-hist"><Icon name="history" size={12} /><span>历史规律</span><HL text={tAdvice.result.histPattern} /></div>
                 )}
-                {tAdvice.result.plain && <div className="t-ai-plain">{tAdvice.result.plain}</div>}
+                {tAdvice.result.plain && <div className="t-ai-plain"><HL text={tAdvice.result.plain} /></div>}
                 <div className="t-ai-basis">
-                  {tAdvice.result.styleReason && <div className="t-basis-row"><span className="t-basis-k">选型</span>{tAdvice.result.styleReason}</div>}
-                  {tAdvice.result.marketNote && <div className="t-basis-row"><span className="t-basis-k">大盘</span>{tAdvice.result.marketNote}</div>}
-                  {tAdvice.result.stockNote && <div className="t-basis-row"><span className="t-basis-k">盘面</span>{tAdvice.result.stockNote}</div>}
-                  {tAdvice.result.fundNote && <div className="t-basis-row"><span className="t-basis-k">资金</span>{tAdvice.result.fundNote}</div>}
+                  {tAdvice.result.styleReason && <div className="t-basis-row"><span className="t-basis-k">选型</span><HL text={tAdvice.result.styleReason} /></div>}
+                  {tAdvice.result.marketNote && <div className="t-basis-row"><span className="t-basis-k">大盘</span><HL text={tAdvice.result.marketNote} /></div>}
+                  {tAdvice.result.stockNote && <div className="t-basis-row"><span className="t-basis-k">盘面</span><HL text={tAdvice.result.stockNote} /></div>}
+                  {tAdvice.result.fundNote && <div className="t-basis-row"><span className="t-basis-k">资金</span><HL text={tAdvice.result.fundNote} /></div>}
                   {(tAdvice.result.support || tAdvice.result.resistance) && (
                     <div className="t-basis-row"><span className="t-basis-k">支撑压力</span>支撑 <b className="green">{tAdvice.result.support ?? '--'}</b> · 压力 <b className="red">{tAdvice.result.resistance ?? '--'}</b></div>
                   )}
-                  {tAdvice.result.quantNote && <div className="t-basis-row"><span className="t-basis-k quant">量化</span>{tAdvice.result.quantNote}</div>}
-                  {tAdvice.result.newsNote && <div className="t-basis-row"><span className="t-basis-k">消息</span>{tAdvice.result.newsNote}</div>}
-                  {tAdvice.result.macroNote && <div className="t-basis-row"><span className="t-basis-k">宏观</span>{tAdvice.result.macroNote}</div>}
+                  {tAdvice.result.quantNote && <div className="t-basis-row"><span className="t-basis-k quant">量化</span><HL text={tAdvice.result.quantNote} /></div>}
+                  {tAdvice.result.newsNote && <div className="t-basis-row"><span className="t-basis-k">消息</span><HL text={tAdvice.result.newsNote} /></div>}
+                  {tAdvice.result.macroNote && <div className="t-basis-row"><span className="t-basis-k">宏观</span><HL text={tAdvice.result.macroNote} /></div>}
                   {tAdvice.result.riskReward && <div className="t-basis-row"><span className="t-basis-k">盈亏比</span>{tAdvice.result.riskReward}</div>}
-                  {tAdvice.result.bearCase && <div className="t-basis-row"><span className="t-basis-k">反方</span>{tAdvice.result.bearCase}</div>}
-                  {tAdvice.result.invalidation && <div className="t-basis-row"><span className="t-basis-k theory">失效</span>{tAdvice.result.invalidation}</div>}
-                  {tAdvice.result.theory && <div className="t-basis-row"><span className="t-basis-k theory">理论</span>{tAdvice.result.theory}</div>}
+                  {tAdvice.result.bearCase && <div className="t-basis-row"><span className="t-basis-k">反方</span><HL text={tAdvice.result.bearCase} /></div>}
+                  {tAdvice.result.invalidation && <div className="t-basis-row"><span className="t-basis-k theory">失效</span><HL text={tAdvice.result.invalidation} /></div>}
+                  {tAdvice.result.theory && <div className="t-basis-row"><span className="t-basis-k theory">理论</span><HL text={tAdvice.result.theory} /></div>}
                 </div>
                 {tAdvice.result.dir !== 'none' && (
                   <div className="t-ai-grid">
@@ -2991,8 +2991,8 @@ function HoldingItem({ h, idx, quote: q }) {
                     <div><span className="k">成本可降</span><b className="green">{tAdvice.result.estCostDown}</b></div>
                   </div>
                 )}
-                {tAdvice.result.addOn && <div className="t-ai-addon"><Icon name="bolt" size={12} />加码：{tAdvice.result.addOn}</div>}
-                {tAdvice.result.risk && <div className="t-ai-risk"><Icon name="shield" size={12} />{tAdvice.result.risk}</div>}
+                {tAdvice.result.addOn && <div className="t-ai-addon"><Icon name="bolt" size={12} />加码：<HL text={tAdvice.result.addOn} /></div>}
+                {tAdvice.result.risk && <div className="t-ai-risk"><Icon name="shield" size={12} /><HL text={tAdvice.result.risk} /></div>}
                 {tAdvice.result.dir !== 'none' && (
                   <button className="chip-btn done" style={{ marginTop: 8 }} onClick={adoptAdvice}><Icon name="check" size={13} />采纳建议价位</button>
                 )}

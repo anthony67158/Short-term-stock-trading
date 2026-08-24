@@ -61,8 +61,8 @@ test('诊断结果展示概念调仓前后、市场场景和执行单质量', ()
 })
 
 test('持仓模型失败或自动切换时展示真实恢复状态', () => {
-  assert.match(component, /result\.warning/)
-  assert.match(component, /result\.meta\?\.modelRecovered/)
+  assert.match(component, /displayResult\.warning/)
+  assert.match(component, /displayResult\.meta\?\.modelRecovered/)
   assert.match(component, /portfolio-analysis-warning/)
   assert.match(styles, /\.portfolio-analysis-warning\s*{/)
   assert.match(styles, /\.portfolio-analysis-warning\.recovered\s*{/)

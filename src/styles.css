@@ -1392,11 +1392,19 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 
 @media (max-width: 640px) {
   .strategy-research-panel .panel-head {
-    align-items: center;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .strategy-research-actions {
+    flex: 1 0 100%;
+    justify-content: space-between;
+    width: 100%;
   }
   .strategy-research-summary {
-    max-width: 180px;
-    overflow-x: auto;
+    max-width: none;
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+    overflow: visible;
   }
   .strategy-research-table {
     min-width: 860px;

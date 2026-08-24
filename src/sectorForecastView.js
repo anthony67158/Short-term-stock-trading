@@ -117,7 +117,7 @@ const ACTION_VIEWS = Object.freeze({
     label: '回避',
     intent: 'avoid',
     instruction:
-      '不买：资金或结构未通过风控闸门，暂时回避。',
+      '不买：资金或走势未通过风险检查，暂时回避。',
   }),
 })
 

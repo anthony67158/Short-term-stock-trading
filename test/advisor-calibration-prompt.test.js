@@ -146,6 +146,9 @@ test('军师明确把动作价位手数视为候选并服从统一决策编译�
   assert.match(ADVISOR_SYSTEM, /研究级条件建议/)
   assert.match(ADVISOR_SYSTEM, /strategyRoute/)
   assert.match(ADVISOR_SYSTEM, /SHADOW_ONLY/)
+  assert.match(ADVISOR_SYSTEM, /严禁原样写进/)
+  assert.match(ADVISOR_FAST_SYSTEM, /系统内部字段名/)
+  assert.match(ADVISOR_FAST_SYSTEM, /市场处于防守状态/)
 })
 
 test('快速军师输出限制重复文案并保留核心证据', () => {

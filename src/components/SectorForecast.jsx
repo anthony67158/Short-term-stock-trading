@@ -17,6 +17,7 @@ import {
   sortSectorForecasts,
   summarizeSectorForecastActions,
 } from '../sectorForecastView.js'
+import { humanizeUserFacingText } from '../../shared/userFacingLanguage.js'
 
 const PHASE_LABELS = {
   ACCUMULATION: '潜伏吸筹',
@@ -84,15 +85,15 @@ function SectorExplanation({ sector, session }) {
       <div className="sector-forecast-thesis">
         <section>
           <h3>为什么现在</h3>
-          <p>{explanation.whyNow || sector.reasons?.join('；') || '暂无补充解释'}</p>
+          <p>{humanizeUserFacingText(explanation.whyNow || sector.reasons?.join('；') || '暂无补充解释')}</p>
         </section>
         <section>
           <h3>催化与反方</h3>
-          <p>{catalysts.join('；') || explanation.counterCase || '暂无已核验催化'}</p>
+          <p>{humanizeUserFacingText(catalysts.join('；') || explanation.counterCase || '暂无已核验催化')}</p>
         </section>
         <section>
           <h3>风险与失效</h3>
-          <p>{risks.join('；') || explanation.invalidation || '暂无额外风险项'}</p>
+          <p>{humanizeUserFacingText(risks.join('；') || explanation.invalidation || '暂无额外风险项')}</p>
         </section>
       </div>
       {!!sector.stocks?.length && (
@@ -590,7 +591,7 @@ export default function SectorForecast() {
                     </span>
                     <span className="sector-forecast-score">
                       <strong>{finite(forecast.score) ? Number(forecast.score).toFixed(1) : '--'}</strong>
-                      <small>{forecast.probability == null ? 'V1评分' : `概率 ${percent(forecast.probability)}`}</small>
+                      <small>{forecast.probability == null ? '综合评分' : `概率 ${percent(forecast.probability)}`}</small>
                     </span>
                     <span
                       className="sector-forecast-guidance"
@@ -598,9 +599,11 @@ export default function SectorForecast() {
                     >
                       <strong>{action.instruction}</strong>
                       <small>
-                        {sector.explanation?.whyNow
+                        {humanizeUserFacingText(
+                          sector.explanation?.whyNow
                           || sector.reasons?.[0]
-                          || '等待解释'}
+                          || '等待解释',
+                        )}
                       </small>
                     </span>
                     <Icon name={isOpen ? 'chevronDown' : 'chevronRight'} size={15} />

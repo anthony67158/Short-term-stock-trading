@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { fetchDailyReport } from '../ai'
 import { useAiSearchConfig } from '../aiSearchConfigStore'
+import { humanizeAdviceTextFields } from '../../shared/userFacingLanguage.js'
 import DailyReportSchedule from './DailyReportSchedule'
 import Icon from './Icon'
 import Md from './Md'
@@ -697,6 +698,8 @@ export default function DailyReport({ onClose }) {
 
   const result = state.data
   const rep = result?.report
+    ? humanizeAdviceTextFields(result.report)
+    : null
   const newsRefs = (result?.newsRefs || [])
     .filter((item) => item?.kind !== 'doubao_search')
     .filter((item) => item?.kind !== 'web_search')

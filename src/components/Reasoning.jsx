@@ -1,3 +1,5 @@
+import { humanizeUserFacingText } from '../../shared/userFacingLanguage.js'
+
 // 全站通用：AI 研判(ReAct/CoT 推理链)展示。
 // 后端把推理链塞进一个字符串里，用 ①②③④⑤ 标记步骤(有时用 → 连接)。
 // 以前直接平铺成一坨，扫读困难；这里按步骤序号拆成独立行，每步一行、序号高亮。
@@ -10,7 +12,7 @@ const STEP_MARKS = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨
 //   2) 无圈号但用 → 分隔
 //   3) 完全无分隔 → 整段作为一条
 function splitSteps(text) {
-  const raw = String(text || '').trim()
+  const raw = humanizeUserFacingText(text || '').trim()
   if (!raw) return []
   // 有圈号：按圈号切，保留圈号本身作为该步的标号
   if (STEP_MARKS.some((m) => raw.includes(m))) {

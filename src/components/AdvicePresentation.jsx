@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { buildAdvicePresentation } from '../../shared/advicePresentation.js'
+import { humanizeAdviceTextFields } from '../../shared/userFacingLanguage.js'
 import AdviceDetails from './AdviceDetails'
 import Icon from './Icon'
 import { HL } from './RichText'
@@ -126,10 +127,10 @@ function RiskOverlay({ risk }) {
   return (
     <section
       className={'advice-risk-overlay ' + (defensive ? 'defensive' : risk.level || '')}
-      aria-label="账户风险闸门"
+      aria-label="账户风险检查"
     >
       <div className="aro-title">
-        <Icon name="shield" size={12} /> 账户风险闸门
+        <Icon name="shield" size={12} /> 账户风险检查
         <b>{risk.stopBreached ? '止损已触发' : risk.blocked ? '已阻止新增风险' : '风险提示'}</b>
       </div>
       <div className="aro-reasons">{risk.reasons.join('；')}</div>
@@ -179,23 +180,8 @@ function EvidenceGapNotice({ issues = [] }) {
 
 function DecisionPlanSummary({ plan }) {
   if (!plan) return null
-  const governanceLabel = {
-    draft: '草稿',
-    backtested: '已回测',
-    rejected: '已拒绝',
-    shadow: '影子运行',
-    'paper-qualified': '模拟达标',
-    approved: '已批准',
-    active: '生产启用',
-    suspended: '已暂停',
-    retired: '已退役',
-  }[plan.governanceState] || plan.governanceState
-  const statusLabel = {
-    READY: '确定性校验通过',
-    RESEARCH_ONLY: '研究级条件建议',
-    BLOCKED: '已被确定性闸门阻止',
-    WATCH: '等待触发',
-  }[plan.actionability] || '等待确认'
+  const governanceLabel = plan.governanceLabel
+  const statusLabel = plan.actionabilityLabel || '等待确认'
   const statusTone = plan.actionability === 'READY'
     ? 'ready'
     : plan.actionability === 'BLOCKED'
@@ -225,8 +211,8 @@ function DecisionPlanSummary({ plan }) {
           </span>
         )}
         {plan.strategyId && (
-          <span title={`${plan.strategyId} · ${plan.specVersion || ''}`}>
-            策略 <b>{plan.strategyName || plan.strategyId}</b>
+          <span>
+            策略 <b>{plan.strategyName || '系统策略'}</b>
           </span>
         )}
         {governanceLabel && (
@@ -234,8 +220,8 @@ function DecisionPlanSummary({ plan }) {
         )}
         {plan.outOfSample?.folds > 0 && (
           <span>
-            样本外 <b>
-              {plan.outOfSample.positiveFolds}/{plan.outOfSample.folds} fold
+            历史检验 <b>
+              {plan.outOfSample.positiveFolds}/{plan.outOfSample.folds}个阶段通过
               {' · '}
               {plan.outOfSample.returnPct > 0 ? '+' : ''}
               {plan.outOfSample.returnPct}%
@@ -321,20 +307,31 @@ export default function AdvicePresentation({
   onArmExecutionPlan,
 }) {
   const [expanded, setExpanded] = useState(false)
-  const view = useMemo(() => buildAdvicePresentation(advice), [advice])
+  const displayAdvice = useMemo(
+    () => humanizeAdviceTextFields(advice || {}),
+    [advice],
+  )
+  const displayReview = useMemo(
+    () => humanizeAdviceTextFields(knowledgeActionReview || {}),
+    [knowledgeActionReview],
+  )
+  const view = useMemo(
+    () => buildAdvicePresentation(displayAdvice),
+    [displayAdvice],
+  )
   const hasTrigger = Object.values(view.trigger).some(Boolean)
   const hasDetails = Boolean(
-    advice.reasoning
-    || advice.knowledgeActionPlan
-    || advice.techNote
-    || advice.fundNote
-    || advice.newsNote
-    || advice.macroNote
-    || advice.seatNote
-    || advice.quantNote
-    || advice.theoryNote
-    || advice.bearCase
-    || advice.risk
+    displayAdvice.reasoning
+    || displayAdvice.knowledgeActionPlan
+    || displayAdvice.techNote
+    || displayAdvice.fundNote
+    || displayAdvice.newsNote
+    || displayAdvice.macroNote
+    || displayAdvice.seatNote
+    || displayAdvice.quantNote
+    || displayAdvice.theoryNote
+    || displayAdvice.bearCase
+    || displayAdvice.risk
     || view.model
     || view.decisionPlan
     || view.review
@@ -379,7 +376,7 @@ export default function AdvicePresentation({
               </div>
             )}
           </div>
-          {(view.execution.quantity || view.execution.amount || advice.riskReward) && (
+          {(view.execution.quantity || view.execution.amount || displayAdvice.riskReward) && (
             <div className="advice-execution-metrics">
               {view.execution.quantity && (
                 <span>操作 <b>{view.execution.quantity}</b></span>
@@ -387,8 +384,8 @@ export default function AdvicePresentation({
               {view.execution.amount && (
                 <span>资金 <b>{view.execution.amount}</b></span>
               )}
-              {advice.riskReward && (
-                <span>盈亏比 <b>{advice.riskReward}</b></span>
+              {displayAdvice.riskReward && (
+                <span>盈亏比 <b>{displayAdvice.riskReward}</b></span>
               )}
             </div>
           )}
@@ -400,7 +397,7 @@ export default function AdvicePresentation({
         />
       </section>
 
-      <RiskOverlay risk={advice.riskOverlay} />
+      <RiskOverlay risk={displayAdvice.riskOverlay} />
       <EvidenceGapNotice
         issues={view.decisionPlan?.evidenceIssues}
       />
@@ -456,9 +453,9 @@ export default function AdvicePresentation({
           ))}
         </section>
       )}
-      {advice.serverAdjust && (
+      {displayAdvice.serverAdjust && (
         <div className="advice-adjust">
-          <Icon name="shield" size={12} /> 已按合规校正：{advice.serverAdjust}
+          <Icon name="shield" size={12} /> 已按规则校正：{displayAdvice.serverAdjust}
         </div>
       )}
 
@@ -477,9 +474,9 @@ export default function AdvicePresentation({
           </button>
           {expanded && (
             <div className="advice-deep-content">
-              <Continuity continuity={advice.continuity} />
+              <Continuity continuity={displayAdvice.continuity} />
               <ReviewCycle review={view.review} enabled={reviewEnabled} />
-              <DecisionContext context={advice.decisionContext} />
+              <DecisionContext context={displayAdvice.decisionContext} />
               <DecisionPlanSummary plan={view.decisionPlan} />
               {view.model && (
                 <section
@@ -534,9 +531,9 @@ export default function AdvicePresentation({
                   ))}
                 </section>
               )}
-              <TheoryReferences references={advice.theoryRefs} />
-              <SearchReference reference={advice.searchReference} />
-              <AdviceDetails advice={advice} review={knowledgeActionReview} />
+              <TheoryReferences references={displayAdvice.theoryRefs} />
+              <SearchReference reference={displayAdvice.searchReference} />
+              <AdviceDetails advice={displayAdvice} review={displayReview} />
             </div>
           )}
         </div>

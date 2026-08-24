@@ -71,7 +71,7 @@ export default function LhbBoard({ interval }) {
               </thead>
               <tbody>
                 {stocks.map((s, i) => (
-                  <tr key={s.code}>
+                  <tr key={`${s.code}:${i}`}>
                     <td><span className="rank">{i + 1}</span><StockName code={s.code} name={s.name} /></td>
                     <td>{fmtRaw(s.price)}</td>
                     <td className={pctClass(s.pct)}>{fmtPct(s.pct)}</td>

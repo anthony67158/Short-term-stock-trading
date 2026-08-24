@@ -20,6 +20,7 @@ const stockDetail = read('src/components/StockDetail.jsx')
 const advicePresentation = read('src/components/AdvicePresentation.jsx')
 const dailyReport = read('src/components/DailyReport.jsx')
 const dailyReportSchedule = read('src/components/DailyReportSchedule.jsx')
+const lhbBoard = read('src/components/LhbBoard.jsx')
 const llmConfig = read('src/components/LLMConfig.jsx')
 const quantModelControl = read('src/components/QuantModelControl.jsx')
 const planTab = read('src/components/PlanTab.jsx')
@@ -35,6 +36,11 @@ const semanticTabSources = [
   'src/components/SectorPanel.jsx',
   'src/components/StockPanel.jsx',
 ].map(read)
+
+test('龙虎榜同一股票多条上榜原因使用复合行标识', () => {
+  assert.match(lhbBoard, /key=\{`\$\{s\.code\}:\$\{i\}`\}/)
+  assert.doesNotMatch(lhbBoard, /<tr key=\{s\.code\}>/)
+})
 
 test('四个工作区共用紧凑页面身份头部且不展示流程指导', () => {
   assert.match(app, /className="workspace-identity"/)
@@ -922,8 +928,8 @@ test('军师建议展示本次实际使用的持仓与资金快照', () => {
     precision,
     /\.advice-decision-context/,
   )
-  assert.match(advicePresentation, /账户风险闸门/)
-  assert.match(advicePresentation, /advice\.riskOverlay/)
+  assert.match(advicePresentation, /账户风险检查/)
+  assert.match(advicePresentation, /displayAdvice\.riskOverlay/)
   assert.match(precision, /\.advice-risk-overlay/)
 })
 

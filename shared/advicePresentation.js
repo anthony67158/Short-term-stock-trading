@@ -1,3 +1,10 @@
+import {
+  actionabilityLabel,
+  humanizeAdviceTextFields,
+  marketRegimeLabel,
+  strategyStateLabel,
+} from './userFacingLanguage.js'
+
 const clean = (value, limit = 800) => {
   if (value == null) return ''
   const result = String(value).trim().replace(/\s+/g, ' ')
@@ -152,11 +159,11 @@ function decisionPlanSummary(plan) {
       })).filter((issue) => issue.source && issue.label)
     : []
   const statusText = actionability === 'READY'
-    ? '已通过确定性策略与风险校验'
+    ? '策略条件与账户风险检查均已通过'
     : actionability === 'RESEARCH_ONLY'
-      ? (plan.blockedReasons || []).join('；') || '仅供研究，尚未通过生产晋级'
+      ? (plan.blockedReasons || []).join('；') || '仅供观察，暂不可直接执行'
       : actionability === 'BLOCKED'
-        ? (plan.blockedReasons || []).join('；') || '确定性闸门未通过'
+        ? (plan.blockedReasons || []).join('；') || '执行条件未满足'
         : '等待触发条件'
   const outOfSample = plan.strategy?.outOfSample
   const compoundedReturn = Number(outOfSample?.compoundedReturn)
@@ -171,10 +178,13 @@ function decisionPlanSummary(plan) {
     strategyName: clean(plan.strategy?.name, 80),
     strategyFamily: clean(plan.strategy?.family, 80),
     governanceState: clean(plan.strategy?.governanceState, 40),
+    governanceLabel: plan.strategy?.governanceState
+      ? strategyStateLabel(plan.strategy.governanceState)
+      : '',
     routeMode: clean(plan.strategy?.routeMode, 40),
     eligibleRegimes: Array.isArray(plan.strategy?.eligibleRegimes)
       ? plan.strategy.eligibleRegimes.map(
-          (item) => clean(item, 40),
+          (item) => marketRegimeLabel(item),
         ).filter(Boolean)
       : [],
     outOfSample: outOfSample
@@ -188,7 +198,12 @@ function decisionPlanSummary(plan) {
       : null,
     strategySignalPassed: plan.strategy?.signalPassed,
     productionEligible: plan.strategy?.productionEligible === true,
-    marketRegime: clean(plan.marketRegime?.label, 40),
+    marketRegime: clean(
+      plan.marketRegime?.label
+      || marketRegimeLabel(plan.marketRegime?.regime),
+      40,
+    ),
+    actionabilityLabel: actionabilityLabel(actionability),
     marketScore: displayNumber(plan.marketRegime?.score),
     asOf: clean(plan.asOf, 40),
     validUntil: clean(plan.validUntil, 40),
@@ -206,7 +221,7 @@ function decisionInstruction(plan, fallback = '') {
     ? plan.blockedReasons
     : []).map((item) => clean(item, 160)).filter(Boolean)
   if (plan.actionability === 'BLOCKED') {
-    return `暂不执行：${reasons.join('；') || '确定性闸门未通过'}`
+    return `暂不执行：${reasons.join('；') || '执行条件未满足'}`
   }
   if (plan.actionability === 'WATCH') {
     return clean(plan.trigger, 500) || fallback || '等待触发条件后重新评估'
@@ -215,7 +230,7 @@ function decisionInstruction(plan, fallback = '') {
   const price = displayNumber(plan.prices?.reference)
   const core = `${plan.actionLabel || '操作'}${lots > 0 ? `${lots}手` : ''}${price ? `，参考${price}元` : ''}`
   if (plan.actionability === 'RESEARCH_ONLY') {
-    return `研究级条件建议：${core}；策略晋级前不进入强执行确认`
+    return `仅供观察：${core}；策略通过实盘启用审核前，不能直接执行`
   }
   return core || fallback
 }
@@ -249,14 +264,14 @@ function buildLegacyAdvicePresentation(advice = {}) {
   const planAdvice = plan ? {
     ...advice,
     action: plan.actionability === 'RESEARCH_ONLY'
-      ? `研究级·${plan.actionLabel || '建议'}`
+      ? `观察·${plan.actionLabel || '建议'}`
       : plan.actionability === 'BLOCKED'
         ? '观望'
         : plan.actionLabel || advice.action,
     title: plan.actionability === 'BLOCKED'
-      ? '确定性闸门未通过，暂不操作'
+      ? '执行条件未满足，暂不操作'
       : plan.actionability === 'RESEARCH_ONLY'
-        ? `研究级条件建议：${advice.title || advice.headline || plan.actionLabel || '等待确认'}`
+        ? `仅供观察：${advice.title || advice.headline || plan.actionLabel || '等待确认'}`
         : advice.title,
     actionPlan: decisionInstruction(plan, advice.actionPlan),
     planQty: plan.quantity?.lots,
@@ -371,21 +386,23 @@ function executionPlanSummary(plan) {
 }
 
 export function compileAdvicePresentationV3(advice = {}) {
-  const view = buildLegacyAdvicePresentation(advice)
+  const displayAdvice = humanizeAdviceTextFields(advice)
+  const view = buildLegacyAdvicePresentation(displayAdvice)
   return {
     schemaVersion: 'advice-presentation.v3',
     ...view,
-    executionPlan: executionPlanSummary(advice.executionPlan),
+    executionPlan: executionPlanSummary(displayAdvice.executionPlan),
   }
 }
 
 export function buildAdvicePresentation(advice = {}) {
-  if (advice.presentation?.schemaVersion === 'advice-presentation.v3') {
+  const displayAdvice = humanizeAdviceTextFields(advice)
+  if (displayAdvice.presentation?.schemaVersion === 'advice-presentation.v3') {
     return {
-      ...advice.presentation,
-      review: reviewSummary(advice),
-      executionPlan: executionPlanSummary(advice.executionPlan),
+      ...displayAdvice.presentation,
+      review: reviewSummary(displayAdvice),
+      executionPlan: executionPlanSummary(displayAdvice.executionPlan),
     }
   }
-  return compileAdvicePresentationV3(advice)
+  return compileAdvicePresentationV3(displayAdvice)
 }

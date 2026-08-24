@@ -89,7 +89,7 @@ test('AI建议链路检索六条理论并回传到个股建议展示', () => {
 
   assert.match(ai, /retrieveTheoryKeywords\([^,]+,\s*6\)/)
   assert.match(ai, /result\.theoryRefs\s*=\s*theoryRefs/)
-  assert.match(presentation, /advice\.theoryRefs/)
+  assert.match(presentation, /displayAdvice\.theoryRefs/)
   assert.match(presentation, /参考理论/)
   assert.match(
     precision,

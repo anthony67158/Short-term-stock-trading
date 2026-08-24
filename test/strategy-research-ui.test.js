@@ -28,7 +28,8 @@ test('策略研究视图合并五类策略与回测影子真实成绩', () => {
   assert.equal(baseline.state, 'rejected')
   assert.equal(baseline.backtest.folds, 4)
   assert.equal(baseline.backtest.returnPct, -1.19)
-  assert.match(baseline.blockerText, /REJECT|尚未/)
+  assert.match(baseline.blockerText, /尚未|不足|未达到/)
+  assert.doesNotMatch(baseline.blockerText, /[A-Z_]{4,}/)
   assert.match(baseline.modelVersion, /lgb-score-36/)
 })
 
@@ -43,9 +44,20 @@ test('盘面研究挂载策略研究区并具备响应式表格契约', () => {
   assert.match(panel, /\/api\/strategy_governance/)
   assert.match(panel, /aria-label="策略研究"/)
   assert.match(panel, /回测/)
-  assert.match(panel, /影子/)
-  assert.match(panel, /真实/)
-  assert.match(panel, /阻断原因/)
+  assert.match(panel, /模拟观察/)
+  assert.match(panel, /模拟表现/)
+  assert.match(panel, /真实成交/)
+  assert.match(panel, /上线状态与原因/)
+  assert.match(panel, /盈亏效率/)
+  assert.doesNotMatch(panel, /\{row\.specVersion\}|\bPF\b| fold/)
   assert.match(css, /\.strategy-research-table/)
   assert.match(css, /@media \(max-width: 640px\)/)
+  assert.match(
+    css,
+    /@media \(max-width: 640px\)[\s\S]*?\.strategy-research-summary\s*{[^}]*flex-wrap:\s*wrap/s,
+  )
+  assert.doesNotMatch(
+    css,
+    /\.strategy-research-summary\s*{[^}]*max-width:\s*180px/s,
+  )
 })

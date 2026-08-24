@@ -1453,11 +1453,11 @@ export default function StockDetail({ stock, onClose }) {
           <div className="busy-modal-mask" onClick={() => setBusyModal(null)}>
             <div className="busy-modal" onClick={(e) => e.stopPropagation()}>
               <div className="busy-modal-head">
-                <span className="busy-modal-title"><Icon name="gauge" size={15} /> AI 端点已满</span>
+                <span className="busy-modal-title"><Icon name="gauge" size={15} /> AI 分析通道已满</span>
                 <button className="icon-btn" onClick={() => setBusyModal(null)} title="关闭"><Icon name="close" size={15} /></button>
               </div>
               <div className="busy-modal-desc">
-                当前 {busyModal.concurrency || busyModal.busy.length} 个 AI 端点已全部占用（并发数=已配置端点数）。
+                当前 {busyModal.concurrency || busyModal.busy.length} 个 AI 分析通道都在使用中，请等待其中一个完成。
                 下列个股正在生成，完成后会自动腾出端点，届时可再次点击生成。
               </div>
               <div className="busy-modal-list">

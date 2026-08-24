@@ -1,3 +1,5 @@
+import { humanizeUserFacingText } from '../../shared/userFacingLanguage.js'
+
 // 轻量 Markdown 渲染（无三方依赖）：标题 # / 加粗 ** / 列表 - 1. / 行内代码 ` / 分隔线 / 引用 > / GFM 表格
 // 面向 AI 短答，安全转义后再套用有限标记
 function esc(s) {
@@ -37,7 +39,7 @@ function parseAligns(divider) {
 }
 
 export default function Md({ text }) {
-  const src = String(text || '')
+  const src = humanizeUserFacingText(text || '')
   const lines = src.split('\n')
   const blocks = []
   let list = null // { ordered, items: [] }

@@ -29,7 +29,7 @@ function BacktestMetric({ value }) {
         {pct(value.returnPct)}
       </b>
       <small>
-        {value.positiveFolds}/{value.folds} fold · 回撤 {pct(value.drawdownPct)}
+        {value.positiveFolds}/{value.folds}个阶段通过 · 回撤 {pct(value.drawdownPct)}
       </small>
       <small>
         沪深300 {pct(value.csi300ExcessPct)} · 中证1000 {pct(value.csi1000ExcessPct)}
@@ -44,7 +44,7 @@ function ShadowMetric({ value }) {
     <span className="strategy-metric-stack">
       <b>{value.samples} 条</b>
       <small>
-        收益 {pct(value.returnPct)} · PF {number(value.profitFactor)}
+        收益 {pct(value.returnPct)} · 盈亏效率 {number(value.profitFactor)}
       </small>
     </span>
   )
@@ -56,7 +56,7 @@ function RealMetric({ value }) {
     <span className="strategy-metric-stack">
       <b>{value.samples} 笔</b>
       <small>
-        收缩胜率 {number(value.posteriorWinRate)}% · PF {number(value.profitFactor)}
+        稳健胜率 {number(value.posteriorWinRate)}% · 盈亏效率 {number(value.profitFactor)}
       </small>
     </span>
   )
@@ -152,10 +152,10 @@ export default function StrategyResearchPanel() {
         <div className="strategy-research-actions">
           {view.rows.length > 0 && (
             <div className="strategy-research-summary" aria-label="策略状态汇总">
-              <span>生产 <b>{view.summary.active}</b></span>
-              <span>影子 <b>{view.summary.shadow}</b></span>
-              <span>拒绝 <b>{view.summary.rejected}</b></span>
-              <span>草稿 <b>{view.summary.draft}</b></span>
+              <span>已启用 <b>{view.summary.active}</b></span>
+              <span>模拟观察 <b>{view.summary.shadow}</b></span>
+              <span>未通过 <b>{view.summary.rejected}</b></span>
+              <span>待验证 <b>{view.summary.draft}</b></span>
             </div>
           )}
           <button
@@ -174,7 +174,7 @@ export default function StrategyResearchPanel() {
       {state.loading && !view.rows.length && (
         <div className="strategy-research-state" role="status">
           <Icon name="refresh" size={14} className="spin" />
-          正在读取策略版本与治理状态…
+          正在读取策略规则与上线状态…
         </div>
       )}
       {state.error && !view.rows.length && (
@@ -193,9 +193,9 @@ export default function StrategyResearchPanel() {
                 <th>状态</th>
                 <th>适用市场</th>
                 <th>回测</th>
-                <th>影子</th>
-                <th>真实</th>
-                <th>版本与阻断原因</th>
+                <th>模拟表现</th>
+                <th>真实成交</th>
+                <th>上线状态与原因</th>
               </tr>
             </thead>
             <tbody>
@@ -220,12 +220,12 @@ export default function StrategyResearchPanel() {
                   <td><ShadowMetric value={row.shadow} /></td>
                   <td><RealMetric value={row.real} /></td>
                   <td>
-                    <span className="strategy-version" title={row.specVersion}>
-                      {row.specVersion}
+                    <span className="strategy-version">
+                      {row.versionLabel}
                     </span>
-                    <small title={row.modelVersion}>{row.modelVersion}</small>
-                    <small className="strategy-blocker" title={row.blockerText}>
-                      {row.blockerText || '门禁已满足'}
+                    <small>{row.modelLabel}</small>
+                    <small className="strategy-blocker">
+                      {row.blockerText || '上线条件已满足'}
                     </small>
                   </td>
                 </tr>

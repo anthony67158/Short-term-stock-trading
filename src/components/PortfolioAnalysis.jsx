@@ -12,6 +12,9 @@ import PortfolioExecutionPlan from './PortfolioExecutionPlan'
 import {
   buildPortfolioAdviceBrief,
 } from '../../shared/portfolioAdviceBrief.js'
+import {
+  humanizeAdviceTextFields,
+} from '../../shared/userFacingLanguage.js'
 
 const PHASE_LABELS = {
   account: '账户重算',
@@ -261,7 +264,8 @@ function PortfolioAdviceBrief({ brief }) {
 }
 
 function AnalysisResult({ result }) {
-  const analysis = result.analysis || {}
+  const displayResult = humanizeAdviceTextFields(result || {})
+  const analysis = displayResult.analysis || {}
   const allocation = analysis.allocation || {}
   const assessment = analysis.positionAssessment || {}
   const hasExecutionPlan = !!analysis.executionPlan?.todayGoal
@@ -269,19 +273,19 @@ function AnalysisResult({ result }) {
   return (
     <div className="portfolio-analysis-result">
       <PortfolioAdviceBrief brief={brief} />
-      {result.warning && (
+      {displayResult.warning && (
         <div
           className={
             'portfolio-analysis-warning'
-            + (result.meta?.modelRecovered ? ' recovered' : '')
+            + (displayResult.meta?.modelRecovered ? ' recovered' : '')
           }
           role="status"
         >
           <Icon
-            name={result.meta?.modelRecovered ? 'check' : 'info'}
+            name={displayResult.meta?.modelRecovered ? 'check' : 'info'}
             size={13}
           />
-          <span>{result.warning}</span>
+          <span>{displayResult.warning}</span>
         </div>
       )}
 
@@ -315,7 +319,7 @@ function AnalysisResult({ result }) {
                 <Icon name="gauge" size={13} /> 目标仓位
               </div>
               <div className="portfolio-analysis-kpis">
-                <span>当前<b>{percent(result.snapshot?.positionPct)}</b></span>
+                <span>当前<b>{percent(displayResult.snapshot?.positionPct)}</b></span>
                 <span>目标<b>{percent(allocation.targetPositionPct)}</b></span>
                 <span>现金<b>{percent(allocation.targetCashReservePct)}</b></span>
               </div>
@@ -418,13 +422,13 @@ function AnalysisResult({ result }) {
             </section>
           )}
 
-          <DecisionPath nodes={result.decisionNodes} />
-          <EvidenceList evidence={result.evidence} />
+          <DecisionPath nodes={displayResult.decisionNodes} />
+          <EvidenceList evidence={displayResult.evidence} />
           <div className="portfolio-analysis-meta">
-            <span>{result.meta?.model || '规则降级'}</span>
-            {result.meta?.endpoint && <span>{result.meta.endpoint}</span>}
-            {result.meta?.quantModelLabel && <span>{result.meta.quantModelLabel}</span>}
-            <span>{result.generatedAt ? new Date(result.generatedAt).toLocaleString('zh-CN') : ''}</span>
+            <span>{displayResult.meta?.model || '规则降级'}</span>
+            {displayResult.meta?.endpoint && <span>{displayResult.meta.endpoint}</span>}
+            {displayResult.meta?.quantModelLabel && <span>{displayResult.meta.quantModelLabel}</span>}
+            <span>{displayResult.generatedAt ? new Date(displayResult.generatedAt).toLocaleString('zh-CN') : ''}</span>
           </div>
         </div>
       </details>

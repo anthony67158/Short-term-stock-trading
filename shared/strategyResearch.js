@@ -1,14 +1,8 @@
-const STATE_LABELS = Object.freeze({
-  draft: '草稿',
-  backtested: '已回测',
-  rejected: '已拒绝',
-  shadow: '影子运行',
-  'paper-qualified': '模拟达标',
-  approved: '已批准',
-  active: '生产启用',
-  suspended: '已暂停',
-  retired: '已退役',
-})
+import {
+  humanizeUserFacingText,
+  marketRegimeLabel,
+  strategyStateLabel,
+} from './userFacingLanguage.js'
 
 const FAMILY_LABELS = Object.freeze({
   TREND_BREAKOUT: '趋势突破',
@@ -16,14 +10,6 @@ const FAMILY_LABELS = Object.freeze({
   RANGE_MEAN_REVERSION: '震荡回归',
   MULTI_FACTOR_RANKING: '多因子排名',
   DEFENSIVE_EXIT: '防守退出',
-})
-
-const REGIME_LABELS = Object.freeze({
-  TREND_STRONG: '强趋势',
-  RANGE: '震荡',
-  TRANSITION: '切换',
-  RISK_OFF: '防守',
-  UNKNOWN: '未知',
 })
 
 function finite(value) {
@@ -82,6 +68,24 @@ function modelVersion(spec) {
   }).join(' · ')
 }
 
+function modelLabel(spec) {
+  const dependencies = Array.isArray(spec?.modelDependencies)
+    ? spec.modelDependencies
+    : []
+  return dependencies.length
+    ? `${dependencies.length}个量化模型参与判断`
+    : '无需额外量化模型'
+}
+
+function timeframeLabel(value) {
+  return {
+    '1d': '日线',
+    '5m': '5分钟',
+    NEXT_OPEN: '次日开盘',
+    NEXT_BAR_OPEN: '下一时段开盘',
+  }[String(value || '')] || humanizeUserFacingText(value || '待确认')
+}
+
 export function buildStrategyResearchView({
   catalog = {},
   governance = {},
@@ -106,7 +110,7 @@ export function buildStrategyResearchView({
       familyLabel: FAMILY_LABELS[spec.family] || spec.family,
       purpose: spec.purpose,
       state,
-      stateLabel: STATE_LABELS[state] || state,
+      stateLabel: strategyStateLabel(state),
       stateTone: state === 'active'
         ? 'active'
         : state === 'rejected' || state === 'suspended'
@@ -116,14 +120,16 @@ export function buildStrategyResearchView({
             : 'draft',
       productionEligible: record.productionEligible === true,
       eligibleRegimes: (spec.eligibleRegimes || []).map(
-        (item) => REGIME_LABELS[item] || item,
+        marketRegimeLabel,
       ),
-      signalTimeframe: spec.signalTimeframe,
-      executionTimeframe: spec.executionTimeframe,
+      signalTimeframe: timeframeLabel(spec.signalTimeframe),
+      executionTimeframe: timeframeLabel(spec.executionTimeframe),
       horizon: `${spec.horizon?.value || '—'}${
         spec.horizon?.unit === 'MINUTE' ? '分钟' : '交易日'
       }`,
       modelVersion: modelVersion(spec),
+      modelLabel: modelLabel(spec),
+      versionLabel: '规则版本已记录',
       dataVersion: String(
         record.datasetVersion
         || record.evaluation?.datasetVersion
@@ -145,7 +151,9 @@ export function buildStrategyResearchView({
       blockers,
       blockerText: blockers.length
         ? blockers.map(
-            (item) => `${item.code || 'BLOCKED'}：${item.message || ''}`,
+            (item) => humanizeUserFacingText(
+              item.message || '仍有上线条件未满足',
+            ),
           ).join('；')
         : '',
     }

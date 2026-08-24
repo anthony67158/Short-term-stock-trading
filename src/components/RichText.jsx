@@ -1,3 +1,5 @@
+import { humanizeUserFacingText } from '../../shared/userFacingLanguage.js';
+
 // ============ 自由文本关键信息高亮(HL)============
 // 军师 AI 操作建议里,价格/价格区间/百分比/手数/金额/时间点常常藏在整句叙述里
 // (如「跌破10.20分时均价再减2手」「9:45 前站回13.50~13.80」),与普通文字同级、
@@ -23,7 +25,7 @@ const HL_RE = /(\d{1,2}:\d{2}|[¥￥]?\d+(?:\.\d+)?\s*[~\-–至]\s*[¥￥]?\d+(
 // item(gap 不再插进词间),在普通文本流里 inline 也不改变原有换行行为,一处根治。
 export function HL({ text }) {
   if (text == null) return null;
-  const s = String(text);
+  const s = humanizeUserFacingText(text);
   if (!s) return null;
   const parts = s.split(HL_RE);
   return (

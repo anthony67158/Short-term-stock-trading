@@ -8,6 +8,7 @@ import {
   formatEvidenceTime,
   sanitizeAccountContext,
 } from '../../shared/assistantContext.js'
+import { humanizeAdviceTextFields } from '../../shared/userFacingLanguage.js'
 import { sanitizeTradeProposal } from '../../shared/tradeProposal.js'
 import { useAiSearchConfig } from '../aiSearchConfigStore'
 import Icon from './Icon'
@@ -424,6 +425,10 @@ const TOOL_LABEL = {
 }
 function Message({ m, canApply, appliedProposalIds, onApplyProposal }) {
   const searchConfig = useAiSearchConfig()
+  const displayData = humanizeAdviceTextFields(m.data || {})
+  const displayProposals = humanizeAdviceTextFields(
+    m.actionProposals || [],
+  )
   if (m.role === 'user') {
     return <div className="qa-msg user"><div className="qa-bubble"><div className="qa-bubble-text">{m.content}</div></div></div>
   }
@@ -462,9 +467,9 @@ function Message({ m, canApply, appliedProposalIds, onApplyProposal }) {
             </div>
           )}
           {m.content && <div className="qa-bubble-text"><Md text={m.content} />{m.streaming && <span className="stream-caret" />}</div>}
-          {Array.isArray(m.actionProposals) && m.actionProposals.length > 0 && (
+          {displayProposals.length > 0 && (
             <ProposalList
-              proposals={m.actionProposals}
+              proposals={displayProposals}
               evidence={visibleEvidence}
               canApply={canApply}
               appliedProposalIds={appliedProposalIds}
@@ -490,10 +495,10 @@ function Message({ m, canApply, appliedProposalIds, onApplyProposal }) {
           )}
         </>
       )}
-      {m.kind === 'diagnose' && <Diagnose r={m.data} />}
-      {m.kind === 'scan' && <Scan r={m.data} />}
-      {m.kind === 'market' && <MarketReview r={m.data} />}
-      {m.kind === 'sector' && <SectorPick r={m.data} />}
+      {m.kind === 'diagnose' && <Diagnose r={displayData} />}
+      {m.kind === 'scan' && <Scan r={displayData} />}
+      {m.kind === 'market' && <MarketReview r={displayData} />}
+      {m.kind === 'sector' && <SectorPick r={displayData} />}
     </div></div>
   )
 }

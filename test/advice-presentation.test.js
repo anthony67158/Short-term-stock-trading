@@ -327,11 +327,11 @@ test('决策计划v2优先提供最终动作手数费用和策略等级', () => 
     },
   })
 
-  assert.equal(view.verdict.action, '研究级·买入')
+  assert.equal(view.verdict.action, '观察·买入')
   assert.equal(view.execution.quantity, '5手')
   assert.equal(view.execution.amount, '5010')
   assert.equal(view.execution.position, '0% → 5%')
-  assert.match(view.execution.instruction, /研究级/)
+  assert.match(view.execution.instruction, /仅供观察/)
   assert.match(view.execution.instruction, /5手/)
   assert.doesNotMatch(view.execution.instruction, /10手/)
   assert.equal(view.decisionPlan.actionability, 'RESEARCH_ONLY')
@@ -356,7 +356,7 @@ test('决策计划v2优先提供最终动作手数费用和策略等级', () => 
     impact: '无法确认当前价和价格时效',
     recovery: '行情接口恢复后重新生成',
   }])
-  assert.match(view.decisionPlan.statusText, /未通过生产晋级/)
+  assert.match(view.decisionPlan.statusText, /未通过实盘启用审核/)
   assert.deepEqual(
     view.levels.map((item) => item.value),
     ['10', '12', '9'],
