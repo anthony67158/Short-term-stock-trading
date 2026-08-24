@@ -596,12 +596,15 @@ function ActionCommand({ view, onOpen }) {
         <span>{view.action}</span>
         {quantity && <strong className="action-command-qty">{quantity}</strong>}
       </span>
-      <span className="action-command-text" title={instruction}>{instruction}</span>
+      <span className="action-command-text">{instruction}</span>
+      <span className="action-command-preview" aria-hidden="true">
+        <strong className="action-command-preview-label">完整操作建议</strong>
+        <span className="action-command-preview-text">{instruction}</span>
+      </span>
       <button
         type="button"
         className="action-command-open"
         aria-label="查看完整操作建议"
-        title="查看完整操作建议"
         onClick={onOpen}
       >
         <span>详情</span>

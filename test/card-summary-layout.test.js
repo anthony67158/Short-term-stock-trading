@@ -66,6 +66,33 @@ test('策略摘要压缩为单行指令、紧凑价位和单行进度', () => {
   )
 })
 
+test('省略的策略摘要在悬浮和键盘聚焦时显示高对比完整预览', () => {
+  assert.match(
+    planTab,
+    /className="action-command-preview"[\s\S]*?完整操作建议[\s\S]*?\{instruction\}/,
+  )
+  assert.doesNotMatch(
+    planTab,
+    /className="action-command-text"\s+title=\{instruction\}/,
+  )
+  assert.match(
+    precision,
+    /\.action-command-preview\s*{[^}]*position:\s*absolute[^}]*z-index:\s*var\(--z-tooltip\)[^}]*visibility:\s*hidden[^}]*opacity:\s*0/s,
+  )
+  assert.match(
+    precision,
+    /\.action-command:focus-within \.action-command-preview\s*{[^}]*visibility:\s*visible[^}]*opacity:\s*1/s,
+  )
+  assert.match(
+    precision,
+    /@media \(hover:\s*hover\) and \(pointer:\s*fine\)\s*{[\s\S]*?\.action-command:hover \.action-command-preview\s*{[^}]*visibility:\s*visible[^}]*opacity:\s*1/s,
+  )
+  assert.match(
+    precision,
+    /@media \(pointer:\s*coarse\)\s*{[\s\S]*?\.action-command-preview\s*{[^}]*display:\s*none/s,
+  )
+})
+
 test('持仓卡在同一指标带展示盘中活跃度与主力散户资金', () => {
   const metricsStart = planTab.indexOf(
     '<div className="stock-card-metrics hold-card-metrics"',

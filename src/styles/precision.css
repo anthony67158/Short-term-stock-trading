@@ -2241,6 +2241,84 @@ html[data-theme="light"] .plan-cand.starred {
   white-space: nowrap;
 }
 
+.action-command-preview {
+  position: absolute;
+  inset-inline: 0;
+  bottom: calc(100% + var(--space-2xs));
+  z-index: var(--z-tooltip);
+  visibility: hidden;
+  opacity: 0;
+  display: grid;
+  gap: var(--space-2xs);
+  padding: var(--space-sm);
+  border: 1px solid color-mix(
+    in oklch,
+    var(--color-accent) 68%,
+    var(--color-ink)
+  );
+  border-radius: var(--radius-input);
+  background: var(--color-ink);
+  box-shadow: var(--shadow-overlay);
+  color: var(--color-paper);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition:
+    opacity var(--dur-short) var(--ease-out),
+    transform var(--dur-short) var(--ease-out),
+    visibility 0s linear var(--dur-short);
+}
+
+.action-command-preview::before {
+  content: "";
+  position: absolute;
+  bottom: -5px;
+  left: var(--space-lg);
+  width: 9px;
+  height: 9px;
+  border-right: 1px solid color-mix(
+    in oklch,
+    var(--color-accent) 68%,
+    var(--color-ink)
+  );
+  border-bottom: 1px solid color-mix(
+    in oklch,
+    var(--color-accent) 68%,
+    var(--color-ink)
+  );
+  background: var(--color-ink);
+  transform: rotate(45deg);
+}
+
+.action-command-preview-label {
+  justify-self: start;
+  padding: var(--space-3xs) var(--space-2xs);
+  border-radius: var(--radius-badge);
+  background: var(--color-accent);
+  color: var(--color-accent-ink);
+  font-size: var(--text-2xs);
+  font-weight: 760;
+  line-height: 1.2;
+}
+
+.action-command-preview-text {
+  color: var(--color-paper);
+  font-size: var(--text-xs);
+  font-weight: 650;
+}
+
+.action-command:focus-within {
+  z-index: var(--z-tooltip);
+}
+
+.action-command:focus-within .action-command-preview {
+  visibility: visible;
+  opacity: 1;
+  transform: translateY(0);
+  transition-delay: 0s;
+}
+
 .action-command-open {
   display: inline-flex;
   align-items: center;
@@ -4016,6 +4094,21 @@ html[data-theme="light"] .plan-cand.starred {
   .action-prompt:hover {
     border-color: var(--color-accent);
     background: color-mix(in oklch, var(--color-accent) 6%, var(--color-paper-3));
+  }
+
+  .action-command:hover {
+    z-index: var(--z-tooltip);
+  }
+
+  .action-command:hover .action-command-preview {
+    visibility: visible;
+    opacity: 1;
+    transform: translateY(0);
+    transition-delay: 0s;
+  }
+
+  .action-command:hover .action-command-text {
+    color: var(--color-accent);
   }
 
   .action-command-open:hover {
@@ -10816,6 +10909,10 @@ button.acct-item {
 }
 
 @media (pointer: coarse) {
+  .action-command-preview {
+    display: none;
+  }
+
   .pc-pin,
   .pi-card-tools > .icon-btn {
     width: 44px;
