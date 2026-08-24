@@ -7,17 +7,20 @@ const read = (path) => readFileSync(
   'utf8',
 )
 
-test('持仓执行顶部只有一个人工动作队列入口', () => {
+test('持仓执行顶部只有一个可移除的手动操作计划入口', () => {
   const planTab = read('src/components/PlanTab.jsx')
   const queue = read('src/components/ExecutionQueue.jsx')
 
   assert.match(planTab, /<ExecutionQueue/)
-  assert.match(queue, /aria-label="人工执行队列"/)
+  assert.match(queue, /aria-label="待执行计划"/)
+  assert.match(queue, /这里只提醒，不会自动交易/)
   assert.match(queue, /等待条件/)
-  assert.match(queue, /已到价/)
-  assert.match(queue, /确认执行/)
+  assert.match(queue, /价格已触发/)
+  assert.match(queue, /确认准备/)
   assert.match(queue, /记录成交/)
   assert.match(queue, /已完成/)
+  assert.match(queue, /planStore\.dismissExecutionPlan/)
+  assert.match(queue, /移除.*操作计划/)
   assert.match(queue, /onOpen\?\.\(plan\.code,\s*plan\.name\)/)
   assert.doesNotMatch(queue, /自动下单/)
 })
@@ -30,7 +33,7 @@ test('个股建议只保留一个主结论并把扩展信息收进详情', () =>
 
   assert.match(presentation, /advice-command-center/)
   assert.match(presentation, /执行摘要/)
-  assert.match(presentation, /加入执行队列/)
+  assert.match(presentation, /加入待执行计划/)
   assert.match(presentation, /完整依据与复核/)
   assert.match(stockDetail, /onArmExecutionPlan/)
   assert.match(stockDetail, /className="btn btn-primary footbar-generate footbar-quick"/)

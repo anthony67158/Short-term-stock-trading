@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react'
 
+import { executionTriggerDirection } from '../../shared/executionTrigger'
 import { planStore } from '../planStore'
 import Icon from './Icon'
 
 const STATUS = {
   ARMED: { label: '等待条件', tone: 'waiting' },
-  ALERTED: { label: '已到价', tone: 'alerted' },
+  ALERTED: { label: '价格已触发', tone: 'alerted' },
   USER_CONFIRMED: { label: '已确认待记录', tone: 'confirmed' },
   PARTIALLY_RECORDED: { label: '部分成交', tone: 'partial' },
   COMPLETED: { label: '已完成', tone: 'completed' },
@@ -29,6 +30,46 @@ function dateTime(value) {
     minute: '2-digit',
     hour12: false,
   })
+}
+
+function planCondition(plan) {
+  const price = Number(plan.triggerPrice ?? plan.referencePrice)
+  const priceText = Number.isFinite(price) && price > 0
+    ? `${price}元`
+    : '条件价'
+  const direction = executionTriggerDirection(plan)
+  if (direction === 'IMMEDIATE') return '现在可处理'
+  if (direction === 'LTE') {
+    return plan.side === 'SELL'
+      ? `跌至${priceText}时提醒`
+      : `回落至${priceText}时提醒`
+  }
+  if (direction === 'GTE') {
+    return plan.side === 'SELL'
+      ? `反弹至${priceText}时提醒`
+      : `突破${priceText}时提醒`
+  }
+  return `到达${priceText}时提醒`
+}
+
+function methodLabel(plan) {
+  return {
+    SINGLE_LIMIT: '建议一次处理',
+    SLICED_LIMIT: '建议分批处理',
+    TWAP_REFERENCE: '建议分时处理',
+    VWAP_REFERENCE: '建议跟随成交量处理',
+    ICEBERG_REFERENCE: '建议拆分处理',
+  }[plan.executionMethod?.type] || '手动处理'
+}
+
+function planStatusDetail(plan) {
+  if (['CANCELED', 'EXPIRED'].includes(plan.status)) {
+    const detail = [...(plan.transitions || [])]
+      .reverse()
+      .find((item) => item?.to === plan.status)?.detail
+    if (detail) return detail
+  }
+  return `${methodLabel(plan)} · ${dateTime(plan.validUntil)}前有效`
 }
 
 function QueueRow({ plan, attribution, onOpen }) {
@@ -73,17 +114,12 @@ function QueueRow({ plan, attribution, onOpen }) {
         <span>{plan.actionLabel || plan.action}</span>
         <b>
           {plan.remainingLots}/{plan.targetLots}手
-          {' · '}
-          {plan.referencePrice || '—'}元
         </b>
       </div>
       <div className="execution-queue-trigger">
-        <span>{plan.trigger || '等待价格条件'}</span>
-        <small>
-          {plan.executionMethod?.label || '单笔限价'}
-          {' · '}
-          {dateTime(plan.validUntil)}失效
-        </small>
+        <span>{planCondition(plan)}</span>
+        <small>{plan.trigger || '到达条件后提醒你确认'}</small>
+        <small>{planStatusDetail(plan)}</small>
       </div>
       <div className="execution-queue-cost">
         <span>{plan.side === 'BUY' ? '占用现金' : '预计净回笼'}</span>
@@ -108,7 +144,7 @@ function QueueRow({ plan, attribution, onOpen }) {
             className="btn tiny"
             onClick={() => planStore.confirmExecutionPlan(plan.planId)}
           >
-            <Icon name="check" size={13} /> 确认执行
+            <Icon name="check" size={13} /> 确认准备
           </button>
         )}
         {canRecord && (
@@ -130,17 +166,15 @@ function QueueRow({ plan, attribution, onOpen }) {
             </button>
           </div>
         )}
-        {!['COMPLETED', 'CANCELED', 'EXPIRED'].includes(plan.status) && (
-          <button
-            type="button"
-            className="icon-btn execution-cancel"
-            aria-label={`取消${plan.name || plan.code}执行计划`}
-            title="取消执行计划"
-            onClick={() => planStore.cancelExecutionPlan(plan.planId)}
-          >
-            <Icon name="close" size={13} />
-          </button>
-        )}
+        <button
+          type="button"
+          className="icon-btn execution-cancel"
+          aria-label={`移除${plan.name || plan.code}手动操作计划`}
+          title="移除计划"
+          onClick={() => planStore.dismissExecutionPlan(plan.planId)}
+        >
+          <Icon name="trash" size={13} />
+        </button>
         {error && <small className="execution-error">{error}</small>}
       </div>
     </div>
@@ -153,11 +187,12 @@ export default function ExecutionQueue({
   onOpen,
 }) {
   const visible = useMemo(() => {
-    const active = plans.filter((plan) =>
+    const available = plans.filter((plan) => !plan.dismissedAt)
+    const active = available.filter((plan) =>
       ['ARMED', 'ALERTED', 'USER_CONFIRMED', 'PARTIALLY_RECORDED']
         .includes(plan.status)
     )
-    const terminal = plans.filter((plan) =>
+    const terminal = available.filter((plan) =>
       ['COMPLETED', 'CANCELED', 'EXPIRED'].includes(plan.status)
     ).slice(0, 6)
     return [...active, ...terminal]
@@ -173,20 +208,25 @@ export default function ExecutionQueue({
 
   if (!visible.length) return null
   return (
-    <section className="panel execution-queue" aria-label="人工执行队列">
+    <section className="panel execution-queue" aria-label="待执行计划">
       <div className="panel-head">
-        <div className="panel-title">
-          <Icon name="checkSquare" size={16} /> 人工执行队列
+        <div className="execution-queue-heading">
+          <div className="panel-title">
+            <Icon name="checkSquare" size={16} /> 待执行计划
+          </div>
+          <small>这里只提醒，不会自动交易；成交后再手动记录。</small>
         </div>
         <div className="execution-queue-summary">
-          <span>待处理 <b>{visible.filter((plan) => ![
+          <span>进行中 <b>{visible.filter((plan) => ![
             'COMPLETED',
             'CANCELED',
             'EXPIRED',
           ].includes(plan.status)).length}</b></span>
-          <span>已完成 <b>{visible.filter(
-            (plan) => plan.status === 'COMPLETED',
-          ).length}</b></span>
+          <span>历史 <b>{visible.filter((plan) => [
+            'COMPLETED',
+            'CANCELED',
+            'EXPIRED',
+          ].includes(plan.status)).length}</b></span>
         </div>
       </div>
       <div className="execution-queue-list">

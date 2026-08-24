@@ -242,3 +242,55 @@ test('止损退出按向下触发而普通减仓按向上触发', () => {
     now: now + 2,
   }).status, 'ARMED')
 })
+
+test('跌破型减仓在现价高于触发线时不能误报已到价', () => {
+  const draft = compileExecutionPlan({
+    decisionPlan: decision({
+      prices: { reference: 31.82, stop: 31.82, target: 36 },
+      trigger: '触及31.82元且30至60分钟不能收回，卖出1手',
+    }),
+    code: '002436',
+    name: '兴森科技',
+    accountRevision: 1,
+    now,
+  })
+  const armed = transitionExecutionPlan(
+    draft,
+    'ARM',
+    { now: now + 1 },
+  )
+
+  assert.equal(draft.triggerDirection, 'LTE')
+  assert.equal(refreshExecutionPlan(armed, {
+    price: 33.24,
+    now: now + 2,
+  }).status, 'ARMED')
+  assert.equal(refreshExecutionPlan(armed, {
+    price: 31.82,
+    now: now + 3,
+  }).status, 'ALERTED')
+
+  const legacyAlerted = {
+    ...armed,
+    status: 'ALERTED',
+    triggerDirection: undefined,
+    transitions: [
+      ...armed.transitions,
+      {
+        from: 'ARMED',
+        to: 'ALERTED',
+        event: 'PRICE_TRIGGERED',
+        at: now + 1,
+      },
+    ],
+  }
+  assert.equal(refreshExecutionPlan(legacyAlerted, {
+    price: 33.24,
+    now: now + 4,
+  }).status, 'ARMED')
+
+  assert.equal(refreshExecutionPlan(legacyAlerted, {
+    price: null,
+    now: now + 5,
+  }).status, 'ALERTED')
+})

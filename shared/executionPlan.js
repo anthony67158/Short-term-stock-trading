@@ -1,3 +1,5 @@
+import { executionTriggerDirection } from './executionTrigger.js'
+
 export const EXECUTION_PLAN_SCHEMA_VERSION = 'execution-plan.v1'
 
 export const EXECUTION_PLAN_STATES = Object.freeze([
@@ -15,7 +17,7 @@ const TERMINAL = new Set(['COMPLETED', 'CANCELED', 'EXPIRED'])
 const TRANSITIONS = Object.freeze({
   DRAFT: new Set(['ARMED', 'CANCELED', 'EXPIRED']),
   ARMED: new Set(['ALERTED', 'CANCELED', 'EXPIRED']),
-  ALERTED: new Set(['USER_CONFIRMED', 'CANCELED', 'EXPIRED']),
+  ALERTED: new Set(['ARMED', 'USER_CONFIRMED', 'CANCELED', 'EXPIRED']),
   USER_CONFIRMED: new Set([
     'PARTIALLY_RECORDED',
     'COMPLETED',
@@ -198,6 +200,11 @@ export function compileExecutionPlan({
   }
   const action = String(decisionPlan.action || 'WATCH')
   const side = actionSide(action)
+  const triggerDirection = executionTriggerDirection({
+    action,
+    trigger: decisionPlan.trigger,
+    triggerDirection: decisionPlan.triggerDirection,
+  })
   const targetLots = integerLots(decisionPlan.quantity?.lots)
   const referencePrice = positive(decisionPlan.prices?.reference)
   const estimatedNetAmount = positive(
@@ -256,6 +263,7 @@ export function compileExecutionPlan({
     remainingLots: targetLots,
     referencePrice,
     triggerPrice: referencePrice,
+    triggerDirection,
     stopPrice: positive(decisionPlan.prices?.stop),
     targetPrice: positive(decisionPlan.prices?.target),
     trigger: String(decisionPlan.trigger || ''),
@@ -316,12 +324,11 @@ function priceReached(plan, price) {
   const current = positive(price)
   const trigger = positive(plan.triggerPrice)
   if (current == null || trigger == null) return false
-  if (plan.action === 'EXIT') return current <= trigger
-  return plan.side === 'BUY'
-    ? current <= trigger
-    : plan.side === 'SELL'
-      ? current >= trigger
-      : false
+  const direction = executionTriggerDirection(plan)
+  if (direction === 'IMMEDIATE') return true
+  if (direction === 'LTE') return current <= trigger
+  if (direction === 'GTE') return current >= trigger
+  return false
 }
 
 export function transitionExecutionPlan(
@@ -402,6 +409,20 @@ export function refreshExecutionPlan(
       price,
       reason: `现价${price}已进入执行触发区`,
     })
+  }
+  const currentPrice = positive(price)
+  if (
+    plan.status === 'ALERTED'
+    && currentPrice != null
+    && !priceReached(plan, currentPrice)
+  ) {
+    plan = withTransition(
+      plan,
+      'ARMED',
+      'PRICE_RESET',
+      now,
+      `现价${currentPrice}不再满足执行条件`,
+    )
   }
   return plan
 }

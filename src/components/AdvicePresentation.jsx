@@ -248,19 +248,26 @@ function ExecutionPlanControl({
   if (!plan) return null
   const status = storedPlan?.status || plan.status
   const statusLabel = {
-    DRAFT: '尚未加入队列',
+    DRAFT: '尚未加入计划',
     ARMED: '等待条件',
-    ALERTED: '已到价',
+    ALERTED: '价格已触发',
     USER_CONFIRMED: '已确认待记录',
     PARTIALLY_RECORDED: '部分成交',
     COMPLETED: '已完成',
     CANCELED: '已取消',
     EXPIRED: '已过期',
   }[status] || status
+  const methodLabel = {
+    SINGLE_LIMIT: '建议一次处理',
+    SLICED_LIMIT: '建议分批处理',
+    TWAP_REFERENCE: '建议分时处理',
+    VWAP_REFERENCE: '建议跟随成交量处理',
+    ICEBERG_REFERENCE: '建议拆分处理',
+  }[plan.methodType] || '手动处理'
   return (
     <div className="advice-execution-queue-action">
       <div>
-        <span>{plan.methodLabel || '人工限价'}</span>
+        <span>{methodLabel}</span>
         <b>{statusLabel}</b>
       </div>
       {plan.canArm && !storedPlan && (
@@ -269,7 +276,7 @@ function ExecutionPlanControl({
           className="btn advice-arm-btn"
           onClick={() => onArmExecutionPlan?.()}
         >
-          <Icon name="checkSquare" size={13} /> 加入执行队列
+          <Icon name="checkSquare" size={13} /> 加入待执行计划
         </button>
       )}
     </div>

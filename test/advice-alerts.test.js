@@ -303,3 +303,24 @@ test('军师主结论已是减仓时不再创建备用加仓预警', () => {
 
   assert.deepEqual(data.alerts.map((alert) => alert.actKind), ['reduce'])
 })
+
+test('跌破型减仓使用向下预警而不是把高于触发线误判为到价', () => {
+  const data = {
+    plan: [],
+    holding: [{ id: 'h1', code: '002436', name: '兴森科技' }],
+    alerts: [],
+    settings: {},
+  }
+
+  projectAdviceAlerts(data, '002436', {
+    action: '减仓',
+    actionPlan: '触及31.82元且30至60分钟不能收回，卖出1手',
+    reducePrice: 31.82,
+    opQty: '减仓1手',
+  }, { now, idFactory: ids })
+
+  const [alert] = data.alerts
+  assert.equal(alert.actKind, 'reduce')
+  assert.equal(alert.op, 'lte')
+  assert.equal(alert.value, 31.82)
+})

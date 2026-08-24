@@ -5,6 +5,7 @@ import { appendExecution, createRecommendation, decisionLedgerStats, removeExecu
 import { proposalAlertSpec, sanitizeTradeProposal } from '../shared/tradeProposal.js'
 import { applyT1ToAlert } from '../shared/t1AdvicePolicy.js'
 import { adviceSupportsIntent, buildJudgeAdviceContext } from '../shared/judgeAdviceContext.js'
+import { executionTriggerDirection } from '../shared/executionTrigger.js'
 import {
   positionGateForAlert,
   requiresPositionCheck,
@@ -48,6 +49,7 @@ import {
 } from '../shared/ashareStrategyExecution.js'
 import {
   activeExecutionPlanForTrade,
+  dismissExecutionPlanInList,
   expireExecutionPlansForAccountChange,
   mergeExecutionAttributions,
   mergeExecutionPlans,
@@ -764,6 +766,15 @@ export const planStore = {
       planId,
       'CANCEL',
       { now, reason: '用户取消人工执行计划' },
+    )
+    emit()
+    return state.executionPlans.find((plan) => plan.planId === planId)
+  },
+  dismissExecutionPlan(planId, now = Date.now()) {
+    state.executionPlans = dismissExecutionPlanInList(
+      state.executionPlans,
+      planId,
+      now,
     )
     emit()
     return state.executionPlans.find((plan) => plan.planId === planId)
@@ -2532,7 +2543,7 @@ export const planStore = {
   // 「行动点」自动预警：跟随 AI 操作建议里的【补仓价 addPrice】/【减仓价 reducePrice】,
   // 自动建 到价预警,价一到就通知用户「现在是补/减仓的时候了」,直接回应「节点把握不准、太抽象」的诉求。
   //   补仓:到价 ≤ addPrice(回踩到位) → op='lte', actKind='add'
-  //   减仓:到价 ≥ reducePrice(反弹到位) → op='gte', actKind='reduce'
+  //   减仓:按行动指令区分跌破触发(lte)与反弹触发(gte)
   // 通知里带上【要做什么(opQty,如 补1手/减1手)】+【到价后怎么确认(exitTiming)】——
   //   遵循「到价=开始盯,不是见价即砍」纪律(A股 T+1),先确认信号再动手。
   //   actCode: 绑定的股票代码(区别于持仓 planId / 候选 candCode);actKind: 'add' | 'reduce'
@@ -2619,7 +2630,17 @@ export const planStore = {
     if (adviceSupportsIntent('add', judgeContext)) {
       build('add', 'lte', adv.addPrice, holder.muteAdd)
     }
-    build('reduce', 'gte', adv.reducePrice, holder.muteReduce)
+    const reduceDirection = executionTriggerDirection({
+      action: adv.decisionPlan?.action || 'REDUCE',
+      trigger: adv.actionPlan || adv.nextAction || adv.exitTiming,
+      triggerDirection: adv.decisionPlan?.triggerDirection,
+    })
+    build(
+      'reduce',
+      reduceDirection === 'LTE' ? 'lte' : 'gte',
+      adv.reducePrice,
+      holder.muteReduce,
+    )
     state.alerts = [...rebuilt, ...rest]
     emit()
   },

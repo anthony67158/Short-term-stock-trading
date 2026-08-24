@@ -3,6 +3,10 @@ import assert from 'node:assert/strict'
 
 import { planStore } from '../src/planStore.js'
 import { compileExecutionPlan } from '../shared/executionPlan.js'
+import {
+  dismissExecutionPlanInList,
+  mergeExecutionPlans,
+} from '../shared/executionPlanStore.js'
 
 const now = Date.parse('2026-08-21T02:00:00.000Z')
 
@@ -145,6 +149,24 @@ test('执行计划取消后不能再确认或录入成交', () => {
     ),
     { ok: false, error: '执行计划尚未确认或已结束' },
   )
+})
+
+test('移除执行计划使用同步标记且不会被旧设备数据恢复', () => {
+  const armed = {
+    ...draftSellPlan(),
+    status: 'ARMED',
+    updatedAt: now + 1,
+  }
+  const [dismissed] = dismissExecutionPlanInList(
+    [armed],
+    armed.planId,
+    now + 2,
+  )
+  const [merged] = mergeExecutionPlans([dismissed], [armed])
+
+  assert.equal(dismissed.status, 'CANCELED')
+  assert.equal(dismissed.dismissedAt, now + 2)
+  assert.equal(merged.dismissedAt, now + 2)
 })
 
 test('跨多笔持仓完成卖出计划时按全部成交汇总费后收益', () => {

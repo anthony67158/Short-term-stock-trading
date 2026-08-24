@@ -234,6 +234,35 @@ test('降低风险动作不受策略REJECT阻断但不得超过今日可卖数�
   assert.doesNotMatch(plan.blockedReasons.join(' '), /策略尚未通过/)
 })
 
+test('当前减仓指令优先于后续防守条件编译为立即处理', () => {
+  const plan = compileDecisionPlan({
+    mode: 'hold_advice',
+    advice: {
+      action: '减仓',
+      reducePrice: 33.24,
+      stopPrice: 31.82,
+      targetPrice: 36,
+      opQty: '减仓1手',
+      actionPlan: '弱市中未显著抗跌，先减仓1手控制回撤',
+      timing: '触及31.82元且30至60分钟不能收回再减仓',
+    },
+    payload: {
+      ...payload,
+      holdQty: 2,
+      sellableTodayQty: 2,
+      account: { ...account, stockWeight: 12 },
+    },
+    evidenceSnapshot: snapshot,
+    strategySpec: getActiveStrategySpec(),
+    strategyGate: { productionEligible: true, blockers: [] },
+    now,
+  })
+
+  assert.equal(plan.trigger, '弱市中未显著抗跌，先减仓1手控制回撤')
+  assert.equal(plan.triggerDirection, 'IMMEDIATE')
+  assert.equal(plan.prices.reference, 33.24)
+})
+
 test('关键证据不完整时风险增加动作必须阻断', () => {
   const plan = compileDecisionPlan({
     mode: 'buy_advice',

@@ -156,6 +156,24 @@ test('减仓建议以减仓点和向上触发进度为主', () => {
   assert.equal(view.trigger.metricLabel, '减仓准备')
 })
 
+test('跌破型减仓明确显示触发线并按向下条件判断', () => {
+  const view = buildAdviceActionView({
+    action: '减仓',
+    actionPlan: '触及31.82元且30至60分钟不能收回，卖出1手',
+    reducePrice: 31.82,
+    stopPrice: 31.82,
+    opQty: '减仓1手',
+  }, { mode: 'hold_advice' })
+
+  assert.equal(view.levels[0].label, '减仓触发线')
+  assert.equal(view.trigger.direction, 'lte')
+  assert.equal(view.trigger.metricLabel, '减仓条件')
+  assert.equal(
+    buildActionProgress(view.trigger, 33.24).stateLabel,
+    '等待跌破',
+  )
+})
+
 test('持有建议把加仓和减仓价降级为观察边界并生成区间进度', () => {
   const view = buildAdviceActionView({
     action: '持有',

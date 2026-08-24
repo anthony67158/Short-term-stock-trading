@@ -4023,6 +4023,15 @@ html[data-theme="light"] .plan-cand.starred {
 .advice-arm-btn { flex: none; min-height: 34px; gap: 5px; }
 
 .execution-queue-list { display: flex; flex-direction: column; }
+.execution-queue-heading {
+  display: grid;
+  gap: 3px;
+}
+.execution-queue-heading > small {
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
 .execution-queue-summary {
   display: flex;
   align-items: center;

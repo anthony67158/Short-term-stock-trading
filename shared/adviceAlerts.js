@@ -1,6 +1,7 @@
 import { applyT1ToAlert } from './t1AdvicePolicy.js'
 import { adviceSupportsIntent, buildJudgeAdviceContext } from './judgeAdviceContext.js'
 import { isAdviceReviewEnabled } from './adviceReviewPolicy.js'
+import { executionTriggerDirection } from './executionTrigger.js'
 
 function roundPrice(value) {
   const n = Number(value)
@@ -167,7 +168,19 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
     if (adviceSupportsIntent('add', judgeContext)) {
       buildAction('add', 'lte', advice.addPrice, liveHolder.muteAdd)
     }
-    buildAction('reduce', 'gte', advice.reducePrice, liveHolder.muteReduce)
+    const reduceDirection = executionTriggerDirection({
+      action: advice.decisionPlan?.action || 'REDUCE',
+      trigger: advice.actionPlan
+        || advice.nextAction
+        || advice.exitTiming,
+      triggerDirection: advice.decisionPlan?.triggerDirection,
+    })
+    buildAction(
+      'reduce',
+      reduceDirection === 'LTE' ? 'lte' : 'gte',
+      advice.reducePrice,
+      liveHolder.muteReduce,
+    )
   }
 
   const oldProjected = alerts.filter(isOwnedAutoAlert)

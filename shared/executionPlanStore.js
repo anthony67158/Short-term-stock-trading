@@ -102,6 +102,38 @@ export function transitionExecutionPlanInList(
   return output
 }
 
+export function dismissExecutionPlanInList(
+  plans,
+  planId,
+  now = Date.now(),
+) {
+  let changed = false
+  const output = (plans || []).map((plan) => {
+    if (plan?.planId !== planId) return plan
+    changed = true
+    const active = [
+      'DRAFT',
+      'ARMED',
+      'ALERTED',
+      'USER_CONFIRMED',
+      'PARTIALLY_RECORDED',
+    ].includes(plan.status)
+    const canceled = active
+      ? transitionExecutionPlan(plan, 'CANCEL', {
+          now,
+          reason: '用户移除手动操作计划',
+        })
+      : structuredClone(plan)
+    return {
+      ...canceled,
+      dismissedAt: Number(now) || Date.now(),
+      updatedAt: Number(now) || Date.now(),
+    }
+  })
+  if (!changed) throw new Error('执行计划不存在')
+  return output
+}
+
 export function refreshExecutionPlanList(
   plans,
   {

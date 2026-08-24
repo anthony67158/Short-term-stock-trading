@@ -12,6 +12,7 @@ import {
   evaluateStrategySignalV2,
   STRATEGY_SPEC_V2_SCHEMA_VERSION,
 } from './strategySpecV2.js'
+import { executionTriggerDirection } from './executionTrigger.js'
 
 export const DECISION_PLAN_SCHEMA_VERSION = 'decision-plan.v2'
 
@@ -613,6 +614,17 @@ export function compileDecisionPlan({
       .map((item) => text(item?.code, 80))
       .filter(Boolean),
   }
+  const trigger = text(
+    advice.actionPlan
+    || advice.nextAction
+    || advice.timing
+    || advice.nextOpenPlan,
+    500,
+  )
+  const triggerDirection = executionTriggerDirection({
+    action,
+    trigger,
+  })
   const identity = {
     accountRevision: finite(
       evidenceSnapshot?.account?.revision
@@ -628,6 +640,7 @@ export function compileDecisionPlan({
     stopPrice,
     targetPrice,
     targetWeightPct,
+    triggerDirection,
   }
   return {
     schemaVersion: DECISION_PLAN_SCHEMA_VERSION,
@@ -682,6 +695,7 @@ export function compileDecisionPlan({
       stop: round(stopPrice, 3),
       target: round(targetPrice, 3),
     },
+    triggerDirection,
     risk: {
       budgetPct: capacity.riskPct,
       maxLossAmount: capacity.maxLossAmount,
@@ -699,12 +713,7 @@ export function compileDecisionPlan({
         : null,
     },
     costs,
-    trigger: text(
-      advice.timing
-      || advice.nextOpenPlan
-      || advice.actionPlan,
-      500,
-    ),
+    trigger,
     invalidation: text(
       advice.invalidation
       || advice.knowledgeActionPlan?.invalidation,

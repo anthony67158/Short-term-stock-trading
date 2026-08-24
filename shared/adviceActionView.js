@@ -1,5 +1,6 @@
 import { t1GateForSide } from './t1AdvicePolicy.js'
 import { humanizeUserFacingText } from './userFacingLanguage.js'
+import { executionTriggerDirection } from './executionTrigger.js'
 
 const finite = (value) => {
   if (value == null || value === '') return null
@@ -46,7 +47,7 @@ const level = (key, label, price, tone, active) => {
   return value == null ? null : { key, label, price: value, tone, active }
 }
 
-function levelsFor(kind, advice) {
+function levelsFor(kind, advice, triggerDirection = '') {
   const entryPrice = advice.buyPrice ?? advice.addPrice
   if (kind === 'wait') {
     return [level('watch', '重新评估', advice.watchPrice, 'neutral', true)]
@@ -68,7 +69,17 @@ function levelsFor(kind, advice) {
   }
   if (kind === 'reduce') {
     return [
-      level('reduce', '减仓执行价', advice.reducePrice ?? advice.targetPrice, 'sell', true),
+      level(
+        'reduce',
+        triggerDirection === 'LTE'
+          ? '减仓触发线'
+          : triggerDirection === 'IMMEDIATE'
+            ? '当前减仓参考价'
+            : '反弹减仓位',
+        advice.reducePrice ?? advice.targetPrice,
+        'sell',
+        true,
+      ),
       level('stop', '止损线', advice.stopPrice, 'risk', false),
     ].filter(Boolean)
   }
@@ -88,7 +99,7 @@ function levelsFor(kind, advice) {
   ].filter(Boolean)
 }
 
-function triggerFor(kind, levels) {
+function triggerFor(kind, levels, triggerDirection = '') {
   const primary = levels.find((item) => item.active)
   if (kind === 'wait') {
     return {
@@ -108,10 +119,10 @@ function triggerFor(kind, levels) {
   }
   if (kind === 'reduce') {
     return primary ? {
-      direction: 'gte',
+      direction: triggerDirection.toLowerCase() || 'gte',
       price: primary.price,
-      label: '减仓位',
-      metricLabel: '减仓准备',
+      label: triggerDirection === 'LTE' ? '减仓线' : '减仓位',
+      metricLabel: triggerDirection === 'LTE' ? '减仓条件' : '减仓准备',
     } : null
   }
   if (kind === 'sell') {
@@ -189,7 +200,6 @@ export function buildAdviceActionView(advice = {}, { mode = '' } = {}) {
     targetPrice: plan.prices?.target,
   } : advice
   const kind = actionKind(source, mode)
-  const levels = levelsFor(kind, source)
   const buySide = kind === 'buy'
   const quantity = buySide
     ? quantityText(source.planQtyNum ?? source.planQty)
@@ -205,6 +215,17 @@ export function buildAdviceActionView(advice = {}, { mode = '' } = {}) {
         || source.timing
         || source.reason,
   )
+  const triggerDirection = executionTriggerDirection({
+    action: plan?.action || {
+      buy: 'BUY',
+      add: 'ADD',
+      reduce: 'REDUCE',
+      sell: 'EXIT',
+    }[kind],
+    trigger: instruction,
+    triggerDirection: plan?.triggerDirection,
+  })
+  const levels = levelsFor(kind, source, triggerDirection)
   return {
     kind,
     action: action || ({
@@ -218,7 +239,7 @@ export function buildAdviceActionView(advice = {}, { mode = '' } = {}) {
     instruction,
     quantity,
     levels,
-    trigger: triggerFor(kind, levels),
+    trigger: triggerFor(kind, levels, triggerDirection),
     actionability: plan?.actionability || null,
     actionable: plan
       ? plan.actionability === 'READY'
@@ -344,6 +365,18 @@ export function buildActionProgress(trigger, currentPrice) {
 
   const target = finite(trigger.price)
   if (target == null) return null
+  if (trigger.direction === 'immediate') {
+    return {
+      pct: 100,
+      score: 100,
+      tone: 'sell',
+      label: '当前可按计划处理',
+      metricLabel: trigger.metricLabel,
+      stateLabel: '现在可处理',
+      reached: true,
+      currentPrice: current,
+    }
+  }
   const distance = trigger.direction === 'gte'
     ? (target - current) / target * 100
     : (current - target) / target * 100
@@ -360,7 +393,9 @@ export function buildActionProgress(trigger, currentPrice) {
         ? `接近${trigger.label}`
         : trigger.direction === 'gte'
           ? '等待反弹'
-          : '等待回踩',
+          : trigger.metricLabel === '减仓条件'
+            ? '等待跌破'
+            : '等待回踩',
       reached: false,
       currentPrice: current,
     }
