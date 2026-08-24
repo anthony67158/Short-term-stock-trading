@@ -5051,10 +5051,10 @@ body:has(.modal-mask) .card-decision-slot .action-command-preview {
 }
 
 .sector-concept-explanation-head {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   min-width: 0;
   align-items: center;
-  justify-content: space-between;
   gap: var(--space-sm);
 }
 
@@ -5071,6 +5071,45 @@ body:has(.modal-mask) .card-decision-slot .action-command-preview {
   color: var(--color-accent);
 }
 
+.sector-concept-toggle {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2xs);
+  min-width: 0;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-ink);
+  cursor: pointer;
+  text-align: start;
+}
+
+.sector-concept-toggle > .icon:first-child {
+  color: var(--color-accent);
+}
+
+.sector-concept-toggle > span {
+  font-size: var(--text-xs);
+  font-weight: 760;
+  white-space: nowrap;
+}
+
+.sector-concept-toggle > .icon:last-child {
+  color: var(--color-muted);
+}
+
+.sector-concept-summary {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .sector-concept-explain-button {
   min-height: 32px;
   padding-inline: var(--space-xs);
@@ -5078,7 +5117,12 @@ body:has(.modal-mask) .card-decision-slot .action-command-preview {
   font-size: var(--text-xs);
 }
 
-.sector-concept-explanation > .md {
+.sector-concept-explanation-body {
+  display: grid;
+  gap: var(--space-xs);
+}
+
+.sector-concept-explanation-body > .md {
   display: grid;
   gap: var(--space-2xs);
   max-width: 92ch;
@@ -5165,6 +5209,12 @@ body:has(.modal-mask) .card-decision-slot .action-command-preview {
   color: var(--color-muted);
   font-size: var(--text-2xs);
   white-space: nowrap;
+}
+
+@media (min-width: 721px) {
+  .sector-concept-explanation-head {
+    padding-inline-end: 96px;
+  }
 }
 
 .sector-forecast-thesis {
@@ -9514,8 +9564,17 @@ button.acct-item {
     padding: var(--space-xs) var(--space-sm);
   }
 
+  .sector-concept-explanation-head {
+    gap: var(--space-2xs);
+  }
+
+  .sector-concept-toggle {
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
+    min-height: 44px;
+  }
+
   .sector-concept-explain-button {
-    min-height: 38px;
+    min-height: 44px;
   }
 
   .sector-concept-sources li {

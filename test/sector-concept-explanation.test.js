@@ -8,6 +8,7 @@ import {
   mergeSectorConceptExplanations,
   normalizeSectorConceptExplanation,
   sectorConceptExplanationPrompt,
+  sectorConceptExplanationSummary,
   sectorConceptExplanationsAfter,
 } from '../shared/sectorConceptExplanation.js'
 import {
@@ -156,6 +157,20 @@ test('智能体问题限定为概念释义并要求联网核验', () => {
   assert.match(prompt, /融捷股份/)
 })
 
+test('折叠摘要跳过标题和证据编号并保留核心定义', () => {
+  const summary = sectorConceptExplanationSummary([
+    '### 这是什么',
+    '**锂矿概念**覆盖锂资源勘探、采选和锂盐加工。[证据1]',
+    '### 为什么形成',
+    '新能源产业需要稳定原料。',
+  ].join('\n'))
+
+  assert.equal(
+    summary,
+    '锂矿概念覆盖锂资源勘探、采选和锂盐加工。',
+  )
+})
+
 test('概念解释客户端解析智能体流式进度与最终证据', async () => {
   let requestBody = null
   const response = [
@@ -195,14 +210,19 @@ test('板块展开区按需调用智能体并持久展示解释', () => {
   assert.match(component, /sectorConceptExplanationPrompt/)
   assert.match(component, /setSectorConceptExplanation/)
   assert.match(component, /await planStore\.flushSave\(\)/)
+  assert.match(component, /setConceptOpen[\s\S]*?\[code\]:\s*true/)
   assert.match(component, /<SectorConceptExplanation/)
   assert.match(conceptComponent, /existingSectorConceptText/)
+  assert.match(conceptComponent, /sectorConceptExplanationSummary/)
   assert.match(conceptComponent, /if \(!conceptExplanation\)/)
+  assert.match(conceptComponent, /aria-expanded=\{expanded\}/)
+  assert.match(conceptComponent, /!expanded && \([\s\S]*?sector-concept-summary/)
+  assert.match(conceptComponent, /expanded && \([\s\S]*?<Md text=\{conceptExplanation\.text\}/)
   assert.match(conceptComponent, /AI解释/)
   assert.match(conceptComponent, /重新解释/)
   assert.match(
     conceptComponent,
-    /className="sector-concept-explanation"/,
+    /'sector-concept-explanation'[\s\S]*?expanded[\s\S]*?collapsed/,
   )
   assert.match(
     conceptComponent,
@@ -215,5 +235,9 @@ test('板块展开区按需调用智能体并持久展示解释', () => {
   assert.match(
     styles,
     /\.sector-concept-explanation\s*{[^}]*border-top:\s*1px solid var\(--color-rule-2\)/s,
+  )
+  assert.match(
+    styles,
+    /@media \(min-width:\s*721px\)\s*{[\s\S]*?\.sector-concept-explanation-head\s*{[^}]*padding-inline-end:\s*96px/s,
   )
 })

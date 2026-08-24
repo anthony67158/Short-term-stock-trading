@@ -62,6 +62,8 @@ function SectorExplanation({
   session,
   conceptExplanation,
   conceptRun,
+  conceptExpanded,
+  onToggleConcept,
   onExplainConcept,
 }) {
   const explanation = sector.explanation || {}
@@ -100,6 +102,8 @@ function SectorExplanation({
         loading={conceptRun?.loading === true}
         status={conceptRun?.status || ''}
         error={conceptRun?.error || ''}
+        expanded={conceptExpanded}
+        onToggle={onToggleConcept}
         onExplain={onExplainConcept}
       />
       <div className="sector-forecast-thesis">
@@ -172,6 +176,7 @@ export default function SectorForecast() {
   const [error, setError] = useState('')
   const [generationNotice, setGenerationNotice] = useState(null)
   const [conceptRuns, setConceptRuns] = useState({})
+  const [conceptOpen, setConceptOpen] = useState({})
   const generationRequestRef = useRef(false)
   const generationBaselineRef = useRef(0)
   const generationSession =
@@ -423,6 +428,10 @@ export default function SectorForecast() {
         throw new Error(saved?.error || '概念解释保存失败')
       }
       await planStore.flushSave()
+      setConceptOpen((current) => ({
+        ...current,
+        [code]: true,
+      }))
       setConceptRuns((current) => ({
         ...current,
         [code]: {
@@ -694,6 +703,15 @@ export default function SectorForecast() {
                         || null
                       }
                       conceptRun={conceptRuns[sector.code] || null}
+                      conceptExpanded={
+                        conceptOpen[sector.code] === true
+                      }
+                      onToggleConcept={() => {
+                        setConceptOpen((current) => ({
+                          ...current,
+                          [sector.code]: !current[sector.code],
+                        }))
+                      }}
                       onExplainConcept={() => explainConcept(sector)}
                     />
                   )}

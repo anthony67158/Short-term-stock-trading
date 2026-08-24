@@ -132,3 +132,25 @@ export function sectorConceptExplanationPrompt(sector = {}) {
     '使用清晰中文 Markdown，总长度控制在 800 字以内；具体外部事实标注对应证据编号。',
   ].filter(Boolean).join('\n')
 }
+
+export function sectorConceptExplanationSummary(value, limit = 120) {
+  const lines = String(value || '')
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line && !/^#{1,6}\s+/.test(line))
+  const source = lines.find((line) => !/^[-*]\s+/.test(line))
+    || lines[0]
+    || ''
+  const plain = cleanText(source, Math.max(1, Number(limit) || 120) + 20)
+    .replace(/\[证据\d+\]/g, '')
+    .replace(/\*\*|__|`/g, '')
+    .replace(/^[-*]\s+/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const characters = Array.from(plain)
+  const maximum = Math.max(1, Number(limit) || 120)
+  return characters.length > maximum
+    ? `${characters.slice(0, maximum).join('')}…`
+    : plain
+}
