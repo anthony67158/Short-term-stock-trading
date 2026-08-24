@@ -305,3 +305,22 @@ test('板块展开区按需调用智能体并持久展示解释', () => {
   assert.doesNotMatch(styles, /padding-inline-end:\s*96px/)
   assert.doesNotMatch(styles, /max-width:\s*92ch/)
 })
+
+test('概念说明操作按钮始终与下方分隔线保持安全距离', () => {
+  assert.match(
+    styles,
+    /\.sector-concept-explanation:not\(\.empty\)\s+\.sector-concept-explanation-head\s*{[^}]*padding-bottom:\s*var\(--space-2xs\)/s,
+  )
+  assert.match(
+    styles,
+    /\.sector-concept-explanation\s+\.sector-concept-explain-button\s*{[^}]*min-height:\s*30px/s,
+  )
+  assert.match(
+    styles,
+    /@media \(max-width:[^)]+\)[\s\S]*?\.sector-concept-explanation\s+\.sector-concept-explain-button\s*{[^}]*min-height:\s*36px/s,
+  )
+  assert.doesNotMatch(
+    styles,
+    /\.sector-concept-explain-button\s*{[^}]*min-height:\s*44px/s,
+  )
+})

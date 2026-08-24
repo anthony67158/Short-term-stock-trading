@@ -5075,6 +5075,10 @@ body:has(.modal-mask) .card-decision-slot .action-command-preview {
   gap: var(--space-sm);
 }
 
+.sector-concept-explanation:not(.empty) .sector-concept-explanation-head {
+  padding-bottom: var(--space-2xs);
+}
+
 .sector-concept-explanation-head > span {
   display: inline-flex;
   align-items: center;
@@ -5147,18 +5151,18 @@ body:has(.modal-mask) .card-decision-slot .action-command-preview {
   color: var(--color-ink-2);
 }
 
-.sector-concept-explain-button {
-  min-height: 32px;
-  padding-inline: var(--space-xs);
+.sector-concept-explanation .sector-concept-explain-button {
+  min-height: 30px;
+  padding: 0 var(--space-2xs);
   color: var(--color-accent);
-  font-size: var(--text-xs);
+  font-size: var(--text-2xs);
 }
 
 .sector-concept-explanation-body {
   display: grid;
   width: 100%;
   min-width: 0;
-  margin-top: var(--space-xs);
+  margin-top: 0;
   border-top: 1px solid var(--color-rule-2);
 }
 
@@ -9655,8 +9659,8 @@ button.acct-item {
     min-height: 44px;
   }
 
-  .sector-concept-explain-button {
-    min-height: 44px;
+  .sector-concept-explanation .sector-concept-explain-button {
+    min-height: 36px;
   }
 
   .sector-concept-collapsed-summary {
