@@ -37,6 +37,7 @@ import {
   ADVISOR_SYSTEM,
   buildUserPrompt,
   isAdvisorMode,
+  llmRoleForAdviceMode,
   maxTokensForMode,
 } from './_ai_prompts.js';
 import { reconcileAdviceNumbers } from '../shared/adviceValidation.js';
@@ -606,15 +607,19 @@ export default async function handler(req, res) {
   }
 
   const mode = (body && body.mode) || 'market';
-  const useRole = isAdvisorMode(mode) ? 'advisor' : 'agent';
+  const useRole = llmRoleForAdviceMode(
+    mode,
+    body?.payload?.reviewOrigin,
+  );
   // 运行时配置优先（前端「AI 模型配置」写入 OSS）：先预热同步缓存，再按角色取端点和模型。
   await ensureConfig();
   const aiSearchConfig = await ensureAiSearchConfig();
   const cfg = currentConfig();
   const effectiveReasoning = (role) => getReasoning(role);
   const MODEL = getModel('agent');
-  // 顶级操盘军师专用模型：深度个股研判(做T/加减仓/买入/复盘)用更强、更快、原生JSON稳定的模型
+  // 主建议与复核严格分池：首次操作建议走 advisor，定时/Judge 复核走 review。
   const ADVISOR_MODEL = getModel('advisor');
+  const REVIEW_MODEL = getModel('review');
   if (!llmReady(useRole)) {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     return res.status(200).send(JSON.stringify({
@@ -1460,7 +1465,9 @@ export default async function handler(req, res) {
     const currentEvidenceSnapshot = isAdvisor && payload.code
       ? ensureEvidenceSnapshot()
       : null;
-    const useModel = isAdvisor ? ADVISOR_MODEL : MODEL;
+    const useModel = isAdvisor
+      ? (useRole === 'review' ? REVIEW_MODEL : ADVISOR_MODEL)
+      : MODEL;
     // —— 编排层须与底层实际下发的 reasoning_effort 对齐 ——
     // 深度思考开关既可开在全局(config.reasoning[role]),也可开在【端点级】(ep.reasoning[role])。
     // poolFetch/reasoningForEndpoint 会按端点把 reasoning_effort=high 真实发给上游,但本文件的超时预算、

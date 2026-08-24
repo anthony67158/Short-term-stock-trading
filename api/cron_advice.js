@@ -1449,7 +1449,7 @@ async function drainAccount(nick, initialAcc) {
         // 不消耗重试次数，直接以最新 OSS 账本重跑，绝不把旧建议落盘。
         requeueAdviceForTradeChange(d, done.code);
       } else if (done.res && done.res.cacheItem) {
-        completeJob(d, done.code, Date.now(), {
+        const completion = completeJob(d, done.code, Date.now(), {
           evidenceAsOf: Date.parse(
             done.res.cacheItem?.meta?.evidenceSnapshot?.asOf || '',
           ) || 0,
@@ -1457,6 +1457,11 @@ async function drainAccount(nick, initialAcc) {
             done.res.cacheItem?.advice?.continuity?.revision,
           ) || 0,
         });
+        if (!completion?.publish) {
+          acc = await saveWorking();
+          data = acc.data;
+          continue;
+        }
         ok++;
         const completedAt = Number(jobsOf(d)[done.code]?.finishedAt) || Date.now();
         done.res.cacheItem.updatedAt = Math.max(

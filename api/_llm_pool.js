@@ -1,6 +1,6 @@
 // ============ LLM 角色端点路由（角色隔离 + 熔断 + 故障转移）============
-// 新配置按角色保存固定槽位：advisor 两路，其余角色一路。请求只能进入自身角色槽位；
-// advisor 两路按最少在途选择，并在网络错误/5xx/429 后切换备用端点。
+// 新配置按角色保存固定槽位：advisor/review 各两路，其余角色一路。请求只能进入自身角色槽位；
+// 双路角色按最少在途选择，并在网络错误/5xx/429 后切换备用端点。
 // 旧 baseUrl/endpoints 结构只在迁移期读取，保存新配置后不再跨角色共享。
 //
 // endpoint 形态:{ id, baseUrl, apiKey, weight?, enabled? }
@@ -150,7 +150,7 @@ export function endpointsForRole(config, role) {
 // 真正调用前仍由 llmReady(role)/poolFetch 拒绝无可用端点的请求。
 export function endpointCountForRole(config, role) {
   const eps = endpointsForRole(config, role);
-  if (['judge', 'sector'].includes(role)) return eps.length;
+  if (['review', 'judge', 'sector'].includes(role)) return eps.length;
   return Math.max(1, eps.length);
 }
 

@@ -343,7 +343,7 @@ export function completeJob(
   } = {},
 ) {
   const j = jobsOf(data)[code];
-  if (!j) return;
+  if (!j) return { status: 'missing', publish: false, jobId: '' };
   rememberEventKey(data, j.idempotencyKey, now);
   const pendingTrigger = j.pendingTrigger;
   if (pendingTrigger && typeof pendingTrigger === 'object') {
@@ -369,7 +369,11 @@ export function completeJob(
       j.stage = 'done';
       j.phase = '生成完成';
       j.progressAt = now;
-      return;
+      return {
+        status: 'done',
+        publish: true,
+        jobId: j.id || '',
+      };
     }
     const triggerAt = Number(pendingTrigger.at) || now;
     Object.assign(j, {
@@ -398,10 +402,19 @@ export function completeJob(
       idempotencyKey: pendingTrigger.idempotencyKey || '',
       pendingTrigger: null,
     });
-    return;
+    return {
+      status: 'requeued',
+      publish: false,
+      jobId: j.id || '',
+    };
   }
   j.status = 'done'; j.stage = 'done'; j.finishedAt = now; j.leaseUntil = 0; j.error = '';
   j.phase = '生成完成'; j.progressAt = now;
+  return {
+    status: 'done',
+    publish: true,
+    jobId: j.id || '',
+  };
 }
 
 // 失败:还有重试次数 → 回 queued(下次 drain 重跑);否则 failed 终态。

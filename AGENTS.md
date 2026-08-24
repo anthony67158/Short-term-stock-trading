@@ -44,7 +44,7 @@
 ```
 api/                后端(下划线开头=共享模块,非独立路由)
   server.js 入口相关 ; _lib.js 行情多镜像容错 ; _ta.js 技术指标+量化调用
-  _llm.js LLM层 ; _llm_config.js 运行时配置(OSS+env+六角色七槽位) ; _llm_pool.js 角色端点路由
+  _llm.js LLM层 ; _llm_config.js 运行时配置(OSS+env+七角色九槽位) ; _llm_pool.js 角色端点路由
   _confirm.js 两段式交易确认闸门 ; _ai_prompts.js 各模式prompt(含军师)
   _rag.js/_kb.js RAG ; _screen.js 选股 ; _blob.js OSS抽象 ; _portfolio.js 持仓计算
   _jobs.js 服务端任务表 ; ai.js 结构化AI ; agent.js 工具增强Agent
@@ -148,8 +148,8 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST "$FC/api/ai" -H "Content-Type: 
 
 ## 关键约定与坑
 
-- **六个 LLM 角色、七个固定槽位**（`_llm_config.js`）：`advisor` / `portfolio` / `agent` / `daily` / `sector` / `judge`。军师 AI 操作建议 `advisor` 固定两路，其余角色各一路；侧边栏对话统一使用 `agent`，不再单列 `chat`。配置存 OSS `config/llm.json` 的 `roleEndpoints`，优先级 **OSS > env > 默认**，改完即时生效免重部署。
-- **角色端点严格隔离**（`_llm_pool.js`）：请求只能进入本角色槽位，禁止跨角色回退；`advisor` 两路按最少在途调度，连续失败 3 次冷却 60 秒并自动半开恢复。旧 `baseUrl` / `endpoints` / `judgeEndpoint` / `sectorEndpoint` 只允许迁移读取，不得作为新功能配置入口。
+- **七个 LLM 角色、九个固定槽位**（`_llm_config.js`）：`advisor` / `review` / `portfolio` / `agent` / `daily` / `sector` / `judge`。军师主建议 `advisor` 与委员会、定时、Judge 失效复核 `review` 各固定两路，其余角色各一路；侧边栏对话统一使用 `agent`，不再单列 `chat`。配置存 OSS `config/llm.json` 的 `roleEndpoints`，优先级 **OSS > env > 默认**，改完即时生效免重部署。
+- **角色端点严格隔离**（`_llm_pool.js`）：请求只能进入本角色槽位，禁止跨角色回退；`advisor` 与 `review` 两路分别按最少在途调度，连续失败 3 次冷却 60 秒并自动半开恢复。旧配置缺少 `review` 时保持两个未配置槽位，绝不借用 `advisor`。旧 `baseUrl` / `endpoints` / `judgeEndpoint` / `sectorEndpoint` 只允许迁移读取，不得作为新功能配置入口。
 - **军师生成模式决定推理模式**：普通生成必须强制关闭深度思考、最多两次尝试且不等待委员会；只有用户显式选择深度研判才开启深度思考和三角色委员会。`advisor` 端点不得被持仓诊断或其他角色借用。
 - **策略日报是军师软证据**：快速建议不得等待或自动生成策略日报；深度研判可尝试补齐，但日报缺失、超时或内容不完整只能降级该证据，禁止阻断个股行情、量化和军师主模型。
 - **策略日报按场次提供新增决策价值**：`daily-report.v3` 固定拆为盘前“预判与预案”、盘中“确认与纠偏”、盘后“复盘与次日预判”。盘前候选只来自板块前瞻与确定性日线价位；午报、晚报必须读取同账号同日早报逐项验证，缺失时明确标记不可复盘。行情、量能、板块资金、异动、龙虎榜和北向成交为只读硬数据，LLM 只能解释逻辑与动作，不得改写。北向净买额按现行披露规则固定为“未披露”，禁止把缺失值写成 `0` 或推断流向。

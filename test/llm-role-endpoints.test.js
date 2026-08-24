@@ -30,9 +30,10 @@ const agent = readFileSync(
   'utf8',
 )
 
-test('所有实际LLM能力映射为六个独立角色和七个固定端点槽位', () => {
+test('所有实际LLM能力映射为七个独立角色和九个固定端点槽位', () => {
   assert.deepEqual(Object.keys(ROLES), [
     'advisor',
+    'review',
     'portfolio',
     'agent',
     'daily',
@@ -41,6 +42,7 @@ test('所有实际LLM能力映射为六个独立角色和七个固定端点槽�
   ])
   assert.deepEqual(ROLE_ENDPOINT_SLOTS, {
     advisor: 2,
+    review: 2,
     portfolio: 1,
     agent: 1,
     daily: 1,
@@ -80,6 +82,7 @@ test('每个角色只路由到自己的专用端点', () => {
       endpoint.baseUrl.includes(role)))
   }
   assert.equal(endpointCountForRole(config, 'advisor'), 2)
+  assert.equal(endpointCountForRole(config, 'review'), 2)
 })
 
 test('旧版主端点和资源池可无损迁移到角色端点槽位', () => {
@@ -136,6 +139,27 @@ test('旧配置缺少的固定槽位以停用状态补齐', () => {
   assert.equal(migrated[1].model, ROLES.advisor.def)
 })
 
+test('旧配置缺少复核角色时不得借用军师端点', () => {
+  const legacy = {
+    baseUrl: 'https://main.example/v1',
+    apiKey: 'main-key',
+    models: { advisor: 'advisor-main' },
+    roleEndpoints: {
+      advisor: [{
+        baseUrl: 'https://advisor.example/v1',
+        apiKey: 'advisor-key',
+        model: 'advisor-model',
+        enabled: true,
+      }],
+    },
+  }
+
+  assert.deepEqual(resolveRoleEndpoints(legacy, 'review'), [])
+  const slots = roleEndpointSlots(legacy, 'review')
+  assert.equal(slots.length, 2)
+  assert.ok(slots.every((endpoint) => endpoint.enabled === false))
+})
+
 test('策略日报使用独立daily角色而不是复用agent', () => {
   assert.match(dailyReport, /getModel\('daily'\)/)
   assert.match(dailyReport, /role:\s*'daily'/)
@@ -144,18 +168,19 @@ test('策略日报使用独立daily角色而不是复用agent', () => {
 
 test('各入口按自己的角色判断专用端点是否可用', () => {
   assert.match(ai, /llmReady\(useRole\)/)
-  assert.match(ai, /isAdvisorMode\(mode\) \? 'advisor' : 'agent'/)
+  assert.match(ai, /llmRoleForAdviceMode\(/)
   assert.doesNotMatch(ai, /getModel\('chat'\)/)
   assert.match(agent, /llmReady\('agent'\)/)
   assert.match(dailyReport, /llmReady\('daily'\)/)
 })
 
 test('配置界面按角色展示端点且不再暴露通用资源池', () => {
-  assert.match(frontend, /6 个角色/)
-  assert.match(frontend, /7 个端点/)
+  assert.match(frontend, /7 个角色/)
+  assert.match(frontend, /9 个端点/)
   assert.match(frontend, /roleEndpoints/)
   assert.match(frontend, /军师AI操作建议生成/)
-  assert.match(frontend, /role === 'advisor'/)
+  assert.match(frontend, /复核角色/)
+  assert.match(frontend, /Number\(roleSlots\?\.\[role\]\) > 1/)
   assert.match(frontend, /role !== 'advisor'/)
   assert.doesNotMatch(frontend, /对话\/盘面分析/)
   assert.match(frontend, /`端点 \$\{index \+ 1\}`/)

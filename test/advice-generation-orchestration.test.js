@@ -15,6 +15,7 @@ import {
   generationOptions,
 } from '../shared/adviceBatchPolicy.js'
 import {
+  llmRoleForAdviceMode,
   maxTokensForMode,
 } from '../api/_ai_prompts.js'
 
@@ -119,7 +120,7 @@ test('证据快照之后才到达的新事件只续跑一次', () => {
     idempotencyKey: 'judge:alert-2:plan-1:1:invalid',
   }, 1400)
 
-  completeJob(data, '600000', 1500, {
+  const completion = completeJob(data, '600000', 1500, {
     evidenceAsOf: 1300,
     planRevision: 2,
   })
@@ -142,6 +143,11 @@ test('证据快照之后才到达的新事件只续跑一次', () => {
   assert.equal(data.jobs['600000'].id, continuedId)
   assert.equal(duplicate.created, false)
   assert.equal(duplicate.replayed, true)
+  assert.deepEqual(completion, {
+    status: 'requeued',
+    publish: false,
+    jobId: continuedId,
+  })
 })
 
 test('委员会只在显式深度生成时同步执行', () => {
@@ -160,6 +166,15 @@ test('委员会只在显式深度生成时同步执行', () => {
     deepMode: true,
     source: 'auto',
   }), false)
+})
+
+test('复核请求使用独立review角色且首次建议仍使用advisor', () => {
+  assert.equal(llmRoleForAdviceMode('review'), 'review')
+  assert.equal(llmRoleForAdviceMode('hold_advice', 'auto'), 'review')
+  assert.equal(llmRoleForAdviceMode('buy_advice', 'judge'), 'review')
+  assert.equal(llmRoleForAdviceMode('hold_advice', 'ondemand'), 'advisor')
+  assert.equal(llmRoleForAdviceMode('buy_advice', ''), 'advisor')
+  assert.equal(llmRoleForAdviceMode('market'), 'agent')
 })
 
 test('快速军师不等待策略日报而深度研判仍尝试补齐', () => {
@@ -208,6 +223,10 @@ test('个股页默认快速生成且普通路径不再无条件同步委员会',
   assert.match(
     cronAdviceSource,
     /onProgress\(\{\s*stage:\s*'finalize',\s*phase:\s*'复核完成，正在发布最终结论'/,
+  )
+  assert.match(
+    cronAdviceSource,
+    /const completion = completeJob\([\s\S]*?if \(!completion\?\.publish\) \{[\s\S]*?await saveWorking\(\)[\s\S]*?continue/,
   )
   assert.match(
     aiSource,

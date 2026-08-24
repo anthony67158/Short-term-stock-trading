@@ -12,6 +12,10 @@ const cronAdvice = readFileSync(
   new URL('../api/cron_advice.js', import.meta.url),
   'utf8',
 )
+const councilSource = readFileSync(
+  new URL('../api/_advisor_council.js', import.meta.url),
+  'utf8',
+)
 
 test('委员会上下文只保留决策所需字段并限制外部文本长度', () => {
   const context = buildCouncilContext({
@@ -106,6 +110,9 @@ test('委员会普通生成强制关闭思考且深度生成强制开启', () =>
     cronAdvice,
     /runAdvisorCouncilShadow\(\{[\s\S]*?deepMode,[\s\S]*?\}\)/,
   )
+  assert.match(councilSource, /getModel\('review'\)/)
+  assert.match(councilSource, /role:\s*'review'/)
+  assert.doesNotMatch(councilSource, /role:\s*'advisor'/)
 })
 
 test('单角色超时不会阻断主流程但委员会必须保守失败', async () => {

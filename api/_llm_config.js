@@ -3,7 +3,7 @@
 // 改完即时对全系统生效，无需重新部署。
 //
 // 存储：OSS 对象 config/llm.json（复用 _blob.js，与账号数据同桶）。
-//   { roleEndpoints:{advisor,portfolio,agent,daily,sector,judge}, updatedAt }
+//   { roleEndpoints:{advisor,review,portfolio,agent,daily,sector,judge}, updatedAt }
 // 读取优先级：OSS 配置 > 环境变量 > 内置默认。
 //
 // 关键约束：
@@ -17,10 +17,11 @@ import { assertSafeRemoteUrl } from './_safe_remote_url.js';
 const KEY_PATH = 'config/llm.json';
 const hasOwn = (obj, key) => !!obj && Object.prototype.hasOwnProperty.call(obj, key);
 
-// 所有生成式 AI 能力均有独立角色；advisor 固定两个槽位，其余角色各一个。
+// 所有生成式 AI 能力均有独立角色；advisor/review 固定两个槽位，其余角色各一个。
 // 环境变量与旧版主端点/资源池仅用于首次迁移，保存后运行时严格按角色隔离。
 export const ROLES = {
   advisor: { envs: ['ADVISOR_MODEL'], def: 'DeepSeek-V4-Pro',   label: '军师AI操作建议生成' },
+  review: { envs: ['REVIEW_MODEL'], def: 'DeepSeek-V4-Pro', label: '复核角色' },
   portfolio: { envs: ['PORTFOLIO_MODEL'], def: 'DeepSeek-V4-Pro', label: '持仓分布分析' },
   agent:   { envs: ['AGENT_MODEL'],   def: 'Qwen3-Max-A',       label: '智能体助手(需函数调用)' },
   daily:   { envs: ['DAILY_MODEL', 'AGENT_MODEL'], def: 'Qwen3-Max-A', label: '策略日报' },
@@ -30,6 +31,7 @@ export const ROLES = {
 
 export const ROLE_ENDPOINT_SLOTS = Object.freeze({
   advisor: 2,
+  review: 2,
   portfolio: 1,
   agent: 1,
   daily: 1,
@@ -216,6 +218,8 @@ export function resolveRoleEndpoints(config = {}, role) {
   if (!ROLES[role]) return [];
   const explicit = explicitRoleEndpoints(config, role);
   if (explicit) return explicit;
+  // 复核必须物理隔离；旧配置缺少 review 时保持未配置，绝不借用 advisor/主端点。
+  if (role === 'review') return [];
   if (role === 'judge') {
     const endpoint = resolveJudgeEndpoint(config);
     return endpoint

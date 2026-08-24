@@ -36,6 +36,7 @@ resources:
         LLM_API_KEY: ${env('LLM_API_KEY')}
         # 模型沿用代码内默认值（保持与线上一致）
         ADVISOR_MODEL: DeepSeek-V4-Pro
+        REVIEW_MODEL: DeepSeek-V4-Pro
         PORTFOLIO_MODEL: DeepSeek-V4-Pro
         AGENT_MODEL: Qwen3-Max-A
         DAILY_MODEL: Qwen3-Max-A

@@ -17,6 +17,14 @@ export const ADVISOR_MODES = new Set([
 ]);
 export function isAdvisorMode(mode) { return ADVISOR_MODES.has(mode); }
 
+const REVIEW_ORIGINS = new Set(['auto', 'judge', 'review', 'scheduled']);
+export function llmRoleForAdviceMode(mode, reviewOrigin = '') {
+  if (mode === 'review' || REVIEW_ORIGINS.has(String(reviewOrigin || ''))) {
+    return 'review';
+  }
+  return isAdvisorMode(mode) ? 'advisor' : 'agent';
+}
+
 // 各 mode 的 LLM maxTokens:选股/盘面类输出长、做T最长、其余持仓类居中、简单分析最短
 // reasoning=true 时,max_tokens 为「思维链 + 正文」共用额度。实测本网关把【思维链 token】
 // 也计入 max_tokens,参考内容一多、思维链一长(复杂军师题可轻松吃掉一两万 token),留给正文 JSON
