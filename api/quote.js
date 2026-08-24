@@ -94,35 +94,45 @@ async function quoteTx(codes) {
   return out;
 }
 
+export async function fetchQuotes(codes) {
+  const normalizedCodes = (codes || [])
+    .map((code) => String(code || '').trim())
+    .filter(Boolean);
+  if (!normalizedCodes.length) return [];
+
+  const secids = normalizedCodes.map(toSecid).join(',');
+  // f15 最高 f16 最低 f17 今开 f18 昨收 f100 所属行业
+  const fields = 'f2,f3,f4,f8,f10,f12,f14,f62,f84,f184,f6,f15,f16,f17,f18,f100,f124';
+  const path =
+    `/api/qt/ulist.np/get?fltt=2&invt=2&secids=${encodeURIComponent(secids)}` +
+    `&fields=${fields}`;
+
+  let list = [];
+  try {
+    const j = await emGet(path);
+    const diff = (j && j.data && j.data.diff) || [];
+    list = diff.map(mapEastmoneyQuote);
+  } catch { /* 东财失败 → 走腾讯 */ }
+
+  // 东财空或缺票 → 用腾讯补齐缺失的代码
+  const have = new Set(list.map((x) => x.code));
+  const missing = normalizedCodes.filter((code) => !have.has(code));
+  if (missing.length) {
+    try {
+      const tx = await quoteTx(missing);
+      list = [...list, ...tx];
+    } catch { /* 腾讯也失败则保持现状 */ }
+  }
+
+  return list;
+}
+
 export default async function handler(req, res) {
   try {
     const codes = (req.query.codes || '').split(',').map((s) => s.trim()).filter(Boolean);
     if (codes.length === 0) return sendJson(res, { ok: true, list: [] });
 
-    const secids = codes.map(toSecid).join(',');
-    // f15 最高 f16 最低 f17 今开 f18 昨收 f100 所属行业
-    const fields = 'f2,f3,f4,f8,f10,f12,f14,f62,f84,f184,f6,f15,f16,f17,f18,f100,f124';
-    const path =
-      `/api/qt/ulist.np/get?fltt=2&invt=2&secids=${encodeURIComponent(secids)}` +
-      `&fields=${fields}`;
-
-    let list = [];
-    try {
-      const j = await emGet(path);
-      const diff = (j && j.data && j.data.diff) || [];
-      list = diff.map(mapEastmoneyQuote);
-    } catch { /* 东财失败 → 走腾讯 */ }
-
-    // 东财空或缺票 → 用腾讯补齐缺失的代码
-    const have = new Set(list.map((x) => x.code));
-    const missing = codes.filter((c) => !have.has(c));
-    if (missing.length) {
-      try {
-        const tx = await quoteTx(missing);
-        list = [...list, ...tx];
-      } catch { /* 腾讯也失败则保持现状 */ }
-    }
-
+    const list = await fetchQuotes(codes);
     sendJson(res, { ok: true, updatedAt: Date.now(), list }, { cache: 10 });
   } catch (e) {
     sendError(res, e);

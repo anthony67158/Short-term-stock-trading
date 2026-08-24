@@ -5,6 +5,7 @@ import {
   quantModelLabel,
 } from '../shared/modelVersion.js';
 import { canUseQuantModel } from './_quant_access.js';
+import { fetchQuotes } from './quote.js';
 
 // secid 前缀：6/9/5 开头沪市=1，其余=0
 function toSecid(code) {
@@ -128,6 +129,7 @@ export default async function handler(req, res) {
     const klt = req.query.klt || '101';
     const lmt = Math.min(Number(req.query.lmt) || 120, 500);
     const wantTrends = req.query.trends === '1';
+    const wantQuote = req.query.quote === '1';
     const wantQuant = req.query.quant === '1';
     const quantModelVersion = normalizeQuantModelVersion(req.query.model);
     if (
@@ -173,14 +175,18 @@ export default async function handler(req, res) {
     }
 
     // 用 allSettled 保证：分时/简介失败绝不影响 K线返回
-    const [klRes, f10Res, trendsRes] = await Promise.allSettled([
+    const [klRes, f10Res, trendsRes, quoteRes] = await Promise.allSettled([
       fetchKline(klHosts, klPath),
       jget(f10Url, 6000, 'https://emweb.securities.eastmoney.com/'),
       wantTrends ? fetchTrends() : Promise.resolve(null),
+      wantQuote ? fetchQuotes([code]) : Promise.resolve([]),
     ]);
     const klJson = klRes.status === 'fulfilled' ? klRes.value : null;
     const f10Json = f10Res.status === 'fulfilled' ? f10Res.value : null;
     const trendsJson = trendsRes.status === 'fulfilled' ? trendsRes.value : null;
+    const quote = quoteRes.status === 'fulfilled'
+      ? quoteRes.value.find((item) => item.code === String(code)) || null
+      : null;
 
     // 解析 K线
     const kd = klJson && klJson.data;
@@ -286,6 +292,7 @@ export default async function handler(req, res) {
         candles,
         trends,
         preClose,
+        quote,
         tech,
         quant,
         quantModelVersion,

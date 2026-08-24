@@ -2711,6 +2711,56 @@ html[data-theme="light"] .plan-cand.starred {
   margin-left: 0;
 }
 
+.detail-market-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  overflow: hidden;
+  border-radius: var(--radius-control);
+  background: var(--color-paper-3);
+}
+
+.detail-market-metric {
+  display: grid;
+  gap: var(--space-3xs);
+  min-width: 0;
+  min-height: 60px;
+  padding: var(--space-xs) var(--space-sm);
+  border-inline-start: 1px solid var(--color-rule-2);
+}
+
+.detail-market-metric:first-child {
+  border-inline-start: 0;
+}
+
+.detail-market-metric > span {
+  overflow: hidden;
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-market-metric > b {
+  overflow: hidden;
+  color: var(--color-ink);
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  font-weight: 720;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-market-metric > b.red {
+  color: var(--red);
+}
+
+.detail-market-metric > b.green {
+  color: var(--green);
+}
+
 .decide-box {
   margin: 0;
   padding: 0;
@@ -3457,6 +3507,18 @@ html[data-theme="light"] .plan-cand.starred {
   .dq-period {
     grid-column: 1 / -1;
     justify-self: start;
+  }
+
+  .detail-market-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .detail-market-metric:nth-child(odd) {
+    border-inline-start: 0;
+  }
+
+  .detail-market-metric:nth-child(n + 3) {
+    border-top: 1px solid var(--color-rule-2);
   }
 
   .decide-head {

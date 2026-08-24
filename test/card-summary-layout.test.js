@@ -8,6 +8,9 @@ const read = (path) => readFileSync(
 )
 
 const planTab = read('src/components/PlanTab.jsx')
+const stockDetail = read('src/components/StockDetail.jsx')
+const stockDetailApi = read('api/stock_detail.js')
+const quoteApi = read('api/quote.js')
 const precision = read('src/styles/precision.css')
 const design = read('design.md')
 
@@ -112,6 +115,36 @@ test('自选卡使用四列指标带展示散户资金', () => {
   assert.match(
     precision,
     /\.pc-metrics\s*{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/s,
+  )
+})
+
+test('个股详情复用详情请求展示换手量比与主力散户资金', () => {
+  assert.match(
+    stockDetail,
+    /stock_detail\?code=\$\{stock\.code\}[^`]*quote=1/,
+  )
+  assert.match(stockDetailApi, /fetchQuotes\(\[code\]\)/)
+  assert.match(quoteApi, /export async function fetchQuotes\(codes\)/)
+  assert.match(
+    stockDetail,
+    /className="detail-market-metrics"[\s\S]*?>换手<\/span>[\s\S]*?>量比<\/span>[\s\S]*?>主力<\/span>[\s\S]*?>散户<\/span>/,
+  )
+  assert.match(stockDetail, /fmtNum\(quote\?\.turnover,\s*1\)/)
+  assert.match(stockDetail, /fmtNum\(quote\?\.volRatio,\s*1\)/)
+  assert.match(stockDetail, /fmtInflow\(quote\?\.mainInflow\)/)
+  assert.match(stockDetail, /fmtInflow\(quote\?\.retailInflow\)/)
+  assert.match(stockDetail, /function hasMarketMetric\(value\)/)
+  assert.equal(
+    (stockDetail.match(/hasMarketMetric\(quote\?\./g) || []).length,
+    4,
+  )
+  assert.match(
+    precision,
+    /\.detail-market-metrics\s*{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.detail-market-metrics\s*{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s,
   )
 })
 

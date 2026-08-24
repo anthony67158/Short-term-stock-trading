@@ -5,7 +5,7 @@ import StockTags from './StockTags'
 import AdviceGenerationStatus from './AdviceGenerationStatus'
 import AdvicePresentation from './AdvicePresentation'
 import { usePolling } from '../hooks'
-import { fmtPct, pctClass, fmtRaw, fmtNum } from '../format'
+import { fmtPct, pctClass, fmtRaw, fmtNum, fmtInflow } from '../format'
 import { api } from '../apiBase'
 import { usePlanStore, planStore, computePortfolio, livePositionOf, t1StatusOf } from '../planStore'
 import { nextTradingDayLabel } from '../../shared/tradingCalendar.js'
@@ -73,6 +73,13 @@ function fmtVol(v) {
   if (a >= 1e8) return (v / 1e8).toFixed(2) + '亿手'
   if (a >= 1e4) return (v / 1e4).toFixed(1) + '万手'
   return Math.round(v) + '手'
+}
+
+function hasMarketMetric(value) {
+  return value !== null
+    && value !== undefined
+    && value !== ''
+    && Number.isFinite(Number(value))
 }
 
 function formatQuantAsOf(value) {
@@ -386,7 +393,7 @@ export default function StockDetail({ stock, onClose }) {
     // eslint-disable-next-line
   }, [busyModal, stock && stock.code])
   const { data, loading, error, reload } = usePolling(
-    stock ? `/api/stock_detail?code=${stock.code}&klt=${klt}&lmt=120&trends=1` : null,
+    stock ? `/api/stock_detail?code=${stock.code}&klt=${klt}&lmt=120&trends=1&quote=1` : null,
     600000, // 详情不需要频繁刷新
     [stock && stock.code, klt]
   )
@@ -411,6 +418,7 @@ export default function StockDetail({ stock, onClose }) {
   const trends = (data && data.trends) || []
   const preClose = data && data.preClose
   const tech = data && data.tech
+  const quote = (data && data.quote) || stock
 
   // K线为空时自动重试（东财偶发空响应）：最多重试 2 次，间隔递增
   const retryRef = useRef(0)
@@ -808,6 +816,43 @@ export default function StockDetail({ stock, onClose }) {
                   最新{overview.periodLabel}K
                   {refreshedAt && <span className="dq-updated">· 已更新 {new Date(refreshedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>}
                 </span>
+              </div>
+              <div
+                className="detail-market-metrics"
+                aria-label="个股活跃度与资金流向"
+              >
+                <div className="detail-market-metric">
+                  <span>换手</span>
+                  <b>
+                    {hasMarketMetric(quote?.turnover)
+                      ? `${fmtNum(quote?.turnover, 1)}%`
+                      : '--'}
+                  </b>
+                </div>
+                <div className="detail-market-metric">
+                  <span>量比</span>
+                  <b>
+                    {hasMarketMetric(quote?.volRatio)
+                      ? fmtNum(quote?.volRatio, 1)
+                      : '--'}
+                  </b>
+                </div>
+                <div className="detail-market-metric">
+                  <span>主力</span>
+                  <b className={pctClass(quote?.mainInflow)}>
+                    {hasMarketMetric(quote?.mainInflow)
+                      ? fmtInflow(quote?.mainInflow)
+                      : '--'}
+                  </b>
+                </div>
+                <div className="detail-market-metric">
+                  <span>散户</span>
+                  <b className={pctClass(quote?.retailInflow)}>
+                    {hasMarketMetric(quote?.retailInflow)
+                      ? fmtInflow(quote?.retailInflow)
+                      : '--'}
+                  </b>
+                </div>
               </div>
               {/* ===== AI 操作建议（核心：紧跟价格，第一优先展示）===== */}
               <div className="decide-box">
