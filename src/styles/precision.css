@@ -11227,6 +11227,264 @@ button.acct-item {
   font-size: var(--text-md);
 }
 
+.holding-plan-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-xs);
+  width: 100%;
+  min-height: 40px;
+  margin-top: var(--space-xs);
+  padding: var(--space-2xs) 0;
+  border: 0;
+  border-block: 1px solid var(--color-rule-2);
+  background: transparent;
+  color: var(--color-ink-2);
+  cursor: pointer;
+  text-align: start;
+}
+
+.holding-plan-summary:hover {
+  color: var(--color-ink);
+}
+
+.holding-plan-summary-label,
+.holding-plan-summary-values {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.holding-plan-summary-label {
+  gap: var(--space-3xs);
+  color: var(--color-ink);
+  font-size: var(--text-xs);
+  font-weight: 700;
+}
+
+.holding-plan-summary-label .icon {
+  color: var(--color-accent);
+}
+
+.holding-plan-summary-values {
+  gap: var(--space-sm);
+  overflow: hidden;
+  color: var(--color-muted);
+  font-size: var(--text-2xs);
+  white-space: nowrap;
+}
+
+.holding-plan-summary-values span {
+  min-width: 0;
+}
+
+.holding-plan-summary-values b {
+  margin-inline-start: 3px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.holding-plan-summary > .icon {
+  color: var(--color-muted);
+}
+
+.holding-plan-mask,
+.plan-edit-mask {
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-lg);
+}
+
+.holding-plan-dialog {
+  display: grid;
+  width: min(520px, calc(100vw - 48px));
+  max-height: min(720px, calc(100dvh - 48px));
+  overflow: hidden;
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-card);
+  background: var(--color-paper-2);
+  box-shadow: var(--shadow-overlay);
+}
+
+.holding-plan-head,
+.holding-plan-footer,
+.plan-edit-dialog .mobile-trade-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+}
+
+.holding-plan-head {
+  border-bottom: 1px solid var(--color-rule-2);
+}
+
+.holding-plan-head > div {
+  display: grid;
+  gap: var(--space-3xs);
+  min-width: 0;
+}
+
+.holding-plan-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  color: var(--color-ink);
+  font-family: var(--font-display);
+  font-size: var(--text-base);
+  font-weight: 700;
+}
+
+.holding-plan-title .icon {
+  color: var(--color-accent);
+}
+
+.holding-plan-head > div > span {
+  overflow: hidden;
+  color: var(--color-muted);
+  font-size: var(--text-2xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.holding-plan-body {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.holding-plan-boundaries {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.holding-plan-boundaries > section {
+  display: grid;
+  gap: var(--space-3xs);
+  min-width: 0;
+  padding: var(--space-lg) var(--space-md);
+  background: transparent;
+}
+
+.holding-plan-boundaries > section + section {
+  border-inline-start: 1px solid var(--color-rule-2);
+}
+
+.holding-plan-boundaries span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3xs);
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+}
+
+.holding-plan-boundaries strong {
+  font-family: var(--font-mono);
+  font-size: var(--text-xl);
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.holding-plan-boundaries small {
+  color: var(--color-muted);
+  font-size: var(--text-2xs);
+}
+
+.holding-plan-boundaries section[data-state="hit"] small {
+  color: var(--color-warning);
+}
+
+.holding-plan-reason,
+.holding-plan-session {
+  display: grid;
+  gap: var(--space-2xs);
+  padding: var(--space-sm) var(--space-md);
+  border-top: 1px solid var(--color-rule-2);
+}
+
+.holding-plan-reason > span,
+.holding-plan-session > span {
+  color: var(--color-muted);
+  font-size: var(--text-2xs);
+  font-weight: 700;
+}
+
+.holding-plan-reason p,
+.holding-plan-session p {
+  margin: 0;
+  color: var(--color-ink-2);
+  font-size: var(--text-sm);
+  line-height: 1.65;
+}
+
+.holding-plan-session {
+  grid-template-columns: minmax(110px, auto) minmax(0, 1fr);
+  align-items: baseline;
+}
+
+.holding-plan-session p {
+  font-size: var(--text-xs);
+}
+
+.holding-plan-footer {
+  border-top: 1px solid var(--color-rule-2);
+}
+
+.holding-plan-follow {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  gap: var(--space-3xs);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-accent);
+  cursor: pointer;
+  font-size: var(--text-xs);
+  font-weight: 650;
+}
+
+.holding-plan-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  margin-inline-start: auto;
+}
+
+.holding-plan-delete {
+  color: var(--color-muted);
+}
+
+.holding-plan-edit {
+  gap: var(--space-3xs);
+  min-width: 108px;
+  justify-content: center;
+}
+
+.plan-edit-dialog {
+  width: min(520px, calc(100vw - 48px));
+  max-height: min(720px, calc(100dvh - 48px));
+  overflow: hidden;
+}
+
+.plan-edit-dialog .mobile-trade-head {
+  margin: 0;
+  border-bottom: 1px solid var(--color-rule-2);
+}
+
+.plan-edit-dialog .mobile-trade-body {
+  max-height: calc(100dvh - 128px);
+  overflow-y: auto;
+  padding: var(--space-md);
+}
+
+.plan-edit-dialog .plan-edit {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
 .hold-item > .pi-actions {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -11336,6 +11594,50 @@ button.acct-item {
 }
 
 @media (max-width: 720px) {
+  .holding-plan-mask,
+  .plan-edit-mask {
+    align-items: flex-end;
+    justify-content: flex-end;
+    padding:
+      max(var(--space-sm), env(safe-area-inset-top))
+      0
+      0;
+  }
+
+  .holding-plan-dialog,
+  .plan-edit-dialog {
+    width: 100%;
+    max-height: calc(88dvh - env(safe-area-inset-top));
+    border-radius:
+      var(--radius-card)
+      var(--radius-card)
+      0
+      0;
+    border-bottom: 0;
+  }
+
+  .holding-plan-head,
+  .holding-plan-footer {
+    padding-inline: var(--space-sm);
+  }
+
+  .holding-plan-boundaries > section {
+    padding: var(--space-md) var(--space-sm);
+  }
+
+  .holding-plan-reason,
+  .holding-plan-session {
+    padding-inline: var(--space-sm);
+  }
+
+  .holding-plan-session {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .plan-edit-dialog .mobile-trade-body {
+    padding: var(--space-sm);
+  }
+
   .modal-mask:has(.detail-panel) .detail-panel {
     width: 100%;
   }

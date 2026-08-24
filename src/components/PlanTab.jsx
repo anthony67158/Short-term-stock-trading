@@ -9,6 +9,7 @@ import AutoRefreshStockSelector from './AutoRefreshStockSelector'
 import Reasoning from './Reasoning'
 import ConfirmDialog from './ConfirmDialog'
 import OverlayPortal from './OverlayPortal'
+import HoldingPlanDialog from './HoldingPlanDialog'
 import AdviceGenerationStatus, { useAdviceGeneration } from './AdviceGenerationStatus'
 import ExecutionQueue from './ExecutionQueue'
 import { AlertForm } from './AlertCenter'
@@ -2111,7 +2112,7 @@ function HoldingList({ book, quote, stockTags, searchConfig, batchSel }) {
       ) : (
         <>
           <div className="hold-grid">
-            {shownHolding.map((h, idx) => (
+            {shownHolding.map((h) => (
               selectMode ? (
                 <div key={h.id}
                   className={'hold-select-wrap' + (selected.has(h.code) ? ' sel-on' : '')}
@@ -2120,10 +2121,10 @@ function HoldingList({ book, quote, stockTags, searchConfig, batchSel }) {
                   <span className={'pc-check' + (selected.has(h.code) ? ' on' : '')}>
                     <Icon name={selected.has(h.code) ? 'checkSquare' : 'square'} size={16} />
                   </span>
-                  <HoldingItem h={h} idx={idx} quote={quote[h.code]} />
+                  <HoldingItem h={h} quote={quote[h.code]} />
                 </div>
               ) : (
-                <HoldingItem key={h.id} h={h} idx={idx} quote={quote[h.code]} />
+                <HoldingItem key={h.id} h={h} quote={quote[h.code]} />
               )
             ))}
           </div>
@@ -2134,7 +2135,7 @@ function HoldingList({ book, quote, stockTags, searchConfig, batchSel }) {
 }
 
 // ---------- 单笔持仓 ----------
-function HoldingItem({ h, idx, quote: q }) {
+function HoldingItem({ h, quote: q }) {
   const searchConfig = useAiSearchConfig()
   const [mode, setMode] = useState(null) // null | 'sell' | 'T' | 'add' | 'cost'
   const detail = useDetailStore() // 监听个股详情弹窗：从个股页生成AI建议返回后自动代入价格
@@ -2147,11 +2148,6 @@ function HoldingItem({ h, idx, quote: q }) {
   const [confirmSettle, setConfirmSettle] = useState(false) // 手动结算做T二次确认
   // B-7 移动端横滑:右滑=看详情(左滑做T已移除——改为点「做T」按钮打开全屏页,避免误触/内容裁切)
   const isTouch = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches
-  const swipe = useSwipe({
-    enabled: isTouch && !mode, // 编辑态(加仓/减仓/做T/设计划打开时)禁用横滑,避免输入时误触"划来划去"
-    onRight: () => openStockDetail(h.code, h.name),
-  })
-
   // 做T输入（流水式：直接记一腿买或卖）
   const [tSide, setTSide] = useState('buy') // buy 低吸/买回 | sell 高抛/卖出
   const [tPrice, setTPrice] = useState('')
@@ -2159,10 +2155,13 @@ function HoldingItem({ h, idx, quote: q }) {
   const [tAdvice, setTAdvice] = useState(null) // {loading,result,error} AI做T参考
   const [tStyle, setTStyle] = useState('auto') // auto(按历史规律) | conservative | balanced | aggressive
   const [openDays, setOpenDays] = useState({}) // 做T流水按天折叠，key→是否展开
-  const [expanded, setExpanded] = useState(false) // 卡片明细区（盘中提示/复盘/信号/计划/做T）默认折叠
-  const [detailTab, setDetailTab] = useState(null) // 明细手风琴当前展开的分段: 'review'|'plan'|'t'|null
+  const [planDetailOpen, setPlanDetailOpen] = useState(false)
   const [tradeErr, setTradeErr] = useState('')
   const mobileOperations = useMediaQuery('(max-width: 720px)')
+  const swipe = useSwipe({
+    enabled: isTouch && !mode && !planDetailOpen,
+    onRight: () => openStockDetail(h.code, h.name),
+  })
 
   const book = usePlanStore()
   const stockNote = stockNoteText(book.stockNotes, h.code)
@@ -2265,6 +2264,7 @@ function HoldingItem({ h, idx, quote: q }) {
 
   // 打开计划编辑：existing=true 用已有值；否则优先复用最新 AI 建议的止损/止盈，缺失则用本地公式兜底
   const openPlan = (useExisting) => {
+    setPlanDetailOpen(false)
     setPlanBasis(null)
     if (useExisting && (h.tp || h.sl || h.planReason)) {
       setPlanTP(h.tp != null ? String(h.tp) : '')
@@ -2498,6 +2498,7 @@ function HoldingItem({ h, idx, quote: q }) {
   }
 
   const flowDays = groupTFlowsByDay(h.tFlows)
+  const hasPlan = !!(h.tp || h.sl || h.planReason)
   // 实时持仓手数/成本（做T后即时反映）
   const netT = (tStat.openBuy || 0) - (tStat.openSell || 0)
   const liveCost = effectiveCost
@@ -2510,6 +2511,7 @@ function HoldingItem({ h, idx, quote: q }) {
         : mode === 'cost'
           ? '修改成本价'
           : ''
+  const isPlanEditor = mode === 'plan'
   const operationForm = mode === 'add' ? (
     <div className="buy-inline-wrap">
       <div className="buy-inline">
@@ -2560,16 +2562,16 @@ function HoldingItem({ h, idx, quote: q }) {
     <div className="plan-edit">
       <div className="plan-edit-tip">
         {planBasis && planBasis.from === 'advice'
-          ? <><Icon name="spark" size={12} /> 已复用最新AI操作建议{planBasis.action ? `(${planBasis.action})` : ''}的止盈/止损价，可直接改</>
+          ? <><Icon name="spark" size={12} /> 已带入最新建议{planBasis.action ? `(${planBasis.action})` : ''}的止盈止损价</>
           : <><Icon name="spark" size={12} /> 已按短线逻辑给默认值，可直接改</>}
         <button className="plan-refill" onClick={() => { const s = suggestPlan(); setPlanTP(s.tp); setPlanSL(s.sl); setPlanReason(s.reason); setPlanBasis(null) }}>用公式</button>
         {!hasAdvicePrices() && (
-          <button className="plan-refill" onClick={() => openStockDetail(h.code, h.name)} title="去个股页生成AI操作建议，返回后自动代入止盈/止损价">去生成AI建议</button>
+          <button className="plan-refill" onClick={() => openStockDetail(h.code, h.name)} title="去个股页生成建议，返回后自动代入止盈止损价">生成建议</button>
         )}
       </div>
       {(!hasAdvicePrices() && (!planBasis || planBasis.from !== 'advice')) && (
         <div className="plan-basis">
-          <span className="muted">该股暂无AI操作建议，当前为公式默认值。生成建议后返回，会自动代入建议的止盈/止损价。</span>
+          <span className="muted">当前使用公式默认值；生成军师建议后可自动带入止盈止损价。</span>
         </div>
       )}
       <div className="plan-edit-row">
@@ -2704,115 +2706,28 @@ function HoldingItem({ h, idx, quote: q }) {
         )}
       />
 
-      {/* 明细展开开关：把计划/做T 收纳,展开后手风琴分段(一次看一类)。
-          复盘已与「AI操作建议」同源,直接点进个股详情页看即可,不再单列分段;
-          「踏5不破10」参考均线信号也已移入个股详情页。 */}
-      {(() => {
-        const hasPlan = !!(h.tp || h.sl || h.planReason)
-        const hasT = !!(h.tFlows && h.tFlows.length > 0)
-        const segs = [
-          hasPlan && { key: 'plan', label: '计划' },
-          hasT && { key: 't', label: `做T${h.tFlows.length}` },
-        ].filter(Boolean)
-        if (!segs.length && !play) return null
-        // 当前分段若已不在可用分段里(如旧的'review'),回退到第一个
-        const activeTab = segs.some((s) => s.key === detailTab) ? detailTab : (segs[0] && segs[0].key)
-        // 打开明细时默认选中第一个分段
-        const openDetail = () => { const nx = !expanded; setExpanded(nx); if (nx && segs.length && !segs.some((s) => s.key === detailTab)) setDetailTab(segs[0].key) }
-        return (
-          <>
-            <button className="hold-detail-toggle" onClick={openDetail}>
-              <Icon name={expanded ? 'chevronDown' : 'chevronRight'} size={13} />
-              {expanded ? '收起明细' : '明细'}
-              {!expanded && <span className="hdt-chips">{segs.map((s) => <span key={s.key} className={'hdt-chip' + (s.dot ? ' pending' : '')}>{s.label}</span>)}</span>}
-            </button>
-
-            {expanded && (
-              <div className="hold-detail">
-                {/* 盘中时段操盘提示（若与主行动不同，作为补充展示在明细顶部）*/}
-                {play && (
-                  <div className={'ipb ipb-' + play.tone}>
-                    <span className="ipb-when">{play.when}</span>
-                    <span className={'ipb-tag ipb-' + play.tone}>{play.tag}</span>
-                    <span className="ipb-tip">{play.tip}</span>
-                  </div>
-                )}
-
-                {/* 手风琴分段切换条 */}
-                {segs.length > 0 && (
-                  <div className="hd-segs">
-                    {segs.map((s) => (
-                      <button key={s.key} className={'hd-seg' + (activeTab === s.key ? ' on' : '') + (s.dot ? ' has-dot' : '')} onClick={() => setDetailTab(s.key)}>{s.label}</button>
-                    ))}
-                  </div>
-                )}
-
-                {/* 交易计划条：止盈/止损/理由 */}
-                {activeTab === 'plan' && hasPlan && mode !== 'plan' && (
-                  <div className={'plan-card' + (hitTP ? ' hit-tp' : hitSL ? ' hit-sl' : '')}>
-                    <div className="plan-card-body">
-                      <div className="plan-card-prices">
-                        <span className="plan-price-item">
-                          <span className="plan-price-k tp"><Icon name="target" size={11} /> 止盈</span>
-                          <b className="red">{h.tp ? fmtRaw(h.tp) : '—'}</b>
-                          {h.tp != null && (h.tpManual
-                            ? <span className="plan-src manual" title="手动设定，不随AI更新">手动</span>
-                            : (aiPlan && aiPlan.tp != null && <span className="plan-src ai" title="来源:AI操作建议目标价，详情刷新后自动跟随"><Icon name="spark" size={9} />AI</span>))}
-                          {hitTP && <span className="plan-hit">已触及</span>}
-                        </span>
-                        <span className="plan-price-item">
-                          <span className="plan-price-k sl"><Icon name="shield" size={11} /> 止损</span>
-                          <b className="green">{h.sl ? fmtRaw(h.sl) : '—'}</b>
-                          {h.sl != null && (h.slManual
-                            ? <span className="plan-src manual" title="手动设定，不随AI更新">手动</span>
-                            : (aiPlan && aiPlan.sl != null && <span className="plan-src ai" title="来源:AI操作建议止损价，详情刷新后自动跟随"><Icon name="spark" size={9} />AI</span>))}
-                          {hitSL && <span className="plan-hit">已触及</span>}
-                        </span>
-                      </div>
-                      {h.planReason && (
-                        <div className="plan-card-reason" title={h.planReason}>
-                          {!h.reasonManual && aiPlan && aiPlan.reason
-                            ? <span className="plan-src ai" title="理由来源:AI操作建议,详情刷新后自动跟随"><Icon name="spark" size={9} />AI</span>
-                            : (h.reasonManual && <span className="plan-src manual" title="手动填写的理由,不随AI更新">手动</span>)}
-                          <span className="plan-reason-tx">{h.planReason}</span>
-                        </div>
-                      )}
-                      {aiPlan && (h.tpManual || h.slManual || h.reasonManual) && (
-                        <button className="plan-follow-ai" onClick={followAI} title="放弃手动值，恢复跟随最新AI操作建议">
-                          <Icon name="spark" size={10} />跟随最新AI建议
-                        </button>
-                      )}
-                    </div>
-                    <div className="plan-card-actions">
-                      <button className="icon-btn" title="修改计划" onClick={() => openPlan(true)}><Icon name="edit" size={13} /></button>
-                      <button className="icon-btn" title="删除计划" onClick={() => planStore.clearPlanRule(h.id)}><Icon name="trash" size={13} /></button>
-                    </div>
-                  </div>
-                )}
-
-                {/* 做T战绩（流水式）：数据一行、结算入账另起一行，不再挤 */}
-                {activeTab === 't' && hasT && (
-                  <div className="t-stat t-stat-v">
-                    <div className="t-stat-row">
-                      <span className="t-badge"><Icon name="refresh" size={12} />做T {h.tFlows.length}笔</span>
-                      <span>差价已实现 <b className={tStat.realized >= 0 ? 'red' : 'green'}>{fmtMoney(tStat.realized)}</b></span>
-                      {tStat.realized !== 0 && <span>实际成本 <b className="red">{fmtRaw(effectiveCost)}</b> <span className="t-down">↓{fmtRaw(rawCostWithFee - effectiveCost)}</span></span>}
-                      {tStat.openBuy > 0 && <span className="t-open" style={{ color: 'var(--red)' }}>净买入 {tStat.openBuy}手 → 加仓</span>}
-                      {tStat.openSell > 0 && <span className="t-open" style={{ color: 'var(--green)' }}>净卖出 {tStat.openSell}手 → {tStat.openSell >= h.qty ? '清仓' : '减仓'}</span>}
-                    </div>
-                    <div className="t-stat-foot">
-                      <button className="chip-btn done t-settle-btn" onClick={() => setConfirmSettle(true)} title="立即把今天的做T流水固化进交易记录并调整底仓">
-                        <Icon name="check" size={12} />结算入账
-                      </button>
-                      <span className="t-auto-hint">或次日自动结算</span>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </>
-        )
-      })()}
+      {hasPlan && (
+        <button
+          type="button"
+          className={
+            'holding-plan-summary'
+            + (hitTP ? ' hit-tp' : hitSL ? ' hit-sl' : '')
+          }
+          aria-haspopup="dialog"
+          onClick={() => setPlanDetailOpen(true)}
+        >
+          <span className="holding-plan-summary-label">
+            <Icon name="target" size={13} />
+            计划
+          </span>
+          <span className="holding-plan-summary-values">
+            {h.tp != null && <span>止盈 <b className="red">{fmtRaw(h.tp)}</b></span>}
+            {h.sl != null && <span>止损 <b className="green">{fmtRaw(h.sl)}</b></span>}
+            {h.tp == null && h.sl == null && <span>查看执行纪律</span>}
+          </span>
+          <Icon name="chevronRight" size={13} />
+        </button>
+      )}
 
       {/* 操作区 */}
       {!mobileOperations && tradeErr && <div className="err" style={{ margin: '8px 0' }}>{tradeErr}</div>}
@@ -2826,7 +2741,7 @@ function HoldingItem({ h, idx, quote: q }) {
           添加计划
         </button>
       )}
-      {operationForm && !mobileOperations ? operationForm : (
+      {operationForm && !mobileOperations && mode !== 'plan' ? operationForm : (
         <div className="pi-actions">
           <div className="pi-trade-actions">
             <button className={'chip-btn act-add' + (decisionView?.kind === 'add' ? ' recommended' : '')} onClick={startAdd}>加仓</button>
@@ -2839,11 +2754,22 @@ function HoldingItem({ h, idx, quote: q }) {
           </div>
         </div>
       )}
-      {operationForm && mobileOperations && (
+      {operationForm && (mobileOperations || mode === 'plan') && (
         <OverlayPortal>
-          <div className="modal-mask mobile-trade-mask" onClick={() => setMode(null)}>
+          <div
+            className={
+              isPlanEditor
+                ? 'modal-mask mobile-trade-mask plan-edit-mask'
+                : 'modal-mask mobile-trade-mask'
+            }
+            onClick={() => setMode(null)}
+          >
             <div
-              className="mobile-trade-dialog"
+              className={
+                isPlanEditor
+                  ? 'mobile-trade-dialog plan-edit-dialog'
+                  : 'mobile-trade-dialog'
+              }
               role="dialog"
               aria-modal="true"
               aria-label={`${operationTitle} · ${h.name}`}
@@ -2867,6 +2793,22 @@ function HoldingItem({ h, idx, quote: q }) {
           </div>
         </OverlayPortal>
       )}
+
+      <HoldingPlanDialog
+        open={planDetailOpen && hasPlan}
+        holding={h}
+        aiPlan={aiPlan}
+        hitTP={hitTP}
+        hitSL={hitSL}
+        play={play}
+        onClose={() => setPlanDetailOpen(false)}
+        onEdit={() => openPlan(true)}
+        onClear={() => {
+          planStore.clearPlanRule(h.id)
+          setPlanDetailOpen(false)
+        }}
+        onFollow={followAI}
+      />
 
       {confirmDel && (
         <ConfirmDialog

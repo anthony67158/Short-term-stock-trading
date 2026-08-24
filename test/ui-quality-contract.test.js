@@ -24,6 +24,7 @@ const lhbBoard = read('src/components/LhbBoard.jsx')
 const llmConfig = read('src/components/LLMConfig.jsx')
 const quantModelControl = read('src/components/QuantModelControl.jsx')
 const planTab = read('src/components/PlanTab.jsx')
+const holdingPlanDialog = read('src/components/HoldingPlanDialog.jsx')
 const reviewTab = read('src/components/ReviewTab.jsx')
 const fundFlowCanvas = read('src/components/FundFlowCanvas.jsx')
 const semanticTabSources = [
@@ -197,6 +198,38 @@ test('持仓与自选卡片使用独立身份行和三列指标带避免首行�
   assert.match(
     precision,
     /\.hold-head\s*{[^}]*align-items:\s*start[^}]*padding-bottom:\s*var\(--space-sm\)/s,
+  )
+})
+
+test('持仓交易计划使用独立浮层且不再展开拉长卡片', () => {
+  const holdingItem = planTab.slice(
+    planTab.indexOf('function HoldingItem'),
+    planTab.indexOf('// 单条做T流水行'),
+  )
+
+  assert.match(planTab, /import HoldingPlanDialog/)
+  assert.match(holdingItem, /'holding-plan-summary'/)
+  assert.match(
+    holdingPlanDialog,
+    /<OverlayPortal>[\s\S]*?className="modal-mask holding-plan-mask"[\s\S]*?className="holding-plan-dialog"/,
+  )
+  assert.match(
+    holdingItem,
+    /'modal-mask mobile-trade-mask plan-edit-mask'/,
+  )
+  assert.doesNotMatch(holdingItem, /className="hold-detail"/)
+  assert.doesNotMatch(holdingItem, /setExpanded/)
+  assert.match(
+    precision,
+    /\.holding-plan-dialog\s*{[^}]*width:\s*min\(520px,[^}]*background:\s*var\(--color-paper-2\)/s,
+  )
+  assert.match(
+    precision,
+    /\.holding-plan-boundaries\s*{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.holding-plan-mask,\s*[\s\S]*?\.plan-edit-mask\s*{[^}]*align-items:\s*flex-end[^}]*justify-content:\s*flex-end/s,
   )
 })
 
