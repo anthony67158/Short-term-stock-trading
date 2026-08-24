@@ -2618,6 +2618,26 @@ function HoldingItem({ h, idx, quote: q }) {
             <Icon name="edit" size={11} />
           </button>
         </span>
+        <span className="stock-card-metric stock-card-market-metric">
+          <span>换手</span>
+          <b className={q?.turnover > 10 ? 'gold' : ''}>
+            {Number.isFinite(Number(q?.turnover))
+              ? `${fmtNum(q?.turnover, 1)}%`
+              : '--'}
+          </b>
+        </span>
+        <span className="stock-card-metric stock-card-market-metric">
+          <span>量比</span>
+          <b className={q?.volRatio > 2 ? 'gold' : ''}>
+            {fmtNum(q?.volRatio, 1)}
+          </b>
+        </span>
+        <span className="stock-card-metric stock-card-market-metric">
+          <span>主力</span>
+          <b className={pctClass(q?.mainInflow)}>
+            {fmtInflow(q?.mainInflow)}
+          </b>
+        </span>
       </div>
 
       {/* 当前指令、加减仓位与动作进度使用同一建议，不再并排展示互相冲突的价格体系。 */}

@@ -63,6 +63,37 @@ test('策略摘要压缩为单行指令、紧凑价位和单行进度', () => {
   )
 })
 
+test('持仓卡在同一三列指标带展示盘中活跃度与主力资金', () => {
+  const metricsStart = planTab.indexOf(
+    '<div className="stock-card-metrics hold-card-metrics"',
+  )
+  const decisionStart = planTab.indexOf(
+    '<div className="card-decision-slot">',
+    metricsStart,
+  )
+  const metrics = planTab.slice(metricsStart, decisionStart)
+
+  assert.match(
+    metrics,
+    />现价<\/span>[\s\S]*?>持仓<\/span>[\s\S]*?>成本<\/span>[\s\S]*?>换手<\/span>[\s\S]*?>量比<\/span>[\s\S]*?>主力<\/span>/,
+  )
+  assert.match(metrics, /fmtNum\(q\?\.turnover,\s*1\)/)
+  assert.match(metrics, /fmtNum\(q\?\.volRatio,\s*1\)/)
+  assert.match(metrics, /fmtInflow\(q\?\.mainInflow\)/)
+  assert.equal(
+    (metrics.match(/className="stock-card-metrics/g) || []).length,
+    1,
+  )
+  assert.match(
+    precision,
+    /\.hold-card-metrics \.stock-card-market-metric\s*{[^}]*min-height:\s*44px/s,
+  )
+  assert.match(
+    precision,
+    /\.hold-card-metrics \.stock-card-market-metric\s*{[^}]*border-top:\s*1px solid var\(--color-rule-2\)/s,
+  )
+})
+
 test('观望建议同时保留手动建仓与复核入口', () => {
   assert.match(
     planTab,

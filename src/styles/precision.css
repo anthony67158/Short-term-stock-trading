@@ -10429,6 +10429,19 @@ button.acct-item {
   right: var(--space-2xs);
 }
 
+.hold-card-metrics .stock-card-market-metric {
+  min-height: 44px;
+  border-top: 1px solid var(--color-rule-2);
+}
+
+.hold-card-metrics .stock-card-market-metric:nth-child(3n + 1) {
+  border-inline-start: 0;
+}
+
+.hold-card-metrics .stock-card-market-metric > b {
+  font-size: var(--text-xs);
+}
+
 .pc-metrics {
   display: grid;
   gap: 0;
