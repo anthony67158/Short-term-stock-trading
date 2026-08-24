@@ -943,6 +943,10 @@ function PlanList({ book, quote, stockTags, batchSel }) {
               <span>主力</span>
               <b className={pctClass(q.mainInflow)}>{fmtInflow(q.mainInflow)}</b>
             </span>
+            <span className="stock-card-metric" title="散户资金（小单净流入）">
+              <span>散户</span>
+              <b className={pctClass(q.retailInflow)}>{fmtInflow(q.retailInflow)}</b>
+            </span>
           </div>
         )}
         {/* 当前指令、有效价位、手数与进度共用同一建议视图，避免方向脱节。 */}
@@ -2636,6 +2640,15 @@ function HoldingItem({ h, idx, quote: q }) {
           <span>主力</span>
           <b className={pctClass(q?.mainInflow)}>
             {fmtInflow(q?.mainInflow)}
+          </b>
+        </span>
+        <span
+          className="stock-card-metric stock-card-market-metric"
+          title="散户资金（小单净流入）"
+        >
+          <span>散户</span>
+          <b className={pctClass(q?.retailInflow)}>
+            {fmtInflow(q?.retailInflow)}
           </b>
         </span>
       </div>

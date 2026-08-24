@@ -6,7 +6,11 @@ import {
   isNearPriceLimit,
   priceLimitRatio,
 } from '../shared/priceLimitPolicy.js'
-import { toSecid, withPriceLimitState } from '../api/quote.js'
+import {
+  mapEastmoneyQuote,
+  toSecid,
+  withPriceLimitState,
+} from '../api/quote.js'
 import { __test as cronAlert } from '../api/cron_alert.js'
 import { beijingDayKey } from '../shared/tradingCalendar.js'
 
@@ -76,6 +80,24 @@ test('报价接口按证券板块生成涨跌停标记', () => {
     name: 'ST示例',
     pct: 4.9,
   }).isLimitUp, true)
+})
+
+test('个股行情映射主力与散户小单净流入', () => {
+  const quote = mapEastmoneyQuote({
+    f2: 10.25,
+    f3: 1.2,
+    f4: 0.12,
+    f8: 7.5,
+    f10: 1.4,
+    f12: '600000',
+    f14: '浦发银行',
+    f62: 10_000_000,
+    f84: -6_000_000,
+    f184: 2.1,
+  })
+
+  assert.equal(quote.mainInflow, 10_000_000)
+  assert.equal(quote.retailInflow, -6_000_000)
 })
 
 test('北交所新旧代码使用正确的东方财富市场前缀', () => {

@@ -63,7 +63,7 @@ test('策略摘要压缩为单行指令、紧凑价位和单行进度', () => {
   )
 })
 
-test('持仓卡在同一三列指标带展示盘中活跃度与主力资金', () => {
+test('持仓卡在同一指标带展示盘中活跃度与主力散户资金', () => {
   const metricsStart = planTab.indexOf(
     '<div className="stock-card-metrics hold-card-metrics"',
   )
@@ -75,11 +75,12 @@ test('持仓卡在同一三列指标带展示盘中活跃度与主力资金', ()
 
   assert.match(
     metrics,
-    />现价<\/span>[\s\S]*?>持仓<\/span>[\s\S]*?>成本<\/span>[\s\S]*?>换手<\/span>[\s\S]*?>量比<\/span>[\s\S]*?>主力<\/span>/,
+    />现价<\/span>[\s\S]*?>持仓<\/span>[\s\S]*?>成本<\/span>[\s\S]*?>换手<\/span>[\s\S]*?>量比<\/span>[\s\S]*?>主力<\/span>[\s\S]*?>散户<\/span>/,
   )
   assert.match(metrics, /fmtNum\(q\?\.turnover,\s*1\)/)
   assert.match(metrics, /fmtNum\(q\?\.volRatio,\s*1\)/)
   assert.match(metrics, /fmtInflow\(q\?\.mainInflow\)/)
+  assert.match(metrics, /fmtInflow\(q\?\.retailInflow\)/)
   assert.equal(
     (metrics.match(/className="stock-card-metrics/g) || []).length,
     1,
@@ -91,6 +92,26 @@ test('持仓卡在同一三列指标带展示盘中活跃度与主力资金', ()
   assert.match(
     precision,
     /\.hold-card-metrics \.stock-card-market-metric\s*{[^}]*border-top:\s*1px solid var\(--color-rule-2\)/s,
+  )
+  assert.match(
+    precision,
+    /\.hold-card-metrics\s*{[^}]*grid-template-columns:\s*repeat\(12,\s*minmax\(0,\s*1fr\)\)/s,
+  )
+  assert.match(
+    precision,
+    /\.hold-card-metrics \.stock-card-market-metric\s*{[^}]*grid-column:\s*span 3/s,
+  )
+})
+
+test('自选卡使用四列指标带展示散户资金', () => {
+  assert.match(
+    planTab,
+    /className="stock-card-metrics pc-metrics"[\s\S]*?>换手<\/span>[\s\S]*?>量比<\/span>[\s\S]*?>主力<\/span>[\s\S]*?>散户<\/span>/,
+  )
+  assert.match(planTab, /fmtInflow\(q\.retailInflow\)/)
+  assert.match(
+    precision,
+    /\.pc-metrics\s*{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/s,
   )
 })
 

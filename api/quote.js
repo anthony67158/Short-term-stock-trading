@@ -21,6 +21,33 @@ export function withPriceLimitState(quote) {
   return { ...quote, ...classifyPriceLimit(quote) };
 }
 
+export function mapEastmoneyQuote(data = {}) {
+  return withPriceLimitState({
+    code: data.f12,
+    name: data.f14,
+    source: '东方财富',
+    price: num(data.f2),
+    pct: num(data.f3),
+    chg: num(data.f4),
+    turnover: num(data.f8),
+    volRatio: num(data.f10),
+    mainInflow: num(data.f62),
+    retailInflow: num(data.f84),
+    mainRatio: num(data.f184),
+    amount: num(data.f6),
+    high: num(data.f15),
+    low: num(data.f16),
+    open: num(data.f17),
+    prevClose: num(data.f18),
+    tradeDate: num(data.f124) > 0
+      ? beijingDayKey(num(data.f124) * 1000)
+      : null,
+    industry: (data.f100 && data.f100 !== '-')
+      ? data.f100
+      : null,
+  });
+}
+
 // 备用源：腾讯批量报价（海外稳、基本不限流）。只取跨版本稳定的数字字段，涨跌幅自算。
 async function quoteTx(codes) {
   const q = codes.map(toTxCode).join(',');
@@ -56,7 +83,7 @@ async function quoteTx(codes) {
       chg: prevClose ? +(price - prevClose).toFixed(3) : 0,
       turnover: num(p[38]) || null,   // 换手率(腾讯常见位)
       volRatio: num(p[49]) || null,   // 量比(腾讯常见位)
-      mainInflow: null, mainRatio: null,
+      mainInflow: null, retailInflow: null, mainRatio: null,
       amount: num(p[37]) ? num(p[37]) * 10000 : null, // 成交额(万元→元)
       high: num(p[33]) || null, low: num(p[34]) || null, open: num(p[5]) || null,
       prevClose,
@@ -74,7 +101,7 @@ export default async function handler(req, res) {
 
     const secids = codes.map(toSecid).join(',');
     // f15 最高 f16 最低 f17 今开 f18 昨收 f100 所属行业
-    const fields = 'f2,f3,f4,f8,f10,f12,f14,f62,f184,f6,f15,f16,f17,f18,f100,f124';
+    const fields = 'f2,f3,f4,f8,f10,f12,f14,f62,f84,f184,f6,f15,f16,f17,f18,f100,f124';
     const path =
       `/api/qt/ulist.np/get?fltt=2&invt=2&secids=${encodeURIComponent(secids)}` +
       `&fields=${fields}`;
@@ -83,25 +110,7 @@ export default async function handler(req, res) {
     try {
       const j = await emGet(path);
       const diff = (j && j.data && j.data.diff) || [];
-      list = diff.map((d) => withPriceLimitState({
-        code: d.f12,
-        name: d.f14,
-        source: '东方财富',
-        price: num(d.f2),
-        pct: num(d.f3),
-        chg: num(d.f4),
-        turnover: num(d.f8),
-        volRatio: num(d.f10),
-        mainInflow: num(d.f62),
-        mainRatio: num(d.f184),
-        amount: num(d.f6),
-        high: num(d.f15),
-        low: num(d.f16),
-        open: num(d.f17),
-        prevClose: num(d.f18),
-        tradeDate: num(d.f124) > 0 ? beijingDayKey(num(d.f124) * 1000) : null,
-        industry: (d.f100 && d.f100 !== '-') ? d.f100 : null,
-      }));
+      list = diff.map(mapEastmoneyQuote);
     } catch { /* 东财失败 → 走腾讯 */ }
 
     // 东财空或缺票 → 用腾讯补齐缺失的代码

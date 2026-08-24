@@ -10414,6 +10414,15 @@ button.acct-item {
   position: relative;
 }
 
+.hold-card-metrics {
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+}
+
+.hold-card-metrics > .stock-card-metric:not(.stock-card-market-metric) {
+  grid-column: span 4;
+  padding-inline: var(--space-3xs);
+}
+
 .hold-card-metrics .stock-card-metric-value {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -10430,11 +10439,13 @@ button.acct-item {
 }
 
 .hold-card-metrics .stock-card-market-metric {
+  grid-column: span 3;
   min-height: 44px;
+  padding-inline: var(--space-2xs);
   border-top: 1px solid var(--color-rule-2);
 }
 
-.hold-card-metrics .stock-card-market-metric:nth-child(3n + 1) {
+.hold-card-metrics .stock-card-market-metric:nth-child(4) {
   border-inline-start: 0;
 }
 
@@ -10444,8 +10455,17 @@ button.acct-item {
 
 .pc-metrics {
   display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0;
   margin-bottom: var(--space-xs);
+}
+
+.pc-metrics .stock-card-metric {
+  padding-inline: var(--space-2xs);
+}
+
+.pc-metrics .stock-card-metric > b {
+  font-size: var(--text-xs);
 }
 
 .card-decision-slot {
