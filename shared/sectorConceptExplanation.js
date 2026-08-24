@@ -143,6 +143,52 @@ export function sectorConceptExplanationPrompt(sector = {}) {
   ].filter(Boolean).join('\n')
 }
 
+function conceptSectionKey(title) {
+  const normalized = String(title || '')
+    .replace(/\*\*/g, '')
+    .replace(/[：:]\s*$/, '')
+    .trim()
+  if (/一句话看懂|这是什么|概念是什么|核心定义/.test(normalized)) {
+    return 'definition'
+  }
+  if (/为什么(?:会)?形成|形成原因|为何形成/.test(normalized)) {
+    return 'reason'
+  }
+  if (
+    /怎么辨认|如何辨认|识别边界|业务范围|包含哪些业务|通常包含|容易误解|常见误区|边界/
+      .test(normalized)
+  ) {
+    return 'boundary'
+  }
+  return ''
+}
+
+export function sectorConceptExplanationSections(value) {
+  const sections = {
+    definition: [],
+    reason: [],
+    boundary: [],
+  }
+  let active = 'definition'
+
+  for (const rawLine of String(value || '').replace(/\r\n?/g, '\n').split('\n')) {
+    const line = rawLine.trim()
+    if (!line) continue
+    const heading = line.match(/^#{1,6}\s+(.+)$/)
+      || line.match(/^\*\*(.+)\*\*$/)
+    if (heading) {
+      const next = conceptSectionKey(heading[1])
+      if (next) active = next
+      continue
+    }
+    sections[active].push(line)
+  }
+
+  return Object.fromEntries(
+    Object.entries(sections).map(([key, lines]) => [key, lines.join('\n')]),
+  )
+}
+
 export function sectorConceptExplanationSummary(value, limit = 120) {
   const lines = String(value || '')
     .replace(/\r\n?/g, '\n')

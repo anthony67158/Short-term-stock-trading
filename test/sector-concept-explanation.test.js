@@ -9,6 +9,7 @@ import {
   mergeSectorConceptExplanations,
   normalizeSectorConceptExplanation,
   sectorConceptExplanationPrompt,
+  sectorConceptExplanationSections,
   sectorConceptExplanationSummary,
   sectorConceptExplanationsAfter,
 } from '../shared/sectorConceptExplanation.js'
@@ -197,6 +198,33 @@ test('折叠摘要跳过标题和证据编号并保留核心定义', () => {
   )
 })
 
+test('新旧概念释义都整理为定义、成因和边界三块', () => {
+  const sections = sectorConceptExplanationSections([
+    '### 这是什么',
+    '锂矿概念覆盖锂资源开发与锂盐生产。[证据1]',
+    '### 为什么会形成这个概念',
+    '动力电池需求让上游资源保障成为共同主题。',
+    '### 通常包含哪些业务',
+    '- 主要看：资源储量、采选能力和锂盐产能。',
+    '### 容易误解什么',
+    '- 不要混同：仅使用锂产品的下游公司。',
+  ].join('\n'))
+
+  assert.equal(
+    sections.definition,
+    '锂矿概念覆盖锂资源开发与锂盐生产。[证据1]',
+  )
+  assert.equal(
+    sections.reason,
+    '动力电池需求让上游资源保障成为共同主题。',
+  )
+  assert.equal(
+    sections.boundary,
+    '- 主要看：资源储量、采选能力和锂盐产能。\n'
+      + '- 不要混同：仅使用锂产品的下游公司。',
+  )
+})
+
 test('概念解释客户端解析智能体流式进度与最终证据', async () => {
   let requestBody = null
   const response = [
@@ -239,20 +267,24 @@ test('板块展开区按需调用智能体并持久展示解释', () => {
   assert.match(component, /setConceptOpen[\s\S]*?\[code\]:\s*true/)
   assert.match(component, /<SectorConceptExplanation/)
   assert.match(conceptComponent, /existingSectorConceptText/)
+  assert.match(conceptComponent, /sectorConceptExplanationSections/)
   assert.match(conceptComponent, /sectorConceptExplanationSummary/)
   assert.match(conceptComponent, /if \(!conceptExplanation\)/)
   assert.match(conceptComponent, /aria-expanded=\{expanded\}/)
-  assert.match(conceptComponent, /!expanded && \([\s\S]*?sector-concept-summary/)
-  assert.match(conceptComponent, /expanded && \([\s\S]*?<Md text=\{conceptExplanation\.text\}/)
+  assert.match(
+    conceptComponent,
+    /!expanded && \([\s\S]*?sector-concept-collapsed-summary/,
+  )
+  assert.match(conceptComponent, /sector-concept-core/)
+  assert.match(conceptComponent, /sector-concept-detail-grid/)
+  assert.match(conceptComponent, /一句话看懂/)
+  assert.match(conceptComponent, /为什么形成/)
+  assert.match(conceptComponent, /怎么辨认/)
   assert.match(conceptComponent, /AI解释/)
   assert.match(conceptComponent, /重新解释/)
   assert.match(
     conceptComponent,
     /'sector-concept-explanation'[\s\S]*?expanded[\s\S]*?collapsed/,
-  )
-  assert.match(
-    conceptComponent,
-    /<Md text=\{conceptExplanation\.text\}/,
   )
   assert.match(client, /api\('\/api\/agent'\)/)
   assert.match(client, /text\/event-stream/)
@@ -264,6 +296,12 @@ test('板块展开区按需调用智能体并持久展示解释', () => {
   )
   assert.match(
     styles,
-    /@media \(min-width:\s*721px\)\s*{[\s\S]*?\.sector-concept-explanation-head\s*{[^}]*padding-inline-end:\s*96px/s,
+    /\.sector-concept-detail-grid\s*{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s,
   )
+  assert.match(
+    styles,
+    /@media \(max-width:[^)]+\)[\s\S]*?\.sector-concept-detail-grid\s*{[^}]*grid-template-columns:\s*1fr/s,
+  )
+  assert.doesNotMatch(styles, /padding-inline-end:\s*96px/)
+  assert.doesNotMatch(styles, /max-width:\s*92ch/)
 })

@@ -2,6 +2,7 @@ import Icon from './Icon'
 import Md from './Md'
 import {
   existingSectorConceptText,
+  sectorConceptExplanationSections,
   sectorConceptExplanationSummary,
 } from '../../shared/sectorConceptExplanation.js'
 
@@ -62,6 +63,9 @@ export default function SectorConceptExplanation({
   const summary = sectorConceptExplanationSummary(
     conceptExplanation.text,
   )
+  const sections = sectorConceptExplanationSections(
+    conceptExplanation.text,
+  )
   return (
     <section
       className={
@@ -74,14 +78,13 @@ export default function SectorConceptExplanation({
           type="button"
           className="sector-concept-toggle"
           aria-expanded={expanded}
-          aria-label={`${expanded ? '收起' : '展开'}${sector?.name || ''}概念说明`}
+          aria-label={`${expanded ? '收起' : '展开'}${sector?.name || ''}的概念说明`}
           onClick={onToggle}
         >
-          <Icon name="info" size={15} />
-          <span>概念说明</span>
-          {!expanded && (
-            <small className="sector-concept-summary">{summary}</small>
-          )}
+          <span className="sector-concept-heading">
+            <Icon name="info" size={15} />
+            <span>概念说明</span>
+          </span>
           <Icon
             name={expanded ? 'chevronDown' : 'chevronRight'}
             size={13}
@@ -97,18 +100,43 @@ export default function SectorConceptExplanation({
           {loading ? '解释中' : '重新解释'}
         </button>
       </div>
+      {!expanded && (
+        <button
+          type="button"
+          className="sector-concept-collapsed-summary"
+          aria-label={`展开${sector?.name || ''}的概念说明`}
+          onClick={onToggle}
+        >
+          {summary}
+        </button>
+      )}
       {expanded && (
         <div className="sector-concept-explanation-body">
-          <Md text={conceptExplanation.text} />
-          {status && (
-            <span className="sector-concept-explanation-status" role="status">
-              {status}
+          <section className="sector-concept-core">
+            <span className="sector-concept-section-label">
+              一句话看懂
             </span>
-          )}
-          {error && (
-            <span className="sector-concept-explanation-error" role="alert">
-              {error}
-            </span>
+            <Md text={sections.definition || summary} />
+          </section>
+          {(sections.reason || sections.boundary) && (
+            <div className="sector-concept-detail-grid">
+              {sections.reason && (
+                <section className="sector-concept-detail">
+                  <span className="sector-concept-section-label">
+                    为什么形成
+                  </span>
+                  <Md text={sections.reason} />
+                </section>
+              )}
+              {sections.boundary && (
+                <section className="sector-concept-detail">
+                  <span className="sector-concept-section-label">
+                    怎么辨认
+                  </span>
+                  <Md text={sections.boundary} />
+                </section>
+              )}
+            </div>
           )}
           {!!evidence.length && (
             <details className="sector-concept-sources">
@@ -135,12 +163,12 @@ export default function SectorConceptExplanation({
           )}
         </div>
       )}
-      {!expanded && status && (
+      {status && (
         <span className="sector-concept-explanation-status" role="status">
           {status}
         </span>
       )}
-      {!expanded && error && (
+      {error && (
         <span className="sector-concept-explanation-error" role="alert">
           {error}
         </span>
