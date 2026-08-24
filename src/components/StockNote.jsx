@@ -7,7 +7,7 @@ import {
 } from '../../shared/stockNotes.js'
 import Icon from './Icon'
 
-export function StockNoteSummary({ code, name, text, onEdit }) {
+export function StockNoteSummary({ code, name, text, onOpen }) {
   const [noteRef, isNoteTruncated] = useTextOverflow(text)
   if (!text) return null
   return (
@@ -18,7 +18,7 @@ export function StockNoteSummary({ code, name, text, onEdit }) {
         + (isNoteTruncated ? ' has-preview' : '')
       }
       aria-label={`查看并编辑${name || code}的个人备注`}
-      onClick={onEdit}
+      onClick={onOpen}
     >
       <Icon name="edit" size={12} />
       <span className="stock-note-summary-label">备注</span>
@@ -40,17 +40,16 @@ export function StockNoteSummary({ code, name, text, onEdit }) {
 export function StockNoteEditor({
   code,
   note,
-  initialEditing = false,
 }) {
-  const [editing, setEditing] = useState(initialEditing)
+  const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(note || '')
   const [error, setError] = useState('')
 
   useEffect(() => {
     setDraft(note || '')
-    setEditing(initialEditing)
+    setEditing(false)
     setError('')
-  }, [code, initialEditing])
+  }, [code])
 
   useEffect(() => {
     if (!editing) setDraft(note || '')

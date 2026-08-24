@@ -3450,6 +3450,22 @@ html[data-theme="light"] .plan-cand.starred {
   margin-top: var(--space-sm);
 }
 
+.stock-note-anchor {
+  min-width: 0;
+  border-radius: var(--radius-control);
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  scroll-margin-top: var(--space-sm);
+}
+
+.stock-note-anchor:focus {
+  outline-color: color-mix(
+    in oklch,
+    var(--color-warning) 46%,
+    transparent
+  );
+}
+
 .stock-note-add {
   display: inline-flex;
   min-height: 34px;
@@ -11269,6 +11285,18 @@ button.acct-item {
 @media (max-width: 30rem) {
   .hold-item > .pi-actions {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .pi-trade-actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .pi-trade-actions > .chip-btn {
+    width: 100%;
+    min-width: 0;
+    padding-inline: var(--space-2xs);
+    font-size: var(--text-xs);
+    white-space: nowrap;
   }
 
   .pi-card-tools {

@@ -973,10 +973,10 @@ function PlanList({ book, quote, stockTags, batchSel }) {
           code={p.code}
           name={q?.name || p.name}
           text={stockNote}
-          onEdit={() => openStockDetail(
+          onOpen={() => openStockDetail(
             p.code,
             q?.name || p.name,
-            { editNote: true },
+            { focusNote: true },
           )}
         />
         {/* 买点预警提示：跟随 AI 建议买入价自动设的「到价 ≤ 买入价」预警，到点即提醒买入 */}
@@ -2697,10 +2697,10 @@ function HoldingItem({ h, idx, quote: q }) {
         code={h.code}
         name={h.name}
         text={stockNote}
-        onEdit={() => openStockDetail(
+        onOpen={() => openStockDetail(
           h.code,
           h.name,
-          { editNote: true },
+          { focusNote: true },
         )}
       />
 
@@ -2825,19 +2825,6 @@ function HoldingItem({ h, idx, quote: q }) {
           </div>
           <div className="pi-card-tools">
             {!(h.tp || h.sl || h.planReason) && <button className="chip-btn ghost" onClick={() => openPlan(false)}>设计划</button>}
-            <button
-              type="button"
-              className={'icon-btn stock-note-edit-button' + (stockNote ? ' active' : '')}
-              aria-label={`${stockNote ? '编辑' : '添加'}${h.name}备注`}
-              title={stockNote ? '编辑备注' : '添加备注'}
-              onClick={() => openStockDetail(
-                h.code,
-                h.name,
-                { editNote: true },
-              )}
-            >
-              <Icon name="edit" size={14} />
-            </button>
             <button className="icon-btn act-del" aria-label={`删除${h.name}持仓`} title="删除持仓" onClick={() => setConfirmDel(true)}><Icon name="trash" size={14} /></button>
           </div>
         </div>

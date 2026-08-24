@@ -24,16 +24,19 @@ test('个股详情提供可清空且有限长的个人备注编辑区', () => {
   assert.match(component, /删除备注/)
 })
 
-test('持仓卡保留备注入口且持仓与自选仅在有内容时显示摘要', () => {
-  assert.match(
-    planTab,
-    /className=\{'icon-btn stock-note-edit-button'[\s\S]*?editNote:\s*true/,
-  )
+test('持仓卡移除备注编辑按钮且摘要只打开详情阅读定位', () => {
+  assert.doesNotMatch(planTab, /stock-note-edit-button/)
   assert.equal(
     (planTab.match(/<StockNoteSummary/g) || []).length,
     2,
   )
+  assert.equal(
+    (planTab.match(/focusNote:\s*true/g) || []).length,
+    2,
+  )
+  assert.doesNotMatch(planTab, /editNote:\s*true/)
   assert.match(component, /if \(!text\) return null/)
+  assert.match(component, /onClick=\{onOpen\}/)
   assert.match(
     component,
     /'stock-note-summary'[\s\S]*?has-preview[\s\S]*?className="stock-note-summary-text"/,
@@ -41,6 +44,27 @@ test('持仓卡保留备注入口且持仓与自选仅在有内容时显示摘�
   assert.match(
     detailStore,
     /openStockDetail\(code,\s*name,\s*options\s*=\s*\{\}\)/,
+  )
+})
+
+test('个股详情聚焦备注区域但保持阅读态', () => {
+  assert.match(stockDetail, /const noteAnchorRef = useRef\(null\)/)
+  assert.match(stockDetail, /stock\?\.focusNote/)
+  assert.match(stockDetail, /noteAnchorRef\.current\?\.scrollIntoView/)
+  assert.match(stockDetail, /noteAnchorRef\.current\?\.focus/)
+  assert.match(stockDetail, /className="stock-note-anchor"/)
+  assert.doesNotMatch(stockDetail, /initialEditing=/)
+  assert.doesNotMatch(component, /initialEditing/)
+})
+
+test('移动端三个持仓交易按钮固定在同一行', () => {
+  assert.match(
+    precision,
+    /@media \(max-width:\s*30rem\)\s*{[\s\S]*?\.pi-trade-actions\s*{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s,
+  )
+  assert.match(
+    precision,
+    /\.pi-trade-actions\s*>\s*\.chip-btn\s*{[^}]*min-width:\s*0[^}]*white-space:\s*nowrap/s,
   )
 })
 

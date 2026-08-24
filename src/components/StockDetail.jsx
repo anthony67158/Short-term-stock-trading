@@ -125,6 +125,7 @@ export default function StockDetail({ stock, onClose }) {
   const [showInfo, setShowInfo] = useState(false) // 公司简介默认折叠
   const [busyModal, setBusyModal] = useState(null) // 端点已满提示:{ busy:[{code,name}], concurrency } | null
   const quantRefreshRef = useRef('')
+  const noteAnchorRef = useRef(null)
   const searchConfig = useAiSearchConfig()
   const book = usePlanStore()
   const reviewEnabled = isAdviceReviewEnabled(
@@ -745,6 +746,22 @@ export default function StockDetail({ stock, onClose }) {
   })
   const stockNote = stockNoteText(book.stockNotes, stock.code)
 
+  useEffect(() => {
+    if (!stock?.focusNote) return undefined
+    const frame = requestAnimationFrame(() => {
+      try {
+        noteAnchorRef.current?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'start',
+        })
+      } catch {
+        noteAnchorRef.current?.scrollIntoView()
+      }
+      noteAnchorRef.current?.focus({ preventScroll: true })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [stock?.code, stock?.focusNote])
+
   return (
     <div className="modal-mask" onClick={onClose}>
       <div className="detail-panel" role="dialog" aria-modal="true" aria-label={`${stock.name || stock.code} 个股详情`} onClick={(e) => e.stopPropagation()}>
@@ -806,11 +823,16 @@ export default function StockDetail({ stock, onClose }) {
         </div>
 
         <div className="detail-scroll">
-          <StockNoteEditor
-            code={stock.code}
-            note={stockNote}
-            initialEditing={stock.editNote === true}
-          />
+          <div
+            ref={noteAnchorRef}
+            className="stock-note-anchor"
+            tabIndex={-1}
+          >
+            <StockNoteEditor
+              code={stock.code}
+              note={stockNote}
+            />
+          </div>
           {/* 价格 & 均线概览 */}
           {overview && (
             <div className="detail-quote">
