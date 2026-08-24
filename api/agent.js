@@ -358,6 +358,8 @@ export default async function handler(req, res) {
     const question = (body.question || '').trim();
     const history = Array.isArray(body.history) ? body.history.slice(-6) : [];
     const focusStock = body.stock;
+    const conceptExplanationMode =
+      body.purpose === 'sector_concept_explanation';
     const rawAccountSize = JSON.stringify(body.accountContext || {}).length;
     const accountContext = rawAccountSize <= 50000 ? sanitizeAccountContext(body.accountContext) : {};
     const hasAccountContext = !!(
@@ -387,13 +389,21 @@ export default async function handler(req, res) {
     if (hasAccountContext) appendEvidence([accountEvidence(accountContext)]);
 
     const origin = internalApiOrigin(req);
-    const sysExtra = focusStock ? `\n\n【当前用户聚焦的股票】${focusStock.name}（${focusStock.code}），如无特别说明，"这只票/它"指这只。` : '';
+    const sysExtra = [
+      focusStock
+        ? `【当前用户聚焦的股票】${focusStock.name}（${focusStock.code}），如无特别说明，"这只票/它"指这只。`
+        : '',
+      conceptExplanationMode
+        ? '【当前任务：板块概念释义】只解释概念本身、形成原因、业务范围和常见误区。'
+          + '优先调用 web_news 联网核验；禁止评价当前走势、给出买卖建议或调用交易提案工具。'
+        : '',
+    ].filter(Boolean).map((item) => `\n\n${item}`).join('');
 
     // ===== 量化服务预热（fire-and-forget）=====
     // 量化后端(LightGBM+GARCH)冷启动~11s。在 agent 一进来就发一个廉价预热请求，
     // 让服务在第1轮扫描期间完成冷启动；等第2轮真正并行调 get_quant_score 时已是热实例(~1s)，
     // 大幅降低"量化打分"因冷启动超时而失败的概率。不阻塞、失败静默。
-    (async () => {
+    if (!conceptExplanationMode) (async () => {
       try {
         const c = new AbortController();
         const to = setTimeout(() => c.abort(), 28000);
@@ -410,8 +420,12 @@ export default async function handler(req, res) {
     let aiSearch = null;
     try {
       [theoryHits, macroFlashes, aiSearch] = await Promise.all([
-        retrieveTheory(question, 4).catch(() => []),
-        fetchMarketFlashes(12).catch(() => []),
+        conceptExplanationMode
+          ? Promise.resolve([])
+          : retrieveTheory(question, 4).catch(() => []),
+        conceptExplanationMode
+          ? Promise.resolve([])
+          : fetchMarketFlashes(12).catch(() => []),
         fetchAiSearchReference({
           query: `${focusStock?.name || ''} ${focusStock?.code || ''} ${question} 最新信息 舆情 风险`,
           cacheScope: 'assistant',
@@ -490,7 +504,14 @@ export default async function handler(req, res) {
         model: AGENT_MODEL,
         role: 'agent',
         messages,
-        ...(useTools ? { tools: TOOLS, toolChoice: 'auto' } : { toolChoice: 'none' }),
+        ...(useTools
+          ? {
+              tools: conceptExplanationMode
+                ? TOOLS.filter((tool) => tool.function.name === 'web_news')
+                : TOOLS,
+              toolChoice: 'auto',
+            }
+          : { toolChoice: 'none' }),
         temperature: 0.3,
         maxTokens,
         timeoutMs,

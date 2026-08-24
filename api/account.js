@@ -35,6 +35,10 @@ import {
   stockNotesAfter,
 } from '../shared/stockNotes.js';
 import {
+  mergeSectorConceptExplanations,
+  sectorConceptExplanationsAfter,
+} from '../shared/sectorConceptExplanation.js';
+import {
   createAccountSessionToken,
   verifyAccountSessionToken,
 } from './_account_session.js';
@@ -132,6 +136,10 @@ export function accountSyncDelta(data = {}, since = 0) {
     executionAttributions,
     reviews: reviewsAfter(data.reviews, after),
     stockNotes: stockNotesAfter(data.stockNotes, after),
+    sectorConceptExplanations: sectorConceptExplanationsAfter(
+      data.sectorConceptExplanations,
+      after,
+    ),
     // 预警只有 166 KiB，整组返回可覆盖旧记录缺少 updatedAt 的兼容场景。
     alerts: Array.isArray(data.alerts) ? data.alerts : [],
     batchProgress: data.batchProgress || null,
@@ -301,6 +309,10 @@ export function applyClientAccountSave(
   merged.stockNotes = mergeStockNotesByTimestamp(
     incoming.stockNotes,
     prev.stockNotes,
+  );
+  merged.sectorConceptExplanations = mergeSectorConceptExplanations(
+    incoming.sectorConceptExplanations,
+    prev.sectorConceptExplanations,
   );
   if (prev.reviewAuto && typeof prev.reviewAuto === 'object') {
     merged.reviewAuto = prev.reviewAuto;

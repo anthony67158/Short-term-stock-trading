@@ -6,9 +6,12 @@ import {
   useState,
 } from 'react'
 import Icon from './Icon'
+import SectorConceptExplanation from './SectorConceptExplanation'
 import SectorForecastProgress from './SectorForecastProgress'
 import SectorForecastSettings from './SectorForecastSettings'
 import { openStockDetail } from '../detailStore.js'
+import { requestAgentAnswer } from '../agentClient.js'
+import { planStore, usePlanStore } from '../planStore.js'
 import { sectorForecastRequest } from '../sectorForecastClient.js'
 import {
   assessSectorForecastGeneration,
@@ -18,6 +21,9 @@ import {
   summarizeSectorForecastActions,
 } from '../sectorForecastView.js'
 import { humanizeUserFacingText } from '../../shared/userFacingLanguage.js'
+import {
+  sectorConceptExplanationPrompt,
+} from '../../shared/sectorConceptExplanation.js'
 
 const PHASE_LABELS = {
   ACCUMULATION: '潜伏吸筹',
@@ -51,7 +57,13 @@ function timeLabel(value) {
   })
 }
 
-function SectorExplanation({ sector, session }) {
+function SectorExplanation({
+  sector,
+  session,
+  conceptExplanation,
+  conceptRun,
+  onExplainConcept,
+}) {
   const explanation = sector.explanation || {}
   const catalysts = explanation.catalysts || []
   const risks = explanation.risks?.length
@@ -82,6 +94,14 @@ function SectorExplanation({ sector, session }) {
           </p>
         </div>
       </div>
+      <SectorConceptExplanation
+        sector={sector}
+        savedExplanation={conceptExplanation}
+        loading={conceptRun?.loading === true}
+        status={conceptRun?.status || ''}
+        error={conceptRun?.error || ''}
+        onExplain={onExplainConcept}
+      />
       <div className="sector-forecast-thesis">
         <section>
           <h3>为什么现在</h3>
@@ -135,6 +155,7 @@ function SectorExplanation({ sector, session }) {
 }
 
 export default function SectorForecast() {
+  const book = usePlanStore()
   const [horizon, setHorizon] = useState('next')
   const [sortMode, setSortMode] = useState('conclusion')
   const [latest, setLatest] = useState(null)
@@ -150,6 +171,7 @@ export default function SectorForecast() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [error, setError] = useState('')
   const [generationNotice, setGenerationNotice] = useState(null)
+  const [conceptRuns, setConceptRuns] = useState({})
   const generationRequestRef = useRef(false)
   const generationBaselineRef = useRef(0)
   const generationSession =
@@ -363,6 +385,61 @@ export default function SectorForecast() {
     } finally {
       generationRequestRef.current = false
       setGenerating(keepGenerating)
+    }
+  }
+
+  const explainConcept = async (sector) => {
+    const code = String(sector?.code || '')
+    if (!code || conceptRuns[code]?.loading) return
+    setConceptRuns((current) => ({
+      ...current,
+      [code]: {
+        loading: true,
+        status: '正在连接智能体助手…',
+        error: '',
+      },
+    }))
+    try {
+      const result = await requestAgentAnswer({
+        question: sectorConceptExplanationPrompt(sector),
+        onProgress: (status) => {
+          setConceptRuns((current) => ({
+            ...current,
+            [code]: {
+              loading: true,
+              status,
+              error: '',
+            },
+          }))
+        },
+      })
+      const saved = planStore.setSectorConceptExplanation(code, {
+        name: sector.name,
+        text: result.answer,
+        evidence: result.evidence,
+        model: result.model,
+      })
+      if (!saved?.ok) {
+        throw new Error(saved?.error || '概念解释保存失败')
+      }
+      await planStore.flushSave()
+      setConceptRuns((current) => ({
+        ...current,
+        [code]: {
+          loading: false,
+          status: '解释已保存',
+          error: '',
+        },
+      }))
+    } catch (reason) {
+      setConceptRuns((current) => ({
+        ...current,
+        [code]: {
+          loading: false,
+          status: '',
+          error: reason?.message || '概念解释失败，请重试',
+        },
+      }))
     }
   }
 
@@ -612,6 +689,12 @@ export default function SectorForecast() {
                     <SectorExplanation
                       sector={sector}
                       session={snapshot.session}
+                      conceptExplanation={
+                        book.sectorConceptExplanations?.[sector.code]
+                        || null
+                      }
+                      conceptRun={conceptRuns[sector.code] || null}
+                      onExplainConcept={() => explainConcept(sector)}
                     />
                   )}
                 </div>

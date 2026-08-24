@@ -5033,6 +5033,140 @@ body:has(.modal-mask) .card-decision-slot .action-command-preview {
   line-height: 1.55;
 }
 
+.sector-concept-explanation {
+  display: grid;
+  gap: var(--space-xs);
+  padding: var(--space-sm) var(--space-md);
+  border-top: 1px solid var(--color-rule-2);
+  border-bottom: 1px solid var(--color-rule-2);
+  background: color-mix(
+    in oklch,
+    var(--color-accent) 3%,
+    var(--color-paper-2)
+  );
+}
+
+.sector-concept-explanation.empty {
+  padding-block: var(--space-xs);
+}
+
+.sector-concept-explanation-head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.sector-concept-explanation-head > span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  color: var(--color-ink);
+  font-size: var(--text-xs);
+  font-weight: 760;
+}
+
+.sector-concept-explanation-head > span .icon {
+  color: var(--color-accent);
+}
+
+.sector-concept-explain-button {
+  min-height: 32px;
+  padding-inline: var(--space-xs);
+  color: var(--color-accent);
+  font-size: var(--text-xs);
+}
+
+.sector-concept-explanation > .md {
+  display: grid;
+  gap: var(--space-2xs);
+  max-width: 92ch;
+  color: var(--color-ink-2);
+}
+
+.sector-concept-explanation .md-h {
+  margin: var(--space-2xs) 0 0;
+  color: var(--color-ink);
+  font-size: var(--text-xs);
+  letter-spacing: 0;
+}
+
+.sector-concept-explanation .md-p,
+.sector-concept-explanation .md-list {
+  margin: 0;
+  color: var(--color-ink-2);
+  font-size: var(--text-xs);
+  line-height: 1.65;
+}
+
+.sector-concept-explanation .md-list {
+  padding-inline-start: var(--space-md);
+}
+
+.sector-concept-explanation-status,
+.sector-concept-explanation-error {
+  font-size: var(--text-2xs);
+}
+
+.sector-concept-explanation-status {
+  color: var(--color-muted);
+}
+
+.sector-concept-explanation-error {
+  color: var(--color-danger);
+}
+
+.sector-concept-sources {
+  border-top: 1px dashed var(--color-rule-2);
+  padding-top: var(--space-xs);
+}
+
+.sector-concept-sources summary {
+  color: var(--color-muted);
+  cursor: pointer;
+  font-size: var(--text-2xs);
+  font-weight: 700;
+}
+
+.sector-concept-sources ul {
+  display: grid;
+  gap: var(--space-2xs);
+  margin: var(--space-xs) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sector-concept-sources li {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.sector-concept-sources a,
+.sector-concept-sources li > span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-ink-2);
+  font-size: var(--text-2xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sector-concept-sources a {
+  text-decoration: underline;
+  text-decoration-color: var(--color-rule);
+  text-underline-offset: 2px;
+}
+
+.sector-concept-sources small {
+  color: var(--color-muted);
+  font-size: var(--text-2xs);
+  white-space: nowrap;
+}
+
 .sector-forecast-thesis {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -9374,6 +9508,25 @@ button.acct-item {
 
   .sector-forecast-execution {
     padding: var(--space-xs) var(--space-sm);
+  }
+
+  .sector-concept-explanation {
+    padding: var(--space-xs) var(--space-sm);
+  }
+
+  .sector-concept-explain-button {
+    min-height: 38px;
+  }
+
+  .sector-concept-sources li {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .sector-concept-sources a,
+  .sector-concept-sources li > span {
+    white-space: normal;
   }
 
   .sector-forecast-row > .icon {

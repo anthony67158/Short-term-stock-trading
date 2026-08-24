@@ -70,6 +70,11 @@ import {
   stockNoteText,
 } from '../shared/stockNotes.js'
 import {
+  mergeSectorConceptExplanations,
+  normalizeSectorConceptExplanation,
+  normalizeSectorConceptExplanations,
+} from '../shared/sectorConceptExplanation.js'
+import {
   AUTO_CONFIG_UPDATED_AT,
   AUTO_HOLD_CODES,
   AUTO_WATCH_CODES,
@@ -283,6 +288,7 @@ let state = {
   executionPlans: [],
   executionAttributions: [],
   stockNotes: {},
+  sectorConceptExplanations: {},
   settings: {},
 }
 const listeners = new Set()
@@ -316,7 +322,7 @@ function scheduleSave() {
   if (_saveTimer) clearTimeout(_saveTimer)
   _saveTimer = setTimeout(() => {
     _saveTimer = null
-    _saver({ plan: state.plan, holding: state.holding, closed: state.closed, account: state.account, alerts: state.alerts, reviews: state.reviews, adviceLog: state.adviceLog, decisionLog: state.decisionLog, executionPlans: state.executionPlans, executionAttributions: state.executionAttributions, stockNotes: state.stockNotes || {}, advice: getAllAdvice(), settings: state.settings || {} })
+    _saver({ plan: state.plan, holding: state.holding, closed: state.closed, account: state.account, alerts: state.alerts, reviews: state.reviews, adviceLog: state.adviceLog, decisionLog: state.decisionLog, executionPlans: state.executionPlans, executionAttributions: state.executionAttributions, stockNotes: state.stockNotes || {}, sectorConceptExplanations: state.sectorConceptExplanations || {}, advice: getAllAdvice(), settings: state.settings || {} })
   }, 800)
 }
 // 立即落盘(不等 800ms 防抖):页面隐藏/关闭前把待写数据抢存一次,避免"改完立刻切走/关页 → 800ms 内没保存到云端"丢数据。
@@ -337,6 +343,8 @@ function flushPendingSave() {
       executionPlans: state.executionPlans,
       executionAttributions: state.executionAttributions,
       stockNotes: state.stockNotes || {},
+      sectorConceptExplanations:
+        state.sectorConceptExplanations || {},
       advice: getAllAdvice(),
       settings: state.settings || {},
     })).then((result) => result !== false).catch(() => false)
@@ -887,6 +895,9 @@ export const planStore = {
         ? d.executionAttributions
         : [],
       stockNotes: normalizeStockNotes(d && d.stockNotes),
+      sectorConceptExplanations: normalizeSectorConceptExplanations(
+        d && d.sectorConceptExplanations,
+      ),
       settings: (d && d.settings) || {},    // 跨设备同步的个性化设置(如 AI 每日精选/自动开关等)
     }
     reconcilePositionAlerts()
@@ -954,7 +965,27 @@ export const planStore = {
         changed = true
       }
     }
-    // 4) 决策记录:按 id 并集(仅新增)
+    // 4) 板块概念解释按更新时间合并，刷新后仍保留已生成内容。
+    if (
+      d.sectorConceptExplanations
+      && typeof d.sectorConceptExplanations === 'object'
+    ) {
+      const mergedExplanations = mergeSectorConceptExplanations(
+        state.sectorConceptExplanations,
+        d.sectorConceptExplanations,
+      )
+      if (
+        JSON.stringify(mergedExplanations)
+          !== JSON.stringify(state.sectorConceptExplanations || {})
+      ) {
+        state = {
+          ...state,
+          sectorConceptExplanations: mergedExplanations,
+        }
+        changed = true
+      }
+    }
+    // 5) 决策记录:按 id 并集(仅新增)
     if (Array.isArray(d.adviceLog) && d.adviceLog.length) {
       const seen = new Set((state.adviceLog || []).map((x) => x && x.id).filter(Boolean))
       const add = d.adviceLog.filter((x) => x && x.id && !seen.has(x.id))
@@ -965,7 +996,7 @@ export const planStore = {
         changed = true
       }
     }
-    // 5) 决策事件按 id 合并；同一建议的 executed 状态以较新的云端事件为准。
+    // 6) 决策事件按 id 合并；同一建议的 executed 状态以较新的云端事件为准。
     if (Array.isArray(d.decisionLog) && d.decisionLog.length) {
       const merged = new Map((state.decisionLog || []).filter((x) => x && x.id).map((x) => [x.id, x]))
       let touched = false
@@ -982,7 +1013,7 @@ export const planStore = {
         changed = true
       }
     }
-    // 6) 人工执行计划与归因按更新时间合并，避免多设备覆盖新状态。
+    // 7) 人工执行计划与归因按更新时间合并，避免多设备覆盖新状态。
     if (Array.isArray(d.executionPlans)) {
       const mergedPlans = mergeExecutionPlans(
         state.executionPlans,
@@ -1009,7 +1040,7 @@ export const planStore = {
         changed = true
       }
     }
-    // 7) 云端预警回灌：服务端军师会创建行动预警，cron_alert 会继续推进其
+    // 8) 云端预警回灌：服务端军师会创建行动预警，cron_alert 会继续推进其
     //    armed/watching/confirmed 状态。新增仅接收可由本地持仓/自选验证且未静音的自动预警，
     //    避免把用户刚删除的规则复活；已有规则仍按 id 合并权威运行态。
     if (Array.isArray(d.alerts) && d.alerts.length && Array.isArray(state.alerts)) {
@@ -1133,7 +1164,7 @@ export const planStore = {
         try { l() } catch (e) { console.error('[store] listener error', e) }
       })
     }
-    // 8) 服务端批量生成进度回灌:喂给 adviceBatch,让本机进度条显示【服务端/另一设备】正在跑的批量进程。
+    // 9) 服务端批量生成进度回灌:喂给 adviceBatch,让本机进度条显示【服务端/另一设备】正在跑的批量进程。
     //    (与 advice/adviceLog 合并解耦:进度是纯展示态,不进 changed/不触发回存)
     if (d.batchProgress && typeof d.batchProgress === 'object') {
       // 按需动态 import,避免顶层静态 import 造成模块初始化环(见文件头注释)
@@ -1176,6 +1207,33 @@ export const planStore = {
     }
     emit()
     return { ok: true, changed: true, note }
+  },
+  getSectorConceptExplanation(code) {
+    return normalizeSectorConceptExplanation(
+      state.sectorConceptExplanations?.[String(code || '').toUpperCase()],
+      code,
+    )
+  },
+  setSectorConceptExplanation(code, value, now = Date.now()) {
+    const normalizedCode = String(code || '').trim().toUpperCase()
+    const current = state.sectorConceptExplanations?.[normalizedCode]
+    const explanation = normalizeSectorConceptExplanation({
+      ...value,
+      code: normalizedCode,
+      updatedAt: Math.max(
+        Number(now) || Date.now(),
+        (Number(current?.updatedAt) || 0) + 1,
+      ),
+    })
+    if (!explanation) {
+      return { ok: false, error: '概念解释内容无效' }
+    }
+    state.sectorConceptExplanations = {
+      ...(state.sectorConceptExplanations || {}),
+      [normalizedCode]: explanation,
+    }
+    emit()
+    return { ok: true, explanation }
   },
   setAdviceReviewEnabled(code, enabled) {
     if (!code) return
@@ -3103,6 +3161,8 @@ export const planStore = {
       executionPlans: d.executionPlans || [],
       executionAttributions: d.executionAttributions || [],
       stockNotes: state.stockNotes || {},
+      sectorConceptExplanations:
+        state.sectorConceptExplanations || {},
       settings: d.settings || state.settings || {},
     }
     emit() // 恢复后正常回存云端，保证撤回结果也持久化
