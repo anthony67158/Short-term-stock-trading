@@ -270,7 +270,7 @@ test('批次全部取消幂等并在进度中返回权威确认', () => {
   assert.equal(progress.running, false)
 })
 
-test('全部停止原子取消跨批次任务且刷新后不再恢复生成中', () => {
+test('全部停止只取消advisor批次且不干扰独立review队列', () => {
   const data = {}
   enqueueJob(data, {
     code: '600000',
@@ -293,7 +293,7 @@ test('全部停止原子取消跨批次任务且刷新后不再恢复生成中',
   }, 1101)
   data.activeAdviceBatchId = 'batch-current'
 
-  assert.equal(cancelAll(data, 1200, 'batch-current'), 3)
+  assert.equal(cancelAll(data, 1200, 'batch-current'), 2)
   const afterCancel = jobsToProgress(data, 1300, 2)
   const afterRefresh = jobsToProgress(
     structuredClone(data),
@@ -305,8 +305,9 @@ test('全部停止原子取消跨批次任务且刷新后不再恢复生成中',
   assert.equal(afterRefresh.running, false)
   assert.deepEqual(
     Object.values(data.jobs).map((job) => job.status),
-    ['canceled', 'canceled', 'canceled'],
+    ['canceled', 'canceled'],
   )
+  assert.equal(data.reviewJobs['000002'].status, 'queued')
   assert.equal(
     isAdviceBatchCanceled(data, 'batch-current', 1400),
     true,
@@ -317,7 +318,7 @@ test('全部停止原子取消跨批次任务且刷新后不再恢复生成中',
   )
   assert.equal(
     isAdviceBatchCanceled(data, 'auto-1100', 1400),
-    true,
+    false,
   )
 })
 

@@ -53,7 +53,10 @@ async function statusTick() {
     try { statusConsumer(progress) } catch { /* ignore */ }
   }
   if (progress) await pullCompletedAdvice(progress)
-  const fast = (progress && progress.running) || Date.now() < statusFastUntil
+  const fast = (
+    progress
+    && (progress.running || progress.reviewRunning)
+  ) || Date.now() < statusFastUntil
   statusTimer = setTimeout(statusTick, fast ? 2000 : 15000)
 }
 

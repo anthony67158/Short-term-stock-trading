@@ -2,13 +2,13 @@
 // 演进(相对旧版串行 cron_advice):
 //   旧版:一次 FC 请求内【串行】生成指定 codes,进度写 batchProgress。任务不持久 → FC 崩/超时即丢,
 //         无状态/无重试/无取消,点两次起两份。
-//   新版:任务沉到账号 data.jobs(OSS 持久,见 _jobs.js),服务端为唯一权威源:
-//         · 并发池:同一时刻最多 CONCURRENCY(默认3)只在跑,上限由"running 且租约未过期"计数强制;
-//           因所有设备都汇入同一张 OSS 表 + 单 Worker 锁 → 3 个槽【跨 phone/PC 天然共享】。
+//   新版:任务按角色沉到账号 data.jobs/reviewJobs(OSS 持久,见 _jobs.js),服务端为唯一权威源:
+//         · advisor/review 各自按端点数限流；深度任务进入委员会阶段后释放 advisor 槽；
+//           同一协调器串行持久化，但两个角色的模型调用可并行。
 //         · 断点续跑:running 但租约过期(FC 崩)= 孤儿 → 下次 drain 自动回收重跑。
 //         · 失败重试:失败回 queued 直到 maxAttempts。
 //         · 取消:queued 立即 canceled;running 协作式(跑完丢弃结果)。
-//         · 防重:同 code 已有活跃任务 → 复用不新建。
+//         · 防重:同 role + code 已有活跃任务 → 复用不新建；不同角色互不覆盖。
 //   触发(均无需浏览器常驻):
 //     A) 前端 fire-and-forget POST(keepalive):{ op:'enqueue', codes, nick, pw }；
 //        浏览器不等结果，但 FC 请求会 await drain，保证刷新/切后台不终止 Worker。
@@ -18,8 +18,8 @@
 //
 // 关键约束(承接旧版):
 //   · 线上 /predict 的 36 维 OHLCV 打分【零改动】——本 handler 只是"调用方"。
-//   · 只写 data.jobs/jobWorker/advice/adviceLog/batchProgress/qScore,绝不覆盖 plan/holding/closed/account。
-//   · 运行态写账号 runtime/state 小对象，单股完成写 runtime/advice/<code>；
+//   · 只写任务运行态/advice/adviceLog/batchProgress/qScore,绝不覆盖 plan/holding/closed/account。
+//   · 运行态写账号 runtime/state 小对象，单股完成按角色写独立 runtime/advice 对象；
 //     整批收尾才压实完整账号快照，且始终先重读最新账本做保护式叠加。
 
 import { applyCors, preflight } from './_lib.js';
@@ -42,10 +42,10 @@ import {
   isAdviceBatchCanceled, markAdviceBatchCanceled,
   mergeAdviceBatchCancellations,
   acquireWorkerLock, renewWorkerLock, renewLease, releaseWorkerLock, workerHeldByOther, updateJobProgress,
-  compareAdviceJobs, hasActiveManualBatch, shouldContinueAdviceWorker,
-  suspendAutomaticJobsForManualBatch,
+  adviceJobRole, allAdviceJobs, advisorAdmission, findAdviceJob,
+  resourcePatchForJobProgress, reviewJobsOf, selectStartableJobs,
 } from './_jobs.js';
-import { ensureConfig, currentConfig } from './_llm_config.js';
+import { ensureConfig, currentConfig, getModel } from './_llm_config.js';
 import { endpointCountForRole } from './_llm_pool.js';
 import { projectAdviceAlerts } from '../shared/adviceAlerts.js';
 import { accountTradeStateFingerprint } from '../shared/accountSync.js';
@@ -207,6 +207,10 @@ function advisorConcurrency() {
   try { return endpointCountForRole(currentConfig(), 'advisor'); } catch { return CONCURRENCY; }
 }
 
+function reviewConcurrency() {
+  try { return endpointCountForRole(currentConfig(), 'review'); } catch { return 0; }
+}
+
 function hasDeepAdviceWork(data) {
   return Object.values(data?.jobs || {}).some((job) =>
     isActive(job) && job.deepMode === true
@@ -225,10 +229,32 @@ function effectiveAdviceConcurrency(data, deepMode, batchRequest) {
   const hasDeepBatch = hasDeepBatchWork(data);
   const deep = deepMode == null ? hasDeepAdviceWork(data) : deepMode === true;
   const limitedBatch = hasDeepBatch || batchRequest === true;
-  return adviceConcurrency(advisorConcurrency(), {
+  const concurrency = adviceConcurrency(advisorConcurrency(), {
     deepMode: deep,
     batchRequest: limitedBatch,
   });
+  return concurrency;
+}
+
+function adviceRoleCapacities(data, deepMode, batchRequest) {
+  return {
+    advisor: effectiveAdviceConcurrency(data, deepMode, batchRequest),
+    review: reviewConcurrency(),
+  };
+}
+
+function hasRunnableAdviceWork(data, now = Date.now()) {
+  return selectStartableJobs(
+    data,
+    adviceRoleCapacities(data),
+    new Set(),
+    now,
+  ).length > 0;
+}
+
+function needsRoleWorkerDispatch(data, now = Date.now()) {
+  if (!hasRunnableAdviceWork(data, now)) return false;
+  return needsWorkerDispatch(data, now);
 }
 
 const MAX_AUTO_JOBS_PER_TICK = 6;
@@ -340,15 +366,22 @@ export function adviceRuntimeUpdateFromData(
   code,
   updatedAt = Date.now(),
   concurrency = effectiveAdviceConcurrency(data),
+  role = 'advisor',
+  jobId = '',
 ) {
   const key = String(code || '');
   const advice = data?.advice?.[key] || null;
+  const job = findAdviceJob(data, key, { role, jobId });
+  const resolvedRole = job ? adviceJobRole(job) : role;
   return {
-    schemaVersion: 'advice-runtime-update.v1',
+    schemaVersion: 'advice-runtime-update.v2',
     code: key,
+    role: resolvedRole,
+    jobKey: `${resolvedRole}:${key}`,
     updatedAt: Number(updatedAt) || Date.now(),
     advice,
-    job: data?.jobs?.[key] || null,
+    job: resolvedRole === 'advisor' ? job : null,
+    reviewJob: resolvedRole === 'review' ? job : null,
     batchProgress: jobsToProgress(
       data || {},
       Number(updatedAt) || Date.now(),
@@ -389,9 +422,10 @@ function adviceRuntimeStateFromData(data, updatedAt = Date.now()) {
     }
   }
   return {
-    schemaVersion: 'advice-runtime-state.v1',
+    schemaVersion: 'advice-runtime-state.v2',
     updatedAt: Number(updatedAt) || Date.now(),
     jobs: data?.jobs || {},
+    reviewJobs: data?.reviewJobs || {},
     jobWorker: data?.jobWorker || null,
     activeAdviceBatchId: data?.activeAdviceBatchId || '',
     adviceBatchCancellations: data?.adviceBatchCancellations || {},
@@ -424,19 +458,23 @@ async function persistAdviceCompletion(
   data,
   code,
   concurrency,
+  role,
+  jobId,
 ) {
   const update = adviceRuntimeUpdateFromData(
     data,
     code,
     Date.now(),
     concurrency,
+    role,
+    jobId,
   );
   await retryRuntimeWrite(() =>
     writeAdviceRuntimeUpdate(nick, update)
   );
   data.runtimeAdviceAppliedAt = {
     ...(data.runtimeAdviceAppliedAt || {}),
-    [code]: update.updatedAt,
+    [update.jobKey || code]: update.updatedAt,
   };
   return update;
 }
@@ -813,6 +851,8 @@ async function genOne({
       onProgress({
         stage: 'council',
         phase: '委员会正在复核候选方案，尚未发布最终结论',
+        model: getModel('review'),
+        endpoint: 'review 独立端点池',
       });
     }
     try {
@@ -893,23 +933,41 @@ async function genOne({
   };
 }
 
-// 依据 code + 当前账号数据,构造该只的生成任务(持仓走 hold,自选走 buy)
-function buildTask(data, code) {
-  const holding = data.holding || [], watch = data.plan || [];
-  const holdSet = new Set(holding.map((h) => h.code));
-  const nameOf = (holding.find((h) => h.code === code) || watch.find((w) => w.code === code) || {}).name || code;
-  return { holdSet, nameOf };
-}
-
 export function adviceTradeStateMatches(sourceData, latestData) {
   return accountTradeStateFingerprint(sourceData)
     === accountTradeStateFingerprint(latestData);
 }
 
-export function requeueAdviceForTradeChange(data, code, now = Date.now()) {
-  const job = jobsOf(data)[code];
+export function reviewResultStillCurrent(result, currentEntry) {
+  const sourceAdviceAt = Number(result?.sourceAdviceAt) || 0;
+  const currentAdviceAt = Math.max(
+    Number(currentEntry?.at) || 0,
+    Number(currentEntry?.updatedAt) || 0,
+  );
+  if (currentAdviceAt > sourceAdviceAt) return false;
+  const sourcePlanId = String(result?.sourcePlanId || '');
+  if (!sourcePlanId) {
+    return sourceAdviceAt > 0
+      ? currentAdviceAt === sourceAdviceAt
+      : currentAdviceAt === 0;
+  }
+  return String(
+    currentEntry?.advice?.continuity?.planId || '',
+  ) === sourcePlanId;
+}
+
+export function requeueAdviceForTradeChange(
+  data,
+  code,
+  now = Date.now(),
+  role = '',
+  jobId = '',
+) {
+  const job = findAdviceJob(data, code, { role, jobId });
   if (!job) return null;
   job.status = 'queued';
+  job.resourceRole = adviceJobRole(job);
+  job.resourceUnits = 1;
   job.attempts = Math.max(0, (Number(job.attempts) || 1) - 1);
   job.startedAt = 0;
   job.finishedAt = 0;
@@ -972,6 +1030,13 @@ async function runJobGen(
   const previousEntry = adviceEntryMatchesMode(cachedPrevious, mode)
     ? cachedPrevious
     : null;
+  const sourceAdviceAt = Math.max(
+    Number(previousEntry?.at) || 0,
+    Number(previousEntry?.updatedAt) || 0,
+  );
+  const sourcePlanId = String(
+    previousEntry?.advice?.continuity?.planId || '',
+  );
   const previousAdvice = compactAdvicePlan(previousEntry);
   const previousEvidenceDigest = previousEntry?.meta?.evidenceSnapshot
     ? adviceEvidenceDigest(previousEntry.meta.evidenceSnapshot)
@@ -997,7 +1062,12 @@ async function runJobGen(
     if (reviewEvent) p.reviewEvent = reviewEvent;
     if (reviewOrigin) p.reviewOrigin = reviewOrigin;
     const result = await genOne({ code, name, mode: 'hold_advice', payload: p, priceHint, onProgress, signal, deepMode, previousEntry, reviewIntervalMin, reviewTrigger: reviewEvent ? `judge_${reviewEvent.decision}` : '', strategyGate, runCouncilShadow });
-    return { ...result, sourceTradeFingerprint };
+    return {
+      ...result,
+      sourceTradeFingerprint,
+      sourceAdviceAt,
+      sourcePlanId,
+    };
   }
   let p = buildWatchPayload(code, name, portfolio, data.account);
   p.advisorTrack = advisorTrackFrom(data, 'buy_advice');
@@ -1010,7 +1080,12 @@ async function runJobGen(
   if (reviewEvent) p.reviewEvent = reviewEvent;
   if (reviewOrigin) p.reviewOrigin = reviewOrigin;
   const result = await genOne({ code, name, mode: 'buy_advice', payload: p, priceHint, onProgress, signal, deepMode, previousEntry, reviewIntervalMin, reviewTrigger: reviewEvent ? `judge_${reviewEvent.decision}` : '', strategyGate, runCouncilShadow });
-  return { ...result, sourceTradeFingerprint };
+  return {
+    ...result,
+    sourceTradeFingerprint,
+    sourceAdviceAt,
+    sourcePlanId,
+  };
 }
 
 // ---- 任务表合并:把云端最新的【外部变更】并入内存 working(捕获其它设备新入队 / 取消)----
@@ -1020,26 +1095,37 @@ async function runJobGen(
 export function mergeExternalJobs(workingData, freshData) {
   mergeAdviceBatchCancellations(workingData, freshData);
   const wj = jobsOf(workingData);
-  const fj = (freshData && freshData.jobs && typeof freshData.jobs === 'object') ? freshData.jobs : {};
-  for (const [code, fjob] of Object.entries(fj)) {
-    if (!fjob) continue;
-    const cur = wj[code];
-    if (!cur) { wj[code] = fjob; continue; }                       // 外部新入队 → 补入
-    const sameJob = !!(fjob.id && cur.id && fjob.id === cur.id);
-    if (sameJob && fjob.status === 'canceled') {
-      if (isActive(cur)) {
-        cur.cancelRequested = true;
-        cur.status = 'canceled';
-        cur.finishedAt = fjob.finishedAt || Date.now();
-        cur.leaseUntil = 0;
-        cur.phase = '已取消生成';
-        cur.progressAt = fjob.progressAt || Date.now();
+  const wr = reviewJobsOf(workingData);
+  const fj = jobsOf(freshData || {});
+  const fr = reviewJobsOf(freshData || {});
+  const mergeTable = (workingJobs, freshJobs) => {
+    for (const [code, fjob] of Object.entries(freshJobs)) {
+      if (!fjob) continue;
+      const cur = workingJobs[code];
+      if (!cur) { workingJobs[code] = fjob; continue; }
+      const sameJob = !!(fjob.id && cur.id && fjob.id === cur.id);
+      if (sameJob && fjob.status === 'canceled') {
+        if (isActive(cur)) {
+          cur.cancelRequested = true;
+          cur.status = 'canceled';
+          cur.finishedAt = fjob.finishedAt || Date.now();
+          cur.leaseUntil = 0;
+          cur.resourceRole = 'none';
+          cur.resourceUnits = 0;
+          cur.phase = '已取消生成';
+          cur.progressAt = fjob.progressAt || Date.now();
+        }
       }
+      else if (sameJob && fjob.cancelRequested && isActive(cur)) cur.cancelRequested = true;
+      else if (
+        fjob.id !== cur.id
+        && (fjob.at || 0) >= (cur.at || 0)
+        && isActive(fjob)
+      ) workingJobs[code] = fjob;
     }
-    else if (sameJob && fjob.cancelRequested && isActive(cur)) cur.cancelRequested = true;  // 传播运行中取消意图
-    // 外部对同 code 的强制重生成(新 id 且更新)→ 采纳新任务；旧在途请求由 cancelPoll 按 jobId 中止。
-    else if (fjob.id !== cur.id && (fjob.at || 0) >= (cur.at || 0) && isActive(fjob)) wj[code] = fjob;
-  }
+  };
+  mergeTable(wj, fj);
+  mergeTable(wr, fr);
   mergeAdviceBatchCancellations(workingData, {}, Date.now());
   const withBatch = Object.values(wj).filter((job) => job?.batchId);
   const active = withBatch.filter((job) => isActive(job));
@@ -1054,7 +1140,7 @@ export function mergeExternalJobs(workingData, freshData) {
 }
 
 // ---- 保护式落盘:重读云端最新账号,只叠加服务端权威字段,绝不覆盖用户 plan/holding/account ----
-async function persistServer(nick, workingAcc, myId) {
+async function persistServer(nick, workingAcc) {
   const fresh = (await readAccount(
     nick,
     undefined,
@@ -1066,6 +1152,7 @@ async function persistServer(nick, workingAcc, myId) {
   // 先把云端外部变更并入内存(其它设备新入队/取消),再整体回写 jobs(服务端权威)
   mergeExternalJobs(wdata, fdata);
   fdata.jobs = wdata.jobs;
+  fdata.reviewJobs = wdata.reviewJobs;
   fdata.adviceEventKeys = {
     ...(fdata.adviceEventKeys || {}),
     ...(wdata.adviceEventKeys || {}),
@@ -1190,6 +1277,7 @@ async function releaseDrainLock(nick, acc, myId, concurrency) {
     releaseWorkerLock(fdata, myId);
     mergeExternalJobs(acc.data, fdata);
     fdata.jobs = acc.data.jobs;
+    fdata.reviewJobs = acc.data.reviewJobs;
     fdata.batchProgress = jobsToProgress(
       acc.data,
       Date.now(),
@@ -1221,7 +1309,7 @@ async function drainAccount(nick, initialAcc) {
   reapOrphans(data); gcJobs(data);
   if (!acquireWorkerLock(data, myId)) return { skipped: 'locked' };  // 已有他人在 drain → 交给它
   const persistence = createRecoverableSerialRunner(async () => {
-    acc = await persistServer(nick, acc, myId);
+    acc = await persistServer(nick, acc);
     data = acc.data;
     return acc;
   });
@@ -1234,6 +1322,7 @@ async function drainAccount(nick, initialAcc) {
   }
 
   const CONC = effectiveAdviceConcurrency(data);
+  const REVIEW_CONC = reviewConcurrency();
   const generateDailyReport = shouldGenerateAdviceDailyReport({
     deepMode: hasDeepAdviceWork(data),
   });
@@ -1320,7 +1409,40 @@ async function drainAccount(nick, initialAcc) {
   }
 
   const dailyReportSummary = dailyReportResult.summary;
-  const inflight = new Map();   // code -> { promise, controller }
+  const inflight = new Map();   // jobId -> { promise, controller, code, role }
+  const roleCapacities = {
+    advisor: CONC,
+    review: REVIEW_CONC,
+  };
+  let schedulerWake = null;
+  const wakeScheduler = () => {
+    if (schedulerWake) schedulerWake();
+  };
+  const createSchedulerWait = () => {
+    let active = true;
+    let timer = null;
+    let finish = null;
+    const promise = new Promise((resolve) => {
+      finish = () => {
+        if (!active) return;
+        active = false;
+        if (schedulerWake === finish) schedulerWake = null;
+        if (timer) clearTimeout(timer);
+        resolve(null);
+      };
+      schedulerWake = finish;
+      timer = setTimeout(finish, 1000);
+    });
+    return {
+      promise,
+      cancel() {
+        if (!active) return;
+        active = false;
+        if (schedulerWake === finish) schedulerWake = null;
+        if (timer) clearTimeout(timer);
+      },
+    };
+  };
   let ok = 0, fail = 0;
   // 深度任务最坏可占约 495s，只允许在本次 FC 前 85s 内启动新任务，
   // 保证在 600s 硬上限前有收尾时间；剩余队列由 5 分钟云端定时器接力。
@@ -1328,58 +1450,117 @@ async function drainAccount(nick, initialAcc) {
   const progressSaver = createAdviceProgressSaveScheduler(saveWorking);
   const queueProgressSave = (force = false) =>
     progressSaver.schedule(force);
-  const recordProgress = (code, patch) => {
+  const recordProgress = (code, jobId, role, patch) => {
     const d = acc.data || (acc.data = {});
-    const job = jobsOf(d)[code];
+    const job = findAdviceJob(d, code, { role, jobId });
     if (!job) return;
     const stageChanged = !!(
       patch.stage
       && patch.stage !== job.stage
+    );
+    const resourcePatch = resourcePatchForJobProgress(
+      job,
+      patch.stage,
+      REVIEW_CONC,
     );
     if (patch.source) {
       const sources = [...(job.sources || [])];
       const idx = sources.findIndex((item) => item.label === patch.source.label);
       if (idx >= 0) sources[idx] = patch.source;
       else sources.push(patch.source);
-      updateJobProgress(d, code, { sources });
+      updateJobProgress(
+        d,
+        code,
+        { sources, ...resourcePatch },
+        Date.now(),
+        role,
+        jobId,
+      );
     } else if (patch.reasoningDelta) {
-      updateJobProgress(d, code, { reasoning: `${job.reasoning || ''}${patch.reasoningDelta}` });
+      updateJobProgress(
+        d,
+        code,
+        {
+          reasoning: `${job.reasoning || ''}${patch.reasoningDelta}`,
+          ...resourcePatch,
+        },
+        Date.now(),
+        role,
+        jobId,
+      );
     } else {
-      updateJobProgress(d, code, patch);
+      updateJobProgress(
+        d,
+        code,
+        { ...patch, ...resourcePatch },
+        Date.now(),
+        role,
+        jobId,
+      );
     }
+    if (stageChanged) wakeScheduler();
     void queueProgressSave(stageChanged).catch(() => {});
   };
   const heartbeat = setInterval(() => {
     const d = acc.data || (acc.data = {});
     renewWorkerLock(d, myId);
-    for (const code of inflight.keys()) renewLease(d, code);
+    for (const task of inflight.values()) {
+      renewLease(d, task.code, Date.now(), task.role, task.jobId);
+    }
     void queueProgressSave(true).catch(() => {});
   }, WORKER_HEARTBEAT_INTERVAL_MS);
   if (heartbeat && typeof heartbeat.unref === 'function') heartbeat.unref();
   const cancelPoll = setInterval(async () => {
     try {
       const fresh = await readAccount(nick);
-      const freshJobs = fresh?.data?.jobs || {};
+      const knownJobIds = new Set(
+        allAdviceJobs(acc.data).map((job) => String(job.id || '')),
+      );
+      mergeExternalJobs(acc.data, fresh?.data || {});
+      const discoveredWork = allAdviceJobs(acc.data).some((job) =>
+        isActive(job)
+        && !knownJobIds.has(String(job.id || ''))
+      );
       acc.data.settings = mergeAutoRefreshSettings(
         acc.data.settings || {},
         fresh?.data?.settings || {},
       );
       const disabledCanceled = cancelDisabledAdviceReviewJobs(acc.data);
-      for (const [code, task] of inflight.entries()) {
-        if (jobsOf(acc.data)[code]?.status === 'canceled') {
+      for (const task of inflight.values()) {
+        const local = findAdviceJob(
+          acc.data,
+          task.code,
+          { role: task.role, jobId: task.jobId },
+        );
+        if (local?.status === 'canceled') {
           task.controller.abort();
           continue;
         }
-        const remote = freshJobs[code];
+        const remote = findAdviceJob(
+          fresh?.data || {},
+          task.code,
+          { role: task.role },
+        );
         if (remote?.id && remote.id !== task.jobId) {
-          jobsOf(acc.data)[code] = remote;
+          const target = task.role === 'review'
+            ? reviewJobsOf(acc.data)
+            : jobsOf(acc.data);
+          target[task.code] = remote;
           task.controller.abort();
         } else if (remote?.status === 'canceled' || remote?.cancelRequested) {
-          cancelJob(acc.data, code);
+          cancelJob(
+            acc.data,
+            task.code,
+            Date.now(),
+            '',
+            task.jobId,
+            task.role,
+          );
           task.controller.abort();
         }
       }
       if (disabledCanceled > 0) await queueProgressSave(true);
+      if (disabledCanceled > 0 || discoveredWork) wakeScheduler();
     } catch { /* 下一轮继续检查 */ }
   }, CANCEL_POLL_INTERVAL_MS);
   if (cancelPoll && typeof cancelPoll.unref === 'function') cancelPoll.unref();
@@ -1388,33 +1569,48 @@ async function drainAccount(nick, initialAcc) {
       data = acc.data;
       reapOrphans(data); gcJobs(data);
       renewWorkerLock(data, myId);
-      const free = CONC - runningCount(data);
-      const startable = Date.now() < startDeadline ? Object.values(jobsOf(data))
-        .filter((j) => j && j.status === 'queued' && !j.cancelRequested && !inflight.has(j.code))
-        .sort(compareAdviceJobs)
-        .slice(0, Math.max(0, free)) : [];
+      const startable = Date.now() < startDeadline
+        ? selectStartableJobs(
+            data,
+            roleCapacities,
+            new Set(inflight.keys()),
+          )
+        : [];
       // 处理 queued 里已被外部取消意图标记的
-      for (const j of Object.values(jobsOf(data))) {
-        if (j && j.status === 'queued' && j.cancelRequested) { j.status = 'canceled'; j.finishedAt = Date.now(); }
+      for (const j of allAdviceJobs(data)) {
+        if (j && j.status === 'queued' && j.cancelRequested) {
+          j.status = 'canceled';
+          j.finishedAt = Date.now();
+          j.resourceRole = 'none';
+          j.resourceUnits = 0;
+        }
       }
       for (const j of startable) {
-        leaseJob(data, j.code);
+        const role = adviceJobRole(j);
+        const leased = leaseJob(data, j.code, Date.now(), role, j.id);
+        if (!leased) continue;
         const code = j.code;
         const jobId = j.id;
         const controller = new AbortController();
         const promise = runJobGen(
           acc,
           code,
-          (patch) => recordProgress(code, patch),
+          (patch) => recordProgress(code, jobId, role, patch),
           controller.signal,
           !!j.deepMode,
           dailyReportSummary,
           j.trigger || null,
           j.source || '',
         )
-          .then((res) => ({ code, jobId, res }))
-          .catch((err) => ({ code, jobId, err }));
-        inflight.set(code, { promise, controller, jobId });
+          .then((res) => ({ code, jobId, role, res }))
+          .catch((err) => ({ code, jobId, role, err }));
+        inflight.set(jobId, {
+          promise,
+          controller,
+          code,
+          jobId,
+          role,
+        });
       }
       if (startable.length) acc = await saveWorking();   // 公布 lease
 
@@ -1424,11 +1620,21 @@ async function drainAccount(nick, initialAcc) {
         // 有待办却起不来(理论上 free>0 时不会发生)——保护性跳出
         break;
       }
-      const done = await Promise.race([...inflight.values()].map((task) => task.promise));
-      inflight.delete(done.code);
+      const schedulerWait = createSchedulerWait();
+      const done = await Promise.race([
+        ...[...inflight.values()].map((task) => task.promise),
+        schedulerWait.promise,
+      ]);
+      schedulerWait.cancel();
+      if (!done) continue;
+      inflight.delete(done.jobId);
       // 应用结果到内存,再保护式落盘
       const d = acc.data;
-      const job = jobsOf(d)[done.code];
+      const job = findAdviceJob(
+        d,
+        done.code,
+        { role: done.role, jobId: done.jobId },
+      );
       let tradeStateCurrent = true;
       if (done.res?.sourceTradeFingerprint) {
         try {
@@ -1444,10 +1650,17 @@ async function drainAccount(nick, initialAcc) {
         // 同一股票已被新批次替换，旧结果必须丢弃。
       } else if (job.cancelRequested || job.status === 'canceled') { // 运行中被取消 → 丢弃结果
         job.status = 'canceled'; job.finishedAt = Date.now(); job.leaseUntil = 0;
+        job.resourceRole = 'none'; job.resourceUnits = 0;
       } else if (!tradeStateCurrent) {
         // 生成期间若用户加/减仓、改成本或补录成交，旧结果里的手数和成本已失效。
         // 不消耗重试次数，直接以最新 OSS 账本重跑，绝不把旧建议落盘。
-        requeueAdviceForTradeChange(d, done.code);
+        requeueAdviceForTradeChange(
+          d,
+          done.code,
+          Date.now(),
+          done.role,
+          done.jobId,
+        );
       } else if (done.res && done.res.cacheItem) {
         const completion = completeJob(d, done.code, Date.now(), {
           evidenceAsOf: Date.parse(
@@ -1456,14 +1669,28 @@ async function drainAccount(nick, initialAcc) {
           planRevision: Number(
             done.res.cacheItem?.advice?.continuity?.revision,
           ) || 0,
+          role: done.role,
+          jobId: done.jobId,
         });
+        if (
+          completion?.publish
+          && done.role === 'review'
+          && !reviewResultStillCurrent(
+            done.res,
+            d.advice?.[done.code],
+          )
+        ) {
+          completion.publish = false;
+          completion.status = 'stale';
+          job.phase = '复核基准已更新，已丢弃旧结果';
+        }
         if (!completion?.publish) {
           acc = await saveWorking();
           data = acc.data;
           continue;
         }
         ok++;
-        const completedAt = Number(jobsOf(d)[done.code]?.finishedAt) || Date.now();
+        const completedAt = Number(job.finishedAt) || Date.now();
         done.res.cacheItem.updatedAt = Math.max(
           Number(done.res.cacheItem.updatedAt) || 0,
           completedAt,
@@ -1525,8 +1752,11 @@ async function drainAccount(nick, initialAcc) {
             : job?.deepMode
               ? '深度建议未完整返回'
               : '生成失败(军师+量化均空)',
+          Date.now(),
+          done.role,
+          done.jobId,
         );
-        if (jobsOf(d)[done.code] && jobsOf(d)[done.code].status === 'failed') fail++;
+        if (job.status === 'failed') fail++;
       }
       if (job && job.id === done.jobId) {
         try {
@@ -1535,6 +1765,8 @@ async function drainAccount(nick, initialAcc) {
             d,
             done.code,
             CONC,
+            done.role,
+            done.jobId,
           );
         } catch (runtimeError) {
           // 小对象增量写连续失败时才回退完整快照，避免生成结果丢失。
@@ -1556,7 +1788,7 @@ async function drainAccount(nick, initialAcc) {
     await releaseDrainLock(nick, acc, myId, CONC);
   }
   let continued = false;
-  if (shouldContinueAdviceWorker(acc.data)) {
+  if (hasRunnableAdviceWork(acc.data)) {
     try {
       continued = !!(await scheduleAdviceWorker(nick))?.accepted;
     } catch { /* 5分钟恢复定时器仍会兜底 */ }
@@ -1599,7 +1831,6 @@ function enqueueStale(data, { scope = 'all', force = false } = {}) {
       add(code, name, 'buy_advice');
     }
   }
-  if (n > 0) data.activeAdviceBatchId = batchId;
   return n;
 }
 
@@ -1620,10 +1851,10 @@ export function cancelDisabledAdviceReviewJobs(data, now = Date.now()) {
       }).allCodes)
     : null;
   let canceled = 0;
-  for (const job of Object.values(jobsOf(data || {}))) {
+  for (const job of Object.values(reviewJobsOf(data || {}))) {
     if (
       !job?.code
-      || !['auto', 'judge'].includes(job.source)
+      || !['auto', 'cron', 'judge'].includes(job.source)
       || (
         isAdviceReviewEnabled(settings, job.code)
         && !(
@@ -1633,7 +1864,16 @@ export function cancelDisabledAdviceReviewJobs(data, now = Date.now()) {
         )
       )
     ) continue;
-    if (cancelJob(data, job.code, now)) canceled++;
+    if (
+      cancelJob(
+        data,
+        job.code,
+        now,
+        '',
+        job.id,
+        'review',
+      )
+    ) canceled++;
   }
   return canceled;
 }
@@ -1641,7 +1881,6 @@ export function cancelDisabledAdviceReviewJobs(data, now = Date.now()) {
 export function enqueueAutoRefreshDue(data, now = Date.now()) {
   if (!inAutoRefreshWindow(now)) return 0;
   if (Number(data?.adviceAutoPauseUntil) > now) return 0;
-  if (hasActiveManualBatch(data)) return 0;
   const settings = data.settings || (data.settings = {});
   const config = autoConfigFromSettings(settings);
   const scopes = [
@@ -1667,7 +1906,7 @@ export function enqueueAutoRefreshDue(data, now = Date.now()) {
   const holdCodes = selected.holdCodes;
   const watchCodes = selected.watchCodes;
   const batchId = `auto_${now}`;
-  const activeAutoJobs = Object.values(jobsOf(data))
+  const activeAutoJobs = Object.values(reviewJobsOf(data))
     .filter((job) => job?.source === 'auto' && isActive(job))
     .length;
   const autoBudget = Math.max(0, MAX_AUTO_JOBS_PER_TICK - activeAutoJobs);
@@ -1730,7 +1969,6 @@ export function enqueueAutoRefreshDue(data, now = Date.now()) {
     settings['advAuto.watchLastTryAt'] = now;
     settings['advAuto.watchLastAt'] = now;
   }
-  if (count > 0) data.activeAdviceBatchId = batchId;
   return count;
 }
 
@@ -1785,9 +2023,9 @@ export default async function handler(req, res) {
       if (op === 'status') {
         const recovered = reapOrphans(data);
         gcJobs(data);
-        if (recovered > 0) await persistServer(nick, acc, 'status-recover');
+        if (recovered > 0) await persistServer(nick, acc);
         let workerScheduled = false;
-        if (needsWorkerDispatch(data)) {
+        if (needsRoleWorkerDispatch(data)) {
           try {
             workerScheduled = !!(await scheduleAdviceWorker(nick))?.accepted;
           } catch (error) {
@@ -1800,9 +2038,11 @@ export default async function handler(req, res) {
         return res.end(JSON.stringify({
           ok: true,
           jobs: jobsOf(data),
+          reviewJobs: reviewJobsOf(data),
           progress: jobsToProgress(data, Date.now(), CONC),
           concurrency: CONC,
-          running: runningCount(data),
+          running: runningCount(data, Date.now(), 'advisor'),
+          reviewRunning: runningCount(data, Date.now(), 'review'),
           workerScheduled,
           recovered,
         }));
@@ -1838,7 +2078,7 @@ export default async function handler(req, res) {
         for (const code of codes) {
           if (cancelJob(data, code, Date.now(), batchId)) n++;
         }
-        await persistServer(nick, acc, 'cancel');
+        await persistServer(nick, acc);
         return res.end(JSON.stringify({ ok: true, canceled: n, progress: jobsToProgress(data, Date.now(), CONC) }));
       }
       if (op === 'cancelAll') {
@@ -1852,11 +2092,7 @@ export default async function handler(req, res) {
         }
         markAdviceBatchCanceled(data, batchId, Date.now());
         const n = cancelAll(data, Date.now(), batchId);
-        const persisted = await persistServer(
-          nick,
-          acc,
-          'cancelAll',
-        );
+        const persisted = await persistServer(nick, acc);
         const finalData = persisted?.data || data;
         return res.end(JSON.stringify({
           ok: true,
@@ -1882,6 +2118,16 @@ export default async function handler(req, res) {
       const holding = data.holding || [], watch = data.plan || [];
       const holdSet = new Set(holding.map((h) => h.code));
       const nameOf = (c) => (holding.find((h) => h.code === c) || watch.find((w) => w.code === c) || {}).name || c;
+      const eligibleCodes = codes.filter((code) =>
+        (scope !== 'hold' || holdSet.has(code))
+        && (scope !== 'watch' || !holdSet.has(code))
+      );
+      if (!eligibleCodes.length) {
+        return res.end(JSON.stringify({
+          ok: false,
+          error: '当前范围没有可生成的股票',
+        }));
+      }
       const requestedBatchId = String(body.batchId || '').trim();
       const batchRequest = !!requestedBatchId;
       const batchId = requestedBatchId
@@ -1890,6 +2136,11 @@ export default async function handler(req, res) {
       const requestId = String(
         body.requestId || requestedBatchId || batchId,
       ).trim().slice(0, 140);
+      CONC = effectiveAdviceConcurrency(
+        data,
+        deepMode,
+        batchRequest,
+      );
       if (
         batchRequest
         && isAdviceBatchCanceled(data, batchId)
@@ -1904,13 +2155,30 @@ export default async function handler(req, res) {
           progress: jobsToProgress(data, Date.now(), CONC),
         }));
       }
-      let enq = 0, dup = 0, canceledBeforeQueue = 0;
-      if (batchRequest) {
-        suspendAutomaticJobsForManualBatch(data, Date.now());
+      const admission = advisorAdmission(
+        data,
+        eligibleCodes,
+        CONC,
+      );
+      if (!admission.accepted) {
+        res.statusCode = 409;
+        return res.end(JSON.stringify({
+          ok: false,
+          accepted: false,
+          queued: false,
+          code: 'ADVISOR_CAPACITY_FULL',
+          error: '军师端点已满，请等待当前生成完成',
+          busy: admission.busy,
+          concurrency: admission.capacity,
+          progress: jobsToProgress(
+            data,
+            Date.now(),
+            CONC,
+          ),
+        }));
       }
-      for (const code of codes) {
-        if (scope === 'hold' && !holdSet.has(code)) continue;
-        if (scope === 'watch' && holdSet.has(code)) continue;
+      let enq = 0, dup = 0, canceledBeforeQueue = 0;
+      for (const code of eligibleCodes) {
         const mode = holdSet.has(code) ? 'hold_advice' : 'buy_advice';
         const { created, canceled } = enqueueJob(data, {
           code, name: nameOf(code), mode, source: 'ondemand', force, batchId, deepMode,
@@ -1926,7 +2194,6 @@ export default async function handler(req, res) {
       const persisted = await persistServer(
         nick,
         acc,
-        'enqueue',
       );   // 立刻公布队列(另一设备可见)
       const persistedData = persisted?.data || data;
       if (
@@ -2025,8 +2292,10 @@ export default async function handler(req, res) {
           : body.resumeOnly === true
             ? 0
             : enqueueStale(data, { scope, force: body.force === true });
-        await persistServer(nick, acc, 'cron');
-        const dr = hasPendingWork(acc.data) ? await drainAccount(nick, await readAccount(nick)) : { drained: false, ok: 0, fail: 0 };
+        await persistServer(nick, acc);
+        const dr = hasRunnableAdviceWork(acc.data)
+          ? await drainAccount(nick, await readAccount(nick))
+          : { drained: false, ok: 0, fail: 0 };
         totalOk += dr.ok || 0; totalFail += dr.fail || 0;
         summary.push({ nick, enqueued: enq, ...(dr.skipped ? { skipped: dr.skipped } : { ok: dr.ok, fail: dr.fail }) });
       } catch (e) { summary.push({ nick, error: String(e.message || e) }); }

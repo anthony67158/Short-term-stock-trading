@@ -81,7 +81,12 @@ export async function callChat({
   //   (不同网关同一角色可能是不同模型名);端点没配则回退全局/本次 model。
   // forceNoReason:硬关深度思考(优先级高于端点级/全局 reasoning 配置)——用于「思维链吃穿正文」
   //   后的补生成:此时必须让模型把整段生成用于正文 JSON,绝不能被端点级 reasoning 配置再次拉起 CoT。
-  const { resp, endpoint, deferred } = await poolFetch(cfg, '/chat/completions', {
+  const {
+    resp,
+    endpoint,
+    deferred,
+    releaseRole = () => {},
+  } = await poolFetch(cfg, '/chat/completions', {
     method: 'POST', body: bodyObj, signal: useSignal, timeoutMs,
     role, modelFallback: model, reasonFallback: reasoning, forceNoReason, forceReason, deferSuccess: !!stream,
   }, stream ? 1 : 2);   // 流式只试一个端点(半路换端点会丢已下发的 token);非流式允许一次故障转移
@@ -96,8 +101,12 @@ export async function callChat({
       clearTimeout(t);
       if (deferred && endpoint && !released) {
         released = true;
-        if (success) markSuccess(endpoint.id);
-        else markEndpointUnusable(endpoint.id, Date.now(), true);
+        try {
+          if (success) markSuccess(endpoint.id);
+          else markEndpointUnusable(endpoint.id, Date.now(), true);
+        } finally {
+          releaseRole();
+        }
       }
     },
   };

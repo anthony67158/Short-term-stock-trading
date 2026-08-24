@@ -58,6 +58,7 @@ test('流式请求在响应体消费完成前持续占用端点', async () => {
     assert.equal(routed.deferred, true)
     assert.equal(poolStatus(config)[0].inflight, 1)
     markSuccess(routed.endpoint.id)
+    routed.releaseRole()
     assert.equal(poolStatus(config)[0].inflight, 0)
   } finally {
     globalThis.fetch = originalFetch

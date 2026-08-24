@@ -68,18 +68,34 @@ export function shouldApplyCloudBatch(progress) {
   )
 }
 
-export function adviceJobState(batch, code) {
+export function adviceJobState(
+  batch,
+  code,
+  { role = 'advisor' } = {},
+) {
   if (!batch || !code) return null
-  const item = (batch.items || []).find((entry) => String(entry?.code) === String(code))
+  const source = role === 'review'
+    ? batch.reviews
+    : batch.items
+  const item = (source || []).find((entry) =>
+    String(entry?.code) === String(code)
+  )
   if (!item || !['queued', 'pending', 'running', 'canceling'].includes(item.status)) return null
   const running = item.status === 'running'
   const canceling = item.status === 'canceling'
+  const review = role === 'review'
+  const defaultLabel = review
+    ? running ? 'AI 建议复核中' : '排队等待云端复核'
+    : running ? 'AI 操作建议生成中' : '排队等待云端生成'
   return {
     active: true,
     status: item.status,
+    ...(review ? { role: 'review' } : {}),
     stage: String(item.stage || ''),
-    label: canceling ? '正在取消生成' : (item.phase || (running ? 'AI 操作建议生成中' : '排队等待云端生成')),
-    cancelable: !canceling,
+    label: canceling
+      ? '正在取消生成'
+      : (item.phase || defaultLabel),
+    cancelable: !review && !canceling,
     cloud: !!batch.serverMode,
     deepMode: item.deepMode === true,
   }
@@ -87,13 +103,18 @@ export function adviceJobState(batch, code) {
 
 export function cloudAdviceLoadingState(batch, code) {
   const active = adviceJobState(batch, code)
+    || adviceJobState(batch, code, { role: 'review' })
   if (!active) return null
-  const item = (batch.items || []).find(
+  const source = active.role === 'review'
+    ? batch.reviews
+    : batch.items
+  const item = (source || []).find(
     (entry) => String(entry?.code) === String(code),
   ) || {}
   return {
     loading: true,
     cloud: true,
+    role: active.role,
     stage: String(item.stage || ''),
     phase: item.phase || active.label,
     warning: String(item.warning || ''),
@@ -128,7 +149,10 @@ export function shouldShowAdviceResult(state) {
 export function createAdviceCompletionPuller(pull) {
   let deliveredFingerprint = ''
   return async function pullCompletedAdvice(progress) {
-    const fingerprint = (progress?.items || [])
+    const fingerprint = [
+      ...(progress?.items || []),
+      ...(progress?.reviews || []),
+    ]
       .filter((item) => item?.status === 'ok' && item?.code)
       .map((item) => `${item.code}:${item.status}:${item.progressAt || 0}`)
       .sort()
@@ -184,6 +208,18 @@ export async function startAdvicePersistently(
           mode: 'server',
           code,
           error: submission.error || '任务已排队，等待云端恢复',
+        }
+      }
+      if (submission?.code === 'ADVISOR_CAPACITY_FULL') {
+        return {
+          status: 'full',
+          mode: 'server',
+          code,
+          busy: Array.isArray(submission.busy)
+            ? submission.busy
+            : [],
+          concurrency: Number(submission.concurrency) || 1,
+          error: submission.error || '军师端点已满',
         }
       }
     } catch {

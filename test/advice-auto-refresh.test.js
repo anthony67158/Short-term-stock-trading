@@ -12,10 +12,7 @@ import {
   cancelDisabledAdviceReviewJobs,
   enqueueAutoRefreshDue,
 } from '../api/cron_advice.js'
-import {
-  cancelAll,
-  suspendAutomaticJobsForManualBatch,
-} from '../api/_jobs.js'
+import { cancelAll } from '../api/_jobs.js'
 import { isAdviceReviewEnabled } from '../shared/adviceReviewPolicy.js'
 
 test('自动刷新默认常开，持仓和自选采用不同建议频率', () => {
@@ -143,9 +140,9 @@ test('云端定时器默认创建到期的持仓和自选刷新任务', () => {
     plan: [{ code: '000001', name: '自选股' }],
   }
   assert.equal(enqueueAutoRefreshDue(enabled, now), 2)
-  assert.equal(enabled.jobs['600000'].mode, 'hold_advice')
-  assert.equal(enabled.jobs['000001'].mode, 'buy_advice')
-  assert.match(enabled.activeAdviceBatchId, /^auto_/)
+  assert.equal(enabled.reviewJobs['600000'].mode, 'hold_advice')
+  assert.equal(enabled.reviewJobs['000001'].mode, 'buy_advice')
+  assert.equal(enabled.activeAdviceBatchId, undefined)
   assert.equal(enqueueAutoRefreshDue(enabled, now + 5 * 60000), 0)
 })
 
@@ -164,8 +161,8 @@ test('云端按每只股票自己的复核时间排队', () => {
   }
 
   assert.equal(enqueueAutoRefreshDue(data, now), 1)
-  assert.equal(data.jobs['600000'].source, 'auto')
-  assert.equal(data.jobs['600001'], undefined)
+  assert.equal(data.reviewJobs['600000'].source, 'auto')
+  assert.equal(data.reviewJobs['600001'], undefined)
 })
 
 test('云端定时器只为持续复核白名单中的股票排队', () => {
@@ -186,10 +183,10 @@ test('云端定时器只为持续复核白名单中的股票排队', () => {
   }
 
   assert.equal(enqueueAutoRefreshDue(data, now), 2)
-  assert.equal(data.jobs['600000'], undefined)
-  assert.equal(data.jobs['000001'], undefined)
-  assert.equal(data.jobs['600001'].mode, 'hold_advice')
-  assert.equal(data.jobs['000002'].mode, 'buy_advice')
+  assert.equal(data.reviewJobs['600000'], undefined)
+  assert.equal(data.reviewJobs['000001'], undefined)
+  assert.equal(data.reviewJobs['600001'].mode, 'hold_advice')
+  assert.equal(data.reviewJobs['000002'].mode, 'buy_advice')
 })
 
 test('移出白名单后取消排队中的自动复核任务', () => {
@@ -203,7 +200,7 @@ test('移出白名单后取消排队中的自动复核任务', () => {
       { code: '600001' },
     ],
     plan: [{ code: '000001' }],
-    jobs: {
+    reviewJobs: {
       '600000': {
         code: '600000',
         status: 'queued',
@@ -223,9 +220,9 @@ test('移出白名单后取消排队中的自动复核任务', () => {
   }
 
   assert.equal(cancelDisabledAdviceReviewJobs(data, 2000), 2)
-  assert.equal(data.jobs['600000'].status, 'canceled')
-  assert.equal(data.jobs['000001'].status, 'canceled')
-  assert.equal(data.jobs['600001'].status, 'queued')
+  assert.equal(data.reviewJobs['600000'].status, 'canceled')
+  assert.equal(data.reviewJobs['000001'].status, 'canceled')
+  assert.equal(data.reviewJobs['600001'].status, 'queued')
 })
 
 test('单股关闭持续复核后云端不再创建定时任务', () => {
@@ -239,29 +236,31 @@ test('单股关闭持续复核后云端不再创建定时任务', () => {
   }
 
   assert.equal(enqueueAutoRefreshDue(data, now), 1)
-  assert.equal(data.jobs['600000'], undefined)
-  assert.equal(data.jobs['600001'].source, 'auto')
+  assert.equal(data.reviewJobs['600000'], undefined)
+  assert.equal(data.reviewJobs['600001'].source, 'auto')
 })
 
 test('单股关闭持续复核后取消排队中的自动链路但保留手动生成', () => {
   const data = {
     settings: { 'advReview.disabledCodes': ['600000'] },
     jobs: {
-      '600000': {
-        code: '600000',
-        status: 'queued',
-        source: 'auto',
-      },
       '600001': {
         code: '600001',
         status: 'queued',
         source: 'ondemand',
       },
     },
+    reviewJobs: {
+      '600000': {
+        code: '600000',
+        status: 'queued',
+        source: 'auto',
+      },
+    },
   }
 
   assert.equal(cancelDisabledAdviceReviewJobs(data, 2000), 1)
-  assert.equal(data.jobs['600000'].status, 'canceled')
+  assert.equal(data.reviewJobs['600000'].status, 'canceled')
   assert.equal(data.jobs['600001'].status, 'queued')
 })
 
@@ -277,13 +276,13 @@ test('每轮最多排两波自动任务并优先处理持仓，避免长队阻�
   }
 
   assert.equal(enqueueAutoRefreshDue(data, now), 6)
-  assert.equal(Object.keys(data.jobs).length, 6)
-  assert.equal(data.jobs['000001'], undefined)
+  assert.equal(Object.keys(data.reviewJobs).length, 6)
+  assert.equal(data.reviewJobs['000001'], undefined)
   assert.equal(enqueueAutoRefreshDue(data, now + 5 * 60000), 0)
-  assert.equal(Object.keys(data.jobs).length, 6)
+  assert.equal(Object.keys(data.reviewJobs).length, 6)
 })
 
-test('一次性生成运行期间不再插入持续复核任务', () => {
+test('一次性生成运行期间仍可向独立review队列插入持续复核任务', () => {
   const now = new Date('2026-08-10T02:00:00Z').getTime()
   const data = {
     settings: {},
@@ -299,36 +298,10 @@ test('一次性生成运行期间不再插入持续复核任务', () => {
     },
   }
 
-  assert.equal(enqueueAutoRefreshDue(data, now), 0)
+  assert.equal(enqueueAutoRefreshDue(data, now), 1)
   assert.equal(data.jobs['600000'], undefined)
-  assert.equal(data.settings['advAuto.holdLastTryAt'], undefined)
-})
-
-test('启动一次性生成时暂停已有自动复核但保留Judge任务', () => {
-  const data = {
-    jobs: {
-      autoQueued: {
-        code: 'autoQueued',
-        status: 'queued',
-        source: 'auto',
-      },
-      autoRunning: {
-        code: 'autoRunning',
-        status: 'running',
-        source: 'auto',
-      },
-      judge: {
-        code: 'judge',
-        status: 'queued',
-        source: 'judge',
-      },
-    },
-  }
-
-  assert.equal(suspendAutomaticJobsForManualBatch(data, 2000), 2)
-  assert.equal(data.jobs.autoQueued.status, 'canceled')
-  assert.equal(data.jobs.autoRunning.status, 'canceled')
-  assert.equal(data.jobs.judge.status, 'queued')
+  assert.equal(data.reviewJobs['600000'].source, 'auto')
+  assert.equal(data.settings['advAuto.holdLastTryAt'], now)
 })
 
 test('人工全部停止后自动复核冷却三十分钟且手动任务不受限', () => {

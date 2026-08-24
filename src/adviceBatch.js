@@ -41,7 +41,9 @@ const state = {
   running: false,
   total: 0, done: 0, ok: 0, fail: 0, skipped: 0,
   current: new Set(),
+  advisorBusy: new Set(),
   items: [],           // 有序:每只 {code, name, status:'pending'|'running'|'ok'|'fail'|'skipped'}
+  reviews: [],         // 独立 review 队列；不参与一次生成批次的 running/done 统计
   startedAt: 0, finishedAt: 0,
   cancelRequested: false,
   cancelError: '',
@@ -64,13 +66,20 @@ export function subscribeBatch(fn) { subs.add(fn); return () => subs.delete(fn) 
 // 之后随云端 batchProgress.concurrency 覆盖为权威值。
 export function getConcurrency() { return Math.max(1, Number(state.concurrency) || 1) }
 export function seedConcurrency(n) { const v = Math.max(1, Number(n) || 0); if (v) { state.concurrency = v; notify() } }
-// 同步窥视端点占用(供批量入口 UI 先行门控)。excludeCodes=本批要生成的 code(须排除自占)。
+// 同步窥视 advisor 端点占用(供批量入口 UI 先行门控)。
 // 返回 { busy:[{code,name}], concurrency, full }。full=true 表示端点已被非本批单股生成占满。
 export function peekBatchBusy(excludeCodes, deepMode = false) {
   const ex = new Set((excludeCodes || []).filter(Boolean).map(String))
-  const busy = externalBusyCodes(ex)
+  const busy = advisorBusyCodes()
   const concurrency = batchConcurrency(getConcurrency(), deepMode)
-  return { busy, concurrency, full: busy.length >= concurrency }
+  const hasNewWork = [...ex].some((code) =>
+    !busy.some((item) => item.code === code)
+  )
+  return {
+    busy,
+    concurrency,
+    full: hasNewWork && busy.length >= concurrency,
+  }
 }
 // 取只读快照(current 转数组,便于组件直接用)
 export function getBatchState() {
@@ -78,7 +87,9 @@ export function getBatchState() {
     running: state.running,
     total: state.total, done: state.done, ok: state.ok, fail: state.fail, skipped: state.skipped,
     current: [...state.current],
+    advisorBusy: [...state.advisorBusy],
     items: state.items.map((x) => ({ ...x })),
+    reviews: state.reviews.map((x) => ({ ...x })),
     startedAt: state.startedAt, finishedAt: state.finishedAt,
     cancelRequested: state.cancelRequested,
     cancelError: state.cancelError,
@@ -161,6 +172,7 @@ async function cancelBatchInternal() {
         ['ok', 'fail', 'skipped'].includes(item.status)
       ).length
       state.current = new Set()
+      state.advisorBusy = new Set()
       state.running = false
       state.finishedAt = Date.now()
       state._cancelingCodes.clear()
@@ -319,8 +331,15 @@ export function applyCloudBatch(bp, force = false) {
     )
   ) return
   if (state.running && !state.serverMode) return           // 本机本地批量进行中 → 不打架
+  if (!force && at > 0 && at <= state._cloudAt) return
+  const reviews = Array.isArray(bp.reviews)
+    ? bp.reviews.map((item) => ({ ...item }))
+    : []
   if (!shouldApplyCloudBatch(bp)) {
-    const hadVisibleBatch = state.total > 0 || state.items.length > 0 || state.finishedAt > 0
+    const hadVisibleBatch = state.total > 0
+      || state.items.length > 0
+      || state.finishedAt > 0
+      || state.reviews.length > 0
     state._cloudAt = Math.max(state._cloudAt, at)
     state.serverMode = true
     state.running = false
@@ -328,11 +347,13 @@ export function applyCloudBatch(bp, force = false) {
     state.cancelRequested = false
     state.cancelError = ''
     state.total = 0; state.done = 0; state.ok = 0; state.fail = 0; state.skipped = 0
-    state.current = new Set(); state.items = []; state.startedAt = 0; state.finishedAt = 0
-    if (hadVisibleBatch) notify()
+    state.current = new Set(); state.advisorBusy = new Set()
+    state.items = []; state.reviews = reviews
+    state.startedAt = 0; state.finishedAt = 0
+    if (hadVisibleBatch || reviews.length) notify()
     return
   }
-  if (!force && (!at || at <= state._cloudAt)) return     // 不是更新的进度 → 忽略
+  if (!force && !at) return
   state._cloudAt = Math.max(state._cloudAt, at)
   state.serverMode = true
   state.cancelRequested = (
@@ -350,7 +371,13 @@ export function applyCloudBatch(bp, force = false) {
   state.fail = bp.fail || 0
   state.skipped = bp.skipped || 0
   state.current = new Set(Array.isArray(bp.current) ? bp.current : [])
+  state.advisorBusy = new Set(
+    Array.isArray(bp.advisorBusy)
+      ? bp.advisorBusy
+      : bp.current || [],
+  )
   state.items = Array.isArray(bp.items) ? bp.items.map((x) => ({ ...x })) : []
+  state.reviews = reviews
   for (const item of state.items) {
     if (
       state._cancelingCodes.has(String(item.code))
@@ -381,11 +408,10 @@ function setItemStatus(code, status) {
 // 「外部占用端点」= 非本批的单股生成正在占用的端点(本地 runner ∪ 服务端 current)。
 // 与 adviceGate.generatingList 同口径,但直接读本模块 state 避免循环依赖。
 // excludeSet:本批要生成的 code(它们进入 running 后也会出现在 getRunningList/current,须排除以免自占)。
-function externalBusyCodes(excludeSet) {
+function advisorBusyCodes() {
   const map = new Map()
   try { for (const it of getRunningList()) if (it && it.code) map.set(String(it.code), it.name || it.code) } catch { /* ignore */ }
-  try { for (const c of state.current) { const code = String(c); if (!map.has(code)) map.set(code, code) } } catch { /* ignore */ }
-  if (excludeSet) for (const c of excludeSet) map.delete(String(c))
+  try { for (const c of state.advisorBusy) { const code = String(c); if (!map.has(code)) map.set(code, code) } } catch { /* ignore */ }
   return [...map.entries()].map(([code, name]) => ({ code, name }))
 }
 
@@ -417,8 +443,13 @@ export async function runBatchAdvice(codes, quoteMap, opts = {}) {
   //   · 未满 → 剩几个用几个,后续单股空出来再补(见下方本地并行池 / 服务端 drainAccount)。
   const batchSet = new Set(uniq.map(String))
   const limit = batchConcurrency(getConcurrency(), generation.deepMode)
-  const busyExt = externalBusyCodes(batchSet)
-  if (busyExt.length >= limit) return { status: 'full', busy: busyExt, concurrency: limit }
+  const busyExt = advisorBusyCodes()
+  const hasNewWork = [...batchSet].some((code) =>
+    !busyExt.some((item) => item.code === code)
+  )
+  if (hasNewWork && busyExt.length >= limit) {
+    return { status: 'full', busy: busyExt, concurrency: limit }
+  }
 
   const st = planStore.get()
   const holding = st.holding || []
@@ -445,6 +476,7 @@ export async function runBatchAdvice(codes, quoteMap, opts = {}) {
     state.total = uniq.length
     state.done = 0; state.ok = 0; state.fail = 0; state.skipped = 0
     state.current = new Set()
+    state.advisorBusy = new Set()
     state.items = uniq.map((code) => ({
       code,
       name: nameOf(code),
@@ -484,6 +516,28 @@ export async function runBatchAdvice(codes, quoteMap, opts = {}) {
         error: submission?.error || '',
       }
     }
+    if (submission?.code === 'ADVISOR_CAPACITY_FULL') {
+      state.running = false
+      state.total = 0
+      state.done = 0
+      state.ok = 0
+      state.fail = 0
+      state.skipped = 0
+      state.current = new Set()
+      state.advisorBusy = new Set()
+      state.items = []
+      state.startedAt = 0
+      state.finishedAt = 0
+      notify()
+      return {
+        status: 'full',
+        mode: 'server',
+        busy: Array.isArray(submission.busy)
+          ? submission.busy
+          : [],
+        concurrency: Number(submission.concurrency) || limit,
+      }
+    }
     state.running = false
     notify()
   }
@@ -501,6 +555,7 @@ export async function runBatchAdvice(codes, quoteMap, opts = {}) {
   state.total = uniq.length
   state.done = 0; state.ok = 0; state.fail = 0; state.skipped = 0
   state.current = new Set()
+  state.advisorBusy = new Set()
   state.items = uniq.map((code) => ({ code, name: nameOf(code), status: 'pending' }))
   state.startedAt = Date.now(); state.finishedAt = 0
   notify()
@@ -514,7 +569,8 @@ export async function runBatchAdvice(codes, quoteMap, opts = {}) {
       ? buildHoldSpec(code, name, quoteMap || {}, portfolio, st.account)
       : buildWatchSpec(code, name, quoteMap || {}, portfolio, st.account)
     spec.deepMode = generation.deepMode
-    state.current.add(code); setItemStatus(code, 'running'); notify()
+    state.current.add(code); state.advisorBusy.add(code)
+    setItemStatus(code, 'running'); notify()
     try {
       // ★超时护栏:startAdvice 内部走 SSE,极端情况下(移动端切后台/网关半挂)可能长时间不 settle。
       //   若不设上限,该 worker 会永久卡在 await → Promise.all 永不 resolve → state.running 永远为 true
@@ -574,7 +630,8 @@ export async function runBatchAdvice(codes, quoteMap, opts = {}) {
         setItemStatus(code, 'fail'); state.fail++
       }
     } finally {
-      state.current.delete(code); state.done++; notify()
+      state.current.delete(code); state.advisorBusy.delete(code)
+      state.done++; notify()
     }
   }
 
@@ -601,7 +658,7 @@ export async function runBatchAdvice(codes, quoteMap, opts = {}) {
   }
   // 首轮并行度 = 端点数 − 已被单股生成占用的端点(动态复算,至少 1);随单只跑完自然补槽。
   const modeConcurrency = batchConcurrency(getConcurrency(), generation.deepMode)
-  const freeSlots = Math.max(1, modeConcurrency - externalBusyCodes(batchSet).length)
+  const freeSlots = Math.max(1, modeConcurrency - advisorBusyCodes().length)
   const poolSize = Math.min(freeSlots, uniq.length)
   const workers = Array.from({ length: poolSize }, () => worker())
   try {

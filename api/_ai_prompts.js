@@ -17,7 +17,13 @@ export const ADVISOR_MODES = new Set([
 ]);
 export function isAdvisorMode(mode) { return ADVISOR_MODES.has(mode); }
 
-const REVIEW_ORIGINS = new Set(['auto', 'judge', 'review', 'scheduled']);
+const REVIEW_ORIGINS = new Set([
+  'auto',
+  'cron',
+  'judge',
+  'review',
+  'scheduled',
+]);
 export function llmRoleForAdviceMode(mode, reviewOrigin = '') {
   if (mode === 'review' || REVIEW_ORIGINS.has(String(reviewOrigin || ''))) {
     return 'review';

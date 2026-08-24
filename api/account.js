@@ -84,6 +84,9 @@ export function accountSyncDelta(data = {}, since = 0) {
   const jobs = data.jobs && typeof data.jobs === 'object'
     ? data.jobs
     : {};
+  const reviewJobs = data.reviewJobs && typeof data.reviewJobs === 'object'
+    ? data.reviewJobs
+    : {};
   const runtimeAdviceObservedAt = (
     data.runtimeAdviceObservedAt
     && typeof data.runtimeAdviceObservedAt === 'object'
@@ -93,9 +96,11 @@ export function accountSyncDelta(data = {}, since = 0) {
   // 事件时间可能早于 OSS 实际可见时间；按可见水位补发可避免游标越过迟到对象。
   const advice = Object.fromEntries(
     Object.entries(data.advice || {}).filter(([code, entry]) => {
-      const job = jobs[code];
-      const completedAfterCursor = job?.status === 'done'
-        && newestStamp(job, ['finishedAt', 'progressAt']) > after;
+      const completedAfterCursor = [jobs[code], reviewJobs[code]]
+        .some((job) =>
+          job?.status === 'done'
+          && newestStamp(job, ['finishedAt', 'progressAt']) > after
+        );
       return newestStamp(entry, ['at', 'cachedAt', 'updatedAt']) > after
         || Number(runtimeAdviceObservedAt[code]) > after
         || completedAfterCursor;
@@ -206,6 +211,10 @@ export function applyClientAccountSave(
   // AI 任务生命周期只由服务端 Worker 管理。客户端可能持有数秒前的旧快照，
   // 保存持仓时绝不能把正在运行的队列、租约或 Worker 锁覆盖掉。
   if (prev.jobs && typeof prev.jobs === 'object') merged.jobs = prev.jobs;
+  if (
+    prev.reviewJobs
+    && typeof prev.reviewJobs === 'object'
+  ) merged.reviewJobs = prev.reviewJobs;
   if (prev.jobWorker && typeof prev.jobWorker === 'object') merged.jobWorker = prev.jobWorker;
   if (prev.activeAdviceBatchId) merged.activeAdviceBatchId = prev.activeAdviceBatchId;
   if (
@@ -332,8 +341,9 @@ export function applyClientAccountSave(
   const heldCodes = new Set(
     (merged.holding || []).map((holding) => String(holding?.code || '')).filter(Boolean),
   );
-  if (merged.jobs && typeof merged.jobs === 'object') {
-    for (const job of Object.values(merged.jobs)) {
+  for (const jobs of [merged.jobs, merged.reviewJobs]) {
+    if (!jobs || typeof jobs !== 'object') continue;
+    for (const job of Object.values(jobs)) {
       if (
         !job
         || job.mode !== 'hold_advice'
@@ -344,6 +354,8 @@ export function applyClientAccountSave(
       job.status = 'canceled';
       job.finishedAt = Date.now();
       job.leaseUntil = 0;
+      job.resourceRole = 'none';
+      job.resourceUnits = 0;
       job.phase = '持仓已清仓，旧持仓复核已取消';
       job.progressAt = job.finishedAt;
     }
@@ -384,8 +396,11 @@ const deactivationPathOf = (nick) => `${prefixOf(nick)}deactivated.json`;
 const legacyPathOf = (nick) => `${PREFIX}${sha('u:' + nick)}.json`; // 旧的单文件覆盖式路径（兼容迁移）
 const adviceRuntimePrefixOf = (nick) => `${prefixOf(nick)}runtime/advice/`;
 const adviceRuntimeStatePathOf = (nick) => `${prefixOf(nick)}runtime/state.json`;
-const adviceRuntimeUpdatePathOf = (nick, code) =>
-  `${adviceRuntimePrefixOf(nick)}${String(code || '').replace(/[^0-9A-Za-z_-]/g, '')}.json`;
+const adviceRuntimeUpdatePathOf = (nick, code, role = 'advisor') => {
+  const safeCode = String(code || '').replace(/[^0-9A-Za-z_-]/g, '');
+  const prefix = role === 'review' ? 'review-' : '';
+  return `${adviceRuntimePrefixOf(nick)}${prefix}${safeCode}.json`;
+};
 
 function runtimeStamp(value) {
   return Math.max(
@@ -450,6 +465,13 @@ export function mergeAdviceRuntimeState(account, runtime) {
     }
     data.jobs = jobs;
   }
+  if (runtime.reviewJobs && typeof runtime.reviewJobs === 'object') {
+    const jobs = { ...(data.reviewJobs || {}) };
+    for (const [code, job] of Object.entries(runtime.reviewJobs)) {
+      jobs[code] = mergeRuntimeJob(jobs[code], job);
+    }
+    data.reviewJobs = jobs;
+  }
   for (const key of [
     'jobWorker',
     'activeAdviceBatchId',
@@ -500,7 +522,12 @@ export function mergeAdviceRuntimeUpdate(
     ? data.runtimeAdviceObservedAt
     : {};
   const code = String(update.code);
-  if (updatedAt > (Number(cursors[code]) || 0)) {
+  const role = update.role === 'review' ? 'review' : 'advisor';
+  const cursorKey = String(
+    update.jobKey
+    || (role === 'review' ? `review:${code}` : code),
+  );
+  if (updatedAt > (Number(cursors[cursorKey]) || 0)) {
     if (update.advice) {
       const advice = data.advice || (data.advice = {});
       if (
@@ -511,6 +538,10 @@ export function mergeAdviceRuntimeUpdate(
     if (update.job) {
       const jobs = data.jobs || (data.jobs = {});
       jobs[code] = mergeRuntimeJob(jobs[code], update.job);
+    }
+    if (update.reviewJob) {
+      const jobs = data.reviewJobs || (data.reviewJobs = {});
+      jobs[code] = mergeRuntimeJob(jobs[code], update.reviewJob);
     }
     data.adviceLog = mergeRuntimeRecords(
       data.adviceLog,
@@ -560,7 +591,7 @@ export function mergeAdviceRuntimeUpdate(
     }
     data.runtimeAdviceAppliedAt = {
       ...cursors,
-      [code]: updatedAt,
+      [cursorKey]: updatedAt,
     };
   }
   data.runtimeAdviceObservedAt = {
@@ -623,7 +654,11 @@ export async function writeAdviceRuntimeUpdate(
   update,
   storage = defaultStorage,
 ) {
-  const path = adviceRuntimeUpdatePathOf(nick, update?.code);
+  const path = adviceRuntimeUpdatePathOf(
+    nick,
+    update?.code,
+    update?.role,
+  );
   if (!nick || !update?.code || path.endsWith('/.json')) {
     throw new Error('单股建议增量无效');
   }

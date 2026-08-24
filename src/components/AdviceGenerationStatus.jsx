@@ -36,7 +36,9 @@ export function useAdviceGeneration(code) {
       endpoint: String(running?.endpoint || ''),
     }
   }
-  return adviceJobState(getBatchState(), code)
+  const batch = getBatchState()
+  return adviceJobState(batch, code)
+    || adviceJobState(batch, code, { role: 'review' })
 }
 
 export default function AdviceGenerationStatus({
@@ -48,6 +50,7 @@ export default function AdviceGenerationStatus({
   const generation = useAdviceGeneration(code)
   const active = generation?.active || detailState?.loading
   if (!active) return null
+  const reviewing = generation?.role === 'review'
 
   const cancel = (event) => {
     event.stopPropagation()
@@ -84,7 +87,11 @@ export default function AdviceGenerationStatus({
           <div className="generation-flow-title">
             <span className="generation-live-dot" aria-hidden="true" />
             <div>
-              <b>{view.deepMode ? '深度研判进行中' : '快速建议生成中'}</b>
+              <b>
+                {reviewing
+                  ? '后台复核进行中'
+                  : view.deepMode ? '深度研判进行中' : '快速建议生成中'}
+              </b>
               <span>{view.phase}</span>
             </div>
           </div>
@@ -160,11 +167,18 @@ export default function AdviceGenerationStatus({
   return (
     <button type="button" className={`advice-generation-status ${variant}`} onClick={generation.cancelable ? cancel : undefined}
       disabled={!generation.cancelable}
-      aria-label={`取消${code}的 AI 操作建议生成`} title="点击取消本次生成">
+      aria-label={reviewing
+        ? `${code}的 AI 建议正在后台复核`
+        : `取消${code}的 AI 操作建议生成`}
+      title={reviewing ? '复核使用独立端点，不占用军师生成' : '点击取消本次生成'}>
       <Icon name="refresh" size={12} className="spin" />
       <span>{generation.label}</span>
       {generation.cloud && <em>云端持续运行</em>}
-      <b>{generation.cancelable ? '取消生成' : '取消中'}</b>
+      <b>
+        {reviewing
+          ? '独立复核'
+          : generation.cancelable ? '取消生成' : '取消中'}
+      </b>
     </button>
   )
 }

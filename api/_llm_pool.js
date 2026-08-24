@@ -18,10 +18,76 @@ const COOLDOWN_MS = 60 * 1000;   // 熔断冷却:连续失败达阈值后暂时�
 const FAIL_THRESHOLD = 3;        // 连续失败多少次触发熔断
 
 const health = new Map();        // id -> { inflight, fails, cooldownUntil }
+const roleCapacity = new Map();  // role -> { active, waiters[] }
 function h(id) {
   let s = health.get(id);
   if (!s) { s = { inflight: 0, fails: 0, cooldownUntil: 0 }; health.set(id, s); }
   return s;
+}
+
+function roleGate(role) {
+  let gate = roleCapacity.get(role);
+  if (!gate) {
+    gate = { active: 0, waiters: [] };
+    roleCapacity.set(role, gate);
+  }
+  return gate;
+}
+
+function releaseRoleCapacity(role) {
+  if (!role) return;
+  const gate = roleGate(role);
+  gate.active = Math.max(0, gate.active - 1);
+  while (gate.waiters.length) {
+    const next = gate.waiters[0];
+    if (gate.active >= next.limit) break;
+    gate.waiters.shift();
+    if (next.signal && next.onAbort) {
+      next.signal.removeEventListener('abort', next.onAbort);
+    }
+    gate.active++;
+    next.resolve();
+  }
+}
+
+function acquireRoleCapacity(role, limit, signal) {
+  const releaseOnce = () => {
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      releaseRoleCapacity(role);
+    };
+  };
+  if (!role || limit <= 0) return Promise.resolve(() => {});
+  const gate = roleGate(role);
+  if (gate.active < limit) {
+    gate.active++;
+    return Promise.resolve(releaseOnce());
+  }
+  return new Promise((resolve, reject) => {
+    const waiter = {
+      limit,
+      signal,
+      onAbort: null,
+      resolve: () => resolve(releaseOnce()),
+    };
+    if (signal) {
+      waiter.onAbort = () => {
+        const index = gate.waiters.indexOf(waiter);
+        if (index >= 0) gate.waiters.splice(index, 1);
+        const error = new Error('Aborted');
+        error.name = 'AbortError';
+        reject(error);
+      };
+      if (signal.aborted) {
+        waiter.onAbort();
+        return;
+      }
+      signal.addEventListener('abort', waiter.onAbort, { once: true });
+    }
+    gate.waiters.push(waiter);
+  });
 }
 
 // 从旧版运行时配置解析端点列表。config 来自 _llm_config.currentConfig()。
@@ -199,7 +265,12 @@ export function pickEndpoint(config, now = Date.now(), role) {
 }
 
 export function markStart(id) { h(id).inflight++; }
-export function markSuccess(id) { const s = h(id); s.inflight = Math.max(0, s.inflight - 1); s.fails = 0; s.cooldownUntil = 0; }
+export function markSuccess(id) {
+  const s = h(id);
+  s.inflight = Math.max(0, s.inflight - 1);
+  s.fails = 0;
+  s.cooldownUntil = 0;
+}
 export function markFailure(id, now = Date.now()) {
   const s = h(id);
   s.inflight = Math.max(0, s.inflight - 1);
@@ -215,6 +286,7 @@ export function markEndpointUnusable(id, now = Date.now(), releaseInflight = fal
 
 export function resetPoolHealthForTests() {
   health.clear();
+  roleCapacity.clear();
 }
 
 // 池化 fetch:自动选端点 + 失败故障转移到下一个可用端点(最多试 maxTries 个)。
@@ -228,6 +300,16 @@ export async function poolFetch(config, path, {
 } = {}, maxTries = 2) {
   const roleEps = endpointsForRole(config, role);
   if (!roleEps.length) return { resp: { __err: new Error('no LLM endpoint configured') }, endpoint: null };
+  let releaseRole = () => {};
+  try {
+    releaseRole = await acquireRoleCapacity(
+      role,
+      roleEps.length,
+      signal,
+    );
+  } catch (error) {
+    return { resp: { __err: error }, endpoint: null };
+  }
   const tried = new Set();
   let lastErr = null;
   const tries = Math.min(maxTries, roleEps.length);
@@ -273,11 +355,23 @@ export async function poolFetch(config, path, {
     const rateLimited = resp && !resp.__err && resp.status === 429;
     // 成功或客户端主动超时(abort)→ 直接返回(abort 不换端点:是我们自己掐的)
     if (!errored && resp.ok) {
-      if (deferSuccess) return { resp, endpoint: ep, deferred: true };
+      if (deferSuccess) {
+        return {
+          resp,
+          endpoint: ep,
+          deferred: true,
+          releaseRole,
+        };
+      }
       markSuccess(ep.id);
+      releaseRole();
       return { resp, endpoint: ep, deferred: false };
     }
-    if (isAbort) { markFailure(ep.id); return { resp, endpoint: ep }; }
+    if (isAbort) {
+      markFailure(ep.id);
+      releaseRole();
+      return { resp, endpoint: ep };
+    }
     // 可转移错误(网络错/5xx/429)→ 记失败,尝试下一个端点
     if (errored || bad5xx || rateLimited) {
       markFailure(ep.id);
@@ -286,8 +380,10 @@ export async function poolFetch(config, path, {
     }
     // 其它 4xx(如 400/401)→ 不重试(换端点也无意义),原样返回
     markFailure(ep.id);
+    releaseRole();
     return { resp, endpoint: ep };
   }
+  releaseRole();
   return { resp: { __err: lastErr || new Error('all endpoints failed') }, endpoint: null };
 }
 

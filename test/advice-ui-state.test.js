@@ -8,6 +8,7 @@ import {
   createAdviceCompletionPuller,
   mergeAdviceRefreshState,
   newestAdviceResult,
+  startAdvicePersistently,
   shouldShowAdviceResult,
   shouldApplyCloudBatch,
 } from '../shared/adviceUiState.js'
@@ -266,6 +267,59 @@ test('卡片可从批次进度识别排队、生成中和可取消状态', () =>
   assert.equal(queued.cancelable, true)
 })
 
+test('后台复核保持卡片可见但不占用或取消advisor生成', () => {
+  const batch = {
+    serverMode: true,
+    running: false,
+    items: [],
+    reviews: [{
+      code: '600000',
+      status: 'running',
+      phase: '正在核对最新失效信号',
+    }],
+  }
+
+  assert.equal(adviceJobState(batch, '600000'), null)
+  assert.deepEqual(
+    adviceJobState(batch, '600000', { role: 'review' }),
+    {
+      active: true,
+      status: 'running',
+      role: 'review',
+      stage: '',
+      label: '正在核对最新失效信号',
+      cancelable: false,
+      cloud: true,
+      deepMode: false,
+    },
+  )
+  assert.equal(
+    cloudAdviceLoadingState(batch, '600000').role,
+    'review',
+  )
+})
+
+test('服务端advisor容量已满时不回退到本地重复生成', async () => {
+  let localStarts = 0
+  const result = await startAdvicePersistently({
+    code: '600000',
+    mode: 'hold_advice',
+  }, {
+    canUseServer: () => true,
+    triggerServer: async () => ({
+      ok: false,
+      code: 'ADVISOR_CAPACITY_FULL',
+      busy: [{ code: '000001', name: '已运行任务' }],
+      concurrency: 1,
+    }),
+    startLocal: () => { localStarts++ },
+  })
+
+  assert.equal(result.status, 'full')
+  assert.equal(result.concurrency, 1)
+  assert.equal(localStarts, 0)
+})
+
 test('服务端建议完成后立即拉取一次正文且重复状态不重复拉取', async () => {
   const pulled = []
   const pullCompletedAdvice = createAdviceCompletionPuller(async () => {
@@ -285,4 +339,33 @@ test('服务端建议完成后立即拉取一次正文且重复状态不重复�
     items: [{ code: '600487', status: 'ok', progressAt: 200 }],
   }), false)
   assert.equal(pulled.length, 1)
+})
+
+test('独立review完成后同样触发一次建议正文增量拉取', async () => {
+  let pulls = 0
+  const pullCompletedAdvice = createAdviceCompletionPuller(async () => {
+    pulls++
+  })
+
+  assert.equal(await pullCompletedAdvice({
+    running: false,
+    items: [],
+    reviews: [{
+      code: '600519',
+      role: 'review',
+      status: 'running',
+      progressAt: 100,
+    }],
+  }), false)
+  assert.equal(await pullCompletedAdvice({
+    running: false,
+    items: [],
+    reviews: [{
+      code: '600519',
+      role: 'review',
+      status: 'ok',
+      progressAt: 200,
+    }],
+  }), true)
+  assert.equal(pulls, 1)
 })

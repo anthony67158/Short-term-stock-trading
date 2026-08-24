@@ -297,6 +297,64 @@ test('单股建议完成后通过独立OSS小对象立即进入跨设备增量�
   )
 })
 
+test('同股advisor与review增量使用独立OSS对象并分别合并', async () => {
+  const storage = fakeStorage()
+  const account = await writeAccount({
+    nick: '双队列账号',
+    pwHash: 'hash',
+    createdAt: 1,
+    clientRevision: 1,
+    data: {
+      plan: [],
+      holding: [{ code: '600519', name: '贵州茅台' }],
+      closed: [],
+      advice: {},
+      jobs: {},
+      reviewJobs: {},
+    },
+  }, storage, {
+    history: false,
+    verify: false,
+  })
+
+  await writeAdviceRuntimeUpdate(account.nick, {
+    schemaVersion: 'advice-runtime-update.v2',
+    code: '600519',
+    role: 'advisor',
+    jobKey: 'advisor:600519',
+    updatedAt: account.updatedAt + 10,
+    job: {
+      id: 'advisor-1',
+      code: '600519',
+      role: 'advisor',
+      status: 'done',
+      progressAt: account.updatedAt + 10,
+    },
+  }, storage)
+  await writeAdviceRuntimeUpdate(account.nick, {
+    schemaVersion: 'advice-runtime-update.v2',
+    code: '600519',
+    role: 'review',
+    jobKey: 'review:600519',
+    updatedAt: account.updatedAt + 20,
+    reviewJob: {
+      id: 'review-1',
+      code: '600519',
+      role: 'review',
+      status: 'done',
+      progressAt: account.updatedAt + 20,
+    },
+  }, storage)
+
+  const prefix = `accounts/${sha('u:双队列账号')}/runtime/advice/`
+  assert.equal(storage.objects.has(`${prefix}600519.json`), true)
+  assert.equal(storage.objects.has(`${prefix}review-600519.json`), true)
+
+  const hydrated = await readAccount(account.nick, storage)
+  assert.equal(hydrated.data.jobs['600519'].id, 'advisor-1')
+  assert.equal(hydrated.data.reviewJobs['600519'].id, 'review-1')
+})
+
 test('迟到上传的单股建议不能被较新的运行态游标永久跳过', async () => {
   const storage = fakeStorage()
   const account = await writeAccount({
@@ -1063,6 +1121,14 @@ test('客户端保存持仓时不能覆盖服务端 AI 任务队列和 Worker �
   const serverJobs = {
     '600000': { code: '600000', status: 'running', progressAt: 2000 },
   }
+  const serverReviewJobs = {
+    '600000': {
+      code: '600000',
+      role: 'review',
+      status: 'running',
+      progressAt: 2100,
+    },
+  }
   const portfolioAnalysisJob = {
     id: 'portfolio_2000',
     status: 'running',
@@ -1083,6 +1149,7 @@ test('客户端保存持仓时不能覆盖服务端 AI 任务队列和 Worker �
     data: {
       holding: [],
       jobs: serverJobs,
+      reviewJobs: serverReviewJobs,
       jobWorker: { id: 'worker-server', lockUntil: 9999 },
       activeAdviceBatchId: 'batch-server',
       adviceBatchCancellations: { 'batch-stopped': 3000 },
@@ -1098,6 +1165,7 @@ test('客户端保存持仓时不能覆盖服务端 AI 任务队列和 Worker �
   const result = applyClientAccountSave(account, {
     holding: [{ code: '000001', qty: 1 }],
     jobs: {},
+    reviewJobs: {},
     jobWorker: { id: '', lockUntil: 0 },
     activeAdviceBatchId: 'batch-client-old',
     adviceBatchCancellations: {},
@@ -1111,6 +1179,7 @@ test('客户端保存持仓时不能覆盖服务端 AI 任务队列和 Worker �
 
   assert.equal(result.ok, true)
   assert.deepEqual(account.data.jobs, serverJobs)
+  assert.deepEqual(account.data.reviewJobs, serverReviewJobs)
   assert.deepEqual(account.data.jobWorker, { id: 'worker-server', lockUntil: 9999 })
   assert.equal(account.data.activeAdviceBatchId, 'batch-server')
   assert.deepEqual(

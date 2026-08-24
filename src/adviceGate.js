@@ -8,9 +8,9 @@
 //   · 再点 C(端点已满)→ 返回 { status:'full', busy:[{code,name}] },由 UI 弹「端点已满 + 正在生成清单」,
 //     清单项可点击跳转到对应个股。
 //
-// 「正在生成」的口径 = 本地 runner 正在跑的 ∪ 服务端正在跑的(batchProgress.current):
+// 「占用 advisor」的口径 = 本地 runner 正在跑的 ∪ 服务端 advisorBusy:
 //   本机点击既可能走本地生成,也可能兜底走服务端;另一台设备的服务端生成也占用同一批端点。
-//   两者取并集,才是真实占用的端点数(跨端一致)。
+//   委员会进入 review 阶段后仍属于运行中任务，但不再占 advisor，不能阻塞新的主建议。
 import { startAdvice, getRunningList, isRunning } from './adviceRunner'
 import { getBatchState, getConcurrency } from './adviceBatch'
 import { canServerAdvice, triggerServerAdvice } from './serverAdvice'
@@ -28,7 +28,10 @@ export function generatingList() {
   try {
     const bs = getBatchState()
     const nameOf = new Map((bs.items || []).map((x) => [String(x.code), x.name || x.code]))
-    for (const c of (bs.current || [])) { const code = String(c); if (!map.has(code)) map.set(code, nameOf.get(code) || code) }
+    const busyCodes = Array.isArray(bs.advisorBusy)
+      ? bs.advisorBusy
+      : bs.current || []
+    for (const c of busyCodes) { const code = String(c); if (!map.has(code)) map.set(code, nameOf.get(code) || code) }
   } catch { /* ignore */ }
   return [...map.entries()].map(([code, name]) => ({ code, name }))
 }

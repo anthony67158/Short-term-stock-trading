@@ -1,22 +1,23 @@
 // ============ 服务端「AI 操作建议」持久任务表(生命周期 / 断点续跑 / 防重 / 取消)============
 // 背景/为什么存在:
 //   原先生成"任务"只活在一次浏览器 SSE 或一次 FC 请求里——页面切后台/FC 超时崩溃 → 任务丢失,
-//   无状态、无重试、无取消、点两次起两份。本模块把"任务"沉到账号 data.jobs(OSS 持久),
-//   服务端为唯一权威源;phone+PC 都汇入同一张表 → 跨端天然一致、并发上限天然共享。
+//   无状态、无重试、无取消、点两次起两份。本模块把"任务"沉到账号的角色队列(OSS 持久),
+//   服务端为唯一权威源;phone+PC 都汇入同一状态机 → 跨端天然一致、角色容量天然隔离。
 //
 // 数据结构(挂在 acc.data 下,不动用户的 plan/holding/closed/account):
-//   data.jobs      = { [code]: Job }         // 每 code 一条"当前任务"(天然防重:同 code 不并存两个活跃任务)
-//   data.jobWorker = { id, lockUntil }       // 单 Worker 锁:同一时刻只有一个 drainer,干净地全局限流
+//   data.jobs       = { [code]: Job }         // advisor:单股/一次生成
+//   data.reviewJobs = { [code]: Job }         // review:定时/Judge/后续复核
+//   data.jobWorker  = { id, lockUntil }       // 单协调器锁；执行容量按角色分别计算
 //
 // Job:
-//   { id, code, name, mode('hold_advice'|'buy_advice'),
+//   { id, role('advisor'|'review'), resourceRole, code, name, mode,
 //     status('queued'|'running'|'done'|'failed'|'canceled'),
 //     attempts, maxAttempts, at, startedAt, finishedAt, leaseUntil, error, source, cancelRequested }
 //
 // 生命周期:
 //   enqueue → queued → (worker 领取)running(带 lease)→ done | failed(可重试回 queued)| canceled
 //   断点续跑:running 但 leaseUntil < now(FC 崩了没续租)→ 视为孤儿 → 回收成 queued,下次 drain 重跑。
-//   防重:同 code 已有 queued/running 活跃任务 → enqueue 复用,不新建(除非 force 重生成)。
+//   防重:同 role + code 已有 queued/running 活跃任务 → enqueue 复用；advisor/review 互不覆盖。
 import { generationOptions } from '../shared/adviceBatchPolicy.js';
 
 export const CONCURRENCY = Number(process.env.ADVICE_CONCURRENCY || 3); // 全局并发上限【默认/回退】(运行时优先按承接 advisor 角色的端点数,见 cron_advice.js)
@@ -30,7 +31,61 @@ const EVENT_KEY_TTL_MS = 24 * 3600 * 1000;
 const EVENT_KEY_LIMIT = 1000;
 
 const ACTIVE = new Set(['queued', 'running']);
+const REVIEW_SOURCES = new Set([
+  'auto',
+  'cron',
+  'judge',
+  'review',
+  'scheduled',
+]);
 export const isActive = (j) => !!(j && ACTIVE.has(j.status));
+
+export function adviceJobRole(job = {}) {
+  if (job?.role === 'review') return 'review';
+  if (job?.role === 'advisor') return 'advisor';
+  if (
+    job?.mode === 'review'
+    || REVIEW_SOURCES.has(String(job?.source || ''))
+  ) return 'review';
+  return 'advisor';
+}
+
+function jobStamp(job) {
+  return Math.max(
+    Number(job?.progressAt) || 0,
+    Number(job?.finishedAt) || 0,
+    Number(job?.startedAt) || 0,
+    Number(job?.at) || 0,
+  );
+}
+
+function ensureJobTables(data) {
+  if (!data.jobs || typeof data.jobs !== 'object') data.jobs = {};
+  if (
+    !data.reviewJobs
+    || typeof data.reviewJobs !== 'object'
+    || Array.isArray(data.reviewJobs)
+  ) data.reviewJobs = {};
+  for (const [key, job] of Object.entries(data.jobs)) {
+    if (!job || adviceJobRole(job) !== 'review') continue;
+    const code = String(job.code || key);
+    const current = data.reviewJobs[code];
+    if (!current || jobStamp(job) >= jobStamp(current)) {
+      data.reviewJobs[code] = {
+        ...job,
+        role: 'review',
+        resourceRole: job.resourceRole || 'review',
+      };
+    }
+    delete data.jobs[key];
+  }
+  for (const job of Object.values(data.jobs)) {
+    if (job && !job.role) job.role = 'advisor';
+  }
+  for (const job of Object.values(data.reviewJobs)) {
+    if (job && !job.role) job.role = 'review';
+  }
+}
 
 function eventKeysOf(data) {
   if (
@@ -72,8 +127,51 @@ export function isOrphan(j, now = Date.now()) {
 
 // 取任务表(惰性初始化,不覆盖已有)
 export function jobsOf(data) {
-  if (!data.jobs || typeof data.jobs !== 'object') data.jobs = {};
+  ensureJobTables(data);
   return data.jobs;
+}
+
+export function reviewJobsOf(data) {
+  ensureJobTables(data);
+  return data.reviewJobs;
+}
+
+export function allAdviceJobs(data) {
+  return [
+    ...Object.values(jobsOf(data)),
+    ...Object.values(reviewJobsOf(data)),
+  ].filter(Boolean);
+}
+
+function jobTable(data, role) {
+  return role === 'review' ? reviewJobsOf(data) : jobsOf(data);
+}
+
+export function findAdviceJob(
+  data,
+  code,
+  {
+    role = '',
+    jobId = '',
+  } = {},
+) {
+  const targetCode = String(code || '');
+  if (role) {
+    const candidate = jobTable(data, role)[targetCode] || null;
+    if (!jobId) return candidate;
+    return String(candidate?.id || '') === String(jobId)
+      ? candidate
+      : null;
+  }
+  if (jobId) {
+    const found = allAdviceJobs(data).find((job) =>
+      String(job?.id || '') === String(jobId)
+    );
+    return found || null;
+  }
+  return jobsOf(data)[targetCode]
+    || reviewJobsOf(data)[targetCode]
+    || null;
 }
 
 function batchCancellationsOf(data) {
@@ -140,37 +238,51 @@ export function mergeAdviceBatchCancellations(
   }
   gcAdviceBatchCancellations(target, now);
   let canceled = 0;
-  for (const job of Object.values(jobsOf(target))) {
+  for (const job of allAdviceJobs(target)) {
     if (
       isActive(job)
       && job.batchId
       && isAdviceBatchCanceled(target, job.batchId, now)
-      && cancelJob(target, job.code, now, job.batchId)
+      && cancelJob(
+        target,
+        job.code,
+        now,
+        job.batchId,
+        job.id,
+        adviceJobRole(job),
+      )
     ) canceled++;
   }
   return canceled;
 }
 
 // 当前"占用槽位"的任务数:running 且租约未过期。孤儿不计(已可被回收)。
-export function runningCount(data, now = Date.now()) {
-  const jobs = jobsOf(data);
+export function runningCount(data, now = Date.now(), role = '') {
   let n = 0;
-  for (const j of Object.values(jobs)) if (j && j.status === 'running' && (j.leaseUntil || 0) >= now) n++;
+  for (const j of allAdviceJobs(data)) {
+    if (
+      j
+      && j.status === 'running'
+      && (j.leaseUntil || 0) >= now
+      && (!role || adviceJobRole(j) === role)
+    ) n++;
+  }
   return n;
 }
 
 // 回收孤儿:running 且租约过期 → 未达上限则回退 queued；达到上限则失败，避免无限从头重跑。
 export function reapOrphans(data, now = Date.now()) {
-  const jobs = jobsOf(data);
   let n = 0;
-  for (const j of Object.values(jobs)) {
+  for (const j of allAdviceJobs(data)) {
     if (isOrphan(j, now)) {
       if ((j.attempts || 0) >= (j.maxAttempts || MAX_ATTEMPTS)) {
         j.status = 'failed'; j.finishedAt = now; j.leaseUntil = 0;
+        j.resourceRole = 'none'; j.resourceUnits = 0;
         j.error = '任务连续中断，已停止自动重试';
         j.phase = '生成中断次数过多';
       } else {
         j.status = 'queued'; j.leaseUntil = 0; j.error = '(中断,自动续跑)';
+        j.resourceRole = adviceJobRole(j); j.resourceUnits = 1;
         j.phase = '任务中断，等待云端自动续跑';
       }
       j.progressAt = now; n++;
@@ -181,10 +293,11 @@ export function reapOrphans(data, now = Date.now()) {
 
 // 清理终态老任务(done/failed/canceled 且超过 TTL)
 export function gcJobs(data, now = Date.now()) {
-  const jobs = jobsOf(data);
-  for (const [code, j] of Object.entries(jobs)) {
-    if (!j) { delete jobs[code]; continue; }
-    if (!ACTIVE.has(j.status) && (now - (j.finishedAt || j.at || 0)) > JOB_TTL_MS) delete jobs[code];
+  for (const jobs of [jobsOf(data), reviewJobsOf(data)]) {
+    for (const [code, j] of Object.entries(jobs)) {
+      if (!j) { delete jobs[code]; continue; }
+      if (!ACTIVE.has(j.status) && (now - (j.finishedAt || j.at || 0)) > JOB_TTL_MS) delete jobs[code];
+    }
   }
   gcAdviceBatchCancellations(data, now);
   gcAdviceEventKeys(data, now);
@@ -195,7 +308,7 @@ export function gcJobs(data, now = Date.now()) {
 // mode 由调用方按持仓/自选判定。返回 { job, created(bool) }。
 export function enqueueJob(data, {
   code, name, mode, source = 'ondemand', batchId = '', deepMode = false,
-  batchRequest = false, trigger = null, idempotencyKey = '',
+  batchRequest = false, trigger = null, idempotencyKey = '', role = '',
 }, now = Date.now()) {
   if (
     batchRequest
@@ -209,7 +322,8 @@ export function enqueueJob(data, {
       deferred: false,
     };
   }
-  const jobs = jobsOf(data);
+  const resolvedRole = adviceJobRole({ role, source, mode });
+  const jobs = jobTable(data, resolvedRole);
   const cur = jobs[code];
   const eventKey = String(idempotencyKey || '').trim().slice(0, 180);
   if (
@@ -257,7 +371,10 @@ export function enqueueJob(data, {
   }
   const generation = generationOptions(deepMode);
   const job = {
-    id: `${code}_${now}`,
+    id: `${resolvedRole === 'review' ? 'review_' : ''}${code}_${now}`,
+    role: resolvedRole,
+    resourceRole: resolvedRole,
+    resourceUnits: 1,
     code, name: name || code, mode: mode || 'buy_advice',
     status: 'queued',
     attempts: 0, maxAttempts: generation.maxAttempts,
@@ -268,7 +385,10 @@ export function enqueueJob(data, {
     deepMode: generation.deepMode,
     batchRequest: !!batchRequest,
     ...(trigger && typeof trigger === 'object' ? { trigger } : {}),
-    stage: 'queued', phase: '排队等待云端生成',
+    stage: 'queued',
+    phase: resolvedRole === 'review'
+      ? '排队等待云端复核'
+      : '排队等待云端生成',
     sources: [], reasoning: '', quant: null, model: '', endpoint: '', progressAt: now,
   };
   jobs[code] = job;
@@ -276,12 +396,19 @@ export function enqueueJob(data, {
 }
 
 // 领取一只 queued 任务 → running,占用租约。调用前须已确认有空槽。
-export function leaseJob(data, code, now = Date.now()) {
-  const jobs = jobsOf(data);
-  const j = jobs[code];
+export function leaseJob(
+  data,
+  code,
+  now = Date.now(),
+  role = '',
+  jobId = '',
+) {
+  const j = findAdviceJob(data, code, { role, jobId });
   if (!j || j.status !== 'queued') return null;
   j.status = 'running';
   j.stage = 'preparing';
+  j.resourceRole = adviceJobRole(j);
+  j.resourceUnits = 1;
   j.attempts = (j.attempts || 0) + 1;
   j.startedAt = j.startedAt || now;
   j.leaseUntil = now + LEASE_MS;
@@ -292,8 +419,14 @@ export function leaseJob(data, code, now = Date.now()) {
 }
 
 // 续租(drainer 周期调用,防止长任务被误判孤儿)
-export function renewLease(data, code, now = Date.now()) {
-  const j = jobsOf(data)[code];
+export function renewLease(
+  data,
+  code,
+  now = Date.now(),
+  role = '',
+  jobId = '',
+) {
+  const j = findAdviceJob(data, code, { role, jobId });
   if (j && j.status === 'running') j.leaseUntil = now + LEASE_MS;
 }
 
@@ -307,8 +440,15 @@ function visibleChineseReasoning(value) {
   return `${text.slice(0, 800)}\n…\n${text.slice(-5197)}`
 }
 
-export function updateJobProgress(data, code, patch = {}, now = Date.now()) {
-  const job = jobsOf(data)[code]
+export function updateJobProgress(
+  data,
+  code,
+  patch = {},
+  now = Date.now(),
+  role = '',
+  jobId = '',
+) {
+  const job = findAdviceJob(data, code, { role, jobId })
   if (!job) return null
   if (['done', 'failed', 'canceled'].includes(job.status)) return job
   if (patch.stage != null) {
@@ -329,6 +469,12 @@ export function updateJobProgress(data, code, patch = {}, now = Date.now()) {
   }
   if (patch.model != null) job.model = String(patch.model).slice(0, 100)
   if (patch.endpoint != null) job.endpoint = String(patch.endpoint).slice(0, 120)
+  if (['advisor', 'review', 'none'].includes(patch.resourceRole)) {
+    job.resourceRole = patch.resourceRole
+  }
+  if (Number.isFinite(Number(patch.resourceUnits))) {
+    job.resourceUnits = Math.max(0, Number(patch.resourceUnits))
+  }
   job.progressAt = now
   return job
 }
@@ -340,9 +486,11 @@ export function completeJob(
   {
     evidenceAsOf = 0,
     planRevision = 0,
+    role = '',
+    jobId = '',
   } = {},
 ) {
-  const j = jobsOf(data)[code];
+  const j = findAdviceJob(data, code, { role, jobId });
   if (!j) return { status: 'missing', publish: false, jobId: '' };
   rememberEventKey(data, j.idempotencyKey, now);
   const pendingTrigger = j.pendingTrigger;
@@ -367,6 +515,8 @@ export function completeJob(
       j.leaseUntil = 0;
       j.error = '';
       j.stage = 'done';
+      j.resourceRole = 'none';
+      j.resourceUnits = 0;
       j.phase = '生成完成';
       j.progressAt = now;
       return {
@@ -386,6 +536,9 @@ export function completeJob(
       leaseUntil: 0,
       error: '',
       source: 'judge',
+      role: 'review',
+      resourceRole: 'review',
+      resourceUnits: 1,
       cancelRequested: false,
       batchId: '',
       deepMode: false,
@@ -409,6 +562,7 @@ export function completeJob(
     };
   }
   j.status = 'done'; j.stage = 'done'; j.finishedAt = now; j.leaseUntil = 0; j.error = '';
+  j.resourceRole = 'none'; j.resourceUnits = 0;
   j.phase = '生成完成'; j.progressAt = now;
   return {
     status: 'done',
@@ -418,14 +572,21 @@ export function completeJob(
 }
 
 // 失败:还有重试次数 → 回 queued(下次 drain 重跑);否则 failed 终态。
-export function failJob(data, code, err, now = Date.now()) {
-  const j = jobsOf(data)[code];
+export function failJob(
+  data,
+  code,
+  err,
+  now = Date.now(),
+  role = '',
+  jobId = '',
+) {
+  const j = findAdviceJob(data, code, { role, jobId });
   if (!j) return;
   j.error = String(err || '生成失败');
   if ((j.attempts || 0) < (j.maxAttempts || MAX_ATTEMPTS)) {
-    j.status = 'queued'; j.stage = 'retrying'; j.leaseUntil = 0; j.phase = `生成失败，准备第${(j.attempts || 0) + 1}次重试`; j.progressAt = now;
+    j.status = 'queued'; j.stage = 'retrying'; j.leaseUntil = 0; j.resourceRole = adviceJobRole(j); j.resourceUnits = 1; j.phase = `生成失败，准备第${(j.attempts || 0) + 1}次重试`; j.progressAt = now;
   } else {
-    j.status = 'failed'; j.stage = 'failed'; j.finishedAt = now; j.leaseUntil = 0; j.phase = '生成失败'; j.progressAt = now;
+    j.status = 'failed'; j.stage = 'failed'; j.finishedAt = now; j.leaseUntil = 0; j.resourceRole = 'none'; j.resourceUnits = 0; j.phase = '生成失败'; j.progressAt = now;
   }
 }
 
@@ -436,8 +597,9 @@ export function cancelJob(
   now = Date.now(),
   batchId = '',
   jobId = '',
+  role = '',
 ) {
-  const j = jobsOf(data)[code];
+  const j = findAdviceJob(data, code, { role, jobId });
   if (!j || !isActive(j)) return false;
   if (batchId && j.batchId !== batchId) return false;
   if (jobId && j.id !== jobId) return false;
@@ -445,6 +607,8 @@ export function cancelJob(
   j.status = 'canceled';
   j.finishedAt = now;
   j.leaseUntil = 0;
+  j.resourceRole = 'none';
+  j.resourceUnits = 0;
   j.phase = '已取消生成';
   j.progressAt = now;
   return true;
@@ -499,8 +663,7 @@ export function workerHeldByOther(data, myId, now = Date.now()) {
 
 // 有无可做的活儿(queued 或可回收的孤儿)
 export function hasPendingWork(data, now = Date.now()) {
-  const jobs = jobsOf(data);
-  for (const j of Object.values(jobs)) {
+  for (const j of allAdviceJobs(data)) {
     if (j && (j.status === 'queued' || isOrphan(j, now))) return true;
   }
   return false;
@@ -516,29 +679,6 @@ export function needsWorkerDispatch(data, now = Date.now()) {
   );
 }
 
-export function hasActiveManualBatch(data) {
-  return Object.values(jobsOf(data)).some((job) =>
-    isActive(job)
-    && job.source === 'ondemand'
-    && job.batchRequest === true
-  );
-}
-
-export function suspendAutomaticJobsForManualBatch(
-  data,
-  now = Date.now(),
-) {
-  let suspended = 0
-  for (const job of Object.values(jobsOf(data))) {
-    if (
-      job?.source === 'auto'
-      && isActive(job)
-      && cancelJob(data, job.code, now)
-    ) suspended++
-  }
-  return suspended
-}
-
 export function compareAdviceJobs(left, right) {
   const priority = (job) => {
     if (job?.source === 'judge') return 0
@@ -550,6 +690,118 @@ export function compareAdviceJobs(left, right) {
     || (Number(left?.at) || 0) - (Number(right?.at) || 0)
 }
 
+function resourceRoleOf(job) {
+  const explicit = String(job?.resourceRole || '');
+  if (['advisor', 'review', 'none'].includes(explicit)) return explicit;
+  return adviceJobRole(job);
+}
+
+function resourceUnitsOf(job) {
+  const units = Number(job?.resourceUnits);
+  return Number.isFinite(units) && units >= 0 ? units : 1;
+}
+
+export function resourcePatchForJobProgress(
+  job,
+  stage,
+  reviewCapacity = 0,
+) {
+  if (adviceJobRole(job) === 'review') {
+    return { resourceRole: 'review', resourceUnits: 1 };
+  }
+  if (stage === 'council') {
+    return {
+      resourceRole: 'review',
+      resourceUnits: Math.max(0, Number(reviewCapacity) || 0),
+    };
+  }
+  if (stage === 'finalize') {
+    return { resourceRole: 'none', resourceUnits: 0 };
+  }
+  if (stage) {
+    return { resourceRole: 'advisor', resourceUnits: 1 };
+  }
+  return {};
+}
+
+export function roleCapacityUsage(
+  data,
+  role,
+  now = Date.now(),
+) {
+  return allAdviceJobs(data).reduce((total, job) => {
+    if (
+      job?.status !== 'running'
+      || (job.leaseUntil || 0) < now
+      || resourceRoleOf(job) !== role
+    ) return total;
+    return total + resourceUnitsOf(job);
+  }, 0);
+}
+
+export function selectStartableJobs(
+  data,
+  capacities = {},
+  inflightJobIds = new Set(),
+  now = Date.now(),
+) {
+  const used = {
+    advisor: roleCapacityUsage(data, 'advisor', now),
+    review: roleCapacityUsage(data, 'review', now),
+  };
+  const limits = {
+    advisor: Math.max(0, Number(capacities.advisor) || 0),
+    review: Math.max(0, Number(capacities.review) || 0),
+  };
+  const selected = [];
+  for (const job of allAdviceJobs(data)
+    .filter((item) =>
+      item?.status === 'queued'
+      && !item.cancelRequested
+      && !inflightJobIds.has(String(item.id || ''))
+    )
+    .sort(compareAdviceJobs)) {
+    const role = adviceJobRole(job);
+    if (used[role] >= limits[role]) continue;
+    selected.push(job);
+    used[role] += 1;
+  }
+  return selected;
+}
+
+export function advisorAdmission(
+  data,
+  codes,
+  capacity,
+  now = Date.now(),
+) {
+  const requested = new Set((codes || []).map(String));
+  const active = allAdviceJobs(data).filter((job) =>
+    job?.status === 'running'
+    && adviceJobRole(job) === 'advisor'
+    && resourceRoleOf(job) === 'advisor'
+    && !isOrphan(job, now)
+  );
+  const hasNewWork = [...requested].some((code) =>
+    !active.some((job) => String(job.code) === code)
+  );
+  const limit = Math.max(1, Number(capacity) || 1);
+  return {
+    accepted: !hasNewWork || roleCapacityUsage(
+      data,
+      'advisor',
+      now,
+    ) < limit,
+    running: roleCapacityUsage(data, 'advisor', now),
+    capacity: limit,
+    busy: active.map((job) => ({
+      code: String(job.code || ''),
+      name: String(job.name || job.code || ''),
+      jobId: String(job.id || ''),
+    })),
+  };
+}
+
 export function shouldContinueAdviceWorker(data, now = Date.now()) {
   return hasPendingWork(data, now)
 }
@@ -558,14 +810,17 @@ export function shouldContinueAdviceWorker(data, now = Date.now()) {
 // running/total/done/ok/fail/skipped/items([{code,name,status}])/startedAt/finishedAt/at/source/concurrency
 // concurrency:本轮生效的并发上限(运行时由承接 advisor 角色的端点数决定;前端据此做单股触发门控)。
 export function jobsToProgress(data, now = Date.now(), concurrency = CONCURRENCY) {
-  const jobs = jobsOf(data);
-  const arr = Object.values(jobs).filter(Boolean);
+  const advisorJobs = Object.values(jobsOf(data)).filter(Boolean);
+  const reviewJobs = Object.values(reviewJobsOf(data)).filter(Boolean);
   // 当前批次的终态 + 所有跨批次活跃任务都必须可见。否则连续点击不同个股时，
   // activeAdviceBatchId 会让先启动的任务从前端消失，看起来像被后一次点击取消。
   const activeBatchId = String(data.activeAdviceBatchId || '');
   const recent = activeBatchId
-    ? arr.filter((j) => j.batchId === activeBatchId || isActive(j))
-    : arr.filter((j) => (now - (j.at || 0)) < 6 * 3600 * 1000);
+    ? advisorJobs.filter((j) => j.batchId === activeBatchId || isActive(j))
+    : advisorJobs.filter((j) => (now - (j.at || 0)) < 6 * 3600 * 1000);
+  const recentReviews = reviewJobs.filter((job) =>
+    isActive(job) || (now - (job.at || 0)) < 6 * 3600 * 1000
+  );
   const mapStatus = (job) => {
     if (job.cancelRequested && job.status === 'running') return 'canceling';
     return job.status === 'done' ? 'ok'
@@ -573,37 +828,58 @@ export function jobsToProgress(data, now = Date.now(), concurrency = CONCURRENCY
         : job.status === 'canceled' ? 'skipped'
           : job.status;
   };
+  const mapItem = (j) => ({
+    code: j.code,
+    jobId: j.id || '',
+    batchId: j.batchId || '',
+    name: j.name,
+    role: adviceJobRole(j),
+    source: j.source || '',
+    status: mapStatus(j),
+    error: j.error || '',
+    warning: j.dailyReportWarning || '',
+    stage: j.stage || '',
+    phase: j.phase || '',
+    sources: Array.isArray(j.sources) ? j.sources : [],
+    reasoning: j.reasoning || '',
+    quant: j.quant || null,
+    model: j.model || '',
+    endpoint: j.endpoint || '',
+    progressAt: j.progressAt || j.at || 0,
+    attempts: j.attempts || 0,
+    deepMode: !!j.deepMode,
+    batchRequest: !!j.batchRequest,
+  });
   const items = recent
     .sort((a, b) => (a.at || 0) - (b.at || 0))
-    .map((j) => ({
-      code: j.code,
-      jobId: j.id || '',
-      batchId: j.batchId || '',
-      name: j.name,
-      status: mapStatus(j),
-      error: j.error || '',
-      warning: j.dailyReportWarning || '',
-      stage: j.stage || '',
-      phase: j.phase || '',
-      sources: Array.isArray(j.sources) ? j.sources : [],
-      reasoning: j.reasoning || '',
-      quant: j.quant || null,
-      model: j.model || '',
-      endpoint: j.endpoint || '',
-      progressAt: j.progressAt || j.at || 0,
-      attempts: j.attempts || 0,
-      deepMode: !!j.deepMode,
-      batchRequest: !!j.batchRequest,
-    }));
+    .map(mapItem);
+  const reviews = recentReviews
+    .sort((a, b) => (a.at || 0) - (b.at || 0))
+    .map(mapItem);
   const ok = recent.filter((j) => j.status === 'done').length;
   const fail = recent.filter((j) => j.status === 'failed').length;
   const skipped = recent.filter((j) => j.status === 'canceled').length;
   const active = recent.filter((j) => isActive(j));
   const current = recent.filter((j) => j.status === 'running').map((j) => j.code);
+  const advisorBusy = recent
+    .filter((job) =>
+      job.status === 'running'
+      && resourceRoleOf(job) === 'advisor'
+    )
+    .map((job) => job.code);
   const total = recent.length;
   const done = ok + fail + skipped;
   const snapshotAt = recent.reduce(
     (latest, j) => Math.max(latest, j.progressAt || 0, j.finishedAt || 0, j.at || 0),
+    0,
+  );
+  const reviewSnapshotAt = recentReviews.reduce(
+    (latest, job) => Math.max(
+      latest,
+      job.progressAt || 0,
+      job.finishedAt || 0,
+      job.at || 0,
+    ),
     0,
   );
   const finishedAt = active.length
@@ -620,10 +896,16 @@ export function jobsToProgress(data, now = Date.now(), concurrency = CONCURRENCY
     running: active.length > 0,
     total, done, ok, fail, skipped,
     current,
+    advisorBusy,
     items,
+    reviewRunning: recentReviews.some((job) => job.status === 'running'),
+    reviewCurrent: recentReviews
+      .filter((job) => job.status === 'running')
+      .map((job) => job.code),
+    reviews,
     startedAt: recent.reduce((m, j) => Math.min(m || Infinity, j.at || Infinity), 0) || 0,
     finishedAt: finishedAt || snapshotAt,
-    at: snapshotAt,
+    at: Math.max(snapshotAt, reviewSnapshotAt),
     source: 'server',
     batchId: progressBatchId,
     batchCanceled: isAdviceBatchCanceled(data, progressBatchId, now),

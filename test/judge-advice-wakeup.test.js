@@ -78,7 +78,7 @@ test('Judge判定计划失效时才排入一次军师复核', () => {
   assert.equal(first.created, true)
   assert.equal(replay.queued, false)
   assert.equal(replay.reason, 'duplicate-event')
-  assert.equal(data.jobs['600000'].source, 'judge')
+  assert.equal(data.reviewJobs['600000'].source, 'judge')
 })
 
 test('旧计划的Judge结果不得唤醒或改写当前军师建议', () => {
@@ -140,7 +140,7 @@ test('单股关闭持续复核后云端不再评估军师派生预警但保留�
   assert.deepEqual(active.map((alert) => alert.id), ['manual'])
 })
 
-test('军师生成期间到达的Judge事件在当前任务完成后自动续跑', () => {
+test('军师生成期间到达的Judge事件进入独立复核队列', () => {
   const data = {
     holding: [{ id: 'h1', code: '600000', qty: 2 }],
     advice: {
@@ -157,7 +157,7 @@ test('军师生成期间到达的Judge事件在当前任务完成后自动续跑
   }, 1000)
   leaseJob(data, '600000', 1100)
 
-  const deferred = queueAdviceReviewForVerdict(data, {
+  const review = queueAdviceReviewForVerdict(data, {
     id: 'during-run',
     code: '600000',
     judgeContext: { planId: 'plan-1', planRevision: 1 },
@@ -165,13 +165,15 @@ test('军师生成期间到达的Judge事件在当前任务完成后自动续跑
     decision: 'invalid',
     reason: '原逻辑失效',
   }, 1200)
-  completeJob(data, '600000', 1300)
+  completeJob(data, '600000', 1300, { role: 'advisor' })
 
-  assert.equal(deferred.deferred, true)
-  assert.equal(data.jobs['600000'].status, 'queued')
-  assert.equal(data.jobs['600000'].source, 'judge')
-  assert.equal(data.jobs['600000'].trigger.decision, 'invalid')
-  assert.equal(data.jobs['600000'].at, 1200)
+  assert.equal(review.created, true)
+  assert.equal(review.deferred, false)
+  assert.equal(data.jobs['600000'].status, 'done')
+  assert.equal(data.reviewJobs['600000'].status, 'queued')
+  assert.equal(data.reviewJobs['600000'].source, 'judge')
+  assert.equal(data.reviewJobs['600000'].trigger.decision, 'invalid')
+  assert.equal(data.reviewJobs['600000'].at, 1200)
 })
 
 test('单股关闭持续复核后执行确认不再唤醒军师', () => {
