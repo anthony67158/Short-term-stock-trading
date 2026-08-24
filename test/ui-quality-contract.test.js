@@ -860,7 +860,7 @@ test('移动端个股详情铺满视口且上下结构共用同一底色', () =>
   )
   assert.match(
     precision,
-    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.modal-mask:has\(\.detail-panel\)\s*{[^}]*padding:\s*0[^}]*background:\s*var\(--color-paper\)/s,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.modal-mask:has\(\.detail-panel\)\s*{[^}]*padding:\s*0[^}]*background:\s*var\(--color-paper-2\)/s,
   )
   assert.match(
     precision,
@@ -873,6 +873,10 @@ test('移动端个股详情铺满视口且上下结构共用同一底色', () =>
   assert.match(
     precision,
     /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.detail-panel \.detail-kline-head\s*{[^}]*flex-wrap:\s*nowrap[^}]*overflow-x:\s*auto/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.detail-panel \.detail-footbar\s*{[^}]*padding-bottom:\s*max\(var\(--space-sm\),\s*env\(safe-area-inset-bottom\)\)[^}]*background:\s*var\(--color-paper-2\)/s,
   )
 })
 

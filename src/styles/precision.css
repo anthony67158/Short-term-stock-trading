@@ -10626,9 +10626,10 @@ button.acct-item {
     overflow-x: clip;
   }
 
+  html[data-theme="light"] .modal-mask:has(.detail-panel),
   .modal-mask:has(.detail-panel) {
     padding: 0;
-    background: var(--color-paper);
+    background: var(--color-paper-2);
   }
 
   .modal-mask:has(.detail-panel) .detail-panel {
@@ -10684,7 +10685,7 @@ button.acct-item {
 
   .detail-panel .detail-footbar {
     padding-bottom: max(var(--space-sm), env(safe-area-inset-bottom));
-    background: transparent;
+    background: var(--color-paper-2);
   }
 
   .modal-mask,
