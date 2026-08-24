@@ -2345,10 +2345,15 @@ export const planStore = {
   //   alertSyncedPrice(记在候选上): 上次自动同步过的买价 —— 相同价不重复写,用户删掉也不会被反复自动加回;
   //   AI 买价变化时(≠ alertSyncedPrice)才会重新同步/重新武装。
   autoSyncCandAlert(code, name, buyPrice, advice = null) {
-    if (buyPrice == null || isNaN(buyPrice)) return
-    if (
+    const adviceNotReady = (
       advice?.decisionPlan?.schemaVersion === 'decision-plan.v2'
       && advice.decisionPlan.actionability !== 'READY'
+    )
+    if (
+      !advice
+      || buyPrice == null
+      || isNaN(buyPrice)
+      || adviceNotReady
     ) {
       this.clearCandBuyAlert(code)
       return

@@ -169,6 +169,43 @@ test('研究级买入计划不会生成可执行买点预警', () => {
   assert.equal(planStore.get().plan[0].alertSyncedPrice ?? null, null)
 })
 
+test('当前建议缺失时撤销系统买点预警但保留手工预警', () => {
+  planStore.setData({
+    plan: [{
+      code: '600556',
+      name: '天下秀',
+      alertSyncedPrice: 4.477,
+    }],
+    holding: [],
+    closed: [],
+    alerts: [
+      {
+        id: 'auto-buy',
+        code: '600556',
+        candCode: '600556',
+        type: 'price',
+        op: 'lte',
+        value: 4.477,
+      },
+      {
+        id: 'manual-price',
+        code: '600556',
+        type: 'price',
+        op: 'lte',
+        value: 4.2,
+      },
+    ],
+  })
+
+  planStore.autoSyncCandAlert('600556', '天下秀', null, null)
+
+  assert.deepEqual(
+    planStore.get().alerts.map((alert) => alert.id),
+    ['manual-price'],
+  )
+  assert.equal(planStore.get().plan[0].alertSyncedPrice, null)
+})
+
 test('做T卖腿同样受今日可卖数量约束', () => {
   const now = Date.now()
   planStore.setData({

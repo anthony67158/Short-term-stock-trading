@@ -649,6 +649,7 @@ function CandDecision({ p, q }) {
   const generation = useAdviceGeneration(p.code)
   const entry = getAdvice(p.code, 'buy_advice')
   const advice = entry?.advice || null
+  const hasAdvice = !!advice
   const baseView = advice
     ? buildAdviceActionView(advice, { mode: 'buy_advice' })
     : null
@@ -658,9 +659,10 @@ function CandDecision({ p, q }) {
   const aiQty = actionable
     ? actionHands(advice?.planQtyNum ?? advice?.planQty)
     : null
+  const hasSystemBuyAlert = planStore.get().alerts
+    .some((alert) => alert.candCode === p.code)
 
   useEffect(() => {
-    if (!advice) return
     const patch = {}
     if (!p.targetManual) {
       const nextPrice = actionable ? aiPrice : null
@@ -671,13 +673,21 @@ function CandDecision({ p, q }) {
       if ((p.buyQty ?? null) !== nextQty) patch.buyQty = nextQty
     }
     if (Object.keys(patch).length) planStore.setCandPlan(p.code, patch)
-    if (actionable && aiPrice != null) {
-      planStore.autoSyncCandAlert(p.code, p.name, aiPrice, advice)
-    } else {
-      planStore.clearCandBuyAlert(p.code)
-    }
+    planStore.autoSyncCandAlert(p.code, p.name, aiPrice, advice)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entry?.at, actionable, aiPrice, aiQty, p.targetManual, p.qtyManual])
+  }, [
+    entry?.at,
+    hasAdvice,
+    actionable,
+    aiPrice,
+    aiQty,
+    p.targetManual,
+    p.qtyManual,
+    p.targetPrice,
+    p.buyQty,
+    p.alertSyncedPrice,
+    hasSystemBuyAlert,
+  ])
 
   const target = p.targetPrice != null
     ? Number(p.targetPrice)
@@ -801,7 +811,8 @@ function CandidateActions({ p, q, onBuy, onAlert, onDelete }) {
         planQty: p.buyQty ?? entry.advice.planQty,
       }, { mode: 'buy_advice' })
     : baseView
-  const actionable = !view || view.kind === 'buy'
+  const actionable = !view
+    || (view.kind === 'buy' && view.actionable !== false)
   return (
     <div className={'pc-actions' + (!actionable ? ' with-review' : '')}>
       {actionable ? (
@@ -938,6 +949,15 @@ function PlanList({ book, quote, stockTags, batchSel }) {
         <CandDecision p={p} q={q} />
         {/* 买点预警提示：跟随 AI 建议买入价自动设的「到价 ≤ 买入价」预警，到点即提醒买入 */}
         {(() => {
+          const currentAdvice = getAdvice(p.code, 'buy_advice')?.advice
+          const currentView = currentAdvice
+            ? buildAdviceActionView(currentAdvice, {
+                mode: 'buy_advice',
+              })
+            : null
+          const canExecuteBuy = currentView?.kind === 'buy'
+            && currentView.actionable !== false
+          if (!canExecuteBuy) return null
           const bpa = (book.alerts || []).find((a) => a.candCode === p.code)
           if (!bpa) return null
           const tone = !bpa.enabled ? ' off' : (q && q.price != null && q.price <= bpa.value ? ' hot' : '')
