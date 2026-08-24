@@ -245,6 +245,14 @@ test('持仓交易计划使用独立浮层且不再展开拉长卡片', () => {
     precision,
     /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.holding-plan-mask,\s*[\s\S]*?\.plan-edit-mask\s*{[^}]*align-items:\s*flex-end[^}]*justify-content:\s*flex-end/s,
   )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.holding-plan-dialog,\s*[\s\S]*?\.plan-edit-dialog\s*{[^}]*position:\s*absolute[^}]*inset-inline:\s*0[^}]*bottom:\s*0/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.holding-plan-footer\s*{[^}]*padding-bottom:\s*max\(var\(--space-sm\),\s*env\(safe-area-inset-bottom\)\)/s,
+  )
 })
 
 test('面板标题、空态与账户标签只绘制单层边界', () => {
@@ -864,7 +872,7 @@ test('移动端个股详情填满视口遮罩且上下结构共用同一底色',
   )
   assert.match(
     precision,
-    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.modal-mask:has\(\.detail-panel\) \.detail-panel\s*{[^}]*height:\s*100%[^}]*max-height:\s*none[^}]*border-radius:\s*0/s,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.modal-mask:has\(\.detail-panel\) \.detail-panel\s*{[^}]*position:\s*absolute[^}]*inset:\s*0[^}]*width:\s*auto[^}]*height:\s*auto[^}]*max-height:\s*none[^}]*border-radius:\s*0/s,
   )
   assert.match(
     precision,

@@ -10633,8 +10633,10 @@ button.acct-item {
   }
 
   .modal-mask:has(.detail-panel) .detail-panel {
-    width: 100%;
-    height: 100%;
+    position: absolute;
+    inset: 0;
+    width: auto;
+    height: auto;
     max-width: none;
     max-height: none;
     margin: 0;
@@ -11607,6 +11609,9 @@ button.acct-item {
 
   .holding-plan-dialog,
   .plan-edit-dialog {
+    position: absolute;
+    inset-inline: 0;
+    bottom: 0;
     width: 100%;
     max-height: calc(88dvh - env(safe-area-inset-top));
     border-radius:
@@ -11620,6 +11625,11 @@ button.acct-item {
   .holding-plan-head,
   .holding-plan-footer {
     padding-inline: var(--space-sm);
+  }
+
+  .holding-plan-footer {
+    padding-bottom:
+      max(var(--space-sm), env(safe-area-inset-bottom));
   }
 
   .holding-plan-boundaries > section {
@@ -12793,5 +12803,21 @@ body.overlay-scroll-locked {
 
   html.edge-back-active body::after {
     display: none;
+  }
+}
+
+/* Mobile overlays own their viewport edge after all shared surface rules. */
+@media (max-width: 720px) {
+  .modal-mask:has(.detail-panel) .detail-panel {
+    border-radius: 0;
+  }
+
+  .holding-plan-dialog,
+  .plan-edit-dialog {
+    border-radius:
+      var(--radius-card)
+      var(--radius-card)
+      0
+      0;
   }
 }
