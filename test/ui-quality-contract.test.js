@@ -849,7 +849,7 @@ test('移动端面板标题和说明采用单行省略而不是挤压操作按�
   )
 })
 
-test('移动端个股详情铺满视口且上下结构共用同一底色', () => {
+test('移动端个股详情填满视口遮罩且上下结构共用同一底色', () => {
   assert.match(
     precision,
     /html\[data-theme="light"\] \.detail-panel\s*{[^}]*background:\s*var\(--color-paper-2\)/s,
@@ -864,7 +864,7 @@ test('移动端个股详情铺满视口且上下结构共用同一底色', () =>
   )
   assert.match(
     precision,
-    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.modal-mask:has\(\.detail-panel\) \.detail-panel\s*{[^}]*height:\s*100dvh[^}]*max-height:\s*100dvh[^}]*border-radius:\s*0/s,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.modal-mask:has\(\.detail-panel\) \.detail-panel\s*{[^}]*height:\s*100%[^}]*max-height:\s*none[^}]*border-radius:\s*0/s,
   )
   assert.match(
     precision,
