@@ -31,6 +31,10 @@ import {
   mergeExecutionPlans,
 } from '../shared/executionPlanStore.js';
 import {
+  mergeStockNotesByTimestamp,
+  stockNotesAfter,
+} from '../shared/stockNotes.js';
+import {
   createAccountSessionToken,
   verifyAccountSessionToken,
 } from './_account_session.js';
@@ -127,6 +131,7 @@ export function accountSyncDelta(data = {}, since = 0) {
     executionPlans,
     executionAttributions,
     reviews: reviewsAfter(data.reviews, after),
+    stockNotes: stockNotesAfter(data.stockNotes, after),
     // 预警只有 166 KiB，整组返回可覆盖旧记录缺少 updatedAt 的兼容场景。
     alerts: Array.isArray(data.alerts) ? data.alerts : [],
     batchProgress: data.batchProgress || null,
@@ -293,6 +298,10 @@ export function applyClientAccountSave(
   // 不能用客户端快照把服务端已绑定的设备订阅清空。
   if (Array.isArray(prev.pushSubs)) merged.pushSubs = prev.pushSubs;
   merged.reviews = mergeReviewsByTimestamp(incoming.reviews, prev.reviews);
+  merged.stockNotes = mergeStockNotesByTimestamp(
+    incoming.stockNotes,
+    prev.stockNotes,
+  );
   if (prev.reviewAuto && typeof prev.reviewAuto === 'object') {
     merged.reviewAuto = prev.reviewAuto;
   }

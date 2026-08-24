@@ -64,6 +64,12 @@ import {
   setAdviceReviewEnabled as withAdviceReviewEnabled,
 } from '../shared/adviceReviewPolicy.js'
 import {
+  mergeStockNotesByTimestamp,
+  normalizeStockNoteText,
+  normalizeStockNotes,
+  stockNoteText,
+} from '../shared/stockNotes.js'
+import {
   AUTO_CONFIG_UPDATED_AT,
   AUTO_HOLD_CODES,
   AUTO_WATCH_CODES,
@@ -276,6 +282,7 @@ let state = {
   decisionLog: [],
   executionPlans: [],
   executionAttributions: [],
+  stockNotes: {},
   settings: {},
 }
 const listeners = new Set()
@@ -309,7 +316,7 @@ function scheduleSave() {
   if (_saveTimer) clearTimeout(_saveTimer)
   _saveTimer = setTimeout(() => {
     _saveTimer = null
-    _saver({ plan: state.plan, holding: state.holding, closed: state.closed, account: state.account, alerts: state.alerts, reviews: state.reviews, adviceLog: state.adviceLog, decisionLog: state.decisionLog, executionPlans: state.executionPlans, executionAttributions: state.executionAttributions, advice: getAllAdvice(), settings: state.settings || {} })
+    _saver({ plan: state.plan, holding: state.holding, closed: state.closed, account: state.account, alerts: state.alerts, reviews: state.reviews, adviceLog: state.adviceLog, decisionLog: state.decisionLog, executionPlans: state.executionPlans, executionAttributions: state.executionAttributions, stockNotes: state.stockNotes || {}, advice: getAllAdvice(), settings: state.settings || {} })
   }, 800)
 }
 // 立即落盘(不等 800ms 防抖):页面隐藏/关闭前把待写数据抢存一次,避免"改完立刻切走/关页 → 800ms 内没保存到云端"丢数据。
@@ -329,6 +336,7 @@ function flushPendingSave() {
       decisionLog: state.decisionLog,
       executionPlans: state.executionPlans,
       executionAttributions: state.executionAttributions,
+      stockNotes: state.stockNotes || {},
       advice: getAllAdvice(),
       settings: state.settings || {},
     })).then((result) => result !== false).catch(() => false)
@@ -878,6 +886,7 @@ export const planStore = {
       executionAttributions: Array.isArray(d && d.executionAttributions)
         ? d.executionAttributions
         : [],
+      stockNotes: normalizeStockNotes(d && d.stockNotes),
       settings: (d && d.settings) || {},    // 跨设备同步的个性化设置(如 AI 每日精选/自动开关等)
     }
     reconcilePositionAlerts()
@@ -931,7 +940,21 @@ export const planStore = {
         changed = true
       }
     }
-    // 3) 决策记录:按 id 并集(仅新增)
+    // 3) 股票备注按更新时间合并；空文本是删除墓碑，不能被旧设备恢复。
+    if (d.stockNotes && typeof d.stockNotes === 'object') {
+      const mergedStockNotes = mergeStockNotesByTimestamp(
+        state.stockNotes,
+        d.stockNotes,
+      )
+      if (
+        JSON.stringify(mergedStockNotes)
+          !== JSON.stringify(state.stockNotes || {})
+      ) {
+        state = { ...state, stockNotes: mergedStockNotes }
+        changed = true
+      }
+    }
+    // 4) 决策记录:按 id 并集(仅新增)
     if (Array.isArray(d.adviceLog) && d.adviceLog.length) {
       const seen = new Set((state.adviceLog || []).map((x) => x && x.id).filter(Boolean))
       const add = d.adviceLog.filter((x) => x && x.id && !seen.has(x.id))
@@ -942,7 +965,7 @@ export const planStore = {
         changed = true
       }
     }
-    // 4) 决策事件按 id 合并；同一建议的 executed 状态以较新的云端事件为准。
+    // 5) 决策事件按 id 合并；同一建议的 executed 状态以较新的云端事件为准。
     if (Array.isArray(d.decisionLog) && d.decisionLog.length) {
       const merged = new Map((state.decisionLog || []).filter((x) => x && x.id).map((x) => [x.id, x]))
       let touched = false
@@ -959,7 +982,7 @@ export const planStore = {
         changed = true
       }
     }
-    // 5) 人工执行计划与归因按更新时间合并，避免多设备覆盖新状态。
+    // 6) 人工执行计划与归因按更新时间合并，避免多设备覆盖新状态。
     if (Array.isArray(d.executionPlans)) {
       const mergedPlans = mergeExecutionPlans(
         state.executionPlans,
@@ -986,7 +1009,7 @@ export const planStore = {
         changed = true
       }
     }
-    // 6) 云端预警回灌：服务端军师会创建行动预警，cron_alert 会继续推进其
+    // 7) 云端预警回灌：服务端军师会创建行动预警，cron_alert 会继续推进其
     //    armed/watching/confirmed 状态。新增仅接收可由本地持仓/自选验证且未静音的自动预警，
     //    避免把用户刚删除的规则复活；已有规则仍按 id 合并权威运行态。
     if (Array.isArray(d.alerts) && d.alerts.length && Array.isArray(state.alerts)) {
@@ -1110,7 +1133,7 @@ export const planStore = {
         try { l() } catch (e) { console.error('[store] listener error', e) }
       })
     }
-    // 6) 服务端批量生成进度回灌:喂给 adviceBatch,让本机进度条显示【服务端/另一设备】正在跑的批量进程。
+    // 8) 服务端批量生成进度回灌:喂给 adviceBatch,让本机进度条显示【服务端/另一设备】正在跑的批量进程。
     //    (与 advice/adviceLog 合并解耦:进度是纯展示态,不进 changed/不触发回存)
     if (d.batchProgress && typeof d.batchProgress === 'object') {
       // 按需动态 import,避免顶层静态 import 造成模块初始化环(见文件头注释)
@@ -1128,6 +1151,31 @@ export const planStore = {
     if (!key) return
     state.settings = { ...(state.settings || {}), [key]: value }
     emit()
+  },
+  getStockNote(code) {
+    return stockNoteText(state.stockNotes, code)
+  },
+  setStockNote(code, value, now = Date.now()) {
+    const normalizedCode = String(code || '').trim()
+    if (!/^\d{6}$/.test(normalizedCode)) {
+      return { ok: false, error: '股票代码无效' }
+    }
+    const text = normalizeStockNoteText(value)
+    const current = state.stockNotes?.[normalizedCode]
+    if (current?.text === text) {
+      return { ok: true, changed: false, note: current }
+    }
+    const updatedAt = Math.max(
+      Number(now) || Date.now(),
+      (Number(current?.updatedAt) || 0) + 1,
+    )
+    const note = { text, updatedAt }
+    state.stockNotes = {
+      ...(state.stockNotes || {}),
+      [normalizedCode]: note,
+    }
+    emit()
+    return { ok: true, changed: true, note }
   },
   setAdviceReviewEnabled(code, enabled) {
     if (!code) return
@@ -3054,6 +3102,7 @@ export const planStore = {
       adviceLog: d.adviceLog || [], decisionLog: d.decisionLog || [],
       executionPlans: d.executionPlans || [],
       executionAttributions: d.executionAttributions || [],
+      stockNotes: state.stockNotes || {},
       settings: d.settings || state.settings || {},
     }
     emit() // 恢复后正常回存云端，保证撤回结果也持久化
