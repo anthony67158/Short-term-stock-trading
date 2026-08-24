@@ -10554,11 +10554,37 @@ button.acct-item {
   border-top: 1px solid var(--color-rule-2);
 }
 
+.plan-cand .pc-actions.with-review {
+  grid-template-columns: minmax(0, 1fr) auto auto 40px;
+}
+
 .plan-cand .pc-actions > button {
   min-width: 0;
   min-height: 40px;
   justify-content: center;
   white-space: nowrap;
+}
+
+@media (max-width: 30rem) {
+  .plan-cand .pc-actions.with-review {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 40px;
+  }
+
+  .plan-cand .pc-actions.with-review .manual-build {
+    grid-column: 1 / -1;
+  }
+
+  .plan-cand .pc-actions.with-review .review-action {
+    grid-column: 1;
+  }
+
+  .plan-cand .pc-actions.with-review .pc-alert-action {
+    grid-column: 2;
+  }
+
+  .plan-cand .pc-actions.with-review > .icon-btn {
+    grid-column: 3;
+  }
 }
 
 @media (max-width: 50rem) {

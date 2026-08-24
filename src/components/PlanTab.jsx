@@ -803,17 +803,31 @@ function CandidateActions({ p, q, onBuy, onAlert, onDelete }) {
     : baseView
   const actionable = !view || view.kind === 'buy'
   return (
-    <div className="pc-actions">
+    <div className={'pc-actions' + (!actionable ? ' with-review' : '')}>
       {actionable ? (
         <button className="chip-btn act-buy" onClick={() => onBuy(p, view)}>
           <Icon name="cart" size={12} />{view ? '按指令建仓' : '建仓'}
         </button>
       ) : (
-        <button className="chip-btn ghost" onClick={() => openStockDetail(p.code, q?.name || p.name)}>
-          <Icon name="spark" size={12} />复核建议
-        </button>
+        <>
+          <button
+            type="button"
+            className="chip-btn ghost manual-build"
+            title="按当前价手动记录建仓"
+            onClick={() => onBuy(p, null)}
+          >
+            <Icon name="cart" size={12} />手动建仓
+          </button>
+          <button
+            type="button"
+            className="chip-btn ghost review-action"
+            onClick={() => openStockDetail(p.code, q?.name || p.name)}
+          >
+            <Icon name="spark" size={12} />复核建议
+          </button>
+        </>
       )}
-      <button className="chip-btn ghost" onClick={onAlert}><Icon name="bell" size={12} />预警</button>
+      <button className="chip-btn ghost pc-alert-action" onClick={onAlert}><Icon name="bell" size={12} />预警</button>
       <button className="icon-btn" aria-label={`删除${q?.name || p.name}`} title="删除" onClick={onDelete}><Icon name="trash" size={13} /></button>
     </div>
   )

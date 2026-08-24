@@ -62,3 +62,26 @@ test('策略摘要压缩为单行指令、紧凑价位和单行进度', () => {
     /\.action-progress-summary\s*{[^}]*grid-template-columns:\s*auto\s+minmax\(0,\s*1fr\)\s+auto/s,
   )
 })
+
+test('观望建议同时保留手动建仓与复核入口', () => {
+  assert.match(
+    planTab,
+    /className=\{'pc-actions' \+ \(!actionable \? ' with-review' : ''\)\}/,
+  )
+  assert.match(
+    planTab,
+    /!actionable[\s\S]*?className="chip-btn ghost manual-build"[\s\S]*?onClick=\{\(\) => onBuy\(p, null\)\}[\s\S]*?手动建仓/s,
+  )
+  assert.match(
+    planTab,
+    /className="chip-btn ghost review-action"[\s\S]*?复核建议/s,
+  )
+  assert.match(
+    precision,
+    /\.plan-cand \.pc-actions\.with-review\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto\s+auto\s+40px/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*30rem\)\s*{[\s\S]*?\.plan-cand \.pc-actions\.with-review\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(0,\s*1fr\)\s+40px/s,
+  )
+})
