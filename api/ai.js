@@ -60,6 +60,7 @@ import {
   classifyPriceLimit,
   priceLimitRatio,
 } from '../shared/priceLimitPolicy.js';
+import { mergeRetailFundFlow } from '../shared/retailFundFlow.js';
 import {
   attachEvidenceSnapshot,
   createCanonicalEvidenceSnapshot,
@@ -343,13 +344,39 @@ async function fetchTrend(code) {
   return await fetchTrendTx(code);
 }
 
-// 个股资金面：主力/超大单/大单 净额 + 5日主力均值 + 盘口委比委差
+const fundAmountYi = (value) =>
+  value == null || value === '-' || value === '' || isNaN(Number(value))
+    ? null
+    : +(Number(value) / 1e8).toFixed(2);
+
+const fundPct = (value) =>
+  value == null || value === '-' || value === '' || isNaN(Number(value))
+    ? null
+    : +Number(value).toFixed(2);
+
+export function mapRealtimeStockFund(data = {}) {
+  return {
+    mainNetYi: fundAmountYi(data.f62),
+    mainNetPct: fundPct(data.f184),
+    superNetYi: fundAmountYi(data.f66),
+    bigNetYi: fundAmountYi(data.f72),
+    smallNetYi: fundAmountYi(data.f84),
+    retailNetYi: fundAmountYi(data.f84),
+    main5dYi: fundAmountYi(data.f164),
+    weibi: fundPct(data.f191),
+    weicha: data.f192 == null || data.f192 === '-'
+      ? null
+      : Math.round(Number(data.f192)),
+  };
+}
+
+// 个股资金面：主力/超大单/大单/小单净额 + 5日主力均值 + 盘口委比委差
 // 关键：用【历史每日资金流】接口(fflow/daykline)，收盘后/开盘前依然能回溯到最近交易日，不会归零；
 // 实时快照(stock/get f62)只在盘中有效、清算后清零，故仅用于取盘口委比与"当日实时"补充。
 async function fetchStockFund(code) {
   const secid = toSecid(code);
-  const yi = (v) => (v == null || v === '-' || v === '' || isNaN(Number(v)) ? null : +(Number(v) / 1e8).toFixed(2));
-  const pct = (v) => (v == null || v === '-' || v === '' || isNaN(Number(v)) ? null : +Number(v).toFixed(2));
+  const yi = fundAmountYi;
+  const pct = fundPct;
   let daily = null;
 
   // 1) 历史每日资金流（可回溯）。只取最近8天(lmt=8)避免全历史大响应超时；多镜像竞速(Promise.any)
@@ -404,7 +431,7 @@ async function fetchStockFund(code) {
   // 2) 实时快照：取盘口委比/委差(盘中有效) + 当日实时主力净额(盘中非0则优先)
   let snap = null;
   const rtHosts = ['https://push2.eastmoney.com', 'https://82.push2.eastmoney.com', 'https://push2delay.eastmoney.com'];
-  const rpath = `/api/qt/stock/get?secid=${secid}&fields=f62,f184,f66,f72,f164,f191,f192`;
+  const rpath = `/api/qt/stock/get?secid=${secid}&fields=f62,f84,f184,f66,f72,f164,f191,f192`;
   const tryRt = (h) => {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 5000);
@@ -415,13 +442,17 @@ async function fetchStockFund(code) {
   };
   try {
     const d = await Promise.any(rtHosts.map(tryRt));
-    snap = { mainNetYi: yi(d.f62), mainNetPct: pct(d.f184), superNetYi: yi(d.f66), bigNetYi: yi(d.f72), main5dYi: yi(d.f164), weibi: pct(d.f191), weicha: (d.f192 == null || d.f192 === '-') ? null : Math.round(Number(d.f192)) };
+    snap = mapRealtimeStockFund(d);
   } catch { /* ignore */ }
 
   if (!daily && !snap) return null;
   const base = daily || {};
-  // 当日主力净额：盘中用实时快照(非0)，否则用历史最近交易日
-  const realtimeMain = snap && snap.mainNetYi != null && snap.mainNetYi !== 0 ? snap.mainNetYi : null;
+  // 盘中任一资金分层出现非零值时采用整组实时快照；收盘清零后回退最近交易日。
+  const hasRealtimeFund = !!(
+    snap
+    && [snap.mainNetYi, snap.retailNetYi]
+      .some((value) => value != null && value !== 0)
+  );
   // 主力资金【连续性】：从最近交易日往回数,当前连续净流入(正)/连续净流出(负)天数。
   // 口径与 K 线连阳连阴的 streak 一致:同号累加,遇反号或 0 即断。用户关心"主力是否连续做多/做空",
   // 一天数字不算数,连续几天才见真章 —— 显式算好给军师,免得它自己从 trend5 里数错。
@@ -440,12 +471,26 @@ async function fetchStockFund(code) {
   })();
   return {
     asOfDate: base.date || null,               // 资金数据对应的交易日
-    isHistorical: !realtimeMain,               // true=用的是最近收盘数据(非实时)
-    mainNetYi: realtimeMain != null ? realtimeMain : (base.mainNetYi ?? null),
-    mainNetPct: (snap && snap.mainNetPct) ?? base.mainNetPct ?? null,
-    superNetYi: (realtimeMain != null && snap && snap.superNetYi) ? snap.superNetYi : (base.superNetYi ?? null),
-    bigNetYi: (realtimeMain != null && snap && snap.bigNetYi) ? snap.bigNetYi : (base.bigNetYi ?? null),
-    midNetYi: base.midNetYi ?? null, smallNetYi: base.smallNetYi ?? null,
+    isHistorical: !hasRealtimeFund,             // true=用的是最近收盘数据(非实时)
+    mainNetYi: hasRealtimeFund && snap.mainNetYi != null
+      ? snap.mainNetYi
+      : (base.mainNetYi ?? null),
+    mainNetPct: hasRealtimeFund && snap.mainNetPct != null
+      ? snap.mainNetPct
+      : (base.mainNetPct ?? null),
+    superNetYi: hasRealtimeFund && snap.superNetYi != null
+      ? snap.superNetYi
+      : (base.superNetYi ?? null),
+    bigNetYi: hasRealtimeFund && snap.bigNetYi != null
+      ? snap.bigNetYi
+      : (base.bigNetYi ?? null),
+    midNetYi: base.midNetYi ?? null,
+    smallNetYi: hasRealtimeFund && snap.retailNetYi != null
+      ? snap.retailNetYi
+      : (base.smallNetYi ?? null),
+    retailNetYi: hasRealtimeFund && snap.retailNetYi != null
+      ? snap.retailNetYi
+      : (base.smallNetYi ?? null),
     main5dYi: base.main5dYi ?? (snap && snap.main5dYi) ?? null,
     main5dAvgYi: base.main5dAvgYi ?? null,
     trend5: base.trend5 || null,
@@ -904,6 +949,8 @@ export default async function handler(req, res) {
               limitUpPrice, limitDownPrice, limitRatioPct: +(ratio * 100).toFixed(0),
               high: q0.high, low: q0.low, open: q0.open, prevClose: q0.prevClose,
               turnover: q0.turnover, volRatio: q0.volRatio,
+              mainNetYi: fundAmountYi(q0.mainInflow),
+              retailNetYi: fundAmountYi(q0.retailInflow),
               bigMove: isLive && q0.pct != null && Math.abs(q0.pct) >= 7,  // 今日大涨/大跌(>7%),仅实时口径
             };
           }
@@ -1306,8 +1353,12 @@ export default async function handler(req, res) {
             atDayLow: nearLow, atDayHigh: nearHigh,
           }
         }
-        // 个股资金面（主力/超大单/大单净额 + 5日主力 + 盘口委比委差）
-        if (stockFund) payload.stockFund = stockFund;
+        // 个股资金面：小单净额只作为散户行为代理，与主力、价格和量能合参。
+        const mergedStockFund = mergeRetailFundFlow(
+          stockFund || payload.stockFund,
+          payload.todayQuote,
+        );
+        if (mergedStockFund) payload.stockFund = mergedStockFund;
         // 交易时段标记：非交易时段时，分时/盘口为最后收盘数据，模型据此参考"收盘后"口径
         {
           const nb = new Date(Date.now() + 8 * 3600 * 1000); // 北京时间
@@ -1491,7 +1542,15 @@ export default async function handler(req, res) {
       newsHeadlines: payload.newsHeadlines || null,
       macroNews: payload.macroNews || null,
       aiSearch: payload.aiSearchMeta || null,
-      fundAsOf: payload.stockFund ? { date: payload.stockFund.asOfDate, historical: payload.stockFund.isHistorical, main5dAvg: payload.stockFund.main5dAvgYi, inflowDays: payload.stockFund.inflowDays, mainStreak: payload.stockFund.mainStreak ?? null } : null,
+      fundAsOf: payload.stockFund ? {
+        date: payload.stockFund.asOfDate,
+        historical: payload.stockFund.isHistorical,
+        main5dAvg: payload.stockFund.main5dAvgYi,
+        inflowDays: payload.stockFund.inflowDays,
+        mainStreak: payload.stockFund.mainStreak ?? null,
+        retailNetYi: payload.stockFund.retailNetYi ?? null,
+        retailRelation: payload.stockFund.retailFlow?.relation || null,
+      } : null,
       marketPhase: payload.marketPhase || null,
       todayQuote: payload.todayQuote || null,
       dailyReport: payload.dailyReport ? { sessionCn: payload.dailyReport.sessionCn, day: payload.dailyReport.day } : null,
