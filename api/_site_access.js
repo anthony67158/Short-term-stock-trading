@@ -16,6 +16,7 @@ const PUBLIC_SITE_ASSETS = new Set([
   '/favicon-32.png',
   '/favicon-48.png',
   '/apple-touch-icon.png',
+  '/apple-touch-icon-v2.png',
   '/apple-touch-icon-v5.png',
   '/apple-touch-icon-v6.png',
   '/apple-touch-icon-v7.png',

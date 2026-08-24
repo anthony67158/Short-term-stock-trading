@@ -126,6 +126,7 @@ test('受保护域名允许系统在未登录时读取PWA元数据和图标', ()
     '/favicon-32.png',
     '/favicon-48.png',
     '/apple-touch-icon.png',
+    '/apple-touch-icon-v2.png',
     '/apple-touch-icon-v5.png',
     '/apple-touch-icon-v6.png',
     '/apple-touch-icon-v7.png',
