@@ -18,6 +18,10 @@ function pngSize(path) {
   }
 }
 
+function assetBuffer(path) {
+  return readFileSync(new URL(`../${path}`, import.meta.url))
+}
+
 const index = read('index.html')
 const manifest = JSON.parse(read('public/manifest.json'))
 const tokens = read('tokens.css')
@@ -50,6 +54,16 @@ test('网站、启动页与主题切换统一使用同一套新版品牌图标',
     height: 180,
     hasAlpha: false,
   })
+
+  const v7AppleTouchIcon = assetBuffer('public/apple-touch-icon-v7.png')
+  for (const path of [
+    'public/apple-touch-icon.png',
+    'public/apple-touch-icon-v2.png',
+    'public/apple-touch-icon-v5.png',
+    'public/apple-touch-icon-v6.png',
+  ]) {
+    assert.deepEqual(assetBuffer(path), v7AppleTouchIcon, path)
+  }
 })
 
 test('PWA和网站图标由用户提供的同一位图母版生成', () => {
@@ -87,6 +101,13 @@ test('PWA和网站图标由用户提供的同一位图母版生成', () => {
       && icon.purpose === 'maskable'
   ))
   assert.ok(manifest.icons.every((icon) => icon.type === 'image/png'))
+  for (const [canonical, legacy] of [
+    ['public/app-icon-192.png', 'public/icon-192.png'],
+    ['public/app-icon-512.png', 'public/icon-512.png'],
+    ['public/app-icon-maskable-512.png', 'public/icon-maskable-512.png'],
+  ]) {
+    assert.deepEqual(assetBuffer(legacy), assetBuffer(canonical), legacy)
+  }
   for (const path of [
     'public/app-icon.svg',
     'public/app-icon-maskable.svg',
