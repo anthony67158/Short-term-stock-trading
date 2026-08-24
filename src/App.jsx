@@ -1,4 +1,11 @@
-import { useState, useRef, useEffect, lazy, Suspense } from 'react'
+import {
+  useState,
+  useRef,
+  useEffect,
+  useCallback,
+  lazy,
+  Suspense,
+} from 'react'
 import Icon from './components/Icon'
 import BrandMark from './components/BrandMark'
 import StockDetail from './components/StockDetail'
@@ -19,7 +26,6 @@ import {
   aiSearchConfigStore,
   useAiSearchConfig,
 } from './aiSearchConfigStore'
-import { timeStr } from './format'
 import { api } from './apiBase'
 import { accountRequestHeaders } from './quantModel'
 import { chunkReloadKey, shouldReloadChunk } from './chunkError'
@@ -32,6 +38,11 @@ import {
   resolveAppShortcut,
 } from '../shared/appShell.js'
 import { tradingPollingIntervals } from '../shared/pollingPolicy.js'
+import {
+  closeTopmostOverlay,
+  useMobileEdgeBack,
+  useOverlayScrollLock,
+} from './mobileNavigation'
 
 // 按需分包：四个主 Tab 与 AI 助手拆成独立 chunk，首屏只加载当前 Tab，
 // 切换时才拉取对应 chunk（配合 Rolldown codeSplitting），缩短首屏体积与白屏时间。
@@ -121,17 +132,32 @@ export default function App() {
 function MainApp() {
   const [tab, setTab] = useState('today')
   const [hubSub, setHubSub] = useState('account') // 账户·交易 融合页的子页
-  const [hubNonce, setHubNonce] = useState(0)      // 每次外部要求跳预警时自增，强制生效
+  const tabHistoryRef = useRef(['today'])
+  const navigateToTab = useCallback((next, { replace = false } = {}) => {
+    if (!APP_SECTIONS.some((section) => section.key === next)) return
+    setTab((current) => {
+      if (replace) {
+        tabHistoryRef.current = [next]
+      } else if (current !== next) {
+        tabHistoryRef.current = [
+          ...tabHistoryRef.current,
+          next,
+        ].slice(-12)
+      }
+      return next
+    })
+  }, [])
+
   // D-15 PWA 快捷方式:manifest shortcuts 带 ?tab=hub&sub=alert 直达对应子页
   useEffect(() => {
     try {
       const sp = new URLSearchParams(window.location.search)
       const t = sp.get('tab')
       const sub = sp.get('sub')
-      if (t) setTab(t)
-      if (sub) { setHubSub(sub); setHubNonce((n) => n + 1) }
+      if (t) navigateToTab(t, { replace: true })
+      if (sub) setHubSub(sub)
     } catch { /* ignore */ }
-  }, [])
+  }, [navigateToTab])
   const { open: aiOpen } = useAIStore()
   const theme = useTheme()
   const { stock: detailStock } = useDetailStore()
@@ -156,6 +182,27 @@ function MainApp() {
   const planCount = book.plan.length + book.holding.length
   const currentSection = APP_SECTIONS.find((section) => section.key === tab)
     || APP_SECTIONS[0]
+  const navigateBack = useCallback(() => {
+    if (closeTopmostOverlay()) return
+    if (detailStore.get().stock) {
+      detailStore.close()
+      return
+    }
+    if (aiStore.get().open) {
+      aiStore.close()
+      return
+    }
+    if (tab === 'hub' && hubSub !== 'account') {
+      setHubSub('account')
+      return
+    }
+    if (tabHistoryRef.current.length <= 1) return
+    tabHistoryRef.current.pop()
+    setTab(tabHistoryRef.current.at(-1) || 'today')
+  }, [hubSub, tab])
+
+  useMobileEdgeBack(navigateBack)
+  useOverlayScrollLock()
 
   // ===== 盯盘预警：轮询所有“启用中预警”涉及的个股报价 → 逐条判断命中 =====
   const alertCodes = [...new Set((book.alerts || []).filter((a) => a.enabled).map((a) => a.code))]
@@ -249,12 +296,13 @@ function MainApp() {
       if (!action) return
       if (action.type === 'escape') {
         // 优先关最上层：详情弹窗 → 助手抽屉
+        if (closeTopmostOverlay()) return
         if (detailStore.get().stock) { detailStore.close(); return }
         aiStore.close()
         return
       }
       if (action.type === 'tab') {
-        setTab(action.tab)
+        navigateToTab(action.tab)
         return
       }
       if (action.type === 'assistant') {
@@ -264,7 +312,7 @@ function MainApp() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [navigateToTab])
 
   return (
     <div className={'app' + (aiOpen ? ' with-ai' : '')}>
@@ -274,7 +322,7 @@ function MainApp() {
           <button
             type="button"
             className="nav-brand"
-            onClick={() => setTab('today')}
+            onClick={() => navigateToTab('today')}
             aria-label="返回今日决策"
           >
             <BrandMark className="nav-brand-mark" />
@@ -286,7 +334,7 @@ function MainApp() {
                 key={t.key}
                 type="button"
                 className={'nav-tab' + (tab === t.key ? ' active' : '')}
-                onClick={() => setTab(t.key)}
+                onClick={() => navigateToTab(t.key)}
                 aria-current={tab === t.key ? 'page' : undefined}
                 title={`${t.label} · ${t.description}`}
               >
@@ -318,7 +366,10 @@ function MainApp() {
               <span className="nav-refresh-count">{remain}s</span>
             </button>
             <UndoButton />
-            <AlertBell onOpen={() => { setHubSub('alert'); setHubNonce((n) => n + 1); setTab('hub') }} />
+            <AlertBell onOpen={() => {
+              setHubSub('alert')
+              navigateToTab('hub')
+            }} />
             <button type="button" className="icon-btn nav-theme" onClick={themeStore.toggle} title={theme === 'dark' ? '切到白天模式' : '切到夜间模式'} aria-label={theme === 'dark' ? '切到白天模式' : '切到夜间模式'}>
               <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={15} />
             </button>
@@ -346,7 +397,14 @@ function MainApp() {
               />
             )}
             {tab === 'plan' && <PlanTab interval={interval} />}
-            {tab === 'hub' && <AccountHub interval={interval} snapshot={snapshot} initialSub={hubSub} jumpNonce={hubNonce} />}
+            {tab === 'hub' && (
+              <AccountHub
+                interval={interval}
+                snapshot={snapshot}
+                sub={hubSub}
+                onSubChange={setHubSub}
+              />
+            )}
             {tab === 'research' && <ResearchTab interval={interval} />}
           </Suspense>
         </ErrorBoundary>

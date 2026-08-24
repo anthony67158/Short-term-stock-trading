@@ -63,6 +63,20 @@ test('四个工作区共用紧凑页面身份头部且不展示流程指导', ()
   assert.doesNotMatch(precision, /\.workspace-icon\s*{/)
 })
 
+test('全站表面使用更柔和的圆角层级和低噪声边框', () => {
+  assert.match(tokens, /--radius-control:\s*10px/)
+  assert.match(tokens, /--radius-input:\s*12px/)
+  assert.match(tokens, /--radius-card:\s*16px/)
+  assert.match(
+    precision,
+    /\.panel:not\(\.plan-section\),[\s\S]*?\.trade-card\s*{[^}]*border-color:\s*color-mix\([^}]*box-shadow:\s*var\(--shadow-card\)/s,
+  )
+  assert.match(
+    precision,
+    /\.nav,[\s\S]*?\.plan-section-sticky\s*{[^}]*backdrop-filter:\s*none/s,
+  )
+})
+
 test('所有按钮受父容器约束且卖出按钮保持短标签', () => {
   assert.match(
     precision,
@@ -352,7 +366,7 @@ test('持仓现价手数成本使用稳定三列指标带', () => {
 test('白天模式建立明确表面层级并将遗留强调色统一映射到钴蓝系统', () => {
   assert.match(
     tokens,
-    /html\[data-theme="light"\]\s*{[\s\S]*?--color-paper:\s*oklch\(96% 0\.01 255\)[\s\S]*?--color-paper-2:\s*oklch\(99% 0\.004 255\)[\s\S]*?--color-paper-3:\s*oklch\(93\.5% 0\.012 255\)[\s\S]*?--color-rule:\s*oklch\(78% 0\.016 255\)/s,
+    /html\[data-theme="light"\]\s*{[\s\S]*?--color-paper:\s*oklch\(96\.8% 0\.008 255\)[\s\S]*?--color-paper-2:\s*oklch\(99\.2% 0\.003 255\)[\s\S]*?--color-paper-3:\s*oklch\(96\.3% 0\.008 255\)[\s\S]*?--color-rule:\s*oklch\(84\.5% 0\.013 255\)/s,
   )
   assert.match(
     precision,

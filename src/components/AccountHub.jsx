@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useEffect } from 'react'
 import Icon from './Icon'
 import AccountTab from './AccountTab'
 import ReviewTab from './ReviewTab'
@@ -6,12 +6,13 @@ import AlertPanel from './AlertPanel'
 import { useAlertStore, alertStore } from '../alertStore'
 
 // ============ 账户·交易 融合页：账户全景 / 预警 / 交易记录 三个子页 ============
-export default function AccountHub({ interval, snapshot, initialSub, jumpNonce }) {
-  const [sub, setSub] = useState(initialSub || 'account')
+export default function AccountHub({
+  interval,
+  snapshot,
+  sub = 'account',
+  onSubChange,
+}) {
   const { unread } = useAlertStore()
-
-  // 外部（导航铃铛）要求跳到预警子页时同步：用自增 nonce 触发，避免同值不刷新
-  useEffect(() => { if (jumpNonce) setSub(initialSub || 'alert') }, [jumpNonce])
 
   // 进入预警子页即标记已读
   useEffect(() => { if (sub === 'alert') alertStore.markAllRead() }, [sub])
@@ -31,7 +32,7 @@ export default function AccountHub({ interval, snapshot, initialSub, jumpNonce }
             type="button"
             className={'hub-tab' + (sub === s.key ? ' active' : '')}
             aria-current={sub === s.key ? 'page' : undefined}
-            onClick={() => setSub(s.key)}
+            onClick={() => onSubChange?.(s.key)}
           >
             <Icon name={s.icon} size={15} />
             <span>{s.label}</span>
