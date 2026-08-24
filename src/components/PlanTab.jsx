@@ -2816,6 +2816,16 @@ function HoldingItem({ h, idx, quote: q }) {
 
       {/* 操作区 */}
       {!mobileOperations && tradeErr && <div className="err" style={{ margin: '8px 0' }}>{tradeErr}</div>}
+      {!(h.tp || h.sl || h.planReason) && (
+        <button
+          type="button"
+          className="chip-btn ghost hold-plan-mobile"
+          onClick={() => openPlan(false)}
+        >
+          <Icon name="target" size={13} />
+          添加计划
+        </button>
+      )}
       {operationForm && !mobileOperations ? operationForm : (
         <div className="pi-actions">
           <div className="pi-trade-actions">

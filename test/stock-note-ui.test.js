@@ -60,11 +60,31 @@ test('个股详情聚焦备注区域但保持阅读态', () => {
 test('移动端三个持仓交易按钮固定在同一行', () => {
   assert.match(
     precision,
+    /@media \(max-width:\s*30rem\)\s*{[\s\S]*?\.hold-item\s*>\s*\.pi-actions\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+44px/s,
+  )
+  assert.match(
+    precision,
     /@media \(max-width:\s*30rem\)\s*{[\s\S]*?\.pi-trade-actions\s*{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s,
   )
   assert.match(
     precision,
-    /\.pi-trade-actions\s*>\s*\.chip-btn\s*{[^}]*min-width:\s*0[^}]*white-space:\s*nowrap/s,
+    /@media \(max-width:\s*30rem\)\s*{[\s\S]*?\.pi-card-tools\s*{[^}]*width:\s*44px[^}]*padding-top:\s*0[^}]*border-top:\s*0/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*30rem\)\s*{[\s\S]*?\.pi-card-tools\s*>\s*\.chip-btn\s*{[^}]*display:\s*none/s,
+  )
+  assert.match(
+    planTab,
+    /className="chip-btn ghost hold-plan-mobile"[\s\S]*?添加计划/,
+  )
+  assert.match(
+    precision,
+    /\.hold-plan-mobile\s*{[^}]*display:\s*none/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*30rem\)\s*{[\s\S]*?\.hold-plan-mobile\s*{[^}]*display:\s*inline-flex/s,
   )
 })
 

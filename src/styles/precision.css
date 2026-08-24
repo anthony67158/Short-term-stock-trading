@@ -11154,6 +11154,10 @@ button.acct-item {
   gap: var(--space-2xs);
 }
 
+.hold-plan-mobile {
+  display: none;
+}
+
 .pi-trade-actions > .chip-btn,
 .pi-card-tools > .chip-btn,
 .pi-card-tools > .icon-btn {
@@ -11284,7 +11288,7 @@ button.acct-item {
 
 @media (max-width: 30rem) {
   .hold-item > .pi-actions {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) 44px;
   }
 
   .pi-trade-actions {
@@ -11300,12 +11304,23 @@ button.acct-item {
   }
 
   .pi-card-tools {
-    padding-top: var(--space-2xs);
-    border-top: 1px solid var(--color-rule-2);
+    width: 44px;
+    padding-top: 0;
+    border-top: 0;
   }
 
   .pi-card-tools > .chip-btn {
-    flex: 1;
+    display: none;
+  }
+
+  .hold-plan-mobile {
+    display: inline-flex;
+    width: 100%;
+    min-height: 44px;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2xs);
+    margin-top: var(--space-sm);
   }
 
   .pc-top {
