@@ -6,15 +6,10 @@ import { getAdvice, saveAdvice } from './adviceCache'
 import { planStore } from './planStore'
 import { triggerServerAdvice, canServerAdvice } from './serverAdvice'
 import { acceptsGenerationResult, generationOptions } from '../shared/adviceBatchPolicy.js'
-import {
-  shouldGenerateAdviceDailyReport,
-} from '../shared/adviceGenerationPolicy.js'
 import { ensureAdviceReasoning } from '../shared/adviceReasoning.js'
 import { evidencePersistenceFields } from '../shared/evidenceSnapshot.js'
 import { quantResultFromAdviceMeta } from '../shared/adviceQuantResult.js'
 import { compactAdvicePlan } from '../shared/adviceContinuity.js'
-import { attachAdviceDailyReport } from '../shared/adviceDailyReportPolicy.js'
-import { ensureLocalAdviceDailyReport } from './adviceDailyReport.js'
 import {
   accountSessionMatches,
   currentAccountSession,
@@ -112,57 +107,10 @@ async function run(spec, record) {
     }
   }
   try {
-    if (shouldGenerateAdviceDailyReport({
-      deepMode: generation.deepMode,
-    })) {
-      record.phase = '深度研判：正在检查今日策略日报…'
-      notify()
-      try {
-        const report = await ensureLocalAdviceDailyReport({
-          existingSummary: requestPayload.dailyReport || null,
-          holdings: (planStore.get().holding || []).map((holding) => ({
-            code: holding.code,
-            name: holding.name,
-          })),
-          signal: record.controller.signal,
-          onPhase: (text) => {
-            if (!belongsToCurrentAccount()) return
-            record.phase = `策略日报：${text}`
-            notify()
-          },
-        })
-        requestPayload = attachAdviceDailyReport(
-          requestPayload,
-          report.summary,
-        )
-        if (!belongsToCurrentAccount()) return
-        record.sources = [
-          ...(record.sources || []).filter(
-            (source) => source.label !== '策略日报摘要',
-          ),
-          { label: '策略日报摘要', ok: true },
-        ]
-        record.phase = '策略日报已就绪，正在准备军师分析…'
-        notify()
-      } catch (error) {
-        if (!belongsToCurrentAccount()) return
-        if (record.cancelRequested || record.controller.signal.aborted) {
-          results.delete(code)
-          return
-        }
-        record.sources = [
-          ...(record.sources || []).filter(
-            (source) => source.label !== '策略日报摘要',
-          ),
-          { label: '策略日报摘要', ok: false },
-        ]
-        record.phase = '策略日报不可用，继续生成个股建议'
-        notify()
-      }
-    } else {
-      record.phase = '快速模式：正在采集个股证据…'
-      notify()
-    }
+    record.phase = generation.deepMode
+      ? '深度研判：正在采集个股证据…'
+      : '快速模式：正在采集个股证据…'
+    notify()
     // 军师服务端在同一轮内采集分时并运行所选量化模型，最终 meta.quantResult
     // 就是 LLM 实际采用的结果。这里只消费这一份，避免并行日线请求覆盖它。
     const adviceResp = await callAIStream(mode, requestPayload, onPhase, record.controller.signal, onEvent, generation)

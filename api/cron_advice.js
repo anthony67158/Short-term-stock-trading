@@ -89,15 +89,6 @@ import quoteHandler from './quote.js';
 import { TRUSTED_QUANT_VERSION } from './_quant_access.js';
 import { TRUSTED_ACCOUNT_REQUEST } from './_account_auth.js';
 import { dispatchAdviceWorker } from './_advice_dispatch.js';
-import dailyReportHandler from './daily_report.js';
-import { getLatestDailySummary } from './_daily_summary.js';
-import { ensureAiSearchConfig } from './_ai_search_config.js';
-import {
-  collectAdviceDailyReportHoldings,
-  continueAdviceJobsWithoutDailyReport,
-  ensureAdviceDailyReport,
-  setAdviceDailyReportPhase,
-} from './_advice_daily_report.js';
 import { buildRealOutcomeLearning } from '../shared/realOutcomeLearning.js';
 import {
   buildStrategyPromotionGate,
@@ -114,7 +105,6 @@ import {
 } from '../shared/tradingCalendar.js';
 import { runAdvisorCouncilShadow } from './_advisor_council.js';
 import {
-  shouldGenerateAdviceDailyReport,
   shouldRunAdvisorCouncil,
 } from '../shared/adviceGenerationPolicy.js';
 
@@ -1290,15 +1280,6 @@ async function releaseDrainLock(nick, acc, myId, concurrency) {
   }
 }
 
-async function generateAdviceDailyReport(nick, holdings) {
-  return invokeSSE(dailyReportHandler, {
-    method: 'POST',
-    body: { holdings, accountNick: nick },
-    timeoutMs: 140000,
-    trustedAccount: true,
-  });
-}
-
 // ---- 并发池 drainer:单 Worker 锁下,把 queued 任务以 ≤CONCURRENCY 并发跑完 ----
 // 返回 { drained(bool), ok, fail } 或 { skipped:'locked' }。
 async function drainAccount(nick, initialAcc) {
@@ -1323,92 +1304,9 @@ async function drainAccount(nick, initialAcc) {
 
   const CONC = effectiveAdviceConcurrency(data);
   const REVIEW_CONC = reviewConcurrency();
-  const generateDailyReport = shouldGenerateAdviceDailyReport({
-    deepMode: hasDeepAdviceWork(data),
-  });
-  setAdviceDailyReportPhase(data, generateDailyReport
-    ? '深度研判：正在读取策略日报'
-    : '快速模式：直接采集个股证据');
-  acc = await saveWorking();
-  data = acc.data;
-  let dailyReportResult = {
-    generated: false,
-    source: 'optional',
-    summary: data.adviceDailyReport?.summary || null,
-  };
-  if (generateDailyReport) {
-    const reportHeartbeat = setInterval(() => {
-      renewWorkerLock(acc.data || (acc.data = {}), myId);
-      void saveWorking().catch(() => {});
-    }, WORKER_HEARTBEAT_INTERVAL_MS);
-    if (
-      reportHeartbeat
-      && typeof reportHeartbeat.unref === 'function'
-    ) reportHeartbeat.unref();
-
-    try {
-      const aiSearchConfig = await ensureAiSearchConfig();
-      setAdviceDailyReportPhase(
-        data,
-        '深度研判：策略日报缺失时将先自动生成',
-      );
-      dailyReportResult = await ensureAdviceDailyReport({
-        scopeKey: nick,
-        existingSummary: data.adviceDailyReport?.summary || null,
-        getSummary: () => getLatestDailySummary(nick),
-        searchConfig: aiSearchConfig,
-        generate: () => generateAdviceDailyReport(
-          nick,
-          collectAdviceDailyReportHoldings(data),
-        ),
-      });
-      data.adviceDailyReport = {
-        summary: dailyReportResult.summary,
-        at: Date.now(),
-        source: dailyReportResult.source,
-      };
-      setAdviceDailyReportPhase(
-        data,
-        '策略日报已就绪，等待军师生成',
-      );
-      acc = await saveWorking();
-      data = acc.data;
-    } catch (error) {
-      const message = `策略日报生成失败：${String(
-        error?.message || error,
-      )}`;
-      continueAdviceJobsWithoutDailyReport(data, message);
-      dailyReportResult = {
-        generated: false,
-        source: 'unavailable',
-        summary: null,
-        warning: message,
-      };
-      acc = await saveWorking();
-      data = acc.data;
-    } finally {
-      clearInterval(reportHeartbeat);
-    }
-  }
-
-  // 首次生成日报与军师分析拆成两次 FC 异步调用，避免日报耗时挤占
-  // 深度建议的 600 秒平台预算。第二次调用会直接命中账号摘要。
-  if (dailyReportResult.generated) {
-    await releaseDrainLock(nick, acc, myId, CONC);
-    let continued = false;
-    try {
-      continued = !!(await scheduleAdviceWorker(nick))?.accepted;
-    } catch { /* 定时任务会接力 */ }
-    return {
-      drained: false,
-      ok: 0,
-      fail: 0,
-      reportGenerated: true,
-      continued,
-    };
-  }
-
-  const dailyReportSummary = dailyReportResult.summary;
+  // 策略日报只作软证据：复用账号内已有摘要，缺失时直接继续个股生成。
+  // ai.js 会再次校验摘要时效，不允许日报生成拆成前置 Worker 阻断主流程。
+  const dailyReportSummary = data.adviceDailyReport?.summary || null;
   const inflight = new Map();   // jobId -> { promise, controller, code, role }
   const roleCapacities = {
     advisor: CONC,

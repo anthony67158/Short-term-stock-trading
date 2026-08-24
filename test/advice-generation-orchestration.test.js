@@ -9,7 +9,6 @@ import {
 } from '../api/_jobs.js'
 import {
   shouldRunAdvisorCouncil,
-  shouldGenerateAdviceDailyReport,
 } from '../shared/adviceGenerationPolicy.js'
 import {
   generationOptions,
@@ -188,33 +187,16 @@ test('复核请求使用独立review角色且首次建议仍使用advisor', () =
   assert.equal(llmRoleForAdviceMode('market'), 'agent')
 })
 
-test('快速军师不等待策略日报而深度研判仍尝试补齐', () => {
-  assert.equal(shouldGenerateAdviceDailyReport({
-    deepMode: false,
-  }), false)
-  assert.equal(shouldGenerateAdviceDailyReport({
-    deepMode: true,
-  }), true)
-  assert.match(
-    cronAdviceSource,
-    /const generateDailyReport = shouldGenerateAdviceDailyReport/,
-  )
-  assert.match(
-    cronAdviceSource,
-    /if \(generateDailyReport\) \{/,
-  )
+test('快速和深度军师都不得等待或自动生成策略日报', () => {
   assert.doesNotMatch(
     cronAdviceSource,
-    /failAdviceJobsForDailyReport/,
-  )
-  assert.match(
-    adviceRunnerSource,
-    /if \(shouldGenerateAdviceDailyReport\(/,
+    /ensureAdviceDailyReport|generateAdviceDailyReport|reportGenerated/,
   )
   assert.doesNotMatch(
     adviceRunnerSource,
-    /策略日报生成失败，未启动军师分析/,
+    /ensureLocalAdviceDailyReport|shouldGenerateAdviceDailyReport/,
   )
+  assert.match(aiSource, /resolveAdviceDailySummary/)
 })
 
 test('个股页默认快速生成且普通路径不再无条件同步委员会', () => {
