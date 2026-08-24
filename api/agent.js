@@ -20,6 +20,9 @@ import {
   evidenceFromTool,
   sanitizeAccountContext,
 } from '../shared/assistantContext.js';
+import {
+  SECTOR_CONCEPT_EXPLANATION_MAX_TOKENS,
+} from '../shared/sectorConceptExplanation.js';
 import { sanitizeTradeProposal } from '../shared/tradeProposal.js';
 
 // ============ 股票 Agent：工具增强的智能体 ============
@@ -394,8 +397,9 @@ export default async function handler(req, res) {
         ? `【当前用户聚焦的股票】${focusStock.name}（${focusStock.code}），如无特别说明，"这只票/它"指这只。`
         : '',
       conceptExplanationMode
-        ? '【当前任务：板块概念释义】只解释概念本身、形成原因、业务范围和常见误区。'
-          + '优先调用 web_news 联网核验；禁止评价当前走势、给出买卖建议或调用交易提案工具。'
+        ? '【当前任务：板块概念释义】用户问题中的三段式模板、标题和字数上限优先于通用输出格式。'
+          + '优先调用 web_news 联网核验；只解释概念定义、形成原因和识别边界。'
+          + '每个事实只说一次，不展开完整产业链、不罗列成分股，不写行情、走势、买卖建议或交易提案。'
         : '',
     ].filter(Boolean).map((item) => `\n\n${item}`).join('');
 
@@ -513,7 +517,9 @@ export default async function handler(req, res) {
             }
           : { toolChoice: 'none' }),
         temperature: 0.3,
-        maxTokens,
+        maxTokens: conceptExplanationMode
+          ? Math.min(maxTokens, SECTOR_CONCEPT_EXPLANATION_MAX_TOKENS)
+          : maxTokens,
         timeoutMs,
         reasoning: AGENT_REASONING,
         stream: !!stream,

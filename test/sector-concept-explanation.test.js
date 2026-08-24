@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 
 import {
   SECTOR_CONCEPT_EXPLANATION_MAX_LENGTH,
+  SECTOR_CONCEPT_EXPLANATION_MAX_TOKENS,
   existingSectorConceptText,
   mergeSectorConceptExplanations,
   normalizeSectorConceptExplanation,
@@ -157,6 +158,31 @@ test('智能体问题限定为概念释义并要求联网核验', () => {
   assert.match(prompt, /融捷股份/)
 })
 
+test('概念释义固定为三段短答且成分股只用于核验边界', () => {
+  const prompt = sectorConceptExplanationPrompt({
+    code: 'BK1173',
+    name: '锂矿概念',
+    stocks: [{ name: '融捷股份' }, { name: '天华新能' }],
+  })
+
+  assert.match(prompt, /只能使用以下三个标题/)
+  assert.match(prompt, /### 一句话看懂/)
+  assert.match(prompt, /### 为什么形成/)
+  assert.match(prompt, /### 怎么辨认/)
+  assert.match(prompt, /正文总计不超过 220 个汉字/)
+  assert.match(prompt, /每个事实只说一次/)
+  assert.match(prompt, /不得逐只介绍或列出成分股/)
+  assert.match(prompt, /不要铺陈完整产业链/)
+})
+
+test('概念释义模式使用独立的小输出预算', () => {
+  assert.equal(SECTOR_CONCEPT_EXPLANATION_MAX_TOKENS, 640)
+  assert.match(
+    agent,
+    /conceptExplanationMode\s*\?\s*Math\.min\(maxTokens,\s*SECTOR_CONCEPT_EXPLANATION_MAX_TOKENS\)/,
+  )
+})
+
 test('折叠摘要跳过标题和证据编号并保留核心定义', () => {
   const summary = sectorConceptExplanationSummary([
     '### 这是什么',
@@ -231,7 +257,7 @@ test('板块展开区按需调用智能体并持久展示解释', () => {
   assert.match(client, /api\('\/api\/agent'\)/)
   assert.match(client, /text\/event-stream/)
   assert.match(agent, /sector_concept_explanation/)
-  assert.match(agent, /只解释概念本身/)
+  assert.match(agent, /只解释概念定义、形成原因和识别边界/)
   assert.match(
     styles,
     /\.sector-concept-explanation\s*{[^}]*border-top:\s*1px solid var\(--color-rule-2\)/s,

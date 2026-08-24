@@ -1,5 +1,6 @@
 export const SECTOR_CONCEPT_EXPLANATION_MAX_LENGTH = 4000
 export const SECTOR_CONCEPT_EXPLANATION_LIMIT = 120
+export const SECTOR_CONCEPT_EXPLANATION_MAX_TOKENS = 640
 
 function cleanText(value, limit) {
   const text = String(value ?? '')
@@ -125,11 +126,20 @@ export function sectorConceptExplanationPrompt(sector = {}) {
     .slice(0, 5)
   return [
     `请解释A股概念板块“${name}”${code ? `（${code}）` : ''}。`,
-    '请优先调用 web_news 联网搜索核验公开资料，并只回答概念本身。',
-    '按“这是什么、为什么会形成这个概念、通常包含哪些业务、容易误解什么”四部分简洁说明。',
-    stocks.length ? `当前真实成分股示例：${stocks.join('、')}。` : '',
+    '请优先调用 web_news 联网核验公开资料，只回答概念本身。',
+    '输出只能使用以下三个标题，不得增加开场白、结语或其他小节：',
+    '### 一句话看懂',
+    '用 1 句话说明它把哪类公司归在一起，以及共同业务或资源是什么，55 个汉字以内。',
+    '### 为什么形成',
+    '用 1 句话说明市场为何把它单独归类，聚焦真实产业驱动，70 个汉字以内。',
+    '### 怎么辨认',
+    '只写两条短句：“主要看：……”和“不要混同：……”，每条 45 个汉字以内。',
+    stocks.length
+      ? `成分股样本仅供核验概念边界：${stocks.join('、')}；不得逐只介绍或列出成分股。`
+      : '',
+    '正文总计不超过 220 个汉字。每个事实只说一次，不要铺陈完整产业链，不要罗列公司、产品或政策清单。',
     '不要分析当前涨跌、不要预测走势、不提供买卖建议。',
-    '使用清晰中文 Markdown，总长度控制在 800 字以内；具体外部事实标注对应证据编号。',
+    '使用简明中文 Markdown；需要引用时，把对应[证据N]放在相关短句末尾。',
   ].filter(Boolean).join('\n')
 }
 
