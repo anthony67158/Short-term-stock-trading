@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { planStore } from '../planStore'
+import { useTextOverflow } from '../useTextOverflow.js'
 import {
   STOCK_NOTE_MAX_LENGTH,
   normalizeStockNoteText,
@@ -7,25 +8,31 @@ import {
 import Icon from './Icon'
 
 export function StockNoteSummary({ code, name, text, onEdit }) {
+  const [noteRef, isNoteTruncated] = useTextOverflow(text)
   if (!text) return null
   return (
     <button
       type="button"
-      className="stock-note-summary"
+      className={
+        'stock-note-summary'
+        + (isNoteTruncated ? ' has-preview' : '')
+      }
       aria-label={`查看并编辑${name || code}的个人备注`}
       onClick={onEdit}
     >
       <Icon name="edit" size={12} />
       <span className="stock-note-summary-label">备注</span>
-      <span className="stock-note-summary-text">{text}</span>
+      <span ref={noteRef} className="stock-note-summary-text">{text}</span>
       <Icon name="chevronRight" size={12} />
-      <span
-        className="action-command-preview stock-note-preview"
-        aria-hidden="true"
-      >
-        <strong className="action-command-preview-label">完整备注</strong>
-        <span className="action-command-preview-text">{text}</span>
-      </span>
+      {isNoteTruncated && (
+        <span
+          className="action-command-preview stock-note-preview"
+          aria-hidden="true"
+        >
+          <strong className="action-command-preview-label">完整备注</strong>
+          <span className="action-command-preview-text">{text}</span>
+        </span>
+      )}
     </button>
   )
 }

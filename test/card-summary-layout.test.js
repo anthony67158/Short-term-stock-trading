@@ -81,11 +81,11 @@ test('省略的策略摘要在悬浮和键盘聚焦时显示高对比完整预�
   )
   assert.match(
     precision,
-    /\.action-command:focus-within \.action-command-preview\s*{[^}]*visibility:\s*visible[^}]*opacity:\s*1/s,
+    /\.action-command\.has-preview:focus-within \.action-command-preview\s*{[^}]*visibility:\s*visible[^}]*opacity:\s*1/s,
   )
   assert.match(
     precision,
-    /@media \(hover:\s*hover\) and \(pointer:\s*fine\)\s*{[\s\S]*?\.action-command:hover \.action-command-preview\s*{[^}]*visibility:\s*visible[^}]*opacity:\s*1/s,
+    /@media \(hover:\s*hover\) and \(pointer:\s*fine\)\s*{[\s\S]*?\.action-command\.has-preview:hover \.action-command-preview\s*{[^}]*visibility:\s*visible[^}]*opacity:\s*1/s,
   )
   assert.match(
     precision,

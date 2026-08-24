@@ -36,7 +36,7 @@ test('持仓卡保留备注入口且持仓与自选仅在有内容时显示摘�
   assert.match(component, /if \(!text\) return null/)
   assert.match(
     component,
-    /className="stock-note-summary"[\s\S]*?className="stock-note-summary-text"/,
+    /'stock-note-summary'[\s\S]*?has-preview[\s\S]*?className="stock-note-summary-text"/,
   )
   assert.match(
     detailStore,
@@ -59,7 +59,7 @@ test('卡片备注复用完整建议的高对比悬浮预览且不改变触屏�
   )
   assert.match(
     precision,
-    /@media \(hover:\s*hover\) and \(pointer:\s*fine\)\s*{[\s\S]*?\.stock-note-summary:hover \.action-command-preview\s*{[^}]*visibility:\s*visible[^}]*opacity:\s*1/s,
+    /@media \(hover:\s*hover\) and \(pointer:\s*fine\)\s*{[\s\S]*?\.stock-note-summary\.has-preview:hover \.action-command-preview\s*{[^}]*visibility:\s*visible[^}]*opacity:\s*1/s,
   )
   assert.match(
     precision,

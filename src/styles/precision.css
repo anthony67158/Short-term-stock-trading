@@ -2308,22 +2308,22 @@ html[data-theme="light"] .plan-cand.starred {
   font-weight: 650;
 }
 
-.action-command:focus-within {
+.action-command.has-preview:focus-within {
   z-index: var(--z-tooltip);
 }
 
-.action-command:focus-within .action-command-preview {
+.action-command.has-preview:focus-within .action-command-preview {
   visibility: visible;
   opacity: 1;
   transform: translateY(0);
   transition-delay: 0s;
 }
 
-.stock-note-summary:focus-visible {
+.stock-note-summary.has-preview:focus-visible {
   z-index: var(--z-tooltip);
 }
 
-.stock-note-summary:focus-visible .action-command-preview {
+.stock-note-summary.has-preview:focus-visible .action-command-preview {
   visibility: visible;
   opacity: 1;
   transform: translateY(0);
@@ -4283,29 +4283,29 @@ html[data-theme="light"] .plan-cand.starred {
     background: color-mix(in oklch, var(--color-accent) 6%, var(--color-paper-3));
   }
 
-  .action-command:hover {
+  .action-command.has-preview:hover {
     z-index: var(--z-tooltip);
   }
 
-  .action-command:hover .action-command-preview {
+  .action-command.has-preview:hover .action-command-preview {
     visibility: visible;
     opacity: 1;
     transform: translateY(0);
     transition-delay: 0s;
   }
 
-  .stock-note-summary:hover {
+  .stock-note-summary.has-preview:hover {
     z-index: var(--z-tooltip);
   }
 
-  .stock-note-summary:hover .action-command-preview {
+  .stock-note-summary.has-preview:hover .action-command-preview {
     visibility: visible;
     opacity: 1;
     transform: translateY(0);
     transition-delay: 0s;
   }
 
-  .action-command:hover .action-command-text {
+  .action-command.has-preview:hover .action-command-text {
     color: var(--color-accent);
   }
 

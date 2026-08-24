@@ -13,6 +13,7 @@ import AdviceGenerationStatus, { useAdviceGeneration } from './AdviceGenerationS
 import ExecutionQueue from './ExecutionQueue'
 import { AlertForm } from './AlertCenter'
 import { useMediaQuery, usePolling, useSwipe } from '../hooks'
+import { useTextOverflow } from '../useTextOverflow.js'
 import { callAIStream } from '../ai'
 import { api } from '../apiBase'
 import { planStore, usePlanStore, calcBuyFee, calcSellFee, computeTFlows, computePortfolio, sortHoldingsByProfit, livePositionOf, t1StatusOf, advicePlan } from '../planStore'
@@ -590,19 +591,30 @@ function EmptyActionLevels() {
 function ActionCommand({ view, onOpen }) {
   const instruction = view.instruction || '等待下一步执行条件'
   const quantity = actionQtyLabel(view.quantity)
+  const [instructionRef, isInstructionTruncated] =
+    useTextOverflow(instruction)
 
   return (
-    <div className="action-command">
+    <div
+      className={
+        'action-command'
+        + (isInstructionTruncated ? ' has-preview' : '')
+      }
+    >
       <span className="action-command-badge">
         <Icon name="spark" size={10} />
         <span>{view.action}</span>
         {quantity && <strong className="action-command-qty">{quantity}</strong>}
       </span>
-      <span className="action-command-text">{instruction}</span>
-      <span className="action-command-preview" aria-hidden="true">
-        <strong className="action-command-preview-label">完整操作建议</strong>
-        <span className="action-command-preview-text">{instruction}</span>
+      <span ref={instructionRef} className="action-command-text">
+        {instruction}
       </span>
+      {isInstructionTruncated && (
+        <span className="action-command-preview" aria-hidden="true">
+          <strong className="action-command-preview-label">完整操作建议</strong>
+          <span className="action-command-preview-text">{instruction}</span>
+        </span>
+      )}
       <button
         type="button"
         className="action-command-open"
