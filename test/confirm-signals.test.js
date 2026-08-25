@@ -6,6 +6,7 @@ import {
   deterministicJudge,
   intradayPrimitives,
   JUDGE_MAX_TOKENS,
+  judgePriceContractGate,
   judgeConfirmation,
 } from '../api/_confirm.js'
 
@@ -114,6 +115,48 @@ test('Judge只生成交易时机结论，不再重复生成知行合一评分', 
   assert.match(prompt, /"reason":"一句话中文理由"/)
   assert.doesNotMatch(prompt, /knowledgeAction|知行合一|可执行性/)
   assert.ok(JUDGE_MAX_TOKENS <= 160)
+})
+
+test('Judge拒绝与价格契约不一致的预警价', () => {
+  const advice = {
+    priceContract: {
+      schemaVersion: 'advice-price-contract.v1',
+      validationStatus: 'VERIFIED',
+      levels: [{
+        key: 'entry',
+        field: 'buyPrice',
+        purpose: 'ENTRY',
+        price: 10,
+        direction: 'LTE',
+        status: 'PENDING',
+        strict: true,
+        basis: 'technical.buyZone.high',
+        basisPrice: 10,
+        basisDistancePct: 0,
+        tolerancePct: 1,
+      }],
+      allPricesStrict: true,
+      issues: [],
+      review: { operator: 'ALL', conditions: [], allMet: false },
+    },
+  }
+
+  assert.deepEqual(
+    judgePriceContractGate({ note: '买点', op: 'lte', value: 10.01 }, advice),
+    {
+      allowed: false,
+      reason: '预警价与已验证价格契约不一致',
+      expectedPrice: 10,
+    },
+  )
+  assert.equal(
+    judgePriceContractGate({
+      note: '买点',
+      op: 'lte',
+      value: 10,
+    }, advice).allowed,
+    true,
+  )
 })
 
 test('买点下方持续走弱时客观判定为失效', () => {

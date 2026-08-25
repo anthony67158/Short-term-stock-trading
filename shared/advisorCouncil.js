@@ -1,4 +1,9 @@
 import { sanitizeTradeProposal } from './tradeProposal.js'
+import {
+  advicePriceLevel,
+  advicePriceLevelForIntent,
+  sanitizedAdvicePriceContract,
+} from './advicePriceContract.js'
 
 const ROLES = new Set(['researcher', 'risk_officer', 'skeptic'])
 const VERDICTS = new Set(['support', 'oppose', 'abstain'])
@@ -52,6 +57,7 @@ export function proposalFromAdvice({
   advice = {},
 } = {}) {
   const actionText = String(advice.action || advice.stance || '')
+  const priceContract = sanitizedAdvicePriceContract(advice)
   let action = null
   let entryPrice = null
   let triggerOp = null
@@ -78,14 +84,26 @@ export function proposalFromAdvice({
     quantity = handsOf(advice.opQty)
   }
   if (!action) return null
+  const contractEntry = advicePriceLevelForIntent(advice, action)
+  if (priceContract && !contractEntry) return null
+  const contractTarget = advicePriceLevel(advice, 'target')
+  const contractStop = advicePriceLevel(advice, 'stop')
+  if (contractEntry) {
+    entryPrice = contractEntry.price
+    triggerOp = contractEntry.direction === 'GTE' ? 'gte' : 'lte'
+  }
   return sanitizeTradeProposal({
     id: `council_${code}_${action}`,
     code,
     name,
     action,
     entryPrice,
-    targetPrice: advice.targetPrice,
-    stopPrice: advice.stopPrice,
+    targetPrice: priceContract
+      ? contractTarget?.price
+      : advice.targetPrice,
+    stopPrice: priceContract
+      ? contractStop?.price
+      : advice.stopPrice,
     qty: quantity,
     triggerOp,
     reason: advice.reason || advice.actionPlan,

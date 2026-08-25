@@ -42,6 +42,80 @@ test('云端买入建议会生成候选买点预警', () => {
   assert.equal(data.plan[0].alertSyncedPrice, 1400)
 })
 
+test('新建议预警只采用价格契约中的精确执行价', () => {
+  const data = {
+    plan: [{ code: '600519', name: '贵州茅台' }],
+    holding: [],
+    alerts: [],
+    settings: {},
+  }
+
+  projectAdviceAlerts(data, '600519', {
+    name: '贵州茅台',
+    action: '立即买入',
+    buyPrice: 1400,
+    priceContract: {
+      schemaVersion: 'advice-price-contract.v1',
+      validationStatus: 'VERIFIED',
+      levels: [{
+        key: 'entry',
+        field: 'buyPrice',
+        purpose: 'ENTRY',
+        price: 1398.5,
+        direction: 'LTE',
+        status: 'PENDING',
+        strict: true,
+        basis: 'technical.buyZone.high',
+        basisPrice: 1398.5,
+        basisDistancePct: 0,
+        tolerancePct: 1,
+      }],
+      allPricesStrict: true,
+      issues: [],
+      review: { operator: 'ALL', conditions: [], allMet: false },
+    },
+  }, { now, idFactory: ids })
+
+  assert.equal(data.alerts.length, 1)
+  assert.equal(data.alerts[0].value, 1398.5)
+  assert.equal(
+    data.alerts[0].judgeContext.priceContract.levels[0].price,
+    1398.5,
+  )
+})
+
+test('价格契约未通过时不得创建交易预警', () => {
+  const data = {
+    plan: [{ code: '600519', name: '贵州茅台' }],
+    holding: [],
+    alerts: [],
+    settings: {},
+  }
+
+  projectAdviceAlerts(data, '600519', {
+    action: '立即买入',
+    buyPrice: 1400,
+    priceContract: {
+      schemaVersion: 'advice-price-contract.v1',
+      validationStatus: 'REJECTED',
+      levels: [{
+        key: 'entry',
+        field: 'buyPrice',
+        purpose: 'ENTRY',
+        price: 1400,
+        direction: 'LTE',
+        status: 'PENDING',
+        strict: false,
+      }],
+      allPricesStrict: false,
+      issues: ['buyPrice缺少邻近行情、技术或量化锚点'],
+      review: { operator: 'ALL', conditions: [], allMet: false },
+    },
+  }, { now, idFactory: ids })
+
+  assert.equal(data.alerts.length, 0)
+})
+
 test('未持仓自选股只生成买点预警，禁止生成加仓或减仓预警', () => {
   const data = {
     plan: [{ code: '600519', name: '贵州茅台' }],

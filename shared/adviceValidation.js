@@ -1,3 +1,5 @@
+import { buildAdvicePriceContract } from './advicePriceContract.js'
+
 function numberOf(value) {
   if (value == null || value === '') return null
   const match = String(value).replace(/,/g, '').match(/-?\d+(?:\.\d+)?/)
@@ -14,18 +16,21 @@ function roundMoney(value) {
   return Math.round(Number(value) || 0)
 }
 
-function clampPrice(value, low, high, issues, label) {
+function validatePrice(value, low, high, issues, label) {
   const price = numberOf(value)
-  if (!(price > 0)) return null
+  if (!(price > 0)) {
+    issues.push(`${label}不是有效正数`)
+    return null
+  }
   if (low > 0 && price < low) {
     issues.push(`${label}低于合法价带`)
-    return low
+    return null
   }
   if (high > 0 && price > high) {
     issues.push(`${label}高于合法价带`)
-    return high
+    return null
   }
-  return price
+  return +(price < 10 ? price.toFixed(3) : price.toFixed(2))
 }
 
 function appendIssue(result, issues) {
@@ -56,11 +61,77 @@ export function reconcileAdviceNumbers({ mode, result: input, payload = {} } = {
   const low = numberOf(quote.limitDownPrice)
   const high = numberOf(quote.limitUpPrice)
   let valid = true
+  const labels = {
+    buyPrice: '买入价',
+    addPrice: '加仓价',
+    reducePrice: '减仓价',
+    stopPrice: '止损价',
+    targetPrice: '目标价',
+    watchPrice: '观察价',
+    leg1Price: '第一腿价',
+    leg2Price: '第二腿价',
+  }
+  const fields = mode === 'buy_advice'
+    ? ['buyPrice', 'stopPrice', 'targetPrice', 'watchPrice']
+    : mode === 't_advice'
+      ? ['leg1Price', 'leg2Price', 'stopPrice', 'targetPrice']
+      : ['addPrice', 'reducePrice', 'stopPrice', 'targetPrice']
+  for (const field of fields) {
+    if (result[field] == null) continue
+    const supplied = result[field]
+    result[field] = validatePrice(
+      result[field],
+      low,
+      high,
+      issues,
+      labels[field],
+    )
+    if (supplied != null && result[field] == null) valid = false
+  }
+  const initialPriceContract = buildAdvicePriceContract({
+    mode,
+    advice: result,
+    payload,
+    strategyGate: payload.strategyGate,
+  })
+  if (initialPriceContract.validationStatus !== 'UNAVAILABLE') {
+    issues.push(...initialPriceContract.issues)
+    if (
+      result.buyZone != null
+      && initialPriceContract.zones?.buy?.strict !== true
+    ) {
+      valid = false
+      result.buyZone = null
+      issues.push('买入区间未通过价格依据校验')
+    }
+    for (const level of initialPriceContract.levels) {
+      if (level.strict) continue
+      valid = false
+      result[level.field] = null
+      issues.push(
+        `${labels[level.field] || level.field}未通过价格依据校验`,
+      )
+    }
+  }
+  const actionText = String(result.action || result.stance || '')
+  const watchLevel = initialPriceContract.levels.find(
+    (level) => level.key === 'watch' && level.strict,
+  )
+  if (
+    /观望|等待|回避|不建议|暂不/.test(actionText)
+    && watchLevel?.status === 'MET'
+  ) {
+    valid = false
+    result.watchPrice = null
+    const remaining = payload.strategyGate?.productionEligible === false
+      ? '策略与风险条件仍未通过'
+      : '其余量价条件仍未确认'
+    result.actionPlan = `价格条件已满足，但${remaining}，暂不买入`
+    result.timing = result.actionPlan
+    issues.push('观察价在生成时已经满足，已撤销过期价格条件')
+  }
 
   if (mode === 'buy_advice') {
-    result.buyPrice = clampPrice(result.buyPrice, low, high, issues, '买入价')
-    result.stopPrice = clampPrice(result.stopPrice, low, high, issues, '止损价')
-    result.targetPrice = clampPrice(result.targetPrice, low, high, issues, '目标价')
     const action = String(result.action || '')
     const actionable = !/观望|不建议|等待/.test(action)
     if (actionable && (!(result.buyPrice > 0) || !(result.stopPrice > 0) || !(result.targetPrice > 0)
@@ -125,10 +196,6 @@ export function reconcileAdviceNumbers({ mode, result: input, payload = {} } = {
   }
 
   if (mode === 'hold_advice' || mode === 'review') {
-    result.addPrice = clampPrice(result.addPrice, low, high, issues, '加仓价')
-    result.reducePrice = clampPrice(result.reducePrice, low, high, issues, '减仓价')
-    result.stopPrice = clampPrice(result.stopPrice, low, high, issues, '止损价')
-    result.targetPrice = clampPrice(result.targetPrice, low, high, issues, '目标价')
     if (result.stopPrice > 0 && result.targetPrice > 0 && result.stopPrice >= result.targetPrice) {
       valid = false
       issues.push('止损价不得高于或等于目标价')
@@ -205,6 +272,40 @@ export function reconcileAdviceNumbers({ mode, result: input, payload = {} } = {
     }
   }
 
+  if (mode === 't_advice') {
+    const first = numberOf(result.leg1Price)
+    const second = numberOf(result.leg2Price)
+    const validLegs = result.dir === 'positive'
+      ? first > 0 && second > first
+      : result.dir === 'reverse'
+        ? first > 0 && second > 0 && second < first
+        : true
+    if (!validLegs) {
+      valid = false
+      result.advisable = '不建议'
+      result.dir = 'none'
+      result.dirLabel = '暂不做T'
+      result.leg1Price = null
+      result.leg2Price = null
+      result.suggestQty = 0
+      issues.push('做T两腿价格关系非法，已取消本次计划')
+    }
+  }
+
+  const finalPriceContract = buildAdvicePriceContract({
+    mode,
+    advice: result,
+    payload,
+    strategyGate: payload.strategyGate,
+  })
+  result.priceContract = {
+    ...finalPriceContract,
+    issues: [...new Set([
+      ...initialPriceContract.issues,
+      ...finalPriceContract.issues,
+      ...issues.filter((item) => /价|价格|区间/.test(item)),
+    ])],
+  }
   appendIssue(result, issues)
   return { result, issues, valid }
 }

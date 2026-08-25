@@ -49,6 +49,81 @@ test('军师结构化建议可编译为统一交易提案', () => {
   assert.equal(proposal.triggerOp, 'lte')
 })
 
+test('委员会交易提案只采用价格契约中的精确价位', () => {
+  const proposal = proposalFromAdvice({
+    code: '600519',
+    name: '贵州茅台',
+    mode: 'buy_advice',
+    advice: {
+      action: '立即买入',
+      buyPrice: 10.2,
+      stopPrice: 9.4,
+      targetPrice: 11.2,
+      planQty: 2,
+      priceContract: {
+        schemaVersion: 'advice-price-contract.v1',
+        validationStatus: 'VERIFIED',
+        levels: [
+          {
+            key: 'entry',
+            field: 'buyPrice',
+            purpose: 'ENTRY',
+            price: 10,
+            direction: 'LTE',
+            strict: true,
+          },
+          {
+            key: 'stop',
+            field: 'stopPrice',
+            purpose: 'RISK',
+            price: 9.5,
+            direction: 'LTE',
+            strict: true,
+          },
+          {
+            key: 'target',
+            field: 'targetPrice',
+            purpose: 'OBJECTIVE',
+            price: 11,
+            direction: 'GTE',
+            strict: true,
+          },
+        ],
+        allPricesStrict: true,
+        issues: [],
+        review: { operator: 'ALL', conditions: [], allMet: false },
+      },
+    },
+  })
+
+  assert.equal(proposal.entryPrice, 10)
+  assert.equal(proposal.stopPrice, 9.5)
+  assert.equal(proposal.targetPrice, 11)
+})
+
+test('委员会拒绝价格契约未通过的交易提案', () => {
+  const proposal = proposalFromAdvice({
+    code: '600519',
+    name: '贵州茅台',
+    mode: 'buy_advice',
+    advice: {
+      action: '立即买入',
+      buyPrice: 10,
+      planQty: 2,
+      priceContract: {
+        schemaVersion: 'advice-price-contract.v1',
+        validationStatus: 'REJECTED',
+        levels: [],
+        allPricesStrict: false,
+        issues: ['buyPrice缺少可核验依据'],
+        review: { operator: 'ALL', conditions: [], allMet: false },
+      },
+    },
+  })
+
+  assert.equal(proposal, null)
+})
+
 test('当前策略REJECT时买入委员会只能记录影子阻断结果', () => {
   const result = compileAdvisorCouncil({
     opinions,

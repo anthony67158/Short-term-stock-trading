@@ -50,8 +50,7 @@ const level = (key, label, price, tone, active) => {
 function levelsFor(kind, advice, triggerDirection = '') {
   const entryPrice = advice.buyPrice ?? advice.addPrice
   if (kind === 'wait') {
-    return [level('watch', '重新评估', advice.watchPrice, 'neutral', true)]
-      .filter(Boolean)
+    return []
   }
   if (kind === 'buy') {
     return [
@@ -105,7 +104,9 @@ function triggerFor(kind, levels, triggerDirection = '') {
     return {
       direction: 'inactive',
       price: primary?.price ?? null,
-      label: '重新评估',
+      label: '等待确认',
+      stateLabel: '保持观望',
+      detailLabel: '等待量价确认',
       metricLabel: '暂不下单',
     }
   }

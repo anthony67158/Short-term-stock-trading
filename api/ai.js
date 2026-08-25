@@ -2035,22 +2035,22 @@ export default async function handler(req, res) {
           result.suggestQty = hq;
           notes.push(`反T先卖手数不能超过持仓${hq}手,已校正`);
         }
-        // (2) 价格必须落在 [跌停价, 涨停价] 合法带内,越界则夹回边界
-        const clampPx = (v, label) => {
+        // (2) 越界价格直接作废，禁止把模型错误值静默改造成另一个可执行价。
+        const validatePx = (v, label) => {
           const x = Number(v);
           if (!Number.isFinite(x)) return v;
-          if (Number.isFinite(lo) && x < lo) { notes.push(`${label}低于跌停价,已上调至跌停价${lo}`); return lo; }
-          if (Number.isFinite(hi) && x > hi) { notes.push(`${label}高于涨停价,已下调至涨停价${hi}`); return hi; }
+          if (Number.isFinite(lo) && x < lo) { notes.push(`${label}低于跌停价,已作废`); return null; }
+          if (Number.isFinite(hi) && x > hi) { notes.push(`${label}高于涨停价,已作废`); return null; }
           return x;
         };
         // hold_advice / review 共用价格字段
-        if (result.addPrice != null) result.addPrice = clampPx(result.addPrice, '加仓价');
-        if (result.reducePrice != null) result.reducePrice = clampPx(result.reducePrice, '减仓价');
-        if (result.stopPrice != null) result.stopPrice = clampPx(result.stopPrice, '止损价');
-        if (result.targetPrice != null) result.targetPrice = clampPx(result.targetPrice, '目标价');
+        if (result.addPrice != null) result.addPrice = validatePx(result.addPrice, '加仓价');
+        if (result.reducePrice != null) result.reducePrice = validatePx(result.reducePrice, '减仓价');
+        if (result.stopPrice != null) result.stopPrice = validatePx(result.stopPrice, '止损价');
+        if (result.targetPrice != null) result.targetPrice = validatePx(result.targetPrice, '目标价');
         // t_advice 两腿价
-        if (result.leg1Price != null) result.leg1Price = clampPx(result.leg1Price, '第一腿价');
-        if (result.leg2Price != null) result.leg2Price = clampPx(result.leg2Price, '第二腿价');
+        if (result.leg1Price != null) result.leg1Price = validatePx(result.leg1Price, '第一腿价');
+        if (result.leg2Price != null) result.leg2Price = validatePx(result.leg2Price, '第二腿价');
         // review 关键价 support/resistance 不改(仅为参考位),但 keyLevel 是文案,不做数字夹取
 
         // (3) ★金额严格重算·不信任模型心算★
@@ -2113,7 +2113,7 @@ export default async function handler(req, res) {
         if (notes.length) result.serverAdjust = notes.join('；');
       } catch { /* 兜底纠偏失败不影响主流程 */ }
     }
-    if (['buy_advice', 'hold_advice', 'review'].includes(mode) && result && typeof result === 'object' && !result.raw) {
+    if (['buy_advice', 'hold_advice', 'review', 't_advice'].includes(mode) && result && typeof result === 'object' && !result.raw) {
       result = reconcileAdviceNumbers({ mode, result, payload }).result;
     }
     if (
@@ -2210,6 +2210,7 @@ export default async function handler(req, res) {
         strategyRoute,
         accountCircuitBreaker,
       });
+      result.priceContract = result.decisionPlan.priceContract;
       result.executionPlan = compileExecutionPlan({
         decisionPlan: result.decisionPlan,
         code: payload.code,

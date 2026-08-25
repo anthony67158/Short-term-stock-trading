@@ -525,12 +525,13 @@ function ActionProgress({ trigger, currentPrice, progress: preparedProgress }) {
         <div className="action-progress-summary">
           <span className="action-direction">
             <Icon name="activity" size={13} />
-            等待重新评估
+            {trigger.stateLabel || '保持观望'}
           </span>
-          <span className="action-current-marker">尚未触发</span>
+          <span className="action-current-marker">
+            {trigger.detailLabel || '等待量价确认'}
+          </span>
           <b className="action-progress-target">{trigger.metricLabel}</b>
         </div>
-        <div className="action-progress-track" />
       </div>
     )
   }
@@ -653,14 +654,16 @@ function AdviceActionPanel({ view, currentPrice, onPrompt }) {
           ))}
         </div>
       )}
-      {view.levels.length === 0 && <EmptyActionLevels />}
+      {view.levels.length === 0 && view.kind !== 'wait' && (
+        <EmptyActionLevels />
+      )}
       <ActionProgress trigger={view.trigger} currentPrice={currentPrice} progress={progress} />
     </div>
   )
 }
 
 // 候选卡的动作、价位、手数和进度只由同一份 AI 建议驱动。
-// 观望时撤下买入控件与旧买点进度，只显示重新评估条件。
+// 观望时撤下买入控件与旧买点进度，只显示不可执行状态和完整文字条件。
 function CandDecision({ p, q }) {
   const [, force] = useState(0)
   useEffect(() => subscribeAdvice(() => force((n) => n + 1)), [])
@@ -673,7 +676,12 @@ function CandDecision({ p, q }) {
     : null
   const actionable = baseView?.kind === 'buy'
     && baseView.actionable !== false
-  const aiPrice = actionable ? roundActionPrice(advice?.buyPrice) : null
+  const contractEntry = baseView?.levels.find(
+    (level) => level.key === 'entry',
+  )
+  const aiPrice = actionable
+    ? roundActionPrice(contractEntry?.price)
+    : null
   const aiQty = actionable
     ? actionHands(advice?.planQtyNum ?? advice?.planQty)
     : null
@@ -803,9 +811,9 @@ function CandDecision({ p, q }) {
                     <ActionLevel key={item.key} level={item} reached={item.key === reachedKey} />
                   ))}
                 </div>
-              ) : (
+              ) : view.kind !== 'wait' ? (
                 <EmptyActionLevels />
-              )}
+              ) : null}
               <ActionProgress trigger={progress} currentPrice={q?.price} progress={progressState} />
             </>
           )}

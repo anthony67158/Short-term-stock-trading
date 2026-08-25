@@ -12,6 +12,10 @@ import {
   evaluateStrategySignalV2,
   STRATEGY_SPEC_V2_SCHEMA_VERSION,
 } from './strategySpecV2.js'
+import {
+  ADVICE_PRICE_CONTRACT_SCHEMA_VERSION,
+  buildAdvicePriceContract,
+} from './advicePriceContract.js'
 import { executionTriggerDirection } from './executionTrigger.js'
 
 export const DECISION_PLAN_SCHEMA_VERSION = 'decision-plan.v2'
@@ -367,6 +371,32 @@ export function compileDecisionPlan({
               )
       )
     : null
+  const generatedPriceContract = buildAdvicePriceContract({
+    mode,
+    advice,
+    payload,
+    evidenceSnapshot,
+    strategyGate,
+    action: requestedAction,
+    requireStrategyApproval: riskIncreasing && !productionEligible,
+  })
+  const suppliedPriceContract = advice.priceContract?.schemaVersion
+    === ADVICE_PRICE_CONTRACT_SCHEMA_VERSION
+    ? advice.priceContract
+    : null
+  const priceContract = suppliedPriceContract ? {
+    ...generatedPriceContract,
+    validationStatus: (
+      suppliedPriceContract.validationStatus === 'REJECTED'
+      || generatedPriceContract.validationStatus === 'REJECTED'
+    ) ? 'REJECTED' : generatedPriceContract.validationStatus,
+    allPricesStrict: suppliedPriceContract.allPricesStrict === true
+      && generatedPriceContract.allPricesStrict === true,
+    issues: [...new Set([
+      ...(suppliedPriceContract.issues || []),
+      ...generatedPriceContract.issues,
+    ])],
+  } : generatedPriceContract
   const blockedReasons = []
   const freshness = evidenceSnapshot?.freshness || {}
   const missingRequiredSources = Array.isArray(
@@ -476,6 +506,19 @@ export function compileDecisionPlan({
   }
   if (riskIncreasing && !(referencePrice > 0 && stopPrice > 0)) {
     blockedReasons.push('缺少有效入场价或止损价')
+  }
+  if (riskReducing && !(referencePrice > 0)) {
+    blockedReasons.push('缺少有效卖出价或止损价')
+  }
+  if (
+    requestedAction !== 'WATCH'
+    && requestedAction !== 'HOLD'
+    && suppliedPriceContract
+    && priceContract.validationStatus === 'REJECTED'
+  ) {
+    blockedReasons.push(
+      `关键执行价缺少可核验依据：${priceContract.issues.join('；')}`,
+    )
   }
   if (riskIncreasing && stopPrice >= referencePrice) {
     blockedReasons.push('止损价必须低于入场价')
@@ -641,6 +684,12 @@ export function compileDecisionPlan({
     targetPrice,
     targetWeightPct,
     triggerDirection,
+    priceLevels: priceContract.levels.map((level) => ({
+      key: level.key,
+      price: level.price,
+      direction: level.direction,
+      strict: level.strict,
+    })),
   }
   return {
     schemaVersion: DECISION_PLAN_SCHEMA_VERSION,
@@ -659,6 +708,8 @@ export function compileDecisionPlan({
       'BAR_5M_CLOSED',
       'ACCOUNT_CHANGED',
       'NEWS_MATERIAL',
+      'PRICE_LEVEL_CROSSED',
+      'STRATEGY_GATE_CHANGED',
     ],
     marketRegime: {
       schemaVersion: market.schemaVersion || null,
@@ -692,9 +743,17 @@ export function compileDecisionPlan({
     },
     prices: {
       reference: round(referencePrice, 3),
+      current: priceContract.currentPrice,
+      buy: round(advice.buyPrice, 3),
+      add: round(advice.addPrice, 3),
+      reduce: round(advice.reducePrice, 3),
       stop: round(stopPrice, 3),
       target: round(targetPrice, 3),
+      watch: round(advice.watchPrice, 3),
+      leg1: round(advice.leg1Price, 3),
+      leg2: round(advice.leg2Price, 3),
     },
+    priceContract,
     triggerDirection,
     risk: {
       budgetPct: capacity.riskPct,

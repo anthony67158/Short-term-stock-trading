@@ -5,6 +5,10 @@ import { appendExecution, createRecommendation, decisionLedgerStats, removeExecu
 import { proposalAlertSpec, sanitizeTradeProposal } from '../shared/tradeProposal.js'
 import { applyT1ToAlert } from '../shared/t1AdvicePolicy.js'
 import { adviceSupportsIntent, buildJudgeAdviceContext } from '../shared/judgeAdviceContext.js'
+import {
+  advicePriceLevel,
+  sanitizedAdvicePriceContract,
+} from '../shared/advicePriceContract.js'
 import { executionTriggerDirection } from '../shared/executionTrigger.js'
 import {
   positionGateForAlert,
@@ -150,8 +154,13 @@ export function advicePlan(code) {
     const a = getAdvice(code, expectedMode)
     const adv = a && a.advice
     if (!adv) return null
-    const tp = adv.targetPrice != null && !isNaN(adv.targetPrice) ? roundPx(adv.targetPrice) : null
-    const sl = adv.stopPrice != null && !isNaN(adv.stopPrice) ? roundPx(adv.stopPrice) : null
+    const priceContract = sanitizedAdvicePriceContract(adv)
+    const targetLevel = advicePriceLevel(adv, 'target')
+    const stopLevel = advicePriceLevel(adv, 'stop')
+    const tpSource = priceContract ? targetLevel?.price : adv.targetPrice
+    const slSource = priceContract ? stopLevel?.price : adv.stopPrice
+    const tp = tpSource != null && !isNaN(tpSource) ? roundPx(tpSource) : null
+    const sl = slSource != null && !isNaN(slSource) ? roundPx(slSource) : null
     if (tp == null && sl == null) return null
     // 计划「理由」同源:优先具体操作计划,其次一句话结论/理由/时机,供持仓卡计划自动跟随
     const reason = adv.actionPlan || adv.title || adv.reason || adv.timing || ''
@@ -2462,14 +2471,19 @@ export const planStore = {
   //   alertSyncedPrice(记在候选上): 上次自动同步过的买价 —— 相同价不重复写,用户删掉也不会被反复自动加回;
   //   AI 买价变化时(≠ alertSyncedPrice)才会重新同步/重新武装。
   autoSyncCandAlert(code, name, buyPrice, advice = null) {
+    const priceContract = sanitizedAdvicePriceContract(advice)
+    const contractEntry = advicePriceLevel(advice, 'entry')
+    const exactBuyPrice = priceContract
+      ? contractEntry?.price
+      : buyPrice
     const adviceNotReady = (
       advice?.decisionPlan?.schemaVersion === 'decision-plan.v2'
       && advice.decisionPlan.actionability !== 'READY'
     )
     if (
       !advice
-      || buyPrice == null
-      || isNaN(buyPrice)
+      || exactBuyPrice == null
+      || isNaN(exactBuyPrice)
       || adviceNotReady
     ) {
       this.clearCandBuyAlert(code)
@@ -2478,7 +2492,7 @@ export const planStore = {
     if (state.settings && state.settings.aiAutoAlert === false) return // 全局关闭 AI 自动预警
     const judgeContext = buildJudgeAdviceContext(advice || {})
     const triggerZone = judgeContext.addZone
-    const v = roundPx(triggerZone?.high ?? buyPrice)
+    const v = roundPx(contractEntry?.price ?? triggerZone?.high ?? exactBuyPrice)
     const p = state.plan.find((x) => x.code === code)
     if (!p) return
     if (p.alertMuted) return                                            // 用户删过买点预警 → 永久不再自动加回
@@ -2494,12 +2508,12 @@ export const planStore = {
             op: 'lte',
             value: Number(v),
             ...(
-              triggerZone
+              triggerZone || priceContract
                 ? { triggerZone, judgeContext }
                 : {}
             ),
             ...(
-              triggerZone
+              (triggerZone || priceContract)
               && a.judgeContext?.planId === judgeContext.planId
                 ? {}
                 : {
@@ -2517,7 +2531,7 @@ export const planStore = {
         id: uid(), enabled: true, createdAt: Date.now(), triggeredAt: null, triggeredMsg: '',
         code, name, type: 'price', op: 'lte', value: Number(v), note: '买点', candCode: code,
         phase: 'armed',
-        ...(triggerZone ? { triggerZone, judgeContext } : {}),
+        ...((triggerZone || priceContract) ? { triggerZone, judgeContext } : {}),
       }, ...(state.alerts || [])]
     }
     state.plan = state.plan.map((x) => x.code === code ? { ...x, alertSyncedPrice: v } : x)
@@ -2582,18 +2596,24 @@ export const planStore = {
     const opQty = adv.opQty || ''
     const timing = adv.exitTiming || adv.actionPlan || ''
     const judgeContext = buildJudgeAdviceContext(adv)
+    const priceContract = sanitizedAdvicePriceContract(adv)
     const t1 = liveStatus
     const old = (state.alerts || []).filter((a) => a.actCode === code)
     const rebuilt = []
     const build = (kind, op, price, muted) => {
       if (muted) return
+      const contractLevel = advicePriceLevel(adv, kind)
+        || (kind === 'reduce'
+          ? advicePriceLevel(adv, 'target')
+          : null)
+      if (priceContract && !contractLevel) return
       const triggerZone = kind === 'add'
         ? judgeContext.addZone
         : judgeContext.reduceZone
       const zoneTrigger = kind === 'add'
         ? triggerZone?.high
         : triggerZone?.low
-      const triggerPrice = zoneTrigger ?? price
+      const triggerPrice = contractLevel?.price ?? zoneTrigger ?? price
       if (triggerPrice == null || isNaN(triggerPrice)) return
       const v = roundPx(triggerPrice)
       if (v == null || !(Number(v) > 0)) return

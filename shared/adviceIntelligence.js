@@ -46,6 +46,7 @@ export function adviceEvidenceDigest(snapshot = {}) {
   const forecast = quant.forecast || {}
   const resonance = evidence.decisionSignals?.resonance || {}
   const account = snapshot?.account || {}
+  const strategyGate = snapshot?.policy?.strategyGate || null
   return {
     account: {
       holdQty: finite(account.holdQty),
@@ -99,6 +100,22 @@ export function adviceEvidenceDigest(snapshot = {}) {
       score: finite(resonance.score),
       hasNegNews: resonance.hasNegNews === true,
     },
+    ...(strategyGate ? {
+      policy: {
+        strategyGate: {
+          specVersion: text(strategyGate.specVersion, 120),
+          productionEligible:
+            strategyGate.productionEligible === true,
+          decision: text(strategyGate.decision, 30),
+          blockerCodes: (Array.isArray(strategyGate.blockerCodes)
+            ? strategyGate.blockerCodes
+            : [])
+            .map((item) => text(item, 80))
+            .filter(Boolean)
+            .sort(),
+        },
+      },
+    } : {}),
   }
 }
 
@@ -109,6 +126,17 @@ function materialChange(previous, current, previousAdvice) {
     previousAdvice,
   })
   if (priceChange.changed) return priceChange
+  if (
+    previous?.policy?.strategyGate
+    && current?.policy?.strategyGate
+    && JSON.stringify(previous.policy.strategyGate)
+      !== JSON.stringify(current.policy.strategyGate)
+  ) {
+    return {
+      changed: true,
+      reason: '策略审核状态发生变化',
+    }
+  }
   const withoutPrice = (value) => JSON.stringify({
     ...value,
     quote: {

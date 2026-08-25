@@ -187,7 +187,7 @@
           "tier": "now",
           "buyPrice": 10,
           "stopPrice": 9,
-          "targetPrice": 12,
+          "targetPrice": 10.8,
           "planQty": 10,
           "planAmount": 10000,
           "actionPlan": "回踩确认后买入",

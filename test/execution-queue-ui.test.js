@@ -25,6 +25,26 @@ test('持仓执行顶部只有一个可移除的手动操作计划入口', () =>
   assert.doesNotMatch(queue, /自动下单/)
 })
 
+test('候选卡买入框与预警只读取统一动作视图的契约价', () => {
+  const planTab = read('src/components/PlanTab.jsx')
+  const planStore = read('src/planStore.js')
+
+  assert.match(
+    planTab,
+    /const contractEntry = baseView\?\.levels\.find/,
+  )
+  assert.match(
+    planTab,
+    /roundActionPrice\(contractEntry\?\.price\)/,
+  )
+  assert.doesNotMatch(
+    planTab,
+    /const aiPrice = actionable \? roundActionPrice\(advice\?\.buyPrice\)/,
+  )
+  assert.match(planStore, /advicePriceLevel\(advice, 'entry'\)/)
+  assert.match(planStore, /contractEntry\?\.price \?\? triggerZone\?\.high/)
+})
+
 test('个股建议只保留一个主结论并把扩展信息收进详情', () => {
   const presentation = read('src/components/AdvicePresentation.jsx')
   const stockDetail = read('src/components/StockDetail.jsx')

@@ -1,5 +1,9 @@
 import { applyT1ToAlert } from './t1AdvicePolicy.js'
 import { adviceSupportsIntent, buildJudgeAdviceContext } from './judgeAdviceContext.js'
+import {
+  advicePriceLevel,
+  sanitizedAdvicePriceContract,
+} from './advicePriceContract.js'
 import { isAdviceReviewEnabled } from './adviceReviewPolicy.js'
 import { executionTriggerDirection } from './executionTrigger.js'
 
@@ -65,10 +69,21 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
   const name = advice.name || owner.name || code
   const projected = []
   const judgeContext = buildJudgeAdviceContext(advice)
+  const priceContract = sanitizedAdvicePriceContract(advice)
+  const oldProjected = alerts.filter(isOwnedAutoAlert)
 
   if (candidate && !liveHolder && !candidate.alertMuted) {
+    const contractLevel = advicePriceLevel(advice, 'entry')
+    if (priceContract && !contractLevel) {
+      data.alerts = rest
+      return oldProjected.length !== 0
+    }
     const triggerZone = judgeContext.addZone
-    const buyPrice = roundPrice(triggerZone?.high ?? advice.buyPrice)
+    const buyPrice = roundPrice(
+      contractLevel?.price
+      ?? triggerZone?.high
+      ?? advice.buyPrice,
+    )
     if (buyPrice != null) {
       const previous = alerts.find((a) => a && a.candCode === code)
       const samePlan = !!(
@@ -80,14 +95,16 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
         projected.push({
           ...previous,
           value: buyPrice,
-          ...(triggerZone ? { triggerZone, judgeContext } : {}),
+          ...(triggerZone ? { triggerZone } : {}),
+          ...((triggerZone || priceContract) ? { judgeContext } : {}),
         })
       } else {
         projected.push({
           ...baseAlert({ idFactory, now, code, name, op: 'lte', value: buyPrice, note: '买点' }),
           candCode: code,
           phase: 'armed',
-          ...(triggerZone ? { triggerZone, judgeContext } : {}),
+          ...(triggerZone ? { triggerZone } : {}),
+          ...((triggerZone || priceContract) ? { judgeContext } : {}),
         })
         changed = true
       }
@@ -104,13 +121,22 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
   const nextTradeDay = options.nextTradeDay || ''
   const buildAction = (kind, op, rawPrice, muted) => {
     if (muted) return
+    const contractLevel = advicePriceLevel(advice, kind)
+      || (kind === 'reduce'
+        ? advicePriceLevel(advice, 'target')
+        : null)
+    if (priceContract && !contractLevel) return
     const triggerZone = kind === 'add'
       ? judgeContext.addZone
       : judgeContext.reduceZone
     const zoneTrigger = kind === 'add'
       ? triggerZone?.high
       : triggerZone?.low
-    const value = roundPrice(zoneTrigger ?? rawPrice)
+    const value = roundPrice(
+      contractLevel?.price
+      ?? zoneTrigger
+      ?? rawPrice,
+    )
     if (value == null) return
     const actionQty = kind === 'add'
       ? (/加仓|补仓|买回|接回/.test(opQty) ? opQty : '')
@@ -183,7 +209,6 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
     )
   }
 
-  const oldProjected = alerts.filter(isOwnedAutoAlert)
   if (oldProjected.length !== projected.length) changed = true
   data.alerts = [...projected, ...rest]
   return changed

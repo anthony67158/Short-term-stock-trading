@@ -48,6 +48,48 @@ test('接近止损位时自动把持仓复核周期压缩到5分钟', () => {
   assert.equal(entry.advice.reviewCycle.nextReviewAt, now + 5 * 60000)
 })
 
+test('存在严格观望价时最多每5分钟检查一次是否穿越', () => {
+  const now = new Date('2026-08-10T02:00:00Z').getTime()
+  const entry = buildAdviceCacheEntry(null, {
+    mode: 'buy_advice',
+    reviewIntervalMin: 30,
+    advice: {
+      action: '观望',
+      watchPrice: 10.5,
+      priceContract: {
+        schemaVersion: 'advice-price-contract.v1',
+        validationStatus: 'VERIFIED',
+        levels: [{
+          key: 'watch',
+          field: 'watchPrice',
+          purpose: 'REVIEW_ONLY',
+          price: 10.5,
+          direction: 'GTE',
+          status: 'PENDING',
+          strict: true,
+        }],
+        allPricesStrict: true,
+        issues: [],
+        review: { operator: 'ALL', conditions: [], allMet: false },
+      },
+    },
+    meta: {
+      evidenceSnapshot: {
+        evidence: {
+          quote: { price: 10, pct: 0 },
+          technical: {
+            indicators: { atr: { atr: 0.2 } },
+          },
+        },
+      },
+    },
+  }, now)
+
+  assert.equal(entry.advice.reviewCycle.configuredIntervalMin, 30)
+  assert.equal(entry.advice.reviewCycle.intervalMin, 5)
+  assert.equal(entry.advice.reviewCycle.nextReviewAt, now + 5 * 60000)
+})
+
 test('午间到期的复核顺延到下午开盘', () => {
   const now = new Date('2026-08-10T03:25:00Z').getTime()
 

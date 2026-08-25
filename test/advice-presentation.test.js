@@ -154,6 +154,40 @@ test('长段关注价说明不挤入价格格且后续路径默认收进完整�
   )
 })
 
+test('被阻断的买入计划不把现价冒充买入价且只展示已验证观察价', () => {
+  const view = buildAdvicePresentation({
+    action: '观望',
+    actionPlan: '站上10.8元且策略审核通过后重新判断',
+    watchPrice: 10.8,
+    decisionPlan: {
+      schemaVersion: 'decision-plan.v2',
+      decisionId: 'decision.wait',
+      action: 'WATCH',
+      actionLabel: '观望',
+      actionability: 'BLOCKED',
+      blockedReasons: ['策略入场条件未通过'],
+      prices: {
+        reference: 10,
+        current: 10,
+        watch: 10.8,
+        stop: null,
+        target: null,
+      },
+      quantity: { lots: 0 },
+      costs: { estimatedNetAmount: 0 },
+      priceContract: {
+        schemaVersion: 'advice-price-contract.v1',
+        validationStatus: 'VERIFIED',
+      },
+    },
+  })
+
+  assert.deepEqual(view.levels.map((item) => [
+    item.key,
+    item.value,
+  ]), [['watch', '10.8']])
+})
+
 test('默认核心依据压缩为可扫读摘要而完整原文仍保留在建议数据中', () => {
   const longText = `量化方向偏多，${'但仍需等待价格确认。'.repeat(30)}`
   const view = buildAdvicePresentation({

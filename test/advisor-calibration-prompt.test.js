@@ -118,6 +118,23 @@ test('弱市买入必须同时通过个股强势和高把握信号硬闸门', ()
   assert.doesNotMatch(prompt, /共振分≥2且个股结构不坏，就应给出明确的做多/)
 })
 
+test('观望买入建议区分观察锚与买入价并比较两条入场路径', () => {
+  const normalPrompt = buildUserPrompt('buy_advice', {
+    code: '003031',
+  })
+  const fastPrompt = buildUserPrompt('buy_advice', {
+    code: '003031',
+    generationProfile: 'FAST',
+  })
+
+  for (const prompt of [normalPrompt, fastPrompt]) {
+    assert.match(prompt, /观察锚.*不是买入价/)
+    assert.match(prompt, /回踩支撑.*企稳/)
+    assert.match(prompt, /放量突破.*确认/)
+    assert.match(prompt, /当前低价.*不能买/)
+  }
+})
+
 test('军师区分真实费后收益与三日建议命中统计', () => {
   const prompt = buildUserPrompt('buy_advice', {
     code: '600000',
@@ -149,6 +166,15 @@ test('军师明确把动作价位手数视为候选并服从统一决策编译�
   assert.match(ADVISOR_SYSTEM, /严禁原样写进/)
   assert.match(ADVISOR_FAST_SYSTEM, /系统内部字段名/)
   assert.match(ADVISOR_FAST_SYSTEM, /市场处于防守状态/)
+})
+
+test('所有军师模式都要求价格可追溯且无法核验时留空', () => {
+  for (const prompt of [ADVISOR_SYSTEM, ADVISOR_FAST_SYSTEM]) {
+    assert.match(prompt, /价格证据链/)
+    assert.match(prompt, /支撑|压力/)
+    assert.match(prompt, /无法追溯.*null/)
+    assert.match(prompt, /禁止.*猜价/)
+  }
 })
 
 test('快速军师输出限制重复文案并保留核心证据', () => {

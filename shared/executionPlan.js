@@ -1,4 +1,5 @@
 import { executionTriggerDirection } from './executionTrigger.js'
+import { sanitizedAdvicePriceContract } from './advicePriceContract.js'
 
 export const EXECUTION_PLAN_SCHEMA_VERSION = 'execution-plan.v1'
 
@@ -205,6 +206,9 @@ export function compileExecutionPlan({
     trigger: decisionPlan.trigger,
     triggerDirection: decisionPlan.triggerDirection,
   })
+  const priceContract = sanitizedAdvicePriceContract({
+    priceContract: decisionPlan.priceContract,
+  })
   const targetLots = integerLots(decisionPlan.quantity?.lots)
   const referencePrice = positive(decisionPlan.prices?.reference)
   const estimatedNetAmount = positive(
@@ -264,6 +268,7 @@ export function compileExecutionPlan({
     referencePrice,
     triggerPrice: referencePrice,
     triggerDirection,
+    priceContract,
     stopPrice: positive(decisionPlan.prices?.stop),
     targetPrice: positive(decisionPlan.prices?.target),
     trigger: String(decisionPlan.trigger || ''),

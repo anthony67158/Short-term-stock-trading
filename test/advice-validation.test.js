@@ -118,3 +118,97 @@ test('今日无可卖手数时减仓建议降级为持有', () => {
   assert.equal(result.opAmount, 0)
   assert.match(result.actionPlan, /今日无可卖仓位/)
 })
+
+test('越过涨跌停价带的模型价格直接作废而不是改造成边界价', () => {
+  const { result, issues, valid } = reconcileAdviceNumbers({
+    mode: 'buy_advice',
+    payload: {
+      account: { cash: 100000 },
+      todayQuote: {
+        price: 10,
+        limitDownPrice: 9,
+        limitUpPrice: 11,
+      },
+    },
+    result: {
+      action: '立即买入',
+      buyPrice: 12,
+      stopPrice: 9.5,
+      targetPrice: 13,
+      planQty: 1,
+    },
+  })
+
+  assert.equal(valid, false)
+  assert.equal(result.action, '观望')
+  assert.equal(result.buyPrice, null)
+  assert.match(issues.join('；'), /买入价高于合法价带/)
+  assert.doesNotMatch(issues.join('；'), /下调至/)
+})
+
+test('观望价必须有明确方向并贴近真实证据锚点', () => {
+  const payload = {
+    todayQuote: {
+      price: 100,
+      limitDownPrice: 90,
+      limitUpPrice: 110,
+    },
+    tech: {
+      atr: 2,
+      resistance: 105,
+    },
+  }
+  const anchored = reconcileAdviceNumbers({
+    mode: 'buy_advice',
+    payload,
+    result: {
+      action: '观望',
+      timing: '放量站上105元后重新判断',
+      watchPrice: 105,
+    },
+  })
+  const unsupported = reconcileAdviceNumbers({
+    mode: 'buy_advice',
+    payload,
+    result: {
+      action: '观望',
+      timing: '站上109.9元后重新判断',
+      watchPrice: 109.9,
+    },
+  })
+
+  assert.equal(anchored.result.watchPrice, 105)
+  assert.equal(anchored.result.priceContract.levels[0].strict, true)
+  assert.equal(unsupported.result.watchPrice, null)
+  assert.match(unsupported.issues.join('；'), /缺少邻近行情、技术或量化锚点/)
+})
+
+test('生成时已经满足的观望价不能继续伪装成未来条件', () => {
+  const { result, valid, issues } = reconcileAdviceNumbers({
+    mode: 'buy_advice',
+    payload: {
+      todayQuote: {
+        price: 158.46,
+        limitDownPrice: 142.61,
+        limitUpPrice: 174.31,
+      },
+      tech: {
+        atr: 3,
+        resistance: 158.22,
+      },
+      strategyGate: { productionEligible: false },
+    },
+    result: {
+      action: '观望',
+      actionPlan: '站上158.22元且审核通过后重新判断',
+      timing: '放量站上158.22元且审核通过后重新判断',
+      watchPrice: 158.22,
+      planQty: 0,
+    },
+  })
+
+  assert.equal(valid, false)
+  assert.equal(result.watchPrice, null)
+  assert.match(result.actionPlan, /价格条件已满足/)
+  assert.match(issues.join('；'), /生成时已经满足/)
+})

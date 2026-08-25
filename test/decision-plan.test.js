@@ -7,6 +7,7 @@ import {
   decisionPlanConfirmationGate,
 } from '../shared/decisionPlan.js'
 import { adviceCompleteness } from '../shared/adviceBatchPolicy.js'
+import { buildAdvicePriceContract } from '../shared/advicePriceContract.js'
 import { getActiveStrategySpec } from '../shared/strategySpec.js'
 import { getStrategySpecV2 } from '../shared/strategyCatalogV2.js'
 import { routeStrategyPortfolio } from '../shared/strategyRouter.js'
@@ -196,6 +197,91 @@ test('没有通过策略信号的风险增加动作被阻断', () => {
   assert.equal(plan.actionability, 'BLOCKED')
   assert.equal(plan.quantity.lots, 0)
   assert.match(plan.blockedReasons.join(' '), /策略入场条件未通过/)
+})
+
+test('统一决策计划固化全部价格依据和观望双条件', () => {
+  const plan = compileDecisionPlan({
+    mode: 'buy_advice',
+    advice: {
+      action: '观望',
+      actionPlan: '放量站上10.8元且策略审核通过后重新判断',
+      watchPrice: 10.8,
+      stopPrice: 9,
+      targetPrice: 11,
+    },
+    payload: {
+      ...payload,
+      tech: {
+        atr: 0.4,
+        support: 9,
+        resistance: 10.8,
+        stopLoss: 9,
+        takeProfit: 11,
+      },
+    },
+    evidenceSnapshot: snapshot,
+    strategyGate: {
+      productionEligible: false,
+      blockers: [{ code: 'BACKTEST_REQUIRED' }],
+    },
+    now,
+  })
+
+  assert.equal(plan.prices.watch, 10.8)
+  assert.equal(plan.priceContract.schemaVersion, 'advice-price-contract.v1')
+  assert.equal(plan.priceContract.levels.find(
+    (level) => level.key === 'watch',
+  ).basis, 'technical.resistance')
+  assert.deepEqual(
+    plan.priceContract.review.conditions.map((condition) => [
+      condition.key,
+      condition.status,
+    ]),
+    [
+      ['WATCH_PRICE', 'PENDING'],
+      ['STRATEGY_ELIGIBLE', 'PENDING'],
+    ],
+  )
+})
+
+test('缺少价格依据的主动交易计划必须被阻断', () => {
+  const unverifiedAdvice = {
+    action: '立即买入',
+    buyPrice: 10.7,
+    stopPrice: 9.1,
+    targetPrice: 10.9,
+    planQty: 1,
+    actionPlan: '10.7元买入1手',
+  }
+  const unverifiedPayload = {
+    ...payload,
+    tech: {
+      atr: 0.1,
+      support: 9.5,
+      resistance: 10.4,
+      stopLoss: 9.5,
+      takeProfit: 10.4,
+    },
+  }
+  unverifiedAdvice.priceContract = buildAdvicePriceContract({
+    mode: 'buy_advice',
+    advice: unverifiedAdvice,
+    payload: unverifiedPayload,
+    strategyGate: { productionEligible: true },
+    action: 'BUY',
+  })
+  const plan = compileDecisionPlan({
+    mode: 'buy_advice',
+    advice: unverifiedAdvice,
+    payload: unverifiedPayload,
+    evidenceSnapshot: snapshot,
+    strategyGate: { productionEligible: true, blockers: [] },
+    now,
+  })
+
+  assert.equal(plan.action, 'WATCH')
+  assert.equal(plan.actionability, 'BLOCKED')
+  assert.match(plan.blockedReasons.join('；'), /关键执行价缺少可核验依据/)
 })
 
 test('降低风险动作不受策略REJECT阻断但不得超过今日可卖数量', () => {

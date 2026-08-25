@@ -19,6 +19,7 @@ const CORE_FIELDS = [
   'positionNote',
   'posAfter',
   'invalidation',
+  'priceContract',
   'knowledgeActionPlan',
   'knowledgeActionScore',
 ]

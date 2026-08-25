@@ -111,3 +111,45 @@ test('Judge上下文保留用户选择、实际运行模型与V2.1实验可靠�
     },
   })
 })
+
+test('Judge上下文只保留服务端验证后的价格契约', () => {
+  const context = buildJudgeAdviceContext({
+    action: '立即买入',
+    buyPrice: 10,
+    priceContract: {
+      schemaVersion: 'advice-price-contract.v1',
+      asOf: '2026-08-25T02:00:00.000Z',
+      evidenceSnapshotId: 'ev-price-1',
+      currentPrice: 10.2,
+      legalRange: { low: 9, high: 11 },
+      validationStatus: 'VERIFIED',
+      levels: [{
+        key: 'entry',
+        field: 'buyPrice',
+        purpose: 'ENTRY',
+        price: 10,
+        direction: 'LTE',
+        status: 'PENDING',
+        strict: true,
+        basis: 'technical.buyZone.high',
+        basisPrice: 10,
+        basisDistancePct: 0,
+        tolerancePct: 1,
+        hidden: 'drop-me',
+      }],
+      allPricesStrict: true,
+      issues: [],
+      review: { operator: 'ALL', conditions: [], allMet: false },
+      secret: 'drop-me',
+    },
+  })
+
+  assert.equal(
+    context.priceContract.schemaVersion,
+    'advice-price-contract.v1',
+  )
+  assert.equal(context.priceContract.levels[0].price, 10)
+  assert.equal(context.priceContract.levels[0].basis, 'technical.buyZone.high')
+  assert.equal(context.priceContract.levels[0].hidden, undefined)
+  assert.equal(context.priceContract.secret, undefined)
+})

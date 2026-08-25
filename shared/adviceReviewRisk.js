@@ -1,3 +1,9 @@
+import {
+  advicePriceLevel,
+  sanitizedAdvicePriceContract,
+} from './advicePriceContract.js'
+import { executionTriggerDirection } from './executionTrigger.js'
+
 function finite(value) {
   if (value == null || value === '') return null
   const parsed = Number(value)
@@ -18,18 +24,54 @@ function atrValue(snapshot = {}) {
 }
 
 function executionLevels(advice = {}) {
+  const priceContract = sanitizedAdvicePriceContract(advice)
+  const contracted = [
+    ['stop', '止损位'],
+    ['target', '目标位'],
+    ['reduce', '减仓位'],
+    ['entry', '买入位'],
+    ['add', '加仓位'],
+    ['watch', '观察价'],
+    ['leg1', '第一腿价'],
+    ['leg2', '第二腿价'],
+  ].map(([key, label]) => {
+    const level = advicePriceLevel(advice, key)
+    return level ? { ...level, label } : null
+  }).filter(Boolean)
+  if (priceContract) return contracted
+
+  const trigger = advice.timing
+    || advice.actionPlan
+    || advice.nextAction
+    || advice.futurePlan
+    || ''
+  const reduceDirection = executionTriggerDirection({
+    action: advice.decisionPlan?.action || 'REDUCE',
+    trigger,
+    triggerDirection: advice.decisionPlan?.triggerDirection,
+  })
+  const watchDirection = executionTriggerDirection({
+    action: 'WATCH',
+    trigger,
+    triggerDirection: advice.watchDirection,
+  })
   return [
-    { key: 'stop', label: '止损位', price: finite(advice.stopPrice) },
+    { key: 'stop', label: '止损位', price: finite(advice.stopPrice), direction: 'LTE' },
     {
       key: 'target',
-      label: advice.reducePrice != null ? '减仓位' : '目标位',
-      price: finite(advice.reducePrice ?? advice.targetPrice),
+      label: '目标位',
+      price: finite(advice.targetPrice),
+      direction: 'GTE',
     },
+    { key: 'reduce', label: '减仓位', price: finite(advice.reducePrice), direction: reduceDirection },
     {
       key: 'entry',
-      label: advice.addPrice != null ? '加仓位' : '买入位',
-      price: finite(advice.addPrice ?? advice.buyPrice),
+      label: '买入位',
+      price: finite(advice.buyPrice),
+      direction: 'LTE',
     },
+    { key: 'add', label: '加仓位', price: finite(advice.addPrice), direction: 'LTE' },
+    { key: 'watch', label: '观察价', price: finite(advice.watchPrice), direction: watchDirection },
   ].filter((item) => item.price != null)
 }
 
@@ -98,11 +140,14 @@ export function adaptiveAdviceReviewInterval({
     240,
   )
   const risk = adviceReviewRisk({ snapshot, advice })
-  const intervalMin = risk.level === 'urgent'
+  const hasStrictWatchPrice = !!advicePriceLevel(advice, 'watch')
+  const intervalMin = hasStrictWatchPrice
     ? Math.min(configured, 5)
-    : risk.level === 'elevated'
-      ? Math.min(configured, mode === 'hold_advice' ? 10 : 15)
-      : configured
+    : risk.level === 'urgent'
+      ? Math.min(configured, 5)
+      : risk.level === 'elevated'
+        ? Math.min(configured, mode === 'hold_advice' ? 10 : 15)
+        : configured
   return {
     configuredIntervalMin: configured,
     intervalMin,
@@ -123,24 +168,16 @@ export function reviewPriceMateriality({
   }
 
   for (const level of executionLevels(previousAdvice)) {
-    if (
-      level.key === 'stop'
+    const crossedDown = level.direction === 'LTE'
       && previousPrice > level.price
       && currentPrice <= level.price
-    ) {
-      return {
-        changed: true,
-        reason: `现价已跌破上一版止损位${level.price}`,
-      }
-    }
-    if (
-      level.key === 'target'
+    const crossedUp = level.direction === 'GTE'
       && previousPrice < level.price
       && currentPrice >= level.price
-    ) {
+    if (crossedDown || crossedUp) {
       return {
         changed: true,
-        reason: `现价已触及上一版${level.label}${level.price}`,
+        reason: `现价已${crossedDown ? '向下' : '向上'}穿越上一版${level.label}${level.price}`,
       }
     }
   }

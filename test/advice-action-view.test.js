@@ -80,7 +80,7 @@ test('买入建议把买入价和首笔手数编译为同一动作视图', () =>
   })
 })
 
-test('观望建议隐藏买入价和买入手数，只保留重新评估条件', () => {
+test('观望建议不把远端关注价展示成候选卡主价位', () => {
   const view = buildAdviceActionView({
     action: '观望',
     actionPlan: '站稳63.50元并放量后再评估',
@@ -91,14 +91,11 @@ test('观望建议隐藏买入价和买入手数，只保留重新评估条件',
 
   assert.equal(view.kind, 'wait')
   assert.equal(view.quantity, '')
-  assert.deepEqual(view.levels, [{
-    key: 'watch',
-    label: '重新评估',
-    price: 63.5,
-    tone: 'neutral',
-    active: true,
-  }])
+  assert.deepEqual(view.levels, [])
   assert.equal(view.trigger.direction, 'inactive')
+  assert.equal(view.trigger.price, null)
+  assert.equal(view.trigger.stateLabel, '保持观望')
+  assert.equal(view.trigger.detailLabel, '等待量价确认')
   assert.equal(view.trigger.metricLabel, '暂不下单')
 })
 
@@ -113,7 +110,9 @@ test('观望建议缺少结构化关注价时仍显示暂不下单状态', () =>
   assert.deepEqual(view.trigger, {
     direction: 'inactive',
     price: null,
-    label: '重新评估',
+    label: '等待确认',
+    stateLabel: '保持观望',
+    detailLabel: '等待量价确认',
     metricLabel: '暂不下单',
   })
 })

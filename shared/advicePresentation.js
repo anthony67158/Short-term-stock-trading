@@ -290,7 +290,10 @@ function buildLegacyAdvicePresentation(advice = {}) {
       ? `${plan.currentWeightPct}% → ${plan.targetWeightPct}%`
       : advice.planWeight,
     buyZone: null,
-    buyPrice: plan.prices?.reference,
+    buyPrice: plan.action === 'BUY'
+      ? plan.prices?.reference
+      : null,
+    watchPrice: plan.prices?.watch,
     addPrice: plan.action === 'ADD'
       ? plan.prices?.reference
       : advice.addPrice,

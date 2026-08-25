@@ -34,6 +34,11 @@ import {
   adviceSupportsIntent,
   buildJudgeAdviceContext,
 } from '../shared/judgeAdviceContext.js';
+import {
+  advicePriceLevelForIntent,
+  priceMatchesAdviceContract,
+  sanitizedAdvicePriceContract,
+} from '../shared/advicePriceContract.js';
 import { positionGateForAlert } from '../shared/alertPositionPolicy.js';
 import { buildJudgeKnowledgeActionAssessment } from '../shared/knowledgeAction.js';
 import { quantJudgeDiscipline } from '../shared/quantAdviceContext.js';
@@ -43,6 +48,42 @@ export const JUDGE_MAX_TOKENS = 140;
 export function buildJudgeUserPrompt(payload) {
   return '请判断此刻交易时机。数据如下(JSON):\n' + JSON.stringify(payload)
     + '\n输出格式:{"decision":"confirm|wait|invalid","confidence":0-100,"reason":"一句话中文理由"}';
+}
+
+export function judgePriceContractGate(alert = {}, advice = {}) {
+  const contract = sanitizedAdvicePriceContract(advice);
+  if (!contract) return { allowed: true, reason: '', expectedPrice: null };
+  const intent = actionIntentOf(alert);
+  const level = advicePriceLevelForIntent(
+    { priceContract: contract },
+    intent,
+  );
+  if (!level || !priceMatchesAdviceContract(
+    { priceContract: contract },
+    level.key,
+    alert.value,
+  )) {
+    return {
+      allowed: false,
+      reason: '预警价与已验证价格契约不一致',
+      expectedPrice: level?.price ?? null,
+    };
+  }
+  const expectedOp = level.direction === 'GTE'
+    ? 'gte'
+    : level.direction === 'LTE' ? 'lte' : '';
+  if (expectedOp && String(alert.op || '') !== expectedOp) {
+    return {
+      allowed: false,
+      reason: '预警方向与已验证价格契约不一致',
+      expectedPrice: level.price,
+    };
+  }
+  return {
+    allowed: true,
+    reason: '',
+    expectedPrice: level.price,
+  };
 }
 
 // ---- 交易语义分类:把一条价位预警归成 buy / sell / stop 三类 ----
@@ -244,7 +285,8 @@ async function llmJudge({ a, name, advice, prim, tech, det, position }) {
   const sys = '你是严谨的A股短线交易确认闸门。价格已触及关键价位,但「到价≠立刻动手」。'
     + '你的唯一任务:结合盘中走势与建议条件,判断【此刻是否真正到了动手时机】。'
     + '军师建议是本次交易计划的上层约束：必须理解其方向、手数、仓位、盈亏比、止损目标、技术资金消息依据与失效条件；'
-    + '不得脱离军师建议单独创造相反动作。单个价格只是进入观察的触发边界，不是固定锚点；'
+    + '不得脱离军师建议单独创造相反动作。priceContract是服务端校验后的唯一权威价格契约，必须逐项严格引用，禁止改价或另造价位；'
+    + '单个价格只是进入观察的触发边界，不是固定锚点；'
     + '当前持仓状态由服务端账本核验：无持仓只能买入，绝不能解释为加仓、减仓、卖出或止损；'
     + '必须围绕主计划版本、动态价格带、失效条件和触价后的分时结构判断。加仓尤其禁止下跌摊平，必须是军师仍支持加仓且触价后出现止跌确认。'
     + '买入必须保守，客观止跌信号不足一律wait；止盈要重视触价后的冲高回落，避免利润明显回撤；'
@@ -352,6 +394,18 @@ export async function judgeConfirmation({ alert, name, advice, quote, position }
     ...result,
     knowledgeAction: result?.knowledgeAction || knowledgeAction,
   });
+  const priceContractGate = judgePriceContractGate(a, adviceContext);
+  if (!priceContractGate.allowed) {
+    return withKnowledgeAction({
+      decision: 'invalid',
+      confidence: 100,
+      reason: priceContractGate.reason,
+      side,
+      actionIntent: intent,
+      source: 'price-contract',
+      policy: 'price-contract-mismatch',
+    });
+  }
   if (position) {
     const positionGate = positionGateForAlert(a, position);
     if (!positionGate.allowed) {

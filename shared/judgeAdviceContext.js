@@ -1,5 +1,6 @@
 import { buildKnowledgeActionPlan } from './knowledgeAction.js'
 import { buildQuantAdviceContext } from './quantAdviceContext.js'
+import { sanitizedAdvicePriceContract } from './advicePriceContract.js'
 
 const text = (value, max = 800) => String(value || '').trim().slice(0, max)
 const finite = (value) => {
@@ -64,11 +65,13 @@ export function buildJudgeAdviceContext(advice = {}) {
           .slice(0, 8),
       }
     : null
+  const priceContract = sanitizedAdvicePriceContract(advice)
   return {
     ...planContext,
     ...knowledgeActionContext,
     ...(quantContext ? { quantContext } : {}),
     ...(decisionPlan ? { decisionPlan } : {}),
+    ...(priceContract ? { priceContract } : {}),
     action: text(advice.action || advice.stance, 40),
     tier: text(advice.tier, 30),
     title: text(advice.title || advice.headline, 200),

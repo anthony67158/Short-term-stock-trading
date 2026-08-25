@@ -68,6 +68,10 @@ function finite(value) {
   return Number.isFinite(number) ? number : null
 }
 
+function boundedText(value, maximum) {
+  return String(value || '').trim().slice(0, maximum)
+}
+
 function compact(value, depth = 0) {
   if (value == null) return null
   if (depth > 4) return null
@@ -470,6 +474,21 @@ export function createCanonicalEvidenceSnapshot({
       basisLabel: marketEvidence.basisLabel,
     },
     account: compact(accountEvidence),
+    policy: compact({
+      strategyGate: payload.strategyGate ? {
+        strategyId: boundedText(payload.strategyGate.strategyId, 80),
+        specVersion: boundedText(payload.strategyGate.specVersion, 120),
+        productionEligible:
+          payload.strategyGate.productionEligible === true,
+        decision: boundedText(payload.strategyGate.decision, 30),
+        blockerCodes: (Array.isArray(payload.strategyGate.blockerCodes)
+          ? payload.strategyGate.blockerCodes
+          : [])
+          .map((item) => boundedText(item, 80))
+          .filter(Boolean)
+          .slice(0, 12),
+      } : null,
+    }),
     quant: {
       selectedModelVersion: selectedQuantVersion,
       runtimeModelVersion: runtimeQuantVersion,
