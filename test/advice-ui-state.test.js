@@ -32,20 +32,15 @@ test('快速军师用可验证阶段展示流程而不依赖隐藏思维链', ()
   assert.equal(steps.some((step) => step.key === 'reasoning'), false)
 })
 
-test('深度研判先形成候选方案并复核，最后才发布最终结论', () => {
+test('深度研判完成后直接发布最终结论', () => {
   const drafting = adviceGenerationSteps({
     stage: 'llm',
     phase: '数据齐全，正在生成操作建议',
     deepMode: true,
   })
-  const reviewing = adviceGenerationSteps({
-    stage: 'council',
-    phase: '委员会正在复核候选方案',
-    deepMode: true,
-  })
   const finalizing = adviceGenerationSteps({
     stage: 'finalize',
-    phase: '复核完成，正在发布最终结论',
+    phase: '正在发布最终结论',
     deepMode: true,
   })
 
@@ -55,27 +50,12 @@ test('深度研判先形成候选方案并复核，最后才发布最终结论',
       ['prepare', '准备上下文', 'done'],
       ['collect', '采集证据', 'done'],
       ['quant', '量化校验', 'done'],
-      ['draft', '形成候选方案', 'active'],
-      ['council', '委员会复核', 'pending'],
+      ['draft', '深度研判', 'active'],
       ['decision', '发布最终结论', 'pending'],
     ],
   )
-  assert.deepEqual(
-    reviewing.map((step) => [step.key, step.state]),
-    [
-      ['prepare', 'done'],
-      ['collect', 'done'],
-      ['quant', 'done'],
-      ['draft', 'done'],
-      ['council', 'active'],
-      ['decision', 'pending'],
-    ],
-  )
   assert.equal(finalizing.at(-1).state, 'active')
-  assert.equal(
-    finalizing.find((step) => step.key === 'council')?.state,
-    'done',
-  )
+  assert.equal(finalizing.some((step) => step.key === 'council'), false)
 })
 
 test('空任务快照不显示批量完成条', () => {

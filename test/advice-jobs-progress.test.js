@@ -55,7 +55,7 @@ test('运行中任务取消后立即终止且不会被孤儿回收重新排队',
   assert.equal(data.jobs['600000'].phase, '已取消生成')
 })
 
-test('最终结论发布后迟到的复核进度不能把任务改回处理中', () => {
+test('最终结论发布后迟到的进度不能把任务改回处理中', () => {
   const data = {}
   enqueueJob(data, {
     code: '600000',
@@ -67,8 +67,8 @@ test('最终结论发布后迟到的复核进度不能把任务改回处理中',
   completeJob(data, '600000', 2000)
 
   updateJobProgress(data, '600000', {
-    stage: 'council',
-    phase: '迟到的委员会复核事件',
+    stage: 'llm',
+    phase: '迟到的模型事件',
   }, 3000)
 
   assert.equal(data.jobs['600000'].status, 'done')

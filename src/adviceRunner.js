@@ -142,8 +142,6 @@ async function run(spec, record) {
         profile: spec.deepMode ? 'DEEP' : 'FAST',
         durationMs: Math.max(0, Date.now() - record.startedAt),
         mainLlmCalls: 1,
-        councilLlmCalls: 0,
-        councilCallsSaved: 3,
       }
       results.set(code, {
         mode,

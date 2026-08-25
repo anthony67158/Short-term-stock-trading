@@ -10,7 +10,7 @@
 //
 // 「占用 advisor」的口径 = 本地 runner 正在跑的 ∪ 服务端 advisorBusy:
 //   本机点击既可能走本地生成,也可能兜底走服务端;另一台设备的服务端生成也占用同一批端点。
-//   委员会进入 review 阶段后仍属于运行中任务，但不再占 advisor，不能阻塞新的主建议。
+//   review 任务独立占用 review 端点，不能阻塞新的主建议。
 import { startAdvice, getRunningList, isRunning } from './adviceRunner'
 import { getBatchState, getConcurrency } from './adviceBatch'
 import { canServerAdvice, triggerServerAdvice } from './serverAdvice'

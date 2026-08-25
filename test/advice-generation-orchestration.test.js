@@ -8,9 +8,6 @@ import {
   leaseJob,
 } from '../api/_jobs.js'
 import {
-  shouldRunAdvisorCouncil,
-} from '../shared/adviceGenerationPolicy.js'
-import {
   generationOptions,
 } from '../shared/adviceBatchPolicy.js'
 import {
@@ -159,24 +156,6 @@ test('复核运行期间的新事件只续跑复核任务一次', () => {
   })
 })
 
-test('委员会只在显式深度生成时同步执行', () => {
-  assert.equal(shouldRunAdvisorCouncil({
-    enabled: true,
-    deepMode: false,
-    source: 'ondemand',
-  }), false)
-  assert.equal(shouldRunAdvisorCouncil({
-    enabled: true,
-    deepMode: true,
-    source: 'ondemand',
-  }), true)
-  assert.equal(shouldRunAdvisorCouncil({
-    enabled: true,
-    deepMode: true,
-    source: 'auto',
-  }), false)
-})
-
 test('复核请求使用独立review角色且首次建议仍使用advisor', () => {
   assert.equal(llmRoleForAdviceMode('review'), 'review')
   assert.equal(llmRoleForAdviceMode('hold_advice', 'auto'), 'review')
@@ -199,24 +178,13 @@ test('快速和深度军师都不得等待或自动生成策略日报', () => {
   assert.match(aiSource, /resolveAdviceDailySummary/)
 })
 
-test('个股页默认快速生成且普通路径不再无条件同步委员会', () => {
+test('个股页默认快速生成且深度路径只调用一次主军师', () => {
   assert.match(
     stockDetailSource,
     /const loadQuant = async \(deepMode = false\)/,
   )
   assert.doesNotMatch(stockDetailSource, /deepMode:\s*true/)
-  assert.doesNotMatch(
-    cronAdviceSource,
-    /if \(advice && councilEnabled\) \{[\s\S]*?await runAdvisorCouncilShadow/,
-  )
-  assert.match(
-    cronAdviceSource,
-    /onProgress\(\{\s*stage:\s*'council',\s*phase:\s*'委员会正在复核候选方案，尚未发布最终结论'/,
-  )
-  assert.match(
-    cronAdviceSource,
-    /onProgress\(\{\s*stage:\s*'finalize',\s*phase:\s*'复核完成，正在发布最终结论'/,
-  )
+  assert.doesNotMatch(cronAdviceSource, /AdvisorCouncil|委员会/)
   assert.match(
     cronAdviceSource,
     /const completion = completeJob\([\s\S]*?if \(!completion\?\.publish\) \{[\s\S]*?await saveWorking\(\)[\s\S]*?continue/,
@@ -231,7 +199,7 @@ test('个股页默认快速生成且普通路径不再无条件同步委员会',
   )
   assert.match(
     cronAdviceSource,
-    /resourcePatchForJobProgress\([\s\S]*?REVIEW_CONC/,
+    /resourcePatchForJobProgress\(\s*job,\s*patch\.stage,\s*\)/,
   )
   assert.match(
     aiSource,

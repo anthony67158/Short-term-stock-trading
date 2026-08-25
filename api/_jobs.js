@@ -704,16 +704,9 @@ function resourceUnitsOf(job) {
 export function resourcePatchForJobProgress(
   job,
   stage,
-  reviewCapacity = 0,
 ) {
   if (adviceJobRole(job) === 'review') {
     return { resourceRole: 'review', resourceUnits: 1 };
-  }
-  if (stage === 'council') {
-    return {
-      resourceRole: 'review',
-      resourceUnits: Math.max(0, Number(reviewCapacity) || 0),
-    };
   }
   if (stage === 'finalize') {
     return { resourceRole: 'none', resourceUnits: 0 };

@@ -3,7 +3,7 @@
 //   旧版:一次 FC 请求内【串行】生成指定 codes,进度写 batchProgress。任务不持久 → FC 崩/超时即丢,
 //         无状态/无重试/无取消,点两次起两份。
 //   新版:任务按角色沉到账号 data.jobs/reviewJobs(OSS 持久,见 _jobs.js),服务端为唯一权威源:
-//         · advisor/review 各自按端点数限流；深度任务进入委员会阶段后释放 advisor 槽；
+//         · advisor/review 各自按端点数限流；
 //           同一协调器串行持久化，但两个角色的模型调用可并行。
 //         · 断点续跑:running 但租约过期(FC 崩)= 孤儿 → 下次 drain 自动回收重跑。
 //         · 失败重试:失败回 queued 直到 maxAttempts。
@@ -45,7 +45,7 @@ import {
   adviceJobRole, allAdviceJobs, advisorAdmission, findAdviceJob,
   resourcePatchForJobProgress, reviewJobsOf, selectStartableJobs,
 } from './_jobs.js';
-import { ensureConfig, currentConfig, getModel } from './_llm_config.js';
+import { ensureConfig, currentConfig } from './_llm_config.js';
 import { endpointCountForRole } from './_llm_pool.js';
 import { projectAdviceAlerts } from '../shared/adviceAlerts.js';
 import { sanitizedAdvicePriceContract } from '../shared/advicePriceContract.js';
@@ -92,22 +92,9 @@ import { TRUSTED_ACCOUNT_REQUEST } from './_account_auth.js';
 import { dispatchAdviceWorker } from './_advice_dispatch.js';
 import { buildRealOutcomeLearning } from '../shared/realOutcomeLearning.js';
 import {
-  buildStrategyPromotionGate,
-  CURRENT_STRATEGY_EVALUATION,
-} from '../shared/strategyPromotionGate.js';
-import { getStrategySpecV2 } from '../shared/strategyCatalogV2.js';
-import {
-  addCouncilShadowRecord,
-  councilRecordsFromData,
-} from '../shared/advisorCouncilStore.js';
-import {
   isContinuousTrading,
   nextTradingDayLabel,
 } from '../shared/tradingCalendar.js';
-import { runAdvisorCouncilShadow } from './_advisor_council.js';
-import {
-  shouldRunAdvisorCouncil,
-} from '../shared/adviceGenerationPolicy.js';
 
 export const PROGRESS_SAVE_INTERVAL_MS = 5000;
 export const CANCEL_POLL_INTERVAL_MS = 2000;
@@ -389,9 +376,6 @@ export function adviceRuntimeUpdateFromData(
       .slice(0, 5),
     alerts: (data?.alerts || [])
       .filter((item) => codeMatches(item, key)),
-    councilShadow: councilRecordsFromData(data)
-      .filter((item) => codeMatches(item, key))
-      .slice(0, 3),
     evidenceSnapshots: evidenceSnapshotsFromData({
       advice: advice ? { [key]: advice } : {},
     }),
@@ -747,8 +731,6 @@ async function genOne({
   previousEntry = null,
   reviewIntervalMin = null,
   reviewTrigger = '',
-  strategyGate = null,
-  runCouncilShadow = false,
 }) {
   const startedAt = Date.now();
   const generation = generationOptions(deepMode);
@@ -839,46 +821,11 @@ async function genOne({
     },
     at,
   );
-  let councilShadow = null;
-  if (advice && runCouncilShadow) {
-    if (typeof onProgress === 'function') {
-      onProgress({
-        stage: 'council',
-        phase: '委员会正在复核候选方案，尚未发布最终结论',
-        model: getModel('review'),
-        endpoint: 'review 独立端点池',
-      });
-    }
-    try {
-      councilShadow = await runAdvisorCouncilShadow({
-        code,
-        name,
-        mode,
-        advice,
-        payload,
-        strategyGate,
-        evidenceSnapshotId: meta?.evidenceSnapshot?.snapshotId || null,
-        signal,
-        deepMode,
-      });
-      cacheItem.councilShadow = councilShadow;
-    } catch {
-      councilShadow = null;
-    }
-    if (typeof onProgress === 'function') {
-      onProgress({
-        stage: 'finalize',
-        phase: '复核完成，正在发布最终结论',
-      });
-    }
-  }
   cacheItem.generationMetrics = {
     schemaVersion: 'advice-generation-metrics.v1',
     profile: deepMode ? 'DEEP' : 'FAST',
     durationMs: Math.max(0, Date.now() - startedAt),
     mainLlmCalls: advice ? 1 : 0,
-    councilLlmCalls: councilShadow ? 3 : 0,
-    councilCallsSaved: advice && !runCouncilShadow ? 3 : 0,
   };
   let logEntry = null;
   if (advice) {
@@ -922,7 +869,6 @@ async function genOne({
     cacheItem,
     logEntry,
     quantScore,
-    councilShadow,
     reviewRecord,
   };
 }
@@ -998,23 +944,6 @@ async function runJobGen(
   const quantModelVersion = data.settings?.quantModelVersion || 'default';
   const realOutcomeLearning = buildRealOutcomeLearning(data);
   data.realOutcomeLearning = realOutcomeLearning;
-  const activeStrategySpec = getStrategySpecV2(
-    'market-quant-resonance',
-  );
-  const strategyGate = buildStrategyPromotionGate({
-    strategySpec: activeStrategySpec,
-    evaluation: CURRENT_STRATEGY_EVALUATION,
-    realOutcomeLearning,
-    councilRecords: councilRecordsFromData(data),
-    humanApproval: data.strategyHumanApproval,
-  });
-  const councilEnabled = process.env.ADVISOR_COUNCIL_SHADOW !== 'false'
-    && data.settings?.advisorCouncilShadow !== false;
-  const runCouncilShadow = shouldRunAdvisorCouncil({
-    enabled: councilEnabled,
-    deepMode,
-    source: reviewOrigin || 'ondemand',
-  });
   const mode = holdSet.has(code) ? 'hold_advice' : 'buy_advice';
   const autoConfig = autoConfigFromSettings(data.settings || {});
   const reviewIntervalMin = mode === 'hold_advice'
@@ -1055,7 +984,7 @@ async function runJobGen(
     if (previousEvidenceDigest) p.previousEvidenceDigest = previousEvidenceDigest;
     if (reviewEvent) p.reviewEvent = reviewEvent;
     if (reviewOrigin) p.reviewOrigin = reviewOrigin;
-    const result = await genOne({ code, name, mode: 'hold_advice', payload: p, priceHint, onProgress, signal, deepMode, previousEntry, reviewIntervalMin, reviewTrigger: reviewEvent ? `judge_${reviewEvent.decision}` : '', strategyGate, runCouncilShadow });
+    const result = await genOne({ code, name, mode: 'hold_advice', payload: p, priceHint, onProgress, signal, deepMode, previousEntry, reviewIntervalMin, reviewTrigger: reviewEvent ? `judge_${reviewEvent.decision}` : '' });
     return {
       ...result,
       sourceTradeFingerprint,
@@ -1073,7 +1002,7 @@ async function runJobGen(
   if (previousEvidenceDigest) p.previousEvidenceDigest = previousEvidenceDigest;
   if (reviewEvent) p.reviewEvent = reviewEvent;
   if (reviewOrigin) p.reviewOrigin = reviewOrigin;
-  const result = await genOne({ code, name, mode: 'buy_advice', payload: p, priceHint, onProgress, signal, deepMode, previousEntry, reviewIntervalMin, reviewTrigger: reviewEvent ? `judge_${reviewEvent.decision}` : '', strategyGate, runCouncilShadow });
+  const result = await genOne({ code, name, mode: 'buy_advice', payload: p, priceHint, onProgress, signal, deepMode, previousEntry, reviewIntervalMin, reviewTrigger: reviewEvent ? `judge_${reviewEvent.decision}` : '' });
   return {
     ...result,
     sourceTradeFingerprint,
@@ -1347,7 +1276,7 @@ async function drainAccount(nick, initialAcc) {
     };
   };
   let ok = 0, fail = 0;
-  // 深度主研判最多约 535s，后面还要留出委员会复核、OSS 发布和 FC 收尾时间。
+  // 深度主研判结束后只需预留 OSS 发布和 FC 收尾时间。
   // 本轮后段不再启动新任务；剩余队列由 5 分钟云端定时器接力。
   const startDeadline = Date.now() + (hasDeepAdviceWork(data) ? 40000 : 300000);
   const progressSaver = createAdviceProgressSaveScheduler(saveWorking);
@@ -1364,7 +1293,6 @@ async function drainAccount(nick, initialAcc) {
     const resourcePatch = resourcePatchForJobProgress(
       job,
       patch.stage,
-      REVIEW_CONC,
     );
     if (patch.source) {
       const sources = [...(job.sources || [])];
@@ -1633,9 +1561,6 @@ async function drainAccount(nick, initialAcc) {
           }
         }
         if (done.res.quantScore) applyQuantScore(d, done.code, done.res.quantScore);
-        if (done.res.councilShadow) {
-          addCouncilShadowRecord(d, done.res.councilShadow);
-        }
         if (done.res.reviewRecord) {
           const records = d.adviceReviewLog || (d.adviceReviewLog = []);
           const withoutCurrent = records.filter(

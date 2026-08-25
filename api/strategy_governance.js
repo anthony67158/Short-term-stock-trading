@@ -9,9 +9,6 @@ import {
   buildStrategyPromotionGate,
   CURRENT_STRATEGY_EVALUATION,
 } from '../shared/strategyPromotionGate.js'
-import {
-  councilRecordsFromData,
-} from '../shared/advisorCouncilStore.js'
 import { getStrategyCatalogV2 } from '../shared/strategyCatalogV2.js'
 import {
   buildDefaultStrategyGovernance,
@@ -41,12 +38,10 @@ export function strategyGovernanceSnapshot(
   data = {},
   evaluation = CURRENT_STRATEGY_EVALUATION,
 ) {
-  const councilRecords = councilRecordsFromData(data)
   const realOutcome = learningOf(data)
   const gate = buildStrategyPromotionGate({
     evaluation,
     realOutcomeLearning: realOutcome,
-    councilRecords,
     humanApproval: data.strategyHumanApproval,
   })
   const catalog = getStrategyCatalogV2()
@@ -122,20 +117,6 @@ export function strategyGovernanceSnapshot(
     evaluation,
     gate,
     realOutcome: realOutcome.overall || { samples: 0 },
-    council: {
-      samples: councilRecords.length,
-      latest: councilRecords.slice(0, 10).map((record) => ({
-        code: record.code,
-        name: record.name,
-        mode: record.mode,
-        at: record.at,
-        evidenceSnapshotId: record.evidenceSnapshotId,
-        baseAdviceAction: record.baseAdviceAction,
-        consensusReached: record.compiled?.consensusReached === true,
-        hardGatePassed: record.compiled?.hardGatePassed === true,
-        blockers: (record.compiled?.blockers || []).slice(0, 12),
-      })),
-    },
     humanApproval: data.strategyHumanApproval || null,
   }
 }
@@ -165,7 +146,6 @@ export function recordStrategyHumanApproval(
   const gate = buildStrategyPromotionGate({
     evaluation,
     realOutcomeLearning: learningOf(data),
-    councilRecords: councilRecordsFromData(data),
     humanApproval: candidate,
   })
   if (!gate.productionEligible) {

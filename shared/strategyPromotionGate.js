@@ -29,46 +29,16 @@ const THRESHOLDS = Object.freeze({
   minimumRealExecutions: 30,
   minimumPosteriorWinRate: 55,
   minimumProfitFactor: 1.2,
-  minimumCouncilSamples: 20,
-  minimumCouncilConsensusRate: 0.7,
-  minimumCouncilHardGatePassRate: 0.7,
 })
-
-function rounded(value, digits = 2) {
-  const scale = 10 ** digits
-  return Math.round((Number(value) || 0) * scale) / scale
-}
 
 function blocker(code, message) {
   return { code, message }
-}
-
-function councilMetrics(records) {
-  const valid = (Array.isArray(records) ? records : []).filter(
-    (record) => record?.schemaVersion === 'advisor-council-shadow.v1',
-  )
-  const consensus = valid.filter(
-    (record) => record?.compiled?.consensusReached === true,
-  ).length
-  const hardGatePassed = valid.filter(
-    (record) => record?.compiled?.hardGatePassed === true,
-  ).length
-  return {
-    samples: valid.length,
-    consensusRate: valid.length
-      ? rounded(consensus / valid.length * 100, 1)
-      : 0,
-    hardGatePassRate: valid.length
-      ? rounded(hardGatePassed / valid.length * 100, 1)
-      : 0,
-  }
 }
 
 export function buildStrategyPromotionGate({
   strategySpec = null,
   evaluation = CURRENT_STRATEGY_EVALUATION,
   realOutcomeLearning = {},
-  councilRecords = [],
   humanApproval = null,
 } = {}) {
   const blocks = []
@@ -153,27 +123,6 @@ export function buildStrategyPromotionGate({
     }
   }
 
-  const council = councilMetrics(councilRecords)
-  if (council.samples < THRESHOLDS.minimumCouncilSamples) {
-    blocks.push(blocker(
-      'INSUFFICIENT_COUNCIL_SHADOW',
-      `委员会影子样本不足${THRESHOLDS.minimumCouncilSamples}条`,
-    ))
-  } else {
-    if (
-      council.consensusRate
-      < THRESHOLDS.minimumCouncilConsensusRate * 100
-    ) {
-      blocks.push(blocker('COUNCIL_CONSENSUS_TOO_LOW', '委员会共识率不足70%'))
-    }
-    if (
-      council.hardGatePassRate
-      < THRESHOLDS.minimumCouncilHardGatePassRate * 100
-    ) {
-      blocks.push(blocker('COUNCIL_GATE_PASS_TOO_LOW', '委员会硬闸门通过率不足70%'))
-    }
-  }
-
   const approved = !!(
     humanApproval
     && humanApproval.specVersion === targetSpecVersion
@@ -209,7 +158,6 @@ export function buildStrategyPromotionGate({
         profitFactor: live.profitFactor ?? null,
         expectancy: live.expectancy ?? null,
       },
-      council,
       humanApproved: approved,
     },
     blockers: blocks,

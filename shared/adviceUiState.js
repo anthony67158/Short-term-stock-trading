@@ -13,8 +13,7 @@ const DEEP_GENERATION_STEPS = Object.freeze([
   { key: 'prepare', label: '准备上下文' },
   { key: 'collect', label: '采集证据' },
   { key: 'quant', label: '量化校验' },
-  { key: 'draft', label: '形成候选方案' },
-  { key: 'council', label: '委员会复核' },
+  { key: 'draft', label: '深度研判' },
   { key: 'decision', label: '发布最终结论' },
 ])
 
@@ -26,11 +25,9 @@ function inferredGenerationStage(generation = {}) {
   if (['theory', 'llm', 'failover'].includes(explicit)) {
     return generation.deepMode === true ? 'draft' : 'decision'
   }
-  if (explicit === 'council') return 'council'
   if (explicit === 'finalize') return 'decision'
   if (['done', 'failed'].includes(explicit)) return explicit
   const phase = String(generation.phase || generation.label || '')
-  if (/委员会/.test(phase)) return 'council'
   if (/量化/.test(phase)) return 'quant'
   if (/采集|行情|资金|证据/.test(phase)) return 'collect'
   if (/发布最终|最终结论/.test(phase)) return 'decision'

@@ -118,7 +118,6 @@ import {
   buildStrategyPromotionGate,
   CURRENT_STRATEGY_EVALUATION,
 } from '../shared/strategyPromotionGate.js';
-import { councilRecordsFromData } from '../shared/advisorCouncilStore.js';
 import { internalApiOrigin } from './_internal_origin.js';
 import { loadSectorOpportunity } from './_sector_opportunity.js';
 
@@ -704,9 +703,6 @@ export default async function handler(req, res) {
           strategySpec: activeStrategySpec,
           evaluation: CURRENT_STRATEGY_EVALUATION,
           realOutcomeLearning: payload.realOutcomeLearning || {},
-          councilRecords: councilRecordsFromData(
-            accountAuth.account?.data || {},
-          ),
           humanApproval:
             accountAuth.account?.data?.strategyHumanApproval || null,
         })
@@ -846,7 +842,6 @@ export default async function handler(req, res) {
     // 只留 ~40s 给"数据回传/SSE 收尾/平台调度",绝不逼近 600s 硬墙被强杀。非深度思考仍给较小预算省成本。
     const BUDGET = resolveAIBudget(reasoningOn, body && body.runtimeBudgetMs);
     const remain = () => BUDGET - (Date.now() - START);
-
     // stock 模式：接入 RAG（近5日走势+主营+联网新闻）
     let ragText = '';
     let newsRefs = [];
@@ -1672,7 +1667,7 @@ export default async function handler(req, res) {
     // LLM 超时按【剩余预算】动态给：预留 2.5s 兜底返回时间，最少给 8s。
     // 军师模式(t_advice/hold_advice/buy_advice/review/price/plan)走深度研判模型,实测常需 47s+;
     // 开启深度思考(reasoning)后需先跑思维链,参考内容多时军师级复杂题可远超 2 分钟——
-    // 深度军师的主模型必须给最终 JSON 整理和委员会发布预留时间。不能让主模型
+    // 深度军师的主模型必须给最终 JSON 整理和结果发布预留时间。不能让主模型
     // 占满 FC 窗口后才发现正文不完整，否则只能整轮重跑。
     const llmCap = useReasoning
       ? (isAdvisor ? 540000 : 300000)
@@ -2026,7 +2021,6 @@ export default async function handler(req, res) {
       usage,
       salv: _salvDbg,
     };
-
     if (!streaming) res.status(200);
     // ★服务端兜底纠偏(hold_advice / review / t_advice):LLM 偶尔无视手数上限/合法价带,
     //   这里强制拉回,避免给出"清仓4手(实际只持3手)"或"止损价低于跌停价"这类不可执行的建议。

@@ -20,17 +20,6 @@ function eligibleData() {
         expectancy: 80,
       },
     },
-    advisorCouncilShadow: Array.from({ length: 24 }, (_, index) => ({
-      schemaVersion: 'advisor-council-shadow.v1',
-      shadowOnly: true,
-      actionable: false,
-      code: '600001',
-      at: index,
-      compiled: {
-        consensusReached: true,
-        hardGatePassed: index < 21,
-      },
-    })),
   }
 }
 
@@ -48,7 +37,7 @@ function passingEvaluation() {
   }
 }
 
-test('治理快照公开拒绝原因但不返回委员会完整提示上下文', () => {
+test('治理快照公开拒绝原因但不再暴露历史委员会数据', () => {
   const snapshot = strategyGovernanceSnapshot({
     realOutcomeLearning: { overall: { samples: 0 } },
     advisorCouncilShadow: [{
@@ -77,9 +66,7 @@ test('治理快照公开拒绝原因但不返回委员会完整提示上下文',
     ).state,
     'rejected',
   )
-  assert.equal(snapshot.council.latest.length, 1)
-  assert.equal(snapshot.council.latest[0].opinions, undefined)
-  assert.equal(snapshot.council.latest[0].hardGatePassed, false)
+  assert.equal(snapshot.council, undefined)
 })
 
 test('治理快照按策略汇总已验证建议作为模拟观察', () => {

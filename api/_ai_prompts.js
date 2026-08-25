@@ -36,7 +36,7 @@ export function llmRoleForAdviceMode(mode, reviewOrigin = '') {
 // 也计入 max_tokens,参考内容一多、思维链一长(复杂军师题可轻松吃掉一两万 token),留给正文 JSON
 // 的额度就被吃光 → finish_reason:length → JSON 截断成半个对象、建议残缺(实测 17200 仍会在
 // 「长思维链 + 军师大 JSON(十余个长文案字段)」场景被吃穿,正文停在半个字段)。
-// 深度推理还必须给最终 JSON 整理与委员会发布留下时间。实际端点在 32k token
+// 深度推理还必须给最终 JSON 整理与发布留下时间。实际端点在 32k token
 // 窗口内会先耗尽 FC 时限再截断正文，因此把主模型收敛到约 24k token；
 // 正文不完整时由后续无思考整理调用完成结构化交付。
 export function maxTokensForMode(mode, reasoning = false) {
@@ -46,6 +46,95 @@ export function maxTokensForMode(mode, reasoning = false) {
   else if (mode === "hold_advice" || mode === "buy_advice" || mode === "review") base = 3200;
   else base = 1600;
   return reasoning ? Math.max(base + 20800, 24000) : base;
+}
+
+function promptText(value, maximum = 180) {
+  return String(value ?? '').trim().slice(0, maximum)
+}
+
+function promptNumber(value) {
+  const number = Number(value)
+  return Number.isFinite(number) ? number : null
+}
+
+function compactPreviousAdviceForPrompt(previousAdvice) {
+  if (!previousAdvice || typeof previousAdvice !== 'object') return null
+  const compact = {}
+  const textFields = [
+    'planId', 'action', 'stance', 'tier', 'tone', 'title', 'headline',
+    'actionPlan', 'nextAction', 'timing', 'opQty', 'planQty',
+    'planWeight', 'posAfter', 'newCost', 'riskReward', 'keyLevel',
+    'invalidation', 'confidence', 'reason',
+  ]
+  const priceFields = [
+    'addPrice', 'reducePrice', 'buyPrice', 'watchPrice', 'stopPrice',
+    'targetPrice', 'planAmount', 'opAmount',
+  ]
+  for (const field of textFields) {
+    const value = promptText(previousAdvice[field])
+    if (value) compact[field] = value
+  }
+  for (const field of priceFields) {
+    const value = promptNumber(previousAdvice[field])
+    if (value != null) compact[field] = value
+  }
+  if (Number.isFinite(Number(previousAdvice.revision))) {
+    compact.revision = Number(previousAdvice.revision)
+  }
+  if (previousAdvice.continuity?.planId) {
+    compact.continuity = {
+      planId: promptText(previousAdvice.continuity.planId, 120),
+      revision: promptNumber(previousAdvice.continuity.revision),
+    }
+  }
+  const levels = Array.isArray(previousAdvice.priceContract?.levels)
+    ? previousAdvice.priceContract.levels
+      .map((level) => ({
+        kind: promptText(level?.kind, 40),
+        price: promptNumber(level?.price),
+        label: promptText(level?.label, 80),
+      }))
+      .filter((level) => level.kind || level.price != null)
+      .slice(0, 8)
+    : []
+  if (levels.length) compact.priceContract = { levels }
+  const decisionPlan = previousAdvice.decisionPlan
+  if (decisionPlan && typeof decisionPlan === 'object') {
+    compact.decisionPlan = {
+      action: promptText(decisionPlan.action, 30),
+      actionability: promptText(decisionPlan.actionability, 40),
+      referencePrice: promptNumber(decisionPlan.referencePrice),
+      entryPrice: promptNumber(decisionPlan.entryPrice),
+      stopPrice: promptNumber(decisionPlan.stopPrice),
+      targetPrice: promptNumber(decisionPlan.targetPrice),
+      lots: promptNumber(decisionPlan.capacity?.lots),
+    }
+  }
+  if (previousAdvice.reviewCycle && typeof previousAdvice.reviewCycle === 'object') {
+    compact.reviewCycle = {
+      status: promptText(previousAdvice.reviewCycle.status, 40),
+      previousAction: promptText(
+        previousAdvice.reviewCycle.previousAction,
+        30,
+      ),
+      changeType: promptText(previousAdvice.reviewCycle.changeType, 40),
+      riskLevel: promptText(previousAdvice.reviewCycle.riskLevel, 30),
+    }
+  }
+  return compact
+}
+
+export function promptPayloadForModel(payload = {}) {
+  const {
+    previousAdvice,
+    previousEvidenceDigest,
+    evidenceSnapshot,
+    evidenceSnapshotRef,
+    realOutcomeLearning,
+    knowledgeActionReview,
+    ...modelPayload
+  } = payload
+  return modelPayload
 }
 
 export const SYSTEM_PROMPT = `你的任务是基于用户提供的【实时行情数据】做客观分析。
@@ -135,7 +224,10 @@ export const ADVISOR_FAST_SYSTEM = `你是A股短线交易决策解释器。必�
 输出只保留：一个结论、一条执行指令、关键价位、仓位与金额、失效条件，以及最多四条互不重复的核心证据。禁止章节堆叠、同义复述、免责声明和额外说明。`;
 
 export function buildUserPrompt(mode, payload, ragText, theoryHits = []) {
-  const data = JSON.stringify(payload, null, 0);
+  const data = JSON.stringify(promptPayloadForModel(payload), null, 0);
+  const previousAdviceForPrompt = compactPreviousAdviceForPrompt(
+    payload.previousAdvice,
+  );
   const sectorOpportunityRule = payload.sectorOpportunity?.matched
     ? `【板块与个股联动】板块前瞻已把本股列入${payload.sectorOpportunity.sector?.name || '相关板块'}前排，板块结论=${payload.sectorOpportunity.sector?.actionability || '待确认'}，个股定位=${payload.sectorOpportunity.stock?.roleLabel || '前排候选'}，试仓资格=${payload.sectorOpportunity.probeEligible === true ? '允许人工小仓试错' : '未开放'}。板块只决定方向顺逆，个股实时量价、资金、策略信号和盈亏比决定此刻是否出手。允许试仓时只能给“小仓试错/小仓加仓”，首笔不超过总资产5%，必须给止损、目标和1-5个交易日内的退出条件；板块转弱、个股掉队或资金转差时立即取消。`
     : '【板块与个股联动】本股未进入板块前瞻的前排候选，不得仅凭题材名称放宽买入或加仓条件。';
@@ -228,8 +320,8 @@ ${payload.quant.v2.executionReference ? `【当前时段实时执行层·不是�
     && advisorTrack.theoryScores.length
     ? `\n【★操盘理论·建议归因统计】以下是引用该理论的建议结果，不是对理论本身的独立因果检验；每个理论至少8个样本才纳入：${advisorTrack.theoryScores.map((item) => `${item.theory} ${item.winRate}%(${item.total}次,均${item.avgPct >= 0 ? '+' : ''}${item.avgPct}%)`).join('、')}。高命中理论仅在当前形态确实匹配时加权；低命中理论要检查是否生搬硬套，不能因名气机械引用。`
     : '';
-  const previousAdviceNote = payload.previousAdvice
-    ? `\n【★★上一版权威主计划·连续决策约束】${JSON.stringify(payload.previousAdvice)}。
+  const previousAdviceNote = previousAdviceForPrompt
+    ? `\n【★★上一版权威主计划·连续决策约束】${JSON.stringify(previousAdviceForPrompt)}。
 刷新不是重新猜一次方向，而是复核这份主计划：①方向和失效条件未被客观行情破坏时，必须延续原方向，只可微调动态买卖区间；②无客观失效证据不得反转，不得仅因现价小幅变化就在“买/持/卖”之间摇摆；③只有触及上一版止损/目标，或资金、消息、量化、技术出现多维反转共振时，才允许改成相反动作，并在理由中明确指出哪条原逻辑已失效；④上一版与新数据冲突但证据不足时，以主计划为准并继续等待 Judge 确认。`
     : '';
   const knowledgeActionNote = `\n【★★知行合一·字段职责】先定义，再行动；先守纪律，再谈收益。请在已有字段中分别写清：action=明确动作、actionPlan/nextAction=当前执行指令、timing/nextOpenPlan=触发条件、positionNote/planWeight/posAfter=仓位上限、exitTiming=确认与退出规则、risk=主要风险、invalidation=可证伪的失效条件。禁止用“适量、看情况、注意风险”等模糊词替代规则。系统会在返回后统一生成知行合一交易契约与评分，你不要再额外复制一套嵌套契约。

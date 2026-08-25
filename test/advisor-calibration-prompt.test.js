@@ -223,3 +223,32 @@ test('快速军师输出限制重复文案并保留核心证据', () => {
   assert.match(prompt, /不得换词重复/)
   assert.ok(prompt.length < 6000)
 })
+
+test('连续决策只传递上一版关键交易契约，不重复注入大对象', () => {
+  const bulkyMarker = 'UNUSED_RUNTIME_PAYLOAD'.repeat(3000)
+  const prompt = buildUserPrompt('hold_advice', {
+    code: '600000',
+    previousEvidenceDigest: { rawSnapshot: bulkyMarker },
+    previousAdvice: {
+      action: '持有',
+      title: '守住10元继续持有',
+      actionPlan: '跌破10元减仓1手',
+      stopPrice: 10,
+      targetPrice: 12,
+      opQty: '减仓1手',
+      invalidation: '收盘跌破10元',
+      priceContract: {
+        levels: [{ kind: 'stop', price: 10 }],
+      },
+      executionPlan: { raw: bulkyMarker },
+      evidenceSnapshotRef: { raw: bulkyMarker },
+      presentation: { raw: bulkyMarker },
+    },
+  })
+
+  assert.match(prompt, /守住10元继续持有/)
+  assert.match(prompt, /跌破10元减仓1手/)
+  assert.match(prompt, /收盘跌破10元/)
+  assert.match(prompt, /"stopPrice":10/)
+  assert.doesNotMatch(prompt, /UNUSED_RUNTIME_PAYLOAD/)
+})

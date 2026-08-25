@@ -9,8 +9,6 @@ import {
   leaseJob,
   resourcePatchForJobProgress,
   reviewJobsOf,
-  selectStartableJobs,
-  updateJobProgress,
 } from '../api/_jobs.js'
 import {
   mergeAdviceRuntimeState,
@@ -121,65 +119,20 @@ test('主批次进度不被后台复核重新拉回运行中', () => {
   )
 })
 
-test('委员会阶段释放advisor容量并独立占用review容量', () => {
-  const data = {}
-  enqueueJob(data, {
-    code: '600000',
-    mode: 'hold_advice',
-    source: 'ondemand',
-    deepMode: true,
-  }, 1000)
-  leaseJob(data, '600000', 1100, 'advisor')
-  updateJobProgress(data, '600000', {
-    stage: 'council',
-    phase: '委员会复核',
-    resourceRole: 'review',
-    resourceUnits: 2,
-  }, 1200, 'advisor')
-
-  enqueueJob(data, {
-    code: '000001',
-    mode: 'hold_advice',
-    source: 'ondemand',
-  }, 1300)
-  enqueueJob(data, {
-    code: '600036',
-    mode: 'hold_advice',
-    source: 'auto',
-  }, 1400)
-
-  const startable = selectStartableJobs(data, {
-    advisor: 2,
-    review: 2,
-  }, new Set(), 1500)
-
-  assert.deepEqual(
-    startable.map((job) => [job.code, job.role]),
-    [['000001', 'advisor']],
-  )
-  const progress = jobsToProgress(data, 1500, 2)
-  assert.deepEqual(progress.current, ['600000'])
-  assert.deepEqual(progress.advisorBusy, [])
-})
-
 test('任务阶段确定当前占用的角色资源', () => {
   const advisor = { role: 'advisor' }
   const review = { role: 'review' }
 
   assert.deepEqual(
-    resourcePatchForJobProgress(advisor, 'council', 2),
-    { resourceRole: 'review', resourceUnits: 2 },
-  )
-  assert.deepEqual(
-    resourcePatchForJobProgress(advisor, 'finalize', 2),
+    resourcePatchForJobProgress(advisor, 'finalize'),
     { resourceRole: 'none', resourceUnits: 0 },
   )
   assert.deepEqual(
-    resourcePatchForJobProgress(advisor, 'llm', 2),
+    resourcePatchForJobProgress(advisor, 'llm'),
     { resourceRole: 'advisor', resourceUnits: 1 },
   )
   assert.deepEqual(
-    resourcePatchForJobProgress(review, 'llm', 2),
+    resourcePatchForJobProgress(review, 'llm'),
     { resourceRole: 'review', resourceUnits: 1 },
   )
 })
