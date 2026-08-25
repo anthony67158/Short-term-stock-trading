@@ -138,6 +138,7 @@ export function buildStrategyResearchView({
       backtest: backtestView(record.evaluation),
       shadow: {
         samples: Math.max(0, Number(record.shadow?.samples) || 0),
+        pending: Math.max(0, Number(record.shadow?.pending) || 0),
         returnPct: percent(record.shadow?.netReturn),
         drawdownPct: percent(record.shadow?.maximumDrawdown),
         profitFactor: finite(record.shadow?.profitFactor),

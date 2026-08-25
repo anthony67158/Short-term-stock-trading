@@ -33,31 +33,35 @@ test('策略研究视图合并五类策略与回测影子真实成绩', () => {
   assert.match(baseline.modelVersion, /lgb-score-36/)
 })
 
-test('盘面研究挂载策略研究区并具备响应式表格契约', () => {
+test('盘面研究优先展示今日策略雷达并折叠验证明细', () => {
   const research = read('src/components/ResearchTab.jsx')
   const panel = read('src/components/StrategyResearchPanel.jsx')
-  const css = read('src/styles.css') + read('src/styles/precision.css')
+  const css = read('src/components/StrategyResearchPanel.css')
 
   assert.match(research, /StrategyResearchPanel/)
   assert.match(research, /<StrategyResearchPanel/)
   assert.match(panel, /\/api\/strategy_specs/)
   assert.match(panel, /\/api\/strategy_governance/)
-  assert.match(panel, /aria-label="策略研究"/)
+  assert.match(panel, /buildStrategyRadar/)
+  assert.match(panel, /usePlanStore/)
+  assert.match(panel, /openStockDetail/)
+  assert.match(panel, /aria-label="今日策略雷达"/)
+  assert.match(panel, /当前主参考/)
+  assert.match(panel, /对当前持仓/)
+  assert.match(panel, /对自选买入/)
+  assert.match(panel, /验证明细/)
+  assert.match(panel, /<details/)
   assert.match(panel, /回测/)
   assert.match(panel, /模拟观察/)
-  assert.match(panel, /模拟表现/)
   assert.match(panel, /真实成交/)
-  assert.match(panel, /上线状态与原因/)
   assert.match(panel, /盈亏效率/)
   assert.doesNotMatch(panel, /\{row\.specVersion\}|\bPF\b| fold/)
+  assert.match(css, /\.strategy-radar-overview/)
+  assert.match(css, /\.strategy-radar-impact-grid/)
   assert.match(css, /\.strategy-research-table/)
-  assert.match(css, /@media \(max-width: 640px\)/)
+  assert.match(css, /@media \(max-width:\s*720px\)/)
   assert.match(
     css,
-    /@media \(max-width: 640px\)[\s\S]*?\.strategy-research-summary\s*{[^}]*flex-wrap:\s*wrap/s,
-  )
-  assert.doesNotMatch(
-    css,
-    /\.strategy-research-summary\s*{[^}]*max-width:\s*180px/s,
+    /@media \(max-width:\s*720px\)[\s\S]*?\.strategy-radar-impact-grid\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s,
   )
 })

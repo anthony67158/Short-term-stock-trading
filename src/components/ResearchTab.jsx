@@ -43,7 +43,7 @@ export default function ResearchTab({ interval }) {
 
   return (
     <div className="research">
-      <ErrorBoundary label="策略研究">
+      <ErrorBoundary label="策略雷达">
         <StrategyResearchPanel />
       </ErrorBoundary>
       <ErrorBoundary label="概念走势">
