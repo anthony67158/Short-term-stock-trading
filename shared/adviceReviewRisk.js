@@ -117,6 +117,30 @@ export function adviceReviewRisk({
     urgent.push('利空与低共振同时出现')
   }
 
+  const funds = snapshot?.evidence?.funds || {}
+  const mainNet = finite(funds.mainNetYi)
+  const retailNet = finite(funds.retailNetYi ?? funds.smallNetYi)
+  const fundRelation = String(funds.retailFlow?.relation || '')
+  if (
+    fundRelation === 'main_out_retail_in'
+    || (mainNet != null && mainNet < 0 && retailNet != null && retailNet > 0)
+  ) {
+    urgent.push('主力流出与小单流入背离')
+  } else if (mainNet != null && mainNet > 0 && retailNet != null && retailNet < 0) {
+    elevated.push('主力流入与小单流出待确认')
+  }
+
+  const opportunity = snapshot?.evidence?.decisionSignals?.sectorOpportunity
+  const role = String(opportunity?.stock?.role || '')
+  if (
+    opportunity?.probeEligible === true
+    && opportunity?.sector?.actionability === 'LAYOUT'
+    && ['leader', 'core', 'elastic'].includes(role)
+    && Number(opportunity?.stock?.mainInflow) > 0
+  ) {
+    elevated.push('板块前排出现可参与信号')
+  }
+
   if (urgent.length) {
     return { level: 'urgent', reasons: urgent.slice(0, 4), price, atrPct }
   }

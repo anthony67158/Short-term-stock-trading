@@ -154,6 +154,45 @@ function reversalEvidence(previous, next, evidence = {}) {
   return { allowed: false, reason: '' }
 }
 
+function actionRiskLevel(advice = {}) {
+  const action = text(advice.action || advice.stance, 80)
+  if (/减仓|清仓|卖出|止损|离场/.test(action)) return 0
+  if (/观望|等待|不买|暂不/.test(action)) return 1
+  if (/持有|持股/.test(action)) return 2
+  if (/买入|加仓|补仓|接回|买回/.test(action)) return 3
+  return 2
+}
+
+function scheduledActionEvidence(previous, next, evidence = {}) {
+  const priorRisk = actionRiskLevel(previous)
+  const nextRisk = actionRiskLevel(next)
+  if (nextRisk <= priorRisk) return { allowed: false, reason: '' }
+  const current = number(evidence.currentPrice)
+  const entry = number(
+    previous.addPrice
+    ?? previous.buyPrice
+    ?? previous.watchPrice,
+  )
+  const entryTriggered = current != null
+    && entry != null
+    && current <= entry * 1.002
+  const sectorConfirmed = evidence.sectorProbeEligible === true
+  const fundsConfirmed = (
+    Number(evidence.mainNetYi) > 0
+    || Number(evidence.mainStreak) >= 1
+  )
+  if (entryTriggered && sectorConfirmed && fundsConfirmed) {
+    return {
+      allowed: true,
+      reason: '执行价已触发，板块前排与主力资金同步确认',
+    }
+  }
+  return {
+    allowed: false,
+    reason: '新增风险仍缺执行价、板块前排或主力资金确认',
+  }
+}
+
 export function compactAdvicePlan(entry) {
   const advice = entry?.advice && typeof entry.advice === 'object'
     ? entry.advice
@@ -225,6 +264,12 @@ export function continuityEvidenceFromPayload(payload = {}) {
     resonanceScore: payload.resonance?.score ?? null,
     hasNegNews: !!payload.resonance?.hasNegNews,
     mainStreak: payload.stockFund?.mainStreak ?? null,
+    mainNetYi: payload.stockFund?.mainNetYi ?? null,
+    retailNetYi: payload.stockFund?.retailNetYi
+      ?? payload.stockFund?.smallNetYi
+      ?? null,
+    sectorProbeEligible:
+      payload.sectorOpportunity?.probeEligible === true,
     highConfFired: !!quant.highConfSignal?.fired,
     atr: payload.tech?.atr?.atr ?? payload.tech?.atr ?? null,
   }
@@ -296,14 +341,20 @@ export function reconcileAdviceContinuity({
 
   if (stabilityMode === 'scheduled' && !reversal) {
     const held = { ...nextAdvice }
-    for (const field of SCHEDULED_STABLE_FIELDS) {
-      if (prior[field] != null) held[field] = prior[field]
-      else delete held[field]
-    }
-    if (
-      text(prior.action || prior.stance, 80)
+    const actionChanged = text(prior.action || prior.stance, 80)
       !== text(nextAdvice.action || nextAdvice.stance, 80)
-    ) {
+    const actionEvidence = scheduledActionEvidence(
+      prior,
+      nextAdvice,
+      evidence,
+    )
+    if (!actionEvidence.allowed) {
+      for (const field of SCHEDULED_STABLE_FIELDS) {
+        if (prior[field] != null) held[field] = prior[field]
+        else delete held[field]
+      }
+    }
+    if (actionChanged && !actionEvidence.allowed) {
       for (const field of SCHEDULED_ACTION_TEXT_FIELDS) {
         if (prior[field] != null) held[field] = prior[field]
         else delete held[field]
@@ -326,10 +377,14 @@ export function reconcileAdviceContinuity({
       thesisVersion: priorThesis,
       changeType,
       changeReason: changeType === 'adjust'
-        ? '自动复核确认方向不变，按最新风险与波动受控更新执行价位'
+        ? actionChanged && actionEvidence.allowed
+          ? actionEvidence.reason
+          : '自动复核确认方向不变，按最新风险与波动受控更新执行价位'
         : '自动复核未发现执行事件，继续执行上一版主计划',
       previousAction: prior.action || '',
-      proposedAction: '',
+      proposedAction: actionChanged && !actionEvidence.allowed
+        ? nextAdvice.action || nextAdvice.stance || ''
+        : '',
       zones: zonesOf(held),
     }
     return { advice: held, accepted: true }

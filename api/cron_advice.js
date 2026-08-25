@@ -786,6 +786,7 @@ async function genOne({
             unchanged: r.unchanged === true,
             reviewDisposition: r.reviewDisposition || '',
             reviewReason: r.reviewReason || '',
+            reviewReceipt: r.reviewReceipt || null,
           };
     })
     .catch((error) => {
@@ -807,6 +808,7 @@ async function genOne({
   const reviewDisposition = adviceResp?.reviewDisposition
     || (!advice && previousEntry && adviceFailure ? 'insufficient' : '');
   const reviewReason = adviceResp?.reviewReason || adviceFailure || '';
+  const reviewReceipt = adviceResp?.reviewReceipt || null;
   if (!acceptsGenerationResult({
     quant: result,
     advice,
@@ -833,6 +835,7 @@ async function genOne({
       reviewTrigger: reviewTrigger || (previousEntry ? 'scheduled' : 'initial'),
       reviewDisposition,
       reviewReason,
+      reviewReceipt,
     },
     at,
   );

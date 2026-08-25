@@ -258,6 +258,26 @@ function reviewSummary(advice = {}) {
         previousAction: clean(advice.reviewCycle.previousAction, 80),
         changeType: clean(advice.reviewCycle.changeType, 40),
         reason: clean(advice.reviewCycle.reason, 160),
+        receipt: advice.reviewCycle.receipt
+          ? {
+              checked: Array.isArray(advice.reviewCycle.receipt.checked)
+                ? advice.reviewCycle.receipt.checked
+                  .map((item) => clean(item, 40))
+                  .filter(Boolean)
+                  .slice(0, 8)
+                : [],
+              changes: Array.isArray(advice.reviewCycle.receipt.changes)
+                ? advice.reviewCycle.receipt.changes
+                  .map((item) => clean(item, 60))
+                  .filter(Boolean)
+                  .slice(0, 4)
+                : [],
+              summary: clean(
+                advice.reviewCycle.receipt.summary,
+                160,
+              ),
+            }
+          : null,
       }
     : null
 }

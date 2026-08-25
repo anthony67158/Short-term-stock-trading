@@ -28,6 +28,24 @@ function isTradeDay(timestamp) {
   return isTradingDayAt(timestamp)
 }
 
+function reviewReceipt(value) {
+  if (!value || typeof value !== 'object') return null
+  const checked = Array.isArray(value.checked)
+    ? value.checked.map((item) => String(item || '').slice(0, 40))
+      .filter(Boolean)
+      .slice(0, 8)
+    : []
+  const changes = Array.isArray(value.changes)
+    ? value.changes.map((item) => String(item || '').slice(0, 60))
+      .filter(Boolean)
+      .slice(0, 4)
+    : []
+  const summary = String(value.summary || '').slice(0, 160)
+  return checked.length || changes.length || summary
+    ? { checked, changes, summary }
+    : null
+}
+
 function atBjMinutes(timestamp, minutes) {
   const parts = bjParts(timestamp)
   return Date.UTC(
@@ -107,6 +125,7 @@ export function buildAdviceReviewCycle(previous, data, at = Date.now()) {
     riskReasons: schedule.riskReasons,
     trigger: data?.reviewTrigger || (previous ? 'scheduled' : 'initial'),
     reason: String(data?.reviewReason || '').slice(0, 160),
+    receipt: reviewReceipt(data?.reviewReceipt),
     previousAction,
     changeType: ['unchanged', 'insufficient'].includes(data?.reviewDisposition)
       ? 'maintain'

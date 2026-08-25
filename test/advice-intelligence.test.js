@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import {
   adviceEvidenceDigest,
   adviceTrustBands,
+  buildReviewReceipt,
   calibrateAdviceTrust,
   evaluateScheduledReview,
   prioritizeAdviceReviewCodes,
@@ -97,6 +98,226 @@ test('自动复核证据无实质变化时跳过LLM', () => {
     disposition: 'unchanged',
     reason: '关键证据无实质变化',
   })
+})
+
+test('宏观快讯轮换和无关研报不应单独触发自动复核模型', () => {
+  const previousSnapshot = snapshot({
+    evidence: {
+      ...snapshot().evidence,
+      news: {
+        headlines: [
+          '[公司公告]测试股份：季度经营数据',
+          '[研报]与本股无关的公司报告A',
+        ],
+        macro: ['海外宏观快讯A'],
+        flashes: ['市场快讯A'],
+      },
+    },
+  })
+  const currentSnapshot = snapshot({
+    evidence: {
+      ...previousSnapshot.evidence,
+      news: {
+        headlines: [
+          '[公司公告]测试股份：季度经营数据',
+          '[研报]与本股无关的公司报告B',
+        ],
+        macro: ['海外宏观快讯B'],
+        flashes: ['市场快讯B'],
+      },
+    },
+  })
+
+  assert.deepEqual(evaluateScheduledReview({
+    origin: 'auto',
+    previousDigest: adviceEvidenceDigest(previousSnapshot),
+    snapshot: currentSnapshot,
+    hasPreviousAdvice: true,
+  }), {
+    shouldRunLLM: false,
+    disposition: 'unchanged',
+    reason: '关键证据无实质变化',
+  })
+})
+
+test('同方向的资金金额和量化分微调不应重复调用自动复核模型', () => {
+  const previousSnapshot = snapshot({
+    evidence: {
+      ...snapshot().evidence,
+      funds: {
+        ...snapshot().evidence.funds,
+        mainNetYi: 0.42,
+        main5dYi: 1.1,
+        retailNetYi: -0.35,
+        retailFlow: { relation: 'main_in_retail_out' },
+      },
+      quant: {
+        ...snapshot().evidence.quant,
+        score: 66,
+        forecast: { direction: '上涨', upProb: 57 },
+      },
+    },
+  })
+  const currentSnapshot = snapshot({
+    evidence: {
+      ...previousSnapshot.evidence,
+      funds: {
+        ...previousSnapshot.evidence.funds,
+        mainNetYi: 0.9,
+        main5dYi: 1.6,
+        retailNetYi: -0.1,
+        retailFlow: { relation: 'main_in_retail_out' },
+      },
+      quant: {
+        ...previousSnapshot.evidence.quant,
+        score: 69,
+        forecast: { direction: '上涨', upProb: 59 },
+      },
+    },
+  })
+
+  assert.equal(evaluateScheduledReview({
+    origin: 'auto',
+    previousDigest: adviceEvidenceDigest(previousSnapshot),
+    snapshot: currentSnapshot,
+    hasPreviousAdvice: true,
+  }).disposition, 'unchanged')
+})
+
+test('板块参与资格或资金结构变化但未触发执行价时只加快观察', () => {
+  const previousSnapshot = snapshot({
+    evidence: {
+      ...snapshot().evidence,
+      funds: {
+        ...snapshot().evidence.funds,
+        retailNetYi: -0.8,
+        retailFlow: { relation: 'main_in_retail_out' },
+      },
+      decisionSignals: {
+        ...snapshot().evidence.decisionSignals,
+        sectorOpportunity: {
+          matched: true,
+          probeEligible: false,
+          sector: { actionability: 'WAIT_PULLBACK' },
+          stock: { role: 'core', score: 60, mainInflow: 0.2 },
+        },
+      },
+    },
+  })
+  const currentSnapshot = snapshot({
+    evidence: {
+      ...previousSnapshot.evidence,
+      funds: {
+        ...previousSnapshot.evidence.funds,
+        mainNetYi: -1,
+        retailNetYi: 1.2,
+        retailFlow: { relation: 'main_out_retail_in' },
+      },
+      decisionSignals: {
+        ...previousSnapshot.evidence.decisionSignals,
+        sectorOpportunity: {
+          matched: true,
+          probeEligible: true,
+          sector: { actionability: 'LAYOUT' },
+          stock: { role: 'leader', score: 78, mainInflow: 1.5 },
+        },
+      },
+    },
+  })
+
+  const result = evaluateScheduledReview({
+    origin: 'auto',
+    previousDigest: adviceEvidenceDigest(previousSnapshot),
+    snapshot: currentSnapshot,
+    hasPreviousAdvice: true,
+  })
+
+  assert.equal(result.shouldRunLLM, false)
+  assert.equal(result.disposition, 'unchanged')
+  assert.match(result.reason, /执行价|风险事件/)
+})
+
+test('板块与资金确认且接近执行价时触发自动复核模型', () => {
+  const previousSnapshot = snapshot({
+    evidence: {
+      ...snapshot().evidence,
+      quote: { price: 10.2, pct: 1.2 },
+      technical: {
+        ...snapshot().evidence.technical,
+        indicators: { ...snapshot().evidence.technical.indicators, atr: { atr: 0.2 } },
+      },
+    },
+  })
+  const currentSnapshot = snapshot({
+    evidence: {
+      ...previousSnapshot.evidence,
+      quote: { price: 10.01, pct: 0.1 },
+      decisionSignals: {
+        ...previousSnapshot.evidence.decisionSignals,
+        sectorOpportunity: {
+          matched: true,
+          probeEligible: true,
+          sector: { actionability: 'LAYOUT' },
+          stock: { role: 'leader', score: 78, mainInflow: 1.5 },
+        },
+      },
+    },
+  })
+  const result = evaluateScheduledReview({
+    origin: 'auto',
+    previousDigest: adviceEvidenceDigest(previousSnapshot),
+    snapshot: currentSnapshot,
+    hasPreviousAdvice: true,
+    previousAdvice: {
+      action: '观望',
+      watchPrice: 10,
+      priceContract: priceContract([{
+        key: 'watch',
+        field: 'watchPrice',
+        purpose: 'REVIEW_ONLY',
+        price: 10,
+        direction: 'LTE',
+        strict: true,
+      }]),
+    },
+  })
+
+  assert.equal(result.shouldRunLLM, true)
+  assert.match(result.reason, /价格|执行价/)
+})
+
+test('复核回执说明已核实项与真正改变的短线证据', () => {
+  const previousSnapshot = snapshot()
+  const currentSnapshot = snapshot({
+    evidence: {
+      ...previousSnapshot.evidence,
+      funds: {
+        ...previousSnapshot.evidence.funds,
+        mainNetYi: -0.6,
+        retailNetYi: 0.8,
+        retailFlow: { relation: 'main_out_retail_in' },
+      },
+    },
+  })
+  const receipt = buildReviewReceipt({
+    previousDigest: adviceEvidenceDigest(previousSnapshot),
+    snapshot: currentSnapshot,
+    previousAdvice: {
+      action: '持有',
+      stopPrice: 9.8,
+      targetPrice: 10.8,
+    },
+    evaluation: {
+      shouldRunLLM: true,
+      disposition: 'material-change',
+      reason: '主力与小单资金结构发生变化',
+    },
+  })
+
+  assert.match(receipt.summary, /资金/)
+  assert.ok(receipt.checked.includes('价格与执行价'))
+  assert.ok(receipt.checked.includes('板块与前排资格'))
+  assert.ok(receipt.changes.includes('主力与小单资金结构变化'))
 })
 
 test('旧建议缺少价格契约时强制进入一次迁移复核', () => {
@@ -315,7 +536,7 @@ test('价格、方向或负面证据发生实质变化时继续调用LLM', () =>
   assert.equal(result.disposition, 'material-change')
 })
 
-test('宏观消息、资金幅度和技术指标变化不能被误判为无变化', () => {
+test('未触发执行价的宏观、资金幅度和技术变化只加快观察', () => {
   const previous = adviceEvidenceDigest(snapshot())
   const changed = snapshot({
     evidence: {
@@ -342,12 +563,16 @@ test('宏观消息、资金幅度和技术指标变化不能被误判为无变�
     },
   })
 
-  assert.equal(evaluateScheduledReview({
+  const result = evaluateScheduledReview({
     origin: 'auto',
     previousDigest: previous,
     snapshot: changed,
     hasPreviousAdvice: true,
-  }).disposition, 'material-change')
+  })
+
+  assert.equal(result.disposition, 'unchanged')
+  assert.equal(result.shouldRunLLM, false)
+  assert.match(result.reason, /执行价|风险事件/)
 })
 
 test('高信心档历史表现较差时收缩当前信心而不是继续过度自信', () => {

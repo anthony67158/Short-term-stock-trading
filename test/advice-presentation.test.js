@@ -74,6 +74,7 @@ test('军师展示契约固定输出结论执行价位触发和三条核心依�
     previousAction: '观望',
     changeType: 'adjust',
     reason: '关键证据发生实质变化',
+    receipt: null,
   })
   assert.equal(view.schemaVersion, 'advice-presentation.v3')
 })

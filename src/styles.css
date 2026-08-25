@@ -2633,6 +2633,10 @@ button.acct-item { width: 100%; border: 0; background: transparent; font: inheri
 .advice-review-cycle > div b { margin-left: auto; color: var(--muted); font-size: 10.5px; }
 .advice-review-cycle p { margin: 3px 0 0; }
 .advice-review-cycle time { color: var(--accent); font-weight: 700; }
+.advice-review-receipt { display: flex; flex-wrap: wrap; gap: 2px 6px; margin-top: 6px; color: var(--muted); font-size: 10.5px; }
+.advice-review-receipt > span { color: var(--text2); font-weight: 700; }
+.advice-review-receipt > em { font-style: normal; }
+.advice-review-receipt > b { color: var(--accent); font-weight: 700; }
 .advice-review-cycle.unchanged { border-style: dashed; }
 .advice-review-cycle.insufficient { border-color: var(--sem-warn-bd); }
 .advice-review-cycle.insufficient > div, .advice-review-cycle.insufficient > div .icon { color: var(--sem-warn-strong); }

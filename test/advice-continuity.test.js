@@ -234,3 +234,40 @@ test('定时复核同为多头但动作变化时保留与锁定动作一致的�
   assert.equal(result.advice.actionPlan, '回踩9.90元加仓1手')
   assert.equal(result.advice.addPrice, 9.95)
 })
+
+test('定时复核在价位触发、板块前排和资金确认齐备时允许小仓加仓', () => {
+  const result = reconcileAdviceContinuity({
+    code: '600000',
+    previous: {
+      ...previous,
+      advice: {
+        ...previous.advice,
+        action: '持有',
+        addPrice: 9.9,
+        actionPlan: '回踩9.90元企稳后再考虑加仓',
+      },
+    },
+    next: {
+      action: '小仓加仓',
+      title: '回踩确认小仓加仓',
+      actionPlan: '9.88元企稳后小仓加仓1手',
+      opQty: '加仓1手',
+      addPrice: 9.88,
+      stopPrice: 9.75,
+      targetPrice: 10.5,
+    },
+    evidence: {
+      currentPrice: 9.88,
+      atr: 0.2,
+      sectorProbeEligible: true,
+      mainNetYi: 0.8,
+    },
+    stabilityMode: 'scheduled',
+    now: 2000,
+  })
+
+  assert.equal(result.advice.action, '小仓加仓')
+  assert.equal(result.advice.opQty, '加仓1手')
+  assert.equal(result.advice.continuity.changeType, 'adjust')
+  assert.match(result.advice.continuity.changeReason, /执行价|板块|资金/)
+})

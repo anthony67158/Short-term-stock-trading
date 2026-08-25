@@ -35,6 +35,12 @@ function newsTitles(headlines) {
     .slice(0, 6)
 }
 
+function companyAnnouncements(headlines) {
+  return newsTitles(headlines)
+    .filter((title) => /^\[公司公告\]/.test(title))
+    .slice(0, 4)
+}
+
 export function adviceEvidenceDigest(snapshot = {}) {
   const evidence = snapshot?.evidence || {}
   const quote = evidence.quote || {}
@@ -65,7 +71,6 @@ export function adviceEvidenceDigest(snapshot = {}) {
       upDownRatio: rounded(evidence.market?.breadth?.upDownRatio, 0.1),
       limitUp: rounded(evidence.market?.breadth?.limitUp, 5),
       limitDown: rounded(evidence.market?.breadth?.limitDown, 5),
-      volLevel: text(evidence.market?.breadth?.volLevel, 30),
     },
     technical: {
       maTrend: text(indicators.maTrend, 30),
@@ -79,27 +84,54 @@ export function adviceEvidenceDigest(snapshot = {}) {
     },
     funds: {
       mainNetSign: sign(funds.mainNetYi),
-      mainNetYi: rounded(funds.mainNetYi, 0.2),
       main5dSign: sign(funds.main5dYi),
-      main5dYi: rounded(funds.main5dYi, 0.5),
-      mainStreak: finite(funds.mainStreak),
+      mainStreakBand: finite(funds.mainStreak) == null
+        ? null
+        : Math.max(-2, Math.min(2, Math.sign(finite(funds.mainStreak)))),
+      retailNetSign: sign(funds.retailNetYi ?? funds.smallNetYi),
+      retailRelation: text(funds.retailFlow?.relation, 40),
     },
     quant: {
-      score: rounded(quant.score, 3),
+      scoreBand: finite(quant.score) == null
+        ? null
+        : Math.round(finite(quant.score) / 10),
       bias: text(quant.bias, 30),
       direction: text(forecast.direction, 30),
-      upProb: rounded(forecast.upProb, 5),
+      upProbBand: finite(forecast.upProb) == null
+        ? null
+        : Math.round(finite(forecast.upProb) / 10),
       highConfFired: quant.highConfSignal?.fired === true,
     },
     news: {
-      headlines: newsTitles(evidence.news?.headlines),
-      macro: newsTitles(evidence.news?.macro),
-      industry: newsTitles(evidence.news?.industry),
-      flashes: newsTitles(evidence.news?.flashes),
+      companyAnnouncements: companyAnnouncements(
+        evidence.news?.headlines,
+      ),
     },
     resonance: {
       score: finite(resonance.score),
       hasNegNews: resonance.hasNegNews === true,
+    },
+    sector: {
+      matched:
+        evidence.decisionSignals?.sectorOpportunity?.matched === true,
+      probeEligible:
+        evidence.decisionSignals?.sectorOpportunity?.probeEligible === true,
+      actionability: text(
+        evidence.decisionSignals?.sectorOpportunity?.sector
+          ?.actionability,
+        30,
+      ),
+      role: text(
+        evidence.decisionSignals?.sectorOpportunity?.stock?.role,
+        30,
+      ),
+      score: rounded(
+        evidence.decisionSignals?.sectorOpportunity?.stock?.score,
+        5,
+      ),
+      mainInflowSign: sign(
+        evidence.decisionSignals?.sectorOpportunity?.stock?.mainInflow,
+      ),
     },
     ...(strategyGate ? {
       policy: {
@@ -126,7 +158,7 @@ function materialChange(previous, current, previousAdvice) {
     current,
     previousAdvice,
   })
-  if (priceChange.changed) return priceChange
+  if (priceChange.changed) return { ...priceChange, kind: 'price' }
   if (
     previous?.policy?.strategyGate
     && current?.policy?.strategyGate
@@ -135,7 +167,29 @@ function materialChange(previous, current, previousAdvice) {
   ) {
     return {
       changed: true,
+      kind: 'policy',
       reason: '策略审核状态发生变化',
+    }
+  }
+  if (JSON.stringify(previous?.sector) !== JSON.stringify(current?.sector)) {
+    return {
+      changed: true,
+      kind: 'sector',
+      reason: '板块方向或个股前排资格发生变化',
+    }
+  }
+  if (JSON.stringify(previous?.funds) !== JSON.stringify(current?.funds)) {
+    return {
+      changed: true,
+      kind: 'funds',
+      reason: '主力与小单资金结构发生变化',
+    }
+  }
+  if (JSON.stringify(previous?.quant) !== JSON.stringify(current?.quant)) {
+    return {
+      changed: true,
+      kind: 'quant',
+      reason: '量化方向或把握度发生变化',
     }
   }
   const withoutPrice = (value) => JSON.stringify({
@@ -145,14 +199,47 @@ function materialChange(previous, current, previousAdvice) {
       price: null,
       pct: null,
     },
+    sector: null,
+    funds: null,
+    quant: null,
   })
   if (withoutPrice(previous) !== withoutPrice(current)) {
     return {
       changed: true,
+      kind: 'context',
       reason: '资金、技术、量化或消息证据发生实质变化',
     }
   }
-  return { changed: false, reason: '' }
+  return { changed: false, kind: '', reason: '' }
+}
+
+function nearExecutionPrice(snapshot, advice) {
+  const price = finite(snapshot?.evidence?.quote?.price)
+  if (!(price > 0)) return false
+  const atr = finite(
+    snapshot?.evidence?.technical?.indicators?.atr?.atr
+    ?? snapshot?.evidence?.technical?.indicators?.atr,
+  )
+  const threshold = Math.max(price * 0.008, (atr || 0) * 0.75)
+  const contractPrices = (advice?.priceContract?.levels || [])
+    .map((item) => finite(item?.price))
+    .filter((item) => item != null)
+  const fallbackPrices = [
+    advice?.addPrice,
+    advice?.buyPrice,
+    advice?.watchPrice,
+    advice?.reducePrice,
+    advice?.stopPrice,
+    advice?.targetPrice,
+  ].map(finite).filter((item) => item != null)
+  return [...new Set([...contractPrices, ...fallbackPrices])]
+    .some((level) => Math.abs(price - level) <= threshold)
+}
+
+function hardNegativeShift(previous, current) {
+  return previous?.resonance?.hasNegNews !== true
+    && current?.resonance?.hasNegNews === true
+    && Number(current?.resonance?.score) <= 1
 }
 
 export function evaluateScheduledReview({
@@ -205,10 +292,78 @@ export function evaluateScheduledReview({
       reason: '关键证据无实质变化',
     }
   }
+  if (
+    previousDigest
+    && !['price', 'policy'].includes(change.kind)
+    && !nearExecutionPrice(snapshot, previousAdvice)
+    && !hardNegativeShift(previousDigest, currentDigest)
+  ) {
+    return {
+      shouldRunLLM: false,
+      disposition: 'unchanged',
+      reason: `${change.reason}，未触发执行价或风险事件`,
+    }
+  }
   return {
     shouldRunLLM: true,
     disposition: previousDigest ? 'material-change' : 'full-review',
     reason: change.reason,
+  }
+}
+
+export function buildReviewReceipt({
+  previousDigest = null,
+  snapshot = null,
+  previousAdvice = null,
+  evaluation = null,
+} = {}) {
+  const current = adviceEvidenceDigest(snapshot || {})
+  const checked = [
+    '价格与执行价',
+    '主力与小单资金',
+    '板块与前排资格',
+    '量化方向',
+    '技术结构',
+    '账户约束',
+  ]
+  const changes = []
+  if (previousDigest) {
+    const price = reviewPriceMateriality({
+      previous: previousDigest,
+      current,
+      previousAdvice,
+    })
+    if (price.changed) changes.push('价格或执行价触发')
+    if (JSON.stringify(previousDigest.funds) !== JSON.stringify(current.funds)) {
+      changes.push('主力与小单资金结构变化')
+    }
+    if (JSON.stringify(previousDigest.sector) !== JSON.stringify(current.sector)) {
+      changes.push('板块方向或前排资格变化')
+    }
+    if (JSON.stringify(previousDigest.quant) !== JSON.stringify(current.quant)) {
+      changes.push('量化方向或把握度变化')
+    }
+    if (JSON.stringify(previousDigest.technical) !== JSON.stringify(current.technical)) {
+      changes.push('技术结构变化')
+    }
+    if (JSON.stringify(previousDigest.account) !== JSON.stringify(current.account)) {
+      changes.push('账户约束变化')
+    }
+    if (
+      JSON.stringify(previousDigest.news?.companyAnnouncements)
+      !== JSON.stringify(current.news?.companyAnnouncements)
+    ) {
+      changes.push('公司公告更新')
+    }
+  }
+  const reason = text(evaluation?.reason, 160)
+  return {
+    checked,
+    changes: changes.slice(0, 4),
+    summary: reason
+      || (changes.length
+        ? changes.slice(0, 2).join('、')
+        : '关键交易条件未发生实质变化'),
   }
 }
 

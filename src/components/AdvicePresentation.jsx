@@ -89,6 +89,15 @@ function ReviewCycle({ review, enabled = true }) {
           : ''}
         ，下次数据检查 <time dateTime={next.toISOString()}>{nextLabel}</time>。
       </p>
+      {review.receipt && (
+        <div className="advice-review-receipt">
+          <span>本轮核实</span>
+          <em>{(review.receipt.checked || []).join('、')}</em>
+          {(review.receipt.changes || []).length > 0 && (
+            <b>变化：{review.receipt.changes.join('、')}</b>
+          )}
+        </div>
+      )}
     </section>
   )
 }

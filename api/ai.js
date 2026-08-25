@@ -77,6 +77,7 @@ import {
   theoryReferencesOf,
 } from '../shared/advisorTheory.js';
 import {
+  buildReviewReceipt,
   calibrateAdviceTrust,
   evaluateScheduledReview,
 } from '../shared/adviceIntelligence.js';
@@ -132,6 +133,7 @@ export function buildScheduledReviewGateResponse({
   hasPreviousAdvice,
   previousAdvice,
   evaluation,
+  reviewReceipt = null,
   meta = {},
   news = [],
   now = Date.now(),
@@ -149,6 +151,7 @@ export function buildScheduledReviewGateResponse({
     unchanged: true,
     reviewDisposition: review.disposition,
     reviewReason: review.reason,
+    reviewReceipt,
     mode,
     updatedAt: now,
     meta: {
@@ -1596,6 +1599,12 @@ export default async function handler(req, res) {
       hasPreviousAdvice: !!payload.previousAdvice,
       previousAdvice: payload.previousAdvice,
     });
+    const reviewReceipt = buildReviewReceipt({
+      previousDigest: payload.previousEvidenceDigest,
+      snapshot: currentEvidenceSnapshot,
+      previousAdvice: payload.previousAdvice,
+      evaluation: scheduledReviewEvaluation,
+    });
     const scheduledReviewResponse = buildScheduledReviewGateResponse({
       mode,
       origin: payload.reviewOrigin,
@@ -1604,6 +1613,7 @@ export default async function handler(req, res) {
       hasPreviousAdvice: !!payload.previousAdvice,
       previousAdvice: payload.previousAdvice,
       evaluation: scheduledReviewEvaluation,
+      reviewReceipt,
       meta: collectedMeta,
       news: newsRefs,
     });
@@ -1996,13 +2006,14 @@ export default async function handler(req, res) {
       && typeof result === 'object'
       && !result.raw
     ) {
-      result = reconcileAdviceContinuity({
+      const continuityResult = reconcileAdviceContinuity({
         code: payload.code,
         previous: payload.previousAdvice,
         next: result,
         evidence: continuityEvidenceFromPayload(payload),
         stabilityMode: payload.reviewOrigin === 'auto' ? 'scheduled' : '',
-      }).advice;
+      });
+      result = continuityResult.advice;
     }
     const _dbg = {
       contentLen: (content || '').length,
@@ -2388,6 +2399,7 @@ export default async function handler(req, res) {
       searchReference,
       reviewDisposition: scheduledReviewEvaluation.disposition,
       reviewReason: scheduledReviewEvaluation.reason,
+      reviewReceipt,
       // 可信度元信息：供前端展示共振灯/环境/龙虎榜/消息面(不依赖模型自报)
       meta: collectedMeta,
       usedRag: !!ragText,
