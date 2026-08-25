@@ -4,6 +4,7 @@ import { api } from '../apiBase'
 import { authStore } from '../authStore'
 import { getAllAdvice, subscribeAdvice } from '../adviceCache'
 import { openStockDetail } from '../detailStore'
+import { formatAdviceTime } from '../format'
 import { usePlanStore } from '../planStore'
 import { accountCredentialHeaders } from '../../shared/accountCredentials.js'
 import { buildStrategyResearchView } from '../../shared/strategyResearch.js'
@@ -329,7 +330,11 @@ export default function StrategyResearchPanel() {
             <div>
               <span>当前市场</span>
               <strong>{radar.marketLabel}</strong>
-              <small>随行情切换策略，不固定押一种模式</small>
+              <small>
+                {radar.generatedAt
+                  ? `最近研判 ${formatAdviceTime(radar.generatedAt)}`
+                  : '等待最新建议形成市场判断'}
+              </small>
             </div>
             <div>
               <span>当前主参考</span>
