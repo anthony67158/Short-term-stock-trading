@@ -173,6 +173,7 @@ export function buildRealOutcomeLearning(
       netPnl,
       mode: String(recommendation.mode || 'unknown'),
       actionKind: actionKind(recommendation.action),
+      strategyId: String(recommendation.strategyId || 'unknown'),
       marketRegime: String(
         recommendation.marketRegime
         || recommendation.marketEnv?.level
@@ -204,6 +205,7 @@ export function buildRealOutcomeLearning(
     groups: {
       modes: grouped(records, (record) => record.mode, threshold),
       actions: grouped(records, (record) => record.actionKind, threshold),
+      strategies: grouped(records, (record) => record.strategyId, threshold),
       marketRegimes: grouped(
         records,
         (record) => record.marketRegime,

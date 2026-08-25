@@ -8,6 +8,7 @@ import {
 import {
   CURRENT_STRATEGY_EVALUATION,
 } from '../shared/strategyPromotionGate.js'
+import { getStrategySpecV2 } from '../shared/strategyCatalogV2.js'
 
 function eligibleData() {
   return {
@@ -79,6 +80,44 @@ test('治理快照公开拒绝原因但不返回委员会完整提示上下文',
   assert.equal(snapshot.council.latest.length, 1)
   assert.equal(snapshot.council.latest[0].opinions, undefined)
   assert.equal(snapshot.council.latest[0].hardGatePassed, false)
+})
+
+test('治理快照按策略汇总已验证建议作为模拟观察', () => {
+  const specVersion = getStrategySpecV2('trend-breakout').specVersion
+  const snapshot = strategyGovernanceSnapshot({
+    adviceLog: [
+      {
+        id: 'trend-1',
+        code: '600001',
+        mode: 'buy_advice',
+        action: '买入',
+        strategyId: 'trend-breakout',
+        specVersion,
+        verified: true,
+        outcomePolicyVersion: 2,
+        hit: true,
+        resultPct: 4,
+        at: 100,
+      },
+      {
+        id: 'trend-2',
+        code: '600002',
+        mode: 'buy_advice',
+        action: '买入',
+        strategyId: 'trend-breakout',
+        specVersion,
+        verified: false,
+        at: 200,
+      },
+    ],
+  })
+  const trend = snapshot.strategies.find(
+    (item) => item.strategyId === 'trend-breakout',
+  )
+
+  assert.equal(trend.shadow.samples, 1)
+  assert.equal(trend.shadow.pending, 1)
+  assert.equal(trend.shadow.netReturn, 0.04)
 })
 
 test('当前离线REJECT不能被人工批准密钥强行覆盖', () => {

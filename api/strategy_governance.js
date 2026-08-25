@@ -17,6 +17,8 @@ import {
   buildDefaultStrategyGovernance,
   strategyCanInfluenceProduction,
 } from '../shared/strategyGovernanceV2.js'
+import { buildRealOutcomeLearning } from '../shared/realOutcomeLearning.js'
+import { strategyShadowMetrics } from '../shared/strategyRadar.js'
 
 function secureEqual(left, right) {
   const expected = Buffer.from(String(right || ''))
@@ -26,6 +28,9 @@ function secureEqual(left, right) {
 }
 
 function learningOf(data) {
+  if (Array.isArray(data?.decisionLog)) {
+    return buildRealOutcomeLearning(data)
+  }
   return data?.realOutcomeLearning || {
     schemaVersion: 'real-outcome-learning.v1',
     overall: { samples: 0 },
@@ -37,9 +42,10 @@ export function strategyGovernanceSnapshot(
   evaluation = CURRENT_STRATEGY_EVALUATION,
 ) {
   const councilRecords = councilRecordsFromData(data)
+  const realOutcome = learningOf(data)
   const gate = buildStrategyPromotionGate({
     evaluation,
-    realOutcomeLearning: learningOf(data),
+    realOutcomeLearning: realOutcome,
     councilRecords,
     humanApproval: data.strategyHumanApproval,
   })
@@ -51,8 +57,38 @@ export function strategyGovernanceSnapshot(
     const spec = catalog.strategies.find(
       (item) => item.strategyId === record.strategyId,
     )
+    const observedShadow = strategyShadowMetrics(data.adviceLog, {
+      strategyId: record.strategyId,
+      specVersion: record.specVersion,
+    })
+    const storedShadow = record.shadow || {}
+    const shadow = observedShadow.samples >= Number(storedShadow.samples || 0)
+      ? {
+          ...storedShadow,
+          ...observedShadow,
+        }
+      : {
+          ...observedShadow,
+          ...storedShadow,
+          pending: observedShadow.pending,
+        }
+    const observedReal = (realOutcome.groups?.strategies || []).find(
+      (item) => item.key === record.strategyId,
+    )
+    const paper = observedReal
+      && observedReal.samples >= Number(record.paper?.samples || 0)
+      ? {
+          ...record.paper,
+          samples: observedReal.samples,
+          posteriorWinRate: observedReal.posteriorWinRate,
+          profitFactor: observedReal.profitFactor,
+          expectancy: observedReal.expectancy,
+        }
+      : record.paper
     return {
       ...record,
+      shadow,
+      paper,
       name: spec?.name || record.strategyId,
       purpose: spec?.purpose || null,
       eligibleRegimes: spec?.eligibleRegimes || [],
@@ -85,7 +121,7 @@ export function strategyGovernanceSnapshot(
     },
     evaluation,
     gate,
-    realOutcome: learningOf(data).overall || { samples: 0 },
+    realOutcome: realOutcome.overall || { samples: 0 },
     council: {
       samples: councilRecords.length,
       latest: councilRecords.slice(0, 10).map((record) => ({
