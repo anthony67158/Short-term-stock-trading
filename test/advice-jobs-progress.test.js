@@ -242,6 +242,56 @@ test('状态查询不伪造新进度时间且完成时间保持稳定', () => {
   assert.equal(later.finishedAt, 2000)
 })
 
+test('没有完整正文的终态任务仍显示为发布中而不是生成完成', () => {
+  const data = {}
+  enqueueJob(data, {
+    code: '600000',
+    name: '浦发银行',
+    mode: 'buy_advice',
+  }, 1000)
+  leaseJob(data, '600000', 1100)
+  completeJob(data, '600000', 2000)
+
+  const progress = jobsToProgress(data, 2100, 2)
+
+  assert.equal(progress.running, true)
+  assert.equal(progress.done, 0)
+  assert.equal(progress.items[0].status, 'publishing')
+  assert.equal(progress.items[0].stage, 'finalize')
+})
+
+test('完整建议已落盘后终态任务才对外显示完成', () => {
+  const data = {
+    advice: {
+      '600000': {
+        mode: 'buy_advice',
+        at: 2000,
+        advice: {
+          action: '观望',
+          title: '等待回踩确认',
+          actionPlan: '回踩10元附近且量能企稳再评估',
+          invalidation: '跌破9.8元后取消关注',
+          quantNote: '量化中性',
+          fundNote: '资金未形成共振',
+        },
+      },
+    },
+  }
+  enqueueJob(data, {
+    code: '600000',
+    name: '浦发银行',
+    mode: 'buy_advice',
+  }, 1000)
+  leaseJob(data, '600000', 1100)
+  completeJob(data, '600000', 2000)
+
+  const progress = jobsToProgress(data, 2100, 2)
+
+  assert.equal(progress.running, false)
+  assert.equal(progress.done, 1)
+  assert.equal(progress.items[0].status, 'ok')
+})
+
 test('没有任务时不生成虚假的空批次完成时间', () => {
   const progress = jobsToProgress({}, 5000, 2)
 

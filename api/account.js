@@ -466,6 +466,20 @@ function mergeRuntimeRecords(current = [], incoming = [], limit = 1000) {
 
 function mergeRuntimeJob(current, incoming) {
   if (!incoming) return current;
+  const sameJob = !!(
+    current?.id
+    && incoming?.id
+    && current.id === incoming.id
+  );
+  const terminal = (job) => ['done', 'failed', 'canceled'].includes(
+    String(job?.status || ''),
+  );
+  if (sameJob && terminal(current) && !terminal(incoming)) {
+    return current;
+  }
+  if (sameJob && terminal(incoming) && !terminal(current)) {
+    return incoming;
+  }
   if (!current || runtimeStamp(incoming) >= runtimeStamp(current)) {
     return incoming;
   }

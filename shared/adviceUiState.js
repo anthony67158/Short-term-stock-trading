@@ -65,6 +65,40 @@ export function shouldApplyCloudBatch(progress) {
   )
 }
 
+export function mergeCloudAdviceItems(
+  previousItems = [],
+  incomingItems = [],
+) {
+  const previousByCode = new Map(
+    (Array.isArray(previousItems) ? previousItems : [])
+      .map((item) => [String(item?.code || ''), item]),
+  )
+  const isTerminal = (status) =>
+    ['ok', 'fail', 'skipped'].includes(String(status || ''))
+  return (Array.isArray(incomingItems) ? incomingItems : []).map((item) => {
+    const next = { ...item }
+    const previous = previousByCode.get(String(next.code || ''))
+    if (
+      previous
+      && previous.jobId
+      && previous.jobId === next.jobId
+      && isTerminal(previous.status)
+      && !isTerminal(next.status)
+    ) return previous
+    return next
+  })
+}
+
+export function isAdviceItemActive(item) {
+  return [
+    'queued',
+    'pending',
+    'running',
+    'canceling',
+    'publishing',
+  ].includes(String(item?.status || ''))
+}
+
 export function adviceJobState(
   batch,
   code,
@@ -77,9 +111,10 @@ export function adviceJobState(
   const item = (source || []).find((entry) =>
     String(entry?.code) === String(code)
   )
-  if (!item || !['queued', 'pending', 'running', 'canceling'].includes(item.status)) return null
+  if (!isAdviceItemActive(item)) return null
   const running = item.status === 'running'
   const canceling = item.status === 'canceling'
+  const publishing = item.status === 'publishing'
   const review = role === 'review'
   const defaultLabel = review
     ? running ? '建议复核中' : '排队等待云端复核'
@@ -91,8 +126,10 @@ export function adviceJobState(
     stage: String(item.stage || ''),
     label: canceling
       ? '正在取消生成'
+      : publishing
+        ? '正在核验并发布最终结论'
       : (item.phase || defaultLabel),
-    cancelable: !review && !canceling,
+    cancelable: !review && !canceling && !publishing,
     cloud: !!batch.serverMode,
     deepMode: item.deepMode === true,
   }

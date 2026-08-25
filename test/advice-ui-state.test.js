@@ -6,6 +6,7 @@ import {
   adviceGenerationSteps,
   cloudAdviceLoadingState,
   createAdviceCompletionPuller,
+  mergeCloudAdviceItems,
   mergeAdviceRefreshState,
   newestAdviceResult,
   startAdvicePersistently,
@@ -245,6 +246,53 @@ test('卡片可从批次进度识别排队、生成中和可取消状态', () =>
   assert.equal(queued.active, true)
   assert.equal(queued.label, '排队等待云端生成')
   assert.equal(queued.cancelable, true)
+})
+
+test('发布中保持生成态且不允许误取消', () => {
+  const publishing = adviceJobState({
+    serverMode: true,
+    running: true,
+    items: [{
+      code: '600000',
+      status: 'publishing',
+      stage: 'finalize',
+      phase: '正在核验并发布最终结论',
+    }],
+  }, '600000')
+
+  assert.deepEqual(publishing, {
+    active: true,
+    status: 'publishing',
+    stage: 'finalize',
+    label: '正在核验并发布最终结论',
+    cancelable: false,
+    cloud: true,
+    deepMode: false,
+  })
+})
+
+test('同一任务完成后拒绝迟到的运行中快照', () => {
+  const merged = mergeCloudAdviceItems(
+    [{
+      code: '600000',
+      jobId: 'job-1',
+      status: 'ok',
+      stage: 'done',
+    }],
+    [{
+      code: '600000',
+      jobId: 'job-1',
+      status: 'running',
+      stage: 'llm',
+    }],
+  )
+
+  assert.deepEqual(merged, [{
+    code: '600000',
+    jobId: 'job-1',
+    status: 'ok',
+    stage: 'done',
+  }])
 })
 
 test('后台复核保持卡片可见但不占用或取消advisor生成', () => {

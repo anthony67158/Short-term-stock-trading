@@ -18,7 +18,10 @@
 //   enqueue → queued → (worker 领取)running(带 lease)→ done | failed(可重试回 queued)| canceled
 //   断点续跑:running 但 leaseUntil < now(FC 崩了没续租)→ 视为孤儿 → 回收成 queued,下次 drain 重跑。
 //   防重:同 role + code 已有 queued/running 活跃任务 → enqueue 复用；advisor/review 互不覆盖。
-import { generationOptions } from '../shared/adviceBatchPolicy.js';
+import {
+  generationOptions,
+  isCompleteAdviceEntry,
+} from '../shared/adviceBatchPolicy.js';
 
 export const CONCURRENCY = Number(process.env.ADVICE_CONCURRENCY || 3); // 全局并发上限【默认/回退】(运行时优先按承接 advisor 角色的端点数,见 cron_advice.js)
 export const LEASE_MS = 270 * 1000;      // 单只运行租约:大于批量单股 225s 护栏；Worker 每 20s 续租，中断后约 4.5 分钟可回收
@@ -814,25 +817,38 @@ export function jobsToProgress(data, now = Date.now(), concurrency = CONCURRENCY
   const recentReviews = reviewJobs.filter((job) =>
     isActive(job) || (now - (job.at || 0)) < 6 * 3600 * 1000
   );
+  const hasPublishedAdvice = (job) => {
+    if (job?.status !== 'done') return true;
+    return isCompleteAdviceEntry(
+      data?.advice?.[String(job.code || '')],
+      job.mode,
+    );
+  };
   const mapStatus = (job) => {
     if (job.cancelRequested && job.status === 'running') return 'canceling';
-    return job.status === 'done' ? 'ok'
+    return job.status === 'done'
+      ? (hasPublishedAdvice(job) ? 'ok' : 'publishing')
       : job.status === 'failed' ? 'fail'
         : job.status === 'canceled' ? 'skipped'
           : job.status;
   };
-  const mapItem = (j) => ({
+  const mapItem = (j) => {
+    const status = mapStatus(j);
+    const publishing = status === 'publishing';
+    return {
     code: j.code,
     jobId: j.id || '',
     batchId: j.batchId || '',
     name: j.name,
     role: adviceJobRole(j),
     source: j.source || '',
-    status: mapStatus(j),
+    status,
     error: j.error || '',
     warning: j.dailyReportWarning || '',
-    stage: j.stage || '',
-    phase: j.phase || '',
+    stage: publishing ? 'finalize' : (j.stage || ''),
+    phase: publishing
+      ? '正在核验并发布最终结论'
+      : (j.phase || ''),
     sources: Array.isArray(j.sources) ? j.sources : [],
     reasoning: j.reasoning || '',
     quant: j.quant || null,
@@ -842,18 +858,25 @@ export function jobsToProgress(data, now = Date.now(), concurrency = CONCURRENCY
     attempts: j.attempts || 0,
     deepMode: !!j.deepMode,
     batchRequest: !!j.batchRequest,
-  });
+    };
+  };
   const items = recent
     .sort((a, b) => (a.at || 0) - (b.at || 0))
     .map(mapItem);
   const reviews = recentReviews
     .sort((a, b) => (a.at || 0) - (b.at || 0))
     .map(mapItem);
-  const ok = recent.filter((j) => j.status === 'done').length;
+  const publishing = recent.filter((j) => mapStatus(j) === 'publishing');
+  const ok = recent.filter((j) => mapStatus(j) === 'ok').length;
   const fail = recent.filter((j) => j.status === 'failed').length;
   const skipped = recent.filter((j) => j.status === 'canceled').length;
-  const active = recent.filter((j) => isActive(j));
-  const current = recent.filter((j) => j.status === 'running').map((j) => j.code);
+  const active = [
+    ...recent.filter((j) => isActive(j)),
+    ...publishing,
+  ];
+  const current = recent
+    .filter((j) => j.status === 'running' || mapStatus(j) === 'publishing')
+    .map((j) => j.code);
   const advisorBusy = recent
     .filter((job) =>
       job.status === 'running'
@@ -891,9 +914,13 @@ export function jobsToProgress(data, now = Date.now(), concurrency = CONCURRENCY
     current,
     advisorBusy,
     items,
-    reviewRunning: recentReviews.some((job) => job.status === 'running'),
+    reviewRunning: recentReviews.some((job) =>
+      job.status === 'running' || mapStatus(job) === 'publishing'
+    ),
     reviewCurrent: recentReviews
-      .filter((job) => job.status === 'running')
+      .filter((job) =>
+        job.status === 'running' || mapStatus(job) === 'publishing'
+      )
       .map((job) => job.code),
     reviews,
     startedAt: recent.reduce((m, j) => Math.min(m || Infinity, j.at || Infinity), 0) || 0,

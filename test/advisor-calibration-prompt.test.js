@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  ADVISOR_DEEP_SYSTEM,
   ADVISOR_SYSTEM,
   ADVISOR_FAST_SYSTEM,
   buildUserPrompt,
@@ -14,6 +15,8 @@ test('快速持仓建议使用精简正文预算而深度模式保留可交付�
   assert.equal(maxTokensForMode('review', false), 3200)
   assert.equal(maxTokensForMode('hold_advice', true), 24000)
   assert.ok(ADVISOR_FAST_SYSTEM.length < ADVISOR_SYSTEM.length / 4)
+  assert.match(ADVISOR_DEEP_SYSTEM, /服务端会按账户、T\+1、费用、涨跌停/)
+  assert.match(ADVISOR_DEEP_SYSTEM, /最强反方与失效信号/)
 })
 
 test('军师低命中校准按动作方向纠偏而不是一律变得更保守', () => {
@@ -251,4 +254,36 @@ test('连续决策只传递上一版关键交易契约，不重复注入大对�
   assert.match(prompt, /收盘跌破10元/)
   assert.match(prompt, /"stopPrice":10/)
   assert.doesNotMatch(prompt, /UNUSED_RUNTIME_PAYLOAD/)
+})
+
+test('显式深度生成使用紧凑事实契约而不丢失价格与资金约束', () => {
+  const bulkyMarker = 'UNUSED_DEEP_PAYLOAD'.repeat(2000)
+  const prompt = buildUserPrompt('buy_advice', {
+    generationProfile: 'DEEP',
+    code: '600000',
+    name: '测试股份',
+    todayQuote: {
+      live: true,
+      price: 10,
+      limitDownPrice: 9,
+      limitUpPrice: 11,
+    },
+    account: { totalAssets: 100000, cash: 50000 },
+    stockFund: { mainNetYi: 0.8, retailNetYi: -0.2 },
+    quant: {
+      score: 72,
+      forecast: { upProb: 64, targetLow: 10.2, targetHigh: 10.8 },
+    },
+    evidenceSnapshot: { raw: bulkyMarker },
+    executionPlan: { raw: bulkyMarker },
+  }, '')
+
+  assert.match(prompt, /深度研判事实契约/)
+  assert.match(prompt, /"limitDownPrice":9/)
+  assert.match(prompt, /"mainNetYi":0.8/)
+  assert.match(prompt, /"retailNetYi":-0.2/)
+  assert.match(prompt, /"targetHigh":10.8/)
+  assert.match(prompt, /主动做多必须满足风险预算与盈亏比至少1\.8:1/)
+  assert.doesNotMatch(prompt, /UNUSED_DEEP_PAYLOAD/)
+  assert.ok(prompt.length < 7000)
 })

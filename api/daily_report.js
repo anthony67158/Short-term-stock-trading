@@ -111,6 +111,115 @@ const SESSION_GENERATION = Object.freeze({
   },
 });
 
+function promptText(value, maximum = 240) {
+  return String(value ?? '')
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maximum);
+}
+
+function compactMorningPool(items = []) {
+  return (Array.isArray(items) ? items : [])
+    .slice(0, 12)
+    .map((item) => ({
+      code: promptText(item?.code, 12),
+      name: promptText(item?.name, 40),
+      sector: promptText(item?.sector, 40),
+      action: promptText(item?.action, 40),
+      actionability: promptText(item?.actionability, 40),
+      rank: Number.isFinite(Number(item?.rank))
+        ? Number(item.rank)
+        : null,
+      buyPrice: Number.isFinite(Number(item?.buyPrice))
+        ? Number(item.buyPrice)
+        : null,
+      watchPrice: Number.isFinite(Number(item?.watchPrice))
+        ? Number(item.watchPrice)
+        : null,
+      stopPrice: Number.isFinite(Number(item?.stopPrice))
+        ? Number(item.stopPrice)
+        : null,
+      targetPrice: Number.isFinite(Number(item?.targetPrice))
+        ? Number(item.targetPrice)
+        : null,
+      trigger: promptText(item?.trigger, 180),
+      reason: promptText(item?.reason || item?.logic, 240),
+    }));
+}
+
+export function buildDailyPromptPayload({
+  session,
+  dataBlock = {},
+  evidence = {},
+  morningBaseline = null,
+} = {}) {
+  const evidenceCategories = session === 'morning'
+    ? ['macro', 'industry', 'global', 'institution']
+    : ['market', 'macro', 'global'];
+  const promptEvidence = (Array.isArray(evidence.items)
+    ? evidence.items
+    : [])
+    .filter((item) =>
+      evidenceCategories.includes(item.category)
+      || item.evidenceLevel === 'primary'
+    )
+    .slice(0, session === 'morning' ? 24 : session === 'noon' ? 18 : 22)
+    .map((item) => ({
+      id: promptText(item.id, 20),
+      category: promptText(item.categoryLabel, 40),
+      title: promptText(item.title, 160),
+      summary: promptText(item.summary, 360),
+      source: promptText(item.src, 80),
+      publishedAt: promptText(item.publishedAt || item.date, 40),
+      evidenceLevel: promptText(item.evidenceLevel, 30),
+      stockCode: promptText(item.stockCode, 12) || undefined,
+      sector: promptText(item.sector, 60) || undefined,
+    }));
+  return {
+    session: dataBlock.session,
+    day: dataBlock.day,
+    asOf: dataBlock.asOf,
+    aIndices: dataBlock.aIndices,
+    ...(session === 'morning'
+      ? {
+          overseas: dataBlock.overseas,
+          commodities: dataBlock.commodities,
+          candidatePools: {
+            sectors: compactMorningPool(dataBlock.candidatePools?.sectors),
+            stocks: compactMorningPool(dataBlock.candidatePools?.stocks),
+          },
+        }
+      : session === 'noon'
+        ? {
+            market: dataBlock.market,
+            sectorFlow: dataBlock.sectorFlow,
+            sectorSnapshot: dataBlock.sectorSnapshot,
+            movers: dataBlock.movers,
+          }
+        : {
+            market: dataBlock.market,
+            sectorFlow: dataBlock.sectorFlow,
+            sectorSnapshot: dataBlock.sectorSnapshot,
+            lhb: dataBlock.lhb,
+            northbound: dataBlock.northbound,
+          }),
+    evidence: promptEvidence,
+    morningBaseline: morningBaseline
+      ? {
+          day: promptText(morningBaseline.day, 20),
+          overview: promptText(morningBaseline.report?.overview, 1000),
+          sectorPool: compactMorningPool(
+            morningBaseline.report?.analysis?.sectorPool,
+          ),
+          stockPool: compactMorningPool(
+            morningBaseline.report?.analysis?.stockPool,
+          ),
+        }
+      : null,
+  };
+}
+
 export function dailyReportCachedResponse(cached = {}) {
   return { ...cached, ok: true, cached: true };
 }
@@ -452,61 +561,12 @@ export default async function handler(req, res) {
           sources: searchItems.slice(0, 12),
         }
       : null;
-    const evidenceCategories = session === 'morning'
-      ? ['macro', 'industry', 'global', 'institution']
-      : ['market', 'macro', 'global'];
-    const promptEvidence = evidence.items
-      .filter((item) =>
-        evidenceCategories.includes(item.category)
-        || item.evidenceLevel === 'primary'
-      )
-      .slice(0, session === 'morning' ? 24 : session === 'noon' ? 18 : 22)
-      .map((item) => ({
-        id: item.id,
-        category: item.categoryLabel,
-        title: item.title,
-        summary: item.summary,
-        source: item.src,
-        publishedAt: item.publishedAt || item.date,
-        evidenceLevel: item.evidenceLevel,
-        stockCode: item.stockCode || undefined,
-        sector: item.sector || undefined,
-      }));
-    const sourcePayload = {
-      session: dataBlock.session,
-      day: dataBlock.day,
-      asOf: dataBlock.asOf,
-      aIndices: dataBlock.aIndices,
-      ...(session === 'morning'
-        ? {
-            overseas: dataBlock.overseas,
-            commodities: dataBlock.commodities,
-            candidatePools: dataBlock.candidatePools,
-          }
-        : session === 'noon'
-          ? {
-              market: dataBlock.market,
-              sectorFlow: dataBlock.sectorFlow,
-              sectorSnapshot: dataBlock.sectorSnapshot,
-              movers: dataBlock.movers,
-            }
-          : {
-              market: dataBlock.market,
-              sectorFlow: dataBlock.sectorFlow,
-              sectorSnapshot: dataBlock.sectorSnapshot,
-              lhb: dataBlock.lhb,
-              northbound: dataBlock.northbound,
-            }),
-      evidence: promptEvidence,
-      morningBaseline: morningBaseline
-        ? {
-            day: morningBaseline.day,
-            overview: morningBaseline.report?.overview,
-            sectorPool: morningBaseline.report?.analysis?.sectorPool || [],
-            stockPool: morningBaseline.report?.analysis?.stockPool || [],
-          }
-        : null,
-    };
+    const sourcePayload = buildDailyPromptPayload({
+      session,
+      dataBlock,
+      evidence,
+      morningBaseline,
+    });
     const SYS = `你是严谨的A股短线策略研究员。硬数据与分析师观点必须分离：输入中的行情、资金、龙虎榜、北向成交和技术价位是只读事实，不得篡改、补写或推算缺失值。网页搜索摘要只用于发现线索，不能替代原文。每个软判断必须给出推理、可执行条件和有效证据编号；没有对应证据时明确写待验证。红涨绿跌。只输出合法JSON，不输出markdown或思维链。`;
     const timeCtx = marketTimePromptBlock();
     const generationConfig = SESSION_GENERATION[session];

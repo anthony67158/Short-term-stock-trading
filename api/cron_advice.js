@@ -1027,7 +1027,13 @@ export function mergeExternalJobs(workingData, freshData) {
       const cur = workingJobs[code];
       if (!cur) { workingJobs[code] = fjob; continue; }
       const sameJob = !!(fjob.id && cur.id && fjob.id === cur.id);
-      if (sameJob && fjob.status === 'canceled') {
+      if (
+        sameJob
+        && isActive(cur)
+        && ['done', 'failed', 'canceled'].includes(fjob.status)
+      ) {
+        workingJobs[code] = fjob;
+      } else if (sameJob && fjob.status === 'canceled') {
         if (isActive(cur)) {
           cur.cancelRequested = true;
           cur.status = 'canceled';

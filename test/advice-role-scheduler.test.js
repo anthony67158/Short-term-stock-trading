@@ -77,6 +77,20 @@ test('旧版混合任务表会把自动复核迁移到review队列', () => {
 test('主批次进度不被后台复核重新拉回运行中', () => {
   const data = {
     activeAdviceBatchId: 'manual-1',
+    advice: {
+      '600000': {
+        mode: 'buy_advice',
+        at: 2000,
+        advice: {
+          action: '观望',
+          title: '等待回踩确认',
+          actionPlan: '回踩10元附近且量能企稳再评估',
+          invalidation: '跌破9.8元后取消关注',
+          quantNote: '量化中性',
+          fundNote: '资金未形成共振',
+        },
+      },
+    },
     jobs: {
       '600000': {
         id: 'advisor-1',
@@ -276,6 +290,42 @@ test('OSS运行态按角色合并同股任务且互不覆盖', () => {
     account.data.runtimeAdviceAppliedAt['review:600000'],
     1200,
   )
+})
+
+test('运行态的旧进度不能复活同一任务的终态', () => {
+  const account = {
+    updatedAt: 200,
+    data: {
+      jobs: {
+        '600000': {
+          id: 'advisor-1',
+          code: '600000',
+          role: 'advisor',
+          status: 'done',
+          stage: 'done',
+          progressAt: 200,
+          finishedAt: 200,
+        },
+      },
+    },
+  }
+
+  mergeAdviceRuntimeState(account, {
+    updatedAt: 300,
+    jobs: {
+      '600000': {
+        id: 'advisor-1',
+        code: '600000',
+        role: 'advisor',
+        status: 'running',
+        stage: 'llm',
+        progressAt: 300,
+      },
+    },
+  })
+
+  assert.equal(account.data.jobs['600000'].status, 'done')
+  assert.equal(account.data.jobs['600000'].stage, 'done')
 })
 
 test('复核结果只能覆盖它开始时所基于的建议版本', () => {

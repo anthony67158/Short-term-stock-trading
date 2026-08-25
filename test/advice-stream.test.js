@@ -165,6 +165,37 @@ test('交易变化导致的旧建议不消耗重试次数并按最新账本重�
   assert.match(job.phase, /最新持仓重新复核/)
 })
 
+test('远端同一任务已完成时旧Worker不得把它写回运行中', () => {
+  const working = {
+    jobs: {
+      '002309': {
+        id: 'job-1',
+        code: '002309',
+        status: 'running',
+        stage: 'llm',
+        progressAt: 100,
+      },
+    },
+  }
+  const fresh = {
+    jobs: {
+      '002309': {
+        id: 'job-1',
+        code: '002309',
+        status: 'done',
+        stage: 'done',
+        finishedAt: 200,
+        progressAt: 200,
+      },
+    },
+  }
+
+  mergeExternalJobs(working, fresh)
+
+  assert.equal(working.jobs['002309'].status, 'done')
+  assert.equal(working.jobs['002309'].stage, 'done')
+})
+
 test('AI SSE 事件会转换为持久任务进度补丁', () => {
   assert.deepEqual(
     progressPatchForEvent('phase', { text: '正在量化打分' }),

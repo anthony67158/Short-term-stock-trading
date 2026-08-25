@@ -33,6 +33,7 @@ import { applyCors, preflight } from './_lib.js';
 import { zhReasonPiece } from './_zh_reason.js';
 import {
   SYSTEM_PROMPT,
+  ADVISOR_DEEP_SYSTEM,
   ADVISOR_FAST_SYSTEM,
   ADVISOR_SYSTEM,
   buildUserPrompt,
@@ -1547,7 +1548,13 @@ export default async function handler(req, res) {
     // 角色的端点开 → 视为开,撑起长超时+大 token+中文思维链指令,思维链才能完整生成并回显。
     const useReasoning = resolveReasoningMode(effectiveReasoning(useRole), fastMode, forceReasoning);
     const sysPrompt = isAdvisor
-      ? (fastMode ? ADVISOR_FAST_SYSTEM : ADVISOR_SYSTEM)
+      ? (
+          fastMode
+            ? ADVISOR_FAST_SYSTEM
+            : forceReasoning
+              ? ADVISOR_DEEP_SYSTEM
+              : ADVISOR_SYSTEM
+        )
       : SYSTEM_PROMPT;
 
     // 已采集到的数据 meta——即便 LLM 超时降级，也把这些"确定性数据"回传前端展示(有价值、不空手)

@@ -76,7 +76,44 @@ function fallbackExplanation(sector, searchResult) {
   }
 }
 
-function modelPayload(snapshot, searchResult, theories) {
+function compactMetricMap(value, limit = 20) {
+  return Object.fromEntries(
+    Object.entries(value && typeof value === 'object' ? value : {})
+      .filter(([, item]) =>
+        typeof item === 'number'
+        || typeof item === 'boolean'
+        || typeof item === 'string'
+      )
+      .slice(0, limit)
+      .map(([key, item]) => [
+        safeText(key, 60),
+        typeof item === 'string' ? safeText(item, 120) : item,
+      ]),
+  )
+}
+
+function compactSectorStocks(stocks) {
+  return (Array.isArray(stocks) ? stocks : [])
+    .slice(0, 8)
+    .map((stock) => ({
+      code: safeText(stock?.code, 12),
+      name: safeText(stock?.name, 50),
+      pct: Number.isFinite(Number(stock?.pct))
+        ? Number(stock.pct)
+        : null,
+      mainInflow: Number.isFinite(Number(stock?.mainInflow))
+        ? Number(stock.mainInflow)
+        : null,
+      mainRatio: Number.isFinite(Number(stock?.mainRatio))
+        ? Number(stock.mainRatio)
+        : null,
+      turnover: Number.isFinite(Number(stock?.turnover))
+        ? Number(stock.turnover)
+        : null,
+    }))
+}
+
+export function buildSectorModelPayload(snapshot, searchResult, theories) {
   return {
     signalDate: snapshot.signalDate,
     session: snapshot.session,
@@ -89,11 +126,17 @@ function modelPayload(snapshot, searchResult, theories) {
       phase: item.phase,
       actionability: item.actionability,
       forecast: item.forecast,
-      factors: item.factors,
-      penalties: item.penalties,
-      reasons: item.reasons,
-      risks: item.risks,
-      stocks: item.stocks,
+      factors: compactMetricMap(item.factors),
+      penalties: compactMetricMap(item.penalties),
+      reasons: (Array.isArray(item.reasons) ? item.reasons : [])
+        .map((reason) => safeText(reason, 180))
+        .filter(Boolean)
+        .slice(0, 6),
+      risks: (Array.isArray(item.risks) ? item.risks : [])
+        .map((risk) => safeText(risk, 180))
+        .filter(Boolean)
+        .slice(0, 6),
+      stocks: compactSectorStocks(item.stocks),
     })),
     externalEvidence: (searchResult?.items || []).slice(0, 10).map((item) => ({
       title: safeText(item?.title, 160),
@@ -102,7 +145,7 @@ function modelPayload(snapshot, searchResult, theories) {
       date: safeText(item?.date, 30),
       pendingVerification: true,
     })),
-    theories: theories.map((item) => ({
+    theories: (Array.isArray(theories) ? theories : []).slice(0, 8).map((item) => ({
       book: item.book,
       topic: item.topic,
       text: safeText(item.text, 400),
@@ -209,7 +252,7 @@ export async function enrichSectorForecastSnapshot(snapshot, {
   let modelResult = null
   try {
     modelResult = await callModel(
-      modelPayload(snapshot, searchResult, theories),
+      buildSectorModelPayload(snapshot, searchResult, theories),
     )
   } catch {
     modelResult = null

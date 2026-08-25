@@ -17,7 +17,11 @@ import {
   cancelServerAdvice,
   startServerAdviceStatusSync,
 } from './serverAdvice'
-import { shouldApplyCloudBatch } from '../shared/adviceUiState.js'
+import {
+  isAdviceItemActive,
+  mergeCloudAdviceItems,
+  shouldApplyCloudBatch,
+} from '../shared/adviceUiState.js'
 import {
   batchConcurrency,
   generationOptions,
@@ -364,20 +368,24 @@ export function applyCloudBatch(bp, force = false) {
   state.batchId = String(bp.batchId || state.batchId || '')
   state.deepMode = !!bp.deepMode
   if (Number(bp.concurrency) > 0) state.concurrency = Number(bp.concurrency)   // 权威并发上限=服务端 advisor 端点数
-  state.running = !!bp.running
   state.total = bp.total || 0
   state.done = bp.done || 0
   state.ok = bp.ok || 0
   state.fail = bp.fail || 0
   state.skipped = bp.skipped || 0
-  state.current = new Set(Array.isArray(bp.current) ? bp.current : [])
-  state.advisorBusy = new Set(
-    Array.isArray(bp.advisorBusy)
-      ? bp.advisorBusy
-      : bp.current || [],
-  )
-  state.items = Array.isArray(bp.items) ? bp.items.map((x) => ({ ...x })) : []
+  state.items = mergeCloudAdviceItems(state.items, bp.items)
   state.reviews = reviews
+  state.running = !!bp.running && state.items.some(isAdviceItemActive)
+  state.current = new Set(
+    state.items
+      .filter(isAdviceItemActive)
+      .map((item) => String(item.code || '')),
+  )
+  state.advisorBusy = new Set(
+    state.items
+      .filter((item) => item.status === 'running')
+      .map((item) => String(item.code || '')),
+  )
   for (const item of state.items) {
     if (
       state._cancelingCodes.has(String(item.code))
@@ -389,7 +397,7 @@ export function applyCloudBatch(bp, force = false) {
     }
   }
   state.startedAt = bp.startedAt || at
-  state.finishedAt = bp.running ? 0 : (bp.finishedAt || at)
+  state.finishedAt = state.running ? 0 : (bp.finishedAt || at)
   notify()
 }
 
