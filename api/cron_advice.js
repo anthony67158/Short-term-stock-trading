@@ -1344,9 +1344,9 @@ async function drainAccount(nick, initialAcc) {
     };
   };
   let ok = 0, fail = 0;
-  // 深度任务最坏可占约 495s，只允许在本次 FC 前 85s 内启动新任务，
-  // 保证在 600s 硬上限前有收尾时间；剩余队列由 5 分钟云端定时器接力。
-  const startDeadline = Date.now() + (hasDeepAdviceWork(data) ? 85000 : 300000);
+  // 深度主研判最多约 535s，后面还要留出委员会复核、OSS 发布和 FC 收尾时间。
+  // 本轮后段不再启动新任务；剩余队列由 5 分钟云端定时器接力。
+  const startDeadline = Date.now() + (hasDeepAdviceWork(data) ? 40000 : 300000);
   const progressSaver = createAdviceProgressSaveScheduler(saveWorking);
   const queueProgressSave = (force = false) =>
     progressSaver.schedule(force);

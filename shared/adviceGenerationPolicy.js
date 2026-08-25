@@ -1,5 +1,7 @@
 export const QUICK_ADVICE_TARGET_MS = 75 * 1000
-export const DEEP_ADVICE_TARGET_MS = 8 * 60 * 1000
+// FC hard-stops at 600s. Reserve 65s for the review council, OSS publish,
+// and response cleanup after the main deep-reasoning request.
+export const DEEP_ADVICE_TARGET_MS = 520 * 1000
 
 export function shouldRunAdvisorCouncil({
   enabled = true,

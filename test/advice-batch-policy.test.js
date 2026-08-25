@@ -71,8 +71,8 @@ test('深度模式启用长预算并自动重试', () => {
     deepMode: true,
     fastMode: false,
     forceReasoning: true,
-    runtimeBudgetMs: 480000,
-    timeoutMs: 495000,
+    runtimeBudgetMs: 520000,
+    timeoutMs: 535000,
     maxAttempts: 3,
   })
 })
