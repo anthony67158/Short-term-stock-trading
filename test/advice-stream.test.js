@@ -440,8 +440,8 @@ test('Worker合并后采用最新活跃任务的批次且保留旧任务运行�
 })
 
 test('批量任务可收紧单股预算但不能突破安全边界', () => {
-  assert.equal(resolveAIBudget(true, 210000), 210000)
-  assert.equal(resolveAIBudget(true, 999999), 560000)
+  assert.equal(resolveAIBudget(true, 210000), 150000)
+  assert.equal(resolveAIBudget(true, 999999), 150000)
   assert.equal(resolveAIBudget(true, 1000), 30000)
   assert.equal(resolveAIBudget(false, null), 150000)
 })

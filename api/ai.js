@@ -36,7 +36,9 @@ import {
   ADVISOR_DEEP_SYSTEM,
   ADVISOR_FAST_SYSTEM,
   ADVISOR_SYSTEM,
+  advisorOutputSchema,
   buildUserPrompt,
+  deepAdvisorFacts,
   isAdvisorMode,
   llmRoleForAdviceMode,
   maxTokensForMode,
@@ -148,8 +150,8 @@ export function buildScheduledReviewGateResponse({
   };
 }
 
-export function resolveAIBudget(reasoningOn, requestedMs) {
-  const fallback = reasoningOn ? 560000 : 150000;
+export function resolveAIBudget(_reasoningOn, requestedMs) {
+  const fallback = 150000;
   if (requestedMs == null || !Number.isFinite(Number(requestedMs))) return fallback;
   return Math.max(30000, Math.min(fallback, Math.trunc(Number(requestedMs))));
 }
@@ -798,8 +800,7 @@ export default async function handler(req, res) {
     }
     const configuredReasoning = effectiveReasoning(useRole);
     const reasoningOn = resolveReasoningMode(configuredReasoning, fastMode, forceReasoning);
-    // 时间窗口拉到 FC 平台上限(600s)附近:深度思考+大量参考内容时模型很慢,总预算给到 560s,
-    // 只留 ~40s 给"数据回传/SSE 收尾/平台调度",绝不逼近 600s 硬墙被强杀。非深度思考仍给较小预算省成本。
+    // 紧凑事实投影下使用有界预算；超过窗口就快速整理或失败，不占满 FC 600s。
     const BUDGET = resolveAIBudget(reasoningOn, body && body.runtimeBudgetMs);
     const remain = () => BUDGET - (Date.now() - START);
     // stock 模式：接入 RAG（近5日走势+主营+联网新闻）
@@ -1479,7 +1480,7 @@ export default async function handler(req, res) {
       : MODEL;
     // —— 编排层须与底层实际下发的 reasoning_effort 对齐 ——
     // 深度思考开关既可开在全局(config.reasoning[role]),也可开在【端点级】(ep.reasoning[role])。
-    // poolFetch/reasoningForEndpoint 会按端点把 reasoning_effort=high 真实发给上游,但本文件的超时预算、
+    // poolFetch/reasoningForEndpoint 会按端点把有界 reasoning_effort 真实发给上游,但本文件的超时预算、
     // maxTokens、强制中文思维链指令(zhTail)此前只读全局 getReasoning → 端点级开启时三者全按"不思考"跑,
     // 导致军师思维链还没吐完就被短超时掐断、且不回显。此处改为读【真实生效值】:全局开 OR 任一承接该
     // 角色的端点开 → 视为开,撑起长超时+大 token+中文思维链指令,思维链才能完整生成并回显。
@@ -1601,13 +1602,12 @@ export default async function handler(req, res) {
     // LLM 超时按【剩余预算】动态给：预留 2.5s 兜底返回时间，最少给 8s。
     // 军师模式(t_advice/hold_advice/buy_advice/review/price/plan)走深度研判模型,实测常需 47s+;
     // 开启深度思考(reasoning)后需先跑思维链,参考内容多时军师级复杂题可远超 2 分钟——
-    // 深度军师的主模型必须给最终 JSON 整理和结果发布预留时间。不能让主模型
-    // 占满 FC 窗口后才发现正文不完整，否则只能整轮重跑。
+    // 深度军师给主判断 90s，并为快速终稿和发布预留独立窗口。
     const llmCap = useReasoning
-      ? (isAdvisor ? 540000 : 300000)
+      ? (isAdvisor ? 140000 : 120000)
       : (isAdvisor ? 120000 : 90000);
     const deepAdvisorMainCap = isAdvisor && useReasoning
-      ? 365000
+      ? 90000
       : llmCap;
     const canFailover = streaming && isAdvisor && endpointCountForRole(cfg, useRole) > 1;
     const retryReserve = canFailover ? Math.min(60000, Math.max(30000, Math.floor(remain() * 0.3))) : 0;
@@ -1626,11 +1626,10 @@ export default async function handler(req, res) {
     let streamedReasoning = '';   // 流式路径捕获的思维链原文：模型 JSON 里没吐 reasoning 字段时,用它兜底填充,保证"军师推理过程"持久可见
     let selectedModel = useModel;
     let selectedEndpoint = '';
-    const _salvDbg = { tried: false };   // TEMP 诊断:补生成救援实况
     // 思维链语言:reasoning 模型的思维链标题默认英文,system + 用户开头指令都压不住时,
     //   在用户消息【末尾】(recency 权重最高)再钉一条最强中文指令,连思维链小标题都要求中文。
     const zhTail = useReasoning
-      ? '\n\n【★最终语言指令·优先级最高·必须遵守】从现在起，你的【全部思考过程/思维链，包括每一个分步小标题】都【必须用简体中文书写】，禁止出现任何英文句子或英文小标题(如禁止"Calculating...""Assessing..."这类)。请用中文思考，例如"正在计算盈亏比""正在评估回调买点"。最终 JSON 输出同样全程中文。'
+      ? '\n\n【最终要求】内部核验最多五步，每步一句并使用简体中文；不要展开长篇思维链。尽快输出完整JSON。'
       : '';
     const userPrompt = buildUserPrompt(
       mode,
@@ -1655,6 +1654,7 @@ export default async function handler(req, res) {
         maxTokens: maxTokensForMode(mode, useReasoning),
         timeoutMs: llmTimeout,
         reasoning: useReasoning,
+        reasoningEffort: 'medium',
         forceNoReason: fastMode,
         forceReason: forceReasoning,
         signal: req.signal,
@@ -1745,42 +1745,15 @@ export default async function handler(req, res) {
         parsed: bodyProbe,
       })) {
           phase('模型正文不完整，正在重新整理完整结论…', 'llm');
-          _salvDbg.tried = true;
-          const salvTimeout = Math.max(8000, Math.min(120000, remain() - 3000));
-          _salvDbg.timeout = salvTimeout;
+          const salvTimeout = Math.max(8000, Math.min(45000, remain() - 3000));
           // 补生成是终稿器，不得再次带入整份深度提示词，否则会重走一轮长推理，
           // 耗尽最后的发布窗口。仅提供字段契约、关键事实和已生成尾段。
           const priorTail = (
             streamedReasoning
             || content
             || ''
-          ).slice(-6000);
-          const repairFacts = {
-            code: payload.code || null,
-            name: payload.name || null,
-            mode,
-            currentPrice: payload.currentPrice
-              ?? payload.todayQuote?.price
-              ?? payload.intraday?.now
-              ?? null,
-            account: payload.account || null,
-            holdCost: payload.holdCost ?? null,
-            holdQty: payload.holdQty ?? null,
-            sellableTodayQty: payload.sellableTodayQty ?? null,
-            tech: payload.tech ? {
-              support: payload.tech.support ?? null,
-              resistance: payload.tech.resistance ?? null,
-              buyZone: payload.tech.buyZone ?? null,
-              sellZone: payload.tech.sellZone ?? null,
-              stopLoss: payload.tech.stopLoss ?? null,
-              takeProfit: payload.tech.takeProfit ?? null,
-              atr: payload.tech.atr ?? null,
-            } : null,
-            stockFund: payload.stockFund || null,
-            marketEnv: payload.marketEnv || null,
-            quant: payload.quant?.forecast || null,
-            previousAdvice: payload.previousAdvice || null,
-          };
+          ).slice(-2000);
+          const repairFacts = deepAdvisorFacts(payload);
           const salvMessages = [
             {
               role: 'system',
@@ -1788,7 +1761,7 @@ export default async function handler(req, res) {
             },
             {
               role: 'user',
-              content: `上轮深度研判的最终JSON被截断。现在立刻生成完整终稿，字段必须遵守下方字段契约；没有可靠事实的字段填null，不能省略字段，不能输出markdown。\n\n字段契约：\n${userPrompt.slice(-8000)}\n\n关键事实：\n${JSON.stringify(repairFacts)}\n\n已截断输出尾段：\n${priorTail || '无可用尾段'}`,
+              content: `上轮深度研判的最终JSON被截断。现在立刻生成完整终稿；没有可靠事实的字段填null，不能省略字段，不能输出markdown。\n\n字段契约：\n${advisorOutputSchema(mode)}\n\n关键事实：\n${JSON.stringify(repairFacts)}\n\n已截断输出尾段：\n${priorTail || '无可用尾段'}`,
             },
           ];
           const salv = await callChat({
@@ -1804,8 +1777,6 @@ export default async function handler(req, res) {
             responseFormat: { type: 'json_object' },
             stream: true,                                // ★关键:流式,partial 存活 + 进度可见
           });
-          _salvDbg.err = salv.resp && salv.resp.__err ? String(salv.resp.__err.name || salv.resp.__err.message || salv.resp.__err) : '';
-          _salvDbg.status = salv.resp && !salv.resp.__err ? salv.resp.status : 0;
           if (salv.resp && !salv.resp.__err && salv.resp.ok) {
             let sc = '', sr = '';
             const sp = await pumpChatStream(salv.resp, {
@@ -1815,16 +1786,13 @@ export default async function handler(req, res) {
             flushR();
             sc = sp.content || sc;
             sr = sp.reasoning || '';
-            _salvDbg.contentLen = sc.length;
-            _salvDbg.reasoningLen = sr.length;
-            _salvDbg.finishReason = sp.finishReason || '';
             if (sc.trim()) {
               content = sc;
               finishReason = sp.finishReason || finishReason;
             } else if (sr.trim()) {
               // 补生成又把正文写进思维链通道 → 从中抠 JSON
               const pr = parseLLMJson(sr);
-              if (pr && pr.value) { content = JSON.stringify(pr.value); _salvDbg.rescuedFromReason = true; }
+              if (pr && pr.value) content = JSON.stringify(pr.value);
             }
           }
           salv.done();
@@ -1842,6 +1810,7 @@ export default async function handler(req, res) {
         maxTokens: maxTokensForMode(mode, useReasoning),
         timeoutMs: llmTimeout,
         reasoning: useReasoning,
+        reasoningEffort: 'medium',
         forceNoReason: fastMode,
         forceReason: forceReasoning,
         signal: req.signal,
@@ -1907,14 +1876,6 @@ export default async function handler(req, res) {
       return finish({
         ok: false, degraded: true, mode, model: useModel, updatedAt: Date.now(),
         error: '模型未返回有效内容，请稍后重试。', meta: collectedMeta, news: newsRefs,
-        _dbg: {
-          contentLen: (content || '').length,
-          finishReason,
-          reasoningLen: (streamedReasoning || '').length,
-          reasoningHasBrace: /\{/.test(streamedReasoning || ''),
-          reasoningTail: (streamedReasoning || '').slice(-300),
-          salv: _salvDbg,
-        },
       });
     }
     // ★truncated 判定(既不误报、也绝不漏报):
@@ -1944,17 +1905,6 @@ export default async function handler(req, res) {
       });
       result = continuityResult.advice;
     }
-    const _dbg = {
-      contentLen: (content || '').length,
-      contentHead: (content || '').slice(0, 120),
-      finishReason,
-      reasoningLen: (streamedReasoning || '').length,
-      reasoningHasBrace: /\{/.test(streamedReasoning || ''),
-      reasoningHead: (streamedReasoning || '').slice(0, 120),
-      parsedOk: !!parsed.value,
-      usage,
-      salv: _salvDbg,
-    };
     if (!streaming) res.status(200);
     // ★服务端兜底纠偏(hold_advice / review / t_advice):LLM 偶尔无视手数上限/合法价带,
     //   这里强制拉回,避免给出"清仓4手(实际只持3手)"或"止损价低于跌停价"这类不可执行的建议。
@@ -2288,7 +2238,6 @@ export default async function handler(req, res) {
       meta: collectedMeta,
       usedRag: !!ragText,
       usage: usage || null,
-      _dbg,
     });
   } catch (e) {
     if (hbTimer) { clearInterval(hbTimer); hbTimer = null; }

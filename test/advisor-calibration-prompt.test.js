@@ -9,14 +9,15 @@ import {
   maxTokensForMode,
 } from '../api/_ai_prompts.js'
 
-test('快速持仓建议使用精简正文预算而深度模式保留可交付长上下文', () => {
+test('快速与深度建议都使用可交付的有界输出预算', () => {
   assert.equal(maxTokensForMode('hold_advice', false), 3200)
   assert.equal(maxTokensForMode('buy_advice', false), 3200)
   assert.equal(maxTokensForMode('review', false), 3200)
-  assert.equal(maxTokensForMode('hold_advice', true), 24000)
+  assert.equal(maxTokensForMode('hold_advice', true), 8000)
   assert.ok(ADVISOR_FAST_SYSTEM.length < ADVISOR_SYSTEM.length / 4)
   assert.match(ADVISOR_DEEP_SYSTEM, /服务端会按账户、T\+1、费用、涨跌停/)
   assert.match(ADVISOR_DEEP_SYSTEM, /最强反方与失效信号/)
+  assert.match(ADVISOR_DEEP_SYSTEM, /最多五个检查点/)
 })
 
 test('军师低命中校准按动作方向纠偏而不是一律变得更保守', () => {

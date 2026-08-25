@@ -161,10 +161,11 @@ async function defaultCallModel(payload) {
     role: 'sector',
     model,
     reasoning: getReasoning('sector'),
+    reasoningEffort: 'medium',
     forceReason: getReasoning('sector'),
     temperature: 0.15,
     maxTokens: 5000,
-    timeoutMs: 240000,
+    timeoutMs: 90000,
     responseFormat: { type: 'json_object' },
     messages: [{
       role: 'system',
@@ -180,7 +181,7 @@ async function defaultCallModel(payload) {
     }],
   }, {
     retries: 1,
-    budgetLeftMs: 250000,
+    budgetLeftMs: 100000,
   })
   try {
     if (!resp || resp.__err) {

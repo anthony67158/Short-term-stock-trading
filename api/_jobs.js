@@ -43,6 +43,10 @@ const REVIEW_SOURCES = new Set([
 ]);
 export const isActive = (j) => !!(j && ACTIVE.has(j.status));
 
+function effectiveJobMaxAttempts(job) {
+  return generationOptions(job?.deepMode === true).maxAttempts;
+}
+
 export function adviceJobRole(job = {}) {
   if (job?.role === 'review') return 'review';
   if (job?.role === 'advisor') return 'advisor';
@@ -278,7 +282,9 @@ export function reapOrphans(data, now = Date.now()) {
   let n = 0;
   for (const j of allAdviceJobs(data)) {
     if (isOrphan(j, now)) {
-      if ((j.attempts || 0) >= (j.maxAttempts || MAX_ATTEMPTS)) {
+      const maxAttempts = effectiveJobMaxAttempts(j);
+      j.maxAttempts = maxAttempts;
+      if ((j.attempts || 0) >= maxAttempts) {
         j.status = 'failed'; j.finishedAt = now; j.leaseUntil = 0;
         j.resourceRole = 'none'; j.resourceUnits = 0;
         j.error = '任务连续中断，已停止自动重试';
@@ -413,6 +419,7 @@ export function leaseJob(
   j.resourceRole = adviceJobRole(j);
   j.resourceUnits = 1;
   j.attempts = (j.attempts || 0) + 1;
+  j.maxAttempts = effectiveJobMaxAttempts(j);
   j.startedAt = j.startedAt || now;
   j.leaseUntil = now + LEASE_MS;
   j.error = '';
@@ -586,7 +593,9 @@ export function failJob(
   const j = findAdviceJob(data, code, { role, jobId });
   if (!j) return;
   j.error = String(err || '生成失败');
-  if ((j.attempts || 0) < (j.maxAttempts || MAX_ATTEMPTS)) {
+  const maxAttempts = effectiveJobMaxAttempts(j);
+  j.maxAttempts = maxAttempts;
+  if ((j.attempts || 0) < maxAttempts) {
     j.status = 'queued'; j.stage = 'retrying'; j.leaseUntil = 0; j.resourceRole = adviceJobRole(j); j.resourceUnits = 1; j.phase = `生成失败，准备第${(j.attempts || 0) + 1}次重试`; j.progressAt = now;
   } else {
     j.status = 'failed'; j.stage = 'failed'; j.finishedAt = now; j.leaseUntil = 0; j.resourceRole = 'none'; j.resourceUnits = 0; j.phase = '生成失败'; j.progressAt = now;

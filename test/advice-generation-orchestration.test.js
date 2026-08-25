@@ -207,7 +207,7 @@ test('个股页默认快速生成且深度路径只调用一次主军师', () =>
   )
 })
 
-test('普通军师生成有明确的低延迟预算且保留深度模式', () => {
+test('普通与深度军师都使用有界预算且深度不整轮重跑', () => {
   const quick = generationOptions(false)
   const deep = generationOptions(true)
 
@@ -215,17 +215,18 @@ test('普通军师生成有明确的低延迟预算且保留深度模式', () =>
   assert.equal(quick.runtimeBudgetMs, 75000)
   assert.equal(quick.maxAttempts, 2)
   assert.equal(deep.forceReasoning, true)
-  assert.equal(deep.runtimeBudgetMs, 520000)
-  assert.equal(deep.timeoutMs, 535000)
+  assert.equal(deep.runtimeBudgetMs, 150000)
+  assert.equal(deep.timeoutMs, 165000)
+  assert.equal(deep.maxAttempts, 1)
   assert.ok(deep.runtimeBudgetMs > quick.runtimeBudgetMs)
   assert.equal(maxTokensForMode('hold_advice', false), 3200)
   assert.match(
     aiSource,
-    /const deepAdvisorMainCap = isAdvisor && useReasoning[\s\S]*?\? 365000/,
+    /const deepAdvisorMainCap = isAdvisor && useReasoning[\s\S]*?\? 90000/,
   )
   assert.match(
     aiSource,
     /你是军师的最终JSON整理器[\s\S]*?字段契约：/,
   )
-  assert.equal(maxTokensForMode('hold_advice', true), 24000)
+  assert.equal(maxTokensForMode('hold_advice', true), 8000)
 })

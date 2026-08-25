@@ -29,6 +29,10 @@ const agent = readFileSync(
   new URL('../api/agent.js', import.meta.url),
   'utf8',
 )
+const sector = readFileSync(
+  new URL('../api/_sector_forecast_llm.js', import.meta.url),
+  'utf8',
+)
 
 test('所有实际LLM能力映射为七个独立角色和九个固定端点槽位', () => {
   assert.deepEqual(Object.keys(ROLES), [
@@ -172,6 +176,14 @@ test('各入口按自己的角色判断专用端点是否可用', () => {
   assert.doesNotMatch(ai, /getModel\('chat'\)/)
   assert.match(agent, /llmReady\('agent'\)/)
   assert.match(dailyReport, /llmReady\('daily'\)/)
+})
+
+test('复杂生成统一使用有界推理且工具规划不启用深度思考', () => {
+  assert.match(agent, /reasoning:\s*boundedReasoning/)
+  assert.match(agent, /reasoningEffort:\s*'medium'/)
+  assert.match(agent, /forceNoReason:\s*!boundedReasoning/)
+  assert.match(sector, /reasoningEffort:\s*'medium'/)
+  assert.match(sector, /timeoutMs:\s*90000/)
 })
 
 test('配置界面按角色展示端点且不再暴露通用资源池', () => {

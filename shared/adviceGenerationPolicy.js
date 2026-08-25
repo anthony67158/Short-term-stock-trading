@@ -1,7 +1,7 @@
 export const QUICK_ADVICE_TARGET_MS = 75 * 1000
-// FC hard-stops at 600s. Reserve time for OSS publish and response cleanup
-// after the main deep-reasoning request.
-export const DEEP_ADVICE_TARGET_MS = 520 * 1000
+// Compact evidence and bounded reasoning should complete within this window.
+// Reserve the remaining FC time for endpoint failover, JSON repair, and OSS publish.
+export const DEEP_ADVICE_TARGET_MS = 150 * 1000
 
 export function adviceRequestId(spec = {}, now = Date.now()) {
   const code = String(spec.code || '').trim()

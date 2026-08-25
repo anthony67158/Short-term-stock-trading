@@ -94,7 +94,7 @@ export function generationOptions(deepMode = false) {
         forceReasoning: true,
         runtimeBudgetMs: DEEP_ADVICE_BUDGET_MS,
         timeoutMs: DEEP_ADVICE_BUDGET_MS + 15000,
-        maxAttempts: 3,
+        maxAttempts: 1,
       }
     : {
         deepMode: false,

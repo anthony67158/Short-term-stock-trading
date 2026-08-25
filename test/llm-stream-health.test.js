@@ -7,6 +7,7 @@ import {
   pickEndpoint,
   poolFetch,
   poolStatus,
+  resetPoolHealthForTests,
 } from '../api/_llm_pool.js'
 import { pumpChatStream } from '../api/_llm.js'
 
@@ -65,7 +66,7 @@ test('流式请求在响应体消费完成前持续占用端点', async () => {
   }
 })
 
-test('深度批量可覆盖端点默认关闭并实际下发深度参数', async () => {
+test('深度批量可覆盖端点默认关闭并下发有界推理参数', async () => {
   const config = {
     baseUrl: 'https://main.example/v1',
     apiKey: 'key',
@@ -86,9 +87,49 @@ test('深度批量可覆盖端点默认关闭并实际下发深度参数', async
       forceReason: true,
     }, 1)
 
-    assert.equal(sentBody.reasoning_effort, 'high')
+    assert.equal(sentBody.reasoning_effort, 'medium')
   } finally {
     globalThis.fetch = originalFetch
+  }
+})
+
+test('流式请求在成功响应头前可快速切换备用端点', async () => {
+  resetPoolHealthForTests()
+  const config = {
+    roleEndpoints: {
+      advisor: [{
+        baseUrl: 'https://advisor-1.example/v1',
+        apiKey: 'key-1',
+        model: 'model-1',
+        enabled: true,
+      }, {
+        baseUrl: 'https://advisor-2.example/v1',
+        apiKey: 'key-2',
+        model: 'model-2',
+        enabled: true,
+      }],
+    },
+  }
+  const originalFetch = globalThis.fetch
+  const urls = []
+  globalThis.fetch = async (url) => {
+    urls.push(url)
+    return new Response('{}', { status: urls.length === 1 ? 503 : 200 })
+  }
+  try {
+    const routed = await poolFetch(config, '/chat/completions', {
+      body: { model: 'model', stream: true },
+      role: 'advisor',
+      deferSuccess: true,
+    }, 2)
+
+    assert.equal(routed.resp.ok, true)
+    assert.equal(urls.length, 2)
+    assert.notEqual(urls[0], urls[1])
+    routed.releaseRole()
+  } finally {
+    globalThis.fetch = originalFetch
+    resetPoolHealthForTests()
   }
 })
 

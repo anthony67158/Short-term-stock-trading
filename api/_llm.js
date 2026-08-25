@@ -46,6 +46,7 @@ export async function callChat({
   stream = false,
   responseFormat,
   reasoning = false,
+  reasoningEffort = 'medium',
   signal,
   role,
   forceNoReason = false,
@@ -71,8 +72,8 @@ export async function callChat({
     bodyObj.tool_choice = toolChoice;
   }
   if (responseFormat) bodyObj.response_format = responseFormat;
-  // 深度思考:开启时按 OpenAI 兼容格式传 reasoning_effort=high(网关据此触发思维链)
-  if (reasoning) bodyObj.reasoning_effort = 'high';
+  // 有界深度思考：默认 medium，避免结构化任务把绝大部分预算耗在隐藏思维链。
+  if (reasoning) bodyObj.reasoning_effort = reasoningEffort;
 
   const cfg = currentConfig();
   // 资源池路由:配了多端点 → 轮询/最少在途 + 故障转移 + 熔断;未配则退化为单 { BASE, KEY }(向后兼容)。
@@ -88,8 +89,9 @@ export async function callChat({
     releaseRole = () => {},
   } = await poolFetch(cfg, '/chat/completions', {
     method: 'POST', body: bodyObj, signal: useSignal, timeoutMs,
-    role, modelFallback: model, reasonFallback: reasoning, forceNoReason, forceReason, deferSuccess: !!stream,
-  }, stream ? 1 : 2);   // 流式只试一个端点(半路换端点会丢已下发的 token);非流式允许一次故障转移
+    role, modelFallback: model, reasonFallback: reasoning, reasoningEffort,
+    forceNoReason, forceReason, deferSuccess: !!stream,
+  }, 2);   // 只在取得成功响应头前故障转移；开始消费流后由调用方处理部分结果。
 
   let released = false;
   return {

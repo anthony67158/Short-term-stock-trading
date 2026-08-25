@@ -66,14 +66,14 @@ test('普通模式关闭深度思考并使用短预算', () => {
   })
 })
 
-test('深度模式启用长预算并自动重试', () => {
+test('深度模式使用有界预算且不整轮自动重试', () => {
   assert.deepEqual(generationOptions(true), {
     deepMode: true,
     fastMode: false,
     forceReasoning: true,
-    runtimeBudgetMs: 520000,
-    timeoutMs: 535000,
-    maxAttempts: 3,
+    runtimeBudgetMs: 150000,
+    timeoutMs: 165000,
+    maxAttempts: 1,
   })
 })
 

@@ -5,6 +5,7 @@ import {
   cancelJob,
   completeJob,
   enqueueJob,
+  failJob,
   jobsToProgress,
   compareAdviceJobs,
   leaseJob,
@@ -134,9 +135,27 @@ test('深度任务模式会持久化到任务和批次进度', () => {
   const progress = jobsToProgress(data, 1500, 2)
 
   assert.equal(job.deepMode, true)
-  assert.equal(job.maxAttempts, 3)
+  assert.equal(job.maxAttempts, 1)
   assert.equal(progress.deepMode, true)
   assert.equal(progress.items[0].deepMode, true)
+})
+
+test('旧深度任务的三次重试配置会在领取时收紧且失败不再整轮重跑', () => {
+  const data = {}
+  enqueueJob(data, {
+    code: '600000',
+    name: '浦发银行',
+    mode: 'buy_advice',
+    deepMode: true,
+  }, 1000)
+  data.jobs['600000'].maxAttempts = 3
+
+  leaseJob(data, '600000', 1100)
+  failJob(data, '600000', '模型输出不完整', 1200)
+
+  assert.equal(data.jobs['600000'].maxAttempts, 1)
+  assert.equal(data.jobs['600000'].attempts, 1)
+  assert.equal(data.jobs['600000'].status, 'failed')
 })
 
 test('重复点击不能用新排队任务覆盖正在生成的同一股票', () => {

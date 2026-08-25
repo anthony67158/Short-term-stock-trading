@@ -504,6 +504,9 @@ export default async function handler(req, res) {
 
     // 通用：发起一次 chat completion（stream 可选）
     const callLLM = async ({ stream, useTools, timeoutMs, maxTokens = 1600 }) => {
+      const boundedReasoning = !!stream
+        && AGENT_REASONING
+        && !conceptExplanationMode;
       return callChat({
         model: AGENT_MODEL,
         role: 'agent',
@@ -521,7 +524,10 @@ export default async function handler(req, res) {
           ? Math.min(maxTokens, SECTOR_CONCEPT_EXPLANATION_MAX_TOKENS)
           : maxTokens,
         timeoutMs,
-        reasoning: AGENT_REASONING,
+        reasoning: boundedReasoning,
+        reasoningEffort: 'medium',
+        forceReason: boundedReasoning,
+        forceNoReason: !boundedReasoning,
         stream: !!stream,
       });
     };

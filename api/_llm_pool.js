@@ -296,7 +296,8 @@ export function resetPoolHealthForTests() {
 //   (不同网关同一角色可能是不同模型名);modelFallback 为角色默认(端点与全局都没配时用)。
 export async function poolFetch(config, path, {
   method = 'POST', body, signal, timeoutMs = 30000, role, modelFallback,
-  reasonFallback, forceNoReason = false, forceReason = false, deferSuccess = false,
+  reasonFallback, reasoningEffort = 'medium',
+  forceNoReason = false, forceReason = false, deferSuccess = false,
 } = {}, maxTries = 2) {
   const roleEps = endpointsForRole(config, role);
   if (!roleEps.length) return { resp: { __err: new Error('no LLM endpoint configured') }, endpoint: null };
@@ -327,14 +328,14 @@ export async function poolFetch(config, path, {
       sendBody = { ...body };
       const m = modelForEndpoint(config, ep, role, modelFallback || body.model);
       if (m) sendBody.model = m;
-      // 深度思考按端点解析:开→注入 reasoning_effort=high;关→删除(避免继承 callChat 的全局注入)
+      // 深度思考按端点解析：开时注入调用方给定的有界强度，关时删除。
       // forceNoReason:硬关(优先级最高)——补生成场景绝不能让端点级/全局 reasoning 把 CoT 再拉起来。
       const wantReason = forceNoReason
         ? false
         : forceReason
           ? true
           : reasoningForEndpoint(config, ep, role, reasonFallback);
-      if (wantReason) sendBody.reasoning_effort = 'high';
+      if (wantReason) sendBody.reasoning_effort = reasoningEffort;
       else delete sendBody.reasoning_effort;
     }
     const ctrl = signal ? null : new AbortController();

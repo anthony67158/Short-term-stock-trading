@@ -71,9 +71,9 @@ import {
 
 const MAX_HOLDING_CODES = 30
 const MAX_QUANT_CODES = 8
-const PORTFOLIO_DEEP_PRIMARY_TIMEOUT_MS = 240000
-const PORTFOLIO_DEEP_RECOVERY_TIMEOUT_MS = 90000
-const PORTFOLIO_QUALITY_REPAIR_TIMEOUT_MS = 75000
+const PORTFOLIO_DEEP_PRIMARY_TIMEOUT_MS = 75000
+const PORTFOLIO_DEEP_RECOVERY_TIMEOUT_MS = 40000
+const PORTFOLIO_QUALITY_REPAIR_TIMEOUT_MS = 30000
 const PRODUCTION_API_ORIGIN =
   'https://stock-dashboard-znrlekbzit.cn-hangzhou.fcapp.run'
 
@@ -586,6 +586,7 @@ async function requestAnalysisJson({
     timeoutMs,
     responseFormat: { type: 'json_object' },
     reasoning,
+    reasoningEffort: 'medium',
     forceReason,
     forceNoReason,
     stream: false,
