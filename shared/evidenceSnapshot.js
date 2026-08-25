@@ -428,6 +428,7 @@ export function createCanonicalEvidenceSnapshot({
       counterTrend: payload.counterTrend,
       backtest: payload.backtest,
       lhb: payload.lhb,
+      sectorOpportunity: payload.sectorOpportunity,
     }),
   }
   const collectionSources = compact(sourceTrace || [])

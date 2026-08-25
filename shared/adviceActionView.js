@@ -170,6 +170,8 @@ export function buildAdviceActionView(advice = {}, { mode = '' } = {}) {
   const planPrice = finite(plan?.prices?.reference)
   const planInstruction = plan?.actionability === 'BLOCKED'
     ? `暂不执行：${planReasons.join('；') || '执行条件未满足'}`
+    : plan?.actionability === 'MANUAL_PROBE'
+      ? `人工确认：${plan?.action === 'ADD' ? '小仓加仓' : '小仓试错'}${planLots}手${planPrice != null ? `，参考${planPrice}元` : ''}${plan.opportunity?.sectorName ? `；${plan.opportunity.sectorName}前排` : ''}，板块与个股条件失效时取消`
     : plan?.actionability === 'RESEARCH_ONLY'
       ? `仅供观察：${planAction || '操作'}${planLots}手${planPrice != null ? `，参考${planPrice}元` : ''}；策略通过实盘启用审核前，不能直接执行`
       : ''
@@ -177,6 +179,8 @@ export function buildAdviceActionView(advice = {}, { mode = '' } = {}) {
     ...advice,
     action: plan.actionability === 'BLOCKED'
       ? '观望'
+      : plan.actionability === 'MANUAL_PROBE'
+        ? plan.action === 'ADD' ? '小仓加仓' : '小仓试错'
       : plan.actionability === 'RESEARCH_ONLY'
         ? `观察·${planAction || '建议'}`
         : planAction || advice.action,
@@ -242,8 +246,9 @@ export function buildAdviceActionView(advice = {}, { mode = '' } = {}) {
     levels,
     trigger: triggerFor(kind, levels, triggerDirection),
     actionability: plan?.actionability || null,
+    manualOnly: plan?.actionability === 'MANUAL_PROBE',
     actionable: plan
-      ? plan.actionability === 'READY'
+      ? ['READY', 'MANUAL_PROBE'].includes(plan.actionability)
       : !['wait', 'hold'].includes(kind),
   }
 }

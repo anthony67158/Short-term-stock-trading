@@ -69,6 +69,7 @@ const TERM_REWRITES = [
   [/\bupProb\b/g, '上涨概率'],
   [/\bSHADOW_ONLY\b/g, '仅模拟观察'],
   [/\bRESEARCH_ONLY\b/g, '仅供研究'],
+  [/\bMANUAL_PROBE\b/g, '人工小仓试错'],
   [/\bTREND_STRONG\b/g, '强趋势'],
   [/\bTRANSITION\b/g, '趋势切换期'],
   [/\bRISK_OFF\b/g, '防守状态'],
@@ -228,6 +229,7 @@ export function strategyStateLabel(value) {
 export function actionabilityLabel(value) {
   return {
     READY: '条件已满足，可执行',
+    MANUAL_PROBE: '短线条件已满足，需人工确认',
     RESEARCH_ONLY: '仅供观察，暂不可执行',
     BLOCKED: '条件未满足，暂不执行',
     WATCH: '等待条件满足',

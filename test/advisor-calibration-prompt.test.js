@@ -118,6 +118,30 @@ test('弱市买入必须同时通过个股强势和高把握信号硬闸门', ()
   assert.doesNotMatch(prompt, /共振分≥2且个股结构不坏，就应给出明确的做多/)
 })
 
+test('板块前排机会允许受控人工试仓但不绕过个股和账户条件', () => {
+  const prompt = buildUserPrompt('buy_advice', {
+    code: '002594',
+    sectorOpportunity: {
+      matched: true,
+      probeEligible: true,
+      sector: {
+        name: '新能源车',
+        actionability: 'LAYOUT',
+      },
+      stock: {
+        roleLabel: '总龙头',
+      },
+    },
+  })
+
+  assert.match(prompt, /板块与个股联动/)
+  assert.match(prompt, /新能源车/)
+  assert.match(prompt, /总龙头/)
+  assert.match(prompt, /应优先给“小仓试错”而不是泛泛“观望”/)
+  assert.match(prompt, /不超过总资产5%/)
+  assert.match(prompt, /不允许升级为“立即买入”/)
+})
+
 test('观望买入建议区分观察锚与买入价并比较两条入场路径', () => {
   const normalPrompt = buildUserPrompt('buy_advice', {
     code: '003031',

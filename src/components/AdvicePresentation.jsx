@@ -184,6 +184,8 @@ function DecisionPlanSummary({ plan }) {
   const statusLabel = plan.actionabilityLabel || '等待确认'
   const statusTone = plan.actionability === 'READY'
     ? 'ready'
+    : plan.actionability === 'MANUAL_PROBE'
+      ? 'probe'
     : plan.actionability === 'BLOCKED'
       ? 'blocked'
       : plan.actionability === 'RESEARCH_ONLY' ? 'research' : 'watch'
@@ -213,6 +215,16 @@ function DecisionPlanSummary({ plan }) {
         {plan.strategyId && (
           <span>
             策略 <b>{plan.strategyName || '系统策略'}</b>
+          </span>
+        )}
+        {plan.opportunity?.sectorName && (
+          <span>
+            短线依据 <b>
+              {plan.opportunity.sectorName}
+              {plan.opportunity.stockRole
+                ? ` · ${plan.opportunity.stockRole}`
+                : ''}
+            </b>
           </span>
         )}
         {governanceLabel && (

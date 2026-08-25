@@ -842,8 +842,15 @@ function CandidateActions({ p, q, onBuy, onAlert, onDelete }) {
   return (
     <div className={'pc-actions' + (!actionable ? ' with-review' : '')}>
       {actionable ? (
-        <button className="chip-btn act-buy" onClick={() => onBuy(p, view)}>
-          <Icon name="cart" size={12} />{view ? '按指令建仓' : '建仓'}
+        <button
+          className="chip-btn act-buy"
+          title={view?.manualOnly ? '仅记录你人工确认的短线试仓，不会自动下单' : undefined}
+          onClick={() => onBuy(p, view)}
+        >
+          <Icon name="cart" size={12} />
+          {view?.manualOnly
+            ? '确认试仓'
+            : view ? '按指令建仓' : '建仓'}
         </button>
       ) : (
         <>

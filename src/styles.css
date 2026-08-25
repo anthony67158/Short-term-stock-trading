@@ -2648,6 +2648,7 @@ button.acct-item { width: 100%; border: 0; background: transparent; font: inheri
 .adc-values b { color: var(--text); font-weight: 700; }
 .advice-decision-plan { padding: 9px 11px; border: 1px solid var(--border-soft); border-radius: 9px; background: var(--panel2); }
 .advice-decision-plan.ready { border-color: rgba(214,69,69,.34); }
+.advice-decision-plan.probe { border-color: rgba(227,179,65,.4); }
 .advice-decision-plan.research { border-color: rgba(227,179,65,.4); }
 .advice-decision-plan.blocked { border-color: rgba(31,157,67,.38); }
 .adp-head { display: flex; align-items: center; gap: 6px; color: var(--text); font-size: 11px; font-weight: 750; }
@@ -2655,6 +2656,7 @@ button.acct-item { width: 100%; border: 0; background: transparent; font: inheri
 .adp-head .icon { color: var(--accent); }
 .adp-head b { margin-left: auto; color: var(--muted); font-size: 10px; }
 .advice-decision-plan.ready .adp-head b { color: var(--red); }
+.advice-decision-plan.probe .adp-head b { color: var(--gold); }
 .advice-decision-plan.research .adp-head b { color: var(--gold); }
 .advice-decision-plan.blocked .adp-head b { color: var(--green); }
 .adp-facts { display: flex; flex-wrap: wrap; gap: 5px 12px; margin-top: 6px; color: var(--muted); font-size: 10.5px; }

@@ -37,9 +37,11 @@ export function decisionPlanConfirmationGate(plan, side) {
     side === 'buy'
     && plan.actionability !== 'READY'
   ) {
-    const reason = plan.actionability === 'RESEARCH_ONLY'
-      ? '当前仅为研究级条件建议，不能升级为执行确认'
-      : '统一决策计划未通过，不能升级为执行确认'
+    const reason = plan.actionability === 'MANUAL_PROBE'
+      ? '当前为短线小仓试错，只能由用户手动确认，不能自动升级执行'
+      : plan.actionability === 'RESEARCH_ONLY'
+        ? '当前仅为研究级条件建议，不能升级为执行确认'
+        : '统一决策计划未通过，不能升级为执行确认'
     return {
       allowed: false,
       policy: 'decision-plan-not-ready',
@@ -329,6 +331,14 @@ export function compileDecisionPlan({
   )
   const stopPrice = positive(advice.stopPrice)
   const targetPrice = positive(advice.targetPrice)
+  const rewardRiskRatio = (
+    referencePrice > 0
+    && stopPrice > 0
+    && targetPrice > referencePrice
+    && stopPrice < referencePrice
+  )
+    ? (targetPrice - referencePrice) / (referencePrice - stopPrice)
+    : null
   const requestedLots = requestedLotsFor(requestedAction, advice)
   const slippageBps = Math.max(
     0,
@@ -585,12 +595,60 @@ export function compileDecisionPlan({
     if (capacity.lots <= 0) blockedReasons.push('今日没有可卖仓位')
   }
 
+  const probeRequested = riskIncreasing
+    && (
+      requestedAction === 'ADD'
+      ||
+      advice.tier === 'probe'
+      || /小仓|试错|试仓/.test(
+        `${advice.action || ''} ${advice.actionPlan || ''}`,
+      )
+    )
+  const sectorProbeEligible = (
+    payload.sectorOpportunity?.schemaVersion === 'sector-opportunity.v1'
+    && payload.sectorOpportunity?.probeEligible === true
+  )
+  if (
+    !productionEligible
+    && probeRequested
+    && sectorProbeEligible
+    && capacity.lots > 0
+  ) {
+    const oneLotGross = executionPrice(
+      referencePrice,
+      'BUY',
+      slippageBps,
+    ) * 100
+    const probeAmountLimit = positive(account.totalAssets) * 0.05
+    const probeLots = Math.floor(probeAmountLimit / oneLotGross)
+    capacity = {
+      ...capacity,
+      lots: Math.min(capacity.lots, Math.max(0, probeLots)),
+      manualProbeLimitPct: 5,
+    }
+    if (capacity.lots <= 0) {
+      blockedReasons.push('单手金额超过短线试仓的5%仓位上限')
+    }
+  }
+
   const uniqueBlockers = [...new Set(blockedReasons.filter(Boolean))]
+  const manualProbeEligible = (
+    !productionEligible
+    && probeRequested
+    && sectorProbeEligible
+    && strategySignal?.passed === true
+    && rewardRiskRatio != null
+    && rewardRiskRatio >= 1.8
+    && uniqueBlockers.length === 0
+    && capacity.lots > 0
+  )
   let actionability = 'WATCH'
   if (riskIncreasing) {
     actionability = uniqueBlockers.length
       ? 'BLOCKED'
-      : productionEligible ? 'READY' : 'RESEARCH_ONLY'
+      : productionEligible
+        ? 'READY'
+        : manualProbeEligible ? 'MANUAL_PROBE' : 'RESEARCH_ONLY'
   } else if (riskReducing) {
     actionability = uniqueBlockers.length ? 'BLOCKED' : 'READY'
   }
@@ -720,6 +778,28 @@ export function compileDecisionPlan({
       targetPositionPct: market.targetPositionPct || { min: 0, max: 0 },
     },
     strategy,
+    manualConfirmationOnly: actionability === 'MANUAL_PROBE',
+    opportunity: payload.sectorOpportunity?.matched === true
+      ? {
+          schemaVersion: payload.sectorOpportunity.schemaVersion,
+          sectorCode: text(payload.sectorOpportunity.sector?.code, 20),
+          sectorName: text(payload.sectorOpportunity.sector?.name, 60),
+          sectorActionability: text(
+            payload.sectorOpportunity.sector?.actionability,
+            30,
+          ),
+          stockRole: text(
+            payload.sectorOpportunity.stock?.roleLabel
+            || payload.sectorOpportunity.stock?.role,
+            30,
+          ),
+          generatedAt: finite(payload.sectorOpportunity.generatedAt),
+          sourceSession: text(
+            payload.sectorOpportunity.sourceSession,
+            20,
+          ),
+        }
+      : null,
     strategyRoute: strategyRoute
       ? {
           schemaVersion: strategyRoute.schemaVersion,
@@ -759,6 +839,7 @@ export function compileDecisionPlan({
       budgetPct: capacity.riskPct,
       maxLossAmount: capacity.maxLossAmount,
       estimatedLossPerLot: capacity.lossPerLot,
+      manualProbeLimitPct: capacity.manualProbeLimitPct ?? null,
       stockLimitPct: capacity.stockLimitPct,
       marketPositionLimitPct: capacity.marketPositionLimitPct,
       accountCircuitBreaker: accountCircuitBreaker

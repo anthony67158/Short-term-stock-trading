@@ -467,3 +467,32 @@ test('决策计划v2优先提供最终动作手数费用和策略等级', () => 
     ['10', '12', '9'],
   )
 })
+
+test('短线试仓展示板块依据并明确只允许人工确认', () => {
+  const view = buildAdvicePresentation({
+    action: '小仓试错',
+    title: '板块前排回踩试仓',
+    decisionPlan: {
+      schemaVersion: 'decision-plan.v2',
+      action: 'BUY',
+      actionLabel: '买入',
+      actionability: 'MANUAL_PROBE',
+      manualConfirmationOnly: true,
+      quantity: { lots: 2 },
+      prices: { reference: 10, stop: 9, target: 12 },
+      costs: { estimatedNetAmount: 2005 },
+      opportunity: {
+        sectorName: '新能源车',
+        stockRole: '总龙头',
+      },
+    },
+  })
+
+  assert.equal(view.verdict.action, '小仓试错')
+  assert.match(view.execution.instruction, /人工确认/)
+  assert.equal(view.decisionPlan.manualConfirmationOnly, true)
+  assert.deepEqual(view.decisionPlan.opportunity, {
+    sectorName: '新能源车',
+    stockRole: '总龙头',
+  })
+})

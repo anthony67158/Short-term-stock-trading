@@ -170,3 +170,34 @@ test('自选股不会把持仓退出策略显示成买入参考', () => {
   assert.equal(radar.watchlist[0].strategyName, '暂无买入策略')
   assert.equal(radar.primaryStrategy, null)
 })
+
+test('人工短线试仓在雷达中显示为买入候选并标记需人工确认', () => {
+  const radar = buildStrategyRadar({
+    watchlist: [{ code: '002594', name: '演示自选' }],
+    advice: {
+      '002594': {
+        at: 100,
+        mode: 'buy_advice',
+        advice: {
+          action: '小仓试错',
+          actionPlan: '回踩企稳后人工确认试仓',
+          decisionPlan: {
+            action: 'BUY',
+            actionability: 'MANUAL_PROBE',
+            strategy: {
+              strategyId: 'trend-breakout',
+              name: '趋势突破',
+              routeMode: 'SHADOW_ONLY',
+              signalPassed: true,
+            },
+          },
+        },
+      },
+    },
+  })
+
+  assert.equal(radar.watchlist[0].actionLabel, '进入买入候选')
+  assert.equal(radar.watchlist[0].canIncreaseRisk, true)
+  assert.equal(radar.watchlist[0].manualOnly, true)
+  assert.equal(radar.summary.watchCandidates, 1)
+})

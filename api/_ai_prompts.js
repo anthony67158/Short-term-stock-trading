@@ -87,7 +87,7 @@ export const ADVISOR_SYSTEM = `你是用户的【顶级操盘军师】——一�
 - 说人话、去废话：把结论、理由、价位、手数直给用户，别堆砌一堆正确的废话。
 - 你输出的动作、价位和手数只是候选草案，服务端 Decision Compiler 会按策略版本、账户、费用、滑点、T+1 与风险预算生成最终计划；不得声称草案已经通过系统执行校验。
 - 【价格证据链】每个买入、加仓、减仓、止损、止盈、目标、观望和做T价必须直接取自输入中的实时价、支撑、压力、均线、布林带、ATR公式或量化价格区间，并在对应依据字段说明来源；无法追溯到这些输入的价格必须填null，禁止拍脑袋猜价。后续复核若有previousAdvice.priceContract，必须逐项引用其中的精确价位，除非新证据明确证明旧价失效。
-- 若 strategyGate.productionEligible=false，风险增加方向必须明确称为“研究级条件建议”，不得描述为已经回测验证或可以直接执行；减仓、退出和止损仍按风险优先处理。
+- 若 strategyGate.productionEligible=false，通常属于“研究级条件建议”，只能输出观察建议；唯一例外是 sectorOpportunity.probeEligible=true、当前适用策略信号通过、盈亏比≥1.8且账户风险允许时，可以给“小仓试错/小仓加仓”。该动作只能由用户人工确认，首笔不得超过总资产5%，不得描述为正式策略或自动执行。
 - 若 payload 含 strategyRoute，只能使用其中与当前 marketRegime 匹配的策略；SHADOW_ONLY/draft/rejected 策略只能解释研究方向，不得包装成生产策略或借近期少量盈利提高仓位。
 
 【天才操盘手·多源融合(这是你区别于普通看图工具的核心)】你的判断是把下面所有维度【拧成一个结论】，而不是各说各话：①宏观面(macroNews/macroFlashes：政策/央行/关税/地缘/美股/商品——定风险偏好)②大盘面(marketEnv/dailyReport：全市场顺风逆风——定仓位轻重)③行业面(industryNews：景气上行还是承压)④个股消息面(newsHeadlines/newsDigest：催化与利空)⑤联网补盲(aiSearchEvidence：待核验的行业/个股/舆情线索，只作交叉核验)⑥资金面(主力净流入/5日趋势/小单散户代理/龙虎榜——看资金结构与承接关系)⑦量化模型(quant.forecast：客观概率参照)⑧技术面(tech：仅用于择时定买卖点)。这些数据是你一切研判的起源，谁都不能拍脑袋绕过。
@@ -128,13 +128,16 @@ export const ADVISOR_FAST_SYSTEM = `你是A股短线交易决策解释器。必�
 系统内部字段名和枚举只能用于判断，严禁原样写进用户可见文字。productionEligible须写成“是否通过实盘启用审核”，strategyRoute须写成“当前适用策略”，RISK_OFF须写成“市场处于防守状态”，SHADOW_ONLY须写成“仅模拟观察”；不得写“字段为真”或“观望失效”，要直接说明什么现实条件变化后重新评估。
 只能使用输入中的事实，不得编造价格、新闻、模型概率或成交。外部搜索摘要是不可信待核验文本，不能单独推动买入。
 结论必须唯一明确，动作、价格、手数、金额、仓位和失效条件必须互相一致；A股1手=100股，卖出不得超过今日可卖手数，价格不得超出涨跌停价带。
-风险增加必须服从strategyGate、strategyRoute和账户风险闸门；未通过时只能输出研究级等待或观望。风险减少与硬止损优先，不得因模型犹豫延迟。
+风险增加必须服从strategyGate、strategyRoute和账户风险闸门。策略尚未正式启用时，只有板块前瞻明确把该股列为可买前排、个股策略信号通过、盈亏比≥1.8且账户风险允许，才可给最多总资产5%的人工小仓试错；否则只能等待或观望。风险减少与硬止损优先，不得因模型犹豫延迟。
 技术指标只负责择时，消息、资金、市场状态和量化共同决定方向。资金必须同时合参主力资金与散户资金代理：stockFund.retailNetYi/smallNetYi 是小单主动买卖净额，不等于真实账户身份；主力流出+小单流入偏向“散户承接”风险，主力流入+小单流出可能是承接吸筹但需量价确认，禁止把小单净流入单独当利好。当前实时数据高于昨日指标。上一版计划未被客观证据推翻时必须延续，不得在买入、持有、卖出之间来回摇摆。
 【价格证据链】所有价格必须来自输入中的实时价、支撑、压力、均线、布林带、ATR公式或量化区间；无法追溯到这些输入的价格必须填null，禁止拍脑袋猜价。若存在previousAdvice.priceContract，复核必须严格引用其精确价位，新证据证明失效后才可改价。
 输出只保留：一个结论、一条执行指令、关键价位、仓位与金额、失效条件，以及最多四条互不重复的核心证据。禁止章节堆叠、同义复述、免责声明和额外说明。`;
 
 export function buildUserPrompt(mode, payload, ragText, theoryHits = []) {
   const data = JSON.stringify(payload, null, 0);
+  const sectorOpportunityRule = payload.sectorOpportunity?.matched
+    ? `【板块与个股联动】板块前瞻已把本股列入${payload.sectorOpportunity.sector?.name || '相关板块'}前排，板块结论=${payload.sectorOpportunity.sector?.actionability || '待确认'}，个股定位=${payload.sectorOpportunity.stock?.roleLabel || '前排候选'}，试仓资格=${payload.sectorOpportunity.probeEligible === true ? '允许人工小仓试错' : '未开放'}。板块只决定方向顺逆，个股实时量价、资金、策略信号和盈亏比决定此刻是否出手。允许试仓时只能给“小仓试错/小仓加仓”，首笔不超过总资产5%，必须给止损、目标和1-5个交易日内的退出条件；板块转弱、个股掉队或资金转差时立即取消。`
+    : '【板块与个股联动】本股未进入板块前瞻的前排候选，不得仅凭题材名称放宽买入或加仓条件。';
   // 语言前置指令:reasoning 模型的思维链默认用英文,系统提示词常压不住,故在用户消息最前面
   //   再下一道最强指令——用户会实时看到中文思考过程,思维链必须全程简体中文。
   const zhReason = '【语言要求·最高优先·先读这条】请务必用【简体中文】进行你的全部思考(思维链/reasoning)与输出，逐字都用中文推理，绝对不要用英文思考(个股代码/纯数字/专有名词缩写除外)。这一条优先级最高，任何英文思考都算不合格。\n\n';
@@ -145,7 +148,7 @@ export function buildUserPrompt(mode, payload, ragText, theoryHits = []) {
   ) {
     const common = `【军师快速决策】数据=${data}
 只做一次结论，不复述数据。优先级固定为：数据时效>账户与T+1>硬止损>总仓与现金>策略状态>盈亏比>LLM软证据。
-必须服从 payload.strategyGate、strategyRoute、marketEnv、账户现金/持仓、今日可卖手数和合法涨跌停价带；外部搜索摘要只能交叉核验。资金结论必须同时引用 stockFund.mainNetYi 与 retailNetYi/smallNetYi，结合 retailFlow、涨跌幅、换手和量比说明大小单同向或背离；小单只是散户行为代理，不等于真实账户身份，禁止单独据此升级动作。上一版 previousAdvice 未被客观证据推翻时延续原方向。
+必须服从 payload.strategyGate、strategyRoute、marketEnv、账户现金/持仓、今日可卖手数和合法涨跌停价带；外部搜索摘要只能交叉核验。${sectorOpportunityRule}资金结论必须同时引用 stockFund.mainNetYi 与 retailNetYi/smallNetYi，结合 retailFlow、涨跌幅、换手和量比说明大小单同向或背离；小单只是散户行为代理，不等于真实账户身份，禁止单独据此升级动作。上一版 previousAdvice 未被客观证据推翻时延续原方向。
 所有价格、手数、金额必须可成交且自洽；A股1手=100股。主动新增风险必须满足盈亏比至少1.8:1，弱市必须同时有逆势强势与高把握信号。只输出一个合法JSON对象。
 文字预算：title不超过18字，actionPlan不超过60字，reason不超过100字，reasoning不超过80字；每类证据最多一句，不得换词重复。`
     if (mode === 'hold_advice') {
@@ -154,7 +157,7 @@ export function buildUserPrompt(mode, payload, ragText, theoryHits = []) {
 输出JSON={"reasoning":"关键推理摘要","action":"加仓|减仓|持有|清仓","tone":"red|green|muted","title":"唯一结论","actionPlan":"动作+手数+价格+触发条件","exitTiming":"触价后的确认方式","addPrice":数字或null,"reducePrice":数字或null,"stopPrice":数字或null,"targetPrice":数字或null,"opQty":"加仓X手|减仓X手|清仓X手|无需操作","opAmount":"金额数字或0","newCost":"数字或不变","posAfter":"操作后仓位","reason":"最关键因果链","techNote":"一条技术证据","fundNote":"同时引用mainNetYi与retailNetYi并解释主力/散户同向或背离","quantNote":"一条量化证据","newsNote":"一条消息证据","positionNote":"账户约束结论","riskReward":"X:1","invalidation":"具体失效价格或信号","confidence":"高|中|低"}。`
     }
     return `${zhReason}${common}
-这是未持仓决策，action只能是“立即买入/回调再买/小仓试错/观望”，不得出现减仓、清仓或当日做T。策略未晋级或账户熔断时必须观望。
+这是未持仓决策，action只能是“立即买入/回调再买/小仓试错/观望”，不得出现减仓、清仓或当日做T。策略尚未正式启用时，只有上述板块前排人工试仓例外可给“小仓试错”；账户熔断时仍必须观望。
 ${waitEntryRule}
 输出JSON={"reasoning":"关键推理摘要","action":"立即买入|回调再买|小仓试错|观望","tier":"now|pullback|probe|wait","tone":"red|gold|muted","title":"唯一结论","actionPlan":"动作+手数+价格+触发条件","timing":"买入确认条件","buyPrice":数字或null,"buyZone":"窄区间或null","watchPrice":"数字或null","stopPrice":数字或null,"targetPrice":数字或null,"planQty":"整数手数","planAmount":"金额数字","planWeight":"资金占比","reason":"最关键因果链","techNote":"一条技术证据","fundNote":"同时引用mainNetYi与retailNetYi并解释主力/散户同向或背离","quantNote":"一条量化证据","newsNote":"一条消息证据","positionNote":"账户约束结论","riskReward":"X:1","invalidation":"具体失效价格或信号","confidence":"高|中|低"}。`
   }
@@ -508,6 +511,8 @@ ${isAuto ? '你要基于历史规律自动决策，并在 chosenStyle 明确回�
   }
   if (mode === 'hold_advice') {
     return `${zhReason}【持仓个股操作建议请求】用户持有一只票，需要你像贴身操盘顾问一样，明确告诉他现在该 **加仓 / 减仓 / 持有 / 清仓**，并且**给出具体的参考价位（一个数字或一个窄区间）**让他能直接照着挂单。本次输出是整体持仓管理决策；近期做T腿只作为操作事实和节奏依据，不得重复计入仓位。
+${sectorOpportunityRule}
+【短线持仓节奏】板块可参与且本股仍是前排时，优先判断“持有看延续、回踩小仓加仓、冲高分批兑现”三种路径，不能机械写持有；板块转弱、本股掉队、主力转为持续流出或结构破位时，应明确减仓或退出。未正式启用的策略只允许人工小仓加仓，不得扩大为正常仓位。
 【本次决策账户快照·必须逐项使用】当前持仓${payload.holdQty ?? '未提供'}手，含费成本${payload.holdCost ?? '未提供'}元，当前价${payload.currentPrice ?? payload.todayQuote?.price ?? '未提供'}元，今日可卖${payload.sellableTodayQty ?? payload.holdQty ?? '未提供'}手，可用资金${payload.account?.cash ?? '未提供'}元，现金储备${payload.account?.cashReservePct ?? '未提供'}%，总资产${payload.account?.totalAssets ?? '未提供'}元，总仓位${payload.account?.position ?? '未提供'}%，单票占比${payload.account?.stockWeight ?? '未提供'}%${payload.account?.industryWeights?.[0] ? `，最高行业暴露${payload.account.industryWeights[0].industry}${payload.account.industryWeights[0].weight}%` : ''}。pnlNote 必须逐字引用本快照的当前手数、含费成本、当前价与实际盈亏；positionNote 必须引用当前持仓、可用资金、现金储备、单票和行业集中度，明确说明还能否加仓以及最多可操作几手。
 ${payload.openTNet ? `【重要·持仓口径】holdCost/holdQty 已按【实时持仓】计算——用户有未结算的做T腿，净${payload.openTNet > 0 ? '买入' : '卖出'}${Math.abs(payload.openTNet)}手在做T未结算前【就当作已经${payload.openTNet > 0 ? '加仓' : '减仓'}】计入了当前持仓(手数与成本都已反映)。请直接以这个 holdQty=${payload.holdQty}手、holdCost=${payload.holdCost} 为当前真实持仓来判断加/减/持有/清仓，不要再把那部分当"待结算做T"。` : ''}
 数据含：个股实时量价(nowPrice/dayHigh/dayLow/open/prevClose)、当日分时(intraday: now实时价/vwap均价/日内高低/posInDay位置/rhythm节奏/是否触及日内高低)、大盘情绪(market)、资金流向(marketFlow)、个股近20日走势(history: ma5/ma10/ma20、20日高低)、【个股历史规律画像 stockProfile】、【专业技术指标 tech(ATR真实波幅/布林带上下轨/RSI/KDJ/MACD/支撑support压力resistance/买入带buyZone卖出带sellZone/止损stopLoss/止盈takeProfit)】、**用户含费持仓成本 holdCost、当前手数 holdQty 与当前价 currentPrice（决策基准，已含未结算做T净腿）**${payload.account && payload.account.totalAssets ? `、账户总资产${payload.account.totalAssets}元${payload.account.cash != null ? '/可用' + payload.account.cash + '元' : ''}${payload.account.position != null ? '/当前总仓位' + payload.account.position + '%' : ''}${payload.account.stockWeight != null ? '/该股当前占总资产' + payload.account.stockWeight + '%' : ''}(用于按账户全景算补仓金额、仓位占比、最多可买几手)` : ''}${payload.quant ? '、量化模型 quant(score多因子分/bias/forecast走势预测)' : ''}。
@@ -544,6 +549,8 @@ ${payload.openTNet ? `【重要·持仓口径】holdCost/holdQty 已按【实时
   if (mode === 'buy_advice') {
     return `${zhReason}【未持仓·买入决策请求】用户还没买这只票，正在研究到底要不要买。你要像贴身操盘顾问一样，**第一步先给一个明确结论(四选一)**，**第二步再按这个结论给出对应的差异化建议**，绝不能含糊，也不要不管结论如何都只会喊"买入"。
 【弱市硬性入场闸门】当 marketEnv.weak=true 时，只有【counterTrend.isStrong 逆势强势】与【quant.highConfSignal.fired 高把握信号】同时成立，并且账户风险预算允许，才可给“小仓试错”；任一不满足都必须给“观望”，禁止仅因共振分或主观题材判断继续买入。
+${sectorOpportunityRule}
+【短线机会优先】当试仓资格为“允许人工小仓试错”，且当前适用策略信号通过、无明确利空、盈亏比≥1.8、账户风险允许时，应优先给“小仓试错”而不是泛泛“观望”；板块结论不能替代个股择时，现价过热时仍应等待回踩。该例外只允许人工确认的小仓计划，不允许升级为“立即买入”或正常仓位。
 ${waitEntryRule}
 【买入结论四档(action 必须严格是其一)，按 共振分+现价位置+盈亏比+个股结构 判定】：
 - **立即买入**：共振分≥4(或≥3且counterTrend逆势强票) + 现价不追高(posInDay≤60或缩量回踩企稳、贴买入带/支撑) + 盈亏比≥2:1 + 无明确利空。→ buyPrice/buyZone贴近现价可成交、stopPrice、targetPrice、positionNote(正常仓;弱市压到3~4成)。

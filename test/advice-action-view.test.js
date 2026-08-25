@@ -251,6 +251,33 @@ test('研究级买入计划保留价格研究但不进入可执行状态', () =>
   assert.equal(view.trigger.price, 10)
 })
 
+test('人工试仓计划保留短线买点但明确只允许手动确认', () => {
+  const view = buildAdviceActionView({
+    action: '小仓试错',
+    buyPrice: 10,
+    stopPrice: 9,
+    targetPrice: 12,
+    planQty: 5,
+    actionPlan: '回踩10元企稳后小仓试错5手',
+    decisionPlan: {
+      schemaVersion: 'decision-plan.v2',
+      action: 'BUY',
+      actionLabel: '买入',
+      actionability: 'MANUAL_PROBE',
+      manualConfirmationOnly: true,
+      quantity: { lots: 5 },
+      prices: { reference: 10, stop: 9, target: 12 },
+    },
+  }, { mode: 'buy_advice' })
+
+  assert.equal(view.kind, 'buy')
+  assert.equal(view.action, '小仓试错')
+  assert.equal(view.actionable, true)
+  assert.equal(view.manualOnly, true)
+  assert.equal(view.quantity, '5手')
+  assert.match(view.instruction, /人工确认/)
+})
+
 test('被决策内核阻断的买入建议统一降级为观望', () => {
   const view = buildAdviceActionView({
     action: '立即买入',

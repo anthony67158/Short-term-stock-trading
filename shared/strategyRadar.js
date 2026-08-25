@@ -56,7 +56,7 @@ function actionLabel({
   if (RISK_REDUCING.has(action)) return '优先降低风险'
   if (action === 'HOLD') return '继续持有'
   if (RISK_INCREASING.has(action)) {
-    return actionability === 'READY'
+    return ['READY', 'MANUAL_PROBE'].includes(actionability)
       ? scope === 'holding' ? '可以按条件加仓' : '进入买入候选'
       : '等待条件确认'
   }
@@ -81,8 +81,10 @@ function impactOf(item, scope, entry, governanceMap) {
     && strategy.signalReason !== 'REGIME_MISMATCH'
   const riskIncreasing = RISK_INCREASING.has(action)
   const canIncreaseRisk = riskIncreasing
-    && actionability === 'READY'
+    && ['READY', 'MANUAL_PROBE'].includes(actionability)
     && (
+      actionability === 'MANUAL_PROBE'
+      ||
       strategy.routeMode === 'PRODUCTION'
       || strategy.productionEligible === true
     )
@@ -110,6 +112,7 @@ function impactOf(item, scope, entry, governanceMap) {
     ),
     signalPassed,
     canIncreaseRisk,
+    manualOnly: actionability === 'MANUAL_PROBE',
     requiresManualConfirmation: true,
     generatedAt: Number(entry?.at) || null,
   }

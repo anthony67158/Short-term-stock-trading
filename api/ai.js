@@ -119,6 +119,7 @@ import {
 } from '../shared/strategyPromotionGate.js';
 import { councilRecordsFromData } from '../shared/advisorCouncilStore.js';
 import { internalApiOrigin } from './_internal_origin.js';
+import { loadSectorOpportunity } from './_sector_opportunity.js';
 
 function avg(arr) { return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0; }
 function std(arr) { if (arr.length < 2) return 0; const m = avg(arr); return Math.sqrt(avg(arr.map((x) => (x - m) ** 2))); }
@@ -724,6 +725,24 @@ export default async function handler(req, res) {
       accountAuth.account,
     );
     const sourceTracker = createEvidenceSourceTracker();
+    if (isAdvisorMode(mode) && payload.code) {
+      const sectorOpportunity = await loadSectorOpportunity(
+        payload.code,
+      ).catch(() => null);
+      if (sectorOpportunity) {
+        payload.sectorOpportunity = sectorOpportunity;
+        if (sectorOpportunity.matched) {
+          payload.sectorContext = {
+            ...(payload.sectorContext || {}),
+            breadth: sectorOpportunity.sector?.breadth ?? null,
+            code: sectorOpportunity.sector?.code || null,
+            name: sectorOpportunity.sector?.name || null,
+            actionability:
+              sectorOpportunity.sector?.actionability || null,
+          };
+        }
+      }
+    }
     let evidenceSnapshot = null;
     const ensureEvidenceSnapshot = () => {
       if (!isAdvisorMode(mode) || !payload.code) return null;
@@ -1568,6 +1587,7 @@ export default async function handler(req, res) {
           .slice(0, 12),
       } : null,
       strategyRoute: payload.strategyRoute || null,
+      sectorOpportunity: payload.sectorOpportunity || null,
     };
     const scheduledReviewEvaluation = evaluateScheduledReview({
       origin: payload.reviewOrigin,

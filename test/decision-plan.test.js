@@ -112,6 +112,106 @@ test('未晋级策略的买入建议被编译为研究级计划且手数受风�
   assert.equal(first.decisionId, second.decisionId)
 })
 
+test('板块前排短线机会可形成受控人工计划但不能进入自动执行', () => {
+  const plan = compileDecisionPlan({
+    mode: 'buy_advice',
+    advice: {
+      action: '小仓试错',
+      tier: 'probe',
+      buyPrice: 10,
+      stopPrice: 9,
+      targetPrice: 12,
+      planQtyNum: 10,
+      actionPlan: '回踩10元企稳后小仓试错',
+      invalidation: '跌破9元',
+    },
+    payload: {
+      ...payload,
+      sectorOpportunity: {
+        schemaVersion: 'sector-opportunity.v1',
+        matched: true,
+        probeEligible: true,
+        entryMode: 'MANUAL_PROBE',
+        sector: {
+          code: 'BK1234',
+          name: '新能源车',
+          actionability: 'LAYOUT',
+        },
+        stock: {
+          code: '600519',
+          role: 'leader',
+          roleLabel: '总龙头',
+          score: 82,
+        },
+      },
+    },
+    evidenceSnapshot: snapshot,
+    strategySpec: getActiveStrategySpec(),
+    strategyGate: {
+      productionEligible: false,
+      blockers: [{ code: 'BACKTEST_REQUIRED' }],
+    },
+    now,
+  })
+
+  assert.equal(plan.action, 'BUY')
+  assert.equal(plan.actionability, 'MANUAL_PROBE')
+  assert.equal(plan.manualConfirmationOnly, true)
+  assert.equal(plan.strategy.productionEligible, false)
+  assert.equal(plan.opportunity.sectorName, '新能源车')
+  assert.ok(plan.quantity.lots > 0)
+  assert.ok(plan.quantity.lots <= 5)
+  assert.equal(
+    decisionPlanConfirmationGate(plan, 'buy').allowed,
+    false,
+  )
+})
+
+test('板块机会不能放宽低赔率或非试仓买入', () => {
+  const sectorOpportunity = {
+    schemaVersion: 'sector-opportunity.v1',
+    matched: true,
+    probeEligible: true,
+    entryMode: 'MANUAL_PROBE',
+  }
+  const lowReward = compileDecisionPlan({
+    mode: 'buy_advice',
+    advice: {
+      action: '小仓试错',
+      tier: 'probe',
+      buyPrice: 10,
+      stopPrice: 9,
+      targetPrice: 11.5,
+      planQtyNum: 1,
+    },
+    payload: { ...payload, sectorOpportunity },
+    evidenceSnapshot: snapshot,
+    strategySpec: getActiveStrategySpec(),
+    strategyGate: { productionEligible: false, blockers: [] },
+    now,
+  })
+  const fullEntry = compileDecisionPlan({
+    mode: 'buy_advice',
+    advice: {
+      action: '立即买入',
+      tier: 'now',
+      buyPrice: 10,
+      stopPrice: 9,
+      targetPrice: 12,
+      planQtyNum: 1,
+    },
+    payload: { ...payload, sectorOpportunity },
+    evidenceSnapshot: snapshot,
+    strategySpec: getActiveStrategySpec(),
+    strategyGate: { productionEligible: false, blockers: [] },
+    now,
+  })
+
+  assert.equal(lowReward.actionability, 'RESEARCH_ONLY')
+  assert.equal(lowReward.manualConfirmationOnly, false)
+  assert.equal(fullEntry.actionability, 'RESEARCH_ONLY')
+})
+
 test('v2影子路由写入策略族、适用状态、样本外成绩和治理级别', () => {
   const strategySpec = getStrategySpecV2('trend-breakout')
   const strategyRoute = routeStrategyPortfolio({

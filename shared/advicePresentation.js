@@ -160,6 +160,8 @@ function decisionPlanSummary(plan) {
     : []
   const statusText = actionability === 'READY'
     ? '策略条件与账户风险检查均已通过'
+    : actionability === 'MANUAL_PROBE'
+      ? '板块与个股短线条件已通过，仅限人工确认小仓试错'
     : actionability === 'RESEARCH_ONLY'
       ? (plan.blockedReasons || []).join('；') || '仅供观察，暂不可直接执行'
       : actionability === 'BLOCKED'
@@ -205,6 +207,13 @@ function decisionPlanSummary(plan) {
       40,
     ),
     actionabilityLabel: actionabilityLabel(actionability),
+    manualConfirmationOnly: plan.manualConfirmationOnly === true,
+    opportunity: plan.opportunity
+      ? {
+          sectorName: clean(plan.opportunity.sectorName, 60),
+          stockRole: clean(plan.opportunity.stockRole, 30),
+        }
+      : null,
     marketScore: displayNumber(plan.marketRegime?.score),
     asOf: clean(plan.asOf, 40),
     validUntil: clean(plan.validUntil, 40),
@@ -232,6 +241,9 @@ function decisionInstruction(plan, fallback = '') {
   const core = `${plan.actionLabel || '操作'}${lots > 0 ? `${lots}手` : ''}${price ? `，参考${price}元` : ''}`
   if (plan.actionability === 'RESEARCH_ONLY') {
     return `仅供观察：${core}；策略通过实盘启用审核前，不能直接执行`
+  }
+  if (plan.actionability === 'MANUAL_PROBE') {
+    return `人工确认：${plan.action === 'ADD' ? '小仓加仓' : '小仓试错'}${lots > 0 ? `${lots}手` : ''}${price ? `，参考${price}元` : ''}；不进入自动执行`
   }
   return core || fallback
 }
@@ -266,13 +278,17 @@ function buildLegacyAdvicePresentation(advice = {}) {
     && plan.action === 'WATCH'
   const planAdvice = plan ? {
     ...advice,
-    action: plan.actionability === 'RESEARCH_ONLY'
-      ? `观察·${plan.actionLabel || '建议'}`
+    action: plan.actionability === 'MANUAL_PROBE'
+      ? plan.action === 'ADD' ? '小仓加仓' : '小仓试错'
+      : plan.actionability === 'RESEARCH_ONLY'
+        ? `观察·${plan.actionLabel || '建议'}`
       : plan.actionability === 'BLOCKED'
         ? '观望'
         : plan.actionLabel || advice.action,
     title: plan.actionability === 'BLOCKED'
       ? '执行条件未满足，暂不操作'
+      : plan.actionability === 'MANUAL_PROBE'
+        ? `短线试仓：${advice.title || advice.headline || '板块与个股条件共振'}`
       : plan.actionability === 'RESEARCH_ONLY'
         ? `仅供观察：${advice.title || advice.headline || plan.actionLabel || '等待确认'}`
         : advice.title,
