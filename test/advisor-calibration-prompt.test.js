@@ -132,6 +132,9 @@ test('观望买入建议区分观察锚与买入价并比较两条入场路径',
     assert.match(prompt, /回踩支撑.*企稳/)
     assert.match(prompt, /放量突破.*确认/)
     assert.match(prompt, /当前低价.*不能买/)
+    assert.match(prompt, /stopPrice.*targetPrice.*null/)
+    assert.match(prompt, /尚未到达.*可核验.*watchPrice/)
+    assert.match(prompt, /invalidation只写何时取消关注/)
   }
 })
 

@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import {
   cloudAlertsForEvaluation,
   isCurrentAdvicePlan,
+  queueAdviceReviewForPriceTrigger,
   queueAdviceReviewForVerdict,
 } from '../api/cron_alert.js'
 import { completeJob, enqueueJob, leaseJob } from '../api/_jobs.js'
@@ -79,6 +80,42 @@ test('Judge判定计划失效时才排入一次军师复核', () => {
   assert.equal(replay.queued, false)
   assert.equal(replay.reason, 'duplicate-event')
   assert.equal(data.reviewJobs['600000'].source, 'judge')
+})
+
+test('观察价命中直接排队复核而不调用Judge确认交易', () => {
+  const data = {
+    plan: [{ code: '600519', name: '贵州茅台' }],
+    advice: {
+      '600519': {
+        mode: 'buy_advice',
+        advice: {
+          continuity: { planId: 'plan-watch', revision: 3 },
+        },
+      },
+    },
+  }
+  const alert = {
+    id: 'watch-review-1',
+    code: '600519',
+    name: '贵州茅台',
+    reviewOnly: true,
+    op: 'gte',
+    value: 145.24,
+    decisionPrice: 145.3,
+    judgeContext: { planId: 'plan-watch', planRevision: 3 },
+  }
+
+  const result = queueAdviceReviewForPriceTrigger(
+    data,
+    alert,
+    1000,
+  )
+
+  assert.equal(result.queued, true)
+  assert.equal(result.created, true)
+  assert.equal(data.reviewJobs['600519'].source, 'judge')
+  assert.equal(data.reviewJobs['600519'].trigger.kind, 'price-review')
+  assert.equal(data.reviewJobs['600519'].trigger.price, 145.3)
 })
 
 test('旧计划的Judge结果不得唤醒或改写当前军师建议', () => {

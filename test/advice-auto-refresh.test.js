@@ -155,14 +155,55 @@ test('云端按每只股票自己的复核时间排队', () => {
       { code: '600001', name: '未到期' },
     ],
     advice: {
-      '600000': { advice: { reviewCycle: { nextReviewAt: now } } },
-      '600001': { advice: { reviewCycle: { nextReviewAt: now + 5 * 60000 } } },
+      '600000': {
+        advice: {
+          reviewCycle: { nextReviewAt: now },
+          priceContract: {
+            schemaVersion: 'advice-price-contract.v1',
+            levels: [],
+          },
+        },
+      },
+      '600001': {
+        advice: {
+          reviewCycle: { nextReviewAt: now + 5 * 60000 },
+          priceContract: {
+            schemaVersion: 'advice-price-contract.v1',
+            levels: [],
+          },
+        },
+      },
     },
   }
 
   assert.equal(enqueueAutoRefreshDue(data, now), 1)
   assert.equal(data.reviewJobs['600000'].source, 'auto')
   assert.equal(data.reviewJobs['600001'], undefined)
+})
+
+test('旧建议缺少价格契约时不等待原计划时间并立即排队迁移复核', () => {
+  const now = new Date('2026-08-10T02:00:00Z').getTime()
+  const data = {
+    settings: {},
+    holding: [],
+    plan: [{ code: '000001', name: '旧建议股票' }],
+    advice: {
+      '000001': {
+        advice: {
+          action: '观望',
+          watchPrice: 12,
+          reviewCycle: { nextReviewAt: now + 60 * 60000 },
+        },
+      },
+    },
+  }
+
+  assert.equal(enqueueAutoRefreshDue(data, now), 1)
+  assert.equal(data.reviewJobs['000001'].source, 'auto')
+  assert.match(
+    data.reviewJobs['000001'].idempotencyKey,
+    /price-contract/,
+  )
 })
 
 test('云端定时器只为持续复核白名单中的股票排队', () => {

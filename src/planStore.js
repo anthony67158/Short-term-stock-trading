@@ -9,6 +9,7 @@ import {
   advicePriceLevel,
   sanitizedAdvicePriceContract,
 } from '../shared/advicePriceContract.js'
+import { projectAdviceAlerts } from '../shared/adviceAlerts.js'
 import { executionTriggerDirection } from '../shared/executionTrigger.js'
 import {
   positionGateForAlert,
@@ -2472,71 +2473,19 @@ export const planStore = {
   //   alertSyncedPrice(记在候选上): 上次自动同步过的买价 —— 相同价不重复写,用户删掉也不会被反复自动加回;
   //   AI 买价变化时(≠ alertSyncedPrice)才会重新同步/重新武装。
   autoSyncCandAlert(code, name, advice = null) {
-    const priceContract = sanitizedAdvicePriceContract(advice)
-    const contractEntry = advicePriceLevel(advice, 'entry')
-    const exactBuyPrice = contractEntry?.price
-    const adviceNotReady = (
-      advice?.decisionPlan?.schemaVersion === 'decision-plan.v2'
-      && advice.decisionPlan.actionability !== 'READY'
-    )
-    if (
-      !advice
-      || !priceContract
-      || !contractEntry
-      || exactBuyPrice == null
-      || isNaN(exactBuyPrice)
-      || adviceNotReady
-    ) {
+    if (!advice) {
       this.clearCandBuyAlert(code)
       return
     }
-    if (state.settings && state.settings.aiAutoAlert === false) return // 全局关闭 AI 自动预警
-    const judgeContext = buildJudgeAdviceContext(advice || {})
-    const triggerZone = judgeContext.addZone
-    const v = roundPx(contractEntry?.price ?? triggerZone?.high ?? exactBuyPrice)
-    const p = state.plan.find((x) => x.code === code)
-    if (!p) return
-    if (p.alertMuted) return                                            // 用户删过买点预警 → 永久不再自动加回
-    if (p.alertSyncedPrice != null && Number(p.alertSyncedPrice) === Number(v)) return // 该买价已处理过
-    const existing = (state.alerts || []).find((a) => a.candCode === code)
-    if (existing) {
-      // 已有买点预警 → 跟随 AI 新买价刷新到价并重新武装
-      state.alerts = (state.alerts || []).map((a) => a.candCode === code
-        ? {
-            ...a,
-            name: name || a.name,
-            type: 'price',
-            op: 'lte',
-            value: Number(v),
-            ...(
-              triggerZone || priceContract
-                ? { triggerZone, judgeContext }
-                : {}
-            ),
-            ...(
-              (triggerZone || priceContract)
-              && a.judgeContext?.planId === judgeContext.planId
-                ? {}
-                : {
-                    enabled: true,
-                    triggeredAt: null,
-                    triggeredMsg: '',
-                    phase: 'armed',
-                  }
-            ),
-          }
-        : a)
-    } else {
-      // 新建买点到价预警(≤ 建议买入价)
-      state.alerts = [{
-        id: uid(), enabled: true, createdAt: Date.now(), triggeredAt: null, triggeredMsg: '',
-        code, name, type: 'price', op: 'lte', value: Number(v), note: '买点', candCode: code,
-        phase: 'armed',
-        ...((triggerZone || priceContract) ? { triggerZone, judgeContext } : {}),
-      }, ...(state.alerts || [])]
-    }
-    state.plan = state.plan.map((x) => x.code === code ? { ...x, alertSyncedPrice: v } : x)
-    emit()
+    const changed = projectAdviceAlerts(state, code, {
+      ...advice,
+      name: advice.name || name,
+    }, {
+      now: Date.now(),
+      idFactory: uid,
+      requirePriceContract: true,
+    })
+    if (changed) emit()
   },
   // 最新候选建议已转为观望/回避时，旧买点不再具备执行意义。
   // 只清理系统自动生成的 candCode 预警，不影响用户手动设置的普通预警。

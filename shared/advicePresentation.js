@@ -66,7 +66,7 @@ function priceLevels(advice) {
       && clean(advice.watchPrice, 200).length <= 24
       && {
       key: 'watch',
-      label: '关注价',
+      label: '观察价',
       value: displayNumber(advice.watchPrice),
       tone: 'muted',
     },
@@ -262,6 +262,8 @@ function buildLegacyAdvicePresentation(advice = {}) {
   const plan = advice.decisionPlan?.schemaVersion === 'decision-plan.v2'
     ? advice.decisionPlan
     : null
+  const observationOnly = plan?.mode === 'buy_advice'
+    && plan.action === 'WATCH'
   const planAdvice = plan ? {
     ...advice,
     action: plan.actionability === 'RESEARCH_ONLY'
@@ -294,18 +296,32 @@ function buildLegacyAdvicePresentation(advice = {}) {
       ? plan.prices?.reference
       : null,
     watchPrice: plan.prices?.watch,
-    addPrice: plan.action === 'ADD'
+    addPrice: observationOnly
+      ? null
+      : plan.action === 'ADD'
       ? plan.prices?.reference
       : advice.addPrice,
-    reducePrice: ['REDUCE', 'EXIT'].includes(plan.action)
+    reducePrice: observationOnly
+      ? null
+      : ['REDUCE', 'EXIT'].includes(plan.action)
       ? plan.prices?.reference
       : advice.reducePrice,
-    stopPrice: plan.prices?.stop,
-    targetPrice: plan.prices?.target,
+    stopPrice: observationOnly ? null : plan.prices?.stop,
+    targetPrice: observationOnly ? null : plan.prices?.target,
   } : advice
   const contract = advice.knowledgeActionPlan || {}
   const review = reviewSummary(advice)
+  const levels = priceLevels(planAdvice)
+  if (observationOnly && levels.length === 0) {
+    levels.push({
+      key: 'watch',
+      label: '观察价',
+      value: '等待重新定价',
+      tone: 'muted',
+    })
+  }
   return {
+    observationOnly,
     verdict: {
       action: first(planAdvice.action, planAdvice.stance),
       title: first(
@@ -345,13 +361,26 @@ function buildLegacyAdvicePresentation(advice = {}) {
         text: clean(advice.futurePlan),
       },
     ].filter(Boolean),
-    levels: priceLevels(planAdvice),
+    levels,
     trigger: {
-      condition: first(
-        contract.triggerConditions,
-        advice.timing,
-        advice.nextOpenPlan,
-      ),
+      title: observationOnly
+        ? '观察与重新判断'
+        : '触发与失效',
+      conditionLabel: observationOnly ? '重新判断' : '触发',
+      confirmationLabel: observationOnly ? '买入确认' : '确认',
+      invalidationLabel: observationOnly ? '取消关注' : '失效',
+      validationLabel: observationOnly ? '观察周期' : '验证',
+      condition: observationOnly
+        ? first(
+            advice.actionPlan,
+            advice.timing,
+            contract.triggerConditions,
+          )
+        : first(
+            contract.triggerConditions,
+            advice.timing,
+            advice.nextOpenPlan,
+          ),
       confirmation: first(
         advice.exitTiming,
         contract.exitConditions,

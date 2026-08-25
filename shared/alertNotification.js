@@ -28,6 +28,7 @@ function identityOf(alert = {}) {
 }
 
 function actionOf(alert = {}) {
+  if (alert.reviewOnly) return '复核'
   if (alert.actKind === 'add') return '加仓'
   if (alert.actKind === 'reduce') return '减仓'
   const note = String(alert.note || '')
@@ -52,7 +53,8 @@ function factLine(alert, quote) {
   const parts = []
   if (price) parts.push(`现${price}`)
   if (alert.type === 'price' && finite(alert.value) != null) {
-    parts.push(`目标${OP_LABEL[alert.op] || ''}${priceText(alert.value)}`)
+    const label = alert.reviewOnly ? '观察价' : '目标'
+    parts.push(`${label}${OP_LABEL[alert.op] || ''}${priceText(alert.value)}`)
   }
   if (alert.opQty && !/无需|不可卖|0手/.test(String(alert.opQty))) {
     parts.push(String(alert.opQty).trim())
@@ -78,6 +80,8 @@ export function buildAlertNotification({
   const facts = factLine(alert, quote) || compactText(reason, 46)
   const instruction = stage === 'watch'
     ? watchInstruction(action)
+    : stage === 'review'
+      ? '正在重新评估，暂不下单'
     : stage === 'confirm'
       ? `执行：${alert.opQty && !/不可卖/.test(String(alert.opQty)) ? alert.opQty : action}`
       : stage === 'invalid'
@@ -92,6 +96,8 @@ export function buildAlertNotification({
   ].filter(Boolean).join('\n').slice(0, 92)
   const title = stage === 'watch'
     ? `${identity}｜${action}待确认`
+    : stage === 'review'
+      ? `${identity}｜观察条件已到`
     : stage === 'confirm'
       ? `${identity}｜现在${action}`
       : stage === 'invalid'

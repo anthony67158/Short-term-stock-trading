@@ -41,9 +41,10 @@ test('候选卡买入框与预警只读取统一动作视图的契约价', () =>
     planTab,
     /const aiPrice = actionable \? roundActionPrice\(advice\?\.buyPrice\)/,
   )
-  assert.match(planStore, /advicePriceLevel\(advice, 'entry'\)/)
-  assert.match(planStore, /contractEntry\?\.price \?\? triggerZone\?\.high/)
-  assert.match(planStore, /!priceContract\s*\|\|\s*!contractEntry/)
+  assert.match(planStore, /projectAdviceAlerts\(state, code/)
+  assert.match(planStore, /requirePriceContract:\s*true/)
+  assert.match(planTab, /观察价提醒/)
+  assert.match(planTab, /已到观察价/)
 })
 
 test('个股建议只保留一个主结论并把扩展信息收进详情', () => {

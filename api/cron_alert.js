@@ -43,6 +43,7 @@ import { needsWorkerDispatch } from './_jobs.js';
 import { scheduleAdviceWorker } from './cron_advice.js';
 import {
   isCurrentAdvicePlan,
+  queueAdviceReviewForPriceTrigger,
   queueAdviceReviewForVerdict,
 } from './_advice_wakeup.js';
 import { isAdviceReviewEnabled } from '../shared/adviceReviewPolicy.js';
@@ -64,7 +65,11 @@ const JUDGE_INTERVAL_MS = { buy: 45000, sell: 30000, stop: 20000 };
 const WATCHING_MAX_MS = 90 * 60 * 1000;
 const JUDGE_DEADLINE_RESERVE_MS = 30000;
 
-export { isCurrentAdvicePlan, queueAdviceReviewForVerdict };
+export {
+  isCurrentAdvicePlan,
+  queueAdviceReviewForPriceTrigger,
+  queueAdviceReviewForVerdict,
+};
 
 function rotateAccounts(accounts, slot = 0) {
   const list = Array.isArray(accounts) ? accounts.slice() : [];
@@ -90,6 +95,9 @@ export function shouldRunAlertCron(now = Date.now()) {
 function describeAlert(a) {
   if (a.type === 'limitup') return `临近涨停(涨幅≥${formatPriceLimitThreshold(a, true)}%)`;
   if (a.type === 'limitdown') return `临近跌停(跌幅≥${formatPriceLimitThreshold(a, true)}%)`;
+  if (a.type === 'price' && a.reviewOnly) {
+    return `观察价 ${OP_LABEL[a.op] || ''} ${a.value}元 · 到价复核`;
+  }
   // 行动点预警(补仓/减仓):补仓点 ≤ X元 · 补1手
   if (a.type === 'price' && a.actKind) {
     const l = a.actKind === 'add' ? '补仓点' : '减仓点';
@@ -301,12 +309,18 @@ async function persistProcessedAccount(
       leaseOwners.has(String(wakeup?.alert?.id || ''))
       && !acceptedLeaseIds.has(String(wakeup?.alert?.id || ''))
     ) continue;
-    const queued = queueAdviceReviewForVerdict(
-      latest.data,
-      wakeup?.alert,
-      wakeup?.verdict,
-      wakeup?.at,
-    );
+    const queued = wakeup?.kind === 'price-review'
+      ? queueAdviceReviewForPriceTrigger(
+          latest.data,
+          wakeup?.alert,
+          wakeup?.at,
+        )
+      : queueAdviceReviewForVerdict(
+          latest.data,
+          wakeup?.alert,
+          wakeup?.verdict,
+          wakeup?.at,
+        );
     if (queued.queued) adviceQueued++;
   }
   const workerNeeded = adviceQueued > 0 && needsWorkerDispatch(latest.data);
@@ -433,6 +447,44 @@ async function processAccount(
     const a = storedAlert;
     if (a.t1Blocked) continue;
     const q = quoteMap[a.code];
+    if (a.reviewOnly) {
+      if (!isCurrentAdvicePlan(a, adviceMap[a.code])) {
+        a.enabled = false;
+        a.phase = 'superseded';
+        a.supersededAt = Date.now();
+        a.triggeredMsg = '军师主计划已更新，旧观察价自动撤销';
+        changed = true;
+        continue;
+      }
+      const msg = hit(a, q);
+      if (!msg) continue;
+      const now = Date.now();
+      hits++;
+      const notification = buildAlertNotification({
+        alert: a,
+        quote: q,
+        stage: 'review',
+        reason: msg,
+      });
+      collectDead(await sendPush(subs, {
+        ...notification,
+        code: a.code,
+        tag: 'review-' + a.id,
+        url: '/',
+      }));
+      a.phase = 'reviewing';
+      a.triggeredAt = now;
+      a.triggeredMsg = `观察价已到：${msg}`;
+      a.decisionPrice = Number(q?.price) || null;
+      a.enabled = false;
+      wakeups.push({
+        kind: 'price-review',
+        alert: { ...a },
+        at: now,
+      });
+      changed = true;
+      continue;
+    }
     if (!isSmart(a)) {
       // —— 老逻辑:命中即强推并停用(向后兼容,不受智能确认影响)——
       const msg = hit(a, q);

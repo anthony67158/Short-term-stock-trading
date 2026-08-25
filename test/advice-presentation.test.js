@@ -162,6 +162,7 @@ test('被阻断的买入计划不把现价冒充买入价且只展示已验证�
     decisionPlan: {
       schemaVersion: 'decision-plan.v2',
       decisionId: 'decision.wait',
+      mode: 'buy_advice',
       action: 'WATCH',
       actionLabel: '观望',
       actionability: 'BLOCKED',
@@ -186,6 +187,76 @@ test('被阻断的买入计划不把现价冒充买入价且只展示已验证�
     item.key,
     item.value,
   ]), [['watch', '10.8']])
+  assert.equal(view.observationOnly, true)
+})
+
+test('未持仓观望不展示止损目标并使用直观观察文案', () => {
+  const view = buildAdvicePresentation({
+    action: '观望',
+    actionPlan: '等待放量站上17.12元后重新判断',
+    timing: '放量站上17.12元后重新判断',
+    invalidation: '跌破15.23元且收不回则取消关注',
+    watchPrice: 17.12,
+    stopPrice: 15.23,
+    targetPrice: 18.6,
+    decisionPlan: {
+      schemaVersion: 'decision-plan.v2',
+      decisionId: 'decision.wait-clean',
+      mode: 'buy_advice',
+      action: 'WATCH',
+      actionLabel: '观望',
+      actionability: 'WATCH',
+      trigger: '放量站上17.12元后重新判断',
+      invalidation: '跌破15.23元且收不回则取消关注',
+      prices: {
+        reference: 16.2,
+        current: 16.2,
+        watch: 17.12,
+        stop: 15.23,
+        target: 18.6,
+      },
+      quantity: { lots: 0 },
+      costs: { estimatedNetAmount: 0 },
+    },
+  })
+
+  assert.equal(view.observationOnly, true)
+  assert.deepEqual(view.levels.map((item) => item.label), ['观察价'])
+  assert.equal(view.trigger.title, '观察与重新判断')
+  assert.equal(view.trigger.conditionLabel, '重新判断')
+  assert.equal(view.trigger.invalidationLabel, '取消关注')
+})
+
+test('未持仓观望缺少可靠观察价时明确显示等待重新定价', () => {
+  const view = buildAdvicePresentation({
+    action: '观望',
+    actionPlan: '当前证据不足，暂不买入',
+    stopPrice: 15.23,
+    decisionPlan: {
+      schemaVersion: 'decision-plan.v2',
+      decisionId: 'decision.wait-no-price',
+      mode: 'buy_advice',
+      action: 'WATCH',
+      actionLabel: '观望',
+      actionability: 'WATCH',
+      prices: {
+        reference: 16.2,
+        current: 16.2,
+        watch: null,
+        stop: 15.23,
+        target: null,
+      },
+      quantity: { lots: 0 },
+      costs: { estimatedNetAmount: 0 },
+    },
+  })
+
+  assert.deepEqual(view.levels, [{
+    key: 'watch',
+    label: '观察价',
+    value: '等待重新定价',
+    tone: 'muted',
+  }])
 })
 
 test('默认核心依据压缩为可扫读摘要而完整原文仍保留在建议数据中', () => {

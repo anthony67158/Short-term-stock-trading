@@ -24,6 +24,70 @@ export function isCurrentAdvicePlan(alert, adviceEntry) {
   return currentPlanId === alertPlanId
 }
 
+export function queueAdviceReviewForPriceTrigger(
+  data,
+  alert,
+  now = Date.now(),
+) {
+  const code = String(alert?.code || '')
+  if (!code) return { queued: false, reason: 'missing-code' }
+  if (!alert?.reviewOnly) {
+    return { queued: false, reason: 'not-review-alert' }
+  }
+  if (!isAdviceReviewEnabled(data?.settings, code)) {
+    return { queued: false, reason: 'review-disabled' }
+  }
+  if (!isCurrentAdvicePlan(alert, data?.advice?.[code])) {
+    return { queued: false, reason: 'stale-plan' }
+  }
+  const holding = Array.isArray(data?.holding) ? data.holding : []
+  const mode = Number(
+    t1StatusOf(holding, data?.closed || [], code).liveQty,
+  ) > 0
+    ? 'hold_advice'
+    : 'buy_advice'
+  const trigger = {
+    kind: 'price-review',
+    decision: 'review',
+    alertId: String(alert?.id || ''),
+    planId: String(alert?.judgeContext?.planId || ''),
+    planRevision:
+      Number(alert?.judgeContext?.planRevision) || 0,
+    direction: String(alert?.op || ''),
+    threshold: Number.isFinite(Number(alert?.value))
+      ? Number(alert.value)
+      : null,
+    price: Number.isFinite(Number(alert?.decisionPrice))
+      ? Number(alert.decisionPrice)
+      : null,
+    reason: '观察价已触发，重新评估买入条件',
+    at: now,
+  }
+  const idempotencyKey = [
+    'price-review',
+    trigger.alertId || code,
+    trigger.planId || 'no-plan',
+    trigger.planRevision || 0,
+    trigger.direction,
+    trigger.threshold,
+  ].join(':')
+  const queued = enqueueJob(data, {
+    code,
+    name: alert?.name || code,
+    mode,
+    source: 'judge',
+    trigger,
+    idempotencyKey,
+  }, now)
+  return {
+    queued: true,
+    created: queued.created,
+    deferred: !!queued.deferred,
+    workerNeeded: needsWorkerDispatch(data),
+    job: queued.job,
+  }
+}
+
 export function queueAdviceReviewForVerdict(data, alert, verdict, now = Date.now()) {
   const decision = String(verdict?.decision || '')
   if (!['confirm', 'invalid'].includes(decision)) {

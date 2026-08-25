@@ -124,6 +124,66 @@ test('FC回写Judge确认时只持久化确定性事件不重复排队军师', a
   )
 })
 
+test('FC回写观察价命中时持久化复核任务并请求Worker接力', async () => {
+  const latest = {
+    nick: '观察价复核账号',
+    data: {
+      holding: [],
+      plan: [{ code: '600519', name: '贵州茅台' }],
+      alerts: [{
+        id: 'review-price-1',
+        code: '600519',
+        candCode: '600519',
+        reviewOnly: true,
+        enabled: true,
+        phase: 'armed',
+      }],
+      advice: {
+        '600519': {
+          mode: 'buy_advice',
+          advice: {
+            continuity: { planId: 'plan-watch', revision: 3 },
+          },
+        },
+      },
+      pushSubs: [],
+      decisionLog: [],
+    },
+  }
+  const storage = memoryStorage(latest)
+  const alert = {
+    ...latest.data.alerts[0],
+    enabled: false,
+    phase: 'reviewing',
+    triggeredAt: 3000,
+    decisionPrice: 145.3,
+    value: 145.24,
+    op: 'gte',
+    judgeContext: { planId: 'plan-watch', planRevision: 3 },
+  }
+
+  const persisted = await __test.persistProcessedAccount({
+    nick: latest.nick,
+    data: {
+      ...latest.data,
+      alerts: [alert],
+    },
+  }, [], storage, [{
+    kind: 'price-review',
+    alert,
+    at: 3000,
+  }])
+
+  const saved = storage.current()
+  assert.equal(persisted.adviceQueued, 1)
+  assert.equal(persisted.workerNeeded, true)
+  assert.equal(saved.data.reviewJobs['600519'].source, 'judge')
+  assert.equal(
+    saved.data.reviewJobs['600519'].trigger.kind,
+    'price-review',
+  )
+})
+
 test('FC只接受当前租约owner的Judge结果并在落盘时清除租约', async () => {
   const latest = {
     nick: 'Judge租约账号',

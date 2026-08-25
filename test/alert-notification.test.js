@@ -50,6 +50,27 @@ test('失效通知保留股票代码并明确暂停动作', () => {
   assert.match(notification.body, /动作：暂停，等军师重算/)
 })
 
+test('观察价命中时明确通知正在复核且不暗示下单', () => {
+  const notification = buildAlertNotification({
+    alert: {
+      code: '600519',
+      name: '贵州茅台',
+      type: 'price',
+      op: 'gte',
+      value: 145.24,
+      note: '观察价复核',
+      reviewOnly: true,
+    },
+    quote: { price: 145.3 },
+    stage: 'review',
+    reason: '观察价已到',
+  })
+
+  assert.equal(notification.title, '贵州茅台(600519)｜观察条件已到')
+  assert.match(notification.body, /观察价≥145\.24/)
+  assert.match(notification.body, /正在重新评估，暂不下单/)
+})
+
 test('非价格预警保留实际命中数值', () => {
   const notification = buildAlertNotification({
     alert: {

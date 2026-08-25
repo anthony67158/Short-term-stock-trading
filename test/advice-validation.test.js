@@ -212,3 +212,33 @@ test('生成时已经满足的观望价不能继续伪装成未来条件', () =>
   assert.match(result.actionPlan, /价格条件已满足/)
   assert.match(issues.join('；'), /生成时已经满足/)
 })
+
+test('未持仓观望只保留观察价并移除无执行意义的止损目标', () => {
+  const { result } = reconcileAdviceNumbers({
+    mode: 'buy_advice',
+    payload: {
+      todayQuote: {
+        price: 16,
+        limitDownPrice: 14.4,
+        limitUpPrice: 17.6,
+      },
+      tech: {
+        atr: 0.5,
+        resistance: 17.12,
+      },
+    },
+    result: {
+      action: '观望',
+      timing: '放量站上17.12元后重新判断',
+      watchPrice: 17.12,
+      stopPrice: 15.23,
+      targetPrice: 18.6,
+      planQty: 0,
+    },
+  })
+
+  assert.equal(result.watchPrice, 17.12)
+  assert.equal(result.buyPrice, null)
+  assert.equal(result.stopPrice, null)
+  assert.equal(result.targetPrice, null)
+})

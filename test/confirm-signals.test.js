@@ -184,6 +184,46 @@ test('旧军师自动预警缺少价格契约时不得进入Judge', () => {
   )
 })
 
+test('持仓止盈预警严格匹配目标价而不是误用减仓价', () => {
+  const advice = {
+    priceContract: {
+      schemaVersion: 'advice-price-contract.v1',
+      validationStatus: 'VERIFIED',
+      levels: [
+        {
+          key: 'reduce',
+          field: 'reducePrice',
+          purpose: 'EXIT',
+          price: 10.8,
+          direction: 'GTE',
+          strict: true,
+        },
+        {
+          key: 'target',
+          field: 'targetPrice',
+          purpose: 'OBJECTIVE',
+          price: 11.2,
+          direction: 'GTE',
+          strict: true,
+        },
+      ],
+      allPricesStrict: true,
+      issues: [],
+      review: { operator: 'ALL', conditions: [], allMet: false },
+    },
+  }
+
+  assert.equal(
+    judgePriceContractGate({
+      planId: 'holding-1',
+      note: '止盈',
+      op: 'gte',
+      value: 11.2,
+    }, advice).allowed,
+    true,
+  )
+})
+
 test('买点下方持续走弱时客观判定为失效', () => {
   const result = deterministicJudge('buy', {
     keyDistancePct: -1.5,

@@ -138,7 +138,7 @@ export function buildUserPrompt(mode, payload, ragText, theoryHits = []) {
   // 语言前置指令:reasoning 模型的思维链默认用英文,系统提示词常压不住,故在用户消息最前面
   //   再下一道最强指令——用户会实时看到中文思考过程,思维链必须全程简体中文。
   const zhReason = '【语言要求·最高优先·先读这条】请务必用【简体中文】进行你的全部思考(思维链/reasoning)与输出，逐字都用中文推理，绝对不要用英文思考(个股代码/纯数字/专有名词缩写除外)。这一条优先级最高，任何英文思考都算不合格。\n\n';
-  const waitEntryRule = '【观望价位语义】若结论为观望，必须说明为什么当前低价仍不能买（如趋势未止跌、资金仍流出或风险闸门未过），并分别判断“回踩支撑后企稳”和“放量突破后确认”两条入场路径；缺少依据的一条要明确写无效，不能只给一个远离现价的上涨数字。watchPrice只是观察锚，不是买入价。';
+  const waitEntryRule = '【观望价位语义】若结论为观望，必须说明为什么当前低价仍不能买（如趋势未止跌、资金仍流出或风险闸门未过），并分别判断“回踩支撑后企稳”和“放量突破后确认”两条入场路径；存在尚未到达且可核验的支撑或压力时必须给watchPrice，缺少依据才填null。不能只给一个远离现价的上涨数字，不能把未持仓股票写成止损计划。watchPrice只是观察锚，不是买入价；观望时buyPrice、buyZone、stopPrice、targetPrice必须为null，invalidation只写何时取消关注，不得混写止损或策略审核条件。';
   if (
     payload.generationProfile === 'FAST'
     && ['hold_advice', 'buy_advice'].includes(mode)
@@ -549,7 +549,7 @@ ${waitEntryRule}
 - **立即买入**：共振分≥4(或≥3且counterTrend逆势强票) + 现价不追高(posInDay≤60或缩量回踩企稳、贴买入带/支撑) + 盈亏比≥2:1 + 无明确利空。→ buyPrice/buyZone贴近现价可成交、stopPrice、targetPrice、positionNote(正常仓;弱市压到3~4成)。
 - **回调再买**：看好(共振分≥3)但现价偏高/追高不划算(posInDay高/贴布林上轨/RSI偏高)。→ buyPrice/buyZone给"回踩到哪个价再买"(低于现价)、timing说清等什么信号、stopPrice、targetPrice。
 - **小仓试错**：中性/强市可用于共振分=2的受控试仓；弱市只能在“逆势强势+高把握信号”双确认且账户风险预算允许时使用。→ buyPrice/buyZone + 明确小仓 positionNote + 偏紧 stopPrice。
-- **观望**：证据不足或该回避——共振分≤1、或技术破位、或主力持续出逃(trend5连负)、或有明确利空、或盈亏比<1.8:1。→ buyPrice/buyZone必须为null；watchPrice只能作为观察锚，timing必须说清低位企稳与突破确认两条路径各自是否成立。
+- **观望**：证据不足或该回避——共振分≤1、或技术破位、或主力持续出逃(trend5连负)、或有明确利空、或盈亏比<1.8:1。→ buyPrice/buyZone/stopPrice/targetPrice必须为null；存在尚未到达且可核验的支撑或压力时必须给watchPrice，watchPrice只能作为观察锚，timing必须说清低位企稳与突破确认两条路径各自是否成立。
 数据含：个股实时量价(nowPrice/dayHigh/dayLow/open/prevClose)、当日分时(intraday: now实时价/vwap均价/日内高低/posInDay位置/rhythm节奏/是否触及日内高低)、大盘情绪(market)、资金流向(marketFlow)、个股近20日走势(history: ma5/ma10/ma20、20日高低)、【个股历史规律画像 stockProfile】、【专业技术指标 tech(ATR真实波幅/布林带上下轨/RSI/KDJ/MACD/支撑support压力resistance/买入带buyZone卖出带sellZone/止损stopLoss/止盈takeProfit)】${payload.account && payload.account.totalAssets ? `、账户全景 account(totalAssets总资产=${payload.account.totalAssets}元${payload.account.cash != null ? `、cash可用资金=${payload.account.cash}元` : ''}${payload.account.position != null ? `、position当前总仓位=${payload.account.position}%` : ''}${payload.account.holdMktValue != null ? `、holdMktValue当前持仓市值=${payload.account.holdMktValue}元` : ''})` : ''}${payload.quant ? '、量化模型 quant(score多因子分/bias/forecast走势预测)' : ''}。
 数据：${data}${advisorData}${tradingReality}${execDiscipline}
 

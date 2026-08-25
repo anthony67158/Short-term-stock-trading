@@ -35,6 +35,7 @@ import {
   buildJudgeAdviceContext,
 } from '../shared/judgeAdviceContext.js';
 import {
+  advicePriceLevel,
   advicePriceLevelForIntent,
   priceMatchesAdviceContract,
   sanitizedAdvicePriceContract,
@@ -63,10 +64,21 @@ export function judgePriceContractGate(alert = {}, advice = {}) {
     return { allowed: true, reason: '', expectedPrice: null };
   }
   const intent = actionIntentOf(alert);
-  const level = advicePriceLevelForIntent(
-    { priceContract: contract },
-    intent,
-  );
+  const contractAdvice = { priceContract: contract };
+  const note = String(alert.note || '');
+  const level = alert.reviewOnly
+    ? advicePriceLevel(contractAdvice, 'watch')
+    : alert.actKind === 'add'
+      ? advicePriceLevel(contractAdvice, 'add')
+        || advicePriceLevel(contractAdvice, 'entry')
+      : alert.actKind === 'reduce'
+        ? advicePriceLevel(contractAdvice, 'reduce')
+          || advicePriceLevel(contractAdvice, 'target')
+        : /止损/.test(note)
+          ? advicePriceLevel(contractAdvice, 'stop')
+          : /止盈/.test(note)
+            ? advicePriceLevel(contractAdvice, 'target')
+            : advicePriceLevelForIntent(contractAdvice, intent);
   if (!level || !priceMatchesAdviceContract(
     { priceContract: contract },
     level.key,

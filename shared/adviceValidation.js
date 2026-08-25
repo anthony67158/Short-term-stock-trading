@@ -61,6 +61,24 @@ export function reconcileAdviceNumbers({ mode, result: input, payload = {} } = {
   const low = numberOf(quote.limitDownPrice)
   const high = numberOf(quote.limitUpPrice)
   let valid = true
+  const initialAction = String(result.action || result.stance || '')
+  const unownedWait = mode === 'buy_advice'
+    && /观望|等待|回避|不建议|暂不/.test(initialAction)
+  if (unownedWait) {
+    const hadIrrelevantPrices = [
+      result.buyPrice,
+      result.buyZone,
+      result.stopPrice,
+      result.targetPrice,
+    ].some((value) => value != null && value !== '')
+    result.buyPrice = null
+    result.buyZone = null
+    result.stopPrice = null
+    result.targetPrice = null
+    if (hadIrrelevantPrices) {
+      issues.push('未持仓观望已移除无执行意义的买入、止损和目标价')
+    }
+  }
   const labels = {
     buyPrice: '买入价',
     addPrice: '加仓价',

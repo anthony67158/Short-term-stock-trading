@@ -55,6 +55,9 @@ export function describeAlert(a) {
   if (!t) return ''
   if (a.type === 'limitup') return `临近涨停(涨幅≥${formatPriceLimitThreshold(a, true)}%)`
   if (a.type === 'limitdown') return `临近跌停(跌幅≥${formatPriceLimitThreshold(a, true)}%)`
+  if (a.type === 'price' && a.reviewOnly) {
+    return `观察价 ${OP_LABEL[a.op] || ''} ${a.value}元 · 到价复核`
+  }
   // 行动点预警(补仓/减仓):用「补仓点 ≤ X元 · 补1手」这类口径,一眼看清价位+要做什么
   if (a.type === 'price' && a.actKind) {
     const label = a.actKind === 'add' ? '补仓点' : '减仓点'
@@ -71,7 +74,8 @@ export function describeAlert(a) {
 export function alertMeta(a, q) {
   // 方向语义:优先看行动点(补/减),再看 note(止盈/止损/买点),最后按 type
   let dir = 'warn', dirLabel = '预警'
-  if (a.type === 'price' && a.actKind === 'add') { dir = 'add'; dirLabel = '补仓' }
+  if (a.type === 'price' && a.reviewOnly) { dir = 'warn'; dirLabel = '复核' }
+  else if (a.type === 'price' && a.actKind === 'add') { dir = 'add'; dirLabel = '补仓' }
   else if (a.type === 'price' && a.actKind === 'reduce') { dir = 'reduce'; dirLabel = '减仓' }
   else if (a.type === 'limitup') { dir = 'up'; dirLabel = '涨停' }
   else if (a.type === 'limitdown') { dir = 'down'; dirLabel = '跌停' }
@@ -291,7 +295,9 @@ export const alertStore = {
       const confirmed = a.phase === 'confirmed'
       const notification = buildAlertNotification({
         alert: a,
-        stage: invalid ? 'invalid' : confirmed ? 'confirm' : 'trigger',
+        stage: a.reviewOnly
+          ? 'review'
+          : invalid ? 'invalid' : confirmed ? 'confirm' : 'trigger',
         reason: a.triggeredMsg,
       })
       add({
@@ -299,7 +305,7 @@ export const alertStore = {
         code: a.code,
         name: a.name,
         ...notification,
-        alertId: `${invalid ? 'invalid' : confirmed ? 'confirm' : 'trigger'}-${a.id}`,
+        alertId: `${a.reviewOnly ? 'review' : invalid ? 'invalid' : confirmed ? 'confirm' : 'trigger'}-${a.id}`,
       })
     }
   },
@@ -322,6 +328,8 @@ export const alertStore = {
     // 该预警是否走智能二段确认:仅【价位类 + 带 phase(AI 派生)】;手动/涨跌幅/量比/涨跌停 → 老逻辑
     const isSmart = (a) => smartOn && a.type === 'price' && !!a.phase && a.phase !== 'confirmed' && a.phase !== 'invalid'
     for (const storedAlert of alerts) {
+      // 观察价只由云端 Timer 触发复核，浏览器不把它误送进交易 Judge。
+      if (storedAlert.reviewOnly) continue
       const positionGate = currentPositionGate(storedAlert)
       if (!positionGate.allowed) {
         if (!positionGate.transient) {

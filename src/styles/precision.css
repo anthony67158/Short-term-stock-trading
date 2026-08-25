@@ -10895,6 +10895,14 @@ button.acct-item {
   grid-template-columns: minmax(0, 1fr);
 }
 
+.advice-tactical-grid.observation-only {
+  grid-template-columns: minmax(220px, .45fr) minmax(0, 1.55fr);
+}
+
+.advice-tactical-grid.observation-only .advice-prices.compact {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .advice-tactical-grid > .advice-trigger:only-child {
   padding-inline-start: 0;
   border-inline-start: 0;
@@ -11687,6 +11695,10 @@ button.acct-item {
 
   .advice-levels {
     padding-bottom: var(--space-md);
+  }
+
+  .advice-tactical-grid.observation-only {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .advice-trigger {

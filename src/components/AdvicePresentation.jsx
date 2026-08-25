@@ -326,7 +326,12 @@ export default function AdvicePresentation({
     () => buildAdvicePresentation(displayAdvice),
     [displayAdvice],
   )
-  const hasTrigger = Object.values(view.trigger).some(Boolean)
+  const hasTrigger = Boolean(
+    view.trigger.condition
+    || view.trigger.confirmation
+    || view.trigger.invalidation
+    || view.trigger.validationWindow
+  )
   const hasDetails = Boolean(
     displayAdvice.reasoning
     || displayAdvice.knowledgeActionPlan
@@ -410,10 +415,15 @@ export default function AdvicePresentation({
       />
 
       {(view.levels.length > 0 || hasTrigger) && (
-        <div className="advice-tactical-grid">
+        <div className={'advice-tactical-grid' + (view.observationOnly ? ' observation-only' : '')}>
           {view.levels.length > 0 && (
-            <section className="advice-levels" aria-label="关键价位">
-              <div className="advice-section-title">关键价位</div>
+            <section
+              className="advice-levels"
+              aria-label={view.observationOnly ? '观察价位' : '关键价位'}
+            >
+              <div className="advice-section-title">
+                {view.observationOnly ? '观察价位' : '关键价位'}
+              </div>
               <div className="advice-prices compact">
                 {view.levels.map((level) => (
                   <div className={'ap-cell ' + level.key} key={level.key}>
@@ -426,22 +436,25 @@ export default function AdvicePresentation({
           )}
 
           {hasTrigger && (
-            <section className="advice-trigger" aria-label="触发与失效">
+            <section
+              className="advice-trigger"
+              aria-label={view.trigger.title || '触发与失效'}
+            >
               <div className="advice-section-title">
-                <Icon name="shield" size={13} /> 触发与失效
+                <Icon name="shield" size={13} /> {view.trigger.title || '触发与失效'}
               </div>
               <div className="advice-trigger-rows">
                 {view.trigger.condition && (
-                  <div><span>触发</span><HL text={view.trigger.condition} /></div>
+                  <div><span>{view.trigger.conditionLabel || '触发'}</span><HL text={view.trigger.condition} /></div>
                 )}
                 {view.trigger.confirmation && (
-                  <div><span>确认</span><HL text={view.trigger.confirmation} /></div>
+                  <div><span>{view.trigger.confirmationLabel || '确认'}</span><HL text={view.trigger.confirmation} /></div>
                 )}
                 {view.trigger.invalidation && (
-                  <div className="invalid"><span>失效</span><HL text={view.trigger.invalidation} /></div>
+                  <div className="invalid"><span>{view.trigger.invalidationLabel || '失效'}</span><HL text={view.trigger.invalidation} /></div>
                 )}
                 {view.trigger.validationWindow && (
-                  <div><span>验证</span>{view.trigger.validationWindow}</div>
+                  <div><span>{view.trigger.validationLabel || '验证'}</span>{view.trigger.validationWindow}</div>
                 )}
               </div>
             </section>

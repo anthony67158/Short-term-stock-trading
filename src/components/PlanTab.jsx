@@ -988,7 +988,7 @@ function PlanList({ book, quote, stockTags, batchSel }) {
             { focusNote: true },
           )}
         />
-        {/* 买点预警提示：跟随 AI 建议买入价自动设的「到价 ≤ 买入价」预警，到点即提醒买入 */}
+        {/* 自动提醒：可执行建议显示买点，观望建议显示到价复核。 */}
         {(() => {
           const currentAdvice = getAdvice(p.code, 'buy_advice')?.advice
           const currentView = currentAdvice
@@ -998,10 +998,28 @@ function PlanList({ book, quote, stockTags, batchSel }) {
             : null
           const canExecuteBuy = currentView?.kind === 'buy'
             && currentView.actionable !== false
-          if (!canExecuteBuy) return null
           const bpa = (book.alerts || []).find((a) => a.candCode === p.code)
           if (!bpa) return null
-          const tone = !bpa.enabled ? ' off' : (q && q.price != null && q.price <= bpa.value ? ' hot' : '')
+          if (!canExecuteBuy && !bpa.reviewOnly) return null
+          const reached = q && q.price != null && (
+            bpa.op === 'gte'
+              ? q.price >= bpa.value
+              : q.price <= bpa.value
+          )
+          const tone = !bpa.enabled ? ' off' : (reached ? ' hot' : '')
+          if (bpa.reviewOnly) {
+            return (
+              <div
+                className={'pc-buyalert' + tone}
+                title={bpa.enabled ? '价格到达观察位后自动重新评估' : '观察价已触发，正在重新评估'}
+              >
+                <Icon name="bell" size={11} />
+                观察价提醒 {bpa.op === 'gte' ? '≥' : '≤'} <b>{fmtRaw(bpa.value)}</b>
+                {!bpa.enabled && <span className="pc-buyalert-off">复核中</span>}
+                {reached && bpa.enabled && <span className="pc-buyalert-hit">已到观察价</span>}
+              </div>
+            )
+          }
           return (
             <div className={'pc-buyalert' + tone} title={bpa.enabled ? '价格跌到该价位会提醒你买入' : '预警已停用/已触发，可在预警中心重启'}>
               <Icon name="bell" size={11} />

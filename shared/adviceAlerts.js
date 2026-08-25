@@ -75,8 +75,71 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
     data.alerts = rest
     return oldProjected.length > 0
   }
+  const waitAdvice = (
+    advice.decisionPlan?.action === 'WATCH'
+    || /观望|等待|回避|不建议|暂不/.test(
+      String(advice.action || advice.stance || ''),
+    )
+  )
+  const watchLevel = advicePriceLevel(advice, 'watch')
+  if (candidate && waitAdvice && candidate.alertSyncedPrice != null) {
+    candidate.alertSyncedPrice = null
+    changed = true
+  }
+  if (candidate && !waitAdvice && candidate.reviewSyncedPrice != null) {
+    candidate.reviewSyncedPrice = null
+    changed = true
+  }
 
-  if (candidate && !liveHolder && !candidate.alertMuted) {
+  if (
+    candidate
+    && !liveHolder
+    && !candidate.alertMuted
+    && waitAdvice
+    && watchLevel
+  ) {
+    const op = watchLevel.direction === 'LTE' ? 'lte' : 'gte'
+    const reviewPrice = roundPrice(watchLevel.price)
+    const previous = alerts.find((alert) =>
+      alert?.candCode === code
+      && alert.reviewOnly === true
+    )
+    if (
+      previous
+      && Number(previous.value) === reviewPrice
+      && previous.op === op
+    ) {
+      projected.push({
+        ...previous,
+        value: reviewPrice,
+        op,
+        judgeContext,
+      })
+    } else {
+      projected.push({
+        ...baseAlert({
+          idFactory,
+          now,
+          code,
+          name,
+          op,
+          value: reviewPrice,
+          note: '观察价复核',
+        }),
+        candCode: code,
+        reviewOnly: true,
+        judgeContext,
+        phase: 'armed',
+      })
+      changed = true
+    }
+    if (Number(candidate.reviewSyncedPrice) !== reviewPrice) {
+      candidate.reviewSyncedPrice = reviewPrice
+      changed = true
+    }
+  }
+
+  if (candidate && !liveHolder && !candidate.alertMuted && !waitAdvice) {
     const contractLevel = advicePriceLevel(advice, 'entry')
     if (priceContract && !contractLevel) {
       data.alerts = rest

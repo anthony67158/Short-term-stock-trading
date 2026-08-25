@@ -48,6 +48,7 @@ import {
 import { ensureConfig, currentConfig, getModel } from './_llm_config.js';
 import { endpointCountForRole } from './_llm_pool.js';
 import { projectAdviceAlerts } from '../shared/adviceAlerts.js';
+import { sanitizedAdvicePriceContract } from '../shared/advicePriceContract.js';
 import { accountTradeStateFingerprint } from '../shared/accountSync.js';
 import { createRecommendation } from '../shared/decisionLedger.js';
 import { ensureAdviceReasoning } from '../shared/adviceReasoning.js';
@@ -1813,10 +1814,15 @@ export function enqueueAutoRefreshDue(data, now = Date.now()) {
   let holdCreated = 0;
   let watchCreated = 0;
   const enqueue = (code, name, mode) => {
+    const needsPriceMigration = !!advice?.[code]?.advice
+      && !sanitizedAdvicePriceContract(advice[code].advice);
     const reviewAt = Number(
       advice?.[code]?.reviewCycle?.nextReviewAt
       ?? advice?.[code]?.advice?.reviewCycle?.nextReviewAt,
     ) || now;
+    const scheduleKey = needsPriceMigration
+      ? `price-contract:${Math.floor(now / (5 * 60 * 1000))}`
+      : reviewAt;
     const { created } = enqueueJob(data, {
       code,
       name,
@@ -1824,7 +1830,7 @@ export function enqueueAutoRefreshDue(data, now = Date.now()) {
       source: 'auto',
       force: false,
       batchId,
-      idempotencyKey: `auto:${code}:${mode}:${reviewAt}`,
+      idempotencyKey: `auto:${code}:${mode}:${scheduleKey}`,
     }, now);
     if (created) {
       count++;
@@ -1837,7 +1843,13 @@ export function enqueueAutoRefreshDue(data, now = Date.now()) {
     ...(scopes.includes('watch') ? watchCodes : []),
   ].filter((code) =>
     isAdviceReviewEnabled(settings, code)
-    && adviceReviewDue(advice[code], now)
+    && (
+      adviceReviewDue(advice[code], now)
+      || (
+        advice?.[code]?.advice
+        && !sanitizedAdvicePriceContract(advice[code].advice)
+      )
+    )
   );
   const orderedCodes = prioritizeAdviceReviewCodes({
     codes: allowedCodes,

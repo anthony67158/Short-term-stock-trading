@@ -145,6 +145,61 @@ test('生产投影拒绝旧建议继续创建无价格契约的自动预警', ()
   assert.equal(data.alerts.length, 0)
 })
 
+test('未持仓观望建议生成复核价提醒而不是买点提醒', () => {
+  const data = {
+    plan: [{ code: '600519', name: '贵州茅台' }],
+    holding: [],
+    alerts: [],
+    settings: {},
+  }
+
+  projectAdviceAlerts(data, '600519', {
+    action: '观望',
+    watchPrice: 145.24,
+    priceContract: {
+      schemaVersion: 'advice-price-contract.v1',
+      validationStatus: 'VERIFIED',
+      levels: [{
+        key: 'watch',
+        field: 'watchPrice',
+        purpose: 'REVIEW_ONLY',
+        price: 145.24,
+        direction: 'GTE',
+        status: 'PENDING',
+        strict: true,
+        basis: 'technical.resistance',
+        basisPrice: 145.24,
+        basisDistancePct: 0,
+        tolerancePct: 2,
+      }],
+      allPricesStrict: true,
+      issues: [],
+      review: {
+        operator: 'ALL',
+        conditions: [{
+          key: 'WATCH_PRICE',
+          direction: 'GTE',
+          price: 145.24,
+          status: 'PENDING',
+          strict: true,
+        }],
+        allMet: false,
+      },
+    },
+  }, {
+    now,
+    idFactory: ids,
+    requirePriceContract: true,
+  })
+
+  assert.equal(data.alerts.length, 1)
+  assert.equal(data.alerts[0].reviewOnly, true)
+  assert.equal(data.alerts[0].note, '观察价复核')
+  assert.equal(data.alerts[0].op, 'gte')
+  assert.equal(data.alerts[0].value, 145.24)
+  assert.equal(data.alerts[0].candCode, '600519')
+})
+
 test('未持仓自选股只生成买点预警，禁止生成加仓或减仓预警', () => {
   const data = {
     plan: [{ code: '600519', name: '贵州茅台' }],
