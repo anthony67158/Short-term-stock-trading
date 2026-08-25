@@ -6,7 +6,6 @@ import Icon from './Icon'
 import StockName from './StockName'
 import { useStockTags } from '../stockTagStore'
 
-// 个股热力图配色：红涨绿跌，涨跌幅越大颜色越深（与板块热力图一致）
 function colorByPct(pct) {
   const cap = Math.min(Math.abs(pct) / 5, 1)
   if (pct > 0) return `rgba(244,97,78,${0.4 + cap * 0.5})`
@@ -52,7 +51,10 @@ export default function StockPanel({ sector, data, loading, error, sort, setSort
 
   // 可排序表头单元格
   const Th = ({ label, k }) => (
-    <th className={'th-sort' + (colSort && colSort.key === k ? ' active' : '')}>
+    <th
+      className={'th-sort' + (colSort && colSort.key === k ? ' active' : '')}
+      aria-sort={colSort?.key === k ? (colSort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+    >
       <button type="button" className="th-inner" onClick={() => clickHead(k)}>
         {label}
         <span className="th-arrow">{colSort && colSort.key === k ? (colSort.dir === 'asc' ? '↑' : '↓') : '⇅'}</span>
@@ -110,6 +112,12 @@ export default function StockPanel({ sector, data, loading, error, sort, setSort
   const heatOption = useMemo(() => buildHeatOption(60), [heatSig, tagSig])
   const heatOptionFull = useMemo(() => buildHeatOption(120), [heatSig, tagSig])
   const heatEvents = { click: (params) => { const d = params && params.data; if (d && d.code) { setDetail({ code: d.code, name: d.name, price: d.price, pct: d.pct }); setFullscreen(false) } } }
+  const openDetail = (stock) => setDetail(stock)
+  const handleRowKeyDown = (event, stock) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    event.preventDefault()
+    openDetail(stock)
+  }
 
   return (
     <div className="panel">
@@ -144,15 +152,20 @@ export default function StockPanel({ sector, data, loading, error, sort, setSort
             <div className="empty">暂无成分股数据{error ? '，数据源暂时不可用，稍后自动重试…' : ''}</div>
           ) : (
             <>
-              <ReactECharts option={heatOption} style={{ height: 480 }} notMerge={false} lazyUpdate onEvents={heatEvents} />
-              <div className="legend" style={{ textAlign: 'center', marginTop: 8 }}>
+              <ReactECharts option={heatOption} className="market-treemap-chart" style={{ height: 480 }} notMerge={false} lazyUpdate onEvents={heatEvents} />
+              <div className="legend chart-note">
                 面积 = 成交额（占比越大方块越大）· 颜色 = 涨跌幅（红涨绿跌，越深幅度越大）· 点方块看K线 · 右上「全屏」看全部
               </div>
             </>
           )}
         </div>
       ) : (
-        <div className="scroll">
+        <div
+          className="scroll data-table-scroll data-table-scroll-lg"
+          role="region"
+          aria-label={`${sector.name}成分股表格`}
+          tabIndex="0"
+        >
           <table className="tbl stock-panel-table">
             <thead>
               <tr>
@@ -166,7 +179,13 @@ export default function StockPanel({ sector, data, loading, error, sort, setSort
             </thead>
             <tbody>
               {rows.map((s, i) => (
-                <tr key={s.code} onClick={() => setDetail(s)}>
+                <tr
+                  key={s.code}
+                  onClick={() => openDetail(s)}
+                  onKeyDown={(event) => handleRowKeyDown(event, s)}
+                  tabIndex="0"
+                  aria-label={`查看${s.name}详情`}
+                >
                   <td className="stock-panel-identity">
                     <span className="stock-panel-identity-inner">
                       <span className="rank">{i + 1}</span>
@@ -185,7 +204,7 @@ export default function StockPanel({ sector, data, loading, error, sort, setSort
             </tbody>
           </table>
           {error && list.length === 0 && <div className="empty err">数据源暂时不可用，稍后自动重试…</div>}
-          <div className="legend" style={{ padding: '8px 12px' }}>
+          <div className="legend table-note">
             短线提示：<span className="gold">换手&gt;10%</span> / <span className="gold">量比&gt;2</span> 标黄，代表资金活跃度高 · 点表头切换正/倒序 · 点个股查看代码/主营/K线
           </div>
         </div>

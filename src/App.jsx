@@ -2,6 +2,7 @@ import {
   useState,
   useRef,
   useEffect,
+  useLayoutEffect,
   useCallback,
   lazy,
   Suspense,
@@ -133,12 +134,16 @@ function MainApp() {
   const [tab, setTab] = useState('today')
   const [hubSub, setHubSub] = useState('account') // 账户·交易 融合页的子页
   const tabHistoryRef = useRef(['today'])
+  useLayoutEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'auto' })
+  }, [tab])
   const navigateToTab = useCallback((next, { replace = false } = {}) => {
     if (!APP_SECTIONS.some((section) => section.key === next)) return
     setTab((current) => {
+      if (current === next) return current
       if (replace) {
         tabHistoryRef.current = [next]
-      } else if (current !== next) {
+      } else {
         tabHistoryRef.current = [
           ...tabHistoryRef.current,
           next,
@@ -198,7 +203,8 @@ function MainApp() {
     }
     if (tabHistoryRef.current.length <= 1) return
     tabHistoryRef.current.pop()
-    setTab(tabHistoryRef.current.at(-1) || 'today')
+    const previous = tabHistoryRef.current.at(-1) || 'today'
+    setTab(previous)
   }, [hubSub, tab])
 
   useMobileEdgeBack(navigateBack)

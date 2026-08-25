@@ -24,7 +24,10 @@ export default function SectorPanel({ data, loading, error, type, setType, selec
     })
   }, [list, colSort])
   const Th = ({ label, k }) => (
-    <th className={'th-sort' + (colSort && colSort.key === k ? ' active' : '')}>
+    <th
+      className={'th-sort' + (colSort && colSort.key === k ? ' active' : '')}
+      aria-sort={colSort?.key === k ? (colSort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+    >
       <button type="button" className="th-inner" onClick={() => clickHead(k)}>
         {label}
         <span className="th-arrow">{colSort && colSort.key === k ? (colSort.dir === 'asc' ? '↑' : '↓') : '⇅'}</span>
@@ -94,6 +97,11 @@ export default function SectorPanel({ data, loading, error, type, setType, selec
     }
   }
   const heatEvents = { click: onHeatClick }
+  const handleRowKeyDown = (event, sector) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    event.preventDefault()
+    onSelect(sector)
+  }
 
   return (
     <>
@@ -119,13 +127,18 @@ export default function SectorPanel({ data, loading, error, type, setType, selec
           <div className="loading">加载中…</div>
         ) : view === 'heat' ? (
           <div className="heatmap">
-            <ReactECharts option={heatOption40} style={{ height: 520 }} notMerge={false} lazyUpdate onEvents={heatEvents} />
-            <div className="legend" style={{ textAlign: 'center', marginTop: 8 }}>
+            <ReactECharts option={heatOption40} className="market-treemap-chart" style={{ height: 520 }} notMerge={false} lazyUpdate onEvents={heatEvents} />
+            <div className="legend chart-note">
               面积 = 成交额 · 颜色 = 涨跌幅（红涨绿跌）· 点击方块看成分股 · 右上「全屏」看大图
             </div>
           </div>
         ) : (
-          <div className="scroll">
+          <div
+            className="scroll data-table-scroll data-table-scroll-lg"
+            role="region"
+            aria-label="板块资金流向表格"
+            tabIndex="0"
+          >
             <table className="tbl">
               <thead>
                 <tr>
@@ -142,6 +155,9 @@ export default function SectorPanel({ data, loading, error, type, setType, selec
                     key={s.code}
                     className={selected && selected.code === s.code ? 'sel' : ''}
                     onClick={() => onSelect(s)}
+                    onKeyDown={(event) => handleRowKeyDown(event, s)}
+                    tabIndex="0"
+                    aria-label={`查看${s.name}成分股`}
                   >
                     <td>
                       <span className="rank">{i + 1}</span>

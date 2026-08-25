@@ -73,3 +73,12 @@ test('Precision tokens 固化主题、字体、间距和动效契约', () => {
   assert.match(css, /Hallmark · genre: modern-minimal/)
   assert.match(css, /oklch\(/)
 })
+
+test('主工作区切换后回到页面顶部避免沿用上一页滚动位置', () => {
+  const app = readFileSync(
+    new URL('../src/App.jsx', import.meta.url),
+    'utf8',
+  )
+
+  assert.match(app, /useLayoutEffect\(\(\) => \{\s*window\.scrollTo\(\{ top: 0, behavior: 'auto' \}\)\s*\}, \[tab\]\)/s)
+})

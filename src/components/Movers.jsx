@@ -24,7 +24,12 @@ export default function Movers({ interval }) {
       ) : list.length === 0 ? (
         <div className="empty">{error ? '数据源暂不可用，稍后自动重试…' : '暂无数据'}</div>
       ) : (
-        <div className="scroll" style={{ maxHeight: 360 }}>
+        <div
+          className="scroll data-table-scroll"
+          role="region"
+          aria-label="盘中异动监控表格"
+          tabIndex="0"
+        >
           <table className="tbl">
             <thead>
               <tr>
@@ -48,7 +53,7 @@ export default function Movers({ interval }) {
               ))}
             </tbody>
           </table>
-          <div className="legend" style={{ padding: '8px 12px' }}>
+          <div className="legend table-note">
             {kind === 'inflow' && '主力资金正在大额买入的个股，往往是当日热点方向'}
             {kind === 'speed' && '短时间内快速拉升的个股，注意甄别真突破还是脉冲'}
             {kind === 'outflow' && '主力大额流出，持有需警惕，避免接盘'}

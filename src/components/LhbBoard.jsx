@@ -61,7 +61,12 @@ export default function LhbBoard({ interval }) {
         stocks.length === 0 ? (
           <div className="empty">暂无龙虎榜数据</div>
         ) : (
-          <div className="scroll" style={{ maxHeight: 420 }}>
+          <div
+            className="scroll data-table-scroll"
+            role="region"
+            aria-label="龙虎榜上榜个股表格"
+            tabIndex="0"
+          >
             <table className="tbl">
               <thead>
                 <tr>
@@ -82,7 +87,7 @@ export default function LhbBoard({ interval }) {
                 ))}
               </tbody>
             </table>
-            <div className="legend" style={{ padding: '8px 12px' }}>
+            <div className="legend table-note">
               红色净额=买方主导（资金净买入），绿色=卖方主导；龙虎榜为收盘后复盘数据，适合隔日短线参考
             </div>
           </div>
@@ -90,7 +95,7 @@ export default function LhbBoard({ interval }) {
       ) : seats.length === 0 ? (
         <div className="empty">暂无席位数据</div>
       ) : (
-        <div className="scroll" style={{ maxHeight: 420 }}>
+        <div className="scroll data-table-scroll">
           <div className="lhb-seats">
             {seats.map((s, i) => (
               <div className="lhb-seat" key={s.name}>
@@ -117,7 +122,7 @@ export default function LhbBoard({ interval }) {
               </div>
             ))}
           </div>
-          <div className="legend" style={{ padding: '8px 12px' }}>
+          <div className="legend table-note">
             按买方营业部当日净买额聚合，展示今日最活跃的游资/机构席位及其主买个股；含北向（沪深股通）与机构专用席位
           </div>
         </div>

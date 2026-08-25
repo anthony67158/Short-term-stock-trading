@@ -1089,7 +1089,7 @@ function ReviewCharts({ records }) {
           </div>
         </div>
       </div>
-      <div className="legend" style={{ padding: '4px 18px 12px' }}>
+      <div className="legend chart-note">
         资金曲线看整体稳定性与回撤 · 每日盈亏看盈亏天分布(防扛单) · 个股排行看钱赚在哪、亏在哪。均为已实现净收益(含费)。
       </div>
     </div>

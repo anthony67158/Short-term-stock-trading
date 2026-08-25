@@ -28,7 +28,20 @@
 - Mobile: 顶部仅保留状态与工具，四个主入口进入固定底部导航。
 - Clickable labels never wrap.
 
-## Theme — Precision Cobalt
+## Theme — Precision Cobalt · Apple × Material
+
+### Hybrid principles
+
+- Apple contributes calm hierarchy, direct manipulation, spatial continuity,
+  platform-safe areas and translucent chrome only where content scrolls beneath.
+- Material contributes explicit component states, predictable touch targets,
+  strong data grouping and accessible feedback.
+- Navigation and overlays may use restrained system material. Content panels,
+  tables and cards stay solid and legible; glass is never decorative.
+- Each primary workspace opens at its natural top origin so content from the
+  previous workspace never appears to carry over.
+- Data density is deliberate: 48px table rows, 56px panel headers, compact KPI
+  tiles and responsive chart heights.
 
 ## Brand mark
 
@@ -102,11 +115,12 @@
 
 ## Radius and depth
 
-- Primary surface: 10px.
-- Input: 7px.
-- Compact control: 6px.
+- Primary surface: 16px.
+- Input: 12px.
+- Compact control: 10px.
 - Pill: status and count only.
-- Shadows are reserved for overlays. Normal content surfaces use lightness and rules.
+- Shadows are reserved for navigation, overlays and primary raised surfaces.
+  Dense internal data groups use lightness and rules.
 - No coloured glow, glass cards, gradient CTA or universal hover lift.
 
 ## Motion
@@ -115,6 +129,8 @@
 - Button press: 110ms, transform only.
 - Tab indicator: 180ms.
 - Modal/drawer: 280ms opacity + subtle transform.
+- Interactions respond on pointer-down and remain interruptible.
+- Main workspace switches reset to the page origin without animated travel.
 - No page-wide repeated reveal and no card hover lift.
 - Reduced motion: opacity only, at most 150ms.
 
@@ -144,8 +160,12 @@
   do not add hidden horizontal padding that shifts segmented controls.
 - KPI values use mono tabular figures, weight 700 and tight leading. Labels are
   smaller and muted; red/green always retain icon, sign or direction context.
-- Data-table rows use a stable 44px rhythm. Selection uses cobalt; market
+- Data-table rows use a stable 48px rhythm. Selection uses cobalt; market
   direction continues to use A-share red-up / green-down semantics.
+- Wide tables scroll inside their panel, keep the first identity column visible
+  in narrow containers and expose sorting through real buttons.
+- Charts share one theme-aware palette for tooltips, axes, grid lines and
+  semantic colours. Heights adapt by chart purpose and viewport.
 - Loading, empty and error states occupy a stable region and explain status
   without decorative illustration or celebratory motion.
 - Actionable empty states use one compact row with status and a direct command;
@@ -212,22 +232,28 @@
   --space-sm: 1rem;
   --space-md: 1.25rem;
   --space-lg: 1.5rem;
-  --radius-card: 10px;
-  --radius-input: 7px;
+  --radius-card: 16px;
+  --radius-input: 12px;
+  --radius-control: 10px;
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
   --dur-short: 180ms;
+  --control-size: 40px;
+  --touch-target: 44px;
+  --panel-head-height: 56px;
+  --table-row-height: 48px;
 }
 
 html[data-theme="light"] {
-  --color-paper: oklch(96% 0.01 255);
-  --color-paper-2: oklch(99% 0.004 255);
-  --color-paper-3: oklch(93.5% 0.012 255);
-  --color-paper-4: oklch(89.5% 0.014 255);
+  --color-paper: oklch(96.8% 0.008 255);
+  --color-paper-2: oklch(99.2% 0.003 255);
+  --color-paper-3: oklch(96.3% 0.008 255);
+  --color-paper-4: oklch(93.5% 0.011 255);
   --color-ink: oklch(19.5% 0.022 255);
   --color-ink-2: oklch(33% 0.018 255);
   --color-muted: oklch(47% 0.014 255);
-  --color-rule: oklch(78% 0.016 255);
-  --color-rule-2: oklch(86% 0.012 255);
+  --color-rule: oklch(84.5% 0.013 255);
+  --color-rule-2: oklch(90.5% 0.009 255);
   --color-accent: oklch(52% 0.205 255);
   --color-focus: oklch(59% 0.19 255);
 }
@@ -251,17 +277,23 @@ html[data-theme="light"] {
   --spacing-sm: 1rem;
   --spacing-md: 1.25rem;
   --spacing-lg: 1.5rem;
-  --radius-card: 10px;
-  --radius-input: 7px;
+  --radius-card: 16px;
+  --radius-input: 12px;
+  --radius-control: 10px;
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --control-size: 40px;
+  --touch-target: 44px;
+  --panel-head-height: 56px;
+  --table-row-height: 48px;
 }
 
 html[data-theme="light"] {
-  --color-paper: oklch(96% 0.01 255);
-  --color-paper-2: oklch(99% 0.004 255);
-  --color-paper-3: oklch(93.5% 0.012 255);
+  --color-paper: oklch(96.8% 0.008 255);
+  --color-paper-2: oklch(99.2% 0.003 255);
+  --color-paper-3: oklch(96.3% 0.008 255);
   --color-ink: oklch(19.5% 0.022 255);
-  --color-rule: oklch(78% 0.016 255);
+  --color-rule: oklch(84.5% 0.013 255);
   --color-accent: oklch(52% 0.205 255);
 }
 ```
@@ -281,14 +313,14 @@ html[data-theme="light"] {
     "focus": { "$value": "oklch(75% 0.19 255)", "$type": "color" }
   },
   "color-light": {
-    "paper": { "$value": "oklch(96% 0.01 255)", "$type": "color" },
-    "paper-2": { "$value": "oklch(99% 0.004 255)", "$type": "color" },
-    "paper-3": { "$value": "oklch(93.5% 0.012 255)", "$type": "color" },
-    "paper-4": { "$value": "oklch(89.5% 0.014 255)", "$type": "color" },
+    "paper": { "$value": "oklch(96.8% 0.008 255)", "$type": "color" },
+    "paper-2": { "$value": "oklch(99.2% 0.003 255)", "$type": "color" },
+    "paper-3": { "$value": "oklch(96.3% 0.008 255)", "$type": "color" },
+    "paper-4": { "$value": "oklch(93.5% 0.011 255)", "$type": "color" },
     "ink": { "$value": "oklch(19.5% 0.022 255)", "$type": "color" },
     "ink-2": { "$value": "oklch(33% 0.018 255)", "$type": "color" },
-    "rule": { "$value": "oklch(78% 0.016 255)", "$type": "color" },
-    "rule-2": { "$value": "oklch(86% 0.012 255)", "$type": "color" },
+    "rule": { "$value": "oklch(84.5% 0.013 255)", "$type": "color" },
+    "rule-2": { "$value": "oklch(90.5% 0.009 255)", "$type": "color" },
     "accent": { "$value": "oklch(52% 0.205 255)", "$type": "color" },
     "focus": { "$value": "oklch(59% 0.19 255)", "$type": "color" }
   },
@@ -332,24 +364,24 @@ html[data-theme="light"] {
   --ring: 75% 0.19 255;
   --destructive: 62% 0.22 25;
   --destructive-foreground: 96% 0.008 255;
-  --radius: 10px;
+  --radius: 16px;
 }
 
 html[data-theme="light"] {
-  --background: 96% 0.01 255;
+  --background: 96.8% 0.008 255;
   --foreground: 19.5% 0.022 255;
-  --card: 99% 0.004 255;
+  --card: 99.2% 0.003 255;
   --card-foreground: 19.5% 0.022 255;
-  --popover: 99% 0.004 255;
+  --popover: 99.2% 0.003 255;
   --popover-foreground: 19.5% 0.022 255;
   --primary: 52% 0.205 255;
   --primary-foreground: 98.5% 0.006 255;
-  --secondary: 93.5% 0.012 255;
+  --secondary: 96.3% 0.008 255;
   --secondary-foreground: 33% 0.018 255;
-  --muted: 93.5% 0.012 255;
+  --muted: 96.3% 0.008 255;
   --muted-foreground: 47% 0.014 255;
-  --border: 78% 0.016 255;
-  --input: 78% 0.016 255;
+  --border: 84.5% 0.013 255;
+  --input: 84.5% 0.013 255;
   --ring: 59% 0.19 255;
   --destructive: 53% 0.22 25;
   --destructive-foreground: 98.5% 0.006 255;

@@ -2,6 +2,8 @@ import { useMemo, useState, useEffect } from 'react'
 import ReactECharts from 'echarts-for-react'
 import { usePolling } from '../hooks'
 import { openStockDetail } from '../detailStore'
+import { useTheme } from '../themeStore'
+import Icon from './Icon'
 
 // ============ 板块资金流向 · 桑基图（静态，打开即当时市场快照）============
 // 结构：资金流出板块(绿) → 市场中枢 → 资金流入方向(红)。
@@ -22,19 +24,6 @@ function sessionLabel() {
   return '已收盘 · 全天收盘快照'
 }
 function nowClock() { const d = nowBJ(); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` }
-
-// 监听主题（白天 / 夜间），供 ECharts 标签/提示框换色
-function useTheme() {
-  const read = () => (typeof document !== 'undefined' && document.documentElement.getAttribute('data-theme')) || 'dark'
-  const [theme, setTheme] = useState(read)
-  useEffect(() => {
-    const el = document.documentElement
-    const ob = new MutationObserver(() => setTheme(read()))
-    ob.observe(el, { attributes: true, attributeFilter: ['data-theme'] })
-    return () => ob.disconnect()
-  }, [])
-  return theme
-}
 
 export default function FundFlowCanvas({ interval }) {
   const theme = useTheme()
@@ -65,11 +54,12 @@ export default function FundFlowCanvas({ interval }) {
   const hasData = outTop.length > 0 && inTop.length > 0
 
   // 主题相关色板
-  const C = light
+  const C = useMemo(() => light
     ? { green: '#168a40', red: '#cf352d', hub: '#0874d8', label: '#202b3a',
         tipBg: 'rgba(252,253,255,.98)', tipBorder: 'rgba(8,116,216,.32)', tipText: '#202b3a', linkOp: 0.46 }
     : { green: '#3fb950', red: '#f4614e', hub: '#8b7cf6', label: '#c9c9d6',
-        tipBg: 'rgba(20,22,34,.94)', tipBorder: 'rgba(124,107,245,.4)', tipText: '#e6e6ef', linkOp: 0.42 }
+        tipBg: 'rgba(20,22,34,.94)', tipBorder: 'rgba(124,107,245,.4)', tipText: '#e6e6ef', linkOp: 0.42 },
+  [light])
 
   const HUB = '市场中枢'
   const yi = (v) => (Math.abs(v) / 1e8).toFixed(2)
@@ -81,13 +71,25 @@ export default function FundFlowCanvas({ interval }) {
     const nodes = [
       ...outTop.map((s) => ({
         name: s.name, depth: 0, itemStyle: { color: C.green },
-        label: { position: 'left', formatter: `${s.name}  ${yi(s.mainInflow)}亿`, color: C.green },
+        label: {
+          position: 'left',
+          formatter: `${s.name}  ${yi(s.mainInflow)}亿`,
+          color: C.green,
+          width: 126,
+          overflow: 'truncate',
+        },
       })),
       { name: HUB, depth: 1, itemStyle: { color: C.hub },
         label: { position: 'inside', formatter: HUB, color: light ? '#fff' : '#fff', fontWeight: 700 } },
       ...inTop.map((s) => ({
         name: s.name, depth: 2, itemStyle: { color: C.red },
-        label: { position: 'right', formatter: `${yi(s.mainInflow)}亿  ${s.name}`, color: C.red },
+        label: {
+          position: 'right',
+          formatter: `${yi(s.mainInflow)}亿  ${s.name}`,
+          color: C.red,
+          width: 126,
+          overflow: 'truncate',
+        },
       })),
     ]
     const links = [
@@ -110,7 +112,7 @@ export default function FundFlowCanvas({ interval }) {
         },
       },
       series: [{
-        type: 'sankey', left: 110, right: 110, top: 16, bottom: 16,
+        type: 'sankey', left: 144, right: 144, top: 16, bottom: 16,
         nodeWidth: 16, nodeGap: 12, nodeAlign: 'justify', draggable: false,
         emphasis: { focus: 'adjacency' },
         label: { fontSize: 12.5, fontWeight: 600, overflow: 'none' },
@@ -133,10 +135,10 @@ export default function FundFlowCanvas({ interval }) {
 
   return (
     <div className="panel ffc-panel">
-      <div className="ffc-head">
-        <div className="ffc-title-wrap">
-          <div className="ffc-sub">板块流速</div>
-          <div className="ffc-title">板块资金流向</div>
+      <div className="panel-head ffc-head">
+        <div role="heading" aria-level="2" className="panel-title">
+          <Icon name="wave" size={16} />
+          板块资金流向
         </div>
         <div className="ffc-date-wrap">
           <div className="ffc-date">{dateLabel}</div>
@@ -162,7 +164,11 @@ export default function FundFlowCanvas({ interval }) {
           </div>
           <ReactECharts
             option={sankeyOption}
-            style={{ height: Math.max(380, Math.max(outTop.length, inTop.length) * 46 + 48) }}
+            className="market-flow-chart"
+            style={{
+              '--market-flow-height': `${Math.max(340, Math.max(outTop.length, inTop.length) * 40 + 36)}px`,
+              height: Math.max(380, Math.max(outTop.length, inTop.length) * 46 + 48),
+            }}
             notMerge lazyUpdate onEvents={onEvents}
           />
         </div>

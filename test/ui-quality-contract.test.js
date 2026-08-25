@@ -390,6 +390,7 @@ test('白天模式建立明确表面层级并将遗留强调色统一映射到�
   )
   assert.doesNotMatch(fundFlowCanvas, /hub:\s*'#6c5ce7'/)
   assert.match(fundFlowCanvas, /hub:\s*'#0874d8'/)
+  assert.match(tokens, /html\[data-theme="light"\][\s\S]*?--color-accent:\s*oklch\(52% 0\.205 255\)/s)
 })
 
 test('数据块网格使用独立间距和边框，不再以1px缝隙拼成连体框', () => {
@@ -1136,4 +1137,12 @@ test('策略日报提供云端自动生成开关与三个场次时间', () => {
     precision,
     /\.dr-auto-grid\s*{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s,
   )
+})
+
+test('图表、表格与系统材质共用统一布局契约', () => {
+  assert.match(precision, /\.data-table-scroll\s*{[^}]*container-name:\s*data-table[^}]*overflow:\s*auto/s)
+  assert.match(precision, /@container data-table \(max-width:\s*44rem\)/)
+  assert.match(precision, /\.market-treemap-chart\s*{[^}]*height:\s*clamp/s)
+  assert.match(precision, /\.portfolio-heatmap-detail\s*{[^}]*grid-template-columns:\s*repeat\(5/s)
+  assert.match(precision, /@media \(prefers-reduced-transparency:\s*reduce\)/)
 })

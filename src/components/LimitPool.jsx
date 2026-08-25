@@ -57,7 +57,12 @@ export default function LimitPool({ interval }) {
           {error ? '数据源暂不可用，稍后自动重试…' : '暂无数据（开盘后逐步更新，盘后为当日收盘结果）'}
         </div>
       ) : (
-        <div className="scroll" style={{ maxHeight: 420 }}>
+        <div
+          className="scroll data-table-scroll"
+          role="region"
+          aria-label={kind === 'zt' ? '涨停连板池表格' : '炸板池表格'}
+          tabIndex="0"
+        >
           <table className="tbl">
             <thead>
               <tr>
@@ -88,7 +93,7 @@ export default function LimitPool({ interval }) {
               ))}
             </tbody>
           </table>
-          <div className="legend" style={{ padding: '8px 12px' }}>
+          <div className="legend table-note">
             {kind === 'zt'
               ? '梯队越高代表市场情绪越强；封板资金大 = 封单结实，次日溢价概率高'
               : '炸板池 = 盘中触及涨停后打开，炸板率高说明资金分歧大、情绪转弱'}

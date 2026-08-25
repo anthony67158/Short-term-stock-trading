@@ -241,10 +241,14 @@ function CandidatePool({ zt, movers, speed }) {
     return null
   })
   const Th = ({ label, k }) => (
-    <th className={'th-sort' + (colSort && colSort.key === k ? ' active' : '')} onClick={() => clickHead(k)}>
-      <span className="th-inner">{label}
+    <th
+      className={'th-sort' + (colSort && colSort.key === k ? ' active' : '')}
+      aria-sort={colSort?.key === k ? (colSort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+    >
+      <button type="button" className="th-inner" onClick={() => clickHead(k)}>
+        {label}
         <span className="th-arrow">{colSort && colSort.key === k ? (colSort.dir === 'asc' ? '↑' : '↓') : '⇅'}</span>
-      </span>
+      </button>
     </th>
   )
 
@@ -301,7 +305,12 @@ function CandidatePool({ zt, movers, speed }) {
           ))}
         </div>
       </div>
-      <div className="scroll" style={{ maxHeight: 520 }}>
+      <div
+        className="scroll data-table-scroll data-table-scroll-lg"
+        role="region"
+        aria-label="今日精选候选池表格"
+        tabIndex="0"
+      >
         <table className="tbl candidate-pool-table">
           <colgroup>
             <col className="candidate-col-name" />
@@ -346,7 +355,7 @@ function CandidatePool({ zt, movers, speed }) {
             {rows.length === 0 && <tr><td colSpan={6} className="empty">暂无数据，开盘后逐步更新</td></tr>}
           </tbody>
         </table>
-        <div className="legend" style={{ padding: '8px 14px' }}>
+        <div className="legend table-note">
           综合精选按信号重叠度排序 · 点表头「现价/涨幅/主力」切换正倒序 · 点名称看详情K线 · 点「加自选」进入计划
         </div>
       </div>

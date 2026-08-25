@@ -1,5 +1,15 @@
 [
   {
+    "date": "2026-08-26",
+    "scope": "app",
+    "macrostructure": "Workbench",
+    "theme": "custom",
+    "theme_axes": "light + dark / geometric-sans / cool",
+    "vibe": "iOS spatial calm, Material clarity, dense trading precision",
+    "enrichment": "none",
+    "brief": "全系统图表、表格、卡片与交互统一为 Apple × Material 工作台"
+  },
+  {
     "date": "2026-08-23",
     "scope": "app",
     "macrostructure": "Workbench",
