@@ -69,7 +69,7 @@ harness/
     evidence.json                证据回放场景
     advice.json                  军师数值校验场景
     judge.json                   确认闸门场景
-    screen.json                  AI选股门禁场景
+    screen.json                  AI选股评分与入场确认场景
     daily.json                   日报事实场景
     endpoint.json                显式在线端点矩阵
     shadow.json                  显式在线影子对拍
@@ -194,7 +194,7 @@ harness-artifacts/               运行产物，不入库
 ### Ask first
 
 - 开启真实 LLM、联网搜索、OSS 写入或生产账号抽样。
-- 修改策略晋级阈值。
+- 修改新增风险、价格、账户或证据质量阈值。
 - 自动把 harness 结果用于真实交易。
 
 ### Never

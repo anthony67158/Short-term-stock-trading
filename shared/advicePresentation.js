@@ -2,7 +2,6 @@ import {
   actionabilityLabel,
   humanizeAdviceTextFields,
   marketRegimeLabel,
-  strategyStateLabel,
 } from './userFacingLanguage.js'
 
 const clean = (value, limit = 800) => {
@@ -159,16 +158,12 @@ function decisionPlanSummary(plan) {
       })).filter((issue) => issue.source && issue.label)
     : []
   const statusText = actionability === 'READY'
-    ? '策略条件与账户风险检查均已通过'
+    ? '证据、价格与账户风险检查均已通过'
     : actionability === 'MANUAL_PROBE'
       ? '板块与个股短线条件已通过，仅限人工确认小仓试错'
-    : actionability === 'RESEARCH_ONLY'
-      ? (plan.blockedReasons || []).join('；') || '仅供观察，暂不可直接执行'
-      : actionability === 'BLOCKED'
+    : actionability === 'BLOCKED'
         ? (plan.blockedReasons || []).join('；') || '执行条件未满足'
         : '等待触发条件'
-  const outOfSample = plan.strategy?.outOfSample
-  const compoundedReturn = Number(outOfSample?.compoundedReturn)
   return {
     decisionId: clean(plan.decisionId, 100),
     action: clean(plan.action, 30),
@@ -176,31 +171,6 @@ function decisionPlanSummary(plan) {
     actionability,
     triggerDirection: clean(plan.triggerDirection, 20),
     statusText: clean(statusText, 320),
-    strategyId: clean(plan.strategy?.strategyId, 80),
-    specVersion: clean(plan.strategy?.specVersion, 80),
-    strategyName: clean(plan.strategy?.name, 80),
-    strategyFamily: clean(plan.strategy?.family, 80),
-    governanceState: clean(plan.strategy?.governanceState, 40),
-    governanceLabel: plan.strategy?.governanceState
-      ? strategyStateLabel(plan.strategy.governanceState)
-      : '',
-    routeMode: clean(plan.strategy?.routeMode, 40),
-    eligibleRegimes: Array.isArray(plan.strategy?.eligibleRegimes)
-      ? plan.strategy.eligibleRegimes.map(
-          (item) => marketRegimeLabel(item),
-        ).filter(Boolean)
-      : [],
-    outOfSample: outOfSample
-      ? {
-          folds: Number(outOfSample.folds) || 0,
-          positiveFolds: Number(outOfSample.positiveFolds) || 0,
-          returnPct: Number.isFinite(compoundedReturn)
-            ? +(compoundedReturn * 100).toFixed(2)
-            : null,
-        }
-      : null,
-    strategySignalPassed: plan.strategy?.signalPassed,
-    productionEligible: plan.strategy?.productionEligible === true,
     marketRegime: clean(
       plan.marketRegime?.label
       || marketRegimeLabel(plan.marketRegime?.regime),
@@ -239,9 +209,6 @@ function decisionInstruction(plan, fallback = '') {
   const lots = Number(plan.quantity?.lots) || 0
   const price = displayNumber(plan.prices?.reference)
   const core = `${plan.actionLabel || '操作'}${lots > 0 ? `${lots}手` : ''}${price ? `，参考${price}元` : ''}`
-  if (plan.actionability === 'RESEARCH_ONLY') {
-    return `仅供观察：${core}；策略通过实盘启用审核前，不能直接执行`
-  }
   if (plan.actionability === 'MANUAL_PROBE') {
     return `人工确认：${plan.action === 'ADD' ? '小仓加仓' : '小仓试错'}${lots > 0 ? `${lots}手` : ''}${price ? `，参考${price}元` : ''}；不进入自动执行`
   }

@@ -41,9 +41,6 @@ import {
   runSectorHarnessCase,
 } from './adapters/sector.mjs'
 import {
-  runStrategyHarnessCase,
-} from './adapters/strategy.mjs'
-import {
   runExecutionHarnessCase,
 } from './adapters/execution.mjs'
 import {
@@ -63,7 +60,6 @@ const ADAPTERS = {
   endpoint: runEndpointHarnessCase,
   shadow: runShadowHarnessCase,
   sector: runSectorHarnessCase,
-  strategy: runStrategyHarnessCase,
   execution: runExecutionHarnessCase,
 }
 

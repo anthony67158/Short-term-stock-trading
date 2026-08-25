@@ -7,7 +7,7 @@ import {
   scoreCompanyInvestmentQuality,
 } from '../shared/investmentSelection.js'
 import { mapStockRow } from '../api/stocks.js'
-import { rankStrategyShortlist } from '../shared/stockRanking.js'
+import { rankCandidateShortlist } from '../shared/stockRanking.js'
 
 const concept = (patch = {}) => ({
   code: 'BK1000',
@@ -164,7 +164,7 @@ test('高产业价值公司在交易条件相近时排在纯热度票之前', ()
     quant: { score: 58, upProb: 58, expRet: 1.5 },
   }
 
-  const result = rankStrategyShortlist([hot, strategic], {
+  const result = rankCandidateShortlist([hot, strategic], {
     limit: 2,
     investmentReserve: 1,
   })
@@ -174,8 +174,8 @@ test('高产业价值公司在交易条件相近时排在纯热度票之前', ()
   assert.ok(strategic.investmentProfile.investmentScore > 80)
 })
 
-test('产业价值保留位不能绕过量化策略闸门', () => {
-  const result = rankStrategyShortlist([{
+test('产业价值保留位不能绕过量价与量化确认', () => {
+  const result = rankCandidateShortlist([{
     code: '600001',
     name: '战略制造',
     marketScore: 62,
@@ -194,7 +194,7 @@ test('产业价值保留位不能绕过量化策略闸门', () => {
     investmentReserve: 1,
   })
 
-  assert.equal(result.list[0].strategySignal.passed, false)
+  assert.equal(result.list[0].entrySignal.passed, false)
   assert.equal(result.executable.length, 0)
   assert.equal(result.watchlist[0].code, '600001')
 })

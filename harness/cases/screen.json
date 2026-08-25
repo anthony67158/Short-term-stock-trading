@@ -3,9 +3,9 @@
   "cases": [
     {
       "schemaVersion": "harness-case.v1",
-      "id": "screen-strategy-gate-and-fabrication-filter",
+      "id": "screen-entry-confirmation-and-fabrication-filter",
       "adapter": "screen",
-      "tags": ["screen", "strategy", "grounding"],
+      "tags": ["screen", "entry-confirmation", "grounding"],
       "input": {
         "options": {
           "limit": 12
@@ -124,9 +124,9 @@
     },
     {
       "schemaVersion": "harness-case.v1",
-      "id": "screen-concept-leader-reserve-keeps-strategy-gate",
+      "id": "screen-concept-leader-reserve-keeps-entry-confirmation",
       "adapter": "screen",
-      "tags": ["screen", "concept-leader", "strategy", "grounding"],
+      "tags": ["screen", "concept-leader", "entry-confirmation", "grounding"],
       "input": {
         "options": {
           "limit": 3,

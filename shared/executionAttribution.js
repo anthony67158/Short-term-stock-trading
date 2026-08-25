@@ -67,7 +67,6 @@ export function attributeExecution(plan, {
     schemaVersion: 'execution-attribution.v1',
     planId: String(plan.planId || ''),
     decisionId: String(plan.decisionId || ''),
-    strategyId: String(plan.strategyId || ''),
     marketRegime: String(plan.marketRegime || ''),
     code: String(plan.code || ''),
     action: String(plan.action || ''),
@@ -123,7 +122,6 @@ export function aggregateExecutionAttribution(records = []) {
   const groups = new Map()
   for (const record of eligible) {
     const key = [
-      record.strategyId || 'unknown',
       record.marketRegime || 'UNKNOWN',
       record.action || 'UNKNOWN',
       record.code || 'unknown',
@@ -131,7 +129,6 @@ export function aggregateExecutionAttribution(records = []) {
     ].join(':')
     const current = groups.get(key) || {
       key,
-      strategyId: record.strategyId || 'unknown',
       marketRegime: record.marketRegime || 'UNKNOWN',
       action: record.action || 'UNKNOWN',
       code: record.code || 'unknown',

@@ -159,16 +159,6 @@ function levelStatus(direction, price, currentPrice) {
   return 'UNKNOWN'
 }
 
-function strategyApprovalRequired(advice = {}) {
-  const source = text([
-    advice.actionPlan,
-    advice.timing,
-    advice.nextAction,
-    advice.futurePlan,
-  ].filter(Boolean).join(' '), 1200)
-  return /策略.{0,12}(?:审核|放行|通过|晋级)|审核通过/.test(source)
-}
-
 function priceZone(value) {
   if (value && typeof value === 'object') {
     const low = roundedPrice(value.low)
@@ -195,9 +185,7 @@ export function buildAdvicePriceContract({
   advice = {},
   payload = {},
   evidenceSnapshot = null,
-  strategyGate = null,
   action = '',
-  requireStrategyApproval = false,
 } = {}) {
   const quote = payload.todayQuote || {}
   const currentPrice = roundedPrice(
@@ -309,8 +297,6 @@ export function buildAdvicePriceContract({
   }
 
   const watch = levels.find((level) => level.key === 'watch') || null
-  const needsStrategyApproval = requireStrategyApproval
-    || strategyApprovalRequired(advice)
   const reviewConditions = [
     ...(watch ? [{
       key: 'WATCH_PRICE',
@@ -318,12 +304,6 @@ export function buildAdvicePriceContract({
       price: watch.price,
       status: watch.status,
       strict: watch.strict,
-    }] : []),
-    ...(needsStrategyApproval ? [{
-      key: 'STRATEGY_ELIGIBLE',
-      expected: true,
-      actual: strategyGate?.productionEligible === true,
-      status: strategyGate?.productionEligible === true ? 'MET' : 'PENDING',
     }] : []),
   ]
 

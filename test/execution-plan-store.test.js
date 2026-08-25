@@ -25,8 +25,6 @@ function draftBuyPlan() {
       costs: { estimatedNetAmount: 1005, estimatedFees: 5 },
       evidenceIds: ['ev_demo'],
       strategy: {
-        strategyId: 'trend-breakout',
-        specVersion: 'strategy.demo',
       },
       marketRegime: { regime: 'TREND_STRONG' },
     },
@@ -53,8 +51,6 @@ function draftSellPlan() {
       costs: { estimatedNetAmount: 1990, estimatedFees: 10 },
       evidenceIds: ['ev_demo'],
       strategy: {
-        strategyId: 'defensive-exit',
-        specVersion: 'strategy.demo',
       },
       marketRegime: { regime: 'RISK_OFF' },
     },

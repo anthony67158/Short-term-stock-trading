@@ -221,6 +221,8 @@ export function applyClientAccountSave(
     };
   }
   const merged = { ...incoming };
+  delete merged.strategyHumanApproval;
+  delete merged.strategyGovernanceV2;
   // AI 任务生命周期只由服务端 Worker 管理。客户端可能持有数秒前的旧快照，
   // 保存持仓时绝不能把正在运行的队列、租约或 Worker 锁覆盖掉。
   if (prev.jobs && typeof prev.jobs === 'object') merged.jobs = prev.jobs;
@@ -320,8 +322,6 @@ export function applyClientAccountSave(
   for (const key of [
     'realOutcomeLearning',
     'advisorCouncilShadow',
-    'strategyHumanApproval',
-    'strategyGovernanceV2',
     'adviceEventKeys',
     'executionEventState',
   ]) {

@@ -189,7 +189,6 @@ function EvidenceGapNotice({ issues = [] }) {
 
 function DecisionPlanSummary({ plan }) {
   if (!plan) return null
-  const governanceLabel = plan.governanceLabel
   const statusLabel = plan.actionabilityLabel || '等待确认'
   const statusTone = plan.actionability === 'READY'
     ? 'ready'
@@ -197,14 +196,14 @@ function DecisionPlanSummary({ plan }) {
       ? 'probe'
     : plan.actionability === 'BLOCKED'
       ? 'blocked'
-      : plan.actionability === 'RESEARCH_ONLY' ? 'research' : 'watch'
+      : 'watch'
   return (
     <section
       className={`advice-decision-plan ${statusTone}`}
-      aria-label="统一决策计划"
+      aria-label="执行校验"
     >
       <div className="adp-head">
-        <span><Icon name="shield" size={12} /> 统一决策计划</span>
+        <span><Icon name="shield" size={12} /> 执行校验</span>
         <b>{statusLabel}</b>
       </div>
       <div className="adp-facts">
@@ -221,11 +220,6 @@ function DecisionPlanSummary({ plan }) {
             </b>
           </span>
         )}
-        {plan.strategyId && (
-          <span>
-            策略 <b>{plan.strategyName || '系统策略'}</b>
-          </span>
-        )}
         {plan.opportunity?.sectorName && (
           <span>
             短线依据 <b>
@@ -233,19 +227,6 @@ function DecisionPlanSummary({ plan }) {
               {plan.opportunity.stockRole
                 ? ` · ${plan.opportunity.stockRole}`
                 : ''}
-            </b>
-          </span>
-        )}
-        {governanceLabel && (
-          <span>级别 <b>{governanceLabel}</b></span>
-        )}
-        {plan.outOfSample?.folds > 0 && (
-          <span>
-            历史检验 <b>
-              {plan.outOfSample.positiveFolds}/{plan.outOfSample.folds}个阶段通过
-              {' · '}
-              {plan.outOfSample.returnPct > 0 ? '+' : ''}
-              {plan.outOfSample.returnPct}%
             </b>
           </span>
         )}

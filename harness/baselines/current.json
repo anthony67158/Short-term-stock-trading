@@ -1,6 +1,6 @@
 {
   "schemaVersion": "harness-baseline.v1",
-  "generatedAt": 1787443003707,
+  "generatedAt": 1787671060693,
   "versions": {
     "app": "1.0.0",
     "git": "working-tree",
@@ -13,8 +13,7 @@
       "judge",
       "portfolio",
       "screen",
-      "sector",
-      "strategy"
+      "sector"
     ]
   },
   "suites": {
@@ -61,7 +60,7 @@
       "cases": 4,
       "caseIds": [
         "advice-buy-cash-cap",
-        "advice-decision-plan-research-only",
+        "advice-decision-plan-evidence-risk-ready",
         "advice-hold-t1-no-sellable",
         "advice-invalid-price-downgrade"
       ]
@@ -94,9 +93,9 @@
       },
       "cases": 3,
       "caseIds": [
-        "screen-concept-leader-reserve-keeps-strategy-gate",
-        "screen-no-trade-conditional-fallback",
-        "screen-strategy-gate-and-fabrication-filter"
+        "screen-concept-leader-reserve-keeps-entry-confirmation",
+        "screen-entry-confirmation-and-fabrication-filter",
+        "screen-no-trade-conditional-fallback"
       ]
     },
     "daily": {
@@ -133,24 +132,6 @@
         "sector-missing-history-degrades",
         "sector-overheat-no-chase",
         "sector-price-flow-divergence"
-      ]
-    },
-    "strategy": {
-      "overall": 1,
-      "dimensions": {
-        "contract": 1,
-        "groundedness": 1,
-        "feasibility": 1,
-        "actionability": 1,
-        "consistency": 1
-      },
-      "cases": 5,
-      "caseIds": [
-        "strategy-cross-sectional-momentum-shadow",
-        "strategy-defensive-exit-shadow",
-        "strategy-multi-factor-ranking-shadow",
-        "strategy-range-mean-reversion-shadow",
-        "strategy-trend-breakout-shadow"
       ]
     },
     "execution": {

@@ -9,7 +9,7 @@ import {
 } from '../shared/conceptLeadership.js'
 import {
   normalizePickDecision,
-  rankStrategyShortlist,
+  rankCandidateShortlist,
 } from '../shared/stockRanking.js'
 
 const sector = (patch = {}) => ({
@@ -176,7 +176,7 @@ test('量化前候选池按配额保留强概念龙头且完成代码去重', ()
   )
 })
 
-test('量化后保留位让龙头进入LLM短名单但不能绕过统一策略闸门', () => {
+test('量化后保留位让龙头进入模型短名单但不能绕过入场确认', () => {
   const candidates = [
     ...Array.from({ length: 4 }, (_, index) => ({
       code: `60300${index}`,
@@ -206,14 +206,14 @@ test('量化后保留位让龙头进入LLM短名单但不能绕过统一策略�
     },
   ]
 
-  const shortlist = rankStrategyShortlist(candidates, {
+  const shortlist = rankCandidateShortlist(candidates, {
     limit: 3,
     leadershipReserve: 1,
   })
 
   assert.equal(shortlist.list.some((item) => item.code === '600001'), true)
   const leader = shortlist.list.find((item) => item.code === '600001')
-  assert.equal(leader.strategySignal.passed, false)
+  assert.equal(leader.entrySignal.passed, false)
   assert.equal(shortlist.executable.some((item) => item.code === '600001'), false)
   assert.equal(shortlist.watchlist.some((item) => item.code === '600001'), true)
 

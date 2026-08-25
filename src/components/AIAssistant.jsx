@@ -646,7 +646,7 @@ function Scan({ r }) {
           )}
         </div>
       ))}
-      {r.strategy && <div className="ai-line" style={{ marginTop: 8 }}><span className="ai-tag-reason">策略</span>{r.strategy}</div>}
+      {r.strategy && <div className="ai-line" style={{ marginTop: 8 }}><span className="ai-tag-reason">计划</span>{r.strategy}</div>}
       {r.topRisk && <div className="ai-line"><span className="ai-tag-watch">风险</span>{r.topRisk}</div>}
     </div>
   )

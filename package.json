@@ -16,7 +16,6 @@
     "harness": "node harness/run.mjs",
     "harness:ci": "node harness/run.mjs --output-dir harness-artifacts",
     "harness:portfolio": "node harness/run.mjs --suite portfolio",
-    "harness:strategy": "node harness/run.mjs --suite strategy",
     "harness:execution": "node harness/run.mjs --suite execution",
     "harness:sector": "node harness/run.mjs --suite sector",
     "harness:export": "node harness/export.mjs",

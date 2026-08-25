@@ -36,17 +36,16 @@ const payload = (price = 100) => ({
   },
 })
 
-test('观望价被编译为有方向、有依据的双条件复核契约', () => {
+test('观望价被编译为有方向、有依据的价格复核契约', () => {
   const advice = {
     action: '观望',
-    actionPlan: '放量站上105元且策略审核通过后重新判断',
+    actionPlan: '放量站上105元后重新判断',
     watchPrice: 105,
   }
   const contract = buildAdvicePriceContract({
     mode: 'buy_advice',
     advice,
     payload: payload(),
-    strategyGate: { productionEligible: false },
   })
 
   assert.deepEqual(advicePriceLevel({ priceContract: contract }, 'watch'), {
@@ -69,28 +68,26 @@ test('观望价被编译为有方向、有依据的双条件复核契约', () =>
     ]),
     [
       ['WATCH_PRICE', 'PENDING'],
-      ['STRATEGY_ELIGIBLE', 'PENDING'],
     ],
   )
   assert.equal(contract.review.allMet, false)
 })
 
-test('价格与策略审核均满足时复核契约才进入全部满足状态', () => {
+test('价格条件满足时复核契约进入全部满足状态', () => {
   const contract = buildAdvicePriceContract({
     mode: 'buy_advice',
     advice: {
       action: '观望',
-      timing: '放量站上105元且审核通过后重新判断',
+      timing: '放量站上105元后重新判断',
       watchPrice: 105,
     },
     payload: payload(106),
-    strategyGate: { productionEligible: true },
   })
 
   assert.equal(contract.review.allMet, true)
   assert.deepEqual(
     contract.review.conditions.map((condition) => condition.status),
-    ['MET', 'MET'],
+    ['MET'],
   )
 })
 

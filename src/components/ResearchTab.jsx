@@ -8,7 +8,6 @@ import Movers from './Movers'
 import LhbBoard from './LhbBoard'
 import MarketNews from './MarketNews'
 import ErrorBoundary from './ErrorBoundary'
-import StrategyResearchPanel from './StrategyResearchPanel'
 import { usePolling } from '../hooks'
 
 // ============ 盘面研究（次级）：大盘资金流向 + 板块/个股下钻 ============
@@ -43,9 +42,6 @@ export default function ResearchTab({ interval }) {
 
   return (
     <div className="research">
-      <ErrorBoundary label="策略雷达">
-        <StrategyResearchPanel />
-      </ErrorBoundary>
       <ErrorBoundary label="概念走势">
         <ConceptTrendPanel
           interval={interval}

@@ -86,31 +86,6 @@ test('统一证据快照包含稳定版本、来源、账户与量化上下文',
   assert.equal(JSON.stringify(snapshot).includes('不应复制进快照的长新闻正文'), false)
 })
 
-test('证据快照固化策略审核状态供自动复核比较', () => {
-  const snapshot = createCanonicalEvidenceSnapshot({
-    mode: 'buy_advice',
-    payload: {
-      ...payload,
-      strategyGate: {
-        strategyId: 'market-quant-resonance',
-        specVersion: 'strategy-v1',
-        productionEligible: false,
-        decision: 'reject',
-        blockerCodes: ['BACKTEST_REQUIRED'],
-      },
-    },
-    now: Date.parse('2026-08-13T02:31:00.000Z'),
-  })
-
-  assert.deepEqual(snapshot.policy.strategyGate, {
-    strategyId: 'market-quant-resonance',
-    specVersion: 'strategy-v1',
-    productionEligible: false,
-    decision: 'reject',
-    blockerCodes: ['BACKTEST_REQUIRED'],
-  })
-})
-
 test('午间休市保留上午完整行情并标记为上午收盘快照', () => {
   const snapshot = createCanonicalEvidenceSnapshot({
     mode: 'hold_advice',

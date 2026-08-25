@@ -567,7 +567,7 @@ export default async function handler(req, res) {
       evidence,
       morningBaseline,
     });
-    const SYS = `你是严谨的A股短线策略研究员。硬数据与分析师观点必须分离：输入中的行情、资金、龙虎榜、北向成交和技术价位是只读事实，不得篡改、补写或推算缺失值。网页搜索摘要只用于发现线索，不能替代原文。每个软判断必须给出推理、可执行条件和有效证据编号；没有对应证据时明确写待验证。红涨绿跌。只输出合法JSON，不输出markdown或思维链。`;
+    const SYS = `你是严谨的A股短线市场研判员。硬数据与分析师观点必须分离：输入中的行情、资金、龙虎榜、北向成交和技术价位是只读事实，不得篡改、补写或推算缺失值。网页搜索摘要只用于发现线索，不能替代原文。每个软判断必须给出推理、可执行条件和有效证据编号；没有对应证据时明确写待验证。红涨绿跌。只输出合法JSON，不输出markdown或思维链。`;
     const timeCtx = marketTimePromptBlock();
     const generationConfig = SESSION_GENERATION[session];
     phase(dailyLlmReady

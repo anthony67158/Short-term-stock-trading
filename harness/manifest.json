@@ -49,7 +49,7 @@
       "caseFile": "cases/screen.json",
       "minOverall": 0.9,
       "mode": "offline",
-      "description": "统一策略短名单、候选白名单和条件回退"
+      "description": "候选评分、入场确认、候选白名单和条件回退"
     },
     "daily": {
       "adapter": "daily",
@@ -64,13 +64,6 @@
       "minOverall": 0.9,
       "mode": "offline",
       "description": "板块前瞻潜伏、追高、背离、解释边界与缺失降级"
-    },
-    "strategy": {
-      "adapter": "strategy",
-      "caseFile": "cases/strategy.json",
-      "minOverall": 0.9,
-      "mode": "offline",
-      "description": "五类策略状态适配、证据命中、生产隔离与路由优先级"
     },
     "execution": {
       "adapter": "execution",

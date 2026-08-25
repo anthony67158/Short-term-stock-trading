@@ -10,8 +10,6 @@ function recommendation(id, {
   mode = 'buy_advice',
   action = '立即买入',
   marketRegime = '弱市',
-  strategyId = 'trend-breakout',
-  specVersion = 'strategy.test',
 } = {}) {
   return {
     id,
@@ -20,8 +18,6 @@ function recommendation(id, {
     mode,
     action,
     marketRegime,
-    strategyId,
-    specVersion,
     at: 100,
   }
 }
@@ -82,8 +78,7 @@ test('真实收益画像只统计已关联且完成验证的真实费后卖出',
   assert.equal(profile.overall.wins, 1)
   assert.equal(profile.overall.losses, 1)
   assert.equal(profile.overall.profitFactor, 3)
-  assert.equal(profile.groups.strategies[0].key, 'trend-breakout')
-  assert.equal(profile.groups.strategies[0].samples, 2)
+  assert.equal(profile.groups.actions[0].samples, 2)
   assert.equal(profile.excluded.unexecutedAdviceOutcomes, 1)
   assert.equal(profile.excluded.incompleteExecutions, 1)
   assert.equal(profile.excluded.unlinkedExecutions, 1)

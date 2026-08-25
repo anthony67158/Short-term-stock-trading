@@ -246,8 +246,6 @@ export function compileExecutionPlan({
     schemaVersion: EXECUTION_PLAN_SCHEMA_VERSION,
     planId,
     decisionId: String(decisionPlan.decisionId || ''),
-    strategyId: String(decisionPlan.strategy?.strategyId || ''),
-    strategyVersion: String(decisionPlan.strategy?.specVersion || ''),
     marketRegime: String(decisionPlan.marketRegime?.regime || 'UNKNOWN'),
     code: String(code || ''),
     name: String(name || code || ''),

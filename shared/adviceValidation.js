@@ -110,7 +110,6 @@ export function reconcileAdviceNumbers({ mode, result: input, payload = {} } = {
     mode,
     advice: result,
     payload,
-    strategyGate: payload.strategyGate,
   })
   if (initialPriceContract.validationStatus !== 'UNAVAILABLE') {
     issues.push(...initialPriceContract.issues)
@@ -141,10 +140,7 @@ export function reconcileAdviceNumbers({ mode, result: input, payload = {} } = {
   ) {
     valid = false
     result.watchPrice = null
-    const remaining = payload.strategyGate?.productionEligible === false
-      ? '策略与风险条件仍未通过'
-      : '其余量价条件仍未确认'
-    result.actionPlan = `价格条件已满足，但${remaining}，暂不买入`
+    result.actionPlan = '价格条件已满足，但量价、资金或风险确认仍不足，暂不买入'
     result.timing = result.actionPlan
     issues.push('观察价在生成时已经满足，已撤销过期价格条件')
   }
@@ -314,7 +310,6 @@ export function reconcileAdviceNumbers({ mode, result: input, payload = {} } = {
     mode,
     advice: result,
     payload,
-    strategyGate: payload.strategyGate,
   })
   result.priceContract = {
     ...finalPriceContract,

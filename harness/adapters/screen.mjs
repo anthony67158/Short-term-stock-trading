@@ -1,6 +1,6 @@
 import {
   normalizePickDecision,
-  rankStrategyShortlist,
+  rankCandidateShortlist,
 } from '../../shared/stockRanking.js'
 
 function check(id, dimension, passed, message, options = {}) {
@@ -18,7 +18,7 @@ function check(id, dimension, passed, message, options = {}) {
 export async function runScreenHarnessCase(testCase) {
   const input = testCase.input || {}
   const expected = testCase.expect || {}
-  const shortlist = rankStrategyShortlist(
+  const shortlist = rankCandidateShortlist(
     input.candidates || [],
     input.options || {},
   )
@@ -33,11 +33,11 @@ export async function runScreenHarnessCase(testCase) {
   const unknownCodes = picks
     .map((item) => String(item.code))
     .filter((code) => !allowedCodes.includes(code))
-  const failedStrategy = new Set(
+  const failedEntryConfirmation = new Set(
     shortlist.watchlist.map((item) => String(item.code)),
   )
   const upgradedFailed = picks.filter((item) =>
-    failedStrategy.has(String(item.code))
+    failedEntryConfirmation.has(String(item.code))
     && item.actionability === '可执行'
   )
   const missingRequired = (expected.requiredPickCodes || [])
@@ -56,7 +56,7 @@ export async function runScreenHarnessCase(testCase) {
       'contract',
       Array.isArray(decision.picks)
         && typeof decision.noTrade === 'boolean'
-        && !!shortlist.specVersion,
+        && !!shortlist.rankingVersion,
       '选股输出契约无效',
       { hard: true, code: 'SCREEN_CONTRACT_INVALID' },
     ),
@@ -93,13 +93,13 @@ export async function runScreenHarnessCase(testCase) {
       },
     ),
     check(
-      'screen-strategy-gate',
+      'screen-entry-confirmation',
       'feasibility',
       upgradedFailed.length === 0,
-      '未通过策略的候选被升级为可执行',
+      '未通过量价与量化确认的候选被升级为可执行',
       {
         hard: true,
-        code: 'SCREEN_STRATEGY_GATE_BYPASS',
+        code: 'SCREEN_ENTRY_CONFIRMATION_BYPASS',
         details: upgradedFailed.map((item) => item.code),
       },
     ),
@@ -129,13 +129,12 @@ export async function runScreenHarnessCase(testCase) {
       { code: 'SCREEN_NO_TRADE_REASON_MISSING' },
     ),
     check(
-      'screen-strategy-version',
+      'screen-ranking-contract',
       'consistency',
-      shortlist.strategyId
-        && shortlist.specVersion
-        && shortlist.list.every((item) => item.strategySignal),
-      '候选缺少统一策略版本或信号',
-      { hard: true, code: 'SCREEN_STRATEGY_VERSION_MISSING' },
+      shortlist.rankingVersion
+        && shortlist.list.every((item) => item.entrySignal),
+      '候选缺少评分版本或入场确认',
+      { hard: true, code: 'SCREEN_RANKING_CONTRACT_MISSING' },
     ),
     check(
       'screen-no-trade-consistency',
@@ -149,8 +148,7 @@ export async function runScreenHarnessCase(testCase) {
   ]
   return {
     output: {
-      strategyId: shortlist.strategyId,
-      specVersion: shortlist.specVersion,
+      rankingVersion: shortlist.rankingVersion,
       signalPassedCount: shortlist.signalPassedCount,
       shortlist: shortlist.list,
       decision,

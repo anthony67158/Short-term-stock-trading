@@ -86,7 +86,6 @@ import { deriveMarketRegime } from '../shared/marketRegime.js';
 import {
   buildFallbackDecisionAdvice,
   compileDecisionPlan,
-  decisionActionFromAdvice,
 } from '../shared/decisionPlan.js';
 import {
   accountTradeStateFingerprint,
@@ -105,20 +104,6 @@ import {
   buildTGridExperiment,
   evaluateTGridEligibility,
 } from '../shared/tGridPolicy.js';
-import {
-  getStrategySpecV2,
-} from '../shared/strategyCatalogV2.js';
-import {
-  buildDefaultStrategyGovernance,
-} from '../shared/strategyGovernanceV2.js';
-import {
-  buildStrategyRoutingContext,
-  routeStrategyPortfolio,
-} from '../shared/strategyRouter.js';
-import {
-  buildStrategyPromotionGate,
-  CURRENT_STRATEGY_EVALUATION,
-} from '../shared/strategyPromotionGate.js';
 import { internalApiOrigin } from './_internal_origin.js';
 import { loadSectorOpportunity } from './_sector_opportunity.js';
 
@@ -684,6 +669,8 @@ export default async function handler(req, res) {
   let hbTimer = null;
   try {
     const payload = stripClientSearchFields((body && body.payload) || {});
+    delete payload.strategyGate;
+    delete payload.strategyRoute;
     if (
       isAdvisorMode(mode)
       && !payload.realOutcomeLearning
@@ -692,32 +679,6 @@ export default async function handler(req, res) {
       payload.realOutcomeLearning = buildRealOutcomeLearning(
         accountAuth.account.data,
       );
-    }
-    const activeStrategySpec = getStrategySpecV2(
-      'market-quant-resonance',
-    );
-    const strategyGovernance = buildDefaultStrategyGovernance(
-      accountAuth.account?.data?.strategyGovernanceV2 || {},
-    );
-    const advisorStrategyGate = isAdvisorMode(mode)
-      ? buildStrategyPromotionGate({
-          strategySpec: activeStrategySpec,
-          evaluation: CURRENT_STRATEGY_EVALUATION,
-          realOutcomeLearning: payload.realOutcomeLearning || {},
-          humanApproval:
-            accountAuth.account?.data?.strategyHumanApproval || null,
-        })
-      : null;
-    if (advisorStrategyGate) {
-      payload.strategyGate = {
-        strategyId: advisorStrategyGate.strategyId,
-        specVersion: advisorStrategyGate.specVersion,
-        productionEligible: advisorStrategyGate.productionEligible,
-        decision: advisorStrategyGate.decision,
-        blockerCodes: advisorStrategyGate.blockers
-          .map((item) => item.code)
-          .slice(0, 12),
-      };
     }
     const streaming = !!(body && body.stream); // 客户端可选开启 SSE 进度流
     const evidenceAccountRevision = resolveEvidenceAccountRevision(
@@ -805,8 +766,6 @@ export default async function handler(req, res) {
             mode,
             payload,
             evidenceSnapshot: snapshot,
-            strategySpec: activeStrategySpec,
-            strategyGate: advisorStrategyGate || {},
             error,
           }),
         };
@@ -1511,28 +1470,6 @@ export default async function handler(req, res) {
         },
       );
     }
-    if (isAdvisorMode(mode)) {
-      const requestedAction = mode === 'buy_advice'
-        ? 'BUY'
-        : mode === 't_advice' ? 'T_BUY_FIRST' : 'HOLD';
-      const strategyRoute = routeStrategyPortfolio({
-        marketRegime: payload.marketEnv?.regime || 'UNKNOWN',
-        context: buildStrategyRoutingContext(
-          payload,
-          payload.marketEnv || {},
-        ),
-        governance: strategyGovernance,
-        requestedAction,
-      });
-      payload.strategyRoute = {
-        schemaVersion: strategyRoute.schemaVersion,
-        catalogVersion: strategyRoute.catalogVersion,
-        marketRegime: strategyRoute.marketRegime,
-        requestedAction: strategyRoute.requestedAction,
-        production: strategyRoute.production,
-        research: strategyRoute.research,
-      };
-    }
     const isAdvisor = isAdvisorMode(mode);
     const currentEvidenceSnapshot = isAdvisor && payload.code
       ? ensureEvidenceSnapshot()
@@ -1582,16 +1519,6 @@ export default async function handler(req, res) {
       todayQuote: payload.todayQuote || null,
       dailyReport: payload.dailyReport ? { sessionCn: payload.dailyReport.sessionCn, day: payload.dailyReport.day } : null,
       quantResult: payload.quant || null,
-      strategyGate: advisorStrategyGate ? {
-        strategyId: advisorStrategyGate.strategyId,
-        specVersion: advisorStrategyGate.specVersion,
-        productionEligible: advisorStrategyGate.productionEligible,
-        decision: advisorStrategyGate.decision,
-        blockerCodes: advisorStrategyGate.blockers
-          .map((item) => item.code)
-          .slice(0, 12),
-      } : null,
-      strategyRoute: payload.strategyRoute || null,
       sectorOpportunity: payload.sectorOpportunity || null,
     };
     const scheduledReviewEvaluation = evaluateScheduledReview({
@@ -2215,39 +2142,6 @@ export default async function handler(req, res) {
       result.knowledgeActionScore = scoreKnowledgeActionPlan(
         result.knowledgeActionPlan,
       );
-      const requestedAction = decisionActionFromAdvice(mode, result);
-      const strategyRoute = routeStrategyPortfolio({
-        marketRegime: payload.marketEnv?.regime || 'UNKNOWN',
-        context: buildStrategyRoutingContext(
-          payload,
-          payload.marketEnv || {},
-        ),
-        governance: strategyGovernance,
-        requestedAction,
-      });
-      const routedStrategy = strategyRoute.production
-        || strategyRoute.research;
-      const decisionStrategySpec = getStrategySpecV2(
-        routedStrategy?.strategyId,
-      ) || activeStrategySpec;
-      const decisionStrategyGate = routedStrategy?.strategyId
-        === activeStrategySpec.strategyId
-        ? advisorStrategyGate
-        : {
-            strategyId: routedStrategy?.strategyId || null,
-            specVersion: routedStrategy?.specVersion || null,
-            productionEligible:
-              routedStrategy?.productionEligible === true,
-            decision: routedStrategy?.productionEligible
-              ? 'promote'
-              : 'reject',
-            blockers: routedStrategy?.blockers?.length
-              ? routedStrategy.blockers
-              : [{
-                  code: 'BACKTEST_REQUIRED',
-                  message: '策略尚未完成生产晋级',
-                }],
-          };
       const accountCircuitBreaker = evaluateAccountCircuitBreaker({
         account: {
           ...(accountAuth.account?.data?.account || {}),
@@ -2266,9 +2160,6 @@ export default async function handler(req, res) {
         advice: result,
         payload,
         evidenceSnapshot: currentEvidenceSnapshot,
-        strategySpec: decisionStrategySpec,
-        strategyGate: decisionStrategyGate || {},
-        strategyRoute,
         accountCircuitBreaker,
       });
       result.priceContract = result.decisionPlan.priceContract;
@@ -2346,14 +2237,6 @@ export default async function handler(req, res) {
           atrPct,
         });
       }
-      collectedMeta.strategyRoute = {
-        schemaVersion: strategyRoute.schemaVersion,
-        catalogVersion: strategyRoute.catalogVersion,
-        marketRegime: strategyRoute.marketRegime,
-        requestedAction: strategyRoute.requestedAction,
-        production: strategyRoute.production,
-        research: strategyRoute.research,
-      };
       collectedMeta.accountCircuitBreaker = {
         schemaVersion: accountCircuitBreaker.schemaVersion,
         allowRiskIncrease:

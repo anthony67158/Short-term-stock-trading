@@ -42,7 +42,7 @@ test('确认接口只保留Judge需要的白名单字段', () => {
         action: 'ADD',
         actionability: 'RESEARCH_ONLY',
         validUntil: '2026-08-21T03:00:00.000Z',
-        blockedReasons: ['策略尚未通过生产晋级'],
+        blockedReasons: ['关键证据尚未确认'],
       },
       private: 'drop',
     },

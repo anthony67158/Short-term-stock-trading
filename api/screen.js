@@ -15,8 +15,7 @@ export default async function handler(req, res) {
     return sendJson(res, {
       ok: true,
       updatedAt: Date.now(),
-      strategyId: ranked.strategyId,
-      specVersion: ranked.specVersion,
+      rankingVersion: ranked.rankingVersion,
       universeCount: ranked.universeCount,
       scannedCount: ranked.scannedCount,
       isComplete: ranked.scannedCount >= ranked.universeCount * 0.98,

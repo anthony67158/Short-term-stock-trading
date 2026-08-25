@@ -195,9 +195,6 @@ async function run(spec, record) {
             decisionPlanId: advice.decisionPlan?.decisionId || null,
             decisionPlanActionability:
               advice.decisionPlan?.actionability || null,
-            strategyId: advice.decisionPlan?.strategy?.strategyId || null,
-            specVersion:
-              advice.decisionPlan?.strategy?.specVersion || null,
             ...evidencePersistenceFields(advice),
           })
         } catch { /* ignore */ }

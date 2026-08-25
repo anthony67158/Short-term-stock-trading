@@ -5,14 +5,6 @@ import {
 } from './ashareStrategyExecution.js'
 import { deriveMarketRegime } from './marketRegime.js'
 import {
-  evaluateStrategySignal,
-  getActiveStrategySpec,
-} from './strategySpec.js'
-import {
-  evaluateStrategySignalV2,
-  STRATEGY_SPEC_V2_SCHEMA_VERSION,
-} from './strategySpecV2.js'
-import {
   ADVICE_PRICE_CONTRACT_SCHEMA_VERSION,
   buildAdvicePriceContract,
 } from './advicePriceContract.js'
@@ -37,15 +29,10 @@ export function decisionPlanConfirmationGate(plan, side) {
     side === 'buy'
     && plan.actionability !== 'READY'
   ) {
-    const reason = plan.actionability === 'MANUAL_PROBE'
-      ? '当前为短线小仓试错，只能由用户手动确认，不能自动升级执行'
-      : plan.actionability === 'RESEARCH_ONLY'
-        ? '当前仅为研究级条件建议，不能升级为执行确认'
-        : '统一决策计划未通过，不能升级为执行确认'
     return {
       allowed: false,
       policy: 'decision-plan-not-ready',
-      reason,
+      reason: '账户、证据或风险条件未通过，不能升级为执行确认',
     }
   }
   if (
@@ -174,27 +161,6 @@ function requestedLotsFor(action, advice = {}) {
   return 0
 }
 
-function signalContext(payload = {}, market = {}) {
-  const quote = payload.todayQuote || {}
-  const quant = payload.quant || {}
-  return {
-    amount: finite(quote.amount),
-    mainRatio: finite(payload.stockFund?.mainRatio),
-    marketEnv: { score: finite(market.score) },
-    marketScore: finite(market.score),
-    pct: finite(quote.pct),
-    quant: {
-      expRet: finite(quant.forecast?.expRet),
-      highConfFired: quant.highConfSignal?.fired === true,
-      score: finite(quant.score),
-      upProb: finite(quant.forecast?.upProb),
-    },
-    speed: finite(quote.speed),
-    turnover: finite(quote.turnover),
-    volRatio: finite(quote.volRatio),
-  }
-}
-
 function computeBuyCapacity({
   requestedLots,
   referencePrice,
@@ -202,7 +168,6 @@ function computeBuyCapacity({
   account,
   market,
   slippageBps,
-  productionEligible,
   highConfidence,
 }) {
   const totalAssets = positive(account.totalAssets)
@@ -215,9 +180,8 @@ function computeBuyCapacity({
     85,
     positive(market.targetPositionPct?.max) || 0,
   )
-  const riskPct = (
-    productionEligible && highConfidence ? 1 : 0.6
-  ) * (finite(market.riskMultiplier) ?? 0)
+  const riskPct = (highConfidence ? 1 : 0.6)
+    * (finite(market.riskMultiplier) ?? 0)
   const maxLossAmount = totalAssets == null
     ? null
     : round(totalAssets * riskPct / 100)
@@ -311,9 +275,6 @@ export function compileDecisionPlan({
   advice = {},
   payload = {},
   evidenceSnapshot = null,
-  strategySpec = getActiveStrategySpec(),
-  strategyGate = {},
-  strategyRoute = null,
   accountCircuitBreaker = null,
   now = Date.now(),
 } = {}) {
@@ -340,55 +301,13 @@ export function compileDecisionPlan({
     ? (targetPrice - referencePrice) / (referencePrice - stopPrice)
     : null
   const requestedLots = requestedLotsFor(requestedAction, advice)
-  const slippageBps = Math.max(
-    0,
-    finite(
-      strategySpec?.execution?.baseSlippageBps
-      ?? strategySpec?.execution?.slippageBps,
-    ) ?? 5,
-  )
-  const productionEligible = strategyGate?.productionEligible === true
-  const routedStrategy = strategyRoute?.production
-    || strategyRoute?.research
-    || null
-  const strategySignal = riskIncreasing && strategySpec
-    ? (
-        routedStrategy?.strategyId === strategySpec.strategyId
-          ? {
-              passed: routedStrategy.signalPassed,
-              matchedRules: routedStrategy.matchedRules || [],
-              failedRules: routedStrategy.failedRules || [],
-            }
-          : strategySpec.schemaVersion === STRATEGY_SPEC_V2_SCHEMA_VERSION
-            ? evaluateStrategySignalV2(
-                strategySpec,
-                {
-                  ...signalContext(payload, market),
-                  marketRegime: market.regime,
-                  account: {
-                    hasBasePosition: (
-                      (finite(payload.holdQty) || 0) > 0
-                      || (finite(payload.holding?.qty) || 0) > 0
-                    ),
-                  },
-                  sector: payload.sector || payload.sectorContext || {},
-                  technical: payload.tech || {},
-                },
-              )
-            : evaluateStrategySignal(
-                strategySpec,
-                signalContext(payload, market),
-              )
-      )
-    : null
+  const slippageBps = 5
   const generatedPriceContract = buildAdvicePriceContract({
     mode,
     advice,
     payload,
     evidenceSnapshot,
-    strategyGate,
     action: requestedAction,
-    requireStrategyApproval: riskIncreasing && !productionEligible,
   })
   const suppliedPriceContract = advice.priceContract?.schemaVersion
     === ADVICE_PRICE_CONTRACT_SCHEMA_VERSION
@@ -498,15 +417,6 @@ export function compileDecisionPlan({
   ) {
     blockedReasons.push('当前市场状态禁止新增风险')
   }
-  const strategyEvidenceMissing = ['quote', 'market', 'quant']
-    .some((source) => missingRequired.has(source))
-  if (
-    riskIncreasing
-    && !strategyEvidenceMissing
-    && strategySignal?.passed !== true
-  ) {
-    blockedReasons.push('策略入场条件未通过')
-  }
   if (
     riskIncreasing
     && !missingRequired.has('account')
@@ -535,6 +445,15 @@ export function compileDecisionPlan({
   }
   if (riskIncreasing && targetPrice != null && targetPrice <= referencePrice) {
     blockedReasons.push('目标价必须高于入场价')
+  }
+  if (
+    riskIncreasing
+    && (
+      rewardRiskRatio == null
+      || rewardRiskRatio < 1.8
+    )
+  ) {
+    blockedReasons.push('预期收益与风险不匹配，盈亏比需至少达到1.8:1')
   }
   if (advice.riskOverlay?.blocked) {
     blockedReasons.push(...(advice.riskOverlay.reasons || []))
@@ -577,7 +496,6 @@ export function compileDecisionPlan({
       account,
       market,
       slippageBps,
-      productionEligible,
       highConfidence: payload.quant?.highConfSignal?.fired === true,
     })
     if (capacity.lots <= 0) blockedReasons.push('风险预算或现金不足一手')
@@ -597,8 +515,6 @@ export function compileDecisionPlan({
 
   const probeRequested = riskIncreasing
     && (
-      requestedAction === 'ADD'
-      ||
       advice.tier === 'probe'
       || /小仓|试错|试仓/.test(
         `${advice.action || ''} ${advice.actionPlan || ''}`,
@@ -609,8 +525,7 @@ export function compileDecisionPlan({
     && payload.sectorOpportunity?.probeEligible === true
   )
   if (
-    !productionEligible
-    && probeRequested
+    probeRequested
     && sectorProbeEligible
     && capacity.lots > 0
   ) {
@@ -632,33 +547,11 @@ export function compileDecisionPlan({
   }
 
   const uniqueBlockers = [...new Set(blockedReasons.filter(Boolean))]
-  const manualProbeEligible = (
-    !productionEligible
-    && probeRequested
-    && sectorProbeEligible
-    && strategySignal?.passed === true
-    && rewardRiskRatio != null
-    && rewardRiskRatio >= 1.8
-    && uniqueBlockers.length === 0
-    && capacity.lots > 0
-  )
   let actionability = 'WATCH'
   if (riskIncreasing) {
-    actionability = uniqueBlockers.length
-      ? 'BLOCKED'
-      : productionEligible
-        ? 'READY'
-        : manualProbeEligible ? 'MANUAL_PROBE' : 'RESEARCH_ONLY'
+    actionability = uniqueBlockers.length ? 'BLOCKED' : 'READY'
   } else if (riskReducing) {
     actionability = uniqueBlockers.length ? 'BLOCKED' : 'READY'
-  }
-  if (
-    riskIncreasing
-    && !productionEligible
-    && actionability === 'RESEARCH_ONLY'
-    && !uniqueBlockers.some((item) => item.includes('策略尚未通过'))
-  ) {
-    uniqueBlockers.push('策略尚未通过生产晋级，仅作为研究级条件建议')
   }
   const action = actionability === 'BLOCKED'
     ? 'WATCH'
@@ -685,36 +578,6 @@ export function compileDecisionPlan({
   const validForMs = payload.todayQuote?.live === true
     ? 15 * 60 * 1000
     : 12 * 60 * 60 * 1000
-  const strategy = {
-    schemaVersion: strategySpec?.schemaVersion || null,
-    strategyId: strategySpec?.strategyId || null,
-    specVersion: strategySpec?.specVersion || null,
-    name: strategySpec?.name || routedStrategy?.name || null,
-    family: strategySpec?.family || routedStrategy?.family || null,
-    purpose: strategySpec?.purpose || routedStrategy?.purpose || null,
-    eligibleRegimes: strategySpec?.eligibleRegimes
-      || routedStrategy?.eligibleRegimes
-      || [],
-    horizon: strategySpec?.horizon || null,
-    signalTimeframe: strategySpec?.signalTimeframe
-      || strategySpec?.data?.timeframe
-      || null,
-    executionTimeframe: strategySpec?.executionTimeframe
-      || strategySpec?.execution?.entryAt
-      || null,
-    signalPassed: strategySignal?.passed ?? null,
-    matchedRules: strategySignal?.matchedRules || [],
-    failedRules: strategySignal?.failedRules || [],
-    productionEligible,
-    governanceState: routedStrategy?.state || null,
-    routeMode: strategyRoute?.production
-      ? 'PRODUCTION'
-      : strategyRoute?.research ? 'SHADOW_ONLY' : null,
-    outOfSample: routedStrategy?.outOfSample || null,
-    gateBlockerCodes: (strategyGate?.blockers || [])
-      .map((item) => text(item?.code, 80))
-      .filter(Boolean),
-  }
   const trigger = text(
     advice.actionPlan
     || advice.nextAction
@@ -737,7 +600,6 @@ export function compileDecisionPlan({
     evidenceSnapshotId: evidenceSnapshot?.snapshotId || null,
     lots,
     referencePrice,
-    specVersion: strategy.specVersion,
     stopPrice,
     targetPrice,
     targetWeightPct,
@@ -767,7 +629,6 @@ export function compileDecisionPlan({
       'ACCOUNT_CHANGED',
       'NEWS_MATERIAL',
       'PRICE_LEVEL_CROSSED',
-      'STRATEGY_GATE_CHANGED',
     ],
     marketRegime: {
       schemaVersion: market.schemaVersion || null,
@@ -777,8 +638,7 @@ export function compileDecisionPlan({
       dataQuality: market.dataQuality || 'MISSING',
       targetPositionPct: market.targetPositionPct || { min: 0, max: 0 },
     },
-    strategy,
-    manualConfirmationOnly: actionability === 'MANUAL_PROBE',
+    manualConfirmationOnly: probeRequested,
     opportunity: payload.sectorOpportunity?.matched === true
       ? {
           schemaVersion: payload.sectorOpportunity.schemaVersion,
@@ -798,17 +658,6 @@ export function compileDecisionPlan({
             payload.sectorOpportunity.sourceSession,
             20,
           ),
-        }
-      : null,
-    strategyRoute: strategyRoute
-      ? {
-          schemaVersion: strategyRoute.schemaVersion,
-          catalogVersion: strategyRoute.catalogVersion,
-          marketRegime: strategyRoute.marketRegime,
-          requestedAction: strategyRoute.requestedAction,
-          policyPriority: strategyRoute.policyPriority,
-          production: strategyRoute.production,
-          research: strategyRoute.research,
         }
       : null,
     currentWeightPct: round(currentWeightPct, 1),
@@ -874,8 +723,6 @@ export function buildFallbackDecisionAdvice({
   mode,
   payload = {},
   evidenceSnapshot = null,
-  strategySpec = getActiveStrategySpec(),
-  strategyGate = {},
   error = '',
   now = Date.now(),
 } = {}) {
@@ -915,8 +762,6 @@ export function buildFallbackDecisionAdvice({
     advice,
     payload,
     evidenceSnapshot,
-    strategySpec,
-    strategyGate,
     now,
   })
   return advice

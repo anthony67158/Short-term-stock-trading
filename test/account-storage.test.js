@@ -539,7 +539,7 @@ test('客户端旧快照不能覆盖服务端复核遥测', () => {
   )
 })
 
-test('客户端保存不能覆盖服务端收益学习委员会与人工批准状态', () => {
+test('客户端保存保留服务端收益学习与事件状态并清理旧策略字段', () => {
   const account = {
     nick: '治理状态账号',
     clientRevision: 3,
@@ -589,14 +589,8 @@ test('客户端保存不能覆盖服务端收益学习委员会与人工批准�
     'real-outcome-learning.v1',
   )
   assert.equal(account.data.advisorCouncilShadow.length, 1)
-  assert.equal(
-    account.data.strategyHumanApproval.specVersion,
-    'strategy.test',
-  )
-  assert.equal(
-    account.data.strategyGovernanceV2.strategies[0].state,
-    'draft',
-  )
+  assert.equal(account.data.strategyHumanApproval, undefined)
+  assert.equal(account.data.strategyGovernanceV2, undefined)
   assert.deepEqual(account.data.adviceEventKeys, {
     'judge:alert-1': 1000,
   })

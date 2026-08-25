@@ -460,44 +460,6 @@ test('观望价被精确穿越时立即进入实质变化复核', () => {
   assert.match(result.reason, /观察价10\.04/)
 })
 
-test('策略审核状态变化会触发自动复核', () => {
-  const previous = snapshot({
-    policy: {
-      strategyGate: {
-        specVersion: 'strategy-v1',
-        productionEligible: false,
-        decision: 'reject',
-        blockerCodes: ['BACKTEST_REQUIRED'],
-      },
-    },
-  })
-  const current = snapshot({
-    policy: {
-      strategyGate: {
-        specVersion: 'strategy-v1',
-        productionEligible: true,
-        decision: 'promote',
-        blockerCodes: [],
-      },
-    },
-  })
-  const result = evaluateScheduledReview({
-    origin: 'auto',
-    previousDigest: adviceEvidenceDigest(previous),
-    snapshot: current,
-    hasPreviousAdvice: true,
-    previousAdvice: {
-      action: '观望',
-      timing: '策略审核通过后重新判断',
-      priceContract: priceContract(),
-    },
-  })
-
-  assert.equal(result.shouldRunLLM, true)
-  assert.equal(result.disposition, 'material-change')
-  assert.match(result.reason, /策略审核状态/)
-})
-
 test('关键证据缺失时保留上一版而不是让LLM猜测', () => {
   const partial = snapshot({
     freshness: { status: 'PARTIAL', missingSources: ['quant'] },

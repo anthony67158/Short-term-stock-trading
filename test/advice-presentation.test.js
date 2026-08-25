@@ -158,7 +158,7 @@ test('长段关注价说明不挤入价格格且后续路径默认收进完整�
 test('被阻断的买入计划不把现价冒充买入价且只展示已验证观察价', () => {
   const view = buildAdvicePresentation({
     action: '观望',
-    actionPlan: '站上10.8元且策略审核通过后重新判断',
+    actionPlan: '站上10.8元且资金确认后重新判断',
     watchPrice: 10.8,
     decisionPlan: {
       schemaVersion: 'decision-plan.v2',
@@ -167,7 +167,7 @@ test('被阻断的买入计划不把现价冒充买入价且只展示已验证�
       action: 'WATCH',
       actionLabel: '观望',
       actionability: 'BLOCKED',
-      blockedReasons: ['策略入场条件未通过'],
+      blockedReasons: ['量价与资金确认不足'],
       prices: {
         reference: 10,
         current: 10,
@@ -364,7 +364,7 @@ test('军师模型摘要直接展示本次采用的生产模型次日预测', ()
   )
 })
 
-test('决策计划v2优先提供最终动作手数费用和策略等级', () => {
+test('决策计划v2优先提供最终动作、手数、费用和执行校验', () => {
   const view = buildAdvicePresentation({
     action: '立即买入',
     title: '模型建议买入',
@@ -376,26 +376,9 @@ test('决策计划v2优先提供最终动作手数费用和策略等级', () => 
       decisionId: 'decision.demo',
       action: 'BUY',
       actionLabel: '买入',
-      actionability: 'RESEARCH_ONLY',
+      actionability: 'READY',
       asOf: '2026-08-21T02:30:00.000Z',
       validUntil: '2026-08-21T02:45:00.000Z',
-      strategy: {
-        schemaVersion: 'strategy-spec.v2',
-        strategyId: 'market-quant-resonance',
-        specVersion: 'strategy.15im9g7',
-        name: '多因子排名',
-        family: 'MULTI_FACTOR_RANKING',
-        eligibleRegimes: ['TREND_STRONG', 'TRANSITION', 'RANGE'],
-        governanceState: 'rejected',
-        routeMode: 'SHADOW_ONLY',
-        outOfSample: {
-          folds: 4,
-          positiveFolds: 2,
-          compoundedReturn: -0.0119,
-        },
-        productionEligible: false,
-        signalPassed: true,
-      },
       marketRegime: {
         regime: 'TREND_STRONG',
         label: '强势趋势',
@@ -412,7 +395,7 @@ test('决策计划v2优先提供最终动作手数费用和策略等级', () => 
         estimatedNetAmount: 5010,
         estimatedFees: 7.5,
       },
-      blockedReasons: ['策略尚未通过生产晋级，仅作为研究级条件建议'],
+      blockedReasons: [],
       evidenceBasis: {
         state: 'PREVIOUS_CLOSE',
         label: '最近交易日完整数据',
@@ -433,20 +416,15 @@ test('决策计划v2优先提供最终动作手数费用和策略等级', () => 
     },
   })
 
-  assert.equal(view.verdict.action, '观察·买入')
+  assert.equal(view.verdict.action, '买入')
   assert.equal(view.execution.quantity, '5手')
   assert.equal(view.execution.amount, '5010')
   assert.equal(view.execution.position, '0% → 5%')
-  assert.match(view.execution.instruction, /仅供观察/)
+  assert.match(view.execution.instruction, /买入5手/)
   assert.match(view.execution.instruction, /5手/)
   assert.doesNotMatch(view.execution.instruction, /10手/)
-  assert.equal(view.decisionPlan.actionability, 'RESEARCH_ONLY')
-  assert.equal(view.decisionPlan.strategyName, '多因子排名')
-  assert.equal(view.decisionPlan.strategyFamily, 'MULTI_FACTOR_RANKING')
-  assert.equal(view.decisionPlan.governanceState, 'rejected')
-  assert.equal(view.decisionPlan.routeMode, 'SHADOW_ONLY')
-  assert.equal(view.decisionPlan.outOfSample.folds, 4)
-  assert.equal(view.decisionPlan.outOfSample.returnPct, -1.19)
+  assert.equal(view.decisionPlan.actionability, 'READY')
+  assert.equal(view.decisionPlan.strategyName, undefined)
   assert.deepEqual(view.decisionPlan.evidenceBasis, {
     state: 'PREVIOUS_CLOSE',
     label: '最近交易日完整数据',
@@ -462,7 +440,7 @@ test('决策计划v2优先提供最终动作手数费用和策略等级', () => 
     impact: '无法确认当前价和价格时效',
     recovery: '行情接口恢复后重新生成',
   }])
-  assert.match(view.decisionPlan.statusText, /未通过实盘启用审核/)
+  assert.match(view.decisionPlan.statusText, /证据、价格与账户风险检查均已通过/)
   assert.deepEqual(
     view.levels.map((item) => item.value),
     ['10', '12', '9'],

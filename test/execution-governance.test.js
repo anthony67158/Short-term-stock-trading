@@ -216,11 +216,10 @@ test('做T网格仅在有底仓的震荡市且流动性波动合格时开放', (
   assert.ok(blocked.reasons.includes('MARKET_NOT_RANGE'))
 })
 
-test('归因聚合只让真实费后已完成结果进入策略学习', () => {
+test('归因聚合只让真实费后已完成结果进入效果学习', () => {
   const summary = aggregateExecutionAttribution([
     {
       status: 'COMPLETED',
-      strategyId: 'trend-breakout',
       marketRegime: 'TREND_STRONG',
       totalFees: 10,
       netPnl: 120,
@@ -228,7 +227,6 @@ test('归因聚合只让真实费后已完成结果进入策略学习', () => {
     },
     {
       status: 'PARTIAL',
-      strategyId: 'trend-breakout',
       totalFees: 5,
       netPnl: 40,
       validationComplete: false,

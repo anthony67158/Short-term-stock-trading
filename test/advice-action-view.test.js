@@ -291,7 +291,7 @@ test('被决策内核阻断的买入建议统一降级为观望', () => {
       actionability: 'BLOCKED',
       quantity: { lots: 0 },
       prices: { reference: 10, stop: 9, target: 12 },
-      blockedReasons: ['策略入场条件未通过'],
+      blockedReasons: ['量价与资金确认不足'],
     },
   }, { mode: 'buy_advice' })
 

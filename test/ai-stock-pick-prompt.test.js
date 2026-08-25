@@ -47,11 +47,11 @@ test('AI选股在V2.1回退时必须按实际V2.0解释候选分数', () => {
   assert.match(prompt, /不得把V2\.0分数描述成V2\.1盘中结果/)
 })
 
-test('AI选股不得把未通过统一策略的候选升级为可执行', () => {
+test('AI选股不得把未通过量价量化确认的候选升级为可执行', () => {
   const prompt = buildUserPrompt('scan_pick', {
     candidates: [{
       code: '600001',
-      strategySignal: {
+      entrySignal: {
         passed: false,
         failedRules: [{
           field: 'quant.score',
@@ -60,18 +60,14 @@ test('AI选股不得把未通过统一策略的候选升级为可执行', () => 
         }],
       },
     }],
-    strategy: {
-      strategyId: 'market-quant-resonance',
-      specVersion: 'strategy.test',
-    },
   })
 
-  assert.match(prompt, /strategySignal\.passed=false/)
+  assert.match(prompt, /entrySignal\.passed=false/)
   assert.match(prompt, /不得升级为“可执行”/)
   assert.match(prompt, /failedRules/)
 })
 
-test('AI选股只解释确定性龙头身份且买点仍由量化与策略闸门决定', () => {
+test('AI选股只解释确定性龙头身份且买点仍由量化与入场确认决定', () => {
   const prompt = buildUserPrompt('scan_pick', {
     candidates: [{
       code: '600001',
@@ -83,7 +79,7 @@ test('AI选股只解释确定性龙头身份且买点仍由量化与策略闸门
         leaderScore: 86,
         memberVerified: true,
       },
-      strategySignal: {
+      entrySignal: {
         passed: false,
         failedRules: [{ field: 'quant.score', actual: 45, expected: 55 }],
       },
@@ -94,7 +90,7 @@ test('AI选股只解释确定性龙头身份且买点仍由量化与策略闸门
   assert.match(prompt, /确定性/)
   assert.match(prompt, /不得重新猜测或改写龙头身份/)
   assert.match(prompt, /龙头身份不等于买点/)
-  assert.match(prompt, /量化与strategySignal/)
+  assert.match(prompt, /量化与entrySignal/)
 })
 
 test('AI选股先比较战略产业与公司价值再用资金量化确认', () => {
@@ -115,7 +111,7 @@ test('AI选股先比较战略产业与公司价值再用资金量化确认', () 
         companyQualityScore: 78,
         memberVerified: true,
       },
-      strategySignal: { passed: false, failedRules: [] },
+      entrySignal: { passed: false, failedRules: [] },
     }],
   })
 

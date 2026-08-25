@@ -118,9 +118,9 @@
     },
     {
       "schemaVersion": "harness-case.v1",
-      "id": "advice-decision-plan-research-only",
+      "id": "advice-decision-plan-evidence-risk-ready",
       "adapter": "advice",
-      "tags": ["advice", "decision-plan", "strategy-gate", "fees"],
+      "tags": ["advice", "decision-plan", "risk-check", "fees"],
       "input": {
         "compileDecisionPlan": true,
         "now": 1787279400000,
@@ -133,7 +133,7 @@
             "pct": 2,
             "volRatio": 2,
             "limitDownPrice": 9,
-            "limitUpPrice": 11,
+            "limitUpPrice": 13,
             "live": true
           },
           "marketEnv": {
@@ -174,20 +174,12 @@
             "missingSources": []
           }
         },
-        "strategyGate": {
-          "productionEligible": false,
-          "blockers": [
-            {
-              "code": "OFFLINE_REJECTED"
-            }
-          ]
-        },
         "result": {
           "action": "立即买入",
           "tier": "now",
           "buyPrice": 10,
           "stopPrice": 9,
-          "targetPrice": 10.8,
+          "targetPrice": 12,
           "planQty": 10,
           "planAmount": 10000,
           "actionPlan": "回踩确认后买入",
@@ -199,7 +191,7 @@
         "expectedValid": true,
         "expectedAction": "立即买入",
         "expectedQty": 10,
-        "expectedDecisionActionability": "RESEARCH_ONLY",
+        "expectedDecisionActionability": "READY",
         "expectedDecisionAction": "BUY",
         "requiredIssueIncludes": [],
         "forbiddenIssueIncludes": [],

@@ -189,13 +189,12 @@ test('军师区分真实费后收益与三日建议命中统计', () => {
 test('军师明确把动作价位手数视为候选并服从统一决策编译器', () => {
   assert.match(ADVISOR_SYSTEM, /Decision Compiler/)
   assert.match(ADVISOR_SYSTEM, /候选草案/)
-  assert.match(ADVISOR_SYSTEM, /strategyGate\.productionEligible=false/)
-  assert.match(ADVISOR_SYSTEM, /研究级条件建议/)
-  assert.match(ADVISOR_SYSTEM, /strategyRoute/)
-  assert.match(ADVISOR_SYSTEM, /SHADOW_ONLY/)
+  assert.match(ADVISOR_SYSTEM, /按证据完整性/)
+  assert.match(ADVISOR_SYSTEM, /盈亏比/)
+  assert.doesNotMatch(ADVISOR_SYSTEM, /strategyGate|strategyRoute/)
   assert.match(ADVISOR_SYSTEM, /严禁原样写进/)
   assert.match(ADVISOR_FAST_SYSTEM, /系统内部字段名/)
-  assert.match(ADVISOR_FAST_SYSTEM, /市场处于防守状态/)
+  assert.match(ADVISOR_FAST_SYSTEM, /账户风险、证据完整性与盈亏比约束/)
 })
 
 test('所有军师模式都要求价格可追溯且无法核验时留空', () => {
@@ -286,4 +285,31 @@ test('显式深度生成使用紧凑事实契约而不丢失价格与资金约�
   assert.match(prompt, /主动做多必须满足风险预算与盈亏比至少1\.8:1/)
   assert.doesNotMatch(prompt, /UNUSED_DEEP_PAYLOAD/)
   assert.ok(prompt.length < 7000)
+})
+
+test('旧客户端携带的策略治理字段不会进入军师提示词', () => {
+  const prompt = buildUserPrompt('buy_advice', {
+    generationProfile: 'DEEP',
+    code: '600000',
+    name: '测试股份',
+    strategyGate: {
+      productionEligible: false,
+      blockerCodes: ['BACKTEST_REQUIRED'],
+    },
+    strategyRoute: {
+      production: null,
+      research: { actionability: 'SHADOW_ONLY' },
+    },
+    previousAdvice: {
+      action: '观望',
+      actionPlan: '策略审核通过后再买入',
+      invalidation: 'productionEligible=true后重新评估',
+    },
+  })
+
+  assert.doesNotMatch(
+    prompt,
+    /productionEligible|strategyRoute|SHADOW_ONLY|BACKTEST_REQUIRED/,
+  )
+  assert.match(prompt, /按当前量价、资金与风险条件重新评估/)
 })

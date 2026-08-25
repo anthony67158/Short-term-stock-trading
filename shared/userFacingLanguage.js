@@ -1,27 +1,27 @@
 const EXACT_REWRITES = [
   [
     /策略闸门\s*productionEligible\s*(?:为|=)\s*(?:真|true)[、，,\s]*策略路线进入生产可执行[、，,\s]*(?:且)?\s*marketEnv\.regime\s*不再为\s*RISK_OFF\s*时[，,]?\s*观望失效[。.]?/gi,
-    '当策略通过实盘启用审核、当前行情匹配可执行策略，且市场结束防守状态时，重新评估是否买入。',
+    '历史限制已取消；市场结束防守状态且量价、资金与风险条件确认后，重新评估是否买入。',
   ],
   [
     /strategyGate\.productionEligible\s*(?:为|=)\s*(?:真|true)/gi,
-    '策略已通过实盘启用审核',
+    '历史限制已取消',
   ],
   [
     /strategyGate\.productionEligible\s*(?:为|=)\s*(?:假|false)/gi,
-    '策略尚未通过实盘启用审核',
+    '历史限制已取消，改按当前证据重新评估',
   ],
   [
     /productionEligible\s*(?:为|=)\s*(?:真|true)/gi,
-    '策略已通过实盘启用审核',
+    '历史限制已取消',
   ],
   [
     /productionEligible\s*(?:为|=)\s*(?:假|false)/gi,
-    '策略尚未通过实盘启用审核',
+    '历史限制已取消，改按当前证据重新评估',
   ],
   [
     /strategyRoute\s*(?:为|=)\s*SHADOW_ONLY/gi,
-    '当前适用策略仅模拟观察',
+    '历史限制已取消，改按当前证据重新评估',
   ],
   [
     /marketEnv\.regime\s*不再为\s*RISK_OFF/gi,
@@ -33,12 +33,12 @@ const EXACT_REWRITES = [
   ],
   [
     /策略尚未通过生产晋级[，,；;]?\s*仅作为研究级条件建议/g,
-    '策略尚未通过实盘启用审核，本轮只用于观察',
+    '历史限制已取消，改按当前证据重新评估',
   ],
-  [/策略路线进入生产可执行/g, '当前行情匹配可执行策略'],
+  [/策略路线进入生产可执行/g, '当前证据允许执行'],
   [/研究级条件建议/g, '仅供观察，暂不可直接执行'],
-  [/策略晋级前不进入强执行确认/g, '策略通过实盘启用审核前，不能直接执行'],
-  [/生产晋级/g, '实盘启用审核'],
+  [/策略晋级前不进入强执行确认/g, '按当前证据重新评估是否执行'],
+  [/生产晋级/g, '历史限制'],
   [/确定性闸门/g, '执行条件'],
   [/强执行确认/g, '直接执行'],
   [/硬闸门/g, '强制风险检查'],
@@ -46,15 +46,15 @@ const EXACT_REWRITES = [
 ]
 
 const TERM_REWRITES = [
-  [/\bstrategyGate\b/g, '策略审核'],
-  [/\bstrategyRoute\.production\b/g, '当前可执行策略'],
-  [/\bstrategyRoute\.research\b/g, '当前研究策略'],
-  [/\bstrategyRoute\b/g, '当前适用策略'],
+  [/\bstrategyGate\b/g, '历史限制'],
+  [/\bstrategyRoute\.production\b/g, '历史执行路径'],
+  [/\bstrategyRoute\.research\b/g, '历史观察路径'],
+  [/\bstrategyRoute\b/g, '历史决策路径'],
   [/\bmarketEnv\.regime\b/g, '市场状态'],
   [/\bmarketRegime\b/g, '市场状态'],
-  [/\bproductionEligible\b/g, '实盘启用资格'],
+  [/\bproductionEligible\b/g, '历史启用状态'],
   [/\bactionability\b/g, '执行状态'],
-  [/\bspecVersion\b/g, '策略版本'],
+  [/\bspecVersion\b/g, '历史规则版本'],
   [/\bblockerCodes\b/g, '未通过原因'],
   [/\bquant\.highConfSignal\.fired\b/g, '高把握买点信号'],
   [/\bcounterTrend\.isStrong\b/g, '个股逆势强度'],
@@ -79,7 +79,7 @@ const TERM_REWRITES = [
   [/\bUNKNOWN\b/g, '状态待确认'],
   [/\bREJECT(?:ED)?\b/gi, '未通过'],
   [/\bPROMOTE(?:D)?\b/gi, '已通过'],
-  [/\bStrategySpec\s*v?2\b/gi, '当前策略规则'],
+  [/\bStrategySpec\s*v?2\b/gi, '历史规则'],
   [/\bWalk-forward\b/gi, '滚动历史检验'],
   [/\bProfit Factor\b/gi, '盈亏效率'],
 ]
@@ -212,25 +212,11 @@ export function marketRegimeLabel(value) {
   }[String(value || '')] || humanizeUserFacingText(value || '暂未判断')
 }
 
-export function strategyStateLabel(value) {
-  return {
-    draft: '待验证',
-    backtested: '已完成回测',
-    rejected: '未通过',
-    shadow: '模拟观察',
-    'paper-qualified': '模拟结果达标',
-    approved: '已审核',
-    active: '已启用',
-    suspended: '已暂停',
-    retired: '已停用',
-  }[String(value || '')] || humanizeUserFacingText(value || '待确认')
-}
-
 export function actionabilityLabel(value) {
   return {
     READY: '条件已满足，可执行',
     MANUAL_PROBE: '短线条件已满足，需人工确认',
-    RESEARCH_ONLY: '仅供观察，暂不可执行',
+    RESEARCH_ONLY: '历史建议，需按当前证据重新评估',
     BLOCKED: '条件未满足，暂不执行',
     WATCH: '等待条件满足',
   }[String(value || '')] || '等待确认'

@@ -148,17 +148,17 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST "$FC/api/ai" -H "Content-Type: 
 
 ## 关键约定与坑
 
-- **七个 LLM 角色、九个固定槽位**（`_llm_config.js`）：`advisor` / `review` / `portfolio` / `agent` / `daily` / `sector` / `judge`。军师主建议 `advisor` 与委员会、定时、Judge 失效复核 `review` 各固定两路，其余角色各一路；侧边栏对话统一使用 `agent`，不再单列 `chat`。配置存 OSS `config/llm.json` 的 `roleEndpoints`，优先级 **OSS > env > 默认**，改完即时生效免重部署。
+- **七个 LLM 角色、九个固定槽位**（`_llm_config.js`）：`advisor` / `review` / `portfolio` / `agent` / `daily` / `sector` / `judge`。军师主建议使用 `advisor`，定时与 Judge 失效复核使用 `review`，其余角色独立；侧边栏对话统一使用 `agent`。配置存 OSS `config/llm.json` 的 `roleEndpoints`，优先级 **OSS > env > 默认**，改完即时生效免重部署。
 - **角色端点严格隔离**（`_llm_pool.js`）：请求只能进入本角色槽位，禁止跨角色回退；`advisor` 与 `review` 两路分别按最少在途调度，连续失败 3 次冷却 60 秒并自动半开恢复。旧配置缺少 `review` 时保持两个未配置槽位，绝不借用 `advisor`。旧 `baseUrl` / `endpoints` / `judgeEndpoint` / `sectorEndpoint` 只允许迁移读取，不得作为新功能配置入口。
-- **建议任务按角色分 lane**（`_jobs.js` / `cron_advice.js`）：`data.jobs` 只承载用户单股/一次生成的 `advisor` 任务，`data.reviewJobs` 只承载定时/Judge `review` 任务；同股可各有一个活跃任务。调度按 `resourceRole` 分别计算容量，深度任务进入委员会阶段后释放 advisor 槽；主批次进度不得混入 review。单股增量按角色使用独立 OSS 对象，复核结果发布前必须校验其基准建议仍是当前版本。
-- **军师生成模式决定推理模式**：普通生成必须强制关闭深度思考、最多两次尝试且不等待委员会；只有用户显式选择深度研判才开启深度思考和三角色委员会。`advisor` 端点不得被持仓诊断或其他角色借用。
+- **建议任务按角色分 lane**（`_jobs.js` / `cron_advice.js`）：`data.jobs` 只承载用户单股/一次生成的 `advisor` 任务，`data.reviewJobs` 只承载定时/Judge `review` 任务；同股可各有一个活跃任务。调度按 `resourceRole` 分别计算容量，主批次进度不得混入 review。单股增量按角色使用独立 OSS 对象，复核结果发布前必须校验其基准建议仍是当前版本。
+- **军师生成模式决定推理模式**：普通生成必须强制关闭深度思考、最多两次尝试；只有用户显式选择深度研判才开启深度思考。深度研判只调用一次主军师，不再执行委员会复核。`advisor` 端点不得被持仓诊断或其他角色借用。
 - **策略日报是军师软证据**：快速建议不得等待或自动生成策略日报；深度研判可尝试补齐，但日报缺失、超时或内容不完整只能降级该证据，禁止阻断个股行情、量化和军师主模型。
 - **策略日报按场次提供新增决策价值**：`daily-report.v3` 固定拆为盘前“预判与预案”、盘中“确认与纠偏”、盘后“复盘与次日预判”。盘前候选只来自板块前瞻与确定性日线价位；午报、晚报必须读取同账号同日早报逐项验证，缺失时明确标记不可复盘。行情、量能、板块资金、异动、龙虎榜和北向成交为只读硬数据，LLM 只能解释逻辑与动作，不得改写。北向净买额按现行披露规则固定为“未披露”，禁止把缺失值写成 `0` 或推断流向。
 - **策略日报证据必须可追溯且可降级**：公告/政策、行情与权威媒体、网页搜索线索统一进入 `E##` 证据包，每条软信息保留来源、链接和发布时间。豆包 Global 为默认搜索源；可选 SearXNG 只允许显式配置自托管 HTTPS 实例，默认关闭且不得依赖公共实例。模型缺字段、引用不存在编号或使用证据包外数字时必须重试，仍失败则返回明确标记的规则化版本。
 - **日报自动计划按账号隔离**：配置保存在 `settings["dailyReport.schedule"]`，默认关闭；`daily-report-schedule-timer` 每五分钟只判断到期场次并异步分发独立 Worker。盘前可每日运行，午间/收盘仅交易日运行；同一 `日期:场次` 使用租约、完成记录和最多三次尝试防重，不得占用 `advisor` 端点。
 - **军师事件幂等**：相同用户请求在任务终态后仍不得重复创建；Judge `confirm` 只推进确定性执行状态，不重新调用军师，只有 `invalid`/计划冲突或证据快照之后的新实质事件才允许续跑。
 - **人工执行状态**（`executionPlan.js` / `executionPlanStore.js`）：`USER_CONFIRMED` 只表示用户确认人工计划，不代表券商已报单；`PARTIALLY_RECORDED/COMPLETED` 只能由真实人工成交推进。执行计划与归因按成交进度、状态历史和时间合并，禁止旧设备回滚完成状态。
-- **账户执行风控**（`accountCircuitBreaker.js` / `executionAttribution.js`）：未完成买入占用现金，未完成卖出不得提前释放现金；账户熔断只阻止新增风险，不阻止减仓/退出。只有完整且已核验的真实费后结果可进入策略学习。
+- **账户执行风控**（`accountCircuitBreaker.js` / `executionAttribution.js`）：未完成买入占用现金，未完成卖出不得提前释放现金；账户熔断只阻止新增风险，不阻止减仓/退出。只有完整且已核验的真实费后结果可进入效果学习。
 - **持续复核使用显式股票白名单**：持仓和自选分别保存 `advAuto.holdCodes` / `advAuto.watchCodes`，FC Timer 只为名单内股票排队；字段缺失仅用于兼容旧账号“全部”，一旦用户选择后，后续新增股票不得自动加入。前端筛选复用一次性生成的概念/行业多选，自选额外支持“置顶”；个股持续复核开关必须与白名单保持一致。
 - **策略日报与板块前瞻独立**：`daily` 不得复用 `agent`，`sector` 不得复用或占用 `advisor`；每个槽位独立配置 Base URL、Key、模型、深度思考、启停与在线验证。
 - **批量建议增量持久化**：每只股票生成完成后先写入账号 `runtime/advice/<code>.json` 小对象，任务运行态写 `runtime/state.json`；禁止每只完成都重写整份账号快照。整批收尾再压实 `current.json`，其他设备通过增量同步立即看到单股结果。
@@ -167,11 +167,11 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST "$FC/api/ai" -H "Content-Type: 
 - **板块生成完成态**：前端只有在任务终态为 `done`、快照非空且 `generatedAt` 严格晚于点击前版本时才能提示完成。休市日手动正式生成重算最近交易日，不得创建周末信号日或用旧快照冒充新结果。
 - **豆包联网检索**（`_ai_search.js` / `_ai_search_config.js`）：仅调用豆包搜索 Global版，运行时开关、API Key 名称和 Key 保存在 OSS `config/doubao-search.json`，环境变量 `DOUBAO_SEARCH_*` 仅作回退。开启后军师的个股信息与行业资讯均以豆包为正式检索源，助手、策略日报统一增加“检索参考”；关闭后禁止调用与展示。军师个股检索每轮最多一次；行业优先复用240分钟缓存，缺失时每轮最多补一次；个股缓存30分钟、失败冷却15分钟，自动复核/Judge只读缓存；同键并发请求单飞合并。搜索摘要是待核验外部证据，不能替代公告、行情、资金或龙虎榜。
 - **军师与复核必须合参散户资金**：东方财富 `f84` / 日资金流 `f53` 作为小单净流入，统一映射为 `stockFund.retailNetYi`，它只是按成交规模划分的散户行为代理，不等于真实账户身份。`advisor` 与 `review` 的 `fundNote` 必须同时引用主力与小单净额并解释同向/背离：主力流出+小单流入重点防散户承接与高位派发，主力流入+小单流出需用价格和量能确认承接；禁止把单日小单净额独立当作买卖信号，缺失值不得写成 `0`。
-- **用户可见文案不得暴露内部字段**：`productionEligible`、`strategyRoute`、`marketEnv.regime`、`RISK_OFF`、`SHADOW_ONLY`、`specVersion`、`blockerCodes` 等字段名和枚举只允许存在于结构化数据、日志与开发配置中。军师、复核、做T、策略研究和其他前台说明必须通过 `shared/userFacingLanguage.js` 转成普通中文，并直接说明“当前能不能操作、还缺什么条件、何时重新评估”；旧建议也必须在展示层兼容转译。
+- **军师直接按证据与风险决策**：不得恢复策略治理、策略路由、版本晋级或研究级门槛。新增风险只受关键证据完整性、市场风险、量化与资金确认、合法价格、账户现金/仓位和至少 `1.8:1` 盈亏比约束；小仓试错最多总资产 `5%` 且必须人工确认。减仓、退出和硬止损不等待模型治理状态。
+- **用户可见文案不得暴露内部字段**：`marketEnv.regime`、`RISK_OFF`、`blockerCodes` 等字段名和枚举只允许存在于结构化数据、日志与开发配置中。军师、复核、做T和其他前台说明必须通过 `shared/userFacingLanguage.js` 转成普通中文，并直接说明“当前能不能操作、还缺什么条件、何时重新评估”；旧建议中的已废弃策略字段也必须在展示层兼容转译。
 - **板块前瞻是唯一方向决策入口**（`sector_forecast.js` / `SectorForecast.jsx`）：前端位于“今日决策”，不得在“盘面研究”或其他页面重复挂载独立 AI 选股模块。交易日 09:30–11:30、13:00–15:00 按运行时设置每 5/10/15 分钟生成独立 `intraday.json`；只复用最近正式版 LightGBM 概率作为日终先验，再用实时资金、涨幅和成分股扩散重算可买性。盘中版禁止覆盖 `latest.json`、正式历史或 08:50 盘前排名，也禁止每轮重复调用 LLM/豆包。
 - **概念标签动态同步**（`stock_tags.js` / `stockTagStore.js`）：标签来自东方财富个股资料与 F10 精确题材，不得写死到持仓或自选数据。服务端成功缓存 5 分钟、空结果 2 分钟；前端只对当前正在展示的股票定期重验，变化后通过统一 store 同步所有页面。
 - **两段式确认**（`_confirm.js`）：价到点→watching(弱提醒);确定性信号+LLM Judge 双判→confirm 才发强提示;LLM 置信度门槛按动作分级（买入78、止盈/减仓70、止损65），未达标降级 wait;LLM 挂了回退确定性结论。
-- **多策略研究隔离**（`strategySpecV2.js` / `strategyRouter.js`）：五类策略使用 `strategy-spec.v2` 和不可变 `specVersion`；信号价固定 QFQ、撮合价固定 RAW。新策略默认 `draft/rejected` 且只进入 `SHADOW_ONLY`，只有同版本六折样本外、双基准、容量压力、真实成交和人工批准全部通过并标记 `active` 后才可影响生产。
 - **每日重训**（`retrain_daily.py`）：冠军-挑战者,leak-free holdout AUC 过护栏才晋级、只升不降;腾讯为硬性前置,新浪仅参考(海外 CI 出口 IP 拉不到新浪),股票池有 `pool_cache.json` 兜底。
 - **A股规则**：T+1(今日买入手数当日锁定)、手续费(佣金万3最低5/印花税千0.5仅卖/过户费万0.1)、做T FIFO 配对、含费均价。
 - **健壮性**：各模块 ErrorBoundary 隔离、事件订阅 try-catch、网络请求带超时、数值渲染 `Number.isFinite` 守卫。改动时保持这些防护,勿裸 fetch、勿无超时。

@@ -2,7 +2,6 @@ import {
   reconcileAdviceNumbers,
 } from '../../shared/adviceValidation.js'
 import { compileDecisionPlan } from '../../shared/decisionPlan.js'
-import { getActiveStrategySpec } from '../../shared/strategySpec.js'
 
 function finite(value) {
   const number = Number(value)
@@ -42,8 +41,6 @@ export async function runAdviceHarnessCase(testCase) {
         advice: result,
         payload: input.payload,
         evidenceSnapshot: input.evidenceSnapshot || null,
-        strategySpec: getActiveStrategySpec(),
-        strategyGate: input.strategyGate || {},
         now: Number(input.now) || Date.now(),
       })
     : null
