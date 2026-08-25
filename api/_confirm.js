@@ -52,7 +52,16 @@ export function buildJudgeUserPrompt(payload) {
 
 export function judgePriceContractGate(alert = {}, advice = {}) {
   const contract = sanitizedAdvicePriceContract(advice);
-  if (!contract) return { allowed: true, reason: '', expectedPrice: null };
+  if (!contract) {
+    if (alert.candCode || alert.actCode) {
+      return {
+        allowed: false,
+        reason: '旧建议缺少已验证价格契约，请先复核',
+        expectedPrice: null,
+      };
+    }
+    return { allowed: true, reason: '', expectedPrice: null };
+  }
   const intent = actionIntentOf(alert);
   const level = advicePriceLevelForIntent(
     { priceContract: contract },

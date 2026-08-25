@@ -116,6 +116,35 @@ test('价格契约未通过时不得创建交易预警', () => {
   assert.equal(data.alerts.length, 0)
 })
 
+test('生产投影拒绝旧建议继续创建无价格契约的自动预警', () => {
+  const data = {
+    plan: [{ code: '600519', name: '贵州茅台' }],
+    holding: [],
+    alerts: [{
+      id: 'legacy-auto',
+      code: '600519',
+      candCode: '600519',
+      type: 'price',
+      op: 'lte',
+      value: 1400,
+      enabled: true,
+    }],
+    settings: {},
+  }
+
+  const changed = projectAdviceAlerts(data, '600519', {
+    action: '立即买入',
+    buyPrice: 1400,
+  }, {
+    now,
+    idFactory: ids,
+    requirePriceContract: true,
+  })
+
+  assert.equal(changed, true)
+  assert.equal(data.alerts.length, 0)
+})
+
 test('未持仓自选股只生成买点预警，禁止生成加仓或减仓预警', () => {
   const data = {
     plan: [{ code: '600519', name: '贵州茅台' }],

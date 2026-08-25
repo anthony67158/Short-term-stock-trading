@@ -43,6 +43,7 @@ test('候选卡买入框与预警只读取统一动作视图的契约价', () =>
   )
   assert.match(planStore, /advicePriceLevel\(advice, 'entry'\)/)
   assert.match(planStore, /contractEntry\?\.price \?\? triggerZone\?\.high/)
+  assert.match(planStore, /!priceContract\s*\|\|\s*!contractEntry/)
 })
 
 test('个股建议只保留一个主结论并把扩展信息收进详情', () => {

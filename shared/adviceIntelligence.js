@@ -1,4 +1,5 @@
 import { reviewPriceMateriality } from './adviceReviewRisk.js'
+import { sanitizedAdvicePriceContract } from './advicePriceContract.js'
 
 function finite(value) {
   const number = Number(value)
@@ -181,6 +182,16 @@ export function evaluateScheduledReview({
       shouldRunLLM: true,
       disposition: 'full-review',
       reason: '首次自动复核',
+    }
+  }
+  if (
+    previousAdvice
+    && !sanitizedAdvicePriceContract(previousAdvice)
+  ) {
+    return {
+      shouldRunLLM: true,
+      disposition: 'material-change',
+      reason: '旧建议缺少已验证价格契约',
     }
   }
   const currentDigest = adviceEvidenceDigest(snapshot)

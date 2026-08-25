@@ -1196,6 +1196,7 @@ async function persistServer(nick, workingAcc) {
       projectAdviceAlerts(fdata, k, effective.advice, {
         t1Status: t1StatusOf(fdata.holding || [], fdata.closed || [], k),
         nextTradeDay: nextTradingDayLabel(),
+        requirePriceContract: true,
       });
     }
   }

@@ -71,6 +71,10 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
   const judgeContext = buildJudgeAdviceContext(advice)
   const priceContract = sanitizedAdvicePriceContract(advice)
   const oldProjected = alerts.filter(isOwnedAutoAlert)
+  if (options.requirePriceContract === true && !priceContract) {
+    data.alerts = rest
+    return oldProjected.length > 0
+  }
 
   if (candidate && !liveHolder && !candidate.alertMuted) {
     const contractLevel = advicePriceLevel(advice, 'entry')

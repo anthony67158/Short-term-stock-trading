@@ -699,7 +699,7 @@ function CandDecision({ p, q }) {
       if ((p.buyQty ?? null) !== nextQty) patch.buyQty = nextQty
     }
     if (Object.keys(patch).length) planStore.setCandPlan(p.code, patch)
-    planStore.autoSyncCandAlert(p.code, p.name, aiPrice, advice)
+    planStore.autoSyncCandAlert(p.code, p.name, advice)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     entry?.at,

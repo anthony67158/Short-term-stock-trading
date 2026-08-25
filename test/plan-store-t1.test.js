@@ -156,7 +156,7 @@ test('研究级买入计划不会生成可执行买点预警', () => {
     alerts: [],
   })
 
-  planStore.autoSyncCandAlert('600519', '贵州茅台', 1400, {
+  planStore.autoSyncCandAlert('600519', '贵州茅台', {
     action: '立即买入',
     decisionPlan: {
       schemaVersion: 'decision-plan.v2',
@@ -197,7 +197,7 @@ test('当前建议缺失时撤销系统买点预警但保留手工预警', () =>
     ],
   })
 
-  planStore.autoSyncCandAlert('600556', '天下秀', null, null)
+  planStore.autoSyncCandAlert('600556', '天下秀', null)
 
   assert.deepEqual(
     planStore.get().alerts.map((alert) => alert.id),

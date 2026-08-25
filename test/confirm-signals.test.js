@@ -159,6 +159,31 @@ test('Judge拒绝与价格契约不一致的预警价', () => {
   )
 })
 
+test('旧军师自动预警缺少价格契约时不得进入Judge', () => {
+  assert.deepEqual(
+    judgePriceContractGate({
+      candCode: '600519',
+      note: '买点',
+      op: 'lte',
+      value: 10,
+    }, {}),
+    {
+      allowed: false,
+      reason: '旧建议缺少已验证价格契约，请先复核',
+      expectedPrice: null,
+    },
+  )
+  assert.equal(
+    judgePriceContractGate({
+      id: 'manual-alert',
+      note: '手工提醒',
+      op: 'gte',
+      value: 10,
+    }, {}).allowed,
+    true,
+  )
+})
+
 test('买点下方持续走弱时客观判定为失效', () => {
   const result = deterministicJudge('buy', {
     keyDistancePct: -1.5,

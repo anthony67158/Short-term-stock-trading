@@ -155,10 +155,11 @@ export function advicePlan(code) {
     const adv = a && a.advice
     if (!adv) return null
     const priceContract = sanitizedAdvicePriceContract(adv)
+    if (!priceContract) return null
     const targetLevel = advicePriceLevel(adv, 'target')
     const stopLevel = advicePriceLevel(adv, 'stop')
-    const tpSource = priceContract ? targetLevel?.price : adv.targetPrice
-    const slSource = priceContract ? stopLevel?.price : adv.stopPrice
+    const tpSource = targetLevel?.price
+    const slSource = stopLevel?.price
     const tp = tpSource != null && !isNaN(tpSource) ? roundPx(tpSource) : null
     const sl = slSource != null && !isNaN(slSource) ? roundPx(slSource) : null
     if (tp == null && sl == null) return null
@@ -2470,18 +2471,18 @@ export const planStore = {
   //   candCode: 该预警所绑定的自选股代码(区别于持仓计划联动的 planId)
   //   alertSyncedPrice(记在候选上): 上次自动同步过的买价 —— 相同价不重复写,用户删掉也不会被反复自动加回;
   //   AI 买价变化时(≠ alertSyncedPrice)才会重新同步/重新武装。
-  autoSyncCandAlert(code, name, buyPrice, advice = null) {
+  autoSyncCandAlert(code, name, advice = null) {
     const priceContract = sanitizedAdvicePriceContract(advice)
     const contractEntry = advicePriceLevel(advice, 'entry')
-    const exactBuyPrice = priceContract
-      ? contractEntry?.price
-      : buyPrice
+    const exactBuyPrice = contractEntry?.price
     const adviceNotReady = (
       advice?.decisionPlan?.schemaVersion === 'decision-plan.v2'
       && advice.decisionPlan.actionability !== 'READY'
     )
     if (
       !advice
+      || !priceContract
+      || !contractEntry
       || exactBuyPrice == null
       || isNaN(exactBuyPrice)
       || adviceNotReady
@@ -2597,6 +2598,11 @@ export const planStore = {
     const timing = adv.exitTiming || adv.actionPlan || ''
     const judgeContext = buildJudgeAdviceContext(adv)
     const priceContract = sanitizedAdvicePriceContract(adv)
+    if (!priceContract) {
+      state.alerts = rest
+      emit()
+      return
+    }
     const t1 = liveStatus
     const old = (state.alerts || []).filter((a) => a.actCode === code)
     const rebuilt = []
@@ -2606,7 +2612,7 @@ export const planStore = {
         || (kind === 'reduce'
           ? advicePriceLevel(adv, 'target')
           : null)
-      if (priceContract && !contractLevel) return
+      if (!contractLevel) return
       const triggerZone = kind === 'add'
         ? judgeContext.addZone
         : judgeContext.reduceZone

@@ -42,6 +42,17 @@ function snapshot(overrides = {}) {
   }
 }
 
+function priceContract(levels = []) {
+  return {
+    schemaVersion: 'advice-price-contract.v1',
+    validationStatus: 'VERIFIED',
+    levels,
+    allPricesStrict: true,
+    issues: [],
+    review: { operator: 'ALL', conditions: [], allMet: false },
+  }
+}
+
 test('快速轮只有量化结果时保留上一版完整军师建议', () => {
   const previous = {
     at: 1000,
@@ -85,6 +96,26 @@ test('自动复核证据无实质变化时跳过LLM', () => {
     shouldRunLLM: false,
     disposition: 'unchanged',
     reason: '关键证据无实质变化',
+  })
+})
+
+test('旧建议缺少价格契约时强制进入一次迁移复核', () => {
+  const result = evaluateScheduledReview({
+    origin: 'auto',
+    previousDigest: adviceEvidenceDigest(snapshot()),
+    snapshot: snapshot(),
+    hasPreviousAdvice: true,
+    previousAdvice: {
+      action: '观望',
+      watchPrice: 10.5,
+      timing: '站上10.5元后重新判断',
+    },
+  })
+
+  assert.deepEqual(result, {
+    shouldRunLLM: true,
+    disposition: 'material-change',
+    reason: '旧建议缺少已验证价格契约',
   })
 })
 
@@ -145,6 +176,24 @@ test('高波动股票穿越止损位仍立即进入实质变化复核', () => {
       action: '持有',
       stopPrice: 9.8,
       targetPrice: 10.8,
+      priceContract: priceContract([
+        {
+          key: 'stop',
+          field: 'stopPrice',
+          purpose: 'RISK',
+          price: 9.8,
+          direction: 'LTE',
+          strict: true,
+        },
+        {
+          key: 'target',
+          field: 'targetPrice',
+          purpose: 'OBJECTIVE',
+          price: 10.8,
+          direction: 'GTE',
+          strict: true,
+        },
+      ]),
     },
   })
 
@@ -174,6 +223,14 @@ test('观望价被精确穿越时立即进入实质变化复核', () => {
       action: '观望',
       timing: '放量站上10.04元后重新判断',
       watchPrice: 10.04,
+      priceContract: priceContract([{
+        key: 'watch',
+        field: 'watchPrice',
+        purpose: 'REVIEW_ONLY',
+        price: 10.04,
+        direction: 'GTE',
+        strict: true,
+      }]),
     },
   })
 
@@ -211,6 +268,7 @@ test('策略审核状态变化会触发自动复核', () => {
     previousAdvice: {
       action: '观望',
       timing: '策略审核通过后重新判断',
+      priceContract: priceContract(),
     },
   })
 
