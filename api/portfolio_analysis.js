@@ -71,6 +71,9 @@ import {
 
 const MAX_HOLDING_CODES = 30
 const MAX_QUANT_CODES = 8
+const PORTFOLIO_DEEP_PRIMARY_TIMEOUT_MS = 240000
+const PORTFOLIO_DEEP_RECOVERY_TIMEOUT_MS = 90000
+const PORTFOLIO_QUALITY_REPAIR_TIMEOUT_MS = 75000
 const PRODUCTION_API_ORIGIN =
   'https://stock-dashboard-znrlekbzit.cn-hangzhou.fcapp.run'
 
@@ -658,8 +661,10 @@ export async function generateAnalysis(context, {
     reasoning: deepMode,
     forceReason: deepMode,
     forceNoReason: false,
-    maxTokens: deepMode ? 5200 : 3600,
-    timeoutMs: deepMode ? 300000 : 150000,
+    maxTokens: deepMode ? 4600 : 3600,
+    timeoutMs: deepMode
+      ? PORTFOLIO_DEEP_PRIMARY_TIMEOUT_MS
+      : 150000,
   })
   if (primary.raw) return primary
 
@@ -677,8 +682,8 @@ export async function generateAnalysis(context, {
       reasoning: false,
       forceReason: false,
       forceNoReason: true,
-      maxTokens: 5200,
-      timeoutMs: 160000,
+      maxTokens: 3600,
+      timeoutMs: PORTFOLIO_DEEP_RECOVERY_TIMEOUT_MS,
     })
     if (withoutReasoning.raw) {
       return {
@@ -721,19 +726,19 @@ async function repairLowQualityAnalysis(context, {
       },
       {
         role: 'user',
-        content: `${buildPortfolioAnalysisPrompt(context)}
+        content: `${buildPortfolioAnalysisPrompt(context).slice(-12000)}
 
 上一版未通过质量闸门，缺失项：${missing.join('；') || '执行字段不完整'}。
 请基于同一证据重写完整JSON。必须补齐executionSummary、可执行stockActions/recommendations、conceptActions和scenarioPlan；每个交易动作必须有目标权重、参考触发价、失效条件和证据。不要解释，不要输出Markdown。
 
 上一版JSON：
-${JSON.stringify(previous).slice(0, 18000)}`,
+${JSON.stringify(previous).slice(0, 10000)}`,
       },
     ],
     toolChoice: 'none',
     temperature: 0.05,
-    maxTokens: 4200,
-    timeoutMs: 180000,
+    maxTokens: 3200,
+    timeoutMs: PORTFOLIO_QUALITY_REPAIR_TIMEOUT_MS,
     responseFormat: { type: 'json_object' },
     reasoning: false,
     forceNoReason: true,
@@ -1529,7 +1534,7 @@ export default async function handler(req, res) {
     let qualityRepaired = false
     let finalModel = generated.model
     let finalEndpoint = generated.endpoint
-    if (generated.raw && analysis.quality.score < 75) {
+    if (generated.raw && analysis.quality.score < 60) {
       emit('phase', {
         key: 'quality',
         text: '执行单字段不足，正在补齐金额、手数与失效条件',

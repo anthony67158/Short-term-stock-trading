@@ -76,7 +76,7 @@ test('上次深度分析靠无思考恢复后自动复核直接使用稳定模�
 
   data.portfolioAnalysisLatest.result.meta.modelRecovered = false
   data.portfolioAnalysisLatest.result.meta.effectiveDeepMode = true
-  assert.equal(portfolioAnalysisReviewDeepMode(data), true)
+  assert.equal(portfolioAnalysisReviewDeepMode(data), false)
 })
 
 test('交易账本变化可提前复核但活动任务始终防重', () => {

@@ -107,6 +107,8 @@ test('深度模型只有思考没有正文时先关闭思考重试同一模型',
   ])
   assert.equal(calls[0].forceReason, true)
   assert.equal(calls[1].forceNoReason, true)
+  assert.equal(calls[0].timeoutMs, 240000)
+  assert.equal(calls[1].timeoutMs, 90000)
 })
 
 test('专用模型失败时保留可定位的安全失败原因', async () => {

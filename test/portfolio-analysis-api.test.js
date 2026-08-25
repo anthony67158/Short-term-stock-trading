@@ -100,7 +100,7 @@ test('模型契约强制输出执行单、概念增减、场景方案和失效�
   assert.match(source, /triggerPrice/)
   assert.match(source, /invalidation/)
   assert.match(source, /repairLowQualityAnalysis/)
-  assert.match(source, /quality\.score\s*<\s*75/)
+  assert.match(source, /quality\.score\s*<\s*60/)
 })
 
 test('深度分析通过阶段、证据与决策节点展示过程，不输出隐藏推理原文', () => {

@@ -40,20 +40,10 @@ export function portfolioAnalysisReviewConfig(data = {}) {
   }
 }
 
-export function portfolioAnalysisReviewDeepMode(data = {}) {
-  const latest = data?.portfolioAnalysisLatest
-  const meta = latest?.result?.meta || {}
-  if (
-    meta.effectiveDeepMode === false
-    || (
-      meta.modelRecovered === true
-      && ['timeout', 'empty_content', 'invalid_json']
-        .includes(meta.primaryFailureCode)
-    )
-  ) {
-    return false
-  }
-  return latest?.deepMode !== false
+export function portfolioAnalysisReviewDeepMode() {
+  // 定时复核只做快速风险检查。完整深度诊断由用户手动发起，
+  // 避免每小时继承一次高成本、长超时的组合推理。
+  return false
 }
 
 export function setPortfolioAnalysisReviewEnabled(
