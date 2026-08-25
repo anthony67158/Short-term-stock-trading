@@ -16,6 +16,13 @@
   transition: opacity var(--dur-long) var(--ease-out);
 }
 
+html.ios-standalone #app-splash {
+  position: absolute;
+  inset: auto 0;
+  top: 0;
+  height: var(--app-height, 100vh);
+}
+
 #app-splash.hide {
   pointer-events: none;
   opacity: 0;

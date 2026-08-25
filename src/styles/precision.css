@@ -12829,4 +12829,38 @@ body.overlay-scroll-locked {
       0
       0;
   }
+
+  /*
+   * iOS standalone may expose a layout viewport shorter than the physical
+   * screen on cold launch. Keep the root in normal flow and size top-level
+   * overlays from 100vh, which maps to the full standalone screen.
+   */
+  html.ios-standalone,
+  html.ios-standalone body,
+  html.ios-standalone #root,
+  html.ios-standalone .app {
+    min-height: var(--app-height, 100vh);
+    background: var(--color-paper-2);
+  }
+
+  html.ios-standalone body.overlay-scroll-locked {
+    position: static;
+    top: auto;
+    right: auto;
+    left: auto;
+    width: auto;
+  }
+
+  html.ios-standalone body.overlay-scroll-locked
+    > .modal-mask:has(.detail-panel),
+  html.ios-standalone body.overlay-scroll-locked
+    > .holding-plan-mask,
+  html.ios-standalone body.overlay-scroll-locked
+    > .plan-edit-mask {
+    position: absolute;
+    inset: auto 0;
+    top: var(--overlay-scroll-top, 0px);
+    bottom: auto;
+    height: var(--app-height, 100vh);
+  }
 }

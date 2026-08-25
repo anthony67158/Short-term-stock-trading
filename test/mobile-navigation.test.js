@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
   edgeBackProgress,
+  isIOSStandalonePWA,
   shouldCommitMobileEdgeBack,
 } from '../shared/mobileEdgeBack.js'
 
@@ -87,5 +88,49 @@ test('应用统一接管边缘返回、弹层关闭和背景滚动锁定', () =>
   assert.match(
     styles,
     /\.detail-scroll,[\s\S]*?\.holding-plan-body[\s\S]*?{[^}]*overscroll-behavior:\s*contain[^}]*touch-action:\s*pan-y/s,
+  )
+})
+
+test('iOS主屏模式使用独立视口策略且不固定根body', () => {
+  const index = read('index.html')
+  const stockDetail = read('src/components/StockDetail.jsx')
+  const navigation = read('src/mobileNavigation.js')
+  const bootStyles = read('src/styles/boot.css')
+  const styles = read('src/styles/precision.css')
+
+  assert.equal(isIOSStandalonePWA({
+    navigator: {
+      standalone: true,
+      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X)',
+      platform: 'iPhone',
+      maxTouchPoints: 5,
+    },
+    matchMedia: () => ({ matches: false }),
+  }), true)
+  assert.equal(isIOSStandalonePWA({
+    navigator: {
+      standalone: false,
+      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X)',
+      platform: 'iPhone',
+      maxTouchPoints: 5,
+    },
+    matchMedia: () => ({ matches: false }),
+  }), false)
+
+  assert.match(index, /nav\.standalone\s*===\s*true/)
+  assert.match(index, /--app-height['"],\s*['"]100vh/)
+  assert.match(navigation, /--overlay-scroll-top/)
+  assert.match(stockDetail, /<OverlayPortal>/)
+  assert.match(
+    bootStyles,
+    /html\.ios-standalone #app-splash\s*{[^}]*position:\s*absolute[^}]*height:\s*var\(--app-height,\s*100vh\)/s,
+  )
+  assert.match(
+    styles,
+    /html\.ios-standalone body\.overlay-scroll-locked\s*{[^}]*position:\s*static/s,
+  )
+  assert.match(
+    styles,
+    /html\.ios-standalone[\s\S]*?\.modal-mask:has\(\.detail-panel\)[\s\S]*?{[^}]*position:\s*absolute[^}]*top:\s*var\(--overlay-scroll-top[^}]*height:\s*var\(--app-height,\s*100vh\)/s,
   )
 })

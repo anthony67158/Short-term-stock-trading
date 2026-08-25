@@ -4,6 +4,22 @@ const EDGE_BACK_FLICK_DISTANCE_PX = 44
 const EDGE_BACK_FLICK_SPEED_PX_PER_MS = 0.32
 const EDGE_BACK_PROGRESS_DISTANCE_PX = 96
 
+export function isIOSStandalonePWA(view) {
+  const target = view || (
+    typeof window === 'undefined' ? null : window
+  )
+  const navigator = target?.navigator || {}
+  const userAgent = String(navigator.userAgent || '')
+  const isIOS = /iPad|iPhone|iPod/.test(userAgent)
+    || (
+      navigator.platform === 'MacIntel'
+      && Number(navigator.maxTouchPoints) > 1
+    )
+  const standalone = navigator.standalone === true
+    || target?.matchMedia?.('(display-mode: standalone)')?.matches === true
+  return isIOS && standalone
+}
+
 export function isMobileEdgeBackStart({
   startX,
   pointerType,

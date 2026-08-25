@@ -4,6 +4,7 @@ import {
 } from 'react'
 import {
   edgeBackProgress,
+  isIOSStandalonePWA,
   isMobileEdgeBackStart,
   shouldCommitMobileEdgeBack,
 } from '../shared/mobileEdgeBack.js'
@@ -95,13 +96,21 @@ export function closeTopmostOverlay() {
 export function useOverlayScrollLock() {
   useEffect(() => {
     const body = document.body
+    const root = document.documentElement
     const mobileMedia = window.matchMedia('(max-width: 720px)')
+    const iosStandalone = isIOSStandalonePWA(window)
+    if (iosStandalone) {
+      root.classList.add('ios-standalone')
+      root.style.setProperty('--app-height', '100vh')
+    }
     let lock = null
 
     const restore = () => {
       if (!lock) return
       const scrollY = lock.scrollY
       Object.assign(body.style, lock.style)
+      root.style.overflow = lock.rootOverflow
+      root.style.removeProperty('--overlay-scroll-top')
       body.classList.remove('overlay-scroll-locked')
       lock = null
       window.scrollTo(0, scrollY)
@@ -131,17 +140,30 @@ export function useOverlayScrollLock() {
             overflow: body.style.overflow,
             paddingRight: body.style.paddingRight,
           },
+          rootOverflow: root.style.overflow,
         }
         body.classList.add('overlay-scroll-locked')
-        Object.assign(body.style, {
-          position: 'fixed',
-          top: `-${scrollY}px`,
-          left: '0',
-          right: '0',
-          width: '100%',
-          overflow: 'hidden',
-          paddingRight: scrollbar ? `${scrollbar}px` : '',
-        })
+        if (iosStandalone) {
+          root.style.setProperty(
+            '--overlay-scroll-top',
+            `${scrollY}px`,
+          )
+          root.style.overflow = 'hidden'
+          Object.assign(body.style, {
+            overflow: 'hidden',
+            paddingRight: scrollbar ? `${scrollbar}px` : '',
+          })
+        } else {
+          Object.assign(body.style, {
+            position: 'fixed',
+            top: `-${scrollY}px`,
+            left: '0',
+            right: '0',
+            width: '100%',
+            overflow: 'hidden',
+            paddingRight: scrollbar ? `${scrollbar}px` : '',
+          })
+        }
       } else if (!open) {
         restore()
       }

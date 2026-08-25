@@ -7,8 +7,18 @@
     <link rel="manifest" href="/manifest.json?v=7" />
     <script>
       try {
-        document.documentElement.dataset.theme =
+        const root = document.documentElement
+        root.dataset.theme =
           localStorage.getItem('theme_v1') || 'dark'
+        const nav = window.navigator || {}
+        const isIOS = /iPad|iPhone|iPod/.test(nav.userAgent || '')
+          || (nav.platform === 'MacIntel' && nav.maxTouchPoints > 1)
+        const standalone = nav.standalone === true
+          || window.matchMedia?.('(display-mode: standalone)').matches
+        if (isIOS && standalone) {
+          root.classList.add('ios-standalone')
+          root.style.setProperty('--app-height', '100vh')
+        }
       } catch {}
     </script>
     <link rel="stylesheet" href="/src/styles/boot.css" />

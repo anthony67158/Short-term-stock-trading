@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import ReactECharts from 'echarts-for-react'
 import Icon from './Icon'
+import OverlayPortal from './OverlayPortal'
 import StockTags from './StockTags'
 import { StockNoteEditor } from './StockNote'
 import AdviceGenerationStatus from './AdviceGenerationStatus'
@@ -763,8 +764,9 @@ export default function StockDetail({ stock, onClose }) {
   }, [stock?.code, stock?.focusNote])
 
   return (
-    <div className="modal-mask" onClick={onClose}>
-      <div className="detail-panel" role="dialog" aria-modal="true" aria-label={`${stock.name || stock.code} 个股详情`} onClick={(e) => e.stopPropagation()}>
+    <OverlayPortal>
+      <div className="modal-mask" onClick={onClose}>
+        <div className="detail-panel" role="dialog" aria-modal="true" aria-label={`${stock.name || stock.code} 个股详情`} onClick={(e) => e.stopPropagation()}>
         <div className="modal-bar detail-header">
           <div className="detail-title-block">
             <div className="detail-title-primary">
@@ -1554,8 +1556,9 @@ export default function StockDetail({ stock, onClose }) {
             </div>
           </div>
         )}
+        </div>
       </div>
-    </div>
+    </OverlayPortal>
   )
 }
 
