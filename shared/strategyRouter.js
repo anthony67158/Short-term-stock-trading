@@ -6,6 +6,7 @@ import {
 import { evaluateStrategySignalV2 } from './strategySpecV2.js'
 
 const RISK_REDUCING_ACTIONS = new Set(['REDUCE', 'EXIT', 'T_SELL_FIRST'])
+const RISK_INCREASING_ACTIONS = new Set(['BUY', 'ADD', 'T_BUY_FIRST'])
 const POSITION_ACTIONS = new Set(['T_BUY_FIRST', 'T_SELL_FIRST'])
 const PURPOSE_PRIORITY = Object.freeze({
   EXIT: 500,
@@ -272,6 +273,10 @@ export function routeStrategyPortfolio({
     (item) =>
       item.signalPassed
       && !['suspended', 'retired'].includes(item.state)
+      && (
+        !RISK_INCREASING_ACTIONS.has(requestedAction)
+        || item.purpose !== 'EXIT'
+      )
       && (
         !RISK_REDUCING_ACTIONS.has(requestedAction)
         || item.purpose === 'EXIT'

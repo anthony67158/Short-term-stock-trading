@@ -67,10 +67,18 @@ function impactOf(item, scope, entry, governanceMap) {
   const { advice, plan, strategy } = strategyFrom(entry)
   const action = normalizedAction(plan, advice)
   const actionability = text(plan.actionability, 30) || 'WATCH'
-  const strategyId = text(strategy.strategyId, 80)
-  const governance = governanceMap.get(strategyId)
-  const signalPassed = strategy.signalPassed === true
-    || strategy.signalReason === 'MATCHED'
+  const routedStrategyId = text(strategy.strategyId, 80)
+  const governance = governanceMap.get(routedStrategyId)
+  const strategyPurpose = text(
+    strategy.purpose || governance?.purpose,
+    30,
+  )
+  const incompatibleExit = scope === 'watch'
+    && strategyPurpose === 'EXIT'
+  const strategyId = incompatibleExit ? '' : routedStrategyId
+  const signalPassed = !!strategyId
+    && strategy.signalPassed !== false
+    && strategy.signalReason !== 'REGIME_MISMATCH'
   const riskIncreasing = RISK_INCREASING.has(action)
   const canIncreaseRisk = riskIncreasing
     && actionability === 'READY'
@@ -83,8 +91,9 @@ function impactOf(item, scope, entry, governanceMap) {
     name: text(item?.name || item?.code, 40),
     scope,
     strategyId: strategyId || null,
-    strategyName: text(strategy.name || governance?.name, 40)
-      || '尚未匹配',
+    strategyName: incompatibleExit
+      ? '暂无买入策略'
+      : text(strategy.name || governance?.name, 40) || '尚未匹配',
     strategyState: text(
       strategy.governanceState || governance?.state,
       30,

@@ -135,3 +135,38 @@ test('策略模拟表现直接从去重后的已验证建议结果累计', () =>
   assert.equal(metrics.maximumDrawdown, -0.02)
   assert.equal(metrics.profitFactor, 2.5)
 })
+
+test('自选股不会把持仓退出策略显示成买入参考', () => {
+  const radar = buildStrategyRadar({
+    watchlist: [{ code: '600001', name: '演示自选' }],
+    governance: {
+      strategies: [{
+        strategyId: 'defensive-exit',
+        name: '防守退出',
+        purpose: 'EXIT',
+      }],
+    },
+    advice: {
+      '600001': {
+        at: 100,
+        mode: 'buy_advice',
+        advice: {
+          action: '观望',
+          decisionPlan: {
+            action: 'WATCH',
+            actionability: 'RESEARCH_ONLY',
+            strategy: {
+              strategyId: 'defensive-exit',
+              name: '防守退出',
+              purpose: 'EXIT',
+            },
+          },
+        },
+      },
+    },
+  })
+
+  assert.equal(radar.watchlist[0].strategyId, null)
+  assert.equal(radar.watchlist[0].strategyName, '暂无买入策略')
+  assert.equal(radar.primaryStrategy, null)
+})

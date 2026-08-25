@@ -113,6 +113,29 @@ test('硬退出路由优先于收益排序且少量样本不放大权重', () =>
   assert.equal(risk.research.strategyId, 'defensive-exit')
 })
 
+test('未持仓买入路由不会借用防守退出策略', () => {
+  const route = routeStrategyPortfolio({
+    marketRegime: 'RISK_OFF',
+    context: {
+      ...trendContext,
+      marketRegime: 'RISK_OFF',
+      technical: {
+        ...trendContext.technical,
+        structureBreak: true,
+      },
+    },
+    requestedAction: 'BUY',
+  })
+
+  assert.equal(route.research, null)
+  assert.equal(
+    route.candidates.find(
+      (item) => item.strategyId === 'defensive-exit',
+    ).signalPassed,
+    true,
+  )
+})
+
 test('只有同版本已批准 active 策略可以进入生产路由', () => {
   const governance = buildDefaultStrategyGovernance()
   governance.strategies = governance.strategies.map((record) => {
