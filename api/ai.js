@@ -1662,14 +1662,24 @@ export default async function handler(req, res) {
     // LLM 超时按【剩余预算】动态给：预留 2.5s 兜底返回时间，最少给 8s。
     // 军师模式(t_advice/hold_advice/buy_advice/review/price/plan)走深度研判模型,实测常需 47s+;
     // 开启深度思考(reasoning)后需先跑思维链,参考内容多时军师级复杂题可远超 2 分钟——
-    // 故把 LLM 单次上限拉到接近总预算(depth 军师 540s / 对话 300s),真正的封顶交给上面的
-    // remain()(总预算 560s,留 ~40s 收尾)去动态收敛,确保"慢但完整"而不半路被掐。
+    // 深度军师的主模型必须给最终 JSON 整理和委员会发布预留时间。不能让主模型
+    // 占满 FC 窗口后才发现正文不完整，否则只能整轮重跑。
     const llmCap = useReasoning
       ? (isAdvisor ? 540000 : 300000)
       : (isAdvisor ? 120000 : 90000);
+    const deepAdvisorMainCap = isAdvisor && useReasoning
+      ? 365000
+      : llmCap;
     const canFailover = streaming && isAdvisor && endpointCountForRole(cfg, useRole) > 1;
     const retryReserve = canFailover ? Math.min(60000, Math.max(30000, Math.floor(remain() * 0.3))) : 0;
-    const llmTimeout = Math.max(8000, Math.min(llmCap, remain() - retryReserve - 2500));
+    const llmTimeout = Math.max(
+      8000,
+      Math.min(
+        llmCap,
+        deepAdvisorMainCap,
+        remain() - retryReserve - 2500,
+      ),
+    );
 
     let content = '';
     let finishReason = '';
@@ -1799,30 +1809,49 @@ export default async function handler(req, res) {
           _salvDbg.tried = true;
           const salvTimeout = Math.max(8000, Math.min(120000, remain() - 3000));
           _salvDbg.timeout = salvTimeout;
-          // ★补生成必须【流式】:实测 DeepSeek-V4-Pro 是"思考原生"模型,删掉 reasoning_effort 也照跑长思维链;
-          //   非流式补生成是"全有或全无"——要等完整 CoT+正文,90s 到点 abort → 前功尽弃(实测两次都 AbortError)。
-          //   改流式后:① token 边到边收,即使慢也不会因 abort 整段丢失;② 思维链继续实时下发,前端"生成过程"不中断。
-          //   同时把【已完成的思维链尾段】回喂,并下达"立即停止思考、只输出 JSON"的硬指令,让模型直接落结论而非重头再想。
+          // 补生成是终稿器，不得再次带入整份深度提示词，否则会重走一轮长推理，
+          // 耗尽最后的发布窗口。仅提供字段契约、关键事实和已生成尾段。
           const priorTail = (
             streamedReasoning
             || content
             || ''
-          ).slice(-3000);
+          ).slice(-6000);
+          const repairFacts = {
+            code: payload.code || null,
+            name: payload.name || null,
+            mode,
+            currentPrice: payload.currentPrice
+              ?? payload.todayQuote?.price
+              ?? payload.intraday?.now
+              ?? null,
+            account: payload.account || null,
+            holdCost: payload.holdCost ?? null,
+            holdQty: payload.holdQty ?? null,
+            sellableTodayQty: payload.sellableTodayQty ?? null,
+            tech: payload.tech ? {
+              support: payload.tech.support ?? null,
+              resistance: payload.tech.resistance ?? null,
+              buyZone: payload.tech.buyZone ?? null,
+              sellZone: payload.tech.sellZone ?? null,
+              stopLoss: payload.tech.stopLoss ?? null,
+              takeProfit: payload.tech.takeProfit ?? null,
+              atr: payload.tech.atr ?? null,
+            } : null,
+            stockFund: payload.stockFund || null,
+            marketEnv: payload.marketEnv || null,
+            quant: payload.quant?.forecast || null,
+            previousAdvice: payload.previousAdvice || null,
+          };
           const salvMessages = [
-            { role: 'system', content: sysPrompt },
-            { role: 'system', content: marketTimePromptBlock() },
-            { role: 'user', content: userPrompt },
-          ];
-          if (priorTail.trim()) {
-            salvMessages.push({
-              role: 'assistant',
-              content: `（上一次输出的尾段，可能被截断）\n${priorTail}`,
-            });
-            salvMessages.push({
+            {
+              role: 'system',
+              content: '你是军师的最终JSON整理器。禁止分析、禁止思考过程、禁止复述，只输出一个完整闭合的JSON对象。',
+            },
+            {
               role: 'user',
-              content: '上一次最终JSON不完整。现在【立即停止思考】，重新从头输出一个字段齐全、完整闭合、可直接解析的最终 JSON 对象。不要续写半截，不要省略字段，不要输出分析、解释或 markdown，直接以 { 开头、以 } 结束。',
-            });
-          }
+              content: `上轮深度研判的最终JSON被截断。现在立刻生成完整终稿，字段必须遵守下方字段契约；没有可靠事实的字段填null，不能省略字段，不能输出markdown。\n\n字段契约：\n${userPrompt.slice(-8000)}\n\n关键事实：\n${JSON.stringify(repairFacts)}\n\n已截断输出尾段：\n${priorTail || '无可用尾段'}`,
+            },
+          ];
           const salv = await callChat({
             model: useModel,
             role: useRole,

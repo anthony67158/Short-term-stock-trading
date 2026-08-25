@@ -8,11 +8,11 @@ import {
   maxTokensForMode,
 } from '../api/_ai_prompts.js'
 
-test('快速持仓建议使用精简正文预算而深度模式保留长上下文', () => {
+test('快速持仓建议使用精简正文预算而深度模式保留可交付长上下文', () => {
   assert.equal(maxTokensForMode('hold_advice', false), 3200)
   assert.equal(maxTokensForMode('buy_advice', false), 3200)
   assert.equal(maxTokensForMode('review', false), 3200)
-  assert.ok(maxTokensForMode('hold_advice', true) >= 32000)
+  assert.equal(maxTokensForMode('hold_advice', true), 24000)
   assert.ok(ADVISOR_FAST_SYSTEM.length < ADVISOR_SYSTEM.length / 4)
 })
 

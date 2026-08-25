@@ -36,15 +36,16 @@ export function llmRoleForAdviceMode(mode, reviewOrigin = '') {
 // 也计入 max_tokens,参考内容一多、思维链一长(复杂军师题可轻松吃掉一两万 token),留给正文 JSON
 // 的额度就被吃光 → finish_reason:length → JSON 截断成半个对象、建议残缺(实测 17200 仍会在
 // 「长思维链 + 军师大 JSON(十余个长文案字段)」场景被吃穿,正文停在半个字段)。
-// 故深度思考时给足大额冗余,并设 32000 的绝对下限,让"超长思维链 + 完整正文"都装得下,
-// 配合大时间窗真正保证输出不断掉(gpt-5.6 / claude-sonnet-5 级模型输出上限足以覆盖 32k+)。
+// 深度推理还必须给最终 JSON 整理与委员会发布留下时间。实际端点在 32k token
+// 窗口内会先耗尽 FC 时限再截断正文，因此把主模型收敛到约 24k token；
+// 正文不完整时由后续无思考整理调用完成结构化交付。
 export function maxTokensForMode(mode, reasoning = false) {
   let base;
   if (mode === "scan" || mode === "daily" || mode === "scan_pick") base = 3200;
   else if (mode === "t_advice") base = 3600;
   else if (mode === "hold_advice" || mode === "buy_advice" || mode === "review") base = 3200;
   else base = 1600;
-  return reasoning ? Math.max(base + 30000, 32000) : base;
+  return reasoning ? Math.max(base + 20800, 24000) : base;
 }
 
 export const SYSTEM_PROMPT = `你的任务是基于用户提供的【实时行情数据】做客观分析。

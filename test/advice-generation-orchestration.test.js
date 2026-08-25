@@ -251,5 +251,13 @@ test('普通军师生成有明确的低延迟预算且保留深度模式', () =>
   assert.equal(deep.timeoutMs, 535000)
   assert.ok(deep.runtimeBudgetMs > quick.runtimeBudgetMs)
   assert.equal(maxTokensForMode('hold_advice', false), 3200)
-  assert.ok(maxTokensForMode('hold_advice', true) >= 32000)
+  assert.match(
+    aiSource,
+    /const deepAdvisorMainCap = isAdvisor && useReasoning[\s\S]*?\? 365000/,
+  )
+  assert.match(
+    aiSource,
+    /你是军师的最终JSON整理器[\s\S]*?字段契约：/,
+  )
+  assert.equal(maxTokensForMode('hold_advice', true), 24000)
 })
