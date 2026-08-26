@@ -376,11 +376,12 @@ export default function AdvicePresentation({
         <div className="advice-command-body">
           <div className="advice-command-copy">
             <div className="advice-command-label">
-              <Icon name="target" size={13} /> 执行指令
+              <Icon name="target" size={13} /> 现在怎么做
             </div>
             <div className="advice-command-instruction">
               <HL text={
-                view.execution.instruction
+                view.operationGuide?.now
+                || view.execution.instruction
                 || '本次无需操作，等待触发条件出现后再行动。'
               } />
             </div>
@@ -404,6 +405,22 @@ export default function AdvicePresentation({
             </div>
           )}
         </div>
+        {view.operationGuide?.steps?.length > 0 && (
+          <div
+            className="advice-operation-guide"
+            aria-label="具体操作步骤"
+          >
+            {view.operationGuide.steps.map((step) => (
+              <div
+                className={`aog-step ${step.tone || ''}`}
+                key={step.key}
+              >
+                <span>{step.label}</span>
+                <HL text={step.text} />
+              </div>
+            ))}
+          </div>
+        )}
         <ExecutionPlanControl
           plan={view.executionPlan}
           storedPlan={executionPlanState}

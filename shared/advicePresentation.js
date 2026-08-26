@@ -253,6 +253,122 @@ function decisionInstruction(plan, fallback = '') {
   return core || fallback
 }
 
+function operationGuide(advice, plan, levels, observationOnly) {
+  const reviewText = clean(advice.reviewTrigger, 180)
+  const withYuan = (value) =>
+    /元$/.test(String(value)) ? String(value) : `${value}元`
+  const invalidation = first(
+    plan?.invalidation,
+    advice.knowledgeActionPlan?.invalidation,
+    advice.invalidation,
+  )
+  if (!plan) return null
+
+  if (observationOnly) {
+    const paths = levels
+      .filter((level) =>
+        ['watch_pullback', 'watch_breakout', 'watch'].includes(
+          level.key,
+        )
+        && level.value !== '等待重新定价'
+      )
+      .map((level) => {
+        if (level.key === 'watch_pullback') {
+          return {
+            key: level.key,
+            label: '回踩路径',
+            text: `价格回落至${withYuan(level.value)}附近，先检查承接、量能和资金；军师复核确认前不买入。`,
+          }
+        }
+        if (level.key === 'watch_breakout') {
+          return {
+            key: level.key,
+            label: '突破路径',
+            text: `价格上行至${withYuan(level.value)}附近且放量站稳，重新生成建议；确认前不追涨。`,
+          }
+        }
+        return {
+          key: level.key,
+          label: '到价后',
+          text: `价格到达${withYuan(level.value)}附近后重新生成建议；确认前不下单。`,
+        }
+      })
+    if (!paths.length) {
+      paths.push({
+        key: 'reprice',
+        label: '等待条件',
+        text: first(
+          plan.trigger,
+          advice.actionPlan,
+          advice.timing,
+          '等待取得有效观察价后重新生成建议。',
+        ),
+      })
+    }
+    return {
+      now: '暂不买入，不挂单、不追涨。',
+      steps: [
+        ...paths,
+        invalidation && {
+          key: 'cancel',
+          label: '取消关注',
+          text: invalidation,
+          tone: 'risk',
+        },
+        reviewText && {
+          key: 'review',
+          label: '下次复核',
+          text: reviewText,
+        },
+      ].filter(Boolean),
+    }
+  }
+
+  const lots = Number(plan.quantity?.lots) || 0
+  const price = displayNumber(plan.prices?.reference)
+  const actionText = `${plan.actionLabel || '操作'}${lots > 0 ? `${lots}手` : ''}${price ? `，参考${price}元` : ''}`
+  const stop = displayNumber(plan.prices?.stop)
+  const target = displayNumber(plan.prices?.target)
+  const exitParts = [
+    stop && `止损${stop}元`,
+    target && `目标${target}元`,
+  ].filter(Boolean)
+  return {
+    now: plan.actionability === 'BLOCKED'
+      ? '暂不操作，不挂单；条件恢复后重新生成建议。'
+      : plan.actionability === 'MANUAL_PROBE'
+        ? `仅限人工确认小仓试错：${actionText}。`
+        : `${actionText}；仅在核对价格和账户后人工执行。`,
+    steps: [
+      plan.trigger && {
+        key: 'trigger',
+        label: '执行条件',
+        text: clean(plan.trigger, 240),
+      },
+      exitParts.length && {
+        key: 'exit',
+        label: '退出纪律',
+        text: [
+          exitParts.join('，'),
+          clean(advice.exitTiming, 180),
+        ].filter(Boolean).join('；'),
+        tone: 'risk',
+      },
+      invalidation && {
+        key: 'invalid',
+        label: '计划失效',
+        text: invalidation,
+        tone: 'risk',
+      },
+      reviewText && {
+        key: 'review',
+        label: '下次复核',
+        text: reviewText,
+      },
+    ].filter(Boolean),
+  }
+}
+
 function reviewSummary(advice = {}) {
   return advice.reviewCycle && typeof advice.reviewCycle === 'object'
     ? {
@@ -389,6 +505,12 @@ function buildLegacyAdvicePresentation(advice = {}) {
       tone: 'muted',
     })
   }
+  const guide = operationGuide(
+    advice,
+    plan,
+    levels,
+    observationOnly,
+  )
   return {
     observationOnly,
     verdict: {
@@ -418,6 +540,7 @@ function buildLegacyAdvicePresentation(advice = {}) {
         contract.positionRule,
       ),
     },
+    operationGuide: guide,
     planSteps: [
       advice.nextOpenPlan && {
         key: 'nextOpen',

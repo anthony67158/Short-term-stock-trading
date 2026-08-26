@@ -24,6 +24,7 @@ import {
   resolveAIBudget,
   resolveAdviceDailySummary,
   resolveReasoningMode,
+  shouldFailoverAdvisorStream,
   shouldRepairAdvisorBody,
 } from '../api/ai.js'
 
@@ -468,6 +469,34 @@ test('快速与深度军师的截断正文都会在任务内自动重整', () =>
     advisor: true,
     budgetMs: 20000,
     parsed: { value: { action: '持有' }, repaired: false },
+  }), false)
+})
+
+test('流式军师在端点超时或无有效JSON时切换备用端点', () => {
+  assert.equal(shouldFailoverAdvisorStream({
+    advisor: true,
+    canFailover: true,
+    budgetMs: 30000,
+    responseError: new DOMException('Timed out', 'AbortError'),
+  }), true)
+  assert.equal(shouldFailoverAdvisorStream({
+    advisor: true,
+    canFailover: true,
+    budgetMs: 30000,
+    reasoning: '只有推理文字，没有最终对象',
+  }), true)
+  assert.equal(shouldFailoverAdvisorStream({
+    advisor: true,
+    canFailover: true,
+    budgetMs: 30000,
+    content: '{"action":"观望"}',
+  }), false)
+  assert.equal(shouldFailoverAdvisorStream({
+    advisor: true,
+    canFailover: true,
+    requestAborted: true,
+    budgetMs: 30000,
+    responseError: new DOMException('Aborted', 'AbortError'),
   }), false)
 })
 

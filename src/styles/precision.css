@@ -11008,6 +11008,43 @@ button.acct-item {
   line-height: 1.65;
 }
 
+.advice-operation-guide {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: var(--space-lg);
+  border-block: 1px solid var(--color-rule-2);
+}
+
+.aog-step {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: var(--space-sm);
+  min-width: 0;
+  padding: var(--space-sm) 0;
+  color: var(--text2);
+  font-size: var(--font-sm);
+  line-height: 1.55;
+}
+
+.aog-step:nth-child(odd) {
+  padding-inline-end: var(--space-lg);
+}
+
+.aog-step:nth-child(even) {
+  padding-inline-start: var(--space-lg);
+  border-inline-start: 1px solid var(--color-rule-2);
+}
+
+.aog-step > span {
+  color: var(--muted);
+  font-size: var(--font-xs);
+  font-weight: 700;
+}
+
+.aog-step.risk > span {
+  color: var(--green);
+}
+
 .advice-execution-metrics {
   width: 100%;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -11899,6 +11936,25 @@ button.acct-item {
 
   .advice-execution-metrics > span {
     padding: var(--space-xs);
+  }
+
+  .advice-operation-guide {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .aog-step {
+    grid-template-columns: 64px minmax(0, 1fr);
+    padding: var(--space-sm) 0;
+  }
+
+  .aog-step:nth-child(odd),
+  .aog-step:nth-child(even) {
+    padding-inline: 0;
+    border-inline-start: 0;
+  }
+
+  .aog-step + .aog-step {
+    border-top: 1px solid var(--color-rule-2);
   }
 
   .advice-tactical-grid {

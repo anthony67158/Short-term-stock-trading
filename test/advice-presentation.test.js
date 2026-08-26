@@ -241,6 +241,22 @@ test('未持仓观望同时展示回踩与突破观察位', () => {
     ['watch_pullback', '回踩观察', '96', '距现价-4.0%'],
     ['watch_breakout', '突破观察', '105', '距现价+5.0%'],
   ])
+  assert.equal(
+    view.operationGuide.now,
+    '暂不买入，不挂单、不追涨。',
+  )
+  assert.deepEqual(
+    view.operationGuide.steps.map((item) => item.label),
+    ['回踩路径', '突破路径'],
+  )
+  assert.match(
+    view.operationGuide.steps[0].text,
+    /96元.*复核确认前不买入/,
+  )
+  assert.match(
+    view.operationGuide.steps[1].text,
+    /105元.*确认前不追涨/,
+  )
 })
 
 test('未持仓观望不展示止损目标并使用直观观察文案', () => {
@@ -501,6 +517,18 @@ test('决策计划v2优先提供最终动作、手数、费用和执行校验', 
   assert.match(view.execution.instruction, /买入5手/)
   assert.match(view.execution.instruction, /5手/)
   assert.doesNotMatch(view.execution.instruction, /10手/)
+  assert.equal(
+    view.operationGuide.now,
+    '买入5手，参考10元；仅在核对价格和账户后人工执行。',
+  )
+  assert.deepEqual(
+    view.operationGuide.steps.map((item) => item.label),
+    ['执行条件', '退出纪律', '计划失效'],
+  )
+  assert.match(
+    view.operationGuide.steps[1].text,
+    /止损9元，目标12元/,
+  )
   assert.equal(view.decisionPlan.actionability, 'READY')
   assert.equal(view.decisionPlan.strategyName, undefined)
   assert.deepEqual(view.decisionPlan.evidenceBasis, {

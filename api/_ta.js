@@ -12,6 +12,9 @@ import {
   QUANT_MODEL_V2,
   QUANT_MODEL_V21,
 } from '../shared/modelVersion.js';
+import {
+  backfillDailyCandlesFromMinuteBars,
+} from '../shared/advisorQuantInput.js';
 import { marketTimeContext } from './_market_time.js';
 
 // ============================================================
@@ -458,16 +461,24 @@ export async function fetchSelectedQuantPredict(
     }
     if (refreshDailyFromMinutes) {
       try {
+        const needsBackfill = !Array.isArray(candles)
+          || candles.length < 25
         const bars = await fetchBars(code, {
           timeoutMs: Math.min(timeoutMs, 2500),
-          limit: 300,
+          limit: needsBackfill ? 1200 : 300,
           completedWindowOnly: false,
         })
-        prepared = mergeLatestMinuteSessionIntoDailyCandles(
-          candles,
-          bars,
-          timeContext,
-        )
+        prepared = needsBackfill
+          ? backfillDailyCandlesFromMinuteBars(
+              candles,
+              bars,
+              timeContext,
+            )
+          : mergeLatestMinuteSessionIntoDailyCandles(
+              candles,
+              bars,
+              timeContext,
+            )
       } catch {
         // 分钟源不可用时保留最新日K，生产模型仍可降级运行。
       }

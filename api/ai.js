@@ -31,7 +31,10 @@ import {
   pumpChatStream,
 } from './_llm.js';
 import { ensureConfig, currentConfig, getModel, getReasoning } from './_llm_config.js';
-import { endpointCountForRole } from './_llm_pool.js';
+import {
+  endpointCountForRole,
+  markEndpointUnusable,
+} from './_llm_pool.js';
 import { applyCors, preflight } from './_lib.js';
 import { zhReasonPiece } from './_zh_reason.js';
 import {
@@ -232,6 +235,31 @@ export function shouldRepairAdvisorBody({
     && Number(budgetMs) > 15000
     && (!parsed?.value || parsed?.repaired)
   )
+}
+
+export function shouldFailoverAdvisorStream({
+  advisor = false,
+  canFailover = false,
+  requestAborted = false,
+  budgetMs = 0,
+  responseError = null,
+  content = '',
+  reasoning = '',
+} = {}) {
+  if (
+    !advisor
+    || !canFailover
+    || requestAborted
+    || Number(budgetMs) <= 12000
+  ) return false
+  if (responseError) return true
+  const contentParsed = content.trim()
+    ? parseLLMJson(content)
+    : null
+  const reasoningParsed = reasoning.trim()
+    ? parseLLMJson(reasoning)
+    : null
+  return !contentParsed?.value && !reasoningParsed?.value
 }
 
 export async function resolveAdviceDailySummary(
@@ -1056,6 +1084,7 @@ export default async function handler(req, res) {
         const quantReadiness = quantInputReadiness(
           quantModelVersion,
           dailyCandles,
+          { allowMinuteBackfill: true },
         );
         // ★让量化模型"基于现在预测未来":盘中把实时价/量并入送模型的最后一根K线。
         //   stock_detail 的日K末根盘中虽是"进行中"的今日bar,但其收盘价可能滞后于 /api/quote 的最新价;
@@ -1763,6 +1792,82 @@ export default async function handler(req, res) {
       theoryHits,
     ) + zhTail;
     if (streaming) {
+      // reasoning 增量做轻量节流:攒到 ~40 字或遇换行再下发,避免事件风暴
+      let rbuf = '';
+      let lastVisibleReasoning = '';
+      const flushR = () => {
+        if (!rbuf) return;
+        const visible = zhReasonPiece(rbuf);
+        if (visible && visible !== lastVisibleReasoning) {
+          emit('reasoning', { text: visible });
+          lastVisibleReasoning = visible;
+        }
+        rbuf = '';
+      };
+      const runStreamFailover = async () => {
+        phase('当前端点响应异常，正在切换备用端点快速重试…', 'failover');
+        const fallbackTimeout = Math.max(
+          8000,
+          Math.min(45000, remain() - 3000),
+        );
+        const fallback = await callChat({
+          model: useModel,
+          role: useRole,
+          messages: [
+            { role: 'system', content: sysPrompt },
+            { role: 'system', content: marketTimePromptBlock() },
+            { role: 'user', content: userPrompt },
+          ],
+          temperature: 0.2,
+          maxTokens: maxTokensForMode(mode, false),
+          timeoutMs: fallbackTimeout,
+          reasoning: false,
+          forceNoReason: true,
+          signal: req.signal,
+          responseFormat: { type: 'json_object' },
+          stream: true,
+        });
+        if (
+          !fallback.resp
+          || fallback.resp.__err
+          || !fallback.resp.ok
+        ) {
+          fallback.done(false);
+          return false;
+        }
+        selectedModel = fallback.selectedModel || selectedModel;
+        selectedEndpoint = fallback.endpoint || selectedEndpoint;
+        emit('model', {
+          model: selectedModel,
+          endpoint: selectedEndpoint,
+        });
+        const retried = await pumpChatStream(fallback.resp, {
+          onReasoning: (piece) => {
+            rbuf += piece;
+            if (
+              rbuf.length >= 40
+              || /[\n。！？]/.test(piece)
+            ) flushR();
+          },
+        }).catch(() => ({
+          content: '',
+          reasoning: '',
+          finishReason: '',
+        }));
+        flushR();
+        content = retried.content || '';
+        streamedReasoning = retried.reasoning || '';
+        finishReason = retried.finishReason || '';
+        const valid = !shouldFailoverAdvisorStream({
+          advisor: isAdvisor,
+          canFailover: true,
+          budgetMs: remain(),
+          content,
+          reasoning: streamedReasoning,
+        });
+        fallback.done(valid);
+        return valid;
+      };
       // ★流式路径(客户端开了 SSE):以 stream:true 调上游,把模型【思维链 reasoning_content】
       //   增量实时推为 reasoning 事件(军师在想什么),正文 content 累积到流结束后再统一解析。
       //   代价是放弃 callChatWithRetry 的一次快速重试——换取"推理过程可见"的实时体验;
@@ -1793,70 +1898,57 @@ export default async function handler(req, res) {
       if (resp && resp.__err) {
         done(false);
         const timedOut = resp.__err.name === 'AbortError';
-        return finish({
-          ok: false, degraded: true, mode, model: useModel, updatedAt: Date.now(),
-          error: timedOut ? '分析生成超时，可稍后重试；如反复超时请缩小问题范围。' : ('网络异常：' + String(resp.__err.message || resp.__err)),
-          meta: collectedMeta, news: newsRefs,
-        });
-      }
-      if (!resp.ok) {
+        if (!req.signal?.aborted && routed.endpointId) {
+          markEndpointUnusable(routed.endpointId);
+        }
+        const recovered = shouldFailoverAdvisorStream({
+          advisor: isAdvisor,
+          canFailover,
+          requestAborted: req.signal?.aborted,
+          budgetMs: remain(),
+          responseError: resp.__err,
+        }) && await runStreamFailover();
+        if (!recovered) {
+          return finish({
+            ok: false, degraded: true, mode, model: useModel, updatedAt: Date.now(),
+            error: timedOut ? '分析生成超时，可稍后重试；如反复超时请缩小问题范围。' : ('网络异常：' + String(resp.__err.message || resp.__err)),
+            meta: collectedMeta, news: newsRefs,
+          });
+        }
+      } else if (!resp.ok) {
         const errText = await resp.text().catch(() => '');
         done(false);
         return finish({ ok: false, error: `LLM ${resp.status}`, detail: errText.slice(0, 200), meta: collectedMeta });
-      }
-      // reasoning 增量做轻量节流:攒到 ~40 字或遇换行再下发,避免事件风暴
-      let rbuf = '';
-      let lastVisibleReasoning = '';
-      const flushR = () => {
-        if (!rbuf) return;
-        const visible = zhReasonPiece(rbuf);
-        if (visible && visible !== lastVisibleReasoning) {
-          emit('reasoning', { text: visible });
-          lastVisibleReasoning = visible;
-        }
-        rbuf = '';
-      };
-      const pumped = await pumpChatStream(resp, {
-        onReasoning: (piece) => { rbuf += piece; if (rbuf.length >= 40 || /[\n。！？]/.test(piece)) flushR(); },
-      }).catch(() => ({ content: '', reasoning: '', finishReason: '' }));
-      flushR();
-      done(!!(pumped.content?.trim() || pumped.reasoning?.trim()));
-      content = pumped.content;
-      finishReason = pumped.finishReason;
-      streamedReasoning = pumped.reasoning || '';
-      if (!req.signal?.aborted && !content.trim() && !streamedReasoning.trim() && canFailover && routed.endpointId && remain() > 12000) {
-        phase('当前端点响应异常，正在切换备用端点快速重试…', 'failover');
-        const fallbackTimeout = Math.max(8000, Math.min(90000, remain() - 3000));
-        const fallback = await callChat({
-          model: useModel,
-          role: useRole,
-          messages: [
-            { role: 'system', content: sysPrompt },
-            { role: 'system', content: marketTimePromptBlock() },
-            { role: 'user', content: userPrompt },
-          ],
-          temperature: 0.2,
-          maxTokens: maxTokensForMode(mode, false),
-          timeoutMs: fallbackTimeout,
-          reasoning: false,
-          forceNoReason: true,
-          signal: req.signal,
-          responseFormat: { type: 'json_object' },
-          stream: true,
+      } else {
+        const pumped = await pumpChatStream(resp, {
+          onReasoning: (piece) => {
+            rbuf += piece;
+            if (
+              rbuf.length >= 40
+              || /[\n。！？]/.test(piece)
+            ) flushR();
+          },
+        }).catch(() => ({
+          content: '',
+          reasoning: '',
+          finishReason: '',
+        }));
+        flushR();
+        content = pumped.content;
+        finishReason = pumped.finishReason;
+        streamedReasoning = pumped.reasoning || '';
+        const needsFailover = shouldFailoverAdvisorStream({
+          advisor: isAdvisor,
+          canFailover,
+          requestAborted: req.signal?.aborted,
+          budgetMs: remain(),
+          content,
+          reasoning: streamedReasoning,
         });
-        if (fallback.resp && !fallback.resp.__err && fallback.resp.ok) {
-          selectedModel = fallback.selectedModel || selectedModel;
-          selectedEndpoint = fallback.endpoint || selectedEndpoint;
-          emit('model', { model: selectedModel, endpoint: selectedEndpoint });
-          const retried = await pumpChatStream(fallback.resp, {
-            onReasoning: (piece) => { rbuf += piece; if (rbuf.length >= 40 || /[\n。！？]/.test(piece)) flushR(); },
-          }).catch(() => ({ content: '', reasoning: '', finishReason: '' }));
-          flushR();
-          content = retried.content || '';
-          streamedReasoning = retried.reasoning || '';
-          finishReason = retried.finishReason || '';
+        done(!needsFailover);
+        if (needsFailover) {
+          await runStreamFailover();
         }
-        fallback.done(!!(content.trim() || streamedReasoning.trim()));
       }
       // 军师长 JSON 在深度/普通模式都可能达到输出上限。正文为空、不可解析或靠补括号
       // 才解析成功时，立即关闭思考并重新输出完整对象；仍不完整则由任务层拒绝完成并重试。

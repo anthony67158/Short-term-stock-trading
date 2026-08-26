@@ -610,6 +610,57 @@ test('盘前生产模型保留最近完整交易日K线', async () => {
   assert.equal(result.inputAsOf, '2026-08-26 15:00:00')
 })
 
+test('日K双源为空时默认模型用25日分钟K聚合恢复输入', async () => {
+  const lines = []
+  for (let day = 1; day <= 25; day++) {
+    lines.push(...validSessionLines(
+      `2026-08-${String(day).padStart(2, '0')}`,
+    ))
+  }
+  const bars = parseFiveMinuteKlines(lines)
+  let received = null
+  let requestedLimit = 0
+
+  const result = await fetchSelectedQuantPredict(
+    'default',
+    '600519',
+    [],
+    null,
+    1000,
+    null,
+    {
+      fetchBars: async (_code, options) => {
+        requestedLimit = options.limit
+        return bars
+      },
+      fetchDefault: async (_code, candles) => {
+        received = candles
+        return {
+          ok: true,
+          modelVersion: 'default',
+          asOf: candles.at(-1).date,
+        }
+      },
+      timeContext: {
+        tradingToday: true,
+        isLive: false,
+        phase: '盘后(已收盘)',
+        bjNow: '2026-08-25 15:30',
+      },
+      refreshDailyFromMinutes: true,
+    },
+  )
+
+  assert.equal(requestedLimit, 1200)
+  assert.equal(received.length, 25)
+  assert.equal(received.at(-1).date, '2026-08-25')
+  assert.equal(
+    result.inputSource,
+    'completed-5m-daily-backfill',
+  )
+  assert.equal(result.inputAsOf, '2026-08-25 15:00:00')
+})
+
 test('非军师生产量化保持原日线快路径不额外下载分钟线', async () => {
   let minuteCalls = 0
   const candles = Array.from({ length: 30 }, (_, index) => ({

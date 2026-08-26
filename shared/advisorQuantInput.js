@@ -15,6 +15,106 @@ function validCandles(value) {
     )
 }
 
+function completedMinuteCutoff(context = {}) {
+  if (!context.tradingToday || !context.isLive) return ''
+  const match = String(context.bjNow || '').match(
+    /^(\d{4}-\d{2}-\d{2}) (\d{2}):(\d{2})/,
+  )
+  if (!match) return ''
+  const total = Number(match[2]) * 60 + Number(match[3])
+  const completed = Math.floor((total - 1) / 5) * 5
+  return `${match[1]} ${String(Math.floor(completed / 60)).padStart(2, '0')}:${String(completed % 60).padStart(2, '0')}:00`
+}
+
+export function backfillDailyCandlesFromMinuteBars(
+  dailyCandles,
+  minuteBars,
+  context = {},
+) {
+  const cutoff = completedMinuteCutoff(context)
+  const groups = new Map()
+  for (const bar of Array.isArray(minuteBars) ? minuteBars : []) {
+    const tradeTime = String(bar?.tradeTime || '')
+    if (
+      !/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(tradeTime)
+      || cutoff && tradeTime > cutoff
+      || !Number.isFinite(Number(bar.open))
+      || !Number.isFinite(Number(bar.high))
+      || !Number.isFinite(Number(bar.low))
+      || !Number.isFinite(Number(bar.close))
+      || !Number.isFinite(Number(bar.volume))
+    ) continue
+    const date = tradeTime.slice(0, 10)
+    const session = groups.get(date) || []
+    session.push(bar)
+    groups.set(date, session)
+  }
+  const minuteDaily = [...groups.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([date, session]) => {
+      const ordered = [...session].sort((left, right) =>
+        String(left.tradeTime).localeCompare(String(right.tradeTime)),
+      )
+      return {
+        date,
+        open: Number(ordered[0].open),
+        high: Math.max(...ordered.map((bar) => Number(bar.high))),
+        low: Math.min(...ordered.map((bar) => Number(bar.low))),
+        close: Number(ordered.at(-1).close),
+        volume: ordered.reduce(
+          (sum, bar) => sum + Number(bar.volume),
+          0,
+        ),
+        pct: 0,
+      }
+    })
+  const merged = new Map(
+    validCandles(dailyCandles).map((item) => [
+      String(item.date),
+      { ...item },
+    ]),
+  )
+  for (const item of minuteDaily) merged.set(item.date, item)
+  const candles = [...merged.values()]
+    .sort((left, right) =>
+      String(left.date).localeCompare(String(right.date)),
+    )
+    .slice(-120)
+  for (let index = 1; index < candles.length; index++) {
+    const previous = Number(candles[index - 1].close)
+    candles[index].pct = previous > 0
+      ? +((Number(candles[index].close) / previous - 1) * 100)
+        .toFixed(2)
+      : 0
+  }
+  return {
+    candles,
+    inputAsOf: String(
+      (Array.isArray(minuteBars) ? minuteBars : [])
+        .filter((bar) =>
+          bar?.tradeTime
+          && (!cutoff || String(bar.tradeTime) <= cutoff),
+        )
+        .sort((left, right) =>
+          String(left.tradeTime).localeCompare(
+            String(right.tradeTime),
+          ),
+        )
+        .at(-1)?.tradeTime
+      || candles.at(-1)?.date
+      || '',
+    ),
+    inputSource: minuteDaily.length
+      ? 'completed-5m-daily-backfill'
+      : 'daily-kline',
+    inputBarCount: (Array.isArray(minuteBars) ? minuteBars : [])
+      .filter((bar) =>
+        bar?.tradeTime
+        && (!cutoff || String(bar.tradeTime) <= cutoff),
+      ).length,
+  }
+}
+
 export function selectFreshestDailyDetail(
   primary,
   backup,
@@ -60,7 +160,11 @@ export function selectFreshestDailyDetail(
   }
 }
 
-export function quantInputReadiness(version, candles) {
+export function quantInputReadiness(
+  version,
+  candles,
+  { allowMinuteBackfill = false } = {},
+) {
   const selected = normalizeQuantModelVersion(version)
   if (selected !== QUANT_MODEL_DEFAULT) {
     return {
@@ -73,6 +177,13 @@ export function quantInputReadiness(version, candles) {
     return {
       ready: true,
       source: 'daily',
+      reason: '',
+    }
+  }
+  if (allowMinuteBackfill) {
+    return {
+      ready: true,
+      source: 'minute-backfill',
       reason: '',
     }
   }
