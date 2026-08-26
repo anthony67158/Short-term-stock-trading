@@ -22,6 +22,7 @@ const payload = {
     price: 10,
     pct: 2,
     volRatio: 2,
+    amount: 2e8,
     limitDownPrice: 9,
     limitUpPrice: 13,
     live: true,
@@ -39,6 +40,10 @@ const payload = {
     score: 72,
     forecast: { upProb: 62, expRet: 2.4 },
     highConfSignal: { fired: true },
+  },
+  stockFund: {
+    mainNetYi: 1.2,
+    retailNetYi: -0.4,
   },
   account: {
     totalAssets: 100000,
@@ -78,8 +83,90 @@ test('证据和风险条件满足时买入计划直接进入可执行状态', ()
   )
   assert.equal(plan.tactical.timingState, 'READY')
   assert.equal(plan.tactical.horizon, 'INTRADAY')
+  assert.equal(plan.actionPolicy.canIncreaseRisk, true)
+  assert.equal(plan.actionPolicy.overridden, false)
   assert.equal(plan.strategy, undefined)
   assert.equal(plan.strategyRoute, undefined)
+})
+
+test('模型建议追高但短线时机过热时确定性改为观望', () => {
+  const plan = compileDecisionPlan({
+    mode: 'buy_advice',
+    advice: {
+      action: '立即买入',
+      buyPrice: 10,
+      stopPrice: 9,
+      targetPrice: 12,
+      planQtyNum: 2,
+      actionPlan: '立即追涨买入2手',
+    },
+    payload: {
+      ...payload,
+      todayQuote: {
+        ...payload.todayQuote,
+        pct: 9,
+        turnover: 20,
+        volRatio: 5.5,
+      },
+      intraday: { posInDay: 96 },
+    },
+    evidenceSnapshot: snapshot,
+    now,
+  })
+
+  assert.equal(plan.requestedAction, 'BUY')
+  assert.equal(plan.governedAction, 'WATCH')
+  assert.equal(plan.action, 'WATCH')
+  assert.equal(plan.actionability, 'WATCH')
+  assert.equal(plan.quantity.lots, 0)
+  assert.equal(plan.actionPolicy.overridden, true)
+  assert.match(
+    plan.actionPolicy.reasons.join('；'),
+    /禁止追涨|拥挤度/,
+  )
+  assert.doesNotMatch(plan.trigger, /立即追涨/)
+})
+
+test('持仓加仓缺少资金确认时改为持有但不阻止减仓', () => {
+  const weakFlowPayload = {
+    ...payload,
+    holdQty: 3,
+    sellableTodayQty: 3,
+    stockFund: {
+      mainNetYi: -1.2,
+      retailNetYi: 0.8,
+    },
+  }
+  const add = compileDecisionPlan({
+    mode: 'hold_advice',
+    advice: {
+      action: '加仓',
+      addPrice: 10,
+      stopPrice: 9,
+      targetPrice: 12,
+      opQty: '加仓1手',
+    },
+    payload: weakFlowPayload,
+    evidenceSnapshot: snapshot,
+    now,
+  })
+  const reduce = compileDecisionPlan({
+    mode: 'hold_advice',
+    advice: {
+      action: '减仓',
+      reducePrice: 10,
+      opQty: '减仓1手',
+    },
+    payload: weakFlowPayload,
+    evidenceSnapshot: snapshot,
+    now,
+  })
+
+  assert.equal(add.requestedAction, 'ADD')
+  assert.equal(add.action, 'HOLD')
+  assert.equal(add.actionPolicy.overridden, true)
+  assert.equal(reduce.action, 'REDUCE')
+  assert.equal(reduce.actionability, 'READY')
 })
 
 test('小仓试错保留5%仓位上限但不受策略晋级限制', () => {

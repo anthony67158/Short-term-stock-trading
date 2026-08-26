@@ -10,7 +10,10 @@ import {
   buildAdvicePriceContract,
 } from './advicePriceContract.js'
 import { executionTriggerDirection } from './executionTrigger.js'
-import { buildShortHorizonTactical } from './shortHorizonTactical.js'
+import {
+  buildShortHorizonTactical,
+  deriveShortHorizonActionPolicy,
+} from './shortHorizonTactical.js'
 import {
   deriveOpportunityLifecycle,
 } from './opportunityLifecycle.js'
@@ -284,8 +287,7 @@ export function compileDecisionPlan({
   now = Date.now(),
 } = {}) {
   const requestedAction = actionFrom(mode, advice)
-  const riskIncreasing = RISK_INCREASING.has(requestedAction)
-  const riskReducing = RISK_REDUCING.has(requestedAction)
+  const riskRequested = RISK_INCREASING.has(requestedAction)
   const market = payload.marketEnv?.schemaVersion
     ? payload.marketEnv
     : deriveMarketRegime(payload.market || {})
@@ -293,30 +295,36 @@ export function compileDecisionPlan({
     === 'short-horizon-tactical.v1'
     ? payload.shortHorizonTactical
     : buildShortHorizonTactical(payload, { now })
+  const actionPolicy = deriveShortHorizonActionPolicy({
+    mode,
+    tactical,
+    requestedAction,
+  })
+  const governedAction = actionPolicy.effectiveAction
+    || requestedAction
+  const riskIncreasing = RISK_INCREASING.has(governedAction)
+  const riskReducing = RISK_REDUCING.has(governedAction)
   const account = payload.account || {}
   const referencePrice = referencePriceFor(
+    governedAction,
+    advice,
+    payload,
+  )
+  const requestedReferencePrice = referencePriceFor(
     requestedAction,
     advice,
     payload,
   )
   const stopPrice = positive(advice.stopPrice)
   const targetPrice = positive(advice.targetPrice)
-  const rewardRiskRatio = (
-    referencePrice > 0
-    && stopPrice > 0
-    && targetPrice > referencePrice
-    && stopPrice < referencePrice
-  )
-    ? (targetPrice - referencePrice) / (referencePrice - stopPrice)
-    : null
-  const requestedLots = requestedLotsFor(requestedAction, advice)
+  const requestedLots = requestedLotsFor(governedAction, advice)
   const slippageBps = 5
   const generatedPriceContract = buildAdvicePriceContract({
     mode,
     advice,
     payload,
     evidenceSnapshot,
-    action: requestedAction,
+    action: governedAction,
   })
   const suppliedPriceContract = advice.priceContract?.schemaVersion
     === ADVICE_PRICE_CONTRACT_SCHEMA_VERSION
@@ -394,7 +402,7 @@ export function compileDecisionPlan({
       }
     : null
   if (
-    riskIncreasing
+    riskRequested
     && (
       freshness.status === 'PARTIAL'
       || missingRequired.size > 0
@@ -413,7 +421,7 @@ export function compileDecisionPlan({
   }
   const marketUnknown = market.regime === 'UNKNOWN'
   if (
-    riskIncreasing
+    riskRequested
     && marketUnknown
     && !missingRequired.has('market')
   ) {
@@ -422,7 +430,7 @@ export function compileDecisionPlan({
   const dualConfirmation = payload.counterTrend?.isStrong === true
     && payload.quant?.highConfSignal?.fired === true
   if (
-    riskIncreasing
+    riskRequested
     && !marketUnknown
     && market.allowRiskIncrease !== true
     && !dualConfirmation
@@ -430,21 +438,24 @@ export function compileDecisionPlan({
     blockedReasons.push('当前市场状态禁止新增风险')
   }
   if (
-    riskIncreasing
+    riskRequested
     && !missingRequired.has('account')
     && !(positive(account.totalAssets) && finite(account.cash) != null)
   ) {
     blockedReasons.push('账户风险事实不完整')
   }
-  if (riskIncreasing && !(referencePrice > 0 && stopPrice > 0)) {
+  if (
+    riskRequested
+    && !(requestedReferencePrice > 0 && stopPrice > 0)
+  ) {
     blockedReasons.push('缺少有效入场价或止损价')
   }
   if (riskReducing && !(referencePrice > 0)) {
     blockedReasons.push('缺少有效卖出价或止损价')
   }
   if (
-    requestedAction !== 'WATCH'
-    && requestedAction !== 'HOLD'
+    governedAction !== 'WATCH'
+    && governedAction !== 'HOLD'
     && suppliedPriceContract
     && priceContract.validationStatus === 'REJECTED'
   ) {
@@ -452,17 +463,26 @@ export function compileDecisionPlan({
       `关键执行价缺少可核验依据：${priceContract.issues.join('；')}`,
     )
   }
-  if (riskIncreasing && stopPrice >= referencePrice) {
+  if (riskRequested && stopPrice >= requestedReferencePrice) {
     blockedReasons.push('止损价必须低于入场价')
   }
-  if (riskIncreasing && targetPrice != null && targetPrice <= referencePrice) {
+  if (
+    riskRequested
+    && targetPrice != null
+    && targetPrice <= requestedReferencePrice
+  ) {
     blockedReasons.push('目标价必须高于入场价')
   }
   if (
-    riskIncreasing
+    riskRequested
     && (
-      rewardRiskRatio == null
-      || rewardRiskRatio < 1.8
+      !(requestedReferencePrice > 0)
+      || !(stopPrice > 0)
+      || !(targetPrice > requestedReferencePrice)
+      || !(
+        (targetPrice - requestedReferencePrice)
+        / (requestedReferencePrice - stopPrice) >= 1.8
+      )
     )
   ) {
     blockedReasons.push('预期收益与风险不匹配，盈亏比需至少达到1.8:1')
@@ -471,7 +491,7 @@ export function compileDecisionPlan({
     blockedReasons.push(...(advice.riskOverlay.reasons || []))
   }
   if (
-    riskIncreasing
+    riskRequested
     && accountCircuitBreaker?.allowRiskIncrease === false
   ) {
     blockedReasons.push(
@@ -560,14 +580,16 @@ export function compileDecisionPlan({
 
   const uniqueBlockers = [...new Set(blockedReasons.filter(Boolean))]
   let actionability = 'WATCH'
-  if (riskIncreasing) {
+  if (riskRequested && uniqueBlockers.length) {
+    actionability = 'BLOCKED'
+  } else if (riskIncreasing) {
     actionability = uniqueBlockers.length ? 'BLOCKED' : 'READY'
   } else if (riskReducing) {
     actionability = uniqueBlockers.length ? 'BLOCKED' : 'READY'
   }
   const action = actionability === 'BLOCKED'
     ? 'WATCH'
-    : requestedAction
+    : governedAction
   const lots = actionability === 'BLOCKED' ? 0 : capacity.lots
   const costs = costEstimate(action, referencePrice, lots, slippageBps)
   const currentWeightPct = Math.max(0, finite(account.stockWeight) || 0)
@@ -591,10 +613,12 @@ export function compileDecisionPlan({
     ? 15 * 60 * 1000
     : 12 * 60 * 60 * 1000
   const trigger = text(
-    advice.actionPlan
-    || advice.nextAction
-    || advice.timing
-    || advice.nextOpenPlan,
+    actionPolicy.overridden
+      ? actionPolicy.nextReviewTrigger
+      : advice.actionPlan
+        || advice.nextAction
+        || advice.timing
+        || advice.nextOpenPlan,
     500,
   )
   const triggerDirection = executionTriggerDirection({
@@ -646,6 +670,7 @@ export function compileDecisionPlan({
     name: text(payload.name, 40),
     mode: text(mode, 30),
     requestedAction,
+    governedAction,
     action,
     actionLabel: actionLabel(action),
     actionability,
@@ -682,6 +707,7 @@ export function compileDecisionPlan({
         ? tactical.conflicts.slice(0, 4)
         : [],
     },
+    actionPolicy,
     exitManagement:
       advice.exitManagement?.schemaVersion === 'exit-management.v1'
         ? {
