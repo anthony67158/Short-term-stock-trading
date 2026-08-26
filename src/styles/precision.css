@@ -387,6 +387,10 @@ html[data-theme="light"] .t-drawer {
   margin: 0;
 }
 
+.nav-tabs-mobile {
+  display: none;
+}
+
 .nav-tab {
   position: relative;
   display: inline-flex;
@@ -9466,6 +9470,14 @@ button.acct-item {
     border-top: 1px solid var(--color-rule-2);
     background: var(--color-paper-2);
     backdrop-filter: none;
+  }
+
+  .nav-tabs-desktop {
+    display: none;
+  }
+
+  .nav-tabs-mobile {
+    display: grid;
   }
 
   .nav-tab {

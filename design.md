@@ -25,7 +25,8 @@
 
 - Desktop: `N13` 工作台变体。四个固定主入口 + 可见的“问军师”命令入口。
 - Keyboard: `1–4` 切页，`⌘K / Ctrl+K / /` 打开军师，`Esc` 关闭最上层。
-- Mobile: 顶部仅保留状态与工具，四个主入口进入固定底部导航。
+- Mobile: 顶部仅保留状态与工具，四个主入口进入应用根层的固定底部导航；
+  底栏不得嵌套在顶部 `sticky` 容器内，避免 iOS 主屏模式错误锚到顶部。
 - Clickable labels never wrap.
 
 ## Theme — Precision Cobalt · Apple × Material

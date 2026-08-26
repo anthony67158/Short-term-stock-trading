@@ -134,3 +134,31 @@ test('iOS主屏模式使用独立视口策略且不固定根body', () => {
     /html\.ios-standalone[\s\S]*?\.modal-mask:has\(\.detail-panel\)[\s\S]*?{[^}]*position:\s*absolute[^}]*top:\s*var\(--overlay-scroll-top[^}]*height:\s*var\(--app-height,\s*100vh\)/s,
   )
 })
+
+test('移动底栏脱离顶部sticky容器避免iOS主屏定位到顶部', () => {
+  const app = read('src/App.jsx')
+  const styles = read('src/styles/precision.css')
+  const headerStart = app.indexOf('<header className="nav">')
+  const headerEnd = app.indexOf('</header>', headerStart)
+  const header = app.slice(headerStart, headerEnd)
+  const afterHeader = app.slice(headerEnd)
+
+  assert.match(app, /function WorkspaceNavigation\(/)
+  assert.match(
+    header,
+    /<WorkspaceNavigation[\s\S]*?className="nav-tabs-desktop"/,
+  )
+  assert.doesNotMatch(header, /nav-tabs-mobile/)
+  assert.match(
+    afterHeader,
+    /<WorkspaceNavigation[\s\S]*?className="nav-tabs-mobile"/,
+  )
+  assert.match(
+    styles,
+    /\.nav-tabs-mobile\s*{[^}]*display:\s*none/s,
+  )
+  assert.match(
+    styles,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.nav-tabs-desktop\s*{[^}]*display:\s*none[^}]*\}[\s\S]*?\.nav-tabs-mobile\s*{[^}]*display:\s*grid/s,
+  )
+})

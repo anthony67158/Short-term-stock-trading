@@ -93,6 +93,47 @@ function TabSkeleton() {
   )
 }
 
+function WorkspaceNavigation({
+  tab,
+  planCount,
+  onNavigate,
+  className,
+}) {
+  return (
+    <nav
+      className={`nav-tabs ${className}`}
+      aria-label="主工作区"
+    >
+      {APP_SECTIONS.map((section) => (
+        <button
+          key={section.key}
+          type="button"
+          className={
+            'nav-tab'
+            + (tab === section.key ? ' active' : '')
+          }
+          onClick={() => onNavigate(section.key)}
+          aria-current={
+            tab === section.key ? 'page' : undefined
+          }
+          title={`${section.label} · ${section.description}`}
+        >
+          <Icon name={section.icon} size={16} />
+          <span className="nav-label-full">
+            {section.label}
+          </span>
+          <span className="nav-label-short">
+            {section.shortLabel}
+          </span>
+          {section.key === 'plan' && planCount > 0 && (
+            <span className="nav-badge">{planCount}</span>
+          )}
+        </button>
+      ))}
+    </nav>
+  )
+}
+
 export default function App() {
   const { user, booting } = useAuthStore()
   useEffect(() => {
@@ -334,23 +375,12 @@ function MainApp() {
             <BrandMark className="nav-brand-mark" />
             <span className="nav-name">短线操盘台</span>
           </button>
-          <nav className="nav-tabs" aria-label="主工作区">
-            {APP_SECTIONS.map((t) => (
-              <button
-                key={t.key}
-                type="button"
-                className={'nav-tab' + (tab === t.key ? ' active' : '')}
-                onClick={() => navigateToTab(t.key)}
-                aria-current={tab === t.key ? 'page' : undefined}
-                title={`${t.label} · ${t.description}`}
-              >
-                <Icon name={t.icon} size={16} />
-                <span className="nav-label-full">{t.label}</span>
-                <span className="nav-label-short">{t.shortLabel}</span>
-                {t.key === 'plan' && planCount > 0 && <span className="nav-badge">{planCount}</span>}
-              </button>
-            ))}
-          </nav>
+          <WorkspaceNavigation
+            tab={tab}
+            planCount={planCount}
+            onNavigate={navigateToTab}
+            className="nav-tabs-desktop"
+          />
           <button
             type="button"
             className="nav-command"
@@ -383,6 +413,13 @@ function MainApp() {
           </div>
         </div>
       </header>
+
+      <WorkspaceNavigation
+        tab={tab}
+        planCount={planCount}
+        onNavigate={navigateToTab}
+        className="nav-tabs-mobile"
+      />
 
       <main className="main" data-section={currentSection.key}>
         <div className="workspace-head">
