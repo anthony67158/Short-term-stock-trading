@@ -66,7 +66,7 @@ test('军师生成前必须服从短线内核给出的唯一允许动作集合',
   assert.match(prompt, /唯一允许动作/)
   assert.match(prompt, /本轮action只能从观望中选择/)
   assert.match(prompt, /价格位置过热，禁止追涨/)
-  assert.match(prompt, /不得用标题、actionPlan或价格字段暗示集合外交易/)
+  assert.match(prompt, /不得把集合外动作写成当前可执行/)
 })
 
 test('试仓档位强制模型输出5%以内并要求人工确认', () => {
@@ -91,6 +91,32 @@ test('试仓档位强制模型输出5%以内并要求人工确认', () => {
   assert.match(prompt, /必须人工确认/)
   assert.match(prompt, /默认给出近期可达的回踩或突破试仓方案/)
   assert.match(prompt, /盈亏比不足1.8:1/)
+})
+
+test('休市时模型保留下一时段试仓预案而不是只写等待盘中', () => {
+  const prompt = buildUserPrompt('buy_advice', {
+    code: '600000',
+    shortHorizonTactical: {
+      schemaVersion: 'short-horizon-tactical.v1',
+      actionPolicy: {
+        schemaVersion: 'short-horizon-action-policy.v1',
+        allowedActions: ['WATCH'],
+        executionOpen: false,
+        riskTier: 'PROBE',
+        nextSessionPlan: {
+          action: 'PROBE',
+          session: 'AFTERNOON',
+          maxPositionPct: 5,
+        },
+      },
+    },
+  })
+
+  assert.match(prompt, /当前action必须为观望/)
+  assert.match(prompt, /下午盘中小仓试仓预案/)
+  assert.match(prompt, /盘中复核通过后人工确认/)
+  assert.match(prompt, /仓位不超过5%/)
+  assert.match(prompt, /不得只写等待盘中/)
 })
 
 test('军师低命中校准按动作方向纠偏而不是一律变得更保守', () => {

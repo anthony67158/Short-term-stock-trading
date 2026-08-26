@@ -53,6 +53,18 @@ test('策略摘要使用两行主指令、紧凑价位和单行进度', () => {
   assert.match(planTab, /className="action-progress-summary"/)
   assert.doesNotMatch(planTab, /className="action-progress-head"/)
   assert.match(
+    planTab,
+    /\{view\.commandLabel \|\| '当前指令'\}/,
+  )
+  assert.match(
+    planTab,
+    /view\.quantityLabel \|\| actionQtyLabel\(view\.quantity\)/,
+  )
+  assert.match(
+    planTab,
+    /\{view\?\.reviewActionLabel \|\| '下一交易时段复核'\}/,
+  )
+  assert.match(
     precision,
     /\.card-decision-slot \.action-command-text\s*{[^}]*display:\s*-webkit-box[^}]*white-space:\s*normal[^}]*-webkit-line-clamp:\s*2/s,
   )

@@ -195,6 +195,20 @@ test('收盘后买入计划转为下一交易时段盘中观察且不立即执�
         atr: 0.681,
         support: 15.2,
       },
+      shortHorizonTactical: {
+        actionPolicy: {
+          nextSessionPlan: {
+            action: 'PROBE',
+            actionLabel: '小仓试仓',
+            session: 'NEXT_TRADING_DAY',
+            sessionLabel: '下一交易日盘中',
+            maxPositionPct: 5,
+            manualConfirmationOnly: true,
+            requiresLiveReview: true,
+            trigger: '下一交易日盘中，回踩15.2元确认承接后重新评估',
+          },
+        },
+      },
     },
     result: {
       action: '回调再买',
@@ -210,7 +224,8 @@ test('收盘后买入计划转为下一交易时段盘中观察且不立即执�
   assert.equal(result.buyPrice, null)
   assert.equal(result.pullbackWatchPrice, 15.2)
   assert.equal(result.planQty, 0)
-  assert.match(result.actionPlan, /下一交易时段盘中/)
+  assert.match(result.actionPlan, /下一交易日盘中小仓试仓预案/)
+  assert.match(result.actionPlan, /盘中复核通过后人工确认/)
   assert.match(issues.join('；'), /当前已收盘/)
 })
 

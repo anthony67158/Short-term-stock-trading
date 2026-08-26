@@ -611,7 +611,8 @@ function EmptyActionLevels() {
 
 function ActionCommand({ view, onOpen }) {
   const instruction = view.instruction || '等待下一步执行条件'
-  const quantity = actionQtyLabel(view.quantity)
+  const quantity =
+    view.quantityLabel || actionQtyLabel(view.quantity)
 
   return (
     <div className="action-command">
@@ -620,7 +621,7 @@ function ActionCommand({ view, onOpen }) {
       </span>
       <span className="action-command-body">
         <span className="action-command-meta">
-          当前指令
+          {view.commandLabel || '当前指令'}
           {view.shortHorizon && <em>{view.shortHorizon}</em>}
         </span>
         <strong className="action-command-primary">
@@ -655,7 +656,7 @@ function AdviceActionPanel({ view, currentPrice, onPrompt }) {
       </button>
     )
   }
-  const tone = actionTone(view.kind)
+  const tone = view.displayTone || actionTone(view.kind)
   const progress = buildActionProgress(view.trigger, currentPrice)
   const reachedKey = reachedLevelKey(view, progress)
   return (
@@ -784,7 +785,12 @@ function CandDecision({ p, q }) {
           />
         )
       ) : (
-        <div className={'action-decision cand-decision tone-' + actionTone(view.kind)}>
+        <div
+          className={
+            'action-decision cand-decision tone-'
+            + (view.displayTone || actionTone(view.kind))
+          }
+        >
           <ActionCommand
             view={view}
             onOpen={() => openStockDetail(p.code, q?.name || p.name)}
@@ -910,7 +916,8 @@ function CandidateActions({ p, q, onBuy, onAlert, onDelete }) {
           className="chip-btn ghost review-action"
           onClick={() => openStockDetail(p.code, q?.name || p.name)}
         >
-          <Icon name="clock" size={12} />下一交易时段复核
+          <Icon name="clock" size={12} />
+          {view?.reviewActionLabel || '下一交易时段复核'}
         </button>
       ) : (
         <>

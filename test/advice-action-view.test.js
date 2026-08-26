@@ -114,6 +114,25 @@ test('休市时已经校正为观望的建议也隐藏手动建仓入口', () =>
   const view = buildAdviceActionView({
     action: '观望',
     actionPlan: '下一交易时段盘中，等待回踩15.2元后复核',
+    decisionPlan: {
+      schemaVersion: 'decision-plan.v2',
+      action: 'WATCH',
+      actionability: 'WATCH',
+      actionPolicy: {
+        executionOpen: false,
+        riskTier: 'PROBE',
+        nextSessionPlan: {
+          action: 'PROBE',
+          actionLabel: '小仓试仓',
+          session: 'NEXT_TRADING_DAY',
+          sessionLabel: '下一交易日盘中',
+          maxPositionPct: 5,
+          manualConfirmationOnly: true,
+          requiresLiveReview: true,
+          trigger: '下一交易日盘中，回踩15.2元确认承接后重新评估',
+        },
+      },
+    },
     priceContract: {
       schemaVersion: 'advice-price-contract.v1',
       levels: [{
@@ -130,11 +149,18 @@ test('休市时已经校正为观望的建议也隐藏手动建仓入口', () =>
     executionOpen: false,
   })
 
-  assert.equal(view.action, '等待盘中')
+  assert.equal(view.action, '次日试仓预案')
+  assert.equal(view.quantityLabel, '仓位≤5%')
+  assert.equal(view.commandLabel, '后续计划')
+  assert.equal(view.displayTone, 'buy')
+  assert.equal(view.reviewActionLabel, '下一交易日复核')
   assert.equal(view.deferred, true)
   assert.equal(view.actionable, false)
   assert.equal(view.levels[0].basisLabel, '5日均线')
-  assert.equal(view.trigger.stateLabel, '等待下一交易时段')
+  assert.equal(view.trigger.stateLabel, '当前休市')
+  assert.equal(view.trigger.metricLabel, '试仓预案')
+  assert.match(view.instruction, /回踩15\.2元确认承接/)
+  assert.match(view.instruction, /盘中复核通过后人工确认/)
 })
 
 test('下一交易日开盘后旧休市建议仍需先复核不能直接恢复买入', () => {
@@ -168,6 +194,51 @@ test('下一交易日开盘后旧休市建议仍需先复核不能直接恢复�
   assert.equal(view.action, '等待盘中')
   assert.equal(view.actionable, false)
   assert.match(view.instruction, /建议基于休市快照/)
+})
+
+test('下一交易日开盘后休市试仓预案进入盘中复核而不是退回笼统观望', () => {
+  const view = buildAdviceActionView({
+    action: '观望',
+    actionPlan: '下一交易日盘中小仓试仓预案',
+    decisionPlan: {
+      schemaVersion: 'decision-plan.v2',
+      action: 'WATCH',
+      actionability: 'WATCH',
+      actionPolicy: {
+        executionOpen: false,
+        riskTier: 'PROBE',
+        nextSessionPlan: {
+          action: 'PROBE',
+          session: 'NEXT_TRADING_DAY',
+          maxPositionPct: 5,
+          trigger: '下一交易日盘中，回踩15.2元确认承接后重新评估',
+        },
+      },
+      evidenceBasis: {
+        isLive: false,
+        phase: '盘后(已收盘)',
+      },
+    },
+    priceContract: {
+      schemaVersion: 'advice-price-contract.v1',
+      levels: [{
+        key: 'watch_pullback',
+        price: 15.2,
+        direction: 'LTE',
+        strict: true,
+      }],
+    },
+  }, {
+    mode: 'buy_advice',
+    currentPrice: 15.3,
+    executionOpen: true,
+  })
+
+  assert.equal(view.action, '盘中试仓复核')
+  assert.equal(view.shortHorizon, '休市预案待确认')
+  assert.equal(view.actionable, false)
+  assert.equal(view.trigger.stateLabel, '盘中先复核')
+  assert.equal(view.trigger.metricLabel, '不自动下单')
 })
 
 test('价位卡展示可核验的数据来源而不是笼统建议', () => {

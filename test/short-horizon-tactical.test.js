@@ -207,6 +207,7 @@ test('只有量化资金时机与流动性同时确认才允许新增风险', ()
   assert.deepEqual(policy.allowedActions, ['BUY', 'WATCH'])
   assert.equal(policy.effectiveAction, 'BUY')
   assert.equal(policy.overridden, false)
+  assert.equal(policy.nextSessionPlan, null)
 })
 
 test('核心信号共振但成交额证据不足时只开放5%人工试仓', () => {
@@ -259,7 +260,7 @@ test('成交额证据明确区分数据缺失与低于流动性门槛', () => {
   assert.equal(sufficient.stock.liquidity, 'GOOD')
 })
 
-test('休市时即使短线条件共振也只生成盘中观察计划', () => {
+test('休市时当前保持观望但保留下一交易日条件买入预案', () => {
   const tactical = buildShortHorizonTactical(payload({
     marketPhase: '盘后(已收盘)',
     todayQuote: {
@@ -278,7 +279,48 @@ test('休市时即使短线条件共振也只生成盘中观察计划', () => {
   assert.equal(policy.executionOpen, false)
   assert.deepEqual(policy.allowedActions, ['WATCH'])
   assert.equal(policy.effectiveAction, 'WATCH')
+  assert.deepEqual(policy.nextSessionPlan, {
+    action: 'BUY',
+    actionLabel: '条件买入',
+    session: 'NEXT_TRADING_DAY',
+    sessionLabel: '下一交易日盘中',
+    maxPositionPct: null,
+    manualConfirmationOnly: true,
+    requiresLiveReview: true,
+    trigger: '下一交易日盘中，回踩97元确认承接或放量站上104元后重新评估',
+  })
   assert.match(policy.reasons.join('；'), /盘中再判断/)
+})
+
+test('午间休市保留下午小仓试仓预案但不开放当前买入', () => {
+  const tactical = buildShortHorizonTactical(payload({
+    marketPhase: '午间休市',
+    todayQuote: {
+      ...payload().todayQuote,
+      amount: null,
+      phase: '午间休市',
+    },
+  }))
+  const policy = deriveShortHorizonActionPolicy({
+    mode: 'buy_advice',
+    tactical,
+    requestedAction: 'BUY',
+  })
+
+  assert.equal(policy.riskTier, 'PROBE')
+  assert.equal(policy.executionOpen, false)
+  assert.equal(policy.canIncreaseRisk, false)
+  assert.deepEqual(policy.allowedActions, ['WATCH'])
+  assert.deepEqual(policy.nextSessionPlan, {
+    action: 'PROBE',
+    actionLabel: '小仓试仓',
+    session: 'AFTERNOON',
+    sessionLabel: '下午盘中',
+    maxPositionPct: 5,
+    manualConfirmationOnly: true,
+    requiresLiveReview: true,
+    trigger: '下午盘中，回踩97元确认承接或放量站上104元后重新评估',
+  })
 })
 
 test('量化轻度偏多只能参与人工试仓不能升级正式建仓', () => {

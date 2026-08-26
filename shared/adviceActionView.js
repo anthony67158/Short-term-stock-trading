@@ -92,6 +92,61 @@ function withPriceBasis(levels, advice = {}) {
   })
 }
 
+function deferredOpportunityView(plan, executionOpen) {
+  const next = plan?.actionPolicy?.nextSessionPlan
+  if (!next || !['PROBE', 'BUY'].includes(next.action)) return null
+  const sessionPrefix = {
+    AFTERNOON: '下午',
+    OPENING: '开盘后',
+    NEXT_TRADING_DAY: '次日',
+  }[next.session] || '下一时段'
+  const reviewActionLabel = {
+    AFTERNOON: '下午盘中复核',
+    OPENING: '开盘后复核',
+    NEXT_TRADING_DAY: '下一交易日复核',
+  }[next.session] || '下一交易时段复核'
+  const actionLabel = next.action === 'PROBE'
+    ? '试仓'
+    : '买入'
+  const maxPositionPct = Number(next.maxPositionPct)
+  const quantityLabel = (
+    next.action === 'PROBE'
+    && Number.isFinite(maxPositionPct)
+    && maxPositionPct > 0
+  ) ? `仓位≤${maxPositionPct}%` : ''
+  const liveReview = executionOpen === true
+  return {
+    action: liveReview
+      ? `盘中${actionLabel}复核`
+      : `${sessionPrefix}${actionLabel}预案`,
+    displayTone: 'buy',
+    commandLabel: '后续计划',
+    reviewActionLabel: liveReview
+      ? '立即复核'
+      : reviewActionLabel,
+    shortHorizon: liveReview
+      ? '休市预案待确认'
+      : '当前休市',
+    quantityLabel,
+    instruction: clean(
+      `${next.trigger || `${next.sessionLabel || '下一交易时段盘中'}重新评估`}；盘中复核通过后人工确认，不自动下单`,
+      240,
+    ),
+    trigger: {
+      direction: 'inactive',
+      price: null,
+      label: '等待确认',
+      stateLabel: liveReview ? '盘中先复核' : '当前休市',
+      detailLabel: liveReview
+        ? '先更新行情与量价'
+        : '满足条件后提醒',
+      metricLabel: liveReview
+        ? '不自动下单'
+        : `${actionLabel}预案`,
+    },
+  }
+}
+
 function levelsFor(kind, advice, triggerDirection = '') {
   const entryPrice = advice.buyPrice ?? advice.addPrice
   if (kind === 'wait') {
@@ -317,6 +372,9 @@ export function buildAdviceActionView(
       || generatedOutsideSession
     )
   )
+  const deferredOpportunity = sessionDeferred
+    ? deferredOpportunityView(plan, executionOpen)
+    : null
   if (entry && (entryAboveCurrent || sessionDeferred)) {
     const observationKey = entryAboveCurrent
       ? 'watch_breakout'
@@ -334,17 +392,29 @@ export function buildAdviceActionView(
       : `${entry.price}元只作回踩观察，当前不执行`
     return {
       kind: 'wait',
-      action: sessionDeferred ? '等待盘中' : '等待突破',
-      shortHorizon: clean(source.shortHorizon, 30),
-      instruction: `${phasePrefix}：${reason}；满足后重新生成建议`,
+      action: deferredOpportunity?.action
+        || (sessionDeferred ? '等待盘中' : '等待突破'),
+      displayTone: deferredOpportunity?.displayTone,
+      commandLabel: deferredOpportunity?.commandLabel,
+      reviewActionLabel:
+        deferredOpportunity?.reviewActionLabel,
+      shortHorizon: deferredOpportunity?.shortHorizon
+        || clean(source.shortHorizon, 30),
+      instruction: deferredOpportunity
+        ? clean(
+            `${deferredOpportunity.instruction}；${reason}`,
+            240,
+          )
+        : `${phasePrefix}：${reason}；满足后重新生成建议`,
       quantity: '',
+      quantityLabel: deferredOpportunity?.quantityLabel,
       levels: [{
         ...entry,
         key: observationKey,
         label: observationLabel,
         active: false,
       }],
-      trigger: {
+      trigger: deferredOpportunity?.trigger || {
         direction: 'inactive',
         price: null,
         label: '等待确认',
@@ -353,7 +423,7 @@ export function buildAdviceActionView(
         metricLabel: '当前不下单',
       },
       actionability: 'WATCH',
-      manualOnly: false,
+      manualOnly: !!deferredOpportunity,
       actionable: false,
       deferred: true,
       deferredReason: reason,
@@ -362,23 +432,38 @@ export function buildAdviceActionView(
   const deferredWait = (
     mode === 'buy_advice'
     && kind === 'wait'
-    && executionOpen === false
+    && (
+      executionOpen === false
+      || (
+        generatedOutsideSession
+        && plan?.actionPolicy?.nextSessionPlan
+      )
+    )
   )
+  const deferredWaitPlan = deferredWait
+    ? deferredOpportunityView(plan, executionOpen)
+    : null
   return {
     kind,
-    action: deferredWait ? '等待盘中' : action || ({
+    action: deferredWaitPlan?.action
+      || (deferredWait ? '等待盘中' : action || ({
       buy: '买入',
       add: '加仓',
       reduce: '减仓',
       sell: '退出',
       hold: '持有',
       wait: '观望',
-    }[kind]),
-    shortHorizon: clean(source.shortHorizon, 30),
-    instruction,
+    }[kind])),
+    displayTone: deferredWaitPlan?.displayTone,
+    commandLabel: deferredWaitPlan?.commandLabel,
+    reviewActionLabel: deferredWaitPlan?.reviewActionLabel,
+    shortHorizon: deferredWaitPlan?.shortHorizon
+      || clean(source.shortHorizon, 30),
+    instruction: deferredWaitPlan?.instruction || instruction,
     quantity,
+    quantityLabel: deferredWaitPlan?.quantityLabel,
     levels,
-    trigger: deferredWait
+    trigger: deferredWaitPlan?.trigger || (deferredWait
       ? {
           direction: 'inactive',
           price: null,
@@ -387,9 +472,11 @@ export function buildAdviceActionView(
           detailLabel: '盘中满足条件后再提醒',
           metricLabel: '当前不下单',
         }
-      : triggerFor(kind, levels, triggerDirection),
+      : triggerFor(kind, levels, triggerDirection)),
     actionability: plan?.actionability || null,
-    manualOnly: manualProbe,
+    manualOnly: deferredWaitPlan
+      ? true
+      : manualProbe,
     actionable: plan
       ? ['READY', 'MANUAL_PROBE'].includes(plan.actionability)
       : !['wait', 'hold'].includes(kind),

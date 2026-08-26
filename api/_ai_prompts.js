@@ -357,6 +357,20 @@ function tacticalActionPolicyRule(tactical = {}) {
   const reasons = Array.isArray(policy.reasons)
     ? policy.reasons.filter(Boolean).slice(0, 4)
     : []
+  const nextPlan = policy.nextSessionPlan
+  const nextSessionLabel = {
+    AFTERNOON: '下午盘中',
+    OPENING: '开盘后',
+    NEXT_TRADING_DAY: '下一交易日盘中',
+  }[nextPlan?.session] || '下一交易时段盘中'
+  const nextActionLabel = nextPlan?.action === 'PROBE'
+    ? '小仓试仓'
+    : nextPlan?.action === 'BUY'
+      ? '条件买入'
+      : ''
+  const nextPlanRule = nextActionLabel
+    ? `虽然当前action必须为观望，但actionPlan必须明确写出“${nextSessionLabel}${nextActionLabel}预案”、回踩或突破条件，并说明盘中复核通过后人工确认${nextPlan?.maxPositionPct ? `，仓位不超过${nextPlan.maxPositionPct}%` : ''}；不得只写等待盘中。`
+    : ''
   const riskRule = policy.executionOpen === false
     ? '当前不可下单，所有价格只能作为下一连续竞价时段的观察条件。'
     : policy.riskTier === 'PROBE'
@@ -365,7 +379,7 @@ function tacticalActionPolicyRule(tactical = {}) {
         ? '新增仓位条件已全部通过，但仍需比较赔率后决定是否操作。'
         : `当前新增仓位未通过：${reasons.join('；')}。`
   return `【唯一允许动作】本轮action只能从${allowed.join('、')}中选择。`
-    + '不得输出集合外动作，不得用标题、actionPlan或价格字段暗示集合外交易。'
+    + '不得把集合外动作写成当前可执行；后续动作只能明确标为预案并附带盘中复核条件。'
     + '未持仓时buyPrice必须不高于输入中的当前价，并来自近期可达的支撑、均线、VWAP或量化买点；上方压力或突破位只能填breakoutWatchPrice，不能填buyPrice。'
     + (
       policy.executionOpen === false
@@ -373,6 +387,7 @@ function tacticalActionPolicyRule(tactical = {}) {
         : ''
     )
     + riskRule
+    + nextPlanRule
     + (
       policy.riskTier === 'PROBE'
       && policy.executionOpen !== false

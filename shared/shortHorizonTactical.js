@@ -446,7 +446,30 @@ function riskIncreaseAssessment(tactical = {}) {
   }
 }
 
-function reviewTriggerForPolicy(tactical = {}, executionOpen = true) {
+function nextSessionContext(phase = '') {
+  if (phase === 'NOON') {
+    return {
+      session: 'AFTERNOON',
+      sessionLabel: '下午盘中',
+    }
+  }
+  if (phase === 'PREOPEN') {
+    return {
+      session: 'OPENING',
+      sessionLabel: '开盘后',
+    }
+  }
+  return {
+    session: 'NEXT_TRADING_DAY',
+    sessionLabel: '下一交易日盘中',
+  }
+}
+
+function reviewTriggerForPolicy(
+  tactical = {},
+  executionOpen = true,
+  sessionLabel = '下一交易时段盘中',
+) {
   const pullback = finite(tactical.timing?.pullbackPrice)
   const breakout = finite(tactical.timing?.breakoutPrice)
   const triggers = [
@@ -455,8 +478,8 @@ function reviewTriggerForPolicy(tactical = {}, executionOpen = true) {
   ].filter(Boolean)
   if (!executionOpen) {
     return triggers.length
-      ? `下一交易时段盘中，${triggers.join('或')}后重新评估`
-      : '下一交易时段盘中开始时重新评估'
+      ? `${sessionLabel}，${triggers.join('或')}后重新评估`
+      : `${sessionLabel}开始时重新评估`
   }
   if (triggers.length) {
     return `${triggers.join('或')}后重新评估`
@@ -488,8 +511,34 @@ export function deriveShortHorizonActionPolicy({
     assessment.riskTier !== 'NONE'
     && executionOpen
   )
+  const nextSession = nextSessionContext(source.market?.phase)
+  const nextReviewTrigger = reviewTriggerForPolicy(
+    source,
+    executionOpen,
+    nextSession.sessionLabel,
+  )
+  const nextSessionPlan = (
+    mode === 'buy_advice'
+    && !executionOpen
+    && assessment.riskTier !== 'NONE'
+  ) ? {
+      action: assessment.riskTier === 'PROBE'
+        ? 'PROBE'
+        : 'BUY',
+      actionLabel: assessment.riskTier === 'PROBE'
+        ? '小仓试仓'
+        : '条件买入',
+      session: nextSession.session,
+      sessionLabel: nextSession.sessionLabel,
+      maxPositionPct:
+        assessment.riskTier === 'PROBE' ? 5 : null,
+      manualConfirmationOnly: true,
+      requiresLiveReview: true,
+      trigger: nextReviewTrigger,
+    }
+  : null
   const sessionReason = source.market?.phase === 'CLOSE'
-    ? '当前已收盘，下一交易时段盘中再判断，不发送即时买入提醒'
+    ? '当前已收盘，下一交易日盘中再判断，不发送即时买入提醒'
     : source.market?.phase === 'NOON'
       ? '当前午间休市，下午连续竞价开始后再判断，不发送即时买入提醒'
       : '当前非连续竞价时段，下一交易时段盘中再判断，不发送即时买入提醒'
@@ -540,6 +589,7 @@ export function deriveShortHorizonActionPolicy({
     riskTier: assessment.riskTier,
     maxPositionPct: assessment.riskTier === 'PROBE' ? 5 : null,
     manualConfirmationOnly: assessment.riskTier === 'PROBE',
+    nextSessionPlan,
     confirmations: assessment.confirmations,
     requestedAction: requested || null,
     effectiveAction: overridden ? fallbackAction : requested || null,
@@ -552,10 +602,7 @@ export function deriveShortHorizonActionPolicy({
           ...assessment.fullRiskGaps,
         ]),
     ],
-    nextReviewTrigger: reviewTriggerForPolicy(
-      source,
-      executionOpen,
-    ),
+    nextReviewTrigger,
   }
 }
 

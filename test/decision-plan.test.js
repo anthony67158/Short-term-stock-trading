@@ -165,7 +165,7 @@ test('收盘后买入计划不得进入可执行或显示已经到价', () => {
   assert.equal(plan.actionability, 'WATCH')
   assert.equal(plan.quantity.lots, 0)
   assert.equal(plan.actionPolicy.executionOpen, false)
-  assert.match(plan.trigger, /下一交易时段/)
+  assert.match(plan.trigger, /下一交易日/)
 })
 
 test('绕过输出校正的高价买入仍被决策编译器阻断', () => {

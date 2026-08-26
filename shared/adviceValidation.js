@@ -55,6 +55,23 @@ function continuousExecutionOpen(payload = {}) {
   return payload.todayQuote?.live !== false
 }
 
+function nextSessionPlanText(payload = {}) {
+  const plan =
+    payload.shortHorizonTactical?.actionPolicy?.nextSessionPlan
+  if (!plan || !['PROBE', 'BUY'].includes(plan.action)) return null
+  const sessionLabel = {
+    AFTERNOON: '下午盘中',
+    OPENING: '开盘后',
+    NEXT_TRADING_DAY: '下一交易日盘中',
+  }[plan.session] || '下一交易时段盘中'
+  return {
+    sessionLabel,
+    actionLabel: plan.action === 'PROBE'
+      ? '小仓试仓'
+      : '条件买入',
+  }
+}
+
 function deferBuyToObservation(result, payload, issues) {
   const quote = payload.todayQuote || {}
   const currentPrice = numberOf(
@@ -397,15 +414,23 @@ export function reconcileAdviceNumbers({ mode, result: input, payload = {} } = {
     result.pullbackWatchPrice = pullback?.price ?? null
     result.breakoutWatchPrice = breakout?.price ?? null
     result.watchPrice = null
-    const executionPrefix = continuousExecutionOpen(payload)
-      ? ''
-      : '下一交易时段盘中，'
+    const executionOpen = continuousExecutionOpen(payload)
+    const nextSessionPlan = executionOpen
+      ? null
+      : nextSessionPlanText(payload)
+    const executionPrefix = nextSessionPlan
+      ? `${nextSessionPlan.sessionLabel}${nextSessionPlan.actionLabel}预案：`
+      : executionOpen
+        ? ''
+        : '下一交易时段盘中，'
     const paths = [
       pullback && `回踩${pullback.price}元企稳（回踩观察价）`,
       breakout && `放量突破${breakout.price}元（突破观察价）`,
     ].filter(Boolean)
     result.actionPlan = paths.length
-      ? `${executionPrefix}等待${paths.join('，或')}后重新评估，未确认不买`
+      ? nextSessionPlan
+        ? `${executionPrefix}等待${paths.join('，或')}；盘中复核通过后人工确认，未确认不买`
+        : `${executionPrefix}等待${paths.join('，或')}后重新评估，未确认不买`
       : `${executionPrefix}暂无近期有效观察价，等待量价与资金出现新变化后重新评估`
     result.timing = result.actionPlan
     finalPriceContract = buildAdvicePriceContract({
