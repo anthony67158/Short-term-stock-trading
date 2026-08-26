@@ -294,8 +294,10 @@ function conflictsOf({
   return conflicts
 }
 
-function bullishQuant(tactical = {}) {
-  if (tactical.quant?.highConfidence === true) return true
+function quantConfirmation(tactical = {}) {
+  if (tactical.quant?.highConfidence === true) {
+    return { supportive: true, strong: true }
+  }
   const candidates = [
     tactical.quant,
     tactical.quant?.nextTradeDay,
@@ -303,17 +305,26 @@ function bullishQuant(tactical = {}) {
     tactical.quant?.v21?.heads?.next30m,
     tactical.quant?.v21?.heads?.sessionClose,
   ].filter(Boolean)
-  return candidates.some((candidate) => {
+  let supportive = false
+  let strong = false
+  for (const candidate of candidates) {
     const direction = text(candidate.direction, 30)
     const upProb = finite(candidate.upProb)
     const expRet = finite(candidate.expRet)
-    return (
-      /看涨|UP|BULL/i.test(direction)
-      && upProb != null
+    const positiveForecast = (
+      upProb != null
       && upProb >= 55
-      && (expRet == null || expRet > 0)
+      && expRet != null
+      && expRet > 0
+      && !/看跌|DOWN|BEAR/i.test(direction)
     )
-  })
+    if (positiveForecast) supportive = true
+    if (
+      /看涨|UP|BULL/i.test(direction)
+      && positiveForecast
+    ) strong = true
+  }
+  return { supportive, strong }
 }
 
 function riskIncreaseAssessment(tactical = {}) {
@@ -351,7 +362,7 @@ function riskIncreaseAssessment(tactical = {}) {
   if (tactical.catalyst?.risk === 'NEGATIVE') {
     hardBlockers.push('负面事件风险尚未消化')
   }
-  const quantConfirmed = bullishQuant(tactical)
+  const quant = quantConfirmation(tactical)
   const flowConfirmed = (
     tactical.flow?.mainDirection === 'INFLOW'
     || (
@@ -371,12 +382,14 @@ function riskIncreaseAssessment(tactical = {}) {
     finite(tactical.stock?.relativeStrength) >= 60
   )
   const confirmations = [
-    quantConfirmed && '量化偏多',
+    quant.strong
+      ? '量化强确认'
+      : quant.supportive && '量化轻度偏多',
     flowConfirmed && '主力资金确认',
     leadershipConfirmed && '板块前排',
     strengthConfirmed && '相对强势',
   ].filter(Boolean)
-  if (!quantConfirmed) fullRiskGaps.push('量化尚未形成偏多确认')
+  if (!quant.strong) fullRiskGaps.push('量化尚未形成强偏多确认')
   if (!flowConfirmed) fullRiskGaps.push('主力资金尚未确认流入')
   if (tactical.stock?.liquidity !== 'GOOD') {
     fullRiskGaps.push('成交额证据不足，仅允许受控试仓')
@@ -384,12 +397,12 @@ function riskIncreaseAssessment(tactical = {}) {
   const canProbe = (
     hardBlockers.length === 0
     && confirmations.length >= 2
-    && (quantConfirmed || flowConfirmed)
+    && (quant.supportive || flowConfirmed)
   )
   const canFull = (
     canProbe
     && timingState === 'READY'
-    && quantConfirmed
+    && quant.strong
     && flowConfirmed
     && tactical.stock?.liquidity === 'GOOD'
   )

@@ -228,6 +228,33 @@ test('核心信号共振但成交额证据不足时只开放5%人工试仓', () 
   )
 })
 
+test('量化轻度偏多只能参与人工试仓不能升级正式建仓', () => {
+  const tactical = buildShortHorizonTactical(payload({
+    quant: {
+      score: 72,
+      forecast: {
+        direction: '震荡',
+        upProb: 55,
+        expRet: 0.5,
+      },
+      highConfSignal: { fired: false },
+    },
+  }))
+  const policy = deriveShortHorizonActionPolicy({
+    mode: 'buy_advice',
+    tactical,
+    requestedAction: 'BUY',
+  })
+
+  assert.equal(policy.riskTier, 'PROBE')
+  assert.ok(policy.confirmations.includes('量化轻度偏多'))
+  assert.equal(policy.manualConfirmationOnly, true)
+  assert.match(
+    policy.reasons.join('；'),
+    /量化尚未形成强偏多确认/,
+  )
+})
+
 test('高位追涨请求被短线动作政策确定性降级为观望', () => {
   const tactical = buildShortHorizonTactical(payload({
     todayQuote: {
