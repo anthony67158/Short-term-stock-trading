@@ -57,6 +57,10 @@ import {
 } from '../shared/knowledgeAction.js';
 import { isCurrentDailyReportSummary } from '../shared/adviceDailyReportPolicy.js';
 import { buildAdviceDecisionContext } from '../shared/adviceModeContext.js';
+import {
+  attachShortHorizonSummary,
+  buildShortHorizonTactical,
+} from '../shared/shortHorizonTactical.js';
 import { applyPortfolioRiskPolicy } from '../shared/portfolioRiskPolicy.js';
 import { applyTActionAdvicePolicy } from '../shared/tAdvicePolicy.js';
 import {
@@ -1462,16 +1466,21 @@ export default async function handler(req, res) {
       }
     }
 
-    if (isAdvisorMode(mode) && payload.realOutcomeLearning) {
+    const isAdvisor = isAdvisorMode(mode);
+    if (isAdvisor) {
+      payload.shortHorizonTactical = buildShortHorizonTactical(payload);
+    }
+    if (isAdvisor && payload.realOutcomeLearning) {
       payload.realOutcomeContext = realOutcomeContext(
         payload.realOutcomeLearning,
         {
           mode,
           marketRegime: payload.marketEnv?.level,
+          tacticalState:
+            payload.shortHorizonTactical?.timing?.state,
         },
       );
     }
-    const isAdvisor = isAdvisorMode(mode);
     const currentEvidenceSnapshot = isAdvisor && payload.code
       ? ensureEvidenceSnapshot()
       : null;
@@ -2084,6 +2093,10 @@ export default async function handler(req, res) {
       && typeof result === 'object'
       && !result.raw
     ) {
+      result = attachShortHorizonSummary(
+        result,
+        payload.shortHorizonTactical,
+      );
       result.quantContext = buildQuantAdviceContext(
         payload.quant,
         quantModelVersion,

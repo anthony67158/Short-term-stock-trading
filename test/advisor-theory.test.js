@@ -35,24 +35,30 @@ test('个股买入建议按短线事件构造龙头战法与情绪周期检索�
   assert.ok(hits.some((item) => item.book.includes('情绪周期')))
 })
 
-test('个股操作建议注入六条同源理论并要求理论服从真实证据', () => {
+test('快速建议不注入理论且深度建议最多使用三条事实优先理论', () => {
   const hits = Array.from({ length: 6 }, (_, index) => ({
     book: `理论${index + 1}`,
     topic: `主题${index + 1}`,
     text: `第${index + 1}条理论正文`,
   }))
   const block = buildAdvisorTheoryBlock(hits)
-  const prompt = buildUserPrompt('hold_advice', {
+  const fastPrompt = buildUserPrompt('hold_advice', {
     code: '000001',
+  }, '', hits)
+  const deepPrompt = buildUserPrompt('hold_advice', {
+    code: '000001',
+    generationProfile: 'DEEP',
   }, '', hits)
 
   assert.match(block, /经典理论知识库动态检索/)
   assert.match(block, /第6条理论正文/)
   assert.match(block, /不得因为检索命中就生搬硬套/)
-  assert.match(prompt, /第6条理论正文/)
-  assert.match(prompt, /theoryNote/)
-  assert.match(prompt, /龙头战法/)
-  assert.match(prompt, /短线情绪周期/)
+  assert.doesNotMatch(fastPrompt, /第1条理论正文/)
+  assert.match(deepPrompt, /第1条理论正文/)
+  assert.match(deepPrompt, /第3条理论正文/)
+  assert.doesNotMatch(deepPrompt, /第4条理论正文/)
+  assert.match(deepPrompt, /可用理论最多三条/)
+  assert.match(deepPrompt, /事实和风控为准/)
 })
 
 test('理论引用去重并限制为六条可展示来源', () => {

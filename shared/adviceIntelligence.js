@@ -52,6 +52,7 @@ export function adviceEvidenceDigest(snapshot = {}) {
   const quant = evidence.quant || {}
   const forecast = quant.forecast || {}
   const resonance = evidence.decisionSignals?.resonance || {}
+  const tactical = evidence.decisionSignals?.tactical || {}
   const account = snapshot?.account || {}
   return {
     account: {
@@ -132,6 +133,22 @@ export function adviceEvidenceDigest(snapshot = {}) {
         evidence.decisionSignals?.sectorOpportunity?.stock?.mainInflow,
       ),
     },
+    tactical: {
+      horizon: text(tactical.horizon, 30),
+      marketRiskTone: text(tactical.market?.riskTone, 30),
+      sectorState: text(tactical.sector?.state, 30),
+      stockRole: text(tactical.sector?.stockRole, 30),
+      location: text(tactical.stock?.location, 30),
+      crowdingRisk: text(tactical.stock?.crowdingRisk, 30),
+      flowRelation: text(tactical.flow?.relation, 30),
+      timingState: text(tactical.timing?.state, 30),
+      catalystFreshness: text(tactical.catalyst?.freshness, 30),
+      catalystRisk: text(tactical.catalyst?.risk, 30),
+      highConfidence: tactical.quant?.highConfidence === true,
+      conflicts: (Array.isArray(tactical.conflicts)
+        ? tactical.conflicts
+        : []).map((item) => text(item, 80)).slice(0, 4),
+    },
   }
 }
 
@@ -142,6 +159,16 @@ function materialChange(previous, current, previousAdvice) {
     previousAdvice,
   })
   if (priceChange.changed) return { ...priceChange, kind: 'price' }
+  if (
+    JSON.stringify(previous?.tactical)
+    !== JSON.stringify(current?.tactical)
+  ) {
+    return {
+      changed: true,
+      kind: 'tactical',
+      reason: '短线战术状态发生变化',
+    }
+  }
   if (JSON.stringify(previous?.sector) !== JSON.stringify(current?.sector)) {
     return {
       changed: true,
@@ -267,7 +294,7 @@ export function evaluateScheduledReview({
   }
   if (
     previousDigest
-    && !['price', 'policy'].includes(change.kind)
+    && !['price', 'policy', 'tactical'].includes(change.kind)
     && !nearExecutionPrice(snapshot, previousAdvice)
     && !hardNegativeShift(previousDigest, currentDigest)
   ) {

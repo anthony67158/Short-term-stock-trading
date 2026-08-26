@@ -2447,6 +2447,17 @@ html[data-theme="light"] .plan-cand.starred {
   white-space: nowrap;
 }
 
+.action-command-horizon {
+  padding-inline-start: var(--space-2xs);
+  border-inline-start: 1px solid currentColor;
+  color: inherit;
+  font-size: inherit;
+  font-style: normal;
+  font-weight: 650;
+  opacity: .78;
+  white-space: nowrap;
+}
+
 .action-levels {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -10884,6 +10895,66 @@ button.acct-item {
   padding: var(--space-sm);
 }
 
+.advice-short-horizon {
+  display: grid;
+  gap: var(--space-sm);
+  padding-block: var(--space-md);
+  border-top: 1px solid var(--color-rule-2);
+}
+
+.advice-short-horizon-head,
+.advice-short-horizon-head > span,
+.advice-short-horizon-foot {
+  display: flex;
+  align-items: center;
+}
+
+.advice-short-horizon-head {
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.advice-short-horizon-head > span {
+  gap: var(--space-xs);
+  color: var(--text2);
+  font-size: var(--font-sm);
+  font-weight: 700;
+}
+
+.advice-short-horizon-head > b {
+  color: var(--accent);
+  font-size: var(--font-sm);
+}
+
+.advice-short-horizon-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-xl);
+}
+
+.advice-short-horizon-grid > div {
+  display: grid;
+  gap: var(--space-2xs);
+  min-width: 0;
+}
+
+.advice-short-horizon-grid span {
+  color: var(--muted);
+  font-size: var(--font-xs);
+  font-weight: 650;
+}
+
+.advice-short-horizon-grid p {
+  margin: 0;
+}
+
+.advice-short-horizon-foot {
+  flex-wrap: wrap;
+  gap: var(--space-xs) var(--space-xl);
+  color: var(--muted);
+  font-size: var(--font-xs);
+}
+
 .advice-tactical-grid {
   gap: var(--space-xl);
   padding-block: var(--space-lg);
@@ -11678,6 +11749,11 @@ button.acct-item {
 
   .advice-command-center {
     padding-block: var(--space-md);
+  }
+
+  .advice-short-horizon-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-sm);
   }
 
   .advice-execution-metrics {

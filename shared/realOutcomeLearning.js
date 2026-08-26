@@ -178,6 +178,15 @@ export function buildRealOutcomeLearning(
         || recommendation.marketEnv?.level
         || 'unknown',
       ),
+      tacticalState: String(
+        recommendation.tacticalState || 'unknown',
+      ),
+      tacticalHorizon: String(
+        recommendation.tacticalHorizon || 'unknown',
+      ),
+      tacticalTriggerPath: String(
+        recommendation.tacticalTriggerPath || 'unknown',
+      ),
       attribution: String(
         execution.knowledgeActionReview?.attribution || 'unknown',
       ),
@@ -214,6 +223,26 @@ export function buildRealOutcomeLearning(
         (record) => record.attribution,
         threshold,
       ),
+      tacticalStates: grouped(
+        records,
+        (record) => record.tacticalState,
+        threshold,
+      ),
+      tacticalHorizons: grouped(
+        records,
+        (record) => record.tacticalHorizon,
+        threshold,
+      ),
+      tacticalTriggerPaths: grouped(
+        records,
+        (record) => record.tacticalTriggerPath,
+        threshold,
+      ),
+      modeTacticalStates: grouped(
+        records,
+        (record) => `${record.mode}|${record.tacticalState}`,
+        threshold,
+      ),
     },
     excluded,
   }
@@ -221,7 +250,7 @@ export function buildRealOutcomeLearning(
 
 export function realOutcomeContext(
   profile,
-  { mode, marketRegime } = {},
+  { mode, marketRegime, tacticalState } = {},
 ) {
   const minimumSamples = Math.max(
     1,
@@ -229,14 +258,22 @@ export function realOutcomeContext(
   )
   const modeText = String(mode || '')
   const regimeText = String(marketRegime || '')
+  const tacticalText = String(tacticalState || '')
   let selected = null
   let scope = 'none'
-  if (modeText && regimeText) {
+  if (modeText && tacticalText) {
+    selected = (profile?.groups?.modeTacticalStates || []).find(
+      (item) => item.key === `${modeText}|${tacticalText}`,
+    ) || null
+    scope = 'mode_tactical'
+  }
+  if (!selected && modeText && regimeText) {
     selected = (profile?.groups?.modeMarkets || []).find(
       (item) => item.key === `${modeText}|${regimeText}`,
     ) || null
     scope = 'mode_market'
-  } else if (modeText) {
+  }
+  if (!selected && modeText) {
     selected = (profile?.groups?.modes || []).find(
       (item) => item.key === modeText,
     ) || null

@@ -287,6 +287,29 @@ function reviewSummary(advice = {}) {
     : null
 }
 
+function shortHorizonSummary(advice = {}) {
+  const stage = clean(
+    advice.decisionPlan?.opportunityLifecycle?.stageLabel,
+    40,
+  )
+  const horizon = clean(advice.shortHorizon, 40)
+  const edge = clean(advice.edge, 120)
+  const risk = clean(advice.crowdingRisk, 120)
+  const catalyst = clean(advice.catalystWindow, 80)
+  const reviewTrigger = clean(advice.reviewTrigger, 120)
+  if (!stage && !horizon && !edge && !risk && !catalyst && !reviewTrigger) {
+    return null
+  }
+  return {
+    stage,
+    horizon: horizon || '1-5个交易日',
+    edge,
+    risk,
+    catalyst,
+    reviewTrigger,
+  }
+}
+
 export function trustCalibrationText(trust = {}) {
   if (trust?.calibrated !== true) return ''
   const samples = Number(trust.calibrationSamples)
@@ -440,6 +463,7 @@ function buildLegacyAdvicePresentation(advice = {}) {
     evidence: coreEvidence(advice),
     model: modelSummary(advice),
     decisionPlan: decisionPlanSummary(plan),
+    tactical: shortHorizonSummary(advice),
     review,
   }
 }

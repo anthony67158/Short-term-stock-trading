@@ -848,6 +848,25 @@ async function genOne({
       decisionPlanId: advice.decisionPlan?.decisionId || null,
       decisionPlanActionability:
         advice.decisionPlan?.actionability || null,
+      tacticalState:
+        advice.decisionPlan?.tactical?.timingState || null,
+      tacticalHorizon:
+        advice.decisionPlan?.tactical?.horizon || null,
+      tacticalTriggerPath:
+        advice.tier === 'pullback'
+          ? 'PULLBACK'
+          : advice.tier === 'now'
+            ? 'DIRECT'
+            : (
+                advice.breakoutWatchPrice != null
+                && advice.pullbackWatchPrice != null
+              )
+              ? 'DUAL_WATCH'
+            : advice.breakoutWatchPrice != null
+              ? 'BREAKOUT'
+              : advice.pullbackWatchPrice != null
+                ? 'PULLBACK'
+                : 'NONE',
       ...evidencePersistenceFields(advice),
       at,
     };

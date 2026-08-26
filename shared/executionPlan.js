@@ -1,5 +1,8 @@
 import { executionTriggerDirection } from './executionTrigger.js'
 import { sanitizedAdvicePriceContract } from './advicePriceContract.js'
+import {
+  deriveOpportunityLifecycle,
+} from './opportunityLifecycle.js'
 
 export const EXECUTION_PLAN_SCHEMA_VERSION = 'execution-plan.v1'
 
@@ -247,6 +250,16 @@ export function compileExecutionPlan({
     planId,
     decisionId: String(decisionPlan.decisionId || ''),
     marketRegime: String(decisionPlan.marketRegime?.regime || 'UNKNOWN'),
+    tactical: decisionPlan.tactical
+      ? structuredClone(decisionPlan.tactical)
+      : null,
+    opportunityLifecycle: decisionPlan.opportunityLifecycle
+      ? {
+          ...structuredClone(decisionPlan.opportunityLifecycle),
+          executionPlanId: planId,
+          updatedAt: Number(now),
+        }
+      : null,
     code: String(code || ''),
     name: String(name || code || ''),
     action,
@@ -306,7 +319,7 @@ function withTransition(plan, status, event, now, detail = '') {
   if (!TRANSITIONS[plan.status]?.has(status)) {
     throw new Error(`不允许从${plan.status}迁移到${status}`)
   }
-  return {
+  const updated = {
     ...plan,
     status,
     updatedAt: Number(now) || Date.now(),
@@ -321,6 +334,21 @@ function withTransition(plan, status, event, now, detail = '') {
       },
     ].slice(-40),
   }
+  updated.opportunityLifecycle = deriveOpportunityLifecycle({
+    code: updated.code,
+    mode: updated.opportunityLifecycle?.mode,
+    advice: { action: updated.actionLabel },
+    decisionPlan: {
+      decisionId: updated.decisionId,
+      action: updated.action,
+      actionability: updated.canArm ? 'READY' : 'BLOCKED',
+    },
+    executionPlan: updated,
+    sellableTodayQty:
+      updated.opportunityLifecycle?.sellableTodayQty,
+    now,
+  })
+  return updated
 }
 
 function priceReached(plan, price) {

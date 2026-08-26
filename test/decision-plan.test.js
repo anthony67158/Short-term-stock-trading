@@ -72,6 +72,12 @@ test('证据和风险条件满足时买入计划直接进入可执行状态', ()
   assert.ok(plan.quantity.lots > 0)
   assert.ok(plan.quantity.lots < 10)
   assert.deepEqual(plan.blockedReasons, [])
+  assert.equal(
+    plan.tactical.schemaVersion,
+    'short-horizon-tactical.v1',
+  )
+  assert.equal(plan.tactical.timingState, 'READY')
+  assert.equal(plan.tactical.horizon, 'INTRADAY')
   assert.equal(plan.strategy, undefined)
   assert.equal(plan.strategyRoute, undefined)
 })

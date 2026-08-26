@@ -607,6 +607,11 @@ function ActionCommand({ view, onOpen }) {
         <Icon name="spark" size={10} />
         <span>{view.action}</span>
         {quantity && <strong className="action-command-qty">{quantity}</strong>}
+        {view.shortHorizon && (
+          <em className="action-command-horizon">
+            {view.shortHorizon}
+          </em>
+        )}
       </span>
       <span ref={instructionRef} className="action-command-text">
         {instruction}

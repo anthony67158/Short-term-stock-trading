@@ -100,6 +100,52 @@ test('自动复核证据无实质变化时跳过LLM', () => {
   })
 })
 
+test('短线战术状态变化优先触发复核', () => {
+  const previousSnapshot = snapshot({
+    evidence: {
+      ...snapshot().evidence,
+      decisionSignals: {
+        ...snapshot().evidence.decisionSignals,
+        tactical: {
+          horizon: 'INTRADAY',
+          market: { riskTone: 'BALANCED' },
+          sector: { state: 'CONFIRMING', stockRole: 'FRONT_ROW' },
+          stock: { location: 'MID', crowdingRisk: 'LOW' },
+          flow: { relation: 'ACCUMULATION' },
+          timing: { state: 'READY' },
+          catalyst: { freshness: 'FRESH', risk: 'POSITIVE' },
+          quant: { highConfidence: true },
+          conflicts: [],
+        },
+      },
+    },
+  })
+  const currentSnapshot = snapshot({
+    evidence: {
+      ...previousSnapshot.evidence,
+      decisionSignals: {
+        ...previousSnapshot.evidence.decisionSignals,
+        tactical: {
+          ...previousSnapshot.evidence.decisionSignals.tactical,
+          stock: { location: 'EXTENDED', crowdingRisk: 'HIGH' },
+          timing: { state: 'TOO_EXTENDED' },
+          conflicts: ['量化偏多，但当前价格过热'],
+        },
+      },
+    },
+  })
+
+  const result = evaluateScheduledReview({
+    origin: 'auto',
+    previousDigest: adviceEvidenceDigest(previousSnapshot),
+    snapshot: currentSnapshot,
+    hasPreviousAdvice: true,
+  })
+
+  assert.equal(result.shouldRunLLM, true)
+  assert.match(result.reason, /短线战术状态/)
+})
+
 test('宏观快讯轮换和无关研报不应单独触发自动复核模型', () => {
   const previousSnapshot = snapshot({
     evidence: {

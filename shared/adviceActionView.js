@@ -248,6 +248,7 @@ export function buildAdviceActionView(advice = {}, { mode = '' } = {}) {
       hold: '持有',
       wait: '观望',
     }[kind]),
+    shortHorizon: clean(source.shortHorizon, 30),
     instruction,
     quantity,
     levels,

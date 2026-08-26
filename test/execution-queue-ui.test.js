@@ -82,6 +82,18 @@ test('个股建议只保留一个主结论并把扩展信息收进详情', () =>
   )
 })
 
+test('个股建议展示短线窗口优势风险与下一复核条件', () => {
+  const presentation = read('src/components/AdvicePresentation.jsx')
+  const precision = read('src/styles/precision.css')
+
+  assert.match(presentation, /advice-short-horizon/)
+  assert.match(presentation, /短线窗口/)
+  assert.match(presentation, /核心优势/)
+  assert.match(presentation, /最大风险/)
+  assert.match(presentation, /重评：/)
+  assert.match(precision, /\.advice-short-horizon-grid/)
+})
+
 test('个股详情用紧凑提示说明生成模式、Judge 与止损纪律', () => {
   const stockDetail = read('src/components/StockDetail.jsx')
   const css = read('src/styles/precision.css')

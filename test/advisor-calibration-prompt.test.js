@@ -14,9 +14,10 @@ test('快速与深度建议都使用可交付的有界输出预算', () => {
   assert.equal(maxTokensForMode('buy_advice', false), 3200)
   assert.equal(maxTokensForMode('review', false), 3200)
   assert.equal(maxTokensForMode('hold_advice', true), 8000)
-  assert.ok(ADVISOR_FAST_SYSTEM.length < ADVISOR_SYSTEM.length / 4)
-  assert.match(ADVISOR_DEEP_SYSTEM, /服务端会按账户、T\+1、费用、涨跌停/)
-  assert.match(ADVISOR_DEEP_SYSTEM, /最强反方与失效信号/)
+  assert.ok(ADVISOR_SYSTEM.length < 2200)
+  assert.ok(ADVISOR_FAST_SYSTEM.length < 2500)
+  assert.match(ADVISOR_DEEP_SYSTEM, /同一战术合同/)
+  assert.match(ADVISOR_DEEP_SYSTEM, /最强反方/)
   assert.match(ADVISOR_DEEP_SYSTEM, /最多五个检查点/)
 })
 
@@ -58,17 +59,13 @@ test('军师低命中校准按动作方向纠偏而不是一律变得更保守',
   }, '')
 
   assert.match(prompt, /低命中不等于一律更保守/)
-  assert.match(prompt, /减仓\/清仓 0%\(8次/)
-  assert.match(prompt, /偏防守/)
-  assert.match(prompt, /量化模型·价格参考因子/)
-  assert.match(prompt, /综合分72/)
+  assert.match(prompt, /"label":"减仓\/清仓"/)
+  assert.match(prompt, /"winRate":0/)
+  assert.match(prompt, /"score":72/)
   assert.match(prompt, /上一版权威主计划/)
   assert.match(prompt, /无客观失效证据不得反转/)
   assert.match(prompt, /plan-600000/)
-  assert.match(prompt, /知行合一·字段职责/)
-  assert.match(prompt, /系统会在返回后统一生成知行合一交易契约/)
-  assert.match(prompt, /输出格式·简洁去重/)
-  assert.match(prompt, /同一事实只写一次/)
+  assert.match(prompt, /短线战术合同/)
   assert.match(prompt, /actionPlan.*80字/)
   assert.doesNotMatch(prompt, /最终JSON必须额外给出 knowledgeActionPlan/)
   assert.doesNotMatch(prompt, /说明你过去偏乐观\/追高/)
@@ -89,11 +86,11 @@ test('持仓建议明确列出本次决策使用的持仓和可用资金快照',
   })
 
   assert.match(prompt, /本次决策账户快照/)
-  assert.match(prompt, /持仓3手/)
-  assert.match(prompt, /成本10\.25元/)
-  assert.match(prompt, /可用资金18600元/)
-  assert.match(prompt, /单票占比18\.5%/)
-  assert.match(prompt, /positionNote.*可用资金/)
+  assert.match(prompt, /"holdCost":10\.25/)
+  assert.match(prompt, /"holdQty":3/)
+  assert.match(prompt, /"cash":18600/)
+  assert.match(prompt, /"stockWeight":18\.5/)
+  assert.match(prompt, /positionNote.*关键账户数字/)
 })
 
 test('弱市买入必须同时通过个股强势和高把握信号硬闸门', () => {
@@ -116,9 +113,10 @@ test('弱市买入必须同时通过个股强势和高把握信号硬闸门', ()
     },
   })
 
-  assert.match(prompt, /弱市硬性入场闸门/)
-  assert.match(prompt, /逆势强势.*高把握信号.*同时成立/)
-  assert.match(prompt, /任一不满足.*观望/)
+  assert.match(prompt, /"riskTone":"RISK_OFF"/)
+  assert.match(prompt, /"highConfidence":false/)
+  assert.match(prompt, /个股逆势强、量化高把握和账户风险同时允许/)
+  assert.match(prompt, /任一不足必须观望/)
   assert.doesNotMatch(prompt, /共振分≥2且个股结构不坏，就应给出明确的做多/)
 })
 
@@ -138,12 +136,11 @@ test('板块前排机会允许受控人工试仓但不绕过个股和账户条�
     },
   })
 
-  assert.match(prompt, /板块与个股联动/)
+  assert.match(prompt, /短线战术合同/)
   assert.match(prompt, /新能源车/)
-  assert.match(prompt, /总龙头/)
-  assert.match(prompt, /应优先给“小仓试错”而不是泛泛“观望”/)
-  assert.match(prompt, /不超过总资产5%/)
-  assert.match(prompt, /不允许升级为“立即买入”/)
+  assert.match(prompt, /"stockRole":"LEADER"/)
+  assert.match(prompt, /板块前排只能提高关注优先级/)
+  assert.match(prompt, /不能绕过个股与账户条件/)
 })
 
 test('观望买入建议区分观察锚与买入价并比较两条入场路径', () => {
@@ -181,29 +178,29 @@ test('军师区分真实费后收益与三日建议命中统计', () => {
   })
 
   assert.match(prompt, /真实成交费后学习/)
-  assert.match(prompt, /12笔完成验证且关联真实卖出/)
-  assert.match(prompt, /风险倍率=1\.1/)
-  assert.match(prompt, /只用于调节本次手数\/风险预算/)
-  assert.match(prompt, /绝不能.*绕过账户硬闸门/)
+  assert.match(prompt, /"samples":12/)
+  assert.match(prompt, /"riskScale":1\.1/)
+  assert.match(prompt, /只能校准本次置信与风险倍率/)
+  assert.match(prompt, /绝不能绕过账户硬约束/)
 })
 
 test('军师明确把动作价位手数视为候选并服从统一决策编译器', () => {
   assert.match(ADVISOR_SYSTEM, /Decision Compiler/)
-  assert.match(ADVISOR_SYSTEM, /候选草案/)
-  assert.match(ADVISOR_SYSTEM, /按证据完整性/)
+  assert.match(ADVISOR_SYSTEM, /价格、手数和金额只是候选/)
+  assert.match(ADVISOR_SYSTEM, /证据完整性/)
   assert.match(ADVISOR_SYSTEM, /盈亏比/)
   assert.doesNotMatch(ADVISOR_SYSTEM, /strategyGate|strategyRoute/)
   assert.match(ADVISOR_SYSTEM, /严禁原样写进/)
-  assert.match(ADVISOR_FAST_SYSTEM, /系统内部字段名/)
-  assert.match(ADVISOR_FAST_SYSTEM, /账户风险、证据完整性与盈亏比约束/)
+  assert.match(ADVISOR_FAST_SYSTEM, /内部枚举和字段名/)
+  assert.match(ADVISOR_FAST_SYSTEM, /至少1\.8:1盈亏比/)
 })
 
 test('所有军师模式都要求价格可追溯且无法核验时留空', () => {
   for (const prompt of [ADVISOR_SYSTEM, ADVISOR_FAST_SYSTEM]) {
     assert.match(prompt, /价格证据链/)
-    assert.match(prompt, /支撑|压力/)
-    assert.match(prompt, /无法追溯.*null/)
-    assert.match(prompt, /禁止.*猜价/)
+    assert.match(prompt, /tactical\.prices/)
+    assert.match(prompt, /无法追溯就填null/)
+    assert.match(prompt, /禁止猜价/)
   }
 })
 
@@ -220,7 +217,7 @@ test('快速军师输出限制重复文案并保留核心证据', () => {
     },
   }, '')
 
-  assert.match(prompt, /军师快速决策/)
+  assert.match(prompt, /短线战术合同/)
   assert.match(prompt, /只做一次结论/)
   assert.match(prompt, /每类证据最多一句/)
   assert.match(prompt, /不得换词重复/)
@@ -249,9 +246,9 @@ test('连续决策只传递上一版关键交易契约，不重复注入大对�
     },
   })
 
-  assert.match(prompt, /守住10元继续持有/)
-  assert.match(prompt, /跌破10元减仓1手/)
-  assert.match(prompt, /收盘跌破10元/)
+  assert.match(prompt, /"title":"守住10元继续持有"/)
+  assert.match(prompt, /"actionPlan":"跌破10元减仓1手"/)
+  assert.match(prompt, /"invalidation":"收盘跌破10元"/)
   assert.match(prompt, /"stopPrice":10/)
   assert.doesNotMatch(prompt, /UNUSED_RUNTIME_PAYLOAD/)
 })
@@ -279,10 +276,10 @@ test('显式深度生成使用紧凑事实契约而不丢失价格与资金约�
   }, '')
 
   assert.match(prompt, /深度研判事实契约/)
-  assert.match(prompt, /"limitDownPrice":9/)
+  assert.match(prompt, /"limitDown":9/)
   assert.match(prompt, /"mainNetYi":0.8/)
   assert.match(prompt, /"retailNetYi":-0.2/)
-  assert.match(prompt, /"targetHigh":10.8/)
+  assert.match(prompt, /"quantTargetHigh":10.8/)
   assert.match(prompt, /主动做多必须满足风险预算与盈亏比至少1\.8:1/)
   assert.doesNotMatch(prompt, /UNUSED_DEEP_PAYLOAD/)
   assert.ok(prompt.length < 7000)

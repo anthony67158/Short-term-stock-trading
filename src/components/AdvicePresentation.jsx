@@ -411,6 +411,47 @@ export default function AdvicePresentation({
         />
       </section>
 
+      {view.tactical && (
+        <section
+          className="advice-short-horizon"
+          aria-label="短线作战窗口"
+        >
+          <div className="advice-short-horizon-head">
+            <span><Icon name="activity" size={13} /> 短线窗口</span>
+            <b>
+              {view.tactical.stage
+                ? `${view.tactical.stage} · `
+                : ''}
+              {view.tactical.horizon}
+            </b>
+          </div>
+          <div className="advice-short-horizon-grid">
+            {view.tactical.edge && (
+              <div>
+                <span>核心优势</span>
+                <HL text={view.tactical.edge} />
+              </div>
+            )}
+            {view.tactical.risk && (
+              <div>
+                <span>最大风险</span>
+                <HL text={view.tactical.risk} />
+              </div>
+            )}
+          </div>
+          {(view.tactical.catalyst || view.tactical.reviewTrigger) && (
+            <div className="advice-short-horizon-foot">
+              {view.tactical.catalyst && (
+                <span>催化：{view.tactical.catalyst}</span>
+              )}
+              {view.tactical.reviewTrigger && (
+                <span>重评：{view.tactical.reviewTrigger}</span>
+              )}
+            </div>
+          )}
+        </section>
+      )}
+
       <RiskOverlay risk={displayAdvice.riskOverlay} />
       <EvidenceGapNotice
         issues={view.decisionPlan?.evidenceIssues}

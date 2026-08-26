@@ -10,6 +10,9 @@ function recommendation(id, {
   mode = 'buy_advice',
   action = '立即买入',
   marketRegime = '弱市',
+  tacticalState = 'READY',
+  tacticalHorizon = 'INTRADAY',
+  tacticalTriggerPath = 'DIRECT',
 } = {}) {
   return {
     id,
@@ -18,6 +21,9 @@ function recommendation(id, {
     mode,
     action,
     marketRegime,
+    tacticalState,
+    tacticalHorizon,
+    tacticalTriggerPath,
     at: 100,
   }
 }
@@ -79,6 +85,9 @@ test('真实收益画像只统计已关联且完成验证的真实费后卖出',
   assert.equal(profile.overall.losses, 1)
   assert.equal(profile.overall.profitFactor, 3)
   assert.equal(profile.groups.actions[0].samples, 2)
+  assert.equal(profile.groups.tacticalStates[0].key, 'READY')
+  assert.equal(profile.groups.tacticalHorizons[0].key, 'INTRADAY')
+  assert.equal(profile.groups.tacticalTriggerPaths[0].key, 'DIRECT')
   assert.equal(profile.excluded.unexecutedAdviceOutcomes, 1)
   assert.equal(profile.excluded.incompleteExecutions, 1)
   assert.equal(profile.excluded.unlinkedExecutions, 1)
@@ -134,10 +143,18 @@ test('上下文只在同模式同市场样本足够时约束风险倍率', () =>
     mode: 'hold_advice',
     marketRegime: '强市',
   })
+  const tactical = realOutcomeContext(profile, {
+    mode: 'buy_advice',
+    marketRegime: '强市',
+    tacticalState: 'READY',
+  })
 
   assert.equal(matched.sampleQualified, true)
   assert.equal(matched.calibration, 'defensive')
   assert.equal(matched.riskScale, 0.6)
   assert.equal(unmatched.sampleQualified, false)
   assert.equal(unmatched.riskScale, 1)
+  assert.equal(tactical.scope, 'mode_tactical')
+  assert.equal(tactical.sampleQualified, true)
+  assert.equal(tactical.riskScale, 0.6)
 })

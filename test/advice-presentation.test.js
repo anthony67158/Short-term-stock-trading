@@ -324,6 +324,32 @@ test('默认核心依据压缩为可扫读摘要而完整原文仍保留在建�
   assert.equal(longText.length > view.evidence[0].text.length, true)
 })
 
+test('军师主视图提供紧凑短线窗口而不暴露内部战术枚举', () => {
+  const view = buildAdvicePresentation({
+    action: '观望',
+    title: '等待突破确认',
+    shortHorizon: '1-3个交易日',
+    edge: '板块前排且主力承接',
+    crowdingRisk: '当前位置偏高，防冲高回落',
+    catalystWindow: '催化仍新鲜，等待量价确认',
+    reviewTrigger: '突破10.8元或资金转弱时重评',
+    shortHorizonTactical: {
+      schemaVersion: 'short-horizon-tactical.v1',
+      timing: { state: 'WAIT_BREAKOUT' },
+    },
+  })
+
+  assert.deepEqual(view.tactical, {
+    stage: '',
+    horizon: '1-3个交易日',
+    edge: '板块前排且主力承接',
+    risk: '当前位置偏高，防冲高回落',
+    catalyst: '催化仍新鲜，等待量价确认',
+    reviewTrigger: '突破10.8元或资金转弱时重评',
+  })
+  assert.doesNotMatch(JSON.stringify(view.tactical), /WAIT_BREAKOUT/)
+})
+
 test('军师展示契约去除重复依据并兼容持仓建议旧字段', () => {
   const view = buildAdvicePresentation({
     stance: '持有',

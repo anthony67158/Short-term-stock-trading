@@ -121,7 +121,7 @@ test('军师快速、深度与复核提示都强制合参散户资金', () => {
   assert.match(ADVISOR_FAST_SYSTEM, /散户资金/)
   assert.match(fast, /fundNote.*mainNetYi.*retailNetYi/)
   assert.match(review, /fundNote.*主力.*散户/)
-  assert.match(review, /main_out_retail_in/)
+  assert.match(review, /DISTRIBUTION/)
 
   const limitUp = buildUserPrompt('hold_advice', {
     ...payload,

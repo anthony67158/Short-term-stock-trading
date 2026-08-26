@@ -17,6 +17,17 @@ function decision(overrides = {}) {
     action: 'REDUCE',
     actionLabel: '减仓',
     actionability: 'READY',
+    opportunityLifecycle: {
+      schemaVersion: 'opportunity-lifecycle.v1',
+      code: '600000',
+      mode: 'hold_advice',
+      stage: 'EXIT_PENDING',
+      stageLabel: '等待退出',
+      decisionId: 'decision.demo',
+      sellableTodayQty: 4,
+      terminal: false,
+      updatedAt: now,
+    },
     asOf: new Date(now).toISOString(),
     validUntil: new Date(now + 30 * 60000).toISOString(),
     quantity: { lots: 4 },
@@ -156,6 +167,10 @@ test('只有真实人工成交才能推进部分完成和完成状态', () => {
   assert.equal(partial.remainingLots, 3)
   assert.equal(completed.status, 'COMPLETED')
   assert.equal(completed.remainingLots, 0)
+  assert.equal(armed.opportunityLifecycle.stage, 'ARMED')
+  assert.equal(confirmed.opportunityLifecycle.stage, 'CONFIRMED')
+  assert.equal(partial.opportunityLifecycle.stage, 'EXECUTING')
+  assert.equal(completed.opportunityLifecycle.stage, 'CLOSED')
   assert.throws(
     () => recordExecutionFill(confirmed, {
       fillId: 'fake',

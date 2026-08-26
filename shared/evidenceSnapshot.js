@@ -419,6 +419,7 @@ export function createCanonicalEvidenceSnapshot({
       aiSearch: payload.aiSearchEvidence || [],
     }),
     decisionSignals: compact({
+      tactical: payload.shortHorizonTactical,
       resonance: payload.resonance,
       trustScore: payload.trustScore,
       counterTrend: payload.counterTrend,

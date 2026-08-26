@@ -10,6 +10,10 @@ import {
   buildAdvicePriceContract,
 } from './advicePriceContract.js'
 import { executionTriggerDirection } from './executionTrigger.js'
+import { buildShortHorizonTactical } from './shortHorizonTactical.js'
+import {
+  deriveOpportunityLifecycle,
+} from './opportunityLifecycle.js'
 
 export const DECISION_PLAN_SCHEMA_VERSION = 'decision-plan.v2'
 
@@ -285,6 +289,10 @@ export function compileDecisionPlan({
   const market = payload.marketEnv?.schemaVersion
     ? payload.marketEnv
     : deriveMarketRegime(payload.market || {})
+  const tactical = payload.shortHorizonTactical?.schemaVersion
+    === 'short-horizon-tactical.v1'
+    ? payload.shortHorizonTactical
+    : buildShortHorizonTactical(payload, { now })
   const account = payload.account || {}
   const referencePrice = referencePriceFor(
     requestedAction,
@@ -615,9 +623,24 @@ export function compileDecisionPlan({
       strict: level.strict,
     })),
   }
+  const decisionId = fingerprint(identity)
+  const opportunityLifecycle = deriveOpportunityLifecycle({
+    code: identity.code,
+    mode,
+    advice,
+    tactical,
+    decisionPlan: {
+      decisionId,
+      action,
+      actionability,
+    },
+    holdQty: payload.holdQty,
+    sellableTodayQty: payload.sellableTodayQty,
+    now,
+  })
   return {
     schemaVersion: DECISION_PLAN_SCHEMA_VERSION,
-    decisionId: fingerprint(identity),
+    decisionId,
     code: identity.code,
     name: text(payload.name, 40),
     mode: text(mode, 30),
@@ -642,6 +665,23 @@ export function compileDecisionPlan({
       dataQuality: market.dataQuality || 'MISSING',
       targetPositionPct: market.targetPositionPct || { min: 0, max: 0 },
     },
+    tactical: {
+      schemaVersion: tactical.schemaVersion,
+      horizon: tactical.horizon,
+      alignmentScore: finite(tactical.alignmentScore),
+      marketRiskTone: tactical.market?.riskTone || 'UNKNOWN',
+      sectorState: tactical.sector?.state || 'UNKNOWN',
+      stockRole: tactical.sector?.stockRole || 'UNKNOWN',
+      timingState: tactical.timing?.state || 'INVALID',
+      reviewAfter: tactical.timing?.reviewAfter || 'MATERIAL_EVENT',
+      flowRelation: tactical.flow?.relation || 'UNKNOWN',
+      crowdingRisk: tactical.stock?.crowdingRisk || 'UNKNOWN',
+      catalystFreshness: tactical.catalyst?.freshness || 'NONE',
+      conflicts: Array.isArray(tactical.conflicts)
+        ? tactical.conflicts.slice(0, 4)
+        : [],
+    },
+    opportunityLifecycle,
     manualConfirmationOnly: probeRequested,
     opportunity: payload.sectorOpportunity?.matched === true
       ? {
