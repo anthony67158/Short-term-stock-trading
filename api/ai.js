@@ -1610,7 +1610,11 @@ export default async function handler(req, res) {
       );
       return finish(scheduledReviewResponse);
     }
-    if (isAdvisor && payload.code) {
+    if (
+      isAdvisor
+      && payload.code
+      && payload.generationProfile === 'DEEP'
+    ) {
       phase('正在匹配经典操盘理论…', 'theory');
       const theoryQuery = buildAdvisorTheoryQuery(mode, payload);
       try {

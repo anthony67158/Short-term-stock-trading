@@ -21,6 +21,28 @@ test('快速与深度建议都使用可交付的有界输出预算', () => {
   assert.match(ADVISOR_DEEP_SYSTEM, /最多五个检查点/)
 })
 
+test('所有军师模式都只使用紧凑短线战术合同', () => {
+  for (const mode of [
+    'buy_advice',
+    'hold_advice',
+    't_advice',
+    'review',
+    'plan',
+  ]) {
+    const prompt = buildUserPrompt(mode, { code: '600000' })
+    assert.match(prompt, /短线战术合同/)
+    assert.doesNotMatch(prompt, /顶级操盘理论·融会贯通/)
+    assert.ok(prompt.length < 6000, `${mode} prompt过长`)
+    const deepPrompt = buildUserPrompt(mode, {
+      code: '600000',
+      generationProfile: 'DEEP',
+    })
+    assert.match(deepPrompt, /深度研判事实契约/)
+    assert.doesNotMatch(deepPrompt, /股神|六条同源理论/)
+    assert.ok(deepPrompt.length < 7000, `${mode} deep prompt过长`)
+  }
+})
+
 test('军师低命中校准按动作方向纠偏而不是一律变得更保守', () => {
   const prompt = buildUserPrompt('hold_advice', {
     code: '600000',
