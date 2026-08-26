@@ -199,6 +199,109 @@
         "requiredPickCodes": ["600001"],
         "forbiddenPickCodes": []
       }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "screen-three-opportunity-queues",
+      "adapter": "screen",
+      "tags": ["screen", "opportunity-queue", "crowding", "distribution"],
+      "input": {
+        "options": {
+          "limit": 3
+        },
+        "candidates": [
+          {
+            "code": "600040",
+            "name": "立即关注样本",
+            "price": 10,
+            "marketScore": 78,
+            "pct": 2,
+            "volRatio": 1.8,
+            "quant": { "score": 72, "upProb": 64, "expRet": 2.2 },
+            "shortHorizonTactical": {
+              "sector": { "stockRole": "FRONT_ROW" },
+              "stock": {
+                "relativeStrength": 74,
+                "liquidity": "GOOD",
+                "crowdingRisk": "LOW"
+              },
+              "flow": { "relation": "ACCUMULATION" },
+              "catalyst": { "freshness": "FRESH", "risk": "POSITIVE" }
+            }
+          },
+          {
+            "code": "600041",
+            "name": "回踩候选样本",
+            "price": 12,
+            "marketScore": 76,
+            "pct": 7.2,
+            "volRatio": 2,
+            "quant": { "score": 70, "upProb": 62, "expRet": 2 },
+            "shortHorizonTactical": {
+              "sector": { "stockRole": "LEADER" },
+              "stock": {
+                "relativeStrength": 80,
+                "liquidity": "GOOD",
+                "crowdingRisk": "HIGH",
+                "location": "EXTENDED"
+              },
+              "flow": { "relation": "ACCUMULATION" },
+              "catalyst": { "freshness": "FRESH", "risk": "POSITIVE" }
+            }
+          },
+          {
+            "code": "600042",
+            "name": "淘汰样本",
+            "price": 8,
+            "marketScore": 45,
+            "pct": -3,
+            "volRatio": 1,
+            "quant": { "score": 30, "upProb": 35, "expRet": -1.5 },
+            "shortHorizonTactical": {
+              "sector": { "stockRole": "LAGGARD" },
+              "stock": {
+                "relativeStrength": 30,
+                "liquidity": "GOOD",
+                "crowdingRisk": "LOW"
+              },
+              "flow": { "relation": "DISTRIBUTION" },
+              "catalyst": { "freshness": "FRESH", "risk": "NEGATIVE" }
+            }
+          }
+        ],
+        "modelOutput": {
+          "noTrade": false,
+          "noTradeReason": "",
+          "picks": [
+            {
+              "code": "600040",
+              "name": "立即关注样本",
+              "actionability": "可执行",
+              "buyPoint": "回踩10元企稳",
+              "risk": "跌破支撑失效"
+            },
+            {
+              "code": "600041",
+              "name": "回踩候选样本",
+              "actionability": "可执行",
+              "buyPoint": "等待回踩",
+              "risk": "高位拥挤"
+            },
+            {
+              "code": "600042",
+              "name": "淘汰样本",
+              "actionability": "可执行",
+              "buyPoint": "直接买入",
+              "risk": "无"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "requiredPickCodes": ["600040", "600041"],
+        "forbiddenPickCodes": ["600042"]
+      }
     }
   ]
 }

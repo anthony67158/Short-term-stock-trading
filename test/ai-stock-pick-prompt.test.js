@@ -17,6 +17,10 @@ test('AI选股提示词要求无立即买点时仍输出条件候选', () => {
   assert.match(prompt, /分钟 Transformer V2/)
   assert.match(prompt, /不得混用默认模型/)
   assert.doesNotMatch(prompt, /noTrade=true 时 picks 必须为空数组/)
+  assert.match(prompt, /IMMEDIATE=立即关注/)
+  assert.match(prompt, /PULLBACK=回踩候选/)
+  assert.match(prompt, /REJECTED=淘汰/)
+  assert.match(prompt, /没有IMMEDIATE时仍从PULLBACK保留1~3只/)
 })
 
 test('AI选股在V2.1回退时必须按实际V2.0解释候选分数', () => {

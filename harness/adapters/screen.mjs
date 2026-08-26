@@ -137,6 +137,30 @@ export async function runScreenHarnessCase(testCase) {
       { hard: true, code: 'SCREEN_RANKING_CONTRACT_MISSING' },
     ),
     check(
+      'screen-opportunity-queues',
+      'consistency',
+      shortlist.list.every((item) =>
+        ['IMMEDIATE', 'PULLBACK', 'REJECTED'].includes(
+          item.opportunityQueue?.key,
+        ),
+      )
+        && shortlist.queues.immediate.length
+          + shortlist.queues.pullback.length
+          + shortlist.queues.rejected.length
+          === shortlist.list.length,
+      '候选未完整归入立即关注、回踩候选或淘汰队列',
+      { hard: true, code: 'SCREEN_OPPORTUNITY_QUEUE_INVALID' },
+    ),
+    check(
+      'screen-rejected-not-picked',
+      'feasibility',
+      picks.every((item) =>
+        item.opportunityQueue?.key !== 'REJECTED'
+      ),
+      '淘汰候选仍进入模型选股结果',
+      { hard: true, code: 'SCREEN_REJECTED_CANDIDATE_PICKED' },
+    ),
+    check(
       'screen-no-trade-consistency',
       'consistency',
       decision.noTrade === true
@@ -160,6 +184,9 @@ export async function runScreenHarnessCase(testCase) {
       executableCount: picks.filter(
         (item) => item.actionability === '可执行',
       ).length,
+      immediateCount: shortlist.queues.immediate.length,
+      pullbackCount: shortlist.queues.pullback.length,
+      rejectedCount: shortlist.queues.rejected.length,
     },
   }
 }

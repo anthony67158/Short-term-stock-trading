@@ -11,6 +11,13 @@ const finite = (value, fallback = 0) => {
 }
 
 export const CANDIDATE_RANKING_VERSION = 'candidate-ranking.v1'
+export const OPPORTUNITY_QUEUE_VERSION = 'opportunity-queue.v1'
+
+export const OPPORTUNITY_QUEUE = Object.freeze({
+  IMMEDIATE: 'IMMEDIATE',
+  PULLBACK: 'PULLBACK',
+  REJECTED: 'REJECTED',
+})
 
 const DEFAULT_RANKING_POLICY = Object.freeze({
   universe: {
@@ -258,6 +265,198 @@ function entrySignal(item) {
   }
 }
 
+function flowRelationOf(item = {}) {
+  const value = String(
+    item.shortHorizonTactical?.flow?.relation
+    || item.flowRelation
+    || item.stockFund?.retailFlow?.relation
+    || '',
+  ).toUpperCase()
+  if (
+    value === 'DISTRIBUTION'
+    || value === 'MAIN_OUT_RETAIL_IN'
+  ) return 'DISTRIBUTION'
+  if (
+    value === 'ACCUMULATION'
+    || value === 'MAIN_IN_RETAIL_OUT'
+  ) return 'ACCUMULATION'
+  if (value === 'CONSENSUS') return 'CONSENSUS'
+  if (value === 'DIVERGENCE') return 'DIVERGENCE'
+  return 'UNKNOWN'
+}
+
+function roleOf(item = {}) {
+  const value = String(
+    item.shortHorizonTactical?.sector?.stockRole
+    || item.conceptLeadership?.role
+    || '',
+  ).toUpperCase()
+  if (value === 'LEADER') return 'LEADER'
+  if (value === 'FRONT_ROW' || value === 'FRONTROW') {
+    return 'FRONT_ROW'
+  }
+  if (value === 'FOLLOWER') return 'FOLLOWER'
+  if (value === 'LAGGARD') return 'LAGGARD'
+  return 'UNKNOWN'
+}
+
+function candidateDimensions(item = {}) {
+  const tactical = item.shortHorizonTactical || {}
+  const amount = finite(item.amount, NaN)
+  const liquidity = String(
+    tactical.stock?.liquidity || (
+      Number.isFinite(amount)
+        ? amount >= DEFAULT_RANKING_POLICY.universe.minimumAmount
+          ? 'GOOD'
+          : 'LIMITED'
+        : 'UNKNOWN'
+    ),
+  ).toUpperCase()
+  const crowdingRisk = String(
+    tactical.stock?.crowdingRisk || (
+      finite(item.pct) >= 6.5
+      || finite(item.turnover) >= 18
+      || finite(item.volRatio) >= 5
+        ? 'HIGH'
+        : 'LOW'
+    ),
+  ).toUpperCase()
+  return {
+    sectorRole: roleOf(item),
+    relativeStrength: +clamp(
+      finite(
+        tactical.stock?.relativeStrength,
+        item.marketScore,
+      ),
+      0,
+      100,
+    ).toFixed(1),
+    flowRelation: flowRelationOf(item),
+    quantScore: Number.isFinite(Number(item.quant?.score))
+      ? +clamp(Number(item.quant.score), 0, 100).toFixed(1)
+      : null,
+    liquidity,
+    crowdingRisk,
+    catalystFreshness: String(
+      tactical.catalyst?.freshness
+      || item.catalyst?.freshness
+      || 'UNKNOWN',
+    ).toUpperCase(),
+    catalystRisk: String(
+      tactical.catalyst?.risk
+      || item.catalyst?.risk
+      || 'UNKNOWN',
+    ).toUpperCase(),
+  }
+}
+
+function opportunityQueueOf(item, signal) {
+  const dimensions = candidateDimensions(item)
+  const qualifiedLeader = isQualifiedConceptLeader(item)
+  const qualifiedInvestment = isQualifiedInvestmentCandidate(item)
+  const hardRejectReasons = []
+  if (
+    item.marketEligible === false
+    || finite(item.marketScore) < 40
+  ) hardRejectReasons.push('市场强度不足')
+  if (
+    dimensions.quantScore != null
+    && dimensions.quantScore < 35
+  ) hardRejectReasons.push('量化方向明显偏弱')
+  if (dimensions.sectorRole === 'LAGGARD') {
+    hardRejectReasons.push('个股已从板块前排掉队')
+  }
+  if (
+    dimensions.flowRelation === 'DISTRIBUTION'
+    && dimensions.relativeStrength < 60
+  ) hardRejectReasons.push('主力流出且小单承接')
+  if (dimensions.liquidity === 'LIMITED') {
+    hardRejectReasons.push('流动性不足')
+  }
+  if (dimensions.catalystRisk === 'NEGATIVE') {
+    hardRejectReasons.push('负面催化尚未消化')
+  }
+  if (
+    hardRejectReasons.length
+    && !qualifiedLeader
+    && !qualifiedInvestment
+  ) {
+    return {
+      schemaVersion: OPPORTUNITY_QUEUE_VERSION,
+      key: OPPORTUNITY_QUEUE.REJECTED,
+      label: '淘汰',
+      reason: hardRejectReasons.join('；'),
+      reviewTrigger: '关键弱势证据消失后重新进入全市场筛选',
+      dimensions,
+    }
+  }
+
+  const overextended = (
+    dimensions.crowdingRisk === 'HIGH'
+    || item.shortHorizonTactical?.stock?.location === 'EXTENDED'
+    || finite(item.pct) >= 6.5
+  )
+  if (signal.passed && !overextended) {
+    return {
+      schemaVersion: OPPORTUNITY_QUEUE_VERSION,
+      key: OPPORTUNITY_QUEUE.IMMEDIATE,
+      label: '立即关注',
+      reason: '板块、相对强弱、量价与量化基础条件已齐，等待精确触发',
+      reviewTrigger: '回踩企稳或放量突破后进入单股复核',
+      dimensions,
+    }
+  }
+
+  const missing = signal.failedRules.slice(0, 2)
+  return {
+    schemaVersion: OPPORTUNITY_QUEUE_VERSION,
+    key: OPPORTUNITY_QUEUE.PULLBACK,
+    label: '回踩候选',
+    reason: overextended
+      ? '短线优势仍在，但当前位置拥挤，不追高'
+      : missing.length
+        ? `基础优势尚可，仍缺${missing.join('、')}`
+        : '等待更合适的回踩或突破确认位置',
+    reviewTrigger: overextended
+      ? '回踩支撑并缩量企稳后重新评估'
+      : '缺失条件补齐后重新评估',
+    dimensions,
+  }
+}
+
+function conciseQueueItem(item = {}) {
+  return {
+    code: String(item.code || ''),
+    name: String(item.name || item.code || ''),
+    queue: item.opportunityQueue,
+    marketScore: item.marketScore ?? null,
+    combinedScore: item.combinedScore ?? null,
+    attentionScore: item.attentionScore ?? null,
+    quantScore: item.quant?.score ?? null,
+  }
+}
+
+function opportunityQueues(items = []) {
+  const result = {
+    immediate: [],
+    pullback: [],
+    rejected: [],
+  }
+  for (const item of items) {
+    const compact = conciseQueueItem(item)
+    if (item.opportunityQueue?.key === OPPORTUNITY_QUEUE.IMMEDIATE) {
+      result.immediate.push(compact)
+    } else if (
+      item.opportunityQueue?.key === OPPORTUNITY_QUEUE.REJECTED
+    ) {
+      result.rejected.push(compact)
+    } else {
+      result.pullback.push(compact)
+    }
+  }
+  return result
+}
+
 export function rankCandidateShortlist(candidates, opts = {}) {
   const policy = resolvedPolicy(opts)
   const limit = Math.max(1, Math.min(30, Number(opts.limit) || 12))
@@ -302,11 +501,20 @@ export function rankCandidateShortlist(candidates, opts = {}) {
       100,
     )
     const resolvedEntrySignal = entrySignal(item)
+    const opportunityQueue = opportunityQueueOf(
+      {
+        ...item,
+        combinedScore,
+        attentionScore,
+      },
+      resolvedEntrySignal,
+    )
     return {
       ...item,
       combinedScore: +combinedScore.toFixed(1),
       attentionScore: +attentionScore.toFixed(1),
       entrySignal: resolvedEntrySignal,
+      opportunityQueue,
     }
   }).sort((a, b) =>
     b.attentionScore - a.attentionScore ||
@@ -349,19 +557,27 @@ export function rankCandidateShortlist(candidates, opts = {}) {
     if (replaceIndex < 0) break
     selected[replaceIndex] = candidate
   }
+  const queueOrder = {
+    [OPPORTUNITY_QUEUE.IMMEDIATE]: 0,
+    [OPPORTUNITY_QUEUE.PULLBACK]: 1,
+    [OPPORTUNITY_QUEUE.REJECTED]: 2,
+  }
   selected.sort((left, right) =>
-    Number(right.entrySignal.passed)
-      - Number(left.entrySignal.passed)
+    queueOrder[left.opportunityQueue?.key]
+      - queueOrder[right.opportunityQueue?.key]
     || right.attentionScore - left.attentionScore
     || right.combinedScore - left.combinedScore
     || String(left.code).localeCompare(String(right.code))
   )
   const executable = selected.filter(
-    (item) => item.entrySignal.passed,
+    (item) =>
+      item.opportunityQueue?.key === OPPORTUNITY_QUEUE.IMMEDIATE,
   )
   const watchlist = selected.filter(
-    (item) => !item.entrySignal.passed,
+    (item) =>
+      item.opportunityQueue?.key !== OPPORTUNITY_QUEUE.IMMEDIATE,
   )
+  const queues = opportunityQueues(selected)
   return {
     rankingVersion: CANDIDATE_RANKING_VERSION,
     signalPassedCount: passed.length,
@@ -371,8 +587,13 @@ export function rankCandidateShortlist(candidates, opts = {}) {
     investmentReservedCount: selected.filter(
       isQualifiedInvestmentCandidate,
     ).length,
+    queues,
     executable,
     watchlist,
+    rejected: selected.filter(
+      (item) =>
+        item.opportunityQueue?.key === OPPORTUNITY_QUEUE.REJECTED,
+    ),
     list: selected,
   }
 }
@@ -435,6 +656,7 @@ function conditionalFallback(item, index, noTradeReason) {
     name: item.name || String(item.code),
     conceptLeadership: item.conceptLeadership || null,
     investmentProfile: item.investmentProfile || null,
+    opportunityQueue: item.opportunityQueue || null,
     quantScore: quant.score ?? null,
     grade: '观察',
     actionability: '等待触发',
@@ -453,11 +675,18 @@ export function normalizePickDecision(value, allowedCodes = [], fallbackCandidat
   const candidates = new Map(
     (fallbackCandidates || []).map((item) => [String(item?.code || ''), item])
   )
+  const queues = opportunityQueues(fallbackCandidates)
   const picks = (Array.isArray(result.picks) ? result.picks : [])
-    .filter((item) => item && allowed.has(String(item.code || '')))
+    .filter((item) => {
+      if (!item || !allowed.has(String(item.code || ''))) return false
+      const candidate = candidates.get(String(item.code))
+      return candidate?.opportunityQueue?.key
+        !== OPPORTUNITY_QUEUE.REJECTED
+    })
     .slice(0, 3)
     .map((item, index) => {
       const candidate = candidates.get(String(item.code))
+      const queueKey = candidate?.opportunityQueue?.key
       const requested = ['可执行', '等待触发', '观察'].includes(item.actionability)
         ? item.actionability
         : null
@@ -466,9 +695,11 @@ export function normalizePickDecision(value, allowedCodes = [], fallbackCandidat
         rank: index + 1,
         conceptLeadership: candidate?.conceptLeadership || null,
         investmentProfile: candidate?.investmentProfile || null,
+        opportunityQueue: candidate?.opportunityQueue || null,
         actionability: (
           result.noTrade === true
           || candidate?.entrySignal?.passed === false
+          || queueKey && queueKey !== OPPORTUNITY_QUEUE.IMMEDIATE
         )
           ? (requested === '观察' ? '观察' : '等待触发')
           : (requested || '可执行'),
@@ -480,6 +711,7 @@ export function normalizePickDecision(value, allowedCodes = [], fallbackCandidat
     return {
       ...result,
       noTrade,
+      opportunityQueues: queues,
       noTradeReason: noTrade
         ? (
             result.noTradeReason
@@ -491,7 +723,12 @@ export function normalizePickDecision(value, allowedCodes = [], fallbackCandidat
   }
   {
     const fallback = (Array.isArray(fallbackCandidates) ? fallbackCandidates : [])
-      .filter((item) => item && allowed.has(String(item.code || '')))
+      .filter((item) =>
+        item
+        && allowed.has(String(item.code || ''))
+        && item.opportunityQueue?.key
+          !== OPPORTUNITY_QUEUE.REJECTED
+      )
       .slice(0, 3)
       .map((item, index) => conditionalFallback(item, index, result.noTradeReason))
     if (fallback.length) {
@@ -501,6 +738,7 @@ export function normalizePickDecision(value, allowedCodes = [], fallbackCandidat
         noTradeReason: result.noTradeReason || '当前没有立即买点，以下为条件候选',
         fallback: true,
         fallbackReason: result.noTradeReason || '研判未形成主动出手结论，已展示确定性条件候选',
+        opportunityQueues: queues,
         picks: fallback,
       }
     }
@@ -508,6 +746,7 @@ export function normalizePickDecision(value, allowedCodes = [], fallbackCandidat
       ...result,
       noTrade: true,
       noTradeReason: result.noTradeReason || '候选池中没有同时通过把握与赔率要求的标的',
+      opportunityQueues: queues,
       picks: [],
     }
   }

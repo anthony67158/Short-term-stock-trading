@@ -738,7 +738,7 @@ ${payload.holdQty != null ? `4) 手数纪律:任何减仓/清仓/卖出手数 �
 数据含：大盘情绪(market)、板块资金流(sectors)、产业方向(investmentConcepts)、活跃概念(activeConcepts)、漏斗统计(funnel)、【候选池 candidates —— 已按 attentionScore 复排】。
 数据：${data}
 
-【候选池 candidates 字段说明】每只含：name/code、price现价、marketScore全市场分、combinedScore交易复排分、attentionScore产业价值加权关注分、pct/turnover/volRatio/mainInflowYi、tags、entrySignal{passed,matchedRules,failedRules}，以及 quant{ modelVersion用户选择,effectiveModelVersion候选实际运行版本,runtimeModelVersion,modelLabel,fallback,score,upProb/expRet/targetLow~targetHigh为原5日窗口，nextUpProb/nextExpRet/nextTargetLow~nextTargetHigh为下一交易日窗口，highConfFired,credibility,buyPrice,takeProfit,stopLoss }。部分候选带 investmentProfile{conceptName,themeLabel,thesis,strategicScore,conceptInvestmentScore,companyQualityScore,investmentScore,fundConfirmed,memberVerified,evidence}；其中公司质量代理分只基于估值、规模、资金和交易稳定性，不等同于完整基本面结论。部分候选还带 conceptLeadership{conceptName,conceptStrength,role,roleLabel,leaderScore,memberVerified,evidence}。
+【候选池 candidates 字段说明】每只含：name/code、price现价、marketScore全市场分、combinedScore交易复排分、attentionScore产业价值加权关注分、pct/turnover/volRatio/mainInflowYi、tags、entrySignal{passed,matchedRules,failedRules}、opportunityQueue{key,label,reason,reviewTrigger,dimensions}，以及 quant{ modelVersion用户选择,effectiveModelVersion候选实际运行版本,runtimeModelVersion,modelLabel,fallback,score,upProb/expRet/targetLow~targetHigh为原5日窗口，nextUpProb/nextExpRet/nextTargetLow~nextTargetHigh为下一交易日窗口，highConfFired,credibility,buyPrice,takeProfit,stopLoss }。部分候选带 investmentProfile{conceptName,themeLabel,thesis,strategicScore,conceptInvestmentScore,companyQualityScore,investmentScore,fundConfirmed,memberVerified,evidence}；其中公司质量代理分只基于估值、规模、资金和交易稳定性，不等同于完整基本面结论。部分候选还带 conceptLeadership{conceptName,conceptStrength,role,roleLabel,leaderScore,memberVerified,evidence}。
 【产业价值纪律】investmentProfile 只在 memberVerified=true 时有效；战略主题是结构化初筛，不是最新政策事实。必须结合豆包搜索的待核验政策/产业证据、当前资金和量化结果复核。若 fundConfirmed=false，应明确“产业逻辑存在但资金尚未确认”，不能给高把握。
 【概念龙头纪律】conceptLeadership 只在 memberVerified=true 时有效；你不得重新猜测或改写龙头身份，也不得把无该字段的股票自行称为龙头。龙头身份不等于买点：它只用于解释“为何值得优先观察”，能否立即买必须继续服从量化与entrySignal；entrySignal.passed=false 时即使是总龙头也只能等待触发或观察。
 【本次量化版本】${payload.quantModelVersion === 'v2.1' ? '分钟 Transformer V2.1（盘中实验）' : payload.quantModelVersion === 'v2' ? '分钟 Transformer V2.0' : '当前生产模型'}。候选评分只采信该版本的结果；不得混用默认模型、V2.0或V2.1的分数。V2.1未达到58%生产门槛，只能作为实验排序参考，不得因其单一高概率直接给“可执行”。
@@ -751,12 +751,14 @@ ${payload.session === 'next_open' ? '【当前为休市/盘前】结论面向下
 2. **再选公司**：只从真实成分股选，比较 investmentProfile 的公司质量代理分、估值/规模证据、资金持续性；高热度但高估值、小市值、资金流出者降级。
 3. **再看交易时点**：用量化、趋势、资金与股票理论验证当前是否值得介入。彼得林奇/好行业好公司好价格用于价值筛选，趋势与量价理论用于时点确认，龙头战法只在真实连板和板块证据成立时使用。
 4. **绝对闸门决定能否立即买，相对排名决定观察谁**：若没有一只同时满足方向不弱、位置不追高、盈亏比合理，就 noTrade=true；但仍保留相对最优的1~3只。
-5. **诚实分级与可买性**：强=产业+公司+资金+量化多维共振；产业逻辑好但资金或量化未确认只能“等待触发/观察”。给出明确买点、买入区、止损与失效条件。
+5. **严格服从三队列**：IMMEDIATE=立即关注，可在确定性触发后执行；PULLBACK=回踩候选，只能等待触发；REJECTED=淘汰，不得进入picks。不得自行改变服务端队列。
+6. **诚实分级与可买性**：强=产业+公司+资金+量化多维共振；产业逻辑好但资金或量化未确认只能“等待触发/观察”。给出明确买点、买入区、止损与失效条件。
 
 【硬要求】：
 - candidates 非空时 picks 必须给1~3只，禁止空数组；可以全部是“等待触发/观察”，但必须说明触发条件和失效条件。
 - actionability 只能填“可执行 / 等待触发 / 观察”。noTrade=true 时不得填“可执行”。
 - entrySignal 是量价与量化的确定性确认：entrySignal.passed=false 的候选不得升级为“可执行”，只能“等待触发/观察”，并须引用 failedRules 解释尚缺哪项条件。
+- opportunityQueue.key=REJECTED 的候选必须淘汰；没有IMMEDIATE时仍从PULLBACK保留1~3只条件候选，不得返回空名单。
 - 理由必须先讲产业与公司价值，再引用量化分/上涨概率/资金/板块等**具体数字**说明交易时点；不得只写涨停、连板、热门或龙头。
 - 每只都要有 grade(强/中/弱),整体名单的把握度用 confidence 概括。
 

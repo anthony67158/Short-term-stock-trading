@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
 
 import {
   CANDIDATE_RANKING_VERSION,
+  OPPORTUNITY_QUEUE,
+  OPPORTUNITY_QUEUE_VERSION,
   marketPageNumbers,
   normalizePickDecision,
   normalizeStoredPickSnapshot,
@@ -119,6 +121,120 @@ test('缺少量化确认的候选只能进入等待名单', () => {
   assert.equal(result.executable.length, 0)
   assert.equal(result.watchlist.length, 1)
   assert.equal(result.watchlist[0].entrySignal.passed, false)
+})
+
+test('候选按立即关注、回踩候选和淘汰形成互斥队列', () => {
+  const result = rankCandidateShortlist([
+    row({
+      code: '600001',
+      marketScore: 78,
+      pct: 2,
+      quant: { score: 72, upProb: 64, expRet: 2.2 },
+      shortHorizonTactical: {
+        sector: { stockRole: 'FRONT_ROW' },
+        stock: {
+          relativeStrength: 74,
+          liquidity: 'GOOD',
+          crowdingRisk: 'LOW',
+        },
+        flow: { relation: 'ACCUMULATION' },
+        catalyst: { freshness: 'FRESH', risk: 'POSITIVE' },
+      },
+    }),
+    row({
+      code: '600002',
+      marketScore: 76,
+      pct: 7.2,
+      quant: { score: 70, upProb: 62, expRet: 2 },
+      shortHorizonTactical: {
+        sector: { stockRole: 'LEADER' },
+        stock: {
+          relativeStrength: 80,
+          liquidity: 'GOOD',
+          crowdingRisk: 'HIGH',
+          location: 'EXTENDED',
+        },
+        flow: { relation: 'ACCUMULATION' },
+        catalyst: { freshness: 'FRESH', risk: 'POSITIVE' },
+      },
+    }),
+    row({
+      code: '600003',
+      marketScore: 50,
+      pct: -2,
+      quant: { score: 30, upProb: 35, expRet: -2 },
+      shortHorizonTactical: {
+        sector: { stockRole: 'LAGGARD' },
+        stock: {
+          relativeStrength: 32,
+          liquidity: 'GOOD',
+          crowdingRisk: 'LOW',
+        },
+        flow: { relation: 'DISTRIBUTION' },
+        catalyst: { freshness: 'FRESH', risk: 'NEGATIVE' },
+      },
+    }),
+  ], { limit: 3 })
+
+  assert.equal(
+    result.list[0].opportunityQueue.schemaVersion,
+    OPPORTUNITY_QUEUE_VERSION,
+  )
+  assert.equal(
+    result.queues.immediate[0].queue.key,
+    OPPORTUNITY_QUEUE.IMMEDIATE,
+  )
+  assert.equal(
+    result.queues.pullback[0].queue.key,
+    OPPORTUNITY_QUEUE.PULLBACK,
+  )
+  assert.equal(
+    result.queues.rejected[0].queue.key,
+    OPPORTUNITY_QUEUE.REJECTED,
+  )
+  assert.equal(result.executable.length, 1)
+  assert.equal(result.rejected.length, 1)
+  assert.deepEqual(
+    result.list.map((item) => item.code),
+    ['600001', '600002', '600003'],
+  )
+})
+
+test('没有立即关注标的时仍保留回踩候选且淘汰项不能进入模型结果', () => {
+  const candidates = rankCandidateShortlist([
+    row({
+      code: '600010',
+      marketScore: 72,
+      pct: 7,
+      quant: { score: 68, upProb: 60, expRet: 1.8 },
+    }),
+    row({
+      code: '600011',
+      marketScore: 45,
+      pct: -3,
+      quant: { score: 30, upProb: 38, expRet: -1.5 },
+      shortHorizonTactical: {
+        sector: { stockRole: 'LAGGARD' },
+        stock: { relativeStrength: 30, liquidity: 'GOOD' },
+        flow: { relation: 'DISTRIBUTION' },
+        catalyst: { risk: 'NEGATIVE' },
+      },
+    }),
+  ], { limit: 2 })
+  const decision = normalizePickDecision({
+    noTrade: true,
+    picks: [
+      { code: '600010', actionability: '可执行' },
+      { code: '600011', actionability: '可执行' },
+    ],
+  }, candidates.list.map((item) => item.code), candidates.list)
+
+  assert.equal(candidates.queues.immediate.length, 0)
+  assert.equal(candidates.queues.pullback.length, 1)
+  assert.equal(decision.picks.length, 1)
+  assert.equal(decision.picks[0].code, '600010')
+  assert.equal(decision.picks[0].actionability, '等待触发')
+  assert.equal(decision.opportunityQueues.rejected.length, 1)
 })
 
 test('模型不能把未通过入场确认的候选升级为可执行', () => {
