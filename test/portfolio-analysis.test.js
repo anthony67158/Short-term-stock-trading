@@ -312,7 +312,15 @@ test('持仓诊断生成金额手数明确且资金守恒的组合执行单', ()
         name: '埃斯顿',
         concept: '机器人',
         price: 30,
+        quantScore: 78,
+        highConfidence: true,
+        conceptPct: 2.6,
+        conceptMainInflowYi: 6,
       },
+    },
+    holdingCatalog: {
+      '300476': { quantScore: 38 },
+      '600276': { quantScore: 57 },
     },
   })
 
@@ -362,6 +370,24 @@ test('持仓诊断生成金额手数明确且资金守恒的组合执行单', ()
     true,
   )
   assert.equal(result.executionPlan.estimatedFees > 0, true)
+  assert.equal(
+    result.executionPlan.primaryRotation.schemaVersion,
+    'portfolio-rotation.v1',
+  )
+  assert.equal(result.executionPlan.primaryRotation.status, 'READY')
+  assert.equal(result.executionPlan.primaryRotation.source.code, '300476')
+  assert.equal(result.executionPlan.primaryRotation.target.code, '002747')
+  assert.equal(result.executionPlan.primaryRotation.source.lots, 2)
+  assert.equal(result.executionPlan.primaryRotation.target.lots, 1)
+  assert.equal(
+    result.executionPlan.primaryRotation.costs.total
+      > result.executionPlan.primaryRotation.costs.fees,
+    true,
+  )
+  assert.equal(
+    result.executionPlan.primaryRotation.t1.targetLockedAfterBuy,
+    true,
+  )
   assert.deepEqual(
     result.conceptActions.map((item) => [
       item.concept,
@@ -410,6 +436,124 @@ test('减仓手数不得超过T+1可卖数量并明确标记未完成部分', ()
   assert.equal(result.executionPlan.orders[0].sellableLots, 1)
   assert.equal(result.executionPlan.orders[0].t1Blocked, true)
   assert.equal(result.executionPlan.orders[0].remainingLots, 4)
+})
+
+test('最弱持仓受T+1锁定时首要轮动等待解锁且不提前买入', () => {
+  const constrained = structuredClone(distribution)
+  constrained.stocks[0].sellableQty = 0
+  const result = normalizePortfolioAnalysis({
+    allocation: { targetPositionPct: 78 },
+    executionSummary: {
+      verdict: 'rebalance',
+      todayGoal: '退出胜宏科技后转入埃斯顿',
+      nextReviewTrigger: '下一交易日仓位解锁',
+    },
+    stockActions: [{
+      priority: 1,
+      code: '300476',
+      action: 'exit',
+      targetWeightPct: 0,
+      triggerPrice: 90,
+      invalidation: '重新放量突破前高',
+      reason: '量化与板块地位均转弱',
+      evidenceIds: ['E1'],
+    }],
+    recommendations: [{
+      priority: 2,
+      concept: '机器人',
+      code: '002747',
+      targetWeightPct: 5,
+      maxWeightPct: 5,
+      triggerPrice: 30,
+      trigger: '放量站稳30元',
+      invalidation: '跌破28元',
+      reason: '量化与资金共振',
+      evidenceIds: ['E2'],
+    }],
+  }, {
+    distribution: constrained,
+    allowedEvidenceIds: ['E1', 'E2'],
+    allowedHoldingCodes: ['300476', '600276'],
+    allowedRecommendationCodes: ['002747'],
+    holdingCatalog: {
+      '300476': { quantScore: 30 },
+    },
+    recommendationCatalog: {
+      '002747': {
+        code: '002747',
+        name: '埃斯顿',
+        concept: '机器人',
+        price: 30,
+        quantScore: 75,
+      },
+    },
+  })
+
+  assert.equal(result.executionPlan.primaryRotation.status, 'WAIT_T1')
+  assert.equal(result.executionPlan.primaryRotation.actionable, false)
+  assert.equal(result.executionPlan.primaryRotation.source.lots, 0)
+  assert.match(result.executionPlan.primaryRotation.summary, /下一交易日/)
+  assert.match(
+    result.executionPlan.primaryRotation.blockedReasons.join('；'),
+    /T\+1/,
+  )
+})
+
+test('候选相对优势不足时服务端拒绝形成首要轮动动作', () => {
+  const result = normalizePortfolioAnalysis({
+    allocation: { targetPositionPct: 78 },
+    executionSummary: {
+      verdict: 'rebalance',
+      todayGoal: '尝试轮动',
+      nextReviewTrigger: '量化优势扩大后复核',
+    },
+    stockActions: [{
+      priority: 1,
+      code: '300476',
+      action: 'reduce',
+      targetWeightPct: 39,
+      triggerPrice: 90,
+      invalidation: '重新走强',
+      reason: '集中度偏高',
+      evidenceIds: ['E1'],
+    }],
+    recommendations: [{
+      priority: 2,
+      concept: '机器人',
+      code: '002747',
+      targetWeightPct: 3,
+      maxWeightPct: 3,
+      triggerPrice: 30,
+      trigger: '站稳30元',
+      invalidation: '跌破28元',
+      reason: '候选暂列第一',
+      evidenceIds: ['E2'],
+    }],
+  }, {
+    distribution,
+    allowedEvidenceIds: ['E1', 'E2'],
+    allowedHoldingCodes: ['300476', '600276'],
+    allowedRecommendationCodes: ['002747'],
+    holdingCatalog: {
+      '300476': { quantScore: 72 },
+    },
+    recommendationCatalog: {
+      '002747': {
+        code: '002747',
+        name: '埃斯顿',
+        concept: '机器人',
+        price: 30,
+        quantScore: 60,
+      },
+    },
+  })
+
+  assert.equal(result.executionPlan.primaryRotation.status, 'HOLD')
+  assert.equal(result.executionPlan.primaryRotation.actionable, false)
+  assert.match(
+    result.executionPlan.primaryRotation.blockedReasons.join('；'),
+    /相对现持仓的短线优势不足/,
+  )
 })
 
 test('新增方向候选排除已持有概念、已持有股票和资金流出板块', () => {

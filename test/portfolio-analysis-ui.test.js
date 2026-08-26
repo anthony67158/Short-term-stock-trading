@@ -40,6 +40,10 @@ test('诊断面板展示生成阶段、证据、决策节点和结构化操作�
 })
 
 test('诊断结果置顶今日执行清单并显示金额手数与失效条件', () => {
+  assert.match(portfolioUi, /首要轮动/)
+  assert.match(portfolioUi, /primaryRotation/)
+  assert.match(portfolioUi, /预计摩擦/)
+  assert.match(portfolioUi, /等待仓位解锁/)
   assert.match(portfolioUi, /今日执行清单/)
   assert.match(portfolioUi, /executionPlan/)
   assert.match(portfolioUi, /estimatedAmount/)
@@ -119,6 +123,8 @@ test('持仓建议默认只突出操作结论、推荐股票和推荐原因', ()
   assert.match(component, /item\.reason/)
   assert.match(component, /brief\.noRecommendationText/)
   assert.match(styles, /\.portfolio-advice-brief\s*{/)
+  assert.match(styles, /\.portfolio-primary-rotation\s*{/)
+  assert.match(styles, /\.portfolio-primary-rotation-route\s*{/)
   assert.match(styles, /\.portfolio-advice-recommendations\s*{/)
 })
 

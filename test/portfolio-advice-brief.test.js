@@ -14,6 +14,30 @@ test('持仓建议摘要只保留操作结论、可执行动作和推荐股票�
     executionPlan: {
       todayGoal: '先减机器人概念，再用小仓关注存储芯片',
       projectedPositionPct: 68,
+      primaryRotation: {
+        status: 'READY',
+        actionable: true,
+        summary: '先释放机器人股份2手，放量站稳后转入长鑫科技1手',
+        source: {
+          code: '600001',
+          name: '机器人股份',
+          lots: 2,
+          referencePrice: 110,
+        },
+        target: {
+          code: '688825',
+          name: '长鑫科技',
+          lots: 1,
+          referencePrice: 98,
+        },
+        comparison: { edgeScore: 18 },
+        costs: { total: 42.5 },
+        funding: { netCashChange: 12100 },
+        t1: {
+          note: '新买仓位当日不可卖出，需承担隔夜风险',
+        },
+        blockedReasons: [],
+      },
       orders: [{
         priority: 1,
         action: 'reduce',
@@ -64,6 +88,11 @@ test('持仓建议摘要只保留操作结论、可执行动作和推荐股票�
   )
   assert.match(brief.recommendations[0].reason, /资金持续流入/)
   assert.equal(brief.projectedPositionPct, 68)
+  assert.equal(brief.primaryRotation.status, 'READY')
+  assert.equal(brief.primaryRotation.source.code, '600001')
+  assert.equal(brief.primaryRotation.target.code, '688825')
+  assert.equal(brief.primaryRotation.edgeScore, 18)
+  assert.equal(brief.primaryRotation.tradingCost, 42.5)
 })
 
 test('持仓建议摘要对重复推荐去重并限制长文长度', () => {

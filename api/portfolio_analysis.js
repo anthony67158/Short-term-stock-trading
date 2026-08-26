@@ -396,7 +396,8 @@ export function buildPortfolioAnalysisPrompt(context) {
 5. scenarioPlan至少包含strong与weak，写明可观测信号、目标总仓位和具体动作，不能只写“视情况调整”。
 6. 目标总仓位+目标现金=100%；所有股票目标权重与概念目标保持一致。A股按100股一手，但金额、手数和T+1可卖量由服务端重算，模型不得自报estimatedAmount或estimatedLots。
 7. 对持仓没有减仓依据时可以hold/watch，但必须给明确失效条件；不得为了显得有用而强行交易。
-8. decisionNodes只写“证据→判断”的可审计节点，不得输出隐藏思维链、逐字推理或内部提示词。
+8. 若同时存在减仓与新增候选，必须把最弱持仓设为最高卖出优先级、最强候选设为最高买入优先级。每次最多形成一个首要换仓组合，其余股票只作为条件动作；服务端会重新计算费用、滑点、现金与T+1。
+9. decisionNodes只写“证据→判断”的可审计节点，不得输出隐藏思维链、逐字推理或内部提示词。
 
 当前服务端快照摘要：
 ${JSON.stringify({
@@ -1503,6 +1504,16 @@ export default async function handler(req, res) {
         && item.tech
       )
       .map((item) => item.code)
+    const holdingCatalog = Object.fromEntries(
+      quantRows.map((item) => [
+        item.code,
+        {
+          quantScore: item.quant?.score,
+          highConfidence:
+            item.quant?.highConfSignal?.fired === true,
+        },
+      ]),
+    )
     const recommendationCatalog = Object.fromEntries(
       candidateRows
         .filter((item) =>
@@ -1515,6 +1526,11 @@ export default async function handler(req, res) {
             name: item.name,
             concept: item.concept,
             price: item.price,
+            quantScore: item.quant?.score,
+            highConfidence:
+              item.quant?.highConfSignal?.fired === true,
+            conceptPct: item.conceptPct,
+            conceptMainInflowYi: item.conceptMainInflowYi,
           },
         ]),
     )
@@ -1526,6 +1542,7 @@ export default async function handler(req, res) {
           allowedEvidenceIds,
           allowedHoldingCodes,
           allowedRecommendationCodes,
+          holdingCatalog,
           recommendationCatalog,
       },
     )

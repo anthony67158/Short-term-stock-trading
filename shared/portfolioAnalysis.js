@@ -174,6 +174,12 @@ function positive(value) {
   return Math.max(0, finite(value))
 }
 
+function nullableNumber(value) {
+  if (value == null || value === '') return null
+  const number = Number(value)
+  return Number.isFinite(number) ? number : null
+}
+
 function priority(value, fallback) {
   return Math.max(
     1,
@@ -308,6 +314,211 @@ function affordableBuyLots(referencePrice, desiredLots, cash, slippageBps = 5) {
   }
 }
 
+function rotationStrength(order = {}, side = 'source') {
+  const quantScore = nullableNumber(order.quantScore)
+  if (quantScore != null) {
+    return rounded(clamp(
+      quantScore
+      + (order.highConfidence === true ? 8 : 0)
+      + clamp(order.conceptPct, -5, 5)
+      + clamp(order.conceptMainInflowYi, -5, 5),
+    ))
+  }
+  if (side === 'source') {
+    return order.action === 'exit' ? 25 : 40
+  }
+  return 55
+}
+
+function rotationOrder(order = {}, lots = 0) {
+  const estimatedLots = Math.max(0, Math.trunc(lots))
+  const execution = estimateExecution(
+    order.action === 'buy' ? 'BUY' : 'SELL',
+    order.referencePrice,
+    estimatedLots,
+  )
+  const referenceAmount = rounded(
+    positive(order.referencePrice) * estimatedLots * 100,
+    2,
+  )
+  const estimatedSlippage = rounded(Math.abs(
+    execution.estimatedCashImpact
+    - referenceAmount
+    - (
+      order.action === 'buy'
+        ? execution.estimatedFees
+        : -execution.estimatedFees
+    ),
+  ), 2)
+  return {
+    code: order.code,
+    name: order.name,
+    concept: order.concept,
+    action: order.action,
+    lots: estimatedLots,
+    referencePrice: order.referencePrice,
+    estimatedFillPrice: execution.estimatedFillPrice,
+    estimatedFees: execution.estimatedFees,
+    estimatedSlippage,
+    estimatedCashImpact: execution.estimatedCashImpact,
+    trigger: order.trigger,
+    invalidation: order.invalidation,
+    evidenceIds: order.evidenceIds,
+    strengthScore: rotationStrength(
+      order,
+      order.action === 'buy' ? 'target' : 'source',
+    ),
+  }
+}
+
+function buildPrimaryRotation({
+  orders = [],
+  distribution = {},
+  targetPositionPct = 0,
+  nextReviewTrigger = '',
+} = {}) {
+  const sources = orders
+    .filter((item) => ['reduce', 'exit'].includes(item.action))
+    .sort((left, right) =>
+      left.priority - right.priority
+      || (left.action === 'exit' ? -1 : 1),
+    )
+  const targets = orders
+    .filter((item) => item.action === 'buy')
+    .sort((left, right) => left.priority - right.priority)
+  const sourceOrder = sources[0]
+  const targetOrder = targets[0]
+  if (!sourceOrder || !targetOrder) return null
+
+  const source = rotationOrder(
+    sourceOrder,
+    sourceOrder.estimatedLots,
+  )
+  const targetCashReserve = positive(distribution.totalAssets)
+    * Math.max(0, 100 - targetPositionPct) / 100
+  const freeCash = positive(
+    positive(distribution.cash)
+    - targetCashReserve
+    + source.estimatedCashImpact,
+  )
+  const desiredTargetLots = Math.max(
+    0,
+    Math.trunc(
+      finite(
+        targetOrder.desiredLots,
+        targetOrder.estimatedLots + targetOrder.remainingLots,
+      ),
+    ),
+  )
+  const affordableTarget = affordableBuyLots(
+    targetOrder.referencePrice,
+    desiredTargetLots,
+    freeCash,
+  )
+  const target = rotationOrder(
+    targetOrder,
+    affordableTarget.lots,
+  )
+  const edgeScore = rounded(
+    target.strengthScore - source.strengthScore,
+  )
+  const blockedReasons = []
+  if (
+    sourceOrder.t1Blocked
+    && source.lots <= 0
+  ) blockedReasons.push('当前待释放仓位受T+1限制')
+  if (source.lots <= 0 && !sourceOrder.t1Blocked) {
+    blockedReasons.push('当前没有可执行的卖出手数')
+  }
+  if (target.lots <= 0) {
+    blockedReasons.push('释放资金与可用现金不足一手')
+  }
+  if (!(source.referencePrice > 0 && target.referencePrice > 0)) {
+    blockedReasons.push('买卖参考价不完整')
+  }
+  if (!target.trigger || !target.invalidation) {
+    blockedReasons.push('候选尚未形成完整触发与失效条件')
+  }
+  if (edgeScore < 5) {
+    blockedReasons.push('候选相对现持仓的短线优势不足')
+  }
+
+  const status = edgeScore < 5
+    ? 'HOLD'
+    : sourceOrder.t1Blocked && source.lots <= 0
+      ? 'WAIT_T1'
+      : target.lots <= 0
+        ? 'WAIT_CASH'
+        : blockedReasons.length
+          ? 'WAIT_TRIGGER'
+          : 'READY'
+  const totalFees = rounded(
+    source.estimatedFees + target.estimatedFees,
+    2,
+  )
+  const totalSlippage = rounded(
+    source.estimatedSlippage + target.estimatedSlippage,
+    2,
+  )
+  const totalTradingCost = rounded(totalFees + totalSlippage, 2)
+  const summary = status === 'READY'
+    ? `先释放${source.name}${source.lots}手，${target.trigger}后转入${target.name}${target.lots}手`
+    : status === 'WAIT_T1'
+      ? `${source.name}受T+1限制，下一交易日优先释放后再评估${target.name}`
+      : status === 'HOLD'
+        ? `暂不从${source.name}轮动到${target.name}，相对优势不足`
+        : `暂缓从${source.name}轮动到${target.name}，等待执行条件补齐`
+
+  return {
+    schemaVersion: 'portfolio-rotation.v1',
+    status,
+    actionable: status === 'READY',
+    summary,
+    source,
+    target,
+    comparison: {
+      sourceStrengthScore: source.strengthScore,
+      targetStrengthScore: target.strengthScore,
+      edgeScore,
+      minimumEdgeScore: 5,
+    },
+    funding: {
+      cashAboveReserve: rounded(
+        Math.max(0, positive(distribution.cash) - targetCashReserve),
+        2,
+      ),
+      sellNetProceeds: source.estimatedCashImpact,
+      buyCashRequired: target.estimatedCashImpact,
+      netCashChange: rounded(
+        source.estimatedCashImpact - target.estimatedCashImpact,
+        2,
+      ),
+    },
+    costs: {
+      fees: totalFees,
+      slippage: totalSlippage,
+      total: totalTradingCost,
+      slippageBps: 5,
+    },
+    t1: {
+      sourceBlocked: sourceOrder.t1Blocked === true,
+      sourceRemainingLots: Math.max(
+        0,
+        Math.trunc(sourceOrder.remainingLots),
+      ),
+      targetLockedAfterBuy: target.lots > 0,
+      note: target.lots > 0
+        ? '新买仓位当日不可卖出，需承担隔夜风险'
+        : '本轮未增加新的隔夜仓位',
+    },
+    blockedReasons,
+    nextReviewTrigger: text(
+      nextReviewTrigger || target.trigger || source.trigger,
+      220,
+    ),
+  }
+}
+
 function buildExecutionPlan({
   distribution,
   targetPositionPct,
@@ -373,6 +584,7 @@ function buildExecutionPlan({
         referencePrice: rounded(referencePrice, 3),
         estimatedAmount,
         ...execution,
+        desiredLots,
         estimatedLots,
         sellableLots,
         remainingLots: Math.max(0, desiredLots - estimatedLots),
@@ -381,6 +593,8 @@ function buildExecutionPlan({
         invalidation: item.invalidation,
         reason: item.reason,
         evidenceIds: item.evidenceIds,
+        quantScore: item.quantScore,
+        highConfidence: item.highConfidence,
       }
     })
 
@@ -468,6 +682,7 @@ function buildExecutionPlan({
       referencePrice: rounded(referencePrice, 3),
       estimatedAmount,
       ...affordable.estimate,
+      desiredLots,
       estimatedLots,
       sellableLots: 0,
       remainingLots: Math.max(0, desiredLots - estimatedLots),
@@ -476,6 +691,10 @@ function buildExecutionPlan({
       invalidation: item.invalidation,
       reason: item.reason,
       evidenceIds: item.evidenceIds,
+      quantScore: item.quantScore,
+      highConfidence: item.highConfidence,
+      conceptPct: item.conceptPct,
+      conceptMainInflowYi: item.conceptMainInflowYi,
     }
   })
   const orders = [...sellOrders, ...buyOrders]
@@ -568,6 +787,12 @@ function buildExecutionPlan({
   if (conceptActions.length) score += 5
   if (scenarioPlan.length >= 2) score += 5
   if (executionSummary.todayGoal && executionSummary.nextReviewTrigger) score += 5
+  const primaryRotation = buildPrimaryRotation({
+    orders,
+    distribution,
+    targetPositionPct,
+    nextReviewTrigger: executionSummary.nextReviewTrigger,
+  })
   return {
     verdict: executionSummary.verdict,
     todayGoal: executableGoal || executionSummary.todayGoal,
@@ -583,6 +808,7 @@ function buildExecutionPlan({
     estimatedBuyCashOutflow,
     estimatedFees,
     buyBudget,
+    primaryRotation,
     orders,
     conceptActions: executableConceptActions,
     quality: {
@@ -599,6 +825,7 @@ export function normalizePortfolioAnalysis(
     allowedEvidenceIds = [],
     allowedHoldingCodes = [],
     allowedRecommendationCodes = [],
+    holdingCatalog = {},
     recommendationCatalog = {},
   } = {},
 ) {
@@ -637,37 +864,40 @@ export function normalizePortfolioAnalysis(
     ? input.stockActions
     : [])
     .filter((item) => holdings.has(String(item?.code || '')))
-    .map((item) => ({
-      code: String(item.code),
-      name: text(
-        holdingsByCode.get(String(item.code))?.name || item.name,
-        40,
-      ),
-      concept: text(
-        holdingsByCode.get(String(item.code))?.concept,
-        50,
-      ),
-      qty: positive(holdingsByCode.get(String(item.code))?.qty),
-      sellableQty: positive(
-        holdingsByCode.get(String(item.code))?.sellableQty
-        ?? holdingsByCode.get(String(item.code))?.qty,
-      ),
-      price: positive(holdingsByCode.get(String(item.code))?.price),
-      currentWeightPct: rounded(
-        holdingsByCode.get(String(item.code))?.accountWeightPct,
-      ),
-      priority: priority(item.priority, 50),
-      action: ['reduce', 'hold', 'watch', 'exit', 'add'].includes(
-        item.action,
-      ) ? item.action : 'watch',
-      reducePct: rounded(clamp(item.reducePct)),
-      targetWeightPct: rounded(clamp(item.targetWeightPct)),
-      triggerPrice: rounded(positive(item.triggerPrice), 3),
-      reason: text(item.reason, 320),
-      trigger: text(item.trigger, 220),
-      invalidation: text(item.invalidation, 220),
-      evidenceIds: evidenceIds(item.evidenceIds, allowedEvidence),
-    }))
+    .map((item) => {
+      const code = String(item.code)
+      const holding = holdingsByCode.get(code) || {}
+      const canonical = holdingCatalog[code] || {}
+      return {
+        code,
+        name: text(holding.name || item.name, 40),
+        concept: text(holding.concept, 50),
+        qty: positive(holding.qty),
+        sellableQty: positive(
+          holding.sellableQty ?? holding.qty,
+        ),
+        price: positive(holding.price),
+        currentWeightPct: rounded(holding.accountWeightPct),
+        floatPct: rounded(holding.floatPct),
+        quantScore: nullableNumber(
+          canonical.quantScore ?? canonical.quant?.score,
+        ),
+        highConfidence:
+          canonical.highConfidence === true
+          || canonical.quant?.highConfSignal?.fired === true,
+        priority: priority(item.priority, 50),
+        action: ['reduce', 'hold', 'watch', 'exit', 'add'].includes(
+          item.action,
+        ) ? item.action : 'watch',
+        reducePct: rounded(clamp(item.reducePct)),
+        targetWeightPct: rounded(clamp(item.targetWeightPct)),
+        triggerPrice: rounded(positive(item.triggerPrice), 3),
+        reason: text(item.reason, 320),
+        trigger: text(item.trigger, 220),
+        invalidation: text(item.invalidation, 220),
+        evidenceIds: evidenceIds(item.evidenceIds, allowedEvidence),
+      }
+    })
     .filter((item) =>
       item.reason
       && (
@@ -699,6 +929,16 @@ export function normalizePortfolioAnalysis(
           item.targetWeightPct || item.maxWeightPct,
         )),
         maxWeightPct: rounded(clamp(item.maxWeightPct)),
+        quantScore: nullableNumber(
+          canonical.quantScore ?? canonical.quant?.score,
+        ),
+        highConfidence:
+          canonical.highConfidence === true
+          || canonical.quant?.highConfSignal?.fired === true,
+        conceptPct: nullableNumber(canonical.conceptPct),
+        conceptMainInflowYi: nullableNumber(
+          canonical.conceptMainInflowYi,
+        ),
         evidenceIds: evidenceIds(item.evidenceIds, allowedEvidence),
       }
     })

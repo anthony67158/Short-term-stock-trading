@@ -35,6 +35,14 @@ const ACTION_LABELS = {
   increase: '增加',
 }
 
+const ROTATION_STATUS_LABELS = {
+  READY: '条件满足后执行',
+  WAIT_T1: '等待仓位解锁',
+  WAIT_CASH: '等待资金释放',
+  WAIT_TRIGGER: '等待条件补齐',
+  HOLD: '暂不轮动',
+}
+
 function percent(value) {
   const number = Number(value)
   return Number.isFinite(number) ? `${number.toFixed(1)}%` : '--'
@@ -184,6 +192,7 @@ function CategoryTargets({ targets = {} }) {
 }
 
 function PortfolioAdviceBrief({ brief }) {
+  const rotation = brief.primaryRotation
   return (
     <section className="portfolio-advice-brief" aria-label="持仓操作摘要">
       <div className="portfolio-advice-conclusion">
@@ -196,6 +205,75 @@ function PortfolioAdviceBrief({ brief }) {
           <span>执行后仓位 <b>{percent(brief.projectedPositionPct)}</b></span>
         )}
       </div>
+
+      {rotation && (
+        <div
+          className="portfolio-primary-rotation"
+          data-status={rotation.status}
+        >
+          <header>
+            <div className="portfolio-advice-label">
+              <Icon name="refresh" size={13} /> 首要轮动
+            </div>
+            <strong>
+              {ROTATION_STATUS_LABELS[rotation.status] || '等待复核'}
+            </strong>
+          </header>
+          <div className="portfolio-primary-rotation-route">
+            <button
+              type="button"
+              onClick={() => openStockDetail(
+                rotation.source.code,
+                rotation.source.name,
+              )}
+              aria-label={`查看待释放持仓${rotation.source.name}`}
+            >
+              <small>优先释放</small>
+              <b>{rotation.source.name}</b>
+              <span>
+                {rotation.source.lots}手
+                {rotation.source.referencePrice != null
+                  ? ` @ ${rotation.source.referencePrice}`
+                  : ''}
+              </span>
+            </button>
+            <Icon name="chevronRight" size={16} />
+            <button
+              type="button"
+              onClick={() => openStockDetail(
+                rotation.target.code,
+                rotation.target.name,
+              )}
+              aria-label={`查看轮入候选${rotation.target.name}`}
+            >
+              <small>确认后转入</small>
+              <b>{rotation.target.name}</b>
+              <span>
+                {rotation.target.lots}手
+                {rotation.target.referencePrice != null
+                  ? ` @ ${rotation.target.referencePrice}`
+                  : ''}
+              </span>
+            </button>
+          </div>
+          <p>{rotation.summary}</p>
+          <div className="portfolio-primary-rotation-metrics">
+            {rotation.edgeScore != null && (
+              <span>优势差 <b>{rotation.edgeScore.toFixed(1)}</b></span>
+            )}
+            {rotation.tradingCost != null && (
+              <span>预计摩擦 <b>{money(rotation.tradingCost)}</b></span>
+            )}
+            {rotation.netCashChange != null && (
+              <span>现金变化 <b>{money(rotation.netCashChange)}</b></span>
+            )}
+          </div>
+          {rotation.blockedReasons.length > 0 && (
+            <small>{rotation.blockedReasons.join('；')}</small>
+          )}
+          {rotation.t1Note && <small>{rotation.t1Note}</small>}
+        </div>
+      )}
 
       {brief.actions.length > 0 && (
         <div className="portfolio-advice-actions">

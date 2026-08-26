@@ -47,6 +47,37 @@ function normalizeRecommendation(item, index) {
   }
 }
 
+function normalizePrimaryRotation(value) {
+  if (!value?.source?.code || !value?.target?.code) return null
+  return {
+    status: text(value.status, 24),
+    actionable: value.actionable === true,
+    summary: text(value.summary, 140),
+    source: {
+      code: text(value.source.code, 12),
+      name: text(value.source.name || value.source.code, 40),
+      lots: Math.max(0, Math.trunc(finite(value.source.lots, 0))),
+      referencePrice: finite(value.source.referencePrice),
+    },
+    target: {
+      code: text(value.target.code, 12),
+      name: text(value.target.name || value.target.code, 40),
+      lots: Math.max(0, Math.trunc(finite(value.target.lots, 0))),
+      referencePrice: finite(value.target.referencePrice),
+    },
+    edgeScore: finite(value.comparison?.edgeScore),
+    tradingCost: finite(value.costs?.total),
+    netCashChange: finite(value.funding?.netCashChange),
+    t1Note: text(value.t1?.note, 100),
+    blockedReasons: (Array.isArray(value.blockedReasons)
+      ? value.blockedReasons
+      : [])
+      .map((item) => text(item, 80))
+      .filter(Boolean)
+      .slice(0, 3),
+  }
+}
+
 export function buildPortfolioAdviceBrief(analysis = {}) {
   const executionPlan = analysis?.executionPlan || {}
   const actions = (Array.isArray(executionPlan.orders)
@@ -97,6 +128,9 @@ export function buildPortfolioAdviceBrief(analysis = {}) {
       executionPlan.projectedPositionPct
         ?? executionPlan.targetPositionPct
         ?? analysis?.allocation?.targetPositionPct,
+    ),
+    primaryRotation: normalizePrimaryRotation(
+      executionPlan.primaryRotation,
     ),
     actions,
     recommendations: [...recommendationMap.values()]
