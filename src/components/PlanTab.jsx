@@ -14,7 +14,6 @@ import AdviceGenerationStatus, { useAdviceGeneration } from './AdviceGenerationS
 import ExecutionQueue from './ExecutionQueue'
 import { AlertForm } from './AlertCenter'
 import { useMediaQuery, usePolling, useSwipe } from '../hooks'
-import { useTextOverflow } from '../useTextOverflow.js'
 import { callAIStream } from '../ai'
 import { api } from '../apiBase'
 import { planStore, usePlanStore, calcBuyFee, calcSellFee, computeTFlows, computePortfolio, sortHoldingsByProfit, livePositionOf, t1StatusOf, advicePlan } from '../planStore'
@@ -545,17 +544,32 @@ function ActionProgress({ trigger, currentPrice, progress: preparedProgress }) {
   const targetText = trigger.direction === 'range'
     ? `${fmtRaw(trigger.low)}–${fmtRaw(trigger.high)}`
     : `${trigger.label} ${fmtRaw(trigger.price)}`
+  if (progress.reached) {
+    return (
+      <div
+        className={'action-trigger-state ' + progress.tone}
+        role="status"
+        aria-live="polite"
+      >
+        <span className="action-trigger-label">
+          <Icon name="bell" size={12} />
+          {trigger.direction === 'lte'
+            ? '买入条件已触发'
+            : trigger.direction === 'gte'
+              ? '卖出条件已触发'
+              : progress.stateLabel}
+        </span>
+        <strong>{targetText}</strong>
+        <span>等待人工确认</span>
+      </div>
+    )
+  }
   return (
-    <div className={'action-progress ' + progress.tone + (progress.reached ? ' reached' : '')}>
+    <div className={'action-progress ' + progress.tone}>
       <div className="action-progress-summary">
         <span className="action-direction">
           <Icon name={directionIcon} size={13} />
           {progress.stateLabel}
-          {progress.reached && (
-            <span className="action-reached" role="status" aria-live="polite">
-              <Icon name="bell" size={11} />已到价
-            </span>
-          )}
         </span>
         <span className="action-current-marker">{progress.label}</span>
         <b className="action-progress-target">{targetText}</b>
@@ -575,7 +589,6 @@ function ActionLevel({ level, reached = false }) {
         {level.label}
       </span>
       <strong className="action-level-price">{fmtRaw(level.price)}</strong>
-      {reached && <span className="action-level-hit" aria-hidden="true"><Icon name="bell" size={11} />已到价</span>}
     </div>
   )
 }
@@ -593,42 +606,32 @@ function EmptyActionLevels() {
 function ActionCommand({ view, onOpen }) {
   const instruction = view.instruction || '等待下一步执行条件'
   const quantity = actionQtyLabel(view.quantity)
-  const [instructionRef, isInstructionTruncated] =
-    useTextOverflow(instruction)
 
   return (
-    <div
-      className={
-        'action-command'
-        + (isInstructionTruncated ? ' has-preview' : '')
-      }
-    >
-      <span className="action-command-badge">
+    <div className="action-command">
+      <span className="action-command-icon" aria-hidden="true">
         <Icon name="spark" size={10} />
-        <span>{view.action}</span>
-        {quantity && <strong className="action-command-qty">{quantity}</strong>}
-        {view.shortHorizon && (
-          <em className="action-command-horizon">
-            {view.shortHorizon}
-          </em>
-        )}
       </span>
-      <span ref={instructionRef} className="action-command-text">
-        {instruction}
-      </span>
-      {isInstructionTruncated && (
-        <span className="action-command-preview" aria-hidden="true">
-          <strong className="action-command-preview-label">完整操作建议</strong>
-          <span className="action-command-preview-text">{instruction}</span>
+      <span className="action-command-body">
+        <span className="action-command-meta">
+          当前指令
+          {view.shortHorizon && <em>{view.shortHorizon}</em>}
         </span>
-      )}
+        <strong className="action-command-primary">
+          {view.action}
+          {quantity && <span className="action-command-qty">{quantity}</span>}
+        </strong>
+        <span className="action-command-text" title={instruction}>
+          {instruction}
+        </span>
+      </span>
       <button
         type="button"
         className="action-command-open"
         aria-label="查看完整操作建议"
+        title="查看完整建议"
         onClick={onOpen}
       >
-        <span>详情</span>
         <Icon name="chevronRight" size={13} />
       </button>
     </div>
@@ -786,12 +789,16 @@ function CandDecision({ p, q }) {
                     value={p.targetPrice != null ? String(p.targetPrice) : ''}
                     onChange={onPrice}
                   />
-                  <em className="action-level-source">{reachedKey === 'entry' ? '已到价' : (p.targetManual ? '手填' : '建议')}</em>
+                  {(reachedKey === 'entry' || p.targetManual) && (
+                    <em className="action-level-source">
+                      {reachedKey === 'entry' ? '已触发' : '手填'}
+                    </em>
+                  )}
                 </label>
                 <label className="action-level action-field active level-buy">
                   <span className="action-level-name">
                     <span className="action-level-icon"><Icon name="cart" size={13} /></span>
-                      手数
+                      买入手数
                   </span>
                   <input
                     className="action-level-price"
@@ -800,7 +807,9 @@ function CandDecision({ p, q }) {
                     value={p.buyQty != null ? String(p.buyQty) : ''}
                     onChange={onQty}
                   />
-                  <em className="action-level-source">{p.qtyManual ? '手填' : '建议'}</em>
+                  {p.qtyManual && (
+                    <em className="action-level-source">手填</em>
+                  )}
                 </label>
                 {otherLevels.map((item) => (
                   <ActionLevel key={item.key} level={item} reached={item.key === reachedKey} />
@@ -844,6 +853,7 @@ function CandidateActions({ p, q, onBuy, onAlert, onDelete }) {
     : baseView
   const actionable = !view
     || (view.kind === 'buy' && view.actionable !== false)
+  const quantity = actionQtyLabel(view?.quantity)
   return (
     <div className={'pc-actions' + (!actionable ? ' with-review' : '')}>
       {actionable ? (
@@ -854,8 +864,10 @@ function CandidateActions({ p, q, onBuy, onAlert, onDelete }) {
         >
           <Icon name="cart" size={12} />
           {view?.manualOnly
-            ? '确认试仓'
-            : view ? '按指令建仓' : '建仓'}
+            ? `确认试仓${quantity ? ` · ${quantity}` : ''}`
+            : view
+              ? `确认买入${quantity ? ` · ${quantity}` : ''}`
+              : '建仓'}
         </button>
       ) : (
         <>
@@ -1002,21 +1014,12 @@ function PlanList({ book, quote, stockTags, batchSel }) {
         />
         {/* 自动提醒：可执行建议显示买点，观望建议显示到价复核。 */}
         {(() => {
-          const currentAdvice = getAdvice(p.code, 'buy_advice')?.advice
-          const currentView = currentAdvice
-            ? buildAdviceActionView(currentAdvice, {
-                mode: 'buy_advice',
-              })
-            : null
-          const canExecuteBuy = currentView?.kind === 'buy'
-            && currentView.actionable !== false
           const stockAlerts = (book.alerts || []).filter(
             (alert) => alert.candCode === p.code,
           )
           const reviewAlerts = stockAlerts.filter(
             (alert) => alert.reviewOnly,
           )
-          const bpa = stockAlerts.find((alert) => !alert.reviewOnly)
           if (reviewAlerts.length) {
             const reached = (alert) => q && q.price != null && (
               alert.op === 'gte'
@@ -1045,21 +1048,7 @@ function PlanList({ book, quote, stockTags, batchSel }) {
               </div>
             )
           }
-          if (!bpa || !canExecuteBuy) return null
-          const reached = q && q.price != null && (
-            bpa.op === 'gte'
-              ? q.price >= bpa.value
-              : q.price <= bpa.value
-          )
-          const tone = !bpa.enabled ? ' off' : (reached ? ' hot' : '')
-          return (
-            <div className={'pc-buyalert' + tone} title={bpa.enabled ? '价格跌到该价位会提醒你买入' : '预警已停用/已触发，可在预警中心重启'}>
-              <Icon name="bell" size={11} />
-              买点预警 ≤ <b>{fmtRaw(bpa.value)}</b>
-              {!bpa.enabled && <span className="pc-buyalert-off">已停用</span>}
-              {q && q.price != null && bpa.enabled && q.price <= bpa.value && <span className="pc-buyalert-hit">已到买点</span>}
-            </div>
-          )
+          return null
         })()}
         {buying === p.code ? (
           <div className="buy-inline-wrap">

@@ -61,16 +61,16 @@ function levelsFor(kind, advice, triggerDirection = '') {
   }
   if (kind === 'buy') {
     return [
-      level('entry', '买入执行价', entryPrice, 'buy', true),
-      level('target', '卖出参考', advice.targetPrice, 'sell', false),
-      level('stop', '止损线', advice.stopPrice, 'risk', false),
+      level('entry', '买入价', entryPrice, 'buy', true),
+      level('target', '止盈参考', advice.targetPrice, 'sell', false),
+      level('stop', '止损价', advice.stopPrice, 'risk', false),
     ].filter(Boolean)
   }
   if (kind === 'add') {
     return [
       level('add', '加仓执行价', advice.addPrice ?? advice.buyPrice, 'buy', true),
       level('reduce', '减仓参考', advice.reducePrice ?? advice.targetPrice, 'sell', false),
-      level('stop', '止损线', advice.stopPrice, 'risk', false),
+      level('stop', '止损价', advice.stopPrice, 'risk', false),
     ].filter(Boolean)
   }
   if (kind === 'reduce') {
@@ -86,7 +86,7 @@ function levelsFor(kind, advice, triggerDirection = '') {
         'sell',
         true,
       ),
-      level('stop', '止损线', advice.stopPrice, 'risk', false),
+      level('stop', '止损价', advice.stopPrice, 'risk', false),
     ].filter(Boolean)
   }
   if (kind === 'sell') {
@@ -101,7 +101,7 @@ function levelsFor(kind, advice, triggerDirection = '') {
   return [
     level('add', '回踩观察', advice.addPrice ?? advice.buyPrice, 'buy', false),
     level('reduce', '反弹观察', advice.reducePrice ?? advice.targetPrice, 'sell', false),
-    level('stop', '止损线', advice.stopPrice, 'risk', false),
+    level('stop', '止损价', advice.stopPrice, 'risk', false),
   ].filter(Boolean)
 }
 
@@ -175,9 +175,11 @@ export function buildAdviceActionView(advice = {}, { mode = '' } = {}) {
     : []).map((item) => clean(item, 160)).filter(Boolean)
   const planLots = Number(plan?.quantity?.lots) || 0
   const planPrice = finite(plan?.prices?.reference)
+  const manualProbe = plan?.actionability === 'MANUAL_PROBE'
+    || plan?.manualConfirmationOnly === true
   const planInstruction = plan?.actionability === 'BLOCKED'
     ? `暂不执行：${planReasons.join('；') || '执行条件未满足'}`
-    : plan?.actionability === 'MANUAL_PROBE'
+    : manualProbe
       ? `人工确认：${plan?.action === 'ADD' ? '小仓加仓' : '小仓试错'}${planLots}手${planPrice != null ? `，参考${planPrice}元` : ''}${plan.opportunity?.sectorName ? `；${plan.opportunity.sectorName}前排` : ''}，板块与个股条件失效时取消`
     : plan?.actionability === 'RESEARCH_ONLY'
       ? `仅供观察：${planAction || '操作'}${planLots}手${planPrice != null ? `，参考${planPrice}元` : ''}；策略通过实盘启用审核前，不能直接执行`
@@ -186,7 +188,7 @@ export function buildAdviceActionView(advice = {}, { mode = '' } = {}) {
     ...advice,
     action: plan.actionability === 'BLOCKED'
       ? '观望'
-      : plan.actionability === 'MANUAL_PROBE'
+      : manualProbe
         ? plan.action === 'ADD' ? '小仓加仓' : '小仓试错'
       : plan.actionability === 'RESEARCH_ONLY'
         ? `观察·${planAction || '建议'}`
@@ -254,7 +256,7 @@ export function buildAdviceActionView(advice = {}, { mode = '' } = {}) {
     levels,
     trigger: triggerFor(kind, levels, triggerDirection),
     actionability: plan?.actionability || null,
-    manualOnly: plan?.actionability === 'MANUAL_PROBE',
+    manualOnly: manualProbe,
     actionable: plan
       ? ['READY', 'MANUAL_PROBE'].includes(plan.actionability)
       : !['wait', 'hold'].includes(kind),

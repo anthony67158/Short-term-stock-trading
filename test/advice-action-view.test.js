@@ -67,7 +67,7 @@ test('买入建议把买入价和首笔手数编译为同一动作视图', () =>
   assert.equal(view.quantity, '2手')
   assert.deepEqual(view.levels[0], {
     key: 'entry',
-    label: '买入执行价',
+    label: '买入价',
     price: 61.2,
     tone: 'buy',
     active: true,
@@ -226,7 +226,7 @@ test('持有建议把加仓和减仓价降级为观察边界并生成区间进�
     [
       { key: 'add', label: '回踩观察', active: false },
       { key: 'reduce', label: '反弹观察', active: false },
-      { key: 'stop', label: '止损线', active: false },
+      { key: 'stop', label: '止损价', active: false },
     ],
   )
   assert.deepEqual(view.trigger, {
@@ -251,7 +251,7 @@ test('持有建议缺少回踩价时使用止损线补全观察区间', () => {
     view.levels.map(({ key, label, price }) => ({ key, label, price })),
     [
       { key: 'reduce', label: '反弹观察', price: 67.87 },
-      { key: 'stop', label: '止损线', price: 59.31 },
+      { key: 'stop', label: '止损价', price: 59.31 },
     ],
   )
   assert.deepEqual(view.trigger, {
@@ -311,6 +311,27 @@ test('人工试仓计划保留短线买点但明确只允许手动确认', () =>
   assert.equal(view.actionable, true)
   assert.equal(view.manualOnly, true)
   assert.equal(view.quantity, '5手')
+  assert.match(view.instruction, /人工确认/)
+})
+
+test('就绪计划带人工确认标记时仍显示为小仓试错', () => {
+  const view = buildAdviceActionView({
+    action: '立即买入',
+    actionPlan: '回踩10元企稳后买入',
+    decisionPlan: {
+      schemaVersion: 'decision-plan.v2',
+      action: 'BUY',
+      actionLabel: '买入',
+      actionability: 'READY',
+      manualConfirmationOnly: true,
+      quantity: { lots: 3 },
+      prices: { reference: 10, stop: 9, target: 12 },
+    },
+  }, { mode: 'buy_advice' })
+
+  assert.equal(view.action, '小仓试错')
+  assert.equal(view.manualOnly, true)
+  assert.equal(view.actionable, true)
   assert.match(view.instruction, /人工确认/)
 })
 

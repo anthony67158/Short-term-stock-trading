@@ -49,16 +49,16 @@ test('桌面卡片使用同高摘要骨架且移动端恢复自然高度', () =>
   )
 })
 
-test('策略摘要压缩为单行指令、紧凑价位和单行进度', () => {
+test('策略摘要使用两行主指令、紧凑价位和单行进度', () => {
   assert.match(planTab, /className="action-progress-summary"/)
   assert.doesNotMatch(planTab, /className="action-progress-head"/)
   assert.match(
     precision,
-    /\.card-decision-slot \.action-command-text\s*{[^}]*text-overflow:\s*ellipsis[^}]*white-space:\s*nowrap/s,
+    /\.card-decision-slot \.action-command-text\s*{[^}]*display:\s*-webkit-box[^}]*white-space:\s*normal[^}]*-webkit-line-clamp:\s*2/s,
   )
   assert.match(
     precision,
-    /\.card-decision-slot \.action-level\s*{[^}]*min-height:\s*56px/s,
+    /\.card-decision-slot \.action-levels\.editable > \.action-level\s*{[^}]*min-height:\s*72px/s,
   )
   assert.match(
     precision,
@@ -66,30 +66,18 @@ test('策略摘要压缩为单行指令、紧凑价位和单行进度', () => {
   )
 })
 
-test('省略的策略摘要在悬浮和键盘聚焦时显示高对比完整预览', () => {
-  assert.match(
+test('策略摘要不再使用遮挡卡片的悬浮预览并保留详情入口', () => {
+  assert.doesNotMatch(
     planTab,
     /className="action-command-preview"[\s\S]*?完整操作建议[\s\S]*?\{instruction\}/,
   )
-  assert.doesNotMatch(
+  assert.match(
     planTab,
     /className="action-command-text"\s+title=\{instruction\}/,
   )
   assert.match(
-    precision,
-    /\.action-command-preview\s*{[^}]*position:\s*absolute[^}]*z-index:\s*var\(--z-tooltip\)[^}]*visibility:\s*hidden[^}]*opacity:\s*0/s,
-  )
-  assert.match(
-    precision,
-    /\.action-command\.has-preview:focus-within \.action-command-preview\s*{[^}]*visibility:\s*visible[^}]*opacity:\s*1/s,
-  )
-  assert.match(
-    precision,
-    /@media \(hover:\s*hover\) and \(pointer:\s*fine\)\s*{[\s\S]*?\.action-command\.has-preview:hover \.action-command-preview\s*{[^}]*visibility:\s*visible[^}]*opacity:\s*1/s,
-  )
-  assert.match(
-    precision,
-    /@media \(pointer:\s*coarse\)\s*{[\s\S]*?\.action-command-preview\s*{[^}]*display:\s*none/s,
+    planTab,
+    /className="action-command-open"[\s\S]*?title="查看完整建议"/,
   )
 })
 

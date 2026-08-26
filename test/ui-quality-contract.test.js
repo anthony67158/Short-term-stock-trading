@@ -494,14 +494,14 @@ test('移动端持续复核弹层高于导航和持仓吸顶区域', () => {
 })
 
 test('操作建议卡使用固定价位列且数量与动作保持同组', () => {
-  assert.match(planTab, /className="action-command-badge"[\s\S]*?className="action-command-qty"/)
+  assert.match(planTab, /className="action-command-primary"[\s\S]*?className="action-command-qty"/)
+  assert.match(planTab, /className="action-command-meta">[\s\S]*?当前指令/)
   assert.match(planTab, /'action-levels levels-' \+ Math\.min\(view\.levels\.length,\s*3\)/)
-  assert.doesNotMatch(planTab, />当前指令</)
   assert.match(planTab, /progress\.stateLabel/)
   assert.doesNotMatch(planTab, /progress\.metricLabel\}\s*\{progress\.score/)
   assert.match(
     precision,
-    /\.action-command\s*{[^}]*grid-template-columns:\s*auto\s+minmax\(0,\s*1fr\)/s,
+    /\.card-decision-slot \.action-command\s*{[^}]*grid-template-columns:\s*32px\s+minmax\(0,\s*1fr\)\s+32px/s,
   )
   assert.match(
     precision,
@@ -531,11 +531,14 @@ test('尚无操作建议使用紧凑单行生成入口', () => {
   )
 })
 
-test('价格路线图放大价格并在到价后有限脉冲提醒', () => {
+test('价格路线图使用单一触发状态且不重复显示到价提醒', () => {
   assert.match(planTab, /className="action-level-icon"/)
   assert.match(planTab, /className="action-level-price"/)
   assert.match(planTab, /className="action-current-marker"/)
-  assert.match(planTab, /progress\.reached\s*&&\s*\([\s\S]*?<span className="action-reached"/)
+  assert.match(planTab, /className=\{'action-trigger-state ' \+ progress\.tone\}/)
+  assert.match(planTab, />等待人工确认</)
+  assert.doesNotMatch(planTab, /className="action-reached"/)
+  assert.doesNotMatch(planTab, />买点预警 ≤/)
   assert.match(
     precision,
     /\.action-level-price\s*{[^}]*font-size:\s*var\(--text-xl\)/s,
@@ -546,22 +549,26 @@ test('价格路线图放大价格并在到价后有限脉冲提醒', () => {
   )
   assert.match(
     precision,
-    /\.action-level\.reached\s*{[^}]*animation:\s*action-price-reached[^}]*3/s,
-  )
-  assert.match(
-    precision,
-    /@media \(prefers-reduced-motion:\s*reduce\)\s*{[\s\S]*?\.action-level\.reached\s*{[^}]*animation:\s*none/s,
+    /\.action-trigger-state\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto\s+auto/s,
   )
 })
 
-test('价格路线图标题使用固定图标列并允许完整换行', () => {
+test('价格路线图窄卡自动切为两列且语义颜色明确区分', () => {
   assert.match(
     precision,
-    /\.action-level-name\s*{[^}]*display:\s*grid[^}]*grid-template-columns:\s*22px\s+minmax\(0,\s*1fr\)[^}]*white-space:\s*normal[^}]*overflow:\s*visible/s,
+    /@container \(max-width:\s*560px\)\s*{[\s\S]*?\.card-decision-slot \.action-levels\.editable\s*{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s,
   )
-  assert.doesNotMatch(
+  assert.match(
     precision,
-    /\.action-level-name\s*{[^}]*overflow:\s*hidden/s,
+    /\.card-decision-slot \.action-level\.level-buy\s*{[^}]*--action-level-color:\s*var\(--color-accent\)/s,
+  )
+  assert.match(
+    precision,
+    /\.card-decision-slot \.action-level\.level-sell\s*{[^}]*--action-level-color:\s*var\(--color-warning\)/s,
+  )
+  assert.match(
+    precision,
+    /\.card-decision-slot \.action-level\.level-risk\s*{[^}]*--action-level-color:\s*var\(--color-danger\)/s,
   )
 })
 
