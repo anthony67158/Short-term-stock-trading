@@ -209,6 +209,25 @@ test('只有量化资金时机与流动性同时确认才允许新增风险', ()
   assert.equal(policy.overridden, false)
 })
 
+test('核心信号共振但成交额证据不足时只开放5%人工试仓', () => {
+  const tactical = buildShortHorizonTactical(payload())
+  const policy = deriveShortHorizonActionPolicy({
+    mode: 'buy_advice',
+    tactical,
+    requestedAction: 'BUY',
+  })
+
+  assert.equal(policy.canIncreaseRisk, true)
+  assert.equal(policy.riskTier, 'PROBE')
+  assert.equal(policy.maxPositionPct, 5)
+  assert.equal(policy.manualConfirmationOnly, true)
+  assert.deepEqual(policy.allowedActions, ['BUY', 'WATCH'])
+  assert.match(
+    policy.reasons.join('；'),
+    /成交额证据不足/,
+  )
+})
+
 test('高位追涨请求被短线动作政策确定性降级为观望', () => {
   const tactical = buildShortHorizonTactical(payload({
     todayQuote: {

@@ -296,58 +296,109 @@ function conflictsOf({
 
 function bullishQuant(tactical = {}) {
   if (tactical.quant?.highConfidence === true) return true
-  const direction = text(tactical.quant?.direction, 30)
-  const upProb = finite(tactical.quant?.upProb)
-  const expRet = finite(tactical.quant?.expRet)
-  return (
-    /看涨|UP|BULL/i.test(direction)
-    && upProb != null
-    && upProb >= 55
-    && (expRet == null || expRet > 0)
-  )
+  const candidates = [
+    tactical.quant,
+    tactical.quant?.nextTradeDay,
+    tactical.quant?.currentTradingDay,
+    tactical.quant?.v21?.heads?.next30m,
+    tactical.quant?.v21?.heads?.sessionClose,
+  ].filter(Boolean)
+  return candidates.some((candidate) => {
+    const direction = text(candidate.direction, 30)
+    const upProb = finite(candidate.upProb)
+    const expRet = finite(candidate.expRet)
+    return (
+      /看涨|UP|BULL/i.test(direction)
+      && upProb != null
+      && upProb >= 55
+      && (expRet == null || expRet > 0)
+    )
+  })
 }
 
-function riskIncreaseConstraints(tactical = {}) {
-  const reasons = []
-  if (tactical.timing?.state !== 'READY') {
-    reasons.push(
-      tactical.timing?.state === 'TOO_EXTENDED'
-        ? '价格位置过热，禁止追涨'
-        : tactical.timing?.state === 'WAIT_PULLBACK'
-          ? '等待回踩承接确认'
-          : tactical.timing?.state === 'WAIT_BREAKOUT'
-            ? '等待放量突破确认'
-            : '短线时机尚未形成',
-    )
+function riskIncreaseAssessment(tactical = {}) {
+  const hardBlockers = []
+  const fullRiskGaps = []
+  const timingState = tactical.timing?.state
+  if (timingState === 'INVALID') {
+    hardBlockers.push('短线时机尚未形成')
+  } else if (timingState === 'TOO_EXTENDED') {
+    hardBlockers.push('价格位置过热，禁止追涨')
+  } else if (timingState === 'WAIT_PULLBACK') {
+    fullRiskGaps.push('等待回踩承接确认')
+  } else if (timingState === 'WAIT_BREAKOUT') {
+    fullRiskGaps.push('等待放量突破确认')
   }
   if (
     ['RISK_OFF', 'UNKNOWN'].includes(
       tactical.market?.riskTone,
     )
-  ) reasons.push('市场风险不支持新增仓位')
+  ) hardBlockers.push('市场风险不支持新增仓位')
   if (
     tactical.sector?.state === 'WEAKENING'
     || tactical.sector?.stockRole === 'LAGGARD'
-  ) reasons.push('板块或个股地位已经转弱')
+  ) hardBlockers.push('板块或个股地位已经转弱')
   if (tactical.flow?.relation === 'DISTRIBUTION') {
-    reasons.push('主力流出且小单承接，存在派发风险')
-  } else if (tactical.flow?.mainDirection !== 'INFLOW') {
-    reasons.push('主力资金尚未确认流入')
-  }
-  if (!bullishQuant(tactical)) {
-    reasons.push('量化尚未形成偏多确认')
+    hardBlockers.push('主力流出且小单承接，存在派发风险')
   }
   if (
     tactical.stock?.location === 'EXTENDED'
     || tactical.stock?.crowdingRisk === 'HIGH'
-  ) reasons.push('价格拥挤度过高')
-  if (tactical.stock?.liquidity !== 'GOOD') {
-    reasons.push('流动性尚未达到短线执行要求')
+  ) hardBlockers.push('价格拥挤度过高')
+  if (tactical.stock?.liquidity === 'LIMITED') {
+    hardBlockers.push('流动性不足，不适合短线进出')
   }
   if (tactical.catalyst?.risk === 'NEGATIVE') {
-    reasons.push('负面事件风险尚未消化')
+    hardBlockers.push('负面事件风险尚未消化')
   }
-  return [...new Set(reasons)]
+  const quantConfirmed = bullishQuant(tactical)
+  const flowConfirmed = (
+    tactical.flow?.mainDirection === 'INFLOW'
+    || (
+      finite(tactical.flow?.main5dYi) > 0
+      && finite(tactical.flow?.mainStreak) > 0
+    )
+  )
+  const leadershipConfirmed = (
+    ['LEADING', 'CONFIRMING'].includes(
+      tactical.sector?.state,
+    )
+    && ['LEADER', 'FRONT_ROW'].includes(
+      tactical.sector?.stockRole,
+    )
+  )
+  const strengthConfirmed = (
+    finite(tactical.stock?.relativeStrength) >= 60
+  )
+  const confirmations = [
+    quantConfirmed && '量化偏多',
+    flowConfirmed && '主力资金确认',
+    leadershipConfirmed && '板块前排',
+    strengthConfirmed && '相对强势',
+  ].filter(Boolean)
+  if (!quantConfirmed) fullRiskGaps.push('量化尚未形成偏多确认')
+  if (!flowConfirmed) fullRiskGaps.push('主力资金尚未确认流入')
+  if (tactical.stock?.liquidity !== 'GOOD') {
+    fullRiskGaps.push('成交额证据不足，仅允许受控试仓')
+  }
+  const canProbe = (
+    hardBlockers.length === 0
+    && confirmations.length >= 2
+    && (quantConfirmed || flowConfirmed)
+  )
+  const canFull = (
+    canProbe
+    && timingState === 'READY'
+    && quantConfirmed
+    && flowConfirmed
+    && tactical.stock?.liquidity === 'GOOD'
+  )
+  return {
+    riskTier: canFull ? 'FULL' : canProbe ? 'PROBE' : 'NONE',
+    hardBlockers: [...new Set(hardBlockers)],
+    fullRiskGaps: [...new Set(fullRiskGaps)],
+    confirmations,
+  }
 }
 
 function reviewTriggerForPolicy(tactical = {}) {
@@ -375,8 +426,8 @@ export function deriveShortHorizonActionPolicy({
   const source = tactical && typeof tactical === 'object'
     ? tactical
     : {}
-  const increaseReasons = riskIncreaseConstraints(source)
-  const canIncreaseRisk = increaseReasons.length === 0
+  const assessment = riskIncreaseAssessment(source)
+  const canIncreaseRisk = assessment.riskTier !== 'NONE'
   let allowedActions = ['WATCH']
   let fallbackAction = 'WATCH'
 
@@ -416,11 +467,20 @@ export function deriveShortHorizonActionPolicy({
     mode: text(mode, 30),
     allowedActions,
     canIncreaseRisk,
+    riskTier: assessment.riskTier,
+    maxPositionPct: assessment.riskTier === 'PROBE' ? 5 : null,
+    manualConfirmationOnly: assessment.riskTier === 'PROBE',
+    confirmations: assessment.confirmations,
     requestedAction: requested || null,
     effectiveAction: overridden ? fallbackAction : requested || null,
     fallbackAction,
     overridden,
-    reasons: canIncreaseRisk ? [] : increaseReasons,
+    reasons: assessment.riskTier === 'FULL'
+      ? []
+      : [
+          ...assessment.hardBlockers,
+          ...assessment.fullRiskGaps,
+        ],
     nextReviewTrigger: reviewTriggerForPolicy(source),
   }
 }

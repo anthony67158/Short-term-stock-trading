@@ -69,6 +69,28 @@ test('军师生成前必须服从短线内核给出的唯一允许动作集合',
   assert.match(prompt, /不得用标题、actionPlan或价格字段暗示集合外交易/)
 })
 
+test('试仓档位强制模型输出5%以内并要求人工确认', () => {
+  const prompt = buildUserPrompt('buy_advice', {
+    code: '600000',
+    shortHorizonTactical: {
+      schemaVersion: 'short-horizon-tactical.v1',
+      actionPolicy: {
+        schemaVersion: 'short-horizon-action-policy.v1',
+        allowedActions: ['BUY', 'WATCH'],
+        canIncreaseRisk: true,
+        riskTier: 'PROBE',
+        maxPositionPct: 5,
+        manualConfirmationOnly: true,
+        reasons: ['成交额证据不足，仅允许受控试仓'],
+      },
+    },
+  })
+
+  assert.match(prompt, /最多只能输出“小仓试错\/小仓加仓”/)
+  assert.match(prompt, /仓位不得超过总资产5%/)
+  assert.match(prompt, /必须人工确认/)
+})
+
 test('军师低命中校准按动作方向纠偏而不是一律变得更保守', () => {
   const prompt = buildUserPrompt('hold_advice', {
     code: '600000',

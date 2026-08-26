@@ -380,6 +380,44 @@ test('短线内核改写模型动作时首屏解释原因而非只显示观望',
   )
 })
 
+test('试仓档位即使计划就绪也明确显示小仓与人工确认', () => {
+  const view = buildAdvicePresentation({
+    action: '立即买入',
+    title: '核心信号共振',
+    decisionPlan: {
+      schemaVersion: 'decision-plan.v2',
+      mode: 'buy_advice',
+      action: 'BUY',
+      actionLabel: '买入',
+      actionability: 'READY',
+      manualConfirmationOnly: true,
+      actionPolicy: {
+        riskTier: 'PROBE',
+        reasons: ['成交额证据不足，仅允许受控试仓'],
+      },
+      trigger: '价格站稳10元且资金继续流入',
+      quantity: { lots: 3 },
+      prices: {
+        reference: 10,
+        stop: 9,
+        target: 12,
+        observations: [],
+      },
+      costs: { estimatedNetAmount: 3000 },
+      blockedReasons: [],
+    },
+  })
+
+  assert.equal(view.verdict.action, '小仓试错')
+  assert.match(view.verdict.title, /短线试仓/)
+  assert.match(view.operationGuide.now, /仅限人工确认/)
+  assert.equal(
+    view.operationGuide.steps[0].label,
+    '为何仅试仓',
+  )
+  assert.match(view.execution.instruction, /人工确认/)
+})
+
 test('默认核心依据压缩为可扫读摘要而完整原文仍保留在建议数据中', () => {
   const longText = `量化方向偏多，${'但仍需等待价格确认。'.repeat(30)}`
   const view = buildAdvicePresentation({

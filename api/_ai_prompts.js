@@ -357,12 +357,18 @@ function tacticalActionPolicyRule(tactical = {}) {
   const reasons = Array.isArray(policy.reasons)
     ? policy.reasons.filter(Boolean).slice(0, 4)
     : []
+  const riskRule = policy.riskTier === 'PROBE'
+    ? '本轮最多只能输出“小仓试错/小仓加仓”，仓位不得超过总资产5%，必须人工确认，禁止写成立即重仓或确定性买点。'
+    : policy.riskTier === 'FULL'
+      ? '新增仓位条件已全部通过，但仍需比较赔率后决定是否操作。'
+      : `当前新增仓位未通过：${reasons.join('；')}。`
   return `【唯一允许动作】本轮action只能从${allowed.join('、')}中选择。`
     + '不得输出集合外动作，不得用标题、actionPlan或价格字段暗示集合外交易。'
+    + riskRule
     + (
-      reasons.length
-        ? `当前新增仓位未通过：${reasons.join('；')}。`
-        : '新增仓位条件已通过，但仍可根据赔率选择观望。'
+      policy.riskTier === 'PROBE' && reasons.length
+        ? `限制原因：${reasons.join('；')}。`
+        : ''
     )
     + `下一复核事件：${policy.nextReviewTrigger || '实质证据变化后重新评估'}`
 }

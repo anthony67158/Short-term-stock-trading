@@ -200,6 +200,35 @@ test('小仓试错保留5%仓位上限但不受策略晋级限制', () => {
   assert.ok(plan.quantity.lots <= 5)
 })
 
+test('短线政策只开放试仓时即使模型建议重仓也强制限制5%', () => {
+  const { amount: _amount, ...quoteWithoutAmount } = payload.todayQuote
+  const plan = compileDecisionPlan({
+    mode: 'buy_advice',
+    advice: {
+      action: '立即买入',
+      buyPrice: 10,
+      stopPrice: 9,
+      targetPrice: 12,
+      planQtyNum: 100,
+      actionPlan: '立即买入100手',
+    },
+    payload: {
+      ...payload,
+      todayQuote: quoteWithoutAmount,
+    },
+    evidenceSnapshot: snapshot,
+    now,
+  })
+
+  assert.equal(plan.action, 'BUY')
+  assert.equal(plan.actionability, 'READY')
+  assert.equal(plan.actionPolicy.riskTier, 'PROBE')
+  assert.equal(plan.manualConfirmationOnly, true)
+  assert.equal(plan.risk.manualProbeLimitPct, 5)
+  assert.ok(plan.quantity.lots > 0)
+  assert.ok(plan.quantity.lots <= 5)
+})
+
 test('新增风险必须满足至少1.8比1的盈亏比', () => {
   const plan = compileDecisionPlan({
     mode: 'buy_advice',

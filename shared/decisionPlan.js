@@ -545,8 +545,14 @@ export function compileDecisionPlan({
     if (capacity.lots <= 0) blockedReasons.push('今日没有可卖仓位')
   }
 
+  const policyProbe = (
+    riskIncreasing
+    && actionPolicy.riskTier === 'PROBE'
+  )
   const probeRequested = riskIncreasing
     && (
+      policyProbe
+      ||
       advice.tier === 'probe'
       || /小仓|试错|试仓/.test(
         `${advice.action || ''} ${advice.actionPlan || ''}`,
@@ -558,7 +564,7 @@ export function compileDecisionPlan({
   )
   if (
     probeRequested
-    && sectorProbeEligible
+    && (policyProbe || sectorProbeEligible)
     && capacity.lots > 0
   ) {
     const oneLotGross = executionPrice(

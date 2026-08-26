@@ -195,7 +195,9 @@ function decisionPlanSummary(plan) {
         recovery: clean(issue?.recovery, 200),
       })).filter((issue) => issue.source && issue.label)
     : []
-  const statusText = actionability === 'READY'
+  const statusText = plan.manualConfirmationOnly === true
+    ? '短线核心信号已共振，仅限人工确认小仓试错'
+    : actionability === 'READY'
     ? '证据、价格与账户风险检查均已通过'
     : actionability === 'MANUAL_PROBE'
       ? '板块与个股短线条件已通过，仅限人工确认小仓试错'
@@ -247,7 +249,10 @@ function decisionInstruction(plan, fallback = '') {
   const lots = Number(plan.quantity?.lots) || 0
   const price = displayNumber(plan.prices?.reference)
   const core = `${plan.actionLabel || '操作'}${lots > 0 ? `${lots}手` : ''}${price ? `，参考${price}元` : ''}`
-  if (plan.actionability === 'MANUAL_PROBE') {
+  if (
+    plan.actionability === 'MANUAL_PROBE'
+    || plan.manualConfirmationOnly === true
+  ) {
     return `人工确认：${plan.action === 'ADD' ? '小仓加仓' : '小仓试错'}${lots > 0 ? `${lots}手` : ''}${price ? `，参考${price}元` : ''}；不进入自动执行`
   }
   return core || fallback
@@ -258,8 +263,11 @@ function operationGuide(advice, plan, levels, observationOnly) {
   const withYuan = (value) =>
     /元$/.test(String(value)) ? String(value) : `${value}元`
   const policyReasons = (
-    plan?.actionPolicy?.overridden
-    && Array.isArray(plan.actionPolicy.reasons)
+    (
+      plan?.actionPolicy?.overridden
+      || plan?.manualConfirmationOnly === true
+    )
+    && Array.isArray(plan?.actionPolicy?.reasons)
   )
     ? plan.actionPolicy.reasons
         .map((item) => clean(item, 120))
@@ -269,9 +277,13 @@ function operationGuide(advice, plan, levels, observationOnly) {
   const policyStep = policyReasons.length
     ? {
         key: 'policy',
-        label: '为何不操作',
+        label: plan?.manualConfirmationOnly === true
+          ? '为何仅试仓'
+          : '为何不操作',
         text: policyReasons.join('；'),
-        tone: 'risk',
+        tone: plan?.manualConfirmationOnly === true
+          ? 'watch'
+          : 'risk',
       }
     : null
   const invalidation = first(
@@ -356,7 +368,10 @@ function operationGuide(advice, plan, levels, observationOnly) {
       ? '继续持有，当前不加仓；等待短线条件重新确认。'
       : plan.actionability === 'BLOCKED'
       ? '暂不操作，不挂单；条件恢复后重新生成建议。'
-      : plan.actionability === 'MANUAL_PROBE'
+      : (
+        plan.actionability === 'MANUAL_PROBE'
+        || plan.manualConfirmationOnly === true
+      )
         ? `仅限人工确认小仓试错：${actionText}。`
         : `${actionText}；仅在核对价格和账户后人工执行。`,
     steps: [
@@ -468,7 +483,10 @@ function buildLegacyAdvicePresentation(advice = {}) {
     )
   const planAdvice = plan ? {
     ...advice,
-    action: plan.actionability === 'MANUAL_PROBE'
+    action: (
+      plan.actionability === 'MANUAL_PROBE'
+      || plan.manualConfirmationOnly === true
+    )
       ? plan.action === 'ADD' ? '小仓加仓' : '小仓试错'
       : plan.actionability === 'RESEARCH_ONLY'
         ? `观察·${plan.actionLabel || '建议'}`
@@ -481,7 +499,10 @@ function buildLegacyAdvicePresentation(advice = {}) {
         : '短线条件未确认，暂不操作'
       : plan.actionability === 'BLOCKED'
       ? '执行条件未满足，暂不操作'
-      : plan.actionability === 'MANUAL_PROBE'
+      : (
+        plan.actionability === 'MANUAL_PROBE'
+        || plan.manualConfirmationOnly === true
+      )
         ? `短线试仓：${advice.title || advice.headline || '板块与个股条件共振'}`
       : plan.actionability === 'RESEARCH_ONLY'
         ? `仅供观察：${advice.title || advice.headline || plan.actionLabel || '等待确认'}`
