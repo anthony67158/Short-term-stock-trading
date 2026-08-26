@@ -189,6 +189,10 @@ test('持仓建议明确列出本次决策使用的持仓和可用资金快照',
   assert.match(prompt, /"cash":18600/)
   assert.match(prompt, /"stockWeight":18\.5/)
   assert.match(prompt, /positionNote.*关键账户数字/)
+  assert.match(prompt, /"nextOpenPlan":/)
+  assert.match(prompt, /"futurePlan":/)
+  assert.match(prompt, /高开、平开、低开/)
+  assert.match(prompt, /T\+1/)
 })
 
 test('弱市买入必须同时通过个股强势和高把握信号硬闸门', () => {
@@ -261,6 +265,17 @@ test('观望买入建议区分观察锚与买入价并比较两条入场路径',
     assert.match(prompt, /过远、已经越过或无依据时填null/)
     assert.match(prompt, /invalidation只写何时取消关注/)
   }
+})
+
+test('买入建议必须同时给出T加一次日应对和五日内退出路径', () => {
+  const prompt = buildUserPrompt('buy_advice', {
+    code: '600000',
+  })
+
+  assert.match(prompt, /"nextOpenPlan":/)
+  assert.match(prompt, /"futurePlan":/)
+  assert.match(prompt, /T\+1/)
+  assert.match(prompt, /最迟第5个交易日/)
 })
 
 test('军师区分真实费后收益与三日建议命中统计', () => {

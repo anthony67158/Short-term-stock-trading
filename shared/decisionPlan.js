@@ -845,6 +845,12 @@ export function buildFallbackDecisionAdvice({
     actionPlan: holdingMode
       ? '本轮不新增仓位，也不依据不完整解释改变原计划；等待数据与解释服务恢复后重新评估。'
       : '本轮不下单；等待数据与解释服务恢复并重新生成统一决策计划。',
+    nextOpenPlan: holdingMode
+      ? '下一交易日开盘先恢复行情、技术与资金证据；证据完整前维持原仓位纪律，不新增风险。'
+      : '',
+    futurePlan: holdingMode
+      ? '解释服务恢复后重新生成1-5日退出路径；恢复前只执行原有硬止损，不延长持有周期。'
+      : '',
     opQty: '无需操作',
     planQty: 0,
     planQtyNum: 0,

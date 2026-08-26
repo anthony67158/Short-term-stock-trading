@@ -173,9 +173,49 @@ function modelSummary(advice) {
   }
 }
 
+function deferredPlanPresentation(plan) {
+  const next = plan?.actionPolicy?.nextSessionPlan
+  if (
+    !next
+    || !['PROBE', 'BUY', 'PROBE_ADD', 'ADD'].includes(
+      next.action,
+    )
+  ) return null
+  const sessionLabel = {
+    AFTERNOON: '下午盘中',
+    OPENING: '开盘后',
+    NEXT_TRADING_DAY: '下一交易日盘中',
+  }[next.session] || '下一交易时段盘中'
+  const actionLabel = ['PROBE_ADD', 'ADD'].includes(next.action)
+    ? '加仓'
+    : next.action === 'PROBE'
+      ? '试仓'
+      : '买入'
+  const maxPositionPct = Number(next.maxPositionPct)
+  const positionLimit = (
+    ['PROBE', 'PROBE_ADD'].includes(next.action)
+    && Number.isFinite(maxPositionPct)
+    && maxPositionPct > 0
+  ) ? `，仓位不超过${maxPositionPct}%` : ''
+  return {
+    actionLabel: `${
+      next.session === 'NEXT_TRADING_DAY'
+        ? '次日'
+        : next.session === 'AFTERNOON'
+          ? '下午'
+          : '开盘后'
+    }${actionLabel}预案`,
+    instruction: `${clean(
+      next.trigger || `${sessionLabel}重新评估`,
+      240,
+    )}${positionLimit}；到价后自动复核分时承接、量能和资金；复核通过后再由你人工确认下单。`,
+  }
+}
+
 function decisionPlanSummary(plan) {
   if (plan?.schemaVersion !== 'decision-plan.v2') return null
   const actionability = clean(plan.actionability, 30)
+  const deferredPlan = deferredPlanPresentation(plan)
   const evidenceBasis = plan.evidenceBasis
     ? {
         state: clean(plan.evidenceBasis.state, 30),
@@ -195,7 +235,9 @@ function decisionPlanSummary(plan) {
         recovery: clean(issue?.recovery, 200),
       })).filter((issue) => issue.source && issue.label)
     : []
-  const statusText = plan.manualConfirmationOnly === true
+  const statusText = deferredPlan
+    ? `休市阶段已保留${deferredPlan.actionLabel}，盘中复核前不下单`
+    : plan.manualConfirmationOnly === true
     ? '短线核心信号已共振，仅限人工确认小仓试错'
     : actionability === 'READY'
     ? '证据、价格与账户风险检查均已通过'
@@ -218,6 +260,7 @@ function decisionPlanSummary(plan) {
     ),
     actionabilityLabel: actionabilityLabel(actionability),
     manualConfirmationOnly: plan.manualConfirmationOnly === true,
+    deferredPlan,
     opportunity: plan.opportunity
       ? {
           sectorName: clean(plan.opportunity.sectorName, 60),
@@ -237,6 +280,7 @@ function decisionPlanSummary(plan) {
 
 function decisionInstruction(plan, fallback = '') {
   if (!plan) return fallback
+  const deferredPlan = deferredPlanPresentation(plan)
   const reasons = (Array.isArray(plan.blockedReasons)
     ? plan.blockedReasons
     : []).map((item) => clean(item, 160)).filter(Boolean)
@@ -244,6 +288,9 @@ function decisionInstruction(plan, fallback = '') {
     return `暂不执行：${reasons.join('；') || '执行条件未满足'}`
   }
   if (plan.actionability === 'WATCH') {
+    if (deferredPlan) {
+      return `该预案生成于休市阶段；盘中复核前不下单。${deferredPlan.instruction}`
+    }
     return clean(plan.trigger, 500) || fallback || '等待触发条件后重新评估'
   }
   const lots = Number(plan.quantity?.lots) || 0
@@ -294,6 +341,7 @@ function operationGuide(advice, plan, levels, observationOnly) {
   if (!plan) return null
 
   if (observationOnly) {
+    const deferredPlan = deferredPlanPresentation(plan)
     const paths = levels
       .filter((level) =>
         ['watch_pullback', 'watch_breakout', 'watch'].includes(
@@ -335,8 +383,16 @@ function operationGuide(advice, plan, levels, observationOnly) {
       })
     }
     return {
-      now: '暂不买入，不挂单、不追涨。',
+      now: deferredPlan
+        ? `该预案生成于休市阶段，已保留${deferredPlan.actionLabel}；盘中复核前不下单。`
+        : '暂不买入，不挂单、不追涨。',
       steps: [
+        deferredPlan && {
+          key: 'next-session',
+          label: '后续计划',
+          text: deferredPlan.instruction,
+          tone: 'watch',
+        },
         policyStep,
         ...paths,
         invalidation && {
@@ -481,19 +537,26 @@ function buildLegacyAdvicePresentation(advice = {}) {
         String(advice.action || advice.stance || ''),
       )
     )
+  const deferredPlan = deferredPlanPresentation(plan)
   const planAdvice = plan ? {
     ...advice,
-    action: (
-      plan.actionability === 'MANUAL_PROBE'
-      || plan.manualConfirmationOnly === true
-    )
-      ? plan.action === 'ADD' ? '小仓加仓' : '小仓试错'
-      : plan.actionability === 'RESEARCH_ONLY'
-        ? `观察·${plan.actionLabel || '建议'}`
-      : plan.actionability === 'BLOCKED'
-        ? '观望'
-        : plan.actionLabel || advice.action,
-    title: plan.actionPolicy?.overridden
+    action: deferredPlan?.actionLabel || (
+      (
+        plan.actionability === 'MANUAL_PROBE'
+        || plan.manualConfirmationOnly === true
+      )
+        ? plan.action === 'ADD'
+          ? '小仓加仓'
+          : '小仓试错'
+        : plan.actionability === 'RESEARCH_ONLY'
+          ? `观察·${plan.actionLabel || '建议'}`
+          : plan.actionability === 'BLOCKED'
+            ? '观望'
+            : plan.actionLabel || advice.action
+    ),
+    title: deferredPlan
+      ? `${deferredPlan.actionLabel}，待盘中复核`
+      : plan.actionPolicy?.overridden
       ? plan.action === 'HOLD'
         ? '短线条件未确认，继续持有'
         : '短线条件未确认，暂不操作'

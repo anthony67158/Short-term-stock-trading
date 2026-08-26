@@ -917,7 +917,7 @@ function CandidateActions({ p, q, onBuy, onAlert, onDelete }) {
           onClick={() => openStockDetail(p.code, q?.name || p.name)}
         >
           <Icon name="clock" size={12} />
-          {view?.reviewActionLabel || '下一交易时段复核'}
+          {view?.detailActionLabel || '查看后续预案'}
         </button>
       ) : (
         <>
@@ -1088,10 +1088,10 @@ function PlanList({ book, quote, stockTags, batchSel }) {
                 className={'pc-buyalert review-paths' + tone}
                 title={
                   !executionOpen
-                    ? '休市期间不触发通知，下一连续竞价时段恢复监测'
+                    ? '休市不通知；下一连续竞价时段恢复监测，到价后自动核对分时承接、量能和资金'
                     : reviewing
                       ? '观察条件已触发，正在重新评估'
-                      : '任一观察条件到达后自动重新评估'
+                      : '到价后自动核对分时承接、量能和资金；确认后再提示'
                 }
               >
                 <Icon name="bell" size={11} />
@@ -1104,7 +1104,7 @@ function PlanList({ book, quote, stockTags, batchSel }) {
                 ))}
                 {reviewing && <span className="pc-buyalert-off">复核中</span>}
                 {!executionOpen && (
-                  <span className="pc-buyalert-off">盘中提醒</span>
+                  <span className="pc-buyalert-off">盘中到价自动复核</span>
                 )}
               </div>
             )

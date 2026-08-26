@@ -13,6 +13,8 @@ const CORE_FIELDS = [
   'shortHorizonTactical',
   'exitManagement',
   'actionPlan',
+  'nextOpenPlan',
+  'futurePlan',
   'exitTiming',
   'opQty',
   'addPrice',
@@ -45,6 +47,8 @@ const SCHEDULED_STABLE_FIELDS = [
 const SCHEDULED_ACTION_TEXT_FIELDS = [
   'title',
   'actionPlan',
+  'nextOpenPlan',
+  'futurePlan',
   'exitTiming',
   'invalidation',
   'knowledgeActionPlan',

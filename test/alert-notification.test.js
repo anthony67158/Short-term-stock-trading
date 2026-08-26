@@ -68,7 +68,10 @@ test('观察价命中时明确通知正在复核且不暗示下单', () => {
 
   assert.equal(notification.title, '贵州茅台(600519)｜观察条件已到')
   assert.match(notification.body, /观察价≥145\.24/)
-  assert.match(notification.body, /正在重新评估，暂不下单/)
+  assert.match(
+    notification.body,
+    /正在自动复核分时承接、量能和资金，暂不下单/,
+  )
 })
 
 test('非价格预警保留实际命中数值', () => {

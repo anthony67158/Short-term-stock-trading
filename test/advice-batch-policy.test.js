@@ -20,6 +20,8 @@ const completeAdvice = {
   action: '持有',
   title: '守住支撑继续持有',
   actionPlan: '守住3.10元继续持有，跌破后减仓10手',
+  nextOpenPlan: '高开减仓、平开持有、低开守3.10元',
+  futurePlan: '最迟第5个交易日未兑现则退出',
   invalidation: '放量跌破3.10元且无法收回时计划失效',
   quantNote: '量化评分51.1分，方向中性',
   fundNote: '主力资金连续流出，反弹承压',
@@ -134,7 +136,44 @@ test('完整度契约要求结论执行失效条件与至少两类依据', () =>
     }, 'hold_advice'),
     {
       complete: false,
-      missing: ['失效条件', '核心依据'],
+      missing: [
+        '失效条件',
+        '核心依据',
+        '次日应对',
+        '五日内退出路径',
+      ],
     },
   )
+})
+
+test('持仓和实际买入建议必须包含次日应对与五日内退出路径', () => {
+  assert.deepEqual(
+    adviceCompleteness({
+      ...completeAdvice,
+      nextOpenPlan: '',
+      futurePlan: '',
+    }, 'hold_advice'),
+    {
+      complete: false,
+      missing: ['次日应对', '五日内退出路径'],
+    },
+  )
+  assert.deepEqual(
+    adviceCompleteness({
+      ...completeAdvice,
+      action: '小仓试错',
+      nextOpenPlan: '',
+      futurePlan: '',
+    }, 'buy_advice'),
+    {
+      complete: false,
+      missing: ['次日应对', '五日内退出路径'],
+    },
+  )
+  assert.equal(adviceCompleteness({
+    ...completeAdvice,
+    action: '观望',
+    nextOpenPlan: '',
+    futurePlan: '',
+  }, 'buy_advice').complete, true)
 })

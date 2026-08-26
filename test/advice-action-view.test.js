@@ -153,11 +153,12 @@ test('休市时已经校正为观望的建议也隐藏手动建仓入口', () =>
   assert.equal(view.quantityLabel, '仓位≤5%')
   assert.equal(view.commandLabel, '后续计划')
   assert.equal(view.displayTone, 'buy')
-  assert.equal(view.reviewActionLabel, '下一交易日复核')
+  assert.equal(view.detailActionLabel, '查看次日预案')
   assert.equal(view.deferred, true)
   assert.equal(view.actionable, false)
   assert.equal(view.levels[0].basisLabel, '5日均线')
   assert.equal(view.trigger.stateLabel, '当前休市')
+  assert.equal(view.trigger.detailLabel, '到价后自动复核')
   assert.equal(view.trigger.metricLabel, '试仓预案')
   assert.match(view.instruction, /回踩15\.2元确认承接/)
   assert.match(view.instruction, /盘中复核通过后人工确认/)
@@ -239,6 +240,45 @@ test('下一交易日开盘后休市试仓预案进入盘中复核而不是退�
   assert.equal(view.actionable, false)
   assert.equal(view.trigger.stateLabel, '盘中先复核')
   assert.equal(view.trigger.metricLabel, '不自动下单')
+})
+
+test('持仓卡在休市时显示下一交易日加仓预案而不是盘中持有在看', () => {
+  const view = buildAdviceActionView({
+    action: '持有',
+    actionPlan: '当前持有观察',
+    addPrice: 15.2,
+    reducePrice: 16.5,
+    stopPrice: 14.7,
+    decisionPlan: {
+      schemaVersion: 'decision-plan.v2',
+      action: 'HOLD',
+      actionability: 'WATCH',
+      actionPolicy: {
+        executionOpen: false,
+        riskTier: 'PROBE',
+        nextSessionPlan: {
+          action: 'PROBE_ADD',
+          session: 'NEXT_TRADING_DAY',
+          maxPositionPct: 5,
+          trigger: '下一交易日盘中，回踩15.2元确认承接后重新评估',
+        },
+      },
+      evidenceBasis: {
+        isLive: false,
+        phase: '盘后(已收盘)',
+      },
+    },
+  }, {
+    mode: 'hold_advice',
+    currentPrice: 15.44,
+    executionOpen: false,
+  })
+
+  assert.equal(view.action, '次日加仓预案')
+  assert.equal(view.quantityLabel, '仓位≤5%')
+  assert.equal(view.commandLabel, '后续计划')
+  assert.equal(view.actionable, false)
+  assert.equal(view.trigger.stateLabel, '当前休市')
 })
 
 test('价位卡展示可核验的数据来源而不是笼统建议', () => {

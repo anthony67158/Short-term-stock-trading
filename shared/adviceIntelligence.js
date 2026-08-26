@@ -80,7 +80,11 @@ export function adviceEvidenceDigest(snapshot = {}) {
       maCross: text(indicators.maCross, 30),
       atr: rounded(atrValue(indicators.atr), 0.01),
       rsi: rounded(indicators.rsi, 5),
-      macdHistSign: sign(indicators.macd?.hist),
+      macdHistSign: sign(
+        indicators.macdDetail?.hist
+        ?? indicators.macd?.hist
+        ?? indicators.macd?.macd,
+      ),
       bollPctB: rounded(indicators.boll?.pctB, 10),
       vsVwap: text(intraday.vsVwap, 40),
       posInDay: rounded(intraday.posInDay, 10),

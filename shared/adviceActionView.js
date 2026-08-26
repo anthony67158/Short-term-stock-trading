@@ -94,23 +94,31 @@ function withPriceBasis(levels, advice = {}) {
 
 function deferredOpportunityView(plan, executionOpen) {
   const next = plan?.actionPolicy?.nextSessionPlan
-  if (!next || !['PROBE', 'BUY'].includes(next.action)) return null
+  if (
+    !next
+    || !['PROBE', 'BUY', 'PROBE_ADD', 'ADD'].includes(
+      next.action,
+    )
+  ) return null
   const sessionPrefix = {
     AFTERNOON: '下午',
     OPENING: '开盘后',
     NEXT_TRADING_DAY: '次日',
   }[next.session] || '下一时段'
-  const reviewActionLabel = {
-    AFTERNOON: '下午盘中复核',
-    OPENING: '开盘后复核',
-    NEXT_TRADING_DAY: '下一交易日复核',
-  }[next.session] || '下一交易时段复核'
-  const actionLabel = next.action === 'PROBE'
-    ? '试仓'
-    : '买入'
+  const detailActionLabel = {
+    AFTERNOON: '查看下午预案',
+    OPENING: '查看开盘预案',
+    NEXT_TRADING_DAY: '查看次日预案',
+  }[next.session] || '查看后续预案'
+  const addSide = ['PROBE_ADD', 'ADD'].includes(next.action)
+  const actionLabel = addSide
+    ? '加仓'
+    : next.action === 'PROBE'
+      ? '试仓'
+      : '买入'
   const maxPositionPct = Number(next.maxPositionPct)
   const quantityLabel = (
-    next.action === 'PROBE'
+    ['PROBE', 'PROBE_ADD'].includes(next.action)
     && Number.isFinite(maxPositionPct)
     && maxPositionPct > 0
   ) ? `仓位≤${maxPositionPct}%` : ''
@@ -121,9 +129,9 @@ function deferredOpportunityView(plan, executionOpen) {
       : `${sessionPrefix}${actionLabel}预案`,
     displayTone: 'buy',
     commandLabel: '后续计划',
-    reviewActionLabel: liveReview
-      ? '立即复核'
-      : reviewActionLabel,
+    detailActionLabel: liveReview
+      ? '查看盘中复核'
+      : detailActionLabel,
     shortHorizon: liveReview
       ? '休市预案待确认'
       : '当前休市',
@@ -139,7 +147,7 @@ function deferredOpportunityView(plan, executionOpen) {
       stateLabel: liveReview ? '盘中先复核' : '当前休市',
       detailLabel: liveReview
         ? '先更新行情与量价'
-        : '满足条件后提醒',
+        : '到价后自动复核',
       metricLabel: liveReview
         ? '不自动下单'
         : `${actionLabel}预案`,
@@ -372,8 +380,12 @@ export function buildAdviceActionView(
       || generatedOutsideSession
     )
   )
+  const policyOpportunity = deferredOpportunityView(
+    plan,
+    executionOpen,
+  )
   const deferredOpportunity = sessionDeferred
-    ? deferredOpportunityView(plan, executionOpen)
+    ? policyOpportunity
     : null
   if (entry && (entryAboveCurrent || sessionDeferred)) {
     const observationKey = entryAboveCurrent
@@ -396,8 +408,8 @@ export function buildAdviceActionView(
         || (sessionDeferred ? '等待盘中' : '等待突破'),
       displayTone: deferredOpportunity?.displayTone,
       commandLabel: deferredOpportunity?.commandLabel,
-      reviewActionLabel:
-        deferredOpportunity?.reviewActionLabel,
+      detailActionLabel:
+        deferredOpportunity?.detailActionLabel,
       shortHorizon: deferredOpportunity?.shortHorizon
         || clean(source.shortHorizon, 30),
       instruction: deferredOpportunity
@@ -430,18 +442,24 @@ export function buildAdviceActionView(
     }
   }
   const deferredWait = (
-    mode === 'buy_advice'
-    && kind === 'wait'
+    !!policyOpportunity
     && (
       executionOpen === false
+      || generatedOutsideSession
+    )
+    && (
+      (
+        mode === 'buy_advice'
+        && kind === 'wait'
+      )
       || (
-        generatedOutsideSession
-        && plan?.actionPolicy?.nextSessionPlan
+        ['hold_advice', 'review'].includes(mode)
+        && ['hold', 'add'].includes(kind)
       )
     )
   )
   const deferredWaitPlan = deferredWait
-    ? deferredOpportunityView(plan, executionOpen)
+    ? policyOpportunity
     : null
   return {
     kind,
@@ -456,7 +474,7 @@ export function buildAdviceActionView(
     }[kind])),
     displayTone: deferredWaitPlan?.displayTone,
     commandLabel: deferredWaitPlan?.commandLabel,
-    reviewActionLabel: deferredWaitPlan?.reviewActionLabel,
+    detailActionLabel: deferredWaitPlan?.detailActionLabel,
     shortHorizon: deferredWaitPlan?.shortHorizon
       || clean(source.shortHorizon, 30),
     instruction: deferredWaitPlan?.instruction || instruction,

@@ -62,7 +62,7 @@ test('策略摘要使用两行主指令、紧凑价位和单行进度', () => {
   )
   assert.match(
     planTab,
-    /\{view\?\.reviewActionLabel \|\| '下一交易时段复核'\}/,
+    /\{view\?\.detailActionLabel \|\| '查看后续预案'\}/,
   )
   assert.match(
     precision,

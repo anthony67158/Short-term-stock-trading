@@ -67,6 +67,17 @@ export function adviceCompleteness(advice, mode = '') {
   if (!instruction) missing.push('执行指令')
   if (!invalidation) missing.push('失效条件')
   if (evidenceCount < 2) missing.push('核心依据')
+  const requiresShortExitPlan = (
+    mode === 'hold_advice'
+    || (
+      mode === 'buy_advice'
+      && /立即买入|回调再买|小仓试错|买入/.test(action)
+    )
+  )
+  if (requiresShortExitPlan) {
+    if (!text(value.nextOpenPlan)) missing.push('次日应对')
+    if (!text(value.futurePlan)) missing.push('五日内退出路径')
+  }
   return {
     complete: missing.length === 0,
     missing,

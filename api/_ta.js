@@ -282,6 +282,17 @@ export function backtestSignal(candles, horizon = 5) {
 export function techSummaryForAI(tech) {
   if (!tech) return null;
   const p = tech.priceHints || {};
+  const kdj = tech.kdj && {
+    k: tech.kdj.k,
+    d: tech.kdj.d,
+    j: tech.kdj.j,
+  };
+  const macd = tech.macd && {
+    dif: tech.macd.dif,
+    dea: tech.macd.dea,
+    hist: tech.macd.macd,
+    cross: tech.macd.cross,
+  };
   return {
     verdict: tech.verdict, bull: tech.bull, bear: tech.bear,
     ma: tech.ma,
@@ -289,7 +300,11 @@ export function techSummaryForAI(tech) {
     maTrend: tech.maTrend === 'bull' ? '均线多头排列(5>10>20>60)' : tech.maTrend === 'bear' ? '均线空头排列(5<10<20<60)' : '均线缠绕',
     atr: tech.atr && tech.atr.atr, atrPct: tech.atr && tech.atr.atrPct,
     boll: tech.boll && { lower: tech.boll.lower, mid: tech.boll.mid, upper: tech.boll.upper, pctB: tech.boll.pctB, width: tech.boll.width },
-    rsi: tech.rsi, kdj: tech.kdj && tech.kdj.j, macd: tech.macd && (tech.macd.cross === 'gold' ? 'MACD金叉' : tech.macd.cross === 'dead' ? 'MACD死叉' : (tech.macd.macd > 0 ? 'MACD红柱' : 'MACD绿柱')),
+    rsi: tech.rsi,
+    kdj: tech.kdj && tech.kdj.j,
+    kdjDetail: kdj,
+    macd: tech.macd && (tech.macd.cross === 'gold' ? 'MACD金叉' : tech.macd.cross === 'dead' ? 'MACD死叉' : (tech.macd.macd > 0 ? 'MACD红柱' : 'MACD绿柱')),
+    macdDetail: macd,
     volRatio: tech.volRatio,
     support: tech.sr && tech.sr.support, resistance: tech.sr && tech.sr.resistance,
     buyZone: p.buyZone, sellZone: p.sellZone, stopLoss: p.stopLoss, takeProfit: p.takeProfit,

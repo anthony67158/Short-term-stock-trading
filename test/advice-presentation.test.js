@@ -380,6 +380,57 @@ test('短线内核改写模型动作时首屏解释原因而非只显示观望',
   )
 })
 
+test('休市观望结论在详情首屏展示次日试仓预案和自动复核', () => {
+  const view = buildAdvicePresentation({
+    action: '观望',
+    title: '等待下一交易日',
+    actionPlan: '等待回踩15.2元',
+    pullbackWatchPrice: 15.2,
+    decisionPlan: {
+      schemaVersion: 'decision-plan.v2',
+      mode: 'buy_advice',
+      action: 'WATCH',
+      actionLabel: '观望',
+      actionability: 'WATCH',
+      actionPolicy: {
+        executionOpen: false,
+        nextSessionPlan: {
+          action: 'PROBE',
+          actionLabel: '小仓试仓',
+          session: 'NEXT_TRADING_DAY',
+          sessionLabel: '下一交易日盘中',
+          maxPositionPct: 5,
+          trigger: '下一交易日盘中，回踩15.2元确认承接后重新评估',
+        },
+      },
+      trigger: '下一交易日盘中，回踩15.2元确认承接后重新评估',
+      quantity: { lots: 0 },
+      prices: {
+        current: 15.44,
+        observations: [{
+          key: 'watch_pullback',
+          label: '回踩观察',
+          price: 15.2,
+          direction: 'LTE',
+        }],
+      },
+      costs: { estimatedNetAmount: 0 },
+    },
+  })
+
+  assert.equal(view.verdict.action, '次日试仓预案')
+  assert.match(view.execution.instruction, /仓位不超过5%/)
+  assert.match(
+    view.operationGuide.now,
+    /休市阶段.*盘中复核前不下单/,
+  )
+  assert.equal(view.operationGuide.steps[0].label, '后续计划')
+  assert.match(
+    view.operationGuide.steps[0].text,
+    /到价后自动复核.*人工确认/,
+  )
+})
+
 test('试仓档位即使计划就绪也明确显示小仓与人工确认', () => {
   const view = buildAdvicePresentation({
     action: '立即买入',

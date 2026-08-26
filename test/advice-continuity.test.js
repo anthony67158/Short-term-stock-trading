@@ -14,6 +14,8 @@ const previous = {
     action: '持有',
     title: '趋势未坏，继续持有',
     actionPlan: '守住9.80元继续持有',
+    nextOpenPlan: '次日高开减仓、平开观察、低开守止损',
+    futurePlan: '最迟第5个交易日退出',
     addPrice: 9.9,
     reducePrice: 10.8,
     stopPrice: 9.8,
@@ -139,6 +141,8 @@ test('上一版主计划只提取连续决策需要的白名单字段', () => {
 
   assert.equal(compact.action, '持有')
   assert.equal(compact.planId, 'plan-600000')
+  assert.match(compact.nextOpenPlan, /高开减仓/)
+  assert.match(compact.futurePlan, /第5个交易日退出/)
   assert.equal(compact.reasoning, undefined)
   assert.equal(compact.news, undefined)
 })

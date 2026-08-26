@@ -108,6 +108,130 @@ function locationOf(payload = {}) {
   return position != null ? 'MID' : 'UNKNOWN'
 }
 
+function technicalEvidenceOf(payload = {}) {
+  const tech = payload.tech || {}
+  const ma = tech.ma || {}
+  const boll = tech.boll || {}
+  const kdjSource = tech.kdjDetail
+    || (
+      tech.kdj && typeof tech.kdj === 'object'
+        ? tech.kdj
+        : null
+    )
+  const macdSource = tech.macdDetail
+    || (
+      tech.macd && typeof tech.macd === 'object'
+        ? tech.macd
+        : null
+    )
+  const kdjJ = finite(kdjSource?.j ?? tech.kdj)
+  const macdHist = finite(
+    macdSource?.hist ?? macdSource?.macd,
+  )
+  const macdState = text(
+    typeof tech.macd === 'string'
+      ? tech.macd
+      : macdSource?.cross === 'gold'
+        ? 'MACD金叉'
+        : macdSource?.cross === 'dead'
+          ? 'MACD死叉'
+          : macdHist > 0
+            ? 'MACD红柱'
+            : macdHist < 0
+              ? 'MACD绿柱'
+              : '',
+    30,
+  )
+  const bull = finite(tech.bull)
+  const bear = finite(tech.bear)
+  let signalScore = bull != null && bear != null
+    ? bull - bear
+    : 0
+  if (bull == null || bear == null) {
+    if (/多头/.test(tech.maTrend || '')) signalScore += 1
+    if (/空头/.test(tech.maTrend || '')) signalScore -= 1
+    if (/金叉/.test(tech.maCross || '')) signalScore += 1
+    if (/死叉/.test(tech.maCross || '')) signalScore -= 1
+    if (/金叉|红柱/.test(macdState)) signalScore += 1
+    if (/死叉|绿柱/.test(macdState)) signalScore -= 1
+  }
+  const rsi = finite(tech.rsi)
+  const bollPctB = finite(boll.pctB)
+  const overheated = (
+    rsi != null && rsi >= 75
+    || kdjJ != null && kdjJ >= 100
+    || bollPctB != null && bollPctB >= 95
+  )
+  const available = [
+    ma.ma5,
+    ma.ma10,
+    ma.ma20,
+    ma.ma60,
+    tech.atr,
+    tech.rsi,
+    tech.kdj,
+    tech.macd,
+    tech.boll,
+  ].some((value) => value != null)
+  if (!available) {
+    return {
+      available: false,
+      bias: 'UNKNOWN',
+      supportsImmediateEntry: false,
+    }
+  }
+  const bias = signalScore >= 2
+    ? 'BULLISH'
+    : signalScore <= -2
+      ? 'BEARISH'
+      : 'MIXED'
+  return {
+    available,
+    bias,
+    signalScore: rounded(signalScore, 0),
+    bullSignals: rounded(bull, 0),
+    bearSignals: rounded(bear, 0),
+    verdict: text(tech.verdict, 100),
+    ma: {
+      ma5: rounded(ma.ma5, 3),
+      ma10: rounded(ma.ma10, 3),
+      ma20: rounded(ma.ma20, 3),
+      ma60: rounded(ma.ma60, 3),
+    },
+    maCross: text(tech.maCross, 40),
+    maTrend: text(tech.maTrend, 60),
+    atr: rounded(tech.atr?.atr ?? tech.atr, 3),
+    atrPct: rounded(tech.atrPct, 2),
+    boll: {
+      lower: rounded(boll.lower, 3),
+      mid: rounded(boll.mid, 3),
+      upper: rounded(boll.upper, 3),
+      pctB: rounded(bollPctB, 1),
+      width: rounded(boll.width, 2),
+    },
+    rsi: rounded(rsi, 1),
+    kdj: {
+      k: rounded(kdjSource?.k, 1),
+      d: rounded(kdjSource?.d, 1),
+      j: rounded(kdjJ, 1),
+    },
+    macd: {
+      dif: rounded(macdSource?.dif, 3),
+      dea: rounded(macdSource?.dea, 3),
+      hist: rounded(macdHist, 3),
+      cross: text(macdSource?.cross, 20),
+      state: macdState || 'UNKNOWN',
+    },
+    volumeRatio: rounded(
+      tech.volRatio ?? payload.todayQuote?.volRatio,
+      2,
+    ),
+    overheated,
+    supportsImmediateEntry:
+      bias === 'BULLISH' && !overheated,
+  }
+}
+
 const SHORT_TERM_AMOUNT_THRESHOLD = 1e8
 
 function liquidityEvidenceOf(payload = {}) {
@@ -410,6 +534,9 @@ function riskIncreaseAssessment(tactical = {}) {
   const strengthConfirmed = (
     finite(tactical.stock?.relativeStrength) >= 60
   )
+  const technicalConfirmed = (
+    tactical.technical?.supportsImmediateEntry === true
+  )
   const confirmations = [
     quant.strong
       ? '量化强确认'
@@ -417,9 +544,13 @@ function riskIncreaseAssessment(tactical = {}) {
     flowConfirmed && '主力资金确认',
     leadershipConfirmed && '板块前排',
     strengthConfirmed && '相对强势',
+    technicalConfirmed && '技术面多头共振',
   ].filter(Boolean)
   if (!quant.strong) fullRiskGaps.push('量化尚未形成强偏多确认')
   if (!flowConfirmed) fullRiskGaps.push('主力资金尚未确认流入')
+  if (tactical.technical?.bias === 'BEARISH') {
+    fullRiskGaps.push('技术面仍偏空，尚未形成短线转强确认')
+  }
   if (tactical.stock?.liquidity !== 'GOOD') {
     fullRiskGaps.push(
       tactical.stock?.liquidityEvidence?.reason
@@ -437,6 +568,7 @@ function riskIncreaseAssessment(tactical = {}) {
     && quant.strong
     && flowConfirmed
     && tactical.stock?.liquidity === 'GOOD'
+    && tactical.technical?.bias !== 'BEARISH'
   )
   return {
     riskTier: canFull ? 'FULL' : canProbe ? 'PROBE' : 'NONE',
@@ -517,17 +649,31 @@ export function deriveShortHorizonActionPolicy({
     executionOpen,
     nextSession.sessionLabel,
   )
-  const nextSessionPlan = (
+  const nextSessionAction = (
     mode === 'buy_advice'
+      ? {
+          PROBE: 'PROBE',
+          FULL: 'BUY',
+        }
+      : ['hold_advice', 'review'].includes(mode)
+        ? {
+            PROBE: 'PROBE_ADD',
+            FULL: 'ADD',
+          }
+        : {}
+  )[assessment.riskTier] || null
+  const nextSessionPlan = (
+    nextSessionAction
     && !executionOpen
     && assessment.riskTier !== 'NONE'
   ) ? {
-      action: assessment.riskTier === 'PROBE'
-        ? 'PROBE'
-        : 'BUY',
-      actionLabel: assessment.riskTier === 'PROBE'
-        ? '小仓试仓'
-        : '条件买入',
+      action: nextSessionAction,
+      actionLabel: {
+        PROBE: '小仓试仓',
+        PROBE_ADD: '小仓加仓',
+        ADD: '条件加仓',
+        BUY: '条件买入',
+      }[nextSessionAction],
       session: nextSession.session,
       sessionLabel: nextSession.sessionLabel,
       maxPositionPct:
@@ -617,6 +763,7 @@ export function buildShortHorizonTactical(
   const marketTone = riskToneOf(market)
   const location = locationOf(payload)
   const crowdingRisk = crowdingRiskOf(payload, location)
+  const technical = technicalEvidenceOf(payload)
   const liquidityEvidence = liquidityEvidenceOf(payload)
   const mainDirection = flowDirection(payload.stockFund?.mainNetYi)
   const retailDirection = flowDirection(
@@ -642,7 +789,13 @@ export function buildShortHorizonTactical(
     ? 'INVALID'
     : location === 'EXTENDED' || crowdingRisk === 'HIGH'
       ? 'TOO_EXTENDED'
-      : relativeStrength >= 60
+      : (
+          relativeStrength >= 60
+          || (
+            relativeStrength >= 52
+            && technical.supportsImmediateEntry
+          )
+        )
         && marketTone !== 'RISK_OFF'
         && !conflicts.length
         ? 'READY'
@@ -703,6 +856,7 @@ export function buildShortHorizonTactical(
       liquidityEvidence,
       crowdingRisk,
     },
+    technical,
     flow: {
       mainNetYi: rounded(payload.stockFund?.mainNetYi, 2),
       retailNetYi: rounded(

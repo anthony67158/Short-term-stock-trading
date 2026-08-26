@@ -1173,7 +1173,7 @@ test('持仓与自选吸顶区跟随页面底色且不会形成整条白色卡�
   )
 })
 
-test('休市卡片不显示到价并明确下一交易时段盘中提醒', () => {
+test('休市卡片不显示到价并明确下一交易时段自动复核', () => {
   assert.match(
     planTab,
     /const executionOpen = isContinuousTrading\(Date\.now\(\)\)/,
@@ -1182,9 +1182,9 @@ test('休市卡片不显示到价并明确下一交易时段盘中提醒', () =>
     planTab,
     /const reached = \(alert\) =>\s*executionOpen &&/,
   )
-  assert.match(planTab, />盘中提醒</)
+  assert.match(planTab, />盘中到价自动复核</)
   assert.match(
     planTab,
-    /Icon name="clock"[\s\S]{0,80}下一交易时段复核/,
+    /Icon name="clock"[\s\S]{0,100}查看后续预案/,
   )
 })

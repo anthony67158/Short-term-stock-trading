@@ -323,6 +323,39 @@ test('午间休市保留下午小仓试仓预案但不开放当前买入', () =>
   })
 })
 
+test('持仓在盘后保留下一交易日小仓加仓预案', () => {
+  const tactical = buildShortHorizonTactical(payload({
+    marketPhase: '盘后(已收盘)',
+    todayQuote: {
+      ...payload().todayQuote,
+      amount: null,
+      live: false,
+      phase: '盘后(已收盘)',
+    },
+  }))
+  const policy = deriveShortHorizonActionPolicy({
+    mode: 'hold_advice',
+    tactical,
+    requestedAction: 'HOLD',
+  })
+
+  assert.equal(policy.executionOpen, false)
+  assert.equal(policy.riskTier, 'PROBE')
+  assert.deepEqual(policy.allowedActions, [
+    'HOLD',
+    'REDUCE',
+    'EXIT',
+    'WATCH',
+  ])
+  assert.equal(policy.nextSessionPlan.action, 'PROBE_ADD')
+  assert.equal(policy.nextSessionPlan.actionLabel, '小仓加仓')
+  assert.equal(policy.nextSessionPlan.maxPositionPct, 5)
+  assert.match(
+    policy.nextSessionPlan.trigger,
+    /下一交易日盘中/,
+  )
+})
+
 test('量化轻度偏多只能参与人工试仓不能升级正式建仓', () => {
   const tactical = buildShortHorizonTactical(payload({
     quant: {

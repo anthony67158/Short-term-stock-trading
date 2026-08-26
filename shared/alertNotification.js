@@ -83,7 +83,7 @@ export function buildAlertNotification({
   const instruction = stage === 'watch'
     ? watchInstruction(action)
     : stage === 'review'
-      ? '正在重新评估，暂不下单'
+      ? '正在自动复核分时承接、量能和资金，暂不下单'
     : stage === 'confirm'
       ? `执行：${alert.opQty && !/不可卖/.test(String(alert.opQty)) ? alert.opQty : action}`
       : stage === 'invalid'

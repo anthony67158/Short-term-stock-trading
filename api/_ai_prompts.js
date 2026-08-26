@@ -68,6 +68,8 @@ function compactPreviousAdviceForPrompt(previousAdvice) {
     'headline',
     'actionPlan',
     'nextAction',
+    'nextOpenPlan',
+    'futurePlan',
     'timing',
     'opQty',
     'planQty',
@@ -290,6 +292,17 @@ function tacticalQuantRule(tactical = {}) {
     : ''
 }
 
+function tacticalTechnicalRule(tactical = {}) {
+  const technical = tactical.technical
+  if (!technical?.available) {
+    return '【技术面事实】技术指标未取得，techNote必须明确写数据缺失，不得猜测均线、MACD、KDJ、BOLL、RSI或ATR'
+  }
+  return '【技术面事实】必须读取 tactical.technical 中的均线数值与排列、'
+    + 'MACD、KDJ、BOLL、RSI、ATR和量比；techNote必须引用至少两类'
+    + '实际指标及其数值，并说明它们支持立即试仓、等待确认还是回避。'
+    + '不得只写“技术偏多/偏空”，也不得把单一指标当作充分买卖信号'
+}
+
 function tacticalTActionRule(tactical = {}) {
   const value = tactical.tAction
   if (!value) return ''
@@ -363,13 +376,21 @@ function tacticalActionPolicyRule(tactical = {}) {
     OPENING: '开盘后',
     NEXT_TRADING_DAY: '下一交易日盘中',
   }[nextPlan?.session] || '下一交易时段盘中'
-  const nextActionLabel = nextPlan?.action === 'PROBE'
-    ? '小仓试仓'
-    : nextPlan?.action === 'BUY'
-      ? '条件买入'
-      : ''
+  const nextActionLabel = {
+    PROBE: '小仓试仓',
+    PROBE_ADD: '小仓加仓',
+    BUY: '条件买入',
+    ADD: '条件加仓',
+  }[nextPlan?.action] || ''
   const nextPlanRule = nextActionLabel
     ? `虽然当前action必须为观望，但actionPlan必须明确写出“${nextSessionLabel}${nextActionLabel}预案”、回踩或突破条件，并说明盘中复核通过后人工确认${nextPlan?.maxPositionPct ? `，仓位不超过${nextPlan.maxPositionPct}%` : ''}；不得只写等待盘中。`
+    : ''
+  const readyEntryRule = (
+    policy.executionOpen !== false
+    && tactical.timing?.state === 'READY'
+    && ['PROBE', 'FULL'].includes(policy.riskTier)
+  )
+    ? '当前短线时机已经形成，必须优先评估以当前价作为可核验入场价；除非账户容量、盈亏比或明确反方证据不通过，否则不得机械等待回踩或突破。'
     : ''
   const riskRule = policy.executionOpen === false
     ? '当前不可下单，所有价格只能作为下一连续竞价时段的观察条件。'
@@ -388,6 +409,7 @@ function tacticalActionPolicyRule(tactical = {}) {
     )
     + riskRule
     + nextPlanRule
+    + readyEntryRule
     + (
       policy.riskTier === 'PROBE'
       && policy.executionOpen !== false
@@ -407,6 +429,7 @@ function tacticalActionPolicyRule(tactical = {}) {
 function tacticalUsageRules(facts = {}) {
   return [
     tacticalActionPolicyRule(facts.tactical),
+    tacticalTechnicalRule(facts.tactical),
     tacticalQuantRule(facts.tactical),
     tacticalTActionRule(facts.tactical),
     tacticalFundRule(facts.tactical),
@@ -535,9 +558,9 @@ export function advisorOutputSchema(mode) {
     return '{"reasoning":"一句话依据","tp":null,"sl":null,"reason":"计划逻辑","exitTiming":"触价后的确认与分批规则","tpBasis":"止盈依据","slBasis":"止损依据","confidence":"高|中|低"}'
   }
   if (mode === 'hold_advice') {
-    return '{"reasoning":"一句话可核对依据","action":"加仓|减仓|持有|清仓","tone":"red|green|muted","title":"20字内结论","shortHorizon":"盘中|下一交易时段|1-3个交易日|3-5个交易日","edge":"60字内核心短线优势","crowdingRisk":"60字内拥挤或兑现风险","catalystWindow":"40字内催化有效期","reviewTrigger":"60字内下一复核事件","actionPlan":"80字内可执行动作","exitTiming":"触价后的确认方式","addPrice":null,"reducePrice":null,"stopPrice":null,"targetPrice":null,"opQty":"动作+手数或无需操作","opAmount":"金额或0","newCost":"数字或不变","posAfter":"操作后仓位","reason":"120字内因果链","techNote":"技术证据","fundNote":"主力与小单资金关系","quantNote":"量化证据","newsNote":"消息证据","positionNote":"账户约束","riskReward":"X:1","bearCase":"最强反方","invalidation":"具体失效价或信号","confidence":"高|中|低"}'
+    return '{"reasoning":"一句话可核对依据","action":"加仓|减仓|持有|清仓","tone":"red|green|muted","title":"20字内结论","shortHorizon":"盘中|下一交易时段|1-3个交易日|3-5个交易日","edge":"60字内核心短线优势","crowdingRisk":"60字内拥挤或兑现风险","catalystWindow":"40字内催化有效期","reviewTrigger":"60字内下一复核事件","actionPlan":"80字内可执行动作","nextOpenPlan":"高开、平开、低开三种情景的下一交易时段动作","futurePlan":"买入后1-5日止盈、减仓或退出路径","exitTiming":"触价后的确认方式","addPrice":null,"reducePrice":null,"stopPrice":null,"targetPrice":null,"opQty":"动作+手数或无需操作","opAmount":"金额或0","newCost":"数字或不变","posAfter":"操作后仓位","reason":"120字内因果链","techNote":"技术证据","fundNote":"主力与小单资金关系","quantNote":"量化证据","newsNote":"消息证据","positionNote":"账户约束","riskReward":"X:1","bearCase":"最强反方","invalidation":"具体失效价或信号","confidence":"高|中|低"}'
   }
-  return '{"reasoning":"一句话可核对依据","action":"立即买入|回调再买|小仓试错|观望","tier":"now|pullback|probe|wait","tone":"red|gold|muted","title":"20字内结论","shortHorizon":"盘中|下一交易时段|1-3个交易日|3-5个交易日","edge":"60字内核心短线优势","crowdingRisk":"60字内拥挤或兑现风险","catalystWindow":"40字内催化有效期","reviewTrigger":"60字内下一复核事件","actionPlan":"80字内可执行动作","timing":"入场确认条件","exitTiming":"买入后退出确认方式","buyPrice":null,"buyZone":null,"pullbackWatchPrice":数字或null,"breakoutWatchPrice":数字或null,"watchPrice":null,"stopPrice":null,"targetPrice":null,"planQty":"整数手数或0","planAmount":"金额或0","planWeight":"资金占比","reason":"120字内因果链","techNote":"技术证据","fundNote":"主力与小单资金关系","quantNote":"量化证据","newsNote":"消息证据","positionNote":"账户约束","riskReward":"X:1","bearCase":"最强反方","invalidation":"取消关注或失效条件","confidence":"高|中|低"}'
+  return '{"reasoning":"一句话可核对依据","action":"立即买入|回调再买|小仓试错|观望","tier":"now|pullback|probe|wait","tone":"red|gold|muted","title":"20字内结论","shortHorizon":"盘中|下一交易时段|1-3个交易日|3-5个交易日","edge":"60字内核心短线优势","crowdingRisk":"60字内拥挤或兑现风险","catalystWindow":"40字内催化有效期","reviewTrigger":"60字内下一复核事件","actionPlan":"80字内可执行动作","nextOpenPlan":"若买入后下一交易日高开、平开、低开的动作","futurePlan":"买入后最迟第5个交易日前的止盈、减仓或退出路径","timing":"入场确认条件","exitTiming":"买入后退出确认方式","buyPrice":null,"buyZone":null,"pullbackWatchPrice":数字或null,"breakoutWatchPrice":数字或null,"watchPrice":null,"stopPrice":null,"targetPrice":null,"planQty":"整数手数或0","planAmount":"金额或0","planWeight":"资金占比","reason":"120字内因果链","techNote":"技术证据","fundNote":"主力与小单资金关系","quantNote":"量化依据","newsNote":"消息依据","positionNote":"账户约束","riskReward":"X:1","bearCase":"最强反方","invalidation":"取消关注或失效条件","confidence":"高|中|低"}'
 }
 
 export function buildDeepAdvisorPrompt({
@@ -567,7 +590,7 @@ export function buildDeepAdvisorPrompt({
         ? '这是做T决策：严格消费tactical.tAction当前阶段，只给尚未完成的下一腿；没有底仓不得先卖。'
         : mode === 'plan'
           ? '这是交易计划定价：止盈和止损必须来自tactical.prices，且满足sl < holdCost < tp。'
-          : `这是未持仓建仓决策：不得给减仓、清仓或当日做T。${waitEntryRule}`
+          : `这是未持仓建仓决策：不得给减仓、清仓或当日做T。若建议买入，nextOpenPlan必须写清T+1限制下下一交易日高开、平开、低开三种应对，futurePlan必须写清最迟第5个交易日前的止盈、减仓或退出路径。${waitEntryRule}`
   const attribution = facts.knowledgeActionReview
     ? `【知行合一复盘归因】${JSON.stringify(facts.knowledgeActionReview)}。必须区分认知错误、执行错误和偶然波动；严格止损后的亏损不能判成执行错误，违规盈利不能粉饰执行质量。`
     : ''
@@ -599,11 +622,13 @@ performance 低命中不等于一律更保守，必须按原动作方向纠偏�
   if (mode === 'hold_advice') {
     return `${common}
 这是持仓管理，只能在“加仓/减仓/持有/清仓”中选择。【本次决策账户快照】以合同中的account和holding为准；减仓和清仓不得超过sellableTodayQty，加仓不得突破现金、总仓、单票和行业上限，positionNote必须引用关键账户数字。
+nextOpenPlan必须分别写清高开、平开、低开时的动作与关键价；futurePlan必须写清买入后受T+1约束的次日到未来5日止盈、减仓或退出路径，禁止只写“盘中持有再看”。
 输出JSON=${advisorOutputSchema(mode)}。`
   }
   if (mode === 'buy_advice') {
     return `${common}
 这是未持仓决策，action只能是“立即买入/回调再买/小仓试错/观望”，不得出现减仓、清仓或当日做T。市场风险高时，只有个股逆势强、量化高把握和账户风险同时允许才可给“小仓试错”，任一不足必须观望；板块前排只能提高关注优先级，不能绕过个股与账户条件。
+若建议买入，nextOpenPlan必须写清T+1限制下下一交易日高开、平开、低开三种应对；futurePlan必须写清最迟第5个交易日前的止盈、减仓或退出路径，禁止只写“持有观察”。
 ${waitEntryRule}
 输出JSON=${advisorOutputSchema(mode)}。`
   }
