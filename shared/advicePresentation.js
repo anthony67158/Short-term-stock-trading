@@ -3,6 +3,7 @@ import {
   humanizeAdviceTextFields,
   marketRegimeLabel,
 } from './userFacingLanguage.js'
+import { adviceObservationLevels } from './advicePriceContract.js'
 
 const clean = (value, limit = 800) => {
   if (value == null) return ''
@@ -47,7 +48,44 @@ function uniqueItems(items, limit = Infinity) {
   return result
 }
 
-function priceLevels(advice) {
+function priceLevels(advice, { observationOnly = false } = {}) {
+  if (observationOnly) {
+    const contracted = adviceObservationLevels(advice)
+      .map((level) => ({
+        key: level.key,
+        label: level.label,
+        value: displayNumber(level.price),
+        tone: level.direction === 'GTE' ? 'red' : 'muted',
+        distanceText: Number.isFinite(
+          Number(level.currentDistancePct),
+        )
+          ? `距现价${level.direction === 'GTE' ? '+' : '-'}${Number(level.currentDistancePct).toFixed(1)}%`
+          : '',
+      }))
+    if (contracted.length) return contracted
+    return uniqueItems([
+      advice.pullbackWatchPrice != null && {
+        key: 'watch_pullback',
+        label: '回踩观察',
+        value: displayNumber(advice.pullbackWatchPrice),
+        tone: 'muted',
+      },
+      advice.breakoutWatchPrice != null && {
+        key: 'watch_breakout',
+        label: '突破观察',
+        value: displayNumber(advice.breakoutWatchPrice),
+        tone: 'red',
+      },
+      advice.watchPrice != null
+        && clean(advice.watchPrice, 200).length <= 24
+        && {
+          key: 'watch',
+          label: '观察价',
+          value: displayNumber(advice.watchPrice),
+          tone: 'muted',
+        },
+    ].filter(Boolean), 2)
+  }
   const entry = first(advice.buyZone, advice.buyPrice, advice.addPrice)
   const entryLabel = advice.buyZone
     ? '买入区间'
@@ -261,8 +299,13 @@ function buildLegacyAdvicePresentation(advice = {}) {
   const plan = advice.decisionPlan?.schemaVersion === 'decision-plan.v2'
     ? advice.decisionPlan
     : null
-  const observationOnly = plan?.mode === 'buy_advice'
-    && plan.action === 'WATCH'
+  const observationOnly = plan?.action === 'WATCH'
+    && (
+      plan.mode === 'buy_advice'
+      || /观望|等待|回避|不建议|暂不/.test(
+        String(advice.action || advice.stance || ''),
+      )
+    )
   const planAdvice = plan ? {
     ...advice,
     action: plan.actionability === 'MANUAL_PROBE'
@@ -314,7 +357,7 @@ function buildLegacyAdvicePresentation(advice = {}) {
   } : advice
   const contract = advice.knowledgeActionPlan || {}
   const review = reviewSummary(advice)
-  const levels = priceLevels(planAdvice)
+  const levels = priceLevels(planAdvice, { observationOnly })
   if (observationOnly && levels.length === 0) {
     levels.push({
       key: 'watch',

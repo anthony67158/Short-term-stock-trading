@@ -1,4 +1,5 @@
 import {
+  adviceObservationLevels,
   advicePriceLevel,
   sanitizedAdvicePriceContract,
 } from './advicePriceContract.js'
@@ -31,13 +32,17 @@ function executionLevels(advice = {}) {
     ['reduce', '减仓位'],
     ['entry', '买入位'],
     ['add', '加仓位'],
-    ['watch', '观察价'],
     ['leg1', '第一腿价'],
     ['leg2', '第二腿价'],
   ].map(([key, label]) => {
     const level = advicePriceLevel(advice, key)
     return level ? { ...level, label } : null
-  }).filter(Boolean)
+  }).filter(Boolean).concat(
+    adviceObservationLevels(advice).map((level) => ({
+      ...level,
+      label: level.label,
+    })),
+  )
   if (priceContract) return contracted
 
   const trigger = advice.timing
@@ -71,6 +76,8 @@ function executionLevels(advice = {}) {
       direction: 'LTE',
     },
     { key: 'add', label: '加仓位', price: finite(advice.addPrice), direction: 'LTE' },
+    { key: 'watch_pullback', label: '回踩观察', price: finite(advice.pullbackWatchPrice), direction: 'LTE' },
+    { key: 'watch_breakout', label: '突破观察', price: finite(advice.breakoutWatchPrice), direction: 'GTE' },
     { key: 'watch', label: '观察价', price: finite(advice.watchPrice), direction: watchDirection },
   ].filter((item) => item.price != null)
 }

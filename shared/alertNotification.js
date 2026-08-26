@@ -53,7 +53,9 @@ function factLine(alert, quote) {
   const parts = []
   if (price) parts.push(`现${price}`)
   if (alert.type === 'price' && finite(alert.value) != null) {
-    const label = alert.reviewOnly ? '观察价' : '目标'
+    const label = alert.reviewOnly
+      ? compactText(alert.note || '观察价', 12).replace(/复核$/, '')
+      : '目标'
     parts.push(`${label}${OP_LABEL[alert.op] || ''}${priceText(alert.value)}`)
   }
   if (alert.opQty && !/无需|不可卖|0手/.test(String(alert.opQty))) {

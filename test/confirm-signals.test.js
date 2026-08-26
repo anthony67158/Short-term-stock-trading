@@ -184,6 +184,54 @@ test('旧军师自动预警缺少价格契约时不得进入Judge', () => {
   )
 })
 
+test('双路径观察提醒按各自价位与方向匹配价格契约', () => {
+  const advice = {
+    priceContract: {
+      schemaVersion: 'advice-price-contract.v1',
+      validationStatus: 'VERIFIED',
+      levels: [{
+        key: 'watch_pullback',
+        field: 'pullbackWatchPrice',
+        purpose: 'REVIEW_ONLY',
+        price: 96,
+        direction: 'LTE',
+        status: 'PENDING',
+        strict: true,
+      }, {
+        key: 'watch_breakout',
+        field: 'breakoutWatchPrice',
+        purpose: 'REVIEW_ONLY',
+        price: 105,
+        direction: 'GTE',
+        status: 'PENDING',
+        strict: true,
+      }],
+      allPricesStrict: true,
+      issues: [],
+      review: { operator: 'ANY', conditions: [], allMet: false },
+    },
+  }
+
+  assert.equal(judgePriceContractGate({
+    reviewOnly: true,
+    reviewKey: 'watch_pullback',
+    op: 'lte',
+    value: 96,
+  }, advice).allowed, true)
+  assert.equal(judgePriceContractGate({
+    reviewOnly: true,
+    reviewKey: 'watch_breakout',
+    op: 'gte',
+    value: 105,
+  }, advice).allowed, true)
+  assert.equal(judgePriceContractGate({
+    reviewOnly: true,
+    reviewKey: 'watch_breakout',
+    op: 'lte',
+    value: 105,
+  }, advice).allowed, false)
+})
+
 test('持仓止盈预警严格匹配目标价而不是误用减仓价', () => {
   const advice = {
     priceContract: {

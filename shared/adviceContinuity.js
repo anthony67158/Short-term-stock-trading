@@ -12,6 +12,8 @@ const CORE_FIELDS = [
   'buyPrice',
   'buyZone',
   'watchPrice',
+  'pullbackWatchPrice',
+  'breakoutWatchPrice',
   'reducePrice',
   'stopPrice',
   'targetPrice',
@@ -46,6 +48,8 @@ const EXECUTION_PRICE_FIELDS = [
   'addPrice',
   'buyPrice',
   'watchPrice',
+  'pullbackWatchPrice',
+  'breakoutWatchPrice',
   'reducePrice',
   'stopPrice',
   'targetPrice',
@@ -171,11 +175,26 @@ function scheduledActionEvidence(previous, next, evidence = {}) {
   const entry = number(
     previous.addPrice
     ?? previous.buyPrice
+  )
+  const pullback = number(
+    previous.pullbackWatchPrice
     ?? previous.watchPrice,
   )
-  const entryTriggered = current != null
-    && entry != null
-    && current <= entry * 1.002
+  const breakout = number(previous.breakoutWatchPrice)
+  const entryTriggered = current != null && (
+    (
+      entry != null
+      && current <= entry * 1.002
+    )
+    || (
+      pullback != null
+      && current <= pullback * 1.002
+    )
+    || (
+      breakout != null
+      && current >= breakout * 0.998
+    )
+  )
   const sectorConfirmed = evidence.sectorProbeEligible === true
   const fundsConfirmed = (
     Number(evidence.mainNetYi) > 0

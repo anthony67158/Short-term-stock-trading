@@ -137,6 +137,12 @@ function compactMorningPool(items = []) {
       watchPrice: Number.isFinite(Number(item?.watchPrice))
         ? Number(item.watchPrice)
         : null,
+      pullbackWatchPrice: Number.isFinite(
+        Number(item?.pullbackWatchPrice),
+      ) ? Number(item.pullbackWatchPrice) : null,
+      breakoutWatchPrice: Number.isFinite(
+        Number(item?.breakoutWatchPrice),
+      ) ? Number(item.breakoutWatchPrice) : null,
       stopPrice: Number.isFinite(Number(item?.stopPrice))
         ? Number(item.stopPrice)
         : null,

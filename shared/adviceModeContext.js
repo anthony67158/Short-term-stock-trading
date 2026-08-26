@@ -25,6 +25,8 @@ export function inferAdviceEntryMode(entry = {}) {
     || advice.buyPrice != null
     || advice.buyZone != null
     || advice.watchPrice != null
+    || advice.pullbackWatchPrice != null
+    || advice.breakoutWatchPrice != null
     || advice.planQty != null
   ) return 'buy_advice'
   if (/^(加仓|减仓|持有|清仓)$/.test(action)) return 'hold_advice'

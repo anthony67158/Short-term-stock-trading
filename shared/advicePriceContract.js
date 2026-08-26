@@ -9,9 +9,17 @@ const PRICE_FIELDS = Object.freeze([
   ['reducePrice', 'reduce', 'EXIT'],
   ['stopPrice', 'stop', 'RISK'],
   ['targetPrice', 'target', 'OBJECTIVE'],
-  ['watchPrice', 'watch', 'REVIEW_ONLY'],
+  ['pullbackWatchPrice', 'watch_pullback', 'REVIEW_ONLY', '回踩观察'],
+  ['breakoutWatchPrice', 'watch_breakout', 'REVIEW_ONLY', '突破观察'],
+  ['watchPrice', 'watch', 'REVIEW_ONLY', '观察价'],
   ['leg1Price', 'leg1', 'EXECUTION'],
   ['leg2Price', 'leg2', 'EXECUTION'],
+])
+
+const OBSERVATION_KEYS = new Set([
+  'watch',
+  'watch_pullback',
+  'watch_breakout',
 ])
 
 const ROLE_DISTANCE_LIMIT_PCT = Object.freeze({
@@ -21,6 +29,8 @@ const ROLE_DISTANCE_LIMIT_PCT = Object.freeze({
   stop: 12,
   target: 25,
   watch: 5,
+  watch_pullback: 5,
+  watch_breakout: 5,
   leg1: 5,
   leg2: 8,
 })
@@ -66,9 +76,17 @@ function collectAnchors(payload = {}) {
   const highConfidence = quant.highConfSignal || {}
   const references = quant.v2?.priceReferences || {}
   const anchors = []
-  const all = ['entry', 'add', 'reduce', 'stop', 'target', 'watch', 'leg1', 'leg2']
-  const lower = ['entry', 'add', 'stop', 'watch', 'leg1', 'leg2']
-  const upper = ['reduce', 'target', 'watch', 'leg1', 'leg2']
+  const all = [
+    'entry', 'add', 'reduce', 'stop', 'target',
+    'watch', 'watch_pullback', 'watch_breakout',
+    'leg1', 'leg2',
+  ]
+  const lower = [
+    'entry', 'add', 'stop', 'watch', 'watch_pullback', 'leg1', 'leg2',
+  ]
+  const upper = [
+    'reduce', 'target', 'watch', 'watch_breakout', 'leg1', 'leg2',
+  ]
 
   pushAnchor(anchors, 'quote.current', quote.price ?? payload.currentPrice, all)
   pushAnchor(anchors, 'quote.open', quote.open, all)
@@ -118,6 +136,8 @@ function directionFor(key, advice = {}, action = '') {
     || advice.nextAction
     || advice.futurePlan,
   )
+  if (key === 'watch_pullback') return 'LTE'
+  if (key === 'watch_breakout') return 'GTE'
   if (key === 'watch') {
     return executionTriggerDirection({
       action: 'WATCH',
@@ -138,6 +158,52 @@ function directionFor(key, advice = {}, action = '') {
   if (key === 'leg1') return advice.dir === 'reverse' ? 'GTE' : 'LTE'
   if (key === 'leg2') return advice.dir === 'reverse' ? 'LTE' : 'GTE'
   return 'UNKNOWN'
+}
+
+function observationHorizonPct(atrPct) {
+  return +Math.max(
+    5,
+    Math.min(12, (atrPct ?? 3.2) * 2.5),
+  ).toFixed(2)
+}
+
+function observationDistance(price, currentPrice) {
+  if (!(price > 0) || !(currentPrice > 0)) return null
+  return Math.abs(price / currentPrice - 1) * 100
+}
+
+function observationIsAhead(direction, price, currentPrice) {
+  if (!(currentPrice > 0)) return false
+  if (direction === 'LTE') return price < currentPrice
+  if (direction === 'GTE') return price > currentPrice
+  return false
+}
+
+function nearestObservationAnchor(
+  anchors,
+  key,
+  direction,
+  currentPrice,
+  horizonPct,
+) {
+  return anchors
+    .filter((item) =>
+      item.roles.includes(key)
+      && !['quote.current', 'quote.open'].includes(item.source)
+      && observationIsAhead(direction, item.price, currentPrice)
+    )
+    .map((item) => ({
+      ...item,
+      currentDistancePct: observationDistance(item.price, currentPrice),
+    }))
+    .filter((item) =>
+      item.currentDistancePct != null
+      && item.currentDistancePct >= 0.2
+      && item.currentDistancePct <= horizonPct + 1e-6
+    )
+    .sort((left, right) =>
+      left.currentDistancePct - right.currentDistancePct
+    )[0] || null
 }
 
 function nearestAnchor(price, key, anchors) {
@@ -199,15 +265,17 @@ export function buildAdvicePriceContract({
   const atrPct = currentPrice != null && atr != null
     ? atr / currentPrice * 100
     : null
+  const watchHorizonPct = observationHorizonPct(atrPct)
   const anchors = collectAnchors(payload)
   const levels = []
   const issues = []
 
-  for (const [field, key, purpose] of PRICE_FIELDS) {
+  for (const [field, key, purpose, label] of PRICE_FIELDS) {
     const price = roundedPrice(advice[field])
     if (price == null) continue
     const direction = directionFor(key, advice, action)
-    const withinLegalBand = (
+    const observationLevel = OBSERVATION_KEYS.has(key)
+    const withinLegalBand = observationLevel || (
       (legalLow == null || price >= legalLow)
       && (legalHigh == null || price <= legalHigh)
     )
@@ -221,20 +289,43 @@ export function buildAdvicePriceContract({
     )
     const evidenceBacked = !!nearest
       && nearest.distancePct <= tolerancePct
+    const currentDistancePct = observationLevel
+      ? observationDistance(price, currentPrice)
+      : null
+    const futureFacing = !observationLevel
+      || observationIsAhead(direction, price, currentPrice)
+    const shortTermReachable = !observationLevel
+      || (
+        currentDistancePct != null
+        && currentDistancePct <= watchHorizonPct + 1e-6
+      )
     const strict = withinLegalBand
       && direction !== 'UNKNOWN'
       && evidenceBacked
+      && futureFacing
+      && shortTermReachable
     if (!withinLegalBand) issues.push(`${field}超出当日合法价带`)
-    else if (direction === 'UNKNOWN') issues.push(`${field}缺少明确触发方向`)
-    else if (!evidenceBacked) issues.push(`${field}缺少邻近行情、技术或量化锚点`)
+    if (direction === 'UNKNOWN') issues.push(`${field}缺少明确触发方向`)
+    if (!evidenceBacked) issues.push(`${field}缺少邻近行情、技术或量化锚点`)
+    if (observationLevel && !futureFacing) {
+      issues.push(`${field}方向已经满足，不再作为未来观察条件`)
+    }
+    if (observationLevel && !shortTermReachable) {
+      issues.push(`${field}超出短线观察范围`)
+    }
     levels.push({
       key,
       field,
       purpose,
+      ...(label ? { label } : {}),
       price,
       direction,
       status: levelStatus(direction, price, currentPrice),
       strict,
+      currentDistancePct: currentDistancePct == null
+        ? null
+        : +currentDistancePct.toFixed(2),
+      horizonPct: observationLevel ? watchHorizonPct : null,
       basis: nearest?.source || null,
       basisPrice: nearest?.price ?? null,
       basisDistancePct: nearest
@@ -242,6 +333,65 @@ export function buildAdvicePriceContract({
         : null,
       tolerancePct: +tolerancePct.toFixed(2),
     })
+  }
+
+  const waitAdvice = (
+    mode === 'buy_advice'
+    && (
+      String(action || '').toUpperCase() === 'WATCH'
+      || /观望|等待|回避|不建议|暂不/.test(
+        String(advice.action || advice.stance || ''),
+      )
+    )
+  )
+  if (waitAdvice && currentPrice != null) {
+    for (const spec of [{
+      key: 'watch_pullback',
+      field: 'pullbackWatchPrice',
+      direction: 'LTE',
+      label: '回踩观察',
+    }, {
+      key: 'watch_breakout',
+      field: 'breakoutWatchPrice',
+      direction: 'GTE',
+      label: '突破观察',
+    }]) {
+      if (levels.some((level) =>
+        OBSERVATION_KEYS.has(level.key)
+        && level.direction === spec.direction
+        && level.strict
+      )) continue
+      const anchor = nearestObservationAnchor(
+        anchors,
+        spec.key,
+        spec.direction,
+        currentPrice,
+        watchHorizonPct,
+      )
+      if (!anchor) continue
+      levels.push({
+        ...spec,
+        purpose: 'REVIEW_ONLY',
+        price: anchor.price,
+        status: 'PENDING',
+        strict: true,
+        currentDistancePct: +anchor.currentDistancePct.toFixed(2),
+        horizonPct: watchHorizonPct,
+        basis: anchor.source,
+        basisPrice: anchor.price,
+        basisDistancePct: 0,
+        tolerancePct: +Math.max(
+          1,
+          Math.min(
+            ROLE_DISTANCE_LIMIT_PCT[spec.key],
+            atrPct != null
+              ? atrPct * 1.5
+              : ROLE_DISTANCE_LIMIT_PCT[spec.key],
+          ),
+        ).toFixed(2),
+        derived: true,
+      })
+    }
   }
 
   const rawBuyZone = advice.buyZone
@@ -296,16 +446,23 @@ export function buildAdvicePriceContract({
     }
   }
 
-  const watch = levels.find((level) => level.key === 'watch') || null
-  const reviewConditions = [
-    ...(watch ? [{
-      key: 'WATCH_PRICE',
-      direction: watch.direction,
-      price: watch.price,
-      status: watch.status,
-      strict: watch.strict,
-    }] : []),
-  ]
+  const observationLevels = levels.filter((level) =>
+    OBSERVATION_KEYS.has(level.key)
+    && level.strict === true
+  )
+  const reviewConditions = observationLevels.map((level) => ({
+    key: level.key === 'watch_pullback'
+      ? 'WATCH_PULLBACK'
+      : level.key === 'watch_breakout'
+        ? 'WATCH_BREAKOUT'
+        : 'WATCH_PRICE',
+    levelKey: level.key,
+    direction: level.direction,
+    price: level.price,
+    status: level.status,
+    strict: true,
+  }))
+  const reviewOperator = reviewConditions.length > 1 ? 'ANY' : 'ALL'
 
   return {
     schemaVersion: ADVICE_PRICE_CONTRACT_SCHEMA_VERSION,
@@ -340,10 +497,12 @@ export function buildAdvicePriceContract({
     },
     issues: [...new Set(issues)],
     review: {
-      operator: 'ALL',
+      operator: reviewOperator,
       conditions: reviewConditions,
       allMet: reviewConditions.length > 0
-        && reviewConditions.every((condition) =>
+        && reviewConditions[
+          reviewOperator === 'ANY' ? 'some' : 'every'
+        ]((condition) =>
           condition.status === 'MET'
           && condition.strict !== false
         ),
@@ -365,6 +524,69 @@ export function advicePriceLevel(advice = {}, key = '') {
     && level.strict === true
     && positive(level.price) != null
   ) || null
+}
+
+export function adviceObservationLevels(advice = {}) {
+  const value = advice && typeof advice === 'object' ? advice : {}
+  const contract = value.priceContract?.schemaVersion
+    === ADVICE_PRICE_CONTRACT_SCHEMA_VERSION
+    ? value.priceContract
+    : value.decisionPlan?.priceContract?.schemaVersion
+      === ADVICE_PRICE_CONTRACT_SCHEMA_VERSION
+      ? value.decisionPlan.priceContract
+      : null
+  const currentPrice = positive(contract?.currentPrice)
+  const levels = (Array.isArray(contract?.levels)
+    ? contract.levels
+    : [])
+    .filter((level) =>
+      OBSERVATION_KEYS.has(level?.key)
+      && level?.strict === true
+      && level?.status !== 'MET'
+      && positive(level?.price) != null
+      && (
+        currentPrice == null
+        || (
+          observationIsAhead(
+            level.direction,
+            positive(level.price),
+            currentPrice,
+          )
+          && (
+            observationDistance(
+              positive(level.price),
+              currentPrice,
+            ) <= (
+              positive(level.horizonPct)
+              ?? observationHorizonPct(null)
+            ) + 1e-6
+          )
+        )
+      )
+    )
+    .map((level) => ({
+      ...level,
+      label: text(
+        level.label
+        || (
+          level.key === 'watch_pullback'
+            ? '回踩观察'
+            : level.key === 'watch_breakout'
+              ? '突破观察'
+              : level.direction === 'LTE'
+                ? '回踩观察'
+                : '突破观察'
+        ),
+        30,
+      ),
+    }))
+  const seen = new Set()
+  return levels.filter((level) => {
+    const identity = `${level.direction}:${roundedPrice(level.price)}`
+    if (seen.has(identity)) return false
+    seen.add(identity)
+    return true
+  })
 }
 
 export function advicePriceLevelForIntent(advice = {}, intent = '') {
@@ -407,14 +629,18 @@ export function sanitizedAdvicePriceContract(advice = {}) {
         key: text(level?.key, 20),
         field: text(level?.field, 30),
         purpose: text(level?.purpose, 30),
+        label: text(level?.label, 30) || null,
         price: roundedPrice(level?.price),
         direction: text(level?.direction, 20),
         status: text(level?.status, 20),
         strict: level?.strict === true,
+        currentDistancePct: finite(level?.currentDistancePct),
+        horizonPct: finite(level?.horizonPct),
         basis: text(level?.basis, 80) || null,
         basisPrice: roundedPrice(level?.basisPrice),
         basisDistancePct: finite(level?.basisDistancePct),
         tolerancePct: finite(level?.tolerancePct),
+        derived: level?.derived === true,
       }))
       .filter((level) => level.key && level.price != null),
     zones: {
@@ -443,12 +669,13 @@ export function sanitizedAdvicePriceContract(advice = {}) {
       .filter(Boolean)
       .slice(0, 12),
     review: {
-      operator: source.review?.operator === 'ALL' ? 'ALL' : 'ALL',
+      operator: source.review?.operator === 'ANY' ? 'ANY' : 'ALL',
       conditions: (Array.isArray(source.review?.conditions)
         ? source.review.conditions
         : [])
         .map((condition) => ({
           key: text(condition?.key, 30),
+          levelKey: text(condition?.levelKey, 30) || null,
           direction: text(condition?.direction, 20) || null,
           price: roundedPrice(condition?.price),
           expected: condition?.expected === true,

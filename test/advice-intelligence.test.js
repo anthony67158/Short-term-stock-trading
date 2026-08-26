@@ -457,7 +457,7 @@ test('观望价被精确穿越时立即进入实质变化复核', () => {
 
   assert.equal(result.shouldRunLLM, true)
   assert.equal(result.disposition, 'material-change')
-  assert.match(result.reason, /观察价10\.04/)
+  assert.match(result.reason, /突破观察10\.04/)
 })
 
 test('关键证据缺失时保留上一版而不是让LLM猜测', () => {

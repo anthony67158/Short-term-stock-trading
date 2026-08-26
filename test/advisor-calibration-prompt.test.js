@@ -156,12 +156,12 @@ test('观望买入建议区分观察锚与买入价并比较两条入场路径',
   })
 
   for (const prompt of [normalPrompt, fastPrompt]) {
-    assert.match(prompt, /观察锚.*不是买入价/)
-    assert.match(prompt, /回踩支撑.*企稳/)
-    assert.match(prompt, /放量突破.*确认/)
-    assert.match(prompt, /当前低价.*不能买/)
+    assert.match(prompt, /观察价不是买入价/)
+    assert.match(prompt, /pullbackWatchPrice/)
+    assert.match(prompt, /breakoutWatchPrice/)
+    assert.match(prompt, /未来1-5个交易日/)
     assert.match(prompt, /stopPrice.*targetPrice.*null/)
-    assert.match(prompt, /尚未到达.*可核验.*watchPrice/)
+    assert.match(prompt, /过远、已经越过或无依据时填null/)
     assert.match(prompt, /invalidation只写何时取消关注/)
   }
 })

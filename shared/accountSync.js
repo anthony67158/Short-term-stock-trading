@@ -3,6 +3,8 @@ const VOLATILE_ITEM_FIELDS = new Set([
   'qBias',
   'qAt',
   'alertSyncedPrice',
+  'reviewSyncedPrice',
+  'reviewSyncedPrices',
 ])
 
 function canonical(value) {

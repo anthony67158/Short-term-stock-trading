@@ -177,9 +177,15 @@ test('观望价必须有明确方向并贴近真实证据锚点', () => {
     },
   })
 
-  assert.equal(anchored.result.watchPrice, 105)
-  assert.equal(anchored.result.priceContract.levels[0].strict, true)
+  assert.equal(anchored.result.watchPrice, null)
+  assert.equal(anchored.result.breakoutWatchPrice, 105)
+  assert.equal(
+    anchored.result.priceContract.levels
+      .find((level) => level.key === 'watch_breakout')?.strict,
+    true,
+  )
   assert.equal(unsupported.result.watchPrice, null)
+  assert.equal(unsupported.result.breakoutWatchPrice, 105)
   assert.match(unsupported.issues.join('；'), /缺少邻近行情、技术或量化锚点/)
 })
 
@@ -208,8 +214,8 @@ test('生成时已经满足的观望价不能继续伪装成未来条件', () =>
 
   assert.equal(valid, false)
   assert.equal(result.watchPrice, null)
-  assert.match(result.actionPlan, /价格条件已满足/)
-  assert.match(issues.join('；'), /生成时已经满足/)
+  assert.match(result.actionPlan, /暂无近期有效观察价/)
+  assert.match(issues.join('；'), /方向已经满足/)
 })
 
 test('未持仓观望只保留观察价并移除无执行意义的止损目标', () => {
@@ -236,8 +242,42 @@ test('未持仓观望只保留观察价并移除无执行意义的止损目标',
     },
   })
 
-  assert.equal(result.watchPrice, 17.12)
+  assert.equal(result.watchPrice, null)
+  assert.equal(result.breakoutWatchPrice, 17.12)
   assert.equal(result.buyPrice, null)
   assert.equal(result.stopPrice, null)
   assert.equal(result.targetPrice, null)
+})
+
+test('远离现价的旧观察价替换为附近回踩与突破路径', () => {
+  const { result } = reconcileAdviceNumbers({
+    mode: 'buy_advice',
+    payload: {
+      todayQuote: {
+        price: 128.61,
+        low: 126.8,
+        high: 130.2,
+        limitDownPrice: 115.75,
+        limitUpPrice: 141.47,
+      },
+      tech: {
+        atr: 3,
+        support: 89.09,
+        resistance: 89.09,
+      },
+    },
+    result: {
+      action: '观望',
+      timing: '站上89.09元后重新判断',
+      watchPrice: 89.09,
+      planQty: 0,
+    },
+  })
+
+  assert.equal(result.watchPrice, null)
+  assert.equal(result.pullbackWatchPrice, 126.8)
+  assert.equal(result.breakoutWatchPrice, 130.2)
+  assert.doesNotMatch(result.actionPlan, /89\.09/)
+  assert.match(result.actionPlan, /回踩126\.8元企稳/)
+  assert.match(result.actionPlan, /放量突破130\.2元/)
 })

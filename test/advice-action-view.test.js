@@ -117,6 +117,42 @@ test('观望建议缺少结构化关注价时仍显示暂不下单状态', () =>
   })
 })
 
+test('候选卡动作视图保留双路径观察位但不把它们当买点', () => {
+  const view = buildAdviceActionView({
+    action: '观望',
+    actionPlan: '等待回踩96元企稳，或放量突破105元后重新评估',
+    priceContract: {
+      schemaVersion: 'advice-price-contract.v1',
+      levels: [{
+        key: 'watch_pullback',
+        label: '回踩观察',
+        price: 96,
+        direction: 'LTE',
+        status: 'PENDING',
+        strict: true,
+      }, {
+        key: 'watch_breakout',
+        label: '突破观察',
+        price: 105,
+        direction: 'GTE',
+        status: 'PENDING',
+        strict: true,
+      }],
+    },
+  }, { mode: 'buy_advice' })
+
+  assert.equal(view.kind, 'wait')
+  assert.equal(view.actionable, false)
+  assert.deepEqual(view.levels.map((item) => [
+    item.key,
+    item.label,
+    item.price,
+  ]), [
+    ['watch_pullback', '回踩观察', 96],
+    ['watch_breakout', '突破观察', 105],
+  ])
+})
+
 test('加仓建议展示加仓点而不是通用买入点', () => {
   const view = buildAdviceActionView({
     action: '加仓',
@@ -351,6 +387,11 @@ test('候选转为观望时只撤下系统买点预警', () => {
       code: '600001',
       name: '测试股票',
       alertSyncedPrice: 10.2,
+      reviewSyncedPrice: 9.8,
+      reviewSyncedPrices: {
+        watch_pullback: 9.8,
+        watch_breakout: 10.6,
+      },
     }],
     holding: [],
     closed: [],
@@ -365,4 +406,6 @@ test('候选转为观望时只撤下系统买点预警', () => {
   const state = planStore.get()
   assert.deepEqual(state.alerts.map((item) => item.id), ['manual'])
   assert.equal(state.plan[0].alertSyncedPrice, null)
+  assert.equal(state.plan[0].reviewSyncedPrice, null)
+  assert.equal(state.plan[0].reviewSyncedPrices, null)
 })

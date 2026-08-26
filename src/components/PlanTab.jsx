@@ -1005,28 +1005,48 @@ function PlanList({ book, quote, stockTags, batchSel }) {
             : null
           const canExecuteBuy = currentView?.kind === 'buy'
             && currentView.actionable !== false
-          const bpa = (book.alerts || []).find((a) => a.candCode === p.code)
-          if (!bpa) return null
-          if (!canExecuteBuy && !bpa.reviewOnly) return null
+          const stockAlerts = (book.alerts || []).filter(
+            (alert) => alert.candCode === p.code,
+          )
+          const reviewAlerts = stockAlerts.filter(
+            (alert) => alert.reviewOnly,
+          )
+          const bpa = stockAlerts.find((alert) => !alert.reviewOnly)
+          if (reviewAlerts.length) {
+            const reached = (alert) => q && q.price != null && (
+              alert.op === 'gte'
+                ? q.price >= alert.value
+                : q.price <= alert.value
+            )
+            const reviewing = reviewAlerts.some((alert) => !alert.enabled)
+            const anyReached = reviewAlerts.some((alert) =>
+              alert.enabled && reached(alert)
+            )
+            const tone = reviewing ? ' off' : (anyReached ? ' hot' : '')
+            return (
+              <div
+                className={'pc-buyalert review-paths' + tone}
+                title={reviewing ? '观察条件已触发，正在重新评估' : '任一观察条件到达后自动重新评估'}
+              >
+                <Icon name="bell" size={11} />
+                {reviewAlerts.map((alert, index) => (
+                  <span className="pc-watch-path" key={alert.id}>
+                    {index > 0 && <i aria-hidden="true">·</i>}
+                    {alert.note || '观察价'} {alert.op === 'gte' ? '≥' : '≤'} <b>{fmtRaw(alert.value)}</b>
+                    {alert.enabled && reached(alert) && <em>已到</em>}
+                  </span>
+                ))}
+                {reviewing && <span className="pc-buyalert-off">复核中</span>}
+              </div>
+            )
+          }
+          if (!bpa || !canExecuteBuy) return null
           const reached = q && q.price != null && (
             bpa.op === 'gte'
               ? q.price >= bpa.value
               : q.price <= bpa.value
           )
           const tone = !bpa.enabled ? ' off' : (reached ? ' hot' : '')
-          if (bpa.reviewOnly) {
-            return (
-              <div
-                className={'pc-buyalert' + tone}
-                title={bpa.enabled ? '价格到达观察位后自动重新评估' : '观察价已触发，正在重新评估'}
-              >
-                <Icon name="bell" size={11} />
-                观察价提醒 {bpa.op === 'gte' ? '≥' : '≤'} <b>{fmtRaw(bpa.value)}</b>
-                {!bpa.enabled && <span className="pc-buyalert-off">复核中</span>}
-                {reached && bpa.enabled && <span className="pc-buyalert-hit">已到观察价</span>}
-              </div>
-            )
-          }
           return (
             <div className={'pc-buyalert' + tone} title={bpa.enabled ? '价格跌到该价位会提醒你买入' : '预警已停用/已触发，可在预警中心重启'}>
               <Icon name="bell" size={11} />

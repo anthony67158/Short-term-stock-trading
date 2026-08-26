@@ -198,6 +198,8 @@ function nearExecutionPrice(snapshot, advice) {
   const fallbackPrices = [
     advice?.addPrice,
     advice?.buyPrice,
+    advice?.pullbackWatchPrice,
+    advice?.breakoutWatchPrice,
     advice?.watchPrice,
     advice?.reducePrice,
     advice?.stopPrice,

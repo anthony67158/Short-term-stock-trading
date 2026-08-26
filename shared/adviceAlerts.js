@@ -1,6 +1,7 @@
 import { applyT1ToAlert } from './t1AdvicePolicy.js'
 import { adviceSupportsIntent, buildJudgeAdviceContext } from './judgeAdviceContext.js'
 import {
+  adviceObservationLevels,
   advicePriceLevel,
   sanitizedAdvicePriceContract,
 } from './advicePriceContract.js'
@@ -81,14 +82,29 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
       String(advice.action || advice.stance || ''),
     )
   )
-  const watchLevel = advicePriceLevel(advice, 'watch')
+  const watchLevels = adviceObservationLevels(advice)
   if (candidate && waitAdvice && candidate.alertSyncedPrice != null) {
     candidate.alertSyncedPrice = null
     changed = true
   }
-  if (candidate && !waitAdvice && candidate.reviewSyncedPrice != null) {
-    candidate.reviewSyncedPrice = null
+  if (
+    candidate
+    && waitAdvice
+    && !watchLevels.length
+    && candidate.reviewSyncedPrices != null
+  ) {
+    candidate.reviewSyncedPrices = null
     changed = true
+  }
+  if (candidate && !waitAdvice) {
+    if (candidate.reviewSyncedPrice != null) {
+      candidate.reviewSyncedPrice = null
+      changed = true
+    }
+    if (candidate.reviewSyncedPrices != null) {
+      candidate.reviewSyncedPrices = null
+      changed = true
+    }
   }
 
   if (
@@ -96,45 +112,61 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
     && !liveHolder
     && !candidate.alertMuted
     && waitAdvice
-    && watchLevel
+    && watchLevels.length
   ) {
-    const op = watchLevel.direction === 'LTE' ? 'lte' : 'gte'
-    const reviewPrice = roundPrice(watchLevel.price)
-    const previous = alerts.find((alert) =>
-      alert?.candCode === code
-      && alert.reviewOnly === true
-    )
-    if (
-      previous
-      && Number(previous.value) === reviewPrice
-      && previous.op === op
-    ) {
-      projected.push({
-        ...previous,
-        value: reviewPrice,
-        op,
-        judgeContext,
-      })
-    } else {
-      projected.push({
-        ...baseAlert({
-          idFactory,
-          now,
-          code,
-          name,
-          op,
+    const syncedPrices = {}
+    for (const watchLevel of watchLevels) {
+      const op = watchLevel.direction === 'LTE' ? 'lte' : 'gte'
+      const reviewPrice = roundPrice(watchLevel.price)
+      if (reviewPrice == null) continue
+      const reviewKey = watchLevel.key
+      const previous = alerts.find((alert) =>
+        alert?.candCode === code
+        && alert.reviewOnly === true
+        && (
+          alert.reviewKey === reviewKey
+          || (
+            !alert.reviewKey
+            && Number(alert.value) === reviewPrice
+            && alert.op === op
+          )
+        )
+      )
+      if (previous) {
+        projected.push({
+          ...previous,
           value: reviewPrice,
-          note: '观察价复核',
-        }),
-        candCode: code,
-        reviewOnly: true,
-        judgeContext,
-        phase: 'armed',
-      })
-      changed = true
+          op,
+          note: watchLevel.label,
+          reviewKey,
+          judgeContext,
+        })
+      } else {
+        projected.push({
+          ...baseAlert({
+            idFactory,
+            now,
+            code,
+            name,
+            op,
+            value: reviewPrice,
+            note: watchLevel.label,
+          }),
+          candCode: code,
+          reviewOnly: true,
+          reviewKey,
+          judgeContext,
+          phase: 'armed',
+        })
+        changed = true
+      }
+      syncedPrices[reviewKey] = reviewPrice
     }
-    if (Number(candidate.reviewSyncedPrice) !== reviewPrice) {
-      candidate.reviewSyncedPrice = reviewPrice
+    if (
+      JSON.stringify(candidate.reviewSyncedPrices || {})
+      !== JSON.stringify(syncedPrices)
+    ) {
+      candidate.reviewSyncedPrices = syncedPrices
       changed = true
     }
   }

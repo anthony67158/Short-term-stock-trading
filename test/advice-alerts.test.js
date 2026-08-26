@@ -194,10 +194,68 @@ test('未持仓观望建议生成复核价提醒而不是买点提醒', () => {
 
   assert.equal(data.alerts.length, 1)
   assert.equal(data.alerts[0].reviewOnly, true)
-  assert.equal(data.alerts[0].note, '观察价复核')
+  assert.equal(data.alerts[0].note, '突破观察')
   assert.equal(data.alerts[0].op, 'gte')
   assert.equal(data.alerts[0].value, 145.24)
   assert.equal(data.alerts[0].candCode, '600519')
+})
+
+test('未持仓观望为回踩与突破分别生成复核提醒', () => {
+  const data = {
+    plan: [{ code: '600519', name: '贵州茅台' }],
+    holding: [],
+    alerts: [],
+    settings: {},
+  }
+
+  projectAdviceAlerts(data, '600519', {
+    action: '观望',
+    priceContract: {
+      schemaVersion: 'advice-price-contract.v1',
+      currentPrice: 100,
+      validationStatus: 'VERIFIED',
+      levels: [{
+        key: 'watch_pullback',
+        field: 'pullbackWatchPrice',
+        purpose: 'REVIEW_ONLY',
+        label: '回踩观察',
+        price: 96,
+        direction: 'LTE',
+        status: 'PENDING',
+        strict: true,
+      }, {
+        key: 'watch_breakout',
+        field: 'breakoutWatchPrice',
+        purpose: 'REVIEW_ONLY',
+        label: '突破观察',
+        price: 105,
+        direction: 'GTE',
+        status: 'PENDING',
+        strict: true,
+      }],
+      allPricesStrict: true,
+      issues: [],
+      review: {
+        operator: 'ANY',
+        conditions: [],
+        allMet: false,
+      },
+    },
+  }, {
+    now,
+    idFactory: ids,
+    requirePriceContract: true,
+  })
+
+  assert.deepEqual(data.alerts.map((alert) => [
+    alert.reviewKey,
+    alert.note,
+    alert.op,
+    alert.value,
+  ]), [
+    ['watch_pullback', '回踩观察', 'lte', 96],
+    ['watch_breakout', '突破观察', 'gte', 105],
+  ])
 })
 
 test('未持仓自选股只生成买点预警，禁止生成加仓或减仓预警', () => {

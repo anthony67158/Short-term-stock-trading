@@ -6,6 +6,7 @@ import {
 import { deriveMarketRegime } from './marketRegime.js'
 import {
   ADVICE_PRICE_CONTRACT_SCHEMA_VERSION,
+  adviceObservationLevels,
   buildAdvicePriceContract,
 } from './advicePriceContract.js'
 import { executionTriggerDirection } from './executionTrigger.js'
@@ -326,6 +327,9 @@ export function compileDecisionPlan({
       ...generatedPriceContract.issues,
     ])],
   } : generatedPriceContract
+  const observationLevels = adviceObservationLevels({
+    priceContract,
+  })
   const blockedReasons = []
   const freshness = evidenceSnapshot?.freshness || {}
   const missingRequiredSources = Array.isArray(
@@ -678,7 +682,13 @@ export function compileDecisionPlan({
       reduce: round(advice.reducePrice, 3),
       stop: round(stopPrice, 3),
       target: round(targetPrice, 3),
-      watch: round(advice.watchPrice, 3),
+      watch: round(observationLevels[0]?.price, 3),
+      observations: observationLevels.map((level) => ({
+        key: level.key,
+        label: level.label,
+        price: round(level.price, 3),
+        direction: level.direction,
+      })),
       leg1: round(advice.leg1Price, 3),
       leg2: round(advice.leg2Price, 3),
     },

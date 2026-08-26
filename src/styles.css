@@ -1795,6 +1795,10 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 .pc-buyalert.off { color: var(--muted); background: var(--panel); border-color: var(--border-soft); }
 .pc-buyalert .pc-buyalert-off { margin-left: 3px; font-size: 10.5px; color: var(--muted); }
 .pc-buyalert .pc-buyalert-hit { margin-left: 3px; font-size: 10.5px; font-weight: 800; color: var(--red); }
+.pc-buyalert.review-paths { flex-wrap: wrap; row-gap: 3px; }
+.pc-watch-path { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
+.pc-watch-path i { margin-inline: 2px; color: var(--muted); font-style: normal; }
+.pc-watch-path em { color: var(--red); font-size: 10.5px; font-style: normal; font-weight: 800; }
 .plan-card-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .plan-edit { margin-top: 8px; padding: 12px; border-radius: var(--radius-sm); background: var(--panel2); border: 1px solid var(--border-soft); display: flex; flex-direction: column; gap: 10px; }
 .plan-edit-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -2721,6 +2725,7 @@ button.acct-item { width: 100%; border: 0; background: transparent; font: inheri
 .ap-cell { display: flex; flex-direction: column; justify-content: center; gap: 5px; min-height: 66px; padding: 10px 12px; border-radius: 10px; background: var(--panel2); border: 1px solid var(--border-soft); }
 .ap-cell.entry { grid-column: 1 / -1; border-color: rgba(224,67,47,.26); background: rgba(224,67,47,.05); }
 .ap-cell.wide { grid-column: 1 / -1; }
+.ap-distance { color: var(--muted); font-size: 10.5px; font-weight: 500; }
 .ap-v.muted { color: var(--text2); font-size: 13px; font-weight: 600; }
 .ap-k { font-size: 10.5px; color: var(--muted); font-weight: 650; }
 .ap-v { font-family: "DIN Alternate", "Arial Narrow", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: clamp(20px, 3.2vw, 27px); font-weight: 900; font-variant-numeric: tabular-nums; line-height: 1.18; letter-spacing: -.025em; overflow-wrap: anywhere; }

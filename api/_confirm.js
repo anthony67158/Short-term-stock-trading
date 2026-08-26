@@ -35,6 +35,7 @@ import {
   buildJudgeAdviceContext,
 } from '../shared/judgeAdviceContext.js';
 import {
+  adviceObservationLevels,
   advicePriceLevel,
   advicePriceLevelForIntent,
   priceMatchesAdviceContract,
@@ -67,7 +68,19 @@ export function judgePriceContractGate(alert = {}, advice = {}) {
   const contractAdvice = { priceContract: contract };
   const note = String(alert.note || '');
   const level = alert.reviewOnly
-    ? advicePriceLevel(contractAdvice, 'watch')
+    ? (
+        alert.reviewKey
+          ? advicePriceLevel(contractAdvice, alert.reviewKey)
+          : adviceObservationLevels(contractAdvice).find((item) =>
+              Number(item.price) === Number(alert.value)
+              && (
+                !alert.op
+                || alert.op === (
+                  item.direction === 'LTE' ? 'lte' : 'gte'
+                )
+              )
+            )
+      )
     : alert.actKind === 'add'
       ? advicePriceLevel(contractAdvice, 'add')
         || advicePriceLevel(contractAdvice, 'entry')

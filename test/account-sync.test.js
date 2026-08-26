@@ -324,6 +324,27 @@ test('交易账本比较忽略AI建议和运行状态变化', () => {
   }), false)
 })
 
+test('双路径观察价同步游标不制造交易账本冲突', () => {
+  const base = {
+    plan: [{ code: '600519' }],
+    holding: [],
+    closed: [],
+    account: { cash: 10000 },
+  }
+
+  assert.equal(sameAccountTradeState({
+    ...base,
+    plan: [{
+      code: '600519',
+      reviewSyncedPrice: 96,
+      reviewSyncedPrices: {
+        watch_pullback: 96,
+        watch_breakout: 105,
+      },
+    }],
+  }, base), true)
+})
+
 test('旧版自动做T结算只差随机记录ID时视为同一交易账本', () => {
   const baseRecord = {
     type: 'BUY',

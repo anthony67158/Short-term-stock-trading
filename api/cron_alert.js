@@ -96,7 +96,7 @@ function describeAlert(a) {
   if (a.type === 'limitup') return `临近涨停(涨幅≥${formatPriceLimitThreshold(a, true)}%)`;
   if (a.type === 'limitdown') return `临近跌停(跌幅≥${formatPriceLimitThreshold(a, true)}%)`;
   if (a.type === 'price' && a.reviewOnly) {
-    return `观察价 ${OP_LABEL[a.op] || ''} ${a.value}元 · 到价复核`;
+    return `${a.note || '观察价'} ${OP_LABEL[a.op] || ''} ${a.value}元 · 到价复核`;
   }
   // 行动点预警(补仓/减仓):补仓点 ≤ X元 · 补1手
   if (a.type === 'price' && a.actKind) {

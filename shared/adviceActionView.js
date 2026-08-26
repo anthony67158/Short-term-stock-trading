@@ -1,6 +1,7 @@
 import { t1GateForSide } from './t1AdvicePolicy.js'
 import { humanizeUserFacingText } from './userFacingLanguage.js'
 import { executionTriggerDirection } from './executionTrigger.js'
+import { adviceObservationLevels } from './advicePriceContract.js'
 
 const finite = (value) => {
   if (value == null || value === '') return null
@@ -50,7 +51,13 @@ const level = (key, label, price, tone, active) => {
 function levelsFor(kind, advice, triggerDirection = '') {
   const entryPrice = advice.buyPrice ?? advice.addPrice
   if (kind === 'wait') {
-    return []
+    return adviceObservationLevels(advice).map((item) => ({
+      key: item.key,
+      label: item.label,
+      price: item.price,
+      tone: item.direction === 'GTE' ? 'buy' : 'muted',
+      active: false,
+    }))
   }
   if (kind === 'buy') {
     return [

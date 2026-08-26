@@ -1,4 +1,7 @@
-import { buildAdvicePriceContract } from './advicePriceContract.js'
+import {
+  adviceObservationLevels,
+  buildAdvicePriceContract,
+} from './advicePriceContract.js'
 
 function numberOf(value) {
   if (value == null || value === '') return null
@@ -86,11 +89,20 @@ export function reconcileAdviceNumbers({ mode, result: input, payload = {} } = {
     stopPrice: '止损价',
     targetPrice: '目标价',
     watchPrice: '观察价',
+    pullbackWatchPrice: '回踩观察价',
+    breakoutWatchPrice: '突破观察价',
     leg1Price: '第一腿价',
     leg2Price: '第二腿价',
   }
   const fields = mode === 'buy_advice'
-    ? ['buyPrice', 'stopPrice', 'targetPrice', 'watchPrice']
+    ? [
+        'buyPrice',
+        'stopPrice',
+        'targetPrice',
+        'pullbackWatchPrice',
+        'breakoutWatchPrice',
+        'watchPrice',
+      ]
     : mode === 't_advice'
       ? ['leg1Price', 'leg2Price', 'stopPrice', 'targetPrice']
       : ['addPrice', 'reducePrice', 'stopPrice', 'targetPrice']
@@ -130,21 +142,6 @@ export function reconcileAdviceNumbers({ mode, result: input, payload = {} } = {
       )
     }
   }
-  const actionText = String(result.action || result.stance || '')
-  const watchLevel = initialPriceContract.levels.find(
-    (level) => level.key === 'watch' && level.strict,
-  )
-  if (
-    /观望|等待|回避|不建议|暂不/.test(actionText)
-    && watchLevel?.status === 'MET'
-  ) {
-    valid = false
-    result.watchPrice = null
-    result.actionPlan = '价格条件已满足，但量价、资金或风险确认仍不足，暂不买入'
-    result.timing = result.actionPlan
-    issues.push('观察价在生成时已经满足，已撤销过期价格条件')
-  }
-
   if (mode === 'buy_advice') {
     const action = String(result.action || '')
     const actionable = !/观望|不建议|等待/.test(action)
@@ -306,11 +303,40 @@ export function reconcileAdviceNumbers({ mode, result: input, payload = {} } = {
     }
   }
 
-  const finalPriceContract = buildAdvicePriceContract({
+  let finalPriceContract = buildAdvicePriceContract({
     mode,
     advice: result,
     payload,
   })
+  if (unownedWait) {
+    const observations = adviceObservationLevels({
+      priceContract: finalPriceContract,
+    })
+    const pullback = observations.find((item) =>
+      item.key === 'watch_pullback'
+      || item.direction === 'LTE'
+    )
+    const breakout = observations.find((item) =>
+      item.key === 'watch_breakout'
+      || item.direction === 'GTE'
+    )
+    result.pullbackWatchPrice = pullback?.price ?? null
+    result.breakoutWatchPrice = breakout?.price ?? null
+    result.watchPrice = null
+    const paths = [
+      pullback && `回踩${pullback.price}元企稳`,
+      breakout && `放量突破${breakout.price}元`,
+    ].filter(Boolean)
+    result.actionPlan = paths.length
+      ? `等待${paths.join('，或')}后重新评估，未确认不买`
+      : '暂无近期有效观察价，等待量价与资金出现新变化后重新评估'
+    result.timing = result.actionPlan
+    finalPriceContract = buildAdvicePriceContract({
+      mode,
+      advice: result,
+      payload,
+    })
+  }
   result.priceContract = {
     ...finalPriceContract,
     issues: [...new Set([

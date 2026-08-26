@@ -431,6 +431,9 @@ export default function AdvicePresentation({
                   <div className={'ap-cell ' + level.key} key={level.key}>
                     <span className="ap-k">{level.label}</span>
                     <span className={'ap-v ' + level.tone}>{level.value}</span>
+                    {level.distanceText && (
+                      <small className="ap-distance">{level.distanceText}</small>
+                    )}
                   </div>
                 ))}
               </div>

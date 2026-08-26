@@ -2466,9 +2466,8 @@ export const planStore = {
     state.holding = state.holding.map((x) => x.id === id ? { ...x, ...meta } : x)
     emit()
   },
-  // 自选股「买点预警」自动同步：跟随 AI 操作建议的【建议买入价】,自动建一条【到价 ≤ 买入价】预警,
-  // 价格跌到买点即提醒去买入。规则:每只自选股只自动设这一条(买点),不把止盈/止损全设上——
-  // 未持仓阶段最有用的就是「到买点提醒买入」,其余等买入后由持仓计划联动生成。
+  // 自选股预警自动同步：可执行建议跟随买入价；观望建议分别跟随近期可达的
+  // 回踩与突破观察位。观察位到达只触发复核，不直接提示买入。
   //   candCode: 该预警所绑定的自选股代码(区别于持仓计划联动的 planId)
   //   alertSyncedPrice(记在候选上): 上次自动同步过的买价 —— 相同价不重复写,用户删掉也不会被反复自动加回;
   //   AI 买价变化时(≠ alertSyncedPrice)才会重新同步/重新武装。
@@ -2496,10 +2495,17 @@ export const planStore = {
     if (
       nextAlerts.length === (state.alerts || []).length
       && candidate?.alertSyncedPrice == null
+      && candidate?.reviewSyncedPrice == null
+      && candidate?.reviewSyncedPrices == null
     ) return
     state.alerts = nextAlerts
     state.plan = state.plan.map((item) => item.code === code
-      ? { ...item, alertSyncedPrice: null }
+      ? {
+          ...item,
+          alertSyncedPrice: null,
+          reviewSyncedPrice: null,
+          reviewSyncedPrices: null,
+        }
       : item)
     emit()
   },
@@ -2684,10 +2690,18 @@ export const planStore = {
     if (!on) state.alerts = (state.alerts || []).filter((a) => !a.planId && !a.candCode && !a.actCode)
     emit()
   },
-  // 解除某只股票的 AI 预警静音(用户改主意想重新自动跟随):清掉持仓 muteTp/muteSl / 候选 alertMuted + alertSyncedPrice / 行动点 muteAdd/muteReduce。
+  // 解除某只股票的自动预警静音并清除旧同步游标。
   unmuteStockAlert(code) {
     state.holding = state.holding.map((h) => h.code === code ? { ...h, muteTp: false, muteSl: false, muteAdd: false, muteReduce: false } : h)
-    state.plan = state.plan.map((p) => p.code === code ? { ...p, alertMuted: false, alertSyncedPrice: null, muteAdd: false, muteReduce: false } : p)
+    state.plan = state.plan.map((p) => p.code === code ? {
+      ...p,
+      alertMuted: false,
+      alertSyncedPrice: null,
+      reviewSyncedPrice: null,
+      reviewSyncedPrices: null,
+      muteAdd: false,
+      muteReduce: false,
+    } : p)
     emit()
   },
   toggleAlert(id) {

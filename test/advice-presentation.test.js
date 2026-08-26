@@ -191,6 +191,58 @@ test('被阻断的买入计划不把现价冒充买入价且只展示已验证�
   assert.equal(view.observationOnly, true)
 })
 
+test('未持仓观望同时展示回踩与突破观察位', () => {
+  const view = buildAdvicePresentation({
+    action: '观望',
+    actionPlan: '回踩96元企稳或放量站上105元后重新判断',
+    priceContract: {
+      schemaVersion: 'advice-price-contract.v1',
+      currentPrice: 100,
+      validationStatus: 'VERIFIED',
+      levels: [{
+        key: 'watch_pullback',
+        field: 'pullbackWatchPrice',
+        purpose: 'REVIEW_ONLY',
+        label: '回踩观察',
+        price: 96,
+        direction: 'LTE',
+        status: 'PENDING',
+        strict: true,
+        currentDistancePct: 4,
+      }, {
+        key: 'watch_breakout',
+        field: 'breakoutWatchPrice',
+        purpose: 'REVIEW_ONLY',
+        label: '突破观察',
+        price: 105,
+        direction: 'GTE',
+        status: 'PENDING',
+        strict: true,
+        currentDistancePct: 5,
+      }],
+      allPricesStrict: true,
+      issues: [],
+      review: { operator: 'ANY', conditions: [], allMet: false },
+    },
+    decisionPlan: {
+      schemaVersion: 'decision-plan.v2',
+      action: 'WATCH',
+      actionability: 'WATCH',
+      prices: { current: 100 },
+    },
+  })
+
+  assert.deepEqual(view.levels.map((item) => [
+    item.key,
+    item.label,
+    item.value,
+    item.distanceText,
+  ]), [
+    ['watch_pullback', '回踩观察', '96', '距现价-4.0%'],
+    ['watch_breakout', '突破观察', '105', '距现价+5.0%'],
+  ])
+})
+
 test('未持仓观望不展示止损目标并使用直观观察文案', () => {
   const view = buildAdvicePresentation({
     action: '观望',

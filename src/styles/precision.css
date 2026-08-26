@@ -10901,7 +10901,7 @@ button.acct-item {
 }
 
 .advice-tactical-grid.observation-only .advice-prices.compact {
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
 }
 
 .advice-tactical-grid > .advice-trigger:only-child {
