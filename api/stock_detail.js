@@ -1,10 +1,10 @@
 import { sendJson, sendError, num } from './_lib.js';
 import { computeTechnicals, fetchSelectedQuantPredict } from './_ta.js';
+import { quantModelLabel } from '../shared/modelVersion.js';
 import {
-  normalizeQuantModelVersion,
-  quantModelLabel,
-} from '../shared/modelVersion.js';
-import { canUseQuantModel } from './_quant_access.js';
+  canUseQuantModel,
+  resolveQuantModelForRequest,
+} from './_quant_access.js';
 import { fetchQuotes } from './quote.js';
 
 // secid 前缀：6/9/5 开头沪市=1，其余=0
@@ -131,7 +131,10 @@ export default async function handler(req, res) {
     const wantTrends = req.query.trends === '1';
     const wantQuote = req.query.quote === '1';
     const wantQuant = req.query.quant === '1';
-    const quantModelVersion = normalizeQuantModelVersion(req.query.model);
+    const quantModelVersion = await resolveQuantModelForRequest(
+      req,
+      req.query.model,
+    );
     if (
       wantQuant
       && !(await canUseQuantModel(req, quantModelVersion))

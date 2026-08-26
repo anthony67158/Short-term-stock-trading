@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   TRUSTED_QUANT_VERSION,
   canUseQuantModel,
+  resolveQuantModelForRequest,
 } from '../api/_quant_access.js'
 
 function encodedHeaders(nick = '测试账号', pw = '测试密码') {
@@ -103,4 +104,25 @@ test('V2.1只允许当前账号明确选择V2.1，不复用V2.0授权', async ()
 
   const trusted = { [TRUSTED_QUANT_VERSION]: 'v2.1' }
   assert.equal(await canUseQuantModel(trusted, 'v2.1'), true)
+})
+
+test('已登录请求始终使用账号当前选择的量化模型', async () => {
+  const readAccount = async (nick) => ({
+    status: 'active',
+    nick,
+    pwHash: 'expected',
+    data: { settings: { quantModelVersion: 'v2' } },
+  })
+  const request = { headers: encodedHeaders() }
+
+  assert.equal(await resolveQuantModelForRequest(
+    request,
+    'default',
+    {
+      readAccount,
+      hashPassword: () => 'expected',
+      isAuthorized: () => true,
+    },
+  ), 'v2')
+  assert.equal(request[TRUSTED_QUANT_VERSION], 'v2')
 })

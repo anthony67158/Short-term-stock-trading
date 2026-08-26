@@ -3,10 +3,7 @@
 import { buildCorpus, retrieve } from './_rag.js';
 import { retrieveTheoryKeywords } from './_kb.js';
 import { techSummaryForAI, fetchSelectedQuantPredict, backtestSignal } from './_ta.js';
-import {
-  normalizeQuantModelVersion,
-  quantModelLabel,
-} from '../shared/modelVersion.js';
+import { quantModelLabel } from '../shared/modelVersion.js';
 import { buildQuantAdviceContext } from '../shared/quantAdviceContext.js';
 import { marketTimePromptBlock, marketTimeContext } from './_market_time.js';
 import { getLatestDailySummary } from './_daily_summary.js';
@@ -45,7 +42,10 @@ import {
 } from './_ai_prompts.js';
 import { reconcileAdviceNumbers } from '../shared/adviceValidation.js';
 import { normalizePickDecision } from '../shared/stockRanking.js';
-import { canUseQuantModel } from './_quant_access.js';
+import {
+  canUseQuantModel,
+  resolveQuantModelForRequest,
+} from './_quant_access.js';
 import { authorizePaidRequest } from './_account_auth.js';
 import {
   continuityEvidenceFromPayload,
@@ -835,9 +835,11 @@ export default async function handler(req, res) {
     };
     // 采集里程碑进度事件
     const phase = (text, key) => emit('phase', { text, key });
-    const quantModelVersion = normalizeQuantModelVersion(
+    const quantModelVersion = await resolveQuantModelForRequest(
+      req,
       payload.quantModelVersion,
     );
+    payload.quantModelVersion = quantModelVersion;
     if (!(await canUseQuantModel(req, quantModelVersion))) {
       return finish({
         ok: false,
