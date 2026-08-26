@@ -69,6 +69,7 @@ import { buildAdviceDecisionContext } from '../shared/adviceModeContext.js';
 import {
   attachShortHorizonSummary,
   buildShortHorizonTactical,
+  deriveShortHorizonActionPolicy,
 } from '../shared/shortHorizonTactical.js';
 import { applyPortfolioRiskPolicy } from '../shared/portfolioRiskPolicy.js';
 import {
@@ -1609,7 +1610,14 @@ export default async function handler(req, res) {
 
     const isAdvisor = isAdvisorMode(mode);
     if (isAdvisor) {
-      payload.shortHorizonTactical = buildShortHorizonTactical(payload);
+      const tactical = buildShortHorizonTactical(payload);
+      payload.shortHorizonTactical = {
+        ...tactical,
+        actionPolicy: deriveShortHorizonActionPolicy({
+          mode,
+          tactical,
+        }),
+      };
     }
     if (isAdvisor && payload.realOutcomeLearning) {
       payload.realOutcomeContext = realOutcomeContext(

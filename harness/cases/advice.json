@@ -132,6 +132,7 @@
             "price": 10,
             "pct": 2,
             "volRatio": 2,
+            "amount": 200000000,
             "limitDownPrice": 9,
             "limitUpPrice": 13,
             "live": true
@@ -158,6 +159,10 @@
             "highConfSignal": {
               "fired": true
             }
+          },
+          "stockFund": {
+            "mainNetYi": 1.2,
+            "retailNetYi": -0.4
           },
           "account": {
             "cash": 50000,
@@ -193,6 +198,98 @@
         "expectedQty": 10,
         "expectedDecisionActionability": "READY",
         "expectedDecisionAction": "BUY",
+        "requiredIssueIncludes": [],
+        "forbiddenIssueIncludes": [],
+        "forbiddenText": []
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "advice-short-horizon-policy-blocks-chasing",
+      "adapter": "advice",
+      "tags": ["advice", "short-horizon", "action-policy"],
+      "input": {
+        "compileDecisionPlan": true,
+        "now": 1787279400000,
+        "mode": "buy_advice",
+        "payload": {
+          "code": "002436",
+          "name": "样本股票",
+          "todayQuote": {
+            "price": 10,
+            "pct": 9,
+            "turnover": 20,
+            "volRatio": 5.5,
+            "amount": 300000000,
+            "limitDownPrice": 9,
+            "limitUpPrice": 12,
+            "live": true
+          },
+          "intraday": {
+            "posInDay": 96
+          },
+          "marketEnv": {
+            "schemaVersion": "market-regime.v1",
+            "regime": "TREND_STRONG",
+            "label": "强势趋势",
+            "score": 76,
+            "dataQuality": "COMPLETE",
+            "riskMultiplier": 1,
+            "allowRiskIncrease": true,
+            "targetPositionPct": {
+              "min": 50,
+              "max": 70
+            }
+          },
+          "quant": {
+            "score": 72,
+            "forecast": {
+              "direction": "看涨",
+              "upProb": 62,
+              "expRet": 2.4
+            },
+            "highConfSignal": {
+              "fired": true
+            }
+          },
+          "stockFund": {
+            "mainNetYi": 1.2,
+            "retailNetYi": -0.4
+          },
+          "account": {
+            "cash": 50000,
+            "totalAssets": 100000,
+            "position": 40,
+            "stockWeight": 0
+          }
+        },
+        "evidenceSnapshot": {
+          "snapshotId": "evidence.chasing",
+          "asOf": "2026-08-21T02:30:00.000Z",
+          "freshness": {
+            "status": "LIVE",
+            "missingSources": []
+          }
+        },
+        "result": {
+          "action": "立即买入",
+          "tier": "now",
+          "buyPrice": 10,
+          "stopPrice": 9,
+          "targetPrice": 12,
+          "planQty": 2,
+          "planAmount": 2000,
+          "actionPlan": "立即追涨买入2手",
+          "invalidation": "跌破9元离场"
+        }
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "expectedValid": true,
+        "expectedAction": "立即买入",
+        "expectedQty": 2,
+        "expectedDecisionActionability": "WATCH",
+        "expectedDecisionAction": "WATCH",
         "requiredIssueIncludes": [],
         "forbiddenIssueIncludes": [],
         "forbiddenText": []

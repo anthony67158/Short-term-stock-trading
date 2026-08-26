@@ -328,6 +328,58 @@ test('未持仓观望缺少可靠观察价时明确显示等待重新定价', ()
   }])
 })
 
+test('短线内核改写模型动作时首屏解释原因而非只显示观望', () => {
+  const view = buildAdvicePresentation({
+    action: '立即买入',
+    title: '模型建议追涨',
+    reviewTrigger: '回踩10元后重新评估',
+    decisionPlan: {
+      schemaVersion: 'decision-plan.v2',
+      mode: 'buy_advice',
+      requestedAction: 'BUY',
+      governedAction: 'WATCH',
+      action: 'WATCH',
+      actionLabel: '观望',
+      actionability: 'WATCH',
+      actionPolicy: {
+        schemaVersion: 'short-horizon-action-policy.v1',
+        overridden: true,
+        reasons: [
+          '价格位置过热，禁止追涨',
+          '主力资金尚未确认流入',
+        ],
+        nextReviewTrigger: '回踩10元后重新评估',
+      },
+      trigger: '回踩10元后重新评估',
+      quantity: { lots: 0 },
+      prices: {
+        current: 10.8,
+        observations: [],
+      },
+      costs: { estimatedNetAmount: 0 },
+      blockedReasons: [],
+    },
+  })
+
+  assert.equal(view.verdict.action, '观望')
+  assert.equal(
+    view.verdict.title,
+    '短线条件未确认，暂不操作',
+  )
+  assert.equal(
+    view.operationGuide.now,
+    '暂不买入，不挂单、不追涨。',
+  )
+  assert.equal(
+    view.operationGuide.steps[0].label,
+    '为何不操作',
+  )
+  assert.match(
+    view.operationGuide.steps[0].text,
+    /禁止追涨.*主力资金尚未确认/,
+  )
+})
+
 test('默认核心依据压缩为可扫读摘要而完整原文仍保留在建议数据中', () => {
   const longText = `量化方向偏多，${'但仍需等待价格确认。'.repeat(30)}`
   const view = buildAdvicePresentation({

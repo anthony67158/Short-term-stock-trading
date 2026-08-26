@@ -43,6 +43,32 @@ test('所有军师模式都只使用紧凑短线战术合同', () => {
   }
 })
 
+test('军师生成前必须服从短线内核给出的唯一允许动作集合', () => {
+  const prompt = buildUserPrompt('buy_advice', {
+    code: '600000',
+    shortHorizonTactical: {
+      schemaVersion: 'short-horizon-tactical.v1',
+      timing: {
+        state: 'TOO_EXTENDED',
+        pullbackPrice: 9.8,
+        reviewAfter: 'PRICE',
+      },
+      actionPolicy: {
+        schemaVersion: 'short-horizon-action-policy.v1',
+        allowedActions: ['WATCH'],
+        canIncreaseRisk: false,
+        reasons: ['价格位置过热，禁止追涨'],
+        nextReviewTrigger: '回踩9.8元确认承接后重新评估',
+      },
+    },
+  })
+
+  assert.match(prompt, /唯一允许动作/)
+  assert.match(prompt, /本轮action只能从观望中选择/)
+  assert.match(prompt, /价格位置过热，禁止追涨/)
+  assert.match(prompt, /不得用标题、actionPlan或价格字段暗示集合外交易/)
+})
+
 test('军师低命中校准按动作方向纠偏而不是一律变得更保守', () => {
   const prompt = buildUserPrompt('hold_advice', {
     code: '600000',

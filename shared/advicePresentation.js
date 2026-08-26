@@ -257,6 +257,23 @@ function operationGuide(advice, plan, levels, observationOnly) {
   const reviewText = clean(advice.reviewTrigger, 180)
   const withYuan = (value) =>
     /元$/.test(String(value)) ? String(value) : `${value}元`
+  const policyReasons = (
+    plan?.actionPolicy?.overridden
+    && Array.isArray(plan.actionPolicy.reasons)
+  )
+    ? plan.actionPolicy.reasons
+        .map((item) => clean(item, 120))
+        .filter(Boolean)
+        .slice(0, 4)
+    : []
+  const policyStep = policyReasons.length
+    ? {
+        key: 'policy',
+        label: '为何不操作',
+        text: policyReasons.join('；'),
+        tone: 'risk',
+      }
+    : null
   const invalidation = first(
     plan?.invalidation,
     advice.knowledgeActionPlan?.invalidation,
@@ -308,6 +325,7 @@ function operationGuide(advice, plan, levels, observationOnly) {
     return {
       now: '暂不买入，不挂单、不追涨。',
       steps: [
+        policyStep,
         ...paths,
         invalidation && {
           key: 'cancel',
@@ -334,12 +352,15 @@ function operationGuide(advice, plan, levels, observationOnly) {
     target && `目标${target}元`,
   ].filter(Boolean)
   return {
-    now: plan.actionability === 'BLOCKED'
+    now: plan.actionPolicy?.overridden && plan.action === 'HOLD'
+      ? '继续持有，当前不加仓；等待短线条件重新确认。'
+      : plan.actionability === 'BLOCKED'
       ? '暂不操作，不挂单；条件恢复后重新生成建议。'
       : plan.actionability === 'MANUAL_PROBE'
         ? `仅限人工确认小仓试错：${actionText}。`
         : `${actionText}；仅在核对价格和账户后人工执行。`,
     steps: [
+      policyStep,
       plan.trigger && {
         key: 'trigger',
         label: '执行条件',
@@ -454,7 +475,11 @@ function buildLegacyAdvicePresentation(advice = {}) {
       : plan.actionability === 'BLOCKED'
         ? '观望'
         : plan.actionLabel || advice.action,
-    title: plan.actionability === 'BLOCKED'
+    title: plan.actionPolicy?.overridden
+      ? plan.action === 'HOLD'
+        ? '短线条件未确认，继续持有'
+        : '短线条件未确认，暂不操作'
+      : plan.actionability === 'BLOCKED'
       ? '执行条件未满足，暂不操作'
       : plan.actionability === 'MANUAL_PROBE'
         ? `短线试仓：${advice.title || advice.headline || '板块与个股条件共振'}`

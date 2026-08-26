@@ -338,8 +338,38 @@ function tacticalTradeRule(trade = {}) {
   return `【近期真实交易分类】${JSON.stringify(trade)}。用户修正后的分类是权威事实；做T卖出是高抛腿，做T买入是低吸或接回腿。待配对买卖腿已计入当前持仓与现金，不得重复加减仓位`
 }
 
+function tacticalActionPolicyRule(tactical = {}) {
+  const policy = tactical.actionPolicy
+  if (!policy?.allowedActions?.length) return ''
+  const labels = {
+    BUY: '买入',
+    ADD: '加仓',
+    HOLD: '持有',
+    REDUCE: '减仓',
+    EXIT: '清仓',
+    T_BUY_FIRST: '正T先买',
+    T_SELL_FIRST: '反T先卖',
+    WATCH: '观望',
+  }
+  const allowed = policy.allowedActions
+    .map((action) => labels[action])
+    .filter(Boolean)
+  const reasons = Array.isArray(policy.reasons)
+    ? policy.reasons.filter(Boolean).slice(0, 4)
+    : []
+  return `【唯一允许动作】本轮action只能从${allowed.join('、')}中选择。`
+    + '不得输出集合外动作，不得用标题、actionPlan或价格字段暗示集合外交易。'
+    + (
+      reasons.length
+        ? `当前新增仓位未通过：${reasons.join('；')}。`
+        : '新增仓位条件已通过，但仍可根据赔率选择观望。'
+    )
+    + `下一复核事件：${policy.nextReviewTrigger || '实质证据变化后重新评估'}`
+}
+
 function tacticalUsageRules(facts = {}) {
   return [
+    tacticalActionPolicyRule(facts.tactical),
     tacticalQuantRule(facts.tactical),
     tacticalTActionRule(facts.tactical),
     tacticalFundRule(facts.tactical),
