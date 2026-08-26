@@ -169,8 +169,11 @@ function missingReason(sourceKey, trace) {
   const code = String(trace?.errorCode || '')
   const http = code.match(/^HTTP_(\d{3})$/)
   if (http) return `接口返回 HTTP ${http[1]}`
-  if (code === 'INSUFFICIENT_CANDLES') {
-    return '个股K线数据不足，量化预测未启动'
+  if (
+    code === 'INSUFFICIENT_CANDLES'
+    || code === 'INSUFFICIENT_DAILY_CANDLES'
+  ) {
+    return '当前生产模型所需日K线数据不足，已尝试主源和备用源'
   }
   if (code === 'AbortError') return '数据采集超时'
   if (trace?.status === 'OK') {

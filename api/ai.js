@@ -2,7 +2,13 @@
 // POST body: { mode: 'market'|'sector'|'stock'|'scan', payload: {...} }
 import { buildCorpus, retrieve } from './_rag.js';
 import { retrieveTheoryKeywords } from './_kb.js';
-import { techSummaryForAI, fetchSelectedQuantPredict, backtestSignal } from './_ta.js';
+import {
+  backtestSignal,
+  computeTechnicals,
+  fetchSelectedQuantPredict,
+  techSummaryForAI,
+} from './_ta.js';
+import { fetchKlineTx } from './stock_detail.js';
 import { quantModelLabel } from '../shared/modelVersion.js';
 import { buildQuantAdviceContext } from '../shared/quantAdviceContext.js';
 import { marketTimePromptBlock, marketTimeContext } from './_market_time.js';
@@ -106,6 +112,10 @@ import {
 import {
   compileAdvicePresentationV3,
 } from '../shared/advicePresentation.js';
+import {
+  quantInputReadiness,
+  selectFreshestDailyDetail,
+} from '../shared/advisorQuantInput.js';
 import {
   humanizeAdviceTextFields,
 } from '../shared/userFacingLanguage.js';
@@ -838,6 +848,7 @@ export default async function handler(req, res) {
     const quantModelVersion = await resolveQuantModelForRequest(
       req,
       payload.quantModelVersion,
+      { account: accountAuth.account },
     );
     payload.quantModelVersion = quantModelVersion;
     if (!(await canUseQuantModel(req, quantModelVersion))) {
@@ -938,11 +949,33 @@ export default async function handler(req, res) {
             return null;
           },
         );
+        const dailyDetailPromise = Promise.allSettled([
+          getJ(
+            `/api/stock_detail?code=${payload.code}&klt=101&lmt=60`,
+          ),
+          fetchKlineTx(payload.code, '101', 120),
+        ]).then(([primaryResult, backupResult]) =>
+          selectFreshestDailyDetail(
+            primaryResult.status === 'fulfilled'
+              ? primaryResult.value
+              : null,
+            backupResult.status === 'fulfilled'
+              ? backupResult.value
+              : null,
+            { computeTechnicals },
+          )
+        );
 
         const [mkt, sec, detail, trend, stockFund, lhb, corpus, macroNews, todayQ, dailySummary, macroFlashes] = await Promise.all([
           track('market', '大盘情绪', getJ('/api/market'), (v) => v && v.ok !== false),
           track('sectorFlow', '板块资金', getJ('/api/sectors?type=industry&sort=main'), (v) => v && v.list && v.list.length),
-          track('dailyCandles', '个股K线', getJ(`/api/stock_detail?code=${payload.code}&klt=101&lmt=60`), (v) => v && v.ok !== false && v.candles && v.candles.length, (v) => v?.candles?.at(-1)?.date || null),
+          track(
+            'dailyCandles',
+            '个股K线',
+            dailyDetailPromise,
+            (v) => v && v.ok !== false && v.candles && v.candles.length,
+            (v) => v?.dailyAsOf || v?.candles?.at(-1)?.date || null,
+          ),
           track('intraday', '分时走势', fetchTrend(payload.code), (v) => Array.isArray(v) && v.length > 0, (v) => v?.at(-1)?.time || null),
           track('stockFunds', '个股资金流', fetchStockFund(payload.code), (v) => v != null, (v) => v?.asOfDate || null),
           track('dragonTiger', '龙虎榜', fetchStockLHB(payload.code), (v) => v != null, (v) => v?.date || null),
@@ -1016,31 +1049,55 @@ export default async function handler(req, res) {
         // 行业资讯统一使用豆包搜索。旧定向新闻接口在 FC 云出口持续返回空，
         // 豆包行业结果按四小时缓存并单飞合并，自动复核仍只读缓存。
         const industry = corpus && corpus.profile && corpus.profile.industry;
-        const hasCandles = detail && detail.ok && Array.isArray(detail.candles) && detail.candles.length >= 25;
+        const dailyCandles = detail?.ok && Array.isArray(detail.candles)
+          ? detail.candles
+          : [];
+        const hasCandles = dailyCandles.length >= 25;
+        const quantReadiness = quantInputReadiness(
+          quantModelVersion,
+          dailyCandles,
+        );
         // ★让量化模型"基于现在预测未来":盘中把实时价/量并入送模型的最后一根K线。
         //   stock_detail 的日K末根盘中虽是"进行中"的今日bar,但其收盘价可能滞后于 /api/quote 的最新价;
-        //   盘前/盘后/休市则末根为昨日收盘,不应改动(此时预测本就是"基于上一交易日")。
-        //   仅当 isLive 且实时价有效时,用实时 price/high/low 覆盖今日末根,使36因子基于当下重算。
-        let quantCandles = hasCandles ? detail.candles : null;
+        //   盘中仅覆盖正在形成的今日末根；盘前/盘后/休市不使用实时价覆盖，
+        //   由日K主/备源与完整5分钟聚合共同保证末根是最近完整交易时段。
+        let quantCandles = dailyCandles;
         let quantRealtime = null;
-        if (hasCandles && payload.todayQuote && payload.todayQuote.live && payload.todayQuote.price != null) {
+        if (
+          payload.todayQuote
+          && payload.todayQuote.live
+          && payload.todayQuote.price != null
+        ) {
           const tq = payload.todayQuote;
-          const cs0 = detail.candles;
-          const lastBar = cs0[cs0.length - 1];
-          const merged = { ...lastBar,
-            close: tq.price,
-            high: Math.max(lastBar.high != null ? lastBar.high : tq.price, tq.high != null ? tq.high : tq.price, tq.price),
-            low: Math.min(lastBar.low != null ? lastBar.low : tq.price, tq.low != null ? tq.low : tq.price, tq.price),
-            open: tq.open != null ? tq.open : lastBar.open,
-          };
-          quantCandles = [...cs0.slice(0, -1), merged];
           quantRealtime = {
             price: tq.price, pct: tq.pct, turnover: tq.turnover, volRatio: tq.volRatio,
             asOf: tq.asOfLabel || null, live: true, phase: tq.phase || null,
             marketVolLevel: (mkt && mkt.ok && mkt.breadth) ? mkt.breadth.volLevel : null,
           };
+          if (hasCandles) {
+            const lastBar = dailyCandles.at(-1);
+            const merged = {
+              ...lastBar,
+              close: tq.price,
+              high: Math.max(
+                lastBar.high != null ? lastBar.high : tq.price,
+                tq.high != null ? tq.high : tq.price,
+                tq.price,
+              ),
+              low: Math.min(
+                lastBar.low != null ? lastBar.low : tq.price,
+                tq.low != null ? tq.low : tq.price,
+                tq.price,
+              ),
+              open: tq.open != null ? tq.open : lastBar.open,
+            };
+            quantCandles = [
+              ...dailyCandles.slice(0, -1),
+              merged,
+            ];
+          }
         }
-        const quantPromise = hasCandles
+        const quantPromise = quantReadiness.ready
           ? track(
             'quant',
             '量化预测',
@@ -1057,13 +1114,13 @@ export default async function handler(req, res) {
               { refreshDailyFromMinutes: true },
             ),
             (value) => !!value?.ok,
-            (value) => value?.asOf || null,
+            (value) => value?.inputAsOf || value?.asOf || null,
           )
           : (() => {
             sourceTracker.skip(
               'quant',
               '量化预测',
-              'INSUFFICIENT_CANDLES',
+              quantReadiness.reason,
             );
             return Promise.resolve(null);
           })();

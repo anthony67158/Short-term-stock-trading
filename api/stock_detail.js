@@ -1,6 +1,9 @@
 import { sendJson, sendError, num } from './_lib.js';
 import { computeTechnicals, fetchSelectedQuantPredict } from './_ta.js';
-import { quantModelLabel } from '../shared/modelVersion.js';
+import {
+  normalizeQuantModelVersion,
+  quantModelLabel,
+} from '../shared/modelVersion.js';
 import {
   canUseQuantModel,
   resolveQuantModelForRequest,
@@ -131,10 +134,9 @@ export default async function handler(req, res) {
     const wantTrends = req.query.trends === '1';
     const wantQuote = req.query.quote === '1';
     const wantQuant = req.query.quant === '1';
-    const quantModelVersion = await resolveQuantModelForRequest(
-      req,
-      req.query.model,
-    );
+    const quantModelVersion = wantQuant
+      ? await resolveQuantModelForRequest(req, req.query.model)
+      : normalizeQuantModelVersion(req.query.model);
     if (
       wantQuant
       && !(await canUseQuantModel(req, quantModelVersion))

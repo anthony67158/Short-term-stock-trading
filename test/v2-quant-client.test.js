@@ -509,6 +509,107 @@ test('生产模型选择器把最新分时聚合日线送入原36因子模型', 
   assert.equal(result.inputSource, 'completed-5m-aggregated')
 })
 
+test('收盘后生产模型使用当天15点完整K线而不是前一交易日', async () => {
+  const daily = Array.from({ length: 30 }, (_, index) => ({
+    date: `2026-07-${String(index + 1).padStart(2, '0')}`,
+    open: 10,
+    high: 10.2,
+    low: 9.8,
+    close: 10,
+    volume: 1000,
+  }))
+  daily[daily.length - 1] = {
+    ...daily.at(-1),
+    date: '2026-08-25',
+  }
+  const bars = parseFiveMinuteKlines(
+    validSessionLines('2026-08-26'),
+  )
+  let received = null
+
+  const result = await fetchSelectedQuantPredict(
+    'default',
+    '600519',
+    daily,
+    null,
+    1000,
+    null,
+    {
+      fetchBars: async () => bars,
+      fetchDefault: async (_code, candles) => {
+        received = candles
+        return {
+          ok: true,
+          modelVersion: 'default',
+          asOf: candles.at(-1).date,
+        }
+      },
+      timeContext: {
+        tradingToday: true,
+        isLive: false,
+        phase: '盘后(已收盘)',
+        bjNow: '2026-08-26 15:35',
+      },
+      refreshDailyFromMinutes: true,
+    },
+  )
+
+  assert.equal(received.at(-1).date, '2026-08-26')
+  assert.equal(received.at(-1).close, 10)
+  assert.equal(received.at(-1).volume, 48000)
+  assert.equal(result.inputAsOf, '2026-08-26 15:00:00')
+  assert.equal(result.inputSource, 'completed-5m-aggregated')
+})
+
+test('盘前生产模型保留最近完整交易日K线', async () => {
+  const daily = Array.from({ length: 30 }, (_, index) => ({
+    date: `2026-07-${String(index + 1).padStart(2, '0')}`,
+    open: 10,
+    high: 10.2,
+    low: 9.8,
+    close: 10,
+    volume: 1000,
+  }))
+  daily[daily.length - 1] = {
+    ...daily.at(-1),
+    date: '2026-08-26',
+  }
+  const bars = parseFiveMinuteKlines(
+    validSessionLines('2026-08-26'),
+  )
+  let received = null
+
+  const result = await fetchSelectedQuantPredict(
+    'default',
+    '600519',
+    daily,
+    null,
+    1000,
+    null,
+    {
+      fetchBars: async () => bars,
+      fetchDefault: async (_code, candles) => {
+        received = candles
+        return {
+          ok: true,
+          modelVersion: 'default',
+          asOf: candles.at(-1).date,
+        }
+      },
+      timeContext: {
+        tradingToday: true,
+        isLive: false,
+        phase: '盘前(未开盘)',
+        bjNow: '2026-08-27 08:30',
+      },
+      refreshDailyFromMinutes: true,
+    },
+  )
+
+  assert.equal(received.at(-1).date, '2026-08-26')
+  assert.equal(result.inputAsOf, '2026-08-26 15:00:00')
+})
+
 test('非军师生产量化保持原日线快路径不额外下载分钟线', async () => {
   let minuteCalls = 0
   const candles = Array.from({ length: 30 }, (_, index) => ({

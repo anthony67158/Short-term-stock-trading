@@ -10,6 +10,7 @@ export async function resolveQuantModelForRequest(
   req,
   requestedVersion,
   {
+    account = null,
     isAuthorized = isAuthorizedAccount,
     ...authenticationOptions
   } = {},
@@ -27,6 +28,14 @@ export async function resolveQuantModelForRequest(
   ) {
     req[TRUSTED_QUANT_VERSION] = requested
     return requested
+  }
+
+  if (account && isAuthorized(account, authenticationOptions)) {
+    const selected = normalizeQuantModelVersion(
+      account.data?.settings?.quantModelVersion,
+    )
+    req[TRUSTED_QUANT_VERSION] = selected
+    return selected
   }
 
   const authentication = await authenticateAccountRequest(
