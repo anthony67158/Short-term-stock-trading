@@ -2960,11 +2960,54 @@ export const planStore = {
         const planNetPnl = hasCompleteRealizedPnl
           ? realizedValues.reduce((sum, value) => sum + value, 0)
           : pnl
+        const entryLots = planTransactions.reduce(
+          (sum, item) => sum + Math.max(0, Number(item.qty) || 0),
+          0,
+        )
+        const entryPrice = entryLots > 0
+          ? planTransactions.reduce(
+              (sum, item) =>
+                sum
+                + Math.max(0, Number(item.qty) || 0)
+                  * Number(item.costPrice ?? item.buyPrice ?? 0),
+              0,
+            ) / entryLots
+          : null
+        const entryAt = planTransactions
+          .map((item) => Number(item.buyAt) || 0)
+          .filter((value) => value > 0)
+          .sort((left, right) => left - right)[0] || null
+        const exitAt = planTransactions.reduce(
+          (latest, item) => Math.max(
+            latest,
+            Number(item.sellAt || item.at) || 0,
+          ),
+          0,
+        ) || null
+        const peakPrices = planTransactions
+          .map((item) => Number(
+            item.peakPrice ?? item.maxFavorablePrice,
+          ))
+          .filter((value) => Number.isFinite(value) && value > 0)
+        const troughPrices = planTransactions
+          .map((item) => Number(
+            item.troughPrice ?? item.maxAdversePrice,
+          ))
+          .filter((value) => Number.isFinite(value) && value > 0)
         const attribution = {
           ...attributeExecution(updated, {
             fills: updated.fills,
             netPnl: planNetPnl,
             validationComplete: hasCompleteRealizedPnl,
+            entryPrice,
+            entryAt,
+            exitAt,
+            peakPrice: peakPrices.length
+              ? Math.max(...peakPrices)
+              : null,
+            troughPrice: troughPrices.length
+              ? Math.min(...troughPrices)
+              : null,
           }),
           updatedAt: Date.now(),
         }

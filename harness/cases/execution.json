@@ -132,11 +132,19 @@
         "triggeredPrice": 10.1,
         "fillPrice": 10.1,
         "vwap": 10.05,
-        "netPnl": 120
+        "netPnl": 120,
+        "entryPrice": 9.5,
+        "entryAt": 1787106600000,
+        "exitAt": 1787279400000,
+        "pricePath": [
+          { "high": 10.4, "low": 9.2 },
+          { "high": 10.8, "low": 9.7 }
+        ]
       },
       "expect": {
         "minOverall": 0.9,
-        "learningEligible": true
+        "learningEligible": true,
+        "pathMetrics": true
       }
     }
   ]

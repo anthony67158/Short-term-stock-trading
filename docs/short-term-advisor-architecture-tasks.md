@@ -96,8 +96,8 @@ node --test test/short-horizon-tactical.test.js \
 **Acceptance**
 
 - [x] 学习记录包含战术状态、窗口和触发路径。
-- [ ] 增加持有时长、最大有利/不利波动和盈利捕获率。
-- [ ] 样本不足时不调整风险倍率。
+- [x] 增加持有时长、最大有利/不利波动和盈利捕获率。
+- [x] 样本不足时不调整风险倍率。
 
 ### Checkpoint C
 

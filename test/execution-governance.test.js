@@ -137,6 +137,44 @@ test('真实成交归因区分决策滑点、执行滑点、VWAP偏差和费用'
   assert.equal(result.recordDelayMs, 120000)
 })
 
+test('真实价格路径计算持有时长MFE、MAE与盈利捕获率', () => {
+  const result = attributeExecution({
+    schemaVersion: 'execution-plan.v1',
+    planId: 'exec-plan-metrics',
+    side: 'SELL',
+    targetLots: 1,
+    referencePrice: 11.2,
+    triggerPrice: 11.1,
+    createdAt: now,
+  }, {
+    fills: [{
+      fillId: 'f-metrics',
+      transactionId: 'tx-metrics',
+      lots: 1,
+      price: 11.2,
+      fee: 6,
+      at: now + 2 * 86400000,
+      manuallyRecorded: true,
+    }],
+    entryPrice: 10,
+    entryAt: now,
+    exitAt: now + 2 * 86400000,
+    pricePath: [
+      { high: 10.8, low: 9.6 },
+      { high: 12, low: 10.5 },
+    ],
+    netPnl: 114,
+    validationComplete: true,
+  })
+
+  assert.deepEqual(result.transactionIds, ['tx-metrics'])
+  assert.equal(result.holdingDurationMinutes, 2880)
+  assert.equal(result.mfePct, 20)
+  assert.equal(result.maePct, -4)
+  assert.equal(result.profitCapturePct, 60)
+  assert.equal(result.learningEligible, true)
+})
+
 test('账户熔断预留未完成买入现金且不提前释放卖出资金', () => {
   const result = evaluateAccountCircuitBreaker({
     account: {
@@ -223,6 +261,10 @@ test('归因聚合只让真实费后已完成结果进入效果学习', () => {
       marketRegime: 'TREND_STRONG',
       totalFees: 10,
       netPnl: 120,
+      holdingDurationMinutes: 180,
+      mfePct: 8,
+      maePct: -2,
+      profitCapturePct: 62.5,
       validationComplete: true,
     },
     {
@@ -236,4 +278,8 @@ test('归因聚合只让真实费后已完成结果进入效果学习', () => {
   assert.equal(summary.total, 2)
   assert.equal(summary.learningEligible, 1)
   assert.equal(summary.groups[0].netPnl, 120)
+  assert.equal(summary.groups[0].averageHoldingMinutes, 180)
+  assert.equal(summary.groups[0].averageMfePct, 8)
+  assert.equal(summary.groups[0].averageMaePct, -2)
+  assert.equal(summary.groups[0].averageProfitCapturePct, 62.5)
 })

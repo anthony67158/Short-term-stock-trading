@@ -286,6 +286,10 @@ export async function runExecutionHarnessCase(testCase) {
       vwap: input.vwap || 10,
       netPnl: input.netPnl,
       validationComplete: true,
+      entryPrice: input.entryPrice,
+      entryAt: input.entryAt,
+      exitAt: input.exitAt,
+      pricePath: input.pricePath,
     })
     checks = [
       check(
@@ -320,6 +324,18 @@ export async function runExecutionHarnessCase(testCase) {
         output.planId === lifecycle.completed.planId
           && output.decisionId === lifecycle.completed.decisionId,
         '归因没有绑定原执行计划',
+      ),
+      check(
+        'attribution-path-metrics',
+        'consistency',
+        expected.pathMetrics !== true
+          || (
+            Number.isFinite(output.holdingDurationMinutes)
+            && Number.isFinite(output.mfePct)
+            && Number.isFinite(output.maePct)
+            && Number.isFinite(output.profitCapturePct)
+          ),
+        '真实成交路径缺少持有时长或盈亏效率指标',
       ),
     ]
   }

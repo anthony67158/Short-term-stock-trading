@@ -31,6 +31,10 @@ function recommendation(id, {
 function execution(id, recommendationId, pnl, {
   transactionId = id,
   validationComplete = true,
+  holdingDurationMinutes = null,
+  mfePct = null,
+  maePct = null,
+  profitCapturePct = null,
 } = {}) {
   return {
     id,
@@ -43,6 +47,10 @@ function execution(id, recommendationId, pnl, {
     outcome: {
       pnl,
       validationComplete,
+      holdingDurationMinutes,
+      mfePct,
+      maePct,
+      profitCapturePct,
     },
   }
 }
@@ -157,4 +165,55 @@ test('上下文只在同模式同市场样本足够时约束风险倍率', () =>
   assert.equal(tactical.scope, 'mode_tactical')
   assert.equal(tactical.sampleQualified, true)
   assert.equal(tactical.riskScale, 0.6)
+})
+
+test('真实学习聚合持有时长MFE、MAE与盈利捕获率', () => {
+  const profile = buildRealOutcomeLearning({
+    decisionLog: [
+      recommendation('r1'),
+      recommendation('r2'),
+      execution('e1', 'r1', 120, {
+        holdingDurationMinutes: 180,
+        mfePct: 8,
+        maePct: -2,
+        profitCapturePct: 62.5,
+      }),
+      execution('e2', 'r2', 80, {
+        holdingDurationMinutes: 300,
+        mfePct: 6,
+        maePct: -1,
+        profitCapturePct: 50,
+      }),
+    ],
+  }, { minimumSamples: 2 })
+
+  assert.equal(profile.overall.averageHoldingMinutes, 240)
+  assert.equal(profile.overall.averageMfePct, 7)
+  assert.equal(profile.overall.averageMaePct, -1.5)
+  assert.equal(profile.overall.averageProfitCapturePct, 56.3)
+
+  const context = realOutcomeContext(profile, {
+    mode: 'buy_advice',
+    tacticalState: 'READY',
+  })
+  assert.equal(context.averageHoldingMinutes, 240)
+  assert.equal(context.averageMfePct, 7)
+  assert.equal(context.averageMaePct, -1.5)
+  assert.equal(context.averageProfitCapturePct, 56.3)
+})
+
+test('缺少真实价格路径时MFE与MAE保持空值', () => {
+  const profile = buildRealOutcomeLearning({
+    decisionLog: [
+      recommendation('r1'),
+      execution('e1', 'r1', 120, {
+        holdingDurationMinutes: 180,
+      }),
+    ],
+  }, { minimumSamples: 1 })
+
+  assert.equal(profile.overall.averageHoldingMinutes, 180)
+  assert.equal(profile.overall.averageMfePct, null)
+  assert.equal(profile.overall.averageMaePct, null)
+  assert.equal(profile.overall.averageProfitCapturePct, null)
 })

@@ -385,7 +385,9 @@ export function deepAdvisorFacts(payload = {}) {
     } : null,
     realOutcome: compactPromptObject(payload.realOutcomeContext, [
       'samples', 'sampleQualified', 'posteriorWinRate',
-      'profitFactor', 'expectancy', 'calibration', 'riskScale',
+      'profitFactor', 'expectancy', 'averageHoldingMinutes',
+      'averageMfePct', 'averageMaePct',
+      'averageProfitCapturePct', 'calibration', 'riskScale',
     ]),
   }
 }

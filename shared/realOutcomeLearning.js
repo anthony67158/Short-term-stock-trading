@@ -21,6 +21,17 @@ function rounded(value, digits = 2) {
   return Math.round((Number(value) || 0) * scale) / scale
 }
 
+function averageAvailable(records, field, digits = 2) {
+  const values = records
+    .map((record) => finite(record[field]))
+    .filter((value) => value != null)
+  if (!values.length) return null
+  return rounded(
+    values.reduce((sum, value) => sum + value, 0) / values.length,
+    digits,
+  )
+}
+
 function summarize(records, minimumSamples) {
   const pnls = records.map((record) => record.netPnl)
   const wins = pnls.filter((pnl) => pnl > 0)
@@ -68,6 +79,18 @@ function summarize(records, minimumSamples) {
     grossLoss: rounded(grossLoss),
     profitFactor: profitFactor == null ? null : rounded(profitFactor),
     expectancy: samples ? rounded(netPnl / samples) : null,
+    averageHoldingMinutes: averageAvailable(
+      records,
+      'holdingDurationMinutes',
+      1,
+    ),
+    averageMfePct: averageAvailable(records, 'mfePct'),
+    averageMaePct: averageAvailable(records, 'maePct'),
+    averageProfitCapturePct: averageAvailable(
+      records,
+      'profitCapturePct',
+      1,
+    ),
     sampleQualified,
     calibration,
     riskScale,
@@ -117,6 +140,30 @@ export function buildRealOutcomeLearning(
     .filter((event) => event?.kind === 'recommendation' && event.id)
     .map((event) => [String(event.id), event]))
   const executions = latestExecutions(events)
+  const attributionsByTransaction = new Map()
+  for (const attribution of (
+    Array.isArray(data.executionAttributions)
+      ? data.executionAttributions
+      : []
+  )) {
+    for (const transactionId of (
+      Array.isArray(attribution?.transactionIds)
+        ? attribution.transactionIds
+        : []
+    )) {
+      if (transactionId) {
+        attributionsByTransaction.set(
+          String(transactionId),
+          attribution,
+        )
+      }
+    }
+  }
+  const closedById = new Map(
+    (Array.isArray(data.closed) ? data.closed : [])
+      .filter((record) => record?.id)
+      .map((record) => [String(record.id), record]),
+  )
   const linkedRecommendationIds = new Set(executions
     .map((event) => String(event.linkedRecommendationId || ''))
     .filter(Boolean))
@@ -165,8 +212,32 @@ export function buildRealOutcomeLearning(
       excluded.missingNetPnl++
       continue
     }
+    const transactionId = String(
+      execution.transactionId || execution.id,
+    )
+    const attribution = attributionsByTransaction.get(transactionId)
+    const transaction = closedById.get(transactionId)
+    const buyAt = finite(
+      attribution?.entryAt
+      ?? execution.outcome?.entryAt
+      ?? transaction?.buyAt,
+    )
+    const sellAt = finite(
+      attribution?.exitAt
+      ?? execution.outcome?.exitAt
+      ?? transaction?.sellAt
+      ?? execution.at,
+    )
+    const holdingDurationMinutes = finite(
+      attribution?.holdingDurationMinutes
+      ?? execution.outcome?.holdingDurationMinutes,
+    ) ?? (
+      buyAt != null && sellAt != null
+        ? Math.max(0, (sellAt - buyAt) / 60000)
+        : null
+    )
     records.push({
-      transactionId: String(execution.transactionId || execution.id),
+      transactionId,
       recommendationId: String(recommendation.id),
       code: String(execution.code || recommendation.code || ''),
       at: Number(execution.at) || 0,
@@ -187,6 +258,24 @@ export function buildRealOutcomeLearning(
       tacticalTriggerPath: String(
         recommendation.tacticalTriggerPath || 'unknown',
       ),
+      holdingDurationMinutes: holdingDurationMinutes == null
+        ? null
+        : rounded(holdingDurationMinutes, 1),
+      mfePct: finite(
+        attribution?.mfePct
+        ?? execution.outcome?.mfePct
+        ?? transaction?.mfePct,
+      ),
+      maePct: finite(
+        attribution?.maePct
+        ?? execution.outcome?.maePct
+        ?? transaction?.maePct,
+      ),
+      profitCapturePct: finite(
+        attribution?.profitCapturePct
+        ?? execution.outcome?.profitCapturePct
+        ?? transaction?.profitCapturePct,
+      ),
       attribution: String(
         execution.knowledgeActionReview?.attribution || 'unknown',
       ),
@@ -197,6 +286,7 @@ export function buildRealOutcomeLearning(
     policy: {
       outcome: 'LINKED_VALIDATED_REALIZED_NET_PNL',
       feeAdjusted: true,
+      pathMetricsRequireVerifiedPrices: true,
       minimumSamples: threshold,
       winRatePrior: 'BETA_2_2',
       unexecutedAdviceExcluded: true,
@@ -293,6 +383,14 @@ export function realOutcomeContext(
     posteriorWinRate: qualified ? selected.posteriorWinRate : null,
     profitFactor: qualified ? selected.profitFactor : null,
     expectancy: qualified ? selected.expectancy : null,
+    averageHoldingMinutes: qualified
+      ? selected.averageHoldingMinutes
+      : null,
+    averageMfePct: qualified ? selected.averageMfePct : null,
+    averageMaePct: qualified ? selected.averageMaePct : null,
+    averageProfitCapturePct: qualified
+      ? selected.averageProfitCapturePct
+      : null,
     calibration: qualified ? selected.calibration : 'insufficient',
     riskScale: qualified ? selected.riskScale : 1,
     rule: '仅调节风险预算，不改变当前证据方向或绕过硬风控',
