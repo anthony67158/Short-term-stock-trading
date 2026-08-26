@@ -201,7 +201,7 @@ test('机会成本只从账号内已验证的首要轮动读取', () => {
   }
 
   assert.deepEqual(
-    portfolioOpportunityCostForStock(accountData, '600000'),
+    portfolioOpportunityCostForStock(accountData, '600000', 1123),
     {
       schemaVersion: 'opportunity-cost.v1',
       status: 'READY',
@@ -215,7 +215,15 @@ test('机会成本只从账号内已验证的首要轮动读取', () => {
     },
   )
   assert.equal(
-    portfolioOpportunityCostForStock(accountData, '600001'),
+    portfolioOpportunityCostForStock(accountData, '600001', 1123),
+    null,
+  )
+  assert.equal(
+    portfolioOpportunityCostForStock(
+      accountData,
+      '600000',
+      123 + 25 * 3600 * 1000,
+    ),
     null,
   )
 })

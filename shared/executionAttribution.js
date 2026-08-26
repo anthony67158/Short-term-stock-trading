@@ -276,39 +276,39 @@ export function aggregateExecutionAttribution(records = []) {
         ...summary
       } = group
       return {
-      ...summary,
-      netPnl: rounded(summary.netPnl),
-      totalFees: rounded(summary.totalFees),
-      averageHoldingMinutes: holdingDurationMinutes.length
-        ? rounded(
-            holdingDurationMinutes.reduce(
-              (sum, value) => sum + value,
-              0,
-            ) / holdingDurationMinutes.length,
-            1,
-          )
-        : null,
-      averageMfePct: mfePct.length
-        ? rounded(
-            mfePct.reduce((sum, value) => sum + value, 0)
-              / mfePct.length,
-          )
-        : null,
-      averageMaePct: maePct.length
-        ? rounded(
-            maePct.reduce((sum, value) => sum + value, 0)
-              / maePct.length,
-          )
-        : null,
-      averageProfitCapturePct: profitCapturePct.length
-        ? rounded(
-            profitCapturePct.reduce(
-              (sum, value) => sum + value,
-              0,
-            ) / profitCapturePct.length,
-            1,
-          )
-        : null,
+        ...summary,
+        netPnl: rounded(summary.netPnl),
+        totalFees: rounded(summary.totalFees),
+        averageHoldingMinutes: holdingDurationMinutes.length
+          ? rounded(
+              holdingDurationMinutes.reduce(
+                (sum, value) => sum + value,
+                0,
+              ) / holdingDurationMinutes.length,
+              1,
+            )
+          : null,
+        averageMfePct: mfePct.length
+          ? rounded(
+              mfePct.reduce((sum, value) => sum + value, 0)
+                / mfePct.length,
+            )
+          : null,
+        averageMaePct: maePct.length
+          ? rounded(
+              maePct.reduce((sum, value) => sum + value, 0)
+                / maePct.length,
+            )
+          : null,
+        averageProfitCapturePct: profitCapturePct.length
+          ? rounded(
+              profitCapturePct.reduce(
+                (sum, value) => sum + value,
+                0,
+              ) / profitCapturePct.length,
+              1,
+            )
+          : null,
       }
     }),
   }

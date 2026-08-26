@@ -123,6 +123,22 @@ test('缺少量化确认的候选只能进入等待名单', () => {
   assert.equal(result.watchlist[0].entrySignal.passed, false)
 })
 
+test('缺失相对强弱与市场分时队列维度使用中性值而非NaN', () => {
+  const result = rankCandidateShortlist([{
+    code: '600099',
+    name: '数据不全样本',
+    price: 10,
+    pct: 1,
+    volRatio: 1,
+    quant: null,
+  }])
+
+  assert.equal(
+    result.list[0].opportunityQueue.dimensions.relativeStrength,
+    50,
+  )
+})
+
 test('候选按立即关注、回踩候选和淘汰形成互斥队列', () => {
   const result = rankCandidateShortlist([
     row({

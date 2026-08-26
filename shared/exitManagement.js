@@ -74,9 +74,12 @@ function structuralExit(tactical = {}) {
     tactical.stock?.relativeStrength,
   )
   return (
-    distribution && sectorWeak
-    || negativeCatalyst && relativeStrength != null
+    (distribution && sectorWeak)
+    || (
+      negativeCatalyst
+      && relativeStrength != null
       && relativeStrength < 45
+    )
   )
 }
 

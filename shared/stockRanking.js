@@ -326,7 +326,7 @@ function candidateDimensions(item = {}) {
     relativeStrength: +clamp(
       finite(
         tactical.stock?.relativeStrength,
-        item.marketScore,
+        finite(item.marketScore, 50),
       ),
       0,
       100,

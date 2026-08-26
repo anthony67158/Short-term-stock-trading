@@ -83,6 +83,30 @@ test('持仓退出受T+1限制时明确下一交易日优先退出', () => {
   assert.match(lifecycle.nextEvent, /T\+1/)
 })
 
+test('确定性止损被T+1锁定时仍保持等待退出阶段', () => {
+  const lifecycle = deriveOpportunityLifecycle({
+    code: '600000',
+    mode: 'hold_advice',
+    advice: {
+      action: '持有',
+      exitManagement: {
+        kind: 'HARD_STOP',
+        blockedByT1: true,
+      },
+    },
+    decisionPlan: {
+      decisionId: 'decision.stop-locked',
+      action: 'HOLD',
+      actionability: 'WATCH',
+    },
+    holdQty: 2,
+    sellableTodayQty: 0,
+  })
+
+  assert.equal(lifecycle.stage, 'EXIT_PENDING')
+  assert.match(lifecycle.nextEvent, /T\+1/)
+})
+
 test('同一决策终态不会被旧设备运行态回滚', () => {
   const current = {
     decisionId: 'd1',

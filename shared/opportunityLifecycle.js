@@ -82,7 +82,14 @@ export function deriveOpportunityLifecycle({
   const actionability = String(
     decisionPlan.actionability || '',
   )
-  const riskExit = /EXIT|REDUCE|清仓|减仓|止损|退出/.test(action)
+  const deterministicExit = [
+    'HARD_STOP',
+    'STRUCTURAL_EXIT',
+    'TAKE_PROFIT',
+    'TRAILING_PROTECT',
+  ].includes(String(advice.exitManagement?.kind || ''))
+  const riskExit = deterministicExit
+    || /EXIT|REDUCE|清仓|减仓|止损|退出/.test(action)
   const riskEntry = /BUY|ADD|买入|建仓|加仓|试错/.test(action)
   let stage = fromExecution
 

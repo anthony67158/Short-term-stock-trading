@@ -119,22 +119,34 @@ import { loadSectorOpportunity } from './_sector_opportunity.js';
 export function portfolioOpportunityCostForStock(
   accountData = {},
   code = '',
+  now = Date.now(),
 ) {
   const result = accountData?.portfolioAnalysisLatest?.result
   const analysis = result?.analysis || result
   const rotation = analysis?.executionPlan?.primaryRotation
+  const sourceCode = String(rotation?.source?.code || '')
+  const targetCode = String(rotation?.target?.code || '')
+  const generatedAt = Number(
+    accountData?.portfolioAnalysisLatest?.generatedAt
+    || accountData?.portfolioAnalysisLatest?.completedAt
+    || 0,
+  )
   if (
     !rotation
-    || String(rotation.source?.code || '') !== String(code || '')
-    || !rotation.target?.code
+    || !/^\d{6}$/.test(sourceCode)
+    || !/^\d{6}$/.test(targetCode)
+    || sourceCode !== String(code || '')
+    || !(generatedAt > 0)
+    || Number(now) < generatedAt
+    || Number(now) - generatedAt > 24 * 3600 * 1000
   ) return null
   return {
     schemaVersion: 'opportunity-cost.v1',
     status: String(rotation.status || ''),
     actionable: rotation.actionable === true,
-    sourceCode: String(rotation.source.code),
-    targetCode: String(rotation.target.code),
-    targetName: String(rotation.target.name || rotation.target.code)
+    sourceCode,
+    targetCode,
+    targetName: String(rotation.target.name || targetCode)
       .slice(0, 40),
     edgeScore: Number.isFinite(Number(rotation.comparison?.edgeScore))
       ? Number(rotation.comparison.edgeScore)
@@ -142,11 +154,7 @@ export function portfolioOpportunityCostForStock(
     tradingCost: Number.isFinite(Number(rotation.costs?.total))
       ? Number(rotation.costs.total)
       : null,
-    generatedAt: Number(
-      accountData?.portfolioAnalysisLatest?.generatedAt
-      || accountData?.portfolioAnalysisLatest?.completedAt
-      || 0,
-    ) || null,
+    generatedAt,
   };
 }
 

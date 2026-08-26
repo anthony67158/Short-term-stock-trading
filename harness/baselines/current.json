@@ -1,6 +1,6 @@
 {
   "schemaVersion": "harness-baseline.v1",
-  "generatedAt": 1787671060693,
+  "generatedAt": 1787734385544,
   "versions": {
     "app": "1.0.0",
     "git": "working-tree",
@@ -91,11 +91,12 @@
         "actionability": 1,
         "consistency": 1
       },
-      "cases": 3,
+      "cases": 4,
       "caseIds": [
         "screen-concept-leader-reserve-keeps-entry-confirmation",
         "screen-entry-confirmation-and-fabrication-filter",
-        "screen-no-trade-conditional-fallback"
+        "screen-no-trade-conditional-fallback",
+        "screen-three-opportunity-queues"
       ]
     },
     "daily": {

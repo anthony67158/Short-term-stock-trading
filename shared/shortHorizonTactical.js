@@ -459,6 +459,37 @@ export function buildShortHorizonTactical(
             ),
           }
         : null,
+      currentTradingDay: payload.quant?.currentTradingDayForecast
+        ? {
+            targetDate: text(
+              payload.quant.currentTradingDayForecast.targetDate,
+              20,
+            ),
+            direction: text(
+              payload.quant.currentTradingDayForecast.direction,
+              30,
+            ),
+            upProb: rounded(
+              payload.quant.currentTradingDayForecast.upProb,
+            ),
+            expRet: rounded(
+              payload.quant.currentTradingDayForecast.expRet,
+              2,
+            ),
+            targetLow: rounded(
+              payload.quant.currentTradingDayForecast.targetLow,
+              3,
+            ),
+            targetMid: rounded(
+              payload.quant.currentTradingDayForecast.targetMid,
+              3,
+            ),
+            targetHigh: rounded(
+              payload.quant.currentTradingDayForecast.targetHigh,
+              3,
+            ),
+          }
+        : null,
       v21: payload.quant?.v21
         ? {
             activeHead: text(payload.quant.v21.activeHead, 30),

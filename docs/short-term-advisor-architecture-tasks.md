@@ -101,7 +101,7 @@ node --test test/short-horizon-tactical.test.js \
 
 ### Checkpoint C
 
-- [ ] 执行、退出、复核和学习闭环通过 Harness。
+- [x] 执行、退出、复核和学习闭环通过 Harness。
 
 ## Phase 4：用户体验与发布
 
@@ -109,9 +109,9 @@ node --test test/short-horizon-tactical.test.js \
 
 **Acceptance**
 
-- [ ] 第一屏只显示唯一动作、作战阶段、短线窗口、优势、风险和重评条件。
-- [ ] 不出现内部枚举、策略卡或影子建议。
-- [ ] 桌面和移动端无重叠、跳动和文本溢出。
+- [x] 第一屏只显示唯一动作、作战阶段、短线窗口、优势、风险和重评条件。
+- [x] 不出现内部枚举、策略卡或影子建议。
+- [x] 桌面和移动端无重叠、跳动和文本溢出。
 
 ### Task 9：系统验证与替换上线
 
