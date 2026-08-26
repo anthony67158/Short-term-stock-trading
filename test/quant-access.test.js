@@ -126,3 +126,26 @@ test('已登录请求始终使用账号当前选择的量化模型', async () =>
   ), 'v2')
   assert.equal(request[TRUSTED_QUANT_VERSION], 'v2')
 })
+
+test('AI已完成鉴权时直接复用账号模型设置不重复读取账号', async () => {
+  const request = { headers: encodedHeaders() }
+  const account = {
+    status: 'active',
+    data: { settings: { quantModelVersion: 'v2.1' } },
+  }
+  let accountReads = 0
+
+  assert.equal(await resolveQuantModelForRequest(
+    request,
+    'default',
+    {
+      account,
+      readAccount: async () => {
+        accountReads++
+        return account
+      },
+      isAuthorized: () => true,
+    },
+  ), 'v2.1')
+  assert.equal(accountReads, 0)
+})
