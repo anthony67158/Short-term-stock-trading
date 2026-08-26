@@ -225,6 +225,36 @@ export async function runAdviceHarnessCase(testCase) {
       },
     ),
     item(
+      'decision-plan-manual-confirmation',
+      'actionability',
+      expected.expectedDecisionManualConfirmation == null
+        || (
+          decisionPlan?.manualConfirmationOnly === true
+        ) === (
+          expected.expectedDecisionManualConfirmation === true
+        ),
+      '统一决策计划人工确认要求与预期不一致',
+      {
+        hard: true,
+        code: 'DECISION_PLAN_MANUAL_CONFIRMATION_MISMATCH',
+      },
+    ),
+    item(
+      'decision-plan-max-lots',
+      'risk',
+      !Number.isFinite(Number(expected.expectedDecisionMaxLots))
+        || (
+          Number.isFinite(Number(decisionPlan?.quantity?.lots))
+          && Number(decisionPlan.quantity.lots)
+            <= Number(expected.expectedDecisionMaxLots)
+        ),
+      '统一决策计划超过预期仓位上限',
+      {
+        hard: true,
+        code: 'DECISION_PLAN_MAX_LOTS_EXCEEDED',
+      },
+    ),
+    item(
       'decision-plan-costs',
       'feasibility',
       input.compileDecisionPlan !== true
