@@ -44,8 +44,10 @@ test('候选卡买入框与预警只读取统一动作视图的契约价', () =>
   assert.match(planStore, /projectAdviceAlerts\(state, code/)
   assert.match(planStore, /requirePriceContract:\s*true/)
   assert.match(planTab, /pc-buyalert review-paths/)
-  assert.match(planTab, /reviewAlerts\.map/)
   assert.match(planTab, /anyReached/)
+  assert.match(planTab, /if \(!reviewing && !anyReached\) return null/)
+  assert.match(planTab, /条件已触发，正在自动复核/)
+  assert.doesNotMatch(planTab, /reviewAlerts\.map/)
 })
 
 test('个股建议只保留一个主结论并把扩展信息收进详情', () => {

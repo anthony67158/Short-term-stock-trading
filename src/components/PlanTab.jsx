@@ -472,6 +472,40 @@ function AdviceUpdatedAt({ entry, score, bias }) {
   )
 }
 
+function MarketPulse({ quote }) {
+  if (!quote) return null
+  return (
+    <div className="trade-card-pulse" role="group" aria-label="盘面证据">
+      <span>
+        <em>换手</em>
+        <b className={quote.turnover > 10 ? 'gold' : ''}>
+          {Number.isFinite(Number(quote.turnover))
+            ? `${fmtNum(quote.turnover, 1)}%`
+            : '--'}
+        </b>
+      </span>
+      <span>
+        <em>量比</em>
+        <b className={quote.volRatio > 2 ? 'gold' : ''}>
+          {fmtNum(quote.volRatio, 1)}
+        </b>
+      </span>
+      <span>
+        <em>主力</em>
+        <b className={pctClass(quote.mainInflow)}>
+          {fmtInflow(quote.mainInflow)}
+        </b>
+      </span>
+      <span title="散户资金（小单净流入）">
+        <em>散户</em>
+        <b className={pctClass(quote.retailInflow)}>
+          {fmtInflow(quote.retailInflow)}
+        </b>
+      </span>
+    </div>
+  )
+}
+
 const roundActionPrice = (value) => (
   value == null || isNaN(value)
     ? null
@@ -776,8 +810,6 @@ function CandDecision({ p, q }) {
 
   return (
     <div className="card-decision-slot">
-      <AdviceUpdatedAt entry={entry} score={p.qScore} bias={p.qBias} />
-      {generation?.active && <AdviceGenerationStatus code={p.code} />}
       {!view ? (
         !generation?.active && (
           <AdviceActionPanel
@@ -859,6 +891,16 @@ function CandDecision({ p, q }) {
           )}
         </div>
       )}
+      <div className="card-decision-meta">
+        <AdviceUpdatedAt
+          entry={entry}
+          score={p.qScore}
+          bias={p.qBias}
+        />
+        {generation?.active && (
+          <AdviceGenerationStatus code={p.code} />
+        )}
+      </div>
     </div>
   )
 }
@@ -1029,39 +1071,9 @@ function PlanList({ book, quote, stockTags, batchSel }) {
             <Icon name={p.star ? 'starFill' : 'star'} size={13} />
           </button>
         </div>
-        {/* 盯盘监控指标（原自选股监控能力）*/}
-        {q && (
-          <div className="stock-card-metrics pc-metrics">
-            <span className="stock-card-metric">
-              <span>换手</span>
-              <b className={q.turnover > 10 ? 'gold' : ''}>{fmtNum(q.turnover, 1)}%</b>
-            </span>
-            <span className="stock-card-metric">
-              <span>量比</span>
-              <b className={q.volRatio > 2 ? 'gold' : ''}>{fmtNum(q.volRatio, 1)}</b>
-            </span>
-            <span className="stock-card-metric">
-              <span>主力</span>
-              <b className={pctClass(q.mainInflow)}>{fmtInflow(q.mainInflow)}</b>
-            </span>
-            <span className="stock-card-metric" title="散户资金（小单净流入）">
-              <span>散户</span>
-              <b className={pctClass(q.retailInflow)}>{fmtInflow(q.retailInflow)}</b>
-            </span>
-          </div>
-        )}
-        {/* 当前指令、有效价位、手数与进度共用同一建议视图，避免方向脱节。 */}
+        {/* 主指令优先；盘面指标只作为次级证据。 */}
         <CandDecision p={p} q={q} />
-        <StockNoteSummary
-          code={p.code}
-          name={q?.name || p.name}
-          text={stockNote}
-          onOpen={() => openStockDetail(
-            p.code,
-            q?.name || p.name,
-            { focusNote: true },
-          )}
-        />
+        <MarketPulse quote={q} />
         {/* 卡片只展示观察复核提醒；可执行买点已在上方指令区统一表达。 */}
         {(() => {
           const stockAlerts = (book.alerts || []).filter(
@@ -1082,6 +1094,7 @@ function PlanList({ book, quote, stockTags, batchSel }) {
             const anyReached = reviewAlerts.some((alert) =>
               alert.enabled && reached(alert)
             )
+            if (!reviewing && !anyReached) return null
             const tone = reviewing ? ' off' : (anyReached ? ' hot' : '')
             return (
               <div
@@ -1095,22 +1108,26 @@ function PlanList({ book, quote, stockTags, batchSel }) {
                 }
               >
                 <Icon name="bell" size={11} />
-                {reviewAlerts.map((alert, index) => (
-                  <span className="pc-watch-path" key={alert.id}>
-                    {index > 0 && <i aria-hidden="true">·</i>}
-                    {alert.note || '观察价'} {alert.op === 'gte' ? '≥' : '≤'} <b>{fmtRaw(alert.value)}</b>
-                    {alert.enabled && reached(alert) && <em>已到</em>}
-                  </span>
-                ))}
-                {reviewing && <span className="pc-buyalert-off">复核中</span>}
-                {!executionOpen && (
-                  <span className="pc-buyalert-off">盘中到价自动复核</span>
-                )}
+                <span>
+                  {reviewing
+                    ? '条件已触发，正在自动复核'
+                    : '条件已到，等待自动复核'}
+                </span>
               </div>
             )
           }
           return null
         })()}
+        <StockNoteSummary
+          code={p.code}
+          name={q?.name || p.name}
+          text={stockNote}
+          onOpen={() => openStockDetail(
+            p.code,
+            q?.name || p.name,
+            { focusNote: true },
+          )}
+        />
         {buying === p.code ? (
           <div className="buy-inline-wrap">
             <div className="buy-inline">
@@ -2703,7 +2720,7 @@ function HoldingItem({ h, quote: q }) {
       <div className="trade-card hold-item" {...swipe.bind}
         data-code={h.code}
         style={swipe.dx ? { transform: `translateX(${swipe.dx}px)`, transition: swipe.swiping ? 'none' : 'transform .2s ease' } : undefined}>
-      {/* 身份行只承担股票身份和持仓盈亏，行情与成本下沉到稳定指标带。 */}
+      {/* 身份行聚合股票身份、现价和盈亏；仓位与成本留在稳定指标带。 */}
       <div className="hold-head">
         <div className="hold-head-l">
           <StockName
@@ -2714,30 +2731,49 @@ function HoldingItem({ h, quote: q }) {
             <span className="hh-name">{h.name}</span>
           </StockName>
         </div>
-        {pnl != null && (
-          <div className={'hold-pnl ' + (pnl >= 0 ? 'red' : 'green')} title={costBasis.tRealizedPnl
-            ? '相对做T后有效成本的持仓总盈亏（含已实现做T收益）'
-            : '相对含费成本的浮动盈亏'}>
-            <span className="hp-pct">{pnl >= 0 ? '+' : ''}{pnl.toFixed(2)}%</span>
-            {floatPnl != null && <span className="hp-amt">{fmtMoney(floatPnl)}</span>}
-          </div>
-        )}
+        <div className="hold-head-market">
+          {effPx != null && (
+            <div
+              className={
+                'hold-live-quote '
+                + (validPx != null ? pctClass(q?.pct) : 'muted')
+              }
+            >
+              <strong>{fmtRaw(effPx)}</strong>
+              <span>
+                {validPx != null ? fmtPct(q?.pct) : '最近收盘'}
+              </span>
+            </div>
+          )}
+          {pnl != null && (
+            <div className={'hold-pnl ' + (pnl >= 0 ? 'red' : 'green')} title={costBasis.tRealizedPnl
+              ? '相对做T后有效成本的持仓总盈亏（含已实现做T收益）'
+              : '相对含费成本的浮动盈亏'}>
+              <span className="hp-pct">{pnl >= 0 ? '+' : ''}{pnl.toFixed(2)}%</span>
+              {floatPnl != null && <span className="hp-amt">{fmtMoney(floatPnl)}</span>}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 当前动作永远先于持仓快照与盘面证据。 */}
+      <div className="card-decision-slot">
+        <AdviceActionPanel
+          view={decisionView}
+          currentPrice={effPx}
+          onPrompt={() => openStockDetail(h.code, h.name)}
+        />
+        <div className="card-decision-meta">
+          <AdviceUpdatedAt
+            entry={adviceEntry}
+            score={h.qScore}
+            bias={h.qBias}
+          />
+          <AdviceGenerationStatus code={h.code} />
+        </div>
       </div>
 
       <div className="stock-card-metrics hold-card-metrics">
-        <span className="stock-card-metric" title={validPx == null && effPx != null ? '休市或行情暂不可用，显示最近收盘价' : '当前价格'}>
-          <span>现价</span>
-          {validPx != null
-            ? (
-                <strong className={'stock-card-metric-value ' + pctClass(q?.pct)}>
-                  {fmtRaw(validPx)}
-                  <small>{fmtPct(q?.pct)}</small>
-                </strong>
-              )
-            : effPx != null
-              ? <strong className="stock-card-metric-value muted">{fmtRaw(effPx)}<small>收盘</small></strong>
-              : <strong className="stock-card-metric-value muted">—</strong>}
-        </span>
         <span className="stock-card-metric" title={netT !== 0 ? `底仓 ${h.qty} 手，今日做T未结算净${netT > 0 ? '买入+' : '卖出'}${netT} 手` : '当前持仓手数'}>
           <span>持仓</span>
           <strong className="stock-card-metric-value">
@@ -2761,58 +2797,20 @@ function HoldingItem({ h, quote: q }) {
             <Icon name="edit" size={11} />
           </button>
         </span>
-        <span className="stock-card-metric stock-card-market-metric">
-          <span>换手</span>
-          <b className={q?.turnover > 10 ? 'gold' : ''}>
-            {Number.isFinite(Number(q?.turnover))
-              ? `${fmtNum(q?.turnover, 1)}%`
-              : '--'}
-          </b>
-        </span>
-        <span className="stock-card-metric stock-card-market-metric">
-          <span>量比</span>
-          <b className={q?.volRatio > 2 ? 'gold' : ''}>
-            {fmtNum(q?.volRatio, 1)}
-          </b>
-        </span>
-        <span className="stock-card-metric stock-card-market-metric">
-          <span>主力</span>
-          <b className={pctClass(q?.mainInflow)}>
-            {fmtInflow(q?.mainInflow)}
-          </b>
-        </span>
-        <span
-          className="stock-card-metric stock-card-market-metric"
-          title="散户资金（小单净流入）"
-        >
-          <span>散户</span>
-          <b className={pctClass(q?.retailInflow)}>
-            {fmtInflow(q?.retailInflow)}
-          </b>
+        <span className="stock-card-metric hold-t1-metric">
+          <span>今日可卖</span>
+          <strong className="stock-card-metric-value">
+            {currentT1.sellableToday}<small>手</small>
+          </strong>
+          <em>
+            {currentT1.boughtToday > 0
+              ? `T+1锁定${currentT1.boughtToday}手`
+              : '无当日锁定'}
+          </em>
         </span>
       </div>
 
-      {/* 当前指令、加减仓位与动作进度使用同一建议，不再并排展示互相冲突的价格体系。 */}
-      <div className="card-decision-slot">
-        <AdviceUpdatedAt entry={adviceEntry} score={h.qScore} bias={h.qBias} />
-        <AdviceGenerationStatus code={h.code} />
-        <AdviceActionPanel
-          view={decisionView}
-          currentPrice={effPx}
-          onPrompt={() => openStockDetail(h.code, h.name)}
-        />
-      </div>
-
-      <StockNoteSummary
-        code={h.code}
-        name={h.name}
-        text={stockNote}
-        onOpen={() => openStockDetail(
-          h.code,
-          h.name,
-          { focusNote: true },
-        )}
-      />
+      <MarketPulse quote={q} />
 
       {hasPlan && (
         <button
@@ -2836,6 +2834,17 @@ function HoldingItem({ h, quote: q }) {
           <Icon name="chevronRight" size={13} />
         </button>
       )}
+
+      <StockNoteSummary
+        code={h.code}
+        name={h.name}
+        text={stockNote}
+        onOpen={() => openStockDetail(
+          h.code,
+          h.name,
+          { focusNote: true },
+        )}
+      />
 
       {/* 操作区 */}
       {!mobileOperations && tradeErr && <div className="err" style={{ margin: '8px 0' }}>{tradeErr}</div>}

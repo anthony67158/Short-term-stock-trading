@@ -76,6 +76,34 @@ test('策略摘要使用两行主指令、紧凑价位和单行进度', () => {
     precision,
     /\.action-progress-summary\s*{[^}]*grid-template-columns:\s*auto\s+minmax\(0,\s*1fr\)\s+auto/s,
   )
+  assert.match(planTab, /className="card-decision-meta"/)
+  assert.match(
+    precision,
+    /\.card-decision-meta\s*{[^}]*display:\s*flex[^}]*flex-wrap:\s*wrap/s,
+  )
+})
+
+test('卡片操作区用推荐动作建立主次且不再额外画顶部分隔线', () => {
+  assert.match(
+    precision,
+    /\.hold-item > \.pi-actions\s*{[^}]*border-top:\s*0/s,
+  )
+  assert.match(
+    precision,
+    /\.plan-cand \.pc-actions\s*{[^}]*border-top:\s*0/s,
+  )
+  assert.match(
+    precision,
+    /\.pi-trade-actions \.act-add\.recommended\s*{[^}]*background:\s*var\(--color-accent\)/s,
+  )
+  assert.match(
+    precision,
+    /\.pi-trade-actions \.act-reduce\.recommended\s*{[^}]*background:\s*var\(--color-warning\)/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*21\.25rem\)\s*{[\s\S]*?\.pi-trade-actions\s*{[^}]*minmax\(0,\s*7fr\)/s,
+  )
 })
 
 test('策略摘要不再使用遮挡卡片的悬浮预览并保留详情入口', () => {
@@ -93,55 +121,58 @@ test('策略摘要不再使用遮挡卡片的悬浮预览并保留详情入口',
   )
 })
 
-test('持仓卡在同一指标带展示盘中活跃度与主力散户资金', () => {
+test('持仓卡先展示指令再展示仓位核心数据与次级盘面证据', () => {
+  const holdStart = planTab.indexOf(
+    '<div className="trade-card hold-item"',
+  )
+  const holdEnd = planTab.indexOf(
+    '{operationForm && (mobileOperations',
+    holdStart,
+  )
+  const holdCard = planTab.slice(holdStart, holdEnd)
   const metricsStart = planTab.indexOf(
     '<div className="stock-card-metrics hold-card-metrics"',
   )
-  const decisionStart = planTab.indexOf(
-    '<div className="card-decision-slot">',
+  const pulseStart = planTab.indexOf(
+    '<MarketPulse quote={q}',
     metricsStart,
   )
-  const metrics = planTab.slice(metricsStart, decisionStart)
+  const metrics = planTab.slice(metricsStart, pulseStart)
 
   assert.match(
     metrics,
-    />现价<\/span>[\s\S]*?>持仓<\/span>[\s\S]*?>成本<\/span>[\s\S]*?>换手<\/span>[\s\S]*?>量比<\/span>[\s\S]*?>主力<\/span>[\s\S]*?>散户<\/span>/,
+    />持仓<\/span>[\s\S]*?>成本<\/span>[\s\S]*?>今日可卖<\/span>/,
   )
-  assert.match(metrics, /fmtNum\(q\?\.turnover,\s*1\)/)
-  assert.match(metrics, /fmtNum\(q\?\.volRatio,\s*1\)/)
-  assert.match(metrics, /fmtInflow\(q\?\.mainInflow\)/)
-  assert.match(metrics, /fmtInflow\(q\?\.retailInflow\)/)
-  assert.equal(
-    (metrics.match(/className="stock-card-metrics/g) || []).length,
-    1,
+  assert.ok(
+    holdCard.indexOf('className="card-decision-slot"')
+    < holdCard.indexOf('className="stock-card-metrics hold-card-metrics"'),
   )
   assert.match(
     precision,
-    /\.hold-card-metrics \.stock-card-market-metric\s*{[^}]*min-height:\s*44px/s,
-  )
-  assert.match(
-    precision,
-    /\.hold-card-metrics \.stock-card-market-metric\s*{[^}]*border-top:\s*1px solid var\(--color-rule-2\)/s,
-  )
-  assert.match(
-    precision,
-    /\.hold-card-metrics\s*{[^}]*grid-template-columns:\s*repeat\(12,\s*minmax\(0,\s*1fr\)\)/s,
-  )
-  assert.match(
-    precision,
-    /\.hold-card-metrics \.stock-card-market-metric\s*{[^}]*grid-column:\s*span 3/s,
+    /\.hold-card-metrics\s*{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s,
   )
 })
 
-test('自选卡使用四列指标带展示散户资金', () => {
+test('自选卡把当前指令放在盘面证据之前并取消四格指标墙', () => {
   assert.match(
     planTab,
-    /className="stock-card-metrics pc-metrics"[\s\S]*?>换手<\/span>[\s\S]*?>量比<\/span>[\s\S]*?>主力<\/span>[\s\S]*?>散户<\/span>/,
+    /<CandDecision p=\{p\} q=\{q\} \/>[\s\S]*?<MarketPulse quote=\{q\}/,
   )
-  assert.match(planTab, /fmtInflow\(q\.retailInflow\)/)
+  assert.doesNotMatch(
+    planTab,
+    /className="stock-card-metrics pc-metrics"/,
+  )
+  assert.equal(
+    (planTab.match(/<MarketPulse quote=\{q\}/g) || []).length,
+    2,
+  )
+  assert.match(
+    planTab,
+    /className="trade-card-pulse" role="group" aria-label="盘面证据"/,
+  )
   assert.match(
     precision,
-    /\.pc-metrics\s*{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/s,
+    /\.trade-card-pulse\s*{[^}]*display:\s*flex[^}]*flex-wrap:\s*wrap/s,
   )
 })
 

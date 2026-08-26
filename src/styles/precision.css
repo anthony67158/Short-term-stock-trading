@@ -2145,13 +2145,11 @@ textarea:focus {
 
 .plan-cand.starred {
   border-color: color-mix(in oklch, var(--color-warning) 58%, var(--color-rule));
-  background: color-mix(in oklch, var(--color-warning) 11%, var(--color-paper-2));
   box-shadow: inset 0 3px 0 color-mix(in oklch, var(--color-warning) 78%, transparent);
 }
 
 html[data-theme="light"] .plan-cand.starred {
   border-color: color-mix(in oklch, var(--color-warning) 52%, var(--color-rule));
-  background: color-mix(in oklch, var(--color-warning) 9%, var(--color-paper-2));
 }
 
 .plan-cand.starred .pc-pin.on {
@@ -11376,15 +11374,6 @@ button.acct-item {
   position: relative;
 }
 
-.hold-card-metrics {
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-}
-
-.hold-card-metrics > .stock-card-metric:not(.stock-card-market-metric) {
-  grid-column: span 4;
-  padding-inline: var(--space-3xs);
-}
-
 .hold-card-metrics .stock-card-metric-value {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -11398,36 +11387,6 @@ button.acct-item {
   position: absolute;
   top: var(--space-2xs);
   right: var(--space-2xs);
-}
-
-.hold-card-metrics .stock-card-market-metric {
-  grid-column: span 3;
-  min-height: 44px;
-  padding-inline: var(--space-2xs);
-  border-top: 1px solid var(--color-rule-2);
-}
-
-.hold-card-metrics .stock-card-market-metric:nth-child(4) {
-  border-inline-start: 0;
-}
-
-.hold-card-metrics .stock-card-market-metric > b {
-  font-size: var(--text-xs);
-}
-
-.pc-metrics {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0;
-  margin-bottom: var(--space-xs);
-}
-
-.pc-metrics .stock-card-metric {
-  padding-inline: var(--space-2xs);
-}
-
-.pc-metrics .stock-card-metric > b {
-  font-size: var(--text-xs);
 }
 
 .card-decision-slot {
@@ -13892,5 +13851,234 @@ body.overlay-scroll-locked {
   .action-trigger-state > span:last-child {
     grid-column: 1 / -1;
     color: var(--color-muted);
+  }
+}
+
+/* Hallmark · component: trade-cards · genre: modern-minimal · theme: Precision Cobalt
+ * hierarchy: identity → decision → position/evidence → discipline → actions
+ * states: default · hover · focus · active · disabled · loading · error · success
+ * pre-emit critique: P5 H5 E5 S5 R5 V4 · contrast: pass
+ */
+.plan-cand .pc-top,
+.hold-grid .hold-head {
+  padding-bottom: var(--space-xs);
+}
+
+.pc-price {
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  font-weight: 750;
+  line-height: 1.1;
+}
+
+.pc-pct {
+  font-size: var(--text-xs);
+}
+
+.hold-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.hold-head-market {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: var(--space-xs);
+}
+
+.hold-live-quote {
+  display: flex;
+  align-items: flex-end;
+  flex-direction: column;
+  gap: var(--space-3xs);
+  font-family: var(--font-mono);
+  line-height: 1;
+}
+
+.hold-live-quote strong {
+  font-size: var(--text-base);
+}
+
+.hold-live-quote span {
+  font-size: var(--text-2xs);
+}
+
+.hold-pnl {
+  min-width: 72px;
+  padding-inline-start: var(--space-xs);
+  border-inline-start: 1px solid var(--color-rule-2);
+}
+
+.card-decision-slot {
+  flex: none;
+  min-height: 0;
+  margin-top: 0;
+}
+
+.card-decision-slot .action-decision {
+  margin-top: 0;
+}
+
+.card-decision-slot .action-command {
+  padding: var(--space-sm) 0 var(--space-xs);
+}
+
+.card-decision-slot .action-command-primary {
+  font-size: var(--text-lg);
+}
+
+.card-decision-meta {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3xs) var(--space-xs);
+  margin-top: var(--space-xs);
+}
+
+.card-decision-meta .advice-updated-at {
+  margin-top: 0;
+}
+
+.card-decision-meta .advice-generation-status {
+  flex: 1 1 100%;
+}
+
+.stock-card-metrics {
+  margin: var(--space-xs) 0 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--radius-input);
+  background: var(--color-paper-3);
+}
+
+.hold-card-metrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.hold-card-metrics > .stock-card-metric {
+  grid-column: auto;
+  min-height: 56px;
+  padding-inline: var(--space-xs);
+}
+
+.hold-t1-metric > em {
+  color: var(--color-ink-2);
+}
+
+.trade-card-pulse {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3xs) var(--space-sm);
+  margin-top: var(--space-xs);
+  padding: var(--space-3xs) 0;
+  color: var(--color-muted);
+  font-size: var(--text-2xs);
+}
+
+.trade-card-pulse > span {
+  display: inline-flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: var(--space-3xs);
+  white-space: nowrap;
+}
+
+.trade-card-pulse em {
+  font-style: normal;
+}
+
+.trade-card-pulse b {
+  color: var(--color-ink-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 700;
+}
+
+.trade-card-pulse b.red {
+  color: var(--color-up);
+}
+
+.trade-card-pulse b.green {
+  color: var(--color-down);
+}
+
+.stock-note-summary {
+  padding-inline: 0;
+  background: transparent;
+}
+
+.holding-plan-summary {
+  padding-inline: var(--space-xs);
+  border: 0;
+  border-radius: var(--radius-input);
+  background: var(--color-paper-3);
+}
+
+.hold-item > .pi-actions {
+  border-top: 0;
+}
+
+.plan-cand .pc-actions {
+  border-top: 0;
+}
+
+.pi-trade-actions .act-add.recommended {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-accent-ink);
+}
+
+.pi-trade-actions .act-reduce.recommended {
+  border-color: var(--color-warning);
+  background: var(--color-warning);
+  color: var(--color-paper);
+}
+
+@media (max-width: 30rem) {
+  .pc-top {
+    grid-template-columns:
+      minmax(0, 1fr)
+      auto
+      44px;
+    grid-template-areas: "identity quote pin";
+    align-items: center;
+  }
+
+  .pc-top-r {
+    align-items: flex-end;
+    justify-self: end;
+  }
+
+  .trade-card-pulse {
+    gap: var(--space-3xs) var(--space-xs);
+  }
+}
+
+@media (max-width: 23.75rem) {
+  .hold-head-market {
+    gap: var(--space-2xs);
+  }
+
+  .hold-pnl {
+    min-width: 0;
+    padding-inline-start: var(--space-2xs);
+  }
+
+  .hp-amt {
+    display: none;
+  }
+}
+
+@media (max-width: 21.25rem) {
+  .pi-trade-actions {
+    grid-template-columns:
+      minmax(0, 4fr)
+      minmax(0, 4fr)
+      minmax(0, 7fr);
   }
 }

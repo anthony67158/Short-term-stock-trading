@@ -187,19 +187,23 @@ test('持仓与自选卡片共用真实股票题材标签且移动端可换行',
   assert.match(legacyStyles, /\.stock-theme-tag\.industry/)
 })
 
-test('持仓与自选卡片使用独立身份行和三列指标带避免首行拥挤', () => {
+test('持仓与自选卡片使用独立身份行且决策优先于次级指标', () => {
   assert.match(planTab, /className="trade-card hold-item"/)
   assert.match(planTab, /className="stock-card-metrics hold-card-metrics"/)
   assert.match(planTab, /className={'trade-card plan-cand'/)
-  assert.match(planTab, /className="stock-card-metrics pc-metrics"/)
+  assert.doesNotMatch(planTab, /className="stock-card-metrics pc-metrics"/)
+  assert.equal(
+    (planTab.match(/<MarketPulse quote=\{q\}/g) || []).length,
+    2,
+  )
   assert.match(planTab, /className={'pc-pin'/)
   assert.match(
     precision,
-    /\.stock-card-metrics\s*{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s,
+    /\.hold-card-metrics\s*{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s,
   )
   assert.match(
     precision,
-    /\.stock-card-metrics\s*{[^}]*border:\s*0[^}]*border-radius:\s*var\(--radius-control\)/s,
+    /\.stock-card-metrics\s*{[^}]*border:\s*0[^}]*border-radius:\s*var\(--radius-input\)/s,
   )
   assert.match(
     precision,
@@ -211,7 +215,7 @@ test('持仓与自选卡片使用独立身份行和三列指标带避免首行�
   )
   assert.match(
     precision,
-    /\.hold-head\s*{[^}]*align-items:\s*start[^}]*padding-bottom:\s*var\(--space-sm\)/s,
+    /\.hold-head-market\s*{[^}]*display:\s*flex[^}]*justify-content:\s*flex-end/s,
   )
 })
 
@@ -334,20 +338,20 @@ test('卡片指标与阅读型建议用留白和底色分组而不连续画横�
 
 test('持仓与自选卡把量化分收进建议元信息而不是混入行情首行', () => {
   const holdHeadStart = planTab.indexOf('<div className="hold-head">')
-  const holdMetricsStart = planTab.indexOf('<div className="stock-card-metrics hold-card-metrics">', holdHeadStart)
-  const adviceStart = planTab.indexOf('<AdviceUpdatedAt', holdMetricsStart)
-  const holdHead = planTab.slice(holdHeadStart, holdMetricsStart)
-  const holdMetrics = planTab.slice(holdMetricsStart, adviceStart)
+  const holdDecisionStart = planTab.indexOf('<div className="card-decision-slot">', holdHeadStart)
+  const holdMetricsStart = planTab.indexOf('<div className="stock-card-metrics hold-card-metrics">', holdDecisionStart)
+  const holdHead = planTab.slice(holdHeadStart, holdDecisionStart)
+  const holdMetrics = planTab.slice(holdMetricsStart, planTab.indexOf('<MarketPulse quote={q}', holdMetricsStart))
   const candTopStart = planTab.indexOf('<div className="pc-top">')
-  const candMetricsStart = planTab.indexOf('<div className="stock-card-metrics pc-metrics">', candTopStart)
-  const candTop = planTab.slice(candTopStart, candMetricsStart)
+  const candDecisionStart = planTab.indexOf('<CandDecision p={p} q={q} />', candTopStart)
+  const candTop = planTab.slice(candTopStart, candDecisionStart)
 
   assert.doesNotMatch(holdHead, /<QuantBadge score=\{h\.qScore\}/)
   assert.doesNotMatch(holdMetrics, /<QuantBadge score=\{h\.qScore\}/)
   assert.doesNotMatch(candTop, /<QuantBadge score=\{p\.qScore\}/)
   assert.match(planTab, /function AdviceUpdatedAt\(\{ entry, score, bias \}\)/)
   assert.equal(
-    (planTab.match(/<AdviceUpdatedAt entry=\{[^}]+\} score=\{[^}]+\.qScore\} bias=\{[^}]+\.qBias\}\s*\/>/g) || []).length,
+    (planTab.match(/<AdviceUpdatedAt\b/g) || []).length,
     2,
   )
   assert.match(
@@ -356,11 +360,12 @@ test('持仓与自选卡把量化分收进建议元信息而不是混入行情�
   )
 })
 
-test('持仓现价手数成本使用稳定三列指标带', () => {
+test('持仓现价和盈亏置于身份行，三列指标带只保留仓位成本与可卖量', () => {
   assert.match(planTab, /className="stock-card-metrics hold-card-metrics"/)
-  assert.match(planTab, />现价<\/span>/)
+  assert.match(planTab, /'hold-live-quote '/)
   assert.match(planTab, />持仓<\/span>/)
   assert.match(planTab, />成本<\/span>/)
+  assert.match(planTab, />今日可卖<\/span>/)
   assert.match(
     precision,
     /\.hold-card-metrics \.stock-card-metric-value\s*{[^}]*font-family:\s*var\(--font-mono\)[^}]*font-variant-numeric:\s*tabular-nums/s,
@@ -469,7 +474,7 @@ test('持仓区共用页面边线、筛选栏留出安全区且卡片展示建�
     /\.stock-group-filter \.stock-group-tabs\s*{[^}]*padding-inline-start:\s*var\(--space-2xs\)[^}]*border-inline-start:\s*1px solid var\(--color-rule-2\)/s,
   )
   assert.match(planTab, /function AdviceUpdatedAt\(\{ entry, score, bias \}\)/)
-  assert.equal((planTab.match(/<AdviceUpdatedAt entry=/g) || []).length, 2)
+  assert.equal((planTab.match(/<AdviceUpdatedAt\b/g) || []).length, 2)
   assert.match(planTab, /className="advice-updated-at"/)
   assert.match(precision, /\.hold-grid\s*{[^}]*align-items:\s*stretch/s)
   assert.match(
@@ -644,15 +649,24 @@ test('卡片内只保留单行建议摘要且完整内容进入个股详情', ()
   )
 })
 
-test('置顶自选卡保留独立金色层级且不被普通卡背景覆盖', () => {
+test('置顶自选卡只用金色边界、顶部标记和星标强调', () => {
+  const starredRule = precision.match(
+    /\.plan-cand\.starred\s*{([^}]*)}/s,
+  )?.[1] || ''
+  const lightStarredRule = precision.match(
+    /html\[data-theme="light"\] \.plan-cand\.starred\s*{([^}]*)}/s,
+  )?.[1] || ''
+
   assert.match(
-    precision,
-    /\.plan-cand\.starred\s*{[^}]*border-color:\s*color-mix\([^}]*var\(--color-warning\)[^}]*background:\s*color-mix\([^}]*var\(--color-warning\)[^}]*box-shadow:\s*inset\s+0\s+3px\s+0/s,
+    starredRule,
+    /border-color:\s*color-mix\([^}]*var\(--color-warning\)[^}]*box-shadow:\s*inset\s+0\s+3px\s+0/s,
   )
   assert.match(
-    precision,
-    /html\[data-theme="light"\] \.plan-cand\.starred\s*{[^}]*border-color:\s*color-mix\([^}]*var\(--color-warning\)[^}]*background:\s*color-mix\([^}]*var\(--color-warning\)/s,
+    lightStarredRule,
+    /border-color:\s*color-mix\([^}]*var\(--color-warning\)/s,
   )
+  assert.doesNotMatch(starredRule, /background:/)
+  assert.doesNotMatch(lightStarredRule, /background:/)
   assert.match(
     precision,
     /\.plan-cand\.starred \.pc-pin\.on\s*{[^}]*color:\s*var\(--color-warning\)/s,
@@ -1173,7 +1187,7 @@ test('持仓与自选吸顶区跟随页面底色且不会形成整条白色卡�
   )
 })
 
-test('休市卡片不显示到价并明确下一交易时段自动复核', () => {
+test('休市卡片不显示到价且自动复核状态只在触发后出现', () => {
   assert.match(
     planTab,
     /const executionOpen = isContinuousTrading\(Date\.now\(\)\)/,
@@ -1182,7 +1196,11 @@ test('休市卡片不显示到价并明确下一交易时段自动复核', () =>
     planTab,
     /const reached = \(alert\) =>\s*executionOpen &&/,
   )
-  assert.match(planTab, />盘中到价自动复核</)
+  assert.match(
+    planTab,
+    /if \(!reviewing && !anyReached\) return null/,
+  )
+  assert.match(planTab, /条件已触发，正在自动复核/)
   assert.match(
     planTab,
     /Icon name="clock"[\s\S]{0,100}查看后续预案/,
