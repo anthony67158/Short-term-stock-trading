@@ -498,6 +498,32 @@ export function buildShortHorizonTactical(
           ),
         }
       : null,
+    opportunityCost: payload.opportunityCost?.targetCode
+      ? {
+          status: text(payload.opportunityCost.status, 30),
+          actionable:
+            payload.opportunityCost.actionable === true,
+          targetCode: text(
+            payload.opportunityCost.targetCode,
+            12,
+          ),
+          targetName: text(
+            payload.opportunityCost.targetName,
+            40,
+          ),
+          edgeScore: rounded(
+            payload.opportunityCost.edgeScore,
+            1,
+          ),
+          tradingCost: rounded(
+            payload.opportunityCost.tradingCost,
+            2,
+          ),
+          generatedAt: finite(
+            payload.opportunityCost.generatedAt,
+          ),
+        }
+      : null,
     prices: {
       current: rounded(quote.price ?? payload.currentPrice, 3),
       dayLow: rounded(quote.low ?? quote.dayLow, 3),

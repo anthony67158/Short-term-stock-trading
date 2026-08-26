@@ -616,6 +616,7 @@ export function compileDecisionPlan({
     targetPrice,
     targetWeightPct,
     triggerDirection,
+    exitKind: text(advice.exitManagement?.kind, 40),
     priceLevels: priceContract.levels.map((level) => ({
       key: level.key,
       price: level.price,
@@ -681,6 +682,31 @@ export function compileDecisionPlan({
         ? tactical.conflicts.slice(0, 4)
         : [],
     },
+    exitManagement:
+      advice.exitManagement?.schemaVersion === 'exit-management.v1'
+        ? {
+            schemaVersion: 'exit-management.v1',
+            kind: text(advice.exitManagement.kind, 40),
+            priority: finite(advice.exitManagement.priority),
+            action: text(advice.exitManagement.action, 30),
+            lots: finite(advice.exitManagement.lots),
+            totalLots: finite(advice.exitManagement.totalLots),
+            sellableLots: finite(
+              advice.exitManagement.sellableLots,
+            ),
+            lockedLots: finite(advice.exitManagement.lockedLots),
+            blockedByT1:
+              advice.exitManagement.blockedByT1 === true,
+            referencePrice: finite(
+              advice.exitManagement.referencePrice,
+            ),
+            reason: text(advice.exitManagement.reason, 240),
+            nextReviewTrigger: text(
+              advice.exitManagement.nextReviewTrigger,
+              180,
+            ),
+          }
+        : null,
     opportunityLifecycle,
     manualConfirmationOnly: probeRequested,
     opportunity: payload.sectorOpportunity?.matched === true

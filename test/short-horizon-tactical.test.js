@@ -157,3 +157,29 @@ test('模型漏填短线摘要时由战术合同补齐用户字段', () => {
     SHORT_HORIZON_TACTICAL_VERSION,
   )
 })
+
+test('账号内首要轮动只以机会成本摘要进入单股战术合同', () => {
+  const tactical = buildShortHorizonTactical(payload({
+    opportunityCost: {
+      status: 'READY',
+      actionable: true,
+      sourceCode: '600000',
+      targetCode: '000001',
+      targetName: '平安银行',
+      edgeScore: 12.4,
+      tradingCost: 35.67,
+      generatedAt: 1787700000000,
+      ignored: '不应透传',
+    },
+  }))
+
+  assert.deepEqual(tactical.opportunityCost, {
+    status: 'READY',
+    actionable: true,
+    targetCode: '000001',
+    targetName: '平安银行',
+    edgeScore: 12.4,
+    tradingCost: 35.67,
+    generatedAt: 1787700000000,
+  })
+})

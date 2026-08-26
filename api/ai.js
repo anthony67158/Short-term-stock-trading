@@ -62,6 +62,9 @@ import {
   buildShortHorizonTactical,
 } from '../shared/shortHorizonTactical.js';
 import { applyPortfolioRiskPolicy } from '../shared/portfolioRiskPolicy.js';
+import {
+  applyShortHorizonExitPolicy,
+} from '../shared/exitManagement.js';
 import { applyTActionAdvicePolicy } from '../shared/tAdvicePolicy.js';
 import {
   classifyPriceLimit,
@@ -112,6 +115,40 @@ import {
 } from '../shared/tGridPolicy.js';
 import { internalApiOrigin } from './_internal_origin.js';
 import { loadSectorOpportunity } from './_sector_opportunity.js';
+
+export function portfolioOpportunityCostForStock(
+  accountData = {},
+  code = '',
+) {
+  const result = accountData?.portfolioAnalysisLatest?.result
+  const analysis = result?.analysis || result
+  const rotation = analysis?.executionPlan?.primaryRotation
+  if (
+    !rotation
+    || String(rotation.source?.code || '') !== String(code || '')
+    || !rotation.target?.code
+  ) return null
+  return {
+    schemaVersion: 'opportunity-cost.v1',
+    status: String(rotation.status || ''),
+    actionable: rotation.actionable === true,
+    sourceCode: String(rotation.source.code),
+    targetCode: String(rotation.target.code),
+    targetName: String(rotation.target.name || rotation.target.code)
+      .slice(0, 40),
+    edgeScore: Number.isFinite(Number(rotation.comparison?.edgeScore))
+      ? Number(rotation.comparison.edgeScore)
+      : null,
+    tradingCost: Number.isFinite(Number(rotation.costs?.total))
+      ? Number(rotation.costs.total)
+      : null,
+    generatedAt: Number(
+      accountData?.portfolioAnalysisLatest?.generatedAt
+      || accountData?.portfolioAnalysisLatest?.completedAt
+      || 0,
+    ) || null,
+  };
+}
 
 function avg(arr) { return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0; }
 function std(arr) { if (arr.length < 2) return 0; const m = avg(arr); return Math.sqrt(avg(arr.map((x) => (x - m) ** 2))); }
@@ -677,6 +714,14 @@ export default async function handler(req, res) {
     const payload = stripClientSearchFields((body && body.payload) || {});
     delete payload.strategyGate;
     delete payload.strategyRoute;
+    delete payload.opportunityCost;
+    if (isAdvisorMode(mode) && accountAuth.account?.data) {
+      const opportunityCost = portfolioOpportunityCostForStock(
+        accountAuth.account.data,
+        payload.code,
+      );
+      if (opportunityCost) payload.opportunityCost = opportunityCost;
+    }
     if (
       isAdvisorMode(mode)
       && !payload.realOutcomeLearning
@@ -2078,6 +2123,18 @@ export default async function handler(req, res) {
       && !result.raw
     ) {
       result = applyTActionAdvicePolicy({ mode, result, payload });
+    }
+    if (
+      ['hold_advice', 'review'].includes(mode)
+      && result
+      && typeof result === 'object'
+      && !result.raw
+    ) {
+      result = applyShortHorizonExitPolicy({
+        mode,
+        result,
+        payload,
+      });
     }
     if (
       ['buy_advice', 'hold_advice'].includes(mode)

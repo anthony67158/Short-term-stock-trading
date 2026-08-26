@@ -216,6 +216,43 @@ test('降低风险动作不受新增风险约束且不得超过今日可卖数�
   assert.equal(plan.quantity.lots, 2)
 })
 
+test('确定性退出优先级与T+1状态进入统一决策计划', () => {
+  const plan = compileDecisionPlan({
+    mode: 'hold_advice',
+    advice: {
+      action: '持有',
+      stopPrice: 9,
+      targetPrice: 12,
+      exitManagement: {
+        schemaVersion: 'exit-management.v1',
+        kind: 'HARD_STOP',
+        priority: 1,
+        action: '持有',
+        lots: 0,
+        totalLots: 2,
+        sellableLots: 0,
+        lockedLots: 2,
+        blockedByT1: true,
+        referencePrice: 8.9,
+        reason: '止损触发但今日不可卖',
+        nextReviewTrigger: '下一交易日仓位解锁',
+      },
+    },
+    payload: {
+      ...payload,
+      holdQty: 2,
+      sellableTodayQty: 0,
+    },
+    evidenceSnapshot: snapshot,
+    now,
+  })
+
+  assert.equal(plan.exitManagement.kind, 'HARD_STOP')
+  assert.equal(plan.exitManagement.priority, 1)
+  assert.equal(plan.exitManagement.blockedByT1, true)
+  assert.equal(plan.exitManagement.lockedLots, 2)
+})
+
 test('关键证据不完整时新增风险必须阻断', () => {
   const plan = compileDecisionPlan({
     mode: 'buy_advice',
