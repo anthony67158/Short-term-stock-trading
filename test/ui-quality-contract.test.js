@@ -505,6 +505,10 @@ test('操作建议卡使用固定价位列且数量与动作保持同组', () =>
   )
   assert.match(
     precision,
+    /\.card-decision-slot \.action-command\s*{[^}]*border-bottom:\s*0/s,
+  )
+  assert.match(
+    precision,
     /\.action-levels\.levels-3\s*{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s,
   )
   assert.match(

@@ -13631,7 +13631,7 @@ body.overlay-scroll-locked {
   align-items: start;
   gap: var(--space-xs);
   padding: var(--space-sm) 0;
-  border-bottom: 1px solid var(--color-rule-2);
+  border-bottom: 0;
 }
 
 .action-command-icon {
