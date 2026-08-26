@@ -2,9 +2,11 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  SHORT_HORIZON_ACTION_POLICY_VERSION,
   SHORT_HORIZON_TACTICAL_VERSION,
   attachShortHorizonSummary,
   buildShortHorizonTactical,
+  deriveShortHorizonActionPolicy,
 } from '../shared/shortHorizonTactical.js'
 
 function payload(overrides = {}) {
@@ -182,4 +184,98 @@ test('账号内首要轮动只以机会成本摘要进入单股战术合同', ()
     tradingCost: 35.67,
     generatedAt: 1787700000000,
   })
+})
+
+test('只有量化资金时机与流动性同时确认才允许新增风险', () => {
+  const tactical = buildShortHorizonTactical(payload({
+    todayQuote: {
+      ...payload().todayQuote,
+      amount: 2e8,
+    },
+  }))
+  const policy = deriveShortHorizonActionPolicy({
+    mode: 'buy_advice',
+    tactical,
+    requestedAction: 'BUY',
+  })
+
+  assert.equal(
+    policy.schemaVersion,
+    SHORT_HORIZON_ACTION_POLICY_VERSION,
+  )
+  assert.equal(policy.canIncreaseRisk, true)
+  assert.deepEqual(policy.allowedActions, ['BUY', 'WATCH'])
+  assert.equal(policy.effectiveAction, 'BUY')
+  assert.equal(policy.overridden, false)
+})
+
+test('高位追涨请求被短线动作政策确定性降级为观望', () => {
+  const tactical = buildShortHorizonTactical(payload({
+    todayQuote: {
+      ...payload().todayQuote,
+      pct: 9,
+      turnover: 20,
+      volRatio: 5.5,
+      amount: 3e8,
+    },
+    intraday: { posInDay: 96 },
+  }))
+  const policy = deriveShortHorizonActionPolicy({
+    mode: 'buy_advice',
+    tactical,
+    requestedAction: 'BUY',
+  })
+
+  assert.deepEqual(policy.allowedActions, ['WATCH'])
+  assert.equal(policy.effectiveAction, 'WATCH')
+  assert.equal(policy.overridden, true)
+  assert.match(policy.reasons.join('；'), /禁止追涨|拥挤度/)
+})
+
+test('持仓场景始终放行减仓退出但严格限制加仓', () => {
+  const tactical = buildShortHorizonTactical(payload({
+    todayQuote: {
+      ...payload().todayQuote,
+      amount: 2e8,
+    },
+    stockFund: {
+      mainNetYi: -1.5,
+      retailNetYi: 1.2,
+    },
+  }))
+  const addPolicy = deriveShortHorizonActionPolicy({
+    mode: 'hold_advice',
+    tactical,
+    requestedAction: 'ADD',
+  })
+  const exitPolicy = deriveShortHorizonActionPolicy({
+    mode: 'hold_advice',
+    tactical,
+    requestedAction: 'EXIT',
+  })
+
+  assert.equal(addPolicy.effectiveAction, 'HOLD')
+  assert.equal(addPolicy.overridden, true)
+  assert.ok(addPolicy.allowedActions.includes('REDUCE'))
+  assert.ok(addPolicy.allowedActions.includes('EXIT'))
+  assert.equal(exitPolicy.effectiveAction, 'EXIT')
+})
+
+test('做T未完成腿只允许继续既定方向', () => {
+  const tactical = {
+    ...buildShortHorizonTactical(payload()),
+    tAction: { stage: 'buy_wait_sell' },
+  }
+  const policy = deriveShortHorizonActionPolicy({
+    mode: 't_advice',
+    tactical,
+    requestedAction: 'T_BUY_FIRST',
+  })
+
+  assert.deepEqual(
+    policy.allowedActions,
+    ['T_SELL_FIRST', 'WATCH'],
+  )
+  assert.equal(policy.effectiveAction, 'WATCH')
+  assert.equal(policy.overridden, true)
 })

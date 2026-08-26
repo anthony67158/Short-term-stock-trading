@@ -8,6 +8,8 @@ import {
 
 export const SHORT_HORIZON_TACTICAL_VERSION =
   'short-horizon-tactical.v1'
+export const SHORT_HORIZON_ACTION_POLICY_VERSION =
+  'short-horizon-action-policy.v1'
 
 const clamp = (value, low = 0, high = 100) =>
   Math.max(low, Math.min(high, value))
@@ -290,6 +292,137 @@ function conflictsOf({
     && location === 'EXTENDED'
   ) conflicts.push('量化偏多，但当前价格过热')
   return conflicts
+}
+
+function bullishQuant(tactical = {}) {
+  if (tactical.quant?.highConfidence === true) return true
+  const direction = text(tactical.quant?.direction, 30)
+  const upProb = finite(tactical.quant?.upProb)
+  const expRet = finite(tactical.quant?.expRet)
+  return (
+    /看涨|UP|BULL/i.test(direction)
+    && upProb != null
+    && upProb >= 55
+    && (expRet == null || expRet > 0)
+  )
+}
+
+function riskIncreaseConstraints(tactical = {}) {
+  const reasons = []
+  if (tactical.timing?.state !== 'READY') {
+    reasons.push(
+      tactical.timing?.state === 'TOO_EXTENDED'
+        ? '价格位置过热，禁止追涨'
+        : tactical.timing?.state === 'WAIT_PULLBACK'
+          ? '等待回踩承接确认'
+          : tactical.timing?.state === 'WAIT_BREAKOUT'
+            ? '等待放量突破确认'
+            : '短线时机尚未形成',
+    )
+  }
+  if (
+    ['RISK_OFF', 'UNKNOWN'].includes(
+      tactical.market?.riskTone,
+    )
+  ) reasons.push('市场风险不支持新增仓位')
+  if (
+    tactical.sector?.state === 'WEAKENING'
+    || tactical.sector?.stockRole === 'LAGGARD'
+  ) reasons.push('板块或个股地位已经转弱')
+  if (tactical.flow?.relation === 'DISTRIBUTION') {
+    reasons.push('主力流出且小单承接，存在派发风险')
+  } else if (tactical.flow?.mainDirection !== 'INFLOW') {
+    reasons.push('主力资金尚未确认流入')
+  }
+  if (!bullishQuant(tactical)) {
+    reasons.push('量化尚未形成偏多确认')
+  }
+  if (
+    tactical.stock?.location === 'EXTENDED'
+    || tactical.stock?.crowdingRisk === 'HIGH'
+  ) reasons.push('价格拥挤度过高')
+  if (tactical.stock?.liquidity !== 'GOOD') {
+    reasons.push('流动性尚未达到短线执行要求')
+  }
+  if (tactical.catalyst?.risk === 'NEGATIVE') {
+    reasons.push('负面事件风险尚未消化')
+  }
+  return [...new Set(reasons)]
+}
+
+function reviewTriggerForPolicy(tactical = {}) {
+  const pullback = finite(tactical.timing?.pullbackPrice)
+  const breakout = finite(tactical.timing?.breakoutPrice)
+  const triggers = [
+    pullback != null ? `回踩${pullback}元确认承接` : '',
+    breakout != null ? `放量站上${breakout}元` : '',
+  ].filter(Boolean)
+  if (triggers.length) return `${triggers.join('或')}后重新评估`
+  if (tactical.timing?.reviewAfter === 'FIVE_MINUTE_BAR') {
+    return '下一根完整5分钟K线收盘后重新评估'
+  }
+  if (tactical.timing?.reviewAfter === 'SESSION_BOUNDARY') {
+    return '下一交易时段开始时重新评估'
+  }
+  return '板块、资金或价格结构发生实质变化后重新评估'
+}
+
+export function deriveShortHorizonActionPolicy({
+  mode = '',
+  tactical = null,
+  requestedAction = '',
+} = {}) {
+  const source = tactical && typeof tactical === 'object'
+    ? tactical
+    : {}
+  const increaseReasons = riskIncreaseConstraints(source)
+  const canIncreaseRisk = increaseReasons.length === 0
+  let allowedActions = ['WATCH']
+  let fallbackAction = 'WATCH'
+
+  if (mode === 'hold_advice' || mode === 'review') {
+    allowedActions = ['HOLD', 'REDUCE', 'EXIT', 'WATCH']
+    if (canIncreaseRisk) allowedActions.unshift('ADD')
+    fallbackAction = 'HOLD'
+  } else if (mode === 't_advice') {
+    const stage = source.tAction?.stage
+    if (stage === 'buy_wait_sell') {
+      allowedActions = ['T_SELL_FIRST', 'WATCH']
+    } else if (stage === 'sell_wait_buy') {
+      allowedActions = ['T_BUY_FIRST', 'WATCH']
+    } else if (
+      stage === 'completed'
+      || stage === 'completed_locked'
+    ) {
+      allowedActions = ['WATCH']
+    } else if (canIncreaseRisk) {
+      allowedActions = [
+        'T_BUY_FIRST',
+        'T_SELL_FIRST',
+        'WATCH',
+      ]
+    }
+  } else if (mode === 'buy_advice' && canIncreaseRisk) {
+    allowedActions = ['BUY', 'WATCH']
+  }
+
+  const requested = text(requestedAction, 30)
+  const overridden = Boolean(
+    requested
+    && !allowedActions.includes(requested)
+  )
+  return {
+    schemaVersion: SHORT_HORIZON_ACTION_POLICY_VERSION,
+    mode: text(mode, 30),
+    allowedActions,
+    canIncreaseRisk,
+    requestedAction: requested || null,
+    effectiveAction: overridden ? fallbackAction : requested || null,
+    fallbackAction,
+    overridden,
+    reasons: canIncreaseRisk ? [] : increaseReasons,
+    nextReviewTrigger: reviewTriggerForPolicy(source),
+  }
 }
 
 export function buildShortHorizonTactical(
