@@ -454,9 +454,8 @@ export function compileDecisionPlan({
     blockedReasons.push('缺少有效卖出价或止损价')
   }
   if (
-    governedAction !== 'WATCH'
-    && governedAction !== 'HOLD'
-    && suppliedPriceContract
+    riskRequested
+    && actionPolicy.executionOpen !== false
     && priceContract.validationStatus === 'REJECTED'
   ) {
     blockedReasons.push(

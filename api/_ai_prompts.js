@@ -357,21 +357,32 @@ function tacticalActionPolicyRule(tactical = {}) {
   const reasons = Array.isArray(policy.reasons)
     ? policy.reasons.filter(Boolean).slice(0, 4)
     : []
-  const riskRule = policy.riskTier === 'PROBE'
-    ? '本轮最多只能输出“小仓试错/小仓加仓”，仓位不得超过总资产5%，必须人工确认，禁止写成立即重仓或确定性买点。'
-    : policy.riskTier === 'FULL'
-      ? '新增仓位条件已全部通过，但仍需比较赔率后决定是否操作。'
-      : `当前新增仓位未通过：${reasons.join('；')}。`
+  const riskRule = policy.executionOpen === false
+    ? '当前不可下单，所有价格只能作为下一连续竞价时段的观察条件。'
+    : policy.riskTier === 'PROBE'
+      ? '本轮最多只能输出“小仓试错/小仓加仓”，仓位不得超过总资产5%，必须人工确认，禁止写成立即重仓或确定性买点。'
+      : policy.riskTier === 'FULL'
+        ? '新增仓位条件已全部通过，但仍需比较赔率后决定是否操作。'
+        : `当前新增仓位未通过：${reasons.join('；')}。`
   return `【唯一允许动作】本轮action只能从${allowed.join('、')}中选择。`
     + '不得输出集合外动作，不得用标题、actionPlan或价格字段暗示集合外交易。'
+    + '未持仓时buyPrice必须不高于输入中的当前价，并来自近期可达的支撑、均线、VWAP或量化买点；上方压力或突破位只能填breakoutWatchPrice，不能填buyPrice。'
+    + (
+      policy.executionOpen === false
+        ? '当前不是连续竞价时段，action必须为观望，只制定下一交易时段盘中复核条件，不得声称已到价或立即买入。'
+        : ''
+    )
     + riskRule
     + (
       policy.riskTier === 'PROBE'
+      && policy.executionOpen !== false
         ? '试仓档默认给出近期可达的回踩或突破试仓方案；只有价格无法核验、盈亏比不足1.8:1或账户无法买入一手时，才允许退回观望，并必须写明唯一阻断原因。'
         : ''
     )
     + (
-      policy.riskTier === 'PROBE' && reasons.length
+      policy.riskTier === 'PROBE'
+      && policy.executionOpen !== false
+      && reasons.length
         ? `限制原因：${reasons.join('；')}。`
         : ''
     )
@@ -638,7 +649,7 @@ function genericPrompt(mode, payload, data, ragText) {
 export function buildUserPrompt(mode, payload = {}, ragText = '', theoryHits = []) {
   const data = JSON.stringify(promptPayloadForModel(payload))
   const zhReason = '【语言要求·最高优先】全部思考与输出必须使用简体中文，专有名词、代码和数字除外。\n'
-  const waitEntryRule = '【观望价位语义】观望时必须分别判断pullbackWatchPrice回踩观察与breakoutWatchPrice突破观察；两者都需来自输入证据、方向正确且在未来1-5个交易日可达。过远、已经越过或无依据时填null。观察价不是买入价；观望时buyPrice、buyZone、stopPrice、targetPrice必须为null，watchPrice固定为null，invalidation只写何时取消关注。'
+  const waitEntryRule = '【未持仓价位语义】buyPrice必须不高于输入中的当前价，并来自近期支撑、均线、VWAP或量化买点；上方压力或突破位只能填breakoutWatchPrice。观望时必须分别判断pullbackWatchPrice回踩观察与breakoutWatchPrice突破观察；两者都需来自输入证据、方向正确且在未来1-5个交易日可达。过远、已经越过或无依据时填null。观察价不是买入价；观望时buyPrice、buyZone、stopPrice、targetPrice必须为null，watchPrice固定为null，invalidation只写何时取消关注。'
   if (!isAdvisorMode(mode)) {
     return `${zhReason}${genericPrompt(mode, payload, data, ragText)}`
   }

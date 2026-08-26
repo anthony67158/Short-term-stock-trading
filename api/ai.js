@@ -436,6 +436,55 @@ const fundPct = (value) =>
     ? null
     : +Number(value).toFixed(2);
 
+export function buildAdvisorTodayQuote(
+  quote = {},
+  {
+    code = '',
+    name = '',
+    marketTime = {},
+  } = {},
+) {
+  const isLive = !!marketTime.isLive;
+  const ratio = priceLimitRatio({
+    code,
+    name: name || quote.name,
+  });
+  const base = quote.prevClose;
+  return {
+    live: isLive,
+    asOfLabel: marketTime.dataDayLabel,
+    phase: marketTime.phase,
+    source: quote.source || null,
+    tradeDate: quote.tradeDate || null,
+    price: quote.price,
+    pct: quote.pct,
+    amount: quote.amount,
+    isLimitUp: isLive && !!quote.isLimitUp,
+    isLimitDown: isLive && !!quote.isLimitDown,
+    limitUpPrice:
+      isLive && base != null
+        ? +(base * (1 + ratio)).toFixed(2)
+        : null,
+    limitDownPrice:
+      isLive && base != null
+        ? +(base * (1 - ratio)).toFixed(2)
+        : null,
+    limitRatioPct: +(ratio * 100).toFixed(0),
+    high: quote.high,
+    low: quote.low,
+    open: quote.open,
+    prevClose: quote.prevClose,
+    turnover: quote.turnover,
+    volRatio: quote.volRatio,
+    mainNetYi: fundAmountYi(quote.mainInflow),
+    retailNetYi: fundAmountYi(quote.retailInflow),
+    bigMove:
+      isLive
+      && quote.pct != null
+      && Math.abs(quote.pct) >= 7,
+  };
+}
+
 export function mapRealtimeStockFund(data = {}) {
   return {
     mainNetYi: fundAmountYi(data.f62),
@@ -1029,32 +1078,11 @@ export default async function handler(req, res) {
             //   isLive=true(集合竞价/盘中/午间/午盘) → 真·实时行情,可算今日合法价带;
             //   isLive=false(盘前未开盘/盘后/休市) → 昨日收盘口径,不算"今日"涨跌停价(否则会错一天)。
             const mtc = marketTimeContext();
-            const isLive = !!mtc.isLive;
-            // ★涨停/跌停价:按【昨收×(1±涨跌幅限制)】四舍五入到分。限制比例按板块/ST判定:
-            //   创业板/科创板 = ±20%; 主板 ST/*ST = ±5%; 其余主板 = ±10%;
-            //   北交所(4/8/92开头)=±30%。仅盘中(isLive)才注入，避免盘前/盘后口径错位。
-            const ratio = priceLimitRatio({
+            payload.todayQuote = buildAdvisorTodayQuote(q0, {
               code: payload.code,
-              name: payload.name || q0.name,
+              name: payload.name,
+              marketTime: mtc,
             });
-            const base = q0.prevClose;
-            // 只有实时(盘中)才给 LLM 硬性"今日合法价带";非实时时置 null,提示词自动转收盘口径。
-            const limitUpPrice = (isLive && base != null) ? +(base * (1 + ratio)).toFixed(2) : null;
-            const limitDownPrice = (isLive && base != null) ? +(base * (1 - ratio)).toFixed(2) : null;
-            payload.todayQuote = {
-              live: isLive,                     // ★是否今日实时(false=上一交易日收盘快照)
-              asOfLabel: mtc.dataDayLabel,      // 该行情实际对应的交易日
-              phase: mtc.phase,                 // 盘前/盘中/盘后/休市
-              price: q0.price, pct: q0.pct,
-              // 涨停/跌停标记仅实时时有意义;盘前的 isLimit* 是昨日的,不代表今日
-              isLimitUp: isLive && !!q0.isLimitUp, isLimitDown: isLive && !!q0.isLimitDown,
-              limitUpPrice, limitDownPrice, limitRatioPct: +(ratio * 100).toFixed(0),
-              high: q0.high, low: q0.low, open: q0.open, prevClose: q0.prevClose,
-              turnover: q0.turnover, volRatio: q0.volRatio,
-              mainNetYi: fundAmountYi(q0.mainInflow),
-              retailNetYi: fundAmountYi(q0.retailInflow),
-              bigMove: isLive && q0.pct != null && Math.abs(q0.pct) >= 7,  // 今日大涨/大跌(>7%),仅实时口径
-            };
           }
         }
         if (macroNews && macroNews.length) {

@@ -80,6 +80,120 @@ test('买入建议把买入价和首笔手数编译为同一动作视图', () =>
   })
 })
 
+test('休市时旧买入建议在卡片上降级为下一交易时段观察', () => {
+  const view = buildAdviceActionView({
+    action: '立即买入',
+    actionPlan: '放量站上15.69元买入2手',
+    buyPrice: 15.69,
+    planQty: 2,
+    stopPrice: 15.33,
+    targetPrice: 17.16,
+  }, {
+    mode: 'buy_advice',
+    currentPrice: 15.44,
+    executionOpen: false,
+  })
+
+  assert.equal(view.kind, 'wait')
+  assert.equal(view.action, '等待盘中')
+  assert.equal(view.actionable, false)
+  assert.equal(view.quantity, '')
+  assert.deepEqual(view.levels.map((item) => [
+    item.key,
+    item.label,
+    item.price,
+  ]), [
+    ['watch_breakout', '突破观察', 15.69],
+  ])
+  assert.match(view.instruction, /高于收盘价15\.44元/)
+  assert.match(view.instruction, /不是买入价/)
+  assert.equal(view.trigger.direction, 'inactive')
+})
+
+test('休市时已经校正为观望的建议也隐藏手动建仓入口', () => {
+  const view = buildAdviceActionView({
+    action: '观望',
+    actionPlan: '下一交易时段盘中，等待回踩15.2元后复核',
+    priceContract: {
+      schemaVersion: 'advice-price-contract.v1',
+      levels: [{
+        key: 'watch_pullback',
+        price: 15.2,
+        direction: 'LTE',
+        strict: true,
+        basis: 'technical.ma5',
+      }],
+    },
+  }, {
+    mode: 'buy_advice',
+    currentPrice: 15.44,
+    executionOpen: false,
+  })
+
+  assert.equal(view.action, '等待盘中')
+  assert.equal(view.deferred, true)
+  assert.equal(view.actionable, false)
+  assert.equal(view.levels[0].basisLabel, '5日均线')
+  assert.equal(view.trigger.stateLabel, '等待下一交易时段')
+})
+
+test('下一交易日开盘后旧休市建议仍需先复核不能直接恢复买入', () => {
+  const view = buildAdviceActionView({
+    action: '立即买入',
+    buyPrice: 15.2,
+    planQty: 2,
+    decisionPlan: {
+      schemaVersion: 'decision-plan.v2',
+      action: 'BUY',
+      actionability: 'READY',
+      actionPolicy: { executionOpen: false },
+      evidenceBasis: {
+        isLive: false,
+        phase: '盘后(已收盘)',
+      },
+      quantity: { lots: 2 },
+      prices: {
+        reference: 15.2,
+        current: 15.44,
+        stop: 14.6,
+        target: 16.5,
+      },
+    },
+  }, {
+    mode: 'buy_advice',
+    currentPrice: 15.5,
+    executionOpen: true,
+  })
+
+  assert.equal(view.action, '等待盘中')
+  assert.equal(view.actionable, false)
+  assert.match(view.instruction, /建议基于休市快照/)
+})
+
+test('价位卡展示可核验的数据来源而不是笼统建议', () => {
+  const view = buildAdviceActionView({
+    action: '回调再买',
+    buyPrice: 14.18,
+    planQty: 2,
+    priceContract: {
+      schemaVersion: 'advice-price-contract.v1',
+      levels: [{
+        key: 'entry',
+        field: 'buyPrice',
+        price: 14.18,
+        strict: true,
+        basis: 'technical.ma20',
+      }],
+    },
+  }, {
+    mode: 'buy_advice',
+    currentPrice: 15.44,
+    executionOpen: true,
+  })
+
+  assert.equal(view.levels[0].basisLabel, '20日均线')
+})
+
 test('观望建议不把远端关注价展示成候选卡主价位', () => {
   const view = buildAdviceActionView({
     action: '观望',

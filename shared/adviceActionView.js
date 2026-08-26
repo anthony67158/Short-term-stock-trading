@@ -48,6 +48,50 @@ const level = (key, label, price, tone, active) => {
   return value == null ? null : { key, label, price: value, tone, active }
 }
 
+function priceBasisLabel(value = '') {
+  const source = String(value || '')
+  if (source === 'quote.current') return '当前价'
+  if (source === 'quote.open') return '当日开盘价'
+  if (source === 'quote.dayLow') return '当日最低价'
+  if (source === 'quote.dayHigh') return '当日最高价'
+  if (source === 'technical.support') return '技术支撑位'
+  if (source === 'technical.resistance') return '技术压力位'
+  if (source.startsWith('technical.buyZone')) return '技术买入区'
+  if (source.startsWith('technical.sellZone')) return '技术卖出区'
+  if (source === 'technical.stopLoss') return '技术止损位'
+  if (source === 'technical.takeProfit') return '技术止盈位'
+  if (source === 'intraday.vwap') return '分时均价'
+  if (source === 'intraday.dayLow') return '盘中最低价'
+  if (source === 'intraday.dayHigh') return '盘中最高价'
+  if (source === 'quant.highConf.buyPrice') return '量化买入价'
+  const movingAverage = source.match(/^technical\.ma(\d+)$/)
+  if (movingAverage) return `${movingAverage[1]}日均线`
+  return source ? '可核验价位' : ''
+}
+
+function withPriceBasis(levels, advice = {}) {
+  const contract = advice.priceContract?.schemaVersion
+    === 'advice-price-contract.v1'
+    ? advice.priceContract
+    : advice.decisionPlan?.priceContract?.schemaVersion
+      === 'advice-price-contract.v1'
+      ? advice.decisionPlan.priceContract
+      : null
+  return levels.map((item) => {
+    const source = contract?.levels?.find((levelItem) =>
+      levelItem?.key === item.key
+      && Number(levelItem.price) === Number(item.price)
+    )?.basis
+    return source
+      ? {
+          ...item,
+          basis: source,
+          basisLabel: priceBasisLabel(source),
+        }
+      : item
+  })
+}
+
 function levelsFor(kind, advice, triggerDirection = '') {
   const entryPrice = advice.buyPrice ?? advice.addPrice
   if (kind === 'wait') {
@@ -156,7 +200,14 @@ function triggerFor(kind, levels, triggerDirection = '') {
   return null
 }
 
-export function buildAdviceActionView(advice = {}, { mode = '' } = {}) {
+export function buildAdviceActionView(
+  advice = {},
+  {
+    mode = '',
+    currentPrice = null,
+    executionOpen = null,
+  } = {},
+) {
   const plan = advice.decisionPlan?.schemaVersion === 'decision-plan.v2'
     ? advice.decisionPlan
     : null
@@ -239,10 +290,83 @@ export function buildAdviceActionView(advice = {}, { mode = '' } = {}) {
     trigger: instruction,
     triggerDirection: plan?.triggerDirection,
   })
-  const levels = levelsFor(kind, source, triggerDirection)
+  const levels = withPriceBasis(
+    levelsFor(kind, source, triggerDirection),
+    source,
+  )
+  const current = finite(currentPrice)
+  const entry = levels.find((item) =>
+    item.key === 'entry'
+    && item.active
+  )
+  const entryAboveCurrent = (
+    mode === 'buy_advice'
+    && kind === 'buy'
+    && current != null
+    && entry?.price > current
+  )
+  const generatedOutsideSession = (
+    plan?.actionPolicy?.executionOpen === false
+    || plan?.evidenceBasis?.isLive === false
+  )
+  const sessionDeferred = (
+    mode === 'buy_advice'
+    && kind === 'buy'
+    && (
+      executionOpen === false
+      || generatedOutsideSession
+    )
+  )
+  if (entry && (entryAboveCurrent || sessionDeferred)) {
+    const observationKey = entryAboveCurrent
+      ? 'watch_breakout'
+      : 'watch_pullback'
+    const observationLabel = entryAboveCurrent
+      ? '突破观察'
+      : '回踩观察'
+    const phasePrefix = executionOpen === false
+      ? '当前休市，下一交易时段盘中'
+      : generatedOutsideSession
+        ? '当前建议基于休市快照，盘中先复核'
+        : '盘中'
+    const reason = entryAboveCurrent
+      ? `${entry.price}元高于${sessionDeferred ? '收盘价' : '现价'}${current}元，只作突破观察，不是买入价`
+      : `${entry.price}元只作回踩观察，当前不执行`
+    return {
+      kind: 'wait',
+      action: sessionDeferred ? '等待盘中' : '等待突破',
+      shortHorizon: clean(source.shortHorizon, 30),
+      instruction: `${phasePrefix}：${reason}；满足后重新生成建议`,
+      quantity: '',
+      levels: [{
+        ...entry,
+        key: observationKey,
+        label: observationLabel,
+        active: false,
+      }],
+      trigger: {
+        direction: 'inactive',
+        price: null,
+        label: '等待确认',
+        stateLabel: sessionDeferred ? '等待下一交易时段' : '等待突破确认',
+        detailLabel: '盘中满足条件后再提醒',
+        metricLabel: '当前不下单',
+      },
+      actionability: 'WATCH',
+      manualOnly: false,
+      actionable: false,
+      deferred: true,
+      deferredReason: reason,
+    }
+  }
+  const deferredWait = (
+    mode === 'buy_advice'
+    && kind === 'wait'
+    && executionOpen === false
+  )
   return {
     kind,
-    action: action || ({
+    action: deferredWait ? '等待盘中' : action || ({
       buy: '买入',
       add: '加仓',
       reduce: '减仓',
@@ -254,12 +378,25 @@ export function buildAdviceActionView(advice = {}, { mode = '' } = {}) {
     instruction,
     quantity,
     levels,
-    trigger: triggerFor(kind, levels, triggerDirection),
+    trigger: deferredWait
+      ? {
+          direction: 'inactive',
+          price: null,
+          label: '等待确认',
+          stateLabel: '等待下一交易时段',
+          detailLabel: '盘中满足条件后再提醒',
+          metricLabel: '当前不下单',
+        }
+      : triggerFor(kind, levels, triggerDirection),
     actionability: plan?.actionability || null,
     manualOnly: manualProbe,
     actionable: plan
       ? ['READY', 'MANUAL_PROBE'].includes(plan.actionability)
       : !['wait', 'hold'].includes(kind),
+    deferred: deferredWait,
+    deferredReason: deferredWait
+      ? '当前不在连续竞价时段'
+      : '',
   }
 }
 

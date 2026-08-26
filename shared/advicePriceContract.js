@@ -207,7 +207,16 @@ function nearestObservationAnchor(
 }
 
 function nearestAnchor(price, key, anchors) {
-  const candidates = anchors.filter((item) => item.roles.includes(key))
+  const candidates = anchors.filter((item) => {
+    if (!item.roles.includes(key)) return false
+    if (
+      ['entry', 'add'].includes(key)
+      && ['quote.current', 'quote.open'].includes(item.source)
+    ) {
+      return Math.abs(price / item.price - 1) * 100 <= 0.15
+    }
+    return true
+  })
   if (!candidates.length) return null
   return candidates
     .map((item) => ({
@@ -299,14 +308,23 @@ export function buildAdvicePriceContract({
         currentDistancePct != null
         && currentDistancePct <= watchHorizonPct + 1e-6
       )
+    const entryNotAboveCurrent = !['entry', 'add'].includes(key)
+      || currentPrice == null
+      || price <= currentPrice
     const strict = withinLegalBand
       && direction !== 'UNKNOWN'
       && evidenceBacked
       && futureFacing
       && shortTermReachable
+      && entryNotAboveCurrent
     if (!withinLegalBand) issues.push(`${field}超出当日合法价带`)
     if (direction === 'UNKNOWN') issues.push(`${field}缺少明确触发方向`)
     if (!evidenceBacked) issues.push(`${field}缺少邻近行情、技术或量化锚点`)
+    if (!entryNotAboveCurrent) {
+      issues.push(
+        `${field}高于当前价，不能作为回踩执行价；如需突破确认应使用breakoutWatchPrice`,
+      )
+    }
     if (observationLevel && !futureFacing) {
       issues.push(`${field}方向已经满足，不再作为未来观察条件`)
     }
@@ -422,10 +440,16 @@ export function buildAdvicePriceContract({
         )
         const evidenceBacked = !!nearest
           && nearest.distancePct <= tolerancePct
+        const entryNotAboveCurrent = currentPrice == null
+          || price <= currentPrice
         return {
           key,
           price,
-          strict: withinLegalBand && evidenceBacked,
+          strict: (
+            withinLegalBand
+            && evidenceBacked
+            && entryNotAboveCurrent
+          ),
           basis: nearest?.source || null,
           basisPrice: nearest?.price ?? null,
           basisDistancePct: nearest

@@ -82,21 +82,61 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
       String(advice.action || advice.stance || ''),
     )
   )
-  const watchLevels = adviceObservationLevels(advice)
-  if (candidate && waitAdvice && candidate.alertSyncedPrice != null) {
+  const contractEntry = priceContract?.levels?.find((level) =>
+    level?.key === 'entry'
+    && roundPrice(level.price) != null
+  )
+  const contractCurrentPrice = roundPrice(priceContract?.currentPrice)
+  const entryPrice = roundPrice(contractEntry?.price)
+  const entryAboveCurrent = (
+    entryPrice != null
+    && contractCurrentPrice != null
+    && entryPrice > contractCurrentPrice
+  )
+  const executionOpen =
+    advice.decisionPlan?.actionPolicy?.executionOpen
+  const deferredBySession = executionOpen === false
+    || (
+      executionOpen == null
+      && advice.decisionPlan?.evidenceBasis?.isLive === false
+    )
+  const deferredEntry = (
+    candidate
+    && !liveHolder
+    && !waitAdvice
+    && contractEntry
+    && (deferredBySession || entryAboveCurrent)
+  )
+  const effectiveWaitAdvice = waitAdvice || !!deferredEntry
+  const watchLevels = deferredEntry
+    ? [{
+        key: entryAboveCurrent
+          ? 'watch_breakout'
+          : 'watch_pullback',
+        label: entryAboveCurrent ? '突破观察' : '回踩观察',
+        price: entryPrice,
+        direction: entryAboveCurrent ? 'GTE' : 'LTE',
+        strict: true,
+      }]
+    : adviceObservationLevels(advice)
+  if (
+    candidate
+    && effectiveWaitAdvice
+    && candidate.alertSyncedPrice != null
+  ) {
     candidate.alertSyncedPrice = null
     changed = true
   }
   if (
     candidate
-    && waitAdvice
+    && effectiveWaitAdvice
     && !watchLevels.length
     && candidate.reviewSyncedPrices != null
   ) {
     candidate.reviewSyncedPrices = null
     changed = true
   }
-  if (candidate && !waitAdvice) {
+  if (candidate && !effectiveWaitAdvice) {
     if (candidate.reviewSyncedPrice != null) {
       candidate.reviewSyncedPrice = null
       changed = true
@@ -111,7 +151,7 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
     candidate
     && !liveHolder
     && !candidate.alertMuted
-    && waitAdvice
+    && effectiveWaitAdvice
     && watchLevels.length
   ) {
     const syncedPrices = {}
@@ -171,7 +211,12 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
     }
   }
 
-  if (candidate && !liveHolder && !candidate.alertMuted && !waitAdvice) {
+  if (
+    candidate
+    && !liveHolder
+    && !candidate.alertMuted
+    && !effectiveWaitAdvice
+  ) {
     const contractLevel = advicePriceLevel(advice, 'entry')
     if (priceContract && !contractLevel) {
       data.alerts = rest

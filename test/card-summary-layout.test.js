@@ -166,7 +166,7 @@ test('个股详情复用详情请求展示换手量比与主力散户资金', ()
 test('观望建议同时保留手动建仓与复核入口', () => {
   assert.match(
     planTab,
-    /className=\{'pc-actions' \+ \(!actionable \? ' with-review' : ''\)\}/,
+    /className=\{\s*'pc-actions'[\s\S]{0,180}' with-review'[\s\S]{0,180}' deferred'/,
   )
   assert.match(
     planTab,

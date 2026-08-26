@@ -127,6 +127,71 @@ test('模型建议追高但短线时机过热时确定性改为观望', () => {
   assert.doesNotMatch(plan.trigger, /立即追涨/)
 })
 
+test('收盘后买入计划不得进入可执行或显示已经到价', () => {
+  const plan = compileDecisionPlan({
+    mode: 'buy_advice',
+    advice: {
+      action: '立即买入',
+      buyPrice: 9.8,
+      stopPrice: 9,
+      targetPrice: 11.5,
+      planQtyNum: 2,
+      actionPlan: '回踩9.8元买入2手',
+    },
+    payload: {
+      ...payload,
+      marketPhase: '盘后(已收盘)',
+      todayQuote: {
+        ...payload.todayQuote,
+        price: 10,
+        live: false,
+        phase: '盘后(已收盘)',
+      },
+    },
+    evidenceSnapshot: {
+      ...snapshot,
+      marketTime: {
+        phase: '盘后(已收盘)',
+        isLive: false,
+        dataDayLabel: '2026-08-21(周五)',
+      },
+    },
+    now,
+  })
+
+  assert.equal(plan.requestedAction, 'BUY')
+  assert.equal(plan.governedAction, 'WATCH')
+  assert.equal(plan.action, 'WATCH')
+  assert.equal(plan.actionability, 'WATCH')
+  assert.equal(plan.quantity.lots, 0)
+  assert.equal(plan.actionPolicy.executionOpen, false)
+  assert.match(plan.trigger, /下一交易时段/)
+})
+
+test('绕过输出校正的高价买入仍被决策编译器阻断', () => {
+  const plan = compileDecisionPlan({
+    mode: 'buy_advice',
+    advice: {
+      action: '立即买入',
+      buyPrice: 10.5,
+      stopPrice: 9,
+      targetPrice: 13.5,
+      planQtyNum: 2,
+      actionPlan: '站上10.5元买入2手',
+    },
+    payload,
+    evidenceSnapshot: snapshot,
+    now,
+  })
+
+  assert.equal(plan.action, 'WATCH')
+  assert.equal(plan.actionability, 'BLOCKED')
+  assert.match(
+    plan.blockedReasons.join('；'),
+    /高于当前价.*不能作为回踩执行价/,
+  )
+})
+
 test('持仓加仓缺少资金确认时改为持有但不阻止减仓', () => {
   const weakFlowPayload = {
     ...payload,

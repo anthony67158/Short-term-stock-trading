@@ -1168,3 +1168,19 @@ test('持仓与自选吸顶区跟随页面底色且不会形成整条白色卡�
     /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.plan-section-sticky,[\s\S]*?background:\s*var\(--color-paper\)/s,
   )
 })
+
+test('休市卡片不显示到价并明确下一交易时段盘中提醒', () => {
+  assert.match(
+    planTab,
+    /const executionOpen = isContinuousTrading\(Date\.now\(\)\)/,
+  )
+  assert.match(
+    planTab,
+    /const reached = \(alert\) =>\s*executionOpen &&/,
+  )
+  assert.match(planTab, />盘中提醒</)
+  assert.match(
+    planTab,
+    /Icon name="clock"[\s\S]{0,80}下一交易时段复核/,
+  )
+})

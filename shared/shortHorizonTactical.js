@@ -108,16 +108,42 @@ function locationOf(payload = {}) {
   return position != null ? 'MID' : 'UNKNOWN'
 }
 
-function liquidityOf(payload = {}) {
-  const amount = finite(
-    payload.todayQuote?.amount
-    ?? payload.liquidity?.amount,
-  )
+const SHORT_TERM_AMOUNT_THRESHOLD = 1e8
+
+function liquidityEvidenceOf(payload = {}) {
+  const quoteAmount = finite(payload.todayQuote?.amount)
+  const suppliedAmount = finite(payload.liquidity?.amount)
+  const amount = quoteAmount ?? suppliedAmount
   const adv20 = finite(payload.liquidity?.adv20)
-  if (amount != null && amount >= 1e8) return 'GOOD'
-  if (adv20 != null && adv20 >= 1e8) return 'GOOD'
-  if (amount != null || adv20 != null) return 'LIMITED'
-  return 'UNKNOWN'
+  const selectedAmount = amount ?? adv20
+  const source = amount != null
+    ? quoteAmount != null ? 'QUOTE_AMOUNT' : 'SUPPLIED_AMOUNT'
+    : adv20 != null ? 'ADV20' : 'MISSING'
+  const state = selectedAmount == null
+    ? 'UNKNOWN'
+    : selectedAmount >= SHORT_TERM_AMOUNT_THRESHOLD
+      ? 'GOOD'
+      : 'LIMITED'
+  const amountYi = selectedAmount == null
+    ? null
+    : rounded(selectedAmount / 1e8, 2)
+  const subject = source === 'ADV20'
+    ? '近20日平均成交额'
+    : '当日成交额'
+  const reason = selectedAmount == null
+    ? '成交额数据未取得：行情接口未返回当日成交额，且没有可用的20日平均成交额'
+    : state === 'GOOD'
+      ? `${subject}${amountYi}亿元，达到短线流动性门槛1亿元`
+      : `${subject}${amountYi}亿元，低于短线流动性门槛1亿元`
+  return {
+    state,
+    source,
+    amount: selectedAmount,
+    amountYi,
+    threshold: SHORT_TERM_AMOUNT_THRESHOLD,
+    thresholdYi: 1,
+    reason,
+  }
 }
 
 function crowdingRiskOf(payload = {}, location) {
@@ -357,7 +383,10 @@ function riskIncreaseAssessment(tactical = {}) {
     || tactical.stock?.crowdingRisk === 'HIGH'
   ) hardBlockers.push('价格拥挤度过高')
   if (tactical.stock?.liquidity === 'LIMITED') {
-    hardBlockers.push('流动性不足，不适合短线进出')
+    hardBlockers.push(
+      tactical.stock?.liquidityEvidence?.reason
+      || '流动性不足，不适合短线进出',
+    )
   }
   if (tactical.catalyst?.risk === 'NEGATIVE') {
     hardBlockers.push('负面事件风险尚未消化')
@@ -392,7 +421,10 @@ function riskIncreaseAssessment(tactical = {}) {
   if (!quant.strong) fullRiskGaps.push('量化尚未形成强偏多确认')
   if (!flowConfirmed) fullRiskGaps.push('主力资金尚未确认流入')
   if (tactical.stock?.liquidity !== 'GOOD') {
-    fullRiskGaps.push('成交额证据不足，仅允许受控试仓')
+    fullRiskGaps.push(
+      tactical.stock?.liquidityEvidence?.reason
+      || '成交额数据未取得，仅允许受控试仓',
+    )
   }
   const canProbe = (
     hardBlockers.length === 0
@@ -414,14 +446,21 @@ function riskIncreaseAssessment(tactical = {}) {
   }
 }
 
-function reviewTriggerForPolicy(tactical = {}) {
+function reviewTriggerForPolicy(tactical = {}, executionOpen = true) {
   const pullback = finite(tactical.timing?.pullbackPrice)
   const breakout = finite(tactical.timing?.breakoutPrice)
   const triggers = [
     pullback != null ? `回踩${pullback}元确认承接` : '',
     breakout != null ? `放量站上${breakout}元` : '',
   ].filter(Boolean)
-  if (triggers.length) return `${triggers.join('或')}后重新评估`
+  if (!executionOpen) {
+    return triggers.length
+      ? `下一交易时段盘中，${triggers.join('或')}后重新评估`
+      : '下一交易时段盘中开始时重新评估'
+  }
+  if (triggers.length) {
+    return `${triggers.join('或')}后重新评估`
+  }
   if (tactical.timing?.reviewAfter === 'FIVE_MINUTE_BAR') {
     return '下一根完整5分钟K线收盘后重新评估'
   }
@@ -440,7 +479,20 @@ export function deriveShortHorizonActionPolicy({
     ? tactical
     : {}
   const assessment = riskIncreaseAssessment(source)
-  const canIncreaseRisk = assessment.riskTier !== 'NONE'
+  const executionOpen = [
+    'OPENING',
+    'MORNING',
+    'AFTERNOON',
+  ].includes(source.market?.phase)
+  const canIncreaseRisk = (
+    assessment.riskTier !== 'NONE'
+    && executionOpen
+  )
+  const sessionReason = source.market?.phase === 'CLOSE'
+    ? '当前已收盘，下一交易时段盘中再判断，不发送即时买入提醒'
+    : source.market?.phase === 'NOON'
+      ? '当前午间休市，下午连续竞价开始后再判断，不发送即时买入提醒'
+      : '当前非连续竞价时段，下一交易时段盘中再判断，不发送即时买入提醒'
   let allowedActions = ['WATCH']
   let fallbackAction = 'WATCH'
   let preferredAction = 'WATCH'
@@ -484,6 +536,7 @@ export function deriveShortHorizonActionPolicy({
     allowedActions,
     preferredAction,
     canIncreaseRisk,
+    executionOpen,
     riskTier: assessment.riskTier,
     maxPositionPct: assessment.riskTier === 'PROBE' ? 5 : null,
     manualConfirmationOnly: assessment.riskTier === 'PROBE',
@@ -492,13 +545,17 @@ export function deriveShortHorizonActionPolicy({
     effectiveAction: overridden ? fallbackAction : requested || null,
     fallbackAction,
     overridden,
-    reasons: assessment.riskTier === 'FULL'
-      ? []
-      : [
+    reasons: [
+      ...(!executionOpen ? [sessionReason] : []),
+      ...(assessment.riskTier === 'FULL' ? [] : [
           ...assessment.hardBlockers,
           ...assessment.fullRiskGaps,
-        ],
-    nextReviewTrigger: reviewTriggerForPolicy(source),
+        ]),
+    ],
+    nextReviewTrigger: reviewTriggerForPolicy(
+      source,
+      executionOpen,
+    ),
   }
 }
 
@@ -513,6 +570,7 @@ export function buildShortHorizonTactical(
   const marketTone = riskToneOf(market)
   const location = locationOf(payload)
   const crowdingRisk = crowdingRiskOf(payload, location)
+  const liquidityEvidence = liquidityEvidenceOf(payload)
   const mainDirection = flowDirection(payload.stockFund?.mainNetYi)
   const retailDirection = flowDirection(
     payload.stockFund?.retailNetYi
@@ -594,7 +652,8 @@ export function buildShortHorizonTactical(
       smartMoney: payload.lhb?.smartMoney === true,
       relativeStrength,
       location,
-      liquidity: liquidityOf(payload),
+      liquidity: liquidityEvidence.state,
+      liquidityEvidence,
       crowdingRisk,
     },
     flow: {

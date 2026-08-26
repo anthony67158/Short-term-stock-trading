@@ -217,6 +217,30 @@ test('Judge只能使用价格契约中的精确价位', () => {
   )
 })
 
+test('高于现价的压力位不能作为回踩买入执行价', () => {
+  const contract = buildAdvicePriceContract({
+    mode: 'buy_advice',
+    advice: {
+      action: '立即买入',
+      actionPlan: '放量站上105元买入',
+      buyPrice: 105,
+      stopPrice: 96,
+      targetPrice: 110,
+    },
+    payload: payload(),
+  })
+
+  assert.equal(
+    advicePriceLevel({ priceContract: contract }, 'entry'),
+    null,
+  )
+  assert.equal(contract.validationStatus, 'REJECTED')
+  assert.match(
+    contract.issues.join('；'),
+    /高于当前价.*不能作为回踩执行价/,
+  )
+})
+
 test('买入区间上下界分别校验并记录证据来源', () => {
   const contract = buildAdvicePriceContract({
     mode: 'buy_advice',

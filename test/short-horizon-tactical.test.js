@@ -225,8 +225,60 @@ test('核心信号共振但成交额证据不足时只开放5%人工试仓', () 
   assert.equal(policy.preferredAction, 'BUY')
   assert.match(
     policy.reasons.join('；'),
-    /成交额证据不足/,
+    /成交额数据未取得/,
   )
+})
+
+test('成交额证据明确区分数据缺失与低于流动性门槛', () => {
+  const missing = buildShortHorizonTactical(payload())
+  const limited = buildShortHorizonTactical(payload({
+    todayQuote: {
+      ...payload().todayQuote,
+      amount: 80_000_000,
+    },
+  }))
+  const sufficient = buildShortHorizonTactical(payload({
+    todayQuote: {
+      ...payload().todayQuote,
+      amount: 2_520_236_581.02,
+    },
+  }))
+
+  assert.match(
+    missing.stock.liquidityEvidence.reason,
+    /成交额数据未取得/,
+  )
+  assert.match(
+    limited.stock.liquidityEvidence.reason,
+    /0\.8亿元.*低于.*1亿元/,
+  )
+  assert.match(
+    sufficient.stock.liquidityEvidence.reason,
+    /25\.2亿元.*达到.*1亿元/,
+  )
+  assert.equal(sufficient.stock.liquidity, 'GOOD')
+})
+
+test('休市时即使短线条件共振也只生成盘中观察计划', () => {
+  const tactical = buildShortHorizonTactical(payload({
+    marketPhase: '盘后(已收盘)',
+    todayQuote: {
+      ...payload().todayQuote,
+      amount: 2e8,
+      live: false,
+      phase: '盘后(已收盘)',
+    },
+  }))
+  const policy = deriveShortHorizonActionPolicy({
+    mode: 'buy_advice',
+    tactical,
+    requestedAction: 'BUY',
+  })
+
+  assert.equal(policy.executionOpen, false)
+  assert.deepEqual(policy.allowedActions, ['WATCH'])
+  assert.equal(policy.effectiveAction, 'WATCH')
+  assert.match(policy.reasons.join('；'), /盘中再判断/)
 })
 
 test('量化轻度偏多只能参与人工试仓不能升级正式建仓', () => {

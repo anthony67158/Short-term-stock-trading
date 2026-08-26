@@ -20,6 +20,7 @@ import {
 } from '../api/cron_advice.js'
 import { adviceEvidenceDigest } from '../shared/adviceIntelligence.js'
 import {
+  buildAdvisorTodayQuote,
   buildScheduledReviewGateResponse,
   resolveAIBudget,
   resolveAdviceDailySummary,
@@ -27,6 +28,35 @@ import {
   shouldFailoverAdvisorStream,
   shouldRepairAdvisorBody,
 } from '../api/ai.js'
+
+test('军师行情快照保留报价接口返回的真实成交额', () => {
+  const quote = buildAdvisorTodayQuote({
+    price: 15.44,
+    pct: 6.26,
+    amount: 2_520_236_581.02,
+    high: 15.69,
+    low: 14.66,
+    open: 14.77,
+    prevClose: 14.53,
+    turnover: 8.63,
+    volRatio: 1.94,
+    mainInflow: 283_000_000,
+    retailInflow: -210_000_000,
+  }, {
+    code: '000737',
+    name: '北方铜业',
+    marketTime: {
+      isLive: false,
+      phase: '盘后(已收盘)',
+      dataDayLabel: '2026-08-26(周三)',
+    },
+  })
+
+  assert.equal(quote.amount, 2_520_236_581.02)
+  assert.equal(quote.price, 15.44)
+  assert.equal(quote.high, 15.69)
+  assert.equal(quote.live, false)
+})
 
 test('服务端可解析跨分片的 AI SSE 事件', () => {
   const seen = []

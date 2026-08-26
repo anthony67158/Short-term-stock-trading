@@ -42,6 +42,72 @@ function appendIssue(result, issues) {
   result.serverAdjust = result.serverAdjust ? `${result.serverAdjust}；${note}` : note
 }
 
+function continuousExecutionOpen(payload = {}) {
+  const phase = String(
+    payload.todayQuote?.phase
+    || payload.marketPhase
+    || '',
+  )
+  if (
+    /非交易|盘前|集合竞价|午间|休市|盘后|已收盘/.test(phase)
+  ) return false
+  if (/早盘|午盘|盘中/.test(phase)) return true
+  return payload.todayQuote?.live !== false
+}
+
+function deferBuyToObservation(result, payload, issues) {
+  const quote = payload.todayQuote || {}
+  const currentPrice = numberOf(
+    quote.price ?? payload.currentPrice,
+  )
+  const buyPrice = numberOf(result.buyPrice)
+  const executionOpen = continuousExecutionOpen(payload)
+  if (!(buyPrice > 0) || !(currentPrice > 0)) return false
+  const aboveCurrent = buyPrice > currentPrice
+  if (!aboveCurrent && executionOpen) return false
+
+  if (aboveCurrent) {
+    result.breakoutWatchPrice = buyPrice
+  } else {
+    result.pullbackWatchPrice = buyPrice
+  }
+  result.action = '观望'
+  result.stance = result.stance ? '观望' : result.stance
+  result.tier = 'wait'
+  result.tone = 'muted'
+  result.buyPrice = null
+  result.buyZone = null
+  result.stopPrice = null
+  result.targetPrice = null
+  result.planQty = 0
+  result.planQtyNum = 0
+  result.planAmount = 0
+  const phasePrefix = executionOpen ? '' : '下一交易时段盘中，'
+  result.actionPlan = aboveCurrent
+    ? `${phasePrefix}${buyPrice}元高于当前价${currentPrice}元，只作为突破观察价；放量站稳后重新评估，未确认不买`
+    : `${phasePrefix}等待回踩${buyPrice}元并确认承接后重新评估，未确认不买`
+  result.timing = result.actionPlan
+  if (aboveCurrent) {
+    issues.push(
+      `模型买入价${buyPrice}元高于当前价${currentPrice}元，已改为突破观察价`,
+    )
+  }
+  if (!executionOpen) {
+    const phase = String(quote.phase || payload.marketPhase || '')
+    const phaseLabel = /盘后|已收盘/.test(phase)
+      ? '当前已收盘'
+      : /午间/.test(phase)
+        ? '当前午间休市'
+        : /盘前|集合竞价/.test(phase)
+          ? '当前尚未进入连续竞价'
+          : '当前不在连续竞价时段'
+    issues.push(
+      `${phaseLabel}，买入计划已改为下一交易时段盘中观察`,
+    )
+  }
+  return true
+}
+
 function reconcileActionText(text, quantity, amount) {
   if (typeof text !== 'string' || !(quantity >= 0)) return text
   let output = text.replace(
@@ -65,7 +131,7 @@ export function reconcileAdviceNumbers({ mode, result: input, payload = {} } = {
   const high = numberOf(quote.limitUpPrice)
   let valid = true
   const initialAction = String(result.action || result.stance || '')
-  const unownedWait = mode === 'buy_advice'
+  let unownedWait = mode === 'buy_advice'
     && /观望|等待|回避|不建议|暂不/.test(initialAction)
   if (unownedWait) {
     const hadIrrelevantPrices = [
@@ -117,6 +183,14 @@ export function reconcileAdviceNumbers({ mode, result: input, payload = {} } = {
       labels[field],
     )
     if (supplied != null && result[field] == null) valid = false
+  }
+  if (
+    mode === 'buy_advice'
+    && !unownedWait
+    && deferBuyToObservation(result, payload, issues)
+  ) {
+    valid = false
+    unownedWait = true
   }
   const initialPriceContract = buildAdvicePriceContract({
     mode,
@@ -323,13 +397,16 @@ export function reconcileAdviceNumbers({ mode, result: input, payload = {} } = {
     result.pullbackWatchPrice = pullback?.price ?? null
     result.breakoutWatchPrice = breakout?.price ?? null
     result.watchPrice = null
+    const executionPrefix = continuousExecutionOpen(payload)
+      ? ''
+      : '下一交易时段盘中，'
     const paths = [
-      pullback && `回踩${pullback.price}元企稳`,
-      breakout && `放量突破${breakout.price}元`,
+      pullback && `回踩${pullback.price}元企稳（回踩观察价）`,
+      breakout && `放量突破${breakout.price}元（突破观察价）`,
     ].filter(Boolean)
     result.actionPlan = paths.length
-      ? `等待${paths.join('，或')}后重新评估，未确认不买`
-      : '暂无近期有效观察价，等待量价与资金出现新变化后重新评估'
+      ? `${executionPrefix}等待${paths.join('，或')}后重新评估，未确认不买`
+      : `${executionPrefix}暂无近期有效观察价，等待量价与资金出现新变化后重新评估`
     result.timing = result.actionPlan
     finalPriceContract = buildAdvicePriceContract({
       mode,

@@ -146,6 +146,74 @@ test('越过涨跌停价带的模型价格直接作废而不是改造成边界�
   assert.doesNotMatch(issues.join('；'), /下调至/)
 })
 
+test('高于现价的买入价只能转为突破观察价', () => {
+  const { result, issues } = reconcileAdviceNumbers({
+    mode: 'buy_advice',
+    payload: {
+      account: { cash: 100000 },
+      todayQuote: {
+        price: 15.44,
+        high: 15.69,
+        live: true,
+      },
+      tech: {
+        atr: 0.681,
+        resistance: 15.69,
+      },
+    },
+    result: {
+      action: '立即买入',
+      buyPrice: 15.69,
+      stopPrice: 15.33,
+      targetPrice: 17.16,
+      planQty: 2,
+      actionPlan: '放量站上15.69元后买入2手',
+    },
+  })
+
+  assert.equal(result.action, '观望')
+  assert.equal(result.buyPrice, null)
+  assert.equal(result.breakoutWatchPrice, 15.69)
+  assert.equal(result.stopPrice, null)
+  assert.equal(result.targetPrice, null)
+  assert.match(result.actionPlan, /突破观察价/)
+  assert.match(issues.join('；'), /高于当前价/)
+})
+
+test('收盘后买入计划转为下一交易时段盘中观察且不立即执行', () => {
+  const { result, issues } = reconcileAdviceNumbers({
+    mode: 'buy_advice',
+    payload: {
+      account: { cash: 100000 },
+      todayQuote: {
+        price: 15.44,
+        low: 14.66,
+        live: false,
+        phase: '盘后(已收盘)',
+      },
+      tech: {
+        atr: 0.681,
+        support: 15.2,
+      },
+    },
+    result: {
+      action: '回调再买',
+      buyPrice: 15.2,
+      stopPrice: 14.6,
+      targetPrice: 16.4,
+      planQty: 2,
+      actionPlan: '回踩15.20元买入2手',
+    },
+  })
+
+  assert.equal(result.action, '观望')
+  assert.equal(result.buyPrice, null)
+  assert.equal(result.pullbackWatchPrice, 15.2)
+  assert.equal(result.planQty, 0)
+  assert.match(result.actionPlan, /下一交易时段盘中/)
+  assert.match(issues.join('；'), /当前已收盘/)
+})
+
 test('观望价必须有明确方向并贴近真实证据锚点', () => {
   const payload = {
     todayQuote: {

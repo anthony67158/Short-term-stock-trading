@@ -258,6 +258,60 @@ test('未持仓观望为回踩与突破分别生成复核提醒', () => {
   ])
 })
 
+test('盘后旧买入计划只生成下一交易时段观察提醒', () => {
+  const data = {
+    plan: [{ code: '000737', name: '北方铜业' }],
+    holding: [],
+    alerts: [],
+    settings: {},
+  }
+
+  projectAdviceAlerts(data, '000737', {
+    action: '立即买入',
+    buyPrice: 15.69,
+    decisionPlan: {
+      schemaVersion: 'decision-plan.v2',
+      action: 'BUY',
+      evidenceBasis: {
+        isLive: false,
+        phase: '盘后(已收盘)',
+      },
+      actionPolicy: {
+        executionOpen: false,
+      },
+    },
+    priceContract: {
+      schemaVersion: 'advice-price-contract.v1',
+      currentPrice: 15.44,
+      validationStatus: 'VERIFIED',
+      levels: [{
+        key: 'entry',
+        field: 'buyPrice',
+        purpose: 'ENTRY',
+        price: 15.69,
+        direction: 'LTE',
+        status: 'MET',
+        strict: true,
+        basis: 'technical.resistance',
+      }],
+      allPricesStrict: true,
+      issues: [],
+      review: { operator: 'ALL', conditions: [], allMet: false },
+    },
+  }, {
+    now,
+    idFactory: ids,
+    requirePriceContract: true,
+  })
+
+  assert.equal(data.alerts.length, 1)
+  assert.equal(data.alerts[0].reviewOnly, true)
+  assert.equal(data.alerts[0].reviewKey, 'watch_breakout')
+  assert.equal(data.alerts[0].op, 'gte')
+  assert.equal(data.alerts[0].value, 15.69)
+  assert.equal(data.alerts[0].note, '突破观察')
+})
+
 test('未持仓自选股只生成买点预警，禁止生成加仓或减仓预警', () => {
   const data = {
     plan: [{ code: '600519', name: '贵州茅台' }],

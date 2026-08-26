@@ -50,7 +50,10 @@ import {
   positionCostBasis,
   tradeActivityContext,
 } from '../../shared/portfolioAccounting.js'
-import { nextTradingDayLabel } from '../../shared/tradingCalendar.js'
+import {
+  isContinuousTrading,
+  nextTradingDayLabel,
+} from '../../shared/tradingCalendar.js'
 import {
   rankWatchlistCandidates,
 } from '../../shared/watchlistRanking.js'
@@ -589,6 +592,9 @@ function ActionLevel({ level, reached = false }) {
         {level.label}
       </span>
       <strong className="action-level-price">{fmtRaw(level.price)}</strong>
+      {level.basisLabel && (
+        <span className="action-level-basis">{level.basisLabel}</span>
+      )}
     </div>
   )
 }
@@ -679,8 +685,13 @@ function CandDecision({ p, q }) {
   const entry = getAdvice(p.code, 'buy_advice')
   const advice = entry?.advice || null
   const hasAdvice = !!advice
+  const executionOpen = isContinuousTrading(Date.now())
   const baseView = advice
-    ? buildAdviceActionView(advice, { mode: 'buy_advice' })
+    ? buildAdviceActionView(advice, {
+        mode: 'buy_advice',
+        currentPrice: q?.price,
+        executionOpen,
+      })
     : null
   const actionable = baseView?.kind === 'buy'
     && baseView.actionable !== false
@@ -731,7 +742,11 @@ function CandDecision({ p, q }) {
     ? buildAdviceActionView({
         ...advice,
         ...(actionable ? { buyPrice: target, planQty: qty } : {}),
-      }, { mode: 'buy_advice' })
+      }, {
+        mode: 'buy_advice',
+        currentPrice: q?.price,
+        executionOpen,
+      })
     : null
   const progress = view?.trigger
   const progressState = buildActionProgress(progress, q?.price)
@@ -794,6 +809,11 @@ function CandDecision({ p, q }) {
                       {reachedKey === 'entry' ? '已触发' : '手填'}
                     </em>
                   )}
+                  {!p.targetManual && contractEntry?.basisLabel && (
+                    <span className="action-level-basis">
+                      来源：{contractEntry.basisLabel}
+                    </span>
+                  )}
                 </label>
                 <label className="action-level action-field active level-buy">
                   <span className="action-level-name">
@@ -841,21 +861,36 @@ function CandidateActions({ p, q, onBuy, onAlert, onDelete }) {
   const [, force] = useState(0)
   useEffect(() => subscribeAdvice(() => force((n) => n + 1)), [])
   const entry = getAdvice(p.code, 'buy_advice')
+  const executionOpen = isContinuousTrading(Date.now())
   const baseView = entry?.advice
-    ? buildAdviceActionView(entry.advice, { mode: 'buy_advice' })
+    ? buildAdviceActionView(entry.advice, {
+        mode: 'buy_advice',
+        currentPrice: q?.price,
+        executionOpen,
+      })
     : null
   const view = baseView?.kind === 'buy'
     ? buildAdviceActionView({
         ...entry.advice,
         buyPrice: p.targetPrice ?? entry.advice.buyPrice,
         planQty: p.buyQty ?? entry.advice.planQty,
-      }, { mode: 'buy_advice' })
+      }, {
+        mode: 'buy_advice',
+        currentPrice: q?.price,
+        executionOpen,
+      })
     : baseView
   const actionable = !view
     || (view.kind === 'buy' && view.actionable !== false)
   const quantity = actionQtyLabel(view?.quantity)
   return (
-    <div className={'pc-actions' + (!actionable ? ' with-review' : '')}>
+    <div
+      className={
+        'pc-actions'
+        + (!actionable ? ' with-review' : '')
+        + (view?.deferred ? ' deferred' : '')
+      }
+    >
       {actionable ? (
         <button
           className="chip-btn act-buy"
@@ -868,6 +903,14 @@ function CandidateActions({ p, q, onBuy, onAlert, onDelete }) {
             : view
               ? `确认买入${quantity ? ` · ${quantity}` : ''}`
               : '建仓'}
+        </button>
+      ) : view?.deferred ? (
+        <button
+          type="button"
+          className="chip-btn ghost review-action"
+          onClick={() => openStockDetail(p.code, q?.name || p.name)}
+        >
+          <Icon name="clock" size={12} />下一交易时段复核
         </button>
       ) : (
         <>
@@ -1012,7 +1055,7 @@ function PlanList({ book, quote, stockTags, batchSel }) {
             { focusNote: true },
           )}
         />
-        {/* 自动提醒：可执行建议显示买点，观望建议显示到价复核。 */}
+        {/* 卡片只展示观察复核提醒；可执行买点已在上方指令区统一表达。 */}
         {(() => {
           const stockAlerts = (book.alerts || []).filter(
             (alert) => alert.candCode === p.code,
@@ -1021,7 +1064,9 @@ function PlanList({ book, quote, stockTags, batchSel }) {
             (alert) => alert.reviewOnly,
           )
           if (reviewAlerts.length) {
-            const reached = (alert) => q && q.price != null && (
+            const executionOpen = isContinuousTrading(Date.now())
+            const reached = (alert) =>
+              executionOpen && q && q.price != null && (
               alert.op === 'gte'
                 ? q.price >= alert.value
                 : q.price <= alert.value
@@ -1034,7 +1079,13 @@ function PlanList({ book, quote, stockTags, batchSel }) {
             return (
               <div
                 className={'pc-buyalert review-paths' + tone}
-                title={reviewing ? '观察条件已触发，正在重新评估' : '任一观察条件到达后自动重新评估'}
+                title={
+                  !executionOpen
+                    ? '休市期间不触发通知，下一连续竞价时段恢复监测'
+                    : reviewing
+                      ? '观察条件已触发，正在重新评估'
+                      : '任一观察条件到达后自动重新评估'
+                }
               >
                 <Icon name="bell" size={11} />
                 {reviewAlerts.map((alert, index) => (
@@ -1045,6 +1096,9 @@ function PlanList({ book, quote, stockTags, batchSel }) {
                   </span>
                 ))}
                 {reviewing && <span className="pc-buyalert-off">复核中</span>}
+                {!executionOpen && (
+                  <span className="pc-buyalert-off">盘中提醒</span>
+                )}
               </div>
             )
           }
