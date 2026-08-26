@@ -117,8 +117,8 @@ node --test test/short-horizon-tactical.test.js \
 
 **Acceptance**
 
-- [ ] `npm test`、`npm run harness:ci`、`npm run build` 全部通过。
-- [ ] 快速生成不超过 75 秒，深度生成不超过 150 秒。
-- [ ] Vercel 与 FC 使用同一提交。
-- [ ] 只用测试账号执行生产生成验收。
-- [ ] 删除旧 Prompt、旧双轨入口和调试内容。
+- [x] `npm test`、`npm run harness:ci`、`npm run build` 全部通过。
+- [x] 快速生成不超过 75 秒，深度生成不超过 150 秒。
+- [x] Vercel 与 FC 使用同一提交。
+- [x] 只用测试账号执行生产生成验收。
+- [x] 删除旧 Prompt、旧双轨入口和调试内容。
