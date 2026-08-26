@@ -89,6 +89,8 @@ test('试仓档位强制模型输出5%以内并要求人工确认', () => {
   assert.match(prompt, /最多只能输出“小仓试错\/小仓加仓”/)
   assert.match(prompt, /仓位不得超过总资产5%/)
   assert.match(prompt, /必须人工确认/)
+  assert.match(prompt, /默认给出近期可达的回踩或突破试仓方案/)
+  assert.match(prompt, /盈亏比不足1.8:1/)
 })
 
 test('军师低命中校准按动作方向纠偏而不是一律变得更保守', () => {

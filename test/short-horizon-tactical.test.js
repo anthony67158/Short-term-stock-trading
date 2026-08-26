@@ -222,6 +222,7 @@ test('核心信号共振但成交额证据不足时只开放5%人工试仓', () 
   assert.equal(policy.maxPositionPct, 5)
   assert.equal(policy.manualConfirmationOnly, true)
   assert.deepEqual(policy.allowedActions, ['BUY', 'WATCH'])
+  assert.equal(policy.preferredAction, 'BUY')
   assert.match(
     policy.reasons.join('；'),
     /成交额证据不足/,

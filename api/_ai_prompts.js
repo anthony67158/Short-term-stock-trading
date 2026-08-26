@@ -366,6 +366,11 @@ function tacticalActionPolicyRule(tactical = {}) {
     + '不得输出集合外动作，不得用标题、actionPlan或价格字段暗示集合外交易。'
     + riskRule
     + (
+      policy.riskTier === 'PROBE'
+        ? '试仓档默认给出近期可达的回踩或突破试仓方案；只有价格无法核验、盈亏比不足1.8:1或账户无法买入一手时，才允许退回观望，并必须写明唯一阻断原因。'
+        : ''
+    )
+    + (
       policy.riskTier === 'PROBE' && reasons.length
         ? `限制原因：${reasons.join('；')}。`
         : ''

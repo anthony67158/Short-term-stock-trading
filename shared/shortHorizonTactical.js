@@ -443,11 +443,13 @@ export function deriveShortHorizonActionPolicy({
   const canIncreaseRisk = assessment.riskTier !== 'NONE'
   let allowedActions = ['WATCH']
   let fallbackAction = 'WATCH'
+  let preferredAction = 'WATCH'
 
   if (mode === 'hold_advice' || mode === 'review') {
     allowedActions = ['HOLD', 'REDUCE', 'EXIT', 'WATCH']
     if (canIncreaseRisk) allowedActions.unshift('ADD')
     fallbackAction = 'HOLD'
+    preferredAction = 'HOLD'
   } else if (mode === 't_advice') {
     const stage = source.tAction?.stage
     if (stage === 'buy_wait_sell') {
@@ -468,6 +470,7 @@ export function deriveShortHorizonActionPolicy({
     }
   } else if (mode === 'buy_advice' && canIncreaseRisk) {
     allowedActions = ['BUY', 'WATCH']
+    preferredAction = 'BUY'
   }
 
   const requested = text(requestedAction, 30)
@@ -479,6 +482,7 @@ export function deriveShortHorizonActionPolicy({
     schemaVersion: SHORT_HORIZON_ACTION_POLICY_VERSION,
     mode: text(mode, 30),
     allowedActions,
+    preferredAction,
     canIncreaseRisk,
     riskTier: assessment.riskTier,
     maxPositionPct: assessment.riskTier === 'PROBE' ? 5 : null,
