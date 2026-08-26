@@ -94,6 +94,27 @@ test('个股重新开启持续复核时加入对应的显式白名单', () => {
   )
 })
 
+test('开启单股持续复核会同步开启自动预警总开关', () => {
+  planStore.setData({
+    plan: [{ code: '000001', name: '平安银行' }],
+    holding: [],
+    closed: [],
+    settings: {
+      aiAutoAlert: false,
+      'advReview.disabledCodes': ['000001'],
+    },
+    alerts: [],
+  })
+
+  planStore.setAdviceReviewEnabled('000001', true)
+
+  assert.equal(planStore.get().settings.aiAutoAlert, true)
+  assert.equal(
+    isAdviceReviewEnabled(planStore.get().settings, '000001'),
+    true,
+  )
+})
+
 test('云端生成的新行动预警增量同步到当前页面', () => {
   planStore.setData({
     plan: [],

@@ -14082,3 +14082,108 @@ body.overlay-scroll-locked {
       minmax(0, 7fr);
   }
 }
+
+/* Hallmark · component: observation-review-board · genre: modern-minimal
+ * theme: Precision Cobalt · hierarchy: price paths → monitoring → review outcome
+ * pre-emit critique: P5 H5 E5 S5 R5 V4 · contrast: pass
+ */
+.advice-tactical-grid.observation-only {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  padding-block: 0;
+}
+
+.advice-tactical-grid.observation-only .advice-levels,
+.advice-tactical-grid.observation-only .advice-trigger {
+  display: grid;
+  grid-template-columns: minmax(132px, .28fr) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-lg);
+  padding-block: var(--space-lg);
+}
+
+.advice-tactical-grid.observation-only .advice-level-content {
+  min-width: 0;
+}
+
+.advice-tactical-grid.observation-only .advice-prices.compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.advice-tactical-grid.observation-only .advice-prices.compact .ap-cell {
+  min-height: 88px;
+  justify-content: center;
+}
+
+.advice-observation-status {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2xs) var(--space-xs);
+  min-height: 40px;
+  margin-top: var(--space-xs);
+  padding: var(--space-2xs) var(--space-xs);
+  border-radius: var(--radius-control);
+  background: var(--color-paper-3);
+  color: var(--color-ink-2);
+  font-size: var(--text-xs);
+}
+
+.advice-observation-status .icon {
+  color: var(--color-accent);
+}
+
+.advice-observation-status span {
+  color: var(--color-accent);
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.advice-observation-status strong {
+  min-width: 0;
+  color: var(--color-ink-2);
+  font-weight: 600;
+}
+
+.advice-observation-status.off .icon,
+.advice-observation-status.off span {
+  color: var(--color-muted);
+}
+
+.advice-tactical-grid.observation-only .advice-trigger {
+  padding-inline-start: 0;
+  border-top: 1px solid var(--color-rule-2);
+  border-inline-start: 0;
+}
+
+.advice-tactical-grid.observation-only .advice-trigger-rows {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 var(--space-xl);
+}
+
+.advice-tactical-grid.observation-only .advice-trigger-rows > div {
+  min-height: 72px;
+  padding-block: var(--space-sm);
+  border-top: 1px solid var(--color-rule-2);
+}
+
+@media (max-width: 45rem) {
+  .advice-tactical-grid.observation-only .advice-levels,
+  .advice-tactical-grid.observation-only .advice-trigger {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-xs);
+  }
+
+  .advice-tactical-grid.observation-only .advice-trigger-rows {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .advice-observation-status {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .advice-observation-status strong {
+    grid-column: 2;
+  }
+}

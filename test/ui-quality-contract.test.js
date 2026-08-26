@@ -157,6 +157,7 @@ test('操作建议生成时间使用固定月日时分格式且拒绝非法时�
 test('个股详情提供可访问的单股持续复核开关', () => {
   assert.match(stockDetail, /className={'advice-review-toggle'/)
   assert.match(stockDetail, /aria-pressed={reviewEnabled}/)
+  assert.match(stockDetail, /book\.settings\?\.aiAutoAlert !== false/)
   assert.match(stockDetail, /planStore\.setAdviceReviewEnabled/)
   assert.match(legacyStyles, /\.advice-review-toggle\.on/)
 })
@@ -1001,6 +1002,26 @@ test('个股详情执行摘要改为纵向节奏并与边线保持稳定留白',
   assert.match(
     precision,
     /\.advice-tactical-grid\s*{[^}]*gap:\s*var\(--space-xl\)[^}]*padding-block:\s*var\(--space-lg\)/s,
+  )
+})
+
+test('观察价位与到价动作使用同一纵向骨架并在桌面共享对齐基线', () => {
+  assert.match(
+    advicePresentation,
+    /className=\{`advice-observation-status \$\{reviewEnabled \? 'on' : 'off'\}`\}/,
+  )
+  assert.match(advicePresentation, /任一到价后自动启动复核/)
+  assert.match(
+    precision,
+    /\.advice-tactical-grid\.observation-only\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)[^}]*gap:\s*0/s,
+  )
+  assert.match(
+    precision,
+    /\.advice-tactical-grid\.observation-only \.advice-levels,\s*\.advice-tactical-grid\.observation-only \.advice-trigger\s*{[^}]*grid-template-columns:\s*minmax\(132px,\s*\.28fr\)\s+minmax\(0,\s*1fr\)/s,
+  )
+  assert.match(
+    precision,
+    /\.advice-tactical-grid\.observation-only \.advice-trigger-rows\s*{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s,
   )
 })
 

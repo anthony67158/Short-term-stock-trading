@@ -257,6 +257,11 @@ test('未持仓观望同时展示回踩与突破观察位', () => {
     view.operationGuide.steps[1].text,
     /105元.*确认前不追涨/,
   )
+  assert.match(
+    view.trigger.condition,
+    /回踩观察≤96元；突破观察≥105元/,
+  )
+  assert.match(view.trigger.confirmation, /自动重新采集分时/)
 })
 
 test('未持仓观望不展示止损目标并使用直观观察文案', () => {
@@ -291,9 +296,12 @@ test('未持仓观望不展示止损目标并使用直观观察文案', () => {
 
   assert.equal(view.observationOnly, true)
   assert.deepEqual(view.levels.map((item) => item.label), ['观察价'])
-  assert.equal(view.trigger.title, '观察与重新判断')
-  assert.equal(view.trigger.conditionLabel, '重新判断')
+  assert.equal(view.trigger.title, '到价后的动作')
+  assert.equal(view.trigger.conditionLabel, '触发规则')
+  assert.equal(view.trigger.confirmationLabel, '自动复核')
   assert.equal(view.trigger.invalidationLabel, '取消关注')
+  assert.match(view.trigger.condition, /任一到价后自动启动复核/)
+  assert.match(view.trigger.confirmation, /VWAP/)
 })
 
 test('未持仓观望缺少可靠观察价时明确显示等待重新定价', () => {

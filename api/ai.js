@@ -1747,12 +1747,12 @@ export default async function handler(req, res) {
       && payload.code
       && payload.generationProfile === 'DEEP'
     ) {
-      phase('正在匹配经典操盘理论…', 'theory');
+      phase('正在提炼短线实战经验…', 'theory');
       const theoryQuery = buildAdvisorTheoryQuery(mode, payload);
       try {
         theoryHits = await sourceTracker.track(
           'theoryKnowledge',
-          '经典理论库',
+          '短线经验库',
           Promise.resolve(retrieveTheoryKeywords(theoryQuery, 6)),
           {
             isAvailable: (value) =>
@@ -1767,7 +1767,7 @@ export default async function handler(req, res) {
       const theoryTrace = sourceTracker.snapshot()
         .findLast((item) => item.key === 'theoryKnowledge');
       emit('source', {
-        label: '经典理论库',
+        label: '短线经验库',
         ok: theoryRefs.length > 0,
         status: theoryTrace?.status || 'ERROR',
         durationMs: theoryTrace?.durationMs,

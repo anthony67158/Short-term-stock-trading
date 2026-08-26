@@ -24,6 +24,27 @@ const displayNumber = (value) => {
   return clean(value, 120)
 }
 
+const withYuan = (value) =>
+  /元$/.test(String(value)) ? String(value) : `${value}元`
+
+function observationTriggerText(levels = []) {
+  const conditions = levels
+    .filter((level) =>
+      ['watch_pullback', 'watch_breakout', 'watch'].includes(level.key)
+      && level.value
+      && level.value !== '等待重新定价'
+    )
+    .map((level) => {
+      const symbol = level.direction === 'LTE'
+        ? '≤'
+        : level.direction === 'GTE' ? '≥' : '到达'
+      return `${level.label}${symbol}${withYuan(level.value)}`
+    })
+  return conditions.length
+    ? `${conditions.join('；')}。任一到价后自动启动复核并记录提醒。`
+    : ''
+}
+
 const quantity = (advice) => {
   const direct = first(advice.opQty)
   if (direct) return direct
@@ -56,6 +77,7 @@ function priceLevels(advice, { observationOnly = false } = {}) {
         label: level.label,
         value: displayNumber(level.price),
         tone: level.direction === 'GTE' ? 'red' : 'muted',
+        direction: level.direction,
         distanceText: Number.isFinite(
           Number(level.currentDistancePct),
         )
@@ -69,12 +91,14 @@ function priceLevels(advice, { observationOnly = false } = {}) {
         label: '回踩观察',
         value: displayNumber(advice.pullbackWatchPrice),
         tone: 'muted',
+        direction: 'LTE',
       },
       advice.breakoutWatchPrice != null && {
         key: 'watch_breakout',
         label: '突破观察',
         value: displayNumber(advice.breakoutWatchPrice),
         tone: 'red',
+        direction: 'GTE',
       },
       advice.watchPrice != null
         && clean(advice.watchPrice, 200).length <= 24
@@ -307,8 +331,6 @@ function decisionInstruction(plan, fallback = '') {
 
 function operationGuide(advice, plan, levels, observationOnly) {
   const reviewText = clean(advice.reviewTrigger, 180)
-  const withYuan = (value) =>
-    /元$/.test(String(value)) ? String(value) : `${value}元`
   const policyReasons = (
     (
       plan?.actionPolicy?.overridden
@@ -665,14 +687,15 @@ function buildLegacyAdvicePresentation(advice = {}) {
     levels,
     trigger: {
       title: observationOnly
-        ? '观察与重新判断'
+        ? '到价后的动作'
         : '触发与失效',
-      conditionLabel: observationOnly ? '重新判断' : '触发',
-      confirmationLabel: observationOnly ? '买入确认' : '确认',
+      conditionLabel: observationOnly ? '触发规则' : '触发',
+      confirmationLabel: observationOnly ? '自动复核' : '确认',
       invalidationLabel: observationOnly ? '取消关注' : '失效',
-      validationLabel: observationOnly ? '观察周期' : '验证',
+      validationLabel: observationOnly ? '有效期' : '验证',
       condition: observationOnly
         ? first(
+            observationTriggerText(levels),
             advice.actionPlan,
             advice.timing,
             contract.triggerConditions,
@@ -682,10 +705,12 @@ function buildLegacyAdvicePresentation(advice = {}) {
             advice.timing,
             advice.nextOpenPlan,
           ),
-      confirmation: first(
-        advice.exitTiming,
-        contract.exitConditions,
-      ),
+      confirmation: observationOnly
+        ? '自动重新采集分时、VWAP、量能、主力与散户资金并生成新结论；确认后再提示人工操作，未确认不买。'
+        : first(
+            advice.exitTiming,
+            contract.exitConditions,
+          ),
       invalidation: first(
         contract.invalidation,
         advice.invalidation,

@@ -291,9 +291,9 @@ function TheoryReferences({ references }) {
     : []
   if (!items.length) return null
   return (
-    <section className="theory-refs" aria-label="本次参考理论">
+    <section className="theory-refs" aria-label="本次研判经验来源">
       <span className="theory-refs-label">
-        <Icon name="book" size={11} /> 参考理论
+        <Icon name="book" size={11} /> 经验来源
       </span>
       {items.map((item) => (
         <span
@@ -301,7 +301,7 @@ function TheoryReferences({ references }) {
           key={`${item.book}:${item.topic}`}
           title={`${item.book} · ${item.topic}`}
         >
-          {item.book}·{item.topic}
+          {item.topic}
         </span>
       ))}
     </section>
@@ -484,16 +484,34 @@ export default function AdvicePresentation({
               <div className="advice-section-title">
                 {view.observationOnly ? '观察价位' : '关键价位'}
               </div>
-              <div className="advice-prices compact">
-                {view.levels.map((level) => (
-                  <div className={'ap-cell ' + level.key} key={level.key}>
-                    <span className="ap-k">{level.label}</span>
-                    <span className={'ap-v ' + level.tone}>{level.value}</span>
-                    {level.distanceText && (
-                      <small className="ap-distance">{level.distanceText}</small>
-                    )}
+              <div className="advice-level-content">
+                <div className="advice-prices compact">
+                  {view.levels.map((level) => (
+                    <div className={'ap-cell ' + level.key} key={level.key}>
+                      <span className="ap-k">{level.label}</span>
+                      <span className={'ap-v ' + level.tone}>{level.value}</span>
+                      {level.distanceText && (
+                        <small className="ap-distance">{level.distanceText}</small>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {view.observationOnly && (
+                  <div
+                    className={`advice-observation-status ${reviewEnabled ? 'on' : 'off'}`}
+                    role="status"
+                  >
+                    <Icon name="bell" size={13} />
+                    <span>
+                      {reviewEnabled ? '自动监控中' : '自动监控已关闭'}
+                    </span>
+                    <strong>
+                      {reviewEnabled
+                        ? '任一到价后自动启动复核并记录提醒'
+                        : '开启持续复核后才会自动触发'}
+                    </strong>
                   </div>
-                ))}
+                )}
               </div>
             </section>
           )}

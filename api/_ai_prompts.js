@@ -186,7 +186,7 @@ export const ADVISOR_FAST_SYSTEM = `${ADVISOR_SYSTEM}
 
 export const ADVISOR_DEEP_SYSTEM = `${ADVISOR_SYSTEM}
 
-深度模式仍使用同一战术合同，只额外核对证据冲突、最强反方、催化有效期与失效路径。内部最多五个检查点，不输出长篇思维链，不新增第二套结论。`
+深度模式仍使用同一战术合同，只额外核对证据冲突、最强反方、催化有效期与失效路径。把经典短线方法内化为短线经验和模式识别：情绪周期决定进攻强度，主线与个股地位决定优先级，量价供需决定时机，试仓、加仓与止损决定风险，T+1次日和五日内退出决定兑现。不得为了引用而引用，不得逐条罗列书名、战法或理论标签。内部最多五个检查点，不输出长篇思维链，不新增第二套结论。`
 
 function promptValue(value) {
   if (typeof value === 'string') return promptText(value, 240)
@@ -575,13 +575,14 @@ export function buildDeepAdvisorPrompt({
     ...payload,
     previousAdvice: previousAdvice || payload?.previousAdvice,
   })
-  const theories = (Array.isArray(theoryHits) ? theoryHits : [])
-    .slice(0, 3)
-    .map((item) => ({
-      theory: promptText(item?.theory || item?.topic, 80),
-      text: promptText(item?.text, 200),
-    }))
-    .filter((item) => item.theory || item.text)
+  const experienceMemory = (Array.isArray(theoryHits) ? theoryHits : [])
+    .map((item) => promptText(
+      String(item?.text || '')
+        .replace(/^【[^】]{1,160}】\s*/, ''),
+      220,
+    ))
+    .filter(Boolean)
+    .slice(0, 5)
   const modeRule = mode === 'hold_advice'
     ? '这是持仓管理：减仓/清仓不得超过sellableTodayQty；加仓不得突破现金、总仓和单票风险上限。'
     : mode === 'review'
@@ -597,12 +598,12 @@ export function buildDeepAdvisorPrompt({
   return `【深度研判事实契约】${JSON.stringify(facts)}
 ${tacticalUsageRules(facts)}
 ${ragText ? `【检索补充·待核验】${promptText(ragText, 1200)}` : ''}
-${theories.length ? `【可用理论】${JSON.stringify(theories)}` : ''}
+${experienceMemory.length ? `【短线经验记忆·仅供内部综合】${JSON.stringify(experienceMemory)}` : ''}
 ${attribution}
 【任务】严格按 tactical 的市场→板块→个股地位→资金博弈→量化/价格时机顺序判断，再核对账户、反方和失效路径。${modeRule}
 主动做多必须满足风险预算与盈亏比至少1.8:1；弱市还必须同时具备逆势强势与高把握信号。价格只可来自事实契约中的合法锚点，不能编造；金额=手数×100×价格。
 涨停封板时资金净额可能受被动成交或排队影响，禁止把它解释为主力主动买卖。
-可用理论最多三条，只能解释已由实时事实确认的结构；理论与事实冲突时以事实和风控为准。文字预算：标题≤20字，动作≤80字，理由≤120字；每类证据只写一句。只输出JSON：
+短线经验只作为内部判断先验：综合吸收后直接用普通交易语言说明证据、动作和风险，不逐条点名，不得为了引用而引用。经验与事实冲突时以事实和风控为准。文字预算：标题≤20字，动作≤80字，理由≤120字；每类证据只写一句。只输出JSON：
 ${advisorOutputSchema(mode)}`
 }
 

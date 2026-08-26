@@ -110,8 +110,8 @@ function describeAlert(a) {
 }
 
 // —— 与前端 alertStore.hit 同口径 ——
-function hit(a, q) {
-  if (!isFreshAlertQuote(q)) return null;
+function hit(a, q, now = Date.now()) {
+  if (!isFreshAlertQuote(q, now)) return null;
   const cmp = (v, op, t) => (op === 'lte' ? v <= t : v >= t);
   switch (a.type) {
     case 'price': {
@@ -139,6 +139,35 @@ function hit(a, q) {
     default:
       return null;
   }
+}
+
+function reviewPriceTriggerOutcome(alert, quote, now = Date.now()) {
+  if (!alert?.reviewOnly) return null;
+  const msg = hit(alert, quote, now);
+  if (!msg) return null;
+  const nextAlert = {
+    ...alert,
+    phase: 'reviewing',
+    triggeredAt: now,
+    triggeredMsg: `观察价已到：${msg}`,
+    decisionPrice: Number(quote?.price) || null,
+    enabled: false,
+  };
+  return {
+    msg,
+    notification: buildAlertNotification({
+      alert: nextAlert,
+      quote,
+      stage: 'review',
+      reason: msg,
+    }),
+    alert: nextAlert,
+    wakeup: {
+      kind: 'price-review',
+      alert: { ...nextAlert },
+      at: now,
+    },
+  };
 }
 
 export function cloudAlertsForEvaluation(alerts = [], settings = {}) {
@@ -456,31 +485,19 @@ async function processAccount(
         changed = true;
         continue;
       }
-      const msg = hit(a, q);
-      if (!msg) continue;
-      const now = Date.now();
+      const outcome = reviewPriceTriggerOutcome(a, q);
+      if (!outcome) continue;
       hits++;
-      const notification = buildAlertNotification({
-        alert: a,
-        quote: q,
-        stage: 'review',
-        reason: msg,
-      });
       collectDead(await sendPush(subs, {
-        ...notification,
+        ...outcome.notification,
         code: a.code,
         tag: 'review-' + a.id,
         url: '/',
       }));
-      a.phase = 'reviewing';
-      a.triggeredAt = now;
-      a.triggeredMsg = `观察价已到：${msg}`;
-      a.decisionPrice = Number(q?.price) || null;
-      a.enabled = false;
+      Object.assign(a, outcome.alert);
       wakeups.push({
-        kind: 'price-review',
+        ...outcome.wakeup,
         alert: { ...a },
-        at: now,
       });
       changed = true;
       continue;
@@ -872,6 +889,7 @@ export const __test = {
   hit,
   persistProcessedAccount,
   positionContextOf,
+  reviewPriceTriggerOutcome,
   rotateAccounts,
   retireIfPositionChanged,
 }

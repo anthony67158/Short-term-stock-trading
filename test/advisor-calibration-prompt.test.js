@@ -19,6 +19,8 @@ test('快速与深度建议都使用可交付的有界输出预算', () => {
   assert.match(ADVISOR_DEEP_SYSTEM, /同一战术合同/)
   assert.match(ADVISOR_DEEP_SYSTEM, /最强反方/)
   assert.match(ADVISOR_DEEP_SYSTEM, /最多五个检查点/)
+  assert.match(ADVISOR_DEEP_SYSTEM, /内化为短线经验/)
+  assert.match(ADVISOR_DEEP_SYSTEM, /不得为了引用而引用/)
 })
 
 test('所有军师模式都只使用紧凑短线战术合同', () => {

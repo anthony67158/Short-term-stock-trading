@@ -2,12 +2,14 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  __test as cronAlertTest,
   cloudAlertsForEvaluation,
   isCurrentAdvicePlan,
   queueAdviceReviewForPriceTrigger,
   queueAdviceReviewForVerdict,
 } from '../api/cron_alert.js'
 import { completeJob, enqueueJob, leaseJob } from '../api/_jobs.js'
+import { projectAdviceAlerts } from '../shared/adviceAlerts.js'
 
 test('Judge确认同一军师计划后只推进确定性执行状态不重复调用军师', () => {
   const data = {
@@ -116,6 +118,117 @@ test('观察价命中直接排队复核而不调用Judge确认交易', () => {
   assert.equal(data.reviewJobs['600519'].source, 'judge')
   assert.equal(data.reviewJobs['600519'].trigger.kind, 'price-review')
   assert.equal(data.reviewJobs['600519'].trigger.price, 145.3)
+})
+
+test('回踩与突破观察价都闭环触发提醒并排队自动复核', () => {
+  const now = Date.parse('2026-08-27T02:00:00.000Z')
+  const cases = [
+    {
+      key: 'watch_pullback',
+      label: '回踩观察',
+      price: 96,
+      direction: 'LTE',
+      quote: 95.9,
+      op: 'lte',
+      symbol: '≤',
+    },
+    {
+      key: 'watch_breakout',
+      label: '突破观察',
+      price: 105,
+      direction: 'GTE',
+      quote: 105.1,
+      op: 'gte',
+      symbol: '≥',
+    },
+  ]
+
+  for (const item of cases) {
+    const advice = {
+      action: '观望',
+      continuity: { planId: `plan-${item.key}`, revision: 2 },
+      priceContract: {
+        schemaVersion: 'advice-price-contract.v1',
+        currentPrice: 100,
+        validationStatus: 'VERIFIED',
+        levels: [{
+          key: item.key,
+          field: item.key === 'watch_pullback'
+            ? 'pullbackWatchPrice'
+            : 'breakoutWatchPrice',
+          purpose: 'REVIEW_ONLY',
+          label: item.label,
+          price: item.price,
+          direction: item.direction,
+          status: 'PENDING',
+          strict: true,
+        }],
+        allPricesStrict: true,
+        issues: [],
+        review: { operator: 'ANY', conditions: [], allMet: false },
+      },
+    }
+    const data = {
+      plan: [{ code: '600519', name: '贵州茅台' }],
+      holding: [],
+      alerts: [],
+      settings: {},
+      advice: {
+        '600519': { mode: 'buy_advice', advice },
+      },
+    }
+
+    projectAdviceAlerts(data, '600519', advice, {
+      now,
+      idFactory: () => `alert-${item.key}`,
+      requirePriceContract: true,
+    })
+
+    const alert = data.alerts[0]
+    assert.equal(alert.reviewOnly, true)
+    assert.equal(alert.reviewKey, item.key)
+    assert.equal(alert.op, item.op)
+    assert.equal(
+      cronAlertTest.reviewPriceTriggerOutcome(
+        alert,
+        { price: 100, tradeDate: '2026-08-27' },
+        now,
+      ),
+      null,
+    )
+
+    const outcome = cronAlertTest.reviewPriceTriggerOutcome(
+      alert,
+      {
+        price: item.quote,
+        tradeDate: '2026-08-27',
+      },
+      now,
+    )
+
+    assert.ok(outcome)
+    assert.equal(outcome.alert.phase, 'reviewing')
+    assert.equal(outcome.alert.enabled, false)
+    assert.equal(outcome.wakeup.kind, 'price-review')
+    assert.match(outcome.notification.title, /观察条件已到/)
+    assert.match(
+      outcome.notification.body,
+      new RegExp(`${item.label}${item.symbol}${item.price}`),
+    )
+    assert.match(outcome.notification.body, /正在自动复核/)
+
+    const queued = queueAdviceReviewForPriceTrigger(
+      data,
+      outcome.alert,
+      now,
+    )
+    assert.equal(queued.queued, true)
+    assert.equal(queued.created, true)
+    assert.equal(
+      data.reviewJobs['600519'].trigger.kind,
+      'price-review',
+    )
+  }
 })
 
 test('旧计划的Judge结果不得唤醒或改写当前军师建议', () => {

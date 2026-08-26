@@ -129,9 +129,12 @@ export default function StockDetail({ stock, onClose }) {
   const noteAnchorRef = useRef(null)
   const searchConfig = useAiSearchConfig()
   const book = usePlanStore()
-  const reviewEnabled = isAdviceReviewEnabled(
-    book.settings,
-    stock && stock.code,
+  const reviewEnabled = (
+    book.settings?.aiAutoAlert !== false
+    && isAdviceReviewEnabled(
+      book.settings,
+      stock && stock.code,
+    )
   )
   const knowledgeActionReview = useMemo(
     () => latestKnowledgeActionReview(

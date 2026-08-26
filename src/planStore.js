@@ -1271,6 +1271,10 @@ export const planStore = {
       configUpdatedAt,
     )
     if (enabled) {
+      state.settings = {
+        ...state.settings,
+        aiAutoAlert: true,
+      }
       const scopeKey = state.holding.some(
         (item) => String(item?.code || '') === normalizedCode,
       )
