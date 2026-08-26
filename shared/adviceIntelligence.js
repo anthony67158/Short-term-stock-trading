@@ -1,6 +1,9 @@
 import { reviewPriceMateriality } from './adviceReviewRisk.js'
 import { sanitizedAdvicePriceContract } from './advicePriceContract.js'
 
+export const ADVICE_REVIEW_EVENT_VERSION =
+  'advice-review-event.v1'
+
 function finite(value) {
   const number = Number(value)
   return Number.isFinite(number) ? number : null
@@ -135,6 +138,7 @@ export function adviceEvidenceDigest(snapshot = {}) {
     },
     tactical: {
       horizon: text(tactical.horizon, 30),
+      marketPhase: text(tactical.market?.phase, 30),
       marketRiskTone: text(tactical.market?.riskTone, 30),
       sectorState: text(tactical.sector?.state, 30),
       stockRole: text(tactical.sector?.stockRole, 30),
@@ -152,63 +156,219 @@ export function adviceEvidenceDigest(snapshot = {}) {
   }
 }
 
-function materialChange(previous, current, previousAdvice) {
+function positionBand(value) {
+  const number = finite(value)
+  if (number == null) return 'UNKNOWN'
+  if (number <= 30) return 'LOW'
+  if (number >= 70) return 'HIGH'
+  return 'MID'
+}
+
+function addReviewEvent(events, {
+  kind,
+  priority,
+  reason,
+  requiresLlm = false,
+  deterministicAction = '',
+}) {
+  if (events.some((item) => item.kind === kind)) return
+  events.push({
+    schemaVersion: ADVICE_REVIEW_EVENT_VERSION,
+    kind,
+    priority,
+    reason: text(reason, 180),
+    requiresLlm,
+    deterministicAction: text(deterministicAction, 50),
+  })
+}
+
+export function buildAdviceReviewEventQueue({
+  previousDigest,
+  currentDigest,
+  snapshot,
+  previousAdvice,
+} = {}) {
+  if (!previousDigest || !currentDigest) return []
+  const events = []
+  const nearPrice = nearExecutionPrice(snapshot, previousAdvice)
   const priceChange = reviewPriceMateriality({
-    previous,
-    current,
+    previous: previousDigest,
+    current: currentDigest,
     previousAdvice,
   })
-  if (priceChange.changed) return { ...priceChange, kind: 'price' }
+  if (priceChange.changed) {
+    addReviewEvent(events, {
+      kind: 'PRICE_LEVEL',
+      priority: 1,
+      reason: priceChange.reason,
+      requiresLlm: true,
+      deterministicAction: /止损/.test(priceChange.reason)
+        ? 'HARD_STOP_CHECK'
+        : /目标|减仓/.test(priceChange.reason)
+          ? 'PROFIT_PROTECTION'
+          : 'PRICE_REVIEW',
+    })
+  }
+
+  const previousStructure = {
+    vsVwap: previousDigest.technical?.vsVwap,
+    posBand: positionBand(previousDigest.technical?.posInDay),
+    macdHistSign: previousDigest.technical?.macdHistSign,
+    maCross: previousDigest.technical?.maCross,
+  }
+  const currentStructure = {
+    vsVwap: currentDigest.technical?.vsVwap,
+    posBand: positionBand(currentDigest.technical?.posInDay),
+    macdHistSign: currentDigest.technical?.macdHistSign,
+    maCross: currentDigest.technical?.maCross,
+  }
   if (
-    JSON.stringify(previous?.tactical)
-    !== JSON.stringify(current?.tactical)
+    JSON.stringify(previousStructure)
+    !== JSON.stringify(currentStructure)
   ) {
-    return {
-      changed: true,
-      kind: 'tactical',
+    addReviewEvent(events, {
+      kind: 'FIVE_MINUTE_STRUCTURE',
+      priority: 3,
+      reason: '完整5分钟结构或均价线位置发生变化',
+      requiresLlm: nearPrice,
+      deterministicAction: 'STRUCTURE_RECHECK',
+    })
+  }
+
+  const previousSector = {
+    state: previousDigest.tactical?.sectorState
+      || previousDigest.sector?.actionability,
+    role: previousDigest.tactical?.stockRole
+      || previousDigest.sector?.role,
+  }
+  const currentSector = {
+    state: currentDigest.tactical?.sectorState
+      || currentDigest.sector?.actionability,
+    role: currentDigest.tactical?.stockRole
+      || currentDigest.sector?.role,
+  }
+  if (JSON.stringify(previousSector) !== JSON.stringify(currentSector)) {
+    addReviewEvent(events, {
+      kind: 'SECTOR_ROLE',
+      priority: 2,
+      reason: '板块状态或个股前排资格发生变化',
+      requiresLlm: nearPrice,
+      deterministicAction:
+        currentSector.state === 'WEAKENING'
+        || currentSector.role === 'LAGGARD'
+          ? 'STRUCTURAL_EXIT_CHECK'
+          : 'SECTOR_RECHECK',
+    })
+  }
+
+  const previousFlow = previousDigest.tactical?.flowRelation
+    || previousDigest.funds?.retailRelation
+  const currentFlow = currentDigest.tactical?.flowRelation
+    || currentDigest.funds?.retailRelation
+  if (previousFlow !== currentFlow) {
+    addReviewEvent(events, {
+      kind: 'FUND_FLOW_RELATION',
+      priority: 2,
+      reason: '主力与小单资金关系发生反转',
+      requiresLlm: nearPrice,
+      deterministicAction:
+        currentFlow === 'DISTRIBUTION'
+        || currentFlow === 'main_out_retail_in'
+          ? 'STRUCTURAL_EXIT_CHECK'
+          : 'FLOW_RECHECK',
+    })
+  }
+
+  const previousQuant = {
+    direction: previousDigest.quant?.direction,
+    highConfidence: previousDigest.tactical?.highConfidence
+      ?? previousDigest.quant?.highConfFired,
+  }
+  const currentQuant = {
+    direction: currentDigest.quant?.direction,
+    highConfidence: currentDigest.tactical?.highConfidence
+      ?? currentDigest.quant?.highConfFired,
+  }
+  if (JSON.stringify(previousQuant) !== JSON.stringify(currentQuant)) {
+    addReviewEvent(events, {
+      kind: 'QUANT_CONFIDENCE',
+      priority: 3,
+      reason: '量化方向或高把握状态发生变化',
+      requiresLlm: true,
+      deterministicAction: 'QUANT_RECHECK',
+    })
+  }
+
+  const previousTactical = {
+    timingState: previousDigest.tactical?.timingState,
+    location: previousDigest.tactical?.location,
+    crowdingRisk: previousDigest.tactical?.crowdingRisk,
+    conflicts: previousDigest.tactical?.conflicts,
+  }
+  const currentTactical = {
+    timingState: currentDigest.tactical?.timingState,
+    location: currentDigest.tactical?.location,
+    crowdingRisk: currentDigest.tactical?.crowdingRisk,
+    conflicts: currentDigest.tactical?.conflicts,
+  }
+  if (
+    JSON.stringify(previousTactical)
+    !== JSON.stringify(currentTactical)
+  ) {
+    addReviewEvent(events, {
+      kind: 'TACTICAL_STATE',
+      priority: 2,
       reason: '短线战术状态发生变化',
-    }
+      requiresLlm: true,
+      deterministicAction: 'TACTICAL_RECHECK',
+    })
   }
-  if (JSON.stringify(previous?.sector) !== JSON.stringify(current?.sector)) {
-    return {
-      changed: true,
-      kind: 'sector',
-      reason: '板块方向或个股前排资格发生变化',
-    }
+
+  if (
+    previousDigest.tactical?.marketPhase
+    !== currentDigest.tactical?.marketPhase
+  ) {
+    addReviewEvent(events, {
+      kind: 'SESSION_BOUNDARY',
+      priority: 4,
+      reason: '交易时段边界发生变化',
+      requiresLlm: true,
+      deterministicAction: 'SESSION_RECHECK',
+    })
   }
-  if (JSON.stringify(previous?.funds) !== JSON.stringify(current?.funds)) {
-    return {
-      changed: true,
-      kind: 'funds',
-      reason: '主力与小单资金结构发生变化',
-    }
+
+  if (
+    JSON.stringify(previousDigest.account)
+    !== JSON.stringify(currentDigest.account)
+  ) {
+    addReviewEvent(events, {
+      kind: 'ACCOUNT_CHANGED',
+      priority: 1,
+      reason: '持仓、可卖数量或账户风险预算发生变化',
+      requiresLlm: true,
+      deterministicAction: 'ACCOUNT_RECOMPILE',
+    })
   }
-  if (JSON.stringify(previous?.quant) !== JSON.stringify(current?.quant)) {
-    return {
-      changed: true,
-      kind: 'quant',
-      reason: '量化方向或把握度发生变化',
-    }
+
+  if (
+    JSON.stringify(previousDigest.news?.companyAnnouncements)
+    !== JSON.stringify(currentDigest.news?.companyAnnouncements)
+    || previousDigest.resonance?.hasNegNews !== true
+      && currentDigest.resonance?.hasNegNews === true
+  ) {
+    addReviewEvent(events, {
+      kind: 'MATERIAL_NEWS',
+      priority: 1,
+      reason: '公司公告或重大风险消息发生变化',
+      requiresLlm: true,
+      deterministicAction: 'NEWS_RECHECK',
+    })
   }
-  const withoutPrice = (value) => JSON.stringify({
-    ...value,
-    quote: {
-      ...value?.quote,
-      price: null,
-      pct: null,
-    },
-    sector: null,
-    funds: null,
-    quant: null,
-  })
-  if (withoutPrice(previous) !== withoutPrice(current)) {
-    return {
-      changed: true,
-      kind: 'context',
-      reason: '资金、技术、量化或消息证据发生实质变化',
-    }
-  }
-  return { changed: false, kind: '', reason: '' }
+
+  return events.sort((left, right) =>
+    left.priority - right.priority
+    || left.kind.localeCompare(right.kind),
+  )
 }
 
 function nearExecutionPrice(snapshot, advice) {
@@ -234,12 +394,6 @@ function nearExecutionPrice(snapshot, advice) {
   ].map(finite).filter((item) => item != null)
   return [...new Set([...contractPrices, ...fallbackPrices])]
     .some((level) => Math.abs(price - level) <= threshold)
-}
-
-function hardNegativeShift(previous, current) {
-  return previous?.resonance?.hasNegNews !== true
-    && current?.resonance?.hasNegNews === true
-    && Number(current?.resonance?.score) <= 1
 }
 
 export function evaluateScheduledReview({
@@ -282,32 +436,36 @@ export function evaluateScheduledReview({
     }
   }
   const currentDigest = adviceEvidenceDigest(snapshot)
-  const change = previousDigest
-    ? materialChange(previousDigest, currentDigest, previousAdvice)
-    : { changed: true, reason: '缺少上一版证据摘要' }
-  if (previousDigest && !change.changed) {
+  const events = previousDigest
+    ? buildAdviceReviewEventQueue({
+        previousDigest,
+        currentDigest,
+        snapshot,
+        previousAdvice,
+      })
+    : []
+  if (previousDigest && !events.length) {
     return {
       shouldRunLLM: false,
       disposition: 'unchanged',
       reason: '关键证据无实质变化',
     }
   }
-  if (
-    previousDigest
-    && !['price', 'policy', 'tactical'].includes(change.kind)
-    && !nearExecutionPrice(snapshot, previousAdvice)
-    && !hardNegativeShift(previousDigest, currentDigest)
-  ) {
+  const firstEvent = events[0]
+  const llmEvent = events.find((event) => event.requiresLlm)
+  if (previousDigest && !llmEvent) {
     return {
       shouldRunLLM: false,
       disposition: 'unchanged',
-      reason: `${change.reason}，未触发执行价或风险事件`,
+      reason: `${firstEvent?.reason || '证据有变化'}，未触发执行价或风险事件`,
     }
   }
   return {
     shouldRunLLM: true,
     disposition: previousDigest ? 'material-change' : 'full-review',
-    reason: change.reason,
+    reason: previousDigest
+      ? llmEvent?.reason || firstEvent?.reason
+      : '缺少上一版证据摘要',
   }
 }
 
@@ -318,6 +476,12 @@ export function buildReviewReceipt({
   evaluation = null,
 } = {}) {
   const current = adviceEvidenceDigest(snapshot || {})
+  const eventQueue = buildAdviceReviewEventQueue({
+    previousDigest,
+    currentDigest: current,
+    snapshot,
+    previousAdvice,
+  })
   const checked = [
     '价格与执行价',
     '主力与小单资金',
@@ -360,6 +524,7 @@ export function buildReviewReceipt({
   return {
     checked,
     changes: changes.slice(0, 4),
+    eventQueue,
     summary: reason
       || (changes.length
         ? changes.slice(0, 2).join('、')

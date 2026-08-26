@@ -11,6 +11,7 @@ const CORE_FIELDS = [
   'catalystWindow',
   'reviewTrigger',
   'shortHorizonTactical',
+  'exitManagement',
   'actionPlan',
   'exitTiming',
   'opQty',

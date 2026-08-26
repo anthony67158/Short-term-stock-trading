@@ -2,8 +2,10 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  ADVICE_REVIEW_EVENT_VERSION,
   adviceEvidenceDigest,
   adviceTrustBands,
+  buildAdviceReviewEventQueue,
   buildReviewReceipt,
   calibrateAdviceTrust,
   evaluateScheduledReview,
@@ -144,6 +146,105 @@ test('短线战术状态变化优先触发复核', () => {
 
   assert.equal(result.shouldRunLLM, true)
   assert.match(result.reason, /短线战术状态/)
+})
+
+test('五分钟结构、板块角色和资金关系统一进入有序事件队列', () => {
+  const previousSnapshot = snapshot({
+    evidence: {
+      ...snapshot().evidence,
+      technical: {
+        indicators: {
+          maTrend: '多头',
+          maCross: '金叉',
+          macd: { hist: 0.2 },
+        },
+        intraday: { vsVwap: '上方', posInDay: 72 },
+      },
+      funds: {
+        mainNetYi: 0.8,
+        retailNetYi: -0.4,
+        retailFlow: { relation: 'main_in_retail_out' },
+      },
+      decisionSignals: {
+        tactical: {
+          market: { phase: 'MORNING', riskTone: 'BALANCED' },
+          sector: {
+            state: 'LEADING',
+            stockRole: 'LEADER',
+          },
+          stock: {
+            location: 'HIGH',
+            crowdingRisk: 'MEDIUM',
+          },
+          flow: { relation: 'ACCUMULATION' },
+          timing: { state: 'READY' },
+          catalyst: { freshness: 'FRESH', risk: 'POSITIVE' },
+          quant: { highConfidence: true },
+          conflicts: [],
+        },
+      },
+    },
+  })
+  const currentSnapshot = snapshot({
+    evidence: {
+      ...previousSnapshot.evidence,
+      technical: {
+        indicators: {
+          maTrend: '空头',
+          maCross: '死叉',
+          macd: { hist: -0.2 },
+        },
+        intraday: { vsVwap: '下方', posInDay: 25 },
+      },
+      funds: {
+        mainNetYi: -1.1,
+        retailNetYi: 0.9,
+        retailFlow: { relation: 'main_out_retail_in' },
+      },
+      decisionSignals: {
+        tactical: {
+          ...previousSnapshot.evidence.decisionSignals.tactical,
+          sector: {
+            state: 'WEAKENING',
+            stockRole: 'LAGGARD',
+          },
+          flow: { relation: 'DISTRIBUTION' },
+        },
+      },
+    },
+  })
+  const events = buildAdviceReviewEventQueue({
+    previousDigest: adviceEvidenceDigest(previousSnapshot),
+    currentDigest: adviceEvidenceDigest(currentSnapshot),
+    snapshot: currentSnapshot,
+    previousAdvice: {
+      action: '持有',
+      stopPrice: 9,
+      targetPrice: 12,
+    },
+  })
+
+  assert.equal(
+    events.every(
+      (event) =>
+        event.schemaVersion === ADVICE_REVIEW_EVENT_VERSION,
+    ),
+    true,
+  )
+  assert.deepEqual(
+    events.map((event) => event.kind),
+    [
+      'FUND_FLOW_RELATION',
+      'SECTOR_ROLE',
+      'FIVE_MINUTE_STRUCTURE',
+    ],
+  )
+  assert.equal(
+    events.find(
+      (event) => event.kind === 'FUND_FLOW_RELATION',
+    ).deterministicAction,
+    'STRUCTURAL_EXIT_CHECK',
+  )
 })
 
 test('宏观快讯轮换和无关研报不应单独触发自动复核模型', () => {

@@ -41,8 +41,31 @@ function reviewReceipt(value) {
       .slice(0, 4)
     : []
   const summary = String(value.summary || '').slice(0, 160)
-  return checked.length || changes.length || summary
-    ? { checked, changes, summary }
+  const eventQueue = (Array.isArray(value.eventQueue)
+    ? value.eventQueue
+    : [])
+    .map((event) => ({
+      schemaVersion: String(event?.schemaVersion || '').slice(0, 40),
+      kind: String(event?.kind || '').slice(0, 40),
+      priority: Math.max(
+        1,
+        Math.min(9, Math.trunc(Number(event?.priority) || 9)),
+      ),
+      reason: String(event?.reason || '').slice(0, 180),
+      requiresLlm: event?.requiresLlm === true,
+      deterministicAction: String(
+        event?.deterministicAction || '',
+      ).slice(0, 50),
+    }))
+    .filter((event) => event.kind && event.reason)
+    .slice(0, 8)
+  return checked.length || changes.length || summary || eventQueue.length
+    ? {
+        checked,
+        changes,
+        summary,
+        ...(eventQueue.length ? { eventQueue } : {}),
+      }
     : null
 }
 

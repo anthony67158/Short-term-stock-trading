@@ -191,6 +191,38 @@ test('复核回执随建议持久化并限制展示字段长度', () => {
   })
 })
 
+test('复核事件队列随回执持久化且只保留安全字段', () => {
+  const entry = buildAdviceCacheEntry(null, {
+    mode: 'hold_advice',
+    reviewDisposition: 'material-change',
+    reviewReason: '板块状态发生变化',
+    reviewReceipt: {
+      checked: ['板块与前排资格'],
+      changes: ['板块方向或前排资格变化'],
+      summary: '板块状态发生变化',
+      eventQueue: [{
+        schemaVersion: 'advice-review-event.v1',
+        kind: 'SECTOR_ROLE',
+        priority: 2,
+        reason: '板块状态或个股前排资格发生变化',
+        requiresLlm: false,
+        deterministicAction: 'STRUCTURAL_EXIT_CHECK',
+        unsafe: '不应持久化',
+      }],
+    },
+    advice: { action: '持有' },
+  }, 1000)
+
+  assert.deepEqual(entry.advice.reviewCycle.receipt.eventQueue, [{
+    schemaVersion: 'advice-review-event.v1',
+    kind: 'SECTOR_ROLE',
+    priority: 2,
+    reason: '板块状态或个股前排资格发生变化',
+    requiresLlm: false,
+    deterministicAction: 'STRUCTURAL_EXIT_CHECK',
+  }])
+})
+
 test('军师正文暂缺时也安排下次重试，避免每5分钟重复调用', () => {
   const now = new Date('2026-08-10T02:00:00Z').getTime()
   const entry = buildAdviceCacheEntry(null, {
