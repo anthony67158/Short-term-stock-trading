@@ -91,9 +91,16 @@ const REVIEW_STATUS_ICON = Object.freeze({
 function CandidateReviewStatus({
   code,
   alerts,
-  adviceAt,
   priceReached,
 }) {
+  const [, forceAdvice] = useState(0)
+  useEffect(
+    () => subscribeAdvice(() =>
+      forceAdvice((value) => value + 1)
+    ),
+    [code],
+  )
+  const adviceAt = getAdvice(code, 'buy_advice')?.at
   const reviewState = useAdviceReviewCardState(
     code,
     alerts,
@@ -1207,7 +1214,6 @@ function PlanList({ book, quote, stockTags, batchSel }) {
             <CandidateReviewStatus
               code={p.code}
               alerts={reviewAlerts}
-              adviceAt={entry?.at}
               priceReached={anyReached}
             />
           )
