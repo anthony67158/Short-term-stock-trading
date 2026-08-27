@@ -10,7 +10,10 @@ import Reasoning from './Reasoning'
 import ConfirmDialog from './ConfirmDialog'
 import OverlayPortal from './OverlayPortal'
 import HoldingPlanDialog from './HoldingPlanDialog'
-import AdviceGenerationStatus, { useAdviceGeneration } from './AdviceGenerationStatus'
+import AdviceGenerationStatus, {
+  useAdviceGeneration,
+  useAdviceReviewCardState,
+} from './AdviceGenerationStatus'
 import ExecutionQueue from './ExecutionQueue'
 import { AlertForm } from './AlertCenter'
 import { useMediaQuery, usePolling, useSwipe } from '../hooks'
@@ -75,6 +78,51 @@ import { adviceRecency } from '../../shared/adviceRecency.js'
 import { selectAutoRefreshCodes } from '../../shared/adviceAutoRefreshPolicy.js'
 import { stockNoteText } from '../../shared/stockNotes.js'
 import { quoteDisplayState } from '../../shared/quoteDisplay.js'
+
+const REVIEW_STATUS_ICON = Object.freeze({
+  queued: 'clock',
+  running: 'refresh',
+  publishing: 'refresh',
+  done: 'check',
+  failed: 'info',
+  stopped: 'close',
+})
+
+function CandidateReviewStatus({
+  code,
+  alerts,
+  priceReached,
+}) {
+  const reviewState = useAdviceReviewCardState(code, alerts)
+  const state = reviewState || (
+    priceReached
+      ? {
+          kind: 'queued',
+          label: '条件已到，等待后台复核',
+          detail: '任务将在云端创建',
+        }
+      : null
+  )
+  if (!state) return null
+  const spinning = ['running', 'publishing'].includes(state.kind)
+
+  return (
+    <div
+      className={`pc-buyalert review-paths review-${state.kind}`}
+      title={state.detail}
+      aria-live="polite"
+      aria-atomic="true"
+      aria-busy={spinning}
+    >
+      <Icon
+        name={REVIEW_STATUS_ICON[state.kind] || 'bell'}
+        size={11}
+        className={spinning ? 'spin' : ''}
+      />
+      <span>{state.label}</span>
+    </div>
+  )
+}
 
 // —— 搜索结果 → 定位到卡片:轻量模块级事件总线 ——
 // 搜索框(StockSearch)、自选区(PlanList)、持仓区(HoldingList)同在本文件,用一个 Set 广播即可:
@@ -1118,41 +1166,23 @@ function PlanList({ book, quote, stockTags, batchSel }) {
           const reviewAlerts = stockAlerts.filter(
             (alert) => alert.reviewOnly,
           )
-          if (reviewAlerts.length) {
-            const executionOpen = isContinuousTrading(Date.now())
-            const reached = (alert) =>
-              executionOpen && priceView.livePrice != null && (
+          const executionOpen = isContinuousTrading(Date.now())
+          const reached = (alert) =>
+            executionOpen && priceView.livePrice != null && (
               alert.op === 'gte'
                 ? priceView.livePrice >= alert.value
                 : priceView.livePrice <= alert.value
             )
-            const reviewing = reviewAlerts.some((alert) => !alert.enabled)
-            const anyReached = reviewAlerts.some((alert) =>
-              alert.enabled && reached(alert)
-            )
-            if (!reviewing && !anyReached) return null
-            const tone = reviewing ? ' off' : (anyReached ? ' hot' : '')
-            return (
-              <div
-                className={'pc-buyalert review-paths' + tone}
-                title={
-                  !executionOpen
-                    ? '休市不通知；下一连续竞价时段恢复监测，到价后自动核对分时承接、量能和资金'
-                    : reviewing
-                      ? '观察条件已触发，正在重新评估'
-                      : '到价后自动核对分时承接、量能和资金；确认后再提示'
-                }
-              >
-                <Icon name="bell" size={11} />
-                <span>
-                  {reviewing
-                    ? '条件已触发，正在自动复核'
-                    : '条件已到，等待自动复核'}
-                </span>
-              </div>
-            )
-          }
-          return null
+          const anyReached = reviewAlerts.some((alert) =>
+            alert.enabled && reached(alert)
+          )
+          return (
+            <CandidateReviewStatus
+              code={p.code}
+              alerts={reviewAlerts}
+              priceReached={anyReached}
+            />
+          )
         })()}
         <StockNoteSummary
           code={p.code}

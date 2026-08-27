@@ -887,6 +887,8 @@ export function jobsToProgress(data, now = Date.now(), concurrency = CONCURRENCY
     quant: j.quant || null,
     model: j.model || '',
     endpoint: j.endpoint || '',
+    triggerKind: String(j.trigger?.kind || ''),
+    triggerAlertId: String(j.trigger?.alertId || ''),
     progressAt: j.progressAt || j.at || 0,
     attempts: j.attempts || 0,
     deepMode: !!j.deepMode,

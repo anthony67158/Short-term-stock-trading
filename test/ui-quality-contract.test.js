@@ -24,6 +24,7 @@ const lhbBoard = read('src/components/LhbBoard.jsx')
 const llmConfig = read('src/components/LLMConfig.jsx')
 const quantModelControl = read('src/components/QuantModelControl.jsx')
 const planTab = read('src/components/PlanTab.jsx')
+const generationStatus = read('src/components/AdviceGenerationStatus.jsx')
 const holdingPlanDialog = read('src/components/HoldingPlanDialog.jsx')
 const reviewTab = read('src/components/ReviewTab.jsx')
 const fundFlowCanvas = read('src/components/FundFlowCanvas.jsx')
@@ -1219,11 +1220,13 @@ test('休市卡片不显示到价且自动复核状态只在触发后出现', ()
     planTab,
     /const reached = \(alert\) =>\s*executionOpen &&/,
   )
+  assert.match(planTab, /<CandidateReviewStatus/)
+  assert.match(planTab, /priceReached=\{anyReached\}/)
+  assert.doesNotMatch(planTab, /reviewAlerts\.some\(\(alert\) => !alert\.enabled\)/)
   assert.match(
-    planTab,
-    /if \(!reviewing && !anyReached\) return null/,
+    generationStatus,
+    /adviceReviewCardState\(\s*getBatchState\(\),/,
   )
-  assert.match(planTab, /条件已触发，正在自动复核/)
   assert.match(
     planTab,
     /Icon name="clock"[\s\S]{0,100}查看后续预案/,

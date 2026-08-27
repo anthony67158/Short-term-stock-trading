@@ -135,6 +135,110 @@ export function adviceJobState(
   }
 }
 
+const REVIEW_TERMINAL_VISIBLE_MS = 2 * 60 * 1000
+
+export function adviceReviewCardState(
+  batch,
+  code,
+  {
+    alerts = [],
+    now = Date.now(),
+  } = {},
+) {
+  const targetCode = String(code || '')
+  if (!targetCode) return null
+  const triggeredAlerts = (Array.isArray(alerts) ? alerts : [])
+    .filter((alert) =>
+      alert?.reviewOnly === true
+      && String(alert.candCode || alert.code || '') === targetCode
+      && alert.phase === 'reviewing'
+    )
+  const triggeredAt = triggeredAlerts.reduce(
+    (latest, alert) =>
+      Math.max(latest, Number(alert.triggeredAt) || 0),
+    0,
+  )
+  const jobs = (Array.isArray(batch?.reviews) ? batch.reviews : [])
+    .filter((item) =>
+      String(item?.code || '') === targetCode
+      && item?.role === 'review'
+      && item?.source === 'judge'
+      && (
+        item?.triggerKind === 'price-review'
+        || triggeredAlerts.length > 0
+      )
+    )
+    .sort(
+      (left, right) =>
+        (Number(right?.progressAt) || 0)
+        - (Number(left?.progressAt) || 0),
+    )
+  const job = jobs[0] || null
+  const progressAt = Number(job?.progressAt) || 0
+  const freshTerminal = (
+    progressAt > 0
+    && Number(now) - progressAt <= REVIEW_TERMINAL_VISIBLE_MS
+  )
+  if (!job || (triggeredAt > 0 && progressAt < triggeredAt)) {
+    return triggeredAlerts.length
+      ? {
+          kind: 'queued',
+          label: '条件已触发，等待后台复核',
+          detail: '后台任务状态同步中',
+        }
+      : null
+  }
+  if (['queued', 'pending'].includes(job.status)) {
+    return {
+      kind: 'queued',
+      label: '条件已触发，等待后台复核',
+      detail: String(job.phase || '后台任务已创建'),
+    }
+  }
+  if (job.status === 'running') {
+    return {
+      kind: 'running',
+      label: '条件已触发，正在自动复核',
+      detail: String(job.phase || '正在核对最新行情与证据'),
+    }
+  }
+  if (job.status === 'publishing') {
+    return {
+      kind: 'publishing',
+      label: '复核完成，正在更新结论',
+      detail: String(job.phase || '正在发布最新建议'),
+    }
+  }
+  if (job.status === 'ok' && freshTerminal) {
+    return {
+      kind: 'done',
+      label: '自动复核完成，结论已更新',
+      detail: '请查看上方最新操作指令',
+    }
+  }
+  if (
+    job.status === 'fail'
+    && (triggeredAlerts.length > 0 || freshTerminal)
+  ) {
+    return {
+      kind: 'failed',
+      label: '自动复核失败，请重新评估',
+      detail: String(job.error || '后台复核未返回完整结果'),
+    }
+  }
+  if (
+    job.status === 'skipped'
+    && (triggeredAlerts.length > 0 || freshTerminal)
+  ) {
+    return {
+      kind: 'stopped',
+      label: '自动复核已停止',
+      detail: '可点击重新评估再次发起',
+    }
+  }
+  return null
+}
+
 export function cloudAdviceLoadingState(batch, code) {
   const active = adviceJobState(batch, code)
     || adviceJobState(batch, code, { role: 'review' })

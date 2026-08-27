@@ -3,6 +3,7 @@ import Icon from './Icon'
 import {
   adviceGenerationSteps,
   adviceJobState,
+  adviceReviewCardState,
 } from '../../shared/adviceUiState.js'
 import { visibleAiSources } from '../../shared/aiSearchUi.js'
 import { cancelAdvice, getRunning, isRunning, subscribeRunner } from '../adviceRunner'
@@ -39,6 +40,31 @@ export function useAdviceGeneration(code) {
   const batch = getBatchState()
   return adviceJobState(batch, code)
     || adviceJobState(batch, code, { role: 'review' })
+}
+
+export function useAdviceReviewCardState(code, alerts = []) {
+  const [, forceRender] = useState(0)
+  useEffect(() => {
+    const update = () => forceRender((value) => value + 1)
+    return subscribeBatch(update)
+  }, [code])
+
+  const state = adviceReviewCardState(
+    getBatchState(),
+    code,
+    { alerts },
+  )
+
+  useEffect(() => {
+    if (!['done', 'failed', 'stopped'].includes(state?.kind)) return undefined
+    const timer = window.setTimeout(
+      () => forceRender((value) => value + 1),
+      2 * 60 * 1000,
+    )
+    return () => window.clearTimeout(timer)
+  }, [state?.kind])
+
+  return state
 }
 
 export default function AdviceGenerationStatus({

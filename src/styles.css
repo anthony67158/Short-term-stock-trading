@@ -1794,6 +1794,12 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 .pc-buyalert .pc-buyalert-off { margin-left: 3px; font-size: 10.5px; color: var(--muted); }
 .pc-buyalert .pc-buyalert-hit { margin-left: 3px; font-size: 10.5px; font-weight: 800; color: var(--red); }
 .pc-buyalert.review-paths { flex-wrap: wrap; row-gap: 3px; }
+.pc-buyalert.review-queued,
+.pc-buyalert.review-stopped { color: var(--muted); background: var(--panel); border-color: var(--border-soft); }
+.pc-buyalert.review-running,
+.pc-buyalert.review-publishing { color: var(--accent2); background: rgba(91,141,239,.1); border-color: rgba(91,141,239,.25); }
+.pc-buyalert.review-done { color: var(--green); background: rgba(31,157,67,.1); border-color: rgba(31,157,67,.25); }
+.pc-buyalert.review-failed { color: var(--red); background: rgba(224,67,47,.1); border-color: rgba(224,67,47,.28); }
 .pc-watch-path { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
 .pc-watch-path i { margin-inline: 2px; color: var(--muted); font-style: normal; }
 .pc-watch-path em { color: var(--red); font-size: 10.5px; font-style: normal; font-weight: 800; }

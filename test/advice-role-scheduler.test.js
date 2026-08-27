@@ -204,7 +204,12 @@ test('复核完成只改变复核任务，不回退已完成的主建议', () =>
     code: '600000',
     mode: 'hold_advice',
     source: 'judge',
-    trigger: { at: 1300, planRevision: 2 },
+    trigger: {
+      kind: 'price-review',
+      alertId: 'review-alert',
+      at: 1300,
+      planRevision: 2,
+    },
   }, 1300)
   leaseJob(data, '600000', 1400, 'review')
   completeJob(data, '600000', 1500, { role: 'review' })
@@ -213,6 +218,9 @@ test('复核完成只改变复核任务，不回退已完成的主建议', () =>
   assert.equal(data.jobs['600000'].finishedAt, 1200)
   assert.equal(data.reviewJobs['600000'].status, 'done')
   assert.equal(data.reviewJobs['600000'].finishedAt, 1500)
+  const progress = jobsToProgress(data, 1600, 1)
+  assert.equal(progress.reviews[0].triggerKind, 'price-review')
+  assert.equal(progress.reviews[0].triggerAlertId, 'review-alert')
 })
 
 test('迟到的旧jobId不能结束同股新任务', () => {

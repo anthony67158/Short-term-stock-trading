@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
   adviceJobState,
+  adviceReviewCardState,
   adviceGenerationSteps,
   cloudAdviceLoadingState,
   createAdviceCompletionPuller,
@@ -333,6 +334,83 @@ test('后台复核保持卡片可见但不占用或取消advisor生成', () => {
     cloudAdviceLoadingState(batch, '600000').role,
     'review',
   )
+})
+
+test('卡片复核状态只由真实price-review任务状态驱动', () => {
+  const now = 10_000
+  const alerts = [{
+    id: 'review-alert',
+    code: '600000',
+    candCode: '600000',
+    reviewOnly: true,
+    enabled: false,
+    phase: 'reviewing',
+    triggeredAt: 5_000,
+  }]
+  const stateFor = (status, extra = {}) => adviceReviewCardState({
+    reviews: [{
+      code: '600000',
+      role: 'review',
+      source: 'judge',
+      triggerKind: 'price-review',
+      status,
+      progressAt: 8_000,
+      ...extra,
+    }],
+  }, '600000', { alerts, now })
+
+  assert.deepEqual(
+    adviceReviewCardState({ reviews: [] }, '600000', { alerts, now }),
+    {
+      kind: 'queued',
+      label: '条件已触发，等待后台复核',
+      detail: '后台任务状态同步中',
+    },
+  )
+  assert.equal(stateFor('queued').label, '条件已触发，等待后台复核')
+  assert.equal(stateFor('running').label, '条件已触发，正在自动复核')
+  assert.equal(stateFor('publishing').label, '复核完成，正在更新结论')
+  assert.equal(stateFor('ok').label, '自动复核完成，结论已更新')
+  assert.equal(adviceReviewCardState({
+    reviews: [{
+      code: '600000',
+      role: 'review',
+      source: 'judge',
+      triggerKind: 'price-review',
+      status: 'ok',
+      progressAt: 8_000,
+    }],
+  }, '600000', { alerts: [], now }).label, '自动复核完成，结论已更新')
+  assert.deepEqual(stateFor('fail', { error: '模型超时' }), {
+    kind: 'failed',
+    label: '自动复核失败，请重新评估',
+    detail: '模型超时',
+  })
+  assert.equal(stateFor('skipped').label, '自动复核已停止')
+})
+
+test('普通定时复核与过期完成状态不占用到价复核提示', () => {
+  const now = 500_000
+  assert.equal(adviceReviewCardState({
+    reviews: [{
+      code: '600000',
+      role: 'review',
+      source: 'auto',
+      status: 'running',
+      progressAt: now,
+    }],
+  }, '600000', { alerts: [], now }), null)
+
+  assert.equal(adviceReviewCardState({
+    reviews: [{
+      code: '600000',
+      role: 'review',
+      source: 'judge',
+      triggerKind: 'price-review',
+      status: 'ok',
+      progressAt: now - 180_000,
+    }],
+  }, '600000', { alerts: [], now }), null)
 })
 
 test('服务端advisor容量已满时不回退到本地重复生成', async () => {

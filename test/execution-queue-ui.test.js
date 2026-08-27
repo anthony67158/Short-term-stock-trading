@@ -28,6 +28,7 @@ test('持仓执行顶部只有一个可移除的手动操作计划入口', () =>
 test('候选卡买入框与预警只读取统一动作视图的契约价', () => {
   const planTab = read('src/components/PlanTab.jsx')
   const planStore = read('src/planStore.js')
+  const generation = read('src/components/AdviceGenerationStatus.jsx')
 
   assert.match(
     planTab,
@@ -45,8 +46,9 @@ test('候选卡买入框与预警只读取统一动作视图的契约价', () =>
   assert.match(planStore, /requirePriceContract:\s*true/)
   assert.match(planTab, /pc-buyalert review-paths/)
   assert.match(planTab, /anyReached/)
-  assert.match(planTab, /if \(!reviewing && !anyReached\) return null/)
-  assert.match(planTab, /条件已触发，正在自动复核/)
+  assert.match(planTab, /<CandidateReviewStatus/)
+  assert.doesNotMatch(planTab, /reviewAlerts\.some\(\(alert\) => !alert\.enabled\)/)
+  assert.match(generation, /useAdviceReviewCardState/)
   assert.doesNotMatch(planTab, /reviewAlerts\.map/)
 })
 
