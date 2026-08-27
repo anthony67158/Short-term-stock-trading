@@ -2195,11 +2195,24 @@ html[data-theme="light"] .plan-cand.starred {
 .action-command {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
-  gap: var(--space-2xs);
+  width: 100%;
   min-width: 0;
   padding: var(--space-xs) 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: start;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.action-command:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
 }
 
 .action-command-badge {
@@ -2389,52 +2402,6 @@ html[data-theme="light"] .plan-cand.starred {
 
 .stock-note-preview .action-command-preview-text {
   white-space: pre-wrap;
-}
-
-.action-command-open {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-3xs);
-  min-width: 54px;
-  min-height: 32px;
-  padding: 0 var(--space-2xs);
-  border: 0;
-  border-radius: var(--radius-control);
-  background: transparent;
-  color: var(--color-accent);
-  cursor: pointer;
-  font-size: var(--text-2xs);
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.action-command-open:focus-visible {
-  outline: 2px solid var(--color-focus);
-  outline-offset: 2px;
-}
-
-.action-command-open:active {
-  transform: translateY(1px);
-}
-
-.action-command-open:disabled,
-.action-command-open[aria-disabled="true"] {
-  color: var(--color-muted);
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
-.action-command-open[aria-busy="true"] {
-  cursor: progress;
-}
-
-.action-command-open[data-state="error"] {
-  color: var(--color-danger);
-}
-
-.action-command-open[data-state="success"] {
-  color: var(--color-down);
 }
 
 .action-command-qty {
@@ -4346,10 +4313,6 @@ html[data-theme="light"] .plan-cand.starred {
 
   .action-command.has-preview:hover .action-command-text {
     color: var(--color-accent);
-  }
-
-  .action-command-open:hover {
-    background: var(--color-paper-3);
   }
 
   .action-field input:hover {
@@ -12052,12 +12015,6 @@ button.acct-item {
     min-height: 44px;
   }
 
-  .action-command-open {
-    width: auto;
-    min-width: 58px;
-    min-height: 44px;
-  }
-
   .plan-cand .pc-actions > button,
   .hold-item > .pi-actions button {
     min-height: 44px;
@@ -13594,9 +13551,8 @@ body.overlay-scroll-locked {
 
 /* Candidate decision: one command, one price band, one trigger state. */
 .card-decision-slot .action-command {
-  grid-template-columns: minmax(0, 1fr) 32px;
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
-  gap: var(--space-xs);
   padding: var(--space-sm) 0;
   border-bottom: 0;
 }
@@ -13664,15 +13620,6 @@ body.overlay-scroll-locked {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   line-clamp: 2;
-}
-
-.card-decision-slot .action-command-open {
-  width: 32px;
-  min-width: 32px;
-  min-height: 32px;
-  padding: 0;
-  border: 1px solid var(--color-rule-2);
-  background: var(--color-paper-2);
 }
 
 .card-decision-slot .action-levels.editable {

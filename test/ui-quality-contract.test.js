@@ -509,7 +509,7 @@ test('操作建议卡使用固定价位列且数量与动作保持同组', () =>
   assert.doesNotMatch(precision, /\.action-command-icon\s*{/)
   assert.match(
     precision,
-    /\.card-decision-slot \.action-command\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+32px/s,
+    /\.card-decision-slot \.action-command\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s*;/s,
   )
   assert.match(
     precision,
@@ -635,8 +635,12 @@ test('持仓与自选卡桌面使用同高摘要且移动端恢复自然高度',
 
 test('卡片内只保留单行建议摘要且完整内容进入个股详情', () => {
   assert.match(planTab, /function ActionCommand\(\{ view, onOpen \}\)/)
-  assert.match(planTab, /className="action-command-open"/)
-  assert.match(planTab, /aria-label="查看完整操作建议"/)
+  assert.match(
+    planTab,
+    /<button[\s\S]*?className="action-command"[\s\S]*?onClick=\{onOpen\}/,
+  )
+  assert.doesNotMatch(planTab, /className="action-command-open"/)
+  assert.doesNotMatch(precision, /\.action-command-open/)
   assert.doesNotMatch(planTab, /action-command-disclosure|new ResizeObserver\(measure\)/)
   assert.match(
     precision,
@@ -644,11 +648,7 @@ test('卡片内只保留单行建议摘要且完整内容进入个股详情', ()
   )
   assert.match(
     precision,
-    /\.action-command-open\s*{[^}]*min-height:\s*32px[^}]*color:\s*var\(--color-accent\)/s,
-  )
-  assert.match(
-    precision,
-    /@media \(pointer:\s*coarse\)\s*{[\s\S]*?\.action-command-open\s*{[^}]*min-width:\s*58px[^}]*min-height:\s*44px/s,
+    /\.action-command:focus-visible\s*{[^}]*outline:\s*2px solid var\(--color-focus\)/s,
   )
 })
 

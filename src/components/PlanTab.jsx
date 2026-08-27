@@ -649,7 +649,12 @@ function ActionCommand({ view, onOpen }) {
     view.quantityLabel || actionQtyLabel(view.quantity)
 
   return (
-    <div className="action-command">
+    <button
+      type="button"
+      className="action-command"
+      title="查看完整建议"
+      onClick={onOpen}
+    >
       <span className="action-command-body">
         <span className="action-command-meta">
           {view.commandLabel || '当前指令'}
@@ -663,16 +668,7 @@ function ActionCommand({ view, onOpen }) {
           {instruction}
         </span>
       </span>
-      <button
-        type="button"
-        className="action-command-open"
-        aria-label="查看完整操作建议"
-        title="查看完整建议"
-        onClick={onOpen}
-      >
-        <Icon name="chevronRight" size={13} />
-      </button>
-    </div>
+    </button>
   )
 }
 

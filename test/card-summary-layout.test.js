@@ -17,8 +17,11 @@ const design = read('design.md')
 test('持仓与自选卡只展示固定策略摘要并从详情入口查看完整建议', () => {
   assert.match(planTab, /function ActionCommand\(\{ view, onOpen \}\)/)
   assert.equal((planTab.match(/<ActionCommand[\s\S]{0,120}onOpen=/g) || []).length, 2)
-  assert.match(planTab, /className="action-command-open"/)
-  assert.match(planTab, /aria-label="查看完整操作建议"/)
+  assert.match(
+    planTab,
+    /<button[\s\S]*?className="action-command"[\s\S]*?onClick=\{onOpen\}/,
+  )
+  assert.doesNotMatch(planTab, /className="action-command-open"/)
   assert.doesNotMatch(planTab, /action-command-disclosure/)
   assert.doesNotMatch(planTab, /useLayoutEffect/)
 })
@@ -106,7 +109,7 @@ test('卡片操作区用推荐动作建立主次且不再额外画顶部分隔�
   )
 })
 
-test('策略摘要不再使用遮挡卡片的悬浮预览并保留详情入口', () => {
+test('策略摘要不再使用遮挡卡片的悬浮预览且文字区域直接进入详情', () => {
   assert.doesNotMatch(
     planTab,
     /className="action-command-preview"[\s\S]*?完整操作建议[\s\S]*?\{instruction\}/,
@@ -117,8 +120,9 @@ test('策略摘要不再使用遮挡卡片的悬浮预览并保留详情入口',
   )
   assert.match(
     planTab,
-    /className="action-command-open"[\s\S]*?title="查看完整建议"/,
+    /className="action-command"[\s\S]*?title="查看完整建议"[\s\S]*?onClick=\{onOpen\}/,
   )
+  assert.doesNotMatch(planTab, /className="action-command-open"/)
 })
 
 test('持仓卡先展示指令再展示仓位核心数据与次级盘面证据', () => {
