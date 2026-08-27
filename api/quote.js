@@ -29,7 +29,7 @@ function positive(value) {
     : null;
 }
 
-function quoteDisplayState(tradeDate, now) {
+function quotePriceMetadata(tradeDate, now) {
   const today = beijingDayKey(now);
   if (String(tradeDate || '').slice(0, 10) !== today) {
     return {
@@ -169,7 +169,7 @@ export function mergeQuoteSources(
     if (eastmoneyValid && eastmoneyCurrent) {
       return {
         ...eastmoney,
-        ...quoteDisplayState(eastmoney.tradeDate, now),
+        ...quotePriceMetadata(eastmoney.tradeDate, now),
       };
     }
     if (tencentValid && tencentCurrent) {
@@ -179,7 +179,7 @@ export function mergeQuoteSources(
         code,
         name: eastmoney?.name || tencent.name || '',
         industry: eastmoney?.industry || tencent.industry || null,
-        ...quoteDisplayState(tencent.tradeDate, now),
+        ...quotePriceMetadata(tencent.tradeDate, now),
       });
     }
     return previousCloseQuote(code, eastmoney, tencent, now);
