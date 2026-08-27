@@ -574,6 +574,76 @@ test('军师主结论已是减仓时不再创建备用加仓预警', () => {
   assert.deepEqual(data.alerts.map((alert) => alert.actKind), ['reduce'])
 })
 
+test('持有建议持续创建回踩与突破两条加仓复核提醒', () => {
+  const data = {
+    plan: [],
+    holding: [{ id: 'h1', code: '003036', name: '泰坦股份' }],
+    alerts: [],
+    settings: {},
+  }
+
+  projectAdviceAlerts(data, '003036', {
+    action: '持有',
+    actionPlan: '当前持有，本轮不直接加仓',
+    shortHorizonTactical: {
+      timing: {
+        pullbackPrice: 50.94,
+        breakoutPrice: 52.06,
+      },
+      actionPolicy: {
+        riskTier: 'NONE',
+        canIncreaseRisk: false,
+        reasons: ['量化与流动性尚未确认'],
+      },
+    },
+    priceContract: {
+      schemaVersion: 'advice-price-contract.v1',
+      currentPrice: 51.82,
+      validationStatus: 'VERIFIED',
+      allPricesStrict: true,
+      levels: [{
+        key: 'stop',
+        field: 'stopPrice',
+        price: 50.89,
+        direction: 'LTE',
+        strict: true,
+        basis: 'quote.dayLow',
+      }],
+    },
+    stopPrice: 50.89,
+  }, {
+    now,
+    idFactory: ids,
+    requirePriceContract: true,
+    t1Status: {
+      liveQty: 1,
+      boughtToday: 1,
+      sellableToday: 0,
+    },
+  })
+
+  const reviews = data.alerts.filter((alert) => alert.reviewOnly)
+  assert.deepEqual(
+    reviews.map((alert) => [
+      alert.reviewKey,
+      alert.op,
+      alert.value,
+      alert.note,
+    ]),
+    [
+      ['holding_add_pullback', 'lte', 50.94, '回踩加仓复核'],
+      ['holding_add_breakout', 'gte', 52.06, '突破加仓复核'],
+    ],
+  )
+  assert.equal(
+    reviews.every((alert) =>
+      alert.actCode === '003036'
+      && alert.reviewIntent.mode === 'REASSESSMENT'
+    ),
+    true,
+  )
+})
+
 test('跌破型减仓使用向下预警而不是把高于触发线误判为到价', () => {
   const data = {
     plan: [],

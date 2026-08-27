@@ -4,13 +4,11 @@ import { computeSellAllowance } from '../shared/decisionGuards.js'
 import { appendExecution, createRecommendation, decisionLedgerStats, removeExecutions } from '../shared/decisionLedger.js'
 import { proposalAlertSpec, sanitizeTradeProposal } from '../shared/tradeProposal.js'
 import { applyT1ToAlert } from '../shared/t1AdvicePolicy.js'
-import { adviceSupportsIntent, buildJudgeAdviceContext } from '../shared/judgeAdviceContext.js'
 import {
   advicePriceLevel,
   sanitizedAdvicePriceContract,
 } from '../shared/advicePriceContract.js'
 import { projectAdviceAlerts } from '../shared/adviceAlerts.js'
-import { executionTriggerDirection } from '../shared/executionTrigger.js'
 import {
   positionGateForAlert,
   requiresPositionCheck,
@@ -147,6 +145,24 @@ function shiftRecordDate(record, dateText) {
 // 从最新 AI 操作建议缓存里取【标准化】的止盈(tp)/止损(sl)——全局唯一口径。
 // AI 建议字段:targetPrice=目标价(止盈)、stopPrice=止损价;统一映射成持仓/候选卡的 tp/sl。
 // 这样「个股详情页的AI建议」与「持仓卡的止盈/止损」永远同源同值,不会各算各的。
+export function advicePlanSyncPatch(holding = {}, plan = null) {
+  if (!plan || typeof plan !== 'object') return {}
+  const patch = {}
+  const syncPrice = (field, manualField, nextValue) => {
+    if (holding[manualField]) return
+    const current = holding[field] == null
+      ? null
+      : roundPx(holding[field])
+    const next = nextValue == null
+      ? null
+      : roundPx(nextValue)
+    if (current !== next) patch[field] = next
+  }
+  syncPrice('tp', 'tpManual', plan.tp)
+  syncPrice('sl', 'slManual', plan.sl)
+  return patch
+}
+
 export function advicePlan(code) {
   try {
     const expectedMode = state.holding.some((holding) => holding.code === code)
@@ -163,7 +179,6 @@ export function advicePlan(code) {
     const slSource = stopLevel?.price
     const tp = tpSource != null && !isNaN(tpSource) ? roundPx(tpSource) : null
     const sl = slSource != null && !isNaN(slSource) ? roundPx(slSource) : null
-    if (tp == null && sl == null) return null
     // 计划「理由」同源:优先具体操作计划,其次一句话结论/理由/时机,供持仓卡计划自动跟随
     const reason = adv.actionPlan || adv.title || adv.reason || adv.timing || ''
     return { tp, sl, reason, action: adv.action || adv.stance || '', tone: adv.tone || '', at: a.at }
@@ -2536,98 +2551,14 @@ export const planStore = {
     let adv = null
     try { adv = (getAdvice(code, 'hold_advice') || {}).advice } catch { adv = null }
     if (!adv) { state.alerts = rest; emit(); return }
-    if (
-      adv.decisionPlan?.schemaVersion === 'decision-plan.v2'
-      && adv.decisionPlan.actionability !== 'READY'
-    ) {
-      state.alerts = rest
-      emit()
-      return
-    }
-    const holder = state.holding.find((x) => x.code === code)
     const liveStatus = t1StatusOf(code)
-    if (!holder || !(liveStatus.liveQty > 0)) {
-      state.alerts = rest
-      emit()
-      return
-    }
-    const name = adv.name || holder.name || code
-    // opQty 是「补1手/减1手」这类操作量标签;actionPlan/exitTiming 给「到价后怎么确认」
-    const opQty = adv.opQty || ''
-    const timing = adv.exitTiming || adv.actionPlan || ''
-    const judgeContext = buildJudgeAdviceContext(adv)
-    const priceContract = sanitizedAdvicePriceContract(adv)
-    if (!priceContract) {
-      state.alerts = rest
-      emit()
-      return
-    }
-    const t1 = liveStatus
-    const old = (state.alerts || []).filter((a) => a.actCode === code)
-    const rebuilt = []
-    const build = (kind, op, price, muted) => {
-      if (muted) return
-      const contractLevel = advicePriceLevel(adv, kind)
-        || (kind === 'reduce'
-          ? advicePriceLevel(adv, 'target')
-          : null)
-      if (!contractLevel) return
-      const triggerZone = kind === 'add'
-        ? judgeContext.addZone
-        : judgeContext.reduceZone
-      const zoneTrigger = kind === 'add'
-        ? triggerZone?.high
-        : triggerZone?.low
-      const triggerPrice = contractLevel?.price ?? zoneTrigger ?? price
-      if (triggerPrice == null || isNaN(triggerPrice)) return
-      const v = roundPx(triggerPrice)
-      if (v == null || !(Number(v) > 0)) return
-      const actionQty = kind === 'add'
-        ? (/加仓|补仓|买回|接回/.test(opQty) ? opQty : '')
-        : (/减仓|卖出|清仓/.test(opQty) ? opQty : '')
-      const note = kind === 'add' ? '补仓点' : '减仓点'
-      const prev = old.find((a) => a.actKind === kind)
-      const samePlan = !!(
-        prev?.judgeContext?.planId
-        && judgeContext.planId
-        && prev.judgeContext.planId === judgeContext.planId
-      )
-      if (prev && (Number(prev.value) === Number(v) || samePlan)) {
-        rebuilt.push(applyT1ToAlert({
-          ...prev,
-          value: Number(v),
-          opQty: actionQty,
-          timing,
-          ...(triggerZone ? { triggerZone } : {}),
-          judgeContext,
-        }, kind === 'reduce' ? t1 : null))
-        return
-      }
-      rebuilt.push(applyT1ToAlert({
-        id: uid(), enabled: true, createdAt: Date.now(), triggeredAt: null, triggeredMsg: '',
-        code, name, type: 'price', op, value: Number(v), note,
-        actCode: code, actKind: kind, opQty: actionQty, timing,
-        ...(triggerZone ? { triggerZone } : {}),
-        judgeContext,
-        phase: 'armed',
-      }, kind === 'reduce' ? t1 : null))
-    }
-    if (adviceSupportsIntent('add', judgeContext)) {
-      build('add', 'lte', adv.addPrice, holder.muteAdd)
-    }
-    const reduceDirection = executionTriggerDirection({
-      action: adv.decisionPlan?.action || 'REDUCE',
-      trigger: adv.actionPlan || adv.nextAction || adv.exitTiming,
-      triggerDirection: adv.decisionPlan?.triggerDirection,
+    const changed = projectAdviceAlerts(state, code, adv, {
+      now: Date.now(),
+      idFactory: uid,
+      t1Status: liveStatus,
+      requirePriceContract: true,
     })
-    build(
-      'reduce',
-      reduceDirection === 'LTE' ? 'lte' : 'gte',
-      adv.reducePrice,
-      holder.muteReduce,
-    )
-    state.alerts = [...rebuilt, ...rest]
-    emit()
+    if (changed) emit()
   },
 
   // ===== 预警规则 =====

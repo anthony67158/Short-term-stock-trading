@@ -7,6 +7,7 @@ import {
 } from './advicePriceContract.js'
 import { isAdviceReviewEnabled } from './adviceReviewPolicy.js'
 import { executionTriggerDirection } from './executionTrigger.js'
+import { holdingAddReviewPlan } from './holdingFollowUp.js'
 
 function roundPrice(value) {
   const n = Number(value)
@@ -304,6 +305,60 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
         candidate.alertSyncedPrice = buyPrice
         changed = true
       }
+    }
+  }
+
+  const holdingFollowUp = liveHolder
+    ? holdingAddReviewPlan(advice)
+    : null
+  if (holdingFollowUp?.paths?.length) {
+    for (const path of holdingFollowUp.paths) {
+      const op = path.direction === 'LTE' ? 'lte' : 'gte'
+      const reviewPrice = roundPrice(path.price)
+      if (reviewPrice == null) continue
+      const previous = alerts.find((alert) =>
+        alert?.actCode === code
+        && alert.reviewOnly === true
+        && alert.reviewKey === path.key
+      )
+      const samePlan = !!(
+        previous?.judgeContext?.planId
+        && judgeContext.planId
+        && previous.judgeContext.planId === judgeContext.planId
+      )
+      if (
+        previous
+        && samePlan
+        && Number(previous.value) === reviewPrice
+        && previous.op === op
+      ) {
+        projected.push({
+          ...previous,
+          note: path.label,
+          judgeContext,
+          reviewIntent: holdingFollowUp.reviewIntent,
+        })
+        continue
+      }
+      projected.push({
+        ...baseAlert({
+          idFactory,
+          now,
+          code,
+          name,
+          op,
+          value: reviewPrice,
+          note: path.label,
+        }),
+        actCode: code,
+        reviewOnly: true,
+        reviewKey: path.key,
+        reviewCategory: 'holding-add',
+        judgeContext,
+        reviewIntent: holdingFollowUp.reviewIntent,
+        phase: 'armed',
+      })
+      changed = true
     }
   }
 

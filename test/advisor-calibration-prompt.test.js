@@ -186,6 +186,35 @@ test('普通观望到价后只重新评估方向且不继承试仓承诺', () =>
   assert.match(prompt, /不得沿用条件试仓措辞/)
 })
 
+test('持仓加仓复核价到达后只评估是否加仓', () => {
+  const prompt = buildUserPrompt('hold_advice', {
+    code: '003036',
+    reviewEvent: {
+      kind: 'price-review',
+      reviewMode: 'REASSESSMENT',
+      plannedAction: 'WATCH',
+      actionLabel: '重新评估加仓',
+      directionApproved: false,
+      threshold: 52.06,
+      price: 52.16,
+    },
+    shortHorizonTactical: {
+      schemaVersion: 'short-horizon-tactical.v1',
+      timing: { state: 'READY' },
+      actionPolicy: {
+        schemaVersion: 'short-horizon-action-policy.v1',
+        allowedActions: ['ADD', 'HOLD', 'REDUCE', 'EXIT', 'WATCH'],
+        executionOpen: true,
+        riskTier: 'PROBE',
+      },
+    },
+  })
+
+  assert.match(prompt, /持仓加仓条件复核/)
+  assert.match(prompt, /重新评估是否加仓/)
+  assert.match(prompt, /否则继续持有并写明本轮不加仓原因/)
+})
+
 test('军师低命中校准按动作方向纠偏而不是一律变得更保守', () => {
   const prompt = buildUserPrompt('hold_advice', {
     code: '600000',

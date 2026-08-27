@@ -41,11 +41,10 @@ export function queueAdviceReviewForPriceTrigger(
     return { queued: false, reason: 'stale-plan' }
   }
   const holding = Array.isArray(data?.holding) ? data.holding : []
-  const mode = Number(
+  const holdingReview = Number(
     t1StatusOf(holding, data?.closed || [], code).liveQty,
   ) > 0
-    ? 'hold_advice'
-    : 'buy_advice'
+  const mode = holdingReview ? 'hold_advice' : 'buy_advice'
   const rawIntent = alert?.reviewIntent || {}
   const intendedAction = String(rawIntent.plannedAction || '')
   const entryConfirmation = (
@@ -74,7 +73,9 @@ export function queueAdviceReviewForPriceTrigger(
     : {
         reviewMode: 'REASSESSMENT',
         plannedAction: 'WATCH',
-        actionLabel: '观望',
+        actionLabel: holdingReview
+          ? '重新评估加仓'
+          : '观望',
         directionApproved: false,
         maxPositionPct: null,
         manualConfirmationOnly: false,
@@ -95,8 +96,12 @@ export function queueAdviceReviewForPriceTrigger(
       : null,
     ...reviewIntent,
     reason: entryConfirmation
-      ? '条件建仓价已触发，只确认入场时机并生成具体执行价'
-      : '观察价已触发，重新评估买入方向',
+      ? holdingReview
+        ? '条件加仓价已触发，只确认加仓时机并生成具体执行价'
+        : '条件建仓价已触发，只确认入场时机并生成具体执行价'
+      : holdingReview
+        ? '持仓加仓复核价已触发，重新评估是否加仓'
+        : '观察价已触发，重新评估买入方向',
     at: now,
   }
   const idempotencyKey = [

@@ -19,7 +19,7 @@ import { AlertForm } from './AlertCenter'
 import { useMediaQuery, usePolling, useSwipe } from '../hooks'
 import { callAIStream } from '../ai'
 import { api } from '../apiBase'
-import { planStore, usePlanStore, calcBuyFee, calcSellFee, computeTFlows, computePortfolio, sortHoldingsByProfit, livePositionOf, t1StatusOf, advicePlan } from '../planStore'
+import { planStore, usePlanStore, calcBuyFee, calcSellFee, computeTFlows, computePortfolio, sortHoldingsByProfit, livePositionOf, t1StatusOf, advicePlan, advicePlanSyncPatch } from '../planStore'
 import { aiStore } from '../aiStore'
 import { openStockDetail, useDetailStore } from '../detailStore'
 import { getAdvice, subscribeAdvice } from '../adviceCache'
@@ -627,7 +627,11 @@ const actionTone = (kind) => (
 )
 
 const actionLevelIcon = (level) => {
-  if (level.key === 'reduce' || level.key === 'target') return 'arrowUp'
+  if (
+    level.key === 'reduce'
+    || level.key === 'target'
+    || level.key === 'holding_add_breakout'
+  ) return 'arrowUp'
   if (level.key === 'stop') return 'shield'
   if (level.key === 'watch') return 'eye'
   return 'arrowDown'
@@ -635,9 +639,14 @@ const actionLevelIcon = (level) => {
 
 const reachedLevelKey = (view, progress) => {
   if (!progress?.reached) return ''
+  if (progress.reachedKey) return progress.reachedKey
   if (view.trigger?.direction === 'range') {
-    if (progress.currentPrice < view.trigger.low) return 'add'
-    if (progress.currentPrice > view.trigger.high) return 'reduce'
+    if (progress.currentPrice < view.trigger.low) {
+      return view.trigger.lowKey || 'add'
+    }
+    if (progress.currentPrice > view.trigger.high) {
+      return view.trigger.highKey || 'reduce'
+    }
     return ''
   }
   return view.levels.find((item) => item.active)?.key || ''
@@ -670,7 +679,13 @@ function ActionProgress({ trigger, currentPrice, progress: preparedProgress }) {
       : 'activity'
   const targetText = trigger.direction === 'range'
     ? `${fmtRaw(trigger.low)}–${fmtRaw(trigger.high)}`
-    : `${trigger.label} ${fmtRaw(trigger.price)}`
+    : trigger.direction === 'review_paths'
+      ? trigger.paths
+          .map((path) =>
+            `${path.direction === 'LTE' ? '回踩' : '突破'}${fmtRaw(path.price)}`
+          )
+          .join(' / ')
+      : `${trigger.label} ${fmtRaw(trigger.price)}`
   if (progress.reached) {
     return (
       <div
@@ -687,7 +702,14 @@ function ActionProgress({ trigger, currentPrice, progress: preparedProgress }) {
               : progress.stateLabel}
         </span>
         <strong>{targetText}</strong>
-        <span>等待人工确认</span>
+        <span>
+          {progress.reachedHint
+            || (
+              trigger.direction === 'review_paths'
+                ? '等待自动复核'
+                : '等待人工确认'
+            )}
+        </span>
       </div>
     )
   }
@@ -2399,8 +2421,6 @@ function HoldingItem({ h, quote: q }) {
   const play = validPx != null ? intradayPlaybook(q) : null
 
   // 交易计划：止盈(tp)/止损(sl)/理由(planReason)。触价「按纪律离场」是实时动作,仅在有真实现价时判定
-  const hitTP = validPx != null && h.tp && validPx >= Number(h.tp)
-  const hitSL = validPx != null && h.sl && validPx <= Number(h.sl)
   const [planPrice, setPlanTP] = useState(h.tp != null ? String(h.tp) : '')
   const [planSL, setPlanSL] = useState(h.sl != null ? String(h.sl) : '')
   const [planReason, setPlanReason] = useState(h.planReason || '')
@@ -2411,12 +2431,26 @@ function HoldingItem({ h, quote: q }) {
   useEffect(() => subscribeAdvice(() => forceAdv((n) => n + 1)), [])
   // 该股最新 AI 建议的【标准化】止盈/止损(与个股详情页同源同值)
   const aiPlan = advicePlan(h.code)
+  const effectivePlanTarget = aiPlan && !h.tpManual
+    ? aiPlan.tp
+    : h.tp
+  const effectivePlanStop = aiPlan && !h.slManual
+    ? aiPlan.sl
+    : h.sl
+  const hitTP = (
+    validPx != null
+    && effectivePlanTarget != null
+    && validPx >= Number(effectivePlanTarget)
+  )
+  const hitSL = (
+    validPx != null
+    && effectivePlanStop != null
+    && validPx <= Number(effectivePlanStop)
+  )
   // 自动跟随:市场在变,每次生成AI建议都基于最新盘面 → 未被手动覆盖的字段回写持仓,保证与详情页一致
   useEffect(() => {
     if (!aiPlan) return
-    const patch = {}
-    if (!h.tpManual && aiPlan.tp != null && Number(aiPlan.tp) !== Number(h.tp)) patch.tp = aiPlan.tp
-    if (!h.slManual && aiPlan.sl != null && Number(aiPlan.sl) !== Number(h.sl)) patch.sl = aiPlan.sl
+    const patch = advicePlanSyncPatch(h, aiPlan)
     // 理由同源:未被手动改写时,自动同步 AI 操作建议里的一句话理由/操作计划
     if (!h.reasonManual && aiPlan.reason && aiPlan.reason !== h.planReason) patch.planReason = aiPlan.reason
     if (Object.keys(patch).length) planStore.setPlanRule(h.id, patch)
@@ -2517,9 +2551,13 @@ function HoldingItem({ h, quote: q }) {
   // 恢复跟随最新 AI 建议(清手动标记,让自动跟随重新接管)
   const followAI = () => {
     const ap = adviceForStock()
+    const pricePatch = advicePlanSyncPatch({
+      ...h,
+      tpManual: false,
+      slManual: false,
+    }, ap)
     planStore.setPlanRule(h.id, {
-      ...(ap && ap.tp != null ? { tp: ap.tp } : {}),
-      ...(ap && ap.sl != null ? { sl: ap.sl } : {}),
+      ...pricePatch,
       ...(ap && ap.reason ? { planReason: ap.reason } : {}),
       tpManual: false, slManual: false, reasonManual: false,
     })
@@ -2527,13 +2565,16 @@ function HoldingItem({ h, quote: q }) {
 
   const adviceEntry = getAdvice(h.code, 'hold_advice')
   const holdAdvice = adviceEntry?.advice || null
+  useEffect(() => {
+    if (holdAdvice) planStore.syncActionAlerts(h.code)
+  }, [adviceEntry?.at, holdAdvice, h.code])
   const currentT1 = t1StatusOf(h.code)
   const decisionView = buildHoldingCardDecisionView({
     advice: holdAdvice,
     hitTarget: hitTP,
     hitStop: hitSL,
-    targetPrice: h.tp,
-    stopPrice: h.sl,
+    targetPrice: effectivePlanTarget,
+    stopPrice: effectivePlanStop,
     t1Status: currentT1,
     nextTradeDay: nextTradingDayLabel(),
   })

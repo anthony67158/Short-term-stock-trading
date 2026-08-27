@@ -2,6 +2,7 @@ import { t1GateForSide } from './t1AdvicePolicy.js'
 import { humanizeUserFacingText } from './userFacingLanguage.js'
 import { executionTriggerDirection } from './executionTrigger.js'
 import { adviceObservationLevels } from './advicePriceContract.js'
+import { holdingAddReviewPlan } from './holdingFollowUp.js'
 
 const finite = (value) => {
   if (value == null || value === '') return null
@@ -169,7 +170,7 @@ function deferredOpportunityView(plan, executionOpen) {
   }
 }
 
-function levelsFor(kind, advice, triggerDirection = '') {
+function levelsFor(kind, advice, triggerDirection = '', followUp = null) {
   const entryPrice = advice.buyPrice ?? advice.addPrice
   if (kind === 'wait') {
     return adviceObservationLevels(advice).map((item) => ({
@@ -219,14 +220,38 @@ function levelsFor(kind, advice, triggerDirection = '') {
       level('target', '目标参考', advice.targetPrice, 'sell', false),
     ].filter(Boolean)
   }
+  const followUpLevels = (followUp?.paths || []).map((path) => ({
+    key: path.key,
+    label: path.label,
+    price: path.price,
+    tone: 'buy',
+    active: false,
+    reviewDirection: path.direction,
+  }))
   return [
-    level('add', '回踩观察', advice.addPrice ?? advice.buyPrice, 'buy', false),
-    level('reduce', '反弹观察', advice.reducePrice ?? advice.targetPrice, 'sell', false),
+    ...(
+      followUpLevels.length
+        ? followUpLevels
+        : [level(
+            'add',
+            '回踩加仓观察',
+            advice.addPrice ?? advice.buyPrice,
+            'buy',
+            false,
+          )].filter(Boolean)
+    ),
+    level(
+      'reduce',
+      '反弹减仓观察',
+      advice.reducePrice ?? advice.targetPrice,
+      'sell',
+      false,
+    ),
     level('stop', '止损价', advice.stopPrice, 'risk', false),
   ].filter(Boolean)
 }
 
-function triggerFor(kind, levels, triggerDirection = '') {
+function triggerFor(kind, levels, triggerDirection = '', followUp = null) {
   const primary = levels.find((item) => item.active)
   if (kind === 'wait') {
     return {
@@ -262,14 +287,30 @@ function triggerFor(kind, levels, triggerDirection = '') {
       metricLabel: '退出准备',
     } : null
   }
-  const low = levels.find((item) => item.key === 'add')?.price
-    ?? levels.find((item) => item.key === 'stop')?.price
-  const high = levels.find((item) => item.key === 'reduce')?.price
+  if (followUp?.paths?.length) {
+    return {
+      direction: 'review_paths',
+      paths: followUp.paths,
+      label: '加仓复核',
+      metricLabel: followUp.status === 'ENTRY_CONFIRMATION'
+        ? '等待加仓确认'
+        : '本轮不直接加仓',
+    }
+  }
+  const lowLevel = levels.find((item) => item.key === 'add')
+    ?? levels.find((item) => item.key === 'stop')
+  const highLevel = levels.find((item) => item.key === 'reduce')
+  const low = lowLevel?.price
+  const high = highLevel?.price
   if (low != null && high != null && high > low) {
     return {
       direction: 'range',
       low,
       high,
+      lowKey: lowLevel.key,
+      highKey: highLevel.key,
+      lowLabel: lowLevel.key === 'stop' ? '止损位' : '加仓观察位',
+      highLabel: '减仓观察位',
       label: '观察区间',
       metricLabel: '继续持有',
     }
@@ -342,12 +383,15 @@ export function buildAdviceActionView(
     targetPrice: plan.prices?.target,
   } : advice
   const kind = actionKind(source, mode)
+  const followUp = kind === 'hold'
+    ? holdingAddReviewPlan(source)
+    : null
   const buySide = kind === 'buy'
   const quantity = buySide
     ? quantityText(source.planQtyNum ?? source.planQty)
     : quantityText(source.opQty)
   const action = clean(source.action || source.stance, 80)
-  const instruction = clean(
+  const baseInstruction = clean(
     plan?.actionability === 'BLOCKED'
       ? (plan.blockedReasons || []).join('；')
       : source.actionPlan
@@ -356,6 +400,11 @@ export function buildAdviceActionView(
         || source.headline
         || source.timing
         || source.reason,
+  )
+  const instruction = clean(
+    followUp?.summary
+      ? `${baseInstruction}${baseInstruction ? '；' : ''}${followUp.summary}`
+      : baseInstruction,
   )
   const triggerDirection = executionTriggerDirection({
     action: plan?.action || {
@@ -368,7 +417,7 @@ export function buildAdviceActionView(
     triggerDirection: plan?.triggerDirection,
   })
   const levels = withPriceBasis(
-    levelsFor(kind, source, triggerDirection),
+    levelsFor(kind, source, triggerDirection, followUp),
     source,
   )
   const current = finite(currentPrice)
@@ -509,7 +558,7 @@ export function buildAdviceActionView(
           detailLabel: '盘中满足条件后再提醒',
           metricLabel: '当前不下单',
         }
-      : triggerFor(kind, levels, triggerDirection)),
+      : triggerFor(kind, levels, triggerDirection, followUp)),
     actionability: plan?.actionability || null,
     manualOnly: deferredWaitPlan
       ? true
@@ -556,8 +605,9 @@ export function buildHoldingCardDecisionView({
     const instruction = persistedExitBlocked && existingPlan
       ? existingPlan
       : `${reached}，但${gate?.reason || '今日买入仓位受T+1锁定，今日不可卖'}；${nextTradeDay || '下一交易日'}再按盘面操作`
-    return buildAdviceActionView({
+    const view = buildAdviceActionView({
       ...source,
+      shortHorizonTactical: null,
       action: '持有',
       stance: '持有',
       opQty: '今日不可卖',
@@ -566,6 +616,20 @@ export function buildHoldingCardDecisionView({
       stopPrice: source.stopPrice ?? stopPrice,
       targetPrice: source.targetPrice ?? targetPrice,
     }, { mode: 'hold_advice' })
+    const nextSession = nextTradeDay || '下一交易日'
+    return {
+      ...view,
+      trigger: view.trigger?.direction === 'range'
+        ? {
+            ...view.trigger,
+            metricLabel: '今日不可卖',
+            lowReachedHint:
+              `今日可卖0手，${nextSession}盘中优先处理止损`,
+            highReachedHint:
+              `今日可卖0手，${nextSession}盘中复核减仓`,
+          }
+        : view.trigger,
+    }
   }
 
   if (hitTarget) {
@@ -593,6 +657,46 @@ export function buildActionProgress(trigger, currentPrice) {
   const current = finite(currentPrice)
   if (!trigger || current == null || trigger.direction === 'inactive') return null
 
+  if (trigger.direction === 'review_paths') {
+    const paths = Array.isArray(trigger.paths) ? trigger.paths : []
+    const reached = paths.find((path) =>
+      path.direction === 'LTE'
+        ? current <= finite(path.price)
+        : current >= finite(path.price)
+    )
+    if (reached) {
+      return {
+        pct: 100,
+        score: 100,
+        tone: 'buy',
+        label: `现价已满足${reached.label}`,
+        metricLabel: trigger.metricLabel,
+        stateLabel: `${reached.label}已到`,
+        reached: true,
+        reachedKey: reached.key,
+        reachedHint: '等待自动复核',
+        currentPrice: current,
+      }
+    }
+    const distances = paths.map((path) => ({
+      ...path,
+      distance: Math.abs(current - path.price) / path.price * 100,
+    })).sort((left, right) => left.distance - right.distance)
+    const nearest = distances[0]
+    if (!nearest) return null
+    return {
+      pct: rounded(clamp(100 - nearest.distance / 8 * 100)),
+      score: rounded(clamp(100 - nearest.distance / 8 * 100)),
+      tone: 'buy',
+      label: `距${nearest.label} ${nearest.distance.toFixed(1)}%`,
+      metricLabel: trigger.metricLabel,
+      stateLabel: '加仓条件监控中',
+      reached: false,
+      reachedKey: '',
+      currentPrice: current,
+    }
+  }
+
   if (trigger.direction === 'range') {
     const low = finite(trigger.low)
     const high = finite(trigger.high)
@@ -603,10 +707,12 @@ export function buildActionProgress(trigger, currentPrice) {
         pct: 0,
         score: 0,
         tone: 'risk',
-        label: `低于回踩位 ${distance.toFixed(1)}%`,
+        label: `低于${trigger.lowLabel || '回踩位'} ${distance.toFixed(1)}%`,
         metricLabel: trigger.metricLabel,
-        stateLabel: '已到回踩位',
+        stateLabel: `已到${trigger.lowLabel || '回踩位'}`,
         reached: true,
+        reachedKey: trigger.lowKey || 'add',
+        reachedHint: trigger.lowReachedHint || '需要重新评估',
         currentPrice: current,
       }
     }
@@ -616,10 +722,12 @@ export function buildActionProgress(trigger, currentPrice) {
         pct: 100,
         score: 100,
         tone: 'sell',
-        label: `高于反弹位 ${distance.toFixed(1)}%`,
+        label: `高于${trigger.highLabel || '反弹位'} ${distance.toFixed(1)}%`,
         metricLabel: trigger.metricLabel,
-        stateLabel: '已到反弹位',
+        stateLabel: `已到${trigger.highLabel || '反弹位'}`,
         reached: true,
+        reachedKey: trigger.highKey || 'reduce',
+        reachedHint: trigger.highReachedHint || '需要重新评估',
         currentPrice: current,
       }
     }
@@ -629,9 +737,9 @@ export function buildActionProgress(trigger, currentPrice) {
       score: rounded(position),
       tone: 'range',
       label: position < 34
-        ? '现价靠近回踩位'
+        ? `现价靠近${trigger.lowLabel || '回踩位'}`
         : position > 66
-          ? '现价靠近反弹位'
+          ? `现价靠近${trigger.highLabel || '反弹位'}`
           : '现价位于区间中部',
       metricLabel: trigger.metricLabel,
       stateLabel: '区间内持有',

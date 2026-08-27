@@ -455,7 +455,12 @@ function tacticalReviewEventRule(reviewEvent = {}) {
       )
       + '；若不成立，只能观望并写明本轮唯一新增阻断原因。'
   }
-  return '【到价复核语义】这是普通观望复核，没有预先买入或试仓授权；到价只代表重新评估方向。只有当前全部硬条件重新通过才可升级，否则继续观望，不得沿用条件试仓措辞。'
+  const holdingAddReview = /加仓/.test(
+    String(reviewEvent.actionLabel || ''),
+  )
+  return holdingAddReview
+    ? '【到价复核语义】这是持仓加仓条件复核，没有预先加仓授权；到价只代表重新评估是否加仓。只有当前量价、资金、量化、账户风险和赔率全部通过才可升级为加仓，否则继续持有并写明本轮不加仓原因。'
+    : '【到价复核语义】这是普通观望复核，没有预先买入或试仓授权；到价只代表重新评估方向。只有当前全部硬条件重新通过才可升级，否则继续观望，不得沿用条件试仓措辞。'
 }
 
 function tacticalUsageRules(facts = {}) {

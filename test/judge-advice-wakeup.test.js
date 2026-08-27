@@ -120,6 +120,53 @@ test('观察价命中直接排队复核而不调用Judge确认交易', () => {
   assert.equal(data.reviewJobs['600519'].trigger.price, 145.3)
 })
 
+test('持仓加仓复核价命中后明确评估加仓而不是普通买入', () => {
+  const data = {
+    holding: [{
+      id: 'holding-1',
+      code: '003036',
+      name: '泰坦股份',
+      qty: 1,
+      buyAt: 100,
+    }],
+    closed: [],
+    advice: {
+      '003036': {
+        mode: 'hold_advice',
+        advice: {
+          continuity: { planId: 'holding-plan', revision: 2 },
+        },
+      },
+    },
+  }
+  const result = queueAdviceReviewForPriceTrigger(data, {
+    id: 'holding-add-review',
+    code: '003036',
+    name: '泰坦股份',
+    reviewOnly: true,
+    reviewCategory: 'holding-add',
+    reviewIntent: {
+      mode: 'REASSESSMENT',
+      plannedAction: 'WATCH',
+      actionLabel: '重新评估加仓',
+      directionApproved: false,
+    },
+    op: 'gte',
+    value: 52.06,
+    decisionPrice: 52.16,
+    judgeContext: {
+      planId: 'holding-plan',
+      planRevision: 2,
+    },
+  }, 1000)
+
+  assert.equal(result.queued, true)
+  assert.equal(result.job.mode, 'hold_advice')
+  assert.equal(result.job.trigger.reviewMode, 'REASSESSMENT')
+  assert.equal(result.job.trigger.actionLabel, '重新评估加仓')
+  assert.match(result.job.trigger.reason, /重新评估是否加仓/)
+})
+
 test('回踩与突破观察价都闭环触发提醒并排队自动复核', () => {
   const now = Date.parse('2026-08-27T02:00:00.000Z')
   const cases = [

@@ -6,7 +6,10 @@ import {
   buildAdviceActionView,
   buildHoldingCardDecisionView,
 } from '../shared/adviceActionView.js'
-import { planStore } from '../src/planStore.js'
+import {
+  advicePlanSyncPatch,
+  planStore,
+} from '../src/planStore.js'
 
 test('止损触及但做T买回仓位受T加一锁定时卡片保留不可卖指令', () => {
   const view = buildHoldingCardDecisionView({
@@ -29,6 +32,13 @@ test('止损触及但做T买回仓位受T加一锁定时卡片保留不可卖指
   assert.equal(view.quantity, '')
   assert.match(view.instruction, /本轮做T已完成/)
   assert.doesNotMatch(view.instruction, /按纪律确认后退出/)
+  assert.equal(view.levels[0].label, '反弹减仓观察')
+  const progress = buildActionProgress(view.trigger, 57)
+  assert.equal(progress.stateLabel, '已到减仓观察位')
+  assert.equal(
+    progress.reachedHint,
+    '今日可卖0手，2026-08-20(周四)盘中复核减仓',
+  )
 })
 
 test('卡片优先遵从军师已持久化的今日不可卖约束', () => {
@@ -51,6 +61,30 @@ test('卡片优先遵从军师已持久化的今日不可卖约束', () => {
   assert.equal(view.action, '持有')
   assert.match(view.instruction, /今日可卖0手/)
   assert.doesNotMatch(view.instruction, /按纪律确认后退出/)
+})
+
+test('自动跟随建议时清除新建议已经取消的旧止盈价', () => {
+  assert.deepEqual(advicePlanSyncPatch({
+    tp: 51.65,
+    sl: 50.89,
+    tpManual: false,
+    slManual: false,
+  }, {
+    tp: null,
+    sl: 50.89,
+  }), {
+    tp: null,
+  })
+
+  assert.deepEqual(advicePlanSyncPatch({
+    tp: 51.65,
+    sl: 50.89,
+    tpManual: true,
+    slManual: false,
+  }, {
+    tp: null,
+    sl: 50.89,
+  }), {})
 })
 
 test('买入建议把买入价和首笔手数编译为同一动作视图', () => {
@@ -481,8 +515,8 @@ test('持有建议把加仓和减仓价降级为观察边界并生成区间进�
   assert.deepEqual(
     view.levels.map(({ key, label, active }) => ({ key, label, active })),
     [
-      { key: 'add', label: '回踩观察', active: false },
-      { key: 'reduce', label: '反弹观察', active: false },
+      { key: 'add', label: '回踩加仓观察', active: false },
+      { key: 'reduce', label: '反弹减仓观察', active: false },
       { key: 'stop', label: '止损价', active: false },
     ],
   )
@@ -490,9 +524,56 @@ test('持有建议把加仓和减仓价降级为观察边界并生成区间进�
     direction: 'range',
     low: 10.2,
     high: 11.4,
+    lowKey: 'add',
+    highKey: 'reduce',
+    lowLabel: '加仓观察位',
+    highLabel: '减仓观察位',
     label: '观察区间',
     metricLabel: '继续持有',
   })
+})
+
+test('持有建议把战术回踩与突破价编译成双路径加仓复核', () => {
+  const view = buildAdviceActionView({
+    action: '持有',
+    actionPlan: '今日继续持有',
+    stopPrice: 50.89,
+    shortHorizonTactical: {
+      timing: {
+        pullbackPrice: 50.94,
+        breakoutPrice: 52.06,
+      },
+      actionPolicy: {
+        riskTier: 'NONE',
+        canIncreaseRisk: false,
+        reasons: ['成交额不足', '量化尚未强确认'],
+      },
+    },
+  }, { mode: 'hold_advice' })
+
+  assert.deepEqual(
+    view.levels.map(({ key, label, price }) => ({ key, label, price })),
+    [
+      {
+        key: 'holding_add_pullback',
+        label: '回踩加仓复核',
+        price: 50.94,
+      },
+      {
+        key: 'holding_add_breakout',
+        label: '突破加仓复核',
+        price: 52.06,
+      },
+      { key: 'stop', label: '止损价', price: 50.89 },
+    ],
+  )
+  assert.equal(view.trigger.direction, 'review_paths')
+  assert.match(view.instruction, /本轮不直接加仓：成交额不足；量化尚未强确认/)
+  const progress = buildActionProgress(view.trigger, 52.16)
+  assert.equal(progress.reached, true)
+  assert.equal(progress.reachedKey, 'holding_add_breakout')
+  assert.equal(progress.stateLabel, '突破加仓复核已到')
+  assert.equal(progress.reachedHint, '等待自动复核')
 })
 
 test('持有建议缺少回踩价时使用止损线补全观察区间', () => {
@@ -507,7 +588,7 @@ test('持有建议缺少回踩价时使用止损线补全观察区间', () => {
   assert.deepEqual(
     view.levels.map(({ key, label, price }) => ({ key, label, price })),
     [
-      { key: 'reduce', label: '反弹观察', price: 67.87 },
+      { key: 'reduce', label: '反弹减仓观察', price: 67.87 },
       { key: 'stop', label: '止损价', price: 59.31 },
     ],
   )
@@ -515,6 +596,10 @@ test('持有建议缺少回踩价时使用止损线补全观察区间', () => {
     direction: 'range',
     low: 59.31,
     high: 67.87,
+    lowKey: 'stop',
+    highKey: 'reduce',
+    lowLabel: '止损位',
+    highLabel: '减仓观察位',
     label: '观察区间',
     metricLabel: '继续持有',
   })
