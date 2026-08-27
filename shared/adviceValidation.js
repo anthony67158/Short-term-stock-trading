@@ -66,9 +66,15 @@ function nextSessionPlanText(payload = {}) {
   }[plan.session] || '下一交易时段盘中'
   return {
     sessionLabel,
-    actionLabel: plan.action === 'PROBE'
-      ? '小仓试仓'
-      : '条件买入',
+    actionLabel: String(
+      plan.actionLabel
+      || (
+        plan.action === 'PROBE'
+          ? '条件试仓'
+          : '条件买入'
+      ),
+    ),
+    reviewMode: plan.reviewMode || 'ENTRY_CONFIRMATION',
   }
 }
 
@@ -419,7 +425,7 @@ export function reconcileAdviceNumbers({ mode, result: input, payload = {} } = {
       ? null
       : nextSessionPlanText(payload)
     const executionPrefix = nextSessionPlan
-      ? `${nextSessionPlan.sessionLabel}${nextSessionPlan.actionLabel}预案：`
+      ? `${nextSessionPlan.sessionLabel}${nextSessionPlan.actionLabel}：`
       : executionOpen
         ? ''
         : '下一交易时段盘中，'
@@ -429,7 +435,7 @@ export function reconcileAdviceNumbers({ mode, result: input, payload = {} } = {
     ].filter(Boolean)
     result.actionPlan = paths.length
       ? nextSessionPlan
-        ? `${executionPrefix}等待${paths.join('，或')}；盘中复核通过后人工确认，未确认不买`
+        ? `${executionPrefix}等待${paths.join('，或')}；触发后只确认入场时机，确认通过后给出具体买入价和手数并由你人工确认，未确认不买`
         : `${executionPrefix}等待${paths.join('，或')}后重新评估，未确认不买`
       : `${executionPrefix}暂无近期有效观察价，等待量价与资金出现新变化后重新评估`
     result.timing = result.actionPlan

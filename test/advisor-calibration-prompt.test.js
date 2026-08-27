@@ -91,8 +91,9 @@ test('试仓档位强制模型输出5%以内并要求人工确认', () => {
   assert.match(prompt, /最多只能输出“小仓试错\/小仓加仓”/)
   assert.match(prompt, /仓位不得超过总资产5%/)
   assert.match(prompt, /必须人工确认/)
-  assert.match(prompt, /默认给出近期可达的回踩或突破试仓方案/)
-  assert.match(prompt, /盈亏比不足1.8:1/)
+  assert.match(prompt, /必须给出可立即人工确认的具体buyPrice/)
+  assert.match(prompt, /不得只给回踩或突破观察价/)
+  assert.match(prompt, /盈亏比至少1.8:1/)
 })
 
 test('休市时模型保留下一时段试仓预案而不是只写等待盘中', () => {
@@ -115,10 +116,74 @@ test('休市时模型保留下一时段试仓预案而不是只写等待盘中',
   })
 
   assert.match(prompt, /当前action必须为观望/)
-  assert.match(prompt, /下午盘中小仓试仓预案/)
-  assert.match(prompt, /盘中复核通过后人工确认/)
+  assert.match(prompt, /下午盘中条件试仓/)
+  assert.match(prompt, /这不是普通观望/)
+  assert.match(prompt, /触发后只确认入场时机并生成具体执行价/)
   assert.match(prompt, /仓位不超过5%/)
   assert.match(prompt, /不得只写等待盘中/)
+})
+
+test('条件试仓到价后只确认入场时机并要求输出具体价格', () => {
+  const prompt = buildUserPrompt('buy_advice', {
+    code: '600000',
+    reviewEvent: {
+      kind: 'price-review',
+      reviewMode: 'ENTRY_CONFIRMATION',
+      plannedAction: 'PROBE',
+      actionLabel: '条件试仓',
+      directionApproved: true,
+      maxPositionPct: 5,
+      manualConfirmationOnly: true,
+      threshold: 10,
+      price: 10.02,
+    },
+    shortHorizonTactical: {
+      schemaVersion: 'short-horizon-tactical.v1',
+      timing: { state: 'READY' },
+      actionPolicy: {
+        schemaVersion: 'short-horizon-action-policy.v1',
+        allowedActions: ['BUY', 'WATCH'],
+        executionOpen: true,
+        riskTier: 'PROBE',
+        maxPositionPct: 5,
+        manualConfirmationOnly: true,
+      },
+    },
+  })
+
+  assert.match(prompt, /方向已通过的条件试仓复核/)
+  assert.match(prompt, /不是从零重新决定方向/)
+  assert.match(prompt, /具体buyPrice、stopPrice、targetPrice和planQty/)
+  assert.match(prompt, /仓位不得超过5%/)
+})
+
+test('普通观望到价后只重新评估方向且不继承试仓承诺', () => {
+  const prompt = buildUserPrompt('buy_advice', {
+    code: '600000',
+    reviewEvent: {
+      kind: 'price-review',
+      reviewMode: 'REASSESSMENT',
+      plannedAction: 'WATCH',
+      actionLabel: '观望',
+      directionApproved: false,
+      threshold: 10,
+      price: 10.02,
+    },
+    shortHorizonTactical: {
+      schemaVersion: 'short-horizon-tactical.v1',
+      timing: { state: 'WAIT_BREAKOUT' },
+      actionPolicy: {
+        schemaVersion: 'short-horizon-action-policy.v1',
+        allowedActions: ['WATCH'],
+        executionOpen: true,
+        riskTier: 'NONE',
+      },
+    },
+  })
+
+  assert.match(prompt, /普通观望复核/)
+  assert.match(prompt, /没有预先买入或试仓授权/)
+  assert.match(prompt, /不得沿用条件试仓措辞/)
 })
 
 test('军师低命中校准按动作方向纠偏而不是一律变得更保守', () => {

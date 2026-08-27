@@ -199,7 +199,10 @@ test('收盘后买入计划转为下一交易时段盘中观察且不立即执�
         actionPolicy: {
           nextSessionPlan: {
             action: 'PROBE',
-            actionLabel: '小仓试仓',
+            actionLabel: '条件试仓',
+            decisionState: 'CONDITIONAL_PROBE',
+            reviewMode: 'ENTRY_CONFIRMATION',
+            directionApproved: true,
             session: 'NEXT_TRADING_DAY',
             sessionLabel: '下一交易日盘中',
             maxPositionPct: 5,
@@ -224,8 +227,8 @@ test('收盘后买入计划转为下一交易时段盘中观察且不立即执�
   assert.equal(result.buyPrice, null)
   assert.equal(result.pullbackWatchPrice, 15.2)
   assert.equal(result.planQty, 0)
-  assert.match(result.actionPlan, /下一交易日盘中小仓试仓预案/)
-  assert.match(result.actionPlan, /盘中复核通过后人工确认/)
+  assert.match(result.actionPlan, /下一交易日盘中条件试仓/)
+  assert.match(result.actionPlan, /只确认入场时机/)
   assert.match(issues.join('；'), /当前已收盘/)
 })
 

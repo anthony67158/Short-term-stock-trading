@@ -377,13 +377,13 @@ function tacticalActionPolicyRule(tactical = {}) {
     NEXT_TRADING_DAY: '下一交易日盘中',
   }[nextPlan?.session] || '下一交易时段盘中'
   const nextActionLabel = {
-    PROBE: '小仓试仓',
-    PROBE_ADD: '小仓加仓',
+    PROBE: '条件试仓',
+    PROBE_ADD: '条件加仓',
     BUY: '条件买入',
     ADD: '条件加仓',
   }[nextPlan?.action] || ''
   const nextPlanRule = nextActionLabel
-    ? `虽然当前action必须为观望，但actionPlan必须明确写出“${nextSessionLabel}${nextActionLabel}预案”、回踩或突破条件，并说明盘中复核通过后人工确认${nextPlan?.maxPositionPct ? `，仓位不超过${nextPlan.maxPositionPct}%` : ''}；不得只写等待盘中。`
+    ? `当前action必须为观望，但这不是普通观望：买入方向已经通过，必须明确写成“${nextSessionLabel}${nextActionLabel}”，列出等待确认的回踩或突破条件；触发后只确认入场时机并生成具体执行价${nextPlan?.maxPositionPct ? `，仓位不超过${nextPlan.maxPositionPct}%` : ''}，不得只写等待盘中。`
     : ''
   const readyEntryRule = (
     policy.executionOpen !== false
@@ -393,12 +393,20 @@ function tacticalActionPolicyRule(tactical = {}) {
     ? '当前短线时机已经形成，必须优先评估以当前价作为可核验入场价；除非账户容量、盈亏比或明确反方证据不通过，否则不得机械等待回踩或突破。'
     : ''
   const riskRule = policy.executionOpen === false
-    ? '当前不可下单，所有价格只能作为下一连续竞价时段的观察条件。'
+    ? '当前不可下单；若存在条件建仓计划，触发价只用于下一连续竞价时段确认入场时机，不是普通观望。'
     : policy.riskTier === 'PROBE'
       ? '本轮最多只能输出“小仓试错/小仓加仓”，仓位不得超过总资产5%，必须人工确认，禁止写成立即重仓或确定性买点。'
       : policy.riskTier === 'FULL'
         ? '新增仓位条件已全部通过，但仍需比较赔率后决定是否操作。'
-        : `当前新增仓位未通过：${reasons.join('；')}。`
+        : `当前新增仓位未通过${reasons.length ? `：${reasons.join('；')}` : ''}。`
+  const exactEntryRule = (
+    policy.executionOpen !== false
+    && policy.allowedActions.includes('BUY')
+  )
+    ? policy.riskTier === 'PROBE'
+      ? '若输出小仓试错，必须给出可立即人工确认的具体buyPrice、stopPrice、targetPrice和planQty，仓位不得超过5%；不得只给回踩或突破观察价。'
+      : '若输出立即买入，必须给出可立即人工确认的具体buyPrice、stopPrice、targetPrice和planQty，不得只给观察条件。'
+    : ''
   return `【唯一允许动作】本轮action只能从${allowed.join('、')}中选择。`
     + '不得把集合外动作写成当前可执行；后续动作只能明确标为预案并附带盘中复核条件。'
     + '未持仓时buyPrice必须不高于输入中的当前价，并来自近期可达的支撑、均线、VWAP或量化买点；上方压力或突破位只能填breakoutWatchPrice，不能填buyPrice。'
@@ -410,12 +418,7 @@ function tacticalActionPolicyRule(tactical = {}) {
     + riskRule
     + nextPlanRule
     + readyEntryRule
-    + (
-      policy.riskTier === 'PROBE'
-      && policy.executionOpen !== false
-        ? '试仓档默认给出近期可达的回踩或突破试仓方案；只有价格无法核验、盈亏比不足1.8:1或账户无法买入一手时，才允许退回观望，并必须写明唯一阻断原因。'
-        : ''
-    )
+    + exactEntryRule
     + (
       policy.riskTier === 'PROBE'
       && policy.executionOpen !== false
@@ -426,9 +429,30 @@ function tacticalActionPolicyRule(tactical = {}) {
     + `下一复核事件：${policy.nextReviewTrigger || '实质证据变化后重新评估'}`
 }
 
+function tacticalReviewEventRule(reviewEvent = {}) {
+  if (!reviewEvent || reviewEvent.kind !== 'price-review') return ''
+  if (
+    reviewEvent.reviewMode === 'ENTRY_CONFIRMATION'
+    && reviewEvent.directionApproved === true
+    && ['PROBE', 'BUY'].includes(reviewEvent.plannedAction)
+  ) {
+    const maxPosition = Number(reviewEvent.maxPositionPct)
+    return '【到价复核语义】这是方向已通过的条件试仓复核，不是从零重新决定方向。'
+      + '若当前分时、量价、资金、风险和赔率仍成立，必须转为小仓试错并输出具体buyPrice、stopPrice、targetPrice和planQty'
+      + (
+        Number.isFinite(maxPosition) && maxPosition > 0
+          ? `，仓位不得超过${Math.min(5, maxPosition)}%`
+          : ''
+      )
+      + '；若不成立，只能观望并写明本轮唯一新增阻断原因。'
+  }
+  return '【到价复核语义】这是普通观望复核，没有预先买入或试仓授权；到价只代表重新评估方向。只有当前全部硬条件重新通过才可升级，否则继续观望，不得沿用条件试仓措辞。'
+}
+
 function tacticalUsageRules(facts = {}) {
   return [
     tacticalActionPolicyRule(facts.tactical),
+    tacticalReviewEventRule(facts.reviewEvent),
     tacticalTechnicalRule(facts.tactical),
     tacticalQuantRule(facts.tactical),
     tacticalTActionRule(facts.tactical),
@@ -487,6 +511,19 @@ export function deepAdvisorFacts(payload = {}) {
       macro: compactPromptList(payload.macroNews, 4, 180),
       search: compactPromptList(payload.aiSearchEvidence, 4, 180),
     },
+    reviewEvent: compactPromptObject(payload.reviewEvent, [
+      'kind',
+      'reviewMode',
+      'plannedAction',
+      'actionLabel',
+      'directionApproved',
+      'maxPositionPct',
+      'manualConfirmationOnly',
+      'direction',
+      'threshold',
+      'price',
+      'reason',
+    ]),
     previousPlan: compactPreviousAdviceForPrompt(
       payload.previousAdvice,
     ),

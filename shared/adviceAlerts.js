@@ -34,6 +34,51 @@ function baseAlert({ idFactory, now, code, name, op, value, note }) {
   }
 }
 
+function reviewIntentOf(advice = {}) {
+  const policy = advice.decisionPlan?.actionPolicy || {}
+  const source = (
+    policy.entryIntent?.reviewMode === 'ENTRY_CONFIRMATION'
+      ? policy.entryIntent
+      : policy.nextSessionPlan?.reviewMode === 'ENTRY_CONFIRMATION'
+        ? policy.nextSessionPlan
+        : null
+  )
+  const plannedAction = String(source?.action || '')
+  if (
+    source?.directionApproved === true
+    && ['PROBE', 'BUY', 'PROBE_ADD', 'ADD'].includes(plannedAction)
+  ) {
+    const maxPositionPct = Number(source.maxPositionPct)
+    return {
+      mode: 'ENTRY_CONFIRMATION',
+      plannedAction,
+      actionLabel: String(
+        source.actionLabel
+        || (
+          ['PROBE', 'PROBE_ADD'].includes(plannedAction)
+            ? '条件试仓'
+            : '条件买入'
+        ),
+      ),
+      directionApproved: true,
+      maxPositionPct: Number.isFinite(maxPositionPct)
+        && maxPositionPct > 0
+        ? Math.min(5, maxPositionPct)
+        : null,
+      manualConfirmationOnly:
+        source.manualConfirmationOnly === true,
+    }
+  }
+  return {
+    mode: 'REASSESSMENT',
+    plannedAction: 'WATCH',
+    actionLabel: '观望',
+    directionApproved: false,
+    maxPositionPct: null,
+    manualConfirmationOnly: false,
+  }
+}
+
 export function projectAdviceAlerts(data, code, advice, options = {}) {
   if (!data || !code || !advice) return false
   const now = options.now ?? Date.now()
@@ -70,6 +115,7 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
   const name = advice.name || owner.name || code
   const projected = []
   const judgeContext = buildJudgeAdviceContext(advice)
+  const reviewIntent = reviewIntentOf(advice)
   const priceContract = sanitizedAdvicePriceContract(advice)
   const oldProjected = alerts.filter(isOwnedAutoAlert)
   if (options.requirePriceContract === true && !priceContract) {
@@ -180,6 +226,7 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
           note: watchLevel.label,
           reviewKey,
           judgeContext,
+          reviewIntent,
         })
       } else {
         projected.push({
@@ -196,6 +243,7 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
           reviewOnly: true,
           reviewKey,
           judgeContext,
+          reviewIntent,
           phase: 'armed',
         })
         changed = true

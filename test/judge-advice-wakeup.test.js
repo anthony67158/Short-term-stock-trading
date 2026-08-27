@@ -231,6 +231,121 @@ test('回踩与突破观察价都闭环触发提醒并排队自动复核', () =>
   }
 })
 
+test('条件试仓与普通观望进入不同的到价复核意图', () => {
+  const now = Date.parse('2026-08-27T02:00:00.000Z')
+  const priceContract = {
+    schemaVersion: 'advice-price-contract.v1',
+    currentPrice: 100,
+    validationStatus: 'VERIFIED',
+    levels: [{
+      key: 'watch_pullback',
+      field: 'pullbackWatchPrice',
+      purpose: 'REVIEW_ONLY',
+      label: '回踩观察',
+      price: 96,
+      direction: 'LTE',
+      status: 'PENDING',
+      strict: true,
+    }],
+    allPricesStrict: true,
+    issues: [],
+    review: { operator: 'ANY', conditions: [], allMet: false },
+  }
+  const buildData = (advice) => ({
+    plan: [{ code: '600519', name: '贵州茅台' }],
+    holding: [],
+    alerts: [],
+    settings: {},
+    advice: {
+      '600519': { mode: 'buy_advice', advice },
+    },
+  })
+  const conditionalAdvice = {
+    action: '观望',
+    continuity: { planId: 'conditional-plan', revision: 2 },
+    decisionPlan: {
+      schemaVersion: 'decision-plan.v2',
+      action: 'WATCH',
+      actionPolicy: {
+        entryIntent: {
+          state: 'CONDITIONAL_PROBE',
+          action: 'PROBE',
+          actionLabel: '条件试仓',
+          reviewMode: 'ENTRY_CONFIRMATION',
+          directionApproved: true,
+          exactPriceRequired: false,
+          maxPositionPct: 5,
+          manualConfirmationOnly: true,
+        },
+      },
+    },
+    priceContract,
+  }
+  const watchAdvice = {
+    action: '观望',
+    continuity: { planId: 'watch-plan', revision: 1 },
+    priceContract,
+  }
+
+  const conditionalData = buildData(conditionalAdvice)
+  projectAdviceAlerts(conditionalData, '600519', conditionalAdvice, {
+    now,
+    idFactory: () => 'conditional-alert',
+    requirePriceContract: true,
+  })
+  const conditionalAlert = {
+    ...conditionalData.alerts[0],
+    decisionPrice: 95.9,
+  }
+  const conditional = queueAdviceReviewForPriceTrigger(
+    conditionalData,
+    conditionalAlert,
+    now,
+  )
+
+  assert.deepEqual(conditionalAlert.reviewIntent, {
+    mode: 'ENTRY_CONFIRMATION',
+    plannedAction: 'PROBE',
+    actionLabel: '条件试仓',
+    directionApproved: true,
+    maxPositionPct: 5,
+    manualConfirmationOnly: true,
+  })
+  assert.equal(
+    conditional.job.trigger.reviewMode,
+    'ENTRY_CONFIRMATION',
+  )
+  assert.equal(conditional.job.trigger.plannedAction, 'PROBE')
+  assert.equal(conditional.job.trigger.maxPositionPct, 5)
+
+  const watchData = buildData(watchAdvice)
+  projectAdviceAlerts(watchData, '600519', watchAdvice, {
+    now,
+    idFactory: () => 'watch-alert',
+    requirePriceContract: true,
+  })
+  const watchAlert = {
+    ...watchData.alerts[0],
+    decisionPrice: 95.9,
+  }
+  const watch = queueAdviceReviewForPriceTrigger(
+    watchData,
+    watchAlert,
+    now,
+  )
+
+  assert.deepEqual(watchAlert.reviewIntent, {
+    mode: 'REASSESSMENT',
+    plannedAction: 'WATCH',
+    actionLabel: '观望',
+    directionApproved: false,
+    maxPositionPct: null,
+    manualConfirmationOnly: false,
+  })
+  assert.equal(watch.job.trigger.reviewMode, 'REASSESSMENT')
+  assert.equal(watch.job.trigger.plannedAction, 'WATCH')
+})
+
 test('旧计划的Judge结果不得唤醒或改写当前军师建议', () => {
   const data = {
     plan: [{ code: '600000', name: '浦发银行' }],

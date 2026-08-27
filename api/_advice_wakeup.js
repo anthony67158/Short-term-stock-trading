@@ -46,6 +46,39 @@ export function queueAdviceReviewForPriceTrigger(
   ) > 0
     ? 'hold_advice'
     : 'buy_advice'
+  const rawIntent = alert?.reviewIntent || {}
+  const intendedAction = String(rawIntent.plannedAction || '')
+  const entryConfirmation = (
+    rawIntent.mode === 'ENTRY_CONFIRMATION'
+    && rawIntent.directionApproved === true
+    && ['PROBE', 'BUY', 'PROBE_ADD', 'ADD'].includes(
+      intendedAction,
+    )
+  )
+  const maxPositionPct = Number(rawIntent.maxPositionPct)
+  const reviewIntent = entryConfirmation
+    ? {
+        reviewMode: 'ENTRY_CONFIRMATION',
+        plannedAction: intendedAction,
+        actionLabel: String(
+          rawIntent.actionLabel || '条件试仓',
+        ).slice(0, 40),
+        directionApproved: true,
+        maxPositionPct: Number.isFinite(maxPositionPct)
+          && maxPositionPct > 0
+          ? Math.min(5, maxPositionPct)
+          : null,
+        manualConfirmationOnly:
+          rawIntent.manualConfirmationOnly === true,
+      }
+    : {
+        reviewMode: 'REASSESSMENT',
+        plannedAction: 'WATCH',
+        actionLabel: '观望',
+        directionApproved: false,
+        maxPositionPct: null,
+        manualConfirmationOnly: false,
+      }
   const trigger = {
     kind: 'price-review',
     decision: 'review',
@@ -60,7 +93,10 @@ export function queueAdviceReviewForPriceTrigger(
     price: Number.isFinite(Number(alert?.decisionPrice))
       ? Number(alert.decisionPrice)
       : null,
-    reason: '观察价已触发，重新评估买入条件',
+    ...reviewIntent,
+    reason: entryConfirmation
+      ? '条件建仓价已触发，只确认入场时机并生成具体执行价'
+      : '观察价已触发，重新评估买入方向',
     at: now,
   }
   const idempotencyKey = [
