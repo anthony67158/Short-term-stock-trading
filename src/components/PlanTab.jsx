@@ -1064,6 +1064,7 @@ function PlanList({ book, quote, stockTags, batchSel }) {
   // 单张候选卡
   const Card = (p) => {
     const q = quote[p.code]
+    const priceView = quoteDisplayState(q)
     const checked = selected.has(p.code)
     const stockNote = stockNoteText(book.stockNotes, p.code)
     return (
@@ -1124,10 +1125,10 @@ function PlanList({ book, quote, stockTags, batchSel }) {
           if (reviewAlerts.length) {
             const executionOpen = isContinuousTrading(Date.now())
             const reached = (alert) =>
-              executionOpen && q && q.price != null && (
+              executionOpen && priceView.livePrice != null && (
               alert.op === 'gte'
-                ? q.price >= alert.value
-                : q.price <= alert.value
+                ? priceView.livePrice >= alert.value
+                : priceView.livePrice <= alert.value
             )
             const reviewing = reviewAlerts.some((alert) => !alert.enabled)
             const anyReached = reviewAlerts.some((alert) =>

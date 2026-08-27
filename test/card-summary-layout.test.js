@@ -40,6 +40,10 @@ test('持仓和自选卡展示最近有效价但只用连续竞价价触发动�
     planTab,
     /const livePrice = quoteDisplayState\(q\)\.livePrice[\s\S]*?currentPrice: livePrice/,
   )
+  assert.match(
+    planTab,
+    /executionOpen && priceView\.livePrice != null[\s\S]*?priceView\.livePrice >= alert\.value/,
+  )
   assert.doesNotMatch(
     planTab,
     /className=\{'pc-price '[\s\S]*?fmtRaw\(q\.price\)/,
