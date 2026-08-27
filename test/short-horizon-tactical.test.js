@@ -610,6 +610,14 @@ test('成交额证据明确区分数据缺失与低于流动性门槛', () => {
     todayQuote: {
       ...payload().todayQuote,
       amount: 20_000_000,
+      live: false,
+    },
+  }))
+  const earlyLive = buildShortHorizonTactical(payload({
+    todayQuote: {
+      ...payload().todayQuote,
+      amount: 20_000_000,
+      live: true,
     },
   }))
 
@@ -623,9 +631,14 @@ test('成交额证据明确区分数据缺失与低于流动性门槛', () => {
   )
   assert.equal(limited.stock.liquidity, 'LIMITED')
   assert.equal(thin.stock.liquidity, 'THIN')
+  assert.equal(earlyLive.stock.liquidity, 'LIMITED')
   assert.match(
     thin.stock.liquidityEvidence.reason,
     /低于最低执行门槛0\.3亿元/,
+  )
+  assert.match(
+    earlyLive.stock.liquidityEvidence.reason,
+    /盘中累计额尚不能确认全天流动性/,
   )
   assert.match(
     sufficient.stock.liquidityEvidence.reason,

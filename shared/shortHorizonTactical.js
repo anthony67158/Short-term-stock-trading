@@ -244,13 +244,19 @@ function liquidityEvidenceOf(payload = {}) {
   const source = amount != null
     ? quoteAmount != null ? 'QUOTE_AMOUNT' : 'SUPPLIED_AMOUNT'
     : adv20 != null ? 'ADV20' : 'MISSING'
+  const thinLiquidityConfirmed = (
+    selectedAmount != null
+    && selectedAmount < MIN_EXECUTABLE_AMOUNT_THRESHOLD
+    && (
+      source === 'ADV20'
+      || payload.todayQuote?.live !== true
+    )
+  )
   const state = selectedAmount == null
     ? 'UNKNOWN'
     : selectedAmount >= SHORT_TERM_AMOUNT_THRESHOLD
       ? 'GOOD'
-      : selectedAmount >= MIN_EXECUTABLE_AMOUNT_THRESHOLD
-        ? 'LIMITED'
-        : 'THIN'
+      : thinLiquidityConfirmed ? 'THIN' : 'LIMITED'
   const amountYi = selectedAmount == null
     ? null
     : rounded(selectedAmount / 1e8, 2)
@@ -262,7 +268,12 @@ function liquidityEvidenceOf(payload = {}) {
     : state === 'GOOD'
       ? `${subject}${amountYi}亿元，达到短线流动性门槛1亿元`
       : state === 'LIMITED'
-        ? `${subject}${amountYi}亿元，低于正式买入门槛1亿元，仅适合小仓试错`
+        ? `${subject}${amountYi}亿元，低于正式买入门槛1亿元，仅适合小仓试错${
+            selectedAmount < MIN_EXECUTABLE_AMOUNT_THRESHOLD
+            && payload.todayQuote?.live === true
+              ? '；盘中累计额尚不能确认全天流动性'
+              : ''
+          }`
         : `${subject}${amountYi}亿元，低于最低执行门槛0.3亿元`
   return {
     state,
