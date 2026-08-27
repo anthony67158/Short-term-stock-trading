@@ -650,9 +650,6 @@ function ActionCommand({ view, onOpen }) {
 
   return (
     <div className="action-command">
-      <span className="action-command-icon" aria-hidden="true">
-        <Icon name="spark" size={10} />
-      </span>
       <span className="action-command-body">
         <span className="action-command-meta">
           {view.commandLabel || '当前指令'}

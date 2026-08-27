@@ -505,9 +505,11 @@ test('操作建议卡使用固定价位列且数量与动作保持同组', () =>
   assert.match(planTab, /'action-levels levels-' \+ Math\.min\(view\.levels\.length,\s*3\)/)
   assert.match(planTab, /progress\.stateLabel/)
   assert.doesNotMatch(planTab, /progress\.metricLabel\}\s*\{progress\.score/)
+  assert.doesNotMatch(planTab, /className="action-command-icon"/)
+  assert.doesNotMatch(precision, /\.action-command-icon\s*{/)
   assert.match(
     precision,
-    /\.card-decision-slot \.action-command\s*{[^}]*grid-template-columns:\s*32px\s+minmax\(0,\s*1fr\)\s+32px/s,
+    /\.card-decision-slot \.action-command\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+32px/s,
   )
   assert.match(
     precision,

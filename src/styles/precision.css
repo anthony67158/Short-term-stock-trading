@@ -2195,7 +2195,7 @@ html[data-theme="light"] .plan-cand.starred {
 .action-command {
   position: relative;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--space-2xs);
   min-width: 0;
@@ -13594,22 +13594,11 @@ body.overlay-scroll-locked {
 
 /* Candidate decision: one command, one price band, one trigger state. */
 .card-decision-slot .action-command {
-  grid-template-columns: 32px minmax(0, 1fr) 32px;
+  grid-template-columns: minmax(0, 1fr) 32px;
   align-items: start;
   gap: var(--space-xs);
   padding: var(--space-sm) 0;
   border-bottom: 0;
-}
-
-.action-command-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius-control);
-  background: color-mix(in oklch, var(--color-accent) 12%, var(--color-paper-3));
-  color: var(--color-accent);
 }
 
 .action-command-body {
@@ -13646,16 +13635,10 @@ body.overlay-scroll-locked {
   line-height: 1.2;
 }
 
-.tone-sell .action-command-icon,
 .tone-sell .action-command-primary {
   color: var(--color-warning);
 }
 
-.tone-sell .action-command-icon {
-  background: color-mix(in oklch, var(--color-warning) 12%, var(--color-paper-3));
-}
-
-.tone-wait .action-command-icon,
 .tone-wait .action-command-primary {
   color: var(--color-muted);
 }
