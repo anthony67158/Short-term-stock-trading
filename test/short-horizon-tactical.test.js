@@ -208,6 +208,16 @@ test('只有量化资金时机与流动性同时确认才允许新增风险', ()
   assert.equal(policy.effectiveAction, 'BUY')
   assert.equal(policy.overridden, false)
   assert.equal(policy.nextSessionPlan, null)
+  assert.deepEqual(policy.entryIntent, {
+    state: 'READY_BUY',
+    action: 'BUY',
+    actionLabel: '立即买入',
+    reviewMode: 'EXECUTION',
+    directionApproved: true,
+    exactPriceRequired: true,
+    maxPositionPct: null,
+    manualConfirmationOnly: false,
+  })
 })
 
 test('核心信号共振但成交额证据不足时只开放5%人工试仓', () => {
@@ -224,10 +234,49 @@ test('核心信号共振但成交额证据不足时只开放5%人工试仓', () 
   assert.equal(policy.manualConfirmationOnly, true)
   assert.deepEqual(policy.allowedActions, ['BUY', 'WATCH'])
   assert.equal(policy.preferredAction, 'BUY')
+  assert.deepEqual(policy.entryIntent, {
+    state: 'READY_PROBE',
+    action: 'PROBE',
+    actionLabel: '小仓试错',
+    reviewMode: 'EXECUTION',
+    directionApproved: true,
+    exactPriceRequired: true,
+    maxPositionPct: 5,
+    manualConfirmationOnly: true,
+  })
   assert.match(
     policy.reasons.join('；'),
     /成交额数据未取得/,
   )
+})
+
+test('试仓方向已通过但时机未到时只能进入条件试仓而不是当前小仓试错', () => {
+  const tactical = buildShortHorizonTactical(payload())
+  tactical.timing = {
+    ...tactical.timing,
+    state: 'WAIT_PULLBACK',
+  }
+  const policy = deriveShortHorizonActionPolicy({
+    mode: 'buy_advice',
+    tactical,
+    requestedAction: 'BUY',
+  })
+
+  assert.equal(policy.riskTier, 'PROBE')
+  assert.equal(policy.canIncreaseRisk, false)
+  assert.deepEqual(policy.allowedActions, ['WATCH'])
+  assert.equal(policy.preferredAction, 'WATCH')
+  assert.equal(policy.effectiveAction, 'WATCH')
+  assert.deepEqual(policy.entryIntent, {
+    state: 'CONDITIONAL_PROBE',
+    action: 'PROBE',
+    actionLabel: '条件试仓',
+    reviewMode: 'ENTRY_CONFIRMATION',
+    directionApproved: true,
+    exactPriceRequired: false,
+    maxPositionPct: 5,
+    manualConfirmationOnly: true,
+  })
 })
 
 test('成交额证据明确区分数据缺失与低于流动性门槛', () => {
@@ -282,6 +331,9 @@ test('休市时当前保持观望但保留下一交易日条件买入预案', ()
   assert.deepEqual(policy.nextSessionPlan, {
     action: 'BUY',
     actionLabel: '条件买入',
+    decisionState: 'CONDITIONAL_BUY',
+    reviewMode: 'ENTRY_CONFIRMATION',
+    directionApproved: true,
     session: 'NEXT_TRADING_DAY',
     sessionLabel: '下一交易日盘中',
     maxPositionPct: null,
@@ -313,7 +365,10 @@ test('午间休市保留下午小仓试仓预案但不开放当前买入', () =>
   assert.deepEqual(policy.allowedActions, ['WATCH'])
   assert.deepEqual(policy.nextSessionPlan, {
     action: 'PROBE',
-    actionLabel: '小仓试仓',
+    actionLabel: '条件试仓',
+    decisionState: 'CONDITIONAL_PROBE',
+    reviewMode: 'ENTRY_CONFIRMATION',
+    directionApproved: true,
     session: 'AFTERNOON',
     sessionLabel: '下午盘中',
     maxPositionPct: 5,
@@ -348,7 +403,7 @@ test('持仓在盘后保留下一交易日小仓加仓预案', () => {
     'WATCH',
   ])
   assert.equal(policy.nextSessionPlan.action, 'PROBE_ADD')
-  assert.equal(policy.nextSessionPlan.actionLabel, '小仓加仓')
+  assert.equal(policy.nextSessionPlan.actionLabel, '条件加仓')
   assert.equal(policy.nextSessionPlan.maxPositionPct, 5)
   assert.match(
     policy.nextSessionPlan.trigger,

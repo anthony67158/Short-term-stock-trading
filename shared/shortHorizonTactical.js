@@ -639,9 +639,12 @@ export function deriveShortHorizonActionPolicy({
     'MORNING',
     'AFTERNOON',
   ].includes(source.market?.phase)
+  const timingReady = source.timing?.state === 'READY'
+  const directionApproved = assessment.riskTier !== 'NONE'
   const canIncreaseRisk = (
-    assessment.riskTier !== 'NONE'
+    directionApproved
     && executionOpen
+    && timingReady
   )
   const nextSession = nextSessionContext(source.market?.phase)
   const nextReviewTrigger = reviewTriggerForPolicy(
@@ -662,6 +665,40 @@ export function deriveShortHorizonActionPolicy({
           }
         : {}
   )[assessment.riskTier] || null
+  const entryIntent = mode === 'buy_advice'
+    ? {
+        state: !directionApproved
+          ? 'WATCH_ONLY'
+          : canIncreaseRisk
+            ? assessment.riskTier === 'PROBE'
+              ? 'READY_PROBE'
+              : 'READY_BUY'
+            : assessment.riskTier === 'PROBE'
+              ? 'CONDITIONAL_PROBE'
+              : 'CONDITIONAL_BUY',
+        action: !directionApproved
+          ? 'WATCH'
+          : assessment.riskTier === 'PROBE' ? 'PROBE' : 'BUY',
+        actionLabel: !directionApproved
+          ? '观望'
+          : canIncreaseRisk
+            ? assessment.riskTier === 'PROBE'
+              ? '小仓试错'
+              : '立即买入'
+            : assessment.riskTier === 'PROBE'
+              ? '条件试仓'
+              : '条件买入',
+        reviewMode: !directionApproved
+          ? 'REASSESSMENT'
+          : canIncreaseRisk ? 'EXECUTION' : 'ENTRY_CONFIRMATION',
+        directionApproved,
+        exactPriceRequired: canIncreaseRisk,
+        maxPositionPct:
+          assessment.riskTier === 'PROBE' ? 5 : null,
+        manualConfirmationOnly:
+          assessment.riskTier === 'PROBE',
+      }
+    : null
   const nextSessionPlan = (
     nextSessionAction
     && !executionOpen
@@ -669,11 +706,17 @@ export function deriveShortHorizonActionPolicy({
   ) ? {
       action: nextSessionAction,
       actionLabel: {
-        PROBE: '小仓试仓',
-        PROBE_ADD: '小仓加仓',
+        PROBE: '条件试仓',
+        PROBE_ADD: '条件加仓',
         ADD: '条件加仓',
         BUY: '条件买入',
       }[nextSessionAction],
+      decisionState:
+        assessment.riskTier === 'PROBE'
+          ? 'CONDITIONAL_PROBE'
+          : 'CONDITIONAL_BUY',
+      reviewMode: 'ENTRY_CONFIRMATION',
+      directionApproved: true,
       session: nextSession.session,
       sessionLabel: nextSession.sessionLabel,
       maxPositionPct:
@@ -735,6 +778,7 @@ export function deriveShortHorizonActionPolicy({
     riskTier: assessment.riskTier,
     maxPositionPct: assessment.riskTier === 'PROBE' ? 5 : null,
     manualConfirmationOnly: assessment.riskTier === 'PROBE',
+    entryIntent,
     nextSessionPlan,
     confirmations: assessment.confirmations,
     requestedAction: requested || null,
@@ -743,6 +787,11 @@ export function deriveShortHorizonActionPolicy({
     overridden,
     reasons: [
       ...(!executionOpen ? [sessionReason] : []),
+      ...(
+        directionApproved && !timingReady
+          ? ['买入方向已通过，当前入场时机尚未确认']
+          : []
+      ),
       ...(assessment.riskTier === 'FULL' ? [] : [
           ...assessment.hardBlockers,
           ...assessment.fullRiskGaps,
