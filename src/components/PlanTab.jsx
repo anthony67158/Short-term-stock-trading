@@ -1015,7 +1015,6 @@ function CandidateActions({ p, q, onBuy, onAlert, onDelete }) {
     : baseView
   const actionable = !view
     || (view.kind === 'buy' && view.actionable !== false)
-  const quantity = actionQtyLabel(view?.quantity)
   return (
     <div
       className={
@@ -1024,20 +1023,16 @@ function CandidateActions({ p, q, onBuy, onAlert, onDelete }) {
         + (view?.deferred ? ' deferred' : '')
       }
     >
-      {actionable ? (
-        <button
-          className="chip-btn act-buy"
-          title={view?.manualOnly ? '仅记录你人工确认的短线试仓，不会自动下单' : undefined}
-          onClick={() => onBuy(p, view)}
-        >
-          <Icon name="cart" size={12} />
-          {view?.manualOnly
-            ? `确认试仓${quantity ? ` · ${quantity}` : ''}`
-            : view
-              ? `确认买入${quantity ? ` · ${quantity}` : ''}`
-              : '建仓'}
-        </button>
-      ) : view?.deferred ? (
+      <button
+        type="button"
+        className="chip-btn act-buy manual-build"
+        title="自主填写买入价和手数，仅记录人工成交"
+        onClick={() => onBuy(p, null)}
+      >
+        <Icon name="cart" size={12} />
+        手动建仓
+      </button>
+      {!actionable && (view?.deferred ? (
         <button
           type="button"
           className="chip-btn ghost review-action"
@@ -1054,7 +1049,7 @@ function CandidateActions({ p, q, onBuy, onAlert, onDelete }) {
         >
           <Icon name="spark" size={12} />重新评估
         </button>
-      )}
+      ))}
       <button className="chip-btn ghost pc-alert-action" onClick={onAlert}><Icon name="bell" size={12} />预警</button>
       <button className="icon-btn" aria-label={`删除${q?.name || p.name}`} title="删除" onClick={onDelete}><Icon name="trash" size={13} /></button>
     </div>

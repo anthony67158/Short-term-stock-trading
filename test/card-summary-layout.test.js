@@ -240,25 +240,29 @@ test('个股详情复用详情请求展示换手量比与主力散户资金', ()
   )
 })
 
-test('观望建议只提供重新评估入口且不伪装成建仓建议', () => {
+test('观望建议保留重新评估且始终允许用户手动建仓', () => {
   assert.match(
     planTab,
     /className=\{\s*'pc-actions'[\s\S]{0,180}' with-review'[\s\S]{0,180}' deferred'/,
   )
   assert.match(
     planTab,
-    /!actionable[\s\S]*?className="chip-btn ghost review-action"[\s\S]*?重新评估/s,
+    /className="chip-btn act-buy manual-build"[\s\S]*?onClick=\{\(\) => onBuy\(p, null\)\}[\s\S]*?手动建仓/s,
   )
-  assert.doesNotMatch(
+  assert.match(
     planTab,
-    /className="chip-btn ghost manual-build"/,
+    /!actionable[\s\S]*?className="chip-btn ghost review-action"[\s\S]*?重新评估/s,
   )
   assert.match(
     precision,
-    /\.plan-cand \.pc-actions\.with-review\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto\s+40px/s,
+    /\.plan-cand \.pc-actions\.with-review\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto\s+auto\s+40px/s,
   )
   assert.match(
     precision,
     /@media \(max-width:\s*30rem\)\s*{[\s\S]*?\.plan-cand \.pc-actions\.with-review\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(0,\s*1fr\)\s+40px/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*30rem\)\s*{[\s\S]*?\.plan-cand \.pc-actions\.with-review \.manual-build\s*{[^}]*grid-column:\s*1\s*\/\s*-1/s,
   )
 })

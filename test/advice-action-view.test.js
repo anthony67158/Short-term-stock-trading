@@ -141,7 +141,7 @@ test('休市时旧买入建议在卡片上降级为下一交易时段观察', ()
   assert.equal(view.trigger.direction, 'inactive')
 })
 
-test('休市时已经校正为观望的建议也隐藏手动建仓入口', () => {
+test('休市观望建议关闭系统推荐买入但保留次日条件预案', () => {
   const view = buildAdviceActionView({
     action: '观望',
     actionPlan: '下一交易时段盘中，等待回踩15.2元后复核',
