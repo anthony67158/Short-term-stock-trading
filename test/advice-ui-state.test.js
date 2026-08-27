@@ -409,8 +409,8 @@ test('卡片复核状态只由真实price-review任务状态驱动', () => {
     adviceReviewCardState({ reviews: [] }, '600000', { alerts, now }),
     {
       kind: 'queued',
-      label: '条件已触发，等待后台复核',
-      detail: '后台任务状态同步中',
+      label: '条件已触发，预计1分钟内开始复核',
+      detail: '云端定时任务每分钟扫描一次',
     },
   )
   assert.equal(stateFor('queued').label, '条件已触发，等待后台复核')
@@ -433,6 +433,50 @@ test('卡片复核状态只由真实price-review任务状态驱动', () => {
     detail: '模型超时',
   })
   assert.equal(stateFor('skipped').label, '自动复核已停止')
+})
+
+test('触价超过90秒仍没有后台任务时明确提示启动失败', () => {
+  const alerts = [{
+    id: 'review-alert',
+    code: '600000',
+    candCode: '600000',
+    reviewOnly: true,
+    enabled: false,
+    phase: 'reviewing',
+    triggeredAt: 1_000,
+  }]
+
+  assert.deepEqual(adviceReviewCardState(
+    { reviews: [] },
+    '600000',
+    { alerts, now: 100_000 },
+  ), {
+    kind: 'failed',
+    label: '自动复核未启动，请重新评估',
+    detail: '触价后90秒内未创建后台任务',
+  })
+})
+
+test('最新建议已晚于触价时间时不再显示旧的等待复核', () => {
+  const alerts = [{
+    id: 'stale-review-alert',
+    code: '600601',
+    candCode: '600601',
+    reviewOnly: true,
+    enabled: false,
+    phase: 'reviewing',
+    triggeredAt: 1_000,
+  }]
+
+  assert.equal(adviceReviewCardState(
+    { reviews: [] },
+    '600601',
+    {
+      alerts,
+      adviceAt: 2_000,
+      now: 3_000,
+    },
+  ), null)
 })
 
 test('普通定时复核与过期完成状态不占用到价复核提示', () => {

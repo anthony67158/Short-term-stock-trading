@@ -91,15 +91,20 @@ const REVIEW_STATUS_ICON = Object.freeze({
 function CandidateReviewStatus({
   code,
   alerts,
+  adviceAt,
   priceReached,
 }) {
-  const reviewState = useAdviceReviewCardState(code, alerts)
+  const reviewState = useAdviceReviewCardState(
+    code,
+    alerts,
+    { adviceAt },
+  )
   const state = reviewState || (
     priceReached
       ? {
           kind: 'queued',
-          label: '条件已到，等待后台复核',
-          detail: '任务将在云端创建',
+          label: '条件已到，预计1分钟内开始复核',
+          detail: '云端定时任务每分钟扫描一次',
         }
       : null
   )
@@ -859,7 +864,12 @@ function CandDecision({ p, q }) {
       if ((p.buyQty ?? null) !== nextQty) patch.buyQty = nextQty
     }
     if (Object.keys(patch).length) planStore.setCandPlan(p.code, patch)
-    planStore.autoSyncCandAlert(p.code, p.name, advice)
+    planStore.autoSyncCandAlert(
+      p.code,
+      p.name,
+      advice,
+      entry?.at,
+    )
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     entry?.at,
@@ -1197,6 +1207,7 @@ function PlanList({ book, quote, stockTags, batchSel }) {
             <CandidateReviewStatus
               code={p.code}
               alerts={reviewAlerts}
+              adviceAt={entry?.at}
               priceReached={anyReached}
             />
           )

@@ -173,22 +173,29 @@ export function adviceJobState(
 }
 
 const REVIEW_TERMINAL_VISIBLE_MS = 2 * 60 * 1000
+const REVIEW_QUEUE_TIMEOUT_MS = 90 * 1000
 
 export function adviceReviewCardState(
   batch,
   code,
   {
     alerts = [],
+    adviceAt = 0,
     now = Date.now(),
   } = {},
 ) {
   const targetCode = String(code || '')
   if (!targetCode) return null
+  const latestAdviceAt = Number(adviceAt) || 0
   const triggeredAlerts = (Array.isArray(alerts) ? alerts : [])
     .filter((alert) =>
       alert?.reviewOnly === true
       && String(alert.candCode || alert.code || '') === targetCode
       && alert.phase === 'reviewing'
+      && (
+        !latestAdviceAt
+        || (Number(alert.triggeredAt) || 0) >= latestAdviceAt
+      )
     )
   const triggeredAt = triggeredAlerts.reduce(
     (latest, alert) =>
@@ -200,6 +207,10 @@ export function adviceReviewCardState(
       String(item?.code || '') === targetCode
       && item?.role === 'review'
       && item?.source === 'judge'
+      && (
+        !latestAdviceAt
+        || (Number(item?.progressAt) || 0) >= latestAdviceAt
+      )
       && (
         item?.triggerKind === 'price-review'
         || triggeredAlerts.length > 0
@@ -217,13 +228,22 @@ export function adviceReviewCardState(
     && Number(now) - progressAt <= REVIEW_TERMINAL_VISIBLE_MS
   )
   if (!job || (triggeredAt > 0 && progressAt < triggeredAt)) {
-    return triggeredAlerts.length
-      ? {
-          kind: 'queued',
-          label: '条件已触发，等待后台复核',
-          detail: '后台任务状态同步中',
-        }
-      : null
+    if (!triggeredAlerts.length) return null
+    if (
+      triggeredAt > 0
+      && Number(now) - triggeredAt > REVIEW_QUEUE_TIMEOUT_MS
+    ) {
+      return {
+        kind: 'failed',
+        label: '自动复核未启动，请重新评估',
+        detail: '触价后90秒内未创建后台任务',
+      }
+    }
+    return {
+      kind: 'queued',
+      label: '条件已触发，预计1分钟内开始复核',
+      detail: '云端定时任务每分钟扫描一次',
+    }
   }
   if (['queued', 'pending'].includes(job.status)) {
     return {

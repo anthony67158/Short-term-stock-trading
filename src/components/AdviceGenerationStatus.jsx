@@ -42,7 +42,11 @@ export function useAdviceGeneration(code) {
     || adviceJobState(batch, code, { role: 'review' })
 }
 
-export function useAdviceReviewCardState(code, alerts = []) {
+export function useAdviceReviewCardState(
+  code,
+  alerts = [],
+  { adviceAt = 0 } = {},
+) {
   const [, forceRender] = useState(0)
   useEffect(() => {
     const update = () => forceRender((value) => value + 1)
@@ -52,7 +56,7 @@ export function useAdviceReviewCardState(code, alerts = []) {
   const state = adviceReviewCardState(
     getBatchState(),
     code,
-    { alerts },
+    { alerts, adviceAt },
   )
 
   useEffect(() => {

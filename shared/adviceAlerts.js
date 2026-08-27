@@ -80,9 +80,36 @@ function reviewIntentOf(advice = {}) {
   }
 }
 
+function refreshReviewAlert(previous, next, adviceAt) {
+  const triggeredAt = Number(previous?.triggeredAt) || 0
+  const superseded = (
+    previous?.enabled === false
+    && ['superseded', 'invalid', 'stopped'].includes(
+      String(previous?.phase || ''),
+    )
+  )
+  const resolvedByNewAdvice = (
+    triggeredAt > 0
+    && Number(adviceAt) > triggeredAt
+  )
+  if (
+    previous?.reviewOnly !== true
+    || (!superseded && !resolvedByNewAdvice)
+  ) return next
+  return {
+    ...next,
+    enabled: true,
+    phase: 'armed',
+    triggeredAt: null,
+    triggeredMsg: '',
+    decisionPrice: null,
+  }
+}
+
 export function projectAdviceAlerts(data, code, advice, options = {}) {
   if (!data || !code || !advice) return false
   const now = options.now ?? Date.now()
+  const adviceAt = Number(options.adviceAt) || 0
   const idFactory = options.idFactory || defaultId
   const alerts = Array.isArray(data.alerts) ? data.alerts : []
   const holding = Array.isArray(data.holding) ? data.holding : []
@@ -220,7 +247,7 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
         )
       )
       if (previous) {
-        projected.push({
+        const refreshed = refreshReviewAlert(previous, {
           ...previous,
           value: reviewPrice,
           op,
@@ -228,7 +255,11 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
           reviewKey,
           judgeContext,
           reviewIntent,
-        })
+        }, adviceAt)
+        if (JSON.stringify(refreshed) !== JSON.stringify(previous)) {
+          changed = true
+        }
+        projected.push(refreshed)
       } else {
         projected.push({
           ...baseAlert({
@@ -332,12 +363,16 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
         && Number(previous.value) === reviewPrice
         && previous.op === op
       ) {
-        projected.push({
+        const refreshed = refreshReviewAlert(previous, {
           ...previous,
           note: path.label,
           judgeContext,
           reviewIntent: holdingFollowUp.reviewIntent,
-        })
+        }, adviceAt)
+        if (JSON.stringify(refreshed) !== JSON.stringify(previous)) {
+          changed = true
+        }
+        projected.push(refreshed)
         continue
       }
       projected.push({

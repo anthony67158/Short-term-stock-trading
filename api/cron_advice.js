@@ -1151,6 +1151,10 @@ async function persistServer(nick, workingAcc) {
     const effective = fa[k];
     if (effective && effective.advice) {
       projectAdviceAlerts(fdata, k, effective.advice, {
+        adviceAt: Math.max(
+          Number(effective.updatedAt) || 0,
+          Number(effective.at) || 0,
+        ),
         t1Status: t1StatusOf(fdata.holding || [], fdata.closed || [], k),
         nextTradeDay: nextTradingDayLabel(),
         requirePriceContract: true,

@@ -2490,7 +2490,7 @@ export const planStore = {
   //   candCode: 该预警所绑定的自选股代码(区别于持仓计划联动的 planId)
   //   alertSyncedPrice(记在候选上): 上次自动同步过的买价 —— 相同价不重复写,用户删掉也不会被反复自动加回;
   //   AI 买价变化时(≠ alertSyncedPrice)才会重新同步/重新武装。
-  autoSyncCandAlert(code, name, advice = null) {
+  autoSyncCandAlert(code, name, advice = null, adviceAt = 0) {
     if (!advice) {
       this.clearCandBuyAlert(code)
       return
@@ -2500,6 +2500,7 @@ export const planStore = {
       name: advice.name || name,
     }, {
       now: Date.now(),
+      adviceAt,
       idFactory: uid,
       requirePriceContract: true,
     })
@@ -2549,11 +2550,19 @@ export const planStore = {
       return
     }
     let adv = null
-    try { adv = (getAdvice(code, 'hold_advice') || {}).advice } catch { adv = null }
+    let adviceAt = 0
+    try {
+      const entry = getAdvice(code, 'hold_advice') || {}
+      adv = entry.advice
+      adviceAt = Number(entry.at) || Number(entry.updatedAt) || 0
+    } catch {
+      adv = null
+    }
     if (!adv) { state.alerts = rest; emit(); return }
     const liveStatus = t1StatusOf(code)
     const changed = projectAdviceAlerts(state, code, adv, {
       now: Date.now(),
+      adviceAt,
       idFactory: uid,
       t1Status: liveStatus,
       requirePriceContract: true,

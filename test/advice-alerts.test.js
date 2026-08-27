@@ -258,6 +258,120 @@ test('未持仓观望为回踩与突破分别生成复核提醒', () => {
   ])
 })
 
+test('新建议发布后重新武装旧的reviewing观察价', () => {
+  const data = {
+    plan: [{ code: '600601', name: '方正科技' }],
+    holding: [],
+    alerts: [{
+      id: 'old-review',
+      code: '600601',
+      name: '方正科技',
+      candCode: '600601',
+      reviewOnly: true,
+      reviewKey: 'watch_pullback',
+      enabled: false,
+      phase: 'reviewing',
+      op: 'lte',
+      value: 12.31,
+      triggeredAt: 1_000,
+      triggeredMsg: '旧触价结果',
+      decisionPrice: 11.66,
+      judgeContext: {
+        planId: 'plan-600601',
+        planRevision: 1,
+      },
+    }, {
+      id: 'old-breakout',
+      code: '600601',
+      name: '方正科技',
+      candCode: '600601',
+      reviewOnly: true,
+      reviewKey: 'watch_breakout',
+      enabled: false,
+      phase: 'superseded',
+      op: 'gte',
+      value: 12.56,
+      triggeredAt: null,
+      judgeContext: {
+        planId: 'plan-600601',
+        planRevision: 1,
+      },
+    }],
+    settings: {},
+  }
+  const advice = {
+    action: '观望',
+    continuity: {
+      planId: 'plan-600601',
+      revision: 2,
+    },
+    priceContract: {
+      schemaVersion: 'advice-price-contract.v1',
+      currentPrice: 12.49,
+      validationStatus: 'VERIFIED',
+      levels: [{
+        key: 'watch_pullback',
+        field: 'pullbackWatchPrice',
+        purpose: 'REVIEW_ONLY',
+        label: '回踩观察',
+        price: 12.31,
+        direction: 'LTE',
+        status: 'PENDING',
+        strict: true,
+      }, {
+        key: 'watch_breakout',
+        field: 'breakoutWatchPrice',
+        purpose: 'REVIEW_ONLY',
+        label: '突破观察',
+        price: 12.56,
+        direction: 'GTE',
+        status: 'PENDING',
+        strict: true,
+      }],
+      allPricesStrict: true,
+      issues: [],
+      review: {
+        operator: 'ANY',
+        conditions: [],
+        allMet: false,
+      },
+    },
+  }
+
+  projectAdviceAlerts(data, '600601', advice, {
+    now: 2_100,
+    adviceAt: 2_000,
+    idFactory: ids,
+    requirePriceContract: true,
+  })
+
+  assert.deepEqual(data.alerts.map((alert) => ({
+    id: alert.id,
+    enabled: alert.enabled,
+    phase: alert.phase,
+    triggeredAt: alert.triggeredAt,
+    triggeredMsg: alert.triggeredMsg,
+    decisionPrice: alert.decisionPrice,
+    planRevision: alert.judgeContext.planRevision,
+  })), [{
+    id: 'old-review',
+    enabled: true,
+    phase: 'armed',
+    triggeredAt: null,
+    triggeredMsg: '',
+    decisionPrice: null,
+    planRevision: 2,
+  }, {
+    id: 'old-breakout',
+    enabled: true,
+    phase: 'armed',
+    triggeredAt: null,
+    triggeredMsg: '',
+    decisionPrice: null,
+    planRevision: 2,
+  }])
+})
+
 test('盘后旧买入计划只生成下一交易时段观察提醒', () => {
   const data = {
     plan: [{ code: '000737', name: '北方铜业' }],
