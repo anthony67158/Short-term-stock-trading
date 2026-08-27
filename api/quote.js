@@ -1,5 +1,10 @@
 import { emGet, sendJson, sendError, num } from './_lib.js';
-import { beijingDayKey } from '../shared/tradingCalendar.js';
+import {
+  beijingDayKey,
+  beijingMinutes,
+  isContinuousTrading,
+  isTradingDayAt,
+} from '../shared/tradingCalendar.js';
 import { classifyPriceLimit } from '../shared/priceLimitPolicy.js';
 
 // 任意股票实时报价（自选股用）
@@ -15,6 +20,170 @@ function toTxCode(code) {
   const c = String(code).trim();
   if (/^(4|8|92)/.test(c)) return 'bj' + c;
   return (/^(6|9|5)/.test(c) ? 'sh' : 'sz') + c;
+}
+
+function positive(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0
+    ? number
+    : null;
+}
+
+function quoteDisplayState(tradeDate, now) {
+  const today = beijingDayKey(now);
+  if (String(tradeDate || '').slice(0, 10) !== today) {
+    return {
+      priceStatus: 'PREVIOUS_CLOSE',
+      priceLabel: (
+        isTradingDayAt(now) && beijingMinutes(now) < 570
+          ? '昨收'
+          : '最近收盘'
+      ),
+      isLivePrice: false,
+    };
+  }
+  const minutes = beijingMinutes(now);
+  if (isContinuousTrading(now)) {
+    return {
+      priceStatus: 'LIVE',
+      priceLabel: '',
+      isLivePrice: true,
+    };
+  }
+  if (minutes >= 555 && minutes < 570) {
+    return {
+      priceStatus: 'AUCTION',
+      priceLabel: '竞价',
+      isLivePrice: false,
+    };
+  }
+  if (minutes >= 690 && minutes < 780) {
+    return {
+      priceStatus: 'LUNCH_CLOSE',
+      priceLabel: '午间收盘',
+      isLivePrice: false,
+    };
+  }
+  if (minutes >= 900) {
+    return {
+      priceStatus: 'CLOSE',
+      priceLabel: '收盘',
+      isLivePrice: false,
+    };
+  }
+  return {
+    priceStatus: 'LATEST',
+    priceLabel: '最新',
+    isLivePrice: false,
+  };
+}
+
+function previousCloseQuote(code, eastmoney, tencent, now) {
+  const today = beijingDayKey(now);
+  const eastmoneyCurrentDay = (
+    String(eastmoney?.tradeDate || '').slice(0, 10) === today
+  );
+  const price = (
+    (!positive(eastmoney?.price) && eastmoneyCurrentDay
+      ? positive(eastmoney?.prevClose)
+      : null)
+    || positive(tencent?.price)
+    || positive(eastmoney?.price)
+    || positive(eastmoney?.prevClose)
+    || positive(tencent?.prevClose)
+  );
+  if (price == null) {
+    return withPriceLimitState({
+      ...(eastmoney || tencent || {}),
+      code,
+      price: null,
+      pct: null,
+      chg: null,
+      priceStatus: 'UNAVAILABLE',
+      priceLabel: '暂无报价',
+      isLivePrice: false,
+    });
+  }
+  const sourceTradeDate = (
+    String(tencent?.tradeDate || '').slice(0, 10) !== today
+      ? tencent?.tradeDate || null
+      : null
+  );
+  return withPriceLimitState({
+    ...(eastmoney || {}),
+    code,
+    name: eastmoney?.name || tencent?.name || '',
+    industry: eastmoney?.industry || tencent?.industry || null,
+    source: tencent
+      ? '腾讯财经·最近收盘'
+      : '东方财富·昨收',
+    price,
+    pct: 0,
+    chg: 0,
+    turnover: null,
+    volRatio: null,
+    mainInflow: null,
+    retailInflow: null,
+    mainRatio: null,
+    amount: null,
+    high: null,
+    low: null,
+    open: null,
+    prevClose: price,
+    tradeDate: sourceTradeDate,
+    priceStatus: 'PREVIOUS_CLOSE',
+    priceLabel: (
+      isTradingDayAt(now) && beijingMinutes(now) < 570
+        ? '昨收'
+        : '最近收盘'
+    ),
+    isLivePrice: false,
+  });
+}
+
+export function mergeQuoteSources(
+  codes,
+  eastmoneyList,
+  tencentList,
+  now = Date.now(),
+) {
+  const eastmoneyByCode = new Map(
+    (eastmoneyList || []).map((quote) => [String(quote.code), quote]),
+  );
+  const tencentByCode = new Map(
+    (tencentList || []).map((quote) => [String(quote.code), quote]),
+  );
+  const today = beijingDayKey(now);
+  return (codes || []).map((rawCode) => {
+    const code = String(rawCode);
+    const eastmoney = eastmoneyByCode.get(code);
+    const tencent = tencentByCode.get(code);
+    const eastmoneyValid = positive(eastmoney?.price) != null;
+    const tencentValid = positive(tencent?.price) != null;
+    const eastmoneyCurrent = (
+      String(eastmoney?.tradeDate || '').slice(0, 10) === today
+    );
+    const tencentCurrent = (
+      String(tencent?.tradeDate || '').slice(0, 10) === today
+    );
+    if (eastmoneyValid && eastmoneyCurrent) {
+      return {
+        ...eastmoney,
+        ...quoteDisplayState(eastmoney.tradeDate, now),
+      };
+    }
+    if (tencentValid && tencentCurrent) {
+      return withPriceLimitState({
+        ...(eastmoney || {}),
+        ...tencent,
+        code,
+        name: eastmoney?.name || tencent.name || '',
+        industry: eastmoney?.industry || tencent.industry || null,
+        ...quoteDisplayState(tencent.tradeDate, now),
+      });
+    }
+    return previousCloseQuote(code, eastmoney, tencent, now);
+  });
 }
 
 export function withPriceLimitState(quote) {
@@ -113,28 +282,41 @@ export async function fetchQuotes(codes, dependencies = {}) {
   if (!normalizedCodes.length) return [];
   const fetchEastmoney = dependencies.fetchEastmoney || quoteEastmoney;
   const fetchTencent = dependencies.fetchTencent || quoteTx;
+  const now = Number(dependencies.now) || Date.now();
 
-  let list = [];
+  let eastmoneyList = [];
   try {
-    list = await fetchEastmoney(normalizedCodes);
+    eastmoneyList = await fetchEastmoney(normalizedCodes);
   } catch { /* 东财失败 → 走腾讯 */ }
 
-  // 东财空或缺票 → 用腾讯补齐缺失的代码
-  const have = new Set(list.map((x) => x.code));
-  const missing = normalizedCodes.filter((code) => !have.has(code));
+  // 东财返回了代码但现价为 0 仍属于缺价，必须继续向腾讯补源。
+  const eastmoneyByCode = new Map(
+    eastmoneyList.map((quote) => [String(quote.code), quote]),
+  );
+  const missing = normalizedCodes.filter(
+    (code) => positive(eastmoneyByCode.get(code)?.price) == null,
+  );
+  let tencentList = [];
   if (missing.length) {
     try {
-      const tx = await fetchTencent(missing);
-      list = [...list, ...tx];
+      tencentList = await fetchTencent(missing);
     } catch { /* 腾讯也失败则保持现状 */ }
   }
 
-  return list;
+  return mergeQuoteSources(
+    normalizedCodes,
+    eastmoneyList,
+    tencentList,
+    now,
+  );
 }
 
 export default async function handler(req, res) {
   try {
-    const codes = (req.query.codes || '').split(',').map((s) => s.trim()).filter(Boolean);
+    const codes = String(req.query.codes || req.query.code || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
     if (codes.length === 0) return sendJson(res, { ok: true, list: [] });
 
     const list = await fetchQuotes(codes);
