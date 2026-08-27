@@ -39,3 +39,24 @@ test('缺失交易日期或无效价格不能触发预警', () => {
     false,
   )
 })
+
+test('竞价或最近收盘展示价不得触发盘中预警', () => {
+  assert.equal(
+    isFreshAlertQuote({
+      price: 10,
+      tradeDate: '2026-08-21',
+      priceStatus: 'AUCTION',
+      isLivePrice: false,
+    }, now),
+    false,
+  )
+  assert.equal(
+    isFreshAlertQuote({
+      price: 10,
+      tradeDate: '2026-08-21',
+      priceStatus: 'PREVIOUS_CLOSE',
+      isLivePrice: false,
+    }, now),
+    false,
+  )
+})

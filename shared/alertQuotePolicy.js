@@ -8,6 +8,8 @@ export function isFreshAlertQuote(quote, now = Date.now()) {
   const tradeDate = String(quote?.tradeDate || '').slice(0, 10)
   return Number.isFinite(price)
     && price > 0
+    && quote?.isLivePrice !== false
+    && !['AUCTION', 'PREVIOUS_CLOSE'].includes(quote?.priceStatus)
     && isContinuousTrading(now)
     && /^\d{4}-\d{2}-\d{2}$/.test(tradeDate)
     && tradeDate === beijingDayKey(now)

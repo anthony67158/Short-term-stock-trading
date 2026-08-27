@@ -74,6 +74,7 @@ import {
 import { adviceRecency } from '../../shared/adviceRecency.js'
 import { selectAutoRefreshCodes } from '../../shared/adviceAutoRefreshPolicy.js'
 import { stockNoteText } from '../../shared/stockNotes.js'
+import { quoteDisplayState } from '../../shared/quoteDisplay.js'
 
 // —— 搜索结果 → 定位到卡片:轻量模块级事件总线 ——
 // 搜索框(StockSearch)、自选区(PlanList)、持仓区(HoldingList)同在本文件,用一个 Set 广播即可:
@@ -103,6 +104,32 @@ function fmtMoney(v) {
   const a = Math.abs(v)
   if (a >= 10000) return sign + (a / 10000).toFixed(2) + '万'
   return sign + a.toFixed(0)
+}
+
+function quoteSecondaryText(priceView) {
+  if (!priceView) return '暂无报价'
+  const pctText = priceView.pct == null
+    ? ''
+    : fmtPct(priceView.pct)
+  return priceView.label
+    ? [priceView.label, pctText].filter(Boolean).join(' ')
+    : pctText
+}
+
+function QuotePrice({ quote, className = 'pc-price' }) {
+  const priceView = quoteDisplayState(quote)
+  const tone = (
+    priceView.livePrice != null
+    || priceView.status === 'AUCTION'
+  ) ? pctClass(priceView.pct) : 'muted'
+  return (
+    <span className={`${className} ${tone}`.trim()}>
+      {fmtRaw(priceView.price)}
+      <span className="pc-pct">
+        {quoteSecondaryText(priceView)}
+      </span>
+    </span>
+  )
 }
 
 // 从日K算 N 日均线（收盘价），取最后一根为当日
@@ -283,11 +310,26 @@ export default function PlanTab({ interval }) {
   )
   const quote = {}
   ;(data?.list || []).forEach((s) => { quote[s.code] = s })
+  const executionQuote = Object.fromEntries(
+    codes
+      .filter((code) => quote[code])
+      .map((code) => {
+        const livePrice = quoteDisplayState(quote[code]).livePrice
+        return [
+          code,
+          livePrice == null
+            ? { ...quote[code], price: null }
+            : quote[code],
+        ]
+      }),
+  )
   const executionQuoteKey = codes
-    .map((code) => `${code}:${quote[code]?.price || ''}`)
+    .map((code) => (
+      `${code}:${quoteDisplayState(quote[code]).livePrice ?? ''}`
+    ))
     .join('|')
   useEffect(() => {
-    planStore.refreshExecutionPlans(quote)
+    planStore.refreshExecutionPlans(executionQuote)
     // 只按价格变化推进 ARMED -> ALERTED，避免 store emit 形成渲染循环。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [executionQuoteKey])
@@ -714,10 +756,11 @@ function CandDecision({ p, q }) {
   const advice = entry?.advice || null
   const hasAdvice = !!advice
   const executionOpen = isContinuousTrading(Date.now())
+  const livePrice = quoteDisplayState(q).livePrice
   const baseView = advice
     ? buildAdviceActionView(advice, {
         mode: 'buy_advice',
-        currentPrice: q?.price,
+        currentPrice: livePrice,
         executionOpen,
       })
     : null
@@ -772,12 +815,12 @@ function CandDecision({ p, q }) {
         ...(actionable ? { buyPrice: target, planQty: qty } : {}),
       }, {
         mode: 'buy_advice',
-        currentPrice: q?.price,
+        currentPrice: livePrice,
         executionOpen,
       })
     : null
   const progress = view?.trigger
-  const progressState = buildActionProgress(progress, q?.price)
+  const progressState = buildActionProgress(progress, livePrice)
   const reachedKey = view ? reachedLevelKey(view, progressState) : ''
   const otherLevels = view?.levels.filter((item) => item.key !== 'entry') || []
 
@@ -866,7 +909,7 @@ function CandDecision({ p, q }) {
                   <ActionLevel key={item.key} level={item} reached={item.key === reachedKey} />
                 ))}
               </div>
-              <ActionProgress trigger={progress} currentPrice={q?.price} progress={progressState} />
+              <ActionProgress trigger={progress} currentPrice={livePrice} progress={progressState} />
             </>
           ) : (
             <>
@@ -879,7 +922,7 @@ function CandDecision({ p, q }) {
               ) : view.kind !== 'wait' ? (
                 <EmptyActionLevels />
               ) : null}
-              <ActionProgress trigger={progress} currentPrice={q?.price} progress={progressState} />
+              <ActionProgress trigger={progress} currentPrice={livePrice} progress={progressState} />
             </>
           )}
         </div>
@@ -903,10 +946,11 @@ function CandidateActions({ p, q, onBuy, onAlert, onDelete }) {
   useEffect(() => subscribeAdvice(() => force((n) => n + 1)), [])
   const entry = getAdvice(p.code, 'buy_advice')
   const executionOpen = isContinuousTrading(Date.now())
+  const livePrice = quoteDisplayState(q).livePrice
   const baseView = entry?.advice
     ? buildAdviceActionView(entry.advice, {
         mode: 'buy_advice',
-        currentPrice: q?.price,
+        currentPrice: livePrice,
         executionOpen,
       })
     : null
@@ -917,7 +961,7 @@ function CandidateActions({ p, q, onBuy, onAlert, onDelete }) {
         planQty: p.buyQty ?? entry.advice.planQty,
       }, {
         mode: 'buy_advice',
-        currentPrice: q?.price,
+        currentPrice: livePrice,
         executionOpen,
       })
     : baseView
@@ -994,7 +1038,10 @@ function PlanList({ book, quote, stockTags, batchSel }) {
     const suggestedQty = actionHands(view?.quantity)
     setBuying(stock.code)
     setBuyErr('')
-    setPrice(entry != null ? String(entry) : (quote[stock.code] ? String(quote[stock.code].price) : ''))
+    const displayPrice = quoteDisplayState(quote[stock.code]).price
+    setPrice(entry != null
+      ? String(entry)
+      : displayPrice != null ? String(displayPrice) : '')
     setQty(String(suggestedQty || 1))
   }
   const confirmBuy = (code) => {
@@ -1013,6 +1060,7 @@ function PlanList({ book, quote, stockTags, batchSel }) {
   // 单张候选卡
   const Card = (p) => {
     const q = quote[p.code]
+    const priceView = quoteDisplayState(q)
     const checked = selected.has(p.code)
     const stockNote = stockNoteText(book.stockNotes, p.code)
     return (
@@ -1041,7 +1089,12 @@ function PlanList({ book, quote, stockTags, batchSel }) {
             {q && q.isLimitUp && <span className="tag tag-lu">涨停</span>}
           </div>
           <div className="pc-top-r">
-            {q && <span className={'pc-price ' + pctClass(q.pct)}>{fmtRaw(q.price)} <span className="pc-pct">{fmtPct(q.pct)}</span></span>}
+            {q && (
+              <QuotePrice
+                quote={q}
+                className="pc-price"
+              />
+            )}
           </div>
           <button
             className={'pc-pin' + (p.star ? ' on' : '')}
@@ -1068,10 +1121,10 @@ function PlanList({ book, quote, stockTags, batchSel }) {
           if (reviewAlerts.length) {
             const executionOpen = isContinuousTrading(Date.now())
             const reached = (alert) =>
-              executionOpen && q && q.price != null && (
+              executionOpen && priceView.livePrice != null && (
               alert.op === 'gte'
-                ? q.price >= alert.value
-                : q.price <= alert.value
+                ? priceView.livePrice >= alert.value
+                : priceView.livePrice <= alert.value
             )
             const reviewing = reviewAlerts.some((alert) => !alert.enabled)
             const anyReached = reviewAlerts.some((alert) =>
@@ -1383,10 +1436,10 @@ function AdvisorScore({ book }) {
 // urgency：数值越大越该先处理。止损触及/破8%纪律 > 止盈触及 > 常规
 function holdSnapshot(h, q) {
   const costWithFee = positionCostBasis(h).costWithFees ?? h.buyPrice
-  // 现价有效性:必须 > 0。休市/接口异常返回 0 时,盈亏用昨收兜底展示;但触价判定只认实时价,避免误触止损
-  const px = q && Number(q.price) > 0 ? q.price : null
-  const pcClose = q && Number(q.prevClose) > 0 ? Number(q.prevClose) : null
-  const effPx = px != null ? px : pcClose
+  const quoteView = quoteDisplayState(q)
+  // 盈亏可用最近有效价；止盈止损与紧急度只认连续竞价实时价。
+  const px = quoteView.livePrice
+  const effPx = quoteView.price
   const pnl = effPx != null && costWithFee ? +(((effPx - costWithFee) / costWithFee) * 100).toFixed(2) : null
   const hitTP = px != null && h.tp && px >= Number(h.tp)
   const hitSL = px != null && h.sl && px <= Number(h.sl)
@@ -2288,8 +2341,9 @@ function HoldingItem({ h, quote: q }) {
   const shares = liveQty * 100
   const rawCostWithFee = costBasis.rawCostWithFees ?? h.buyPrice
   const effectiveCost = costBasis.costWithFees ?? rawCostWithFee
-  // 现价有效性:必须为有限数且 > 0。休市/接口异常会返回 0(或 null/NaN),此时不能拿 0 去算盈亏。
-  const validPx = q && Number.isFinite(Number(q.price)) && Number(q.price) > 0 ? Number(q.price) : null
+  const quoteView = quoteDisplayState(q)
+  // 展示价可回退竞价/最近收盘；触价、止盈止损与执行计划只认连续竞价实时价。
+  const validPx = quoteView.livePrice
 
   // 拉该股日K：用于 MA10(计划公式兜底)/收盘价兜底/盈亏计算。信号灯已移入个股详情页。
   const kd = usePolling(`/api/stock_detail?code=${h.code}&klt=101&lmt=30`, 600000, [h.code])
@@ -2301,8 +2355,8 @@ function HoldingItem({ h, quote: q }) {
     const pc = Number(q && q.prevClose)
     return Number.isFinite(pc) && pc > 0 ? pc : null
   })()
-  // 有效价:优先实时现价,否则用收盘价兜底 → 盈亏/进度轨用它计算,绝不留空、也绝不会除零
-  const effPx = validPx != null ? validPx : closePx
+  // 盈亏展示使用最新有效价格；交易动作仍只使用上面的 validPx。
+  const effPx = validPx ?? quoteView.price ?? closePx
 
   // 持仓浮盈与展示成本必须同源：已实现做T收益已摊入有效成本。
   const floatPnl = effPx != null && shares > 0
@@ -2524,13 +2578,19 @@ function HoldingItem({ h, quote: q }) {
     setMode(null)
   }
 
-  const startT = () => { setTradeErr(''); setMode('T'); setTPrice(q ? String(q.price) : ''); setTQty('1'); setTAdvice(null) }
+  const startT = () => {
+    setTradeErr('')
+    setMode('T')
+    setTPrice(quoteView.price != null ? String(quoteView.price) : '')
+    setTQty('1')
+    setTAdvice(null)
+  }
   const addTFlow = () => {
     if (!tPrice || !(Number(tQty) > 0)) return
     const result = planStore.addTFlow(h.id, tSide, tPrice, Number(tQty))
     if (!result || !result.ok) { setTradeErr((result && result.error) || '做T流水记录失败'); return }
     setTradeErr(result.message || '')
-    setTPrice(q ? String(q.price) : '')
+    setTPrice(quoteView.price != null ? String(quoteView.price) : '')
     setTQty('1')
   }
 
@@ -2564,7 +2624,8 @@ function HoldingItem({ h, quote: q }) {
       )
       const r = await callAIStream('t_advice', {
         name: h.name, code: h.code,
-        nowPrice: q?.price, pct: q?.pct,
+        nowPrice: validPx,
+        pct: validPx != null ? quoteView.pct : null,
         dayHigh: q?.high, dayLow: q?.low, open: q?.open, prevClose: q?.prevClose,
         turnover: q?.turnover, volRatio: q?.volRatio,
         mainInflowYi: q ? +(q.mainInflow / 1e8).toFixed(2) : null,
@@ -2719,12 +2780,19 @@ function HoldingItem({ h, quote: q }) {
             <div
               className={
                 'hold-live-quote '
-                + (validPx != null ? pctClass(q?.pct) : 'muted')
+                + (
+                  validPx != null
+                  || quoteView.status === 'AUCTION'
+                    ? pctClass(quoteView.pct)
+                    : 'muted'
+                )
               }
             >
               <strong>{fmtRaw(effPx)}</strong>
               <span>
-                {validPx != null ? fmtPct(q?.pct) : '最近收盘'}
+                {effPx === quoteView.price
+                  ? quoteSecondaryText(quoteView)
+                  : '最近收盘'}
               </span>
             </div>
           )}
@@ -2743,7 +2811,7 @@ function HoldingItem({ h, quote: q }) {
       <div className="card-decision-slot">
         <AdviceActionPanel
           view={decisionView}
-          currentPrice={effPx}
+          currentPrice={validPx}
           onPrompt={() => openStockDetail(h.code, h.name)}
         />
         <div className="card-decision-meta">
@@ -2962,7 +3030,19 @@ function HoldingItem({ h, quote: q }) {
               {/* 持仓概览 */}
               <div className="t-drawer-meta">
                 <span>{liveQty}手</span><span title={`原始含费成本 ${fmtRaw(rawCostWithFee)}${costBasis.tRealizedPnl ? `；累计做T收益 ${fmtMoney(costBasis.tRealizedPnl)}` : ''}`}>成本 {fmtRaw(effectiveCost)} <span className="sub-name">{costBasis.tRealizedPnl ? '(做T后)' : '(含费)'}</span></span>
-                {q && <span>现价 <b className={pctClass(q.pct)}>{fmtRaw(q.price)}</b></span>}
+                {q && (
+                  <span>
+                    现价 <b className={
+                      validPx != null
+                      || quoteView.status === 'AUCTION'
+                        ? pctClass(quoteView.pct)
+                        : 'muted'
+                    }>
+                      {fmtRaw(effPx)}
+                    </b>
+                    {' '}{quoteSecondaryText(quoteView)}
+                  </span>
+                )}
                 {costBasis.tRealizedPnl !== 0 && <span>累计做T收益 <b className={costBasis.tRealizedPnl >= 0 ? 'red' : 'green'}>{fmtMoney(costBasis.tRealizedPnl)}</b></span>}
                 {h.tFlows && h.tFlows.length > 0 && (
                   <button className="chip-btn done t-settle-btn" style={{ marginLeft: 'auto' }} onClick={() => { setConfirmSettle(true) }} title="把今天的做T流水固化进交易记录并调整底仓">
