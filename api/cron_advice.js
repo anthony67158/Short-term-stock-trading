@@ -26,6 +26,7 @@ import { applyCors, preflight } from './_lib.js';
 import {
   accountCredentialMatches,
   isAccountActive,
+  writeAdviceBatchCancellation,
   writeAdviceRuntimeState,
   writeAdviceRuntimeUpdate,
   writeAccount,
@@ -39,7 +40,7 @@ import { buildHoldPayload, buildWatchPayload, computePortfolio, t1StatusOf } fro
 import {
   CONCURRENCY, jobsOf, enqueueJob, leaseJob, completeJob, failJob, cancelJob, cancelAll,
   reapOrphans, gcJobs, runningCount, hasPendingWork, needsWorkerDispatch, isActive, jobsToProgress,
-  isAdviceBatchCanceled, markAdviceBatchCanceled,
+  isAdviceBatchCanceled,
   mergeAdviceBatchCancellations,
   acquireWorkerLock, renewWorkerLock, renewLease, releaseWorkerLock, workerHeldByOther, updateJobProgress,
   adviceJobRole, allAdviceJobs, advisorAdmission, findAdviceJob,
@@ -1853,10 +1854,13 @@ export default async function handler(req, res) {
   if (preflight(req, res)) return;
   applyCors(res);
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  // 预热 LLM 配置 → advisorConcurrency() 才能读到最新的端点数(并发上限的权威来源)
-  try { await ensureConfig(); } catch { /* 读失败回退 env 基线,不阻断 */ }
-
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
+  const op = body.op || 'enqueue';
+  // 预热 LLM 配置 → advisorConcurrency() 才能读到最新的端点数(并发上限的权威来源)
+  if (!['cancel', 'cancelAll'].includes(op)) {
+    try { await ensureConfig(); } catch { /* 读失败回退 env 基线,不阻断 */ }
+  }
+
   const scope = ['all', 'hold', 'watch'].includes(body.scope) ? body.scope : 'all';
   const force = body.force != null ? !!body.force : true;   // 用户主动生成默认强制重生成
 
@@ -1869,14 +1873,15 @@ export default async function handler(req, res) {
     if (!nick || (!token && !pw)) {
       return res.end(JSON.stringify({ ok: false, error: '缺少账号凭证' }));
     }
-    const acc = await readAccount(nick);
+    const acc = await readAccount(nick, undefined, {
+      includeAdviceUpdates: !['status', 'cancel', 'cancelAll'].includes(op),
+    });
     if (!acc) return res.end(JSON.stringify({ ok: false, error: '账号不存在' }));
     if (!accountCredentialMatches(acc, { pw, token })) {
       return res.end(JSON.stringify({ ok: false, error: '账号鉴权失败' }));
     }
     if (!isAccountActive(acc)) return res.end(JSON.stringify({ ok: false, error: '账号已注销' }));
     const data = acc.data || (acc.data = {});
-    const op = body.op || 'enqueue';
     const started = Date.now();
     let CONC = effectiveAdviceConcurrency(data);
     let stopHeartbeat = () => {};
@@ -1952,16 +1957,24 @@ export default async function handler(req, res) {
             error: '缺少批次标识',
           }));
         }
-        markAdviceBatchCanceled(data, batchId, Date.now());
-        const n = cancelAll(data, Date.now(), batchId);
-        const persisted = await persistServer(nick, acc);
-        const finalData = persisted?.data || data;
+        const now = Date.now();
+        const command = await writeAdviceBatchCancellation(nick, {
+          batchId,
+          canceledAt: now,
+        });
+        const canceledAt = Number(command.canceledAt) || now;
+        const n = cancelAll(
+          data,
+          now,
+          batchId,
+          canceledAt,
+        );
         return res.end(JSON.stringify({
           ok: true,
-          confirmed: isAdviceBatchCanceled(finalData, batchId),
+          confirmed: true,
           batchId,
           canceled: n,
-          progress: jobsToProgress(finalData, Date.now(), CONC),
+          progress: jobsToProgress(data, now, CONC),
         }));
       }
       // enqueue(默认):把 codes 排入队列(防重),随后 drain(拿不到锁则由在跑的 drainer 接手)

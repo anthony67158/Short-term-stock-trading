@@ -229,6 +229,13 @@ test('取消与入队并发落盘时墓碑合并后终止迟到任务', () => {
     batchId: 'batch-race',
     batchRequest: true,
   }, 1001)
+  enqueueJob(enqueueWorking, {
+    code: '000001',
+    mode: 'review',
+    role: 'review',
+    source: 'review',
+    batchId: 'batch-race',
+  }, 1002)
 
   mergeAdviceBatchCancellations(enqueueWorking, cancelWorking, 1100)
 
@@ -239,6 +246,10 @@ test('取消与入队并发落盘时墓碑合并后终止迟到任务', () => {
   assert.equal(
     enqueueWorking.jobs['600000'].cancelRequested,
     true,
+  )
+  assert.equal(
+    enqueueWorking.reviewJobs['000001'].status,
+    'queued',
   )
 })
 
@@ -322,6 +333,26 @@ test('全部停止只取消advisor批次且不干扰独立review队列', () => {
   )
 })
 
+test('取消请求重试沿用首次截止时间且不误停之后的新批次', () => {
+  const data = {}
+  enqueueJob(data, {
+    code: '600000',
+    mode: 'buy_advice',
+    batchId: 'batch-old',
+    batchRequest: true,
+  }, 1000)
+  enqueueJob(data, {
+    code: '000001',
+    mode: 'buy_advice',
+    batchId: 'batch-new',
+    batchRequest: true,
+  }, 1300)
+
+  assert.equal(cancelAll(data, 1500, 'batch-old', 1200), 1)
+  assert.equal(data.jobs['600000'].status, 'canceled')
+  assert.equal(data.jobs['000001'].status, 'queued')
+})
+
 test('批次取消响应丢失后重试仍可由服务端墓碑确认', async () => {
   let sends = 0
   const result = await confirmAdviceBatchCancellation({
@@ -363,12 +394,20 @@ test('全部停止不等待提交请求并使用批次级取消协议', () => {
   const cancelAllBlock = adviceBatchSource.match(
     /async function cancelBatchInternal\(\)[\s\S]*?(?=export function cancelBatch)/,
   )?.[0] || ''
+  const serverCancelAllBlock = serverAdviceSource.match(
+    /export async function cancelServerAdviceBatch[\s\S]*?(?=\/\/ 取消必须等云端权威状态确认)/,
+  )?.[0] || ''
   assert.match(adviceBatchSource, /cancelServerAdviceBatch\(/)
   assert.doesNotMatch(
     cancelAllBlock,
     /await state\._submissionPromise/,
   )
+  assert.doesNotMatch(cancelAllBlock, /pendingSubmission\.finally/)
+  assert.match(cancelAllBlock, /state\.batchId\s*!==\s*batchId/)
   assert.match(serverAdviceSource, /op:\s*'cancelAll'/)
-  assert.match(cronAdviceSource, /markAdviceBatchCanceled/)
+  assert.match(cronAdviceSource, /writeAdviceBatchCancellation/)
+  assert.match(cronAdviceSource, /includeAdviceUpdates:\s*!\[/)
+  assert.doesNotMatch(serverCancelAllBlock, /outsideTargets/)
+  assert.doesNotMatch(serverCancelAllBlock, /confirmAdviceCancellation\(/)
   assert.match(planTabSource, /batch\.cancelError\s*\?\s*'重试停止'/)
 })

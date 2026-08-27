@@ -417,6 +417,12 @@ const deactivationPathOf = (nick) => `${prefixOf(nick)}deactivated.json`;
 const legacyPathOf = (nick) => `${PREFIX}${sha('u:' + nick)}.json`; // 旧的单文件覆盖式路径（兼容迁移）
 const adviceRuntimePrefixOf = (nick) => `${prefixOf(nick)}runtime/advice/`;
 const adviceRuntimeStatePathOf = (nick) => `${prefixOf(nick)}runtime/state.json`;
+const adviceBatchCancellationPathOf = (nick, batchId) =>
+  `${prefixOf(nick)}runtime/cancellations/${
+    sha(`batch:${String(batchId || '')}`)
+  }.json`;
+const adviceBatchCancellationLatestPathOf = (nick) =>
+  `${prefixOf(nick)}runtime/cancellations/latest.json`;
 const adviceRuntimeUpdatePathOf = (nick, code, role = 'advisor') => {
   const safeCode = String(code || '').replace(/[^0-9A-Za-z_-]/g, '');
   const prefix = role === 'review' ? 'review-' : '';
@@ -536,6 +542,154 @@ export function mergeAdviceRuntimeState(account, runtime) {
   return account;
 }
 
+function applyAdviceBatchCancellation(account, marker) {
+  const cancelBefore = Number(
+    marker?.cancelBefore || marker?.canceledAt,
+  ) || 0;
+  const markerBatches = {
+    ...(marker?.batchCancellations || {}),
+    ...(marker?.batchId
+      ? { [String(marker.batchId)]: Number(marker.canceledAt) || cancelBefore }
+      : {}),
+  };
+  if (!account || !cancelBefore) return account;
+  const data = account.data || (account.data = {});
+  const jobs = data.jobs && typeof data.jobs === 'object'
+    ? data.jobs
+    : {};
+  const canceledBatches = {
+    ...(data.adviceBatchCancellations || {}),
+  };
+  for (const [batchId, canceledAt] of Object.entries(markerBatches)) {
+    canceledBatches[batchId] = Math.max(
+      Number(canceledBatches[batchId]) || 0,
+      Number(canceledAt) || 0,
+    );
+  }
+  for (const job of Object.values(jobs)) {
+    const batchCanceledAt = Number(
+      canceledBatches[String(job?.batchId || '')],
+    ) || 0;
+    const cutoffCanceledAt = (
+      Number(job?.at || job?.startedAt || 0) <= cancelBefore
+    ) ? cancelBefore : 0;
+    const canceledAt = batchCanceledAt || cutoffCanceledAt;
+    const status = String(job?.status || '');
+    const completedAfterCancel = (
+      ['done', 'failed'].includes(status)
+      && Number(job?.finishedAt || job?.progressAt || 0) >= canceledAt
+    );
+    if (
+      !job
+      || !canceledAt
+      || (
+        !['queued', 'running'].includes(status)
+        && !completedAfterCancel
+      )
+    ) continue;
+    job.cancelRequested = true;
+    job.status = 'canceled';
+    job.finishedAt = Math.max(Number(job.finishedAt) || 0, canceledAt);
+    job.leaseUntil = 0;
+    job.resourceRole = 'none';
+    job.resourceUnits = 0;
+    job.phase = '已取消生成';
+    job.progressAt = Math.max(Number(job.progressAt) || 0, canceledAt);
+    if (job.batchId) {
+      canceledBatches[job.batchId] = Math.max(
+        Number(canceledBatches[job.batchId]) || 0,
+        canceledAt,
+      );
+    }
+  }
+  data.adviceBatchCancellations = canceledBatches;
+  data.adviceCancelAllBefore = Math.max(
+    Number(data.adviceCancelAllBefore) || 0,
+    cancelBefore,
+  );
+  data.adviceAutoPauseUntil = Math.max(
+    Number(data.adviceAutoPauseUntil) || 0,
+    cancelBefore + 30 * 60 * 1000,
+  );
+
+  const progress = data.batchProgress;
+  if (progress && typeof progress === 'object') {
+    const items = (Array.isArray(progress.items) ? progress.items : [])
+      .map((item) => {
+        const job = jobs[String(item?.code || '')];
+        if (
+          !job
+          || job.status !== 'canceled'
+          || (
+            item?.jobId
+            && job.id
+            && String(item.jobId) !== String(job.id)
+          )
+        ) return item;
+        return {
+          ...item,
+          status: 'skipped',
+          phase: '已取消生成',
+          progressAt: Math.max(
+            Number(item.progressAt) || 0,
+            cancelBefore,
+          ),
+        };
+      });
+    const terminal = new Set(['ok', 'fail', 'skipped']);
+    progress.items = items;
+    progress.total = items.length;
+    progress.ok = items.filter((item) => item.status === 'ok').length;
+    progress.fail = items.filter((item) => item.status === 'fail').length;
+    progress.skipped = items.filter(
+      (item) => item.status === 'skipped',
+    ).length;
+    progress.done = items.filter(
+      (item) => terminal.has(item.status),
+    ).length;
+    progress.running = items.some(
+      (item) => !terminal.has(item.status),
+    );
+    progress.current = items
+      .filter((item) => item.status === 'running')
+      .map((item) => item.code);
+    progress.advisorBusy = [...progress.current];
+    progress.batchCanceled =
+      Number(canceledBatches[progress.batchId]) > 0;
+    progress.at = Math.max(Number(progress.at) || 0, cancelBefore);
+    if (!progress.running) progress.finishedAt = cancelBefore;
+  }
+  account.updatedAt = Math.max(
+    Number(account.updatedAt) || 0,
+    cancelBefore,
+  );
+  return account;
+}
+
+async function applyStoredAdviceBatchCancellation(
+  account,
+  nick,
+  storage,
+) {
+  const marker = await storage.readJson(
+    adviceBatchCancellationLatestPathOf(nick),
+  ).catch(() => null);
+  return applyAdviceBatchCancellation(account, marker);
+}
+
+function adviceRuntimeUpdateWasCanceled(data, update) {
+  if (update?.role === 'review' || !update?.job) return false;
+  const job = update.job;
+  const batchCanceledAt = Number(
+    data?.adviceBatchCancellations?.[String(job.batchId || '')],
+  ) || 0;
+  const cancelBefore = Number(data?.adviceCancelAllBefore) || 0;
+  return batchCanceledAt > 0 || (
+    cancelBefore > 0
+    && Number(job.at || job.startedAt || 0) <= cancelBefore
+  );
+}
+
 export function mergeAdviceRuntimeUpdate(
   account,
   update,
@@ -562,6 +716,27 @@ export function mergeAdviceRuntimeUpdate(
     update.jobKey
     || (role === 'review' ? `review:${code}` : code),
   );
+  if (adviceRuntimeUpdateWasCanceled(data, update)) {
+    data.runtimeAdviceAppliedAt = {
+      ...cursors,
+      [cursorKey]: Math.max(
+        Number(cursors[cursorKey]) || 0,
+        updatedAt,
+      ),
+    };
+    data.runtimeAdviceObservedAt = {
+      ...observed,
+      [code]: Math.max(
+        Number(observed[code]) || 0,
+        deliveredAt,
+      ),
+    };
+    account.updatedAt = Math.max(
+      Number(account.updatedAt) || 0,
+      deliveredAt,
+    );
+    return account;
+  }
   if (updatedAt > (Number(cursors[cursorKey]) || 0)) {
     if (update.advice) {
       const advice = data.advice || (data.advice = {});
@@ -684,6 +859,67 @@ export async function writeAdviceRuntimeState(
   );
 }
 
+export async function writeAdviceBatchCancellation(
+  nick,
+  {
+    batchId,
+    canceledAt = Date.now(),
+  } = {},
+  storage = defaultStorage,
+) {
+  const key = String(batchId || '').trim().slice(0, 100);
+  if (!nick || !key) throw new Error('批次取消指令无效');
+  const releaseLock = await acquireAdviceCancellationWriteLock(
+    nick,
+    storage,
+  );
+  try {
+    const requestedAt = Number(canceledAt) || Date.now();
+    const path = adviceBatchCancellationPathOf(nick, key);
+    let command = await storage.readJson(path).catch(() => null);
+    if (!command || command.batchId !== key) {
+      command = {
+        schemaVersion: 'advice-batch-cancellation.v1',
+        batchId: key,
+        canceledAt: requestedAt,
+        updatedAt: requestedAt,
+      };
+      await writeAdviceRuntimeObject(path, command, storage);
+    }
+    const latestPath = adviceBatchCancellationLatestPathOf(nick);
+    const latest = await storage.readJson(latestPath).catch(() => null);
+    const batches = {
+      ...(latest?.batchCancellations || {}),
+      [key]: Number(command.canceledAt) || requestedAt,
+    };
+    const trimmedBatches = Object.fromEntries(
+      Object.entries(batches)
+        .sort((left, right) => Number(right[1]) - Number(left[1]))
+        .slice(0, 50),
+    );
+    const latestMarker = {
+      schemaVersion: 'advice-batch-cancellation-index.v1',
+      cancelBefore: Math.max(
+        Number(latest?.cancelBefore || latest?.canceledAt) || 0,
+        Number(command.canceledAt) || requestedAt,
+      ),
+      batchCancellations: trimmedBatches,
+      updatedAt: Math.max(
+        Date.now(),
+        Number(latest?.updatedAt) + 1 || 0,
+      ),
+    };
+    await writeAdviceRuntimeObject(
+      latestPath,
+      latestMarker,
+      storage,
+    );
+    return command;
+  } finally {
+    await releaseLock();
+  }
+}
+
 export async function writeAdviceRuntimeUpdate(
   nick,
   update,
@@ -710,6 +946,7 @@ async function applyAdviceRuntime(
   const state = await storage.readJson(adviceRuntimeStatePathOf(nick))
     .catch(() => null);
   mergeAdviceRuntimeState(account, state);
+  await applyStoredAdviceBatchCancellation(account, nick, storage);
   if (!includeAdviceUpdates) return account;
   const cursor = Math.max(0, Number(runtimeSince) || 0);
   const { blobs } = await storage.list({
@@ -881,6 +1118,10 @@ function accountWriteLockPath(nick) {
   return `${prefixOf(nick)}write.lock`;
 }
 
+function adviceCancellationWriteLockPath(nick) {
+  return `${prefixOf(nick)}runtime/cancellations/write.lock`;
+}
+
 function accountWriteConflict() {
   const conflict = new Error('OSS 权威快照已被其他实例更新');
   conflict.code = 'OSS_WRITE_CONFLICT';
@@ -888,12 +1129,11 @@ function accountWriteConflict() {
   return conflict;
 }
 
-async function acquireAccountWriteLock(
-  nick,
+async function acquireObjectWriteLock(
+  pathname,
   storage,
   now = Date.now(),
 ) {
-  const pathname = accountWriteLockPath(nick);
   const owner = randomUUID();
   const payload = JSON.stringify({
     owner,
@@ -934,6 +1174,30 @@ async function acquireAccountWriteLock(
     }
   }
   throw accountWriteConflict();
+}
+
+async function acquireAccountWriteLock(
+  nick,
+  storage,
+  now = Date.now(),
+) {
+  return acquireObjectWriteLock(
+    accountWriteLockPath(nick),
+    storage,
+    now,
+  );
+}
+
+async function acquireAdviceCancellationWriteLock(
+  nick,
+  storage,
+  now = Date.now(),
+) {
+  return acquireObjectWriteLock(
+    adviceCancellationWriteLockPath(nick),
+    storage,
+    now,
+  );
 }
 
 export async function writeAccount(

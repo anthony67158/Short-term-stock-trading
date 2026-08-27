@@ -164,7 +164,10 @@ async function sendCancellationRequest(creds, targets, batchId = '') {
   }
 }
 
-async function sendBatchCancellationRequest(creds, batchId) {
+async function sendBatchCancellationRequest(
+  creds,
+  batchId,
+) {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 5000)
   try {
@@ -207,51 +210,15 @@ export async function cancelServerAdviceBatch(batchId, items = []) {
     }
   }
   const targets = activeAdviceCancellationTargets(items)
-  const batchTargets = targets.filter(
-    (target) => !target.batchId || target.batchId === key,
-  )
-  const outsideTargets = targets.filter(
-    (target) => target.batchId && target.batchId !== key,
-  )
   kickServerAdviceStatusSync()
-  const [batchResult, outsideResult] = await Promise.all([
-    confirmAdviceBatchCancellation({
-      batchId: key,
-      targets: batchTargets,
-      attempts: 4,
-      delayMs: 350,
-      send: () => sendBatchCancellationRequest(creds, key),
-      readStatus: fetchServerAdviceStatus,
-    }),
-    outsideTargets.length
-      ? confirmAdviceCancellation({
-          targets: outsideTargets,
-          attempts: 4,
-          delayMs: 350,
-          send: (currentTargets) =>
-            sendCancellationRequest(creds, currentTargets),
-          readStatus: fetchServerAdviceStatus,
-        })
-      : Promise.resolve({
-          ok: true,
-          confirmed: true,
-          canceled: 0,
-          progress: null,
-        }),
-  ])
-  const result = {
-    ok: batchResult.ok && outsideResult.ok,
-    confirmed:
-      batchResult.confirmed && outsideResult.confirmed,
-    canceled:
-      Number(batchResult.canceled || 0)
-      + Number(outsideResult.canceled || 0),
+  const result = await confirmAdviceBatchCancellation({
     batchId: key,
-    progress: outsideResult.progress || batchResult.progress || null,
-    error: [batchResult.error, outsideResult.error]
-      .filter(Boolean)
-      .join('；'),
-  }
+    targets,
+    attempts: 4,
+    delayMs: 350,
+    send: () => sendBatchCancellationRequest(creds, key),
+    readStatus: fetchServerAdviceStatus,
+  })
   if (result.progress && statusConsumer) {
     try { statusConsumer(result.progress) } catch { /* ignore */ }
   }

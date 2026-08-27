@@ -245,7 +245,7 @@ export function mergeAdviceBatchCancellations(
   }
   gcAdviceBatchCancellations(target, now);
   let canceled = 0;
-  for (const job of allAdviceJobs(target)) {
+  for (const job of Object.values(jobsOf(target))) {
     if (
       isActive(job)
       && job.batchId
@@ -627,11 +627,26 @@ export function cancelJob(
 }
 
 // 取消全部活跃任务
-export function cancelAll(data, now = Date.now(), batchId = '') {
+export function cancelAll(
+  data,
+  now = Date.now(),
+  batchId = '',
+  cancelBefore = now,
+) {
   const jobs = jobsOf(data);
+  const cutoff = Math.min(
+    Number(cancelBefore) || Number(now) || Date.now(),
+    Number(now) || Date.now(),
+  );
+  const cancellable = Object.values(jobs).filter((job) =>
+    isActive(job)
+    && (
+      String(job.batchId || '') === String(batchId || '')
+      || Number(job.at || job.startedAt || 0) <= cutoff
+    )
+  );
   const canceledBatchIds = new Set(
-    Object.values(jobs)
-      .filter(isActive)
+    cancellable
       .map((job) => String(job?.batchId || '').trim())
       .filter(Boolean),
   );
@@ -646,8 +661,17 @@ export function cancelAll(data, now = Date.now(), batchId = '') {
     markAdviceBatchCanceled(data, canceledBatchId, now);
   }
   let n = 0;
-  for (const code of Object.keys(jobs)) {
-    if (isActive(jobs[code]) && cancelJob(data, code, now)) n++;
+  for (const job of cancellable) {
+    if (
+      cancelJob(
+        data,
+        job.code,
+        now,
+        '',
+        job.id,
+        'advisor',
+      )
+    ) n++;
   }
   return n;
 }

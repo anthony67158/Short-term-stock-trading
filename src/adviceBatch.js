@@ -58,6 +58,7 @@ const state = {
   _submissionPromise: null,
   _cancelingCodes: new Set(),
   _cancelAllRequested: false,
+  _cancelAllBatchId: '',
   _canceledBatchIds: new Set(),
   _cancelBatchPromise: null,
   _cancelOnePromises: new Map(),
@@ -122,6 +123,7 @@ function prepareBatchCancellation() {
   const targets = activeAdviceCancellationTargets(state.items)
   for (const target of targets) state._cancelingCodes.add(target.code)
   state._cancelAllRequested = true
+  state._cancelAllBatchId = state.batchId
   rememberCanceledBatch(state.batchId)
   const canceling = beginAdviceCancellation(state.items)
   state.items = canceling.items
@@ -152,18 +154,11 @@ async function cancelBatchInternal() {
   const prepared = prepareBatchCancellation()
   if (state.serverMode) {
     const batchId = state.batchId
-    const pendingSubmission = state._submissionPromise
-    if (pendingSubmission) {
-      const itemSnapshot = state.items.map((item) => ({ ...item }))
-      void pendingSubmission.finally(() => {
-        if (!state._canceledBatchIds.has(batchId)) return
-        void cancelServerAdviceBatch(batchId, itemSnapshot)
-      })
-    }
     const result = await cancelServerAdviceBatch(
       batchId,
       state.items,
     )
+    if (state.batchId !== batchId) return result
     if (result.progress) applyCloudBatch(result.progress, true)
     if (result.confirmed) {
       state.items = state.items.map((item) =>
@@ -181,6 +176,7 @@ async function cancelBatchInternal() {
       state.finishedAt = Date.now()
       state._cancelingCodes.clear()
       state._cancelAllRequested = false
+      state._cancelAllBatchId = ''
       state.cancelRequested = false
       state.cancelError = ''
       notify()
@@ -362,6 +358,7 @@ export function applyCloudBatch(bp, force = false) {
   state.serverMode = true
   state.cancelRequested = (
     state._cancelAllRequested
+    && state._cancelAllBatchId === cloudBatchId
     && !state.cancelError
   )
   if (!state._cancelAllRequested) state.cancelError = ''
@@ -389,6 +386,7 @@ export function applyCloudBatch(bp, force = false) {
   for (const item of state.items) {
     if (
       state._cancelingCodes.has(String(item.code))
+      && state._cancelAllBatchId === cloudBatchId
       && ['pending', 'queued', 'running'].includes(item.status)
     ) {
       item.cancelPreviousStatus = item.status
@@ -479,6 +477,7 @@ export async function runBatchAdvice(codes, quoteMap, opts = {}) {
     state.cancelError = ''
     state._cancelingCodes.clear()
     state._cancelAllRequested = false
+    state._cancelAllBatchId = ''
     state.batchId = batchId
     state.deepMode = generation.deepMode
     state.total = uniq.length
@@ -558,6 +557,7 @@ export async function runBatchAdvice(codes, quoteMap, opts = {}) {
   state.cancelError = ''
   state._cancelingCodes.clear()
   state._cancelAllRequested = false
+  state._cancelAllBatchId = ''
   state.batchId = `local_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
   state.deepMode = generation.deepMode
   state.total = uniq.length
@@ -676,6 +676,7 @@ export async function runBatchAdvice(codes, quoteMap, opts = {}) {
     state.running = false
     state.cancelRequested = false
     state._cancelAllRequested = false
+    state._cancelAllBatchId = ''
     state._cancelingCodes.clear()
     state.finishedAt = Date.now()
     notify()

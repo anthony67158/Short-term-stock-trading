@@ -10,6 +10,7 @@ import {
   listAllAccounts,
   readAccount,
   sha,
+  writeAdviceBatchCancellation,
   writeAdviceRuntimeState,
   writeAdviceRuntimeUpdate,
   writeAccount,
@@ -295,6 +296,179 @@ test('单股建议完成后通过独立OSS小对象立即进入跨设备增量�
     (await listAllAccounts(storage)).map((item) => item.nick),
     ['增量账号'],
   )
+})
+
+test('全部停止指令不会被迟到的Worker运行快照覆盖', async () => {
+  const storage = fakeStorage()
+  const nick = '批量取消并发账号'
+  const batchId = 'batch-cancel-32'
+  const jobs = Object.fromEntries(
+    Array.from({ length: 32 }, (_, index) => {
+      const code = String(600000 + index)
+      return [code, {
+        id: `job-${index}`,
+        code,
+        batchId,
+        status: 'running',
+        at: 1000 + index,
+        progressAt: 2000 + index,
+      }]
+    }),
+  )
+  const items = Object.values(jobs).map((job) => ({
+    code: job.code,
+    jobId: job.id,
+    batchId,
+    status: 'running',
+  }))
+  const account = await writeAccount({
+    nick,
+    pwHash: 'hash',
+    createdAt: 1,
+    data: {
+      plan: [],
+      holding: [],
+      closed: [],
+      jobs,
+      activeAdviceBatchId: batchId,
+    },
+  }, storage, {
+    history: false,
+    verify: false,
+  })
+  const stateAt = account.updatedAt + 10
+  const activeState = {
+    schemaVersion: 'advice-runtime-state.v2',
+    updatedAt: stateAt,
+    jobs,
+    activeAdviceBatchId: batchId,
+    batchProgress: {
+      batchId,
+      running: true,
+      total: 32,
+      done: 0,
+      skipped: 0,
+      at: stateAt,
+      items,
+    },
+  }
+
+  await writeAdviceRuntimeState(nick, activeState, storage)
+  const cancellation = await writeAdviceBatchCancellation(nick, {
+    batchId,
+    canceledAt: stateAt + 10,
+  }, storage)
+  const retriedCancellation = await writeAdviceBatchCancellation(nick, {
+    batchId,
+    canceledAt: stateAt + 50,
+  }, storage)
+  assert.equal(
+    retriedCancellation.canceledAt,
+    cancellation.canceledAt,
+  )
+  await writeAdviceRuntimeState(nick, {
+    ...activeState,
+    updatedAt: stateAt + 20,
+    batchProgress: {
+      ...activeState.batchProgress,
+      at: stateAt + 20,
+    },
+  }, storage)
+  await writeAdviceRuntimeUpdate(nick, {
+    schemaVersion: 'advice-runtime-update.v2',
+    code: '600000',
+    role: 'advisor',
+    updatedAt: stateAt + 30,
+    advice: {
+      at: stateAt + 30,
+      advice: { action: '买入', title: '取消后不得发布' },
+    },
+    job: {
+      ...jobs['600000'],
+      status: 'done',
+      finishedAt: stateAt + 30,
+      progressAt: stateAt + 30,
+    },
+  }, storage)
+
+  const hydrated = await readAccount(nick, storage)
+  assert.equal(
+    Object.values(hydrated.data.jobs)
+      .every((job) => job.status === 'canceled'),
+    true,
+  )
+  assert.equal(hydrated.data.batchProgress.running, false)
+  assert.equal(hydrated.data.batchProgress.done, 32)
+  assert.equal(hydrated.data.batchProgress.skipped, 32)
+  assert.equal(hydrated.data.advice?.['600000'], undefined)
+
+  const doneJobs = Object.fromEntries(
+    Object.entries(jobs).map(([code, job]) => [code, {
+      ...job,
+      status: 'done',
+      finishedAt: stateAt + 40,
+      progressAt: stateAt + 40,
+    }]),
+  )
+  await writeAdviceRuntimeState(nick, {
+    ...activeState,
+    updatedAt: stateAt + 40,
+    jobs: doneJobs,
+    batchProgress: {
+      ...activeState.batchProgress,
+      running: false,
+      done: 32,
+      at: stateAt + 40,
+      items: activeState.batchProgress.items.map((item) => ({
+        ...item,
+        status: 'ok',
+      })),
+    },
+  }, storage)
+  const terminalHydrated = await readAccount(nick, storage, {
+    includeAdviceUpdates: false,
+  })
+  assert.equal(
+    Object.values(terminalHydrated.data.jobs)
+      .every((job) => job.status === 'canceled'),
+    true,
+  )
+})
+
+test('并发全部停止通过原子锁避免取消截止线相互覆盖', async () => {
+  const storage = fakeStorage()
+  const nick = '并发取消锁账号'
+  const requests = [
+    { batchId: 'batch-a', canceledAt: 1000 },
+    { batchId: 'batch-b', canceledAt: 2000 },
+  ]
+  const results = await Promise.allSettled(
+    requests.map((request) =>
+      writeAdviceBatchCancellation(nick, request, storage)
+    ),
+  )
+  const rejectedIndex = results.findIndex(
+    (result) => result.status === 'rejected',
+  )
+  assert.equal(
+    results.filter((result) => result.status === 'fulfilled').length,
+    1,
+  )
+  assert.notEqual(rejectedIndex, -1)
+  await writeAdviceBatchCancellation(
+    nick,
+    requests[rejectedIndex],
+    storage,
+  )
+
+  const latest = storage.objects.get(
+    `accounts/${sha(`u:${nick}`)}/runtime/cancellations/latest.json`,
+  )?.value
+  assert.equal(latest.cancelBefore, 2000)
+  assert.deepEqual(latest.batchCancellations, {
+    'batch-a': 1000,
+    'batch-b': 2000,
+  })
 })
 
 test('同股advisor与review增量使用独立OSS对象并分别合并', async () => {
