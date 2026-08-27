@@ -122,6 +122,31 @@ test('试仓档位强制模型输出5%以内并要求人工确认', () => {
   assert.match(prompt, /盈亏比至少1.8:1/)
 })
 
+test('正式进攻档位按主攻路线给出积极仓位而不等待全条件同向', () => {
+  const prompt = buildUserPrompt('buy_advice', {
+    code: '600000',
+    shortHorizonTactical: {
+      schemaVersion: 'short-horizon-tactical.v1',
+      timing: { state: 'READY' },
+      actionPolicy: {
+        schemaVersion: 'short-horizon-action-policy.v1',
+        allowedActions: ['BUY', 'WATCH'],
+        executionOpen: true,
+        canIncreaseRisk: true,
+        riskTier: 'FULL',
+        signalScore: 4,
+        entryRoute: 'QUANT_MOMENTUM',
+        positionBandPct: { min: 10, max: 20 },
+      },
+    },
+  })
+
+  assert.match(prompt, /量化强势路线，共振4分/)
+  assert.match(prompt, /不要求量化、资金、板块、技术全部同时同向/)
+  assert.match(prompt, /操作后单票目标仓位为10%~20%/)
+  assert.match(prompt, /优先给出立即买入或加仓/)
+})
+
 test('弱市逆势试仓提示词使用3%仓位和2.2比1赔率', () => {
   const prompt = buildUserPrompt('buy_advice', {
     code: '600000',

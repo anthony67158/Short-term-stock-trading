@@ -374,6 +374,19 @@ function tacticalActionPolicyRule(tactical = {}) {
     && Number(policy.maxPositionPct) > 0
     ? Math.min(5, Number(policy.maxPositionPct))
     : 5
+  const entryRouteLabel = {
+    DUAL_CORE: '量化与资金双核共振',
+    QUANT_MOMENTUM: '量化强势路线',
+    FLOW_LEADERSHIP: '资金领涨路线',
+  }[policy.entryRoute] || '多维共振路线'
+  const positionBand = policy.positionBandPct
+  const fullPositionRule = (
+    policy.riskTier === 'FULL'
+    && Number(positionBand?.min) > 0
+    && Number(positionBand?.max) >= Number(positionBand?.min)
+  )
+    ? `在账户容量、单笔止损预算和总仓上限允许时，操作后单票目标仓位为${positionBand.min}%~${positionBand.max}%；容量不足则按服务端可执行手数，不得为凑仓位放宽止损。`
+    : ''
   const nextPlan = policy.nextSessionPlan
   const nextSessionLabel = {
     AFTERNOON: '下午盘中',
@@ -401,7 +414,7 @@ function tacticalActionPolicyRule(tactical = {}) {
     : policy.riskTier === 'PROBE'
       ? `本轮最多只能输出“小仓试错/小仓加仓”，仓位不得超过总资产${probeLimit}%，必须人工确认，禁止写成立即重仓或确定性买点。`
       : policy.riskTier === 'FULL'
-        ? '新增仓位条件已全部通过，但仍需比较赔率后决定是否操作。'
+        ? `正式进攻通道已通过：${entryRouteLabel}${Number.isFinite(Number(policy.signalScore)) ? `，共振${policy.signalScore}分` : ''}。不要求量化、资金、板块、技术全部同时同向；只要当前主攻路线仍成立、赔率合格，就应优先给出立即买入或加仓。${fullPositionRule}`
         : `当前新增仓位未通过${reasons.length ? `：${reasons.join('；')}` : ''}。`
   const exactEntryRule = (
     policy.executionOpen !== false

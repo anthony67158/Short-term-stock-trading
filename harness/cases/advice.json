@@ -413,6 +413,111 @@
     },
     {
       "schemaVersion": "harness-case.v1",
+      "id": "advice-quant-momentum-route-with-flat-flow",
+      "adapter": "advice",
+      "tags": ["advice", "short-horizon", "aggressive-entry"],
+      "input": {
+        "compileDecisionPlan": true,
+        "now": 1787279400000,
+        "mode": "buy_advice",
+        "payload": {
+          "code": "600003",
+          "name": "量化强势样本",
+          "todayQuote": {
+            "price": 10,
+            "pct": 2,
+            "low": 9.8,
+            "high": 10.2,
+            "turnover": 4,
+            "volRatio": 2,
+            "amount": 200000000,
+            "limitDownPrice": 9,
+            "limitUpPrice": 13,
+            "live": true,
+            "phase": "上午盘中"
+          },
+          "marketEnv": {
+            "schemaVersion": "market-regime.v1",
+            "regime": "TREND_STRONG",
+            "label": "强势趋势",
+            "score": 76,
+            "dataQuality": "COMPLETE",
+            "riskMultiplier": 1,
+            "allowRiskIncrease": true,
+            "targetPositionPct": {
+              "min": 50,
+              "max": 70
+            }
+          },
+          "sectorOpportunity": {
+            "matched": true,
+            "sector": {
+              "name": "测试板块",
+              "actionability": "可买"
+            },
+            "stock": {
+              "roleLabel": "前排龙头",
+              "score": 68
+            }
+          },
+          "quant": {
+            "score": 72,
+            "forecast": {
+              "direction": "看涨",
+              "upProb": 62,
+              "expRet": 2.4
+            },
+            "highConfSignal": {
+              "fired": true
+            }
+          },
+          "stockFund": {
+            "mainNetYi": 0,
+            "retailNetYi": 0
+          },
+          "account": {
+            "cash": 100000,
+            "totalAssets": 100000,
+            "position": 0,
+            "stockWeight": 0
+          }
+        },
+        "evidenceSnapshot": {
+          "snapshotId": "evidence.quant-momentum",
+          "asOf": "2026-08-21T02:30:00.000Z",
+          "freshness": {
+            "status": "LIVE",
+            "missingSources": []
+          }
+        },
+        "result": {
+          "action": "立即买入",
+          "tier": "now",
+          "buyPrice": 10,
+          "stopPrice": 9,
+          "targetPrice": 12,
+          "planQty": 10,
+          "planAmount": 10000,
+          "actionPlan": "量化强势路线确认后立即买入10手",
+          "invalidation": "跌破9元离场"
+        }
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "expectedValid": true,
+        "expectedAction": "立即买入",
+        "expectedQty": 10,
+        "expectedDecisionActionability": "READY",
+        "expectedDecisionAction": "BUY",
+        "expectedDecisionManualConfirmation": false,
+        "expectedDecisionMaxLots": 20,
+        "requiredIssueIncludes": [],
+        "forbiddenIssueIncludes": [],
+        "forbiddenText": []
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
       "id": "advice-short-horizon-policy-blocks-chasing",
       "adapter": "advice",
       "tags": ["advice", "short-horizon", "action-policy"],
