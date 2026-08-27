@@ -138,6 +138,7 @@ test('快速和深度军师事实合同显式携带完整技术面', () => {
   assert.match(deepPrompt, /\"ma20\":32\.803/)
   assert.match(deepPrompt, /\"j\":75\.9/)
   assert.match(deepPrompt, /techNote必须引用至少两类/)
-  assert.equal(policy.riskTier, 'PROBE')
+  assert.equal(policy.riskTier, 'FULL')
+  assert.equal(policy.entryRoute, 'FLOW_LEADERSHIP')
   assert.match(policy.confirmations.join('；'), /技术面多头共振/)
 })
