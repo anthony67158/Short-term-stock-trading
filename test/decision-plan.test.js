@@ -8,6 +8,7 @@ import {
 } from '../shared/decisionPlan.js'
 import { adviceCompleteness } from '../shared/adviceBatchPolicy.js'
 import { buildAdvicePriceContract } from '../shared/advicePriceContract.js'
+import { buildShortHorizonTactical } from '../shared/shortHorizonTactical.js'
 
 const now = Date.parse('2026-08-21T02:30:00.000Z')
 const snapshot = {
@@ -87,6 +88,50 @@ test('证据和风险条件满足时买入计划直接进入可执行状态', ()
   assert.equal(plan.actionPolicy.overridden, false)
   assert.equal(plan.strategy, undefined)
   assert.equal(plan.strategyRoute, undefined)
+})
+
+test('条件试仓到价后最终计划可升级为5%小仓试错而不是再次观望', () => {
+  const tactical = buildShortHorizonTactical(payload, { now })
+  tactical.timing = {
+    ...tactical.timing,
+    state: 'WAIT_PULLBACK',
+  }
+  const plan = compileDecisionPlan({
+    mode: 'buy_advice',
+    advice: {
+      action: '小仓试错',
+      tier: 'probe',
+      buyPrice: 10,
+      stopPrice: 9,
+      targetPrice: 12,
+      planQtyNum: 10,
+      actionPlan: '按10元小仓买入，跌破9元退出',
+    },
+    payload: {
+      ...payload,
+      shortHorizonTactical: tactical,
+      reviewEvent: {
+        kind: 'price-review',
+        reviewMode: 'ENTRY_CONFIRMATION',
+        plannedAction: 'PROBE',
+        directionApproved: true,
+        maxPositionPct: 5,
+        threshold: 10,
+        price: 10,
+      },
+    },
+    evidenceSnapshot: snapshot,
+    now,
+  })
+
+  assert.equal(plan.requestedAction, 'BUY')
+  assert.equal(plan.governedAction, 'BUY')
+  assert.equal(plan.action, 'BUY')
+  assert.equal(plan.actionability, 'READY')
+  assert.equal(plan.actionPolicy.riskTier, 'PROBE')
+  assert.equal(plan.actionPolicy.canIncreaseRisk, true)
+  assert.ok(plan.quantity.lots > 0)
+  assert.ok(plan.quantity.lots <= 5)
 })
 
 test('模型建议追高但短线时机过热时确定性改为观望', () => {

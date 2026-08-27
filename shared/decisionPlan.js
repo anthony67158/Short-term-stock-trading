@@ -299,6 +299,7 @@ export function compileDecisionPlan({
     mode,
     tactical,
     requestedAction,
+    reviewEvent: payload.reviewEvent,
   })
   const governedAction = actionPolicy.effectiveAction
     || requestedAction

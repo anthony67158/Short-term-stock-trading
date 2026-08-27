@@ -434,11 +434,20 @@ function tacticalReviewEventRule(reviewEvent = {}) {
   if (
     reviewEvent.reviewMode === 'ENTRY_CONFIRMATION'
     && reviewEvent.directionApproved === true
-    && ['PROBE', 'BUY'].includes(reviewEvent.plannedAction)
+    && ['PROBE', 'BUY', 'PROBE_ADD', 'ADD'].includes(
+      reviewEvent.plannedAction,
+    )
   ) {
     const maxPosition = Number(reviewEvent.maxPositionPct)
-    return '【到价复核语义】这是方向已通过的条件试仓复核，不是从零重新决定方向。'
-      + '若当前分时、量价、资金、风险和赔率仍成立，必须转为小仓试错并输出具体buyPrice、stopPrice、targetPrice和planQty'
+    const holdingAction = ['PROBE_ADD', 'ADD'].includes(
+      reviewEvent.plannedAction,
+    )
+    return `【到价复核语义】这是方向已通过的条件${holdingAction ? '加仓' : '试仓'}复核，不是从零重新决定方向。`
+      + (
+        holdingAction
+          ? '若当前分时、量价、资金、风险和赔率仍成立，必须转为明确加仓并输出具体addPrice、stopPrice、targetPrice和opQty'
+          : '若当前分时、量价、资金、风险和赔率仍成立，必须转为小仓试错并输出具体buyPrice、stopPrice、targetPrice和planQty'
+      )
       + (
         Number.isFinite(maxPosition) && maxPosition > 0
           ? `，仓位不得超过${Math.min(5, maxPosition)}%`

@@ -279,6 +279,143 @@ test('试仓方向已通过但时机未到时只能进入条件试仓而不是�
   })
 })
 
+test('条件试仓到价后沿用已通过方向并进入小仓试错而不是生成新观察价', () => {
+  const tactical = buildShortHorizonTactical(payload())
+  tactical.timing = {
+    ...tactical.timing,
+    state: 'WAIT_PULLBACK',
+  }
+  const policy = deriveShortHorizonActionPolicy({
+    mode: 'buy_advice',
+    tactical,
+    requestedAction: 'BUY',
+    reviewEvent: {
+      kind: 'price-review',
+      reviewMode: 'ENTRY_CONFIRMATION',
+      plannedAction: 'PROBE',
+      directionApproved: true,
+      maxPositionPct: 5,
+      threshold: 99,
+      price: 99,
+    },
+  })
+
+  assert.equal(policy.canIncreaseRisk, true)
+  assert.equal(policy.riskTier, 'PROBE')
+  assert.deepEqual(policy.allowedActions, ['BUY', 'WATCH'])
+  assert.equal(policy.preferredAction, 'BUY')
+  assert.equal(policy.effectiveAction, 'BUY')
+  assert.equal(policy.entryIntent.state, 'READY_PROBE')
+  assert.equal(policy.entryIntent.reviewMode, 'EXECUTION')
+  assert.equal(policy.nextSessionPlan, null)
+})
+
+test('普通观望到价后按最新证据重新判方向而不是生成下一观察价', () => {
+  const tactical = buildShortHorizonTactical(payload())
+  tactical.timing = {
+    ...tactical.timing,
+    state: 'WAIT_PULLBACK',
+  }
+  const policy = deriveShortHorizonActionPolicy({
+    mode: 'buy_advice',
+    tactical,
+    requestedAction: 'BUY',
+    reviewEvent: {
+      kind: 'price-review',
+      reviewMode: 'REASSESSMENT',
+      plannedAction: 'WATCH',
+      directionApproved: false,
+      threshold: 99,
+      price: 99,
+    },
+  })
+
+  assert.equal(policy.canIncreaseRisk, true)
+  assert.equal(policy.riskTier, 'PROBE')
+  assert.deepEqual(policy.allowedActions, ['BUY', 'WATCH'])
+  assert.equal(policy.effectiveAction, 'BUY')
+  assert.equal(policy.entryIntent.state, 'READY_PROBE')
+})
+
+test('缺少真实触发价格的复核事件不能跳过时机确认', () => {
+  const tactical = buildShortHorizonTactical(payload())
+  tactical.timing = {
+    ...tactical.timing,
+    state: 'WAIT_PULLBACK',
+  }
+  const policy = deriveShortHorizonActionPolicy({
+    mode: 'buy_advice',
+    tactical,
+    requestedAction: 'BUY',
+    reviewEvent: {
+      kind: 'price-review',
+      reviewMode: 'ENTRY_CONFIRMATION',
+      plannedAction: 'PROBE',
+      directionApproved: true,
+    },
+  })
+
+  assert.equal(policy.canIncreaseRisk, false)
+  assert.deepEqual(policy.allowedActions, ['WATCH'])
+  assert.equal(policy.effectiveAction, 'WATCH')
+})
+
+test('条件加仓到价后可进入加仓评估且试仓上限仍为5%', () => {
+  const tactical = buildShortHorizonTactical(payload())
+  tactical.timing = {
+    ...tactical.timing,
+    state: 'WAIT_BREAKOUT',
+  }
+  const policy = deriveShortHorizonActionPolicy({
+    mode: 'hold_advice',
+    tactical,
+    requestedAction: 'ADD',
+    reviewEvent: {
+      kind: 'price-review',
+      reviewMode: 'ENTRY_CONFIRMATION',
+      plannedAction: 'PROBE_ADD',
+      directionApproved: true,
+      maxPositionPct: 5,
+      threshold: 101,
+      price: 101,
+    },
+  })
+
+  assert.equal(policy.canIncreaseRisk, true)
+  assert.equal(policy.riskTier, 'PROBE')
+  assert.equal(policy.allowedActions[0], 'ADD')
+  assert.equal(policy.effectiveAction, 'ADD')
+  assert.equal(policy.maxPositionPct, 5)
+})
+
+test('到价不能绕过派发风险等当前硬阻断条件', () => {
+  const tactical = buildShortHorizonTactical(payload({
+    stockFund: {
+      mainNetYi: -1.5,
+      retailNetYi: 1.1,
+    },
+  }))
+  const policy = deriveShortHorizonActionPolicy({
+    mode: 'buy_advice',
+    tactical,
+    requestedAction: 'BUY',
+    reviewEvent: {
+      kind: 'price-review',
+      reviewMode: 'ENTRY_CONFIRMATION',
+      plannedAction: 'PROBE',
+      directionApproved: true,
+      maxPositionPct: 5,
+      threshold: 100,
+      price: 100,
+    },
+  })
+
+  assert.equal(policy.canIncreaseRisk, false)
+  assert.deepEqual(policy.allowedActions, ['WATCH'])
+  assert.equal(policy.effectiveAction, 'WATCH')
+  assert.match(policy.reasons.join('；'), /派发风险/)
+})
+
 test('成交额证据明确区分数据缺失与低于流动性门槛', () => {
   const missing = buildShortHorizonTactical(payload())
   const limited = buildShortHorizonTactical(payload({

@@ -629,6 +629,7 @@ export function deriveShortHorizonActionPolicy({
   mode = '',
   tactical = null,
   requestedAction = '',
+  reviewEvent = null,
 } = {}) {
   const source = tactical && typeof tactical === 'object'
     ? tactical
@@ -639,8 +640,38 @@ export function deriveShortHorizonActionPolicy({
     'MORNING',
     'AFTERNOON',
   ].includes(source.market?.phase)
-  const timingReady = source.timing?.state === 'READY'
-  const directionApproved = assessment.riskTier !== 'NONE'
+  const plannedAction = text(reviewEvent?.plannedAction, 30)
+  const priceReviewReached = (
+    reviewEvent?.kind === 'price-review'
+    && ['ENTRY_CONFIRMATION', 'REASSESSMENT'].includes(
+      reviewEvent?.reviewMode,
+    )
+    && finite(reviewEvent?.threshold) > 0
+    && finite(reviewEvent?.price) > 0
+  )
+  const entryConfirmation = (
+    priceReviewReached
+    && reviewEvent?.reviewMode === 'ENTRY_CONFIRMATION'
+    && reviewEvent?.directionApproved === true
+    && (
+      mode === 'buy_advice'
+        ? ['PROBE', 'BUY'].includes(plannedAction)
+        : ['hold_advice', 'review'].includes(mode)
+          && ['PROBE_ADD', 'ADD'].includes(plannedAction)
+    )
+  )
+  const riskTier = (
+    entryConfirmation
+    && assessment.riskTier !== 'NONE'
+    && ['PROBE', 'PROBE_ADD'].includes(plannedAction)
+  )
+    ? 'PROBE'
+    : assessment.riskTier
+  const timingReady = (
+    source.timing?.state === 'READY'
+    || priceReviewReached
+  )
+  const directionApproved = riskTier !== 'NONE'
   const canIncreaseRisk = (
     directionApproved
     && executionOpen
@@ -664,28 +695,28 @@ export function deriveShortHorizonActionPolicy({
             FULL: 'ADD',
           }
         : {}
-  )[assessment.riskTier] || null
+  )[riskTier] || null
   const entryIntent = mode === 'buy_advice'
     ? {
         state: !directionApproved
           ? 'WATCH_ONLY'
           : canIncreaseRisk
-            ? assessment.riskTier === 'PROBE'
+            ? riskTier === 'PROBE'
               ? 'READY_PROBE'
               : 'READY_BUY'
-            : assessment.riskTier === 'PROBE'
+            : riskTier === 'PROBE'
               ? 'CONDITIONAL_PROBE'
               : 'CONDITIONAL_BUY',
         action: !directionApproved
           ? 'WATCH'
-          : assessment.riskTier === 'PROBE' ? 'PROBE' : 'BUY',
+          : riskTier === 'PROBE' ? 'PROBE' : 'BUY',
         actionLabel: !directionApproved
           ? '观望'
           : canIncreaseRisk
-            ? assessment.riskTier === 'PROBE'
+            ? riskTier === 'PROBE'
               ? '小仓试错'
               : '立即买入'
-            : assessment.riskTier === 'PROBE'
+            : riskTier === 'PROBE'
               ? '条件试仓'
               : '条件买入',
         reviewMode: !directionApproved
@@ -694,15 +725,15 @@ export function deriveShortHorizonActionPolicy({
         directionApproved,
         exactPriceRequired: canIncreaseRisk,
         maxPositionPct:
-          assessment.riskTier === 'PROBE' ? 5 : null,
+          riskTier === 'PROBE' ? 5 : null,
         manualConfirmationOnly:
-          assessment.riskTier === 'PROBE',
+          riskTier === 'PROBE',
       }
     : null
   const nextSessionPlan = (
     nextSessionAction
     && !executionOpen
-    && assessment.riskTier !== 'NONE'
+    && riskTier !== 'NONE'
   ) ? {
       action: nextSessionAction,
       actionLabel: {
@@ -712,7 +743,7 @@ export function deriveShortHorizonActionPolicy({
         BUY: '条件买入',
       }[nextSessionAction],
       decisionState:
-        assessment.riskTier === 'PROBE'
+        riskTier === 'PROBE'
           ? 'CONDITIONAL_PROBE'
           : 'CONDITIONAL_BUY',
       reviewMode: 'ENTRY_CONFIRMATION',
@@ -720,7 +751,7 @@ export function deriveShortHorizonActionPolicy({
       session: nextSession.session,
       sessionLabel: nextSession.sessionLabel,
       maxPositionPct:
-        assessment.riskTier === 'PROBE' ? 5 : null,
+        riskTier === 'PROBE' ? 5 : null,
       manualConfirmationOnly: true,
       requiresLiveReview: true,
       trigger: nextReviewTrigger,
@@ -775,9 +806,9 @@ export function deriveShortHorizonActionPolicy({
     preferredAction,
     canIncreaseRisk,
     executionOpen,
-    riskTier: assessment.riskTier,
-    maxPositionPct: assessment.riskTier === 'PROBE' ? 5 : null,
-    manualConfirmationOnly: assessment.riskTier === 'PROBE',
+    riskTier,
+    maxPositionPct: riskTier === 'PROBE' ? 5 : null,
+    manualConfirmationOnly: riskTier === 'PROBE',
     entryIntent,
     nextSessionPlan,
     confirmations: assessment.confirmations,
@@ -792,7 +823,7 @@ export function deriveShortHorizonActionPolicy({
           ? ['买入方向已通过，当前入场时机尚未确认']
           : []
       ),
-      ...(assessment.riskTier === 'FULL' ? [] : [
+      ...(riskTier === 'FULL' ? [] : [
           ...assessment.hardBlockers,
           ...assessment.fullRiskGaps,
         ]),
