@@ -186,7 +186,7 @@ test('账号内首要轮动只以机会成本摘要进入单股战术合同', ()
   })
 })
 
-test('只有量化资金时机与流动性同时确认才允许新增风险', () => {
+test('量化与资金双核共振时直接开放正式买入', () => {
   const tactical = buildShortHorizonTactical(payload({
     todayQuote: {
       ...payload().todayQuote,
@@ -204,6 +204,10 @@ test('只有量化资金时机与流动性同时确认才允许新增风险', ()
     SHORT_HORIZON_ACTION_POLICY_VERSION,
   )
   assert.equal(policy.canIncreaseRisk, true)
+  assert.equal(policy.riskTier, 'FULL')
+  assert.equal(policy.signalScore, 6)
+  assert.equal(policy.entryRoute, 'DUAL_CORE')
+  assert.deepEqual(policy.positionBandPct, { min: 10, max: 20 })
   assert.deepEqual(policy.allowedActions, ['BUY', 'WATCH'])
   assert.equal(policy.effectiveAction, 'BUY')
   assert.equal(policy.overridden, false)
@@ -218,6 +222,59 @@ test('只有量化资金时机与流动性同时确认才允许新增风险', ()
     maxPositionPct: null,
     manualConfirmationOnly: false,
   })
+})
+
+test('量化强势路线不再因当日主力未流入而错过正式买点', () => {
+  const tactical = buildShortHorizonTactical(payload({
+    todayQuote: {
+      ...payload().todayQuote,
+      amount: 2e8,
+    },
+    stockFund: {
+      mainNetYi: 0,
+      retailNetYi: 0,
+    },
+  }))
+  const policy = deriveShortHorizonActionPolicy({
+    mode: 'buy_advice',
+    tactical,
+    requestedAction: 'BUY',
+  })
+
+  assert.equal(policy.riskTier, 'FULL')
+  assert.equal(policy.canIncreaseRisk, true)
+  assert.equal(policy.signalScore, 4)
+  assert.equal(policy.entryRoute, 'QUANT_MOMENTUM')
+  assert.equal(policy.entryIntent.actionLabel, '立即买入')
+})
+
+test('资金领涨路线允许量化仅轻度偏多时直接正式买入', () => {
+  const tactical = buildShortHorizonTactical(payload({
+    todayQuote: {
+      ...payload().todayQuote,
+      amount: 2e8,
+    },
+    quant: {
+      score: 66,
+      forecast: {
+        direction: '震荡偏强',
+        upProb: 57,
+        expRet: 0.8,
+      },
+      highConfSignal: { fired: false },
+    },
+  }))
+  const policy = deriveShortHorizonActionPolicy({
+    mode: 'buy_advice',
+    tactical,
+    requestedAction: 'BUY',
+  })
+
+  assert.equal(policy.riskTier, 'FULL')
+  assert.equal(policy.canIncreaseRisk, true)
+  assert.equal(policy.signalScore, 5)
+  assert.equal(policy.entryRoute, 'FLOW_LEADERSHIP')
+  assert.equal(policy.entryIntent.actionLabel, '立即买入')
 })
 
 test('核心信号共振但成交额证据不足时只开放5%人工试仓', () => {
@@ -505,7 +562,7 @@ test('条件加仓到价后可进入加仓评估且试仓上限仍为5%', () => 
   assert.equal(policy.maxPositionPct, 5)
 })
 
-test('到价不能绕过派发风险等当前硬阻断条件', () => {
+test('派发迹象不再一票否决但只能降级为5%人工试仓', () => {
   const tactical = buildShortHorizonTactical(payload({
     stockFund: {
       mainNetYi: -1.5,
@@ -527,10 +584,12 @@ test('到价不能绕过派发风险等当前硬阻断条件', () => {
     },
   })
 
-  assert.equal(policy.canIncreaseRisk, false)
-  assert.deepEqual(policy.allowedActions, ['WATCH'])
-  assert.equal(policy.effectiveAction, 'WATCH')
-  assert.match(policy.reasons.join('；'), /派发风险/)
+  assert.equal(policy.canIncreaseRisk, true)
+  assert.equal(policy.riskTier, 'PROBE')
+  assert.equal(policy.maxPositionPct, 5)
+  assert.deepEqual(policy.allowedActions, ['BUY', 'WATCH'])
+  assert.equal(policy.effectiveAction, 'BUY')
+  assert.match(policy.reasons.join('；'), /小仓验证是否派发/)
 })
 
 test('成交额证据明确区分数据缺失与低于流动性门槛', () => {
@@ -547,6 +606,12 @@ test('成交额证据明确区分数据缺失与低于流动性门槛', () => {
       amount: 2_520_236_581.02,
     },
   }))
+  const thin = buildShortHorizonTactical(payload({
+    todayQuote: {
+      ...payload().todayQuote,
+      amount: 20_000_000,
+    },
+  }))
 
   assert.match(
     missing.stock.liquidityEvidence.reason,
@@ -555,6 +620,12 @@ test('成交额证据明确区分数据缺失与低于流动性门槛', () => {
   assert.match(
     limited.stock.liquidityEvidence.reason,
     /0\.8亿元.*低于.*1亿元/,
+  )
+  assert.equal(limited.stock.liquidity, 'LIMITED')
+  assert.equal(thin.stock.liquidity, 'THIN')
+  assert.match(
+    thin.stock.liquidityEvidence.reason,
+    /低于最低执行门槛0\.3亿元/,
   )
   assert.match(
     sufficient.stock.liquidityEvidence.reason,

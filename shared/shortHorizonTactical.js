@@ -233,6 +233,7 @@ function technicalEvidenceOf(payload = {}) {
 }
 
 const SHORT_TERM_AMOUNT_THRESHOLD = 1e8
+const MIN_EXECUTABLE_AMOUNT_THRESHOLD = 3e7
 
 function liquidityEvidenceOf(payload = {}) {
   const quoteAmount = finite(payload.todayQuote?.amount)
@@ -247,7 +248,9 @@ function liquidityEvidenceOf(payload = {}) {
     ? 'UNKNOWN'
     : selectedAmount >= SHORT_TERM_AMOUNT_THRESHOLD
       ? 'GOOD'
-      : 'LIMITED'
+      : selectedAmount >= MIN_EXECUTABLE_AMOUNT_THRESHOLD
+        ? 'LIMITED'
+        : 'THIN'
   const amountYi = selectedAmount == null
     ? null
     : rounded(selectedAmount / 1e8, 2)
@@ -258,7 +261,9 @@ function liquidityEvidenceOf(payload = {}) {
     ? '成交额数据未取得：行情接口未返回当日成交额，且没有可用的20日平均成交额'
     : state === 'GOOD'
       ? `${subject}${amountYi}亿元，达到短线流动性门槛1亿元`
-      : `${subject}${amountYi}亿元，低于短线流动性门槛1亿元`
+      : state === 'LIMITED'
+        ? `${subject}${amountYi}亿元，低于正式买入门槛1亿元，仅适合小仓试错`
+        : `${subject}${amountYi}亿元，低于最低执行门槛0.3亿元`
   return {
     state,
     source,
@@ -508,25 +513,33 @@ function riskIncreaseAssessment(tactical = {}) {
   } else if (weakMarketProbe) {
     fullRiskGaps.push('普通弱市只允许不超过3%的人工试错')
   }
-  if (
-    tactical.sector?.state === 'WEAKENING'
-    || tactical.sector?.stockRole === 'LAGGARD'
-  ) hardBlockers.push('板块或个股地位已经转弱')
+  const sectorHealthy = (
+    tactical.sector?.state !== 'WEAKENING'
+    && tactical.sector?.stockRole !== 'LAGGARD'
+  )
+  if (!sectorHealthy) {
+    fullRiskGaps.push('板块或个股地位偏弱，只允许小仓验证')
+  }
   if (tactical.flow?.relation === 'DISTRIBUTION') {
-    hardBlockers.push('主力流出且小单承接，存在派发风险')
+    fullRiskGaps.push('主力流出且小单承接，只允许小仓验证是否派发')
   }
   if (
     tactical.stock?.location === 'EXTENDED'
     || tactical.stock?.crowdingRisk === 'HIGH'
   ) hardBlockers.push('价格拥挤度过高')
-  if (tactical.stock?.liquidity === 'LIMITED') {
+  if (tactical.stock?.liquidity === 'THIN') {
     hardBlockers.push(
       tactical.stock?.liquidityEvidence?.reason
       || '流动性不足，不适合短线进出',
     )
+  } else if (tactical.stock?.liquidity === 'LIMITED') {
+    fullRiskGaps.push(
+      tactical.stock?.liquidityEvidence?.reason
+      || '流动性只支持小仓试错',
+    )
   }
   if (tactical.catalyst?.risk === 'NEGATIVE') {
-    hardBlockers.push('负面事件风险尚未消化')
+    fullRiskGaps.push('负面消息尚未核实，只允许小仓验证')
   }
   if (
     tactical.holding?.hasPosition === true
@@ -568,6 +581,13 @@ function riskIncreaseAssessment(tactical = {}) {
     strengthConfirmed && '相对强势',
     technicalConfirmed && '技术面多头共振',
   ].filter(Boolean)
+  const signalScore = (
+    (quant.strong ? 2 : quant.supportive ? 1 : 0)
+    + (flowConfirmed ? 2 : 0)
+    + (leadershipConfirmed ? 1 : 0)
+    + (strengthConfirmed ? 1 : 0)
+    + (technicalConfirmed ? 1 : 0)
+  )
   if (!quant.strong) fullRiskGaps.push('量化尚未形成强偏多确认')
   if (!flowConfirmed) fullRiskGaps.push('主力资金尚未确认流入')
   if (tactical.technical?.bias === 'BEARISH') {
@@ -584,20 +604,35 @@ function riskIncreaseAssessment(tactical = {}) {
     && confirmations.length >= 2
     && (quant.supportive || flowConfirmed)
   )
+  const fullRiskEligible = (
+    sectorHealthy
+    && tactical.flow?.relation !== 'DISTRIBUTION'
+    && tactical.catalyst?.risk !== 'NEGATIVE'
+  )
   const canFull = (
     canProbe
     && riskTone !== 'RISK_OFF'
     && timingState === 'READY'
-    && quant.strong
-    && flowConfirmed
+    && (quant.strong || flowConfirmed)
+    && signalScore >= 4
     && tactical.stock?.liquidity === 'GOOD'
     && tactical.technical?.bias !== 'BEARISH'
+    && fullRiskEligible
   )
+  const entryRoute = !canFull
+    ? null
+    : quant.strong && flowConfirmed
+      ? 'DUAL_CORE'
+      : quant.strong
+        ? 'QUANT_MOMENTUM'
+        : 'FLOW_LEADERSHIP'
   return {
     riskTier: canFull ? 'FULL' : canProbe ? 'PROBE' : 'NONE',
     hardBlockers: [...new Set(hardBlockers)],
     fullRiskGaps: [...new Set(fullRiskGaps)],
     confirmations,
+    signalScore,
+    entryRoute,
   }
 }
 
@@ -693,6 +728,13 @@ export function deriveShortHorizonActionPolicy({
   const probePositionLimitPct = riskTier === 'PROBE'
     ? source.market?.riskTone === 'RISK_OFF' ? 3 : 5
     : null
+  const positionBandPct = riskTier === 'FULL'
+    ? source.market?.riskTone === 'RISK_ON'
+      ? { min: 10, max: 20 }
+      : { min: 8, max: 15 }
+    : riskTier === 'PROBE'
+      ? { min: 0, max: probePositionLimitPct }
+      : null
   const timingReady = (
     source.timing?.state === 'READY'
     || priceReviewReached
@@ -832,6 +874,9 @@ export function deriveShortHorizonActionPolicy({
     executionOpen,
     riskTier,
     maxPositionPct: probePositionLimitPct,
+    positionBandPct,
+    signalScore: assessment.signalScore,
+    entryRoute: assessment.entryRoute,
     manualConfirmationOnly: riskTier === 'PROBE',
     entryIntent,
     nextSessionPlan,
