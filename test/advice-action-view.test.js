@@ -80,6 +80,37 @@ test('买入建议把买入价和首笔手数编译为同一动作视图', () =>
   })
 })
 
+test('立即买入状态明确展示当前可执行价格而不是观察条件', () => {
+  const view = buildAdviceActionView({
+    action: '立即买入',
+    buyPrice: 10.02,
+    stopPrice: 9.7,
+    targetPrice: 10.8,
+    planQty: 3,
+    actionPlan: '现价附近买入3手',
+    decisionPlan: {
+      schemaVersion: 'decision-plan.v2',
+      action: 'BUY',
+      actionLabel: '买入',
+      actionability: 'READY',
+      manualConfirmationOnly: false,
+      quantity: { lots: 3 },
+      prices: {
+        reference: 10.02,
+        stop: 9.7,
+        target: 10.8,
+      },
+    },
+  }, { mode: 'buy_advice', currentPrice: 10.02, executionOpen: true })
+
+  assert.equal(view.action, '现在买入')
+  assert.equal(view.actionable, true)
+  assert.equal(view.manualOnly, false)
+  assert.equal(view.quantity, '3手')
+  assert.equal(view.levels[0].label, '买入价')
+  assert.equal(view.levels[0].price, 10.02)
+})
+
 test('休市时旧买入建议在卡片上降级为下一交易时段观察', () => {
   const view = buildAdviceActionView({
     action: '立即买入',
@@ -149,19 +180,20 @@ test('休市时已经校正为观望的建议也隐藏手动建仓入口', () =>
     executionOpen: false,
   })
 
-  assert.equal(view.action, '次日试仓预案')
+  assert.equal(view.action, '次日条件试仓')
   assert.equal(view.quantityLabel, '仓位≤5%')
-  assert.equal(view.commandLabel, '后续计划')
+  assert.equal(view.commandLabel, '条件计划')
   assert.equal(view.displayTone, 'buy')
   assert.equal(view.detailActionLabel, '查看次日预案')
   assert.equal(view.deferred, true)
   assert.equal(view.actionable, false)
   assert.equal(view.levels[0].basisLabel, '5日均线')
   assert.equal(view.trigger.stateLabel, '当前休市')
-  assert.equal(view.trigger.detailLabel, '到价后自动复核')
-  assert.equal(view.trigger.metricLabel, '试仓预案')
+  assert.equal(view.trigger.detailLabel, '到价后确认买点')
+  assert.equal(view.trigger.metricLabel, '条件试仓')
   assert.match(view.instruction, /回踩15\.2元确认承接/)
-  assert.match(view.instruction, /盘中复核通过后人工确认/)
+  assert.match(view.instruction, /方向已通过/)
+  assert.match(view.instruction, /确认通过后给出具体买入价和手数/)
 })
 
 test('下一交易日开盘后旧休市建议仍需先复核不能直接恢复买入', () => {
@@ -235,14 +267,14 @@ test('下一交易日开盘后休市试仓预案进入盘中复核而不是退�
     executionOpen: true,
   })
 
-  assert.equal(view.action, '盘中试仓复核')
-  assert.equal(view.shortHorizon, '休市预案待确认')
+  assert.equal(view.action, '盘中条件试仓')
+  assert.equal(view.shortHorizon, '方向已通过 · 待时机确认')
   assert.equal(view.actionable, false)
-  assert.equal(view.trigger.stateLabel, '盘中先复核')
-  assert.equal(view.trigger.metricLabel, '不自动下单')
+  assert.equal(view.trigger.stateLabel, '等待试仓确认')
+  assert.equal(view.trigger.metricLabel, '确认后给买入价')
 })
 
-test('持仓卡在休市时显示下一交易日加仓预案而不是盘中持有在看', () => {
+test('持仓卡在休市时显示下一交易日条件加仓而不是盘中持有在看', () => {
   const view = buildAdviceActionView({
     action: '持有',
     actionPlan: '当前持有观察',
@@ -274,9 +306,9 @@ test('持仓卡在休市时显示下一交易日加仓预案而不是盘中持�
     executionOpen: false,
   })
 
-  assert.equal(view.action, '次日加仓预案')
+  assert.equal(view.action, '次日条件加仓')
   assert.equal(view.quantityLabel, '仓位≤5%')
-  assert.equal(view.commandLabel, '后续计划')
+  assert.equal(view.commandLabel, '条件计划')
   assert.equal(view.actionable, false)
   assert.equal(view.trigger.stateLabel, '当前休市')
 })
@@ -319,9 +351,9 @@ test('观望建议不把远端关注价展示成候选卡主价位', () => {
   assert.deepEqual(view.levels, [])
   assert.equal(view.trigger.direction, 'inactive')
   assert.equal(view.trigger.price, null)
-  assert.equal(view.trigger.stateLabel, '保持观望')
-  assert.equal(view.trigger.detailLabel, '等待量价确认')
-  assert.equal(view.trigger.metricLabel, '暂不下单')
+  assert.equal(view.trigger.stateLabel, '等待新证据')
+  assert.equal(view.trigger.detailLabel, '到价后重新评估方向')
+  assert.equal(view.trigger.metricLabel, '不预设买入')
 })
 
 test('观望建议缺少结构化关注价时仍显示暂不下单状态', () => {
@@ -336,9 +368,9 @@ test('观望建议缺少结构化关注价时仍显示暂不下单状态', () =>
     direction: 'inactive',
     price: null,
     label: '等待确认',
-    stateLabel: '保持观望',
-    detailLabel: '等待量价确认',
-    metricLabel: '暂不下单',
+    stateLabel: '等待新证据',
+    detailLabel: '到价后重新评估方向',
+    metricLabel: '不预设买入',
   })
 })
 
@@ -537,6 +569,9 @@ test('人工试仓计划保留短线买点但明确只允许手动确认', () =>
   assert.equal(view.manualOnly, true)
   assert.equal(view.quantity, '5手')
   assert.match(view.instruction, /人工确认/)
+  assert.equal(view.levels[0].label, '买入价')
+  assert.equal(view.levels[0].price, 10)
+  assert.equal(view.trigger.metricLabel, '买入准备')
 })
 
 test('就绪计划带人工确认标记时仍显示为小仓试错', () => {

@@ -93,7 +93,15 @@ function withPriceBasis(levels, advice = {}) {
 }
 
 function deferredOpportunityView(plan, executionOpen) {
-  const next = plan?.actionPolicy?.nextSessionPlan
+  const policy = plan?.actionPolicy || {}
+  const nextSession = policy.nextSessionPlan
+  const entryIntent = policy.entryIntent
+  const next = nextSession || (
+    entryIntent?.reviewMode === 'ENTRY_CONFIRMATION'
+    && entryIntent?.directionApproved === true
+      ? entryIntent
+      : null
+  )
   if (
     !next
     || !['PROBE', 'BUY', 'PROBE_ADD', 'ADD'].includes(
@@ -104,18 +112,18 @@ function deferredOpportunityView(plan, executionOpen) {
     AFTERNOON: '下午',
     OPENING: '开盘后',
     NEXT_TRADING_DAY: '次日',
-  }[next.session] || '下一时段'
+  }[nextSession?.session] || '盘中'
   const detailActionLabel = {
     AFTERNOON: '查看下午预案',
     OPENING: '查看开盘预案',
     NEXT_TRADING_DAY: '查看次日预案',
-  }[next.session] || '查看后续预案'
+  }[nextSession?.session] || '查看条件计划'
   const addSide = ['PROBE_ADD', 'ADD'].includes(next.action)
   const actionLabel = addSide
-    ? '加仓'
+    ? '条件加仓'
     : next.action === 'PROBE'
-      ? '试仓'
-      : '买入'
+      ? '条件试仓'
+      : '条件买入'
   const maxPositionPct = Number(next.maxPositionPct)
   const quantityLabel = (
     ['PROBE', 'PROBE_ADD'].includes(next.action)
@@ -123,34 +131,40 @@ function deferredOpportunityView(plan, executionOpen) {
     && maxPositionPct > 0
   ) ? `仓位≤${maxPositionPct}%` : ''
   const liveReview = executionOpen === true
+  const subject = addSide ? '加仓方向' : '买入方向'
+  const outcome = addSide
+    ? '具体加仓价和手数'
+    : '具体买入价和手数'
   return {
-    action: liveReview
-      ? `盘中${actionLabel}复核`
-      : `${sessionPrefix}${actionLabel}预案`,
+    action: liveReview ? `盘中${actionLabel}` : `${sessionPrefix}${actionLabel}`,
     displayTone: 'buy',
-    commandLabel: '后续计划',
+    commandLabel: '条件计划',
     detailActionLabel: liveReview
-      ? '查看盘中复核'
+      ? '查看确认条件'
       : detailActionLabel,
     shortHorizon: liveReview
-      ? '休市预案待确认'
-      : '当前休市',
+      ? '方向已通过 · 待时机确认'
+      : '当前休市 · 方向已通过',
     quantityLabel,
     instruction: clean(
-      `${next.trigger || `${next.sessionLabel || '下一交易时段盘中'}重新评估`}；盘中复核通过后人工确认，不自动下单`,
+      `${subject}已通过；${next.trigger || `${next.sessionLabel || '下一交易时段盘中'}确认入场时机`}；确认通过后给出${outcome}${quantityLabel ? `，${quantityLabel}` : ''}，由你人工确认`,
       240,
     ),
     trigger: {
       direction: 'inactive',
       price: null,
       label: '等待确认',
-      stateLabel: liveReview ? '盘中先复核' : '当前休市',
+      stateLabel: liveReview
+        ? next.action === 'PROBE'
+          ? '等待试仓确认'
+          : '等待买入确认'
+        : '当前休市',
       detailLabel: liveReview
-        ? '先更新行情与量价'
-        : '到价后自动复核',
+        ? '仅确认入场时机'
+        : addSide ? '到价后确认加仓点' : '到价后确认买点',
       metricLabel: liveReview
-        ? '不自动下单'
-        : `${actionLabel}预案`,
+        ? `确认后给${addSide ? '加仓' : '买入'}价`
+        : actionLabel,
     },
   }
 }
@@ -219,9 +233,9 @@ function triggerFor(kind, levels, triggerDirection = '') {
       direction: 'inactive',
       price: primary?.price ?? null,
       label: '等待确认',
-      stateLabel: '保持观望',
-      detailLabel: '等待量价确认',
-      metricLabel: '暂不下单',
+      stateLabel: '等待新证据',
+      detailLabel: '到价后重新评估方向',
+      metricLabel: '不预设买入',
     }
   }
   if (kind === 'buy' || kind === 'add') {
@@ -275,7 +289,7 @@ export function buildAdviceActionView(
     ? advice.decisionPlan
     : null
   const planAction = {
-    BUY: '买入',
+    BUY: '现在买入',
     ADD: '加仓',
     HOLD: '持有',
     REDUCE: '减仓',
@@ -441,7 +455,12 @@ export function buildAdviceActionView(
       deferredReason: reason,
     }
   }
-  const deferredWait = (
+  const conditionalEntry = (
+    !!policyOpportunity
+    && mode === 'buy_advice'
+    && kind === 'wait'
+  )
+  const deferredWait = conditionalEntry || (
     !!policyOpportunity
     && (
       executionOpen === false

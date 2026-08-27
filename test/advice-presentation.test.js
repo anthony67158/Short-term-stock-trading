@@ -251,7 +251,7 @@ test('未持仓观望同时展示回踩与突破观察位', () => {
   )
   assert.match(
     view.operationGuide.steps[0].text,
-    /96元.*复核确认前不买入/,
+    /96元.*重新评估方向.*确认前不买入/,
   )
   assert.match(
     view.operationGuide.steps[1].text,
@@ -388,7 +388,7 @@ test('短线内核改写模型动作时首屏解释原因而非只显示观望',
   )
 })
 
-test('休市观望结论在详情首屏展示次日试仓预案和自动复核', () => {
+test('休市方向已通过时展示次日条件试仓而不是普通观望', () => {
   const view = buildAdvicePresentation({
     action: '观望',
     title: '等待下一交易日',
@@ -404,7 +404,10 @@ test('休市观望结论在详情首屏展示次日试仓预案和自动复核',
         executionOpen: false,
         nextSessionPlan: {
           action: 'PROBE',
-          actionLabel: '小仓试仓',
+          actionLabel: '条件试仓',
+          decisionState: 'CONDITIONAL_PROBE',
+          reviewMode: 'ENTRY_CONFIRMATION',
+          directionApproved: true,
           session: 'NEXT_TRADING_DAY',
           sessionLabel: '下一交易日盘中',
           maxPositionPct: 5,
@@ -426,16 +429,17 @@ test('休市观望结论在详情首屏展示次日试仓预案和自动复核',
     },
   })
 
-  assert.equal(view.verdict.action, '次日试仓预案')
+  assert.equal(view.verdict.action, '次日条件试仓')
+  assert.match(view.verdict.title, /方向已通过/)
   assert.match(view.execution.instruction, /仓位不超过5%/)
   assert.match(
     view.operationGuide.now,
-    /休市阶段.*盘中复核前不下单/,
+    /方向已通过.*等待入场时机确认/,
   )
-  assert.equal(view.operationGuide.steps[0].label, '后续计划')
+  assert.equal(view.operationGuide.steps[0].label, '次日条件试仓')
   assert.match(
     view.operationGuide.steps[0].text,
-    /到价后自动复核.*人工确认/,
+    /只确认入场时机.*具体买入价/,
   )
 })
 
@@ -659,7 +663,7 @@ test('决策计划v2优先提供最终动作、手数、费用和执行校验', 
     },
   })
 
-  assert.equal(view.verdict.action, '买入')
+  assert.equal(view.verdict.action, '现在买入')
   assert.equal(view.execution.quantity, '5手')
   assert.equal(view.execution.amount, '5010')
   assert.equal(view.execution.position, '0% → 5%')

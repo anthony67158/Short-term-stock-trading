@@ -198,7 +198,15 @@ function modelSummary(advice) {
 }
 
 function deferredPlanPresentation(plan) {
-  const next = plan?.actionPolicy?.nextSessionPlan
+  const policy = plan?.actionPolicy || {}
+  const nextSession = policy.nextSessionPlan
+  const entryIntent = policy.entryIntent
+  const next = nextSession || (
+    entryIntent?.reviewMode === 'ENTRY_CONFIRMATION'
+    && entryIntent?.directionApproved === true
+      ? entryIntent
+      : null
+  )
   if (
     !next
     || !['PROBE', 'BUY', 'PROBE_ADD', 'ADD'].includes(
@@ -209,30 +217,36 @@ function deferredPlanPresentation(plan) {
     AFTERNOON: '下午盘中',
     OPENING: '开盘后',
     NEXT_TRADING_DAY: '下一交易日盘中',
-  }[next.session] || '下一交易时段盘中'
+  }[nextSession?.session] || '当前盘中'
   const actionLabel = ['PROBE_ADD', 'ADD'].includes(next.action)
-    ? '加仓'
+    ? '条件加仓'
     : next.action === 'PROBE'
-      ? '试仓'
-      : '买入'
+      ? '条件试仓'
+      : '条件买入'
   const maxPositionPct = Number(next.maxPositionPct)
   const positionLimit = (
     ['PROBE', 'PROBE_ADD'].includes(next.action)
     && Number.isFinite(maxPositionPct)
     && maxPositionPct > 0
   ) ? `，仓位不超过${maxPositionPct}%` : ''
+  const sessionPrefix = nextSession
+    ? nextSession.session === 'NEXT_TRADING_DAY'
+      ? '次日'
+      : nextSession.session === 'AFTERNOON'
+        ? '下午'
+        : '开盘后'
+    : '盘中'
+  const addSide = ['PROBE_ADD', 'ADD'].includes(next.action)
   return {
-    actionLabel: `${
-      next.session === 'NEXT_TRADING_DAY'
-        ? '次日'
-        : next.session === 'AFTERNOON'
-          ? '下午'
-          : '开盘后'
-    }${actionLabel}预案`,
-    instruction: `${clean(
-      next.trigger || `${sessionLabel}重新评估`,
+    actionLabel: `${sessionPrefix}${actionLabel}`,
+    instruction: `${
+      addSide ? '加仓方向' : '买入方向'
+    }已通过；${clean(
+      next.trigger || `${sessionLabel}确认入场时机`,
       240,
-    )}${positionLimit}；到价后自动复核分时承接、量能和资金；复核通过后再由你人工确认下单。`,
+    )}${positionLimit}；触发后只确认入场时机，确认通过后给出具体${
+      addSide ? '加仓' : '买入'
+    }价和手数，再由你人工确认。`,
   }
 }
 
@@ -260,7 +274,7 @@ function decisionPlanSummary(plan) {
       })).filter((issue) => issue.source && issue.label)
     : []
   const statusText = deferredPlan
-    ? `休市阶段已保留${deferredPlan.actionLabel}，盘中复核前不下单`
+    ? `${deferredPlan.actionLabel}方向已通过，当前只等待入场时机确认`
     : plan.manualConfirmationOnly === true
     ? '短线核心信号已共振，仅限人工确认小仓试错'
     : actionability === 'READY'
@@ -376,14 +390,18 @@ function operationGuide(advice, plan, levels, observationOnly) {
           return {
             key: level.key,
             label: '回踩路径',
-            text: `价格回落至${withYuan(level.value)}附近，先检查承接、量能和资金；军师复核确认前不买入。`,
+            text: deferredPlan
+              ? `价格回落至${withYuan(level.value)}附近后只确认承接与入场时机；通过即给具体买入价和手数。`
+              : `价格回落至${withYuan(level.value)}附近，重新评估方向；军师确认前不买入。`,
           }
         }
         if (level.key === 'watch_breakout') {
           return {
             key: level.key,
             label: '突破路径',
-            text: `价格上行至${withYuan(level.value)}附近且放量站稳，重新生成建议；确认前不追涨。`,
+            text: deferredPlan
+              ? `价格上行至${withYuan(level.value)}附近且放量站稳后只确认入场时机；通过即给具体买入价和手数。`
+              : `价格上行至${withYuan(level.value)}附近且放量站稳，重新评估方向；确认前不追涨。`,
           }
         }
         return {
@@ -406,12 +424,12 @@ function operationGuide(advice, plan, levels, observationOnly) {
     }
     return {
       now: deferredPlan
-        ? `该预案生成于休市阶段，已保留${deferredPlan.actionLabel}；盘中复核前不下单。`
+        ? `${deferredPlan.actionLabel}方向已通过；当前只等待入场时机确认，确认后给出具体价格和手数。`
         : '暂不买入，不挂单、不追涨。',
       steps: [
         deferredPlan && {
           key: 'next-session',
-          label: '后续计划',
+          label: deferredPlan.actionLabel,
           text: deferredPlan.instruction,
           tone: 'watch',
         },
@@ -574,10 +592,12 @@ function buildLegacyAdvicePresentation(advice = {}) {
           ? `观察·${plan.actionLabel || '建议'}`
           : plan.actionability === 'BLOCKED'
             ? '观望'
-            : plan.actionLabel || advice.action
+            : plan.action === 'BUY'
+              ? '现在买入'
+              : plan.actionLabel || advice.action
     ),
     title: deferredPlan
-      ? `${deferredPlan.actionLabel}，待盘中复核`
+      ? `${deferredPlan.actionLabel}：方向已通过，待时机确认`
       : plan.actionPolicy?.overridden
       ? plan.action === 'HOLD'
         ? '短线条件未确认，继续持有'
