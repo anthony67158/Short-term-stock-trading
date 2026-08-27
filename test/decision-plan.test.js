@@ -359,6 +359,39 @@ test('新增风险必须满足至少1.8比1的盈亏比', () => {
   assert.match(plan.blockedReasons.join('；'), /盈亏比/)
 })
 
+test('市场硬红线不能被逆势强票和量化高把握绕过', () => {
+  const plan = compileDecisionPlan({
+    mode: 'buy_advice',
+    advice: {
+      action: '小仓试错',
+      tier: 'probe',
+      buyPrice: 10,
+      stopPrice: 9,
+      targetPrice: 12,
+      planQtyNum: 1,
+    },
+    payload: {
+      ...payload,
+      marketEnv: {
+        ...payload.marketEnv,
+        regime: 'RISK_OFF',
+        score: 38,
+        weak: true,
+        allowRiskIncrease: false,
+        hardRiskOff: true,
+        hardRiskSignals: ['炸板率45%超过40%'],
+      },
+      counterTrend: { isStrong: true },
+    },
+    evidenceSnapshot: snapshot,
+    now,
+  })
+
+  assert.equal(plan.action, 'WATCH')
+  assert.equal(plan.actionability, 'BLOCKED')
+  assert.match(plan.blockedReasons.join('；'), /市场风险红线.*炸板率/)
+})
+
 test('观望计划只保留可核验的价格复核条件', () => {
   const plan = compileDecisionPlan({
     mode: 'buy_advice',
@@ -540,6 +573,41 @@ test('账户熔断阻止新增风险但不阻止减仓退出', () => {
 
   assert.equal(buy.actionability, 'BLOCKED')
   assert.equal(reduce.actionability, 'READY')
+})
+
+test('跨日连续亏损会把下一笔风险预算减半', () => {
+  const plan = compileDecisionPlan({
+    mode: 'buy_advice',
+    advice: {
+      action: '立即买入',
+      buyPrice: 10,
+      stopPrice: 9,
+      targetPrice: 12,
+      planQtyNum: 10,
+    },
+    payload,
+    evidenceSnapshot: snapshot,
+    accountCircuitBreaker: {
+      schemaVersion: 'account-circuit-breaker.v1',
+      allowRiskIncrease: true,
+      riskBudgetMultiplier: 0.5,
+      riskBudgetReason: '最近连续亏损2笔，下一笔风险预算降至50%',
+      blockers: [],
+      blockerCodes: [],
+    },
+    now,
+  })
+
+  assert.equal(plan.actionability, 'READY')
+  assert.equal(plan.risk.maxLossAmount, 500)
+  assert.equal(
+    plan.risk.accountCircuitBreaker.riskBudgetMultiplier,
+    0.5,
+  )
+  assert.match(
+    plan.risk.accountCircuitBreaker.riskBudgetReason,
+    /降至50%/,
+  )
 })
 
 test('被阻断的新增风险计划不能升级为执行确认', () => {

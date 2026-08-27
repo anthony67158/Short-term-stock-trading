@@ -1,6 +1,6 @@
 {
   "schemaVersion": "harness-baseline.v1",
-  "generatedAt": 1787734385544,
+  "generatedAt": 1787803600100,
   "versions": {
     "app": "1.0.0",
     "git": "working-tree",
@@ -57,12 +57,15 @@
         "actionability": 1,
         "consistency": 1
       },
-      "cases": 4,
+      "cases": 7,
       "caseIds": [
+        "advice-after-close-converts-high-entry-to-review",
         "advice-buy-cash-cap",
         "advice-decision-plan-evidence-risk-ready",
         "advice-hold-t1-no-sellable",
-        "advice-invalid-price-downgrade"
+        "advice-invalid-price-downgrade",
+        "advice-short-horizon-policy-blocks-chasing",
+        "advice-short-horizon-policy-caps-probe"
       ]
     },
     "judge": {
@@ -144,9 +147,11 @@
         "actionability": 1,
         "consistency": 1
       },
-      "cases": 5,
+      "cases": 7,
       "caseIds": [
         "execution-account-circuit-breaker",
+        "execution-cross-day-loss-streak-throttle",
+        "execution-daily-loss-streak-cooldown",
         "execution-event-idempotency",
         "execution-manual-lifecycle",
         "execution-range-grid-guardrail",

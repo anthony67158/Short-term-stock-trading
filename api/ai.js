@@ -1305,6 +1305,9 @@ export default async function handler(req, res) {
             amountYi: b.amountYi,        // ★两市实时成交额(亿元)
             volVsAvg5: b.volVsAvg5,      // ★较近5日均量的偏离%
             volLevel: b.volLevel,        // ★放量/平量/缩量
+            volumeComparable: b.volumeComparable === true,
+            volumeTradeDate: b.volumeTradeDate || null,
+            sentiment: mkt.sentiment || null,
           };
         }
         // ★事件确认高把握层(P2:正交高精度筛子)。优先用【离线权威标记】——qlib-service 每日
@@ -2461,6 +2464,10 @@ export default async function handler(req, res) {
         schemaVersion: accountCircuitBreaker.schemaVersion,
         allowRiskIncrease:
           accountCircuitBreaker.allowRiskIncrease,
+        riskBudgetMultiplier:
+          accountCircuitBreaker.riskBudgetMultiplier,
+        riskBudgetReason:
+          accountCircuitBreaker.riskBudgetReason,
         blockerCodes: accountCircuitBreaker.blockerCodes,
         reservedBuyCash: accountCircuitBreaker.reservedBuyCash,
       };

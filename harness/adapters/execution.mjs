@@ -226,6 +226,22 @@ export async function runExecutionHarnessCase(testCase) {
           === Number(expected.availableCashAfterReservations),
         '买入现金占用与可用现金不一致',
       ),
+      check(
+        'circuit-loss-streak-budget',
+        'consistency',
+        expected.riskBudgetMultiplier == null
+          || output.riskBudgetMultiplier
+            === Number(expected.riskBudgetMultiplier),
+        '连续亏损后的风险预算倍率错误',
+      ),
+      check(
+        'circuit-daily-loss-streak',
+        'actionability',
+        expected.dailyConsecutiveLosses == null
+          || output.metrics.dailyConsecutiveLosses
+            === Number(expected.dailyConsecutiveLosses),
+        '当日连续亏损冷却状态错误',
+      ),
     ]
   } else if (input.scenario === 'grid') {
     const eligibility = evaluateTGridEligibility(input)

@@ -67,6 +67,122 @@ export function summarizeMarketBreadth(indexRows = [], limits = {}) {
   }
 }
 
+function poolTotal(pool) {
+  const total = Number(pool?.total)
+  return Number.isFinite(total) && total >= 0 ? total : null
+}
+
+export function summarizeMarketSentiment({
+  limitUpPool = null,
+  limitDownPool = null,
+  brokenLimitPool = null,
+} = {}) {
+  const limitUp = poolTotal(limitUpPool)
+  const limitDown = poolTotal(limitDownPool)
+  const brokenLimit = poolTotal(brokenLimitPool)
+  const denominator = limitUp != null && brokenLimit != null
+    ? limitUp + brokenLimit
+    : 0
+  const breakRatePct = denominator > 0
+    ? +(brokenLimit / denominator * 100).toFixed(1)
+    : null
+  const limitUpList = Array.isArray(limitUpPool?.list)
+    ? limitUpPool.list
+    : []
+  const boardHeights = limitUpList
+    .map((item) => Number(item?.lbc || item?.boardCount || 1))
+    .filter((value) => Number.isFinite(value) && value > 0)
+  const maxBoardHeight = boardHeights.length
+    ? Math.max(...boardHeights)
+    : null
+  const linkedBoardCount = boardHeights
+    .filter((value) => value >= 2)
+    .length
+
+  let score = 50
+  if (limitUp != null) {
+    if (limitUp >= 60) score += 15
+    else if (limitUp >= 30) score += 8
+    else if (limitUp < 15) score -= 12
+  }
+  if (breakRatePct != null) {
+    if (breakRatePct <= 15) score += 12
+    else if (breakRatePct > 40) score -= 18
+    else if (breakRatePct >= 35) score -= 12
+  }
+  if (maxBoardHeight >= 5) score += 10
+  else if (maxBoardHeight >= 3) score += 5
+  if (limitDown > 10) score -= 10
+  score = Math.max(0, Math.min(100, Math.round(score)))
+
+  const hardRiskSignals = []
+  if (breakRatePct > 40) {
+    hardRiskSignals.push(`炸板率${breakRatePct}%超过40%`)
+  }
+  if (
+    limitDown >= 20
+    && limitUp != null
+    && limitDown >= limitUp * 0.5
+  ) {
+    hardRiskSignals.push(`跌停${limitDown}家且亏钱效应扩散`)
+  }
+  const availableCount = [
+    limitUp,
+    limitDown,
+    brokenLimit,
+  ].filter((value) => value != null).length
+  const phase = availableCount === 0
+    ? 'UNKNOWN'
+    : hardRiskSignals.length
+      ? 'RETREAT'
+      : score >= 75 && maxBoardHeight >= 5
+        ? 'CLIMAX'
+        : score >= 60
+          ? 'EXPANSION'
+          : score >= 45 ? 'RECOVERY' : 'ICE'
+  const phaseLabel = {
+    ICE: '冰点',
+    RECOVERY: '修复',
+    EXPANSION: '发酵',
+    CLIMAX: '高潮',
+    RETREAT: '退潮',
+    UNKNOWN: '数据不足',
+  }[phase]
+  return {
+    phase,
+    phaseLabel,
+    score,
+    limitUp,
+    limitDown,
+    brokenLimit,
+    breakRatePct,
+    maxBoardHeight,
+    linkedBoardCount,
+    hardRiskSignals,
+    dataQuality: availableCount === 3
+      ? 'COMPLETE'
+      : availableCount > 0 ? 'PARTIAL' : 'MISSING',
+  }
+}
+
+function volumeComparisonContext(tradeDate, now = Date.now()) {
+  const normalizedTradeDate = String(tradeDate || '').replaceAll('-', '')
+  if (!/^\d{8}$/.test(normalizedTradeDate)) {
+    return { comparable: false, tradeDate: null }
+  }
+  const date = new Date(now + 8 * 3600000)
+  const today = `${date.getUTCFullYear()}${String(
+    date.getUTCMonth() + 1,
+  ).padStart(2, '0')}${String(date.getUTCDate()).padStart(2, '0')}`
+  const minutes = date.getUTCHours() * 60 + date.getUTCMinutes()
+  return {
+    comparable:
+      normalizedTradeDate < today
+      || normalizedTradeDate === today && minutes >= 14 * 60 + 50,
+    tradeDate: normalizedTradeDate,
+  }
+}
+
 export async function fetchMarketSnapshot() {
   const idxSecids = '1.000001,0.399001,0.399006,0.899050';
   const idxFields = 'f2,f3,f4,f12,f14,f6,f104,f105,f106';
@@ -75,10 +191,11 @@ export async function fetchMarketSnapshot() {
     `&fields=${idxFields}`;
 
   // 涨跌停必须用真实池；统一涨跌幅阈值会误判创业板和科创板。
-  const [idxJson, ztPool, dtPool, shK, szK] = await Promise.all([
+  const [idxJson, ztPool, dtPool, zbPool, shK, szK] = await Promise.all([
     emGet(idxPath).catch(() => null),
     fetchLimitPool('zt').catch(() => null),
     fetchLimitPool('dt').catch(() => null),
+    fetchLimitPool('zb').catch(() => null),
     emGet(`/api/qt/stock/kline/get?secid=1.000001&fields1=f1&fields2=f51,f57&klt=101&fqt=1&end=20500101&lmt=6`, { his: true }).catch(() => null),
     emGet(`/api/qt/stock/kline/get?secid=0.399001&fields1=f1&fields2=f51,f57&klt=101&fqt=1&end=20500101&lmt=6`, { his: true }).catch(() => null),
   ]);
@@ -113,17 +230,23 @@ export async function fetchMarketSnapshot() {
     const kl = (kJson && kJson.data && kJson.data.klines) || [];
     return kl.map((s) => {
       const parts = String(s).split(',');
-      return +parts[1] || 0;
+      return {
+        date: parts[0] || '',
+        amount: +parts[1] || 0,
+      };
     });
   };
   const shAmts = klAmt(shK), szAmts = klAmt(szK);
   let marketAmountYi = indexAmountYi, volVsAvg5 = null, volLevel = null;
+  let volumeComparison = { comparable: false, tradeDate: null };
   if (shAmts.length && szAmts.length) {
     const n = Math.min(shAmts.length, szAmts.length);
     const sum2 = (i) =>
-      (shAmts[shAmts.length - n + i] || 0)
-      + (szAmts[szAmts.length - n + i] || 0);
+      (shAmts[shAmts.length - n + i]?.amount || 0)
+      + (szAmts[szAmts.length - n + i]?.amount || 0);
     const todayAmt = sum2(n - 1);
+    const latestTradeDate = shAmts.at(-1)?.date || szAmts.at(-1)?.date;
+    volumeComparison = volumeComparisonContext(latestTradeDate);
     const previous = [];
     for (let i = 0; i < n - 1; i++) previous.push(sum2(i));
     const avg5 = previous.length
@@ -138,6 +261,11 @@ export async function fetchMarketSnapshot() {
         : volVsAvg5 <= -15 ? '缩量' : '平量';
     }
   }
+  const sentiment = summarizeMarketSentiment({
+    limitUpPool: ztPool,
+    limitDownPool: dtPool,
+    brokenLimitPool: zbPool,
+  });
 
   return {
     ok: true,
@@ -154,7 +282,10 @@ export async function fetchMarketSnapshot() {
       amountYi: marketAmountYi,
       volVsAvg5,
       volLevel,
+      volumeComparable: volumeComparison.comparable,
+      volumeTradeDate: volumeComparison.tradeDate,
     },
+    sentiment,
   };
 }
 

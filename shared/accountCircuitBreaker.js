@@ -17,12 +17,16 @@ function breaker(code, message, value = null, limit = null) {
   return { code, message, value, limit }
 }
 
-function consecutiveLossCount(closed = []) {
+function consecutiveLossCount(closed = [], since = null) {
   let count = 0
   const exits = closed
     .filter((item) =>
       ['SELL', 'T'].includes(item?.type || item?.kind)
       && finite(item?.realizedPnl ?? item?.netPnl) != null
+      && (
+        since == null
+        || Number(item?.at || item?.sellAt || 0) >= since
+      )
     )
     .sort((left, right) =>
       Number(right.at || right.sellAt || 0)
@@ -58,7 +62,18 @@ export function evaluateAccountCircuitBreaker({
   ) ?? 3
   const maximumConsecutiveLosses = Math.max(
     1,
-    Math.trunc(finite(limits.maximumConsecutiveLosses) || 3),
+    Math.trunc(finite(limits.maximumConsecutiveLosses) || 2),
+  )
+  const lossStreakReductionThreshold = Math.max(
+    1,
+    Math.trunc(finite(limits.lossStreakReductionThreshold) || 2),
+  )
+  const lossStreakRiskMultiplier = Math.max(
+    0,
+    Math.min(
+      1,
+      finite(limits.lossStreakRiskMultiplier) ?? 0.5,
+    ),
   )
   const maximumPositionPct = finite(limits.maximumPositionPct) ?? 85
   const minimumCashReservePct = finite(limits.minimumCashReservePct) ?? 10
@@ -83,6 +98,7 @@ export function evaluateAccountCircuitBreaker({
     ? (startAssets - totalAssets) / startAssets * 100
     : 0
   const consecutiveLosses = consecutiveLossCount(closed)
+  const dailyConsecutiveLosses = consecutiveLossCount(closed, dayStart)
   const activePlans = (executionPlans || []).filter(
     (plan) => ACTIVE_PLAN_STATES.has(plan?.status),
   )
@@ -128,11 +144,11 @@ export function evaluateAccountCircuitBreaker({
       maximumDailyDrawdownPct,
     ))
   }
-  if (consecutiveLosses >= maximumConsecutiveLosses) {
+  if (dailyConsecutiveLosses >= maximumConsecutiveLosses) {
     blockers.push(breaker(
       'CONSECUTIVE_LOSSES',
-      '连续亏损进入冷却期',
-      consecutiveLosses,
+      '当日连续亏损达到停手线',
+      dailyConsecutiveLosses,
       maximumConsecutiveLosses,
     ))
   }
@@ -161,6 +177,10 @@ export function evaluateAccountCircuitBreaker({
     ))
   }
   const allowRiskIncrease = blockers.length === 0
+  const riskBudgetMultiplier = allowRiskIncrease
+    && consecutiveLosses >= lossStreakReductionThreshold
+    ? lossStreakRiskMultiplier
+    : allowRiskIncrease ? 1 : 0
   return {
     schemaVersion: 'account-circuit-breaker.v1',
     allowRiskIncrease,
@@ -171,10 +191,19 @@ export function evaluateAccountCircuitBreaker({
       realizedLossPct: +realizedLossPct.toFixed(2),
       drawdownPct: +drawdownPct.toFixed(2),
       consecutiveLosses,
+      dailyConsecutiveLosses,
       positionPct,
       cashReservePct: +cashReservePct.toFixed(2),
       maximumIndustryWeightPct: maximumIndustry,
     },
+    riskBudgetMultiplier,
+    riskBudgetReason: riskBudgetMultiplier < 1
+      ? (
+          allowRiskIncrease
+            ? `最近连续亏损${consecutiveLosses}笔，下一笔风险预算降至${Math.round(riskBudgetMultiplier * 100)}%`
+            : '账户风险闸门已触发，本次风险预算为0'
+        )
+      : null,
     reservedBuyCash: +reservedBuyCash.toFixed(2),
     availableCashAfterReservations:
       +availableCashAfterReservations.toFixed(2),

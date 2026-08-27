@@ -71,6 +71,32 @@ test('军师生成前必须服从短线内核给出的唯一允许动作集合',
   assert.match(prompt, /不得把集合外动作写成当前可执行/)
 })
 
+test('市场硬红线在快速与深度提示词中都禁止逆势开仓', () => {
+  const payload = {
+    code: '600000',
+    shortHorizonTactical: {
+      schemaVersion: 'short-horizon-tactical.v1',
+      market: {
+        hardRiskOff: true,
+        hardRiskSignals: ['炸板率45%超过40%'],
+      },
+      actionPolicy: {
+        schemaVersion: 'short-horizon-action-policy.v1',
+        allowedActions: ['WATCH'],
+        canIncreaseRisk: false,
+      },
+    },
+  }
+  const fast = buildUserPrompt('buy_advice', payload)
+  const deep = buildUserPrompt('buy_advice', {
+    ...payload,
+    generationProfile: 'DEEP',
+  })
+
+  assert.match(fast, /市场红线优先于逆势强票例外/)
+  assert.match(deep, /无论个股是否逆势强都禁止新增风险/)
+})
+
 test('试仓档位强制模型输出5%以内并要求人工确认', () => {
   const prompt = buildUserPrompt('buy_advice', {
     code: '600000',

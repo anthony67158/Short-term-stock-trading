@@ -177,6 +177,7 @@ function computeBuyCapacity({
   market,
   slippageBps,
   highConfidence,
+  accountRiskMultiplier = 1,
 }) {
   const totalAssets = positive(account.totalAssets)
   const cash = Math.max(0, finite(account.cash) || 0)
@@ -188,8 +189,13 @@ function computeBuyCapacity({
     85,
     positive(market.targetPositionPct?.max) || 0,
   )
+  const normalizedAccountRiskMultiplier = Math.max(
+    0,
+    Math.min(1, finite(accountRiskMultiplier) ?? 1),
+  )
   const riskPct = (highConfidence ? 1 : 0.6)
     * (finite(market.riskMultiplier) ?? 0)
+    * normalizedAccountRiskMultiplier
   const maxLossAmount = totalAssets == null
     ? null
     : round(totalAssets * riskPct / 100)
@@ -247,6 +253,7 @@ function computeBuyCapacity({
     lossPerLot: round(lossPerLot),
     stockLimitPct: stockLimit,
     marketPositionLimitPct: marketPositionLimit,
+    accountRiskMultiplier: normalizedAccountRiskMultiplier,
   }
 }
 
@@ -434,9 +441,20 @@ export function compileDecisionPlan({
     riskRequested
     && !marketUnknown
     && market.allowRiskIncrease !== true
-    && !dualConfirmation
+    && (
+      market.hardRiskOff === true
+      || !dualConfirmation
+    )
   ) {
-    blockedReasons.push('当前市场状态禁止新增风险')
+    blockedReasons.push(
+      market.hardRiskOff === true
+        ? `市场风险红线已触发${
+            market.hardRiskSignals?.length
+              ? `：${market.hardRiskSignals.join('、')}`
+              : ''
+          }`
+        : '当前市场状态禁止新增风险',
+    )
   }
   if (
     riskRequested
@@ -511,6 +529,7 @@ export function compileDecisionPlan({
     lossPerLot: null,
     stockLimitPct: null,
     marketPositionLimitPct: null,
+    accountRiskMultiplier: null,
   }
   if (
     riskIncreasing
@@ -529,6 +548,8 @@ export function compileDecisionPlan({
       market,
       slippageBps,
       highConfidence: payload.quant?.highConfSignal?.fired === true,
+      accountRiskMultiplier:
+        accountCircuitBreaker?.riskBudgetMultiplier,
     })
     if (capacity.lots <= 0) blockedReasons.push('风险预算或现金不足一手')
   }
@@ -804,6 +825,12 @@ export function compileDecisionPlan({
             schemaVersion: accountCircuitBreaker.schemaVersion,
             allowRiskIncrease:
               accountCircuitBreaker.allowRiskIncrease === true,
+            riskBudgetMultiplier:
+              finite(accountCircuitBreaker.riskBudgetMultiplier),
+            riskBudgetReason: text(
+              accountCircuitBreaker.riskBudgetReason,
+              160,
+            ),
             blockerCodes:
               accountCircuitBreaker.blockerCodes || [],
           }

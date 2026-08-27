@@ -273,12 +273,18 @@ function decisionPlanSummary(plan) {
         recovery: clean(issue?.recovery, 200),
       })).filter((issue) => issue.source && issue.label)
     : []
+  const riskBudgetReason = clean(
+    plan.risk?.accountCircuitBreaker?.riskBudgetReason,
+    160,
+  )
   const statusText = deferredPlan
     ? `${deferredPlan.actionLabel}方向已通过，当前只等待入场时机确认`
     : plan.manualConfirmationOnly === true
     ? '短线核心信号已共振，仅限人工确认小仓试错'
     : actionability === 'READY'
-    ? '证据、价格与账户风险检查均已通过'
+    ? `证据、价格与账户风险检查均已通过${
+        riskBudgetReason ? `；${riskBudgetReason}` : ''
+      }`
     : actionability === 'MANUAL_PROBE'
       ? '板块与个股短线条件已通过，仅限人工确认小仓试错'
     : actionability === 'BLOCKED'

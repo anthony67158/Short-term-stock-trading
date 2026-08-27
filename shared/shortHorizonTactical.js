@@ -915,6 +915,20 @@ export function buildShortHorizonTactical(
       phase,
       riskTone: marketTone,
       breadthScore: rounded(market.score),
+      sentimentPhase: text(market.sentiment?.phase, 20),
+      sentimentLabel: text(market.sentiment?.phaseLabel, 20),
+      sentimentScore: rounded(market.sentiment?.score),
+      breakRatePct: rounded(market.sentiment?.breakRatePct),
+      maxBoardHeight: rounded(
+        market.sentiment?.maxBoardHeight,
+        0,
+      ),
+      hardRiskOff: market.hardRiskOff === true,
+      hardRiskSignals: Array.isArray(market.hardRiskSignals)
+        ? market.hardRiskSignals.slice(0, 4).map((item) =>
+            text(item, 100)
+          )
+        : [],
     },
     sector: {
       name: text(payload.sectorOpportunity?.sector?.name, 50),

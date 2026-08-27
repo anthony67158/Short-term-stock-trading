@@ -217,6 +217,56 @@ test('账户熔断预留未完成买入现金且不提前释放卖出资金', ()
   assert.deepEqual(result.allowedActions, ['REDUCE', 'EXIT', 'WATCH'])
 })
 
+test('当日连续两笔亏损后停止新增风险', () => {
+  const result = evaluateAccountCircuitBreaker({
+    account: {
+      totalAssets: 100000,
+      cash: 60000,
+      dayStartAssets: 100000,
+    },
+    portfolio: {
+      position: 40,
+      industryWeights: [],
+    },
+    closed: [
+      { type: 'SELL', realizedPnl: -300, at: now - 2000 },
+      { type: 'SELL', realizedPnl: -200, at: now - 1000 },
+    ],
+    now,
+  })
+
+  assert.equal(result.allowRiskIncrease, false)
+  assert.equal(result.metrics.dailyConsecutiveLosses, 2)
+  assert.equal(result.riskBudgetMultiplier, 0)
+  assert.ok(result.blockerCodes.includes('CONSECUTIVE_LOSSES'))
+  assert.match(result.blockers[0].message, /当日连续亏损/)
+})
+
+test('跨日仍处于连亏序列时风险预算减半但不会永久锁死', () => {
+  const result = evaluateAccountCircuitBreaker({
+    account: {
+      totalAssets: 100000,
+      cash: 60000,
+      dayStartAssets: 100000,
+    },
+    portfolio: {
+      position: 40,
+      industryWeights: [],
+    },
+    closed: [
+      { type: 'SELL', realizedPnl: -300, at: now - 25 * 3600000 },
+      { type: 'SELL', realizedPnl: -200, at: now - 24 * 3600000 },
+    ],
+    now,
+  })
+
+  assert.equal(result.allowRiskIncrease, true)
+  assert.equal(result.metrics.consecutiveLosses, 2)
+  assert.equal(result.metrics.dailyConsecutiveLosses, 0)
+  assert.equal(result.riskBudgetMultiplier, 0.5)
+  assert.match(result.riskBudgetReason, /风险预算降至50%/)
+})
+
 test('做T网格仅在有底仓的震荡市且流动性波动合格时开放', () => {
   const eligible = evaluateTGridEligibility({
     marketRegime: 'RANGE',

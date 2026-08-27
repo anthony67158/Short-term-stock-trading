@@ -94,6 +94,86 @@
     },
     {
       "schemaVersion": "harness-case.v1",
+      "id": "execution-daily-loss-streak-cooldown",
+      "adapter": "execution",
+      "tags": ["execution", "account-risk", "loss-streak"],
+      "input": {
+        "scenario": "circuit",
+        "account": {
+          "totalAssets": 100000,
+          "cash": 60000,
+          "dayStartAssets": 100000
+        },
+        "portfolio": {
+          "position": 40,
+          "industryWeights": []
+        },
+        "closed": [
+          {
+            "type": "SELL",
+            "realizedPnl": -300,
+            "at": 1787279398000
+          },
+          {
+            "type": "SELL",
+            "realizedPnl": -200,
+            "at": 1787279399000
+          }
+        ],
+        "executionPlans": [],
+        "now": 1787279400000
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "allowRiskIncrease": false,
+        "availableCashAfterReservations": 60000,
+        "blockerCodes": ["CONSECUTIVE_LOSSES"],
+        "riskBudgetMultiplier": 0,
+        "dailyConsecutiveLosses": 2
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "execution-cross-day-loss-streak-throttle",
+      "adapter": "execution",
+      "tags": ["execution", "account-risk", "position-sizing"],
+      "input": {
+        "scenario": "circuit",
+        "account": {
+          "totalAssets": 100000,
+          "cash": 60000,
+          "dayStartAssets": 100000
+        },
+        "portfolio": {
+          "position": 40,
+          "industryWeights": []
+        },
+        "closed": [
+          {
+            "type": "SELL",
+            "realizedPnl": -300,
+            "at": 1787192998000
+          },
+          {
+            "type": "SELL",
+            "realizedPnl": -200,
+            "at": 1787192999000
+          }
+        ],
+        "executionPlans": [],
+        "now": 1787279400000
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "allowRiskIncrease": true,
+        "availableCashAfterReservations": 60000,
+        "blockerCodes": [],
+        "riskBudgetMultiplier": 0.5,
+        "dailyConsecutiveLosses": 0
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
       "id": "execution-range-grid-guardrail",
       "adapter": "execution",
       "tags": ["execution", "t-grid", "manual-only"],

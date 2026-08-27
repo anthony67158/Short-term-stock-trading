@@ -18,6 +18,10 @@ function normalizedInputs(payload = {}) {
   const breadth = payload.breadth && typeof payload.breadth === 'object'
     ? payload.breadth
     : payload
+  const sentiment = payload.sentiment
+    && typeof payload.sentiment === 'object'
+    ? payload.sentiment
+    : {}
   const indices = (Array.isArray(payload.indices) ? payload.indices : [])
     .map((item) => ({
       code: clean(item?.code, 12),
@@ -36,6 +40,24 @@ function normalizedInputs(payload = {}) {
       amountYi: finite(breadth.amountYi),
       volVsAvg5: finite(breadth.volVsAvg5),
       volLevel: clean(breadth.volLevel, 20),
+      volumeComparable: breadth.volumeComparable === true,
+      volumeTradeDate: clean(breadth.volumeTradeDate, 20),
+    },
+    sentiment: {
+      phase: clean(sentiment.phase, 20),
+      phaseLabel: clean(sentiment.phaseLabel, 20),
+      score: finite(sentiment.score),
+      brokenLimit: finite(sentiment.brokenLimit),
+      breakRatePct: finite(sentiment.breakRatePct),
+      maxBoardHeight: finite(sentiment.maxBoardHeight),
+      linkedBoardCount: finite(sentiment.linkedBoardCount),
+      dataQuality: clean(sentiment.dataQuality, 20),
+      hardRiskSignals: Array.isArray(sentiment.hardRiskSignals)
+        ? sentiment.hardRiskSignals
+          .map((item) => clean(item, 100))
+          .filter(Boolean)
+          .slice(0, 4)
+        : [],
     },
     asOf: payload.updatedAt || payload.asOf || null,
   }
@@ -87,7 +109,12 @@ function regimeProfile(regime) {
 }
 
 export function deriveMarketRegime(payload = {}) {
-  const { indices, breadth, asOf } = normalizedInputs(payload)
+  const {
+    indices,
+    breadth,
+    sentiment,
+    asOf,
+  } = normalizedInputs(payload)
   const hasBreadth = breadth.up != null && breadth.down != null
   const hasMarketEvidence = indices.length > 0 || hasBreadth
   if (!hasMarketEvidence) {
@@ -102,6 +129,9 @@ export function deriveMarketRegime(payload = {}) {
       ...profile,
       indices,
       breadth,
+      sentiment,
+      hardRiskOff: false,
+      hardRiskSignals: [],
       asOf,
       note: '市场关键证据缺失，暂停新增风险，仅允许处理已有仓位。',
     }
@@ -126,12 +156,49 @@ export function deriveMarketRegime(payload = {}) {
       8,
     )
   }
-  if (breadth.volLevel === '放量' && averageIndexPct > 0) score += 5
-  if (breadth.volLevel === '放量' && averageIndexPct < 0) score -= 5
+  if (
+    breadth.volumeComparable
+    && breadth.volLevel === '放量'
+    && averageIndexPct > 0
+  ) score += 5
+  if (
+    breadth.volumeComparable
+    && breadth.volLevel === '放量'
+    && averageIndexPct < 0
+  ) score -= 5
+  if (sentiment.breakRatePct != null) {
+    if (sentiment.breakRatePct <= 15) score += 4
+    else if (sentiment.breakRatePct > 40) score -= 10
+    else if (sentiment.breakRatePct >= 35) score -= 5
+  }
+  if (sentiment.maxBoardHeight >= 5) score += 4
+  else if (sentiment.maxBoardHeight >= 3) score += 2
   score = Math.round(clamp(score, 0, 100))
 
+  const hardRiskSignals = [...sentiment.hardRiskSignals]
+  if (
+    breadth.volumeComparable
+    && breadth.volVsAvg5 != null
+    && breadth.volVsAvg5 <= -20
+  ) {
+    hardRiskSignals.push(
+      `两市成交较近5日均量缩量${Math.abs(breadth.volVsAvg5)}%`,
+    )
+  }
+  if (
+    breadth.volumeComparable
+    && breadth.volLevel === '放量'
+    && averageIndexPct <= -1
+  ) {
+    hardRiskSignals.push(
+      `主要指数平均下跌${Math.abs(averageIndexPct).toFixed(2)}%且放量`,
+    )
+  }
+  const uniqueHardRiskSignals = [...new Set(hardRiskSignals)]
+  const hardRiskOff = uniqueHardRiskSignals.length > 0
   let regime
-  if (score >= 68) regime = 'TREND_STRONG'
+  if (hardRiskOff) regime = 'RISK_OFF'
+  else if (score >= 68) regime = 'TREND_STRONG'
   else if (score <= 44) regime = 'RISK_OFF'
   else if (
     Math.abs(averageIndexPct) <= 0.6
@@ -161,7 +228,20 @@ export function deriveMarketRegime(payload = {}) {
     ...profile,
     indices,
     breadth,
+    sentiment,
+    hardRiskOff,
+    hardRiskSignals: uniqueHardRiskSignals,
     asOf,
-    note: `市场${profile.label}（${score}分）：${indexText || '指数数据暂缺'}；${breadthText}${breadth.volLevel ? `，当前${breadth.volLevel}` : ''}。目标总仓位${target.min}~${target.max}%。`,
+    note: `市场${profile.label}（${score}分）${
+      sentiment.phaseLabel ? `，情绪${sentiment.phaseLabel}` : ''
+    }：${indexText || '指数数据暂缺'}；${breadthText}${
+      breadth.volLevel && breadth.volumeComparable
+        ? `，当前${breadth.volLevel}`
+        : ''
+    }${
+      hardRiskOff
+        ? `；风险红线：${uniqueHardRiskSignals.join('、')}`
+        : ''
+    }。目标总仓位${target.min}~${target.max}%。`,
   }
 }

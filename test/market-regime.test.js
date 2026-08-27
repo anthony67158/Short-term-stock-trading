@@ -82,3 +82,49 @@ test('指数和涨跌家数胶着时识别为震荡而不是强行趋势化', ()
   assert.equal(result.portfolioRegime, 'balanced')
   assert.deepEqual(result.targetPositionPct, { min: 30, max: 50 })
 })
+
+test('炸板率超过40%时即使指数上涨也强制进入风险防守', () => {
+  const result = deriveMarketRegime({
+    ...strongMarket,
+    sentiment: {
+      phase: 'RETREAT',
+      phaseLabel: '退潮',
+      score: 32,
+      breakRatePct: 44.2,
+      maxBoardHeight: 4,
+      hardRiskSignals: ['炸板率44.2%超过40%'],
+      dataQuality: 'COMPLETE',
+    },
+  })
+
+  assert.equal(result.regime, 'RISK_OFF')
+  assert.equal(result.hardRiskOff, true)
+  assert.equal(result.allowRiskIncrease, false)
+  assert.match(result.note, /情绪退潮/)
+  assert.match(result.note, /风险红线.*炸板率/)
+})
+
+test('盘中累计成交额不触发全天缩量红线', () => {
+  const intraday = deriveMarketRegime({
+    ...strongMarket,
+    breadth: {
+      ...strongMarket.breadth,
+      volVsAvg5: -65,
+      volLevel: '缩量',
+      volumeComparable: false,
+    },
+  })
+  const completed = deriveMarketRegime({
+    ...strongMarket,
+    breadth: {
+      ...strongMarket.breadth,
+      volVsAvg5: -25,
+      volLevel: '缩量',
+      volumeComparable: true,
+    },
+  })
+
+  assert.equal(intraday.hardRiskOff, false)
+  assert.equal(completed.hardRiskOff, true)
+  assert.match(completed.hardRiskSignals.join('；'), /缩量25%/)
+})
