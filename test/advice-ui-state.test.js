@@ -13,6 +13,7 @@ import {
   startAdvicePersistently,
   shouldShowAdviceResult,
   shouldApplyCloudBatch,
+  shouldApplyCloudProgressSnapshot,
 } from '../shared/adviceUiState.js'
 
 test('快速军师用可验证阶段展示流程而不依赖隐藏思维链', () => {
@@ -68,6 +69,51 @@ test('空任务快照不显示批量完成条', () => {
     items: [],
     at: Date.now(),
   }), false)
+})
+
+test('相同时间戳的发布终态变化仍必须回灌客户端', () => {
+  const publishing = {
+    at: 2000,
+    running: true,
+    total: 1,
+    done: 0,
+    ok: 0,
+    fail: 0,
+    skipped: 0,
+    items: [{
+      code: '000636',
+      jobId: 'job-1',
+      status: 'publishing',
+    }],
+    reviews: [],
+  }
+  const completed = {
+    ...publishing,
+    running: false,
+    done: 1,
+    ok: 1,
+    items: [{
+      code: '000636',
+      jobId: 'job-1',
+      status: 'ok',
+    }],
+  }
+
+  assert.equal(
+    shouldApplyCloudProgressSnapshot(publishing, completed),
+    true,
+  )
+  assert.equal(
+    shouldApplyCloudProgressSnapshot(completed, completed),
+    false,
+  )
+  assert.equal(
+    shouldApplyCloudProgressSnapshot(completed, {
+      ...publishing,
+      at: 1999,
+    }),
+    false,
+  )
 })
 
 test('个股详情优先展示生成时间更新的云端批量结果', () => {

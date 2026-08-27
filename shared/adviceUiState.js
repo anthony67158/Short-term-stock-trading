@@ -65,6 +65,43 @@ export function shouldApplyCloudBatch(progress) {
   )
 }
 
+function cloudProgressSignature(progress = {}) {
+  const items = (list) => (Array.isArray(list) ? list : []).map((item) => [
+    String(item?.code || ''),
+    String(item?.jobId || ''),
+    String(item?.status || ''),
+    String(item?.stage || ''),
+    String(item?.phase || ''),
+    String(item?.error || ''),
+    Number(item?.progressAt) || 0,
+  ])
+  return JSON.stringify({
+    batchId: String(progress.batchId || ''),
+    running: progress.running === true,
+    total: Number(progress.total) || 0,
+    done: Number(progress.done) || 0,
+    ok: Number(progress.ok) || 0,
+    fail: Number(progress.fail) || 0,
+    skipped: Number(progress.skipped) || 0,
+    items: items(progress.items),
+    reviews: items(progress.reviews),
+  })
+}
+
+export function shouldApplyCloudProgressSnapshot(
+  current,
+  incoming,
+  { force = false } = {},
+) {
+  if (force) return true
+  const incomingAt = Number(incoming?.at) || 0
+  if (!incomingAt) return false
+  const currentAt = Number(current?.at) || 0
+  if (incomingAt !== currentAt) return incomingAt > currentAt
+  return cloudProgressSignature(current)
+    !== cloudProgressSignature(incoming)
+}
+
 export function mergeCloudAdviceItems(
   previousItems = [],
   incomingItems = [],

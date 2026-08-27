@@ -29,6 +29,7 @@ export const LOCK_TTL_MS = 60 * 1000;    // Worker 锁 TTL:drainer 周期续租;
 export const MAX_ATTEMPTS = 3;           // 失败最多重试次数
 const JOB_TTL_MS = 24 * 3600 * 1000;     // 终态任务保留 24h 后清理(避免无限堆积)
 const BATCH_CANCEL_TTL_MS = 24 * 3600 * 1000;
+const PUBLISHING_GRACE_MS = 2 * 60 * 1000;
 const ADVICE_AUTO_PAUSE_MS = 30 * 60 * 1000;
 const EVENT_KEY_TTL_MS = 24 * 3600 * 1000;
 const EVENT_KEY_LIMIT = 1000;
@@ -852,22 +853,35 @@ export function jobsToProgress(data, now = Date.now(), concurrency = CONCURRENCY
   );
   const hasPublishedAdvice = (job) => {
     if (job?.status !== 'done') return true;
-    return isCompleteAdviceEntry(
-      data?.advice?.[String(job.code || '')],
-      job.mode,
+    const entry = data?.advice?.[String(job.code || '')];
+    if (!isCompleteAdviceEntry(entry, job.mode)) return false;
+    const publishedAt = Math.max(
+      Number(entry?.updatedAt) || 0,
+      Number(entry?.at) || 0,
     );
+    const finishedAt = Number(job.finishedAt) || 0;
+    return !finishedAt || publishedAt >= finishedAt;
   };
   const mapStatus = (job) => {
     if (job.cancelRequested && job.status === 'running') return 'canceling';
-    return job.status === 'done'
-      ? (hasPublishedAdvice(job) ? 'ok' : 'publishing')
-      : job.status === 'failed' ? 'fail'
-        : job.status === 'canceled' ? 'skipped'
-          : job.status;
+    if (job.status === 'done') {
+      if (hasPublishedAdvice(job)) return 'ok';
+      const publishingSince = Number(job.finishedAt)
+        || Number(job.progressAt)
+        || Number(job.at)
+        || now;
+      return now - publishingSince > PUBLISHING_GRACE_MS
+        ? 'fail'
+        : 'publishing';
+    }
+    return job.status === 'failed' ? 'fail'
+      : job.status === 'canceled' ? 'skipped'
+        : job.status;
   };
   const mapItem = (j) => {
     const status = mapStatus(j);
     const publishing = status === 'publishing';
+    const publishFailed = j.status === 'done' && status === 'fail';
     return {
     code: j.code,
     jobId: j.id || '',
@@ -876,12 +890,18 @@ export function jobsToProgress(data, now = Date.now(), concurrency = CONCURRENCY
     role: adviceJobRole(j),
     source: j.source || '',
     status,
-    error: j.error || '',
+    error: publishFailed
+      ? '建议发布失败，请重新生成'
+      : (j.error || ''),
     warning: j.dailyReportWarning || '',
-    stage: publishing ? 'finalize' : (j.stage || ''),
+    stage: publishing
+      ? 'finalize'
+      : publishFailed ? 'failed' : (j.stage || ''),
     phase: publishing
       ? '正在核验并发布最终结论'
-      : (j.phase || ''),
+      : publishFailed
+        ? '建议发布失败，请重新生成'
+        : (j.phase || ''),
     sources: Array.isArray(j.sources) ? j.sources : [],
     reasoning: j.reasoning || '',
     quant: j.quant || null,
@@ -903,7 +923,7 @@ export function jobsToProgress(data, now = Date.now(), concurrency = CONCURRENCY
     .map(mapItem);
   const publishing = recent.filter((j) => mapStatus(j) === 'publishing');
   const ok = recent.filter((j) => mapStatus(j) === 'ok').length;
-  const fail = recent.filter((j) => j.status === 'failed').length;
+  const fail = recent.filter((j) => mapStatus(j) === 'fail').length;
   const skipped = recent.filter((j) => j.status === 'canceled').length;
   const active = [
     ...recent.filter((j) => isActive(j)),

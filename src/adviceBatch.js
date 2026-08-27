@@ -21,6 +21,7 @@ import {
   isAdviceItemActive,
   mergeCloudAdviceItems,
   shouldApplyCloudBatch,
+  shouldApplyCloudProgressSnapshot,
 } from '../shared/adviceUiState.js'
 import {
   batchConcurrency,
@@ -103,6 +104,7 @@ export function getBatchState() {
     serverMode: state.serverMode,
     concurrency: getConcurrency(),
     pct: state.total ? Math.round((state.done / state.total) * 100) : 0,
+    at: state._cloudAt,
   }
 }
 export function isBatchRunning() { return state.running }
@@ -311,7 +313,7 @@ export function regenerateFailed(quoteMap) {
 // authStore.pull 每 45s(批量中加速)拉云端账号,把其中 data.batchProgress 喂进来。
 // 这样【另一台设备上正在跑的服务端批量】,本机也能实时看到同一个进度条(手机生成、电脑同步看到)。
 // 规则:
-//   · 仅当云端进度的 at 比已消费的更新才应用(防旧盖新/重复渲染);
+//   · 新时间戳直接应用；同时间戳下终态变化也必须应用，避免发布完成被去重；
 //   · 本机正在跑【本地】批量(serverMode=false 且 running)时不被云端覆盖,避免两套进度打架;
 //   · finished 后 8s 由 UI 自行淡出(与本地一致)。
 export function applyCloudBatch(bp, force = false) {
@@ -331,7 +333,13 @@ export function applyCloudBatch(bp, force = false) {
     )
   ) return
   if (state.running && !state.serverMode) return           // 本机本地批量进行中 → 不打架
-  if (!force && at > 0 && at <= state._cloudAt) return
+  if (
+    !shouldApplyCloudProgressSnapshot(
+      getBatchState(),
+      bp,
+      { force },
+    )
+  ) return
   const reviews = Array.isArray(bp.reviews)
     ? bp.reviews.map((item) => ({ ...item }))
     : []

@@ -279,6 +279,26 @@ test('没有完整正文的终态任务仍显示为发布中而不是生成完�
   assert.equal(progress.items[0].stage, 'finalize')
 })
 
+test('终态任务超过发布宽限期后转为失败而不是永久卡在发布中', () => {
+  const data = {}
+  enqueueJob(data, {
+    code: '600000',
+    name: '浦发银行',
+    mode: 'buy_advice',
+  }, 1000)
+  leaseJob(data, '600000', 1100)
+  completeJob(data, '600000', 2000)
+
+  const progress = jobsToProgress(data, 2000 + 3 * 60 * 1000, 2)
+
+  assert.equal(progress.running, false)
+  assert.equal(progress.done, 1)
+  assert.equal(progress.fail, 1)
+  assert.equal(progress.items[0].status, 'fail')
+  assert.equal(progress.items[0].stage, 'failed')
+  assert.match(progress.items[0].error, /发布失败/)
+})
+
 test('完整建议已落盘后终态任务才对外显示完成', () => {
   const data = {
     advice: {
