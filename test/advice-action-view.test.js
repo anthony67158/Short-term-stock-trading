@@ -10,6 +10,7 @@ import {
   advicePlanSyncPatch,
   planStore,
 } from '../src/planStore.js'
+import { holdingAddReviewPlan } from '../shared/holdingFollowUp.js'
 
 test('止损触及但做T买回仓位受T加一锁定时卡片保留不可卖指令', () => {
   const view = buildHoldingCardDecisionView({
@@ -606,6 +607,26 @@ test('持有建议把战术回踩与突破价编译成双路径加仓复核', ()
   assert.equal(progress.reachedKey, 'holding_add_breakout')
   assert.equal(progress.stateLabel, '突破加仓复核已到')
   assert.equal(progress.reachedHint, '等待自动复核')
+})
+
+test('弱市条件加仓复核沿用3%仓位上限', () => {
+  const followUp = holdingAddReviewPlan({
+    action: '持有',
+    shortHorizonTactical: {
+      timing: {
+        pullbackPrice: 50.94,
+        breakoutPrice: 52.06,
+      },
+      actionPolicy: {
+        riskTier: 'PROBE',
+        maxPositionPct: 3,
+      },
+    },
+  })
+
+  assert.equal(followUp.reviewIntent.mode, 'ENTRY_CONFIRMATION')
+  assert.equal(followUp.reviewIntent.plannedAction, 'PROBE_ADD')
+  assert.equal(followUp.reviewIntent.maxPositionPct, 3)
 })
 
 test('持有建议缺少回踩价时使用止损线补全观察区间', () => {

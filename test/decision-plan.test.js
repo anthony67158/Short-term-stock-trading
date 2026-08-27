@@ -415,6 +415,70 @@ test('市场硬红线不能被逆势强票和量化高把握绕过', () => {
   assert.match(plan.blockedReasons.join('；'), /市场风险红线.*炸板率/)
 })
 
+test('普通弱市逆势试仓限制为3%且要求至少2.2比1赔率', () => {
+  const weakPayload = {
+    ...payload,
+    todayQuote: {
+      ...payload.todayQuote,
+      amount: 2e8,
+    },
+    marketEnv: {
+      ...payload.marketEnv,
+      regime: 'RISK_OFF',
+      score: 38,
+      weak: true,
+      allowRiskIncrease: false,
+      hardRiskOff: false,
+      riskMultiplier: 0.25,
+      targetPositionPct: { min: 0, max: 20 },
+    },
+    counterTrend: {
+      isStrong: true,
+      flags: ['强于大盘', '主力逆势流入'],
+    },
+    account: {
+      ...payload.account,
+      position: 0,
+    },
+  }
+  const insufficientReward = compileDecisionPlan({
+    mode: 'buy_advice',
+    advice: {
+      action: '小仓试错',
+      tier: 'probe',
+      buyPrice: 10,
+      stopPrice: 9,
+      targetPrice: 12,
+      planQtyNum: 10,
+    },
+    payload: weakPayload,
+    evidenceSnapshot: snapshot,
+    now,
+  })
+  const eligible = compileDecisionPlan({
+    mode: 'buy_advice',
+    advice: {
+      action: '小仓试错',
+      tier: 'probe',
+      buyPrice: 10,
+      stopPrice: 9,
+      targetPrice: 12.3,
+      planQtyNum: 10,
+    },
+    payload: weakPayload,
+    evidenceSnapshot: snapshot,
+    now,
+  })
+
+  assert.equal(insufficientReward.actionability, 'BLOCKED')
+  assert.match(
+    insufficientReward.blockedReasons.join('；'),
+    /2.2:1/,
+  )
+  assert.equal(eligible.actionability, 'READY')
+  assert.equal(eligible.risk.manualProbeLimitPct, 3)
+})
+
 test('观望计划只保留可核验的价格复核条件', () => {
   const plan = compileDecisionPlan({
     mode: 'buy_advice',

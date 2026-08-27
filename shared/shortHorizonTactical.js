@@ -418,6 +418,7 @@ function observationTiming(payload = {}) {
 
 function conflictsOf({
   marketTone,
+  weakMarketProbeReady,
   sectorState,
   relativeStrength,
   flowRelation: relation,
@@ -428,6 +429,7 @@ function conflictsOf({
   if (
     marketTone === 'RISK_OFF'
     && relativeStrength >= 65
+    && weakMarketProbeReady !== true
   ) conflicts.push('个股逆势强，但市场风险偏高')
   if (
     ['LEADING', 'CONFIRMING'].includes(sectorState)
@@ -490,11 +492,22 @@ function riskIncreaseAssessment(tactical = {}) {
   } else if (timingState === 'WAIT_BREAKOUT') {
     fullRiskGaps.push('等待放量突破确认')
   }
-  if (
-    ['RISK_OFF', 'UNKNOWN'].includes(
-      tactical.market?.riskTone,
-    )
-  ) hardBlockers.push('市场风险不支持新增仓位')
+  const riskTone = tactical.market?.riskTone
+  const weakMarketProbe = (
+    riskTone === 'RISK_OFF'
+    && tactical.market?.hardRiskOff !== true
+    && tactical.stock?.counterTrendStrong === true
+    && tactical.quant?.highConfidence === true
+  )
+  if (riskTone === 'UNKNOWN') {
+    hardBlockers.push('市场状态无法确认，不支持新增仓位')
+  } else if (tactical.market?.hardRiskOff === true) {
+    hardBlockers.push('市场风险红线已触发，禁止新增仓位')
+  } else if (riskTone === 'RISK_OFF' && !weakMarketProbe) {
+    hardBlockers.push('弱市仅允许逆势强且量化高把握的标的小仓试错')
+  } else if (weakMarketProbe) {
+    fullRiskGaps.push('普通弱市只允许不超过3%的人工试错')
+  }
   if (
     tactical.sector?.state === 'WEAKENING'
     || tactical.sector?.stockRole === 'LAGGARD'
@@ -514,6 +527,15 @@ function riskIncreaseAssessment(tactical = {}) {
   }
   if (tactical.catalyst?.risk === 'NEGATIVE') {
     hardBlockers.push('负面事件风险尚未消化')
+  }
+  if (
+    tactical.holding?.hasPosition === true
+    && tactical.holding?.addEligible !== true
+  ) {
+    hardBlockers.push(
+      tactical.holding?.addBlockReason
+      || '持仓未盈利且未重新站回关键位，禁止下跌加仓',
+    )
   }
   const quant = quantConfirmation(tactical)
   const flowConfirmed = (
@@ -564,6 +586,7 @@ function riskIncreaseAssessment(tactical = {}) {
   )
   const canFull = (
     canProbe
+    && riskTone !== 'RISK_OFF'
     && timingState === 'READY'
     && quant.strong
     && flowConfirmed
@@ -667,6 +690,9 @@ export function deriveShortHorizonActionPolicy({
   )
     ? 'PROBE'
     : assessment.riskTier
+  const probePositionLimitPct = riskTier === 'PROBE'
+    ? source.market?.riskTone === 'RISK_OFF' ? 3 : 5
+    : null
   const timingReady = (
     source.timing?.state === 'READY'
     || priceReviewReached
@@ -724,8 +750,7 @@ export function deriveShortHorizonActionPolicy({
           : canIncreaseRisk ? 'EXECUTION' : 'ENTRY_CONFIRMATION',
         directionApproved,
         exactPriceRequired: canIncreaseRisk,
-        maxPositionPct:
-          riskTier === 'PROBE' ? 5 : null,
+        maxPositionPct: probePositionLimitPct,
         manualConfirmationOnly:
           riskTier === 'PROBE',
       }
@@ -750,8 +775,7 @@ export function deriveShortHorizonActionPolicy({
       directionApproved: true,
       session: nextSession.session,
       sessionLabel: nextSession.sessionLabel,
-      maxPositionPct:
-        riskTier === 'PROBE' ? 5 : null,
+      maxPositionPct: probePositionLimitPct,
       manualConfirmationOnly: true,
       requiresLiveReview: true,
       trigger: nextReviewTrigger,
@@ -807,7 +831,7 @@ export function deriveShortHorizonActionPolicy({
     canIncreaseRisk,
     executionOpen,
     riskTier,
-    maxPositionPct: riskTier === 'PROBE' ? 5 : null,
+    maxPositionPct: probePositionLimitPct,
     manualConfirmationOnly: riskTier === 'PROBE',
     entryIntent,
     nextSessionPlan,
@@ -854,8 +878,15 @@ export function buildShortHorizonTactical(
   const relativeStrength = relativeStrengthOf(payload, role, relation)
   const prices = observationTiming(payload)
   const quantDirection = text(payload.quant?.forecast?.direction, 30)
+  const weakMarketProbeReady = (
+    marketTone === 'RISK_OFF'
+    && market.hardRiskOff !== true
+    && payload.counterTrend?.isStrong === true
+    && payload.quant?.highConfSignal?.fired === true
+  )
   const conflicts = conflictsOf({
     marketTone,
+    weakMarketProbeReady,
     sectorState,
     relativeStrength,
     flowRelation: relation,
@@ -876,7 +907,10 @@ export function buildShortHorizonTactical(
             && technical.supportsImmediateEntry
           )
         )
-        && marketTone !== 'RISK_OFF'
+        && (
+          marketTone !== 'RISK_OFF'
+          || weakMarketProbeReady
+        )
         && !conflicts.length
         ? 'READY'
         : prices.pullbackPrice != null
@@ -945,6 +979,8 @@ export function buildShortHorizonTactical(
       vsVwap: text(payload.intraday?.vsVwap, 30) || 'UNKNOWN',
       smartMoney: payload.lhb?.smartMoney === true,
       relativeStrength,
+      counterTrendStrong:
+        payload.counterTrend?.isStrong === true,
       location,
       liquidity: liquidityEvidence.state,
       liquidityEvidence,
@@ -964,6 +1000,48 @@ export function buildShortHorizonTactical(
       retailDirection,
       relation,
     },
+    holding: (() => {
+      const holdQty = finite(payload.holdQty)
+      if (!(holdQty > 0)) return null
+      const current = finite(quote.price ?? payload.currentPrice)
+      const holdCost = finite(payload.holdCost)
+      const vwap = finite(payload.intraday?.vwap)
+      const ma5 = finite(payload.tech?.ma?.ma5)
+      const reclaimedLevels = [
+        current != null && vwap != null && current >= vwap
+          ? 'VWAP'
+          : '',
+        current != null && ma5 != null && current >= ma5
+          ? 'MA5'
+          : '',
+      ].filter(Boolean)
+      const profitable = (
+        current != null
+        && holdCost != null
+        && current >= holdCost
+      )
+      const keyLevelReclaimed = (
+        !profitable
+        && reclaimedLevels.length > 0
+        && technical.bias === 'BULLISH'
+        && mainDirection === 'INFLOW'
+      )
+      const addEligible = profitable || keyLevelReclaimed
+      return {
+        hasPosition: true,
+        holdQty: rounded(holdQty, 0),
+        holdCost: rounded(holdCost, 3),
+        profitable,
+        keyLevelReclaimed,
+        reclaimedLevels,
+        addEligible,
+        addBlockReason: addEligible
+          ? ''
+          : holdCost == null
+            ? '持仓成本缺失，不能核验加仓是否属于下跌摊平'
+            : '持仓未盈利且未重新站回VWAP或MA5，禁止下跌加仓',
+      }
+    })(),
     timing: {
       state,
       ...prices,

@@ -63,6 +63,71 @@ test('弱市只有逆势强势与高把握信号同时成立才允许小仓买�
   assert.equal(risk.blocked, false)
 })
 
+test('市场硬红线不能被逆势强势与高把握信号绕过', () => {
+  const { result, risk } = applyPortfolioRiskPolicy({
+    mode: 'buy_advice',
+    result: {
+      action: '小仓试错',
+      tier: 'probe',
+      buyPrice: 20,
+      planQty: 1,
+      planQtyNum: 1,
+      planAmount: 2000,
+    },
+    payload: {
+      account: {
+        totalAssets: 80000,
+        cash: 40000,
+        position: 50,
+      },
+      marketEnv: {
+        score: 35,
+        weak: true,
+        hardRiskOff: true,
+      },
+      counterTrend: { isStrong: true },
+      quant: { highConfSignal: { fired: true } },
+    },
+  })
+
+  assert.equal(result.action, '观望')
+  assert.equal(risk.blocked, true)
+  assert.match(risk.reasons.join('；'), /市场风险红线/)
+})
+
+test('持仓未盈利且未站回关键位时加仓降级为持有', () => {
+  const { result, risk } = applyPortfolioRiskPolicy({
+    mode: 'hold_advice',
+    result: {
+      action: '加仓',
+      opQty: '加仓1手',
+      opAmount: 10000,
+    },
+    payload: {
+      holdQty: 1,
+      holdCost: 105,
+      todayQuote: { price: 100, live: true },
+      account: {
+        totalAssets: 100000,
+        cash: 50000,
+        position: 40,
+      },
+      shortHorizonTactical: {
+        holding: {
+          hasPosition: true,
+          addEligible: false,
+          addBlockReason:
+            '持仓未盈利且未重新站回VWAP或MA5，禁止下跌加仓',
+        },
+      },
+    },
+  })
+
+  assert.equal(result.action, '持有')
+  assert.equal(risk.blocked, true)
+  assert.match(result.actionPlan, /禁止下跌加仓/)
+})
+
 test('市场环境缺失时不伪造弱市理由阻止正常小仓买入', () => {
   const { result, risk } = applyPortfolioRiskPolicy({
     mode: 'buy_advice',

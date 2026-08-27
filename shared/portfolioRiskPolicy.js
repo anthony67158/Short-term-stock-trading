@@ -169,6 +169,8 @@ export function applyPortfolioRiskPolicy({
   const marketScore = finite(payload.marketEnv?.score)
   const marketWeak = payload.marketEnv?.weak === true
     || (marketScore != null && marketScore <= 44)
+  const marketHardRiskOff =
+    payload.marketEnv?.hardRiskOff === true
   const dualConfirmation = payload.counterTrend?.isStrong === true
     && payload.quant?.highConfSignal?.fired === true
   const risk = {
@@ -202,8 +204,21 @@ export function applyPortfolioRiskPolicy({
   if (sectorWeight != null && sectorWeight >= 30) {
     risk.reasons.push(`所属行业占比${sectorWeight}%过高`)
   }
-  if (marketWeak && !dualConfirmation) {
+  if (marketHardRiskOff) {
+    risk.reasons.push('市场风险红线已触发')
+  } else if (marketWeak && !dualConfirmation) {
     risk.reasons.push('弱市且未同时满足逆势强势与高把握信号')
+  }
+  if (
+    mode === 'hold_advice'
+    && isAddAction(result)
+    && payload.shortHorizonTactical?.holding?.hasPosition === true
+    && payload.shortHorizonTactical.holding.addEligible !== true
+  ) {
+    risk.reasons.push(
+      payload.shortHorizonTactical.holding.addBlockReason
+      || '持仓未盈利且未重新站回关键位，禁止下跌加仓',
+    )
   }
 
   if (mode === 'buy_advice' && isBuyAction(result) && risk.reasons.length) {

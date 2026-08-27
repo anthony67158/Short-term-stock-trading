@@ -122,6 +122,58 @@ test('试仓档位强制模型输出5%以内并要求人工确认', () => {
   assert.match(prompt, /盈亏比至少1.8:1/)
 })
 
+test('弱市逆势试仓提示词使用3%仓位和2.2比1赔率', () => {
+  const prompt = buildUserPrompt('buy_advice', {
+    code: '600000',
+    shortHorizonTactical: {
+      schemaVersion: 'short-horizon-tactical.v1',
+      market: {
+        phase: 'AFTERNOON',
+        riskTone: 'RISK_OFF',
+        hardRiskOff: false,
+      },
+      actionPolicy: {
+        schemaVersion: 'short-horizon-action-policy.v1',
+        allowedActions: ['BUY', 'WATCH'],
+        executionOpen: true,
+        riskTier: 'PROBE',
+        maxPositionPct: 3,
+        manualConfirmationOnly: true,
+      },
+    },
+  })
+
+  assert.match(prompt, /仓位不得超过总资产3%/)
+  assert.match(prompt, /弱市.*盈亏比至少2.2:1/)
+  assert.doesNotMatch(prompt, /仓位不得超过总资产5%/)
+})
+
+test('持仓加仓提示词禁止亏损途中摊平', () => {
+  const prompt = buildUserPrompt('hold_advice', {
+    code: '600000',
+    shortHorizonTactical: {
+      schemaVersion: 'short-horizon-tactical.v1',
+      holding: {
+        hasPosition: true,
+        holdCost: 105,
+        profitable: false,
+        keyLevelReclaimed: false,
+        addEligible: false,
+        addBlockReason: '持仓未盈利且未重新站回VWAP或MA5，禁止下跌加仓',
+      },
+      actionPolicy: {
+        schemaVersion: 'short-horizon-action-policy.v1',
+        allowedActions: ['HOLD', 'REDUCE', 'EXIT', 'WATCH'],
+        executionOpen: true,
+        riskTier: 'NONE',
+      },
+    },
+  })
+
+  assert.match(prompt, /当前禁止加仓/)
+  assert.match(prompt, /禁止下跌加仓|禁止下跌摊平/)
+})
+
 test('休市时模型保留下一时段试仓预案而不是只写等待盘中', () => {
   const prompt = buildUserPrompt('buy_advice', {
     code: '600000',
@@ -517,7 +569,8 @@ test('显式深度生成使用紧凑事实契约而不丢失价格与资金约�
   assert.match(prompt, /"mainNetYi":0.8/)
   assert.match(prompt, /"retailNetYi":-0.2/)
   assert.match(prompt, /"quantTargetHigh":10.8/)
-  assert.match(prompt, /主动做多必须满足风险预算与盈亏比至少1\.8:1/)
+  assert.match(prompt, /普通市场盈亏比至少1\.8:1/)
+  assert.match(prompt, /弱市试错至少2\.2:1/)
   assert.doesNotMatch(prompt, /UNUSED_DEEP_PAYLOAD/)
   assert.ok(prompt.length < 7000)
 })

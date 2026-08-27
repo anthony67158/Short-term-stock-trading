@@ -1,6 +1,6 @@
 {
   "schemaVersion": "harness-baseline.v1",
-  "generatedAt": 1787803600100,
+  "generatedAt": 1787810200954,
   "versions": {
     "app": "1.0.0",
     "git": "working-tree",
@@ -57,7 +57,7 @@
         "actionability": 1,
         "consistency": 1
       },
-      "cases": 7,
+      "cases": 8,
       "caseIds": [
         "advice-after-close-converts-high-entry-to-review",
         "advice-buy-cash-cap",
@@ -65,7 +65,8 @@
         "advice-hold-t1-no-sellable",
         "advice-invalid-price-downgrade",
         "advice-short-horizon-policy-blocks-chasing",
-        "advice-short-horizon-policy-caps-probe"
+        "advice-short-horizon-policy-caps-probe",
+        "advice-weak-market-countertrend-probe"
       ]
     },
     "judge": {

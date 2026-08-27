@@ -327,6 +327,9 @@ export function compileDecisionPlan({
   )
   const stopPrice = positive(advice.stopPrice)
   const targetPrice = positive(advice.targetPrice)
+  const minimumRiskReward = market.regime === 'RISK_OFF'
+    ? 2.2
+    : 1.8
   const requestedLots = requestedLotsFor(governedAction, advice)
   const slippageBps = 5
   const generatedPriceContract = buildAdvicePriceContract({
@@ -501,11 +504,14 @@ export function compileDecisionPlan({
       || !(targetPrice > requestedReferencePrice)
       || !(
         (targetPrice - requestedReferencePrice)
-        / (requestedReferencePrice - stopPrice) >= 1.8
+        / (requestedReferencePrice - stopPrice)
+          >= minimumRiskReward
       )
     )
   ) {
-    blockedReasons.push('预期收益与风险不匹配，盈亏比需至少达到1.8:1')
+    blockedReasons.push(
+      `预期收益与风险不匹配，盈亏比需至少达到${minimumRiskReward}:1`,
+    )
   }
   if (advice.riskOverlay?.blocked) {
     blockedReasons.push(...(advice.riskOverlay.reasons || []))
@@ -590,20 +596,27 @@ export function compileDecisionPlan({
     && (policyProbe || sectorProbeEligible)
     && capacity.lots > 0
   ) {
+    const probePositionLimitPct = Math.min(
+      5,
+      positive(actionPolicy.maxPositionPct) || 5,
+    )
     const oneLotGross = executionPrice(
       referencePrice,
       'BUY',
       slippageBps,
     ) * 100
-    const probeAmountLimit = positive(account.totalAssets) * 0.05
+    const probeAmountLimit = positive(account.totalAssets)
+      * probePositionLimitPct / 100
     const probeLots = Math.floor(probeAmountLimit / oneLotGross)
     capacity = {
       ...capacity,
       lots: Math.min(capacity.lots, Math.max(0, probeLots)),
-      manualProbeLimitPct: 5,
+      manualProbeLimitPct: probePositionLimitPct,
     }
     if (capacity.lots <= 0) {
-      blockedReasons.push('单手金额超过短线试仓的5%仓位上限')
+      blockedReasons.push(
+        `单手金额超过短线试仓的${probePositionLimitPct}%仓位上限`,
+      )
     }
   }
 
@@ -817,6 +830,7 @@ export function compileDecisionPlan({
     triggerDirection,
     risk: {
       budgetPct: capacity.riskPct,
+      minimumRiskReward,
       maxLossAmount: capacity.maxLossAmount,
       estimatedLossPerLot: capacity.lossPerLot,
       manualProbeLimitPct: capacity.manualProbeLimitPct ?? null,

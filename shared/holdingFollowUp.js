@@ -49,6 +49,9 @@ export function holdingAddReviewPlan(advice = {}) {
   const directionApproved = ['PROBE', 'FULL'].includes(riskTier)
   const reasons = compactReasons(policy.reasons)
   const probe = riskTier === 'PROBE'
+  const probePositionLimitPct = probe
+    ? Math.min(5, finite(policy.maxPositionPct) || 5)
+    : null
   return {
     schemaVersion: HOLDING_FOLLOW_UP_VERSION,
     status: directionApproved ? 'ENTRY_CONFIRMATION' : 'REASSESSMENT',
@@ -65,7 +68,7 @@ export function holdingAddReviewPlan(advice = {}) {
           plannedAction: probe ? 'PROBE_ADD' : 'ADD',
           actionLabel: probe ? '条件小仓加仓' : '条件加仓',
           directionApproved: true,
-          maxPositionPct: probe ? 5 : null,
+          maxPositionPct: probePositionLimitPct,
           manualConfirmationOnly: true,
         }
       : {

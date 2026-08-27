@@ -370,6 +370,10 @@ function tacticalActionPolicyRule(tactical = {}) {
   const reasons = Array.isArray(policy.reasons)
     ? policy.reasons.filter(Boolean).slice(0, 4)
     : []
+  const probeLimit = Number.isFinite(Number(policy.maxPositionPct))
+    && Number(policy.maxPositionPct) > 0
+    ? Math.min(5, Number(policy.maxPositionPct))
+    : 5
   const nextPlan = policy.nextSessionPlan
   const nextSessionLabel = {
     AFTERNOON: '下午盘中',
@@ -395,7 +399,7 @@ function tacticalActionPolicyRule(tactical = {}) {
   const riskRule = policy.executionOpen === false
     ? '当前不可下单；若存在条件建仓计划，触发价只用于下一连续竞价时段确认入场时机，不是普通观望。'
     : policy.riskTier === 'PROBE'
-      ? '本轮最多只能输出“小仓试错/小仓加仓”，仓位不得超过总资产5%，必须人工确认，禁止写成立即重仓或确定性买点。'
+      ? `本轮最多只能输出“小仓试错/小仓加仓”，仓位不得超过总资产${probeLimit}%，必须人工确认，禁止写成立即重仓或确定性买点。`
       : policy.riskTier === 'FULL'
         ? '新增仓位条件已全部通过，但仍需比较赔率后决定是否操作。'
         : `当前新增仓位未通过${reasons.length ? `：${reasons.join('；')}` : ''}。`
@@ -404,8 +408,17 @@ function tacticalActionPolicyRule(tactical = {}) {
     && policy.allowedActions.includes('BUY')
   )
     ? policy.riskTier === 'PROBE'
-      ? '若输出小仓试错，必须给出可立即人工确认的具体buyPrice、stopPrice、targetPrice和planQty，仓位不得超过5%；不得只给回踩或突破观察价。'
+      ? `若输出小仓试错，必须给出可立即人工确认的具体buyPrice、stopPrice、targetPrice和planQty，仓位不得超过${probeLimit}%；不得只给回踩或突破观察价。`
       : '若输出立即买入，必须给出可立即人工确认的具体buyPrice、stopPrice、targetPrice和planQty，不得只给观察条件。'
+    : ''
+  const holdingRule = tactical.holding?.hasPosition === true
+    ? tactical.holding.addEligible === true
+      ? '加仓只允许用于盈利仓，或主力流入且技术转强后重新站回VWAP/MA5的持仓；不得在下跌途中摊平。'
+      : `当前禁止加仓：${tactical.holding.addBlockReason || '持仓未盈利且未重新站回关键位'}。`
+    : ''
+  const weakMarketRule = tactical.market?.riskTone === 'RISK_OFF'
+    && tactical.market?.hardRiskOff !== true
+    ? '普通弱市仅允许逆势强且量化高把握的人工试错，盈亏比至少2.2:1。'
     : ''
   return `【唯一允许动作】本轮action只能从${allowed.join('、')}中选择。`
     + '不得把集合外动作写成当前可执行；后续动作只能明确标为预案并附带盘中复核条件。'
@@ -415,6 +428,8 @@ function tacticalActionPolicyRule(tactical = {}) {
         ? '当前不是连续竞价时段，action必须为观望，只制定下一交易时段盘中复核条件，不得声称已到价或立即买入。'
         : ''
     )
+    + holdingRule
+    + weakMarketRule
     + riskRule
     + nextPlanRule
     + readyEntryRule
@@ -652,7 +667,7 @@ ${ragText ? `【检索补充·待核验】${promptText(ragText, 1200)}` : ''}
 ${experienceMemory.length ? `【短线经验记忆·仅供内部综合】${JSON.stringify(experienceMemory)}` : ''}
 ${attribution}
 【任务】严格按 tactical 的市场→板块→个股地位→资金博弈→量化/价格时机顺序判断，再核对账户、反方和失效路径。${modeRule}
-主动做多必须满足风险预算与盈亏比至少1.8:1；弱市还必须同时具备逆势强势与高把握信号。价格只可来自事实契约中的合法锚点，不能编造；金额=手数×100×价格。
+主动做多必须满足风险预算；普通市场盈亏比至少1.8:1，弱市试错至少2.2:1且必须同时具备逆势强势与高把握信号。价格只可来自事实契约中的合法锚点，不能编造；金额=手数×100×价格。
 若tactical.market.hardRiskOff=true，说明炸板、跌停扩散或完整交易日量价已触发市场红线，无论个股是否逆势强都禁止新增风险，只允许观望或降低已有风险。
 涨停封板时资金净额可能受被动成交或排队影响，禁止把它解释为主力主动买卖。
 短线经验只作为内部判断先验：综合吸收后直接用普通交易语言说明证据、动作和风险，不逐条点名，不得为了引用而引用。经验与事实冲突时以事实和风控为准。文字预算：标题≤20字，动作≤80字，理由≤120字；每类证据只写一句。只输出JSON：
@@ -670,12 +685,12 @@ ${tacticalRules}
 只做一次结论，不复述数据。优先级固定为：数据时效>账户与T+1>硬止损>总仓与现金>盈亏比>LLM软证据。
 必须服从 shortHorizonTactical、账户现金/持仓、今日可卖手数、证据完整性和合法价格；外部搜索摘要只能交叉核验。上一版权威主计划 previousPlan 无客观失效证据不得反转，只可微调执行条件。
 performance 低命中不等于一律更保守，必须按原动作方向纠偏。realOutcome 是真实成交费后学习，只能校准本次置信与风险倍率，绝不能绕过账户硬约束。
-所有价格、手数、金额必须可成交且自洽；A股1手=100股。主动新增风险必须满足盈亏比至少1.8:1，弱市必须同时有逆势强势与高把握信号。只输出一个合法JSON对象。
+所有价格、手数、金额必须可成交且自洽；A股1手=100股。普通市场主动新增风险必须满足盈亏比至少1.8:1；弱市试错至少2.2:1，且必须同时有逆势强势与高把握信号。只输出一个合法JSON对象。
 若tactical.market.hardRiskOff=true，市场红线优先于逆势强票例外，禁止买入或加仓。
 必须填写短线窗口、核心优势、拥挤风险、催化有效期和下一复核事件。文字预算：标题不超过18字，动作不超过60字，理由不超过100字；每类证据最多一句，不得换词重复。`
   if (mode === 'hold_advice') {
     return `${common}
-这是持仓管理，只能在“加仓/减仓/持有/清仓”中选择。【本次决策账户快照】以合同中的account和holding为准；减仓和清仓不得超过sellableTodayQty，加仓不得突破现金、总仓、单票和行业上限，positionNote必须引用关键账户数字。
+这是持仓管理，只能在“加仓/减仓/持有/清仓”中选择。【本次决策账户快照】以合同中的account和holding为准；减仓和清仓不得超过sellableTodayQty，加仓不得突破现金、总仓、单票和行业上限，且只能用于盈利仓或资金技术转强后重新站回VWAP/MA5的持仓，禁止下跌摊平；positionNote必须引用关键账户数字。
 nextOpenPlan必须分别写清高开、平开、低开时的动作与关键价；futurePlan必须写清买入后受T+1约束的次日到未来5日止盈、减仓或退出路径，禁止只写“盘中持有再看”。
 输出JSON=${advisorOutputSchema(mode)}。`
   }

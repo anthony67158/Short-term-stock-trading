@@ -250,6 +250,123 @@ test('核心信号共振但成交额证据不足时只开放5%人工试仓', () 
   )
 })
 
+test('普通弱市的逆势强票允许3%人工试仓但不能升级正式买入', () => {
+  const tactical = buildShortHorizonTactical(payload({
+    todayQuote: {
+      ...payload().todayQuote,
+      amount: 2e8,
+    },
+    marketEnv: {
+      score: 38,
+      weak: true,
+      allowRiskIncrease: false,
+      hardRiskOff: false,
+    },
+    counterTrend: {
+      isStrong: true,
+      flags: ['强于大盘', '主力逆势流入'],
+    },
+  }))
+  const policy = deriveShortHorizonActionPolicy({
+    mode: 'buy_advice',
+    tactical,
+    requestedAction: 'BUY',
+  })
+
+  assert.equal(tactical.timing.state, 'READY')
+  assert.equal(policy.canIncreaseRisk, true)
+  assert.equal(policy.riskTier, 'PROBE')
+  assert.equal(policy.maxPositionPct, 3)
+  assert.equal(policy.entryIntent.actionLabel, '小仓试错')
+  assert.equal(policy.entryIntent.maxPositionPct, 3)
+})
+
+test('市场硬红线下逆势强票仍不得试仓', () => {
+  const tactical = buildShortHorizonTactical(payload({
+    todayQuote: {
+      ...payload().todayQuote,
+      amount: 2e8,
+    },
+    marketEnv: {
+      score: 38,
+      weak: true,
+      allowRiskIncrease: false,
+      hardRiskOff: true,
+      hardRiskSignals: ['炸板率45%超过40%'],
+    },
+    counterTrend: { isStrong: true },
+  }))
+  const policy = deriveShortHorizonActionPolicy({
+    mode: 'buy_advice',
+    tactical,
+    requestedAction: 'BUY',
+  })
+
+  assert.equal(policy.canIncreaseRisk, false)
+  assert.equal(policy.riskTier, 'NONE')
+  assert.deepEqual(policy.allowedActions, ['WATCH'])
+})
+
+test('持仓亏损且未站回关键位时禁止下跌加仓', () => {
+  const tactical = buildShortHorizonTactical(payload({
+    holdQty: 1,
+    holdCost: 105,
+    todayQuote: {
+      ...payload().todayQuote,
+      amount: 2e8,
+    },
+    intraday: {
+      posInDay: 55,
+      vwap: 101,
+    },
+  }))
+  const policy = deriveShortHorizonActionPolicy({
+    mode: 'hold_advice',
+    tactical,
+    requestedAction: 'ADD',
+  })
+
+  assert.equal(tactical.holding.addEligible, false)
+  assert.equal(policy.canIncreaseRisk, false)
+  assert.equal(policy.effectiveAction, 'HOLD')
+  assert.match(policy.reasons.join('；'), /禁止下跌加仓/)
+})
+
+test('持仓重新站回关键位且资金技术转强后恢复加仓资格', () => {
+  const tactical = buildShortHorizonTactical(payload({
+    holdQty: 1,
+    holdCost: 105,
+    todayQuote: {
+      ...payload().todayQuote,
+      amount: 2e8,
+    },
+    intraday: {
+      posInDay: 55,
+      vwap: 99,
+    },
+    tech: {
+      ...payload().tech,
+      bull: 3,
+      bear: 0,
+      ma: {
+        ma5: 99.5,
+        ma10: 98.5,
+        ma20: 97.5,
+      },
+    },
+  }))
+  const policy = deriveShortHorizonActionPolicy({
+    mode: 'hold_advice',
+    tactical,
+    requestedAction: 'ADD',
+  })
+
+  assert.equal(tactical.holding.keyLevelReclaimed, true)
+  assert.equal(tactical.holding.addEligible, true)
+  assert.equal(policy.canIncreaseRisk, true)
+  assert.equal(policy.allowedActions[0], 'ADD')
+})
+
 test('试仓方向已通过但时机未到时只能进入条件试仓而不是当前小仓试错', () => {
   const tactical = buildShortHorizonTactical(payload())
   tactical.timing = {
