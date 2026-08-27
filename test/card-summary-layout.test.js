@@ -206,22 +206,22 @@ test('个股详情复用详情请求展示换手量比与主力散户资金', ()
   )
 })
 
-test('观望建议同时保留手动建仓与复核入口', () => {
+test('观望建议只提供重新评估入口且不伪装成建仓建议', () => {
   assert.match(
     planTab,
     /className=\{\s*'pc-actions'[\s\S]{0,180}' with-review'[\s\S]{0,180}' deferred'/,
   )
   assert.match(
     planTab,
-    /!actionable[\s\S]*?className="chip-btn ghost manual-build"[\s\S]*?onClick=\{\(\) => onBuy\(p, null\)\}[\s\S]*?手动建仓/s,
+    /!actionable[\s\S]*?className="chip-btn ghost review-action"[\s\S]*?重新评估/s,
   )
-  assert.match(
+  assert.doesNotMatch(
     planTab,
-    /className="chip-btn ghost review-action"[\s\S]*?复核建议/s,
+    /className="chip-btn ghost manual-build"/,
   )
   assert.match(
     precision,
-    /\.plan-cand \.pc-actions\.with-review\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto\s+auto\s+40px/s,
+    /\.plan-cand \.pc-actions\.with-review\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto\s+40px/s,
   )
   assert.match(
     precision,
