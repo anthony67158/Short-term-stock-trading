@@ -109,7 +109,9 @@ function lotsOf(value) {
 
 function actionFrom(mode, advice = {}) {
   const value = text(advice.action || advice.stance, 80)
-  if (/观望|等待|回避|不建议|暂不/.test(value)) return 'WATCH'
+  if (/观望|等待|回避|不建议|暂不/.test(value)) {
+    return mode === 'hold_advice' ? 'HOLD' : 'WATCH'
+  }
   if (/清仓|卖出|止损|离场/.test(value)) return 'EXIT'
   if (/减仓|止盈/.test(value)) return 'REDUCE'
   if (/加仓|补仓|接回|买回/.test(value)) return 'ADD'

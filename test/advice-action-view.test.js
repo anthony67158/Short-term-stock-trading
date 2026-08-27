@@ -63,6 +63,38 @@ test('卡片优先遵从军师已持久化的今日不可卖约束', () => {
   assert.doesNotMatch(view.instruction, /按纪律确认后退出/)
 })
 
+test('持仓计划等待新证据时显示持有而不是未持仓语义观望', () => {
+  const view = buildHoldingCardDecisionView({
+    advice: {
+      action: '观望',
+      actionPlan:
+        '下午连续竞价仅观察，不加仓、不做T；今日可卖0手，现有持仓受T+1约束不可卖出。',
+      stopPrice: 47.01,
+      decisionPlan: {
+        schemaVersion: 'decision-plan.v2',
+        action: 'WATCH',
+        actionLabel: '观望',
+        actionability: 'WATCH',
+        quantity: { lots: 0 },
+        prices: {
+          reference: 53.58,
+          stop: 47.01,
+          target: null,
+        },
+      },
+    },
+    t1Status: {
+      liveQty: 1,
+      boughtToday: 1,
+      sellableToday: 0,
+    },
+  })
+
+  assert.equal(view.kind, 'hold')
+  assert.equal(view.action, '持有')
+  assert.match(view.instruction, /今日可卖0手/)
+})
+
 test('自动跟随建议时清除新建议已经取消的旧止盈价', () => {
   assert.deepEqual(advicePlanSyncPatch({
     tp: 51.65,

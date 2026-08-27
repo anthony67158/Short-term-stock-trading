@@ -329,6 +329,7 @@ export function buildAdviceActionView(
   const plan = advice.decisionPlan?.schemaVersion === 'decision-plan.v2'
     ? advice.decisionPlan
     : null
+  const holdingMode = mode === 'hold_advice'
   const planAction = {
     BUY: '现在买入',
     ADD: '加仓',
@@ -337,7 +338,7 @@ export function buildAdviceActionView(
     EXIT: '清仓',
     T_BUY_FIRST: '买回',
     T_SELL_FIRST: '减仓',
-    WATCH: '观望',
+    WATCH: holdingMode ? '持有' : '观望',
   }[plan?.action]
   const planReasons = (Array.isArray(plan?.blockedReasons)
     ? plan.blockedReasons
@@ -356,7 +357,7 @@ export function buildAdviceActionView(
   const source = plan ? {
     ...advice,
     action: plan.actionability === 'BLOCKED'
-      ? '观望'
+      ? holdingMode ? '持有' : '观望'
       : manualProbe
         ? plan.action === 'ADD' ? '小仓加仓' : '小仓试错'
       : plan.actionability === 'RESEARCH_ONLY'
@@ -381,7 +382,14 @@ export function buildAdviceActionView(
       : advice.reducePrice,
     stopPrice: plan.prices?.stop,
     targetPrice: plan.prices?.target,
-  } : advice
+  } : (
+    holdingMode
+    && /观望|等待|回避|不建议|暂不/.test(
+      `${advice.action || ''} ${advice.stance || ''}`,
+    )
+      ? { ...advice, action: '持有', stance: '持有' }
+      : advice
+  )
   const kind = actionKind(source, mode)
   const followUp = kind === 'hold'
     ? holdingAddReviewPlan(source)

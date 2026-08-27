@@ -279,6 +279,29 @@ test('持仓加仓缺少资金确认时改为持有但不阻止减仓', () => {
   assert.equal(reduce.actionability, 'READY')
 })
 
+test('持仓建议的观望语义在决策计划中归一为持有', () => {
+  const plan = compileDecisionPlan({
+    mode: 'hold_advice',
+    advice: {
+      action: '观望',
+      actionPlan: '当前不加仓、不做T，继续等待新证据',
+      stopPrice: 9,
+    },
+    payload: {
+      ...payload,
+      holdQty: 1,
+      sellableTodayQty: 0,
+    },
+    evidenceSnapshot: snapshot,
+    now,
+  })
+
+  assert.equal(plan.requestedAction, 'HOLD')
+  assert.equal(plan.action, 'HOLD')
+  assert.equal(plan.actionLabel, '持有')
+  assert.equal(plan.actionability, 'WATCH')
+})
+
 test('小仓试错保留5%仓位上限但不受策略晋级限制', () => {
   const plan = compileDecisionPlan({
     mode: 'buy_advice',
