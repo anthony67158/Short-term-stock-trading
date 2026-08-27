@@ -23,6 +23,29 @@ test('持仓与自选卡只展示固定策略摘要并从详情入口查看完�
   assert.doesNotMatch(planTab, /useLayoutEffect/)
 })
 
+test('持仓和自选卡展示最近有效价但只用连续竞价价触发动作', () => {
+  assert.match(
+    planTab,
+    /import\s*{\s*quoteDisplayState\s*}\s*from\s*'\.\.\/\.\.\/shared\/quoteDisplay\.js'/,
+  )
+  assert.match(
+    planTab,
+    /function QuotePrice\([\s\S]*?const priceView = quoteDisplayState\(quote\)[\s\S]*?fmtRaw\(priceView\.price\)[\s\S]*?quoteSecondaryText\(priceView\)/,
+  )
+  assert.match(
+    planTab,
+    /const quoteView = quoteDisplayState\(q\)[\s\S]*?const validPx = quoteView\.livePrice/,
+  )
+  assert.match(
+    planTab,
+    /const livePrice = quoteDisplayState\(q\)\.livePrice[\s\S]*?currentPrice: livePrice/,
+  )
+  assert.doesNotMatch(
+    planTab,
+    /className=\{'pc-price '[\s\S]*?fmtRaw\(q\.price\)/,
+  )
+})
+
 test('桌面卡片使用同高摘要骨架且移动端恢复自然高度', () => {
   assert.match(planTab, /className="card-decision-slot"/)
   assert.equal((planTab.match(/className="card-decision-slot"/g) || []).length, 2)
@@ -182,7 +205,10 @@ test('个股详情复用详情请求展示换手量比与主力散户资金', ()
     /stock_detail\?code=\$\{stock\.code\}[^`]*quote=1/,
   )
   assert.match(stockDetailApi, /fetchQuotes\(\[code\]\)/)
-  assert.match(quoteApi, /export async function fetchQuotes\(codes\)/)
+  assert.match(
+    quoteApi,
+    /export async function fetchQuotes\(codes,\s*dependencies = \{\}\)/,
+  )
   assert.match(
     stockDetail,
     /className="detail-market-metrics"[\s\S]*?>换手<\/span>[\s\S]*?>量比<\/span>[\s\S]*?>主力<\/span>[\s\S]*?>散户<\/span>/,
