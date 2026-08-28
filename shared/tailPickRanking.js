@@ -1,0 +1,141 @@
+import { thirdTradingDayAfter } from './tailPickPolicy.js'
+import { localDateKey } from './tradingCalendar.js'
+
+export const TAIL_PICK_RANKING_VERSION = 'tail-pick-ranking.v1'
+export const TAIL_PICK_VALIDATION_STATE =
+  'PENDING_INTRADAY_BACKTEST'
+
+function finite(value) {
+  if (value == null || value === '') return null
+  const number = Number(value)
+  return Number.isFinite(number) ? number : null
+}
+
+function clamp(value, minimum = 0, maximum = 100) {
+  return Math.max(minimum, Math.min(maximum, value))
+}
+
+function rounded(value, digits = 2) {
+  const number = finite(value)
+  return number == null ? null : +number.toFixed(digits)
+}
+
+function fundScore(fund) {
+  if (!fund) return { score: 0, label: '资金数据缺失' }
+  const mainNow = finite(fund.mainNetYi)
+  const retailNow = finite(fund.retailNetYi)
+  const main5d = finite(fund.main5dYi)
+  let score = 0
+  if (mainNow > 0) score += 6
+  else if (mainNow < 0) score -= 6
+  if (main5d > 0) score += 8
+  else if (main5d < 0) score -= 8
+  if (mainNow < 0 && retailNow > 0) score -= 8
+  if (mainNow > 0 && retailNow < 0) score += 2
+  const days = Number(fund.historyDayCount) || 0
+  const range = days >= 5 ? '近5日' : `近${days}日`
+  const mainText = mainNow == null
+    ? '主力缺失'
+    : `主力${mainNow >= 0 ? '净流入' : '净流出'}${Math.abs(mainNow)}亿`
+  const retailText = retailNow == null
+    ? '小单缺失'
+    : `小单${retailNow >= 0 ? '净流入' : '净流出'}${Math.abs(retailNow)}亿`
+  return {
+    score,
+    label: `${range}资金；当日${mainText}，${retailText}`,
+  }
+}
+
+function candidateScore(candidate) {
+  const sector = candidate.sectorOpportunity || {}
+  const intraday = candidate.intraday || {}
+  const stockGate = candidate.stockGate || {}
+  const fund = fundScore(candidate.fund)
+  const sectorScore = finite(sector.sector?.nextScore) || 0
+  const stockScore = finite(sector.stock?.score) || 0
+  const gain20 = finite(stockGate.gain20) || 0
+  const vwapDistance = intraday.vwap > 0
+    ? (intraday.price / intraday.vwap - 1) * 100
+    : 0
+  return {
+    score: rounded(clamp(
+      45
+        + sectorScore * 0.25
+        + stockScore * 0.15
+        + fund.score
+        + clamp(12 - Math.max(0, gain20) * 0.3, 0, 12)
+        + clamp(8 - Math.abs(vwapDistance - 0.4) * 4, 0, 8),
+    ), 1),
+    fundLabel: fund.label,
+  }
+}
+
+function instruction(candidate, role, timestamp) {
+  const price = finite(candidate.intraday?.price)
+    ?? finite(candidate.quote?.price)
+  const vwap = finite(candidate.intraday?.vwap)
+  const dayLow = finite(candidate.quote?.low)
+    ?? finite(candidate.intraday?.low)
+  const ceiling = price == null
+    ? null
+    : rounded(Math.max(price, vwap || price) * 1.003)
+  const finalExit = thirdTradingDayAfter(timestamp)
+  return {
+    role,
+    action: role === 'PRIMARY'
+      ? `公式首选：不高于${ceiling ?? '--'}元观察，手工确认后最多5%仓位`
+      : '候补：首选失效前不买，只加入自选跟踪',
+    firstLeg: role === 'PRIMARY'
+      ? `14:50-14:52不高于${ceiling ?? '--'}元，第一笔最多2%`
+      : null,
+    secondLeg: role === 'PRIMARY'
+      ? '14:53-14:55仍站稳分时均价线且未放量跳水，再补最多3%'
+      : null,
+    stopPrice: rounded(dayLow),
+    stopNote: '买入当日最低价，次日起生效',
+    takeProfit: '次日冲高1%-3%减半，累计上涨7%-8%清仓',
+    finalExitDate: finalExit ? localDateKey(finalExit) : null,
+  }
+}
+
+export function rankTailPickCandidates(
+  candidates = [],
+  {
+    limit = 3,
+    timestamp = Date.now(),
+  } = {},
+) {
+  const ranked = candidates
+    .filter((item) =>
+      item?.formula?.matched
+      && item?.stockGate?.passed
+      && item?.intraday?.passed
+    )
+    .map((item) => ({
+      ...item,
+      ...candidateScore(item),
+    }))
+    .sort((left, right) =>
+      Number(right.score) - Number(left.score)
+      || Number(right.quote?.amount || 0)
+        - Number(left.quote?.amount || 0)
+      || String(left.code).localeCompare(String(right.code))
+    )
+    .slice(0, Math.max(0, Math.min(3, Number(limit) || 3)))
+    .map((item, index) => ({
+      ...item,
+      rank: index + 1,
+      execution: instruction(
+        item,
+        index === 0 ? 'PRIMARY' : 'ALTERNATE',
+        timestamp,
+      ),
+    }))
+  return {
+    schemaVersion: TAIL_PICK_RANKING_VERSION,
+    validationState: TAIL_PICK_VALIDATION_STATE,
+    decision: ranked.length ? 'OBSERVE_ONLY' : 'NO_TRADE',
+    primaryCode: ranked[0]?.code || null,
+    candidates: ranked,
+  }
+}

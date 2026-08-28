@@ -146,7 +146,7 @@ async function fetchStockDetailData(code, fetcher) {
   return response?.data || null
 }
 
-async function fetchStockTagProfile(
+export async function fetchStockTagProfile(
   code,
   fetcher = emGetOne,
   now = Date.now(),
