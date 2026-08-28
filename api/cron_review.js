@@ -25,7 +25,7 @@ import {
 } from '../shared/evidenceSnapshot.js'
 import { buildRealOutcomeLearning } from '../shared/realOutcomeLearning.js'
 
-const REVIEW_CONCURRENCY = 2
+export const REVIEW_CONCURRENCY = 4
 const REVIEW_RUNTIME_BUDGET_MS = 300000
 
 function beijingDayStart(timestamp = Date.now()) {

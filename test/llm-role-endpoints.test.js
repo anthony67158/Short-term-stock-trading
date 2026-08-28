@@ -34,7 +34,7 @@ const sector = readFileSync(
   'utf8',
 )
 
-test('所有实际LLM能力映射为七个独立角色和九个固定端点槽位', () => {
+test('所有实际LLM能力映射为七个独立角色和十一个固定端点槽位', () => {
   assert.deepEqual(Object.keys(ROLES), [
     'advisor',
     'review',
@@ -46,7 +46,7 @@ test('所有实际LLM能力映射为七个独立角色和九个固定端点槽�
   ])
   assert.deepEqual(ROLE_ENDPOINT_SLOTS, {
     advisor: 2,
-    review: 2,
+    review: 4,
     portfolio: 1,
     agent: 1,
     daily: 1,
@@ -86,7 +86,7 @@ test('每个角色只路由到自己的专用端点', () => {
       endpoint.baseUrl.includes(role)))
   }
   assert.equal(endpointCountForRole(config, 'advisor'), 2)
-  assert.equal(endpointCountForRole(config, 'review'), 2)
+  assert.equal(endpointCountForRole(config, 'review'), 4)
 })
 
 test('旧版主端点和资源池可无损迁移到角色端点槽位', () => {
@@ -160,7 +160,7 @@ test('旧配置缺少复核角色时不得借用军师端点', () => {
 
   assert.deepEqual(resolveRoleEndpoints(legacy, 'review'), [])
   const slots = roleEndpointSlots(legacy, 'review')
-  assert.equal(slots.length, 2)
+  assert.equal(slots.length, 4)
   assert.ok(slots.every((endpoint) => endpoint.enabled === false))
 })
 
@@ -188,7 +188,9 @@ test('复杂生成统一使用有界推理且工具规划不启用深度思考',
 
 test('配置界面按角色展示端点且不再暴露通用资源池', () => {
   assert.match(frontend, /7 个角色/)
-  assert.match(frontend, /9 个端点/)
+  assert.match(frontend, /11 个端点/)
+  assert.match(frontend, /复核角色/)
+  assert.match(frontend, /4 路并行/)
   assert.match(frontend, /roleEndpoints/)
   assert.match(frontend, /军师操作建议生成/)
   assert.match(frontend, /复核角色/)

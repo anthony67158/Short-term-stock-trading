@@ -104,7 +104,7 @@ import {
 } from '../shared/tradingCalendar.js';
 
 export const PROGRESS_SAVE_INTERVAL_MS = 5000;
-export const CANCEL_POLL_INTERVAL_MS = 2000;
+export const CANCEL_POLL_INTERVAL_MS = 1000;
 export const WORKER_HEARTBEAT_INTERVAL_MS = 30000;
 
 export function createAdviceSSEParser(onEvent) {
@@ -196,6 +196,18 @@ function reviewConcurrency() {
   try { return endpointCountForRole(currentConfig(), 'review'); } catch { return 0; }
 }
 
+export function reviewRoleCapacities(endpointCount) {
+  const review = Math.max(0, Math.trunc(Number(endpointCount) || 0));
+  return {
+    review,
+    // 四路时普通定时复核最多占两路，至少两路留给到价/Judge。
+    // 只有一至两路已配置时仍允许后台工作，但至少保留一路应急容量。
+    reviewBackground: review > 0
+      ? Math.max(1, review - 2)
+      : 0,
+  };
+}
+
 function hasDeepAdviceWork(data) {
   return Object.values(data?.jobs || {}).some((job) =>
     isActive(job) && job.deepMode === true
@@ -222,9 +234,10 @@ function effectiveAdviceConcurrency(data, deepMode, batchRequest) {
 }
 
 function adviceRoleCapacities(data, deepMode, batchRequest) {
+  const review = reviewRoleCapacities(reviewConcurrency());
   return {
     advisor: effectiveAdviceConcurrency(data, deepMode, batchRequest),
-    review: reviewConcurrency(),
+    ...review,
   };
 }
 
@@ -1360,7 +1373,7 @@ async function drainAccount(nick, initialAcc) {
   const inflight = new Map();   // jobId -> { promise, controller, code, role }
   const roleCapacities = {
     advisor: CONC,
-    review: REVIEW_CONC,
+    ...reviewRoleCapacities(REVIEW_CONC),
   };
   let schedulerWake = null;
   const wakeScheduler = () => {

@@ -4,9 +4,14 @@ import assert from 'node:assert/strict'
 import {
   buildReviewPayload,
   processReviewAccount,
+  REVIEW_CONCURRENCY,
   reviewRecordFromAIResponse,
   reviewResponse,
 } from '../api/cron_review.js'
+
+test('自动复盘可并行使用四个复核端点', () => {
+  assert.equal(REVIEW_CONCURRENCY, 4)
+})
 
 function accountFixture() {
   return {

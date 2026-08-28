@@ -9,12 +9,14 @@ import {
   leaseJob,
   resourcePatchForJobProgress,
   reviewJobsOf,
+  selectStartableJobs,
 } from '../api/_jobs.js'
 import {
   mergeAdviceRuntimeState,
   mergeAdviceRuntimeUpdate,
 } from '../api/account.js'
 import {
+  reviewRoleCapacities,
   reviewResultStillCurrent,
 } from '../api/cron_advice.js'
 
@@ -187,6 +189,61 @@ test('advisor容量门控不受review任务占用影响', () => {
   assert.deepEqual(
     full.busy.map((job) => job.code).sort(),
     ['300750', '600000'],
+  )
+})
+
+test('四路复核为到价任务预留两路且普通定时复核最多占两路', () => {
+  assert.deepEqual(reviewRoleCapacities(4), {
+    review: 4,
+    reviewBackground: 2,
+  })
+  assert.deepEqual(reviewRoleCapacities(2), {
+    review: 2,
+    reviewBackground: 1,
+  })
+
+  const data = {}
+  for (let index = 0; index < 4; index++) {
+    enqueueJob(data, {
+      code: `60000${index}`,
+      mode: 'hold_advice',
+      source: 'auto',
+    }, 1000 + index)
+  }
+  const backgroundOnly = selectStartableJobs(data, {
+    advisor: 0,
+    review: 4,
+    reviewBackground: 2,
+  }, new Set(), 2000)
+  assert.equal(backgroundOnly.length, 2)
+  assert.ok(backgroundOnly.every((job) => job.source === 'auto'))
+
+  enqueueJob(data, {
+    code: '300001',
+    mode: 'buy_advice',
+    source: 'judge',
+    trigger: { kind: 'price-review' },
+  }, 2000)
+  enqueueJob(data, {
+    code: '300002',
+    mode: 'buy_advice',
+    source: 'review',
+    trigger: { kind: 'price-review' },
+  }, 2001)
+  const withUrgent = selectStartableJobs(data, {
+    advisor: 0,
+    review: 4,
+    reviewBackground: 2,
+  }, new Set(), 2100)
+
+  assert.equal(withUrgent.length, 4)
+  assert.deepEqual(
+    withUrgent.slice(0, 2).map((job) => job.trigger?.kind),
+    ['price-review', 'price-review'],
+  )
+  assert.equal(
+    withUrgent.filter((job) => job.source === 'auto').length,
+    2,
   )
 })
 

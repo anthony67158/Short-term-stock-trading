@@ -5,6 +5,7 @@ import {
   buildTriggeredReviewFallback,
   enforceTriggeredReviewDecisionPlan,
   normalizeTriggeredReviewDecision,
+  shouldCollectTriggeredReviewSource,
   TRIGGERED_REVIEW_MODEL_BUDGET_MS,
   TRIGGERED_REVIEW_TIME_LIMIT_MINUTES,
   triggeredReviewRuntime,
@@ -37,9 +38,10 @@ function payload(overrides = {}) {
   }
 }
 
-test('价格触发复核固定两分钟总期限和一分钟模型预算', () => {
+test('价格触发复核保留两分钟硬截止并将模型预算收紧到45秒', () => {
   const runtime = triggeredReviewRuntime(payload().reviewEvent, NOW)
   assert.equal(runtime.remainingMs, 120000)
+  assert.equal(TRIGGERED_REVIEW_MODEL_BUDGET_MS, 45000)
   assert.equal(runtime.runtimeBudgetMs, TRIGGERED_REVIEW_MODEL_BUDGET_MS)
   assert.equal(runtime.maxAttempts, 1)
   assert.equal(runtime.expired, false)
@@ -49,6 +51,36 @@ test('价格触发复核固定两分钟总期限和一分钟模型预算', () =>
     NOW + 115000,
   )
   assert.equal(expired.expired, true)
+})
+
+test('到价复核只重新采集价格决策所需的快速证据', () => {
+  const event = payload().reviewEvent
+  for (const key of [
+    'market',
+    'sectorFlow',
+    'dailyCandles',
+    'intraday',
+    'stockFunds',
+    'quote',
+  ]) {
+    assert.equal(shouldCollectTriggeredReviewSource(event, key), true)
+  }
+  for (const key of [
+    'dragonTiger',
+    'stockNews',
+    'macroNews',
+    'dailyReport',
+    'macroFlashes',
+    'quant',
+    'stockSearch',
+    'industrySearch',
+  ]) {
+    assert.equal(shouldCollectTriggeredReviewSource(event, key), false)
+  }
+  assert.equal(
+    shouldCollectTriggeredReviewSource({}, 'stockNews'),
+    true,
+  )
 })
 
 test('买入复核成功只输出立即买入并带区间手数与依据', () => {

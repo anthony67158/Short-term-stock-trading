@@ -17,7 +17,8 @@ import { assertSafeRemoteUrl } from './_safe_remote_url.js';
 const KEY_PATH = 'config/llm.json';
 const hasOwn = (obj, key) => !!obj && Object.prototype.hasOwnProperty.call(obj, key);
 
-// 所有生成式 AI 能力均有独立角色；advisor/review 固定两个槽位，其余角色各一个。
+// 所有生成式 AI 能力均有独立角色；advisor 固定两个槽位，review 固定四个槽位，
+// 其余角色各一个。review 的额外容量用于盘中到价复核，不能借用 advisor。
 // 环境变量与旧版主端点/资源池仅用于首次迁移，保存后运行时严格按角色隔离。
 export const ROLES = {
   advisor: { envs: ['ADVISOR_MODEL'], def: 'DeepSeek-V4-Pro',   label: '军师AI操作建议生成' },
@@ -31,7 +32,7 @@ export const ROLES = {
 
 export const ROLE_ENDPOINT_SLOTS = Object.freeze({
   advisor: 2,
-  review: 2,
+  review: 4,
   portfolio: 1,
   agent: 1,
   daily: 1,

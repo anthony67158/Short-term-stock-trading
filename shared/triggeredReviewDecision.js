@@ -1,7 +1,16 @@
 export const TRIGGERED_REVIEW_TIME_LIMIT_MINUTES = 2
 export const TRIGGERED_REVIEW_TOTAL_BUDGET_MS =
   TRIGGERED_REVIEW_TIME_LIMIT_MINUTES * 60 * 1000
-export const TRIGGERED_REVIEW_MODEL_BUDGET_MS = 60 * 1000
+export const TRIGGERED_REVIEW_MODEL_BUDGET_MS = 45 * 1000
+
+const TRIGGERED_REVIEW_SOURCE_KEYS = new Set([
+  'market',
+  'sectorFlow',
+  'dailyCandles',
+  'intraday',
+  'stockFunds',
+  'quote',
+])
 
 const text = (value, maximum = 500) => String(value || '')
   .replace(/[\u0000-\u001f\u007f]/g, ' ')
@@ -35,6 +44,11 @@ const lotsOf = (value) => {
 
 export function isTriggeredReviewEvent(event = {}) {
   return ['price-review', 'judge'].includes(String(event?.kind || ''))
+}
+
+export function shouldCollectTriggeredReviewSource(event = {}, key = '') {
+  return !isTriggeredReviewEvent(event)
+    || TRIGGERED_REVIEW_SOURCE_KEYS.has(String(key || ''))
 }
 
 export function triggeredReviewDeadlineAt(

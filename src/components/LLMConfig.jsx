@@ -16,7 +16,7 @@ const ROLE_ORDER = [
 
 const ROLE_META = {
   advisor: { icon: 'spark', label: '军师操作建议生成', badge: '2 路并行' },
-  review: { icon: 'shield', label: '复核角色', badge: '2 路并行' },
+  review: { icon: 'shield', label: '复核角色', badge: '4 路并行' },
   portfolio: { icon: 'layers', label: '持仓分布分析', badge: '组合' },
   agent: { icon: 'brain', label: '智能体助手', badge: '工具调用' },
   daily: { icon: 'history', label: '策略日报', badge: '日报' },
@@ -477,7 +477,7 @@ export default function LLMConfig() {
           <div className="modal-title">
             <Icon name="brain" size={18} />
             模型角色与端点
-            <span className="llm-role-count">7 个角色 · 9 个端点</span>
+            <span className="llm-role-count">7 个角色 · 11 个端点</span>
           </div>
           <button
             type="button"

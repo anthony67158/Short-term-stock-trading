@@ -727,13 +727,21 @@ export function needsWorkerDispatch(data, now = Date.now()) {
 
 export function compareAdviceJobs(left, right) {
   const priority = (job) => {
-    if (job?.source === 'judge') return 0
+    if (isUrgentReviewJob(job)) return 0
     if (job?.source === 'ondemand' && job?.batchRequest === true) return 1
     if (job?.source === 'ondemand') return 2
     return 3
   }
   return priority(left) - priority(right)
     || (Number(left?.at) || 0) - (Number(right?.at) || 0)
+}
+
+export function isUrgentReviewJob(job = {}) {
+  if (adviceJobRole(job) !== 'review') return false
+  return (
+    job?.source === 'judge'
+    || ['price-review', 'judge'].includes(String(job?.trigger?.kind || ''))
+  )
 }
 
 function resourceRoleOf(job) {
@@ -792,6 +800,18 @@ export function selectStartableJobs(
     advisor: Math.max(0, Number(capacities.advisor) || 0),
     review: Math.max(0, Number(capacities.review) || 0),
   };
+  const backgroundReviewLimit = capacities.reviewBackground == null
+    ? limits.review
+    : Math.max(0, Number(capacities.reviewBackground) || 0);
+  let backgroundReviewUsed = allAdviceJobs(data).reduce((total, job) => {
+    if (
+      job?.status !== 'running'
+      || (job.leaseUntil || 0) < now
+      || adviceJobRole(job) !== 'review'
+      || isUrgentReviewJob(job)
+    ) return total;
+    return total + resourceUnitsOf(job);
+  }, 0);
   const selected = [];
   for (const job of allAdviceJobs(data)
     .filter((item) =>
@@ -802,8 +822,16 @@ export function selectStartableJobs(
     .sort(compareAdviceJobs)) {
     const role = adviceJobRole(job);
     if (used[role] >= limits[role]) continue;
+    if (
+      role === 'review'
+      && !isUrgentReviewJob(job)
+      && backgroundReviewUsed >= backgroundReviewLimit
+    ) continue;
     selected.push(job);
     used[role] += 1;
+    if (role === 'review' && !isUrgentReviewJob(job)) {
+      backgroundReviewUsed += 1;
+    }
   }
   return selected;
 }

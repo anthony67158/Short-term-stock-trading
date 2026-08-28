@@ -27,11 +27,11 @@ test('跨设备账号同步每30秒走FC增量接口且OSS保持内网访问', (
   assert.doesNotMatch(authStore, /setTimeout\(tick,\s*0\)/)
 })
 
-test('军师Worker控制进度落盘频率且两秒内感知取消', () => {
+test('军师Worker控制进度落盘频率且一秒内感知紧急任务与取消', () => {
   const cronAdvice = read('api/cron_advice.js')
 
   assert.match(cronAdvice, /PROGRESS_SAVE_INTERVAL_MS\s*=\s*5000/)
-  assert.match(cronAdvice, /CANCEL_POLL_INTERVAL_MS\s*=\s*2000/)
+  assert.match(cronAdvice, /CANCEL_POLL_INTERVAL_MS\s*=\s*1000/)
   assert.match(cronAdvice, /writeAdviceRuntimeState/)
   assert.match(cronAdvice, /writeAdviceRuntimeUpdate/)
   assert.match(cronAdvice, /persistAdviceCompletion/)

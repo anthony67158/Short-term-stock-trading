@@ -107,3 +107,45 @@ test('advisor与review容量互相独立', async () => {
     resetPoolHealthForTests()
   }
 })
+
+test('四个复核请求会同时分散到四个独立端点', async () => {
+  resetPoolHealthForTests()
+  const originalFetch = global.fetch
+  const pending = []
+  const urls = []
+  const reviewConfig = {
+    roleEndpoints: {
+      review: Array.from({ length: 4 }, (_, index) => ({
+        id: `review-${index + 1}`,
+        role: 'review',
+        baseUrl: `https://review-${index + 1}.example/v1`,
+        apiKey: `key-${index + 1}`,
+        model: `model-${index + 1}`,
+        enabled: true,
+      })),
+    },
+  }
+  global.fetch = async (url) => {
+    urls.push(url)
+    return new Promise((resolve) => pending.push(resolve))
+  }
+
+  try {
+    const requests = Array.from({ length: 4 }, () =>
+      poolFetch(reviewConfig, '/chat/completions', {
+        role: 'review',
+        body: { model: 'review-model' },
+      })
+    )
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    assert.equal(urls.length, 4)
+    assert.equal(new Set(urls).size, 4)
+    for (const resolve of pending.splice(0)) resolve(response())
+    await Promise.all(requests)
+  } finally {
+    for (const resolve of pending.splice(0)) resolve(response())
+    global.fetch = originalFetch
+    resetPoolHealthForTests()
+  }
+})

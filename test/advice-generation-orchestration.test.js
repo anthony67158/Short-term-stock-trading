@@ -230,3 +230,26 @@ test('普通与深度军师都使用有界预算且深度不整轮重跑', () =>
   )
   assert.equal(maxTokensForMode('hold_advice', true), 8000)
 })
+
+test('到价复核使用快速证据路径并在一秒内发现新紧急任务', () => {
+  assert.match(
+    cronAdviceSource,
+    /CANCEL_POLL_INTERVAL_MS\s*=\s*1000/,
+  )
+  assert.match(
+    aiSource,
+    /triggeredPriceReview\s*\?\s*3500\s*:\s*15000/,
+  )
+  assert.match(
+    aiSource,
+    /timeoutMs:\s*triggeredPriceReview\s*\?\s*2500\s*:\s*7000/,
+  )
+  assert.match(
+    aiSource,
+    /triggeredPriceReview[\s\S]*?timeoutMs:\s*1800[\s\S]*?parallel:\s*true[\s\S]*?maxHosts:\s*2/,
+  )
+  assert.match(
+    aiSource,
+    /TRIGGERED_REVIEW_REUSE_PREVIOUS/,
+  )
+})
