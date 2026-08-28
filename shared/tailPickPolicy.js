@@ -153,6 +153,8 @@ export function evaluateTailPickMarketGate({
 } = {}) {
   const reasons = []
   const blockers = []
+  let riskTier = 'BLOCKED'
+  let maxPositionPct = 0
   const regime = deriveMarketRegime(market)
   if (!regime.allowRiskIncrease) {
     blockers.push(
@@ -168,10 +170,27 @@ export function evaluateTailPickMarketGate({
   } else {
     const aboveMa20 = indices.filter((item) => item.aboveMa20).length
     const bullish = indices.filter((item) => item.bullishStack).length
-    if (aboveMa20 < 2 || bullish < 1) {
-      blockers.push('核心指数尚未形成5/10/20日均线总体偏强结构')
-    } else {
+    const stronglySupported = aboveMa20 >= 2 && bullish >= 1
+    const breadth = market?.breadth || {}
+    const breadthSupport = (
+      Number(breadth.up) > 0
+      && Number(breadth.down) > 0
+      && Number(breadth.up) / Number(breadth.down) >= 1.05
+    )
+    const structurallySupported = (
+      ['RANGE', 'TRANSITION', 'TREND_STRONG'].includes(regime.regime)
+      && (aboveMa20 >= 1 || breadthSupport)
+    )
+    if (stronglySupported) {
+      riskTier = 'STANDARD'
+      maxPositionPct = 5
       reasons.push('核心指数站稳20日线且短中期均线结构未破坏')
+    } else if (structurallySupported) {
+      riskTier = 'CAUTIOUS'
+      maxPositionPct = 3
+      reasons.push('均线尚未全面转强，但市场仍有结构性承接，仓位降至3%')
+    } else {
+      blockers.push('核心指数与市场广度均未形成可参与结构')
     }
     if (indices.some((item) => item.volumeSelloff)) {
       blockers.push('核心指数连续放量下跌并跌破60日线')
@@ -190,12 +209,22 @@ export function evaluateTailPickMarketGate({
   } else {
     reasons.push(`板块前瞻确认${mainlines.length}个可跟踪方向`)
   }
+  if (blockers.length) {
+    riskTier = 'BLOCKED'
+    maxPositionPct = 0
+  }
 
   return {
     allowed: blockers.length === 0,
-    label: blockers.length ? '今日不开仓' : '允许公式观察',
+    label: blockers.length
+      ? '今日不开仓'
+      : riskTier === 'STANDARD'
+        ? '允许小仓观察'
+        : '仅允许谨慎观察',
     reasons,
     blockers,
+    riskTier,
+    maxPositionPct,
     dataAsOf: Number(market?.updatedAt) || null,
     regime: {
       label: regime.label,

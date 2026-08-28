@@ -193,6 +193,29 @@ test('排序最多输出一只首选并保持候补不可买', () => {
   assert.match(result.candidates[1].execution.action, /不买/)
 })
 
+test('结构性震荡档把首选总仓位从5%收紧到3%', () => {
+  const candidate = {
+    code: '600001',
+    name: '测试股份',
+    formula: { matched: true, signals: [] },
+    stockGate: { passed: true, gain20: 8, evidence: [] },
+    intraday: { passed: true, price: 10, vwap: 9.96 },
+    quote: { price: 10, low: 9.5, amount: 100_000_000 },
+    sectorOpportunity: {
+      sector: { nextScore: 70 },
+      stock: { score: 68 },
+    },
+  }
+  const result = rankTailPickCandidates([candidate], {
+    timestamp: beijingTimestamp('2026-08-28T14:51:00'),
+    maxPositionPct: 3,
+  })
+
+  assert.equal(result.candidates[0].execution.maxPositionPct, 3)
+  assert.match(result.candidates[0].execution.firstLeg, /最多2%/)
+  assert.match(result.candidates[0].execution.secondLeg, /最多1%/)
+})
+
 test('扫描任务在大盘闸门失败时直接保存不开仓结果', async () => {
   let savedRun = null
   let scanCalls = 0

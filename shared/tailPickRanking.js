@@ -70,7 +70,12 @@ function candidateScore(candidate) {
   }
 }
 
-function instruction(candidate, role, timestamp) {
+function instruction(
+  candidate,
+  role,
+  timestamp,
+  maxPositionPct,
+) {
   const price = finite(candidate.intraday?.price)
     ?? finite(candidate.quote?.price)
   const vwap = finite(candidate.intraday?.vwap)
@@ -79,18 +84,27 @@ function instruction(candidate, role, timestamp) {
   const ceiling = price == null
     ? null
     : rounded(Math.max(price, vwap || price) * 1.003)
+  const positionCap = Math.max(
+    1,
+    Math.min(5, Number(maxPositionPct) || 5),
+  )
+  const firstLegPct = Math.min(2, positionCap)
+  const secondLegPct = Math.max(0, positionCap - firstLegPct)
   const finalExit = thirdTradingDayAfter(timestamp)
   return {
     role,
     action: role === 'PRIMARY'
-      ? `公式首选：不高于${ceiling ?? '--'}元观察，手工确认后最多5%仓位`
+      ? `公式首选：不高于${ceiling ?? '--'}元观察，手工确认后最多${positionCap}%仓位`
       : '候补：首选失效前不买，只加入自选跟踪',
     firstLeg: role === 'PRIMARY'
-      ? `14:50-14:52不高于${ceiling ?? '--'}元，第一笔最多2%`
+      ? `14:50-14:52不高于${ceiling ?? '--'}元，第一笔最多${firstLegPct}%`
       : null,
     secondLeg: role === 'PRIMARY'
-      ? '14:53-14:55仍站稳分时均价线且未放量跳水，再补最多3%'
+      ? secondLegPct > 0
+        ? `14:53-14:55仍站稳分时均价线且未放量跳水，再补最多${secondLegPct}%`
+        : null
       : null,
+    maxPositionPct: positionCap,
     stopPrice: rounded(dayLow),
     stopNote: '买入当日最低价，次日起生效',
     takeProfit: '次日冲高1%-3%减半，累计上涨7%-8%清仓',
@@ -103,6 +117,7 @@ export function rankTailPickCandidates(
   {
     limit = 3,
     timestamp = Date.now(),
+    maxPositionPct = 5,
   } = {},
 ) {
   const ranked = candidates
@@ -129,6 +144,7 @@ export function rankTailPickCandidates(
         item,
         index === 0 ? 'PRIMARY' : 'ALTERNATE',
         timestamp,
+        maxPositionPct,
       ),
     }))
   return {

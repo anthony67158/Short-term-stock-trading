@@ -227,6 +227,8 @@ export function runTailPickScan({
       )
       const ranked = rankCandidates(scanned.candidates, {
         timestamp: Number(now()) || Date.now(),
+        maxPositionPct:
+          marketContext.marketGate.maxPositionPct,
       })
       const generatedAt = Number(now()) || Date.now()
       const result = {

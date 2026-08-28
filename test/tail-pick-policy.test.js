@@ -90,7 +90,54 @@ test('大盘与主线方向同时通过才允许继续扫描', () => {
   })
 
   assert.equal(result.allowed, true)
-  assert.equal(result.label, '允许公式观察')
+  assert.equal(result.label, '允许小仓观察')
+  assert.equal(result.riskTier, 'STANDARD')
+  assert.equal(result.maxPositionPct, 5)
+})
+
+test('均线未全面多头但震荡结构仍有承接时降为3%而非一票否决', () => {
+  const weakIndex = Array.from({ length: 60 }, (_, index) => ({
+    close: 12 - index * 0.02,
+    volume: 1000,
+  }))
+  const market = strongMarket()
+  market.indices = [
+    { code: '000001', name: '上证指数', pct: -0.2 },
+    { code: '399001', name: '深证成指', pct: 0.1 },
+  ]
+  market.breadth = {
+    ...market.breadth,
+    up: 2800,
+    down: 2400,
+    limitUp: 35,
+    limitDown: 8,
+    volLevel: '平量',
+  }
+  market.sentiment = {
+    ...market.sentiment,
+    phase: 'RECOVERY',
+    phaseLabel: '修复',
+    breakRatePct: 25,
+    maxBoardHeight: 3,
+  }
+  const result = evaluateTailPickMarketGate({
+    market,
+    indexSeries: [
+      { code: '000001', name: '上证指数', candles: indexCandles() },
+      { code: '399001', name: '深证成指', candles: weakIndex },
+    ],
+    sectorSnapshot: {
+      sectors: [{
+        actionability: 'LAYOUT',
+        forecast: { next: { score: 62 } },
+      }],
+    },
+  })
+
+  assert.equal(result.allowed, true)
+  assert.equal(result.riskTier, 'CAUTIOUS')
+  assert.equal(result.maxPositionPct, 3)
+  assert.match(result.reasons.join('；'), /结构性承接/)
 })
 
 test('大盘数据缺失或没有主线时直接输出今日不开仓', () => {
@@ -102,6 +149,7 @@ test('大盘数据缺失或没有主线时直接输出今日不开仓', () => {
 
   assert.equal(result.allowed, false)
   assert.equal(result.label, '今日不开仓')
+  assert.equal(result.maxPositionPct, 0)
   assert.match(result.blockers.join('；'), /数据不完整/)
   assert.match(result.blockers.join('；'), /主线方向/)
 })
