@@ -83,6 +83,20 @@ export function pendingOutboxAfterReset(cloudData, pendingOutbox) {
   if (resetAt > 0 && (Number(pendingOutbox.at) || 0) <= resetAt) {
     return null
   }
+  const baseFingerprint = String(
+    pendingOutbox.baseTradeFingerprint || '',
+  )
+  const cloudMatchesBase = !!baseFingerprint && (
+    accountTradeStateFingerprint(cloudData) === baseFingerprint
+    || legacyAccountTradeStateFingerprint(cloudData)
+      === baseFingerprint
+  )
+  if (
+    !cloudMatchesBase
+    && !sameAccountTradeState(pendingOutbox.data, cloudData)
+  ) {
+    return null
+  }
   return pendingOutbox
 }
 

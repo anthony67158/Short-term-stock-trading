@@ -50,6 +50,7 @@ test('刷新恢复账号时优先保留尚未上传完成的本地交易快照',
     alerts: [{ id: 'cloud-alert' }],
   }
   const pending = {
+    baseTradeFingerprint: accountTradeStateFingerprint(cloud),
     data: {
       holding: [{ id: 'h1', code: '002309', qty: 16 }],
       closed: [{ id: 'sell-1', code: '002309', type: 'SELL', qty: 9 }],
@@ -78,6 +79,7 @@ test('权威账本重置后淘汰旧outbox但保留重置后的新修改', () =>
   }
   const fresh = {
     at: 600,
+    baseTradeFingerprint: accountTradeStateFingerprint(cloud),
     data: {
       holding: [{ id: 'titan', code: '003036', qty: 2 }],
       closed: [],
@@ -93,6 +95,48 @@ test('权威账本重置后淘汰旧outbox但保留重置后的新修改', () =>
   assert.equal(
     accountSnapshotForRestore(cloud, fresh).holding[0].qty,
     2,
+  )
+})
+
+test('登录时拒绝把旧设备待上传账本覆盖到更新的云端持仓', () => {
+  const cloud = {
+    plan: [
+      { code: '600988', name: '赤峰黄金' },
+      { code: '002436', name: '兴森科技' },
+    ],
+    holding: [
+      { code: '003036', name: '泰坦股份', qty: 1 },
+      { code: '000636', name: '风华高科', qty: 1 },
+    ],
+    closed: Array.from({ length: 169 }, (_, index) => ({
+      id: `closed-${index}`,
+    })),
+  }
+  const staleBase = {
+    plan: [{ code: '000636', name: '风华高科' }],
+    holding: [
+      { code: '002436', name: '兴森科技', qty: 1 },
+      { code: '600988', name: '赤峰黄金', qty: 1 },
+      { code: '003036', name: '泰坦股份', qty: 1 },
+    ],
+    closed: Array.from({ length: 165 }, (_, index) => ({
+      id: `closed-${index}`,
+    })),
+  }
+  const stalePending = {
+    at: 600,
+    baseTradeFingerprint:
+      accountTradeStateFingerprint(staleBase),
+    data: staleBase,
+  }
+
+  assert.equal(
+    pendingOutboxAfterReset(cloud, stalePending),
+    null,
+  )
+  assert.deepEqual(
+    accountSnapshotForRestore(cloud, stalePending),
+    cloud,
   )
 })
 
