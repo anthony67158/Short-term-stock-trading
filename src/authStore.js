@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react'
 import { planStore } from './planStore'
 import { api as apiUrl } from './apiBase'
 import { isBatchRunning } from './adviceBatch'
+import { accountApiRequest } from './accountRequest.js'
 import {
   accountSnapshotForRestore,
   accountTradeStateFingerprint,
@@ -136,19 +137,11 @@ export function readLegacyData() {
 export function hasLegacyData() { return !!readLegacyData() }
 
 async function api(action, payload) {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 20000)
-  try {
-    const r = await fetch(apiUrl('/api/account'), {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, ...payload }),
-      signal: controller.signal,
-    })
-    const raw = await r.text()
-    try { return JSON.parse(raw) } catch { return { ok: false, error: `服务异常(${r.status})` } }
-  } finally {
-    clearTimeout(timeout)
-  }
+  return accountApiRequest(
+    apiUrl('/api/account'),
+    action,
+    payload,
+  )
 }
 
 const cloudSaveQueue = createCloudSaveQueue({
