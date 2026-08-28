@@ -158,6 +158,29 @@ test('旧深度任务的三次重试配置会在领取时收紧且失败不再�
   assert.equal(data.jobs['600000'].status, 'failed')
 })
 
+test('价格触发复核只允许一次任务尝试，失败不得循环重跑', () => {
+  const data = {}
+  enqueueJob(data, {
+    code: '600000',
+    name: '浦发银行',
+    mode: 'buy_advice',
+    source: 'judge',
+    trigger: {
+      kind: 'price-review',
+      at: 1000,
+      decisionDeadlineAt: 121000,
+      terminalRequired: true,
+    },
+  }, 1000)
+
+  const job = data.reviewJobs['600000']
+  assert.equal(job.maxAttempts, 1)
+  leaseJob(data, '600000', 1100, 'review', job.id)
+  failJob(data, '600000', '限时复核失败', 1200, 'review', job.id)
+  assert.equal(job.status, 'failed')
+  assert.equal(job.maxAttempts, 1)
+})
+
 test('重复点击不能用新排队任务覆盖正在生成的同一股票', () => {
   const data = {}
   const first = enqueueJob(data, {

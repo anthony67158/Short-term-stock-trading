@@ -1,16 +1,16 @@
 const POLICY = {
   buy: {
-    minObserveMs: 2 * 60 * 1000,
+    minObserveMs: 0,
     deterministicConfirm: 2.5,
     llmConfidence: 78,
   },
   sell: {
-    minObserveMs: 60 * 1000,
+    minObserveMs: 0,
     deterministicConfirm: 1.5,
     llmConfidence: 70,
   },
   stop: {
-    minObserveMs: 90 * 1000,
+    minObserveMs: 0,
     deterministicConfirm: 1.5,
     hardOverride: 3,
     llmConfidence: 65,
@@ -39,7 +39,7 @@ export function shouldRequestConfirmation(
 }
 
 export function shouldConfirmImmediatelyAfterTouch(side) {
-  return side === 'stop'
+  return ['buy', 'sell', 'stop'].includes(side)
 }
 
 export async function resolveImmediateConfirmationAlert({
@@ -65,9 +65,8 @@ export async function resolveImmediateConfirmationAlert({
 }
 
 export function shouldCallLlmJudge(side, deterministic) {
-  const policy = confirmationPolicy(side)
-  return deterministic?.decision === 'confirm'
-    && Number(deterministic.score) >= policy.deterministicConfirm
+  return !!confirmationPolicy(side)
+    && deterministic?.decision !== 'invalid'
 }
 
 export function fuseConfirmation({
@@ -113,14 +112,13 @@ export function fuseConfirmation({
     }
   }
 
-  if (llm?.decision === 'invalid' && det.decision !== 'invalid') {
+  if (llm?.decision === 'invalid') {
     return {
-      decision: 'wait',
+      decision: 'invalid',
       confidence: llm.confidence ?? null,
-      reason: `模型认为失效，但客观失效信号不足，继续观察：${llm.reason || ''}`,
-      gated: true,
+      reason: llm.reason || '本次交易逻辑已经失效',
       rawDecision: 'invalid',
-      policy: 'invalid-gated',
+      policy: 'llm-invalid',
     }
   }
 
@@ -128,7 +126,7 @@ export function fuseConfirmation({
     return {
       decision: det.decision === 'confirm' && score >= policy.deterministicConfirm ? 'confirm' : 'wait',
       confidence: null,
-      reason: det.hits?.length ? det.hits.join('、') : '证据不足，继续观察',
+      reason: det.hits?.length ? det.hits.join('、') : '证据不足，本次不执行',
       policy: 'deterministic-fallback',
     }
   }
@@ -137,7 +135,7 @@ export function fuseConfirmation({
     return {
       decision: 'wait',
       confidence: llm.confidence ?? null,
-      reason: llm.reason || '模型建议继续观察',
+      reason: llm.reason || '模型本轮决定不执行',
       policy: 'llm-wait',
     }
   }
@@ -146,7 +144,7 @@ export function fuseConfirmation({
     return {
       decision: 'wait',
       confidence: null,
-      reason: '模型未提供有效置信度，继续观察',
+      reason: '模型未提供有效置信度，本次不执行',
       gated: true,
       rawDecision: 'confirm',
       policy: 'confidence-gated',
@@ -157,21 +155,10 @@ export function fuseConfirmation({
     return {
       decision: 'wait',
       confidence: llm.confidence,
-      reason: `模型把握不足(${llm.confidence}<${policy.llmConfidence})，继续观察：${llm.reason || ''}`,
+      reason: `模型把握不足(${llm.confidence}<${policy.llmConfidence})，本次不执行：${llm.reason || ''}`,
       gated: true,
       rawDecision: 'confirm',
       policy: 'confidence-gated',
-    }
-  }
-
-  if (det.decision !== 'confirm' || score < policy.deterministicConfirm) {
-    return {
-      decision: 'wait',
-      confidence: llm.confidence,
-      reason: `模型倾向确认，但客观信号仅${score}分，尚未共振`,
-      gated: true,
-      rawDecision: 'confirm',
-      policy: 'deterministic-gated',
     }
   }
 

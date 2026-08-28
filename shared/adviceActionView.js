@@ -251,16 +251,91 @@ function levelsFor(kind, advice, triggerDirection = '', followUp = null) {
   ].filter(Boolean)
 }
 
+function preferredWaitLevel(levels = [], advice = {}, currentPrice = null) {
+  const pullback = levels.find((item) => item.key === 'watch_pullback')
+  const breakout = levels.find((item) => item.key === 'watch_breakout')
+  const timingState = String(
+    advice.shortHorizonTactical?.timing?.state || '',
+  )
+  if (timingState === 'WAIT_BREAKOUT' && breakout) return breakout
+  if (timingState === 'WAIT_PULLBACK' && pullback) return pullback
+
+  const instruction = String(
+    advice.actionPlan || advice.timing || advice.reason || '',
+  )
+  const mentionsBreakout = /突破|站上|站稳/.test(instruction)
+  const mentionsPullback = /回踩|回调|低吸/.test(instruction)
+  if (mentionsBreakout && !mentionsPullback && breakout) return breakout
+  if (mentionsPullback && !mentionsBreakout && pullback) return pullback
+
+  const current = finite(currentPrice)
+  if (current != null && pullback && breakout) {
+    const pullbackDistance = Math.abs(current - pullback.price) / current
+    const breakoutDistance = Math.abs(current - breakout.price) / current
+    return breakoutDistance <= pullbackDistance ? breakout : pullback
+  }
+  return breakout || pullback || levels[0] || null
+}
+
+function waitPathInstruction(level, quantity = '') {
+  if (!level) return ''
+  const nextAction = quantity
+    ? `复核通过后手动买入${quantity}`
+    : '复核通过后按新指令的价格和手数手动买入'
+  if (level.key === 'watch_breakout') {
+    return `当前不买；只看${level.price}元：盘中放量站稳后立即复核一次，${nextAction}；未放量或跌回${level.price}元下方不买`
+  }
+  return `当前不买；只看${level.price}元：回踩不破并重新站回分时均价后立即复核一次，${nextAction}；跌破${level.price}元不买`
+}
+
+function pendingManualEntryProposal({
+  advice = {},
+  instruction = '',
+  mode = '',
+  plan = null,
+} = {}) {
+  if (
+    mode !== 'buy_advice'
+    || plan?.actionability === 'BLOCKED'
+  ) return null
+  const buyPrice = finite(advice.buyPrice)
+  const quantity = quantityText(
+    advice.planQtyNum ?? advice.planQty ?? advice.opQty,
+  )
+  const explicitlyPlansEntry = (
+    /人工确认.*(?:买入|建仓|试仓)/.test(instruction)
+    || /(?:买入|建仓|试仓).*\d+(?:\.\d+)?\s*手/.test(instruction)
+  )
+  if (buyPrice == null || !quantity || !explicitlyPlansEntry) return null
+  return {
+    buyPrice,
+    quantity,
+    stopPrice: finite(advice.stopPrice),
+    targetPrice: finite(advice.targetPrice),
+  }
+}
+
 function triggerFor(kind, levels, triggerDirection = '', followUp = null) {
   const primary = levels.find((item) => item.active)
   if (kind === 'wait') {
+    const waitLevel = levels[0] || null
     return {
       direction: 'inactive',
-      price: primary?.price ?? null,
-      label: '等待确认',
-      stateLabel: '等待新证据',
-      detailLabel: '到价后重新评估方向',
-      metricLabel: '不预设买入',
+      price: waitLevel?.price ?? null,
+      label: waitLevel?.key === 'watch_breakout'
+        ? '等待突破'
+        : waitLevel?.key === 'watch_pullback'
+          ? '等待回踩'
+          : '等待确认',
+      stateLabel: waitLevel?.key === 'watch_breakout'
+        ? '等待放量突破'
+        : waitLevel?.key === 'watch_pullback'
+          ? '等待回踩企稳'
+          : '等待新证据',
+      detailLabel: waitLevel
+        ? '到价立即复核一次'
+        : '出现新证据后重新评估',
+      metricLabel: '未触发不买',
     }
   }
   if (kind === 'buy' || kind === 'add') {
@@ -329,6 +404,9 @@ export function buildAdviceActionView(
   const plan = advice.decisionPlan?.schemaVersion === 'decision-plan.v2'
     ? advice.decisionPlan
     : null
+  const terminalOutcome = advice.reviewDecision?.terminal === true
+    ? clean(advice.reviewDecision.outcome, 30)
+    : ''
   const holdingMode = mode === 'hold_advice'
   const planAction = {
     BUY: '现在买入',
@@ -409,11 +487,56 @@ export function buildAdviceActionView(
         || source.timing
         || source.reason,
   )
-  const instruction = clean(
+  const initialInstruction = clean(
     followUp?.summary
       ? `${baseInstruction}${baseInstruction ? '；' : ''}${followUp.summary}`
       : baseInstruction,
   )
+  const current = finite(currentPrice)
+  const policyOpportunity = deferredOpportunityView(
+    plan,
+    executionOpen,
+  )
+  const pendingEntry = kind === 'wait' && !policyOpportunity
+    ? pendingManualEntryProposal({
+        advice,
+        instruction: initialInstruction,
+        mode,
+        plan,
+      })
+    : null
+  if (pendingEntry) {
+    const proposalLevels = withPriceBasis([
+      level('entry', '拟买价', pendingEntry.buyPrice, 'buy', false),
+      level('stop', '止损价', pendingEntry.stopPrice, 'risk', false),
+      level('target', '目标价', pendingEntry.targetPrice, 'sell', false),
+    ].filter(Boolean), advice)
+    return {
+      kind: 'wait',
+      action: '待确认建仓',
+      displayTone: 'buy',
+      commandLabel: '执行预案',
+      detailActionLabel: '查看建仓依据',
+      shortHorizon: clean(advice.shortHorizon, 30),
+      instruction: initialInstruction,
+      quantity: pendingEntry.quantity,
+      quantityLabel: '',
+      levels: proposalLevels,
+      trigger: {
+        direction: 'inactive',
+        price: pendingEntry.buyPrice,
+        label: '等待确认',
+        stateLabel: '等待人工确认',
+        detailLabel: '确认后按计划手动建仓',
+        metricLabel: '不自动下单',
+      },
+      actionability: plan?.actionability || 'WATCH',
+      manualOnly: true,
+      actionable: false,
+      deferred: false,
+      deferredReason: '',
+    }
+  }
   const triggerDirection = executionTriggerDirection({
     action: plan?.action || {
       buy: 'BUY',
@@ -421,14 +544,29 @@ export function buildAdviceActionView(
       reduce: 'REDUCE',
       sell: 'EXIT',
     }[kind],
-    trigger: instruction,
+    trigger: initialInstruction,
     triggerDirection: plan?.triggerDirection,
   })
-  const levels = withPriceBasis(
+  const allLevels = withPriceBasis(
     levelsFor(kind, source, triggerDirection, followUp),
     source,
   )
-  const current = finite(currentPrice)
+  const primaryWaitLevel = kind === 'wait'
+    ? preferredWaitLevel(allLevels, source, current)
+    : null
+  const levels = kind === 'wait' && primaryWaitLevel
+    ? [primaryWaitLevel]
+    : allLevels
+  const instruction = (
+    kind === 'wait'
+    && primaryWaitLevel
+    && !policyOpportunity
+  )
+    ? waitPathInstruction(
+        primaryWaitLevel,
+        quantityText(advice.planQtyNum ?? advice.planQty),
+      )
+    : initialInstruction
   const entry = levels.find((item) =>
     item.key === 'entry'
     && item.active
@@ -450,10 +588,6 @@ export function buildAdviceActionView(
       executionOpen === false
       || generatedOutsideSession
     )
-  )
-  const policyOpportunity = deferredOpportunityView(
-    plan,
-    executionOpen,
   )
   const deferredOpportunity = sessionDeferred
     ? policyOpportunity
@@ -540,25 +674,47 @@ export function buildAdviceActionView(
   return {
     kind,
     action: deferredWaitPlan?.action
-      || (deferredWait ? '等待盘中' : action || ({
-      buy: '买入',
-      add: '加仓',
-      reduce: '减仓',
-      sell: '退出',
-      hold: '持有',
-      wait: '观望',
-    }[kind])),
+      || (
+        deferredWait
+          ? '等待盘中'
+          : terminalOutcome
+            || (kind === 'wait' && primaryWaitLevel
+            ? primaryWaitLevel.key === 'watch_breakout'
+              ? '等待突破'
+              : '等待回踩'
+            : action || ({
+                buy: '买入',
+                add: '加仓',
+                reduce: '减仓',
+                sell: '退出',
+                hold: '持有',
+                wait: '观望',
+              }[kind]))
+      ),
     displayTone: deferredWaitPlan?.displayTone,
-    commandLabel: deferredWaitPlan?.commandLabel,
+    commandLabel: deferredWaitPlan?.commandLabel
+      || (terminalOutcome ? '复核结论' : null)
+      || (kind === 'wait' && primaryWaitLevel ? '唯一条件' : null),
     detailActionLabel: deferredWaitPlan?.detailActionLabel,
-    shortHorizon: deferredWaitPlan?.shortHorizon
-      || clean(source.shortHorizon, 30),
+    shortHorizon: terminalOutcome
+      ? '本次到价已决断'
+      : deferredWaitPlan?.shortHorizon
+        || clean(source.shortHorizon, 30),
     instruction: deferredWaitPlan?.instruction || instruction,
     quantity,
     quantityLabel: deferredWaitPlan?.quantityLabel,
     levels,
-    trigger: deferredWaitPlan?.trigger || (deferredWait
+    trigger: terminalOutcome
       ? {
+          direction: 'inactive',
+          price: null,
+          label: '复核完成',
+          stateLabel: terminalOutcome,
+          detailLabel: '本次价格触发已结束',
+          metricLabel: '不再复核原价',
+        }
+      : deferredWaitPlan?.trigger || (deferredWait
+        ? {
           direction: 'inactive',
           price: null,
           label: '等待确认',
@@ -566,7 +722,7 @@ export function buildAdviceActionView(
           detailLabel: '盘中满足条件后再提醒',
           metricLabel: '当前不下单',
         }
-      : triggerFor(kind, levels, triggerDirection, followUp)),
+        : triggerFor(kind, levels, triggerDirection, followUp)),
     actionability: plan?.actionability || null,
     manualOnly: deferredWaitPlan
       ? true
@@ -585,6 +741,58 @@ function holdingPriceText(value) {
   const number = finite(value)
   if (number == null) return '计划价'
   return String(number < 10 ? +number.toFixed(3) : +number.toFixed(2))
+}
+
+const ENTRY_ROUTE_LABEL = Object.freeze({
+  DUAL_CORE: '量化资金双核共振',
+  BREAKOUT_MOMENTUM: '放量突破确认',
+  QUANT_MOMENTUM: '量化强势',
+  FLOW_LEADERSHIP: '资金领涨',
+})
+
+// 从决策计划的动作政策中提炼"这次该下多重的手"给卡片做强高亮。
+// 只在方向已通过（FULL 正式建仓 / PROBE 小仓试错）时返回，观望一律为空。
+export function entryConvictionView(advice = {}) {
+  const plan = advice?.decisionPlan?.schemaVersion === 'decision-plan.v2'
+    ? advice.decisionPlan
+    : null
+  const policy = plan?.actionPolicy
+  if (!policy) return null
+  const actionable = ['READY', 'MANUAL_PROBE'].includes(plan.actionability)
+  if (!actionable) return null
+  const tier = policy.riskTier
+  const route = ENTRY_ROUTE_LABEL[policy.entryRoute] || ''
+  const confirmations = (Array.isArray(policy.confirmations)
+    ? policy.confirmations
+    : []).map((item) => clean(item, 20)).filter(Boolean).slice(0, 3)
+  if (tier === 'FULL') {
+    const band = policy.positionBandPct
+    const sizeValue = band
+      && Number.isFinite(Number(band.min))
+      && Number.isFinite(Number(band.max))
+      ? `${band.min}–${band.max}%`
+      : ''
+    return {
+      tier: 'FULL',
+      sizeLabel: '正式建仓',
+      sizeValue,
+      route,
+      confirmations,
+      tone: 'buy',
+    }
+  }
+  if (tier === 'PROBE') {
+    const max = Number(policy.maxPositionPct)
+    return {
+      tier: 'PROBE',
+      sizeLabel: '小仓试错',
+      sizeValue: Number.isFinite(max) && max > 0 ? `≤${max}%` : '',
+      route,
+      confirmations,
+      tone: 'probe',
+    }
+  }
+  return null
 }
 
 export function buildHoldingCardDecisionView({

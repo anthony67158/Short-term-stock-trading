@@ -31,6 +31,36 @@ function memoryStorage(account) {
   }
 }
 
+test('Judge维持意见会终结当前价格触发而不是继续循环复核', () => {
+  const outcome = __test.terminalWaitOutcome(
+    {
+      id: 'buy-watch-1',
+      code: '600000',
+      name: '浦发银行',
+      type: 'price',
+      op: 'gte',
+      value: 10,
+      note: '买入点',
+      phase: 'watching',
+      enabled: true,
+    },
+    { price: 10.02 },
+    {
+      decision: 'wait',
+      terminalInstruction: '维持观望；本次触发结束，不新增复核价',
+      side: 'buy',
+    },
+    2000,
+  )
+
+  assert.equal(outcome.alert.phase, 'reviewed')
+  assert.equal(outcome.alert.enabled, false)
+  assert.equal(outcome.alert.triggeredAt, 2000)
+  assert.equal(outcome.alert.decisionPrice, 10.02)
+  assert.match(outcome.notification.title, /维持观望/)
+  assert.match(outcome.notification.body, /本次触发结束/)
+})
+
 test('FC回写预警状态时保留期间刚变化的持仓和新预警', async () => {
   const latest = {
     nick: '并发预警账号',

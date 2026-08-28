@@ -29,7 +29,9 @@ function industryWeight(payload) {
 }
 
 function isBuyAction(result) {
-  return !/观望|等待|不建议|回避/.test(String(result?.action || ''))
+  return !/观望|等待|不建议|回避|放弃买入/.test(
+    String(result?.action || ''),
+  )
 }
 
 function isAddAction(result) {

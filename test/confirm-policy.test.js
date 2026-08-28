@@ -17,7 +17,7 @@ import {
 const det = (score, decision = 'wait') => ({ score, decision, hits: [] })
 const llm = (decision, confidence) => ({ decision, confidence, reason: '模型判断' })
 
-test('买入必须同时通过客观信号和高置信 LLM，不允许模型单独确认', () => {
+test('到价后高置信 LLM 可结合原计划直接确认，不机械等待全部指标共振', () => {
   const result = fuseConfirmation({
     side: 'buy',
     deterministic: det(1.5),
@@ -25,9 +25,8 @@ test('买入必须同时通过客观信号和高置信 LLM，不允许模型单�
     observationAgeMs: 5 * 60 * 1000,
   })
 
-  assert.equal(result.decision, 'wait')
-  assert.equal(result.gated, true)
-  assert.match(result.reason, /客观信号/)
+  assert.equal(result.decision, 'confirm')
+  assert.equal(result.policy, 'consensus')
 })
 
 test('买入客观信号充分且 LLM 高置信时确认', () => {
@@ -77,21 +76,18 @@ test('灾难性止损不等待观察窗口或LLM确认', () => {
   assert.equal(result.policy, 'risk-override')
 })
 
-test('前端止损触价后立即请求后端以允许强破位快通道', () => {
+test('买入卖出止损触价后都立即请求后端终局确认', () => {
   const now = Date.now()
 
   assert.equal(shouldRequestConfirmation('stop', now - 5000, now), true)
-  assert.equal(shouldRequestConfirmation('buy', now - 5000, now), false)
-  assert.equal(
-    shouldRequestConfirmation('buy', now - 2 * 60 * 1000, now),
-    true,
-  )
+  assert.equal(shouldRequestConfirmation('buy', now - 5000, now), true)
+  assert.equal(shouldRequestConfirmation('sell', now - 5000, now), true)
 })
 
-test('只有止损在首次触价落盘后立即进入确认', () => {
+test('所有价格动作在首次触价落盘后立即进入确认', () => {
   assert.equal(shouldConfirmImmediatelyAfterTouch('stop'), true)
-  assert.equal(shouldConfirmImmediatelyAfterTouch('sell'), false)
-  assert.equal(shouldConfirmImmediatelyAfterTouch('buy'), false)
+  assert.equal(shouldConfirmImmediatelyAfterTouch('sell'), true)
+  assert.equal(shouldConfirmImmediatelyAfterTouch('buy'), true)
 })
 
 test('止损即时确认必须等待权威状态落盘并重读watching预警', async () => {
@@ -116,20 +112,26 @@ test('止损即时确认必须等待权威状态落盘并重读watching预警', 
 
   assert.deepEqual(events, ['saved', 'read'])
   assert.equal(resolved, current)
-  assert.equal(await resolveImmediateConfirmationAlert({
+  const buyCurrent = await resolveImmediateConfirmationAlert({
     side: 'buy',
     alertId: 'stop-1',
     flushSave: async () => {
-      throw new Error('买入不应立即落盘确认')
+      events.push('buy-saved')
+      return true
     },
-    getAlerts: () => [current],
-  }), null)
+    getAlerts: () => {
+      events.push('buy-read')
+      return [current]
+    },
+  })
+  assert.equal(buyCurrent, current)
+  assert.deepEqual(events.slice(-2), ['buy-saved', 'buy-read'])
 })
 
-test('确定性信号未达到确认门槛时不调用LLM', () => {
+test('到价后只要未客观失效就调用LLM完成终局判断', () => {
   assert.equal(
     shouldCallLlmJudge('buy', { decision: 'wait', score: 2 }),
-    false,
+    true,
   )
   assert.equal(
     shouldCallLlmJudge('buy', { decision: 'confirm', score: 2.5 }),
@@ -149,7 +151,7 @@ test('LLM 未提供置信度时不能发买卖强提示', () => {
   assert.match(result.reason, /置信度/)
 })
 
-test('刚触价时先观察，不能拿触价前分时立即确认', () => {
+test('刚触价时无需额外等待观察窗口即可确认', () => {
   const result = fuseConfirmation({
     side: 'sell',
     deterministic: det(3, 'confirm'),
@@ -157,11 +159,11 @@ test('刚触价时先观察，不能拿触价前分时立即确认', () => {
     observationAgeMs: 20 * 1000,
   })
 
-  assert.equal(result.decision, 'wait')
-  assert.match(result.reason, /观察/)
+  assert.equal(result.decision, 'confirm')
+  assert.equal(result.policy, 'consensus')
 })
 
-test('LLM 判失效必须得到客观失效信号支持', () => {
+test('LLM 基于完整计划判失效时可直接结束本次触发', () => {
   const unsupported = fuseConfirmation({
     side: 'buy',
     deterministic: det(1),
@@ -175,7 +177,7 @@ test('LLM 判失效必须得到客观失效信号支持', () => {
     observationAgeMs: 5 * 60 * 1000,
   })
 
-  assert.equal(unsupported.decision, 'wait')
+  assert.equal(unsupported.decision, 'invalid')
   assert.equal(supported.decision, 'invalid')
 })
 

@@ -6,6 +6,10 @@ import {
   createExecutionEvent,
   processExecutionEvent,
 } from '../shared/executionEvents.js'
+import {
+  TRIGGERED_REVIEW_TIME_LIMIT_MINUTES,
+  TRIGGERED_REVIEW_TOTAL_BUDGET_MS,
+} from '../shared/triggeredReviewDecision.js'
 
 function decisionSideOf(alert, verdict) {
   if (verdict?.side) return String(verdict.side)
@@ -103,6 +107,10 @@ export function queueAdviceReviewForPriceTrigger(
         ? '持仓加仓复核价已触发，重新评估是否加仓'
         : '观察价已触发，重新评估买入方向',
     at: now,
+    timeLimitMinutes: TRIGGERED_REVIEW_TIME_LIMIT_MINUTES,
+    decisionDeadlineAt:
+      now + TRIGGERED_REVIEW_TOTAL_BUDGET_MS,
+    terminalRequired: true,
   }
   const idempotencyKey = [
     'price-review',
@@ -164,6 +172,10 @@ export function queueAdviceReviewForVerdict(data, alert, verdict, now = Date.now
       ? Number(alert.decisionPrice)
       : null,
     at: now,
+    timeLimitMinutes: TRIGGERED_REVIEW_TIME_LIMIT_MINUTES,
+    decisionDeadlineAt:
+      now + TRIGGERED_REVIEW_TOTAL_BUDGET_MS,
+    terminalRequired: true,
   }
   const idempotencyKey = [
     'judge',

@@ -2875,6 +2875,46 @@ button.acct-item { width: 100%; border: 0; background: transparent; font: inheri
 .ap-subtitle .icon { color: var(--gold); }
 .ap-subtitle .muted { font-weight: 400; }
 .ap-mode.theory { color: var(--gold); font-weight: 700; }
+
+/* 交易纪律条：真实业绩镜子 + 行为护栏（高频/连亏/费用） */
+.discipline-bar-wrap { position: relative; display: inline-block; }
+.discipline-bar { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 8px; background: var(--panel2); border: 1px solid var(--border-soft); font-size: 12px; cursor: pointer; font-family: inherit; }
+.discipline-bar:hover { border-color: var(--accent, #7c6bf5); }
+.discipline-bar .icon { color: var(--accent, #7c6bf5); }
+.discipline-bar.has-alert.level-warn { background: rgba(214,158,46,.1); border-color: rgba(214,158,46,.4); }
+.discipline-bar.has-alert.level-danger { background: rgba(224,49,49,.1); border-color: rgba(224,49,49,.45); }
+.discipline-bar.has-alert.level-warn .icon { color: var(--gold); }
+.discipline-bar.has-alert.level-danger .icon { color: var(--red); }
+.db-k { color: var(--muted); }
+.db-wr { font-size: 15px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.db-wr.red { color: var(--red); } .db-wr.gold { color: var(--gold); } .db-wr.green { color: var(--green); } .db-wr.muted { color: var(--muted); }
+.db-sub { font-size: 11px; color: var(--muted); }
+.db-alert-title { font-weight: 700; color: var(--text); }
+.discipline-bar.level-danger .db-alert-title { color: var(--red); }
+.discipline-bar.level-warn .db-alert-title { color: var(--gold); }
+.db-alert-more { font-size: 11px; font-weight: 700; color: var(--muted); padding: 0 5px; border-radius: 6px; background: var(--panel2); }
+/* 纪律弹层：告警块 + 真实业绩指标网格 */
+.discipline-dialog .db-alerts { display: flex; flex-direction: column; gap: 7px; margin-bottom: 11px; }
+.db-alert-item { display: flex; gap: 9px; padding: 9px 11px; border-radius: 10px; }
+.db-alert-item .icon { flex-shrink: 0; margin-top: 2px; }
+.db-alert-item > div { display: flex; flex-direction: column; gap: 2px; }
+.db-alert-item b { font-size: 12.5px; font-weight: 700; color: var(--text); }
+.db-alert-item span { font-size: 12px; color: var(--muted); line-height: 1.5; }
+.db-alert-item.level-warn { background: rgba(214,158,46,.1); border: 1px solid rgba(214,158,46,.28); }
+.db-alert-item.level-warn .icon { color: var(--gold); }
+.db-alert-item.level-danger { background: rgba(224,49,49,.09); border: 1px solid rgba(224,49,49,.3); }
+.db-alert-item.level-danger .icon { color: var(--red); }
+.db-mirror-head { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+.db-mirror-head .icon { color: var(--accent, #7c6bf5); }
+.db-mirror-head em { margin-left: auto; font-style: normal; font-size: 11px; font-weight: 400; color: var(--muted); }
+.db-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-bottom: 9px; }
+.db-metric { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 10px; background: var(--panel2); }
+.db-metric-k { font-size: 11px; color: var(--muted); }
+.db-metric b { font-size: 17px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.db-metric b.red { color: var(--red); } .db-metric b.gold { color: var(--gold); } .db-metric b.green { color: var(--green); } .db-metric b.muted { color: var(--muted); }
+.db-metric-sub { font-size: 10.5px; color: var(--muted); }
+.db-verdict { margin: 0 0 4px; padding: 8px 11px; border-radius: 9px; font-size: 12.5px; font-weight: 600; line-height: 1.5; background: var(--panel2); }
+.db-verdict.red { color: var(--red); } .db-verdict.gold { color: var(--gold); } .db-verdict.green { color: var(--green); } .db-verdict.muted { color: var(--muted); }
 .advice-timing { display: flex; align-items: baseline; gap: 6px; font-size: 13px; line-height: 1.55; margin-bottom: 9px; padding: 8px 11px; border-radius: 9px; color: var(--text); background: rgba(124,107,245,.08); border: 1px solid rgba(124,107,245,.22); }
 .advice-timing .icon { color: var(--accent, #7c6bf5); flex-shrink: 0; align-self: center; }
 .advice-timing b { color: var(--accent, #7c6bf5); flex-shrink: 0; }

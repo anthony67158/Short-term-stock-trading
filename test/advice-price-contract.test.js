@@ -280,3 +280,25 @@ test('买入区间上下界分别校验并记录证据来源', () => {
     ],
   })
 })
+
+test('到价终局观望不再从技术锚点补出新的观察价', () => {
+  const contract = buildAdvicePriceContract({
+    mode: 'buy_advice',
+    advice: {
+      action: '观望',
+      reviewDecision: {
+        schemaVersion: 'triggered-review-decision.v1',
+        terminal: true,
+        outcome: '维持观望',
+      },
+      pullbackWatchPrice: null,
+      breakoutWatchPrice: null,
+    },
+    payload: payload(100),
+    action: 'WATCH',
+  })
+
+  assert.deepEqual(adviceObservationLevels({
+    priceContract: contract,
+  }), [])
+})

@@ -15,18 +15,54 @@ export const WATCHLIST_RANKING_WEIGHTS = Object.freeze({
 })
 
 const BUY_ADVICE_PRIORITY = Object.freeze({
+  ready_buy: { score: 7, label: '现在买入' },
+  ready_probe: { score: 6, label: '小仓试错' },
   now: { score: 5, label: '立即买入' },
+  conditional_buy: { score: 5, label: '条件买入' },
   pullback: { score: 4, label: '回调再买' },
+  conditional_probe: { score: 4, label: '条件试仓' },
   probe: { score: 3, label: '小仓试错' },
   unknown: { score: 2, label: '尚无建议' },
   wait: { score: 1, label: '观望' },
   avoid: { score: 0, label: '不建议' },
 })
 
+// 决策计划（decision-plan.v2）是卡片实际展示的权威动作，排序必须与它一致：
+// 能立即买入 > 立即小仓试错 > 条件买入 > 条件试仓 > 尚无建议 > 观望 > 不建议。
+function decisionPlanBuyPriority(advice) {
+  const plan = advice?.decisionPlan?.schemaVersion === 'decision-plan.v2'
+    ? advice.decisionPlan
+    : null
+  if (!plan) return null
+  const ability = String(plan.actionability || '')
+  if (ability === 'BLOCKED') return 'avoid'
+  const policy = plan.actionPolicy || {}
+  const state = String(policy.entryIntent?.state || '')
+  if (state === 'READY_BUY') return 'ready_buy'
+  if (state === 'READY_PROBE') return 'ready_probe'
+  if (state === 'CONDITIONAL_BUY') return 'conditional_buy'
+  if (state === 'CONDITIONAL_PROBE') return 'conditional_probe'
+  if (state === 'WATCH_ONLY') return 'wait'
+  // entryIntent 缺失时退回按可执行性与风险档位判断。
+  if (ability === 'READY') {
+    return policy.canIncreaseRisk === true ? 'ready_buy' : 'conditional_buy'
+  }
+  if (ability === 'MANUAL_PROBE') {
+    return policy.canIncreaseRisk === true ? 'ready_probe' : 'conditional_probe'
+  }
+  if (ability === 'WATCH') return 'wait'
+  if (ability === 'RESEARCH_ONLY') return 'wait'
+  return null
+}
+
 export function watchlistAdvicePriority(entry) {
   const advice = entry?.advice || entry
   if (!advice || typeof advice !== 'object') {
     return { key: 'unknown', ...BUY_ADVICE_PRIORITY.unknown }
+  }
+  const planKey = decisionPlanBuyPriority(advice)
+  if (planKey) {
+    return { key: planKey, ...BUY_ADVICE_PRIORITY[planKey] }
   }
   const tier = String(advice.tier || '').trim().toLowerCase()
   if (BUY_ADVICE_PRIORITY[tier]) {

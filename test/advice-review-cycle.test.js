@@ -236,6 +236,28 @@ test('军师正文暂缺时也安排下次重试，避免每5分钟重复调用'
   assert.equal(adviceReviewDue(entry, now + 5 * 60000), false)
 })
 
+test('到价终局复核完成后不再沿用原价格进入定时循环', () => {
+  const now = new Date('2026-08-10T02:00:00Z').getTime()
+  const entry = buildAdviceCacheEntry(null, {
+    mode: 'buy_advice',
+    reviewDisposition: 'terminal',
+    reviewReason: '维持观望',
+    advice: {
+      action: '观望',
+      title: '维持观望',
+      reviewDecision: {
+        schemaVersion: 'triggered-review-decision.v1',
+        terminal: true,
+        outcome: '维持观望',
+      },
+    },
+  }, now)
+
+  assert.equal(entry.advice.reviewCycle.status, 'terminal')
+  assert.equal(entry.advice.reviewCycle.nextReviewAt, null)
+  assert.equal(adviceReviewDue(entry, now + 24 * 60 * 60 * 1000), false)
+})
+
 test('单股持续复核默认开启且可独立关闭后再开启', () => {
   const disabled = setAdviceReviewEnabled({}, '600000', false, 1000)
 

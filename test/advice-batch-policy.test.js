@@ -122,6 +122,24 @@ test('所有任务只有完整AI建议才能计为成功', () => {
   )
 })
 
+test('限时到价复核只需一类可追溯依据即可形成终局结论', () => {
+  const quality = adviceCompleteness({
+    action: '观望',
+    title: '维持观望',
+    actionPlan: '维持观望：本次触发结束，不新增复核价',
+    invalidation: '本次触发价已消费',
+    techNote: '现价已触发原计划，分时承接未确认',
+    reviewDecision: {
+      schemaVersion: 'triggered-review-decision.v1',
+      terminal: true,
+      outcome: '维持观望',
+    },
+  }, 'buy_advice')
+
+  assert.equal(quality.complete, true)
+  assert.deepEqual(quality.missing, [])
+})
+
 test('完整度契约要求结论执行失效条件与至少两类依据', () => {
   assert.deepEqual(adviceCompleteness(completeAdvice, 'hold_advice'), {
     complete: true,

@@ -4,8 +4,93 @@ import { readFileSync } from 'node:fs'
 
 import {
   rankWatchlistCandidates,
+  watchlistAdvicePriority,
   watchlistReadiness,
 } from '../shared/watchlistRanking.js'
+
+test('决策计划的现在买入优先于原始文案的立即买入档位', () => {
+  const readyBuy = watchlistAdvicePriority({
+    advice: {
+      action: '观望',
+      tier: 'wait',
+      decisionPlan: {
+        schemaVersion: 'decision-plan.v2',
+        action: 'BUY',
+        actionability: 'READY',
+        actionPolicy: {
+          canIncreaseRisk: true,
+          entryIntent: { state: 'READY_BUY' },
+        },
+      },
+    },
+  })
+  const rawNow = watchlistAdvicePriority({
+    advice: { action: '立即买入', tier: 'now' },
+  })
+
+  assert.equal(readyBuy.key, 'ready_buy')
+  assert.equal(readyBuy.label, '现在买入')
+  assert.ok(readyBuy.score > rawNow.score)
+})
+
+test('可立即买入的股票排在条件买入与观望之前', () => {
+  const candidates = [
+    { code: '600001', qScore: 60, targetPrice: 10 },
+    { code: '600002', qScore: 95, targetPrice: 10 },
+    { code: '600003', qScore: 88, targetPrice: 10 },
+  ]
+  const quotes = Object.fromEntries(
+    candidates.map((item) => [item.code, { price: 10 }]),
+  )
+  const advice = {
+    // 观望（最不可能买）
+    '600001': {
+      advice: {
+        decisionPlan: {
+          schemaVersion: 'decision-plan.v2',
+          action: 'WATCH',
+          actionability: 'WATCH',
+          actionPolicy: { entryIntent: { state: 'WATCH_ONLY' } },
+        },
+      },
+    },
+    // 现在就能买（最可能买）——量化分不是最高，但仍应排最前
+    '600002': {
+      advice: {
+        decisionPlan: {
+          schemaVersion: 'decision-plan.v2',
+          action: 'BUY',
+          actionability: 'READY',
+          actionPolicy: {
+            canIncreaseRisk: true,
+            entryIntent: { state: 'READY_BUY' },
+          },
+        },
+      },
+    },
+    // 条件买入（方向通过、时机未到）
+    '600003': {
+      advice: {
+        decisionPlan: {
+          schemaVersion: 'decision-plan.v2',
+          action: 'BUY',
+          actionability: 'READY',
+          actionPolicy: {
+            canIncreaseRisk: false,
+            entryIntent: { state: 'CONDITIONAL_BUY' },
+          },
+        },
+      },
+    },
+  }
+
+  const ranked = rankWatchlistCandidates(candidates, quotes, advice)
+
+  assert.deepEqual(
+    ranked.map((item) => item.code),
+    ['600002', '600003', '600001'],
+  )
+})
 
 test('临近买入价的中高分股票排在量化更高但远离买点的股票前面', () => {
   const candidates = [
@@ -157,5 +242,5 @@ test('自选列表订阅建议更新并把建议映射传入排序器', () => {
     source,
     /rankWatchlistCandidates\([\s\S]*?quote,[\s\S]*?adviceByCode/,
   )
-  assert.match(source, /置顶优先，再按建议档位排序/)
+  assert.match(source, /置顶优先，其余按最可能买入排序/)
 })

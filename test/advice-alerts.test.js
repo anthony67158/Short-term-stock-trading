@@ -778,3 +778,37 @@ test('跌破型减仓使用向下预警而不是把高于触发线误判为到�
   assert.equal(alert.op, 'lte')
   assert.equal(alert.value, 31.82)
 })
+
+test('到价终局复核完成后清除原价格链且不创建新复核价', () => {
+  const data = {
+    plan: [{ code: '600519', name: '贵州茅台' }],
+    holding: [],
+    alerts: [{
+      id: 'old-review',
+      code: '600519',
+      candCode: '600519',
+      reviewOnly: true,
+      enabled: false,
+      phase: 'reviewing',
+      value: 145.24,
+    }],
+    settings: {},
+  }
+
+  projectAdviceAlerts(data, '600519', {
+    action: '观望',
+    title: '维持观望',
+    reviewDecision: {
+      schemaVersion: 'triggered-review-decision.v1',
+      terminal: true,
+      outcome: '维持观望',
+    },
+    pullbackWatchPrice: null,
+    breakoutWatchPrice: null,
+  }, { now, idFactory: ids })
+
+  assert.deepEqual(data.alerts, [])
+  assert.equal(data.plan[0].alertSyncedPrice, null)
+  assert.equal(data.plan[0].reviewSyncedPrice, null)
+  assert.equal(data.plan[0].reviewSyncedPrices, null)
+})

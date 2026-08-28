@@ -51,6 +51,9 @@ import { isContinuousTrading } from '../shared/tradingCalendar.js';
 import { buildAlertNotification } from '../shared/alertNotification.js';
 import { isFreshAlertQuote } from '../shared/alertQuotePolicy.js';
 import {
+  TRIGGERED_REVIEW_TOTAL_BUDGET_MS,
+} from '../shared/triggeredReviewDecision.js';
+import {
   acquireConfirmationLease,
   isAuthoritativeWatchingAlert,
   ownsConfirmationLease,
@@ -59,7 +62,7 @@ import {
 const OP_LABEL = { gte: '≥', lte: '≤' };
 
 // 单账号单轮「智能确认(LLM judge)」调用上限:watching 态预警很多时,若逐条 judge 会烧光 token/超时,
-// 拖垮整轮拨测。超出预算的 watching 预警本轮跳过(维持 watching,下轮再判),保证每轮有界收敛。
+// 拖垮整轮拨测。超出本轮预算的任务由下一轮优先处理；超过2分钟总期限则直接落终态。
 const JUDGE_BUDGET_PER_ROUND = 4;
 const JUDGE_INTERVAL_MS = { buy: 45000, sell: 30000, stop: 20000 };
 const WATCHING_MAX_MS = 90 * 60 * 1000;
@@ -168,6 +171,35 @@ function reviewPriceTriggerOutcome(alert, quote, now = Date.now()) {
       at: now,
     },
   };
+}
+
+function terminalWaitOutcome(alert, quote, verdict, now = Date.now()) {
+  const terminalInstruction = String(
+    verdict?.terminalInstruction
+    || verdict?.reason
+    || '本次触发未确认操作条件',
+  )
+  const nextAlert = {
+    ...alert,
+    phase: 'reviewed',
+    triggeredAt: now,
+    triggeredMsg: terminalInstruction,
+    decisionPrice: Number(quote?.price) || null,
+    decisionSide: resolveDecisionSide(
+      verdict,
+      sideOf(alert),
+    ),
+    enabled: false,
+  }
+  return {
+    alert: nextAlert,
+    notification: buildAlertNotification({
+      alert: nextAlert,
+      quote,
+      stage: 'wait',
+      reason: terminalInstruction,
+    }),
+  }
 }
 
 export function cloudAlertsForEvaluation(alerts = [], settings = {}) {
@@ -563,6 +595,8 @@ async function processAccount(
       });
       collectDead(await sendPush(subs, { ...notification, code: a.code, tag: 'watch-' + a.id, url: '/' }));
       a.phase = 'watching'; a.watchingAt = Date.now(); a.watchingPrice = Number(q?.price) || null; a.watchingMsg = msg;
+      a.decisionDeadlineAt =
+        a.watchingAt + TRIGGERED_REVIEW_TOTAL_BUDGET_MS;
       changed = true;
       continue;
     }
@@ -575,6 +609,42 @@ async function processAccount(
         a.phase = 'superseded';
         a.supersededAt = now;
         a.triggeredMsg = '军师主计划已更新，旧执行确认自动撤销';
+        changed = true;
+        continue;
+      }
+      const terminalDeadline = Number(a.decisionDeadlineAt)
+        || (
+          Number(a.watchingAt) > 0
+            ? Number(a.watchingAt) + TRIGGERED_REVIEW_TOTAL_BUDGET_MS
+            : now + TRIGGERED_REVIEW_TOTAL_BUDGET_MS
+        );
+      if (!Number(a.decisionDeadlineAt)) {
+        a.decisionDeadlineAt = terminalDeadline;
+        changed = true;
+      }
+      if (now >= terminalDeadline) {
+        const terminal = terminalWaitOutcome(
+          a,
+          q,
+          {
+            decision: 'wait',
+            side,
+            terminalInstruction:
+              '复核已到2分钟期限，维持原计划；本次触发结束，不新增复核价',
+          },
+          now,
+        );
+        pendingPushes.push({
+          alertId: a.id,
+          countedHit: false,
+          payload: {
+            ...terminal.notification,
+            code: a.code,
+            tag: 'review-timeout-' + a.id,
+            url: '/',
+          },
+        });
+        Object.assign(a, terminal.alert);
         changed = true;
         continue;
       }
@@ -591,7 +661,7 @@ async function processAccount(
         continue;
       }
       // 阶段二:调用智能确认闸门,判定真正交易时机是否到。
-      // ★预算护栏:本轮 judge 调用达上限 → 跳过(维持 watching,下轮再判),避免 watching 堆积时烧光 token/超时。
+      // ★预算护栏:本轮 judge 调用达上限时留给下一轮优先处理；2分钟期限会强制收敛。
       if (judgeCalls >= judgeLimit || !hasJudgeBudget(deadline)) continue;
       // 现价缺失(接口异常/休市返回空)时不判定,省一次无谓的 judge 调用。
       if (!q || q.price == null || !(Number(q.price) > 0)) continue;
@@ -739,8 +809,28 @@ async function processAccount(
         a.phase = 'invalid'; a.triggeredAt = Date.now(); a.triggeredMsg = `已失效:${verdict.reason || ''}`; a.enabled = false;
         wakeups.push({ alert: { ...a }, verdict, at: a.triggeredAt });
         changed = true;
+      } else {
+        // wait 是本次触价复核的终态，不再围绕同一价位循环 Judge。
+        // 后续只有新的独立事件或用户主动生成，才能建立下一份计划。
+        const terminal = terminalWaitOutcome(
+          a,
+          q,
+          verdict,
+          Date.now(),
+        );
+        pendingPushes.push({
+          alertId: a.id,
+          countedHit: false,
+          payload: {
+            ...terminal.notification,
+            code: a.code,
+            tag: 'review-wait-' + a.id,
+            url: '/',
+          },
+        });
+        Object.assign(a, terminal.alert);
+        changed = true;
       }
-      // wait → 维持 watching,静默继续观察
     }
   }
   if (dead.size) { data.pushSubs = subs.filter((s) => !dead.has(s.endpoint)); changed = true; }
@@ -811,7 +901,7 @@ export default async function handler(req, res) {
         let r;
         try {
           r = await processAccount(acc, {
-            judgeLimit: 1,
+            judgeLimit: JUDGE_BUDGET_PER_ROUND,
             deadline,
           });
         } catch (e) {
@@ -890,6 +980,7 @@ export const __test = {
   persistProcessedAccount,
   positionContextOf,
   reviewPriceTriggerOutcome,
+  terminalWaitOutcome,
   rotateAccounts,
   retireIfPositionChanged,
 }

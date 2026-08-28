@@ -107,14 +107,21 @@ test('午休后的确认窗口不拼接上午分钟线', () => {
   assert.equal(prim.winLow, 10.3)
 })
 
-test('Judge只生成交易时机结论，不再重复生成知行合一评分', () => {
-  const prompt = buildJudgeUserPrompt({ 股票: '贵州茅台(600519)' })
+test('Judge生成一次性终局结论、执行区间、手数与依据', () => {
+  const prompt = buildJudgeUserPrompt({
+    股票: '贵州茅台(600519)',
+    动作类型: 'buy',
+  })
 
   assert.match(prompt, /"decision":"confirm\|wait\|invalid"/)
+  assert.match(prompt, /立即买入\|维持观望\|放弃买入/)
+  assert.match(prompt, /"priceLow":数字或null/)
+  assert.match(prompt, /"quantity":整数手数或0/)
+  assert.match(prompt, /"basisType"/)
   assert.match(prompt, /"confidence":0-100/)
   assert.match(prompt, /"reason":"一句话中文理由"/)
   assert.doesNotMatch(prompt, /knowledgeAction|知行合一|可执行性/)
-  assert.ok(JUDGE_MAX_TOKENS <= 160)
+  assert.ok(JUDGE_MAX_TOKENS <= 300)
 })
 
 test('Judge拒绝与价格契约不一致的预警价', () => {

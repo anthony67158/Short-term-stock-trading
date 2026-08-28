@@ -57,7 +57,7 @@
       "schemaVersion": "harness-case.v1",
       "id": "judge-observation-window",
       "adapter": "judge",
-      "tags": ["judge", "observation", "timing"],
+      "tags": ["judge", "terminal", "timing"],
       "input": {
         "side": "sell",
         "deterministic": {
@@ -74,9 +74,9 @@
       },
       "expect": {
         "minOverall": 0.9,
-        "decision": "wait",
-        "policy": "observation",
-        "reasonIncludes": ["刚触价"]
+        "decision": "confirm",
+        "policy": "consensus",
+        "reasonIncludes": ["高位滞涨"]
       }
     },
     {

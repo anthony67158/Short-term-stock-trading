@@ -5,6 +5,7 @@ import {
   buildActionProgress,
   buildAdviceActionView,
   buildHoldingCardDecisionView,
+  entryConvictionView,
 } from '../shared/adviceActionView.js'
 import {
   advicePlanSyncPatch,
@@ -419,8 +420,8 @@ test('观望建议不把远端关注价展示成候选卡主价位', () => {
   assert.equal(view.trigger.direction, 'inactive')
   assert.equal(view.trigger.price, null)
   assert.equal(view.trigger.stateLabel, '等待新证据')
-  assert.equal(view.trigger.detailLabel, '到价后重新评估方向')
-  assert.equal(view.trigger.metricLabel, '不预设买入')
+  assert.equal(view.trigger.detailLabel, '出现新证据后重新评估')
+  assert.equal(view.trigger.metricLabel, '未触发不买')
 })
 
 test('观望建议缺少结构化关注价时仍显示暂不下单状态', () => {
@@ -436,15 +437,18 @@ test('观望建议缺少结构化关注价时仍显示暂不下单状态', () =>
     price: null,
     label: '等待确认',
     stateLabel: '等待新证据',
-    detailLabel: '到价后重新评估方向',
-    metricLabel: '不预设买入',
+    detailLabel: '出现新证据后重新评估',
+    metricLabel: '未触发不买',
   })
 })
 
-test('候选卡动作视图保留双路径观察位但不把它们当买点', () => {
+test('候选卡只展示一个主观察路径并明确后续动作', () => {
   const view = buildAdviceActionView({
     action: '观望',
     actionPlan: '等待回踩96元企稳，或放量突破105元后重新评估',
+    shortHorizonTactical: {
+      timing: { state: 'WAIT_BREAKOUT' },
+    },
     priceContract: {
       schemaVersion: 'advice-price-contract.v1',
       levels: [{
@@ -466,15 +470,19 @@ test('候选卡动作视图保留双路径观察位但不把它们当买点', ()
   }, { mode: 'buy_advice' })
 
   assert.equal(view.kind, 'wait')
+  assert.equal(view.action, '等待突破')
+  assert.equal(view.commandLabel, '唯一条件')
   assert.equal(view.actionable, false)
   assert.deepEqual(view.levels.map((item) => [
     item.key,
     item.label,
     item.price,
   ]), [
-    ['watch_pullback', '回踩观察', 96],
     ['watch_breakout', '突破观察', 105],
   ])
+  assert.match(view.instruction, /只看105元/)
+  assert.match(view.instruction, /未放量或跌回105元下方不买/)
+  assert.doesNotMatch(view.instruction, /96元/)
 })
 
 test('加仓建议展示加仓点而不是通用买入点', () => {
@@ -607,6 +615,31 @@ test('持有建议把战术回踩与突破价编译成双路径加仓复核', ()
   assert.equal(progress.reachedKey, 'holding_add_breakout')
   assert.equal(progress.stateLabel, '突破加仓复核已到')
   assert.equal(progress.reachedHint, '等待自动复核')
+})
+
+test('持仓到价终局结论不再生成后续加仓复核路径', () => {
+  const view = buildAdviceActionView({
+    action: '持有',
+    actionPlan: '维持持有：本次触发结束',
+    reviewDecision: {
+      schemaVersion: 'triggered-review-decision.v1',
+      terminal: true,
+      outcome: '维持持有',
+    },
+    shortHorizonTactical: {
+      timing: {
+        pullbackPrice: 50.94,
+        breakoutPrice: 52.06,
+      },
+      actionPolicy: {
+        riskTier: 'PROBE',
+      },
+    },
+  }, { mode: 'hold_advice' })
+
+  assert.equal(view.action, '维持持有')
+  assert.equal(view.commandLabel, '复核结论')
+  assert.deepEqual(view.levels, [])
 })
 
 test('弱市条件加仓复核沿用3%仓位上限', () => {
@@ -827,4 +860,126 @@ test('候选转为观望时只撤下系统买点预警', () => {
   assert.equal(state.plan[0].alertSyncedPrice, null)
   assert.equal(state.plan[0].reviewSyncedPrice, null)
   assert.equal(state.plan[0].reviewSyncedPrices, null)
+})
+
+test('正式建仓计划向卡片输出仓位band与进场路线的强信号', () => {
+  const conviction = entryConvictionView({
+    decisionPlan: {
+      schemaVersion: 'decision-plan.v2',
+      action: 'BUY',
+      actionability: 'READY',
+      actionPolicy: {
+        riskTier: 'FULL',
+        entryRoute: 'BREAKOUT_MOMENTUM',
+        positionBandPct: { min: 10, max: 20 },
+        confirmations: ['主力资金确认', '技术面多头共振'],
+      },
+    },
+  })
+
+  assert.equal(conviction.tier, 'FULL')
+  assert.equal(conviction.sizeLabel, '正式建仓')
+  assert.equal(conviction.sizeValue, '10–20%')
+  assert.equal(conviction.route, '放量突破确认')
+  assert.deepEqual(conviction.confirmations, ['主力资金确认', '技术面多头共振'])
+  assert.equal(conviction.tone, 'buy')
+})
+
+test('小仓试错计划输出仓位上限与试仓语义', () => {
+  const conviction = entryConvictionView({
+    decisionPlan: {
+      schemaVersion: 'decision-plan.v2',
+      action: 'BUY',
+      actionability: 'MANUAL_PROBE',
+      manualConfirmationOnly: true,
+      actionPolicy: {
+        riskTier: 'PROBE',
+        entryRoute: null,
+        maxPositionPct: 5,
+        confirmations: ['主力资金确认'],
+      },
+    },
+  })
+
+  assert.equal(conviction.tier, 'PROBE')
+  assert.equal(conviction.sizeLabel, '小仓试错')
+  assert.equal(conviction.sizeValue, '≤5%')
+  assert.equal(conviction.tone, 'probe')
+})
+
+test('观望或被阻断计划不产生进场强信号', () => {
+  assert.equal(entryConvictionView({
+    decisionPlan: {
+      schemaVersion: 'decision-plan.v2',
+      action: 'WATCH',
+      actionability: 'BLOCKED',
+      actionPolicy: { riskTier: 'NONE' },
+    },
+  }), null)
+  assert.equal(entryConvictionView({}), null)
+})
+
+test('旧观望数据已有完整建仓参数时归并为唯一待确认预案', () => {
+  const advice = {
+    action: '观望',
+    actionPlan: '人工确认后以12.31元买入3手；跌破12.22元止损，目标13.50元，不追高补仓。',
+    buyPrice: 12.31,
+    planQty: 3,
+    stopPrice: 12.22,
+    targetPrice: 13.5,
+    pullbackWatchPrice: 12.22,
+    breakoutWatchPrice: 12.42,
+  }
+  const view = buildAdviceActionView(advice, {
+    mode: 'buy_advice',
+    currentPrice: 12.43,
+  })
+
+  assert.equal(view.kind, 'wait')
+  assert.equal(view.action, '待确认建仓')
+  assert.equal(view.commandLabel, '执行预案')
+  assert.equal(view.quantity, '3手')
+  assert.equal(view.actionable, false)
+  assert.equal(view.manualOnly, true)
+  assert.deepEqual(view.levels.map(({ key, label, price }) => ({
+    key,
+    label,
+    price,
+  })), [
+    { key: 'entry', label: '拟买价', price: 12.31 },
+    { key: 'stop', label: '止损价', price: 12.22 },
+    { key: 'target', label: '目标价', price: 13.5 },
+  ])
+  assert.equal(view.trigger.stateLabel, '等待人工确认')
+  assert.match(view.instruction, /12\.31元买入3手/)
+})
+
+test('买入到价终局结论在卡片直接显示放弃买入且不再展示观察价', () => {
+  const view = buildAdviceActionView({
+    action: '观望',
+    title: '放弃买入',
+    actionPlan: '放弃本次买入：原触发条件已经失效',
+    reviewDecision: {
+      schemaVersion: 'triggered-review-decision.v1',
+      terminal: true,
+      outcome: '放弃买入',
+      operation: '不操作',
+    },
+    decisionPlan: {
+      schemaVersion: 'decision-plan.v2',
+      action: 'WATCH',
+      actionability: 'WATCH',
+      quantity: { lots: 0 },
+      prices: { observations: [] },
+    },
+  }, { mode: 'buy_advice' })
+
+  assert.equal(view.kind, 'wait')
+  assert.equal(view.action, '放弃买入')
+  assert.equal(view.commandLabel, '复核结论')
+  assert.deepEqual(view.levels, [])
+  assert.match(view.instruction, /原触发条件已经失效/)
+  assert.equal(view.trigger.stateLabel, '放弃买入')
+  assert.equal(view.trigger.detailLabel, '本次价格触发已结束')
+  assert.equal(view.trigger.metricLabel, '不再复核原价')
 })

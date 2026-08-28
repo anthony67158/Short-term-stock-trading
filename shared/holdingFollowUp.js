@@ -15,6 +15,7 @@ function compactReasons(values = []) {
 }
 
 export function holdingAddReviewPlan(advice = {}) {
+  if (advice?.reviewDecision?.terminal === true) return null
   const action = String(
     advice?.decisionPlan?.action
     || advice?.action

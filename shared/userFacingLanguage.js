@@ -90,6 +90,7 @@ const TEXT_FIELDS = new Set([
   'addOn',
   'advice',
   'bearCase',
+  'beginnerNote',
   'cashStrategy',
   'changeReason',
   'confirmSignal',

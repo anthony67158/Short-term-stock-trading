@@ -24,13 +24,16 @@ export async function runJudgeHarnessCase(testCase) {
   const stopOverride = input.side === 'stop'
     && input.deterministic?.decision === 'confirm'
     && deterministicScore >= Number(policy.hardOverride || Infinity)
-  const consensusConfirm = input.deterministic?.decision === 'confirm'
-    && deterministicScore >= policy.deterministicConfirm
+  const llmAuthorizedConfirm = input.deterministic?.decision !== 'invalid'
     && input.llm?.decision === 'confirm'
     && Number(input.llm?.confidence) >= policy.llmConfidence
+  const deterministicConfirm = !input.llm
+    && input.deterministic?.decision === 'confirm'
+    && deterministicScore >= policy.deterministicConfirm
   const confirmedSafely = output.decision !== 'confirm'
     || stopOverride
-    || consensusConfirm
+    || llmAuthorizedConfirm
+    || deterministicConfirm
   const reasonIncludes = expected.reasonIncludes || []
   const checks = [
     check(
@@ -73,9 +76,9 @@ export async function runJudgeHarnessCase(testCase) {
       'judge-no-model-only-confirm',
       'groundedness',
       output.decision !== 'confirm'
-        || input.deterministic?.decision === 'confirm',
-      '模型单独确认突破客观信号门禁',
-      { hard: true, code: 'JUDGE_MODEL_ONLY_CONFIRM' },
+        || input.deterministic?.decision !== 'invalid',
+      '模型确认覆盖了客观失效信号',
+      { hard: true, code: 'JUDGE_INVALID_OVERRIDE' },
     ),
     check(
       'judge-policy-thresholds',

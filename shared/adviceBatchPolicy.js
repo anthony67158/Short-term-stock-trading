@@ -61,12 +61,20 @@ export function adviceCompleteness(advice, mode = '') {
     value.intradayNote,
     value.macroNote,
   ].filter((item) => text(item)).length
+  const terminalTriggeredReview =
+    value.reviewDecision?.schemaVersion
+      === 'triggered-review-decision.v1'
+    && value.reviewDecision?.terminal === true
   const missing = []
   if (!action) missing.push('动作结论')
   if (!title) missing.push('标题')
   if (!instruction) missing.push('执行指令')
   if (!invalidation) missing.push('失效条件')
-  if (evidenceCount < 2) missing.push('核心依据')
+  // 触价复核是限时终局判断：至少一类可追溯依据即可决断，
+  // 不再为了凑两类证据拖延或重新生成观察价。
+  if (evidenceCount < (terminalTriggeredReview ? 1 : 2)) {
+    missing.push('核心依据')
+  }
   const requiresShortExitPlan = (
     mode === 'hold_advice'
     || (

@@ -16,11 +16,13 @@ test('快速与深度建议都使用可交付的有界输出预算', () => {
   assert.equal(maxTokensForMode('hold_advice', true), 8000)
   assert.ok(ADVISOR_SYSTEM.length < 2200)
   assert.ok(ADVISOR_FAST_SYSTEM.length < 2500)
+  assert.match(ADVISOR_SYSTEM, /股神级的A股短线操盘手/)
+  assert.match(ADVISOR_SYSTEM, /快速拍板/)
   assert.match(ADVISOR_DEEP_SYSTEM, /同一战术合同/)
   assert.match(ADVISOR_DEEP_SYSTEM, /最强反方/)
   assert.match(ADVISOR_DEEP_SYSTEM, /最多五个检查点/)
-  assert.match(ADVISOR_DEEP_SYSTEM, /内化为短线经验/)
-  assert.match(ADVISOR_DEEP_SYSTEM, /不得为了引用而引用/)
+  assert.match(ADVISOR_DEEP_SYSTEM, /讲给新手听/)
+  assert.match(ADVISOR_DEEP_SYSTEM, /不得.*夸大把握或承诺收益/)
 })
 
 test('所有军师模式都只使用紧凑短线战术合同', () => {
@@ -40,7 +42,7 @@ test('所有军师模式都只使用紧凑短线战术合同', () => {
       generationProfile: 'DEEP',
     })
     assert.match(deepPrompt, /深度研判事实契约/)
-    assert.doesNotMatch(deepPrompt, /股神|六条同源理论/)
+    assert.doesNotMatch(deepPrompt, /六条同源理论/)
     assert.ok(deepPrompt.length < 7000, `${mode} deep prompt过长`)
   }
 })
@@ -239,6 +241,8 @@ test('条件试仓到价后只确认入场时机并要求输出具体价格', ()
       manualConfirmationOnly: true,
       threshold: 10,
       price: 10.02,
+      timeLimitMinutes: 2,
+      terminalRequired: true,
     },
     shortHorizonTactical: {
       schemaVersion: 'short-horizon-tactical.v1',
@@ -254,13 +258,15 @@ test('条件试仓到价后只确认入场时机并要求输出具体价格', ()
     },
   })
 
-  assert.match(prompt, /方向已通过的条件试仓复核/)
-  assert.match(prompt, /不是从零重新决定方向/)
-  assert.match(prompt, /具体buyPrice、stopPrice、targetPrice和planQty/)
-  assert.match(prompt, /仓位不得超过5%/)
+  assert.match(prompt, /到价终局复核/)
+  assert.match(prompt, /2分钟总期限内一次完成/)
+  assert.match(prompt, /previousPlan里的原军师结论/)
+  assert.match(prompt, /立即买入”“维持观望”“放弃买入/)
+  assert.match(prompt, /禁止生成任何新的观察价/)
+  assert.match(prompt, /"reviewDecision"/)
 })
 
-test('普通观望到价后只重新评估方向且不继承试仓承诺', () => {
+test('普通观望到价后按已到达的突破条件给出决断而不是再顺延观察价', () => {
   const prompt = buildUserPrompt('buy_advice', {
     code: '600000',
     reviewEvent: {
@@ -269,6 +275,7 @@ test('普通观望到价后只重新评估方向且不继承试仓承诺', () =>
       plannedAction: 'WATCH',
       actionLabel: '观望',
       directionApproved: false,
+      direction: 'gte',
       threshold: 10,
       price: 10.02,
     },
@@ -284,12 +291,12 @@ test('普通观望到价后只重新评估方向且不继承试仓承诺', () =>
     },
   })
 
-  assert.match(prompt, /普通观望复核/)
-  assert.match(prompt, /没有预先买入或试仓授权/)
-  assert.match(prompt, /不得沿用条件试仓措辞/)
+  assert.match(prompt, /放量突破价已经到达/)
+  assert.match(prompt, /结论只能三选一/)
+  assert.match(prompt, /不得顺延到新价格/)
 })
 
-test('持仓加仓复核价到达后只评估是否加仓', () => {
+test('持仓加仓复核价到达后据此决断是否加仓而不是再顺延加仓观察价', () => {
   const prompt = buildUserPrompt('hold_advice', {
     code: '003036',
     reviewEvent: {
@@ -298,6 +305,7 @@ test('持仓加仓复核价到达后只评估是否加仓', () => {
       plannedAction: 'WATCH',
       actionLabel: '重新评估加仓',
       directionApproved: false,
+      direction: 'gte',
       threshold: 52.06,
       price: 52.16,
     },
@@ -313,9 +321,10 @@ test('持仓加仓复核价到达后只评估是否加仓', () => {
     },
   })
 
-  assert.match(prompt, /持仓加仓条件复核/)
-  assert.match(prompt, /重新评估是否加仓/)
-  assert.match(prompt, /否则继续持有并写明本轮不加仓原因/)
+  assert.match(prompt, /到价终局复核/)
+  assert.match(prompt, /必须明确决定是否加仓/)
+  assert.match(prompt, /操作类型、可成交价格区间和具体手数/)
+  assert.match(prompt, /维持持有.*放弃本次操作/)
 })
 
 test('军师低命中校准按动作方向纠偏而不是一律变得更保守', () => {
@@ -460,6 +469,8 @@ test('观望买入建议区分观察锚与买入价并比较两条入场路径',
     assert.match(prompt, /pullbackWatchPrice/)
     assert.match(prompt, /breakoutWatchPrice/)
     assert.match(prompt, /未来1-5个交易日/)
+    assert.match(prompt, /actionPlan只能选择一个最优主路径/)
+    assert.match(prompt, /不得用“或\/任一到价”并列两条路径/)
     assert.match(prompt, /stopPrice.*targetPrice.*null/)
     assert.match(prompt, /过远、已经越过或无依据时填null/)
     assert.match(prompt, /invalidation只写何时取消关注/)
@@ -498,15 +509,14 @@ test('军师区分真实费后收益与三日建议命中统计', () => {
   assert.match(prompt, /绝不能绕过账户硬约束/)
 })
 
-test('军师明确把动作价位手数视为候选并服从统一决策编译器', () => {
-  assert.match(ADVISOR_SYSTEM, /Decision Compiler/)
-  assert.match(ADVISOR_SYSTEM, /价格、手数和金额只是候选/)
-  assert.match(ADVISOR_SYSTEM, /证据完整性/)
+test('军师面向新手给明确结论且保持诚实不承诺收益', () => {
+  assert.match(ADVISOR_SYSTEM, /散户新手/)
+  assert.match(ADVISOR_SYSTEM, /明确可执行的结论/)
   assert.match(ADVISOR_SYSTEM, /盈亏比/)
   assert.doesNotMatch(ADVISOR_SYSTEM, /strategyGate|strategyRoute/)
-  assert.match(ADVISOR_SYSTEM, /严禁原样写进/)
+  assert.match(ADVISOR_SYSTEM, /不得承诺收益/)
   assert.match(ADVISOR_FAST_SYSTEM, /内部枚举和字段名/)
-  assert.match(ADVISOR_FAST_SYSTEM, /至少1\.8:1盈亏比/)
+  assert.match(ADVISOR_SYSTEM, /1\.8:1盈亏比/)
 })
 
 test('所有军师模式都要求价格可追溯且无法核验时留空', () => {

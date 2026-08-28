@@ -409,14 +409,14 @@ test('卡片复核状态只由真实price-review任务状态驱动', () => {
     adviceReviewCardState({ reviews: [] }, '600000', { alerts, now }),
     {
       kind: 'queued',
-      label: '条件已触发，预计1分钟内开始复核',
-      detail: '云端定时任务每分钟扫描一次',
+      label: '条件已触发，正在限时复核',
+      detail: '2分钟内给出明确操作结论',
     },
   )
   assert.equal(stateFor('queued').label, '条件已触发，等待后台复核')
-  assert.equal(stateFor('running').label, '条件已触发，正在自动复核')
+  assert.equal(stateFor('running').label, '到价终局复核中')
   assert.equal(stateFor('publishing').label, '复核完成，正在更新结论')
-  assert.equal(stateFor('ok').label, '自动复核完成，结论已更新')
+  assert.equal(stateFor('ok').label, '到价复核完成，已给出明确结论')
   assert.equal(adviceReviewCardState({
     reviews: [{
       code: '600000',
@@ -426,7 +426,7 @@ test('卡片复核状态只由真实price-review任务状态驱动', () => {
       status: 'ok',
       progressAt: 8_000,
     }],
-  }, '600000', { alerts: [], now }).label, '自动复核完成，结论已更新')
+  }, '600000', { alerts: [], now }).label, '到价复核完成，已给出明确结论')
   assert.deepEqual(stateFor('fail', { error: '模型超时' }), {
     kind: 'failed',
     label: '自动复核失败，请重新评估',
@@ -452,8 +452,8 @@ test('触价超过90秒仍没有后台任务时明确提示启动失败', () => 
     { alerts, now: 100_000 },
   ), {
     kind: 'failed',
-    label: '自动复核未启动，请重新评估',
-    detail: '触价后90秒内未创建后台任务',
+    label: '自动复核未启动，点“重新评估”立即处理',
+    detail: '到价任务未成功启动，需手动重新评估当前信号',
   })
 })
 

@@ -355,6 +355,7 @@ export function buildAdvicePriceContract({
 
   const waitAdvice = (
     mode === 'buy_advice'
+    && advice.reviewDecision?.terminal !== true
     && (
       String(action || '').toUpperCase() === 'WATCH'
       || /观望|等待|回避|不建议|暂不/.test(

@@ -142,6 +142,20 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
   const owner = liveHolder || candidate || {}
   const name = advice.name || owner.name || code
   const projected = []
+  if (advice.reviewDecision?.terminal === true) {
+    if (candidate) {
+      if (
+        candidate.alertSyncedPrice != null
+        || candidate.reviewSyncedPrice != null
+        || candidate.reviewSyncedPrices != null
+      ) changed = true
+      candidate.alertSyncedPrice = null
+      candidate.reviewSyncedPrice = null
+      candidate.reviewSyncedPrices = null
+    }
+    data.alerts = rest
+    return changed || rest.length !== alerts.length
+  }
   const judgeContext = buildJudgeAdviceContext(advice)
   const reviewIntent = reviewIntentOf(advice)
   const priceContract = sanitizedAdvicePriceContract(advice)

@@ -31,6 +31,9 @@ import {
 import { evaluateKnowledgeActionCycle } from '../shared/knowledgeAction.js'
 import { mergeReviewsByTimestamp } from '../shared/reviewSchedule.js'
 import {
+  TRIGGERED_REVIEW_TOTAL_BUDGET_MS,
+} from '../shared/triggeredReviewDecision.js'
+import {
   computePortfolio as computeSharedPortfolio,
   computeTFlows as computeSharedTFlows,
   beijingDayStartTs,
@@ -2685,7 +2688,15 @@ export const planStore = {
   // 智能确认闸门:进入「观察确认中」——到价发弱提醒后置 watching(不停用、继续监控真正时机)
   markAlertWatching(id, msg, price = null) {
     state.alerts = (state.alerts || []).map((x) => x.id === id && x.phase !== 'watching' && x.phase !== 'confirmed'
-      ? { ...x, phase: 'watching', watchingAt: Date.now(), watchingPrice: Number(price) || null, watchingMsg: msg || x.watchingMsg || '' }
+      ? {
+          ...x,
+          phase: 'watching',
+          watchingAt: Date.now(),
+          watchingPrice: Number(price) || null,
+          watchingMsg: msg || x.watchingMsg || '',
+          decisionDeadlineAt:
+            Date.now() + TRIGGERED_REVIEW_TOTAL_BUDGET_MS,
+        }
       : x)
     emit()
   },
@@ -2748,6 +2759,22 @@ export const planStore = {
   markAlertInvalid(id, msg) {
     state.alerts = (state.alerts || []).map((x) => x.id === id
       ? { ...x, phase: 'invalid', triggeredAt: Date.now(), triggeredMsg: msg, enabled: false }
+      : x)
+    emit()
+  },
+  markAlertReviewed(id, msg, verdict = null, price = null) {
+    state.alerts = (state.alerts || []).map((x) => x.id === id
+      ? {
+          ...x,
+          phase: 'reviewed',
+          triggeredAt: Date.now(),
+          triggeredMsg: msg,
+          enabled: false,
+          decisionPrice: Number(price) || x.lastJudgePrice || null,
+          decisionSide: verdict?.side || null,
+          terminalInstruction:
+            verdict?.terminalInstruction || msg || '',
+        }
       : x)
     emit()
   },

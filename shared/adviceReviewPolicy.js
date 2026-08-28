@@ -124,15 +124,37 @@ export function buildAdviceReviewCycle(previous, data, at = Date.now()) {
     || (previous?.advice && typeof previous.advice === 'object'
       ? previous.advice
       : null)
+  const previousAction = previous?.advice?.action
+    || previous?.advice?.stance
+    || ''
+  if (advice?.reviewDecision?.terminal === true) {
+    return {
+      status: 'terminal',
+      sequence: Math.max(0, Number(priorCycle.sequence) || 0) + 1,
+      reviewedAt: at,
+      nextReviewAt: null,
+      configuredIntervalMin: null,
+      intervalMin: null,
+      riskLevel: 'normal',
+      riskReasons: [],
+      trigger: 'price-terminal',
+      reason: String(
+        data?.reviewReason
+        || advice.reviewDecision.outcome
+        || '到价复核已完成',
+      ).slice(0, 160),
+      receipt: reviewReceipt(data?.reviewReceipt),
+      previousAction,
+      changeType: advice.continuity?.changeType
+        || (previous ? 'adjust' : 'initial'),
+    }
+  }
   const schedule = adaptiveAdviceReviewInterval({
     mode,
     configuredIntervalMin: data?.reviewIntervalMin,
     snapshot: data?.meta?.evidenceSnapshot,
     advice: effectiveAdvice,
   })
-  const previousAction = previous?.advice?.action
-    || previous?.advice?.stance
-    || ''
   return {
     status: data?.reviewDisposition || 'scheduled',
     sequence: Math.max(0, Number(priorCycle.sequence) || 0) + 1,
@@ -159,6 +181,10 @@ export function buildAdviceReviewCycle(previous, data, at = Date.now()) {
 }
 
 export function adviceReviewDue(entry, now = Date.now()) {
+  if (
+    entry?.reviewDecision?.terminal === true
+    || entry?.advice?.reviewDecision?.terminal === true
+  ) return false
   const nextReviewAt = Number(
     entry?.reviewCycle?.nextReviewAt
       ?? entry?.advice?.reviewCycle?.nextReviewAt,

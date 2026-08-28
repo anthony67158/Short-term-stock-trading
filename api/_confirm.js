@@ -1,15 +1,14 @@
 // ============ 智能交易确认闸门(_confirm)============
-// 目的(直接回应用户诉求「上班没空盯盘,到点位别急着推交易提示,先弱提醒、真到时机再强提示」):
-//   价格触及 AI 建议的关键价位(买点/止损/止盈/补仓/减仓)只代表「开始盯」,不代表「立刻动手」。
-//   本模块在【价已到点(watching)】的前提下,判定「真正的交易时机是否已确认」:
+// 目的:价格触及 AI 建议的关键价位后立即做一次限时终局判断，禁止围绕同一价格反复复核。
+//   价格触及关键价位(买点/止损/止盈/补仓/减仓)后，在当前分时窗口内直接判定:
 //     · 先算【确定性信号】(基于腾讯公开分时 fetchTrendsTx + 日线 fetchKlineTx,computeTechnicals):
 //       买入侧看「止跌企稳/站回均价线/缩量」;卖出侧看「冲高滞涨/跌破均价/放量不涨」;止损侧看「真跌破而非插针」。
 //     · 再交给【LLM Judge(role:'judge')】做最终研判,喂它:本次交易意图 + 建议的确认条件(exitTiming)/
 //       失效条件(invalidation) + 确定性信号 + 技术面摘要 + 分时快照,产出 {decision, confidence, reason}。
 //   decision:
-//     'confirm' → 真正时机到了 → 上层发【强交易提示】(✅ 可以买入/可以卖出)。
-//     'wait'    → 还在观察 → 维持 watching,不打扰。
-//     'invalid' → 逻辑已破坏(如买点但已跌破失效价)→ 上层撤下该点位,别再提示买。
+//     'confirm' → 立即执行买入/加仓/减仓/锁利润等明确动作。
+//     'wait'    → 本次终态维持观望/持有，原触发价结束，不再循环。
+//     'invalid' → 放弃本次操作，原计划失效，不再围绕该价纠缠。
 //
 // 关键约束:
 //   · 绝不触碰量化 /predict(36维OHLCV)模型口径——这里只用公开行情 + 通用技术指标 + LLM。
@@ -45,11 +44,174 @@ import { positionGateForAlert } from '../shared/alertPositionPolicy.js';
 import { buildJudgeKnowledgeActionAssessment } from '../shared/knowledgeAction.js';
 import { quantJudgeDiscipline } from '../shared/quantAdviceContext.js';
 
-export const JUDGE_MAX_TOKENS = 140;
+export const JUDGE_MAX_TOKENS = 260;
 
 export function buildJudgeUserPrompt(payload) {
+  const intent = String(payload?.动作类型 || '');
+  const outcomes = intent === 'buy'
+    ? '立即买入|维持观望|放弃买入'
+    : intent === 'add'
+      ? '立即加仓|维持持有|放弃加仓'
+      : intent === 'stop'
+        ? '立即止损|维持持有|放弃本次操作'
+        : '立即减仓|锁定利润|维持持有';
   return '请判断此刻交易时机。数据如下(JSON):\n' + JSON.stringify(payload)
-    + '\n输出格式:{"decision":"confirm|wait|invalid","confidence":0-100,"reason":"一句话中文理由"}';
+    + `\n本次终局结论只能从“${outcomes}”中选择。`
+    + '\n输出格式:{"decision":"confirm|wait|invalid","terminalInstruction":"明确操作结论","priceLow":数字或null,"priceHigh":数字或null,"quantity":整数手数或0,"basisType":"已验证理论|实时资金与价格|重大催化","basis":"一句话可追溯依据","confidence":0-100,"reason":"一句话中文理由"}';
+}
+
+function compactText(value, maximum = 240) {
+  return String(value || '')
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maximum)
+}
+
+function lotsOf(value) {
+  const match = String(value ?? '').match(/\d+(?:\.\d+)?/)
+  const number = match ? Number(match[0]) : Number(value)
+  return Number.isFinite(number) && number > 0
+    ? Math.trunc(number)
+    : 0
+}
+
+function terminalOutcome(intent, decision, note = '') {
+  if (intent === 'buy') {
+    return decision === 'confirm'
+      ? ['立即买入', '买入']
+      : decision === 'invalid'
+        ? ['放弃买入', '不操作']
+        : ['维持观望', '不操作']
+  }
+  if (intent === 'add') {
+    return decision === 'confirm'
+      ? ['立即加仓', '加仓']
+      : decision === 'invalid'
+        ? ['放弃加仓', '不操作']
+        : ['维持持有', '不操作']
+  }
+  if (intent === 'stop') {
+    return decision === 'confirm'
+      ? ['立即止损', '减仓']
+      : decision === 'invalid'
+        ? ['放弃本次操作', '不操作']
+        : ['维持持有', '不操作']
+  }
+  if (decision === 'confirm') {
+    return /止盈|锁利/.test(String(note || ''))
+      ? ['锁定利润', '锁利润']
+      : ['立即减仓', '减仓']
+  }
+  return decision === 'invalid'
+    ? ['放弃本次操作', '不操作']
+    : ['维持持有', '不操作']
+}
+
+function decisionRange(value, fallback) {
+  const low = Number(value?.low ?? value?.priceLow)
+  const high = Number(value?.high ?? value?.priceHigh)
+  const point = Number(fallback)
+  const left = Number.isFinite(low) && low > 0
+    ? low
+    : Number.isFinite(point) && point > 0 ? point : null
+  const right = Number.isFinite(high) && high > 0
+    ? high
+    : left
+  if (left == null || right == null) return { low: null, high: null }
+  return left <= right
+    ? { low: round(left, 3), high: round(right, 3) }
+    : { low: round(right, 3), high: round(left, 3) }
+}
+
+function rangeLabel(range = {}) {
+  if (!(range.low > 0) || !(range.high > 0)) return ''
+  return range.low === range.high
+    ? `${range.low}元`
+    : `${range.low}–${range.high}元`
+}
+
+function attachTerminalInstruction({
+  result = {},
+  alert = {},
+  intent = '',
+  advice = {},
+  primitives = {},
+  position = null,
+} = {}) {
+  const [outcome, operation] = terminalOutcome(
+    intent,
+    result.decision,
+    alert.note,
+  )
+  const zone = intent === 'buy' || intent === 'add'
+    ? advice.addZone
+    : intent === 'stop'
+      ? advice.stopZone
+      : advice.reduceZone
+  const range = decisionRange(
+    result.executionRange || {
+      priceLow: result.priceLow,
+      priceHigh: result.priceHigh,
+    },
+    primitives.price ?? alert.decisionPrice ?? alert.value,
+  )
+  if (
+    range.low == null
+    && zone
+    && Number(zone.low) > 0
+    && Number(zone.high) > 0
+  ) {
+    range.low = round(zone.low, 3)
+    range.high = round(zone.high, 3)
+  }
+  const requested = lotsOf(
+    result.quantity
+    || alert.opQty
+    || advice.opQty,
+  )
+  const sellable = Math.max(
+    0,
+    Math.trunc(Number(position?.sellableToday) || 0),
+  )
+  const quantity = ['sell', 'stop'].includes(intent)
+    ? Math.min(requested || sellable, sellable)
+    : requested
+  const execute = result.decision === 'confirm'
+  const theoryBasis = compactText(
+    advice.knowledgeActionPlan?.principle,
+    240,
+  )
+  const execution = execute
+    ? [
+        outcome,
+        quantity > 0 ? `${quantity}手` : '',
+        rangeLabel(range) ? `执行区间${rangeLabel(range)}` : '',
+      ].filter(Boolean).join('，')
+    : `${outcome}；本次触发结束，不新增复核价`
+  return {
+    ...result,
+    // 终态指令由服务端根据 decision、方向、区间和手数重建，
+    // 不直接信任模型自由文本，避免夹带新观察价或下一轮复核。
+    terminalInstruction: execution,
+    reviewDecision: {
+      schemaVersion: 'triggered-review-decision.v1',
+      terminal: true,
+      outcome,
+      operation,
+      priceLow: execute ? range.low : null,
+      priceHigh: execute ? range.high : null,
+      quantity: execute ? quantity : 0,
+      basisType:
+        compactText(result.basisType, 40)
+        || (theoryBasis ? '已验证理论' : '实时资金与价格'),
+      basis:
+        compactText(result.basis, 240)
+        || theoryBasis
+        || compactText(result.reason, 240)
+        || '依据原军师计划与本轮触价后的分时结构判断',
+    },
+  }
 }
 
 export function judgePriceContractGate(alert = {}, advice = {}) {
@@ -316,15 +478,14 @@ async function llmJudge({ a, name, advice, prim, tech, det, position }) {
   const sideZh = actionLabelOf(a);
   const adv = buildJudgeAdviceContext({ ...(a.judgeContext || {}), ...(advice || {}) });
   const modelDiscipline = quantJudgeDiscipline(adv.quantContext);
-  const sys = '你是严谨的A股短线交易确认闸门。价格已触及关键价位,但「到价≠立刻动手」。'
-    + '你的唯一任务:结合盘中走势与建议条件,判断【此刻是否真正到了动手时机】。'
-    + '军师建议是本次交易计划的上层约束：必须理解其方向、手数、仓位、盈亏比、止损目标、技术资金消息依据与失效条件；'
-    + '不得脱离军师建议单独创造相反动作。priceContract是服务端校验后的唯一权威价格契约，必须逐项严格引用，禁止改价或另造价位；'
-    + '单个价格只是进入观察的触发边界，不是固定锚点；'
+  const sys = '你是顶尖的A股短线操盘手，负责价格触发后的10秒终局确认。'
+    + '价格已经到达军师预设点位，你必须基于原军师计划和最新分时证据立即拍板，不得重新选价、不得延后到下一轮。'
+    + '军师建议是本次交易计划的上层约束：先核对其方向、手数、仓位、盈亏比、止损目标、技术资金消息依据与失效条件；'
+    + 'priceContract是服务端校验后的唯一权威价格契约，禁止改价或另造价位。'
     + '当前持仓状态由服务端账本核验：无持仓只能买入，绝不能解释为加仓、减仓、卖出或止损；'
-    + '必须围绕主计划版本、动态价格带、失效条件和触价后的分时结构判断。加仓尤其禁止下跌摊平，必须是军师仍支持加仓且触价后出现止跌确认。'
-    + '买入必须保守，客观止跌信号不足一律wait；止盈要重视触价后的冲高回落，避免利润明显回撤；'
-    + '止损要重视持续破位，不能因措辞犹豫而拖延。invalid必须有明确客观失效证据，不能只凭主观感觉。'
+    + '加仓必须确认原军师仍支持且触价后承接有效；减仓和锁利润要结合冲高回落、VWAP与量能；硬止损优先。'
+    + '不要求所有指标同时同向：只要至少一类可追溯依据成立（已验证理论、实时资金与价格、重大催化）即可综合决断。'
+    + 'wait是本次触发的终态“维持观望/维持持有”，不是继续围绕该价格循环复核；invalid是放弃本次操作。'
     + (modelDiscipline ? `量化模型纪律：${modelDiscipline}` : '')
     + '只输出 JSON,不要多余文字。';
   const payload = {
@@ -392,6 +553,19 @@ async function llmJudge({ a, name, advice, prim, tech, det, position }) {
       const decision = ['confirm', 'wait', 'invalid'].includes(d) ? d : 'wait';
       return {
         decision,
+        terminalInstruction: compactText(
+          value.terminalInstruction,
+          160,
+        ),
+        priceLow: Number.isFinite(Number(value.priceLow))
+          ? Number(value.priceLow)
+          : null,
+        priceHigh: Number.isFinite(Number(value.priceHigh))
+          ? Number(value.priceHigh)
+          : null,
+        quantity: lotsOf(value.quantity),
+        basisType: compactText(value.basisType, 40),
+        basis: compactText(value.basis, 240),
         confidence: Math.min(
           normalizeConfidence(value.confidence),
           adv.quantContext?.experimental ? 85 : 100,
@@ -428,9 +602,21 @@ export async function judgeConfirmation({ alert, name, advice, quote, position }
     ...result,
     knowledgeAction: result?.knowledgeAction || knowledgeAction,
   });
+  const finalize = (result, primitives = {}) =>
+    attachTerminalInstruction({
+      result: withKnowledgeAction(result),
+      alert: a,
+      intent,
+      advice: adviceContext,
+      primitives: {
+        price: Number(quote?.price) || null,
+        ...primitives,
+      },
+      position,
+    });
   const priceContractGate = judgePriceContractGate(a, adviceContext);
   if (!priceContractGate.allowed) {
-    return withKnowledgeAction({
+    return finalize({
       decision: 'invalid',
       confidence: 100,
       reason: priceContractGate.reason,
@@ -443,7 +629,7 @@ export async function judgeConfirmation({ alert, name, advice, quote, position }
   if (position) {
     const positionGate = positionGateForAlert(a, position);
     if (!positionGate.allowed) {
-      return withKnowledgeAction({
+      return finalize({
         decision: positionGate.transient ? 'wait' : 'invalid',
         confidence: 100,
         reason: positionGate.reason,
@@ -455,7 +641,7 @@ export async function judgeConfirmation({ alert, name, advice, quote, position }
     }
   }
   if (!adviceSupportsIntent(intent, adviceContext)) {
-    return withKnowledgeAction({
+    return finalize({
       decision: 'invalid',
       confidence: 100,
       reason: `最新军师建议已不再支持${actionLabelOf(a)}，原操作点失效`,
@@ -467,7 +653,7 @@ export async function judgeConfirmation({ alert, name, advice, quote, position }
   }
   const timeContext = marketTimeContext();
   if (!isConfirmationPhase(timeContext.phase)) {
-    return withKnowledgeAction({
+    return finalize({
       decision: 'wait',
       reason: `${timeContext.phase}不做盘中确认，等待连续竞价`,
       side,
@@ -483,15 +669,20 @@ export async function judgeConfirmation({ alert, name, advice, quote, position }
     { watchingAt: a.watchingAt },
   ) : null;
   if (!prim) {
-    return withKnowledgeAction({ decision: 'wait', reason: '分时数据不足,继续观察', side, source: 'ta' });
-  }
-  if (!isMinuteSnapshotFresh(prim.lastTime, timeContext.bjNow)) {
-    return withKnowledgeAction({
+    return finalize({
       decision: 'wait',
-      reason: `分时快照已过期(${prim.lastTime || '时间未知'}),等待最新成交`,
+      reason: '分时数据不足，本次维持原计划且不新增复核价',
       side,
       source: 'ta',
     });
+  }
+  if (!isMinuteSnapshotFresh(prim.lastTime, timeContext.bjNow)) {
+    return finalize({
+      decision: 'wait',
+      reason: `分时快照已过期(${prim.lastTime || '时间未知'})，本次维持原计划`,
+      side,
+      source: 'ta',
+    }, prim);
   }
   const quotePrice = Number(quote && quote.price);
   prim.quotePrice = quotePrice > 0 ? quotePrice : null;
@@ -499,12 +690,12 @@ export async function judgeConfirmation({ alert, name, advice, quote, position }
     ? round((prim.price - quotePrice) / quotePrice * 100, 2)
     : null;
   if (prim.sourceSpreadPct != null && Math.abs(prim.sourceSpreadPct) > 0.8) {
-    return withKnowledgeAction({
+    return finalize({
       decision: 'wait',
-      reason: `分时价与实时报价偏差${Math.abs(prim.sourceSpreadPct)}%，等待数据源收敛`,
+      reason: `分时价与实时报价偏差${Math.abs(prim.sourceSpreadPct)}%，本次不执行`,
       side,
       source: 'ta',
-    });
+    }, prim);
   }
   const keyPrice = Number(a.value);
   const watchingPrice = Number(a.watchingPrice);
@@ -519,7 +710,7 @@ export async function judgeConfirmation({ alert, name, advice, quote, position }
     : Math.min(wallObservationMs, Number(prim.observedTradingMs) || 0);
   prim.observationAgeMin = prim.observationAgeMs != null ? round(prim.observationAgeMs / 60000, 1) : null;
 
-  // 最短观察期内不调用 LLM；但买点明确跌破/追高失效可立即撤销。
+  // 到价后立即进入终局判断；确定性失效直接结束，其余交给 Judge 快速拍板。
   const preliminary = deterministicJudge(side, prim, null);
   const early = fuseConfirmation({
     side,
@@ -534,7 +725,7 @@ export async function judgeConfirmation({ alert, name, advice, quote, position }
       signals: { side, primitives: prim, deterministic: preliminary, techVerdict: null },
       source: 'ta',
     };
-    const enriched = withKnowledgeAction(result);
+    const enriched = finalize(result, prim);
     await logVerdict(a, name, prim, enriched);
     return enriched;
   }
@@ -558,7 +749,7 @@ export async function judgeConfirmation({ alert, name, advice, quote, position }
       observationAgeMs: prim.observationAgeMs,
     });
     const result = { ...fused, side, signals, source: 'ta' };
-    const enriched = withKnowledgeAction(result);
+    const enriched = finalize(result, prim);
     await logVerdict(a, name, prim, enriched);
     return enriched;
   }
@@ -592,14 +783,21 @@ export async function judgeConfirmation({ alert, name, advice, quote, position }
   });
   const result = {
     ...fused,
+    terminalInstruction: llm?.terminalInstruction || '',
+    priceLow: llm?.priceLow ?? null,
+    priceHigh: llm?.priceHigh ?? null,
+    quantity: llm?.quantity ?? 0,
+    basisType: llm?.basisType || '',
+    basis: llm?.basis || '',
     side,
     signals,
     source: llm ? 'llm+ta' : 'ta',
     actionIntent: intent,
     knowledgeAction: llm?.knowledgeAction || knowledgeAction,
   };
-  await logVerdict(a, name, prim, result);
-  return result;
+  const terminal = finalize(result, prim);
+  await logVerdict(a, name, prim, terminal);
+  return terminal;
 }
 
 // ---- 可观测性:落一条轻量判定日志到 OSS ----

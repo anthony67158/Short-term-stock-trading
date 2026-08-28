@@ -22,6 +22,9 @@ import {
   generationOptions,
   isCompleteAdviceEntry,
 } from '../shared/adviceBatchPolicy.js';
+import {
+  isTriggeredReviewEvent,
+} from '../shared/triggeredReviewDecision.js';
 
 export const CONCURRENCY = Number(process.env.ADVICE_CONCURRENCY || 3); // 全局并发上限【默认/回退】(运行时优先按承接 advisor 角色的端点数,见 cron_advice.js)
 export const LEASE_MS = 270 * 1000;      // 单只运行租约:大于批量单股 225s 护栏；Worker 每 20s 续租，中断后约 4.5 分钟可回收
@@ -45,6 +48,7 @@ const REVIEW_SOURCES = new Set([
 export const isActive = (j) => !!(j && ACTIVE.has(j.status));
 
 function effectiveJobMaxAttempts(job) {
+  if (isTriggeredReviewEvent(job?.trigger)) return 1;
   return generationOptions(job?.deepMode === true).maxAttempts;
 }
 
@@ -359,7 +363,9 @@ export function enqueueJob(data, {
         cur.source = 'judge';
         cur.trigger = trigger;
         cur.at = Math.max(Number(cur.at) || 0, Number(trigger.at) || now);
-        cur.maxAttempts = generation.maxAttempts;
+        cur.maxAttempts = isTriggeredReviewEvent(trigger)
+          ? 1
+          : generation.maxAttempts;
         cur.deepMode = false;
         cur.batchRequest = false;
         cur.batchId = '';
@@ -380,6 +386,9 @@ export function enqueueJob(data, {
     return { job: cur, created: false, deferred: false };
   }
   const generation = generationOptions(deepMode);
+  const maxAttempts = isTriggeredReviewEvent(trigger)
+    ? 1
+    : generation.maxAttempts;
   const job = {
     id: `${resolvedRole === 'review' ? 'review_' : ''}${code}_${now}`,
     role: resolvedRole,
@@ -387,7 +396,7 @@ export function enqueueJob(data, {
     resourceUnits: 1,
     code, name: name || code, mode: mode || 'buy_advice',
     status: 'queued',
-    attempts: 0, maxAttempts: generation.maxAttempts,
+    attempts: 0, maxAttempts,
     at: now, startedAt: 0, finishedAt: 0, leaseUntil: 0,
     error: '', source, cancelRequested: false,
     batchId: String(batchId || ''),

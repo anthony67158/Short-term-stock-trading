@@ -93,6 +93,10 @@ import {
   realOutcomeContext,
 } from '../shared/realOutcomeLearning.js';
 import {
+  enforceTriggeredReviewDecisionPlan,
+  normalizeTriggeredReviewDecision,
+} from '../shared/triggeredReviewDecision.js';
+import {
   buildAdvisorTheoryQuery,
   theoryReferencesOf,
 } from '../shared/advisorTheory.js';
@@ -2340,6 +2344,19 @@ export default async function handler(req, res) {
       });
     }
     if (
+      ['buy_advice', 'hold_advice', 'review'].includes(mode)
+      && result
+      && typeof result === 'object'
+      && !result.raw
+      && payload.reviewEvent
+    ) {
+      result = normalizeTriggeredReviewDecision({
+        mode,
+        result,
+        payload,
+      });
+    }
+    if (
       ['buy_advice', 'hold_advice'].includes(mode)
       && result
       && typeof result === 'object'
@@ -2385,6 +2402,20 @@ export default async function handler(req, res) {
         evidenceSnapshot: currentEvidenceSnapshot,
         accountCircuitBreaker,
       });
+      const terminalAlignment = enforceTriggeredReviewDecisionPlan({
+        mode,
+        result,
+      });
+      if (terminalAlignment.changed) {
+        result = terminalAlignment.result;
+        result.decisionPlan = compileDecisionPlan({
+          mode,
+          advice: result,
+          payload,
+          evidenceSnapshot: currentEvidenceSnapshot,
+          accountCircuitBreaker,
+        });
+      }
       result.priceContract = result.decisionPlan.priceContract;
       result.executionPlan = compileExecutionPlan({
         decisionPlan: result.decisionPlan,

@@ -734,3 +734,39 @@ test('短线试仓展示板块依据并明确只允许人工确认', () => {
     stockRole: '总龙头',
   })
 })
+
+test('到价终局复核详情只展示最终动作与依据，不再生成下次价格路径', () => {
+  const view = buildAdvicePresentation({
+    action: '观望',
+    title: '维持观望',
+    actionPlan: '维持观望：本次触发结束，不新增复核价',
+    invalidation: '原触发价已消费',
+    reviewDecision: {
+      schemaVersion: 'triggered-review-decision.v1',
+      terminal: true,
+      outcome: '维持观望',
+      operation: '不操作',
+      basis: [{
+        type: '实时资金与价格',
+        summary: '触价后量能不足且未站稳分时均价',
+      }],
+    },
+    decisionPlan: {
+      schemaVersion: 'decision-plan.v2',
+      action: 'WATCH',
+      actionLabel: '观望',
+      actionability: 'WATCH',
+      quantity: { lots: 0 },
+      prices: { observations: [] },
+      trigger: '本次触发结束',
+    },
+  })
+
+  assert.equal(view.verdict.action, '维持观望')
+  assert.match(view.operationGuide.now, /本次触发结束/)
+  assert.equal(view.operationGuide.steps[0].label, '决策依据')
+  assert.doesNotMatch(
+    JSON.stringify(view.operationGuide),
+    /下次复核|回踩路径|突破路径/,
+  )
+})

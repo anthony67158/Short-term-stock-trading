@@ -1,6 +1,9 @@
 import { adviceEntryMatchesMode } from './adviceModeContext.js'
 import { isCompleteAdviceEntry } from './adviceBatchPolicy.js'
 import { adviceRequestId } from './adviceGenerationPolicy.js'
+import {
+  TRIGGERED_REVIEW_TIME_LIMIT_MINUTES,
+} from './triggeredReviewDecision.js'
 
 const QUICK_GENERATION_STEPS = Object.freeze([
   { key: 'prepare', label: '准备上下文' },
@@ -235,28 +238,34 @@ export function adviceReviewCardState(
     ) {
       return {
         kind: 'failed',
-        label: '自动复核未启动，请重新评估',
-        detail: '触价后90秒内未创建后台任务',
+        label: '自动复核未启动，点“重新评估”立即处理',
+        detail: '到价任务未成功启动，需手动重新评估当前信号',
       }
     }
     return {
       kind: 'queued',
-      label: '条件已触发，预计1分钟内开始复核',
-      detail: '云端定时任务每分钟扫描一次',
+      label: '条件已触发，正在限时复核',
+      detail: `${TRIGGERED_REVIEW_TIME_LIMIT_MINUTES}分钟内给出明确操作结论`,
     }
   }
   if (['queued', 'pending'].includes(job.status)) {
     return {
       kind: 'queued',
       label: '条件已触发，等待后台复核',
-      detail: String(job.phase || '后台任务已创建'),
+      detail: String(
+        job.phase
+        || `${TRIGGERED_REVIEW_TIME_LIMIT_MINUTES}分钟内给出明确操作结论`,
+      ),
     }
   }
   if (job.status === 'running') {
     return {
       kind: 'running',
-      label: '条件已触发，正在自动复核',
-      detail: String(job.phase || '正在核对最新行情与证据'),
+      label: '到价终局复核中',
+      detail: String(
+        job.phase
+        || `正在核对原军师计划与最新证据，${TRIGGERED_REVIEW_TIME_LIMIT_MINUTES}分钟内完成`,
+      ),
     }
   }
   if (job.status === 'publishing') {
@@ -269,8 +278,8 @@ export function adviceReviewCardState(
   if (job.status === 'ok' && freshTerminal) {
     return {
       kind: 'done',
-      label: '自动复核完成，结论已更新',
-      detail: '请查看上方最新操作指令',
+      label: '到价复核完成，已给出明确结论',
+      detail: '请按上方最新操作指令执行',
     }
   }
   if (

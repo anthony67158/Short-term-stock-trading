@@ -1023,7 +1023,11 @@ export default function StockDetail({ stock, onClose }) {
                           {generationMetrics?.durationMs > 0 && (
                             <span className="generation-proof">
                               <Icon name="check" size={10} />
-                              完整结果 · {generationMetrics.profile === 'DEEP' ? '深度生成' : '快速生成'}
+                              完整结果 · {generationMetrics.profile === 'DEEP'
+                                ? '深度生成'
+                                : generationMetrics.profile === 'TRIGGERED_REVIEW'
+                                  ? '限时到价复核'
+                                  : '快速生成'}
                               {' · '}
                               {(generationMetrics.durationMs / 1000).toFixed(1)}秒
                             </span>

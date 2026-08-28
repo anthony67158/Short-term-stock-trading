@@ -63,6 +63,11 @@ import {
   isAdviceReviewEnabled,
 } from '../shared/adviceReviewPolicy.js';
 import {
+  buildTriggeredReviewFallback,
+  isTriggeredReviewEvent,
+  triggeredReviewRuntime,
+} from '../shared/triggeredReviewDecision.js';
+import {
   adviceEvidenceDigest,
   adviceTrustBands,
   prioritizeAdviceReviewCodes,
@@ -88,6 +93,7 @@ import { attachAdviceDailyReport } from '../shared/adviceDailyReportPolicy.js';
 import { adviceEntryMatchesMode } from '../shared/adviceModeContext.js';
 import aiHandler from './ai.js';
 import quoteHandler from './quote.js';
+import { sendPush } from './_push_send.js';
 import { TRUSTED_QUANT_VERSION } from './_quant_access.js';
 import { TRUSTED_ACCOUNT_REQUEST } from './_account_auth.js';
 import { dispatchAdviceWorker } from './_advice_dispatch.js';
@@ -719,6 +725,38 @@ export function buildAdviceReviewRecord({
   };
 }
 
+export function terminalReviewNotification({
+  code = '',
+  name = '',
+  advice = {},
+  jobId = '',
+} = {}) {
+  const decision = advice?.reviewDecision;
+  if (decision?.terminal !== true || !decision.outcome) return null;
+  const identity = name && name !== code
+    ? `${name}(${code})`
+    : name || code || '股票';
+  const action = String(advice.actionPlan || decision.outcome)
+    .replace(/\s+/g, ' ')
+    .trim();
+  const basis = String(
+    decision.basis?.[0]?.summary
+    || decision.basisSummary
+    || advice.reason
+    || '',
+  ).replace(/\s+/g, ' ').trim();
+  return {
+    title: `${identity}｜${decision.outcome}`.slice(0, 64),
+    body: [
+      action,
+      basis ? `依据：${basis}` : '',
+    ].filter(Boolean).join('\n').slice(0, 180),
+    code,
+    tag: `review-terminal-${jobId || code}`,
+    url: '/',
+  };
+}
+
 // 生成单只:军师内部完成统一证据采集与量化预测，任务层直接复用同一份结果。
 async function genOne({
   code,
@@ -734,10 +772,28 @@ async function genOne({
   reviewTrigger = '',
 }) {
   const startedAt = Date.now();
-  const generation = generationOptions(deepMode);
+  const baseGeneration = generationOptions(deepMode);
+  const reviewRuntime = triggeredReviewRuntime(
+    payload?.reviewEvent,
+    startedAt,
+  );
+  const generation = reviewRuntime
+    ? {
+        ...baseGeneration,
+        deepMode: false,
+        fastMode: true,
+        forceReasoning: false,
+        runtimeBudgetMs: reviewRuntime.runtimeBudgetMs,
+        timeoutMs: reviewRuntime.timeoutMs,
+        maxAttempts: 1,
+      }
+    : baseGeneration;
   let streamedReasoning = '';
   let adviceFailure = '';
-  const adviceP = invokeSSE(aiHandler, {
+  let usedTerminalFallback = false;
+  const adviceRequest = reviewRuntime?.expired
+    ? Promise.resolve(null)
+    : invokeSSE(aiHandler, {
     method: 'POST',
     body: {
       mode,
@@ -756,7 +812,8 @@ async function genOne({
       const patch = progressPatchForEvent(event, data);
       if (patch && typeof onProgress === 'function') onProgress(patch);
     },
-  })
+  });
+  const adviceP = adviceRequest
     .then((r) => {
       adviceFailure = adviceFailureReason(r, mode);
       return adviceFailure
@@ -778,7 +835,28 @@ async function genOne({
         : '军师生成请求异常';
       return null;
     });
-  const adviceResp = await adviceP;
+  let adviceResp = await adviceP;
+  if (!adviceResp && isTriggeredReviewEvent(payload?.reviewEvent)) {
+    usedTerminalFallback = true;
+    const fallbackReason = reviewRuntime?.expired
+      ? '价格触发复核已到两分钟期限，系统按纪律结束本轮'
+      : adviceFailure || '模型在限时内未返回完整结论';
+    adviceResp = {
+      advice: buildTriggeredReviewFallback({
+        mode,
+        previousAdvice: previousEntry?.advice || {},
+        payload,
+        reason: fallbackReason,
+      }),
+      meta: previousEntry?.meta || null,
+      news: previousEntry?.news || [],
+      truncated: false,
+      unchanged: false,
+      reviewDisposition: 'terminal-fallback',
+      reviewReason: fallbackReason,
+      reviewReceipt: null,
+    };
+  }
   const result = quantResultFromAdviceResponse(adviceResp, priceHint);
 
   const advice = adviceResp && adviceResp.advice
@@ -824,9 +902,19 @@ async function genOne({
   );
   cacheItem.generationMetrics = {
     schemaVersion: 'advice-generation-metrics.v1',
-    profile: deepMode ? 'DEEP' : 'FAST',
+    profile: reviewRuntime
+      ? 'TRIGGERED_REVIEW'
+      : deepMode ? 'DEEP' : 'FAST',
     durationMs: Math.max(0, Date.now() - startedAt),
-    mainLlmCalls: advice ? 1 : 0,
+    mainLlmCalls: advice && !usedTerminalFallback ? 1 : 0,
+    ...(reviewRuntime
+      ? {
+          timeLimitMinutes:
+            payload.reviewEvent?.timeLimitMinutes,
+          deadlineAt: reviewRuntime.deadlineAt,
+          terminalFallback: usedTerminalFallback,
+        }
+      : {}),
   };
   let logEntry = null;
   if (advice) {
@@ -880,7 +968,7 @@ async function genOne({
     origin: payload.reviewOrigin,
     previousEntry,
     cacheItem,
-    llmRan: !!advice,
+    llmRan: !!advice && !usedTerminalFallback,
     durationMs: Date.now() - startedAt,
   });
   return {
@@ -1555,6 +1643,29 @@ async function drainAccount(nick, initialAcc) {
           completedAt,
         );
         (d.advice || (d.advice = {}))[done.code] = done.res.cacheItem;
+        const terminalPush = terminalReviewNotification({
+          code: done.code,
+          name: job.name || done.code,
+          advice: done.res.cacheItem?.advice,
+          jobId: done.jobId,
+        });
+        if (terminalPush && !job.terminalPushSentAt) {
+          try {
+            const pushed = await sendPush(
+              Array.isArray(d.pushSubs) ? d.pushSubs : [],
+              terminalPush,
+            );
+            if (pushed.deadEndpoints?.length) {
+              const dead = new Set(pushed.deadEndpoints);
+              d.pushSubs = (d.pushSubs || []).filter(
+                (subscription) => !dead.has(subscription?.endpoint),
+              );
+            }
+            job.terminalPushSentAt = Date.now();
+          } catch {
+            // 推送失败不影响终局结论落盘；前端增量同步仍会展示结果。
+          }
+        }
         if (done.res.logEntry) {
           const log = d.adviceLog || (d.adviceLog = []);
           const dup = log.find((x) =>

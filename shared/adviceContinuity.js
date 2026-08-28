@@ -76,6 +76,7 @@ const text = (value, max = 1200) =>
 
 function directionOf(advice = {}) {
   const action = text(advice.action || advice.stance, 80)
+  if (/放弃买入|取消买入|维持观望/.test(action)) return 'neutral'
   if (/减仓|清仓|卖出|止损|离场/.test(action)) return 'defensive'
   if (/买入|加仓|补仓|接回|买回|持有|持股/.test(action)) return 'long'
   return 'neutral'
@@ -172,7 +173,7 @@ function reversalEvidence(previous, next, evidence = {}) {
 function actionRiskLevel(advice = {}) {
   const action = text(advice.action || advice.stance, 80)
   if (/减仓|清仓|卖出|止损|离场/.test(action)) return 0
-  if (/观望|等待|不买|暂不/.test(action)) return 1
+  if (/观望|等待|不买|暂不|放弃买入|取消买入/.test(action)) return 1
   if (/持有|持股/.test(action)) return 2
   if (/买入|加仓|补仓|接回|买回/.test(action)) return 3
   return 2

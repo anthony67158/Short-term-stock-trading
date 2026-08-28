@@ -529,7 +529,7 @@ test('操作建议卡使用固定价位列且数量与动作保持同组', () =>
 test('尚无操作建议使用紧凑单行生成入口', () => {
   assert.match(
     planTab,
-    /function AdviceActionPanel\(\{ view, currentPrice, onPrompt \}\)/,
+    /function AdviceActionPanel\(\{ view, currentPrice, onPrompt, conviction = null \}\)/,
   )
   assert.match(planTab, /className="action-prompt-label">尚无操作建议<\/span>/)
   assert.match(planTab, /className="action-prompt-action">生成<\/span>/)
@@ -574,6 +574,14 @@ test('价格路线图使用单一触发状态且不重复显示到价提醒', ()
 })
 
 test('价格路线图窄卡自动切为两列且语义颜色明确区分', () => {
+  assert.match(
+    precision,
+    /@container \(max-width:\s*560px\)\s*{[\s\S]*?\.card-decision-slot \.action-levels\.levels-3\s*{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s,
+  )
+  assert.match(
+    precision,
+    /\.card-decision-slot \.action-levels\.levels-3 > \.action-level:nth-child\(3\)\s*{[^}]*grid-column:\s*1\s*\/\s*-1/s,
+  )
   assert.match(
     precision,
     /@container \(max-width:\s*560px\)\s*{[\s\S]*?\.card-decision-slot \.action-levels\.editable\s*{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s,
@@ -650,6 +658,10 @@ test('卡片内只保留单行建议摘要且完整内容进入个股详情', ()
   assert.doesNotMatch(planTab, /className="action-command-open"/)
   assert.doesNotMatch(precision, /\.action-command-open/)
   assert.doesNotMatch(planTab, /action-command-disclosure|new ResizeObserver\(measure\)/)
+  assert.doesNotMatch(planTab, /action-beginner-note|cardBeginnerNote/)
+  assert.doesNotMatch(advicePresentation, /advice-beginner-note|beginnerNote/)
+  assert.doesNotMatch(precision, /\.action-beginner-note\s*{/)
+  assert.doesNotMatch(precision, /\.advice-beginner-note\s*{/)
   assert.match(
     precision,
     /\.card-decision-slot \.action-command-text\s*{[^}]*text-overflow:\s*ellipsis[^}]*white-space:\s*nowrap/s,

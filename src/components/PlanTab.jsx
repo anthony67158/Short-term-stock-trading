@@ -61,9 +61,14 @@ import {
   rankWatchlistCandidates,
 } from '../../shared/watchlistRanking.js'
 import {
+  behaviorGuardrails,
+  realPerformanceMirror,
+} from '../../shared/tradingDiscipline.js'
+import {
   buildActionProgress,
   buildAdviceActionView,
   buildHoldingCardDecisionView,
+  entryConvictionView,
 } from '../../shared/adviceActionView.js'
 import { visibleAiSources } from '../../shared/aiSearchUi.js'
 import { useAiSearchConfig } from '../aiSearchConfigStore'
@@ -767,6 +772,35 @@ function EmptyActionLevels() {
   )
 }
 
+function ConvictionStrip({ conviction }) {
+  if (!conviction) return null
+  const chips = [
+    conviction.route,
+    ...(conviction.confirmations || []),
+  ].filter(Boolean).slice(0, 3)
+  return (
+    <div className={'action-conviction conviction-' + conviction.tone}>
+      <span className="action-conviction-size">
+        <Icon
+          name={conviction.tier === 'FULL' ? 'rocket' : 'spark'}
+          size={12}
+        />
+        {conviction.sizeLabel}
+        {conviction.sizeValue && (
+          <strong>{conviction.sizeValue}</strong>
+        )}
+      </span>
+      {chips.length > 0 && (
+        <span className="action-conviction-why">
+          {chips.map((chip) => (
+            <em key={chip}>{chip}</em>
+          ))}
+        </span>
+      )}
+    </div>
+  )
+}
+
 function ActionCommand({ view, onOpen }) {
   const instruction = view.instruction || '等待下一步执行条件'
   const quantity =
@@ -796,7 +830,7 @@ function ActionCommand({ view, onOpen }) {
   )
 }
 
-function AdviceActionPanel({ view, currentPrice, onPrompt }) {
+function AdviceActionPanel({ view, currentPrice, onPrompt, conviction = null }) {
   if (!view) {
     return (
       <button type="button" className="action-prompt" onClick={onPrompt} aria-label="生成操作建议">
@@ -813,6 +847,7 @@ function AdviceActionPanel({ view, currentPrice, onPrompt }) {
   return (
     <div className={'action-decision tone-' + tone}>
       <ActionCommand view={view} onOpen={onPrompt} />
+      <ConvictionStrip conviction={conviction} />
       {view.levels.length > 0 && (
         <div className={'action-levels levels-' + Math.min(view.levels.length, 3)}>
           {view.levels.map((item) => (
@@ -950,6 +985,7 @@ function CandDecision({ p, q }) {
             view={view}
             onOpen={() => openStockDetail(p.code, q?.name || p.name)}
           />
+          <ConvictionStrip conviction={entryConvictionView(advice)} />
           {actionable ? (
             <>
               <div className="action-levels editable">
@@ -1323,7 +1359,7 @@ function PlanList({ book, quote, stockTags, batchSel }) {
     <section className="panel plan-section plan-section-watch">
       <div className="plan-section-sticky">
         <div className="panel-head plan-head">
-          <div role="heading" aria-level="2" className="panel-title"><Icon name="eye" size={16} /> 自选 / 候选 <span className="sub-name">{book.plan.length} 只 · 置顶优先，再按建议档位排序</span></div>
+          <div role="heading" aria-level="2" className="panel-title"><Icon name="eye" size={16} /> 自选 / 候选 <span className="sub-name">{book.plan.length} 只 · 置顶优先，其余按最可能买入排序</span></div>
           <div className="plan-head-r">
             <div className="plan-search"><StockSearch /></div>
           </div>
@@ -1366,6 +1402,152 @@ const ADVICE_MODE_LABEL = {
   hold_advice: '持仓建议', buy_advice: '买入建议', t_advice: '做T建议',
   price: '目标价', plan: '交易计划', review: '复盘', other: '其他',
 }
+
+// 交易纪律条：把行为护栏(高频/连亏/费用)和真实业绩镜子(扣费后胜率)放在
+// 账户命令区，让新手一眼看清"我真实赚没赚、有没有在犯散户通病"。
+// 这与"军师战绩"(决策命中率)是两码事——这里是账户里真金白银的结果。
+function DisciplineBar({ book }) {
+  const [open, setOpen] = useState(false)
+  const closed = book.closed || []
+  const guard = useMemo(() => behaviorGuardrails({ closed }), [closed])
+  const mirror = useMemo(() => realPerformanceMirror(closed), [closed])
+  useEffect(() => {
+    if (!open) return undefined
+    const close = (event) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('keydown', close)
+    return () => document.removeEventListener('keydown', close)
+  }, [open])
+
+  const topAlert = guard.alerts[0] || null
+  // 无任何真实成交且无告警时不占位，避免空面板。
+  if (!topAlert && mirror.samples === 0) return null
+
+  const wr = mirror.winRate
+  const tone = !mirror.qualified
+    ? 'muted'
+    : mirror.netPnl < 0
+      ? 'green'
+      : wr != null && wr >= 50
+        ? 'red'
+        : 'gold'
+
+  return (
+    <div className="discipline-bar-wrap">
+      <button
+        className={'discipline-bar' + (topAlert ? ' has-alert level-' + topAlert.level : '')}
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        title="点击查看真实业绩与交易纪律提醒"
+      >
+        {topAlert ? (
+          <>
+            <Icon name={topAlert.icon || 'shield'} size={13} />
+            <span className="db-alert-title">{topAlert.title}</span>
+            {guard.alerts.length > 1 && (
+              <span className="db-alert-more">+{guard.alerts.length - 1}</span>
+            )}
+          </>
+        ) : (
+          <>
+            <Icon name="gauge" size={13} />
+            <span className="db-k">真实业绩</span>
+            {wr != null
+              ? <span className={'db-wr ' + tone}>{wr}%</span>
+              : <span className="db-sub">积累中</span>}
+          </>
+        )}
+        <Icon name={open ? 'arrowUp' : 'chevronDown'} size={12} />
+      </button>
+      {open && (
+        <OverlayPortal>
+          <div className="advisor-score-mask" onClick={() => setOpen(false)}>
+            <div
+              className="advisor-pop discipline-dialog"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="discipline-title"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="ap-title" id="discipline-title">
+                <Icon name="gauge" size={13} />
+                <span>真实业绩与交易纪律</span>
+                <button type="button" className="modal-close" aria-label="关闭" onClick={() => setOpen(false)}>
+                  <Icon name="close" size={14} />
+                </button>
+              </div>
+
+              {guard.alerts.length > 0 && (
+                <div className="db-alerts">
+                  {guard.alerts.map((alert) => (
+                    <div className={'db-alert-item level-' + alert.level} key={alert.code}>
+                      <Icon name={alert.icon || 'shield'} size={14} />
+                      <div>
+                        <b>{alert.title}</b>
+                        <span>{alert.message}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="db-mirror">
+                <div className="db-mirror-head">
+                  <Icon name="target" size={12} />
+                  <span>真实成交（扣费后）</span>
+                  <em>{mirror.samples} 笔已实现</em>
+                </div>
+                {mirror.samples > 0 ? (
+                  <>
+                    <div className="db-metrics">
+                      <div className="db-metric">
+                        <span className="db-metric-k">真实胜率</span>
+                        <b className={tone}>{wr != null ? wr + '%' : '—'}</b>
+                        <span className="db-metric-sub">{mirror.wins}胜/{mirror.losses}负</span>
+                      </div>
+                      <div className="db-metric">
+                        <span className="db-metric-k">扣费后累计</span>
+                        <b className={mirror.netPnl >= 0 ? 'red' : 'green'}>
+                          {mirror.netPnl >= 0 ? '+' : ''}{mirror.netPnl}元
+                        </b>
+                        <span className="db-metric-sub">
+                          均{mirror.averageNetPnl >= 0 ? '+' : ''}{mirror.averageNetPnl}/笔
+                        </span>
+                      </div>
+                      <div className="db-metric">
+                        <span className="db-metric-k">盈亏比</span>
+                        <b>{mirror.profitFactor != null ? mirror.profitFactor : '—'}</b>
+                        <span className="db-metric-sub">赚:亏</span>
+                      </div>
+                      <div className="db-metric">
+                        <span className="db-metric-k">手续费拖累</span>
+                        <b className="gold">{mirror.totalFees}元</b>
+                        <span className="db-metric-sub">
+                          {mirror.feeDragPct != null ? '吃掉毛利' + mirror.feeDragPct + '%' : '—'}
+                        </span>
+                      </div>
+                    </div>
+                    <p className={'db-verdict ' + tone}>{mirror.verdict}</p>
+                  </>
+                ) : (
+                  <p className="ap-desc muted">还没有已实现的真实成交，先按纪律积累样本。</p>
+                )}
+              </div>
+
+              <p className="ap-foot muted">
+                这里只统计你<b>真实卖出/清仓/做T后</b>扣掉手续费的已实现结果，和“军师战绩”(决策命中率)不同。
+                短线无稳赚，系统的价值是帮你少犯错、控仓位、守纪律。
+              </p>
+            </div>
+          </div>
+        </OverlayPortal>
+      )}
+    </div>
+  )
+}
+
 function AdvisorScore({ book }) {
   const [open, setOpen] = useState(false)
   const stats = planStore.adviceStats()
@@ -2084,6 +2266,7 @@ function HoldingList({ book, quote, stockTags, searchConfig, batchSel }) {
         <HoldOverview book={book} quote={quote} />
         <div className="portfolio-command-actions">
           <AdvisorScore book={book} />
+          <DisciplineBar book={book} />
           <AutoRefreshControl quote={quote} stockTags={stockTags} />
           {canBatch && !selectMode && (
             <button className="mini-btn batch-entry" onClick={() => {
@@ -2895,6 +3078,7 @@ function HoldingItem({ h, quote: q }) {
         <AdviceActionPanel
           view={decisionView}
           currentPrice={validPx}
+          conviction={entryConvictionView(holdAdvice)}
           onPrompt={() => openStockDetail(h.code, h.name)}
         />
         <div className="card-decision-meta">

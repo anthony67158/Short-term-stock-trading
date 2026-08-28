@@ -381,6 +381,36 @@ function operationGuide(advice, plan, levels, observationOnly) {
     advice.invalidation,
   )
   if (!plan) return null
+  if (advice.reviewDecision?.terminal === true) {
+    const decision = advice.reviewDecision
+    const basis = (Array.isArray(decision.basis)
+      ? decision.basis
+      : [])
+      .map((item) => clean(item?.summary, 180))
+      .filter(Boolean)
+      .slice(0, 3)
+    return {
+      now: clean(
+        advice.actionPlan
+        || advice.nextAction
+        || decision.outcome,
+        300,
+      ),
+      steps: [
+        basis.length && {
+          key: 'basis',
+          label: '决策依据',
+          text: basis.join('；'),
+        },
+        invalidation && {
+          key: 'invalid',
+          label: '失效条件',
+          text: invalidation,
+          tone: 'risk',
+        },
+      ].filter(Boolean),
+    }
+  }
 
   if (observationOnly) {
     const deferredPlan = deferredPlanPresentation(plan)
@@ -576,7 +606,11 @@ function buildLegacyAdvicePresentation(advice = {}) {
   const plan = advice.decisionPlan?.schemaVersion === 'decision-plan.v2'
     ? advice.decisionPlan
     : null
-  const observationOnly = plan?.action === 'WATCH'
+  const terminalOutcome = advice.reviewDecision?.terminal === true
+    ? clean(advice.reviewDecision.outcome, 40)
+    : ''
+  const observationOnly = !terminalOutcome
+    && plan?.action === 'WATCH'
     && (
       plan.mode === 'buy_advice'
       || /观望|等待|回避|不建议|暂不/.test(
@@ -586,7 +620,7 @@ function buildLegacyAdvicePresentation(advice = {}) {
   const deferredPlan = deferredPlanPresentation(plan)
   const planAdvice = plan ? {
     ...advice,
-    action: deferredPlan?.actionLabel || (
+    action: terminalOutcome || deferredPlan?.actionLabel || (
       (
         plan.actionability === 'MANUAL_PROBE'
         || plan.manualConfirmationOnly === true
@@ -602,7 +636,9 @@ function buildLegacyAdvicePresentation(advice = {}) {
               ? '现在买入'
               : plan.actionLabel || advice.action
     ),
-    title: deferredPlan
+    title: terminalOutcome
+      ? `到价复核：${terminalOutcome}`
+      : deferredPlan
       ? `${deferredPlan.actionLabel}：方向已通过，待时机确认`
       : plan.actionPolicy?.overridden
       ? plan.action === 'HOLD'

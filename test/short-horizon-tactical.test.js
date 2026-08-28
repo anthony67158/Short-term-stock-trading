@@ -677,7 +677,7 @@ test('休市时当前保持观望但保留下一交易日条件买入预案', ()
     maxPositionPct: null,
     manualConfirmationOnly: true,
     requiresLiveReview: true,
-    trigger: '下一交易日盘中，回踩97元确认承接或放量站上104元后重新评估',
+    trigger: '下一交易日盘中，只看回踩97元不破并重新站回分时均价；到价立即复核一次',
   })
   assert.match(policy.reasons.join('；'), /盘中再判断/)
 })
@@ -712,7 +712,7 @@ test('午间休市保留下午小仓试仓预案但不开放当前买入', () =>
     maxPositionPct: 5,
     manualConfirmationOnly: true,
     requiresLiveReview: true,
-    trigger: '下午盘中，回踩97元确认承接或放量站上104元后重新评估',
+    trigger: '下午盘中，只看回踩97元不破并重新站回分时均价；到价立即复核一次',
   })
 })
 
@@ -845,4 +845,88 @@ test('做T未完成腿只允许继续既定方向', () => {
   )
   assert.equal(policy.effectiveAction, 'WATCH')
   assert.equal(policy.overridden, true)
+})
+
+test('主力单信号确认流入即开放小仓试错而不再要求两个共振', () => {
+  const tactical = buildShortHorizonTactical(payload({
+    quant: {
+      score: 45,
+      forecast: { direction: '震荡', upProb: 50, expRet: 0 },
+      highConfSignal: { fired: false },
+    },
+    sectorOpportunity: { matched: false },
+    stockFund: { mainNetYi: 1.2, retailNetYi: -0.6 },
+    tech: { atr: 2, support: 97, resistance: 104, rsi: 52 },
+    todayQuote: {
+      ...payload().todayQuote,
+      amount: 2e8,
+    },
+  }))
+  const policy = deriveShortHorizonActionPolicy({
+    mode: 'buy_advice',
+    tactical,
+    requestedAction: 'BUY',
+  })
+
+  // 仅"主力资金确认"一个信号，旧口径会被判为 NONE 强制观望
+  assert.deepEqual(policy.confirmations, ['主力资金确认'])
+  assert.equal(policy.riskTier, 'PROBE')
+  assert.equal(policy.maxPositionPct, 5)
+})
+
+test('放量突破观察价到达后配合核心确认直接升级为满仓位买入', () => {
+  // 复现死循环场景：原为"观望，等待放量突破"，突破价到达触发 REASSESSMENT 复核
+  const tactical = buildShortHorizonTactical(payload())
+  tactical.timing = {
+    ...tactical.timing,
+    state: 'WAIT_BREAKOUT',
+  }
+  const policy = deriveShortHorizonActionPolicy({
+    mode: 'buy_advice',
+    tactical,
+    requestedAction: 'BUY',
+    reviewEvent: {
+      kind: 'price-review',
+      reviewMode: 'REASSESSMENT',
+      plannedAction: 'WATCH',
+      directionApproved: false,
+      direction: 'gte',
+      threshold: 104,
+      price: 104,
+    },
+  })
+
+  assert.equal(policy.riskTier, 'FULL')
+  assert.equal(policy.entryRoute, 'BREAKOUT_MOMENTUM')
+  assert.equal(policy.canIncreaseRisk, true)
+  assert.deepEqual(policy.allowedActions, ['BUY', 'WATCH'])
+  assert.equal(policy.effectiveAction, 'BUY')
+  assert.equal(policy.entryIntent.state, 'READY_BUY')
+  assert.equal(policy.entryIntent.actionLabel, '立即买入')
+})
+
+test('回踩观察价到达不因方向向下而被误判为突破满仓位', () => {
+  const tactical = buildShortHorizonTactical(payload())
+  tactical.timing = {
+    ...tactical.timing,
+    state: 'WAIT_PULLBACK',
+  }
+  const policy = deriveShortHorizonActionPolicy({
+    mode: 'buy_advice',
+    tactical,
+    requestedAction: 'BUY',
+    reviewEvent: {
+      kind: 'price-review',
+      reviewMode: 'REASSESSMENT',
+      plannedAction: 'WATCH',
+      directionApproved: false,
+      direction: 'lte',
+      threshold: 97,
+      price: 97,
+    },
+  })
+
+  // 回踩到价仍按证据评估，不走突破满仓位路径（默认成交额缺失只到 PROBE）
+  assert.equal(policy.riskTier, 'PROBE')
+  assert.notEqual(policy.entryRoute, 'BREAKOUT_MOMENTUM')
 })

@@ -71,6 +71,20 @@ function watchInstruction(action) {
   return '先观察，等条件确认'
 }
 
+function waitOutcome(action) {
+  return /加仓|减仓|止盈|止损/.test(action)
+    ? '维持持有'
+    : '维持观望'
+}
+
+function invalidOutcome(action) {
+  if (/买入/.test(action)) return '放弃买入'
+  if (/加仓/.test(action)) return '放弃加仓'
+  if (/减仓|止盈/.test(action)) return '放弃本次减仓'
+  if (/止损/.test(action)) return '原止损条件失效'
+  return '放弃本次操作'
+}
+
 export function buildAlertNotification({
   alert = {},
   quote = null,
@@ -83,16 +97,18 @@ export function buildAlertNotification({
   const instruction = stage === 'watch'
     ? watchInstruction(action)
     : stage === 'review'
-      ? '正在自动复核分时承接、量能和资金，暂不下单'
+      ? '正在核对原军师计划、分时、量能和资金，2分钟内给出明确结论'
     : stage === 'confirm'
       ? `执行：${alert.opQty && !/不可卖/.test(String(alert.opQty)) ? alert.opQty : action}`
+      : stage === 'wait'
+        ? `结论：${waitOutcome(action)}；本次触发结束`
       : stage === 'invalid'
-        ? '动作：暂停，等军师重算'
+        ? `结论：${invalidOutcome(action)}；本次触发结束`
         : `执行：${alert.opQty || action}`
   const conciseReason = compactText(reason)
   const body = [
     facts,
-    stage === 'confirm' && conciseReason
+    ['confirm', 'wait', 'invalid'].includes(stage) && conciseReason
       ? `${instruction}；${conciseReason}`
       : instruction,
   ].filter(Boolean).join('\n').slice(0, 92)
@@ -102,8 +118,10 @@ export function buildAlertNotification({
       ? `${identity}｜观察条件已到`
     : stage === 'confirm'
       ? `${identity}｜现在${action}`
+      : stage === 'wait'
+        ? `${identity}｜${waitOutcome(action)}`
       : stage === 'invalid'
-        ? `${identity}｜暂停${action}`
+        ? `${identity}｜${invalidOutcome(action)}`
         : `${identity}｜${action}提醒`
   return { title, body }
 }

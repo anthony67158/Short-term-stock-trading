@@ -176,7 +176,8 @@ test('高于现价的买入价只能转为突破观察价', () => {
   assert.equal(result.breakoutWatchPrice, 15.69)
   assert.equal(result.stopPrice, null)
   assert.equal(result.targetPrice, null)
-  assert.match(result.actionPlan, /突破观察价/)
+  assert.match(result.actionPlan, /只看15\.69元/)
+  assert.match(result.actionPlan, /未放量或跌回15\.69元下方不买/)
   assert.match(issues.join('；'), /高于当前价/)
 })
 
@@ -228,7 +229,8 @@ test('收盘后买入计划转为下一交易时段盘中观察且不立即执�
   assert.equal(result.pullbackWatchPrice, 15.2)
   assert.equal(result.planQty, 0)
   assert.match(result.actionPlan, /下一交易日盘中条件试仓/)
-  assert.match(result.actionPlan, /只确认入场时机/)
+  assert.match(result.actionPlan, /只看15\.2元/)
+  assert.match(result.actionPlan, /通过后.*手动买入/)
   assert.match(issues.join('；'), /当前已收盘/)
 })
 
@@ -300,7 +302,7 @@ test('生成时已经满足的观望价不能继续伪装成未来条件', () =>
 
   assert.equal(valid, false)
   assert.equal(result.watchPrice, null)
-  assert.match(result.actionPlan, /暂无近期有效观察价/)
+  assert.match(result.actionPlan, /暂无近期有效触发价/)
   assert.match(issues.join('；'), /方向已经满足/)
 })
 
@@ -335,7 +337,7 @@ test('未持仓观望只保留观察价并移除无执行意义的止损目标',
   assert.equal(result.targetPrice, null)
 })
 
-test('远离现价的旧观察价替换为附近回踩与突破路径', () => {
+test('远离现价的旧观察价替换为最近的唯一主路径', () => {
   const { result } = reconcileAdviceNumbers({
     mode: 'buy_advice',
     payload: {
@@ -364,6 +366,7 @@ test('远离现价的旧观察价替换为附近回踩与突破路径', () => {
   assert.equal(result.pullbackWatchPrice, 126.8)
   assert.equal(result.breakoutWatchPrice, 130.2)
   assert.doesNotMatch(result.actionPlan, /89\.09/)
-  assert.match(result.actionPlan, /回踩126\.8元企稳/)
-  assert.match(result.actionPlan, /放量突破130\.2元/)
+  assert.match(result.actionPlan, /只看130\.2元/)
+  assert.match(result.actionPlan, /未放量或跌回130\.2元下方不买/)
+  assert.doesNotMatch(result.actionPlan, /126\.8元/)
 })

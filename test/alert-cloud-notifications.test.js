@@ -43,3 +43,33 @@ test('云端近期到价事件回灌为去重的站内预警通知', () => {
   assert.equal(alertStore.get().unread, 1)
   assert.equal(alertStore.get().notifications[0].alertId, 'watch-cloud-reduce')
 })
+
+test('云端Judge维持结论回灌为终态通知而不是再次等待', () => {
+  alertStore.clearAll()
+  const triggeredAt = Date.now() - 1000
+  planStore.setData({
+    plan: [{ code: '600000', name: '浦发银行' }],
+    holding: [],
+    closed: [],
+    settings: {},
+    alerts: [{
+      id: 'cloud-buy-wait',
+      code: '600000',
+      name: '浦发银行',
+      type: 'price',
+      op: 'gte',
+      value: 10,
+      note: '买入点',
+      enabled: false,
+      phase: 'reviewed',
+      triggeredAt,
+      triggeredMsg: '维持观望；本次触发结束，不新增复核价',
+      decisionPrice: 10.02,
+    }],
+  })
+
+  const notification = alertStore.get().notifications[0]
+  assert.equal(notification.alertId, 'review-wait-cloud-buy-wait')
+  assert.match(notification.title, /维持观望/)
+  assert.match(notification.body, /本次触发结束/)
+})

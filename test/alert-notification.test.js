@@ -39,15 +39,28 @@ test('确认通知一眼显示现在做什么并限制冗长理由', () => {
   assert.ok(notification.body.length <= 92)
 })
 
-test('失效通知保留股票代码并明确暂停动作', () => {
+test('失效通知保留股票代码并明确放弃本次动作', () => {
   const notification = buildAlertNotification({
     alert: { ...reduceAlert, name: '' },
     quote: { price: 3.01 },
     stage: 'invalid',
   })
 
-  assert.equal(notification.title, '002309｜暂停减仓')
-  assert.match(notification.body, /动作：暂停，等军师重算/)
+  assert.equal(notification.title, '002309｜放弃本次减仓')
+  assert.match(notification.body, /结论：放弃本次减仓；本次触发结束/)
+})
+
+test('未确认通知给出维持持有终态而不是继续循环观察', () => {
+  const notification = buildAlertNotification({
+    alert: reduceAlert,
+    quote: { price: 3.04 },
+    stage: 'wait',
+    reason: '冲高后未转弱',
+  })
+
+  assert.equal(notification.title, '中利集团(002309)｜维持持有')
+  assert.match(notification.body, /结论：维持持有；本次触发结束/)
+  assert.match(notification.body, /冲高后未转弱/)
 })
 
 test('观察价命中时明确通知正在复核且不暗示下单', () => {
@@ -70,7 +83,7 @@ test('观察价命中时明确通知正在复核且不暗示下单', () => {
   assert.match(notification.body, /观察价≥145\.24/)
   assert.match(
     notification.body,
-    /正在自动复核分时承接、量能和资金，暂不下单/,
+    /正在核对原军师计划、分时、量能和资金，2分钟内给出明确结论/,
   )
 })
 

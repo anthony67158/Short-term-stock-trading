@@ -78,6 +78,51 @@ function nextSessionPlanText(payload = {}) {
   }
 }
 
+function primaryObservationPath({
+  pullback = null,
+  breakout = null,
+  payload = {},
+  result = {},
+} = {}) {
+  const timingState = String(
+    payload.shortHorizonTactical?.timing?.state || '',
+  )
+  if (timingState === 'WAIT_BREAKOUT' && breakout) return breakout
+  if (timingState === 'WAIT_PULLBACK' && pullback) return pullback
+
+  const originalText = String(
+    result.timing || result.actionPlan || result.reason || '',
+  )
+  const mentionsBreakout = /突破|站上|站稳/.test(originalText)
+  const mentionsPullback = /回踩|回调|低吸/.test(originalText)
+  if (mentionsBreakout && !mentionsPullback && breakout) return breakout
+  if (mentionsPullback && !mentionsBreakout && pullback) return pullback
+
+  const current = numberOf(
+    payload.todayQuote?.price ?? payload.currentPrice,
+  )
+  if (current > 0 && pullback && breakout) {
+    const pullbackDistance = Math.abs(current - pullback.price) / current
+    const breakoutDistance = Math.abs(current - breakout.price) / current
+    return breakoutDistance <= pullbackDistance ? breakout : pullback
+  }
+  return breakout || pullback || null
+}
+
+function observationActionPlan({
+  observation = null,
+  executionPrefix = '',
+} = {}) {
+  if (!observation) {
+    return `${executionPrefix}暂无近期有效触发价；当前不买，等待量价与资金出现新变化后重新评估`
+  }
+  const price = observation.price
+  if (observation.direction === 'GTE') {
+    return `当前不买；${executionPrefix}只看${price}元：盘中放量站稳后自动复核一次，通过后按新指令的价格和手数手动买入；未放量或跌回${price}元下方不买`
+  }
+  return `当前不买；${executionPrefix}只看${price}元：回踩不破并重新站回分时均价后自动复核一次，通过后按新指令的价格和手数手动买入；跌破${price}元不买`
+}
+
 function deferBuyToObservation(result, payload, issues) {
   const quote = payload.todayQuote || {}
   const currentPrice = numberOf(
@@ -107,8 +152,8 @@ function deferBuyToObservation(result, payload, issues) {
   result.planAmount = 0
   const phasePrefix = executionOpen ? '' : '下一交易时段盘中，'
   result.actionPlan = aboveCurrent
-    ? `${phasePrefix}${buyPrice}元高于当前价${currentPrice}元，只作为突破观察价；放量站稳后重新评估，未确认不买`
-    : `${phasePrefix}等待回踩${buyPrice}元并确认承接后重新评估，未确认不买`
+    ? `当前不买；${phasePrefix}只看${buyPrice}元：盘中放量站稳后立即复核一次，通过后按新指令的价格和手数手动买入；未放量或跌回${buyPrice}元下方不买`
+    : `当前不买；${phasePrefix}只看${buyPrice}元：回踩不破并重新站回分时均价后立即复核一次，通过后按新指令的价格和手数手动买入；跌破${buyPrice}元不买`
   result.timing = result.actionPlan
   if (aboveCurrent) {
     issues.push(
@@ -155,7 +200,7 @@ export function reconcileAdviceNumbers({ mode, result: input, payload = {} } = {
   let valid = true
   const initialAction = String(result.action || result.stance || '')
   let unownedWait = mode === 'buy_advice'
-    && /观望|等待|回避|不建议|暂不/.test(initialAction)
+    && /观望|等待|回避|不建议|暂不|放弃买入/.test(initialAction)
   if (unownedWait) {
     const hadIrrelevantPrices = [
       result.buyPrice,
@@ -241,7 +286,7 @@ export function reconcileAdviceNumbers({ mode, result: input, payload = {} } = {
   }
   if (mode === 'buy_advice') {
     const action = String(result.action || '')
-    const actionable = !/观望|不建议|等待/.test(action)
+    const actionable = !/观望|不建议|等待|放弃买入/.test(action)
     if (actionable && (!(result.buyPrice > 0) || !(result.stopPrice > 0) || !(result.targetPrice > 0)
       || result.stopPrice >= result.buyPrice || result.targetPrice <= result.buyPrice)) {
       valid = false
@@ -429,15 +474,16 @@ export function reconcileAdviceNumbers({ mode, result: input, payload = {} } = {
       : executionOpen
         ? ''
         : '下一交易时段盘中，'
-    const paths = [
-      pullback && `回踩${pullback.price}元企稳（回踩观察价）`,
-      breakout && `放量突破${breakout.price}元（突破观察价）`,
-    ].filter(Boolean)
-    result.actionPlan = paths.length
-      ? nextSessionPlan
-        ? `${executionPrefix}等待${paths.join('，或')}；触发后只确认入场时机，确认通过后给出具体买入价和手数并由你人工确认，未确认不买`
-        : `${executionPrefix}等待${paths.join('，或')}后重新评估，未确认不买`
-      : `${executionPrefix}暂无近期有效观察价，等待量价与资金出现新变化后重新评估`
+    const primaryObservation = primaryObservationPath({
+      pullback,
+      breakout,
+      payload,
+      result,
+    })
+    result.actionPlan = observationActionPlan({
+      observation: primaryObservation,
+      executionPrefix,
+    })
     result.timing = result.actionPlan
     finalPriceContract = buildAdvicePriceContract({
       mode,

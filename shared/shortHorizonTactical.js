@@ -495,17 +495,22 @@ function quantConfirmation(tactical = {}) {
   return { supportive, strong }
 }
 
-function riskIncreaseAssessment(tactical = {}) {
+function riskIncreaseAssessment(tactical = {}, reviewContext = {}) {
   const hardBlockers = []
   const fullRiskGaps = []
   const timingState = tactical.timing?.state
+  // 到价复核：等待中的回踩/突破条件已经触发，视为时机已确认，不再当作"仍在等待"。
+  const triggerFired = reviewContext.priceReviewReached === true
+  const breakoutTriggerFired = (
+    triggerFired && reviewContext.reviewDirection === 'GTE'
+  )
   if (timingState === 'INVALID') {
     hardBlockers.push('短线时机尚未形成')
   } else if (timingState === 'TOO_EXTENDED') {
     hardBlockers.push('价格位置过热，禁止追涨')
-  } else if (timingState === 'WAIT_PULLBACK') {
+  } else if (timingState === 'WAIT_PULLBACK' && !triggerFired) {
     fullRiskGaps.push('等待回踩承接确认')
-  } else if (timingState === 'WAIT_BREAKOUT') {
+  } else if (timingState === 'WAIT_BREAKOUT' && !triggerFired) {
     fullRiskGaps.push('等待放量突破确认')
   }
   const riskTone = tactical.market?.riskTone
@@ -612,15 +617,27 @@ function riskIncreaseAssessment(tactical = {}) {
   }
   const canProbe = (
     hardBlockers.length === 0
-    && confirmations.length >= 2
-    && (quant.supportive || flowConfirmed)
+    && (
+      // 多信号共振：维持原口径
+      (confirmations.length >= 2 && (quant.supportive || flowConfirmed))
+      // 单一强信号即可小仓试错：主力确认流入 / 量化强偏多 / 放量突破已触发
+      || quant.strong
+      || flowConfirmed
+      || breakoutTriggerFired
+    )
   )
   const fullRiskEligible = (
     sectorHealthy
     && tactical.flow?.relation !== 'DISTRIBUTION'
     && tactical.catalyst?.risk !== 'NEGATIVE'
   )
-  const canFull = (
+  const coreConfirmed = (
+    quant.strong
+    || flowConfirmed
+    || leadershipConfirmed
+    || strengthConfirmed
+  )
+  const resonanceFull = (
     canProbe
     && riskTone !== 'RISK_OFF'
     && timingState === 'READY'
@@ -630,13 +647,26 @@ function riskIncreaseAssessment(tactical = {}) {
     && tactical.technical?.bias !== 'BEARISH'
     && fullRiskEligible
   )
+  // 放量突破已触发是短线最强进攻信号：配合任一核心确认直接满仓位。
+  // 流动性 THIN 已在 hardBlockers 拦截，故此处不再叠加 GOOD 硬门槛。
+  const breakoutFull = (
+    hardBlockers.length === 0
+    && breakoutTriggerFired
+    && riskTone !== 'RISK_OFF'
+    && coreConfirmed
+    && tactical.technical?.bias !== 'BEARISH'
+    && fullRiskEligible
+  )
+  const canFull = resonanceFull || breakoutFull
   const entryRoute = !canFull
     ? null
-    : quant.strong && flowConfirmed
-      ? 'DUAL_CORE'
-      : quant.strong
-        ? 'QUANT_MOMENTUM'
-        : 'FLOW_LEADERSHIP'
+    : breakoutFull && !resonanceFull
+      ? 'BREAKOUT_MOMENTUM'
+      : quant.strong && flowConfirmed
+        ? 'DUAL_CORE'
+        : quant.strong
+          ? 'QUANT_MOMENTUM'
+          : 'FLOW_LEADERSHIP'
   return {
     riskTier: canFull ? 'FULL' : canProbe ? 'PROBE' : 'NONE',
     hardBlockers: [...new Set(hardBlockers)],
@@ -673,17 +703,36 @@ function reviewTriggerForPolicy(
 ) {
   const pullback = finite(tactical.timing?.pullbackPrice)
   const breakout = finite(tactical.timing?.breakoutPrice)
-  const triggers = [
-    pullback != null ? `回踩${pullback}元确认承接` : '',
-    breakout != null ? `放量站上${breakout}元` : '',
-  ].filter(Boolean)
+  const timingState = String(tactical.timing?.state || '')
+  const current = finite(tactical.prices?.current ?? tactical.stock?.price)
+  let direction = ''
+  if (timingState === 'WAIT_BREAKOUT' && breakout != null) {
+    direction = 'BREAKOUT'
+  } else if (timingState === 'WAIT_PULLBACK' && pullback != null) {
+    direction = 'PULLBACK'
+  } else if (current != null && pullback != null && breakout != null) {
+    const pullbackDistance = Math.abs(current - pullback) / current
+    const breakoutDistance = Math.abs(current - breakout) / current
+    direction = breakoutDistance <= pullbackDistance
+      ? 'BREAKOUT'
+      : 'PULLBACK'
+  } else if (breakout != null) {
+    direction = 'BREAKOUT'
+  } else if (pullback != null) {
+    direction = 'PULLBACK'
+  }
+  const trigger = direction === 'BREAKOUT'
+    ? `放量站稳${breakout}元`
+    : direction === 'PULLBACK'
+      ? `回踩${pullback}元不破并重新站回分时均价`
+      : ''
   if (!executionOpen) {
-    return triggers.length
-      ? `${sessionLabel}，${triggers.join('或')}后重新评估`
+    return trigger
+      ? `${sessionLabel}，只看${trigger}；到价立即复核一次`
       : `${sessionLabel}开始时重新评估`
   }
-  if (triggers.length) {
-    return `${triggers.join('或')}后重新评估`
+  if (trigger) {
+    return `只看${trigger}；到价立即复核一次`
   }
   if (tactical.timing?.reviewAfter === 'FIVE_MINUTE_BAR') {
     return '下一根完整5分钟K线收盘后重新评估'
@@ -703,12 +752,6 @@ export function deriveShortHorizonActionPolicy({
   const source = tactical && typeof tactical === 'object'
     ? tactical
     : {}
-  const assessment = riskIncreaseAssessment(source)
-  const executionOpen = [
-    'OPENING',
-    'MORNING',
-    'AFTERNOON',
-  ].includes(source.market?.phase)
   const plannedAction = text(reviewEvent?.plannedAction, 30)
   const priceReviewReached = (
     reviewEvent?.kind === 'price-review'
@@ -718,6 +761,20 @@ export function deriveShortHorizonActionPolicy({
     && finite(reviewEvent?.threshold) > 0
     && finite(reviewEvent?.price) > 0
   )
+  const reviewDirection = /gte/i.test(String(reviewEvent?.direction || ''))
+    ? 'GTE'
+    : /lte/i.test(String(reviewEvent?.direction || ''))
+      ? 'LTE'
+      : null
+  const assessment = riskIncreaseAssessment(source, {
+    priceReviewReached,
+    reviewDirection,
+  })
+  const executionOpen = [
+    'OPENING',
+    'MORNING',
+    'AFTERNOON',
+  ].includes(source.market?.phase)
   const entryConfirmation = (
     priceReviewReached
     && reviewEvent?.reviewMode === 'ENTRY_CONFIRMATION'

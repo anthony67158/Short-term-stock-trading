@@ -23,6 +23,9 @@ import {
   subscribeAccountSession,
 } from '../shared/accountSessionScope.js'
 import { buildAlertNotification } from '../shared/alertNotification.js'
+import {
+  TRIGGERED_REVIEW_TOTAL_BUDGET_MS,
+} from '../shared/triggeredReviewDecision.js'
 import { isFreshAlertQuote } from '../shared/alertQuotePolicy.js'
 
 // ============ 盯盘预警引擎 ============
@@ -293,11 +296,16 @@ export const alertStore = {
       if (!recent(a.triggeredAt)) continue
       const invalid = a.phase === 'invalid'
       const confirmed = a.phase === 'confirmed'
+      const reviewed = a.phase === 'reviewed'
       const notification = buildAlertNotification({
         alert: a,
         stage: a.reviewOnly
           ? 'review'
-          : invalid ? 'invalid' : confirmed ? 'confirm' : 'trigger',
+          : invalid
+            ? 'invalid'
+            : confirmed
+              ? 'confirm'
+              : reviewed ? 'wait' : 'trigger',
         reason: a.triggeredMsg,
       })
       add({
@@ -305,7 +313,7 @@ export const alertStore = {
         code: a.code,
         name: a.name,
         ...notification,
-        alertId: `${a.reviewOnly ? 'review' : invalid ? 'invalid' : confirmed ? 'confirm' : 'trigger'}-${a.id}`,
+        alertId: `${a.reviewOnly ? 'review' : invalid ? 'invalid' : confirmed ? 'confirm' : reviewed ? 'review-wait' : 'trigger'}-${a.id}`,
       })
     }
   },
@@ -318,7 +326,7 @@ export const alertStore = {
   //       watching → 异步 POST /api/confirm_signal(LLM Judge 留后端) 判定:
   //         confirm → 发【强提示】(✅ 可以买入/卖出) + 置 confirmed 停用;
   //         invalid → 发【失效说明】(⛔ 已失效·暂不操作) + 置 invalid 停用;
-  //         wait    → 静默维持 watching。
+  //         wait    → 明确维持观望/持有并置 reviewed 停用，不再复核原价。
   //   evaluate 为同步函数;watching 的确认调用是异步「即发即忘」,不阻塞本轮遍历。
   evaluate(quoteMap) {
     const book = planStore.get()
@@ -407,6 +415,36 @@ export const alertStore = {
   _confirmWatching(a, q) {
     if (_confirming.has(a.id)) return // 同一预警上一次判定还没回来,跳过,避免并发重复请求
     const side = sideOf(a)
+    const decisionDeadlineAt = Number(a.decisionDeadlineAt)
+      || (
+        Number(a.watchingAt) > 0
+          ? Number(a.watchingAt) + TRIGGERED_REVIEW_TOTAL_BUDGET_MS
+          : Date.now() + TRIGGERED_REVIEW_TOTAL_BUDGET_MS
+      )
+    if (
+      Date.now() >= decisionDeadlineAt
+    ) {
+      const conclusion =
+        '复核已到2分钟期限，维持原计划；本次触发结束，不新增复核价'
+      const notification = buildAlertNotification({
+        alert: a,
+        quote: q,
+        stage: 'wait',
+        reason: conclusion,
+      })
+      this.push({
+        code: a.code,
+        name: a.name,
+        ...notification,
+        alertId: 'review-timeout-' + a.id,
+      })
+      notify(notification.title, notification.body)
+      planStore.markAlertReviewed(a.id, conclusion, {
+        decision: 'wait',
+        side,
+      }, q && q.price)
+      return
+    }
     const interval = side === 'stop' ? 20000 : side === 'sell' ? 30000 : 45000
     if (a.lastJudgeAt && Date.now() - a.lastJudgeAt < interval) return
     if (!shouldRequestConfirmation(side, a.watchingAt)) return
@@ -469,10 +507,33 @@ export const alertStore = {
             this.push({ code: current.code, name: current.name, ...notification, alertId: 'invalid-' + current.id })
             notify(notification.title, notification.body)
             planStore.markAlertInvalid(current.id, `已失效:${v.reason || ''}`)
+          } else {
+            const conclusion =
+              v.terminalInstruction
+              || v.reason
+              || '维持原计划，本次触发结束'
+            const notification = buildAlertNotification({
+              alert: current,
+              quote: q,
+              stage: 'wait',
+              reason: conclusion,
+            })
+            this.push({
+              code: current.code,
+              name: current.name,
+              ...notification,
+              alertId: 'review-wait-' + current.id,
+            })
+            notify(notification.title, notification.body)
+            planStore.markAlertReviewed(
+              current.id,
+              conclusion,
+              v,
+              q && q.price,
+            )
           }
-          // wait → 维持 watching,静默继续观察
         })
-        .catch(() => { /* 网络/解析/超时失败 → 静默,下轮再判 */ })
+        .catch(() => { /* 网络失败由云端接力；2分钟期限到达后强制落终态 */ })
         .finally(clear)
     } catch { clear() }  // fetch 同步抛错:立即清理,避免 id 永久滞留
   },

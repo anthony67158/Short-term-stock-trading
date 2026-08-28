@@ -118,6 +118,13 @@ test('观察价命中直接排队复核而不调用Judge确认交易', () => {
   assert.equal(data.reviewJobs['600519'].source, 'judge')
   assert.equal(data.reviewJobs['600519'].trigger.kind, 'price-review')
   assert.equal(data.reviewJobs['600519'].trigger.price, 145.3)
+  assert.equal(data.reviewJobs['600519'].trigger.timeLimitMinutes, 2)
+  assert.equal(
+    data.reviewJobs['600519'].trigger.decisionDeadlineAt,
+    121000,
+  )
+  assert.equal(data.reviewJobs['600519'].trigger.terminalRequired, true)
+  assert.equal(data.reviewJobs['600519'].maxAttempts, 1)
 })
 
 test('持仓加仓复核价命中后明确评估加仓而不是普通买入', () => {
@@ -262,7 +269,7 @@ test('回踩与突破观察价都闭环触发提醒并排队自动复核', () =>
       outcome.notification.body,
       new RegExp(`${item.label}${item.symbol}${item.price}`),
     )
-    assert.match(outcome.notification.body, /正在自动复核/)
+    assert.match(outcome.notification.body, /2分钟内给出明确结论/)
 
     const queued = queueAdviceReviewForPriceTrigger(
       data,
