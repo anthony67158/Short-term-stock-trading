@@ -8,10 +8,31 @@ import {
 } from '../api/_ai_prompts.js'
 import { mapRealtimeStockFund } from '../api/ai.js'
 import {
+  buildStockFundNote,
   buildRetailFlowEvidence,
   mergeRetailFundFlow,
   normalizeFundNoteHistory,
 } from '../shared/retailFundFlow.js'
+
+test('资金说明由服务端写入完整五日序列和合计', () => {
+  const note = buildStockFundNote({
+    mainNetYi: -14.03,
+    retailNetYi: 12.59,
+    mainTrend5: [-8, 18.41, -4.22, 13.17, -14.03],
+    retailTrend5: [7.5, -9.82, 3.77, -7.68, 12.59],
+    main5dYi: 5.33,
+    retail5dYi: 6.36,
+    historyDayCount: 5,
+    historyComplete: true,
+  })
+
+  assert.match(note, /主力当日净流出14\.03亿元/)
+  assert.match(note, /最近5日主力\[-8,18\.41,-4\.22,13\.17,-14\.03\]/)
+  assert.match(note, /小单资金代理\[7\.5,-9\.82,3\.77,-7\.68,12\.59\]/)
+  assert.match(note, /5日合计主力净流入5\.33亿元/)
+  assert.match(note, /小单资金代理净流入6\.36亿元/)
+  assert.match(note, /不等于真实账户身份/)
+})
 
 test('实时资金快照同时映射主力与小单净流入', () => {
   const snapshot = mapRealtimeStockFund({

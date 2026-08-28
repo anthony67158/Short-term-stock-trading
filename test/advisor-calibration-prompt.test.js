@@ -13,7 +13,14 @@ test('快速与深度建议都使用可交付的有界输出预算', () => {
   assert.equal(maxTokensForMode('hold_advice', false), 3200)
   assert.equal(maxTokensForMode('buy_advice', false), 3200)
   assert.equal(maxTokensForMode('review', false), 3200)
-  assert.equal(maxTokensForMode('hold_advice', true), 8000)
+  assert.equal(maxTokensForMode('hold_advice', true), 6000)
+  assert.equal(maxTokensForMode('hold_advice', false, {
+    fastMode: true,
+  }), 1800)
+  assert.equal(maxTokensForMode('hold_advice', false, {
+    fastMode: true,
+    triggeredReview: true,
+  }), 1200)
   assert.ok(ADVISOR_SYSTEM.length < 2200)
   assert.ok(ADVISOR_FAST_SYSTEM.length < 2500)
   assert.match(ADVISOR_SYSTEM, /股神级的A股短线操盘手/)
@@ -264,6 +271,7 @@ test('条件试仓到价后只确认入场时机并要求输出具体价格', ()
   assert.match(prompt, /立即买入”“维持观望”“放弃买入/)
   assert.match(prompt, /禁止生成任何新的观察价/)
   assert.match(prompt, /"reviewDecision"/)
+  assert.ok(prompt.length < 3200)
 })
 
 test('普通观望到价后按已到达的突破条件给出决断而不是再顺延观察价', () => {

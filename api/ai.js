@@ -30,11 +30,7 @@ import {
   parseLLMJson,
   pumpChatStream,
 } from './_llm.js';
-import { ensureConfig, currentConfig, getModel, getReasoning } from './_llm_config.js';
-import {
-  endpointCountForRole,
-  markEndpointUnusable,
-} from './_llm_pool.js';
+import { ensureConfig, getModel, getReasoning } from './_llm_config.js';
 import { applyCors, preflight } from './_lib.js';
 import { zhReasonPiece } from './_zh_reason.js';
 import {
@@ -42,9 +38,7 @@ import {
   ADVISOR_DEEP_SYSTEM,
   ADVISOR_FAST_SYSTEM,
   ADVISOR_SYSTEM,
-  advisorOutputSchema,
   buildUserPrompt,
-  deepAdvisorFacts,
   isAdvisorMode,
   llmRoleForAdviceMode,
   maxTokensForMode,
@@ -81,6 +75,7 @@ import {
   priceLimitRatio,
 } from '../shared/priceLimitPolicy.js';
 import {
+  buildStockFundNote,
   compactStockFundSnapshot,
   mergeRetailFundFlow,
   normalizeFundNoteHistory,
@@ -97,6 +92,7 @@ import {
   realOutcomeContext,
 } from '../shared/realOutcomeLearning.js';
 import {
+  buildTriggeredReviewFallback,
   enforceTriggeredReviewDecisionPlan,
   isTriggeredReviewEvent,
   normalizeTriggeredReviewDecision,
@@ -240,43 +236,39 @@ export function resolveReasoningMode(configuredReasoning, fastMode = false, forc
   return !!configuredReasoning && !fastMode;
 }
 
-export function shouldRepairAdvisorBody({
-  advisor = false,
-  aborted = false,
-  budgetMs = 0,
-  parsed = null,
+export function advisorGenerationPlan({
+  remainingMs = 0,
+  reasoning = false,
 } = {}) {
-  return !!(
-    advisor
-    && !aborted
-    && Number(budgetMs) > 15000
-    && (!parsed?.value || parsed?.repaired)
-  )
+  const cap = reasoning ? 90000 : 120000
+  return {
+    timeoutMs: Math.max(
+      8000,
+      Math.min(cap, Number(remainingMs) - 2500),
+    ),
+  }
 }
 
-export function shouldFailoverAdvisorStream({
-  advisor = false,
-  canFailover = false,
-  requestAborted = false,
-  budgetMs = 0,
-  responseError = null,
-  content = '',
-  reasoning = '',
-} = {}) {
-  if (
-    !advisor
-    || !canFailover
-    || requestAborted
-    || Number(budgetMs) <= 12000
-  ) return false
-  if (responseError) return true
-  const contentParsed = content.trim()
-    ? parseLLMJson(content)
-    : null
-  const reasoningParsed = reasoning.trim()
-    ? parseLLMJson(reasoning)
-    : null
-  return !contentParsed?.value && !reasoningParsed?.value
+const QUICK_ADVICE_SOURCE_KEYS = new Set([
+  'market',
+  'sectorFlow',
+  'dailyCandles',
+  'intraday',
+  'stockFunds',
+  'quote',
+])
+
+export function shouldCollectAdvisorSource(
+  {
+    fastMode = false,
+    reviewEvent = null,
+  } = {},
+  key = '',
+) {
+  if (!shouldCollectTriggeredReviewSource(reviewEvent, key)) {
+    return false
+  }
+  return !fastMode || QUICK_ADVICE_SOURCE_KEYS.has(String(key || ''))
 }
 
 export async function resolveAdviceDailySummary(
@@ -687,7 +679,6 @@ export default async function handler(req, res) {
   // 运行时配置优先（前端「AI 模型配置」写入 OSS）：先预热同步缓存，再按角色取端点和模型。
   await ensureConfig();
   const aiSearchConfig = await ensureAiSearchConfig();
-  const cfg = currentConfig();
   const effectiveReasoning = (role) => getReasoning(role);
   const MODEL = getModel('agent');
   // 主建议与复核严格分池：首次操作建议走 advisor，定时/Judge 复核走 review。
@@ -728,6 +719,42 @@ export default async function handler(req, res) {
     const triggeredPriceReview = isTriggeredReviewEvent(
       payload.reviewEvent,
     );
+    const finishGenerationFailure = (error, extra = {}) => {
+      if (triggeredPriceReview) {
+        const fallback = buildTriggeredReviewFallback({
+          mode,
+          previousAdvice: payload.previousAdvice || {},
+          payload,
+          reason: error,
+        });
+        fallback.fundNote = buildStockFundNote(payload.stockFund)
+          || fallback.fundNote;
+        return finish({
+          ok: true,
+          degraded: true,
+          fallbackOnly: true,
+          mode,
+          model: useRole === 'review'
+            ? getModel('review')
+            : getModel('advisor'),
+          updatedAt: Date.now(),
+          warning: error,
+          result: fallback,
+          ...extra,
+        });
+      }
+      return finish({
+        ok: false,
+        degraded: true,
+        mode,
+        model: useRole === 'review'
+          ? getModel('review')
+          : getModel('advisor'),
+        updatedAt: Date.now(),
+        error,
+        ...extra,
+      });
+    };
     const evidenceAccountRevision = resolveEvidenceAccountRevision(
       payload,
       accountAuth.account,
@@ -803,18 +830,21 @@ export default async function handler(req, res) {
         && !payload.previousAdvice
       ) {
         const { error, ...rest } = obj;
+        const fallback = buildFallbackDecisionAdvice({
+          mode,
+          payload,
+          evidenceSnapshot: snapshot,
+          error,
+        });
+        fallback.fundNote = buildStockFundNote(payload.stockFund)
+          || fallback.fundNote;
         finalized = {
           ...rest,
           ok: true,
           degraded: true,
           fallbackOnly: true,
           warning: error || '解释服务未返回完整结果',
-          result: buildFallbackDecisionAdvice({
-            mode,
-            payload,
-            evidenceSnapshot: snapshot,
-            error,
-          }),
+          result: fallback,
         };
       }
       const output = attachEvidenceSnapshot(finalized, snapshot);
@@ -942,14 +972,16 @@ export default async function handler(req, res) {
           okFn,
           dataAsOf = () => null,
         ) => {
-          if (!shouldCollectTriggeredReviewSource(
-            payload.reviewEvent,
-            key,
-          )) {
+          if (!shouldCollectAdvisorSource({
+            fastMode,
+            reviewEvent: payload.reviewEvent,
+          }, key)) {
             sourceTracker.skip(
               key,
               label,
-              'TRIGGERED_REVIEW_FAST_PATH',
+              triggeredPriceReview
+                ? 'TRIGGERED_REVIEW_FAST_PATH'
+                : 'QUICK_ADVICE_FAST_PATH',
             );
             return Promise.resolve(null);
           }
@@ -1159,17 +1191,22 @@ export default async function handler(req, res) {
           .filter(Boolean)
           .sort()
           .at(-1) || null;
-        const advisorSearchPromise = triggeredPriceReview
+        const advisorSearchPromise = (
+          triggeredPriceReview || fastMode
+        )
           ? (() => {
+            const skipReason = triggeredPriceReview
+              ? 'TRIGGERED_REVIEW_REUSE_PREVIOUS'
+              : 'QUICK_ADVICE_SKIP_LIVE_SEARCH';
             sourceTracker.skip(
               'stockSearch',
               '豆包个股信息',
-              'TRIGGERED_REVIEW_REUSE_PREVIOUS',
+              skipReason,
             );
             sourceTracker.skip(
               'industrySearch',
               '豆包行业资讯',
-              'TRIGGERED_REVIEW_REUSE_PREVIOUS',
+              skipReason,
             );
             return Promise.resolve({
               items: [],
@@ -1802,28 +1839,23 @@ export default async function handler(req, res) {
       'llm',
     );
     // LLM 超时按【剩余预算】动态给：预留 2.5s 兜底返回时间，最少给 8s。
-    // 军师模式(t_advice/hold_advice/buy_advice/review/price/plan)走深度研判模型,实测常需 47s+;
-    // 开启深度思考(reasoning)后需先跑思维链,参考内容多时军师级复杂题可远超 2 分钟——
-    // 深度军师给主判断 90s，并为快速终稿和发布预留独立窗口。
-    const llmCap = useReasoning
-      ? (isAdvisor ? 140000 : 120000)
-      : (isAdvisor ? 120000 : 90000);
-    const deepAdvisorMainCap = isAdvisor && useReasoning
-      ? 90000
-      : llmCap;
-    const canFailover = streaming && isAdvisor && endpointCountForRole(cfg, useRole) > 1;
-    const retryReserve = canFailover ? Math.min(60000, Math.max(30000, Math.floor(remain() * 0.3))) : 0;
-    const llmTimeout = Math.max(
-      8000,
-      Math.min(
-        llmCap,
-        deepAdvisorMainCap,
-        remain() - retryReserve - 2500,
-      ),
+    // 单次生成使用全部可用模型窗口，只为服务端收尾预留 2.5s。
+    // 成功响应开始后不再重跑整题，避免重复生成和挤占最终结果的时间。
+    const generationPlan = advisorGenerationPlan({
+      remainingMs: remain(),
+      reasoning: useReasoning,
+    });
+    const llmTimeout = generationPlan.timeoutMs;
+    const outputMaxTokens = maxTokensForMode(
+      mode,
+      useReasoning,
+      {
+        fastMode,
+        triggeredReview: triggeredPriceReview,
+      },
     );
 
     let content = '';
-    let finishReason = '';
     let usage = null;
     let streamedReasoning = '';   // 流式路径捕获的思维链原文：模型 JSON 里没吐 reasoning 字段时,用它兜底填充,保证"军师推理过程"持久可见
     let selectedModel = useModel;
@@ -1852,74 +1884,9 @@ export default async function handler(req, res) {
         }
         rbuf = '';
       };
-      const runStreamFailover = async () => {
-        phase('当前端点响应异常，正在切换备用端点快速重试…', 'failover');
-        const fallbackTimeout = Math.max(
-          8000,
-          Math.min(45000, remain() - 3000),
-        );
-        const fallback = await callChat({
-          model: useModel,
-          role: useRole,
-          messages: [
-            { role: 'system', content: sysPrompt },
-            { role: 'system', content: marketTimePromptBlock() },
-            { role: 'user', content: userPrompt },
-          ],
-          temperature: 0.2,
-          maxTokens: maxTokensForMode(mode, false),
-          timeoutMs: fallbackTimeout,
-          reasoning: false,
-          forceNoReason: true,
-          signal: req.signal,
-          responseFormat: { type: 'json_object' },
-          stream: true,
-        });
-        if (
-          !fallback.resp
-          || fallback.resp.__err
-          || !fallback.resp.ok
-        ) {
-          fallback.done(false);
-          return false;
-        }
-        selectedModel = fallback.selectedModel || selectedModel;
-        selectedEndpoint = fallback.endpoint || selectedEndpoint;
-        emit('model', {
-          model: selectedModel,
-          endpoint: selectedEndpoint,
-        });
-        const retried = await pumpChatStream(fallback.resp, {
-          onReasoning: (piece) => {
-            rbuf += piece;
-            if (
-              rbuf.length >= 40
-              || /[\n。！？]/.test(piece)
-            ) flushR();
-          },
-        }).catch(() => ({
-          content: '',
-          reasoning: '',
-          finishReason: '',
-        }));
-        flushR();
-        content = retried.content || '';
-        streamedReasoning = retried.reasoning || '';
-        finishReason = retried.finishReason || '';
-        const valid = !shouldFailoverAdvisorStream({
-          advisor: isAdvisor,
-          canFailover: true,
-          budgetMs: remain(),
-          content,
-          reasoning: streamedReasoning,
-        });
-        fallback.done(valid);
-        return valid;
-      };
       // ★流式路径(客户端开了 SSE):以 stream:true 调上游,把模型【思维链 reasoning_content】
       //   增量实时推为 reasoning 事件(军师在想什么),正文 content 累积到流结束后再统一解析。
-      //   代价是放弃 callChatWithRetry 的一次快速重试——换取"推理过程可见"的实时体验;
-      //   失败仍走下方统一降级(带已采集 meta),不会白屏。
+      //   只允许 poolFetch 在收到成功响应头前切换端点；开始消费流后不再整题重跑。
       const routed = await callChat({
         model: useModel,
         role: useRole,
@@ -1929,7 +1896,7 @@ export default async function handler(req, res) {
           { role: 'user', content: userPrompt },
         ],
         temperature: 0.2,
-        maxTokens: maxTokensForMode(mode, useReasoning),
+        maxTokens: outputMaxTokens,
         timeoutMs: llmTimeout,
         reasoning: useReasoning,
         reasoningEffort: 'medium',
@@ -1946,27 +1913,22 @@ export default async function handler(req, res) {
       if (resp && resp.__err) {
         done(false);
         const timedOut = resp.__err.name === 'AbortError';
-        if (!req.signal?.aborted && routed.endpointId) {
-          markEndpointUnusable(routed.endpointId);
-        }
-        const recovered = shouldFailoverAdvisorStream({
-          advisor: isAdvisor,
-          canFailover,
-          requestAborted: req.signal?.aborted,
-          budgetMs: remain(),
-          responseError: resp.__err,
-        }) && await runStreamFailover();
-        if (!recovered) {
-          return finish({
-            ok: false, degraded: true, mode, model: useModel, updatedAt: Date.now(),
-            error: timedOut ? '分析生成超时，可稍后重试；如反复超时请缩小问题范围。' : ('网络异常：' + String(resp.__err.message || resp.__err)),
-            meta: collectedMeta, news: newsRefs,
-          });
-        }
+        return finishGenerationFailure(
+          timedOut
+            ? '分析生成超时，本次已结束且不会重复生成。'
+            : `网络异常：${String(resp.__err.message || resp.__err)}`,
+          {
+            meta: collectedMeta,
+            news: newsRefs,
+          },
+        );
       } else if (!resp.ok) {
         const errText = await resp.text().catch(() => '');
         done(false);
-        return finish({ ok: false, error: `LLM ${resp.status}`, detail: errText.slice(0, 200), meta: collectedMeta });
+        return finishGenerationFailure(`LLM ${resp.status}`, {
+          detail: errText.slice(0, 200),
+          meta: collectedMeta,
+        });
       } else {
         const pumped = await pumpChatStream(resp, {
           onReasoning: (piece) => {
@@ -1979,88 +1941,17 @@ export default async function handler(req, res) {
         }).catch(() => ({
           content: '',
           reasoning: '',
-          finishReason: '',
         }));
         flushR();
         content = pumped.content;
-        finishReason = pumped.finishReason;
         streamedReasoning = pumped.reasoning || '';
-        const needsFailover = shouldFailoverAdvisorStream({
-          advisor: isAdvisor,
-          canFailover,
-          requestAborted: req.signal?.aborted,
-          budgetMs: remain(),
-          content,
-          reasoning: streamedReasoning,
-        });
-        done(!needsFailover);
-        if (needsFailover) {
-          await runStreamFailover();
-        }
-      }
-      // 军师长 JSON 在深度/普通模式都可能达到输出上限。正文为空、不可解析或靠补括号
-      // 才解析成功时，立即关闭思考并重新输出完整对象；仍不完整则由任务层拒绝完成并重试。
-      const bodyProbe = content.trim()
-        ? parseLLMJson(content)
-        : { value: null };
-      if (shouldRepairAdvisorBody({
-        advisor: isAdvisor,
-        aborted: req.signal?.aborted,
-        budgetMs: remain(),
-        parsed: bodyProbe,
-      })) {
-          phase('模型正文不完整，正在重新整理完整结论…', 'llm');
-          const salvTimeout = Math.max(8000, Math.min(45000, remain() - 3000));
-          // 补生成是终稿器，不得再次带入整份深度提示词，否则会重走一轮长推理，
-          // 耗尽最后的发布窗口。仅提供字段契约、关键事实和已生成尾段。
-          const priorTail = (
-            streamedReasoning
-            || content
-            || ''
-          ).slice(-2000);
-          const repairFacts = deepAdvisorFacts(payload);
-          const salvMessages = [
-            {
-              role: 'system',
-              content: '你是军师的最终JSON整理器。禁止分析、禁止思考过程、禁止复述，只输出一个完整闭合的JSON对象。',
-            },
-            {
-              role: 'user',
-              content: `上轮深度研判的最终JSON被截断。现在立刻生成完整终稿；没有可靠事实的字段填null，不能省略字段，不能输出markdown。\n\n字段契约：\n${advisorOutputSchema(mode)}\n\n关键事实：\n${JSON.stringify(repairFacts)}\n\n已截断输出尾段：\n${priorTail || '无可用尾段'}`,
-            },
-          ];
-          const salv = await callChat({
-            model: useModel,
-            role: useRole,
-            messages: salvMessages,
-            temperature: 0.2,
-            maxTokens: maxTokensForMode(mode, false),
-            timeoutMs: salvTimeout,
-            reasoning: false,                            // 尽力关思维链
-            forceNoReason: true,                         // ★硬关端点级/全局 reasoning 注入
-            signal: req.signal,
-            responseFormat: { type: 'json_object' },
-            stream: true,                                // ★关键:流式,partial 存活 + 进度可见
-          });
-          if (salv.resp && !salv.resp.__err && salv.resp.ok) {
-            let sc = '', sr = '';
-            const sp = await pumpChatStream(salv.resp, {
-              onReasoning: (piece) => { rbuf += piece; if (rbuf.length >= 40 || /[\n。！？]/.test(piece)) flushR(); },
-              onContent: (piece) => { sc += piece; },
-            }).catch(() => ({ content: '', reasoning: '', finishReason: '' }));
-            flushR();
-            sc = sp.content || sc;
-            sr = sp.reasoning || '';
-            if (sc.trim()) {
-              content = sc;
-              finishReason = sp.finishReason || finishReason;
-            } else if (sr.trim()) {
-              // 补生成又把正文写进思维链通道 → 从中抠 JSON
-              const pr = parseLLMJson(sr);
-              if (pr && pr.value) content = JSON.stringify(pr.value);
-            }
-          }
-          salv.done();
+        const parsedContent = content.trim()
+          ? parseLLMJson(content)
+          : null;
+        const parsedReasoning = streamedReasoning.trim()
+          ? parseLLMJson(streamedReasoning)
+          : null;
+        done(!!(parsedContent?.value || parsedReasoning?.value));
       }
     } else {
       const routed = await callChatWithRetry({
@@ -2072,7 +1963,7 @@ export default async function handler(req, res) {
           { role: 'user', content: userPrompt },
         ],
         temperature: 0.2,   // JSON 结构化输出：低温提升稳定性与可解析率，减少字段漂移
-        maxTokens: maxTokensForMode(mode, useReasoning),
+        maxTokens: outputMaxTokens,
         timeoutMs: llmTimeout,
         reasoning: useReasoning,
         reasoningEffort: 'medium',
@@ -2080,36 +1971,48 @@ export default async function handler(req, res) {
         forceReason: forceReasoning,
         signal: req.signal,
         responseFormat: { type: 'json_object' },
-      }, { budgetLeftMs: () => remain() - 2500 });  // 上游抖动/5xx 且预算足够时快速重试一次；abort/网络错误不抛出 → 转入降级返回
+      }, {
+        retries: isAdvisor ? 0 : 1,
+        budgetLeftMs: () => remain() - 2500,
+      });
       const { resp, done } = routed;
       selectedModel = routed.selectedModel || useModel;
       selectedEndpoint = routed.endpoint || '';
-      done();
 
       // LLM 超时/网络错误 → 结构化降级返回(带已采集 meta)，前端可提示"重试/缩小范围"而非"服务不可用"
       if (resp && resp.__err) {
+        done(false);
         const timedOut = resp.__err.name === 'AbortError';
-        return finish({
-          ok: false, degraded: true, mode, model: useModel, updatedAt: Date.now(),
-          error: timedOut ? '分析生成超时，可稍后重试；如反复超时请缩小问题范围。' : ('网络异常：' + String(resp.__err.message || resp.__err)),
-          meta: collectedMeta, news: newsRefs,
-        });
+        return finishGenerationFailure(
+          timedOut
+            ? '分析生成超时，本次已结束且不会重复生成。'
+            : `网络异常：${String(resp.__err.message || resp.__err)}`,
+          {
+            meta: collectedMeta,
+            news: newsRefs,
+          },
+        );
       }
 
       if (!resp.ok) {
+        done(false);
         const errText = await resp.text();
-        return finish({ ok: false, error: `LLM ${resp.status}`, detail: errText.slice(0, 200), meta: collectedMeta });
+        return finishGenerationFailure(`LLM ${resp.status}`, {
+          detail: errText.slice(0, 200),
+          meta: collectedMeta,
+        });
       }
 
       const j = await resp.json().catch(() => null);
       if (!j) {
-        return finish({
-          ok: false, degraded: true, mode, model: useModel, updatedAt: Date.now(),
-          error: '模型返回解析失败，请稍后重试。', meta: collectedMeta, news: newsRefs,
+        done(false);
+        return finishGenerationFailure('模型返回解析失败，本次已结束且不会重复生成。', {
+          meta: collectedMeta,
+          news: newsRefs,
         });
       }
+      done(true);
       content = j.choices?.[0]?.message?.content || '';
-      finishReason = j.choices?.[0]?.finish_reason || '';
       usage = j.usage || null;
     }
 
@@ -2135,6 +2038,17 @@ export default async function handler(req, res) {
         // 思维链已被当作正文消费,别再把整段思维链回填成 reasoning 字段(会把 JSON 原文塞进展示)
         streamedReasoning = '';
       }
+    }
+    if (isAdvisor && (!parsed.value || parsed.repaired)) {
+      return finishGenerationFailure(
+        '模型输出不完整，本次已结束且不会重复生成。',
+        {
+          model: selectedModel,
+          endpoint: selectedEndpoint,
+          meta: collectedMeta,
+          news: newsRefs,
+        },
+      );
     }
     // 兜底后仍无任何可用对象 → 才真正判定"模型未返回有效内容"
     if (!parsed.value && !content.trim()) {
@@ -2526,11 +2440,12 @@ export default async function handler(req, res) {
       result.reasoning = zhReasonPiece(String(result.reasoning));
     }
     if (result && typeof result === 'object' && !result.raw) {
-      if (isAdvisorMode(mode) && result.fundNote) {
-        result.fundNote = normalizeFundNoteHistory(
-          result.fundNote,
-          payload.stockFund,
-        );
+      if (isAdvisorMode(mode)) {
+        result.fundNote = buildStockFundNote(payload.stockFund)
+          || normalizeFundNoteHistory(
+            result.fundNote,
+            payload.stockFund,
+          );
       }
       if (searchReference) result.searchReference = searchReference;
       else delete result.searchReference;

@@ -14,6 +14,7 @@ import {
   llmRoleForAdviceMode,
   maxTokensForMode,
 } from '../api/_ai_prompts.js'
+import { advisorGenerationPlan } from '../api/ai.js'
 
 const stockDetailSource = readFileSync(
   new URL('../src/components/StockDetail.jsx', import.meta.url),
@@ -212,7 +213,7 @@ test('普通与深度军师都使用有界预算且深度不整轮重跑', () =>
   const deep = generationOptions(true)
 
   assert.equal(quick.fastMode, true)
-  assert.equal(quick.runtimeBudgetMs, 75000)
+  assert.equal(quick.runtimeBudgetMs, 55000)
   assert.equal(quick.maxAttempts, 1)
   assert.equal(deep.forceReasoning, true)
   assert.equal(deep.runtimeBudgetMs, 150000)
@@ -220,15 +221,13 @@ test('普通与深度军师都使用有界预算且深度不整轮重跑', () =>
   assert.equal(deep.maxAttempts, 1)
   assert.ok(deep.runtimeBudgetMs > quick.runtimeBudgetMs)
   assert.equal(maxTokensForMode('hold_advice', false), 3200)
-  assert.match(
-    aiSource,
-    /const deepAdvisorMainCap = isAdvisor && useReasoning[\s\S]*?\? 90000/,
-  )
-  assert.match(
-    aiSource,
-    /你是军师的最终JSON整理器[\s\S]*?字段契约：/,
-  )
-  assert.equal(maxTokensForMode('hold_advice', true), 8000)
+  assert.equal(advisorGenerationPlan({
+    remainingMs: 145000,
+    reasoning: true,
+  }).timeoutMs, 90000)
+  assert.doesNotMatch(aiSource, /runStreamFailover/)
+  assert.doesNotMatch(aiSource, /最终JSON整理器/)
+  assert.equal(maxTokensForMode('hold_advice', true), 6000)
 })
 
 test('到价复核使用快速证据路径并在一秒内发现新紧急任务', () => {

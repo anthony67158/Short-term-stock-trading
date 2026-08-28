@@ -19,9 +19,19 @@ const FAIL_THRESHOLD = 3;        // 连续失败多少次触发熔断
 
 const health = new Map();        // id -> { inflight, fails, cooldownUntil }
 const roleCapacity = new Map();  // role -> { active, waiters[] }
+const roleCursor = new Map();    // role -> next index among equally loaded endpoints
 function h(id) {
   let s = health.get(id);
-  if (!s) { s = { inflight: 0, fails: 0, cooldownUntil: 0 }; health.set(id, s); }
+  if (!s) {
+    s = {
+      inflight: 0,
+      fails: 0,
+      cooldownUntil: 0,
+      latencyMs: null,
+      samples: 0,
+    };
+    health.set(id, s);
+  }
   return s;
 }
 
@@ -245,31 +255,46 @@ export function pickEndpoint(config, now = Date.now(), role) {
   if (!eps.length) return null;
   const usable = eps.filter((e) => h(e.id).cooldownUntil <= now);
   const pool = usable.length ? usable : eps;
-  const primary = pool.find((endpoint) => endpoint.id === 'default');
-  const primaryThreshold = Math.max(
-    1,
-    Math.min(20, Number(config?.primaryMaxInflight) || 2),
+  const unmeasured = pool.filter((endpoint) =>
+    h(endpoint.id).samples === 0
   );
-  if (primary && h(primary.id).inflight < primaryThreshold) {
-    return primary;
-  }
-  const routedPool = pool.filter((endpoint) => endpoint.id !== 'default');
-  const candidates = routedPool.length ? routedPool : pool;
-  let best = null, bestScore = Infinity;
-  for (const e of candidates) {
+  const selectionPool = unmeasured.length ? unmeasured : pool;
+  let bestScore = Infinity;
+  const candidates = [];
+  for (const e of selectionPool) {
     const s = h(e.id);
-    const score = (s.inflight + 1) / (e.weight || 1);   // 在途越多、权重越低 → 分越高越不优先
-    if (score < bestScore) { bestScore = score; best = e; }
+    const latencyFactor = s.latencyMs || 1;
+    const score = (
+      (s.inflight + 1) * latencyFactor
+    ) / (e.weight || 1);
+    if (score < bestScore) {
+      bestScore = score;
+      candidates.length = 0;
+      candidates.push(e);
+    } else if (score === bestScore) {
+      candidates.push(e);
+    }
   }
+  const cursorKey = role || 'default';
+  const cursor = roleCursor.get(cursorKey) || 0;
+  const best = candidates[cursor % candidates.length] || pool[0];
+  roleCursor.set(cursorKey, cursor + 1);
   return best;
 }
 
 export function markStart(id) { h(id).inflight++; }
-export function markSuccess(id) {
+export function markSuccess(id, latencyMs = null) {
   const s = h(id);
   s.inflight = Math.max(0, s.inflight - 1);
   s.fails = 0;
   s.cooldownUntil = 0;
+  const elapsed = Number(latencyMs);
+  if (Number.isFinite(elapsed) && elapsed > 0) {
+    s.latencyMs = s.latencyMs == null
+      ? elapsed
+      : Math.round(s.latencyMs * 0.7 + elapsed * 0.3);
+    s.samples++;
+  }
 }
 export function markFailure(id, now = Date.now()) {
   const s = h(id);
@@ -287,6 +312,7 @@ export function markEndpointUnusable(id, now = Date.now(), releaseInflight = fal
 export function resetPoolHealthForTests() {
   health.clear();
   roleCapacity.clear();
+  roleCursor.clear();
 }
 
 // 池化 fetch:自动选端点 + 失败故障转移到下一个可用端点(最多试 maxTries 个)。
@@ -322,6 +348,7 @@ export async function poolFetch(config, path, {
     if (!ep) break;
     tried.add(ep.id);
     markStart(ep.id);
+    const attemptStartedAt = Date.now();
     // 端点级模型 + 端点级深度思考:按选中端点重写 body(仅当 body 为对象且指定了 role)
     let sendBody = body;
     if (role && body && typeof body === 'object') {
@@ -329,13 +356,12 @@ export async function poolFetch(config, path, {
       const m = modelForEndpoint(config, ep, role, modelFallback || body.model);
       if (m) sendBody.model = m;
       // 深度思考按端点解析：开时注入调用方给定的有界强度，关时删除。
-      // forceNoReason:硬关(优先级最高)——补生成场景绝不能让端点级/全局 reasoning 把 CoT 再拉起来。
-      const wantReason = forceNoReason
-        ? false
-        : forceReason
+      // forceNoReason:显式发送 none，避免删除字段后由网关恢复默认深度推理。
+      const wantReason = forceReason
           ? true
           : reasoningForEndpoint(config, ep, role, reasonFallback);
-      if (wantReason) sendBody.reasoning_effort = reasoningEffort;
+      if (forceNoReason) sendBody.reasoning_effort = 'none';
+      else if (wantReason) sendBody.reasoning_effort = reasoningEffort;
       else delete sendBody.reasoning_effort;
     }
     const ctrl = signal ? null : new AbortController();
@@ -361,10 +387,11 @@ export async function poolFetch(config, path, {
           resp,
           endpoint: ep,
           deferred: true,
+          attemptStartedAt,
           releaseRole,
         };
       }
-      markSuccess(ep.id);
+      markSuccess(ep.id, Date.now() - attemptStartedAt);
       releaseRole();
       return { resp, endpoint: ep, deferred: false };
     }
@@ -398,6 +425,8 @@ export function poolStatus(config, now = Date.now()) {
       id: e.id, role: e.role || '', slot: e.slot || null,
       baseUrl: e.baseUrl, weight: e.weight,
       inflight: s.inflight, fails: s.fails,
+      latencyMs: s.latencyMs,
+      latencySamples: s.samples,
       cooling: s.cooldownUntil > now, cooldownMsLeft: Math.max(0, s.cooldownUntil - now),
     };
   });

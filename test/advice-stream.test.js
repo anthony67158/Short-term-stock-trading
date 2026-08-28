@@ -21,13 +21,13 @@ import {
 } from '../api/cron_advice.js'
 import { adviceEvidenceDigest } from '../shared/adviceIntelligence.js'
 import {
+  advisorGenerationPlan,
   buildAdvisorTodayQuote,
   buildScheduledReviewGateResponse,
   resolveAIBudget,
   resolveAdviceDailySummary,
   resolveReasoningMode,
-  shouldFailoverAdvisorStream,
-  shouldRepairAdvisorBody,
+  shouldCollectAdvisorSource,
 } from '../api/ai.js'
 
 test('到价终局复核完成后生成明确操作推送', () => {
@@ -510,50 +510,48 @@ test('批量快速模式会关闭深度思考，普通单股生成保持原配�
   assert.equal(resolveReasoningMode(false, false, true), true)
 })
 
-test('快速与深度军师的截断正文都会在任务内自动重整', () => {
-  assert.equal(shouldRepairAdvisorBody({
-    advisor: true,
-    budgetMs: 20000,
-    parsed: { value: { action: '持有' }, repaired: true },
-  }), true)
-  assert.equal(shouldRepairAdvisorBody({
-    advisor: true,
-    budgetMs: 20000,
-    parsed: { value: null, repaired: false },
-  }), true)
-  assert.equal(shouldRepairAdvisorBody({
-    advisor: true,
-    budgetMs: 20000,
-    parsed: { value: { action: '持有' }, repaired: false },
-  }), false)
+test('军师把剩余预算交给唯一模型调用且禁止响应后的整轮重跑', () => {
+  assert.deepEqual(advisorGenerationPlan({
+    remainingMs: 44570,
+    reasoning: false,
+  }), {
+    timeoutMs: 42070,
+  })
+  assert.deepEqual(advisorGenerationPlan({
+    remainingMs: 145000,
+    reasoning: true,
+  }), {
+    timeoutMs: 90000,
+  })
 })
 
-test('流式军师在端点超时或无有效JSON时切换备用端点', () => {
-  assert.equal(shouldFailoverAdvisorStream({
-    advisor: true,
-    canFailover: true,
-    budgetMs: 30000,
-    responseError: new DOMException('Timed out', 'AbortError'),
-  }), true)
-  assert.equal(shouldFailoverAdvisorStream({
-    advisor: true,
-    canFailover: true,
-    budgetMs: 30000,
-    reasoning: '只有推理文字，没有最终对象',
-  }), true)
-  assert.equal(shouldFailoverAdvisorStream({
-    advisor: true,
-    canFailover: true,
-    budgetMs: 30000,
-    content: '{"action":"观望"}',
-  }), false)
-  assert.equal(shouldFailoverAdvisorStream({
-    advisor: true,
-    canFailover: true,
-    requestAborted: true,
-    budgetMs: 30000,
-    responseError: new DOMException('Aborted', 'AbortError'),
-  }), false)
+test('快速生成只等待价格决策必需证据', () => {
+  for (const key of [
+    'market',
+    'sectorFlow',
+    'dailyCandles',
+    'intraday',
+    'stockFunds',
+    'quote',
+  ]) {
+    assert.equal(shouldCollectAdvisorSource({
+      fastMode: true,
+    }, key), true)
+  }
+  for (const key of [
+    'dragonTiger',
+    'stockNews',
+    'macroNews',
+    'dailyReport',
+    'macroFlashes',
+  ]) {
+    assert.equal(shouldCollectAdvisorSource({
+      fastMode: true,
+    }, key), false)
+  }
+  assert.equal(shouldCollectAdvisorSource({
+    fastMode: false,
+  }, 'stockNews'), true)
 })
 
 test('军师优先使用前置闸门注入的策略日报而不是再次查询覆盖', async () => {

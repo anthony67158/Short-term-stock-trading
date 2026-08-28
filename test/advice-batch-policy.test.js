@@ -63,8 +63,8 @@ test('普通模式关闭深度思考并使用短预算', () => {
     deepMode: false,
     fastMode: true,
     forceReasoning: false,
-    runtimeBudgetMs: 75000,
-    timeoutMs: 90000,
+    runtimeBudgetMs: 55000,
+    timeoutMs: 70000,
     maxAttempts: 1,
   })
 })

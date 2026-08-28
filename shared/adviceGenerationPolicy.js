@@ -1,6 +1,6 @@
-export const QUICK_ADVICE_TARGET_MS = 75 * 1000
+export const QUICK_ADVICE_TARGET_MS = 55 * 1000
 // Compact evidence and bounded reasoning should complete within this window.
-// Reserve the remaining FC time for endpoint failover, JSON repair, and OSS publish.
+// Reserve the remaining FC time for result normalization and OSS publish.
 export const DEEP_ADVICE_TARGET_MS = 150 * 1000
 
 export function adviceRequestId(spec = {}, now = Date.now()) {

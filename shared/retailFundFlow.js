@@ -149,6 +149,75 @@ export function normalizeFundNoteHistory(note, stockFund = {}) {
     : `${normalized.replace(/[。；]\s*$/, '')}；${caveat}`
 }
 
+function flowAmountText(label, value) {
+  const amount = finite(value)
+  if (amount == null) return `${label}缺失`
+  if (amount === 0) return `${label}净额0亿元`
+  return `${label}${amount > 0 ? '净流入' : '净流出'}${Math.abs(amount)}亿元`
+}
+
+function flowRelationText(mainNetYi, retailNetYi) {
+  if (mainNetYi == null || retailNetYi == null) {
+    return '资金结构不完整，不能据此判断方向'
+  }
+  if (mainNetYi < 0 && retailNetYi > 0) {
+    return '当日主力流出、小单流入，需警惕小单承接抛压'
+  }
+  if (mainNetYi > 0 && retailNetYi < 0) {
+    return '当日主力流入、小单流出，需结合价格和量能确认承接'
+  }
+  if (mainNetYi > 0 && retailNetYi > 0) {
+    return '当日主力与小单同步流入，仍需价格和量能确认'
+  }
+  if (mainNetYi < 0 && retailNetYi < 0) {
+    return '当日主力与小单同步流出，抛压偏强'
+  }
+  return '当日资金方向接近平衡'
+}
+
+export function buildStockFundNote(input = {}) {
+  const mainNetYi = finite(input.mainNetYi)
+  const retailNetYi = finite(
+    input.retailNetYi ?? input.smallNetYi,
+  )
+  if (mainNetYi == null && retailNetYi == null) return ''
+  const mainTrend = compactTrend(input.mainTrend5 ?? input.trend5)
+  const retailTrend = compactTrend(input.retailTrend5)
+  const historyDays = stockFundHistoryDayCount(input)
+  const complete = historyDays >= 5
+    && mainTrend.length >= 5
+    && retailTrend.length >= 5
+    && mainTrend.every((value) => value != null)
+    && retailTrend.every((value) => value != null)
+  const parts = [
+    flowAmountText('主力当日', mainNetYi),
+    flowAmountText('小单资金代理当日', retailNetYi),
+  ]
+  if (complete) {
+    const main5dYi = finite(input.main5dYi)
+      ?? +mainTrend.reduce((sum, value) => sum + value, 0).toFixed(2)
+    const retail5dYi = finite(input.retail5dYi)
+      ?? +retailTrend.reduce((sum, value) => sum + value, 0).toFixed(2)
+    parts.push(
+      `最近5日主力[${mainTrend.join(',')}]`,
+      `小单资金代理[${retailTrend.join(',')}]`,
+      flowAmountText('5日合计主力', main5dYi),
+      flowAmountText('小单资金代理', retail5dYi),
+    )
+  } else {
+    parts.push(
+      historyDays > 0
+        ? `当前仅取得${historyDays}个交易日历史，不能判断5日持续性`
+        : '历史资金序列缺失，不能判断5日持续性',
+    )
+  }
+  parts.push(
+    flowRelationText(mainNetYi, retailNetYi),
+    '小单资金代理不等于真实账户身份，不能单独作为买卖信号',
+  )
+  return `${parts.join('；')}。`
+}
+
 export function compactStockFundSnapshot(input = {}) {
   if (!input || typeof input !== 'object') return null
   const mainNetYi = finite(input.mainNetYi)

@@ -80,12 +80,13 @@ export async function callChat({
   // stream 模式下 poolFetch 仍返回上游 Response(其 body 可继续被 pumpStream/pumpChatStream 读取)。
   // 端点级模型:传入 role 时,poolFetch 会在选定端点后按该端点自己的模型名覆盖 body.model
   //   (不同网关同一角色可能是不同模型名);端点没配则回退全局/本次 model。
-  // forceNoReason:硬关深度思考(优先级高于端点级/全局 reasoning 配置)——用于「思维链吃穿正文」
-  //   后的补生成:此时必须让模型把整段生成用于正文 JSON,绝不能被端点级 reasoning 配置再次拉起 CoT。
+  // forceNoReason:硬关深度思考(优先级高于端点级/全局 reasoning 配置)，
+  // 快速生成与复核会显式下发 none，避免网关恢复默认推理。
   const {
     resp,
     endpoint,
     deferred,
+    attemptStartedAt,
     releaseRole = () => {},
   } = await poolFetch(cfg, '/chat/completions', {
     method: 'POST', body: bodyObj, signal: useSignal, timeoutMs,
@@ -104,7 +105,12 @@ export async function callChat({
       if (deferred && endpoint && !released) {
         released = true;
         try {
-          if (success) markSuccess(endpoint.id);
+          if (success) {
+            markSuccess(
+              endpoint.id,
+              Date.now() - Number(attemptStartedAt || Date.now()),
+            );
+          }
           else markEndpointUnusable(endpoint.id, Date.now(), true);
         } finally {
           releaseRole();

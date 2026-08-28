@@ -28,14 +28,23 @@ export function llmRoleForAdviceMode(mode, reviewOrigin = '') {
   return isAdvisorMode(mode) ? 'advisor' : 'agent'
 }
 
-export function maxTokensForMode(mode, reasoning = false) {
+export function maxTokensForMode(
+  mode,
+  reasoning = false,
+  {
+    fastMode = false,
+    triggeredReview = false,
+  } = {},
+) {
+  if (triggeredReview) return reasoning ? 2200 : 1200
+  if (fastMode && isAdvisorMode(mode)) return 1800
   let base
   if (['scan', 'daily', 'scan_pick'].includes(mode)) base = 3200
   else if (mode === 't_advice') base = 3600
   else if (['hold_advice', 'buy_advice', 'review'].includes(mode)) {
     base = 3200
   } else base = 1600
-  return reasoning ? Math.max(base + 4800, 8000) : base
+  return reasoning ? Math.max(base + 2800, 6000) : base
 }
 
 function promptText(value, maximum = 180) {
@@ -206,9 +215,11 @@ export const ADVISOR_SYSTEM = `你是股神级的A股短线操盘手，也是面
 
 每条建议必须填写shortHorizon、edge、crowdingRisk、catalystWindow和reviewTrigger；reason用新手能懂的因果链讲清为什么这么做。内部枚举和字段名严禁原样写进用户文案。不得承诺收益，不得为提高出手频率而追高、放宽止损或编造催化。`
 
-export const ADVISOR_FAST_SYSTEM = `${ADVISOR_SYSTEM}
+export const ADVISOR_FAST_SYSTEM = `你是面向散户新手的A股短线决策教练。快速模式只做一次有界判断，必须使用简体中文，只输出一个合法JSON对象；给出唯一明确动作、具体价格、手数和失效条件，不得承诺收益或用等待逃避结论。
 
-快速模式只做一次有界判断：优先当前时点和最强证据，避免理论展开与同义复述。title不超过18字，actionPlan不超过60字，reason不超过100字，每类证据最多一句。`
+shortHorizonTactical是唯一战术合同；账户现金、仓位、T+1、今日可卖手数和硬止损不可绕过。主力与散户资金必须合参，小单资金只是成交规模代理，不等于真实账户身份。外部新闻与搜索摘要只可交叉核验，不能覆盖行情、资金和量化事实。
+
+【价格证据链】价格只能取自tactical.prices和已验证路径，无法追溯就填null，禁止猜价。只保留最强证据，不展开理论或同义复述；内部枚举和字段名严禁原样写进用户文案。`
 
 export const ADVISOR_DEEP_SYSTEM = `${ADVISOR_SYSTEM}
 
@@ -719,18 +730,219 @@ export function deepAdvisorFacts(payload = {}) {
   }
 }
 
+function compactPreviousAdviceForReview(previousAdvice = {}) {
+  if (!previousAdvice || typeof previousAdvice !== 'object') return null
+  return {
+    ...compactPromptObject(previousAdvice, [
+      'planId',
+      'action',
+      'stance',
+      'actionPlan',
+      'nextAction',
+      'opQty',
+      'planQty',
+      'invalidation',
+      'confidence',
+      'reason',
+      'techNote',
+      'fundNote',
+      'quantNote',
+      'newsNote',
+    ]),
+    ...Object.fromEntries(
+      [
+        'addPrice',
+        'reducePrice',
+        'buyPrice',
+        'stopPrice',
+        'targetPrice',
+      ]
+        .map((field) => [field, promptNumber(previousAdvice[field])])
+        .filter(([, value]) => value != null),
+    ),
+  }
+}
+
+export function triggeredReviewFacts(payload = {}) {
+  const facts = deepAdvisorFacts(payload)
+  const tactical = facts.tactical || {}
+  return {
+    code: facts.code,
+    name: facts.name,
+    trigger: facts.reviewEvent,
+    previousPlan: compactPreviousAdviceForReview(
+      payload.previousAdvice,
+    ),
+    current: {
+      market: compactPromptObject(tactical.market, [
+        'phase',
+        'riskTone',
+        'sentimentScore',
+        'hardRiskOff',
+      ]),
+      sector: compactPromptObject(tactical.sector, [
+        'name',
+        'state',
+        'stockRole',
+      ]),
+      stock: compactPromptObject(tactical.stock, [
+        'price',
+        'pct',
+        'turnover',
+        'volRatio',
+        'posInDay',
+        'vsVwap',
+        'relativeStrength',
+        'location',
+        'crowdingRisk',
+      ]),
+      technical: tactical.technical
+        ? {
+            ...compactPromptObject(tactical.technical, [
+              'available',
+              'bias',
+              'signalScore',
+              'maCross',
+              'maTrend',
+              'atr',
+              'atrPct',
+              'rsi',
+              'volumeRatio',
+              'overheated',
+            ]),
+            ma: tactical.technical.ma || null,
+            macd: tactical.technical.macd || null,
+          }
+        : null,
+      timing: compactPromptObject(tactical.timing, [
+        'state',
+        'pullbackPrice',
+        'breakoutPrice',
+        'reviewAfter',
+      ]),
+      prices: tactical.prices || null,
+      quant: {
+        ...compactPromptObject(tactical.quant, [
+          'selectedModelVersion',
+          'modelVersion',
+          'runtimeModelVersion',
+          'modelLabel',
+          'asOf',
+          'inputAsOf',
+          'inputSource',
+          'score',
+          'direction',
+          'upProb',
+          'expRet',
+          'horizon',
+          'highConfidence',
+        ]),
+        nextTradeDay: tactical.quant?.nextTradeDay || null,
+        currentTradingDay:
+          tactical.quant?.currentTradingDay || null,
+        v21: tactical.quant?.v21 || null,
+        fallback: tactical.quant?.fallback || null,
+      },
+      tAction: tactical.tAction || null,
+      actionPolicy: tactical.actionPolicy
+        ? {
+            ...compactPromptObject(tactical.actionPolicy, [
+              'preferredAction',
+              'canIncreaseRisk',
+              'executionOpen',
+              'riskTier',
+              'maxPositionPct',
+              'signalScore',
+              'entryRoute',
+              'manualConfirmationOnly',
+              'nextReviewTrigger',
+            ]),
+            allowedActions: Array.isArray(
+              tactical.actionPolicy.allowedActions,
+            )
+              ? tactical.actionPolicy.allowedActions.slice(0, 8)
+              : [],
+            positionBandPct:
+              tactical.actionPolicy.positionBandPct || null,
+            reasons: Array.isArray(tactical.actionPolicy.reasons)
+              ? tactical.actionPolicy.reasons.slice(0, 4)
+              : [],
+            nextSessionPlan:
+              tactical.actionPolicy.nextSessionPlan || null,
+          }
+        : null,
+    },
+    account: facts.account,
+    holding: facts.holding,
+    funds: facts.funds,
+  }
+}
+
+export function fastAdvisorFacts(payload = {}) {
+  const facts = deepAdvisorFacts(payload)
+  const core = triggeredReviewFacts(payload)
+  const triggeredReview = ['price-review', 'judge'].includes(
+    String(facts.reviewEvent?.kind || ''),
+  )
+  return {
+    code: facts.code,
+    name: facts.name,
+    tactical: {
+      ...core.current,
+      flow: {
+        mainNetYi: facts.funds?.mainNetYi,
+        retailNetYi: facts.funds?.retailNetYi,
+        relation: facts.tactical?.flow?.relation || null,
+      },
+      holding: facts.tactical?.holding || null,
+    },
+    account: facts.account,
+    holding: facts.holding,
+    funds: facts.funds,
+    news: {
+      stock: facts.news.stock
+        .slice(0, triggeredReview ? 0 : 1)
+        .map((item) => promptText(item, 120)),
+      industry: facts.news.industry
+        .slice(0, triggeredReview ? 0 : 1)
+        .map((item) => promptText(item, 120)),
+      macro: facts.news.macro
+        .slice(0, triggeredReview ? 0 : 1)
+        .map((item) => promptText(item, 120)),
+      search: facts.news.search
+        .slice(0, triggeredReview ? 0 : 1)
+        .map((item) => promptText(item, 120)),
+      industrySource: facts.news.industrySource,
+    },
+    reviewEvent: facts.reviewEvent,
+    previousPlan: facts.previousPlan,
+    dailySummary: triggeredReview
+      ? ''
+      : promptText(facts.dailySummary, 300),
+    performance: triggeredReview ? null : facts.performance,
+    realOutcome: facts.realOutcome,
+    knowledgeActionReview: facts.knowledgeActionReview,
+    trade: facts.trade
+      ? {
+          recent: facts.trade.recent.slice(0, 3),
+          t: facts.trade.t,
+        }
+      : null,
+  }
+}
+
 export function advisorOutputSchema(mode, reviewEvent = null) {
   const triggeredReview = ['price-review', 'judge'].includes(
     String(reviewEvent?.kind || ''),
   )
   if (triggeredReview && mode === 'buy_advice') {
-    return '{"reasoning":"一句话依据","reviewDecision":{"outcome":"立即买入|维持观望|放弃买入","operation":"买入|不操作","priceLow":数字或null,"priceHigh":数字或null,"quantity":"整数手数","basis":[{"type":"已验证理论|实时资金与价格|重大催化","summary":"可追溯依据"}]},"action":"立即买入|维持观望|放弃买入","tier":"now|wait","tone":"red|muted","title":"复核终局结论","shortHorizon":"立即|本次结束","edge":"核心依据","crowdingRisk":"最大风险","catalystWindow":"有效期","reviewTrigger":"仅允许新的独立事件或用户主动生成","actionPlan":"动作+执行区间+手数+取消条件","nextOpenPlan":"买入后的次日应对或不适用","futurePlan":"买入后的五日退出路径或不适用","timing":"本次触发的判断","exitTiming":"退出规则","buyPrice":数字或null,"buyZone":"区间或null","pullbackWatchPrice":null,"breakoutWatchPrice":null,"watchPrice":null,"stopPrice":数字或null,"targetPrice":数字或null,"planQty":"整数手数或0","planAmount":"金额或0","planWeight":"仓位占比","reason":"因果链","techNote":"技术与价格依据","fundNote":"主力与小单资金依据","quantNote":"量化依据","newsNote":"催化依据","positionNote":"账户约束","riskReward":"X:1或null","bearCase":"最强反方","invalidation":"本次计划失效条件","confidence":"高|中|低"}'
+    return '{"reviewDecision":{"outcome":"立即买入|维持观望|放弃买入","operation":"买入|不操作","priceLow":数字或null,"priceHigh":数字或null,"quantity":"整数手数","basis":[{"type":"实时资金与价格|已验证理论|重大催化","summary":"80字内依据"}]},"stopPrice":数字或null,"targetPrice":数字或null,"reason":"80字内因果链","techNote":"60字内技术依据","quantNote":"60字内量化依据","newsNote":"60字内催化依据","positionNote":"60字内账户约束","confidence":"高|中|低"}'
   }
   if (
     triggeredReview
     && ['hold_advice', 'review'].includes(mode)
   ) {
-    return '{"reasoning":"一句话依据","reviewDecision":{"outcome":"立即加仓|立即减仓|锁定利润|维持持有|立即清仓","operation":"加仓|减仓|锁利润|不操作|清仓","priceLow":数字或null,"priceHigh":数字或null,"quantity":"整数手数","basis":[{"type":"已验证理论|实时资金与价格|重大催化","summary":"可追溯依据"}]},"action":"加仓|减仓|持有|清仓","stance":"加仓|减仓|持有|清仓","tone":"red|green|muted","title":"复核终局结论","headline":"复核终局结论","shortHorizon":"立即|本次结束","edge":"核心依据","crowdingRisk":"最大风险","catalystWindow":"有效期","reviewTrigger":"仅允许新的独立事件或用户主动生成","actionPlan":"动作+执行区间+手数+取消条件","nextAction":"动作+执行区间+手数","nextOpenPlan":"下一交易时段应对","futurePlan":"五日内退出路径","exitTiming":"退出规则","opQty":"动作+整数手数或无需操作","opAmount":"金额或0","addPrice":数字或null,"reducePrice":数字或null,"stopPrice":数字或null,"targetPrice":数字或null,"keyLevel":"关键价位","fundNote":"主力与小单资金依据","quantNote":"量化依据","techNote":"技术与价格依据","newsNote":"催化依据","positionNote":"账户约束","riskReward":"X:1或null","bearCase":"最强反方","invalidation":"本次计划失效条件","confidence":"高|中|低"}'
+    return '{"reviewDecision":{"outcome":"立即加仓|立即减仓|锁定利润|维持持有|立即清仓","operation":"加仓|减仓|锁利润|不操作|清仓","priceLow":数字或null,"priceHigh":数字或null,"quantity":"整数手数","basis":[{"type":"实时资金与价格|已验证理论|重大催化","summary":"80字内依据"}]},"reason":"80字内因果链","techNote":"60字内技术依据","quantNote":"60字内量化依据","newsNote":"60字内催化依据","positionNote":"60字内账户约束","confidence":"高|中|低"}'
   }
   if (mode === 't_advice') {
     return '{"reasoning":"一句话依据","advisable":"适合|谨慎|不建议","dir":"positive|reverse|none","dirLabel":"正T低吸|反T高抛|暂不做T","shortHorizon":"盘中|下一交易时段","edge":"核心优势","crowdingRisk":"最大风险","catalystWindow":"催化有效期","reviewTrigger":"下一复核事件","actionPlan":"唯一动作","support":null,"resistance":null,"suggestQty":0,"leg1Price":null,"leg2Price":null,"nextSide":"buy|sell|null","nextPrice":null,"fundNote":"主力与小单关系","quantNote":"量化依据","invalidation":"失效条件","confidence":"高|中|低"}'
@@ -742,9 +954,9 @@ export function advisorOutputSchema(mode, reviewEvent = null) {
     return '{"reasoning":"一句话依据","tp":null,"sl":null,"reason":"计划逻辑","exitTiming":"触价后的确认与分批规则","tpBasis":"止盈依据","slBasis":"止损依据","confidence":"高|中|低"}'
   }
   if (mode === 'hold_advice') {
-    return '{"reasoning":"一句话可核对依据","action":"加仓|减仓|持有|清仓","tone":"red|green|muted","title":"20字内结论","shortHorizon":"盘中|下一交易时段|1-3个交易日|3-5个交易日","edge":"60字内核心短线优势","crowdingRisk":"60字内拥挤或兑现风险","catalystWindow":"40字内催化有效期","reviewTrigger":"60字内下一复核事件","actionPlan":"80字内可执行动作","nextOpenPlan":"高开、平开、低开三种情景的下一交易时段动作","futurePlan":"买入后1-5日止盈、减仓或退出路径","exitTiming":"触价后的确认方式","addPrice":null,"reducePrice":null,"stopPrice":null,"targetPrice":null,"opQty":"动作+手数或无需操作","opAmount":"金额或0","newCost":"数字或不变","posAfter":"操作后仓位","reason":"120字内因果链","techNote":"技术证据","fundNote":"主力与小单资金关系","quantNote":"量化证据","newsNote":"消息证据","positionNote":"账户约束","riskReward":"X:1","bearCase":"最强反方","invalidation":"具体失效价或信号","confidence":"高|中|低"}'
+    return '{"action":"加仓|减仓|持有|清仓","title":"20字内结论","actionPlan":"80字内可执行动作","nextOpenPlan":"高开、平开、低开三种应对","futurePlan":"1-5日退出路径","addPrice":null,"reducePrice":null,"stopPrice":null,"targetPrice":null,"opQty":"动作+整数手数或无需操作","reason":"100字内因果链","techNote":"60字内技术证据","quantNote":"60字内量化证据","newsNote":"60字内消息证据","positionNote":"60字内账户约束","riskReward":"X:1","bearCase":"60字内最强反方","invalidation":"60字内失效条件","confidence":"高|中|低"}'
   }
-  return '{"reasoning":"一句话可核对依据","action":"立即买入|回调再买|小仓试错|观望","tier":"now|pullback|probe|wait","tone":"red|gold|muted","title":"20字内结论","shortHorizon":"盘中|下一交易时段|1-3个交易日|3-5个交易日","edge":"60字内核心短线优势","crowdingRisk":"60字内拥挤或兑现风险","catalystWindow":"40字内催化有效期","reviewTrigger":"60字内下一复核事件","actionPlan":"80字内可执行动作","nextOpenPlan":"若买入后下一交易日高开、平开、低开的动作","futurePlan":"买入后最迟第5个交易日前的止盈、减仓或退出路径","timing":"入场确认条件","exitTiming":"买入后退出确认方式","buyPrice":null,"buyZone":null,"pullbackWatchPrice":数字或null,"breakoutWatchPrice":数字或null,"watchPrice":null,"stopPrice":null,"targetPrice":null,"planQty":"整数手数或0","planAmount":"金额或0","planWeight":"资金占比","reason":"120字内因果链","techNote":"技术证据","fundNote":"主力与小单资金关系","quantNote":"量化依据","newsNote":"消息依据","positionNote":"账户约束","riskReward":"X:1","bearCase":"最强反方","invalidation":"取消关注或失效条件","confidence":"高|中|低"}'
+  return '{"action":"立即买入|回调再买|小仓试错|观望","title":"20字内结论","actionPlan":"80字内唯一动作","nextOpenPlan":"买入后高开、平开、低开三种应对","futurePlan":"买入后最迟第5日退出路径","buyPrice":null,"pullbackWatchPrice":数字或null,"breakoutWatchPrice":数字或null,"stopPrice":null,"targetPrice":null,"planQty":"整数手数或0","reason":"100字内因果链","techNote":"60字内技术证据","quantNote":"60字内量化依据","newsNote":"60字内消息依据","positionNote":"60字内账户约束","riskReward":"X:1","bearCase":"60字内最强反方","invalidation":"60字内失效条件","confidence":"高|中|低"}'
 }
 
 export function buildDeepAdvisorPrompt({
@@ -788,8 +1000,32 @@ ${attribution}
 主动做多必须满足风险预算；普通市场盈亏比至少1.8:1，弱市试错至少2.2:1且必须同时具备逆势强势与高把握信号。价格只可来自事实契约中的合法锚点，不能编造；金额=手数×100×价格。
 若tactical.market.hardRiskOff=true，说明炸板、跌停扩散或完整交易日量价已触发市场红线，无论个股是否逆势强都禁止新增风险，只允许观望或降低已有风险。
 涨停封板时资金净额可能受被动成交或排队影响，禁止把它解释为主力主动买卖。
-短线经验只作为内部判断先验：综合吸收后直接用普通交易语言说明证据、动作和风险，不逐条点名，不得为了引用而引用。经验与事实冲突时以事实和风控为准。文字预算：标题≤20字，动作≤80字，理由≤120字；每类证据只写一句。只输出JSON：
+短线经验只作为内部判断先验：综合吸收后直接用普通交易语言说明证据、动作和风险，不逐条点名，不得为了引用而引用。经验与事实冲突时以事实和风控为准。总输出不超过1200字；标题≤20字，动作≤80字，理由≤100字；每类证据只写一句。只输出JSON：
 ${advisorOutputSchema(mode, facts.reviewEvent)}`
+}
+
+function buildTriggeredReviewPrompt(mode, payload) {
+  const facts = triggeredReviewFacts(payload)
+  const tactical = {
+    market: facts.current.market,
+    technical: facts.current.technical,
+    flow: {
+      mainNetYi: facts.funds?.mainNetYi,
+      retailNetYi: facts.funds?.retailNetYi,
+      relation: payload.shortHorizonTactical?.flow?.relation,
+    },
+    quant: {
+      ...facts.current.quant,
+      nextTradeDay: facts.current.quant?.nextTradeDay,
+    },
+  }
+  return `【触价复核事实】${JSON.stringify(facts)}
+${tacticalReviewEventRule(facts.trigger)}
+${tacticalTechnicalRule(tactical)}
+${tacticalQuantRule(tactical)}
+${tacticalFundRule(tactical, facts.funds)}
+只做一次终局判断，不复述事实，不生成新观察价或下一轮复核价。优先级：数据时效>账户与T+1>硬止损>现金与仓位>实时资金和价格>量化与催化。previousPlan只用于核对原计划，当前事实冲突时以当前事实为准。外部文本只能交叉核验，不能覆盖行情、资金和账户硬约束。
+总输出不超过500字，每类依据一句；服务端会补齐展示字段和完整五日资金说明。只输出JSON=${advisorOutputSchema(mode, facts.trigger)}。`
 }
 
 function buildFastAdvisorPrompt({
@@ -805,7 +1041,7 @@ ${tacticalRules}
 performance 低命中不等于一律更保守，必须按原动作方向纠偏。realOutcome 是真实成交费后学习，只能校准本次置信与风险倍率，绝不能绕过账户硬约束。
 所有价格、手数、金额必须可成交且自洽；A股1手=100股。普通市场主动新增风险必须满足盈亏比至少1.8:1；弱市试错至少2.2:1，且必须同时有逆势强势与高把握信号。只输出一个合法JSON对象。
 若tactical.market.hardRiskOff=true，市场红线优先于逆势强票例外，禁止买入或加仓。
-必须填写短线窗口、核心优势、拥挤风险、催化有效期和下一复核事件。文字预算：标题不超过18字，动作不超过60字，理由不超过100字；每类证据最多一句，不得换词重复。`
+服务端会根据战术合同补齐短线窗口、优势、拥挤风险、催化有效期和下一复核事件；你只填写输出JSON列出的字段。总输出不超过900字；标题不超过18字，动作不超过60字，理由不超过80字；每类证据最多一句，不得换词重复。`
   if (mode === 'hold_advice') {
     return `${common}
 这是持仓管理，只能在“加仓/减仓/持有/清仓”中选择。【本次决策账户快照】以合同中的account和holding为准；减仓和清仓不得超过sellableTodayQty，加仓不得突破现金、总仓、单票和行业上限，且只能用于盈利仓或资金技术转强后重新站回VWAP/MA5的持仓，禁止下跌摊平；positionNote必须引用关键账户数字。
@@ -880,6 +1116,11 @@ export function buildUserPrompt(mode, payload = {}, ragText = '', theoryHits = [
   if (!isAdvisorMode(mode)) {
     return `${zhReason}${genericPrompt(mode, payload, data, ragText)}`
   }
+  if (['price-review', 'judge'].includes(
+    String(payload.reviewEvent?.kind || ''),
+  )) {
+    return `${zhReason}${buildTriggeredReviewPrompt(mode, payload)}`
+  }
   if (payload.generationProfile === 'DEEP') {
     return `${zhReason}${buildDeepAdvisorPrompt({
       mode,
@@ -890,7 +1131,7 @@ export function buildUserPrompt(mode, payload = {}, ragText = '', theoryHits = [
       waitEntryRule,
     })}`
   }
-  const facts = deepAdvisorFacts(payload)
+  const facts = fastAdvisorFacts(payload)
   return `${zhReason}${buildFastAdvisorPrompt({
     mode,
     facts,

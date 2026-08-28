@@ -36,6 +36,61 @@ test('空流端点立即冷却，下一次请求切换到备用端点', () => {
   assert.equal(second.id, 'advisor-2')
 })
 
+test('同角色空闲端点轮询使用而不是每次固定命中第一路', () => {
+  resetPoolHealthForTests()
+  const config = {
+    roleEndpoints: {
+      advisor: [{
+        baseUrl: 'https://advisor-1.example/v1',
+        apiKey: 'advisor-1-key',
+        model: 'advisor-1-model',
+        enabled: true,
+      }, {
+        baseUrl: 'https://advisor-2.example/v1',
+        apiKey: 'advisor-2-key',
+        model: 'advisor-2-model',
+        enabled: true,
+      }],
+    },
+  }
+
+  const first = pickEndpoint(config, 1000, 'advisor')
+  markSuccess(first.id)
+  const second = pickEndpoint(config, 1001, 'advisor')
+
+  assert.equal(first.id, 'advisor-1')
+  assert.equal(second.id, 'advisor-2')
+})
+
+test('同角色端点采样后优先选择历史响应更快的一路', () => {
+  resetPoolHealthForTests()
+  const config = {
+    roleEndpoints: {
+      advisor: [{
+        baseUrl: 'https://advisor-1.example/v1',
+        apiKey: 'advisor-1-key',
+        model: 'advisor-1-model',
+        enabled: true,
+      }, {
+        baseUrl: 'https://advisor-2.example/v1',
+        apiKey: 'advisor-2-key',
+        model: 'advisor-2-model',
+        enabled: true,
+      }],
+    },
+  }
+
+  const first = pickEndpoint(config, 1000, 'advisor')
+  markSuccess(first.id, 50000)
+  const second = pickEndpoint(config, 1001, 'advisor')
+  markSuccess(second.id, 15000)
+  const third = pickEndpoint(config, 1002, 'advisor')
+
+  assert.equal(first.id, 'advisor-1')
+  assert.equal(second.id, 'advisor-2')
+  assert.equal(third.id, 'advisor-2')
+})
+
 test('流式请求在响应体消费完成前持续占用端点', async () => {
   const config = {
     roleEndpoints: {
@@ -90,6 +145,38 @@ test('深度批量可覆盖端点默认关闭并下发有界推理参数', async
     assert.equal(sentBody.reasoning_effort, 'medium')
   } finally {
     globalThis.fetch = originalFetch
+  }
+})
+
+test('快速模式显式下发none而不是让网关回退默认深度推理', async () => {
+  const config = {
+    roleEndpoints: {
+      review: [{
+        baseUrl: 'https://review.example/v1',
+        apiKey: 'key',
+        model: 'model',
+        reasoning: true,
+        enabled: true,
+      }],
+    },
+  }
+  const originalFetch = globalThis.fetch
+  let sentBody = null
+  globalThis.fetch = async (_url, options) => {
+    sentBody = JSON.parse(options.body)
+    return new Response('{}', { status: 200 })
+  }
+  try {
+    await poolFetch(config, '/chat/completions', {
+      body: { model: 'model', stream: true },
+      role: 'review',
+      forceNoReason: true,
+    }, 1)
+
+    assert.equal(sentBody.reasoning_effort, 'none')
+  } finally {
+    globalThis.fetch = originalFetch
+    resetPoolHealthForTests()
   }
 })
 
