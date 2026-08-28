@@ -86,6 +86,14 @@ export default function TailPick() {
     return () => clearInterval(timer)
   }, [running, load])
 
+  useEffect(() => {
+    if (running) return undefined
+    const timer = setInterval(() => {
+      void load({ quiet: true })
+    }, 15_000)
+    return () => clearInterval(timer)
+  }, [running, load])
+
   const run = async () => {
     const tradeDate = state?.session?.tradeDate
     if (!tradeDate || running) return

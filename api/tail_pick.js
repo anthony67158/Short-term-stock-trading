@@ -136,6 +136,23 @@ export function runTailPickScan({
       error.code = 'WINDOW_CLOSED'
       throw error
     }
+    const activeTask = typeof store.readTask === 'function'
+      ? await store.readTask()
+      : null
+    if (
+      activeTask?.status === 'RUNNING'
+      && requestedAt
+        - Number(activeTask.updatedAt || activeTask.startedAt || 0)
+        < 3 * 60 * 1000
+    ) {
+      return {
+        ok: true,
+        schemaVersion: TAIL_PICK_SCHEMA_VERSION,
+        session,
+        task: activeTask,
+        running: true,
+      }
+    }
     const claim = await store.claimRun(tradeDate, requestedAt, runMode)
     if (!claim.acquired) {
       return {
@@ -162,7 +179,9 @@ export function runTailPickScan({
         '正在确认今天是否适合尾盘开仓',
         now,
       )
-      const marketContext = await collectMarketContext()
+      const marketContext = await collectMarketContext({
+        now: requestedAt,
+      })
       if (!marketContext.marketGate.allowed) {
         const result = noTradeResult({
           tradeDate,

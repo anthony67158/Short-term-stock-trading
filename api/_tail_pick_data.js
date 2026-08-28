@@ -31,14 +31,14 @@ function finite(value) {
   return Number.isFinite(number) ? number : null
 }
 
-function quoteDate(value, now) {
+function quoteDate(value) {
   const seconds = finite(value)
   return seconds && seconds > 1_000_000_000
     ? beijingDayKey(seconds * 1000)
-    : beijingDayKey(now)
+    : null
 }
 
-export function mapTailPickMarketRow(row = {}, now = Date.now()) {
+export function mapTailPickMarketRow(row = {}) {
   return {
     code: String(row.f12 || ''),
     name: String(row.f14 || ''),
@@ -54,16 +54,20 @@ export function mapTailPickMarketRow(row = {}, now = Date.now()) {
     totalMarketCap: finite(row.f20),
     mainInflow: finite(row.f62),
     mainRatio: finite(row.f184),
-    tradeDate: quoteDate(row.f124, now),
+    tradeDate: quoteDate(row.f124),
   }
 }
 
-export function passesTailPickRealtimePrefilter(quote = {}) {
+export function passesTailPickRealtimePrefilter(
+  quote = {},
+  expectedTradeDate = beijingDayKey(),
+) {
   if (
     !/^\d{6}$/.test(quote.code)
     || /ST|退/.test(String(quote.name || '').toUpperCase())
     || /^(68|8|4|9)/.test(quote.code)
   ) return false
+  if (quote.tradeDate !== expectedTradeDate) return false
   const {
     price,
     open,
@@ -106,6 +110,7 @@ export async function fetchTailPickRealtimePool({
   const rows = []
   let total = 0
   let pagesRead = 0
+  let boundaryReached = false
   for (let page = 1; page <= MAX_MARKET_PAGES; page++) {
     const payload = await fetchPage(page)
     const diff = Array.isArray(payload?.data?.diff)
@@ -113,10 +118,19 @@ export async function fetchTailPickRealtimePool({
       : []
     if (page === 1) total = Number(payload?.data?.total) || diff.length
     pagesRead = page
-    if (!diff.length) break
-    rows.push(...diff.map((item) => mapTailPickMarketRow(item, now)))
+    if (!diff.length) {
+      boundaryReached = true
+      break
+    }
+    rows.push(...diff.map((item) => mapTailPickMarketRow(item)))
     const lastPct = finite(diff.at(-1)?.f3)
-    if (lastPct == null || lastPct <= MIN_FORMULA_GAIN_PCT) break
+    if (lastPct == null || lastPct <= MIN_FORMULA_GAIN_PCT) {
+      boundaryReached = true
+      break
+    }
+  }
+  if (!boundaryReached) {
+    throw new Error('全市场涨幅分页未读取到2.4%边界')
   }
   const unique = [...new Map(
     rows.filter((item) => item.code).map((item) => [item.code, item]),
@@ -125,7 +139,9 @@ export async function fetchTailPickRealtimePool({
     total,
     pagesRead,
     inspectedCount: unique.length,
-    list: unique.filter(passesTailPickRealtimePrefilter),
+    list: unique.filter((item) =>
+      passesTailPickRealtimePrefilter(item, beijingDayKey(now))
+    ),
   }
 }
 
@@ -187,12 +203,14 @@ export async function fetchTailPickIndexSeries() {
   }))
 }
 
-function usableSectorSnapshot(latest, intraday) {
+function usableSectorSnapshot(latest, intraday, now = Date.now()) {
   return [intraday, latest]
     .filter((item) =>
       item
       && Array.isArray(item.sectors)
       && item.sectors.length > 0
+      && Number(item.generatedAt) > 0
+      && now - Number(item.generatedAt) <= 72 * 60 * 60 * 1000
     )
     .sort((left, right) =>
       Number(right.generatedAt || 0) - Number(left.generatedAt || 0)
@@ -203,6 +221,7 @@ export async function collectTailPickMarketContext({
   fetchMarket = fetchMarketSnapshot,
   fetchIndices = fetchTailPickIndexSeries,
   store = sectorForecastStore,
+  now = Date.now(),
 } = {}) {
   const [market, indexSeries, latest, intraday] = await Promise.all([
     fetchMarket(),
@@ -210,7 +229,7 @@ export async function collectTailPickMarketContext({
     store.readLatest(),
     store.readIntraday(),
   ])
-  const sectorSnapshot = usableSectorSnapshot(latest, intraday)
+  const sectorSnapshot = usableSectorSnapshot(latest, intraday, now)
   return {
     market,
     indexSeries,
@@ -254,7 +273,7 @@ function sectorOpportunityFromTags({
     now,
   })
   if (direct.matched) return direct
-  const snapshot = usableSectorSnapshot(latest, intraday)
+  const snapshot = usableSectorSnapshot(latest, intraday, now)
   const conceptCodes = new Set(
     (profile?.conceptBoards || []).map((item) => String(item.code)),
   )

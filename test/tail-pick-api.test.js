@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 import {
   fetchTailPickRealtimePool,
@@ -23,6 +24,11 @@ function beijingTimestamp(text) {
   return new Date(`${text}+08:00`).getTime()
 }
 
+const readProjectFile = (path) => readFileSync(
+  new URL(`../${path}`, import.meta.url),
+  'utf8',
+)
+
 function marketRow(patch = {}) {
   return {
     f12: '600001',
@@ -45,19 +51,43 @@ function marketRow(patch = {}) {
 
 test('实时预筛只保留可能满足原公式的股票', () => {
   const accepted = mapTailPickMarketRow(marketRow())
-  assert.equal(passesTailPickRealtimePrefilter(accepted), true)
+  assert.equal(
+    passesTailPickRealtimePrefilter(accepted, '2026-08-28'),
+    true,
+  )
   assert.equal(
     passesTailPickRealtimePrefilter(
       mapTailPickMarketRow(marketRow({ f8: 4.9 })),
+      '2026-08-28',
     ),
     false,
   )
   assert.equal(
     passesTailPickRealtimePrefilter(
       mapTailPickMarketRow(marketRow({ f14: 'ST测试' })),
+      '2026-08-28',
     ),
     false,
   )
+  assert.equal(
+    passesTailPickRealtimePrefilter(
+      mapTailPickMarketRow(marketRow({ f124: null })),
+      '2026-08-28',
+    ),
+    false,
+  )
+})
+
+test('FC在14:50自动运行正式扫描并于14:52仅作失败重试', () => {
+  const schedule = readProjectFile('s.yaml')
+  const server = readProjectFile('server.js')
+  assert.match(schedule, /triggerName: tail-pick-1450-timer/)
+  assert.match(
+    schedule,
+    /cronExpression: "CRON_TZ=Asia\/Shanghai 0 50,52 14 \* \* 1-5"/,
+  )
+  assert.match(server, /tailPickTimerBody/)
+  assert.match(server, /\? 'tail_pick'/)
 })
 
 test('按涨幅倒序读取市场页面并在2.4%边界停止', async () => {
@@ -75,6 +105,7 @@ test('按涨幅倒序读取市场页面并在2.4%边界停止', async () => {
   ]
   let calls = 0
   const result = await fetchTailPickRealtimePool({
+    now: beijingTimestamp('2026-08-28T14:50:00'),
     fetchPage: async (page) => {
       calls++
       return pages[page - 1]
@@ -89,7 +120,27 @@ test('按涨幅倒序读取市场页面并在2.4%边界停止', async () => {
   )
 })
 
-test('指数K线按东财字段顺序解析', () => {
+test('分页未读到2.4%边界时拒绝伪装成全市场扫描', async () => {
+  await assert.rejects(
+    fetchTailPickRealtimePool({
+      now: beijingTimestamp('2026-08-28T14:50:00'),
+      fetchPage: async () => ({
+        data: {
+          total: 6000,
+          diff: Array.from({ length: 100 }, (_, index) =>
+            marketRow({
+              f12: String(600000 + index),
+              f3: 3,
+            })
+          ),
+        },
+      }),
+    }),
+    /未读取到2.4%边界/,
+  )
+})
+
+test('指数K线按腾讯字段顺序解析', () => {
   const candles = parseTailPickIndexCandles([
     ['2026-08-28', '10', '10.2', '10.3', '9.9', '12345'],
   ])
@@ -215,14 +266,26 @@ test('存储适配器对同一交易日读取同一正式结果', async () => {
   }
   const store = createTailPickStore(storage)
   const result = {
-    session: { tradeDate: '2026-08-28' },
+    session: {
+      tradeDate: '2026-08-28',
+      dataAsOf: beijingTimestamp('2026-08-28T14:50:00'),
+    },
     result: { decision: 'NO_TRADE' },
   }
   await store.saveRun(result)
+  const manual = {
+    session: {
+      tradeDate: '2026-08-28',
+      mode: 'manual',
+      dataAsOf: beijingTimestamp('2026-08-28T16:00:00'),
+    },
+    result: { decision: 'NO_TRADE' },
+  }
+  await store.saveManualRun(manual)
 
   assert.deepEqual(await store.readRun('2026-08-28'), result)
   assert.deepEqual(await store.readLatest(), result)
-  assert.equal(await store.readManualLatest(), null)
+  assert.deepEqual(await store.readManualLatest(), manual)
   const state = await readTailPickState({
     store,
     timestamp: beijingTimestamp('2026-08-28T14:56:00'),

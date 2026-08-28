@@ -24,6 +24,7 @@ test('尾盘拾金支持14:50自动正式扫描和手动试算', () => {
   assert.match(component, /runTailPick/)
   assert.match(component, /14:50 自动正式扫描/)
   assert.match(component, /随时手动试算/)
+  assert.match(component, /15_000/)
   assert.match(component, /确认开仓环境/)
   assert.match(component, /扫描公式信号/)
   assert.match(component, /执行纪律过滤/)
