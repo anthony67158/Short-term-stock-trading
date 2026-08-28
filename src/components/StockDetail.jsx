@@ -172,12 +172,17 @@ export default function StockDetail({ stock, onClose }) {
     const code = stock && stock.code
     if (!code) { setQuantState(null); return }
     const sync = () => {
+      const setForCode = (value) => setQuantState(
+        value && typeof value === 'object'
+          ? { ...value, code: String(code) }
+          : value,
+      )
       const expectedMode = myHold ? 'hold_advice' : 'buy_advice'
       const cached = getAdvice(code, expectedMode)
       const cachedState = adviceDisplayState(cached)
       if (isRunning(code)) {
         const r = getRunning(code)
-        setQuantState(mergeAdviceRefreshState({
+        setForCode(mergeAdviceRefreshState({
           loading: true,
           stage: r?.stage || 'preparing',
           phase: r && r.phase,
@@ -192,7 +197,7 @@ export default function StockDetail({ stock, onClose }) {
       const res = selectedResult.source === 'runner' ? selectedResult.value : null
       if (res && res.pending) {
         // 本地生成中断→已转云端继续,展示中转 loading,待云端回灌自动切成品
-        setQuantState(mergeAdviceRefreshState({
+        setForCode(mergeAdviceRefreshState({
           loading: true,
           cloud: true,
           phase: (res.error && String(res.error)) || '云端继续生成中,稍候自动刷新…',
@@ -203,7 +208,7 @@ export default function StockDetail({ stock, onClose }) {
         return
       }
       if (res) {
-        setQuantState(res.error
+        setForCode(res.error
           ? mergeAdviceRefreshState({ error: res.error }, cachedState)
           : adviceDisplayState(res))
         return
@@ -218,12 +223,12 @@ export default function StockDetail({ stock, onClose }) {
           const it = (bs.items || []).find((x) => String(x.code) === c)
           const cloudLoading = cloudAdviceLoadingState(bs, c)
           if (cloudLoading) {
-            setQuantState(mergeAdviceRefreshState(cloudLoading, cachedState))
+            setForCode(mergeAdviceRefreshState(cloudLoading, cachedState))
             return
           }
           // 云端已把该股标记为失败 → 如实提示生成失败(不做假成功)
           if (it && it.status === 'fail') {
-            setQuantState(mergeAdviceRefreshState({
+            setForCode(mergeAdviceRefreshState({
               error: (it.error && String(it.error)) || '生成失败,请重试',
             }, cachedState))
             return
@@ -231,7 +236,7 @@ export default function StockDetail({ stock, onClose }) {
         }
       } catch { /* ignore */ }
       const latestCache = selectedResult.source === 'cache' ? selectedResult.value : cached
-      setQuantState(adviceDisplayState(latestCache))
+      setForCode(adviceDisplayState(latestCache))
     }
     sync()
     const unRunner = subscribeRunner(sync)
@@ -245,6 +250,7 @@ export default function StockDetail({ stock, onClose }) {
     const expectedMode = myHold ? 'hold_advice' : 'buy_advice'
     const previousState = adviceDisplayState(getAdvice(stock.code, expectedMode))
     setQuantState(mergeAdviceRefreshState({
+      code: String(stock.code),
       loading: true,
       cloud: true,
       stage: 'preparing',
@@ -362,6 +368,7 @@ export default function StockDetail({ stock, onClose }) {
         serverMode: true,
       }, stock.code)
       setQuantState(mergeAdviceRefreshState({
+        code: String(stock.code),
         loading: true,
         cloud: true,
         stage: acceptedState?.stage || 'queued',
@@ -381,7 +388,9 @@ export default function StockDetail({ stock, onClose }) {
     }
     if (r && r.status === 'full') {
       setBusyModal({ busy: r.busy || [], concurrency: r.concurrency || 0 })
-      setQuantState(previousState)
+      setQuantState(previousState
+        ? { ...previousState, code: String(stock.code) }
+        : previousState)
     }
   }
   const [showAlert, setShowAlert] = useState(false) // 设预警表单开关
@@ -744,6 +753,8 @@ export default function StockDetail({ stock, onClose }) {
   const adviceActions = adviceGenerationActions({
     loading: Boolean(quantState?.loading),
     deepMode: quantState?.deepMode === true,
+    stateCode: quantState?.code || '',
+    currentCode: stock.code,
   })
   const modeGuidance = adviceModeGuidance({
     hasAdvice: Boolean(quantState?.advice),

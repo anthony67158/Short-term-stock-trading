@@ -68,6 +68,16 @@ test('底栏明确区分快速生成与深度生成且只标记当前模式', ()
   assert.equal(deepRunning.quick.active, false)
   assert.equal(deepRunning.deep.label, '深度生成中')
   assert.equal(deepRunning.deep.active, true)
+
+  const switchedStock = adviceGenerationActions({
+    loading: true,
+    deepMode: true,
+    stateCode: '600000',
+    currentCode: '000001',
+  })
+  assert.equal(switchedStock.quick.disabled, false)
+  assert.equal(switchedStock.deep.disabled, false)
+  assert.equal(switchedStock.deep.active, false)
 })
 
 test('首次生成推荐深度模式并固定展示决策分工', () => {

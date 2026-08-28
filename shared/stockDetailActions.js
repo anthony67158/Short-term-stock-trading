@@ -29,20 +29,28 @@ export function stockWatchAction({
 export function adviceGenerationActions({
   loading = false,
   deepMode = false,
+  stateCode = '',
+  currentCode = '',
 } = {}) {
-  const quickActive = loading && deepMode !== true
-  const deepActive = loading && deepMode === true
+  const belongsToCurrentStock = (
+    !stateCode
+    || !currentCode
+    || String(stateCode) === String(currentCode)
+  )
+  const activeLoading = loading && belongsToCurrentStock
+  const quickActive = activeLoading && deepMode !== true
+  const deepActive = activeLoading && deepMode === true
   return {
     quick: {
       label: quickActive ? '快速生成中' : '快速生成',
       icon: quickActive ? 'refresh' : 'spark',
-      disabled: loading,
+      disabled: activeLoading,
       active: quickActive,
     },
     deep: {
       label: deepActive ? '深度生成中' : '深度生成',
       icon: deepActive ? 'refresh' : 'brain',
-      disabled: loading,
+      disabled: activeLoading,
       active: deepActive,
     },
   }
