@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  accountClientSnapshot,
   accountSyncDelta,
   applyClientAccountSave,
   deactivateAccount,
@@ -15,6 +16,40 @@ import {
   writeAdviceRuntimeUpdate,
   writeAccount,
 } from '../api/account.js'
+
+test('登录快照只返回前端使用字段并排除大型后端证据', () => {
+  const data = {
+    plan: [{ code: '000636' }],
+    holding: [],
+    closed: [],
+    account: { cash: 100000 },
+    alerts: [],
+    reviews: {},
+    advice: { '000636': { at: 1 } },
+    adviceLog: [],
+    decisionLog: [],
+    executionPlans: [],
+    executionAttributions: [],
+    stockNotes: {},
+    sectorConceptExplanations: {},
+    settings: {},
+    tradeStateResetAt: 123,
+    evidenceSnapshots: {
+      large: { payload: 'x'.repeat(1000000) },
+    },
+    portfolioAnalysisHistory: [{ payload: 'large' }],
+    reviewAuto: { noon: { done: true } },
+  }
+
+  const snapshot = accountClientSnapshot(data)
+
+  assert.deepEqual(snapshot.plan, data.plan)
+  assert.deepEqual(snapshot.advice, data.advice)
+  assert.equal(snapshot.tradeStateResetAt, 123)
+  assert.equal(snapshot.evidenceSnapshots, undefined)
+  assert.equal(snapshot.portfolioAnalysisHistory, undefined)
+  assert.equal(snapshot.reviewAuto, undefined)
+})
 
 function fakeStorage({ rejectIfMatch = false } = {}) {
   const objects = new Map()

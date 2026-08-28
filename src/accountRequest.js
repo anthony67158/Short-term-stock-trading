@@ -1,10 +1,16 @@
+export function accountRequestTimeoutMs(action) {
+  return ['login', 'register', 'get'].includes(String(action || ''))
+    ? 45000
+    : 20000
+}
+
 export async function accountApiRequest(
   url,
   action,
   payload,
   {
     fetchImpl = globalThis.fetch,
-    timeoutMs = 20000,
+    timeoutMs = accountRequestTimeoutMs(action),
   } = {},
 ) {
   const controller = new AbortController()

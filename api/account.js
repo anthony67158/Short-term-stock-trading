@@ -147,6 +147,35 @@ export function accountSyncDelta(data = {}, since = 0) {
   };
 }
 
+const CLIENT_ACCOUNT_DATA_KEYS = Object.freeze([
+  'plan',
+  'holding',
+  'closed',
+  'account',
+  'alerts',
+  'reviews',
+  'advice',
+  'adviceLog',
+  'decisionLog',
+  'executionPlans',
+  'executionAttributions',
+  'stockNotes',
+  'sectorConceptExplanations',
+  'settings',
+  'tradeStateResetAt',
+])
+
+export function accountClientSnapshot(data = {}) {
+  const source = data && typeof data === 'object' ? data : {}
+  return Object.fromEntries(
+    CLIENT_ACCOUNT_DATA_KEYS
+      .filter((key) =>
+        Object.prototype.hasOwnProperty.call(source, key)
+      )
+      .map((key) => [key, source[key]]),
+  )
+}
+
 function mergeAccountAlerts(clientAlerts, serverAlerts) {
   const serverById = new Map((serverAlerts || []).filter((alert) => alert?.id).map((alert) => [alert.id, alert]));
   return (clientAlerts || []).map((client) => {
@@ -1324,7 +1353,9 @@ export default async function handler(req, res) {
         clientRevision: 1, data,
       }, undefined, { createOnly: true });
       return ok(res, {
-        ok: true, nick: acc.nick, data: acc.data,
+        ok: true,
+        nick: acc.nick,
+        data: accountClientSnapshot(acc.data),
         updatedAt: acc.updatedAt, revision: acc.clientRevision, storage: acc.storage,
         token: accountSessionToken(acc),
       });
@@ -1367,7 +1398,7 @@ export default async function handler(req, res) {
       }
       return ok(res, {
         ok: true, nick: acc.nick,
-        data: acc.data || { plan: [], holding: [], closed: [] },
+        data: accountClientSnapshot(acc.data),
         updatedAt: acc.updatedAt, revision: Number(acc.clientRevision) || 0, storage: 'oss',
         token: accountSessionToken(acc),
       });
