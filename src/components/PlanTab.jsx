@@ -1436,6 +1436,7 @@ function DisciplineBar({ book }) {
   return (
     <div className="discipline-bar-wrap">
       <button
+        type="button"
         className={'discipline-bar' + (topAlert ? ' has-alert level-' + topAlert.level : '')}
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
@@ -1465,7 +1466,7 @@ function DisciplineBar({ book }) {
         <OverlayPortal>
           <div className="advisor-score-mask" onClick={() => setOpen(false)}>
             <div
-              className="advisor-pop discipline-dialog"
+              className="advisor-pop advisor-score-dialog discipline-dialog"
               role="dialog"
               aria-modal="true"
               aria-labelledby="discipline-title"

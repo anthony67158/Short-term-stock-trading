@@ -607,6 +607,10 @@ test('持仓页大型展开层统一挂到顶层Portal避免被吸顶区遮盖',
   )
   assert.match(
     planTab,
+    /className="advisor-pop advisor-score-dialog discipline-dialog"/,
+  )
+  assert.match(
+    planTab,
     /<OverlayPortal>[\s\S]*?className="auto-ref-mask"/,
   )
   assert.doesNotMatch(
