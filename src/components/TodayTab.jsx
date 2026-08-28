@@ -9,6 +9,10 @@ import SectorForecast from './SectorForecast'
 import ErrorBoundary from './ErrorBoundary'
 import { fmtPct, pctClass, fmtInflow, fmtRaw } from '../format'
 import { deriveMarketRegime } from '../../shared/marketRegime.js'
+import {
+  buildMarketBoardGuidance,
+  buildSentimentGuidance,
+} from '../../shared/marketGuidance.js'
 
 // ============ 今日决策：先定方向，再核验个股 ============
 export default function TodayTab({ interval, market, sectors }) {
@@ -34,6 +38,35 @@ export default function TodayTab({ interval, market, sectors }) {
         speed={speed.data}
       />
       <LimitPool interval={interval} />
+    </div>
+  )
+}
+
+function MarketInterpretation({ guidance, compact = false }) {
+  return (
+    <div
+      className={
+        'market-interpretation'
+        + (compact ? ' compact' : '')
+      }
+      data-tone={guidance.tone}
+      role="note"
+      aria-label="盘面数据解读"
+    >
+      <span className="market-interpretation-icon">
+        <Icon name={guidance.icon} size={15} />
+      </span>
+      <div className="market-interpretation-body">
+        <div className="market-interpretation-title">
+          <span>这些数据说明</span>
+          <strong>{guidance.conclusion}</strong>
+        </div>
+        <p>{guidance.evidence}</p>
+        <div className="market-interpretation-action">
+          <span>操作参考</span>
+          <b>{guidance.action}</b>
+        </div>
+      </div>
     </div>
   )
 }
@@ -68,6 +101,7 @@ function SentimentGauge({ zt, zb, market }) {
     const level = score >= 70 ? { t: '情绪火热', c: 'red' } : score >= 55 ? { t: '情绪偏暖', c: 'gold' } : score >= 40 ? { t: '情绪中性', c: 'muted' } : { t: '情绪偏冷', c: 'green' }
     return { ztCount, zbCount, breakRate, maxBoard, lianban, score, level, b }
   }, [zt, zb, market])
+  const guidance = buildSentimentGuidance(g)
 
   if (!zt) return null
   return (
@@ -85,9 +119,7 @@ function SentimentGauge({ zt, zb, market }) {
         <div className="sg-cell"><span className="sg-k">连板数</span><span className="sg-v">{g.lianban}</span></div>
         <div className="sg-cell"><span className="sg-k">跌停</span><span className="sg-v green">{g.b.limitDown ?? '--'}</span></div>
       </div>
-      <div className="legend" style={{ padding: '6px 2px 0' }}>
-        炸板率低+连板高=接力意愿强、赚钱效应好；炸板率高+跌停多=情绪退潮，谨慎追高。综合评分仅供参考。
-      </div>
+      <MarketInterpretation guidance={guidance} compact />
     </section>
   )
 }
@@ -153,6 +185,14 @@ function MarketLight({ market, sectors, limitUp }) {
   }[regime.regime]
   const { light } = regimeView
   const topSector = (sectors && sectors.list && sectors.list[0]) || null
+  const guidance = buildMarketBoardGuidance({
+    regime,
+    indices: idx,
+    breadth: b,
+    topSector,
+    limitUp: zt,
+    limitDown: dt,
+  })
 
   const [reportOpen, setReportOpen] = useState(false) // 策略日报抽屉
 
@@ -225,6 +265,7 @@ function MarketLight({ market, sectors, limitUp }) {
           )}
         </div>
       </div>
+      <MarketInterpretation guidance={guidance} />
     </section>
   )
 }

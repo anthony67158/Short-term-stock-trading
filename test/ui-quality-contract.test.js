@@ -24,6 +24,7 @@ const lhbBoard = read('src/components/LhbBoard.jsx')
 const llmConfig = read('src/components/LLMConfig.jsx')
 const quantModelControl = read('src/components/QuantModelControl.jsx')
 const planTab = read('src/components/PlanTab.jsx')
+const todayTab = read('src/components/TodayTab.jsx')
 const generationStatus = read('src/components/AdviceGenerationStatus.jsx')
 const holdingPlanDialog = read('src/components/HoldingPlanDialog.jsx')
 const reviewTab = read('src/components/ReviewTab.jsx')
@@ -439,6 +440,27 @@ test('市场情绪指标卡的标签与数值保持水平居中', () => {
   assert.match(
     precision,
     /\.senti-gauge \.sg-k,[\s\S]*?\.senti-gauge \.sg-v\s*{[^}]*width:\s*100%[^}]*text-align:\s*center/s,
+  )
+})
+
+test('盘面指标垂直居中并在数据后直接给出结论与操作参考', () => {
+  assert.match(
+    precision,
+    /\.mb-idx,[\s\S]*?\.mb-stat\s*{[^}]*display:\s*flex[^}]*justify-content:\s*center[^}]*text-align:\s*center/s,
+  )
+  assert.match(
+    todayTab,
+    /function MarketInterpretation\(\{ guidance, compact = false \}\)/,
+  )
+  assert.equal(
+    (todayTab.match(/<MarketInterpretation\b/g) || []).length,
+    2,
+  )
+  assert.match(todayTab, /这些数据说明/)
+  assert.match(todayTab, /操作参考/)
+  assert.match(
+    precision,
+    /\.market-interpretation\s*{[^}]*display:\s*grid[^}]*border-top:\s*1px solid var\(--color-rule-2\)/s,
   )
 })
 
