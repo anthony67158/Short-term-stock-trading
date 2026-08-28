@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  evaluateTailPickNearMatch,
   evaluateTailPickSignal,
   mergeTailPickCurrentBar,
   TAIL_PICK_FORMULA_VERSION,
@@ -119,4 +120,71 @@ test('实时行情只替换同交易日K线而不重复追加', () => {
   assert.equal(merged.length, rows.length)
   assert.equal(merged.at(-1).close, 9.9)
   assert.equal(merged.at(-1).volume, 2100)
+})
+
+test('接近公式只允许最多两个次要条件未通过', () => {
+  const near = evaluateTailPickNearMatch({
+    matched: false,
+    failedRules: [
+      { key: 'HSL', label: '换手率大于5%' },
+      { key: 'AB32', label: '成交量不过热' },
+    ],
+  }, {
+    turnover: 4,
+    amount: 100_000_000,
+  })
+
+  assert.equal(near.matched, true)
+  assert.equal(near.matchRate, 85.7)
+  assert.deepEqual(
+    near.failedRules.map((item) => item.key),
+    ['HSL', 'AB32'],
+  )
+
+  const tooFar = evaluateTailPickNearMatch({
+    matched: false,
+    failedRules: [
+      { key: 'AB4', label: '上影线形态' },
+      { key: 'AB6', label: '前高约束' },
+      { key: 'AB32', label: '成交量约束' },
+    ],
+  }, {
+    turnover: 6,
+    amount: 100_000_000,
+  })
+  assert.equal(tooFar.matched, false)
+})
+
+test('接近公式不放宽核心反转条件、基础流动性或严格命中', () => {
+  const coreFailure = evaluateTailPickNearMatch({
+    matched: false,
+    failedRules: [
+      { key: 'AB8', label: '昨日跌幅超过约3.29%' },
+    ],
+  }, {
+    turnover: 6,
+    amount: 100_000_000,
+  })
+  assert.equal(coreFailure.matched, false)
+  assert.match(coreFailure.blockers.join('；'), /核心条件/)
+
+  const lowTurnover = evaluateTailPickNearMatch({
+    matched: false,
+    failedRules: [
+      { key: 'HSL', label: '换手率大于5%' },
+    ],
+  }, {
+    turnover: 2.99,
+    amount: 100_000_000,
+  })
+  assert.equal(lowTurnover.matched, false)
+
+  const strict = evaluateTailPickNearMatch({
+    matched: true,
+    failedRules: [],
+  }, {
+    turnover: 6,
+    amount: 100_000_000,
+  })
+  assert.equal(strict.matched, false)
 })

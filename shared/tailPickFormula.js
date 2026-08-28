@@ -1,4 +1,19 @@
 export const TAIL_PICK_FORMULA_VERSION = 'tail-pick-formula.v1'
+export const TAIL_PICK_NEAR_MATCH_VERSION = 'tail-pick-near-match.v1'
+
+const TAIL_PICK_RULE_COUNT = 14
+const NEAR_MATCH_RELAXABLE_RULES = new Set([
+  'AB4',
+  'AB5',
+  'HSL',
+  'AB6',
+  'AB7',
+  'AB12B',
+  'AB32',
+  'AB34',
+])
+const NEAR_MATCH_MIN_TURNOVER = 3
+const NEAR_MATCH_MIN_AMOUNT = 50_000_000
 
 function finite(value) {
   if (value == null || value === '') return null
@@ -167,5 +182,58 @@ export function evaluateTailPickSignal({
       minPreviousVolume15: Math.min(...previousVolumes15),
       maxVolume30: Math.max(...volumes30),
     },
+  }
+}
+
+export function evaluateTailPickNearMatch(
+  formula,
+  {
+    turnover = null,
+    amount = null,
+  } = {},
+) {
+  const failedRules = Array.isArray(formula?.failedRules)
+    ? formula.failedRules.filter(
+      (item) => item && typeof item === 'object' && item.key,
+    )
+    : []
+  const failedKeys = failedRules.map((item) => item.key)
+  const hardFailures = failedRules.filter(
+    (item) => !NEAR_MATCH_RELAXABLE_RULES.has(item.key),
+  )
+  const currentTurnover = finite(turnover)
+  const currentAmount = finite(amount)
+  const blockers = []
+
+  if (formula?.matched) blockers.push('已进入严格公式命中池')
+  if (!failedRules.length && !formula?.matched) {
+    blockers.push('公式数据不足，无法计算接近程度')
+  }
+  if (failedRules.length > 2) blockers.push('距离严格公式超过2项')
+  if (hardFailures.length) {
+    blockers.push(`核心条件未通过：${
+      hardFailures.map((item) => item.label).join('、')
+    }`)
+  }
+  if (
+    failedKeys.includes('HSL')
+    && !(currentTurnover >= NEAR_MATCH_MIN_TURNOVER)
+  ) {
+    blockers.push('换手率低于接近公式的3%底线')
+  }
+  if (!(currentAmount >= NEAR_MATCH_MIN_AMOUNT)) {
+    blockers.push('成交额低于5000万元')
+  }
+
+  return {
+    matched: blockers.length === 0,
+    sourceVersion: TAIL_PICK_NEAR_MATCH_VERSION,
+    matchRate: +(
+      (TAIL_PICK_RULE_COUNT - failedRules.length)
+      / TAIL_PICK_RULE_COUNT
+      * 100
+    ).toFixed(1),
+    failedRules,
+    blockers,
   }
 }
