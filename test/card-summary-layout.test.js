@@ -92,7 +92,7 @@ test('策略摘要使用两行主指令、紧凑价位和单行进度', () => {
   )
   assert.match(
     planTab,
-    /\{view\?\.detailActionLabel \|\| '查看后续预案'\}/,
+    /view\.detailActionLabel \|\| '查看后续预案'/,
   )
   assert.match(
     precision,
@@ -243,7 +243,7 @@ test('个股详情复用详情请求展示换手量比与主力散户资金', ()
 test('观望建议保留重新评估且始终允许用户手动建仓', () => {
   assert.match(
     planTab,
-    /className=\{\s*'pc-actions'[\s\S]{0,180}' with-review'[\s\S]{0,180}' deferred'/,
+    /className=\{\s*'pc-actions with-review'[\s\S]{0,180}' deferred'/,
   )
   assert.match(
     planTab,
@@ -251,11 +251,11 @@ test('观望建议保留重新评估且始终允许用户手动建仓', () => {
   )
   assert.match(
     planTab,
-    /!actionable[\s\S]*?className="chip-btn ghost review-action"[\s\S]*?重新评估/s,
+    /const detailActionLabel = !view[\s\S]*?'生成建议'[\s\S]*?view\.deferred[\s\S]*?'查看后续预案'[\s\S]*?'重新评估'[\s\S]*?'查看建议'/s,
   )
   assert.match(
     precision,
-    /\.plan-cand \.pc-actions\.with-review\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto\s+auto\s+40px/s,
+    /\.plan-cand \.pc-actions\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(88px,\s*112px\)\s+64px\s+40px[^}]*margin-top:\s*auto/s,
   )
   assert.match(
     precision,
@@ -264,5 +264,16 @@ test('观望建议保留重新评估且始终允许用户手动建仓', () => {
   assert.match(
     precision,
     /@media \(max-width:\s*30rem\)\s*{[\s\S]*?\.plan-cand \.pc-actions\.with-review \.manual-build\s*{[^}]*grid-column:\s*1\s*\/\s*-1/s,
+  )
+})
+
+test('桌面自选卡固定决策高度并将操作栏贴齐底部', () => {
+  assert.match(
+    precision,
+    /@media \(min-width:\s*50\.001rem\)\s*{[\s\S]*?\.plan-cand \.card-decision-slot\s*{[^}]*min-height:\s*232px/s,
+  )
+  assert.match(
+    precision,
+    /\.plan-cand \.pc-actions\s*{[^}]*min-height:\s*40px/s,
   )
 })

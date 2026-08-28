@@ -1252,6 +1252,10 @@ test('休市卡片不显示到价且自动复核状态只在触发后出现', ()
   )
   assert.match(
     planTab,
-    /Icon name="clock"[\s\S]{0,100}查看后续预案/,
+    /view\.detailActionLabel \|\| '查看后续预案'/,
+  )
+  assert.match(
+    planTab,
+    /view\.deferred \? 'clock' : 'spark'/,
   )
 })

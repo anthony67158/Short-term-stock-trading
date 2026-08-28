@@ -1090,11 +1090,20 @@ function CandidateActions({ p, q, onBuy, onAlert, onDelete }) {
     : baseView
   const actionable = !view
     || (view.kind === 'buy' && view.actionable !== false)
+  const detailActionLabel = !view
+    ? '生成建议'
+    : !actionable
+      ? view.deferred
+        ? view.detailActionLabel || '查看后续预案'
+        : '重新评估'
+      : '查看建议'
+  const detailActionIcon = !view || actionable
+    ? 'target'
+    : view.deferred ? 'clock' : 'spark'
   return (
     <div
       className={
-        'pc-actions'
-        + (!actionable ? ' with-review' : '')
+        'pc-actions with-review'
         + (view?.deferred ? ' deferred' : '')
       }
     >
@@ -1107,26 +1116,16 @@ function CandidateActions({ p, q, onBuy, onAlert, onDelete }) {
         <Icon name="cart" size={12} />
         手动建仓
       </button>
-      {!actionable && (view?.deferred ? (
-        <button
-          type="button"
-          className="chip-btn ghost review-action"
-          onClick={() => openStockDetail(p.code, q?.name || p.name)}
-        >
-          <Icon name="clock" size={12} />
-          {view?.detailActionLabel || '查看后续预案'}
-        </button>
-      ) : (
-        <button
-          type="button"
-          className="chip-btn ghost review-action"
-          onClick={() => openStockDetail(p.code, q?.name || p.name)}
-        >
-          <Icon name="spark" size={12} />重新评估
-        </button>
-      ))}
-      <button className="chip-btn ghost pc-alert-action" onClick={onAlert}><Icon name="bell" size={12} />预警</button>
-      <button className="icon-btn" aria-label={`删除${q?.name || p.name}`} title="删除" onClick={onDelete}><Icon name="trash" size={13} /></button>
+      <button
+        type="button"
+        className="chip-btn ghost review-action"
+        onClick={() => openStockDetail(p.code, q?.name || p.name)}
+      >
+        <Icon name={detailActionIcon} size={12} />
+        {detailActionLabel}
+      </button>
+      <button type="button" className="chip-btn ghost pc-alert-action" onClick={onAlert}><Icon name="bell" size={12} />预警</button>
+      <button type="button" className="icon-btn" aria-label={`删除${q?.name || p.name}`} title="删除" onClick={onDelete}><Icon name="trash" size={13} /></button>
     </div>
   )
 }
