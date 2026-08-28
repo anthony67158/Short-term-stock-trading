@@ -86,6 +86,21 @@ function nearCandidateScore(candidate) {
   }
 }
 
+function hasNearFundSupport(fund) {
+  const mainNow = finite(fund?.mainNetYi)
+  const retailNow = finite(fund?.retailNetYi)
+  const main5d = finite(fund?.main5dYi)
+  const days = Number(fund?.historyDayCount) || 0
+  return (
+    days >= 3
+    && mainNow != null
+    && retailNow != null
+    && main5d != null
+    && !(mainNow < 0 && retailNow > 0)
+    && (mainNow > 0 || main5d > 0)
+  )
+}
+
 function instruction(
   candidate,
   role,
@@ -196,8 +211,10 @@ export function rankTailPickNearCandidates(
   return candidates
     .filter((item) =>
       item?.nearMatch?.matched
+      && item?.stockGate?.passed
       && finite(item?.stockGate?.gain20) != null
       && finite(item.stockGate.gain20) <= 35
+      && hasNearFundSupport(item.fund)
     )
     .map((item) => ({
       ...item,

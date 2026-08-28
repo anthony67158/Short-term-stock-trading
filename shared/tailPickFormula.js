@@ -4,15 +4,13 @@ export const TAIL_PICK_NEAR_MATCH_VERSION = 'tail-pick-near-match.v1'
 const TAIL_PICK_RULE_COUNT = 14
 const NEAR_MATCH_RELAXABLE_RULES = new Set([
   'AB4',
-  'AB5',
   'HSL',
   'AB6',
   'AB7',
   'AB12B',
-  'AB32',
   'AB34',
 ])
-const NEAR_MATCH_MIN_TURNOVER = 3
+const NEAR_MATCH_MIN_TURNOVER = 4
 const NEAR_MATCH_MIN_AMOUNT = 50_000_000
 
 function finite(value) {
@@ -219,7 +217,7 @@ export function evaluateTailPickNearMatch(
     failedKeys.includes('HSL')
     && !(currentTurnover >= NEAR_MATCH_MIN_TURNOVER)
   ) {
-    blockers.push('换手率低于接近公式的3%底线')
+    blockers.push('换手率低于接近公式的4%底线')
   }
   if (!(currentAmount >= NEAR_MATCH_MIN_AMOUNT)) {
     blockers.push('成交额低于5000万元')
@@ -228,6 +226,8 @@ export function evaluateTailPickNearMatch(
   return {
     matched: blockers.length === 0,
     sourceVersion: TAIL_PICK_NEAR_MATCH_VERSION,
+    passedCount: TAIL_PICK_RULE_COUNT - failedRules.length,
+    totalRuleCount: TAIL_PICK_RULE_COUNT,
     matchRate: +(
       (TAIL_PICK_RULE_COUNT - failedRules.length)
       / TAIL_PICK_RULE_COUNT

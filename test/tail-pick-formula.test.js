@@ -127,18 +127,20 @@ test('接近公式只允许最多两个次要条件未通过', () => {
     matched: false,
     failedRules: [
       { key: 'HSL', label: '换手率大于5%' },
-      { key: 'AB32', label: '成交量不过热' },
+      { key: 'AB4', label: '上影线形态' },
     ],
   }, {
-    turnover: 4,
+    turnover: 4.2,
     amount: 100_000_000,
   })
 
   assert.equal(near.matched, true)
   assert.equal(near.matchRate, 85.7)
+  assert.equal(near.passedCount, 12)
+  assert.equal(near.totalRuleCount, 14)
   assert.deepEqual(
     near.failedRules.map((item) => item.key),
-    ['HSL', 'AB32'],
+    ['HSL', 'AB4'],
   )
 
   const tooFar = evaluateTailPickNearMatch({
@@ -174,10 +176,21 @@ test('接近公式不放宽核心反转条件、基础流动性或严格命中',
       { key: 'HSL', label: '换手率大于5%' },
     ],
   }, {
-    turnover: 2.99,
+    turnover: 3.99,
     amount: 100_000_000,
   })
   assert.equal(lowTurnover.matched, false)
+
+  const overheatedVolume = evaluateTailPickNearMatch({
+    matched: false,
+    failedRules: [
+      { key: 'AB32', label: '当日成交量过热' },
+    ],
+  }, {
+    turnover: 6,
+    amount: 100_000_000,
+  })
+  assert.equal(overheatedVolume.matched, false)
 
   const strict = evaluateTailPickNearMatch({
     matched: true,

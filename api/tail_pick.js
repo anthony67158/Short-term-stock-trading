@@ -49,6 +49,8 @@ function publicCandidate(candidate) {
       .map((item) => item.label),
     nearMatch: candidate.nearMatch
       ? {
+          passedCount: candidate.nearMatch.passedCount,
+          totalRuleCount: candidate.nearMatch.totalRuleCount,
           matchRate: candidate.nearMatch.matchRate,
           failedRules: (candidate.nearMatch.failedRules || [])
             .map((item) => ({

@@ -75,7 +75,7 @@ test('实时预筛保留严格公式和接近公式的共同候选', () => {
   )
   assert.equal(
     passesTailPickRealtimePrefilter(
-      mapTailPickMarketRow(marketRow({ f8: 2.99 })),
+      mapTailPickMarketRow(marketRow({ f8: 3.99 })),
       '2026-08-28',
     ),
     false,
@@ -274,17 +274,23 @@ test('接近公式池最多五只且全部只能加入自选观察', () => {
         ? [{ key: 'AB4', label: '上影线形态' }]
         : [
             { key: 'HSL', label: '换手率大于5%' },
-            { key: 'AB32', label: '成交量约束' },
+            { key: 'AB4', label: '上影线形态' },
           ],
     },
     stockGate: {
-      passed: index === 6,
+      passed: true,
       gain20: 8,
       evidence: [],
     },
-    intraday: { passed: index === 6, price: 10, vwap: 9.96 },
+    intraday: { passed: true, price: 10, vwap: 9.96 },
     quote: { price: 10, amount: 100_000_000 + index },
-    sectorOpportunity: { matched: index === 6 },
+    sectorOpportunity: { matched: true },
+    fund: {
+      mainNetYi: 0.1,
+      retailNetYi: -0.05,
+      main5dYi: 0.2,
+      historyDayCount: 5,
+    },
   }))
 
   const result = rankTailPickNearCandidates(candidates)
@@ -343,18 +349,26 @@ test('严格公式为空时仍返回独立接近观察池且不生成仓位', as
     formula: { matched: false, signals: [] },
     nearMatch: {
       matched: true,
+      passedCount: 13,
+      totalRuleCount: 14,
       matchRate: 92.9,
       failedRules: [{ key: 'AB4', label: '上影线形态' }],
     },
     stockGate: {
-      passed: false,
+      passed: true,
       gain20: 8,
       evidence: ['近20日位置正常'],
-      blockers: ['未进入板块前瞻确认的主线方向'],
+      blockers: [],
     },
     intraday: { passed: true, price: 10, vwap: 9.96 },
     quote: { price: 10, amount: 100_000_000 },
-    sectorOpportunity: { matched: false },
+    sectorOpportunity: { matched: true },
+    fund: {
+      mainNetYi: 0.1,
+      retailNetYi: -0.05,
+      main5dYi: 0.3,
+      historyDayCount: 5,
+    },
   }
 
   const result = await runTailPickScan({
@@ -388,6 +402,42 @@ test('严格公式为空时仍返回独立接近观察池且不生成仓位', as
   )
   assert.match(result.result.reason, /接近公式观察股/)
   assert.deepEqual(saved, result)
+})
+
+test('接近公式候选必须通过主线分时与资金承接', () => {
+  const base = {
+    code: '600001',
+    nearMatch: {
+      matched: true,
+      matchRate: 92.9,
+      failedRules: [{ key: 'AB4', label: '上影线形态' }],
+    },
+    stockGate: { passed: true, gain20: 8 },
+    intraday: { passed: true },
+    quote: { amount: 100_000_000 },
+    sectorOpportunity: { matched: true },
+    fund: {
+      mainNetYi: 0.1,
+      retailNetYi: -0.05,
+      main5dYi: 0.3,
+      historyDayCount: 5,
+    },
+  }
+
+  assert.equal(rankTailPickNearCandidates([base]).length, 1)
+  assert.equal(rankTailPickNearCandidates([{
+    ...base,
+    stockGate: { passed: false, gain20: 8 },
+  }]).length, 0)
+  assert.equal(rankTailPickNearCandidates([{
+    ...base,
+    fund: {
+      mainNetYi: -0.1,
+      retailNetYi: 0.1,
+      main5dYi: -0.2,
+      historyDayCount: 5,
+    },
+  }]).length, 0)
 })
 
 test('手动试算可在14:50前运行且不会写入正式结果', async () => {

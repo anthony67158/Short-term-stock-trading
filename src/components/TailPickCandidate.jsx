@@ -30,6 +30,9 @@ export default function TailPickCandidate({
         candidate.sector?.name
           ? `${candidate.sector.name}方向`
           : '暂未匹配主线方向',
+        candidate.fund?.historyDayCount
+          ? `${candidate.fund.historyDayCount}日资金通过承接检查`
+          : null,
       ].filter(Boolean)
     : [
         candidate.sector?.name
@@ -53,7 +56,9 @@ export default function TailPickCandidate({
         </span>
         <strong>
           {near
-            ? `${candidate.nearMatch?.matchRate ?? '--'}%吻合`
+            ? `${candidate.nearMatch?.passedCount ?? '--'}/${
+              candidate.nearMatch?.totalRuleCount ?? 14
+            }项`
             : `${candidate.score}分`}
         </strong>
       </div>

@@ -87,8 +87,10 @@ export function passesTailPickRealtimePrefilter(
   return (
     quote.pct > MIN_FORMULA_GAIN_PCT
     && amount >= 50_000_000
-    && turnover >= 3
+    && turnover >= 4
     && open < price
+    && high / open > 1.01
+    && high / open < 1.09
     && high / price < 1.06
   )
 }

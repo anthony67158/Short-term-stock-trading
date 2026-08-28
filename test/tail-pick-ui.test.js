@@ -37,6 +37,8 @@ test('结果明确区分首选候补且只写入人工观察计划', () => {
   assert.match(candidate, /首选观察/)
   assert.match(candidate, /候补/)
   assert.match(candidate, /接近公式/)
+  assert.match(candidate, /passedCount/)
+  assert.match(candidate, /totalRuleCount/)
   assert.match(candidate, /加入尾盘计划/)
   assert.match(candidate, /加入自选/)
   assert.match(component, /planStore\.addPlan/)
