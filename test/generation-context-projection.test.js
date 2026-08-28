@@ -97,6 +97,9 @@ test('板块模型载荷保留排名与资金结构，不携带全部成分股�
         mainInflow: index * 100,
         mainRatio: index / 10,
         turnover: index + 1,
+        entryStage: index === 0 ? 'EARLY_LAYOUT' : 'EXTENDED_WATCH',
+        entryLabel: index === 0 ? '潜伏候选' : '已走强，仅跟踪',
+        chaseRisk: index !== 0,
         raw: marker,
       })),
     }],
@@ -114,6 +117,8 @@ test('板块模型载荷保留排名与资金结构，不携带全部成分股�
   assert.equal(sector.factors.nested, undefined)
   assert.equal(sector.stocks.length, 8)
   assert.equal(sector.stocks[0].raw, undefined)
+  assert.equal(sector.stocks[0].entryStage, 'EARLY_LAYOUT')
+  assert.equal(sector.stocks[1].chaseRisk, true)
   assert.equal(sector.reasons[0].length, 180)
   assert.equal(payload.theories.length, 8)
   assert.equal(payload.theories[0].text.length, 400)

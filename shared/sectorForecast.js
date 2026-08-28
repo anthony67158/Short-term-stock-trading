@@ -15,6 +15,13 @@ const ACTIONS = new Set([
   'AVOID',
 ])
 
+const TIMING_LANES = new Set([
+  'EARLY_LAYOUT',
+  'CONFIRMING',
+  'EXTENDED_WATCH',
+  'WEAK',
+])
+
 const finite = (value, fallback = null) => {
   if (value === null || value === undefined || value === '') return fallback
   const number = Number(value)
@@ -129,8 +136,8 @@ function crowdingPenaltyOf({
   momentum5Pct,
 }) {
   let penalty = 0
-  if (pctPercentile >= 0.9) penalty += 14
-  if (pctPercentile >= 0.97) penalty += 8
+  if (currentPct >= 3 && pctPercentile >= 0.9) penalty += 14
+  if (currentPct >= 4.5 && pctPercentile >= 0.97) penalty += 8
   if (currentPct >= 7) penalty += 10
   else if (currentPct >= 5) penalty += 6
   if (limitUpPct >= 25) penalty += 12
@@ -151,6 +158,100 @@ function divergencePenaltyOf({
   if (currentPct > 0 && latestMainRatio < 0) penalty += 10
   if (upBreadthPct >= 50 && inflowBreadthPct < 30) penalty += 10
   return Math.min(40, penalty)
+}
+
+function layoutTimingOf({
+  currentPct,
+  momentum5Pct,
+  pricePositionPct,
+  limitUpPct,
+  relation,
+  scores,
+  penalties,
+}) {
+  const dailyMove = finite(currentPct, 0)
+  const momentum5 = finite(momentum5Pct, 0)
+  const position = finite(pricePositionPct, 50)
+  const limitBreadth = finite(limitUpPct, 0)
+  const dailyTiming = dailyMove < -2.5
+    ? 20
+    : dailyMove <= 2.5
+      ? clamp(100 - Math.abs(dailyMove - 0.8) * 10)
+      : dailyMove <= 5
+        ? clamp(72 - (dailyMove - 2.5) * 15)
+        : 5
+  const momentumTiming = momentum5 < -5
+    ? 15
+    : momentum5 <= 1
+      ? 78
+      : momentum5 <= 6
+        ? clamp(100 - (momentum5 - 3) * 7)
+        : momentum5 <= 10
+          ? clamp(55 - (momentum5 - 6) * 10)
+          : 5
+  const positionTiming = position <= 30
+    ? 72
+    : position <= 70
+      ? 100
+      : position <= 85
+        ? 70
+        : position <= 92 ? 35 : 10
+  const breadthTiming = limitBreadth <= 3
+    ? 100
+    : limitBreadth <= 8
+      ? 76
+      : limitBreadth <= 15 ? 38 : 5
+  const priceTiming = (
+    dailyTiming * 0.38
+    + momentumTiming * 0.32
+    + positionTiming * 0.2
+    + breadthTiming * 0.1
+  )
+  const capitalSignal = (
+    scores.flowPersistence * 0.34
+    + scores.flowAcceleration * 0.28
+    + scores.fundStrength * 0.28
+    + scores.priceFund * 0.1
+  )
+  const layoutScore = clamp(
+    capitalSignal * 0.62
+      + priceTiming * 0.38
+      - finite(penalties.divergence, 0) * 0.7
+      - finite(penalties.missingData, 0) * 0.3,
+  )
+  const extended = (
+    dailyMove >= 6.5
+    || momentum5 >= 12
+    || (position >= 92 && momentum5 >= 8)
+    || limitBreadth >= 15
+    || finite(penalties.crowding, 0) >= 24
+  )
+  let lane = 'WEAK'
+  if (extended) {
+    lane = 'EXTENDED_WATCH'
+  } else if (
+    ['ACCUMULATION', 'RESONANCE'].includes(relation)
+    && capitalSignal >= 50
+    && dailyMove <= 2.5
+    && momentum5 < 6
+    && layoutScore >= 58
+  ) {
+    lane = 'EARLY_LAYOUT'
+  } else if (
+    relation === 'RESONANCE'
+    && dailyMove < 5
+    && momentum5 < 10
+    && layoutScore >= 52
+  ) {
+    lane = 'CONFIRMING'
+  }
+  return {
+    lane,
+    layoutScore: rounded(layoutScore, 1),
+    capitalSignal: rounded(capitalSignal, 1),
+    priceTiming: rounded(priceTiming, 1),
+    chaseRisk: extended,
+  }
 }
 
 export function buildSectorForecastFeatures({
@@ -214,6 +315,40 @@ export function buildSectorForecastFeatures({
     inflowBreadthPct,
     upBreadthPct,
   })
+  const scores = {
+    flowPersistence: rounded(flowPersistence, 1),
+    flowAcceleration: rounded(flowAccelerationScore, 1),
+    fundStrength: rounded((
+      clamp(sectorPercentiles.mainInflow, 0, 1) * 0.6
+        + clamp(sectorPercentiles.mainRatio, 0, 1) * 0.4
+    ) * 100, 1),
+    priceFund: {
+      RESONANCE: 82,
+      ACCUMULATION: 92,
+      DISTRIBUTION: 20,
+      WEAKENING: 10,
+      NEUTRAL: 50,
+      UNKNOWN: 35,
+    }[relation],
+    breadth: rounded(upBreadthPct * 0.45 + inflowBreadthPct * 0.55, 1),
+    leadership: rounded(clamp(leadership.strength)),
+    liquidity: rounded(clamp(sectorPercentiles.amount, 0, 1) * 100, 1),
+    marketFit: rounded(clamp(market.score, 0, 100), 1),
+  }
+  const penalties = {
+    crowding,
+    divergence,
+    missingData: ordered.length < 5 ? 15 : 0,
+  }
+  const timing = layoutTimingOf({
+    currentPct,
+    momentum5Pct: momentum5,
+    pricePositionPct: position,
+    limitUpPct,
+    relation,
+    scores,
+    penalties,
+  })
   return {
     schemaVersion: SECTOR_FORECAST_SCHEMA_VERSION,
     code: String(sector.code || ''),
@@ -235,24 +370,8 @@ export function buildSectorForecastFeatures({
       flowStreak,
     },
     scores: {
-      flowPersistence: rounded(flowPersistence, 1),
-      flowAcceleration: rounded(flowAccelerationScore, 1),
-      fundStrength: rounded((
-        clamp(sectorPercentiles.mainInflow, 0, 1) * 0.6
-          + clamp(sectorPercentiles.mainRatio, 0, 1) * 0.4
-      ) * 100, 1),
-      priceFund: {
-        RESONANCE: 82,
-        ACCUMULATION: 92,
-        DISTRIBUTION: 20,
-        WEAKENING: 10,
-        NEUTRAL: 50,
-        UNKNOWN: 35,
-      }[relation],
-      breadth: rounded(upBreadthPct * 0.45 + inflowBreadthPct * 0.55, 1),
-      leadership: rounded(clamp(leadership.strength)),
-      liquidity: rounded(clamp(sectorPercentiles.amount, 0, 1) * 100, 1),
-      marketFit: rounded(clamp(market.score, 0, 100), 1),
+      ...scores,
+      earlyTiming: timing.priceTiming,
     },
     relation,
     breadth: {
@@ -277,11 +396,8 @@ export function buildSectorForecastFeatures({
       pct: rounded(pctPercentile * 100),
       leadPct: rounded(clamp(sectorPercentiles.leadPct, 0, 1) * 100),
     },
-    penalties: {
-      crowding,
-      divergence,
-      missingData: ordered.length < 5 ? 15 : 0,
-    },
+    penalties,
+    timing,
   }
 }
 
@@ -296,7 +412,9 @@ function lifecycleOf(features) {
     score.flowPersistence < 30
     && score.fundStrength < 35
   ) return 'RETREAT'
-  if (penalties.crowding >= 20) return 'ACCELERATION'
+  if (features.timing?.lane === 'EXTENDED_WATCH') return 'ACCELERATION'
+  if (features.timing?.lane === 'EARLY_LAYOUT') return 'ACCUMULATION'
+  if (features.timing?.lane === 'CONFIRMING') return 'STARTUP'
   if (
     score.flowPersistence >= 60
     && score.flowAcceleration >= 55
@@ -311,19 +429,32 @@ function lifecycleOf(features) {
   return score.fundStrength < 40 ? 'RETREAT' : 'DIVERGENCE'
 }
 
-function actionabilityOf(phase, nextScore, weekScore, penalties) {
+function actionabilityOf(
+  phase,
+  nextScore,
+  weekScore,
+  penalties,
+  timing = {},
+) {
   if (phase === 'RETREAT') return 'AVOID'
-  if (phase === 'ACCELERATION') return 'WATCH_ONLY'
+  if (
+    phase === 'ACCELERATION'
+    || timing.lane === 'EXTENDED_WATCH'
+  ) return 'WATCH_ONLY'
   if (phase === 'DIVERGENCE') {
     return Math.max(nextScore, weekScore) >= 55
       ? 'WAIT_PULLBACK'
       : 'AVOID'
   }
   if (
-    penalties.crowding > 0
+    penalties.crowding >= 20
     || penalties.divergence > 0
     || penalties.missingData > 0
   ) return 'WAIT_PULLBACK'
+  if (
+    timing.lane === 'EARLY_LAYOUT'
+    && finite(timing.layoutScore, 0) >= 58
+  ) return 'LAYOUT'
   return Math.max(nextScore, weekScore) >= 62
     ? 'LAYOUT'
     : 'WAIT_PULLBACK'
@@ -331,6 +462,12 @@ function actionabilityOf(phase, nextScore, weekScore, penalties) {
 
 function reasonsFor(features, phase) {
   const reasons = []
+  if (features.timing?.lane === 'EARLY_LAYOUT') {
+    reasons.push('资金先行，价格尚未充分启动')
+  }
+  if (features.timing?.lane === 'CONFIRMING') {
+    reasons.push('趋势刚启动，等待个股低风险介入')
+  }
   if (features.scores.flowPersistence >= 60) {
     reasons.push(`近10日资金持续性${features.scores.flowPersistence}分`)
   }
@@ -367,24 +504,26 @@ export function scoreSectorForecast(features = {}) {
   const weighted = (weights) => Object.entries(weights)
     .reduce((sum, [key, weight]) => sum + clamp(score[key]) * weight, 0)
   const nextBase = weighted({
-    flowPersistence: 0.22,
-    flowAcceleration: 0.13,
+    flowPersistence: 0.2,
+    flowAcceleration: 0.14,
     fundStrength: 0.15,
     priceFund: 0.1,
-    breadth: 0.15,
-    leadership: 0.1,
-    liquidity: 0.08,
-    marketFit: 0.07,
+    earlyTiming: 0.2,
+    breadth: 0.08,
+    leadership: 0.05,
+    liquidity: 0.04,
+    marketFit: 0.04,
   })
   const weekBase = weighted({
-    flowPersistence: 0.27,
-    flowAcceleration: 0.13,
-    fundStrength: 0.12,
+    flowPersistence: 0.24,
+    flowAcceleration: 0.14,
+    fundStrength: 0.13,
     priceFund: 0.1,
-    breadth: 0.12,
-    leadership: 0.08,
-    liquidity: 0.08,
-    marketFit: 0.1,
+    earlyTiming: 0.18,
+    breadth: 0.07,
+    leadership: 0.04,
+    liquidity: 0.04,
+    marketFit: 0.06,
   })
   const totalPenalty = clamp(
     finite(penalties.crowding, 0)
@@ -401,6 +540,7 @@ export function scoreSectorForecast(features = {}) {
     nextScore,
     weekScore,
     penalties,
+    features.timing,
   )
   return {
     schemaVersion: SECTOR_FORECAST_SCHEMA_VERSION,
@@ -412,6 +552,9 @@ export function scoreSectorForecast(features = {}) {
       ? actionability
       : 'WATCH_ONLY',
     forecast: {
+      layout: {
+        score: rounded(finite(features.timing?.layoutScore, 0), 1),
+      },
       next: { score: nextScore, probability: null },
       week: {
         score: weekScore,
@@ -435,6 +578,18 @@ export function scoreSectorForecast(features = {}) {
       missingData: finite(penalties.missingData, 0),
       total: totalPenalty,
     },
+    timing: {
+      lane: TIMING_LANES.has(features.timing?.lane)
+        ? features.timing.lane
+        : 'WEAK',
+      layoutScore: rounded(finite(features.timing?.layoutScore, 0), 1),
+      capitalSignal: rounded(
+        finite(features.timing?.capitalSignal, 0),
+        1,
+      ),
+      priceTiming: rounded(finite(features.timing?.priceTiming, 0), 1),
+      chaseRisk: features.timing?.chaseRisk === true,
+    },
     reasons: reasonsFor(features, phase),
     risks: risksFor(features, phase),
     source: {
@@ -456,18 +611,36 @@ export function scoreSectorForecast(features = {}) {
 }
 
 export function rankSectorForecasts(items = [], horizon = 'next') {
-  const key = horizon === 'week' ? 'week' : 'next'
+  const key = ['week', 'layout'].includes(horizon)
+    ? horizon
+    : 'next'
+  const timingOrder = {
+    EARLY_LAYOUT: 0,
+    CONFIRMING: 1,
+    EXTENDED_WATCH: 2,
+    WEAK: 3,
+  }
   return (Array.isArray(items) ? items : [])
     .filter((item) =>
       item?.schemaVersion === SECTOR_FORECAST_SCHEMA_VERSION
       && /^BK\d+$/.test(String(item.code || ''))
     )
     .slice()
-    .sort((left, right) =>
-      finite(right.forecast?.[key]?.score, -1)
-        - finite(left.forecast?.[key]?.score, -1)
-      || String(left.code).localeCompare(String(right.code))
-    )
+    .sort((left, right) => {
+      if (key === 'layout') {
+        const laneDelta = (
+          timingOrder[left.timing?.lane] ?? 99
+        ) - (
+          timingOrder[right.timing?.lane] ?? 99
+        )
+        if (laneDelta) return laneDelta
+      }
+      return (
+        finite(right.forecast?.[key]?.score, -1)
+          - finite(left.forecast?.[key]?.score, -1)
+        || String(left.code).localeCompare(String(right.code))
+      )
+    })
     .map((item, index) => ({ ...item, rank: index + 1 }))
 }
 

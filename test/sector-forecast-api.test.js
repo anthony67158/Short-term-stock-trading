@@ -705,6 +705,49 @@ test('候选初筛保留资金强但价格未启动的潜伏板块', () => {
   )
 })
 
+test('候选初筛为资金先行但尚未大涨的板块保留主要名额', () => {
+  const selected = selectSectorForecastUniverse([
+    {
+      code: 'BK2000',
+      name: '低位蓄势',
+      pct: 0.6,
+      mainInflow: 500e6,
+      mainRatio: 6,
+      amount: 12e9,
+    },
+    {
+      code: 'BK2001',
+      name: '涨停热点一',
+      pct: 9.8,
+      mainInflow: 2000e6,
+      mainRatio: 15,
+      amount: 50e9,
+    },
+    {
+      code: 'BK2002',
+      name: '涨停热点二',
+      pct: 8.7,
+      mainInflow: 1800e6,
+      mainRatio: 14,
+      amount: 45e9,
+    },
+    {
+      code: 'BK2003',
+      name: '高位热点三',
+      pct: 7.2,
+      mainInflow: 1600e6,
+      mainRatio: 12,
+      amount: 40e9,
+    },
+  ], 3)
+
+  assert.equal(selected[0].code, 'BK2000')
+  assert.ok(selected.some((item) => item.code === 'BK2000'))
+  assert.ok(
+    selected.filter((item) => Number(item.pct) >= 7).length <= 2,
+  )
+})
+
 test('快照以真实成分股计算扩散并输出双周期确定性排名', () => {
   const sectors = [{
     code: 'BK1000',
@@ -787,6 +830,93 @@ test('快照以真实成分股计算扩散并输出双周期确定性排名', ()
   )
   assert.ok(snapshot.sectors[0].forecast.next.score >= 0)
   assert.ok(snapshot.sectors[0].forecast.week.score >= 0)
+})
+
+test('成分股先展示资金流入且尚未大涨的布局候选，涨停龙头降为跟踪', () => {
+  const sector = {
+    code: 'BK2100',
+    name: '先进材料',
+    price: 102,
+    pct: 1.1,
+    mainInflow: 680e6,
+    mainRatio: 7.2,
+    amount: 26e9,
+    leadCode: '600101',
+    leadName: '涨停龙头',
+    leadPct: 10,
+  }
+  const history = Array.from({ length: 10 }, (_, index) => ({
+    date: `2026-08-${String(7 + index).padStart(2, '0')}`,
+    close: 100 + index * 0.2,
+    pct: 0.2,
+    mainInflow: (80 + index * 30) * 1e6,
+    mainRatio: 1.5 + index * 0.4,
+  }))
+  const members = [{
+    code: '600101',
+    name: '涨停龙头',
+    price: 22,
+    pct: 10,
+    mainInflow: 500e6,
+    mainRatio: 15,
+    amount: 5e9,
+    turnover: 12,
+    volRatio: 3.6,
+    amplitude: 10,
+    isLimitUp: true,
+  }, {
+    code: '600102',
+    name: '低位中军',
+    price: 16,
+    pct: 1.2,
+    mainInflow: 180e6,
+    mainRatio: 8,
+    amount: 3e9,
+    turnover: 3.2,
+    volRatio: 1.35,
+    amplitude: 3.5,
+    isLimitUp: false,
+  }, {
+    code: '600103',
+    name: '温和启动',
+    price: 13,
+    pct: 3.4,
+    mainInflow: 120e6,
+    mainRatio: 6,
+    amount: 2e9,
+    turnover: 4.1,
+    volRatio: 1.6,
+    amplitude: 4.5,
+    isLimitUp: false,
+  }, {
+    code: '600104',
+    name: '弱势跟随',
+    price: 9,
+    pct: -3.5,
+    mainInflow: -80e6,
+    mainRatio: -5,
+    amount: 1e9,
+    turnover: 3,
+    volRatio: 0.8,
+    amplitude: 4,
+    isLimitUp: false,
+  }]
+
+  const snapshot = buildSectorForecastSnapshot({
+    signalDate: '2026-08-20',
+    sectors: [sector],
+    histories: new Map([[sector.code, history]]),
+    members: new Map([[sector.code, members]]),
+  })
+  const stocks = snapshot.sectors[0].stocks
+
+  assert.equal(stocks[0].code, '600102')
+  assert.equal(stocks[0].entryStage, 'EARLY_LAYOUT')
+  assert.equal(stocks[0].entryLabel, '潜伏候选')
+  const hot = stocks.find((item) => item.code === '600101')
+  assert.equal(hot?.entryStage, 'EXTENDED_WATCH')
+  assert.equal(hot?.entryLabel, '已走强，仅跟踪')
+  assert.equal(stocks.some((item) => item.code === '600104'), false)
 })
 
 test('LightGBM横截面概率按20%基准校准并约束布局动作', () => {

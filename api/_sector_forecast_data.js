@@ -100,6 +100,25 @@ function universeScore(sector, sectors) {
   )
 }
 
+function earlyUniverseScore(sector, sectors) {
+  const ranks = sectorPercentiles(sector, sectors)
+  const pct = Number(sector.pct) || 0
+  const priceReadiness = pct < -2
+    ? 30
+    : pct <= 2.5
+      ? clamp(100 - Math.abs(pct - 0.8) * 10)
+      : pct <= 4.5
+        ? clamp(70 - (pct - 2.5) * 20)
+        : 0
+  return rounded(
+    ranks.mainInflow * 35
+      + ranks.mainRatio * 35
+      + ranks.amount * 10
+      + priceReadiness * 0.2,
+    2,
+  )
+}
+
 export function selectSectorForecastUniverse(rows = [], limit = 24) {
   const valid = (Array.isArray(rows) ? rows : []).filter((item) =>
     /^BK\d{4}$/.test(String(item?.code || ''))
@@ -108,17 +127,43 @@ export function selectSectorForecastUniverse(rows = [], limit = 24) {
     && Number.isFinite(Number(item?.mainRatio))
     && Number(item?.amount) > 0
   )
-  return valid
+  const scored = valid
     .map((item) => ({
       ...item,
       universeScore: universeScore(item, valid),
+      earlyUniverseScore: earlyUniverseScore(item, valid),
     }))
-    .sort((left, right) =>
+  const byStrength = scored.slice().sort((left, right) =>
       right.universeScore - left.universeScore
       || Number(right.mainInflow) - Number(left.mainInflow)
       || String(left.code).localeCompare(String(right.code))
     )
-    .slice(0, Math.max(1, Math.min(60, Number(limit) || 24)))
+  const maximum = Math.max(1, Math.min(60, Number(limit) || 24))
+  const early = scored
+    .filter((item) =>
+      Number(item.pct) >= -2
+      && Number(item.pct) <= 3.5
+      && Number(item.mainInflow) > 0
+      && Number(item.mainRatio) > 0
+    )
+    .sort((left, right) =>
+      right.earlyUniverseScore - left.earlyUniverseScore
+      || right.universeScore - left.universeScore
+      || String(left.code).localeCompare(String(right.code))
+    )
+  const earlyQuota = Math.min(
+    early.length,
+    Math.max(1, Math.ceil(maximum * 0.65)),
+  )
+  const selected = early.slice(0, earlyQuota)
+  const selectedCodes = new Set(selected.map((item) => item.code))
+  for (const item of byStrength) {
+    if (selected.length >= maximum) break
+    if (selectedCodes.has(item.code)) continue
+    selected.push(item)
+    selectedCodes.add(item.code)
+  }
+  return selected
 }
 
 function marketContext(sectors) {
@@ -202,7 +247,97 @@ function leadershipContext(sector, memberRows) {
   }
 }
 
+function stockEntryProfile(item) {
+  const pct = Number(item?.pct) || 0
+  const mainInflow = Number(item?.mainInflow) || 0
+  const mainRatio = Number(item?.mainRatio) || 0
+  const volRatio = Number(item?.volRatio) || 0
+  const evidence = item?.conceptLeadership?.evidence || {}
+  const fundScore = (
+    (Number(evidence.mainInflowRank) || 0) * 0.62
+    + (Number(evidence.mainRatioRank) || 0) * 0.38
+  )
+  const liquidityScore = Number(evidence.amountRank) || 0
+  const priceReadiness = pct < -2.5
+    ? 20
+    : pct <= 2.5
+      ? clamp(100 - Math.abs(pct - 0.8) * 12)
+      : pct < 5
+        ? clamp(72 - (pct - 2.5) * 16)
+        : 5
+  const volumeReadiness = volRatio <= 0
+    ? 50
+    : volRatio <= 1.8
+      ? 90
+      : volRatio <= 2.5 ? 58 : 20
+  const isExtended = (
+    item?.isLimitUp === true
+    || pct >= 7
+    || (pct >= 5 && volRatio >= 2.5)
+  )
+  const capitalConfirmed = mainInflow > 0 && mainRatio > 0
+  const stage = isExtended
+    ? 'EXTENDED_WATCH'
+    : capitalConfirmed && pct >= -2 && pct <= 2.5
+      ? 'EARLY_LAYOUT'
+      : capitalConfirmed && pct < 7
+        ? 'CONFIRMING'
+        : 'WATCH'
+  const entryLabel = {
+    EARLY_LAYOUT: '潜伏候选',
+    CONFIRMING: '启动确认',
+    EXTENDED_WATCH: '已走强，仅跟踪',
+    WATCH: '普通观察',
+  }[stage]
+  return {
+    stage,
+    entryLabel,
+    chaseRisk: isExtended,
+    layoutScore: rounded(clamp(
+      fundScore * 0.5
+        + liquidityScore * 0.18
+        + priceReadiness * 0.24
+        + volumeReadiness * 0.08
+        - (isExtended ? 45 : 0),
+    ), 1),
+  }
+}
+
+function selectSectorStocks(items = [], limit = 5) {
+  const stageOrder = {
+    EARLY_LAYOUT: 0,
+    CONFIRMING: 1,
+    EXTENDED_WATCH: 2,
+    WATCH: 3,
+  }
+  const profiled = (Array.isArray(items) ? items : [])
+    .map((item) => ({
+      ...item,
+      sectorEntry: stockEntryProfile(item),
+    }))
+    .sort((left, right) =>
+      stageOrder[left.sectorEntry.stage]
+        - stageOrder[right.sectorEntry.stage]
+      || right.sectorEntry.layoutScore
+        - left.sectorEntry.layoutScore
+      || Number(right.conceptLeadership?.leaderScore || 0)
+        - Number(left.conceptLeadership?.leaderScore || 0)
+      || String(left.code).localeCompare(String(right.code))
+    )
+  const layout = profiled
+    .filter((item) =>
+      ['EARLY_LAYOUT', 'CONFIRMING'].includes(item.sectorEntry.stage)
+    )
+    .slice(0, 3)
+  const tracking = profiled
+    .filter((item) => item.sectorEntry.stage === 'EXTENDED_WATCH')
+    .slice(0, 2)
+  const selected = [...layout, ...tracking]
+  return selected.slice(0, limit)
+}
+
 function stockView(item) {
+  const entry = item.sectorEntry || stockEntryProfile(item)
   return {
     code: String(item.code),
     name: String(item.name || ''),
@@ -213,6 +348,11 @@ function stockView(item) {
     pct: rounded(item.pct),
     mainInflow: rounded(item.mainInflow, 0),
     mainRatio: rounded(item.mainRatio),
+    entryStage: entry.stage,
+    entryLabel: entry.entryLabel,
+    layoutScore: entry.layoutScore,
+    chaseRisk: entry.chaseRisk,
+    isLimitUp: item.isLimitUp === true,
   }
 }
 
@@ -294,6 +434,7 @@ export function buildSectorForecastSnapshot({
       breadth: features.breadth,
       raw: features.raw,
       forecast: {
+        layout: baseline.forecast.layout,
         next: {
           ...baseline.forecast.next,
           score: nextScore,
@@ -310,14 +451,18 @@ export function buildSectorForecastSnapshot({
             : null,
         },
       },
-      stocks: leadership.leaders.slice(0, 3).map(stockView),
+      stocks: selectSectorStocks(leadership.leaders).map(stockView),
     }
   })
   const nextRanked = rankSectorForecasts(forecasts, 'next')
+  const nextRanks = new Map(
+    nextRanked.map((item) => [item.code, item.rank]),
+  )
   const weekRanks = new Map(
     rankSectorForecasts(forecasts, 'week')
       .map((item) => [item.code, item.rank]),
   )
+  const layoutRanked = rankSectorForecasts(forecasts, 'layout')
   return {
     schemaVersion: SECTOR_FORECAST_SCHEMA_VERSION,
     signalDate,
@@ -337,9 +482,11 @@ export function buildSectorForecastSnapshot({
       ) ? 'lightgbm' : 'unavailable',
     },
     market,
-    sectors: nextRanked.map((item) => ({
+    sectors: layoutRanked.map((item, index) => ({
       ...item,
+      rank: nextRanks.get(item.code) || null,
       weekRank: weekRanks.get(item.code) || null,
+      layoutRank: index + 1,
     })),
   }
 }
