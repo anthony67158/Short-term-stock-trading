@@ -7,6 +7,8 @@ s.yaml
 migrate/
 # 量化训练/模型服务(近1GB,与前端无关,严禁上传 Vercel,否则触发 100MB 上限)
 qlib-service/
+# 回测研究脚本与本地缓存(近500MB历史数据,本地工具,与前端无关,严禁上传)
+backtest/
 # 依赖与本地产物,严禁上传(Vercel 只需 dist/ 静态产物,构建由其云端 npm run build 完成)
 node_modules/
 dist/

@@ -21,7 +21,8 @@
     "harness:export": "node harness/export.mjs",
     "harness:online": "node harness/run.mjs --suite endpoint --online --no-baseline",
     "harness:shadow": "node harness/run.mjs --suite shadow --online --no-baseline",
-    "harness:advice": "node scripts/advice-reliability-harness.mjs"
+    "harness:advice": "node scripts/advice-reliability-harness.mjs",
+    "backtest": "node backtest/run.mjs"
   },
   "dependencies": {
     "@alicloud/eas20210701": "^7.9.0",

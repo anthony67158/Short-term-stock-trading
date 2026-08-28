@@ -52,5 +52,9 @@ qlib-service/*.bak
 # Harness运行报告(由npm run harness生成,CI以artifact保存)
 harness-artifacts/
 
+# 回测历史数据缓存与报告(由 Tushare 拉取，可重生成，绝不入库)
+backtest/cache/
+backtest/reports/
+
 # 明文密钥清单(仅本人自用,绝不入库)
 CREDENTIALS.md
