@@ -63,6 +63,9 @@ import {
   isAdviceReviewEnabled,
 } from '../shared/adviceReviewPolicy.js';
 import {
+  activatePriceReviewTrigger,
+} from './_advice_wakeup.js';
+import {
   buildTriggeredReviewFallback,
   isTriggeredReviewEvent,
   triggeredReviewRuntime,
@@ -95,7 +98,10 @@ import aiHandler from './ai.js';
 import quoteHandler from './quote.js';
 import { sendPush } from './_push_send.js';
 import { TRUSTED_QUANT_VERSION } from './_quant_access.js';
-import { TRUSTED_ACCOUNT_REQUEST } from './_account_auth.js';
+import {
+  authorizePaidRequest,
+  TRUSTED_ACCOUNT_REQUEST,
+} from './_account_auth.js';
 import { dispatchAdviceWorker } from './_advice_dispatch.js';
 import { buildRealOutcomeLearning } from '../shared/realOutcomeLearning.js';
 import {
@@ -1991,6 +1997,108 @@ export default async function handler(req, res) {
 
   const scope = ['all', 'hold', 'watch'].includes(body.scope) ? body.scope : 'all';
   const force = body.force != null ? !!body.force : true;   // 用户主动生成默认强制重生成
+
+  if (op === 'triggerPriceReview') {
+    try {
+      const accountAuth = await authorizePaidRequest(req);
+      if (!accountAuth.ok) {
+        res.statusCode = accountAuth.error === '请先登录' ? 401 : 403;
+        return res.end(JSON.stringify({
+          ok: false,
+          accepted: false,
+          error: accountAuth.error,
+        }));
+      }
+      const nick = accountAuth.account.nick;
+      const now = Date.now();
+      const request = {
+        alertId: String(body.alertId || '').slice(0, 120),
+        code: String(body.code || '').slice(0, 6),
+        quote: body.quote,
+      };
+      let persisted = null;
+      let activated = null;
+      let concurrency = 0;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const acc = attempt === 0
+          ? accountAuth.account
+          : await readAccount(nick);
+        if (!isAccountActive(acc)) {
+          return res.end(JSON.stringify({
+            ok: false,
+            accepted: false,
+            error: '账号不可用',
+          }));
+        }
+        const data = acc.data || (acc.data = {});
+        activated = activatePriceReviewTrigger(data, request, now);
+        if (!activated.ok) {
+          return res.end(JSON.stringify({
+            ok: false,
+            accepted: false,
+            error: activated.reason || '到价复核未受理',
+          }));
+        }
+        concurrency = effectiveAdviceConcurrency(data);
+        data.batchProgress = jobsToProgress(data, now, concurrency);
+        try {
+          persisted = await writeAccount(acc, undefined, {
+            history: false,
+            verify: true,
+          });
+          break;
+        } catch (error) {
+          if (error?.status !== 409 || attempt > 0) throw error;
+        }
+      }
+      const persistedData = persisted?.data || {};
+      const currentAlert = (persistedData.alerts || []).find(
+        (alert) => String(alert?.id || '') === String(body.alertId || ''),
+      );
+      let workerScheduled = false;
+      if (needsRoleWorkerDispatch(persistedData)) {
+        try {
+          workerScheduled = !!(await scheduleAdviceWorker(nick))?.accepted;
+        } catch (error) {
+          console.error(
+            '[cron_advice] price review dispatch failed',
+            error?.code || error?.name || error?.message,
+          );
+        }
+      }
+      return res.end(JSON.stringify({
+        ok: true,
+        accepted: true,
+        queued: activated.queued,
+        already: activated.already === true,
+        workerScheduled,
+        alert: currentAlert ? {
+          id: currentAlert.id,
+          code: currentAlert.code,
+          phase: currentAlert.phase,
+          enabled: currentAlert.enabled,
+          triggeredAt: currentAlert.triggeredAt,
+          triggeredMsg: currentAlert.triggeredMsg,
+          decisionPrice: currentAlert.decisionPrice,
+          decisionDeadlineAt: currentAlert.decisionDeadlineAt,
+        } : null,
+        progress: jobsToProgress(
+          persistedData,
+          now,
+          concurrency,
+        ),
+      }));
+    } catch (error) {
+      res.statusCode = error?.status === 409 ? 409 : 503;
+      return res.end(JSON.stringify({
+        ok: false,
+        accepted: false,
+        error: error?.status === 409
+          ? '账号状态刚刚更新，系统将立即重试'
+          : '到价复核提交失败，云端盯盘将自动接力',
+      }));
+    }
+  }
 
   // ====== 分支 A:账号会话鉴权的按需操作(enqueue / cancel / cancelAll / status / drain)======
   const isUser = !!(body.nick && (body.token != null || body.pw != null));

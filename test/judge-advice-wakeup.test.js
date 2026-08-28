@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  activatePriceReviewTrigger,
   __test as cronAlertTest,
   cloudAlertsForEvaluation,
   isCurrentAdvicePlan,
@@ -10,6 +11,126 @@ import {
 } from '../api/cron_alert.js'
 import { completeJob, enqueueJob, leaseJob } from '../api/_jobs.js'
 import { projectAdviceAlerts } from '../shared/adviceAlerts.js'
+
+test('页面发现观察价已到时立即进入复核并排入紧急任务', () => {
+  const now = Date.parse('2026-08-28T05:30:00.000Z')
+  const data = {
+    plan: [{ code: '000636', name: '风华高科' }],
+    holding: [],
+    closed: [],
+    settings: {},
+    advice: {
+      '000636': {
+        mode: 'buy_advice',
+        advice: {
+          continuity: {
+            planId: 'plan-000636',
+            revision: 3,
+          },
+        },
+      },
+    },
+    alerts: [{
+      id: 'review-000636',
+      code: '000636',
+      name: '风华高科',
+      type: 'price',
+      op: 'lte',
+      value: 55.37,
+      note: '回踩加仓复核',
+      reviewOnly: true,
+      enabled: true,
+      phase: 'armed',
+      judgeContext: {
+        planId: 'plan-000636',
+        planRevision: 3,
+      },
+    }],
+  }
+
+  const result = activatePriceReviewTrigger(data, {
+    alertId: 'review-000636',
+    code: '000636',
+    quote: {
+      code: '000636',
+      price: 55.34,
+      tradeDate: '2026-08-28',
+      isLivePrice: true,
+    },
+  }, now)
+
+  assert.equal(result.ok, true)
+  assert.equal(result.queued, true)
+  assert.equal(result.alert.phase, 'reviewing')
+  assert.equal(result.alert.enabled, false)
+  assert.equal(result.alert.triggeredAt, now)
+  assert.equal(result.alert.decisionPrice, 55.34)
+  assert.match(result.alert.triggeredMsg, /55\.34.*55\.37/)
+  assert.equal(data.reviewJobs['000636'].source, 'judge')
+  assert.equal(data.reviewJobs['000636'].trigger.kind, 'price-review')
+})
+
+test('页面即时复核拒绝未到价和非当日实时行情', () => {
+  const now = Date.parse('2026-08-28T05:30:00.000Z')
+  const buildData = () => ({
+    plan: [{ code: '000636', name: '风华高科' }],
+    holding: [],
+    closed: [],
+    settings: {},
+    advice: {
+      '000636': {
+        mode: 'buy_advice',
+        advice: {
+          continuity: {
+            planId: 'plan-000636',
+            revision: 3,
+          },
+        },
+      },
+    },
+    alerts: [{
+      id: 'review-000636',
+      code: '000636',
+      name: '风华高科',
+      type: 'price',
+      op: 'lte',
+      value: 55.37,
+      reviewOnly: true,
+      enabled: true,
+      phase: 'armed',
+      judgeContext: {
+        planId: 'plan-000636',
+        planRevision: 3,
+      },
+    }],
+  })
+
+  const notReached = buildData()
+  assert.equal(activatePriceReviewTrigger(notReached, {
+    alertId: 'review-000636',
+    code: '000636',
+    quote: {
+      price: 55.38,
+      tradeDate: '2026-08-28',
+      isLivePrice: true,
+    },
+  }, now).reason, 'price-not-reached')
+  assert.equal(notReached.alerts[0].phase, 'armed')
+  assert.equal(notReached.reviewJobs, undefined)
+
+  const stale = buildData()
+  assert.equal(activatePriceReviewTrigger(stale, {
+    alertId: 'review-000636',
+    code: '000636',
+    quote: {
+      price: 55.34,
+      tradeDate: '2026-08-27',
+      isLivePrice: false,
+    },
+  }, now).reason, 'stale-quote')
+  assert.equal(stale.alerts[0].phase, 'armed')
+  assert.equal(stale.reviewJobs, undefined)
+})
 
 test('Judge确认同一军师计划后只推进确定性执行状态不重复调用军师', () => {
   const data = {

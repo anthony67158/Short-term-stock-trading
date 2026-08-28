@@ -3,7 +3,7 @@
 // 收到服务端(api/cron_alert.js 经 web-push 网关)下发的推送就会弹系统通知。
 // iOS 需 16.4+ 且「添加到主屏幕」以 PWA 方式打开后,本 SW 才会被系统保活以收推送。
 
-self.addEventListener('install', (e) => { self.skipWaiting(); });
+self.addEventListener('install', () => { self.skipWaiting(); });
 self.addEventListener('activate', (e) => { e.waitUntil(self.clients.claim()); });
 
 // 收到推送 → 弹系统通知
@@ -11,15 +11,33 @@ self.addEventListener('push', (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch { data = { body: (event.data && event.data.text()) || '' }; }
   const title = data.title || '⚡ 盯盘预警';
+  const tag = data.tag || ('alert-' + Date.now());
   const options = {
     body: data.body || '',
     icon: data.icon || '/app-icon-192.png?v=7',
     badge: '/app-icon-192.png?v=7',
-    tag: data.tag || ('alert-' + Date.now()),
+    tag,
     renotify: true,
     data: { url: data.url || '/', code: data.code || '' },
   };
-  event.waitUntil(self.registration.showNotification(title, options));
+  event.waitUntil(Promise.all([
+    self.registration.showNotification(title, options),
+    self.clients
+      .matchAll({ type: 'window', includeUncontrolled: true })
+      .then((clients) => Promise.all(clients.map((client) =>
+        client.postMessage({
+          type: 'stock-alert',
+          notification: {
+            title,
+            body: options.body,
+            code: data.code || '',
+            name: data.name || '',
+            alertId: tag,
+            at: Date.now(),
+          },
+        })
+      ))),
+  ]));
 });
 
 // 点通知 → 聚焦已开页面,或新开

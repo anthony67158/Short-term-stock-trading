@@ -42,6 +42,7 @@ import {
 import { needsWorkerDispatch } from './_jobs.js';
 import { scheduleAdviceWorker } from './cron_advice.js';
 import {
+  activatePriceReviewTrigger,
   isCurrentAdvicePlan,
   queueAdviceReviewForPriceTrigger,
   queueAdviceReviewForVerdict,
@@ -69,6 +70,7 @@ const WATCHING_MAX_MS = 90 * 60 * 1000;
 const JUDGE_DEADLINE_RESERVE_MS = 30000;
 
 export {
+  activatePriceReviewTrigger,
   isCurrentAdvicePlan,
   queueAdviceReviewForPriceTrigger,
   queueAdviceReviewForVerdict,

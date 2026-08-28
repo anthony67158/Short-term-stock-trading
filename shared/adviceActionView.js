@@ -890,7 +890,7 @@ export function buildActionProgress(trigger, currentPrice) {
         stateLabel: `${reached.label}已到`,
         reached: true,
         reachedKey: reached.key,
-        reachedHint: '等待自动复核',
+        reachedHint: '已到价，正在提交复核',
         currentPrice: current,
       }
     }

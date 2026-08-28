@@ -10,6 +10,12 @@ import {
   TRIGGERED_REVIEW_TIME_LIMIT_MINUTES,
   TRIGGERED_REVIEW_TOTAL_BUDGET_MS,
 } from '../shared/triggeredReviewDecision.js'
+import { isFreshAlertQuote } from '../shared/alertQuotePolicy.js'
+
+const PRICE_OPERATOR_LABEL = Object.freeze({
+  gte: '≥',
+  lte: '≤',
+})
 
 function decisionSideOf(alert, verdict) {
   if (verdict?.side) return String(verdict.side)
@@ -26,6 +32,77 @@ export function isCurrentAdvicePlan(alert, adviceEntry) {
   if (!alertPlanId) return true
   const currentPlanId = String(adviceEntry?.advice?.continuity?.planId || '')
   return currentPlanId === alertPlanId
+}
+
+export function activatePriceReviewTrigger(
+  data,
+  request = {},
+  now = Date.now(),
+) {
+  const alerts = Array.isArray(data?.alerts) ? data.alerts : []
+  const alertId = String(request?.alertId || '')
+  const code = String(request?.code || '')
+  const alert = alerts.find((item) =>
+    String(item?.id || '') === alertId
+    && String(item?.code || '') === code
+  )
+  if (!alert) return { ok: false, reason: 'alert-missing' }
+  if (!alert.reviewOnly) {
+    return { ok: false, reason: 'not-review-alert' }
+  }
+  if (alert.phase === 'reviewing') {
+    const queued = queueAdviceReviewForPriceTrigger(
+      data,
+      alert,
+      Number(alert.triggeredAt) || now,
+    )
+    return {
+      ok: queued.queued === true,
+      ...queued,
+      already: queued.created !== true,
+      alert: { ...alert },
+    }
+  }
+  if (!alert.enabled || alert.triggeredAt) {
+    return { ok: false, reason: 'alert-not-armed' }
+  }
+  if (!isAdviceReviewEnabled(data?.settings, code)) {
+    return { ok: false, reason: 'review-disabled' }
+  }
+  if (!isCurrentAdvicePlan(alert, data?.advice?.[code])) {
+    return { ok: false, reason: 'stale-plan' }
+  }
+  const quote = request?.quote
+  if (!isFreshAlertQuote(quote, now)) {
+    return { ok: false, reason: 'stale-quote' }
+  }
+  const price = Number(quote.price)
+  const threshold = Number(alert.value)
+  const crossed = alert.op === 'gte'
+    ? price >= threshold
+    : alert.op === 'lte'
+      ? price <= threshold
+      : false
+  if (!(threshold > 0) || !crossed) {
+    return { ok: false, reason: 'price-not-reached' }
+  }
+
+  Object.assign(alert, {
+    phase: 'reviewing',
+    triggeredAt: now,
+    triggeredMsg:
+      `观察价已到：现价 ${price} ${PRICE_OPERATOR_LABEL[alert.op]} ${threshold}`,
+    decisionPrice: price,
+    decisionDeadlineAt:
+      now + TRIGGERED_REVIEW_TOTAL_BUDGET_MS,
+    enabled: false,
+  })
+  const queued = queueAdviceReviewForPriceTrigger(data, alert, now)
+  return {
+    ok: queued.queued === true,
+    ...queued,
+    alert: { ...alert },
+  }
 }
 
 export function queueAdviceReviewForPriceTrigger(

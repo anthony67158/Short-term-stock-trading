@@ -30,7 +30,7 @@ import { isFreshAlertQuote } from '../shared/alertQuotePolicy.js'
 
 // ============ 盯盘预警引擎 ============
 // 统一轮询自选/持仓相关个股实时报价，逐条判断预警规则是否命中；
-// 命中 → 浏览器通知 + 声音 + 站内红点 + 回写 planStore（自动停用避免重复）。
+// 命中 → 同一内容进入页面横幅、浏览器通知、声音和站内记录，再回写 planStore。
 // 预警规则存于 planStore.alerts（随账号云端持久化）。
 
 // 规则类型：
@@ -148,8 +148,8 @@ function currentPositionGate(alert) {
 }
 
 // 判断单条规则是否命中（q=该股实时报价）
-function hit(a, q) {
-  if (!isFreshAlertQuote(q)) return null
+function hit(a, q, now = Date.now()) {
+  if (!isFreshAlertQuote(q, now)) return null
   // 数值型字段统一取有限数:接口异常/字符串/NaN 时返回 null(不判定),
   // 避免后续 .toFixed 在字符串上抛错(会中断整个 evaluate 预警循环)或渲染出字面 "NaN"。
   const fin = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null }
@@ -198,10 +198,19 @@ function hit(a, q) {
 }
 
 // ---- 站内通知中心状态 ----
-let state = { notifications: [], unread: 0, permission: (typeof Notification !== 'undefined' ? Notification.permission : 'default') }
+let state = {
+  notifications: [],
+  banners: [],
+  unread: 0,
+  permission:
+    typeof Notification !== 'undefined'
+      ? Notification.permission
+      : 'default',
+}
 const listeners = new Set()
 // 智能确认在途去重:记录正在请求 /api/confirm_signal 的预警 id,避免同一预警跨轮并发重复判定
 const _confirming = new Set()
+const _reviewTriggering = new Set()
 let _watchingFlushPromise = null
 function flushWatchingState() {
   if (!_watchingFlushPromise) {
@@ -245,6 +254,39 @@ function notify(title, body) {
   beep()
 }
 
+async function triggerServerPriceReview(alert, quote) {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 8000)
+  try {
+    const response = await fetch(api('/api/cron_advice'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...accountRequestHeaders(),
+      },
+      body: JSON.stringify({
+        op: 'triggerPriceReview',
+        alertId: alert.id,
+        code: alert.code,
+        quote: {
+          code: quote?.code || alert.code,
+          price: quote?.price,
+          tradeDate: quote?.tradeDate,
+          isLivePrice: quote?.isLivePrice,
+          priceStatus: quote?.priceStatus,
+        },
+      }),
+      signal: controller.signal,
+      keepalive: true,
+    })
+    return await response.json().catch(() => null)
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
 export const alertStore = {
   subscribe(l) { listeners.add(l); return () => listeners.delete(l) },
   get() { return state },
@@ -264,19 +306,39 @@ export const alertStore = {
       const dup = state.notifications.find((x) => x.alertId === n.alertId && (Date.now() - (x.at || 0)) < 1800000)
       if (dup) return false
     }
-    state.notifications = [{ id: Date.now() + '_' + Math.random().toString(36).slice(2, 6), at: Date.now(), read: false, ...n }, ...state.notifications].slice(0, 100)
+    const event = {
+      id: Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+      at: Date.now(),
+      read: false,
+      ...n,
+    }
+    state.notifications = [event, ...state.notifications].slice(0, 100)
+    state.banners = [...state.banners, event].slice(-20)
     state.unread += 1
     emit()
     return true
   },
+  publish(n) {
+    if (!n?.title || !n?.body) return false
+    if (!this.push(n)) return false
+    notify(n.title, n.body)
+    return true
+  },
+  dismissBanner(id) {
+    state.banners = state.banners.filter((item) => item.id !== id)
+    emit()
+  },
   markAllRead() { state.notifications = state.notifications.map((x) => ({ ...x, read: true })); state.unread = 0; emit() },
-  clearAll() { state.notifications = []; state.unread = 0; emit() },
+  clearAll() {
+    state.notifications = []
+    state.banners = []
+    state.unread = 0
+    emit()
+  },
 
   syncCloudNotifications(alerts, now = Date.now()) {
     const recent = (at) => at && now - Number(at) >= 0 && now - Number(at) < 1800000
-    const add = (event) => {
-      if (this.push(event)) notify(event.title, event.body)
-    }
+    const add = (event) => this.publish(event)
     for (const a of (alerts || [])) {
       if (!a?.id) continue
       if (recent(a.watchingAt)) {
@@ -328,7 +390,7 @@ export const alertStore = {
   //         invalid → 发【失效说明】(⛔ 已失效·暂不操作) + 置 invalid 停用;
   //         wait    → 明确维持观望/持有并置 reviewed 停用，不再复核原价。
   //   evaluate 为同步函数;watching 的确认调用是异步「即发即忘」,不阻塞本轮遍历。
-  evaluate(quoteMap) {
+  evaluate(quoteMap, now = Date.now()) {
     const book = planStore.get()
     const smartOn = !(book.settings && book.settings.smartConfirm === false)
     const alerts = (book.alerts || []).filter((a) => a.enabled)
@@ -336,8 +398,12 @@ export const alertStore = {
     // 该预警是否走智能二段确认:仅【价位类 + 带 phase(AI 派生)】;手动/涨跌幅/量比/涨跌停 → 老逻辑
     const isSmart = (a) => smartOn && a.type === 'price' && !!a.phase && a.phase !== 'confirmed' && a.phase !== 'invalid'
     for (const storedAlert of alerts) {
-      // 观察价只由云端 Timer 触发复核，浏览器不把它误送进交易 Judge。
-      if (storedAlert.reviewOnly) continue
+      const q = quoteMap[storedAlert.code]
+      if (storedAlert.reviewOnly) {
+        const msg = hit(storedAlert, q, now)
+        if (msg) this._triggerReviewOnly(storedAlert, q)
+        continue
+      }
       const positionGate = currentPositionGate(storedAlert)
       if (!positionGate.allowed) {
         if (!positionGate.transient) {
@@ -347,10 +413,9 @@ export const alertStore = {
       }
       const a = applyT1ToAlert(storedAlert, t1StatusOf(storedAlert.code))
       if (a.t1Blocked) continue
-      const q = quoteMap[a.code]
       if (!isSmart(a)) {
         // —— 老逻辑:命中即强推并停用(向后兼容)——
-        const msg = hit(a, q)
+        const msg = hit(a, q, now)
         if (!msg) continue
         const notification = buildAlertNotification({
           alert: a,
@@ -358,8 +423,12 @@ export const alertStore = {
           stage: 'trigger',
           reason: msg,
         })
-        this.push({ code: a.code, name: a.name, ...notification, alertId: a.id })
-        notify(notification.title, notification.body)
+        this.publish({
+          code: a.code,
+          name: a.name,
+          ...notification,
+          alertId: 'alert-' + a.id,
+        })
         planStore.markAlertTriggered(a.id, msg) // 触发后自动停用，防重复
         continue
       }
@@ -367,7 +436,7 @@ export const alertStore = {
       // —— 智能二段确认 ——
       if (a.phase === 'armed' || !a.phase) {
         // 阶段一:价格触及关键价位 → 发【弱提醒】,进入「观察确认中」,继续监控真正时机(不停用)
-        const msg = hit(a, q)
+        const msg = hit(a, q, now)
         if (!msg) continue
         const notification = buildAlertNotification({
           alert: a,
@@ -375,8 +444,12 @@ export const alertStore = {
           stage: 'watch',
           reason: msg,
         })
-        this.push({ code: a.code, name: a.name, ...notification, alertId: 'watch-' + a.id })
-        notify(notification.title, notification.body)
+        this.publish({
+          code: a.code,
+          name: a.name,
+          ...notification,
+          alertId: 'watch-' + a.id,
+        })
         planStore.markAlertWatching(a.id, msg, q && q.price)
         this._confirmAfterTouch(sideOf(a), a.id, q)
         continue
@@ -387,6 +460,26 @@ export const alertStore = {
         this._confirmWatching(a, q)
       }
     }
+  },
+
+  _triggerReviewOnly(alert, quote) {
+    if (_reviewTriggering.has(alert.id)) return
+    const session = currentAccountSession()
+    if (!session.account) return
+    _reviewTriggering.add(alert.id)
+    void triggerServerPriceReview(alert, quote)
+      .then((result) => {
+        if (!accountSessionMatches(session) || !result?.ok) return
+        if (result.alert) {
+          planStore.markAlertReviewing(alert.id, result.alert)
+        }
+        void import('./serverAdvice.js')
+          .then((module) => module.kickServerAdviceStatusSync())
+          .catch(() => {})
+      })
+      .finally(() => {
+        _reviewTriggering.delete(alert.id)
+      })
   },
 
   _confirmAfterTouch(side, alertId, q) {
@@ -432,13 +525,12 @@ export const alertStore = {
         stage: 'wait',
         reason: conclusion,
       })
-      this.push({
+      this.publish({
         code: a.code,
         name: a.name,
         ...notification,
         alertId: 'review-timeout-' + a.id,
       })
-      notify(notification.title, notification.body)
       planStore.markAlertReviewed(a.id, conclusion, {
         decision: 'wait',
         side,
@@ -494,8 +586,12 @@ export const alertStore = {
               stage: 'confirm',
               reason: v.reason || '多项信号共振确认',
             })
-            this.push({ code: current.code, name: current.name, ...notification, alertId: 'confirm-' + current.id })
-            notify(notification.title, notification.body)
+            this.publish({
+              code: current.code,
+              name: current.name,
+              ...notification,
+              alertId: 'confirm-' + current.id,
+            })
             planStore.markAlertConfirmed(current.id, `确认${actZh}:${v.reason || ''}`, v, q && q.price)
           } else if (v.decision === 'invalid') {
             const notification = buildAlertNotification({
@@ -504,8 +600,12 @@ export const alertStore = {
               stage: 'invalid',
               reason: v.reason || '关键条件已破坏',
             })
-            this.push({ code: current.code, name: current.name, ...notification, alertId: 'invalid-' + current.id })
-            notify(notification.title, notification.body)
+            this.publish({
+              code: current.code,
+              name: current.name,
+              ...notification,
+              alertId: 'invalid-' + current.id,
+            })
             planStore.markAlertInvalid(current.id, `已失效:${v.reason || ''}`)
           } else {
             const conclusion =
@@ -518,13 +618,12 @@ export const alertStore = {
               stage: 'wait',
               reason: conclusion,
             })
-            this.push({
+            this.publish({
               code: current.code,
               name: current.name,
               ...notification,
               alertId: 'review-wait-' + current.id,
             })
-            notify(notification.title, notification.body)
             planStore.markAlertReviewed(
               current.id,
               conclusion,
@@ -549,6 +648,9 @@ planStore.subscribe(() => {
 
 subscribeAccountSession(() => {
   state.notifications = []
+  state.banners = []
   state.unread = 0
+  _confirming.clear()
+  _reviewTriggering.clear()
   emit()
 })

@@ -614,7 +614,7 @@ test('持有建议把战术回踩与突破价编译成双路径加仓复核', ()
   assert.equal(progress.reached, true)
   assert.equal(progress.reachedKey, 'holding_add_breakout')
   assert.equal(progress.stateLabel, '突破加仓复核已到')
-  assert.equal(progress.reachedHint, '等待自动复核')
+  assert.equal(progress.reachedHint, '已到价，正在提交复核')
 })
 
 test('持仓到价终局结论不再生成后续加仓复核路径', () => {

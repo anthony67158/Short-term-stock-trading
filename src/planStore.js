@@ -2710,6 +2710,41 @@ export const planStore = {
       : x)
     emit()
   },
+  // 页面发现观察价命中后，采用服务端已持久化的权威状态立即更新卡片。
+  // 终态不可被迟到的受理响应回滚为 reviewing。
+  markAlertReviewing(id, accepted = {}) {
+    let changed = false
+    state.alerts = (state.alerts || []).map((alert) => {
+      if (alert.id !== id) return alert
+      if ([
+        'confirmed',
+        'invalid',
+        'reviewed',
+        'superseded',
+      ].includes(alert.phase)) return alert
+      changed = true
+      return {
+        ...alert,
+        phase: 'reviewing',
+        enabled: false,
+        triggeredAt:
+          Number(accepted.triggeredAt) || Date.now(),
+        triggeredMsg:
+          accepted.triggeredMsg
+          || alert.triggeredMsg
+          || '观察价已到，正在限时复核',
+        decisionPrice:
+          Number(accepted.decisionPrice)
+          || alert.decisionPrice
+          || null,
+        decisionDeadlineAt:
+          Number(accepted.decisionDeadlineAt)
+          || Date.now() + TRIGGERED_REVIEW_TOTAL_BUDGET_MS,
+      }
+    })
+    if (changed) emit()
+    return changed
+  },
   markAlertJudged(id, verdict, price = null) {
     state.alerts = (state.alerts || []).map((x) => x.id === id
       ? {

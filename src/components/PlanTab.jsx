@@ -115,8 +115,8 @@ function CandidateReviewStatus({
     priceReached
       ? {
           kind: 'queued',
-          label: '条件已到，预计1分钟内开始复核',
-          detail: '云端定时任务每分钟扫描一次',
+          label: '条件已到，正在提交复核',
+          detail: '页面立即提交，云端盯盘同时兜底',
         }
       : null
   )

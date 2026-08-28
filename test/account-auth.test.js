@@ -8,6 +8,7 @@ import dailyReportScheduleHandler from '../api/daily_report_schedule.js'
 import llmConfigHandler from '../api/llm_config.js'
 import aiSearchConfigHandler from '../api/ai_search_config.js'
 import confirmSignalHandler from '../api/confirm_signal.js'
+import cronAdviceHandler from '../api/cron_advice.js'
 import {
   TRUSTED_ACCOUNT_REQUEST,
   authenticateAccountRequest,
@@ -166,6 +167,31 @@ test('匿名调用智能体和策略日报同样必须返回401', async () => {
     assert.equal(res.statusCode, 401)
     assert.equal(JSON.parse(res.body).ok, false)
   }
+})
+
+test('匿名请求不得触发页面到价复核任务', async () => {
+  const req = {
+    method: 'POST',
+    headers: {},
+    body: {
+      op: 'triggerPriceReview',
+      alertId: 'review-000636',
+      code: '000636',
+      quote: {
+        price: 55.34,
+        tradeDate: '2026-08-28',
+        isLivePrice: true,
+      },
+    },
+    socket: { remoteAddress: 'auth-test' },
+  }
+  const res = responseStub()
+
+  await cronAdviceHandler(req, res)
+  await res.ended
+
+  assert.equal(res.statusCode, 401)
+  assert.equal(JSON.parse(res.body).accepted, false)
 })
 
 test('无成本健康检查保持公开且不触发模型', async () => {

@@ -18,7 +18,11 @@ import { useAIStore, aiStore } from './aiStore'
 import { useAuthStore, authStore, startCloudSync } from './authStore'
 import { syncPushSubscription } from './push'
 import { useTheme, themeStore } from './themeStore'
-import { useDetailStore, detailStore } from './detailStore'
+import {
+  useDetailStore,
+  detailStore,
+  openStockDetail,
+} from './detailStore'
 import { alertStore, useAlertStore } from './alertStore'
 import { useLLMConfigOpen } from './llmConfigStore'
 import { useQuantReportOpen } from './quantReportUiStore'
@@ -175,6 +179,29 @@ function MainApp() {
   const [tab, setTab] = useState('today')
   const [hubSub, setHubSub] = useState('account') // 账户·交易 融合页的子页
   const tabHistoryRef = useRef(['today'])
+  useEffect(() => {
+    if (!navigator.serviceWorker) return undefined
+    const receivePush = (event) => {
+      if (event?.data?.type !== 'stock-alert') return
+      const incoming = event.data.notification
+      const title = String(incoming?.title || '').trim().slice(0, 120)
+      const body = String(incoming?.body || '').trim().slice(0, 300)
+      if (!title || !body) return
+      const code = /^\d{6}$/.test(String(incoming?.code || ''))
+        ? String(incoming.code)
+        : ''
+      alertStore.push({
+        alertId: String(incoming?.alertId || '').slice(0, 160),
+        code,
+        name: String(incoming?.name || '').trim().slice(0, 40),
+        title,
+        body,
+      })
+    }
+    navigator.serviceWorker.addEventListener('message', receivePush)
+    return () =>
+      navigator.serviceWorker.removeEventListener('message', receivePush)
+  }, [])
   useLayoutEffect(() => {
     window.scrollTo({ top: 0, behavior: 'auto' })
   }, [tab])
@@ -421,6 +448,8 @@ function MainApp() {
         className="nav-tabs-mobile"
       />
 
+      <AlertBanner />
+
       <main className="main" data-section={currentSection.key}>
         <div className="workspace-head">
           <div className="workspace-identity">
@@ -532,6 +561,67 @@ function RegulatoryFooter({ showDisclaimer = false }) {
         </a>
       </span>
     </footer>
+  )
+}
+
+function AlertBanner() {
+  const { banners = [] } = useAlertStore()
+  const banner = banners[0] || null
+
+  useEffect(() => {
+    if (!banner?.id) return undefined
+    const timer = setTimeout(
+      () => alertStore.dismissBanner(banner.id),
+      10000,
+    )
+    return () => clearTimeout(timer)
+  }, [banner?.id])
+
+  if (!banner) return null
+  const inspect = () => {
+    if (banner.code) {
+      openStockDetail(banner.code, banner.name || banner.code)
+    }
+    alertStore.dismissBanner(banner.id)
+  }
+
+  return (
+    <div className="alert-banner-stack" aria-live="assertive">
+      <section className="alert-banner" role="alert">
+        <span className="alert-banner-icon">
+          <Icon name="bell" size={17} />
+        </span>
+        <div className="alert-banner-copy">
+          <strong>{banner.title}</strong>
+          <p>{banner.body}</p>
+        </div>
+        <div className="alert-banner-actions">
+          {banners.length > 1 && (
+            <span className="alert-banner-count">
+              还有 {banners.length - 1} 条
+            </span>
+          )}
+          {banner.code && (
+            <button
+              type="button"
+              className="alert-banner-open"
+              onClick={inspect}
+            >
+              查看
+              <Icon name="chevronRight" size={14} />
+            </button>
+          )}
+          <button
+            type="button"
+            className="alert-banner-close"
+            aria-label="关闭当前预警横幅"
+            onClick={() => alertStore.dismissBanner(banner.id)}
+          >
+            <Icon name="close" size={15} />
+          </button>
+        </div>
+      </section>
+    </div>
   )
 }
 

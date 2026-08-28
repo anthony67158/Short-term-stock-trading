@@ -1,8 +1,148 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 import { alertStore } from '../src/alertStore.js'
 import { planStore } from '../src/planStore.js'
+import {
+  activateAccountSession,
+} from '../shared/accountSessionScope.js'
+
+const root = new URL('../', import.meta.url)
+const read = (path) => readFileSync(new URL(path, root), 'utf8')
+
+test('每次提醒使用同一份标题正文进入通知记录与全局横幅', () => {
+  alertStore.clearAll()
+  const notification = {
+    alertId: 'banner-000636',
+    code: '000636',
+    name: '风华高科',
+    title: '风华高科(000636)｜观察条件已到',
+    body: '现55.34｜回踩加仓≤55.37\n正在复核',
+  }
+
+  assert.equal(alertStore.publish(notification), true)
+  assert.equal(alertStore.get().notifications.length, 1)
+  assert.equal(alertStore.get().banners.length, 1)
+  assert.equal(
+    alertStore.get().banners[0].title,
+    alertStore.get().notifications[0].title,
+  )
+  assert.equal(
+    alertStore.get().banners[0].body,
+    alertStore.get().notifications[0].body,
+  )
+
+  assert.equal(alertStore.publish(notification), false)
+  assert.equal(alertStore.get().notifications.length, 1)
+  assert.equal(alertStore.get().banners.length, 1)
+
+  alertStore.dismissBanner(alertStore.get().banners[0].id)
+  assert.equal(alertStore.get().banners.length, 0)
+})
+
+test('应用根节点挂载全局预警横幅并原样展示通知内容', () => {
+  const app = read('src/App.jsx')
+  const store = read('src/alertStore.js')
+  const serviceWorker = read('public/sw.js')
+  assert.match(app, /function AlertBanner/)
+  assert.match(app, /banner\.title/)
+  assert.match(app, /banner\.body/)
+  assert.match(app, /<AlertBanner\s*\/>/)
+  assert.match(app, /event\?\.data\?\.type !== 'stock-alert'/)
+  assert.match(serviceWorker, /client\.postMessage\(\{/)
+  assert.match(serviceWorker, /type:\s*'stock-alert'/)
+  assert.match(store, /if \(storedAlert\.reviewOnly\)/)
+  assert.match(store, /this\._triggerReviewOnly\(storedAlert,\s*q\)/)
+  assert.doesNotMatch(
+    store,
+    /if \(storedAlert\.reviewOnly\) continue/,
+  )
+})
+
+test('页面轮询发现观察价到达后立即提交复核并显示同内容横幅', async () => {
+  const now = Date.parse('2026-08-28T05:30:00.000Z')
+  const triggeredAt = Date.now()
+  const originalFetch = global.fetch
+  let requestBody = null
+  activateAccountSession('测试账号')
+  alertStore.clearAll()
+  planStore.setData({
+    plan: [{ code: '000636', name: '风华高科' }],
+    holding: [],
+    closed: [],
+    settings: {},
+    advice: {
+      '000636': {
+        mode: 'buy_advice',
+        advice: {
+          continuity: {
+            planId: 'plan-000636',
+            revision: 3,
+          },
+        },
+      },
+    },
+    alerts: [{
+      id: 'review-000636',
+      code: '000636',
+      name: '风华高科',
+      type: 'price',
+      op: 'lte',
+      value: 55.37,
+      note: '回踩加仓复核',
+      reviewOnly: true,
+      enabled: true,
+      phase: 'armed',
+      judgeContext: {
+        planId: 'plan-000636',
+        planRevision: 3,
+      },
+    }],
+  })
+  global.fetch = async (_url, options) => {
+    requestBody = JSON.parse(options.body)
+    return {
+      json: async () => ({
+        ok: true,
+        accepted: true,
+        alert: {
+          id: 'review-000636',
+          code: '000636',
+          phase: 'reviewing',
+          enabled: false,
+          triggeredAt,
+          triggeredMsg: '观察价已到：现价 55.34 ≤ 55.37',
+          decisionPrice: 55.34,
+          decisionDeadlineAt: triggeredAt + 120000,
+        },
+      }),
+    }
+  }
+
+  try {
+    alertStore.evaluate({
+      '000636': {
+        code: '000636',
+        price: 55.34,
+        tradeDate: '2026-08-28',
+        isLivePrice: true,
+      },
+    }, now)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    assert.equal(requestBody.op, 'triggerPriceReview')
+    assert.equal(requestBody.alertId, 'review-000636')
+    assert.equal(planStore.get().alerts[0].phase, 'reviewing')
+    assert.equal(planStore.get().alerts[0].enabled, false)
+    assert.match(alertStore.get().banners[0].title, /风华高科.*观察条件已到/)
+    assert.match(alertStore.get().banners[0].body, /55\.34.*55\.37/)
+  } finally {
+    global.fetch = originalFetch
+    activateAccountSession('')
+    alertStore.clearAll()
+  }
+})
 
 test('云端近期到价事件回灌为去重的站内预警通知', () => {
   alertStore.clearAll()
