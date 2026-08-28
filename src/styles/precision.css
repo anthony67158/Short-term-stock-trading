@@ -5377,7 +5377,52 @@ body:has(.modal-mask) .card-decision-slot .action-command-preview {
   line-height: 1.6;
 }
 
-.sector-forecast-stocks,
+.sector-forecast-stocks {
+  display: grid;
+  border-top: 1px solid var(--color-rule-2);
+}
+
+.sector-forecast-stock-group {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-md);
+}
+
+.sector-forecast-stock-group + .sector-forecast-stock-group {
+  border-top: 1px solid var(--color-rule-2);
+}
+
+.sector-forecast-stock-group[data-kind="tracking"] {
+  background: color-mix(
+    in oklch,
+    var(--color-warning) 4%,
+    transparent
+  );
+}
+
+.sector-forecast-stock-group-head {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+}
+
+.sector-forecast-stock-group-head b {
+  color: var(--color-ink-2);
+  font-size: var(--text-xs);
+}
+
+.sector-forecast-stock-group[data-kind="layout"]
+  .sector-forecast-stock-group-head b {
+  color: var(--sem-buy);
+}
+
+.sector-forecast-stock-group-head span {
+  color: var(--color-muted);
+  font-size: var(--text-2xs);
+  line-height: 1.45;
+}
+
 .sector-forecast-evidence {
   display: grid;
   grid-template-columns: 120px minmax(0, 1fr);
@@ -5386,13 +5431,12 @@ body:has(.modal-mask) .card-decision-slot .action-command-preview {
   border-top: 1px solid var(--color-rule-2);
 }
 
-.sector-forecast-stocks > b,
 .sector-forecast-evidence > b {
   color: var(--color-ink-2);
   font-size: var(--text-xs);
 }
 
-.sector-forecast-stocks > div {
+.sector-forecast-stock-list {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-sm);
@@ -9888,14 +9932,14 @@ button.acct-item {
     border-inline-start: 0;
   }
 
-  .sector-forecast-stocks,
+  .sector-forecast-stock-group,
   .sector-forecast-evidence {
     grid-template-columns: 1fr;
     gap: var(--space-2xs);
     padding: var(--space-xs) var(--space-sm);
   }
 
-  .sector-forecast-stocks > div {
+  .sector-forecast-stock-list {
     grid-template-columns: 1fr;
     gap: var(--space-2xs);
   }

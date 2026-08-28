@@ -49,7 +49,8 @@ test('板块前瞻提供双周期排名、展开解释与真实成分股', () =>
 
 test('板块前瞻支持结论优先和预测分数升降序', () => {
   assert.match(component, /sector-forecast-sort/)
-  assert.match(component, /useState\('conclusion'\)/)
+  assert.match(component, /useState\('layout'\)/)
+  assert.match(component, /提前布局优先/)
   assert.match(component, /结论优先/)
   assert.match(component, /分数从高到低/)
   assert.match(component, /分数从低到高/)
@@ -59,9 +60,19 @@ test('板块前瞻支持结论优先和预测分数升降序', () => {
   assert.match(view, /score_asc/)
 })
 
-test('板块前瞻直接展示可买数量和每个板块的操作指令', () => {
+test('成分股明确拆分提前布局与已走强跟踪', () => {
+  assert.match(component, /提前布局候选/)
+  assert.match(component, /已走强，仅跟踪/)
+  assert.match(component, /entryStage/)
+  assert.match(component, /entryLabel/)
+  assert.match(component, /追高风险/)
+  assert.match(component, /布局时机/)
+})
+
+test('板块前瞻直接展示提前布局数量和每个板块的操作指令', () => {
   assert.match(component, /sector-forecast-action-summary/)
-  assert.match(component, /当前可买/)
+  assert.match(component, /可提前布局/)
+  assert.match(component, /提前布局观察/)
   assert.match(component, /sector-forecast-guidance/)
   assert.match(component, /sectorForecastActionView/)
   assert.match(view, /可以买入/)

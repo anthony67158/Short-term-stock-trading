@@ -1,4 +1,5 @@
 export const SECTOR_FORECAST_SORTS = Object.freeze([
+  'layout',
   'rank',
   'conclusion',
   'score_desc',
@@ -99,19 +100,19 @@ const ACTION_VIEWS = Object.freeze({
     label: '可以买入',
     intent: 'buy',
     instruction:
-      '可以小仓分批：优先核心或中军，下一交易日不高开再介入。',
+      '可以小仓提前布局：优先潜伏候选，下一交易日不高开再介入。',
   }),
   WAIT_PULLBACK: Object.freeze({
     label: '暂不买',
     intent: 'wait',
     instruction:
-      '先不买：等缩量回踩企稳且资金继续流入，再考虑低吸。',
+      '先不追：等缩量回踩企稳且资金继续流入，再考虑低吸。',
   }),
   WATCH_ONLY: Object.freeze({
     label: '不要买',
     intent: 'watch',
     instruction:
-      '不要追：当前仅观察，等拥挤度下降或结构重新转强。',
+      '只跟踪：当前涨幅或拥挤度偏高，等待新的低风险机会。',
   }),
   AVOID: Object.freeze({
     label: '回避',
@@ -129,6 +130,32 @@ const PHASE_ORDER = Object.freeze({
   RETREAT: 4,
 })
 
+const TIMING_ORDER = Object.freeze({
+  EARLY_LAYOUT: 0,
+  CONFIRMING: 1,
+  EXTENDED_WATCH: 2,
+  WEAK: 3,
+})
+
+const TIMING_VIEWS = Object.freeze({
+  EARLY_LAYOUT: Object.freeze({
+    label: '提前布局',
+    intent: 'buy',
+  }),
+  CONFIRMING: Object.freeze({
+    label: '启动确认',
+    intent: 'wait',
+  }),
+  EXTENDED_WATCH: Object.freeze({
+    label: '强势跟踪',
+    intent: 'watch',
+  }),
+  WEAK: Object.freeze({
+    label: '暂不关注',
+    intent: 'avoid',
+  }),
+})
+
 function finiteValue(value) {
   if (value === null || value === undefined || value === '') return null
   const number = Number(value)
@@ -143,6 +170,25 @@ function rankValue(item, horizon) {
 
 function scoreValue(item, horizon) {
   return finiteValue(item?.forecast?.[horizon]?.score)
+}
+
+function timingLane(item) {
+  if (TIMING_VIEWS[item?.timing?.lane]) return item.timing.lane
+  return {
+    ACCUMULATION: 'EARLY_LAYOUT',
+    STARTUP: 'CONFIRMING',
+    ACCELERATION: 'EXTENDED_WATCH',
+    DIVERGENCE: 'EXTENDED_WATCH',
+    RETREAT: 'WEAK',
+  }[item?.phase] || 'WEAK'
+}
+
+export function sectorForecastTimingView(item = {}) {
+  const lane = timingLane(item)
+  return {
+    lane,
+    ...(TIMING_VIEWS[lane] || TIMING_VIEWS.WEAK),
+  }
 }
 
 function compareScore(left, right, horizon, direction) {
@@ -168,14 +214,14 @@ export function sectorForecastActionView(
     return {
       ...base,
       instruction:
-        '可以小仓分批：优先核心或中军，盘中回踩不破且未明显冲高时介入。',
+        '可以小仓提前布局：优先潜伏候选，盘中回踩不破且未明显冲高时介入。',
     }
   }
   if (actionability === 'WAIT_PULLBACK') {
     return {
       ...base,
       instruction:
-        '先不买：等盘中缩量回踩企稳且资金继续流入，再考虑低吸。',
+        '先不追：等盘中缩量回踩企稳且资金继续流入，再考虑低吸。',
     }
   }
   return base
@@ -190,7 +236,14 @@ export function summarizeSectorForecastActions(items = []) {
     avoid: 0,
   }
   const buyable = []
+  const early = []
+  const confirming = []
+  const tracking = []
   for (const item of rows) {
+    const lane = timingLane(item)
+    if (lane === 'EARLY_LAYOUT') early.push(item)
+    else if (lane === 'CONFIRMING') confirming.push(item)
+    else if (lane === 'EXTENDED_WATCH') tracking.push(item)
     if (item?.actionability === 'LAYOUT') {
       counts.buy += 1
       buyable.push(item)
@@ -205,6 +258,9 @@ export function summarizeSectorForecastActions(items = []) {
   return {
     counts,
     buyable,
+    early,
+    confirming,
+    tracking,
     noBuy: counts.watch + counts.avoid,
   }
 }
@@ -221,7 +277,26 @@ export function sortSectorForecasts(items = [], {
     .sort((leftEntry, rightEntry) => {
       const left = leftEntry.item
       const right = rightEntry.item
-      if (mode === 'conclusion') {
+      if (mode === 'layout') {
+        const timingDelta = (
+          TIMING_ORDER[timingLane(left)] ?? 99
+        ) - (
+          TIMING_ORDER[timingLane(right)] ?? 99
+        )
+        if (timingDelta) return timingDelta
+        const layoutScoreDelta = (
+          finiteValue(right?.timing?.layoutScore) ?? -1
+        ) - (
+          finiteValue(left?.timing?.layoutScore) ?? -1
+        )
+        if (layoutScoreDelta) return layoutScoreDelta
+        const layoutRankDelta = (
+          finiteValue(left?.layoutRank) ?? 999
+        ) - (
+          finiteValue(right?.layoutRank) ?? 999
+        )
+        if (layoutRankDelta) return layoutRankDelta
+      } else if (mode === 'conclusion') {
         const actionDelta =
           (ACTION_ORDER[left?.actionability] ?? 99)
           - (ACTION_ORDER[right?.actionability] ?? 99)

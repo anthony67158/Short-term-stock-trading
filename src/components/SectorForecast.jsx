@@ -17,6 +17,7 @@ import {
   assessSectorForecastGeneration,
   resolveSectorForecastGenerationSession,
   sectorForecastActionView,
+  sectorForecastTimingView,
   sortSectorForecasts,
   summarizeSectorForecastActions,
 } from '../sectorForecastView.js'
@@ -39,7 +40,11 @@ export const phaseLabel = (value) =>
 export const actionLabel = (value) =>
   sectorForecastActionView(value).label
 
-const finite = (value) => Number.isFinite(Number(value))
+const finite = (value) =>
+  value !== null
+  && value !== undefined
+  && value !== ''
+  && Number.isFinite(Number(value))
 
 function percent(value, digits = 0) {
   return finite(value) ? `${Number(value).toFixed(digits)}%` : '--'
@@ -55,6 +60,61 @@ function timeLabel(value) {
     minute: '2-digit',
     hour12: false,
   })
+}
+
+function stockEntryStage(stock = {}) {
+  if (stock.entryStage) return stock.entryStage
+  const pct = Number(stock.pct)
+  if (stock.isLimitUp === true || (Number.isFinite(pct) && pct >= 7)) {
+    return 'EXTENDED_WATCH'
+  }
+  if (
+    Number(stock.mainInflow) > 0
+    && Number(stock.mainRatio) > 0
+    && Number.isFinite(pct)
+    && pct <= 2.5
+  ) return 'EARLY_LAYOUT'
+  return 'CONFIRMING'
+}
+
+function SectorStockGroup({
+  label,
+  note,
+  stocks,
+  kind,
+}) {
+  if (!stocks.length) return null
+  return (
+    <div className="sector-forecast-stock-group" data-kind={kind}>
+      <div className="sector-forecast-stock-group-head">
+        <b>{label}</b>
+        <span>{note}</span>
+      </div>
+      <div className="sector-forecast-stock-list">
+        {stocks.map((stock) => (
+          <button
+            type="button"
+            className="sector-forecast-stock"
+            key={stock.code}
+            aria-label={`查看个股详情：${stock.name}`}
+            title={`查看${stock.name}个股详情`}
+            onClick={() => openStockDetail(stock.code, stock.name)}
+          >
+            <strong>{stock.name}</strong>
+            <small>
+              {stock.entryLabel || stock.roleLabel}
+              {' · '}
+              {finite(stock.pct) && Number(stock.pct) >= 0 ? '+' : ''}
+              {percent(stock.pct, 1)}
+              {' · '}
+              {stock.code}
+            </small>
+            <Icon name="chevronRight" size={14} />
+          </button>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 function SectorExplanation({
@@ -75,6 +135,13 @@ function SectorExplanation({
   const action = sectorForecastActionView(
     sector.actionability,
     { session },
+  )
+  const stocks = Array.isArray(sector.stocks) ? sector.stocks : []
+  const layoutStocks = stocks.filter((stock) =>
+    ['EARLY_LAYOUT', 'CONFIRMING'].includes(stockEntryStage(stock))
+  )
+  const trackingStocks = stocks.filter((stock) =>
+    stockEntryStage(stock) === 'EXTENDED_WATCH'
   )
   return (
     <div className="sector-forecast-expanded">
@@ -120,25 +187,20 @@ function SectorExplanation({
           <p>{humanizeUserFacingText(risks.join('；') || explanation.invalidation || '暂无额外风险项')}</p>
         </section>
       </div>
-      {!!sector.stocks?.length && (
+      {!!stocks.length && (
         <div className="sector-forecast-stocks">
-          <b>真实成分股</b>
-          <div>
-            {sector.stocks.map((stock) => (
-              <button
-                type="button"
-                className="sector-forecast-stock"
-                key={stock.code}
-                aria-label={`查看个股详情：${stock.name}`}
-                title={`查看${stock.name}个股详情`}
-                onClick={() => openStockDetail(stock.code, stock.name)}
-              >
-                <strong>{stock.name}</strong>
-                <small>{stock.roleLabel} · {stock.code}</small>
-                <Icon name="chevronRight" size={14} />
-              </button>
-            ))}
-          </div>
+          <SectorStockGroup
+            label="提前布局候选"
+            note="资金先行、尚未明显大涨"
+            stocks={layoutStocks}
+            kind="layout"
+          />
+          <SectorStockGroup
+            label="已走强，仅跟踪"
+            note="追高风险高，等待新的低风险机会"
+            stocks={trackingStocks}
+            kind="tracking"
+          />
         </div>
       )}
       {!!evidence.length && (
@@ -161,7 +223,7 @@ function SectorExplanation({
 export default function SectorForecast() {
   const book = usePlanStore()
   const [horizon, setHorizon] = useState('next')
-  const [sortMode, setSortMode] = useState('conclusion')
+  const [sortMode, setSortMode] = useState('layout')
   const [latest, setLatest] = useState(null)
   const [intraday, setIntraday] = useState(null)
   const [market, setMarket] = useState(null)
@@ -474,6 +536,7 @@ export default function SectorForecast() {
               value={sortMode}
               onChange={(event) => setSortMode(event.target.value)}
             >
+              <option value="layout">提前布局优先</option>
               <option value="rank">原始排名</option>
               <option value="conclusion">结论优先</option>
               <option value="score_desc">分数从高到低</option>
@@ -609,18 +672,18 @@ export default function SectorForecast() {
               <div>
                 <strong>
                   {actionSummary.counts.buy > 0
-                    ? `当前可买 ${actionSummary.counts.buy} 个`
-                    : '当前没有通过买入闸门的板块'}
+                    ? `可提前布局 ${actionSummary.counts.buy} 个`
+                    : `提前布局观察 ${actionSummary.early.length} 个`}
                 </strong>
                 <span>
                   {actionSummary.counts.buy > 0
-                    ? `${actionSummary.buyable.slice(0, 3).map((item) => item.name).join('、')}；列表已按结论优先排列`
-                    : '今天先不买，等待资金、位置和量化信号重新共振'}
+                    ? `${actionSummary.buyable.slice(0, 3).map((item) => item.name).join('、')}；优先看资金先行且尚未大涨的方向`
+                    : '主榜优先找资金先行且尚未大涨的方向，不因涨停或短期热度追高'}
                 </span>
               </div>
               <small>
-                暂不买 {actionSummary.counts.wait} ·
-                {' '}观察/回避 {actionSummary.noBuy}
+                启动确认 {actionSummary.confirming.length} ·
+                {' '}强势跟踪 {actionSummary.tracking.length}
               </small>
             </div>
           ) : (
@@ -642,12 +705,23 @@ export default function SectorForecast() {
                 : sector.rank
               const displayRank = sortMode === 'rank'
                 ? rank
+                : sortMode === 'layout'
+                  ? (sector.layoutRank || index + 1)
                 : index + 1
               const forecast = sector.forecast?.[horizon] || {}
+              const displayedScore = sortMode === 'layout'
+                ? sector.timing?.layoutScore
+                : forecast.score
+              const displayedScoreLabel = sortMode === 'layout'
+                ? '布局时机'
+                : forecast.probability == null
+                  ? '综合评分'
+                  : `概率 ${percent(forecast.probability)}`
               const action = sectorForecastActionView(
                 sector.actionability,
                 { session: snapshot.session },
               )
+              const timing = sectorForecastTimingView(sector)
               const isOpen = expanded === sector.code
               return (
                 <div className={'sector-forecast-item' + (isOpen ? ' expanded' : '')}
@@ -661,13 +735,21 @@ export default function SectorForecast() {
                     <span className="sector-forecast-name">
                       <strong>{sector.name}</strong>
                       <small>
-                        {sortMode === 'rank'
-                          ? sector.code
-                          : `原排名 #${rank || '--'} · ${sector.code}`}
+                          {sortMode === 'rank'
+                            ? sector.code
+                            : sortMode === 'layout'
+                              ? `次日排名 #${rank || '--'} · ${sector.code}`
+                              : `原排名 #${rank || '--'} · ${sector.code}`}
                       </small>
                     </span>
                     <span className="sector-forecast-state">
-                      <b data-phase={sector.phase}>{phaseLabel(sector.phase)}</b>
+                        <b
+                          data-phase={sector.phase}
+                          data-timing={timing.lane}
+                          title={`板块阶段：${phaseLabel(sector.phase)}`}
+                        >
+                          {timing.label}
+                        </b>
                       <em
                         data-action={sector.actionability}
                         data-intent={action.intent}
@@ -676,8 +758,12 @@ export default function SectorForecast() {
                       </em>
                     </span>
                     <span className="sector-forecast-score">
-                      <strong>{finite(forecast.score) ? Number(forecast.score).toFixed(1) : '--'}</strong>
-                      <small>{forecast.probability == null ? '综合评分' : `概率 ${percent(forecast.probability)}`}</small>
+                        <strong>
+                          {finite(displayedScore)
+                            ? Number(displayedScore).toFixed(1)
+                            : '--'}
+                        </strong>
+                        <small>{displayedScoreLabel}</small>
                     </span>
                     <span
                       className="sector-forecast-guidance"

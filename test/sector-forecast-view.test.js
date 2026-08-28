@@ -54,6 +54,7 @@ const rows = [{
 
 test('板块前瞻提供原始排名、结论优先和分数升降序', () => {
   assert.deepEqual(SECTOR_FORECAST_SORTS, [
+    'layout',
     'rank',
     'conclusion',
     'score_desc',
@@ -86,6 +87,45 @@ test('板块前瞻提供原始排名、结论优先和分数升降序', () => {
       sortMode: 'score_asc',
     }).map((item) => item.code),
     ['BK1003', 'BK1001', 'BK1000', 'BK1002'],
+  )
+})
+
+test('提前布局排序把潜伏方向置顶并把已大涨方向降为跟踪', () => {
+  const sorted = sortSectorForecasts([{
+    code: 'BK3000',
+    rank: 1,
+    layoutRank: 3,
+    timing: {
+      lane: 'EXTENDED_WATCH',
+      layoutScore: 38,
+    },
+    forecast: { next: { score: 82 } },
+  }, {
+    code: 'BK3001',
+    rank: 3,
+    layoutRank: 1,
+    timing: {
+      lane: 'EARLY_LAYOUT',
+      layoutScore: 79,
+    },
+    forecast: { next: { score: 68 } },
+  }, {
+    code: 'BK3002',
+    rank: 2,
+    layoutRank: 2,
+    timing: {
+      lane: 'CONFIRMING',
+      layoutScore: 65,
+    },
+    forecast: { next: { score: 74 } },
+  }], {
+    horizon: 'next',
+    sortMode: 'layout',
+  })
+
+  assert.deepEqual(
+    sorted.map((item) => item.code),
+    ['BK3001', 'BK3002', 'BK3000'],
   )
 })
 
@@ -140,16 +180,16 @@ test('板块结论翻译为明确的买入或不买指令', () => {
       label: '可以买入',
       intent: 'buy',
       instruction:
-        '可以小仓分批：优先核心或中军，下一交易日不高开再介入。',
+        '可以小仓提前布局：优先潜伏候选，下一交易日不高开再介入。',
     },
   )
   assert.match(
     sectorForecastActionView('WAIT_PULLBACK').instruction,
-    /^先不买：/,
+    /^先不追：/,
   )
   assert.match(
     sectorForecastActionView('WATCH_ONLY').instruction,
-    /^不要追：/,
+    /^只跟踪：/,
   )
   assert.match(
     sectorForecastActionView('AVOID').instruction,
@@ -163,7 +203,7 @@ test('板块结论翻译为明确的买入或不买指令', () => {
       label: '可以买入',
       intent: 'buy',
       instruction:
-        '可以小仓分批：优先核心或中军，盘中回踩不破且未明显冲高时介入。',
+        '可以小仓提前布局：优先潜伏候选，盘中回踩不破且未明显冲高时介入。',
     },
   )
 })
