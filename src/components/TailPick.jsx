@@ -111,9 +111,15 @@ export default function TailPick() {
   }
 
   const addCandidate = async (candidate) => {
+    const role = candidate.execution?.role
+    const sourceLabel = role === 'PRIMARY'
+      ? '首选'
+      : role === 'NEAR'
+        ? '接近公式'
+        : '候补'
     planStore.addPlan(
       { code: candidate.code, name: candidate.name },
-      `尾盘拾金${candidate.execution?.role === 'PRIMARY' ? '首选' : '候补'}；`
+      `尾盘拾金${sourceLabel}；`
         + `${candidate.execution?.action || ''}`,
     )
     await planStore.flushSave()

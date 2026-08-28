@@ -16,24 +16,46 @@ export default function TailPickCandidate({
   onAdd,
 }) {
   const primary = candidate.execution?.role === 'PRIMARY'
+  const near = candidate.execution?.role === 'NEAR'
   const canAdd = !added
-  const evidence = [
-    candidate.sector?.name
-      ? `${candidate.sector.name}方向`
-      : null,
-    candidate.evidence?.[0],
-    candidate.fund?.historyDayCount
-      ? `${candidate.fund.historyDayCount}日资金已核验`
-      : '资金证据缺失',
-  ].filter(Boolean)
+  const missingRules = (candidate.nearMatch?.failedRules || [])
+    .map((item) => item.label)
+    .filter(Boolean)
+  const evidence = near
+    ? [
+        missingRules.length
+          ? `未满足：${missingRules.join('、')}`
+          : null,
+        candidate.blockers?.[0],
+        candidate.sector?.name
+          ? `${candidate.sector.name}方向`
+          : '暂未匹配主线方向',
+      ].filter(Boolean)
+    : [
+        candidate.sector?.name
+          ? `${candidate.sector.name}方向`
+          : null,
+        candidate.evidence?.[0],
+        candidate.fund?.historyDayCount
+          ? `${candidate.fund.historyDayCount}日资金已核验`
+          : '资金证据缺失',
+      ].filter(Boolean)
   return (
     <article
       className="tail-pick-row"
-      data-role={primary ? 'primary' : 'alternate'}
+      data-role={near ? 'near' : primary ? 'primary' : 'alternate'}
     >
       <div className="tail-pick-rank">
-        <span>{primary ? '首选观察' : `候补 ${candidate.rank}`}</span>
-        <strong>{candidate.score}分</strong>
+        <span>
+          {near
+            ? `接近公式 ${candidate.rank}`
+            : primary ? '首选观察' : `候补 ${candidate.rank}`}
+        </span>
+        <strong>
+          {near
+            ? `${candidate.nearMatch?.matchRate ?? '--'}%吻合`
+            : `${candidate.score}分`}
+        </strong>
       </div>
       <div className="tail-pick-stock">
         <StockName
@@ -44,23 +66,41 @@ export default function TailPickCandidate({
       </div>
       <div className="tail-pick-prices">
         <span>现价 <b>{price(candidate.quote?.price)}</b></span>
-        <span>均价 <b>{price(candidate.intraday?.vwap)}</b></span>
-        <span>止损 <b>{price(candidate.execution?.stopPrice)}</b></span>
+        <span>
+          {near ? '换手' : '均价'}
+          {' '}
+          <b>
+            {near
+              ? `${price(candidate.quote?.turnover)}%`
+              : price(candidate.intraday?.vwap)}
+          </b>
+        </span>
+        <span>
+          {near ? '缺少' : '止损'}
+          {' '}
+          <b>
+            {near
+              ? `${missingRules.length}项`
+              : price(candidate.execution?.stopPrice)}
+          </b>
+        </span>
       </div>
       <div className="tail-pick-action">
         <strong>{candidate.execution?.action}</strong>
-        {primary && (
+        {primary && !near && (
           <>
             <span>{candidate.execution.firstLeg}</span>
             <span>{candidate.execution.secondLeg}</span>
           </>
         )}
-        <span>
-          {candidate.execution?.takeProfit}
-          {candidate.execution?.finalExitDate
-            ? `；最晚${candidate.execution.finalExitDate}退出`
-            : ''}
-        </span>
+        {candidate.execution?.takeProfit && (
+          <span>
+            {candidate.execution.takeProfit}
+            {candidate.execution?.finalExitDate
+              ? `；最晚${candidate.execution.finalExitDate}退出`
+              : ''}
+          </span>
+        )}
       </div>
       <div className="tail-pick-evidence">
         {evidence.map((item) => <span key={item}>{item}</span>)}
@@ -73,7 +113,9 @@ export default function TailPickCandidate({
         title={
           added
             ? '已在自选中'
-            : !allowExecution
+            : near
+              ? '加入自选观察，不生成买入动作'
+              : !allowExecution
               ? '加入自选观察，不生成买入动作'
               : primary ? '加入尾盘观察计划' : '加入自选'
         }
@@ -81,7 +123,9 @@ export default function TailPickCandidate({
         <Icon name={added ? 'check' : 'plus'} size={14} />
         {added
           ? '已加入'
-          : primary && allowExecution ? '加入尾盘计划' : '加入自选'}
+          : primary && allowExecution && !near
+            ? '加入尾盘计划'
+            : '加入自选'}
       </button>
     </article>
   )

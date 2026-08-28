@@ -36,11 +36,14 @@ test('尾盘拾金支持14:50自动正式扫描和手动试算', () => {
 test('结果明确区分首选候补且只写入人工观察计划', () => {
   assert.match(candidate, /首选观察/)
   assert.match(candidate, /候补/)
+  assert.match(candidate, /接近公式/)
   assert.match(candidate, /加入尾盘计划/)
   assert.match(candidate, /加入自选/)
   assert.match(component, /planStore\.addPlan/)
   assert.doesNotMatch(component, /planStore\.buy/)
   assert.match(results, /唯一操作：今天不新开仓/)
+  assert.match(results, /接近公式观察/)
+  assert.match(results, /最多缺2项次要条件，仅可加入自选/)
   assert.match(results, /尚未通过分钟级样本外回测，不自动下单/)
 })
 
@@ -64,5 +67,10 @@ test('尾盘结果在移动端改为单列且操作按钮不溢出', () => {
   assert.match(
     styles,
     /@media \(max-width: 720px\)[\s\S]*\.tail-pick-row > button\s*{[\s\S]*width:\s*100%/,
+  )
+  assert.match(styles, /\.tail-pick-row\[data-role="near"\]/)
+  assert.match(
+    styles,
+    /@media \(max-width: 720px\)[\s\S]*\.tail-pick-near-head/,
   )
 })
