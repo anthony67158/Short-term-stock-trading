@@ -56,6 +56,29 @@ test('Judge建议快照覆盖军师的方向、风控、仓位与多维依据', 
   })
 })
 
+test('Judge建议快照保留生成时的主力与散户资金基准', () => {
+  const context = buildJudgeAdviceContext({
+    action: '立即买入',
+    fundContext: {
+      source: 'realtime',
+      fetchedAt: 1000,
+      asOfDate: '2026-08-28',
+      mainNetYi: 0.8,
+      retailNetYi: -0.3,
+      mainTrend5: [0.1, 0.2, 0.3, 0.5, 0.7],
+      retailTrend5: [-0.1, -0.1, -0.2, -0.2, -0.3],
+    },
+  })
+
+  assert.equal(context.fundContext.source, 'realtime')
+  assert.equal(context.fundContext.mainNetYi, 0.8)
+  assert.equal(context.fundContext.retailNetYi, -0.3)
+  assert.deepEqual(
+    context.fundContext.retailTrend5,
+    [-0.1, -0.1, -0.2, -0.2, -0.3],
+  )
+})
+
 test('军师明确写不加仓或赔率不足时不能创建加仓提醒', () => {
   assert.equal(adviceSupportsIntent('add', {
     action: '持有',

@@ -80,7 +80,10 @@ import {
   classifyPriceLimit,
   priceLimitRatio,
 } from '../shared/priceLimitPolicy.js';
-import { mergeRetailFundFlow } from '../shared/retailFundFlow.js';
+import {
+  compactStockFundSnapshot,
+  mergeRetailFundFlow,
+} from '../shared/retailFundFlow.js';
 import {
   attachEvidenceSnapshot,
   createCanonicalEvidenceSnapshot,
@@ -133,6 +136,12 @@ import {
 } from '../shared/tGridPolicy.js';
 import { internalApiOrigin } from './_internal_origin.js';
 import { loadSectorOpportunity } from './_sector_opportunity.js';
+import {
+  fetchStockFund,
+  fundAmountYi,
+} from './_stock_fund.js';
+
+export { mapRealtimeStockFund } from './_stock_fund.js';
 
 export function portfolioOpportunityCostForStock(
   accountData = {},
@@ -430,16 +439,6 @@ async function fetchTrend(code) {
   return await fetchTrendTx(code);
 }
 
-const fundAmountYi = (value) =>
-  value == null || value === '-' || value === '' || isNaN(Number(value))
-    ? null
-    : +(Number(value) / 1e8).toFixed(2);
-
-const fundPct = (value) =>
-  value == null || value === '-' || value === '' || isNaN(Number(value))
-    ? null
-    : +Number(value).toFixed(2);
-
 export function buildAdvisorTodayQuote(
   quote = {},
   {
@@ -486,152 +485,6 @@ export function buildAdvisorTodayQuote(
       isLive
       && quote.pct != null
       && Math.abs(quote.pct) >= 7,
-  };
-}
-
-export function mapRealtimeStockFund(data = {}) {
-  return {
-    mainNetYi: fundAmountYi(data.f62),
-    mainNetPct: fundPct(data.f184),
-    superNetYi: fundAmountYi(data.f66),
-    bigNetYi: fundAmountYi(data.f72),
-    smallNetYi: fundAmountYi(data.f84),
-    retailNetYi: fundAmountYi(data.f84),
-    main5dYi: fundAmountYi(data.f164),
-    weibi: fundPct(data.f191),
-    weicha: data.f192 == null || data.f192 === '-'
-      ? null
-      : Math.round(Number(data.f192)),
-  };
-}
-
-// 个股资金面：主力/超大单/大单/小单净额 + 5日主力均值 + 盘口委比委差
-// 关键：用【历史每日资金流】接口(fflow/daykline)，收盘后/开盘前依然能回溯到最近交易日，不会归零；
-// 实时快照(stock/get f62)只在盘中有效、清算后清零，故仅用于取盘口委比与"当日实时"补充。
-async function fetchStockFund(code) {
-  const secid = toSecid(code);
-  const yi = fundAmountYi;
-  const pct = fundPct;
-  let daily = null;
-
-  // 1) 历史每日资金流（可回溯）。只取最近8天(lmt=8)避免全历史大响应超时；多镜像竞速(Promise.any)
-  // fields2: f51日期,f52主力净额,f53小单,f54中单,f55大单,f56超大单,f57主力净占比%
-  const hisHosts = ['https://push2his.eastmoney.com', 'https://82.push2his.eastmoney.com', 'https://push2.eastmoney.com', 'https://push2delay.eastmoney.com'];
-  const hpath = `/api/qt/stock/fflow/daykline/get?lmt=8&klt=101&secid=${secid}&ut=b2884a393a59ad64002292a3e90d46a5&fields1=f1,f2,f3,f7&fields2=f51,f52,f53,f54,f55,f56,f57`;
-  const tryHis = (h) => {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 7000);
-    return fetch(h + hpath, { signal: ctrl.signal, headers: { Referer: 'https://data.eastmoney.com/', 'User-Agent': 'Mozilla/5.0' } })
-      .then((r) => r.json())
-      .then((j) => { const kl = j && j.data && j.data.klines; if (kl && kl.length) return kl; throw new Error('empty'); })
-      .finally(() => clearTimeout(t));
-  };
-  try {
-    const kl = await Promise.any(hisHosts.map(tryHis));
-    const rows = kl.map((line) => { const p = line.split(','); return { date: p[0], main: Number(p[1]), small: Number(p[2]), mid: Number(p[3]), big: Number(p[4]), super: Number(p[5]), mainPct: Number(p[6]) }; });
-    const last = rows[rows.length - 1];
-    const last5 = rows.slice(-5);
-    const sum5 = last5.reduce((a, x) => a + (x.main || 0), 0);
-    daily = {
-      date: last.date,
-      mainNetYi: yi(last.main), mainNetPct: pct(last.mainPct),
-      superNetYi: yi(last.super), bigNetYi: yi(last.big), midNetYi: yi(last.mid), smallNetYi: yi(last.small),
-      main5dYi: yi(sum5), main5dAvgYi: yi(sum5 / (last5.length || 1)),
-      trend5: last5.map((x) => yi(x.main)),   // 近5日主力净额序列(亿)
-      inflowDays: last5.filter((x) => x.main > 0).length, // 近5日流入天数
-    };
-  } catch { /* 所有镜像失败 → 走备用源 */ }
-
-  // 1b) 备用：若竞速全失败，串行再给最稳的镜像一次独立、更长超时的机会(大盘股响应慢，竞速易被别的镜像拖累)
-  if (!daily) {
-    for (const h of ['https://push2his.eastmoney.com', 'https://push2.eastmoney.com']) {
-      try {
-        const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), 9000);
-        const r = await fetch(h + hpath, { signal: ctrl.signal, headers: { Referer: 'https://data.eastmoney.com/', 'User-Agent': 'Mozilla/5.0' } });
-        clearTimeout(t);
-        const j = await r.json();
-        const kl = j && j.data && j.data.klines;
-        if (kl && kl.length) {
-          const rows = kl.map((line) => { const p = line.split(','); return { date: p[0], main: Number(p[1]), small: Number(p[2]), mid: Number(p[3]), big: Number(p[4]), super: Number(p[5]), mainPct: Number(p[6]) }; });
-          const last = rows[rows.length - 1]; const last5 = rows.slice(-5);
-          const sum5 = last5.reduce((a, x) => a + (x.main || 0), 0);
-          daily = { date: last.date, mainNetYi: yi(last.main), mainNetPct: pct(last.mainPct), superNetYi: yi(last.super), bigNetYi: yi(last.big), midNetYi: yi(last.mid), smallNetYi: yi(last.small), main5dYi: yi(sum5), main5dAvgYi: yi(sum5 / (last5.length || 1)), trend5: last5.map((x) => yi(x.main)), inflowDays: last5.filter((x) => x.main > 0).length };
-          break;
-        }
-      } catch { /* try next */ }
-    }
-  }
-
-  // 2) 实时快照：取盘口委比/委差(盘中有效) + 当日实时主力净额(盘中非0则优先)
-  let snap = null;
-  const rtHosts = ['https://push2.eastmoney.com', 'https://82.push2.eastmoney.com', 'https://push2delay.eastmoney.com'];
-  const rpath = `/api/qt/stock/get?secid=${secid}&fields=f62,f84,f184,f66,f72,f164,f191,f192`;
-  const tryRt = (h) => {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 5000);
-    return fetch(h + rpath, { signal: ctrl.signal, headers: { Referer: 'https://data.eastmoney.com/', 'User-Agent': 'Mozilla/5.0' } })
-      .then((r) => r.json())
-      .then((j) => { if (j && j.data) return j.data; throw new Error('empty'); })
-      .finally(() => clearTimeout(t));
-  };
-  try {
-    const d = await Promise.any(rtHosts.map(tryRt));
-    snap = mapRealtimeStockFund(d);
-  } catch { /* ignore */ }
-
-  if (!daily && !snap) return null;
-  const base = daily || {};
-  // 盘中任一资金分层出现非零值时采用整组实时快照；收盘清零后回退最近交易日。
-  const hasRealtimeFund = !!(
-    snap
-    && [snap.mainNetYi, snap.retailNetYi]
-      .some((value) => value != null && value !== 0)
-  );
-  // 主力资金【连续性】：从最近交易日往回数,当前连续净流入(正)/连续净流出(负)天数。
-  // 口径与 K 线连阳连阴的 streak 一致:同号累加,遇反号或 0 即断。用户关心"主力是否连续做多/做空",
-  // 一天数字不算数,连续几天才见真章 —— 显式算好给军师,免得它自己从 trend5 里数错。
-  const mainStreak = (() => {
-    const seq = base.trend5;
-    if (!Array.isArray(seq) || !seq.length) return null;
-    let s = 0;
-    for (let i = seq.length - 1; i >= 0; i--) {
-      const v = seq[i];
-      if (v == null) break;
-      if (s === 0) { s = v > 0 ? 1 : (v < 0 ? -1 : 0); if (s === 0) break; }
-      else if ((s > 0 && v > 0) || (s < 0 && v < 0)) s += s > 0 ? 1 : -1;
-      else break;
-    }
-    return s;
-  })();
-  return {
-    asOfDate: base.date || null,               // 资金数据对应的交易日
-    isHistorical: !hasRealtimeFund,             // true=用的是最近收盘数据(非实时)
-    mainNetYi: hasRealtimeFund && snap.mainNetYi != null
-      ? snap.mainNetYi
-      : (base.mainNetYi ?? null),
-    mainNetPct: hasRealtimeFund && snap.mainNetPct != null
-      ? snap.mainNetPct
-      : (base.mainNetPct ?? null),
-    superNetYi: hasRealtimeFund && snap.superNetYi != null
-      ? snap.superNetYi
-      : (base.superNetYi ?? null),
-    bigNetYi: hasRealtimeFund && snap.bigNetYi != null
-      ? snap.bigNetYi
-      : (base.bigNetYi ?? null),
-    midNetYi: base.midNetYi ?? null,
-    smallNetYi: hasRealtimeFund && snap.retailNetYi != null
-      ? snap.retailNetYi
-      : (base.smallNetYi ?? null),
-    retailNetYi: hasRealtimeFund && snap.retailNetYi != null
-      ? snap.retailNetYi
-      : (base.smallNetYi ?? null),
-    main5dYi: base.main5dYi ?? (snap && snap.main5dYi) ?? null,
-    main5dAvgYi: base.main5dAvgYi ?? null,
-    trend5: base.trend5 || null,
-    inflowDays: base.inflowDays ?? null,
-    mainStreak,                                 // 当前连续净流入(+)/净流出(-)天数;null=数据不足
-    weibi: snap ? snap.weibi : null, weicha: snap ? snap.weicha : null,  // 盘口仅盘中有效
   };
 }
 
@@ -1059,7 +912,13 @@ export default async function handler(req, res) {
             (v) => v?.dailyAsOf || v?.candles?.at(-1)?.date || null,
           ),
           track('intraday', '分时走势', fetchTrend(payload.code), (v) => Array.isArray(v) && v.length > 0, (v) => v?.at(-1)?.time || null),
-          track('stockFunds', '个股资金流', fetchStockFund(payload.code), (v) => v != null, (v) => v?.asOfDate || null),
+          track(
+            'stockFunds',
+            '个股资金流',
+            fetchStockFund(payload.code, { timeoutMs: 7000 }),
+            (v) => v != null,
+            (v) => v?.asOfDate || null,
+          ),
           track('dragonTiger', '龙虎榜', fetchStockLHB(payload.code), (v) => v != null, (v) => v?.date || null),
           track('stockNews', '消息面/公告', buildCorpus(payload.code, { name: payload.name }), (v) => v && v.docs && v.docs.length),
           track('macroNews', '宏观要闻', fetchMacroNews(), (v) => v && v.length),
@@ -1704,9 +1563,14 @@ export default async function handler(req, res) {
       fundAsOf: payload.stockFund ? {
         date: payload.stockFund.asOfDate,
         historical: payload.stockFund.isHistorical,
+        source: payload.stockFund.source || null,
+        fetchedAt: payload.stockFund.fetchedAt || null,
         main5dAvg: payload.stockFund.main5dAvgYi,
+        retail5dAvg: payload.stockFund.retail5dAvgYi,
         inflowDays: payload.stockFund.inflowDays,
+        retailInflowDays: payload.stockFund.retailInflowDays,
         mainStreak: payload.stockFund.mainStreak ?? null,
+        retailStreak: payload.stockFund.retailStreak ?? null,
         retailNetYi: payload.stockFund.retailNetYi ?? null,
         retailRelation: payload.stockFund.retailFlow?.relation || null,
       } : null,
@@ -2378,6 +2242,7 @@ export default async function handler(req, res) {
         payload.quant,
         quantModelVersion,
       );
+      result.fundContext = compactStockFundSnapshot(payload.stockFund);
       result.knowledgeActionPlan = buildKnowledgeActionPlan(result, { mode });
       result.knowledgeActionScore = scoreKnowledgeActionPlan(
         result.knowledgeActionPlan,

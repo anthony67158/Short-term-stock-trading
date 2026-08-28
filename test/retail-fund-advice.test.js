@@ -104,6 +104,8 @@ test('军师快速、深度与复核提示都强制合参散户资金', () => {
       mainNetYi: -1.2,
       retailNetYi: 0.8,
       smallNetYi: 0.8,
+      mainTrend5: [0.4, 0.2, -0.1, -0.5, -1.2],
+      retailTrend5: [-0.3, -0.1, 0.1, 0.4, 0.8],
       retailFlow: {
         relation: 'main_out_retail_in',
         interpretation: '大单主动卖出、小单主动买入，可能是小单承接大单抛压。',
@@ -120,6 +122,8 @@ test('军师快速、深度与复核提示都强制合参散户资金', () => {
   assert.match(ADVISOR_SYSTEM, /不等于真实账户身份/)
   assert.match(ADVISOR_FAST_SYSTEM, /散户资金/)
   assert.match(fast, /fundNote.*mainNetYi.*retailNetYi/)
+  assert.match(fast, /mainTrend5/)
+  assert.match(fast, /retailTrend5/)
   assert.match(review, /fundNote.*主力.*散户/)
   assert.match(review, /DISTRIBUTION/)
 

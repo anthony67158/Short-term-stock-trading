@@ -1147,6 +1147,9 @@ export const planStore = {
             lastJudgeDecision: c.lastJudgeDecision || a.lastJudgeDecision,
             lastJudgeConfidence: c.lastJudgeConfidence ?? a.lastJudgeConfidence,
             lastJudgePolicy: c.lastJudgePolicy || a.lastJudgePolicy,
+            lastJudgeFund: c.lastJudgeFund || a.lastJudgeFund || null,
+            lastJudgeFundChange:
+              c.lastJudgeFundChange || a.lastJudgeFundChange || null,
             lastKnowledgeAction: c.lastKnowledgeAction || a.lastKnowledgeAction || null,
             judgeCount: Math.max(Number(c.judgeCount) || 0, Number(a.judgeCount) || 0),
           }
@@ -1162,6 +1165,8 @@ export const planStore = {
             lastJudgeDecision: a.lastJudgeDecision,
             lastJudgeConfidence: a.lastJudgeConfidence,
             lastJudgePolicy: a.lastJudgePolicy,
+            lastJudgeFund: a.lastJudgeFund || null,
+            lastJudgeFundChange: a.lastJudgeFundChange || null,
             lastKnowledgeAction: a.lastKnowledgeAction || null,
             judgeCount: Number(a.judgeCount) || 0,
           })) touched = true
@@ -1186,6 +1191,9 @@ export const planStore = {
             lastJudgeDecision: c.lastJudgeDecision || a.lastJudgeDecision,
             lastJudgeConfidence: c.lastJudgeConfidence ?? a.lastJudgeConfidence,
             lastJudgePolicy: c.lastJudgePolicy || a.lastJudgePolicy,
+            lastJudgeFund: c.lastJudgeFund || a.lastJudgeFund || null,
+            lastJudgeFundChange:
+              c.lastJudgeFundChange || a.lastJudgeFundChange || null,
             lastKnowledgeAction: c.lastKnowledgeAction || a.lastKnowledgeAction || null,
             judgeCount: Math.max(Number(c.judgeCount) || 0, Number(a.judgeCount) || 0),
           }
@@ -2680,6 +2688,8 @@ export const planStore = {
           lastJudgeConfidence: null,
           lastJudgePolicy: null,
           lastJudgePrice: null,
+          lastJudgeFund: null,
+          lastJudgeFundChange: null,
           lastKnowledgeAction: null,
           judgeOutcomes: {},
         } : x)
@@ -2709,6 +2719,8 @@ export const planStore = {
           lastJudgeConfidence: verdict?.confidence ?? null,
           lastJudgePolicy: verdict?.policy || null,
           lastJudgePrice: Number(price) || null,
+          lastJudgeFund: verdict?.signals?.funds?.current || null,
+          lastJudgeFundChange: verdict?.signals?.funds?.change || null,
           lastKnowledgeAction: verdict?.knowledgeAction || x.lastKnowledgeAction || null,
           judgeCount: (Number(x.judgeCount) || 0) + 1,
         }
@@ -2727,6 +2739,12 @@ export const planStore = {
           enabled: false,
           decisionPrice: Number(price) || x.lastJudgePrice || null,
           decisionSide: verdict?.side || null,
+          lastJudgeFund:
+            verdict?.signals?.funds?.current || x.lastJudgeFund || null,
+          lastJudgeFundChange:
+            verdict?.signals?.funds?.change
+            || x.lastJudgeFundChange
+            || null,
           lastKnowledgeAction: verdict?.knowledgeAction || x.lastKnowledgeAction || null,
           judgeOutcomes: {},
         }
@@ -2774,6 +2792,12 @@ export const planStore = {
           decisionSide: verdict?.side || null,
           terminalInstruction:
             verdict?.terminalInstruction || msg || '',
+          lastJudgeFund:
+            verdict?.signals?.funds?.current || x.lastJudgeFund || null,
+          lastJudgeFundChange:
+            verdict?.signals?.funds?.change
+            || x.lastJudgeFundChange
+            || null,
         }
       : x)
     emit()

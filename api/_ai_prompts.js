@@ -123,6 +123,30 @@ function compactPreviousAdviceForPrompt(previousAdvice) {
     : []
   if (levels.length) compact.priceContract = { levels }
   if (
+    previousAdvice.fundContext
+    && typeof previousAdvice.fundContext === 'object'
+  ) {
+    compact.fundContext = {
+      ...compactPromptObject(previousAdvice.fundContext, [
+        'source',
+        'fetchedAt',
+        'asOfDate',
+        'mainNetYi',
+        'retailNetYi',
+        'main5dYi',
+        'retail5dYi',
+        'mainStreak',
+        'retailStreak',
+      ]),
+      mainTrend5: (
+        previousAdvice.fundContext.mainTrend5 || []
+      ).slice(-5),
+      retailTrend5: (
+        previousAdvice.fundContext.retailTrend5 || []
+      ).slice(-5),
+    }
+  }
+  if (
     previousAdvice.reviewCycle
     && typeof previousAdvice.reviewCycle === 'object'
   ) {
@@ -320,11 +344,14 @@ function tacticalTActionRule(tactical = {}) {
   return `【做T阶段】${value.stage}，今日可卖${value.sellableTodayQty || 0}手`
 }
 
-function tacticalFundRule(tactical = {}) {
+function tacticalFundRule(tactical = {}, funds = {}) {
   const flow = tactical.flow || {}
   return '【主力与散户资金】fundNote必须同时引用'
     + ` tactical.flow.mainNetYi=${flow.mainNetYi ?? '缺失'}`
     + ` 与 tactical.flow.retailNetYi=${flow.retailNetYi ?? '缺失'}，`
+    + `并结合 funds.mainTrend5=${JSON.stringify(funds.mainTrend5 || [])}`
+    + `、funds.retailTrend5=${JSON.stringify(funds.retailTrend5 || [])}`
+    + ' 判断最近5日持续、转弱或背离，'
     + `解释主力与散户资金代理的同向或背离（当前关系=${flow.relation || 'UNKNOWN'}）；`
     + '散户资金缺失时明确说明，不得按0处理，也不得单独作为买卖信号'
 }
@@ -513,7 +540,7 @@ function tacticalUsageRules(facts = {}) {
     tacticalTechnicalRule(facts.tactical),
     tacticalQuantRule(facts.tactical),
     tacticalTActionRule(facts.tactical),
-    tacticalFundRule(facts.tactical),
+    tacticalFundRule(facts.tactical, facts.funds),
     tacticalNewsRule(facts.news),
     tacticalTradeRule(facts.trade),
   ].filter(Boolean).join('\n')
@@ -544,6 +571,29 @@ export function deepAdvisorFacts(payload = {}) {
       openTNet: promptNumber(payload.openTNet),
       sellableTodayQty: promptNumber(payload.sellableTodayQty),
       boughtTodayQty: promptNumber(payload.boughtTodayQty),
+    },
+    funds: {
+      ...compactPromptObject(payload.stockFund, [
+        'source',
+        'fetchedAt',
+        'asOfDate',
+        'historicalAsOfDate',
+        'isHistorical',
+        'mainNetYi',
+        'retailNetYi',
+        'main5dYi',
+        'retail5dYi',
+        'main5dAvgYi',
+        'retail5dAvgYi',
+        'inflowDays',
+        'retailInflowDays',
+        'mainStreak',
+        'retailStreak',
+      ]),
+      mainTrend5: (Array.isArray(payload.stockFund?.mainTrend5)
+        ? payload.stockFund.mainTrend5
+        : payload.stockFund?.trend5 || []).slice(-5),
+      retailTrend5: (payload.stockFund?.retailTrend5 || []).slice(-5),
     },
     stockProfile: compactPromptObject(payload.stockProfile, [
       'days',

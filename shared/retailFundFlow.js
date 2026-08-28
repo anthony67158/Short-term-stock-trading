@@ -107,3 +107,113 @@ export function mergeRetailFundFlow(
   })
   return merged
 }
+
+function compactTrend(value) {
+  return (Array.isArray(value) ? value : [])
+    .slice(-5)
+    .map(finite)
+}
+
+export function compactStockFundSnapshot(input = {}) {
+  if (!input || typeof input !== 'object') return null
+  const mainNetYi = finite(input.mainNetYi)
+  const retailNetYi = finite(
+    input.retailNetYi ?? input.smallNetYi,
+  )
+  if (mainNetYi == null && retailNetYi == null) return null
+  const mainTrend5 = compactTrend(
+    input.mainTrend5 ?? input.trend5,
+  )
+  const retailTrend5 = compactTrend(input.retailTrend5)
+  return {
+    schemaVersion: 'stock-fund-snapshot.v1',
+    source: String(input.source || (
+      input.isHistorical ? 'historical' : 'realtime'
+    )).slice(0, 30),
+    fetchedAt: finite(input.fetchedAt),
+    asOfDate: input.asOfDate || null,
+    historicalAsOfDate: input.historicalAsOfDate || null,
+    isHistorical: input.isHistorical === true,
+    mainNetYi,
+    retailNetYi,
+    main5dYi: finite(input.main5dYi),
+    retail5dYi: finite(input.retail5dYi),
+    main5dAvgYi: finite(input.main5dAvgYi),
+    retail5dAvgYi: finite(input.retail5dAvgYi),
+    inflowDays: finite(input.inflowDays),
+    retailInflowDays: finite(input.retailInflowDays),
+    mainStreak: finite(input.mainStreak),
+    retailStreak: finite(input.retailStreak),
+    mainTrend5,
+    retailTrend5,
+    retailFlow: input.retailFlow
+      ? {
+          relation: input.retailFlow.relation || 'partial',
+          bias: input.retailFlow.bias || 'neutral',
+          interpretation: input.retailFlow.interpretation || '',
+        }
+      : buildRetailFlowEvidence({
+          mainNetYi,
+          retailNetYi,
+          asOfDate: input.asOfDate,
+          isHistorical: input.isHistorical,
+        }),
+  }
+}
+
+function directionChange(current, baseline, label) {
+  if (current == null) return `${label}当前缺失`
+  if (baseline == null) {
+    return `${label}当前${current > 0 ? '净流入' : current < 0 ? '净流出' : '接近平衡'}`
+  }
+  if (baseline <= 0 && current > 0) return `${label}由流出转流入`
+  if (baseline >= 0 && current < 0) return `${label}由流入转流出`
+  const delta = +(current - baseline).toFixed(2)
+  if (Math.abs(delta) < 0.05) return `${label}基本持平`
+  return `${label}${delta > 0 ? '增强' : '减弱'}${Math.abs(delta)}亿元`
+}
+
+export function compareStockFundSnapshots(currentInput, baselineInput) {
+  const current = compactStockFundSnapshot(currentInput)
+  const baseline = compactStockFundSnapshot(baselineInput)
+  if (!current) {
+    return {
+      status: 'UNAVAILABLE',
+      baselineAvailable: !!baseline,
+      summary: '本次未取得有效的最新主力与散户资金快照',
+    }
+  }
+  const mainDeltaYi = current.mainNetYi == null
+    || baseline?.mainNetYi == null
+    ? null
+    : +(current.mainNetYi - baseline.mainNetYi).toFixed(2)
+  const retailDeltaYi = current.retailNetYi == null
+    || baseline?.retailNetYi == null
+    ? null
+    : +(current.retailNetYi - baseline.retailNetYi).toFixed(2)
+  const relationChanged = !!(
+    baseline?.retailFlow?.relation
+    && current.retailFlow?.relation
+    && baseline.retailFlow.relation !== current.retailFlow.relation
+  )
+  return {
+    status: baseline ? 'COMPARED' : 'FRESH_ONLY',
+    baselineAvailable: !!baseline,
+    mainDeltaYi,
+    retailDeltaYi,
+    relationChanged,
+    summary: [
+      directionChange(
+        current.mainNetYi,
+        baseline?.mainNetYi,
+        '主力',
+      ),
+      directionChange(
+        current.retailNetYi,
+        baseline?.retailNetYi,
+        '散户代理',
+      ),
+      relationChanged ? '主力与散户关系已变化' : '',
+    ].filter(Boolean).join('；'),
+  }
+}

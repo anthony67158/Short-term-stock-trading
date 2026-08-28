@@ -43,6 +43,11 @@ import {
 import { positionGateForAlert } from '../shared/alertPositionPolicy.js';
 import { buildJudgeKnowledgeActionAssessment } from '../shared/knowledgeAction.js';
 import { quantJudgeDiscipline } from '../shared/quantAdviceContext.js';
+import {
+  compactStockFundSnapshot,
+  compareStockFundSnapshots,
+} from '../shared/retailFundFlow.js';
+import { fetchStockFund } from './_stock_fund.js';
 
 export const JUDGE_MAX_TOKENS = 260;
 
@@ -66,6 +71,17 @@ function compactText(value, maximum = 240) {
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, maximum)
+}
+
+export function buildJudgeFundContext(currentInput, baselineInput) {
+  const current = compactStockFundSnapshot(currentInput);
+  const baseline = compactStockFundSnapshot(baselineInput);
+  return {
+    available: !!current,
+    current,
+    baseline,
+    change: compareStockFundSnapshots(current, baseline),
+  };
 }
 
 function lotsOf(value) {
@@ -471,7 +487,17 @@ export function deterministicJudge(side, prim, tech) {
 // ---- LLM Judge:最终研判闸门 ----
 // 喂:交易意图 + 建议的确认条件/失效条件 + 确定性结论 + 技术面摘要 + 分时快照。
 // 要求返回严格 JSON:{decision:'confirm'|'wait'|'invalid', confidence:0-100, reason:'一句话'}。
-async function llmJudge({ a, name, advice, prim, tech, det, position }) {
+async function llmJudge({
+  a,
+  name,
+  advice,
+  prim,
+  tech,
+  det,
+  position,
+  fundContext,
+  deadlineAt,
+}) {
   const model = getModel('judge');
   if (!model) return null;   // 未配置 judge 端点/模型 → 跳过 LLM,用确定性结论
   const intent = actionIntentOf(a);
@@ -484,6 +510,8 @@ async function llmJudge({ a, name, advice, prim, tech, det, position }) {
     + 'priceContract是服务端校验后的唯一权威价格契约，禁止改价或另造价位。'
     + '当前持仓状态由服务端账本核验：无持仓只能买入，绝不能解释为加仓、减仓、卖出或止损；'
     + '加仓必须确认原军师仍支持且触价后承接有效；减仓和锁利润要结合冲高回落、VWAP与量能；硬止损优先。'
+    + '本轮服务端最新资金是实时判断依据：必须同时分析主力与散户代理资金，并对比原军师生成时的资金基准；'
+    + '若资金关系由正面转为背离或主力转流出，必须降低买入/加仓把握；资金不可用时明确降级，不得沿用旧资金冒充实时。'
     + '不要求所有指标同时同向：只要至少一类可追溯依据成立（已验证理论、实时资金与价格、重大催化）即可综合决断。'
     + 'wait是本次触发的终态“维持观望/维持持有”，不是继续围绕该价格循环复核；invalid是放弃本次操作。'
     + (modelDiscipline ? `量化模型纪律：${modelDiscipline}` : '')
@@ -520,6 +548,14 @@ async function llmJudge({ a, name, advice, prim, tech, det, position }) {
       已观察分钟: prim.observationAgeMin,
     },
     技术面: techSummaryForAI(tech),
+    本轮服务端最新资金: fundContext?.current || {
+      available: false,
+    },
+    原军师资金基准: fundContext?.baseline || null,
+    相对原军师资金变化: fundContext?.change || {
+      status: 'UNAVAILABLE',
+      summary: '本次未取得有效的最新主力与散户资金快照',
+    },
     军师完整建议: adv,
     建议给出的确认条件: adv.exitTiming || adv.actionPlan || '(未提供,按通用纪律判断)',
     建议给出的失效条件: adv.invalidation || '(未提供)',
@@ -533,7 +569,14 @@ async function llmJudge({ a, name, advice, prim, tech, det, position }) {
   try {
     // Judge 必须及时：总预算 10s 内允许一次故障转移，超时立即回退客观信号。
     const startedAt = Date.now();
-    const TIMEOUT_MS = 10000;
+    const remainingMs = Number(deadlineAt) > 0
+      ? Number(deadlineAt) - startedAt
+      : 10000;
+    if (remainingMs < 1000) return null;
+    const TIMEOUT_MS = Math.max(
+      1200,
+      Math.min(10000, remainingMs),
+    );
     const { resp, done } = await callChatWithRetry({
       role: 'judge', model,
       messages,
@@ -581,7 +624,14 @@ async function llmJudge({ a, name, advice, prim, tech, det, position }) {
 //   decision: 'confirm' | 'wait' | 'invalid'
 //   source:   'llm+ta' | 'ta' (LLM 缺席/失败时的确定性兜底)
 // 内部自取分时(fetchTrendsTx)+日线(fetchKlineTx→computeTechnicals);取数失败 → wait(不误发)。
-export async function judgeConfirmation({ alert, name, advice, quote, position } = {}) {
+export async function judgeConfirmation({
+  alert,
+  name,
+  advice,
+  quote,
+  position,
+  providers = {},
+} = {}) {
   const a = alert;
   if (!a || !a.code) {
     return {
@@ -651,7 +701,9 @@ export async function judgeConfirmation({ alert, name, advice, quote, position }
       policy: 'advice-mismatch',
     });
   }
-  const timeContext = marketTimeContext();
+  const timeContext = typeof providers.marketTimeContext === 'function'
+    ? providers.marketTimeContext()
+    : marketTimeContext();
   if (!isConfirmationPhase(timeContext.phase)) {
     return finalize({
       decision: 'wait',
@@ -660,13 +712,31 @@ export async function judgeConfirmation({ alert, name, advice, quote, position }
       source: 'ta',
     });
   }
-  // 盘中分时(主依据)
-  let trendsData = null;
-  try { trendsData = await fetchTrendsTx(a.code); } catch { trendsData = null; }
+  // 分时与资金并行拉取。资金只信任服务端本轮新取值，不使用客户端传入值。
+  const observedAt = typeof providers.now === 'function'
+    ? Number(providers.now()) || Date.now()
+    : Date.now();
+  const fetchTrends = providers.fetchTrendsTx || fetchTrendsTx;
+  const fetchFunds = providers.fetchStockFund || fetchStockFund;
+  const [trendsResult, fundResult] = await Promise.allSettled([
+    fetchTrends(a.code),
+    fetchFunds(a.code, {
+      preferRealtime: true,
+      timeoutMs: 2200,
+      fetchedAt: observedAt,
+    }),
+  ]);
+  const trendsData = trendsResult.status === 'fulfilled'
+    ? trendsResult.value
+    : null;
+  const fundContext = buildJudgeFundContext(
+    fundResult.status === 'fulfilled' ? fundResult.value : null,
+    adviceContext.fundContext,
+  );
   const prim = trendsData ? intradayPrimitives(
     trendsData.trends,
     trendsData.preClose,
-    { watchingAt: a.watchingAt },
+    { watchingAt: a.watchingAt, now: observedAt },
   ) : null;
   if (!prim) {
     return finalize({
@@ -674,6 +744,7 @@ export async function judgeConfirmation({ alert, name, advice, quote, position }
       reason: '分时数据不足，本次维持原计划且不新增复核价',
       side,
       source: 'ta',
+      signals: { funds: fundContext },
     });
   }
   if (!isMinuteSnapshotFresh(prim.lastTime, timeContext.bjNow)) {
@@ -682,6 +753,7 @@ export async function judgeConfirmation({ alert, name, advice, quote, position }
       reason: `分时快照已过期(${prim.lastTime || '时间未知'})，本次维持原计划`,
       side,
       source: 'ta',
+      signals: { funds: fundContext },
     }, prim);
   }
   const quotePrice = Number(quote && quote.price);
@@ -695,6 +767,7 @@ export async function judgeConfirmation({ alert, name, advice, quote, position }
       reason: `分时价与实时报价偏差${Math.abs(prim.sourceSpreadPct)}%，本次不执行`,
       side,
       source: 'ta',
+      signals: { funds: fundContext },
     }, prim);
   }
   const keyPrice = Number(a.value);
@@ -703,7 +776,7 @@ export async function judgeConfirmation({ alert, name, advice, quote, position }
   prim.keyDistancePct = keyPrice > 0 ? round((prim.price - keyPrice) / keyPrice * 100, 2) : null;
   prim.sinceTouchPct = watchingPrice > 0 ? round((prim.price - watchingPrice) / watchingPrice * 100, 2) : null;
   const wallObservationMs = watchingAt > 0
-    ? Math.max(0, Date.now() - watchingAt)
+    ? Math.max(0, observedAt - watchingAt)
     : null;
   prim.observationAgeMs = wallObservationMs == null
     ? null
@@ -722,7 +795,13 @@ export async function judgeConfirmation({ alert, name, advice, quote, position }
     const result = {
       ...early,
       side,
-      signals: { side, primitives: prim, deterministic: preliminary, techVerdict: null },
+      signals: {
+        side,
+        primitives: prim,
+        deterministic: preliminary,
+        techVerdict: null,
+        funds: fundContext,
+      },
       source: 'ta',
     };
     const enriched = finalize(result, prim);
@@ -733,12 +812,19 @@ export async function judgeConfirmation({ alert, name, advice, quote, position }
   // 日线技术面(辅助:MACD/RSI/均线)
   let tech = null;
   try {
-    const kl = await fetchKlineTx(a.code, '101', 60);
+    const fetchKline = providers.fetchKlineTx || fetchKlineTx;
+    const kl = await fetchKline(a.code, '101', 60);
     if (kl && kl.candles) tech = computeTechnicals(kl.candles);
   } catch { tech = null; }
 
   const det = deterministicJudge(side, prim, tech);
-  const signals = { side, primitives: prim, deterministic: det, techVerdict: tech && tech.verdict };
+  const signals = {
+    side,
+    primitives: prim,
+    deterministic: det,
+    techVerdict: tech && tech.verdict,
+    funds: fundContext,
+  };
 
   // 强止损客观信号优先，避免等待 LLM 导致风险继续扩大。
   if (side === 'stop' && det.score >= 3) {
@@ -774,7 +860,19 @@ export async function judgeConfirmation({ alert, name, advice, quote, position }
   }
 
   // LLM 最终闸门(可回退)，最终结果由非对称融合策略裁决。
-  const llm = await llmJudge({ side, a, name, advice, prim, tech, det, position });
+  const callJudge = providers.llmJudge || llmJudge;
+  const llm = await callJudge({
+    side,
+    a,
+    name,
+    advice,
+    prim,
+    tech,
+    det,
+    position,
+    fundContext,
+    deadlineAt: observedAt + 10000,
+  });
   const fused = fuseConfirmation({
     side,
     deterministic: det,
@@ -830,6 +928,8 @@ async function logVerdict(a, name, prim, result) {
     policy: result.policy || null,
     deterministicScore: result.signals?.deterministic?.score ?? null,
     deterministicHits: result.signals?.deterministic?.hits || [],
+    fundSnapshot: result.signals?.funds?.current || null,
+    fundChange: result.signals?.funds?.change || null,
     keyDistancePct: prim?.keyDistancePct ?? null,
     sinceTouchPct: prim?.sinceTouchPct ?? null,
     drawdownFromHighPct: prim?.drawdownFromHighPct ?? null,

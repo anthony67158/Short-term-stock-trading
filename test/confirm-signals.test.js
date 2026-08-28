@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  buildJudgeFundContext,
   buildJudgeUserPrompt,
   deterministicJudge,
   intradayPrimitives,
@@ -122,6 +123,162 @@ test('Judge生成一次性终局结论、执行区间、手数与依据', () => 
   assert.match(prompt, /"reason":"一句话中文理由"/)
   assert.doesNotMatch(prompt, /knowledgeAction|知行合一|可执行性/)
   assert.ok(JUDGE_MAX_TOKENS <= 300)
+})
+
+test('快速复核比较本轮服务端资金与原军师资金基准', () => {
+  const context = buildJudgeFundContext({
+    source: 'realtime',
+    mainNetYi: -0.4,
+    retailNetYi: 0.7,
+    mainTrend5: [0.2, 0.4, 0.5, 0.7, 0.8],
+    retailTrend5: [-0.1, -0.2, -0.2, -0.3, -0.4],
+  }, {
+    source: 'realtime',
+    mainNetYi: 1.2,
+    retailNetYi: -0.5,
+  })
+
+  assert.equal(context.available, true)
+  assert.equal(context.current.mainNetYi, -0.4)
+  assert.equal(context.current.retailNetYi, 0.7)
+  assert.equal(context.change.mainDeltaYi, -1.6)
+  assert.equal(context.change.relationChanged, true)
+})
+
+test('快速Judge每次触价重新拉取服务端主力与散户资金', async () => {
+  const now = Date.parse('2026-08-28T02:05:00.000Z')
+  let fundCalls = 0
+  let receivedFundContext = null
+  const trends = Array.from({ length: 6 }, (_, index) => ({
+    time: `10:0${index}`,
+    price: 10 + index * 0.02,
+    volume: 100 + index * 5,
+    avg: 10.03,
+  }))
+  const result = await judgeConfirmation({
+    alert: {
+      id: 'fund-review',
+      code: '600000',
+      note: '买点',
+      op: 'lte',
+      value: 10.1,
+      watchingAt: Date.parse('2026-08-28T02:00:00.000Z'),
+      watchingPrice: 10,
+    },
+    advice: {
+      action: '立即买入',
+      actionPlan: '10.1元买入1手',
+      buyPrice: 10.1,
+      fundContext: {
+        source: 'realtime',
+        mainNetYi: 0.8,
+        retailNetYi: -0.3,
+      },
+    },
+    quote: { price: 10.1 },
+    providers: {
+      now: () => now,
+      marketTimeContext: () => ({
+        phase: '早盘(盘中)',
+        bjNow: '2026-08-28 10:05',
+      }),
+      fetchTrendsTx: async () => ({
+        trends,
+        preClose: 10,
+      }),
+      fetchKlineTx: async () => null,
+      fetchStockFund: async (code, options) => {
+        fundCalls += 1
+        assert.equal(code, '600000')
+        assert.equal(options.preferRealtime, true)
+        return {
+          source: 'realtime',
+          fetchedAt: now,
+          mainNetYi: -0.5,
+          retailNetYi: 0.6,
+          mainTrend5: [0.1, 0.2, 0.3, 0.4, 0.5],
+          retailTrend5: [-0.1, -0.2, -0.2, -0.3, -0.3],
+        }
+      },
+      llmJudge: async ({ fundContext }) => {
+        receivedFundContext = fundContext
+        return {
+          decision: 'wait',
+          confidence: 82,
+          reason: '主力转流出且散户代理转流入，本次不执行',
+          basisType: '实时资金与价格',
+          basis: '主力与散户资金关系已反转',
+        }
+      },
+    },
+  })
+
+  assert.equal(fundCalls, 1)
+  assert.equal(receivedFundContext.current.mainNetYi, -0.5)
+  assert.equal(receivedFundContext.current.retailNetYi, 0.6)
+  assert.equal(receivedFundContext.change.relationChanged, true)
+  assert.equal(result.signals.funds.current.source, 'realtime')
+  assert.equal(result.decision, 'wait')
+})
+
+test('快速Judge资金源失败时明确降级且不沿用旧资金冒充实时', async () => {
+  const now = Date.parse('2026-08-28T02:05:00.000Z')
+  let receivedFundContext = null
+  const trends = Array.from({ length: 6 }, (_, index) => ({
+    time: `10:0${index}`,
+    price: 10 + index * 0.02,
+    volume: 100,
+    avg: 10.03,
+  }))
+  const result = await judgeConfirmation({
+    alert: {
+      id: 'fund-review-failed',
+      code: '600000',
+      note: '买点',
+      op: 'lte',
+      value: 10.1,
+      watchingAt: Date.parse('2026-08-28T02:00:00.000Z'),
+      watchingPrice: 10,
+    },
+    advice: {
+      action: '立即买入',
+      actionPlan: '10.1元买入1手',
+      buyPrice: 10.1,
+      fundContext: {
+        source: 'realtime',
+        mainNetYi: 0.8,
+        retailNetYi: -0.3,
+      },
+    },
+    quote: { price: 10.1 },
+    providers: {
+      now: () => now,
+      marketTimeContext: () => ({
+        phase: '早盘(盘中)',
+        bjNow: '2026-08-28 10:05',
+      }),
+      fetchTrendsTx: async () => ({ trends, preClose: 10 }),
+      fetchKlineTx: async () => null,
+      fetchStockFund: async () => {
+        throw new Error('fund source unavailable')
+      },
+      llmJudge: async ({ fundContext }) => {
+        receivedFundContext = fundContext
+        return {
+          decision: 'wait',
+          confidence: 80,
+          reason: '最新资金缺失，本次不执行',
+        }
+      },
+    },
+  })
+
+  assert.equal(receivedFundContext.available, false)
+  assert.equal(receivedFundContext.current, null)
+  assert.equal(receivedFundContext.baseline.mainNetYi, 0.8)
+  assert.equal(receivedFundContext.change.status, 'UNAVAILABLE')
+  assert.equal(result.signals.funds.current, null)
+  assert.equal(result.decision, 'wait')
 })
 
 test('Judge拒绝与价格契约不一致的预警价', () => {

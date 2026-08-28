@@ -33,6 +33,7 @@ const CORE_FIELDS = [
   'priceContract',
   'knowledgeActionPlan',
   'knowledgeActionScore',
+  'fundContext',
 ]
 
 const SCHEDULED_STABLE_FIELDS = [

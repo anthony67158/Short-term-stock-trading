@@ -100,6 +100,8 @@ export function applyConfirmationVerdict(
   stored.lastJudgeAt = now;
   stored.lastJudgeDecision = verdict.decision;
   stored.lastJudgeConfidence = verdict.confidence ?? null;
+  stored.lastJudgeFund = verdict.signals?.funds?.current || null;
+  stored.lastJudgeFundChange = verdict.signals?.funds?.change || null;
   stored.decisionPrice = Number.isFinite(Number(quotePrice))
     ? Number(quotePrice)
     : null;
