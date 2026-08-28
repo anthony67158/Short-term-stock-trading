@@ -6,6 +6,7 @@ import { usePolling } from '../hooks'
 import { planStore, usePlanStore } from '../planStore'
 import DailyReport from './DailyReport'
 import SectorForecast from './SectorForecast'
+import TailPick from './TailPick'
 import ErrorBoundary from './ErrorBoundary'
 import { fmtPct, pctClass, fmtInflow, fmtRaw } from '../format'
 import { deriveMarketRegime } from '../../shared/marketRegime.js'
@@ -31,6 +32,9 @@ export default function TodayTab({ interval, market, sectors }) {
       <SentimentGauge zt={zt.data} zb={zb.data} market={market} />
       <ErrorBoundary label="板块前瞻">
         <SectorForecast />
+      </ErrorBoundary>
+      <ErrorBoundary label="尾盘拾金">
+        <TailPick />
       </ErrorBoundary>
       <CandidatePool
         zt={zt.data}

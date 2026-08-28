@@ -11,6 +11,7 @@ import {
   createTailPickStore,
 } from '../api/_tail_pick_store.js'
 import {
+  projectTailPickLiveStatus,
   readTailPickState,
   runTailPickScan,
 } from '../api/tail_pick.js'
@@ -195,4 +196,55 @@ test('存储适配器对同一交易日读取同一正式结果', async () => {
   })
   assert.deepEqual(state.currentResult, result)
   assert.equal(state.session.label, '查看尾盘结果')
+})
+
+test('14:55后旧执行指令统一失效，不能继续追买', async () => {
+  const result = await projectTailPickLiveStatus({
+    session: { tradeDate: '2026-08-28' },
+    result: {
+      candidates: [{
+        code: '600001',
+        execution: { action: '原执行指令' },
+      }],
+    },
+  }, {
+    timestamp: beijingTimestamp('2026-08-28T14:55:00'),
+  })
+
+  assert.equal(
+    result.result.candidates[0].liveStatus,
+    'WINDOW_CLOSED',
+  )
+  assert.match(
+    result.result.candidates[0].execution.action,
+    /不再买入/,
+  )
+})
+
+test('运行窗口内分时跌破纪律后立即改为放弃买入', async () => {
+  const result = await projectTailPickLiveStatus({
+    session: { tradeDate: '2026-08-28' },
+    result: {
+      candidates: [{
+        code: '600001',
+        execution: { action: '原执行指令' },
+      }],
+    },
+  }, {
+    timestamp: beijingTimestamp('2026-08-28T14:52:00'),
+    fetchTrends: async () => ({
+      trends: Array.from({ length: 10 }, (_, index) => ({
+        time: `14:${String(43 + index).padStart(2, '0')}`,
+        price: index === 9 ? 9.7 : 10,
+        avg: 9.9,
+        volume: index === 9 ? 1000 : 100,
+      })),
+    }),
+  })
+
+  assert.equal(result.result.candidates[0].liveStatus, 'ABANDON')
+  assert.match(
+    result.result.candidates[0].execution.action,
+    /放弃买入/,
+  )
 })

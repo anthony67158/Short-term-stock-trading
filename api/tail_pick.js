@@ -9,6 +9,7 @@ import {
   collectTailPickMarketContext,
   scanTailPickCandidates,
 } from './_tail_pick_data.js'
+import { fetchTrendsTx } from './stock_detail.js'
 import {
   tailPickStore,
 } from './_tail_pick_store.js'
@@ -16,6 +17,7 @@ import {
   rankTailPickCandidates,
 } from '../shared/tailPickRanking.js'
 import {
+  evaluateTailPickIntraday,
   tailPickSession,
 } from '../shared/tailPickPolicy.js'
 
@@ -243,6 +245,7 @@ export function runTailPickScan({
 
 export async function readTailPickState({
   store = tailPickStore,
+  fetchTrends = fetchTrendsTx,
   timestamp = Date.now(),
 } = {}) {
   const [latest, task] = await Promise.all([
@@ -253,14 +256,98 @@ export async function readTailPickState({
     === tailPickSession(timestamp).tradeDate
     ? latest
     : null
+  const projected = currentResult
+    ? await projectTailPickLiveStatus(currentResult, {
+        fetchTrends,
+        timestamp,
+      })
+    : null
   return {
     schemaVersion: TAIL_PICK_SCHEMA_VERSION,
     session: tailPickSession(timestamp, {
       hasResult: !!currentResult,
     }),
     latest,
-    currentResult,
+    currentResult: projected,
     task,
+  }
+}
+
+export async function projectTailPickLiveStatus(
+  result,
+  {
+    fetchTrends = fetchTrendsTx,
+    timestamp = Date.now(),
+  } = {},
+) {
+  const candidates = Array.isArray(result?.result?.candidates)
+    ? result.result.candidates
+    : []
+  if (!candidates.length) return result
+  const session = tailPickSession(timestamp, { hasResult: true })
+  if (result.session?.tradeDate !== session.tradeDate) {
+    return {
+      ...result,
+      result: {
+        ...result.result,
+        candidates: candidates.map((candidate) => ({
+          ...candidate,
+          liveStatus: 'HISTORY',
+          execution: {
+            ...candidate.execution,
+            action: '历史结果，仅供复盘',
+          },
+        })),
+      },
+    }
+  }
+  if (session.status !== 'OPEN') {
+    return {
+      ...result,
+      result: {
+        ...result.result,
+        candidates: candidates.map((candidate) => ({
+          ...candidate,
+          liveStatus: 'WINDOW_CLOSED',
+          execution: {
+            ...candidate.execution,
+            action: '执行窗口已结束，不再买入',
+          },
+        })),
+      },
+    }
+  }
+  const refreshed = await Promise.all(candidates.map(async (candidate) => {
+    const data = await fetchTrends(candidate.code).catch(() => null)
+    const intraday = data?.trends?.length
+      ? evaluateTailPickIntraday(data.trends)
+      : {
+          passed: false,
+          blockers: ['实时分时更新失败'],
+          evidence: [],
+        }
+    return {
+      ...candidate,
+      intraday,
+      liveStatus: intraday.passed ? 'READY' : 'ABANDON',
+      execution: intraday.passed
+        ? candidate.execution
+        : {
+            ...candidate.execution,
+            action: `放弃买入：${
+              intraday.blockers?.[0] || '分时纪律失效'
+            }`,
+            firstLeg: null,
+            secondLeg: null,
+          },
+    }
+  }))
+  return {
+    ...result,
+    result: {
+      ...result.result,
+      candidates: refreshed,
+    },
   }
 }
 
