@@ -4,6 +4,7 @@ import { api } from './apiBase.js'
 const BATCH_LIMIT = 80
 const REQUEST_TIMEOUT_MS = 15000
 export const STOCK_TAG_REVALIDATE_MS = 5 * 60 * 1000
+export const STOCK_TAG_FAILURE_RETRY_MS = 30 * 1000
 const STOCK_TAG_SWEEP_MS = 60 * 1000
 
 function validCode(value) {
@@ -46,6 +47,7 @@ export function createStockTagStore({
     : STOCK_TAG_REVALIDATE_MS
   const cache = new Map()
   const checkedAt = new Map()
+  const retryAt = new Map()
   const pending = new Set()
   const inFlight = new Set()
   const watched = new Map()
@@ -73,8 +75,13 @@ export function createStockTagStore({
   const ensure = (value) => {
     const code = validCode(value)
     const checked = Number(checkedAt.get(code)) || 0
-    const fresh = checked > 0
-      && Number(now()) - checked < revalidateWindowMs
+    const currentTime = Number(now())
+    const nextRetryAt = Number(retryAt.get(code)) || 0
+    const retryReady = nextRetryAt > 0
+      && currentTime >= nextRetryAt
+    const fresh = !retryReady
+      && checked > 0
+      && currentTime - checked < revalidateWindowMs
     if (!code || fresh || inFlight.has(code)) return
     pending.add(code)
     schedule()
@@ -96,6 +103,7 @@ export function createStockTagStore({
     if (!codes.length) return undefined
 
     activePromise = (async () => {
+      let failed = false
       try {
         const list = await fetchBatch(codes)
         const received = new Set()
@@ -110,12 +118,30 @@ export function createStockTagStore({
           if (!received.has(code)) {
             cache.set(code, { code, displayTags: [] })
           }
+          retryAt.delete(code)
         }
       } catch {
-        // 题材是辅助信息，失败保持静默；后续重新挂载可再次尝试。
+        failed = true
+        for (const code of codes) {
+          if (!cache.has(code)) {
+            cache.set(code, {
+              code,
+              displayTags: [],
+              unavailable: true,
+            })
+          }
+        }
       } finally {
         const checked = Number(now()) || Date.now()
         codes.forEach((code) => checkedAt.set(code, checked))
+        if (failed) {
+          codes.forEach((code) => {
+            retryAt.set(
+              code,
+              checked + STOCK_TAG_FAILURE_RETRY_MS,
+            )
+          })
+        }
         codes.forEach((code) => inFlight.delete(code))
         activePromise = null
         emit()
@@ -139,7 +165,11 @@ export function createStockTagStore({
     ) return
     watchTimer = setInterval(() => {
       for (const code of watched.keys()) ensure(code)
-    }, Math.min(STOCK_TAG_SWEEP_MS, revalidateWindowMs))
+    }, Math.min(
+      STOCK_TAG_SWEEP_MS,
+      revalidateWindowMs,
+      STOCK_TAG_FAILURE_RETRY_MS,
+    ))
     watchTimer?.unref?.()
   }
 

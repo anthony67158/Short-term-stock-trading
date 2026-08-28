@@ -85,3 +85,35 @@ test('概念标签超过重验周期后自动请求并替换旧题材', async ()
   assert.equal(calls, 2)
   assert.equal(store.get('300476').displayTags[0].name, '新题材')
 })
+
+test('题材请求失败后结束加载状态并按短周期自动重试', async () => {
+  let now = 1000
+  let calls = 0
+  const store = createStockTagStore({
+    now: () => now,
+    fetchBatch: async (codes) => {
+      calls++
+      if (calls === 1) throw new Error('network unavailable')
+      return codes.map((code) => ({
+        code,
+        displayTags: [{ name: 'PCB', kind: 'concept' }],
+      }))
+    },
+  })
+
+  store.ensure('002436')
+  await store.flush()
+
+  assert.deepEqual(store.get('002436'), {
+    code: '002436',
+    displayTags: [],
+    unavailable: true,
+  })
+
+  now += 30 * 1000
+  store.ensure('002436')
+  await store.flush()
+
+  assert.equal(calls, 2)
+  assert.equal(store.get('002436').displayTags[0].name, 'PCB')
+})
