@@ -11790,10 +11790,11 @@ button.acct-item {
 
 .hold-item > .pi-actions {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) 104px;
   align-items: stretch;
   gap: var(--space-xs);
-  margin-top: var(--space-sm);
+  min-height: 40px;
+  margin-top: auto;
   padding-top: var(--space-sm);
 }
 
@@ -11805,6 +11806,7 @@ button.acct-item {
 
 .pi-card-tools {
   display: flex;
+  width: 104px;
   align-items: stretch;
   justify-content: flex-end;
   gap: var(--space-2xs);
@@ -13967,6 +13969,14 @@ body.overlay-scroll-locked {
 @media (min-width: 50.001rem) {
   .plan-cand .card-decision-slot {
     min-height: 232px;
+  }
+
+  .hold-item .hold-head {
+    min-height: 60px;
+  }
+
+  .hold-item .card-decision-slot {
+    min-height: 280px;
   }
 }
 

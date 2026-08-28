@@ -277,3 +277,18 @@ test('桌面自选卡固定决策高度并将操作栏贴齐底部', () => {
     /\.plan-cand \.pc-actions\s*{[^}]*min-height:\s*40px/s,
   )
 })
+
+test('桌面持仓卡固定决策高度并统一操作与工具列', () => {
+  assert.match(
+    precision,
+    /@media \(min-width:\s*50\.001rem\)\s*{[\s\S]*?\.hold-item \.hold-head\s*{[^}]*min-height:\s*60px[\s\S]*?\.hold-item \.card-decision-slot\s*{[^}]*min-height:\s*280px/s,
+  )
+  assert.match(
+    precision,
+    /\.hold-item > \.pi-actions\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+104px[^}]*min-height:\s*40px[^}]*margin-top:\s*auto/s,
+  )
+  assert.match(
+    precision,
+    /\.pi-card-tools\s*{[^}]*width:\s*104px/s,
+  )
+})
