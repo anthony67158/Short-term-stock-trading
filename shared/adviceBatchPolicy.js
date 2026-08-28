@@ -121,6 +121,33 @@ export function generationOptions(deepMode = false) {
         forceReasoning: false,
         runtimeBudgetMs: QUICK_ADVICE_BUDGET_MS,
         timeoutMs: QUICK_ADVICE_BUDGET_MS + 15000,
-        maxAttempts: 2,
+        maxAttempts: 1,
       }
+}
+
+export function createAdviceSubmissionRegistry() {
+  const pending = new Map()
+  return {
+    begin(code, name = '') {
+      const key = String(code || '')
+      if (!key || pending.has(key)) return false
+      pending.set(key, {
+        code: key,
+        name: String(name || key),
+      })
+      return true
+    },
+    end(code) {
+      pending.delete(String(code || ''))
+    },
+    has(code) {
+      return pending.has(String(code || ''))
+    },
+    list() {
+      return [...pending.values()].map((item) => ({ ...item }))
+    },
+    clear() {
+      pending.clear()
+    },
+  }
 }

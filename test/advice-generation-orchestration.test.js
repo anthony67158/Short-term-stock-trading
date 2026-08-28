@@ -213,7 +213,7 @@ test('普通与深度军师都使用有界预算且深度不整轮重跑', () =>
 
   assert.equal(quick.fastMode, true)
   assert.equal(quick.runtimeBudgetMs, 75000)
-  assert.equal(quick.maxAttempts, 2)
+  assert.equal(quick.maxAttempts, 1)
   assert.equal(deep.forceReasoning, true)
   assert.equal(deep.runtimeBudgetMs, 150000)
   assert.equal(deep.timeoutMs, 165000)

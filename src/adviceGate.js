@@ -18,10 +18,18 @@ import {
   adviceJobState,
   startAdvicePersistently,
 } from '../shared/adviceUiState.js'
+import {
+  createAdviceSubmissionRegistry,
+} from '../shared/adviceBatchPolicy.js'
+
+const submissions = createAdviceSubmissionRegistry()
 
 // 汇总当前"正在生成"的股票:code -> name(本地 + 云端并集)。
 export function generatingList() {
   const map = new Map()
+  for (const item of submissions.list()) {
+    map.set(item.code, item.name)
+  }
   // 本地正在跑
   try { for (const it of getRunningList()) if (it && it.code) map.set(String(it.code), it.name || it.code) } catch { /* ignore */ }
   // 服务端正在跑(current=running 的 code;items 里带 name)
@@ -40,6 +48,7 @@ export function generatingList() {
 export function isGenerating(code) {
   if (!code) return false
   const c = String(code)
+  if (submissions.has(c)) return true
   if (isRunning(c)) return true
   try { return !!adviceJobState(getBatchState(), c)?.active } catch { return false }
 }
@@ -63,9 +72,20 @@ export async function tryStartAdvice(spec) {
   const busy = generatingList().filter((x) => x.code !== String(code))
   const limit = getConcurrency()
   if (busy.length >= limit) return { status: 'full', busy, concurrency: limit }
-  return await startAdvicePersistently(spec, {
-    canUseServer: canServerAdvice,
-    triggerServer: triggerServerAdvice,
-    startLocal: startAdvice,
-  })
+  if (!submissions.begin(code, spec?.name || code)) {
+    return {
+      status: 'already',
+      mode: 'server',
+      code: String(code),
+    }
+  }
+  try {
+    return await startAdvicePersistently(spec, {
+      canUseServer: canServerAdvice,
+      triggerServer: triggerServerAdvice,
+      startLocal: startAdvice,
+    })
+  } finally {
+    submissions.end(code)
+  }
 }

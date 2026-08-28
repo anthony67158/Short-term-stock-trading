@@ -346,12 +346,33 @@ function tacticalTActionRule(tactical = {}) {
 
 function tacticalFundRule(tactical = {}, funds = {}) {
   const flow = tactical.flow || {}
+  const mainTrend = Array.isArray(funds.mainTrend5)
+    ? funds.mainTrend5
+    : []
+  const retailTrend = Array.isArray(funds.retailTrend5)
+    ? funds.retailTrend5
+    : []
+  const historyDays = Math.max(
+    0,
+    Math.min(
+      5,
+      Number(funds.historyDayCount)
+      || Math.max(mainTrend.length, retailTrend.length),
+    ),
+  )
+  const historyRule = historyDays >= 5
+    ? `并结合完整5日序列 funds.mainTrend5=${JSON.stringify(mainTrend)}`
+      + `、funds.retailTrend5=${JSON.stringify(retailTrend)} 判断最近5日持续、转弱或背离，`
+    : historyDays > 0
+      ? `当前仅取得${historyDays}个交易日资金序列：`
+        + `funds.mainTrend5=${JSON.stringify(mainTrend)}、`
+        + `funds.retailTrend5=${JSON.stringify(retailTrend)}；`
+        + '不能称为最近5日，也不能据此判断5日持续性，只能作为当日或有限历史证据，'
+      : '历史资金序列缺失，不能声称存在最近5日趋势，只能依据当日资金，'
   return '【主力与散户资金】fundNote必须同时引用'
     + ` tactical.flow.mainNetYi=${flow.mainNetYi ?? '缺失'}`
     + ` 与 tactical.flow.retailNetYi=${flow.retailNetYi ?? '缺失'}，`
-    + `并结合 funds.mainTrend5=${JSON.stringify(funds.mainTrend5 || [])}`
-    + `、funds.retailTrend5=${JSON.stringify(funds.retailTrend5 || [])}`
-    + ' 判断最近5日持续、转弱或背离，'
+    + historyRule
     + `解释主力与散户资金代理的同向或背离（当前关系=${flow.relation || 'UNKNOWN'}）；`
     + '散户资金缺失时明确说明，不得按0处理，也不得单独作为买卖信号'
 }
@@ -589,6 +610,8 @@ export function deepAdvisorFacts(payload = {}) {
         'retailInflowDays',
         'mainStreak',
         'retailStreak',
+        'historyDayCount',
+        'historyComplete',
       ]),
       mainTrend5: (Array.isArray(payload.stockFund?.mainTrend5)
         ? payload.stockFund.mainTrend5

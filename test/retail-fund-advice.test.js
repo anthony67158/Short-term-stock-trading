@@ -10,6 +10,7 @@ import { mapRealtimeStockFund } from '../api/ai.js'
 import {
   buildRetailFlowEvidence,
   mergeRetailFundFlow,
+  normalizeFundNoteHistory,
 } from '../shared/retailFundFlow.js'
 
 test('实时资金快照同时映射主力与小单净流入', () => {
@@ -140,4 +141,34 @@ test('军师快速、深度与复核提示都强制合参散户资金', () => {
   assert.doesNotMatch(ADVISOR_SYSTEM, /涨停→今日主力大幅流入/)
   assert.doesNotMatch(limitUp, /说明今日主力大幅流入/)
   assert.match(limitUp, /资金净额.*被动成交|被动排队.*资金/)
+})
+
+test('资金历史不足五日时提示词禁止冒充五日序列', () => {
+  const prompt = buildUserPrompt('buy_advice', {
+    code: '600487',
+    stockFund: {
+      mainNetYi: -14.03,
+      retailNetYi: 12.59,
+      mainTrend5: [-14.03],
+      retailTrend5: [12.59],
+      historyDayCount: 1,
+      historyComplete: false,
+    },
+  })
+
+  assert.match(prompt, /仅取得1个交易日/)
+  assert.match(prompt, /不能称为最近5日/)
+  assert.doesNotMatch(prompt, /判断最近5日持续/)
+  assert.equal(
+    normalizeFundNoteHistory(
+      '最近5日序列分别为[-14.03]和[12.59]，形成背离。',
+      {
+        mainTrend5: [-14.03],
+        retailTrend5: [12.59],
+        historyDayCount: 1,
+      },
+    ),
+    '当前1个交易日序列分别为[-14.03]和[12.59]，形成背离；'
+      + '历史资金仅取得1个交易日，不能据此判断5日持续性。',
+  )
 })

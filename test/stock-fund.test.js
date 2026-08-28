@@ -84,6 +84,53 @@ test('快速采集并行请求历史与实时资金且不信任外部输入', as
   assert.equal(snapshot.history5.length, 5)
 })
 
+test('资金历史镜像优先选择完整五日而不是最快的一日结果', async () => {
+  const oneDay = historyLines.slice(-1)
+  const snapshot = await fetchStockFund('600487', {
+    preferRealtime: true,
+    fetchedAt: Date.parse('2026-08-28T02:00:00.000Z'),
+    fetchImpl: async (url) => {
+      if (url.includes('/fflow/daykline/get')) {
+        const complete = url.includes('push2his.eastmoney.com')
+          || url.includes('82.push2his.eastmoney.com')
+        if (complete) {
+          await new Promise((resolve) => setTimeout(resolve, 10))
+        }
+        return {
+          ok: true,
+          async json() {
+            return {
+              data: {
+                klines: complete ? historyLines : oneDay,
+              },
+            }
+          },
+        }
+      }
+      return {
+        ok: true,
+        async json() {
+          return {
+            data: {
+              f62: -1_403_000_000,
+              f84: 1_259_000_000,
+            },
+          }
+        },
+      }
+    },
+  })
+
+  assert.equal(snapshot.historyDayCount, 5)
+  assert.equal(snapshot.historyComplete, true)
+  assert.equal(snapshot.history5.length, 5)
+  assert.deepEqual(snapshot.mainTrend5, [1, 1.2, 1.5, 1.8, 2])
+  assert.deepEqual(
+    snapshot.retailTrend5,
+    [-0.6, -0.7, -0.8, -0.9, -1],
+  )
+})
+
 test('资金快照比较识别主力由流入转流出与散户反向承接', () => {
   const change = compareStockFundSnapshots({
     mainNetYi: -0.4,

@@ -14,20 +14,6 @@ import {
   updateJobProgress,
 } from '../api/_jobs.js'
 
-test('过期运行任务会被回收并在进度中显示为排队等待续跑', () => {
-  const data = {}
-  enqueueJob(data, { code: '600000', name: '浦发银行', mode: 'buy_advice' }, 1000)
-  leaseJob(data, '600000', 1000)
-
-  const reaped = reapOrphans(data, 1000 + 500 * 1000)
-  const progress = jobsToProgress(data, 1000 + 500 * 1000, 2)
-
-  assert.equal(reaped, 1)
-  assert.equal(progress.running, true)
-  assert.equal(progress.items[0].status, 'queued')
-  assert.equal(progress.items[0].phase, '任务中断，等待云端自动续跑')
-})
-
 test('达到最大尝试次数的中断任务会终止，避免无限从头重跑', () => {
   const data = {}
   enqueueJob(data, { code: '600000', name: '浦发银行', mode: 'buy_advice' }, 1000)

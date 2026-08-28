@@ -114,6 +114,41 @@ function compactTrend(value) {
     .map(finite)
 }
 
+export function stockFundHistoryDayCount(input = {}) {
+  const mainTrend = compactTrend(
+    input?.mainTrend5 ?? input?.trend5,
+  )
+  const retailTrend = compactTrend(input?.retailTrend5)
+  return Math.max(
+    0,
+    Math.min(
+      5,
+      Number(input?.historyDayCount)
+      || Math.max(mainTrend.length, retailTrend.length),
+    ),
+  )
+}
+
+export function normalizeFundNoteHistory(note, stockFund = {}) {
+  const text = String(note || '').trim()
+  if (!text) return text
+  const historyDays = stockFundHistoryDayCount(stockFund)
+  if (historyDays >= 5) return text
+  const label = historyDays > 0
+    ? `当前${historyDays}个交易日`
+    : '当前可用历史'
+  const normalized = text.replace(
+    /(?:最近|近)\s*5\s*日/g,
+    label,
+  )
+  const caveat = historyDays > 0
+    ? `历史资金仅取得${historyDays}个交易日，不能据此判断5日持续性。`
+    : '历史资金序列缺失，不能据此判断5日持续性。'
+  return normalized.includes('不能据此判断5日持续性')
+    ? normalized
+    : `${normalized.replace(/[。；]\s*$/, '')}；${caveat}`
+}
+
 export function compactStockFundSnapshot(input = {}) {
   if (!input || typeof input !== 'object') return null
   const mainNetYi = finite(input.mainNetYi)
@@ -125,6 +160,7 @@ export function compactStockFundSnapshot(input = {}) {
     input.mainTrend5 ?? input.trend5,
   )
   const retailTrend5 = compactTrend(input.retailTrend5)
+  const historyDayCount = stockFundHistoryDayCount(input)
   return {
     schemaVersion: 'stock-fund-snapshot.v1',
     source: String(input.source || (
@@ -140,6 +176,9 @@ export function compactStockFundSnapshot(input = {}) {
     retail5dYi: finite(input.retail5dYi),
     main5dAvgYi: finite(input.main5dAvgYi),
     retail5dAvgYi: finite(input.retail5dAvgYi),
+    historyDayCount,
+    historyComplete:
+      input.historyComplete === true || historyDayCount >= 5,
     inflowDays: finite(input.inflowDays),
     retailInflowDays: finite(input.retailInflowDays),
     mainStreak: finite(input.mainStreak),

@@ -83,6 +83,7 @@ import {
 import {
   compactStockFundSnapshot,
   mergeRetailFundFlow,
+  normalizeFundNoteHistory,
 } from '../shared/retailFundFlow.js';
 import {
   attachEvidenceSnapshot,
@@ -1706,6 +1707,10 @@ export default async function handler(req, res) {
         retailInflowDays: payload.stockFund.retailInflowDays,
         mainStreak: payload.stockFund.mainStreak ?? null,
         retailStreak: payload.stockFund.retailStreak ?? null,
+        historyDayCount:
+          payload.stockFund.historyDayCount ?? null,
+        historyComplete:
+          payload.stockFund.historyComplete === true,
         retailNetYi: payload.stockFund.retailNetYi ?? null,
         retailRelation: payload.stockFund.retailFlow?.relation || null,
       } : null,
@@ -2521,6 +2526,12 @@ export default async function handler(req, res) {
       result.reasoning = zhReasonPiece(String(result.reasoning));
     }
     if (result && typeof result === 'object' && !result.raw) {
+      if (isAdvisorMode(mode) && result.fundNote) {
+        result.fundNote = normalizeFundNoteHistory(
+          result.fundNote,
+          payload.stockFund,
+        );
+      }
       if (searchReference) result.searchReference = searchReference;
       else delete result.searchReference;
       result.theoryRefs = theoryRefs;

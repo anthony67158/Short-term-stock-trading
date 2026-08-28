@@ -121,8 +121,16 @@ export function buildStockFundSnapshot({
   const retailTrend5 = history.map((item) =>
     optionalNumber(item.retailNetYi)
   );
-  const main5dYi = sum(mainTrend5);
-  const retail5dYi = sum(retailTrend5);
+  const historyDayCount = history.length;
+  const historyComplete = historyDayCount >= 5;
+  const mainHistoryTotal = sum(mainTrend5);
+  const retailHistoryTotal = sum(retailTrend5);
+  const main5dYi = historyComplete
+    ? mainHistoryTotal
+    : optionalNumber(realtime?.main5dYi);
+  const retail5dYi = historyComplete
+    ? retailHistoryTotal
+    : null;
   const mainNetYi = useRealtime
     ? optionalNumber(realtime.mainNetYi)
     : optionalNumber(latest.mainNetYi ?? realtime?.mainNetYi);
@@ -152,14 +160,16 @@ export function buildStockFundSnapshot({
       ? optionalNumber(realtime.bigNetYi)
       : optionalNumber(latest.bigNetYi ?? realtime?.bigNetYi),
     midNetYi: optionalNumber(latest.midNetYi),
-    main5dYi: main5dYi ?? optionalNumber(realtime?.main5dYi),
-    main5dAvgYi: mainTrend5.length && main5dYi != null
-      ? +(main5dYi / mainTrend5.length).toFixed(2)
+    main5dYi,
+    main5dAvgYi: historyComplete && mainHistoryTotal != null
+      ? +(mainHistoryTotal / historyDayCount).toFixed(2)
       : null,
     retail5dYi,
-    retail5dAvgYi: retailTrend5.length && retail5dYi != null
-      ? +(retail5dYi / retailTrend5.length).toFixed(2)
+    retail5dAvgYi: historyComplete && retailHistoryTotal != null
+      ? +(retailHistoryTotal / historyDayCount).toFixed(2)
       : null,
+    historyDayCount,
+    historyComplete,
     trend5: mainTrend5,
     mainTrend5,
     retailTrend5,
@@ -210,6 +220,28 @@ async function firstValid(hosts, path, {
   }
 }
 
+async function bestValid(hosts, path, {
+  fetchImpl,
+  timeoutMs,
+  pick,
+  score = (value) =>
+    Array.isArray(value) ? value.length : value == null ? 0 : 1,
+}) {
+  const settled = await Promise.all(hosts.map(async (host) => {
+    try {
+      const payload = await fetchJson(fetchImpl, host + path, timeoutMs);
+      return pick(payload);
+    } catch {
+      return null;
+    }
+  }));
+  return settled.reduce((best, value) =>
+    value != null && score(value) > score(best)
+      ? value
+      : best
+  , null);
+}
+
 export async function fetchStockFund(code, {
   fetchImpl = fetch,
   historyLimit = 8,
@@ -228,13 +260,14 @@ export async function fetchStockFund(code, {
     `/api/qt/stock/get?secid=${secid}`
     + '&fields=f62,f84,f184,f66,f72,f164,f191,f192';
   const [historyLines, realtime] = await Promise.all([
-    firstValid(HISTORY_HOSTS, historyPath, {
+    bestValid(HISTORY_HOSTS, historyPath, {
       fetchImpl,
       timeoutMs,
       pick: (payload) => {
         const lines = payload?.data?.klines;
         return Array.isArray(lines) && lines.length ? lines : null;
       },
+      score: (lines) => Array.isArray(lines) ? lines.length : 0,
     }),
     firstValid(REALTIME_HOSTS, realtimePath, {
       fetchImpl,

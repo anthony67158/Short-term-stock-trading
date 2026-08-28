@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 
 import {
   acceptsGenerationResult,
+  createAdviceSubmissionRegistry,
   adviceCompleteness,
   adviceConcurrency,
   batchConcurrency,
@@ -64,8 +65,23 @@ test('普通模式关闭深度思考并使用短预算', () => {
     forceReasoning: false,
     runtimeBudgetMs: 75000,
     timeoutMs: 90000,
-    maxAttempts: 2,
+    maxAttempts: 1,
   })
+})
+
+test('同一股票提交确认前快速与深度入口共用一把锁', () => {
+  const registry = createAdviceSubmissionRegistry()
+
+  assert.equal(registry.begin('600487', '亨通光电'), true)
+  assert.equal(registry.begin('600487', '亨通光电'), false)
+  assert.equal(registry.has('600487'), true)
+  assert.deepEqual(registry.list(), [{
+    code: '600487',
+    name: '亨通光电',
+  }])
+
+  registry.end('600487')
+  assert.equal(registry.has('600487'), false)
 })
 
 test('深度模式使用有界预算且不整轮自动重试', () => {
