@@ -18,6 +18,7 @@ import {
 } from '../api/tail_pick.js'
 import {
   rankTailPickCandidates,
+  rankTailPickNearCandidates,
 } from '../shared/tailPickRanking.js'
 
 function beijingTimestamp(text) {
@@ -59,7 +60,7 @@ function marketRows(startCode, count, patchForIndex = () => ({})) {
   )
 }
 
-test('实时预筛只保留可能满足原公式的股票', () => {
+test('实时预筛保留严格公式和接近公式的共同候选', () => {
   const accepted = mapTailPickMarketRow(marketRow())
   assert.equal(
     passesTailPickRealtimePrefilter(accepted, '2026-08-28'),
@@ -70,7 +71,26 @@ test('实时预筛只保留可能满足原公式的股票', () => {
       mapTailPickMarketRow(marketRow({ f8: 4.9 })),
       '2026-08-28',
     ),
+    true,
+  )
+  assert.equal(
+    passesTailPickRealtimePrefilter(
+      mapTailPickMarketRow(marketRow({ f8: 2.99 })),
+      '2026-08-28',
+    ),
     false,
+  )
+  assert.equal(
+    passesTailPickRealtimePrefilter(
+      mapTailPickMarketRow(marketRow({
+        f15: 10.1,
+        f16: 9.5,
+        f17: 9.55,
+        f2: 10.05,
+      })),
+      '2026-08-28',
+    ),
+    true,
   )
   assert.equal(
     passesTailPickRealtimePrefilter(
@@ -243,6 +263,39 @@ test('结构性震荡档把首选总仓位从5%收紧到3%', () => {
   assert.match(result.candidates[0].execution.secondLeg, /最多1%/)
 })
 
+test('接近公式池最多五只且全部只能加入自选观察', () => {
+  const candidates = Array.from({ length: 7 }, (_, index) => ({
+    code: `60000${index}`,
+    name: `测试${index}`,
+    nearMatch: {
+      matched: true,
+      matchRate: index === 6 ? 92.9 : 85.7,
+      failedRules: index === 6
+        ? [{ key: 'AB4', label: '上影线形态' }]
+        : [
+            { key: 'HSL', label: '换手率大于5%' },
+            { key: 'AB32', label: '成交量约束' },
+          ],
+    },
+    stockGate: {
+      passed: index === 6,
+      gain20: 8,
+      evidence: [],
+    },
+    intraday: { passed: index === 6, price: 10, vwap: 9.96 },
+    quote: { price: 10, amount: 100_000_000 + index },
+    sectorOpportunity: { matched: index === 6 },
+  }))
+
+  const result = rankTailPickNearCandidates(candidates)
+
+  assert.equal(result.length, 5)
+  assert.equal(result[0].code, '600006')
+  assert.equal(result[0].execution.role, 'NEAR')
+  assert.equal(result[0].execution.maxPositionPct, 0)
+  assert.match(result[0].execution.action, /条件补齐前不买/)
+})
+
 test('扫描任务在大盘闸门失败时直接保存不开仓结果', async () => {
   let savedRun = null
   let scanCalls = 0
@@ -273,6 +326,68 @@ test('扫描任务在大盘闸门失败时直接保存不开仓结果', async ()
   assert.equal(result.result.decision, 'NO_TRADE')
   assert.equal(savedRun.result.reason, '大盘跌破60日线')
   assert.equal(tasks.at(-1).status, 'DONE')
+})
+
+test('严格公式为空时仍返回独立接近观察池且不生成仓位', async () => {
+  let saved = null
+  const store = {
+    readTask: async () => null,
+    claimRun: async () => ({ acquired: true }),
+    releaseRun: async () => true,
+    saveManualRun: async (value) => { saved = value },
+    saveTask: async () => {},
+  }
+  const nearCandidate = {
+    code: '600001',
+    name: '接近公式样本',
+    formula: { matched: false, signals: [] },
+    nearMatch: {
+      matched: true,
+      matchRate: 92.9,
+      failedRules: [{ key: 'AB4', label: '上影线形态' }],
+    },
+    stockGate: {
+      passed: false,
+      gain20: 8,
+      evidence: ['近20日位置正常'],
+      blockers: ['未进入板块前瞻确认的主线方向'],
+    },
+    intraday: { passed: true, price: 10, vwap: 9.96 },
+    quote: { price: 10, amount: 100_000_000 },
+    sectorOpportunity: { matched: false },
+  }
+
+  const result = await runTailPickScan({
+    store,
+    mode: 'manual',
+    now: () => beijingTimestamp('2026-08-26T14:51:00'),
+    collectMarketContext: async () => ({
+      marketGate: {
+        allowed: true,
+        maxPositionPct: 5,
+        blockers: [],
+      },
+    }),
+    scanCandidates: async () => ({
+      universe: {
+        inspectedCount: 5500,
+        formulaMatchCount: 0,
+        nearFormulaCount: 1,
+      },
+      candidates: [],
+      nearCandidates: [nearCandidate],
+    }),
+  })
+
+  assert.equal(result.result.decision, 'NO_TRADE')
+  assert.equal(result.result.candidates.length, 0)
+  assert.equal(result.result.nearCandidates.length, 1)
+  assert.equal(
+    result.result.nearCandidates[0].execution.maxPositionPct,
+    0,
+  )
+  assert.match(result.result.reason, /接近公式观察股/)
+  assert.deepEqual(saved, result)
 })
 
 test('手动试算可在14:50前运行且不会写入正式结果', async () => {

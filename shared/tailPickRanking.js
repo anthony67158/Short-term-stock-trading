@@ -4,6 +4,7 @@ import { localDateKey } from './tradingCalendar.js'
 export const TAIL_PICK_RANKING_VERSION = 'tail-pick-ranking.v1'
 export const TAIL_PICK_VALIDATION_STATE =
   'PENDING_INTRADAY_BACKTEST'
+export const TAIL_PICK_NEAR_LIMIT = 5
 
 function finite(value) {
   if (value == null || value === '') return null
@@ -70,6 +71,21 @@ function candidateScore(candidate) {
   }
 }
 
+function nearCandidateScore(candidate) {
+  const matchRate = finite(candidate.nearMatch?.matchRate) || 0
+  const fund = fundScore(candidate.fund)
+  const contextBonus =
+    (candidate.stockGate?.passed ? 4 : 0)
+    + (candidate.intraday?.passed ? 3 : 0)
+    + (candidate.sectorOpportunity?.matched ? 3 : 0)
+  return {
+    score: rounded(clamp(
+      matchRate + contextBonus + clamp(fund.score, -5, 5),
+    ), 1),
+    fundLabel: fund.label,
+  }
+}
+
 function instruction(
   candidate,
   role,
@@ -109,6 +125,23 @@ function instruction(
     stopNote: '买入当日最低价，次日起生效',
     takeProfit: '次日冲高1%-3%减半，累计上涨7%-8%清仓',
     finalExitDate: finalExit ? localDateKey(finalExit) : null,
+  }
+}
+
+function nearInstruction(candidate) {
+  const missing = (candidate.nearMatch?.failedRules || [])
+    .map((item) => item.label)
+    .filter(Boolean)
+  return {
+    role: 'NEAR',
+    action: `接近公式：还差${missing.join('、') || '部分条件'}，条件补齐前不买`,
+    firstLeg: null,
+    secondLeg: null,
+    maxPositionPct: 0,
+    stopPrice: null,
+    stopNote: null,
+    takeProfit: null,
+    finalExitDate: null,
   }
 }
 
@@ -154,4 +187,42 @@ export function rankTailPickCandidates(
     primaryCode: ranked[0]?.code || null,
     candidates: ranked,
   }
+}
+
+export function rankTailPickNearCandidates(
+  candidates = [],
+  { limit = TAIL_PICK_NEAR_LIMIT } = {},
+) {
+  return candidates
+    .filter((item) =>
+      item?.nearMatch?.matched
+      && finite(item?.stockGate?.gain20) != null
+      && finite(item.stockGate.gain20) <= 35
+    )
+    .map((item) => ({
+      ...item,
+      ...nearCandidateScore(item),
+    }))
+    .sort((left, right) =>
+      Number(left.nearMatch?.failedRules?.length || 99)
+        - Number(right.nearMatch?.failedRules?.length || 99)
+      || Number(right.stockGate?.passed) - Number(left.stockGate?.passed)
+      || Number(right.intraday?.passed) - Number(left.intraday?.passed)
+      || Number(right.score) - Number(left.score)
+      || Number(right.quote?.amount || 0)
+        - Number(left.quote?.amount || 0)
+      || String(left.code).localeCompare(String(right.code))
+    )
+    .slice(
+      0,
+      Math.max(
+        0,
+        Math.min(TAIL_PICK_NEAR_LIMIT, Number(limit) || TAIL_PICK_NEAR_LIMIT),
+      ),
+    )
+    .map((item, index) => ({
+      ...item,
+      rank: index + 1,
+      execution: nearInstruction(item),
+    }))
 }

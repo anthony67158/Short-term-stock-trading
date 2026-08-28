@@ -9,6 +9,7 @@ import { fetchStockTagProfile } from './stock_tags.js'
 import { sectorForecastStore } from './_sector_forecast_store.js'
 import { buildSectorOpportunity } from '../shared/sectorOpportunity.js'
 import {
+  evaluateTailPickNearMatch,
   evaluateTailPickSignal,
 } from '../shared/tailPickFormula.js'
 import {
@@ -86,11 +87,8 @@ export function passesTailPickRealtimePrefilter(
   return (
     quote.pct > MIN_FORMULA_GAIN_PCT
     && amount >= 50_000_000
-    && turnover > 5
+    && turnover >= 3
     && open < price
-    && high - price > (open - low) * 1.5
-    && high / open > 1.01
-    && high / open < 1.09
     && high / price < 1.06
   )
 }
@@ -371,18 +369,38 @@ export async function scanTailPickCandidates({
         quote,
         turnover: quote.turnover,
       })
+      const nearMatch = evaluateTailPickNearMatch(formula, {
+        turnover: quote.turnover,
+        amount: quote.amount,
+      })
       return {
         code: quote.code,
         name: quote.name || kline.name,
         quote,
         candles: kline.candles,
         formula,
+        nearMatch,
       }
     },
   )
   const formulaMatches = daily.filter((item) => item?.formula?.matched)
+  const nearFormulaMatches = daily
+    .filter((item) => item?.nearMatch?.matched)
+    .sort((left, right) =>
+      Number(left.nearMatch.failedRules.length)
+        - Number(right.nearMatch.failedRules.length)
+      || Number(right.quote?.turnover || 0)
+        - Number(left.quote?.turnover || 0)
+      || Number(right.quote?.amount || 0)
+        - Number(left.quote?.amount || 0)
+      || String(left.code).localeCompare(String(right.code))
+    )
+  const enrichmentPool = [
+    ...formulaMatches,
+    ...nearFormulaMatches.slice(0, 12),
+  ]
   const enriched = await mapLimit(
-    formulaMatches,
+    enrichmentPool,
     8,
     async (item) => {
       const [trendsResult, fundResult, tagResult] =
@@ -435,10 +453,12 @@ export async function scanTailPickCandidates({
       inspectedCount: universe.inspectedCount,
       realtimePrefilterCount: universe.list.length,
       formulaMatchCount: formulaMatches.length,
+      nearFormulaCount: nearFormulaMatches.length,
       disciplinePassCount: enriched.filter(
-        (item) => item.stockGate.passed,
+        (item) => item.formula.matched && item.stockGate.passed,
       ).length,
     },
-    candidates: enriched,
+    candidates: enriched.filter((item) => item.formula.matched),
+    nearCandidates: enriched.filter((item) => item.nearMatch.matched),
   }
 }

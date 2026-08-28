@@ -15,6 +15,7 @@ import {
 } from './_tail_pick_store.js'
 import {
   rankTailPickCandidates,
+  rankTailPickNearCandidates,
 } from '../shared/tailPickRanking.js'
 import {
   evaluateTailPickIntraday,
@@ -46,7 +47,18 @@ function publicCandidate(candidate) {
     sector: candidate.sectorOpportunity?.sector || null,
     formulaSignals: (candidate.formula?.signals || [])
       .map((item) => item.label),
+    nearMatch: candidate.nearMatch
+      ? {
+          matchRate: candidate.nearMatch.matchRate,
+          failedRules: (candidate.nearMatch.failedRules || [])
+            .map((item) => ({
+              key: item.key,
+              label: item.label,
+            })),
+        }
+      : null,
     evidence: candidate.stockGate?.evidence || [],
+    blockers: candidate.stockGate?.blockers || [],
     execution: candidate.execution,
   }
 }
@@ -230,6 +242,9 @@ export function runTailPickScan({
         maxPositionPct:
           marketContext.marketGate.maxPositionPct,
       })
+      const nearRanked = rankTailPickNearCandidates(
+        scanned.nearCandidates,
+      )
       const generatedAt = Number(now()) || Date.now()
       const result = {
         ok: true,
@@ -247,7 +262,9 @@ export function runTailPickScan({
           ...ranked,
           reason: ranked.candidates.length
             ? '公式命中且纪律闸门通过；分钟级历史优势尚未完成验证，仅供观察'
-            : '没有股票同时通过原公式、主线、位置、流动性和分时纪律',
+            : nearRanked.length
+              ? `原公式今日无完整命中；另筛出${nearRanked.length}只接近公式观察股`
+              : '没有股票同时通过原公式或接近公式观察条件',
           universe: scanned.universe,
           candidates: ranked.candidates.map((candidate) => {
             const value = publicCandidate(candidate)
@@ -266,6 +283,14 @@ export function runTailPickScan({
               },
             }
           }),
+          nearCandidates: nearRanked.map((candidate) => ({
+            ...publicCandidate(candidate),
+            liveStatus: 'WATCH_ONLY',
+            execution: {
+              ...candidate.execution,
+              action: '接近公式：仅加入自选观察，条件补齐前不买',
+            },
+          })),
         },
       }
       if (runMode === 'scheduled') await store.saveRun(result)
@@ -277,7 +302,9 @@ export function runTailPickScan({
         progress: 100,
         message: ranked.candidates.length
           ? `筛出${ranked.candidates.length}只公式观察股`
-          : '没有合格标的，今日不开仓',
+          : nearRanked.length
+            ? `严格公式未命中，筛出${nearRanked.length}只接近公式观察股`
+            : '没有合格标的，今日不开仓',
         finishedAt: generatedAt,
       })
       return result
