@@ -295,6 +295,47 @@ test('存储适配器对同一交易日读取同一正式结果', async () => {
   assert.deepEqual(state.displayResult, result)
 })
 
+test('手动与定时扫描共用跨实例活动锁且旧owner不能释放新锁', async () => {
+  const objects = new Map()
+  const storage = {
+    hasStorage: () => true,
+    put: async (path, body, options = {}) => {
+      if (options.forbidOverwrite && objects.has(path)) {
+        const error = new Error('exists')
+        error.status = 409
+        throw error
+      }
+      objects.set(path, JSON.parse(body))
+    },
+    readJson: async (path) => objects.get(path) || null,
+    del: async (path) => { objects.delete(path) },
+  }
+  const store = createTailPickStore(storage)
+  const first = await store.claimRun(
+    '2026-08-28',
+    beijingTimestamp('2026-08-28T14:50:00'),
+    'manual',
+  )
+  const blocked = await store.claimRun(
+    '2026-08-28',
+    beijingTimestamp('2026-08-28T14:50:30'),
+    'scheduled',
+  )
+
+  assert.equal(first.acquired, true)
+  assert.equal(blocked.acquired, false)
+  assert.equal(
+    await store.releaseRun({ ...first, owner: 'wrong-owner' }),
+    false,
+  )
+  assert.equal(await store.releaseRun(first), true)
+  assert.equal((await store.claimRun(
+    '2026-08-28',
+    beijingTimestamp('2026-08-28T14:52:00'),
+    'scheduled',
+  )).acquired, true)
+})
+
 test('14:55后旧执行指令统一失效，不能继续追买', async () => {
   const result = await projectTailPickLiveStatus({
     session: { tradeDate: '2026-08-28' },

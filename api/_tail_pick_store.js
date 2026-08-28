@@ -4,6 +4,7 @@ import {
   put,
   readJson,
 } from './_blob.js'
+import { randomUUID } from 'node:crypto'
 
 export const TAIL_PICK_PREFIX = 'market/tail-pick/v1/'
 
@@ -18,6 +19,8 @@ const PATHS = Object.freeze({
 let memoryLatest = null
 let memoryManualLatest = null
 let memoryTask = null
+let memoryClaim = null
+const CLAIM_TTL_MS = 3 * 60 * 1000
 
 function jsonOptions() {
   return {
@@ -100,39 +103,69 @@ export function createTailPickStore(storage = {
       return writeJson(PATHS.task, task)
     },
     async claimRun(tradeDate, now = Date.now(), mode = 'scheduled') {
+      const timestamp = Number(now) || Date.now()
+      const owner = randomUUID()
       if (!storage.hasStorage()) {
         if (
-          memoryTask?.status === 'RUNNING'
-          && memoryTask.tradeDate === tradeDate
-          && memoryTask.mode === mode
+          memoryClaim?.tradeDate === tradeDate
+          && timestamp - memoryClaim.claimedAt < CLAIM_TTL_MS
         ) return { acquired: false, path: '' }
-        return { acquired: true, path: '' }
+        memoryClaim = { tradeDate, mode, claimedAt: timestamp, owner }
+        return { acquired: true, path: '', owner }
       }
       const runMode = mode === 'manual' ? 'manual' : 'scheduled'
-      const bucket = Math.floor((Number(now) || Date.now()) / 60_000)
-      const path = `${PATHS.locks}${safeTradeDate(tradeDate)}-${runMode}-${bucket}.json`
-      try {
-        await writeJson(path, {
+      const path = `${PATHS.locks}${safeTradeDate(tradeDate)}-active.json`
+      const writeClaim = async () =>
+        writeJson(path, {
           tradeDate,
-          claimedAt: Number(now) || Date.now(),
+          mode: runMode,
+          claimedAt: timestamp,
+          owner,
         }, { forbidOverwrite: true })
-        return { acquired: true, path }
-      } catch (error) {
-        if (
-          error?.status === 409
+      try {
+        await writeClaim()
+        return { acquired: true, path, owner }
+      } catch (firstError) {
+        const conflict = firstError?.status === 409
           || [
             'FileAlreadyExists',
             'ObjectAlreadyExists',
             'PositionNotEqualToLength',
-          ].includes(error?.code)
+          ].includes(firstError?.code)
+        if (!conflict) throw firstError
+        const existing = await storage.readJson(path).catch(() => null)
+        if (
+          !existing?.claimedAt
+          || timestamp - Number(existing.claimedAt) < CLAIM_TTL_MS
         ) return { acquired: false, path }
-        throw error
+        await storage.del(path)
+        try {
+          await writeClaim()
+          return { acquired: true, path, owner }
+        } catch (retryError) {
+          const retryConflict = retryError?.status === 409
+            || [
+              'FileAlreadyExists',
+              'ObjectAlreadyExists',
+              'PositionNotEqualToLength',
+            ].includes(retryError?.code)
+          if (retryConflict) return { acquired: false, path }
+          throw retryError
+        }
       }
     },
     async releaseRun(claim) {
-      if (!claim?.acquired || !claim.path || !storage.hasStorage()) {
+      if (!claim?.acquired) return false
+      if (!storage.hasStorage()) {
+        if (memoryClaim?.owner !== claim.owner) return false
+        memoryClaim = null
+        return true
+      }
+      if (!claim.path || !claim.owner) {
         return false
       }
+      const existing = await storage.readJson(claim.path).catch(() => null)
+      if (existing?.owner !== claim.owner) return false
       await storage.del(claim.path)
       return true
     },
