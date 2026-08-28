@@ -285,18 +285,51 @@ export function runningCount(data, now = Date.now(), role = '') {
 // 回收孤儿:running 且租约过期 → 未达上限则回退 queued；达到上限则失败，避免无限从头重跑。
 export function reapOrphans(data, now = Date.now()) {
   let n = 0;
+  const worker = data?.jobWorker;
+  const workerUnavailable = !(
+    worker
+    && worker.id
+    && (worker.lockUntil || 0) >= now
+  );
   for (const j of allAdviceJobs(data)) {
-    if (isOrphan(j, now)) {
+    const leaseExpired = isOrphan(j, now);
+    const abandonedByWorker = (
+      j?.status === 'running'
+      && workerUnavailable
+    );
+    if (leaseExpired || abandonedByWorker) {
+      const workerLostBeforeLease = abandonedByWorker && !leaseExpired;
+      const modelStarted = (
+        ['theory', 'llm', 'failover', 'finalize'].includes(
+          String(j.stage || ''),
+        )
+        || !!j.endpoint
+      );
+      if (workerLostBeforeLease && !modelStarted) {
+        j.attempts = Math.max(0, (Number(j.attempts) || 1) - 1);
+      }
       const maxAttempts = effectiveJobMaxAttempts(j);
       j.maxAttempts = maxAttempts;
       if ((j.attempts || 0) >= maxAttempts) {
         j.status = 'failed'; j.finishedAt = now; j.leaseUntil = 0;
         j.resourceRole = 'none'; j.resourceUnits = 0;
-        j.error = '任务连续中断，已停止自动重试';
-        j.phase = '生成中断次数过多';
+        j.stage = 'failed';
+        j.error = workerLostBeforeLease
+          ? '云端Worker已中断，为避免重复调用模型，本轮已停止，请重新生成'
+          : '任务连续中断，已停止自动重试';
+        j.phase = workerLostBeforeLease
+          ? '云端生成中断，请重新生成'
+          : '生成中断次数过多';
       } else {
-        j.status = 'queued'; j.leaseUntil = 0; j.error = '(中断,自动续跑)';
+        j.status = 'queued'; j.stage = 'queued'; j.leaseUntil = 0; j.error = '(中断,自动续跑)';
         j.resourceRole = adviceJobRole(j); j.resourceUnits = 1;
+        j.startedAt = 0;
+        j.finishedAt = 0;
+        j.model = '';
+        j.endpoint = '';
+        j.sources = [];
+        j.reasoning = '';
+        j.quant = null;
         j.phase = '任务中断，等待云端自动续跑';
       }
       j.progressAt = now; n++;

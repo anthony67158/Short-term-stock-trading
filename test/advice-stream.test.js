@@ -266,9 +266,15 @@ test('交易变化导致的旧建议不消耗重试次数并按最新账本重�
         id: 'job-1',
         code: '002309',
         status: 'running',
+        stage: 'llm',
         attempts: 1,
         startedAt: 900,
         leaseUntil: 999999,
+        endpoint: 'advisor-1',
+        model: 'gpt-test',
+        sources: [{ label: '实时行情', ok: true }],
+        reasoning: '上一轮推理',
+        quant: { summary: '上一轮量化' },
       },
     },
   }
@@ -280,6 +286,12 @@ test('交易变化导致的旧建议不消耗重试次数并按最新账本重�
   assert.equal(job.startedAt, 0)
   assert.equal(job.leaseUntil, 0)
   assert.equal(job.tradeRequeues, 1)
+  assert.equal(job.stage, 'queued')
+  assert.equal(job.endpoint, '')
+  assert.equal(job.model, '')
+  assert.deepEqual(job.sources, [])
+  assert.equal(job.reasoning, '')
+  assert.equal(job.quant, null)
   assert.match(job.phase, /最新持仓重新复核/)
 
   const stopped = requeueAdviceForTradeChange(

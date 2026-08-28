@@ -205,6 +205,57 @@ test('待办且没有有效Worker锁时必须补发异步Worker', () => {
   assert.equal(needsWorkerDispatch(data, 6000), true)
 })
 
+test('Worker锁已过期时立即回收失联任务而不是继续等待任务长租约', () => {
+  const beforeModel = {}
+  enqueueJob(beforeModel, {
+    code: '600000',
+    mode: 'buy_advice',
+    deepMode: true,
+  }, 1000)
+  beforeModel.jobWorker = { id: 'dead-worker', lockUntil: 61000 }
+  leaseJob(beforeModel, '600000', 1100)
+
+  assert.equal(beforeModel.jobs['600000'].leaseUntil > 62000, true)
+  assert.equal(reapOrphans(beforeModel, 62000), 1)
+  assert.equal(beforeModel.jobs['600000'].status, 'queued')
+  assert.equal(beforeModel.jobs['600000'].attempts, 0)
+  assert.equal(needsWorkerDispatch(beforeModel, 62000), true)
+
+  const afterModel = {}
+  enqueueJob(afterModel, {
+    code: '600001',
+    mode: 'buy_advice',
+    deepMode: true,
+  }, 1000)
+  afterModel.jobWorker = { id: 'dead-worker', lockUntil: 61000 }
+  leaseJob(afterModel, '600001', 1100)
+  updateJobProgress(afterModel, '600001', {
+    stage: 'llm',
+    endpoint: 'advisor-1',
+  }, 2000)
+
+  assert.equal(afterModel.jobs['600001'].leaseUntil > 62000, true)
+  assert.equal(reapOrphans(afterModel, 62000), 1)
+  assert.equal(afterModel.jobs['600001'].status, 'failed')
+  assert.equal(afterModel.jobs['600001'].phase, '云端生成中断，请重新生成')
+  assert.match(afterModel.jobs['600001'].error, /避免重复调用模型/)
+})
+
+test('Worker锁仍有效时不得提前回收运行任务', () => {
+  const data = {}
+  enqueueJob(data, {
+    code: '600000',
+    mode: 'buy_advice',
+    deepMode: true,
+  }, 1000)
+  data.jobWorker = { id: 'live-worker', lockUntil: 90000 }
+  leaseJob(data, '600000', 1100)
+
+  assert.equal(reapOrphans(data, 62000), 0)
+  assert.equal(data.jobs['600000'].status, 'running')
+  assert.equal(data.jobs['600000'].attempts, 1)
+})
+
 test('上一批延迟到达的取消请求不能取消新批次任务', () => {
   const data = {}
   enqueueJob(data, {

@@ -1052,6 +1052,12 @@ export function requeueAdviceForTradeChange(
   job.finishedAt = 0;
   job.leaseUntil = 0;
   job.error = '';
+  job.stage = 'queued';
+  job.model = '';
+  job.endpoint = '';
+  job.sources = [];
+  job.reasoning = '';
+  job.quant = null;
   job.phase = '交易账本已更新，正在按最新持仓重新复核';
   job.progressAt = now;
   return job;
@@ -2263,6 +2269,8 @@ export default async function handler(req, res) {
           error: '当前范围没有可生成的股票',
         }));
       }
+      reapOrphans(data);
+      gcJobs(data);
       const requestedBatchId = String(body.batchId || '').trim();
       const batchRequest = !!requestedBatchId;
       const batchId = requestedBatchId
