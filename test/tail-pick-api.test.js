@@ -49,6 +49,16 @@ function marketRow(patch = {}) {
   }
 }
 
+function marketRows(startCode, count, patchForIndex = () => ({})) {
+  return Array.from({ length: count }, (_, index) =>
+    marketRow({
+      f12: String(startCode + index).padStart(6, '0'),
+      f3: 0,
+      ...patchForIndex(index),
+    })
+  )
+}
+
 test('实时预筛只保留可能满足原公式的股票', () => {
   const accepted = mapTailPickMarketRow(marketRow())
   assert.equal(
@@ -90,16 +100,32 @@ test('FC在14:50自动运行正式扫描并于14:52仅作失败重试', () => {
   assert.match(server, /\? 'tail_pick'/)
 })
 
-test('按涨幅倒序读取市场页面并在2.4%边界停止', async () => {
+test('按代码稳定分页读取完整股票池后再执行公式预筛', async () => {
   const pages = [
-    { data: { total: 250, diff: [marketRow()] } },
     {
       data: {
-        total: 250,
-        diff: [
-          marketRow({ f12: '600002', f3: 2.5 }),
-          marketRow({ f12: '600003', f3: 2.4 }),
-        ],
+        total: 201,
+        diff: marketRows(
+          600001,
+          100,
+          (index) => index === 0 ? { f3: 3 } : {},
+        ),
+      },
+    },
+    {
+      data: {
+        total: 201,
+        diff: marketRows(
+          600101,
+          100,
+          (index) => index === 0 ? { f3: 2.5 } : {},
+        ),
+      },
+    },
+    {
+      data: {
+        total: 201,
+        diff: marketRows(600201, 1),
       },
     },
   ]
@@ -112,31 +138,32 @@ test('按涨幅倒序读取市场页面并在2.4%边界停止', async () => {
     },
   })
 
-  assert.equal(calls, 2)
-  assert.equal(result.inspectedCount, 3)
+  assert.equal(calls, 3)
+  assert.equal(result.total, 201)
+  assert.equal(result.pagesRead, 3)
+  assert.equal(result.inspectedCount, 201)
   assert.deepEqual(
     result.list.map((item) => item.code),
-    ['600001', '600002'],
+    ['600001', '600101'],
   )
 })
 
-test('分页未读到2.4%边界时拒绝伪装成全市场扫描', async () => {
+test('任一分页数量不足时拒绝伪装成全量股票池', async () => {
   await assert.rejects(
     fetchTailPickRealtimePool({
       now: beijingTimestamp('2026-08-28T14:50:00'),
-      fetchPage: async () => ({
+      fetchPage: async (page) => ({
         data: {
-          total: 6000,
-          diff: Array.from({ length: 100 }, (_, index) =>
-            marketRow({
-              f12: String(600000 + index),
-              f3: 3,
-            })
-          ),
+          total: 201,
+          diff: page === 1
+            ? marketRows(600001, 100)
+            : page === 2
+              ? marketRows(600101, 99)
+              : marketRows(600201, 1),
         },
       }),
     }),
-    /未读取到2.4%边界/,
+    /第2页不完整/,
   )
 })
 

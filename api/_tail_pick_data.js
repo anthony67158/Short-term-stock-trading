@@ -23,7 +23,9 @@ const MARKET_FS =
 const MARKET_FIELDS =
   'f2,f3,f5,f6,f8,f12,f14,f15,f16,f17,f18,f20,f62,f184,f124'
 const MIN_FORMULA_GAIN_PCT = 2.4
-const MAX_MARKET_PAGES = 30
+const MARKET_PAGE_SIZE = 100
+const MARKET_PAGE_CONCURRENCY = 6
+const MAX_MARKET_PAGES = 80
 
 function finite(value) {
   if (value == null || value === '' || value === '-') return null
@@ -94,8 +96,8 @@ export function passesTailPickRealtimePrefilter(
 }
 
 function marketPagePath(page) {
-  return `/api/qt/clist/get?pn=${page}&pz=100&po=1&np=1`
-    + '&fltt=2&invt=2&fid=f3'
+  return `/api/qt/clist/get?pn=${page}&pz=${MARKET_PAGE_SIZE}&po=0&np=1`
+    + '&fltt=2&invt=2&fid=f12'
     + `&fs=${encodeURIComponent(MARKET_FS)}`
     + `&fields=${MARKET_FIELDS}`
 }
@@ -107,37 +109,59 @@ export async function fetchTailPickRealtimePool({
   ),
   now = Date.now(),
 } = {}) {
+  const firstPayload = await fetchPage(1)
+  const total = Number(firstPayload?.data?.total) || 0
+  if (total <= 0) throw new Error('全市场股票总数为空')
+  const pageCount = Math.ceil(total / MARKET_PAGE_SIZE)
+  if (pageCount > MAX_MARKET_PAGES) {
+    throw new Error(`全市场分页数异常：${pageCount}`)
+  }
   const rows = []
-  let total = 0
-  let pagesRead = 0
-  let boundaryReached = false
-  for (let page = 1; page <= MAX_MARKET_PAGES; page++) {
-    const payload = await fetchPage(page)
+  const appendPage = (payload, page) => {
     const diff = Array.isArray(payload?.data?.diff)
       ? payload.data.diff
       : []
-    if (page === 1) total = Number(payload?.data?.total) || diff.length
-    pagesRead = page
-    if (!diff.length) {
-      boundaryReached = true
-      break
+    const expected = page < pageCount
+      ? MARKET_PAGE_SIZE
+      : total - MARKET_PAGE_SIZE * (pageCount - 1)
+    if (diff.length < expected) {
+      throw new Error(
+        `全市场第${page}页不完整：${diff.length}/${expected}`,
+      )
     }
     rows.push(...diff.map((item) => mapTailPickMarketRow(item)))
-    const lastPct = finite(diff.at(-1)?.f3)
-    if (lastPct == null || lastPct <= MIN_FORMULA_GAIN_PCT) {
-      boundaryReached = true
-      break
-    }
   }
-  if (!boundaryReached) {
-    throw new Error('全市场涨幅分页未读取到2.4%边界')
+  appendPage(firstPayload, 1)
+  for (
+    let start = 2;
+    start <= pageCount;
+    start += MARKET_PAGE_CONCURRENCY
+  ) {
+    const pageNumbers = Array.from(
+      {
+        length: Math.min(
+          MARKET_PAGE_CONCURRENCY,
+          pageCount - start + 1,
+        ),
+      },
+      (_, index) => start + index,
+    )
+    const payloads = await Promise.all(
+      pageNumbers.map((page) => fetchPage(page)),
+    )
+    for (let index = 0; index < payloads.length; index++) {
+      appendPage(payloads[index], pageNumbers[index])
+    }
   }
   const unique = [...new Map(
     rows.filter((item) => item.code).map((item) => [item.code, item]),
   ).values()]
+  if (unique.length !== total) {
+    throw new Error(`全市场快照不完整：${unique.length}/${total}`)
+  }
   return {
     total,
-    pagesRead,
+    pagesRead: pageCount,
     inspectedCount: unique.length,
     list: unique.filter((item) =>
       passesTailPickRealtimePrefilter(item, beijingDayKey(now))
