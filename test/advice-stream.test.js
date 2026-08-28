@@ -199,6 +199,66 @@ test('军师生成期间持仓或成交变化时旧结果必须失效', () => {
   assert.equal(adviceTradeStateMatches(source, latest), false)
 })
 
+test('题材量化分和账户时间戳更新不得把深度任务重新排队', () => {
+  const source = {
+    plan: [{
+      id: 'watch-1',
+      code: '600000',
+      name: '浦发银行',
+      buyPrice: 10,
+      stopPrice: 9.6,
+      targetPrice: 10.8,
+      concept: '银行',
+      industry: '银行',
+      qScore: 52,
+      qAt: 1000,
+    }],
+    holding: [{
+      id: 'holding-1',
+      code: '003036',
+      name: '泰坦股份',
+      qty: 1,
+      buyPrice: 12.3,
+      buyFee: 5,
+      concept: '专用设备',
+      industry: '专用设备',
+      qScore: 55,
+      qAt: 1000,
+    }],
+    closed: [],
+    account: {
+      cash: 50000,
+      totalAssets: 100000,
+      cashUpdatedAt: 1000,
+      updatedAt: 1000,
+    },
+  }
+  const latest = {
+    ...source,
+    plan: [{
+      ...source.plan[0],
+      concept: '银行+中特估',
+      industry: '金融',
+      qScore: 61,
+      qAt: 2000,
+    }],
+    holding: [{
+      ...source.holding[0],
+      concept: '固态电池',
+      industry: '专用机械',
+      qScore: 58,
+      qAt: 2000,
+    }],
+    account: {
+      ...source.account,
+      cashUpdatedAt: 2000,
+      updatedAt: 2000,
+    },
+  }
+
+  assert.equal(adviceTradeStateMatches(source, latest), true)
+})
+
 test('交易变化导致的旧建议不消耗重试次数并按最新账本重新排队', () => {
   const data = {
     jobs: {
@@ -219,7 +279,17 @@ test('交易变化导致的旧建议不消耗重试次数并按最新账本重�
   assert.equal(job.attempts, 0)
   assert.equal(job.startedAt, 0)
   assert.equal(job.leaseUntil, 0)
+  assert.equal(job.tradeRequeues, 1)
   assert.match(job.phase, /最新持仓重新复核/)
+
+  const stopped = requeueAdviceForTradeChange(
+    data,
+    '002309',
+    2000,
+  )
+  assert.equal(stopped.status, 'failed')
+  assert.equal(stopped.finishedAt, 2000)
+  assert.match(stopped.error, /连续变化/)
 })
 
 test('远端同一任务已完成时旧Worker不得把它写回运行中', () => {

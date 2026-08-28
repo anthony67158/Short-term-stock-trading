@@ -7,6 +7,20 @@ const VOLATILE_ITEM_FIELDS = new Set([
   'reviewSyncedPrices',
 ])
 
+const ADVICE_VOLATILE_FIELDS = new Set([
+  ...VOLATILE_ITEM_FIELDS,
+  'name',
+  'concept',
+  'industry',
+  'star',
+  'alertMuted',
+  'muteAdd',
+  'muteReduce',
+  'muteSl',
+  'muteTp',
+  'cashUpdatedAt',
+])
+
 function canonical(value) {
   if (Array.isArray(value)) return value.map(canonical)
   if (!value || typeof value !== 'object') return value
@@ -14,6 +28,25 @@ function canonical(value) {
   for (const key of Object.keys(value).sort()) {
     if (key === 'updatedAt' || VOLATILE_ITEM_FIELDS.has(key)) continue
     next[key] = canonical(value[key])
+  }
+  return next
+}
+
+function canonicalAdviceState(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map(canonicalAdviceState)
+      .sort((left, right) =>
+        JSON.stringify(left).localeCompare(JSON.stringify(right))
+      )
+  }
+  if (!value || typeof value !== 'object') return value
+  const next = {}
+  for (const key of Object.keys(value).sort()) {
+    if (key === 'updatedAt' || ADVICE_VOLATILE_FIELDS.has(key)) {
+      continue
+    }
+    next[key] = canonicalAdviceState(value[key])
   }
   return next
 }
@@ -69,6 +102,18 @@ function fingerprint(value) {
 
 export function accountTradeStateFingerprint(data) {
   return fingerprint(tradeState(data))
+}
+
+export function adviceGenerationStateFingerprint(data = {}) {
+  return fingerprint(canonicalAdviceState({
+    plan: data.plan || [],
+    holding: data.holding || [],
+    closed: comparableClosed(data.closed),
+    account: data.account || null,
+    executionPlans: data.executionPlans || [],
+    quantModelVersion:
+      data.settings?.quantModelVersion || 'default',
+  }))
 }
 
 function legacyAccountTradeStateFingerprint(data) {

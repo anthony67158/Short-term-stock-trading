@@ -50,7 +50,9 @@ import { ensureConfig, currentConfig } from './_llm_config.js';
 import { endpointCountForRole } from './_llm_pool.js';
 import { projectAdviceAlerts } from '../shared/adviceAlerts.js';
 import { sanitizedAdvicePriceContract } from '../shared/advicePriceContract.js';
-import { accountTradeStateFingerprint } from '../shared/accountSync.js';
+import {
+  adviceGenerationStateFingerprint,
+} from '../shared/accountSync.js';
 import { createRecommendation } from '../shared/decisionLedger.js';
 import { ensureAdviceReasoning } from '../shared/adviceReasoning.js';
 import {
@@ -999,8 +1001,8 @@ async function genOne({
 }
 
 export function adviceTradeStateMatches(sourceData, latestData) {
-  return accountTradeStateFingerprint(sourceData)
-    === accountTradeStateFingerprint(latestData);
+  return adviceGenerationStateFingerprint(sourceData)
+    === adviceGenerationStateFingerprint(latestData);
 }
 
 export function reviewResultStillCurrent(result, currentEntry) {
@@ -1030,9 +1032,21 @@ export function requeueAdviceForTradeChange(
 ) {
   const job = findAdviceJob(data, code, { role, jobId });
   if (!job) return null;
+  if ((Number(job.tradeRequeues) || 0) >= 1) {
+    job.status = 'failed';
+    job.resourceRole = 'none';
+    job.resourceUnits = 0;
+    job.finishedAt = now;
+    job.leaseUntil = 0;
+    job.error = '生成期间交易账本连续变化，请确认成交记录后手动重新生成';
+    job.phase = '交易账本连续变化，已停止自动重排';
+    job.progressAt = now;
+    return job;
+  }
   job.status = 'queued';
   job.resourceRole = adviceJobRole(job);
   job.resourceUnits = 1;
+  job.tradeRequeues = (Number(job.tradeRequeues) || 0) + 1;
   job.attempts = Math.max(0, (Number(job.attempts) || 1) - 1);
   job.startedAt = 0;
   job.finishedAt = 0;
@@ -1058,7 +1072,7 @@ async function runJobGen(
     sourceAcc = (await readAccount(acc.nick)) || acc;
   } catch { /* 当前副本仍可进入生成，完成前还会再次校验 */ }
   const data = sourceAcc.data || {};
-  const sourceTradeFingerprint = accountTradeStateFingerprint(data);
+  const sourceTradeFingerprint = adviceGenerationStateFingerprint(data);
   const holding = data.holding || [], watch = data.plan || [];
   const holdSet = new Set(holding.map((h) => h.code));
   const allCodes = [...new Set([...holding.map((h) => h.code), ...watch.map((w) => w.code)])];
@@ -1377,6 +1391,7 @@ async function drainAccount(nick, initialAcc) {
   // ai.js 会再次校验摘要时效，不允许日报生成拆成前置 Worker 阻断主流程。
   const dailyReportSummary = data.adviceDailyReport?.summary || null;
   const inflight = new Map();   // jobId -> { promise, controller, code, role }
+  const immediateRequeues = new Set();
   const roleCapacities = {
     advisor: CONC,
     ...reviewRoleCapacities(REVIEW_CONC),
@@ -1535,13 +1550,16 @@ async function drainAccount(nick, initialAcc) {
       data = acc.data;
       reapOrphans(data); gcJobs(data);
       renewWorkerLock(data, myId);
+      const startCandidates = selectStartableJobs(
+        data,
+        roleCapacities,
+        new Set(inflight.keys()),
+      );
       const startable = Date.now() < startDeadline
-        ? selectStartableJobs(
-            data,
-            roleCapacities,
-            new Set(inflight.keys()),
-          )
-        : [];
+        ? startCandidates
+        : startCandidates.filter((job) =>
+            immediateRequeues.has(String(job.id || ''))
+          );
       // 处理 queued 里已被外部取消意图标记的
       for (const j of allAdviceJobs(data)) {
         if (j && j.status === 'queued' && j.cancelRequested) {
@@ -1557,6 +1575,7 @@ async function drainAccount(nick, initialAcc) {
         if (!leased) continue;
         const code = j.code;
         const jobId = j.id;
+        immediateRequeues.delete(String(jobId || ''));
         const controller = new AbortController();
         const promise = runJobGen(
           acc,
@@ -1606,7 +1625,7 @@ async function drainAccount(nick, initialAcc) {
         try {
           const latest = await readAccount(nick);
           tradeStateCurrent = !!latest?.data
-            && accountTradeStateFingerprint(latest.data)
+            && adviceGenerationStateFingerprint(latest.data)
               === done.res.sourceTradeFingerprint;
         } catch {
           tradeStateCurrent = false;
@@ -1620,13 +1639,18 @@ async function drainAccount(nick, initialAcc) {
       } else if (!tradeStateCurrent) {
         // 生成期间若用户加/减仓、改成本或补录成交，旧结果里的手数和成本已失效。
         // 不消耗重试次数，直接以最新 OSS 账本重跑，绝不把旧建议落盘。
-        requeueAdviceForTradeChange(
+        const requeued = requeueAdviceForTradeChange(
           d,
           done.code,
           Date.now(),
           done.role,
           done.jobId,
         );
+        if (requeued?.status === 'queued') {
+          immediateRequeues.add(String(done.jobId || ''));
+        } else if (requeued?.status === 'failed') {
+          fail++;
+        }
       } else if (done.res && done.res.cacheItem) {
         const completion = completeJob(d, done.code, Date.now(), {
           evidenceAsOf: Date.parse(
