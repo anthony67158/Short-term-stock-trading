@@ -54,6 +54,8 @@ function publicCandidate(candidate) {
 function noTradeResult({
   tradeDate,
   now,
+  mode,
+  isLive,
   marketGate,
   universe = null,
   reason,
@@ -64,8 +66,10 @@ function noTradeResult({
     session: {
       tradeDate,
       dataAsOf: now,
-      isLive: true,
+      isLive,
       window: '14:50-14:55',
+      mode,
+      isFormal: mode === 'scheduled',
     },
     marketGate,
     result: {
@@ -96,14 +100,19 @@ export function runTailPickScan({
   scanCandidates = scanTailPickCandidates,
   rankCandidates = rankTailPickCandidates,
   now = Date.now,
+  mode = 'manual',
 } = {}) {
   const requestedAt = Number(now()) || Date.now()
   const tradeDate = tailPickSession(requestedAt).tradeDate
-  const existingFlight = generationFlights.get(tradeDate)
+  const runMode = mode === 'scheduled' ? 'scheduled' : 'manual'
+  const flightKey = `${runMode}:${tradeDate}`
+  const existingFlight = generationFlights.get(flightKey)
   if (existingFlight) return existingFlight
 
   const promise = (async () => {
-    const existing = await store.readRun(tradeDate)
+    const existing = runMode === 'scheduled'
+      ? await store.readRun(tradeDate)
+      : null
     const session = tailPickSession(requestedAt, {
       hasResult: !!existing,
     })
@@ -113,12 +122,21 @@ export function runTailPickScan({
         reused: true,
       }
     }
-    if (!session.canRun) {
-      const error = new Error(session.reason || '当前不在尾盘选股时间窗')
+    if (runMode === 'scheduled' && session.status === 'REST') {
+      return {
+        ok: true,
+        skipped: true,
+        reason: 'non-trading-day',
+        schemaVersion: TAIL_PICK_SCHEMA_VERSION,
+        session,
+      }
+    }
+    if (runMode === 'scheduled' && !session.formalRunDue) {
+      const error = new Error('自动正式扫描仅在交易日14:50-14:55运行')
       error.code = 'WINDOW_CLOSED'
       throw error
     }
-    const claim = await store.claimRun(tradeDate, requestedAt)
+    const claim = await store.claimRun(tradeDate, requestedAt, runMode)
     if (!claim.acquired) {
       return {
         ok: true,
@@ -129,8 +147,9 @@ export function runTailPickScan({
       }
     }
     const task = {
-      id: `tp_${tradeDate.replaceAll('-', '')}_1450`,
+      id: `tp_${tradeDate.replaceAll('-', '')}_${runMode}`,
       tradeDate,
+      mode: runMode,
       status: 'RUNNING',
       startedAt: requestedAt,
     }
@@ -148,11 +167,14 @@ export function runTailPickScan({
         const result = noTradeResult({
           tradeDate,
           now: Number(now()) || Date.now(),
+          mode: runMode,
+          isLive: session.status === 'OPEN',
           marketGate: marketContext.marketGate,
           reason: marketContext.marketGate.blockers[0]
             || '今天不适合新增仓位',
         })
-        await store.saveRun(result)
+        if (runMode === 'scheduled') await store.saveRun(result)
+        else await store.saveManualRun(result)
         await store.saveTask({
           ...task,
           status: 'DONE',
@@ -194,8 +216,10 @@ export function runTailPickScan({
         session: {
           tradeDate,
           dataAsOf: generatedAt,
-          isLive: true,
+          isLive: session.status === 'OPEN',
           window: '14:50-14:55',
+          mode: runMode,
+          isFormal: runMode === 'scheduled',
         },
         marketGate: marketContext.marketGate,
         result: {
@@ -204,10 +228,27 @@ export function runTailPickScan({
             ? '公式命中且纪律闸门通过；分钟级历史优势尚未完成验证，仅供观察'
             : '没有股票同时通过原公式、主线、位置、流动性和分时纪律',
           universe: scanned.universe,
-          candidates: ranked.candidates.map(publicCandidate),
+          candidates: ranked.candidates.map((candidate) => {
+            const value = publicCandidate(candidate)
+            if (runMode === 'scheduled') return value
+            return {
+              ...value,
+              liveStatus: 'MANUAL_PREVIEW',
+              execution: {
+                ...value.execution,
+                action: session.status === 'OPEN'
+                  ? value.execution.action
+                  : '手动试算命中：仅加入自选观察，不在当前时点买入',
+                ...(session.status === 'OPEN'
+                  ? {}
+                  : { firstLeg: null, secondLeg: null }),
+              },
+            }
+          }),
         },
       }
-      await store.saveRun(result)
+      if (runMode === 'scheduled') await store.saveRun(result)
+      else await store.saveManualRun(result)
       await store.saveTask({
         ...task,
         status: 'DONE',
@@ -234,10 +275,10 @@ export function runTailPickScan({
       await store.releaseRun(claim).catch(() => {})
     }
   })()
-  generationFlights.set(tradeDate, promise)
+  generationFlights.set(flightKey, promise)
   promise.finally(() => {
-    if (generationFlights.get(tradeDate) === promise) {
-      generationFlights.delete(tradeDate)
+    if (generationFlights.get(flightKey) === promise) {
+      generationFlights.delete(flightKey)
     }
   }).catch(() => {})
   return promise
@@ -248,13 +289,14 @@ export async function readTailPickState({
   fetchTrends = fetchTrendsTx,
   timestamp = Date.now(),
 } = {}) {
-  const [latest, task] = await Promise.all([
+  const [formalLatest, manualLatest, task] = await Promise.all([
     store.readLatest(),
+    store.readManualLatest(),
     store.readTask(),
   ])
-  const currentResult = latest?.session?.tradeDate
+  const currentResult = formalLatest?.session?.tradeDate
     === tailPickSession(timestamp).tradeDate
-    ? latest
+    ? formalLatest
     : null
   const projected = currentResult
     ? await projectTailPickLiveStatus(currentResult, {
@@ -262,14 +304,34 @@ export async function readTailPickState({
         timestamp,
       })
     : null
+  const latestDisplay = [manualLatest, formalLatest]
+    .filter(Boolean)
+    .sort((left, right) =>
+      Number(right.session?.dataAsOf || 0)
+      - Number(left.session?.dataAsOf || 0)
+    )[0] || null
+  const visibleTask = (
+    task?.status === 'RUNNING'
+    && timestamp - Number(task.updatedAt || task.startedAt || 0)
+      > 3 * 60 * 1000
+  )
+    ? {
+        ...task,
+        status: 'FAILED',
+        stage: 'FAILED',
+        message: '上次任务已超时，可重新手动试算',
+      }
+    : task
   return {
     schemaVersion: TAIL_PICK_SCHEMA_VERSION,
     session: tailPickSession(timestamp, {
       hasResult: !!currentResult,
     }),
-    latest,
+    latest: formalLatest,
+    manualLatest,
     currentResult: projected,
-    task,
+    displayResult: projected || latestDisplay,
+    task: visibleTask,
   }
 }
 
@@ -358,6 +420,28 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store')
 
   try {
+    const body = typeof req.body === 'string'
+      ? JSON.parse(req.body || '{}')
+      : (req.body || {})
+    if (req.method === 'POST' && body.scheduled === true) {
+      const expected = String(process.env.CRON_KEY || '')
+      const supplied = String(
+        req.headers?.['x-cron-key']
+        || body.key
+        || req.query?.key
+        || '',
+      )
+      if (!expected || supplied !== expected) {
+        return reply(res, 401, {
+          ok: false,
+          error: 'unauthorized',
+          errorCode: 'UNAUTHORIZED',
+        })
+      }
+      return reply(res, 200, await runTailPickScan({
+        mode: 'scheduled',
+      }))
+    }
     const authentication = await authenticateAccountRequest(req)
     if (!authentication.ok || authentication.trusted) {
       return reply(res, 401, {
@@ -379,9 +463,6 @@ export default async function handler(req, res) {
         errorCode: 'METHOD_NOT_ALLOWED',
       })
     }
-    const body = typeof req.body === 'string'
-      ? JSON.parse(req.body || '{}')
-      : (req.body || {})
     if (body.action !== 'run') {
       return reply(res, 400, {
         ok: false,
@@ -389,17 +470,21 @@ export default async function handler(req, res) {
         errorCode: 'INVALID_ACTION',
       })
     }
-    const expectedKey = `tail-pick:${
-      tailPickSession().tradeDate
-    }:1450`
-    if (String(body.idempotencyKey || '') !== expectedKey) {
+    const tradeDate = tailPickSession().tradeDate
+    const idempotencyKey = String(body.idempotencyKey || '')
+    const expectedPattern = new RegExp(
+      `^tail-pick:${tradeDate}:manual:\\d{13}$`,
+    )
+    if (!expectedPattern.test(idempotencyKey)) {
       return reply(res, 422, {
         ok: false,
         error: '尾盘选股请求标识无效，请刷新页面后重试',
         errorCode: 'INVALID_IDEMPOTENCY_KEY',
       })
     }
-    return reply(res, 200, await runTailPickScan())
+    return reply(res, 200, await runTailPickScan({
+      mode: 'manual',
+    }))
   } catch (error) {
     const code = error?.code || 'TAIL_PICK_FAILED'
     return reply(res, code === 'WINDOW_CLOSED' ? 409 : 500, {

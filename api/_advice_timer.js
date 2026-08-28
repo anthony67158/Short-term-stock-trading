@@ -78,6 +78,13 @@ export function sectorForecastTimerBody(event, cronKey) {
   return { action: 'run_due' };
 }
 
+export function tailPickTimerBody(event, cronKey) {
+  if (!cronKey || !event || typeof event !== 'object') return null;
+  if (event.triggerName !== 'tail-pick-1450-timer') return null;
+  if (String(event.payload || '') !== String(cronKey)) return null;
+  return { scheduled: true };
+}
+
 const REVIEW_TIMER_SESSIONS = new Map([
   ['review-noon-open', 'noon'],
   ['review-noon-core', 'noon'],

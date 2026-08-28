@@ -17,7 +17,7 @@ export default function TailPickResults({
   result,
   book,
   accountGate,
-  allowPlanAction,
+  allowExecution,
   onAdd,
 }) {
   const candidates = result?.result?.candidates || []
@@ -30,6 +30,8 @@ export default function TailPickResults({
       >
         <div>
           <span>
+            {result.session?.isFormal ? '14:50正式版' : '手动试算'}
+            {' · '}
             {noTrade ? '今日不开仓' : `${candidates.length}只公式观察股`}
           </span>
           <strong>{result.result?.reason}</strong>
@@ -64,8 +66,7 @@ export default function TailPickResults({
             <TailPickCandidate
               key={candidate.code}
               candidate={candidate}
-              accountGate={accountGate}
-              allowPlanAction={allowPlanAction}
+              allowExecution={allowExecution}
               added={book.plan.some(
                 (item) => item.code === candidate.code,
               )}

@@ -11,13 +11,12 @@ function price(value) {
 
 export default function TailPickCandidate({
   candidate,
-  accountGate,
   added,
-  allowPlanAction,
+  allowExecution,
   onAdd,
 }) {
   const primary = candidate.execution?.role === 'PRIMARY'
-  const canAdd = !added && allowPlanAction
+  const canAdd = !added
   const evidence = [
     candidate.sector?.name
       ? `${candidate.sector.name}方向`
@@ -42,7 +41,6 @@ export default function TailPickCandidate({
           name={candidate.name}
           showTags={false}
         />
-        <span>{candidate.code}</span>
       </div>
       <div className="tail-pick-prices">
         <span>现价 <b>{price(candidate.quote?.price)}</b></span>
@@ -75,15 +73,15 @@ export default function TailPickCandidate({
         title={
           added
             ? '已在自选中'
-            : !allowPlanAction
-              ? '当前不是本场可执行时间'
-            : !accountGate.allowRiskIncrease
-              ? '仅加入观察，账户纪律当前不允许开仓'
+            : !allowExecution
+              ? '加入自选观察，不生成买入动作'
               : primary ? '加入尾盘观察计划' : '加入自选'
         }
       >
         <Icon name={added ? 'check' : 'plus'} size={14} />
-        {added ? '已加入' : primary ? '加入尾盘计划' : '加入自选'}
+        {added
+          ? '已加入'
+          : primary && allowExecution ? '加入尾盘计划' : '加入自选'}
       </button>
     </article>
   )

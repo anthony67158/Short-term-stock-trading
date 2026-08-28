@@ -48,19 +48,21 @@ export function tailPickSession(
   if (!isTradingDayAt(timestamp)) {
     return {
       status: 'REST',
-      canRun: false,
+      canRun: true,
+      formalRunDue: false,
       tradeDate,
-      label: hasResult ? '查看最近结果' : '休市，今日不运行',
-      reason: '今天不是A股交易日',
+      label: '手动复盘',
+      reason: '今天休市，手动运行只按最近交易日收盘数据试算',
     }
   }
   if (minutes < TAIL_PICK_WINDOW.opensAtMinute) {
     return {
       status: 'BEFORE_WINDOW',
-      canRun: false,
+      canRun: true,
+      formalRunDue: false,
       tradeDate,
-      label: '14:50 可运行',
-      reason: `距离运行窗口还有${
+      label: '手动试算',
+      reason: `14:50自动正式扫描；当前距正式扫描还有${
         TAIL_PICK_WINDOW.opensAtMinute - minutes
       }分钟`,
     }
@@ -68,20 +70,24 @@ export function tailPickSession(
   if (minutes < TAIL_PICK_WINDOW.closesAtMinute) {
     return {
       status: 'OPEN',
-      canRun: !hasResult,
+      canRun: true,
+      formalRunDue: !hasResult,
       tradeDate,
-      label: hasResult ? '查看尾盘结果' : '运行尾盘选股',
-      reason: hasResult ? '本场正式结果已生成，不重复扫描' : '',
+      label: hasResult ? '重新试算' : '立即试算',
+      reason: hasResult
+        ? '14:50正式版已生成；手动试算不会覆盖正式版'
+        : '14:50自动任务正在生成或可由手动试算兜底',
     }
   }
   return {
     status: minutes < 15 * 60 ? 'LOCKED' : 'CLOSED',
-    canRun: false,
+    canRun: true,
+    formalRunDue: false,
     tradeDate,
-    label: hasResult ? '查看尾盘结果' : '今日窗口已结束',
-    reason: `已超过${timeLabel(
+    label: '手动复盘',
+    reason: `正式执行窗口已在${timeLabel(
       TAIL_PICK_WINDOW.closesAtMinute,
-    )}，禁止追涨式重选`,
+    )}结束；手动运行仅用于复盘，不产生买入指令`,
     hour: date.getHours(),
   }
 }

@@ -1735,15 +1735,10 @@ textarea:focus {
 }
 
 .tail-pick-rank strong,
-.tail-pick-stock > span,
 .tail-pick-prices {
   color: var(--color-muted);
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
-}
-
-.tail-pick-stock > span {
-  font-variant-numeric: tabular-nums;
 }
 
 .tail-pick-prices {

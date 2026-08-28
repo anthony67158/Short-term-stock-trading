@@ -20,8 +20,10 @@ test('尾盘拾金位于板块前瞻和普通候选池之间', () => {
   assert.ok(today.indexOf('<TailPick') < today.indexOf('<CandidatePool'))
 })
 
-test('尾盘拾金使用唯一运行入口和四段真实进度', () => {
+test('尾盘拾金支持14:50自动正式扫描和手动试算', () => {
   assert.match(component, /runTailPick/)
+  assert.match(component, /14:50 自动正式扫描/)
+  assert.match(component, /随时手动试算/)
   assert.match(component, /确认开仓环境/)
   assert.match(component, /扫描公式信号/)
   assert.match(component, /执行纪律过滤/)
@@ -44,7 +46,7 @@ test('结果明确区分首选候补且只写入人工观察计划', () => {
 test('尾盘接口携带账号令牌、幂等键和明确超时', () => {
   assert.match(client, /accountRequestHeaders/)
   assert.match(client, /AbortController/)
-  assert.match(client, /tail-pick:\$\{tradeDate\}:1450/)
+  assert.match(client, /tail-pick:\$\{tradeDate\}:manual:/)
   assert.match(client, /尾盘选股超过45秒/)
 })
 

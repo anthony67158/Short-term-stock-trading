@@ -112,7 +112,7 @@ export default function TailPick() {
   }
 
   const session = state?.session || {}
-  const result = state?.currentResult || state?.latest || null
+  const result = state?.displayResult || null
   const task = state?.task
   const progress = running
     ? Math.max(3, Number(task?.progress) || 3)
@@ -136,7 +136,7 @@ export default function TailPick() {
         >
           <Icon name="target" size={16} />
           尾盘拾金
-          <span className="sub-name">14:50 固定公式 + 纪律闸门</span>
+          <span className="sub-name">14:50 自动正式扫描 · 随时手动试算</span>
         </div>
         <button
           type="button"
@@ -171,7 +171,10 @@ export default function TailPick() {
           <Icon name="clock" size={18} />
           <div>
             <strong>{session.label}</strong>
-            <span>{session.reason || '到达运行窗口后生成本场唯一正式结果'}</span>
+            <span>
+              {session.reason
+                || '交易日14:50自动生成正式版；手动试算不覆盖正式结果'}
+            </span>
           </div>
         </div>
       )}
@@ -181,8 +184,10 @@ export default function TailPick() {
           result={result}
           book={book}
           accountGate={accountGate}
-          allowPlanAction={
-            !!state?.currentResult && session.status === 'OPEN'
+          allowExecution={
+            !!state?.currentResult
+            && session.status === 'OPEN'
+            && accountGate.allowRiskIncrease
           }
           onAdd={addCandidate}
         />

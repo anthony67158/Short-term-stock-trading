@@ -155,6 +155,7 @@ test('扫描任务在大盘闸门失败时直接保存不开仓结果', async ()
   }
   const result = await runTailPickScan({
     store,
+    mode: 'scheduled',
     now: () => beijingTimestamp('2026-08-27T14:51:00'),
     collectMarketContext: async () => ({
       marketGate: {
@@ -171,6 +172,37 @@ test('扫描任务在大盘闸门失败时直接保存不开仓结果', async ()
   assert.equal(result.result.decision, 'NO_TRADE')
   assert.equal(savedRun.result.reason, '大盘跌破60日线')
   assert.equal(tasks.at(-1).status, 'DONE')
+})
+
+test('手动试算可在14:50前运行且不会写入正式结果', async () => {
+  let formalWrites = 0
+  let manualResult = null
+  const store = {
+    readRun: async () => null,
+    claimRun: async () => ({ acquired: true }),
+    releaseRun: async () => true,
+    saveRun: async () => { formalWrites++ },
+    saveManualRun: async (value) => { manualResult = value },
+    saveTask: async () => {},
+  }
+  const result = await runTailPickScan({
+    store,
+    mode: 'manual',
+    now: () => beijingTimestamp('2026-08-28T10:30:00'),
+    collectMarketContext: async () => ({
+      marketGate: {
+        allowed: false,
+        label: '今日不开仓',
+        reasons: [],
+        blockers: ['手动试算环境不通过'],
+      },
+    }),
+  })
+
+  assert.equal(formalWrites, 0)
+  assert.equal(manualResult.session.mode, 'manual')
+  assert.equal(manualResult.session.isFormal, false)
+  assert.equal(result.result.decision, 'NO_TRADE')
 })
 
 test('存储适配器对同一交易日读取同一正式结果', async () => {
@@ -190,12 +222,14 @@ test('存储适配器对同一交易日读取同一正式结果', async () => {
 
   assert.deepEqual(await store.readRun('2026-08-28'), result)
   assert.deepEqual(await store.readLatest(), result)
+  assert.equal(await store.readManualLatest(), null)
   const state = await readTailPickState({
     store,
     timestamp: beijingTimestamp('2026-08-28T14:56:00'),
   })
   assert.deepEqual(state.currentResult, result)
-  assert.equal(state.session.label, '查看尾盘结果')
+  assert.equal(state.session.label, '手动复盘')
+  assert.deepEqual(state.displayResult, result)
 })
 
 test('14:55后旧执行指令统一失效，不能继续追买', async () => {

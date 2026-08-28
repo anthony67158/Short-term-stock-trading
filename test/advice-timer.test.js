@@ -9,6 +9,7 @@ import {
   dailyReportWorkerBody,
   reviewTimerBody,
   sectorForecastTimerBody,
+  tailPickTimerBody,
   v2AccuracyTimerBody,
 } from '../api/_advice_timer.js'
 
@@ -49,6 +50,23 @@ test('板块前瞻Timer只负责唤醒运行时到期判断', () => {
   )
   assert.equal(sectorForecastTimerBody(event, 'wrong-key'), null)
   assert.equal(sectorForecastTimerBody({
+    ...event,
+    triggerName: 'other',
+  }, 'secret-key'), null)
+})
+
+test('尾盘拾金Timer只在14:50专用触发器和密钥匹配时运行', () => {
+  const event = {
+    triggerName: 'tail-pick-1450-timer',
+    payload: 'secret-key',
+  }
+
+  assert.deepEqual(
+    tailPickTimerBody(event, 'secret-key'),
+    { scheduled: true },
+  )
+  assert.equal(tailPickTimerBody(event, 'wrong-key'), null)
+  assert.equal(tailPickTimerBody({
     ...event,
     triggerName: 'other',
   }, 'secret-key'), null)

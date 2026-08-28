@@ -46,31 +46,32 @@ function strongMarket() {
   }
 }
 
-test('尾盘选股只在交易日14:50至14:55前开放一次', () => {
-  assert.equal(
-    tailPickSession(
-      beijingTimestamp('2026-08-28T14:49:00'),
-    ).status,
-    'BEFORE_WINDOW',
+test('14:50自动正式扫描且其它时间保留手动试算', () => {
+  const before = tailPickSession(
+    beijingTimestamp('2026-08-28T14:49:00'),
   )
+  assert.equal(before.status, 'BEFORE_WINDOW')
+  assert.equal(before.canRun, true)
+  assert.equal(before.formalRunDue, false)
+
   assert.equal(
     tailPickSession(
       beijingTimestamp('2026-08-28T14:50:00'),
-    ).canRun,
+    ).formalRunDue,
     true,
   )
-  assert.equal(
-    tailPickSession(
-      beijingTimestamp('2026-08-28T14:55:00'),
-    ).status,
-    'LOCKED',
+  const after = tailPickSession(
+    beijingTimestamp('2026-08-28T14:55:00'),
   )
-  assert.equal(
-    tailPickSession(
-      beijingTimestamp('2026-08-29T14:50:00'),
-    ).status,
-    'REST',
+  assert.equal(after.status, 'LOCKED')
+  assert.equal(after.canRun, true)
+  assert.match(after.reason, /手动运行仅用于复盘/)
+
+  const rest = tailPickSession(
+    beijingTimestamp('2026-08-29T14:50:00'),
   )
+  assert.equal(rest.status, 'REST')
+  assert.equal(rest.canRun, true)
 })
 
 test('大盘与主线方向同时通过才允许继续扫描', () => {

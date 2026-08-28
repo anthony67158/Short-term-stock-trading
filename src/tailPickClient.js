@@ -42,7 +42,8 @@ export function runTailPick(tradeDate) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       action: 'run',
-      idempotencyKey: `tail-pick:${tradeDate}:1450`,
+      mode: 'manual',
+      idempotencyKey: `tail-pick:${tradeDate}:manual:${Date.now()}`,
     }),
   }, 60_000)
 }

@@ -9,12 +9,14 @@ export const TAIL_PICK_PREFIX = 'market/tail-pick/v1/'
 
 const PATHS = Object.freeze({
   latest: `${TAIL_PICK_PREFIX}latest.json`,
+  manualLatest: `${TAIL_PICK_PREFIX}manual-latest.json`,
   task: `${TAIL_PICK_PREFIX}task.json`,
   runs: `${TAIL_PICK_PREFIX}runs/`,
   locks: `${TAIL_PICK_PREFIX}locks/`,
 })
 
 let memoryLatest = null
+let memoryManualLatest = null
 let memoryTask = null
 
 function jsonOptions() {
@@ -64,6 +66,10 @@ export function createTailPickStore(storage = {
       }
       return storage.readJson(this.runPath(tradeDate)).catch(() => null)
     },
+    async readManualLatest() {
+      if (!storage.hasStorage()) return memoryManualLatest
+      return storage.readJson(PATHS.manualLatest).catch(() => null)
+    },
     async saveRun(result) {
       const tradeDate = safeTradeDate(result?.session?.tradeDate)
       if (!storage.hasStorage()) {
@@ -72,6 +78,14 @@ export function createTailPickStore(storage = {
       }
       await writeJson(this.runPath(tradeDate), result)
       await writeJson(PATHS.latest, result)
+      return result
+    },
+    async saveManualRun(result) {
+      if (!storage.hasStorage()) {
+        memoryManualLatest = result
+        return result
+      }
+      await writeJson(PATHS.manualLatest, result)
       return result
     },
     async readTask() {
@@ -85,15 +99,18 @@ export function createTailPickStore(storage = {
       }
       return writeJson(PATHS.task, task)
     },
-    async claimRun(tradeDate, now = Date.now()) {
+    async claimRun(tradeDate, now = Date.now(), mode = 'scheduled') {
       if (!storage.hasStorage()) {
         if (
           memoryTask?.status === 'RUNNING'
           && memoryTask.tradeDate === tradeDate
+          && memoryTask.mode === mode
         ) return { acquired: false, path: '' }
         return { acquired: true, path: '' }
       }
-      const path = `${PATHS.locks}${safeTradeDate(tradeDate)}-1450.json`
+      const runMode = mode === 'manual' ? 'manual' : 'scheduled'
+      const bucket = Math.floor((Number(now) || Date.now()) / 60_000)
+      const path = `${PATHS.locks}${safeTradeDate(tradeDate)}-${runMode}-${bucket}.json`
       try {
         await writeJson(path, {
           tradeDate,

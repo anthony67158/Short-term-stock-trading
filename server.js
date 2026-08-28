@@ -24,6 +24,7 @@ import {
   portfolioAnalysisWorkerBody,
   reviewTimerBody,
   sectorForecastTimerBody,
+  tailPickTimerBody,
   v2AccuracyTimerBody,
 } from './api/_advice_timer.js';
 import {
@@ -342,6 +343,10 @@ async function handleRequest(req, res) {
       event,
       process.env.CRON_KEY,
     );
+    const tailPickBody = tailPickTimerBody(
+      event,
+      process.env.CRON_KEY,
+    );
     const portfolioAnalysisBody = portfolioAnalysisWorkerBody(
       event,
       process.env.CRON_KEY,
@@ -353,6 +358,7 @@ async function handleRequest(req, res) {
       && !alertBody
       && !reviewBody
       && !sectorForecastBody
+      && !tailPickBody
       && !portfolioAnalysisBody
     ) { res.statusCode = 403; res.end('forbidden'); return; }
     req.query = {};
@@ -362,6 +368,7 @@ async function handleRequest(req, res) {
       || alertBody
       || reviewBody
       || sectorForecastBody
+      || tailPickBody
       || portfolioAnalysisBody;
     req.headers['x-cron-key'] = process.env.CRON_KEY;
     res.status = (code) => { res.statusCode = code; return res; };
@@ -380,6 +387,8 @@ async function handleRequest(req, res) {
                 ? 'cron_review'
                 : sectorForecastBody
                   ? 'sector_forecast'
+                  : tailPickBody
+                    ? 'tail_pick'
                   : 'portfolio_analysis';
       await handlers[handlerName](req, res);
     } catch (e) {

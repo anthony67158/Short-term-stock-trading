@@ -118,6 +118,13 @@ resources:
             cronExpression: "@every 5m"
             enable: true
             payload: ${env('CRON_KEY')}
+        # 尾盘拾金：14:50 自动正式扫描，14:52 仅作失败重试；幂等结果不重算。
+        - triggerName: tail-pick-1450-timer
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 50,52 14 * * 1-5"
+            enable: true
+            payload: ${env('CRON_KEY')}
         - triggerName: v2-accuracy-timer
           triggerType: timer
           triggerConfig:
