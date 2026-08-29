@@ -117,6 +117,48 @@ test('市场扫描从完整股票池生成最多五个带唯一价位的观察�
   assert.ok(result.candidates[0].primaryPrice > 0)
 })
 
+test('公式扫描不会因实时排序只检查前60只而漏掉后续命中', async () => {
+  const quotes = Array.from({ length: 61 }, (_, index) => quote({
+    code: String(600001 + index),
+    amount: 300_000_000 - index,
+  }))
+  const result = await scanFormulaSelectionCandidates({
+    mode: 'intraday',
+    now: Date.UTC(2026, 7, 28, 7),
+    marketContext: {
+      marketGate: { allowed: true },
+      latest: null,
+      intraday: null,
+    },
+    fetchUniverse: async () => ({
+      total: 5500,
+      inspectedCount: 5500,
+      allList: quotes,
+    }),
+    fetchKline: async (code) => {
+      if (code !== '600061') return null
+      const rows = candles()
+      rows.at(-1).high = 12.6
+      return { candles: rows }
+    },
+    fetchTrends: async () => ({
+      trends: [11.92, 11.95, 11.97, 12, 12.01].map((value) => ({
+        price: value,
+        avg: 11.9,
+        volume: 100,
+      })),
+    }),
+    fetchFund: async () => fund,
+    fetchTags: async () => ({ industry: '测试', concepts: [] }),
+    matchSector: () => ({
+      matched: true,
+      sector: { code: 'BK001', name: '测试主线' },
+    }),
+  })
+
+  assert.equal(result.candidates[0].code, '600061')
+})
+
 test('个股价位读取服务端持仓并返回军师只读参考', async () => {
   const result = await buildStockFormulaSelection({
     code: '600001',

@@ -162,11 +162,39 @@ export async function scanFormulaSelectionCandidates({
       right.cheapScore - left.cheapScore
       || String(left.quote.code).localeCompare(String(right.quote.code))
     )
-    .slice(0, normalizedMode === 'intraday' ? 60 : 80)
+  const deferredBlockers = new Set([
+    '最近分钟线未确认承接',
+    '分钟价格未稳定在VWAP上方',
+    '板块方向未确认',
+    '资金承接未确认',
+  ])
+  const technicalCandidates = (await mapLimit(
+    prefiltered,
+    12,
+    async ({ quote }) => {
+      const kline = await fetchKline(quote.code, '101', 60)
+        .catch(() => null)
+      if (!kline?.candles?.length) return null
+      const preliminary = evaluateFormulaSelection({
+        mode: normalizedMode,
+        candles: kline.candles,
+        quote,
+        trends: [],
+        fund: {},
+        sectorOpportunity: { matched: false },
+      })
+      const possible = preliminary.evaluations.some((item) =>
+        item.blockers.every((blocker) => deferredBlockers.has(blocker))
+      )
+      return possible ? { quote, kline } : null
+    },
+  )).filter(Boolean)
 
-  const evaluated = await mapLimit(prefiltered, 8, async ({ quote }) => {
-    const [kline, trendData, fund, tags] = await Promise.all([
-      fetchKline(quote.code, '101', 60).catch(() => null),
+  const evaluated = await mapLimit(
+    technicalCandidates,
+    8,
+    async ({ quote, kline }) => {
+      const [trendData, fund, tags] = await Promise.all([
       normalizedMode === 'intraday'
         ? fetchTrends(quote.code).catch(() => null)
         : Promise.resolve(null),
@@ -175,48 +203,49 @@ export async function scanFormulaSelectionCandidates({
         fetchedAt: now,
       }).catch(() => null),
       fetchTags(quote.code).catch(() => null),
-    ])
-    if (!kline?.candles?.length || !fund || !tags) return null
-    const sectorOpportunity = matchSector({
-      code: quote.code,
-      profile: tags,
-      latest: marketContext?.latest,
-      intraday: marketContext?.intraday,
-      now,
-    })
-    const formula = evaluateFormulaSelection({
-      mode: normalizedMode,
-      candles: kline.candles,
-      quote,
-      trends: trendData?.trends || [],
-      fund,
-      sectorOpportunity,
-    })
-    const decision = buildFormulaPriceDecision({
-      code: quote.code,
-      quote,
-      formulaMatches: formula.matches,
-      positionMode: 'UNOWNED',
-      marketAllowsRisk: marketContext?.marketGate?.allowed === true,
-      dataComplete: true,
-      dataFresh: true,
-      now,
-    })
-    if (decision.action !== 'WATCH_BUY') return null
-    return {
-      code: quote.code,
-      name: quote.name || kline.name || tags.name,
-      quote,
-      fund,
-      tags,
-      sectorOpportunity,
-      formula,
-      decision,
-      score:
-        Number(formula.matches[0]?.score || 0)
-        + Math.max(-5, Math.min(5, Number(fund.mainNetYi || 0))),
-    }
-  })
+      ])
+      if (!fund || !tags) return null
+      const sectorOpportunity = matchSector({
+        code: quote.code,
+        profile: tags,
+        latest: marketContext?.latest,
+        intraday: marketContext?.intraday,
+        now,
+      })
+      const formula = evaluateFormulaSelection({
+        mode: normalizedMode,
+        candles: kline.candles,
+        quote,
+        trends: trendData?.trends || [],
+        fund,
+        sectorOpportunity,
+      })
+      const decision = buildFormulaPriceDecision({
+        code: quote.code,
+        quote,
+        formulaMatches: formula.matches,
+        positionMode: 'UNOWNED',
+        marketAllowsRisk: marketContext?.marketGate?.allowed === true,
+        dataComplete: true,
+        dataFresh: true,
+        now,
+      })
+      if (decision.action !== 'WATCH_BUY') return null
+      return {
+        code: quote.code,
+        name: quote.name || kline.name || tags.name,
+        quote,
+        fund,
+        tags,
+        sectorOpportunity,
+        formula,
+        decision,
+        score:
+          Number(formula.matches[0]?.score || 0)
+          + Math.max(-5, Math.min(5, Number(fund.mainNetYi || 0))),
+      }
+    },
+  )
 
   const ranked = evaluated
     .filter(Boolean)
@@ -232,6 +261,7 @@ export async function scanFormulaSelectionCandidates({
       total: universe.total,
       inspectedCount: universe.inspectedCount,
       prefilterCount: prefiltered.length,
+      technicalCandidateCount: technicalCandidates.length,
       formulaMatchCount: ranked.length,
     },
     formulas: FORMULA_REGISTRY
