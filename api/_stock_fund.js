@@ -1,6 +1,9 @@
+import { get as httpsGet } from 'node:https';
+
+import { parseEastmoneyPayload } from './_lib.js';
 import { buildRetailFlowEvidence } from '../shared/retailFundFlow.js';
 
-const HISTORY_HOSTS = [
+const DEDICATED_HISTORY_HOSTS = [
   'https://push2his.eastmoney.com',
   'https://82.push2his.eastmoney.com',
   'https://45.push2his.eastmoney.com',
@@ -8,6 +11,10 @@ const HISTORY_HOSTS = [
   'https://28.push2his.eastmoney.com',
   'https://33.push2his.eastmoney.com',
   'https://48.push2his.eastmoney.com',
+];
+
+const HISTORY_HOSTS = [
+  ...DEDICATED_HISTORY_HOSTS,
   'https://push2.eastmoney.com',
   'https://push2delay.eastmoney.com',
 ];
@@ -208,6 +215,71 @@ async function fetchJson(fetchImpl, url, timeoutMs) {
   }
 }
 
+function fetchJsonViaHttps(url, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const request = httpsGet(url, {
+      headers: {
+        Accept: 'application/json, text/javascript, */*; q=0.01',
+        Connection: 'close',
+        Referer: 'https://data.eastmoney.com/',
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+          + 'AppleWebKit/537.36 Chrome/124.0 Safari/537.36',
+      },
+    }, (response) => {
+      if (
+        Number(response.statusCode) < 200
+        || Number(response.statusCode) >= 300
+      ) {
+        response.resume();
+        reject(new Error(`HTTP_${response.statusCode || 0}`));
+        return;
+      }
+      response.setEncoding('utf8');
+      let body = '';
+      response.on('data', (chunk) => {
+        body += chunk;
+        if (body.length > 2_000_000) {
+          request.destroy(new Error('payload_too_large'));
+        }
+      });
+      response.on('end', () => {
+        try {
+          resolve(parseEastmoneyPayload(body));
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+    request.setTimeout(timeoutMs, () => {
+      request.destroy(new Error('request_timeout'));
+    });
+    request.on('error', reject);
+  });
+}
+
+export async function fetchStockFundHistoryViaHttps(
+  path,
+  { timeoutMs = 3000 } = {},
+) {
+  const settled = await Promise.all(DEDICATED_HISTORY_HOSTS.map(
+    async (host) => {
+      try {
+        const payload = await fetchJsonViaHttps(host + path, timeoutMs);
+        const lines = payload?.data?.klines;
+        return Array.isArray(lines) && lines.length ? lines : null;
+      } catch {
+        return null;
+      }
+    },
+  ));
+  return settled.reduce((best, lines) =>
+    Array.isArray(lines) && lines.length > (best?.length || 0)
+      ? lines
+      : best
+  , null);
+}
+
 async function firstValid(hosts, path, {
   fetchImpl,
   timeoutMs,
@@ -253,6 +325,7 @@ export async function fetchStockFund(code, {
   timeoutMs = 3000,
   preferRealtime = false,
   fetchedAt = Date.now(),
+  fetchHistory = null,
 } = {}) {
   const secid = toSecid(code);
   if (!secid) return null;
@@ -260,20 +333,23 @@ export async function fetchStockFund(code, {
     `/api/qt/stock/fflow/daykline/get?lmt=${historyLimit}&klt=101`
     + `&secid=${secid}&ut=b2884a393a59ad64002292a3e90d46a5`
     + '&fields1=f1,f2,f3,f7'
-    + '&fields2=f51,f52,f53,f54,f55,f56,f57';
+    + '&fields2=f51,f52,f53,f54,f55,f56,f57'
+    + `&_=${Number(fetchedAt) || Date.now()}`;
   const realtimePath =
     `/api/qt/stock/get?secid=${secid}`
     + '&fields=f62,f84,f184,f66,f72,f164,f191,f192';
   const [historyLines, realtime] = await Promise.all([
-    bestValid(HISTORY_HOSTS, historyPath, {
-      fetchImpl,
-      timeoutMs,
-      pick: (payload) => {
-        const lines = payload?.data?.klines;
-        return Array.isArray(lines) && lines.length ? lines : null;
-      },
-      score: (lines) => Array.isArray(lines) ? lines.length : 0,
-    }),
+    typeof fetchHistory === 'function'
+      ? fetchHistory(historyPath, { timeoutMs })
+      : bestValid(HISTORY_HOSTS, historyPath, {
+          fetchImpl,
+          timeoutMs,
+          pick: (payload) => {
+            const lines = payload?.data?.klines;
+            return Array.isArray(lines) && lines.length ? lines : null;
+          },
+          score: (lines) => Array.isArray(lines) ? lines.length : 0,
+        }),
     firstValid(REALTIME_HOSTS, realtimePath, {
       fetchImpl,
       timeoutMs,

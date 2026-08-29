@@ -131,6 +131,31 @@ test('资金历史镜像优先选择完整五日而不是最快的一日结果',
   )
 })
 
+test('详情可切换原生HTTPS传输读取完整五日资金', async () => {
+  let historyCalls = 0
+  const snapshot = await fetchStockFund('300390', {
+    fetchedAt: Date.parse('2026-08-29T02:00:00.000Z'),
+    fetchImpl: async (url) => ({
+      ok: true,
+      async json() {
+        return url.includes('/fflow/daykline/get')
+          ? { data: { klines: historyLines.slice(-1) } }
+          : { data: { f62: 200_000_000, f84: -100_000_000 } }
+      },
+    }),
+    fetchHistory: async () => {
+      historyCalls += 1
+      return historyLines
+    },
+  })
+
+  assert.equal(historyCalls, 1)
+  assert.equal(snapshot.historyDayCount, 5)
+  assert.equal(snapshot.historyComplete, true)
+  assert.equal(snapshot.main5dYi, 7.5)
+  assert.equal(snapshot.retail5dYi, -4)
+})
+
 test('资金快照比较识别主力由流入转流出与散户反向承接', () => {
   const change = compareStockFundSnapshots({
     mainNetYi: -0.4,

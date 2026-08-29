@@ -127,3 +127,27 @@ test('资金日期落后时不把历史值伪装成当前快照', () => {
   assert.equal(result.recent5.mainNetYi, null)
   assert.equal(result.recent5.retailNetYi, null)
 })
+
+test('资金历史不足时使用同日报价的五日聚合值', () => {
+  const result = buildStockMarketSnapshot({
+    quote: {
+      tradeDate: '2026-08-28',
+      isLivePrice: false,
+      main5dInflow: 550_000_000,
+      retail5dInflow: -310_000_000,
+    },
+    candles,
+    fund: {
+      asOfDate: '2026-08-28',
+      historyDayCount: 1,
+      historyComplete: false,
+      mainNetYi: 1.8,
+      retailNetYi: -1.2,
+    },
+  })
+
+  assert.equal(result.recent5.priceUpDays, 5)
+  assert.equal(result.recent5.mainNetYi, 5.5)
+  assert.equal(result.recent5.retailNetYi, -3.1)
+  assert.equal(result.recent5.mainInflowDays, null)
+})

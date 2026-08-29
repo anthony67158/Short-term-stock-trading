@@ -29,6 +29,12 @@ function positive(value) {
     : null;
 }
 
+function optionalNumber(value) {
+  if (value == null || value === '' || value === '-') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 function quotePriceMetadata(tradeDate, now) {
   const today = beijingDayKey(now);
   if (String(tradeDate || '').slice(0, 10) !== today) {
@@ -135,6 +141,8 @@ function previousCloseQuote(code, eastmoney, tencent, now) {
     volRatio: positive(eastmoneyHistorical?.volRatio),
     mainInflow: eastmoneyHistorical?.mainInflow ?? null,
     retailInflow: eastmoneyHistorical?.retailInflow ?? null,
+    main5dInflow: eastmoneyHistorical?.main5dInflow ?? null,
+    retail5dInflow: eastmoneyHistorical?.retail5dInflow ?? null,
     mainRatio: eastmoneyHistorical?.mainRatio ?? null,
     amount: positive(eastmoneyHistorical?.amount),
     high: positive(eastmoneyHistorical?.high),
@@ -213,6 +221,8 @@ export function mapEastmoneyQuote(data = {}) {
     volRatio: num(data.f10),
     mainInflow: num(data.f62),
     retailInflow: num(data.f84),
+    main5dInflow: optionalNumber(data.f164),
+    retail5dInflow: optionalNumber(data.f172),
     mainRatio: num(data.f184),
     amount: num(data.f6),
     high: num(data.f15),
@@ -277,7 +287,9 @@ async function quoteTx(codes) {
 async function quoteEastmoney(codes) {
   const secids = codes.map(toSecid).join(',');
   // f15 最高 f16 最低 f17 今开 f18 昨收 f100 所属行业
-  const fields = 'f2,f3,f4,f8,f10,f12,f14,f62,f84,f184,f6,f15,f16,f17,f18,f100,f124';
+  const fields =
+    'f2,f3,f4,f8,f10,f12,f14,f62,f84,f164,f172,f184,'
+    + 'f6,f15,f16,f17,f18,f100,f124';
   const path =
     `/api/qt/ulist.np/get?fltt=2&invt=2&secids=${encodeURIComponent(secids)}` +
     `&fields=${fields}`;

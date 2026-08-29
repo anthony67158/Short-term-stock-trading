@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { fetchQuotes } from '../api/quote.js'
+import { fetchQuotes, mapEastmoneyQuote } from '../api/quote.js'
 
 const preOpen = Date.parse('2026-08-27T01:03:00.000Z')
 
@@ -148,6 +148,8 @@ test('休市时保留最近收盘日的活跃度与资金快照', async () => {
       volRatio: 0.78,
       mainInflow: 181_197_588,
       retailInflow: -211_449_936,
+      main5dInflow: 286_921_224,
+      retail5dInflow: -416_996_256,
       mainRatio: 7.42,
       amount: 2_442_216_361.28,
       high: 64.98,
@@ -169,4 +171,29 @@ test('休市时保留最近收盘日的活跃度与资金快照', async () => {
   assert.equal(list[0].volRatio, 0.78)
   assert.equal(list[0].mainInflow, 181_197_588)
   assert.equal(list[0].retailInflow, -211_449_936)
+  assert.equal(list[0].main5dInflow, 286_921_224)
+  assert.equal(list[0].retail5dInflow, -416_996_256)
+})
+
+test('东财报价映射保留五日主力与小单累计且缺失值不伪装成零', () => {
+  const quote = mapEastmoneyQuote({
+    f12: '300390',
+    f14: '天华新能',
+    f2: 64.12,
+    f124: Date.parse('2026-08-28T07:00:00.000Z') / 1000,
+    f164: 286_921_224,
+    f172: -416_996_256,
+  })
+  const missing = mapEastmoneyQuote({
+    f12: '300390',
+    f14: '天华新能',
+    f2: 64.12,
+    f164: '-',
+    f172: '',
+  })
+
+  assert.equal(quote.main5dInflow, 286_921_224)
+  assert.equal(quote.retail5dInflow, -416_996_256)
+  assert.equal(missing.main5dInflow, null)
+  assert.equal(missing.retail5dInflow, null)
 })

@@ -27,6 +27,7 @@ export function buildStockMarketSnapshot({
     .filter((item) => item?.date && finite(item.close) != null)
   const recentCandles = daily.slice(-5)
   const latestCandle = recentCandles.at(-1) || null
+  const recentStart = daily.length - recentCandles.length
   const baseline = daily.length > recentCandles.length
     ? daily[daily.length - recentCandles.length - 1]
     : null
@@ -50,6 +51,25 @@ export function buildStockMarketSnapshot({
     day(fundAsOfDate)
     && day(fundAsOfDate) === day(asOfDate)
   )
+  const quoteAligned = (
+    day(quote?.tradeDate)
+    && day(quote?.tradeDate) === day(asOfDate)
+  )
+  const recentMoves = recentCandles.map((item, index) => {
+    const change = finite(item?.pct)
+    if (change != null) return change
+    const previousClose = finite(daily[recentStart + index - 1]?.close)
+    const close = finite(item?.close)
+    return previousClose != null && previousClose > 0 && close != null
+      ? (close - previousClose) / previousClose * 100
+      : null
+  })
+  const priceUpDays = (
+    recentMoves.length > 0
+    && recentMoves.every((value) => value != null)
+  )
+    ? recentMoves.filter((value) => value > 0).length
+    : null
   const fundComplete = (
     fund?.historyComplete === true
     && Number(fund?.historyDayCount) >= 5
@@ -76,8 +96,17 @@ export function buildStockMarketSnapshot({
     recent5: {
       dayCount: recentCandles.length,
       priceChangePct,
-      mainNetYi: fundComplete ? rounded(fund?.main5dYi) : null,
-      retailNetYi: fundComplete ? rounded(fund?.retail5dYi) : null,
+      priceUpDays,
+      mainNetYi: fundComplete
+        ? rounded(fund?.main5dYi)
+        : quoteAligned
+          ? yuanToYi(quote?.main5dInflow)
+          : null,
+      retailNetYi: fundComplete
+        ? rounded(fund?.retail5dYi)
+        : quoteAligned
+          ? yuanToYi(quote?.retail5dInflow)
+          : null,
       mainInflowDays: fundComplete
         ? Math.max(0, Number(fund?.inflowDays) || 0)
         : null,

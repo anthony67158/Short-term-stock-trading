@@ -935,13 +935,11 @@ export default function StockDetail({ stock, onClose }) {
                           </b>
                         </div>
                         <div className="detail-market-metric">
-                          <span>主力流入天数</span>
-                          <b className={pctClass(
-                            marketSnapshot.recent5.mainNetYi,
-                          )}>
-                            {marketSnapshot.recent5.mainInflowDays == null
+                          <span>收涨天数</span>
+                          <b>
+                            {marketSnapshot.recent5.priceUpDays == null
                               ? '--'
-                              : `${marketSnapshot.recent5.mainInflowDays}`
+                              : `${marketSnapshot.recent5.priceUpDays}`
                                 + `/${marketSnapshot.recent5.dayCount}日`}
                           </b>
                         </div>
@@ -952,6 +950,11 @@ export default function StockDetail({ stock, onClose }) {
                           )}>
                             {formatYi(marketSnapshot.recent5.mainNetYi)}
                           </b>
+                          {marketSnapshot.recent5.mainInflowDays != null && (
+                            <small>
+                              {marketSnapshot.recent5.mainInflowDays}日净流入
+                            </small>
+                          )}
                         </div>
                         <div className="detail-market-metric">
                           <span>小单累计</span>

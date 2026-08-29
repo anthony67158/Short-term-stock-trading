@@ -224,7 +224,7 @@ test('个股详情展示最近收盘快照与近5日关键趋势', () => {
   )
   assert.match(
     stockDetail,
-    /className="detail-market-snapshot"[\s\S]*?最近收盘[\s\S]*?换手[\s\S]*?量比[\s\S]*?主力净额[\s\S]*?小单净额[\s\S]*?近\{marketSnapshot\.recent5\.dayCount\}日[\s\S]*?价格变化[\s\S]*?主力流入天数[\s\S]*?主力累计[\s\S]*?小单累计/,
+    /className="detail-market-snapshot"[\s\S]*?最近收盘[\s\S]*?换手[\s\S]*?量比[\s\S]*?主力净额[\s\S]*?小单净额[\s\S]*?近\{marketSnapshot\.recent5\.dayCount\}日[\s\S]*?价格变化[\s\S]*?收涨天数[\s\S]*?主力累计[\s\S]*?小单累计/,
   )
   assert.match(stockDetail, /formatYi\(marketSnapshot\.latest\.mainNetYi\)/)
   assert.match(stockDetail, /formatYi\(marketSnapshot\.recent5\.mainNetYi\)/)
