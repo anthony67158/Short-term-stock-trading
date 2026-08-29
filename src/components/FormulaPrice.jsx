@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   loadStockFormulaPrice,
 } from '../formulaSelectionClient.js'
@@ -29,6 +29,7 @@ function formatPrice(value) {
 }
 
 export default function FormulaPrice({ code }) {
+  const requestRef = useRef(0)
   const [state, setState] = useState({
     loading: true,
     error: '',
@@ -37,6 +38,7 @@ export default function FormulaPrice({ code }) {
 
   const refreshFormulaPrice = useCallback(async () => {
     if (!code) return
+    const requestId = ++requestRef.current
     setState((current) => ({
       ...current,
       loading: true,
@@ -44,8 +46,10 @@ export default function FormulaPrice({ code }) {
     }))
     try {
       const payload = await loadStockFormulaPrice(code)
+      if (requestRef.current !== requestId) return
       setState({ loading: false, error: '', payload })
     } catch (error) {
+      if (requestRef.current !== requestId) return
       setState({
         loading: false,
         error: String(error?.message || error),
@@ -56,6 +60,7 @@ export default function FormulaPrice({ code }) {
 
   useEffect(() => {
     refreshFormulaPrice()
+    return () => { requestRef.current += 1 }
   }, [refreshFormulaPrice])
 
   const decision = state.payload?.decision

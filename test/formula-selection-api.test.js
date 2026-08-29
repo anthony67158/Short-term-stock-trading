@@ -275,3 +275,34 @@ test('公式选股任务保存同一模式结果并保持幂等', async () => {
   assert.equal(first.mode, 'CLOSE')
   assert.equal(second.reused, true)
 })
+
+test('市场闸门不允许新增风险时不启动全市场公式扫描', async () => {
+  let scanCalls = 0
+  let saved = null
+  const store = {
+    readLatest: async () => null,
+    saveRun: async (_mode, value) => { saved = value },
+    claimRun: async () => ({ acquired: true, owner: 'owner' }),
+    releaseRun: async () => true,
+  }
+  const result = await runFormulaSelection({
+    mode: 'intraday',
+    store,
+    scan: async () => {
+      scanCalls += 1
+      return { universe: {}, formulas: [], candidates: [] }
+    },
+    collectMarketContext: async () => ({
+      marketGate: {
+        allowed: false,
+        blockers: ['市场风险偏高'],
+      },
+    }),
+    now: () => Date.UTC(2026, 7, 28, 2),
+  })
+
+  assert.equal(scanCalls, 0)
+  assert.equal(result.decision, 'NO_MATCH')
+  assert.match(result.reason, /市场风险偏高/)
+  assert.deepEqual(saved, result)
+})

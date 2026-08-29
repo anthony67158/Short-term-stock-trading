@@ -85,11 +85,21 @@ export function runFormulaSelection({
     }
     try {
       const marketContext = await collectMarketContext({ now: timestamp })
-      const scanned = await scan({
-        mode: normalized,
-        marketContext,
-        now: timestamp,
-      })
+      const marketAllowed = marketContext?.marketGate?.allowed === true
+      const scanned = marketAllowed
+        ? await scan({
+            mode: normalized,
+            marketContext,
+            now: timestamp,
+          })
+        : {
+            universe: {
+              inspectedCount: 0,
+              formulaMatchCount: 0,
+            },
+            formulas: [],
+            candidates: [],
+          }
       const resultTradeDate =
         scanned.universe?.tradeDate || tradeDate
       const result = {
@@ -108,7 +118,10 @@ export function runFormulaSelection({
         decision: scanned.candidates.length ? 'OBSERVE' : 'NO_MATCH',
         reason: scanned.candidates.length
           ? `筛出${scanned.candidates.length}只公式观察股`
-          : '当前没有股票通过公式和风险条件',
+          : marketAllowed
+            ? '当前没有股票通过公式和风险条件'
+            : marketContext?.marketGate?.blockers?.[0]
+              || '市场环境不允许新增风险',
       }
       await store.saveRun(normalized, result)
       return result
