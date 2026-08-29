@@ -291,9 +291,13 @@ export async function buildStockFormulaSelection({
       fetchFund(code, {
         preferRealtime: isContinuousTrading(now),
         fetchedAt: now,
-      }),
-      fetchTags(code),
-      collectMarketContext({ now }),
+      }).catch(() => null),
+      fetchTags(code).catch(() => null),
+      collectMarketContext({ now }).catch(() => ({
+        marketGate: { allowed: false, blockers: ['市场环境暂缺'] },
+        latest: null,
+        intraday: null,
+      })),
     ])
   if (!quote?.price || !kline?.candles?.length) {
     throw new Error('个股关键行情不完整')
@@ -305,7 +309,7 @@ export async function buildStockFormulaSelection({
     : null
   const sectorOpportunity = matchSector({
     code,
-    profile: tags,
+    profile: tags || {},
     latest: marketContext.latest,
     intraday: marketContext.intraday,
     now,
@@ -335,7 +339,9 @@ export async function buildStockFormulaSelection({
     technicals: holdingTechnicals(tech, kline.candles),
     fund,
     marketAllowsRisk: marketContext.marketGate?.allowed === true,
-    dataComplete: !!fund && !!tags && !!tech,
+    dataComplete: holding
+      ? !!tech
+      : !!fund && !!tags && !!tech,
     dataFresh: true,
     now,
   })

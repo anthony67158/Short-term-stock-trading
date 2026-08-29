@@ -150,6 +150,35 @@ test('个股价位读取服务端持仓并返回军师只读参考', async () =>
   assert.equal(result.advisorReference.canForceRiskReduction, true)
 })
 
+test('资金或市场源失败时仍保留持仓硬止损', async () => {
+  const result = await buildStockFormulaSelection({
+    code: '600001',
+    account: {
+      holding: [{ code: '600001', qty: 2, buyPrice: 10 }],
+      closed: [],
+    },
+    now: Date.UTC(2026, 7, 28, 7),
+    fetchQuote: async () => quote({ price: 9.4 }),
+    fetchKline: async () => ({ candles: candles() }),
+    fetchTrends: async () => ({ trends: [] }),
+    fetchFund: async () => { throw new Error('fund unavailable') },
+    fetchTags: async () => { throw new Error('tags unavailable') },
+    collectMarketContext: async () => {
+      throw new Error('market unavailable')
+    },
+    matchSector: () => ({ matched: false }),
+    computeTech: () => ({
+      atr: { atr: 0.4 },
+      sr: { support: 9.6, resistance: 11 },
+      ma: { ma10: 9.8 },
+      pricePlan: { stopLoss: 9.5 },
+    }),
+  })
+
+  assert.equal(result.decision.action, 'EXIT')
+  assert.equal(result.decision.primaryPrice, 9.5)
+})
+
 test('收盘定时器只接受专用触发器和正确密钥', () => {
   assert.deepEqual(
     formulaSelectionTimerBody({
