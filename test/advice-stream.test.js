@@ -3,11 +3,13 @@ import assert from 'node:assert/strict'
 
 import {
   adviceRuntimeUpdateFromData,
+  adviceJobDeadlineMs,
   adviceFailureReason,
   adviceTradeStateMatches,
   createAdviceProgressSaveScheduler,
   createRecoverableSerialRunner,
   createAdviceSSEParser,
+  fetchQuoteMap,
   internalRequestHeaders,
   invoke,
   invokeSSE,
@@ -18,6 +20,8 @@ import {
   requeueAdviceForTradeChange,
   startJsonHeartbeat,
   terminalReviewNotification,
+  withAdviceJobDeadline,
+  withAdviceTimeoutFallback,
 } from '../api/cron_advice.js'
 import { adviceEvidenceDigest } from '../shared/adviceIntelligence.js'
 import {
@@ -128,6 +132,71 @@ test('服务端单只超时会中止原模型请求避免与重试重叠', async
 
   assert.equal(result, null)
   assert.equal(aborted, true)
+})
+
+test('军师前置内部调用必须服从短超时而不是卡到FC硬上限', async () => {
+  let aborted = false
+  const invocation = invoke((req) => new Promise((resolve) => {
+    req.signal?.addEventListener('abort', () => {
+      aborted = true
+      resolve()
+    }, { once: true })
+  }), {
+    timeoutMs: 15,
+  })
+  const settled = await Promise.race([
+    invocation.then(() => true),
+    new Promise((resolve) => setTimeout(() => resolve(false), 80)),
+  ])
+
+  assert.equal(settled, true)
+  assert.equal(aborted, true)
+})
+
+test('行情预取把短超时和取消信号传入内部调用', async () => {
+  const controller = new AbortController()
+  let options = null
+  const result = await fetchQuoteMap(['123456'], {
+    signal: controller.signal,
+    timeoutMs: 25,
+    invokeHandler: async (_handler, value) => {
+      options = value
+      return null
+    },
+  })
+
+  assert.deepEqual(result, {})
+  assert.equal(options.timeoutMs, 25)
+  assert.equal(options.signal, controller.signal)
+})
+
+test('账户快照读取超时时使用当前副本继续生成', async () => {
+  const fallback = { nick: '测试账号', data: { plan: [] } }
+  const result = await withAdviceTimeoutFallback(
+    () => new Promise(() => {}),
+    15,
+    fallback,
+  )
+
+  assert.equal(result, fallback)
+})
+
+test('完整深度任务有独立总时限并在超时后释放执行资源', async () => {
+  let aborted = false
+  await assert.rejects(
+    withAdviceJobDeadline(
+      new Promise(() => {}),
+      {
+        timeoutMs: 15,
+        onTimeout: () => { aborted = true },
+      },
+    ),
+    /超过总时限/,
+  )
+
+  assert.equal(aborted, true)
+  assert.ok(adviceJobDeadlineMs(true) < 210000)
+  assert.ok(adviceJobDeadlineMs(false) < 110000)
 })
 
 test('服务端进程内调用完成后立即清理长超时与中止监听', async () => {

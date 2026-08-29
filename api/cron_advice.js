@@ -45,6 +45,7 @@ import {
   acquireWorkerLock, renewWorkerLock, renewLease, releaseWorkerLock, workerHeldByOther, updateJobProgress,
   adviceJobRole, allAdviceJobs, advisorAdmission, findAdviceJob,
   resourcePatchForJobProgress, reviewJobsOf, selectStartableJobs,
+  requeueAdvicePreparationFailure,
 } from './_jobs.js';
 import { ensureConfig, currentConfig } from './_llm_config.js';
 import { endpointCountForRole } from './_llm_pool.js';
@@ -114,6 +115,9 @@ import {
 export const PROGRESS_SAVE_INTERVAL_MS = 5000;
 export const CANCEL_POLL_INTERVAL_MS = 1000;
 export const WORKER_HEARTBEAT_INTERVAL_MS = 30000;
+export const ADVICE_PREPARE_ACCOUNT_TIMEOUT_MS = 5000;
+export const ADVICE_PREPARE_QUOTE_TIMEOUT_MS = 8000;
+export const ADVICE_JOB_SETTLE_GRACE_MS = 15000;
 
 export function createAdviceSSEParser(onEvent) {
   let buffer = '';
@@ -488,12 +492,14 @@ export function invoke(handler, {
   query = {},
   body = null,
   signal,
+  timeoutMs = 595000,
   trustedQuantVersion,
   trustedAccount = false,
 } = {}) {
   return new Promise((resolve) => {
     let done = false;
     const chunks = [];
+    const requestController = new AbortController();
     let timer = null;
     let externalAbort = null;
     const cleanup = () => {
@@ -530,20 +536,24 @@ export function invoke(handler, {
       query,
       body: body || {},
       headers: internalRequestHeaders(),
-      signal,
+      signal: requestController.signal,
     };
     if (trustedQuantVersion) {
       req[TRUSTED_QUANT_VERSION] = trustedQuantVersion;
     }
     if (trustedAccount) req[TRUSTED_ACCOUNT_REQUEST] = true;
+    const abortAndFinish = () => {
+      requestController.abort();
+      finishWith(null);
+    };
     timer = setTimeout(
-      () => finishWith(null),
-      595000,
+      abortAndFinish,
+      Math.max(1, Number(timeoutMs) || 595000),
     );
     if (timer && typeof timer.unref === 'function') timer.unref();
     if (signal) {
-      if (signal.aborted) return finishWith(null);
-      externalAbort = () => finishWith(null);
+      if (signal.aborted) return abortAndFinish();
+      externalAbort = abortAndFinish;
       signal.addEventListener('abort', externalAbort, { once: true });
     }
     try {
@@ -637,18 +647,84 @@ export function invokeSSE(handler, {
 
 // 行情缓存(进程级,30s):并发多只时避免每只都全量拉一遍行情。
 let _quoteMemo = { at: 0, key: '', map: {} };
-async function fetchQuoteMap(codes) {
+export async function fetchQuoteMap(codes, {
+  signal,
+  timeoutMs = ADVICE_PREPARE_QUOTE_TIMEOUT_MS,
+  invokeHandler = invoke,
+} = {}) {
   const key = [...codes].sort().join(',');
   if (key && _quoteMemo.key === key && (Date.now() - _quoteMemo.at) < 30000) return _quoteMemo.map;
   const map = {};
   if (codes.length) {
     try {
-      const j = await invoke(quoteHandler, { method: 'GET', query: { codes: codes.join(',') } });
+      const j = await invokeHandler(quoteHandler, {
+        method: 'GET',
+        query: { codes: codes.join(',') },
+        signal,
+        timeoutMs,
+      });
       for (const it of (j && j.list) || []) if (it && it.code) map[it.code] = it;
     } catch { /* 空 map 也能跑 */ }
   }
   _quoteMemo = { at: Date.now(), key, map };
   return map;
+}
+
+export async function withAdviceTimeoutFallback(
+  create,
+  timeoutMs,
+  fallback,
+) {
+  let timer = null;
+  const pending = Promise.resolve()
+    .then(create)
+    .catch(() => fallback);
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(fallback), Math.max(1, timeoutMs));
+  });
+  try {
+    return await Promise.race([pending, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+export function adviceJobDeadlineMs(deepMode = false) {
+  return (
+    ADVICE_PREPARE_ACCOUNT_TIMEOUT_MS
+    + ADVICE_PREPARE_QUOTE_TIMEOUT_MS
+    + generationOptions(deepMode).timeoutMs
+    + ADVICE_JOB_SETTLE_GRACE_MS
+  );
+}
+
+export function withAdviceJobDeadline(
+  promise,
+  {
+    timeoutMs,
+    onTimeout,
+  } = {},
+) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      callback(value);
+    };
+    const timer = setTimeout(() => {
+      try { if (typeof onTimeout === 'function') onTimeout(); } catch {}
+      finish(
+        reject,
+        new Error('军师任务超过总时限，已终止本轮并释放资源'),
+      );
+    }, Math.max(1, Number(timeoutMs) || 1));
+    Promise.resolve(promise).then(
+      (value) => finish(resolve, value),
+      (error) => finish(reject, error),
+    );
+  });
 }
 
 // 军师历史战绩(当前回测口径样本<5 返回 null)
@@ -1073,16 +1149,32 @@ async function runJobGen(
   reviewEvent = null,
   reviewOrigin = '',
 ) {
-  let sourceAcc = acc;
-  try {
-    sourceAcc = (await readAccount(acc.nick)) || acc;
-  } catch { /* 当前副本仍可进入生成，完成前还会再次校验 */ }
+  if (typeof onProgress === 'function') {
+    onProgress({
+      stage: 'collect',
+      phase: '正在读取账户与实时行情',
+    });
+  }
+  const sourceAcc = await withAdviceTimeoutFallback(
+    () => readAccount(acc.nick),
+    ADVICE_PREPARE_ACCOUNT_TIMEOUT_MS,
+    acc,
+  ) || acc;
   const data = sourceAcc.data || {};
   const sourceTradeFingerprint = adviceGenerationStateFingerprint(data);
   const holding = data.holding || [], watch = data.plan || [];
   const holdSet = new Set(holding.map((h) => h.code));
   const allCodes = [...new Set([...holding.map((h) => h.code), ...watch.map((w) => w.code)])];
-  const quoteMap = await fetchQuoteMap(allCodes);
+  const quoteMap = await fetchQuoteMap(allCodes, {
+    signal,
+    timeoutMs: ADVICE_PREPARE_QUOTE_TIMEOUT_MS,
+  });
+  if (typeof onProgress === 'function') {
+    onProgress({
+      stage: 'collect',
+      phase: '账户与实时行情已就位，正在采集分析证据',
+    });
+  }
   const portfolio = computePortfolio(holding, quoteMap, data.account);
   const name = (holding.find((h) => h.code === code) || watch.find((w) => w.code === code) || {}).name || code;
   const priceHint = Number(quoteMap[code]?.price) > 0 ? Number(quoteMap[code].price) : null;
@@ -1583,15 +1675,21 @@ async function drainAccount(nick, initialAcc) {
         const jobId = j.id;
         immediateRequeues.delete(String(jobId || ''));
         const controller = new AbortController();
-        const promise = runJobGen(
-          acc,
-          code,
-          (patch) => recordProgress(code, jobId, role, patch),
-          controller.signal,
-          !!j.deepMode,
-          dailyReportSummary,
-          j.trigger || null,
-          j.source || '',
+        const promise = withAdviceJobDeadline(
+          runJobGen(
+            acc,
+            code,
+            (patch) => recordProgress(code, jobId, role, patch),
+            controller.signal,
+            !!j.deepMode,
+            dailyReportSummary,
+            j.trigger || null,
+            j.source || '',
+          ),
+          {
+            timeoutMs: adviceJobDeadlineMs(!!j.deepMode),
+            onTimeout: () => controller.abort(),
+          },
         )
           .then((res) => ({ code, jobId, role, res }))
           .catch((err) => ({ code, jobId, role, err }));
@@ -1760,19 +1858,32 @@ async function drainAccount(nick, initialAcc) {
           ].slice(0, 500);
         }
       } else {
-        failJob(
-          d,
-          done.code,
-          done.err
-            ? String(done.err.message || done.err)
-            : job?.deepMode
-              ? '深度建议未完整返回'
-              : '生成失败(军师+量化均空)',
-          Date.now(),
-          done.role,
-          done.jobId,
-        );
-        if (job.status === 'failed') fail++;
+        const preparationRetry = done.err
+          ? requeueAdvicePreparationFailure(
+              d,
+              done.code,
+              Date.now(),
+              done.role,
+              done.jobId,
+            )
+          : null;
+        if (preparationRetry?.status === 'queued') {
+          immediateRequeues.add(String(done.jobId || ''));
+        } else {
+          failJob(
+            d,
+            done.code,
+            done.err
+              ? String(done.err.message || done.err)
+              : job?.deepMode
+                ? '深度建议未完整返回'
+                : '生成失败(军师+量化均空)',
+            Date.now(),
+            done.role,
+            done.jobId,
+          );
+          if (job.status === 'failed') fail++;
+        }
       }
       if (job && job.id === done.jobId) {
         try {

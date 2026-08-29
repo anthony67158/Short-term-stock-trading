@@ -116,6 +116,36 @@ test('相同时间戳的发布终态变化仍必须回灌客户端', () => {
   )
 })
 
+test('相同进度时间新增准备超时警告时仍必须回灌客户端', () => {
+  const current = {
+    at: 2000,
+    running: true,
+    total: 1,
+    items: [{
+      code: '600000',
+      jobId: 'job-1',
+      status: 'running',
+      stage: 'collect',
+      phase: '正在读取账户与实时行情',
+      progressAt: 2000,
+      warning: '',
+    }],
+    reviews: [],
+  }
+  const warned = {
+    ...current,
+    items: [{
+      ...current.items[0],
+      warning: '部分数据源响应较慢，超时后将自动跳过并继续',
+    }],
+  }
+
+  assert.equal(
+    shouldApplyCloudProgressSnapshot(current, warned),
+    true,
+  )
+})
+
 test('个股详情优先展示生成时间更新的云端批量结果', () => {
   const runner = {
     mode: 'hold_advice',

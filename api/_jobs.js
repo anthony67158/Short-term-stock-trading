@@ -305,7 +305,13 @@ export function reapOrphans(data, now = Date.now()) {
         )
         || !!j.endpoint
       );
-      if (workerLostBeforeLease && !modelStarted) {
+      const preparationRetryAvailable = (
+        workerLostBeforeLease
+        && !modelStarted
+        && (Number(j.preparationRetries) || 0) < 1
+      );
+      if (preparationRetryAvailable) {
+        j.preparationRetries = (Number(j.preparationRetries) || 0) + 1;
         j.attempts = Math.max(0, (Number(j.attempts) || 1) - 1);
       }
       const maxAttempts = effectiveJobMaxAttempts(j);
@@ -481,6 +487,44 @@ export function renewLease(
 ) {
   const j = findAdviceJob(data, code, { role, jobId });
   if (j && j.status === 'running') j.leaseUntil = now + LEASE_MS;
+}
+
+export function requeueAdvicePreparationFailure(
+  data,
+  code,
+  now = Date.now(),
+  role = '',
+  jobId = '',
+) {
+  const job = findAdviceJob(data, code, { role, jobId });
+  if (
+    !job
+    || job.status !== 'running'
+    || !['preparing', 'collect', 'quant', 'theory'].includes(
+      String(job.stage || ''),
+    )
+    || job.endpoint
+    || job.model
+    || (Number(job.preparationRetries) || 0) >= 1
+  ) return null;
+  job.status = 'queued';
+  job.stage = 'queued';
+  job.resourceRole = adviceJobRole(job);
+  job.resourceUnits = 1;
+  job.preparationRetries = (Number(job.preparationRetries) || 0) + 1;
+  job.attempts = Math.max(0, (Number(job.attempts) || 1) - 1);
+  job.startedAt = 0;
+  job.finishedAt = 0;
+  job.leaseUntil = 0;
+  job.error = '';
+  job.model = '';
+  job.endpoint = '';
+  job.sources = [];
+  job.reasoning = '';
+  job.quant = null;
+  job.phase = '准备阶段中断，正在自动重试';
+  job.progressAt = now;
+  return job;
 }
 
 function visibleChineseReasoning(value) {
@@ -952,6 +996,15 @@ export function jobsToProgress(data, now = Date.now(), concurrency = CONCURRENCY
     const status = mapStatus(j);
     const publishing = status === 'publishing';
     const publishFailed = j.status === 'done' && status === 'fail';
+    const progressAgeMs = Math.max(
+      0,
+      Number(now) - (Number(j.progressAt) || Number(j.at) || Number(now)),
+    );
+    const slowPreparation = (
+      j.status === 'running'
+      && ['preparing', 'collect'].includes(String(j.stage || ''))
+      && progressAgeMs >= 20000
+    );
     return {
     code: j.code,
     jobId: j.id || '',
@@ -963,7 +1016,9 @@ export function jobsToProgress(data, now = Date.now(), concurrency = CONCURRENCY
     error: publishFailed
       ? '建议发布失败，请重新生成'
       : (j.error || ''),
-    warning: j.dailyReportWarning || '',
+    warning: j.dailyReportWarning || (slowPreparation
+      ? '部分数据源响应较慢，超时后将自动跳过并继续'
+      : ''),
     stage: publishing
       ? 'finalize'
       : publishFailed ? 'failed' : (j.stage || ''),
@@ -981,6 +1036,7 @@ export function jobsToProgress(data, now = Date.now(), concurrency = CONCURRENCY
     triggerAlertId: String(j.trigger?.alertId || ''),
     progressAt: j.progressAt || j.at || 0,
     attempts: j.attempts || 0,
+    preparationRetries: j.preparationRetries || 0,
     deepMode: !!j.deepMode,
     batchRequest: !!j.batchRequest,
     };

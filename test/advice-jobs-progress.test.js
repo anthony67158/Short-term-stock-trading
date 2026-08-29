@@ -11,6 +11,7 @@ import {
   leaseJob,
   needsWorkerDispatch,
   reapOrphans,
+  requeueAdvicePreparationFailure,
   updateJobProgress,
 } from '../api/_jobs.js'
 
@@ -219,7 +220,14 @@ test('Worker锁已过期时立即回收失联任务而不是继续等待任务�
   assert.equal(reapOrphans(beforeModel, 62000), 1)
   assert.equal(beforeModel.jobs['600000'].status, 'queued')
   assert.equal(beforeModel.jobs['600000'].attempts, 0)
+  assert.equal(beforeModel.jobs['600000'].preparationRetries, 1)
   assert.equal(needsWorkerDispatch(beforeModel, 62000), true)
+
+  beforeModel.jobWorker = { id: 'dead-worker-2', lockUntil: 123000 }
+  leaseJob(beforeModel, '600000', 63000)
+  assert.equal(reapOrphans(beforeModel, 124000), 1)
+  assert.equal(beforeModel.jobs['600000'].status, 'failed')
+  assert.match(beforeModel.jobs['600000'].error, /云端Worker已中断/)
 
   const afterModel = {}
   enqueueJob(afterModel, {
@@ -254,6 +262,71 @@ test('Worker锁仍有效时不得提前回收运行任务', () => {
   assert.equal(reapOrphans(data, 62000), 0)
   assert.equal(data.jobs['600000'].status, 'running')
   assert.equal(data.jobs['600000'].attempts, 1)
+})
+
+test('模型调用前的准备故障只自动恢复一次且不消耗生成次数', () => {
+  const data = {}
+  enqueueJob(data, {
+    code: '600000',
+    mode: 'buy_advice',
+    deepMode: true,
+  }, 1000)
+  const job = leaseJob(data, '600000', 1100)
+  updateJobProgress(data, '600000', {
+    stage: 'collect',
+    phase: '正在读取账户与实时行情',
+  }, 1200)
+
+  const recovered = requeueAdvicePreparationFailure(
+    data,
+    '600000',
+    1300,
+    'advisor',
+    job.id,
+  )
+
+  assert.equal(recovered.status, 'queued')
+  assert.equal(recovered.attempts, 0)
+  assert.equal(recovered.preparationRetries, 1)
+  assert.equal(recovered.phase, '准备阶段中断，正在自动重试')
+
+  leaseJob(data, '600000', 1400, 'advisor', job.id)
+  const second = requeueAdvicePreparationFailure(
+    data,
+    '600000',
+    1500,
+    'advisor',
+    job.id,
+  )
+  assert.equal(second, null)
+  assert.equal(data.jobs['600000'].status, 'running')
+})
+
+test('模型已开始后不得自动重跑整题', () => {
+  const data = {}
+  enqueueJob(data, {
+    code: '600000',
+    mode: 'buy_advice',
+    deepMode: true,
+  }, 1000)
+  const job = leaseJob(data, '600000', 1100)
+  updateJobProgress(data, '600000', {
+    stage: 'llm',
+    endpoint: 'advisor-1',
+    model: 'deep-model',
+  }, 1200)
+
+  assert.equal(
+    requeueAdvicePreparationFailure(
+      data,
+      '600000',
+      1300,
+      'advisor',
+      job.id,
+    ),
+    null,
+  )
+  assert.equal(data.jobs['600000'].status, 'running')
 })
 
 test('上一批延迟到达的取消请求不能取消新批次任务', () => {
@@ -291,6 +364,25 @@ test('进度快照携带单股阶段、数据源、模型端点和简体中文�
   assert.equal(item.model, 'DeepSeek-V4-Pro')
   assert.equal(item.endpoint, '主端点')
   assert.equal(item.progressAt, 2000)
+})
+
+test('准备阶段长时间无进展时明确提示将自动跳过慢源', () => {
+  const data = {}
+  enqueueJob(data, {
+    code: '600000',
+    name: '浦发银行',
+    mode: 'buy_advice',
+    deepMode: true,
+  }, 1000)
+  leaseJob(data, '600000', 1100)
+  updateJobProgress(data, '600000', {
+    stage: 'collect',
+    phase: '正在读取账户与实时行情',
+  }, 1200)
+
+  const item = jobsToProgress(data, 22000, 2).items[0]
+
+  assert.match(item.warning, /自动跳过并继续/)
 })
 
 test('持久任务推理限制长度并清理英文思维链标题', () => {

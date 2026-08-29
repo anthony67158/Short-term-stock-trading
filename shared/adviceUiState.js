@@ -76,7 +76,9 @@ function cloudProgressSignature(progress = {}) {
     String(item?.stage || ''),
     String(item?.phase || ''),
     String(item?.error || ''),
+    String(item?.warning || ''),
     Number(item?.progressAt) || 0,
+    Number(item?.preparationRetries) || 0,
   ])
   return JSON.stringify({
     batchId: String(progress.batchId || ''),
