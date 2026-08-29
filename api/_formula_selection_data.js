@@ -145,7 +145,14 @@ export async function scanFormulaSelectionCandidates({
 } = {}) {
   const normalizedMode = mode === 'close' ? 'close' : 'intraday'
   const universe = await fetchUniverse({ now })
-  const expectedDate = beijingDayKey(now)
+  const latestQuoteDate = (universe.allList || universe.list || [])
+    .map((item) => String(item?.tradeDate || ''))
+    .filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value))
+    .sort()
+    .at(-1)
+  const expectedDate = normalizedMode === 'close'
+    ? latestQuoteDate || beijingDayKey(now)
+    : beijingDayKey(now)
   const prefiltered = (universe.allList || universe.list || [])
     .filter((quote) =>
       passesFormulaRealtimePrefilter(
@@ -260,6 +267,7 @@ export async function scanFormulaSelectionCandidates({
     universe: {
       total: universe.total,
       inspectedCount: universe.inspectedCount,
+      tradeDate: expectedDate,
       prefilterCount: prefiltered.length,
       technicalCandidateCount: technicalCandidates.length,
       formulaMatchCount: ranked.length,

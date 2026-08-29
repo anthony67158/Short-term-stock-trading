@@ -90,11 +90,13 @@ export function runFormulaSelection({
         marketContext,
         now: timestamp,
       })
+      const resultTradeDate =
+        scanned.universe?.tradeDate || tradeDate
       const result = {
         ok: true,
         schemaVersion: FORMULA_SELECTION_SCHEMA_VERSION,
         mode: normalized.toUpperCase(),
-        tradeDate,
+        tradeDate: resultTradeDate,
         slot,
         generatedAt: timestamp,
         dataAsOf: timestamp,

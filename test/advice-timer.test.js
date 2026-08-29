@@ -7,6 +7,7 @@ import {
   adviceWorkerBody,
   dailyReportTimerBody,
   dailyReportWorkerBody,
+  formulaSelectionTimerBody,
   reviewTimerBody,
   sectorForecastTimerBody,
   tailPickTimerBody,
@@ -70,6 +71,22 @@ test('尾盘拾金Timer只在14:50专用触发器和密钥匹配时运行', () =
     ...event,
     triggerName: 'other',
   }, 'secret-key'), null)
+})
+
+test('公式选股收盘Timer只接受专用触发器和匹配密钥', () => {
+  const event = {
+    triggerName: 'formula-selection-close-timer',
+    payload: 'secret-key',
+  }
+
+  assert.deepEqual(
+    formulaSelectionTimerBody(event, 'secret-key'),
+    { scheduled: true, mode: 'close' },
+  )
+  assert.equal(
+    formulaSelectionTimerBody(event, 'wrong-key'),
+    null,
+  )
 })
 
 test('盯盘预警只接受交易时段专用Timer触发器和匹配密钥', () => {
