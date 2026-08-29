@@ -259,6 +259,10 @@ test('休市观望建议关闭系统推荐买入但保留次日条件预案', ()
   assert.equal(view.trigger.stateLabel, '当前休市')
   assert.equal(view.trigger.detailLabel, '到价后确认买点')
   assert.equal(view.trigger.metricLabel, '条件试仓')
+  assert.equal(
+    view.cardInstruction,
+    '下一交易日盘中，回踩15.2元确认承接后重新评估',
+  )
   assert.match(view.instruction, /回踩15\.2元确认承接/)
   assert.match(view.instruction, /方向已通过/)
   assert.match(view.instruction, /确认通过后给出具体买入价和手数/)

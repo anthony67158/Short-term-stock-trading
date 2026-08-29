@@ -803,8 +803,16 @@ function ConvictionStrip({ conviction }) {
 
 function ActionCommand({ view, onOpen }) {
   const instruction = view.instruction || '等待下一步执行条件'
+  const cardInstruction = view.cardInstruction || instruction
   const quantity =
     view.quantityLabel || actionQtyLabel(view.quantity)
+  const icon = view.kind === 'wait'
+    ? 'clock'
+    : ['sell', 'reduce'].includes(view.kind)
+      ? 'sell'
+      : view.kind === 'hold'
+        ? 'shield'
+        : 'target'
 
   return (
     <button
@@ -815,15 +823,27 @@ function ActionCommand({ view, onOpen }) {
     >
       <span className="action-command-body">
         <span className="action-command-meta">
-          {view.commandLabel || '当前指令'}
+          <span className="action-command-kicker">
+            <Icon name="flag" size={12} />
+            {view.commandLabel || '当前指令'}
+          </span>
           {view.shortHorizon && <em>{view.shortHorizon}</em>}
         </span>
-        <strong className="action-command-primary">
-          {view.action}
+        <span className="action-command-main">
+          <span className="action-command-icon">
+            <Icon name={icon} size={16} />
+          </span>
+          <strong className="action-command-primary">
+            {view.action}
+          </strong>
           {quantity && <span className="action-command-qty">{quantity}</span>}
-        </strong>
-        <span className="action-command-text" title={instruction}>
-          {instruction}
+        </span>
+        <span className="action-command-detail">
+          <span className="action-command-detail-label">执行条件</span>
+          <span className="action-command-text" title={instruction}>
+            {cardInstruction}
+          </span>
+          <Icon name="chevronRight" size={14} />
         </span>
       </span>
     </button>

@@ -136,6 +136,8 @@ function deferredOpportunityView(plan, executionOpen) {
   const outcome = addSide
     ? '具体加仓价和手数'
     : '具体买入价和手数'
+  const reviewTrigger = next.trigger
+    || `${next.sessionLabel || '下一交易时段盘中'}确认入场时机`
   return {
     action: liveReview ? `盘中${actionLabel}` : `${sessionPrefix}${actionLabel}`,
     displayTone: 'buy',
@@ -147,8 +149,9 @@ function deferredOpportunityView(plan, executionOpen) {
       ? '方向已通过 · 待时机确认'
       : '当前休市 · 方向已通过',
     quantityLabel,
+    cardInstruction: clean(reviewTrigger, 120),
     instruction: clean(
-      `${subject}已通过；${next.trigger || `${next.sessionLabel || '下一交易时段盘中'}确认入场时机`}；确认通过后给出${outcome}${quantityLabel ? `，${quantityLabel}` : ''}，由你人工确认`,
+      `${subject}已通过；${reviewTrigger}；确认通过后给出${outcome}${quantityLabel ? `，${quantityLabel}` : ''}，由你人工确认`,
       240,
     ),
     trigger: {
@@ -617,6 +620,7 @@ export function buildAdviceActionView(
         deferredOpportunity?.detailActionLabel,
       shortHorizon: deferredOpportunity?.shortHorizon
         || clean(source.shortHorizon, 30),
+      cardInstruction: deferredOpportunity?.cardInstruction,
       instruction: deferredOpportunity
         ? clean(
             `${deferredOpportunity.instruction}；${reason}`,
@@ -700,6 +704,7 @@ export function buildAdviceActionView(
       ? '本次到价已决断'
       : deferredWaitPlan?.shortHorizon
         || clean(source.shortHorizon, 30),
+    cardInstruction: deferredWaitPlan?.cardInstruction,
     instruction: deferredWaitPlan?.instruction || instruction,
     quantity,
     quantityLabel: deferredWaitPlan?.quantityLabel,

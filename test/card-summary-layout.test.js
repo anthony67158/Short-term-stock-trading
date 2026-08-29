@@ -99,7 +99,7 @@ test('桌面同排卡片以最高内容为准等高并均匀拉伸内部节奏',
   )
 })
 
-test('策略摘要使用两行主指令、紧凑价位和单行进度', () => {
+test('策略摘要分离状态、主动作、仓位和执行条件', () => {
   assert.match(planTab, /className="action-progress-summary"/)
   assert.doesNotMatch(planTab, /className="action-progress-head"/)
   assert.match(
@@ -112,11 +112,35 @@ test('策略摘要使用两行主指令、紧凑价位和单行进度', () => {
   )
   assert.match(
     planTab,
+    /const cardInstruction = view\.cardInstruction \|\| instruction/,
+  )
+  assert.match(
+    planTab,
+    /className="action-command-kicker"[\s\S]*?<Icon name="flag"[\s\S]*?className="action-command-main"[\s\S]*?className="action-command-icon"/,
+  )
+  assert.match(
+    planTab,
+    /className="action-command-detail"[\s\S]*?className="action-command-detail-label">执行条件[\s\S]*?<Icon name="chevronRight"/,
+  )
+  assert.match(
+    planTab,
     /view\.detailActionLabel \|\| '查看后续预案'/,
   )
   assert.match(
     precision,
     /\.card-decision-slot \.action-command-text\s*{[^}]*display:\s*-webkit-box[^}]*white-space:\s*normal[^}]*-webkit-line-clamp:\s*2/s,
+  )
+  assert.match(
+    calmSurface,
+    /\.action-command-main\s*{[^}]*grid-template-columns:\s*32px\s+minmax\(0,\s*1fr\)\s+auto/s,
+  )
+  assert.match(
+    calmSurface,
+    /\.action-command-detail\s*{[^}]*grid-template-columns:\s*auto\s+minmax\(0,\s*1fr\)\s+16px[^}]*border-top:\s*1px solid var\(--color-rule-2\)/s,
+  )
+  assert.match(
+    calmSurface,
+    /\.action-command-main \.action-command-qty\s*{[^}]*border-radius:\s*var\(--radius-badge\)[^}]*background:\s*color-mix/s,
   )
   assert.match(
     precision,

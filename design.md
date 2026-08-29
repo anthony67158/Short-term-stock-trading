@@ -181,6 +181,10 @@
   extra height across section gaps instead of leaving one large void above the
   action rail. Mobile keeps natural height and compact flow. The full advice
   opens in stock detail.
+- Card decision summaries separate status, primary action, position limit and
+  execution condition into distinct visual rows. Use one semantic icon for the
+  primary action, render position as a compact badge, and clamp the condition to
+  two lines while keeping the full text available in stock detail.
 - Stock detail keeps the execution instruction full width. Position size,
   capital and risk/reward sit in a separate metric strip below it, never in a
   competing side column. Major sections use one rule plus internal spacing,

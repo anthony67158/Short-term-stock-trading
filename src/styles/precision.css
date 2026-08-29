@@ -15804,12 +15804,131 @@ html[data-theme="light"] .plan-cand.starred {
 }
 
 .card-decision-slot .action-command {
-  padding: var(--space-xs) 0;
+  padding: var(--space-xs) 0 var(--space-sm);
+}
+
+.card-decision-slot .action-command-body {
+  gap: var(--space-xs);
+}
+
+.card-decision-slot .action-command-meta {
+  flex-wrap: wrap;
+  gap: var(--space-2xs);
+}
+
+.action-command-kicker,
+.card-decision-slot .action-command-meta em {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  gap: var(--space-3xs);
+  padding: var(--space-3xs) var(--space-2xs);
+  border: 0;
+  border-radius: var(--radius-badge);
+  line-height: 1;
+}
+
+.action-command-kicker {
+  background: var(--color-paper-4);
+  color: var(--color-ink-2);
+}
+
+.card-decision-slot .action-command-meta em {
+  background: color-mix(
+    in oklch,
+    var(--color-accent) 10%,
+    var(--color-paper-3)
+  );
+}
+
+.action-command-main {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
+.action-command-icon {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-control);
+  background: color-mix(
+    in oklch,
+    var(--color-accent) 12%,
+    var(--color-paper-3)
+  );
+  color: var(--color-accent);
+}
+
+.tone-sell .action-command-icon {
+  background: color-mix(
+    in oklch,
+    var(--color-warning) 12%,
+    var(--color-paper-3)
+  );
+  color: var(--color-warning);
+}
+
+.tone-wait .action-command-icon {
+  background: var(--color-paper-4);
+  color: var(--color-muted);
+}
+
+.action-command-main .action-command-primary {
+  display: block;
+  font-size: var(--text-lg);
+  line-height: 1.15;
+}
+
+.action-command-main .action-command-qty {
+  min-height: 24px;
+  padding: var(--space-3xs) var(--space-2xs);
+  border: 0;
+  border-radius: var(--radius-badge);
+  background: color-mix(
+    in oklch,
+    var(--color-accent) 10%,
+    var(--color-paper-3)
+  );
+  color: var(--color-accent);
+  font-size: var(--text-xs);
+  line-height: 1;
+}
+
+.action-command-detail {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 16px;
+  align-items: start;
+  gap: var(--space-xs);
+  min-width: 0;
+  padding-top: var(--space-xs);
+  border-top: 1px solid var(--color-rule-2);
+}
+
+.action-command-detail-label {
+  color: var(--color-muted);
+  font-size: var(--text-2xs);
+  font-weight: 750;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.action-command-detail > .icon {
+  margin-top: 1px;
+  color: var(--color-muted);
+}
+
+.card-decision-slot .action-command-text {
+  font-weight: 550;
+  line-height: 1.5;
 }
 
 .action-command-meta em,
-.action-command-qty,
-.action-command-primary .action-command-qty {
+.action-command-qty {
   padding-inline-start: 0;
   border-inline-start: 0;
 }

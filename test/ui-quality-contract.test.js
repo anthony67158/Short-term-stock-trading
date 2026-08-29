@@ -556,14 +556,17 @@ test('移动端持续复核弹层高于导航和持仓吸顶区域', () => {
   )
 })
 
-test('操作建议卡使用固定价位列且数量与动作保持同组', () => {
+test('操作建议卡使用语义图标、仓位徽标与固定价位列', () => {
   assert.match(planTab, /className="action-command-primary"[\s\S]*?className="action-command-qty"/)
   assert.match(planTab, /className="action-command-meta">[\s\S]*?当前指令/)
   assert.match(planTab, /'action-levels levels-' \+ Math\.min\(view\.levels\.length,\s*3\)/)
   assert.match(planTab, /progress\.stateLabel/)
   assert.doesNotMatch(planTab, /progress\.metricLabel\}\s*\{progress\.score/)
-  assert.doesNotMatch(planTab, /className="action-command-icon"/)
-  assert.doesNotMatch(precision, /\.action-command-icon\s*{/)
+  assert.match(planTab, /className="action-command-icon"[\s\S]*?<Icon name=\{icon\}/)
+  assert.match(
+    precision,
+    /\.action-command-icon\s*{[^}]*width:\s*32px[^}]*height:\s*32px[^}]*background:\s*color-mix/s,
+  )
   assert.match(
     precision,
     /\.card-decision-slot \.action-command\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s*;/s,
