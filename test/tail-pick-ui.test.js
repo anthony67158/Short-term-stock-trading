@@ -8,6 +8,7 @@ const read = (path) => readFileSync(
 )
 
 const today = read('src/components/TodayTab.jsx')
+const formulaSelection = read('src/components/FormulaSelection.jsx')
 const component = read('src/components/TailPick.jsx')
 const candidate = read('src/components/TailPickCandidate.jsx')
 const results = read('src/components/TailPickResults.jsx')
@@ -15,9 +16,14 @@ const client = read('src/tailPickClient.js')
 const styles = read('src/styles/precision.css')
 
 test('尾盘拾金位于板块前瞻和普通候选池之间', () => {
-  assert.match(today, /import TailPick from '\.\/TailPick'/)
-  assert.ok(today.indexOf('<SectorForecast') < today.indexOf('<TailPick'))
-  assert.ok(today.indexOf('<TailPick') < today.indexOf('<CandidatePool'))
+  assert.match(today, /import FormulaSelection from '\.\/FormulaSelection'/)
+  assert.match(formulaSelection, /import TailPick from '\.\/TailPick'/)
+  assert.ok(
+    today.indexOf('<SectorForecast') < today.indexOf('<FormulaSelection'),
+  )
+  assert.ok(
+    today.indexOf('<FormulaSelection') < today.indexOf('<CandidatePool'),
+  )
 })
 
 test('尾盘拾金支持14:50自动正式扫描和手动试算', () => {

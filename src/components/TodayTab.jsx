@@ -6,7 +6,7 @@ import { usePolling } from '../hooks'
 import { planStore, usePlanStore } from '../planStore'
 import DailyReport from './DailyReport'
 import SectorForecast from './SectorForecast'
-import TailPick from './TailPick'
+import FormulaSelection from './FormulaSelection'
 import ErrorBoundary from './ErrorBoundary'
 import { fmtPct, pctClass, fmtInflow, fmtRaw } from '../format'
 import { deriveMarketRegime } from '../../shared/marketRegime.js'
@@ -33,8 +33,8 @@ export default function TodayTab({ interval, market, sectors }) {
       <ErrorBoundary label="板块前瞻">
         <SectorForecast />
       </ErrorBoundary>
-      <ErrorBoundary label="尾盘拾金">
-        <TailPick />
+      <ErrorBoundary label="公式选股">
+        <FormulaSelection />
       </ErrorBoundary>
       <CandidatePool
         zt={zt.data}

@@ -45,6 +45,7 @@ import {
   shouldRefreshProductionForecast,
 } from '../../shared/productionForecastWindow.js'
 import { stockNoteText } from '../../shared/stockNotes.js'
+import FormulaPrice from './FormulaPrice'
 
 // 把公司网址补全为可点击的绝对 URL（东财 F10 常给不带协议的裸域名）
 function normalizeUrl(raw) {
@@ -1271,6 +1272,8 @@ export default function StockDetail({ stock, onClose }) {
                   )
                 })()}
               </div>
+
+              <FormulaPrice code={stock && stock.code} />
 
               {/* 均线技术参考（精简为可折叠的次要信息）*/}
               {tech && (
