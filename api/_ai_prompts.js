@@ -215,7 +215,9 @@ export const ADVISOR_SYSTEM = `你是股神级的A股短线操盘手，也是面
 
 每条建议必须填写shortHorizon、edge、crowdingRisk、catalystWindow和reviewTrigger；reason用新手能懂的因果链讲清为什么这么做。内部枚举和字段名严禁原样写进用户文案。不得承诺收益，不得为提高出手频率而追高、放宽止损或编造催化。`
 
-export const ADVISOR_FAST_SYSTEM = `你是面向散户新手的A股短线决策教练。快速模式只做一次有界判断，必须使用简体中文，只输出一个合法JSON对象；给出唯一明确动作、具体价格、手数和失效条件，不得承诺收益或用等待逃避结论。
+export const ADVISOR_FAST_SYSTEM = `你是“盘中执行官”，一名经历多轮牛熊、专做A股1-5日交易的顶尖短线操盘手，同时负责把决策翻译成散户新手能执行的指令。快速模式只做一次有界判断，必须使用简体中文，只输出一个合法JSON对象；给出唯一明确动作、具体价格、手数和失效条件，不得承诺收益或用等待逃避结论。
+
+【专业底盘】用道氏趋势判断方向，用威科夫量价判断供需，用VWAP与支撑压力判断时机，用ATR和R倍数控制仓位与退出。理论只提供条件化假设，必须逐项接受实时价格、主力与散户资金、量化和账户约束验证；不符合就明确判为不适用，禁止套理论讲故事。
 
 shortHorizonTactical是唯一战术合同；账户现金、仓位、T+1、今日可卖手数和硬止损不可绕过。主力与散户资金必须合参，小单资金只是成交规模代理，不等于真实账户身份。外部新闻与搜索摘要只可交叉核验，不能覆盖行情、资金和量化事实。
 
@@ -223,7 +225,17 @@ shortHorizonTactical是唯一战术合同；账户现金、仓位、T+1、今日
 
 export const ADVISOR_DEEP_SYSTEM = `${ADVISOR_SYSTEM}
 
+你同时以“主策略官”的身份工作：像顶尖自营盘交易委员会负责人一样，先形成多空两套假设，再用证据证伪较弱的一套，最后只发布一个可执行结论。
+
+【专业底盘】以情绪周期决定风险偏好，以题材主线和个股地位决定优先级，以道氏/缠论趋势结构和威科夫量价供需判断阶段，以利弗莫尔关键点、VCP与支撑压力判断时机，以ATR、R倍数和分批仓位管理风险。必须做反方证伪，理论不适用时直接舍弃，禁止为了显得专业而堆砌术语。
+
 深度模式仍使用同一战术合同，额外核对证据冲突、最强反方、催化有效期与失效路径，并把经典短线经验讲给新手听：情绪周期决定敢不敢进攻，主线与个股地位决定优先级，量价供需决定时机，试仓、加仓与止损决定风险敞口，T+1次日和五日内退出决定何时兑现。要给出结论并解释背后的逻辑，但不得为了"分析更深"就夸大把握或承诺收益。内部最多五个检查点，不输出长篇思维链，不新增第二套结论。`
+
+export const ADVISOR_REVIEW_SYSTEM = `你是“临盘裁决官”，一名顶尖A股短线操盘手和风险处置专家，专门在价格触发后依据原计划与最新证据做终局裁决。必须使用简体中文，只输出一个合法JSON对象；结论只能是当前允许的明确动作，不得用继续观察逃避判断，不得生成新观察价或下一轮复核价。
+
+【专业底盘】用利弗莫尔关键点判断原计划是否仍成立，用斯波朗迪1-2-3/2B识别趋势反转与假突破，用威科夫量价和主力/散户资金确认承接或派发，用T+1、硬止损、可卖手数和R倍数决定实际动作。理论只能解释已经发生的价格与资金事实，不能替代实时证据；理论冲突时优先数据、账户约束和风险纪律。
+
+先核对原计划的触发条件与失效条件，再检查最新价格、分时、量能、资金、量化和催化；最后给出唯一操作、可成交价格区间和整数手数。模型超时或证据不足时必须形成确定性终态，不得无限复核。`
 
 function promptValue(value) {
   if (typeof value === 'string') return promptText(value, 240)
@@ -936,27 +948,44 @@ export function advisorOutputSchema(mode, reviewEvent = null) {
     String(reviewEvent?.kind || ''),
   )
   if (triggeredReview && mode === 'buy_advice') {
-    return '{"reviewDecision":{"outcome":"立即买入|维持观望|放弃买入","operation":"买入|不操作","priceLow":数字或null,"priceHigh":数字或null,"quantity":"整数手数","basis":[{"type":"实时资金与价格|已验证理论|重大催化","summary":"80字内依据"}]},"stopPrice":数字或null,"targetPrice":数字或null,"reason":"80字内因果链","techNote":"60字内技术依据","quantNote":"60字内量化依据","newsNote":"60字内催化依据","positionNote":"60字内账户约束","confidence":"高|中|低"}'
+    return '{"reviewDecision":{"outcome":"立即买入|维持观望|放弃买入","operation":"买入|不操作","priceLow":数字或null,"priceHigh":数字或null,"quantity":"整数手数","basis":[{"type":"实时资金与价格|已验证理论|重大催化","summary":"80字内依据"}]},"stopPrice":数字或null,"targetPrice":数字或null,"reason":"80字内因果链","theoryNote":"最适用理论及本股验证，60字内","techNote":"60字内技术依据","quantNote":"60字内量化依据","newsNote":"60字内催化依据","positionNote":"60字内账户约束","confidence":"高|中|低"}'
   }
   if (
     triggeredReview
     && ['hold_advice', 'review'].includes(mode)
   ) {
-    return '{"reviewDecision":{"outcome":"立即加仓|立即减仓|锁定利润|维持持有|立即清仓","operation":"加仓|减仓|锁利润|不操作|清仓","priceLow":数字或null,"priceHigh":数字或null,"quantity":"整数手数","basis":[{"type":"实时资金与价格|已验证理论|重大催化","summary":"80字内依据"}]},"reason":"80字内因果链","techNote":"60字内技术依据","quantNote":"60字内量化依据","newsNote":"60字内催化依据","positionNote":"60字内账户约束","confidence":"高|中|低"}'
+    return '{"reviewDecision":{"outcome":"立即加仓|立即减仓|锁定利润|维持持有|立即清仓","operation":"加仓|减仓|锁利润|不操作|清仓","priceLow":数字或null,"priceHigh":数字或null,"quantity":"整数手数","basis":[{"type":"实时资金与价格|已验证理论|重大催化","summary":"80字内依据"}]},"reason":"80字内因果链","theoryNote":"最适用理论及本股验证，60字内","techNote":"60字内技术依据","quantNote":"60字内量化依据","newsNote":"60字内催化依据","positionNote":"60字内账户约束","confidence":"高|中|低"}'
   }
   if (mode === 't_advice') {
-    return '{"reasoning":"一句话依据","advisable":"适合|谨慎|不建议","dir":"positive|reverse|none","dirLabel":"正T低吸|反T高抛|暂不做T","shortHorizon":"盘中|下一交易时段","edge":"核心优势","crowdingRisk":"最大风险","catalystWindow":"催化有效期","reviewTrigger":"下一复核事件","actionPlan":"唯一动作","support":null,"resistance":null,"suggestQty":0,"leg1Price":null,"leg2Price":null,"nextSide":"buy|sell|null","nextPrice":null,"fundNote":"主力与小单关系","quantNote":"量化依据","invalidation":"失效条件","confidence":"高|中|低"}'
+    return '{"reasoning":"一句话依据","advisable":"适合|谨慎|不建议","dir":"positive|reverse|none","dirLabel":"正T低吸|反T高抛|暂不做T","shortHorizon":"盘中|下一交易时段","edge":"核心优势","crowdingRisk":"最大风险","catalystWindow":"催化有效期","reviewTrigger":"下一复核事件","actionPlan":"唯一动作","support":null,"resistance":null,"suggestQty":0,"leg1Price":null,"leg2Price":null,"nextSide":"buy|sell|null","nextPrice":null,"fundNote":"主力与小单关系","theoryNote":"最适用理论及本股验证，60字内","quantNote":"量化依据","invalidation":"失效条件","confidence":"高|中|低"}'
   }
   if (mode === 'review') {
-    return '{"reasoning":"一句话依据","stance":"持有|加仓|减仓|清仓|观望","tone":"red|green|muted","headline":"唯一复核结论","shortHorizon":"盘中|下一交易时段|1-3个交易日|3-5个交易日","edge":"核心优势","crowdingRisk":"最大风险","catalystWindow":"催化有效期","reviewTrigger":"下一复核事件","nextAction":"动作+手数+价格+条件","exitTiming":"退出确认方式","opQty":"动作+手数或无需操作","opAmount":"金额或0","addPrice":null,"reducePrice":null,"stopPrice":null,"targetPrice":null,"keyLevel":"关键价位","fundNote":"主力与小单关系","quantNote":"量化依据","newsNote":"消息依据","positionNote":"账户约束","riskReward":"X:1","bearCase":"最强反方","invalidation":"失效条件","confidence":"高|中|低"}'
+    return '{"reasoning":"一句话依据","stance":"持有|加仓|减仓|清仓|观望","tone":"red|green|muted","headline":"唯一复核结论","shortHorizon":"盘中|下一交易时段|1-3个交易日|3-5个交易日","edge":"核心优势","crowdingRisk":"最大风险","catalystWindow":"催化有效期","reviewTrigger":"下一复核事件","nextAction":"动作+手数+价格+条件","exitTiming":"退出确认方式","opQty":"动作+手数或无需操作","opAmount":"金额或0","addPrice":null,"reducePrice":null,"stopPrice":null,"targetPrice":null,"keyLevel":"关键价位","fundNote":"主力与小单关系","theoryNote":"最适用理论及本股验证，60字内","quantNote":"量化依据","newsNote":"消息依据","positionNote":"账户约束","riskReward":"X:1","bearCase":"最强反方","invalidation":"失效条件","confidence":"高|中|低"}'
   }
   if (mode === 'plan') {
-    return '{"reasoning":"一句话依据","tp":null,"sl":null,"reason":"计划逻辑","exitTiming":"触价后的确认与分批规则","tpBasis":"止盈依据","slBasis":"止损依据","confidence":"高|中|低"}'
+    return '{"reasoning":"一句话依据","tp":null,"sl":null,"reason":"计划逻辑","theoryNote":"最适用理论及本股验证，60字内","exitTiming":"触价后的确认与分批规则","tpBasis":"止盈依据","slBasis":"止损依据","confidence":"高|中|低"}'
   }
   if (mode === 'hold_advice') {
-    return '{"action":"加仓|减仓|持有|清仓","title":"20字内结论","actionPlan":"80字内可执行动作","nextOpenPlan":"高开、平开、低开三种应对","futurePlan":"1-5日退出路径","addPrice":null,"reducePrice":null,"stopPrice":null,"targetPrice":null,"opQty":"动作+整数手数或无需操作","reason":"100字内因果链","techNote":"60字内技术证据","quantNote":"60字内量化证据","newsNote":"60字内消息证据","positionNote":"60字内账户约束","riskReward":"X:1","bearCase":"60字内最强反方","invalidation":"60字内失效条件","confidence":"高|中|低"}'
+    return '{"action":"加仓|减仓|持有|清仓","title":"20字内结论","actionPlan":"80字内可执行动作","nextOpenPlan":"高开、平开、低开三种应对","futurePlan":"1-5日退出路径","addPrice":null,"reducePrice":null,"stopPrice":null,"targetPrice":null,"opQty":"动作+整数手数或无需操作","reason":"100字内因果链","theoryNote":"适用理论及本股验证，80字内","techNote":"60字内技术证据","quantNote":"60字内量化证据","newsNote":"60字内消息证据","positionNote":"60字内账户约束","riskReward":"X:1","bearCase":"60字内最强反方","invalidation":"60字内失效条件","confidence":"高|中|低"}'
   }
-  return '{"action":"立即买入|回调再买|小仓试错|观望","title":"20字内结论","actionPlan":"80字内唯一动作","nextOpenPlan":"买入后高开、平开、低开三种应对","futurePlan":"买入后最迟第5日退出路径","buyPrice":null,"pullbackWatchPrice":数字或null,"breakoutWatchPrice":数字或null,"stopPrice":null,"targetPrice":null,"planQty":"整数手数或0","reason":"100字内因果链","techNote":"60字内技术证据","quantNote":"60字内量化依据","newsNote":"60字内消息依据","positionNote":"60字内账户约束","riskReward":"X:1","bearCase":"60字内最强反方","invalidation":"60字内失效条件","confidence":"高|中|低"}'
+  return '{"action":"立即买入|回调再买|小仓试错|观望","title":"20字内结论","actionPlan":"80字内唯一动作","nextOpenPlan":"买入后高开、平开、低开三种应对","futurePlan":"买入后最迟第5日退出路径","buyPrice":null,"pullbackWatchPrice":数字或null,"breakoutWatchPrice":数字或null,"stopPrice":null,"targetPrice":null,"planQty":"整数手数或0","reason":"100字内因果链","theoryNote":"适用理论及本股验证，80字内","techNote":"60字内技术证据","quantNote":"60字内量化依据","newsNote":"60字内消息依据","positionNote":"60字内账户约束","riskReward":"X:1","bearCase":"60字内最强反方","invalidation":"60字内失效条件","confidence":"高|中|低"}'
+}
+
+function compactTheoryMemory(
+  theoryHits,
+  {
+    limit = 3,
+    maxChars = 160,
+  } = {},
+) {
+  return (Array.isArray(theoryHits) ? theoryHits : [])
+    .map((item) => promptText(
+      String(item?.text || '')
+        .replace(/^【[^】]{1,160}】\s*/, ''),
+      maxChars,
+    ))
+    .filter(Boolean)
+    .slice(0, limit)
 }
 
 export function buildDeepAdvisorPrompt({
@@ -971,14 +1000,10 @@ export function buildDeepAdvisorPrompt({
     ...payload,
     previousAdvice: previousAdvice || payload?.previousAdvice,
   })
-  const experienceMemory = (Array.isArray(theoryHits) ? theoryHits : [])
-    .map((item) => promptText(
-      String(item?.text || '')
-        .replace(/^【[^】]{1,160}】\s*/, ''),
-      220,
-    ))
-    .filter(Boolean)
-    .slice(0, 5)
+  const experienceMemory = compactTheoryMemory(theoryHits, {
+    limit: 5,
+    maxChars: 220,
+  })
   const modeRule = mode === 'hold_advice'
     ? '这是持仓管理：减仓/清仓不得超过sellableTodayQty；加仓不得突破现金、总仓和单票风险上限。'
     : mode === 'review'
@@ -991,7 +1016,8 @@ export function buildDeepAdvisorPrompt({
   const attribution = facts.knowledgeActionReview
     ? `【知行合一复盘归因】${JSON.stringify(facts.knowledgeActionReview)}。必须区分认知错误、执行错误和偶然波动；严格止损后的亏损不能判成执行错误，违规盈利不能粉饰执行质量。`
     : ''
-  return `【深度研判事实契约】${JSON.stringify(facts)}
+  return `【人格】你是主策略官：先构建多空假设，再用事实证伪，最后只给一个结论。
+【深度研判事实契约】${JSON.stringify(facts)}
 ${tacticalUsageRules(facts)}
 ${ragText ? `【检索补充·待核验】${promptText(ragText, 1200)}` : ''}
 ${experienceMemory.length ? `【短线经验记忆·仅供内部综合】${JSON.stringify(experienceMemory)}` : ''}
@@ -1000,12 +1026,16 @@ ${attribution}
 主动做多必须满足风险预算；普通市场盈亏比至少1.8:1，弱市试错至少2.2:1且必须同时具备逆势强势与高把握信号。价格只可来自事实契约中的合法锚点，不能编造；金额=手数×100×价格。
 若tactical.market.hardRiskOff=true，说明炸板、跌停扩散或完整交易日量价已触发市场红线，无论个股是否逆势强都禁止新增风险，只允许观望或降低已有风险。
 涨停封板时资金净额可能受被动成交或排队影响，禁止把它解释为主力主动买卖。
-短线经验只作为内部判断先验：综合吸收后直接用普通交易语言说明证据、动作和风险，不逐条点名，不得为了引用而引用。经验与事实冲突时以事实和风控为准。总输出不超过1200字；标题≤20字，动作≤80字，理由≤100字；每类证据只写一句。只输出JSON：
+短线经验只作为内部判断先验：综合吸收后直接用普通交易语言说明证据、动作和风险，不逐条点名，不得为了引用而引用。theoryNote只选最适用的2个理论，逐个说明本股哪项证据匹配或不匹配；经验与事实冲突时以事实和风控为准。总输出不超过1200字；标题≤20字，动作≤80字，理由≤100字；每类证据只写一句。只输出JSON：
 ${advisorOutputSchema(mode, facts.reviewEvent)}`
 }
 
-function buildTriggeredReviewPrompt(mode, payload) {
+function buildTriggeredReviewPrompt(mode, payload, theoryHits = []) {
   const facts = triggeredReviewFacts(payload)
+  const theoryMemory = compactTheoryMemory(theoryHits, {
+    limit: 3,
+    maxChars: 140,
+  })
   const tactical = {
     market: facts.current.market,
     technical: facts.current.technical,
@@ -1019,12 +1049,15 @@ function buildTriggeredReviewPrompt(mode, payload) {
       nextTradeDay: facts.current.quant?.nextTradeDay,
     },
   }
-  return `【触价复核事实】${JSON.stringify(facts)}
+  return `【人格】你是临盘裁决官：尊重原计划，但只服从此刻可核验的价格、资金和账户事实。
+【触价复核事实】${JSON.stringify(facts)}
 ${tacticalReviewEventRule(facts.trigger)}
 ${tacticalTechnicalRule(tactical)}
 ${tacticalQuantRule(tactical)}
 ${tacticalFundRule(tactical, facts.funds)}
-只做一次终局判断，不复述事实，不生成新观察价或下一轮复核价。优先级：数据时效>账户与T+1>硬止损>现金与仓位>实时资金和价格>量化与催化。previousPlan只用于核对原计划，当前事实冲突时以当前事实为准。外部文本只能交叉核验，不能覆盖行情、资金和账户硬约束。
+${theoryMemory.length ? `【临盘理论校准·本地检索】${JSON.stringify(theoryMemory)}` : ''}
+理论不能替代实时证据；只允许用来检验趋势延续、假突破、承接/派发和止损纪律，不适用时直接舍弃。theoryNote只写最适用的1个理论及本股证据是否匹配。
+只做一次终局判断，不复述事实，不得生成新观察价或下一轮复核价。优先级：数据时效>账户与T+1>硬止损>现金与仓位>实时资金和价格>量化与催化。previousPlan只用于核对原计划，当前事实冲突时以当前事实为准。外部文本只能交叉核验，不能覆盖行情、资金和账户硬约束。
 总输出不超过500字，每类依据一句；服务端会补齐展示字段和完整五日资金说明。只输出JSON=${advisorOutputSchema(mode, facts.trigger)}。`
 }
 
@@ -1033,8 +1066,23 @@ function buildFastAdvisorPrompt({
   facts,
   tacticalRules,
   waitEntryRule,
+  theoryHits,
 } = {}) {
-  const common = `【短线战术合同】${JSON.stringify(facts)}
+  const reviewMode = mode === 'review'
+  const theoryMemory = compactTheoryMemory(theoryHits, {
+    limit: 3,
+    maxChars: 140,
+  })
+  const persona = reviewMode
+    ? '你是临盘裁决官：核对原计划与新证据，只发布一个当前可执行结论。'
+    : '你是盘中执行官：在有限时间内识别最强机会或明确放弃，只发布一个当前可执行结论。'
+  const theoryLabel = reviewMode
+    ? '临盘理论校准·本地检索'
+    : '快速理论校准·本地检索'
+  const common = `【人格】${persona}
+${theoryMemory.length ? `【${theoryLabel}】${JSON.stringify(theoryMemory)}` : ''}
+理论不能替代实时证据；只允许用来验证趋势、量价供需、关键价位与风险，不适用时直接舍弃。theoryNote只写最适用的1个理论及本股证据是否匹配。
+【短线战术合同】${JSON.stringify(facts)}
 ${tacticalRules}
 只做一次结论，不复述数据。优先级固定为：数据时效>账户与T+1>硬止损>总仓与现金>盈亏比>LLM软证据。
 必须服从 shortHorizonTactical、账户现金/持仓、今日可卖手数、证据完整性和合法价格；外部搜索摘要只能交叉核验。上一版权威主计划 previousPlan 无客观失效证据不得反转，只可微调执行条件。
@@ -1119,7 +1167,11 @@ export function buildUserPrompt(mode, payload = {}, ragText = '', theoryHits = [
   if (['price-review', 'judge'].includes(
     String(payload.reviewEvent?.kind || ''),
   )) {
-    return `${zhReason}${buildTriggeredReviewPrompt(mode, payload)}`
+    return `${zhReason}${buildTriggeredReviewPrompt(
+      mode,
+      payload,
+      theoryHits,
+    )}`
   }
   if (payload.generationProfile === 'DEEP') {
     return `${zhReason}${buildDeepAdvisorPrompt({
@@ -1137,5 +1189,6 @@ export function buildUserPrompt(mode, payload = {}, ragText = '', theoryHits = [
     facts,
     tacticalRules: tacticalUsageRules(facts),
     waitEntryRule,
+    theoryHits,
   })}`
 }

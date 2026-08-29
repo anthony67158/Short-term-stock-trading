@@ -37,6 +37,7 @@ import {
   SYSTEM_PROMPT,
   ADVISOR_DEEP_SYSTEM,
   ADVISOR_FAST_SYSTEM,
+  ADVISOR_REVIEW_SYSTEM,
   ADVISOR_SYSTEM,
   buildUserPrompt,
   isAdvisorMode,
@@ -1713,11 +1714,13 @@ export default async function handler(req, res) {
     const useReasoning = resolveReasoningMode(effectiveReasoning(useRole), fastMode, forceReasoning);
     const sysPrompt = isAdvisor
       ? (
-          fastMode
-            ? ADVISOR_FAST_SYSTEM
-            : forceReasoning
-              ? ADVISOR_DEEP_SYSTEM
-              : ADVISOR_SYSTEM
+          useRole === 'review' || mode === 'review'
+            ? ADVISOR_REVIEW_SYSTEM
+            : fastMode
+              ? ADVISOR_FAST_SYSTEM
+              : forceReasoning
+                ? ADVISOR_DEEP_SYSTEM
+                : ADVISOR_SYSTEM
         )
       : SYSTEM_PROMPT;
 
@@ -1791,18 +1794,22 @@ export default async function handler(req, res) {
       );
       return finish(scheduledReviewResponse);
     }
-    if (
-      isAdvisor
-      && payload.code
-      && payload.generationProfile === 'DEEP'
-    ) {
-      phase('正在提炼短线实战经验…', 'theory');
+    if (isAdvisor && payload.code) {
+      const theoryLimit = payload.generationProfile === 'DEEP'
+        ? 6
+        : 3;
+      if (payload.generationProfile === 'DEEP') {
+        phase('正在提炼短线实战经验…', 'theory');
+      }
       const theoryQuery = buildAdvisorTheoryQuery(mode, payload);
       try {
         theoryHits = await sourceTracker.track(
           'theoryKnowledge',
           '短线经验库',
-          Promise.resolve(retrieveTheoryKeywords(theoryQuery, 6)),
+          Promise.resolve(retrieveTheoryKeywords(
+            theoryQuery,
+            theoryLimit,
+          )),
           {
             isAvailable: (value) =>
               Array.isArray(value) && value.length > 0,

@@ -5,6 +5,7 @@ import {
   ADVISOR_DEEP_SYSTEM,
   ADVISOR_SYSTEM,
   ADVISOR_FAST_SYSTEM,
+  ADVISOR_REVIEW_SYSTEM,
   buildUserPrompt,
   maxTokensForMode,
 } from '../api/_ai_prompts.js'
@@ -23,13 +24,24 @@ test('快速与深度建议都使用可交付的有界输出预算', () => {
   }), 1200)
   assert.ok(ADVISOR_SYSTEM.length < 2200)
   assert.ok(ADVISOR_FAST_SYSTEM.length < 2500)
+  assert.ok(ADVISOR_REVIEW_SYSTEM.length < 2500)
   assert.match(ADVISOR_SYSTEM, /股神级的A股短线操盘手/)
   assert.match(ADVISOR_SYSTEM, /快速拍板/)
+  assert.match(ADVISOR_FAST_SYSTEM, /盘中执行官/)
+  assert.match(ADVISOR_FAST_SYSTEM, /道氏趋势/)
+  assert.match(ADVISOR_FAST_SYSTEM, /威科夫量价/)
   assert.match(ADVISOR_DEEP_SYSTEM, /同一战术合同/)
+  assert.match(ADVISOR_DEEP_SYSTEM, /主策略官/)
+  assert.match(ADVISOR_DEEP_SYSTEM, /情绪周期/)
+  assert.match(ADVISOR_DEEP_SYSTEM, /反方证伪/)
   assert.match(ADVISOR_DEEP_SYSTEM, /最强反方/)
   assert.match(ADVISOR_DEEP_SYSTEM, /最多五个检查点/)
   assert.match(ADVISOR_DEEP_SYSTEM, /讲给新手听/)
   assert.match(ADVISOR_DEEP_SYSTEM, /不得.*夸大把握或承诺收益/)
+  assert.match(ADVISOR_REVIEW_SYSTEM, /临盘裁决官/)
+  assert.match(ADVISOR_REVIEW_SYSTEM, /利弗莫尔关键点/)
+  assert.match(ADVISOR_REVIEW_SYSTEM, /1-2-3\/2B/)
+  assert.match(ADVISOR_REVIEW_SYSTEM, /不得生成新观察价/)
 })
 
 test('所有军师模式都只使用紧凑短线战术合同', () => {
