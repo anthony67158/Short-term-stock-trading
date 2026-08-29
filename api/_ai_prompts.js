@@ -369,6 +369,8 @@ function tacticalTActionRule(tactical = {}) {
 
 function tacticalFundRule(tactical = {}, funds = {}) {
   const flow = tactical.flow || {}
+  const main5d = promptNumber(funds.main5dYi)
+  const retail5d = promptNumber(funds.retail5dYi)
   const mainTrend = Array.isArray(funds.mainTrend5)
     ? funds.mainTrend5
     : []
@@ -385,7 +387,15 @@ function tacticalFundRule(tactical = {}, funds = {}) {
   )
   const historyRule = historyDays >= 5
     ? `并结合完整5日序列 funds.mainTrend5=${JSON.stringify(mainTrend)}`
-      + `、funds.retailTrend5=${JSON.stringify(retailTrend)} 判断最近5日持续、转弱或背离，`
+      + `、funds.retailTrend5=${JSON.stringify(retailTrend)}`
+      + `及5日合计主力=${main5d ?? '缺失'}、小单=${retail5d ?? '缺失'}`
+      + '判断最近5日持续、转弱或背离，'
+    : main5d != null || retail5d != null
+      ? `已取得同日5日聚合主力=${main5d ?? '缺失'}`
+        + `、5日聚合小单=${retail5d ?? '缺失'}，`
+        + '必须用于判断五日总体方向；'
+        + `逐日资金仅取得${historyDays}个交易日，`
+        + '不能判断逐日连续性，'
     : historyDays > 0
       ? `当前仅取得${historyDays}个交易日资金序列：`
         + `funds.mainTrend5=${JSON.stringify(mainTrend)}、`
@@ -655,6 +665,7 @@ export function deepAdvisorFacts(payload = {}) {
         'retailStreak',
         'historyDayCount',
         'historyComplete',
+        'fiveDaySource',
       ]),
       mainTrend5: (Array.isArray(payload.stockFund?.mainTrend5)
         ? payload.stockFund.mainTrend5

@@ -146,7 +146,7 @@ import {
 import { internalApiOrigin } from './_internal_origin.js';
 import { loadSectorOpportunity } from './_sector_opportunity.js';
 import {
-  fetchStockFund,
+  fetchResilientStockFund,
   fundAmountYi,
 } from './_stock_fund.js';
 
@@ -523,6 +523,8 @@ export function buildAdvisorTodayQuote(
     volRatio: quote.volRatio,
     mainNetYi: fundAmountYi(quote.mainInflow),
     retailNetYi: fundAmountYi(quote.retailInflow),
+    main5dYi: fundAmountYi(quote.main5dInflow),
+    retail5dYi: fundAmountYi(quote.retail5dInflow),
     bigMove:
       isLive
       && quote.pct != null
@@ -1048,7 +1050,7 @@ export default async function handler(req, res) {
           collect(
             'stockFunds',
             '个股资金流',
-            () => fetchStockFund(payload.code, {
+            () => fetchResilientStockFund(payload.code, {
               timeoutMs: triggeredPriceReview ? 2500 : 7000,
               preferRealtime: triggeredPriceReview,
             }),
@@ -1818,6 +1820,9 @@ export default async function handler(req, res) {
         historical: payload.stockFund.isHistorical,
         source: payload.stockFund.source || null,
         fetchedAt: payload.stockFund.fetchedAt || null,
+        main5dYi: payload.stockFund.main5dYi ?? null,
+        retail5dYi: payload.stockFund.retail5dYi ?? null,
+        fiveDaySource: payload.stockFund.fiveDaySource || null,
         main5dAvg: payload.stockFund.main5dAvgYi,
         retail5dAvg: payload.stockFund.retail5dAvgYi,
         inflowDays: payload.stockFund.inflowDays,

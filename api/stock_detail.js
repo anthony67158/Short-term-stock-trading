@@ -9,8 +9,7 @@ import {
   resolveQuantModelForRequest,
 } from './_quant_access.js';
 import {
-  fetchStockFund,
-  fetchStockFundHistoryViaHttps,
+  fetchResilientStockFund,
 } from './_stock_fund.js';
 import { fetchQuotes } from './quote.js';
 import { isContinuousTrading } from '../shared/tradingCalendar.js';
@@ -198,10 +197,9 @@ export default async function handler(req, res) {
           ? fetchQuotes([code], { now: requestedAt })
           : Promise.resolve([]),
         wantQuote
-          ? fetchStockFund(code, {
+          ? fetchResilientStockFund(code, {
               preferRealtime: isContinuousTrading(requestedAt),
               fetchedAt: requestedAt,
-              fetchHistory: fetchStockFundHistoryViaHttps,
             })
           : Promise.resolve(null),
       ]);

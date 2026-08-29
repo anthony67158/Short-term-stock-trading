@@ -74,7 +74,11 @@ function streak(values = []) {
 }
 
 export function mapRealtimeStockFund(data = {}) {
+  const timestamp = optionalNumber(data.f124);
   return {
+    asOfDate: timestamp != null && timestamp > 0
+      ? beijingDay(timestamp * 1000)
+      : null,
     mainNetYi: fundAmountYi(data.f62),
     mainNetPct: fundPct(data.f184),
     superNetYi: fundAmountYi(data.f66),
@@ -82,6 +86,7 @@ export function mapRealtimeStockFund(data = {}) {
     smallNetYi: fundAmountYi(data.f84),
     retailNetYi: fundAmountYi(data.f84),
     main5dYi: fundAmountYi(data.f164),
+    retail5dYi: fundAmountYi(data.f172),
     weibi: fundPct(data.f191),
     weicha: optionalNumber(data.f192) == null
       ? null
@@ -115,15 +120,37 @@ export function buildStockFundSnapshot({
   preferRealtime = false,
   fetchedAt = Date.now(),
 } = {}) {
-  const history = (Array.isArray(historyRows) ? historyRows : [])
-    .filter((item) => item?.date)
-    .slice(-5);
-  const latest = history.at(-1) || {};
   const hasRealtime = !!(
     realtime
     && [realtime.mainNetYi, realtime.retailNetYi]
       .some((value) => value != null)
   );
+  const realtimeAsOfDate = String(
+    realtime?.asOfDate || '',
+  ).slice(0, 10);
+  const historical = (Array.isArray(historyRows) ? historyRows : [])
+    .filter((item) => item?.date);
+  const historyByDate = new Map(
+    historical.map((item) => [String(item.date).slice(0, 10), item]),
+  );
+  if (hasRealtime && realtimeAsOfDate) {
+    const existing = historyByDate.get(realtimeAsOfDate);
+    historyByDate.set(realtimeAsOfDate, {
+      ...(existing || {}),
+      date: realtimeAsOfDate,
+      ...(preferRealtime || !existing ? {
+        mainNetYi: optionalNumber(realtime.mainNetYi),
+        retailNetYi: optionalNumber(realtime.retailNetYi),
+        mainNetPct: optionalNumber(realtime.mainNetPct),
+        superNetYi: optionalNumber(realtime.superNetYi),
+        bigNetYi: optionalNumber(realtime.bigNetYi),
+      } : {}),
+    });
+  }
+  const history = [...historyByDate.values()]
+    .sort((left, right) => String(left.date).localeCompare(String(right.date)))
+    .slice(-5);
+  const latest = history.at(-1) || {};
   const useRealtime = preferRealtime && hasRealtime;
   if (!history.length && !hasRealtime) return null;
 
@@ -142,7 +169,7 @@ export function buildStockFundSnapshot({
     : optionalNumber(realtime?.main5dYi);
   const retail5dYi = historyComplete
     ? retailHistoryTotal
-    : null;
+    : optionalNumber(realtime?.retail5dYi);
   const mainNetYi = useRealtime
     ? optionalNumber(realtime.mainNetYi)
     : optionalNumber(latest.mainNetYi ?? realtime?.mainNetYi);
@@ -150,12 +177,16 @@ export function buildStockFundSnapshot({
     ? optionalNumber(realtime.retailNetYi)
     : optionalNumber(latest.retailNetYi ?? realtime?.retailNetYi);
   const asOfDate = useRealtime
-    ? beijingDay(fetchedAt)
-    : latest.date || null;
+    ? realtimeAsOfDate || beijingDay(fetchedAt)
+    : latest.date || realtimeAsOfDate || null;
   const snapshot = {
     schemaVersion: 'stock-fund-snapshot.v1',
     fetchedAt: Number(fetchedAt) || Date.now(),
-    source: useRealtime ? 'realtime' : 'historical',
+    source: useRealtime
+      ? 'realtime'
+      : historical.length
+        ? 'historical'
+        : 'quote',
     asOfDate,
     historicalAsOfDate: latest.date || null,
     isHistorical: !useRealtime,
@@ -177,6 +208,11 @@ export function buildStockFundSnapshot({
       ? +(mainHistoryTotal / historyDayCount).toFixed(2)
       : null,
     retail5dYi,
+    fiveDaySource: historyComplete
+      ? 'daily-history'
+      : main5dYi != null || retail5dYi != null
+        ? 'quote-aggregate'
+        : null,
     retail5dAvgYi: historyComplete && retailHistoryTotal != null
       ? +(retailHistoryTotal / historyDayCount).toFixed(2)
       : null,
@@ -336,8 +372,8 @@ export async function fetchStockFund(code, {
     + '&fields2=f51,f52,f53,f54,f55,f56,f57'
     + `&_=${Number(fetchedAt) || Date.now()}`;
   const realtimePath =
-    `/api/qt/stock/get?secid=${secid}`
-    + '&fields=f62,f84,f184,f66,f72,f164,f191,f192';
+    `/api/qt/ulist.np/get?fltt=2&invt=2&secids=${secid}`
+    + '&fields=f62,f84,f164,f172,f184,f66,f72,f191,f192,f124';
   const [historyLines, realtime] = await Promise.all([
     typeof fetchHistory === 'function'
       ? fetchHistory(historyPath, { timeoutMs })
@@ -353,7 +389,8 @@ export async function fetchStockFund(code, {
     firstValid(REALTIME_HOSTS, realtimePath, {
       fetchImpl,
       timeoutMs,
-      pick: (payload) => payload?.data || null,
+      pick: (payload) =>
+        payload?.data?.diff?.[0] || payload?.data || null,
     }),
   ]);
   return buildStockFundSnapshot({
@@ -361,5 +398,13 @@ export async function fetchStockFund(code, {
     realtime: realtime ? mapRealtimeStockFund(realtime) : null,
     preferRealtime,
     fetchedAt,
+  });
+}
+
+export function fetchResilientStockFund(code, options = {}) {
+  return fetchStockFund(code, {
+    ...options,
+    fetchHistory:
+      options.fetchHistory || fetchStockFundHistoryViaHttps,
   });
 }

@@ -1108,6 +1108,7 @@ export function buildShortHorizonTactical(
         2,
       ),
       main5dYi: rounded(payload.stockFund?.main5dYi, 2),
+      retail5dYi: rounded(payload.stockFund?.retail5dYi, 2),
       mainStreak: rounded(payload.stockFund?.mainStreak, 0),
       mainDirection,
       retailDirection,

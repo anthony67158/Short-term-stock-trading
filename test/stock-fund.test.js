@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import {
   buildStockFundSnapshot,
   fetchStockFund,
+  fetchResilientStockFund,
   parseStockFundHistory,
 } from '../api/_stock_fund.js'
 import {
@@ -53,6 +54,50 @@ test('盘中快照覆盖当日主力与散户值但保留历史序列', () => {
   assert.equal(snapshot.retailFlow.relation, 'main_out_retail_in')
 })
 
+test('逐日历史不足时保留报价接口的五日资金聚合', () => {
+  const snapshot = buildStockFundSnapshot({
+    historyRows: [],
+    realtime: {
+      asOfDate: '2026-08-28',
+      mainNetYi: 1.81,
+      retailNetYi: -2.11,
+      main5dYi: 2.87,
+      retail5dYi: -4.17,
+    },
+    fetchedAt: Date.parse('2026-08-29T02:00:00.000Z'),
+  })
+
+  assert.equal(snapshot.asOfDate, '2026-08-28')
+  assert.equal(snapshot.historyDayCount, 1)
+  assert.equal(snapshot.historyComplete, false)
+  assert.equal(snapshot.main5dYi, 2.87)
+  assert.equal(snapshot.retail5dYi, -4.17)
+  assert.equal(snapshot.fiveDaySource, 'quote-aggregate')
+})
+
+test('报价日期晚于资金历史时补入当前日形成完整五日序列', () => {
+  const snapshot = buildStockFundSnapshot({
+    historyRows: parseStockFundHistory(historyLines.slice(-4)),
+    realtime: {
+      asOfDate: '2026-08-28',
+      mainNetYi: 1.81,
+      retailNetYi: -2.11,
+      main5dYi: 6.81,
+      retail5dYi: -4.51,
+    },
+    fetchedAt: Date.parse('2026-08-29T02:00:00.000Z'),
+  })
+
+  assert.equal(snapshot.asOfDate, '2026-08-28')
+  assert.equal(snapshot.historyDayCount, 5)
+  assert.equal(snapshot.historyComplete, true)
+  assert.deepEqual(snapshot.mainTrend5, [1.2, 1.5, 1.8, 2, 1.81])
+  assert.deepEqual(
+    snapshot.retailTrend5,
+    [-0.7, -0.8, -0.9, -1, -2.11],
+  )
+})
+
 test('快速采集并行请求历史与实时资金且不信任外部输入', async () => {
   const urls = []
   const snapshot = await fetchStockFund('600000', {
@@ -78,7 +123,7 @@ test('快速采集并行请求历史与实时资金且不信任外部输入', as
   })
 
   assert.ok(urls.some((url) => url.includes('/fflow/daykline/get')))
-  assert.ok(urls.some((url) => url.includes('/api/qt/stock/get')))
+  assert.ok(urls.some((url) => url.includes('/api/qt/ulist.np/get')))
   assert.equal(snapshot.mainNetYi, 2.3)
   assert.equal(snapshot.retailNetYi, -1.4)
   assert.equal(snapshot.history5.length, 5)
@@ -131,9 +176,9 @@ test('资金历史镜像优先选择完整五日而不是最快的一日结果',
   )
 })
 
-test('详情可切换原生HTTPS传输读取完整五日资金', async () => {
+test('详情与军师共用可靠资金入口读取完整五日资金', async () => {
   let historyCalls = 0
-  const snapshot = await fetchStockFund('300390', {
+  const snapshot = await fetchResilientStockFund('300390', {
     fetchedAt: Date.parse('2026-08-29T02:00:00.000Z'),
     fetchImpl: async (url) => ({
       ok: true,

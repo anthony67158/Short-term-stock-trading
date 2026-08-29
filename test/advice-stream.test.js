@@ -72,6 +72,8 @@ test('军师行情快照保留报价接口返回的真实成交额', () => {
     volRatio: 1.94,
     mainInflow: 283_000_000,
     retailInflow: -210_000_000,
+    main5dInflow: 550_000_000,
+    retail5dInflow: -310_000_000,
   }, {
     code: '000737',
     name: '北方铜业',
@@ -86,6 +88,8 @@ test('军师行情快照保留报价接口返回的真实成交额', () => {
   assert.equal(quote.price, 15.44)
   assert.equal(quote.high, 15.69)
   assert.equal(quote.live, false)
+  assert.equal(quote.main5dYi, 5.5)
+  assert.equal(quote.retail5dYi, -3.1)
 })
 
 test('服务端可解析跨分片的 AI SSE 事件', () => {

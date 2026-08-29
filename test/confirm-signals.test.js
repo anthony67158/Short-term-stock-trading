@@ -175,7 +175,14 @@ test('快速Judge每次触价重新拉取服务端主力与散户资金', async 
         retailNetYi: -0.3,
       },
     },
-    quote: { price: 10.1 },
+    quote: {
+      price: 10.1,
+      tradeDate: '2026-08-28',
+      mainInflow: -50_000_000,
+      retailInflow: 60_000_000,
+      main5dInflow: 287_000_000,
+      retail5dInflow: -417_000_000,
+    },
     providers: {
       now: () => now,
       marketTimeContext: () => ({
@@ -196,8 +203,10 @@ test('快速Judge每次触价重新拉取服务端主力与散户资金', async 
           fetchedAt: now,
           mainNetYi: -0.5,
           retailNetYi: 0.6,
-          mainTrend5: [0.1, 0.2, 0.3, 0.4, 0.5],
-          retailTrend5: [-0.1, -0.2, -0.2, -0.3, -0.3],
+          mainTrend5: [-0.5],
+          retailTrend5: [0.6],
+          historyDayCount: 1,
+          historyComplete: false,
         }
       },
       llmJudge: async ({ fundContext }) => {
@@ -216,6 +225,12 @@ test('快速Judge每次触价重新拉取服务端主力与散户资金', async 
   assert.equal(fundCalls, 1)
   assert.equal(receivedFundContext.current.mainNetYi, -0.5)
   assert.equal(receivedFundContext.current.retailNetYi, 0.6)
+  assert.equal(receivedFundContext.current.main5dYi, 2.87)
+  assert.equal(receivedFundContext.current.retail5dYi, -4.17)
+  assert.equal(
+    receivedFundContext.current.fiveDaySource,
+    'quote-aggregate',
+  )
   assert.equal(receivedFundContext.change.relationChanged, true)
   assert.equal(result.signals.funds.current.source, 'realtime')
   assert.equal(result.decision, 'wait')

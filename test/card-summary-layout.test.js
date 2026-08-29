@@ -216,7 +216,7 @@ test('个股详情展示最近收盘快照与近5日关键趋势', () => {
     stockDetailApi,
     /fetchQuotes\(\[code\],\s*\{\s*now:\s*requestedAt\s*\}\)/,
   )
-  assert.match(stockDetailApi, /fetchStockFund\(code/)
+  assert.match(stockDetailApi, /fetchResilientStockFund\(code/)
   assert.match(stockDetailApi, /buildStockMarketSnapshot/)
   assert.match(
     quoteApi,

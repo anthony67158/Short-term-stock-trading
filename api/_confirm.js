@@ -46,8 +46,12 @@ import { quantJudgeDiscipline } from '../shared/quantAdviceContext.js';
 import {
   compactStockFundSnapshot,
   compareStockFundSnapshots,
+  mergeRetailFundFlow,
 } from '../shared/retailFundFlow.js';
-import { fetchStockFund } from './_stock_fund.js';
+import {
+  fetchResilientStockFund,
+  fundAmountYi,
+} from './_stock_fund.js';
 
 export const JUDGE_MAX_TOKENS = 260;
 
@@ -717,7 +721,7 @@ export async function judgeConfirmation({
     ? Number(providers.now()) || Date.now()
     : Date.now();
   const fetchTrends = providers.fetchTrendsTx || fetchTrendsTx;
-  const fetchFunds = providers.fetchStockFund || fetchStockFund;
+  const fetchFunds = providers.fetchStockFund || fetchResilientStockFund;
   const [trendsResult, fundResult] = await Promise.allSettled([
     fetchTrends(a.code),
     fetchFunds(a.code, {
@@ -729,8 +733,21 @@ export async function judgeConfirmation({
   const trendsData = trendsResult.status === 'fulfilled'
     ? trendsResult.value
     : null;
-  const fundContext = buildJudgeFundContext(
+  const currentFund = mergeRetailFundFlow(
     fundResult.status === 'fulfilled' ? fundResult.value : null,
+    {
+      live: timeContext.isLive === true,
+      tradeDate: quote?.tradeDate || null,
+      asOfLabel: quote?.tradeDate || null,
+      source: quote?.source || null,
+      mainNetYi: fundAmountYi(quote?.mainInflow),
+      retailNetYi: fundAmountYi(quote?.retailInflow),
+      main5dYi: fundAmountYi(quote?.main5dInflow),
+      retail5dYi: fundAmountYi(quote?.retail5dInflow),
+    },
+  );
+  const fundContext = buildJudgeFundContext(
+    currentFund,
     adviceContext.fundContext,
   );
   const prim = trendsData ? intradayPrimitives(

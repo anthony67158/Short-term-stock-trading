@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 import {
   ADVISOR_FAST_SYSTEM,
@@ -13,6 +14,15 @@ import {
   mergeRetailFundFlow,
   normalizeFundNoteHistory,
 } from '../shared/retailFundFlow.js'
+
+const aiSource = readFileSync(
+  new URL('../api/ai.js', import.meta.url),
+  'utf8',
+)
+const confirmSource = readFileSync(
+  new URL('../api/_confirm.js', import.meta.url),
+  'utf8',
+)
 
 test('资金说明由服务端写入完整五日序列和合计', () => {
   const note = buildStockFundNote({
@@ -41,11 +51,17 @@ test('实时资金快照同时映射主力与小单净流入', () => {
     f184: 6.2,
     f66: 70_000_000,
     f72: 50_000_000,
+    f164: 550_000_000,
+    f172: -310_000_000,
+    f124: Date.parse('2026-08-28T07:00:00.000Z') / 1000,
   })
 
   assert.equal(snapshot.mainNetYi, 1.2)
   assert.equal(snapshot.smallNetYi, -0.8)
   assert.equal(snapshot.retailNetYi, -0.8)
+  assert.equal(snapshot.main5dYi, 5.5)
+  assert.equal(snapshot.retail5dYi, -3.1)
+  assert.equal(snapshot.asOfDate, '2026-08-28')
 })
 
 test('主力流出且小单流入识别为散户承接风险而非买入信号', () => {
@@ -191,5 +207,71 @@ test('资金历史不足五日时提示词禁止冒充五日序列', () => {
     ),
     '当前1个交易日序列分别为[-14.03]和[12.59]，形成背离；'
       + '历史资金仅取得1个交易日，不能据此判断5日持续性。',
+  )
+})
+
+test('逐日历史不足时军师仍使用同日五日累计但不判断连续性', () => {
+  const stockFund = mergeRetailFundFlow({
+    source: 'historical',
+    asOfDate: '2026-08-28',
+    mainNetYi: 1.81,
+    retailNetYi: -2.11,
+    mainTrend5: [1.81],
+    retailTrend5: [-2.11],
+    historyDayCount: 1,
+    historyComplete: false,
+  }, {
+    live: false,
+    tradeDate: '2026-08-28',
+    asOfLabel: '2026-08-28(周五)',
+    mainNetYi: 1.81,
+    retailNetYi: -2.11,
+    main5dYi: 2.87,
+    retail5dYi: -4.17,
+  })
+
+  assert.equal(stockFund.main5dYi, 2.87)
+  assert.equal(stockFund.retail5dYi, -4.17)
+  assert.equal(stockFund.fiveDaySource, 'quote-aggregate')
+
+  for (const [mode, generationProfile] of [
+    ['buy_advice', 'FAST'],
+    ['hold_advice', 'DEEP'],
+    ['review', 'FAST'],
+  ]) {
+    const prompt = buildUserPrompt(mode, {
+      code: '300390',
+      generationProfile,
+      stockFund,
+    })
+    assert.match(prompt, /5日聚合主力=2\.87/)
+    assert.match(prompt, /5日聚合小单=-4\.17/)
+    assert.match(prompt, /必须用于判断五日总体方向/)
+    assert.match(prompt, /不能判断逐日连续性/)
+  }
+
+  const note = buildStockFundNote(stockFund)
+  assert.match(note, /5日累计主力净流入2\.87亿元/)
+  assert.match(note, /5日累计小单资金代理净流出4\.17亿元/)
+  assert.match(note, /不能判断逐日连续性/)
+  assert.equal(
+    normalizeFundNoteHistory(
+      '近5日累计主力净流入2.87亿元。',
+      stockFund,
+    ),
+    '近5日累计主力净流入2.87亿元；'
+      + '已取得5日累计，但逐日资金仅取得1个交易日，'
+      + '不能据此判断逐日连续性。',
+  )
+})
+
+test('快速深度军师与Judge统一使用可靠资金入口', () => {
+  assert.match(
+    aiSource,
+    /fetchResilientStockFund\(payload\.code,\s*\{/,
+  )
+  assert.match(
+    confirmSource,
+    /providers\.fetchStockFund\s*\|\|\s*fetchResilientStockFund/,
   )
 })

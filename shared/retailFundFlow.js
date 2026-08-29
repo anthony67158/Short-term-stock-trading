@@ -4,6 +4,8 @@ const finite = (value) => {
   return Number.isFinite(number) ? number : null
 }
 
+const day = (value) => String(value || '').slice(0, 10)
+
 export const RETAIL_FLOW_CAVEAT =
   '小单资金仅按成交规模分类，是散户行为代理，不等于真实账户身份；拆单、对倒和涨跌停成交机制都可能造成偏差。'
 
@@ -72,32 +74,63 @@ export function mergeRetailFundFlow(
   const base = stockFund && typeof stockFund === 'object'
     ? { ...stockFund }
     : null
-  const liveMain = finite(todayQuote?.mainNetYi)
-  const liveRetail = finite(todayQuote?.retailNetYi)
-  const hasLiveQuote = todayQuote?.live === true
-    && (liveMain != null || liveRetail != null)
+  const quoteMain = finite(todayQuote?.mainNetYi)
+  const quoteRetail = finite(todayQuote?.retailNetYi)
+  const quoteMain5d = finite(todayQuote?.main5dYi)
+  const quoteRetail5d = finite(todayQuote?.retail5dYi)
+  const quoteDate = day(
+    todayQuote?.tradeDate || todayQuote?.asOfLabel,
+  )
+  const baseDate = day(
+    base?.asOfDate || base?.historicalAsOfDate,
+  )
+  const quoteAligned = !!quoteDate
+    && (!baseDate || quoteDate === baseDate)
+  const useQuoteDaily = (
+    todayQuote?.live === true || quoteAligned
+  ) && (quoteMain != null || quoteRetail != null)
+  const useQuoteFiveDay = quoteAligned
+    && (quoteMain5d != null || quoteRetail5d != null)
+  const completeHistory = base?.historyComplete === true
+    && stockFundHistoryDayCount(base) >= 5
 
-  if (!base && !hasLiveQuote) return null
+  if (!base && !useQuoteDaily && !useQuoteFiveDay) return null
 
   const merged = {
     ...(base || {}),
-    ...(hasLiveQuote ? {
-      asOfDate: todayQuote?.asOfLabel || base?.asOfDate || null,
-      isHistorical: false,
-      mainNetYi: liveMain,
-      smallNetYi: liveRetail,
-      retailNetYi: liveRetail,
+    ...(!base ? {
+      schemaVersion: 'stock-fund-snapshot.v1',
+      source: todayQuote?.source || 'quote',
+      historyDayCount: 0,
+      historyComplete: false,
+      mainTrend5: [],
+      retailTrend5: [],
+    } : {}),
+    ...(useQuoteDaily ? {
+      asOfDate: quoteDate || base?.asOfDate || null,
+      historicalAsOfDate: todayQuote?.live === true
+        ? base?.historicalAsOfDate || null
+        : quoteDate || base?.historicalAsOfDate || null,
+      isHistorical: todayQuote?.live !== true,
+      mainNetYi: quoteMain,
+      smallNetYi: quoteRetail,
+      retailNetYi: quoteRetail,
     } : {
       retailNetYi: finite(
         base?.retailNetYi ?? base?.smallNetYi,
       ),
     }),
+    ...(useQuoteFiveDay && !completeHistory ? {
+      ...(quoteMain5d != null ? { main5dYi: quoteMain5d } : {}),
+      ...(quoteRetail5d != null
+        ? { retail5dYi: quoteRetail5d }
+        : {}),
+      fiveDaySource: 'quote-aggregate',
+    } : completeHistory ? {
+      fiveDaySource: base?.fiveDaySource || 'daily-history',
+    } : {}),
   }
-  const comparableQuote = hasLiveQuote
-    || (
-      todayQuote?.asOfLabel
-      && todayQuote.asOfLabel === merged.asOfDate
-    )
+  const comparableQuote = useQuoteDaily || useQuoteFiveDay
 
   merged.retailFlow = buildRetailFlowEvidence({
     ...merged,
@@ -134,17 +167,30 @@ export function normalizeFundNoteHistory(note, stockFund = {}) {
   if (!text) return text
   const historyDays = stockFundHistoryDayCount(stockFund)
   if (historyDays >= 5) return text
+  const hasFiveDayAggregate = (
+    finite(stockFund?.main5dYi) != null
+    || finite(stockFund?.retail5dYi) != null
+  )
   const label = historyDays > 0
     ? `当前${historyDays}个交易日`
     : '当前可用历史'
-  const normalized = text.replace(
-    /(?:最近|近)\s*5\s*日/g,
-    label,
+  const normalized = hasFiveDayAggregate
+    ? text.replace(
+        /(?:最近|近)\s*5\s*日(?=\s*(?:序列|逐日|连续))/g,
+        label,
+      )
+    : text.replace(/(?:最近|近)\s*5\s*日/g, label)
+  const caveat = hasFiveDayAggregate
+    ? historyDays > 0
+      ? `已取得5日累计，但逐日资金仅取得${historyDays}个交易日，不能据此判断逐日连续性。`
+      : '已取得5日累计，但逐日资金序列缺失，不能据此判断逐日连续性。'
+    : historyDays > 0
+      ? `历史资金仅取得${historyDays}个交易日，不能据此判断5日持续性。`
+      : '历史资金序列缺失，不能据此判断5日持续性。'
+  return (
+    normalized.includes('不能据此判断5日持续性')
+    || normalized.includes('不能据此判断逐日连续性')
   )
-  const caveat = historyDays > 0
-    ? `历史资金仅取得${historyDays}个交易日，不能据此判断5日持续性。`
-    : '历史资金序列缺失，不能据此判断5日持续性。'
-  return normalized.includes('不能据此判断5日持续性')
     ? normalized
     : `${normalized.replace(/[。；]\s*$/, '')}；${caveat}`
 }
@@ -180,7 +226,14 @@ export function buildStockFundNote(input = {}) {
   const retailNetYi = finite(
     input.retailNetYi ?? input.smallNetYi,
   )
-  if (mainNetYi == null && retailNetYi == null) return ''
+  const main5dYi = finite(input.main5dYi)
+  const retail5dYi = finite(input.retail5dYi)
+  if (
+    mainNetYi == null
+    && retailNetYi == null
+    && main5dYi == null
+    && retail5dYi == null
+  ) return ''
   const mainTrend = compactTrend(input.mainTrend5 ?? input.trend5)
   const retailTrend = compactTrend(input.retailTrend5)
   const historyDays = stockFundHistoryDayCount(input)
@@ -194,15 +247,23 @@ export function buildStockFundNote(input = {}) {
     flowAmountText('小单资金代理当日', retailNetYi),
   ]
   if (complete) {
-    const main5dYi = finite(input.main5dYi)
+    const completeMain5dYi = main5dYi
       ?? +mainTrend.reduce((sum, value) => sum + value, 0).toFixed(2)
-    const retail5dYi = finite(input.retail5dYi)
+    const completeRetail5dYi = retail5dYi
       ?? +retailTrend.reduce((sum, value) => sum + value, 0).toFixed(2)
     parts.push(
       `最近5日主力[${mainTrend.join(',')}]`,
       `小单资金代理[${retailTrend.join(',')}]`,
-      flowAmountText('5日合计主力', main5dYi),
-      flowAmountText('小单资金代理', retail5dYi),
+      flowAmountText('5日合计主力', completeMain5dYi),
+      flowAmountText('小单资金代理', completeRetail5dYi),
+    )
+  } else if (main5dYi != null || retail5dYi != null) {
+    parts.push(
+      flowAmountText('5日累计主力', main5dYi),
+      flowAmountText('5日累计小单资金代理', retail5dYi),
+      historyDays > 0
+        ? `逐日资金仅取得${historyDays}个交易日，不能判断逐日连续性`
+        : '逐日资金序列缺失，不能判断逐日连续性',
     )
   } else {
     parts.push(
@@ -224,7 +285,14 @@ export function compactStockFundSnapshot(input = {}) {
   const retailNetYi = finite(
     input.retailNetYi ?? input.smallNetYi,
   )
-  if (mainNetYi == null && retailNetYi == null) return null
+  const main5dYi = finite(input.main5dYi)
+  const retail5dYi = finite(input.retail5dYi)
+  if (
+    mainNetYi == null
+    && retailNetYi == null
+    && main5dYi == null
+    && retail5dYi == null
+  ) return null
   const mainTrend5 = compactTrend(
     input.mainTrend5 ?? input.trend5,
   )
@@ -241,8 +309,9 @@ export function compactStockFundSnapshot(input = {}) {
     isHistorical: input.isHistorical === true,
     mainNetYi,
     retailNetYi,
-    main5dYi: finite(input.main5dYi),
-    retail5dYi: finite(input.retail5dYi),
+    main5dYi,
+    retail5dYi,
+    fiveDaySource: String(input.fiveDaySource || '').slice(0, 30),
     main5dAvgYi: finite(input.main5dAvgYi),
     retail5dAvgYi: finite(input.retail5dAvgYi),
     historyDayCount,
