@@ -83,11 +83,22 @@ function buildUnownedDecision(input) {
     return emptyDecision(input, ['公式主价位方向或合法价带不正确'])
   }
 
-  const riskDistance = atr > 0 ? atr * 0.8 : null
-  const stop = riskDistance != null
+  const riskDistance = atr > 0
+    ? atr * (pullback ? 0.8 : 1)
+    : null
+  const derivedStop = riskDistance != null
     ? price(primary - riskDistance)
-    : support != null ? price(support * 0.98) : null
-  const target = resistance
+    : null
+  const stop = pullback
+    ? derivedStop ?? (support != null ? price(support * 0.98) : null)
+    : [derivedStop, support]
+        .filter((value) => value != null && value < primary)
+        .sort((left, right) => right - left)[0] ?? null
+  const target = pullback
+    ? resistance
+    : stop != null
+      ? price(primary + (primary - stop) * 2)
+      : null
   const risk = stop != null ? primary - stop : null
   const reward = target != null ? target - primary : null
   const riskReward = risk > 0 && reward > 0

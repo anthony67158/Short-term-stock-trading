@@ -83,6 +83,34 @@ test('未持仓没有公式或赔率不足时不编造买入价格', () => {
   assert.match(poorReward.blockers.join('；'), /盈亏比/)
 })
 
+test('突破观察使用ATR生成入场上方目标而不是沿用原压力', () => {
+  const result = buildFormulaPriceDecision({
+    code: '600001',
+    quote: { price: 10, limitDownPrice: 9, limitUpPrice: 12 },
+    formulaMatches: [matchedFormula({
+      formulaId: 'CLOSE_SQUEEZE',
+      name: '收盘蓄势突破',
+      priceType: 'BREAKOUT_WATCH',
+      anchors: {
+        primary: 10.2,
+        support: 9.8,
+        resistance: 10.19,
+        atr: 0.3,
+      },
+    })],
+    positionMode: 'UNOWNED',
+    marketAllowsRisk: true,
+    dataComplete: true,
+    dataFresh: true,
+  })
+
+  assert.equal(result.action, 'WATCH_BUY')
+  assert.equal(result.primaryPrice, 10.2)
+  assert.ok(result.stopPrice < result.primaryPrice)
+  assert.ok(result.targetPrice > result.primaryPrice)
+  assert.ok(result.riskReward >= 1.8)
+})
+
 test('持仓跌破硬止损时直接输出退出且T+1只延迟执行', () => {
   const result = buildFormulaPriceDecision({
     code: '600001',
