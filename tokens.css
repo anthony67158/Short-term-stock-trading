@@ -82,6 +82,7 @@
   --dur-short: 180ms;
   --dur-long: 280ms;
 
+  --control-size-compact: 36px;
   --control-size: 40px;
   --touch-target: 44px;
   --panel-head-height: 56px;

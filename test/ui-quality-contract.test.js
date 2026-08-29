@@ -99,6 +99,34 @@ test('所有按钮受父容器约束且卖出按钮保持短标签', () => {
   assert.doesNotMatch(planTab, /按浮盈金额排序/)
 })
 
+test('全站同组按钮等高且纯图标按钮保持正方形', () => {
+  assert.match(tokens, /--control-size-compact:\s*36px/)
+  assert.match(
+    precision,
+    /button\.icon-btn\s*{[^}]*width:\s*var\(--icon-button-size\)[^}]*min-width:\s*var\(--icon-button-size\)[^}]*height:\s*var\(--icon-button-size\)[^}]*min-height:\s*var\(--icon-button-size\)[^}]*aspect-ratio:\s*1/s,
+  )
+  assert.match(
+    precision,
+    /\.nav-meta button\.icon-btn\s*{[^}]*--icon-button-size:\s*var\(--control-size-compact\)/s,
+  )
+  assert.match(
+    precision,
+    /\.sector-forecast-head-actions\s*{[^}]*--sector-control-height:\s*var\(--control-size\)/s,
+  )
+  assert.match(
+    precision,
+    /\.portfolio-analysis-controls > :is\([\s\S]*?min-height:\s*var\(--control-size\)/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?button\.icon-btn\s*{[^}]*--icon-button-size:\s*var\(--touch-target\)/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.plan-cand \.pc-actions > button\s*{[^}]*height:\s*var\(--touch-target\)/s,
+  )
+})
+
 test('全站面板、指标、表格与反馈状态使用统一视觉语法', () => {
   assert.match(
     stockPanel,

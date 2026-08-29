@@ -5540,7 +5540,7 @@ body:has(.modal-mask) .card-decision-slot .action-command-preview {
 }
 
 .sector-forecast-head-actions {
-  --sector-control-height: 36px;
+  --sector-control-height: var(--control-size);
   display: flex;
   align-items: center;
   gap: var(--space-2xs);
@@ -15396,5 +15396,183 @@ body.overlay-scroll-locked {
 
   .advice-observation-status strong {
     grid-column: 2;
+  }
+}
+
+/* Control geometry contract: peers share a height; icon controls stay square. */
+button.icon-btn {
+  --icon-button-size: var(--control-size);
+  flex: 0 0 var(--icon-button-size);
+  box-sizing: border-box;
+  width: var(--icon-button-size);
+  min-width: var(--icon-button-size);
+  height: var(--icon-button-size);
+  min-height: var(--icon-button-size);
+  aspect-ratio: 1;
+  padding: 0;
+}
+
+.nav-meta button.icon-btn {
+  --icon-button-size: var(--control-size-compact);
+}
+
+.nav-meta > :is(.nav-refresh, .acct-btn),
+.nav-meta > .undo-wrap > .icon-btn {
+  height: var(--control-size-compact);
+  min-height: var(--control-size-compact);
+}
+
+.sector-forecast-head-actions {
+  align-items: stretch;
+}
+
+.sector-forecast-head-actions > :is(
+  .tabs,
+  .sector-forecast-sort,
+  .sector-forecast-generate,
+  .sector-forecast-settings-trigger
+) {
+  height: var(--sector-control-height);
+  min-height: var(--sector-control-height);
+}
+
+.sector-forecast-head-actions
+  > button.icon-btn.sector-forecast-settings-trigger {
+  --icon-button-size: var(--sector-control-height);
+}
+
+.portfolio-analysis-controls > :is(
+  .portfolio-analysis-review-toggle,
+  .portfolio-analysis-mode,
+  .btn
+) {
+  box-sizing: border-box;
+  min-height: var(--control-size);
+}
+
+.portfolio-analysis-review-toggle,
+.portfolio-analysis-mode {
+  align-content: center;
+}
+
+button:is(
+  .modal-close,
+  .qrp-close,
+  .detail-watch-btn
+) {
+  box-sizing: border-box;
+  width: var(--control-size);
+  min-width: var(--control-size);
+  height: var(--control-size);
+  min-height: var(--control-size);
+  aspect-ratio: 1;
+  padding: 0;
+}
+
+button:is(
+  .alert-banner-close,
+  .execution-cancel,
+  .arp-x,
+  .pc-pin,
+  .star-btn,
+  .del,
+  .di-del,
+  .t-flow-edit-btn,
+  .qrp-del
+) {
+  box-sizing: border-box;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
+  aspect-ratio: 1;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.qrp-actions > :is(.qrp-btn, .qrp-close),
+.dr-head-actions > :is(.icon-btn, .modal-close),
+.modal-actions > :is(.detail-watch-btn, .detail-refresh, .modal-close),
+.holding-plan-footer-actions > :is(.icon-btn, .btn) {
+  height: var(--control-size);
+  min-height: var(--control-size);
+}
+
+@media (max-width: 720px) {
+  button.icon-btn {
+    --icon-button-size: var(--touch-target);
+  }
+
+  .nav-meta button.icon-btn {
+    --icon-button-size: var(--touch-target);
+  }
+
+  .nav-meta > :is(.nav-refresh, .acct-btn),
+  .nav-meta > .undo-wrap > .icon-btn {
+    height: var(--touch-target);
+    min-height: var(--touch-target);
+  }
+
+  .sector-forecast-head-actions {
+    --sector-control-height: var(--touch-target);
+  }
+
+  .plan-cand .pc-actions > button {
+    height: var(--touch-target);
+    min-height: var(--touch-target);
+  }
+
+  .pi-card-tools > button.icon-btn,
+  .plan-cand .pc-actions > button.icon-btn {
+    width: var(--touch-target);
+    min-width: var(--touch-target);
+    height: var(--touch-target);
+    min-height: var(--touch-target);
+  }
+
+  .portfolio-analysis-controls > :is(
+    .portfolio-analysis-review-toggle,
+    .portfolio-analysis-mode,
+    .btn
+  ) {
+    min-height: var(--touch-target);
+  }
+
+  button:is(
+    .modal-close,
+    .qrp-close,
+    .detail-watch-btn
+  ) {
+    width: var(--touch-target);
+    min-width: var(--touch-target);
+    height: var(--touch-target);
+    min-height: var(--touch-target);
+  }
+
+  button:is(
+    .alert-banner-close,
+    .execution-cancel,
+    .arp-x,
+    .pc-pin,
+    .star-btn,
+    .del,
+    .di-del,
+    .t-flow-edit-btn,
+    .qrp-del
+  ) {
+    width: var(--control-size);
+    min-width: var(--control-size);
+    height: var(--control-size);
+    min-height: var(--control-size);
+  }
+}
+
+@media (max-width: 30rem) {
+  .plan-cand .pc-actions.with-review {
+    grid-template-columns:
+      minmax(0, 1fr)
+      minmax(0, 1fr)
+      var(--touch-target);
   }
 }

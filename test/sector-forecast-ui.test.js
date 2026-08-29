@@ -164,7 +164,7 @@ test('板块前瞻桌面信息密集且移动端稳定单列', () => {
   assert.match(styles, /\.sector-forecast-empty-result\s*{/)
   assert.match(
     styles,
-    /\.sector-forecast-head-actions\s*{[\s\S]*--sector-control-height:\s*36px/,
+    /\.sector-forecast-head-actions\s*{[\s\S]*--sector-control-height:\s*var\(--control-size\)/,
   )
   assert.match(
     styles,
