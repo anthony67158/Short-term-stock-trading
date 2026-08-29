@@ -327,7 +327,9 @@ export default function FormulaSelection() {
                 </div>
                 <div className="formula-selection-foot">
                   <span>
-                    全市场检查 {result.universe?.inspectedCount ?? 0} 只
+                    全市场完整读取{' '}
+                    {result.universe?.inspectedCount ?? 0}
+                    /{result.universe?.total ?? 0} 只
                   </span>
                   <span>仅作观察，不自动下单</span>
                 </div>

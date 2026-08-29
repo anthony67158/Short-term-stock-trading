@@ -110,6 +110,15 @@ test('公式选股展示服务端真实计算阶段而不是静态计算中文�
   assert.match(tailPick, /FormulaSelectionProgress/)
 })
 
+test('公式选股明确展示全市场完整读取数量', () => {
+  assert.match(
+    selection,
+    /全市场完整读取[\s\S]*inspectedCount[\s\S]*total/,
+  )
+  assert.match(progress, /counts\.total/)
+  assert.match(progress, /已读取/)
+})
+
 test('个股公式价位沿用详情页单层信息带并隐藏内部枚举', () => {
   assert.match(price, /formula-price-command/)
   assert.match(price, /formula-price-levels/)

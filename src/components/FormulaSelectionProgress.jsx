@@ -41,6 +41,9 @@ function progressDetail(task = {}) {
   ) {
     return `证据 ${counts.evidenceChecked}/${counts.evidenceTotal}`
   }
+  if (Number(counts.total) > 0) {
+    return `全市场 ${Number(counts.inspected) || 0}/${counts.total}`
+  }
   if (Number(counts.inspected) > 0) {
     return `已读取 ${counts.inspected} 只`
   }

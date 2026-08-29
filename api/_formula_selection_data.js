@@ -51,6 +51,24 @@ function validStock(quote = {}, expectedTradeDate = beijingDayKey()) {
   )
 }
 
+export function assertCompleteFormulaUniverse(universe = {}) {
+  const total = Math.floor(Number(universe.total) || 0)
+  const inspected = Math.floor(Number(universe.inspectedCount) || 0)
+  const allList = Array.isArray(universe.allList)
+    ? universe.allList
+    : []
+  const uniqueCodes = new Set(
+    allList
+      .map((item) => String(item?.code || ''))
+      .filter((code) => /^\d{6}$/.test(code)),
+  ).size
+  const completeCount = Math.min(inspected, allList.length, uniqueCodes)
+  if (total <= 0 || completeCount !== total) {
+    throw new Error(`全市场快照不完整：${completeCount}/${total}`)
+  }
+  return allList
+}
+
 export function passesFormulaRealtimePrefilter(
   quote = {},
   mode = 'intraday',
@@ -154,7 +172,8 @@ export async function scanFormulaSelectionCandidates({
     message: '正在读取完整A股行情',
   })
   const universe = await fetchUniverse({ now })
-  const latestQuoteDate = (universe.allList || universe.list || [])
+  const allQuotes = assertCompleteFormulaUniverse(universe)
+  const latestQuoteDate = allQuotes
     .map((item) => String(item?.tradeDate || ''))
     .filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value))
     .sort()
@@ -162,7 +181,7 @@ export async function scanFormulaSelectionCandidates({
   const expectedDate = normalizedMode === 'close'
     ? latestQuoteDate || beijingDayKey(now)
     : beijingDayKey(now)
-  const prefiltered = (universe.allList || universe.list || [])
+  const prefiltered = allQuotes
     .filter((quote) =>
       passesFormulaRealtimePrefilter(
         quote,
@@ -185,6 +204,7 @@ export async function scanFormulaSelectionCandidates({
       `已读取${universe.inspectedCount || 0}只，`
       + `筛出${prefiltered.length}只进入形态检查`,
     counts: {
+      total: universe.total || 0,
       inspected: universe.inspectedCount || 0,
       prefiltered: prefiltered.length,
     },
@@ -200,6 +220,7 @@ export async function scanFormulaSelectionCandidates({
     percent: 28,
     message: `正在检查${prefiltered.length}只股票的日线形态`,
     counts: {
+      total: universe.total || 0,
       inspected: universe.inspectedCount || 0,
       prefiltered: prefiltered.length,
       technicalChecked: 0,
@@ -240,6 +261,7 @@ export async function scanFormulaSelectionCandidates({
           message:
             `正在检查日线形态 ${technicalCompleted}/${prefiltered.length}`,
           counts: {
+            total: universe.total || 0,
             inspected: universe.inspectedCount || 0,
             prefiltered: prefiltered.length,
             technicalChecked: technicalCompleted,
@@ -256,6 +278,7 @@ export async function scanFormulaSelectionCandidates({
     message:
       `${technicalCandidates.length}只进入分时、资金和板块复核`,
     counts: {
+      total: universe.total || 0,
       inspected: universe.inspectedCount || 0,
       prefiltered: prefiltered.length,
       technicalCandidates: technicalCandidates.length,
@@ -330,6 +353,7 @@ export async function scanFormulaSelectionCandidates({
             `正在复核资金与板块 ${evidenceCompleted}`
             + `/${technicalCandidates.length}`,
           counts: {
+            total: universe.total || 0,
             inspected: universe.inspectedCount || 0,
             prefiltered: prefiltered.length,
             technicalCandidates: technicalCandidates.length,
@@ -346,6 +370,7 @@ export async function scanFormulaSelectionCandidates({
     percent: 97,
     message: '正在校验价位并生成最终观察顺序',
     counts: {
+      total: universe.total || 0,
       inspected: universe.inspectedCount || 0,
       prefiltered: prefiltered.length,
       technicalCandidates: technicalCandidates.length,

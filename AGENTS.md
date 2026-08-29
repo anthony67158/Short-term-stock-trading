@@ -149,6 +149,7 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST "$FC/api/ai" -H "Content-Type: 
 ## 关键约定与坑
 
 - **前端设计基线统一读取 `docs/DESIGN.md`**：所有新增或改造组件都必须沿用当前“Apple 空间秩序 + Google Material 状态清晰度 + 交易工作台信息密度”，坚持单层表面、统一 token、明确状态、真实进度和响应式可访问性；同一操作组控件必须等高，纯图标按钮必须以同一 token 约束宽高并保持正方形；禁止卡片套卡片、重复大标题、独立视觉体系、内部枚举直出及无上下文的加载动画。
+- **公式选股必须物理读取完整市场后再筛选**：按代码稳定分页读取全部 A 股并校验 `allList.length === inspectedCount === total`，任何缺页、重复代码或数量不一致都必须失败关闭；实时必要条件和日线必要条件只用于全量读取后的分层减负，禁止按涨幅、排名或固定前 N 只提前截断。最终 `.slice(0, 5)` 只能限制展示结果，不能限制参与筛选的股票。
 - **七个 LLM 角色、十一个固定槽位**（`_llm_config.js`）：`advisor` / `review` / `portfolio` / `agent` / `daily` / `sector` / `judge`。军师主建议使用 `advisor` 两路，定时与 Judge 失效复核使用 `review` 四路，其余角色独立；侧边栏对话统一使用 `agent`。配置存 OSS `config/llm.json` 的 `roleEndpoints`，优先级 **OSS > env > 默认**，改完即时生效免重部署。
 - **角色端点严格隔离**（`_llm_pool.js`）：请求只能进入本角色槽位，禁止跨角色回退；同角色端点先轮询采样，再结合最少在途与近期响应时长优先使用较快端点，连续失败 3 次冷却 60 秒并自动半开恢复。快速与复核必须显式下发 `reasoning_effort=none`，不能仅删除字段后让上游回到默认深度推理。`review` 四路中普通定时复核最多占两路，至少预留两路给到价/Judge 紧急复核；旧配置新增的槽位保持未配置，绝不借用 `advisor` 或复制密钥。旧 `baseUrl` / `endpoints` / `judgeEndpoint` / `sectorEndpoint` 只允许迁移读取，不得作为新功能配置入口。
 - **建议任务按角色分 lane**（`_jobs.js` / `cron_advice.js`）：`data.jobs` 只承载用户单股/一次生成的 `advisor` 任务，`data.reviewJobs` 只承载定时/Judge `review` 任务；同股可各有一个活跃任务。调度按 `resourceRole` 分别计算容量，主批次进度不得混入 review。单股增量按角色使用独立 OSS 对象，复核结果发布前必须校验其基准建议仍是当前版本。

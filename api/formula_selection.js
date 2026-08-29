@@ -203,6 +203,7 @@ export function runFormulaSelection({
           ? `已生成${scanned.candidates.length}只公式观察股`
           : result.reason,
         counts: {
+          total: scanned.universe?.total || 0,
           inspected: scanned.universe?.inspectedCount || 0,
           prefiltered: scanned.universe?.prefilterCount || 0,
           technicalCandidates:

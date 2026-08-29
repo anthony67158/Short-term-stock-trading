@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  assertCompleteFormulaUniverse,
   buildStockFormulaSelection,
   passesFormulaRealtimePrefilter,
   scanFormulaSelectionCandidates,
@@ -81,6 +82,14 @@ test('盘中和收盘预筛使用不同边界且排除风险名称', () => {
 
 test('市场扫描从完整股票池生成最多五个带唯一价位的观察候选', async () => {
   const progress = []
+  const allList = Array.from({ length: 5500 }, (_, index) => (
+    index === 0
+      ? quote()
+      : quote({
+          code: String(100000 + index),
+          amount: 0,
+        })
+  ))
   const result = await scanFormulaSelectionCandidates({
     mode: 'intraday',
     now: Date.UTC(2026, 7, 28, 7),
@@ -93,7 +102,7 @@ test('市场扫描从完整股票池生成最多五个带唯一价位的观察�
     fetchUniverse: async () => ({
       total: 5500,
       inspectedCount: 5500,
-      allList: [quote()],
+      allList,
     }),
     fetchKline: async () => {
       const rows = candles()
@@ -141,8 +150,8 @@ test('公式扫描不会因实时排序只检查前60只而漏掉后续命中', 
       intraday: null,
     },
     fetchUniverse: async () => ({
-      total: 5500,
-      inspectedCount: 5500,
+      total: quotes.length,
+      inspectedCount: quotes.length,
       allList: quotes,
     }),
     fetchKline: async (code) => {
@@ -167,6 +176,19 @@ test('公式扫描不会因实时排序只检查前60只而漏掉后续命中', 
   })
 
   assert.equal(result.candidates[0].code, '600061')
+})
+
+test('公式扫描拒绝用不完整股票列表冒充全市场', async () => {
+  assert.throws(
+    () => assertCompleteFormulaUniverse({
+      total: 5500,
+      inspectedCount: 60,
+      allList: Array.from({ length: 60 }, (_, index) => quote({
+        code: String(600001 + index),
+      })),
+    }),
+    /全市场快照不完整：60\/5500/,
+  )
 })
 
 test('个股价位读取服务端持仓并返回军师只读参考', async () => {
