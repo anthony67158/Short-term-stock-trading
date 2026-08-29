@@ -1180,8 +1180,9 @@ function PlanList({ book, quote, stockTags, batchSel }) {
     const priceView = quoteDisplayState(q)
     const checked = selected.has(p.code)
     const stockNote = stockNoteText(book.stockNotes, p.code)
+    const cardAdvice = getAdvice(p.code, 'buy_advice')?.advice || null
     return (
-      <div className={'trade-card plan-cand' + (p.star ? ' starred' : '') + (selectMode ? ' selectable' : '') + (checked ? ' sel-on' : '')}
+      <div className={'trade-card plan-cand' + (cardAdvice ? ' has-advice' : ' no-advice') + (p.star ? ' starred' : '') + (selectMode ? ' selectable' : '') + (checked ? ' sel-on' : '')}
         key={p.code}
         data-code={p.code}
         onClickCapture={selectMode ? (e) => { e.stopPropagation(); toggleSel(p.code) } : undefined}>
@@ -3032,7 +3033,7 @@ function HoldingItem({ h, quote: q }) {
       {swipe.swiping && isTouch && swipe.dx > 0 && (
         <div className={'hsw-hint hsw-right' + (swipe.dx >= 64 ? ' armed' : '')}><Icon name="chart" size={16} /><span>详情</span></div>
       )}
-      <div className="trade-card hold-item" {...swipe.bind}
+      <div className={'trade-card hold-item' + (holdAdvice ? ' has-advice' : ' no-advice')} {...swipe.bind}
         data-code={h.code}
         style={swipe.dx ? { transform: `translateX(${swipe.dx}px)`, transition: swipe.swiping ? 'none' : 'transform .2s ease' } : undefined}>
       {/* 身份行聚合股票身份、现价和盈亏；仓位与成本留在稳定指标带。 */}

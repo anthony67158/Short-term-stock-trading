@@ -15696,15 +15696,34 @@ button:is(
 /* Trade workspace refinement: calm surfaces and content-led height. */
 .hold-grid,
 .plan-cand-grid {
-  align-items: stretch;
-  grid-auto-rows: 1fr;
+  align-items: start;
+  grid-auto-rows: auto;
 }
 
 .hold-swipe-wrap,
 .hold-select-wrap,
 .hold-swipe-wrap > .hold-item,
 .plan-cand {
+  height: auto;
+}
+
+.plan-cand.has-advice,
+.hold-swipe-wrap:has(> .hold-item.has-advice),
+.hold-select-wrap:has(.hold-item.has-advice) {
+  align-self: stretch;
   height: 100%;
+}
+
+.hold-swipe-wrap:has(> .hold-item.has-advice) > .hold-item,
+.hold-select-wrap:has(.hold-item.has-advice) .hold-item {
+  height: 100%;
+}
+
+.plan-cand.no-advice,
+.hold-swipe-wrap:has(> .hold-item.no-advice),
+.hold-select-wrap:has(.hold-item.no-advice) {
+  align-self: start;
+  height: auto;
 }
 
 .trade-card,
@@ -15733,31 +15752,38 @@ button:is(
 
 .plan-cand.starred,
 html[data-theme="light"] .plan-cand.starred {
-  border-color: transparent;
+  border-color: color-mix(
+    in srgb,
+    var(--color-accent) 52%,
+    var(--color-rule)
+  );
   background: color-mix(
     in srgb,
-    var(--color-warning) 9%,
+    var(--color-accent) 6%,
     var(--color-paper-2)
   );
-  box-shadow:
-    inset 0 3px 0 var(--color-warning),
-    var(--shadow-card);
+  box-shadow: var(--shadow-card);
 }
 
 .plan-cand.starred .pc-pin.on {
   background: color-mix(
     in srgb,
-    var(--color-warning) 16%,
+    var(--color-accent) 14%,
     var(--color-paper-3)
   );
-  color: var(--color-warning);
+  color: var(--color-accent);
   opacity: 1;
 }
 
 .plan-cand.starred.sel-on {
+  border-color: var(--color-accent);
+  background: color-mix(
+    in srgb,
+    var(--color-accent) 9%,
+    var(--color-paper-2)
+  );
   box-shadow:
-    inset 0 3px 0 var(--color-warning),
-    0 0 0 2px var(--color-accent),
+    0 0 0 1px var(--color-accent),
     var(--shadow-card);
 }
 
@@ -15883,10 +15909,12 @@ html[data-theme="light"] .plan-cand.starred {
     grid-auto-rows: auto;
   }
 
-  .hold-swipe-wrap,
-  .hold-select-wrap,
-  .hold-swipe-wrap > .hold-item,
-  .plan-cand {
+  .plan-cand.has-advice,
+  .hold-swipe-wrap:has(> .hold-item.has-advice),
+  .hold-select-wrap:has(.hold-item.has-advice),
+  .hold-swipe-wrap:has(> .hold-item.has-advice) > .hold-item,
+  .hold-select-wrap:has(.hold-item.has-advice) .hold-item {
+    align-self: start;
     height: auto;
   }
 
@@ -15898,13 +15926,11 @@ html[data-theme="light"] .plan-cand.starred {
 
   .plan-cand.starred,
   html[data-theme="light"] .plan-cand.starred {
-    box-shadow: inset 0 3px 0 var(--color-warning);
+    box-shadow: none;
   }
 
   .plan-cand.starred.sel-on {
-    box-shadow:
-      inset 0 3px 0 var(--color-warning),
-      0 0 0 2px var(--color-accent);
+    box-shadow: 0 0 0 1px var(--color-accent);
   }
 
   .stock-card-metrics {

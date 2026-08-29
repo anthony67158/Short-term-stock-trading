@@ -222,7 +222,10 @@ test('持仓与自选卡片共用真实股票题材标签且移动端可换行',
 })
 
 test('持仓与自选卡片使用独立身份行且决策优先于次级指标', () => {
-  assert.match(planTab, /className="trade-card hold-item"/)
+  assert.match(
+    planTab,
+    /className=\{'trade-card hold-item'[\s\S]*?\(holdAdvice \? ' has-advice' : ' no-advice'\)/,
+  )
   assert.match(planTab, /className="stock-card-metrics hold-card-metrics"/)
   assert.match(planTab, /className={'trade-card plan-cand'/)
   assert.doesNotMatch(planTab, /className="stock-card-metrics pc-metrics"/)
@@ -680,16 +683,16 @@ test('持仓页大型展开层统一挂到顶层Portal避免被吸顶区遮盖',
   )
 })
 
-test('持仓与自选卡桌面行级等高且移动端恢复自然高度', () => {
-  assert.match(calmSurface, /\.hold-grid,[\s\S]*?\.plan-cand-grid\s*{[^}]*align-items:\s*stretch[^}]*grid-auto-rows:\s*1fr/s)
-  assert.match(calmSurface, /\.hold-swipe-wrap,[\s\S]*?\.hold-select-wrap,[\s\S]*?\.plan-cand\s*{[^}]*height:\s*100%/s)
+test('持仓与自选卡只对已生成建议项做行级等高', () => {
+  assert.match(calmSurface, /\.hold-grid,[\s\S]*?\.plan-cand-grid\s*{[^}]*align-items:\s*start[^}]*grid-auto-rows:\s*auto/s)
+  assert.match(calmSurface, /\.plan-cand\.has-advice,[\s\S]*?\.hold-select-wrap:has\(\.hold-item\.has-advice\)\s*{[^}]*align-self:\s*stretch[^}]*height:\s*100%/s)
   assert.match(
     calmSurface,
     /\.plan-cand \.card-decision-slot,[\s\S]*?\.hold-item \.card-decision-slot\s*{[^}]*min-height:\s*0/s,
   )
   assert.match(
     calmSurface,
-    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.hold-grid,[\s\S]*?\.plan-cand-grid\s*{[^}]*grid-auto-rows:\s*auto[\s\S]*?\.plan-cand\s*{[^}]*height:\s*auto/s,
+    /\.plan-cand\.no-advice,[\s\S]*?\.hold-select-wrap:has\(\.hold-item\.no-advice\)\s*{[^}]*height:\s*auto/s,
   )
   assert.match(
     precision,
@@ -732,14 +735,14 @@ test('卡片内只保留单行建议摘要且完整内容进入个股详情', ()
   )
 })
 
-test('置顶自选卡使用暖色表面、顶部标记和强化星标', () => {
+test('置顶自选卡使用浅蓝表面、整圈蓝框和强化星标', () => {
   assert.match(
     calmSurface,
-    /\.plan-cand\.starred,[\s\S]*?html\[data-theme="light"\] \.plan-cand\.starred\s*{[^}]*background:\s*color-mix\([^}]*var\(--color-warning\)\s*9%[^}]*box-shadow:\s*inset\s+0\s+3px\s+0\s+var\(--color-warning\),\s*var\(--shadow-card\)/s,
+    /\.plan-cand\.starred,[\s\S]*?html\[data-theme="light"\] \.plan-cand\.starred\s*{[^}]*border-color:\s*color-mix\([^}]*var\(--color-accent\)\s*52%[^}]*background:\s*color-mix\([^}]*var\(--color-accent\)\s*6%[^}]*box-shadow:\s*var\(--shadow-card\)/s,
   )
   assert.match(
     calmSurface,
-    /\.plan-cand\.starred \.pc-pin\.on\s*{[^}]*background:[^}]*color:\s*var\(--color-warning\)[^}]*opacity:\s*1/s,
+    /\.plan-cand\.starred \.pc-pin\.on\s*{[^}]*background:[^}]*color:\s*var\(--color-accent\)[^}]*opacity:\s*1/s,
   )
 })
 

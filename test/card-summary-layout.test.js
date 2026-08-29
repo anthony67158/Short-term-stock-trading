@@ -56,16 +56,26 @@ test('持仓和自选卡展示最近有效价但只用连续竞价价触发动�
   )
 })
 
-test('桌面卡片行级等高但决策区仍由内容驱动', () => {
-  assert.match(planTab, /className="card-decision-slot"/)
-  assert.equal((planTab.match(/className="card-decision-slot"/g) || []).length, 2)
+test('只对已生成建议的卡片做行级等高', () => {
   assert.match(
-    calmSurface,
-    /\.hold-grid,[\s\S]*?\.plan-cand-grid\s*{[^}]*align-items:\s*stretch[^}]*grid-auto-rows:\s*1fr/s,
+    planTab,
+    /'trade-card plan-cand'[\s\S]*?\(cardAdvice \? ' has-advice' : ' no-advice'\)/,
+  )
+  assert.match(
+    planTab,
+    /'trade-card hold-item'[\s\S]*?\(holdAdvice \? ' has-advice' : ' no-advice'\)/,
   )
   assert.match(
     calmSurface,
-    /\.hold-swipe-wrap,[\s\S]*?\.plan-cand\s*{[^}]*height:\s*100%/s,
+    /\.hold-grid,[\s\S]*?\.plan-cand-grid\s*{[^}]*align-items:\s*start[^}]*grid-auto-rows:\s*auto/s,
+  )
+  assert.match(
+    calmSurface,
+    /\.plan-cand\.has-advice,[\s\S]*?\.hold-select-wrap:has\(\.hold-item\.has-advice\)\s*{[^}]*align-self:\s*stretch[^}]*height:\s*100%/s,
+  )
+  assert.match(
+    calmSurface,
+    /\.plan-cand\.no-advice,[\s\S]*?\.hold-select-wrap:has\(\.hold-item\.no-advice\)\s*{[^}]*height:\s*auto/s,
   )
   assert.match(
     calmSurface,
@@ -81,11 +91,7 @@ test('桌面卡片行级等高但决策区仍由内容驱动', () => {
   )
   assert.match(
     design,
-    /Desktop grid rows equalise outer\s+card height[\s\S]*decision region[\s\S]*remains content-led[\s\S]*Mobile keeps natural height/s,
-  )
-  assert.match(
-    calmSurface,
-    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.hold-grid,[\s\S]*?\.plan-cand-grid\s*{[^}]*align-items:\s*start[^}]*grid-auto-rows:\s*auto/s,
+    /Only cards with generated advice[\s\S]*stretch within their desktop grid row[\s\S]*Cards without advice[\s\S]*keep natural height/s,
   )
 })
 
@@ -166,14 +172,20 @@ test('卡片通过留白和弱底色分组而不是连续边线', () => {
   )
 })
 
-test('置顶自选卡使用暖色表面顶部状态线和强化星标', () => {
+test('置顶自选卡使用浅蓝表面整圈蓝框且没有顶部状态线', () => {
   assert.match(
     calmSurface,
-    /\.plan-cand\.starred,[\s\S]*?html\[data-theme="light"\] \.plan-cand\.starred\s*{[^}]*background:\s*color-mix\([^}]*var\(--color-warning\)\s*9%[^}]*box-shadow:\s*inset\s+0\s+3px\s+0\s+var\(--color-warning\),\s*var\(--shadow-card\)/s,
+    /\.plan-cand\.starred,[\s\S]*?html\[data-theme="light"\] \.plan-cand\.starred\s*{[^}]*border-color:\s*color-mix\([^}]*var\(--color-accent\)\s*52%[^}]*background:\s*color-mix\([^}]*var\(--color-accent\)\s*6%[^}]*box-shadow:\s*var\(--shadow-card\)/s,
+  )
+  assert.doesNotMatch(
+    calmSurface.match(
+      /\.plan-cand\.starred,[\s\S]*?html\[data-theme="light"\] \.plan-cand\.starred\s*{[^}]*}/s,
+    )?.[0] || '',
+    /inset\s+0\s+3px/,
   )
   assert.match(
     calmSurface,
-    /\.plan-cand\.starred \.pc-pin\.on\s*{[^}]*background:\s*color-mix\([^}]*var\(--color-warning\)\s*16%[^}]*color:\s*var\(--color-warning\)[^}]*opacity:\s*1/s,
+    /\.plan-cand\.starred \.pc-pin\.on\s*{[^}]*background:\s*color-mix\([^}]*var\(--color-accent\)\s*14%[^}]*color:\s*var\(--color-accent\)[^}]*opacity:\s*1/s,
   )
 })
 
@@ -195,7 +207,7 @@ test('策略摘要不再使用遮挡卡片的悬浮预览且文字区域直接�
 
 test('持仓卡先展示指令再展示仓位核心数据与次级盘面证据', () => {
   const holdStart = planTab.indexOf(
-    '<div className="trade-card hold-item"',
+    "<div className={'trade-card hold-item'",
   )
   const holdEnd = planTab.indexOf(
     '{operationForm && (mobileOperations',
