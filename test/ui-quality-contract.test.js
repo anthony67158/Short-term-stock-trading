@@ -104,6 +104,7 @@ test('所有按钮受父容器约束且卖出按钮保持短标签', () => {
 
 test('全站同组按钮等高且纯图标按钮保持正方形', () => {
   assert.match(tokens, /--control-size-compact:\s*36px/)
+  assert.match(tokens, /--radius-badge:\s*var\(--radius-pill\)/)
   assert.match(
     precision,
     /button\.icon-btn\s*{[^}]*width:\s*var\(--icon-button-size\)[^}]*min-width:\s*var\(--icon-button-size\)[^}]*height:\s*var\(--icon-button-size\)[^}]*min-height:\s*var\(--icon-button-size\)[^}]*aspect-ratio:\s*1/s,

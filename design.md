@@ -185,6 +185,9 @@
   execution condition into distinct visual rows. Use one semantic icon for the
   primary action, render position as a compact badge, and clamp the condition to
   two lines while keeping the full text available in stock detail.
+- Card identity rows align price context and icon controls on one vertical
+  centerline. Status, count and position badges use the shared pill radius;
+  icon buttons use the control radius.
 - Stock detail keeps the execution instruction full width. Position size,
   capital and risk/reward sit in a separate metric strip below it, never in a
   competing side column. Major sections use one rule plus internal spacing,
@@ -240,6 +243,8 @@
   --radius-card: 16px;
   --radius-input: 12px;
   --radius-control: 10px;
+  --radius-pill: 999px;
+  --radius-badge: var(--radius-pill);
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
   --dur-short: 180ms;

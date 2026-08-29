@@ -68,6 +68,7 @@
   --radius-input: 12px;
   --radius-control: 10px;
   --radius-pill: 999px;
+  --radius-badge: var(--radius-pill);
 
   --rule-hair: 1px;
   --rule-fine: 2px;

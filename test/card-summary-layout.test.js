@@ -143,6 +143,18 @@ test('策略摘要分离状态、主动作、仓位和执行条件', () => {
     /\.action-command-main \.action-command-qty\s*{[^}]*border-radius:\s*var\(--radius-badge\)[^}]*background:\s*color-mix/s,
   )
   assert.match(
+    calmSurface,
+    /\.plan-cand \.pc-top\s*{[^}]*align-items:\s*center/s,
+  )
+  assert.match(
+    calmSurface,
+    /\.plan-cand \.pc-price\s*{[^}]*display:\s*inline-flex[^}]*align-items:\s*baseline[^}]*gap:\s*var\(--space-2xs\)/s,
+  )
+  assert.match(
+    calmSurface,
+    /\.plan-cand \.pc-pct\s*{[^}]*align-items:\s*center[^}]*border-radius:\s*var\(--radius-badge\)/s,
+  )
+  assert.match(
     precision,
     /\.card-decision-slot \.action-levels\.editable > \.action-level\s*{[^}]*min-height:\s*72px/s,
   )
