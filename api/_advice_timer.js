@@ -85,6 +85,13 @@ export function tailPickTimerBody(event, cronKey) {
   return { scheduled: true };
 }
 
+export function formulaSelectionTimerBody(event, cronKey) {
+  if (!cronKey || !event || typeof event !== 'object') return null;
+  if (event.triggerName !== 'formula-selection-close-timer') return null;
+  if (String(event.payload || '') !== String(cronKey)) return null;
+  return { scheduled: true, mode: 'close' };
+}
+
 const REVIEW_TIMER_SESSIONS = new Map([
   ['review-noon-open', 'noon'],
   ['review-noon-core', 'noon'],

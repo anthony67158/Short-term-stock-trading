@@ -125,6 +125,13 @@ resources:
             cronExpression: "CRON_TZ=Asia/Shanghai 0 50,52 14 * * 1-5"
             enable: true
             payload: ${env('CRON_KEY')}
+        # 公式选股次日关注：15:05 正式生成，15:10 仅在结果缺失时重试。
+        - triggerName: formula-selection-close-timer
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 5,10 15 * * 1-5"
+            enable: true
+            payload: ${env('CRON_KEY')}
         - triggerName: v2-accuracy-timer
           triggerType: timer
           triggerConfig:

@@ -20,6 +20,7 @@ import {
   adviceWorkerBody,
   dailyReportTimerBody,
   dailyReportWorkerBody,
+  formulaSelectionTimerBody,
   portfolioAnalysisTimerBody,
   portfolioAnalysisWorkerBody,
   reviewTimerBody,
@@ -347,6 +348,10 @@ async function handleRequest(req, res) {
       event,
       process.env.CRON_KEY,
     );
+    const formulaSelectionBody = formulaSelectionTimerBody(
+      event,
+      process.env.CRON_KEY,
+    );
     const portfolioAnalysisBody = portfolioAnalysisWorkerBody(
       event,
       process.env.CRON_KEY,
@@ -359,6 +364,7 @@ async function handleRequest(req, res) {
       && !reviewBody
       && !sectorForecastBody
       && !tailPickBody
+      && !formulaSelectionBody
       && !portfolioAnalysisBody
     ) { res.statusCode = 403; res.end('forbidden'); return; }
     req.query = {};
@@ -369,6 +375,7 @@ async function handleRequest(req, res) {
       || reviewBody
       || sectorForecastBody
       || tailPickBody
+      || formulaSelectionBody
       || portfolioAnalysisBody;
     req.headers['x-cron-key'] = process.env.CRON_KEY;
     res.status = (code) => { res.statusCode = code; return res; };
@@ -389,7 +396,9 @@ async function handleRequest(req, res) {
                   ? 'sector_forecast'
                   : tailPickBody
                     ? 'tail_pick'
-                  : 'portfolio_analysis';
+                    : formulaSelectionBody
+                      ? 'formula_selection'
+                      : 'portfolio_analysis';
       await handlers[handlerName](req, res);
     } catch (e) {
       console.error('[fc] invoke handler failed', e?.code || e?.name || e?.message);

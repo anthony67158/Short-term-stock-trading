@@ -22,7 +22,7 @@ import { beijingDayKey } from '../shared/tradingCalendar.js'
 const MARKET_FS =
   'm:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048'
 const MARKET_FIELDS =
-  'f2,f3,f5,f6,f8,f12,f14,f15,f16,f17,f18,f20,f62,f184,f124'
+  'f2,f3,f5,f6,f8,f10,f12,f14,f15,f16,f17,f18,f20,f62,f184,f124'
 const MIN_FORMULA_GAIN_PCT = 2.4
 const MARKET_PAGE_SIZE = 100
 const MARKET_PAGE_CONCURRENCY = 6
@@ -50,6 +50,7 @@ export function mapTailPickMarketRow(row = {}) {
     volume: finite(row.f5),
     amount: finite(row.f6),
     turnover: finite(row.f8),
+    volumeRatio: finite(row.f10),
     high: finite(row.f15),
     low: finite(row.f16),
     open: finite(row.f17),
@@ -163,6 +164,7 @@ export async function fetchTailPickRealtimePool({
     total,
     pagesRead: pageCount,
     inspectedCount: unique.length,
+    allList: unique,
     list: unique.filter((item) =>
       passesTailPickRealtimePrefilter(item, beijingDayKey(now))
     ),
@@ -283,7 +285,7 @@ async function mapLimit(items, concurrency, mapper) {
   return output
 }
 
-function sectorOpportunityFromTags({
+export function sectorOpportunityFromTags({
   code,
   profile,
   latest,
