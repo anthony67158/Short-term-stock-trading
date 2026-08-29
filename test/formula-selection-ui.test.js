@@ -13,6 +13,13 @@ const candidate = fs.readFileSync(
   ),
   'utf8',
 )
+const progress = fs.readFileSync(
+  new URL(
+    '../src/components/FormulaSelectionProgress.jsx',
+    import.meta.url,
+  ),
+  'utf8',
+)
 const tailPick = fs.readFileSync(
   new URL('../src/components/TailPick.jsx', import.meta.url),
   'utf8',
@@ -35,6 +42,10 @@ const client = fs.readFileSync(
 )
 const styles = fs.readFileSync(
   new URL('../src/styles/precision.css', import.meta.url),
+  'utf8',
+)
+const design = fs.readFileSync(
+  new URL('../docs/DESIGN.md', import.meta.url),
   'utf8',
 )
 
@@ -83,6 +94,48 @@ test('公式选股请求携带账号凭证和明确超时', () => {
   assert.match(client, /AbortController/)
   assert.match(client, /\/api\/formula_selection/)
   assert.match(client, /loadStockFormulaPrice/)
+  assert.match(client, /loadFormulaSelectionProgress/)
+})
+
+test('公式选股展示服务端真实计算阶段而不是静态计算中文案', () => {
+  assert.match(selection, /FormulaSelectionProgress/)
+  assert.match(selection, /loadFormulaSelectionProgress/)
+  assert.match(progress, /role="progressbar"/)
+  assert.match(progress, /核验市场/)
+  assert.match(progress, /读取全市场/)
+  assert.match(progress, /检查日线/)
+  assert.match(progress, /复核资金/)
+  assert.match(progress, /生成结果/)
+  assert.match(progress, /aria-live="polite"/)
+  assert.match(tailPick, /FormulaSelectionProgress/)
+})
+
+test('个股公式价位沿用详情页单层信息带并隐藏内部枚举', () => {
+  assert.match(price, /formula-price-command/)
+  assert.match(price, /formula-price-levels/)
+  assert.match(price, /FORMULA_NAMES/)
+  assert.doesNotMatch(price, /\{decision\.formulaId \|\|/)
+  assert.match(
+    styles,
+    /\.formula-price-panel\s*{[\s\S]*background:\s*transparent/,
+  )
+  assert.match(
+    styles,
+    /\.formula-price-levels\s*{[\s\S]*background:\s*var\(--color-paper-3\)/,
+  )
+  assert.doesNotMatch(
+    styles,
+    /\.formula-price-levels > div\s*{[\s\S]{0,240}border:\s*1px/,
+  )
+})
+
+test('设计参考固化 Apple 空间秩序与 Material 状态清晰度', () => {
+  assert.match(design, /Apple/)
+  assert.match(design, /Material/)
+  assert.match(design, /单层表面/)
+  assert.match(design, /真实进度/)
+  assert.match(design, /44px/)
+  assert.match(design, /prefers-reduced-motion/)
 })
 
 test('公式选股桌面信息密集且移动端稳定单列', () => {

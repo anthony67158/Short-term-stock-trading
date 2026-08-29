@@ -48,6 +48,14 @@ export function runFormulaSelection(mode) {
   }, mode === 'close' ? 100_000 : 70_000)
 }
 
+export function loadFormulaSelectionProgress(mode) {
+  return request(
+    `/api/formula_selection?view=progress&mode=${encodeURIComponent(mode)}`,
+    {},
+    10_000,
+  )
+}
+
 export function loadStockFormulaPrice(code) {
   return request(
     `/api/formula_selection?view=stock&code=${encodeURIComponent(code)}`,

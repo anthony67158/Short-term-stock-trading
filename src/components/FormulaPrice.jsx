@@ -21,6 +21,13 @@ const PRICE_TYPES = {
   RISK_BOUNDARY: '持有风险边界',
 }
 
+const FORMULA_NAMES = {
+  INTRADAY_VWAP_PULLBACK: '盘中回踩承接',
+  INTRADAY_ACCUMULATION: '盘中资金先行',
+  CLOSE_TREND_PULLBACK: '收盘趋势回踩',
+  CLOSE_SQUEEZE: '收盘蓄势突破',
+}
+
 function formatPrice(value) {
   const number = Number(value)
   return Number.isFinite(number) && number > 0
@@ -66,51 +73,88 @@ export default function FormulaPrice({ code }) {
   const decision = state.payload?.decision
   const reference = state.payload?.advisorReference
   const [actionLabel, tone] = ACTIONS[decision?.action] || ACTIONS.AVOID
+  const hasPrice = decision?.primaryPrice != null
+  const formulaName = FORMULA_NAMES[decision?.formulaId]
+    || (decision?.positionMode === 'HELD' ? '持仓风险纪律' : '公式条件未成立')
   return (
-    <section className="formula-price-panel" aria-label="公式价位">
+    <section
+      className="formula-price-panel"
+      aria-labelledby="formula-price-title"
+    >
       <div className="formula-price-head">
-        <div>
-          <strong>公式价位</strong>
-          <span>独立算法计算 · 军师次级参考</span>
+        <div className="formula-price-title">
+          <Icon name="target" size={15} />
+          <div>
+            <strong id="formula-price-title">公式价位</strong>
+            <span>规则计算 · 军师低权重参考</span>
+          </div>
         </div>
         <button
           type="button"
           className="icon-btn"
           onClick={refreshFormulaPrice}
           disabled={state.loading}
+          aria-busy={state.loading}
           aria-label="刷新公式价位"
           title="刷新公式价位"
         >
-          <Icon name="refresh" size={14} />
+          <Icon
+            name="refresh"
+            size={14}
+            className={state.loading ? 'spin' : ''}
+          />
         </button>
       </div>
       {state.loading && (
-        <div className="formula-price-state" role="status">
-          正在计算唯一主路径…
+        <div
+          className="formula-price-state loading"
+          role="status"
+          aria-live="polite"
+        >
+          <Icon name="pulse" size={15} />
+          <div>
+            <strong>正在计算唯一价位</strong>
+            <span>核验行情、技术形态、资金与账户约束</span>
+          </div>
         </div>
       )}
       {!state.loading && state.error && (
         <div className="formula-price-state error" role="alert">
-          {state.error}
+          <Icon name="info" size={15} />
+          <span>{state.error}</span>
+        </div>
+      )}
+      {!state.loading && !state.error && !decision && (
+        <div className="formula-price-state" role="status">
+          <Icon name="info" size={15} />
+          <span>当前没有可用的公式价位</span>
         </div>
       )}
       {!state.loading && !state.error && decision && (
         <>
-          <div className="formula-price-verdict">
-            <span className={tone}>{actionLabel}</span>
-            <strong>
-              {decision.primaryPrice == null
-                ? '本轮不给价格'
-                : `${PRICE_TYPES[decision.priceType] || '唯一主价位'} `
-                  + formatPrice(decision.primaryPrice)}
-            </strong>
+          <div className="formula-price-command" data-tone={tone}>
+            <span className="formula-price-command-icon">
+              <Icon
+                name={decision.action === 'WATCH_BUY' ? 'eye' : 'shield'}
+                size={16}
+              />
+            </span>
+            <div>
+              <strong>{actionLabel}</strong>
+              <span>
+                {hasPrice
+                  ? PRICE_TYPES[decision.priceType] || '唯一主价位'
+                  : '本轮条件不足，不给价格'}
+              </span>
+            </div>
+            <b data-empty={hasPrice ? undefined : 'true'}>
+              {hasPrice
+                ? formatPrice(decision.primaryPrice)
+                : '暂不操作'}
+            </b>
           </div>
-          {decision.primaryPrice != null && (
-            <div className="formula-price-grid">
-              <div>
-                <span>唯一主价位</span>
-                <b>{formatPrice(decision.primaryPrice)}</b>
-              </div>
+          {hasPrice && (
+            <div className="formula-price-levels">
               <div>
                 <span>止损</span>
                 <b className="green">
@@ -135,23 +179,34 @@ export default function FormulaPrice({ code }) {
           )}
           <div className="formula-price-meta">
             <span>
-              {decision.formulaId || '持仓风险规则'}
+              <Icon name="activity" size={12} />
+              {formulaName}
             </span>
             <span>
-              军师参考权重 {
+              <Icon name="scale" size={12} />
+              军师参考 {
                 Math.round(Number(reference?.effectiveWeight || 0) * 100)
               }%
             </span>
             {decision.executionState === 'T1_LOCKED' && (
-              <span className="green">T+1锁定，下一交易日优先处理</span>
+              <span className="green">
+                <Icon name="clock" size={12} />
+                T+1锁定，下一交易日优先处理
+              </span>
             )}
           </div>
           <div className="formula-price-evidence">
             {(decision.evidence || []).slice(0, 3).map((item) => (
-              <span key={item}>{item}</span>
+              <span key={item}>
+                <Icon name="check" size={11} />
+                {item}
+              </span>
             ))}
             {(decision.blockers || []).slice(0, 2).map((item) => (
-              <span className="green" key={item}>{item}</span>
+              <span className="green" key={item}>
+                <Icon name="shield" size={11} />
+                {item}
+              </span>
             ))}
           </div>
         </>

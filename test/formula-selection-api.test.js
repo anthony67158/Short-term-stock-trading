@@ -10,6 +10,9 @@ import {
   runFormulaSelection,
 } from '../api/formula_selection.js'
 import {
+  createFormulaSelectionStore,
+} from '../api/_formula_selection_store.js'
+import {
   formulaSelectionTimerBody,
 } from '../api/_advice_timer.js'
 
@@ -77,9 +80,11 @@ test('盘中和收盘预筛使用不同边界且排除风险名称', () => {
 })
 
 test('市场扫描从完整股票池生成最多五个带唯一价位的观察候选', async () => {
+  const progress = []
   const result = await scanFormulaSelectionCandidates({
     mode: 'intraday',
     now: Date.UTC(2026, 7, 28, 7),
+    onProgress: async (next) => { progress.push(next) },
     marketContext: {
       marketGate: { allowed: true },
       latest: null,
@@ -115,6 +120,11 @@ test('市场扫描从完整股票池生成最多五个带唯一价位的观察�
   assert.equal(result.candidates[0].action, 'WATCH_BUY')
   assert.equal(result.candidates[0].validationState, 'OBSERVE_ONLY')
   assert.ok(result.candidates[0].primaryPrice > 0)
+  assert.deepEqual(
+    [...new Set(progress.map((item) => item.stage))],
+    ['UNIVERSE', 'PREFILTER', 'TECHNICAL', 'EVIDENCE', 'RANKING'],
+  )
+  assert.equal(progress.at(-1).percent, 97)
 })
 
 test('公式扫描不会因实时排序只检查前60只而漏掉后续命中', async () => {
@@ -240,17 +250,26 @@ test('收盘定时器只接受专用触发器和正确密钥', () => {
 
 test('公式选股任务保存同一模式结果并保持幂等', async () => {
   let saved = null
+  const progress = []
   const store = {
     readLatest: async () => saved,
     saveRun: async (_mode, value) => { saved = value },
+    saveProgress: async (_mode, value) => { progress.push(value) },
     claimRun: async () => ({ acquired: true, owner: 'owner' }),
     releaseRun: async () => true,
   }
-  const scan = async () => ({
-    universe: { inspectedCount: 5500 },
-    formulas: [],
-    candidates: [],
-  })
+  const scan = async ({ onProgress }) => {
+    await onProgress({
+      stage: 'TECHNICAL',
+      percent: 60,
+      message: '正在检查日线形态',
+    })
+    return {
+      universe: { inspectedCount: 5500 },
+      formulas: [],
+      candidates: [],
+    }
+  }
 
   const first = await runFormulaSelection({
     mode: 'close',
@@ -274,6 +293,30 @@ test('公式选股任务保存同一模式结果并保持幂等', async () => {
   assert.equal(first.schemaVersion, 'formula-selection.v1')
   assert.equal(first.mode, 'CLOSE')
   assert.equal(second.reused, true)
+  assert.deepEqual(
+    progress.map((item) => item.stage),
+    ['MARKET_GATE', 'TECHNICAL', 'SAVING', 'DONE'],
+  )
+  assert.equal(progress.at(-1).percent, 100)
+})
+
+test('公式选股进度按模式独立持久化并可恢复读取', async () => {
+  const store = createFormulaSelectionStore({
+    hasStorage: () => false,
+  })
+  const task = {
+    id: 'formula-close-1505',
+    mode: 'close',
+    status: 'RUNNING',
+    stage: 'TECHNICAL',
+    percent: 56,
+    message: '正在检查日线形态',
+  }
+
+  await store.saveProgress('close', task)
+
+  assert.deepEqual(await store.readProgress('close'), task)
+  assert.equal(await store.readProgress('intraday'), null)
 })
 
 test('市场闸门不允许新增风险时不启动全市场公式扫描', async () => {

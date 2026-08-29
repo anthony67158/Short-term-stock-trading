@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   isContinuousTrading,
 } from '../../shared/tradingCalendar.js'
 import {
+  loadFormulaSelectionProgress,
   loadFormulaSelectionState,
   runFormulaSelection,
 } from '../formulaSelectionClient.js'
@@ -14,6 +15,7 @@ import FormulaSelectionCandidate, {
   FORMULA_NAMES,
   PRICE_LABELS,
 } from './FormulaSelectionCandidate'
+import FormulaSelectionProgress from './FormulaSelectionProgress'
 
 const MODES = [
   { id: 'intraday', label: '盘中机会' },
@@ -30,8 +32,13 @@ export default function FormulaSelection() {
     error: '',
     intraday: null,
     close: null,
+    progress: {
+      intraday: null,
+      close: null,
+    },
   })
-  const [running, setRunning] = useState(false)
+  const [activeRunMode, setActiveRunMode] = useState('')
+  const activeRunStartedAt = useRef(0)
   const book = usePlanStore()
 
   useEffect(() => {
@@ -44,7 +51,19 @@ export default function FormulaSelection() {
           error: '',
           intraday: payload.intraday || null,
           close: payload.close || null,
+          progress: payload.progress || {
+            intraday: null,
+            close: null,
+          },
         })
+        const runningMode = ['intraday', 'close'].find(
+          (item) => payload.progress?.[item]?.status === 'RUNNING',
+        )
+        if (runningMode) {
+          activeRunStartedAt.current =
+            Number(payload.progress?.[runningMode]?.startedAt) || 0
+          setActiveRunMode(runningMode)
+        }
       })
       .catch((error) => {
         if (!active) return
@@ -59,6 +78,11 @@ export default function FormulaSelection() {
 
   const result = mode === 'tail' ? null : state[mode]
   const candidates = result?.candidates || []
+  const running = Boolean(activeRunMode)
+  const activeTask = activeRunMode
+    ? state.progress?.[activeRunMode]
+    : null
+  const currentTask = mode === activeRunMode ? activeTask : null
   const canRun = mode === 'close' || isContinuousTrading(Date.now())
   const formulaSummary = useMemo(
     () => (result?.formulas || [])
@@ -67,15 +91,109 @@ export default function FormulaSelection() {
     [result],
   )
 
+  useEffect(() => {
+    if (!activeRunMode) return undefined
+    let active = true
+    let polling = false
+    const poll = async () => {
+      if (polling) return
+      polling = true
+      try {
+        const payload = await loadFormulaSelectionProgress(activeRunMode)
+        if (!active) return
+        const task = payload.task || null
+        if (
+          task
+          && activeRunStartedAt.current
+          && Number(task.startedAt || 0)
+            < activeRunStartedAt.current - 5000
+        ) return
+        setState((current) => ({
+          ...current,
+          progress: {
+            ...current.progress,
+            [activeRunMode]: task,
+          },
+        }))
+        if (task?.status === 'DONE') {
+          const latest = await loadFormulaSelectionState()
+          if (!active) return
+          setState((current) => ({
+            ...current,
+            error: '',
+            intraday: latest.intraday || current.intraday,
+            close: latest.close || current.close,
+            progress: latest.progress || current.progress,
+          }))
+          activeRunStartedAt.current = 0
+          setActiveRunMode('')
+        } else if (task?.status === 'FAILED') {
+          setState((current) => ({
+            ...current,
+            error: task.error || task.message || '公式计算失败',
+          }))
+          activeRunStartedAt.current = 0
+          setActiveRunMode('')
+        }
+      } catch {
+        // The original generation request remains authoritative.
+      } finally {
+        polling = false
+      }
+    }
+    const timer = setInterval(poll, 1500)
+    return () => {
+      active = false
+      clearInterval(timer)
+    }
+  }, [activeRunMode])
+
   const run = async () => {
     if (running || mode === 'tail' || !canRun) return
-    setRunning(true)
-    setState((current) => ({ ...current, error: '' }))
+    const runMode = mode
+    let keepPolling = false
+    activeRunStartedAt.current = Date.now()
+    setActiveRunMode(runMode)
+    setState((current) => ({
+      ...current,
+      error: '',
+      progress: {
+        ...current.progress,
+        [runMode]: {
+          status: 'RUNNING',
+          stage: 'MARKET_GATE',
+          percent: 3,
+          message: '正在启动公式计算',
+        },
+      },
+    }))
     try {
-      const payload = await runFormulaSelection(mode)
+      const payload = await runFormulaSelection(runMode)
+      if (payload.running) {
+        keepPolling = true
+        activeRunStartedAt.current =
+          Number(payload.task?.startedAt) || activeRunStartedAt.current
+        setState((current) => ({
+          ...current,
+          progress: {
+            ...current.progress,
+            [runMode]: payload.task || current.progress?.[runMode],
+          },
+        }))
+        return
+      }
       setState((current) => ({
         ...current,
-        [mode]: payload,
+        [runMode]: payload,
+        progress: {
+          ...current.progress,
+          [runMode]: {
+            ...current.progress?.[runMode],
+            status: 'DONE',
+            stage: 'DONE',
+            percent: 100,
+          },
+        },
       }))
     } catch (error) {
       setState((current) => ({
@@ -83,7 +201,10 @@ export default function FormulaSelection() {
         error: String(error?.message || error),
       }))
     } finally {
-      setRunning(false)
+      if (!keepPolling) {
+        activeRunStartedAt.current = 0
+        setActiveRunMode('')
+      }
     }
   }
 
@@ -138,15 +259,21 @@ export default function FormulaSelection() {
           className="btn btn-primary"
           onClick={run}
           disabled={running || !canRun}
+          aria-busy={mode === activeRunMode}
           title={!canRun ? '盘中公式仅在连续竞价期间运行' : ''}
         >
-          <Icon name={running ? 'refresh' : 'play'} size={14} />
-          {running
-            ? '计算中'
+          <Icon
+            name={mode === activeRunMode ? 'refresh' : 'play'}
+            size={14}
+            className={mode === activeRunMode ? 'spin' : ''}
+          />
+          {mode === activeRunMode
+            ? `计算中 ${Math.round(Number(currentTask?.percent) || 3)}%`
             : mode === 'intraday' ? '扫描当前机会' : '生成次日关注'}
         </button>
       </div>
       {tabs}
+      <FormulaSelectionProgress task={activeTask} />
       <div className="formula-selection-body">
             {state.loading && !result && (
               <div className="formula-selection-state" role="status">
@@ -158,7 +285,7 @@ export default function FormulaSelection() {
                 {state.error}
               </div>
             )}
-            {!state.loading && !state.error && !result && (
+            {!state.loading && !state.error && !result && !currentTask && (
               <div className="formula-selection-state">
                 {mode === 'intraday'
                   ? '尚无盘中结果'

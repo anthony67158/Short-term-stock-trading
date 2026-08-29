@@ -10,6 +10,7 @@ export const FORMULA_SELECTION_PREFIX = 'market/formula-selection/v1/'
 
 const memoryLatest = new Map()
 const memoryClaims = new Map()
+const memoryProgress = new Map()
 const CLAIM_TTL_MS = 3 * 60 * 1000
 
 function safeMode(value) {
@@ -53,6 +54,8 @@ export function createFormulaSelectionStore(storage = {
   const runPath = (mode, date, slot) =>
     `${FORMULA_SELECTION_PREFIX}runs/${safeDate(date)}/`
       + `${safeMode(mode)}-${String(slot || 'manual')}.json`
+  const progressPath = (mode) =>
+    `${FORMULA_SELECTION_PREFIX}runtime/${safeMode(mode)}.json`
 
   return {
     async readLatest(mode) {
@@ -71,6 +74,21 @@ export function createFormulaSelectionStore(storage = {
       await write(runPath(normalized, date, slot), value)
       await write(latestPath(normalized), value)
       return value
+    },
+    async readProgress(mode) {
+      const normalized = safeMode(mode)
+      if (!storage.hasStorage()) {
+        return memoryProgress.get(normalized) || null
+      }
+      return storage.readJson(progressPath(normalized)).catch(() => null)
+    },
+    async saveProgress(mode, value) {
+      const normalized = safeMode(mode)
+      if (!storage.hasStorage()) {
+        memoryProgress.set(normalized, value)
+        return value
+      }
+      return write(progressPath(normalized), value)
     },
     async claimRun(mode, date, slot = 'manual', now = Date.now()) {
       const normalized = safeMode(mode)

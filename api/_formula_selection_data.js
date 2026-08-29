@@ -141,9 +141,18 @@ export async function scanFormulaSelectionCandidates({
   fetchFund = fetchStockFund,
   fetchTags = fetchStockTagProfile,
   matchSector = sectorOpportunityFromTags,
+  onProgress = null,
   now = Date.now(),
 } = {}) {
   const normalizedMode = mode === 'close' ? 'close' : 'intraday'
+  const report = async (progress) => {
+    if (typeof onProgress === 'function') await onProgress(progress)
+  }
+  await report({
+    stage: 'UNIVERSE',
+    percent: 12,
+    message: '正在读取完整A股行情',
+  })
   const universe = await fetchUniverse({ now })
   const latestQuoteDate = (universe.allList || universe.list || [])
     .map((item) => String(item?.tradeDate || ''))
@@ -169,91 +178,179 @@ export async function scanFormulaSelectionCandidates({
       right.cheapScore - left.cheapScore
       || String(left.quote.code).localeCompare(String(right.quote.code))
     )
+  await report({
+    stage: 'PREFILTER',
+    percent: 24,
+    message:
+      `已读取${universe.inspectedCount || 0}只，`
+      + `筛出${prefiltered.length}只进入形态检查`,
+    counts: {
+      inspected: universe.inspectedCount || 0,
+      prefiltered: prefiltered.length,
+    },
+  })
   const deferredBlockers = new Set([
     '最近分钟线未确认承接',
     '分钟价格未稳定在VWAP上方',
     '板块方向未确认',
     '资金承接未确认',
   ])
+  await report({
+    stage: 'TECHNICAL',
+    percent: 28,
+    message: `正在检查${prefiltered.length}只股票的日线形态`,
+    counts: {
+      inspected: universe.inspectedCount || 0,
+      prefiltered: prefiltered.length,
+      technicalChecked: 0,
+      technicalTotal: prefiltered.length,
+    },
+  })
+  let technicalCompleted = 0
   const technicalCandidates = (await mapLimit(
     prefiltered,
     12,
     async ({ quote }) => {
-      const kline = await fetchKline(quote.code, '101', 60)
-        .catch(() => null)
-      if (!kline?.candles?.length) return null
-      const preliminary = evaluateFormulaSelection({
-        mode: normalizedMode,
-        candles: kline.candles,
-        quote,
-        trends: [],
-        fund: {},
-        sectorOpportunity: { matched: false },
-      })
-      const possible = preliminary.evaluations.some((item) =>
-        item.blockers.every((blocker) => deferredBlockers.has(blocker))
-      )
-      return possible ? { quote, kline } : null
+      let candidate = null
+      try {
+        const kline = await fetchKline(quote.code, '101', 60)
+          .catch(() => null)
+        if (kline?.candles?.length) {
+          const preliminary = evaluateFormulaSelection({
+            mode: normalizedMode,
+            candles: kline.candles,
+            quote,
+            trends: [],
+            fund: {},
+            sectorOpportunity: { matched: false },
+          })
+          const possible = preliminary.evaluations.some((item) =>
+            item.blockers.every((blocker) => deferredBlockers.has(blocker))
+          )
+          if (possible) candidate = { quote, kline }
+        }
+        return candidate
+      } finally {
+        technicalCompleted += 1
+        await report({
+          stage: 'TECHNICAL',
+          percent: prefiltered.length
+            ? 28 + Math.floor(50 * technicalCompleted / prefiltered.length)
+            : 78,
+          message:
+            `正在检查日线形态 ${technicalCompleted}/${prefiltered.length}`,
+          counts: {
+            inspected: universe.inspectedCount || 0,
+            prefiltered: prefiltered.length,
+            technicalChecked: technicalCompleted,
+            technicalTotal: prefiltered.length,
+          },
+        })
+      }
     },
   )).filter(Boolean)
 
+  await report({
+    stage: 'EVIDENCE',
+    percent: 80,
+    message:
+      `${technicalCandidates.length}只进入分时、资金和板块复核`,
+    counts: {
+      inspected: universe.inspectedCount || 0,
+      prefiltered: prefiltered.length,
+      technicalCandidates: technicalCandidates.length,
+    },
+  })
+  let evidenceCompleted = 0
   const evaluated = await mapLimit(
     technicalCandidates,
     8,
     async ({ quote, kline }) => {
-      const [trendData, fund, tags] = await Promise.all([
-      normalizedMode === 'intraday'
-        ? fetchTrends(quote.code).catch(() => null)
-        : Promise.resolve(null),
-      fetchFund(quote.code, {
-        preferRealtime: normalizedMode === 'intraday',
-        fetchedAt: now,
-      }).catch(() => null),
-      fetchTags(quote.code).catch(() => null),
-      ])
-      if (!fund || !tags) return null
-      const sectorOpportunity = matchSector({
-        code: quote.code,
-        profile: tags,
-        latest: marketContext?.latest,
-        intraday: marketContext?.intraday,
-        now,
-      })
-      const formula = evaluateFormulaSelection({
-        mode: normalizedMode,
-        candles: kline.candles,
-        quote,
-        trends: trendData?.trends || [],
-        fund,
-        sectorOpportunity,
-      })
-      const decision = buildFormulaPriceDecision({
-        code: quote.code,
-        quote,
-        formulaMatches: formula.matches,
-        positionMode: 'UNOWNED',
-        marketAllowsRisk: marketContext?.marketGate?.allowed === true,
-        dataComplete: true,
-        dataFresh: true,
-        now,
-      })
-      if (decision.action !== 'WATCH_BUY') return null
-      return {
-        code: quote.code,
-        name: quote.name || kline.name || tags.name,
-        quote,
-        fund,
-        tags,
-        sectorOpportunity,
-        formula,
-        decision,
-        score:
-          Number(formula.matches[0]?.score || 0)
-          + Math.max(-5, Math.min(5, Number(fund.mainNetYi || 0))),
+      try {
+        const [trendData, fund, tags] = await Promise.all([
+          normalizedMode === 'intraday'
+            ? fetchTrends(quote.code).catch(() => null)
+            : Promise.resolve(null),
+          fetchFund(quote.code, {
+            preferRealtime: normalizedMode === 'intraday',
+            fetchedAt: now,
+          }).catch(() => null),
+          fetchTags(quote.code).catch(() => null),
+        ])
+        if (!fund || !tags) return null
+        const sectorOpportunity = matchSector({
+          code: quote.code,
+          profile: tags,
+          latest: marketContext?.latest,
+          intraday: marketContext?.intraday,
+          now,
+        })
+        const formula = evaluateFormulaSelection({
+          mode: normalizedMode,
+          candles: kline.candles,
+          quote,
+          trends: trendData?.trends || [],
+          fund,
+          sectorOpportunity,
+        })
+        const decision = buildFormulaPriceDecision({
+          code: quote.code,
+          quote,
+          formulaMatches: formula.matches,
+          positionMode: 'UNOWNED',
+          marketAllowsRisk: marketContext?.marketGate?.allowed === true,
+          dataComplete: true,
+          dataFresh: true,
+          now,
+        })
+        if (decision.action !== 'WATCH_BUY') return null
+        return {
+          code: quote.code,
+          name: quote.name || kline.name || tags.name,
+          quote,
+          fund,
+          tags,
+          sectorOpportunity,
+          formula,
+          decision,
+          score:
+            Number(formula.matches[0]?.score || 0)
+            + Math.max(-5, Math.min(5, Number(fund.mainNetYi || 0))),
+        }
+      } finally {
+        evidenceCompleted += 1
+        await report({
+          stage: 'EVIDENCE',
+          percent: technicalCandidates.length
+            ? 80 + Math.floor(
+                15 * evidenceCompleted / technicalCandidates.length
+              )
+            : 95,
+          message:
+            `正在复核资金与板块 ${evidenceCompleted}`
+            + `/${technicalCandidates.length}`,
+          counts: {
+            inspected: universe.inspectedCount || 0,
+            prefiltered: prefiltered.length,
+            technicalCandidates: technicalCandidates.length,
+            evidenceChecked: evidenceCompleted,
+            evidenceTotal: technicalCandidates.length,
+          },
+        })
       }
     },
   )
 
+  await report({
+    stage: 'RANKING',
+    percent: 97,
+    message: '正在校验价位并生成最终观察顺序',
+    counts: {
+      inspected: universe.inspectedCount || 0,
+      prefiltered: prefiltered.length,
+      technicalCandidates: technicalCandidates.length,
+    },
+  })
   const ranked = evaluated
     .filter(Boolean)
     .sort((left, right) =>

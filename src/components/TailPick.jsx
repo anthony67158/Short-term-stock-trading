@@ -9,6 +9,7 @@ import {
   evaluateAccountCircuitBreaker,
 } from '../../shared/accountCircuitBreaker.js'
 import Icon from './Icon'
+import FormulaSelectionProgress from './FormulaSelectionProgress'
 import TailPickResults from './TailPickResults'
 import {
   planStore,
@@ -164,29 +165,31 @@ export default function TailPick({
           type="button"
           className="btn btn-primary tail-pick-run"
           disabled={runDisabled}
+          aria-busy={running}
           onClick={run}
         >
-          <Icon name={running ? 'refresh' : 'play'} size={14} />
+          <Icon
+            name={running ? 'refresh' : 'play'}
+            size={14}
+            className={running ? 'spin' : ''}
+          />
           {buttonLabel}
         </button>
       </div>
 
       {navigation}
 
-      {running && (
-        <div
-          className="tail-pick-progress"
-          role="progressbar"
-          aria-valuemin="0"
-          aria-valuemax="100"
-          aria-valuenow={progress}
-          aria-live="polite"
-        >
-          <span style={{ width: `${progress}%` }} />
-          <b>{STAGES[task?.stage] || '准备扫描'}</b>
-          <em>{progress}%</em>
-        </div>
-      )}
+      <FormulaSelectionProgress
+        task={running
+          ? {
+              ...task,
+              status: 'RUNNING',
+              percent: progress,
+              message: STAGES[task?.stage] || '准备扫描',
+            }
+          : null}
+        mode="tail"
+      />
 
       {error && <div className="err tail-pick-error">{error}</div>}
 

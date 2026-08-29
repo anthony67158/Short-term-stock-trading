@@ -27,6 +27,7 @@ import {
 export const FORMULA_SELECTION_SCHEMA_VERSION = 'formula-selection.v1'
 
 const runFlights = new Map()
+const PROGRESS_STALE_MS = 4 * 60 * 1000
 
 function reply(res, status, body) {
   res.status(status)
@@ -42,6 +43,48 @@ function modeSlot(mode, now) {
   if (mode === 'close') return '1505'
   const minutes = beijingMinutes(now)
   return String(Math.floor(minutes / 5) * 5).padStart(4, '0')
+}
+
+function createProgressReporter({
+  store,
+  mode,
+  task,
+  now,
+}) {
+  let current = task
+  let lastStage = ''
+  let lastPercent = -100
+  let writeQueue = Promise.resolve()
+  return async (update = {}, { force = false } = {}) => {
+    const stage = String(update.stage || current.stage || 'PREPARING')
+    const percent = Math.max(
+      1,
+      Math.min(100, Math.round(Number(update.percent) || 1)),
+    )
+    const shouldWrite = (
+      force
+      || stage !== lastStage
+      || percent >= lastPercent + 3
+    )
+    current = {
+      ...current,
+      ...update,
+      stage,
+      percent,
+      updatedAt: Number(now()) || Date.now(),
+    }
+    if (!shouldWrite || typeof store.saveProgress !== 'function') {
+      return current
+    }
+    lastStage = stage
+    lastPercent = percent
+    const snapshot = current
+    writeQueue = writeQueue
+      .catch(() => {})
+      .then(() => store.saveProgress(mode, snapshot).catch(() => snapshot))
+    await writeQueue
+    return snapshot
+  }
 }
 
 export function runFormulaSelection({
@@ -81,9 +124,31 @@ export function runFormulaSelection({
         tradeDate,
         slot,
         running: true,
+        task: typeof store.readProgress === 'function'
+          ? await store.readProgress(normalized)
+          : null,
       }
     }
+    const task = {
+      id: `formula-${tradeDate}-${normalized}-${slot}`,
+      mode: normalized,
+      tradeDate,
+      slot,
+      status: 'RUNNING',
+      stage: 'MARKET_GATE',
+      percent: 4,
+      message: '正在核验市场环境与运行窗口',
+      startedAt: timestamp,
+      updatedAt: timestamp,
+    }
+    const reportProgress = createProgressReporter({
+      store,
+      mode: normalized,
+      task,
+      now,
+    })
     try {
+      await reportProgress(task, { force: true })
       const marketContext = await collectMarketContext({ now: timestamp })
       const marketAllowed = marketContext?.marketGate?.allowed === true
       const scanned = marketAllowed
@@ -91,6 +156,7 @@ export function runFormulaSelection({
             mode: normalized,
             marketContext,
             now: timestamp,
+            onProgress: reportProgress,
           })
         : {
             universe: {
@@ -123,8 +189,39 @@ export function runFormulaSelection({
             : marketContext?.marketGate?.blockers?.[0]
               || '市场环境不允许新增风险',
       }
+      await reportProgress({
+        stage: 'SAVING',
+        percent: 99,
+        message: '正在保存本次公式结果',
+      }, { force: true })
       await store.saveRun(normalized, result)
+      await reportProgress({
+        status: 'DONE',
+        stage: 'DONE',
+        percent: 100,
+        message: scanned.candidates.length
+          ? `已生成${scanned.candidates.length}只公式观察股`
+          : result.reason,
+        counts: {
+          inspected: scanned.universe?.inspectedCount || 0,
+          prefiltered: scanned.universe?.prefilterCount || 0,
+          technicalCandidates:
+            scanned.universe?.technicalCandidateCount || 0,
+          matched: scanned.candidates.length,
+        },
+        finishedAt: Number(now()) || Date.now(),
+      }, { force: true })
       return result
+    } catch (error) {
+      await reportProgress({
+        status: 'FAILED',
+        stage: 'FAILED',
+        percent: 100,
+        message: '公式计算失败',
+        error: String(error?.message || error).slice(0, 180),
+        finishedAt: Number(now()) || Date.now(),
+      }, { force: true }).catch(() => {})
+      throw error
     } finally {
       await store.releaseRun(claim).catch(() => {})
     }
@@ -140,17 +237,57 @@ export async function readFormulaSelectionState({
   store = formulaSelectionStore,
   tailReader = readTailPickState,
 } = {}) {
-  const [intraday, close, tail] = await Promise.all([
+  const [
+    intraday,
+    close,
+    tail,
+    intradayProgress,
+    closeProgress,
+  ] = await Promise.all([
     store.readLatest('intraday'),
     store.readLatest('close'),
     tailReader().catch(() => null),
+    readFormulaSelectionProgress({ mode: 'intraday', store }),
+    readFormulaSelectionProgress({ mode: 'close', store }),
   ])
   return {
     schemaVersion: FORMULA_SELECTION_SCHEMA_VERSION,
     intraday,
     close,
     tail: tail?.displayResult || tail?.latest || null,
+    progress: {
+      intraday: intradayProgress,
+      close: closeProgress,
+    },
   }
+}
+
+export async function readFormulaSelectionProgress({
+  mode,
+  store = formulaSelectionStore,
+  timestamp = Date.now(),
+} = {}) {
+  const normalized = normalizedMode(mode)
+  if (!['intraday', 'close'].includes(normalized)) {
+    throw new Error('公式选股运行模式无效')
+  }
+  const task = typeof store.readProgress === 'function'
+    ? await store.readProgress(normalized)
+    : null
+  if (
+    task?.status === 'RUNNING'
+    && timestamp - Number(task.updatedAt || task.startedAt || 0)
+      > PROGRESS_STALE_MS
+  ) {
+    return {
+      ...task,
+      status: 'FAILED',
+      stage: 'FAILED',
+      percent: 100,
+      message: '上次公式计算已超时，可重新运行',
+    }
+  }
+  return task
 }
 
 export default async function handler(req, res) {
@@ -191,6 +328,20 @@ export default async function handler(req, res) {
     }
     if (req.method === 'GET') {
       const view = String(req.query?.view || 'latest')
+      if (view === 'progress') {
+        const mode = normalizedMode(req.query?.mode)
+        if (!['intraday', 'close'].includes(mode)) {
+          return reply(res, 400, {
+            ok: false,
+            error: '运行模式无效',
+            errorCode: 'INVALID_MODE',
+          })
+        }
+        return reply(res, 200, {
+          ok: true,
+          task: await readFormulaSelectionProgress({ mode }),
+        })
+      }
       if (view === 'stock') {
         const code = String(req.query?.code || '')
         if (!/^\d{6}$/.test(code)) {

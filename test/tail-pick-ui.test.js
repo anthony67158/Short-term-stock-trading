@@ -10,6 +10,7 @@ const read = (path) => readFileSync(
 const today = read('src/components/TodayTab.jsx')
 const formulaSelection = read('src/components/FormulaSelection.jsx')
 const component = read('src/components/TailPick.jsx')
+const progress = read('src/components/FormulaSelectionProgress.jsx')
 const candidate = read('src/components/TailPickCandidate.jsx')
 const results = read('src/components/TailPickResults.jsx')
 const client = read('src/tailPickClient.js')
@@ -35,7 +36,8 @@ test('尾盘拾金支持14:50自动正式扫描和手动试算', () => {
   assert.match(component, /扫描公式信号/)
   assert.match(component, /执行纪律过滤/)
   assert.match(component, /生成最终顺序/)
-  assert.match(component, /role="progressbar"/)
+  assert.match(component, /FormulaSelectionProgress/)
+  assert.match(progress, /role="progressbar"/)
   assert.match(component, /session\.canRun/)
 })
 
