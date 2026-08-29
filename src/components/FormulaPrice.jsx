@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   loadStockFormulaPrice,
 } from '../formulaSelectionClient.js'
+import {
+  buildFormulaPriceExplanation,
+} from '../formulaPriceView.js'
 import Icon from './Icon'
 
 const ACTIONS = {
@@ -19,13 +22,6 @@ const PRICE_TYPES = {
   DISTRIBUTION_REDUCE: '减仓参考价',
   TARGET_REDUCE: '目标减仓价',
   RISK_BOUNDARY: '持有风险边界',
-}
-
-const FORMULA_NAMES = {
-  INTRADAY_VWAP_PULLBACK: '盘中回踩承接',
-  INTRADAY_ACCUMULATION: '盘中资金先行',
-  CLOSE_TREND_PULLBACK: '收盘趋势回踩',
-  CLOSE_SQUEEZE: '收盘蓄势突破',
 }
 
 function formatPrice(value) {
@@ -74,8 +70,7 @@ export default function FormulaPrice({ code }) {
   const reference = state.payload?.advisorReference
   const [actionLabel, tone] = ACTIONS[decision?.action] || ACTIONS.AVOID
   const hasPrice = decision?.primaryPrice != null
-  const formulaName = FORMULA_NAMES[decision?.formulaId]
-    || (decision?.positionMode === 'HELD' ? '持仓风险纪律' : '公式条件未成立')
+  const explanation = buildFormulaPriceExplanation(state.payload)
   return (
     <section
       className="formula-price-panel"
@@ -144,7 +139,9 @@ export default function FormulaPrice({ code }) {
               <span>
                 {hasPrice
                   ? PRICE_TYPES[decision.priceType] || '唯一主价位'
-                  : '本轮条件不足，不给价格'}
+                  : explanation.computed
+                    ? '公式已运行，查看下方原因'
+                    : '公式尚未完成计算'}
               </span>
             </div>
             <b data-empty={hasPrice ? undefined : 'true'}>
@@ -177,10 +174,36 @@ export default function FormulaPrice({ code }) {
               </div>
             </div>
           )}
+          {decision.action === 'AVOID' && (
+            <div className="formula-price-reason" role="note">
+              <div className="formula-price-reason-head">
+                <span>
+                  <Icon name="info" size={13} />
+                  为什么暂不买
+                </span>
+                <small>{explanation.status}</small>
+              </div>
+              <strong>{explanation.title}</strong>
+              {explanation.reasons.length > 0 && (
+                <ul>
+                  {explanation.reasons.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              )}
+              {(explanation.moreCount > 0 || explanation.alternative) && (
+                <small>
+                  {explanation.moreCount > 0
+                    ? `另有${explanation.moreCount}项未通过`
+                    : explanation.alternative}
+                </small>
+              )}
+            </div>
+          )}
           <div className="formula-price-meta">
             <span>
               <Icon name="activity" size={12} />
-              {formulaName}
+              {explanation.formulaName}
             </span>
             <span>
               <Icon name="scale" size={12} />
@@ -202,12 +225,13 @@ export default function FormulaPrice({ code }) {
                 {item}
               </span>
             ))}
-            {(decision.blockers || []).slice(0, 2).map((item) => (
+            {decision.action !== 'AVOID'
+              && (decision.blockers || []).slice(0, 2).map((item) => (
               <span className="green" key={item}>
                 <Icon name="shield" size={11} />
                 {item}
               </span>
-            ))}
+              ))}
           </div>
         </>
       )}

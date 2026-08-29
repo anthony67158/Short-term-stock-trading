@@ -122,7 +122,7 @@ test('公式选股明确展示全市场完整读取数量', () => {
 test('个股公式价位沿用详情页单层信息带并隐藏内部枚举', () => {
   assert.match(price, /formula-price-command/)
   assert.match(price, /formula-price-levels/)
-  assert.match(price, /FORMULA_NAMES/)
+  assert.match(price, /buildFormulaPriceExplanation/)
   assert.doesNotMatch(price, /\{decision\.formulaId \|\|/)
   assert.match(
     styles,
@@ -136,6 +136,15 @@ test('个股公式价位沿用详情页单层信息带并隐藏内部枚举', ()
     styles,
     /\.formula-price-levels > div\s*{[\s\S]{0,240}border:\s*1px/,
   )
+})
+
+test('个股公式未命中时展示已计算状态和具体失败条件', () => {
+  assert.match(price, /buildFormulaPriceExplanation/)
+  assert.match(price, /formula-price-reason/)
+  assert.match(price, /为什么暂不买/)
+  assert.match(price, /explanation\.reasons/)
+  assert.match(price, /explanation\.alternative/)
+  assert.doesNotMatch(price, /本轮条件不足，不给价格/)
 })
 
 test('设计参考固化 Apple 空间秩序与 Material 状态清晰度', () => {
