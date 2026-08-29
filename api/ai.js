@@ -134,6 +134,15 @@ import {
   buildTGridExperiment,
   evaluateTGridEligibility,
 } from '../shared/tGridPolicy.js';
+import {
+  evaluateFormulaSelection,
+} from '../shared/formulaSelection.js';
+import {
+  buildFormulaPriceDecision,
+} from '../shared/formulaPriceEngine.js';
+import {
+  buildFormulaEvidenceReference,
+} from '../shared/formulaEvidencePolicy.js';
 import { internalApiOrigin } from './_internal_origin.js';
 import { loadSectorOpportunity } from './_sector_opportunity.js';
 import {
@@ -700,6 +709,7 @@ export default async function handler(req, res) {
     delete payload.strategyGate;
     delete payload.strategyRoute;
     delete payload.opportunityCost;
+    delete payload.formulaPriceReference;
     if (isAdvisorMode(mode) && accountAuth.account?.data) {
       const opportunityCost = portfolioOpportunityCostForStock(
         accountAuth.account.data,
@@ -1637,6 +1647,73 @@ export default async function handler(req, res) {
               : '综合共振/信号回测/大盘环境/消息面/军师历史真实胜率得出，非胜率承诺',
           };
         }
+        if (
+          ['buy_advice', 'hold_advice', 'review'].includes(mode)
+          && payload.todayQuote?.price != null
+          && dailyCandles.length >= 30
+        ) {
+          try {
+            const formulaMode = payload.todayQuote.live === true
+              ? 'intraday'
+              : 'close';
+            const formula = evaluateFormulaSelection({
+              mode: formulaMode,
+              candles: dailyCandles,
+              quote: payload.todayQuote,
+              trends: trend || [],
+              fund: payload.stockFund,
+              sectorOpportunity: payload.sectorOpportunity,
+            });
+            const tech = detail?.tech || computeTechnicals(dailyCandles);
+            const held = Number(payload.holdQty) > 0;
+            const decision = buildFormulaPriceDecision({
+              code: payload.code,
+              quote: payload.todayQuote,
+              formulaMatches: formula.matches,
+              positionMode: held ? 'HELD' : 'UNOWNED',
+              holding: held ? {
+                qty: Number(payload.holdQty) || 0,
+                cost: Number(payload.holdCost) || null,
+              } : null,
+              t1Status: held ? {
+                sellableQty:
+                  Number(payload.sellableTodayQty) || 0,
+                lockedQty:
+                  Math.max(
+                    0,
+                    (Number(payload.holdQty) || 0)
+                      - (Number(payload.sellableTodayQty) || 0),
+                  ),
+              } : null,
+              technicals: {
+                stopLoss:
+                  tech?.priceHints?.stopLoss ?? null,
+                support: tech?.sr?.support ?? null,
+                resistance: tech?.sr?.resistance ?? null,
+                ma10: tech?.ma?.ma10 ?? null,
+                atr: tech?.atr?.atr ?? null,
+                highestClose: Math.max(
+                  ...dailyCandles.slice(-20)
+                    .map((bar) => Number(bar.close) || 0),
+                ),
+              },
+              fund: payload.stockFund,
+              marketAllowsRisk: !['RISK_OFF', 'UNKNOWN'].includes(
+                String(payload.marketEnv?.regime || 'UNKNOWN'),
+              ),
+              dataComplete: !!tech && !!payload.stockFund,
+              dataFresh: true,
+              now: Date.now(),
+            });
+            payload.formulaPriceReference =
+              buildFormulaEvidenceReference(decision, {
+                validationState: 'OBSERVE_ONLY',
+                sampleSize: 0,
+              });
+          } catch {
+            payload.formulaPriceReference = null;
+          }
+        }
         // 风格
         payload.style = payload.style || 'balanced'
       } catch (e) {
@@ -1759,6 +1836,7 @@ export default async function handler(req, res) {
       dailyReport: payload.dailyReport ? { sessionCn: payload.dailyReport.sessionCn, day: payload.dailyReport.day } : null,
       quantResult: payload.quant || null,
       sectorOpportunity: payload.sectorOpportunity || null,
+      formulaPriceReference: payload.formulaPriceReference || null,
     };
     const scheduledReviewEvaluation = evaluateScheduledReview({
       origin: payload.reviewOrigin,
@@ -2304,6 +2382,8 @@ export default async function handler(req, res) {
         quantModelVersion,
       );
       result.fundContext = compactStockFundSnapshot(payload.stockFund);
+      result.formulaPriceReference =
+        payload.formulaPriceReference || null;
       result.knowledgeActionPlan = buildKnowledgeActionPlan(result, { mode });
       result.knowledgeActionScore = scoreKnowledgeActionPlan(
         result.knowledgeActionPlan,

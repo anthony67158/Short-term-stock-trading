@@ -424,6 +424,25 @@ function tacticalTradeRule(trade = {}) {
   return `【近期真实交易分类】${JSON.stringify(trade)}。用户修正后的分类是权威事实；做T卖出是高抛腿，做T买入是低吸或接回腿。待配对买卖腿已计入当前持仓与现金，不得重复加减仓位`
 }
 
+function tacticalFormulaRule(reference = null) {
+  if (!reference?.schemaVersion) return ''
+  const weight = Math.round(
+    Math.max(0, Math.min(1, Number(reference.effectiveWeight) || 0))
+    * 100,
+  )
+  if (reference.role === 'DETERMINISTIC_RISK_OVERRIDE') {
+    return '【公式价位·确定性风控】服务端确认已触发持仓硬止损；'
+      + '该结论只允许推动减仓或退出，不得用于新增风险'
+  }
+  return `【公式价位·次级参考】当前权重${weight}%，`
+    + `动作=${reference.action || '未知'}，`
+    + `主价位=${reference.primaryPrice ?? '缺失'}，`
+    + `止损=${reference.stopPrice ?? '缺失'}，`
+    + `目标=${reference.targetPrice ?? '缺失'}。`
+    + '只能辅助选择已验证价位或降低置信度，不能单独升级买入或加仓；'
+    + '与实时行情、资金、量化、账户或战术合同冲突时服从后者'
+}
+
 function tacticalActionPolicyRule(tactical = {}) {
   const policy = tactical.actionPolicy
   if (!policy?.allowedActions?.length) return ''
@@ -587,6 +606,7 @@ function tacticalUsageRules(facts = {}) {
     tacticalFundRule(facts.tactical, facts.funds),
     tacticalNewsRule(facts.news),
     tacticalTradeRule(facts.trade),
+    tacticalFormulaRule(facts.formulaPriceReference),
   ].filter(Boolean).join('\n')
 }
 
@@ -726,6 +746,30 @@ export function deepAdvisorFacts(payload = {}) {
         'summary',
       ],
     ),
+    formulaPriceReference: payload.formulaPriceReference
+      ? {
+          ...compactPromptObject(payload.formulaPriceReference, [
+            'schemaVersion',
+            'formulaId',
+            'positionMode',
+            'action',
+            'primaryPrice',
+            'stopPrice',
+            'targetPrice',
+            'riskReward',
+            'validationState',
+            'effectiveWeight',
+            'role',
+            'canUpgradeAction',
+            'canForceRiskReduction',
+          ]),
+          conflicts: compactPromptList(
+            payload.formulaPriceReference.conflicts,
+            4,
+            100,
+          ),
+        }
+      : null,
     trade: payload.tradeContext ? {
       recent: compactPromptList(
         payload.tradeContext.recent,
@@ -934,6 +978,7 @@ export function fastAdvisorFacts(payload = {}) {
     performance: triggeredReview ? null : facts.performance,
     realOutcome: facts.realOutcome,
     knowledgeActionReview: facts.knowledgeActionReview,
+    formulaPriceReference: facts.formulaPriceReference,
     trade: facts.trade
       ? {
           recent: facts.trade.recent.slice(0, 3),
