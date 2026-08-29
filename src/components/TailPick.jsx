@@ -45,7 +45,10 @@ function accountRiskGate(book) {
   })
 }
 
-export default function TailPick() {
+export default function TailPick({
+  title = '尾盘拾金',
+  navigation = null,
+}) {
   const book = usePlanStore()
   const [state, setState] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -141,7 +144,12 @@ export default function TailPick() {
     : session.label || '读取状态'
 
   return (
-    <section className="panel tail-pick-panel">
+    <section
+      className={
+        'panel tail-pick-panel'
+        + (navigation ? ' formula-selection-panel' : '')
+      }
+    >
       <div className="panel-head">
         <div
           role="heading"
@@ -149,7 +157,7 @@ export default function TailPick() {
           className="panel-title"
         >
           <Icon name="target" size={16} />
-          尾盘拾金
+          {title}
           <span className="sub-name">14:50 自动正式扫描 · 随时手动试算</span>
         </div>
         <button
@@ -162,6 +170,8 @@ export default function TailPick() {
           {buttonLabel}
         </button>
       </div>
+
+      {navigation}
 
       {running && (
         <div

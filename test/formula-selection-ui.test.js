@@ -13,6 +13,10 @@ const candidate = fs.readFileSync(
   ),
   'utf8',
 )
+const tailPick = fs.readFileSync(
+  new URL('../src/components/TailPick.jsx', import.meta.url),
+  'utf8',
+)
 const price = fs.readFileSync(
   new URL('../src/components/FormulaPrice.jsx', import.meta.url),
   'utf8',
@@ -42,6 +46,20 @@ test('今日决策使用公式选股三视图并保留尾盘反转', () => {
   assert.match(selection, /次日关注/)
   assert.match(selection, /尾盘反转/)
   assert.match(selection, /<TailPick/)
+})
+
+test('尾盘反转复用公式选股单面板而不是上下叠两张卡', () => {
+  assert.match(
+    selection,
+    /mode === 'tail'[\s\S]*<TailPick[\s\S]*title="公式选股"/,
+  )
+  assert.match(selection, /navigation=\{tabs\}/)
+  assert.doesNotMatch(
+    selection,
+    /<\/section>\s*\{mode === 'tail' && <TailPick/,
+  )
+  assert.match(tailPick, /title = '尾盘拾金'/)
+  assert.match(tailPick, /\{navigation\}/)
 })
 
 test('公式候选只允许加入自选且展示唯一主价位', () => {

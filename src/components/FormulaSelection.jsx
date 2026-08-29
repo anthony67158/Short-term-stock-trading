@@ -96,50 +96,58 @@ export default function FormulaSelection() {
     )
   }
 
-  return (
-    <>
-      <section className="panel formula-selection-panel">
-        <div className="panel-head formula-selection-head">
-          <div role="heading" aria-level="2" className="panel-title">
-            <Icon name="target" size={16} />
-            公式选股
-          </div>
-          {mode !== 'tail' && (
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={run}
-              disabled={running || !canRun}
-              title={!canRun ? '盘中公式仅在连续竞价期间运行' : ''}
-            >
-              <Icon name={running ? 'refresh' : 'play'} size={14} />
-              {running
-                ? '计算中'
-                : mode === 'intraday' ? '扫描当前机会' : '生成次日关注'}
-            </button>
-          )}
-        </div>
-        <div
-          className="formula-selection-tabs"
-          role="tablist"
-          aria-label="公式选股视图"
+  const tabs = (
+    <div
+      className="formula-selection-tabs"
+      role="tablist"
+      aria-label="公式选股视图"
+    >
+      {MODES.map((item) => (
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === item.id}
+          className={mode === item.id ? 'active' : ''}
+          key={item.id}
+          onClick={() => setMode(item.id)}
         >
-          {MODES.map((item) => (
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mode === item.id}
-              className={mode === item.id ? 'active' : ''}
-              key={item.id}
-              onClick={() => setMode(item.id)}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
+          {item.label}
+        </button>
+      ))}
+    </div>
+  )
 
-        {mode !== 'tail' && (
-          <div className="formula-selection-body">
+  if (mode === 'tail') {
+    return (
+      <TailPick
+        title="公式选股"
+        navigation={tabs}
+      />
+    )
+  }
+
+  return (
+    <section className="panel formula-selection-panel">
+      <div className="panel-head formula-selection-head">
+        <div role="heading" aria-level="2" className="panel-title">
+          <Icon name="target" size={16} />
+          公式选股
+        </div>
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={run}
+          disabled={running || !canRun}
+          title={!canRun ? '盘中公式仅在连续竞价期间运行' : ''}
+        >
+          <Icon name={running ? 'refresh' : 'play'} size={14} />
+          {running
+            ? '计算中'
+            : mode === 'intraday' ? '扫描当前机会' : '生成次日关注'}
+        </button>
+      </div>
+      {tabs}
+      <div className="formula-selection-body">
             {state.loading && !result && (
               <div className="formula-selection-state" role="status">
                 正在读取公式结果…
@@ -198,10 +206,7 @@ export default function FormulaSelection() {
                 </div>
               </>
             )}
-          </div>
-        )}
-      </section>
-      {mode === 'tail' && <TailPick />}
-    </>
+      </div>
+    </section>
   )
 }
