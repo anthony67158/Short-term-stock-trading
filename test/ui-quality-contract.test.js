@@ -683,16 +683,20 @@ test('持仓页大型展开层统一挂到顶层Portal避免被吸顶区遮盖',
   )
 })
 
-test('持仓与自选卡只对已生成建议项做行级等高', () => {
-  assert.match(calmSurface, /\.hold-grid,[\s\S]*?\.plan-cand-grid\s*{[^}]*align-items:\s*start[^}]*grid-auto-rows:\s*auto/s)
-  assert.match(calmSurface, /\.plan-cand\.has-advice,[\s\S]*?\.hold-select-wrap:has\(\.hold-item\.has-advice\)\s*{[^}]*align-self:\s*stretch[^}]*height:\s*100%/s)
+test('持仓与自选卡桌面同排以最高卡片等高并分散内部留白', () => {
+  assert.match(calmSurface, /\.hold-grid,[\s\S]*?\.plan-cand-grid\s*{[^}]*align-items:\s*stretch[^}]*grid-auto-rows:\s*auto/s)
+  assert.match(calmSurface, /\.hold-swipe-wrap,[\s\S]*?\.plan-cand\s*{[^}]*height:\s*100%/s)
   assert.match(
     calmSurface,
     /\.plan-cand \.card-decision-slot,[\s\S]*?\.hold-item \.card-decision-slot\s*{[^}]*min-height:\s*0/s,
   )
   assert.match(
     calmSurface,
-    /\.plan-cand\.no-advice,[\s\S]*?\.hold-select-wrap:has\(\.hold-item\.no-advice\)\s*{[^}]*height:\s*auto/s,
+    /\.plan-cand,[\s\S]*?\.hold-grid \.hold-item\s*{[^}]*justify-content:\s*space-between/s,
+  )
+  assert.match(
+    calmSurface,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.hold-swipe-wrap,[\s\S]*?\.plan-cand\s*{[^}]*height:\s*auto[\s\S]*?\.plan-cand,[\s\S]*?\.hold-grid \.hold-item\s*{[^}]*justify-content:\s*flex-start/s,
   )
   assert.match(
     precision,

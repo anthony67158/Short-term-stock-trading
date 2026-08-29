@@ -176,11 +176,11 @@
 - In dense equal-width command rows, prefer short text-only labels when icons
   would reduce the required inner padding.
 - Holding and watchlist cards share one anatomy: identity row, three-column
-  metric strip, decision summary, then actions. Only cards with generated advice
-  stretch within their desktop grid row, while their decision region remains
-  content-led and never receives a fixed blank placeholder. Cards without advice
-  keep natural height. Extra space stays between evidence and the bottom action
-  rail. Mobile keeps natural height. The full advice opens in stock detail.
+  metric strip, decision summary, then actions. Every card stretches to the
+  tallest natural card in its desktop grid row. Shorter cards distribute the
+  extra height across section gaps instead of leaving one large void above the
+  action rail. Mobile keeps natural height and compact flow. The full advice
+  opens in stock detail.
 - Stock detail keeps the execution instruction full width. Position size,
   capital and risk/reward sit in a separate metric strip below it, never in a
   competing side column. Major sections use one rule plus internal spacing,

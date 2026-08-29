@@ -15696,7 +15696,7 @@ button:is(
 /* Trade workspace refinement: calm surfaces and content-led height. */
 .hold-grid,
 .plan-cand-grid {
-  align-items: start;
+  align-items: stretch;
   grid-auto-rows: auto;
 }
 
@@ -15704,26 +15704,12 @@ button:is(
 .hold-select-wrap,
 .hold-swipe-wrap > .hold-item,
 .plan-cand {
-  height: auto;
-}
-
-.plan-cand.has-advice,
-.hold-swipe-wrap:has(> .hold-item.has-advice),
-.hold-select-wrap:has(.hold-item.has-advice) {
-  align-self: stretch;
   height: 100%;
 }
 
-.hold-swipe-wrap:has(> .hold-item.has-advice) > .hold-item,
-.hold-select-wrap:has(.hold-item.has-advice) .hold-item {
-  height: 100%;
-}
-
-.plan-cand.no-advice,
-.hold-swipe-wrap:has(> .hold-item.no-advice),
-.hold-select-wrap:has(.hold-item.no-advice) {
-  align-self: start;
-  height: auto;
+.plan-cand,
+.hold-grid .hold-item {
+  justify-content: space-between;
 }
 
 .trade-card,
@@ -15888,7 +15874,7 @@ html[data-theme="light"] .plan-cand.starred {
 
 .hold-item > .pi-actions,
 .plan-cand .pc-actions {
-  margin-top: auto;
+  margin-top: 0;
   padding-top: var(--space-sm);
   border-top: 0;
 }
@@ -15909,13 +15895,17 @@ html[data-theme="light"] .plan-cand.starred {
     grid-auto-rows: auto;
   }
 
-  .plan-cand.has-advice,
-  .hold-swipe-wrap:has(> .hold-item.has-advice),
-  .hold-select-wrap:has(.hold-item.has-advice),
-  .hold-swipe-wrap:has(> .hold-item.has-advice) > .hold-item,
-  .hold-select-wrap:has(.hold-item.has-advice) .hold-item {
+  .hold-swipe-wrap,
+  .hold-select-wrap,
+  .hold-swipe-wrap > .hold-item,
+  .plan-cand {
     align-self: start;
     height: auto;
+  }
+
+  .plan-cand,
+  .hold-grid .hold-item {
+    justify-content: flex-start;
   }
 
   .trade-card,

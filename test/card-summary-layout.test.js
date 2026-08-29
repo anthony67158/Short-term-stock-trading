@@ -56,7 +56,7 @@ test('持仓和自选卡展示最近有效价但只用连续竞价价触发动�
   )
 })
 
-test('只对已生成建议的卡片做行级等高', () => {
+test('桌面同排卡片以最高内容为准等高并均匀拉伸内部节奏', () => {
   assert.match(
     planTab,
     /'trade-card plan-cand'[\s\S]*?\(cardAdvice \? ' has-advice' : ' no-advice'\)/,
@@ -67,15 +67,15 @@ test('只对已生成建议的卡片做行级等高', () => {
   )
   assert.match(
     calmSurface,
-    /\.hold-grid,[\s\S]*?\.plan-cand-grid\s*{[^}]*align-items:\s*start[^}]*grid-auto-rows:\s*auto/s,
+    /\.hold-grid,[\s\S]*?\.plan-cand-grid\s*{[^}]*align-items:\s*stretch[^}]*grid-auto-rows:\s*auto/s,
   )
   assert.match(
     calmSurface,
-    /\.plan-cand\.has-advice,[\s\S]*?\.hold-select-wrap:has\(\.hold-item\.has-advice\)\s*{[^}]*align-self:\s*stretch[^}]*height:\s*100%/s,
+    /\.hold-swipe-wrap,[\s\S]*?\.plan-cand\s*{[^}]*height:\s*100%/s,
   )
   assert.match(
     calmSurface,
-    /\.plan-cand\.no-advice,[\s\S]*?\.hold-select-wrap:has\(\.hold-item\.no-advice\)\s*{[^}]*height:\s*auto/s,
+    /\.plan-cand,[\s\S]*?\.hold-grid \.hold-item\s*{[^}]*justify-content:\s*space-between/s,
   )
   assert.match(
     calmSurface,
@@ -87,11 +87,15 @@ test('只对已生成建议的卡片做行级等高', () => {
   )
   assert.match(
     calmSurface,
-    /\.hold-item > \.pi-actions,[\s\S]*?\.plan-cand \.pc-actions\s*{[^}]*margin-top:\s*auto[^}]*padding-top:\s*var\(--space-sm\)/s,
+    /\.hold-item > \.pi-actions,[\s\S]*?\.plan-cand \.pc-actions\s*{[^}]*margin-top:\s*0[^}]*padding-top:\s*var\(--space-sm\)/s,
   )
   assert.match(
     design,
-    /Only cards with generated advice[\s\S]*stretch within their desktop grid row[\s\S]*Cards without advice[\s\S]*keep natural height/s,
+    /Every card stretches to the\s+tallest natural card in its desktop grid row[\s\S]*distribute the\s+extra height across section gaps[\s\S]*Mobile keeps natural height/s,
+  )
+  assert.match(
+    calmSurface,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.hold-swipe-wrap,[\s\S]*?\.plan-cand\s*{[^}]*height:\s*auto[\s\S]*?\.plan-cand,[\s\S]*?\.hold-grid \.hold-item\s*{[^}]*justify-content:\s*flex-start/s,
   )
 })
 
