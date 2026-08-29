@@ -15696,14 +15696,15 @@ button:is(
 /* Trade workspace refinement: calm surfaces and content-led height. */
 .hold-grid,
 .plan-cand-grid {
-  align-items: start;
+  align-items: stretch;
+  grid-auto-rows: 1fr;
 }
 
 .hold-swipe-wrap,
 .hold-select-wrap,
 .hold-swipe-wrap > .hold-item,
 .plan-cand {
-  height: auto;
+  height: 100%;
 }
 
 .trade-card,
@@ -15734,11 +15735,30 @@ button:is(
 html[data-theme="light"] .plan-cand.starred {
   border-color: transparent;
   background: color-mix(
-    in oklch,
-    var(--color-warning) 4%,
+    in srgb,
+    var(--color-warning) 9%,
     var(--color-paper-2)
   );
-  box-shadow: var(--shadow-card);
+  box-shadow:
+    inset 0 3px 0 var(--color-warning),
+    var(--shadow-card);
+}
+
+.plan-cand.starred .pc-pin.on {
+  background: color-mix(
+    in srgb,
+    var(--color-warning) 16%,
+    var(--color-paper-3)
+  );
+  color: var(--color-warning);
+  opacity: 1;
+}
+
+.plan-cand.starred.sel-on {
+  box-shadow:
+    inset 0 3px 0 var(--color-warning),
+    0 0 0 2px var(--color-accent),
+    var(--shadow-card);
 }
 
 .plan-cand .pc-top,
@@ -15842,8 +15862,8 @@ html[data-theme="light"] .plan-cand.starred {
 
 .hold-item > .pi-actions,
 .plan-cand .pc-actions {
-  margin-top: var(--space-sm);
-  padding-top: 0;
+  margin-top: auto;
+  padding-top: var(--space-sm);
   border-top: 0;
 }
 
@@ -15857,10 +15877,34 @@ html[data-theme="light"] .plan-cand.starred {
 }
 
 @media (max-width: 720px) {
+  .hold-grid,
+  .plan-cand-grid {
+    align-items: start;
+    grid-auto-rows: auto;
+  }
+
+  .hold-swipe-wrap,
+  .hold-select-wrap,
+  .hold-swipe-wrap > .hold-item,
+  .plan-cand {
+    height: auto;
+  }
+
   .trade-card,
   .plan-cand,
   .hold-grid .hold-item {
     box-shadow: none;
+  }
+
+  .plan-cand.starred,
+  html[data-theme="light"] .plan-cand.starred {
+    box-shadow: inset 0 3px 0 var(--color-warning);
+  }
+
+  .plan-cand.starred.sel-on {
+    box-shadow:
+      inset 0 3px 0 var(--color-warning),
+      0 0 0 2px var(--color-accent);
   }
 
   .stock-card-metrics {

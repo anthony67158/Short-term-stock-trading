@@ -56,12 +56,16 @@ test('持仓和自选卡展示最近有效价但只用连续竞价价触发动�
   )
 })
 
-test('持仓与自选卡使用内容驱动高度且不保留空白占位', () => {
+test('桌面卡片行级等高但决策区仍由内容驱动', () => {
   assert.match(planTab, /className="card-decision-slot"/)
   assert.equal((planTab.match(/className="card-decision-slot"/g) || []).length, 2)
   assert.match(
     calmSurface,
-    /\.hold-grid,[\s\S]*?\.plan-cand-grid\s*{[^}]*align-items:\s*start/s,
+    /\.hold-grid,[\s\S]*?\.plan-cand-grid\s*{[^}]*align-items:\s*stretch[^}]*grid-auto-rows:\s*1fr/s,
+  )
+  assert.match(
+    calmSurface,
+    /\.hold-swipe-wrap,[\s\S]*?\.plan-cand\s*{[^}]*height:\s*100%/s,
   )
   assert.match(
     calmSurface,
@@ -72,8 +76,16 @@ test('持仓与自选卡使用内容驱动高度且不保留空白占位', () =>
     /\.card-decision-slot > \.action-prompt\s*{[^}]*min-height:\s*48px[^}]*flex:\s*none/s,
   )
   assert.match(
+    calmSurface,
+    /\.hold-item > \.pi-actions,[\s\S]*?\.plan-cand \.pc-actions\s*{[^}]*margin-top:\s*auto[^}]*padding-top:\s*var\(--space-sm\)/s,
+  )
+  assert.match(
     design,
-    /Cards use content-led compact\s+height:[\s\S]*must not reserve large empty regions/s,
+    /Desktop grid rows equalise outer\s+card height[\s\S]*decision region[\s\S]*remains content-led[\s\S]*Mobile keeps natural height/s,
+  )
+  assert.match(
+    calmSurface,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.hold-grid,[\s\S]*?\.plan-cand-grid\s*{[^}]*align-items:\s*start[^}]*grid-auto-rows:\s*auto/s,
   )
 })
 
@@ -151,6 +163,17 @@ test('卡片通过留白和弱底色分组而不是连续边线', () => {
   assert.match(
     calmSurface,
     /\.action-decision\s*{[^}]*border-block:\s*0/s,
+  )
+})
+
+test('置顶自选卡使用暖色表面顶部状态线和强化星标', () => {
+  assert.match(
+    calmSurface,
+    /\.plan-cand\.starred,[\s\S]*?html\[data-theme="light"\] \.plan-cand\.starred\s*{[^}]*background:\s*color-mix\([^}]*var\(--color-warning\)\s*9%[^}]*box-shadow:\s*inset\s+0\s+3px\s+0\s+var\(--color-warning\),\s*var\(--shadow-card\)/s,
+  )
+  assert.match(
+    calmSurface,
+    /\.plan-cand\.starred \.pc-pin\.on\s*{[^}]*background:\s*color-mix\([^}]*var\(--color-warning\)\s*16%[^}]*color:\s*var\(--color-warning\)[^}]*opacity:\s*1/s,
   )
 })
 

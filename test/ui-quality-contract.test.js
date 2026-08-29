@@ -29,6 +29,9 @@ const generationStatus = read('src/components/AdviceGenerationStatus.jsx')
 const holdingPlanDialog = read('src/components/HoldingPlanDialog.jsx')
 const reviewTab = read('src/components/ReviewTab.jsx')
 const fundFlowCanvas = read('src/components/FundFlowCanvas.jsx')
+const calmSurface = precision.slice(precision.indexOf(
+  '/* Trade workspace refinement: calm surfaces and content-led height. */',
+))
 const semanticTabSources = [
   'src/components/AlertCenter.jsx',
   'src/components/AlertPanel.jsx',
@@ -677,13 +680,16 @@ test('持仓页大型展开层统一挂到顶层Portal避免被吸顶区遮盖',
   )
 })
 
-test('持仓与自选卡桌面使用同高摘要且移动端恢复自然高度', () => {
-  assert.match(precision, /\.hold-grid,[\s\S]*?\.plan-cand-grid\s*{[^}]*align-items:\s*stretch/s)
-  assert.match(precision, /\.hold-swipe-wrap,[\s\S]*?\.hold-select-wrap\s*{[^}]*height:\s*100%/s)
-  assert.match(precision, /\.hold-swipe-wrap > \.hold-item,[\s\S]*?\.plan-cand\s*{[^}]*height:\s*100%/s)
+test('持仓与自选卡桌面行级等高且移动端恢复自然高度', () => {
+  assert.match(calmSurface, /\.hold-grid,[\s\S]*?\.plan-cand-grid\s*{[^}]*align-items:\s*stretch[^}]*grid-auto-rows:\s*1fr/s)
+  assert.match(calmSurface, /\.hold-swipe-wrap,[\s\S]*?\.hold-select-wrap,[\s\S]*?\.plan-cand\s*{[^}]*height:\s*100%/s)
   assert.match(
-    precision,
-    /@media \(max-width:\s*50rem\)\s*{[\s\S]*?\.card-decision-slot\s*{[^}]*min-height:\s*0/s,
+    calmSurface,
+    /\.plan-cand \.card-decision-slot,[\s\S]*?\.hold-item \.card-decision-slot\s*{[^}]*min-height:\s*0/s,
+  )
+  assert.match(
+    calmSurface,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.hold-grid,[\s\S]*?\.plan-cand-grid\s*{[^}]*grid-auto-rows:\s*auto[\s\S]*?\.plan-cand\s*{[^}]*height:\s*auto/s,
   )
   assert.match(
     precision,
@@ -726,27 +732,14 @@ test('卡片内只保留单行建议摘要且完整内容进入个股详情', ()
   )
 })
 
-test('置顶自选卡只用金色边界、顶部标记和星标强调', () => {
-  const starredRule = precision.match(
-    /\.plan-cand\.starred\s*{([^}]*)}/s,
-  )?.[1] || ''
-  const lightStarredRule = precision.match(
-    /html\[data-theme="light"\] \.plan-cand\.starred\s*{([^}]*)}/s,
-  )?.[1] || ''
-
+test('置顶自选卡使用暖色表面、顶部标记和强化星标', () => {
   assert.match(
-    starredRule,
-    /border-color:\s*color-mix\([^}]*var\(--color-warning\)[^}]*box-shadow:\s*inset\s+0\s+3px\s+0/s,
+    calmSurface,
+    /\.plan-cand\.starred,[\s\S]*?html\[data-theme="light"\] \.plan-cand\.starred\s*{[^}]*background:\s*color-mix\([^}]*var\(--color-warning\)\s*9%[^}]*box-shadow:\s*inset\s+0\s+3px\s+0\s+var\(--color-warning\),\s*var\(--shadow-card\)/s,
   )
   assert.match(
-    lightStarredRule,
-    /border-color:\s*color-mix\([^}]*var\(--color-warning\)/s,
-  )
-  assert.doesNotMatch(starredRule, /background:/)
-  assert.doesNotMatch(lightStarredRule, /background:/)
-  assert.match(
-    precision,
-    /\.plan-cand\.starred \.pc-pin\.on\s*{[^}]*color:\s*var\(--color-warning\)/s,
+    calmSurface,
+    /\.plan-cand\.starred \.pc-pin\.on\s*{[^}]*background:[^}]*color:\s*var\(--color-warning\)[^}]*opacity:\s*1/s,
   )
 })
 
