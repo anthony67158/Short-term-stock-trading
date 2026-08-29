@@ -851,22 +851,24 @@ export default function StockDetail({ stock, onClose }) {
         </div>
 
         <div className="detail-scroll">
-          <div
-            ref={noteAnchorRef}
-            className="stock-note-anchor"
-            tabIndex={-1}
-          >
-            <StockNoteEditor
-              code={stock.code}
-              note={stockNote}
-            />
-          </div>
           {/* 价格 & 均线概览 */}
           {overview && (
             <div className="detail-quote">
               <div className="dq-price-row">
                 <div className="dq-price-main">
-                  <span className={'dq-price ' + pctClass(overview.pct)}>{fmtRaw(overview.price)}</span>
+                  <span
+                    className={
+                      'dq-price '
+                      + pctClass(overview.pct)
+                      + (
+                        String(fmtRaw(overview.price)).length > 8
+                          ? ' compact'
+                          : ''
+                      )
+                    }
+                  >
+                    {fmtRaw(overview.price)}
+                  </span>
                   <span className={'dq-pct ' + pctClass(overview.pct)}>{fmtPct(overview.pct)}</span>
                 </div>
                 {overview.trend && <span className={'dq-trend ' + overview.trend.cls}>{overview.trend.label}</span>}
@@ -975,7 +977,7 @@ export default function StockDetail({ stock, onClose }) {
                 </div>
               )}
               {/* ===== AI 操作建议（核心：紧跟价格，第一优先展示）===== */}
-              <div className="decide-box">
+              <div className={'decide-box' + (!quantState ? ' is-empty' : '')}>
                 <div className="decide-head">
                   <div className="decide-primary">
                     <div className="decide-title">
@@ -1348,6 +1350,17 @@ export default function StockDetail({ stock, onClose }) {
 
               <FormulaPrice code={stock && stock.code} />
 
+              <div
+                ref={noteAnchorRef}
+                className="stock-note-anchor detail-note-section"
+                tabIndex={-1}
+              >
+                <StockNoteEditor
+                  code={stock.code}
+                  note={stockNote}
+                />
+              </div>
+
               {/* 均线技术参考（精简为可折叠的次要信息）*/}
               {tech && (
                 <div className="tech-box">
@@ -1533,41 +1546,11 @@ export default function StockDetail({ stock, onClose }) {
 
         {/* 固定底部动作栏：快速建议 / 深度建议 / 预警 */}
         <div className="detail-footbar">
-          <div
-            id="advice-mode-guide"
-            className={
-              'advice-mode-guide'
-              + (modeGuidance.firstGeneration ? ' first-generation' : '')
-            }
-            role="note"
-            aria-label="建议生成方式说明"
-          >
-            {modeGuidance.items.map((item) => (
-              <div
-                key={item.key}
-                className={
-                  `advice-mode-guide-item ${item.key}`
-                  + (
-                    modeGuidance.firstGeneration && item.key === 'deep'
-                      ? ' recommended'
-                      : ''
-                  )
-                }
-              >
-                <Icon name={item.icon} size={13} />
-                <span>
-                  <b>{item.label}</b>
-                  <small>{item.purpose}</small>
-                </span>
-              </div>
-            ))}
-          </div>
           <button
             className="btn btn-primary footbar-generate footbar-quick"
             type="button"
             disabled={adviceActions.quick.disabled}
             aria-busy={adviceActions.quick.active}
-            aria-describedby="advice-mode-guide"
             title="关闭深度思考，直接生成单模型操作建议"
             onClick={() => loadQuant(false)}
           >
@@ -1585,7 +1568,6 @@ export default function StockDetail({ stock, onClose }) {
             type="button"
             disabled={adviceActions.deep.disabled}
             aria-busy={adviceActions.deep.active}
-            aria-describedby="advice-mode-guide"
             data-recommended={
               modeGuidance.firstGeneration ? 'true' : undefined
             }
@@ -1605,13 +1587,9 @@ export default function StockDetail({ stock, onClose }) {
                 </small>
               )}
             </span>
-            <small className="footbar-mode-usecase">
-              {modeGuidance.deepUseCase}
-            </small>
           </button>
           <button
             className={'btn footbar-alert' + (showAlert ? ' on' : '')}
-            aria-describedby="advice-mode-guide"
             onClick={() => setShowAlert((v) => !v)}
           >
             <Icon name="bell" size={14} /> {showAlert ? '收起预警' : '盯盘预警'}

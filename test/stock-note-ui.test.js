@@ -52,7 +52,10 @@ test('个股详情聚焦备注区域但保持阅读态', () => {
   assert.match(stockDetail, /stock\?\.focusNote/)
   assert.match(stockDetail, /noteAnchorRef\.current\?\.scrollIntoView/)
   assert.match(stockDetail, /noteAnchorRef\.current\?\.focus/)
-  assert.match(stockDetail, /className="stock-note-anchor"/)
+  assert.match(
+    stockDetail,
+    /className="stock-note-anchor detail-note-section"/,
+  )
   assert.doesNotMatch(stockDetail, /initialEditing=/)
   assert.doesNotMatch(component, /initialEditing/)
 })

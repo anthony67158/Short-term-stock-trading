@@ -176,11 +176,11 @@
 - In dense equal-width command rows, prefer short text-only labels when icons
   would reduce the required inner padding.
 - Holding and watchlist cards share one anatomy: identity row, three-column
-  metric strip, decision summary, then actions. Desktop uses a uniform compact
-  summary skeleton: the instruction stays on one line, key prices and trigger
-  progress stay visible, and the full advice opens in the existing stock detail
-  panel. Mobile restores natural height. Do not let full strategy prose determine
-  grid-row height.
+  metric strip, decision summary, then actions. Cards use content-led compact
+  height: the instruction stays on one line, key prices and trigger progress stay
+  visible, and the full advice opens in the existing stock detail panel. Cards
+  must not reserve large empty regions merely to align a grid row; use whitespace
+  and quiet tonal surfaces instead of repeated divider lines.
 - Stock detail keeps the execution instruction full width. Position size,
   capital and risk/reward sit in a separate metric strip below it, never in a
   competing side column. Major sections use one rule plus internal spacing,

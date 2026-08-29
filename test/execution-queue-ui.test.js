@@ -98,28 +98,21 @@ test('个股建议展示短线窗口优势风险与下一复核条件', () => {
   assert.match(precision, /\.advice-short-horizon-grid/)
 })
 
-test('个股详情用紧凑提示说明生成模式、Judge 与止损纪律', () => {
+test('个股详情底栏直接呈现三项命令且不重复展示功能说明', () => {
   const stockDetail = read('src/components/StockDetail.jsx')
-  const css = read('src/styles/precision.css')
 
   assert.match(stockDetail, /adviceModeGuidance/)
-  assert.match(stockDetail, /role="note"/)
-  assert.match(stockDetail, /aria-label="建议生成方式说明"/)
-  assert.match(stockDetail, /id="advice-mode-guide"/)
-  assert.match(stockDetail, /modeGuidance\.items\.map/)
   assert.match(stockDetail, /modeGuidance\.deepBadge/)
-  assert.match(stockDetail, /modeGuidance\.deepUseCase/)
   assert.match(stockDetail, /modeGuidance\.deepTitle/)
-  assert.match(stockDetail, /className="footbar-mode-usecase"/)
-  assert.match(stockDetail, /aria-describedby="advice-mode-guide"/)
-  assert.match(
-    css,
-    /\.advice-mode-guide\s*{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/s,
+  assert.doesNotMatch(stockDetail, /id="advice-mode-guide"/)
+  assert.doesNotMatch(stockDetail, /modeGuidance\.items\.map/)
+  assert.doesNotMatch(stockDetail, /className="footbar-mode-usecase"/)
+  assert.doesNotMatch(stockDetail, /aria-describedby="advice-mode-guide"/)
+  assert.equal(
+    (stockDetail.match(/className="btn[^"]*footbar-/g) || []).length,
+    2,
   )
-  assert.match(
-    css,
-    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.advice-mode-guide\s*{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s,
-  )
+  assert.match(stockDetail, /className=\{'btn footbar-alert'/)
 })
 
 test('证据缺失时主视图展示来源原因影响与恢复方式', () => {

@@ -13,6 +13,9 @@ const stockDetailApi = read('api/stock_detail.js')
 const quoteApi = read('api/quote.js')
 const precision = read('src/styles/precision.css')
 const design = read('design.md')
+const calmSurfaceMarker =
+  '/* Trade workspace refinement: calm surfaces and content-led height. */'
+const calmSurface = precision.slice(precision.indexOf(calmSurfaceMarker))
 
 test('持仓与自选卡只展示固定策略摘要并从详情入口查看完整建议', () => {
   assert.match(planTab, /function ActionCommand\(\{ view, onOpen \}\)/)
@@ -53,29 +56,24 @@ test('持仓和自选卡展示最近有效价但只用连续竞价价触发动�
   )
 })
 
-test('桌面卡片使用同高摘要骨架且移动端恢复自然高度', () => {
+test('持仓与自选卡使用内容驱动高度且不保留空白占位', () => {
   assert.match(planTab, /className="card-decision-slot"/)
   assert.equal((planTab.match(/className="card-decision-slot"/g) || []).length, 2)
   assert.match(
-    precision,
-    /\.hold-grid,[\s\S]*?\.plan-cand-grid\s*{[^}]*align-items:\s*stretch/s,
+    calmSurface,
+    /\.hold-grid,[\s\S]*?\.plan-cand-grid\s*{[^}]*align-items:\s*start/s,
   )
   assert.match(
-    precision,
-    /\.card-decision-slot\s*{[^}]*display:\s*flex[^}]*flex:\s*1[^}]*min-height:/s,
-  )
-  assert.match(precision, /\.card-decision-slot\s*{[^}]*flex-direction:\s*column/s)
-  assert.match(
-    precision,
-    /\.card-decision-slot > \.action-decision,[\s\S]*?\.card-decision-slot > \.action-prompt,[\s\S]*?\.card-decision-slot > \.advice-generation-status\s*{[^}]*flex:\s*1/s,
+    calmSurface,
+    /\.plan-cand \.card-decision-slot,[\s\S]*?\.hold-item \.card-decision-slot\s*{[^}]*min-height:\s*0/s,
   )
   assert.match(
-    precision,
-    /@media \(max-width:\s*50rem\)\s*{[\s\S]*?\.card-decision-slot\s*{[^}]*min-height:\s*0/s,
+    calmSurface,
+    /\.card-decision-slot > \.action-prompt\s*{[^}]*min-height:\s*48px[^}]*flex:\s*none/s,
   )
   assert.match(
     design,
-    /Desktop uses a uniform compact[\s\S]*Mobile restores natural height/s,
+    /Cards use content-led compact\s+height:[\s\S]*must not reserve large empty regions/s,
   )
 })
 
@@ -133,6 +131,26 @@ test('卡片操作区用推荐动作建立主次且不再额外画顶部分隔�
   assert.match(
     precision,
     /@media \(max-width:\s*21\.25rem\)\s*{[\s\S]*?\.pi-trade-actions\s*{[^}]*minmax\(0,\s*7fr\)/s,
+  )
+})
+
+test('卡片通过留白和弱底色分组而不是连续边线', () => {
+  assert.match(precision, new RegExp(calmSurfaceMarker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+  assert.match(
+    calmSurface,
+    /\.trade-card,[\s\S]*?\.hold-grid \.hold-item\s*{[^}]*border-color:\s*transparent[^}]*box-shadow:\s*var\(--shadow-card\)/s,
+  )
+  assert.match(
+    calmSurface,
+    /\.stock-card-metric \+ \.stock-card-metric\s*{[^}]*border-inline-start:\s*0/s,
+  )
+  assert.match(
+    calmSurface,
+    /\.hold-pnl\s*{[^}]*border-inline-start:\s*0/s,
+  )
+  assert.match(
+    calmSurface,
+    /\.action-decision\s*{[^}]*border-block:\s*0/s,
   )
 })
 
@@ -242,6 +260,29 @@ test('个股详情展示最近收盘快照与近5日关键趋势', () => {
   )
 })
 
+test('个股详情以决策优先并移除指标表格线', () => {
+  const quoteIndex = stockDetail.indexOf('className="detail-quote"')
+  const formulaIndex = stockDetail.indexOf('<FormulaPrice')
+  const noteIndex = stockDetail.indexOf(
+    'className="stock-note-anchor detail-note-section"',
+  )
+  assert.ok(quoteIndex >= 0)
+  assert.ok(formulaIndex > quoteIndex)
+  assert.ok(noteIndex > formulaIndex)
+  assert.match(
+    calmSurface,
+    /\.detail-market-grid\s*{[^}]*border:\s*0[^}]*gap:/s,
+  )
+  assert.match(
+    calmSurface,
+    /\.detail-market-metric\s*{[^}]*border-inline-start:\s*0/s,
+  )
+  assert.match(
+    calmSurface,
+    /\.detail-panel \.formula-price-panel\s*{[^}]*border-top:\s*0/s,
+  )
+})
+
 test('观望建议保留重新评估且始终允许用户手动建仓', () => {
   assert.match(
     planTab,
@@ -269,10 +310,10 @@ test('观望建议保留重新评估且始终允许用户手动建仓', () => {
   )
 })
 
-test('桌面自选卡固定决策高度并将操作栏贴齐底部', () => {
+test('自选卡使用紧凑决策区且操作栏保持稳定', () => {
   assert.match(
-    precision,
-    /@media \(min-width:\s*50\.001rem\)\s*{[\s\S]*?\.plan-cand \.card-decision-slot\s*{[^}]*min-height:\s*232px/s,
+    calmSurface,
+    /\.plan-cand \.card-decision-slot,[\s\S]*?\.hold-item \.card-decision-slot\s*{[^}]*min-height:\s*0/s,
   )
   assert.match(
     precision,
@@ -280,10 +321,10 @@ test('桌面自选卡固定决策高度并将操作栏贴齐底部', () => {
   )
 })
 
-test('桌面持仓卡固定决策高度并统一操作与工具列', () => {
+test('持仓卡使用紧凑决策区并统一操作与工具列', () => {
   assert.match(
-    precision,
-    /@media \(min-width:\s*50\.001rem\)\s*{[\s\S]*?\.hold-item \.hold-head\s*{[^}]*min-height:\s*60px[\s\S]*?\.hold-item \.card-decision-slot\s*{[^}]*min-height:\s*280px/s,
+    calmSurface,
+    /\.hold-item \.card-decision-slot\s*{[^}]*min-height:\s*0/s,
   )
   assert.match(
     precision,
