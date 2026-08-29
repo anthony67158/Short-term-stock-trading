@@ -29,7 +29,7 @@
   底栏不得嵌套在顶部 `sticky` 容器内，避免 iOS 主屏模式错误锚到顶部。
 - Clickable labels never wrap.
 
-## Theme — Precision Cobalt · Apple × Material
+## Theme — Midnight Alloy · Apple × Material
 
 ### Hybrid principles
 
@@ -59,32 +59,37 @@
 
 ### Dark default
 
-- `--color-paper` `oklch(14.5% 0.012 255)`
-- `--color-paper-2` `oklch(18% 0.014 255)`
-- `--color-paper-3` `oklch(21.5% 0.016 255)`
-- `--color-ink` `oklch(94% 0.008 255)`
-- `--color-ink-2` `oklch(78% 0.012 255)`
-- `--color-rule` `oklch(29% 0.014 255)`
-- `--color-accent` `oklch(68% 0.17 255)`
-- `--color-focus` `oklch(75% 0.19 255)`
+- `--color-paper` `#030B1B`
+- `--color-paper-2` `#071126`
+- `--color-paper-3` `#0D1B36`
+- `--color-paper-4` `#1C2D4B`
+- `--color-ink` `#F8FAFD`
+- `--color-ink-2` `#C1C5CD`
+- `--color-muted` `#9EA5B1`
+- `--color-rule` `#364B6D`
+- `--color-accent` `#75B7FF`
+- `--color-focus` `#A6CEFA`
+- Page shell uses the logo-derived midnight gradient; cards use a quieter
+  navy-to-midnight surface gradient.
 
 ### Light variant
 
-- `--color-paper` `oklch(96% 0.01 255)`
-- `--color-paper-2` `oklch(99% 0.004 255)`
-- `--color-paper-3` `oklch(93.5% 0.012 255)`
-- `--color-paper-4` `oklch(89.5% 0.014 255)`
-- `--color-ink` `oklch(19.5% 0.022 255)`
-- `--color-ink-2` `oklch(33% 0.018 255)`
-- `--color-muted` `oklch(47% 0.014 255)`
-- `--color-rule` `oklch(78% 0.016 255)`
-- `--color-rule-2` `oklch(86% 0.012 255)`
-- `--color-accent` `oklch(52% 0.205 255)`
-- `--color-focus` `oklch(59% 0.19 255)`
-- Page background uses cool slate paper; primary panels use porcelain paper.
+- `--color-paper` `#E8EFF7`
+- `--color-paper-2` `#F8FAFD`
+- `--color-paper-3` `#EDF3F8`
+- `--color-paper-4` `#DCE7F2`
+- `--color-ink` `#071126`
+- `--color-ink-2` `#1C2D4B`
+- `--color-muted` `#5C708A`
+- `--color-rule` `#AFC0D3`
+- `--color-rule-2` `#D4DFEA`
+- `--color-accent` `#1F5F9F`
+- `--color-focus` `#2E72B8`
+- Page background uses an ice-silver gradient; primary panels use near-white
+  silver-blue surfaces.
 - Quiet bands use `paper-3`; pressed and track surfaces use `paper-4`.
-- Light overlays dim with graphite ink, never a translucent white veil.
-- Legacy purple aliases must remap to the cobalt tokens in the precision layer.
+- Navigation keeps the logo-derived midnight gradient in both themes.
+- Legacy purple aliases and literals must map to the current blue tokens.
 
 ### Trading semantics
 
@@ -224,15 +229,30 @@
 
 ```css
 :root {
-  --color-paper: oklch(14.5% 0.012 255);
-  --color-paper-2: oklch(18% 0.014 255);
-  --color-paper-3: oklch(21.5% 0.016 255);
-  --color-ink: oklch(94% 0.008 255);
-  --color-ink-2: oklch(78% 0.012 255);
-  --color-rule: oklch(29% 0.014 255);
-  --color-accent: oklch(68% 0.17 255);
-  --color-accent-ink: oklch(15% 0.012 255);
-  --color-focus: oklch(75% 0.19 255);
+  --brand-abyss: #030B1B;
+  --brand-midnight: #071126;
+  --brand-navy: #0D1B36;
+  --brand-deep-blue: #1C2D4B;
+  --brand-steel-blue: #364B6D;
+  --brand-cobalt: #2E72B8;
+  --brand-glow-blue: #5F9FE3;
+  --brand-halo-blue: #75B7FF;
+  --brand-silver: #9EA5B1;
+  --brand-silver-light: #C1C5CD;
+  --brand-pearl: #E4E5E8;
+  --brand-ice: #F8FAFD;
+  --color-paper: var(--brand-abyss);
+  --color-paper-2: var(--brand-midnight);
+  --color-paper-3: var(--brand-navy);
+  --color-ink: var(--brand-ice);
+  --color-ink-2: var(--brand-silver-light);
+  --color-rule: var(--brand-steel-blue);
+  --color-accent: var(--brand-halo-blue);
+  --color-accent-ink: var(--brand-abyss);
+  --color-focus: #A6CEFA;
+  --gradient-app: linear-gradient(145deg, #020714, #071126 42%, #0D1B36 72%, #1C2D4B);
+  --gradient-nav: linear-gradient(110deg, #030B1B, #071126 48%, #0D1B36 74%, #1C2D4B);
+  --gradient-primary: linear-gradient(135deg, #123D6B, #1F5F9F 58%, #2E72B8);
   --font-display: "Space Grotesk Variable", "PingFang SC", sans-serif;
   --font-body: "Space Grotesk Variable", "PingFang SC", sans-serif;
   --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
@@ -255,17 +275,19 @@
 }
 
 html[data-theme="light"] {
-  --color-paper: oklch(96.8% 0.008 255);
-  --color-paper-2: oklch(99.2% 0.003 255);
-  --color-paper-3: oklch(96.3% 0.008 255);
-  --color-paper-4: oklch(93.5% 0.011 255);
-  --color-ink: oklch(19.5% 0.022 255);
-  --color-ink-2: oklch(33% 0.018 255);
-  --color-muted: oklch(47% 0.014 255);
-  --color-rule: oklch(84.5% 0.013 255);
-  --color-rule-2: oklch(90.5% 0.009 255);
-  --color-accent: oklch(52% 0.205 255);
-  --color-focus: oklch(59% 0.19 255);
+  --color-paper: #E8EFF7;
+  --color-paper-2: #F8FAFD;
+  --color-paper-3: #EDF3F8;
+  --color-paper-4: #DCE7F2;
+  --color-ink: #071126;
+  --color-ink-2: #1C2D4B;
+  --color-muted: #5C708A;
+  --color-rule: #AFC0D3;
+  --color-rule-2: #D4DFEA;
+  --color-accent: #1F5F9F;
+  --color-accent-ink: var(--brand-ice);
+  --color-focus: #2E72B8;
+  --gradient-app: linear-gradient(145deg, #F8FAFD, #EDF3F9 52%, #DCE7F2);
 }
 ```
 
@@ -273,13 +295,13 @@ html[data-theme="light"] {
 
 ```css
 @theme {
-  --color-paper: oklch(14.5% 0.012 255);
-  --color-paper-2: oklch(18% 0.014 255);
-  --color-paper-3: oklch(21.5% 0.016 255);
-  --color-ink: oklch(94% 0.008 255);
-  --color-ink-2: oklch(78% 0.012 255);
-  --color-rule: oklch(29% 0.014 255);
-  --color-accent: oklch(68% 0.17 255);
+  --color-paper: #030B1B;
+  --color-paper-2: #071126;
+  --color-paper-3: #0D1B36;
+  --color-ink: #F8FAFD;
+  --color-ink-2: #C1C5CD;
+  --color-rule: #364B6D;
+  --color-accent: #75B7FF;
   --font-display: "Space Grotesk Variable", sans-serif;
   --font-body: "Space Grotesk Variable", sans-serif;
   --font-mono: "JetBrains Mono Variable", monospace;
@@ -299,12 +321,12 @@ html[data-theme="light"] {
 }
 
 html[data-theme="light"] {
-  --color-paper: oklch(96.8% 0.008 255);
-  --color-paper-2: oklch(99.2% 0.003 255);
-  --color-paper-3: oklch(96.3% 0.008 255);
-  --color-ink: oklch(19.5% 0.022 255);
-  --color-rule: oklch(84.5% 0.013 255);
-  --color-accent: oklch(52% 0.205 255);
+  --color-paper: #E8EFF7;
+  --color-paper-2: #F8FAFD;
+  --color-paper-3: #EDF3F8;
+  --color-ink: #071126;
+  --color-rule: #AFC0D3;
+  --color-accent: #1F5F9F;
 }
 ```
 
@@ -314,25 +336,25 @@ html[data-theme="light"] {
 {
   "$schema": "https://design-tokens.github.io/community-group/format/",
   "color": {
-    "paper": { "$value": "oklch(14.5% 0.012 255)", "$type": "color" },
-    "paper-2": { "$value": "oklch(18% 0.014 255)", "$type": "color" },
-    "ink": { "$value": "oklch(94% 0.008 255)", "$type": "color" },
-    "ink-2": { "$value": "oklch(78% 0.012 255)", "$type": "color" },
-    "rule": { "$value": "oklch(29% 0.014 255)", "$type": "color" },
-    "accent": { "$value": "oklch(68% 0.17 255)", "$type": "color" },
-    "focus": { "$value": "oklch(75% 0.19 255)", "$type": "color" }
+    "paper": { "$value": "#030B1B", "$type": "color" },
+    "paper-2": { "$value": "#071126", "$type": "color" },
+    "ink": { "$value": "#F8FAFD", "$type": "color" },
+    "ink-2": { "$value": "#C1C5CD", "$type": "color" },
+    "rule": { "$value": "#364B6D", "$type": "color" },
+    "accent": { "$value": "#75B7FF", "$type": "color" },
+    "focus": { "$value": "#A6CEFA", "$type": "color" }
   },
   "color-light": {
-    "paper": { "$value": "oklch(96.8% 0.008 255)", "$type": "color" },
-    "paper-2": { "$value": "oklch(99.2% 0.003 255)", "$type": "color" },
-    "paper-3": { "$value": "oklch(96.3% 0.008 255)", "$type": "color" },
-    "paper-4": { "$value": "oklch(93.5% 0.011 255)", "$type": "color" },
-    "ink": { "$value": "oklch(19.5% 0.022 255)", "$type": "color" },
-    "ink-2": { "$value": "oklch(33% 0.018 255)", "$type": "color" },
-    "rule": { "$value": "oklch(84.5% 0.013 255)", "$type": "color" },
-    "rule-2": { "$value": "oklch(90.5% 0.009 255)", "$type": "color" },
-    "accent": { "$value": "oklch(52% 0.205 255)", "$type": "color" },
-    "focus": { "$value": "oklch(59% 0.19 255)", "$type": "color" }
+    "paper": { "$value": "#E8EFF7", "$type": "color" },
+    "paper-2": { "$value": "#F8FAFD", "$type": "color" },
+    "paper-3": { "$value": "#EDF3F8", "$type": "color" },
+    "paper-4": { "$value": "#DCE7F2", "$type": "color" },
+    "ink": { "$value": "#071126", "$type": "color" },
+    "ink-2": { "$value": "#1C2D4B", "$type": "color" },
+    "rule": { "$value": "#AFC0D3", "$type": "color" },
+    "rule-2": { "$value": "#D4DFEA", "$type": "color" },
+    "accent": { "$value": "#1F5F9F", "$type": "color" },
+    "focus": { "$value": "#2E72B8", "$type": "color" }
   },
   "font": {
     "display": { "$value": "Space Grotesk Variable, PingFang SC, sans-serif", "$type": "fontFamily" },
@@ -357,42 +379,42 @@ html[data-theme="light"] {
 
 ```css
 :root {
-  --background: 14.5% 0.012 255;
-  --foreground: 94% 0.008 255;
-  --card: 18% 0.014 255;
-  --card-foreground: 94% 0.008 255;
-  --popover: 18% 0.014 255;
-  --popover-foreground: 94% 0.008 255;
-  --primary: 68% 0.17 255;
-  --primary-foreground: 15% 0.012 255;
-  --secondary: 21.5% 0.016 255;
-  --secondary-foreground: 78% 0.012 255;
+  --background: #030B1B;
+  --foreground: #F8FAFD;
+  --card: #071126;
+  --card-foreground: #F8FAFD;
+  --popover: #071126;
+  --popover-foreground: #F8FAFD;
+  --primary: #75B7FF;
+  --primary-foreground: #030B1B;
+  --secondary: #0D1B36;
+  --secondary-foreground: #C1C5CD;
   --muted: 24% 0.014 255;
   --muted-foreground: 64% 0.012 255;
-  --border: 29% 0.014 255;
-  --input: 29% 0.014 255;
-  --ring: 75% 0.19 255;
+  --border: #364B6D;
+  --input: #364B6D;
+  --ring: #A6CEFA;
   --destructive: 62% 0.22 25;
   --destructive-foreground: 96% 0.008 255;
   --radius: 16px;
 }
 
 html[data-theme="light"] {
-  --background: 96.8% 0.008 255;
-  --foreground: 19.5% 0.022 255;
-  --card: 99.2% 0.003 255;
-  --card-foreground: 19.5% 0.022 255;
-  --popover: 99.2% 0.003 255;
-  --popover-foreground: 19.5% 0.022 255;
-  --primary: 52% 0.205 255;
-  --primary-foreground: 98.5% 0.006 255;
-  --secondary: 96.3% 0.008 255;
-  --secondary-foreground: 33% 0.018 255;
-  --muted: 96.3% 0.008 255;
-  --muted-foreground: 47% 0.014 255;
-  --border: 84.5% 0.013 255;
-  --input: 84.5% 0.013 255;
-  --ring: 59% 0.19 255;
+  --background: #E8EFF7;
+  --foreground: #071126;
+  --card: #F8FAFD;
+  --card-foreground: #071126;
+  --popover: #F8FAFD;
+  --popover-foreground: #071126;
+  --primary: #1F5F9F;
+  --primary-foreground: #F8FAFD;
+  --secondary: #EDF3F8;
+  --secondary-foreground: #1C2D4B;
+  --muted: #EDF3F8;
+  --muted-foreground: #5C708A;
+  --border: #AFC0D3;
+  --input: #AFC0D3;
+  --ring: #2E72B8;
   --destructive: 53% 0.22 25;
   --destructive-foreground: 98.5% 0.006 255;
 }

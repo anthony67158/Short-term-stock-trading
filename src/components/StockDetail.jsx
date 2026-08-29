@@ -46,6 +46,46 @@ import {
 } from '../../shared/productionForecastWindow.js'
 import { stockNoteText } from '../../shared/stockNotes.js'
 import FormulaPrice from './FormulaPrice'
+import { useTheme } from '../themeStore'
+
+const STOCK_CHART_COLORS = Object.freeze({
+  dark: Object.freeze({
+    up: '#f4614e',
+    down: '#3fb950',
+    upArea: 'rgba(244,97,78,.55)',
+    downArea: 'rgba(63,185,80,.55)',
+    price: '#75b7ff',
+    priceAreaTop: 'rgba(117,183,255,.28)',
+    priceAreaBottom: 'rgba(117,183,255,.02)',
+    ma5: '#e3b341',
+    ma10: '#5f9fe3',
+    ma20: '#3fb950',
+    axis: '#9ea5b1',
+    rule: '#364b6d',
+    grid: '#1c2d4b',
+    tooltipBg: 'rgba(7,17,38,.96)',
+    tooltipText: '#f8fafd',
+    zoomFill: 'rgba(117,183,255,.15)',
+  }),
+  light: Object.freeze({
+    up: '#e0432f',
+    down: '#1f9d43',
+    upArea: 'rgba(224,67,47,.55)',
+    downArea: 'rgba(31,157,67,.55)',
+    price: '#1f5f9f',
+    priceAreaTop: 'rgba(31,95,159,.28)',
+    priceAreaBottom: 'rgba(31,95,159,.02)',
+    ma5: '#b7841a',
+    ma10: '#2e72b8',
+    ma20: '#1f9d43',
+    axis: '#5c708a',
+    rule: '#afc0d3',
+    grid: '#d4dfea',
+    tooltipBg: 'rgba(248,250,253,.98)',
+    tooltipText: '#071126',
+    zoomFill: 'rgba(31,95,159,.15)',
+  }),
+})
 
 // 把公司网址补全为可点击的绝对 URL（东财 F10 常给不带协议的裸域名）
 function normalizeUrl(raw) {
@@ -126,6 +166,8 @@ function Linkify({ text }) {
 
 // 个股详情弹窗：代码 + 主营业务 + 分时/K线图
 export default function StockDetail({ stock, onClose }) {
+  const theme = useTheme()
+  const chartColors = STOCK_CHART_COLORS[theme] || STOCK_CHART_COLORS.dark
   const [mode, setMode] = useState('kline') // kline K线 | trend 分时
   const [klt, setKlt] = useState('101') // 101日 102周 103月
   const [chartType, setChartType] = useState('candle') // candle | line
@@ -630,7 +672,11 @@ export default function StockDetail({ stock, onClose }) {
     const ma20 = ma(candles, 20)
     const vols = candles.map((c) => ({
       value: c.volume,
-      itemStyle: { color: c.close >= c.open ? 'rgba(244,97,78,.55)' : 'rgba(63,185,80,.55)' },
+      itemStyle: {
+        color: c.close >= c.open
+          ? chartColors.upArea
+          : chartColors.downArea,
+      },
     }))
 
     const isLine = chartType === 'line'
@@ -639,13 +685,13 @@ export default function StockDetail({ stock, onClose }) {
           {
             name: '收盘价', type: 'line', data: closes,
             smooth: true, symbol: 'none',
-            lineStyle: { color: '#5b8def', width: 2 },
+            lineStyle: { color: chartColors.price, width: 2 },
             areaStyle: {
               color: {
                 type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
                 colorStops: [
-                  { offset: 0, color: 'rgba(91,141,239,.28)' },
-                  { offset: 1, color: 'rgba(91,141,239,.02)' },
+                  { offset: 0, color: chartColors.priceAreaTop },
+                  { offset: 1, color: chartColors.priceAreaBottom },
                 ],
               },
             },
@@ -654,15 +700,20 @@ export default function StockDetail({ stock, onClose }) {
       : [
           {
             name: 'K线', type: 'candlestick', data: ohlc,
-            itemStyle: { color: '#f4614e', color0: '#3fb950', borderColor: '#f4614e', borderColor0: '#3fb950' },
+            itemStyle: {
+              color: chartColors.up,
+              color0: chartColors.down,
+              borderColor: chartColors.up,
+              borderColor0: chartColors.down,
+            },
           },
         ]
 
     // 均线（两种模式都叠加）
     const maSeries = [
-      { name: 'MA5', type: 'line', data: ma5, smooth: true, symbol: 'none', lineStyle: { color: '#e3b341', width: 1 } },
-      { name: 'MA10', type: 'line', data: ma10, smooth: true, symbol: 'none', lineStyle: { color: '#7c6bf5', width: 1 } },
-      { name: 'MA20', type: 'line', data: ma20, smooth: true, symbol: 'none', lineStyle: { color: '#3fb950', width: 1 } },
+      { name: 'MA5', type: 'line', data: ma5, smooth: true, symbol: 'none', lineStyle: { color: chartColors.ma5, width: 1 } },
+      { name: 'MA10', type: 'line', data: ma10, smooth: true, symbol: 'none', lineStyle: { color: chartColors.ma10, width: 1 } },
+      { name: 'MA20', type: 'line', data: ma20, smooth: true, symbol: 'none', lineStyle: { color: chartColors.ma20, width: 1 } },
     ]
 
     return {
@@ -670,13 +721,14 @@ export default function StockDetail({ stock, onClose }) {
       axisPointer: { link: [{ xAxisIndex: 'all' }] },
       legend: {
         data: isLine ? ['收盘价', 'MA5', 'MA10', 'MA20'] : ['MA5', 'MA10', 'MA20'],
-        top: 0, right: 8, textStyle: { color: '#767881', fontSize: 10 },
+        top: 0, right: 8, textStyle: { color: chartColors.axis, fontSize: 10 },
         itemWidth: 14, itemHeight: 8,
       },
       tooltip: {
         trigger: 'axis',
-        backgroundColor: '#16181f', borderColor: '#23252d',
-        textStyle: { color: '#e6e7ea', fontSize: 12 },
+        backgroundColor: chartColors.tooltipBg,
+        borderColor: chartColors.rule,
+        textStyle: { color: chartColors.tooltipText, fontSize: 12 },
         formatter: (ps) => {
           const k = candles[ps[0].dataIndex]
           if (!k) return ''
@@ -688,16 +740,16 @@ export default function StockDetail({ stock, onClose }) {
         { left: 52, right: 16, top: '74%', height: '18%' },
       ],
       xAxis: [
-        { type: 'category', data: dates, boundaryGap: true, axisLabel: { color: '#767881', fontSize: 10 }, axisLine: { lineStyle: { color: '#23252d' } }, splitLine: { show: false } },
-        { type: 'category', gridIndex: 1, data: dates, axisLabel: { show: false }, axisLine: { lineStyle: { color: '#23252d' } } },
+        { type: 'category', data: dates, boundaryGap: true, axisLabel: { color: chartColors.axis, fontSize: 10 }, axisLine: { lineStyle: { color: chartColors.rule } }, splitLine: { show: false } },
+        { type: 'category', gridIndex: 1, data: dates, axisLabel: { show: false }, axisLine: { lineStyle: { color: chartColors.rule } } },
       ],
       yAxis: [
-        { scale: true, axisLabel: { color: '#767881', fontSize: 10 }, splitLine: { lineStyle: { color: '#16181f' } } },
+        { scale: true, axisLabel: { color: chartColors.axis, fontSize: 10 }, splitLine: { lineStyle: { color: chartColors.grid } } },
         { scale: true, gridIndex: 1, axisLabel: { show: false }, splitLine: { show: false } },
       ],
       dataZoom: [
         { type: 'inside', xAxisIndex: [0, 1], start: 55, end: 100 },
-        { type: 'slider', xAxisIndex: [0, 1], bottom: 4, height: 14, start: 55, end: 100, borderColor: '#23252d', textStyle: { color: '#767881', fontSize: 9 }, fillerColor: 'rgba(124,107,245,.15)' },
+        { type: 'slider', xAxisIndex: [0, 1], bottom: 4, height: 14, start: 55, end: 100, borderColor: chartColors.rule, textStyle: { color: chartColors.axis, fontSize: 9 }, fillerColor: chartColors.zoomFill },
       ],
       series: [
         ...priceSeries,
@@ -705,7 +757,7 @@ export default function StockDetail({ stock, onClose }) {
         { name: '成交量', type: 'bar', xAxisIndex: 1, yAxisIndex: 1, data: vols },
       ],
     }
-  }, [candles, chartType])
+  }, [candles, chartType, chartColors])
 
   // 分时图 option：现价线 + 均价线 + 昨收基准 + 成交量
   const trendOption = useMemo(() => {
@@ -716,15 +768,23 @@ export default function StockDetail({ stock, onClose }) {
     const avgs = trends.map((t) => t.avg)
     const vols = trends.map((t, i) => ({
       value: t.volume,
-      itemStyle: { color: (i > 0 ? t.price >= trends[i - 1].price : t.price >= (preClose || t.price)) ? 'rgba(244,97,78,.55)' : 'rgba(63,185,80,.55)' },
+      itemStyle: {
+        color: (
+          i > 0
+            ? t.price >= trends[i - 1].price
+            : t.price >= (preClose || t.price)
+        )
+          ? chartColors.upArea
+          : chartColors.downArea,
+      },
     }))
     const base = preClose || prices[0]
     return {
       animation: false,
       axisPointer: { link: [{ xAxisIndex: 'all' }] },
-      legend: { data: ['价格', '均价'], top: 0, right: 8, textStyle: { color: '#767881', fontSize: 10 }, itemWidth: 14, itemHeight: 8 },
+      legend: { data: ['价格', '均价'], top: 0, right: 8, textStyle: { color: chartColors.axis, fontSize: 10 }, itemWidth: 14, itemHeight: 8 },
       tooltip: {
-        trigger: 'axis', backgroundColor: '#16181f', borderColor: '#23252d', textStyle: { color: '#e6e7ea', fontSize: 12 },
+        trigger: 'axis', backgroundColor: chartColors.tooltipBg, borderColor: chartColors.rule, textStyle: { color: chartColors.tooltipText, fontSize: 12 },
         formatter: (ps) => {
           const i = ps[0].dataIndex, t = trends[i]
           const pct = base ? ((t.price - base) / base * 100).toFixed(2) : '0'
@@ -733,23 +793,23 @@ export default function StockDetail({ stock, onClose }) {
       },
       grid: [{ left: 52, right: 16, top: 24, height: '60%' }, { left: 52, right: 16, top: '76%', height: '16%' }],
       xAxis: [
-        { type: 'category', data: times, boundaryGap: false, axisLabel: { color: '#767881', fontSize: 10, interval: Math.floor(times.length / 5) }, axisLine: { lineStyle: { color: '#23252d' } } },
-        { type: 'category', gridIndex: 1, data: times, axisLabel: { show: false }, axisLine: { lineStyle: { color: '#23252d' } } },
+        { type: 'category', data: times, boundaryGap: false, axisLabel: { color: chartColors.axis, fontSize: 10, interval: Math.floor(times.length / 5) }, axisLine: { lineStyle: { color: chartColors.rule } } },
+        { type: 'category', gridIndex: 1, data: times, axisLabel: { show: false }, axisLine: { lineStyle: { color: chartColors.rule } } },
       ],
       yAxis: [
-        { scale: true, axisLabel: { color: '#767881', fontSize: 10 }, splitLine: { lineStyle: { color: '#16181f' } } },
+        { scale: true, axisLabel: { color: chartColors.axis, fontSize: 10 }, splitLine: { lineStyle: { color: chartColors.grid } } },
         { scale: true, gridIndex: 1, axisLabel: { show: false }, splitLine: { show: false } },
       ],
       series: [
-        { name: '价格', type: 'line', data: prices, smooth: false, symbol: 'none', lineStyle: { color: '#5b8def', width: 1.5 },
-          areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(91,141,239,.22)' }, { offset: 1, color: 'rgba(91,141,239,.01)' }] } },
-          markLine: base ? { symbol: 'none', silent: true, data: [{ yAxis: base, lineStyle: { color: '#767881', type: 'dashed', width: 1 }, label: { formatter: '昨收 ' + fmtRaw(base), color: '#767881', fontSize: 10, position: 'insideEndTop' } }] } : undefined,
+        { name: '价格', type: 'line', data: prices, smooth: false, symbol: 'none', lineStyle: { color: chartColors.price, width: 1.5 },
+          areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: chartColors.priceAreaTop }, { offset: 1, color: chartColors.priceAreaBottom }] } },
+          markLine: base ? { symbol: 'none', silent: true, data: [{ yAxis: base, lineStyle: { color: chartColors.axis, type: 'dashed', width: 1 }, label: { formatter: '昨收 ' + fmtRaw(base), color: chartColors.axis, fontSize: 10, position: 'insideEndTop' } }] } : undefined,
         },
-        { name: '均价', type: 'line', data: avgs, smooth: false, symbol: 'none', lineStyle: { color: '#e3b341', width: 1 } },
+        { name: '均价', type: 'line', data: avgs, smooth: false, symbol: 'none', lineStyle: { color: chartColors.ma5, width: 1 } },
         { name: '成交量', type: 'bar', xAxisIndex: 1, yAxisIndex: 1, data: vols },
       ],
     }
-  }, [trends, preClose])
+  }, [trends, preClose, chartColors])
 
   if (!stock) return null
   const inWatchlist = (book.plan || []).some(

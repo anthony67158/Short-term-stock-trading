@@ -3365,7 +3365,7 @@ html[data-theme="light"] .plan-cand.starred {
   box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-accent) 35%, transparent);
 }
 
-/* Hallmark · component: trade-action-panel · genre: modern-minimal · theme: Precision Cobalt
+/* Hallmark · component: trade-action-panel · genre: modern-minimal · theme: Midnight Alloy
  * hierarchy: action summary → fixed price columns → plain-language progress
  * states: default · hover · focus · active · disabled · loading · error · success
  * pre-emit critique: P5 H5 E5 S5 R5 V4 · contrast: pass · responsive: pass
@@ -3618,7 +3618,7 @@ html[data-theme="light"] .plan-cand.starred {
   white-space: nowrap;
 }
 
-/* Hallmark · component: entry-conviction-strip · genre: modern-minimal · theme: Precision Cobalt
+/* Hallmark · component: entry-conviction-strip · genre: modern-minimal · theme: Midnight Alloy
  * intent: surface "how heavy to go" + why, only when direction is approved (FULL/PROBE)
  */
 .action-conviction {
@@ -15167,7 +15167,7 @@ body.overlay-scroll-locked {
   }
 }
 
-/* Hallmark · component: trade-cards · genre: modern-minimal · theme: Precision Cobalt
+/* Hallmark · component: trade-cards · genre: modern-minimal · theme: Midnight Alloy
  * hierarchy: identity → decision → position/evidence → discipline → actions
  * states: default · hover · focus · active · disabled · loading · error · success
  * pre-emit critique: P5 H5 E5 S5 R5 V4 · contrast: pass
@@ -15411,7 +15411,7 @@ body.overlay-scroll-locked {
 }
 
 /* Hallmark · component: observation-review-board · genre: modern-minimal
- * theme: Precision Cobalt · hierarchy: price paths → monitoring → review outcome
+ * theme: Midnight Alloy · hierarchy: price paths → monitoring → review outcome
  * pre-emit critique: P5 H5 E5 S5 R5 V4 · contrast: pass
  */
 .advice-tactical-grid.observation-only {
@@ -16346,5 +16346,210 @@ html[data-theme="light"] .plan-cand.starred {
     background: var(--color-paper-2);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
+  }
+}
+
+/* Brand CMF: midnight navy shell, ice-silver surfaces and cobalt light. */
+html,
+body {
+  background-color: var(--color-paper);
+}
+
+body {
+  background-image: var(--gradient-app);
+}
+
+.app {
+  background: transparent;
+}
+
+.nav,
+html[data-theme="light"] .nav {
+  border-bottom-color: rgb(193 197 205 / 0.16);
+  background: var(--gradient-nav);
+  box-shadow: 0 10px 30px rgb(0 4 14 / 0.22);
+  color: var(--brand-silver-light);
+}
+
+.nav .nav-brand,
+.nav .nav-name {
+  color: var(--brand-pearl);
+}
+
+.nav .nav-tab {
+  color: var(--brand-silver);
+}
+
+.nav .nav-tab:hover,
+.nav .nav-tab.active {
+  border-color: rgb(193 197 205 / 0.16);
+  background: rgb(255 255 255 / 0.07);
+  color: var(--brand-ice);
+}
+
+.nav .nav-tab.active .icon,
+.nav .nav-command .icon {
+  color: var(--brand-halo-blue);
+}
+
+.nav .nav-tab.active::after {
+  background: linear-gradient(
+    90deg,
+    var(--brand-glow-blue),
+    var(--brand-halo-blue)
+  );
+}
+
+html[data-theme="light"] .nav .nav-tab.active,
+html[data-theme="light"] .nav-tabs-mobile .nav-tab.active {
+  border-color: rgb(193 197 205 / 0.5);
+  background: var(--brand-ice);
+  color: var(--brand-midnight);
+}
+
+html[data-theme="light"] .nav .nav-tab.active .icon,
+html[data-theme="light"] .nav-tabs-mobile .nav-tab.active .icon {
+  color: var(--color-accent);
+}
+
+.nav :is(
+  .nav-command,
+  .nav-status,
+  .icon-btn,
+  .acct-btn
+) {
+  border-color: rgb(193 197 205 / 0.18);
+  background: rgb(255 255 255 / 0.05);
+  color: var(--brand-silver-light);
+}
+
+.nav .nav-command kbd {
+  border-color: rgb(193 197 205 / 0.18);
+  background: rgb(255 255 255 / 0.07);
+  color: var(--brand-silver);
+}
+
+.nav :is(
+  .nav-command,
+  .icon-btn,
+  .acct-btn
+):hover {
+  border-color: rgb(117 183 255 / 0.5);
+  background: rgb(255 255 255 / 0.09);
+  color: var(--brand-ice);
+}
+
+.nav button.icon-btn,
+.nav button.icon-btn.nav-undo,
+.nav button.icon-btn.nav-undo:disabled {
+  border-color: rgb(193 197 205 / 0.18);
+  background: rgb(255 255 255 / 0.05);
+  color: var(--brand-silver-light);
+}
+
+.nav button.icon-btn:not(:disabled):hover,
+.nav button.icon-btn.nav-undo:not(:disabled):hover {
+  border-color: rgb(117 183 255 / 0.5);
+  background: rgb(255 255 255 / 0.09);
+  color: var(--brand-ice);
+}
+
+.nav button.icon-btn.nav-undo:disabled {
+  opacity: 0.52;
+}
+
+:is(
+  .btn-primary,
+  .btn-ai,
+  .quant-btn,
+  .t-ai-btn,
+  .ss-btn,
+  .nav-refresh,
+  .ai-fab,
+  .plan-cand .pc-actions .act-buy
+) {
+  border-color: var(--brand-cobalt);
+  background-color: #1f5f9f;
+  background-image: var(--gradient-primary);
+  box-shadow: 0 6px 16px rgb(3 11 27 / 0.18);
+  color: var(--color-on-brand);
+}
+
+:is(
+  .btn-primary,
+  .btn-ai,
+  .quant-btn,
+  .t-ai-btn,
+  .ss-btn,
+  .nav-refresh,
+  .ai-fab,
+  .plan-cand .pc-actions .act-buy
+):hover:not(:disabled) {
+  border-color: var(--brand-glow-blue);
+  background-color: #286aa8;
+  background-image: var(--gradient-primary-hover);
+  color: var(--color-on-brand);
+}
+
+.batch-prog .bp-fill {
+  background-color: var(--brand-cobalt);
+  background-image: linear-gradient(
+    90deg,
+    var(--brand-cobalt),
+    var(--brand-halo-blue)
+  );
+}
+
+.panel:not(.plan-section),
+.trade-card,
+.auth-card,
+.auth-box,
+.confirm-dialog,
+.mobile-trade-dialog,
+.t-drawer,
+.dr-drawer,
+.detail-panel,
+.llm-dialog,
+.holding-plan-dialog {
+  background-color: var(--color-paper-2);
+  background-image: var(--gradient-surface);
+}
+
+.portfolio-overview-zone {
+  background-color: var(--color-paper-2);
+  background-image: var(--gradient-surface);
+}
+
+.plan-section-sticky,
+.plan-section-hold-sticky {
+  background-color: color-mix(
+    in srgb,
+    var(--color-paper) 94%,
+    transparent
+  );
+}
+
+@media (max-width: 720px) {
+  .nav-tabs-mobile {
+    border-top-color: rgb(193 197 205 / 0.16);
+    background: var(--gradient-nav);
+    box-shadow: 0 -10px 30px rgb(0 4 14 / 0.24);
+  }
+
+  .nav-tabs-mobile .nav-tab {
+    color: var(--brand-silver);
+  }
+
+  .nav-tabs-mobile .nav-tab.active {
+    background: rgb(255 255 255 / 0.07);
+    color: var(--brand-halo-blue);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .nav,
+  html[data-theme="light"] .nav,
+  .nav-tabs-mobile {
+    background: var(--brand-midnight);
   }
 }

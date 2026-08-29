@@ -10,7 +10,8 @@
   align-items: center;
   justify-content: center;
   gap: var(--space-sm);
-  background: var(--color-paper);
+  background-color: var(--color-paper);
+  background-image: var(--gradient-app);
   color: var(--color-ink);
   font-family: var(--font-body);
   transition: opacity var(--dur-long) var(--ease-out);
@@ -71,7 +72,8 @@ html.ios-standalone #app-splash {
   width: 38%;
   height: 100%;
   border-radius: inherit;
-  background: var(--color-accent);
+  background-color: var(--brand-cobalt);
+  background-image: var(--gradient-primary);
   animation: precision-boot-progress 1.1s linear infinite;
   content: "";
 }

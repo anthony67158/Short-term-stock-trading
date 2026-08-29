@@ -414,10 +414,10 @@ test('持仓现价和盈亏置于身份行，三列指标带只保留仓位成�
   )
 })
 
-test('白天模式建立明确表面层级并将遗留强调色统一映射到钴蓝系统', () => {
+test('白天模式使用品牌银蓝层级并保留交易语义色', () => {
   assert.match(
     tokens,
-    /html\[data-theme="light"\]\s*{[\s\S]*?--color-paper:\s*oklch\(96\.8% 0\.008 255\)[\s\S]*?--color-paper-2:\s*oklch\(99\.2% 0\.003 255\)[\s\S]*?--color-paper-3:\s*oklch\(96\.3% 0\.008 255\)[\s\S]*?--color-rule:\s*oklch\(84\.5% 0\.013 255\)/s,
+    /html\[data-theme="light"\]\s*{[\s\S]*?--color-paper:\s*#e8eff7[\s\S]*?--color-paper-2:\s*#f8fafd[\s\S]*?--color-paper-3:\s*#edf3f8[\s\S]*?--color-rule:\s*#afc0d3/is,
   )
   assert.match(
     precision,
@@ -432,8 +432,8 @@ test('白天模式建立明确表面层级并将遗留强调色统一映射到�
     /html\[data-theme="light"\] \.ht-fill\s*{[^}]*background:\s*color-mix\(\s*in oklch,\s*var\(--color-accent\) 48%,\s*var\(--color-paper-4\)\s*\)/s,
   )
   assert.doesNotMatch(fundFlowCanvas, /hub:\s*'#6c5ce7'/)
-  assert.match(fundFlowCanvas, /hub:\s*'#0874d8'/)
-  assert.match(tokens, /html\[data-theme="light"\][\s\S]*?--color-accent:\s*oklch\(52% 0\.205 255\)/s)
+  assert.match(fundFlowCanvas, /hub:\s*'#1f5f9f'/)
+  assert.match(tokens, /html\[data-theme="light"\][\s\S]*?--color-accent:\s*#1f5f9f/is)
 })
 
 test('数据块网格使用独立间距和边框，不再以1px缝隙拼成连体框', () => {

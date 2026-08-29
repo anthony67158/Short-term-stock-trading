@@ -55,10 +55,10 @@ export default function FundFlowCanvas({ interval }) {
 
   // 主题相关色板
   const C = useMemo(() => light
-    ? { green: '#168a40', red: '#cf352d', hub: '#0874d8', label: '#202b3a',
-        tipBg: 'rgba(252,253,255,.98)', tipBorder: 'rgba(8,116,216,.32)', tipText: '#202b3a', linkOp: 0.46 }
-    : { green: '#3fb950', red: '#f4614e', hub: '#8b7cf6', label: '#c9c9d6',
-        tipBg: 'rgba(20,22,34,.94)', tipBorder: 'rgba(124,107,245,.4)', tipText: '#e6e6ef', linkOp: 0.42 },
+    ? { green: '#168a40', red: '#cf352d', hub: '#1f5f9f', label: '#1c2d4b',
+        tipBg: 'rgba(248,250,253,.98)', tipBorder: 'rgba(31,95,159,.32)', tipText: '#071126', linkOp: 0.46 }
+    : { green: '#3fb950', red: '#f4614e', hub: '#5f9fe3', label: '#c1c5cd',
+        tipBg: 'rgba(7,17,38,.96)', tipBorder: 'rgba(117,183,255,.38)', tipText: '#f8fafd', linkOp: 0.42 },
   [light])
 
   const HUB = '市场中枢'

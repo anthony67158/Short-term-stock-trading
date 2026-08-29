@@ -31,6 +31,8 @@ const brandMark = read('src/components/BrandMark.jsx')
 const server = read('server.js')
 const themeStore = read('src/themeStore.js')
 const precision = read('src/styles/precision.css')
+const legacyStyles = read('src/styles.css')
+const stockDetail = read('src/components/StockDetail.jsx')
 
 test('网站、启动页与主题切换统一使用同一套新版品牌图标', () => {
   assert.doesNotMatch(index, /brand-light\.svg|brand-dark\.svg/)
@@ -149,12 +151,60 @@ test('导航和登录门户统一使用主题品牌标记', () => {
   assert.match(authGate, /<BrandMark/)
 })
 
-test('亮色主题使用钴蓝强调色并保留A股红涨绿跌', () => {
+test('主题颜色取自品牌图标并保留A股红涨绿跌', () => {
+  assert.match(tokens, /--brand-abyss:\s*#030b1b/i)
+  assert.match(tokens, /--brand-midnight:\s*#071126/i)
+  assert.match(tokens, /--brand-navy:\s*#0d1b36/i)
+  assert.match(tokens, /--brand-steel-blue:\s*#364b6d/i)
+  assert.match(tokens, /--brand-silver:\s*#9ea5b1/i)
+  assert.match(tokens, /--brand-pearl:\s*#e4e5e8/i)
+  assert.match(tokens, /--gradient-app:/)
+  assert.match(tokens, /--gradient-nav:/)
+  assert.match(tokens, /--gradient-primary:/)
   const light = tokens.match(/html\[data-theme="light"\]\s*{([\s\S]*?)\n}/)?.[1] || ''
-  assert.match(light, /--color-accent:\s*oklch\(52% 0\.205 255\)/)
-  assert.match(light, /--color-accent-ink:\s*oklch\(98\.5% 0\.006 255\)/)
+  assert.match(light, /--color-paper:\s*#e8eff7/i)
+  assert.match(light, /--color-paper-2:\s*#f8fafd/i)
+  assert.match(light, /--color-accent:\s*#1f5f9f/i)
+  assert.match(light, /--color-accent-ink:\s*var\(--brand-ice\)/)
   assert.match(light, /--color-up:\s*oklch\(57% 0\.2 25\)/)
   assert.match(light, /--color-down:\s*oklch\(52% 0\.16 150\)/)
+  assert.match(
+    precision,
+    /body\s*{[^}]*background-image:\s*var\(--gradient-app\)/s,
+  )
+  assert.match(
+    precision,
+    /\.nav\s*{[^}]*background(?:-image)?:\s*var\(--gradient-nav\)/s,
+  )
+  assert.match(
+    precision,
+    /\.portfolio-overview-zone\s*{[^}]*background-image:\s*var\(--gradient-surface\)/s,
+  )
+  assert.match(
+    precision,
+    /\.plan-section-sticky,[\s\S]*?\.plan-section-hold-sticky\s*{[^}]*color-mix\(\s*in srgb,/s,
+  )
+  assert.match(
+    precision,
+    /\.nav button\.icon-btn,[\s\S]*?\.nav button\.icon-btn\.nav-undo:disabled\s*{[^}]*background:\s*rgb\(255 255 255 \/ 0\.05\)/s,
+  )
+  assert.match(
+    precision,
+    /html\[data-theme="light"\] \.nav \.nav-tab\.active,[\s\S]*?html\[data-theme="light"\] \.nav-tabs-mobile \.nav-tab\.active\s*{[^}]*background:\s*var\(--brand-ice\)[^}]*color:\s*var\(--brand-midnight\)/s,
+  )
+  assert.doesNotMatch(
+    legacyStyles,
+    /#(?:7c6bf5|8b7cf6|5b8def|9c8bff)|rgba\(\s*(?:124\s*,\s*107\s*,\s*245|91\s*,\s*141\s*,\s*239)\s*,/i,
+  )
+  assert.match(stockDetail, /const STOCK_CHART_COLORS = Object\.freeze/)
+  assert.match(stockDetail, /price:\s*'#75b7ff'/i)
+  assert.match(stockDetail, /price:\s*'#1f5f9f'/i)
+  assert.match(stockDetail, /ma10:\s*'#5f9fe3'/i)
+  assert.match(stockDetail, /ma10:\s*'#2e72b8'/i)
+  assert.doesNotMatch(
+    stockDetail,
+    /#(?:7c6bf5|8b7cf6|5b8def|9c8bff)|rgba\(\s*(?:124\s*,\s*107\s*,\s*245|91\s*,\s*141\s*,\s*239)\s*,/i,
+  )
 })
 
 test('导航品牌图标与右侧操作按钮保持同尺寸', () => {

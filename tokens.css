@@ -1,6 +1,6 @@
 /* Hallmark · genre: modern-minimal · macrostructure: Workbench · design-system: design.md · designed-as-app
- * theme: custom · vibe: "iOS spatial calm, Material clarity, dense trading precision" · paper: oklch(14.5% 0.012 255) · accent: oklch(68% 0.17 255)
- * light: porcelain oklch(96% 0.01 255) · graphite rules · restrained cobalt accent
+ * theme: Midnight Alloy · source: app-icon-1024.png
+ * vibe: "deep navy instrument panel, ice-silver typography, focused cobalt light"
  * display: Space Grotesk · body: Space Grotesk + PingFang SC · axes: dark / geometric-sans / cool
  * studied: no · context: explicit · pre-emit critique: P5 H5 E5 S5 R5 V4
  */
@@ -8,25 +8,82 @@
 :root {
   color-scheme: dark;
 
-  --color-paper: oklch(14.5% 0.012 255);
-  --color-paper-2: oklch(18% 0.014 255);
-  --color-paper-3: oklch(21.5% 0.016 255);
-  --color-paper-4: oklch(25% 0.016 255);
-  --color-ink: oklch(94% 0.008 255);
-  --color-ink-2: oklch(78% 0.012 255);
-  --color-muted: oklch(64% 0.012 255);
-  --color-neutral: oklch(48% 0.012 255);
-  --color-rule: oklch(29% 0.014 255);
-  --color-rule-2: oklch(24% 0.014 255);
-  --color-accent: oklch(68% 0.17 255);
-  --color-accent-ink: oklch(15% 0.012 255);
-  --color-focus: oklch(75% 0.19 255);
+  /* Primitive palette sampled from the metallic navy app icon. */
+  --brand-abyss: #030b1b;
+  --brand-midnight: #071126;
+  --brand-navy: #0d1b36;
+  --brand-deep-blue: #1c2d4b;
+  --brand-steel-blue: #364b6d;
+  --brand-cobalt: #2e72b8;
+  --brand-glow-blue: #5f9fe3;
+  --brand-halo-blue: #75b7ff;
+  --brand-silver: #9ea5b1;
+  --brand-silver-light: #c1c5cd;
+  --brand-pearl: #e4e5e8;
+  --brand-ice: #f8fafd;
+
+  /* Semantic surfaces and content. */
+  --color-paper: var(--brand-abyss);
+  --color-paper-2: var(--brand-midnight);
+  --color-paper-3: var(--brand-navy);
+  --color-paper-4: var(--brand-deep-blue);
+  --color-ink: var(--brand-ice);
+  --color-ink-2: var(--brand-silver-light);
+  --color-muted: var(--brand-silver);
+  --color-neutral: #6e7b91;
+  --color-rule: var(--brand-steel-blue);
+  --color-rule-2: var(--brand-deep-blue);
+  --color-accent: var(--brand-halo-blue);
+  --color-accent-2: var(--brand-glow-blue);
+  --color-accent-ink: var(--brand-abyss);
+  --color-on-brand: var(--brand-ice);
+  --color-focus: #a6cefa;
   --color-focus-on-accent: var(--color-ink);
   --color-up: oklch(68% 0.18 25);
   --color-down: oklch(70% 0.16 150);
   --color-warning: oklch(78% 0.14 78);
   --color-danger: oklch(62% 0.22 25);
 
+  --gradient-app:
+    linear-gradient(
+      145deg,
+      #020714 0%,
+      var(--brand-midnight) 42%,
+      var(--brand-navy) 72%,
+      var(--brand-deep-blue) 100%
+    );
+  --gradient-nav:
+    linear-gradient(
+      110deg,
+      var(--brand-abyss) 0%,
+      var(--brand-midnight) 48%,
+      var(--brand-navy) 74%,
+      var(--brand-deep-blue) 100%
+    );
+  --gradient-surface:
+    linear-gradient(
+      145deg,
+      var(--color-paper-2) 0%,
+      color-mix(
+        in oklch,
+        var(--color-paper-3) 72%,
+        var(--color-paper-2)
+      ) 100%
+    );
+  --gradient-primary:
+    linear-gradient(
+      135deg,
+      #123d6b 0%,
+      #1f5f9f 58%,
+      var(--brand-cobalt) 100%
+    );
+  --gradient-primary-hover:
+    linear-gradient(
+      135deg,
+      #174978 0%,
+      #286aa8 58%,
+      var(--brand-cobalt) 100%
+    );
 
   --font-display:
     "Space Grotesk Variable",
@@ -72,8 +129,8 @@
 
   --rule-hair: 1px;
   --rule-fine: 2px;
-  --shadow-card: 0 12px 32px oklch(5% 0.012 255 / 0.16);
-  --shadow-overlay: 0 24px 64px oklch(5% 0.012 255 / 0.48);
+  --shadow-card: 0 12px 32px rgb(0 6 20 / 0.28);
+  --shadow-overlay: 0 24px 64px rgb(0 4 14 / 0.58);
 
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
@@ -114,8 +171,8 @@
   --green: var(--color-down);
   --gold: var(--color-warning);
   --accent: var(--color-accent);
-  --accent2: var(--color-accent);
-  --glow: oklch(68% 0.17 255 / 0.12);
+  --accent2: var(--color-accent-2);
+  --glow: rgb(95 159 227 / 0.18);
   --radius: var(--radius-card);
   --radius-sm: var(--radius-input);
   --radius-xs: var(--radius-control);
@@ -149,26 +206,40 @@
 html[data-theme="light"] {
   color-scheme: light;
 
-  --color-paper: oklch(96.8% 0.008 255);
-  --color-paper-2: oklch(99.2% 0.003 255);
-  --color-paper-3: oklch(96.3% 0.008 255);
-  --color-paper-4: oklch(93.5% 0.011 255);
-  --color-ink: oklch(19.5% 0.022 255);
-  --color-ink-2: oklch(33% 0.018 255);
-  --color-muted: oklch(47% 0.014 255);
-  --color-neutral: oklch(58% 0.012 255);
-  --color-rule: oklch(84.5% 0.013 255);
-  --color-rule-2: oklch(90.5% 0.009 255);
-  --color-accent: oklch(52% 0.205 255);
-  --color-accent-ink: oklch(98.5% 0.006 255);
-  --color-focus: oklch(59% 0.19 255);
+  --color-paper: #e8eff7;
+  --color-paper-2: #f8fafd;
+  --color-paper-3: #edf3f8;
+  --color-paper-4: #dce7f2;
+  --color-ink: var(--brand-midnight);
+  --color-ink-2: var(--brand-deep-blue);
+  --color-muted: #5c708a;
+  --color-neutral: #73839a;
+  --color-rule: #afc0d3;
+  --color-rule-2: #d4dfea;
+  --color-accent: #1f5f9f;
+  --color-accent-2: var(--brand-cobalt);
+  --color-accent-ink: var(--brand-ice);
+  --color-focus: var(--brand-cobalt);
   --color-focus-on-accent: var(--color-paper-2);
   --color-up: oklch(57% 0.2 25);
   --color-down: oklch(52% 0.16 150);
   --color-warning: oklch(55% 0.14 78);
   --color-danger: oklch(53% 0.22 25);
 
-  --shadow-card: 0 12px 32px oklch(28% 0.018 255 / 0.08);
-  --shadow-overlay: 0 18px 48px oklch(28% 0.018 255 / 0.16);
-  --glow: oklch(52% 0.205 255 / 0.08);
+  --gradient-app:
+    linear-gradient(
+      145deg,
+      var(--brand-ice) 0%,
+      #edf3f9 52%,
+      #dce7f2 100%
+    );
+  --gradient-surface:
+    linear-gradient(
+      145deg,
+      var(--color-paper-2) 0%,
+      var(--color-paper-3) 100%
+    );
+  --shadow-card: 0 12px 32px rgb(13 27 54 / 0.10);
+  --shadow-overlay: 0 18px 48px rgb(13 27 54 / 0.20);
+  --glow: rgb(31 95 159 / 0.16);
 }
