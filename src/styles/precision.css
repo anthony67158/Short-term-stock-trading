@@ -16365,31 +16365,31 @@ body {
 
 .nav,
 html[data-theme="light"] .nav {
-  border-bottom-color: rgb(193 197 205 / 0.16);
-  background: var(--gradient-nav);
-  box-shadow: 0 10px 30px rgb(0 4 14 / 0.22);
-  color: var(--brand-silver-light);
+  border-bottom-color: var(--color-nav-border);
+  background: var(--gradient-nav-theme);
+  box-shadow: 0 10px 30px var(--color-nav-shadow);
+  color: var(--color-nav-ink);
 }
 
 .nav .nav-brand,
 .nav .nav-name {
-  color: var(--brand-pearl);
+  color: var(--color-nav-ink-strong);
 }
 
 .nav .nav-tab {
-  color: var(--brand-silver);
+  color: var(--color-nav-muted);
 }
 
 .nav .nav-tab:hover,
 .nav .nav-tab.active {
-  border-color: rgb(193 197 205 / 0.16);
-  background: rgb(255 255 255 / 0.07);
-  color: var(--brand-ice);
+  border-color: var(--color-nav-border);
+  background: var(--color-nav-active);
+  color: var(--color-nav-active-ink);
 }
 
 .nav .nav-tab.active .icon,
 .nav .nav-command .icon {
-  color: var(--brand-halo-blue);
+  color: var(--color-nav-active-icon);
 }
 
 .nav .nav-tab.active::after {
@@ -16400,33 +16400,21 @@ html[data-theme="light"] .nav {
   );
 }
 
-html[data-theme="light"] .nav .nav-tab.active,
-html[data-theme="light"] .nav-tabs-mobile .nav-tab.active {
-  border-color: rgb(193 197 205 / 0.5);
-  background: var(--brand-ice);
-  color: var(--brand-midnight);
-}
-
-html[data-theme="light"] .nav .nav-tab.active .icon,
-html[data-theme="light"] .nav-tabs-mobile .nav-tab.active .icon {
-  color: var(--color-accent);
-}
-
 .nav :is(
   .nav-command,
   .nav-status,
   .icon-btn,
   .acct-btn
 ) {
-  border-color: rgb(193 197 205 / 0.18);
-  background: rgb(255 255 255 / 0.05);
-  color: var(--brand-silver-light);
+  border-color: var(--color-nav-border);
+  background: var(--color-nav-control);
+  color: var(--color-nav-ink);
 }
 
 .nav .nav-command kbd {
-  border-color: rgb(193 197 205 / 0.18);
-  background: rgb(255 255 255 / 0.07);
-  color: var(--brand-silver);
+  border-color: var(--color-nav-border);
+  background: var(--color-nav-active);
+  color: var(--color-nav-muted);
 }
 
 .nav :is(
@@ -16434,24 +16422,32 @@ html[data-theme="light"] .nav-tabs-mobile .nav-tab.active .icon {
   .icon-btn,
   .acct-btn
 ):hover {
-  border-color: rgb(117 183 255 / 0.5);
-  background: rgb(255 255 255 / 0.09);
-  color: var(--brand-ice);
+  border-color: color-mix(
+    in srgb,
+    var(--color-accent) 46%,
+    var(--color-nav-border)
+  );
+  background: var(--color-nav-control-hover);
+  color: var(--color-nav-ink-strong);
 }
 
 .nav button.icon-btn,
 .nav button.icon-btn.nav-undo,
 .nav button.icon-btn.nav-undo:disabled {
-  border-color: rgb(193 197 205 / 0.18);
-  background: rgb(255 255 255 / 0.05);
-  color: var(--brand-silver-light);
+  border-color: var(--color-nav-border);
+  background: var(--color-nav-control);
+  color: var(--color-nav-ink);
 }
 
 .nav button.icon-btn:not(:disabled):hover,
 .nav button.icon-btn.nav-undo:not(:disabled):hover {
-  border-color: rgb(117 183 255 / 0.5);
-  background: rgb(255 255 255 / 0.09);
-  color: var(--brand-ice);
+  border-color: color-mix(
+    in srgb,
+    var(--color-accent) 46%,
+    var(--color-nav-border)
+  );
+  background: var(--color-nav-control-hover);
+  color: var(--color-nav-ink-strong);
 }
 
 .nav button.icon-btn.nav-undo:disabled {
@@ -16531,18 +16527,22 @@ html[data-theme="light"] .nav-tabs-mobile .nav-tab.active .icon {
 
 @media (max-width: 720px) {
   .nav-tabs-mobile {
-    border-top-color: rgb(193 197 205 / 0.16);
-    background: var(--gradient-nav);
-    box-shadow: 0 -10px 30px rgb(0 4 14 / 0.24);
+    border-top-color: var(--color-nav-border);
+    background: var(--gradient-nav-theme);
+    box-shadow: 0 -10px 30px var(--color-nav-shadow);
   }
 
   .nav-tabs-mobile .nav-tab {
-    color: var(--brand-silver);
+    color: var(--color-nav-muted);
   }
 
   .nav-tabs-mobile .nav-tab.active {
-    background: rgb(255 255 255 / 0.07);
-    color: var(--brand-halo-blue);
+    background: var(--color-nav-active);
+    color: var(--color-nav-active-ink);
+  }
+
+  .nav-tabs-mobile .nav-tab.active .icon {
+    color: var(--color-nav-active-icon);
   }
 }
 
@@ -16550,6 +16550,6 @@ html[data-theme="light"] .nav-tabs-mobile .nav-tab.active .icon {
   .nav,
   html[data-theme="light"] .nav,
   .nav-tabs-mobile {
-    background: var(--brand-midnight);
+    background: var(--color-paper-2);
   }
 }

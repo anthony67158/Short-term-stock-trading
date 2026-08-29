@@ -93,7 +93,7 @@ html[data-theme="light"] {
   --track-bg: color-mix(in srgb, var(--panel3) 85%, transparent);
 }
 /* 浅色下调整几处硬编码深色 */
-html[data-theme="light"] .nav { background: var(--gradient-nav); }
+html[data-theme="light"] .nav { background: var(--gradient-nav-theme); }
 html[data-theme="light"] *::-webkit-scrollbar-thumb:hover { background: var(--brand-silver); }
 html[data-theme="light"] body { background-image: var(--gradient-app); }
 

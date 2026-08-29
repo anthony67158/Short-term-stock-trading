@@ -88,7 +88,9 @@
 - Page background uses an ice-silver gradient; primary panels use near-white
   silver-blue surfaces.
 - Quiet bands use `paper-3`; pressed and track surfaces use `paper-4`.
-- Navigation keeps the logo-derived midnight gradient in both themes.
+- Navigation uses the logo-derived midnight gradient in dark mode and an
+  ice-silver gradient in light mode. The logo and primary refresh action remain
+  the dark/blue anchors.
 - Legacy purple aliases and literals must map to the current blue tokens.
 
 ### Trading semantics
@@ -252,6 +254,7 @@
   --color-focus: #A6CEFA;
   --gradient-app: linear-gradient(145deg, #020714, #071126 42%, #0D1B36 72%, #1C2D4B);
   --gradient-nav: linear-gradient(110deg, #030B1B, #071126 48%, #0D1B36 74%, #1C2D4B);
+  --gradient-nav-theme: var(--gradient-nav);
   --gradient-primary: linear-gradient(135deg, #123D6B, #1F5F9F 58%, #2E72B8);
   --font-display: "Space Grotesk Variable", "PingFang SC", sans-serif;
   --font-body: "Space Grotesk Variable", "PingFang SC", sans-serif;
@@ -288,6 +291,7 @@ html[data-theme="light"] {
   --color-accent-ink: var(--brand-ice);
   --color-focus: #2E72B8;
   --gradient-app: linear-gradient(145deg, #F8FAFD, #EDF3F9 52%, #DCE7F2);
+  --gradient-nav-theme: linear-gradient(110deg, #F8FAFD, #EDF3F8 56%, #DCE7F2);
 }
 ```
 

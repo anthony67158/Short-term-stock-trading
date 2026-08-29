@@ -60,6 +60,17 @@
       var(--brand-navy) 74%,
       var(--brand-deep-blue) 100%
     );
+  --gradient-nav-theme: var(--gradient-nav);
+  --color-nav-ink: var(--brand-silver-light);
+  --color-nav-ink-strong: var(--brand-pearl);
+  --color-nav-muted: var(--brand-silver);
+  --color-nav-border: rgb(193 197 205 / 0.16);
+  --color-nav-control: rgb(255 255 255 / 0.05);
+  --color-nav-control-hover: rgb(255 255 255 / 0.09);
+  --color-nav-active: rgb(255 255 255 / 0.07);
+  --color-nav-active-ink: var(--brand-ice);
+  --color-nav-active-icon: var(--brand-halo-blue);
+  --color-nav-shadow: rgb(0 4 14 / 0.22);
   --gradient-surface:
     linear-gradient(
       145deg,
@@ -233,6 +244,23 @@ html[data-theme="light"] {
       #edf3f9 52%,
       #dce7f2 100%
     );
+  --gradient-nav-theme:
+    linear-gradient(
+      110deg,
+      var(--brand-ice) 0%,
+      #edf3f8 56%,
+      #dce7f2 100%
+    );
+  --color-nav-ink: var(--brand-deep-blue);
+  --color-nav-ink-strong: var(--brand-midnight);
+  --color-nav-muted: #5c708a;
+  --color-nav-border: rgb(54 75 109 / 0.18);
+  --color-nav-control: rgb(248 250 253 / 0.72);
+  --color-nav-control-hover: var(--brand-ice);
+  --color-nav-active: var(--brand-ice);
+  --color-nav-active-ink: var(--brand-midnight);
+  --color-nav-active-icon: var(--color-accent);
+  --color-nav-shadow: rgb(13 27 54 / 0.10);
   --gradient-surface:
     linear-gradient(
       145deg,

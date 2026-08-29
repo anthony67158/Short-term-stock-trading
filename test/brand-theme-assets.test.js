@@ -174,7 +174,7 @@ test('主题颜色取自品牌图标并保留A股红涨绿跌', () => {
   )
   assert.match(
     precision,
-    /\.nav\s*{[^}]*background(?:-image)?:\s*var\(--gradient-nav\)/s,
+    /\.nav\s*{[^}]*background(?:-image)?:\s*var\(--gradient-nav-theme\)/s,
   )
   assert.match(
     precision,
@@ -186,11 +186,15 @@ test('主题颜色取自品牌图标并保留A股红涨绿跌', () => {
   )
   assert.match(
     precision,
-    /\.nav button\.icon-btn,[\s\S]*?\.nav button\.icon-btn\.nav-undo:disabled\s*{[^}]*background:\s*rgb\(255 255 255 \/ 0\.05\)/s,
+    /\.nav button\.icon-btn,[\s\S]*?\.nav button\.icon-btn\.nav-undo:disabled\s*{[^}]*background:\s*var\(--color-nav-control\)/s,
   )
   assert.match(
-    precision,
-    /html\[data-theme="light"\] \.nav \.nav-tab\.active,[\s\S]*?html\[data-theme="light"\] \.nav-tabs-mobile \.nav-tab\.active\s*{[^}]*background:\s*var\(--brand-ice\)[^}]*color:\s*var\(--brand-midnight\)/s,
+    light,
+    /--gradient-nav-theme:[\s\S]*?var\(--brand-ice\)[\s\S]*?#edf3f8[\s\S]*?#dce7f2/,
+  )
+  assert.match(
+    light,
+    /--color-nav-active:\s*var\(--brand-ice\)[\s\S]*?--color-nav-active-ink:\s*var\(--brand-midnight\)/s,
   )
   assert.doesNotMatch(
     legacyStyles,
