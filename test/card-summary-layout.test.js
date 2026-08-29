@@ -207,36 +207,38 @@ test('自选卡把当前指令放在盘面证据之前并取消四格指标墙',
   )
 })
 
-test('个股详情复用详情请求展示换手量比与主力散户资金', () => {
+test('个股详情展示最近收盘快照与近5日关键趋势', () => {
   assert.match(
     stockDetail,
     /stock_detail\?code=\$\{stock\.code\}[^`]*quote=1/,
   )
-  assert.match(stockDetailApi, /fetchQuotes\(\[code\]\)/)
+  assert.match(
+    stockDetailApi,
+    /fetchQuotes\(\[code\],\s*\{\s*now:\s*requestedAt\s*\}\)/,
+  )
+  assert.match(stockDetailApi, /fetchStockFund\(code/)
+  assert.match(stockDetailApi, /buildStockMarketSnapshot/)
   assert.match(
     quoteApi,
     /export async function fetchQuotes\(codes,\s*dependencies = \{\}\)/,
   )
   assert.match(
     stockDetail,
-    /className="detail-market-metrics"[\s\S]*?>换手<\/span>[\s\S]*?>量比<\/span>[\s\S]*?>主力<\/span>[\s\S]*?>散户<\/span>/,
+    /className="detail-market-snapshot"[\s\S]*?最近收盘[\s\S]*?换手[\s\S]*?量比[\s\S]*?主力净额[\s\S]*?小单净额[\s\S]*?近\{marketSnapshot\.recent5\.dayCount\}日[\s\S]*?价格变化[\s\S]*?主力流入天数[\s\S]*?主力累计[\s\S]*?小单累计/,
   )
-  assert.match(stockDetail, /fmtNum\(quote\?\.turnover,\s*1\)/)
-  assert.match(stockDetail, /fmtNum\(quote\?\.volRatio,\s*1\)/)
-  assert.match(stockDetail, /fmtInflow\(quote\?\.mainInflow\)/)
-  assert.match(stockDetail, /fmtInflow\(quote\?\.retailInflow\)/)
-  assert.match(stockDetail, /function hasMarketMetric\(value\)/)
-  assert.equal(
-    (stockDetail.match(/hasMarketMetric\(quote\?\./g) || []).length,
-    4,
+  assert.match(stockDetail, /formatYi\(marketSnapshot\.latest\.mainNetYi\)/)
+  assert.match(stockDetail, /formatYi\(marketSnapshot\.recent5\.mainNetYi\)/)
+  assert.match(
+    precision,
+    /\.detail-market-snapshot\s*{[^}]*background:\s*var\(--color-paper-3\)/s,
   )
   assert.match(
     precision,
-    /\.detail-market-metrics\s*{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/s,
+    /\.detail-market-grid\s*{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/s,
   )
   assert.match(
     precision,
-    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.detail-market-metrics\s*{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.detail-market-grid\s*{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s,
   )
 })
 

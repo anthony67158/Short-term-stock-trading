@@ -104,32 +104,43 @@ function previousCloseQuote(code, eastmoney, tencent, now) {
       isLivePrice: false,
     });
   }
+  const eastmoneyHistorical = (
+    positive(eastmoney?.price) != null
+    && String(eastmoney?.tradeDate || '').slice(0, 10) !== today
+  )
+    ? eastmoney
+    : null;
   const sourceTradeDate = (
-    String(tencent?.tradeDate || '').slice(0, 10) !== today
-      ? tencent?.tradeDate || null
-      : null
+    eastmoneyHistorical?.tradeDate
+    || (
+      String(tencent?.tradeDate || '').slice(0, 10) !== today
+        ? tencent?.tradeDate || null
+        : null
+    )
   );
   return withPriceLimitState({
     ...(eastmoney || {}),
     code,
     name: eastmoney?.name || tencent?.name || '',
     industry: eastmoney?.industry || tencent?.industry || null,
-    source: tencent
-      ? '腾讯财经·最近收盘'
-      : '东方财富·昨收',
+    source: eastmoneyHistorical
+      ? '东方财富·最近收盘'
+      : tencent
+        ? '腾讯财经·最近收盘'
+        : '东方财富·昨收',
     price,
-    pct: 0,
-    chg: 0,
-    turnover: null,
-    volRatio: null,
-    mainInflow: null,
-    retailInflow: null,
-    mainRatio: null,
-    amount: null,
-    high: null,
-    low: null,
-    open: null,
-    prevClose: price,
+    pct: eastmoneyHistorical?.pct ?? 0,
+    chg: eastmoneyHistorical?.chg ?? 0,
+    turnover: positive(eastmoneyHistorical?.turnover),
+    volRatio: positive(eastmoneyHistorical?.volRatio),
+    mainInflow: eastmoneyHistorical?.mainInflow ?? null,
+    retailInflow: eastmoneyHistorical?.retailInflow ?? null,
+    mainRatio: eastmoneyHistorical?.mainRatio ?? null,
+    amount: positive(eastmoneyHistorical?.amount),
+    high: positive(eastmoneyHistorical?.high),
+    low: positive(eastmoneyHistorical?.low),
+    open: positive(eastmoneyHistorical?.open),
+    prevClose: positive(eastmoneyHistorical?.prevClose) || price,
     tradeDate: sourceTradeDate,
     priceStatus: 'PREVIOUS_CLOSE',
     priceLabel: (

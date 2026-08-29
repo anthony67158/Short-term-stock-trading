@@ -8,7 +8,12 @@ import {
   canUseQuantModel,
   resolveQuantModelForRequest,
 } from './_quant_access.js';
+import { fetchStockFund } from './_stock_fund.js';
 import { fetchQuotes } from './quote.js';
+import { isContinuousTrading } from '../shared/tradingCalendar.js';
+import {
+  buildStockMarketSnapshot,
+} from '../shared/stockMarketSnapshot.js';
 
 // secid 前缀：6/9/5 开头沪市=1，其余=0
 function toSecid(code) {
@@ -134,6 +139,7 @@ export default async function handler(req, res) {
     const wantTrends = req.query.trends === '1';
     const wantQuote = req.query.quote === '1';
     const wantQuant = req.query.quant === '1';
+    const requestedAt = Date.now();
     const quantModelVersion = wantQuant
       ? await resolveQuantModelForRequest(req, req.query.model)
       : normalizeQuantModelVersion(req.query.model);
@@ -180,18 +186,28 @@ export default async function handler(req, res) {
     }
 
     // 用 allSettled 保证：分时/简介失败绝不影响 K线返回
-    const [klRes, f10Res, trendsRes, quoteRes] = await Promise.allSettled([
-      fetchKline(klHosts, klPath),
-      jget(f10Url, 6000, 'https://emweb.securities.eastmoney.com/'),
-      wantTrends ? fetchTrends() : Promise.resolve(null),
-      wantQuote ? fetchQuotes([code]) : Promise.resolve([]),
-    ]);
+    const [klRes, f10Res, trendsRes, quoteRes, fundRes] =
+      await Promise.allSettled([
+        fetchKline(klHosts, klPath),
+        jget(f10Url, 6000, 'https://emweb.securities.eastmoney.com/'),
+        wantTrends ? fetchTrends() : Promise.resolve(null),
+        wantQuote
+          ? fetchQuotes([code], { now: requestedAt })
+          : Promise.resolve([]),
+        wantQuote
+          ? fetchStockFund(code, {
+              preferRealtime: isContinuousTrading(requestedAt),
+              fetchedAt: requestedAt,
+            })
+          : Promise.resolve(null),
+      ]);
     const klJson = klRes.status === 'fulfilled' ? klRes.value : null;
     const f10Json = f10Res.status === 'fulfilled' ? f10Res.value : null;
     const trendsJson = trendsRes.status === 'fulfilled' ? trendsRes.value : null;
     const quote = quoteRes.status === 'fulfilled'
       ? quoteRes.value.find((item) => item.code === String(code)) || null
       : null;
+    const fund = fundRes.status === 'fulfilled' ? fundRes.value : null;
 
     // 解析 K线
     const kd = klJson && klJson.data;
@@ -207,6 +223,7 @@ export default async function handler(req, res) {
         volume: num(p[5]),
         amount: num(p[6]),
         pct: num(p[8]),
+        turnover: num(p[9]) || null,
       };
     });
     let txName = '';
@@ -251,6 +268,9 @@ export default async function handler(req, res) {
     const periodLabel = klt === '102' ? '周' : klt === '103' ? '月' : '日';
     let tech = null;
     try { tech = computeTechnicals(candles, periodLabel); } catch { /* 指标失败不阻断 */ }
+    const marketSnapshot = wantQuote
+      ? buildStockMarketSnapshot({ quote, candles, fund })
+      : null;
 
     // 量化预测（quant=1 时调用；把本地已取到的 K线传给量化服务，绕开其取数被风控）
     // 可选持仓：holdCost 传入则给"加/减/做T"建议，否则给"买/观望"建议
@@ -298,6 +318,8 @@ export default async function handler(req, res) {
         trends,
         preClose,
         quote,
+        fund,
+        marketSnapshot,
         tech,
         quant,
         quantModelVersion,

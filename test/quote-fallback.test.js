@@ -132,3 +132,41 @@ test('两个行情源都没有现价时使用东财昨收且不伪造行情日�
   assert.equal(list[0].priceLabel, '昨收')
   assert.equal(list[0].isLivePrice, false)
 })
+
+test('休市时保留最近收盘日的活跃度与资金快照', async () => {
+  const weekend = Date.parse('2026-08-29T02:00:00.000Z')
+  const list = await fetchQuotes(['300390'], {
+    now: weekend,
+    fetchEastmoney: async () => [{
+      code: '300390',
+      name: '天华新能',
+      source: '东方财富',
+      price: 64.12,
+      pct: 1.46,
+      chg: 0.92,
+      turnover: 5.38,
+      volRatio: 0.78,
+      mainInflow: 181_197_588,
+      retailInflow: -211_449_936,
+      mainRatio: 7.42,
+      amount: 2_442_216_361.28,
+      high: 64.98,
+      low: 62.36,
+      open: 63.98,
+      prevClose: 63.2,
+      tradeDate: '2026-08-28',
+      industry: '电池',
+    }],
+    fetchTencent: async () => [],
+  })
+
+  assert.equal(list[0].priceStatus, 'PREVIOUS_CLOSE')
+  assert.equal(list[0].priceLabel, '最近收盘')
+  assert.equal(list[0].isLivePrice, false)
+  assert.equal(list[0].tradeDate, '2026-08-28')
+  assert.equal(list[0].pct, 1.46)
+  assert.equal(list[0].turnover, 5.38)
+  assert.equal(list[0].volRatio, 0.78)
+  assert.equal(list[0].mainInflow, 181_197_588)
+  assert.equal(list[0].retailInflow, -211_449_936)
+})

@@ -7,7 +7,7 @@ import { StockNoteEditor } from './StockNote'
 import AdviceGenerationStatus from './AdviceGenerationStatus'
 import AdvicePresentation from './AdvicePresentation'
 import { usePolling } from '../hooks'
-import { fmtPct, pctClass, fmtRaw, fmtNum, fmtInflow } from '../format'
+import { fmtPct, pctClass, fmtRaw, fmtNum } from '../format'
 import { api } from '../apiBase'
 import { usePlanStore, planStore, computePortfolio, livePositionOf, t1StatusOf } from '../planStore'
 import { nextTradingDayLabel } from '../../shared/tradingCalendar.js'
@@ -84,6 +84,17 @@ function hasMarketMetric(value) {
     && value !== undefined
     && value !== ''
     && Number.isFinite(Number(value))
+}
+
+function formatYi(value) {
+  if (!hasMarketMetric(value)) return '--'
+  const amount = Number(value)
+  return `${amount > 0 ? '+' : ''}${amount.toFixed(2)}亿`
+}
+
+function formatSnapshotDate(value) {
+  const matched = String(value || '').match(/^\d{4}-(\d{2})-(\d{2})/)
+  return matched ? `${matched[1]}/${matched[2]}` : ''
 }
 
 function formatQuantAsOf(value) {
@@ -435,7 +446,7 @@ export default function StockDetail({ stock, onClose }) {
   const trends = (data && data.trends) || []
   const preClose = data && data.preClose
   const tech = data && data.tech
-  const quote = (data && data.quote) || stock
+  const marketSnapshot = data && data.marketSnapshot
 
   // K线为空时自动重试（东财偶发空响应）：最多重试 2 次，间隔递增
   const retryRef = useRef(0)
@@ -864,43 +875,102 @@ export default function StockDetail({ stock, onClose }) {
                   {refreshedAt && <span className="dq-updated">· 已更新 {new Date(refreshedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>}
                 </span>
               </div>
-              <div
-                className="detail-market-metrics"
-                aria-label="个股活跃度与资金流向"
-              >
-                <div className="detail-market-metric">
-                  <span>换手</span>
-                  <b>
-                    {hasMarketMetric(quote?.turnover)
-                      ? `${fmtNum(quote?.turnover, 1)}%`
-                      : '--'}
-                  </b>
+              {marketSnapshot && (
+                <div
+                  className="detail-market-snapshot"
+                  aria-label="个股最近收盘与近5日盘面数据"
+                >
+                  <div className="detail-market-section-head">
+                    <strong>
+                      {marketSnapshot.isLive ? '盘中快照' : '最近收盘'}
+                    </strong>
+                    <span>
+                      {formatSnapshotDate(marketSnapshot.asOfDate)}
+                      {marketSnapshot.isLive ? ' · 实时口径' : ' · 收盘口径'}
+                    </span>
+                  </div>
+                  <div className="detail-market-grid">
+                    <div className="detail-market-metric">
+                      <span>换手</span>
+                      <b>
+                        {hasMarketMetric(marketSnapshot.latest.turnover)
+                          ? `${fmtNum(marketSnapshot.latest.turnover, 1)}%`
+                          : '--'}
+                      </b>
+                    </div>
+                    <div className="detail-market-metric">
+                      <span>量比</span>
+                      <b>
+                        {hasMarketMetric(marketSnapshot.latest.volumeRatio)
+                          ? fmtNum(marketSnapshot.latest.volumeRatio, 2)
+                          : '--'}
+                      </b>
+                    </div>
+                    <div className="detail-market-metric">
+                      <span>主力净额</span>
+                      <b className={pctClass(marketSnapshot.latest.mainNetYi)}>
+                        {formatYi(marketSnapshot.latest.mainNetYi)}
+                      </b>
+                    </div>
+                    <div className="detail-market-metric">
+                      <span>小单净额</span>
+                      <b className={pctClass(marketSnapshot.latest.retailNetYi)}>
+                        {formatYi(marketSnapshot.latest.retailNetYi)}
+                      </b>
+                    </div>
+                  </div>
+                  {marketSnapshot.recent5.dayCount > 0 && (
+                    <>
+                      <div className="detail-market-section-head secondary">
+                        <strong>近{marketSnapshot.recent5.dayCount}日</strong>
+                        <span>交易日累计</span>
+                      </div>
+                      <div className="detail-market-grid secondary">
+                        <div className="detail-market-metric">
+                          <span>价格变化</span>
+                          <b className={pctClass(
+                            marketSnapshot.recent5.priceChangePct,
+                          )}>
+                            {fmtPct(marketSnapshot.recent5.priceChangePct)}
+                          </b>
+                        </div>
+                        <div className="detail-market-metric">
+                          <span>主力流入天数</span>
+                          <b className={pctClass(
+                            marketSnapshot.recent5.mainNetYi,
+                          )}>
+                            {marketSnapshot.recent5.mainInflowDays == null
+                              ? '--'
+                              : `${marketSnapshot.recent5.mainInflowDays}`
+                                + `/${marketSnapshot.recent5.dayCount}日`}
+                          </b>
+                        </div>
+                        <div className="detail-market-metric">
+                          <span>主力累计</span>
+                          <b className={pctClass(
+                            marketSnapshot.recent5.mainNetYi,
+                          )}>
+                            {formatYi(marketSnapshot.recent5.mainNetYi)}
+                          </b>
+                        </div>
+                        <div className="detail-market-metric">
+                          <span>小单累计</span>
+                          <b className={pctClass(
+                            marketSnapshot.recent5.retailNetYi,
+                          )}>
+                            {formatYi(marketSnapshot.recent5.retailNetYi)}
+                          </b>
+                          {marketSnapshot.recent5.retailInflowDays != null && (
+                            <small>
+                              {marketSnapshot.recent5.retailInflowDays}日净流入
+                            </small>
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
-                <div className="detail-market-metric">
-                  <span>量比</span>
-                  <b>
-                    {hasMarketMetric(quote?.volRatio)
-                      ? fmtNum(quote?.volRatio, 1)
-                      : '--'}
-                  </b>
-                </div>
-                <div className="detail-market-metric">
-                  <span>主力</span>
-                  <b className={pctClass(quote?.mainInflow)}>
-                    {hasMarketMetric(quote?.mainInflow)
-                      ? fmtInflow(quote?.mainInflow)
-                      : '--'}
-                  </b>
-                </div>
-                <div className="detail-market-metric">
-                  <span>散户</span>
-                  <b className={pctClass(quote?.retailInflow)}>
-                    {hasMarketMetric(quote?.retailInflow)
-                      ? fmtInflow(quote?.retailInflow)
-                      : '--'}
-                  </b>
-                </div>
-              </div>
+              )}
               {/* ===== AI 操作建议（核心：紧跟价格，第一优先展示）===== */}
               <div className="decide-box">
                 <div className="decide-head">

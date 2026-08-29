@@ -4089,12 +4089,43 @@ html[data-theme="light"] .plan-cand.starred {
   margin-left: 0;
 }
 
-.detail-market-metrics {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+.detail-market-snapshot {
   overflow: hidden;
   border-radius: var(--radius-control);
   background: var(--color-paper-3);
+}
+
+.detail-market-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  min-height: 36px;
+  padding: var(--space-xs) var(--space-sm);
+}
+
+.detail-market-section-head.secondary {
+  border-top: 1px solid var(--color-rule-2);
+}
+
+.detail-market-section-head > strong {
+  color: var(--color-ink);
+  font-size: var(--text-xs);
+  font-weight: 720;
+}
+
+.detail-market-section-head > span {
+  overflow: hidden;
+  color: var(--color-muted);
+  font-size: var(--text-2xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-market-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: 1px solid var(--color-rule-2);
 }
 
 .detail-market-metric {
@@ -4106,7 +4137,7 @@ html[data-theme="light"] .plan-cand.starred {
   border-inline-start: 1px solid var(--color-rule-2);
 }
 
-.detail-market-metric:first-child {
+.detail-market-metric:nth-child(4n + 1) {
   border-inline-start: 0;
 }
 
@@ -4137,6 +4168,15 @@ html[data-theme="light"] .plan-cand.starred {
 
 .detail-market-metric > b.green {
   color: var(--green);
+}
+
+.detail-market-metric > small {
+  overflow: hidden;
+  color: var(--color-muted);
+  font-size: var(--text-2xs);
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .decide-box {
@@ -5021,7 +5061,7 @@ html[data-theme="light"] .plan-cand.starred {
     justify-self: start;
   }
 
-  .detail-market-metrics {
+  .detail-market-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -5029,7 +5069,7 @@ html[data-theme="light"] .plan-cand.starred {
     border-inline-start: 0;
   }
 
-  .detail-market-metric:nth-child(n + 3) {
+  .detail-market-grid .detail-market-metric:nth-child(n + 3) {
     border-top: 1px solid var(--color-rule-2);
   }
 

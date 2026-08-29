@@ -3,6 +3,11 @@ import { buildRetailFlowEvidence } from '../shared/retailFundFlow.js';
 const HISTORY_HOSTS = [
   'https://push2his.eastmoney.com',
   'https://82.push2his.eastmoney.com',
+  'https://45.push2his.eastmoney.com',
+  'https://49.push2his.eastmoney.com',
+  'https://28.push2his.eastmoney.com',
+  'https://33.push2his.eastmoney.com',
+  'https://48.push2his.eastmoney.com',
   'https://push2.eastmoney.com',
   'https://push2delay.eastmoney.com',
 ];
