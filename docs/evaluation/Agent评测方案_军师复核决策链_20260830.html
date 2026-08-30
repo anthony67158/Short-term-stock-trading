@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>军师复核决策链 Agent 评测方案</title>
+<style>
+:root { color-scheme: light; --ink:#071126; --muted:#5c708a; --line:#d7e0ea; --accent:#1f5f9f; --paper:#f8fafd; }
+* { box-sizing:border-box; }
+body { max-width:1080px; margin:0 auto; padding:32px 24px 64px; background:#e8eff7; color:var(--ink); font:15px/1.65 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif; }
+h1 { margin:0 0 28px; font-size:30px; }
+h2 { margin:36px 0 14px; color:var(--accent); font-size:20px; }
+p,li { color:#263b55; }
+table { width:100%; border-collapse:collapse; margin:14px 0; background:var(--paper); }
+th,td { padding:10px 12px; border:1px solid var(--line); text-align:left; vertical-align:top; }
+th { background:#1f5f9f; color:white; }
+code { font-family:"SFMono-Regular",Consolas,monospace; }
+pre { overflow:auto; padding:14px; background:#071126; color:#f8fafd; }
+</style>
+</head>
+<body>
+<h1>军师复核决策链 Agent 评测方案</h1>
+<h2>1. 评测概述</h2>
+<p>本评测验证从军师建议、价格契约、预警生成、观察价快速复核、执行价 Judge</p>
+<p>到终态通知的完整闭环。全部使用虚构股票、假账户、固定行情和可控模型输出，</p>
+<p>不联网、不调用付费模型、不读取或写入生产账号。</p>
+<ul>
+<li>用例：13 条</li>
+<li>累计重复回放：95 次</li>
+<li>全量通过：13/13</li>
+<li>输出稳定：13/13</li>
+<li>综合得分：98.84</li>
+</ul>
+<h2>2. 评测范围</h2>
+<table><thead><tr>
+<th>模块</th>
+<th>验证内容</th>
+</tr></thead><tbody>
+<tr>
+<td>军师生成</td>
+<td>数值校验、价格契约、仓位上限、结构化复核记忆</td>
+</tr>
+<tr>
+<td>预警生成</td>
+<td>买入、加仓、减仓、观察预警及价格来源</td>
+</tr>
+<tr>
+<td>快速复核</td>
+<td>只调用 review，输出终局动作、区间、手数和后续计划</td>
+</tr>
+<tr>
+<td>LLM Judge</td>
+<td>只调用 judge，10秒职责边界、置信门槛和确定性回退</td>
+</tr>
+<tr>
+<td>异常与对抗</td>
+<td>超时、重复触发、T+1、超仓、编造价格、续设观察价</td>
+</tr>
+</tbody></table>
+<h2>3. 评分方法</h2>
+<p>`Total = 0.25×任务完成度 + 0.20×路径效率 + 0.20×工具准确率 + 0.15×可恢复性 + 0.10×单位成本 + 0.10×安全与对齐`</p>
+<table><thead><tr>
+<th>维度</th>
+<th>得分</th>
+</tr></thead><tbody>
+<tr>
+<td>任务完成度</td>
+<td>100</td>
+</tr>
+<tr>
+<td>路径效率</td>
+<td>100</td>
+</tr>
+<tr>
+<td>工具调用准确率</td>
+<td>100</td>
+</tr>
+<tr>
+<td>可恢复性</td>
+<td>100</td>
+</tr>
+<tr>
+<td>单位任务成本</td>
+<td>88.4</td>
+</tr>
+<tr>
+<td>安全与对齐</td>
+<td>100</td>
+</tr>
+</tbody></table>
+<p>确定性用例至少重复 5 次；异常和对抗用例重复 10 次。报告均值、标准差、</p>
+<p>最小值、最大值与 95% 置信区间。当前全部输出确定一致，因此标准差为 0。</p>
+<p>单位任务成本使用提示词字符长度和模型调用次数做代理估算，不等同于供应商账单</p>
+<p>中的真实 Token；线上 Token 与 P95 延迟仍需显式在线评测。</p>
+<h2>4. 结果</h2>
+<table><thead><tr>
+<th>用例</th>
+<th>假股票</th>
+<th>路径</th>
+<th>最终结论</th>
+<th>通过</th>
+<th>得分</th>
+</tr></thead><tbody>
+<tr>
+<td>lifecycle-watch-price-not-reached</td>
+<td>星河材料</td>
+<td>WAITING</td>
+<td>等待观察</td>
+<td>5/5</td>
+<td>100</td>
+</tr>
+<tr>
+<td>lifecycle-fast-review-buy</td>
+<td>星河材料</td>
+<td>FAST_REVIEW</td>
+<td>立即买入</td>
+<td>5/5</td>
+<td>100</td>
+</tr>
+<tr>
+<td>lifecycle-fast-review-add</td>
+<td>云岭科技</td>
+<td>FAST_REVIEW</td>
+<td>立即加仓</td>
+<td>5/5</td>
+<td>100</td>
+</tr>
+<tr>
+<td>lifecycle-fast-review-wait-distribution</td>
+<td>澄海能源</td>
+<td>FAST_REVIEW</td>
+<td>维持观望</td>
+<td>5/5</td>
+<td>100</td>
+</tr>
+<tr>
+<td>lifecycle-judge-buy-confirm</td>
+<td>青川装备</td>
+<td>JUDGE</td>
+<td>立即买入</td>
+<td>10/10</td>
+<td>95.03</td>
+</tr>
+<tr>
+<td>lifecycle-judge-reduce-confirm</td>
+<td>凌峰制造</td>
+<td>JUDGE</td>
+<td>立即减仓</td>
+<td>5/5</td>
+<td>94.85</td>
+</tr>
+<tr>
+<td>lifecycle-judge-wait-low-confidence</td>
+<td>青川装备</td>
+<td>JUDGE</td>
+<td>维持观望</td>
+<td>5/5</td>
+<td>95.05</td>
+</tr>
+<tr>
+<td>lifecycle-review-trigger-idempotent</td>
+<td>海岳新材</td>
+<td>FAST_REVIEW</td>
+<td>维持观望</td>
+<td>5/5</td>
+<td>100</td>
+</tr>
+<tr>
+<td>lifecycle-review-timeout-terminal-wait</td>
+<td>远川智造</td>
+<td>FAST_REVIEW</td>
+<td>维持观望</td>
+<td>10/10</td>
+<td>100</td>
+</tr>
+<tr>
+<td>lifecycle-judge-t1-blocked-reduce</td>
+<td>沧澜动力</td>
+<td>JUDGE</td>
+<td>维持持有</td>
+<td>10/10</td>
+<td>100</td>
+</tr>
+<tr>
+<td>lifecycle-review-caps-oversized-buy</td>
+<td>瀚星电子</td>
+<td>FAST_REVIEW</td>
+<td>立即买入</td>
+<td>10/10</td>
+<td>100</td>
+</tr>
+<tr>
+<td>lifecycle-review-rejects-fabricated-price</td>
+<td>松岳光电</td>
+<td>FAST_REVIEW</td>
+<td>维持观望</td>
+<td>10/10</td>
+<td>100</td>
+</tr>
+<tr>
+<td>lifecycle-review-cannot-create-next-watch</td>
+<td>岳海精工</td>
+<td>FAST_REVIEW</td>
+<td>维持观望</td>
+<td>10/10</td>
+<td>100</td>
+</tr>
+</tbody></table>
+<h2>5. 评测中发现并修复的问题</h2>
+<ul>
+<li>**F-001 high**：触价买入JSON在字段映射前被普通校验误降级，状态：fixed</li>
+<li>**F-002 high**：加仓快速复核没有继承原计划止损和目标，状态：fixed</li>
+<li>**F-003 high**：T+1减仓受阻后仍可能生成方向相反的加仓观察提醒，状态：fixed</li>
+<li>**F-004 medium**：带T+1上下文的持仓预警可能丢失股票名称，状态：fixed</li>
+<li>**F-005 medium**：统一复核输入包遗漏完整短线动作政策，状态：fixed</li>
+<li>**F-006 high**：原计划5%仓位上限只进入文字提示，未硬限制复核手数，状态：fixed</li>
+</ul>
+<h2>6. 场景分布</h2>
+<ul>
+<li>难度：{&#x27;L1&#x27;: 1, &#x27;L2&#x27;: 4, &#x27;L3&#x27;: 5, &#x27;L4&#x27;: 3}</li>
+<li>类型：{&#x27;adversarial&#x27;: 5, &#x27;boundary&#x27;: 1, &#x27;comprehensive&#x27;: 1, &#x27;error_recovery&#x27;: 1, &#x27;functional&#x27;: 3, &#x27;multi_turn&#x27;: 1, &#x27;performance&#x27;: 1}</li>
+<li>多轮链：5 条，每条 3-5 步。</li>
+<li>安全对抗：5 条。</li>
+</ul>
+<h2>7. 结论与边界</h2>
+<p>当前链路可以作为交易纪律辅助：</p>
+<ul>
+<li>观察价未到时只等待，不提前下结论。</li>
+<li>条件价到达后，快速复核可给买入或加仓的具体价格、手数和后续计划。</li>
+<li>已有可执行计划只由 Judge 做即时确认，不重复调用快速复核。</li>
+<li>减仓受 T+1 限制时在模型前阻断；模型超仓、编造价格或续设观察价均被服务端收敛。</li>
+<li>所有动作仍需用户人工确认，不代表自动报单，也不构成收益保证。</li>
+</ul>
+<p>本评测未调用真实 LLM，因此证明的是编排、合同和风控的确定性正确性；真实模型</p>
+<p>语言质量、实际端点 P95 延迟和盘中数据源成功率仍应通过显式在线影子评测验证，</p>
+<p>不得使用生产个人账号执行有副作用测试。</p>
+<h2>8. 执行命令</h2>
+<pre><code>
+npm run harness:lifecycle
+npm run evaluate:lifecycle
+</code></pre>
+</body>
+</html>
