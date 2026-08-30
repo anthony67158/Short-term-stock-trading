@@ -782,10 +782,14 @@ test('股票搜索框加宽并只由外层绘制一层焦点框', () => {
   )
 })
 
-test('中等桌面宽度在导航拥挤前收起命令入口并使用短标签', () => {
+test('中等桌面宽度压缩军师入口并使用短标签', () => {
   assert.match(
     precision,
-    /@media \(max-width:\s*1360px\)\s*{[\s\S]*?\.nav-command\s*{[^}]*display:\s*none/s,
+    /@media \(max-width:\s*1360px\)\s*{[\s\S]*?\.nav-command\s*{[^}]*display:\s*inline-flex[^}]*width:\s*var\(--control-size-compact\)[^}]*justify-content:\s*center/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*1360px\)\s*{[\s\S]*?\.nav-command > :is\(span,\s*kbd\)\s*{[^}]*display:\s*none/s,
   )
   assert.match(
     precision,
@@ -1273,22 +1277,26 @@ test('图表、表格与系统材质共用统一布局契约', () => {
   assert.match(precision, /@media \(prefers-reduced-transparency:\s*reduce\)/)
 })
 
-test('页面根容器保持透明且持仓与自选吸顶区使用圆角控制面', () => {
+test('页面根容器和吸顶筛选保持无框透明且主内容左右等距', () => {
   assert.match(
     precision,
     /\.today,\s*\.plan,\s*\.hub,\s*\.research,\s*\.review,\s*\.hub-body,\s*\.research-section\s*{[^}]*background:\s*transparent/s,
   )
   assert.match(
     precision,
-    /\.plan-section-sticky,\s*\.plan-section-hold-sticky\s*{[^}]*border-radius:\s*var\(--radius-card\)[^}]*background-color:\s*var\(--color-paper-2\)[^}]*background-image:\s*none/s,
-  )
-  assert.doesNotMatch(
-    precision,
-    /\.plan-section-sticky,\s*\.plan-section-hold-sticky\s*{[^}]*var\(--color-paper\)\s*94%/s,
+    /\.plan-section-sticky,\s*\.plan-section-hold-sticky\s*{[^}]*border:\s*0[^}]*border-radius:\s*0[^}]*background-color:\s*transparent[^}]*background-image:\s*none/s,
   )
   assert.match(
     precision,
-    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.plan-section-sticky,[\s\S]*?background:\s*var\(--color-paper-2\)/s,
+    /\.main\s*{[^}]*padding:\s*var\(--space-lg\)\s*max\(var\(--space-lg\),\s*env\(safe-area-inset-right\)\)\s*var\(--space-2xl\)\s*max\(var\(--space-lg\),\s*env\(safe-area-inset-left\)\)/s,
+  )
+  assert.doesNotMatch(
+    precision,
+    /@media \(min-width:\s*721px\)\s*{[\s\S]*?\.main,\s*\.footer\s*{[^}]*padding-right:\s*max\([^}]*56px/s,
+  )
+  assert.match(
+    precision,
+    /@media \(min-width:\s*721px\)\s*{[^}]*\.ai-fab\s*{[^}]*display:\s*none/s,
   )
 })
 
