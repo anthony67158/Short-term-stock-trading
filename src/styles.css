@@ -1260,15 +1260,18 @@ button.cand-focus:hover { border-color: var(--accent, #d99a2b); }
 .ss-input input { flex: 1; background: transparent; border: none; outline: none; color: var(--text); font-size: 13px; }
 .ss-input input::placeholder { color: var(--muted); }
 .ss-dropdown { position: absolute; top: 100%; left: 0; right: 0; margin-top: 4px; z-index: 20; background: var(--panel3); border: 1px solid var(--border); border-radius: var(--radius-sm); box-shadow: var(--shadow); overflow: hidden; }
-.ss-item { display: flex; align-items: center; gap: 10px; padding: 9px 12px; cursor: pointer; transition: background .12s; border-top: 1px solid var(--border-soft); }
+.ss-item { display: flex; align-items: stretch; gap: 0; padding: 0; transition: background .12s; border-top: 1px solid var(--border-soft); }
 .ss-item:first-child { border-top: none; }
 .ss-item:hover { background: var(--panel2); }
+.ss-preview { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 9px 0 9px 12px; border: 0; border-radius: 0; background: transparent; color: inherit; text-align: start; cursor: pointer; }
 .ss-name { font-size: 13px; font-weight: 550; }
 .ss-type { color: var(--muted); font-size: 11px; }
-.ss-add { margin-left: auto; display: inline-flex; align-items: center; gap: 3px; font-size: 12px; color: var(--accent); font-weight: 500; }
+.ss-add { flex: none; margin-left: auto; display: inline-flex; align-items: center; gap: 3px; padding: 9px 12px; border: 0; border-radius: 0; background: transparent; cursor: pointer; font-size: 12px; color: var(--accent); font-weight: 500; }
+.ss-preview:focus-visible,
+.ss-add:focus-visible { outline: 2px solid var(--color-focus); outline-offset: -2px; }
+.ss-add:hover { background: color-mix(in srgb, var(--color-accent) 9%, transparent); }
 .ss-add.done { color: var(--green); }
-/* 搜索结果:已加入/已持有 → 可点击「定位」到已有卡片 */
-.ss-item.locatable { cursor: pointer; }
+/* 搜索结果右侧动作:未加入时显式加入，已加入/已持有时定位到已有卡片。 */
 .ss-item.locatable:hover { background: color-mix(in srgb, var(--color-accent) 10%, transparent); }
 .ss-add.locate { color: var(--accent2); }
 .ss-add.locate .icon { color: var(--accent2); }

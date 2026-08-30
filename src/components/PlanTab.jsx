@@ -553,26 +553,41 @@ function StockSearch() {
             const added = planStore.has(s.code)
             const held = (planStore.get().holding || []).some((x) => x.code === s.code)
             const inBook = added || held
-            // 已加入/已持有 → 点击不再是「加入」,而是定位到已有卡片(自选多了也能秒找到)
-            const onItem = () => {
+            const viewDetail = () => {
+              openStockDetail(s.code, s.name)
+              setOpen(false)
+            }
+            const onAction = () => {
               if (inBook) { requestLocate(s.code); setOpen(false) }
               else pick(s)
             }
             return (
-              <button type="button" className={'ss-item' + (inBook ? ' locatable' : '')} key={s.code} onClick={onItem}
-                title={inBook ? '点击定位到已有卡片' : '点击加入自选'}>
-                <span className="ss-name">
-                  <StockName
-                    code={s.code}
-                    name={s.name}
-                    interactive={false}
-                  />
-                </span>
-                <span className="ss-type">{s.type}</span>
-                {inBook
-                  ? <span className="ss-add locate"><Icon name="target" size={13} />{held ? '已持有 · 定位' : '已加 · 定位'}</span>
-                  : <span className="ss-add"><Icon name="plus" size={13} />加入</span>}
-              </button>
+              <div className={'ss-item' + (inBook ? ' locatable' : '')} key={s.code}>
+                <button
+                  type="button"
+                  className="ss-preview"
+                  onClick={viewDetail}
+                  title={`查看${s.name}详情与K线`}
+                >
+                  <span className="ss-name">
+                    <StockName
+                      code={s.code}
+                      name={s.name}
+                      interactive={false}
+                    />
+                  </span>
+                  <span className="ss-type">{s.type}</span>
+                </button>
+                <button
+                  type="button"
+                  className={'ss-add' + (inBook ? ' locate' : '')}
+                  onClick={onAction}
+                  title={inBook ? '定位到已有卡片' : `将${s.name}加入自选`}
+                >
+                  <Icon name={inBook ? 'target' : 'plus'} size={13} />
+                  {inBook ? (held ? '已持有 · 定位' : '已加 · 定位') : '加入'}
+                </button>
+              </div>
             )
           })}
         </div>
