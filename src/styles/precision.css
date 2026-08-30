@@ -15775,7 +15775,7 @@ html[data-theme="light"] .plan-cand.starred {
     var(--color-accent) 6%,
     var(--color-paper-2)
   );
-  box-shadow: var(--shadow-card);
+  box-shadow: none;
 }
 
 .plan-cand.starred .pc-pin.on {
@@ -15795,9 +15795,7 @@ html[data-theme="light"] .plan-cand.starred {
     var(--color-accent) 9%,
     var(--color-paper-2)
   );
-  box-shadow:
-    0 0 0 1px var(--color-accent),
-    var(--shadow-card);
+  box-shadow: inset 0 0 0 1px var(--color-accent);
 }
 
 .plan-cand .pc-top,

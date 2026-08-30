@@ -746,7 +746,7 @@ test('卡片内只保留单行建议摘要且完整内容进入个股详情', ()
 test('置顶自选卡使用浅蓝表面、整圈蓝框和强化星标', () => {
   assert.match(
     calmSurface,
-    /\.plan-cand\.starred,[\s\S]*?html\[data-theme="light"\] \.plan-cand\.starred\s*{[^}]*border-color:\s*color-mix\([^}]*var\(--color-accent\)\s*52%[^}]*background:\s*color-mix\([^}]*var\(--color-accent\)\s*6%[^}]*box-shadow:\s*var\(--shadow-card\)/s,
+    /\.plan-cand\.starred,[\s\S]*?html\[data-theme="light"\] \.plan-cand\.starred\s*{[^}]*border-color:\s*color-mix\([^}]*var\(--color-accent\)\s*52%[^}]*background:\s*color-mix\([^}]*var\(--color-accent\)\s*6%[^}]*box-shadow:\s*none/s,
   )
   assert.match(
     calmSurface,
