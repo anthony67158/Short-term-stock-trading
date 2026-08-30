@@ -136,6 +136,14 @@ test('上一版主计划只提取连续决策需要的白名单字段', () => {
     advice: {
       ...previous.advice,
       reasoning: '很长的内部推理',
+      reviewMemory: {
+        schemaVersion: 'advice-review-memory.v1',
+        source: 'ADVISOR',
+        market: {
+          volumeState: 'CONTRACTING',
+          priceVsVwap: 'BELOW',
+        },
+      },
     },
   })
 
@@ -143,6 +151,10 @@ test('上一版主计划只提取连续决策需要的白名单字段', () => {
   assert.equal(compact.planId, 'plan-600000')
   assert.match(compact.nextOpenPlan, /高开减仓/)
   assert.match(compact.futurePlan, /第5个交易日退出/)
+  assert.equal(
+    compact.reviewMemory.market.volumeState,
+    'CONTRACTING',
+  )
   assert.equal(compact.reasoning, undefined)
   assert.equal(compact.news, undefined)
 })

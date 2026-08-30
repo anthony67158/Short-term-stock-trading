@@ -34,6 +34,7 @@ const CORE_FIELDS = [
   'knowledgeActionPlan',
   'knowledgeActionScore',
   'fundContext',
+  'reviewMemory',
 ]
 
 const SCHEDULED_STABLE_FIELDS = [
