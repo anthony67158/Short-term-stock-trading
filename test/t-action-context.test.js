@@ -9,7 +9,8 @@ import {
   applyTActionAdvicePolicy,
 } from '../shared/tAdvicePolicy.js'
 
-const DAY = Date.now()
+// 固定在北京时间交易日盘中，避免测试运行于午夜前后时跨日。
+const DAY = Date.parse('2026-08-19T02:00:00.000Z')
 const holding = (qty, flows) => [{
   id: 'holding-1',
   code: '600000',
