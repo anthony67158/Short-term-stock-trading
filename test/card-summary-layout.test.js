@@ -29,6 +29,31 @@ test('持仓与自选卡只展示固定策略摘要并从详情入口查看完�
   assert.doesNotMatch(planTab, /useLayoutEffect/)
 })
 
+test('持仓与自选支持整卡进入详情且保留卡内独立操作', () => {
+  assert.match(
+    planTab,
+    /const CARD_DETAIL_CONTROL_SELECTOR = \[[\s\S]*?'button'[\s\S]*?'input'[\s\S]*?'\.pc-actions'[\s\S]*?'\.pi-actions'/s,
+  )
+  assert.match(
+    planTab,
+    /function openDetailFromCardEvent\(event, code, name\)\s*{[\s\S]*?control !== event\.currentTarget[\s\S]*?openStockDetail\(code, name\)/s,
+  )
+  assert.match(
+    planTab,
+    /trade-card plan-cand[\s\S]*?stock-detail-card-hitarea[\s\S]*?role={selectMode \? undefined : 'button'}[\s\S]*?onClick={selectMode \? undefined : \(event\) => openDetailFromCardEvent/s,
+  )
+  assert.match(
+    planTab,
+    /trade-card hold-item stock-detail-card-hitarea[\s\S]*?role="button"[\s\S]*?onClick={\(event\) => {[\s\S]*?openDetailFromCardEvent\(event, h\.code, h\.name\)/s,
+  )
+  assert.match(planTab, /<StockName[\s\S]{0,100}code={p\.code}/)
+  assert.match(planTab, /<StockName[\s\S]{0,100}code={h\.code}/)
+  assert.match(
+    precision,
+    /\.stock-detail-card-hitarea\s*{[^}]*cursor:\s*pointer[^}]*}[\s\S]*?\.stock-detail-card-hitarea:focus-visible\s*{[^}]*outline:\s*2px solid var\(--color-focus\)/s,
+  )
+})
+
 test('持仓和自选卡展示最近有效价但只用连续竞价价触发动作', () => {
   assert.match(
     planTab,
@@ -63,7 +88,7 @@ test('桌面同排卡片以最高内容为准等高并均匀拉伸内部节奏',
   )
   assert.match(
     planTab,
-    /'trade-card hold-item'[\s\S]*?\(holdAdvice \? ' has-advice' : ' no-advice'\)/,
+    /'trade-card hold-item stock-detail-card-hitarea'[\s\S]*?\(holdAdvice \? ' has-advice' : ' no-advice'\)/,
   )
   assert.match(
     calmSurface,
@@ -251,7 +276,7 @@ test('策略摘要不再使用遮挡卡片的悬浮预览且文字区域直接�
 
 test('持仓卡先展示指令再展示仓位核心数据与次级盘面证据', () => {
   const holdStart = planTab.indexOf(
-    "<div className={'trade-card hold-item'",
+    "<div className={'trade-card hold-item stock-detail-card-hitarea'",
   )
   const holdEnd = planTab.indexOf(
     '{operationForm && (mobileOperations',

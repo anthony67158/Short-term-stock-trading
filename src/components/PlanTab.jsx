@@ -93,6 +93,41 @@ const REVIEW_STATUS_ICON = Object.freeze({
   stopped: 'close',
 })
 
+const CARD_DETAIL_CONTROL_SELECTOR = [
+  'a[href]',
+  'button',
+  'input',
+  'select',
+  'textarea',
+  'label',
+  'summary',
+  '[contenteditable="true"]',
+  '[role="button"]',
+  '[role="link"]',
+  '[role="checkbox"]',
+  '[role="switch"]',
+  '.buy-inline-wrap',
+  '.cost-edit-form',
+  '.plan-edit',
+  '.pc-alert-box',
+  '.pc-actions',
+  '.pi-actions',
+].join(',')
+
+function openDetailFromCardEvent(event, code, name) {
+  if (event.defaultPrevented) return
+  const control = event.target?.closest?.(CARD_DETAIL_CONTROL_SELECTOR)
+  if (control && control !== event.currentTarget) return
+  openStockDetail(code, name)
+}
+
+function openDetailFromCardKey(event, code, name) {
+  if (event.target !== event.currentTarget) return
+  if (event.key !== 'Enter' && event.key !== ' ') return
+  event.preventDefault()
+  openStockDetail(code, name)
+}
+
 function CandidateReviewStatus({
   code,
   alerts,
@@ -1199,13 +1234,20 @@ function PlanList({ book, quote, stockTags, batchSel }) {
     const q = quote[p.code]
     const priceView = quoteDisplayState(q)
     const checked = selected.has(p.code)
+    const cardName = q?.name || p.name
     const stockNote = stockNoteText(book.stockNotes, p.code)
     const cardAdvice = getAdvice(p.code, 'buy_advice')?.advice || null
     return (
-      <div className={'trade-card plan-cand' + (cardAdvice ? ' has-advice' : ' no-advice') + (p.star ? ' starred' : '') + (selectMode ? ' selectable' : '') + (checked ? ' sel-on' : '')}
+      <div className={'trade-card plan-cand' + (cardAdvice ? ' has-advice' : ' no-advice') + (p.star ? ' starred' : '') + (selectMode ? ' selectable' : ' stock-detail-card-hitarea') + (checked ? ' sel-on' : '')}
         key={p.code}
         data-code={p.code}
-        onClickCapture={selectMode ? (e) => { e.stopPropagation(); toggleSel(p.code) } : undefined}>
+        role={selectMode ? undefined : 'button'}
+        tabIndex={selectMode ? undefined : 0}
+        aria-haspopup={selectMode ? undefined : 'dialog'}
+        aria-label={selectMode ? undefined : `查看${cardName}详情与K线`}
+        onClickCapture={selectMode ? (e) => { e.stopPropagation(); toggleSel(p.code) } : undefined}
+        onClick={selectMode ? undefined : (event) => openDetailFromCardEvent(event, p.code, cardName)}
+        onKeyDown={selectMode ? undefined : (event) => openDetailFromCardKey(event, p.code, cardName)}>
         {/* 勾选模式:左上角复选框(点整卡即可切换;捕获阶段拦截,屏蔽卡内其它交互) */}
         {selectMode && (
           <span className={'pc-check' + (checked ? ' on' : '')} title={checked ? '取消选择' : '选择此股'}>
@@ -3053,8 +3095,17 @@ function HoldingItem({ h, quote: q }) {
       {swipe.swiping && isTouch && swipe.dx > 0 && (
         <div className={'hsw-hint hsw-right' + (swipe.dx >= 64 ? ' armed' : '')}><Icon name="chart" size={16} /><span>详情</span></div>
       )}
-      <div className={'trade-card hold-item' + (holdAdvice ? ' has-advice' : ' no-advice')} {...swipe.bind}
+      <div className={'trade-card hold-item stock-detail-card-hitarea' + (holdAdvice ? ' has-advice' : ' no-advice')} {...swipe.bind}
         data-code={h.code}
+        role="button"
+        tabIndex={0}
+        aria-haspopup="dialog"
+        aria-label={`查看${h.name}详情与K线`}
+        onClick={(event) => {
+          if (swipe.swiping || Math.abs(swipe.dx) > 4) return
+          openDetailFromCardEvent(event, h.code, h.name)
+        }}
+        onKeyDown={(event) => openDetailFromCardKey(event, h.code, h.name)}
         style={swipe.dx ? { transform: `translateX(${swipe.dx}px)`, transition: swipe.swiping ? 'none' : 'transform .2s ease' } : undefined}>
       {/* 身份行聚合股票身份、现价和盈亏；仓位与成本留在稳定指标带。 */}
       <div className="hold-head">

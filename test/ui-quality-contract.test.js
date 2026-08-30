@@ -225,7 +225,7 @@ test('持仓与自选卡片共用真实股票题材标签且移动端可换行',
 test('持仓与自选卡片使用独立身份行且决策优先于次级指标', () => {
   assert.match(
     planTab,
-    /className=\{'trade-card hold-item'[\s\S]*?\(holdAdvice \? ' has-advice' : ' no-advice'\)/,
+    /className=\{'trade-card hold-item stock-detail-card-hitarea'[\s\S]*?\(holdAdvice \? ' has-advice' : ' no-advice'\)/,
   )
   assert.match(planTab, /className="stock-card-metrics hold-card-metrics"/)
   assert.match(planTab, /className={'trade-card plan-cand'/)
