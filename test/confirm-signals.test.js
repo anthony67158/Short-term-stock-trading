@@ -149,6 +149,7 @@ test('快速Judge每次触价重新拉取服务端主力与散户资金', async 
   const now = Date.parse('2026-08-28T02:05:00.000Z')
   let fundCalls = 0
   let receivedFundContext = null
+  let receivedReviewPacket = null
   const trends = Array.from({ length: 6 }, (_, index) => ({
     time: `10:0${index}`,
     price: 10 + index * 0.02,
@@ -169,6 +170,10 @@ test('快速Judge每次触价重新拉取服务端主力与散户资金', async 
       action: '立即买入',
       actionPlan: '10.1元买入1手',
       buyPrice: 10.1,
+      nextOpenPlan: '次日跌破9.8元退出',
+      futurePlan: '五日内未达10.8元退出',
+      stopPrice: 9.8,
+      targetPrice: 10.8,
       fundContext: {
         source: 'realtime',
         mainNetYi: 0.8,
@@ -209,8 +214,9 @@ test('快速Judge每次触价重新拉取服务端主力与散户资金', async 
           historyComplete: false,
         }
       },
-      llmJudge: async ({ fundContext }) => {
+      llmJudge: async ({ fundContext, reviewPacket }) => {
         receivedFundContext = fundContext
+        receivedReviewPacket = reviewPacket
         return {
           decision: 'wait',
           confidence: 82,
@@ -232,8 +238,33 @@ test('快速Judge每次触价重新拉取服务端主力与散户资金', async 
     'quote-aggregate',
   )
   assert.equal(receivedFundContext.change.relationChanged, true)
+  assert.equal(
+    receivedReviewPacket.schemaVersion,
+    'review-decision-packet.v1',
+  )
+  assert.equal(receivedReviewPacket.channel, 'JUDGE')
+  assert.equal(
+    receivedReviewPacket.current.intradayFromOpen.firstTime,
+    '10:00',
+  )
+  assert.equal(
+    receivedReviewPacket.requestedDecision.stage,
+    'EXECUTION_GATE',
+  )
   assert.equal(result.signals.funds.current.source, 'realtime')
+  assert.equal(
+    result.signals.reviewDecisionPacket.channel,
+    'JUDGE',
+  )
   assert.equal(result.decision, 'wait')
+  assert.equal(
+    result.reviewDecision.followUpPlan.source,
+    'PRIOR_PLAN',
+  )
+  assert.match(
+    result.reviewDecision.followUpPlan.nextSessionPlan,
+    /9\.8元退出/,
+  )
 })
 
 test('快速Judge资金源失败时明确降级且不沿用旧资金冒充实时', async () => {

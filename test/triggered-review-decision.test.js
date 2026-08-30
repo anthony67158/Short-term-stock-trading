@@ -112,6 +112,22 @@ test('买入复核成功只输出立即买入并带区间手数与依据', () =>
   assert.equal(result.reviewDecision.quantity, 3)
   assert.equal(result.reviewDecision.priceLow, 12.43)
   assert.equal(result.reviewDecision.terminal, true)
+  assert.equal(
+    result.reviewDecision.followUpPlan.source,
+    'CURRENT_REVIEW',
+  )
+  assert.equal(
+    result.reviewDecision.followUpPlan.manualConfirmationRequired,
+    true,
+  )
+  assert.match(
+    result.reviewDecision.followUpPlan.nextSessionPlan,
+    /次日跌破止损/,
+  )
+  assert.match(
+    result.reviewDecision.followUpPlan.futurePlan,
+    /五日内未达目标/,
+  )
   assert.match(result.actionPlan, /立即买入3手/)
   assert.match(result.actionPlan, /执行区间12\.43元/)
   assert.ok(result.reviewDecision.basis.length >= 1)

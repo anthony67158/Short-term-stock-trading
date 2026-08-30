@@ -230,8 +230,10 @@ function reviewDecisionRecord({
   quantity,
   bases,
   event,
+  result,
   now,
 }) {
+  const executed = operation !== '不操作'
   return {
     schemaVersion: 'triggered-review-decision.v1',
     terminal: true,
@@ -249,6 +251,18 @@ function reviewDecisionRecord({
     decidedAt: Number(now),
     timeLimitMinutes: Number(event?.timeLimitMinutes)
       || TRIGGERED_REVIEW_TIME_LIMIT_MINUTES,
+    followUpPlan: {
+      source: 'CURRENT_REVIEW',
+      manualConfirmationRequired: true,
+      nextSessionPlan: text(result?.nextOpenPlan, 500),
+      futurePlan: text(result?.futurePlan, 500),
+      invalidation: text(result?.invalidation, 300),
+      stopPrice: positive(result?.stopPrice),
+      targetPrice: positive(result?.targetPrice),
+      reassessment: executed
+        ? '人工确认并记录真实成交后，按本轮计划继续管理'
+        : '本次触发结束，仅在新实质事件或用户主动生成时重新评估',
+    },
   }
 }
 
@@ -339,6 +353,7 @@ function normalizeBuyReview(result, payload, bases, now) {
     quantity,
     bases,
     event,
+    result,
     now,
   })
   return result
@@ -439,6 +454,7 @@ function normalizeHoldingReview(result, payload, bases, now) {
     quantity,
     bases,
     event,
+    result,
     now,
   })
   return result

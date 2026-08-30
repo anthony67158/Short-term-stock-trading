@@ -149,6 +149,13 @@ import {
   fetchResilientStockFund,
   fundAmountYi,
 } from './_stock_fund.js';
+import {
+  buildAdviceReviewMemory,
+} from '../shared/adviceReviewMemory.js';
+import {
+  buildIntradayOpenSummary,
+  buildReviewDecisionPacket,
+} from '../shared/reviewDecisionPacket.js';
 
 export { mapRealtimeStockFund } from './_stock_fund.js';
 
@@ -1536,6 +1543,16 @@ export default async function handler(req, res) {
         }
         // 当日分时结构（VWAP均价、日内高低、当前节奏、现价相对均价/高低的位置）
         if (trend && trend.length) {
+          payload.intradayOpenSummary = buildIntradayOpenSummary(
+            trend,
+            {
+              preClose:
+                payload.todayQuote?.preClose
+                ?? payload.todayQuote?.previousClose
+                ?? null,
+              observedAt: Date.now(),
+            },
+          )
           const prices = trend.map((t) => t.price)
           const now = prices[prices.length - 1]
           const vwap = trend[trend.length - 1].avg // 东财分时自带均价即VWAP
@@ -1766,6 +1783,30 @@ export default async function handler(req, res) {
           reviewEvent: payload.reviewEvent,
         }),
       };
+      if (triggeredPriceReview) {
+        payload.reviewDecisionPacket = buildReviewDecisionPacket({
+          channel: 'FAST_REVIEW',
+          code: payload.code,
+          name: payload.name,
+          priorAdvice: payload.previousAdvice || {},
+          event: payload.reviewEvent || {},
+          current: {
+            quote: payload.todayQuote,
+            funds: payload.stockFund,
+            intradayFromOpen: payload.intradayOpenSummary,
+            technical: payload.tech,
+            tactical: payload.shortHorizonTactical,
+            position: {
+              liveQty: Number(payload.holdQty) || 0,
+              sellableToday:
+                Number(payload.sellableTodayQty) || 0,
+              boughtToday:
+                Number(payload.boughtTodayQty) || 0,
+            },
+            account: payload.account,
+          },
+        });
+      }
     }
     if (isAdvisor && payload.realOutcomeLearning) {
       payload.realOutcomeContext = realOutcomeContext(
@@ -2389,6 +2430,13 @@ export default async function handler(req, res) {
       result.fundContext = compactStockFundSnapshot(payload.stockFund);
       result.formulaPriceReference =
         payload.formulaPriceReference || null;
+      result.reviewMemory = buildAdviceReviewMemory({
+        advice: result,
+        payload,
+        source: triggeredPriceReview
+          ? 'FAST_REVIEW'
+          : 'ADVISOR',
+      });
       result.knowledgeActionPlan = buildKnowledgeActionPlan(result, { mode });
       result.knowledgeActionScore = scoreKnowledgeActionPlan(
         result.knowledgeActionPlan,

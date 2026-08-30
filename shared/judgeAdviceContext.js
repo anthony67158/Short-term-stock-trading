@@ -2,6 +2,7 @@ import { buildKnowledgeActionPlan } from './knowledgeAction.js'
 import { buildQuantAdviceContext } from './quantAdviceContext.js'
 import { sanitizedAdvicePriceContract } from './advicePriceContract.js'
 import { compactStockFundSnapshot } from './retailFundFlow.js'
+import { sanitizeAdviceReviewMemory } from './adviceReviewMemory.js'
 
 const text = (value, max = 800) => String(value || '').trim().slice(0, max)
 const finite = (value) => {
@@ -68,6 +69,9 @@ export function buildJudgeAdviceContext(advice = {}) {
     : null
   const priceContract = sanitizedAdvicePriceContract(advice)
   const fundContext = compactStockFundSnapshot(advice.fundContext)
+  const reviewMemory = sanitizeAdviceReviewMemory(advice.reviewMemory)
+  const nextOpenPlan = text(advice.nextOpenPlan, 800)
+  const futurePlan = text(advice.futurePlan, 800)
   return {
     ...planContext,
     ...knowledgeActionContext,
@@ -75,6 +79,9 @@ export function buildJudgeAdviceContext(advice = {}) {
     ...(decisionPlan ? { decisionPlan } : {}),
     ...(priceContract ? { priceContract } : {}),
     ...(fundContext ? { fundContext } : {}),
+    ...(reviewMemory ? { reviewMemory } : {}),
+    ...(nextOpenPlan ? { nextOpenPlan } : {}),
+    ...(futurePlan ? { futurePlan } : {}),
     action: text(advice.action || advice.stance, 40),
     tier: text(advice.tier, 30),
     title: text(advice.title || advice.headline, 200),

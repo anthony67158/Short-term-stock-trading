@@ -52,6 +52,10 @@ import {
   fetchResilientStockFund,
   fundAmountYi,
 } from './_stock_fund.js';
+import {
+  buildIntradayOpenSummary,
+  buildReviewDecisionPacket,
+} from '../shared/reviewDecisionPacket.js';
 
 export const JUDGE_MAX_TOKENS = 260;
 
@@ -209,6 +213,9 @@ function attachTerminalInstruction({
         rangeLabel(range) ? `执行区间${rangeLabel(range)}` : '',
       ].filter(Boolean).join('，')
     : `${outcome}；本次触发结束，不新增复核价`
+  const nextSessionPlan = compactText(advice.nextOpenPlan, 500)
+  const futurePlan = compactText(advice.futurePlan, 500)
+  const invalidation = compactText(advice.invalidation, 300)
   return {
     ...result,
     // 终态指令由服务端根据 decision、方向、区间和手数重建，
@@ -230,6 +237,22 @@ function attachTerminalInstruction({
         || theoryBasis
         || compactText(result.reason, 240)
         || '依据原军师计划与本轮触价后的分时结构判断',
+      followUpPlan: {
+        source: 'PRIOR_PLAN',
+        manualConfirmationRequired: true,
+        nextSessionPlan,
+        futurePlan,
+        invalidation,
+        stopPrice: Number(advice.stopPrice) > 0
+          ? Number(advice.stopPrice)
+          : null,
+        targetPrice: Number(advice.targetPrice) > 0
+          ? Number(advice.targetPrice)
+          : null,
+        reassessment: execute
+          ? '人工确认并记录真实成交后，继续按原计划管理'
+          : '本次触发结束，仅在新实质事件或用户主动生成时重新评估',
+      },
     },
   }
 }
@@ -495,11 +518,8 @@ async function llmJudge({
   a,
   name,
   advice,
-  prim,
-  tech,
   det,
-  position,
-  fundContext,
+  reviewPacket,
   deadlineAt,
 }) {
   const model = getModel('judge');
@@ -510,6 +530,7 @@ async function llmJudge({
   const modelDiscipline = quantJudgeDiscipline(adv.quantContext);
   const sys = '你是顶尖的A股短线操盘手，负责价格触发后的10秒终局确认。'
     + '价格已经到达军师预设点位，你必须基于原军师计划和最新分时证据立即拍板，不得重新选价、不得延后到下一轮。'
+    + '你的职责只是执行闸门，不是重新生成军师计划：不得改变交易方向，不得创建新的观察价、止损目标或后续计划。'
     + '军师建议是本次交易计划的上层约束：先核对其方向、手数、仓位、盈亏比、止损目标、技术资金消息依据与失效条件；'
     + 'priceContract是服务端校验后的唯一权威价格契约，禁止改价或另造价位。'
     + '当前持仓状态由服务端账本核验：无持仓只能买入，绝不能解释为加仓、减仓、卖出或止损；'
@@ -522,48 +543,14 @@ async function llmJudge({
     + '只输出 JSON,不要多余文字。';
   const payload = {
     股票: `${name || a.code}(${a.code})`,
-    本次交易意图: sideZh,
     动作类型: intent,
-    观察触发价: a.value,
-    动态执行区间: intent === 'add' || intent === 'buy'
-      ? adv.addZone
-      : intent === 'reduce' || intent === 'sell'
-        ? adv.reduceZone
-        : adv.stopZone,
-    当前价: prim.price,
-    服务端实时持仓: position ? {
-      当前持仓手数: position.liveQty,
-      今日可卖手数: position.sellableToday,
-    } : null,
-    分时快照: {
-      较昨收: prim.pctFromPre != null ? prim.pctFromPre + '%' : null,
-      分时均价VWAP: prim.vwap,
-      是否站上均价线: prim.aboveVwap,
-      近5分钟动量: prim.mom5Pct + '%',
-      量能: prim.volSurge ? '放量' : prim.volShrink ? '缩量' : '平稳',
-      分时低点是否抬高: prim.higherLows,
-      分时高点是否压低: prim.lowerHighs,
-      连续3分钟站上VWAP次数: prim.aboveVwapCount3,
-      距VWAP: prim.vwapDistancePct != null ? prim.vwapDistancePct + '%' : null,
-      较窗口低点反弹: prim.bounceFromLowPct != null ? prim.bounceFromLowPct + '%' : null,
-      较窗口高点回撤: prim.drawdownFromHighPct != null ? prim.drawdownFromHighPct + '%' : null,
-      距关键价: prim.keyDistancePct != null ? prim.keyDistancePct + '%' : null,
-      触价后涨跌: prim.sinceTouchPct != null ? prim.sinceTouchPct + '%' : null,
-      已观察分钟: prim.observationAgeMin,
+    本次交易意图: sideZh,
+    复核输入包: reviewPacket,
+    确定性闸门: {
+      结论: det.decision,
+      评分: det.score,
+      命中: det.hits,
     },
-    技术面: techSummaryForAI(tech),
-    本轮服务端最新资金: fundContext?.current || {
-      available: false,
-    },
-    原军师资金基准: fundContext?.baseline || null,
-    相对原军师资金变化: fundContext?.change || {
-      status: 'UNAVAILABLE',
-      summary: '本次未取得有效的最新主力与散户资金快照',
-    },
-    军师完整建议: adv,
-    建议给出的确认条件: adv.exitTiming || adv.actionPlan || '(未提供,按通用纪律判断)',
-    建议给出的失效条件: adv.invalidation || '(未提供)',
-    确定性信号: { 结论: det.decision, 评分: det.score, 命中: det.hits },
     量化模型纪律: modelDiscipline || null,
   };
   const messages = [
@@ -755,6 +742,15 @@ export async function judgeConfirmation({
     trendsData.preClose,
     { watchingAt: a.watchingAt, now: observedAt },
   ) : null;
+  const intradayFromOpen = trendsData
+    ? buildIntradayOpenSummary(
+        trendsData.trends,
+        {
+          preClose: trendsData.preClose,
+          observedAt,
+        },
+      )
+    : null;
   if (!prim) {
     return finalize({
       decision: 'wait',
@@ -835,12 +831,47 @@ export async function judgeConfirmation({
   } catch { tech = null; }
 
   const det = deterministicJudge(side, prim, tech);
+  const reviewPacket = buildReviewDecisionPacket({
+    channel: 'JUDGE',
+    code: a.code,
+    name,
+    priorAdvice: adviceContext,
+    event: {
+      kind: 'judge',
+      alertId: a.id,
+      actionIntent: intent,
+      direction: a.op,
+      threshold: a.value,
+      price: prim.price,
+      at: observedAt,
+      reason: a.note,
+    },
+    current: {
+      quote: {
+        price: prim.price,
+        quotePrice: prim.quotePrice,
+        pctFromPre: prim.pctFromPre,
+        tradeDate: quote?.tradeDate || null,
+      },
+      funds: fundContext.current,
+      intradayFromOpen,
+      postTrigger: prim,
+      technical: techSummaryForAI(tech),
+      position,
+      account: position ? {
+        holdQty: position.liveQty,
+        sellableTodayQty: position.sellableToday,
+      } : null,
+    },
+    now: observedAt,
+  });
   const signals = {
     side,
     primitives: prim,
     deterministic: det,
     techVerdict: tech && tech.verdict,
     funds: fundContext,
+    reviewDecisionPacket: reviewPacket,
   };
 
   // 强止损客观信号优先，避免等待 LLM 导致风险继续扩大。
@@ -888,6 +919,7 @@ export async function judgeConfirmation({
     det,
     position,
     fundContext,
+    reviewPacket,
     deadlineAt: observedAt + 10000,
   });
   const fused = fuseConfirmation({

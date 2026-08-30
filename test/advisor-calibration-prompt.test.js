@@ -286,6 +286,63 @@ test('条件试仓到价后只确认入场时机并要求输出具体价格', ()
   assert.ok(prompt.length < 3200)
 })
 
+test('到价快速复核只注入统一结构包并比较上一轮与本轮结论', () => {
+  const prompt = buildUserPrompt('buy_advice', {
+    code: '600000',
+    reviewEvent: {
+      kind: 'price-review',
+      plannedAction: 'PROBE',
+      timeLimitMinutes: 2,
+    },
+    reviewDecisionPacket: {
+      schemaVersion: 'review-decision-packet.v1',
+      channel: 'FAST_REVIEW',
+      priorPlan: {
+        action: '观望',
+        executionCondition: '回踩10元不破并站回VWAP',
+      },
+      baseline: {
+        market: {
+          volumeState: 'CONTRACTING',
+          priceVsVwap: 'BELOW',
+        },
+      },
+      current: {
+        intradayFromOpen: {
+          volume: { state: 'EXPANDING' },
+          priceVsVwap: 'ABOVE',
+        },
+        funds: {
+          mainNetYi: 0.5,
+          retailNetYi: -0.2,
+        },
+      },
+      delta: {
+        volumeChanged: true,
+        vwapChanged: true,
+      },
+      requestedDecision: {
+        stage: 'PLAN_REASSESSMENT',
+        mayCreateObservationPrice: false,
+      },
+    },
+    shortHorizonTactical: {
+      flow: { relation: 'ACCUMULATION' },
+    },
+  })
+
+  assert.equal(
+    (prompt.match(/review-decision-packet\.v1/g) || []).length,
+    1,
+  )
+  assert.match(prompt, /"volumeState":"CONTRACTING"/)
+  assert.match(prompt, /"state":"EXPANDING"/)
+  assert.match(prompt, /"volumeChanged":true/)
+  assert.match(prompt, /"nextOpenPlan"/)
+  assert.match(prompt, /"futurePlan"/)
+  assert.doesNotMatch(prompt, /"previousPlan":/)
+})
+
 test('普通观望到价后按已到达的突破条件给出决断而不是再顺延观察价', () => {
   const prompt = buildUserPrompt('buy_advice', {
     code: '600000',

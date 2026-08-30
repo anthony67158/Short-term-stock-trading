@@ -79,6 +79,47 @@ test('Judge建议快照保留生成时的主力与散户资金基准', () => {
   )
 })
 
+test('Judge建议快照保留上一轮结构化量价资金结论', () => {
+  const context = buildJudgeAdviceContext({
+    action: '观望',
+    reviewMemory: {
+      schemaVersion: 'advice-review-memory.v1',
+      observedAt: '2026-08-28T02:00:00.000Z',
+      source: 'ADVISOR',
+      conclusion: {
+        action: '观望',
+        executionCondition: '回踩10元不破并站回VWAP',
+        maxPositionPct: 5,
+      },
+      market: {
+        volumeState: 'CONTRACTING',
+        recentVolumeRatio: 0.72,
+        priceVsVwap: 'BELOW',
+        price: 10,
+        vwap: 10.05,
+      },
+      funds: {
+        relation: 'DISTRIBUTION',
+        mainNetYi: -0.3,
+        retailNetYi: 0.2,
+      },
+    },
+  })
+
+  assert.equal(
+    context.reviewMemory.market.volumeState,
+    'CONTRACTING',
+  )
+  assert.equal(
+    context.reviewMemory.funds.relation,
+    'DISTRIBUTION',
+  )
+  assert.equal(
+    context.reviewMemory.conclusion.maxPositionPct,
+    5,
+  )
+})
+
 test('军师明确写不加仓或赔率不足时不能创建加仓提醒', () => {
   assert.equal(adviceSupportsIntent('add', {
     action: '持有',
