@@ -182,7 +182,7 @@ test('主题颜色取自品牌图标并保留A股红涨绿跌', () => {
   )
   assert.match(
     precision,
-    /\.plan-section-sticky,[\s\S]*?\.plan-section-hold-sticky\s*{[^}]*color-mix\(\s*in srgb,/s,
+    /\.plan-section-sticky,[\s\S]*?\.plan-section-hold-sticky\s*{[^}]*border-radius:\s*var\(--radius-card\)[^}]*background-color:\s*var\(--color-paper-2\)[^}]*background-image:\s*none/s,
   )
   assert.match(
     precision,

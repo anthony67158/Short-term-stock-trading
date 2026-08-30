@@ -758,6 +758,7 @@ button.icon-btn.nav-undo:not(:disabled):hover {
   gap: var(--space-lg);
   padding: var(--space-sm) 0 var(--space-md);
   border-bottom: 1px solid var(--color-rule-2);
+  background: transparent;
 }
 
 .workspace-identity {
@@ -2567,6 +2568,16 @@ textarea:focus {
 }
 
 /* Workbench page composition */
+.today,
+.plan,
+.hub,
+.research,
+.review,
+.hub-body,
+.research-section {
+  background: transparent;
+}
+
 .today {
   display: grid;
   grid-template-columns: minmax(0, 8fr) minmax(280px, 4fr);
@@ -2795,9 +2806,10 @@ textarea:focus {
   top: calc(64px + env(safe-area-inset-top));
   z-index: calc(var(--z-sticky) - 1);
   margin-bottom: var(--space-sm);
-  padding-bottom: var(--space-xs);
-  border-bottom: 1px solid var(--color-rule-2);
-  background: color-mix(in oklch, var(--color-paper) 96%, transparent);
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid var(--color-rule-2);
+  border-radius: var(--radius-card);
+  background: var(--color-paper-2);
   backdrop-filter: blur(10px);
 }
 
@@ -2806,9 +2818,10 @@ textarea:focus {
   top: calc(64px + env(safe-area-inset-top));
   z-index: calc(var(--z-sticky) - 1);
   margin-bottom: var(--space-sm);
-  padding-bottom: var(--space-xs);
-  border-bottom: 1px solid var(--color-rule-2);
-  background: color-mix(in oklch, var(--color-paper) 96%, transparent);
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid var(--color-rule-2);
+  border-radius: var(--radius-card);
+  background: var(--color-paper-2);
   backdrop-filter: blur(10px);
 }
 
@@ -10652,7 +10665,7 @@ button.acct-item {
 
   .plan-section-sticky {
     top: calc(60px + env(safe-area-inset-top));
-    background: var(--color-paper);
+    background: var(--color-paper-2);
     backdrop-filter: none;
   }
 
@@ -10661,7 +10674,7 @@ button.acct-item {
     position: sticky;
     top: calc(60px + env(safe-area-inset-top));
     z-index: calc(var(--z-sticky) - 1);
-    background: var(--color-paper);
+    background: var(--color-paper-2);
     backdrop-filter: none;
   }
 
@@ -14771,7 +14784,7 @@ body.overlay-scroll-locked {
   .plan-section-hold-sticky {
     background: color-mix(
       in oklch,
-      var(--color-paper) 94%,
+      var(--color-paper-2) 96%,
       transparent
     );
     backdrop-filter: blur(14px) saturate(120%);
@@ -14789,7 +14802,7 @@ body.overlay-scroll-locked {
 @media (max-width: 720px) {
   .plan-section-sticky,
   .plan-section-hold-sticky {
-    background: var(--color-paper);
+    background: var(--color-paper-2);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
   }
@@ -14926,7 +14939,7 @@ body.overlay-scroll-locked {
 
   .plan-section-sticky,
   .plan-section-hold-sticky {
-    background: var(--color-paper);
+    background: var(--color-paper-2);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
   }
@@ -16518,11 +16531,10 @@ html[data-theme="light"] .nav {
 
 .plan-section-sticky,
 .plan-section-hold-sticky {
-  background-color: color-mix(
-    in srgb,
-    var(--color-paper) 94%,
-    transparent
-  );
+  border-color: var(--color-rule-2);
+  border-radius: var(--radius-card);
+  background-color: var(--color-paper-2);
+  background-image: none;
 }
 
 @media (max-width: 720px) {

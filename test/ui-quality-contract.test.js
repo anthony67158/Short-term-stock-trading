@@ -1273,18 +1273,22 @@ test('图表、表格与系统材质共用统一布局契约', () => {
   assert.match(precision, /@media \(prefers-reduced-transparency:\s*reduce\)/)
 })
 
-test('持仓与自选吸顶区跟随页面底色且不会形成整条白色卡片带', () => {
+test('页面根容器保持透明且持仓与自选吸顶区使用圆角控制面', () => {
   assert.match(
     precision,
-    /\.plan-section-sticky,\s*\.plan-section-hold-sticky\s*{[^}]*var\(--color-paper\)\s*94%/s,
+    /\.today,\s*\.plan,\s*\.hub,\s*\.research,\s*\.review,\s*\.hub-body,\s*\.research-section\s*{[^}]*background:\s*transparent/s,
+  )
+  assert.match(
+    precision,
+    /\.plan-section-sticky,\s*\.plan-section-hold-sticky\s*{[^}]*border-radius:\s*var\(--radius-card\)[^}]*background-color:\s*var\(--color-paper-2\)[^}]*background-image:\s*none/s,
   )
   assert.doesNotMatch(
     precision,
-    /\.nav,\s*\.plan-section-sticky\s*{[^}]*background:\s*var\(--color-paper-2\)/s,
+    /\.plan-section-sticky,\s*\.plan-section-hold-sticky\s*{[^}]*var\(--color-paper\)\s*94%/s,
   )
   assert.match(
     precision,
-    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.plan-section-sticky,[\s\S]*?background:\s*var\(--color-paper\)/s,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.plan-section-sticky,[\s\S]*?background:\s*var\(--color-paper-2\)/s,
   )
 })
 
