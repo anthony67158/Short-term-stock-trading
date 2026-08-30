@@ -171,6 +171,18 @@ test('快速复核输入包可更新执行细节和后续计划但不能再造�
       funds: { mainNetYi: 0.28, retailNetYi: -0.19 },
       intradayFromOpen: intraday,
       account: { cash: 10000 },
+      tactical: {
+        market: {
+          phase: 'MORNING',
+          riskTone: 'RISK_ON',
+        },
+        actionPolicy: {
+          allowedActions: ['BUY', 'WATCH'],
+          riskTier: 'PROBE',
+          maxPositionPct: 5,
+          privateDebug: 'drop-me',
+        },
+      },
     },
     now: NOW,
   })
@@ -191,6 +203,14 @@ test('快速复核输入包可更新执行细节和后续计划但不能再造�
   )
   assert.equal(packet.priorPlan.maxPositionPct, 5)
   assert.equal(packet.delta.volumeChanged, true)
+  assert.deepEqual(
+    packet.current.tactical.actionPolicy.allowedActions,
+    ['BUY', 'WATCH'],
+  )
+  assert.equal(
+    packet.current.tactical.actionPolicy.privateDebug,
+    undefined,
+  )
 })
 
 test('Judge输入包只确认原计划并继承后续计划', () => {

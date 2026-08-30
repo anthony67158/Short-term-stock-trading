@@ -401,6 +401,7 @@ test('持仓加仓复核价到达后据此决断是否加仓而不是再顺延�
   assert.match(prompt, /到价终局复核/)
   assert.match(prompt, /必须明确决定是否加仓/)
   assert.match(prompt, /操作类型、可成交价格区间和具体手数/)
+  assert.match(prompt, /必须同时返回本轮仍有效的stopPrice与targetPrice/)
   assert.match(prompt, /维持持有.*放弃本次操作/)
 })
 

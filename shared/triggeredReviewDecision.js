@@ -42,6 +42,64 @@ const lotsOf = (value) => {
     : 0
 }
 
+function priorPositionLimitPct(payload = {}) {
+  const previous = payload.previousAdvice || {}
+  const direct = finite(
+    payload.reviewEvent?.maxPositionPct
+    ?? previous.reviewMemory?.conclusion?.maxPositionPct
+    ?? previous.shortHorizonTactical?.actionPolicy?.maxPositionPct,
+  )
+  if (direct != null && direct > 0) {
+    return Math.min(100, direct)
+  }
+  const match = [
+    previous.positionNote,
+    previous.actionPlan,
+  ].filter(Boolean).join(' ')
+    .match(/(?:仓位|单票).{0,12}(?:不超过|上限)\s*(\d+(?:\.\d+)?)%/)
+  return match ? Math.min(100, Number(match[1])) : null
+}
+
+function capRiskIncreasingLots(
+  requested,
+  executionPrice,
+  payload = {},
+) {
+  const quantity = Math.max(0, Math.trunc(Number(requested) || 0))
+  const price = positive(executionPrice)
+  const limitPct = priorPositionLimitPct(payload)
+  const totalAssets = positive(payload.account?.totalAssets)
+  if (quantity <= 0 || limitPct == null) {
+    return { quantity, limitPct, capped: false }
+  }
+  if (price == null || totalAssets == null) {
+    return {
+      quantity: 0,
+      limitPct,
+      capped: true,
+      reason: '缺少总资产或执行价，无法核验原计划仓位上限',
+    }
+  }
+  const currentLots = Math.max(
+    0,
+    Math.trunc(finite(payload.holdQty) || 0),
+  )
+  const currentValue = currentLots * price * 100
+  const available = Math.max(
+    0,
+    totalAssets * limitPct / 100 - currentValue,
+  )
+  const allowed = Math.max(
+    0,
+    Math.floor(available / (price * 100)),
+  )
+  return {
+    quantity: Math.min(quantity, allowed),
+    limitPct,
+    capped: quantity > allowed,
+  }
+}
+
 export function isTriggeredReviewEvent(event = {}) {
   return ['price-review', 'judge'].includes(String(event?.kind || ''))
 }
@@ -285,6 +343,15 @@ function normalizeBuyReview(result, payload, bases, now) {
     ?? result.planQty,
   )
   let range = executionRange(result, payload, '买入')
+  const positionCap = capRiskIncreasingLots(
+    quantity,
+    range.high,
+    payload,
+  )
+  quantity = positionCap.quantity
+  if (positionCap.reason && !result.reason) {
+    result.reason = positionCap.reason
+  }
   const stop = positive(result.stopPrice)
   const target = positive(result.targetPrice)
   if (
@@ -323,6 +390,10 @@ function normalizeBuyReview(result, payload, bases, now) {
       || `下一交易日跌破${stop}元立即退出；站稳则按${target}元目标管理`
     result.futurePlan = result.futurePlan
       || `最迟第5个交易日未达到${target}元则退出，不转为长线持有`
+    if (positionCap.capped) {
+      result.positionNote =
+        `按原计划总仓位不超过${positionCap.limitPct}%，本次最多买入${quantity}手`
+    }
   } else {
     result.buyPrice = null
     result.buyZone = null
@@ -387,6 +458,13 @@ function normalizeHoldingReview(result, payload, bases, now) {
     quantity = Math.min(quantity || sellable, sellable)
   }
   let range = executionRange(result, payload, operation)
+  const positionCap = operation === '加仓'
+    ? capRiskIncreasingLots(quantity, range.high, payload)
+    : null
+  if (positionCap) quantity = positionCap.quantity
+  if (positionCap?.reason && !result.reason) {
+    result.reason = positionCap.reason
+  }
   if (
     operation !== '不操作'
     && (
@@ -423,8 +501,16 @@ function normalizeHoldingReview(result, payload, bases, now) {
     ? '无需操作'
     : `${operation}${quantity}手`
   if (operation === '加仓') {
+    result.stopPrice = positive(result.stopPrice)
+      || positive(payload.previousAdvice?.stopPrice)
+    result.targetPrice = positive(result.targetPrice)
+      || positive(payload.previousAdvice?.targetPrice)
     result.addPrice = range.low
     result.actionPlan = `立即加仓${quantity}手，执行区间${rangeText(range)}；超出区间不追`
+    if (positionCap?.capped) {
+      result.positionNote =
+        `按原计划总仓位不超过${positionCap.limitPct}%，本次最多加仓${quantity}手`
+    }
   } else if (['减仓', '锁利润', '清仓'].includes(operation)) {
     result.reducePrice = range.low
     result.actionPlan = `${outcome}${quantity}手，执行区间${rangeText(range)}；到价按计划落袋`
@@ -523,6 +609,12 @@ export function enforceTriggeredReviewDecisionPlan({
     priceLow: null,
     priceHigh: null,
     quantity: 0,
+    followUpPlan: {
+      ...(decision.followUpPlan || {}),
+      manualConfirmationRequired: true,
+      reassessment:
+        '本次触发结束，仅在新实质事件或用户主动生成时重新评估',
+    },
   }
   delete result.decisionPlan
   delete result.executionPlan

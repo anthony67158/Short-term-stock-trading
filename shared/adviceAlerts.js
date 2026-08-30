@@ -37,6 +37,9 @@ function baseAlert({ idFactory, now, code, name, op, value, note }) {
 
 function reviewIntentOf(advice = {}) {
   const policy = advice.decisionPlan?.actionPolicy || {}
+  const inheritedMaxPositionPct = Number(
+    advice.reviewMemory?.conclusion?.maxPositionPct,
+  )
   const source = (
     policy.entryIntent?.reviewMode === 'ENTRY_CONFIRMATION'
       ? policy.entryIntent
@@ -75,7 +78,11 @@ function reviewIntentOf(advice = {}) {
     plannedAction: 'WATCH',
     actionLabel: '观望',
     directionApproved: false,
-    maxPositionPct: null,
+    maxPositionPct:
+      Number.isFinite(inheritedMaxPositionPct)
+      && inheritedMaxPositionPct > 0
+        ? Math.min(100, inheritedMaxPositionPct)
+        : null,
     manualConfirmationOnly: false,
   }
 }
@@ -130,9 +137,9 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
   const holder = holding.find((x) => x && x.code === code)
   const candidate = plan.find((x) => x && x.code === code)
   const liveHolder = holder && (
-    options.t1Status == null ||
-    Number(options.t1Status.liveQty) > 0
-  )
+    options.t1Status == null
+    || Number(options.t1Status.liveQty) > 0
+  ) ? holder : null
   const rest = alerts.filter((a) => !isOwnedAutoAlert(a))
   if (!liveHolder && !candidate) {
     if (rest.length !== alerts.length) changed = true

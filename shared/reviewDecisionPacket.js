@@ -322,6 +322,93 @@ function priorPlanOf(advice = {}, event = {}) {
   }
 }
 
+function tacticalForReview(input = {}) {
+  const tactical = input && typeof input === 'object'
+    ? input
+    : {}
+  return {
+    market: compact({
+      phase: tactical.market?.phase,
+      riskTone: tactical.market?.riskTone,
+      sentimentScore: tactical.market?.sentimentScore,
+      hardRiskOff: tactical.market?.hardRiskOff,
+      hardRiskSignals: tactical.market?.hardRiskSignals,
+    }),
+    sector: compact({
+      name: tactical.sector?.name,
+      state: tactical.sector?.state,
+      stockRole: tactical.sector?.stockRole,
+    }),
+    stock: compact({
+      price: tactical.stock?.price,
+      pct: tactical.stock?.pct,
+      turnover: tactical.stock?.turnover,
+      volRatio: tactical.stock?.volRatio,
+      posInDay: tactical.stock?.posInDay,
+      vsVwap: tactical.stock?.vsVwap,
+      relativeStrength: tactical.stock?.relativeStrength,
+      location: tactical.stock?.location,
+      crowdingRisk: tactical.stock?.crowdingRisk,
+    }),
+    technical: compact({
+      available: tactical.technical?.available,
+      bias: tactical.technical?.bias,
+      signalScore: tactical.technical?.signalScore,
+      maCross: tactical.technical?.maCross,
+      maTrend: tactical.technical?.maTrend,
+      atr: tactical.technical?.atr,
+      atrPct: tactical.technical?.atrPct,
+      rsi: tactical.technical?.rsi,
+      volumeRatio: tactical.technical?.volumeRatio,
+      overheated: tactical.technical?.overheated,
+      ma: tactical.technical?.ma,
+      macd: tactical.technical?.macd,
+    }),
+    flow: compact(tactical.flow),
+    timing: compact(tactical.timing),
+    prices: compact(tactical.prices),
+    quant: compact({
+      selectedModelVersion:
+        tactical.quant?.selectedModelVersion,
+      modelVersion: tactical.quant?.modelVersion,
+      runtimeModelVersion: tactical.quant?.runtimeModelVersion,
+      modelLabel: tactical.quant?.modelLabel,
+      asOf: tactical.quant?.asOf,
+      inputAsOf: tactical.quant?.inputAsOf,
+      score: tactical.quant?.score,
+      direction: tactical.quant?.direction,
+      upProb: tactical.quant?.upProb,
+      expRet: tactical.quant?.expRet,
+      horizon: tactical.quant?.horizon,
+      highConfidence: tactical.quant?.highConfidence,
+      nextTradeDay: tactical.quant?.nextTradeDay,
+      fallback: tactical.quant?.fallback,
+    }),
+    actionPolicy: compact({
+      allowedActions:
+        tactical.actionPolicy?.allowedActions,
+      preferredAction:
+        tactical.actionPolicy?.preferredAction,
+      canIncreaseRisk:
+        tactical.actionPolicy?.canIncreaseRisk,
+      executionOpen:
+        tactical.actionPolicy?.executionOpen,
+      riskTier: tactical.actionPolicy?.riskTier,
+      maxPositionPct:
+        tactical.actionPolicy?.maxPositionPct,
+      positionBandPct:
+        tactical.actionPolicy?.positionBandPct,
+      entryRoute:
+        tactical.actionPolicy?.entryRoute,
+      manualConfirmationOnly:
+        tactical.actionPolicy?.manualConfirmationOnly,
+      reasons: tactical.actionPolicy?.reasons,
+      nextReviewTrigger:
+        tactical.actionPolicy?.nextReviewTrigger,
+    }),
+  }
+}
+
 export function buildReviewDecisionPacket({
   channel = 'FAST_REVIEW',
   code = '',
@@ -389,6 +476,7 @@ export function buildReviewDecisionPacket({
       intradayFromOpen: compact(current.intradayFromOpen),
       postTrigger: compact(current.postTrigger),
       technical: compact(current.technical),
+      tactical: tacticalForReview(current.tactical),
       position: compact(current.position),
       account: compact(current.account),
     },

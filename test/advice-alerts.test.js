@@ -156,6 +156,17 @@ test('未持仓观望建议生成复核价提醒而不是买点提醒', () => {
   projectAdviceAlerts(data, '600519', {
     action: '观望',
     watchPrice: 145.24,
+    reviewMemory: {
+      schemaVersion: 'advice-review-memory.v1',
+      source: 'ADVISOR',
+      conclusion: {
+        action: '观望',
+        executionCondition: '观察价到达后复核',
+        maxPositionPct: 5,
+      },
+      market: {},
+      funds: {},
+    },
     priceContract: {
       schemaVersion: 'advice-price-contract.v1',
       validationStatus: 'VERIFIED',
@@ -198,6 +209,7 @@ test('未持仓观望建议生成复核价提醒而不是买点提醒', () => {
   assert.equal(data.alerts[0].op, 'gte')
   assert.equal(data.alerts[0].value, 145.24)
   assert.equal(data.alerts[0].candCode, '600519')
+  assert.equal(data.alerts[0].reviewIntent.maxPositionPct, 5)
 })
 
 test('未持仓观望为回踩与突破分别生成复核提醒', () => {
@@ -507,9 +519,54 @@ test('今日新建仓的减仓预警标记为 T+1 锁定且不能提示卖出', 
   })
 
   const reduce = data.alerts.find((alert) => alert.actKind === 'reduce')
+  assert.equal(reduce.name, '风华高科')
   assert.equal(reduce.t1Blocked, true)
   assert.equal(reduce.sellableTodayQty, 0)
   assert.equal(reduce.opQty, '今日不可卖')
+})
+
+test('T+1导致减仓降级为持有时不生成方向相反的加仓复核提醒', () => {
+  const data = {
+    plan: [],
+    holding: [{ id: 'h1', code: '990008', name: '沧澜动力' }],
+    alerts: [],
+    settings: {},
+  }
+
+  projectAdviceAlerts(data, '990008', {
+    action: '持有',
+    actionPlan: '今日无可卖仓位，继续持有等待下一交易日',
+    nextAction: '下一交易日优先减仓降低风险',
+    opQty: '无需操作',
+    reducePrice: 10.8,
+    shortHorizonTactical: {
+      timing: {
+        pullbackPrice: 10.1,
+        breakoutPrice: 10.9,
+      },
+      actionPolicy: {
+        riskTier: 'FULL',
+        canIncreaseRisk: true,
+      },
+    },
+  }, {
+    now,
+    idFactory: ids,
+    t1Status: {
+      liveQty: 2,
+      boughtToday: 2,
+      sellableToday: 0,
+    },
+  })
+
+  assert.equal(
+    data.alerts.some((alert) => alert.reviewOnly === true),
+    false,
+  )
+  assert.equal(
+    data.alerts.some((alert) => alert.actKind === 'reduce'),
+    true,
+  )
 })
 
 test('旧仓2手今日补1手时减仓预警最多提示2手', () => {

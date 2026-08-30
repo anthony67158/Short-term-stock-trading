@@ -252,3 +252,15 @@ test('到价复核使用快速证据路径并在一秒内发现新紧急任务',
     /TRIGGERED_REVIEW_REUSE_PREVIOUS/,
   )
 })
+
+test('触价模型输出先映射为标准动作再进入数值与风控校验', () => {
+  const normalizeAt = aiSource.indexOf(
+    'result = normalizeTriggeredReviewDecision({',
+  )
+  const reconcileAt = aiSource.indexOf(
+    'result = reconcileAdviceNumbers({ mode, result, payload }).result;',
+  )
+
+  assert.ok(normalizeAt > 0)
+  assert.ok(reconcileAt > normalizeAt)
+})

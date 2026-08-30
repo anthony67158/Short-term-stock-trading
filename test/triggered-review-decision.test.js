@@ -135,6 +135,82 @@ test('买入复核成功只输出立即买入并带区间手数与依据', () =>
   assert.equal(result.breakoutWatchPrice, null)
 })
 
+test('触价复核买入手数不得突破上一轮5%总仓位上限', () => {
+  const result = normalizeTriggeredReviewDecision({
+    mode: 'buy_advice',
+    payload: payload({
+      account: {
+        totalAssets: 100000,
+        cash: 100000,
+      },
+      previousAdvice: {
+        reviewMemory: {
+          schemaVersion: 'advice-review-memory.v1',
+          source: 'ADVISOR',
+          conclusion: {
+            action: '观望',
+            executionCondition: '到价复核',
+            maxPositionPct: 5,
+          },
+          market: {},
+          funds: {},
+        },
+      },
+    }),
+    result: {
+      reviewDecision: {
+        outcome: '立即买入',
+        operation: '买入',
+        priceLow: 10,
+        priceHigh: 10,
+        quantity: 20,
+        basis: [{
+          type: '实时资金与价格',
+          summary: '价格与资金确认',
+        }],
+      },
+      stopPrice: 9.7,
+      targetPrice: 10.8,
+    },
+  })
+
+  assert.equal(result.reviewDecision.outcome, '立即买入')
+  assert.equal(result.reviewDecision.quantity, 5)
+  assert.equal(result.planQty, 5)
+  assert.match(result.positionNote, /总仓位不超过5%/)
+})
+
+test('存在仓位上限但总资产缺失时不得猜测可买手数', () => {
+  const result = normalizeTriggeredReviewDecision({
+    mode: 'buy_advice',
+    payload: payload({
+      account: { cash: 100000 },
+      previousAdvice: {
+        positionNote: '确认后总仓位不超过5%',
+      },
+    }),
+    result: {
+      reviewDecision: {
+        outcome: '立即买入',
+        operation: '买入',
+        priceLow: 10,
+        priceHigh: 10,
+        quantity: 5,
+        basis: [{
+          type: '实时资金与价格',
+          summary: '价格与资金确认',
+        }],
+      },
+      stopPrice: 9.7,
+      targetPrice: 10.8,
+    },
+  })
+
+  assert.equal(result.reviewDecision.outcome, '维持观望')
+  assert.equal(result.reviewDecision.quantity, 0)
+  assert.match(result.reason, /无法核验原计划仓位上限/)
+})
+
 test('买入复核未确认时终态只能维持观望且不得生成新观察价', () => {
   const result = normalizeTriggeredReviewDecision({
     mode: 'buy_advice',
@@ -257,6 +333,10 @@ test('LLM给出买入但服务端计划不可执行时收敛为维持观望', ()
   assert.equal(aligned.result.action, '观望')
   assert.equal(aligned.result.reviewDecision.outcome, '维持观望')
   assert.equal(aligned.result.reviewDecision.operation, '不操作')
+  assert.match(
+    aligned.result.reviewDecision.followUpPlan.reassessment,
+    /本次触发结束/,
+  )
   assert.match(aligned.result.actionPlan, /可用资金不足/)
   assert.equal(aligned.result.buyPrice, null)
 })

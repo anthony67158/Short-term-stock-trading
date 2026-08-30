@@ -2361,6 +2361,21 @@ export default async function handler(req, res) {
         if (notes.length) result.serverAdjust = notes.join('；');
       } catch { /* 兜底纠偏失败不影响主流程 */ }
     }
+    if (
+      ['buy_advice', 'hold_advice', 'review'].includes(mode)
+      && result
+      && typeof result === 'object'
+      && !result.raw
+      && payload.reviewEvent
+    ) {
+      // 触价模型按 reviewDecision 契约返回。先映射成标准建议字段，
+      // 再复用普通建议的数值、账户与价格契约校验。
+      result = normalizeTriggeredReviewDecision({
+        mode,
+        result,
+        payload,
+      });
+    }
     if (['buy_advice', 'hold_advice', 'review', 't_advice'].includes(mode) && result && typeof result === 'object' && !result.raw) {
       result = reconcileAdviceNumbers({ mode, result, payload }).result;
     }
@@ -2387,19 +2402,6 @@ export default async function handler(req, res) {
       && !result.raw
     ) {
       result = applyShortHorizonExitPolicy({
-        mode,
-        result,
-        payload,
-      });
-    }
-    if (
-      ['buy_advice', 'hold_advice', 'review'].includes(mode)
-      && result
-      && typeof result === 'object'
-      && !result.raw
-      && payload.reviewEvent
-    ) {
-      result = normalizeTriggeredReviewDecision({
         mode,
         result,
         payload,

@@ -158,7 +158,10 @@ export function queueAdviceReviewForPriceTrigger(
           ? '重新评估加仓'
           : '观望',
         directionApproved: false,
-        maxPositionPct: null,
+        maxPositionPct: Number.isFinite(maxPositionPct)
+          && maxPositionPct > 0
+          ? Math.min(100, maxPositionPct)
+          : null,
         manualConfirmationOnly: false,
       }
   const trigger = {

@@ -26,6 +26,17 @@ export function holdingAddReviewPlan(advice = {}) {
     ['ADD', 'REDUCE', 'EXIT'].includes(action)
     || /加仓|减仓|清仓|卖出|止损/.test(action)
   ) return null
+  const executionText = [
+    advice?.actionPlan,
+    advice?.nextAction,
+    advice?.opQty,
+    advice?.serverAdjust,
+  ].filter(Boolean).join(' ')
+  if (
+    /今日无可卖|T\+1.{0,20}(?:锁定|不可卖)|下一交易日.{0,20}(?:减仓|卖出|降低风险)/.test(
+      executionText,
+    )
+  ) return null
 
   const tactical = advice?.shortHorizonTactical || {}
   const timing = tactical.timing || {}
