@@ -2809,9 +2809,10 @@ textarea:focus {
   padding: 0 var(--space-md) var(--space-xs);
   border: 0;
   border-radius: 0;
-  background: transparent;
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  background-color: var(--color-paper);
+  background-image: var(--gradient-app);
+  background-attachment: fixed;
+  background-size: 100vw 100vh;
 }
 
 .plan-section-hold-sticky {
@@ -2822,9 +2823,10 @@ textarea:focus {
   padding: 0 var(--space-md) var(--space-xs);
   border: 0;
   border-radius: 0;
-  background: transparent;
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  background-color: var(--color-paper);
+  background-image: var(--gradient-app);
+  background-attachment: fixed;
+  background-size: 100vw 100vh;
 }
 
 .plan-section-hold-sticky > .plan-section-sticky {
@@ -3286,6 +3288,7 @@ textarea:focus {
 
 .hold-swipe-wrap {
   height: 100%;
+  border-radius: var(--radius-card);
 }
 
 .hold-select-wrap {
@@ -10675,7 +10678,8 @@ button.acct-item {
 
   .plan-section-sticky {
     top: calc(60px + env(safe-area-inset-top));
-    background: transparent;
+    background-color: var(--color-paper);
+    background-image: var(--gradient-app);
     backdrop-filter: none;
   }
 
@@ -10684,7 +10688,8 @@ button.acct-item {
     position: sticky;
     top: calc(60px + env(safe-area-inset-top));
     z-index: calc(var(--z-sticky) - 1);
-    background: transparent;
+    background-color: var(--color-paper);
+    background-image: var(--gradient-app);
     backdrop-filter: none;
   }
 
@@ -14792,9 +14797,10 @@ body.overlay-scroll-locked {
 
   .plan-section-sticky,
   .plan-section-hold-sticky {
-    background: transparent;
-    backdrop-filter: blur(14px) saturate(120%);
-    -webkit-backdrop-filter: blur(14px) saturate(120%);
+    background-color: var(--color-paper);
+    background-image: var(--gradient-app);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 }
 
@@ -14808,7 +14814,8 @@ body.overlay-scroll-locked {
 @media (max-width: 720px) {
   .plan-section-sticky,
   .plan-section-hold-sticky {
-    background: transparent;
+    background-color: var(--color-paper);
+    background-image: var(--gradient-app);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
   }
@@ -14945,7 +14952,8 @@ body.overlay-scroll-locked {
 
   .plan-section-sticky,
   .plan-section-hold-sticky {
-    background: transparent;
+    background-color: var(--color-paper);
+    background-image: var(--gradient-app);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
   }
@@ -15736,7 +15744,7 @@ button:is(
 .hold-grid .hold-item {
   border-color: transparent;
   background: var(--color-paper-2);
-  box-shadow: var(--shadow-card);
+  box-shadow: none;
   transition:
     background-color var(--dur-short) var(--ease-out),
     box-shadow var(--dur-short) var(--ease-out);
@@ -15751,7 +15759,7 @@ button:is(
       var(--color-paper-2) 94%,
       var(--color-accent)
     );
-    box-shadow: var(--shadow-card);
+    box-shadow: none;
   }
 }
 
@@ -16376,6 +16384,8 @@ body {
 
 body {
   background-image: var(--gradient-app);
+  background-attachment: fixed;
+  background-size: 100vw 100vh;
 }
 
 .app {
@@ -16539,8 +16549,10 @@ html[data-theme="light"] .nav {
 .plan-section-hold-sticky {
   border: 0;
   border-radius: 0;
-  background-color: transparent;
-  background-image: none;
+  background-color: var(--color-paper);
+  background-image: var(--gradient-app);
+  background-attachment: fixed;
+  background-size: 100vw 100vh;
 }
 
 @media (max-width: 720px) {

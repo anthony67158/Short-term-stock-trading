@@ -182,7 +182,7 @@ test('主题颜色取自品牌图标并保留A股红涨绿跌', () => {
   )
   assert.match(
     precision,
-    /\.plan-section-sticky,[\s\S]*?\.plan-section-hold-sticky\s*{[^}]*border:\s*0[^}]*border-radius:\s*0[^}]*background-color:\s*transparent[^}]*background-image:\s*none/s,
+    /\.plan-section-sticky,[\s\S]*?\.plan-section-hold-sticky\s*{[^}]*border:\s*0[^}]*border-radius:\s*0[^}]*background-color:\s*var\(--color-paper\)[^}]*background-image:\s*var\(--gradient-app\)/s,
   )
   assert.match(
     precision,

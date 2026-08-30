@@ -159,10 +159,10 @@ test('桌面与移动端持仓标题和筛选轨道共用吸顶容器', () => {
   )
   assert.match(
     styles,
-    /@media \(max-width:\s*720px\)\s*\{[\s\S]*?\.plan-section-hold-sticky\s*\{[^}]*display:\s*block[^}]*position:\s*sticky[^}]*top:\s*calc\(60px \+ env\(safe-area-inset-top\)\)[^}]*background:\s*transparent/s,
+    /@media \(max-width:\s*720px\)\s*\{[\s\S]*?\.plan-section-hold-sticky\s*\{[^}]*display:\s*block[^}]*position:\s*sticky[^}]*top:\s*calc\(60px \+ env\(safe-area-inset-top\)\)[^}]*background-color:\s*var\(--color-paper\)[^}]*background-image:\s*var\(--gradient-app\)/s,
   )
   assert.match(
     styles,
-    /\.plan-section-sticky,\s*\.plan-section-hold-sticky\s*\{[^}]*border:\s*0[^}]*border-radius:\s*0[^}]*background-color:\s*transparent/s,
+    /\.plan-section-sticky,\s*\.plan-section-hold-sticky\s*\{[^}]*border:\s*0[^}]*border-radius:\s*0[^}]*background-color:\s*var\(--color-paper\)[^}]*background-image:\s*var\(--gradient-app\)/s,
   )
 })

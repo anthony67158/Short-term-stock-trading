@@ -196,7 +196,11 @@ test('卡片通过留白和弱底色分组而不是连续边线', () => {
   assert.match(precision, new RegExp(calmSurfaceMarker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
   assert.match(
     calmSurface,
-    /\.trade-card,[\s\S]*?\.hold-grid \.hold-item\s*{[^}]*border-color:\s*transparent[^}]*box-shadow:\s*var\(--shadow-card\)/s,
+    /\.trade-card,[\s\S]*?\.hold-grid \.hold-item\s*{[^}]*border-color:\s*transparent[^}]*box-shadow:\s*none/s,
+  )
+  assert.match(
+    precision,
+    /\.hold-swipe-wrap\s*{[^}]*height:\s*100%[^}]*border-radius:\s*var\(--radius-card\)/s,
   )
   assert.match(
     calmSurface,

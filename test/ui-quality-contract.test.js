@@ -1277,14 +1277,14 @@ test('图表、表格与系统材质共用统一布局契约', () => {
   assert.match(precision, /@media \(prefers-reduced-transparency:\s*reduce\)/)
 })
 
-test('页面根容器和吸顶筛选保持无框透明且主内容左右等距', () => {
+test('页面根容器透明、吸顶筛选无框不透底且主内容左右等距', () => {
   assert.match(
     precision,
     /\.today,\s*\.plan,\s*\.hub,\s*\.research,\s*\.review,\s*\.hub-body,\s*\.research-section\s*{[^}]*background:\s*transparent/s,
   )
   assert.match(
     precision,
-    /\.plan-section-sticky,\s*\.plan-section-hold-sticky\s*{[^}]*border:\s*0[^}]*border-radius:\s*0[^}]*background-color:\s*transparent[^}]*background-image:\s*none/s,
+    /\.plan-section-sticky,\s*\.plan-section-hold-sticky\s*{[^}]*border:\s*0[^}]*border-radius:\s*0[^}]*background-color:\s*var\(--color-paper\)[^}]*background-image:\s*var\(--gradient-app\)[^}]*background-attachment:\s*fixed/s,
   )
   assert.match(
     precision,
