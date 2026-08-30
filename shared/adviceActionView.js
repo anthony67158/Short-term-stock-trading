@@ -44,6 +44,25 @@ function actionKind(advice, mode) {
   return 'hold'
 }
 
+export function actionImportance(view = {}) {
+  const action = clean(view.action, 80)
+  if (/止损|清仓|退出/.test(action)) return 'critical'
+  if (
+    view.deferred
+    || view.manualOnly
+    || view.trigger?.direction === 'inactive'
+  ) {
+    if (/试仓/.test(action)) return 'conditional'
+    if (/条件(?:买入|加仓)|待确认建仓/.test(action)) return 'ready'
+    return 'watch'
+  }
+  if (['buy', 'add', 'reduce', 'sell'].includes(view.kind)) {
+    return 'execute'
+  }
+  if (view.kind === 'hold') return 'steady'
+  return 'watch'
+}
+
 const level = (key, label, price, tone, active) => {
   const value = finite(price)
   return value == null ? null : { key, label, price: value, tone, active }

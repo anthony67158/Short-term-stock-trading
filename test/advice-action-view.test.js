@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  actionImportance,
   buildActionProgress,
   buildAdviceActionView,
   buildHoldingCardDecisionView,
@@ -12,6 +13,45 @@ import {
   planStore,
 } from '../src/planStore.js'
 import { holdingAddReviewPlan } from '../shared/holdingFollowUp.js'
+
+test('主结论按硬风险、立即执行、条件计划、持有和观望分级', () => {
+  assert.equal(
+    actionImportance({ kind: 'sell', action: '止损' }),
+    'critical',
+  )
+  assert.equal(
+    actionImportance({ kind: 'buy', action: '现在买入' }),
+    'execute',
+  )
+  assert.equal(
+    actionImportance({ kind: 'reduce', action: '止盈' }),
+    'execute',
+  )
+  assert.equal(
+    actionImportance({
+      kind: 'wait',
+      action: '次日条件买入',
+      deferred: true,
+    }),
+    'ready',
+  )
+  assert.equal(
+    actionImportance({
+      kind: 'wait',
+      action: '开盘后条件试仓',
+      deferred: true,
+    }),
+    'conditional',
+  )
+  assert.equal(
+    actionImportance({ kind: 'hold', action: '持有' }),
+    'steady',
+  )
+  assert.equal(
+    actionImportance({ kind: 'wait', action: '继续观望' }),
+    'watch',
+  )
+})
 
 test('止损触及但做T买回仓位受T加一锁定时卡片保留不可卖指令', () => {
   const view = buildHoldingCardDecisionView({

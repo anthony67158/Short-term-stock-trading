@@ -15001,14 +15001,6 @@ body.overlay-scroll-locked {
   line-height: 1.2;
 }
 
-.tone-sell .action-command-primary {
-  color: var(--color-warning);
-}
-
-.tone-wait .action-command-primary {
-  color: var(--color-muted);
-}
-
 .action-command-primary .action-command-qty {
   padding-inline-start: var(--space-2xs);
   border-inline-start: 1px solid currentColor;
@@ -15917,6 +15909,82 @@ html[data-theme="light"] .plan-cand.starred {
   min-width: 0;
 }
 
+.action-command {
+  --action-command-emphasis: var(--color-accent);
+  --action-command-emphasis-bg: color-mix(
+    in oklch,
+    var(--color-accent) 12%,
+    var(--color-paper-3)
+  );
+  --action-command-emphasis-weight: 780;
+}
+
+.action-command.importance-critical {
+  --action-command-emphasis: var(--color-danger);
+  --action-command-emphasis-bg: color-mix(
+    in oklch,
+    var(--color-danger) 18%,
+    var(--color-paper-3)
+  );
+  --action-command-emphasis-weight: 850;
+}
+
+.tone-buy .action-command.importance-execute {
+  --action-command-emphasis: var(--color-up);
+  --action-command-emphasis-bg: color-mix(
+    in oklch,
+    var(--color-up) 16%,
+    var(--color-paper-3)
+  );
+  --action-command-emphasis-weight: 850;
+}
+
+.tone-sell .action-command.importance-execute {
+  --action-command-emphasis: var(--color-down);
+  --action-command-emphasis-bg: color-mix(
+    in oklch,
+    var(--color-down) 16%,
+    var(--color-paper-3)
+  );
+  --action-command-emphasis-weight: 850;
+}
+
+.action-command.importance-ready {
+  --action-command-emphasis: var(--color-accent);
+  --action-command-emphasis-bg: color-mix(
+    in oklch,
+    var(--color-accent) 16%,
+    var(--color-paper-3)
+  );
+  --action-command-emphasis-weight: 820;
+}
+
+.action-command.importance-conditional {
+  --action-command-emphasis: var(--color-warning);
+  --action-command-emphasis-bg: color-mix(
+    in oklch,
+    var(--color-warning) 15%,
+    var(--color-paper-3)
+  );
+  --action-command-emphasis-weight: 800;
+}
+
+.action-command.importance-steady {
+  --action-command-emphasis: var(--color-accent-2);
+  --action-command-emphasis-bg: color-mix(
+    in oklch,
+    var(--color-accent-2) 10%,
+    var(--color-paper-3)
+  );
+  --action-command-emphasis-weight: 760;
+}
+
+.action-command.importance-watch {
+  --action-command-emphasis: var(--color-muted);
+  --action-command-emphasis-bg: var(--color-paper-4);
+  --action-command-emphasis-weight: 720;
+}
+
 .action-command-icon {
   display: inline-flex;
   width: 32px;
@@ -15924,31 +15992,15 @@ html[data-theme="light"] .plan-cand.starred {
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-control);
-  background: color-mix(
-    in oklch,
-    var(--color-accent) 12%,
-    var(--color-paper-3)
-  );
-  color: var(--color-accent);
-}
-
-.tone-sell .action-command-icon {
-  background: color-mix(
-    in oklch,
-    var(--color-warning) 12%,
-    var(--color-paper-3)
-  );
-  color: var(--color-warning);
-}
-
-.tone-wait .action-command-icon {
-  background: var(--color-paper-4);
-  color: var(--color-muted);
+  background: var(--action-command-emphasis-bg);
+  color: var(--action-command-emphasis);
 }
 
 .action-command-main .action-command-primary {
   display: block;
+  color: var(--action-command-emphasis);
   font-size: var(--text-lg);
+  font-weight: var(--action-command-emphasis-weight);
   line-height: 1.15;
 }
 
@@ -15961,12 +16013,8 @@ html[data-theme="light"] .plan-cand.starred {
   padding: var(--space-3xs) var(--space-2xs);
   border: 0;
   border-radius: var(--radius-badge);
-  background: color-mix(
-    in oklch,
-    var(--color-accent) 10%,
-    var(--color-paper-3)
-  );
-  color: var(--color-accent);
+  background: var(--action-command-emphasis-bg);
+  color: var(--action-command-emphasis);
   font-size: var(--text-xs);
   line-height: 1;
 }

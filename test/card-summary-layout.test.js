@@ -22,11 +22,46 @@ test('持仓与自选卡只展示固定策略摘要并从详情入口查看完�
   assert.equal((planTab.match(/<ActionCommand[\s\S]{0,120}onOpen=/g) || []).length, 2)
   assert.match(
     planTab,
-    /<button[\s\S]*?className="action-command"[\s\S]*?onClick=\{onOpen\}/,
+    /<button[\s\S]*?className={`action-command importance-\$\{importance\}`}[\s\S]*?onClick=\{onOpen\}/,
   )
   assert.doesNotMatch(planTab, /className="action-command-open"/)
   assert.doesNotMatch(planTab, /action-command-disclosure/)
   assert.doesNotMatch(planTab, /useLayoutEffect/)
+})
+
+test('卡片主结论使用统一的重要程度与交易语义色', () => {
+  assert.match(
+    planTab,
+    /const importance = actionImportance\(view\)[\s\S]*?className={`action-command importance-\$\{importance\}`}/s,
+  )
+  assert.match(
+    precision,
+    /\.action-command\.importance-critical\s*{[^}]*--action-command-emphasis:\s*var\(--color-danger\)/s,
+  )
+  assert.match(
+    precision,
+    /\.tone-buy \.action-command\.importance-execute\s*{[^}]*--action-command-emphasis:\s*var\(--color-up\)/s,
+  )
+  assert.match(
+    precision,
+    /\.tone-sell \.action-command\.importance-execute\s*{[^}]*--action-command-emphasis:\s*var\(--color-down\)/s,
+  )
+  assert.match(
+    precision,
+    /\.action-command\.importance-ready\s*{[^}]*--action-command-emphasis:\s*var\(--color-accent\)/s,
+  )
+  assert.match(
+    precision,
+    /\.action-command\.importance-conditional\s*{[^}]*--action-command-emphasis:\s*var\(--color-warning\)/s,
+  )
+  assert.match(
+    precision,
+    /\.action-command\.importance-steady\s*{[^}]*--action-command-emphasis:\s*var\(--color-accent-2\)/s,
+  )
+  assert.match(
+    precision,
+    /\.action-command\.importance-watch\s*{[^}]*--action-command-emphasis:\s*var\(--color-muted\)/s,
+  )
 })
 
 test('持仓与自选支持整卡进入详情且保留卡内独立操作', () => {
@@ -165,7 +200,7 @@ test('策略摘要分离状态、主动作、仓位和执行条件', () => {
   )
   assert.match(
     calmSurface,
-    /\.action-command-main \.action-command-qty\s*{[^}]*border-radius:\s*var\(--radius-badge\)[^}]*background:\s*color-mix/s,
+    /\.action-command-main \.action-command-qty\s*{[^}]*border-radius:\s*var\(--radius-badge\)[^}]*background:\s*var\(--action-command-emphasis-bg\)/s,
   )
   assert.match(
     calmSurface,
@@ -269,7 +304,7 @@ test('策略摘要不再使用遮挡卡片的悬浮预览且文字区域直接�
   )
   assert.match(
     planTab,
-    /className="action-command"[\s\S]*?title="查看完整建议"[\s\S]*?onClick=\{onOpen\}/,
+    /className={`action-command importance-\$\{importance\}`}[\s\S]*?title="查看完整建议"[\s\S]*?onClick=\{onOpen\}/,
   )
   assert.doesNotMatch(planTab, /className="action-command-open"/)
 })

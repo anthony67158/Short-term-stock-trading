@@ -566,7 +566,7 @@ test('操作建议卡使用语义图标、仓位徽标与固定价位列', () =>
   assert.match(planTab, /className="action-command-icon"[\s\S]*?<Icon name=\{icon\}/)
   assert.match(
     precision,
-    /\.action-command-icon\s*{[^}]*width:\s*32px[^}]*height:\s*32px[^}]*background:\s*color-mix/s,
+    /\.action-command-icon\s*{[^}]*width:\s*32px[^}]*height:\s*32px[^}]*background:\s*var\(--action-command-emphasis-bg\)/s,
   )
   assert.match(
     precision,
@@ -724,7 +724,7 @@ test('卡片内只保留单行建议摘要且完整内容进入个股详情', ()
   assert.match(planTab, /function ActionCommand\(\{ view, onOpen \}\)/)
   assert.match(
     planTab,
-    /<button[\s\S]*?className="action-command"[\s\S]*?onClick=\{onOpen\}/,
+    /<button[\s\S]*?className={`action-command importance-\$\{importance\}`}[\s\S]*?onClick=\{onOpen\}/,
   )
   assert.doesNotMatch(planTab, /className="action-command-open"/)
   assert.doesNotMatch(precision, /\.action-command-open/)

@@ -65,6 +65,7 @@ import {
   realPerformanceMirror,
 } from '../../shared/tradingDiscipline.js'
 import {
+  actionImportance,
   buildActionProgress,
   buildAdviceActionView,
   buildHoldingCardDecisionView,
@@ -854,6 +855,7 @@ function ConvictionStrip({ conviction }) {
 function ActionCommand({ view, onOpen }) {
   const instruction = view.instruction || '等待下一步执行条件'
   const cardInstruction = view.cardInstruction || instruction
+  const importance = actionImportance(view)
   const quantity =
     view.quantityLabel || actionQtyLabel(view.quantity)
   const icon = view.kind === 'wait'
@@ -867,7 +869,7 @@ function ActionCommand({ view, onOpen }) {
   return (
     <button
       type="button"
-      className="action-command"
+      className={`action-command importance-${importance}`}
       title="查看完整建议"
       onClick={onOpen}
     >
