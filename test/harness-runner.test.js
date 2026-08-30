@@ -401,13 +401,14 @@ test('真实manifest与case可通过统一CLI离线执行', async () => {
 
   assert.equal(result.exitCode, 0)
   assert.equal(payload.ok, true)
-  assert.equal(payload.summary.total, 39)
-  assert.equal(payload.summary.passed, 39)
+  assert.equal(payload.summary.total, 52)
+  assert.equal(payload.summary.passed, 52)
   assert.deepEqual(
     [...new Set(payload.episodes.map((item) => item.adapter))].sort(),
     [
       'advice',
       'daily',
+      'decision-lifecycle',
       'evidence',
       'execution',
       'judge',
@@ -422,6 +423,14 @@ test('Harness接入npm命令、CI门禁与报告artifact', () => {
   assert.match(packageJson.scripts.harness, /harness\/run\.mjs/)
   assert.match(packageJson.scripts['harness:ci'], /harness\/run\.mjs/)
   assert.match(packageJson.scripts['harness:execution'], /--suite execution/)
+  assert.match(
+    packageJson.scripts['harness:lifecycle'],
+    /--suite decision-lifecycle/,
+  )
+  assert.match(
+    packageJson.scripts['evaluate:lifecycle'],
+    /run-decision-lifecycle-evaluation\.mjs/,
+  )
   assert.match(packageJson.scripts['test:ci'], /--test-concurrency=1/)
   assert.match(workflow, /npm run harness:ci/)
   assert.match(workflow, /npm run test:ci/)

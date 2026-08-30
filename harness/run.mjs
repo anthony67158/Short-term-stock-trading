@@ -44,6 +44,9 @@ import {
   runExecutionHarnessCase,
 } from './adapters/execution.mjs'
 import {
+  runDecisionLifecycleHarnessCase,
+} from './adapters/decision-lifecycle.mjs'
+import {
   compareHarnessBaseline,
   createHarnessBaseline,
   loadHarnessBaseline,
@@ -61,6 +64,7 @@ const ADAPTERS = {
   shadow: runShadowHarnessCase,
   sector: runSectorHarnessCase,
   execution: runExecutionHarnessCase,
+  'decision-lifecycle': runDecisionLifecycleHarnessCase,
 }
 
 function parseArgs(argv) {

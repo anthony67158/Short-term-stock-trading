@@ -72,6 +72,13 @@
       "mode": "offline",
       "description": "人工执行状态、事件幂等、账户熔断、做T边界与真实成交归因"
     },
+    "decision-lifecycle": {
+      "adapter": "decision-lifecycle",
+      "caseFile": "cases/decision-lifecycle.json",
+      "minOverall": 0.9,
+      "mode": "offline",
+      "description": "假股票端到端军师、复核、Judge、预警与终态决策链"
+    },
     "endpoint": {
       "adapter": "endpoint",
       "caseFile": "cases/endpoint.json",

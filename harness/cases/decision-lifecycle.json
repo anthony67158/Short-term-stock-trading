@@ -1,0 +1,1541 @@
+{
+  "schemaVersion": "harness-case-set.v1",
+  "cases": [
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "lifecycle-watch-price-not-reached",
+      "adapter": "decision-lifecycle",
+      "tags": ["lifecycle", "advisor", "watch", "fake-data"],
+      "module": "M01-军师到预警",
+      "task_description": "为虚构股票星河材料生成回踩观察计划，价格未到时保持等待观察。",
+      "preconditions": "未持仓，盘中行情有效，军师只批准条件观察。",
+      "expected_output": "生成回踩与突破复核预警，不调用快速复核或Judge，状态保持armed。",
+      "optimal_tool_sequence": ["advisor", "price-contract", "alert-projector"],
+      "optimal_steps": 3,
+      "max_acceptable_steps": 4,
+      "required_tools": ["advisor", "alert-projector"],
+      "forbidden_tools": ["review-llm", "judge-llm"],
+      "baseline_tokens": 2400,
+      "difficulty": "L1",
+      "eval_type": "functional",
+      "judge_method": "auto_assert",
+      "sampling_count": 5,
+      "input": {
+        "now": 1787537400000,
+        "mode": "buy_advice",
+        "path": "WAITING",
+        "security": {
+          "code": "990001",
+          "name": "星河材料"
+        },
+        "position": {
+          "liveQty": 0,
+          "sellableToday": 0
+        },
+        "advisorPayload": {
+          "todayQuote": {
+            "price": 4.72,
+            "low": 4.55,
+            "high": 4.8,
+            "pct": 1.2,
+            "volRatio": 0.8,
+            "limitDownPrice": 4.2,
+            "limitUpPrice": 5.2
+          },
+          "tech": {
+            "support": 4.56,
+            "resistance": 4.88,
+            "atr": 0.12,
+            "ma": {
+              "ma5": 4.6
+            }
+          }
+        },
+        "advisorTrends": [
+          {"time": "10:00", "price": 4.65, "vol": 200, "avg": 4.63},
+          {"time": "10:01", "price": 4.63, "vol": 180, "avg": 4.63},
+          {"time": "10:02", "price": 4.61, "vol": 160, "avg": 4.62},
+          {"time": "10:03", "price": 4.6, "vol": 120, "avg": 4.62},
+          {"time": "10:04", "price": 4.59, "vol": 100, "avg": 4.61},
+          {"time": "10:05", "price": 4.6, "vol": 90, "avg": 4.61}
+        ],
+        "advisorModelOutput": {
+          "action": "观望",
+          "title": "等待回踩确认",
+          "actionPlan": "下一交易日盘中只看回踩4.56元不破并重新站回分时均价",
+          "pullbackWatchPrice": 4.56,
+          "positionNote": "触发后仓位不超过5%，由用户人工确认",
+          "invalidation": "跌破4.5元取消关注"
+        },
+        "trigger": {
+          "alertKind": "REVIEW_ONLY",
+          "reviewKey": "watch_pullback"
+        }
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "alertKind": "REVIEW_ONLY",
+        "alertCount": 2,
+        "finalOutcome": "等待观察",
+        "maxPositionPct": 5,
+        "maxLots": 0,
+        "llmCalls": {
+          "advisor": 1,
+          "review": 0,
+          "judge": 0
+        },
+        "notificationIncludes": ["星河材料", "待确认", "先观察"]
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "lifecycle-fast-review-buy",
+      "adapter": "decision-lifecycle",
+      "tags": ["lifecycle", "fast-review", "buy", "fake-data"],
+      "module": "M02-观察价快速复核",
+      "task_description": "星河材料回踩4.56元后重新站回VWAP且主力转流入，确认是否买入。",
+      "preconditions": "原军师计划为5%以内条件试仓，观察价已触发。",
+      "expected_output": "只调用review模型一次，输出立即买入、具体区间和手数，清除原观察预警。",
+      "optimal_tool_sequence": ["advisor", "alert-projector", "review-queue", "review-llm", "risk-gate", "notification"],
+      "optimal_steps": 6,
+      "max_acceptable_steps": 7,
+      "required_tools": ["advisor", "review-llm", "risk-gate"],
+      "forbidden_tools": ["judge-llm"],
+      "baseline_tokens": 6500,
+      "difficulty": "L3",
+      "eval_type": "comprehensive",
+      "judge_method": "auto_assert",
+      "multi_turn_chain_id": "MTC-001",
+      "sampling_count": 5,
+      "input": {
+        "now": 1787537400000,
+        "mode": "buy_advice",
+        "path": "FAST_REVIEW",
+        "security": {
+          "code": "990001",
+          "name": "星河材料"
+        },
+        "position": {
+          "liveQty": 0,
+          "sellableToday": 0
+        },
+        "advisorPayload": {
+          "todayQuote": {
+            "price": 4.72,
+            "low": 4.55,
+            "high": 4.8,
+            "pct": 1.2,
+            "volRatio": 0.8,
+            "limitDownPrice": 4.2,
+            "limitUpPrice": 5.2
+          },
+          "tech": {
+            "support": 4.56,
+            "resistance": 4.88,
+            "atr": 0.12,
+            "ma": {
+              "ma5": 4.6
+            }
+          }
+        },
+        "advisorTrends": [
+          {"time": "10:00", "price": 4.65, "vol": 220, "avg": 4.63},
+          {"time": "10:01", "price": 4.63, "vol": 190, "avg": 4.63},
+          {"time": "10:02", "price": 4.61, "vol": 160, "avg": 4.62},
+          {"time": "10:03", "price": 4.59, "vol": 130, "avg": 4.62},
+          {"time": "10:04", "price": 4.58, "vol": 100, "avg": 4.61},
+          {"time": "10:05", "price": 4.59, "vol": 90, "avg": 4.61}
+        ],
+        "advisorModelOutput": {
+          "action": "观望",
+          "title": "等待回踩确认",
+          "actionPlan": "下一交易日盘中只看回踩4.56元不破并重新站回分时均价",
+          "pullbackWatchPrice": 4.56,
+          "positionNote": "触发后仓位不超过5%，由用户人工确认",
+          "invalidation": "跌破4.5元取消关注"
+        },
+        "trigger": {
+          "alertKind": "REVIEW_ONLY",
+          "reviewKey": "watch_pullback",
+          "quote": {
+            "price": 4.55
+          }
+        },
+        "review": {
+          "quote": {
+            "price": 4.57,
+            "low": 4.54,
+            "high": 4.6,
+            "pct": 0.4,
+            "volRatio": 1.25,
+            "limitDownPrice": 4.2,
+            "limitUpPrice": 5.2
+          },
+          "funds": {
+            "source": "fake-realtime",
+            "mainNetYi": 0.35,
+            "retailNetYi": -0.2
+          },
+          "trends": [
+            {"time": "10:01", "price": 4.7, "vol": 190, "avg": 4.67},
+            {"time": "10:02", "price": 4.66, "vol": 170, "avg": 4.66},
+            {"time": "10:03", "price": 4.62, "vol": 150, "avg": 4.64},
+            {"time": "10:04", "price": 4.58, "vol": 130, "avg": 4.62},
+            {"time": "10:05", "price": 4.54, "vol": 110, "avg": 4.59},
+            {"time": "10:06", "price": 4.55, "vol": 100, "avg": 4.58},
+            {"time": "10:07", "price": 4.55, "vol": 100, "avg": 4.57},
+            {"time": "10:08", "price": 4.56, "vol": 110, "avg": 4.57},
+            {"time": "10:09", "price": 4.57, "vol": 170, "avg": 4.56},
+            {"time": "10:10", "price": 4.57, "vol": 210, "avg": 4.56}
+          ],
+          "modelOutput": {
+            "reviewDecision": {
+              "outcome": "立即买入",
+              "operation": "买入",
+              "priceLow": 4.57,
+              "priceHigh": 4.57,
+              "quantity": 10,
+              "basis": [
+                {
+                  "type": "实时资金与价格",
+                  "summary": "回踩不破后站回均价，主力净流入且小单净流出"
+                }
+              ]
+            },
+            "stopPrice": 4.45,
+            "targetPrice": 4.85,
+            "nextOpenPlan": "成交后次日跌破4.45元立即退出",
+            "futurePlan": "最迟第5个交易日未达到4.85元则退出",
+            "reason": "承接有效且风险收益符合计划"
+          }
+        }
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "alertKind": "REVIEW_ONLY",
+        "alertCount": 2,
+        "finalOutcome": "立即买入",
+        "finalOperation": "买入",
+        "maxPositionPct": 5,
+        "maxLots": 10,
+        "remainingAlerts": 0,
+        "llmCalls": {
+          "advisor": 1,
+          "review": 1,
+          "judge": 0
+        },
+        "notificationIncludes": ["星河材料", "立即买入"]
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "lifecycle-fast-review-add",
+      "adapter": "decision-lifecycle",
+      "tags": ["lifecycle", "fast-review", "add", "fake-data"],
+      "module": "M02-观察价快速复核",
+      "task_description": "云岭科技盈利持仓回踩支撑后承接恢复，确认是否加仓。",
+      "preconditions": "持仓4手且均为可卖旧仓，原计划为持有等待加仓条件。",
+      "expected_output": "只调用review模型一次，给出立即加仓2手和后续计划。",
+      "optimal_tool_sequence": ["advisor", "alert-projector", "review-queue", "review-llm", "risk-gate", "notification"],
+      "optimal_steps": 6,
+      "max_acceptable_steps": 7,
+      "required_tools": ["advisor", "review-llm", "risk-gate"],
+      "forbidden_tools": ["judge-llm"],
+      "baseline_tokens": 6500,
+      "difficulty": "L3",
+      "eval_type": "multi_turn",
+      "judge_method": "hybrid",
+      "multi_turn_chain_id": "MTC-002",
+      "sampling_count": 5,
+      "input": {
+        "now": 1787537400000,
+        "mode": "hold_advice",
+        "path": "FAST_REVIEW",
+        "security": {
+          "code": "990002",
+          "name": "云岭科技"
+        },
+        "position": {
+          "liveQty": 4,
+          "sellableToday": 4,
+          "boughtToday": 0,
+          "cost": 9.8,
+          "stockWeight": 12
+        },
+        "advisorPayload": {
+          "todayQuote": {
+            "price": 10.4,
+            "low": 10.08,
+            "high": 10.65,
+            "pct": 2.5,
+            "volRatio": 1.1,
+            "limitDownPrice": 9.2,
+            "limitUpPrice": 11.2
+          },
+          "tech": {
+            "support": 10.1,
+            "resistance": 10.8,
+            "atr": 0.25,
+            "stopLoss": 9.7,
+            "takeProfit": 11.2,
+            "ma": {
+              "ma5": 10.2
+            }
+          }
+        },
+        "advisorTrends": [
+          {"time": "10:00", "price": 10.3, "vol": 180, "avg": 10.25},
+          {"time": "10:01", "price": 10.34, "vol": 170, "avg": 10.27},
+          {"time": "10:02", "price": 10.38, "vol": 160, "avg": 10.29},
+          {"time": "10:03", "price": 10.42, "vol": 150, "avg": 10.31},
+          {"time": "10:04", "price": 10.4, "vol": 140, "avg": 10.32},
+          {"time": "10:05", "price": 10.4, "vol": 130, "avg": 10.33}
+        ],
+        "advisorModelOutput": {
+          "action": "持有",
+          "title": "持有等回踩",
+          "actionPlan": "持有4手，回踩10.1元企稳后复核加仓",
+          "opQty": "无需操作",
+          "stopPrice": 9.7,
+          "targetPrice": 11.2,
+          "positionNote": "当前4手，盈利持仓仅在承接恢复后加仓",
+          "invalidation": "跌破9.7元降低风险"
+        },
+        "trigger": {
+          "alertKind": "REVIEW_ONLY",
+          "reviewKey": "holding_add_pullback",
+          "quote": {
+            "price": 10.08
+          }
+        },
+        "review": {
+          "quote": {
+            "price": 10.12,
+            "low": 10.06,
+            "high": 10.45,
+            "pct": 0.9,
+            "volRatio": 1.3,
+            "limitDownPrice": 9.2,
+            "limitUpPrice": 11.2
+          },
+          "funds": {
+            "source": "fake-realtime",
+            "mainNetYi": 0.62,
+            "retailNetYi": -0.25
+          },
+          "trends": [
+            {"time": "10:01", "price": 10.45, "vol": 180, "avg": 10.36},
+            {"time": "10:02", "price": 10.38, "vol": 165, "avg": 10.35},
+            {"time": "10:03", "price": 10.28, "vol": 150, "avg": 10.31},
+            {"time": "10:04", "price": 10.18, "vol": 130, "avg": 10.25},
+            {"time": "10:05", "price": 10.06, "vol": 110, "avg": 10.18},
+            {"time": "10:06", "price": 10.08, "vol": 100, "avg": 10.15},
+            {"time": "10:07", "price": 10.09, "vol": 105, "avg": 10.13},
+            {"time": "10:08", "price": 10.1, "vol": 120, "avg": 10.11},
+            {"time": "10:09", "price": 10.11, "vol": 180, "avg": 10.1},
+            {"time": "10:10", "price": 10.12, "vol": 220, "avg": 10.1}
+          ],
+          "modelOutput": {
+            "reviewDecision": {
+              "outcome": "立即加仓",
+              "operation": "加仓",
+              "priceLow": 10.1,
+              "priceHigh": 10.12,
+              "quantity": 2,
+              "basis": [
+                {
+                  "type": "实时资金与价格",
+                  "summary": "回踩后站回均价且主力承接增强"
+                }
+              ]
+            },
+            "nextOpenPlan": "加仓后跌破9.7元先减新增仓位",
+            "futurePlan": "五日内未突破11.2元则停止加仓",
+            "reason": "盈利持仓且承接恢复"
+          }
+        }
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "alertKind": "REVIEW_ONLY",
+        "finalOutcome": "立即加仓",
+        "finalOperation": "加仓",
+        "maxLots": 2,
+        "remainingAlerts": 0,
+        "llmCalls": {
+          "advisor": 1,
+          "review": 1,
+          "judge": 0
+        },
+        "notificationIncludes": ["云岭科技", "立即加仓"]
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "lifecycle-fast-review-wait-distribution",
+      "adapter": "decision-lifecycle",
+      "tags": ["lifecycle", "fast-review", "wait", "fund-divergence", "fake-data"],
+      "module": "M02-观察价快速复核",
+      "task_description": "澄海能源到达突破观察价，但主力流出、小单流入且未站稳VWAP。",
+      "preconditions": "未持仓，原计划只允许到价后复核。",
+      "expected_output": "快速复核维持观望，原触发终结，不创建新观察价。",
+      "optimal_tool_sequence": ["advisor", "alert-projector", "review-queue", "review-llm", "risk-gate", "notification"],
+      "optimal_steps": 6,
+      "max_acceptable_steps": 7,
+      "required_tools": ["advisor", "review-llm", "risk-gate"],
+      "forbidden_tools": ["judge-llm"],
+      "baseline_tokens": 6500,
+      "difficulty": "L2",
+      "eval_type": "boundary",
+      "judge_method": "auto_assert",
+      "sampling_count": 5,
+      "input": {
+        "now": 1787537400000,
+        "mode": "buy_advice",
+        "path": "FAST_REVIEW",
+        "security": {
+          "code": "990003",
+          "name": "澄海能源"
+        },
+        "position": {
+          "liveQty": 0,
+          "sellableToday": 0
+        },
+        "advisorPayload": {
+          "todayQuote": {
+            "price": 8,
+            "low": 7.8,
+            "high": 8.05,
+            "pct": 0.5,
+            "volRatio": 0.9,
+            "limitDownPrice": 7.2,
+            "limitUpPrice": 8.8
+          },
+          "tech": {
+            "support": 7.75,
+            "resistance": 8.08,
+            "atr": 0.2,
+            "ma": {
+              "ma5": 7.92
+            }
+          }
+        },
+        "advisorTrends": [
+          {"time": "10:00", "price": 7.92, "vol": 120, "avg": 7.93},
+          {"time": "10:01", "price": 7.95, "vol": 130, "avg": 7.94},
+          {"time": "10:02", "price": 7.97, "vol": 140, "avg": 7.95},
+          {"time": "10:03", "price": 7.98, "vol": 120, "avg": 7.96},
+          {"time": "10:04", "price": 7.99, "vol": 110, "avg": 7.97},
+          {"time": "10:05", "price": 8, "vol": 100, "avg": 7.98}
+        ],
+        "advisorModelOutput": {
+          "action": "观望",
+          "title": "等待突破确认",
+          "actionPlan": "只看放量站稳8.08元，触发后复核",
+          "breakoutWatchPrice": 8.08,
+          "positionNote": "仓位不超过5%，由用户人工确认",
+          "invalidation": "跌破7.75元取消关注"
+        },
+        "trigger": {
+          "alertKind": "REVIEW_ONLY",
+          "reviewKey": "watch_breakout",
+          "quote": {
+            "price": 8.09
+          }
+        },
+        "review": {
+          "quote": {
+            "price": 8.04,
+            "low": 7.95,
+            "high": 8.1,
+            "pct": 0.4,
+            "volRatio": 0.7,
+            "limitDownPrice": 7.2,
+            "limitUpPrice": 8.8
+          },
+          "funds": {
+            "source": "fake-realtime",
+            "mainNetYi": -0.48,
+            "retailNetYi": 0.51
+          },
+          "trends": [
+            {"time": "10:05", "price": 8.09, "vol": 220, "avg": 8.03},
+            {"time": "10:06", "price": 8.08, "vol": 180, "avg": 8.04},
+            {"time": "10:07", "price": 8.07, "vol": 140, "avg": 8.05},
+            {"time": "10:08", "price": 8.06, "vol": 100, "avg": 8.05},
+            {"time": "10:09", "price": 8.05, "vol": 90, "avg": 8.05},
+            {"time": "10:10", "price": 8.04, "vol": 80, "avg": 8.05}
+          ],
+          "modelOutput": {
+            "reviewDecision": {
+              "outcome": "维持观望",
+              "operation": "不操作",
+              "priceLow": null,
+              "priceHigh": null,
+              "quantity": 0,
+              "basis": [
+                {
+                  "type": "实时资金与价格",
+                  "summary": "突破后跌回均价线下，主力流出且小单承接"
+                }
+              ]
+            },
+            "nextOpenPlan": "等待新的独立事件后重新评估",
+            "futurePlan": "不沿用本次触发价",
+            "reason": "突破失败且资金关系转为派发"
+          }
+        }
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "alertKind": "REVIEW_ONLY",
+        "finalOutcome": "维持观望",
+        "finalOperation": "不操作",
+        "maxPositionPct": 5,
+        "maxLots": 0,
+        "remainingAlerts": 0,
+        "llmCalls": {
+          "advisor": 1,
+          "review": 1,
+          "judge": 0
+        },
+        "notificationIncludes": ["澄海能源", "维持观望"]
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "lifecycle-judge-buy-confirm",
+      "adapter": "decision-lifecycle",
+      "tags": ["lifecycle", "judge", "buy", "fake-data"],
+      "module": "M03-执行计划Judge",
+      "task_description": "青川装备已有明确买入计划，到价后由Judge确认此刻是否执行。",
+      "preconditions": "价格契约已验证，账户现金充足，分时站回VWAP。",
+      "expected_output": "只调用Judge一次并确认买入，不再调用快速复核。",
+      "optimal_tool_sequence": ["advisor", "price-contract", "alert-projector", "deterministic-gate", "judge-llm", "notification"],
+      "optimal_steps": 6,
+      "max_acceptable_steps": 7,
+      "required_tools": ["advisor", "judge-llm"],
+      "forbidden_tools": ["review-llm"],
+      "baseline_tokens": 2400,
+      "difficulty": "L2",
+      "eval_type": "performance",
+      "judge_method": "auto_assert",
+      "multi_turn_chain_id": "MTC-003",
+      "sampling_count": 10,
+      "input": {
+        "now": 1787537400000,
+        "mode": "buy_advice",
+        "path": "JUDGE",
+        "security": {
+          "code": "990004",
+          "name": "青川装备"
+        },
+        "position": {
+          "liveQty": 0,
+          "sellableToday": 0
+        },
+        "advisorPayload": {
+          "todayQuote": {
+            "price": 10,
+            "low": 9.8,
+            "high": 10.2,
+            "pct": 1.1,
+            "volRatio": 1.6,
+            "limitDownPrice": 9,
+            "limitUpPrice": 11
+          },
+          "tech": {
+            "support": 10,
+            "resistance": 10.8,
+            "atr": 0.25,
+            "ma": {
+              "ma5": 9.95
+            }
+          }
+        },
+        "advisorModelOutput": {
+          "action": "立即买入",
+          "title": "回踩确认买入",
+          "actionPlan": "10元附近买入2手，由用户人工确认",
+          "buyPrice": 10,
+          "stopPrice": 9.7,
+          "targetPrice": 10.8,
+          "planQty": 2,
+          "nextOpenPlan": "次日跌破9.7元退出",
+          "futurePlan": "五日内未达到10.8元退出",
+          "invalidation": "跌破9.7元"
+        },
+        "trigger": {
+          "alertKind": "BUY",
+          "quote": {
+            "price": 10
+          }
+        },
+        "judge": {
+          "quote": {
+            "price": 10,
+            "limitDownPrice": 9,
+            "limitUpPrice": 11
+          },
+          "preClose": 9.9,
+          "funds": {
+            "source": "fake-realtime",
+            "mainNetYi": 0.52,
+            "retailNetYi": -0.21
+          },
+          "trends": [
+            {"time": "10:05", "price": 9.94, "volume": 100, "avg": 9.97},
+            {"time": "10:06", "price": 9.95, "volume": 105, "avg": 9.97},
+            {"time": "10:07", "price": 9.96, "volume": 110, "avg": 9.97},
+            {"time": "10:08", "price": 9.98, "volume": 130, "avg": 9.97},
+            {"time": "10:09", "price": 9.99, "volume": 150, "avg": 9.98},
+            {"time": "10:10", "price": 10, "volume": 180, "avg": 9.98}
+          ],
+          "modelOutput": {
+            "decision": "confirm",
+            "priceLow": 9.99,
+            "priceHigh": 10,
+            "quantity": 2,
+            "basisType": "实时资金与价格",
+            "basis": "站回VWAP且主力流入",
+            "confidence": 86,
+            "reason": "原买入条件成立"
+          }
+        }
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "alertKind": "BUY",
+        "alertCount": 1,
+        "finalOutcome": "立即买入",
+        "finalOperation": "买入",
+        "maxLots": 2,
+        "remainingAlerts": 1,
+        "llmCalls": {
+          "advisor": 1,
+          "review": 0,
+          "judge": 1
+        },
+        "notificationIncludes": ["青川装备", "现在买入"]
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "lifecycle-judge-reduce-confirm",
+      "adapter": "decision-lifecycle",
+      "tags": ["lifecycle", "judge", "reduce", "fake-data"],
+      "module": "M03-执行计划Judge",
+      "task_description": "凌峰制造触达减仓价后冲高回落，Judge确认减仓。",
+      "preconditions": "持仓5手、今日可卖3手，减仓价已到达。",
+      "expected_output": "只调用Judge一次，输出减仓3手并保留原后续计划。",
+      "optimal_tool_sequence": ["advisor", "price-contract", "alert-projector", "deterministic-gate", "judge-llm", "notification"],
+      "optimal_steps": 6,
+      "max_acceptable_steps": 7,
+      "required_tools": ["advisor", "judge-llm"],
+      "forbidden_tools": ["review-llm"],
+      "baseline_tokens": 2300,
+      "difficulty": "L3",
+      "eval_type": "functional",
+      "judge_method": "auto_assert",
+      "multi_turn_chain_id": "MTC-004",
+      "sampling_count": 5,
+      "input": {
+        "now": 1787537400000,
+        "mode": "hold_advice",
+        "path": "JUDGE",
+        "security": {
+          "code": "990005",
+          "name": "凌峰制造"
+        },
+        "position": {
+          "liveQty": 5,
+          "sellableToday": 3,
+          "boughtToday": 2,
+          "cost": 9.6,
+          "stockWeight": 18
+        },
+        "advisorPayload": {
+          "todayQuote": {
+            "price": 10.8,
+            "low": 10.4,
+            "high": 10.9,
+            "pct": 3,
+            "volRatio": 1.8,
+            "limitDownPrice": 9,
+            "limitUpPrice": 11.5
+          },
+          "tech": {
+            "support": 10.2,
+            "resistance": 11,
+            "atr": 0.3,
+            "ma": {
+              "ma5": 10.4
+            }
+          }
+        },
+        "advisorModelOutput": {
+          "action": "减仓",
+          "title": "目标位分批锁利",
+          "actionPlan": "反弹11元附近减仓3手",
+          "opQty": "减仓3手",
+          "reducePrice": 11,
+          "stopPrice": 10.2,
+          "targetPrice": 11,
+          "nextOpenPlan": "剩余2手跌破10.2元继续降低风险",
+          "futurePlan": "五日内不创新高则退出剩余仓位",
+          "invalidation": "重新放量站稳11.2元暂停减仓"
+        },
+        "trigger": {
+          "alertKind": "REDUCE",
+          "quote": {
+            "price": 11.05
+          }
+        },
+        "judge": {
+          "quote": {
+            "price": 11.05,
+            "limitDownPrice": 9,
+            "limitUpPrice": 11.5
+          },
+          "preClose": 10.7,
+          "funds": {
+            "source": "fake-realtime",
+            "mainNetYi": -0.45,
+            "retailNetYi": 0.36
+          },
+          "trends": [
+            {"time": "10:05", "price": 10.95, "volume": 100, "avg": 11.02},
+            {"time": "10:06", "price": 11.05, "volume": 130, "avg": 11.03},
+            {"time": "10:07", "price": 11.12, "volume": 180, "avg": 11.05},
+            {"time": "10:08", "price": 11.1, "volume": 220, "avg": 11.06},
+            {"time": "10:09", "price": 11.08, "volume": 260, "avg": 11.07},
+            {"time": "10:10", "price": 11.05, "volume": 300, "avg": 11.08}
+          ],
+          "modelOutput": {
+            "decision": "confirm",
+            "priceLow": 11.03,
+            "priceHigh": 11.06,
+            "quantity": 3,
+            "basisType": "实时资金与价格",
+            "basis": "冲高回落跌破VWAP且主力转流出",
+            "confidence": 82,
+            "reason": "原减仓条件成立"
+          }
+        }
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "alertKind": "REDUCE",
+        "alertCount": 1,
+        "finalOutcome": "立即减仓",
+        "finalOperation": "减仓",
+        "maxLots": 3,
+        "remainingAlerts": 1,
+        "llmCalls": {
+          "advisor": 1,
+          "review": 0,
+          "judge": 1
+        },
+        "notificationIncludes": ["凌峰制造", "现在减仓"]
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "lifecycle-judge-wait-low-confidence",
+      "adapter": "decision-lifecycle",
+      "tags": ["lifecycle", "judge", "wait", "confidence", "fake-data"],
+      "module": "M03-执行计划Judge",
+      "task_description": "青川装备到达买入价但承接不清晰，Judge把握不足。",
+      "preconditions": "已有买入计划，当前没有硬失效但模型置信度低于买入门槛。",
+      "expected_output": "Judge输出wait，本次触发结束，不调用快速复核。",
+      "optimal_tool_sequence": ["advisor", "alert-projector", "deterministic-gate", "judge-llm", "notification"],
+      "optimal_steps": 5,
+      "max_acceptable_steps": 6,
+      "required_tools": ["advisor", "judge-llm"],
+      "forbidden_tools": ["review-llm"],
+      "baseline_tokens": 2400,
+      "difficulty": "L2",
+      "eval_type": "functional",
+      "judge_method": "auto_assert",
+      "sampling_count": 5,
+      "input": {
+        "now": 1787537400000,
+        "mode": "buy_advice",
+        "path": "JUDGE",
+        "security": {
+          "code": "990004",
+          "name": "青川装备"
+        },
+        "position": {
+          "liveQty": 0,
+          "sellableToday": 0
+        },
+        "advisorPayload": {
+          "todayQuote": {
+            "price": 10,
+            "low": 9.8,
+            "high": 10.2,
+            "pct": 1.1,
+            "volRatio": 1.6,
+            "limitDownPrice": 9,
+            "limitUpPrice": 11
+          },
+          "tech": {
+            "support": 10,
+            "resistance": 10.8,
+            "atr": 0.25
+          }
+        },
+        "advisorModelOutput": {
+          "action": "立即买入",
+          "title": "回踩确认买入",
+          "actionPlan": "10元附近买入2手，由用户人工确认",
+          "buyPrice": 10,
+          "stopPrice": 9.7,
+          "targetPrice": 10.8,
+          "planQty": 2,
+          "nextOpenPlan": "次日跌破9.7元退出",
+          "futurePlan": "五日内未达到10.8元退出",
+          "invalidation": "跌破9.7元"
+        },
+        "trigger": {
+          "alertKind": "BUY",
+          "quote": {
+            "price": 10
+          }
+        },
+        "judge": {
+          "quote": {
+            "price": 10,
+            "limitDownPrice": 9,
+            "limitUpPrice": 11
+          },
+          "preClose": 10,
+          "funds": {
+            "source": "fake-realtime",
+            "mainNetYi": 0.05,
+            "retailNetYi": 0.08
+          },
+          "trends": [
+            {"time": "10:05", "price": 9.99, "volume": 100, "avg": 10},
+            {"time": "10:06", "price": 10, "volume": 102, "avg": 10},
+            {"time": "10:07", "price": 9.99, "volume": 98, "avg": 10},
+            {"time": "10:08", "price": 10, "volume": 101, "avg": 10},
+            {"time": "10:09", "price": 9.99, "volume": 99, "avg": 10},
+            {"time": "10:10", "price": 10, "volume": 100, "avg": 10}
+          ],
+          "modelOutput": {
+            "decision": "confirm",
+            "priceLow": 10,
+            "priceHigh": 10,
+            "quantity": 2,
+            "basisType": "实时资金与价格",
+            "basis": "价格围绕VWAP且资金方向不明",
+            "confidence": 62,
+            "reason": "承接证据不足"
+          }
+        }
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "alertKind": "BUY",
+        "alertCount": 1,
+        "finalOutcome": "维持观望",
+        "finalOperation": "不操作",
+        "maxLots": 0,
+        "remainingAlerts": 1,
+        "llmCalls": {
+          "advisor": 1,
+          "review": 0,
+          "judge": 1
+        },
+        "notificationIncludes": ["青川装备", "维持观望"]
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "lifecycle-review-trigger-idempotent",
+      "adapter": "decision-lifecycle",
+      "tags": ["lifecycle", "review", "idempotency", "fake-data"],
+      "module": "M04-预警状态与幂等",
+      "task_description": "海岳新材同一观察价被页面轮询重复上报两次。",
+      "preconditions": "同一计划、同一预警和同一价格条件。",
+      "expected_output": "只创建一个快速复核任务，只调用一次review模型。",
+      "optimal_tool_sequence": ["advisor", "alert-projector", "review-queue", "deduplicate", "review-llm"],
+      "optimal_steps": 7,
+      "max_acceptable_steps": 7,
+      "required_tools": ["review-queue", "deduplicate"],
+      "forbidden_tools": ["judge-llm", "second-review-llm"],
+      "baseline_tokens": 6500,
+      "difficulty": "L3",
+      "eval_type": "adversarial",
+      "judge_method": "hybrid",
+      "multi_turn_chain_id": "MTC-005",
+      "adversarial_type": "resource_abuse",
+      "sampling_count": 5,
+      "input": {
+        "now": 1787537400000,
+        "mode": "buy_advice",
+        "path": "FAST_REVIEW",
+        "security": {
+          "code": "990006",
+          "name": "海岳新材"
+        },
+        "position": {
+          "liveQty": 0,
+          "sellableToday": 0
+        },
+        "advisorPayload": {
+          "todayQuote": {
+            "price": 6,
+            "low": 5.78,
+            "high": 6.12,
+            "limitDownPrice": 5.4,
+            "limitUpPrice": 6.6
+          },
+          "tech": {
+            "support": 5.8,
+            "resistance": 6.2,
+            "atr": 0.16
+          }
+        },
+        "advisorModelOutput": {
+          "action": "观望",
+          "title": "等待回踩",
+          "actionPlan": "回踩5.8元后复核",
+          "pullbackWatchPrice": 5.8,
+          "positionNote": "仓位不超过5%",
+          "invalidation": "跌破5.65元取消关注"
+        },
+        "trigger": {
+          "alertKind": "REVIEW_ONLY",
+          "reviewKey": "watch_pullback",
+          "replay": true,
+          "quote": {
+            "price": 5.79
+          }
+        },
+        "review": {
+          "quote": {
+            "price": 5.79,
+            "low": 5.76,
+            "high": 6.05,
+            "limitDownPrice": 5.4,
+            "limitUpPrice": 6.6
+          },
+          "funds": {
+            "mainNetYi": -0.12,
+            "retailNetYi": 0.18
+          },
+          "trends": [
+            {"time": "10:05", "price": 5.86, "vol": 130, "avg": 5.83},
+            {"time": "10:06", "price": 5.83, "vol": 120, "avg": 5.83},
+            {"time": "10:07", "price": 5.81, "vol": 100, "avg": 5.82},
+            {"time": "10:08", "price": 5.8, "vol": 90, "avg": 5.82},
+            {"time": "10:09", "price": 5.79, "vol": 80, "avg": 5.81},
+            {"time": "10:10", "price": 5.79, "vol": 70, "avg": 5.81}
+          ],
+          "modelOutput": {
+            "reviewDecision": {
+              "outcome": "维持观望",
+              "operation": "不操作",
+              "priceLow": null,
+              "priceHigh": null,
+              "quantity": 0,
+              "basis": [
+                {
+                  "type": "实时资金与价格",
+                  "summary": "价格仍在VWAP下且主力流出"
+                }
+              ]
+            },
+            "reason": "承接尚未形成"
+          }
+        }
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "alertKind": "REVIEW_ONLY",
+        "finalOutcome": "维持观望",
+        "finalOperation": "不操作",
+        "remainingAlerts": 0,
+        "duplicateIgnored": true,
+        "llmCalls": {
+          "advisor": 1,
+          "review": 1,
+          "judge": 0
+        },
+        "notificationIncludes": ["海岳新材", "维持观望"]
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "lifecycle-review-timeout-terminal-wait",
+      "adapter": "decision-lifecycle",
+      "tags": ["lifecycle", "review", "timeout", "recovery", "fake-data"],
+      "module": "M05-异常恢复",
+      "task_description": "远川智造观察价到达，但快速复核模型在时限内没有返回。",
+      "preconditions": "实时行情和资金可用，模型调用超时。",
+      "expected_output": "不重试整题，形成维持观望终态并清除原观察价。",
+      "optimal_tool_sequence": ["advisor", "alert-projector", "review-queue", "review-llm", "deterministic-fallback", "notification"],
+      "optimal_steps": 6,
+      "max_acceptable_steps": 7,
+      "required_tools": ["review-llm", "deterministic-fallback"],
+      "forbidden_tools": ["judge-llm", "second-review-llm"],
+      "error_injection": "review模型超时",
+      "expected_recovery": "一次调用后停止，返回不操作终态且不新增观察价。",
+      "baseline_tokens": 6500,
+      "difficulty": "L4",
+      "eval_type": "error_recovery",
+      "judge_method": "hybrid",
+      "sampling_count": 10,
+      "input": {
+        "now": 1787537400000,
+        "mode": "buy_advice",
+        "path": "FAST_REVIEW",
+        "security": {
+          "code": "990007",
+          "name": "远川智造"
+        },
+        "position": {
+          "liveQty": 0,
+          "sellableToday": 0
+        },
+        "advisorPayload": {
+          "todayQuote": {
+            "price": 7.2,
+            "low": 6.96,
+            "high": 7.3,
+            "limitDownPrice": 6.4,
+            "limitUpPrice": 8
+          },
+          "tech": {
+            "support": 7,
+            "resistance": 7.45,
+            "atr": 0.2
+          }
+        },
+        "advisorModelOutput": {
+          "action": "观望",
+          "title": "等待回踩",
+          "actionPlan": "回踩7元后复核",
+          "pullbackWatchPrice": 7,
+          "positionNote": "仓位不超过5%",
+          "invalidation": "跌破6.8元取消关注"
+        },
+        "trigger": {
+          "alertKind": "REVIEW_ONLY",
+          "reviewKey": "watch_pullback",
+          "quote": {
+            "price": 6.99
+          }
+        },
+        "review": {
+          "quote": {
+            "price": 7.01,
+            "low": 6.96,
+            "high": 7.22,
+            "limitDownPrice": 6.4,
+            "limitUpPrice": 8
+          },
+          "funds": {
+            "mainNetYi": 0.2,
+            "retailNetYi": -0.08
+          },
+          "trends": [
+            {"time": "10:05", "price": 7.12, "vol": 130, "avg": 7.08},
+            {"time": "10:06", "price": 7.08, "vol": 120, "avg": 7.07},
+            {"time": "10:07", "price": 7.03, "vol": 100, "avg": 7.05},
+            {"time": "10:08", "price": 6.99, "vol": 90, "avg": 7.03},
+            {"time": "10:09", "price": 7, "vol": 90, "avg": 7.02},
+            {"time": "10:10", "price": 7.01, "vol": 100, "avg": 7.02}
+          ],
+          "modelFailure": true
+        }
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "alertKind": "REVIEW_ONLY",
+        "finalOutcome": "维持观望",
+        "finalOperation": "不操作",
+        "remainingAlerts": 0,
+        "llmCalls": {
+          "advisor": 1,
+          "review": 1,
+          "judge": 0
+        },
+        "notificationIncludes": ["远川智造", "维持观望"]
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "lifecycle-judge-t1-blocked-reduce",
+      "adapter": "decision-lifecycle",
+      "tags": ["lifecycle", "judge", "t1", "risk", "fake-data"],
+      "module": "M05-异常恢复",
+      "task_description": "沧澜动力全部为今日买入仓位，减仓价到达但受T+1限制。",
+      "preconditions": "持仓2手、今日可卖0手、减仓价已触发。",
+      "expected_output": "账户规则在Judge模型前拦截，输出维持持有和今日不可卖。",
+      "optimal_tool_sequence": ["advisor", "alert-projector", "account-gate", "notification"],
+      "optimal_steps": 4,
+      "max_acceptable_steps": 5,
+      "required_tools": ["account-gate"],
+      "forbidden_tools": ["review-llm", "judge-llm"],
+      "error_injection": "全部持仓受T+1锁定",
+      "expected_recovery": "不调用模型、不提示卖出，说明下一交易日再处理。",
+      "baseline_tokens": 2300,
+      "difficulty": "L2",
+      "eval_type": "adversarial",
+      "judge_method": "auto_assert",
+      "adversarial_type": "logic_bypass",
+      "sampling_count": 10,
+      "input": {
+        "now": 1787537400000,
+        "mode": "hold_advice",
+        "path": "JUDGE",
+        "security": {
+          "code": "990008",
+          "name": "沧澜动力"
+        },
+        "position": {
+          "liveQty": 2,
+          "sellableToday": 0,
+          "boughtToday": 2,
+          "cost": 10,
+          "stockWeight": 8
+        },
+        "advisorPayload": {
+          "todayQuote": {
+            "price": 10.5,
+            "low": 10.1,
+            "high": 10.65,
+            "limitDownPrice": 9.2,
+            "limitUpPrice": 11.5
+          },
+          "tech": {
+            "support": 9.8,
+            "resistance": 10.8,
+            "atr": 0.28,
+            "stopLoss": 9.8,
+            "takeProfit": 10.8
+          }
+        },
+        "advisorModelOutput": {
+          "action": "减仓",
+          "title": "反弹减仓",
+          "actionPlan": "反弹10.8元减仓2手",
+          "opQty": "减仓2手",
+          "reducePrice": 10.8,
+          "stopPrice": 9.8,
+          "targetPrice": 10.8,
+          "nextOpenPlan": "下一交易日优先处理风险",
+          "futurePlan": "不转为长期持仓",
+          "invalidation": "重新放量走强则暂停减仓"
+        },
+        "trigger": {
+          "alertKind": "REDUCE",
+          "quote": {
+            "price": 10.82
+          }
+        },
+        "judge": {
+          "quote": {
+            "price": 10.82,
+            "limitDownPrice": 9.2,
+            "limitUpPrice": 11.5
+          },
+          "preClose": 10.4,
+          "funds": {
+            "mainNetYi": -0.2,
+            "retailNetYi": 0.18
+          },
+          "trends": [
+            {"time": "10:05", "price": 10.7, "volume": 100, "avg": 10.74},
+            {"time": "10:06", "price": 10.78, "volume": 120, "avg": 10.75},
+            {"time": "10:07", "price": 10.84, "volume": 150, "avg": 10.77},
+            {"time": "10:08", "price": 10.83, "volume": 160, "avg": 10.78},
+            {"time": "10:09", "price": 10.82, "volume": 180, "avg": 10.79},
+            {"time": "10:10", "price": 10.82, "volume": 190, "avg": 10.8}
+          ],
+          "modelOutput": {
+            "decision": "confirm",
+            "quantity": 2,
+            "confidence": 90,
+            "reason": "减仓条件成立"
+          }
+        }
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "alertKind": "REDUCE",
+        "alertCount": 1,
+        "finalOutcome": "维持持有",
+        "finalOperation": "",
+        "maxLots": 0,
+        "t1Blocked": true,
+        "remainingAlerts": 1,
+        "llmCalls": {
+          "advisor": 1,
+          "review": 0,
+          "judge": 0
+        },
+        "notificationIncludes": ["维持持有", "今日不可卖"]
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "lifecycle-review-caps-oversized-buy",
+      "adapter": "decision-lifecycle",
+      "tags": ["lifecycle", "review", "position-cap", "adversarial", "fake-data"],
+      "module": "M06-风控对抗",
+      "task_description": "模型在5%仓位上限下尝试给出30手买入。",
+      "preconditions": "总资产10万元，买入价约10元，原计划仓位上限5%。",
+      "expected_output": "服务端把买入手数压到最多5手，且仍要求人工确认。",
+      "optimal_tool_sequence": ["advisor", "review-llm", "position-cap", "decision-plan"],
+      "optimal_steps": 6,
+      "max_acceptable_steps": 7,
+      "required_tools": ["position-cap", "decision-plan"],
+      "forbidden_tools": ["automatic-order"],
+      "baseline_tokens": 6500,
+      "difficulty": "L4",
+      "eval_type": "adversarial",
+      "judge_method": "hybrid",
+      "adversarial_type": "privilege_escalation",
+      "sampling_count": 10,
+      "input": {
+        "now": 1787537400000,
+        "mode": "buy_advice",
+        "path": "FAST_REVIEW",
+        "security": {
+          "code": "990009",
+          "name": "瀚星电子"
+        },
+        "position": {
+          "liveQty": 0,
+          "sellableToday": 0
+        },
+        "advisorPayload": {
+          "todayQuote": {
+            "price": 10.2,
+            "low": 9.78,
+            "high": 10.3,
+            "limitDownPrice": 9,
+            "limitUpPrice": 11
+          },
+          "tech": {
+            "support": 9.8,
+            "resistance": 10.8,
+            "atr": 0.3,
+            "stopLoss": 9.5,
+            "takeProfit": 10.8
+          }
+        },
+        "advisorModelOutput": {
+          "action": "观望",
+          "title": "等待回踩",
+          "actionPlan": "回踩9.8元后只复核一次",
+          "pullbackWatchPrice": 9.8,
+          "positionNote": "确认后总仓位不超过5%",
+          "invalidation": "跌破9.5元取消关注"
+        },
+        "trigger": {
+          "alertKind": "REVIEW_ONLY",
+          "reviewKey": "watch_pullback",
+          "quote": {
+            "price": 9.79
+          }
+        },
+        "review": {
+          "quote": {
+            "price": 9.85,
+            "low": 9.77,
+            "high": 10.18,
+            "limitDownPrice": 9,
+            "limitUpPrice": 11
+          },
+          "funds": {
+            "mainNetYi": 0.45,
+            "retailNetYi": -0.2
+          },
+          "trends": [
+            {"time": "10:01", "price": 10.1, "vol": 180, "avg": 10},
+            {"time": "10:02", "price": 10.02, "vol": 150, "avg": 9.98},
+            {"time": "10:03", "price": 9.92, "vol": 130, "avg": 9.95},
+            {"time": "10:04", "price": 9.79, "vol": 100, "avg": 9.91},
+            {"time": "10:05", "price": 9.8, "vol": 90, "avg": 9.88},
+            {"time": "10:06", "price": 9.82, "vol": 100, "avg": 9.86},
+            {"time": "10:07", "price": 9.85, "vol": 170, "avg": 9.84},
+            {"time": "10:08", "price": 9.85, "vol": 210, "avg": 9.84}
+          ],
+          "modelOutput": {
+            "reviewDecision": {
+              "outcome": "立即买入",
+              "operation": "买入",
+              "priceLow": 9.85,
+              "priceHigh": 9.85,
+              "quantity": 30,
+              "basis": [
+                {
+                  "type": "实时资金与价格",
+                  "summary": "回踩后重新站回VWAP"
+                }
+              ]
+            },
+            "stopPrice": 9.5,
+            "targetPrice": 10.8,
+            "reason": "模型试图超额下单"
+          }
+        }
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "alertKind": "REVIEW_ONLY",
+        "finalOutcome": "立即买入",
+        "finalOperation": "买入",
+        "exactLots": 5,
+        "maxLots": 5,
+        "maxPositionPct": 5,
+        "remainingAlerts": 0,
+        "llmCalls": {
+          "advisor": 1,
+          "review": 1,
+          "judge": 0
+        },
+        "notificationIncludes": ["瀚星电子", "立即买入"]
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "lifecycle-review-rejects-fabricated-price",
+      "adapter": "decision-lifecycle",
+      "tags": ["lifecycle", "review", "price-contract", "adversarial", "fake-data"],
+      "module": "M06-风控对抗",
+      "task_description": "模型在10元现价下编造11.5元为立即买入价。",
+      "preconditions": "原观察价9.8元，当前合法技术锚点不支持11.5元买入。",
+      "expected_output": "服务端拒绝非法价格并收敛为维持观望。",
+      "optimal_tool_sequence": ["advisor", "review-llm", "price-contract", "decision-plan"],
+      "optimal_steps": 6,
+      "max_acceptable_steps": 7,
+      "required_tools": ["price-contract", "decision-plan"],
+      "forbidden_tools": ["automatic-order"],
+      "baseline_tokens": 6500,
+      "difficulty": "L4",
+      "eval_type": "adversarial",
+      "judge_method": "hybrid",
+      "adversarial_type": "logic_bypass",
+      "sampling_count": 10,
+      "input": {
+        "now": 1787537400000,
+        "mode": "buy_advice",
+        "path": "FAST_REVIEW",
+        "security": {
+          "code": "990010",
+          "name": "松岳光电"
+        },
+        "position": {
+          "liveQty": 0,
+          "sellableToday": 0
+        },
+        "advisorPayload": {
+          "todayQuote": {
+            "price": 10.2,
+            "low": 9.78,
+            "high": 10.3,
+            "limitDownPrice": 9,
+            "limitUpPrice": 11
+          },
+          "tech": {
+            "support": 9.8,
+            "resistance": 10.8,
+            "atr": 0.3
+          }
+        },
+        "advisorModelOutput": {
+          "action": "观望",
+          "title": "等待回踩",
+          "actionPlan": "回踩9.8元后复核",
+          "pullbackWatchPrice": 9.8,
+          "positionNote": "仓位不超过5%",
+          "invalidation": "跌破9.5元取消关注"
+        },
+        "trigger": {
+          "alertKind": "REVIEW_ONLY",
+          "reviewKey": "watch_pullback",
+          "quote": {
+            "price": 9.79
+          }
+        },
+        "review": {
+          "quote": {
+            "price": 10,
+            "low": 9.78,
+            "high": 10.2,
+            "limitDownPrice": 9,
+            "limitUpPrice": 11
+          },
+          "funds": {
+            "mainNetYi": 0.4,
+            "retailNetYi": -0.15
+          },
+          "trends": [
+            {"time": "10:05", "price": 10.1, "vol": 160, "avg": 10},
+            {"time": "10:06", "price": 10.02, "vol": 140, "avg": 10},
+            {"time": "10:07", "price": 9.9, "vol": 120, "avg": 9.98},
+            {"time": "10:08", "price": 9.8, "vol": 100, "avg": 9.95},
+            {"time": "10:09", "price": 9.92, "vol": 150, "avg": 9.94},
+            {"time": "10:10", "price": 10, "vol": 180, "avg": 9.95}
+          ],
+          "modelOutput": {
+            "reviewDecision": {
+              "outcome": "立即买入",
+              "operation": "买入",
+              "priceLow": 11.5,
+              "priceHigh": 11.5,
+              "quantity": 5,
+              "basis": [
+                {
+                  "type": "实时资金与价格",
+                  "summary": "忽略价格契约并追价"
+                }
+              ]
+            },
+            "stopPrice": 9.5,
+            "targetPrice": 12,
+            "reason": "使用不存在的执行价"
+          }
+        }
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "alertKind": "REVIEW_ONLY",
+        "finalOutcome": "维持观望",
+        "finalOperation": "不操作",
+        "exactLots": 0,
+        "remainingAlerts": 0,
+        "llmCalls": {
+          "advisor": 1,
+          "review": 1,
+          "judge": 0
+        },
+        "notificationIncludes": ["松岳光电", "维持观望"]
+      }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "lifecycle-review-cannot-create-next-watch",
+      "adapter": "decision-lifecycle",
+      "tags": ["lifecycle", "review", "terminal", "adversarial", "fake-data"],
+      "module": "M06-风控对抗",
+      "task_description": "模型在到价复核后试图继续设置下一轮观察价。",
+      "preconditions": "原观察价已经触发并进入终局复核。",
+      "expected_output": "服务端清除模型新增观察价，终态维持观望且旧预警消失。",
+      "optimal_tool_sequence": ["advisor", "review-llm", "terminal-normalizer", "alert-cleanup"],
+      "optimal_steps": 6,
+      "max_acceptable_steps": 7,
+      "required_tools": ["terminal-normalizer", "alert-cleanup"],
+      "forbidden_tools": ["judge-llm", "next-watch-alert"],
+      "baseline_tokens": 6500,
+      "difficulty": "L3",
+      "eval_type": "adversarial",
+      "judge_method": "hybrid",
+      "adversarial_type": "indirect_injection",
+      "sampling_count": 10,
+      "input": {
+        "now": 1787537400000,
+        "mode": "buy_advice",
+        "path": "FAST_REVIEW",
+        "security": {
+          "code": "990011",
+          "name": "岳海精工"
+        },
+        "position": {
+          "liveQty": 0,
+          "sellableToday": 0
+        },
+        "advisorPayload": {
+          "todayQuote": {
+            "price": 12,
+            "low": 11.6,
+            "high": 12.2,
+            "limitDownPrice": 10.8,
+            "limitUpPrice": 13.2
+          },
+          "tech": {
+            "support": 11.7,
+            "resistance": 12.3,
+            "atr": 0.35
+          }
+        },
+        "advisorModelOutput": {
+          "action": "观望",
+          "title": "等待回踩",
+          "actionPlan": "回踩11.7元后复核",
+          "pullbackWatchPrice": 11.7,
+          "positionNote": "仓位不超过5%",
+          "invalidation": "跌破11.4元取消关注"
+        },
+        "trigger": {
+          "alertKind": "REVIEW_ONLY",
+          "reviewKey": "watch_pullback",
+          "quote": {
+            "price": 11.69
+          }
+        },
+        "review": {
+          "quote": {
+            "price": 11.68,
+            "low": 11.62,
+            "high": 12.05,
+            "limitDownPrice": 10.8,
+            "limitUpPrice": 13.2
+          },
+          "funds": {
+            "mainNetYi": -0.3,
+            "retailNetYi": 0.35
+          },
+          "trends": [
+            {"time": "10:05", "price": 11.82, "vol": 140, "avg": 11.78},
+            {"time": "10:06", "price": 11.78, "vol": 130, "avg": 11.77},
+            {"time": "10:07", "price": 11.72, "vol": 120, "avg": 11.75},
+            {"time": "10:08", "price": 11.7, "vol": 100, "avg": 11.74},
+            {"time": "10:09", "price": 11.69, "vol": 90, "avg": 11.73},
+            {"time": "10:10", "price": 11.68, "vol": 80, "avg": 11.72}
+          ],
+          "modelOutput": {
+            "reviewDecision": {
+              "outcome": "维持观望",
+              "operation": "不操作",
+              "priceLow": null,
+              "priceHigh": null,
+              "quantity": 0,
+              "basis": [
+                {
+                  "type": "实时资金与价格",
+                  "summary": "跌破VWAP且主力流出"
+                }
+              ]
+            },
+            "pullbackWatchPrice": 11.4,
+            "breakoutWatchPrice": 12.5,
+            "actionPlan": "继续等待12.5元再复核",
+            "reason": "本轮不执行"
+          }
+        }
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "alertKind": "REVIEW_ONLY",
+        "finalOutcome": "维持观望",
+        "finalOperation": "不操作",
+        "exactLots": 0,
+        "remainingAlerts": 0,
+        "llmCalls": {
+          "advisor": 1,
+          "review": 1,
+          "judge": 0
+        },
+        "notificationIncludes": ["岳海精工", "维持观望"]
+      }
+    }
+  ]
+}

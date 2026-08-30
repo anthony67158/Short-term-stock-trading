@@ -1,6 +1,6 @@
 {
   "schemaVersion": "harness-baseline.v1",
-  "generatedAt": 1787810200954,
+  "generatedAt": 1788058526238,
   "versions": {
     "app": "1.0.0",
     "git": "working-tree",
@@ -8,6 +8,7 @@
     "adapters": [
       "advice",
       "daily",
+      "decision-lifecycle",
       "evidence",
       "execution",
       "judge",
@@ -57,13 +58,14 @@
         "actionability": 1,
         "consistency": 1
       },
-      "cases": 8,
+      "cases": 9,
       "caseIds": [
         "advice-after-close-converts-high-entry-to-review",
         "advice-buy-cash-cap",
         "advice-decision-plan-evidence-risk-ready",
         "advice-hold-t1-no-sellable",
         "advice-invalid-price-downgrade",
+        "advice-quant-momentum-route-with-flat-flow",
         "advice-short-horizon-policy-blocks-chasing",
         "advice-short-horizon-policy-caps-probe",
         "advice-weak-market-countertrend-probe"
@@ -157,6 +159,32 @@
         "execution-manual-lifecycle",
         "execution-range-grid-guardrail",
         "execution-real-fill-attribution"
+      ]
+    },
+    "decision-lifecycle": {
+      "overall": 1,
+      "dimensions": {
+        "contract": 1,
+        "groundedness": 1,
+        "feasibility": 1,
+        "actionability": 1,
+        "consistency": 1
+      },
+      "cases": 13,
+      "caseIds": [
+        "lifecycle-fast-review-add",
+        "lifecycle-fast-review-buy",
+        "lifecycle-fast-review-wait-distribution",
+        "lifecycle-judge-buy-confirm",
+        "lifecycle-judge-reduce-confirm",
+        "lifecycle-judge-t1-blocked-reduce",
+        "lifecycle-judge-wait-low-confidence",
+        "lifecycle-review-cannot-create-next-watch",
+        "lifecycle-review-caps-oversized-buy",
+        "lifecycle-review-rejects-fabricated-price",
+        "lifecycle-review-timeout-terminal-wait",
+        "lifecycle-review-trigger-idempotent",
+        "lifecycle-watch-price-not-reached"
       ]
     }
   }

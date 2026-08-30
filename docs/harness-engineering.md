@@ -37,6 +37,13 @@ npm run harness:ci
 # 只运行持仓再平衡套件
 node harness/run.mjs --suite portfolio
 
+# 假股票端到端军师、复核、Judge与预警链路
+npm run harness:lifecycle
+
+# 按声明采样次数重复评测并生成JSON、Excel、Markdown与HTML报告
+# 生成Excel需要本机Python 3与openpyxl
+npm run evaluate:lifecycle
+
 # 显式运行线上端点矩阵/影子对拍（付费，不进入默认CI）
 npm run harness:online
 npm run harness:shadow
@@ -71,6 +78,7 @@ harness/
     judge.json                   确认闸门场景
     screen.json                  AI选股评分与入场确认场景
     daily.json                   日报事实场景
+    decision-lifecycle.json      虚构股票端到端决策链场景
     endpoint.json                显式在线端点矩阵
     shadow.json                  显式在线影子对拍
     regressions/                 生产失败导出的临时回归场景
@@ -81,6 +89,7 @@ harness/
     judge.mjs                    调确认融合策略
     screen.mjs                   调选股排序和决策归一化
     daily.mjs                    调日报摘要构建
+    decision-lifecycle.mjs       调军师→预警→复核/Judge→通知链路
     endpoint.mjs                 运行时端点能力矩阵
     shadow.mjs                   多端点影子对拍
   lib/
@@ -227,7 +236,8 @@ harness-artifacts/               运行产物，不入库
 ## 验收标准
 
 - `npm run harness:ci` 在无密钥、无网络环境可稳定运行。
-- 当前 16 个离线场景覆盖持仓、证据、军师、Judge、选股和日报。
+- 当前离线场景覆盖持仓、证据、军师、Judge、选股、日报、板块、人工执行和
+  端到端决策链；其中决策链用 13 个场景累计回放 95 次。
 - 每个场景产出五维分数、失败归因和阶段轨迹。
 - 低于 suite 门槛或硬门禁失败时进程退出码为 1。
 - JSON/Markdown 报告不包含敏感字段。

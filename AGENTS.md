@@ -85,6 +85,8 @@ npm run dev                  # 终端B: 前端Vite(5173, /api 已代理到3000)
 npm run harness             # 全部离线 suite + JSON/Markdown episode 报告
 npm run harness:portfolio   # 仅持仓再平衡
 npm run harness:execution   # 仅人工执行、事件、熔断、做T与成交归因
+npm run harness:lifecycle   # 假股票端到端军师→预警→复核/Judge→通知
+npm run evaluate:lifecycle  # 95次重复回放并生成Excel/MD/HTML评测报告
 npm run harness:ci          # CI 同口径，失败返回非零退出码
 npm run harness:online      # 显式付费：FC内运行端点能力矩阵
 npm run harness:shadow      # 显式付费：多端点同题影子对拍
