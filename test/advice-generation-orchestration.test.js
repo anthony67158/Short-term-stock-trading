@@ -233,8 +233,9 @@ test('普通与深度军师都使用有界预算且深度不整轮重跑', () =>
 test('军师准备与证据依赖采用并行编排且单源有独立截止', () => {
   assert.match(
     aiSource,
-    /Promise\.all\(\[[\s\S]*?ensureConfig\(\)[\s\S]*?ensureAiSearchConfig\(\{ maxAgeMs: 20000 \}\)[\s\S]*?sectorOpportunityPromise/,
+    /Promise\.all\(\[\s*ensureConfig\(\),[\s\S]*?ensureAiSearchConfig\(\{ maxAgeMs: 20000 \}\)[\s\S]*?sectorOpportunityPromise/,
   )
+  assert.match(aiSource, /source:\s*'timeout'/)
   assert.match(aiSource, /startAdvisorDependentWork\(\{/)
   assert.match(aiSource, /withAIEvidenceDeadline/)
   assert.doesNotMatch(aiSource, /fetchKlineTx/)

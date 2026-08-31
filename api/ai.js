@@ -21,10 +21,7 @@ import {
   fetchIndustrySearchSupplement,
   stripClientSearchFields,
 } from './_ai_search.js';
-import {
-  currentAiSearchConfig,
-  ensureAiSearchConfig,
-} from './_ai_search_config.js';
+import { ensureAiSearchConfig } from './_ai_search_config.js';
 import {
   callChat,
   callChatWithRetry,
@@ -974,8 +971,7 @@ export default async function handler(req, res) {
     : Promise.resolve(null);
   // 模型配置、搜索配置和板块快照彼此独立，同时预热并设置短截止。
   const [, loadedSearchConfig, sectorOpportunity] = await Promise.all([
-    withAIEvidenceDeadline(ensureConfig(), 3000)
-      .catch(() => null),
+    ensureConfig(),
     withAIEvidenceDeadline(
       ensureAiSearchConfig({ maxAgeMs: 20000 }),
       3000,
@@ -983,7 +979,12 @@ export default async function handler(req, res) {
     sectorOpportunityPromise,
   ]);
   const aiSearchConfig = loadedSearchConfig
-    || currentAiSearchConfig();
+    || {
+      enabled: false,
+      apiKey: '',
+      source: 'timeout',
+      updatedAt: 0,
+    };
   const effectiveReasoning = (role) => getReasoning(role);
   const MODEL = getModel('agent');
   // 主建议与复核严格分池：首次操作建议走 advisor，定时/Judge 复核走 review。
@@ -1245,7 +1246,8 @@ export default async function handler(req, res) {
           dataAsOf,
         }).then(
           (value) => {
-            const trace = sourceTracker.snapshot().at(-1);
+            const trace = sourceTracker.snapshot()
+              .findLast((item) => item.key === key);
             emit('source', {
               label,
               ok: trace?.status === 'OK',
@@ -1255,8 +1257,9 @@ export default async function handler(req, res) {
             });
             return value;
           },
-          (error) => {
-            const trace = sourceTracker.snapshot().at(-1);
+          () => {
+            const trace = sourceTracker.snapshot()
+              .findLast((item) => item.key === key);
             emit('source', {
               label,
               ok: false,
