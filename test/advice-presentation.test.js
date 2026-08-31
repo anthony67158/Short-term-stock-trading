@@ -770,3 +770,27 @@ test('到价终局复核详情只展示最终动作与依据，不再生成下�
     /下次复核|回踩路径|突破路径/,
   )
 })
+
+test('放弃类到价结论单独展示具体放弃原因', () => {
+  const view = buildAdvicePresentation({
+    action: '观望',
+    title: '放弃买入',
+    actionPlan: '放弃本次买入：触价后主力转为流出',
+    reason: '触价后主力转为流出且未站稳分时均价',
+    invalidation: '原触发价已消费',
+    reviewDecision: {
+      schemaVersion: 'triggered-review-decision.v1',
+      terminal: true,
+      outcome: '放弃买入',
+      operation: '不操作',
+      reason: '触价后主力转为流出且未站稳分时均价',
+      basis: [{
+        type: '实时资金与价格',
+        summary: '主力转为流出且价格跌破分时均价',
+      }],
+    },
+  })
+
+  assert.equal(view.operationGuide.steps[0].label, '放弃原因')
+  assert.match(view.operationGuide.steps[0].text, /主力转为流出/)
+})

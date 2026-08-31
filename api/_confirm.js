@@ -206,13 +206,20 @@ function attachTerminalInstruction({
     advice.knowledgeActionPlan?.principle,
     240,
   )
+  const reason = compactText(
+    result.reason
+    || result.basis
+    || theoryBasis
+    || '本轮实时价格、量能或资金条件未能确认原操作',
+    240,
+  )
   const execution = execute
     ? [
         outcome,
         quantity > 0 ? `${quantity}手` : '',
         rangeLabel(range) ? `执行区间${rangeLabel(range)}` : '',
       ].filter(Boolean).join('，')
-    : `${outcome}；本次触发结束，不新增复核价`
+    : `${outcome}：${reason}；本次触发结束，不新增复核价`
   const nextSessionPlan = compactText(advice.nextOpenPlan, 500)
   const futurePlan = compactText(advice.futurePlan, 500)
   const invalidation = compactText(advice.invalidation, 300)
@@ -237,6 +244,7 @@ function attachTerminalInstruction({
         || theoryBasis
         || compactText(result.reason, 240)
         || '依据原军师计划与本轮触价后的分时结构判断',
+      reason,
       followUpPlan: {
         source: 'PRIOR_PLAN',
         manualConfirmationRequired: true,

@@ -251,7 +251,33 @@ test('买入逻辑失效时终态为放弃买入', () => {
   assert.equal(result.action, '观望')
   assert.equal(result.reviewDecision.outcome, '放弃买入')
   assert.equal(result.reviewDecision.operation, '不操作')
+  assert.match(result.reviewDecision.reason, /重大利空/)
+  assert.match(result.actionPlan, /重大利空/)
   assert.match(result.actionPlan, /本轮结束/)
+})
+
+test('加仓逻辑失效时终态为放弃加仓并说明原因', () => {
+  const result = normalizeTriggeredReviewDecision({
+    mode: 'hold_advice',
+    payload: payload({ sellableTodayQty: 2 }),
+    result: {
+      action: '放弃加仓',
+      title: '承接失败',
+      actionPlan: '取消加仓',
+      reason: '触价后主力转为流出且价格跌破分时均价',
+      fundNote: '主力净流出0.5亿元',
+      techNote: '价格跌破分时均价',
+      invalidation: '原加仓逻辑失效',
+      nextOpenPlan: '次日继续持有',
+      futurePlan: '五日内按止损退出',
+    },
+  })
+
+  assert.equal(result.action, '持有')
+  assert.equal(result.reviewDecision.outcome, '放弃加仓')
+  assert.equal(result.reviewDecision.operation, '不操作')
+  assert.match(result.reviewDecision.reason, /主力转为流出/)
+  assert.match(result.actionPlan, /主力转为流出/)
 })
 
 test('持仓复核锁定利润时给出执行区间和可卖手数', () => {

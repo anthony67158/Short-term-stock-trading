@@ -233,6 +233,22 @@ function evidenceBasis(result = {}, payload = {}) {
   return bases.slice(0, 3)
 }
 
+function terminalDecisionReason(result = {}, bases = [], fallback = '') {
+  const candidates = [
+    result.reviewDecision?.reason,
+    result.reason,
+    result.newsNote,
+    result.fundNote,
+    result.techNote,
+    ...(Array.isArray(bases) ? bases.map((item) => item?.summary) : []),
+  ]
+  return candidates
+    .map((item) => usefulEvidence(item))
+    .find(Boolean)
+    || fallback
+    || '本轮实时证据未能继续支持原操作'
+}
+
 function executionRange(result = {}, payload = {}, operation = '') {
   const review = result.reviewDecision || {}
   let low = positive(review.priceLow)
@@ -287,6 +303,7 @@ function reviewDecisionRecord({
   range,
   quantity,
   bases,
+  reason,
   event,
   result,
   now,
@@ -304,6 +321,10 @@ function reviewDecisionRecord({
     basisType: bases[0]?.type || '实时资金与价格',
     basisSummary:
       bases[0]?.summary || '依据本轮触价后的实时走势作出终局判断',
+    reason: text(
+      reason || bases[0]?.summary || '依据本轮实时证据作出终局判断',
+      500,
+    ),
     triggerPrice: positive(event?.price),
     triggerThreshold: positive(event?.threshold),
     decidedAt: Number(now),
@@ -354,6 +375,11 @@ function normalizeBuyReview(result, payload, bases, now) {
   }
   const stop = positive(result.stopPrice)
   const target = positive(result.targetPrice)
+  const reason = terminalDecisionReason(
+    result,
+    bases,
+    '触价后未满足原计划的价格、量能或资金确认条件',
+  )
   if (
     outcome === '立即买入'
     && (
@@ -401,8 +427,8 @@ function normalizeBuyReview(result, payload, bases, now) {
     result.targetPrice = null
     result.planAmount = 0
     result.actionPlan = outcome === '放弃买入'
-      ? '放弃本次买入：原触发条件已经失效，本轮结束，不再设置新的复核价格'
-      : '维持观望：本次到价未确认买点，原触发价已经消费，不再设置新的复核价格'
+      ? `放弃本次买入：${reason}；本轮结束，不再设置新的复核价格`
+      : `维持观望：${reason}；原触发价已经消费，不再设置新的复核价格`
     result.invalidation = '本次价格触发已经完成，不再沿用原触发价'
   }
   result.nextAction = result.actionPlan
@@ -410,10 +436,7 @@ function normalizeBuyReview(result, payload, bases, now) {
     || '下一交易时段沿用本次终局结论，不围绕原触发价再次复核'
   result.futurePlan = result.futurePlan
     || '最迟第5个交易日按现有止损、目标和仓位纪律退出或减仓'
-  result.reason = text(
-    result.reason || bases[0]?.summary || '依据本轮实时证据作出终局判断',
-    500,
-  )
+  result.reason = reason
   if (!usefulEvidence(result.techNote) && bases[0]) {
     result.techNote = bases[0].summary
   }
@@ -423,6 +446,7 @@ function normalizeBuyReview(result, payload, bases, now) {
     range,
     quantity,
     bases,
+    reason,
     event,
     result,
     now,
@@ -446,7 +470,17 @@ function holdingOperation(result = {}) {
 
 function normalizeHoldingReview(result, payload, bases, now) {
   const event = payload.reviewEvent || {}
-  let operation = holdingOperation(result)
+  const raw = text(
+    result.reviewDecision?.outcome
+    || result.action
+    || result.stance,
+    80,
+  )
+  const abandonedAdd = (
+    /放弃|取消|失效/.test(raw)
+    && /加仓|补仓|接回|买回/.test(raw)
+  )
+  let operation = abandonedAdd ? '不操作' : holdingOperation(result)
   let quantity = lotsOf(
     result.reviewDecision?.quantity ?? result.opQty,
   )
@@ -477,13 +511,20 @@ function normalizeHoldingReview(result, payload, bases, now) {
     quantity = 0
     range = { low: null, high: null }
   }
-  const outcome = {
+  const outcome = abandonedAdd ? '放弃加仓' : {
     加仓: '立即加仓',
     减仓: '立即减仓',
     锁利润: '锁定利润',
     清仓: '立即清仓',
     不操作: '维持持有',
   }[operation]
+  const reason = terminalDecisionReason(
+    result,
+    bases,
+    operation === '不操作'
+      ? '触价后未满足原计划的加减仓确认条件'
+      : '本轮实时证据支持立即执行',
+  )
 
   clearReviewPrices(result)
   const action = {
@@ -517,17 +558,14 @@ function normalizeHoldingReview(result, payload, bases, now) {
   } else {
     result.addPrice = null
     result.reducePrice = null
-    result.actionPlan = '维持持有：本次到价未形成加减仓条件，原触发价已经消费，不再设置新的复核价格'
+    result.actionPlan = `${outcome}：${reason}；原触发价已经消费，不再设置新的复核价格`
   }
   result.nextAction = result.actionPlan
   result.nextOpenPlan = result.nextOpenPlan
     || '下一交易时段沿用本次终局结论，不围绕原触发价再次复核'
   result.futurePlan = result.futurePlan
     || '最迟第5个交易日按现有止损、目标和仓位纪律退出或减仓'
-  result.reason = text(
-    result.reason || bases[0]?.summary || '依据本轮实时证据作出终局判断',
-    500,
-  )
+  result.reason = reason
   if (!usefulEvidence(result.techNote) && bases[0]) {
     result.techNote = bases[0].summary
   }
@@ -539,6 +577,7 @@ function normalizeHoldingReview(result, payload, bases, now) {
     range,
     quantity,
     bases,
+    reason,
     event,
     result,
     now,

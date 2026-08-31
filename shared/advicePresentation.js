@@ -380,15 +380,26 @@ function operationGuide(advice, plan, levels, observationOnly) {
     advice.knowledgeActionPlan?.invalidation,
     advice.invalidation,
   )
-  if (!plan) return null
   if (advice.reviewDecision?.terminal === true) {
     const decision = advice.reviewDecision
-    const basis = (Array.isArray(decision.basis)
-      ? decision.basis
-      : [])
+    const basis = (
+      Array.isArray(decision.basis)
+        ? decision.basis
+        : decision.basis
+          ? [{ summary: decision.basis }]
+          : []
+    )
       .map((item) => clean(item?.summary, 180))
       .filter(Boolean)
       .slice(0, 3)
+    const rejectionReason = /^放弃/.test(String(decision.outcome || ''))
+      ? first(
+          decision.reason,
+          advice.reason,
+          decision.basisSummary,
+          basis[0],
+        )
+      : ''
     return {
       now: clean(
         advice.actionPlan
@@ -397,10 +408,18 @@ function operationGuide(advice, plan, levels, observationOnly) {
         300,
       ),
       steps: [
-        basis.length && {
+        rejectionReason && {
+          key: 'rejection',
+          label: '放弃原因',
+          text: rejectionReason,
+          tone: 'risk',
+        },
+        basis.some((item) => item !== rejectionReason) && {
           key: 'basis',
           label: '决策依据',
-          text: basis.join('；'),
+          text: basis
+            .filter((item) => item !== rejectionReason)
+            .join('；'),
         },
         invalidation && {
           key: 'invalid',
@@ -411,6 +430,7 @@ function operationGuide(advice, plan, levels, observationOnly) {
       ].filter(Boolean),
     }
   }
+  if (!plan) return null
 
   if (observationOnly) {
     const deferredPlan = deferredPlanPresentation(plan)

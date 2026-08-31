@@ -600,10 +600,10 @@ function tacticalReviewEventRule(reviewEvent = {}) {
       ? ''
       : '若执行加仓，必须同时返回本轮仍有效的stopPrice与targetPrice；不得删除原计划风控价。'
     return `【到价终局复核】${reachedPath}。${terminalRule}${evidenceRule}`
-      + `你是顶尖A股短线操盘手，现在必须明确决定是否${focus}。若执行，reviewDecision必须给出操作类型、可成交价格区间和具体手数；${riskPriceRule}若不执行，必须明确写“维持持有”或“放弃本次操作”，并说明唯一关键原因。`
+      + `你是顶尖A股短线操盘手，现在必须明确决定是否${focus}。若执行，reviewDecision必须给出操作类型、可成交价格区间和具体手数；${riskPriceRule}若不执行，必须明确写“维持持有”或“放弃本次操作”，并在reviewDecision.reason和顶层reason说明唯一关键原因。`
   }
   return `【到价终局复核】${reachedPath}。${terminalRule}${evidenceRule}`
-    + '未持仓结论只能三选一：“立即买入”“维持观望”“放弃买入”。立即买入必须同时给出可成交价格区间、具体手数、止损和目标；维持观望或放弃买入都表示本次触发已经结束，不得顺延到新价格。'
+    + '未持仓结论只能三选一：“立即买入”“维持观望”“放弃买入”。立即买入必须同时给出可成交价格区间、具体手数、止损和目标；维持观望或放弃买入都表示本次触发已经结束，不得顺延到新价格；放弃买入必须在reviewDecision.reason和顶层reason说明唯一关键原因。'
 }
 
 function tacticalUsageRules(facts = {}) {
@@ -1007,13 +1007,13 @@ export function advisorOutputSchema(mode, reviewEvent = null) {
     String(reviewEvent?.kind || ''),
   )
   if (triggeredReview && mode === 'buy_advice') {
-    return '{"reviewDecision":{"outcome":"立即买入|维持观望|放弃买入","operation":"买入|不操作","priceLow":数字或null,"priceHigh":数字或null,"quantity":"整数手数","basis":[{"type":"实时资金与价格|已验证理论|重大催化","summary":"80字内依据"}]},"stopPrice":数字或null,"targetPrice":数字或null,"nextOpenPlan":"成交后的下一交易时段计划","futurePlan":"未来1-5日止盈减仓或退出计划","reason":"80字内因果链","theoryNote":"最适用理论及本股验证，60字内","techNote":"60字内技术依据","quantNote":"60字内量化依据","newsNote":"60字内催化依据","positionNote":"60字内账户约束","confidence":"高|中|低"}'
+    return '{"reviewDecision":{"outcome":"立即买入|维持观望|放弃买入","operation":"买入|不操作","priceLow":数字或null,"priceHigh":数字或null,"quantity":"整数手数","reason":"若放弃则填写唯一关键原因","basis":[{"type":"实时资金与价格|已验证理论|重大催化","summary":"80字内依据"}]},"stopPrice":数字或null,"targetPrice":数字或null,"nextOpenPlan":"成交后的下一交易时段计划","futurePlan":"未来1-5日止盈减仓或退出计划","reason":"80字内因果链","theoryNote":"最适用理论及本股验证，60字内","techNote":"60字内技术依据","quantNote":"60字内量化依据","newsNote":"60字内催化依据","positionNote":"60字内账户约束","confidence":"高|中|低"}'
   }
   if (
     triggeredReview
     && ['hold_advice', 'review'].includes(mode)
   ) {
-    return '{"reviewDecision":{"outcome":"立即加仓|立即减仓|锁定利润|维持持有|立即清仓","operation":"加仓|减仓|锁利润|不操作|清仓","priceLow":数字或null,"priceHigh":数字或null,"quantity":"整数手数","basis":[{"type":"实时资金与价格|已验证理论|重大催化","summary":"80字内依据"}]},"stopPrice":数字或null,"targetPrice":数字或null,"nextOpenPlan":"本次操作后的下一交易时段计划","futurePlan":"未来1-5日持仓管理或退出计划","reason":"80字内因果链","theoryNote":"最适用理论及本股验证，60字内","techNote":"60字内技术依据","quantNote":"60字内量化依据","newsNote":"60字内催化依据","positionNote":"60字内账户约束","confidence":"高|中|低"}'
+    return '{"reviewDecision":{"outcome":"立即加仓|立即减仓|锁定利润|维持持有|放弃加仓|立即清仓","operation":"加仓|减仓|锁利润|不操作|清仓","priceLow":数字或null,"priceHigh":数字或null,"quantity":"整数手数","reason":"若放弃则填写唯一关键原因","basis":[{"type":"实时资金与价格|已验证理论|重大催化","summary":"80字内依据"}]},"stopPrice":数字或null,"targetPrice":数字或null,"nextOpenPlan":"本次操作后的下一交易时段计划","futurePlan":"未来1-5日持仓管理或退出计划","reason":"80字内因果链","theoryNote":"最适用理论及本股验证，60字内","techNote":"60字内技术依据","quantNote":"60字内量化依据","newsNote":"60字内催化依据","positionNote":"60字内账户约束","confidence":"高|中|低"}'
   }
   if (mode === 't_advice') {
     return '{"reasoning":"一句话依据","advisable":"适合|谨慎|不建议","dir":"positive|reverse|none","dirLabel":"正T低吸|反T高抛|暂不做T","shortHorizon":"盘中|下一交易时段","edge":"核心优势","crowdingRisk":"最大风险","catalystWindow":"催化有效期","reviewTrigger":"下一复核事件","actionPlan":"唯一动作","support":null,"resistance":null,"suggestQty":0,"leg1Price":null,"leg2Price":null,"nextSide":"buy|sell|null","nextPrice":null,"fundNote":"主力与小单关系","theoryNote":"最适用理论及本股验证，60字内","quantNote":"量化依据","invalidation":"失效条件","confidence":"高|中|低"}'
