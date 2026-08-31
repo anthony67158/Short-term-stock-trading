@@ -8,6 +8,7 @@ import {
   adviceCompleteness,
   adviceConcurrency,
   batchConcurrency,
+  completeAdviceHorizonFields,
   generationOptions,
   validateBatchMode,
 } from '../shared/adviceBatchPolicy.js'
@@ -210,4 +211,18 @@ test('持仓和实际买入建议必须包含次日应对与五日内退出路�
     nextOpenPlan: '',
     futurePlan: '',
   }, 'buy_advice').complete, true)
+})
+
+test('模型遗漏持仓时间计划时按风控字段补齐而不丢弃其余结论', () => {
+  const advice = completeAdviceHorizonFields({
+    ...completeAdvice,
+    nextOpenPlan: '',
+    futurePlan: '',
+  }, 'hold_advice')
+
+  assert.match(advice.nextOpenPlan, /高开/)
+  assert.match(advice.nextOpenPlan, /平开/)
+  assert.match(advice.nextOpenPlan, /低开/)
+  assert.match(advice.futurePlan, /1-5/)
+  assert.equal(adviceCompleteness(advice, 'hold_advice').complete, true)
 })

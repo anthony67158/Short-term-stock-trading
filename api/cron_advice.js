@@ -869,6 +869,9 @@ async function genOne({
   reviewTrigger = '',
 }) {
   const startedAt = Date.now();
+  // #region debug-point A:job-start
+  const debugTraceId = `${code}:${startedAt}`; const debugReport = (hypothesisId, location, msg, data = {}) => { const url = process.env.DEBUG_SERVER_URL; if (url) void fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: process.env.DEBUG_SESSION_ID || 'cloud-advice-stuck', runId: process.env.DEBUG_RUN_ID || 'pre-fix', hypothesisId, traceId: debugTraceId, location, msg: `[DEBUG] ${msg}`, data, ts: Date.now() }) }).catch(() => {}); }; debugReport('A', 'api/cron_advice.js:genOne', 'job generation entered', { code, mode, deepMode });
+  // #endregion
   const baseGeneration = generationOptions(deepMode);
   const reviewRuntime = triggeredReviewRuntime(
     payload?.reviewEvent,
@@ -908,11 +911,17 @@ async function genOne({
       if (event === 'reasoning' && data?.text) streamedReasoning += String(data.text);
       const patch = progressPatchForEvent(event, data);
       if (patch && typeof onProgress === 'function') onProgress(patch);
+      // #region debug-point D:evidence-progress
+      if (event === 'source' || event === 'phase') debugReport('D', 'api/cron_advice.js:onEvent', 'generation progress', { event, stage: data?.key || '', label: data?.label || '', ok: data?.ok ?? null, elapsedMs: Date.now() - startedAt });
+      // #endregion
     },
   });
   const adviceP = adviceRequest
     .then((r) => {
       adviceFailure = adviceFailureReason(r, mode);
+      // #region debug-point C:model-result
+      debugReport('C', 'api/cron_advice.js:adviceP', 'model request settled', { ok: !adviceFailure, failure: adviceFailure, elapsedMs: Date.now() - startedAt });
+      // #endregion
       return adviceFailure
         ? null
         : {
@@ -930,6 +939,9 @@ async function genOne({
       adviceFailure = error?.name === 'AbortError'
         ? '军师生成已中断'
         : '军师生成请求异常';
+      // #region debug-point A:model-error
+      debugReport('A', 'api/cron_advice.js:adviceP', 'model request rejected', { name: error?.name || '', failure: adviceFailure, elapsedMs: Date.now() - startedAt });
+      // #endregion
       return null;
     });
   let adviceResp = await adviceP;
@@ -1671,6 +1683,9 @@ async function drainAccount(nick, initialAcc) {
         const role = adviceJobRole(j);
         const leased = leaseJob(data, j.code, Date.now(), role, j.id);
         if (!leased) continue;
+        // #region debug-point A:worker-lease
+        if (process.env.DEBUG_SERVER_URL) void fetch(process.env.DEBUG_SERVER_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: process.env.DEBUG_SESSION_ID || 'cloud-advice-stuck', runId: process.env.DEBUG_RUN_ID || 'pre-fix', hypothesisId: 'A', traceId: String(j.id || j.code), location: 'api/cron_advice.js:leaseJob', msg: '[DEBUG] worker leased job', data: { code: j.code, role, stage: leased.stage || '', leaseUntil: leased.leaseUntil || 0 }, ts: Date.now() }) }).catch(() => {});
+        // #endregion
         const code = j.code;
         const jobId = j.id;
         immediateRequeues.delete(String(jobId || ''));
@@ -2497,6 +2512,9 @@ export default async function handler(req, res) {
         }));
       }
       res.statusCode = 202;
+      // #region debug-point B:enqueue-result
+      if (process.env.DEBUG_SERVER_URL) void fetch(process.env.DEBUG_SERVER_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: process.env.DEBUG_SESSION_ID || 'cloud-advice-stuck', runId: process.env.DEBUG_RUN_ID || 'pre-fix', hypothesisId: 'B', traceId: String(requestId || batchId), location: 'api/cron_advice.js:enqueue', msg: '[DEBUG] cloud submission accepted', data: { enqueued: enq, dedup: dup, workerScheduled: !!worker?.accepted, deepMode, elapsedMs: Date.now() - started }, ts: Date.now() }) }).catch(() => {});
+      // #endregion
       return res.end(JSON.stringify({
         ok: true,
         accepted: true,

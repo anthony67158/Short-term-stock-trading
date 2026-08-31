@@ -153,6 +153,9 @@ import {
   buildAdviceReviewMemory,
 } from '../shared/adviceReviewMemory.js';
 import {
+  completeAdviceHorizonFields,
+} from '../shared/adviceBatchPolicy.js';
+import {
   buildIntradayOpenSummary,
   buildReviewDecisionPacket,
 } from '../shared/reviewDecisionPacket.js';
@@ -1034,6 +1037,9 @@ export default async function handler(req, res) {
             )
           );
 
+        // #region debug-point D:evidence-start
+        if (process.env.DEBUG_SERVER_URL) void fetch(process.env.DEBUG_SERVER_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: process.env.DEBUG_SESSION_ID || 'cloud-advice-stuck', runId: process.env.DEBUG_RUN_ID || 'pre-fix', hypothesisId: 'D', traceId: `${payload.code}:${START}`, location: 'api/ai.js:evidence-start', msg: '[DEBUG] evidence collection started', data: { code: payload.code, mode, fastMode, elapsedMs: Date.now() - START }, ts: Date.now() }) }).catch(() => {});
+        // #endregion
         const [mkt, sec, detail, trend, stockFund, lhb, corpus, macroNews, todayQ, dailySummary, macroFlashes] = await Promise.all([
           collect('market', '大盘情绪', () => getJ('/api/market'), (v) => v && v.ok !== false),
           collect('sectorFlow', '板块资金', () => getJ('/api/sectors?type=industry&sort=main'), (v) => v && v.list && v.list.length),
@@ -1075,6 +1081,9 @@ export default async function handler(req, res) {
           ), (v) => v && v.text, (v) => v?.day || null),
           collect('macroFlashes', '财经快讯', () => fetchMacroFlashes(8), (v) => v && v.length),
         ]);
+        // #region debug-point D:evidence-complete
+        if (process.env.DEBUG_SERVER_URL) void fetch(process.env.DEBUG_SERVER_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: process.env.DEBUG_SESSION_ID || 'cloud-advice-stuck', runId: process.env.DEBUG_RUN_ID || 'pre-fix', hypothesisId: 'D', traceId: `${payload.code}:${START}`, location: 'api/ai.js:evidence-complete', msg: '[DEBUG] evidence collection settled', data: { code: payload.code, mode, elapsedMs: Date.now() - START, sources: sourceTracker.snapshot().map(({ key, status, durationMs }) => ({ key, status, durationMs })) }, ts: Date.now() }) }).catch(() => {});
+        // #endregion
         // ★外部市场环境：把当天策略日报摘要注入，让个股建议结合大盘/板块/海外环境判断
         if (dailySummary && dailySummary.text) payload.dailyReport = dailySummary;
         // ★今日实时行情：这是"当下事实"，优先级高于昨日收盘的 tech/资金
@@ -2196,6 +2205,7 @@ export default async function handler(req, res) {
     //      触发 length,但正文 JSON 已闭合)也不误报"建议被截断"。
     const truncated = !parsed.value || !!parsed.repaired;
     let result = parsed.value || { raw: content, truncated };
+    result = completeAdviceHorizonFields(result, mode);
     if (mode === 'scan_pick' && result && typeof result === 'object' && !result.raw) {
       const allowedCodes = (payload.candidates || []).map((item) => item && item.code).filter(Boolean);
       result = normalizePickDecision(result, allowedCodes, payload.candidates || []);

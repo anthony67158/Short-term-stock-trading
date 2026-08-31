@@ -92,6 +92,32 @@ export function adviceCompleteness(advice, mode = '') {
   }
 }
 
+export function completeAdviceHorizonFields(advice, mode = '') {
+  if (!advice || typeof advice !== 'object' || advice.raw) return advice
+  const action = text(advice.action || advice.stance)
+  const requiresPlan = (
+    mode === 'hold_advice'
+    || (
+      mode === 'buy_advice'
+      && /立即买入|回调再买|小仓试错|买入/.test(action)
+    )
+  )
+  if (!requiresPlan) return advice
+  return {
+    ...advice,
+    nextOpenPlan: text(advice.nextOpenPlan) || (
+      mode === 'hold_advice'
+        ? '高开按目标或减仓条件执行，平开继续核对量价，低开优先守止损条件。'
+        : '高开不追涨，平开等待买点与量能确认，低开先观察止跌；条件未满足不下单。'
+    ),
+    futurePlan: text(advice.futurePlan) || (
+      mode === 'hold_advice'
+        ? '未来1-5日只按当前止损、减仓和目标条件执行，逻辑失效及时退出。'
+        : '成交后1-5日按止损与目标条件管理；未成交继续观望，不提高买价。'
+    ),
+  }
+}
+
 export function isCompleteAdviceEntry(entry, expectedMode = '') {
   if (!entry || typeof entry !== 'object') return false
   if (entry.truncated === true || entry.advice?.truncated === true) return false
