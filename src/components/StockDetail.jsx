@@ -251,6 +251,25 @@ export default function StockDetail({ stock, onClose }) {
         }, cachedState))
         return
       }
+      // 服务端任务是转交后的权威状态，优先于本地“提交未确认”占位。
+      try {
+        const bs = getBatchState()
+        if (bs && bs.serverMode) {
+          const c = String(code)
+          const it = (bs.items || []).find((x) => String(x.code) === c)
+          const cloudLoading = cloudAdviceLoadingState(bs, c)
+          if (cloudLoading) {
+            setForCode(mergeAdviceRefreshState(cloudLoading, cachedState))
+            return
+          }
+          if (it && it.status === 'fail') {
+            setForCode(mergeAdviceRefreshState({
+              error: (it.error && String(it.error)) || '生成失败，请重试',
+            }, cachedState))
+            return
+          }
+        }
+      } catch { /* ignore */ }
       const selectedResult = newestAdviceResult(getResult(code), cached, expectedMode)
       const res = selectedResult.source === 'runner' ? selectedResult.value : null
       if (res && res.pending) {
@@ -271,28 +290,6 @@ export default function StockDetail({ stock, onClose }) {
           : adviceDisplayState(res))
         return
       }
-      // 服务端(云端)批量/按需生成:该股在 FC 上生成,本机 isRunning 为 false。
-      // 若它出现在批量进度的 current(正在跑)或仍是 pending/running 项 → 展示「云端生成中」,
-      // 待结果经 authStore.pull 回灌 adviceCache 后自动切成品(见下方 subscribeAdvice)。
-      try {
-        const bs = getBatchState()
-        if (bs && bs.serverMode) {
-          const c = String(code)
-          const it = (bs.items || []).find((x) => String(x.code) === c)
-          const cloudLoading = cloudAdviceLoadingState(bs, c)
-          if (cloudLoading) {
-            setForCode(mergeAdviceRefreshState(cloudLoading, cachedState))
-            return
-          }
-          // 云端已把该股标记为失败 → 如实提示生成失败(不做假成功)
-          if (it && it.status === 'fail') {
-            setForCode(mergeAdviceRefreshState({
-              error: (it.error && String(it.error)) || '生成失败,请重试',
-            }, cachedState))
-            return
-          }
-        }
-      } catch { /* ignore */ }
       const latestCache = selectedResult.source === 'cache' ? selectedResult.value : cached
       setForCode(adviceDisplayState(latestCache))
     }

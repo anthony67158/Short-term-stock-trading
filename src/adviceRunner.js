@@ -11,6 +11,10 @@ import { evidencePersistenceFields } from '../shared/evidenceSnapshot.js'
 import { quantResultFromAdviceMeta } from '../shared/adviceQuantResult.js'
 import { compactAdvicePlan } from '../shared/adviceContinuity.js'
 import {
+  SERVER_FALLBACK_CONFIRM_MS,
+  serverFallbackDisplayState,
+} from '../shared/adviceUiState.js'
+import {
   accountSessionMatches,
   currentAccountSession,
   subscribeAccountSession,
@@ -21,6 +25,24 @@ const results = new Map()  // code -> { result, advice, meta, news, adviceMissin
 const subs = new Set()
 
 function notify() { subs.forEach((fn) => { try { fn() } catch { /* ignore */ } }) }
+
+function rememberServerFallback(code, submission) {
+  const fallback = serverFallbackDisplayState(submission)
+  if (!fallback) {
+    results.delete(code)
+    return
+  }
+  results.set(code, fallback)
+  if (!fallback.pending) return
+  setTimeout(() => {
+    if (results.get(code) !== fallback) return
+    results.set(code, {
+      error: '云端任务未确认，请重新生成',
+      cachedAt: Date.now(),
+    })
+    notify()
+  }, SERVER_FALLBACK_CONFIRM_MS)
+}
 // 订阅：后台进度/结果变化时回调（组件用它触发重渲染）
 export function subscribeRunner(fn) { subs.add(fn); return () => subs.delete(fn) }
 export function isRunning(code) { return code ? running.has(code) : false }
@@ -203,11 +225,10 @@ async function run(spec, record) {
       // 本地生成两头都空(军师+量化):很可能是移动端切后台/锁屏把 SSE 掐断了。
       // 已登录云端账号 → 兜底改走【服务端生成】:请求带 keepalive,退到后台也能在 FC 里跑完,
       // 结果稍后经 authStore.pull 轮询云端回灌到本机缓存(手机/电脑都能看到)。
-      if (serverFallback(code, generation.deepMode)) {
-        results.set(code, { pending: true, error: '本地生成中断,已转由云端继续生成,稍候自动刷新…' })
-      } else {
-        results.set(code, { error: '量化服务暂不可用（可能冷启动，请稍后重试）' })
-      }
+      rememberServerFallback(
+        code,
+        await serverFallback(code, generation.deepMode),
+      )
     }
   } catch (e) {
     if (!belongsToCurrentAccount()) return
@@ -215,23 +236,34 @@ async function run(spec, record) {
       results.delete(code)
       return
     }
-    if (serverFallback(code, generation.deepMode)) {
-      results.set(code, { pending: true, error: '本地生成中断,已转由云端继续生成,稍候自动刷新…' })
-    } else {
-      results.set(code, { error: '获取失败：' + String((e && e.message) || e) })
-    }
+    const fallback = await serverFallback(code, generation.deepMode)
+    rememberServerFallback(
+      code,
+      fallback?.ok || fallback?.queued
+        ? fallback
+        : {
+            error: fallback?.error
+              || '获取失败：' + String((e && e.message) || e),
+          },
+    )
   }
   if (belongsToCurrentAccount()) notify()
 }
 
-// 单只服务端兜底:已登录云端账号才可用。触发一次「按需服务端生成」(仅这一只 code),
-// fire-and-forget + keepalive,页面切后台/关闭也已送达 FC 照跑完。成功发出返回 true。
-function serverFallback(code, deepMode = false) {
+// 单只服务端兜底：必须等待服务端确认是否已持久化，不能把“请求已发出”
+// 误当成“任务已受理”，否则网络失败会留下永久等待态。
+async function serverFallback(code, deepMode = false) {
   try {
-    if (!canServerAdvice()) return false
-    void triggerServerAdvice([code], { scope: 'all', force: true, deepMode })
-    return true
-  } catch { return false }
+    if (!canServerAdvice()) {
+      return { ok: false, error: '当前账号无法转交云端生成' }
+    }
+    return await triggerServerAdvice(
+      [code],
+      { scope: 'all', force: true, deepMode },
+    )
+  } catch {
+    return { ok: false, error: '云端任务提交失败，请重新生成' }
+  }
 }
 
 subscribeAccountSession(() => {

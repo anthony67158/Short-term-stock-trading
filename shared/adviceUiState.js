@@ -436,6 +436,28 @@ export async function startAdvicePersistently(
   return { status: 'started', mode: 'local', code }
 }
 
+export const SERVER_FALLBACK_CONFIRM_MS = 30_000
+
+export function serverFallbackDisplayState(
+  submission,
+  now = Date.now(),
+) {
+  if (submission === true || submission?.ok) return null
+  const cachedAt = Number(now) || Date.now()
+  if (submission?.queued) {
+    return {
+      pending: true,
+      error: submission.error || '云端提交状态未确认，正在核对任务状态',
+      cachedAt,
+      expiresAt: cachedAt + SERVER_FALLBACK_CONFIRM_MS,
+    }
+  }
+  return {
+    error: submission?.error || '云端任务未成功受理，请重新生成',
+    cachedAt,
+  }
+}
+
 export function newestAdviceResult(runnerResult, cachedResult, expectedMode = '') {
   if (runnerResult && expectedMode && !adviceEntryMatchesMode(runnerResult, expectedMode)) {
     runnerResult = null

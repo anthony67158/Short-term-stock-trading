@@ -10,11 +10,42 @@ import {
   mergeCloudAdviceItems,
   mergeAdviceRefreshState,
   newestAdviceResult,
+  serverFallbackDisplayState,
   startAdvicePersistently,
   shouldShowAdviceResult,
   shouldApplyCloudBatch,
   shouldApplyCloudProgressSnapshot,
 } from '../shared/adviceUiState.js'
+
+test('本地中断转云端时只有未确认提交短暂保留等待态', () => {
+  assert.equal(
+    serverFallbackDisplayState({ ok: true }, 1_000),
+    null,
+  )
+  assert.deepEqual(
+    serverFallbackDisplayState({
+      ok: false,
+      queued: true,
+      error: '提交结果未确认',
+    }, 1_000),
+    {
+      pending: true,
+      error: '提交结果未确认',
+      cachedAt: 1_000,
+      expiresAt: 31_000,
+    },
+  )
+  assert.deepEqual(
+    serverFallbackDisplayState({
+      ok: false,
+      error: '云端拒绝任务',
+    }, 1_000),
+    {
+      error: '云端拒绝任务',
+      cachedAt: 1_000,
+    },
+  )
+})
 
 test('快速军师用可验证阶段展示流程而不依赖隐藏思维链', () => {
   const steps = adviceGenerationSteps({
