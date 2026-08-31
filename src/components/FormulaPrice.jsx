@@ -3,6 +3,7 @@ import {
   formulaPriceAccountFingerprint,
   loadStockFormulaPrice,
   readStockFormulaPriceCache,
+  staleFormulaPricePayload,
 } from '../formulaSelectionClient.js'
 import {
   buildFormulaPriceExplanation,
@@ -86,6 +87,32 @@ export default function FormulaPrice({ code }) {
     refreshFormulaPrice()
     return () => { requestRef.current += 1 }
   }, [refreshFormulaPrice])
+
+  useEffect(() => {
+    if (
+      !code
+      || state.loading
+      || state.error
+      || !state.payload
+      || state.payload.stale
+    ) return undefined
+    const timer = setInterval(() => {
+      if (readStockFormulaPriceCache(code, {
+        accountState: planStore.get(),
+      })) return
+      requestRef.current += 1
+      setState((current) => (
+        !current.payload || current.payload.stale
+          ? current
+          : {
+              loading: false,
+              error: '',
+              payload: staleFormulaPricePayload(current.payload),
+            }
+      ))
+    }, 15_000)
+    return () => clearInterval(timer)
+  }, [code, accountFingerprint, state.loading, state.error, state.payload])
 
   const decision = state.payload?.decision
   const reference = state.payload?.advisorReference

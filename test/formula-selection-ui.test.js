@@ -96,6 +96,8 @@ test('个股详情独立展示公式价位和军师参考权重', () => {
   assert.match(price, /effectiveWeight/)
   assert.match(price, /唯一/)
   assert.match(price, /refreshFormulaPrice/)
+  assert.match(price, /staleFormulaPricePayload/)
+  assert.match(price, /setInterval/)
 })
 
 test('公式选股请求携带账号凭证和明确超时', () => {
