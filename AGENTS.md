@@ -117,8 +117,8 @@ npm run package:fc
 set -a; . ./.env; set +a
 npx @serverless-devs/s deploy -y
 
-# 两端都验收；备案域名未授权时返回 401 设备授权页也说明域名已到 FC，
-# 完整页面验收需在已授权设备浏览器中完成。
+# 两端都验收；备案域名未授权时返回 200 设备授权页，
+# 完整工作台验收需在已授权设备浏览器中完成。
 curl -s -o /dev/null -w "%{http_code}\n" https://stock-dashboard-one-plum.vercel.app/
 curl -s -o /dev/null -w "%{http_code}\n" https://www.tedixtf.cn/
 ```

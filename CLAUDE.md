@@ -30,7 +30,7 @@ npx @serverless-devs/s deploy -y
 
 部署后必须同时验收：
 - `https://stock-dashboard-one-plum.vercel.app`
-- `https://www.tedixtf.cn/`（设备授权域名；未授权 HTTP 客户端可能返回 `401` 授权页，完整页面需在已授权设备验证）
+- `https://www.tedixtf.cn/`（设备授权域名；未授权时返回 `200` 授权页，完整工作台需在已授权设备验证）
 
 ## 铁律：后端改动必须部署到阿里云 FC
 
