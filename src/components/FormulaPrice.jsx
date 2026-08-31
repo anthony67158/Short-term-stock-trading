@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   loadStockFormulaPrice,
+  readStockFormulaPriceCache,
 } from '../formulaSelectionClient.js'
 import {
   buildFormulaPriceExplanation,
@@ -33,22 +34,32 @@ function formatPrice(value) {
 
 export default function FormulaPrice({ code }) {
   const requestRef = useRef(0)
-  const [state, setState] = useState({
-    loading: true,
-    error: '',
-    payload: null,
+  const [state, setState] = useState(() => {
+    const cached = readStockFormulaPriceCache(code)
+    return {
+      loading: !cached,
+      error: '',
+      payload: cached,
+    }
   })
 
-  const refreshFormulaPrice = useCallback(async () => {
+  const refreshFormulaPrice = useCallback(async (force = false) => {
     if (!code) return
     const requestId = ++requestRef.current
+    const cached = force
+      ? null
+      : readStockFormulaPriceCache(code)
+    if (cached) {
+      setState({ loading: false, error: '', payload: cached })
+      return
+    }
     setState((current) => ({
       ...current,
       loading: true,
       error: '',
     }))
     try {
-      const payload = await loadStockFormulaPrice(code)
+      const payload = await loadStockFormulaPrice(code, { force })
       if (requestRef.current !== requestId) return
       setState({ loading: false, error: '', payload })
     } catch (error) {
@@ -92,7 +103,7 @@ export default function FormulaPrice({ code }) {
         <button
           type="button"
           className="icon-btn"
-          onClick={refreshFormulaPrice}
+          onClick={() => refreshFormulaPrice(true)}
           disabled={state.loading}
           aria-busy={state.loading}
           aria-label="刷新公式价位"

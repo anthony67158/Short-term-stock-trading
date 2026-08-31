@@ -1,8 +1,22 @@
 import { api } from './apiBase.js'
 import { accountRequestHeaders } from './quantModel.js'
+import { planStore } from './planStore.js'
+import {
+  accountTradeStateFingerprint,
+} from '../shared/accountSync.js'
+import {
+  beijingDate,
+  beijingDayKey,
+  beijingMinutes,
+  isTradingDay,
+  isTradingDayAt,
+  localDateKey,
+} from '../shared/tradingCalendar.js'
 
 const stockFormulaCache = new Map()
+const STOCK_FORMULA_LIVE_CACHE_MS = 60 * 1000
 const STOCK_FORMULA_STALE_MS = 30 * 60 * 1000
+const STOCK_FORMULA_CACHE_LIMIT = 64
 
 export function formulaSelectionClientError(message, status = 0) {
   const detail = String(message || '')
@@ -19,6 +33,86 @@ export function formulaSelectionClientError(message, status = 0) {
 export function formulaSelectionCacheKey(code, headers = {}) {
   const account = String(headers['X-Account-Nick'] || 'anonymous')
   return `${account}:${String(code || '')}`
+}
+
+function latestCompletedTradingDayKey(timestamp, includeCurrent) {
+  const current = beijingDate(timestamp)
+  current.setHours(0, 0, 0, 0)
+  for (
+    let offset = includeCurrent ? 0 : 1;
+    offset <= 14;
+    offset += 1
+  ) {
+    const candidate = new Date(current.getTime() - offset * 86400000)
+    if (isTradingDay(candidate)) return localDateKey(candidate)
+  }
+  return beijingDayKey(timestamp)
+}
+
+export function formulaPriceCachePolicy(now = Date.now()) {
+  const timestamp = Number(now) || Date.now()
+  const day = beijingDayKey(timestamp)
+  const minutes = beijingMinutes(timestamp)
+  if (isTradingDayAt(timestamp)) {
+    if (minutes < 570) {
+      return {
+        key: `close:${latestCompletedTradingDayKey(timestamp, false)}`,
+        maxAgeMs: Infinity,
+      }
+    }
+    if (minutes <= 690) {
+      return {
+        key: `live:${day}`,
+        maxAgeMs: STOCK_FORMULA_LIVE_CACHE_MS,
+      }
+    }
+    if (minutes < 780) {
+      return { key: `lunch:${day}`, maxAgeMs: Infinity }
+    }
+    if (minutes < 915) {
+      return {
+        key: `live:${day}`,
+        maxAgeMs: STOCK_FORMULA_LIVE_CACHE_MS,
+      }
+    }
+    return { key: `close:${day}`, maxAgeMs: Infinity }
+  }
+  return {
+    key: `close:${latestCompletedTradingDayKey(timestamp, true)}`,
+    maxAgeMs: Infinity,
+  }
+}
+
+function formulaAccountFingerprint(accountState = planStore.get()) {
+  return accountTradeStateFingerprint(accountState || {})
+}
+
+export function readStockFormulaPriceCache(
+  code,
+  {
+    now = Date.now(),
+    headers = accountRequestHeaders(),
+    accountState = planStore.get(),
+  } = {},
+) {
+  const timestamp = Number(now) || Date.now()
+  const policy = formulaPriceCachePolicy(timestamp)
+  const cacheKey = formulaSelectionCacheKey(code, headers)
+  const cached = stockFormulaCache.get(cacheKey)
+  if (
+    !cached
+    || cached.marketKey !== policy.key
+    || cached.accountFingerprint
+      !== formulaAccountFingerprint(accountState)
+    || timestamp - cached.at > policy.maxAgeMs
+  ) {
+    return null
+  }
+  return cached.payload
+}
+
+export function clearStockFormulaPriceCache() {
+  stockFormulaCache.clear()
 }
 
 export function isFormulaSelectionTransientError(error) {
@@ -100,20 +194,46 @@ export function loadFormulaSelectionProgress(mode) {
   )
 }
 
-export function loadStockFormulaPrice(code) {
+export function loadStockFormulaPrice(
+  code,
+  {
+    force = false,
+    now = Date.now(),
+    accountState = planStore.get(),
+  } = {},
+) {
   const normalized = String(code || '')
   const headers = accountRequestHeaders()
   const cacheKey = formulaSelectionCacheKey(normalized, headers)
+  const timestamp = Number(now) || Date.now()
+  const policy = formulaPriceCachePolicy(timestamp)
+  const accountFingerprint = formulaAccountFingerprint(accountState)
+  if (!force) {
+    const cached = readStockFormulaPriceCache(normalized, {
+      now: timestamp,
+      headers,
+      accountState,
+    })
+    if (cached) return Promise.resolve(cached)
+  }
   return request(
     `/api/formula_selection?view=stock&code=${encodeURIComponent(normalized)}`,
     { headers },
     30_000,
   ).then((payload) => {
     if (payload?.stale !== true) {
+      stockFormulaCache.delete(cacheKey)
       stockFormulaCache.set(cacheKey, {
-        at: Date.now(),
+        at: timestamp,
+        marketKey: policy.key,
+        accountFingerprint,
         payload,
       })
+      while (stockFormulaCache.size > STOCK_FORMULA_CACHE_LIMIT) {
+        stockFormulaCache.delete(
+          stockFormulaCache.keys().next().value,
+        )
+      }
     }
     return payload
   }).catch((error) => {
@@ -121,7 +241,8 @@ export function loadStockFormulaPrice(code) {
     if (
       isFormulaSelectionTransientError(error)
       && cached
-      && Date.now() - cached.at <= STOCK_FORMULA_STALE_MS
+      && cached.accountFingerprint === accountFingerprint
+      && timestamp - cached.at <= STOCK_FORMULA_STALE_MS
     ) {
       return {
         ...cached.payload,

@@ -2,9 +2,12 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import {
+  clearStockFormulaPriceCache,
   formulaSelectionCacheKey,
   formulaSelectionClientError,
+  formulaPriceCachePolicy,
   isFormulaSelectionTransientError,
+  loadStockFormulaPrice,
 } from '../src/formulaSelectionClient.js'
 
 const selection = fs.readFileSync(
@@ -145,6 +148,87 @@ test('公式价位旧快照按账号隔离且只在临时故障时回退', () =>
     false,
   )
   assert.match(client, /if \(payload\?\.stale !== true\)/)
+})
+
+test('收盘公式跨休市复用且在开盘或账户变化后重新计算', async () => {
+  clearStockFormulaPriceCache()
+  const originalFetch = globalThis.fetch
+  let calls = 0
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      ok: true,
+      decision: { action: 'HOLD' },
+      requestNumber: ++calls,
+    }),
+  })
+  const fridayClose = Date.parse('2026-08-28T15:20:00+08:00')
+  const mondayPreopen = Date.parse('2026-08-31T08:50:00+08:00')
+  const mondayOpen = Date.parse('2026-08-31T09:30:00+08:00')
+  const accountState = {
+    plan: [],
+    holding: [{ code: '600001', qty: 1, buyPrice: 10 }],
+    closed: [],
+    account: { cash: 10000 },
+  }
+  try {
+    const first = await loadStockFormulaPrice('600001', {
+      now: fridayClose,
+      accountState,
+    })
+    const cached = await loadStockFormulaPrice('600001', {
+      now: mondayPreopen,
+      accountState,
+    })
+    assert.equal(cached.requestNumber, first.requestNumber)
+    assert.equal(calls, 1)
+
+    await loadStockFormulaPrice('600001', {
+      now: mondayOpen,
+      accountState,
+    })
+    assert.equal(calls, 2)
+
+    await loadStockFormulaPrice('600001', {
+      now: mondayOpen,
+      accountState: {
+        ...accountState,
+        holding: [{ code: '600001', qty: 2, buyPrice: 10 }],
+      },
+    })
+    assert.equal(calls, 3)
+
+    await loadStockFormulaPrice('600001', {
+      now: mondayOpen,
+      accountState,
+      force: true,
+    })
+    assert.equal(calls, 4)
+  } finally {
+    globalThis.fetch = originalFetch
+    clearStockFormulaPriceCache()
+  }
+})
+
+test('公式价位缓存窗口区分盘中、午休和收盘', () => {
+  const morning = formulaPriceCachePolicy(
+    Date.parse('2026-08-31T10:00:00+08:00'),
+  )
+  const lunch = formulaPriceCachePolicy(
+    Date.parse('2026-08-31T12:00:00+08:00'),
+  )
+  const close = formulaPriceCachePolicy(
+    Date.parse('2026-08-31T15:20:00+08:00'),
+  )
+  const weekend = formulaPriceCachePolicy(
+    Date.parse('2026-08-30T12:00:00+08:00'),
+  )
+
+  assert.equal(morning.maxAgeMs, 60_000)
+  assert.equal(lunch.key, 'lunch:2026-08-31')
+  assert.equal(close.key, 'close:2026-08-31')
+  assert.equal(weekend.key, 'close:2026-08-28')
 })
 
 test('公式选股展示服务端真实计算阶段而不是静态计算中文案', () => {
