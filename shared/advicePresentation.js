@@ -841,8 +841,12 @@ export function compileAdvicePresentationV3(advice = {}) {
 export function buildAdvicePresentation(advice = {}) {
   const displayAdvice = humanizeAdviceTextFields(advice)
   if (displayAdvice.presentation?.schemaVersion === 'advice-presentation.v3') {
+    const terminalGuide = displayAdvice.reviewDecision?.terminal === true
+      ? buildLegacyAdvicePresentation(displayAdvice).operationGuide
+      : null
     return {
       ...displayAdvice.presentation,
+      ...(terminalGuide ? { operationGuide: terminalGuide } : {}),
       review: reviewSummary(displayAdvice),
       executionPlan: executionPlanSummary(displayAdvice.executionPlan),
     }

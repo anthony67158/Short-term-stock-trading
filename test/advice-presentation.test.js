@@ -789,6 +789,14 @@ test('放弃类到价结论单独展示具体放弃原因', () => {
         summary: '主力转为流出且价格跌破分时均价',
       }],
     },
+    presentation: {
+      schemaVersion: 'advice-presentation.v3',
+      verdict: { action: '放弃买入', title: '放弃买入' },
+      operationGuide: {
+        now: '放弃本次买入',
+        steps: [],
+      },
+    },
   })
 
   assert.equal(view.operationGuide.steps[0].label, '放弃原因')
