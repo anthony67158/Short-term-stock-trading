@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 import aiHandler from '../api/ai.js'
 import agentHandler from '../api/agent.js'
@@ -19,6 +20,11 @@ import {
   createAccountSessionToken,
   verifyAccountSessionToken,
 } from '../api/_account_session.js'
+
+const formulaSelectionSource = readFileSync(
+  new URL('../api/formula_selection.js', import.meta.url),
+  'utf8',
+)
 
 function encodedHeaders(nick = '测试账号', pw = '测试密码') {
   return {
@@ -66,6 +72,34 @@ test('账号请求必须验证密码且服务端可信调用可绕过浏览器�
   assert.equal((await authenticateAccountRequest({
     [TRUSTED_ACCOUNT_REQUEST]: true,
   })).ok, true)
+})
+
+test('公式价位鉴权可只读取账户主快照，不扫描建议运行态', async () => {
+  let readOptions = null
+  const readAccount = async (_nick, _storage, options) => {
+    readOptions = options
+    return {
+      nick: '测试账号',
+      status: 'active',
+      pwHash: 'expected',
+      data: { holding: [] },
+    }
+  }
+
+  const result = await authenticateAccountRequest({
+    headers: encodedHeaders(),
+  }, {
+    readAccount,
+    hashPassword: () => 'expected',
+    includeAdviceRuntime: false,
+  })
+
+  assert.equal(result.ok, true)
+  assert.deepEqual(readOptions, { includeAdviceRuntime: false })
+  assert.match(
+    formulaSelectionSource,
+    /authenticateAccountRequest\(req,\s*\{\s*includeAdviceRuntime:\s*false/,
+  )
 })
 
 test('付费能力只允许部署白名单中的账号', () => {

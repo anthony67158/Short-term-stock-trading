@@ -319,7 +319,10 @@ export default async function handler(req, res) {
       return reply(res, 200, await runFormulaSelection({ mode: 'close' }))
     }
 
-    const authentication = await authenticateAccountRequest(req)
+    // 公式价位只依赖主快照中的持仓与设置，无需为鉴权扫描建议运行态。
+    const authentication = await authenticateAccountRequest(req, {
+      includeAdviceRuntime: false,
+    })
     if (!authentication.ok || authentication.trusted) {
       return reply(res, 401, {
         ok: false,

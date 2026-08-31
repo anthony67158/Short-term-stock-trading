@@ -24,6 +24,7 @@ export async function authenticateAccountRequest(
     hashPassword = sha,
     verifySession = verifyAccountSessionToken,
     sessionSecret,
+    includeAdviceRuntime = true,
   } = {},
 ) {
   if (req?.[TRUSTED_ACCOUNT_REQUEST] === true) {
@@ -35,7 +36,11 @@ export async function authenticateAccountRequest(
   const password = decodedHeader(req, 'x-account-password')
   if (!nick || (!token && !password)) return { ok: false, error: '请先登录' }
 
-  const account = await readAccount(nick)
+  const account = await readAccount(
+    nick,
+    undefined,
+    { includeAdviceRuntime },
+  )
   if (
     !account
     || !isAccountActive(account)
