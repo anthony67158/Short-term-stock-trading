@@ -7,7 +7,9 @@ import {
   normalizeTriggeredReviewDecision,
   shouldCollectTriggeredReviewSource,
   TRIGGERED_REVIEW_MODEL_BUDGET_MS,
+  TRIGGERED_REVIEW_OBSERVATION_MS,
   TRIGGERED_REVIEW_TIME_LIMIT_MINUTES,
+  triggeredReviewMonitoringWindow,
   triggeredReviewRuntime,
 } from '../shared/triggeredReviewDecision.js'
 
@@ -51,6 +53,44 @@ test('价格触发复核保留两分钟硬截止并将模型预算收紧到45秒
     NOW + 115000,
   )
   assert.equal(expired.expired, true)
+})
+
+test('观察价到达后持续观察一分钟再执行唯一一次终局复核', () => {
+  const event = payload({
+    reviewEvent: {
+      ...payload().reviewEvent,
+      kind: 'price-review',
+      direction: 'lte',
+      monitoringUntilAt: NOW + TRIGGERED_REVIEW_OBSERVATION_MS,
+    },
+  }).reviewEvent
+
+  const started = triggeredReviewMonitoringWindow(event, NOW)
+  assert.equal(TRIGGERED_REVIEW_OBSERVATION_MS, 60_000)
+  assert.equal(started.active, true)
+  assert.equal(started.remainingMs, 60_000)
+  assert.equal(started.direction, 'pullback')
+
+  const completed = triggeredReviewMonitoringWindow(
+    event,
+    NOW + TRIGGERED_REVIEW_OBSERVATION_MS,
+  )
+  assert.equal(completed.active, false)
+  assert.equal(completed.remainingMs, 0)
+  const runtime = triggeredReviewRuntime(
+    event,
+    NOW + TRIGGERED_REVIEW_OBSERVATION_MS,
+  )
+  assert.equal(runtime.remainingMs, 60_000)
+  assert.equal(runtime.runtimeBudgetMs, TRIGGERED_REVIEW_MODEL_BUDGET_MS)
+  assert.equal(runtime.expired, false)
+
+  const judge = triggeredReviewMonitoringWindow({
+    ...event,
+    kind: 'judge',
+  }, NOW)
+  assert.equal(judge.active, false)
+  assert.equal(judge.required, false)
 })
 
 test('到价复核只重新采集价格决策所需的快速证据', () => {

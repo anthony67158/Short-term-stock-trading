@@ -7,6 +7,7 @@ import {
   processExecutionEvent,
 } from '../shared/executionEvents.js'
 import {
+  TRIGGERED_REVIEW_OBSERVATION_MS,
   TRIGGERED_REVIEW_TIME_LIMIT_MINUTES,
   TRIGGERED_REVIEW_TOTAL_BUDGET_MS,
 } from '../shared/triggeredReviewDecision.js'
@@ -95,6 +96,8 @@ export function activatePriceReviewTrigger(
     decisionPrice: price,
     decisionDeadlineAt:
       now + TRIGGERED_REVIEW_TOTAL_BUDGET_MS,
+    monitoringUntilAt:
+      now + TRIGGERED_REVIEW_OBSERVATION_MS,
     enabled: false,
   })
   const queued = queueAdviceReviewForPriceTrigger(data, alert, now)
@@ -190,6 +193,9 @@ export function queueAdviceReviewForPriceTrigger(
     timeLimitMinutes: TRIGGERED_REVIEW_TIME_LIMIT_MINUTES,
     decisionDeadlineAt:
       now + TRIGGERED_REVIEW_TOTAL_BUDGET_MS,
+    observationWindowMs: TRIGGERED_REVIEW_OBSERVATION_MS,
+    monitoringUntilAt: Number(alert?.monitoringUntilAt)
+      || now + TRIGGERED_REVIEW_OBSERVATION_MS,
     terminalRequired: true,
   }
   const idempotencyKey = [

@@ -38,6 +38,51 @@ test('开盘至今摘要保留价格路径、VWAP位置和可解释量能比', (
   assert.equal(summary.volume.recentToPriorRatio, 1.8)
   assert.equal(summary.path.length, 8)
   assert.equal(summary.path.at(-1).price, summary.currentPrice)
+  assert.equal(summary.postTrigger, null)
+})
+
+test('持续复核单独保留触价后的均价线恢复路径', () => {
+  const triggerAt = Date.parse('2026-08-28T02:02:00.000Z')
+  const summary = buildIntradayOpenSummary([
+    { time: '10:00', price: 66.7, vol: 100, avg: 66.59 },
+    { time: '10:01', price: 66.62, vol: 110, avg: 66.59 },
+    { time: '10:02', price: 66.42, vol: 130, avg: 66.59 },
+    { time: '10:03', price: 66.61, vol: 160, avg: 66.59 },
+    { time: '10:04', price: 66.68, vol: 180, avg: 66.6 },
+  ], {
+    preClose: 66.5,
+    observedAt: Date.parse('2026-08-28T02:04:30.000Z'),
+    triggeredAt: triggerAt,
+  })
+
+  assert.equal(summary.postTrigger.firstTime, '10:02')
+  assert.equal(summary.postTrigger.lastTime, '10:04')
+  assert.equal(summary.postTrigger.bars, 3)
+  assert.equal(summary.postTrigger.aboveVwapBars, 2)
+  assert.equal(summary.postTrigger.reclaimedVwap, true)
+  assert.equal(summary.postTrigger.heldAboveVwap, true)
+  assert.deepEqual(
+    summary.postTrigger.path.map((item) => item.time),
+    ['10:02', '10:03', '10:04'],
+  )
+  const packet = buildReviewDecisionPacket({
+    channel: 'FAST_REVIEW',
+    code: '600000',
+    priorAdvice: {
+      action: '观望',
+      actionPlan: '回踩66.42元后确认承接',
+    },
+    event: {
+      kind: 'price-review',
+      direction: 'lte',
+      at: triggerAt,
+    },
+    current: {
+      intradayFromOpen: summary,
+    },
+  })
+  assert.equal(packet.current.postTrigger.reclaimedVwap, true)
+  assert.equal(packet.current.postTrigger.heldAboveVwap, true)
 })
 
 test('军师结论被编译为下一轮可直接比较的结构化记忆', () => {

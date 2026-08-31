@@ -18,8 +18,10 @@ import {
   buildAdviceReviewRecord,
   quantResultFromAdviceResponse,
   requeueAdviceForTradeChange,
+  reviewEventMatchesCurrentAdvice,
   startJsonHeartbeat,
   terminalReviewNotification,
+  waitForTriggeredReviewMonitoring,
   withAdviceJobDeadline,
   withAdviceTimeoutFallback,
 } from '../api/cron_advice.js'
@@ -212,6 +214,32 @@ test('账户快照读取超时时使用当前副本继续生成', async () => {
   assert.equal(result, fallback)
 })
 
+test('观察价复核持续更新观察进度后才进入证据采集', async () => {
+  let now = 1000
+  let totalWaitMs = 0
+  const progress = []
+  const result = await waitForTriggeredReviewMonitoring({
+    kind: 'price-review',
+    direction: 'lte',
+    at: now,
+    monitoringUntilAt: now + 60_000,
+    decisionDeadlineAt: now + 120_000,
+  }, {
+    now: () => now,
+    sleep: async (waitMs) => {
+      totalWaitMs += waitMs
+      now += waitMs
+    },
+    onProgress: (patch) => progress.push(patch),
+  })
+
+  assert.equal(totalWaitMs, 60_000)
+  assert.equal(result.active, false)
+  assert.equal(progress[0].stage, 'monitoring')
+  assert.match(progress[0].phase, /持续观察回踩后的承接/)
+  assert.equal(progress.at(-1).remainingMs, 0)
+})
+
 test('完整深度任务有独立总时限并在超时后释放执行资源', async () => {
   let aborted = false
   await assert.rejects(
@@ -228,6 +256,16 @@ test('完整深度任务有独立总时限并在超时后释放执行资源', as
   assert.equal(aborted, true)
   assert.ok(adviceJobDeadlineMs(true) < 210000)
   assert.ok(adviceJobDeadlineMs(false) < 110000)
+  assert.equal(adviceJobDeadlineMs(false, {
+    kind: 'price-review',
+    at: 1000,
+    decisionDeadlineAt: 121000,
+  }, 1000), 135000)
+  assert.ok(adviceJobDeadlineMs(false, {
+    kind: 'judge',
+    at: 1000,
+    decisionDeadlineAt: 121000,
+  }, 1000) < 110000)
 })
 
 test('服务端进程内调用完成后立即清理长超时与中止监听', async () => {
@@ -297,6 +335,25 @@ test('军师生成期间持仓或成交变化时旧结果必须失效', () => {
 
   assert.equal(adviceTradeStateMatches(source, source), true)
   assert.equal(adviceTradeStateMatches(source, latest), false)
+})
+
+test('持续观察期间主计划更新会停止旧触价复核', () => {
+  assert.equal(reviewEventMatchesCurrentAdvice({
+    kind: 'price-review',
+    planId: 'plan-old',
+  }, {
+    advice: {
+      continuity: { planId: 'plan-new' },
+    },
+  }), false)
+  assert.equal(reviewEventMatchesCurrentAdvice({
+    kind: 'price-review',
+    planId: 'plan-current',
+  }, {
+    advice: {
+      continuity: { planId: 'plan-current' },
+    },
+  }), true)
 })
 
 test('题材量化分和账户时间戳更新不得把深度任务重新排队', () => {

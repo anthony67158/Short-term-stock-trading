@@ -20,8 +20,29 @@ const DEEP_GENERATION_STEPS = Object.freeze([
   { key: 'decision', label: '发布最终结论' },
 ])
 
+const TRIGGERED_REVIEW_STEPS = Object.freeze([
+  { key: 'monitoring', label: '持续观察' },
+  { key: 'collect', label: '采集最新证据' },
+  { key: 'decision', label: '给出终局结论' },
+])
+
 function inferredGenerationStage(generation = {}) {
   const explicit = String(generation.stage || '')
+  const triggeredReview = (
+    generation.role === 'review'
+    && generation.triggerKind === 'price-review'
+  )
+  if (triggeredReview) {
+    if (['queued', 'preparing', 'monitoring'].includes(explicit)) {
+      return 'monitoring'
+    }
+    if (['collect', 'quant', 'theory'].includes(explicit)) {
+      return 'collect'
+    }
+    if (['llm', 'failover', 'finalize'].includes(explicit)) {
+      return 'decision'
+    }
+  }
   if (['queued', 'preparing'].includes(explicit)) return 'prepare'
   if (explicit === 'collect') return 'collect'
   if (explicit === 'quant') return 'quant'
@@ -41,9 +62,15 @@ function inferredGenerationStage(generation = {}) {
 }
 
 export function adviceGenerationSteps(generation = {}) {
-  const steps = generation.deepMode === true
-    ? DEEP_GENERATION_STEPS
-    : QUICK_GENERATION_STEPS
+  const triggeredReview = (
+    generation.role === 'review'
+    && generation.triggerKind === 'price-review'
+  )
+  const steps = triggeredReview
+    ? TRIGGERED_REVIEW_STEPS
+    : generation.deepMode === true
+      ? DEEP_GENERATION_STEPS
+      : QUICK_GENERATION_STEPS
   const stage = inferredGenerationStage(generation)
   const activeIndex = steps.findIndex((step) => step.key === stage)
   return steps.map((step, index) => ({
@@ -77,6 +104,8 @@ function cloudProgressSignature(progress = {}) {
     String(item?.phase || ''),
     String(item?.error || ''),
     String(item?.warning || ''),
+    Number(item?.monitoringUntilAt) || 0,
+    Number(item?.observationWindowMs) || 0,
     Number(item?.progressAt) || 0,
     Number(item?.preparationRetries) || 0,
   ])
@@ -178,7 +207,8 @@ export function adviceJobState(
 }
 
 const REVIEW_TERMINAL_VISIBLE_MS = 2 * 60 * 1000
-const REVIEW_QUEUE_TIMEOUT_MS = 90 * 1000
+const REVIEW_QUEUE_TIMEOUT_MS =
+  (TRIGGERED_REVIEW_TIME_LIMIT_MINUTES * 60 + 30) * 1000
 
 export function adviceReviewCardState(
   batch,
@@ -246,8 +276,24 @@ export function adviceReviewCardState(
     }
     return {
       kind: 'queued',
-      label: '条件已触发，正在限时复核',
-      detail: `${TRIGGERED_REVIEW_TIME_LIMIT_MINUTES}分钟内给出明确操作结论`,
+      label: '条件已触发，正在启动持续观察',
+      detail: `持续观察后，在${TRIGGERED_REVIEW_TIME_LIMIT_MINUTES}分钟内给出明确结论`,
+    }
+  }
+  if (
+    ['queued', 'pending', 'running'].includes(job.status)
+    && (
+      job.stage === 'monitoring'
+      || Number(job.monitoringUntilAt) > Number(now)
+    )
+  ) {
+    return {
+      kind: 'monitoring',
+      label: '触价后持续观察中',
+      detail: String(
+        job.phase
+        || '正在观察价格能否站稳、均价线是否收复以及量能资金变化',
+      ),
     }
   }
   if (['queued', 'pending'].includes(job.status)) {

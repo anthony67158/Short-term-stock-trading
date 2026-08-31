@@ -71,6 +71,7 @@ import {
 import {
   buildTriggeredReviewFallback,
   isTriggeredReviewEvent,
+  triggeredReviewMonitoringWindow,
   triggeredReviewRuntime,
 } from '../shared/triggeredReviewDecision.js';
 import {
@@ -693,13 +694,30 @@ export async function withAdviceTimeoutFallback(
   }
 }
 
-export function adviceJobDeadlineMs(deepMode = false) {
-  return (
+export function adviceJobDeadlineMs(
+  deepMode = false,
+  reviewEvent = null,
+  now = Date.now(),
+) {
+  const standardDeadline = (
     ADVICE_PREPARE_ACCOUNT_TIMEOUT_MS
     + ADVICE_PREPARE_QUOTE_TIMEOUT_MS
     + generationOptions(deepMode).timeoutMs
     + ADVICE_JOB_SETTLE_GRACE_MS
   );
+  const monitoring = triggeredReviewMonitoringWindow(
+    reviewEvent,
+    now,
+  );
+  const reviewRuntime = monitoring.required
+    ? triggeredReviewRuntime(reviewEvent, now)
+    : null;
+  return reviewRuntime
+    ? Math.max(
+        standardDeadline,
+        reviewRuntime.remainingMs + ADVICE_JOB_SETTLE_GRACE_MS,
+      )
+    : standardDeadline;
 }
 
 export function withAdviceJobDeadline(
@@ -729,6 +747,73 @@ export function withAdviceJobDeadline(
       (error) => finish(reject, error),
     );
   });
+}
+
+function abortableDelay(waitMs, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      const error = new Error('军师生成已中断');
+      error.name = 'AbortError';
+      reject(error);
+      return;
+    }
+    let timer = null;
+    const abort = () => {
+      if (timer) clearTimeout(timer);
+      signal?.removeEventListener?.('abort', abort);
+      const error = new Error('军师生成已中断');
+      error.name = 'AbortError';
+      reject(error);
+    };
+    timer = setTimeout(() => {
+      signal?.removeEventListener?.('abort', abort);
+      resolve();
+    }, Math.max(0, Number(waitMs) || 0));
+    signal?.addEventListener?.('abort', abort, { once: true });
+  });
+}
+
+export async function waitForTriggeredReviewMonitoring(
+  reviewEvent,
+  {
+    signal,
+    onProgress,
+    now = Date.now,
+    sleep = abortableDelay,
+  } = {},
+) {
+  let window = triggeredReviewMonitoringWindow(
+    reviewEvent,
+    now(),
+  );
+  if (!window.required) return window;
+  const subject = window.direction === 'pullback'
+    ? '回踩后的承接与均价线恢复'
+    : window.direction === 'breakout'
+      ? '突破后的站稳与量能延续'
+      : '触价后的量价与资金变化';
+  if (window.active) {
+    onProgress?.({
+      stage: 'monitoring',
+      phase: `持续观察${subject}，约${Math.ceil(
+        window.remainingMs / 1000,
+      )}秒后统一复核`,
+      remainingMs: window.remainingMs,
+    });
+    await sleep(window.remainingMs, signal);
+    window = triggeredReviewMonitoringWindow(
+      reviewEvent,
+      now(),
+    );
+  }
+  if (typeof onProgress === 'function') {
+    onProgress({
+      stage: 'monitoring',
+      phase: '持续观察完成，正在采集最新证据',
+      remainingMs: 0,
+    });
+  }
+  return window;
 }
 
 // 军师历史战绩(当前回测口径样本<5 返回 null)
@@ -1128,6 +1213,18 @@ export function reviewResultStillCurrent(result, currentEntry) {
   ) === sourcePlanId;
 }
 
+export function reviewEventMatchesCurrentAdvice(
+  reviewEvent,
+  currentEntry,
+) {
+  if (!isTriggeredReviewEvent(reviewEvent)) return true;
+  const eventPlanId = String(reviewEvent?.planId || '');
+  if (!eventPlanId) return true;
+  return String(
+    currentEntry?.advice?.continuity?.planId || '',
+  ) === eventPlanId;
+}
+
 export function requeueAdviceForTradeChange(
   data,
   code,
@@ -1178,6 +1275,10 @@ async function runJobGen(
   reviewEvent = null,
   reviewOrigin = '',
 ) {
+  await waitForTriggeredReviewMonitoring(reviewEvent, {
+    signal,
+    onProgress,
+  });
   if (typeof onProgress === 'function') {
     onProgress({
       stage: 'collect',
@@ -1226,6 +1327,13 @@ async function runJobGen(
   const sourcePlanId = String(
     previousEntry?.advice?.continuity?.planId || '',
   );
+  if (!reviewEventMatchesCurrentAdvice(reviewEvent, previousEntry)) {
+    const error = new Error(
+      '原观察计划已更新，本次触价复核已停止',
+    );
+    error.code = 'STALE_REVIEW_PLAN';
+    throw error;
+  }
   const previousAdvice = compactAdvicePlan(previousEntry);
   const previousEvidenceDigest = previousEntry?.meta?.evidenceSnapshot
     ? adviceEvidenceDigest(previousEntry.meta.evidenceSnapshot)
@@ -1719,7 +1827,10 @@ async function drainAccount(nick, initialAcc) {
             j.source || '',
           ),
           {
-            timeoutMs: adviceJobDeadlineMs(!!j.deepMode),
+            timeoutMs: adviceJobDeadlineMs(
+              !!j.deepMode,
+              j.trigger || null,
+            ),
             onTimeout: () => controller.abort(),
           },
         )

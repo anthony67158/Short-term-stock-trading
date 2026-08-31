@@ -1560,6 +1560,7 @@ export default async function handler(req, res) {
                 ?? payload.todayQuote?.previousClose
                 ?? null,
               observedAt: Date.now(),
+              triggeredAt: payload.reviewEvent?.at || null,
             },
           )
           const prices = trend.map((t) => t.price)

@@ -143,7 +143,7 @@ export function buildAlertNotification({
   const instruction = stage === 'watch'
     ? watchInstruction(action, holdingMode)
     : stage === 'review'
-      ? '正在核对原军师计划、分时、量能和资金，2分钟内给出明确结论'
+      ? '先持续观察约60秒，再核对分时、量能和资金；2分钟内给出明确结论'
     : stage === 'confirm'
       ? `执行：${alert.opQty && !/不可卖/.test(String(alert.opQty)) ? alert.opQty : action}`
       : stage === 'wait'

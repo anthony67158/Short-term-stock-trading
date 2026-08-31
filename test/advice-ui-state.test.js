@@ -66,6 +66,25 @@ test('快速军师用可验证阶段展示流程而不依赖隐藏思维链', ()
   assert.equal(steps.some((step) => step.key === 'reasoning'), false)
 })
 
+test('到价复核先展示持续观察再采集证据和给出终局结论', () => {
+  const steps = adviceGenerationSteps({
+    role: 'review',
+    triggerKind: 'price-review',
+    stage: 'monitoring',
+    phase: '持续观察回踩后的承接',
+    deepMode: false,
+  })
+
+  assert.deepEqual(
+    steps.map((step) => [step.key, step.label, step.state]),
+    [
+      ['monitoring', '持续观察', 'active'],
+      ['collect', '采集最新证据', 'pending'],
+      ['decision', '给出终局结论', 'pending'],
+    ],
+  )
+})
+
 test('深度研判完成后直接发布最终结论', () => {
   const drafting = adviceGenerationSteps({
     stage: 'llm',
@@ -470,12 +489,21 @@ test('卡片复核状态只由真实price-review任务状态驱动', () => {
     adviceReviewCardState({ reviews: [] }, '600000', { alerts, now }),
     {
       kind: 'queued',
-      label: '条件已触发，正在限时复核',
-      detail: '2分钟内给出明确操作结论',
+      label: '条件已触发，正在启动持续观察',
+      detail: '持续观察后，在2分钟内给出明确结论',
     },
   )
   assert.equal(stateFor('queued').label, '条件已触发，等待后台复核')
   assert.equal(stateFor('running').label, '到价终局复核中')
+  assert.deepEqual(stateFor('running', {
+    stage: 'monitoring',
+    monitoringUntilAt: 70_000,
+    phase: '持续观察回踩后的承接',
+  }), {
+    kind: 'monitoring',
+    label: '触价后持续观察中',
+    detail: '持续观察回踩后的承接',
+  })
   assert.equal(stateFor('publishing').label, '复核完成，正在更新结论')
   assert.equal(stateFor('ok').label, '到价复核完成，已给出明确结论')
   assert.equal(adviceReviewCardState({
@@ -496,7 +524,7 @@ test('卡片复核状态只由真实price-review任务状态驱动', () => {
   assert.equal(stateFor('skipped').label, '自动复核已停止')
 })
 
-test('触价超过90秒仍没有后台任务时明确提示启动失败', () => {
+test('触价超过总期限缓冲仍没有后台任务时明确提示启动失败', () => {
   const alerts = [{
     id: 'review-alert',
     code: '600000',
@@ -510,7 +538,7 @@ test('触价超过90秒仍没有后台任务时明确提示启动失败', () => 
   assert.deepEqual(adviceReviewCardState(
     { reviews: [] },
     '600000',
-    { alerts, now: 100_000 },
+    { alerts, now: 160_000 },
   ), {
     kind: 'failed',
     label: '自动复核未启动，点“重新评估”立即处理',

@@ -116,11 +116,89 @@ function highLowStructure(rows) {
   return 'MIXED'
 }
 
+function minuteOfDay(value) {
+  if (value == null || value === '') return null
+  if (typeof value === 'string') {
+    const match = value.match(/(\d{1,2}):(\d{2})/)
+    if (match) return Number(match[1]) * 60 + Number(match[2])
+  }
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return null
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Shanghai',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(date)
+  const hour = Number(
+    parts.find((item) => item.type === 'hour')?.value,
+  )
+  const minute = Number(
+    parts.find((item) => item.type === 'minute')?.value,
+  )
+  return Number.isFinite(hour) && Number.isFinite(minute)
+    ? hour * 60 + minute
+    : null
+}
+
+function postTriggerSummary(rows, triggeredAt, observedAt) {
+  const triggerMinute = minuteOfDay(triggeredAt)
+  if (triggerMinute == null) return null
+  const postRows = rows.filter((item) => {
+    const minute = minuteOfDay(item.time)
+    return minute != null && minute >= triggerMinute
+  })
+  if (!postRows.length) return null
+  const first = postRows[0]
+  const last = postRows.at(-1)
+  const prices = postRows.map((item) => item.price)
+  const aboveVwapBars = postRows.filter(
+    (item) => item.vwap > 0 && item.price >= item.vwap,
+  ).length
+  const belowVwapBars = postRows.filter(
+    (item) => item.vwap > 0 && item.price < item.vwap,
+  ).length
+  const recent = postRows.slice(-2)
+  return {
+    triggerAt: isoTime(triggeredAt),
+    observedAt: isoTime(observedAt),
+    firstTime: first.time,
+    lastTime: last.time,
+    bars: postRows.length,
+    startPrice: round(first.price),
+    currentPrice: round(last.price),
+    low: round(Math.min(...prices)),
+    high: round(Math.max(...prices)),
+    vwap: round(last.vwap),
+    priceVsVwap: priceVsVwap(last.price, last.vwap),
+    aboveVwapBars,
+    belowVwapBars,
+    reclaimedVwap: (
+      belowVwapBars > 0
+      && last.vwap > 0
+      && last.price >= last.vwap
+    ),
+    heldAboveVwap: (
+      recent.length >= 2
+      && recent.every(
+        (item) => item.vwap > 0 && item.price >= item.vwap,
+      )
+    ),
+    path: sampledPath(postRows).map((item) => ({
+      time: item.time,
+      price: round(item.price),
+      volume: round(item.volume, 0),
+      vwap: round(item.vwap),
+    })),
+  }
+}
+
 export function buildIntradayOpenSummary(
   trends,
   {
     preClose = null,
     observedAt = Date.now(),
+    triggeredAt = null,
   } = {},
 ) {
   const rows = (Array.isArray(trends) ? trends : [])
@@ -201,6 +279,11 @@ export function buildIntradayOpenSummary(
       ? round((currentPrice - dayLow) / (dayHigh - dayLow) * 100, 1)
       : 50,
     highLowStructure: highLowStructure(rows),
+    postTrigger: postTriggerSummary(
+      rows,
+      triggeredAt,
+      observedAt,
+    ),
     volume: {
       state: volumeState(recentToPriorRatio),
       recentToPriorRatio: round(recentToPriorRatio, 2),
@@ -447,6 +530,12 @@ export function buildReviewDecisionPacket({
     priorMemory,
     currentMemory,
   )
+  const intradayFromOpen = {
+    ...(current.intradayFromOpen || {}),
+  }
+  const embeddedPostTrigger = intradayFromOpen.postTrigger
+  delete intradayFromOpen.postTrigger
+  delete intradayFromOpen.path
   return {
     schemaVersion: REVIEW_DECISION_PACKET_VERSION,
     channel: normalizedChannel,
@@ -473,8 +562,11 @@ export function buildReviewDecisionPacket({
     current: {
       quote: compact(current.quote),
       funds: compact(current.funds),
-      intradayFromOpen: compact(current.intradayFromOpen),
-      postTrigger: compact(current.postTrigger),
+      intradayFromOpen: compact(intradayFromOpen),
+      postTrigger: compact(
+        current.postTrigger
+        || embeddedPostTrigger,
+      ),
       technical: compact(current.technical),
       tactical: tacticalForReview(current.tactical),
       position: compact(current.position),

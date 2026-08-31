@@ -568,6 +568,15 @@ function tacticalReviewEventRule(reviewEvent = {}) {
     1,
     Math.min(5, Number(reviewEvent.timeLimitMinutes) || 2),
   )
+  const observationSeconds = Math.max(
+    1,
+    Math.min(
+      90,
+      Math.round(
+        (Number(reviewEvent.observationWindowMs) || 60_000) / 1000,
+      ),
+    ),
+  )
   const holdingAddReview = /加仓/.test(
     String(reviewEvent.actionLabel || ''),
   ) || ['PROBE_ADD', 'ADD'].includes(reviewEvent.plannedAction)
@@ -590,8 +599,11 @@ function tacticalReviewEventRule(reviewEvent = {}) {
     : triggerDir === 'LTE'
       ? '你此前在等待的回踩企稳价已经到达'
       : '你此前设定的观察价已经到达'
-  const evidenceRule = '必须先读取previousPlan里的原军师结论、执行条件、失效条件和仓位意见，再结合本轮最新证据判断。结论至少明确引用一类可追溯依据：已验证投资理论、实时资金与价格走势、或重大催化事件。'
-  const terminalRule = `这是限时终局复核，须在${timeLimit}分钟总期限内一次完成。禁止生成任何新的观察价、复核价或下一轮价格条件，禁止用“继续看看/再等等”逃避结论。只能描述截至复核时已经观察到的事实，禁止断言价格之后“不能/不会重新站回”；尚未确认站回时应结束本次触发，并说明之后重新站回且量价、资金转强可作为新事件重新评估。`
+  const evidenceRule = '核对原计划、本轮价格、分时、资金，引用一类可追溯依据。'
+  const observationRule = reviewEvent.kind === 'price-review'
+    ? `观察${observationSeconds}秒：`
+    : ''
+  const terminalRule = `${observationRule}${timeLimit}分钟内裁决，只据窗口事实。未确认即结束；之后量价资金转强才重评。`
   if (holdingAddReview || holdingReduceReview) {
     const focus = holdingReduceReview
       ? '减仓或锁定利润'

@@ -4,6 +4,9 @@ export const TRIGGERED_REVIEW_TIME_LIMIT_MINUTES = 2
 export const TRIGGERED_REVIEW_TOTAL_BUDGET_MS =
   TRIGGERED_REVIEW_TIME_LIMIT_MINUTES * 60 * 1000
 export const TRIGGERED_REVIEW_MODEL_BUDGET_MS = 45 * 1000
+export const TRIGGERED_REVIEW_OBSERVATION_MS = 60 * 1000
+const TRIGGERED_REVIEW_EXECUTION_RESERVE_MS =
+  TRIGGERED_REVIEW_MODEL_BUDGET_MS + 15 * 1000
 
 const TRIGGERED_REVIEW_SOURCE_KEYS = new Set([
   'market',
@@ -120,6 +123,45 @@ export function triggeredReviewDeadlineAt(
   if (explicit != null) return explicit
   const startedAt = finite(event.at) || Number(now)
   return startedAt + TRIGGERED_REVIEW_TOTAL_BUDGET_MS
+}
+
+export function triggeredReviewMonitoringWindow(
+  event = {},
+  now = Date.now(),
+) {
+  if (String(event?.kind || '') !== 'price-review') {
+    return {
+      required: false,
+      active: false,
+      direction: '',
+      untilAt: null,
+      remainingMs: 0,
+    }
+  }
+  const startedAt = finite(event.at) || Number(now)
+  const deadlineAt = triggeredReviewDeadlineAt(event, now)
+  const requestedUntilAt = finite(event.monitoringUntilAt)
+    || startedAt + TRIGGERED_REVIEW_OBSERVATION_MS
+  const latestStartAt = Math.max(
+    startedAt,
+    deadlineAt - TRIGGERED_REVIEW_EXECUTION_RESERVE_MS,
+  )
+  const untilAt = Math.max(
+    startedAt,
+    Math.min(requestedUntilAt, latestStartAt),
+  )
+  const remainingMs = Math.max(0, untilAt - Number(now))
+  return {
+    required: true,
+    active: remainingMs > 0,
+    direction: /gte/i.test(String(event.direction || ''))
+      ? 'breakout'
+      : /lte/i.test(String(event.direction || ''))
+        ? 'pullback'
+        : 'watch',
+    untilAt,
+    remainingMs,
+  }
 }
 
 export function triggeredReviewRuntime(

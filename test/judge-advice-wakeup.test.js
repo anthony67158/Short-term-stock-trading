@@ -11,6 +11,9 @@ import {
 } from '../api/cron_alert.js'
 import { completeJob, enqueueJob, leaseJob } from '../api/_jobs.js'
 import { projectAdviceAlerts } from '../shared/adviceAlerts.js'
+import {
+  TRIGGERED_REVIEW_OBSERVATION_MS,
+} from '../shared/triggeredReviewDecision.js'
 
 test('页面发现观察价已到时立即进入复核并排入紧急任务', () => {
   const now = Date.parse('2026-08-28T05:30:00.000Z')
@@ -68,6 +71,12 @@ test('页面发现观察价已到时立即进入复核并排入紧急任务', ()
   assert.match(result.alert.triggeredMsg, /55\.34.*55\.37/)
   assert.equal(data.reviewJobs['000636'].source, 'judge')
   assert.equal(data.reviewJobs['000636'].trigger.kind, 'price-review')
+  assert.equal(
+    data.reviewJobs['000636'].trigger.monitoringUntilAt,
+    now + TRIGGERED_REVIEW_OBSERVATION_MS,
+  )
+  assert.equal(data.reviewJobs['000636'].stage, 'monitoring')
+  assert.match(data.reviewJobs['000636'].phase, /持续观察/)
 })
 
 test('页面即时复核拒绝未到价和非当日实时行情', () => {

@@ -24,6 +24,7 @@ import {
 } from '../shared/adviceBatchPolicy.js';
 import {
   isTriggeredReviewEvent,
+  triggeredReviewMonitoringWindow,
 } from '../shared/triggeredReviewDecision.js';
 
 export const CONCURRENCY = Number(process.env.ADVICE_CONCURRENCY || 3); // 全局并发上限【默认/回退】(运行时优先按承接 advisor 角色的端点数,见 cron_advice.js)
@@ -399,6 +400,10 @@ export function enqueueJob(data, {
     if (trigger && typeof trigger === 'object') {
       if (cur.status === 'queued') {
         const generation = generationOptions(false);
+        const monitoring = triggeredReviewMonitoringWindow(
+          trigger,
+          now,
+        ).active;
         cur.source = 'judge';
         cur.trigger = trigger;
         cur.at = Math.max(Number(cur.at) || 0, Number(trigger.at) || now);
@@ -408,7 +413,10 @@ export function enqueueJob(data, {
         cur.deepMode = false;
         cur.batchRequest = false;
         cur.batchId = '';
-        cur.phase = '军师执行确认已触发，等待复核';
+        cur.stage = monitoring ? 'monitoring' : 'queued';
+        cur.phase = monitoring
+          ? '观察价已触发，准备持续观察确认'
+          : '军师执行确认已触发，等待复核';
         cur.progressAt = now;
         cur.idempotencyKey = eventKey;
         return { job: cur, created: false, deferred: false };
@@ -428,6 +436,10 @@ export function enqueueJob(data, {
   const maxAttempts = isTriggeredReviewEvent(trigger)
     ? 1
     : generation.maxAttempts;
+  const monitoring = triggeredReviewMonitoringWindow(
+    trigger,
+    now,
+  ).active;
   const job = {
     id: `${resolvedRole === 'review' ? 'review_' : ''}${code}_${now}`,
     role: resolvedRole,
@@ -443,9 +455,11 @@ export function enqueueJob(data, {
     deepMode: generation.deepMode,
     batchRequest: !!batchRequest,
     ...(trigger && typeof trigger === 'object' ? { trigger } : {}),
-    stage: 'queued',
-    phase: resolvedRole === 'review'
-      ? '排队等待云端复核'
+    stage: monitoring ? 'monitoring' : 'queued',
+    phase: monitoring
+      ? '观察价已触发，准备持续观察确认'
+      : resolvedRole === 'review'
+        ? '排队等待云端复核'
       : '排队等待云端生成',
     sources: [], reasoning: '', quant: null, model: '', endpoint: '', progressAt: now,
   };
@@ -464,7 +478,11 @@ export function leaseJob(
   const j = findAdviceJob(data, code, { role, jobId });
   if (!j || j.status !== 'queued') return null;
   j.status = 'running';
-  j.stage = 'preparing';
+  const monitoring = triggeredReviewMonitoringWindow(
+    j.trigger,
+    now,
+  ).active;
+  j.stage = monitoring ? 'monitoring' : 'preparing';
   j.resourceRole = adviceJobRole(j);
   j.resourceUnits = 1;
   j.attempts = (j.attempts || 0) + 1;
@@ -472,7 +490,9 @@ export function leaseJob(
   j.startedAt = j.startedAt || now;
   j.leaseUntil = now + LEASE_MS;
   j.error = '';
-  j.phase = '正在准备分析';
+  j.phase = monitoring
+    ? '观察价已触发，正在持续观察确认'
+    : '正在准备分析';
   j.progressAt = now;
   return j;
 }
@@ -633,6 +653,10 @@ export function completeJob(
       };
     }
     const triggerAt = Number(pendingTrigger.at) || now;
+    const monitoring = triggeredReviewMonitoringWindow(
+      pendingTrigger,
+      now,
+    ).active;
     Object.assign(j, {
       id: `${code}_${now}_judge`,
       status: 'queued',
@@ -650,8 +674,10 @@ export function completeJob(
       batchId: '',
       deepMode: false,
       batchRequest: false,
-      stage: 'queued',
-      phase: '军师执行确认已触发，等待复核',
+      stage: monitoring ? 'monitoring' : 'queued',
+      phase: monitoring
+        ? '观察价已触发，准备持续观察确认'
+        : '军师执行确认已触发，等待复核',
       sources: [],
       reasoning: '',
       quant: null,
@@ -1044,6 +1070,10 @@ export function jobsToProgress(data, now = Date.now(), concurrency = CONCURRENCY
     endpoint: j.endpoint || '',
     triggerKind: String(j.trigger?.kind || ''),
     triggerAlertId: String(j.trigger?.alertId || ''),
+    monitoringUntilAt:
+      Number(j.trigger?.monitoringUntilAt) || 0,
+    observationWindowMs:
+      Number(j.trigger?.observationWindowMs) || 0,
     progressAt: j.progressAt || j.at || 0,
     attempts: j.attempts || 0,
     preparationRetries: j.preparationRetries || 0,
