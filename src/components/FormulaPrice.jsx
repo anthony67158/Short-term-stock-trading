@@ -70,6 +70,11 @@ export default function FormulaPrice({ code }) {
   const reference = state.payload?.advisorReference
   const [actionLabel, tone] = ACTIONS[decision?.action] || ACTIONS.AVOID
   const hasPrice = decision?.primaryPrice != null
+  const noPriceAction = decision?.action === 'HOLD'
+    ? '不加仓、不减仓'
+    : ['REDUCE', 'EXIT'].includes(decision?.action)
+      ? '本次不卖出'
+      : '本次不买入'
   const explanation = buildFormulaPriceExplanation(state.payload)
   return (
     <section
@@ -147,7 +152,7 @@ export default function FormulaPrice({ code }) {
             <b data-empty={hasPrice ? undefined : 'true'}>
               {hasPrice
                 ? formatPrice(decision.primaryPrice)
-                : '暂不操作'}
+                : noPriceAction}
             </b>
           </div>
           {hasPrice && (

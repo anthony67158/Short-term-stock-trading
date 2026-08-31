@@ -10,6 +10,7 @@ import { planStore, t1StatusOf, usePlanStore } from '../planStore'
 import { alertStore, useAlertStore, describeAlert, alertMeta, ALERT_TYPES } from '../alertStore'
 import { fmtRaw } from '../format'
 import PushToggle from './PushToggle'
+import { userFacingAlertMessage } from '../../shared/alertNotification.js'
 import { judgeEffectStats } from '../../shared/confirmPolicy.js'
 import { applyT1ToAlert } from '../../shared/t1AdvicePolicy.js'
 import { formatPriceLimitThreshold } from '../../shared/priceLimitPolicy.js'
@@ -245,7 +246,7 @@ function renderRule(a, quote, setDelTarget, holding) {
         {a.phase === 'watching' && !a.triggeredAt && (
           <div className="ar-watching"><Icon name="eye" size={12} /> 已到点位，系统盯盘确认真正时机中，确认后会发「可以操作」强提示{a.watchingAt ? ` · ${new Date(a.watchingAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}起` : ''}</div>
         )}
-        {a.triggeredAt && <div className="ar-fired">已于 {new Date(a.triggeredAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })} 触发：{a.triggeredMsg}</div>}
+        {a.triggeredAt && <div className="ar-fired">已于 {new Date(a.triggeredAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })} 触发：{userFacingAlertMessage(a)}</div>}
       </button>
       <div className="ar-actions">
         {a.actKind && <ActionQuickExec alert={a} holding={holding} />}

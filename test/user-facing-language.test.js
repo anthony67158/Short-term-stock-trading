@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 import {
+  explicitActionInstruction,
+  explicitActionLabel,
   humanizeAdviceTextFields,
   humanizeUserFacingText,
 } from '../shared/userFacingLanguage.js'
@@ -62,6 +64,61 @@ test('到价复核复用上一轮量化时不暴露内部状态码', () => {
     '原建议没有可复用的量化结果，本轮快速复核不重复计算',
   )
   assert.doesNotMatch(result, /TRIGGERED_REVIEW/)
+})
+
+test('操作标签明确区分当前仓位与本轮动作', () => {
+  assert.equal(
+    explicitActionLabel('持有', { holdingMode: true }),
+    '继续持有',
+  )
+  assert.equal(
+    explicitActionLabel('维持持有', {
+      holdingMode: true,
+      terminal: true,
+    }),
+    '本次不加仓、不减仓',
+  )
+  assert.equal(
+    explicitActionLabel('维持观望', { terminal: true }),
+    '本次不买入',
+  )
+  assert.equal(explicitActionLabel('观望'), '暂不买入')
+  assert.equal(explicitActionLabel('等待确认'), '条件尚未确认')
+  assert.equal(
+    explicitActionLabel('到价复核：维持持有', {
+      holdingMode: true,
+      terminal: true,
+    }),
+    '到价复核：本次不加仓、不减仓',
+  )
+})
+
+test('模糊的维持类执行文案改为当前动作和后续条件', () => {
+  assert.equal(
+    explicitActionInstruction(
+      '维持持有：资金未转强；本次触发结束',
+      { holdingMode: true, terminal: true },
+    ),
+    '本次不加仓、不减仓，继续持有现有仓位：资金未转强；本次触发结束',
+  )
+  assert.equal(
+    explicitActionInstruction(
+      '维持观望：量能不足；原触发价已消费',
+      { terminal: true },
+    ),
+    '本次不买入：量能不足；原触发价已消费',
+  )
+  assert.equal(
+    explicitActionInstruction(
+      '结论：维持持有；今日买入仓位受T+1限制',
+      { holdingMode: true, terminal: true },
+    ),
+    '结论：本次不加仓、不减仓，继续持有现有仓位；今日买入仓位受T+1限制',
+  )
+  assert.equal(
+    explicitActionInstruction('等待突破10.20元并放量'),
+    '本次不买入；突破10.20元并放量',
+  )
 })
 
 test('建议文本递归转译但不改写程序使用的结构字段', () => {

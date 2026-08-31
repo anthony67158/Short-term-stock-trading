@@ -513,7 +513,9 @@ const PROPOSAL_ACTION = {
 function ProposalList({ proposals, evidence, canApply, appliedProposalIds, onApply }) {
   return (
     <div className="proposal-list">
-      <div className="proposal-head"><Icon name="target" size={12} /> 待确认交易提案</div>
+      <div className="proposal-head">
+        <Icon name="target" size={12} /> 交易提案（需你确认）
+      </div>
       {proposals.map((proposal) => {
         const action = PROPOSAL_ACTION[proposal.action] || { label: proposal.action, cls: '' }
         const applied = appliedProposalIds.has(proposal.id)

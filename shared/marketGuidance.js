@@ -51,7 +51,7 @@ export function buildMarketBoardGuidance({
     } else if (averageIndexPct <= -0.3 && ratio <= 0.85) {
       conclusion = '指数与多数个股同步偏弱，亏钱效应正在扩散'
     } else {
-      conclusion = '指数与个股表现接近均衡，方向仍需等待确认'
+      conclusion = '指数与个股表现接近均衡，方向未明；当前不主动加仓'
     }
   } else if (averageIndexPct != null) {
     conclusion = averageIndexPct >= 0

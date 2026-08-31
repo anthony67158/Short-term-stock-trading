@@ -164,10 +164,10 @@ function MarketLight({ market, sectors, limitUp }) {
     },
     TRANSITION: {
       light: 'yellow',
-      status: '等待确认',
-      text: '方向切换，降低试错频率',
+      status: '方向未明',
+      text: '市场方向切换，只有量价与资金共振后才考虑小仓试错',
       icon: 'gauge',
-      title: '今日轻仓等待共振',
+      title: '今日暂不主动加仓',
       sub: `只处理确定性较高的机会，目标总仓位 ${regime.targetPositionPct.min}~${regime.targetPositionPct.max}%`,
     },
     RISK_OFF: {

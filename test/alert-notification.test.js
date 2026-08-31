@@ -1,7 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { buildAlertNotification } from '../shared/alertNotification.js'
+import {
+  buildAlertNotification,
+  userFacingAlertMessage,
+} from '../shared/alertNotification.js'
 
 const reduceAlert = {
   id: 'reduce-1',
@@ -21,8 +24,11 @@ test('到价待确认通知先展示股票和动作且正文只保留执行要�
     stage: 'watch',
   })
 
-  assert.equal(notification.title, '中利集团(002309)｜减仓待确认')
-  assert.equal(notification.body, '现3.06｜目标≥3.05｜减仓9手\n先不卖，等冲高转弱')
+  assert.equal(notification.title, '中利集团(002309)｜减仓观察价已到')
+  assert.equal(
+    notification.body,
+    '现3.06｜目标≥3.05｜减仓9手\n当前不减仓；冲高转弱后复核',
+  )
   assert.doesNotMatch(notification.body, /系统正在|确认后会|详情见|到价≠/)
 })
 
@@ -50,7 +56,7 @@ test('失效通知保留股票代码并明确放弃本次动作', () => {
   assert.match(notification.body, /结论：放弃本次减仓；本次触发结束/)
 })
 
-test('未确认通知给出维持持有终态而不是继续循环观察', () => {
+test('未确认通知给出本轮不调仓终态而不是继续循环观察', () => {
   const notification = buildAlertNotification({
     alert: reduceAlert,
     quote: { price: 3.04 },
@@ -58,9 +64,42 @@ test('未确认通知给出维持持有终态而不是继续循环观察', () =>
     reason: '冲高后未转弱',
   })
 
-  assert.equal(notification.title, '中利集团(002309)｜维持持有')
-  assert.match(notification.body, /结论：维持持有；本次触发结束/)
+  assert.equal(
+    notification.title,
+    '中利集团(002309)｜本次不加仓、不减仓',
+  )
+  assert.match(
+    notification.body,
+    /结论：本次不加仓、不减仓；本次触发结束/,
+  )
   assert.match(notification.body, /冲高后未转弱/)
+})
+
+test('历史终局用语在通知层改写为本轮明确动作', () => {
+  const notification = buildAlertNotification({
+    alert: {
+      code: '600519',
+      name: '贵州茅台',
+      type: 'price',
+      op: 'lte',
+      value: 145,
+      note: '买入点',
+    },
+    quote: { price: 144.9 },
+    stage: 'wait',
+    reason: '维持观望；本次触发结束，不新增复核价',
+  })
+
+  assert.equal(notification.title, '贵州茅台(600519)｜本次不买入')
+  assert.doesNotMatch(notification.body, /维持观望|不操作/)
+  assert.match(notification.body, /本次触发结束/)
+  assert.equal(
+    userFacingAlertMessage({
+      ...reduceAlert,
+      triggeredMsg: '维持持有；本次触发结束',
+    }),
+    '本次不加仓、不减仓，继续持有现有仓位；本次触发结束',
+  )
 })
 
 test('观察价命中时明确通知正在复核且不暗示下单', () => {

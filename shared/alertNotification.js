@@ -1,3 +1,5 @@
+import { explicitActionInstruction } from './userFacingLanguage.js'
+
 const OP_LABEL = { gte: '≥', lte: '≤' }
 
 function finite(value) {
@@ -64,17 +66,57 @@ function factLine(alert, quote) {
   return parts.join('｜')
 }
 
-function watchInstruction(action) {
-  if (/加仓|买入/.test(action)) return '先不买，等止跌企稳'
-  if (/减仓|止盈/.test(action)) return '先不卖，等冲高转弱'
-  if (/止损/.test(action)) return '先盯盘，等有效跌破'
-  return '先观察，等条件确认'
+function watchInstruction(action, holdingMode) {
+  if (/加仓|买入/.test(action)) {
+    return '当前不买入；止跌企稳后复核'
+  }
+  if (/减仓|止盈/.test(action)) {
+    return '当前不减仓；冲高转弱后复核'
+  }
+  if (/止损/.test(action)) {
+    return '当前不卖出；有效跌破后复核'
+  }
+  return holdingMode
+    ? '本次不加仓、不减仓；条件满足后复核'
+    : '当前不买入；条件满足后复核'
 }
 
-function waitOutcome(action) {
-  return /加仓|减仓|止盈|止损/.test(action)
-    ? '维持持有'
-    : '维持观望'
+function waitOutcome(action, holdingMode) {
+  return holdingMode || /加仓|减仓|止盈|止损/.test(action)
+    ? '本次不加仓、不减仓'
+    : '本次不买入'
+}
+
+function terminalReason(reason, holdingMode) {
+  return compactText(
+    explicitActionInstruction(reason, {
+      holdingMode,
+      terminal: true,
+    })
+      .replace(/^结论\s*[：:]\s*/, '')
+      .replace(
+        /^本次不加仓、不减仓(?:，继续持有现有仓位)?[，,；;:]?\s*/,
+        '',
+      )
+      .replace(/^本次不买入[，,；;:]?\s*/, '')
+      .replace(/^本次触发结束[，,；;:]?\s*/, ''),
+  )
+}
+
+export function userFacingAlertMessage(alert = {}) {
+  const message = String(alert.triggeredMsg || '').trim()
+  if (!message) return ''
+  const action = actionOf(alert)
+  const holdingMode = (
+    ['add', 'reduce'].includes(String(alert.actKind || ''))
+    || /加仓|减仓|止盈|止损/.test(`${action} ${alert.note || ''}`)
+  )
+  return explicitActionInstruction(message, {
+    holdingMode,
+    terminal: /维持持有|维持观望|保持持有|保持观望|维持原计划/.test(
+      message,
+    ),
+  })
 }
 
 function invalidOutcome(action) {
@@ -93,19 +135,23 @@ export function buildAlertNotification({
 } = {}) {
   const identity = identityOf(alert)
   const action = actionOf(alert)
+  const holdingMode = (
+    ['add', 'reduce'].includes(String(alert.actKind || ''))
+    || /加仓|减仓|止盈|止损/.test(`${action} ${alert.note || ''}`)
+  )
   const facts = factLine(alert, quote) || compactText(reason, 46)
   const instruction = stage === 'watch'
-    ? watchInstruction(action)
+    ? watchInstruction(action, holdingMode)
     : stage === 'review'
       ? '正在核对原军师计划、分时、量能和资金，2分钟内给出明确结论'
     : stage === 'confirm'
       ? `执行：${alert.opQty && !/不可卖/.test(String(alert.opQty)) ? alert.opQty : action}`
       : stage === 'wait'
-        ? `结论：${waitOutcome(action)}；本次触发结束`
+        ? `结论：${waitOutcome(action, holdingMode)}；本次触发结束`
       : stage === 'invalid'
         ? `结论：${invalidOutcome(action)}；本次触发结束`
         : `执行：${alert.opQty || action}`
-  const conciseReason = compactText(reason)
+  const conciseReason = terminalReason(reason, holdingMode)
   const body = [
     facts,
     ['confirm', 'wait', 'invalid'].includes(stage) && conciseReason
@@ -113,13 +159,13 @@ export function buildAlertNotification({
       : instruction,
   ].filter(Boolean).join('\n').slice(0, 92)
   const title = stage === 'watch'
-    ? `${identity}｜${action}待确认`
+    ? `${identity}｜${action === '复核' ? '' : action}观察价已到`
     : stage === 'review'
       ? `${identity}｜观察条件已到`
     : stage === 'confirm'
       ? `${identity}｜现在${action}`
       : stage === 'wait'
-        ? `${identity}｜${waitOutcome(action)}`
+        ? `${identity}｜${waitOutcome(action, holdingMode)}`
       : stage === 'invalid'
         ? `${identity}｜${invalidOutcome(action)}`
         : `${identity}｜${action}提醒`

@@ -647,8 +647,8 @@ function conditionalFallback(item, index, noTradeReason) {
     ...(item.tags || []).slice(0, 2),
   ].filter(Boolean)
   const buyPoint = buyLow != null && buyHigh != null
-    ? `等待回踩${buyLow}~${buyHigh}缩量企稳${breakout != null ? `，或放量突破${breakout}后再评估` : ''}`
-    : '等待回踩企稳或放量突破后再评估，不在加速段追入'
+    ? `当前不买入；回踩${buyLow}~${buyHigh}缩量企稳${breakout != null ? `，或放量突破${breakout}后再评估` : ''}`
+    : '当前不买入；回踩企稳或放量突破后再评估，不在加速段追入'
 
   return {
     rank: index + 1,

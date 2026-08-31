@@ -134,7 +134,7 @@ export function adviceReviewRisk({
   ) {
     urgent.push('主力流出与小单流入背离')
   } else if (mainNet != null && mainNet > 0 && retailNet != null && retailNet < 0) {
-    elevated.push('主力流入与小单流出待确认')
+    elevated.push('主力流入但小单流出，需结合价格与量能确认承接')
   }
 
   const opportunity = snapshot?.evidence?.decisionSignals?.sectorOpportunity

@@ -113,7 +113,7 @@ export function completeAdviceHorizonFields(advice, mode = '') {
     futurePlan: text(advice.futurePlan) || (
       mode === 'hold_advice'
         ? '未来1-5日只按当前止损、减仓和目标条件执行，逻辑失效及时退出。'
-        : '成交后1-5日按止损与目标条件管理；未成交继续观望，不提高买价。'
+        : '成交后1-5日按止损与目标条件管理；未成交则不买入，且不提高买价。'
     ),
   }
 }

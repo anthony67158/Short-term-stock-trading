@@ -1,5 +1,9 @@
 import { t1GateForSide } from './t1AdvicePolicy.js'
-import { humanizeUserFacingText } from './userFacingLanguage.js'
+import {
+  explicitActionInstruction,
+  explicitActionLabel,
+  humanizeUserFacingText,
+} from './userFacingLanguage.js'
 import { executionTriggerDirection } from './executionTrigger.js'
 import { adviceObservationLevels } from './advicePriceContract.js'
 import { holdingAddReviewPlan } from './holdingFollowUp.js'
@@ -53,7 +57,9 @@ export function actionImportance(view = {}) {
     || view.trigger?.direction === 'inactive'
   ) {
     if (/试仓/.test(action)) return 'conditional'
-    if (/条件(?:买入|加仓)|待确认建仓/.test(action)) return 'ready'
+    if (/条件(?:买入|加仓)|(?:待确认|人工确认后)建仓/.test(action)) {
+      return 'ready'
+    }
     return 'watch'
   }
   if (['buy', 'add', 'reduce', 'sell'].includes(view.kind)) {
@@ -176,11 +182,11 @@ function deferredOpportunityView(plan, executionOpen) {
     trigger: {
       direction: 'inactive',
       price: null,
-      label: '等待确认',
+      label: '待核对入场时机',
       stateLabel: liveReview
         ? next.action === 'PROBE'
-          ? '等待试仓确认'
-          : '等待买入确认'
+          ? '试仓条件待复核'
+          : '买入条件待复核'
         : '当前休市',
       detailLabel: liveReview
         ? '仅确认入场时机'
@@ -345,15 +351,15 @@ function triggerFor(kind, levels, triggerDirection = '', followUp = null) {
       direction: 'inactive',
       price: waitLevel?.price ?? null,
       label: waitLevel?.key === 'watch_breakout'
-        ? '等待突破'
+        ? '突破后再判断'
         : waitLevel?.key === 'watch_pullback'
-          ? '等待回踩'
-          : '等待确认',
+          ? '回踩后再判断'
+          : '条件尚未确认',
       stateLabel: waitLevel?.key === 'watch_breakout'
-        ? '等待放量突破'
+        ? '放量突破后再判断'
         : waitLevel?.key === 'watch_pullback'
-          ? '等待回踩企稳'
-          : '等待新证据',
+          ? '回踩企稳后再判断'
+          : '量价条件尚未满足',
       detailLabel: waitLevel
         ? '到价立即复核一次'
         : '出现新证据后重新评估',
@@ -433,7 +439,7 @@ export function buildAdviceActionView(
   const planAction = {
     BUY: '现在买入',
     ADD: '加仓',
-    HOLD: '持有',
+    HOLD: '继续持有',
     REDUCE: '减仓',
     EXIT: '清仓',
     T_BUY_FIRST: '买回',
@@ -535,7 +541,7 @@ export function buildAdviceActionView(
     ].filter(Boolean), advice)
     return {
       kind: 'wait',
-      action: '待确认建仓',
+      action: '人工确认后建仓',
       displayTone: 'buy',
       commandLabel: '执行预案',
       detailActionLabel: '查看建仓依据',
@@ -547,8 +553,8 @@ export function buildAdviceActionView(
       trigger: {
         direction: 'inactive',
         price: pendingEntry.buyPrice,
-        label: '等待确认',
-        stateLabel: '等待人工确认',
+        label: '需要人工确认',
+        stateLabel: '确认后可执行',
         detailLabel: '确认后按计划手动建仓',
         metricLabel: '不自动下单',
       },
@@ -629,10 +635,17 @@ export function buildAdviceActionView(
     const reason = entryAboveCurrent
       ? `${entry.price}元高于${sessionDeferred ? '收盘价' : '现价'}${current}元，只作突破观察，不是买入价`
       : `${entry.price}元只作回踩观察，当前不执行`
+    const deferredAction = deferredOpportunity?.action
+      || (sessionDeferred ? '等待盘中' : '等待突破')
+    const deferredInstruction = deferredOpportunity
+      ? clean(
+          `${deferredOpportunity.instruction}；${reason}`,
+          240,
+        )
+      : `${phasePrefix}：${reason}；满足后重新生成建议`
     return {
       kind: 'wait',
-      action: deferredOpportunity?.action
-        || (sessionDeferred ? '等待盘中' : '等待突破'),
+      action: explicitActionLabel(deferredAction, { holdingMode }),
       displayTone: deferredOpportunity?.displayTone,
       commandLabel: deferredOpportunity?.commandLabel,
       detailActionLabel:
@@ -640,12 +653,10 @@ export function buildAdviceActionView(
       shortHorizon: deferredOpportunity?.shortHorizon
         || clean(source.shortHorizon, 30),
       cardInstruction: deferredOpportunity?.cardInstruction,
-      instruction: deferredOpportunity
-        ? clean(
-            `${deferredOpportunity.instruction}；${reason}`,
-            240,
-          )
-        : `${phasePrefix}：${reason}；满足后重新生成建议`,
+      instruction: explicitActionInstruction(
+        deferredInstruction,
+        { holdingMode },
+      ),
       quantity: '',
       quantityLabel: deferredOpportunity?.quantityLabel,
       levels: [{
@@ -657,8 +668,10 @@ export function buildAdviceActionView(
       trigger: deferredOpportunity?.trigger || {
         direction: 'inactive',
         price: null,
-        label: '等待确认',
-        stateLabel: sessionDeferred ? '等待下一交易时段' : '等待突破确认',
+        label: '条件尚未确认',
+        stateLabel: sessionDeferred
+          ? '下一交易时段再判断'
+          : '突破确认后再判断',
         detailLabel: '盘中满足条件后再提醒',
         metricLabel: '当前不下单',
       },
@@ -694,26 +707,38 @@ export function buildAdviceActionView(
   const deferredWaitPlan = deferredWait
     ? policyOpportunity
     : null
+  const rawDisplayAction = deferredWaitPlan?.action
+    || (
+      deferredWait
+        ? '等待盘中'
+        : terminalOutcome
+          || (kind === 'wait' && primaryWaitLevel
+          ? primaryWaitLevel.key === 'watch_breakout'
+            ? '等待突破'
+            : '等待回踩'
+          : action || ({
+              buy: '买入',
+              add: '加仓',
+              reduce: '减仓',
+              sell: '退出',
+              hold: '持有',
+              wait: '观望',
+            }[kind]))
+    )
+  const displayAction = explicitActionLabel(rawDisplayAction, {
+    holdingMode,
+    terminal: !!terminalOutcome,
+  })
+  const displayInstruction = explicitActionInstruction(
+    deferredWaitPlan?.instruction || instruction,
+    {
+      holdingMode,
+      terminal: !!terminalOutcome,
+    },
+  )
   return {
     kind,
-    action: deferredWaitPlan?.action
-      || (
-        deferredWait
-          ? '等待盘中'
-          : terminalOutcome
-            || (kind === 'wait' && primaryWaitLevel
-            ? primaryWaitLevel.key === 'watch_breakout'
-              ? '等待突破'
-              : '等待回踩'
-            : action || ({
-                buy: '买入',
-                add: '加仓',
-                reduce: '减仓',
-                sell: '退出',
-                hold: '持有',
-                wait: '观望',
-              }[kind]))
-      ),
+    action: displayAction,
     displayTone: deferredWaitPlan?.displayTone,
     commandLabel: deferredWaitPlan?.commandLabel
       || (terminalOutcome ? '复核结论' : null)
@@ -724,7 +749,7 @@ export function buildAdviceActionView(
       : deferredWaitPlan?.shortHorizon
         || clean(source.shortHorizon, 30),
     cardInstruction: deferredWaitPlan?.cardInstruction,
-    instruction: deferredWaitPlan?.instruction || instruction,
+    instruction: displayInstruction,
     quantity,
     quantityLabel: deferredWaitPlan?.quantityLabel,
     levels,
@@ -733,7 +758,7 @@ export function buildAdviceActionView(
           direction: 'inactive',
           price: null,
           label: '复核完成',
-          stateLabel: terminalOutcome,
+          stateLabel: displayAction,
           detailLabel: '本次价格触发已结束',
           metricLabel: '不再复核原价',
         }
@@ -741,8 +766,8 @@ export function buildAdviceActionView(
         ? {
           direction: 'inactive',
           price: null,
-          label: '等待确认',
-          stateLabel: '等待下一交易时段',
+          label: '条件尚未确认',
+          stateLabel: '下一交易时段再判断',
           detailLabel: '盘中满足条件后再提醒',
           metricLabel: '当前不下单',
         }
@@ -1017,10 +1042,10 @@ export function buildActionProgress(trigger, currentPrice) {
       stateLabel: score >= 75
         ? `接近${trigger.label}`
         : trigger.direction === 'gte'
-          ? '等待反弹'
+          ? '反弹条件监控中'
           : trigger.metricLabel === '减仓条件'
-            ? '等待跌破'
-            : '等待回踩',
+            ? '跌破条件监控中'
+            : '回踩条件监控中',
       reached: false,
       currentPrice: current,
     }
@@ -1044,7 +1069,7 @@ export function buildActionProgress(trigger, currentPrice) {
     pct: 100,
     score: 100,
     tone: trigger.direction === 'gte' ? 'sell' : 'buy',
-    label: `已到${trigger.label} · 等确认`,
+    label: `已到${trigger.label} · 正在复核`,
     metricLabel: trigger.metricLabel,
     stateLabel: `已到${trigger.label}`,
     reached: true,

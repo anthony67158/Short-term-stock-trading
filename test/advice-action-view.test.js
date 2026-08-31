@@ -70,7 +70,7 @@ test('止损触及但做T买回仓位受T加一锁定时卡片保留不可卖指
   })
 
   assert.equal(view.kind, 'hold')
-  assert.equal(view.action, '持有')
+  assert.equal(view.action, '继续持有')
   assert.equal(view.quantity, '')
   assert.match(view.instruction, /本轮做T已完成/)
   assert.doesNotMatch(view.instruction, /按纪律确认后退出/)
@@ -100,7 +100,7 @@ test('卡片优先遵从军师已持久化的今日不可卖约束', () => {
     nextTradeDay: '2026-08-20(周四)',
   })
 
-  assert.equal(view.action, '持有')
+  assert.equal(view.action, '继续持有')
   assert.match(view.instruction, /今日可卖0手/)
   assert.doesNotMatch(view.instruction, /按纪律确认后退出/)
 })
@@ -133,7 +133,7 @@ test('持仓计划等待新证据时显示持有而不是未持仓语义观望',
   })
 
   assert.equal(view.kind, 'hold')
-  assert.equal(view.action, '持有')
+  assert.equal(view.action, '继续持有')
   assert.match(view.instruction, /今日可卖0手/)
 })
 
@@ -234,7 +234,7 @@ test('休市时旧买入建议在卡片上降级为下一交易时段观察', ()
   })
 
   assert.equal(view.kind, 'wait')
-  assert.equal(view.action, '等待盘中')
+  assert.equal(view.action, '下一交易时段再判断')
   assert.equal(view.actionable, false)
   assert.equal(view.quantity, '')
   assert.deepEqual(view.levels.map((item) => [
@@ -336,7 +336,7 @@ test('下一交易日开盘后旧休市建议仍需先复核不能直接恢复�
     executionOpen: true,
   })
 
-  assert.equal(view.action, '等待盘中')
+  assert.equal(view.action, '下一交易时段再判断')
   assert.equal(view.actionable, false)
   assert.match(view.instruction, /建议基于休市快照/)
 })
@@ -382,7 +382,7 @@ test('下一交易日开盘后休市试仓预案进入盘中复核而不是退�
   assert.equal(view.action, '盘中条件试仓')
   assert.equal(view.shortHorizon, '方向已通过 · 待时机确认')
   assert.equal(view.actionable, false)
-  assert.equal(view.trigger.stateLabel, '等待试仓确认')
+  assert.equal(view.trigger.stateLabel, '试仓条件待复核')
   assert.equal(view.trigger.metricLabel, '确认后给买入价')
 })
 
@@ -463,7 +463,7 @@ test('观望建议不把远端关注价展示成候选卡主价位', () => {
   assert.deepEqual(view.levels, [])
   assert.equal(view.trigger.direction, 'inactive')
   assert.equal(view.trigger.price, null)
-  assert.equal(view.trigger.stateLabel, '等待新证据')
+  assert.equal(view.trigger.stateLabel, '量价条件尚未满足')
   assert.equal(view.trigger.detailLabel, '出现新证据后重新评估')
   assert.equal(view.trigger.metricLabel, '未触发不买')
 })
@@ -479,8 +479,8 @@ test('观望建议缺少结构化关注价时仍显示暂不下单状态', () =>
   assert.deepEqual(view.trigger, {
     direction: 'inactive',
     price: null,
-    label: '等待确认',
-    stateLabel: '等待新证据',
+    label: '条件尚未确认',
+    stateLabel: '量价条件尚未满足',
     detailLabel: '出现新证据后重新评估',
     metricLabel: '未触发不买',
   })
@@ -514,7 +514,7 @@ test('候选卡只展示一个主观察路径并明确后续动作', () => {
   }, { mode: 'buy_advice' })
 
   assert.equal(view.kind, 'wait')
-  assert.equal(view.action, '等待突破')
+  assert.equal(view.action, '突破后再判断')
   assert.equal(view.commandLabel, '唯一条件')
   assert.equal(view.actionable, false)
   assert.deepEqual(view.levels.map((item) => [
@@ -581,7 +581,7 @@ test('跌破型减仓明确显示触发线并按向下条件判断', () => {
   assert.equal(view.trigger.metricLabel, '减仓条件')
   assert.equal(
     buildActionProgress(view.trigger, 33.24).stateLabel,
-    '等待跌破',
+    '跌破条件监控中',
   )
 })
 
@@ -681,9 +681,11 @@ test('持仓到价终局结论不再生成后续加仓复核路径', () => {
     },
   }, { mode: 'hold_advice' })
 
-  assert.equal(view.action, '维持持有')
+  assert.equal(view.action, '本次不加仓、不减仓')
   assert.equal(view.commandLabel, '复核结论')
   assert.deepEqual(view.levels, [])
+  assert.match(view.instruction, /继续持有现有仓位/)
+  assert.doesNotMatch(view.instruction, /维持持有/)
 })
 
 test('弱市条件加仓复核沿用3%仓位上限', () => {
@@ -863,11 +865,11 @@ test('动作进度按买入向下、减仓向上和持有区间分别计算', ()
   assert.equal(buy.tone, 'buy')
   assert.match(buy.label, /距买入位 6\.9%/)
   assert.equal(buy.score, 14.2)
-  assert.equal(buy.stateLabel, '等待回踩')
+  assert.equal(buy.stateLabel, '回踩条件监控中')
   assert.equal(reduce.tone, 'sell')
   assert.match(reduce.label, /距减仓位 5\.3%/)
   assert.equal(reduce.score, 34.2)
-  assert.equal(reduce.stateLabel, '等待反弹')
+  assert.equal(reduce.stateLabel, '反弹条件监控中')
   assert.equal(hold.tone, 'range')
   assert.equal(hold.label, '现价位于区间中部')
   assert.equal(hold.score, 50)
@@ -980,7 +982,7 @@ test('旧观望数据已有完整建仓参数时归并为唯一待确认预案',
   })
 
   assert.equal(view.kind, 'wait')
-  assert.equal(view.action, '待确认建仓')
+  assert.equal(view.action, '人工确认后建仓')
   assert.equal(view.commandLabel, '执行预案')
   assert.equal(view.quantity, '3手')
   assert.equal(view.actionable, false)
@@ -994,7 +996,7 @@ test('旧观望数据已有完整建仓参数时归并为唯一待确认预案',
     { key: 'stop', label: '止损价', price: 12.22 },
     { key: 'target', label: '目标价', price: 13.5 },
   ])
-  assert.equal(view.trigger.stateLabel, '等待人工确认')
+  assert.equal(view.trigger.stateLabel, '确认后可执行')
   assert.match(view.instruction, /12\.31元买入3手/)
 })
 

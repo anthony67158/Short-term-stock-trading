@@ -223,6 +223,7 @@ test('云端Judge维持结论回灌为终态通知而不是再次等待', () => 
 
   const notification = alertStore.get().notifications[0]
   assert.equal(notification.alertId, 'review-wait-cloud-buy-wait')
-  assert.match(notification.title, /维持观望/)
+  assert.match(notification.title, /本次不买入/)
+  assert.doesNotMatch(notification.body, /维持观望|不操作/)
   assert.match(notification.body, /本次触发结束/)
 })

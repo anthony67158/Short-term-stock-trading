@@ -24,7 +24,7 @@ test('未持仓观望进入观察确认而不是执行状态', () => {
   })
 
   assert.equal(lifecycle.stage, 'WATCHING')
-  assert.equal(lifecycle.stageLabel, '观察确认')
+  assert.equal(lifecycle.stageLabel, '观察条件核验中')
 })
 
 test('可执行建仓进入等待触发并由真实执行状态继续推进', () => {

@@ -347,7 +347,7 @@ function ReviewRows({ rows }) {
   const labels = {
     confirmed: '已验证',
     invalidated: '已证伪',
-    pending: '待确认',
+    pending: '尚待盘中验证',
   }
   return (
     <div className="dr-v3-list">

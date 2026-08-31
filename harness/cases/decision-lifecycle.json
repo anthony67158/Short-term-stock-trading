@@ -84,7 +84,7 @@
           "review": 0,
           "judge": 0
         },
-        "notificationIncludes": ["星河材料", "待确认", "先观察"]
+        "notificationIncludes": ["星河材料", "观察价已到", "当前不买入"]
       }
     },
     {
@@ -499,7 +499,7 @@
           "review": 1,
           "judge": 0
         },
-        "notificationIncludes": ["澄海能源", "维持观望"]
+        "notificationIncludes": ["澄海能源", "本次不买入"]
       }
     },
     {
@@ -849,7 +849,7 @@
           "review": 0,
           "judge": 1
         },
-        "notificationIncludes": ["青川装备", "维持观望"]
+        "notificationIncludes": ["青川装备", "本次不买入"]
       }
     },
     {
@@ -965,7 +965,7 @@
           "review": 1,
           "judge": 0
         },
-        "notificationIncludes": ["海岳新材", "维持观望"]
+        "notificationIncludes": ["海岳新材", "本次不买入"]
       }
     },
     {
@@ -1064,7 +1064,7 @@
           "review": 1,
           "judge": 0
         },
-        "notificationIncludes": ["远川智造", "维持观望"]
+        "notificationIncludes": ["远川智造", "本次不买入"]
       }
     },
     {
@@ -1179,7 +1179,7 @@
           "review": 0,
           "judge": 0
         },
-        "notificationIncludes": ["维持持有", "今日不可卖"]
+        "notificationIncludes": ["本次不加仓、不减仓", "今日不可卖"]
       }
     },
     {
@@ -1417,7 +1417,7 @@
           "review": 1,
           "judge": 0
         },
-        "notificationIncludes": ["松岳光电", "维持观望"]
+        "notificationIncludes": ["松岳光电", "本次不买入"]
       }
     },
     {
@@ -1534,7 +1534,7 @@
           "review": 1,
           "judge": 0
         },
-        "notificationIncludes": ["岳海精工", "维持观望"]
+        "notificationIncludes": ["岳海精工", "本次不买入"]
       }
     }
   ]

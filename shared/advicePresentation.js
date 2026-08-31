@@ -1,5 +1,7 @@
 import {
   actionabilityLabel,
+  explicitActionInstruction,
+  explicitActionLabel,
   humanizeAdviceTextFields,
   marketRegimeLabel,
 } from './userFacingLanguage.js'
@@ -349,7 +351,13 @@ function decisionInstruction(plan, fallback = '') {
   return core || fallback
 }
 
-function operationGuide(advice, plan, levels, observationOnly) {
+function operationGuide(
+  advice,
+  plan,
+  levels,
+  observationOnly,
+  holdingMode,
+) {
   const reviewText = clean(advice.reviewTrigger, 180)
   const policyReasons = (
     (
@@ -401,12 +409,15 @@ function operationGuide(advice, plan, levels, observationOnly) {
         )
       : ''
     return {
-      now: clean(
+      now: explicitActionInstruction(clean(
         advice.actionPlan
         || advice.nextAction
         || decision.outcome,
         300,
-      ),
+      ), {
+        holdingMode,
+        terminal: true,
+      }),
       steps: [
         rejectionReason && {
           key: 'rejection',
@@ -469,18 +480,18 @@ function operationGuide(advice, plan, levels, observationOnly) {
     if (!paths.length) {
       paths.push({
         key: 'reprice',
-        label: '等待条件',
+        label: '重新评估条件',
         text: first(
           plan.trigger,
           advice.actionPlan,
           advice.timing,
-          '等待取得有效观察价后重新生成建议。',
+          '当前不买入；取得有效观察价后重新生成建议。',
         ),
       })
     }
     return {
       now: deferredPlan
-        ? `${deferredPlan.actionLabel}方向已通过；当前只等待入场时机确认，确认后给出具体价格和手数。`
+        ? `当前不买入；${deferredPlan.actionLabel}方向已通过，入场时机确认后给出具体价格和手数。`
         : '暂不买入，不挂单、不追涨。',
       steps: [
         deferredPlan && {
@@ -517,9 +528,11 @@ function operationGuide(advice, plan, levels, observationOnly) {
   ].filter(Boolean)
   return {
     now: plan.actionPolicy?.overridden && plan.action === 'HOLD'
-      ? '继续持有，当前不加仓；等待短线条件重新确认。'
+      ? '本次不加仓、不减仓，继续持有现有仓位；价格、量能与资金条件恢复后再判断。'
       : plan.actionability === 'BLOCKED'
-      ? '暂不操作，不挂单；条件恢复后重新生成建议。'
+      ? holdingMode
+        ? '本次不加仓、不减仓，继续持有现有仓位；条件恢复后重新生成建议。'
+        : '本次不买入、不挂单；条件恢复后重新生成建议。'
       : (
         plan.actionability === 'MANUAL_PROBE'
         || plan.manualConfirmationOnly === true
@@ -629,6 +642,13 @@ function buildLegacyAdvicePresentation(advice = {}) {
   const terminalOutcome = advice.reviewDecision?.terminal === true
     ? clean(advice.reviewDecision.outcome, 40)
     : ''
+  const holdingMode = (
+    plan?.mode === 'hold_advice'
+    || ['ADD', 'HOLD', 'REDUCE', 'EXIT'].includes(plan?.action)
+    || /加仓|减仓|清仓|持有/.test(
+      String(advice.action || advice.stance || terminalOutcome),
+    )
+  )
   const observationOnly = !terminalOutcome
     && plan?.action === 'WATCH'
     && (
@@ -640,7 +660,12 @@ function buildLegacyAdvicePresentation(advice = {}) {
   const deferredPlan = deferredPlanPresentation(plan)
   const planAdvice = plan ? {
     ...advice,
-    action: terminalOutcome || deferredPlan?.actionLabel || (
+    action: terminalOutcome
+      ? explicitActionLabel(terminalOutcome, {
+          holdingMode,
+          terminal: true,
+        })
+      : deferredPlan?.actionLabel || (
       (
         plan.actionability === 'MANUAL_PROBE'
         || plan.manualConfirmationOnly === true
@@ -657,22 +682,27 @@ function buildLegacyAdvicePresentation(advice = {}) {
               : plan.actionLabel || advice.action
     ),
     title: terminalOutcome
-      ? `到价复核：${terminalOutcome}`
+      ? `到价复核：${explicitActionLabel(terminalOutcome, {
+          holdingMode,
+          terminal: true,
+        })}`
       : deferredPlan
-      ? `${deferredPlan.actionLabel}：方向已通过，待时机确认`
+      ? `${deferredPlan.actionLabel}：方向已通过，入场时机待核验`
       : plan.actionPolicy?.overridden
       ? plan.action === 'HOLD'
         ? '短线条件未确认，继续持有'
-        : '短线条件未确认，暂不操作'
+        : '短线条件未确认，本次不买入'
       : plan.actionability === 'BLOCKED'
-      ? '执行条件未满足，暂不操作'
+      ? holdingMode
+        ? '执行条件未满足，本次不加仓、不减仓'
+        : '执行条件未满足，本次不买入'
       : (
         plan.actionability === 'MANUAL_PROBE'
         || plan.manualConfirmationOnly === true
       )
         ? `短线试仓：${advice.title || advice.headline || '板块与个股条件共振'}`
       : plan.actionability === 'RESEARCH_ONLY'
-        ? `仅供观察：${advice.title || advice.headline || plan.actionLabel || '等待确认'}`
+        ? `仅供观察：${advice.title || advice.headline || plan.actionLabel || '执行条件尚未确认'}`
         : advice.title,
     actionPlan: decisionInstruction(plan, advice.actionPlan),
     planQty: plan.quantity?.lots,
@@ -680,7 +710,7 @@ function buildLegacyAdvicePresentation(advice = {}) {
       ? null
       : plan.quantity?.lots > 0
         ? `${plan.actionLabel || '操作'}${plan.quantity.lots}手`
-        : '无需操作',
+        : holdingMode ? '不加仓、不减仓' : '不买入',
     planAmount: plan.costs?.estimatedNetAmount,
     opAmount: plan.costs?.estimatedNetAmount,
     planWeight: (
@@ -723,27 +753,41 @@ function buildLegacyAdvicePresentation(advice = {}) {
     plan,
     levels,
     observationOnly,
+    holdingMode,
   )
+  const rawAction = first(planAdvice.action, planAdvice.stance)
+  const action = explicitActionLabel(rawAction, {
+    holdingMode,
+    terminal: !!terminalOutcome,
+  })
+  const rawTitle = first(
+    planAdvice.title,
+    planAdvice.headline,
+    planAdvice.action,
+    planAdvice.stance,
+  )
+  const title = explicitActionLabel(rawTitle, {
+    holdingMode,
+    terminal: !!terminalOutcome,
+  })
   return {
     observationOnly,
     verdict: {
-      action: first(planAdvice.action, planAdvice.stance),
-      title: first(
-        planAdvice.title,
-        planAdvice.headline,
-        planAdvice.action,
-        planAdvice.stance,
-      ),
+      action,
+      title,
       tone: first(planAdvice.tone, 'muted'),
       confidence: first(planAdvice.confidence),
     },
     execution: {
-      instruction: first(
+      instruction: explicitActionInstruction(first(
         planAdvice.actionPlan,
         planAdvice.nextAction,
         planAdvice.timing,
         contract.executionPlan,
-      ),
+      ), {
+        holdingMode,
+        terminal: !!terminalOutcome,
+      }),
       quantity: quantity(planAdvice),
       amount: first(planAdvice.opAmount, planAdvice.planAmount),
       position: first(
@@ -841,12 +885,47 @@ export function compileAdvicePresentationV3(advice = {}) {
 export function buildAdvicePresentation(advice = {}) {
   const displayAdvice = humanizeAdviceTextFields(advice)
   if (displayAdvice.presentation?.schemaVersion === 'advice-presentation.v3') {
-    const terminalGuide = displayAdvice.reviewDecision?.terminal === true
+    const terminal = displayAdvice.reviewDecision?.terminal === true
+    const plan = displayAdvice.decisionPlan
+    const holdingMode = (
+      plan?.mode === 'hold_advice'
+      || ['ADD', 'HOLD', 'REDUCE', 'EXIT'].includes(plan?.action)
+      || /加仓|减仓|清仓|持有/.test(String(
+        displayAdvice.action
+        || displayAdvice.stance
+        || displayAdvice.reviewDecision?.outcome
+        || '',
+      ))
+    )
+    const terminalGuide = terminal
       ? buildLegacyAdvicePresentation(displayAdvice).operationGuide
       : null
+    const storedVerdict = displayAdvice.presentation.verdict || {}
+    const action = explicitActionLabel(storedVerdict.action, {
+      holdingMode,
+      terminal,
+    })
     return {
       ...displayAdvice.presentation,
-      ...(terminalGuide ? { operationGuide: terminalGuide } : {}),
+      verdict: {
+        ...storedVerdict,
+        action,
+        title: explicitActionLabel(storedVerdict.title, {
+          holdingMode,
+          terminal,
+        }),
+      },
+      operationGuide: terminalGuide || (
+        displayAdvice.presentation.operationGuide
+          ? {
+              ...displayAdvice.presentation.operationGuide,
+              now: explicitActionInstruction(
+                displayAdvice.presentation.operationGuide.now,
+                { holdingMode, terminal },
+              ),
+            }
+          : null
+      ),
       review: reviewSummary(displayAdvice),
       executionPlan: executionPlanSummary(displayAdvice.executionPlan),
     }

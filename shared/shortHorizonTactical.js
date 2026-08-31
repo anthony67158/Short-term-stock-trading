@@ -509,7 +509,7 @@ function riskIncreaseAssessment(tactical = {}, reviewContext = {}) {
   } else if (timingState === 'TOO_EXTENDED') {
     hardBlockers.push('价格位置过热，禁止追涨')
   } else if (timingState === 'WAIT_PULLBACK' && !triggerFired) {
-    fullRiskGaps.push('等待回踩承接确认')
+    fullRiskGaps.push('回踩承接尚未得到价格与量能确认')
   } else if (timingState === 'WAIT_BREAKOUT' && !triggerFired) {
     fullRiskGaps.push('等待放量突破确认')
   }

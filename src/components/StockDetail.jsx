@@ -1057,7 +1057,7 @@ export default function StockDetail({ stock, onClose }) {
                           量化信号 · {formatQuantAsOf(quantState.result.asOf)}
                         </span>
                       )
-                      : <span className="quant-asof muted">等待量化信号</span>}
+                      : <span className="quant-asof muted">量化结果尚未返回</span>}
                     <button
                       type="button"
                       className={'advice-review-toggle' + (reviewEnabled ? ' on' : '')}

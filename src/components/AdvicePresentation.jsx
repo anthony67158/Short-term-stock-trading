@@ -189,7 +189,7 @@ function EvidenceGapNotice({ issues = [] }) {
 
 function DecisionPlanSummary({ plan }) {
   if (!plan) return null
-  const statusLabel = plan.actionabilityLabel || '等待确认'
+  const statusLabel = plan.actionabilityLabel || '执行条件尚未确认'
   const statusTone = plan.actionability === 'READY'
     ? 'ready'
     : plan.actionability === 'MANUAL_PROBE'
@@ -328,6 +328,15 @@ export default function AdvicePresentation({
     () => buildAdvicePresentation(displayAdvice),
     [displayAdvice],
   )
+  const holdingMode = (
+    displayAdvice.decisionPlan?.mode === 'hold_advice'
+    || /持有|加仓|减仓|清仓/.test(String(
+      view.verdict.action || displayAdvice.action || '',
+    ))
+  )
+  const noActionInstruction = holdingMode
+    ? '本次不加仓、不减仓，继续持有现有仓位；出现新的价格、量能或资金信号后再判断。'
+    : '本次不买入；出现有效观察价或新的量价、资金信号后再判断。'
   const hasTrigger = Boolean(
     view.trigger.condition
     || view.trigger.confirmation
@@ -361,7 +370,7 @@ export default function AdvicePresentation({
         <div className="advice-command-head">
           <div className="advice-command-verdict">
             <span className={`dv-badge ${view.verdict.tone}`}>
-              {view.verdict.action || '等待'}
+              {view.verdict.action || '暂无明确动作'}
             </span>
             <div className="advice-command-title">
               {view.verdict.title || '暂无明确结论'}
@@ -382,7 +391,7 @@ export default function AdvicePresentation({
               <HL text={
                 view.operationGuide?.now
                 || view.execution.instruction
-                || '本次无需操作，等待触发条件出现后再行动。'
+                || noActionInstruction
               } />
             </div>
             {view.execution.position && (

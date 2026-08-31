@@ -324,7 +324,7 @@ export function reconcileAdviceNumbers({ mode, result: input, payload = {} } = {
         result.planQty = 0
         result.planQtyNum = 0
         result.planAmount = 0
-        result.actionPlan = '可用资金不足买入一手，暂不操作'
+        result.actionPlan = '可用资金不足买入一手，本次不买入'
         appendIssue(result, issues)
         return { result, issues, valid }
       }

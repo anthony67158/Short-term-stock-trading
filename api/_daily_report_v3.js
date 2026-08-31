@@ -58,7 +58,9 @@ function percentProbability(value) {
 
 function actionForSector(actionability) {
   if (actionability === 'LAYOUT') return '回踩承接确认后分批关注，竞价高开不追。'
-  if (actionability === 'WAIT_PULLBACK') return '等待回踩关键支撑且资金未转弱后再关注。'
+  if (actionability === 'WAIT_PULLBACK') {
+    return '当前不买入；回踩关键支撑且资金未转弱后再关注。'
+  }
   if (actionability === 'AVOID') return '不新增风险，已有仓位仅在反抽时评估减仓。'
   return '仅观察资金与龙头扩散，条件未满足不执行。'
 }

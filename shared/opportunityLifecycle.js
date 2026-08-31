@@ -14,12 +14,12 @@ export const OPPORTUNITY_STAGES = Object.freeze([
 
 const STAGE_LABELS = Object.freeze({
   DISCOVERED: '发现机会',
-  WATCHING: '观察确认',
-  ARMED: '等待触发',
-  CONFIRMED: '已确认待执行',
+  WATCHING: '观察条件核验中',
+  ARMED: '价格条件监控中',
+  CONFIRMED: '条件已确认，待人工执行',
   EXECUTING: '执行记录中',
   MANAGED: '持仓管理',
-  EXIT_PENDING: '等待退出',
+  EXIT_PENDING: '退出条件监控中',
   CLOSED: '本轮已结束',
 })
 
@@ -36,18 +36,20 @@ function finite(value) {
 }
 
 function nextEventFor(stage, lifecycle = {}) {
-  if (stage === 'DISCOVERED') return '等待进入关注队列'
-  if (stage === 'WATCHING') return '等待回踩、突破或证据变化'
-  if (stage === 'ARMED') return '等待价格触发并人工确认'
-  if (stage === 'CONFIRMED') return '等待记录真实成交'
-  if (stage === 'EXECUTING') return '等待完成剩余成交记录'
-  if (stage === 'MANAGED') return '等待止盈、止损、做T或换仓事件'
+  if (stage === 'DISCOVERED') return '进入关注队列后开始监控'
+  if (stage === 'WATCHING') {
+    return '当前不执行；回踩、突破或关键证据变化时重新判断'
+  }
+  if (stage === 'ARMED') return '价格触发后，由用户确认是否执行'
+  if (stage === 'CONFIRMED') return '用户确认计划后，记录真实成交'
+  if (stage === 'EXECUTING') return '补录剩余真实成交'
+  if (stage === 'MANAGED') return '止盈、止损、做T或换仓条件变化时重新判断'
   if (stage === 'EXIT_PENDING') {
     return lifecycle.sellableTodayQty > 0
-      ? '等待退出条件触发并人工执行'
+      ? '退出条件触发后，由用户人工执行'
       : '受T+1限制，下一交易日优先退出'
   }
-  return '等待新一轮机会'
+  return '本轮已结束；出现新的独立机会后再评估'
 }
 
 function executionStage(executionPlan) {

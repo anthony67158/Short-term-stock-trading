@@ -96,7 +96,7 @@ const TERM_REWRITES = [
   [/\bRANGE\b/g, '震荡区间'],
   [/\bREADY\b/g, '可执行'],
   [/\bBLOCKED\b/g, '暂不可执行'],
-  [/\bUNKNOWN\b/g, '状态待确认'],
+  [/\bUNKNOWN\b/g, '当前数据不足，暂未判断'],
   [/\bREJECT(?:ED)?\b/gi, '未通过'],
   [/\bPROMOTE(?:D)?\b/gi, '已通过'],
   [/\bStrategySpec\s*v?2\b/gi, '历史规则'],
@@ -207,6 +207,119 @@ export function humanizeUserFacingText(value) {
   return text
 }
 
+export function explicitActionLabel(
+  value,
+  { holdingMode = false, terminal = false } = {},
+) {
+  const text = humanizeUserFacingText(value ?? '').trim()
+  if (!text) return ''
+  const reviewTitle = text.match(/^到价复核\s*[：:]\s*(.+)$/)
+  if (reviewTitle) {
+    return `到价复核：${explicitActionLabel(reviewTitle[1], {
+      holdingMode,
+      terminal: true,
+    })}`
+  }
+  if (/^(?:维持|保持|继续)?持有$/.test(text)) {
+    return terminal ? '本次不加仓、不减仓' : '继续持有'
+  }
+  if (/^(?:维持|保持|继续)?观望$/.test(text)) {
+    return terminal ? '本次不买入' : '暂不买入'
+  }
+  if (/^(?:暂不|无需|不)操作$/.test(text)) {
+    return holdingMode ? '本次不加仓、不减仓' : '本次不买入'
+  }
+  return {
+    等待确认: '条件尚未确认',
+    等待量化信号: '量化结果尚未返回',
+    等待盘中: '下一交易时段再判断',
+    等待突破: '突破后再判断',
+    等待回踩: '回踩后再判断',
+    待确认建仓: '人工确认后建仓',
+    等待人工确认: '人工确认后执行',
+  }[text] || text
+}
+
+export function explicitActionInstruction(
+  value,
+  { holdingMode = false, terminal = false } = {},
+) {
+  let text = humanizeUserFacingText(value ?? '').trim()
+  if (!text) return ''
+  const prefixMatch = text.match(
+    /^((?:结论|到价复核)\s*[：:]\s*)/,
+  )
+  const prefix = prefixMatch?.[1] || ''
+  const actionText = prefix ? text.slice(prefix.length) : text
+  if (
+    terminal
+    && /^(?:维持|保持|继续)?持有(?:现有仓位)?(?=[：:；;，,。\s]|$)/.test(
+      actionText,
+    )
+  ) {
+    text = text.replace(
+      /^((?:结论|到价复核)\s*[：:]\s*)?(?:维持|保持|继续)?持有(?:现有仓位)?(?=[：:；;，,。\s]|$)/,
+      `${prefix}本次不加仓、不减仓，继续持有现有仓位`,
+    )
+  } else if (
+    terminal
+    && /^(?:维持|保持|继续)?观望(?=[：:；;，,。\s]|$)/.test(
+      actionText,
+    )
+  ) {
+    text = text.replace(
+      /^((?:结论|到价复核)\s*[：:]\s*)?(?:维持|保持|继续)?观望(?=[：:；;，,。\s]|$)/,
+      `${prefix}本次不买入`,
+    )
+  } else if (/^维持原计划/.test(text)) {
+    text = text.replace(
+      /^维持原计划/,
+      holdingMode
+        ? '本次不加仓、不减仓，继续持有现有仓位'
+        : '本次不买入',
+    )
+  } else if (/^等待确认/.test(text)) {
+    text = text.replace(
+      /^等待确认/,
+      '当前不执行；待价格、量能和资金条件确认后再判断',
+    )
+  } else if (/^等待量化信号/.test(text)) {
+    text = text.replace(/^等待量化信号/, '量化结果尚未返回')
+  } else if (/^(?:暂不执行|(?:暂不|无需|不)操作)/.test(text)) {
+    text = text.replace(
+      /^(?:暂不执行|(?:暂不|无需|不)操作)/,
+      holdingMode ? '本次不加仓、不减仓' : '本次不买入',
+    )
+  } else if (/^等待回踩/.test(text)) {
+    text = text.replace(
+      /^等待回踩/,
+      holdingMode
+        ? '本次不加仓、不减仓；回踩'
+        : '本次不买入；回踩',
+    )
+  } else if (/^等待突破/.test(text)) {
+    text = text.replace(
+      /^等待突破/,
+      holdingMode
+        ? '本次不加仓、不减仓；突破'
+        : '本次不买入；突破',
+    )
+  } else if (/^等待盘中/.test(text)) {
+    text = text.replace(
+      /^等待盘中/,
+      '当前不执行；下一交易时段',
+    )
+  } else if (/^等待触发/.test(text)) {
+    text = text.replace(
+      /^等待触发/,
+      holdingMode
+        ? '本次不加仓、不减仓；触发'
+        : '本次不买入；触发',
+    )
+  }
+  return text
+}
+
 export function humanizeAdviceTextFields(value, field = '') {
   if (Array.isArray(value)) {
     return value.map((item) =>
@@ -243,7 +356,7 @@ export function actionabilityLabel(value) {
     READY: '条件已满足，可执行',
     MANUAL_PROBE: '短线条件已满足，需人工确认',
     RESEARCH_ONLY: '历史建议，需按当前证据重新评估',
-    BLOCKED: '条件未满足，暂不执行',
-    WATCH: '等待条件满足',
-  }[String(value || '')] || '等待确认'
+    BLOCKED: '执行条件未满足，当前不下单',
+    WATCH: '当前不执行，达到触发条件后再判断',
+  }[String(value || '')] || '执行条件尚未确认'
 }

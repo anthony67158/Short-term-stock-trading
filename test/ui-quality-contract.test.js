@@ -611,7 +611,7 @@ test('价格路线图使用单一触发状态且不重复显示到价提醒', ()
   assert.match(planTab, /className=\{'action-trigger-state ' \+ progress\.tone\}/)
   assert.match(planTab, /progress\.reachedHint/)
   assert.match(planTab, /条件已到，正在提交复核/)
-  assert.match(planTab, /等待人工确认/)
+  assert.match(planTab, /需你确认后执行/)
   assert.match(
     planTab,
     /const adviceAt = getAdvice\(code, 'buy_advice'\)\?\.at/,

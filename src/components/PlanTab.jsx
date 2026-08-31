@@ -728,10 +728,10 @@ function ActionProgress({ trigger, currentPrice, progress: preparedProgress }) {
         <div className="action-progress-summary">
           <span className="action-direction">
             <Icon name="activity" size={13} />
-            {trigger.stateLabel || '保持观望'}
+            {trigger.stateLabel || '当前不下单'}
           </span>
           <span className="action-current-marker">
-            {trigger.detailLabel || '等待量价确认'}
+            {trigger.detailLabel || '量价条件满足后再判断'}
           </span>
           <b className="action-progress-target">{trigger.metricLabel}</b>
         </div>
@@ -774,8 +774,8 @@ function ActionProgress({ trigger, currentPrice, progress: preparedProgress }) {
           {progress.reachedHint
             || (
               trigger.direction === 'review_paths'
-                ? '等待自动复核'
-                : '等待人工确认'
+                ? '系统正在复核'
+                : '需你确认后执行'
             )}
         </span>
       </div>
@@ -815,10 +815,10 @@ function ActionLevel({ level, reached = false }) {
 
 function EmptyActionLevels() {
   return (
-    <div className="action-levels-empty" aria-label="关键价位等待信号确认">
+    <div className="action-levels-empty" aria-label="暂无有效执行价">
       <Icon name="target" size={13} />
       <span>关键价位</span>
-      <strong>等待信号确认</strong>
+      <strong>出现有效价位后再判断</strong>
     </div>
   )
 }
@@ -853,7 +853,11 @@ function ConvictionStrip({ conviction }) {
 }
 
 function ActionCommand({ view, onOpen }) {
-  const instruction = view.instruction || '等待下一步执行条件'
+      const instruction = view.instruction || (
+        view.kind === 'hold'
+          ? '本次不加仓、不减仓，继续持有现有仓位'
+          : '当前不下单；达到卡片所列条件后再判断'
+      )
   const cardInstruction = view.cardInstruction || instruction
   const importance = actionImportance(view)
   const quantity =

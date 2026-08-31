@@ -59,6 +59,33 @@ test('到价终局复核完成后生成明确操作推送', () => {
   assert.equal(notification.tag, 'review-terminal-review-1')
 })
 
+test('到价终局通知把内部维持枚举改写为本轮明确动作', () => {
+  const notification = terminalReviewNotification({
+    code: '600519',
+    name: '贵州茅台',
+    jobId: 'review-2',
+    advice: {
+      action: '持有',
+      actionPlan: '维持持有：资金未转强；本次触发结束',
+      reviewDecision: {
+        terminal: true,
+        outcome: '维持持有',
+        basis: [{
+          type: '实时资金与价格',
+          summary: '主力资金未转强',
+        }],
+      },
+    },
+  })
+
+  assert.equal(
+    notification.title,
+    '贵州茅台(600519)｜本次不加仓、不减仓',
+  )
+  assert.match(notification.body, /继续持有现有仓位/)
+  assert.doesNotMatch(notification.body, /维持持有/)
+})
+
 test('军师行情快照保留报价接口返回的真实成交额', () => {
   const quote = buildAdvisorTodayQuote({
     price: 15.44,

@@ -369,10 +369,10 @@ test('短线内核改写模型动作时首屏解释原因而非只显示观望',
     },
   })
 
-  assert.equal(view.verdict.action, '观望')
+  assert.equal(view.verdict.action, '暂不买入')
   assert.equal(
     view.verdict.title,
-    '短线条件未确认，暂不操作',
+    '短线条件未确认，本次不买入',
   )
   assert.equal(
     view.operationGuide.now,
@@ -434,7 +434,7 @@ test('休市方向已通过时展示次日条件试仓而不是普通观望', ()
   assert.match(view.execution.instruction, /仓位不超过5%/)
   assert.match(
     view.operationGuide.now,
-    /方向已通过.*等待入场时机确认/,
+    /当前不买入.*方向已通过.*入场时机确认后/,
   )
   assert.equal(view.operationGuide.steps[0].label, '次日条件试仓')
   assert.match(
@@ -535,7 +535,7 @@ test('军师展示契约去除重复依据并兼容持仓建议旧字段', () =>
     quantNote: '量化方向偏多',
   })
 
-  assert.equal(view.verdict.action, '持有')
+  assert.equal(view.verdict.action, '继续持有')
   assert.equal(view.verdict.title, '守住支撑继续持有')
   assert.equal(view.execution.instruction, '守住9.80元继续持有，跌破再减仓')
   assert.equal(view.levels.length, 3)
@@ -762,8 +762,9 @@ test('到价终局复核详情只展示最终动作与依据，不再生成下�
     },
   })
 
-  assert.equal(view.verdict.action, '维持观望')
+  assert.equal(view.verdict.action, '本次不买入')
   assert.match(view.operationGuide.now, /本次触发结束/)
+  assert.doesNotMatch(view.operationGuide.now, /维持观望/)
   assert.equal(view.operationGuide.steps[0].label, '决策依据')
   assert.doesNotMatch(
     JSON.stringify(view.operationGuide),

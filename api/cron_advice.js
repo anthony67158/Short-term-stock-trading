@@ -74,6 +74,10 @@ import {
   triggeredReviewRuntime,
 } from '../shared/triggeredReviewDecision.js';
 import {
+  explicitActionInstruction,
+  explicitActionLabel,
+} from '../shared/userFacingLanguage.js';
+import {
   adviceEvidenceDigest,
   adviceTrustBands,
   prioritizeAdviceReviewCodes,
@@ -833,9 +837,22 @@ export function terminalReviewNotification({
   const identity = name && name !== code
     ? `${name}(${code})`
     : name || code || '股票';
-  const action = String(advice.actionPlan || decision.outcome)
-    .replace(/\s+/g, ' ')
-    .trim();
+  const holdingMode = /加仓|减仓|清仓|持有|止损|止盈/.test(
+    `${decision.outcome} ${advice.action || ''} ${advice.stance || ''}`,
+  );
+  const outcome = explicitActionLabel(decision.outcome, {
+    holdingMode,
+    terminal: true,
+  });
+  const action = explicitActionInstruction(
+    String(advice.actionPlan || decision.outcome)
+      .replace(/\s+/g, ' ')
+      .trim(),
+    {
+      holdingMode,
+      terminal: true,
+    },
+  );
   const basis = String(
     decision.basis?.[0]?.summary
     || decision.basisSummary
@@ -843,7 +860,7 @@ export function terminalReviewNotification({
     || '',
   ).replace(/\s+/g, ' ').trim();
   return {
-    title: `${identity}｜${decision.outcome}`.slice(0, 64),
+    title: `${identity}｜${outcome}`.slice(0, 64),
     body: [
       action,
       basis ? `依据：${basis}` : '',

@@ -8,6 +8,7 @@ import { openStockDetail } from '../detailStore'
 import { planStore, t1StatusOf, usePlanStore } from '../planStore'
 import { alertStore, useAlertStore, describeAlert, alertMeta } from '../alertStore'
 import { quantReportStore, useQuantReportStore } from '../quantReportStore'
+import { userFacingAlertMessage } from '../../shared/alertNotification.js'
 import { applyT1ToAlert } from '../../shared/t1AdvicePolicy.js'
 
 // ============ 预警中心：站内通知流 + 预警规则管理 + 量化每日汇报 ============
@@ -148,7 +149,7 @@ export default function AlertCenter({ onClose }) {
                         </div>
                       </>
                     )}
-                    {a.triggeredAt && <div className="ar-fired">已于 {new Date(a.triggeredAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })} 触发：{a.triggeredMsg}</div>}
+                    {a.triggeredAt && <div className="ar-fired">已于 {new Date(a.triggeredAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })} 触发：{userFacingAlertMessage(a)}</div>}
                   </button>
                   <div className="ar-actions">
                     {a.actKind && <ActionQuickExec alert={a} holding={book.holding} />}
