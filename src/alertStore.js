@@ -27,6 +27,7 @@ import {
   TRIGGERED_REVIEW_TOTAL_BUDGET_MS,
 } from '../shared/triggeredReviewDecision.js'
 import { isFreshAlertQuote } from '../shared/alertQuotePolicy.js'
+import { showSystemNotification } from './systemNotification.js'
 
 // ============ 盯盘预警引擎 ============
 // 统一轮询自选/持仓相关个股实时报价，逐条判断预警规则是否命中；
@@ -244,13 +245,8 @@ function beep() {
   } catch { /* ignore */ }
 }
 
-function notify(title, body) {
-  // 浏览器系统通知
-  try {
-    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-      new Notification(title, { body, icon: '/app-icon-192.png?v=7', tag: 'alert-' + Date.now() })
-    }
-  } catch { /* ignore */ }
+function notify(notification) {
+  void showSystemNotification(notification)
   beep()
 }
 
@@ -321,7 +317,7 @@ export const alertStore = {
   publish(n) {
     if (!n?.title || !n?.body) return false
     if (!this.push(n)) return false
-    notify(n.title, n.body)
+    notify(n)
     return true
   },
   dismissBanner(id) {

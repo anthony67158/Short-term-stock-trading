@@ -60,6 +60,19 @@ test('应用根节点挂载全局预警横幅并原样展示通知内容', () =>
   )
 })
 
+test('前台命中也通过 Service Worker 展示系统通知', () => {
+  const store = read('src/alertStore.js')
+  const systemNotification = read('src/systemNotification.js')
+
+  assert.match(store, /showSystemNotification\(notification\)/)
+  assert.doesNotMatch(store, /new Notification\(/)
+  assert.match(
+    systemNotification,
+    /registration\.showNotification\(title,\s*options\)/,
+  )
+  assert.match(systemNotification, /alertId/)
+})
+
 test('页面轮询发现观察价到达后立即提交复核并显示同内容横幅', async () => {
   const now = Date.parse('2026-08-28T05:30:00.000Z')
   const triggeredAt = Date.now()
