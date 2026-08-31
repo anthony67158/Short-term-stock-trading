@@ -9,6 +9,8 @@ import {
   deactivateStoredAccount,
   isAccountActive,
   listAllAccounts,
+  mergeAdviceRuntimeState,
+  readAdviceRuntimeState,
   readAccount,
   sha,
   writeAdviceBatchCancellation,
@@ -333,6 +335,135 @@ test('单股建议完成后通过独立OSS小对象立即进入跨设备增量�
   )
 })
 
+test('轻量运行态可直接携带完成建议而无需等待主快照压实', () => {
+  const account = {
+    updatedAt: 100,
+    data: {
+      advice: {},
+      jobWorker: {
+        id: 'worker-old',
+        lockUntil: 9999,
+      },
+      jobs: {
+        '600519': {
+          id: 'job-1',
+          code: '600519',
+          status: 'running',
+          progressAt: 100,
+        },
+      },
+    },
+  }
+  const adviceAt = 200
+
+  mergeAdviceRuntimeState(account, {
+    updatedAt: adviceAt,
+    jobWorker: null,
+    jobs: {
+      '600519': {
+        id: 'job-1',
+        code: '600519',
+        status: 'done',
+        finishedAt: adviceAt,
+        progressAt: adviceAt,
+      },
+    },
+    recentAdviceUpdates: [{
+      schemaVersion: 'advice-runtime-update.v2',
+      code: '600519',
+      role: 'advisor',
+      jobKey: 'advisor:600519',
+      updatedAt: adviceAt,
+      advice: {
+        at: adviceAt,
+        advice: { action: '持有', title: '继续持有' },
+      },
+      job: {
+        id: 'job-1',
+        code: '600519',
+        status: 'done',
+        finishedAt: adviceAt,
+        progressAt: adviceAt,
+      },
+    }],
+  })
+
+  assert.equal(account.data.jobs['600519'].status, 'done')
+  assert.equal(account.data.jobWorker, null)
+  assert.equal(
+    account.data.advice['600519'].advice.title,
+    '继续持有',
+  )
+})
+
+test('并发轻量运行态写入会合并任务而不是后写覆盖', async () => {
+  const storage = fakeStorage()
+  const nick = '运行态并发账号'
+  const advisorJob = {
+    id: 'advisor-1',
+    code: '600519',
+    status: 'queued',
+    at: 100,
+    progressAt: 100,
+  }
+  const reviewJob = {
+    id: 'review-1',
+    code: '000001',
+    role: 'review',
+    status: 'queued',
+    at: 101,
+    progressAt: 101,
+  }
+
+  await Promise.all([
+    writeAdviceRuntimeState(nick, {
+      updatedAt: 100,
+      jobs: { '600519': advisorJob },
+      recentAdviceUpdates: [],
+    }, storage),
+    writeAdviceRuntimeState(nick, {
+      updatedAt: 101,
+      reviewJobs: { '000001': reviewJob },
+      recentAdviceUpdates: [],
+    }, storage),
+  ])
+
+  const runtime = await readAdviceRuntimeState(nick, storage)
+  assert.equal(runtime.jobs['600519'].id, 'advisor-1')
+  assert.equal(runtime.reviewJobs['000001'].id, 'review-1')
+})
+
+test('运行态游标已前移时仍合并迟到的完成建议', () => {
+  const account = {
+    updatedAt: 300,
+    data: {
+      runtimeStateAppliedAt: 300,
+      runtimeAdviceAppliedAt: {},
+      advice: {},
+      jobs: {},
+    },
+  }
+
+  mergeAdviceRuntimeState(account, {
+    updatedAt: 300,
+    recentAdviceUpdates: [{
+      code: '600519',
+      role: 'advisor',
+      jobKey: 'advisor:600519',
+      updatedAt: 250,
+      advice: {
+        at: 250,
+        advice: { action: '持有', title: '迟到建议仍需送达' },
+      },
+    }],
+  })
+
+  assert.equal(
+    account.data.advice['600519'].advice.title,
+    '迟到建议仍需送达',
+  )
+})
+
 test('全部停止指令不会被迟到的Worker运行快照覆盖', async () => {
   const storage = fakeStorage()
   const nick = '批量取消并发账号'
@@ -401,18 +532,11 @@ test('全部停止指令不会被迟到的Worker运行快照覆盖', async () =>
     retriedCancellation.canceledAt,
     cancellation.canceledAt,
   )
-  await writeAdviceRuntimeState(nick, {
-    ...activeState,
-    updatedAt: stateAt + 20,
-    batchProgress: {
-      ...activeState.batchProgress,
-      at: stateAt + 20,
-    },
-  }, storage)
-  await writeAdviceRuntimeUpdate(nick, {
+  const lateUpdate = {
     schemaVersion: 'advice-runtime-update.v2',
     code: '600000',
     role: 'advisor',
+    jobKey: 'advisor:600000',
     updatedAt: stateAt + 30,
     advice: {
       at: stateAt + 30,
@@ -424,7 +548,24 @@ test('全部停止指令不会被迟到的Worker运行快照覆盖', async () =>
       finishedAt: stateAt + 30,
       progressAt: stateAt + 30,
     },
+  }
+  await writeAdviceRuntimeState(nick, {
+    ...activeState,
+    updatedAt: stateAt + 20,
+    batchProgress: {
+      ...activeState.batchProgress,
+      at: stateAt + 20,
+    },
+    recentAdviceUpdates: [lateUpdate],
   }, storage)
+  await writeAdviceRuntimeUpdate(nick, lateUpdate, storage)
+
+  const runtime = await readAdviceRuntimeState(nick, storage)
+  assert.equal(
+    Object.values(runtime.jobs)
+      .every((job) => job.status === 'canceled'),
+    true,
+  )
 
   const hydrated = await readAccount(nick, storage)
   assert.equal(

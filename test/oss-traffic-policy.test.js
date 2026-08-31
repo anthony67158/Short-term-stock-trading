@@ -29,13 +29,18 @@ test('跨设备账号同步每30秒走FC增量接口且OSS保持内网访问', (
 
 test('军师Worker控制进度落盘频率且一秒内感知紧急任务与取消', () => {
   const cronAdvice = read('api/cron_advice.js')
+  const serverAdvice = read('src/serverAdvice.js')
 
   assert.match(cronAdvice, /PROGRESS_SAVE_INTERVAL_MS\s*=\s*5000/)
   assert.match(cronAdvice, /CANCEL_POLL_INTERVAL_MS\s*=\s*1000/)
   assert.match(cronAdvice, /writeAdviceRuntimeState/)
   assert.match(cronAdvice, /writeAdviceRuntimeUpdate/)
+  assert.match(cronAdvice, /readAdviceRuntimeState/)
   assert.match(cronAdvice, /persistAdviceCompletion/)
+  assert.match(cronAdvice, /recentRuntimeUpdates/)
   assert.match(cronAdvice, /queueProgressSave\(false\)/)
   assert.match(cronAdvice, /history:\s*false/)
   assert.match(cronAdvice, /verify:\s*true/)
+  assert.match(serverAdvice, /adviceDelivered/)
+  assert.match(serverAdvice, /planStore\.mergeCloud/)
 })

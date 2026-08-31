@@ -634,6 +634,24 @@ test('服务端建议完成后立即拉取一次正文且重复状态不重复�
   assert.equal(pulled.length, 1)
 })
 
+test('状态响应已携带建议正文时不再重复拉取完整账号', async () => {
+  let pulls = 0
+  const pullCompletedAdvice = createAdviceCompletionPuller(async () => {
+    pulls++
+  })
+
+  assert.equal(await pullCompletedAdvice({
+    running: false,
+    adviceDelivered: true,
+    items: [{
+      code: '600487',
+      status: 'ok',
+      progressAt: 200,
+    }],
+  }), true)
+  assert.equal(pulls, 0)
+})
+
 test('独立review完成后同样触发一次建议正文增量拉取', async () => {
   let pulls = 0
   const pullCompletedAdvice = createAdviceCompletionPuller(async () => {

@@ -19,6 +19,8 @@ let statusTimer = null
 let statusPulling = false
 let statusConsumer = null
 let statusFastUntil = 0
+let statusRuntimeSince = 0
+let statusRuntimeNick = ''
 const pullCompletedAdvice = createAdviceCompletionPuller(
   () => authStore.pull(),
 )
@@ -27,6 +29,10 @@ export async function fetchServerAdviceStatus() {
   let creds = null
   try { creds = authStore.getCreds && authStore.getCreds() } catch { creds = null }
   if (!creds || !creds.nick || statusPulling) return null
+  if (statusRuntimeNick !== creds.nick) {
+    statusRuntimeNick = creds.nick
+    statusRuntimeSince = 0
+  }
   statusPulling = true
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 8000)
@@ -34,11 +40,59 @@ export async function fetchServerAdviceStatus() {
     const response = await fetch(api('/api/cron_advice'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ op: 'status', ...creds }),
+      body: JSON.stringify({
+        op: 'status',
+        since: statusRuntimeSince,
+        ...creds,
+      }),
       signal: controller.signal,
     })
     const data = await response.json()
-    return data && data.ok ? data.progress : null
+    if (!data?.ok) return null
+    const deliveredAdvice = new Map()
+    for (const update of (Array.isArray(data.runtimeUpdates)
+      ? data.runtimeUpdates
+      : [])) {
+      if (!update?.code) continue
+      const delta = {
+        ...(update.advice
+          ? { advice: { [String(update.code)]: update.advice } }
+          : {}),
+        adviceLog: update.adviceLog || [],
+        decisionLog: update.decisionLog || [],
+        alerts: update.alerts || [],
+      }
+      try {
+        planStore.mergeCloud(delta)
+        if (update.advice) {
+          deliveredAdvice.set(
+            String(update.code),
+            Number(update.updatedAt) || 0,
+          )
+        }
+        statusRuntimeSince = Math.max(
+          statusRuntimeSince,
+          Number(update.updatedAt) || 0,
+        )
+      } catch {
+        return data.progress || null
+      }
+    }
+    const latestTerminal = [
+      ...(data.progress?.items || []),
+      ...(data.progress?.reviews || []),
+    ]
+      .filter((item) => item?.status === 'ok' && item?.code)
+      .sort((left, right) =>
+        Number(right.progressAt) - Number(left.progressAt)
+      )[0]
+    const adviceDelivered = !!latestTerminal
+      && Number(deliveredAdvice.get(String(latestTerminal.code))) >=
+        Number(latestTerminal.progressAt || 0)
+    return {
+      ...(data.progress || {}),
+      adviceDelivered,
+    }
   } catch {
     return null
   } finally {

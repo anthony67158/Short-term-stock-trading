@@ -446,6 +446,8 @@ const deactivationPathOf = (nick) => `${prefixOf(nick)}deactivated.json`;
 const legacyPathOf = (nick) => `${PREFIX}${sha('u:' + nick)}.json`; // 旧的单文件覆盖式路径（兼容迁移）
 const adviceRuntimePrefixOf = (nick) => `${prefixOf(nick)}runtime/advice/`;
 const adviceRuntimeStatePathOf = (nick) => `${prefixOf(nick)}runtime/state.json`;
+const adviceRuntimeStateWriteLockPathOf = (nick) =>
+  `${prefixOf(nick)}runtime/state.write.lock`;
 const adviceBatchCancellationPathOf = (nick, batchId) =>
   `${prefixOf(nick)}runtime/cancellations/${
     sha(`batch:${String(batchId || '')}`)
@@ -457,6 +459,36 @@ const adviceRuntimeUpdatePathOf = (nick, code, role = 'advisor') => {
   const prefix = role === 'review' ? 'review-' : '';
   return `${adviceRuntimePrefixOf(nick)}${prefix}${safeCode}.json`;
 };
+
+export async function readAdviceRuntimeState(
+  nick,
+  storage = defaultStorage,
+) {
+  if (!nick) return null;
+  const [stored, cancellation] = await Promise.all([
+    storage.readJson(adviceRuntimeStatePathOf(nick))
+      .catch(() => null),
+    storage.readJson(adviceBatchCancellationLatestPathOf(nick))
+      .catch(() => null),
+  ]);
+  if (!stored && !cancellation) return null;
+  const runtime = stored && typeof stored === 'object'
+    ? structuredClone(stored)
+    : {};
+  if (cancellation) {
+    const holder = {
+      updatedAt: Number(runtime.updatedAt) || 0,
+      data: runtime,
+    };
+    applyAdviceBatchCancellation(holder, cancellation);
+    runtime.updatedAt = Math.max(
+      Number(runtime.updatedAt) || 0,
+      Number(cancellation.updatedAt) || 0,
+      Number(holder.updatedAt) || 0,
+    );
+  }
+  return runtime;
+}
 
 function runtimeStamp(value) {
   return Math.max(
@@ -525,6 +557,29 @@ export function mergeAdviceRuntimeState(account, runtime) {
   if (!account || !runtime || typeof runtime !== 'object') return account;
   const updatedAt = Number(runtime.updatedAt) || 0;
   const data = account.data || (account.data = {});
+  const cancellations = { ...(data.adviceBatchCancellations || {}) };
+  for (const [batchId, canceledAt] of Object.entries(
+    runtime.adviceBatchCancellations || {},
+  )) {
+    cancellations[batchId] = Math.max(
+      Number(cancellations[batchId]) || 0,
+      Number(canceledAt) || 0,
+    );
+  }
+  data.adviceBatchCancellations = cancellations;
+  data.adviceCancelAllBefore = Math.max(
+    Number(data.adviceCancelAllBefore) || 0,
+    Number(runtime.adviceCancelAllBefore) || 0,
+  );
+  data.adviceAutoPauseUntil = Math.max(
+    Number(data.adviceAutoPauseUntil) || 0,
+    Number(runtime.adviceAutoPauseUntil) || 0,
+  );
+  for (const update of (Array.isArray(runtime.recentAdviceUpdates)
+    ? runtime.recentAdviceUpdates
+    : [])) {
+    mergeAdviceRuntimeUpdate(account, update, updatedAt);
+  }
   if (updatedAt <= (Number(data.runtimeStateAppliedAt) || 0)) {
     return account;
   }
@@ -542,13 +597,10 @@ export function mergeAdviceRuntimeState(account, runtime) {
     }
     data.reviewJobs = jobs;
   }
-  for (const key of [
-    'jobWorker',
-    'activeAdviceBatchId',
-    'adviceBatchCancellations',
-    'adviceAutoPauseUntil',
-  ]) {
-    if (runtime[key] != null) data[key] = runtime[key];
+  for (const key of ['jobWorker', 'activeAdviceBatchId']) {
+    if (Object.prototype.hasOwnProperty.call(runtime, key)) {
+      data[key] = runtime[key];
+    }
   }
   if (
     runtime.batchProgress
@@ -693,17 +745,6 @@ function applyAdviceBatchCancellation(account, marker) {
     cancelBefore,
   );
   return account;
-}
-
-async function applyStoredAdviceBatchCancellation(
-  account,
-  nick,
-  storage,
-) {
-  const marker = await storage.readJson(
-    adviceBatchCancellationLatestPathOf(nick),
-  ).catch(() => null);
-  return applyAdviceBatchCancellation(account, marker);
 }
 
 function adviceRuntimeUpdateWasCanceled(data, update) {
@@ -872,6 +913,110 @@ async function writeAdviceRuntimeObject(
   return value;
 }
 
+const ADVICE_RUNTIME_RECENT_LIMIT = 24;
+const ADVICE_RUNTIME_TERMINAL_TTL_MS = 24 * 60 * 60 * 1000;
+
+function mergedRuntimeJobTable(current = {}, incoming = {}, now = Date.now()) {
+  const jobs = { ...(current || {}) };
+  for (const [code, job] of Object.entries(incoming || {})) {
+    jobs[code] = mergeRuntimeJob(jobs[code], job);
+  }
+  for (const [code, job] of Object.entries(jobs)) {
+    const terminal = ['done', 'failed', 'canceled'].includes(
+      String(job?.status || ''),
+    );
+    if (
+      !job
+      || (
+        terminal
+        && now - runtimeStamp(job) > ADVICE_RUNTIME_TERMINAL_TTL_MS
+      )
+    ) delete jobs[code];
+  }
+  return jobs;
+}
+
+function mergeAdviceRuntimeDocuments(current, incoming) {
+  const previous = current && typeof current === 'object' ? current : {};
+  const next = incoming && typeof incoming === 'object' ? incoming : {};
+  const previousAt = Number(previous.updatedAt) || 0;
+  const nextAt = Number(next.updatedAt) || 0;
+  const latest = nextAt >= previousAt ? next : previous;
+  const oldest = latest === next ? previous : next;
+  const recent = new Map();
+  for (const update of [
+    ...(Array.isArray(previous.recentAdviceUpdates)
+      ? previous.recentAdviceUpdates
+      : []),
+    ...(Array.isArray(next.recentAdviceUpdates)
+      ? next.recentAdviceUpdates
+      : []),
+  ]) {
+    if (!update?.code) continue;
+    const key = String(
+      update.jobKey
+      || `${update.role === 'review' ? 'review' : 'advisor'}:${update.code}`,
+    );
+    const existing = recent.get(key);
+    if (
+      !existing
+      || Number(update.updatedAt) >= Number(existing.updatedAt)
+    ) recent.set(key, update);
+  }
+  const settings = { ...(oldest.settings || {}) };
+  for (const [key, value] of Object.entries(latest.settings || {})) {
+    settings[key] = Math.max(
+      Number(settings[key]) || 0,
+      Number(value) || 0,
+    );
+  }
+  const cancellations = { ...(previous.adviceBatchCancellations || {}) };
+  for (const [batchId, canceledAt] of Object.entries(
+    next.adviceBatchCancellations || {},
+  )) {
+    cancellations[batchId] = Math.max(
+      Number(cancellations[batchId]) || 0,
+      Number(canceledAt) || 0,
+    );
+  }
+  const batchProgress = runtimeStamp(next.batchProgress)
+      >= runtimeStamp(previous.batchProgress)
+    ? next.batchProgress
+    : previous.batchProgress;
+  const adviceDailyReport = runtimeStamp(next.adviceDailyReport)
+      >= runtimeStamp(previous.adviceDailyReport)
+    ? next.adviceDailyReport
+    : previous.adviceDailyReport;
+  return {
+    schemaVersion: 'advice-runtime-state.v2',
+    updatedAt: Math.max(previousAt, nextAt, Date.now()),
+    jobs: mergedRuntimeJobTable(previous.jobs, next.jobs),
+    reviewJobs: mergedRuntimeJobTable(
+      previous.reviewJobs,
+      next.reviewJobs,
+    ),
+    jobWorker: latest.jobWorker ?? null,
+    activeAdviceBatchId: latest.activeAdviceBatchId || '',
+    adviceBatchCancellations: cancellations,
+    adviceCancelAllBefore: Math.max(
+      Number(previous.adviceCancelAllBefore) || 0,
+      Number(next.adviceCancelAllBefore) || 0,
+    ),
+    adviceAutoPauseUntil: Math.max(
+      Number(previous.adviceAutoPauseUntil) || 0,
+      Number(next.adviceAutoPauseUntil) || 0,
+    ),
+    batchProgress: batchProgress || null,
+    adviceDailyReport: adviceDailyReport || null,
+    recentAdviceUpdates: [...recent.values()]
+      .sort((left, right) =>
+        Number(left.updatedAt) - Number(right.updatedAt)
+      )
+      .slice(-ADVICE_RUNTIME_RECENT_LIMIT),
+    settings,
+  };
+}
+
 export async function writeAdviceRuntimeState(
   nick,
   runtime,
@@ -880,12 +1025,35 @@ export async function writeAdviceRuntimeState(
   if (!nick || !runtime || typeof runtime !== 'object') {
     throw new Error('建议运行态无效');
   }
-  return writeAdviceRuntimeObject(
-    adviceRuntimeStatePathOf(nick),
-    runtime,
-    storage,
-    { verify: false },
-  );
+  let releaseLock = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      releaseLock = await acquireObjectWriteLock(
+        adviceRuntimeStateWriteLockPathOf(nick),
+        storage,
+      );
+      break;
+    } catch (error) {
+      if (error?.status !== 409 || attempt >= 2) throw error;
+      await new Promise((resolve) =>
+        setTimeout(resolve, 25 * (attempt + 1))
+      );
+    }
+  }
+  try {
+    const current = await storage.readJson(
+      adviceRuntimeStatePathOf(nick),
+    ).catch(() => null);
+    const merged = mergeAdviceRuntimeDocuments(current, runtime);
+    return await writeAdviceRuntimeObject(
+      adviceRuntimeStatePathOf(nick),
+      merged,
+      storage,
+      { verify: false },
+    );
+  } finally {
+    if (releaseLock) await releaseLock();
+  }
 }
 
 export async function writeAdviceBatchCancellation(
@@ -972,10 +1140,16 @@ async function applyAdviceRuntime(
   { runtimeSince = 0, includeAdviceUpdates = true } = {},
 ) {
   if (!account || !storage?.list || !storage?.readJson) return account;
-  const state = await storage.readJson(adviceRuntimeStatePathOf(nick))
-    .catch(() => null);
+  const state = await readAdviceRuntimeState(nick, storage);
   mergeAdviceRuntimeState(account, state);
-  await applyStoredAdviceBatchCancellation(account, nick, storage);
+  if (state) {
+    Object.defineProperty(account, '_adviceRuntimeState', {
+      value: state,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+    });
+  }
   if (!includeAdviceUpdates) return account;
   const cursor = Math.max(0, Number(runtimeSince) || 0);
   const { blobs } = await storage.list({

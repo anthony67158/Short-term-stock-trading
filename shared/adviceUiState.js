@@ -410,6 +410,10 @@ export function createAdviceCompletionPuller(pull) {
       .sort()
       .join('|')
     if (!fingerprint || fingerprint === deliveredFingerprint) return false
+    if (progress?.adviceDelivered === true) {
+      deliveredFingerprint = fingerprint
+      return true
+    }
     try {
       const pulled = await pull()
       if (pulled === false) return false

@@ -26,6 +26,7 @@ import { applyCors, preflight } from './_lib.js';
 import {
   accountCredentialMatches,
   isAccountActive,
+  readAdviceRuntimeState,
   writeAdviceBatchCancellation,
   writeAdviceRuntimeState,
   writeAdviceRuntimeUpdate,
@@ -120,6 +121,7 @@ import {
 export const PROGRESS_SAVE_INTERVAL_MS = 5000;
 export const CANCEL_POLL_INTERVAL_MS = 1000;
 export const WORKER_HEARTBEAT_INTERVAL_MS = 30000;
+const ADVICE_RUNTIME_RECENT_LIMIT = 24;
 export const ADVICE_PREPARE_ACCOUNT_TIMEOUT_MS = 5000;
 export const ADVICE_PREPARE_QUOTE_TIMEOUT_MS = 8000;
 export const ADVICE_JOB_SETTLE_GRACE_MS = 15000;
@@ -421,7 +423,11 @@ export function adviceRuntimeUpdateFromData(
   };
 }
 
-function adviceRuntimeStateFromData(data, updatedAt = Date.now()) {
+export function adviceRuntimeStateFromData(
+  data,
+  updatedAt = Date.now(),
+  recentAdviceUpdates = [],
+) {
   const runtimeSettings = {};
   for (const key of [
     'advAuto.holdLastAt',
@@ -441,9 +447,14 @@ function adviceRuntimeStateFromData(data, updatedAt = Date.now()) {
     jobWorker: data?.jobWorker || null,
     activeAdviceBatchId: data?.activeAdviceBatchId || '',
     adviceBatchCancellations: data?.adviceBatchCancellations || {},
+    adviceCancelAllBefore: Number(data?.adviceCancelAllBefore) || 0,
     adviceAutoPauseUntil: Number(data?.adviceAutoPauseUntil) || 0,
     batchProgress: data?.batchProgress || null,
     adviceDailyReport: data?.adviceDailyReport || null,
+    recentAdviceUpdates: (Array.isArray(recentAdviceUpdates)
+      ? recentAdviceUpdates
+      : []
+    ).slice(-ADVICE_RUNTIME_RECENT_LIMIT),
     settings: runtimeSettings,
   };
 }
@@ -465,6 +476,26 @@ async function retryRuntimeWrite(task, attempts = 3) {
   throw lastError || new Error('OSS 建议增量保存失败');
 }
 
+async function persistWorkerRuntimeState(
+  nick,
+  data,
+  recentAdviceUpdates = [],
+) {
+  const runtime = adviceRuntimeStateFromData(
+    data,
+    Math.max(
+      Date.now(),
+      (Number(data.runtimeStateAppliedAt) || 0) + 1,
+    ),
+    recentAdviceUpdates,
+  );
+  const saved = await retryRuntimeWrite(() =>
+    writeAdviceRuntimeState(nick, runtime)
+  );
+  data.runtimeStateAppliedAt = saved.updatedAt;
+  return saved;
+}
+
 async function persistAdviceCompletion(
   nick,
   data,
@@ -472,6 +503,8 @@ async function persistAdviceCompletion(
   concurrency,
   role,
   jobId,
+  recentUpdates = new Map(),
+  saveRuntimeState = null,
 ) {
   const update = adviceRuntimeUpdateFromData(
     data,
@@ -481,9 +514,25 @@ async function persistAdviceCompletion(
     role,
     jobId,
   );
+  const recentKey = update.jobKey || code;
+  recentUpdates.delete(recentKey);
+  recentUpdates.set(recentKey, update);
+  while (recentUpdates.size > ADVICE_RUNTIME_RECENT_LIMIT) {
+    recentUpdates.delete(recentUpdates.keys().next().value);
+  }
+  data.batchProgress = update.batchProgress;
   await retryRuntimeWrite(() =>
     writeAdviceRuntimeUpdate(nick, update)
   );
+  if (typeof saveRuntimeState === 'function') {
+    await saveRuntimeState();
+  } else {
+    await persistWorkerRuntimeState(
+      nick,
+      data,
+      [...recentUpdates.values()],
+    );
+  }
   data.runtimeAdviceAppliedAt = {
     ...(data.runtimeAdviceAppliedAt || {}),
     [update.jobKey || code]: update.updatedAt,
@@ -1606,6 +1655,7 @@ async function persistServer(nick, workingAcc) {
   const runtimeState = adviceRuntimeStateFromData(
     fdata,
     Date.now(),
+    workingAcc._adviceRuntimeState?.recentAdviceUpdates || [],
   );
   await retryRuntimeWrite(() =>
     writeAdviceRuntimeState(nick, runtimeState)
@@ -1615,23 +1665,41 @@ async function persistServer(nick, workingAcc) {
   return fresh;
 }
 
-async function releaseDrainLock(nick, acc, myId, concurrency) {
-  const fresh = (await readAccount(nick)) || acc;
-  const fdata = fresh.data || (fresh.data = {});
-  if (isAccountActive(fresh) && !workerHeldByOther(fdata, myId)) {
+async function releaseDrainLock(
+  nick,
+  acc,
+  myId,
+  concurrency,
+  recentAdviceUpdates = [],
+) {
+  const workingData = acc.data || (acc.data = {});
+  releaseWorkerLock(workingData, myId);
+  workingData.batchProgress = jobsToProgress(
+    workingData,
+    Date.now(),
+    concurrency,
+  );
+  await persistWorkerRuntimeState(
+    nick,
+    workingData,
+    recentAdviceUpdates,
+  ).catch(() => {});
+
+  try {
+    const fresh = (await readAccount(nick)) || acc;
+    const fdata = fresh.data || (fresh.data = {});
+    if (!isAccountActive(fresh) || workerHeldByOther(fdata, myId)) return;
     releaseWorkerLock(fdata, myId);
-    mergeExternalJobs(acc.data, fdata);
-    fdata.jobs = acc.data.jobs;
-    fdata.reviewJobs = acc.data.reviewJobs;
-    fdata.batchProgress = jobsToProgress(
-      acc.data,
-      Date.now(),
-      concurrency,
-    );
-    if (acc.data.adviceDailyReport?.summary?.text) {
-      fdata.adviceDailyReport = acc.data.adviceDailyReport;
+    mergeExternalJobs(workingData, fdata);
+    fdata.jobs = workingData.jobs;
+    fdata.reviewJobs = workingData.reviewJobs;
+    fdata.batchProgress = workingData.batchProgress;
+    if (workingData.adviceDailyReport?.summary?.text) {
+      fdata.adviceDailyReport = workingData.adviceDailyReport;
     }
-    try { await writeAccount(fresh); } catch { /* ignore */ }
+    await writeAccount(fresh);
+  } catch {
+    // 轻量终态已经发布；主快照由后续 Worker 或账号保存继续压实。
   }
 }
 
@@ -1644,8 +1712,19 @@ async function drainAccount(nick, initialAcc) {
   let data = acc.data || (acc.data = {});
   reapOrphans(data); gcJobs(data);
   if (!acquireWorkerLock(data, myId)) return { skipped: 'locked' };  // 已有他人在 drain → 交给它
+  const recentRuntimeUpdates = new Map(
+    (Array.isArray(acc._adviceRuntimeState?.recentAdviceUpdates)
+      ? acc._adviceRuntimeState.recentAdviceUpdates
+      : [])
+      .filter((update) => update?.jobKey)
+      .map((update) => [update.jobKey, update]),
+  );
   const persistence = createRecoverableSerialRunner(async () => {
-    acc = await persistServer(nick, acc);
+    await persistWorkerRuntimeState(
+      nick,
+      acc.data,
+      [...recentRuntimeUpdates.values()],
+    );
     data = acc.data;
     return acc;
   });
@@ -1763,20 +1842,33 @@ async function drainAccount(nick, initialAcc) {
     void queueProgressSave(true).catch(() => {});
   }, WORKER_HEARTBEAT_INTERVAL_MS);
   if (heartbeat && typeof heartbeat.unref === 'function') heartbeat.unref();
+  let cancelPollRunning = false;
+  let lastFullAccountPollAt = Date.now();
   const cancelPoll = setInterval(async () => {
+    if (cancelPollRunning) return;
+    cancelPollRunning = true;
     try {
-      const fresh = await readAccount(nick);
+      const now = Date.now();
+      let freshData = await readAdviceRuntimeState(nick);
+      if (now - lastFullAccountPollAt >= 15000) {
+        lastFullAccountPollAt = now;
+        const freshAccount = await readAccount(nick, undefined, {
+          includeAdviceUpdates: false,
+        });
+        freshData = freshAccount?.data || freshData;
+      }
+      if (!freshData) return;
       const knownJobIds = new Set(
         allAdviceJobs(acc.data).map((job) => String(job.id || '')),
       );
-      mergeExternalJobs(acc.data, fresh?.data || {});
+      mergeExternalJobs(acc.data, freshData);
       const discoveredWork = allAdviceJobs(acc.data).some((job) =>
         isActive(job)
         && !knownJobIds.has(String(job.id || ''))
       );
       acc.data.settings = mergeAutoRefreshSettings(
         acc.data.settings || {},
-        fresh?.data?.settings || {},
+        freshData.settings || {},
       );
       const disabledCanceled = cancelDisabledAdviceReviewJobs(acc.data);
       for (const task of inflight.values()) {
@@ -1790,7 +1882,7 @@ async function drainAccount(nick, initialAcc) {
           continue;
         }
         const remote = findAdviceJob(
-          fresh?.data || {},
+          freshData,
           task.code,
           { role: task.role },
         );
@@ -1814,7 +1906,11 @@ async function drainAccount(nick, initialAcc) {
       }
       if (disabledCanceled > 0) await queueProgressSave(true);
       if (disabledCanceled > 0 || discoveredWork) wakeScheduler();
-    } catch { /* 下一轮继续检查 */ }
+    } catch {
+      // 下一轮继续检查。
+    } finally {
+      cancelPollRunning = false;
+    }
   }, CANCEL_POLL_INTERVAL_MS);
   if (cancelPoll && typeof cancelPoll.unref === 'function') cancelPoll.unref();
   try {
@@ -1904,7 +2000,9 @@ async function drainAccount(nick, initialAcc) {
       let tradeStateCurrent = true;
       if (done.res?.sourceTradeFingerprint) {
         try {
-          const latest = await readAccount(nick);
+          const latest = await readAccount(nick, undefined, {
+            includeAdviceUpdates: false,
+          });
           tradeStateCurrent = !!latest?.data
             && adviceGenerationStateFingerprint(latest.data)
               === done.res.sourceTradeFingerprint;
@@ -2071,6 +2169,8 @@ async function drainAccount(nick, initialAcc) {
             CONC,
             done.role,
             done.jobId,
+            recentRuntimeUpdates,
+            saveWorking,
           );
         } catch (runtimeError) {
           // 小对象增量写连续失败时才回退完整快照，避免生成结果丢失。
@@ -2089,7 +2189,13 @@ async function drainAccount(nick, initialAcc) {
     for (const task of inflight.values()) task.controller.abort();
     await progressSaver.settle();
     await persistence.settle();
-    await releaseDrainLock(nick, acc, myId, CONC);
+    await releaseDrainLock(
+      nick,
+      acc,
+      myId,
+      CONC,
+      [...recentRuntimeUpdates.values()],
+    );
   }
   let continued = false;
   if (hasRunnableAdviceWork(acc.data)) {
@@ -2445,6 +2551,20 @@ export default async function handler(req, res) {
         const recovered = reapOrphans(data);
         gcJobs(data);
         if (recovered > 0) await persistServer(nick, acc);
+        const runtimeSince = Math.max(0, Number(body.since) || 0);
+        const recentRuntimeUpdates = (
+          Array.isArray(acc._adviceRuntimeState?.recentAdviceUpdates)
+            ? acc._adviceRuntimeState.recentAdviceUpdates
+            : []
+        )
+          .filter((update) =>
+            update?.advice
+            && Number(update.updatedAt) > runtimeSince
+          )
+          .sort((left, right) =>
+            Number(left.updatedAt) - Number(right.updatedAt)
+          )
+          .slice(-ADVICE_RUNTIME_RECENT_LIMIT);
         let workerScheduled = false;
         if (needsRoleWorkerDispatch(data)) {
           try {
@@ -2464,6 +2584,7 @@ export default async function handler(req, res) {
           concurrency: CONC,
           running: runningCount(data, Date.now(), 'advisor'),
           reviewRunning: runningCount(data, Date.now(), 'review'),
+          runtimeUpdates: recentRuntimeUpdates,
           workerScheduled,
           recovered,
         }));
@@ -2522,6 +2643,11 @@ export default async function handler(req, res) {
           now,
           batchId,
           canceledAt,
+        );
+        await persistWorkerRuntimeState(
+          nick,
+          data,
+          acc._adviceRuntimeState?.recentAdviceUpdates || [],
         );
         return res.end(JSON.stringify({
           ok: true,
