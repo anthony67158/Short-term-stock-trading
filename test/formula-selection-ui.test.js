@@ -8,6 +8,7 @@ import {
   formulaPriceCachePolicy,
   isFormulaSelectionTransientError,
   loadStockFormulaPrice,
+  staleFormulaPricePayload,
 } from '../src/formulaSelectionClient.js'
 
 const selection = fs.readFileSync(
@@ -191,20 +192,32 @@ test('收盘公式跨休市复用且在开盘或账户变化后重新计算', as
     assert.equal(calls, 2)
 
     await loadStockFormulaPrice('600001', {
-      now: mondayOpen,
+      now: mondayOpen + 30_000,
+      accountState,
+    })
+    assert.equal(calls, 2)
+
+    await loadStockFormulaPrice('600001', {
+      now: mondayOpen + 60_001,
+      accountState,
+    })
+    assert.equal(calls, 3)
+
+    await loadStockFormulaPrice('600001', {
+      now: mondayOpen + 60_001,
       accountState: {
         ...accountState,
         holding: [{ code: '600001', qty: 2, buyPrice: 10 }],
       },
     })
-    assert.equal(calls, 3)
+    assert.equal(calls, 4)
 
     await loadStockFormulaPrice('600001', {
-      now: mondayOpen,
+      now: mondayOpen + 60_001,
       accountState,
       force: true,
     })
-    assert.equal(calls, 4)
+    assert.equal(calls, 5)
   } finally {
     globalThis.fetch = originalFetch
     clearStockFormulaPriceCache()
@@ -240,6 +253,77 @@ test('同一账号同股的并发公式请求只计算一次', async () => {
       loadStockFormulaPrice('600001', { now, accountState }),
     ])
     assert.equal(calls, 1)
+  } finally {
+    globalThis.fetch = originalFetch
+    clearStockFormulaPriceCache()
+  }
+})
+
+test('公式故障回退只限同一行情窗口且降级为不可执行', () => {
+  const payload = staleFormulaPricePayload({
+    ok: true,
+    decision: {
+      positionMode: 'UNOWNED',
+      action: 'WATCH_BUY',
+      primaryPrice: 10,
+      stopPrice: 9.5,
+      targetPrice: 11,
+      riskReward: 2,
+      priceContractValid: true,
+      dataFresh: true,
+      blockers: [],
+    },
+    advisorReference: {
+      effectiveWeight: 0.05,
+      conflicts: [],
+    },
+  })
+
+  assert.equal(payload.stale, true)
+  assert.equal(payload.decision.action, 'AVOID')
+  assert.equal(payload.decision.primaryPrice, null)
+  assert.equal(payload.decision.dataFresh, false)
+  assert.equal(payload.advisorReference.effectiveWeight, 0)
+  assert.match(
+    payload.decision.blockers.join('；'),
+    /行情数据已过期/,
+  )
+})
+
+test('行情窗口切换后请求失败不会沿用上一窗口价位', async () => {
+  clearStockFormulaPriceCache()
+  const originalFetch = globalThis.fetch
+  let failed = false
+  globalThis.fetch = async () => {
+    if (failed) throw new TypeError('Failed to fetch')
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: true,
+        decision: { action: 'WATCH_BUY' },
+      }),
+    }
+  }
+  const accountState = {
+    plan: [],
+    holding: [],
+    closed: [],
+    account: { cash: 10000 },
+  }
+  try {
+    await loadStockFormulaPrice('600002', {
+      now: Date.parse('2026-08-31T14:59:30+08:00'),
+      accountState,
+    })
+    failed = true
+    await assert.rejects(
+      loadStockFormulaPrice('600002', {
+        now: Date.parse('2026-08-31T15:01:00+08:00'),
+        accountState,
+      }),
+      /行情数据暂时不可用/,
+    )
   } finally {
     globalThis.fetch = originalFetch
     clearStockFormulaPriceCache()

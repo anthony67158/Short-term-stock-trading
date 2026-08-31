@@ -119,6 +119,49 @@ export function clearStockFormulaPriceCache() {
   stockFormulaFlights.clear()
 }
 
+export function staleFormulaPricePayload(payload = {}) {
+  const decision = payload?.decision
+  if (!decision) return { ...payload, stale: true }
+  const action = decision.positionMode === 'HELD' ? 'HOLD' : 'AVOID'
+  const staleReason = '行情数据已过期，需要重新获取后再执行'
+  return {
+    ...payload,
+    stale: true,
+    decision: {
+      ...decision,
+      action,
+      primaryPrice: null,
+      priceType: null,
+      stopPrice: null,
+      targetPrice: null,
+      riskReward: null,
+      priceContractValid: false,
+      dataFresh: false,
+      evidence: [],
+      blockers: [
+        staleReason,
+        ...(decision.blockers || []),
+      ],
+    },
+    advisorReference: payload.advisorReference
+      ? {
+          ...payload.advisorReference,
+          action,
+          primaryPrice: null,
+          stopPrice: null,
+          targetPrice: null,
+          riskReward: null,
+          effectiveWeight: 0,
+          canForceRiskReduction: false,
+          conflicts: [
+            staleReason,
+            ...(payload.advisorReference.conflicts || []),
+          ],
+        }
+      : payload.advisorReference,
+  }
+}
+
 export function isFormulaSelectionTransientError(error) {
   const status = Number(error?.status) || 0
   const errorCode = String(error?.errorCode || '')
@@ -250,13 +293,11 @@ export function loadStockFormulaPrice(
     if (
       isFormulaSelectionTransientError(error)
       && cached
+      && cached.marketKey === policy.key
       && cached.accountFingerprint === accountFingerprint
       && timestamp - cached.at <= STOCK_FORMULA_STALE_MS
     ) {
-      return {
-        ...cached.payload,
-        stale: true,
-      }
+      return staleFormulaPricePayload(cached.payload)
     }
     throw error
   }).finally(() => {
