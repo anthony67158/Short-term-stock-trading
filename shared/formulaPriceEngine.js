@@ -158,6 +158,15 @@ function holdingDecision(input) {
   const resistance = price(technicals.resistance)
   const atr = finite(technicals.atr)
   const highestClose = price(technicals.highestClose)
+  const risk = current != null && stop != null
+    ? current - stop
+    : null
+  const reward = current != null && resistance != null
+    ? resistance - current
+    : null
+  const riskReward = risk > 0 && reward > 0
+    ? +(reward / risk).toFixed(2)
+    : null
   const sellableQty = Math.max(
     0,
     Math.trunc(finite(input.t1Status?.sellableQty) || 0),
@@ -170,7 +179,7 @@ function holdingDecision(input) {
     positionMode: 'HELD',
     stopPrice: stop,
     targetPrice: resistance,
-    riskReward: null,
+    riskReward,
     validUntil: null,
     dataComplete: true,
     dataFresh: true,

@@ -165,4 +165,5 @@ test('持仓未触发退出时只返回一个持有风险边界', () => {
   assert.equal(result.priceType, 'RISK_BOUNDARY')
   assert.equal(result.primaryPrice, 10)
   assert.equal(result.sellableQty, 2)
+  assert.equal(result.riskReward, 0.64)
 })
