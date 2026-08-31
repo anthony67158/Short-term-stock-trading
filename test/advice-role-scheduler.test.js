@@ -47,6 +47,84 @@ test('同一股票的主建议与复核使用独立任务槽位', () => {
   assert.equal(data.reviewJobs['600000'].role, 'review')
 })
 
+test('普通复核运行中收到到价事件时不得发布新观察价', () => {
+  const data = {}
+  const scheduled = enqueueJob(data, {
+    code: '600000',
+    mode: 'buy_advice',
+    source: 'auto',
+    idempotencyKey: 'auto:600000:1000',
+  }, 1000)
+  leaseJob(data, '600000', 1100, 'review', scheduled.job.id)
+
+  const triggered = enqueueJob(data, {
+    code: '600000',
+    mode: 'buy_advice',
+    source: 'judge',
+    idempotencyKey: 'price-review:alert-1:plan-1:1:lte:10',
+    trigger: {
+      kind: 'price-review',
+      alertId: 'alert-1',
+      planId: 'plan-1',
+      planRevision: 1,
+      at: 1200,
+      terminalRequired: true,
+    },
+  }, 1200)
+
+  assert.equal(triggered.deferred, true)
+  const completion = completeJob(data, '600000', 1400, {
+    evidenceAsOf: 1300,
+    planRevision: 1,
+    role: 'review',
+    jobId: scheduled.job.id,
+  })
+
+  assert.equal(completion.publish, false)
+  assert.equal(completion.status, 'requeued')
+  assert.equal(data.reviewJobs['600000'].status, 'queued')
+  assert.equal(data.reviewJobs['600000'].maxAttempts, 1)
+  assert.equal(
+    data.reviewJobs['600000'].trigger.terminalRequired,
+    true,
+  )
+})
+
+test('普通复核运行中已覆盖的非终局事件无需重复生成', () => {
+  const data = {}
+  const scheduled = enqueueJob(data, {
+    code: '600000',
+    mode: 'buy_advice',
+    source: 'auto',
+    idempotencyKey: 'auto:600000:1000',
+  }, 1000)
+  leaseJob(data, '600000', 1100, 'review', scheduled.job.id)
+
+  const deferred = enqueueJob(data, {
+    code: '600000',
+    mode: 'buy_advice',
+    source: 'judge',
+    idempotencyKey: 'news-review:600000:1200',
+    trigger: {
+      kind: 'material-news',
+      at: 1200,
+      planRevision: 1,
+    },
+  }, 1200)
+
+  assert.equal(deferred.deferred, true)
+  const completion = completeJob(data, '600000', 1400, {
+    evidenceAsOf: 1300,
+    planRevision: 1,
+    role: 'review',
+    jobId: scheduled.job.id,
+  })
+
+  assert.equal(completion.publish, true)
+  assert.equal(completion.status, 'done')
+  assert.equal(data.reviewJobs['600000'].status, 'done')
+})
+
 test('旧版混合任务表会把自动复核迁移到review队列', () => {
   const data = {
     jobs: {

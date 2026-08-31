@@ -594,6 +594,11 @@ export function completeJob(
   if (pendingTrigger && typeof pendingTrigger === 'object') {
     const pendingAt = Number(pendingTrigger.at) || 0;
     const pendingRevision = Number(pendingTrigger.planRevision) || 0;
+    const pendingRequiresTerminal =
+      pendingTrigger.terminalRequired === true;
+    const currentIsTerminalReview =
+      isTriggeredReviewEvent(j.trigger)
+      && j.trigger?.terminalRequired === true;
     const coveredByEvidence = (
       Number(evidenceAsOf) > 0
       && pendingAt > 0
@@ -604,7 +609,12 @@ export function completeJob(
       && pendingRevision > 0
       && pendingRevision >= Number(planRevision)
     );
-    if (coveredByEvidence || coveredByPlan) {
+    // Fresh evidence from a normal review cannot satisfy a one-shot
+    // price trigger because its output may still create new watch prices.
+    if (
+      (!pendingRequiresTerminal || currentIsTerminalReview)
+      && (coveredByEvidence || coveredByPlan)
+    ) {
       rememberEventKey(data, pendingTrigger.idempotencyKey, now);
       j.pendingTrigger = null;
       j.status = 'done';
