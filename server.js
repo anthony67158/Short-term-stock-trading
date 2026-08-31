@@ -213,7 +213,9 @@ function serveSiteAccess(req, res) {
     return;
   }
   protectedSiteHeaders(res);
-  res.statusCode = 401;
+  // 授权页本身是可交互的顶层文档。部分 WebView 会拒绝提交 401
+  // 导航并永久停在加载态；真正受保护的 API/资源仍在路由层返回 401。
+  res.statusCode = 200;
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader(

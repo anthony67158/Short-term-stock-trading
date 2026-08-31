@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 import {
   PROTECTED_SITE_HOST,
@@ -11,12 +12,26 @@ import {
   verifySiteAccessToken,
 } from '../api/_site_access.js'
 
+const serverSource = readFileSync(
+  new URL('../server.js', import.meta.url),
+  'utf8',
+)
+
 test('设备授权只保护备案新域名，不影响 Vercel 和旧 FC 地址', () => {
   assert.equal(PROTECTED_SITE_HOST, 'www.tedixtf.cn')
   assert.equal(isProtectedSiteHost('www.tedixtf.cn'), true)
   assert.equal(isProtectedSiteHost('www.tedixtf.cn:443'), true)
   assert.equal(isProtectedSiteHost('stock-dashboard-one-plum.vercel.app'), false)
   assert.equal(isProtectedSiteHost('stock-dashboard-znrlekbzit.cn-hangzhou.fcapp.run'), false)
+})
+
+test('设备授权页使用成功状态以便浏览器提交并渲染顶层文档', () => {
+  const serveSiteAccess = serverSource.match(
+    /function serveSiteAccess\(req, res\) \{[\s\S]*?\n\}/,
+  )?.[0] || ''
+
+  assert.match(serveSiteAccess, /res\.statusCode = 200/)
+  assert.doesNotMatch(serveSiteAccess, /res\.statusCode = 401/)
 })
 
 test('授权码只通过服务端密钥派生摘要校验', () => {
