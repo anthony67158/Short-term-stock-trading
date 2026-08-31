@@ -662,6 +662,7 @@ export async function fetchAdvisorSearch({
   name = '',
   industry = '',
   reviewOrigin = '',
+  cacheIndustryResult = true,
 } = {}, options = {}) {
   const config = await runtimeConfig(options);
   if (config.enabled !== true || !String(config.apiKey || '').trim()) {
@@ -733,7 +734,15 @@ export async function fetchAdvisorSearch({
     writeCache,
   });
   const industryItems = industryOnlyItems(result.items, industry, name, code);
-  await saveCache('industry', industry, industryItems, INDUSTRY_CACHE_MS, cacheOptions);
+  if (cacheIndustryResult) {
+    await saveCache(
+      'industry',
+      industry,
+      industryItems,
+      INDUSTRY_CACHE_MS,
+      cacheOptions,
+    );
+  }
   return result;
 }
 
@@ -766,12 +775,6 @@ export async function fetchAdvisorSearchBundle({
     || ((input) => fetchAdvisorSearch(input, options));
   const industryFetcher = options.industryFetcher
     || ((input) => fetchIndustrySearchSupplement(input, options));
-  const stockPromise = Promise.resolve().then(() => stockFetcher({
-    code,
-    name,
-    industry,
-    reviewOrigin,
-  }));
   const needsIndustry = !!(
     (includeIndustry || industryFallback)
     && industry
@@ -779,6 +782,13 @@ export async function fetchAdvisorSearchBundle({
   const scheduled = ['auto', 'judge'].includes(
     String(reviewOrigin || ''),
   );
+  const stockPromise = Promise.resolve().then(() => stockFetcher({
+    code,
+    name,
+    industry,
+    reviewOrigin,
+    cacheIndustryResult: !(needsIndustry && !scheduled),
+  }));
   const industryPromise = needsIndustry && !scheduled
     ? Promise.resolve().then(() =>
         industryFetcher({ industry, reviewOrigin })

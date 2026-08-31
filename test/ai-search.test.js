@@ -400,6 +400,7 @@ test('军师行业资讯可直接使用豆包主源而不依赖旧新闻源失�
 test('手动深度研判并行获取个股与行业搜索证据', async () => {
   let releaseStock
   let industryStarted = false
+  let stockInput = null
   const stockPending = new Promise((resolve) => {
     releaseStock = resolve
   })
@@ -409,7 +410,10 @@ test('手动深度研判并行获取个股与行业搜索证据', async () => {
     industry: '半导体',
     includeIndustry: true,
   }, {
-    stockFetcher: async () => stockPending,
+    stockFetcher: async (input) => {
+      stockInput = input
+      return stockPending
+    },
     industryFetcher: async () => {
       industryStarted = true
       return {
@@ -438,6 +442,7 @@ test('手动深度研判并行获取个股与行业搜索证据', async () => {
   await pending
 
   assert.equal(startedBeforeStockFinished, true)
+  assert.equal(stockInput.cacheIndustryResult, false)
 })
 
 test('自动复核命中的行业缓存不会冒充个股信息', async () => {
