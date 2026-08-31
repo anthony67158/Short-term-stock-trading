@@ -1,3 +1,7 @@
+import {
+  reusableQuantEvidenceFromAdvice,
+} from './adviceQuantResult.js'
+
 export const EVIDENCE_SCHEMA_VERSION = 'canonical-evidence.v1'
 export const EVIDENCE_COLLECTOR_VERSION = 'ai-collector.v1'
 export const EVIDENCE_SNAPSHOT_LIMIT = 80
@@ -331,9 +335,13 @@ export function createCanonicalEvidenceSnapshot({
     && quantTrace?.errorCode === 'TRIGGERED_REVIEW_REUSE_PREVIOUS'
   )
     ? (
-        payload.reviewDecisionPacket?.baseline?.tactical?.quant
-        || payload.previousAdvice?.shortHorizonTactical?.quant
-        || payload.previousAdvice?.quantContext
+        reusableQuantEvidenceFromAdvice(payload.previousAdvice)
+        || reusableQuantEvidenceFromAdvice({
+          shortHorizonTactical: {
+            quant:
+              payload.reviewDecisionPacket?.baseline?.tactical?.quant,
+          },
+        })
         || null
       )
     : null

@@ -44,6 +44,9 @@ import {
   selectPrimaryProductionForecast,
   shouldRefreshProductionForecast,
 } from '../../shared/productionForecastWindow.js'
+import {
+  restoreAdviceEntryQuantEvidence,
+} from '../../shared/adviceQuantResult.js'
 import { stockNoteText } from '../../shared/stockNotes.js'
 import FormulaPrice from './FormulaPrice'
 import { useTheme } from '../themeStore'
@@ -103,15 +106,16 @@ function normalizeUrl(raw) {
 
 function adviceDisplayState(entry) {
   if (!entry || typeof entry !== 'object') return null
+  const restored = restoreAdviceEntryQuantEvidence(entry)
   return {
-    result: entry.result,
-    advice: entry.advice,
-    meta: entry.meta,
-    news: entry.news,
-    adviceMissing: entry.adviceMissing,
-    truncated: entry.truncated,
-    generationMetrics: entry.generationMetrics || null,
-    cachedAt: entry.cachedAt || entry.at,
+    result: restored.result,
+    advice: restored.advice,
+    meta: restored.meta,
+    news: restored.news,
+    adviceMissing: restored.adviceMissing,
+    truncated: restored.truncated,
+    generationMetrics: restored.generationMetrics || null,
+    cachedAt: restored.cachedAt || restored.at,
   }
 }
 

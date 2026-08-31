@@ -1,4 +1,7 @@
 import { buildAdviceReviewCycle } from './adviceReviewPolicy.js'
+import {
+  reusableQuantEvidenceFromAdviceEntry,
+} from './adviceQuantResult.js'
 
 const CORE_FIELDS = [
   'action',
@@ -232,11 +235,13 @@ export function compactAdvicePlan(entry) {
     : entry
   if (!advice || typeof advice !== 'object') return null
   const continuity = advice.continuity || {}
+  const quantEvidence = reusableQuantEvidenceFromAdviceEntry(entry)
   const compact = {
     at: Number(entry?.at || advice.at) || null,
     planId: text(continuity.planId, 120),
     revision: Number(continuity.revision) || 0,
     thesisVersion: Number(continuity.thesisVersion) || 0,
+    ...(quantEvidence ? { quantEvidence } : {}),
   }
   for (const field of CORE_FIELDS) {
     const value = advice[field]

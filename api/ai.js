@@ -127,6 +127,9 @@ import {
   selectFreshestDailyDetail,
 } from '../shared/advisorQuantInput.js';
 import {
+  reusableQuantEvidenceFromAdvice,
+} from '../shared/adviceQuantResult.js';
+import {
   humanizeAdviceTextFields,
 } from '../shared/userFacingLanguage.js';
 import {
@@ -331,7 +334,7 @@ function emptyAdvisorSearch(status = 'disabled') {
   }
 }
 
-async function buildAdvisorQuantEvidence({
+export async function buildAdvisorQuantEvidence({
   market,
   detail,
   quoteResponse,
@@ -341,6 +344,8 @@ async function buildAdvisorQuantEvidence({
   track,
   sourceTracker,
   phase,
+  fetchQuant = fetchSelectedQuantPredict,
+  allowPreviousQuantReuse = false,
 }) {
   const q0 = quoteResponse?.list?.[0]
   const todayQuote = q0?.price != null
@@ -395,13 +400,24 @@ async function buildAdvisorQuantEvidence({
       ]
     }
   }
-  if (triggeredPriceReview) {
+  const reusableQuant = triggeredPriceReview && allowPreviousQuantReuse
+    ? reusableQuantEvidenceFromAdvice(payload.previousAdvice)
+    : null
+  if (reusableQuant) {
     sourceTracker.skip(
       'quant',
       '量化预测',
       'TRIGGERED_REVIEW_REUSE_PREVIOUS',
     )
-    return { quant: null, dailyCandles, todayQuote }
+    return {
+      quant: {
+        ...reusableQuant,
+        ok: true,
+        reusedFromPrevious: true,
+      },
+      dailyCandles,
+      todayQuote,
+    }
   }
   phase(
     '核心行情已就位，量化校验与补充证据正在并行处理…',
@@ -420,7 +436,7 @@ async function buildAdvisorQuantEvidence({
     quant = await track(
       'quant',
       '量化预测',
-      fetchSelectedQuantPredict(
+      fetchQuant(
         quantModelVersion,
         payload.code,
         quantCandles,
@@ -428,9 +444,11 @@ async function buildAdvisorQuantEvidence({
           cost: payload.holdCost,
           qty: payload.holdQty,
         } : null),
-        12000,
+        triggeredPriceReview ? 5000 : 12000,
         quantRealtime,
-        { refreshDailyFromMinutes: true },
+        {
+          refreshDailyFromMinutes: !triggeredPriceReview,
+        },
       ),
       (value) => !!value?.ok,
       (value) => value?.inputAsOf || value?.asOf || null,
@@ -1419,6 +1437,7 @@ export default async function handler(req, res) {
             track,
             sourceTracker,
             phase,
+            allowPreviousQuantReuse: accountAuth.trusted === true,
           }),
           buildSearch: ({ stockNews }) =>
             buildAdvisorSearchEvidence({

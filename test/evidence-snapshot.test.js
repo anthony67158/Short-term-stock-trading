@@ -12,6 +12,7 @@ import {
   resolveEvidenceAccountRevision,
   sourceTextVersion,
 } from '../shared/evidenceSnapshot.js'
+import { compactAdvicePlan } from '../shared/adviceContinuity.js'
 
 const payload = {
   code: '600001',
@@ -266,6 +267,86 @@ test('到价复核复用原建议量化时不标记为关键证据缺失', () =>
     snapshot.freshness.missingRequiredSources.includes('quant'),
     false,
   )
+})
+
+test('到价复核从持久化建议元数据恢复原量化结果', () => {
+  const previousAdvice = compactAdvicePlan({
+    at: Date.parse('2026-08-13T02:25:00.000Z'),
+    advice: {
+      action: '持有',
+      title: '等待到价复核',
+    },
+    meta: {
+      quantResult: {
+        score: 72,
+        bias: '偏多',
+        inputAsOf: '2026-08-13T02:25:00.000Z',
+        forecast: {
+          direction: '上涨',
+          upProb: 61,
+          targetLow: 10.8,
+          targetHigh: 11.4,
+        },
+      },
+    },
+  })
+  const snapshot = createCanonicalEvidenceSnapshot({
+    mode: 'hold_advice',
+    payload: {
+      ...payload,
+      quant: null,
+      reviewEvent: { kind: 'price-review' },
+      previousAdvice,
+    },
+    sourceTrace: [{
+      key: 'quant',
+      label: '量化预测',
+      status: 'SKIPPED',
+      errorCode: 'TRIGGERED_REVIEW_REUSE_PREVIOUS',
+    }],
+    now: Date.parse('2026-08-13T02:31:00.000Z'),
+  })
+
+  assert.equal(previousAdvice.quantEvidence.score, 72)
+  assert.equal(snapshot.sources.quant.available, true)
+  assert.equal(snapshot.sources.quant.state, 'REUSED')
+  assert.equal(snapshot.evidence.quant.forecast.upProb, 61)
+  assert.equal(
+    snapshot.freshness.missingRequiredSources.includes('quant'),
+    false,
+  )
+})
+
+test('连续复核从历史轨迹恢复被上一轮覆盖的量化结果', () => {
+  const previousAdvice = compactAdvicePlan({
+    advice: {
+      action: '观望',
+      title: '本次不买入',
+    },
+    meta: {
+      quantResult: null,
+      evidenceSnapshot: {
+        freshness: {
+          missingRequiredSources: ['quant'],
+        },
+      },
+    },
+    trail: [{
+      action: '观望',
+      shortHorizonTactical: {
+        quant: {
+          score: 69,
+          direction: '上涨',
+          upProb: 59,
+          inputAsOf: '2026-08-13T02:20:00.000Z',
+        },
+      },
+    }],
+  })
+
+  assert.equal(previousAdvice.quantEvidence.score, 69)
+  assert.equal(previousAdvice.quantEvidence.forecast.direction, '上涨')
+  assert.equal(previousAdvice.quantEvidence.forecast.upProb, 59)
 })
 
 test('采集追踪优先保留安全错误码而不是泛化错误类型', async () => {

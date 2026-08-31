@@ -29,6 +29,7 @@ import {
 import { adviceEvidenceDigest } from '../shared/adviceIntelligence.js'
 import {
   advisorGenerationPlan,
+  buildAdvisorQuantEvidence,
   buildAdvisorTodayQuote,
   buildScheduledReviewGateResponse,
   fetchTrend,
@@ -39,6 +40,7 @@ import {
   shouldCollectAdvisorSource,
   withAIEvidenceDeadline,
 } from '../api/ai.js'
+import { createEvidenceSourceTracker } from '../shared/evidenceSnapshot.js'
 
 test('到价终局复核完成后生成明确操作推送', () => {
   const notification = terminalReviewNotification({
@@ -205,6 +207,145 @@ test('量化与搜索在各自依赖就绪后启动而不等待其他证据', as
     'quant-result',
     'search-result',
   ])
+})
+
+test('到价复核优先复用持久化量化且缺失时只补跑一次短量化', async () => {
+  const trackWith = (tracker) => (
+    key,
+    label,
+    promise,
+    isAvailable,
+    dataAsOf,
+  ) => tracker.track(key, label, promise, {
+    isAvailable,
+    dataAsOf,
+  })
+  const shared = {
+    market: { ok: true, breadth: { volLevel: '平量' } },
+    detail: {
+      ok: true,
+      candles: Array.from({ length: 30 }, (_, index) => ({
+        date: `2026-08-${String(index + 1).padStart(2, '0')}`,
+        open: 10,
+        high: 10.5,
+        low: 9.8,
+        close: 10.2,
+        volume: 10000,
+      })),
+    },
+    quoteResponse: {
+      list: [{
+        code: '600001',
+        price: 10.2,
+        open: 10,
+        high: 10.5,
+        low: 9.8,
+      }],
+    },
+    quantModelVersion: 'default',
+    phase() {},
+  }
+
+  let reusedFetchCalls = 0
+  const reusedTracker = createEvidenceSourceTracker()
+  const reused = await buildAdvisorQuantEvidence({
+    ...shared,
+    payload: {
+      code: '600001',
+      name: '测试股票',
+      previousAdvice: {
+        quantEvidence: {
+          score: 72,
+          forecast: { direction: '上涨', upProb: 61 },
+        },
+      },
+    },
+    triggeredPriceReview: true,
+    allowPreviousQuantReuse: true,
+    sourceTracker: reusedTracker,
+    track: trackWith(reusedTracker),
+    fetchQuant: async () => {
+      reusedFetchCalls += 1
+      return null
+    },
+  })
+
+  assert.equal(reusedFetchCalls, 0)
+  assert.equal(reused.quant.score, 72)
+  assert.equal(reused.quant.reusedFromPrevious, true)
+  assert.equal(
+    reusedTracker.snapshot()[0].errorCode,
+    'TRIGGERED_REVIEW_REUSE_PREVIOUS',
+  )
+
+  let recoveryFetchCalls = 0
+  let recoveryTimeout = null
+  let recoveryOptions = null
+  const recoveryTracker = createEvidenceSourceTracker()
+  const recovered = await buildAdvisorQuantEvidence({
+    ...shared,
+    payload: {
+      code: '600001',
+      name: '测试股票',
+      previousAdvice: { action: '观望' },
+    },
+    triggeredPriceReview: true,
+    sourceTracker: recoveryTracker,
+    track: trackWith(recoveryTracker),
+    fetchQuant: async (
+      _version,
+      _code,
+      _candles,
+      _hold,
+      timeoutMs,
+      _realtime,
+      options,
+    ) => {
+      recoveryFetchCalls += 1
+      recoveryTimeout = timeoutMs
+      recoveryOptions = options
+      return {
+        ok: true,
+        score: 64,
+        forecast: { direction: '震荡偏强', upProb: 56 },
+      }
+    },
+  })
+
+  assert.equal(recoveryFetchCalls, 1)
+  assert.equal(recoveryTimeout, 5000)
+  assert.equal(recoveryOptions.refreshDailyFromMinutes, false)
+  assert.equal(recovered.quant.score, 64)
+  assert.equal(recoveryTracker.snapshot()[0].status, 'OK')
+
+  let untrustedFetchCalls = 0
+  const untrustedTracker = createEvidenceSourceTracker()
+  await buildAdvisorQuantEvidence({
+    ...shared,
+    payload: {
+      code: '600001',
+      name: '测试股票',
+      previousAdvice: {
+        quantEvidence: {
+          score: 99,
+          forecast: { direction: '上涨', upProb: 99 },
+        },
+      },
+    },
+    triggeredPriceReview: true,
+    allowPreviousQuantReuse: false,
+    sourceTracker: untrustedTracker,
+    track: trackWith(untrustedTracker),
+    fetchQuant: async () => {
+      untrustedFetchCalls += 1
+      return {
+        ok: true,
+        score: 60,
+        forecast: { direction: '震荡', upProb: 51 },
+      }
+    },
+  })
+  assert.equal(untrustedFetchCalls, 1)
 })
 
 test('单个军师证据超时后立即降级而不阻塞其他阶段', async () => {
