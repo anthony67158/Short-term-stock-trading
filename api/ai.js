@@ -8,7 +8,6 @@ import {
   fetchSelectedQuantPredict,
   techSummaryForAI,
 } from './_ta.js';
-import { fetchKlineTx } from './stock_detail.js';
 import { quantModelLabel } from '../shared/modelVersion.js';
 import { buildQuantAdviceContext } from '../shared/quantAdviceContext.js';
 import { marketTimePromptBlock, marketTimeContext } from './_market_time.js';
@@ -266,6 +265,249 @@ export function advisorGenerationPlan({
       8000,
       Math.min(cap, Number(remainingMs) - 2500),
     ),
+  }
+}
+
+export function startAdvisorDependentWork({
+  market,
+  dailyCandles,
+  quote,
+  stockNews,
+  buildQuant,
+  buildSearch,
+} = {}) {
+  return {
+    quant: Promise.all([
+      Promise.resolve(market),
+      Promise.resolve(dailyCandles),
+      Promise.resolve(quote),
+    ]).then(([marketValue, dailyValue, quoteValue]) =>
+      buildQuant({
+        market: marketValue,
+        dailyCandles: dailyValue,
+        quote: quoteValue,
+      })
+    ),
+    search: Promise.resolve(stockNews)
+      .then((stockNewsValue) =>
+        buildSearch({ stockNews: stockNewsValue })
+      ),
+  }
+}
+
+export function withAIEvidenceDeadline(
+  promise,
+  timeoutMs,
+) {
+  let timer = null
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const error = new Error('evidence timeout')
+      error.code = 'EVIDENCE_TIMEOUT'
+      reject(error)
+    }, Math.max(1, Number(timeoutMs) || 1))
+  })
+  return Promise.race([
+    Promise.resolve(promise),
+    timeout,
+  ]).finally(() => {
+    if (timer) clearTimeout(timer)
+  })
+}
+
+function emptyAdvisorSearch(status = 'disabled') {
+  return {
+    items: [],
+    status,
+    billed: false,
+    enabled: false,
+    stock: {
+      items: [],
+      status,
+      billed: false,
+      enabled: false,
+    },
+    industry: null,
+  }
+}
+
+async function buildAdvisorQuantEvidence({
+  market,
+  detail,
+  quoteResponse,
+  payload,
+  quantModelVersion,
+  triggeredPriceReview,
+  track,
+  sourceTracker,
+  phase,
+}) {
+  const q0 = quoteResponse?.list?.[0]
+  const todayQuote = q0?.price != null
+    ? buildAdvisorTodayQuote(q0, {
+        code: payload.code,
+        name: payload.name,
+        marketTime: marketTimeContext(),
+      })
+    : null
+  const dailyCandles = detail?.ok && Array.isArray(detail.candles)
+    ? detail.candles
+    : []
+  const quantReadiness = quantInputReadiness(
+    quantModelVersion,
+    dailyCandles,
+    { allowMinuteBackfill: true },
+  )
+  let quantCandles = dailyCandles
+  let quantRealtime = null
+  if (todayQuote?.live && todayQuote.price != null) {
+    quantRealtime = {
+      price: todayQuote.price,
+      pct: todayQuote.pct,
+      turnover: todayQuote.turnover,
+      volRatio: todayQuote.volRatio,
+      asOf: todayQuote.asOfLabel || null,
+      live: true,
+      phase: todayQuote.phase || null,
+      marketVolLevel: market?.ok && market.breadth
+        ? market.breadth.volLevel
+        : null,
+    }
+    if (dailyCandles.length >= 25) {
+      const lastBar = dailyCandles.at(-1)
+      quantCandles = [
+        ...dailyCandles.slice(0, -1),
+        {
+          ...lastBar,
+          close: todayQuote.price,
+          high: Math.max(
+            lastBar.high ?? todayQuote.price,
+            todayQuote.high ?? todayQuote.price,
+            todayQuote.price,
+          ),
+          low: Math.min(
+            lastBar.low ?? todayQuote.price,
+            todayQuote.low ?? todayQuote.price,
+            todayQuote.price,
+          ),
+          open: todayQuote.open ?? lastBar.open,
+        },
+      ]
+    }
+  }
+  if (triggeredPriceReview) {
+    sourceTracker.skip(
+      'quant',
+      '量化预测',
+      'TRIGGERED_REVIEW_REUSE_PREVIOUS',
+    )
+    return { quant: null, dailyCandles, todayQuote }
+  }
+  phase(
+    '核心行情已就位，量化校验与补充证据正在并行处理…',
+    'quant',
+  )
+  if (!quantReadiness.ready) {
+    sourceTracker.skip(
+      'quant',
+      '量化预测',
+      quantReadiness.reason,
+    )
+    return { quant: null, dailyCandles, todayQuote }
+  }
+  let quant = null
+  try {
+    quant = await track(
+      'quant',
+      '量化预测',
+      fetchSelectedQuantPredict(
+        quantModelVersion,
+        payload.code,
+        quantCandles,
+        (payload.holdCost ? {
+          cost: payload.holdCost,
+          qty: payload.holdQty,
+        } : null),
+        12000,
+        quantRealtime,
+        { refreshDailyFromMinutes: true },
+      ),
+      (value) => !!value?.ok,
+      (value) => value?.inputAsOf || value?.asOf || null,
+    )
+  } catch {
+    quant = null
+  }
+  return { quant, dailyCandles, todayQuote }
+}
+
+async function buildAdvisorSearchEvidence({
+  corpus,
+  payload,
+  fastMode,
+  triggeredPriceReview,
+  aiSearchConfig,
+  sourceTracker,
+  track,
+}) {
+  if (triggeredPriceReview || fastMode) {
+    const skipReason = triggeredPriceReview
+      ? 'TRIGGERED_REVIEW_REUSE_PREVIOUS'
+      : 'QUICK_ADVICE_SKIP_LIVE_SEARCH'
+    sourceTracker.skip('stockSearch', '豆包个股信息', skipReason)
+    sourceTracker.skip('industrySearch', '豆包行业资讯', skipReason)
+    return {
+      industry: '',
+      result: emptyAdvisorSearch('skipped'),
+    }
+  }
+  const industry = corpus?.profile?.industry || ''
+  if (!aiSearchConfig.enabled || !aiSearchConfig.apiKey) {
+    return {
+      industry,
+      result: emptyAdvisorSearch(),
+    }
+  }
+  const searchAvailable = (value) =>
+    Array.isArray(value?.items) && value.items.length > 0
+  const searchAsOf = (value) => value?.items
+    ?.map((item) => item.date)
+    .filter(Boolean)
+    .sort()
+    .at(-1) || null
+  try {
+    const result = await fetchAdvisorSearchBundle({
+      code: payload.code,
+      name: payload.name || corpus?.name || '',
+      industry,
+      reviewOrigin: payload.reviewOrigin,
+      includeIndustry: !!industry,
+    }, {
+      stockFetcher: (input) => track(
+        'stockSearch',
+        '豆包个股信息',
+        fetchAdvisorSearch(input, {
+          runtimeConfig: aiSearchConfig,
+        }),
+        searchAvailable,
+        searchAsOf,
+      ),
+      industryFetcher: (input) => track(
+        'industrySearch',
+        '豆包行业资讯',
+        fetchIndustrySearchSupplement(input, {
+          runtimeConfig: aiSearchConfig,
+        }),
+        searchAvailable,
+        searchAsOf,
+      ),
+    })
+    return { industry, result }
+  } catch {
+    return {
+      industry,
+      result: emptyAdvisorSearch('unavailable'),
+    }
   }
 }
 
@@ -1027,49 +1269,56 @@ export default async function handler(req, res) {
             );
             return Promise.resolve(null);
           }
-          return track(key, label, create(), okFn, dataAsOf);
-        };
-        const dailyDetailPromise = triggeredPriceReview
-          ? getJ(
-            `/api/stock_detail?code=${payload.code}&klt=101&lmt=60`,
-          ).then((primary) =>
-            selectFreshestDailyDetail(
-              primary,
-              null,
-              { computeTechnicals },
-            )
-          )
-          : Promise.allSettled([
-            getJ(
-              `/api/stock_detail?code=${payload.code}&klt=101&lmt=60`,
+          const sourceTimeoutMs = triggeredPriceReview
+            ? 3500
+            : fastMode ? 6000 : 9000;
+          return track(
+            key,
+            label,
+            withAIEvidenceDeadline(
+              Promise.resolve().then(create),
+              sourceTimeoutMs,
             ),
-            fetchKlineTx(payload.code, '101', 120),
-          ]).then(([primaryResult, backupResult]) =>
-            selectFreshestDailyDetail(
-              primaryResult.status === 'fulfilled'
-                ? primaryResult.value
-                : null,
-              backupResult.status === 'fulfilled'
-                ? backupResult.value
-                : null,
-              { computeTechnicals },
-            )
+            okFn,
+            dataAsOf,
           );
+        };
+        const dailyDetailPromise = getJ(
+          `/api/stock_detail?code=${payload.code}&klt=101&lmt=120`,
+        ).then((primary) =>
+          selectFreshestDailyDetail(
+            primary,
+            null,
+            { computeTechnicals },
+          )
+        );
 
         // #region debug-point D:evidence-start
         if (process.env.DEBUG_SERVER_URL) void fetch(process.env.DEBUG_SERVER_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: process.env.DEBUG_SESSION_ID || 'cloud-advice-stuck', runId: process.env.DEBUG_RUN_ID || 'pre-fix', hypothesisId: 'D', traceId: `${payload.code}:${START}`, location: 'api/ai.js:evidence-start', msg: '[DEBUG] evidence collection started', data: { code: payload.code, mode, fastMode, elapsedMs: Date.now() - START }, ts: Date.now() }) }).catch(() => {});
         // #endregion
-        const [mkt, sec, detail, trend, stockFund, lhb, corpus, macroNews, todayQ, dailySummary, macroFlashes] = await Promise.all([
-          collect('market', '大盘情绪', () => getJ('/api/market'), (v) => v && v.ok !== false),
-          collect('sectorFlow', '板块资金', () => getJ('/api/sectors?type=industry&sort=main'), (v) => v && v.list && v.list.length),
-          collect(
+        const marketPromise = collect(
+          'market',
+          '大盘情绪',
+          () => getJ('/api/market'),
+          (value) => value && value.ok !== false,
+        );
+        const sectorFlowPromise = collect(
+          'sectorFlow',
+          '板块资金',
+          () => getJ('/api/sectors?type=industry&sort=main'),
+          (value) => value?.list?.length,
+        );
+        const detailPromise = collect(
             'dailyCandles',
             '个股K线',
             () => dailyDetailPromise,
             (v) => v && v.ok !== false && v.candles && v.candles.length,
             (v) => v?.dailyAsOf || v?.candles?.at(-1)?.date || null,
-          ),
-          collect('intraday', '分时走势', () => fetchTrend(
+          );
+        const trendPromise = collect(
+          'intraday',
+          '分时走势',
+          () => fetchTrend(
             payload.code,
             triggeredPriceReview
               ? {
@@ -1078,8 +1327,11 @@ export default async function handler(req, res) {
                   maxHosts: 2,
                 }
               : undefined,
-          ), (v) => Array.isArray(v) && v.length > 0, (v) => v?.at(-1)?.time || null),
-          collect(
+          ),
+          (value) => Array.isArray(value) && value.length > 0,
+          (value) => value?.at(-1)?.time || null,
+        );
+        const stockFundPromise = collect(
             'stockFunds',
             '个股资金流',
             () => fetchResilientStockFund(payload.code, {
@@ -1088,49 +1340,135 @@ export default async function handler(req, res) {
             }),
             (v) => v != null,
             (v) => v?.asOfDate || null,
+          );
+        const lhbPromise = collect(
+          'dragonTiger',
+          '龙虎榜',
+          () => fetchStockLHB(payload.code),
+          (value) => value != null,
+          (value) => value?.date || null,
+        );
+        const corpusPromise = collect(
+          'stockNews',
+          '消息面/公告',
+          () => buildCorpus(payload.code, { name: payload.name }),
+          (value) => value?.docs?.length,
+        );
+        const macroNewsPromise = collect(
+          'macroNews',
+          '宏观要闻',
+          () => fetchMacroNews(),
+          (value) => value?.length,
+        );
+        const quotePromise = collect(
+          'quote',
+          '今日实时行情',
+          () => getJ(
+            `/api/quote?codes=${payload.code}&_t=${Date.now()}`,
           ),
-          collect('dragonTiger', '龙虎榜', () => fetchStockLHB(payload.code), (v) => v != null, (v) => v?.date || null),
-          collect('stockNews', '消息面/公告', () => buildCorpus(payload.code, { name: payload.name }), (v) => v && v.docs && v.docs.length),
-          collect('macroNews', '宏观要闻', () => fetchMacroNews(), (v) => v && v.length),
-          collect('quote', '今日实时行情', () => getJ(`/api/quote?codes=${payload.code}&_t=${Date.now()}`), (v) => v && v.list && v.list.length, (v) => v?.list?.[0]?.tradeDate || null),
-          collect('dailyReport', '策略日报摘要', () => resolveAdviceDailySummary(
+          (value) => value?.list?.length,
+          (value) => value?.list?.[0]?.tradeDate || null,
+        );
+        const dailySummaryPromise = collect(
+          'dailyReport',
+          '策略日报摘要',
+          () => resolveAdviceDailySummary(
             payload,
             getLatestDailySummary,
             aiSearchConfig,
-          ), (v) => v && v.text, (v) => v?.day || null),
-          collect('macroFlashes', '财经快讯', () => fetchMacroFlashes(8), (v) => v && v.length),
+          ),
+          (value) => value?.text,
+          (value) => value?.day || null,
+        );
+        const macroFlashesPromise = collect(
+          'macroFlashes',
+          '财经快讯',
+          () => fetchMacroFlashes(8),
+          (value) => value?.length,
+        );
+        const dependentWork = startAdvisorDependentWork({
+          market: marketPromise,
+          dailyCandles: detailPromise,
+          quote: quotePromise,
+          stockNews: corpusPromise,
+          buildQuant: ({
+            market,
+            dailyCandles,
+            quote,
+          }) => buildAdvisorQuantEvidence({
+            market,
+            detail: dailyCandles,
+            quoteResponse: quote,
+            payload,
+            quantModelVersion,
+            triggeredPriceReview,
+            track,
+            sourceTracker,
+            phase,
+          }),
+          buildSearch: ({ stockNews }) =>
+            buildAdvisorSearchEvidence({
+              corpus: stockNews,
+              payload,
+              fastMode,
+              triggeredPriceReview,
+              aiSearchConfig,
+              sourceTracker,
+              track,
+            }),
+        });
+        const [
+          mkt,
+          sec,
+          detail,
+          trend,
+          stockFund,
+          lhb,
+          corpus,
+          macroNews,
+          dailySummary,
+          macroFlashes,
+          quantEvidence,
+          searchEvidence,
+        ] = await Promise.all([
+          marketPromise,
+          sectorFlowPromise,
+          detailPromise,
+          trendPromise,
+          stockFundPromise,
+          lhbPromise,
+          corpusPromise,
+          macroNewsPromise,
+          dailySummaryPromise,
+          macroFlashesPromise,
+          dependentWork.quant,
+          dependentWork.search,
         ]);
+        const {
+          quant,
+          dailyCandles,
+          todayQuote,
+        } = quantEvidence || {};
+        const {
+          industry = '',
+          result: advisorSearch = emptyAdvisorSearch('unavailable'),
+        } = searchEvidence || {};
+        if (todayQuote) payload.todayQuote = todayQuote;
+        if (triggeredPriceReview) {
+          phase(
+            '关键实时证据已就位，正在形成终局结论…',
+            'quant',
+          );
+        }
         // #region debug-point D:evidence-complete
         if (process.env.DEBUG_SERVER_URL) void fetch(process.env.DEBUG_SERVER_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: process.env.DEBUG_SESSION_ID || 'cloud-advice-stuck', runId: process.env.DEBUG_RUN_ID || 'pre-fix', hypothesisId: 'D', traceId: `${payload.code}:${START}`, location: 'api/ai.js:evidence-complete', msg: '[DEBUG] evidence collection settled', data: { code: payload.code, mode, elapsedMs: Date.now() - START, sources: sourceTracker.snapshot().map(({ key, status, durationMs }) => ({ key, status, durationMs })) }, ts: Date.now() }) }).catch(() => {});
         // #endregion
         // ★外部市场环境：把当天策略日报摘要注入，让个股建议结合大盘/板块/海外环境判断
         if (dailySummary && dailySummary.text) payload.dailyReport = dailySummary;
-        // ★今日实时行情：这是"当下事实"，优先级高于昨日收盘的 tech/资金
-        {
-          const q0 = todayQ && todayQ.list && todayQ.list[0];
-          if (q0 && q0.price != null) {
-            // ★时效闸门:盘前(<9:15)/盘后/休市 时 /api/quote 返回的是【上一交易日收盘快照】,
-            //   绝不能当"今日实时行情"。用 marketTimeContext().isLive 判定:
-            //   isLive=true(集合竞价/盘中/午间/午盘) → 真·实时行情,可算今日合法价带;
-            //   isLive=false(盘前未开盘/盘后/休市) → 昨日收盘口径,不算"今日"涨跌停价(否则会错一天)。
-            const mtc = marketTimeContext();
-            payload.todayQuote = buildAdvisorTodayQuote(q0, {
-              code: payload.code,
-              name: payload.name,
-              marketTime: mtc,
-            });
-          }
-        }
         if (macroNews && macroNews.length) {
           payload.macroNews = macroNews.map(labeledNewsTitle).filter(Boolean).slice(0, 6);
         }
         if (macroFlashes && macroFlashes.length) payload.macroFlashes = macroFlashes.slice(0, 8);
-        phase(
-          triggeredPriceReview
-            ? '关键实时证据已就位，正在形成终局结论…'
-            : '行情 / 资金 / 消息面已就位，正在量化打分…',
-          'quant',
-        );
         // 消息面：直接取新闻/公告/基本面文档(不做向量检索，省3~5s，避免函数超时)
         if (corpus && corpus.docs && corpus.docs.length) {
           payload.newsDigest = corpus.docs
@@ -1144,176 +1482,6 @@ export default async function handler(req, res) {
             newsRefs = corpus.news.filter((n) => n.url).slice(0, 5);  // 供前端引用消息来源
           }
         }
-        // 行业资讯统一使用豆包搜索。旧定向新闻接口在 FC 云出口持续返回空，
-        // 豆包行业结果按四小时缓存并单飞合并，自动复核仍只读缓存。
-        const industry = corpus && corpus.profile && corpus.profile.industry;
-        const dailyCandles = detail?.ok && Array.isArray(detail.candles)
-          ? detail.candles
-          : [];
-        const hasCandles = dailyCandles.length >= 25;
-        const quantReadiness = quantInputReadiness(
-          quantModelVersion,
-          dailyCandles,
-          { allowMinuteBackfill: true },
-        );
-        // ★让量化模型"基于现在预测未来":盘中把实时价/量并入送模型的最后一根K线。
-        //   stock_detail 的日K末根盘中虽是"进行中"的今日bar,但其收盘价可能滞后于 /api/quote 的最新价;
-        //   盘中仅覆盖正在形成的今日末根；盘前/盘后/休市不使用实时价覆盖，
-        //   由日K主/备源与完整5分钟聚合共同保证末根是最近完整交易时段。
-        let quantCandles = dailyCandles;
-        let quantRealtime = null;
-        if (
-          payload.todayQuote
-          && payload.todayQuote.live
-          && payload.todayQuote.price != null
-        ) {
-          const tq = payload.todayQuote;
-          quantRealtime = {
-            price: tq.price, pct: tq.pct, turnover: tq.turnover, volRatio: tq.volRatio,
-            asOf: tq.asOfLabel || null, live: true, phase: tq.phase || null,
-            marketVolLevel: (mkt && mkt.ok && mkt.breadth) ? mkt.breadth.volLevel : null,
-          };
-          if (hasCandles) {
-            const lastBar = dailyCandles.at(-1);
-            const merged = {
-              ...lastBar,
-              close: tq.price,
-              high: Math.max(
-                lastBar.high != null ? lastBar.high : tq.price,
-                tq.high != null ? tq.high : tq.price,
-                tq.price,
-              ),
-              low: Math.min(
-                lastBar.low != null ? lastBar.low : tq.price,
-                tq.low != null ? tq.low : tq.price,
-                tq.price,
-              ),
-              open: tq.open != null ? tq.open : lastBar.open,
-            };
-            quantCandles = [
-              ...dailyCandles.slice(0, -1),
-              merged,
-            ];
-          }
-        }
-        const quantPromise = triggeredPriceReview
-          ? (() => {
-            sourceTracker.skip(
-              'quant',
-              '量化预测',
-              'TRIGGERED_REVIEW_REUSE_PREVIOUS',
-            );
-            return Promise.resolve(null);
-          })()
-          : quantReadiness.ready
-          ? track(
-            'quant',
-            '量化预测',
-            fetchSelectedQuantPredict(
-              quantModelVersion,
-              payload.code,
-              quantCandles,
-              (payload.holdCost ? {
-                cost: payload.holdCost,
-                qty: payload.holdQty,
-              } : null),
-              12000,
-              quantRealtime,
-              { refreshDailyFromMinutes: true },
-            ),
-            (value) => !!value?.ok,
-            (value) => value?.inputAsOf || value?.asOf || null,
-          )
-          : (() => {
-            sourceTracker.skip(
-              'quant',
-              '量化预测',
-              quantReadiness.reason,
-            );
-            return Promise.resolve(null);
-          })();
-        const searchAvailable = (value) =>
-          Array.isArray(value?.items) && value.items.length > 0;
-        const searchAsOf = (value) => value?.items
-          ?.map((item) => item.date)
-          .filter(Boolean)
-          .sort()
-          .at(-1) || null;
-        const advisorSearchPromise = (
-          triggeredPriceReview || fastMode
-        )
-          ? (() => {
-            const skipReason = triggeredPriceReview
-              ? 'TRIGGERED_REVIEW_REUSE_PREVIOUS'
-              : 'QUICK_ADVICE_SKIP_LIVE_SEARCH';
-            sourceTracker.skip(
-              'stockSearch',
-              '豆包个股信息',
-              skipReason,
-            );
-            sourceTracker.skip(
-              'industrySearch',
-              '豆包行业资讯',
-              skipReason,
-            );
-            return Promise.resolve({
-              items: [],
-              status: 'skipped',
-              billed: false,
-              enabled: false,
-              stock: {
-                items: [],
-                status: 'skipped',
-                billed: false,
-                enabled: false,
-              },
-              industry: null,
-            });
-          })()
-          : aiSearchConfig.enabled && aiSearchConfig.apiKey
-            ? fetchAdvisorSearchBundle({
-              code: payload.code,
-              name: payload.name || corpus?.name || '',
-              industry,
-              reviewOrigin: payload.reviewOrigin,
-              includeIndustry: !!industry,
-            }, {
-              stockFetcher: (input) => track(
-                'stockSearch',
-                '豆包个股信息',
-                fetchAdvisorSearch(input, {
-                  runtimeConfig: aiSearchConfig,
-                }),
-                searchAvailable,
-                searchAsOf,
-              ),
-              industryFetcher: (input) => track(
-                'industrySearch',
-                '豆包行业资讯',
-                fetchIndustrySearchSupplement(input, {
-                  runtimeConfig: aiSearchConfig,
-                }),
-                searchAvailable,
-                searchAsOf,
-              ),
-            })
-            : Promise.resolve({
-              items: [],
-              status: 'disabled',
-              billed: false,
-              enabled: false,
-              stock: {
-                items: [],
-                status: 'disabled',
-                billed: false,
-                enabled: false,
-              },
-              industry: null,
-            });
-        const [quant, advisorSearch] = await Promise.all([
-          quantPromise,
-          advisorSearchPromise,
-        ]);
         const industrySearch = advisorSearch?.industry;
         if (
           !triggeredPriceReview

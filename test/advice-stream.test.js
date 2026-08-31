@@ -34,7 +34,9 @@ import {
   resolveAIBudget,
   resolveAdviceDailySummary,
   resolveReasoningMode,
+  startAdvisorDependentWork,
   shouldCollectAdvisorSource,
+  withAIEvidenceDeadline,
 } from '../api/ai.js'
 
 test('到价终局复核完成后生成明确操作推送', () => {
@@ -162,6 +164,56 @@ test('分时行情并发尝试主备源且不等待失效镜像串行超时', as
   )
   assert.equal(result.length, 1)
   assert.equal(result[0].price, 10)
+})
+
+test('量化与搜索在各自依赖就绪后启动而不等待其他证据', async () => {
+  let releaseOptional
+  const optional = new Promise((resolve) => {
+    releaseOptional = resolve
+  })
+  const started = []
+  const work = startAdvisorDependentWork({
+    market: Promise.resolve('market'),
+    dailyCandles: Promise.resolve('daily'),
+    quote: Promise.resolve('quote'),
+    stockNews: Promise.resolve('news'),
+    buildQuant: async (input) => {
+      started.push(['quant', input])
+      return 'quant-result'
+    },
+    buildSearch: async (input) => {
+      started.push(['search', input])
+      return 'search-result'
+    },
+  })
+
+  await Promise.resolve()
+  await Promise.resolve()
+  assert.deepEqual(
+    started.map(([key]) => key).sort(),
+    ['quant', 'search'],
+  )
+
+  releaseOptional('optional-result')
+  assert.deepEqual(await Promise.all([
+    optional,
+    work.quant,
+    work.search,
+  ]), [
+    'optional-result',
+    'quant-result',
+    'search-result',
+  ])
+})
+
+test('单个军师证据超时后立即降级而不阻塞其他阶段', async () => {
+  await assert.rejects(
+    withAIEvidenceDeadline(
+      new Promise(() => {}),
+      15,
+    ),
+    (error) => error?.code === 'EVIDENCE_TIMEOUT',
+  )
 })
 
 test('服务端可解析跨分片的 AI SSE 事件', () => {
