@@ -49,6 +49,7 @@ import FormulaPrice from './FormulaPrice'
 import { useTheme } from '../themeStore'
 import {
   STOCK_DETAIL_CACHE_TTL_MS,
+  STOCK_DETAIL_STALE_MS,
   stockDetailPath,
 } from '../stockDetailData.js'
 
@@ -463,11 +464,20 @@ export default function StockDetail({ stock, onClose }) {
     return () => { unsub(); unsubR() }
     // eslint-disable-next-line
   }, [busyModal, stock && stock.code])
-  const { data, loading, error, reload } = usePolling(
+  const {
+    data,
+    loading,
+    error,
+    stale: browserCacheStale,
+    reload,
+  } = usePolling(
     stock ? stockDetailPath(stock.code, klt) : null,
     600000, // 详情不需要频繁刷新
     [stock && stock.code, klt],
-    { cacheTtlMs: STOCK_DETAIL_CACHE_TTL_MS },
+    {
+      cacheTtlMs: STOCK_DETAIL_CACHE_TTL_MS,
+      staleIfErrorMs: STOCK_DETAIL_STALE_MS,
+    },
   )
 
   // 手动刷新：破缓存重拉 + 转圈至少 600ms + 完成后记录更新时间
@@ -477,9 +487,13 @@ export default function StockDetail({ stock, onClose }) {
     quantRefreshRef.current = ''
     retryRef.current = 0
     const started = Date.now()
-    try { await reload() } catch { /* usePolling 内部已兜底 */ }
+    let updated = false
+    try { updated = await reload() === true } catch { /* usePolling 内部已兜底 */ }
     const wait = Math.max(0, 600 - (Date.now() - started))
-    setTimeout(() => { setRefreshing(false); setRefreshedAt(Date.now()) }, wait)
+    setTimeout(() => {
+      setRefreshing(false)
+      if (updated) setRefreshedAt(Date.now())
+    }, wait)
   }
 
   const profile = data && data.profile
@@ -491,6 +505,7 @@ export default function StockDetail({ stock, onClose }) {
   const preClose = data && data.preClose
   const tech = data && data.tech
   const marketSnapshot = data && data.marketSnapshot
+  const klineStale = browserCacheStale || data?.klineStale === true
 
   // K线为空时自动重试（东财偶发空响应）：最多重试 2 次，间隔递增
   const retryRef = useRef(0)
@@ -1500,6 +1515,9 @@ export default function StockDetail({ stock, onClose }) {
               </div>
               {mode === 'kline' ? (
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {klineStale && (
+                    <span className="sub-name">最近成功快照</span>
+                  )}
                   <div className="tabs">
                     <button type="button" className={'tab' + (chartType === 'candle' ? ' active' : '')} aria-pressed={chartType === 'candle'} onClick={() => setChartType('candle')}>蜡烛图</button>
                     <button type="button" className={'tab' + (chartType === 'line' ? ' active' : '')} aria-pressed={chartType === 'line'} onClick={() => setChartType('line')}>折线图</button>

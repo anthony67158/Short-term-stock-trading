@@ -112,23 +112,212 @@ export async function fetchTrendsTx(code) {
   return { trends, preClose };
 }
 
-// 专门抓 K线：校验必须有非空 klines，否则视为失败（东财偶发 200 空响应会被拒）
-// 两轮并发抢镜像，绝不串行累加超时（避免 4×9s 拖到 Vercel 函数超时）
-async function fetchKline(hosts, path) {
-  const valid = (j) => j && j.data && Array.isArray(j.data.klines) && j.data.klines.length > 0;
-  const raceOnce = (timeout) => {
-    const race = hosts.map((h) => jget(h + path, timeout).then((j) => {
-      if (!valid(j)) throw new Error('empty klines');
-      return j;
-    }));
-    return Promise.any(race);
+const KLINE_HOSTS = [
+  'https://push2his.eastmoney.com',
+  'https://82.push2his.eastmoney.com',
+  'https://45.push2his.eastmoney.com',
+  'https://49.push2his.eastmoney.com',
+];
+export const KLINE_FRESH_CACHE_MS = 2 * 60 * 1000;
+const KLINE_STALE_CACHE_MS = 24 * 60 * 60 * 1000;
+
+function normalizeKlineResult(result, source) {
+  const candles = Array.isArray(result?.candles)
+    ? result.candles.filter((item) => (
+        item
+        && Number(item.open) > 0
+        && Number(item.close) > 0
+        && Number(item.high) > 0
+        && Number(item.low) > 0
+      ))
+    : [];
+  if (!candles.length) throw new Error(`empty ${source} klines`);
+  return {
+    name: String(result?.name || ''),
+    candles,
+    source,
+    stale: false,
   };
-  try {
-    return await raceOnce(6000);   // 第一轮：6s 并发抢
-  } catch {
-    try { return await raceOnce(6000); } catch { return null; } // 第二轮：再并发抢一次
-  }
 }
+
+function firstUsableKline(sources, {
+  code,
+  klt,
+  sourceLimit,
+  preferredCount,
+}) {
+  return new Promise((resolve, reject) => {
+    let pending = sources.length;
+    let settled = false;
+    let best = null;
+    const errors = [];
+    const finish = () => {
+      pending -= 1;
+      if (pending > 0 || settled) return;
+      settled = true;
+      if (best) resolve(best);
+      else reject(new AggregateError(errors, 'all kline sources failed'));
+    };
+    for (const [source, fetchSource] of sources) {
+      Promise.resolve()
+        .then(() => fetchSource(code, klt, sourceLimit))
+        .then((result) => normalizeKlineResult(result, source))
+        .then((result) => {
+          if (
+            !best
+            || result.candles.length > best.candles.length
+          ) {
+            best = result;
+          }
+          if (
+            !settled
+            && result.candles.length >= preferredCount
+          ) {
+            settled = true;
+            resolve(result);
+          }
+        })
+        .catch((error) => errors.push(error))
+        .finally(finish);
+    }
+  });
+}
+
+export async function fetchKlineEastmoney(code, klt, lmt) {
+  const path =
+    `/api/qt/stock/kline/get?secid=${toSecid(code)}` +
+    `&fields1=f1,f2,f3,f4,f5,f6` +
+    `&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f61` +
+    `&klt=${klt}&fqt=1&end=20500101&lmt=${lmt}`;
+  const payload = await Promise.any(KLINE_HOSTS.map((host) => (
+    jget(host + path, 5000).then((json) => {
+      if (!Array.isArray(json?.data?.klines) || !json.data.klines.length) {
+        throw new Error('empty eastmoney klines');
+      }
+      return json;
+    })
+  )));
+  const data = payload.data;
+  return {
+    name: data?.name || '',
+    candles: data.klines.map((line) => {
+      const parts = line.split(',');
+      return {
+        date: parts[0],
+        open: num(parts[1]),
+        close: num(parts[2]),
+        high: num(parts[3]),
+        low: num(parts[4]),
+        volume: num(parts[5]),
+        amount: num(parts[6]),
+        pct: num(parts[8]),
+        turnover: num(parts[9]) || null,
+      };
+    }),
+  };
+}
+
+export async function fetchKlineSina(code, klt, lmt) {
+  if (String(klt) !== '101') return null;
+  const symbol = toTxCode(code);
+  const url =
+    'https://quotes.sina.cn/cn/api/openapi.php/' +
+    'CN_MarketDataService.getKLineData' +
+    `?symbol=${symbol}&scale=240&ma=no&datalen=${lmt}`;
+  const payload = await jget(url, 6000, 'https://finance.sina.com.cn/');
+  if (Number(payload?.result?.status?.code) !== 0) return null;
+  const rows = Array.isArray(payload?.result?.data)
+    ? payload.result.data
+    : [];
+  const candles = rows.map((row) => ({
+    date: String(row.day || ''),
+    open: num(row.open),
+    close: num(row.close),
+    high: num(row.high),
+    low: num(row.low),
+    volume: num(row.volume),
+    amount: num(row.amount),
+    pct: 0,
+    turnover: null,
+  })).sort((a, b) => a.date.localeCompare(b.date));
+  for (let index = 1; index < candles.length; index += 1) {
+    const previous = candles[index - 1].close;
+    if (previous > 0) {
+      candles[index].pct = +(
+        ((candles[index].close - previous) / previous) * 100
+      ).toFixed(2);
+    }
+  }
+  return { name: '', candles };
+}
+
+export function createResilientKlineFetcher({
+  fetchTencent = fetchKlineTx,
+  fetchEastmoney = fetchKlineEastmoney,
+  fetchSina = fetchKlineSina,
+  now = Date.now,
+} = {}) {
+  const cache = new Map();
+  const flights = new Map();
+  const trim = (result, limit, stale = false) => ({
+    ...result,
+    stale,
+    candles: result.candles.slice(-limit),
+  });
+  return async (code, klt = '101', lmt = 120) => {
+    const limit = Math.max(1, Math.min(Number(lmt) || 120, 500));
+    const sourceLimit = limit <= 200 ? 200 : 500;
+    const preferredCount = sourceLimit;
+    const key = `${String(code)}:${String(klt)}:${sourceLimit}`;
+    const timestamp = Number(now()) || Date.now();
+    const cached = cache.get(key);
+    if (cached && timestamp - cached.at <= KLINE_FRESH_CACHE_MS) {
+      return trim(cached.value, limit);
+    }
+    if (!flights.has(key)) {
+      const attempt = async () => {
+        const sources = [
+          ['tencent', fetchTencent],
+          ['eastmoney', fetchEastmoney],
+        ];
+        if (String(klt) === '101') sources.push(['sina', fetchSina]);
+        return firstUsableKline(sources, {
+          code,
+          klt,
+          sourceLimit,
+          preferredCount,
+        });
+      };
+      const flight = attempt()
+        .catch(() => new Promise((resolve) => setTimeout(resolve, 120))
+          .then(attempt))
+        .then((value) => {
+          const fetchedAt = Number(now()) || Date.now();
+          const freshValue = { ...value, fetchedAt };
+          cache.set(key, { at: fetchedAt, value: freshValue });
+          while (cache.size > 128) cache.delete(cache.keys().next().value);
+          return freshValue;
+        })
+        .finally(() => {
+          if (flights.get(key) === flight) flights.delete(key);
+        });
+      flights.set(key, flight);
+    }
+    try {
+      return trim(await flights.get(key), limit);
+    } catch {
+      if (
+        cached
+        && timestamp - cached.at <= KLINE_STALE_CACHE_MS
+      ) {
+        return trim(cached.value, limit, true);
+      }
+      return null;
+    }
+  };
+}
+
+export const fetchResilientKline = createResilientKlineFetcher();
 
 // 个股详情：公司简介(主营) + 日K线 + (可选)当日分时
 // query: code=600519  klt=101(日)|102(周)|103(月)  lmt=K线根数  trends=1(附当日分时)
@@ -156,18 +345,6 @@ export default async function handler(req, res) {
     }
     const secid = toSecid(code);
 
-    // K线多镜像（多个负载均衡节点，任一有效即可）
-    const klHosts = [
-      'https://push2his.eastmoney.com',
-      'https://82.push2his.eastmoney.com',
-      'https://45.push2his.eastmoney.com',
-      'https://49.push2his.eastmoney.com',
-    ];
-    const klPath =
-      `/api/qt/stock/kline/get?secid=${secid}` +
-      `&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f61` +
-      `&klt=${klt}&fqt=1&end=20500101&lmt=${lmt}`;
-
     // 当日分时（trends2：f51时间,f53现价,f56量,f58均价）
     const trendsPath =
       `/api/qt/stock/trends2/get?secid=${secid}` +
@@ -190,7 +367,7 @@ export default async function handler(req, res) {
     // 用 allSettled 保证：分时/简介失败绝不影响 K线返回
     const [klRes, f10Res, trendsRes, quoteRes, fundRes] =
       await Promise.allSettled([
-        fetchKline(klHosts, klPath),
+        fetchResilientKline(code, klt, lmt),
         jget(f10Url, 6000, 'https://emweb.securities.eastmoney.com/'),
         wantTrends ? fetchTrends() : Promise.resolve(null),
         wantQuote
@@ -203,7 +380,7 @@ export default async function handler(req, res) {
             })
           : Promise.resolve(null),
       ]);
-    const klJson = klRes.status === 'fulfilled' ? klRes.value : null;
+    const kline = klRes.status === 'fulfilled' ? klRes.value : null;
     const f10Json = f10Res.status === 'fulfilled' ? f10Res.value : null;
     const trendsJson = trendsRes.status === 'fulfilled' ? trendsRes.value : null;
     const quote = quoteRes.status === 'fulfilled'
@@ -211,30 +388,15 @@ export default async function handler(req, res) {
       : null;
     const fund = fundRes.status === 'fulfilled' ? fundRes.value : null;
 
-    // 解析 K线
-    const kd = klJson && klJson.data;
-    const klines = (kd && kd.klines) || [];
-    let candles = klines.map((line) => {
-      const p = line.split(',');
-      return {
-        date: p[0],
-        open: num(p[1]),
-        close: num(p[2]),
-        high: num(p[3]),
-        low: num(p[4]),
-        volume: num(p[5]),
-        amount: num(p[6]),
-        pct: num(p[8]),
-        turnover: num(p[9]) || null,
-      };
-    });
-    let txName = '';
-    // 东财 K线为空 → 回退腾讯行情（更稳、基本不限流）
+    const candles = Array.isArray(kline?.candles)
+      ? kline.candles
+      : [];
     if (!candles.length) {
-      try {
-        const tx = await fetchKlineTx(code, klt, lmt);
-        if (tx && tx.candles && tx.candles.length) { candles = tx.candles; txName = tx.name; }
-      } catch { /* 腾讯也失败则保持空 */ }
+      return sendJson(res, {
+        ok: false,
+        error: '行情数据暂时不可用，请稍后重试',
+        errorCode: 'KLINE_UNAVAILABLE',
+      }, { cache: 0 });
     }
 
     // 解析分时（f51时间,f53现价,f56量,f58均价）；东财空则回退腾讯
@@ -255,8 +417,8 @@ export default async function handler(req, res) {
     // 解析简介
     const jb = (f10Json && f10Json.jbzl && f10Json.jbzl[0]) || {};
     const profile = {
-      fullName: jb.ORG_NAME || (kd && kd.name) || '',
-      name: jb.SECURITY_NAME_ABBR || (kd && kd.name) || txName || '',
+      fullName: jb.ORG_NAME || kline?.name || '',
+      name: jb.SECURITY_NAME_ABBR || kline?.name || '',
       code: jb.SECURITY_CODE || code,
       industry: jb.EM2016 || jb.INDUSTRYCSRC1 || '',
       market: jb.SECURITY_TYPE || '',
@@ -317,6 +479,8 @@ export default async function handler(req, res) {
         profile,
         klt,
         candles,
+        klineSource: kline?.source || null,
+        klineStale: kline?.stale === true,
         trends,
         preClose,
         quote,

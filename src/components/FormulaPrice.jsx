@@ -206,6 +206,12 @@ export default function FormulaPrice({ code }) {
             </div>
           )}
           <div className="formula-price-meta">
+            {state.payload?.stale && (
+              <span>
+                <Icon name="history" size={12} />
+                最近成功快照
+              </span>
+            )}
             <span>
               <Icon name="activity" size={12} />
               {explanation.formulaName}

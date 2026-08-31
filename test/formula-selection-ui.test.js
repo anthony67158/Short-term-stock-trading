@@ -1,6 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import {
+  formulaSelectionCacheKey,
+  formulaSelectionClientError,
+  isFormulaSelectionTransientError,
+} from '../src/formulaSelectionClient.js'
 
 const selection = fs.readFileSync(
   new URL('../src/components/FormulaSelection.jsx', import.meta.url),
@@ -95,6 +100,51 @@ test('公式选股请求携带账号凭证和明确超时', () => {
   assert.match(client, /\/api\/formula_selection/)
   assert.match(client, /loadStockFormulaPrice/)
   assert.match(client, /loadFormulaSelectionProgress/)
+})
+
+test('公式价位前端不直接展示HTTP 501', () => {
+  assert.equal(
+    formulaSelectionClientError('HTTP 501', 500),
+    '行情数据暂时不可用，请稍后重试',
+  )
+  assert.equal(
+    formulaSelectionClientError('Failed to fetch'),
+    '行情数据暂时不可用，请稍后重试',
+  )
+  assert.match(client, /stockFormulaCache/)
+  assert.match(client, /stale:\s*true/)
+})
+
+test('公式价位旧快照按账号隔离且只在临时故障时回退', () => {
+  assert.notEqual(
+    formulaSelectionCacheKey('600001', {
+      'X-Account-Nick': 'account-a',
+    }),
+    formulaSelectionCacheKey('600001', {
+      'X-Account-Nick': 'account-b',
+    }),
+  )
+  assert.equal(
+    isFormulaSelectionTransientError({
+      status: 503,
+      errorCode: 'MARKET_DATA_UNAVAILABLE',
+    }),
+    true,
+  )
+  assert.equal(
+    isFormulaSelectionTransientError({
+      errorCode: 'NETWORK_ERROR',
+    }),
+    true,
+  )
+  assert.equal(
+    isFormulaSelectionTransientError({
+      status: 401,
+      message: '请先登录',
+    }),
+    false,
+  )
+  assert.match(client, /if \(payload\?\.stale !== true\)/)
 })
 
 test('公式选股展示服务端真实计算阶段而不是静态计算中文案', () => {

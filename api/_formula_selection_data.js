@@ -3,6 +3,7 @@ import {
   sectorOpportunityFromTags,
 } from './_tail_pick_data.js'
 import {
+  fetchResilientKline,
   fetchKlineTx,
   fetchTrendsTx,
 } from './stock_detail.js'
@@ -432,7 +433,7 @@ export async function buildStockFormulaSelection({
   account,
   now = Date.now(),
   fetchQuote = async (value) => (await fetchQuotes([value]))[0] || null,
-  fetchKline = fetchKlineTx,
+  fetchKline = fetchResilientKline,
   fetchTrends = fetchTrendsTx,
   fetchFund = fetchStockFund,
   fetchTags = fetchStockTagProfile,
@@ -484,6 +485,7 @@ export async function buildStockFormulaSelection({
     sectorOpportunity,
   })
   const tech = computeTech(kline.candles)
+  const klineStale = kline.stale === true
   const decision = buildFormulaPriceDecision({
     code,
     quote,
@@ -502,7 +504,7 @@ export async function buildStockFormulaSelection({
     dataComplete: holding
       ? !!tech
       : !!fund && !!tags && !!tech,
-    dataFresh: true,
+    dataFresh: !klineStale,
     now,
   })
   const advisorReference = buildFormulaEvidenceReference(decision, {
@@ -512,7 +514,8 @@ export async function buildStockFormulaSelection({
   return {
     schemaVersion: 'formula-price-decision.v1',
     generatedAt: now,
-    dataAsOf: now,
+    dataAsOf: Number(kline.fetchedAt) || now,
+    stale: klineStale,
     quote,
     formula,
     decision,

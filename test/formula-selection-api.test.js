@@ -8,6 +8,7 @@ import {
   scanFormulaSelectionCandidates,
 } from '../api/_formula_selection_data.js'
 import {
+  formulaSelectionPublicError,
   runFormulaSelection,
 } from '../api/formula_selection.js'
 import {
@@ -77,6 +78,16 @@ test('盘中和收盘预筛使用不同边界且排除风险名称', () => {
       '2026-08-28',
     ),
     false,
+  )
+})
+
+test('公式价位不会向界面泄露上游HTTP 501', () => {
+  assert.deepEqual(
+    formulaSelectionPublicError(new Error('HTTP 501')),
+    {
+      error: '行情数据暂时不可用，请稍后重试',
+      errorCode: 'MARKET_DATA_UNAVAILABLE',
+    },
   )
 })
 
@@ -222,6 +233,36 @@ test('个股价位读取服务端持仓并返回军师只读参考', async () =>
   assert.equal(result.decision.action, 'EXIT')
   assert.equal(result.advisorReference.role, 'DETERMINISTIC_RISK_OVERRIDE')
   assert.equal(result.advisorReference.canForceRiskReduction, true)
+})
+
+test('旧K线快照只用于展示且不能生成可执行公式价位', async () => {
+  const fetchedAt = Date.UTC(2026, 7, 27, 7)
+  const result = await buildStockFormulaSelection({
+    code: '600001',
+    account: { holding: [], closed: [] },
+    now: Date.UTC(2026, 7, 28, 7),
+    fetchQuote: async () => quote({ price: 10 }),
+    fetchKline: async () => ({
+      candles: candles(),
+      stale: true,
+      fetchedAt,
+    }),
+    fetchTrends: async () => ({ trends: [] }),
+    fetchFund: async () => fund,
+    collectMarketContext: async () => ({
+      marketGate: { allowed: true },
+      latest: null,
+      intraday: null,
+    }),
+    fetchTags: async () => ({ industry: '测试', concepts: [] }),
+    matchSector: () => ({ matched: true }),
+  })
+
+  assert.equal(result.stale, true)
+  assert.equal(result.dataAsOf, fetchedAt)
+  assert.equal(result.decision.dataFresh, false)
+  assert.equal(result.decision.action, 'AVOID')
+  assert.equal(result.advisorReference.effectiveWeight, 0)
 })
 
 test('资金或市场源失败时仍保留持仓硬止损', async () => {

@@ -11,6 +11,7 @@ import {
   clearPollingCache,
   loadPollingResource,
   readPollingCache,
+  readPollingCacheStale,
 } from '../src/pollingCache.js'
 
 const read = (path) => readFileSync(
@@ -85,10 +86,67 @@ test('详情短缓存合并同一资源的并发请求并支持后台重验', as
   assert.equal(calls, 2)
 })
 
+test('K线实时请求失败时仍可读取一天内最近成功快照', async () => {
+  clearPollingCache()
+  const now = Date.now()
+  const detail = {
+    ok: true,
+    candles: [{ date: '2026-08-28', close: 12.3 }],
+  }
+  await loadPollingResource('detail:002230', async () => detail, {
+    ttlMs: 120000,
+    preferCache: false,
+  })
+
+  assert.equal(
+    readPollingCache('detail:002230', 120000, now + 180000),
+    null,
+  )
+  assert.deepEqual(
+    readPollingCacheStale(
+      'detail:002230',
+      24 * 60 * 60 * 1000,
+      now + 180000,
+    ),
+    detail,
+  )
+  assert.equal(
+    readPollingCacheStale(
+      'detail:002230',
+      24 * 60 * 60 * 1000,
+      now + 24 * 60 * 60 * 1000 + 1,
+    ),
+    null,
+  )
+})
+
+test('服务端旧K线响应不会刷新浏览器快照的过期时间', async () => {
+  clearPollingCache()
+  const fresh = {
+    ok: true,
+    candles: [{ date: '2026-08-28', close: 12.3 }],
+  }
+  await loadPollingResource('detail:stale-clock', async () => fresh, {
+    preferCache: false,
+  })
+  await loadPollingResource('detail:stale-clock', async () => ({
+    ...fresh,
+    klineStale: true,
+  }), {
+    preferCache: false,
+  })
+
+  assert.deepEqual(
+    readPollingCache('detail:stale-clock', 60_000),
+    fresh,
+  )
+})
+
 test('个股详情代码和行情在点击时并行预取，主包不再静态加载图表', () => {
   const app = read('src/App.jsx')
   const detailStore = read('src/detailStore.js')
   const detail = read('src/components/StockDetail.jsx')
+  const hooks = read('src/hooks.js')
 
   assert.doesNotMatch(app, /import StockDetail from/)
   assert.match(
@@ -101,6 +159,12 @@ test('个股详情代码和行情在点击时并行预取，主包不再静态�
     /open\(stock\)[\s\S]*?preloadStockDetailExperience\(stock\.code\)[\s\S]*?emit\(\)/,
   )
   assert.match(detail, /cacheTtlMs:\s*STOCK_DETAIL_CACHE_TTL_MS/)
+  assert.match(detail, /staleIfErrorMs:\s*STOCK_DETAIL_STALE_MS/)
+  assert.match(detail, /stale:\s*browserCacheStale/)
+  assert.match(detail, /updated = await reload\(\) === true/)
+  assert.match(detail, /if \(updated\) setRefreshedAt/)
+  assert.match(hooks, /j\?\.klineStale === true/)
+  assert.match(hooks, /return !responseStale/)
 })
 
 test('账号缓存只做临时展示，云端校验前不触发账本结算与回存', () => {

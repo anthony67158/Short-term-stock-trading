@@ -10,6 +10,21 @@ export function readPollingCache(key, ttlMs, now = Date.now()) {
   return entry.data
 }
 
+export function readPollingCacheStale(
+  key,
+  maxAgeMs,
+  now = Date.now(),
+) {
+  const entry = cache.get(String(key || ''))
+  if (
+    !entry
+    || now - entry.at > Math.max(0, Number(maxAgeMs) || 0)
+  ) {
+    return null
+  }
+  return entry.data
+}
+
 export function writePollingCache(key, data, now = Date.now()) {
   const normalized = String(key || '')
   if (!normalized || data == null) return
@@ -43,7 +58,13 @@ export async function loadPollingResource(
   const request = Promise.resolve()
     .then(loader)
     .then((data) => {
-      if (data?.ok !== false) writePollingCache(normalized, data)
+      if (
+        data?.ok !== false
+        && data?.stale !== true
+        && data?.klineStale !== true
+      ) {
+        writePollingCache(normalized, data)
+      }
       return data
     })
     .finally(() => {

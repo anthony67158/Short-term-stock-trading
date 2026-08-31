@@ -4,6 +4,7 @@ import { isContinuousTrading } from '../shared/tradingCalendar.js'
 import {
   loadPollingResource,
   readPollingCache,
+  readPollingCacheStale,
 } from './pollingCache.js'
 
 // 全局手动刷新总线：点刷新按钮 → 所有 usePolling 立即重拉
@@ -21,12 +22,17 @@ export function useRefreshTick() {
 // 轮询 hook：交易时段自动刷新 + 响应全局手动刷新
 export function usePolling(url, intervalMs, deps = [], options = {}) {
   const cacheTtlMs = Math.max(0, Number(options.cacheTtlMs) || 0)
+  const staleIfErrorMs = Math.max(
+    cacheTtlMs,
+    Number(options.staleIfErrorMs) || 0,
+  )
   const initialCached = cacheTtlMs
     ? readPollingCache(url, cacheTtlMs)
     : null
   const [data, setData] = useState(initialCached)
   const [loading, setLoading] = useState(!initialCached)
   const [error, setError] = useState(null)
+  const [stale, setStale] = useState(false)
   const timer = useRef(null)
   const ctrl = useRef(null)       // 当前在飞的请求 controller —— 组件卸载/切 url 时中止，避免旧响应覆盖新状态
   const alive = useRef(true)      // 组件是否仍挂载：卸载后禁止 setState（防 "state update on unmounted"）
@@ -34,7 +40,12 @@ export function usePolling(url, intervalMs, deps = [], options = {}) {
 
   // 底层取数：bust=true 时加时间戳破 CDN 缓存 + 先置 loading（供手动刷新反馈）
   const fetchData = useCallback(async (bust = false) => {
-    if (!url) { setData(null); setLoading(false); return }
+    if (!url) {
+      setData(null)
+      setLoading(false)
+      setStale(false)
+      return false
+    }
     if (bust) setLoading(true)
     // 中止上一笔仍在飞的请求，避免慢的旧响应晚到覆盖新数据（竞态）
     if (ctrl.current) { try { ctrl.current.abort() } catch { /* ignore */ } }
@@ -58,31 +69,67 @@ export function usePolling(url, intervalMs, deps = [], options = {}) {
         : await request()
       if (!alive.current || ac.signal.aborted) return       // 已卸载/被中止：丢弃结果，不 setState
       if (j && j.ok === false) {
-        setError(j.error || '数据源暂不可用')
+        const staleData = staleIfErrorMs
+          ? readPollingCacheStale(url, staleIfErrorMs)
+          : null
+        if (staleData != null) {
+          setData(staleData)
+          setError(null)
+          setStale(true)
+        } else {
+          if (staleIfErrorMs) setData(null)
+          setError(j.error || '数据源暂不可用')
+          setStale(false)
+        }
+        return false
       } else {
+        const responseStale = (
+          j?.stale === true
+          || j?.klineStale === true
+        )
         setData(j)
         setError(null)
+        setStale(responseStale)
+        return !responseStale
       }
     } catch (e) {
       if (e && e.name === 'AbortError') return               // 主动中止不算错误
       if (!alive.current) return
-      setError(String(e.message || e))
+      const staleData = staleIfErrorMs
+        ? readPollingCacheStale(url, staleIfErrorMs)
+        : null
+      if (staleData != null) {
+        setData(staleData)
+        setError(null)
+        setStale(true)
+      } else {
+        if (staleIfErrorMs) setData(null)
+        setError(String(e.message || e))
+        setStale(false)
+      }
+      return false
     } finally {
       if (alive.current && !ac.signal.aborted) setLoading(false)
     }
     // eslint-disable-next-line
-  }, [url, cacheTtlMs])
+  }, [url, cacheTtlMs, staleIfErrorMs])
 
   const load = useCallback(() => fetchData(false), [fetchData])
   const reload = useCallback(() => fetchData(true), [fetchData]) // 手动刷新：破缓存 + 有 loading 反馈
 
   useEffect(() => {
     alive.current = true
-    if (!url) { setData(null); setLoading(false); return () => { alive.current = false } }
+    if (!url) {
+      setData(null)
+      setLoading(false)
+      setStale(false)
+      return () => { alive.current = false }
+    }
     if (cacheTtlMs) {
       const cached = readPollingCache(url, cacheTtlMs)
       setData(cached)
       setLoading(!cached)
+      setStale(false)
     }
     load()
     if (timer.current) clearInterval(timer.current)
@@ -93,9 +140,9 @@ export function usePolling(url, intervalMs, deps = [], options = {}) {
       if (ctrl.current) { try { ctrl.current.abort() } catch { /* ignore */ } }
     }
     // eslint-disable-next-line
-  }, [url, intervalMs, tick, cacheTtlMs, ...deps])
+  }, [url, intervalMs, tick, cacheTtlMs, staleIfErrorMs, ...deps])
 
-  return { data, loading, error, reload }
+  return { data, loading, error, stale, reload }
 }
 
 export function prefetchPolling(url, { cacheTtlMs = 0 } = {}) {

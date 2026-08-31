@@ -1,6 +1,7 @@
 import { prefetchPolling } from './hooks.js'
 
 export const STOCK_DETAIL_CACHE_TTL_MS = 2 * 60 * 1000
+export const STOCK_DETAIL_STALE_MS = 24 * 60 * 60 * 1000
 
 export function stockDetailPath(code, klt = '101') {
   return `/api/stock_detail?code=${encodeURIComponent(code)}`

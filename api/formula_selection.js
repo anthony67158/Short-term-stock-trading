@@ -291,6 +291,23 @@ export async function readFormulaSelectionProgress({
   return task
 }
 
+export function formulaSelectionPublicError(error) {
+  const message = String(error?.message || error || '公式选股失败')
+  if (
+    /HTTP\s*\d{3}|fetch failed|timeout|timed out|aborted|empty .*kline|关键行情不完整/i
+      .test(message)
+  ) {
+    return {
+      error: '行情数据暂时不可用，请稍后重试',
+      errorCode: 'MARKET_DATA_UNAVAILABLE',
+    }
+  }
+  return {
+    error: message.slice(0, 180),
+    errorCode: 'FORMULA_SELECTION_FAILED',
+  }
+}
+
 export default async function handler(req, res) {
   if (preflight(req, res)) return
   applyCors(res)
@@ -399,10 +416,10 @@ export default async function handler(req, res) {
     }
     return reply(res, 200, await runFormulaSelection({ mode }))
   } catch (error) {
+    const failure = formulaSelectionPublicError(error)
     return reply(res, 500, {
       ok: false,
-      error: String(error?.message || '公式选股失败').slice(0, 180),
-      errorCode: 'FORMULA_SELECTION_FAILED',
+      ...failure,
     })
   }
 }
