@@ -14,6 +14,7 @@ import {
 } from '../shared/tradingCalendar.js'
 
 const stockFormulaCache = new Map()
+const stockFormulaFlights = new Map()
 const STOCK_FORMULA_LIVE_CACHE_MS = 60 * 1000
 const STOCK_FORMULA_STALE_MS = 30 * 60 * 1000
 const STOCK_FORMULA_CACHE_LIMIT = 64
@@ -69,7 +70,7 @@ export function formulaPriceCachePolicy(now = Date.now()) {
     if (minutes < 780) {
       return { key: `lunch:${day}`, maxAgeMs: Infinity }
     }
-    if (minutes < 915) {
+    if (minutes < 900) {
       return {
         key: `live:${day}`,
         maxAgeMs: STOCK_FORMULA_LIVE_CACHE_MS,
@@ -83,7 +84,9 @@ export function formulaPriceCachePolicy(now = Date.now()) {
   }
 }
 
-function formulaAccountFingerprint(accountState = planStore.get()) {
+export function formulaPriceAccountFingerprint(
+  accountState = planStore.get(),
+) {
   return accountTradeStateFingerprint(accountState || {})
 }
 
@@ -103,7 +106,7 @@ export function readStockFormulaPriceCache(
     !cached
     || cached.marketKey !== policy.key
     || cached.accountFingerprint
-      !== formulaAccountFingerprint(accountState)
+      !== formulaPriceAccountFingerprint(accountState)
     || timestamp - cached.at > policy.maxAgeMs
   ) {
     return null
@@ -113,6 +116,7 @@ export function readStockFormulaPriceCache(
 
 export function clearStockFormulaPriceCache() {
   stockFormulaCache.clear()
+  stockFormulaFlights.clear()
 }
 
 export function isFormulaSelectionTransientError(error) {
@@ -207,7 +211,9 @@ export function loadStockFormulaPrice(
   const cacheKey = formulaSelectionCacheKey(normalized, headers)
   const timestamp = Number(now) || Date.now()
   const policy = formulaPriceCachePolicy(timestamp)
-  const accountFingerprint = formulaAccountFingerprint(accountState)
+  const accountFingerprint = formulaPriceAccountFingerprint(accountState)
+  const flightKey =
+    `${cacheKey}:${policy.key}:${accountFingerprint}`
   if (!force) {
     const cached = readStockFormulaPriceCache(normalized, {
       now: timestamp,
@@ -216,7 +222,10 @@ export function loadStockFormulaPrice(
     })
     if (cached) return Promise.resolve(cached)
   }
-  return request(
+  if (stockFormulaFlights.has(flightKey)) {
+    return stockFormulaFlights.get(flightKey)
+  }
+  const flight = request(
     `/api/formula_selection?view=stock&code=${encodeURIComponent(normalized)}`,
     { headers },
     30_000,
@@ -250,5 +259,11 @@ export function loadStockFormulaPrice(
       }
     }
     throw error
+  }).finally(() => {
+    if (stockFormulaFlights.get(flightKey) === flight) {
+      stockFormulaFlights.delete(flightKey)
+    }
   })
+  stockFormulaFlights.set(flightKey, flight)
+  return flight
 }

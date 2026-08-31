@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  formulaPriceAccountFingerprint,
   loadStockFormulaPrice,
   readStockFormulaPriceCache,
 } from '../formulaSelectionClient.js'
 import {
   buildFormulaPriceExplanation,
 } from '../formulaPriceView.js'
+import { planStore, usePlanStore } from '../planStore.js'
 import Icon from './Icon'
 
 const ACTIONS = {
@@ -33,9 +35,11 @@ function formatPrice(value) {
 }
 
 export default function FormulaPrice({ code }) {
+  const accountState = usePlanStore()
+  const accountFingerprint = formulaPriceAccountFingerprint(accountState)
   const requestRef = useRef(0)
   const [state, setState] = useState(() => {
-    const cached = readStockFormulaPriceCache(code)
+    const cached = readStockFormulaPriceCache(code, { accountState })
     return {
       loading: !cached,
       error: '',
@@ -46,9 +50,12 @@ export default function FormulaPrice({ code }) {
   const refreshFormulaPrice = useCallback(async (force = false) => {
     if (!code) return
     const requestId = ++requestRef.current
+    const currentAccountState = planStore.get()
     const cached = force
       ? null
-      : readStockFormulaPriceCache(code)
+      : readStockFormulaPriceCache(code, {
+          accountState: currentAccountState,
+        })
     if (cached) {
       setState({ loading: false, error: '', payload: cached })
       return
@@ -59,7 +66,10 @@ export default function FormulaPrice({ code }) {
       error: '',
     }))
     try {
-      const payload = await loadStockFormulaPrice(code, { force })
+      const payload = await loadStockFormulaPrice(code, {
+        force,
+        accountState: currentAccountState,
+      })
       if (requestRef.current !== requestId) return
       setState({ loading: false, error: '', payload })
     } catch (error) {
@@ -70,7 +80,7 @@ export default function FormulaPrice({ code }) {
         payload: null,
       })
     }
-  }, [code])
+  }, [code, accountFingerprint])
 
   useEffect(() => {
     refreshFormulaPrice()

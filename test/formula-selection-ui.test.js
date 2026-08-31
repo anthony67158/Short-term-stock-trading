@@ -211,6 +211,41 @@ test('收盘公式跨休市复用且在开盘或账户变化后重新计算', as
   }
 })
 
+test('同一账号同股的并发公式请求只计算一次', async () => {
+  clearStockFormulaPriceCache()
+  const originalFetch = globalThis.fetch
+  let calls = 0
+  globalThis.fetch = async () => {
+    calls += 1
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: true,
+        decision: { action: 'HOLD' },
+      }),
+    }
+  }
+  const now = Date.parse('2026-08-31T10:00:00+08:00')
+  const accountState = {
+    plan: [],
+    holding: [{ code: '600001', qty: 1, buyPrice: 10 }],
+    closed: [],
+    account: { cash: 10000 },
+  }
+  try {
+    await Promise.all([
+      loadStockFormulaPrice('600001', { now, accountState }),
+      loadStockFormulaPrice('600001', { now, accountState }),
+    ])
+    assert.equal(calls, 1)
+  } finally {
+    globalThis.fetch = originalFetch
+    clearStockFormulaPriceCache()
+  }
+})
+
 test('公式价位缓存窗口区分盘中、午休和收盘', () => {
   const morning = formulaPriceCachePolicy(
     Date.parse('2026-08-31T10:00:00+08:00'),
@@ -221,6 +256,9 @@ test('公式价位缓存窗口区分盘中、午休和收盘', () => {
   const close = formulaPriceCachePolicy(
     Date.parse('2026-08-31T15:20:00+08:00'),
   )
+  const closeBell = formulaPriceCachePolicy(
+    Date.parse('2026-08-31T15:00:00+08:00'),
+  )
   const weekend = formulaPriceCachePolicy(
     Date.parse('2026-08-30T12:00:00+08:00'),
   )
@@ -228,7 +266,10 @@ test('公式价位缓存窗口区分盘中、午休和收盘', () => {
   assert.equal(morning.maxAgeMs, 60_000)
   assert.equal(lunch.key, 'lunch:2026-08-31')
   assert.equal(close.key, 'close:2026-08-31')
+  assert.equal(closeBell.key, 'close:2026-08-31')
   assert.equal(weekend.key, 'close:2026-08-28')
+  assert.match(price, /formulaPriceAccountFingerprint/)
+  assert.match(price, /\[code,\s*accountFingerprint\]/)
 })
 
 test('公式选股展示服务端真实计算阶段而不是静态计算中文案', () => {
