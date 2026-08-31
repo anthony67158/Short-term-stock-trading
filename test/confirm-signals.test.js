@@ -7,6 +7,7 @@ import {
   deterministicJudge,
   intradayPrimitives,
   JUDGE_MAX_TOKENS,
+  JUDGE_MODEL_BUDGET_MS,
   judgePriceContractGate,
   judgeConfirmation,
 } from '../api/_confirm.js'
@@ -123,6 +124,7 @@ test('Judge生成一次性终局结论、执行区间、手数与依据', () => 
   assert.match(prompt, /"reason":"一句话中文理由"/)
   assert.doesNotMatch(prompt, /knowledgeAction|知行合一|可执行性/)
   assert.ok(JUDGE_MAX_TOKENS <= 300)
+  assert.equal(JUDGE_MODEL_BUDGET_MS, 20000)
 })
 
 test('快速复核比较本轮服务端资金与原军师资金基准', () => {

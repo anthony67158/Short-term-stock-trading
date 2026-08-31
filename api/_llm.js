@@ -43,6 +43,7 @@ export async function callChat({
   temperature = 0.4,
   maxTokens = 1600,
   timeoutMs = 30000,
+  headerTimeoutMs = Math.min(timeoutMs, 15000),
   stream = false,
   responseFormat,
   reasoning = false,
@@ -92,6 +93,7 @@ export async function callChat({
     method: 'POST', body: bodyObj, signal: useSignal, timeoutMs,
     role, modelFallback: model, reasonFallback: reasoning, reasoningEffort,
     forceNoReason, forceReason, deferSuccess: !!stream,
+    headerTimeoutMs,
   }, 2);   // 只在取得成功响应头前故障转移；开始消费流后由调用方处理部分结果。
 
   let released = false;

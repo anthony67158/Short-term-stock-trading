@@ -328,6 +328,7 @@ export async function poolFetch(config, path, {
   method = 'POST', body, signal, timeoutMs = 30000, role, modelFallback,
   reasonFallback, reasoningEffort = 'medium',
   forceNoReason = false, forceReason = false, deferSuccess = false,
+  headerTimeoutMs = timeoutMs,
 } = {}, maxTries = 2) {
   const roleEps = endpointsForRole(config, role);
   if (!roleEps.length) return { resp: { __err: new Error('no LLM endpoint configured') }, endpoint: null };
@@ -368,9 +369,34 @@ export async function poolFetch(config, path, {
       else if (wantReason) sendBody.reasoning_effort = reasoningEffort;
       else delete sendBody.reasoning_effort;
     }
-    const ctrl = signal ? null : new AbortController();
-    const useSignal = signal || (ctrl && ctrl.signal);
-    const t = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
+    const ctrl = new AbortController();
+    let headerTimedOut = false;
+    const useSignal = signal && typeof AbortSignal.any === 'function'
+      ? AbortSignal.any([signal, ctrl.signal])
+      : (signal || ctrl.signal);
+    const headerBudget = Math.max(
+      250,
+      Math.min(
+        Number(timeoutMs) || 30000,
+        roleEps.length > 1
+          ? Number(headerTimeoutMs) || Number(timeoutMs) || 30000
+          : Number(timeoutMs) || 30000,
+      ),
+    );
+    const t = setTimeout(() => {
+      const idleAlternative = roleEps.some((candidate) => {
+        if (
+          tried.has(candidate.id)
+          || h(candidate.id).cooldownUntil > Date.now()
+        ) return false;
+        return h(candidate.id).inflight === 0;
+      });
+      // 所有备用端点都在服务其它任务时，切换只会把请求塞到繁忙端点，
+      // 同时丢掉当前已排队的上游请求。此时继续等待当前端点，由总预算兜底。
+      if (i + 1 >= tries || !idleAlternative) return;
+      headerTimedOut = true;
+      ctrl.abort();
+    }, headerBudget);
     let resp;
     try {
       resp = await fetch(`${ep.baseUrl}${path}`, {
@@ -379,7 +405,7 @@ export async function poolFetch(config, path, {
         body: typeof sendBody === 'string' ? sendBody : JSON.stringify(sendBody || {}),
       });
     } catch (e) { resp = { __err: e }; }
-    if (t) clearTimeout(t);
+    clearTimeout(t);
     const errored = resp && resp.__err;
     const isAbort = errored && resp.__err && resp.__err.name === 'AbortError';
     const bad5xx = resp && !resp.__err && !resp.ok && resp.status >= 500;
@@ -398,6 +424,16 @@ export async function poolFetch(config, path, {
       markSuccess(ep.id, Date.now() - attemptStartedAt);
       releaseRole();
       return { resp, endpoint: ep, deferred: false };
+    }
+    if (
+      isAbort
+      && headerTimedOut
+      && !signal?.aborted
+      && i + 1 < tries
+    ) {
+      markFailure(ep.id);
+      lastErr = new Error('LLM response header timeout');
+      continue;
     }
     if (isAbort) {
       markFailure(ep.id);

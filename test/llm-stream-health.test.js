@@ -256,6 +256,152 @@ test('流式请求在成功响应头前可快速切换备用端点', async () =>
   }
 })
 
+test('外层请求仍有效时单端点响应头超时会切换备用端点', async () => {
+  resetPoolHealthForTests()
+  const config = {
+    roleEndpoints: {
+      advisor: [{
+        baseUrl: 'https://advisor-1.example/v1',
+        apiKey: 'key-1',
+        model: 'model-1',
+        enabled: true,
+      }, {
+        baseUrl: 'https://advisor-2.example/v1',
+        apiKey: 'key-2',
+        model: 'model-2',
+        enabled: true,
+      }],
+    },
+  }
+  const originalFetch = globalThis.fetch
+  const urls = []
+  globalThis.fetch = async (url, options) => {
+    urls.push(url)
+    if (urls.length === 1) {
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      if (options.signal?.aborted) {
+        const error = new Error('aborted')
+        error.name = 'AbortError'
+        throw error
+      }
+    }
+    return new Response('{}', { status: 200 })
+  }
+  try {
+    const routed = await poolFetch(config, '/chat/completions', {
+      body: { model: 'model', stream: true },
+      role: 'advisor',
+      signal: new AbortController().signal,
+      timeoutMs: 1000,
+      headerTimeoutMs: 250,
+      deferSuccess: true,
+    }, 2)
+
+    assert.equal(routed.resp.ok, true)
+    assert.equal(routed.endpoint.id, 'advisor-2')
+    assert.equal(urls.length, 2)
+    routed.releaseRole()
+  } finally {
+    globalThis.fetch = originalFetch
+    resetPoolHealthForTests()
+  }
+})
+
+test('备用端点忙碌时保留当前请求而不是切换后重复排队', async () => {
+  resetPoolHealthForTests()
+  const config = {
+    roleEndpoints: {
+      advisor: [{
+        baseUrl: 'https://advisor-1.example/v1',
+        apiKey: 'key-1',
+        model: 'model-1',
+        enabled: true,
+      }, {
+        baseUrl: 'https://advisor-2.example/v1',
+        apiKey: 'key-2',
+        model: 'model-2',
+        enabled: true,
+      }],
+    },
+  }
+  markStart('advisor-2')
+  const originalFetch = globalThis.fetch
+  const urls = []
+  globalThis.fetch = async (url) => {
+    urls.push(url)
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    return new Response('{}', { status: 200 })
+  }
+  try {
+    const routed = await poolFetch(config, '/chat/completions', {
+      body: { model: 'model', stream: true },
+      role: 'advisor',
+      signal: new AbortController().signal,
+      timeoutMs: 1000,
+      headerTimeoutMs: 250,
+      deferSuccess: true,
+    }, 2)
+
+    assert.equal(routed.resp.ok, true)
+    assert.equal(routed.endpoint.id, 'advisor-1')
+    assert.equal(urls.length, 1)
+    routed.releaseRole()
+  } finally {
+    markSuccess('advisor-2')
+    globalThis.fetch = originalFetch
+    resetPoolHealthForTests()
+  }
+})
+
+test('外层请求取消时不得把同一题切换到备用端点', async () => {
+  resetPoolHealthForTests()
+  const config = {
+    roleEndpoints: {
+      advisor: [{
+        baseUrl: 'https://advisor-1.example/v1',
+        apiKey: 'key-1',
+        model: 'model-1',
+        enabled: true,
+      }, {
+        baseUrl: 'https://advisor-2.example/v1',
+        apiKey: 'key-2',
+        model: 'model-2',
+        enabled: true,
+      }],
+    },
+  }
+  const originalFetch = globalThis.fetch
+  const urls = []
+  globalThis.fetch = async (url, options) => {
+    urls.push(url)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    if (options.signal?.aborted) {
+      const error = new Error('aborted')
+      error.name = 'AbortError'
+      throw error
+    }
+    return new Response('{}', { status: 200 })
+  }
+  const controller = new AbortController()
+  setTimeout(() => controller.abort(), 5)
+  try {
+    const routed = await poolFetch(config, '/chat/completions', {
+      body: { model: 'model', stream: true },
+      role: 'advisor',
+      signal: controller.signal,
+      timeoutMs: 1000,
+      headerTimeoutMs: 250,
+      deferSuccess: true,
+    }, 2)
+
+    assert.equal(routed.resp.__err?.name, 'AbortError')
+    assert.equal(urls.length, 1)
+  } finally {
+    globalThis.fetch = originalFetch
+    resetPoolHealthForTests()
+  }
+})
+
 test('流读取中断时保留已经收到的推理和正文', async () => {
   const encoder = new TextEncoder()
   const chunks = [

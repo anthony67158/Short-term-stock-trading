@@ -2270,6 +2270,9 @@ export default async function handler(req, res) {
         temperature: 0.2,
         maxTokens: outputMaxTokens,
         timeoutMs: llmTimeout,
+        headerTimeoutMs: useRole === 'review'
+          ? 12000
+          : useReasoning ? 25000 : 22000,
         reasoning: useReasoning,
         reasoningEffort: 'medium',
         forceNoReason: fastMode,
@@ -2345,6 +2348,9 @@ export default async function handler(req, res) {
         temperature: 0.2,   // JSON 结构化输出：低温提升稳定性与可解析率，减少字段漂移
         maxTokens: outputMaxTokens,
         timeoutMs: llmTimeout,
+        headerTimeoutMs: useRole === 'review'
+          ? 12000
+          : useReasoning ? 25000 : 22000,
         reasoning: useReasoning,
         reasoningEffort: 'medium',
         forceNoReason: fastMode,

@@ -58,6 +58,7 @@ import {
 } from '../shared/reviewDecisionPacket.js';
 
 export const JUDGE_MAX_TOKENS = 260;
+export const JUDGE_MODEL_BUDGET_MS = 20000;
 
 export function buildJudgeUserPrompt(payload) {
   const intent = String(payload?.动作类型 || '');
@@ -566,15 +567,16 @@ async function llmJudge({
     { role: 'user', content: buildJudgeUserPrompt(payload) },
   ];
   try {
-    // Judge 必须及时：总预算 10s 内允许一次故障转移，超时立即回退客观信号。
+    // Judge 只调用一次完整模型；20s 预算覆盖已观测到的上游首包延迟，
+    // 到时仍未返回则立即回退客观信号。
     const startedAt = Date.now();
     const remainingMs = Number(deadlineAt) > 0
       ? Number(deadlineAt) - startedAt
-      : 10000;
+      : JUDGE_MODEL_BUDGET_MS;
     if (remainingMs < 1000) return null;
     const TIMEOUT_MS = Math.max(
       1200,
-      Math.min(10000, remainingMs),
+      Math.min(JUDGE_MODEL_BUDGET_MS, remainingMs),
     );
     const { resp, done } = await callChatWithRetry({
       role: 'judge', model,
@@ -582,6 +584,7 @@ async function llmJudge({
       temperature: 0,
       maxTokens: JUDGE_MAX_TOKENS,
       timeoutMs: TIMEOUT_MS,
+      headerTimeoutMs: TIMEOUT_MS,
       responseFormat: { type: 'json_object' },
       reasoning: getReasoning('judge'),
     }, { retries: 1, budgetLeftMs: () => TIMEOUT_MS - (Date.now() - startedAt) });
@@ -928,7 +931,7 @@ export async function judgeConfirmation({
     position,
     fundContext,
     reviewPacket,
-    deadlineAt: observedAt + 10000,
+    deadlineAt: Date.now() + JUDGE_MODEL_BUDGET_MS,
   });
   const fused = fuseConfirmation({
     side,
