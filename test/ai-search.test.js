@@ -397,6 +397,49 @@ test('军师行业资讯可直接使用豆包主源而不依赖旧新闻源失�
   assert.equal(result.items[1].searchScope, 'industry')
 })
 
+test('手动深度研判并行获取个股与行业搜索证据', async () => {
+  let releaseStock
+  let industryStarted = false
+  const stockPending = new Promise((resolve) => {
+    releaseStock = resolve
+  })
+  const pending = fetchAdvisorSearchBundle({
+    code: '688981',
+    name: '中芯国际',
+    industry: '半导体',
+    includeIndustry: true,
+  }, {
+    stockFetcher: async () => stockPending,
+    industryFetcher: async () => {
+      industryStarted = true
+      return {
+        items: [{
+          title: '半导体行业景气改善',
+          url: 'https://example.com/industry',
+        }],
+        status: 'network',
+        billed: true,
+        enabled: true,
+      }
+    },
+  })
+
+  await Promise.resolve()
+  const startedBeforeStockFinished = industryStarted
+  releaseStock({
+    items: [{
+      title: '中芯国际披露经营进展',
+      url: 'https://example.com/stock',
+    }],
+    status: 'network',
+    billed: true,
+    enabled: true,
+  })
+  await pending
+
+  assert.equal(startedBeforeStockFinished, true)
+})
+
 test('自动复核命中的行业缓存不会冒充个股信息', async () => {
   const result = await fetchAdvisorSearchBundle({
     code: '000858',

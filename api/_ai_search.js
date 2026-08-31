@@ -766,12 +766,25 @@ export async function fetchAdvisorSearchBundle({
     || ((input) => fetchAdvisorSearch(input, options));
   const industryFetcher = options.industryFetcher
     || ((input) => fetchIndustrySearchSupplement(input, options));
-  const fetchedStock = await stockFetcher({
+  const stockPromise = Promise.resolve().then(() => stockFetcher({
     code,
     name,
     industry,
     reviewOrigin,
-  }) || {
+  }));
+  const needsIndustry = !!(
+    (includeIndustry || industryFallback)
+    && industry
+  );
+  const scheduled = ['auto', 'judge'].includes(
+    String(reviewOrigin || ''),
+  );
+  const industryPromise = needsIndustry && !scheduled
+    ? Promise.resolve().then(() =>
+        industryFetcher({ industry, reviewOrigin })
+      )
+    : null;
+  const fetchedStock = await stockPromise || {
     items: [],
     status: 'unavailable',
     billed: false,
@@ -786,10 +799,12 @@ export async function fetchAdvisorSearchBundle({
     }
     : fetchedStock;
   const fetchedIndustry =
-    (includeIndustry || industryFallback)
-    && industry
+    needsIndustry
     && !stockUsedIndustryCache
-    ? await industryFetcher({ industry, reviewOrigin })
+    ? await (
+        industryPromise
+        || industryFetcher({ industry, reviewOrigin })
+      )
     : null;
   const industryResult = fetchedIndustry
     || (stockUsedIndustryCache ? fetchedStock : null);
