@@ -66,6 +66,22 @@ test('到价复核复用上一轮量化时不暴露内部状态码', () => {
   assert.doesNotMatch(result, /TRIGGERED_REVIEW/)
 })
 
+test('历史建议不把未来是否站回均价写成确定事实', () => {
+  const result = humanizeUserFacingText(
+    '回踩后不能重新站回66.59元均价，则取消本次关注；不因价格靠近而追买。',
+  )
+
+  assert.doesNotMatch(result, /不能重新站回|不会重新站回/)
+  assert.match(result, /到价复核时尚未确认价格已重新站回66\.59元/)
+  assert.match(result, /之后重新站回.*作为新事件重新评估/)
+
+  const conditional = humanizeUserFacingText(
+    '若下午有效跌破357.3元且不能重新站回，原计划失效。',
+  )
+  assert.doesNotMatch(conditional, /不能重新站回/)
+  assert.match(conditional, /截至复核时仍未站回/)
+})
+
 test('操作标签明确区分当前仓位与本轮动作', () => {
   assert.equal(
     explicitActionLabel('持有', { holdingMode: true }),

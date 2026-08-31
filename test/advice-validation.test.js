@@ -3,6 +3,32 @@ import assert from 'node:assert/strict'
 
 import { reconcileAdviceNumbers } from '../shared/adviceValidation.js'
 
+test('复核条件不得把未来是否站回均价写成确定事实', () => {
+  const { result } = reconcileAdviceNumbers({
+    mode: 'buy_advice',
+    payload: {
+      todayQuote: { price: 67 },
+      tech: {
+        atr: 1.2,
+        support: 66.2,
+      },
+    },
+    result: {
+      action: '观望',
+      pullbackWatchPrice: 66.2,
+      invalidation:
+        '回踩后不能重新站回66.59元均价，则取消本次关注；不因价格靠近而追买。',
+    },
+  })
+
+  assert.doesNotMatch(result.invalidation, /不能重新站回|不会重新站回/)
+  assert.match(
+    result.invalidation,
+    /到价复核时尚未确认价格已重新站回66\.59元/,
+  )
+  assert.match(result.invalidation, /之后重新站回.*作为新事件重新评估/)
+})
+
 test('买入建议按现金上限裁剪手数并重算金额与风险收益', () => {
   const { result, issues } = reconcileAdviceNumbers({
     mode: 'buy_advice',

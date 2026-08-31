@@ -2,6 +2,7 @@ import {
   adviceObservationLevels,
   buildAdvicePriceContract,
 } from './advicePriceContract.js'
+import { timeBoundReviewText } from './userFacingLanguage.js'
 
 function numberOf(value) {
   if (value == null || value === '') return null
@@ -193,6 +194,17 @@ function reconcileActionText(text, quantity, amount) {
 
 export function reconcileAdviceNumbers({ mode, result: input, payload = {} } = {}) {
   const result = input && typeof input === 'object' ? { ...input } : {}
+  for (const field of [
+    'actionPlan',
+    'invalidation',
+    'nextAction',
+    'reason',
+    'timing',
+  ]) {
+    if (typeof result[field] === 'string') {
+      result[field] = timeBoundReviewText(result[field])
+    }
+  }
   const issues = []
   const quote = payload.todayQuote || {}
   const low = numberOf(quote.limitDownPrice)

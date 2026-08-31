@@ -195,6 +195,21 @@ const TEXT_ARRAY_FIELDS = new Set([
   'violations',
 ])
 
+export function timeBoundReviewText(value, { terminal = false } = {}) {
+  if (value == null) return value
+  let text = String(value)
+  text = text.replace(
+    /回踩后(?:不能|不会|未能|无法)(?:重新)?站回\s*(\d+(?:\.\d+)?)\s*元(?:分时)?均价(?:线)?\s*[，,]?\s*则取消本次关注/g,
+    (_, price) => terminal
+      ? `截至本次复核，尚未确认价格已重新站回${price}元分时均价，因此本次不买入；若之后重新站回且量价、资金转强，作为新事件重新评估`
+      : `回踩触价后，若到价复核时尚未确认价格已重新站回${price}元分时均价，则本次不买入；若之后重新站回且量价、资金转强，作为新事件重新评估`,
+  )
+  return text.replace(
+    /(若[^。；]{0,80}?)(?:不能|不会|无法)(?:重新)?站回/g,
+    '$1截至复核时仍未站回',
+  )
+}
+
 export function humanizeUserFacingText(value) {
   if (value == null) return value
   let text = String(value)
@@ -204,7 +219,7 @@ export function humanizeUserFacingText(value) {
   for (const [pattern, replacement] of TERM_REWRITES) {
     text = text.replace(pattern, replacement)
   }
-  return text
+  return timeBoundReviewText(text)
 }
 
 export function explicitActionLabel(

@@ -1,3 +1,5 @@
+import { timeBoundReviewText } from './userFacingLanguage.js'
+
 export const TRIGGERED_REVIEW_TIME_LIMIT_MINUTES = 2
 export const TRIGGERED_REVIEW_TOTAL_BUDGET_MS =
   TRIGGERED_REVIEW_TIME_LIMIT_MINUTES * 60 * 1000
@@ -243,7 +245,10 @@ function terminalDecisionReason(result = {}, bases = [], fallback = '') {
     ...(Array.isArray(bases) ? bases.map((item) => item?.summary) : []),
   ]
   return candidates
-    .map((item) => usefulEvidence(item))
+    .map((item) => timeBoundReviewText(
+      usefulEvidence(item),
+      { terminal: true },
+    ))
     .find(Boolean)
     || fallback
     || '本轮实时证据未能继续支持原操作'

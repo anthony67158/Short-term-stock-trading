@@ -591,7 +591,7 @@ function tacticalReviewEventRule(reviewEvent = {}) {
       ? '你此前在等待的回踩企稳价已经到达'
       : '你此前设定的观察价已经到达'
   const evidenceRule = '必须先读取previousPlan里的原军师结论、执行条件、失效条件和仓位意见，再结合本轮最新证据判断。结论至少明确引用一类可追溯依据：已验证投资理论、实时资金与价格走势、或重大催化事件。'
-  const terminalRule = `这是限时终局复核，须在${timeLimit}分钟总期限内一次完成。禁止生成任何新的观察价、复核价或下一轮价格条件，禁止用“继续看看/再等等”逃避结论。`
+  const terminalRule = `这是限时终局复核，须在${timeLimit}分钟总期限内一次完成。禁止生成任何新的观察价、复核价或下一轮价格条件，禁止用“继续看看/再等等”逃避结论。只能描述截至复核时已经观察到的事实，禁止断言价格之后“不能/不会重新站回”；尚未确认站回时应结束本次触发，并说明之后重新站回且量价、资金转强可作为新事件重新评估。`
   if (holdingAddReview || holdingReduceReview) {
     const focus = holdingReduceReview
       ? '减仓或锁定利润'
@@ -1233,7 +1233,7 @@ function genericPrompt(mode, payload, data, ragText) {
 export function buildUserPrompt(mode, payload = {}, ragText = '', theoryHits = []) {
   const data = JSON.stringify(promptPayloadForModel(payload))
   const zhReason = '【语言要求·最高优先】全部思考与输出必须使用简体中文，专有名词、代码和数字除外。\n'
-  const waitEntryRule = '【未持仓价位语义】buyPrice必须不高于输入中的当前价，并来自近期支撑、均线、VWAP或量化买点；上方压力或突破位只能填breakoutWatchPrice。观望时必须分别校验pullbackWatchPrice与breakoutWatchPrice是否有效，但actionPlan只能选择一个最优主路径，按“当前不买→唯一触发→复核通过后手动买入→失效则不买”写清，不得用“或/任一到价”并列两条路径。两个结构化观察价仍可分别保留供预警，且都需来自输入证据、方向正确并在未来1-5个交易日可达；过远、已经越过或无依据时填null。观察价不是买入价；观望时buyPrice、buyZone、stopPrice、targetPrice必须为null，watchPrice固定为null，invalidation只写何时取消关注。'
+  const waitEntryRule = '【未持仓价位语义】buyPrice必须不高于输入中的当前价，并来自近期支撑、均线、VWAP或量化买点；上方压力或突破位只能填breakoutWatchPrice。观望时必须分别校验pullbackWatchPrice与breakoutWatchPrice是否有效，但actionPlan只能选择一个最优主路径，按“当前不买→唯一触发→复核通过后手动买入→失效则不买”写清，不得用“或/任一到价”并列两条路径。两个结构化观察价仍可分别保留供预警，且都需来自输入证据、方向正确并在未来1-5个交易日可达；过远、已经越过或无依据时填null。观察价不是买入价；观望时buyPrice、buyZone、stopPrice、targetPrice必须为null，watchPrice固定为null。invalidation必须写成可观测条件，禁止断言未来“不能/不会重新站回”；应写“本次复核若尚未确认站回则本次不买，之后重新站回且量价、资金转强时作为新事件重新评估”。'
   if (!isAdvisorMode(mode)) {
     return `${zhReason}${genericPrompt(mode, payload, data, ragText)}`
   }

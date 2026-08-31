@@ -235,6 +235,33 @@ test('买入复核未确认时终态只能维持观望且不得生成新观察�
   assert.doesNotMatch(result.actionPlan, /13元/)
 })
 
+test('到价终局只描述复核时点且允许站回均价后作为新事件', () => {
+  const result = normalizeTriggeredReviewDecision({
+    mode: 'buy_advice',
+    payload: payload(),
+    result: {
+      action: '观望',
+      reviewDecision: {
+        outcome: '维持观望',
+        operation: '不操作',
+        reason:
+          '回踩后不能重新站回66.59元均价，则取消本次关注；不因价格靠近而追买。',
+      },
+    },
+  })
+
+  assert.doesNotMatch(
+    result.reviewDecision.reason,
+    /不能重新站回|不会重新站回/,
+  )
+  assert.match(
+    result.reviewDecision.reason,
+    /截至本次复核，尚未确认价格已重新站回66\.59元/,
+  )
+  assert.match(result.reviewDecision.reason, /作为新事件重新评估/)
+  assert.match(result.actionPlan, /作为新事件重新评估/)
+})
+
 test('买入逻辑失效时终态为放弃买入', () => {
   const result = normalizeTriggeredReviewDecision({
     mode: 'buy_advice',
