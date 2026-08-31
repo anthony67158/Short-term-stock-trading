@@ -1,5 +1,25 @@
 const EXACT_REWRITES = [
   [
+    /依赖条件未满足[，,]\s*本轮未执行[（(]TRIGGERED_REVIEW_REUSE_PREVIOUS[）)]/g,
+    '原建议没有可复用的量化结果，本轮快速复核不重复计算',
+  ],
+  [
+    /\bTRIGGERED_REVIEW_REUSE_PREVIOUS\b/g,
+    '原建议没有可复用的量化结果，本轮快速复核不重复计算',
+  ],
+  [
+    /\bTRIGGERED_REVIEW_FAST_PATH\b/g,
+    '到价复核只采集当前决策所需的实时证据',
+  ],
+  [
+    /\bQUICK_ADVICE_FAST_PATH\b/g,
+    '快速建议只采集价格决策所需证据',
+  ],
+  [
+    /\bQUICK_ADVICE_SKIP_LIVE_SEARCH\b/g,
+    '快速建议不等待联网检索',
+  ],
+  [
     /策略闸门\s*productionEligible\s*(?:为|=)\s*(?:真|true)[、，,\s]*策略路线进入生产可执行[、，,\s]*(?:且)?\s*marketEnv\.regime\s*不再为\s*RISK_OFF\s*时[，,]?\s*观望失效[。.]?/gi,
     '历史限制已取消；市场结束防守状态且量价、资金与风险条件确认后，重新评估是否买入。',
   ],

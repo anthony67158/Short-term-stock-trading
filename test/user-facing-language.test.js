@@ -17,6 +17,7 @@ const INTERNAL_TERMS = [
   'RESEARCH_ONLY',
   'specVersion',
   'blockerCodes',
+  'TRIGGERED_REVIEW_REUSE_PREVIOUS',
 ]
 
 const read = (path) => readFileSync(
@@ -49,6 +50,18 @@ test('通用术语转换保留价格、T+1和常用技术指标', () => {
   assert.match(result, /10\.20元/)
   assert.match(result, /RSI/)
   assert.match(result, /T\+1/)
+})
+
+test('到价复核复用上一轮量化时不暴露内部状态码', () => {
+  const result = humanizeUserFacingText(
+    '依赖条件未满足，本轮未执行（TRIGGERED_REVIEW_REUSE_PREVIOUS）',
+  )
+
+  assert.equal(
+    result,
+    '原建议没有可复用的量化结果，本轮快速复核不重复计算',
+  )
+  assert.doesNotMatch(result, /TRIGGERED_REVIEW/)
 })
 
 test('建议文本递归转译但不改写程序使用的结构字段', () => {

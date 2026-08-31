@@ -232,6 +232,42 @@ test('缺失关键数据时明确标记PARTIAL和缺失来源', () => {
   assert.equal(snapshot.account.revision, 12)
 })
 
+test('到价复核复用原建议量化时不标记为关键证据缺失', () => {
+  const snapshot = createCanonicalEvidenceSnapshot({
+    mode: 'hold_advice',
+    payload: {
+      ...payload,
+      quant: null,
+      reviewEvent: { kind: 'price-review' },
+      previousAdvice: {
+        shortHorizonTactical: {
+          quant: {
+            score: 72,
+            direction: '上涨',
+            inputAsOf: '2026-08-13T02:25:00.000Z',
+          },
+        },
+      },
+    },
+    sourceTrace: [{
+      key: 'quant',
+      label: '量化预测',
+      status: 'SKIPPED',
+      errorCode: 'TRIGGERED_REVIEW_REUSE_PREVIOUS',
+    }],
+    now: Date.parse('2026-08-13T02:31:00.000Z'),
+  })
+
+  assert.equal(snapshot.sources.quant.available, true)
+  assert.equal(snapshot.sources.quant.state, 'REUSED')
+  assert.equal(snapshot.sources.quant.basisLabel, '复用原建议量化结果')
+  assert.equal(snapshot.freshness.missingSources.includes('quant'), false)
+  assert.equal(
+    snapshot.freshness.missingRequiredSources.includes('quant'),
+    false,
+  )
+})
+
 test('采集追踪优先保留安全错误码而不是泛化错误类型', async () => {
   const tracker = createEvidenceSourceTracker()
   const error = Object.assign(new Error('HTTP 401'), {

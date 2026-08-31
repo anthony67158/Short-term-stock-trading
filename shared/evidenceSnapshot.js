@@ -62,6 +62,17 @@ const SOURCE_TRACE_KEYS = Object.freeze({
   dailyReport: ['dailyReport'],
 })
 
+const SKIP_REASON_LABELS = Object.freeze({
+  TRIGGERED_REVIEW_REUSE_PREVIOUS:
+    '原建议没有可复用的量化结果，本轮快速复核不重复计算',
+  TRIGGERED_REVIEW_FAST_PATH:
+    '到价复核只采集当前决策所需的实时证据',
+  QUICK_ADVICE_FAST_PATH:
+    '快速建议只采集价格决策所需证据',
+  QUICK_ADVICE_SKIP_LIVE_SEARCH:
+    '快速建议不等待联网检索',
+})
+
 function finite(value) {
   if (value == null || value === '') return null
   const number = Number(value)
@@ -181,9 +192,8 @@ function missingReason(sourceKey, trace) {
   }
   if (trace?.status === 'EMPTY') return '接口已响应，但没有返回可用数据'
   if (trace?.status === 'SKIPPED') {
-    return code
-      ? `依赖条件未满足，本轮未执行（${code}）`
-      : '依赖条件未满足，本轮未执行'
+    return SKIP_REASON_LABELS[code]
+      || '该项不属于本轮必需证据，未重复采集'
   }
   if (trace?.status === 'ERROR') {
     return code ? `数据采集失败（${code}）` : '数据采集失败'
@@ -315,11 +325,24 @@ export function createCanonicalEvidenceSnapshot({
       !['revision', 'industryWeights'].includes(key)
       && value != null
     )
-  const selectedQuantVersion = quant?.selectedModelVersion
+  const quantTrace = traceForSource('quant', sourceTrace)
+  const reusedQuant = (
+    quantTrace?.status === 'SKIPPED'
+    && quantTrace?.errorCode === 'TRIGGERED_REVIEW_REUSE_PREVIOUS'
+  )
+    ? (
+        payload.reviewDecisionPacket?.baseline?.tactical?.quant
+        || payload.previousAdvice?.shortHorizonTactical?.quant
+        || payload.previousAdvice?.quantContext
+        || null
+      )
+    : null
+  const effectiveQuant = quant || reusedQuant
+  const selectedQuantVersion = effectiveQuant?.selectedModelVersion
     || payload.quantModelVersion
     || null
-  const runtimeQuantVersion = quant?.runtimeModelVersion
-    || quant?.modelVersion
+  const runtimeQuantVersion = effectiveQuant?.runtimeModelVersion
+    || effectiveQuant?.modelVersion
     || null
   const sources = {
     account: source(
@@ -367,11 +390,11 @@ export function createCanonicalEvidenceSnapshot({
       asOf,
     ),
     quant: source(
-      !!quant,
-      marketEvidence.state,
-      quant?.inputAsOf || quant?.asOf,
+      !!effectiveQuant,
+      reusedQuant ? 'REUSED' : marketEvidence.state,
+      effectiveQuant?.inputAsOf || effectiveQuant?.asOf,
       asOf,
-      marketEvidence.basisLabel,
+      reusedQuant ? '复用原建议量化结果' : marketEvidence.basisLabel,
     ),
     dailyReport: source(
       !!payload.dailyReport,
@@ -408,11 +431,11 @@ export function createCanonicalEvidenceSnapshot({
     }),
     funds: compact(payload.stockFund),
     quant: compact({
-      score: quant?.score,
-      bias: quant?.bias,
-      forecast: quant?.forecast,
-      highConfSignal: quant?.highConfSignal,
-      reliability: quant?.reliability,
+      score: effectiveQuant?.score,
+      bias: effectiveQuant?.bias,
+      forecast: effectiveQuant?.forecast,
+      highConfSignal: effectiveQuant?.highConfSignal,
+      reliability: effectiveQuant?.reliability,
       eventTag: payload.eventSignal,
     }),
     news: compact({
