@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react'
+import { preloadStockDetailExperience } from './stockDetailLoader.js'
 
 // 全局个股详情 store：任意页面点击股票名 → 弹出详情+K线弹窗
 let state = { stock: null } // { code, name }
@@ -10,7 +11,13 @@ export const detailStore = {
   subscribe(l) { listeners.add(l); return () => listeners.delete(l) },
   get() { return state },
   // 打开某只股票的详情弹窗
-  open(stock) { if (stock && stock.code) { state.stock = stock; emit() } },
+  open(stock) {
+    if (stock && stock.code) {
+      void preloadStockDetailExperience(stock.code)
+      state.stock = stock
+      emit()
+    }
+  },
   close() { state.stock = null; emit() },
 }
 

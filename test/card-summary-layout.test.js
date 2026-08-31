@@ -9,6 +9,7 @@ const read = (path) => readFileSync(
 
 const planTab = read('src/components/PlanTab.jsx')
 const stockDetail = read('src/components/StockDetail.jsx')
+const stockDetailData = read('src/stockDetailData.js')
 const stockDetailApi = read('api/stock_detail.js')
 const quoteApi = read('api/quote.js')
 const precision = read('src/styles/precision.css')
@@ -366,9 +367,10 @@ test('自选卡把当前指令放在盘面证据之前并取消四格指标墙',
 
 test('个股详情展示最近收盘快照与近5日关键趋势', () => {
   assert.match(
-    stockDetail,
-    /stock_detail\?code=\$\{stock\.code\}[^`]*quote=1/,
+    stockDetailData,
+    /stock_detail\?code=\$\{encodeURIComponent\(code\)\}/,
   )
+  assert.match(stockDetailData, /trends=1&quote=1/)
   assert.match(
     stockDetailApi,
     /fetchQuotes\(\[code\],\s*\{\s*now:\s*requestedAt\s*\}\)/,

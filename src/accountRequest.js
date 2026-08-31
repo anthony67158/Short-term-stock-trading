@@ -1,7 +1,8 @@
 export function accountRequestTimeoutMs(action) {
-  return ['login', 'register', 'get'].includes(String(action || ''))
-    ? 45000
-    : 20000
+  const normalized = String(action || '')
+  if (['login', 'register'].includes(normalized)) return 45000
+  if (normalized === 'get') return 12000
+  return 20000
 }
 
 export async function accountApiRequest(
@@ -35,9 +36,12 @@ export async function accountApiRequest(
       }
     }
   } catch (error) {
+    const timedOut = error?.name === 'AbortError'
     return {
       ok: false,
-      error: error?.name === 'AbortError'
+      transient: true,
+      code: timedOut ? 'REQUEST_TIMEOUT' : 'NETWORK_ERROR',
+      error: timedOut
         ? '请求超时，请重试'
         : '网络连接失败，请检查网络后重试',
     }

@@ -47,6 +47,10 @@ import {
 import { stockNoteText } from '../../shared/stockNotes.js'
 import FormulaPrice from './FormulaPrice'
 import { useTheme } from '../themeStore'
+import {
+  STOCK_DETAIL_CACHE_TTL_MS,
+  stockDetailPath,
+} from '../stockDetailData.js'
 
 const STOCK_CHART_COLORS = Object.freeze({
   dark: Object.freeze({
@@ -463,9 +467,10 @@ export default function StockDetail({ stock, onClose }) {
     // eslint-disable-next-line
   }, [busyModal, stock && stock.code])
   const { data, loading, error, reload } = usePolling(
-    stock ? `/api/stock_detail?code=${stock.code}&klt=${klt}&lmt=120&trends=1&quote=1` : null,
+    stock ? stockDetailPath(stock.code, klt) : null,
     600000, // 详情不需要频繁刷新
-    [stock && stock.code, klt]
+    [stock && stock.code, klt],
+    { cacheTtlMs: STOCK_DETAIL_CACHE_TTL_MS },
   )
 
   // 手动刷新：破缓存重拉 + 转圈至少 600ms + 完成后记录更新时间

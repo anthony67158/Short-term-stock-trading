@@ -23,6 +23,11 @@ import {
   activateAccountSession,
   currentAccountSession,
 } from '../shared/accountSessionScope.js'
+import {
+  clearAccountSnapshotCache,
+  readAccountSnapshotCache,
+  writeAccountSnapshotCache,
+} from './accountSnapshotCache.js'
 
 // ============ 云端账号体系（阿里云 OSS 持久化，跨设备同步）============
 // localStorage 只保存昵称和签名会话令牌；旧版本密码会话仅在首次启动时用于换票。
@@ -181,6 +186,11 @@ const cloudSaveQueue = createCloudSaveQueue({
       _cloudRevision = response.revision
       _lastSyncedTradeFingerprint = accountTradeStateFingerprint(data)
       settleOutbox(nick, outboxId, response.revision, data)
+      writeAccountSnapshotCache(nick, {
+        data,
+        updatedAt: response.updatedAt,
+        revision: response.revision,
+      })
     }
     return response
   },
@@ -236,14 +246,53 @@ export const authStore = {
   async boot() {
     resetAccountRuntime()
     const attempt = activateAccountSession('')
+    let restoredFromCache = false
+    let activeAttempt = attempt
     try {
       const stored = parseStoredAccountSession(loadSession())
       if (!stored) return
       if (stored.legacyPassword) saveSession(null)
+      const cached = stored.legacyPassword
+        ? null
+        : readAccountSnapshotCache(stored.credentials.nick)
+      if (cached) {
+        const session = establishAccountSession(
+          stored.credentials.nick,
+          stored.credentials.token,
+        )
+        if (session) {
+          activeAttempt = session
+          restoredFromCache = true
+          _cloudRevision = Number(cached.revision) || 0
+          _lastSyncedTradeFingerprint =
+            accountTradeStateFingerprint(cached.data)
+          _tradeStateResetAt =
+            Number(cached.data?.tradeStateResetAt) || 0
+          _runtimeSyncCursor.noteSnapshot(cached.updatedAt)
+          state.user = stored.credentials.nick
+          state.status = 'ready'
+          state.error = ''
+          state.syncStatus = 'restoring'
+          state.syncError = ''
+          state.lastSyncedAt = Number(cached.updatedAt) || 0
+          planStore.setData(cached.data, { provisional: true })
+          state.booting = false
+          emit()
+        }
+      }
       const r = await api('get', stored.credentials)
-      if (!accountSessionMatches(attempt)) return
+      if (!accountSessionMatches(activeAttempt)) return
       if (r.ok && r.token) {
-        const session = establishAccountSession(stored.credentials.nick, r.token)
+        const session = restoredFromCache
+          ? activeAttempt
+          : establishAccountSession(stored.credentials.nick, r.token)
+        if (restoredFromCache) {
+          _credentials = accountCredentialPayload({
+            nick: stored.credentials.nick,
+            token: r.token,
+          })
+          saveSession(storedAccountSession(_credentials.nick, _credentials.token))
+        }
         state.user = stored.credentials.nick; state.status = 'ready'
         _cloudRevision = Number(r.revision) || 0
         _lastSyncedTradeFingerprint = accountTradeStateFingerprint(r.data)
@@ -254,15 +303,31 @@ export const authStore = {
           _credentials.nick,
           r.data,
         )
-        planStore.setData(accountSnapshotForRestore(r.data, pending))
+        const restored = accountSnapshotForRestore(r.data, pending)
+        planStore.setData(restored)
+        writeAccountSnapshotCache(_credentials.nick, {
+          data: restored,
+          updatedAt: r.updatedAt,
+          revision: r.revision,
+        })
         resumeOutbox(_credentials, session, pending)
+      } else if (restoredFromCache && r.transient) {
+        state.syncStatus = 'error'
+        state.syncError = r.error || '云端校验暂时失败'
+        emit()
       } else {
+        clearAccountSnapshotCache(stored.credentials.nick)
         saveSession(null)
         resetAccountRuntime()
-        if (accountSessionMatches(attempt)) activateAccountSession('')
+        state.user = null
+        state.status = 'idle'
+        planStore.setData({ plan: [], holding: [], closed: [] })
+        if (accountSessionMatches(activeAttempt)) activateAccountSession('')
       }
     } catch {
-      if (accountSessionMatches(attempt)) resetAccountRuntime()
+      if (accountSessionMatches(activeAttempt) && !restoredFromCache) {
+        resetAccountRuntime()
+      }
     } finally {
       state.booting = false; emit()
     }
@@ -292,6 +357,7 @@ export const authStore = {
     state.syncStatus = 'synced'; state.syncError = ''; state.lastSyncedAt = r.updatedAt || Date.now()
     _runtimeSyncCursor.noteSnapshot(r.updatedAt)
     planStore.setData(r.data)
+    writeAccountSnapshotCache(nick, r)
     resumeOutbox(_credentials, session)
     emit()
     return { ok: true }
@@ -321,13 +387,20 @@ export const authStore = {
       _credentials.nick,
       r.data,
     )
-    planStore.setData(accountSnapshotForRestore(r.data, pending))
+    const restored = accountSnapshotForRestore(r.data, pending)
+    planStore.setData(restored)
+    writeAccountSnapshotCache(nick, {
+      ...r,
+      data: restored,
+    })
     resumeOutbox(_credentials, session, pending)
     emit()
     return { ok: true }
   },
 
   logout() {
+    const nick = _credentials?.nick || state.user
+    clearAccountSnapshotCache(nick)
     resetAccountRuntime()
     saveSession(null)
     activateAccountSession('')
@@ -470,6 +543,7 @@ export const authStore = {
               Number(full.data.tradeStateResetAt) || remoteResetAt
             _runtimeSyncCursor.noteSnapshot(full.updatedAt)
             planStore.setData(full.data)
+            writeAccountSnapshotCache(credentials.nick, full)
             state.syncStatus = 'synced'
             state.syncError = ''
             return true
@@ -483,6 +557,11 @@ export const authStore = {
           _lastSyncedTradeFingerprint = r.tradeFingerprint
         }
         try { planStore.mergeCloud(r.data) } catch { return false }
+        writeAccountSnapshotCache(credentials.nick, {
+          data: planStore.get(),
+          updatedAt: r.updatedAt || state.lastSyncedAt,
+          revision: Number(r.revision) || _cloudRevision,
+        })
         _runtimeSyncCursor.notePull(r.updatedAt)
         state.lastSyncedAt = r.updatedAt || state.lastSyncedAt
         return true

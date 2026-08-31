@@ -1,6 +1,10 @@
 import { useEffect, useState, useRef, useCallback, useSyncExternalStore } from 'react'
 import { api } from './apiBase'
 import { isContinuousTrading } from '../shared/tradingCalendar.js'
+import {
+  loadPollingResource,
+  readPollingCache,
+} from './pollingCache.js'
 
 // 全局手动刷新总线：点刷新按钮 → 所有 usePolling 立即重拉
 let refreshTick = 0
@@ -15,9 +19,13 @@ export function useRefreshTick() {
 }
 
 // 轮询 hook：交易时段自动刷新 + 响应全局手动刷新
-export function usePolling(url, intervalMs, deps = []) {
-  const [data, setData] = useState(null)
-  const [loading, setLoading] = useState(true)
+export function usePolling(url, intervalMs, deps = [], options = {}) {
+  const cacheTtlMs = Math.max(0, Number(options.cacheTtlMs) || 0)
+  const initialCached = cacheTtlMs
+    ? readPollingCache(url, cacheTtlMs)
+    : null
+  const [data, setData] = useState(initialCached)
+  const [loading, setLoading] = useState(!initialCached)
   const [error, setError] = useState(null)
   const timer = useRef(null)
   const ctrl = useRef(null)       // 当前在飞的请求 controller —— 组件卸载/切 url 时中止，避免旧响应覆盖新状态
@@ -34,9 +42,20 @@ export function usePolling(url, intervalMs, deps = []) {
     ctrl.current = ac
     try {
       const u = bust ? url + (url.includes('?') ? '&' : '?') + '_t=' + Date.now() : url
-      const res = await fetch(api(u), { cache: bust ? 'no-store' : 'default', signal: ac.signal })
-      if (!res.ok) throw new Error('HTTP ' + res.status)   // 先校验状态码，别把 500 的 HTML 当 JSON 解析
-      const j = await res.json()
+      const request = async () => {
+        const res = await fetch(api(u), {
+          cache: bust ? 'no-store' : 'default',
+          signal: ac.signal,
+        })
+        if (!res.ok) throw new Error('HTTP ' + res.status)
+        return res.json()
+      }
+      const j = cacheTtlMs
+        ? await loadPollingResource(url, request, {
+            ttlMs: cacheTtlMs,
+            preferCache: false,
+          })
+        : await request()
       if (!alive.current || ac.signal.aborted) return       // 已卸载/被中止：丢弃结果，不 setState
       if (j && j.ok === false) {
         setError(j.error || '数据源暂不可用')
@@ -52,7 +71,7 @@ export function usePolling(url, intervalMs, deps = []) {
       if (alive.current && !ac.signal.aborted) setLoading(false)
     }
     // eslint-disable-next-line
-  }, [url])
+  }, [url, cacheTtlMs])
 
   const load = useCallback(() => fetchData(false), [fetchData])
   const reload = useCallback(() => fetchData(true), [fetchData]) // 手动刷新：破缓存 + 有 loading 反馈
@@ -60,6 +79,11 @@ export function usePolling(url, intervalMs, deps = []) {
   useEffect(() => {
     alive.current = true
     if (!url) { setData(null); setLoading(false); return () => { alive.current = false } }
+    if (cacheTtlMs) {
+      const cached = readPollingCache(url, cacheTtlMs)
+      setData(cached)
+      setLoading(!cached)
+    }
     load()
     if (timer.current) clearInterval(timer.current)
     timer.current = setInterval(load, intervalMs)
@@ -69,9 +93,22 @@ export function usePolling(url, intervalMs, deps = []) {
       if (ctrl.current) { try { ctrl.current.abort() } catch { /* ignore */ } }
     }
     // eslint-disable-next-line
-  }, [url, intervalMs, tick, ...deps])
+  }, [url, intervalMs, tick, cacheTtlMs, ...deps])
 
   return { data, loading, error, reload }
+}
+
+export function prefetchPolling(url, { cacheTtlMs = 0 } = {}) {
+  if (!url || !cacheTtlMs) return Promise.resolve(null)
+  return loadPollingResource(
+    url,
+    async () => {
+      const response = await fetch(api(url), { cache: 'default' })
+      if (!response.ok) throw new Error('HTTP ' + response.status)
+      return response.json()
+    },
+    { ttlMs: cacheTtlMs, preferCache: true },
+  ).catch(() => null)
 }
 
 // 全局刷新倒计时：与轮询间隔对齐

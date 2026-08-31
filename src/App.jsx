@@ -9,7 +9,6 @@ import {
 } from 'react'
 import Icon from './components/Icon'
 import BrandMark from './components/BrandMark'
-import StockDetail from './components/StockDetail'
 import ErrorBoundary from './components/ErrorBoundary'
 import AuthGate, { AccountMenu } from './components/AuthGate'
 import { usePolling, useCountdown, triggerRefresh, useRefreshTick } from './hooks'
@@ -48,6 +47,7 @@ import {
   useMobileEdgeBack,
   useOverlayScrollLock,
 } from './mobileNavigation'
+import { loadStockDetailComponent } from './stockDetailLoader.js'
 
 // 按需分包：四个主 Tab 与 AI 助手拆成独立 chunk，首屏只加载当前 Tab，
 // 切换时才拉取对应 chunk（配合 Rolldown codeSplitting），缩短首屏体积与白屏时间。
@@ -71,6 +71,7 @@ const PlanTab = lazyWithReload(() => import('./components/PlanTab'), 'plan')
 const ResearchTab = lazyWithReload(() => import('./components/ResearchTab'), 'research')
 const AccountHub = lazyWithReload(() => import('./components/AccountHub'), 'account-hub')
 const AIAssistant = lazyWithReload(() => import('./components/AIAssistant'), 'assistant')
+const StockDetail = lazyWithReload(loadStockDetailComponent, 'stock-detail')
 const LLMConfig = lazyWithReload(() => import('./components/LLMConfig'), 'llm-config')
 const QuantReport = lazyWithReload(() => import('./components/QuantReport'), 'quant-report')
 const QuantModelControl = lazyWithReload(() => import('./components/QuantModelControl'), 'quant-model-control')
@@ -93,6 +94,38 @@ function TabSkeleton() {
     <div className="tab-skeleton" role="status" aria-live="polite">
       <Icon name="refresh" size={16} className="spin" />
       <span>正在加载工作区…</span>
+    </div>
+  )
+}
+
+function StockDetailSkeleton({ stock, onClose }) {
+  return (
+    <div className="modal-mask" onClick={onClose}>
+      <div
+        className="detail-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${stock.name || stock.code} 个股详情`}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="modal-bar detail-header">
+          <div className="detail-title-primary">
+            <span className="detail-stock-name">{stock.name || stock.code}</span>
+            <span className="detail-code">{stock.code}</span>
+          </div>
+          <button
+            type="button"
+            className="modal-close"
+            aria-label="关闭个股详情"
+            onClick={onClose}
+          >
+            <Icon name="close" size={16} />
+          </button>
+        </div>
+        <div className="detail-scroll">
+          <div className="loading">正在准备行情与图表…</div>
+        </div>
+      </div>
     </div>
   )
 }
@@ -494,7 +527,20 @@ function MainApp() {
           任一渲染异常只降级为"重试"占位，绝不再黑屏拖垮整个应用 */}
       {detailStock && (
         <ErrorBoundary label="个股详情">
-          <StockDetail stock={detailStock} onClose={() => detailStore.close()} />
+          <Suspense
+            fallback={(
+              <StockDetailSkeleton
+                stock={detailStock}
+                onClose={() => detailStore.close()}
+              />
+            )}
+          >
+            <StockDetail
+              key={detailStock.code}
+              stock={detailStock}
+              onClose={() => detailStore.close()}
+            />
+          </Suspense>
         </ErrorBoundary>
       )}
 

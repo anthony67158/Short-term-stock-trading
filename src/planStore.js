@@ -896,7 +896,7 @@ export const planStore = {
     return { ok: false, error: '当前计划没有可记录的买卖方向' }
   },
   // 由 authStore 登录/登出时注入数据（不触发回存云端，避免刚拉就写回）
-  setData(d) {
+  setData(d, options = {}) {
     _suspend = true
     _undoStack.length = 0
     const closed = normalizeClosed(Array.isArray(d && d.closed) ? d.closed : [])
@@ -945,9 +945,13 @@ export const planStore = {
     setAllAdvice((d && d.advice) || {})
     listeners.forEach((l) => { try { l() } catch (e) { console.error('[store] listener error', e) } })
     _suspend = false
-    // 登录/切换账号载入后，自动结算跨天未结算的做T（会触发一次云端回存）
-    this.autoSettleTFlows()
-    if ((restored.migrated || riskBaselineCreated) && _saver) {
+    // 临时缓存只用于先恢复可见界面；云端校验完成前不得触发结算或回存。
+    if (!options.provisional) this.autoSettleTFlows()
+    if (
+      !options.provisional
+      && (restored.migrated || riskBaselineCreated)
+      && _saver
+    ) {
       scheduleSave()
     }
   },

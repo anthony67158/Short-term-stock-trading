@@ -109,7 +109,9 @@ export function AccountMenu() {
   const [deactivateBusy, setDeactivateBusy] = useState(false)
   const [deactivateError, setDeactivateError] = useState('')
   if (!user) return null
-  const syncLabel = syncStatus === 'saving'
+  const syncLabel = syncStatus === 'restoring'
+    ? '正在校验云端最新数据'
+    : syncStatus === 'saving'
     ? '正在保存到阿里云 OSS'
     : syncStatus === 'conflict'
       ? '检测到多设备交易冲突，已暂停覆盖'
