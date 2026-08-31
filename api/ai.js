@@ -405,13 +405,17 @@ function toTxCode(code) {
   if (/^(4|8)/.test(c)) return 'bj' + c;
   return 'sh' + c;
 }
-async function fetchTrendTx(code, timeoutMs = 6000) {
+async function fetchTrendTx(
+  code,
+  timeoutMs = 6000,
+  fetchImpl = fetch,
+) {
   const tx = toTxCode(code);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), timeoutMs);
-    const r = await fetch(`https://web.ifzq.gtimg.cn/appstock/app/minute/query?code=${tx}&_=${Date.now()}`, { signal: ctrl.signal, headers: { Referer: 'https://gu.qq.com/', 'User-Agent': 'Mozilla/5.0' } });
-    clearTimeout(t);
+    const r = await fetchImpl(`https://web.ifzq.gtimg.cn/appstock/app/minute/query?code=${tx}&_=${Date.now()}`, { signal: ctrl.signal, headers: { Referer: 'https://gu.qq.com/', 'User-Agent': 'Mozilla/5.0' } });
+    if (r.ok === false) throw new Error(`HTTP ${r.status}`);
     const j = await r.json();
     const root = j && j.data && j.data[tx];
     const node = root && root.data;
@@ -430,13 +434,15 @@ async function fetchTrendTx(code, timeoutMs = 6000) {
       return { time, price, vol, avg };
     }).filter((x) => x.price > 0);
   } catch { return null; }
+  finally { clearTimeout(timer); }
 }
-async function fetchTrend(
+export async function fetchTrend(
   code,
   {
     timeoutMs = 6000,
-    parallel = false,
-    maxHosts = 4,
+    parallel = true,
+    maxHosts = 2,
+    fetchImpl = fetch,
   } = {},
 ) {
   const hosts = ['https://push2his.eastmoney.com', 'https://82.push2his.eastmoney.com', 'https://push2.eastmoney.com', 'https://push2delay.eastmoney.com'];
@@ -445,13 +451,16 @@ async function fetchTrend(
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
-      const response = await fetch(host + path, {
+      const response = await fetchImpl(host + path, {
         signal: ctrl.signal,
         headers: {
           Referer: 'https://quote.eastmoney.com/',
           'User-Agent': 'Mozilla/5.0',
         },
       });
+      if (response.ok === false) {
+        throw new Error(`HTTP ${response.status}`);
+      }
       const json = await response.json();
       const trends = json?.data?.trends;
       if (!Array.isArray(trends) || !trends.length) {
@@ -477,9 +486,19 @@ async function fetchTrend(
   if (parallel) {
     try {
       return await Promise.any(
-        candidates.map((host) => fetchHost(host)),
+        [
+          ...candidates.map((host) => fetchHost(host)),
+          fetchTrendTx(code, timeoutMs, fetchImpl).then((value) => {
+            if (!Array.isArray(value) || !value.length) {
+              throw new Error('empty tencent trends');
+            }
+            return value;
+          }),
+        ],
       );
-    } catch { /* fall through to Tencent */ }
+    } catch {
+      return null;
+    }
   } else {
     for (const host of candidates) {
       try {
@@ -488,7 +507,7 @@ async function fetchTrend(
     }
   }
   // 东财全镜像失败 → 回退腾讯分时(不限流),确保"分时走势"因子在 Vercel 上也能取到
-  return await fetchTrendTx(code, timeoutMs);
+  return await fetchTrendTx(code, timeoutMs, fetchImpl);
 }
 
 export function buildAdvisorTodayQuote(

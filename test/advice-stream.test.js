@@ -30,6 +30,7 @@ import {
   advisorGenerationPlan,
   buildAdvisorTodayQuote,
   buildScheduledReviewGateResponse,
+  fetchTrend,
   resolveAIBudget,
   resolveAdviceDailySummary,
   resolveReasoningMode,
@@ -119,6 +120,48 @@ test('军师行情快照保留报价接口返回的真实成交额', () => {
   assert.equal(quote.live, false)
   assert.equal(quote.main5dYi, 5.5)
   assert.equal(quote.retail5dYi, -3.1)
+})
+
+test('分时行情并发尝试主备源且不等待失效镜像串行超时', async () => {
+  const calls = []
+  const result = await fetchTrend('600001', {
+    timeoutMs: 50,
+    maxHosts: 2,
+    fetchImpl: async (url, options = {}) => {
+      calls.push(url)
+      if (url.includes('web.ifzq.gtimg.cn')) {
+        return {
+          async json() {
+            return {
+              data: {
+                sh600001: {
+                  data: {
+                    data: ['0930 10.00 100 100000'],
+                  },
+                  qt: {
+                    sh600001: [null, '测试股票', null, null, '9.90'],
+                  },
+                },
+              },
+            }
+          },
+        }
+      }
+      return new Promise((resolve, reject) => {
+        options.signal.addEventListener('abort', () => {
+          const error = new Error('timeout')
+          error.name = 'AbortError'
+          reject(error)
+        }, { once: true })
+      })
+    },
+  })
+
+  assert.ok(
+    calls.some((url) => url.includes('web.ifzq.gtimg.cn')),
+  )
+  assert.equal(result.length, 1)
+  assert.equal(result[0].price, 10)
 })
 
 test('服务端可解析跨分片的 AI SSE 事件', () => {
