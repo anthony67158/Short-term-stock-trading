@@ -14,6 +14,7 @@ import {
   invoke,
   invokeSSE,
   mergeExternalJobs,
+  prepareAdviceInputs,
   progressPatchForEvent,
   buildAdviceReviewRecord,
   quantResultFromAdviceResponse,
@@ -307,6 +308,39 @@ test('账户快照读取超时时使用当前副本继续生成', async () => {
   )
 
   assert.equal(result, fallback)
+})
+
+test('军师账户读取与行情预取并行启动', async () => {
+  const fallback = {
+    nick: '测试账号',
+    data: {
+      holding: [{ code: '600001' }],
+      plan: [{ code: '000001' }],
+    },
+  }
+  let releaseAccount
+  const quoteCalls = []
+  const pending = prepareAdviceInputs(fallback, {
+    readAccountFn: () => new Promise((resolve) => {
+      releaseAccount = resolve
+    }),
+    fetchQuoteMapFn: async (codes) => {
+      quoteCalls.push([...codes])
+      return {
+        '600001': { code: '600001', price: 10 },
+        '000001': { code: '000001', price: 11 },
+      }
+    },
+  })
+
+  await Promise.resolve()
+  await Promise.resolve()
+  assert.deepEqual(quoteCalls, [['600001', '000001']])
+
+  releaseAccount(fallback)
+  const prepared = await pending
+  assert.equal(prepared.sourceAcc, fallback)
+  assert.equal(prepared.quoteMap['600001'].price, 10)
 })
 
 test('观察价复核持续更新观察进度后才进入证据采集', async () => {

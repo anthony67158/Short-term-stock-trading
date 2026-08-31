@@ -230,6 +230,17 @@ test('普通与深度军师都使用有界预算且深度不整轮重跑', () =>
   assert.equal(maxTokensForMode('hold_advice', true), 6000)
 })
 
+test('军师准备与证据依赖采用并行编排且单源有独立截止', () => {
+  assert.match(
+    aiSource,
+    /Promise\.all\(\[[\s\S]*?ensureConfig\(\)[\s\S]*?ensureAiSearchConfig\(\{ maxAgeMs: 20000 \}\)[\s\S]*?sectorOpportunityPromise/,
+  )
+  assert.match(aiSource, /startAdvisorDependentWork\(\{/)
+  assert.match(aiSource, /withAIEvidenceDeadline/)
+  assert.doesNotMatch(aiSource, /fetchKlineTx/)
+  assert.match(cronAdviceSource, /prepareAdviceInputs\(acc, \{ signal \}\)/)
+})
+
 test('到价复核使用快速证据路径并在一秒内发现新紧急任务', () => {
   assert.match(
     cronAdviceSource,
@@ -237,8 +248,9 @@ test('到价复核使用快速证据路径并在一秒内发现新紧急任务',
   )
   assert.match(
     aiSource,
-    /triggeredPriceReview\s*\?\s*3500\s*:\s*15000/,
+    /const sourceTimeoutMs\s*=\s*triggeredPriceReview[\s\S]*?\?\s*3500[\s\S]*?:\s*fastMode\s*\?\s*6000\s*:\s*9000/,
   )
+  assert.match(aiSource, /withAIEvidenceDeadline/)
   assert.match(
     aiSource,
     /timeoutMs:\s*triggeredPriceReview\s*\?\s*2500\s*:\s*7000/,

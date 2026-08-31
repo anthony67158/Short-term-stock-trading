@@ -21,7 +21,10 @@ import {
   fetchIndustrySearchSupplement,
   stripClientSearchFields,
 } from './_ai_search.js';
-import { ensureAiSearchConfig } from './_ai_search_config.js';
+import {
+  currentAiSearchConfig,
+  ensureAiSearchConfig,
+} from './_ai_search_config.js';
 import {
   callChat,
   callChatWithRetry,
@@ -959,9 +962,28 @@ export default async function handler(req, res) {
     mode,
     body?.payload?.reviewOrigin,
   );
-  // 运行时配置优先（前端「AI 模型配置」写入 OSS）：先预热同步缓存，再按角色取端点和模型。
-  await ensureConfig();
-  const aiSearchConfig = await ensureAiSearchConfig();
+  const requestedCode = String(body?.payload?.code || '');
+  const sectorOpportunityPromise = (
+    isAdvisorMode(mode)
+    && /^\d{6}$/.test(requestedCode)
+  )
+    ? withAIEvidenceDeadline(
+        loadSectorOpportunity(requestedCode),
+        3000,
+      ).catch(() => null)
+    : Promise.resolve(null);
+  // 模型配置、搜索配置和板块快照彼此独立，同时预热并设置短截止。
+  const [, loadedSearchConfig, sectorOpportunity] = await Promise.all([
+    withAIEvidenceDeadline(ensureConfig(), 3000)
+      .catch(() => null),
+    withAIEvidenceDeadline(
+      ensureAiSearchConfig({ maxAgeMs: 20000 }),
+      3000,
+    ).catch(() => null),
+    sectorOpportunityPromise,
+  ]);
+  const aiSearchConfig = loadedSearchConfig
+    || currentAiSearchConfig();
   const effectiveReasoning = (role) => getReasoning(role);
   const MODEL = getModel('agent');
   // 主建议与复核严格分池：首次操作建议走 advisor，定时/Judge 复核走 review。
@@ -1044,22 +1066,17 @@ export default async function handler(req, res) {
       accountAuth.account,
     );
     const sourceTracker = createEvidenceSourceTracker();
-    if (isAdvisorMode(mode) && payload.code) {
-      const sectorOpportunity = await loadSectorOpportunity(
-        payload.code,
-      ).catch(() => null);
-      if (sectorOpportunity) {
-        payload.sectorOpportunity = sectorOpportunity;
-        if (sectorOpportunity.matched) {
-          payload.sectorContext = {
-            ...(payload.sectorContext || {}),
-            breadth: sectorOpportunity.sector?.breadth ?? null,
-            code: sectorOpportunity.sector?.code || null,
-            name: sectorOpportunity.sector?.name || null,
-            actionability:
-              sectorOpportunity.sector?.actionability || null,
-          };
-        }
+    if (sectorOpportunity) {
+      payload.sectorOpportunity = sectorOpportunity;
+      if (sectorOpportunity.matched) {
+        payload.sectorContext = {
+          ...(payload.sectorContext || {}),
+          breadth: sectorOpportunity.sector?.breadth ?? null,
+          code: sectorOpportunity.sector?.code || null,
+          name: sectorOpportunity.sector?.name || null,
+          actionability:
+            sectorOpportunity.sector?.actionability || null,
+        };
       }
     }
     let evidenceSnapshot = null;
@@ -1196,13 +1213,13 @@ export default async function handler(req, res) {
           'collect',
         );
         const origin = internalApiOrigin(req);
+        const sourceTimeoutMs = triggeredPriceReview
+          ? 3500
+          : fastMode ? 6000 : 9000;
         const getJ = (p) => {
           // 内部 API 调用加超时保护(原来无超时——某个内部接口卡住会拖垮整个数据采集、烧光预算)
           const c = new AbortController();
-          const to = setTimeout(
-            () => c.abort(),
-            triggeredPriceReview ? 3500 : 15000,
-          );
+          const to = setTimeout(() => c.abort(), sourceTimeoutMs);
           return fetch(origin + p, { signal: c.signal })
             .then((r) => {
               if (!r.ok) {
@@ -1269,9 +1286,6 @@ export default async function handler(req, res) {
             );
             return Promise.resolve(null);
           }
-          const sourceTimeoutMs = triggeredPriceReview
-            ? 3500
-            : fastMode ? 6000 : 9000;
           return track(
             key,
             label,
@@ -1293,9 +1307,6 @@ export default async function handler(req, res) {
           )
         );
 
-        // #region debug-point D:evidence-start
-        if (process.env.DEBUG_SERVER_URL) void fetch(process.env.DEBUG_SERVER_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: process.env.DEBUG_SESSION_ID || 'cloud-advice-stuck', runId: process.env.DEBUG_RUN_ID || 'pre-fix', hypothesisId: 'D', traceId: `${payload.code}:${START}`, location: 'api/ai.js:evidence-start', msg: '[DEBUG] evidence collection started', data: { code: payload.code, mode, fastMode, elapsedMs: Date.now() - START }, ts: Date.now() }) }).catch(() => {});
-        // #endregion
         const marketPromise = collect(
           'market',
           '大盘情绪',
@@ -1460,9 +1471,6 @@ export default async function handler(req, res) {
             'quant',
           );
         }
-        // #region debug-point D:evidence-complete
-        if (process.env.DEBUG_SERVER_URL) void fetch(process.env.DEBUG_SERVER_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: process.env.DEBUG_SESSION_ID || 'cloud-advice-stuck', runId: process.env.DEBUG_RUN_ID || 'pre-fix', hypothesisId: 'D', traceId: `${payload.code}:${START}`, location: 'api/ai.js:evidence-complete', msg: '[DEBUG] evidence collection settled', data: { code: payload.code, mode, elapsedMs: Date.now() - START, sources: sourceTracker.snapshot().map(({ key, status, durationMs }) => ({ key, status, durationMs })) }, ts: Date.now() }) }).catch(() => {});
-        // #endregion
         // ★外部市场环境：把当天策略日报摘要注入，让个股建议结合大盘/板块/海外环境判断
         if (dailySummary && dailySummary.text) payload.dailyReport = dailySummary;
         if (macroNews && macroNews.length) {
