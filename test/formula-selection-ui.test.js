@@ -256,8 +256,11 @@ test('公式价位缓存窗口区分盘中、午休和收盘', () => {
   const close = formulaPriceCachePolicy(
     Date.parse('2026-08-31T15:20:00+08:00'),
   )
-  const closeBell = formulaPriceCachePolicy(
+  const closingMinute = formulaPriceCachePolicy(
     Date.parse('2026-08-31T15:00:00+08:00'),
+  )
+  const settledClose = formulaPriceCachePolicy(
+    Date.parse('2026-08-31T15:01:00+08:00'),
   )
   const weekend = formulaPriceCachePolicy(
     Date.parse('2026-08-30T12:00:00+08:00'),
@@ -266,7 +269,8 @@ test('公式价位缓存窗口区分盘中、午休和收盘', () => {
   assert.equal(morning.maxAgeMs, 60_000)
   assert.equal(lunch.key, 'lunch:2026-08-31')
   assert.equal(close.key, 'close:2026-08-31')
-  assert.equal(closeBell.key, 'close:2026-08-31')
+  assert.equal(closingMinute.key, 'live:2026-08-31')
+  assert.equal(settledClose.key, 'close:2026-08-31')
   assert.equal(weekend.key, 'close:2026-08-28')
   assert.match(price, /formulaPriceAccountFingerprint/)
   assert.match(price, /\[code,\s*accountFingerprint\]/)

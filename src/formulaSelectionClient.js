@@ -70,7 +70,7 @@ export function formulaPriceCachePolicy(now = Date.now()) {
     if (minutes < 780) {
       return { key: `lunch:${day}`, maxAgeMs: Infinity }
     }
-    if (minutes < 900) {
+    if (minutes <= 900) {
       return {
         key: `live:${day}`,
         maxAgeMs: STOCK_FORMULA_LIVE_CACHE_MS,
