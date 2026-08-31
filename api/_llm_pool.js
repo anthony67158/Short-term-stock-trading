@@ -246,7 +246,9 @@ export function reasoningForEndpoint(config, ep, role, fallback) {
   return !!fallback;
 }
 
-// 选一个端点:排除熔断中的;在可用端点里按【最少在途 × 权重】选负载最低者(round-robin 的加权推广)。
+// 选一个端点:排除熔断中的;按【在途数 × 已测延迟 × 权重】选择。
+// 已有成功测速时不强制把下一条单任务送去未知端点；未知端点使用已测最慢值的
+// 1.25 倍作为保守估值，只在快端点繁忙时用于扩容。
 // 全部熔断时,退而选 cooldownUntil 最早到期者(半开探测),保证不至于完全无端点可用。
 // role:传入时只在【承接该角色】的端点里选(附加端点须自带该角色模型),避免把请求路由到不提供对应模型的网关。
 //   若某角色只有主端点承接(附加端点都没配该角色模型),自然退化为单主端点。
@@ -255,15 +257,17 @@ export function pickEndpoint(config, now = Date.now(), role) {
   if (!eps.length) return null;
   const usable = eps.filter((e) => h(e.id).cooldownUntil <= now);
   const pool = usable.length ? usable : eps;
-  const unmeasured = pool.filter((endpoint) =>
-    h(endpoint.id).samples === 0
-  );
-  const selectionPool = unmeasured.length ? unmeasured : pool;
+  const measuredLatencies = pool
+    .map((endpoint) => Number(h(endpoint.id).latencyMs))
+    .filter((latency) => Number.isFinite(latency) && latency > 0);
+  const unmeasuredLatency = measuredLatencies.length
+    ? Math.max(...measuredLatencies) * 1.25
+    : 1;
   let bestScore = Infinity;
   const candidates = [];
-  for (const e of selectionPool) {
+  for (const e of pool) {
     const s = h(e.id);
-    const latencyFactor = s.latencyMs || 1;
+    const latencyFactor = s.latencyMs || unmeasuredLatency;
     const score = (
       (s.inflight + 1) * latencyFactor
     ) / (e.weight || 1);

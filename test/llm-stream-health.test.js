@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
   markEndpointUnusable,
+  markStart,
   markSuccess,
   pickEndpoint,
   poolFetch,
@@ -81,14 +82,49 @@ test('同角色端点采样后优先选择历史响应更快的一路', () => {
   }
 
   const first = pickEndpoint(config, 1000, 'advisor')
+  markStart(first.id)
   markSuccess(first.id, 50000)
+  markStart(first.id)
   const second = pickEndpoint(config, 1001, 'advisor')
+  markStart(second.id)
   markSuccess(second.id, 15000)
+  markSuccess(first.id, 50000)
   const third = pickEndpoint(config, 1002, 'advisor')
 
   assert.equal(first.id, 'advisor-1')
   assert.equal(second.id, 'advisor-2')
   assert.equal(third.id, 'advisor-2')
+})
+
+test('已有成功测速时不为探索空闲慢端点牺牲单任务延迟', () => {
+  resetPoolHealthForTests()
+  const config = {
+    roleEndpoints: {
+      advisor: [{
+        baseUrl: 'https://advisor-1.example/v1',
+        apiKey: 'advisor-1-key',
+        model: 'advisor-1-model',
+        enabled: true,
+      }, {
+        baseUrl: 'https://advisor-2.example/v1',
+        apiKey: 'advisor-2-key',
+        model: 'advisor-2-model',
+        enabled: true,
+      }],
+    },
+  }
+
+  const first = pickEndpoint(config, 1000, 'advisor')
+  markSuccess(first.id, 20000)
+  const nextIdle = pickEndpoint(config, 1001, 'advisor')
+  markStart(nextIdle.id)
+  const nextBusy = pickEndpoint(config, 1002, 'advisor')
+
+  assert.equal(first.id, 'advisor-1')
+  assert.equal(nextIdle.id, 'advisor-1')
+  assert.equal(nextBusy.id, 'advisor-2')
+  markSuccess(nextIdle.id, 20000)
+  resetPoolHealthForTests()
 })
 
 test('流式请求在响应体消费完成前持续占用端点', async () => {
