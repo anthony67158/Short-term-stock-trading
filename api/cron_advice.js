@@ -1113,7 +1113,9 @@ async function genOne({
   const result = quantResultFromAdviceResponse(adviceResp, priceHint);
 
   const advice = adviceResp && adviceResp.advice
-    ? ensureAdviceReasoning(adviceResp.advice, streamedReasoning)
+    ? ensureAdviceReasoning(adviceResp.advice, streamedReasoning, {
+        deepMode: generation.deepMode,
+      })
     : null;
   const meta = adviceResp && adviceResp.meta;
   const news = adviceResp && adviceResp.news;

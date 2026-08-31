@@ -96,9 +96,22 @@ async function parseSSE(response, startedAt) {
   }
 }
 
-const allowedLatin = /\b(?:ATR|BOLL|JSON|KDJ|MACD|RSI|VWAP)\b/gi
-function hasUnexpectedEnglish(text) {
-  return /[A-Za-z]{3,}/.test(String(text || '').replace(allowedLatin, ''))
+function reasoningQuality(text) {
+  const lines = String(text || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+  const keys = lines.map((line) =>
+    line
+      .replace(/[.,;:!?。，；：！？'"`()[\]{}]/g, '')
+      .replace(/\s+/g, ' ')
+      .toLowerCase()
+  )
+  return {
+    lines: lines.length,
+    uniqueLines: new Set(keys).size,
+    duplicateLines: Math.max(0, lines.length - new Set(keys).size),
+  }
 }
 
 function caseAt(index) {
@@ -220,8 +233,23 @@ async function execute(testCase) {
     }
     if (output?.truncated) errors.push('结果被截断')
     if (checked.issues.length) errors.push(...checked.issues)
-    if (hasUnexpectedEnglish(parsed.visibleReasoning)) errors.push('可见思考链含英文句子')
-    if (hasUnexpectedEnglish(output?.result?.reasoning)) errors.push('最终研判含英文句子')
+    const liveReasoningQuality = reasoningQuality(
+      parsed.visibleReasoning,
+    )
+    const finalReasoningQuality = reasoningQuality(
+      output?.result?.reasoning,
+    )
+    if (liveReasoningQuality.duplicateLines > 0) {
+      errors.push(
+        `实时研判摘要包含${liveReasoningQuality.duplicateLines}条重复内容`,
+      )
+    }
+    if (
+      testCase.profile === 'deep'
+      && finalReasoningQuality.uniqueLines < 3
+    ) {
+      errors.push('深度研判摘要未覆盖至少三个独立维度')
+    }
     const elapsedMs = Date.now() - startedAt
     if (maxMs > 0 && elapsedMs > maxMs) {
       errors.push(`耗时${elapsedMs}ms，超过${maxMs}ms目标`)
@@ -232,9 +260,13 @@ async function execute(testCase) {
     if (modelCalls > 1) {
       errors.push(`单次任务触发${modelCalls}次完整模型调用`)
     }
-    const llmPasses = parsed.timeline.filter((item) =>
-      item.event === 'phase' && item.key === 'llm'
-    ).length
+    let llmPasses = 0
+    let previousPhase = ''
+    for (const item of parsed.timeline) {
+      if (item.event !== 'phase') continue
+      if (item.key === 'llm' && previousPhase !== 'llm') llmPasses += 1
+      previousPhase = item.key
+    }
     if (llmPasses > 1) {
       errors.push(`单次任务进入${llmPasses}轮模型生成`)
     }
@@ -249,6 +281,8 @@ async function execute(testCase) {
       llmPasses,
       model: output?.model || '',
       endpoint: output?.endpoint || '',
+      liveReasoningQuality,
+      finalReasoningQuality,
       errors,
       timeline: parsed.timeline,
     }

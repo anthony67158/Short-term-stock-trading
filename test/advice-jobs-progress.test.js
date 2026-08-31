@@ -341,7 +341,7 @@ test('上一批延迟到达的取消请求不能取消新批次任务', () => {
   assert.equal(data.jobs['600000'].status, 'canceled')
 })
 
-test('进度快照携带单股阶段、数据源、模型端点和简体中文推理', () => {
+test('进度快照携带单股阶段、数据源、模型端点和研判摘要', () => {
   const data = {}
   enqueueJob(data, { code: '600000', name: '浦发银行', mode: 'buy_advice' }, 1000)
   leaseJob(data, '600000', 1000)
@@ -385,15 +385,25 @@ test('准备阶段长时间无进展时明确提示将自动跳过慢源', () =>
   assert.match(item.warning, /自动跳过并继续/)
 })
 
-test('持久任务推理限制长度并清理英文思维链标题', () => {
+test('持久任务研判摘要保留原文并去重过滤JSON草稿', () => {
   const data = {}
   enqueueJob(data, { code: '600000', name: '浦发银行', mode: 'buy_advice' }, 1000)
   updateJobProgress(data, '600000', {
-    reasoning: `Analyzing momentum...\n正在分析走势。${'中文推理'.repeat(3000)}`,
+    reasoning: [
+      'Analyzing momentum...',
+      'Analyzing momentum...',
+      '正在分析走势。',
+      '{"action":"hold"}',
+      '中文推理'.repeat(3000),
+    ].join('\n'),
   }, 2000)
 
   const reasoning = data.jobs['600000'].reasoning
-  assert.equal(reasoning.includes('Analyzing momentum'), false)
+  assert.equal(
+    reasoning.match(/Analyzing momentum/g)?.length,
+    1,
+  )
+  assert.equal(reasoning.includes('{"action"'), false)
   assert.equal(reasoning.length <= 6000, true)
   assert.equal(reasoning.includes('正在分析走势'), true)
 })

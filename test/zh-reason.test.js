@@ -1,7 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { zhReasonPiece } from '../api/_zh_reason.js'
+import {
+  createReasoningProgressTracker,
+  zhReasonPiece,
+} from '../api/_zh_reason.js'
 
 test('未知英文思考标题降级为全中文研判提示', () => {
   const output = zhReasonPiece('Assessing catalyst durability and downside asymmetry')
@@ -23,4 +26,22 @@ test('常见技术缩写允许保留', () => {
   assert.match(output, /VWAP/)
   assert.match(output, /RSI/)
   assert.equal(/Checking|signals/.test(output), false)
+})
+
+test('实时研判进度保留模型原文并过滤重复与JSON片段', () => {
+  const tracker = createReasoningProgressTracker()
+  const outputs = [
+    tracker.push('Assessing catalyst durability.\n'),
+    tracker.push('Assessing catalyst durability.\n'),
+    tracker.push('Reviewing liquidity and fund flow.\n'),
+    tracker.push('Checking quant forecast probability.\n'),
+    tracker.push('{"action":"hold"}'),
+  ].filter(Boolean)
+
+  assert.deepEqual(outputs, [
+    'Assessing catalyst durability.',
+    'Reviewing liquidity and fund flow.',
+    'Checking quant forecast probability.',
+  ])
+  assert.equal(new Set(outputs).size, outputs.length)
 })

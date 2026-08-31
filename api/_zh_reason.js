@@ -218,4 +218,60 @@ function translateSeg(seg) {
   return out || orig;
 }
 
+function normalizeProgressText(value) {
+  return String(value || '')
+    .replace(/\*\*/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function progressKey(value) {
+  return normalizeProgressText(value)
+    .replace(/[.,;:!?。，；：！？'"`()[\]{}]/g, '')
+    .toLowerCase()
+}
+
+export function createReasoningProgressTracker({ maxItems = 6 } = {}) {
+  const emitted = []
+  let buffer = ''
+  const emitCandidate = (value) => {
+    const text = normalizeProgressText(value).slice(0, 160)
+    const key = progressKey(text)
+    if (
+      !key
+      || /^[\[{]/.test(text)
+      || /"[^"]+"\s*:/.test(text)
+      || emitted.length >= Math.max(1, Number(maxItems) || 6)
+      || emitted.some((prior) =>
+        prior === key
+        || (
+          Math.min(prior.length, key.length) >= 18
+          && (prior.includes(key) || key.includes(prior))
+        )
+      )
+    ) return ''
+    emitted.push(key)
+    return text
+  }
+  return {
+    push(piece) {
+      const text = String(piece || '')
+      if (!text) return ''
+      buffer = `${buffer}${text}`.slice(-800)
+      if (!/[\n。！？.!?]/.test(text) && buffer.length < 40) return ''
+      const candidate = buffer
+      buffer = ''
+      return emitCandidate(candidate)
+    },
+    flush() {
+      const candidate = buffer
+      buffer = ''
+      return emitCandidate(candidate)
+    },
+    snapshot() {
+      return [...emitted]
+    },
+  }
+}
+
 export default zhReasonPiece;

@@ -145,7 +145,9 @@ async function run(spec, record) {
     }
 
     const advice = adviceResp && adviceResp.advice
-      ? ensureAdviceReasoning(adviceResp.advice, record.reasoning)
+      ? ensureAdviceReasoning(adviceResp.advice, record.reasoning, {
+          deepMode: generation.deepMode,
+        })
       : null
     const meta = adviceResp && adviceResp.meta
     const news = adviceResp && adviceResp.news

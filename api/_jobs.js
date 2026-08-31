@@ -547,11 +547,25 @@ export function requeueAdvicePreparationFailure(
   return job;
 }
 
-function visibleChineseReasoning(value) {
+function visibleReasoning(value) {
+  const seen = new Set()
   const lines = String(value || '')
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter((line) => line && /[\u4e00-\u9fff]/.test(line))
+    .filter((line) => {
+      if (
+        !line
+        || /^[\[{]/.test(line)
+        || /"[^"]+"\s*:/.test(line)
+      ) return false
+      const key = line
+        .replace(/[.,;:!?。，；：！？'"`()[\]{}]/g, '')
+        .replace(/\s+/g, ' ')
+        .toLowerCase()
+      if (!key || seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
   const text = lines.join('\n')
   if (text.length <= 6000) return text
   return `${text.slice(0, 800)}\n…\n${text.slice(-5197)}`
@@ -578,7 +592,7 @@ export function updateJobProgress(
       ok: !!source?.ok,
     }))
   }
-  if (patch.reasoning != null) job.reasoning = visibleChineseReasoning(patch.reasoning)
+  if (patch.reasoning != null) job.reasoning = visibleReasoning(patch.reasoning)
   if (patch.quant && typeof patch.quant === 'object') {
     job.quant = {
       summary: String(patch.quant.summary || '').slice(0, 300),

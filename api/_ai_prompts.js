@@ -1097,7 +1097,7 @@ ${attribution}
 主动做多必须满足风险预算；普通市场盈亏比至少1.8:1，弱市试错至少2.2:1且必须同时具备逆势强势与高把握信号。价格只可来自事实契约中的合法锚点，不能编造；金额=手数×100×价格。
 若tactical.market.hardRiskOff=true，说明炸板、跌停扩散或完整交易日量价已触发市场红线，无论个股是否逆势强都禁止新增风险，只允许观望或降低已有风险。
 涨停封板时资金净额可能受被动成交或排队影响，禁止把它解释为主力主动买卖。
-短线经验只作为内部判断先验：综合吸收后直接用普通交易语言说明证据、动作和风险，不逐条点名，不得为了引用而引用。theoryNote只选最适用的2个理论，逐个说明本股哪项证据匹配或不匹配；经验与事实冲突时以事实和风控为准。总输出不超过1200字；标题≤20字，动作≤80字，理由≤100字；每类证据只写一句。只输出JSON：
+短线经验只作为内部判断先验：综合吸收后直接用普通交易语言说明证据、动作和风险，不逐条点名，不得为了引用而引用。theoryNote只选最适用的2个理论，逐个说明本股哪项证据匹配或不匹配；经验与事实冲突时以事实和风控为准。各证据字段不得互相改写或重复：reason只写结论因果，techNote/fundNote/quantNote/newsNote各自只写本维度新增信息，actionPlan/nextOpenPlan/futurePlan只写对应时间范围的动作。总输出不超过900字；标题≤20字，动作≤80字，理由≤100字；每类证据只写一句。只输出JSON：
 ${advisorOutputSchema(mode, facts.reviewEvent)}`
 }
 
@@ -1244,7 +1244,7 @@ function genericPrompt(mode, payload, data, ragText) {
 
 export function buildUserPrompt(mode, payload = {}, ragText = '', theoryHits = []) {
   const data = JSON.stringify(promptPayloadForModel(payload))
-  const zhReason = '【语言要求·最高优先】全部思考与输出必须使用简体中文，专有名词、代码和数字除外。\n'
+  const zhReason = '【语言要求·最高优先】最终JSON中的用户可见内容必须使用简体中文；内部推理过程可保留模型原始语言，不必翻译。专有名词、代码和数字可保留原文。\n'
   const waitEntryRule = '【未持仓价位语义】buyPrice必须不高于输入中的当前价，并来自近期支撑、均线、VWAP或量化买点；上方压力或突破位只能填breakoutWatchPrice。观望时必须分别校验pullbackWatchPrice与breakoutWatchPrice是否有效，但actionPlan只能选择一个最优主路径，按“当前不买→唯一触发→复核通过后手动买入→失效则不买”写清，不得用“或/任一到价”并列两条路径。两个结构化观察价仍可分别保留供预警，且都需来自输入证据、方向正确并在未来1-5个交易日可达；过远、已经越过或无依据时填null。观察价不是买入价；观望时buyPrice、buyZone、stopPrice、targetPrice必须为null，watchPrice固定为null。invalidation必须写成可观测条件，禁止断言未来“不能/不会重新站回”；应写“本次复核若尚未确认站回则本次不买，之后重新站回且量价、资金转强时作为新事件重新评估”。'
   if (!isAdvisorMode(mode)) {
     return `${zhReason}${genericPrompt(mode, payload, data, ragText)}`

@@ -31,7 +31,7 @@ import {
 } from './_llm.js';
 import { ensureConfig, getModel, getReasoning } from './_llm_config.js';
 import { applyCors, preflight } from './_lib.js';
-import { zhReasonPiece } from './_zh_reason.js';
+import { createReasoningProgressTracker } from './_zh_reason.js';
 import {
   SYSTEM_PROMPT,
   ADVISOR_DEEP_SYSTEM,
@@ -157,6 +157,10 @@ import {
 import {
   completeAdviceHorizonFields,
 } from '../shared/adviceBatchPolicy.js';
+import {
+  deepModelProgressMessage,
+  ensureAdviceReasoning,
+} from '../shared/adviceReasoning.js';
 import {
   buildIntradayOpenSummary,
   buildReviewDecisionPacket,
@@ -1018,6 +1022,7 @@ export default async function handler(req, res) {
 
   // 心跳定时器提到 try 外层声明,保证下方 catch 也能兜底清理(异常绕过 finish 时不泄漏 interval)
   let hbTimer = null;
+  let modelProgressTimer = null;
   try {
     const payload = stripClientSearchFields((body && body.payload) || {});
     delete payload.strategyGate;
@@ -1139,7 +1144,13 @@ export default async function handler(req, res) {
       if (hbTimer && typeof hbTimer.unref === 'function') hbTimer.unref();
     }
     const stopHeartbeat = () => { if (hbTimer) { clearInterval(hbTimer); hbTimer = null; } };
+    const stopModelProgress = () => {
+      if (!modelProgressTimer) return;
+      clearInterval(modelProgressTimer);
+      modelProgressTimer = null;
+    };
     const finish = (obj) => {
+      stopModelProgress();
       stopHeartbeat();
       const snapshot = ensureEvidenceSnapshot();
       let finalized = obj;
@@ -2196,6 +2207,20 @@ export default async function handler(req, res) {
         : '数据齐全，正在生成操作建议…',
       'llm',
     );
+    let modelOutputStarted = false;
+    const modelStageStartedAt = Date.now();
+    if (streaming && payload.generationProfile === 'DEEP') {
+      modelProgressTimer = setInterval(() => {
+        const message = deepModelProgressMessage(
+          Date.now() - modelStageStartedAt,
+        );
+        if (message) phase(message, 'llm');
+      }, 5000);
+      if (
+        modelProgressTimer
+        && typeof modelProgressTimer.unref === 'function'
+      ) modelProgressTimer.unref();
+    }
     // LLM 超时按【剩余预算】动态给：预留 2.5s 兜底返回时间，最少给 8s。
     // 单次生成使用全部可用模型窗口，只为服务端收尾预留 2.5s。
     // 成功响应开始后不再重跑整题，避免重复生成和挤占最终结果的时间。
@@ -2218,10 +2243,10 @@ export default async function handler(req, res) {
     let streamedReasoning = '';   // 流式路径捕获的思维链原文：模型 JSON 里没吐 reasoning 字段时,用它兜底填充,保证"军师推理过程"持久可见
     let selectedModel = useModel;
     let selectedEndpoint = '';
-    // 思维链语言:reasoning 模型的思维链标题默认英文,system + 用户开头指令都压不住时,
-    //   在用户消息【末尾】(recency 权重最高)再钉一条最强中文指令,连思维链小标题都要求中文。
+    // 深度研判只约束最终业务结论为中文；内部过程保留模型原始语言，
+    // 避免额外翻译和重复改写拉长生成时间。
     const zhTail = useReasoning
-      ? '\n\n【最终要求】内部核验最多五步，每步一句并使用简体中文；不要展开长篇思维链。尽快输出完整JSON。'
+      ? '\n\n【最终要求】内部核验最多五步，每步一句，允许使用模型原始语言；禁止重复核验或逐字段复述。最终JSON中的用户可见内容使用简体中文，并尽快完整输出。'
       : '';
     const userPrompt = buildUserPrompt(
       mode,
@@ -2230,20 +2255,9 @@ export default async function handler(req, res) {
       theoryHits,
     ) + zhTail;
     if (streaming) {
-      // reasoning 增量做轻量节流:攒到 ~40 字或遇换行再下发,避免事件风暴
-      let rbuf = '';
-      let lastVisibleReasoning = '';
-      const flushR = () => {
-        if (!rbuf) return;
-        const visible = zhReasonPiece(rbuf);
-        if (visible && visible !== lastVisibleReasoning) {
-          emit('reasoning', { text: visible });
-          lastVisibleReasoning = visible;
-        }
-        rbuf = '';
-      };
+      const reasoningProgress = createReasoningProgressTracker();
       // ★流式路径(客户端开了 SSE):以 stream:true 调上游,把模型【思维链 reasoning_content】
-      //   增量实时推为 reasoning 事件(军师在想什么),正文 content 累积到流结束后再统一解析。
+      //   归并为不重复的证据维度进度，正文 content 累积到流结束后再统一解析。
       //   只允许 poolFetch 在收到成功响应头前切换端点；开始消费流后不再整题重跑。
       const routed = await callChat({
         model: useModel,
@@ -2290,17 +2304,25 @@ export default async function handler(req, res) {
       } else {
         const pumped = await pumpChatStream(resp, {
           onReasoning: (piece) => {
-            rbuf += piece;
-            if (
-              rbuf.length >= 40
-              || /[\n。！？]/.test(piece)
-            ) flushR();
+            const visible = reasoningProgress.push(piece);
+            if (visible) emit('reasoning', { text: `${visible}\n` });
+          },
+          onContent: (piece) => {
+            if (modelOutputStarted || !String(piece || '').trim()) return;
+            modelOutputStarted = true;
+            phase(
+              '模型已开始返回结论，正在校验结构完整性…',
+              'llm',
+            );
           },
         }).catch(() => ({
           content: '',
           reasoning: '',
         }));
-        flushR();
+        const finalReasoningProgress = reasoningProgress.flush();
+        if (finalReasoningProgress) {
+          emit('reasoning', { text: `${finalReasoningProgress}\n` });
+        }
         content = pumped.content;
         streamedReasoning = pumped.reasoning || '';
         const parsedContent = content.trim()
@@ -2798,17 +2820,6 @@ export default async function handler(req, res) {
       const m = String(result.planQty).match(/-?\d+(?:\.\d+)?/);
       if (m) { const n = Math.trunc(Number(m[0])); if (Number.isFinite(n)) result.planQtyNum = n; }
     }
-    // ★思维链持久化:流式路径把模型思维链实时推给了前端(reasoning 事件),但生成结束、卡片落库后,
-    //   前端展示的是最终 result.reasoning。若模型没在 JSON 里单独吐 reasoning 字段(多数网关只把思维链
-    //   走 reasoning_content / <think>,不会重复进 JSON),就用本次流式捕获的思维链原文兜底填充,
-    //   保证"军师推理过程"在生成完成后依然可见(修复端点+深度思考场景下推理消失)。
-    if (result && typeof result === 'object' && !result.raw
-        && (!result.reasoning || !String(result.reasoning).trim())
-        && streamedReasoning && streamedReasoning.trim()) {
-      result.reasoning = zhReasonPiece(streamedReasoning.trim());
-    } else if (result && typeof result === 'object' && !result.raw && result.reasoning) {
-      result.reasoning = zhReasonPiece(String(result.reasoning));
-    }
     if (result && typeof result === 'object' && !result.raw) {
       if (isAdvisorMode(mode)) {
         result.fundNote = buildStockFundNote(payload.stockFund)
@@ -2821,6 +2832,9 @@ export default async function handler(req, res) {
       else delete result.searchReference;
       result.theoryRefs = theoryRefs;
       result = humanizeAdviceTextFields(result);
+      result = ensureAdviceReasoning(result, streamedReasoning, {
+        deepMode: payload.generationProfile === 'DEEP',
+      });
       if (isAdvisorMode(mode)) {
         result.presentation = compileAdvicePresentationV3(result);
       }
@@ -2844,6 +2858,10 @@ export default async function handler(req, res) {
       usage: usage || null,
     });
   } catch (e) {
+    if (modelProgressTimer) {
+      clearInterval(modelProgressTimer);
+      modelProgressTimer = null;
+    }
     if (hbTimer) { clearInterval(hbTimer); hbTimer = null; }
     if (res.headersSent || (res.getHeader && String(res.getHeader('Content-Type') || '').includes('event-stream'))) {
       try { res.write(`event: result\ndata: ${JSON.stringify({ ok: false, error: String(e.message || e) })}\n\n`); } catch { /* ignore */ }

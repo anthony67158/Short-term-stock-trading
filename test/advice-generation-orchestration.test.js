@@ -242,6 +242,19 @@ test('军师准备与证据依赖采用并行编排且单源有独立截止', ()
   assert.match(cronAdviceSource, /prepareAdviceInputs\(acc, \{ signal \}\)/)
 })
 
+test('深度模型阶段持续报告真实进展且最终摘要统一去重', () => {
+  assert.match(aiSource, /createReasoningProgressTracker\(\)/)
+  assert.match(aiSource, /deepModelProgressMessage\(/)
+  assert.match(
+    aiSource,
+    /onContent:\s*\(piece\)[\s\S]*?模型已开始返回结论/,
+  )
+  assert.match(
+    aiSource,
+    /ensureAdviceReasoning\(result,\s*streamedReasoning,[\s\S]*?deepMode:/,
+  )
+})
+
 test('到价复核使用快速证据路径并在一秒内发现新紧急任务', () => {
   assert.match(
     cronAdviceSource,
