@@ -138,7 +138,7 @@ curl -s -o /dev/null -w "%{http_code}\n" "$FC/api/quote?code=600519"
 curl -s -o /dev/null -w "%{http_code}\n" -X POST "$FC/api/ai" -H "Content-Type: application/json" -d '{"mode":"ping"}'
 ```
 
-### 量化服务 → 容器/CloudBase/FC（可选）
+### 量化服务 → 阿里云 FC / PAI-EAS（可选）
 见 `qlib-service/README.md`。部署后把地址/Key 配到后端 `QUANT_URL`/`QUANT_KEY`。不配也能跑,只是预测与融合建议不可用。
 
 ### 定时任务

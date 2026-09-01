@@ -332,7 +332,7 @@ async function fetchIndexCloseMap(bars = 130, timeoutMs = 6000) {
   } catch { return {}; }
 }
 
-// ============ 量化预测微服务调用（CloudBase）============
+// ============ 量化预测微服务调用（阿里云 FC）============
 // 数据由本地传入（candles），服务端只做因子打分+走势预测，绕开其自身取数被风控的问题。
 // 仅当配置了环境变量 QUANT_URL 才调用；失败静默返回 null，绝不阻断主流程。
 // candles: [{date,open,close,high,low,volume}]（升序）；hold: {cost,qty} 可选（持仓则给加/减建议）

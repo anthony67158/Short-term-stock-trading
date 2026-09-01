@@ -1,73 +1,84 @@
-# 量化打分微服务 → 部署到 Google Cloud Run
+# 量化打分微服务
 
-一个轻量的 A 股量化打分接口（Qlib/Alpha158 因子思路）：输入 6 位股票代码，
-返回 **0~100 综合分 + 偏多/偏空/中性 + 做T方向建议 + 可解释因子**。
-数据用 AKShare（东财，免费），CPU 秒级推理，无需预训练下载。
+生产服务部署在阿里云函数计算 FC 3.0，与主服务和 OSS 同处
+`cn-hangzhou`。当前稳定地址：
 
-## 原子模型发布
+```text
+https://quant-score-nlxgclpdbu.cn-hangzhou.fcapp.run
+```
 
-生产模型不再直接覆盖一组固定文件。`upload_model.py` 会先把模型、元数据、
-信号头和事件标签写入 `quantmodel/runs/<run-id>/`，逐文件记录 SHA-256，
-全部成功后最后更新 `quantmodel/manifest.json`。推理进程只加载同一 manifest
-引用且校验值一致的整套产物；manifest 缺失时才兼容读取旧固定路径。
+服务基于 FastAPI、LightGBM 和 GARCH，提供量化评分、走势预测、模型信息与
+健康检查。模型优先从部署包加载，并按小时从阿里云 OSS 热更新。
 
-## 一、Cloud Run 适合吗？
+## 生产架构
 
-适合，而且是这几个方案里最优的：
-- **按请求计费、闲时缩容到 0**：不调用时几乎不花钱
-- **新账号 $300 / 90 天额度**：这点用量基本免费
-- **原生跑容器**：不像 HF 免费版处处设限
+- 计算：阿里云 FC 3.0 `quant-score`
+- 存储：阿里云 OSS `quantmodel/`、`sectormodel/`
+- 部署描述：`s.yaml`
+- 运行包：`deploy_pkg/`
+- 主服务接入：`QUANT_URL`、`QUANT_KEY`
 
-## 二、你要做的操作（约 15 分钟，只做一次）
+腾讯财经接口仅作为公开行情数据源，不承载计算、存储或定时任务。
 
-### 1. 装 gcloud CLI 并登录
-- 官网装 Google Cloud CLI：https://cloud.google.com/sdk/docs/install
-- 然后在终端：
-  ```bash
-  gcloud auth login          # 浏览器登录你的 Google 账号
-  ```
+## 部署
 
-### 2. 建一个 GCP 项目 + 开通结算
-- 打开 https://console.cloud.google.com
-- 顶部「选择项目」→「新建项目」，记下 **项目 ID**（形如 `my-quant-123456`）
-- 左侧菜单「结算 Billing」→ 绑定一张卡（新账号送 $300，不会立刻扣费）
+在项目根目录准备 `.env`，然后执行：
 
-### 3. 一键部署
-在本目录（`qlib-service/`）下：
 ```bash
-# ① 编辑 deploy.sh，把 PROJECT_ID 改成你上一步的项目 ID
-# ② 运行
+cd qlib-service
 bash deploy.sh
 ```
-脚本会自动：开通所需服务 → 源码直传让 Google 构建镜像 → 部署到 Cloud Run（台湾节点）→
-生成一把 API 密钥 → 把「服务地址 + 密钥」写进 `DEPLOY_INFO.txt`。
 
-### 4. 把两样东西发我
-部署成功后，打开 `qlib-service/DEPLOY_INFO.txt`，把里面这两行发我：
-```
-SERVICE_URL=https://quant-score-xxxxx.a.run.app
-API_KEY=xxxxxxxx
-```
-我来把它接进操盘台（改 `api/ai.js` 调用它，在 Vercel 配好环境变量并重新部署）。
+`deploy.sh` 会：
 
-## 三、部署后自检（可选）
+1. 检查并同步 `deploy_pkg/` 中的源码、模型和启动脚本。
+2. 在缺少 vendored Python 依赖时调用 `build_deploy_pkg.sh`。
+3. 加载项目根目录 `.env`。
+4. 通过 Serverless Devs 部署到阿里云 FC。
+5. 调用 `/health` 完成部署后验证。
+
+修改依赖或首次构建时，也可以显式执行：
+
 ```bash
-# 健康检查（应返回 {"ok":true,...}）
-curl "https://你的服务地址/health"
-
-# 打分测试（茅台）——注意带 X-API-Key
-curl -H "X-API-Key: 你的密钥" "https://你的服务地址/score?code=600519"
+cd qlib-service
+bash build_deploy_pkg.sh
+set -a
+. ../.env
+set +a
+npx @serverless-devs/s deploy -y
 ```
 
-## 四、费用 & 安全
-- **费用**：min-instances=0，闲时不计费；单次打分算力极小，正常个人使用远在免费额度内。
-- **安全**：接口用 `X-API-Key` 校验，只有你的操盘台（配了同一把密钥）能调用，防盗刷。
-- **随时下线**：`gcloud run services delete quant-score --region asia-east1` 即可删除，不留费用。
+## 验收
+
+```bash
+curl -s \
+  https://quant-score-nlxgclpdbu.cn-hangzhou.fcapp.run/health
+
+curl -s \
+  -H "X-API-Key: $QUANT_KEY" \
+  https://quant-score-nlxgclpdbu.cn-hangzhou.fcapp.run/model_info
+```
+
+`/health` 应返回 `ok: true`；`/model_info` 应返回 `loaded: true`。
+
+## 模型发布
+
+`upload_model.py` 会先将模型、元数据、信号头和事件标签写入
+`quantmodel/runs/<run-id>/`，逐文件记录 SHA-256，全部成功后再原子更新
+`quantmodel/manifest.json`。
+
+推理进程只加载同一 manifest 引用且校验值一致的整套产物。manifest 缺失时
+兼容读取旧固定路径；OSS 暂时不可用时继续使用部署包内的 bundled 模型。
 
 ## 文件说明
+
 | 文件 | 作用 |
 |---|---|
-| `app.py` | FastAPI 服务：`/score` 打分接口 + `/health` 健康检查 |
-| `requirements.txt` | Python 依赖 |
-| `Dockerfile` | 容器构建（Cloud Run 用） |
-| `deploy.sh` | 一键部署脚本 |
+| `app.py` | FastAPI 服务入口 |
+| `factors_lib.py` | 训练与推理共用的 36 维因子口径 |
+| `model_lib.py` | 模型加载、OSS 热更新和 GARCH |
+| `s.yaml` | 阿里云 FC 3.0 部署描述 |
+| `bootstrap` | FC 自定义运行时启动脚本 |
+| `build_deploy_pkg.sh` | 构建免 Docker 的 FC 运行包 |
+| `deploy.sh` | 阿里云 FC 一键部署入口 |
+| `Dockerfile` | 阿里云容器部署备用方案 |

@@ -56,7 +56,14 @@ cp "$HERE/app.py" "$HERE/factors_lib.py" "$HERE/model_lib.py" \
    "$HERE/sector_contract.py" "$HERE/sector_factors.py" \
    "$HERE/sector_model.py" \
    "$HERE/lgb_score.txt" "$HERE/meta.json" "$HERE/bootstrap" "$PKG/"
-for f in sector_next_lgb.txt sector_week_lgb.txt sector_meta.json; do
+for f in \
+  lgb_signal.txt \
+  signal_meta.json \
+  event_tags.json \
+  sector_next_lgb.txt \
+  sector_week_lgb.txt \
+  sector_meta.json
+do
   if [ -f "$HERE/$f" ]; then cp "$HERE/$f" "$PKG/"; fi
 done
 chmod +x "$PKG/bootstrap"

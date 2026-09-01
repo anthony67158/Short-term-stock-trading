@@ -1693,7 +1693,7 @@ export default async function handler(req, res) {
             if (t) payload.tech = t;
           }
         }
-        // 量化模型打分（CloudBase 微服务，多因子融合）——配置了才有，作为更专业的一层参考
+        // 量化模型打分（阿里云 FC 微服务，多因子融合）——配置了才有，作为更专业的一层参考
         if (quant && quant.ok) {
           payload.quant = {
             score: quant.score, bias: quant.bias, tDir: quant.tDir,
