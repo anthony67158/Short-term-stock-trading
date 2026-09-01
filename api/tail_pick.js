@@ -61,6 +61,7 @@ function publicCandidate(candidate) {
       : null,
     evidence: candidate.stockGate?.evidence || [],
     blockers: candidate.stockGate?.blockers || [],
+    decisionWarnings: candidate.decisionWarnings || [],
     execution: candidate.execution,
   }
 }
@@ -190,7 +191,7 @@ export function runTailPickScan({
         task,
         'MARKET_GATE',
         10,
-        '正在确认今天是否适合尾盘开仓',
+        '正在读取大盘环境',
         now,
       )
       const marketContext = await collectMarketContext({
@@ -236,7 +237,7 @@ export function runTailPickScan({
         task,
         'DISCIPLINE_GATE',
         72,
-        '正在排除高位、弱势和流动性风险',
+        '正在汇总位置、分时、资金与流动性指标',
         now,
       )
       const ranked = rankCandidates(scanned.candidates, {
@@ -263,10 +264,10 @@ export function runTailPickScan({
         result: {
           ...ranked,
           reason: ranked.candidates.length
-            ? '公式命中且纪律闸门通过；分钟级历史优势尚未完成验证，仅供观察'
+            ? `展示${ranked.candidates.length}只严格公式计算结果；风险项随股票列出，请自行判断`
             : nearRanked.length
-              ? `原公式今日无完整命中；另筛出${nearRanked.length}只接近公式观察股`
-              : '没有股票同时通过原公式或接近公式观察条件',
+              ? `严格公式今日无完整命中；以下展示${nearRanked.length}只接近公式的计算结果，请自行判断`
+              : '本次计算未发现严格公式或接近公式结果',
           universe: scanned.universe,
           candidates: ranked.candidates.map((candidate) => {
             const value = publicCandidate(candidate)
@@ -288,10 +289,6 @@ export function runTailPickScan({
           nearCandidates: nearRanked.map((candidate) => ({
             ...publicCandidate(candidate),
             liveStatus: 'WATCH_ONLY',
-            execution: {
-              ...candidate.execution,
-              action: '接近公式：仅加入自选观察，条件补齐前不买',
-            },
           })),
         },
       }
@@ -305,8 +302,8 @@ export function runTailPickScan({
         message: ranked.candidates.length
           ? `筛出${ranked.candidates.length}只公式观察股`
           : nearRanked.length
-            ? `严格公式未命中，筛出${nearRanked.length}只接近公式观察股`
-            : '没有合格标的，今日不开仓',
+            ? `展示${nearRanked.length}只接近公式计算结果`
+            : '本次计算没有匹配结果',
         finishedAt: generatedAt,
       })
       return result

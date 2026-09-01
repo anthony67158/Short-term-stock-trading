@@ -4,7 +4,6 @@ import { localDateKey } from './tradingCalendar.js'
 export const TAIL_PICK_RANKING_VERSION = 'tail-pick-ranking.v1'
 export const TAIL_PICK_VALIDATION_STATE =
   'PENDING_INTRADAY_BACKTEST'
-export const TAIL_PICK_NEAR_LIMIT = 5
 
 function finite(value) {
   if (value == null || value === '') return null
@@ -86,19 +85,38 @@ function nearCandidateScore(candidate) {
   }
 }
 
-function hasNearFundSupport(fund) {
+function candidateWarnings(candidate) {
+  const warnings = [
+    ...(candidate?.stockGate?.blockers || []),
+  ]
+  if (candidate?.stockGate?.passed === false && !warnings.length) {
+    warnings.push('个股纪律检查未通过')
+  }
+  if (candidate?.intraday?.passed === false) {
+    warnings.push(
+      candidate.intraday.blockers?.[0] || '尾盘分时检查未通过',
+    )
+  }
+  if (candidate?.sectorOpportunity?.matched === false) {
+    warnings.push('未进入板块前瞻主线')
+  }
+  const fund = candidate?.fund
   const mainNow = finite(fund?.mainNetYi)
   const retailNow = finite(fund?.retailNetYi)
   const main5d = finite(fund?.main5dYi)
   const days = Number(fund?.historyDayCount) || 0
-  return (
-    days >= 3
-    && mainNow != null
-    && retailNow != null
-    && main5d != null
-    && !(mainNow < 0 && retailNow > 0)
-    && (mainNow > 0 || main5d > 0)
-  )
+  if (!fund) warnings.push('资金数据缺失')
+  else {
+    if (days < 3) warnings.push(`资金历史仅${days}个交易日`)
+    if (mainNow == null) warnings.push('当日主力资金缺失')
+    if (retailNow == null) warnings.push('当日小单资金缺失')
+    if (main5d == null) warnings.push('近期主力资金缺失')
+    if (mainNow < 0 && retailNow > 0) {
+      warnings.push('主力净流出且小单净流入')
+    }
+    if (main5d < 0) warnings.push('近期主力资金净流出')
+  }
+  return [...new Set(warnings.filter(Boolean))]
 }
 
 function instruction(
@@ -107,6 +125,7 @@ function instruction(
   timestamp,
   maxPositionPct,
 ) {
+  const warnings = candidate.decisionWarnings || candidateWarnings(candidate)
   const price = finite(candidate.intraday?.price)
     ?? finite(candidate.quote?.price)
   const vwap = finite(candidate.intraday?.vwap)
@@ -125,8 +144,12 @@ function instruction(
   return {
     role,
     action: role === 'PRIMARY'
-      ? `公式首选：不高于${ceiling ?? '--'}元观察，手工确认后最多${positionCap}%仓位`
-      : '候补：首选失效前不买，只加入自选跟踪',
+      ? warnings.length
+        ? `严格公式命中；另有${warnings.length}项风险提示，请结合计算结果自行判断`
+        : `公式首选：不高于${ceiling ?? '--'}元观察，手工确认后最多${positionCap}%仓位`
+      : `严格公式候补；${
+          warnings.length ? `另有${warnings.length}项风险提示，` : ''
+        }请结合计算结果自行判断`,
     firstLeg: role === 'PRIMARY'
       ? `14:50-14:52不高于${ceiling ?? '--'}元，第一笔最多${firstLegPct}%`
       : null,
@@ -144,12 +167,14 @@ function instruction(
 }
 
 function nearInstruction(candidate) {
-  const missing = (candidate.nearMatch?.failedRules || [])
-    .map((item) => item.label)
-    .filter(Boolean)
+  const passed = Number(candidate.nearMatch?.passedCount) || 0
+  const total = Number(candidate.nearMatch?.totalRuleCount) || 0
+  const warnings = candidate.decisionWarnings || candidateWarnings(candidate)
   return {
     role: 'NEAR',
-    action: `接近公式：还差${missing.join('、') || '部分条件'}，条件补齐前不买`,
+    action: `接近公式：通过${passed}/${total}项；${
+      warnings.length ? `另有${warnings.length}项风险提示` : '其余检查无额外风险项'
+    }，请自行判断`,
     firstLeg: null,
     secondLeg: null,
     maxPositionPct: 0,
@@ -163,28 +188,25 @@ function nearInstruction(candidate) {
 export function rankTailPickCandidates(
   candidates = [],
   {
-    limit = 3,
     timestamp = Date.now(),
     maxPositionPct = 5,
   } = {},
 ) {
   const ranked = candidates
-    .filter((item) =>
-      item?.formula?.matched
-      && item?.stockGate?.passed
-      && item?.intraday?.passed
-    )
+    .filter((item) => item?.formula?.matched)
     .map((item) => ({
       ...item,
+      decisionWarnings: candidateWarnings(item),
       ...candidateScore(item),
     }))
     .sort((left, right) =>
-      Number(right.score) - Number(left.score)
+      Number(left.decisionWarnings.length)
+        - Number(right.decisionWarnings.length)
+      || Number(right.score) - Number(left.score)
       || Number(right.quote?.amount || 0)
         - Number(left.quote?.amount || 0)
       || String(left.code).localeCompare(String(right.code))
     )
-    .slice(0, Math.max(0, Math.min(3, Number(limit) || 3)))
     .map((item, index) => ({
       ...item,
       rank: index + 1,
@@ -206,36 +228,23 @@ export function rankTailPickCandidates(
 
 export function rankTailPickNearCandidates(
   candidates = [],
-  { limit = TAIL_PICK_NEAR_LIMIT } = {},
 ) {
   return candidates
-    .filter((item) =>
-      item?.nearMatch?.matched
-      && item?.stockGate?.passed
-      && finite(item?.stockGate?.gain20) != null
-      && finite(item.stockGate.gain20) <= 35
-      && hasNearFundSupport(item.fund)
-    )
+    .filter((item) => item?.nearMatch?.matched)
     .map((item) => ({
       ...item,
+      decisionWarnings: candidateWarnings(item),
       ...nearCandidateScore(item),
     }))
     .sort((left, right) =>
       Number(left.nearMatch?.failedRules?.length || 99)
         - Number(right.nearMatch?.failedRules?.length || 99)
-      || Number(right.stockGate?.passed) - Number(left.stockGate?.passed)
-      || Number(right.intraday?.passed) - Number(left.intraday?.passed)
+      || Number(left.decisionWarnings.length)
+        - Number(right.decisionWarnings.length)
       || Number(right.score) - Number(left.score)
       || Number(right.quote?.amount || 0)
         - Number(left.quote?.amount || 0)
       || String(left.code).localeCompare(String(right.code))
-    )
-    .slice(
-      0,
-      Math.max(
-        0,
-        Math.min(TAIL_PICK_NEAR_LIMIT, Number(limit) || TAIL_PICK_NEAR_LIMIT),
-      ),
     )
     .map((item, index) => ({
       ...item,

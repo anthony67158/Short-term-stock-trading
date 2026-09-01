@@ -201,7 +201,7 @@ test('指数K线按腾讯字段顺序解析', () => {
   })
 })
 
-test('排序最多输出一只首选并保持候补不可买', () => {
+test('严格公式结果只保留一只首选并把其余候补交给用户判断', () => {
   const base = {
     formula: { matched: true, signals: [] },
     stockGate: { passed: true, gain20: 8, evidence: [] },
@@ -229,6 +229,16 @@ test('排序最多输出一只首选并保持候补不可买', () => {
         stock: { score: 55 },
       },
     },
+    {
+      ...base,
+      code: '600003',
+      name: '丙',
+      stockGate: {
+        passed: false,
+        gain20: 38,
+        blockers: ['近20日位置偏高'],
+      },
+    },
   ], {
     timestamp: beijingTimestamp('2026-08-28T14:51:00'),
   })
@@ -237,7 +247,12 @@ test('排序最多输出一只首选并保持候补不可买', () => {
   assert.equal(result.primaryCode, '600001')
   assert.equal(result.candidates[0].execution.role, 'PRIMARY')
   assert.equal(result.candidates[1].execution.role, 'ALTERNATE')
-  assert.match(result.candidates[1].execution.action, /不买/)
+  assert.match(result.candidates[1].execution.action, /自行判断/)
+  assert.equal(result.candidates.length, 3)
+  assert.match(
+    result.candidates[2].decisionWarnings.join('；'),
+    /近20日位置偏高/,
+  )
 })
 
 test('结构性震荡档把首选总仓位从5%收紧到3%', () => {
@@ -263,7 +278,7 @@ test('结构性震荡档把首选总仓位从5%收紧到3%', () => {
   assert.match(result.candidates[0].execution.secondLeg, /最多1%/)
 })
 
-test('接近公式池最多五只且全部只能加入自选观察', () => {
+test('接近公式池完整返回并按接近度排序', () => {
   const candidates = Array.from({ length: 7 }, (_, index) => ({
     code: `60000${index}`,
     name: `测试${index}`,
@@ -295,11 +310,16 @@ test('接近公式池最多五只且全部只能加入自选观察', () => {
 
   const result = rankTailPickNearCandidates(candidates)
 
-  assert.equal(result.length, 5)
+  assert.equal(result.length, 7)
   assert.equal(result[0].code, '600006')
   assert.equal(result[0].execution.role, 'NEAR')
   assert.equal(result[0].execution.maxPositionPct, 0)
-  assert.match(result[0].execution.action, /条件补齐前不买/)
+  assert.match(result[0].execution.action, /自行判断/)
+})
+
+test('接近公式结果全部进入证据补充而不是提前截断', () => {
+  const source = readProjectFile('api/_tail_pick_data.js')
+  assert.doesNotMatch(source, /nearFormulaMatches\.slice/)
 })
 
 test('扫描任务在大盘闸门失败时直接保存不开仓结果', async () => {
@@ -355,10 +375,10 @@ test('严格公式为空时仍返回独立接近观察池且不生成仓位', as
       failedRules: [{ key: 'AB4', label: '上影线形态' }],
     },
     stockGate: {
-      passed: true,
+      passed: false,
       gain20: 8,
       evidence: ['近20日位置正常'],
-      blockers: [],
+      blockers: ['尾盘分时检查未通过'],
     },
     intraday: { passed: true, price: 10, vwap: 9.96 },
     quote: { price: 10, amount: 100_000_000 },
@@ -400,11 +420,15 @@ test('严格公式为空时仍返回独立接近观察池且不生成仓位', as
     result.result.nearCandidates[0].execution.maxPositionPct,
     0,
   )
-  assert.match(result.result.reason, /接近公式观察股/)
+  assert.deepEqual(
+    result.result.nearCandidates[0].decisionWarnings,
+    ['尾盘分时检查未通过'],
+  )
+  assert.match(result.result.reason, /接近公式.*计算结果/)
   assert.deepEqual(saved, result)
 })
 
-test('接近公式候选必须通过主线分时与资金承接', () => {
+test('接近公式候选保留纪律与资金失败项供用户判断', () => {
   const base = {
     code: '600001',
     nearMatch: {
@@ -425,11 +449,16 @@ test('接近公式候选必须通过主线分时与资金承接', () => {
   }
 
   assert.equal(rankTailPickNearCandidates([base]).length, 1)
-  assert.equal(rankTailPickNearCandidates([{
+  const weakStructure = rankTailPickNearCandidates([{
     ...base,
     stockGate: { passed: false, gain20: 8 },
-  }]).length, 0)
-  assert.equal(rankTailPickNearCandidates([{
+  }])
+  assert.equal(weakStructure.length, 1)
+  assert.match(
+    weakStructure[0].decisionWarnings.join('；'),
+    /个股纪律检查未通过/,
+  )
+  const weakFund = rankTailPickNearCandidates([{
     ...base,
     fund: {
       mainNetYi: -0.1,
@@ -437,7 +466,12 @@ test('接近公式候选必须通过主线分时与资金承接', () => {
       main5dYi: -0.2,
       historyDayCount: 5,
     },
-  }]).length, 0)
+  }])
+  assert.equal(weakFund.length, 1)
+  assert.match(
+    weakFund[0].decisionWarnings.join('；'),
+    /主力净流出且小单净流入|近期主力资金净流出/,
+  )
 })
 
 test('手动试算可在14:50前运行且不会写入正式结果', async () => {

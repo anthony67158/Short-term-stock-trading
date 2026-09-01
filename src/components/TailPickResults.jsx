@@ -16,7 +16,6 @@ function timeLabel(value) {
 export default function TailPickResults({
   result,
   book,
-  accountGate,
   allowExecution,
   onAdd,
 }) {
@@ -28,7 +27,7 @@ export default function TailPickResults({
     <>
       <div
         className="tail-pick-summary"
-        data-result={noTrade ? 'blocked' : 'observing'}
+        data-result={noTrade && !hasNearCandidates ? 'empty' : 'observing'}
       >
         <div>
           <span>
@@ -36,8 +35,8 @@ export default function TailPickResults({
             {' · '}
             {noTrade
               ? hasNearCandidates
-                ? `严格公式0只 · 接近观察${nearCandidates.length}只`
-                : '今日不开仓'
+                ? `严格公式0只 · 接近条件${nearCandidates.length}只`
+                : '本次未发现匹配结果'
               : `${candidates.length}只严格公式观察股`}
           </span>
           <strong>{result.result?.reason}</strong>
@@ -45,29 +44,13 @@ export default function TailPickResults({
         <small>数据截至 {timeLabel(result.session?.dataAsOf)}</small>
       </div>
 
-      {!accountGate.allowRiskIncrease && (
-        <div className="tail-pick-account-block">
-          <Icon name="shield" size={16} />
-          <span>
-            {accountGate.blockers?.[0]?.message
-              || '账户纪律已阻止新增风险'}
-          </span>
-        </div>
-      )}
-
-      {noTrade && (
+      {noTrade && !hasNearCandidates && (
         <div className="tail-pick-no-trade">
-          <Icon name="shield" size={22} />
-          <strong>
-            {hasNearCandidates
-              ? '严格公式今日不新开仓'
-              : '唯一操作：今天不新开仓'}
-          </strong>
+          <Icon name="target" size={22} />
+          <strong>本次没有匹配结果</strong>
           <span>
-            {hasNearCandidates
-              ? '下方股票只接近原公式，条件补齐前仅观察'
-              : result.marketGate?.blockers?.[0]
-                || result.result?.reason}
+            {result.marketGate?.blockers?.[0]
+              || result.result?.reason}
           </span>
         </div>
       )}
@@ -91,8 +74,8 @@ export default function TailPickResults({
       {hasNearCandidates && (
         <section className="tail-pick-near-section">
           <div className="tail-pick-near-head">
-            <strong>接近公式观察</strong>
-            <span>最多缺2项次要条件，仅可加入自选</span>
+            <strong>接近公式计算结果</strong>
+            <span>按接近度排序，完整展示缺失条件与风险项</span>
           </div>
           <div className="tail-pick-list">
             {nearCandidates.map((candidate) => (
@@ -120,7 +103,7 @@ export default function TailPickResults({
         <span>
           接近公式 {result.result?.universe?.nearFormulaCount ?? 0} 只
         </span>
-        <b>尚未通过分钟级样本外回测，不自动下单</b>
+        <b>计算结果仅供判断，不自动下单</b>
       </div>
     </>
   )

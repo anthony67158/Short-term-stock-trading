@@ -1,13 +1,9 @@
 import {
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
 } from 'react'
-import {
-  evaluateAccountCircuitBreaker,
-} from '../../shared/accountCircuitBreaker.js'
 import Icon from './Icon'
 import FormulaSelectionProgress from './FormulaSelectionProgress'
 import TailPickResults from './TailPickResults'
@@ -21,29 +17,10 @@ import {
 } from '../tailPickClient.js'
 
 const STAGES = {
-  MARKET_GATE: '确认开仓环境',
+  MARKET_GATE: '读取大盘环境',
   FORMULA_SCAN: '扫描公式信号',
-  DISCIPLINE_GATE: '执行纪律过滤',
-  DONE: '生成最终顺序',
-}
-
-function accountRiskGate(book) {
-  const totalAssets = Number(book.account?.totalAssets) || 0
-  const cash = Number(book.account?.cash)
-  const position = (
-    totalAssets > 0 && Number.isFinite(cash)
-      ? Math.max(0, (totalAssets - cash) / totalAssets * 100)
-      : 0
-  )
-  return evaluateAccountCircuitBreaker({
-    account: book.account,
-    portfolio: {
-      position,
-      industryWeights: [],
-    },
-    closed: book.closed,
-    executionPlans: book.executionPlans,
-  })
+  DISCIPLINE_GATE: '汇总风险指标',
+  DONE: '整理计算结果',
 }
 
 export default function TailPick({
@@ -56,7 +33,6 @@ export default function TailPick({
   const [running, setRunning] = useState(false)
   const [error, setError] = useState('')
   const mounted = useRef(true)
-  const accountGate = useMemo(() => accountRiskGate(book), [book])
 
   const load = useCallback(async ({ quiet = false } = {}) => {
     if (!quiet) setLoading(true)
@@ -210,11 +186,9 @@ export default function TailPick({
         <TailPickResults
           result={result}
           book={book}
-          accountGate={accountGate}
           allowExecution={
             !!state?.currentResult
             && session.status === 'OPEN'
-            && accountGate.allowRiskIncrease
           }
           onAdd={addCandidate}
         />

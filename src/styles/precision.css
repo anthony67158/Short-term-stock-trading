@@ -1644,14 +1644,6 @@ textarea:focus {
   );
 }
 
-.tail-pick-summary[data-result="blocked"] {
-  background: color-mix(
-    in oklch,
-    var(--color-danger) 7%,
-    var(--color-paper-2)
-  );
-}
-
 .tail-pick-summary > div {
   display: grid;
   gap: 3px;
@@ -1664,35 +1656,11 @@ textarea:focus {
   font-weight: 700;
 }
 
-.tail-pick-summary[data-result="blocked"] span {
-  color: var(--color-danger);
-}
-
 .tail-pick-summary strong,
 .tail-pick-summary small {
   color: var(--color-muted);
   font-size: var(--text-xs);
   font-weight: 500;
-}
-
-.tail-pick-account-block {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-  padding: var(--space-xs) var(--space-md);
-  border-bottom: 1px solid color-mix(
-    in oklch,
-    var(--color-danger) 28%,
-    var(--color-rule-2)
-  );
-  background: color-mix(
-    in oklch,
-    var(--color-danger) 7%,
-    var(--color-paper-2)
-  );
-  color: var(--color-danger);
-  font-size: var(--text-xs);
-  font-weight: 650;
 }
 
 .tail-pick-list {

@@ -9,6 +9,19 @@ function price(value) {
     : '--'
 }
 
+function fundText(candidate) {
+  const main = Number(candidate.fund?.mainNetYi)
+  const retail = Number(candidate.fund?.retailNetYi)
+  const days = Number(candidate.fund?.historyDayCount) || 0
+  if (!Number.isFinite(main) || !Number.isFinite(retail)) {
+    return '主力或小单资金数据缺失'
+  }
+  return `${
+    days ? `${days}日资金；` : ''
+  }主力${main >= 0 ? '净流入' : '净流出'}${Math.abs(main).toFixed(2)}亿，`
+    + `小单${retail >= 0 ? '净流入' : '净流出'}${Math.abs(retail).toFixed(2)}亿`
+}
+
 export default function TailPickCandidate({
   candidate,
   added,
@@ -21,28 +34,29 @@ export default function TailPickCandidate({
   const missingRules = (candidate.nearMatch?.failedRules || [])
     .map((item) => item.label)
     .filter(Boolean)
-  const evidence = near
+  const decisionWarnings = Array.isArray(candidate.decisionWarnings)
+    ? candidate.decisionWarnings
+    : []
+  const evidence = [...new Set((near
     ? [
         missingRules.length
           ? `未满足：${missingRules.join('、')}`
           : null,
-        candidate.blockers?.[0],
+        ...decisionWarnings.map((item) => `风险提示：${item}`),
         candidate.sector?.name
           ? `${candidate.sector.name}方向`
           : '暂未匹配主线方向',
-        candidate.fund?.historyDayCount
-          ? `${candidate.fund.historyDayCount}日资金通过承接检查`
-          : null,
+        fundText(candidate),
       ].filter(Boolean)
     : [
+        ...decisionWarnings.map((item) => `风险提示：${item}`),
         candidate.sector?.name
           ? `${candidate.sector.name}方向`
           : null,
         candidate.evidence?.[0],
-        candidate.fund?.historyDayCount
-          ? `${candidate.fund.historyDayCount}日资金已核验`
-          : '资金证据缺失',
+        fundText(candidate),
       ].filter(Boolean)
+  ))]
   return (
     <article
       className="tail-pick-row"
@@ -119,7 +133,7 @@ export default function TailPickCandidate({
           added
             ? '已在自选中'
             : near
-              ? '加入自选观察，不生成买入动作'
+              ? '加入自选，后续由你结合计算结果判断'
               : !allowExecution
               ? '加入自选观察，不生成买入动作'
               : primary ? '加入尾盘观察计划' : '加入自选'

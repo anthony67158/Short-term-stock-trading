@@ -401,7 +401,7 @@ export async function scanTailPickCandidates({
     )
   const enrichmentPool = [
     ...formulaMatches,
-    ...nearFormulaMatches.slice(0, 12),
+    ...nearFormulaMatches,
   ]
   const enriched = await mapLimit(
     enrichmentPool,

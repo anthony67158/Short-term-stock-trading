@@ -32,16 +32,16 @@ test('尾盘拾金支持14:50自动正式扫描和手动试算', () => {
   assert.match(component, /14:50 自动正式扫描/)
   assert.match(component, /随时手动试算/)
   assert.match(component, /15_000/)
-  assert.match(component, /确认开仓环境/)
+  assert.match(component, /读取大盘环境/)
   assert.match(component, /扫描公式信号/)
-  assert.match(component, /执行纪律过滤/)
-  assert.match(component, /生成最终顺序/)
+  assert.match(component, /汇总风险指标/)
+  assert.match(component, /整理计算结果/)
   assert.match(component, /FormulaSelectionProgress/)
   assert.match(progress, /role="progressbar"/)
   assert.match(component, /session\.canRun/)
 })
 
-test('结果明确区分首选候补且只写入人工观察计划', () => {
+test('结果展示完整计算依据且只写入人工观察计划', () => {
   assert.match(candidate, /首选观察/)
   assert.match(candidate, /候补/)
   assert.match(candidate, /接近公式/)
@@ -51,10 +51,11 @@ test('结果明确区分首选候补且只写入人工观察计划', () => {
   assert.match(candidate, /加入自选/)
   assert.match(component, /planStore\.addPlan/)
   assert.doesNotMatch(component, /planStore\.buy/)
-  assert.match(results, /唯一操作：今天不新开仓/)
-  assert.match(results, /接近公式观察/)
-  assert.match(results, /最多缺2项次要条件，仅可加入自选/)
-  assert.match(results, /尚未通过分钟级样本外回测，不自动下单/)
+  assert.doesNotMatch(component, /accountCircuitBreaker/)
+  assert.doesNotMatch(results, /唯一操作：今天不新开仓/)
+  assert.match(results, /接近公式计算结果/)
+  assert.match(results, /完整展示缺失条件与风险项/)
+  assert.match(results, /计算结果仅供判断，不自动下单/)
 })
 
 test('尾盘接口携带账号令牌、幂等键和明确超时', () => {
