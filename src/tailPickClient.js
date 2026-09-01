@@ -24,7 +24,11 @@ async function request(path, options = {}, timeoutMs = 45_000) {
     return payload
   } catch (error) {
     if (error?.name === 'AbortError') {
-      throw new Error('尾盘选股超过45秒，请查看任务状态')
+      const failure = new Error(
+        `尾盘任务提交超过${Math.round(timeoutMs / 1000)}秒，正在检查云端状态`,
+      )
+      failure.errorCode = 'REQUEST_TIMEOUT'
+      throw failure
     }
     throw error
   } finally {
@@ -36,6 +40,10 @@ export function loadTailPickState() {
   return request('/api/tail_pick')
 }
 
+export function isActiveTailPickTask(task) {
+  return ['QUEUED', 'RUNNING'].includes(task?.status)
+}
+
 export function runTailPick(tradeDate) {
   return request('/api/tail_pick', {
     method: 'POST',
@@ -45,5 +53,5 @@ export function runTailPick(tradeDate) {
       mode: 'manual',
       idempotencyKey: `tail-pick:${tradeDate}:manual:${Date.now()}`,
     }),
-  }, 60_000)
+  }, 15_000)
 }

@@ -13,6 +13,7 @@ import { fetchTrendsTx } from './stock_detail.js'
 import {
   tailPickStore,
 } from './_tail_pick_store.js'
+import { dispatchTailPickWorker } from './_tail_pick_dispatch.js'
 import {
   rankTailPickCandidates,
   rankTailPickNearCandidates,
@@ -75,6 +76,61 @@ async function saveProgress(store, task, stage, progress, message, now) {
     message,
     updatedAt: now(),
   })
+}
+
+export async function queueTailPickScan({
+  store = tailPickStore,
+  dispatch = dispatchTailPickWorker,
+  now = Date.now,
+} = {}) {
+  const requestedAt = Number(now()) || Date.now()
+  const session = tailPickSession(requestedAt)
+  const activeTask = await store.readTask()
+  if (
+    ['QUEUED', 'RUNNING'].includes(activeTask?.status)
+    && requestedAt
+      - Number(activeTask.updatedAt || activeTask.startedAt || 0)
+      < 3 * 60 * 1000
+  ) {
+    return {
+      ok: true,
+      accepted: true,
+      running: true,
+      task: activeTask,
+    }
+  }
+  const task = {
+    id: `tp_${session.tradeDate.replaceAll('-', '')}_manual`,
+    tradeDate: session.tradeDate,
+    mode: 'manual',
+    status: 'QUEUED',
+    stage: 'QUEUED',
+    progress: 2,
+    message: '已提交云端，等待开始扫描',
+    startedAt: requestedAt,
+    updatedAt: requestedAt,
+  }
+  await store.saveTask(task)
+  try {
+    const dispatched = await dispatch('manual')
+    return {
+      ok: true,
+      accepted: dispatched?.accepted !== false,
+      running: true,
+      task,
+    }
+  } catch (error) {
+    await store.saveTask({
+      ...task,
+      status: 'FAILED',
+      stage: 'FAILED',
+      progress: 100,
+      message: '云端任务提交失败',
+      error: String(error?.message || error).slice(0, 180),
+      finishedAt: Number(now()) || Date.now(),
+    }).catch(() => {})
+    throw error
+  }
 }
 
 export function runTailPickScan({
@@ -304,7 +360,7 @@ export async function readTailPickState({
       - Number(left.session?.dataAsOf || 0)
     )[0] || null
   const visibleTask = (
-    task?.status === 'RUNNING'
+    ['QUEUED', 'RUNNING'].includes(task?.status)
     && timestamp - Number(task.updatedAt || task.startedAt || 0)
       > 3 * 60 * 1000
   )
@@ -416,7 +472,10 @@ export default async function handler(req, res) {
     const body = typeof req.body === 'string'
       ? JSON.parse(req.body || '{}')
       : (req.body || {})
-    if (req.method === 'POST' && body.scheduled === true) {
+    if (
+      req.method === 'POST'
+      && (body.scheduled === true || body.worker === true)
+    ) {
       const expected = String(process.env.CRON_KEY || '')
       const supplied = String(
         req.headers?.['x-cron-key']
@@ -432,7 +491,7 @@ export default async function handler(req, res) {
         })
       }
       return reply(res, 200, await runTailPickScan({
-        mode: 'scheduled',
+        mode: body.worker === true ? body.mode : 'scheduled',
       }))
     }
     const authentication = await authenticateAccountRequest(req)
@@ -475,9 +534,7 @@ export default async function handler(req, res) {
         errorCode: 'INVALID_IDEMPOTENCY_KEY',
       })
     }
-    return reply(res, 200, await runTailPickScan({
-      mode: 'manual',
-    }))
+    return reply(res, 202, await queueTailPickScan())
   } catch (error) {
     const code = error?.code || 'TAIL_PICK_FAILED'
     return reply(res, code === 'WINDOW_CLOSED' ? 409 : 500, {

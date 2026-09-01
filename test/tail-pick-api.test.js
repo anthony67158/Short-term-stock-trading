@@ -13,9 +13,13 @@ import {
 } from '../api/_tail_pick_store.js'
 import {
   projectTailPickLiveStatus,
+  queueTailPickScan,
   readTailPickState,
   runTailPickScan,
 } from '../api/tail_pick.js'
+import {
+  buildTailPickWorkerEvent,
+} from '../api/_tail_pick_dispatch.js'
 import {
   rankTailPickCandidates,
   rankTailPickNearCandidates,
@@ -24,6 +28,40 @@ import {
 function beijingTimestamp(text) {
   return new Date(`${text}+08:00`).getTime()
 }
+
+test('手动扫描先持久化排队状态再异步唤醒FC Worker', async () => {
+  const tasks = []
+  const dispatched = []
+  const now = beijingTimestamp('2026-09-01T15:31:00')
+  const result = await queueTailPickScan({
+    now: () => now,
+    store: {
+      readTask: async () => null,
+      saveTask: async (task) => { tasks.push(task) },
+    },
+    dispatch: async (mode) => {
+      dispatched.push(mode)
+      return { accepted: true, requestId: 'request-id' }
+    },
+  })
+
+  assert.equal(result.running, true)
+  assert.equal(result.task.status, 'QUEUED')
+  assert.equal(tasks[0].status, 'QUEUED')
+  assert.deepEqual(dispatched, ['manual'])
+  assert.deepEqual(
+    buildTailPickWorkerEvent('manual', 'secret-key'),
+    {
+      source: 'stock-dashboard.tail-pick-worker',
+      key: 'secret-key',
+      mode: 'manual',
+    },
+  )
+  assert.throws(
+    () => buildTailPickWorkerEvent('scheduled', 'secret-key'),
+    /Worker模式无效/,
+  )
+})
 
 const readProjectFile = (path) => readFileSync(
   new URL(`../${path}`, import.meta.url),

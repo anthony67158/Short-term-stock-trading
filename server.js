@@ -26,6 +26,7 @@ import {
   reviewTimerBody,
   sectorForecastTimerBody,
   tailPickTimerBody,
+  tailPickWorkerBody,
   v2AccuracyTimerBody,
 } from './api/_advice_timer.js';
 import {
@@ -349,7 +350,7 @@ async function handleRequest(req, res) {
     const tailPickBody = tailPickTimerBody(
       event,
       process.env.CRON_KEY,
-    );
+    ) || tailPickWorkerBody(event, process.env.CRON_KEY);
     const formulaSelectionBody = formulaSelectionTimerBody(
       event,
       process.env.CRON_KEY,

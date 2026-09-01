@@ -11,6 +11,7 @@ import {
   reviewTimerBody,
   sectorForecastTimerBody,
   tailPickTimerBody,
+  tailPickWorkerBody,
   v2AccuracyTimerBody,
 } from '../api/_advice_timer.js'
 
@@ -71,6 +72,23 @@ test('尾盘拾金Timer只在14:50专用触发器和密钥匹配时运行', () =
     ...event,
     triggerName: 'other',
   }, 'secret-key'), null)
+})
+
+test('尾盘拾金异步Worker只接受内部密钥和受支持模式', () => {
+  const event = {
+    source: 'stock-dashboard.tail-pick-worker',
+    key: 'secret-key',
+    mode: 'manual',
+  }
+  assert.deepEqual(
+    tailPickWorkerBody(event, 'secret-key'),
+    { worker: true, mode: 'manual' },
+  )
+  assert.equal(
+    tailPickWorkerBody({ ...event, mode: 'scheduled' }, 'secret-key'),
+    null,
+  )
+  assert.equal(tailPickWorkerBody(event, 'wrong-key'), null)
 })
 
 test('公式选股收盘Timer只接受专用触发器和匹配密钥', () => {

@@ -63,7 +63,10 @@ test('尾盘接口携带账号令牌、幂等键和明确超时', () => {
   assert.match(client, /accountRequestHeaders/)
   assert.match(client, /AbortController/)
   assert.match(client, /tail-pick:\$\{tradeDate\}:manual:/)
-  assert.match(client, /尾盘选股超过45秒/)
+  assert.match(client, /REQUEST_TIMEOUT/)
+  assert.match(client, /15_000/)
+  assert.match(component, /isActiveTailPickTask/)
+  assert.match(component, /submitted\?\.running === true/)
 })
 
 test('尾盘结果在移动端改为单列且操作按钮不溢出', () => {

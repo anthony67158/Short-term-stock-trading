@@ -12,11 +12,13 @@ import {
   usePlanStore,
 } from '../planStore.js'
 import {
+  isActiveTailPickTask,
   loadTailPickState,
   runTailPick,
 } from '../tailPickClient.js'
 
 const STAGES = {
+  QUEUED: '等待云端扫描',
   MARKET_GATE: '读取大盘环境',
   FORMULA_SCAN: '扫描公式信号',
   DISCIPLINE_GATE: '汇总风险指标',
@@ -41,12 +43,13 @@ export default function TailPick({
       if (!mounted.current) return
       setState(next)
       setError('')
-      if (next.task?.status === 'RUNNING') setRunning(true)
-      else if (!quiet) setRunning(false)
+      setRunning(isActiveTailPickTask(next.task))
+      return next
     } catch (loadError) {
       if (mounted.current) {
         setError(loadError.message || '尾盘选股状态读取失败')
       }
+      return null
     } finally {
       if (mounted.current && !quiet) setLoading(false)
     }
@@ -77,16 +80,29 @@ export default function TailPick({
   const run = async () => {
     const tradeDate = state?.session?.tradeDate
     if (!tradeDate || running) return
+    let keepRunning = false
     setRunning(true)
     setError('')
     try {
-      await runTailPick(tradeDate)
-      await load({ quiet: true })
+      const submitted = await runTailPick(tradeDate)
+      keepRunning = submitted?.running === true
+      if (keepRunning && mounted.current) {
+        setState((current) => ({
+          ...current,
+          task: submitted.task || current?.task,
+        }))
+      } else {
+        const next = await load({ quiet: true })
+        keepRunning = isActiveTailPickTask(next?.task)
+      }
     } catch (runError) {
-      setError(runError.message || '尾盘选股运行失败')
-      await load({ quiet: true })
+      const next = await load({ quiet: true })
+      keepRunning = isActiveTailPickTask(next?.task)
+      if (!keepRunning && mounted.current) {
+        setError(runError.message || '尾盘选股运行失败')
+      }
     } finally {
-      if (mounted.current) setRunning(false)
+      if (mounted.current && !keepRunning) setRunning(false)
     }
   }
 

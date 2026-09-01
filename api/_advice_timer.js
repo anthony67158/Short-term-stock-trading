@@ -85,6 +85,14 @@ export function tailPickTimerBody(event, cronKey) {
   return { scheduled: true };
 }
 
+export function tailPickWorkerBody(event, cronKey) {
+  if (!cronKey || !event || typeof event !== 'object') return null;
+  if (event.source !== 'stock-dashboard.tail-pick-worker') return null;
+  if (String(event.key || '') !== String(cronKey)) return null;
+  if (event.mode !== 'manual') return null;
+  return { worker: true, mode: 'manual' };
+}
+
 export function formulaSelectionTimerBody(event, cronKey) {
   if (!cronKey || !event || typeof event !== 'object') return null;
   if (event.triggerName !== 'formula-selection-close-timer') return null;
