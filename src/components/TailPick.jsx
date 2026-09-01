@@ -187,7 +187,8 @@ export default function TailPick({
           result={result}
           book={book}
           allowExecution={
-            !!state?.currentResult
+            result?.session?.isFormal === true
+            && !!state?.currentResult
             && session.status === 'OPEN'
           }
           onAdd={addCandidate}

@@ -351,7 +351,7 @@ export async function readTailPickState({
         timestamp,
       })
     : null
-  const latestDisplay = [manualLatest, formalLatest]
+  const latestDisplay = [manualLatest, projected || formalLatest]
     .filter(Boolean)
     .sort((left, right) =>
       Number(right.session?.dataAsOf || 0)
@@ -377,7 +377,7 @@ export async function readTailPickState({
     latest: formalLatest,
     manualLatest,
     currentResult: projected,
-    displayResult: projected || latestDisplay,
+    displayResult: latestDisplay,
     task: visibleTask,
   }
 }

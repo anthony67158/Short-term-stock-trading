@@ -541,7 +541,7 @@ test('存储适配器对同一交易日读取同一正式结果', async () => {
   })
   assert.deepEqual(state.currentResult, result)
   assert.equal(state.session.label, '手动复盘')
-  assert.deepEqual(state.displayResult, result)
+  assert.deepEqual(state.displayResult, manual)
 })
 
 test('手动与定时扫描共用跨实例活动锁且旧owner不能释放新锁', async () => {
