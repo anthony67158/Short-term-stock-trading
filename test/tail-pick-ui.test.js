@@ -53,6 +53,7 @@ test('结果展示完整计算依据且只写入人工观察计划', () => {
   assert.doesNotMatch(component, /planStore\.buy/)
   assert.doesNotMatch(component, /accountCircuitBreaker/)
   assert.doesNotMatch(results, /唯一操作：今天不新开仓/)
+  assert.match(results, /市场环境参考/)
   assert.match(results, /接近公式计算结果/)
   assert.match(results, /完整展示缺失条件与风险项/)
   assert.match(results, /计算结果仅供判断，不自动下单/)

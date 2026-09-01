@@ -23,6 +23,7 @@ export default function TailPickResults({
   const nearCandidates = result?.result?.nearCandidates || []
   const noTrade = result?.result?.decision === 'NO_TRADE'
   const hasNearCandidates = nearCandidates.length > 0
+  const marketWarnings = result?.marketGate?.blockers || []
   return (
     <>
       <div
@@ -43,6 +44,13 @@ export default function TailPickResults({
         </div>
         <small>数据截至 {timeLabel(result.session?.dataAsOf)}</small>
       </div>
+
+      {marketWarnings.length > 0 && (
+        <div className="tail-pick-market-notes">
+          <strong>市场环境参考</strong>
+          <span>{marketWarnings.join('；')}</span>
+        </div>
+      )}
 
       {noTrade && !hasNearCandidates && (
         <div className="tail-pick-no-trade">

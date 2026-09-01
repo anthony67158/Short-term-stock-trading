@@ -322,7 +322,7 @@ test('接近公式结果全部进入证据补充而不是提前截断', () => {
   assert.doesNotMatch(source, /nearFormulaMatches\.slice/)
 })
 
-test('扫描任务在大盘闸门失败时直接保存不开仓结果', async () => {
+test('大盘环境风险只作提示，仍完整扫描并返回公式结果', async () => {
   let savedRun = null
   let scanCalls = 0
   const tasks = []
@@ -345,12 +345,46 @@ test('扫描任务在大盘闸门失败时直接保存不开仓结果', async ()
         blockers: ['大盘跌破60日线'],
       },
     }),
-    scanCandidates: async () => { scanCalls++; return null },
+    scanCandidates: async () => {
+      scanCalls++
+      return {
+        universe: {
+          inspectedCount: 5500,
+          formulaMatchCount: 0,
+          nearFormulaCount: 1,
+        },
+        candidates: [],
+        nearCandidates: [{
+          code: '600001',
+          name: '接近公式样本',
+          formula: { matched: false, signals: [] },
+          nearMatch: {
+            matched: true,
+            passedCount: 13,
+            totalRuleCount: 14,
+            matchRate: 92.9,
+            failedRules: [{ key: 'AB4', label: '上影线形态' }],
+          },
+          stockGate: { passed: true, evidence: [], blockers: [] },
+          intraday: { passed: true, price: 10, vwap: 9.96 },
+          quote: { price: 10, amount: 100_000_000 },
+          sectorOpportunity: { matched: true },
+          fund: {
+            mainNetYi: 0.1,
+            retailNetYi: -0.05,
+            main5dYi: 0.3,
+            historyDayCount: 5,
+          },
+        }],
+      }
+    },
   })
 
-  assert.equal(scanCalls, 0)
+  assert.equal(scanCalls, 1)
   assert.equal(result.result.decision, 'NO_TRADE')
-  assert.equal(savedRun.result.reason, '大盘跌破60日线')
+  assert.equal(result.result.nearCandidates.length, 1)
+  assert.deepEqual(result.marketGate.blockers, ['大盘跌破60日线'])
+  assert.equal(savedRun.result.nearCandidates.length, 1)
   assert.equal(tasks.at(-1).status, 'DONE')
 })
 

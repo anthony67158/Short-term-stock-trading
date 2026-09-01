@@ -1663,6 +1663,21 @@ textarea:focus {
   font-weight: 500;
 }
 
+.tail-pick-market-notes {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-md);
+  border-bottom: 1px solid var(--color-rule-2);
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+}
+
+.tail-pick-market-notes strong {
+  flex: 0 0 auto;
+  color: var(--color-warning);
+}
+
 .tail-pick-list {
   display: grid;
 }
@@ -2371,6 +2386,7 @@ textarea:focus {
   }
 
   .tail-pick-summary,
+  .tail-pick-market-notes,
   .tail-pick-near-head,
   .formula-selection-summary,
   .formula-selection-foot,

@@ -66,38 +66,6 @@ function publicCandidate(candidate) {
   }
 }
 
-function noTradeResult({
-  tradeDate,
-  now,
-  mode,
-  isLive,
-  marketGate,
-  universe = null,
-  reason,
-}) {
-  return {
-    ok: true,
-    schemaVersion: TAIL_PICK_SCHEMA_VERSION,
-    session: {
-      tradeDate,
-      dataAsOf: now,
-      isLive,
-      window: '14:50-14:55',
-      mode,
-      isFormal: mode === 'scheduled',
-    },
-    marketGate,
-    result: {
-      decision: 'NO_TRADE',
-      validationState: 'PENDING_INTRADAY_BACKTEST',
-      primaryCode: null,
-      candidates: [],
-      reason,
-      universe,
-    },
-  }
-}
-
 async function saveProgress(store, task, stage, progress, message, now) {
   await store.saveTask({
     ...task,
@@ -197,28 +165,6 @@ export function runTailPickScan({
       const marketContext = await collectMarketContext({
         now: requestedAt,
       })
-      if (!marketContext.marketGate.allowed) {
-        const result = noTradeResult({
-          tradeDate,
-          now: Number(now()) || Date.now(),
-          mode: runMode,
-          isLive: session.status === 'OPEN',
-          marketGate: marketContext.marketGate,
-          reason: marketContext.marketGate.blockers[0]
-            || '今天不适合新增仓位',
-        })
-        if (runMode === 'scheduled') await store.saveRun(result)
-        else await store.saveManualRun(result)
-        await store.saveTask({
-          ...task,
-          status: 'DONE',
-          stage: 'DONE',
-          progress: 100,
-          message: '大盘纪律未通过，今日不开仓',
-          finishedAt: Number(now()) || Date.now(),
-        })
-        return result
-      }
 
       await saveProgress(
         store,
