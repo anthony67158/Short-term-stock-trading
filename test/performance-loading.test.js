@@ -88,7 +88,6 @@ test('详情短缓存合并同一资源的并发请求并支持后台重验', as
 
 test('K线实时请求失败时仍可读取一天内最近成功快照', async () => {
   clearPollingCache()
-  const now = Date.now()
   const detail = {
     ok: true,
     candles: [{ date: '2026-08-28', close: 12.3 }],
@@ -97,16 +96,17 @@ test('K线实时请求失败时仍可读取一天内最近成功快照', async (
     ttlMs: 120000,
     preferCache: false,
   })
+  const loadedAt = Date.now()
 
   assert.equal(
-    readPollingCache('detail:002230', 120000, now + 180000),
+    readPollingCache('detail:002230', 120000, loadedAt + 180000),
     null,
   )
   assert.deepEqual(
     readPollingCacheStale(
       'detail:002230',
       24 * 60 * 60 * 1000,
-      now + 180000,
+      loadedAt + 180000,
     ),
     detail,
   )
@@ -114,7 +114,7 @@ test('K线实时请求失败时仍可读取一天内最近成功快照', async (
     readPollingCacheStale(
       'detail:002230',
       24 * 60 * 60 * 1000,
-      now + 24 * 60 * 60 * 1000 + 1,
+      loadedAt + 24 * 60 * 60 * 1000 + 1,
     ),
     null,
   )
