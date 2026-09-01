@@ -159,6 +159,24 @@ test('上一版主计划只提取连续决策需要的白名单字段', () => {
   assert.equal(compact.news, undefined)
 })
 
+test('上一版到价终局保留重评标记供新事件门控', () => {
+  const compact = compactAdvicePlan({
+    advice: {
+      action: '观望',
+      title: '放弃买入',
+      reviewDecision: {
+        schemaVersion: 'triggered-review-decision.v1',
+        terminal: true,
+        outcome: '放弃买入',
+        operation: '不操作',
+      },
+    },
+  })
+
+  assert.equal(compact.reviewDecision.terminal, true)
+  assert.equal(compact.reviewDecision.operation, '不操作')
+})
+
 test('每次刷新保留精简的计划修订历史而不是只剩最后一版', () => {
   const entry = buildAdviceCacheEntry(previous, {
     advice: {

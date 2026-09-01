@@ -109,6 +109,14 @@ export function isTriggeredReviewEvent(event = {}) {
   return ['price-review', 'judge'].includes(String(event?.kind || ''))
 }
 
+export function isTerminalReassessmentCandidate(advice = {}) {
+  const decision = advice?.reviewDecision
+  if (decision?.terminal !== true) return false
+  const outcome = text(decision.outcome, 60)
+  return decision.operation === '不操作'
+    || /维持观望|维持持有|放弃买入|放弃加仓/.test(outcome)
+}
+
 export function shouldCollectTriggeredReviewSource(event = {}, key = '') {
   return !isTriggeredReviewEvent(event)
     || TRIGGERED_REVIEW_SOURCE_KEYS.has(String(key || ''))
@@ -339,7 +347,7 @@ function clearReviewPrices(result) {
   delete result.executionPlan
   delete result.presentation
   result.reviewTrigger =
-    '本次触发已经结束；仅在新的独立事件或用户主动生成时重新判断'
+    '本次触发已经结束；不再沿用原触发价，仅在价格、资金或技术结构出现新变化时重新判断'
   result.reviewTerminal = true
   return result
 }
@@ -387,7 +395,7 @@ function reviewDecisionRecord({
       targetPrice: positive(result?.targetPrice),
       reassessment: executed
         ? '人工确认并记录真实成交后，按本轮计划继续管理'
-        : '本次触发结束，仅在新实质事件或用户主动生成时重新评估',
+        : '本次触发结束；持续复核开启时，仅在价格、主力与小单资金或技术结构出现新变化后重新评估',
     },
   }
 }
@@ -474,8 +482,8 @@ function normalizeBuyReview(result, payload, bases, now) {
     result.targetPrice = null
     result.planAmount = 0
     result.actionPlan = outcome === '放弃买入'
-      ? `放弃本次买入：${reason}；本轮结束，不再设置新的复核价格`
-      : `维持观望：${reason}；原触发价已经消费，不再设置新的复核价格`
+      ? `放弃本次买入：${reason}；原触发价终止，新证据出现后再评估`
+      : `维持观望：${reason}；原触发价终止，新证据出现后再评估`
     result.invalidation = '本次价格触发已经完成，不再沿用原触发价'
   }
   result.nextAction = result.actionPlan
@@ -605,7 +613,8 @@ function normalizeHoldingReview(result, payload, bases, now) {
   } else {
     result.addPrice = null
     result.reducePrice = null
-    result.actionPlan = `${outcome}：${reason}；原触发价已经消费，不再设置新的复核价格`
+    result.actionPlan =
+      `${outcome}：${reason}；原触发价终止，新证据出现后再评估`
   }
   result.nextAction = result.actionPlan
   result.nextOpenPlan = result.nextOpenPlan
@@ -699,7 +708,7 @@ export function enforceTriggeredReviewDecisionPlan({
       ...(decision.followUpPlan || {}),
       manualConfirmationRequired: true,
       reassessment:
-        '本次触发结束，仅在新实质事件或用户主动生成时重新评估',
+        '本次触发结束；持续复核开启时，仅在价格、主力与小单资金或技术结构出现新变化后重新评估',
     },
   }
   delete result.decisionPlan

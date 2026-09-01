@@ -1,5 +1,8 @@
 import { reviewPriceMateriality } from './adviceReviewRisk.js'
 import { sanitizedAdvicePriceContract } from './advicePriceContract.js'
+import {
+  isTerminalReassessmentCandidate,
+} from './triggeredReviewDecision.js'
 
 export const ADVICE_REVIEW_EVENT_VERSION =
   'advice-review-event.v1'
@@ -195,6 +198,9 @@ export function buildAdviceReviewEventQueue({
   if (!previousDigest || !currentDigest) return []
   const events = []
   const nearPrice = nearExecutionPrice(snapshot, previousAdvice)
+  const terminalReassessment = isTerminalReassessmentCandidate(
+    previousAdvice,
+  )
   const priceChange = reviewPriceMateriality({
     previous: previousDigest,
     current: currentDigest,
@@ -234,7 +240,7 @@ export function buildAdviceReviewEventQueue({
       kind: 'FIVE_MINUTE_STRUCTURE',
       priority: 3,
       reason: '完整5分钟结构或均价线位置发生变化',
-      requiresLlm: nearPrice,
+      requiresLlm: nearPrice || terminalReassessment,
       deterministicAction: 'STRUCTURE_RECHECK',
     })
   }
@@ -256,7 +262,7 @@ export function buildAdviceReviewEventQueue({
       kind: 'SECTOR_ROLE',
       priority: 2,
       reason: '板块状态或个股前排资格发生变化',
-      requiresLlm: nearPrice,
+      requiresLlm: nearPrice || terminalReassessment,
       deterministicAction:
         currentSector.state === 'WEAKENING'
         || currentSector.role === 'LAGGARD'
@@ -265,19 +271,31 @@ export function buildAdviceReviewEventQueue({
     })
   }
 
-  const previousFlow = previousDigest.tactical?.flowRelation
-    || previousDigest.funds?.retailRelation
-  const currentFlow = currentDigest.tactical?.flowRelation
-    || currentDigest.funds?.retailRelation
-  if (previousFlow !== currentFlow) {
+  const previousFlow = {
+    relation: previousDigest.tactical?.flowRelation
+      || previousDigest.funds?.retailRelation,
+    mainNetSign: previousDigest.funds?.mainNetSign,
+    retailNetSign: previousDigest.funds?.retailNetSign,
+  }
+  const currentFlow = {
+    relation: currentDigest.tactical?.flowRelation
+      || currentDigest.funds?.retailRelation,
+    mainNetSign: currentDigest.funds?.mainNetSign,
+    retailNetSign: currentDigest.funds?.retailNetSign,
+  }
+  if (JSON.stringify(previousFlow) !== JSON.stringify(currentFlow)) {
     addReviewEvent(events, {
       kind: 'FUND_FLOW_RELATION',
       priority: 2,
-      reason: '主力与小单资金关系发生反转',
-      requiresLlm: nearPrice,
+      reason: '主力或小单资金方向及两者关系发生反转',
+      requiresLlm: nearPrice || terminalReassessment,
       deterministicAction:
-        currentFlow === 'DISTRIBUTION'
-        || currentFlow === 'main_out_retail_in'
+        currentFlow.relation === 'DISTRIBUTION'
+        || currentFlow.relation === 'main_out_retail_in'
+        || (
+          currentFlow.mainNetSign === -1
+          && currentFlow.retailNetSign === 1
+        )
           ? 'STRUCTURAL_EXIT_CHECK'
           : 'FLOW_RECHECK',
     })
@@ -431,6 +449,7 @@ export function evaluateScheduledReview({
   }
   if (
     previousAdvice
+    && !isTerminalReassessmentCandidate(previousAdvice)
     && !sanitizedAdvicePriceContract(previousAdvice)
   ) {
     return {

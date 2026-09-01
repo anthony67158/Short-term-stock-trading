@@ -236,7 +236,7 @@ test('军师正文暂缺时也安排下次重试，避免每5分钟重复调用'
   assert.equal(adviceReviewDue(entry, now + 5 * 60000), false)
 })
 
-test('到价终局复核完成后不再沿用原价格进入定时循环', () => {
+test('到价放弃后不沿用原价格但每5分钟检查新实质事件', () => {
   const now = new Date('2026-08-10T02:00:00Z').getTime()
   const entry = buildAdviceCacheEntry(null, {
     mode: 'buy_advice',
@@ -249,11 +249,36 @@ test('到价终局复核完成后不再沿用原价格进入定时循环', () =>
         schemaVersion: 'triggered-review-decision.v1',
         terminal: true,
         outcome: '维持观望',
+        operation: '不操作',
       },
     },
   }, now)
 
   assert.equal(entry.advice.reviewCycle.status, 'terminal')
+  assert.equal(entry.advice.reviewCycle.trigger, 'terminal-reassessment')
+  assert.equal(entry.advice.reviewCycle.nextReviewAt, now + 5 * 60000)
+  assert.equal(adviceReviewDue(entry, now + 5 * 60000 - 1), false)
+  assert.equal(adviceReviewDue(entry, now + 5 * 60000), true)
+})
+
+test('到价确认执行后保持终局且不自动重开交易决策', () => {
+  const now = new Date('2026-08-10T02:00:00Z').getTime()
+  const entry = buildAdviceCacheEntry(null, {
+    mode: 'buy_advice',
+    reviewDisposition: 'terminal',
+    reviewReason: '立即买入',
+    advice: {
+      action: '立即买入',
+      title: '立即买入',
+      reviewDecision: {
+        schemaVersion: 'triggered-review-decision.v1',
+        terminal: true,
+        outcome: '立即买入',
+        operation: '买入',
+      },
+    },
+  }, now)
+
   assert.equal(entry.advice.reviewCycle.nextReviewAt, null)
   assert.equal(adviceReviewDue(entry, now + 24 * 60 * 60 * 1000), false)
 })

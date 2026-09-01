@@ -2304,6 +2304,12 @@ export function enqueueAutoRefreshDue(data, now = Date.now()) {
   const advice = data.advice && typeof data.advice === 'object'
     ? data.advice
     : {};
+  const needsPriceMigration = (entry) => {
+    const currentAdvice = entry?.advice;
+    return !!currentAdvice
+      && currentAdvice.reviewDecision?.terminal !== true
+      && !sanitizedAdvicePriceContract(currentAdvice);
+  };
   const holdSet = new Set(
     holding.map((item) => String(item?.code || '')).filter(Boolean),
   );
@@ -2324,13 +2330,12 @@ export function enqueueAutoRefreshDue(data, now = Date.now()) {
   let holdCreated = 0;
   let watchCreated = 0;
   const enqueue = (code, name, mode) => {
-    const needsPriceMigration = !!advice?.[code]?.advice
-      && !sanitizedAdvicePriceContract(advice[code].advice);
+    const migratePriceContract = needsPriceMigration(advice?.[code]);
     const reviewAt = Number(
       advice?.[code]?.reviewCycle?.nextReviewAt
       ?? advice?.[code]?.advice?.reviewCycle?.nextReviewAt,
     ) || now;
-    const scheduleKey = needsPriceMigration
+    const scheduleKey = migratePriceContract
       ? `price-contract:${Math.floor(now / (5 * 60 * 1000))}`
       : reviewAt;
     const { created } = enqueueJob(data, {
@@ -2355,10 +2360,7 @@ export function enqueueAutoRefreshDue(data, now = Date.now()) {
     isAdviceReviewEnabled(settings, code)
     && (
       adviceReviewDue(advice[code], now)
-      || (
-        advice?.[code]?.advice
-        && !sanitizedAdvicePriceContract(advice[code].advice)
-      )
+      || needsPriceMigration(advice?.[code])
     )
   );
   const orderedCodes = prioritizeAdviceReviewCodes({

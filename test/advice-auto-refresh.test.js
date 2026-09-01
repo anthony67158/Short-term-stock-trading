@@ -181,6 +181,46 @@ test('云端按每只股票自己的复核时间排队', () => {
   assert.equal(data.reviewJobs['600001'], undefined)
 })
 
+test('终局放弃只为新事件排队且已确认执行保持关闭', () => {
+  const now = new Date('2026-08-10T02:00:00Z').getTime()
+  const data = {
+    settings: {},
+    holding: [],
+    plan: [
+      { code: '000001', name: '放弃后观察' },
+      { code: '000002', name: '已经确认买入' },
+    ],
+    advice: {
+      '000001': {
+        advice: {
+          action: '观望',
+          reviewDecision: {
+            terminal: true,
+            outcome: '放弃买入',
+            operation: '不操作',
+          },
+          reviewCycle: { nextReviewAt: now },
+        },
+      },
+      '000002': {
+        advice: {
+          action: '立即买入',
+          reviewDecision: {
+            terminal: true,
+            outcome: '立即买入',
+            operation: '买入',
+          },
+          reviewCycle: { nextReviewAt: null },
+        },
+      },
+    },
+  }
+
+  assert.equal(enqueueAutoRefreshDue(data, now), 1)
+  assert.equal(data.reviewJobs['000001'].source, 'auto')
+  assert.equal(data.reviewJobs['000002'], undefined)
+})
+
 test('旧建议缺少价格契约时不等待原计划时间并立即排队迁移复核', () => {
   const now = new Date('2026-08-10T02:00:00Z').getTime()
   const data = {

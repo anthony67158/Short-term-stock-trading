@@ -269,7 +269,7 @@ test('买入复核未确认时终态只能维持观望且不得生成新观察�
 
   assert.equal(result.action, '观望')
   assert.equal(result.reviewDecision.outcome, '维持观望')
-  assert.match(result.actionPlan, /原触发价已经消费/)
+  assert.match(result.actionPlan, /原触发价终止/)
   assert.equal(result.pullbackWatchPrice, null)
   assert.equal(result.breakoutWatchPrice, null)
   assert.doesNotMatch(result.actionPlan, /13元/)
@@ -320,7 +320,8 @@ test('买入逻辑失效时终态为放弃买入', () => {
   assert.equal(result.reviewDecision.operation, '不操作')
   assert.match(result.reviewDecision.reason, /重大利空/)
   assert.match(result.actionPlan, /重大利空/)
-  assert.match(result.actionPlan, /本轮结束/)
+  assert.match(result.actionPlan, /原触发价终止/)
+  assert.match(result.actionPlan, /新证据出现后再评估/)
 })
 
 test('加仓逻辑失效时终态为放弃加仓并说明原因', () => {
@@ -391,7 +392,8 @@ test('限时复核失败直接形成维持观望终态而不是重排新价格',
   assert.equal(result.action, '观望')
   assert.equal(result.reviewDecision.terminal, true)
   assert.equal(result.breakoutWatchPrice, null)
-  assert.match(result.actionPlan, /不再设置新的复核价格/)
+  assert.match(result.actionPlan, /原触发价终止/)
+  assert.match(result.actionPlan, /新证据出现后再评估/)
   assert.match(result.reason, /限时内未返回/)
 })
 

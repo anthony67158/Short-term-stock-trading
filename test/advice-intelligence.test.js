@@ -102,6 +102,122 @@ test('自动复核证据无实质变化时跳过LLM', () => {
   })
 })
 
+test('放弃买入后无新证据时继续观察但不重复调用LLM', () => {
+  const previous = adviceEvidenceDigest(snapshot())
+  const result = evaluateScheduledReview({
+    origin: 'auto',
+    previousDigest: previous,
+    snapshot: snapshot(),
+    hasPreviousAdvice: true,
+    previousAdvice: {
+      action: '观望',
+      reviewDecision: {
+        terminal: true,
+        outcome: '放弃买入',
+        operation: '不操作',
+      },
+    },
+  })
+
+  assert.deepEqual(result, {
+    shouldRunLLM: false,
+    disposition: 'unchanged',
+    reason: '关键证据无实质变化',
+  })
+})
+
+test('放弃买入后资金关系反转作为新事件重新调用LLM', () => {
+  const previousSnapshot = snapshot({
+    evidence: {
+      ...snapshot().evidence,
+      funds: {
+        mainNetYi: -0.8,
+        retailNetYi: 0.6,
+        retailFlow: { relation: 'main_out_retail_in' },
+      },
+      decisionSignals: {
+        ...snapshot().evidence.decisionSignals,
+        tactical: {
+          flow: { relation: 'DISTRIBUTION' },
+        },
+      },
+    },
+  })
+  const currentSnapshot = snapshot({
+    evidence: {
+      ...previousSnapshot.evidence,
+      funds: {
+        mainNetYi: 0.9,
+        retailNetYi: -0.5,
+        retailFlow: { relation: 'main_in_retail_out' },
+      },
+      decisionSignals: {
+        ...previousSnapshot.evidence.decisionSignals,
+        tactical: {
+          flow: { relation: 'ACCUMULATION' },
+        },
+      },
+    },
+  })
+  const result = evaluateScheduledReview({
+    origin: 'auto',
+    previousDigest: adviceEvidenceDigest(previousSnapshot),
+    snapshot: currentSnapshot,
+    hasPreviousAdvice: true,
+    previousAdvice: {
+      action: '观望',
+      reviewDecision: {
+        terminal: true,
+        outcome: '放弃买入',
+        operation: '不操作',
+      },
+    },
+  })
+
+  assert.equal(result.shouldRunLLM, true)
+  assert.equal(result.disposition, 'material-change')
+  assert.match(result.reason, /资金.*关系/)
+})
+
+test('放弃加仓后主力与小单方向反转也构成新事件', () => {
+  const previousSnapshot = snapshot({
+    evidence: {
+      ...snapshot().evidence,
+      funds: {
+        mainNetYi: -0.8,
+        retailNetYi: 0.6,
+      },
+    },
+  })
+  const currentSnapshot = snapshot({
+    evidence: {
+      ...previousSnapshot.evidence,
+      funds: {
+        mainNetYi: 0.9,
+        retailNetYi: -0.5,
+      },
+    },
+  })
+  const result = evaluateScheduledReview({
+    origin: 'auto',
+    previousDigest: adviceEvidenceDigest(previousSnapshot),
+    snapshot: currentSnapshot,
+    hasPreviousAdvice: true,
+    previousAdvice: {
+      action: '持有',
+      reviewDecision: {
+        terminal: true,
+        outcome: '放弃加仓',
+        operation: '不操作',
+      },
+    },
+  })
+
+  assert.equal(result.shouldRunLLM, true)
+  assert.equal(result.disposition, 'material-change')
+  assert.match(result.reason, /资金.*关系/)
+})
+
 test('短线战术状态变化优先触发复核', () => {
   const previousSnapshot = snapshot({
     evidence: {

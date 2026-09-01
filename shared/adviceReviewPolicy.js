@@ -6,6 +6,9 @@ import {
 } from './adviceAutoRefreshPolicy.js'
 import { adaptiveAdviceReviewInterval } from './adviceReviewRisk.js'
 import { isTradingDayAt } from './tradingCalendar.js'
+import {
+  isTerminalReassessmentCandidate,
+} from './triggeredReviewDecision.js'
 
 const BJ_OFFSET_MS = 8 * 60 * 60 * 1000
 
@@ -127,20 +130,33 @@ export function buildAdviceReviewCycle(previous, data, at = Date.now()) {
   const previousAction = previous?.advice?.action
     || previous?.advice?.stance
     || ''
-  if (advice?.reviewDecision?.terminal === true) {
+  if (effectiveAdvice?.reviewDecision?.terminal === true) {
+    const continueMonitoring = isTerminalReassessmentCandidate(
+      effectiveAdvice,
+    )
     return {
       status: 'terminal',
       sequence: Math.max(0, Number(priorCycle.sequence) || 0) + 1,
       reviewedAt: at,
-      nextReviewAt: null,
-      configuredIntervalMin: null,
-      intervalMin: null,
+      nextReviewAt: continueMonitoring
+        ? nextAdviceReviewAt({
+            now: at,
+            mode,
+            intervalMin: 5,
+          })
+        : null,
+      configuredIntervalMin: continueMonitoring ? 5 : null,
+      intervalMin: continueMonitoring ? 5 : null,
       riskLevel: 'normal',
-      riskReasons: [],
-      trigger: 'price-terminal',
+      riskReasons: continueMonitoring
+        ? ['等待价格、资金或技术结构出现新实质变化']
+        : [],
+      trigger: continueMonitoring
+        ? 'terminal-reassessment'
+        : 'price-terminal',
       reason: String(
         data?.reviewReason
-        || advice.reviewDecision.outcome
+        || effectiveAdvice.reviewDecision.outcome
         || '到价复核已完成',
       ).slice(0, 160),
       receipt: reviewReceipt(data?.reviewReceipt),
@@ -181,9 +197,12 @@ export function buildAdviceReviewCycle(previous, data, at = Date.now()) {
 }
 
 export function adviceReviewDue(entry, now = Date.now()) {
+  const advice = entry?.advice && typeof entry.advice === 'object'
+    ? entry.advice
+    : entry
   if (
-    entry?.reviewDecision?.terminal === true
-    || entry?.advice?.reviewDecision?.terminal === true
+    advice?.reviewDecision?.terminal === true
+    && !isTerminalReassessmentCandidate(advice)
   ) return false
   const nextReviewAt = Number(
     entry?.reviewCycle?.nextReviewAt
