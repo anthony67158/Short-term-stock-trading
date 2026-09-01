@@ -43,3 +43,29 @@ export function quoteDisplayState(quote = {}) {
     status,
   }
 }
+
+export function stockDetailHeaderState(quote = {}, candleOverview = {}) {
+  const quoteState = quoteDisplayState(quote)
+  const candle = candleOverview && typeof candleOverview === 'object'
+    ? candleOverview
+    : {}
+  const candlePrice = positive(
+    candle.price ?? candle.close,
+  )
+  const quoteAvailable = quoteState.price != null
+  return {
+    price: quoteAvailable ? quoteState.price : candlePrice,
+    pct: quoteAvailable
+      ? quoteState.pct
+      : finite(candle.pct),
+    source: quoteAvailable ? 'quote' : 'candle',
+    sourceLabel: quoteAvailable
+      ? (
+          quoteState.label
+          || (quoteState.livePrice != null ? '实时行情' : '最新行情')
+        )
+      : '最新K线',
+    live: quoteState.livePrice != null,
+    status: quoteAvailable ? quoteState.status : 'KLINE',
+  }
+}

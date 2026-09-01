@@ -48,6 +48,7 @@ import {
   restoreAdviceEntryQuantEvidence,
 } from '../../shared/adviceQuantResult.js'
 import { stockNoteText } from '../../shared/stockNotes.js'
+import { stockDetailHeaderState } from '../../shared/quoteDisplay.js'
 import FormulaPrice from './FormulaPrice'
 import { useTheme } from '../themeStore'
 import {
@@ -682,6 +683,10 @@ export default function StockDetail({ stock, onClose }) {
 
     return { last, price, pct: last.pct, mas, trend, periodLabel, signals }
   }, [candles, klt])
+  const headerQuote = useMemo(
+    () => stockDetailHeaderState(data?.quote, overview),
+    [data?.quote, overview],
+  )
 
   const option = useMemo(() => {
     if (!candles.length) return null
@@ -940,21 +945,21 @@ export default function StockDetail({ stock, onClose }) {
                   <span
                     className={
                       'dq-price '
-                      + pctClass(overview.pct)
+                      + pctClass(headerQuote.pct)
                       + (
-                        String(fmtRaw(overview.price)).length > 8
+                        String(fmtRaw(headerQuote.price)).length > 8
                           ? ' compact'
                           : ''
                       )
                     }
                   >
-                    {fmtRaw(overview.price)}
+                    {fmtRaw(headerQuote.price)}
                   </span>
-                  <span className={'dq-pct ' + pctClass(overview.pct)}>{fmtPct(overview.pct)}</span>
+                  <span className={'dq-pct ' + pctClass(headerQuote.pct)}>{fmtPct(headerQuote.pct)}</span>
                 </div>
                 {overview.trend && <span className={'dq-trend ' + overview.trend.cls}>{overview.trend.label}</span>}
                 <span className="dq-period">
-                  最新{overview.periodLabel}K
+                  {headerQuote.sourceLabel}
                   {refreshedAt && <span className="dq-updated">· 已更新 {new Date(refreshedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>}
                 </span>
               </div>
