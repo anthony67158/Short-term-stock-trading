@@ -16339,18 +16339,14 @@ html[data-theme="light"]
 
 .sector-forecast-panel,
 html[data-theme="light"] .sector-forecast-panel {
-  border-color: var(--color-rule-2);
+  border-color: var(--color-rule);
   background: var(--color-paper-2);
 }
 
 .sector-forecast-panel > .panel-head,
 html[data-theme="light"] .sector-forecast-panel > .panel-head {
-  border-bottom-color: var(--color-rule-2);
-  background: color-mix(
-    in oklch,
-    var(--color-accent) 2%,
-    var(--color-paper-2)
-  );
+  border-bottom-color: var(--color-rule);
+  background: var(--color-paper-3);
 }
 
 .modal-mask:has(.detail-panel) {
