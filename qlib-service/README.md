@@ -14,6 +14,24 @@ https://quant-score-nlxgclpdbu.cn-hangzhou.fcapp.run
 时间外验证并发布到 `opportunitymodel/manifest.json` 的模型时，接口稳定返回
 `NOT_READY` 和空概率，不影响现有 36 维 `/predict`。
 
+机会模型训练必须从项目根目录执行以下顺序：
+
+```bash
+set -a; . ./.env; set +a
+npm run opportunity:export
+npm run opportunity:dataset
+npm run opportunity:train
+```
+
+少于 1000 个成熟候选、300 个完整成交结果或 60 个独立交易日时，训练只生成
+`NOT_READY` 报告。通过影子闸门后仍需显式发布，禁止训练脚本自动覆盖线上模型：
+
+```bash
+cd qlib-service
+python3 upload_opportunity_model.py \
+  --directory opportunity-model/shadow
+```
+
 ## 生产架构
 
 - 计算：阿里云 FC 3.0 `quant-score`

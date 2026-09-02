@@ -24,6 +24,9 @@
     "harness:online": "node harness/run.mjs --suite endpoint --online --no-baseline",
     "harness:shadow": "node harness/run.mjs --suite shadow --online --no-baseline",
     "harness:advice": "node scripts/advice-reliability-harness.mjs",
+    "opportunity:export": "node scripts/export-opportunity-outcomes.mjs",
+    "opportunity:dataset": "python3 qlib-service/opportunity_dataset.py --input qlib-service/opportunity-outcomes.json --output qlib-service/opportunity-dataset.npz",
+    "opportunity:train": "python3 qlib-service/train_opportunity_score.py --dataset qlib-service/opportunity-dataset.npz --output qlib-service/opportunity-model",
     "backtest": "node backtest/run.mjs"
   },
   "dependencies": {
