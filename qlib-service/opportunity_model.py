@@ -38,7 +38,7 @@ ARTIFACT_FILENAMES = {
 
 _MODELS = None
 _META = None
-_LOADED_AT = 0.0
+_LAST_CHECK_AT = 0.0
 
 
 def _sha256(path):
@@ -192,19 +192,19 @@ def _bundled_release():
 
 
 def get_opportunity_models(force=False):
-    global _MODELS, _META, _LOADED_AT
+    global _MODELS, _META, _LAST_CHECK_AT
     now = time.time()
     if (
         not force
-        and _MODELS is not None
-        and now - _LOADED_AT < MODEL_TTL_SECONDS
+        and _LAST_CHECK_AT > 0
+        and now - _LAST_CHECK_AT < MODEL_TTL_SECONDS
     ):
         return _MODELS, _META
     loaded = _download_release() or _bundled_release()
+    _LAST_CHECK_AT = now
     if loaded is None:
-        return None, None
+        return _MODELS, _META
     _MODELS, _META = loaded
-    _LOADED_AT = now
     return _MODELS, _META
 
 
@@ -229,6 +229,13 @@ def _is_out_of_distribution(vector, metadata):
         return True
     span = np.maximum(maximum - minimum, 1e-6)
     tolerance = span * 0.05
+    for index, name in enumerate(FEATURE_NAMES):
+        if (
+            name.endswith("_UNKNOWN")
+            and values[index] >= 0.5
+            and maximum[index] < 0.5
+        ):
+            return True
     violations = (
         (values < minimum - tolerance)
         | (values > maximum + tolerance)

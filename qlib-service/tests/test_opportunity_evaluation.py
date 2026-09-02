@@ -131,6 +131,18 @@ class OpportunityEvaluationTest(unittest.TestCase):
                 "challenger": {"mae": 0.50},
                 "baseline": {"mae": 0.50},
             },
+            "ranking": {
+                "challenger": {
+                    "ndcg_at_5": 0.6,
+                    "precision_at_5": 0.6,
+                    "mean_net_r_at_5": 0.2,
+                },
+                "baseline": {
+                    "ndcg_at_5": 0.59,
+                    "precision_at_5": 0.59,
+                    "mean_net_r_at_5": 0.19,
+                },
+            },
         })
         rejected = shadow_gate({
             **accepted["metrics"],

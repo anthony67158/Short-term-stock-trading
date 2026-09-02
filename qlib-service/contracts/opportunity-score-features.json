@@ -14,7 +14,6 @@
     "stopDistancePct",
     "targetDistancePct",
     "marketAllowed",
-    "displayed",
     "formula_TAIL_REVERSAL",
     "formula_INTRADAY_VWAP_PULLBACK",
     "formula_INTRADAY_ACCUMULATION",

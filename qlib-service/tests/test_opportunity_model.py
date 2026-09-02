@@ -2,6 +2,7 @@ import hashlib
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
@@ -10,6 +11,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SERVICE_ROOT = os.path.abspath(os.path.join(HERE, ".."))
 sys.path.insert(0, SERVICE_ROOT)
 
+import opportunity_model  # noqa: E402
 from opportunity_contract import (  # noqa: E402
     FEATURE_NAMES,
     FEATURE_SCHEMA_VERSION,
@@ -166,6 +168,97 @@ class OpportunityModelTest(unittest.TestCase):
         self.assertTrue(result["outOfDistribution"])
         self.assertIsNone(result["pFill"])
         self.assertIsNone(result["expectedNetR"])
+
+    def test_unseen_unknown_category_fails_closed(self):
+        value = item()
+        value["factors"]["market_STANDARD"] = 0.0
+        value["factors"]["market_UNKNOWN"] = 1.0
+        metadata = meta()
+        unknown_index = FEATURE_NAMES.index("market_UNKNOWN")
+        metadata["ood"]["maximum"][unknown_index] = 0.0
+
+        result = predict_opportunity_items(
+            {"items": [value]},
+            models={
+                "pFill": FakeModel(0.9),
+                "pWinGivenFill": FakeModel(0.9),
+                "expectedNetR": FakeModel(1.0),
+            },
+            metadata=metadata,
+        )[0]
+
+        self.assertEqual(result["state"], "OUT_OF_DISTRIBUTION")
+
+    def test_loader_caches_missing_manifest_and_keeps_last_good_model(self):
+        previous = (
+            opportunity_model._MODELS,
+            opportunity_model._META,
+            opportunity_model._LAST_CHECK_AT,
+        )
+        self.addCleanup(setattr, opportunity_model, "_MODELS", previous[0])
+        self.addCleanup(setattr, opportunity_model, "_META", previous[1])
+        self.addCleanup(
+            setattr,
+            opportunity_model,
+            "_LAST_CHECK_AT",
+            previous[2],
+        )
+        opportunity_model._MODELS = None
+        opportunity_model._META = None
+        opportunity_model._LAST_CHECK_AT = 0
+        with (
+            patch.object(
+                opportunity_model,
+                "_download_release",
+                return_value=None,
+            ) as download,
+            patch.object(
+                opportunity_model,
+                "_bundled_release",
+                return_value=None,
+            ),
+            patch.object(
+                opportunity_model.time,
+                "time",
+                return_value=1000,
+            ),
+        ):
+            self.assertEqual(
+                opportunity_model.get_opportunity_models(),
+                (None, None),
+            )
+            self.assertEqual(
+                opportunity_model.get_opportunity_models(),
+                (None, None),
+            )
+            download.assert_called_once()
+
+        current_models = {"pFill": FakeModel(0.5)}
+        current_meta = {"modelVersion": "current"}
+        opportunity_model._MODELS = current_models
+        opportunity_model._META = current_meta
+        opportunity_model._LAST_CHECK_AT = 0
+        with (
+            patch.object(
+                opportunity_model,
+                "_download_release",
+                return_value=None,
+            ),
+            patch.object(
+                opportunity_model,
+                "_bundled_release",
+                return_value=None,
+            ),
+            patch.object(
+                opportunity_model.time,
+                "time",
+                return_value=2000,
+            ),
+        ):
+            self.assertEqual(
+                opportunity_model.get_opportunity_models(force=True),
+                (current_models, current_meta),
+            )
 
 
 if __name__ == "__main__":

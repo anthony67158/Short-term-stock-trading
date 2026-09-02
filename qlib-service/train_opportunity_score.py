@@ -22,7 +22,11 @@ from opportunity_evaluation import (
     regression_metrics,
     shadow_gate,
 )
-from time_splits import three_way_purged_split
+from time_splits import (
+    expanding_date_folds,
+    purged_holdout_split,
+    three_way_purged_split,
+)
 
 
 MODEL_VERSION_PREFIX = "opportunity-score"
@@ -312,6 +316,125 @@ def _not_ready_report(now, readiness, split=None):
     }
 
 
+def _walk_forward_report(data, *, n_splits=3, purge_dates=5):
+    folds = expanding_date_folds(
+        data["dates"],
+        n_splits=n_splits,
+        purge_dates=purge_dates,
+    )
+    reports = []
+    for fold_number, (outer_train, validation) in enumerate(folds, 1):
+        try:
+            inner_train_relative, calibration_relative, inner_meta = (
+                purged_holdout_split(
+                    data["dates"][outer_train],
+                    holdout_fraction=0.2,
+                    purge_dates=purge_dates,
+                )
+            )
+            train_index = outer_train[inner_train_relative]
+            calibration_index = outer_train[calibration_relative]
+            win_train = _conditional_indices(
+                train_index,
+                data["y_win"],
+                data["y_net_r"],
+            )
+            win_calibration = _conditional_indices(
+                calibration_index,
+                data["y_win"],
+                data["y_net_r"],
+            )
+            win_validation = _conditional_indices(
+                validation,
+                data["y_win"],
+                data["y_net_r"],
+            )
+            for indices, labels in (
+                (train_index, data["y_fill"]),
+                (calibration_index, data["y_fill"]),
+                (validation, data["y_fill"]),
+                (win_train, data["y_win"]),
+                (win_calibration, data["y_win"]),
+                (win_validation, data["y_win"]),
+            ):
+                if (
+                    not len(indices)
+                    or len(set(
+                        np.asarray(labels)[indices]
+                        .astype(int)
+                        .tolist()
+                    )) < 2
+                ):
+                    raise ValueError("fold二分类标签不完整")
+            fill = _classification_report(
+                data["X"],
+                data["y_fill"],
+                train_index,
+                calibration_index,
+                validation,
+            )
+            win_labels = np.nan_to_num(
+                data["y_win"],
+                nan=0.0,
+            ).astype(np.int8)
+            win = _classification_report(
+                data["X"],
+                win_labels,
+                win_train,
+                win_calibration,
+                win_validation,
+            )
+            net_r = _regression_report(
+                data["X"],
+                data["y_net_r"],
+                win_train,
+                win_validation,
+            )
+            fold_metrics = {
+                "pFill": {
+                    "challenger": fill["challenger"],
+                    "baseline": fill["baseline"],
+                },
+                "pWinGivenFill": {
+                    "challenger": win["challenger"],
+                    "baseline": win["baseline"],
+                },
+                "expectedNetR": {
+                    "challenger": net_r["challenger"],
+                    "baseline": net_r["baseline"],
+                },
+            }
+            gate = shadow_gate(fold_metrics)
+            reports.append({
+                "fold": fold_number,
+                "trainEndDate": inner_meta["train_samples"]
+                and str(data["dates"][train_index][-1]),
+                "validationStartDate": str(
+                    data["dates"][validation][0]
+                ),
+                "validationEndDate": str(
+                    data["dates"][validation][-1]
+                ),
+                "trainSamples": int(len(train_index)),
+                "calibrationSamples": int(len(calibration_index)),
+                "validationSamples": int(len(validation)),
+                "shadowEligible": gate["shadowEligible"],
+                "blockers": gate["shadowBlockers"],
+                "metrics": fold_metrics,
+            })
+        except ValueError:
+            continue
+    return {
+        "folds": len(reports),
+        "requiredFolds": 2,
+        "shadowEligible": (
+            len(reports) >= 2
+            and all(item["shadowEligible"] for item in reports)
+        ),
+        "results": reports,
+    }
+
+
 def train_opportunity_score(
     dataset_path,
     output_directory,
@@ -344,6 +467,7 @@ def train_opportunity_score(
         _write_report(report_path, report)
         return report
 
+    walk_forward = _walk_forward_report(data)
     try:
         train_index, calibration_index, holdout_index, split = (
             three_way_purged_split(
@@ -433,7 +557,6 @@ def train_opportunity_score(
             "baseline": net_r["baseline"],
         },
     }
-    gate = shadow_gate(metrics)
     holdout_fill = fill["challenger_probabilities"]
     holdout_net_r_all = np.asarray(
         net_r["model"].predict(data["X"][holdout_index]),
@@ -444,25 +567,42 @@ def train_opportunity_score(
         data["y_net_r"][holdout_index],
         nan=0.0,
     )
-    ranking = ranking_metrics(
+    challenger_ranking = ranking_metrics(
         actual_net_r > 0,
         actual_net_r,
         utility,
         data["dates"][holdout_index],
         top_k=5,
     )
+    formula_score_index = FEATURE_NAMES.index("formulaScore")
+    baseline_ranking = ranking_metrics(
+        actual_net_r > 0,
+        actual_net_r,
+        data["X"][holdout_index, formula_score_index],
+        data["dates"][holdout_index],
+        top_k=5,
+    )
     lower_bound = block_bootstrap_lower_bound(
-        ranking["daily_net_r"],
+        challenger_ranking["daily_net_r"],
         samples=2000,
         random_state=42,
     )
     metrics["ranking"] = {
-        **ranking,
-        "netRLowerBound": lower_bound,
+        "challenger": {
+            **challenger_ranking,
+            "netRLowerBound": lower_bound,
+        },
+        "baseline": baseline_ranking,
     }
+    gate = shadow_gate(metrics)
+    if not walk_forward["shadowEligible"]:
+        gate["shadowEligible"] = False
+        gate["shadowBlockers"].append(
+            "walk-forward时间窗未稳定优于简单基线"
+        )
     model_version = (
         f"{MODEL_VERSION_PREFIX}."
-        + time.strftime("%Y%m%d", time.gmtime(timestamp))
+        + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(timestamp))
     )
     report = {
         "schemaVersion": TRAINING_SCHEMA_VERSION,
@@ -479,6 +619,7 @@ def train_opportunity_score(
         "productionBlockers": gate["productionBlockers"],
         "readiness": readiness,
         "split": split,
+        "walkForward": walk_forward,
         "metrics": metrics,
     }
     _append_trial(trial_path, report)

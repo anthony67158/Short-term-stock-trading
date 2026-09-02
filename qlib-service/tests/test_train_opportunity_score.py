@@ -115,23 +115,25 @@ class TrainOpportunityScoreTest(unittest.TestCase):
     def test_ready_dataset_trains_three_heads_and_keeps_shadow_only(self):
         value = dataset(samples=1200, dates_count=120)
 
+        def classifier(X, labels):
+            labels = np.asarray(labels)
+            column = 0 if np.array_equal(
+                X[:, 0].astype(int),
+                labels.astype(int),
+            ) else 1
+            return FakeClassifier(column)
+
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, "dataset.npz")
             np.savez_compressed(path, **value)
             with (
                 patch(
                     "train_opportunity_score._fit_lgb_classifier",
-                    side_effect=[
-                        FakeClassifier(0),
-                        FakeClassifier(1),
-                    ],
+                    side_effect=classifier,
                 ),
                 patch(
                     "train_opportunity_score._fit_logistic_classifier",
-                    side_effect=[
-                        FakeClassifier(0),
-                        FakeClassifier(1),
-                    ],
+                    side_effect=classifier,
                 ),
                 patch(
                     "train_opportunity_score._fit_lgb_regressor",
@@ -156,6 +158,8 @@ class TrainOpportunityScoreTest(unittest.TestCase):
             self.assertIn("pWinGivenFill", report["metrics"])
             self.assertIn("expectedNetR", report["metrics"])
             self.assertIn("ranking", report["metrics"])
+            self.assertGreaterEqual(report["walkForward"]["folds"], 2)
+            self.assertTrue(report["walkForward"]["shadowEligible"])
             for filename in (
                 "opportunity_fill_lgb.txt",
                 "opportunity_win_lgb.txt",

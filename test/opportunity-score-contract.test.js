@@ -93,7 +93,7 @@ test('机会评分特征只使用决策时点数据并保持固定顺序', () =>
   assert.equal(input.factors.cheapScore, 42)
   assert.equal(input.factors.formulaScore, 88)
   assert.equal(input.factors.marketAllowed, 1)
-  assert.equal(input.factors.displayed, 1)
+  assert.equal('displayed' in input.factors, false)
   assert.equal(input.factors.entryDistancePct, -1.961)
   assert.equal(input.factors.stopDistancePct, 4)
   assert.equal(input.factors.targetDistancePct, 9)

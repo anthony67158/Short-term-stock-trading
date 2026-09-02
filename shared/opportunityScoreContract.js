@@ -58,7 +58,6 @@ const NUMERIC_FEATURES = Object.freeze([
   'stopDistancePct',
   'targetDistancePct',
   'marketAllowed',
-  'displayed',
 ])
 
 export const OPPORTUNITY_SCORE_FEATURE_NAMES = Object.freeze([
@@ -198,7 +197,6 @@ export function buildOpportunityScoreInput({
       decision.primaryPrice,
     ),
     marketAllowed: marketGate?.allowed === true ? 1 : 0,
-    displayed: event.stageReached === 'DISPLAYED' ? 1 : 0,
   }
   for (const [prefix, values] of Object.entries(CATEGORIES)) {
     oneHot(factors, prefix, values, selected[prefix])

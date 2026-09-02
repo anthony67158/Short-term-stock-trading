@@ -352,6 +352,21 @@ def shadow_gate(metrics):
     baseline = metrics["expectedNetR"]["baseline"]
     if challenger["mae"] > baseline["mae"] * 1.02 + 1e-9:
         blockers.append("expectedNetR MAE劣于线性基线")
+    ranking = metrics.get("ranking")
+    if ranking:
+        challenger = ranking.get("challenger") or {}
+        baseline = ranking.get("baseline") or {}
+        for name, tolerance in (
+            ("ndcg_at_5", 0.01),
+            ("precision_at_5", 0.01),
+            ("mean_net_r_at_5", 0.05),
+        ):
+            current = challenger.get(name)
+            reference = baseline.get(name)
+            if current is None or reference is None:
+                blockers.append(f"排序指标{name}不可用")
+            elif current < reference - tolerance:
+                blockers.append(f"排序指标{name}劣于现有公式")
     return {
         "shadowEligible": not blockers,
         "shadowBlockers": blockers,
