@@ -632,6 +632,73 @@ test('Harness基线阻止低于允许回撤的静默质量退化', () => {
   ))
 })
 
+test('单suite运行只比较本次执行范围', () => {
+  const perfect = {
+    overall: 1,
+    dimensions: {
+      contract: 1,
+      groundedness: 1,
+      feasibility: 1,
+      actionability: 1,
+      consistency: 1,
+    },
+    cases: 1,
+    caseIds: ['sector-case'],
+  }
+  const baseline = {
+    schemaVersion: 'harness-baseline.v1',
+    suites: {
+      sector: perfect,
+      portfolio: {
+        ...perfect,
+        caseIds: ['portfolio-case'],
+      },
+    },
+  }
+  const compared = compareHarnessBaseline([{
+    suiteId: 'sector',
+    summary: {
+      total: 1,
+      overall: 1,
+      dimensions: perfect.dimensions,
+    },
+    episodes: [{ caseId: 'sector-case' }],
+  }], baseline)
+
+  assert.equal(compared.passed, true)
+  assert.deepEqual(compared.regressions, [])
+})
+
+test('全量基线比较仍拒绝未执行的suite', () => {
+  const baseline = {
+    schemaVersion: 'harness-baseline.v1',
+    suites: {
+      sector: {
+        overall: 1,
+        dimensions: {},
+      },
+      portfolio: {
+        overall: 1,
+        dimensions: {},
+      },
+    },
+  }
+  const compared = compareHarnessBaseline([{
+    suiteId: 'sector',
+    summary: {
+      overall: 1,
+      dimensions: {},
+    },
+  }], baseline, {
+    requireAllSuites: true,
+  })
+
+  assert.equal(compared.passed, false)
+  assert.ok(compared.regressions.some((item) =>
+    item.suiteId === 'portfolio' && item.metric === 'suite'
+  ))
+})
+
 test('Harness基线拒绝通过删除困难case维持高分', () => {
   const baseline = {
     schemaVersion: 'harness-baseline.v1',

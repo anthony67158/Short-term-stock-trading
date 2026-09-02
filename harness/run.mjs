@@ -299,7 +299,10 @@ export async function runHarnessCli(argv = process.argv.slice(2)) {
       ...compareHarnessBaseline(
         runs,
         baseline,
-        manifest.regressionTolerance || {},
+        {
+          ...(manifest.regressionTolerance || {}),
+          requireAllSuites: options.suite === 'all',
+        },
       ),
       versions: baseline.versions || {},
     }

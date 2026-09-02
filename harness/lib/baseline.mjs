@@ -67,6 +67,7 @@ export function compareHarnessBaseline(
   {
     overall = 0.03,
     dimension = 0.05,
+    requireAllSuites = false,
   } = {},
 ) {
   if (!baseline || baseline.schemaVersion !== SCHEMA) {
@@ -89,17 +90,19 @@ export function compareHarnessBaseline(
   const currentSuiteIds = new Set(
     (runs || []).map((run) => run?.suiteId).filter(Boolean),
   )
-  for (const suiteId of Object.keys(baseline.suites || {})) {
-    if (currentSuiteIds.has(suiteId)) continue
-    regressions.push({
-      suiteId,
-      metric: 'suite',
-      current: 0,
-      baseline: 1,
-      tolerance: 0,
-      delta: -1,
-      message: `${suiteId}基线suite未执行`,
-    })
+  if (requireAllSuites) {
+    for (const suiteId of Object.keys(baseline.suites || {})) {
+      if (currentSuiteIds.has(suiteId)) continue
+      regressions.push({
+        suiteId,
+        metric: 'suite',
+        current: 0,
+        baseline: 1,
+        tolerance: 0,
+        delta: -1,
+        message: `${suiteId}基线suite未执行`,
+      })
+    }
   }
   for (const run of runs || []) {
     const reference = baseline.suites?.[run.suiteId]
