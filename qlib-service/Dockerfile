@@ -17,7 +17,8 @@ RUN pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app.py factors_lib.py model_lib.py sector_contract.py sector_factors.py sector_model.py ./
+COPY app.py factors_lib.py model_lib.py opportunity_contract.py opportunity_evaluation.py opportunity_model.py sector_contract.py sector_factors.py sector_model.py ./
+COPY contracts/opportunity-score-features.json ./contracts/
 COPY lgb_score.txt meta.json lgb_signal.txt signal_meta.json event_tags.json ./
 COPY sector_next_lgb.txt sector_week_lgb.txt sector_meta.json ./
 

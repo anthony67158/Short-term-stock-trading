@@ -10,6 +10,10 @@ https://quant-score-nlxgclpdbu.cn-hangzhou.fcapp.run
 服务基于 FastAPI、LightGBM 和 GARCH，提供量化评分、走势预测、模型信息与
 健康检查。模型优先从部署包加载，并按小时从阿里云 OSS 热更新。
 
+独立的 `POST /opportunity-score` 只承载机会雷达影子评分。没有通过
+时间外验证并发布到 `opportunitymodel/manifest.json` 的模型时，接口稳定返回
+`NOT_READY` 和空概率，不影响现有 36 维 `/predict`。
+
 ## 生产架构
 
 - 计算：阿里云 FC 3.0 `quant-score`

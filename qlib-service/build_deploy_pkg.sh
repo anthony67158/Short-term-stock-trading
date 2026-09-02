@@ -53,9 +53,13 @@ find "$PKG/deps" -name "*.pyc" -delete 2>/dev/null || true
 
 # --- 5) 拷贝源码 + bundled 模型 + bootstrap(这些进 git) ---
 cp "$HERE/app.py" "$HERE/factors_lib.py" "$HERE/model_lib.py" \
+   "$HERE/opportunity_contract.py" "$HERE/opportunity_evaluation.py" \
+   "$HERE/opportunity_model.py" \
    "$HERE/sector_contract.py" "$HERE/sector_factors.py" \
    "$HERE/sector_model.py" \
    "$HERE/lgb_score.txt" "$HERE/meta.json" "$HERE/bootstrap" "$PKG/"
+mkdir -p "$PKG/contracts"
+cp "$HERE/contracts/opportunity-score-features.json" "$PKG/contracts/"
 for f in \
   lgb_signal.txt \
   signal_meta.json \

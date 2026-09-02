@@ -39,6 +39,7 @@ resources:
         OSS_ALLOW_PUBLIC_NETWORK: "false"
         QUANT_MODEL_PREFIX: quantmodel/
         SECTOR_MODEL_PREFIX: sectormodel/
+        OPPORTUNITY_MODEL_PREFIX: opportunitymodel/
       # 注意: 该函数已存在一个 http 触发器(线上 URL 稳定,见 docs)。
       # fc3 用 triggerName 做主键,若此处名字与线上不一致会尝试"再建一个"而触发
       # LimitExceededError(一个函数只能有一个 http 触发器)。故此处不声明 triggers,

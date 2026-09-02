@@ -18,6 +18,9 @@ else
     "$HERE/app.py" \
     "$HERE/factors_lib.py" \
     "$HERE/model_lib.py" \
+    "$HERE/opportunity_contract.py" \
+    "$HERE/opportunity_evaluation.py" \
+    "$HERE/opportunity_model.py" \
     "$HERE/sector_contract.py" \
     "$HERE/sector_factors.py" \
     "$HERE/sector_model.py" \
@@ -25,6 +28,8 @@ else
     "$HERE/meta.json" \
     "$HERE/bootstrap" \
     "$PKG/"
+  mkdir -p "$PKG/contracts"
+  cp "$HERE/contracts/opportunity-score-features.json" "$PKG/contracts/"
   for file in \
     lgb_signal.txt \
     signal_meta.json \
