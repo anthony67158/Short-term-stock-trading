@@ -297,7 +297,14 @@ test('置顶自选卡使用浅蓝表面、整圈蓝框并保留卡片阴影', ()
 test('持仓与自选卡内部次级按钮使用实体表面和清晰边界', () => {
   assert.match(
     precision,
-    /Card controls stay visually attached[\s\S]*?\.pi-trade-actions > \.chip-btn:not\(\.recommended\)[\s\S]*?\.plan-cand \.pc-actions > \.chip-btn:not\(\.act-buy\)[\s\S]*?\.holding-plan-summary,[\s\S]*?\.hold-cost-edit,[\s\S]*?\.plan-cand \.pc-pin[\s\S]*?border:\s*1px solid var\(--color-trade-control-border\)[\s\S]*?background:\s*var\(--color-trade-control\)[\s\S]*?box-shadow:\s*var\(--shadow-trade-control\)/s,
+    /Card controls stay visually attached[\s\S]*?\.pi-trade-actions > \.chip-btn:not\(\.recommended\)[\s\S]*?\.plan-cand \.pc-actions > \.chip-btn:not\(\.act-buy\)[\s\S]*?\.holding-plan-summary,[\s\S]*?\.plan-cand \.pc-pin[\s\S]*?border:\s*1px solid var\(--color-trade-control-border\)[\s\S]*?background:\s*var\(--color-trade-control\)[\s\S]*?box-shadow:\s*var\(--shadow-trade-control\)/s,
+  )
+})
+
+test('成本编辑是贴近数值的低权重图标而不是独立描边按钮', () => {
+  assert.match(
+    precision,
+    /\.hold-card-metrics \.hold-cost-edit\s*{[^}]*width:\s*22px[^}]*border:\s*0[^}]*background:\s*transparent[^}]*box-shadow:\s*none[^}]*opacity:\s*0\.72/s,
   )
 })
 

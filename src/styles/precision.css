@@ -16227,7 +16227,6 @@ html[data-theme="light"] .plan-cand.starred {
   .plan-cand .pc-actions > .chip-btn:not(.act-buy),
   .plan-cand .pc-actions > .icon-btn,
   .holding-plan-summary,
-  .hold-cost-edit,
   .plan-cand .pc-pin
 ) {
   border: 1px solid var(--color-trade-control-border);
@@ -16268,7 +16267,6 @@ html[data-theme="light"]
     .plan-cand .pc-actions > .chip-btn:not(.act-buy),
     .plan-cand .pc-actions > .icon-btn,
     .holding-plan-summary,
-    .hold-cost-edit,
     .plan-cand .pc-pin
   ):hover:not(:disabled) {
     border-color: color-mix(
@@ -16295,7 +16293,6 @@ html[data-theme="light"]
   .plan-cand .pc-actions > .chip-btn:not(.act-buy),
   .plan-cand .pc-actions > .icon-btn,
   .holding-plan-summary,
-  .hold-cost-edit,
   .plan-cand .pc-pin
 ):active:not(:disabled) {
   background: var(--color-trade-control);
@@ -16303,6 +16300,56 @@ html[data-theme="light"]
     in oklch,
     var(--color-ink) 12%,
     transparent
+  );
+}
+
+.hold-card-metrics .hold-cost-edit {
+  width: 22px;
+  min-width: 22px;
+  height: 22px;
+  min-height: 22px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--color-muted);
+  opacity: 0.72;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .hold-card-metrics .hold-cost-edit:hover {
+    border: 0;
+    background: color-mix(
+      in oklch,
+      var(--color-ink) 5%,
+      transparent
+    );
+    box-shadow: none;
+    color: var(--color-ink-2);
+    opacity: 1;
+  }
+}
+
+.hold-card-metrics .hold-cost-edit:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+  background: transparent;
+  color: var(--color-ink-2);
+  opacity: 1;
+}
+
+.sector-forecast-panel,
+html[data-theme="light"] .sector-forecast-panel {
+  border-color: var(--color-rule-2);
+  background: var(--color-paper-2);
+}
+
+.sector-forecast-panel > .panel-head,
+html[data-theme="light"] .sector-forecast-panel > .panel-head {
+  border-bottom-color: var(--color-rule-2);
+  background: color-mix(
+    in oklch,
+    var(--color-accent) 2%,
+    var(--color-paper-2)
   );
 }
 

@@ -149,6 +149,14 @@ test('板块前瞻请求携带账号令牌且有明确超时', () => {
 
 test('板块前瞻桌面信息密集且移动端稳定单列', () => {
   assert.match(styles, /\.sector-forecast-panel\s*{/)
+  assert.match(
+    styles,
+    /\.sector-forecast-panel,[\s\S]*?html\[data-theme="light"\] \.sector-forecast-panel\s*{[^}]*border-color:\s*var\(--color-rule-2\)[^}]*background:\s*var\(--color-paper-2\)/s,
+  )
+  assert.match(
+    styles,
+    /\.sector-forecast-panel > \.panel-head,[\s\S]*?html\[data-theme="light"\] \.sector-forecast-panel > \.panel-head\s*{[^}]*border-bottom-color:\s*var\(--color-rule-2\)[^}]*background:\s*color-mix\([^}]*var\(--color-accent\)\s*2%[^}]*var\(--color-paper-2\)/s,
+  )
   assert.match(styles, /\.sector-forecast-row\s*{/)
   assert.match(styles, /@media[\s\S]*\.sector-forecast-row\s*{[\s\S]*grid-template-columns:\s*1fr/)
   assert.match(styles, /\.sector-forecast-settings\s*{/)
