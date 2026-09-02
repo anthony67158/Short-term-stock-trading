@@ -259,7 +259,13 @@ function tailOpportunity(candidate, {
 }) {
   const sector = resolveCandidateSector(candidate, maps)
   const execution = candidate.execution || {}
-  const entryPrice = finite(candidate.quote?.price)
+  const quotePrice = finite(candidate.quote?.price)
+  const vwap = finite(candidate.intraday?.vwap)
+  const entryPrice = quotePrice == null
+    ? null
+    : +(
+        Math.max(quotePrice, vwap || quotePrice) * 1.003
+      ).toFixed(2)
   const stop = finite(execution.stopPrice)
   const blockers = unique([
     ...(candidate.blockers || []),
@@ -547,6 +553,16 @@ export function buildOpportunityRadar({
     ['INTRADAY', 'LUNCH'].includes(timing.phase)
       ? sourceStatus.formulaIntraday.status === 'fresh'
       : sourceStatus.formulaClose.status === 'fresh'
+  const currentSectorFresh = (
+    sourceStatus.sector.status === 'fresh'
+    && (
+      !['INTRADAY', 'LUNCH'].includes(timing.phase)
+      || (
+        sectorSnapshot?.session === 'intraday'
+        && sectorSnapshot?.signalDate === day
+      )
+    )
+  )
 
   const layout = mergeLane([
     ...sectorRows(sectorSnapshot, 'layout'),
@@ -557,7 +573,7 @@ export function buildOpportunityRadar({
       .map((candidate) => formulaOpportunity(candidate, {
         lane: 'layout',
         sourceFresh: preferredFormulaFresh,
-        sectorFresh: sourceStatus.sector.status === 'fresh',
+        sectorFresh: currentSectorFresh,
         maps,
         now: timestamp,
       })),
@@ -569,7 +585,7 @@ export function buildOpportunityRadar({
         lane: 'intraday',
         sourceFresh:
           sourceStatus.formulaIntraday.status === 'fresh',
-        sectorFresh: sourceStatus.sector.status === 'fresh',
+        sectorFresh: currentSectorFresh,
         maps,
         now: timestamp,
       }),

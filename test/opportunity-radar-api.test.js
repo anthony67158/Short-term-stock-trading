@@ -82,7 +82,11 @@ test('单个来源失败时仍返回其它结果并标记失败来源', async ()
   assert.equal(result.sourceStatus.formulaClose.status, 'failed')
   assert.match(
     result.sourceStatus.formulaIntraday.error,
-    /公式存储暂时不可用/,
+    /公式结果读取失败/,
+  )
+  assert.doesNotMatch(
+    result.sourceStatus.formulaIntraday.error,
+    /存储暂时不可用/,
   )
 })
 
@@ -92,8 +96,9 @@ test('机会雷达接口保持账号鉴权、只读GET和禁缓存', () => {
   assert.match(apiSource, /Cache-Control',\s*'no-store'/)
   assert.match(apiSource, /req\.method !== 'GET'/)
   assert.match(apiSource, /Promise\.allSettled/)
+  assert.match(apiSource, /SOURCE_READ_TIMEOUT_MS/)
+  assert.match(apiSource, /withTimeout/)
   assert.doesNotMatch(apiSource, /generateSectorForecastSnapshot/)
   assert.doesNotMatch(apiSource, /runFormulaSelection/)
   assert.doesNotMatch(apiSource, /runTailPick/)
 })
-

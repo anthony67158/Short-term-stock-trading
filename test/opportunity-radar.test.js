@@ -295,6 +295,31 @@ test('板块实时源失败时公式候选最多进入等待确认', () => {
   assert.match(candidate.blockers.join('；'), /板块方向需要重新确认/)
 })
 
+test('盘中只有昨日板块基线时不升级为当前可操作', () => {
+  const result = buildOpportunityRadar({
+    now: NOW,
+    sector: {
+      market: {
+        phase: 'live',
+        tradingDay: true,
+        day: '2026-09-02',
+      },
+      latest: sectorSnapshot({
+        session: 'close',
+        signalDate: '2026-09-01',
+      }),
+    },
+    formula: {
+      intraday: formulaResult('INTRADAY', [formulaCandidate()]),
+    },
+  })
+  const candidate = result.lanes.intraday.find(
+    (item) => item.code === '600001',
+  )
+  assert.equal(candidate.state, 'WAIT_TRIGGER')
+  assert.match(candidate.blockers.join('；'), /板块方向需要重新确认/)
+})
+
 test('收盘与尾盘结果必须属于最近完整交易日', () => {
   const result = buildOpportunityRadar({
     now: Date.parse('2026-09-02T15:20:00+08:00'),

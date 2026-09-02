@@ -18,8 +18,23 @@ import {
   readTailPickState,
 } from './tail_pick.js'
 
+const SOURCE_READ_TIMEOUT_MS = 15_000
+
 function message(reason) {
   return String(reason?.message || reason || '').slice(0, 180)
+}
+
+function withTimeout(promise, label) {
+  let timeout
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timeout = setTimeout(
+        () => reject(new Error(`${label}超时`)),
+        SOURCE_READ_TIMEOUT_MS,
+      )
+    }),
+  ]).finally(() => clearTimeout(timeout))
 }
 
 function settledValue(result, fallback) {
@@ -38,19 +53,19 @@ export async function readOpportunityRadarSnapshot({
 } = {}) {
   const [sectorResult, formulaResult, tailResult] =
     await Promise.allSettled([
-      readSector(),
-      readFormula(),
-      readTail(),
+      withTimeout(Promise.resolve().then(readSector), '板块结果读取'),
+      withTimeout(Promise.resolve().then(readFormula), '公式结果读取'),
+      withTimeout(Promise.resolve().then(readTail), '尾盘结果读取'),
     ])
   const sourceErrors = {
     sector: sectorResult.status === 'rejected'
-      ? message(sectorResult.reason)
+      ? '板块结果读取失败'
       : '',
     formula: formulaResult.status === 'rejected'
-      ? message(formulaResult.reason)
+      ? '公式结果读取失败'
       : '',
     tail: tailResult.status === 'rejected'
-      ? message(tailResult.reason)
+      ? '尾盘结果读取失败'
       : '',
   }
   const radar = buildOpportunityRadar({
@@ -106,4 +121,3 @@ export default async function handler(req, res) {
     })
   }
 }
-
