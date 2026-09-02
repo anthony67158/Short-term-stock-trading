@@ -13,6 +13,9 @@ import {
   formulaSelectionStore,
 } from './_formula_selection_store.js'
 import {
+  opportunityRadarLedgerStore,
+} from './_opportunity_radar_ledger_store.js'
+import {
   collectTailPickMarketContext,
 } from './_tail_pick_data.js'
 import {
@@ -23,6 +26,9 @@ import {
   beijingMinutes,
   isContinuousTrading,
 } from '../shared/tradingCalendar.js'
+import {
+  buildOpportunityRadarLedgerBatch,
+} from '../shared/opportunityRadarLedger.js'
 
 export const FORMULA_SELECTION_SCHEMA_VERSION = 'formula-selection.v1'
 
@@ -90,6 +96,7 @@ function createProgressReporter({
 export function runFormulaSelection({
   mode = 'intraday',
   store = formulaSelectionStore,
+  ledgerStore = opportunityRadarLedgerStore,
   scan = scanFormulaSelectionCandidates,
   collectMarketContext = collectTailPickMarketContext,
   now = Date.now,
@@ -162,6 +169,15 @@ export function runFormulaSelection({
         || '当前市场环境不支持新增风险'
       const resultTradeDate =
         scanned.universe?.tradeDate || tradeDate
+      const ledgerBatch = buildOpportunityRadarLedgerBatch({
+        mode: normalized,
+        tradeDate: resultTradeDate,
+        slot,
+        generatedAt: timestamp,
+        universe: scanned.universe,
+        marketGate: marketContext?.marketGate || null,
+        events: scanned.candidateEvents || [],
+      })
       const result = {
         ok: true,
         schemaVersion: FORMULA_SELECTION_SCHEMA_VERSION,
@@ -175,6 +191,11 @@ export function runFormulaSelection({
         universe: scanned.universe,
         formulas: scanned.formulas,
         candidates: scanned.candidates,
+        ledger: {
+          schemaVersion: ledgerBatch.schemaVersion,
+          runId: ledgerBatch.runId,
+          summary: ledgerBatch.summary,
+        },
         decision: scanned.candidates.length ? 'OBSERVE' : 'NO_MATCH',
         reason: scanned.candidates.length
           ? marketAllowed
@@ -189,6 +210,7 @@ export function runFormulaSelection({
         percent: 99,
         message: '正在保存本次公式结果',
       }, { force: true })
+      await ledgerStore.saveBatch(ledgerBatch)
       await store.saveRun(normalized, result)
       await reportProgress({
         status: 'DONE',

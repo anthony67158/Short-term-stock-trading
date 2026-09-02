@@ -140,6 +140,12 @@ test('市场扫描从完整股票池生成最多五个带唯一价位的观察�
   assert.equal(result.candidates[0].action, 'WATCH_BUY')
   assert.equal(result.candidates[0].validationState, 'OBSERVE_ONLY')
   assert.ok(result.candidates[0].primaryPrice > 0)
+  assert.equal(result.candidateEvents.length, 1)
+  assert.equal(result.candidateEvents[0].stageReached, 'DISPLAYED')
+  assert.equal(
+    result.candidateEvents[0].decision.priceContractValid,
+    true,
+  )
   assert.deepEqual(
     [...new Set(progress.map((item) => item.stage))],
     ['UNIVERSE', 'PREFILTER', 'TECHNICAL', 'EVIDENCE', 'RANKING'],
@@ -230,6 +236,19 @@ test('公式扫描不会因实时排序只检查前60只而漏掉后续命中', 
   })
 
   assert.equal(result.candidates[0].code, '600061')
+  assert.equal(result.candidateEvents.length, 61)
+  assert.equal(
+    result.candidateEvents.filter(
+      (item) => item.stageReached === 'DISPLAYED',
+    ).length,
+    1,
+  )
+  assert.equal(
+    result.candidateEvents.filter(
+      (item) => item.stageReached === 'PREFILTER',
+    ).length,
+    60,
+  )
 })
 
 test('公式扫描拒绝用不完整股票列表冒充全市场', async () => {
@@ -356,6 +375,7 @@ test('收盘定时器只接受专用触发器和正确密钥', () => {
 
 test('公式选股任务保存同一模式结果并保持幂等', async () => {
   let saved = null
+  let ledgerBatch = null
   const progress = []
   const store = {
     readLatest: async () => saved,
@@ -374,12 +394,21 @@ test('公式选股任务保存同一模式结果并保持幂等', async () => {
       universe: { inspectedCount: 5500 },
       formulas: [],
       candidates: [],
+      candidateEvents: [{
+        code: '600001',
+        name: '测试股份',
+        stageReached: 'TECHNICAL',
+        rejectionReasons: ['收盘未站上MA20'],
+      }],
     }
   }
 
   const first = await runFormulaSelection({
     mode: 'close',
     store,
+    ledgerStore: {
+      saveBatch: async (value) => { ledgerBatch = value },
+    },
     scan,
     collectMarketContext: async () => ({
       marketGate: { allowed: true },
@@ -389,6 +418,9 @@ test('公式选股任务保存同一模式结果并保持幂等', async () => {
   const second = await runFormulaSelection({
     mode: 'close',
     store,
+    ledgerStore: {
+      saveBatch: async (value) => { ledgerBatch = value },
+    },
     scan,
     collectMarketContext: async () => ({
       marketGate: { allowed: true },
@@ -398,6 +430,10 @@ test('公式选股任务保存同一模式结果并保持幂等', async () => {
 
   assert.equal(first.schemaVersion, 'formula-selection.v1')
   assert.equal(first.mode, 'CLOSE')
+  assert.equal(first.ledger.runId, '2026-08-28:close:1505')
+  assert.equal(first.ledger.summary.total, 1)
+  assert.equal(ledgerBatch.events[0].stageReached, 'TECHNICAL')
+  assert.equal('candidateEvents' in first, false)
   assert.equal(second.reused, true)
   assert.deepEqual(
     progress.map((item) => item.stage),

@@ -124,6 +124,29 @@ function cheapRank(quote, mode) {
   return amountScore + flowScore + ratioScore + positionScore
 }
 
+function uniqueReasons(values = []) {
+  return [...new Set(
+    values
+      .flat()
+      .map((value) => String(value || '').trim())
+      .filter(Boolean),
+  )]
+}
+
+function candidateEvent(quote, cheapScore) {
+  return {
+    code: quote.code,
+    name: quote.name,
+    stageReached: 'PREFILTER',
+    quote,
+    cheapScore,
+    formulaEvaluations: [],
+    decision: null,
+    sector: null,
+    rejectionReasons: [],
+  }
+}
+
 function publicCandidate(item, rank) {
   return {
     code: item.code,
@@ -201,6 +224,12 @@ export async function scanFormulaSelectionCandidates({
       right.cheapScore - left.cheapScore
       || String(left.quote.code).localeCompare(String(right.quote.code))
     )
+  const candidateEvents = new Map(
+    prefiltered.map(({ quote, cheapScore }) => [
+      String(quote.code),
+      candidateEvent(quote, cheapScore),
+    ]),
+  )
   await report({
     stage: 'PREFILTER',
     percent: 24,
@@ -237,22 +266,36 @@ export async function scanFormulaSelectionCandidates({
     12,
     async ({ quote }) => {
       let candidate = null
+      const event = candidateEvents.get(String(quote.code))
       try {
         const kline = await fetchKline(quote.code, '101', 60)
           .catch(() => null)
-        if (kline?.candles?.length) {
-          const preliminary = evaluateFormulaSelection({
-            mode: normalizedMode,
-            candles: kline.candles,
-            quote,
-            trends: [],
-            fund: {},
-            sectorOpportunity: { matched: false },
-          })
-          const possible = preliminary.evaluations.some((item) =>
-            item.blockers.every((blocker) => deferredBlockers.has(blocker))
+        if (!kline?.candles?.length) {
+          event.rejectionReasons = ['日线数据不可用']
+          return null
+        }
+        const preliminary = evaluateFormulaSelection({
+          mode: normalizedMode,
+          candles: kline.candles,
+          quote,
+          trends: [],
+          fund: {},
+          sectorOpportunity: { matched: false },
+        })
+        event.stageReached = 'TECHNICAL'
+        event.formulaEvaluations = preliminary.evaluations
+        const possible = preliminary.evaluations.some((item) =>
+          item.blockers.every((blocker) => deferredBlockers.has(blocker))
+        )
+        if (possible) candidate = { quote, kline }
+        else {
+          event.rejectionReasons = uniqueReasons(
+            preliminary.evaluations.map((item) =>
+              item.blockers.filter(
+                (blocker) => !deferredBlockers.has(blocker),
+              ),
+            ),
           )
-          if (possible) candidate = { quote, kline }
         }
         return candidate
       } finally {
@@ -293,6 +336,7 @@ export async function scanFormulaSelectionCandidates({
     technicalCandidates,
     8,
     async ({ quote, kline }) => {
+      const event = candidateEvents.get(String(quote.code))
       try {
         const [trendData, fund, tags] = await Promise.all([
           normalizedMode === 'intraday'
@@ -304,7 +348,14 @@ export async function scanFormulaSelectionCandidates({
           }).catch(() => null),
           fetchTags(quote.code).catch(() => null),
         ])
-        if (!fund || !tags) return null
+        event.stageReached = 'EVIDENCE'
+        if (!fund || !tags) {
+          event.rejectionReasons = [
+            !fund ? '资金数据不可用' : null,
+            !tags ? '板块标签不可用' : null,
+          ].filter(Boolean)
+          return null
+        }
         const sectorOpportunity = matchSector({
           code: quote.code,
           profile: tags,
@@ -320,6 +371,8 @@ export async function scanFormulaSelectionCandidates({
           fund,
           sectorOpportunity,
         })
+        event.formulaEvaluations = formula.evaluations
+        event.sector = sectorOpportunity?.sector || null
         const rawDecision = buildFormulaPriceDecision({
           code: quote.code,
           quote,
@@ -330,7 +383,14 @@ export async function scanFormulaSelectionCandidates({
           dataFresh: true,
           now,
         })
-        if (!rawDecision.priceContractValid) return null
+        event.decision = rawDecision
+        if (!rawDecision.priceContractValid) {
+          event.rejectionReasons = uniqueReasons([
+            rawDecision.blockers || [],
+            formula.evaluations.map((item) => item.blockers),
+          ])
+          return null
+        }
         const marketBlockers = marketContext?.marketGate?.allowed === true
           ? []
           : Array.isArray(marketContext?.marketGate?.blockers)
@@ -347,6 +407,8 @@ export async function scanFormulaSelectionCandidates({
               ],
             }
           : rawDecision
+        event.decision = decision
+        event.rejectionReasons = uniqueReasons(decision.blockers || [])
         return {
           code: quote.code,
           name: quote.name || kline.name || tags.name,
@@ -396,14 +458,21 @@ export async function scanFormulaSelectionCandidates({
       technicalCandidates: technicalCandidates.length,
     },
   })
-  const ranked = evaluated
+  const validEvaluated = evaluated
     .filter(Boolean)
     .sort((left, right) =>
       right.score - left.score
       || Number(right.quote.amount || 0) - Number(left.quote.amount || 0)
       || String(left.code).localeCompare(String(right.code))
     )
+  const selected = validEvaluated
     .slice(0, 5)
+  selected.forEach((item, index) => {
+    const event = candidateEvents.get(String(item.code))
+    event.stageReached = 'DISPLAYED'
+    event.displayedRank = index + 1
+  })
+  const ranked = selected
     .map(publicCandidate)
   return {
     universe: {
@@ -412,7 +481,8 @@ export async function scanFormulaSelectionCandidates({
       tradeDate: expectedDate,
       prefilterCount: prefiltered.length,
       technicalCandidateCount: technicalCandidates.length,
-      formulaMatchCount: ranked.length,
+      formulaMatchCount: validEvaluated.length,
+      displayedCount: ranked.length,
     },
     formulas: FORMULA_REGISTRY
       .filter((item) => item.mode === normalizedMode.toUpperCase())
@@ -423,6 +493,7 @@ export async function scanFormulaSelectionCandidates({
         ).length,
       })),
     candidates: ranked,
+    candidateEvents: [...candidateEvents.values()],
   }
 }
 
