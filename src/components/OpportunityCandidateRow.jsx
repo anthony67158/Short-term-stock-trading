@@ -4,12 +4,12 @@ import StockName from './StockName'
 
 const STATE_VIEW = Object.freeze({
   READY: {
-    label: '当前可关注',
+    label: '可以买入',
     icon: 'target',
     tone: 'ready',
   },
   WAIT_TRIGGER: {
-    label: '等待触发',
+    label: '到价再买',
     icon: 'clock',
     tone: 'waiting',
   },
@@ -19,7 +19,7 @@ const STATE_VIEW = Object.freeze({
     tone: 'sector',
   },
   AVOID: {
-    label: '暂不操作',
+    label: '本次不买',
     icon: 'shield',
     tone: 'avoid',
   },
@@ -84,6 +84,12 @@ export default function OpportunityCandidateRow({
         <span>
           {(opportunity.sourceSignals || []).join(' · ')}
         </span>
+        <p>
+          {opportunity.state === 'READY' ? '为什么能买：' : '判断依据：'}
+          {(opportunity.evidence || []).slice(0, 2).join('；')
+            || opportunity.blockers?.[0]
+            || '等待更多有效证据'}
+        </p>
       </div>
 
       <div className="opportunity-plan-grid">

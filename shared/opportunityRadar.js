@@ -229,10 +229,10 @@ function formulaOpportunity(candidate, {
     lane,
     state: ready ? 'READY' : valid ? 'WAIT_TRIGGER' : 'AVOID',
     stateLabel: ready
-      ? '当前可关注'
+      ? '满足买入条件'
       : valid
-        ? '等待触发'
-        : '暂不操作',
+        ? '等待价格触发'
+        : '本次不买',
     sector: sectorView(sector),
     quote: candidate.quote || null,
     score: finite(candidate.score),

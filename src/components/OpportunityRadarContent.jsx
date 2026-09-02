@@ -47,7 +47,7 @@ function laneCopy(lane, summary) {
   if (summary.ready > 0) {
     return {
       icon: 'target',
-      title: `${summary.ready}只已接近可执行条件`,
+      title: `${summary.ready}只满足买入条件`,
       detail:
         '先核对触发条件和仓位，再按对应止损、止盈与时间退出执行。',
     }
@@ -55,7 +55,7 @@ function laneCopy(lane, summary) {
   if (summary.waiting > 0) {
     return {
       icon: 'clock',
-      title: `${summary.waiting}只等待价格或开盘确认`,
+      title: `${summary.waiting}只到价后再买`,
       detail: '不提前抢跑，满足价格、量能和资金条件后再判断。',
     }
   }
@@ -141,6 +141,12 @@ export default function OpportunityRadarContent({
   onAdd,
 }) {
   const rows = snapshot?.lanes?.[lane] || []
+  const plannedRows = rows.filter((item) =>
+    item.entryPlan && item.exitPlan,
+  )
+  const directionRows = rows.filter((item) =>
+    !item.entryPlan || !item.exitPlan,
+  )
   const summary = laneSummary(rows)
   const copy = laneCopy(lane, summary)
   const sectors = sectorsFromRows(rows)
@@ -186,14 +192,41 @@ export default function OpportunityRadarContent({
         </div>
       )}
 
-      {rows.length ? (
-        <CandidateList rows={rows} book={book} onAdd={onAdd} />
+      {plannedRows.length ? (
+        <>
+          <div className="opportunity-list-head">
+            <strong>个股买卖计划</strong>
+            <span>按当前可执行性排序，价格条件未满足前不买</span>
+          </div>
+          <CandidateList
+            rows={plannedRows}
+            book={book}
+            onAdd={onAdd}
+          />
+        </>
       ) : (
         <div className="opportunity-empty">
           <Icon name="shield" size={20} />
-          <strong>本视图暂无有效机会</strong>
-          <span>等待下一次权威快照，不放宽公式条件。</span>
+          <strong>当前没有形成完整买卖计划的股票</strong>
+          <span>
+            板块方向不等于个股买点；需要个股公式同时给出
+            入场价、止损、目标和合格赔率后才会进入这里。
+          </span>
         </div>
+      )}
+
+      {!!directionRows.length && (
+        <details className="opportunity-direction-watch">
+          <summary>
+            方向观察 {directionRows.length} 只
+            <span>尚无完整价格，不代表可以买入</span>
+          </summary>
+          <CandidateList
+            rows={directionRows}
+            book={book}
+            onAdd={onAdd}
+          />
+        </details>
       )}
 
       {!!sourceFailures.length && (

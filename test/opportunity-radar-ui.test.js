@@ -45,6 +45,10 @@ test('机会候选同时展示入场仓位和完整退出计划', () => {
   assert.match(opportunityUi, /最大仓位/)
   assert.match(opportunityUi, /加入自选/)
   assert.match(opportunityUi, /openStockDetail/)
+  assert.match(opportunityUi, /为什么能买/)
+  assert.match(content, /plannedRows/)
+  assert.match(content, /当前没有形成完整买卖计划的股票/)
+  assert.match(content, /尚无完整价格，不代表可以买入/)
 })
 
 test('机会雷达显示真实来源状态和局部失败', () => {
