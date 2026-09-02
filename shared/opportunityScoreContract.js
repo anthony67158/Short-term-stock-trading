@@ -226,6 +226,27 @@ export function buildOpportunityScoreInput({
   }
 }
 
+export function isOpportunityScoreInput(value) {
+  if (
+    !value
+    || value.schemaVersion !== OPPORTUNITY_SCORE_FEATURE_SCHEMA_VERSION
+    || !/^\d{6}$/.test(String(value.code || ''))
+    || !String(value.formulaId || '')
+    || !value.factors
+    || typeof value.factors !== 'object'
+    || !Number.isFinite(Number(value.asOf))
+  ) return false
+  const names = Object.keys(value.factors)
+  return (
+    names.length === OPPORTUNITY_SCORE_FEATURE_NAMES.length
+    && names.every(
+      (name, index) =>
+        name === OPPORTUNITY_SCORE_FEATURE_NAMES[index]
+        && Number.isFinite(Number(value.factors[name])),
+    )
+  )
+}
+
 export function unavailableOpportunityScore(input = {}, reason) {
   return {
     schemaVersion: OPPORTUNITY_SCORE_SCHEMA_VERSION,

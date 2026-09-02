@@ -7,6 +7,7 @@ import {
   OPPORTUNITY_SCORE_FEATURE_SCHEMA_VERSION,
   OPPORTUNITY_SCORE_SCHEMA_VERSION,
   buildOpportunityScoreInput,
+  isOpportunityScoreInput,
   normalizeOpportunityScoreResponse,
   unavailableOpportunityScore,
 } from '../shared/opportunityScoreContract.js'
@@ -102,6 +103,14 @@ test('机会评分特征只使用决策时点数据并保持固定顺序', () =>
   assert.equal(input.factors.time_INTRADAY_OPEN, 1)
   assert.equal(input.factors.liquidity_HIGH, 1)
   assert.equal('netR' in input.factors, false)
+  assert.equal(isOpportunityScoreInput(input), true)
+  assert.equal(isOpportunityScoreInput({
+    ...input,
+    factors: {
+      ...input.factors,
+      futureReturn: 9,
+    },
+  }), false)
 })
 
 test('前后端机会评分特征清单与版本保持一致', () => {

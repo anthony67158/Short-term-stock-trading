@@ -442,6 +442,113 @@ test('公式选股任务保存同一模式结果并保持幂等', async () => {
   assert.equal(progress.at(-1).percent, 100)
 })
 
+test('公式结果附加影子评分但不改变现有候选顺序', async () => {
+  let savedLedger = null
+  let scoreInputs = null
+  const candidates = ['600002', '600001'].map((code, index) => ({
+    code,
+    name: `测试${index}`,
+    score: 90 - index,
+    formulaId: 'CLOSE_TREND_PULLBACK',
+    action: 'WATCH_BUY',
+    primaryPrice: 10,
+    priceType: 'PULLBACK_WATCH',
+    stopPrice: 9.5,
+    targetPrice: 11,
+    riskReward: 2,
+    priceContractValid: true,
+    quote: quote({ code }),
+    blockers: [],
+  }))
+  const candidateEvents = candidates.map((candidate, index) => ({
+    code: candidate.code,
+    name: candidate.name,
+    stageReached: 'DISPLAYED',
+    displayedRank: index + 1,
+    cheapScore: 40 - index,
+    quote: candidate.quote,
+    formulaEvaluations: [{
+      formulaId: candidate.formulaId,
+      matched: true,
+      score: candidate.score,
+    }],
+    decision: candidate,
+    sector: {
+      phase: 'ACCUMULATION',
+      actionability: 'LAYOUT',
+    },
+  }))
+  const result = await runFormulaSelection({
+    mode: 'close',
+    store: {
+      readLatest: async () => null,
+      saveRun: async () => {},
+      saveProgress: async () => {},
+      claimRun: async () => ({ acquired: true }),
+      releaseRun: async () => true,
+    },
+    ledgerStore: {
+      saveBatch: async (value) => { savedLedger = value },
+    },
+    scan: async () => ({
+      universe: {
+        total: 2,
+        inspectedCount: 2,
+        tradeDate: '2026-08-28',
+      },
+      formulas: [],
+      candidates,
+      candidateEvents,
+    }),
+    scoreOpportunities: async (inputs) => {
+      scoreInputs = inputs
+      return new Map(inputs.map((input, index) => [
+        input.code,
+        {
+          schemaVersion: 'opportunity-score.v1',
+          state: 'READY',
+          code: input.code,
+          formulaId: input.formulaId,
+          pFill: 0.6 + index * 0.2,
+          pWinGivenFill: 0.55,
+          expectedNetR: 0.1 + index,
+          netRLowerBound: -0.1,
+          expectedShortfall10: -1,
+        },
+      ]))
+    },
+    collectMarketContext: async () => ({
+      marketGate: {
+        allowed: true,
+        riskTier: 'STANDARD',
+      },
+    }),
+    now: () => Date.UTC(2026, 7, 28, 7, 5),
+  })
+
+  assert.equal(scoreInputs.length, 2)
+  assert.deepEqual(
+    result.candidates.map((item) => item.code),
+    ['600002', '600001'],
+  )
+  assert.equal(result.candidates[0].opportunityScore.pFill, 0.6)
+  assert.equal(result.candidates[1].opportunityScore.pFill, 0.8)
+  assert.equal(
+    savedLedger.events[0].opportunityScore.state,
+    'READY',
+  )
+  assert.equal(
+    savedLedger.events[0].scoreInput.schemaVersion,
+    'opportunity-score-feature.v1',
+  )
+  assert.deepEqual(result.shadowRanking, {
+    requested: 2,
+    ready: 2,
+    unavailable: 0,
+    appliedToOrder: false,
+  })
+})
+
 test('公式选股进度按模式独立持久化并可恢复读取', async () => {
   const store = createFormulaSelectionStore({
     hasStorage: () => false,

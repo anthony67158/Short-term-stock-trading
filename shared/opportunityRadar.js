@@ -237,6 +237,7 @@ function formulaOpportunity(candidate, {
     quote: candidate.quote || null,
     score: finite(candidate.score),
     riskReward,
+    opportunityScore: candidate.opportunityScore || null,
     entryPlan,
     exitPlan,
     sourceSignals: unique([

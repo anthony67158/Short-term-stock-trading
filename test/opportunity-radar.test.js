@@ -72,6 +72,11 @@ function formulaCandidate(overrides = {}) {
     validUntil: NOW + 60 * 60 * 1000,
     evidence: ['回踩均价线后重新站稳'],
     blockers: [],
+    opportunityScore: {
+      schemaVersion: 'opportunity-score.v1',
+      state: 'NOT_READY',
+      pFill: null,
+    },
     quote: {
       price: 10.04,
       amount: 250_000_000,
@@ -145,6 +150,10 @@ test('盘中公式与板块方向融合为包含退出计划的可操作机会',
   assert.equal(result.lanes.intraday[0].exitPlan.hardStopPrice, 9.6)
   assert.equal(result.lanes.intraday[0].exitPlan.takeProfitPrice, 10.8)
   assert.equal(result.lanes.intraday[0].exitPlan.timeStopDate, '2026-09-09')
+  assert.equal(
+    result.lanes.intraday[0].opportunityScore.state,
+    'NOT_READY',
+  )
   assert.deepEqual(
     result.lanes.intraday[0].sourceSignals,
     ['板块前瞻', '盘中回踩承接'],

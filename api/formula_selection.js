@@ -16,6 +16,9 @@ import {
   opportunityRadarLedgerStore,
 } from './_opportunity_radar_ledger_store.js'
 import {
+  fetchOpportunityScores,
+} from './_opportunity_score.js'
+import {
   collectTailPickMarketContext,
 } from './_tail_pick_data.js'
 import {
@@ -29,6 +32,9 @@ import {
 import {
   buildOpportunityRadarLedgerBatch,
 } from '../shared/opportunityRadarLedger.js'
+import {
+  buildOpportunityScoreInput,
+} from '../shared/opportunityScoreContract.js'
 
 export const FORMULA_SELECTION_SCHEMA_VERSION = 'formula-selection.v1'
 
@@ -97,6 +103,7 @@ export function runFormulaSelection({
   mode = 'intraday',
   store = formulaSelectionStore,
   ledgerStore = opportunityRadarLedgerStore,
+  scoreOpportunities = fetchOpportunityScores,
   scan = scanFormulaSelectionCandidates,
   collectMarketContext = collectTailPickMarketContext,
   now = Date.now,
@@ -178,6 +185,29 @@ export function runFormulaSelection({
         marketGate: marketContext?.marketGate || null,
         events: scanned.candidateEvents || [],
       })
+      const scoreInputs = ledgerBatch.events
+        .filter((event) => event.decision?.priceContractValid === true)
+        .map((event) => buildOpportunityScoreInput({
+          event,
+          batch: ledgerBatch,
+        }))
+      const scoreInputMap = new Map(
+        scoreInputs.map((input) => [input.code, input]),
+      )
+      const scoreMap = await scoreOpportunities(scoreInputs)
+        .catch(() => new Map())
+      ledgerBatch.events = ledgerBatch.events.map((event) => ({
+        ...event,
+        scoreInput: scoreInputMap.get(event.code) || null,
+        opportunityScore: scoreMap.get(event.code) || null,
+      }))
+      const scoredCandidates = scanned.candidates.map((candidate) => ({
+        ...candidate,
+        opportunityScore: scoreMap.get(candidate.code) || null,
+      }))
+      const readyScores = [...scoreMap.values()].filter(
+        (score) => score?.state === 'READY',
+      ).length
       const result = {
         ok: true,
         schemaVersion: FORMULA_SELECTION_SCHEMA_VERSION,
@@ -190,17 +220,23 @@ export function runFormulaSelection({
         marketGate: marketContext?.marketGate || null,
         universe: scanned.universe,
         formulas: scanned.formulas,
-        candidates: scanned.candidates,
+        candidates: scoredCandidates,
+        shadowRanking: {
+          requested: scoreInputs.length,
+          ready: readyScores,
+          unavailable: Math.max(0, scoreInputs.length - readyScores),
+          appliedToOrder: false,
+        },
         ledger: {
           schemaVersion: ledgerBatch.schemaVersion,
           runId: ledgerBatch.runId,
           summary: ledgerBatch.summary,
         },
-        decision: scanned.candidates.length ? 'OBSERVE' : 'NO_MATCH',
-        reason: scanned.candidates.length
+        decision: scoredCandidates.length ? 'OBSERVE' : 'NO_MATCH',
+        reason: scoredCandidates.length
           ? marketAllowed
-            ? `筛出${scanned.candidates.length}只公式观察股`
-            : `已完成${scanned.candidates.length}只个股价格计算；${marketBlocker}，本次不买`
+            ? `筛出${scoredCandidates.length}只公式观察股`
+            : `已完成${scoredCandidates.length}只个股价格计算；${marketBlocker}，本次不买`
           : marketAllowed
             ? '当前没有股票通过公式和风险条件'
             : `已完成全市场个股计算；${marketBlocker}，且当前没有股票形成有效公式价格`,
@@ -216,10 +252,10 @@ export function runFormulaSelection({
         status: 'DONE',
         stage: 'DONE',
         percent: 100,
-        message: scanned.candidates.length
+        message: scoredCandidates.length
           ? marketAllowed
-            ? `已生成${scanned.candidates.length}只公式观察股`
-            : `已完成${scanned.candidates.length}只个股价格计算，本次不买`
+            ? `已生成${scoredCandidates.length}只公式观察股`
+            : `已完成${scoredCandidates.length}只个股价格计算，本次不买`
           : result.reason,
         counts: {
           total: scanned.universe?.total || 0,
@@ -227,7 +263,7 @@ export function runFormulaSelection({
           prefiltered: scanned.universe?.prefilterCount || 0,
           technicalCandidates:
             scanned.universe?.technicalCandidateCount || 0,
-          matched: scanned.candidates.length,
+          matched: scoredCandidates.length,
         },
         finishedAt: Number(now()) || Date.now(),
       }, { force: true })

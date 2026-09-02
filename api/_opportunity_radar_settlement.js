@@ -3,6 +3,7 @@ import {
 } from '../shared/opportunityOutcomeResolver.js'
 import {
   buildOpportunityScoreInput,
+  isOpportunityScoreInput,
 } from '../shared/opportunityScoreContract.js'
 import {
   beijingDayKey,
@@ -53,7 +54,11 @@ function persistedOutcome(batch, outcome) {
   const event = batch.events?.find(
     (item) => item.decisionId === outcome.decisionId,
   ) || {}
-  const scoreInput = buildOpportunityScoreInput({ event, batch })
+  const scoreInput = (
+    isOpportunityScoreInput(event.scoreInput)
+      ? event.scoreInput
+      : buildOpportunityScoreInput({ event, batch })
+  )
   return {
     ...outcome,
     runId: String(batch.runId || ''),
