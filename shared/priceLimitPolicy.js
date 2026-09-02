@@ -1,5 +1,10 @@
 const NEAR_LIMIT_FACTOR = 0.95
 const AT_LIMIT_TOLERANCE_PCT = 0.2
+const CHINEXT_REFORM_DATE = '20200824'
+const RISK_WARNING_REFORM_DATE = '20260706'
+
+export const ASHARE_TRADING_RULE_SCHEMA_VERSION =
+  'ashare-trading-rule.v1'
 
 function finite(value) {
   if (value == null || value === '') return null
@@ -14,12 +19,58 @@ function normalizedSecurity(security = {}) {
   }
 }
 
-export function priceLimitRatio(security = {}) {
+function normalizedDate(value) {
+  const compact = String(value || '').replaceAll('-', '')
+  return /^\d{8}$/.test(compact) ? compact : null
+}
+
+function boardOf(code) {
+  if (/^68/.test(code)) return 'STAR'
+  if (/^30/.test(code)) return 'CHINEXT'
+  if (/^(4|8|92)/.test(code)) return 'BSE'
+  return 'MAIN'
+}
+
+export function resolveAshareTradingRule(
+  security = {},
+  tradeDate = null,
+) {
   const { code, name } = normalizedSecurity(security)
-  if (/^(30|68)/.test(code)) return 0.2
-  if (/^(4|8|92)/.test(code)) return 0.3
-  if (/(?:\*?ST)/i.test(name)) return 0.05
-  return 0.1
+  const date = normalizedDate(tradeDate ?? security.tradeDate)
+  const effectiveDate = date || RISK_WARNING_REFORM_DATE
+  const board = boardOf(code)
+  const riskWarning = /(?:\*?ST)/i.test(name)
+  let ratio = 0.1
+  if (board === 'STAR') ratio = 0.2
+  else if (board === 'CHINEXT') {
+    ratio = effectiveDate >= CHINEXT_REFORM_DATE
+      ? 0.2
+      : riskWarning ? 0.05 : 0.1
+  } else if (board === 'BSE') ratio = 0.3
+  else if (riskWarning && effectiveDate < RISK_WARNING_REFORM_DATE) {
+    ratio = 0.05
+  }
+  return {
+    schemaVersion: ASHARE_TRADING_RULE_SCHEMA_VERSION,
+    ruleVersion: effectiveDate >= RISK_WARNING_REFORM_DATE
+      ? 'CN_A_SHARE_2026_07_06'
+      : effectiveDate >= CHINEXT_REFORM_DATE
+        ? 'CN_A_SHARE_2020_08_24'
+        : 'CN_A_SHARE_LEGACY',
+    tradeDate: date,
+    board,
+    riskWarning,
+    priceLimitRatio: ratio,
+    priceTick: 0.01,
+    tPlusOne: true,
+  }
+}
+
+export function priceLimitRatio(security = {}, tradeDate = null) {
+  return resolveAshareTradingRule(
+    security,
+    tradeDate,
+  ).priceLimitRatio
 }
 
 export function priceLimitThresholdPct(security = {}, near = false) {

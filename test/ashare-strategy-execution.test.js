@@ -8,22 +8,71 @@ import {
   tradeFees,
 } from '../shared/ashareStrategyExecution.js'
 
-test('A股涨跌停价格沿用主板创业板科创板北交所与ST口径', () => {
+test('A股涨跌停价格沿用主板创业板科创板北交所与当前ST口径', () => {
   assert.deepEqual(
     ashareLimitPrices({ code: '600001', name: '主板' }, 10),
-    { lower: 9, upper: 11, ratio: 0.1 },
+    {
+      lower: 9,
+      upper: 11,
+      ratio: 0.1,
+      ruleVersion: 'CN_A_SHARE_2026_07_06',
+    },
   )
   assert.deepEqual(
     ashareLimitPrices({ code: '300001', name: '创业板' }, 10),
-    { lower: 8, upper: 12, ratio: 0.2 },
+    {
+      lower: 8,
+      upper: 12,
+      ratio: 0.2,
+      ruleVersion: 'CN_A_SHARE_2026_07_06',
+    },
   )
   assert.deepEqual(
     ashareLimitPrices({ code: '920001', name: '北交所' }, 10),
-    { lower: 7, upper: 13, ratio: 0.3 },
+    {
+      lower: 7,
+      upper: 13,
+      ratio: 0.3,
+      ruleVersion: 'CN_A_SHARE_2026_07_06',
+    },
   )
   assert.deepEqual(
     ashareLimitPrices({ code: '600001', name: '*ST样本' }, 10),
-    { lower: 9.5, upper: 10.5, ratio: 0.05 },
+    {
+      lower: 9,
+      upper: 11,
+      ratio: 0.1,
+      ruleVersion: 'CN_A_SHARE_2026_07_06',
+    },
+  )
+})
+
+test('主板风险警示股历史回测按2026年7月6日切换涨跌停制度', () => {
+  assert.deepEqual(
+    ashareLimitPrices(
+      { code: '600001', name: '*ST样本' },
+      10,
+      '2026-07-03',
+    ),
+    {
+      lower: 9.5,
+      upper: 10.5,
+      ratio: 0.05,
+      ruleVersion: 'CN_A_SHARE_2020_08_24',
+    },
+  )
+  assert.deepEqual(
+    ashareLimitPrices(
+      { code: '600001', name: '*ST样本' },
+      10,
+      '2026-07-06',
+    ),
+    {
+      lower: 9,
+      upper: 11,
+      ratio: 0.1,
+      ruleVersion: 'CN_A_SHARE_2026_07_06',
+    },
   )
 })
 
@@ -34,7 +83,12 @@ test('创业板历史回测按2020年8月24日切换涨跌停制度', () => {
       10,
       '2020-08-21',
     ),
-    { lower: 9, upper: 11, ratio: 0.1 },
+    {
+      lower: 9,
+      upper: 11,
+      ratio: 0.1,
+      ruleVersion: 'CN_A_SHARE_LEGACY',
+    },
   )
   assert.deepEqual(
     ashareLimitPrices(
@@ -42,7 +96,12 @@ test('创业板历史回测按2020年8月24日切换涨跌停制度', () => {
       10,
       '2020-08-24',
     ),
-    { lower: 8, upper: 12, ratio: 0.2 },
+    {
+      lower: 8,
+      upper: 12,
+      ratio: 0.2,
+      ruleVersion: 'CN_A_SHARE_2020_08_24',
+    },
   )
 })
 
@@ -140,4 +199,5 @@ test('正常成交返回含滑点价格、费用与现金流', () => {
   assert.equal(result.grossAmount, 2001)
   assert.equal(result.fees.total, 5.02)
   assert.equal(result.cashFlow, -2006.02)
+  assert.equal(result.ruleVersion, 'CN_A_SHARE_2026_07_06')
 })

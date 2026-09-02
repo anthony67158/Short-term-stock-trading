@@ -1,4 +1,4 @@
-import { priceLimitRatio } from './priceLimitPolicy.js'
+import { resolveAshareTradingRule } from './priceLimitPolicy.js'
 
 export const A_SHARE_STANDARD_FEE_POLICY = Object.freeze({
   policyId: 'A_SHARE_STANDARD_V1',
@@ -26,20 +26,6 @@ function normalizedDate(value) {
   return /^\d{8}$/.test(compact) ? compact : null
 }
 
-function historicalPriceLimitRatio(security = {}, tradeDate = null) {
-  const code = String(security.code || '').trim()
-  const name = String(security.name || '')
-  const date = normalizedDate(tradeDate)
-  if (/^(68)/.test(code)) return 0.2
-  if (/^(30)/.test(code)) {
-    if (!date || date >= '20200824') return 0.2
-    return /(?:\*?ST)/i.test(name) ? 0.05 : 0.1
-  }
-  if (/^(4|8|92)/.test(code)) return 0.3
-  if (/(?:\*?ST)/i.test(name)) return 0.05
-  return priceLimitRatio(security)
-}
-
 export function ashareLimitPrices(
   security,
   previousClose,
@@ -47,11 +33,13 @@ export function ashareLimitPrices(
 ) {
   const close = finite(previousClose)
   if (!(close > 0)) throw new Error('previousClose必须为正有限数')
-  const ratio = historicalPriceLimitRatio(security, tradeDate)
+  const rule = resolveAshareTradingRule(security, tradeDate)
+  const ratio = rule.priceLimitRatio
   return {
     lower: priceTick(close * (1 - ratio)),
     upper: priceTick(close * (1 + ratio)),
     ratio,
+    ruleVersion: rule.ruleVersion,
   }
 }
 
@@ -187,5 +175,6 @@ export function assessAshareExecution({
     fees,
     cashFlow,
     limits,
+    ruleVersion: limits.ruleVersion,
   }
 }
