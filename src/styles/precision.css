@@ -16152,6 +16152,71 @@ html[data-theme="light"] .plan-cand.starred {
   }
 }
 
+/* Portfolio cards: a restrained contact shadow and inner highlight preserve
+   card boundaries on both the midnight and ice surfaces. */
+.plan-cand,
+.hold-grid .hold-item {
+  border-color: var(--color-trade-card-border);
+  background: var(--color-trade-card);
+  box-shadow: var(--shadow-trade-card);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .plan-cand:hover,
+  .hold-grid .hold-item:hover {
+    border-color: color-mix(
+      in oklch,
+      var(--color-accent) 24%,
+      var(--color-trade-card-border)
+    );
+    background: color-mix(
+      in oklch,
+      var(--color-trade-card) 96%,
+      var(--color-accent)
+    );
+    box-shadow: var(--shadow-trade-card-hover);
+  }
+}
+
+.stock-detail-card-hitarea:active {
+  box-shadow: var(--shadow-trade-card-pressed);
+}
+
+.plan-cand.starred,
+html[data-theme="light"] .plan-cand.starred {
+  border-color: color-mix(
+    in oklch,
+    var(--color-accent) 58%,
+    var(--color-trade-card-border)
+  );
+  background: color-mix(
+    in oklch,
+    var(--color-accent) 7%,
+    var(--color-trade-card)
+  );
+  box-shadow:
+    inset 0 0 0 1px color-mix(
+      in oklch,
+      var(--color-accent) 22%,
+      transparent
+    ),
+    var(--shadow-trade-card);
+}
+
+.plan-cand.sel-on,
+.hold-select-wrap.sel-on .hold-item,
+.plan-cand.starred.sel-on {
+  border-color: var(--color-accent);
+  background: color-mix(
+    in oklch,
+    var(--color-accent) 9%,
+    var(--color-trade-card)
+  );
+  box-shadow:
+    inset 0 0 0 1px var(--color-accent),
+    var(--shadow-trade-card);
+}
+
 .modal-mask:has(.detail-panel) {
   background: color-mix(
     in oklch,

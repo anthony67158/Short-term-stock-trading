@@ -253,11 +253,11 @@ test('卡片操作区用推荐动作建立主次且不再额外画顶部分隔�
   )
 })
 
-test('卡片通过留白和弱底色分组而不是连续边线', () => {
+test('卡片通过留白分组并用克制阴影建立整卡边界', () => {
   assert.match(precision, new RegExp(calmSurfaceMarker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
   assert.match(
     calmSurface,
-    /\.trade-card,[\s\S]*?\.hold-grid \.hold-item\s*{[^}]*border-color:\s*transparent[^}]*box-shadow:\s*none/s,
+    /Portfolio cards:[\s\S]*?\.plan-cand,[\s\S]*?\.hold-grid \.hold-item\s*{[^}]*border-color:\s*var\(--color-trade-card-border\)[^}]*background:\s*var\(--color-trade-card\)[^}]*box-shadow:\s*var\(--shadow-trade-card\)/s,
   )
   assert.match(
     precision,
@@ -277,10 +277,10 @@ test('卡片通过留白和弱底色分组而不是连续边线', () => {
   )
 })
 
-test('置顶自选卡使用浅蓝表面整圈蓝框且没有顶部状态线', () => {
+test('置顶自选卡使用浅蓝表面、整圈蓝框并保留卡片阴影', () => {
   assert.match(
     calmSurface,
-    /\.plan-cand\.starred,[\s\S]*?html\[data-theme="light"\] \.plan-cand\.starred\s*{[^}]*border-color:\s*color-mix\([^}]*var\(--color-accent\)\s*52%[^}]*background:\s*color-mix\([^}]*var\(--color-accent\)\s*6%[^}]*box-shadow:\s*none/s,
+    /\.plan-cand\.starred,[\s\S]*?html\[data-theme="light"\] \.plan-cand\.starred\s*{[^}]*border-color:\s*color-mix\([^}]*var\(--color-accent\)\s*58%[^}]*background:\s*color-mix\([^}]*var\(--color-accent\)\s*7%[^}]*box-shadow:[^}]*var\(--shadow-trade-card\)/s,
   )
   assert.doesNotMatch(
     calmSurface.match(

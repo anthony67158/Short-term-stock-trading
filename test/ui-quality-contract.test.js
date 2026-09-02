@@ -746,11 +746,23 @@ test('卡片内只保留单行建议摘要且完整内容进入个股详情', ()
 test('置顶自选卡使用浅蓝表面、整圈蓝框和强化星标', () => {
   assert.match(
     calmSurface,
-    /\.plan-cand\.starred,[\s\S]*?html\[data-theme="light"\] \.plan-cand\.starred\s*{[^}]*border-color:\s*color-mix\([^}]*var\(--color-accent\)\s*52%[^}]*background:\s*color-mix\([^}]*var\(--color-accent\)\s*6%[^}]*box-shadow:\s*none/s,
+    /\.plan-cand\.starred,[\s\S]*?html\[data-theme="light"\] \.plan-cand\.starred\s*{[^}]*border-color:\s*color-mix\([^}]*var\(--color-accent\)\s*58%[^}]*background:\s*color-mix\([^}]*var\(--color-accent\)\s*7%[^}]*box-shadow:[^}]*var\(--shadow-trade-card\)/s,
   )
   assert.match(
     calmSurface,
     /\.plan-cand\.starred \.pc-pin\.on\s*{[^}]*background:[^}]*color:\s*var\(--color-accent\)[^}]*opacity:\s*1/s,
+  )
+})
+
+test('持仓与自选卡在明暗主题使用独立表面和低扩散阴影', () => {
+  assert.match(tokens, /--color-trade-card:[\s\S]*?--shadow-trade-card:/)
+  assert.match(
+    tokens,
+    /html\[data-theme="light"\]\s*{[\s\S]*?--color-trade-card:\s*var\(--color-paper-2\)[\s\S]*?--shadow-trade-card:/s,
+  )
+  assert.match(
+    precision,
+    /\.plan-cand,[\s\S]*?\.hold-grid \.hold-item\s*{[^}]*box-shadow:\s*var\(--shadow-trade-card\)/s,
   )
 })
 

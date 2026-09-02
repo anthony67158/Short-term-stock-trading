@@ -142,6 +142,22 @@
   --rule-fine: 2px;
   --shadow-card: 0 12px 32px rgb(0 6 20 / 0.28);
   --shadow-overlay: 0 24px 64px rgb(0 4 14 / 0.58);
+  --color-trade-card:
+    color-mix(in oklch, var(--color-paper-3) 42%, var(--color-paper-2));
+  --color-trade-card-border:
+    color-mix(in oklch, var(--color-rule) 72%, var(--color-paper-3));
+  --shadow-trade-card:
+    inset 0 1px 0 rgb(255 255 255 / 0.055),
+    0 2px 5px rgb(0 4 14 / 0.28),
+    0 12px 26px rgb(0 3 12 / 0.2);
+  --shadow-trade-card-hover:
+    inset 0 1px 0 rgb(255 255 255 / 0.075),
+    0 3px 7px rgb(0 4 14 / 0.32),
+    0 15px 32px rgb(0 3 12 / 0.24);
+  --shadow-trade-card-pressed:
+    inset 0 1px 0 rgb(255 255 255 / 0.045),
+    0 1px 3px rgb(0 4 14 / 0.24),
+    0 7px 16px rgb(0 3 12 / 0.16);
 
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
@@ -269,5 +285,20 @@ html[data-theme="light"] {
     );
   --shadow-card: 0 12px 32px rgb(13 27 54 / 0.10);
   --shadow-overlay: 0 18px 48px rgb(13 27 54 / 0.20);
+  --color-trade-card: var(--color-paper-2);
+  --color-trade-card-border:
+    color-mix(in oklch, var(--color-rule) 70%, var(--color-paper-2));
+  --shadow-trade-card:
+    inset 0 1px 0 rgb(255 255 255 / 0.86),
+    0 2px 5px rgb(13 27 54 / 0.07),
+    0 11px 24px rgb(13 27 54 / 0.08);
+  --shadow-trade-card-hover:
+    inset 0 1px 0 rgb(255 255 255 / 0.94),
+    0 3px 7px rgb(13 27 54 / 0.09),
+    0 14px 30px rgb(13 27 54 / 0.11);
+  --shadow-trade-card-pressed:
+    inset 0 1px 0 rgb(255 255 255 / 0.8),
+    0 1px 3px rgb(13 27 54 / 0.07),
+    0 6px 14px rgb(13 27 54 / 0.07);
   --glow: rgb(31 95 159 / 0.16);
 }
