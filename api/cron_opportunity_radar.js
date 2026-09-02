@@ -5,6 +5,9 @@ import {
 import {
   settleOpportunityRadarOutcomes,
 } from './_opportunity_radar_settlement.js'
+import {
+  refreshOpportunityRadarBaseline,
+} from './_opportunity_radar_baseline.js'
 
 function reply(res, body, status = 200) {
   applyCors(res)
@@ -26,7 +29,8 @@ export default async function handler(req, res) {
   }
   try {
     const settlement = await settleOpportunityRadarOutcomes()
-    return reply(res, { ok: true, settlement })
+    const baseline = await refreshOpportunityRadarBaseline()
+    return reply(res, { ok: true, settlement, baseline })
   } catch (error) {
     console.error(
       '[cron_opportunity_radar] settlement failed',

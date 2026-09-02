@@ -211,6 +211,9 @@ export function buildOpportunityRadarLedgerBatch({
     marketGate: marketGate && typeof marketGate === 'object'
       ? {
           allowed: marketGate.allowed === true,
+          riskTier: text(marketGate.riskTier, 30) || null,
+          regimeLabel:
+            text(marketGate.regime?.label, 60) || null,
           blockers: uniqueText(marketGate.blockers, 8),
         }
       : null,

@@ -43,7 +43,7 @@ function formulaState() {
   }
 }
 
-test('机会雷达聚合读取会并行启动三个现有来源', async () => {
+test('机会雷达聚合读取会并行启动业务来源与统计基线', async () => {
   const started = []
   const resolvers = []
   const source = (name, value) => () => new Promise((resolve) => {
@@ -55,14 +55,24 @@ test('机会雷达聚合读取会并行启动三个现有来源', async () => {
     readSector: source('sector', sectorState()),
     readFormula: source('formula', formulaState()),
     readTail: source('tail', null),
+    readBaseline: source('baseline', {
+      schemaVersion: 'opportunity-radar-baseline.v1',
+    }),
   })
 
   await Promise.resolve()
-  assert.deepEqual(started.sort(), ['formula', 'sector', 'tail'])
+  assert.deepEqual(
+    started.sort(),
+    ['baseline', 'formula', 'sector', 'tail'],
+  )
   resolvers.forEach((resolve) => resolve())
   const result = await pending
   assert.equal(result.schemaVersion, 'opportunity-radar.v1')
   assert.equal(result.sourceStatus.sector.status, 'fresh')
+  assert.equal(
+    result.baseline.schemaVersion,
+    'opportunity-radar-baseline.v1',
+  )
 })
 
 test('单个来源失败时仍返回其它结果并标记失败来源', async () => {

@@ -26,6 +26,11 @@ function event({
     quote: {
       price: 10,
       preClose: 9.8,
+      amount: 600_000_000,
+    },
+    sector: {
+      phase: 'ACCUMULATION',
+      actionability: 'LAYOUT',
     },
     decision: {
       formulaId: 'CLOSE_TREND_PULLBACK',
@@ -47,6 +52,10 @@ function batch(tradeDate, candidate) {
     tradeDate,
     mode: 'CLOSE',
     slot: '1505',
+    marketGate: {
+      allowed: true,
+      riskTier: 'STANDARD',
+    },
     events: [candidate],
   }
 }
@@ -173,6 +182,13 @@ test('离线结算只写成熟结果并保留未成熟路径供后续重算', as
   assert.equal(store.values.length, 1)
   assert.equal(store.values[0].outcome, 'NOT_TRIGGERED')
   assert.equal(store.values[0].ruleVersion, 'CN_A_SHARE_2026_07_06')
+  assert.equal(store.values[0].context.marketState, 'STANDARD')
+  assert.equal(
+    store.values[0].context.timeBucket,
+    'CLOSE_NEXT_SESSION',
+  )
+  assert.equal(store.values[0].context.liquidityBucket, 'HIGH')
+  assert.equal(store.values[0].context.sectorPhase, 'ACCUMULATION')
 })
 
 test('重复运行跳过已经不可变落盘的成熟结果', async () => {

@@ -12,6 +12,9 @@ import {
   readFormulaSelectionState,
 } from './formula_selection.js'
 import {
+  opportunityRadarBaselineStore,
+} from './_opportunity_radar_baseline_store.js'
+import {
   readSectorForecastBootstrap,
 } from './sector_forecast.js'
 import {
@@ -49,13 +52,18 @@ export async function readOpportunityRadarSnapshot({
     tailReader: async () => null,
   }),
   readTail = () => readTailPickState(),
+  readBaseline = () => opportunityRadarBaselineStore.readBaseline(),
   now = Date.now(),
 } = {}) {
-  const [sectorResult, formulaResult, tailResult] =
+  const [sectorResult, formulaResult, tailResult, baselineResult] =
     await Promise.allSettled([
       withTimeout(Promise.resolve().then(readSector), '板块结果读取'),
       withTimeout(Promise.resolve().then(readFormula), '公式结果读取'),
       withTimeout(Promise.resolve().then(readTail), '尾盘结果读取'),
+      withTimeout(
+        Promise.resolve().then(readBaseline),
+        '统计基线读取',
+      ),
     ])
   const sourceErrors = {
     sector: sectorResult.status === 'rejected'
@@ -78,6 +86,7 @@ export async function readOpportunityRadarSnapshot({
   return {
     ok: true,
     partial: Object.values(sourceErrors).some(Boolean),
+    baseline: settledValue(baselineResult, null),
     ...radar,
   }
 }

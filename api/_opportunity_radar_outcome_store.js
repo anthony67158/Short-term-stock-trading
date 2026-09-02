@@ -50,6 +50,21 @@ function outcomePath({ tradeDate, mode, slot, code }) {
     + `${safeMode(mode)}-${safeSlot(slot)}/${safeCode(code)}.json`
 }
 
+function dateRange(from, to, maximumDays = 366) {
+  const start = new Date(`${safeDate(from)}T00:00:00.000Z`)
+  const end = new Date(`${safeDate(to)}T00:00:00.000Z`)
+  if (start > end) throw new Error('机会雷达结果日期范围无效')
+  const dates = []
+  for (
+    let value = start.getTime();
+    value <= end.getTime() && dates.length < maximumDays;
+    value += 24 * 60 * 60 * 1000
+  ) {
+    dates.push(new Date(value).toISOString().slice(0, 10))
+  }
+  return dates
+}
+
 function conflict(error) {
   return error?.status === 409
     || ['FileAlreadyExists', 'ObjectAlreadyExists']
@@ -126,6 +141,44 @@ export function createOpportunityRadarOutcomeStore(storage = {
         limit: maximum,
       })
       const outcomes = await Promise.all(blobs.map((blob) =>
+        storage.readJson(blob.pathname || blob).catch(() => null),
+      ))
+      return outcomes.filter(Boolean)
+    },
+    async listOutcomeRange({
+      from,
+      to,
+      limit = 10000,
+    } = {}) {
+      const dates = dateRange(from, to)
+      const maximum = Math.max(1, Math.min(
+        10000,
+        Number(limit) || 10000,
+      ))
+      if (!storage.hasStorage()) {
+        return [...memoryOutcomes.entries()]
+          .filter(([path]) => dates.some((date) =>
+            path.startsWith(
+              `${OPPORTUNITY_RADAR_OUTCOME_PREFIX}${date}/`,
+            ),
+          ))
+          .sort(([left], [right]) => left.localeCompare(right))
+          .slice(0, maximum)
+          .map(([, value]) => value)
+      }
+      if (typeof storage.list !== 'function') {
+        throw new Error('机会雷达结果存储不支持枚举')
+      }
+      const refs = []
+      for (const date of dates) {
+        if (refs.length >= maximum) break
+        const { blobs = [] } = await storage.list({
+          prefix: `${OPPORTUNITY_RADAR_OUTCOME_PREFIX}${date}/`,
+          limit: maximum - refs.length,
+        })
+        refs.push(...blobs)
+      }
+      const outcomes = await Promise.all(refs.map((blob) =>
         storage.readJson(blob.pathname || blob).catch(() => null),
       ))
       return outcomes.filter(Boolean)

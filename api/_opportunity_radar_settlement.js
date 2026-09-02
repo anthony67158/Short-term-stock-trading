@@ -46,7 +46,38 @@ function eligibleEvents(batch) {
     ))
 }
 
+function timeBucket(batch) {
+  if (String(batch?.mode || '').toUpperCase() === 'CLOSE') {
+    return 'CLOSE_NEXT_SESSION'
+  }
+  const slot = Number(batch?.slot)
+  if (!Number.isFinite(slot)) return 'INTRADAY_MANUAL'
+  if (slot <= 630) return 'INTRADAY_OPEN'
+  if (slot <= 690) return 'INTRADAY_MORNING'
+  if (slot <= 840) return 'INTRADAY_AFTERNOON'
+  return 'INTRADAY_CLOSE'
+}
+
+function liquidityBucket(amount) {
+  const value = Number(amount)
+  if (!Number.isFinite(value) || value < 0) return 'UNKNOWN'
+  if (value >= 500_000_000) return 'HIGH'
+  if (value >= 100_000_000) return 'GOOD'
+  if (value >= 50_000_000) return 'LIMITED'
+  return 'THIN'
+}
+
 function persistedOutcome(batch, outcome) {
+  const event = batch.events?.find(
+    (item) => item.decisionId === outcome.decisionId,
+  ) || {}
+  const hasMarketGate = (
+    batch.marketGate
+    && typeof batch.marketGate === 'object'
+  )
+  const marketAllowed = hasMarketGate
+    ? batch.marketGate.allowed === true
+    : null
   return {
     ...outcome,
     runId: String(batch.runId || ''),
@@ -54,11 +85,36 @@ function persistedOutcome(batch, outcome) {
     mode: String(batch.mode || '').toUpperCase(),
     slot: String(batch.slot || 'manual'),
     ledgerSchemaVersion: String(batch.schemaVersion || ''),
-    ruleVersion: String(
-      batch.events?.find(
-        (event) => event.decisionId === outcome.decisionId,
-      )?.ruleVersion || '',
-    ),
+    ruleVersion: String(event.ruleVersion || ''),
+    context: {
+      stageReached: String(event.stageReached || 'UNKNOWN'),
+      displayed: event.stageReached === 'DISPLAYED',
+      displayedRank: Number(event.displayedRank) || null,
+      marketAllowed,
+      marketState: String(
+        batch.marketGate?.riskTier
+        || (
+          marketAllowed == null
+            ? 'UNKNOWN'
+            : marketAllowed ? 'RISK_ALLOWED' : 'RISK_BLOCKED'
+        ),
+      ),
+      marketRegimeLabel: String(
+        batch.marketGate?.regimeLabel || '',
+      ) || null,
+      sectorPhase: String(event.sector?.phase || 'UNKNOWN'),
+      sectorActionability: String(
+        event.sector?.actionability || 'UNKNOWN',
+      ),
+      timeBucket: timeBucket(batch),
+      liquidityBucket: liquidityBucket(event.quote?.amount),
+      amount: Number.isFinite(Number(event.quote?.amount))
+        ? Number(event.quote.amount)
+        : null,
+      turnover: Number.isFinite(Number(event.quote?.turnover))
+        ? Number(event.quote.turnover)
+        : null,
+    },
   }
 }
 

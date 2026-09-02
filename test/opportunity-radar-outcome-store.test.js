@@ -88,3 +88,24 @@ test('未成熟结果不能写入最终结果目录', async () => {
     /只持久化成熟结果/,
   )
 })
+
+test('成熟结果可按日期范围读取用于生成统计基线', async () => {
+  const storage = memoryStorage()
+  const store = createOpportunityRadarOutcomeStore(storage)
+  await store.saveOutcome(outcome())
+  await store.saveOutcome(outcome({
+    decisionId: 'formula:2026-09-03:close:1505:600002',
+    tradeDate: '2026-09-03',
+    code: '600002',
+  }))
+
+  const values = await store.listOutcomeRange({
+    from: '2026-09-02',
+    to: '2026-09-03',
+  })
+
+  assert.deepEqual(
+    values.map((value) => value.code),
+    ['600001', '600002'],
+  )
+})

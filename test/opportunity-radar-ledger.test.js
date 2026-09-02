@@ -66,6 +66,8 @@ test('机会雷达账本为每只候选生成稳定决策ID和规则版本', () 
     },
     marketGate: {
       allowed: true,
+      riskTier: 'STANDARD',
+      regime: { label: '趋势偏强' },
       blockers: [],
     },
     events: [event()],
@@ -90,6 +92,8 @@ test('机会雷达账本为每只候选生成稳定决策ID和规则版本', () 
     1_788_323_600_000,
   )
   assert.equal(batch.events[0].decision.timeStopTradingDays, 5)
+  assert.equal(batch.marketGate.riskTier, 'STANDARD')
+  assert.equal(batch.marketGate.regimeLabel, '趋势偏强')
   assert.deepEqual(batch.summary, {
     total: 1,
     prefilter: 0,
