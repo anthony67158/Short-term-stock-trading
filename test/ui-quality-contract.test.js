@@ -766,6 +766,21 @@ test('持仓与自选卡在明暗主题使用独立表面和低扩散阴影', ()
   )
 })
 
+test('持仓与自选卡内部控件在明暗主题都有实体表面和边界', () => {
+  assert.match(
+    tokens,
+    /--color-trade-control:[\s\S]*?--color-trade-control-border:[\s\S]*?--shadow-trade-control:/,
+  )
+  assert.match(
+    tokens,
+    /html\[data-theme="light"\]\s*{[\s\S]*?--color-trade-control:[\s\S]*?--color-trade-control-border:[\s\S]*?--shadow-trade-control:/s,
+  )
+  assert.match(
+    precision,
+    /Card controls stay visually attached[\s\S]*?border:\s*1px solid var\(--color-trade-control-border\)[\s\S]*?background:\s*var\(--color-trade-control\)[\s\S]*?box-shadow:\s*var\(--shadow-trade-control\)/s,
+  )
+})
+
 test('军师建议正文块统一透明且不再叠加分层底色', () => {
   assert.match(
     precision,

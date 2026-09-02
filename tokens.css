@@ -158,6 +158,18 @@
     inset 0 1px 0 rgb(255 255 255 / 0.045),
     0 1px 3px rgb(0 4 14 / 0.24),
     0 7px 16px rgb(0 3 12 / 0.16);
+  --color-trade-control:
+    color-mix(in oklch, var(--color-paper-4) 64%, var(--color-paper-3));
+  --color-trade-control-hover:
+    color-mix(in oklch, var(--color-paper-4) 78%, var(--color-paper-3));
+  --color-trade-control-border:
+    color-mix(in oklch, var(--color-rule) 82%, var(--color-paper-4));
+  --shadow-trade-control:
+    inset 0 1px 0 rgb(255 255 255 / 0.055),
+    0 1px 2px rgb(0 3 12 / 0.24);
+  --shadow-trade-control-hover:
+    inset 0 1px 0 rgb(255 255 255 / 0.075),
+    0 2px 5px rgb(0 3 12 / 0.28);
 
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
@@ -300,5 +312,16 @@ html[data-theme="light"] {
     inset 0 1px 0 rgb(255 255 255 / 0.8),
     0 1px 3px rgb(13 27 54 / 0.07),
     0 6px 14px rgb(13 27 54 / 0.07);
+  --color-trade-control:
+    color-mix(in oklch, var(--color-paper-3) 82%, var(--color-paper-2));
+  --color-trade-control-hover: var(--color-paper-4);
+  --color-trade-control-border:
+    color-mix(in oklch, var(--color-rule) 74%, var(--color-paper-2));
+  --shadow-trade-control:
+    inset 0 1px 0 rgb(255 255 255 / 0.9),
+    0 1px 2px rgb(13 27 54 / 0.08);
+  --shadow-trade-control-hover:
+    inset 0 1px 0 rgb(255 255 255 / 0.96),
+    0 2px 5px rgb(13 27 54 / 0.11);
   --glow: rgb(31 95 159 / 0.16);
 }

@@ -294,6 +294,13 @@ test('置顶自选卡使用浅蓝表面、整圈蓝框并保留卡片阴影', ()
   )
 })
 
+test('持仓与自选卡内部次级按钮使用实体表面和清晰边界', () => {
+  assert.match(
+    precision,
+    /Card controls stay visually attached[\s\S]*?\.pi-trade-actions > \.chip-btn:not\(\.recommended\)[\s\S]*?\.plan-cand \.pc-actions > \.chip-btn:not\(\.act-buy\)[\s\S]*?\.holding-plan-summary,[\s\S]*?\.hold-cost-edit,[\s\S]*?\.plan-cand \.pc-pin[\s\S]*?border:\s*1px solid var\(--color-trade-control-border\)[\s\S]*?background:\s*var\(--color-trade-control\)[\s\S]*?box-shadow:\s*var\(--shadow-trade-control\)/s,
+  )
+})
+
 test('策略摘要不再使用遮挡卡片的悬浮预览且文字区域直接进入详情', () => {
   assert.doesNotMatch(
     planTab,
