@@ -230,4 +230,8 @@ test('就绪评分验证代码、概率范围和完整数值合同', () => {
     ...result,
     code: '600002',
   }, result), /评分股票不匹配/)
+  assert.throws(() => normalizeOpportunityScoreResponse({
+    ...result,
+    modelVersion: '',
+  }, result), /模型版本无效/)
 })

@@ -51,9 +51,12 @@ def validate_score_item(item):
         name: _finite(factors[name], "机会评分特征")
         for name in FEATURE_NAMES
     }
+    as_of = int(_finite(item.get("asOf"), "机会评分时点"))
+    if as_of <= 0:
+        raise ValueError("机会评分时点必须为正数")
     return {
         "schemaVersion": FEATURE_SCHEMA_VERSION,
-        "asOf": int(_finite(item.get("asOf"), "机会评分时点")),
+        "asOf": as_of,
         "code": code,
         "formulaId": formula_id,
         "factors": normalized,

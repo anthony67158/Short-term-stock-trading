@@ -135,6 +135,8 @@ export function buildOpportunityScoreInput({
   if (event?.decision?.priceContractValid !== true) {
     throw new Error('机会评分只接受完整价格合同')
   }
+  const asOf = finite(event.asOf)
+  if (!(asOf > 0)) throw new Error('机会评分时点无效')
   const formulaId = String(event.decision.formulaId || 'UNKNOWN')
   const formulaEvaluation = (
     Array.isArray(event.formulaEvaluations)
@@ -203,7 +205,7 @@ export function buildOpportunityScoreInput({
   }
   return {
     schemaVersion: OPPORTUNITY_SCORE_FEATURE_SCHEMA_VERSION,
-    asOf: finite(event.asOf),
+    asOf,
     code,
     formulaId,
     factors: Object.fromEntries(
@@ -310,6 +312,8 @@ export function normalizeOpportunityScoreResponse(
         || response.outOfDistribution === true,
     }
   }
+  const modelVersion = String(response.modelVersion || '')
+  if (!modelVersion) throw new Error('机会评分模型版本无效')
   const sampleCount = Math.max(
     0,
     Math.trunc(finite(response.calibration?.sampleCount) || 0),
@@ -318,7 +322,7 @@ export function normalizeOpportunityScoreResponse(
     schemaVersion: OPPORTUNITY_SCORE_SCHEMA_VERSION,
     state,
     reason: null,
-    modelVersion: String(response.modelVersion || ''),
+    modelVersion,
     asOf: finite(response.asOf) ?? finite(expected.asOf),
     code: String(response.code),
     formulaId: String(response.formulaId),

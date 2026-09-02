@@ -71,6 +71,10 @@ class OpportunityContractTest(unittest.TestCase):
                     "schemaVersion": "other",
                 }],
             })
+        with self.assertRaisesRegex(ValueError, "时点必须为正数"):
+            validate_score_request({
+                "items": [{**item(), "asOf": 0}],
+            })
 
     def test_not_ready_prediction_never_returns_probabilities(self):
         value = item()
