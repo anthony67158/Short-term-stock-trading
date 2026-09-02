@@ -16249,12 +16249,12 @@ html[data-theme="light"]
 .plan-cand.starred .pc-pin.on {
   border-color: color-mix(
     in oklch,
-    var(--color-accent) 58%,
+    var(--color-accent) 42%,
     var(--color-trade-control-border)
   );
   background: color-mix(
     in oklch,
-    var(--color-accent) 14%,
+    var(--color-accent) 8%,
     var(--color-trade-control)
   );
   color: var(--color-accent);
@@ -16273,7 +16273,7 @@ html[data-theme="light"]
   ):hover:not(:disabled) {
     border-color: color-mix(
       in oklch,
-      var(--color-accent) 36%,
+      var(--color-accent) 22%,
       var(--color-trade-control-border)
     );
     background: var(--color-trade-control-hover);

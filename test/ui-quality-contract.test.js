@@ -785,7 +785,7 @@ test('持仓与自选卡内部控件在明暗主题都有实体表面和边界',
   )
   assert.match(
     tokens,
-    /html\[data-theme="light"\]\s*{[\s\S]*?--color-trade-control:\s*color-mix\(in oklch,\s*var\(--color-accent\)\s*5%,\s*var\(--color-paper-3\)\)[\s\S]*?--color-trade-control-border:\s*color-mix\(in oklch,\s*var\(--color-accent\)\s*24%,\s*var\(--color-rule\)\)/s,
+    /html\[data-theme="light"\]\s*{[\s\S]*?--color-trade-control:\s*color-mix\(in oklch,\s*var\(--color-accent\)\s*2%,\s*var\(--color-paper-3\)\)[\s\S]*?--color-trade-control-border:\s*color-mix\(in oklch,\s*var\(--color-accent\)\s*12%,\s*var\(--color-rule\)\)/s,
   )
   assert.match(
     precision,
