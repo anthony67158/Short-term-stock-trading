@@ -366,3 +366,39 @@ test('收盘与尾盘结果必须属于最近完整交易日', () => {
     'AVOID',
   )
 })
+
+test('机会雷达为每个lane附加组合视图且不改变个股结论', () => {
+  const result = buildOpportunityRadar({
+    now: NOW,
+    sector: {
+      market: { phase: 'live', day: '2026-09-02' },
+      intraday: sectorSnapshot(),
+      latest: sectorSnapshot({ session: 'close' }),
+    },
+    formula: {
+      intraday: formulaResult('INTRADAY', [formulaCandidate()]),
+    },
+  })
+
+  // 三个 lane 都有组合视图
+  assert.ok(result.portfolios)
+  assert.equal(
+    result.portfolios.intraday.schemaVersion,
+    'opportunity-portfolio.v1',
+  )
+  // 组合视图不修改 lanes 里的个股 state
+  const laneRow = result.lanes.intraday.find(
+    (item) => item.code === '600001',
+  )
+  assert.equal(laneRow.state, 'READY')
+  assert.equal('portfolioState' in laneRow, false)
+  // 组合视图里同一只股票被标注了 portfolioState
+  const pf = result.portfolios.intraday.candidates.find(
+    (item) => item.code === '600001',
+  )
+  assert.ok(pf)
+  assert.equal(pf.state, 'READY')
+  assert.equal(typeof pf.portfolioState, 'string')
+  assert.ok(result.portfolios.intraday.budget)
+})
+

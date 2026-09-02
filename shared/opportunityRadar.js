@@ -5,6 +5,9 @@ import {
   localDateKey,
   nextTradingDate,
 } from './tradingCalendar.js'
+import {
+  analyzeOpportunityPortfolio,
+} from './opportunityPortfolio.js'
 
 export const OPPORTUNITY_RADAR_SCHEMA_VERSION =
   'opportunity-radar.v1'
@@ -485,6 +488,7 @@ export function buildOpportunityRadar({
   formula = {},
   tail = null,
   sourceErrors = {},
+  holdings = [],
   now = Date.now(),
 } = {}) {
   const timestamp = Number(now) || Date.now()
@@ -622,6 +626,11 @@ export function buildOpportunityRadar({
     ),
   ])
   const lanes = { layout, intraday, next }
+  const portfolios = {
+    layout: analyzeOpportunityPortfolio({ rows: layout, holdings }),
+    intraday: analyzeOpportunityPortfolio({ rows: intraday, holdings }),
+    next: analyzeOpportunityPortfolio({ rows: next, holdings }),
+  }
   return {
     schemaVersion: OPPORTUNITY_RADAR_SCHEMA_VERSION,
     generatedAt: timestamp,
@@ -637,6 +646,7 @@ export function buildOpportunityRadar({
       tail: tailState?.task || null,
     },
     lanes,
+    portfolios,
     sectors: maps.sectors.slice(0, 5).map(sectorView),
     summary: summaryFor(lanes[timing.defaultLane]),
   }
