@@ -62,7 +62,16 @@ function sourceDay(value = {}) {
 function sourceState(value, {
   expectedDay = '',
   strictDay = false,
+  error = '',
 } = {}) {
+  if (error) {
+    return {
+      status: 'failed',
+      dataAsOf: null,
+      tradeDate: null,
+      error: String(error).slice(0, 180),
+    }
+  }
   if (!value) return { status: 'missing', dataAsOf: null }
   const day = sourceDay(value)
   return {
@@ -70,9 +79,9 @@ function sourceState(value, {
       ? 'stale'
       : 'fresh',
     dataAsOf:
-      finite(value.dataAsOf)
-      ?? finite(value.generatedAt)
-      ?? finite(value.session?.dataAsOf)
+      value.dataAsOf
+      ?? value.generatedAt
+      ?? value.session?.dataAsOf
       ?? null,
     tradeDate: day || null,
   }
@@ -449,6 +458,7 @@ export function buildOpportunityRadar({
   sector = {},
   formula = {},
   tail = null,
+  sourceErrors = {},
   now = Date.now(),
 } = {}) {
   const timestamp = Number(now) || Date.now()
@@ -463,18 +473,29 @@ export function buildOpportunityRadar({
     day,
   )
   const maps = sectorMaps(sectorSnapshot)
-  const tailResult = tail || formula?.tail || null
+  const tailState = tail || null
+  const tailResult = tailState?.displayResult
+    || tailState?.latest
+    || tailState
+    || formula?.tail
+    || null
   const sourceStatus = {
     sector: sourceState(sectorSnapshot, {
       expectedDay: day,
       strictDay: sectorSnapshot?.session === 'intraday',
+      error: sourceErrors.sector,
     }),
     formulaIntraday: sourceState(formula?.intraday, {
       expectedDay: day,
       strictDay: true,
+      error: sourceErrors.formula,
     }),
-    formulaClose: sourceState(formula?.close),
-    tail: sourceState(tailResult),
+    formulaClose: sourceState(formula?.close, {
+      error: sourceErrors.formula,
+    }),
+    tail: sourceState(tailResult, {
+      error: sourceErrors.tail,
+    }),
   }
   const intradayFormula = Array.isArray(formula?.intraday?.candidates)
     ? formula.intraday.candidates
@@ -558,7 +579,7 @@ export function buildOpportunityRadar({
       sector: sector?.task || null,
       formulaIntraday: formula?.progress?.intraday || null,
       formulaClose: formula?.progress?.close || null,
-      tail: tailResult?.task || tail?.task || null,
+      tail: tailState?.task || null,
     },
     lanes,
     sectors: maps.sectors.slice(0, 5).map(sectorView),
