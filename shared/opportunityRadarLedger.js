@@ -56,7 +56,7 @@ function safeSlot(value) {
 function quoteProjection(value = {}) {
   return {
     price: finite(value.price),
-    preClose: finite(value.preClose),
+    preClose: finite(value.preClose ?? value.prevClose),
     open: finite(value.open),
     high: finite(value.high),
     low: finite(value.low),

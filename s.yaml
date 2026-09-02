@@ -138,6 +138,13 @@ resources:
             cronExpression: "CRON_TZ=Asia/Shanghai 0 15 15 * * 1-5"
             enable: true
             payload: ${env('CRON_KEY')}
+        # 机会雷达影子结算：只读历史账本与原始分钟价，成熟结果禁止覆盖写入。
+        - triggerName: opportunity-radar-settlement-timer
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 10 17 * * 1-5"
+            enable: true
+            payload: ${env('CRON_KEY')}
         # 持仓自动复盘：每场分段重复触发，未完成股票按租约续跑，页面关闭也不丢任务。
         - triggerName: review-noon-open
           triggerType: timer

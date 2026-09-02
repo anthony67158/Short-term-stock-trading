@@ -21,6 +21,7 @@ import {
   dailyReportTimerBody,
   dailyReportWorkerBody,
   formulaSelectionTimerBody,
+  opportunityRadarTimerBody,
   portfolioAnalysisTimerBody,
   portfolioAnalysisWorkerBody,
   reviewTimerBody,
@@ -341,6 +342,10 @@ async function handleRequest(req, res) {
       process.env.CRON_KEY,
     ) || dailyReportWorkerBody(event, process.env.CRON_KEY);
     const v2Body = v2AccuracyTimerBody(event, process.env.CRON_KEY);
+    const opportunityRadarBody = opportunityRadarTimerBody(
+      event,
+      process.env.CRON_KEY,
+    );
     const alertBody = alertTimerBody(event, process.env.CRON_KEY);
     const reviewBody = reviewTimerBody(event, process.env.CRON_KEY);
     const sectorForecastBody = sectorForecastTimerBody(
@@ -363,6 +368,7 @@ async function handleRequest(req, res) {
       !adviceBody
       && !dailyReportBody
       && !v2Body
+      && !opportunityRadarBody
       && !alertBody
       && !reviewBody
       && !sectorForecastBody
@@ -374,6 +380,7 @@ async function handleRequest(req, res) {
     req.body = adviceBody
       || dailyReportBody
       || v2Body
+      || opportunityRadarBody
       || alertBody
       || reviewBody
       || sectorForecastBody
@@ -391,17 +398,19 @@ async function handleRequest(req, res) {
           ? 'cron_daily_report'
           : v2Body
             ? 'cron_v2_accuracy'
-            : alertBody
-              ? 'cron_alert'
-              : reviewBody
-                ? 'cron_review'
-                : sectorForecastBody
-                  ? 'sector_forecast'
-                  : tailPickBody
-                    ? 'tail_pick'
-                    : formulaSelectionBody
-                      ? 'formula_selection'
-                      : 'portfolio_analysis';
+            : opportunityRadarBody
+              ? 'cron_opportunity_radar'
+              : alertBody
+                ? 'cron_alert'
+                : reviewBody
+                  ? 'cron_review'
+                  : sectorForecastBody
+                    ? 'sector_forecast'
+                    : tailPickBody
+                      ? 'tail_pick'
+                      : formulaSelectionBody
+                        ? 'formula_selection'
+                        : 'portfolio_analysis';
       await handlers[handlerName](req, res);
     } catch (e) {
       console.error('[fc] invoke handler failed', e?.code || e?.name || e?.message);

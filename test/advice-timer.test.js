@@ -8,6 +8,7 @@ import {
   dailyReportTimerBody,
   dailyReportWorkerBody,
   formulaSelectionTimerBody,
+  opportunityRadarTimerBody,
   reviewTimerBody,
   sectorForecastTimerBody,
   tailPickTimerBody,
@@ -38,6 +39,23 @@ test('V2正确率定时事件只接受专用触发器和匹配密钥', () => {
   assert.deepEqual(v2AccuracyTimerBody(event, 'secret-key'), { scheduled: true })
   assert.equal(v2AccuracyTimerBody(event, 'wrong-key'), null)
   assert.equal(v2AccuracyTimerBody({ ...event, triggerName: 'other' }, 'secret-key'), null)
+})
+
+test('机会雷达结算只接受收盘后专用触发器和匹配密钥', () => {
+  const event = {
+    triggerName: 'opportunity-radar-settlement-timer',
+    payload: 'secret-key',
+  }
+
+  assert.deepEqual(
+    opportunityRadarTimerBody(event, 'secret-key'),
+    { scheduled: true },
+  )
+  assert.equal(opportunityRadarTimerBody(event, 'wrong-key'), null)
+  assert.equal(opportunityRadarTimerBody({
+    ...event,
+    triggerName: 'other',
+  }, 'secret-key'), null)
 })
 
 test('板块前瞻Timer只负责唤醒运行时到期判断', () => {

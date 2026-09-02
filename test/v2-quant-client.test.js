@@ -89,6 +89,26 @@ test('分钟行情下载校验代码并回退多镜像', async () => {
   assert.equal(bars.at(-1).tradeTime, '2026-08-10 15:00:00')
 })
 
+test('机会结果结算可显式读取不复权分钟价', async () => {
+  let requestedUrl = ''
+  const bars = await fetchFiveMinuteBars('600519', {
+    adjustment: 'raw',
+    completedWindowOnly: false,
+    fetchImpl: async (url) => {
+      requestedUrl = url
+      return {
+        ok: true,
+        async json() {
+          return { data: { klines: minuteLines() } }
+        },
+      }
+    },
+  })
+
+  assert.match(requestedUrl, /[?&]fqt=0(?:&|$)/)
+  assert.equal(bars.length, 61)
+})
+
 test('东财分钟镜像全部失败后回退腾讯真实5分钟K线', async () => {
   const calls = []
   const tencentRows = minuteLines().map((line) => {

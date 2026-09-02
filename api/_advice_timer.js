@@ -71,6 +71,15 @@ export function v2AccuracyTimerBody(event, cronKey) {
   return { scheduled: true };
 }
 
+export function opportunityRadarTimerBody(event, cronKey) {
+  if (!cronKey || !event || typeof event !== 'object') return null;
+  if (
+    event.triggerName !== 'opportunity-radar-settlement-timer'
+  ) return null;
+  if (String(event.payload || '') !== String(cronKey)) return null;
+  return { scheduled: true };
+}
+
 export function sectorForecastTimerBody(event, cronKey) {
   if (!cronKey || !event || typeof event !== 'object') return null;
   if (event.triggerName !== 'sector-forecast-due-timer') return null;

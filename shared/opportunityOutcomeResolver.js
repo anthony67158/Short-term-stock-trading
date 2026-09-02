@@ -135,6 +135,36 @@ function baseResult(event, evaluatedAt) {
   }
 }
 
+function sessionBoundaryAt(date, hour, minute) {
+  const parsed = Date.parse(
+    `${date}T${String(hour).padStart(2, '0')}:`
+      + `${String(minute).padStart(2, '0')}:00+08:00`,
+  )
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function intradayWindowEnd(event) {
+  const date = dateKey(event?.tradeDate)
+  const signalAt = finite(event?.asOf)
+  const validUntil = finite(event?.decision?.validUntil)
+  if (!date || signalAt == null) return validUntil
+  const morningClose = sessionBoundaryAt(date, 11, 30)
+  const dayClose = sessionBoundaryAt(date, 15, 0)
+  const sessionEnd = signalAt <= morningClose
+    ? morningClose
+    : dayClose
+  return validUntil == null
+    ? sessionEnd
+    : Math.min(validUntil, sessionEnd)
+}
+
+function isSessionCloseBar(bar) {
+  if (bar?.at == null) return true
+  const local = new Date(bar.at + 8 * 60 * 60 * 1000)
+  return local.getUTCHours() === 15
+    && local.getUTCMinutes() === 0
+}
+
 function terminalWithoutFill(base, {
   outcome,
   fillStatus,
@@ -160,19 +190,20 @@ function entryWindow(event, rows, evaluatedAt) {
   const mode = String(event?.mode || '').toUpperCase()
   const signalDate = dateKey(event?.tradeDate)
   const signalAt = finite(event?.asOf)
-  const validUntil = finite(event?.decision?.validUntil)
   if (mode === 'INTRADAY') {
+    const windowEnd = intradayWindowEnd(event)
     const exact = rows.filter((bar) => (
       bar.date === signalDate
       && bar.at != null
       && (signalAt == null || bar.at > signalAt)
-      && (validUntil == null || bar.at <= validUntil)
+      && (windowEnd == null || bar.at <= windowEnd)
     ))
     return {
       rows: exact,
       complete: exact.length > 0
-        && validUntil != null
-        && evaluatedAt > validUntil,
+        && windowEnd != null
+        && evaluatedAt > windowEnd
+        && exact.at(-1).at >= windowEnd - 5 * 60 * 1000,
       requiresTimestamp: true,
     }
   }
@@ -182,7 +213,12 @@ function entryWindow(event, rows, evaluatedAt) {
     rows: firstDate
       ? future.filter((bar) => bar.date === firstDate)
       : [],
-    complete: !!firstDate,
+    complete: !!firstDate && (
+      future[0]?.at == null
+      || isSessionCloseBar(
+        future.filter((bar) => bar.date === firstDate).at(-1),
+      )
+    ),
     requiresTimestamp: false,
   }
 }
@@ -191,8 +227,8 @@ function triggered(bar, decision) {
   const primary = finite(decision?.primaryPrice)
   if (!(primary > 0)) return false
   return decision?.priceType === 'PULLBACK_WATCH'
-    ? bar.low <= primary
-    : bar.high >= primary
+    ? bar.low <= primary && bar.close >= primary
+    : bar.high >= primary && bar.close >= primary
 }
 
 function executionView(outcome, bar, referencePrice) {
@@ -342,17 +378,36 @@ export function resolveOpportunityOutcome({
   const triggerIndex = rows.indexOf(triggerBar)
   const entryBar = rows[triggerIndex + 1]
   const validUntil = finite(decision.validUntil)
-  if (
-    !entryBar
-    || (
-      String(event.mode || '').toUpperCase() === 'INTRADAY'
-      && (
-        entryBar.date !== triggerBar.date
-        || entryBar.at == null
-        || (validUntil != null && entryBar.at > validUntil)
+  const entryWindowExpired = (
+    triggerBar.at != null
+    && entryBar
+    && (
+      entryBar.date !== triggerBar.date
+      || entryBar.at == null
+      || (
+        String(event.mode || '').toUpperCase() === 'INTRADAY'
+        && validUntil != null
+        && entryBar.at > validUntil
       )
     )
-  ) {
+  )
+  if (entryWindowExpired) {
+    return terminalWithoutFill(base, {
+      outcome: 'TRIGGERED_WINDOW_EXPIRED',
+      fillStatus: 'TRIGGERED_UNFILLED',
+      trigger,
+      entryWindowBars: window.rows.length,
+    })
+  }
+  if (!entryBar) {
+    if (window.complete) {
+      return terminalWithoutFill(base, {
+        outcome: 'TRIGGERED_WINDOW_EXPIRED',
+        fillStatus: 'TRIGGERED_UNFILLED',
+        trigger,
+        entryWindowBars: window.rows.length,
+      })
+    }
     return {
       ...base,
       outcome: 'TRIGGERED_PENDING',
@@ -442,6 +497,7 @@ export function resolveOpportunityOutcome({
     if (bar.date === entryBar.date) {
       observations.t1LockedStopHit ||= hitStop
       observations.t1LockedTargetHit ||= hitTarget
+      if (hitStop) forcedExit = 'STOP'
       continue
     }
 
@@ -458,7 +514,11 @@ export function resolveOpportunityOutcome({
         const session = sessionOrdinals.get(bar.date) || 1
         const next = holdingRows[index + 1]
         const endOfSession = !next || next.date !== bar.date
-        if (session >= timeStopTradingDays && endOfSession) {
+        if (
+          session >= timeStopTradingDays
+          && endOfSession
+          && isSessionCloseBar(bar)
+        ) {
           reason = 'TIME'
         }
       }
@@ -527,7 +587,7 @@ export function resolveOpportunityOutcome({
     }
   }
 
-  if (forcedExit) {
+  if (forcedExit && lastExitRejection) {
     return {
       ...base,
       outcome: lastExitRejection === 'LIMIT_DOWN_UNFILLED'
@@ -537,6 +597,17 @@ export function resolveOpportunityOutcome({
       exitStatus: lastExitRejection === 'LIMIT_DOWN_UNFILLED'
         ? 'LIMIT_DOWN_BLOCKED'
         : 'EXIT_PENDING',
+      trigger,
+      entry,
+      observations,
+    }
+  }
+  if (forcedExit) {
+    return {
+      ...base,
+      outcome: 'OPEN_T1_LOCKED',
+      fillStatus: 'FILLED',
+      exitStatus: 'T1_LOCKED',
       trigger,
       entry,
       observations,

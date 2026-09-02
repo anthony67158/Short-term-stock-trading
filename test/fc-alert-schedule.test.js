@@ -62,6 +62,25 @@ test('板块前瞻每五分钟唤醒且具体时间由OSS设置决定', () => {
   assert.match(server, /sectorForecastBody[\s\S]*'sector_forecast'/)
 })
 
+test('机会雷达在收盘后独立结算且不占用LLM定时任务', () => {
+  const config = read('s.yaml')
+  const server = read('server.js')
+
+  assert.ok(
+    config.includes(
+      '- triggerName: opportunity-radar-settlement-timer',
+    ),
+  )
+  assert.ok(config.includes(
+    'cronExpression: "CRON_TZ=Asia/Shanghai 0 10 17 * * 1-5"',
+  ))
+  assert.match(server, /opportunityRadarTimerBody\(/)
+  assert.match(
+    server,
+    /opportunityRadarBody[\s\S]*'cron_opportunity_radar'/,
+  )
+})
+
 test('策略日报每五分钟检查账号计划并路由到独立日报Worker', () => {
   const config = read('s.yaml')
   const server = read('server.js')

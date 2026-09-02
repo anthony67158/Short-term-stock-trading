@@ -99,9 +99,13 @@ export async function fetchFiveMinuteBars(code, {
   timeoutMs = 6000,
   limit = 240,
   completedWindowOnly = true,
+  adjustment = 'qfq',
 } = {}) {
   code = String(code || '').trim()
   if (!CODE_RE.test(code)) throw new Error('V2股票代码无效')
+  if (!['qfq', 'raw'].includes(adjustment)) {
+    throw new Error('V2分钟复权口径无效')
+  }
   const requestLimit = Math.max(
     61,
     Math.min(1200, Number(limit) || 240),
@@ -109,7 +113,8 @@ export async function fetchFiveMinuteBars(code, {
   const path = `/api/qt/stock/kline/get?secid=${marketSecid(code)}`
     + '&fields1=f1,f2,f3,f4,f5,f6'
     + '&fields2=f51,f52,f53,f54,f55,f56,f57,f58'
-    + `&klt=5&fqt=1&end=20500101&lmt=${requestLimit}`
+    + `&klt=5&fqt=${adjustment === 'raw' ? 0 : 1}`
+    + `&end=20500101&lmt=${requestLimit}`
   for (const host of MINUTE_HOSTS) {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), timeoutMs)

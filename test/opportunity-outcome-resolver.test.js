@@ -36,6 +36,7 @@ function event(overrides = {}) {
 }
 
 function bar(date, {
+  tradeTime,
   open = 10,
   high = 10.4,
   low = 9.8,
@@ -45,6 +46,7 @@ function bar(date, {
 } = {}) {
   return {
     date,
+    ...(tradeTime ? { tradeTime: `${date} ${tradeTime}` } : {}),
     open,
     high,
     low,
@@ -53,6 +55,52 @@ function bar(date, {
     ...(preClose == null ? {} : { preClose }),
   }
 }
+
+test('回踩只插针但收盘未站回观察价时不算有效触发', () => {
+  const result = resolveOpportunityOutcome({
+    event: event(),
+    bars: [
+      bar('2026-09-01'),
+      bar('2026-09-02', {
+        tradeTime: '09:35:00',
+        low: 9.9,
+        close: 9.95,
+      }),
+      bar('2026-09-02', {
+        tradeTime: '15:00:00',
+        low: 9.7,
+        close: 9.9,
+      }),
+    ],
+    evaluatedAt: Date.parse('2026-09-02T08:00:00.000Z'),
+  })
+
+  assert.equal(result.outcome, 'NOT_TRIGGERED')
+  assert.equal(result.fillStatus, 'NOT_TRIGGERED')
+})
+
+test('观察窗口最后一根K线才触发时不得跨交易日伪造成交', () => {
+  const result = resolveOpportunityOutcome({
+    event: event(),
+    bars: [
+      bar('2026-09-01'),
+      bar('2026-09-02', {
+        tradeTime: '15:00:00',
+        low: 9.9,
+        close: 10.1,
+      }),
+      bar('2026-09-03', {
+        tradeTime: '09:35:00',
+        open: 10.1,
+      }),
+    ],
+    evaluatedAt: Date.parse('2026-09-03T08:00:00.000Z'),
+  })
+
+  assert.equal(result.maturity, 'MATURED')
+  assert.equal(result.outcome, 'TRIGGERED_WINDOW_EXPIRED')
+  assert.equal(result.fillStatus, 'TRIGGERED_UNFILLED')
+})
 
 test('未形成合法价格合同的候选不进入可执行结果样本', () => {
   const result = resolveOpportunityOutcome({
@@ -139,6 +187,42 @@ test('买入当日触发止损只能记录T+1锁定，不能伪造成可卖出',
   assert.equal(result.outcome, 'OPEN_T1_LOCKED')
   assert.equal(result.fillStatus, 'FILLED')
   assert.equal(result.exitStatus, 'T1_LOCKED')
+  assert.equal(result.observations.t1LockedStopHit, true)
+})
+
+test('T+1锁定期跌破止损后在下一可卖时段优先退出', () => {
+  const result = resolveOpportunityOutcome({
+    event: event(),
+    bars: [
+      bar('2026-09-01'),
+      bar('2026-09-02', {
+        tradeTime: '09:35:00',
+        low: 9.9,
+        close: 10.05,
+      }),
+      bar('2026-09-02', {
+        tradeTime: '09:40:00',
+        open: 10,
+        high: 10.1,
+        low: 9.3,
+        close: 9.6,
+      }),
+      bar('2026-09-03', {
+        tradeTime: '09:35:00',
+        open: 9.8,
+        high: 10.2,
+        low: 9.7,
+        close: 10.1,
+        preClose: 9.6,
+      }),
+    ],
+    evaluatedAt: Date.parse('2026-09-03T08:00:00.000Z'),
+  })
+
+  assert.equal(result.maturity, 'MATURED')
+  assert.equal(result.outcome, 'STOP_LOSS')
+  assert.equal(result.exitStatus, 'STOP_FILLED')
+  assert.equal(result.exit.referencePrice, 9.8)
   assert.equal(result.observations.t1LockedStopHit, true)
 })
 
