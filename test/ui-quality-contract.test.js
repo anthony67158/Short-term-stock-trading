@@ -787,6 +787,10 @@ test('持仓与自选卡内部控件在明暗主题都有实体表面和边界',
     tokens,
     /html\[data-theme="light"\]\s*{[\s\S]*?--color-trade-control:\s*color-mix\(in oklch,\s*var\(--color-accent\)\s*5%,\s*var\(--color-paper-3\)\)[\s\S]*?--color-trade-control-border:\s*color-mix\(in oklch,\s*var\(--color-accent\)\s*24%,\s*var\(--color-rule\)\)/s,
   )
+  assert.match(
+    precision,
+    /html\[data-theme="light"\][\s\S]*?\.plan-cand[\s\S]*?\.pc-actions[\s\S]*?> \.chip-btn:not\(\.act-buy\)\s*{[^}]*border-color:\s*var\(--color-trade-control-border\)[^}]*background:\s*var\(--color-trade-control\)/s,
+  )
 })
 
 test('军师建议正文块统一透明且不再叠加分层底色', () => {

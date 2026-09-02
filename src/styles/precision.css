@@ -16236,6 +16236,16 @@ html[data-theme="light"] .plan-cand.starred {
   color: var(--color-ink-2);
 }
 
+html[data-theme="light"]
+  .plan-cand
+  .pc-actions
+  > .chip-btn:not(.act-buy) {
+  border-color: var(--color-trade-control-border);
+  background: var(--color-trade-control);
+  box-shadow: var(--shadow-trade-control);
+  color: var(--color-ink-2);
+}
+
 .plan-cand.starred .pc-pin.on {
   border-color: color-mix(
     in oklch,
