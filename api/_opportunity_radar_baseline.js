@@ -2,6 +2,9 @@ import {
   buildOpportunityRadarBaseline,
 } from '../shared/opportunityRadarBaseline.js'
 import {
+  detectOpportunityDrift,
+} from '../shared/opportunityDriftMonitor.js'
+import {
   beijingDayKey,
 } from '../shared/tradingCalendar.js'
 import {
@@ -22,6 +25,7 @@ export async function refreshOpportunityRadarBaseline({
   baselineStore = opportunityRadarBaselineStore,
   now = Date.now(),
   lookbackDays = 180,
+  driftHistoryLimit = 60,
 } = {}) {
   const generatedAt = Number(now)
   if (!Number.isFinite(generatedAt) || generatedAt <= 0) {
@@ -39,5 +43,13 @@ export async function refreshOpportunityRadarBaseline({
     to,
   })
   await baselineStore.saveBaseline(baseline)
-  return baseline
+  // 追加漂移历史并计算漂移信号（只读监控，不改变任何排序或结论）。
+  let drift = null
+  if (typeof baselineStore.appendDriftHistory === 'function') {
+    const history = await baselineStore.appendDriftHistory(baseline, {
+      limit: driftHistoryLimit,
+    })
+    drift = detectOpportunityDrift({ history })
+  }
+  return { ...baseline, drift }
 }
