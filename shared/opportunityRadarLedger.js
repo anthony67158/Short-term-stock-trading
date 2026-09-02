@@ -56,11 +56,17 @@ function safeSlot(value) {
 function quoteProjection(value = {}) {
   return {
     price: finite(value.price),
+    preClose: finite(value.preClose),
+    open: finite(value.open),
+    high: finite(value.high),
+    low: finite(value.low),
     pct: finite(value.pct),
     amount: finite(value.amount),
     turnover: finite(value.turnover),
     volumeRatio: finite(value.volumeRatio),
     mainRatio: finite(value.mainRatio),
+    limitUpPrice: finite(value.limitUpPrice),
+    limitDownPrice: finite(value.limitDownPrice),
     tradeDate: text(value.tradeDate, 10) || null,
   }
 }
@@ -84,6 +90,11 @@ function decisionProjection(value = {}) {
     stopPrice: finite(value.stopPrice),
     targetPrice: finite(value.targetPrice),
     riskReward: finite(value.riskReward),
+    validUntil: finite(value.validUntil),
+    timeStopTradingDays: Math.max(
+      1,
+      Math.trunc(finite(value.timeStopTradingDays) || 5),
+    ),
     priceContractValid: value.priceContractValid === true,
     marketAllowsRisk: value.marketAllowsRisk === true,
     executionState: text(value.executionState, 40) || null,

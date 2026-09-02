@@ -13,6 +13,10 @@ function event(overrides = {}) {
     stageReached: 'EVIDENCE',
     quote: {
       price: 10.2,
+      preClose: 10,
+      open: 10.05,
+      high: 10.3,
+      low: 9.98,
       pct: 1.5,
       amount: 120_000_000,
       turnover: 3.2,
@@ -32,6 +36,8 @@ function event(overrides = {}) {
       stopPrice: 9.6,
       targetPrice: 10.9,
       riskReward: 2.25,
+      validUntil: 1_788_323_600_000,
+      timeStopTradingDays: 5,
       priceContractValid: true,
     },
     sector: {
@@ -78,6 +84,12 @@ test('机会雷达账本为每只候选生成稳定决策ID和规则版本', () 
     batch.events[0].ruleVersion,
     'CN_A_SHARE_2026_07_06',
   )
+  assert.equal(batch.events[0].quote.preClose, 10)
+  assert.equal(
+    batch.events[0].decision.validUntil,
+    1_788_323_600_000,
+  )
+  assert.equal(batch.events[0].decision.timeStopTradingDays, 5)
   assert.deepEqual(batch.summary, {
     total: 1,
     prefilter: 0,
