@@ -242,7 +242,7 @@ class OpportunityModelTest(unittest.TestCase):
             patch.object(
                 opportunity_model,
                 "_download_release",
-                return_value=None,
+                side_effect=RuntimeError("OSS unavailable"),
             ),
             patch.object(
                 opportunity_model,

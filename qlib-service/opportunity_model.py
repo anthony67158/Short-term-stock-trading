@@ -200,7 +200,11 @@ def get_opportunity_models(force=False):
         and now - _LAST_CHECK_AT < MODEL_TTL_SECONDS
     ):
         return _MODELS, _META
-    loaded = _download_release() or _bundled_release()
+    try:
+        loaded = _download_release()
+    except Exception:
+        loaded = None
+    loaded = loaded or _bundled_release()
     _LAST_CHECK_AT = now
     if loaded is None:
         return _MODELS, _META
