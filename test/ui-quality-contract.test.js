@@ -174,6 +174,30 @@ test('全站面板、指标、表格与反馈状态使用统一视觉语法', ()
   )
 })
 
+test('加载态与弹窗使用无暖红混色的冷色实体表面', () => {
+  assert.match(tokens, /--color-loading-surface:\s*#0d1b36/)
+  assert.match(tokens, /--color-loading-surface:\s*#edf3f8/)
+  assert.match(tokens, /--color-dialog-surface:\s*#071126/)
+  assert.match(tokens, /--color-dialog-surface:\s*#f8fafd/)
+  assert.match(
+    precision,
+    /\.panel > \.loading\s*{[^}]*background:\s*var\(--color-loading-surface\)/s,
+  )
+  assert.match(
+    precision,
+    /\.panel-head\s*{[^}]*background:\s*var\(--color-paper-3\)/s,
+  )
+  assert.match(precision, /--surface-quiet:\s*var\(--color-paper-3\)/)
+  assert.match(
+    precision,
+    /\.modal-mask,[\s\S]*?\.auto-ref-mask\s*{[^}]*background:\s*var\(--color-overlay-scrim\)[^}]*backdrop-filter:\s*none/s,
+  )
+  assert.match(
+    precision,
+    /\.confirm-dialog,[\s\S]*?\.modal-body\s*{[^}]*background-color:\s*var\(--color-dialog-surface\)[^}]*background-image:\s*none/s,
+  )
+})
+
 test('异常数值统一降级，交易复盘不会渲染 NaN', () => {
   assert.equal(finiteNum(undefined), 0)
   assert.equal(finiteNum(Number.NaN), 0)

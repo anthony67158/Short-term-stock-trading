@@ -110,11 +110,7 @@ html[data-theme="light"] {
   --glow: color-mix(in oklch, var(--color-accent) 8%, transparent);
   --shadow: var(--shadow-card);
   --shadow-lg: var(--shadow-overlay);
-  --surface-quiet: color-mix(
-    in oklch,
-    var(--color-paper-3) 76%,
-    var(--color-paper-2)
-  );
+  --surface-quiet: var(--color-paper-3);
   --surface-hair: var(--color-rule-2);
   --track-bg: var(--color-paper-4);
   --sem-up: var(--color-up);
@@ -163,11 +159,7 @@ html[data-theme="light"] .footer {
 }
 
 html[data-theme="light"] .panel-head {
-  background: color-mix(
-    in oklch,
-    var(--color-paper-2) 92%,
-    var(--color-paper-3)
-  );
+  background: var(--color-paper-3);
 }
 
 html[data-theme="light"] .plan-section .panel-head {
@@ -275,8 +267,10 @@ html[data-theme="light"] .qmc-mask,
 html[data-theme="light"] .busy-modal-mask,
 html[data-theme="light"] .mask-drawer,
 html[data-theme="light"] .mobile-trade-mask,
-html[data-theme="light"] .t-trade-mask {
-  background: color-mix(in oklch, var(--color-ink) 14%, transparent);
+html[data-theme="light"] .t-trade-mask,
+html[data-theme="light"] .advisor-score-mask,
+html[data-theme="light"] .auto-ref-mask {
+  background: var(--color-overlay-scrim);
 }
 
 html[data-theme="light"] .heatmap-modal-mask {
@@ -289,9 +283,17 @@ html[data-theme="light"] .advisor-pop,
 html[data-theme="light"] .detail-panel,
 html[data-theme="light"] .qmc-modal,
 html[data-theme="light"] .llm-modal,
-html[data-theme="light"] .t-drawer {
+html[data-theme="light"] .t-drawer,
+html[data-theme="light"] .confirm-dialog,
+html[data-theme="light"] .busy-modal,
+html[data-theme="light"] .alert-center,
+html[data-theme="light"] .qrp-panel,
+html[data-theme="light"] .dr-drawer,
+html[data-theme="light"] .holding-plan-dialog,
+html[data-theme="light"] .plan-edit-dialog {
   border-color: var(--color-rule);
-  background: var(--color-paper-2);
+  background-color: var(--color-dialog-surface);
+  background-image: none;
   box-shadow: var(--shadow-overlay);
 }
 
@@ -867,11 +869,7 @@ button.icon-btn.nav-undo:not(:disabled):hover {
   min-height: 60px;
   padding: var(--space-xs) var(--space-md);
   border-bottom: 1px solid var(--color-rule-2);
-  background: color-mix(
-    in oklch,
-    var(--color-paper-2) 94%,
-    var(--color-paper-3)
-  );
+  background: var(--color-paper-3);
   flex-wrap: nowrap;
   line-height: 1;
 }
@@ -2532,13 +2530,16 @@ textarea:focus {
   min-height: 128px;
   padding: var(--space-lg);
   border-top: 1px solid var(--color-rule-2);
-  background: color-mix(
-    in oklch,
-    var(--color-paper-3) 46%,
-    var(--color-paper-2)
-  );
   color: var(--color-muted);
   text-align: center;
+}
+
+.panel > .loading {
+  background: var(--color-loading-surface);
+}
+
+.panel > .empty {
+  background: var(--color-paper-2);
 }
 
 .panel > .err {
@@ -9180,9 +9181,12 @@ html[data-theme="light"] .portfolio-heatmap {
 .qmc-mask,
 .busy-modal-mask,
 .mask-drawer,
-.mobile-trade-mask {
+.mobile-trade-mask,
+.t-trade-mask,
+.advisor-score-mask,
+.auto-ref-mask {
   z-index: var(--z-modal);
-  background: color-mix(in oklch, var(--color-paper) 72%, transparent);
+  background: var(--color-overlay-scrim);
   backdrop-filter: none;
 }
 
@@ -9192,10 +9196,22 @@ html[data-theme="light"] .portfolio-heatmap {
 .qmc-modal,
 .llm-modal,
 .mobile-trade-dialog,
-.t-drawer {
+.t-drawer,
+.alert-center,
+.qrp-panel,
+.dr-drawer,
+.holding-plan-dialog,
+.plan-edit-dialog,
+.advisor-score-dialog,
+.auto-ref-dialog,
+.search-cfg,
+.llm-cfg,
+.ai-drawer,
+.modal-body {
   border: 1px solid var(--color-rule);
   border-radius: var(--radius-card);
-  background: var(--color-paper-2);
+  background-color: var(--color-dialog-surface);
+  background-image: none;
   box-shadow: var(--shadow-overlay);
   transform-origin: center;
 }
@@ -9218,9 +9234,17 @@ html[data-theme="light"] .portfolio-heatmap {
 
 .detail-panel .modal-bar,
 .qmc-header,
-.mobile-trade-head {
+.mobile-trade-head,
+.t-drawer-head,
+.dr-head,
+.holding-plan-head,
+.busy-modal-head,
+.alert-center > .modal-bar,
+.qrp-panel > .qrp-head,
+.llm-cfg > .modal-bar,
+.search-cfg > .modal-bar {
   border-bottom-color: var(--color-rule-2);
-  background: var(--color-paper-2);
+  background: var(--color-dialog-header);
 }
 
 html[data-theme="light"] .detail-panel {
@@ -16764,16 +16788,32 @@ html[data-theme="light"] .nav {
 .panel:not(.plan-section),
 .trade-card,
 .auth-card,
-.auth-box,
+.auth-box {
+  background-color: var(--color-paper-2);
+  background-image: var(--gradient-surface);
+}
+
 .confirm-dialog,
 .mobile-trade-dialog,
 .t-drawer,
 .dr-drawer,
 .detail-panel,
 .llm-dialog,
-.holding-plan-dialog {
-  background-color: var(--color-paper-2);
-  background-image: var(--gradient-surface);
+.llm-modal,
+.llm-cfg,
+.search-cfg,
+.busy-modal,
+.qmc-modal,
+.alert-center,
+.qrp-panel,
+.holding-plan-dialog,
+.plan-edit-dialog,
+.advisor-score-dialog,
+.auto-ref-dialog,
+.ai-drawer,
+.modal-body {
+  background-color: var(--color-dialog-surface);
+  background-image: none;
 }
 
 .portfolio-overview-zone {
