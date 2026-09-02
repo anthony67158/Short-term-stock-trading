@@ -1029,3 +1029,69 @@ test('买入到价终局结论在卡片直接显示放弃买入且不再展示�
   assert.equal(view.trigger.detailLabel, '本次价格触发已结束')
   assert.equal(view.trigger.metricLabel, '不再复核原价')
 })
+
+test('一手持仓卡把减仓一手展示为二选一清仓路径', () => {
+  const view = buildHoldingCardDecisionView({
+    advice: {
+      action: '减仓',
+      opQty: '减仓1手',
+      reducePrice: 40.22,
+      stopPrice: 38.67,
+      actionPlan: '主力流出且个股转弱，按纪律减仓1手',
+      decisionPlan: {
+        schemaVersion: 'decision-plan.v2',
+        action: 'REDUCE',
+        actionLabel: '减仓',
+        actionability: 'READY',
+        quantity: { lots: 1, sellableLots: 1 },
+        prices: {
+          reference: 40.22,
+          reduce: 40.22,
+          stop: 38.67,
+        },
+      },
+    },
+    t1Status: {
+      liveQty: 1,
+      sellableToday: 1,
+    },
+  })
+
+  assert.equal(view.kind, 'sell')
+  assert.equal(view.action, '退出观察')
+  assert.equal(view.quantity, '确认后清仓1手')
+  assert.equal(view.actionable, false)
+  assert.deepEqual(
+    view.levels.map(({ key, label }) => ({ key, label })),
+    [
+      { key: 'reduce', label: '反弹清仓位' },
+      { key: 'stop', label: '未执行兜底止损' },
+    ],
+  )
+  assert.equal(view.trigger.price, 40.22)
+  assert.match(view.cardInstruction, /观察约60秒/)
+  assert.match(view.cardInstruction, /任一路径成交后.*失效/)
+})
+
+test('一手持仓实时触及止损时先进入短观察而不是立即清仓', () => {
+  const view = buildHoldingCardDecisionView({
+    advice: {
+      action: '持有',
+      reducePrice: 40.22,
+      stopPrice: 38.67,
+    },
+    hitStop: true,
+    stopPrice: 38.67,
+    t1Status: {
+      liveQty: 1,
+      sellableToday: 1,
+    },
+  })
+
+  assert.equal(view.action, '退出观察')
+  assert.equal(view.quantity, '确认后清仓1手')
+  assert.equal(view.actionable, false)
+  assert.equal(view.trigger.price, 38.67)
+  assert.equal(view.levels[0].label, '止损确认位')
+  assert.match(view.instruction, /观察约20秒/)
+})

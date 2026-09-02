@@ -7,6 +7,10 @@ import {
 import { executionTriggerDirection } from './executionTrigger.js'
 import { adviceObservationLevels } from './advicePriceContract.js'
 import { holdingAddReviewPlan } from './holdingFollowUp.js'
+import {
+  normalizeFullExitAdvice,
+  positionExitEffect,
+} from './positionExit.js'
 
 const finite = (value) => {
   if (value == null || value === '') return null
@@ -40,7 +44,7 @@ function quantityText(value, verb = '') {
 function actionKind(advice, mode) {
   const action = clean(advice.action || advice.stance, 80)
   if (/观望|等待|回避|不建议|暂不/.test(action)) return 'wait'
-  if (/清仓|卖出|止损|离场/.test(action)) return 'sell'
+  if (/清仓|卖出|止损|离场|退出/.test(action)) return 'sell'
   if (/减仓|止盈/.test(action)) return 'reduce'
   if (/加仓|补仓|接回|买回/.test(action)) return 'add'
   if (/持有|不动|无需操作/.test(action)) return 'hold'
@@ -50,6 +54,7 @@ function actionKind(advice, mode) {
 
 export function actionImportance(view = {}) {
   const action = clean(view.action, 80)
+  if (view.actionability === 'CONDITIONAL') return 'watch'
   if (/止损|清仓|退出/.test(action)) return 'critical'
   if (
     view.deferred
@@ -240,6 +245,26 @@ function levelsFor(kind, advice, triggerDirection = '', followUp = null) {
     ].filter(Boolean)
   }
   if (kind === 'sell') {
+    const fullExit = advice.decisionPlan?.positionEffect?.fullExit === true
+      || /清仓/.test(String(advice.action || advice.stance || ''))
+    const reducePrice = advice.reducePrice
+      ?? advice.decisionPlan?.prices?.reduce
+    if (
+      fullExit
+      && advice.decisionPlan?.activeExitPath === 'stop'
+      && finite(advice.stopPrice) != null
+    ) {
+      return [
+        level('stop', '止损确认位', advice.stopPrice, 'risk', true),
+        level('reduce', '反弹清仓位', reducePrice, 'sell', false),
+      ].filter(Boolean)
+    }
+    if (fullExit && finite(reducePrice) != null && finite(advice.stopPrice) != null) {
+      return [
+        level('reduce', '反弹清仓位', reducePrice, 'sell', true),
+        level('stop', '未执行兜底止损', advice.stopPrice, 'risk', false),
+      ]
+    }
     const stop = level('stop', '退出执行价', advice.stopPrice, 'risk', true)
     const reduce = level('reduce', '卖出执行价', advice.reducePrice, 'sell', !stop)
     return [
@@ -427,8 +452,14 @@ export function buildAdviceActionView(
     mode = '',
     currentPrice = null,
     executionOpen = null,
+    holdQty = null,
+    sellableTodayQty = null,
   } = {},
 ) {
+  advice = normalizeFullExitAdvice(advice, {
+    holdQty,
+    sellableTodayQty,
+  }).advice
   const plan = advice.decisionPlan?.schemaVersion === 'decision-plan.v2'
     ? advice.decisionPlan
     : null
@@ -453,8 +484,13 @@ export function buildAdviceActionView(
   const planPrice = finite(plan?.prices?.reference)
   const manualProbe = plan?.actionability === 'MANUAL_PROBE'
     || plan?.manualConfirmationOnly === true
+  const conditionalExit = plan?.actionability === 'CONDITIONAL'
+    && ['REDUCE', 'EXIT', 'T_SELL_FIRST'].includes(plan?.action)
   const planInstruction = plan?.actionability === 'BLOCKED'
     ? `暂不执行：${planReasons.join('；') || '执行条件未满足'}`
+    : conditionalExit
+      ? clean(advice.exitTiming, 240)
+        || '到价后先观察价格、均价线和主力资金，确认转弱后再退出'
     : manualProbe
       ? `人工确认：${plan?.action === 'ADD' ? '小仓加仓' : '小仓试错'}${planLots}手${planPrice != null ? `，参考${planPrice}元` : ''}${plan.opportunity?.sectorName ? `；${plan.opportunity.sectorName}前排` : ''}，板块与个股条件失效时取消`
     : plan?.actionability === 'RESEARCH_ONLY'
@@ -464,6 +500,8 @@ export function buildAdviceActionView(
     ...advice,
     action: plan.actionability === 'BLOCKED'
       ? holdingMode ? '持有' : '观望'
+      : conditionalExit
+        ? '退出观察'
       : manualProbe
         ? plan.action === 'ADD' ? '小仓加仓' : '小仓试错'
       : plan.actionability === 'RESEARCH_ONLY'
@@ -475,7 +513,9 @@ export function buildAdviceActionView(
     opQty: plan.action === 'BUY'
       ? advice.opQty
       : plan.quantity?.lots > 0
-        ? `${planAction || '操作'}${plan.quantity.lots}手`
+        ? conditionalExit
+          ? `确认后${planAction || '退出'}${plan.quantity.lots}手`
+          : `${planAction || '操作'}${plan.quantity.lots}手`
         : '无需操作',
     buyPrice: plan.action === 'BUY'
       ? plan.prices?.reference
@@ -748,7 +788,12 @@ export function buildAdviceActionView(
       ? '本次到价已决断'
       : deferredWaitPlan?.shortHorizon
         || clean(source.shortHorizon, 30),
-    cardInstruction: deferredWaitPlan?.cardInstruction,
+    cardInstruction: deferredWaitPlan?.cardInstruction
+      || (
+        source.decisionPlan?.positionEffect?.fullExit === true
+          ? clean(source.exitTiming, 180)
+          : ''
+      ),
     instruction: displayInstruction,
     quantity,
     quantityLabel: deferredWaitPlan?.quantityLabel,
@@ -862,6 +907,72 @@ export function buildHoldingCardDecisionView({
   const persistedExitBlocked = /今日不可卖|T\+1锁定/.test(
     `${clean(source.opQty, 80)} ${existingPlan}`,
   )
+  const totalLots = Math.max(0, Math.trunc(Number(t1Status?.liveQty) || 0))
+  const sellableLots = Math.max(
+    0,
+    Math.min(totalLots, Math.trunc(Number(t1Status?.sellableToday) || 0)),
+  )
+  const reachedExitAdvice = (path) => {
+    const stopSide = path === 'stop'
+    const requestedLots = stopSide
+      ? sellableLots
+      : Math.min(
+          sellableLots,
+          Math.max(
+            1,
+            Math.trunc(Number(source.decisionPlan?.quantity?.lots) || 1),
+          ),
+        )
+    const effect = positionExitEffect({
+      action: stopSide ? 'EXIT' : 'REDUCE',
+      requestedLots,
+      holdQty: totalLots,
+      sellableTodayQty: sellableLots,
+    })
+    const action = effect.fullExit ? 'EXIT' : 'REDUCE'
+    const reference = stopSide ? stopPrice : targetPrice
+    const timing = stopSide
+      ? '止损价到达后先观察约20秒，确认有效跌破再退出；快速深破等硬风险立即退出'
+      : '反弹退出价到达后先观察约60秒，确认冲高不能站稳且资金未改善再退出'
+    return {
+      ...source,
+      action: effect.fullExit ? '清仓' : '减仓',
+      opQty: effect.fullExit
+        ? `清仓${effect.executableLots}手`
+        : `减仓${effect.executableLots}手`,
+      actionPlan: timing,
+      exitTiming: effect.fullExit
+        ? `${timing}；成交后持仓归零，另一条退出路径自动失效`
+        : `${timing}；成交后剩余${effect.remainingLots}手继续由止损保护`,
+      reducePrice: source.reducePrice ?? targetPrice,
+      stopPrice: source.stopPrice ?? stopPrice,
+      targetPrice: source.targetPrice ?? targetPrice,
+      decisionPlan: {
+        ...(source.decisionPlan || {}),
+        schemaVersion: 'decision-plan.v2',
+        action,
+        actionLabel: effect.fullExit ? '清仓' : '减仓',
+        actionability: 'CONDITIONAL',
+        actionabilityLabel: '到价后观察确认',
+        activeExitPath: path,
+        quantity: {
+          ...(source.decisionPlan?.quantity || {}),
+          lots: effect.executableLots,
+          holdingLots: effect.totalLots,
+          sellableLots: effect.sellableLots,
+          remainingLots: effect.remainingLots,
+        },
+        prices: {
+          ...(source.decisionPlan?.prices || {}),
+          reference,
+          reduce: source.reducePrice ?? targetPrice,
+          stop: source.stopPrice ?? stopPrice,
+          target: source.targetPrice ?? targetPrice,
+        },
+        positionEffect: effect,
+      },
+    }
+  }
 
   if (gate?.blocked || persistedExitBlocked) {
     const reached = hitStop
@@ -880,7 +991,11 @@ export function buildHoldingCardDecisionView({
       reducePrice: source.reducePrice ?? targetPrice,
       stopPrice: source.stopPrice ?? stopPrice,
       targetPrice: source.targetPrice ?? targetPrice,
-    }, { mode: 'hold_advice' })
+    }, {
+      mode: 'hold_advice',
+      holdQty: t1Status?.liveQty,
+      sellableTodayQty: t1Status?.sellableToday,
+    })
     const nextSession = nextTradeDay || '下一交易日'
     return {
       ...view,
@@ -898,23 +1013,25 @@ export function buildHoldingCardDecisionView({
   }
 
   if (hitTarget) {
-    return buildAdviceActionView({
-      action: '止盈',
-      actionPlan: `现价已到止盈参考 ${holdingPriceText(targetPrice)}，按确认信号分批落袋`,
-      reducePrice: targetPrice,
-      stopPrice,
-    }, { mode: 'hold_advice' })
+    return buildAdviceActionView(reachedExitAdvice('target'), {
+      mode: 'hold_advice',
+      holdQty: t1Status?.liveQty,
+      sellableTodayQty: t1Status?.sellableToday,
+    })
   }
   if (hitStop) {
-    return buildAdviceActionView({
-      action: '止损',
-      actionPlan: `现价已到止损参考 ${holdingPriceText(stopPrice)}，按纪律确认后退出`,
-      stopPrice,
-      targetPrice,
-    }, { mode: 'hold_advice' })
+    return buildAdviceActionView(reachedExitAdvice('stop'), {
+      mode: 'hold_advice',
+      holdQty: t1Status?.liveQty,
+      sellableTodayQty: t1Status?.sellableToday,
+    })
   }
   return advice
-    ? buildAdviceActionView(advice, { mode: 'hold_advice' })
+    ? buildAdviceActionView(advice, {
+        mode: 'hold_advice',
+        holdQty: t1Status?.liveQty,
+        sellableTodayQty: t1Status?.sellableToday,
+      })
     : null
 }
 

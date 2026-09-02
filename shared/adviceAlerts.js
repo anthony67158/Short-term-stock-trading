@@ -479,7 +479,11 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
         name,
         op,
         value,
-        note: kind === 'add' ? '补仓点' : '减仓点',
+        note: kind === 'add'
+          ? '补仓点'
+          : advice.decisionPlan?.positionEffect?.fullExit === true
+            ? '清仓观察位'
+            : '减仓观察位',
       }),
       actCode: code,
       actKind: kind,

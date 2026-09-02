@@ -17,6 +17,7 @@ import {
 import {
   deriveOpportunityLifecycle,
 } from './opportunityLifecycle.js'
+import { positionExitEffect } from './positionExit.js'
 
 export const DECISION_PLAN_SCHEMA_VERSION = 'decision-plan.v2'
 
@@ -138,7 +139,7 @@ function actionLabel(action) {
     ADD: '加仓',
     HOLD: '持有',
     REDUCE: '减仓',
-    EXIT: '退出',
+    EXIT: '清仓',
     T_BUY_FIRST: '正T先买',
     T_SELL_FIRST: '反T先卖',
     WATCH: '观望',
@@ -152,7 +153,7 @@ function referencePriceFor(action, advice = {}, payload = {}) {
     return positive(advice.reducePrice ?? advice.targetPrice)
   }
   if (action === 'EXIT') {
-    return positive(advice.stopPrice ?? advice.reducePrice)
+    return positive(advice.reducePrice ?? advice.stopPrice)
   }
   if (action === 'T_BUY_FIRST' || action === 'T_SELL_FIRST') {
     return positive(advice.leg1Price)
@@ -621,18 +622,38 @@ export function compileDecisionPlan({
   }
 
   const uniqueBlockers = [...new Set(blockedReasons.filter(Boolean))]
+  const exitConfirmed = advice.reviewDecision?.terminal === true
+    && /减仓|清仓|锁定利润|止损|退出/.test(String(
+      advice.reviewDecision?.operation
+      || advice.reviewDecision?.outcome
+      || '',
+    ))
   let actionability = 'WATCH'
   if (riskRequested && uniqueBlockers.length) {
     actionability = 'BLOCKED'
   } else if (riskIncreasing) {
     actionability = uniqueBlockers.length ? 'BLOCKED' : 'READY'
   } else if (riskReducing) {
-    actionability = uniqueBlockers.length ? 'BLOCKED' : 'READY'
+    actionability = uniqueBlockers.length
+      ? 'BLOCKED'
+      : exitConfirmed ? 'READY' : 'CONDITIONAL'
   }
-  const action = actionability === 'BLOCKED'
+  const provisionalAction = actionability === 'BLOCKED'
     ? 'WATCH'
     : governedAction
   const lots = actionability === 'BLOCKED' ? 0 : capacity.lots
+  const positionEffect = positionExitEffect({
+    action: provisionalAction,
+    requestedLots: lots,
+    holdQty: payload.holdQty,
+    sellableTodayQty: payload.sellableTodayQty,
+  })
+  const action = positionEffect.fullExit
+    ? 'EXIT'
+    : provisionalAction
+  const effectiveGovernedAction = positionEffect.fullExit
+    ? 'EXIT'
+    : governedAction
   const costs = costEstimate(action, referencePrice, lots, slippageBps)
   const currentWeightPct = Math.max(0, finite(account.stockWeight) || 0)
   const totalAssets = positive(account.totalAssets)
@@ -712,10 +733,17 @@ export function compileDecisionPlan({
     name: text(payload.name, 40),
     mode: text(mode, 30),
     requestedAction,
-    governedAction,
+    governedAction: effectiveGovernedAction,
     action,
     actionLabel: actionLabel(action),
     actionability,
+    actionabilityLabel: actionability === 'CONDITIONAL'
+      ? '到价后观察确认'
+      : actionability === 'READY'
+        ? '可执行'
+        : actionability === 'BLOCKED'
+          ? '暂不可执行'
+          : '继续观察',
     asOf,
     validUntil: new Date(baseTime + validForMs).toISOString(),
     recomputeOn: [
@@ -804,10 +832,13 @@ export function compileDecisionPlan({
     quantity: {
       lots,
       requestedLots,
+      holdingLots: positionEffect.totalLots,
+      remainingLots: positionEffect.remainingLots,
       riskLimitedLots: capacity.riskLots,
       affordableLots: capacity.affordableLots,
       sellableLots: capacity.sellableLots ?? null,
     },
+    positionEffect,
     prices: {
       reference: round(referencePrice, 3),
       current: priceContract.currentPrice,

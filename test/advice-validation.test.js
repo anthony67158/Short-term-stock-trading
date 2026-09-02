@@ -106,6 +106,31 @@ test('减仓建议不超过可卖手数并正确表达止损锁盈', () => {
   assert.match(result.actionPlan, /回笼2400元/)
 })
 
+test('一手持仓减仓一手必须归一化为清仓并声明止损为未成交兜底', () => {
+  const { result } = reconcileAdviceNumbers({
+    mode: 'hold_advice',
+    payload: {
+      holdCost: 40.33,
+      holdQty: 1,
+      sellableTodayQty: 1,
+    },
+    result: {
+      action: '减仓',
+      opQty: '减仓1手',
+      reducePrice: 40.22,
+      stopPrice: 38.67,
+      actionPlan: '主力流出且个股转弱，按纪律减仓1手',
+    },
+  })
+
+  assert.equal(result.action, '清仓')
+  assert.equal(result.opQty, '清仓1手')
+  assert.match(result.actionPlan, /清仓1手/)
+  assert.match(result.exitTiming, /观察约60秒/)
+  assert.match(result.exitTiming, /未执行前.*38\.67.*止损清仓/)
+  assert.match(result.exitTiming, /任一路径成交后.*失效/)
+})
+
 test('现金不足一手时买入建议降级为观望', () => {
   const { result } = reconcileAdviceNumbers({
     mode: 'buy_advice',

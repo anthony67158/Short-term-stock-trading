@@ -525,6 +525,35 @@ test('今日新建仓的减仓预警标记为 T+1 锁定且不能提示卖出', 
   assert.equal(reduce.opQty, '今日不可卖')
 })
 
+test('一手持仓的退出价生成清仓观察预警而不是立即清仓指令', () => {
+  const data = {
+    plan: [],
+    holding: [{ id: 'h1', code: '002230', name: '科大讯飞' }],
+    alerts: [],
+    settings: {},
+  }
+
+  projectAdviceAlerts(data, '002230', {
+    action: '清仓',
+    reducePrice: 40.22,
+    stopPrice: 38.67,
+    opQty: '清仓1手',
+    decisionPlan: {
+      action: 'EXIT',
+      positionEffect: { fullExit: true },
+    },
+  }, {
+    now,
+    idFactory: ids,
+    t1Status: { liveQty: 1, boughtToday: 0, sellableToday: 1 },
+  })
+
+  const alert = data.alerts.find((item) => item.actKind === 'reduce')
+  assert.equal(alert.note, '清仓观察位')
+  assert.equal(alert.phase, 'armed')
+  assert.equal(alert.opQty, '清仓1手')
+})
+
 test('T+1导致减仓降级为持有时不生成方向相反的加仓复核提醒', () => {
   const data = {
     plan: [],

@@ -5,12 +5,12 @@ const POLICY = {
     llmConfidence: 78,
   },
   sell: {
-    minObserveMs: 0,
+    minObserveMs: 60 * 1000,
     deterministicConfirm: 1.5,
     llmConfidence: 70,
   },
   stop: {
-    minObserveMs: 0,
+    minObserveMs: 20 * 1000,
     deterministicConfirm: 1.5,
     hardOverride: 3,
     llmConfidence: 65,
@@ -31,15 +31,25 @@ export function shouldRequestConfirmation(
   side,
   watchingAt,
   now = Date.now(),
+  context = {},
 ) {
-  if (side === 'stop') return true
+  if (
+    side === 'stop'
+    && Number(context.threshold) > 0
+    && Number(context.price) > 0
+    && (
+      Number(context.threshold) - Number(context.price)
+    ) / Number(context.threshold) >= 0.01
+  ) {
+    return true
+  }
   const startedAt = Number(watchingAt)
   if (!Number.isFinite(startedAt) || startedAt <= 0) return true
   return now - startedAt >= confirmationPolicy(side).minObserveMs
 }
 
 export function shouldConfirmImmediatelyAfterTouch(side) {
-  return ['buy', 'sell', 'stop'].includes(side)
+  return side === 'buy'
 }
 
 export async function resolveImmediateConfirmationAlert({

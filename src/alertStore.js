@@ -64,7 +64,7 @@ export function describeAlert(a) {
   }
   // 行动点预警(补仓/减仓):用「补仓点 ≤ X元 · 补1手」这类口径,一眼看清价位+要做什么
   if (a.type === 'price' && a.actKind) {
-    const label = a.actKind === 'add' ? '补仓点' : '减仓点'
+    const label = a.note || (a.actKind === 'add' ? '补仓点' : '减仓观察位')
     const qty = a.opQty ? ' · ' + a.opQty : ''
     return `${label} ${OP_LABEL[a.op] || ''} ${a.value}元${qty}`
   }
@@ -80,7 +80,10 @@ export function alertMeta(a, q) {
   let dir = 'warn', dirLabel = '预警'
   if (a.type === 'price' && a.reviewOnly) { dir = 'warn'; dirLabel = '复核' }
   else if (a.type === 'price' && a.actKind === 'add') { dir = 'add'; dirLabel = '补仓' }
-  else if (a.type === 'price' && a.actKind === 'reduce') { dir = 'reduce'; dirLabel = '减仓' }
+  else if (a.type === 'price' && a.actKind === 'reduce') {
+    dir = 'reduce'
+    dirLabel = /清仓/.test(String(a.note || '')) ? '清仓观察' : '减仓观察'
+  }
   else if (a.type === 'limitup') { dir = 'up'; dirLabel = '涨停' }
   else if (a.type === 'limitdown') { dir = 'down'; dirLabel = '跌停' }
   else if (a.type === 'price') {
@@ -535,7 +538,10 @@ export const alertStore = {
     }
     const interval = side === 'stop' ? 20000 : side === 'sell' ? 30000 : 45000
     if (a.lastJudgeAt && Date.now() - a.lastJudgeAt < interval) return
-    if (!shouldRequestConfirmation(side, a.watchingAt)) return
+    if (!shouldRequestConfirmation(side, a.watchingAt, Date.now(), {
+      price: q?.price,
+      threshold: a.value,
+    })) return
     const session = currentAccountSession()
     _confirming.add(a.id)
     // ★超时护栏 + 同步异常兜底:若 fetch 同步抛错(URL 异常)或请求长时间不回,

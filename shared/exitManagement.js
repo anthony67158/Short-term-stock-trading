@@ -169,9 +169,12 @@ function applyExitAction(
   const result = { ...input }
   const lots = exitQuantity(total, sellable, full)
   const blockedByT1 = lots <= 0
+  const clearsPosition = !blockedByT1
+    && lots >= total
+    && sellable >= total
   const action = blockedByT1
     ? '持有'
-    : full && sellable >= total ? '清仓' : '减仓'
+    : clearsPosition ? '清仓' : '减仓'
   result.action = action
   result.stance = action
   result.tone = blockedByT1 ? 'muted' : 'green'
@@ -187,6 +190,10 @@ function applyExitAction(
     : `${reason}，按纪律${result.opQty}`
   result.exitTiming = blockedByT1
     ? `${nextTradeDay}开盘后优先核验可卖数量并执行退出`
+    : clearsPosition
+      ? kind === 'HARD_STOP'
+        ? '触及止损后观察约20秒确认非瞬时插针；快速深破立即退出，不等待模型再次生成；清仓成交后其他止损、止盈和减仓条件自动失效'
+        : '反弹退出价到达后观察约60秒确认转弱；清仓成交后持仓归零，其他止损、止盈和减仓条件自动失效'
     : kind === 'HARD_STOP'
       ? '破位已确认，不等待模型再次生成；人工确认后立即按可卖数量退出'
       : '先执行本次风险释放，剩余仓位用短线结构继续保护'

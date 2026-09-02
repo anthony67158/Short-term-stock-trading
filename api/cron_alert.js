@@ -33,6 +33,7 @@ import {
   collectOutcomeSnapshots,
   duplicateSmartAlerts,
   resolveDecisionSide,
+  shouldRequestConfirmation,
 } from '../shared/confirmPolicy.js';
 import { applyT1ToAlert } from '../shared/t1AdvicePolicy.js';
 import {
@@ -105,7 +106,7 @@ function describeAlert(a) {
   }
   // 行动点预警(补仓/减仓):补仓点 ≤ X元 · 补1手
   if (a.type === 'price' && a.actKind) {
-    const l = a.actKind === 'add' ? '补仓点' : '减仓点';
+    const l = a.note || (a.actKind === 'add' ? '补仓点' : '减仓观察位');
     const qty = a.opQty ? ' · ' + a.opQty : '';
     return `${l} ${OP_LABEL[a.op] || ''} ${a.value}元${qty}`;
   }
@@ -663,6 +664,10 @@ async function processAccount(
         continue;
       }
       // 阶段二:调用智能确认闸门,判定真正交易时机是否到。
+      if (!shouldRequestConfirmation(side, a.watchingAt, now, {
+        price: q?.price,
+        threshold: a.value,
+      })) continue;
       // ★预算护栏:本轮 judge 调用达上限时留给下一轮优先处理；2分钟期限会强制收敛。
       if (judgeCalls >= judgeLimit || !hasJudgeBudget(deadline)) continue;
       // 现价缺失(接口异常/休市返回空)时不判定,省一次无谓的 judge 调用。

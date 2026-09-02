@@ -74,9 +74,9 @@
       },
       "expect": {
         "minOverall": 0.9,
-        "decision": "confirm",
-        "policy": "consensus",
-        "reasonIncludes": ["高位滞涨"]
+        "decision": "wait",
+        "policy": "observation",
+        "reasonIncludes": ["观察1分钟"]
       }
     },
     {

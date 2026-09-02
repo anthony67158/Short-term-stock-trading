@@ -289,6 +289,8 @@ function decisionPlanSummary(plan) {
       }`
     : actionability === 'MANUAL_PROBE'
       ? '板块与个股短线条件已通过，仅限人工确认小仓试错'
+    : actionability === 'CONDITIONAL'
+      ? '价格仅用于启动观察；确认价格站稳/转弱、均价线和资金条件后再决定是否执行'
     : actionability === 'BLOCKED'
         ? (plan.blockedReasons || []).join('；') || '执行条件未满足'
         : '等待触发条件'

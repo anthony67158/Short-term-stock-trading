@@ -2,6 +2,7 @@ import {
   adviceObservationLevels,
   buildAdvicePriceContract,
 } from './advicePriceContract.js'
+import { normalizeFullExitAdvice } from './positionExit.js'
 import { timeBoundReviewText } from './userFacingLanguage.js'
 
 function numberOf(value) {
@@ -403,7 +404,14 @@ export function reconcileAdviceNumbers({ mode, result: input, payload = {} } = {
     }
     if ((selling || adding) && quantity > 0) {
       const requestedClear = selling && /清仓/.test(action)
-      const verb = selling ? (requestedClear && quantity >= holdQuantity ? '清仓' : '减仓') : '加仓'
+      const fullExit = selling
+        && quantity >= holdQuantity
+        && sellable >= holdQuantity
+      const verb = selling
+        ? (requestedClear || fullExit) && quantity >= holdQuantity
+          ? '清仓'
+          : '减仓'
+        : '加仓'
       if (requestedClear && quantity < holdQuantity) {
         if (result.action) result.action = '减仓'
         if (result.stance) result.stance = '减仓'
@@ -420,6 +428,14 @@ export function reconcileAdviceNumbers({ mode, result: input, payload = {} } = {
         result.newCost = +((cost * holdQuantity + result.addPrice * quantity) / (holdQuantity + quantity)).toFixed(3)
       } else if (cost != null) {
         result.newCost = cost
+      }
+      if (fullExit) {
+        const normalized = normalizeFullExitAdvice(result, {
+          holdQty: holdQuantity,
+          sellableTodayQty: sellable,
+        })
+        Object.assign(result, normalized.advice)
+        issues.push('卖出后持仓归零，减仓已归一为清仓')
       }
     }
 

@@ -2408,7 +2408,7 @@ export const planStore = {
     const rest = (state.alerts || []).filter((a) => a.planId !== id)
     const rebuilt = []
     const t1 = t1StatusOf(h.code)
-    const build = (op, value, note, muted) => {
+    const build = (op, value, note, muted, opQty = '') => {
       if (muted) return                                  // 用户删过 → 永久不再生成
       if (value == null) return
       const v = Number(value)
@@ -2420,11 +2420,19 @@ export const planStore = {
       rebuilt.push(applyT1ToAlert({
         id: uid(), enabled: true, createdAt: Date.now(), triggeredAt: null, triggeredMsg: '',
         code: h.code, name: h.name, type: 'price', op, value: v, note, planId: id,
+        ...(opQty ? { opQty } : {}),
         phase: 'armed', // 智能确认:到价先弱提醒(watching)、确认到真时机才强提示(confirmed)
       }, t1))
     }
     build('gte', h.tp, '止盈', h.muteTp)
-    build('lte', h.sl, '止损', h.muteSl)
+    const sellable = Math.max(0, Math.trunc(Number(t1.sellableToday) || 0))
+    const total = Math.max(0, Math.trunc(Number(t1.liveQty) || 0))
+    const stopQty = sellable > 0
+      ? sellable >= total
+        ? `清仓${sellable}手`
+        : `卖出今日可卖${sellable}手`
+      : ''
+    build('lte', h.sl, '止损', h.muteSl, stopQty)
     state.alerts = [...rebuilt, ...rest]
   },
   // 给候选(计划买入)预设交易计划：目标买入价/止盈/止损/理由/计划仓位

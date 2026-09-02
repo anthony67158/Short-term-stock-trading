@@ -108,6 +108,32 @@ test('派发并掉队时按第二优先级释放一半可卖仓位', () => {
   assert.equal(result.exitManagement.priority, 2)
 })
 
+test('一手持仓的风险释放必须是清仓而不是减仓', () => {
+  const result = applyShortHorizonExitPolicy({
+    mode: 'hold_advice',
+    result: {
+      action: '持有',
+      stopPrice: 9.5,
+      targetPrice: 12,
+    },
+    payload: {
+      ...basePayload,
+      holdQty: 1,
+      sellableTodayQty: 1,
+      shortHorizonTactical: {
+        ...basePayload.shortHorizonTactical,
+        sector: { state: 'WEAKENING', stockRole: 'LAGGARD' },
+        flow: { relation: 'DISTRIBUTION' },
+      },
+    },
+  })
+
+  assert.equal(result.action, '清仓')
+  assert.equal(result.opQty, '清仓1手')
+  assert.equal(result.exitManagement.action, '清仓')
+  assert.match(result.exitTiming, /持仓归零/)
+})
+
 test('达到目标位时确定性分批止盈而不等待模型重跑', () => {
   const result = applyShortHorizonExitPolicy({
     mode: 'hold_advice',

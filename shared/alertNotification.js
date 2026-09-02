@@ -32,6 +32,9 @@ function identityOf(alert = {}) {
 function actionOf(alert = {}) {
   if (alert.reviewOnly) return '复核'
   if (alert.actKind === 'add') return '加仓'
+  if (alert.actKind === 'reduce' && /清仓/.test(String(alert.note || ''))) {
+    return '清仓'
+  }
   if (alert.actKind === 'reduce') return '减仓'
   const note = String(alert.note || '')
   if (/止损/.test(note)) return '止损'
@@ -70,11 +73,14 @@ function watchInstruction(action, holdingMode) {
   if (/加仓|买入/.test(action)) {
     return '当前不买入；止跌企稳后复核'
   }
+  if (/清仓/.test(action)) {
+    return '当前不清仓；先观察约60秒，确认冲高转弱后复核'
+  }
   if (/减仓|止盈/.test(action)) {
-    return '当前不减仓；冲高转弱后复核'
+    return '当前不减仓；先观察约60秒，确认冲高转弱后复核'
   }
   if (/止损/.test(action)) {
-    return '当前不卖出；有效跌破后复核'
+    return '当前不卖出；先观察约20秒，确认有效跌破后复核'
   }
   return holdingMode
     ? '本次不加仓、不减仓；条件满足后复核'
@@ -82,7 +88,7 @@ function watchInstruction(action, holdingMode) {
 }
 
 function waitOutcome(action, holdingMode) {
-  return holdingMode || /加仓|减仓|止盈|止损/.test(action)
+  return holdingMode || /加仓|减仓|清仓|止盈|止损/.test(action)
     ? '本次不加仓、不减仓'
     : '本次不买入'
 }
@@ -122,6 +128,7 @@ export function userFacingAlertMessage(alert = {}) {
 function invalidOutcome(action) {
   if (/买入/.test(action)) return '放弃买入'
   if (/加仓/.test(action)) return '放弃加仓'
+  if (/清仓/.test(action)) return '放弃本次清仓'
   if (/减仓|止盈/.test(action)) return '放弃本次减仓'
   if (/止损/.test(action)) return '原止损条件失效'
   return '放弃本次操作'

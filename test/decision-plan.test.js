@@ -90,6 +90,42 @@ test('证据和风险条件满足时买入计划直接进入可执行状态', ()
   assert.equal(plan.strategyRoute, undefined)
 })
 
+test('减掉全部可卖持仓时决策计划使用清仓语义和归零效果', () => {
+  const plan = compileDecisionPlan({
+    mode: 'hold_advice',
+    advice: {
+      action: '减仓',
+      opQty: '减仓1手',
+      reducePrice: 40.22,
+      stopPrice: 38.67,
+      actionPlan: '反弹到40.22元减仓1手',
+    },
+    payload: {
+      ...payload,
+      holdQty: 1,
+      sellableTodayQty: 1,
+      todayQuote: {
+        ...payload.todayQuote,
+        price: 40.22,
+        limitDownPrice: 36.2,
+        limitUpPrice: 44.24,
+      },
+    },
+    evidenceSnapshot: snapshot,
+    now,
+  })
+
+  assert.equal(plan.requestedAction, 'REDUCE')
+  assert.equal(plan.action, 'EXIT')
+  assert.equal(plan.actionLabel, '清仓')
+  assert.equal(plan.actionability, 'CONDITIONAL')
+  assert.equal(plan.actionabilityLabel, '到价后观察确认')
+  assert.equal(plan.prices.reference, 40.22)
+  assert.equal(plan.quantity.lots, 1)
+  assert.equal(plan.positionEffect.remainingLots, 0)
+  assert.equal(plan.positionEffect.stopAfterExecution, false)
+})
+
 test('条件试仓到价后最终计划可升级为5%小仓试错而不是再次观望', () => {
   const tactical = buildShortHorizonTactical(payload, { now })
   tactical.timing = {
@@ -276,7 +312,7 @@ test('持仓加仓缺少资金确认时改为持有但不阻止减仓', () => {
   assert.equal(add.action, 'HOLD')
   assert.equal(add.actionPolicy.overridden, true)
   assert.equal(reduce.action, 'REDUCE')
-  assert.equal(reduce.actionability, 'READY')
+  assert.equal(reduce.actionability, 'CONDITIONAL')
 })
 
 test('持仓建议的观望语义在决策计划中归一为持有', () => {
@@ -558,7 +594,7 @@ test('降低风险动作不受新增风险约束且不得超过今日可卖数�
   })
 
   assert.equal(plan.action, 'REDUCE')
-  assert.equal(plan.actionability, 'READY')
+  assert.equal(plan.actionability, 'CONDITIONAL')
   assert.equal(plan.quantity.lots, 2)
 })
 
@@ -659,7 +695,7 @@ test('账户熔断阻止新增风险但不阻止减仓退出', () => {
   })
 
   assert.equal(buy.actionability, 'BLOCKED')
-  assert.equal(reduce.actionability, 'READY')
+  assert.equal(reduce.actionability, 'CONDITIONAL')
 })
 
 test('跨日连续亏损会把下一笔风险预算减半', () => {

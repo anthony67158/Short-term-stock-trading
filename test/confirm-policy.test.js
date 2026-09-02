@@ -76,21 +76,29 @@ test('灾难性止损不等待观察窗口或LLM确认', () => {
   assert.equal(result.policy, 'risk-override')
 })
 
-test('买入卖出止损触价后都立即请求后端终局确认', () => {
+test('反弹退出观察60秒，普通止损观察20秒后才请求终局确认', () => {
   const now = Date.now()
 
-  assert.equal(shouldRequestConfirmation('stop', now - 5000, now), true)
+  assert.equal(shouldRequestConfirmation('stop', now - 5000, now), false)
+  assert.equal(shouldRequestConfirmation(
+    'stop',
+    now - 5000,
+    now,
+    { price: 9.89, threshold: 10 },
+  ), true)
+  assert.equal(shouldRequestConfirmation('stop', now - 20_000, now), true)
   assert.equal(shouldRequestConfirmation('buy', now - 5000, now), true)
-  assert.equal(shouldRequestConfirmation('sell', now - 5000, now), true)
+  assert.equal(shouldRequestConfirmation('sell', now - 59_000, now), false)
+  assert.equal(shouldRequestConfirmation('sell', now - 60_000, now), true)
 })
 
-test('所有价格动作在首次触价落盘后立即进入确认', () => {
-  assert.equal(shouldConfirmImmediatelyAfterTouch('stop'), true)
-  assert.equal(shouldConfirmImmediatelyAfterTouch('sell'), true)
+test('退出类价格动作首次触价只落盘观察，不立即调用确认', () => {
+  assert.equal(shouldConfirmImmediatelyAfterTouch('stop'), false)
+  assert.equal(shouldConfirmImmediatelyAfterTouch('sell'), false)
   assert.equal(shouldConfirmImmediatelyAfterTouch('buy'), true)
 })
 
-test('止损即时确认必须等待权威状态落盘并重读watching预警', async () => {
+test('退出观察不立即请求，买入即时确认仍先落盘并重读watching预警', async () => {
   const events = []
   const current = {
     id: 'stop-1',
@@ -110,8 +118,8 @@ test('止损即时确认必须等待权威状态落盘并重读watching预警', 
     },
   })
 
-  assert.deepEqual(events, ['saved', 'read'])
-  assert.equal(resolved, current)
+  assert.deepEqual(events, [])
+  assert.equal(resolved, null)
   const buyCurrent = await resolveImmediateConfirmationAlert({
     side: 'buy',
     alertId: 'stop-1',
@@ -151,7 +159,7 @@ test('LLM 未提供置信度时不能发买卖强提示', () => {
   assert.match(result.reason, /置信度/)
 })
 
-test('刚触价时无需额外等待观察窗口即可确认', () => {
+test('反弹退出未观察满60秒时即使信号一致也不能确认', () => {
   const result = fuseConfirmation({
     side: 'sell',
     deterministic: det(3, 'confirm'),
@@ -159,8 +167,8 @@ test('刚触价时无需额外等待观察窗口即可确认', () => {
     observationAgeMs: 20 * 1000,
   })
 
-  assert.equal(result.decision, 'confirm')
-  assert.equal(result.policy, 'consensus')
+  assert.equal(result.decision, 'wait')
+  assert.equal(result.policy, 'observation')
 })
 
 test('LLM 基于完整计划判失效时可直接结束本次触发', () => {

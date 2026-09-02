@@ -27,9 +27,33 @@ test('到价待确认通知先展示股票和动作且正文只保留执行要�
   assert.equal(notification.title, '中利集团(002309)｜减仓观察价已到')
   assert.equal(
     notification.body,
-    '现3.06｜目标≥3.05｜减仓9手\n当前不减仓；冲高转弱后复核',
+    '现3.06｜目标≥3.05｜减仓9手\n当前不减仓；先观察约60秒，确认冲高转弱后复核',
   )
   assert.doesNotMatch(notification.body, /系统正在|确认后会|详情见|到价≠/)
+})
+
+test('一手清仓观察只在确认后提示执行', () => {
+  const alert = {
+    ...reduceAlert,
+    note: '清仓观察位',
+    opQty: '清仓1手',
+  }
+  const watching = buildAlertNotification({
+    alert,
+    quote: { price: 40.22 },
+    stage: 'watch',
+  })
+  const confirmed = buildAlertNotification({
+    alert,
+    quote: { price: 40.18 },
+    stage: 'confirm',
+    reason: '冲高不能站稳且主力继续流出',
+  })
+
+  assert.equal(watching.title, '中利集团(002309)｜清仓观察价已到')
+  assert.match(watching.body, /当前不清仓；先观察约60秒/)
+  assert.equal(confirmed.title, '中利集团(002309)｜现在清仓')
+  assert.match(confirmed.body, /执行：清仓1手/)
 })
 
 test('确认通知一眼显示现在做什么并限制冗长理由', () => {

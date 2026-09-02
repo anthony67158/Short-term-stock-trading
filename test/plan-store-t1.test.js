@@ -295,6 +295,32 @@ test('今日新建仓的止盈止损预警保留观察价但标记 T+1 锁定', 
   assert.equal(alerts.every((alert) => alert.sellableTodayQty === 0), true)
 })
 
+test('一手可卖持仓的止损预警明确为确认后清仓一手', () => {
+  planStore.setData({
+    plan: [],
+    holding: [{
+      id: 'one_lot_position',
+      code: '002230',
+      name: '科大讯飞',
+      buyPrice: 40.33,
+      buyAt: 1,
+      qty: 1,
+      buyFee: 5,
+    }],
+    closed: [],
+    alerts: [],
+  })
+
+  planStore.setPlanRule('one_lot_position', { sl: 38.67 })
+
+  const alert = planStore.get().alerts.find((item) =>
+    item.planId === 'one_lot_position' && item.note === '止损'
+  )
+  assert.equal(alert.phase, 'armed')
+  assert.equal(alert.opQty, '清仓1手')
+  assert.equal(alert.sellableTodayQty, 1)
+})
+
 test('旧仓2手今日补1手时预警记录今日最多可卖2手', () => {
   const now = Date.now()
   planStore.setData({
