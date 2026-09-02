@@ -125,6 +125,7 @@ export async function settleOpportunityRadarOutcomes({
   now = Date.now(),
   lookbackDays = 35,
   fetchConcurrency = 5,
+  maxCodes = 60,
 } = {}) {
   const evaluatedAt = Number(now)
   if (!Number.isFinite(evaluatedAt) || evaluatedAt <= 0) {
@@ -136,7 +137,7 @@ export async function settleOpportunityRadarOutcomes({
     -Math.max(1, Math.min(60, Number(lookbackDays) || 35)),
   )
   const batches = await ledgerStore.listBatches({ from, to })
-  const work = []
+  const allWork = []
   let existingCount = 0
   for (const batch of batches) {
     const events = eligibleEvents(batch)
@@ -152,12 +153,36 @@ export async function settleOpportunityRadarOutcomes({
     existingCount += existingIds.size
     for (const event of events) {
       if (!existingIds.has(String(event.decisionId || ''))) {
-        work.push({ batch, event })
+        allWork.push({ batch, event })
       }
     }
   }
 
-  const codes = [...new Set(work.map(({ event }) => event.code))]
+  const allCodes = [...new Set(
+    allWork.map(({ event }) => event.code),
+  )].sort()
+  const codeLimit = Math.max(
+    1,
+    Math.min(120, Math.trunc(Number(maxCodes) || 60)),
+  )
+  const dateOrdinal = Math.floor(
+    Date.parse(`${to}T00:00:00.000Z`) / 86400000,
+  )
+  const start = allCodes.length
+    ? (dateOrdinal * codeLimit) % allCodes.length
+    : 0
+  const selectedCodes = new Set(
+    allCodes.length <= codeLimit
+      ? allCodes
+      : Array.from(
+          { length: codeLimit },
+          (_, index) => allCodes[(start + index) % allCodes.length],
+        ),
+  )
+  const work = allWork.filter(
+    ({ event }) => selectedCodes.has(event.code),
+  )
+  const codes = [...selectedCodes]
   const barsByCode = new Map()
   await mapLimit(codes, fetchConcurrency, async (code) => {
     try {
@@ -165,6 +190,7 @@ export async function settleOpportunityRadarOutcomes({
         limit: 1200,
         completedWindowOnly: false,
         adjustment: 'raw',
+        timeoutMs: 3500,
       })
       barsByCode.set(code, Array.isArray(bars) ? bars : [])
     } catch (error) {
@@ -197,9 +223,10 @@ export async function settleOpportunityRadarOutcomes({
     evaluatedAt,
     range: { from, to },
     batches: batches.length,
-    candidates: existingCount + work.length,
+    candidates: existingCount + allWork.length,
     existing: existingCount,
     evaluated: resolved.length,
+    deferred: allWork.length - work.length,
     matured: resolved.filter(
       (item) => item.maturity === 'MATURED',
     ).length,

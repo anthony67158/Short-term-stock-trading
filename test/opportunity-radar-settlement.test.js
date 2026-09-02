@@ -219,3 +219,43 @@ test('重复运行跳过已经不可变落盘的成熟结果', async () => {
   assert.equal(replayed.evaluated, 0)
   assert.equal(replayed.matured, 0)
 })
+
+test('单轮行情请求受股票上限约束且未处理候选明确顺延', async () => {
+  const candidates = ['600001', '600002', '600003'].map((code) =>
+    event({
+      tradeDate: '2026-09-01',
+      code,
+      priceType: 'BREAKOUT_WATCH',
+      primaryPrice: 10.8,
+      stopPrice: 10.3,
+      targetPrice: 11.8,
+    }),
+  )
+  const sourceBatch = {
+    ...batch('2026-09-01', candidates[0]),
+    events: candidates,
+  }
+  const store = outcomeStore()
+  let fetchCount = 0
+
+  const result = await settleOpportunityRadarOutcomes({
+    ledgerStore: {
+      async listBatches() {
+        return [sourceBatch]
+      },
+    },
+    outcomeStore: store,
+    fetchBars: async () => {
+      fetchCount += 1
+      return bars()
+    },
+    now: Date.parse('2026-09-03T09:10:00.000Z'),
+    maxCodes: 2,
+  })
+
+  assert.equal(fetchCount, 2)
+  assert.equal(result.candidates, 3)
+  assert.equal(result.evaluated, 2)
+  assert.equal(result.deferred, 1)
+  assert.equal(store.values.length, 2)
+})
