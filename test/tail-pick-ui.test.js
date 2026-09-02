@@ -16,15 +16,12 @@ const results = read('src/components/TailPickResults.jsx')
 const client = read('src/tailPickClient.js')
 const styles = read('src/styles/precision.css')
 
-test('尾盘拾金位于板块前瞻和普通候选池之间', () => {
-  assert.match(today, /import FormulaSelection from '\.\/FormulaSelection'/)
+test('尾盘拾金作为数据源并入机会雷达', () => {
+  assert.match(today, /import OpportunityRadar from '\.\/OpportunityRadar'/)
   assert.match(formulaSelection, /import TailPick from '\.\/TailPick'/)
-  assert.ok(
-    today.indexOf('<SectorForecast') < today.indexOf('<FormulaSelection'),
-  )
-  assert.ok(
-    today.indexOf('<FormulaSelection') < today.indexOf('<CandidatePool'),
-  )
+  assert.match(today, /<OpportunityRadar/)
+  assert.doesNotMatch(today, /<FormulaSelection/)
+  assert.ok(today.indexOf('<OpportunityRadar') < today.indexOf('<CandidatePool'))
 })
 
 test('尾盘拾金支持14:50自动正式扫描和手动试算', () => {

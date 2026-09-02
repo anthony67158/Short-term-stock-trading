@@ -1,5 +1,7 @@
 import {
+  beijingDate,
   beijingDayKey,
+  isTradingDay,
   localDateKey,
   nextTradingDate,
 } from './tradingCalendar.js'
@@ -48,6 +50,16 @@ function tradingDayAfter(timestamp, count) {
     cursor = result.getTime()
   }
   return result ? localDateKey(result) : null
+}
+
+function previousTradingDayKey(timestamp) {
+  const current = beijingDate(timestamp)
+  current.setHours(0, 0, 0, 0)
+  for (let offset = 1; offset <= 14; offset += 1) {
+    const candidate = new Date(current.getTime() - offset * 86400000)
+    if (isTradingDay(candidate)) return localDateKey(candidate)
+  }
+  return ''
 }
 
 function sourceDay(value = {}) {
@@ -173,6 +185,7 @@ function formulaExitPlan(candidate, lane, now) {
 function formulaOpportunity(candidate, {
   lane,
   sourceFresh,
+  sectorFresh,
   maps,
   now,
 }) {
@@ -195,6 +208,8 @@ function formulaOpportunity(candidate, {
   if (!['LAYOUT', 'WAIT_PULLBACK'].includes(sectorAction)) {
     blockers.push('板块方向尚未支持新增仓位')
   }
+  const hardBlocked = blockers.length > 0
+  if (!sectorFresh) blockers.push('板块方向需要重新确认')
   const current = finite(candidate.quote?.price)
   const distance = current != null && entryPlan?.price > 0
     ? Math.abs(current / entryPlan.price - 1) * 100
@@ -202,11 +217,12 @@ function formulaOpportunity(candidate, {
   const ready = (
     lane !== 'next'
     && sectorAction === 'LAYOUT'
+    && sectorFresh
     && distance != null
     && distance <= 0.8
-    && blockers.length === 0
+    && !hardBlocked
   )
-  const valid = blockers.length === 0
+  const valid = !hardBlocked
   return {
     code: String(candidate.code || ''),
     name: String(candidate.name || ''),
@@ -236,6 +252,7 @@ function formulaOpportunity(candidate, {
 
 function tailOpportunity(candidate, {
   near = false,
+  formal = false,
   sourceFresh,
   maps,
   now,
@@ -253,11 +270,13 @@ function tailOpportunity(candidate, {
       : []),
   ])
   if (near) blockers.unshift('仅接近公式，尚未完整命中')
+  if (!formal) blockers.push('手动试算仅供观察')
   if (!sourceFresh) blockers.push('尾盘结果已过期')
   if (!near && (entryPrice == null || stop == null)) {
     blockers.push('尾盘买卖计划不完整')
   }
   const valid = !near
+    && formal
     && sourceFresh
     && entryPrice != null
     && stop != null
@@ -467,6 +486,10 @@ export function buildOpportunityRadar({
     now: timestamp,
   })
   const day = String(sector?.market?.day || beijingDayKey(timestamp))
+  const closeDay = (
+    timing.phase === 'AFTER_CLOSE'
+    && sector?.market?.tradingDay !== false
+  ) ? day : previousTradingDayKey(timestamp)
   const sectorSnapshot = sectorSnapshotFor(
     sector,
     timing.phase,
@@ -474,15 +497,18 @@ export function buildOpportunityRadar({
   )
   const maps = sectorMaps(sectorSnapshot)
   const tailState = tail || null
-  const tailResult = tailState?.displayResult
+  const tailResult = tailState?.currentResult
     || tailState?.latest
+    || tailState?.displayResult
     || tailState
     || formula?.tail
     || null
   const sourceStatus = {
     sector: sourceState(sectorSnapshot, {
-      expectedDay: day,
-      strictDay: sectorSnapshot?.session === 'intraday',
+      expectedDay: sectorSnapshot?.session === 'intraday'
+        ? day
+        : closeDay,
+      strictDay: true,
       error: sourceErrors.sector,
     }),
     formulaIntraday: sourceState(formula?.intraday, {
@@ -491,9 +517,13 @@ export function buildOpportunityRadar({
       error: sourceErrors.formula,
     }),
     formulaClose: sourceState(formula?.close, {
+      expectedDay: closeDay,
+      strictDay: true,
       error: sourceErrors.formula,
     }),
     tail: sourceState(tailResult, {
+      expectedDay: closeDay,
+      strictDay: true,
       error: sourceErrors.tail,
     }),
   }
@@ -527,6 +557,7 @@ export function buildOpportunityRadar({
       .map((candidate) => formulaOpportunity(candidate, {
         lane: 'layout',
         sourceFresh: preferredFormulaFresh,
+        sectorFresh: sourceStatus.sector.status === 'fresh',
         maps,
         now: timestamp,
       })),
@@ -538,6 +569,7 @@ export function buildOpportunityRadar({
         lane: 'intraday',
         sourceFresh:
           sourceStatus.formulaIntraday.status === 'fresh',
+        sectorFresh: sourceStatus.sector.status === 'fresh',
         maps,
         now: timestamp,
       }),
@@ -549,12 +581,14 @@ export function buildOpportunityRadar({
       formulaOpportunity(candidate, {
         lane: 'next',
         sourceFresh: sourceStatus.formulaClose.status === 'fresh',
+        sectorFresh: sourceStatus.sector.status === 'fresh',
         maps: sectorMaps(sector?.latest || sectorSnapshot),
         now: timestamp,
       }),
     ),
     ...tailCandidates.map((candidate) =>
       tailOpportunity(candidate, {
+        formal: tailResult?.session?.isFormal === true,
         sourceFresh: sourceStatus.tail.status === 'fresh',
         maps: sectorMaps(sector?.latest || sectorSnapshot),
         now: timestamp,
@@ -563,6 +597,7 @@ export function buildOpportunityRadar({
     ...tailNearCandidates.map((candidate) =>
       tailOpportunity(candidate, {
         near: true,
+        formal: tailResult?.session?.isFormal === true,
         sourceFresh: sourceStatus.tail.status === 'fresh',
         maps: sectorMaps(sector?.latest || sectorSnapshot),
         now: timestamp,
@@ -574,6 +609,9 @@ export function buildOpportunityRadar({
     schemaVersion: OPPORTUNITY_RADAR_SCHEMA_VERSION,
     generatedAt: timestamp,
     ...timing,
+    market: sector?.market || null,
+    settings: sector?.settings || null,
+    tailSession: tailState?.session || null,
     sourceStatus,
     tasks: {
       sector: sector?.task || null,

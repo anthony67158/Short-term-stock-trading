@@ -16,15 +16,13 @@ const client = read('src/sectorForecastClient.js')
 const view = read('src/sectorForecastView.js')
 const styles = read('src/styles/precision.css')
 
-test('板块前瞻迁入今日决策并替代AI选股入口', () => {
+test('板块前瞻作为数据源并入今日决策的机会雷达', () => {
   assert.match(
     today,
-    /import SectorForecast from '\.\/SectorForecast'/,
+    /import OpportunityRadar from '\.\/OpportunityRadar'/,
   )
-  assert.ok(
-    today.indexOf('<SectorForecast')
-      < today.indexOf('<CandidatePool'),
-  )
+  assert.match(today, /<OpportunityRadar/)
+  assert.doesNotMatch(today, /<SectorForecast/)
   assert.doesNotMatch(research, /SectorForecast/)
   assert.doesNotMatch(today, /<DailyPlay/)
   assert.doesNotMatch(today, /function DailyPlay/)

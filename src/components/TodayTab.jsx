@@ -5,8 +5,7 @@ import LimitPool from './LimitPool'
 import { usePolling } from '../hooks'
 import { planStore, usePlanStore } from '../planStore'
 import DailyReport from './DailyReport'
-import SectorForecast from './SectorForecast'
-import FormulaSelection from './FormulaSelection'
+import OpportunityRadar from './OpportunityRadar'
 import ErrorBoundary from './ErrorBoundary'
 import { fmtPct, pctClass, fmtInflow, fmtRaw } from '../format'
 import { deriveMarketRegime } from '../../shared/marketRegime.js'
@@ -30,11 +29,8 @@ export default function TodayTab({ interval, market, sectors }) {
         limitUp={zt.data}
       />
       <SentimentGauge zt={zt.data} zb={zb.data} market={market} />
-      <ErrorBoundary label="板块前瞻">
-        <SectorForecast />
-      </ErrorBoundary>
-      <ErrorBoundary label="公式选股">
-        <FormulaSelection />
+      <ErrorBoundary label="机会雷达">
+        <OpportunityRadar />
       </ErrorBoundary>
       <CandidatePool
         zt={zt.data}

@@ -58,9 +58,10 @@ const design = fs.readFileSync(
   'utf8',
 )
 
-test('今日决策使用公式选股三视图并保留尾盘反转', () => {
-  assert.match(today, /FormulaSelection/)
+test('今日决策由机会雷达统一承载公式与尾盘结果', () => {
+  assert.match(today, /OpportunityRadar/)
   assert.doesNotMatch(today, /<TailPick/)
+  assert.doesNotMatch(today, /<FormulaSelection/)
   assert.match(selection, /公式选股/)
   assert.match(selection, /盘中机会/)
   assert.match(selection, /次日关注/)

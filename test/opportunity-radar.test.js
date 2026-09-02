@@ -276,3 +276,59 @@ test('赔率不足或盘中快照过期时不得显示为可操作', () => {
     'AVOID',
   )
 })
+
+test('板块实时源失败时公式候选最多进入等待确认', () => {
+  const result = buildOpportunityRadar({
+    now: NOW,
+    sector: {
+      market: { phase: 'live', day: '2026-09-02' },
+    },
+    formula: {
+      intraday: formulaResult('INTRADAY', [formulaCandidate()]),
+    },
+    sourceErrors: {
+      sector: '板块快照读取失败',
+    },
+  })
+  const candidate = result.lanes.intraday[0]
+  assert.equal(candidate.state, 'WAIT_TRIGGER')
+  assert.match(candidate.blockers.join('；'), /板块方向需要重新确认/)
+})
+
+test('收盘与尾盘结果必须属于最近完整交易日', () => {
+  const result = buildOpportunityRadar({
+    now: Date.parse('2026-09-02T15:20:00+08:00'),
+    sector: {
+      market: {
+        phase: 'closed',
+        tradingDay: true,
+        day: '2026-09-02',
+      },
+      latest: sectorSnapshot({
+        session: 'close',
+        signalDate: '2026-09-02',
+      }),
+    },
+    formula: {
+      close: formulaResult(
+        'CLOSE',
+        [formulaCandidate({ formulaId: 'CLOSE_SQUEEZE' })],
+        { tradeDate: '2026-09-01' },
+      ),
+      tail: {
+        session: {
+          tradeDate: '2026-09-01',
+          isFormal: true,
+          dataAsOf: NOW,
+        },
+        result: { candidates: [], nearCandidates: [] },
+      },
+    },
+  })
+  assert.equal(result.sourceStatus.formulaClose.status, 'stale')
+  assert.equal(result.sourceStatus.tail.status, 'stale')
+  assert.equal(
+    result.lanes.next.find((item) => item.code === '600001').state,
+    'AVOID',
+  )
+})
