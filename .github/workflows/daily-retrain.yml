@@ -62,6 +62,14 @@ jobs:
             test_train_sector_model.py \
             test_build_sector_dataset.py \
             test_sector_app.py \
+            tests/test_opportunity_contract.py \
+            tests/test_opportunity_dataset.py \
+            tests/test_opportunity_evaluation.py \
+            tests/test_train_opportunity_score.py \
+            tests/test_opportunity_model.py \
+            tests/test_opportunity_app.py \
+            tests/test_upload_opportunity_model.py \
+            tests/test_collect_opportunity_outcomes.py \
             2>&1 | tee ../test-artifacts/retrain-contract-tests.log
 
       - name: Upload contract diagnostics
@@ -216,6 +224,85 @@ jobs:
             qlib-service/retrain_history.jsonl
             qlib-service/dataset_build_meta.json
             qlib-service/production_accuracy.json
+          if-no-files-found: warn
+
+  opportunity-retrain:
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: qlib-service
+    env:
+      PYTHONUNBUFFERED: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      PIP_DEFAULT_TIMEOUT: "90"
+      OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+      OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+      OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
+      OSS_ENDPOINT: https://oss-cn-hangzhou.aliyuncs.com
+      OSS_ALLOW_PUBLIC_NETWORK: "true"
+      OSS_REGION: oss-cn-hangzhou
+      OPPORTUNITY_MODEL_PREFIX: opportunitymodel/
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Use Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: qlib-service/requirements-ci.txt
+
+      - name: Install locked training dependencies
+        run: |
+          python -m pip install --retries 5 -r requirements-ci.txt
+          python -m pip check
+
+      - name: Verify required OSS configuration
+        run: |
+          missing=0
+          for name in \
+            OSS_ACCESS_KEY_ID \
+            OSS_ACCESS_KEY_SECRET \
+            OSS_BUCKET
+          do
+            if [ -z "${!name}" ]; then
+              echo "::error title=Missing Actions secret::$name 未配置"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Collect mature opportunity outcomes
+        run: |
+          python collect_opportunity_outcomes.py \
+            --export opportunity-outcomes.json \
+            --dataset opportunity-dataset.npz
+
+      - name: Train and evaluate opportunity challenger
+        run: |
+          python train_opportunity_score.py \
+            --dataset opportunity-dataset.npz \
+            --output opportunity-model
+
+      - name: Publish eligible shadow model
+        run: |
+          if [ -f opportunity-model/shadow/opportunity_meta.json ]; then
+            python upload_opportunity_model.py \
+              --directory opportunity-model/shadow
+          else
+            echo "Opportunity model is not shadow-eligible; keeping current manifest."
+          fi
+
+      - name: Upload opportunity diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: opportunity-retrain-${{ github.run_id }}
+          path: |
+            qlib-service/opportunity-model/opportunity_training_report.json
+            qlib-service/opportunity-model/opportunity_trials.jsonl
           if-no-files-found: warn
 
   sector-retrain:

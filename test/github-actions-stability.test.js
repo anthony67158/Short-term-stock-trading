@@ -20,10 +20,11 @@ test('所有Python Actions共享精确版本依赖并包含TestClient运行时',
   assert.doesNotMatch(retrain, /pip install "fastapi/)
 })
 
-test('重训主模型与板块模型分离运行并使用明确OSS公网出口', () => {
+test('重训主模型、板块模型与机会影子模型分离运行', () => {
   assert.match(retrain, /^\s{2}verify:/m)
   assert.match(retrain, /^\s{2}stock-retrain:/m)
   assert.match(retrain, /^\s{2}sector-retrain:/m)
+  assert.match(retrain, /^\s{2}opportunity-retrain:/m)
   assert.match(retrain, /needs:\s*verify/)
   assert.match(retrain, /OSS_ALLOW_PUBLIC_NETWORK:\s*"true"/)
   assert.match(
@@ -32,6 +33,13 @@ test('重训主模型与板块模型分离运行并使用明确OSS公网出口',
   )
   assert.match(retrain, /Verify stock model OSS connectivity/)
   assert.match(retrain, /Verify sector model OSS connectivity/)
+  assert.match(retrain, /Collect mature opportunity outcomes/)
+  assert.match(retrain, /Train and evaluate opportunity challenger/)
+  assert.match(retrain, /Publish eligible shadow model/)
+  assert.match(
+    retrain,
+    /if \[ -f opportunity-model\/shadow\/opportunity_meta\.json \]/,
+  )
   assert.match(retrain, /Preflight - Tushare板块数据源/)
   assert.match(retrain, /TushareClient\(timeout=20, retries=1\)/)
   assert.match(retrain, /except urllib\.error\.HTTPError as error:/)
