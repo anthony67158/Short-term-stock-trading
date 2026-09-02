@@ -51,6 +51,11 @@ test('机会候选同时展示入场仓位和完整退出计划', () => {
   assert.match(content, /尚无完整价格，不代表可以买入/)
 })
 
+test('已算出计划但大盘不支持时仍展示计划并说明为什么先不买', () => {
+  assert.match(content, /已算出计划但本次不买/)
+  assert.match(candidate, /为什么先不买/)
+})
+
 test('机会雷达显示真实来源状态和局部失败', () => {
   assert.match(content, /sourceStatus/)
   assert.match(content, /failed/)

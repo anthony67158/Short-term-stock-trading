@@ -145,6 +145,49 @@ test('市场扫描从完整股票池生成最多五个带唯一价位的观察�
     ['UNIVERSE', 'PREFILTER', 'TECHNICAL', 'EVIDENCE', 'RANKING'],
   )
   assert.equal(progress.at(-1).percent, 97)
+
+  const blocked = await scanFormulaSelectionCandidates({
+    mode: 'intraday',
+    now: Date.UTC(2026, 7, 28, 7),
+    marketContext: {
+      marketGate: {
+        allowed: false,
+        blockers: ['市场风险偏高'],
+      },
+      latest: null,
+      intraday: null,
+    },
+    fetchUniverse: async () => ({
+      total: 5500,
+      inspectedCount: 5500,
+      allList,
+    }),
+    fetchKline: async () => {
+      const rows = candles()
+      rows.at(-1).high = 12.6
+      return { candles: rows }
+    },
+    fetchTrends: async () => ({
+      trends: [11.92, 11.95, 11.97, 12, 12.01].map((current) => ({
+        price: current,
+        avg: 11.9,
+        volume: 100,
+      })),
+    }),
+    fetchFund: async () => fund,
+    fetchTags: async () => ({ industry: '测试', concepts: [] }),
+    matchSector: () => ({
+      matched: true,
+      sector: { code: 'BK001', name: '测试主线' },
+    }),
+  })
+  assert.equal(blocked.universe.inspectedCount, 5500)
+  assert.equal(blocked.candidates.length, 1)
+  assert.equal(blocked.candidates[0].action, 'AVOID')
+  assert.ok(blocked.candidates[0].primaryPrice > 0)
+  assert.ok(blocked.candidates[0].stopPrice > 0)
+  assert.ok(blocked.candidates[0].targetPrice > 0)
+  assert.match(blocked.candidates[0].blockers.join('；'), /市场风险偏高/)
 })
 
 test('公式扫描不会因实时排序只检查前60只而漏掉后续命中', async () => {
@@ -382,7 +425,7 @@ test('公式选股进度按模式独立持久化并可恢复读取', async () =>
   assert.equal(await store.readProgress('intraday'), null)
 })
 
-test('市场闸门不允许新增风险时不启动全市场公式扫描', async () => {
+test('市场闸门不允许新增风险时仍完成全市场个股计算', async () => {
   let scanCalls = 0
   let saved = null
   const store = {
@@ -396,7 +439,22 @@ test('市场闸门不允许新增风险时不启动全市场公式扫描', async
     store,
     scan: async () => {
       scanCalls += 1
-      return { universe: {}, formulas: [], candidates: [] }
+      return {
+        universe: {
+          total: 5500,
+          inspectedCount: 5500,
+        },
+        formulas: [],
+        candidates: [{
+          code: '600001',
+          name: '测试股份',
+          action: 'AVOID',
+          primaryPrice: 10,
+          stopPrice: 9.6,
+          targetPrice: 10.8,
+          blockers: ['市场风险偏高'],
+        }],
+      }
     },
     collectMarketContext: async () => ({
       marketGate: {
@@ -407,8 +465,10 @@ test('市场闸门不允许新增风险时不启动全市场公式扫描', async
     now: () => Date.UTC(2026, 7, 28, 2),
   })
 
-  assert.equal(scanCalls, 0)
-  assert.equal(result.decision, 'NO_MATCH')
+  assert.equal(scanCalls, 1)
+  assert.equal(result.universe.inspectedCount, 5500)
+  assert.equal(result.candidates[0].primaryPrice, 10)
+  assert.equal(result.candidates[0].action, 'AVOID')
   assert.match(result.reason, /市场风险偏高/)
   assert.deepEqual(saved, result)
 })

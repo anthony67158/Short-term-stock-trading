@@ -74,6 +74,25 @@ test('数据过期价格非法或新增风险被阻断时权重归零', () => {
   }
 })
 
+test('大盘阻断后保留的研究价格不能升级为买入证据', () => {
+  const result = buildFormulaEvidenceReference(decision({
+    action: 'AVOID',
+    marketAllowsRisk: false,
+    executionState: 'MARKET_BLOCKED',
+    blockers: ['当前市场环境不支持新增风险'],
+  }), {
+    validationState: 'VALIDATED',
+    sampleSize: 120,
+    expectancyPct: 0.3,
+    profitFactor: 1.2,
+    stableWindows: 2,
+  })
+
+  assert.equal(result.effectiveWeight, 0)
+  assert.equal(result.canUpgradeAction, false)
+  assert.match(result.conflicts.join('；'), /不允许新增风险/)
+})
+
 test('持仓硬止损作为确定性风险退出而不是普通低权重参考', () => {
   const result = buildFormulaEvidenceReference(decision({
     positionMode: 'HELD',

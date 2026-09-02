@@ -133,6 +133,9 @@ function publicCandidate(item, rank) {
     formulaId: item.decision.formulaId,
     validationState: 'OBSERVE_ONLY',
     action: item.decision.action,
+    executionState: item.decision.executionState,
+    marketAllowsRisk: item.decision.marketAllowsRisk,
+    priceContractValid: item.decision.priceContractValid,
     primaryPrice: item.decision.primaryPrice,
     priceType: item.decision.priceType,
     stopPrice: item.decision.stopPrice,
@@ -317,7 +320,7 @@ export async function scanFormulaSelectionCandidates({
           fund,
           sectorOpportunity,
         })
-        const decision = buildFormulaPriceDecision({
+        const rawDecision = buildFormulaPriceDecision({
           code: quote.code,
           quote,
           formulaMatches: formula.matches,
@@ -327,7 +330,23 @@ export async function scanFormulaSelectionCandidates({
           dataFresh: true,
           now,
         })
-        if (decision.action !== 'WATCH_BUY') return null
+        if (!rawDecision.priceContractValid) return null
+        const marketBlockers = marketContext?.marketGate?.allowed === true
+          ? []
+          : Array.isArray(marketContext?.marketGate?.blockers)
+            ? marketContext.marketGate.blockers
+            : []
+        const decision = marketBlockers.length
+          ? {
+              ...rawDecision,
+              blockers: [
+                ...new Set([
+                  ...marketBlockers,
+                  ...(rawDecision.blockers || []),
+                ]),
+              ],
+            }
+          : rawDecision
         return {
           code: quote.code,
           name: quote.name || kline.name || tags.name,

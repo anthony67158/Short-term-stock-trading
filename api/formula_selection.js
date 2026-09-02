@@ -151,21 +151,15 @@ export function runFormulaSelection({
       await reportProgress(task, { force: true })
       const marketContext = await collectMarketContext({ now: timestamp })
       const marketAllowed = marketContext?.marketGate?.allowed === true
-      const scanned = marketAllowed
-        ? await scan({
-            mode: normalized,
-            marketContext,
-            now: timestamp,
-            onProgress: reportProgress,
-          })
-        : {
-            universe: {
-              inspectedCount: 0,
-              formulaMatchCount: 0,
-            },
-            formulas: [],
-            candidates: [],
-          }
+      const scanned = await scan({
+        mode: normalized,
+        marketContext,
+        now: timestamp,
+        onProgress: reportProgress,
+      })
+      const marketBlocker =
+        marketContext?.marketGate?.blockers?.[0]
+        || '当前市场环境不支持新增风险'
       const resultTradeDate =
         scanned.universe?.tradeDate || tradeDate
       const result = {
@@ -183,11 +177,12 @@ export function runFormulaSelection({
         candidates: scanned.candidates,
         decision: scanned.candidates.length ? 'OBSERVE' : 'NO_MATCH',
         reason: scanned.candidates.length
-          ? `筛出${scanned.candidates.length}只公式观察股`
+          ? marketAllowed
+            ? `筛出${scanned.candidates.length}只公式观察股`
+            : `已完成${scanned.candidates.length}只个股价格计算；${marketBlocker}，本次不买`
           : marketAllowed
             ? '当前没有股票通过公式和风险条件'
-            : marketContext?.marketGate?.blockers?.[0]
-              || '市场环境不允许新增风险',
+            : `已完成全市场个股计算；${marketBlocker}，且当前没有股票形成有效公式价格`,
       }
       await reportProgress({
         stage: 'SAVING',
@@ -200,7 +195,9 @@ export function runFormulaSelection({
         stage: 'DONE',
         percent: 100,
         message: scanned.candidates.length
-          ? `已生成${scanned.candidates.length}只公式观察股`
+          ? marketAllowed
+            ? `已生成${scanned.candidates.length}只公式观察股`
+            : `已完成${scanned.candidates.length}只个股价格计算，本次不买`
           : result.reason,
         counts: {
           total: scanned.universe?.total || 0,

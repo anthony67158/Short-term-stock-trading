@@ -60,10 +60,6 @@ function buildUnownedDecision(input) {
   if (input.dataComplete !== true || input.dataFresh !== true) {
     return emptyDecision(input, ['关键行情不完整或已过期'])
   }
-  if (input.marketAllowsRisk !== true) {
-    return emptyDecision(input, ['市场或账户不允许新增风险'])
-  }
-
   const selected = matches[0]
   const current = price(input.quote?.price)
   const primary = price(selected.anchors?.primary)
@@ -117,12 +113,13 @@ function buildUnownedDecision(input) {
     return emptyDecision(input, ['公式价位无法形成至少1.8:1的盈亏比'])
   }
 
+  const marketAllowsRisk = input.marketAllowsRisk === true
   return {
     schemaVersion: FORMULA_PRICE_SCHEMA_VERSION,
     code: String(input.code || ''),
     formulaId: selected.formulaId,
     positionMode: 'UNOWNED',
-    action: 'WATCH_BUY',
+    action: marketAllowsRisk ? 'WATCH_BUY' : 'AVOID',
     primaryPrice: primary,
     priceType: selected.priceType,
     stopPrice: stop,
@@ -134,15 +131,17 @@ function buildUnownedDecision(input) {
     priceContractValid,
     dataComplete: true,
     dataFresh: true,
-    marketAllowsRisk: true,
+    marketAllowsRisk,
     hardStopTriggered: false,
-    executionState: 'OBSERVE_ONLY',
+    executionState: marketAllowsRisk ? 'OBSERVE_ONLY' : 'MARKET_BLOCKED',
     sellableQty: null,
     evidence: [
       ...(selected.evidence || []),
       `主价位来自${selected.name || selected.formulaId}`,
     ].slice(0, 4),
-    blockers: [],
+    blockers: marketAllowsRisk
+      ? []
+      : ['当前市场环境不支持新增风险'],
   }
 }
 

@@ -48,6 +48,28 @@ test('未持仓股票只输出一条合法观察价和完整风险边界', () =>
   assert.equal(result.priceContractValid, true)
 })
 
+test('大盘不支持新增风险时保留价格合同但动作降级为不买', () => {
+  const result = buildFormulaPriceDecision({
+    code: '600001',
+    quote: { price: 10.2, limitDownPrice: 9, limitUpPrice: 11.2 },
+    formulaMatches: [matchedFormula()],
+    positionMode: 'UNOWNED',
+    marketAllowsRisk: false,
+    dataComplete: true,
+    dataFresh: true,
+    now: 1_000,
+  })
+
+  assert.equal(result.action, 'AVOID')
+  assert.equal(result.primaryPrice, 10)
+  assert.equal(result.stopPrice, 9.6)
+  assert.equal(result.targetPrice, 11)
+  assert.equal(result.riskReward, 2.5)
+  assert.equal(result.priceContractValid, true)
+  assert.equal(result.marketAllowsRisk, false)
+  assert.match(result.blockers.join('；'), /市场环境不支持新增风险/)
+})
+
 test('未持仓没有公式或赔率不足时不编造买入价格', () => {
   const noFormula = buildFormulaPriceDecision({
     code: '600001',

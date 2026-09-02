@@ -17061,6 +17061,10 @@ html[data-theme="light"] .nav {
   color: var(--color-accent);
 }
 
+.opportunity-row[data-state="avoid"] .opportunity-state {
+  color: var(--color-ink-2);
+}
+
 .opportunity-quote {
   display: inline-flex;
   align-items: baseline;

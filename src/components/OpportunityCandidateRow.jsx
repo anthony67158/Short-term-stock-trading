@@ -85,10 +85,18 @@ export default function OpportunityCandidateRow({
           {(opportunity.sourceSignals || []).join(' · ')}
         </span>
         <p>
-          {opportunity.state === 'READY' ? '为什么能买：' : '判断依据：'}
-          {(opportunity.evidence || []).slice(0, 2).join('；')
-            || opportunity.blockers?.[0]
-            || '等待更多有效证据'}
+          {opportunity.state === 'READY'
+            ? '为什么能买：'
+            : opportunity.state === 'AVOID'
+              ? '为什么先不买：'
+              : '判断依据：'}
+          {opportunity.state === 'AVOID'
+            ? (opportunity.blockers?.[0]
+              || (opportunity.evidence || []).slice(0, 1).join('；')
+              || '等待更多有效证据')
+            : ((opportunity.evidence || []).slice(0, 2).join('；')
+              || opportunity.blockers?.[0]
+              || '等待更多有效证据')}
         </p>
       </div>
 

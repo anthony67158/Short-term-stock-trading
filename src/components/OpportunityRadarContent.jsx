@@ -30,15 +30,18 @@ function sourceTime(source = {}) {
 
 function laneSummary(rows) {
   return rows.reduce((summary, item) => {
+    const priced = !!(item.entryPlan && item.exitPlan)
     if (item.state === 'READY') summary.ready += 1
     else if (item.state === 'WAIT_TRIGGER') summary.waiting += 1
     else if (item.state === 'SECTOR_WATCH') summary.sectorWatch += 1
+    else if (priced) summary.blocked += 1
     else summary.avoid += 1
     return summary
   }, {
     ready: 0,
     waiting: 0,
     sectorWatch: 0,
+    blocked: 0,
     avoid: 0,
   })
 }
@@ -57,6 +60,14 @@ function laneCopy(lane, summary) {
       icon: 'clock',
       title: `${summary.waiting}只到价后再买`,
       detail: '不提前抢跑，满足价格、量能和资金条件后再判断。',
+    }
+  }
+  if (summary.blocked > 0) {
+    return {
+      icon: 'shield',
+      title: `${summary.blocked}只已算出计划但本次不买`,
+      detail:
+        '入场价、止损和目标已给出，但当前大盘或账户不支持新增风险，先观察不下手。',
     }
   }
   if (summary.sectorWatch > 0) {
