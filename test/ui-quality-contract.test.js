@@ -789,7 +789,7 @@ test('持仓与自选卡内部控件在明暗主题都有实体表面和边界',
   )
   assert.match(
     precision,
-    /html\[data-theme="light"\][\s\S]*?\.plan-cand[\s\S]*?\.pc-actions[\s\S]*?> \.chip-btn:not\(\.act-buy\)\s*{[^}]*border-color:\s*var\(--color-trade-control-border\)[^}]*background:\s*var\(--color-trade-control\)/s,
+    /html\[data-theme="light"\][\s\S]*?\.plan-cand[\s\S]*?\.pc-actions[\s\S]*?> \.chip-btn:not\(\.act-add\):not\(\.act-buy\):not\(\.act-reduce\):not\(\.act-t\):not\(\.act-clear\)\s*{[^}]*border-color:\s*var\(--color-trade-control-border\)[^}]*background:\s*var\(--color-trade-control\)/s,
   )
 })
 

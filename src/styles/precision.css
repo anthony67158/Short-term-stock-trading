@@ -16239,7 +16239,7 @@ html[data-theme="light"] .plan-cand.starred {
 html[data-theme="light"]
   .plan-cand
   .pc-actions
-  > .chip-btn:not(.act-buy) {
+  > .chip-btn:not(.act-add):not(.act-buy):not(.act-reduce):not(.act-t):not(.act-clear) {
   border-color: var(--color-trade-control-border);
   background: var(--color-trade-control);
   box-shadow: var(--shadow-trade-control);
