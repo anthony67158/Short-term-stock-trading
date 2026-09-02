@@ -15131,9 +15131,10 @@ body.overlay-scroll-locked {
 }
 
 .plan-cand .pc-actions.deferred .review-action {
-  border-color: color-mix(in oklch, var(--color-accent) 38%, var(--color-rule));
-  background: color-mix(in oklch, var(--color-accent) 8%, var(--color-paper-2));
-  color: var(--color-accent);
+  border-color: var(--color-trade-control-border);
+  background: var(--color-trade-control);
+  box-shadow: var(--shadow-trade-control);
+  color: var(--color-ink-2);
   font-weight: 750;
 }
 
