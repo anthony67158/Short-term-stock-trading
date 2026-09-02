@@ -46,8 +46,14 @@ function entryTypeLabel(value) {
   }[value] || '等待定价'
 }
 
+const PORTFOLIO_VIEW = Object.freeze({
+  SECTOR_CAPPED: { label: '同板块集中，先观察', icon: 'compass' },
+  BUDGET_CAPPED: { label: '风险预算已满，先观察', icon: 'shield' },
+})
+
 export default function OpportunityCandidateRow({
   opportunity,
+  portfolio,
   added,
   onAdd,
 }) {
@@ -55,6 +61,15 @@ export default function OpportunityCandidateRow({
   const entryPlan = opportunity.entryPlan
   const exitPlan = opportunity.exitPlan
   const canAdd = !added
+  // 组合层只读提示：仅在候选被同板块集中或预算上限降级时展示，
+  // 它不改变个股主状态（主状态始终由 opportunity.state 驱动）。
+  const portfolioNote = portfolio
+    && PORTFOLIO_VIEW[portfolio.portfolioState]
+    ? {
+        ...PORTFOLIO_VIEW[portfolio.portfolioState],
+        reason: portfolio.portfolioReason || '',
+      }
+    : null
   return (
     <article
       className="opportunity-row"
@@ -84,6 +99,15 @@ export default function OpportunityCandidateRow({
         <span>
           {(opportunity.sourceSignals || []).join(' · ')}
         </span>
+        {portfolioNote && (
+          <span
+            className="opportunity-portfolio-note"
+            title={portfolioNote.reason}
+          >
+            <Icon name={portfolioNote.icon} size={12} />
+            {portfolioNote.label}
+          </span>
+        )}
         <p>
           {opportunity.state === 'READY'
             ? '为什么能买：'

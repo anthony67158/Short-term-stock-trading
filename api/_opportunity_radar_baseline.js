@@ -42,8 +42,8 @@ export async function refreshOpportunityRadarBaseline({
     from,
     to,
   })
-  await baselineStore.saveBaseline(baseline)
-  // 追加漂移历史并计算漂移信号（只读监控，不改变任何排序或结论）。
+  // 先追加漂移历史并计算漂移信号（只读监控，不改变任何排序或结论），
+  // 再把 drift 并入基线快照一起持久化，供机会雷达只读展示。
   let drift = null
   if (typeof baselineStore.appendDriftHistory === 'function') {
     const history = await baselineStore.appendDriftHistory(baseline, {
@@ -51,5 +51,7 @@ export async function refreshOpportunityRadarBaseline({
     })
     drift = detectOpportunityDrift({ history })
   }
-  return { ...baseline, drift }
+  const persisted = { ...baseline, drift }
+  await baselineStore.saveBaseline(persisted)
+  return persisted
 }

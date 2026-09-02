@@ -119,11 +119,12 @@ function SourceStatus({ sourceStatus = {} }) {
   )
 }
 
-function CandidateList({ rows, book, onAdd }) {
+function CandidateList({ rows, book, onAdd, portfolioMap }) {
   const renderRow = (item) => (
     <OpportunityCandidateRow
       key={item.code}
       opportunity={item}
+      portfolio={portfolioMap?.get(item.code) || null}
       added={(book?.plan || []).some(
         (candidate) => candidate.code === item.code,
       )}
@@ -145,6 +146,61 @@ function CandidateList({ rows, book, onAdd }) {
   )
 }
 
+// 组合层概览：展示本轮新增风险预算占用与已纳入的独立机会数。
+// 只在有可入场候选参与预算时显示，纯只读，不改变任何个股结论。
+function PortfolioBar({ portfolio }) {
+  const budget = portfolio?.budget
+  if (!budget || !(Number(budget.limitPct) > 0)) return null
+  const approved = Number(budget.approvedPct) || 0
+  const limit = Number(budget.limitPct) || 0
+  const included = Number(budget.includedCount) || 0
+  const capped = (portfolio.candidates || []).filter((item) =>
+    item.portfolioState === 'SECTOR_CAPPED'
+    || item.portfolioState === 'BUDGET_CAPPED',
+  ).length
+  const ratio = limit > 0
+    ? Math.min(100, Math.max(0, approved / limit * 100))
+    : 0
+  return (
+    <div className="opportunity-portfolio-bar" role="status">
+      <div className="opportunity-portfolio-head">
+        <Icon name="shield" size={14} />
+        <strong>组合风险预算</strong>
+        <span>
+          已纳入 {included} 个独立机会 · 占用约 {approved}% / 上限 {limit}%
+        </span>
+      </div>
+      <div className="opportunity-portfolio-track" aria-hidden="true">
+        <i style={{ width: `${ratio}%` }} />
+      </div>
+      {capped > 0 && (
+        <small>
+          另有 {capped} 只因同板块集中或预算已满先观察，避免同向重仓。
+        </small>
+      )}
+    </div>
+  )
+}
+
+// 漂移预警：只在样本充足且明确检出漂移时提示，样本不足/稳定时不显示噪音。
+function DriftNotice({ drift }) {
+  if (!drift || drift.state !== 'DRIFT_DETECTED') return null
+  const alerts = Array.isArray(drift.alerts) ? drift.alerts : []
+  if (!alerts.length) return null
+  return (
+    <div className="opportunity-drift" role="status">
+      <Icon name="info" size={14} />
+      <div>
+        <strong>统计漂移提醒</strong>
+        <span>{alerts[0].message}</span>
+        {alerts.length > 1 && (
+          <small>另有 {alerts.length - 1} 项指标同时预警，建议复核。</small>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function OpportunityRadarContent({
   lane,
   snapshot,
@@ -152,6 +208,10 @@ export default function OpportunityRadarContent({
   onAdd,
 }) {
   const rows = snapshot?.lanes?.[lane] || []
+  const portfolio = snapshot?.portfolios?.[lane] || null
+  const portfolioMap = new Map(
+    (portfolio?.candidates || []).map((item) => [item.code, item]),
+  )
   const plannedRows = rows.filter((item) =>
     item.entryPlan && item.exitPlan,
   )
@@ -180,6 +240,9 @@ export default function OpportunityRadarContent({
           <div><dt>看方向</dt><dd>{summary.sectorWatch}</dd></div>
         </dl>
       </div>
+
+      <DriftNotice drift={snapshot?.baseline?.drift} />
+      <PortfolioBar portfolio={portfolio} />
 
       {!!sectors.length && (
         <div className="opportunity-sector-strip">
@@ -213,6 +276,7 @@ export default function OpportunityRadarContent({
             rows={plannedRows}
             book={book}
             onAdd={onAdd}
+            portfolioMap={portfolioMap}
           />
         </>
       ) : (
@@ -236,6 +300,7 @@ export default function OpportunityRadarContent({
             rows={directionRows}
             book={book}
             onAdd={onAdd}
+            portfolioMap={portfolioMap}
           />
         </details>
       )}

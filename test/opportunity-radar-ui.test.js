@@ -130,3 +130,36 @@ test('机会雷达使用单层响应式布局', () => {
   )
   assert.doesNotMatch(radar, /className="panel[^"]*panel/)
 })
+
+test('机会雷达展示组合层去重与风险预算但不改个股结论', () => {
+  // 消费后端 portfolios 字段
+  assert.match(content, /portfolios/)
+  // 组合概览展示预算占用与独立机会数
+  assert.match(content, /风险预算|独立机会|已纳入/)
+  // 候选行接收只读组合提示，通过 code 映射而非改写 state
+  assert.match(content, /portfolioState|portfolioReason|portfolioNote/)
+  assert.match(candidate, /portfolioState|portfolioReason|portfolioNote/)
+  // 板块集中/预算受限提示文案
+  assert.match(candidate, /板块|预算|集中/)
+  // 组合视图不写回个股 state：仍以 opportunity.state 驱动主状态
+  assert.match(candidate, /STATE_VIEW\[opportunity\.state\]/)
+})
+
+test('漂移检出时展示只读预警且样本不足时不显示噪音', () => {
+  // 仅在 DRIFT_DETECTED 时提示
+  assert.match(content, /DRIFT_DETECTED/)
+  assert.match(content, /drift/)
+  // 预警文案与只读语义
+  assert.match(content, /漂移|回报|复核/)
+})
+
+test('组合与漂移使用统一设计token而非独立视觉体系', () => {
+  assert.match(styles, /\.opportunity-portfolio-bar\s*{/)
+  assert.match(styles, /\.opportunity-drift\s*{/)
+  // 复用现有表面/边框/间距 token
+  assert.match(
+    styles,
+    /\.opportunity-portfolio-bar\s*{[^}]*var\(--color-rule-2\)/s,
+  )
+})
+

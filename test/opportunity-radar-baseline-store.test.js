@@ -123,6 +123,7 @@ test('基线刷新从成熟结果范围生成并保存分桶报告', async () =>
     range: baseline.range,
     overall: baseline.overall,
     groups: baseline.groups,
+    drift: null,
   })
 })
 
