@@ -15,6 +15,7 @@ import numpy as np
 
 from factors_lib import compute_factors, feature_vector, FEATURE_NAMES
 from model_lib import model_score, garch_sigma, get_model, signal_prob, event_tag_for
+from opportunity_model import predict_opportunity_items
 from sector_model import get_sector_models, predict_sector_items
 
 app = FastAPI(title="Quant Score & Forecast", version="3.0")
@@ -274,6 +275,23 @@ def sector_predict(
         raise HTTPException(status_code=400, detail=str(error)[:120])
     except RuntimeError as error:
         raise HTTPException(status_code=503, detail=str(error)[:120])
+
+
+@app.post("/opportunity-score")
+def opportunity_score(
+    payload: dict = Body(...),
+    x_api_key: str = Header(default=""),
+):
+    _check_key(x_api_key)
+    try:
+        return {
+            "ok": True,
+            "shadowOnly": True,
+            "predictions": predict_opportunity_items(payload),
+            "note": "影子统计口径，不参与生产排序，不构成投资建议",
+        }
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)[:120])
 
 
 @app.post("/predict")
