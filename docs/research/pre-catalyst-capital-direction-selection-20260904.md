@@ -1,7 +1,7 @@
 # A 股预催化与资金启动预测路径研究
 
-> 研究日期：2026-09-04  
-> 目标：在明显涨停、龙虎榜或市场广泛关注之前，识别未来 1–5 个交易日更可能出现资金扩张和价格启动的股票。  
+> 研究日期：2026-09-04
+> 目标：在明显涨停、龙虎榜或市场广泛关注之前，识别未来 1–5 个交易日更可能出现资金扩张和价格启动的股票。
 > 边界：只使用决策时点已经公开的信息；输出概率与观察条件，不声称识别真实账户身份，不自动交易。
 
 ## 结论
@@ -343,38 +343,38 @@ adverseExcursion = 启动前最大不利波动
 
 ## 来源
 
-[S1] Zhang, So, Wang, “Investor Corporate Visits and Predictable Returns,” *Journal of Financial and Quantitative Analysis*, 2025.  
+[S1] Zhang, So, Wang, “Investor Corporate Visits and Predictable Returns,” *Journal of Financial and Quantitative Analysis*, 2025.
 https://doi.org/10.1017/S0022109024000528
 
-[S2] Dong, Yue, Cao, “Site visit information content and return predictability: Evidence from China,” *North American Journal of Economics and Finance*, 2020.  
+[S2] Dong, Yue, Cao, “Site visit information content and return predictability: Evidence from China,” *North American Journal of Economics and Finance*, 2020.
 https://doi.org/10.1016/j.najef.2019.101104
 
-[S3] Cohen, Frazzini, “Economic Links and Predictable Returns,” *Journal of Finance*, 2008.  
+[S3] Cohen, Frazzini, “Economic Links and Predictable Returns,” *Journal of Finance*, 2008.
 https://doi.org/10.1111/j.1540-6261.2008.01379.x
 
-[S4] Wang, Bian, Wu, “Spillover effects within supply chains: Evidence from Chinese-listed firms,” *Journal of International Financial Management & Accounting*, 2023.  
+[S4] Wang, Bian, Wu, “Spillover effects within supply chains: Evidence from Chinese-listed firms,” *Journal of International Financial Management & Accounting*, 2023.
 https://doi.org/10.1111/jifm.12186
 
-[S5] Huang et al., “Cross-Stock Predictability via LLM-Augmented Semantic Networks,” arXiv, 2026. Exploratory evidence, not production proof.  
+[S5] Huang et al., “Cross-Stock Predictability via LLM-Augmented Semantic Networks,” arXiv, 2026. Exploratory evidence, not production proof.
 https://arxiv.org/abs/2604.19476
 
-[S6] Zhang, Jiang, Zhou, “Order imbalance and stock returns: New evidence from the Chinese stock market,” *Accounting & Finance*, 2021.  
+[S6] Zhang, Jiang, Zhou, “Order imbalance and stock returns: New evidence from the Chinese stock market,” *Accounting & Finance*, 2021.
 https://doi.org/10.1111/acfi.12684
 
-[S7] Zhang, Xie, Wang, “Do order imbalances predict intraday returns? New evidence from the Chinese stock market,” *Asia-Pacific Journal of Accounting & Economics*, 2025.  
+[S7] Zhang, Xie, Wang, “Do order imbalances predict intraday returns? New evidence from the Chinese stock market,” *Asia-Pacific Journal of Accounting & Economics*, 2025.
 https://doi.org/10.1080/16081625.2025.2604824
 
-[S8] Chu, Qiu, “Forecasting stock returns using first half an hour order imbalance,” *International Journal of Finance & Economics*, 2020.  
+[S8] Chu, Qiu, “Forecasting stock returns using first half an hour order imbalance,” *International Journal of Finance & Economics*, 2020.
 https://doi.org/10.1002/ijfe.1960
 
-[S9] Chen, Xu, Wang, “Can convertible bond trading predict stock returns? Evidence from China,” *Pacific-Basin Finance Journal*, 2023.  
+[S9] Chen, Xu, Wang, “Can convertible bond trading predict stock returns? Evidence from China,” *Pacific-Basin Finance Journal*, 2023.
 https://doi.org/10.1016/j.pacfin.2023.102026
 
-[S10] Zhang et al., “From noise to signals: Investor attention as a catalyst for the momentum effect in the Chinese stock market,” *Global Finance Journal*, 2025.  
+[S10] Zhang et al., “From noise to signals: Investor attention as a catalyst for the momentum effect in the Chinese stock market,” *Global Finance Journal*, 2025.
 https://doi.org/10.1016/j.gfj.2025.101175
 
-[S11] 上海证券交易所，《上市公司自律监管指引第1号——规范运作（2026年4月修订）》，2026。上证 e 互动发布必须真实、准确、完整、公平，并提示重大不确定性。  
+[S11] 上海证券交易所，《上市公司自律监管指引第1号——规范运作（2026年4月修订）》，2026。上证 e 互动发布必须真实、准确、完整、公平，并提示重大不确定性。
 https://www.sse.com.cn/lawandrules/sselawsrules2025/stocks/mainipo/c/c_20260424_10816605.shtml
 
-[S12] 巨潮资讯网，上市公司公告与投资者关系活动记录公开查询入口。  
+[S12] 巨潮资讯网，上市公司公告与投资者关系活动记录公开查询入口。
 https://www.cninfo.com.cn/new/index.jsp
