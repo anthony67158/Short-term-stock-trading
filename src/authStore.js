@@ -114,7 +114,7 @@ let state = {
   status: 'idle',    // idle | loading | ready | error
   error: '',
   booting: true,     // 启动时是否在恢复会话
-  syncStatus: 'idle', // idle | saving | synced | error | conflict
+  syncStatus: 'idle', // idle | saving | retrying | synced | error | conflict
   syncError: '',
   lastSyncedAt: 0,
 }

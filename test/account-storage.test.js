@@ -18,6 +18,9 @@ import {
   writeAdviceRuntimeUpdate,
   writeAccount,
 } from '../api/account.js'
+import {
+  accountTradeStateFingerprint,
+} from '../shared/accountSync.js'
 
 test('登录快照只返回前端使用字段并排除大型后端证据', () => {
   const data = {
@@ -205,6 +208,81 @@ test('OSS PutObject不支持If-Match时通过原子锁完成条件写', async ()
 
   const saved = await readAccount('OSS条件写兼容账号', storage)
   assert.equal(saved.data.plan[0].code, '600519')
+})
+
+test('账号写锁短暂被占用时自动退避等待而不是立即失败', async () => {
+  const baseStorage = fakeStorage()
+  const account = await writeAccount({
+    nick: '锁竞争账号',
+    pwHash: 'hash',
+    createdAt: 1,
+    data: { plan: [{ code: '600519' }] },
+  }, baseStorage)
+  let remainingConflicts = 2
+  let lockPutAttempts = 0
+  let syntheticLock = false
+  const storage = {
+    ...baseStorage,
+    async put(pathname, body, options = {}) {
+      if (
+        pathname.endsWith('/write.lock')
+        && options.forbidOverwrite
+      ) {
+        lockPutAttempts += 1
+        if (remainingConflicts > 0) {
+          remainingConflicts -= 1
+          syntheticLock = true
+          const error = new Error('object already exists')
+          error.status = 409
+          error.code = 'FileAlreadyExists'
+          throw error
+        }
+      }
+      return baseStorage.put(pathname, body, options)
+    },
+    async readJson(pathname) {
+      if (pathname.endsWith('/write.lock') && syntheticLock) {
+        syntheticLock = false
+        return {
+          owner: 'other-instance',
+          expiresAt: Date.now() + 1000,
+        }
+      }
+      return baseStorage.readJson(pathname)
+    },
+  }
+
+  account.data.plan.push({ code: '000001' })
+  const saved = await writeAccount(account, storage)
+
+  assert.equal(lockPutAttempts, 3)
+  assert.equal(saved.data.plan.length, 2)
+})
+
+test('历史快照写入失败不阻断权威当前快照保存', async () => {
+  const baseStorage = fakeStorage()
+  const storage = {
+    ...baseStorage,
+    async put(pathname, body, options = {}) {
+      if (pathname.includes('/history/')) {
+        throw new Error('history temporarily unavailable')
+      }
+      return baseStorage.put(pathname, body, options)
+    },
+  }
+  const account = {
+    nick: '历史降级账号',
+    pwHash: 'hash',
+    createdAt: 1,
+    data: { plan: [{ code: '600519' }] },
+  }
+
+  const saved = await writeAccount(account, storage)
+  const restored = await readAccount(account.nick, storage)
+
+  assert.equal(saved.storage, 'oss')
+  assert.equal(saved.snapshotKey, null)
+  assert.equal(restored.data.plan[0].code, '600519')
 })
 
 test('同一服务端实例连续保存会推进ETag而不是误报冲突', async () => {
@@ -611,7 +689,7 @@ test('全部停止指令不会被迟到的Worker运行快照覆盖', async () =>
   )
 })
 
-test('并发全部停止通过原子锁避免取消截止线相互覆盖', async () => {
+test('并发全部停止通过原子锁排队完成且取消截止线不丢失', async () => {
   const storage = fakeStorage()
   const nick = '并发取消锁账号'
   const requests = [
@@ -623,18 +701,9 @@ test('并发全部停止通过原子锁避免取消截止线相互覆盖', async
       writeAdviceBatchCancellation(nick, request, storage)
     ),
   )
-  const rejectedIndex = results.findIndex(
-    (result) => result.status === 'rejected',
-  )
   assert.equal(
     results.filter((result) => result.status === 'fulfilled').length,
-    1,
-  )
-  assert.notEqual(rejectedIndex, -1)
-  await writeAdviceBatchCancellation(
-    nick,
-    requests[rejectedIndex],
-    storage,
+    2,
   )
 
   const latest = storage.objects.get(
@@ -1109,6 +1178,68 @@ test('旧客户端不能覆盖更新版本的持仓和交易流水', () => {
   assert.equal(stale.code, 'ACCOUNT_VERSION_CONFLICT')
   assert.equal(account.data.holding.length, 1)
   assert.equal(account.data.closed.length, 1)
+})
+
+test('只有服务端运行态更新时允许客户端按交易指纹直接合并', () => {
+  const base = {
+    plan: [{ code: '600519' }],
+    holding: [{ id: 'h1', code: '000938', qty: 3 }],
+    closed: [],
+    account: { cash: 10000 },
+  }
+  const account = {
+    nick: '并发账号',
+    clientRevision: 9,
+    data: {
+      ...base,
+      advice: { '000938': { at: 200 } },
+    },
+  }
+
+  const result = applyClientAccountSave(
+    account,
+    {
+      ...base,
+      settings: { theme: 'dark' },
+    },
+    8,
+    {
+      baseTradeFingerprint: accountTradeStateFingerprint(base),
+    },
+  )
+
+  assert.equal(result.ok, true)
+  assert.equal(account.clientRevision, 10)
+  assert.equal(account.data.settings.theme, 'dark')
+  assert.equal(account.data.advice['000938'].at, 200)
+})
+
+test('交易账本已被其他设备更新时交易指纹不能绕过冲突', () => {
+  const base = {
+    holding: [{ id: 'h1', code: '000938', qty: 3 }],
+    closed: [],
+  }
+  const account = {
+    nick: '并发账号',
+    clientRevision: 9,
+    data: {
+      holding: [{ id: 'h1', code: '000938', qty: 2 }],
+      closed: [{ id: 'sell-1', code: '000938', type: 'SELL' }],
+    },
+  }
+
+  const result = applyClientAccountSave(
+    account,
+    base,
+    8,
+    {
+      baseTradeFingerprint: accountTradeStateFingerprint(base),
+    },
+  )
+
+  assert.equal(result.ok, false)
+  assert.equal(result.code, 'ACCOUNT_VERSION_CONFLICT')
+  assert.equal(account.data.holding[0].qty, 2)
 })
 
 test('同版本旧页面缺少已执行交易时也不能覆盖云端持仓', () => {

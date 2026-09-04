@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { gunzipSync } from 'node:zlib'
 
 import {
   accountApiRequest,
@@ -33,12 +34,12 @@ test('账号请求网络失败时返回可展示错误而不是永久停在加�
   })
 })
 
-test('登录与恢复允许较大账号完成传输而普通同步保持短超时', () => {
+test('大型账号登录恢复和保存使用足够传输预算', () => {
   assert.equal(accountRequestTimeoutMs('login'), 45000)
   assert.equal(accountRequestTimeoutMs('register'), 45000)
-  assert.equal(accountRequestTimeoutMs('get'), 12000)
+  assert.equal(accountRequestTimeoutMs('get'), 30000)
   assert.equal(accountRequestTimeoutMs('sync'), 20000)
-  assert.equal(accountRequestTimeoutMs('save'), 20000)
+  assert.equal(accountRequestTimeoutMs('save'), 45000)
 })
 
 test('账号请求超时时返回明确提示并允许登录状态收尾', async () => {
@@ -63,4 +64,41 @@ test('账号请求超时时返回明确提示并允许登录状态收尾', async
   })
   assert.match(authStoreSource, /accountApiRequest/)
   assert.match(authStoreSource, /state\.status = 'error'/)
+})
+
+test('大型账号保存请求使用gzip传输并保持JSON内容完整', async () => {
+  let captured = null
+  const payload = {
+    nick: '测试账号',
+    data: {
+      advice: {
+        '600519': {
+          text: '重复分析正文'.repeat(30000),
+        },
+      },
+    },
+  }
+  const result = await accountApiRequest(
+    '/api/account',
+    'save',
+    payload,
+    {
+      fetchImpl: async (_url, init) => {
+        captured = init
+        return {
+          text: async () => JSON.stringify({
+            ok: true,
+            storage: 'oss',
+          }),
+        }
+      },
+    },
+  )
+
+  assert.equal(result.ok, true)
+  assert.equal(captured.headers['Content-Encoding'], 'gzip')
+  assert.deepEqual(
+    JSON.parse(gunzipSync(Buffer.from(captured.body)).toString('utf8')),
+    { action: 'save', ...payload },
+  )
 })

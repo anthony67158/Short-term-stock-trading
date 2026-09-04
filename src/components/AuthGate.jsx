@@ -115,8 +115,10 @@ export function AccountMenu() {
     ? '正在保存到阿里云 OSS'
     : syncStatus === 'conflict'
       ? '检测到多设备交易冲突，已暂停覆盖'
+    : syncStatus === 'retrying'
+      ? '同步延迟，正在自动重试'
     : syncStatus === 'error'
-      ? 'OSS 同步失败，正在重试'
+      ? 'OSS 同步失败'
       : '数据已保存到阿里云 OSS'
   const confirmDeactivate = async () => {
     if (deactivateBusy) return
@@ -142,7 +144,11 @@ export function AccountMenu() {
           <button type="button" className="acct-mask" aria-label="关闭账号菜单" onClick={() => setOpen(false)} />
           <div className="acct-menu" role="menu">
             <div className="acct-menu-label" title={syncError || ''}>当前账号 · {syncLabel}</div>
-            {(syncStatus === 'error' || syncStatus === 'conflict') && (
+            {(
+              syncStatus === 'retrying'
+              || syncStatus === 'error'
+              || syncStatus === 'conflict'
+            ) && (
               <button
                 type="button"
                 role="menuitem"
@@ -162,7 +168,7 @@ export function AccountMenu() {
                 <Icon name="refresh" size={13} />
                 {syncStatus === 'conflict'
                   ? '以本机交易账本覆盖云端'
-                  : '立即重试 OSS 同步'}
+                  : '立即重试云端同步'}
               </button>
             )}
             <button type="button" role="menuitem" className="acct-item" onClick={() => { llmConfigStore.open(); setOpen(false) }}>

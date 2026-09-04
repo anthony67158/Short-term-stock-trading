@@ -61,6 +61,8 @@ const defaultStorage = {
 const RECENT_HISTORY = 20;
 const DAILY_HISTORY_DAYS = 90;
 const ACCOUNT_WRITE_LOCK_TTL_MS = 60 * 1000;
+const ACCOUNT_WRITE_LOCK_ATTEMPTS = 6;
+const ACCOUNT_WRITE_LOCK_RETRY_BASE_MS = 25;
 export const isAccountActive = (account) => !!account && account.status !== 'deactivated';
 export function deactivateAccount(account, now = Date.now()) {
   return {
@@ -212,11 +214,20 @@ export function applyClientAccountSave(
   account,
   incoming,
   baseRevision,
-  { forceTradeState = false } = {},
+  {
+    forceTradeState = false,
+    baseTradeFingerprint = '',
+  } = {},
 ) {
   const currentRevision = Number(account.clientRevision) || 0;
+  const remoteTradeUnchanged = (
+    !!baseTradeFingerprint
+    && accountTradeStateFingerprint(account.data)
+      === String(baseTradeFingerprint)
+  );
   if (
     !forceTradeState
+    && !remoteTradeUnchanged
     && (
       !Number.isInteger(baseRevision)
       || baseRevision !== currentRevision
@@ -1312,9 +1323,11 @@ async function cleanupAccountHistory(nick, storage, now) {
       keep.add(item.pathname);
     }
   }
-  for (const item of sorted) {
-    if (!keep.has(item.pathname)) await storage.del(item.pathname);
-  }
+  await Promise.allSettled(
+    sorted
+      .filter((item) => !keep.has(item.pathname))
+      .map((item) => storage.del(item.pathname)),
+  );
 }
 
 function accountWriteLockPath(nick) {
@@ -1342,7 +1355,11 @@ async function acquireObjectWriteLock(
     owner,
     expiresAt: now + ACCOUNT_WRITE_LOCK_TTL_MS,
   });
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (
+    let attempt = 0;
+    attempt < ACCOUNT_WRITE_LOCK_ATTEMPTS;
+    attempt++
+  ) {
     try {
       await storage.put(pathname, payload, {
         contentType: 'application/json',
@@ -1373,7 +1390,16 @@ async function acquireObjectWriteLock(
         try { await storage.del(pathname); } catch { /* 重新竞争 */ }
         continue;
       }
-      throw accountWriteConflict();
+      if (attempt >= ACCOUNT_WRITE_LOCK_ATTEMPTS - 1) {
+        throw accountWriteConflict();
+      }
+      await new Promise((resolve) => setTimeout(
+        resolve,
+        Math.min(
+          400,
+          ACCOUNT_WRITE_LOCK_RETRY_BASE_MS * (2 ** attempt),
+        ),
+      ));
     }
   }
   throw accountWriteConflict();
@@ -1432,18 +1458,29 @@ export async function writeAccount(
         throw accountWriteConflict();
       }
     }
-    snapshot = history
-      ? await storage.put(`${historyPrefixOf(saved.nick)}${saved.updatedAt}.json`, body, {
+    const historyWrite = history
+      ? storage.put(`${historyPrefixOf(saved.nick)}${saved.updatedAt}.json`, body, {
           access: 'public', contentType: 'application/json',
           addRandomSuffix: true, cacheControlMaxAge: 0,
         })
-      : null;
-    currentWrite = await storage.put(currentPathOf(saved.nick), body, {
+      : Promise.resolve(null);
+    const currentWritePromise = storage.put(currentPathOf(saved.nick), body, {
       access: 'public',
       contentType: 'application/json',
       cacheControlMaxAge: 0,
       ...(createOnly ? { forbidOverwrite: true } : {}),
     });
+    const [historyResult, currentResult] = await Promise.allSettled([
+      historyWrite,
+      currentWritePromise,
+    ]);
+    if (currentResult.status === 'rejected') {
+      throw currentResult.reason;
+    }
+    currentWrite = currentResult.value;
+    snapshot = historyResult.status === 'fulfilled'
+      ? historyResult.value
+      : null;
     if (verify) {
       const verified = await storage.readJson(currentPathOf(saved.nick));
       if (
@@ -1470,7 +1507,7 @@ export async function writeAccount(
   }
 
   // 保留最近 20 份细粒度版本，并为最近 90 天每天保留一个恢复点。
-  if (history) {
+  if (history && snapshot) {
     try {
       await cleanupAccountHistory(saved.nick, storage, saved.updatedAt);
     } catch { /* ignore */ }
@@ -1591,7 +1628,10 @@ export default async function handler(req, res) {
           acc,
           incoming,
           Number(body.baseRevision),
-          { forceTradeState: body.forceTradeState === true },
+          {
+            forceTradeState: body.forceTradeState === true,
+            baseTradeFingerprint: body.baseTradeFingerprint,
+          },
         );
         if (!applied.ok) {
           const refreshPatch = newerAutoRefreshPatch(acc.data?.settings || {}, incoming.settings || {});

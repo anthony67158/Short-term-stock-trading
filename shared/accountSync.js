@@ -160,53 +160,78 @@ export async function saveWithRevisionRecovery({
   save,
   getLatest,
   onRevision = () => {},
+  maxRevisionRetries = 3,
+  wait = (delay) => new Promise((resolve) => setTimeout(resolve, delay)),
 } = {}) {
-  let response = await save(payload)
-  if (response?.ok || response?.code !== 'ACCOUNT_VERSION_CONFLICT') {
-    return response
-  }
+  const retries = Math.max(
+    0,
+    Math.min(5, Number(maxRevisionRetries) || 0),
+  )
+  let nextPayload = payload
+  let response = null
 
-  let latest = null
-  try {
-    latest = await getLatest()
-  } catch {
-    latest = null
-  }
-  if (!latest?.ok || !Number.isInteger(Number(latest.revision))) {
-    return {
-      ...response,
-      retryable: true,
-      error: '云端版本已更新，自动对齐失败，稍后继续重试',
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    response = await save(nextPayload)
+    if (
+      response?.ok
+      || response?.code !== 'ACCOUNT_VERSION_CONFLICT'
+    ) {
+      return response
     }
-  }
-  const baseFingerprint = String(payload?.baseTradeFingerprint || '')
-  const remoteMatchesBase = !!baseFingerprint
-    && (
+    if (attempt >= retries) break
+
+    let latest = null
+    try {
+      latest = await getLatest()
+    } catch {
+      latest = null
+    }
+    if (
+      !latest?.ok
+      || !Number.isInteger(Number(latest.revision))
+    ) {
+      return {
+        ...response,
+        retryable: true,
+        error: '云端版本已更新，自动对齐失败，稍后继续重试',
+      }
+    }
+    const baseFingerprint = String(
+      nextPayload?.baseTradeFingerprint || '',
+    )
+    const remoteMatchesBase = !!baseFingerprint && (
       accountTradeStateFingerprint(latest.data) === baseFingerprint
       || legacyAccountTradeStateFingerprint(latest.data)
         === baseFingerprint
     )
-  if (
-    !remoteMatchesBase
-    && !sameAccountTradeState(payload?.data, latest.data)
-    && payload?.forceTradeState !== true
-  ) {
-    return {
-      ...response,
-      code: 'TRADE_STATE_CONFLICT',
-      retryable: false,
-      conflict: true,
-      error: '检测到其他设备也修改了交易账本，为防止覆盖已暂停同步',
+    if (
+      !remoteMatchesBase
+      && !sameAccountTradeState(nextPayload?.data, latest.data)
+      && nextPayload?.forceTradeState !== true
+    ) {
+      return {
+        ...response,
+        code: 'TRADE_STATE_CONFLICT',
+        retryable: false,
+        conflict: true,
+        error: '检测到其他设备也修改了交易账本，为防止覆盖已暂停同步',
+      }
     }
+
+    const revision = Number(latest.revision)
+    onRevision(revision)
+    nextPayload = {
+      ...nextPayload,
+      baseRevision: revision,
+    }
+    await wait(Math.min(600, 75 * (2 ** attempt)))
   }
 
-  const revision = Number(latest.revision)
-  onRevision(revision)
-  response = await save({
-    ...payload,
-    baseRevision: revision,
-  })
-  return response
+  return {
+    ...response,
+    retryable: true,
+    error: '云端正在更新，已保留本机修改并将在稍后继续同步',
+  }
 }
 
 export function createCloudSaveQueue({
@@ -221,6 +246,7 @@ export function createCloudSaveQueue({
 
   let pending = null
   let running = null
+  let activeItem = null
   let retryTimer = null
   let retryDelay = retryBaseMs
   let epoch = 0
@@ -251,6 +277,7 @@ export function createCloudSaveQueue({
       while (pending) {
         const item = pending
         pending = null
+        activeItem = item
         notify({ status: 'saving', error: '' })
         try {
           const response = await save(item.payload)
@@ -270,7 +297,7 @@ export function createCloudSaveQueue({
           if (retryable && !pending) pending = item
           notify({
             status: retryable
-              ? 'error'
+              ? 'retrying'
               : (error?.conflict || error?.code === 'TRADE_STATE_CONFLICT')
                 ? 'conflict'
                 : 'error',
@@ -278,6 +305,8 @@ export function createCloudSaveQueue({
           })
           if (retryable) scheduleRetry()
           return false
+        } finally {
+          if (activeItem === item) activeItem = null
         }
       }
       return true
@@ -293,6 +322,23 @@ export function createCloudSaveQueue({
 
   return {
     enqueue(payload) {
+      const outboxId = String(payload?.outboxId || '')
+      if (
+        outboxId
+        && String(activeItem?.payload?.outboxId || '') === outboxId
+      ) {
+        return running
+      }
+      if (
+        outboxId
+        && String(pending?.payload?.outboxId || '') === outboxId
+      ) {
+        if (retryTimer) {
+          clearTimer(retryTimer)
+          retryTimer = null
+        }
+        return drain()
+      }
       pending = { payload, epoch }
       if (retryTimer) {
         clearTimer(retryTimer)

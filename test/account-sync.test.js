@@ -156,7 +156,7 @@ test('云端保存失败后保留最新数据并自动重试到成功', async ()
   })
 
   await queue.enqueue({ version: 1 })
-  assert.equal(states.at(-1).status, 'error')
+  assert.equal(states.at(-1).status, 'retrying')
   assert.equal(timers.length, 1)
 
   await timers[0]()
@@ -185,6 +185,30 @@ test('保存进行中产生的新变更会在本轮继续写入 OSS', async () =
   await running
 
   assert.deepEqual(calls, [{ version: 1 }, { version: 2 }])
+})
+
+test('保存中的同一outbox被再次确认时不重复上传', async () => {
+  const calls = []
+  let releaseSave
+  const waiting = new Promise((resolve) => {
+    releaseSave = resolve
+  })
+  const queue = createCloudSaveQueue({
+    save: async (payload) => {
+      calls.push(payload)
+      await waiting
+      return { ok: true, updatedAt: 123, storage: 'oss' }
+    },
+    onState: () => {},
+  })
+  const payload = { outboxId: 'same-save', version: 1 }
+
+  const first = queue.enqueue(payload)
+  const duplicate = queue.enqueue(payload)
+  releaseSave()
+  await Promise.all([first, duplicate])
+
+  assert.deepEqual(calls, [payload])
 })
 
 test('退出账号会取消进行中的旧账号失败重试', async () => {
@@ -271,6 +295,59 @@ test('交易账本一致时版本冲突会自动更新修订号并重放保存',
   assert.equal(calls.length, 2)
   assert.equal(calls[1].baseRevision, 8)
   assert.deepEqual(revisions, [8])
+})
+
+test('连续服务端运行态更新时保存会持续对齐直到成功', async () => {
+  const calls = []
+  const revisions = []
+  const local = {
+    plan: [{ code: '600519' }],
+    holding: [{ id: 'h1', code: '600000', qty: 2 }],
+    closed: [],
+    account: { cash: 10000 },
+  }
+  let latestRevision = 7
+  const result = await saveWithRevisionRecovery({
+    payload: {
+      data: local,
+      baseRevision: latestRevision,
+      baseTradeFingerprint: accountTradeStateFingerprint(local),
+    },
+    save: async (payload) => {
+      calls.push(payload)
+      if (calls.length <= 2) {
+        latestRevision += 1
+        return {
+          ok: false,
+          code: 'ACCOUNT_VERSION_CONFLICT',
+          revision: latestRevision,
+          retryable: true,
+        }
+      }
+      return {
+        ok: true,
+        storage: 'oss',
+        revision: latestRevision + 1,
+      }
+    },
+    getLatest: async () => ({
+      ok: true,
+      revision: latestRevision,
+      data: {
+        ...local,
+        advice: { '600000': { at: latestRevision } },
+      },
+    }),
+    onRevision: (revision) => revisions.push(revision),
+  })
+
+  assert.equal(result.ok, true)
+  assert.equal(calls.length, 3)
+  assert.deepEqual(
+    calls.map((payload) => payload.baseRevision),
+    [7, 8, 9],
+  )
+  assert.deepEqual(revisions, [8, 9])
 })
 
 test('两端交易账本都变化时拒绝自动覆盖', async () => {

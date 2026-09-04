@@ -1,3 +1,5 @@
+import { gunzip } from 'node:zlib'
+
 export class RequestBodyError extends Error {
   constructor(message, { code, statusCode }) {
     super(message)
@@ -39,6 +41,14 @@ export function readRequestBody(
   }
 
   const declared = Number(req?.headers?.['content-length'])
+  const contentEncoding = String(
+    req?.headers?.['content-encoding'] || 'identity',
+  ).trim().toLowerCase()
+  if (!['', 'identity', 'gzip'].includes(contentEncoding)) {
+    return Promise.reject(
+      bodyError('不支持的请求压缩格式', 'UNSUPPORTED_ENCODING', 415),
+    )
+  }
   if (Number.isFinite(declared) && declared > limit) {
     return Promise.reject(
       bodyError('请求体超过大小限制', 'BODY_TOO_LARGE', 413),
@@ -74,7 +84,39 @@ export function readRequestBody(
       }
       chunks.push(buffer)
     }
-    const onEnd = () => finish(null, Buffer.concat(chunks).toString('utf8'))
+    const onEnd = () => {
+      const body = Buffer.concat(chunks)
+      if (contentEncoding !== 'gzip') {
+        finish(null, body.toString('utf8'))
+        return
+      }
+      gunzip(body, { maxOutputLength: limit }, (error, decoded) => {
+        if (error) {
+          const tooLarge = error?.code === 'ERR_BUFFER_TOO_LARGE'
+          finish(tooLarge
+            ? bodyError(
+                '请求体超过大小限制',
+                'BODY_TOO_LARGE',
+                413,
+              )
+            : bodyError(
+                '请求体解压失败',
+                'BODY_DECOMPRESSION_FAILED',
+                400,
+              ))
+          return
+        }
+        if (decoded.length > limit) {
+          finish(bodyError(
+            '请求体超过大小限制',
+            'BODY_TOO_LARGE',
+            413,
+          ))
+          return
+        }
+        finish(null, decoded.toString('utf8'))
+      })
+    }
     const onAborted = () => finish(
       bodyError('请求在读取完成前中止', 'BODY_ABORTED', 400),
     )

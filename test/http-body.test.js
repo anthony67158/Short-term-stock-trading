@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { PassThrough, Readable } from 'node:stream'
+import { gzipSync } from 'node:zlib'
 
 import {
   accountRequestBodyLimit,
@@ -71,4 +72,42 @@ test('未结束请求在读取超时后失败而不是永久占用连接', async
     ),
   )
   req.destroy()
+})
+
+test('gzip请求体按解压后的JSON读取', async () => {
+  const text = JSON.stringify({
+    action: 'save',
+    data: { note: '同步内容'.repeat(1000) },
+  })
+  const body = gzipSync(Buffer.from(text))
+  const req = Readable.from([body])
+  req.headers = {
+    'content-encoding': 'gzip',
+    'content-length': String(body.length),
+  }
+
+  assert.equal(
+    await readRequestBody(req, {
+      maxBytes: Buffer.byteLength(text),
+    }),
+    text,
+  )
+})
+
+test('gzip请求体解压后超过限制时返回413', async () => {
+  const body = gzipSync(Buffer.from('x'.repeat(4096)))
+  const req = Readable.from([body])
+  req.headers = {
+    'content-encoding': 'gzip',
+    'content-length': String(body.length),
+  }
+
+  await assert.rejects(
+    () => readRequestBody(req, { maxBytes: 1024 }),
+    (error) => (
+      error instanceof RequestBodyError
+      && error.statusCode === 413
+      && error.code === 'BODY_TOO_LARGE'
+    ),
+  )
 })
