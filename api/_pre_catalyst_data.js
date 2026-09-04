@@ -25,6 +25,20 @@ const CNINFO_URL =
 const CNINFO_REFERER = 'https://www.cninfo.com.cn/'
 const MAX_RELEVANT_EVENTS = 16
 const MAX_RELATIONS_PER_EVENT = 4
+const EVENT_SEARCH_KEYS = Object.freeze([
+  '中标',
+  '重大合同',
+  '重大订单',
+  '投产',
+  '量产',
+  '产品注册证',
+  '回购',
+  '增持',
+  '业绩预增',
+  '扭亏',
+  '控制权变更',
+  '重组',
+])
 
 function finite(value) {
   if (value == null || value === '' || value === '-') return null
@@ -48,27 +62,37 @@ async function fetchJsonWithTimeout(
   options,
   timeoutMs,
 ) {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), timeoutMs)
-  try {
-    const response = await fetchImpl(url, {
-      ...options,
-      signal: controller.signal,
-    })
-    if (!response?.ok) {
-      throw new Error(`巨潮资讯HTTP ${response?.status || 0}`)
+  let latestError
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), timeoutMs)
+    try {
+      const response = await fetchImpl(url, {
+        ...options,
+        signal: controller.signal,
+      })
+      if (!response?.ok) {
+        throw new Error(`巨潮资讯HTTP ${response?.status || 0}`)
+      }
+      return await response.json()
+    } catch (error) {
+      latestError = error
+      if (attempt === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 250))
+      }
+    } finally {
+      clearTimeout(timeout)
     }
-    return await response.json()
-  } finally {
-    clearTimeout(timeout)
   }
+  throw latestError
 }
 
 export async function fetchCninfoAnnouncements({
   now = Date.now(),
-  lookbackDays = 4,
+  lookbackDays = 1,
   pageSize = 100,
-  pageLimit = 8,
+  pageLimit = 40,
+  searchKey = '',
   fetchImpl = fetch,
   timeoutMs = 10_000,
 } = {}) {
@@ -76,13 +100,14 @@ export async function fetchCninfoAnnouncements({
   const startDate = dayOffset(timestamp, lookbackDays)
   const endDate = beijingDayKey(timestamp)
   const size = clamp(pageSize, 1, 100)
-  const maxPages = clamp(pageLimit, 1, 10)
+  const maxPages = clamp(pageLimit, 1, 80)
   const events = new Map()
   let total = Infinity
+  let received = 0
 
   for (
     let pageNum = 1;
-    pageNum <= maxPages && events.size < total;
+    pageNum <= maxPages && received < total;
     pageNum += 1
   ) {
     const body = new URLSearchParams({
@@ -92,7 +117,7 @@ export async function fetchCninfoAnnouncements({
       tabName: 'fulltext',
       plate: '',
       stock: '',
-      searchkey: '',
+      searchkey: String(searchKey || '').slice(0, 60),
       secid: '',
       category: '',
       trade: '',
@@ -128,13 +153,14 @@ export async function fetchCninfoAnnouncements({
     const rows = Array.isArray(payload?.announcements)
       ? payload.announcements
       : []
+    received += rows.length
     for (const row of rows) {
       const event = normalizePreCatalystAnnouncement(row, {
         now: timestamp,
       })
       if (event) events.set(event.eventId, event)
     }
-    if (rows.length < size) break
+    if (!rows.length) break
   }
   return [...events.values()]
 }
@@ -153,6 +179,28 @@ async function mapLimit(items, concurrency, mapper) {
   )
   await Promise.all(workers)
   return output
+}
+
+export async function fetchPreCatalystAnnouncements({
+  now = Date.now(),
+  fetchAnnouncements = fetchCninfoAnnouncements,
+} = {}) {
+  const batches = await mapLimit(
+    EVENT_SEARCH_KEYS,
+    3,
+    (searchKey) => fetchAnnouncements({
+      now,
+      lookbackDays: 1,
+      pageLimit: searchKey === '回购' ? 6 : 3,
+      searchKey,
+    }).catch(() => []),
+  )
+  return [...new Map(
+    batches
+      .flat()
+      .filter((item) => item?.eventId)
+      .map((item) => [item.eventId, item]),
+  ).values()]
 }
 
 function rankPercentiles(rows, key) {
@@ -236,10 +284,90 @@ function normalizedEvent(raw, previousById, now) {
     : event
 }
 
+function institutionalVisitSignals(rows = [], now = Date.now()) {
+  const recentSince = Number(now) - 20 * 86400000
+  const baselineSince = Number(now) - 90 * 86400000
+  const grouped = new Map()
+  for (const event of rows) {
+    if (
+      event?.eventType !== 'INSTITUTION_VISIT'
+      || !(Number(event.publishedAt) >= baselineSince)
+    ) continue
+    const list = grouped.get(event.code) || []
+    list.push(event)
+    grouped.set(event.code, list)
+  }
+  const signals = new Map()
+  for (const [code, list] of grouped.entries()) {
+    const recent = list.filter(
+      (item) => Number(item.publishedAt) >= recentSince,
+    )
+    const baseline = list.length - recent.length
+    const expectedRecent = baseline / 70 * 20
+    const abnormalCount = Math.max(0, recent.length - expectedRecent)
+    if (recent.length < 2 || abnormalCount < 1) continue
+    const latest = [...recent].sort(
+      (left, right) =>
+        Number(right.publishedAt) - Number(left.publishedAt),
+    )[0]
+    signals.set(code, {
+      latest,
+      recentCount: recent.length,
+      baselineCount: baseline,
+      abnormalCount: +abnormalCount.toFixed(2),
+    })
+  }
+  return signals
+}
+
+function externalLeads(searchResult, quotes = [], now = Date.now()) {
+  const names = quotes
+    .filter((item) =>
+      item?.code
+      && String(item?.name || '').trim().length >= 3
+    )
+    .map((item) => ({
+      code: String(item.code),
+      name: String(item.name).trim(),
+    }))
+  const leads = []
+  for (const item of (Array.isArray(searchResult?.items)
+    ? searchResult.items
+    : [])) {
+    const title = String(item?.title || '').replace(/\s+/g, ' ').trim()
+    const summary = String(item?.summary || '').replace(/\s+/g, ' ').trim()
+    const matched = names.find((stock) =>
+      title.includes(stock.name)
+      || summary.includes(stock.name)
+      || title.includes(stock.code)
+    )
+    if (!matched || !/^https:\/\//.test(String(item?.url || ''))) continue
+    leads.push({
+      leadId: `NEWS:${matched.code}:${Number(now)}:${leads.length}`,
+      code: matched.code,
+      name: matched.name,
+      title: title.slice(0, 180),
+      summary: summary.slice(0, 320),
+      source: String(item?.src || '联网检索').slice(0, 80),
+      sourceUrl: String(item.url).slice(0, 500),
+      publishedAt: String(item?.date || '').slice(0, 30),
+      verified: false,
+      status: 'PENDING_OFFICIAL_CONFIRMATION',
+    })
+    if (leads.length >= 20) break
+  }
+  return leads
+}
+
 export async function collectPreCatalystSnapshot({
   now = Date.now(),
   fetchAnnouncements = (options) =>
-    fetchCninfoAnnouncements(options),
+    fetchPreCatalystAnnouncements(options),
+  fetchInstitutionVisits = async () => [],
+  fetchDiscoverySearch = async () => ({
+    enabled: false,
+    items: [],
+  }),
   fetchUniverse = fetchTailPickRealtimePool,
   fetchTags = fetchStockTagProfile,
   fetchSectorMembers: fetchMembers = fetchSectorMembers,
@@ -249,9 +377,17 @@ export async function collectPreCatalystSnapshot({
   onProgress = async () => {},
 } = {}) {
   const timestamp = Number(now) || Date.now()
-  const [rawAnnouncements, universe, relationConfig] =
+  const [
+    rawAnnouncements,
+    rawVisits,
+    discoverySearch,
+    universe,
+    relationConfig,
+  ] =
     await Promise.all([
       fetchAnnouncements({ now: timestamp }),
+      fetchInstitutionVisits({ now: timestamp }),
+      fetchDiscoverySearch({ now: timestamp }),
       fetchUniverse({ now: timestamp }),
       readRelations(),
     ])
@@ -260,9 +396,11 @@ export async function collectPreCatalystSnapshot({
     percent: 30,
     message: '正在筛选有效事件并核对完整市场',
   })
-  const quotes = Array.isArray(universe?.list)
-    ? universe.list
-    : []
+  const quotes = Array.isArray(universe?.allList)
+    ? universe.allList
+    : Array.isArray(universe?.list)
+      ? universe.list
+      : []
   if (
     Number(universe?.total) <= 0
     || Number(universe?.inspectedCount) !== Number(universe?.total)
@@ -282,11 +420,41 @@ export async function collectPreCatalystSnapshot({
       .filter((item) => item?.eventId)
       .map((item) => [String(item.eventId), item]),
   )
-  const events = (Array.isArray(rawAnnouncements)
+  const normalizedAnnouncements = (Array.isArray(rawAnnouncements)
     ? rawAnnouncements
     : [])
     .map((item) => normalizedEvent(item, previousById, timestamp))
     .filter(Boolean)
+  const normalizedVisits = (Array.isArray(rawVisits) ? rawVisits : [])
+    .map((item) => normalizedEvent(item, previousById, timestamp))
+    .filter(Boolean)
+  const visitSignals = institutionalVisitSignals(
+    normalizedVisits,
+    timestamp,
+  )
+  const eventMap = new Map(
+    normalizedAnnouncements.map((item) => [item.eventId, item]),
+  )
+  for (const signal of visitSignals.values()) {
+    const event = signal.latest
+    if (!event?.eventId) continue
+    eventMap.set(event.eventId, {
+      ...event,
+      eligible: true,
+      materialityScore: clamp(
+        Number(event.materialityScore || 58)
+          + signal.abnormalCount * 5,
+        0,
+        85,
+      ),
+      institutionVisit: {
+        recentCount: signal.recentCount,
+        baselineCount: signal.baselineCount,
+        abnormalCount: signal.abnormalCount,
+      },
+    })
+  }
+  const events = [...eventMap.values()]
     .sort((left, right) =>
       Number(right.publishedAt || 0) - Number(left.publishedAt || 0)
       || String(left.eventId).localeCompare(String(right.eventId))
@@ -449,6 +617,7 @@ export async function collectPreCatalystSnapshot({
     .filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value))
     .sort()
     .at(-1) || beijingDayKey(timestamp)
+  const leads = externalLeads(discoverySearch, quotes, timestamp)
   return {
     schemaVersion: PRE_CATALYST_SCHEMA_VERSION,
     status: 'READY',
@@ -476,8 +645,11 @@ export async function collectPreCatalystSnapshot({
         (item) => item.relation.type !== 'DIRECT',
       ).length,
       eligibleCandidates: candidates.length,
+      institutionalSignals: visitSignals.size,
+      externalLeads: leads.length,
     },
     events: events.slice(0, 300),
+    leads,
     candidates,
   }
 }

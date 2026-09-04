@@ -8,13 +8,48 @@ import {
 } from './_lib.js'
 import {
   collectPreCatalystSnapshot,
+  fetchCninfoAnnouncements,
 } from './_pre_catalyst_data.js'
+import {
+  fetchAiSearchReference,
+} from './_ai_search.js'
 import {
   preCatalystStore,
 } from './_pre_catalyst_store.js'
+import {
+  hydratePreCatalystForecasts,
+} from '../shared/preCatalystEvaluation.js'
 
 const runFlights = new Map()
 const REUSE_MS = 10 * 60 * 1000
+const DISCOVERY_QUERY =
+  'A股 最新 重大订单 中标 量产 机构调研 产业政策 供需变化'
+
+function collectProductionSnapshot(options = {}) {
+  return collectPreCatalystSnapshot({
+    ...options,
+    fetchInstitutionVisits: ({ now }) =>
+      fetchCninfoAnnouncements({
+        now,
+        lookbackDays: 90,
+        pageLimit: 6,
+        searchKey: '投资者关系活动记录表',
+      }),
+    fetchDiscoverySearch: ({ now }) =>
+      fetchAiSearchReference({
+        query: DISCOVERY_QUERY,
+        cacheScope: 'pre-catalyst',
+        cacheKey: beijingSearchKey(now),
+        cacheMinutes: 30,
+      }),
+  })
+}
+
+function beijingSearchKey(now) {
+  return `scan-${Math.floor(
+    (Number(now) || Date.now()) / (30 * 60 * 1000),
+  )}`
+}
 
 function reply(res, status, body) {
   res.status(status)
@@ -40,7 +75,7 @@ function publicError(error) {
 
 export function runPreCatalystScan({
   store = preCatalystStore,
-  collect = collectPreCatalystSnapshot,
+  collect = collectProductionSnapshot,
   force = false,
   now = Date.now,
 } = {}) {
@@ -88,12 +123,17 @@ export function runPreCatalystScan({
     }
     try {
       await store.saveProgress(baseTask)
-      const snapshot = await collect({
+      const collected = await collect({
         now: timestamp,
         previous,
         readRelations: () => store.readRelations(),
         onProgress: report,
       })
+      const evaluation = await store.readEvaluation()
+      const snapshot = hydratePreCatalystForecasts(
+        collected,
+        evaluation,
+      )
       await store.saveSnapshot(snapshot)
       const completed = {
         ...task,
@@ -139,7 +179,11 @@ export async function readPreCatalystState(
     store.readProgress(),
     store.readEvaluation(),
   ])
-  return { latest, task, evaluation }
+  return {
+    latest: hydratePreCatalystForecasts(latest, evaluation),
+    task,
+    evaluation,
+  }
 }
 
 export default async function handler(req, res) {

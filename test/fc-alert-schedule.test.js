@@ -65,6 +65,7 @@ test('板块前瞻每五分钟唤醒且具体时间由OSS设置决定', () => {
 test('机会雷达在收盘后独立结算且不占用LLM定时任务', () => {
   const config = read('s.yaml')
   const server = read('server.js')
+  const settlement = read('api/cron_opportunity_radar.js')
 
   assert.ok(
     config.includes(
@@ -79,6 +80,7 @@ test('机会雷达在收盘后独立结算且不占用LLM定时任务', () => {
     server,
     /opportunityRadarBody[\s\S]*'cron_opportunity_radar'/,
   )
+  assert.match(settlement, /settlePreCatalystOutcomes/)
 })
 
 test('预催化事件在盘前盘中和收盘后使用独立低频扫描', () => {

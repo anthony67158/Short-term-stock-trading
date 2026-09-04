@@ -8,6 +8,9 @@ import {
 import {
   refreshOpportunityRadarBaseline,
 } from './_opportunity_radar_baseline.js'
+import {
+  settlePreCatalystOutcomes,
+} from './_pre_catalyst_settlement.js'
 
 function reply(res, body, status = 200) {
   applyCors(res)
@@ -28,9 +31,27 @@ export default async function handler(req, res) {
     return reply(res, { ok: false, error: 'unauthorized' }, 401)
   }
   try {
-    const settlement = await settleOpportunityRadarOutcomes()
+    const [settlementResult, preCatalystResult] =
+      await Promise.allSettled([
+        settleOpportunityRadarOutcomes(),
+        settlePreCatalystOutcomes(),
+      ])
+    if (settlementResult.status === 'rejected') {
+      throw settlementResult.reason
+    }
     const baseline = await refreshOpportunityRadarBaseline()
-    return reply(res, { ok: true, settlement, baseline })
+    return reply(res, {
+      ok: true,
+      settlement: settlementResult.value,
+      preCatalystSettlement:
+        preCatalystResult.status === 'fulfilled'
+          ? preCatalystResult.value
+          : {
+              ok: false,
+              error: '预催化结果暂未完成结算',
+            },
+      baseline,
+    })
   } catch (error) {
     console.error(
       '[cron_opportunity_radar] settlement failed',

@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 import {
   collectPreCatalystSnapshot,
@@ -14,6 +15,10 @@ import {
 } from '../api/pre_catalyst.js'
 
 const now = Date.parse('2026-09-04T19:00:00+08:00')
+const routeSource = readFileSync(
+  new URL('../api/pre_catalyst.js', import.meta.url),
+  'utf8',
+)
 
 function candles(base = 10) {
   return Array.from({ length: 24 }, (_, index) => ({
@@ -136,7 +141,8 @@ test('预催化扫描从公告主体扩展到同题材低拥挤股票', async ()
     fetchUniverse: async () => ({
       total: universe.length,
       inspectedCount: universe.length,
-      list: universe,
+      allList: universe,
+      list: [universe[0]],
     }),
     fetchTags: async (code) => code === '300001'
       ? {
@@ -180,6 +186,102 @@ test('预催化扫描从公告主体扩展到同题材低拥挤股票', async ()
       .relation.type,
     'CONCEPT_PEER',
   )
+})
+
+test('机构调研只有近期频次显著异常时才进入事件候选', async () => {
+  const quote = {
+    code: '300010',
+    name: '调研科技',
+    price: 10,
+    pct: 0.3,
+    amount: 100_000_000,
+    turnover: 1.8,
+    volumeRatio: 1.1,
+    mainInflow: 4_000_000,
+    mainRatio: 1.2,
+    tradeDate: '2026-09-04',
+  }
+  const visit = (id, daysAgo) => ({
+    announcementId: id,
+    secCode: quote.code,
+    secName: quote.name,
+    announcementTitle: '投资者关系活动记录表',
+    announcementTime: now - daysAgo * 86400000,
+    adjunctUrl: `finalpage/2026-09-04/${id}.PDF`,
+  })
+  const snapshot = await collectPreCatalystSnapshot({
+    now,
+    fetchAnnouncements: async () => [],
+    fetchInstitutionVisits: async () => [
+      visit('1225000010', 2),
+      visit('1225000011', 7),
+      visit('1225000012', 55),
+    ],
+    fetchUniverse: async () => ({
+      total: 1,
+      inspectedCount: 1,
+      list: [quote],
+    }),
+    fetchTags: async () => ({
+      industry: '软件开发',
+      concepts: [],
+      conceptBoards: [],
+    }),
+    fetchSectorMembers: async () => [],
+    fetchKline: async () => ({ candles: candles(10) }),
+    readRelations: async () => ({ edges: [] }),
+  })
+
+  assert.equal(snapshot.counts.institutionalSignals, 1)
+  assert.equal(snapshot.counts.relevantEvents, 1)
+  assert.equal(
+    snapshot.candidates[0].event.eventType,
+    'INSTITUTION_VISIT',
+  )
+})
+
+test('联网新闻只保存待核验线索且不能直接生成候选', async () => {
+  const quote = {
+    code: '300020',
+    name: '线索股份',
+    price: 12,
+    pct: 0.1,
+    amount: 80_000_000,
+    turnover: 1.5,
+    volumeRatio: 1,
+    mainInflow: 0,
+    mainRatio: 0,
+    tradeDate: '2026-09-04',
+  }
+  const snapshot = await collectPreCatalystSnapshot({
+    now,
+    fetchAnnouncements: async () => [],
+    fetchInstitutionVisits: async () => [],
+    fetchDiscoverySearch: async () => ({
+      enabled: true,
+      items: [{
+        title: '线索股份获得重要订单',
+        summary: '市场消息称公司可能获得订单',
+        url: 'https://news.example.com/a',
+        src: '联网检索',
+        date: '2026-09-04',
+      }],
+    }),
+    fetchUniverse: async () => ({
+      total: 1,
+      inspectedCount: 1,
+      list: [quote],
+    }),
+    readRelations: async () => ({ edges: [] }),
+  })
+
+  assert.equal(snapshot.leads.length, 1)
+  assert.equal(snapshot.leads[0].verified, false)
+  assert.equal(
+    snapshot.leads[0].status,
+    'PENDING_OFFICIAL_CONFIRMATION',
+  )
+  assert.equal(snapshot.candidates.length, 0)
 })
 
 test('预催化快照在OSS保存最新版本和不可变运行记录', async () => {
@@ -233,6 +335,7 @@ test('预催化扫描先写运行态并在完成后发布快照', async () => {
     now: () => now,
     store: {
       readLatest: async () => null,
+      readEvaluation: async () => null,
       readRelations: async () => ({ edges: [] }),
       claimRun: async () => ({
         acquired: true,
@@ -254,4 +357,12 @@ test('预催化扫描先写运行态并在完成后发布快照', async () => {
   assert.equal(progress[0].status, 'RUNNING')
   assert.equal(progress.at(-1).status, 'DONE')
   assert.equal(released, true)
+})
+
+test('预催化接口区分账号请求和内部定时鉴权', () => {
+  assert.match(routeSource, /authenticateAccountRequest/)
+  assert.match(routeSource, /authorizePaidRequest/)
+  assert.match(routeSource, /process\.env\.CRON_KEY/)
+  assert.match(routeSource, /errorCode: 'PRE_CATALYST_SOURCE_UNAVAILABLE'/)
+  assert.doesNotMatch(routeSource, /apiKey/)
 })

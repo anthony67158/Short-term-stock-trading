@@ -345,6 +345,16 @@ export function buildPreCatalystCandidate({
 
   const contract = priceContract(quote, candles, now)
   if (!contract) return null
+  const dailyRows = normalizeCandles(candles)
+  const signalTradeDate = text(quote.tradeDate, 16)
+  const baselineDailyAmount = average(
+    dailyRows
+      .filter((item) =>
+        !signalTradeDate || item.date < signalTradeDate
+      )
+      .slice(-5)
+      .map((item) => item.amount),
+  )
   const relationLabel = relation.type === 'DIRECT'
     ? '公告主体'
     : relation.type === 'MENTIONED_COMPANY'
@@ -409,6 +419,11 @@ export function buildPreCatalystCandidate({
       pActivation3d: null,
       pOutperform5d: null,
       sampleCount: 0,
+    },
+    evaluationContext: {
+      signalTradeDate,
+      decisionPrice: round(price),
+      baselineDailyAmount: round(baselineDailyAmount, 0),
     },
     score: activationScore,
     opportunityScore: null,
