@@ -129,9 +129,9 @@ export default function OpportunityCandidateRow({
             className="opportunity-model-signal"
             data-state={modelReady ? 'ready' : 'pending'}
           >
-            <Icon name={modelReady ? 'chart' : 'clock'} size={12} />
             {modelReady ? (
               <>
+                <Icon name="chart" size={12} />
                 <span>成交率 {probabilityPct(modelScore.pFill)}</span>
                 <span>
                   净盈利率 {probabilityPct(modelScore.pWinGivenFill)}
@@ -139,7 +139,10 @@ export default function OpportunityCandidateRow({
                 <span>期望 {expectedR(modelScore.expectedNetR)}</span>
               </>
             ) : (
-              <span>排序模型样本仍在积累，不影响当前公式结论</span>
+              <span className="opportunity-model-pending">
+                <Icon name="clock" size={12} />
+                <span>排序模型样本仍在积累，不影响当前公式结论</span>
+              </span>
             )}
           </div>
         )}

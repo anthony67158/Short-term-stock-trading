@@ -17316,6 +17316,23 @@ html[data-theme="light"] .nav {
   flex: none;
 }
 
+.opportunity-context .opportunity-model-pending {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-2xs);
+  width: 100%;
+  min-width: 0;
+}
+
+.opportunity-model-pending > .icon {
+  margin-top: 2px;
+}
+
+.opportunity-model-pending > span {
+  min-width: 0;
+}
+
 .opportunity-context p {
   margin: var(--space-3xs) 0 0;
   color: var(--color-ink-2);

@@ -56,6 +56,11 @@ test('机会候选同时展示入场仓位和完整退出计划', () => {
   assert.match(opportunityUi, /成交率/)
   assert.match(opportunityUi, /净盈利率/)
   assert.match(opportunityUi, /样本仍在积累/)
+  assert.match(candidate, /className="opportunity-model-pending"/)
+  assert.match(
+    styles,
+    /\.opportunity-context \.opportunity-model-pending\s*\{[\s\S]*grid-template-columns:\s*12px minmax\(0,\s*1fr\)/,
+  )
 })
 
 test('尾盘严格与接近公式在盘中页使用独立区段展示', () => {

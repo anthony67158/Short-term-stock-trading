@@ -3,6 +3,10 @@
   margin: 32px auto;
 }
 
+.opportunity-preview .opportunity-model-signal[data-state="pending"] {
+  max-width: 150px;
+}
+
 @media (max-width: 520px) {
   .opportunity-preview {
     width: 100%;
