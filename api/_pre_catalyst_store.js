@@ -1,9 +1,11 @@
 import {
+  del,
   hasStorage,
   list,
   put,
   readJson,
 } from './_blob.js'
+import { randomUUID } from 'node:crypto'
 
 export const PRE_CATALYST_PREFIX = 'market/pre-catalyst/v1/'
 
@@ -14,7 +16,9 @@ const memory = {
   runs: new Map(),
   outcomes: new Map(),
   evaluation: null,
+  claim: null,
 }
+const CLAIM_TTL_MS = 10 * 60 * 1000
 
 function safeDate(value) {
   const date = String(value || '')
@@ -46,6 +50,7 @@ function isConflict(error) {
 }
 
 export function createPreCatalystStore(storage = {
+  del,
   hasStorage,
   list,
   put,
@@ -94,6 +99,50 @@ export function createPreCatalystStore(storage = {
         return progress
       }
       return write(`${PRE_CATALYST_PREFIX}runtime.json`, progress)
+    },
+    async claimRun(now = Date.now()) {
+      const timestamp = Number(now) || Date.now()
+      const owner = randomUUID()
+      const path = `${PRE_CATALYST_PREFIX}run.lock`
+      if (!storage.hasStorage()) {
+        if (
+          memory.claim
+          && timestamp - Number(memory.claim.claimedAt) < CLAIM_TTL_MS
+        ) return { acquired: false, path: '', owner: '' }
+        memory.claim = { owner, claimedAt: timestamp }
+        return { acquired: true, path: '', owner }
+      }
+      const payload = { owner, claimedAt: timestamp }
+      try {
+        await write(path, payload, { forbidOverwrite: true })
+        return { acquired: true, path, owner }
+      } catch (error) {
+        if (!isConflict(error)) throw error
+        const current = await storage.readJson(path).catch(() => null)
+        if (
+          current?.claimedAt
+          && timestamp - Number(current.claimedAt) < CLAIM_TTL_MS
+        ) return { acquired: false, path, owner: '' }
+        await storage.del(path)
+        try {
+          await write(path, payload, { forbidOverwrite: true })
+          return { acquired: true, path, owner }
+        } catch {
+          return { acquired: false, path, owner: '' }
+        }
+      }
+    },
+    async releaseRun(claim) {
+      if (!claim?.acquired) return false
+      if (!storage.hasStorage()) {
+        if (memory.claim?.owner !== claim.owner) return false
+        memory.claim = null
+        return true
+      }
+      const current = await storage.readJson(claim.path).catch(() => null)
+      if (current?.owner !== claim.owner) return false
+      await storage.del(claim.path)
+      return true
     },
     async readRelations() {
       if (!storage.hasStorage()) return memory.relations

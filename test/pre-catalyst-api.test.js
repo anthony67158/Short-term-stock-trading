@@ -9,6 +9,9 @@ import {
   createPreCatalystStore,
   PRE_CATALYST_PREFIX,
 } from '../api/_pre_catalyst_store.js'
+import {
+  runPreCatalystScan,
+} from '../api/pre_catalyst.js'
 
 const now = Date.parse('2026-09-04T19:00:00+08:00')
 
@@ -214,4 +217,41 @@ test('预催化快照在OSS保存最新版本和不可变运行记录', async ()
       path.startsWith(`${PRE_CATALYST_PREFIX}runs/2026-09-04/`),
     ),
   )
+})
+
+test('预催化扫描先写运行态并在完成后发布快照', async () => {
+  const progress = []
+  let saved = null
+  let released = false
+  const snapshot = {
+    schemaVersion: 'pre-catalyst.v1',
+    tradeDate: '2026-09-04',
+    generatedAt: now,
+    candidates: [{ code: '300001' }],
+  }
+  const result = await runPreCatalystScan({
+    now: () => now,
+    store: {
+      readLatest: async () => null,
+      readRelations: async () => ({ edges: [] }),
+      claimRun: async () => ({
+        acquired: true,
+        owner: 'owner-1',
+      }),
+      releaseRun: async () => { released = true },
+      saveProgress: async (value) => { progress.push(value) },
+      saveSnapshot: async (value) => { saved = value },
+    },
+    collect: async ({ previous, readRelations }) => {
+      assert.equal(previous, null)
+      assert.deepEqual(await readRelations(), { edges: [] })
+      return snapshot
+    },
+  })
+
+  assert.equal(result.ok, true)
+  assert.equal(saved, snapshot)
+  assert.equal(progress[0].status, 'RUNNING')
+  assert.equal(progress.at(-1).status, 'DONE')
+  assert.equal(released, true)
 })

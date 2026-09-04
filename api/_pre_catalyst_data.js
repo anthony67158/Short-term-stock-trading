@@ -246,6 +246,7 @@ export async function collectPreCatalystSnapshot({
   fetchKline = fetchKlineTx,
   readRelations = async () => ({ edges: [] }),
   previous = null,
+  onProgress = async () => {},
 } = {}) {
   const timestamp = Number(now) || Date.now()
   const [rawAnnouncements, universe, relationConfig] =
@@ -254,6 +255,11 @@ export async function collectPreCatalystSnapshot({
       fetchUniverse({ now: timestamp }),
       readRelations(),
     ])
+  await onProgress({
+    stage: 'EVENTS',
+    percent: 30,
+    message: '正在筛选有效事件并核对完整市场',
+  })
   const quotes = Array.isArray(universe?.list)
     ? universe.list
     : []
@@ -299,6 +305,11 @@ export async function collectPreCatalystSnapshot({
   await mapLimit(relevant, 4, async (event) => {
     const tags = await fetchTags(event.code).catch(() => null)
     if (tags) tagsByCode.set(event.code, tags)
+  })
+  await onProgress({
+    stage: 'RELATIONS',
+    percent: 52,
+    message: '正在扩展产业关系与低关注候选',
   })
 
   const references = new Map()
@@ -424,6 +435,11 @@ export async function collectPreCatalystSnapshot({
       })
     },
   )
+  await onProgress({
+    stage: 'SCORING',
+    percent: 88,
+    message: '正在计算未定价程度、资金试探和拥挤风险',
+  })
   const candidates = rankPreCatalystCandidates(
     candidateRows.filter(Boolean),
     { limit: 20, maxPerConcept: 2 },
