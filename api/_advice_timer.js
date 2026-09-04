@@ -80,6 +80,16 @@ export function opportunityRadarTimerBody(event, cronKey) {
   return { scheduled: true };
 }
 
+export function preCatalystTimerBody(event, cronKey) {
+  if (!cronKey || !event || typeof event !== 'object') return null;
+  if (![
+    'pre-catalyst-scan-timer',
+    'pre-catalyst-close-timer',
+  ].includes(String(event.triggerName || ''))) return null;
+  if (String(event.payload || '') !== String(cronKey)) return null;
+  return { scheduled: true };
+}
+
 export function sectorForecastTimerBody(event, cronKey) {
   if (!cronKey || !event || typeof event !== 'object') return null;
   if (event.triggerName !== 'sector-forecast-due-timer') return null;

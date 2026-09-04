@@ -9,6 +9,7 @@ import {
   dailyReportWorkerBody,
   formulaSelectionTimerBody,
   opportunityRadarTimerBody,
+  preCatalystTimerBody,
   reviewTimerBody,
   sectorForecastTimerBody,
   tailPickTimerBody,
@@ -53,6 +54,23 @@ test('机会雷达结算只接受收盘后专用触发器和匹配密钥', () =>
   )
   assert.equal(opportunityRadarTimerBody(event, 'wrong-key'), null)
   assert.equal(opportunityRadarTimerBody({
+    ...event,
+    triggerName: 'other',
+  }, 'secret-key'), null)
+})
+
+test('预催化扫描只接受专用触发器和匹配密钥', () => {
+  const event = {
+    triggerName: 'pre-catalyst-scan-timer',
+    payload: 'secret-key',
+  }
+
+  assert.deepEqual(
+    preCatalystTimerBody(event, 'secret-key'),
+    { scheduled: true },
+  )
+  assert.equal(preCatalystTimerBody(event, 'wrong-key'), null)
+  assert.equal(preCatalystTimerBody({
     ...event,
     triggerName: 'other',
   }, 'secret-key'), null)

@@ -81,6 +81,24 @@ test('机会雷达在收盘后独立结算且不占用LLM定时任务', () => {
   )
 })
 
+test('预催化事件在盘前盘中和收盘后使用独立低频扫描', () => {
+  const config = read('s.yaml')
+  const server = read('server.js')
+
+  assert.ok(config.includes('- triggerName: pre-catalyst-scan-timer'))
+  assert.ok(config.includes(
+    'cronExpression: "CRON_TZ=Asia/Shanghai 0 0,30 9-14 * * 1-5"',
+  ))
+  assert.ok(config.includes(
+    '- triggerName: pre-catalyst-close-timer',
+  ))
+  assert.ok(config.includes(
+    'cronExpression: "CRON_TZ=Asia/Shanghai 0 30 18 * * 1-5"',
+  ))
+  assert.match(server, /preCatalystTimerBody\(/)
+  assert.match(server, /preCatalystBody[\s\S]*'pre_catalyst'/)
+})
+
 test('策略日报每五分钟检查账号计划并路由到独立日报Worker', () => {
   const config = read('s.yaml')
   const server = read('server.js')

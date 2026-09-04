@@ -24,6 +24,7 @@ import {
   opportunityRadarTimerBody,
   portfolioAnalysisTimerBody,
   portfolioAnalysisWorkerBody,
+  preCatalystTimerBody,
   reviewTimerBody,
   sectorForecastTimerBody,
   tailPickTimerBody,
@@ -346,6 +347,10 @@ async function handleRequest(req, res) {
       event,
       process.env.CRON_KEY,
     );
+    const preCatalystBody = preCatalystTimerBody(
+      event,
+      process.env.CRON_KEY,
+    );
     const alertBody = alertTimerBody(event, process.env.CRON_KEY);
     const reviewBody = reviewTimerBody(event, process.env.CRON_KEY);
     const sectorForecastBody = sectorForecastTimerBody(
@@ -369,6 +374,7 @@ async function handleRequest(req, res) {
       && !dailyReportBody
       && !v2Body
       && !opportunityRadarBody
+      && !preCatalystBody
       && !alertBody
       && !reviewBody
       && !sectorForecastBody
@@ -381,6 +387,7 @@ async function handleRequest(req, res) {
       || dailyReportBody
       || v2Body
       || opportunityRadarBody
+      || preCatalystBody
       || alertBody
       || reviewBody
       || sectorForecastBody
@@ -400,6 +407,8 @@ async function handleRequest(req, res) {
             ? 'cron_v2_accuracy'
             : opportunityRadarBody
               ? 'cron_opportunity_radar'
+              : preCatalystBody
+                ? 'pre_catalyst'
               : alertBody
                 ? 'cron_alert'
                 : reviewBody

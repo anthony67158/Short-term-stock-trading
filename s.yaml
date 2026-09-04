@@ -138,6 +138,19 @@ resources:
             cronExpression: "CRON_TZ=Asia/Shanghai 0 10 17 * * 1-5"
             enable: true
             payload: ${env('CRON_KEY')}
+        # 预催化发现：交易时段低频读取新增公告，收盘后补齐当日披露。
+        - triggerName: pre-catalyst-scan-timer
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 0,30 9-14 * * 1-5"
+            enable: true
+            payload: ${env('CRON_KEY')}
+        - triggerName: pre-catalyst-close-timer
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 30 18 * * 1-5"
+            enable: true
+            payload: ${env('CRON_KEY')}
         # 持仓自动复盘：每场分段重复触发，未完成股票按租约续跑，页面关闭也不丢任务。
         - triggerName: review-noon-open
           triggerType: timer
