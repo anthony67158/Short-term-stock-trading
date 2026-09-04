@@ -2500,7 +2500,7 @@ function HoldingList({ book, quote, stockTags, searchConfig, batchSel }) {
                   && /交易账本已更新/.test(String(it.phase || ''))
                 )
                   ? '账本更新·重排'
-                  : ({ pending: '排队中', queued: '排队中', running: '生成中', canceling: '取消中', ok: '已完成', fail: '失败', skipped: '已取消' }[st] || st)
+                  : ({ pending: '同步账本', queued: '排队中', running: '生成中', canceling: '取消中', ok: '已完成', fail: '失败', skipped: '已取消' }[st] || st)
                 const jumpable = st === 'running' || st === 'ok' || st === 'fail'
                 const visibleProgress = st === 'running' && (it.phase || it.reasoning || it.sources?.length || it.model)
                 return (
