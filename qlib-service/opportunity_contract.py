@@ -20,6 +20,13 @@ FEATURE_SCHEMA_VERSION = _CONTRACT["featureSchemaVersion"]
 SCORE_SCHEMA_VERSION = _CONTRACT["scoreSchemaVersion"]
 FEATURE_NAMES = tuple(_CONTRACT["featureNames"])
 _FEATURE_SET = frozenset(FEATURE_NAMES)
+_LEGACY_SCHEMA_VERSIONS = frozenset(
+    _CONTRACT.get("legacyFeatureSchemaVersions", ())
+)
+_LEGACY_DEFAULTS = frozenset(
+    _CONTRACT.get("legacyDefaultZeroFeatures", ())
+)
+_LEGACY_FEATURE_SET = _FEATURE_SET - _LEGACY_DEFAULTS
 _CODE = re.compile(r"^\d{6}$")
 
 
@@ -36,7 +43,11 @@ def _finite(value, label):
 def validate_score_item(item):
     if not isinstance(item, dict):
         raise ValueError("机会评分项目必须是对象")
-    if item.get("schemaVersion") != FEATURE_SCHEMA_VERSION:
+    schema_version = item.get("schemaVersion")
+    if (
+        schema_version != FEATURE_SCHEMA_VERSION
+        and schema_version not in _LEGACY_SCHEMA_VERSIONS
+    ):
         raise ValueError("机会评分特征版本无效")
     code = str(item.get("code") or "")
     if not _CODE.fullmatch(code):
@@ -45,10 +56,19 @@ def validate_score_item(item):
     if not formula_id or len(formula_id) > 60:
         raise ValueError("机会评分公式无效")
     factors = item.get("factors")
-    if not isinstance(factors, dict) or set(factors) != _FEATURE_SET:
+    expected_features = (
+        _FEATURE_SET
+        if schema_version == FEATURE_SCHEMA_VERSION
+        else _LEGACY_FEATURE_SET
+    )
+    if not isinstance(factors, dict) or set(factors) != expected_features:
         raise ValueError("机会评分特征字段不匹配")
     normalized = {
-        name: _finite(factors[name], "机会评分特征")
+        name: (
+            _finite(factors[name], "机会评分特征")
+            if name in factors
+            else 0.0
+        )
         for name in FEATURE_NAMES
     }
     as_of = int(_finite(item.get("asOf"), "机会评分时点"))

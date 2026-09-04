@@ -2,7 +2,6 @@ import { useState, useMemo } from 'react'
 import Icon from './Icon'
 import StockName from './StockName'
 import LimitPool from './LimitPool'
-import { usePolling } from '../hooks'
 import { planStore, usePlanStore } from '../planStore'
 import DailyReport from './DailyReport'
 import OpportunityRadar from './OpportunityRadar'
@@ -15,11 +14,22 @@ import {
 } from '../../shared/marketGuidance.js'
 
 // ============ 今日决策：先定方向，再核验个股 ============
-export default function TodayTab({ interval, market, sectors }) {
-  const zt = usePolling('/api/board?type=limitup&kind=zt', interval)
-  const zb = usePolling('/api/board?type=limitup&kind=zb', interval)
-  const movers = usePolling('/api/board?type=movers&kind=inflow', interval)
-  const speed = usePolling('/api/board?type=movers&kind=speed', interval)
+export default function TodayTab({
+  market,
+  sectors,
+  snapshot,
+  snapshotLoading,
+  snapshotError,
+}) {
+  const state = (key) => ({
+    data: snapshot?.[key] || null,
+    loading: snapshotLoading,
+    error: snapshot?.errors?.[key] || snapshotError,
+  })
+  const zt = state('limitUp')
+  const zb = state('brokenLimit')
+  const movers = state('movers')
+  const speed = state('speed')
 
   return (
     <div className="today">
@@ -37,7 +47,14 @@ export default function TodayTab({ interval, market, sectors }) {
         movers={movers.data}
         speed={speed.data}
       />
-      <LimitPool interval={interval} />
+      <LimitPool
+        dataByKind={{
+          zt: zt.data,
+          zb: zb.data,
+        }}
+        loading={snapshotLoading}
+        errors={snapshot?.errors}
+      />
     </div>
   )
 }

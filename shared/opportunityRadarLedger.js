@@ -1,6 +1,9 @@
 import {
   resolveAshareTradingRule,
 } from './priceLimitPolicy.js'
+import {
+  OPPORTUNITY_SHADOW_FEATURE_NAMES,
+} from './opportunityShadowFeatures.js'
 
 export const OPPORTUNITY_RADAR_LEDGER_SCHEMA_VERSION =
   'opportunity-radar-ledger.v1'
@@ -54,60 +57,74 @@ function safeSlot(value) {
 }
 
 function quoteProjection(value = {}) {
+  const source = value && typeof value === 'object' ? value : {}
   return {
-    price: finite(value.price),
-    preClose: finite(value.preClose ?? value.prevClose),
-    open: finite(value.open),
-    high: finite(value.high),
-    low: finite(value.low),
-    pct: finite(value.pct),
-    amount: finite(value.amount),
-    turnover: finite(value.turnover),
-    volumeRatio: finite(value.volumeRatio),
-    mainRatio: finite(value.mainRatio),
-    limitUpPrice: finite(value.limitUpPrice),
-    limitDownPrice: finite(value.limitDownPrice),
-    tradeDate: text(value.tradeDate, 10) || null,
+    price: finite(source.price),
+    preClose: finite(source.preClose ?? source.prevClose),
+    open: finite(source.open),
+    high: finite(source.high),
+    low: finite(source.low),
+    pct: finite(source.pct),
+    amount: finite(source.amount),
+    turnover: finite(source.turnover),
+    volumeRatio: finite(source.volumeRatio),
+    mainRatio: finite(source.mainRatio),
+    limitUpPrice: finite(source.limitUpPrice),
+    limitDownPrice: finite(source.limitDownPrice),
+    tradeDate: text(source.tradeDate, 10) || null,
   }
 }
 
 function formulaProjection(value = {}) {
+  const source = value && typeof value === 'object' ? value : {}
   return {
-    formulaId: text(value.formulaId, 60),
-    matched: value.matched === true,
-    score: finite(value.score),
-    priceType: text(value.priceType, 40) || null,
-    blockers: uniqueText(value.blockers),
+    formulaId: text(source.formulaId, 60),
+    matched: source.matched === true,
+    score: finite(source.score),
+    priceType: text(source.priceType, 40) || null,
+    blockers: uniqueText(source.blockers),
   }
 }
 
 function decisionProjection(value = {}) {
+  const source = value && typeof value === 'object' ? value : {}
   return {
-    action: text(value.action, 40),
-    formulaId: text(value.formulaId, 60) || null,
-    primaryPrice: finite(value.primaryPrice),
-    priceType: text(value.priceType, 40) || null,
-    stopPrice: finite(value.stopPrice),
-    targetPrice: finite(value.targetPrice),
-    riskReward: finite(value.riskReward),
-    validUntil: finite(value.validUntil),
+    action: text(source.action, 40),
+    formulaId: text(source.formulaId, 60) || null,
+    primaryPrice: finite(source.primaryPrice),
+    priceType: text(source.priceType, 40) || null,
+    stopPrice: finite(source.stopPrice),
+    targetPrice: finite(source.targetPrice),
+    riskReward: finite(source.riskReward),
+    validUntil: finite(source.validUntil),
     timeStopTradingDays: Math.max(
       1,
-      Math.trunc(finite(value.timeStopTradingDays) || 5),
+      Math.trunc(finite(source.timeStopTradingDays) || 5),
     ),
-    priceContractValid: value.priceContractValid === true,
-    marketAllowsRisk: value.marketAllowsRisk === true,
-    executionState: text(value.executionState, 40) || null,
+    priceContractValid: source.priceContractValid === true,
+    marketAllowsRisk: source.marketAllowsRisk === true,
+    executionState: text(source.executionState, 40) || null,
   }
 }
 
 function sectorProjection(value = {}) {
+  const source = value && typeof value === 'object' ? value : {}
   return {
-    code: text(value.code, 20),
-    name: text(value.name, 60),
-    phase: text(value.phase, 40) || null,
-    actionability: text(value.actionability, 40) || null,
+    code: text(source.code, 20),
+    name: text(source.name, 60),
+    phase: text(source.phase, 40) || null,
+    actionability: text(source.actionability, 40) || null,
   }
+}
+
+function shadowProjection(value = {}) {
+  const source = value && typeof value === 'object' ? value : {}
+  return Object.fromEntries(
+    OPPORTUNITY_SHADOW_FEATURE_NAMES.map((name) => [
+      name,
+      finite(source[name]) ?? 0,
+    ]),
+  )
 }
 
 function eventProjection(value, context) {
@@ -142,6 +159,7 @@ function eventProjection(value, context) {
     ),
     quote: quoteProjection(value?.quote),
     cheapScore: finite(value?.cheapScore),
+    shadowFeatures: shadowProjection(value?.shadowFeatures),
     formulaEvaluations: (
       Array.isArray(value?.formulaEvaluations)
         ? value.formulaEvaluations

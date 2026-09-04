@@ -183,7 +183,11 @@ function volumeComparisonContext(tradeDate, now = Date.now()) {
   }
 }
 
-export async function fetchMarketSnapshot() {
+export async function fetchMarketSnapshot({
+  limitUpPool,
+  limitDownPool,
+  brokenLimitPool,
+} = {}) {
   const idxSecids = '1.000001,0.399001,0.399006,0.899050';
   const idxFields = 'f2,f3,f4,f12,f14,f6,f104,f105,f106';
   const idxPath =
@@ -193,9 +197,15 @@ export async function fetchMarketSnapshot() {
   // 涨跌停必须用真实池；统一涨跌幅阈值会误判创业板和科创板。
   const [idxJson, ztPool, dtPool, zbPool, shK, szK] = await Promise.all([
     emGet(idxPath).catch(() => null),
-    fetchLimitPool('zt').catch(() => null),
-    fetchLimitPool('dt').catch(() => null),
-    fetchLimitPool('zb').catch(() => null),
+    Promise.resolve(
+      limitUpPool === undefined ? fetchLimitPool('zt') : limitUpPool,
+    ).catch(() => null),
+    Promise.resolve(
+      limitDownPool === undefined ? fetchLimitPool('dt') : limitDownPool,
+    ).catch(() => null),
+    Promise.resolve(
+      brokenLimitPool === undefined ? fetchLimitPool('zb') : brokenLimitPool,
+    ).catch(() => null),
     emGet(`/api/qt/stock/kline/get?secid=1.000001&fields1=f1&fields2=f51,f57&klt=101&fqt=1&end=20500101&lmt=6`, { his: true }).catch(() => null),
     emGet(`/api/qt/stock/kline/get?secid=0.399001&fields1=f1&fields2=f51,f57&klt=101&fqt=1&end=20500101&lmt=6`, { his: true }).catch(() => null),
   ]);

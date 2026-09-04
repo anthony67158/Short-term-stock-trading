@@ -16889,7 +16889,7 @@ html[data-theme="light"] .nav {
 
 .opportunity-radar-tabs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-3xs);
   padding: var(--space-2xs) var(--space-md);
   border-bottom: 1px solid var(--color-rule-2);
@@ -16969,6 +16969,110 @@ html[data-theme="light"] .nav {
   font-family: var(--font-mono);
   font-size: var(--text-base);
   font-weight: 750;
+}
+
+.opportunity-intraday-nav {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  padding: 1px 0;
+  border-bottom: 1px solid var(--color-rule-2);
+  background: var(--color-rule-2);
+}
+
+.opportunity-intraday-nav button {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--space-xs);
+  align-items: center;
+  min-width: 0;
+  min-height: 64px;
+  padding: var(--space-xs) var(--space-md);
+  border: 0;
+  border-radius: 0;
+  background: var(--color-paper-2);
+  color: var(--color-muted);
+  cursor: pointer;
+  text-align: start;
+}
+
+.opportunity-intraday-nav button::after {
+  position: absolute;
+  inset: auto var(--space-sm) 0;
+  height: 3px;
+  background: transparent;
+  content: "";
+}
+
+.opportunity-intraday-nav button:hover {
+  background: var(--color-paper-3);
+  color: var(--color-ink);
+}
+
+.opportunity-intraday-nav button.active {
+  background: var(--color-paper-3);
+  color: var(--color-ink);
+}
+
+.opportunity-intraday-nav button[data-mode="ready"].active::after {
+  background: var(--color-up);
+}
+
+.opportunity-intraday-nav button[data-mode="layout"].active::after {
+  background: var(--color-accent);
+}
+
+.opportunity-intraday-nav button[data-mode="tail"].active::after {
+  background: var(--color-warning);
+}
+
+.opportunity-intraday-nav button[data-mode="ready"].active > .icon {
+  color: var(--color-up);
+}
+
+.opportunity-intraday-nav button[data-mode="layout"].active > .icon {
+  color: var(--color-accent);
+}
+
+.opportunity-intraday-nav button[data-mode="tail"].active > .icon {
+  color: var(--color-warning);
+}
+
+.opportunity-intraday-nav button > .icon {
+  flex: none;
+}
+
+.opportunity-intraday-nav button > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.opportunity-intraday-nav button b {
+  overflow: hidden;
+  color: inherit;
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.opportunity-intraday-nav button small {
+  overflow: hidden;
+  color: var(--color-muted);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.opportunity-intraday-nav button > strong {
+  min-width: 28px;
+  color: inherit;
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  line-height: 1;
+  text-align: end;
 }
 
 .opportunity-portfolio-bar {
@@ -17194,6 +17298,24 @@ html[data-theme="light"] .nav {
   line-height: 1.4;
 }
 
+.opportunity-model-signal {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2xs);
+  min-height: var(--control-size-compact);
+  color: var(--color-muted);
+  font-size: var(--text-2xs);
+}
+
+.opportunity-model-signal[data-state="ready"] {
+  color: var(--color-accent);
+}
+
+.opportunity-model-signal .icon {
+  flex: none;
+}
+
 .opportunity-context p {
   margin: var(--space-3xs) 0 0;
   color: var(--color-ink-2);
@@ -17218,6 +17340,111 @@ html[data-theme="light"] .nav {
 .opportunity-list-head span {
   color: var(--color-muted);
   font-size: var(--text-2xs);
+}
+
+.opportunity-section {
+  border-top: 1px solid var(--color-rule-2);
+}
+
+.opportunity-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  min-height: 68px;
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--color-rule-2);
+  background: var(--color-paper-3);
+}
+
+.opportunity-section[data-mode="ready"] .opportunity-section-head {
+  box-shadow: inset 4px 0 var(--color-up);
+}
+
+.opportunity-section[data-mode="layout"] .opportunity-section-head {
+  box-shadow: inset 4px 0 var(--color-accent);
+}
+
+.opportunity-section[data-mode="tail"] .opportunity-section-head {
+  box-shadow: inset 4px 0 var(--color-warning);
+}
+
+.opportunity-section-title,
+.opportunity-section-title > div {
+  display: grid;
+  gap: var(--space-3xs);
+  min-width: 0;
+}
+
+.opportunity-section-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3xs);
+  width: max-content;
+  color: var(--color-muted);
+  font-size: var(--text-2xs);
+  font-weight: 700;
+}
+
+.opportunity-section[data-mode="ready"] .opportunity-section-kicker {
+  color: var(--color-up);
+}
+
+.opportunity-section[data-mode="layout"] .opportunity-section-kicker {
+  color: var(--color-accent);
+}
+
+.opportunity-section[data-mode="tail"] .opportunity-section-kicker {
+  color: var(--color-warning);
+}
+
+.opportunity-section-title strong {
+  color: var(--color-ink);
+  font-size: var(--text-sm);
+}
+
+.opportunity-section-title > div > span,
+.opportunity-section-empty,
+.opportunity-tail-note {
+  color: var(--color-muted);
+  font-size: var(--text-2xs);
+  line-height: 1.45;
+}
+
+.opportunity-section-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  flex: none;
+}
+
+.opportunity-section-actions > strong {
+  color: var(--color-ink);
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+}
+
+.opportunity-section-actions .btn {
+  flex: none;
+  min-height: var(--control-size-compact);
+}
+
+.opportunity-section-empty {
+  min-height: 64px;
+  padding: var(--space-sm) var(--space-md);
+}
+
+.opportunity-tail-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  padding: var(--space-xs) var(--space-md);
+  border-top: 1px solid var(--color-rule-2);
+}
+
+.opportunity-tail-note .icon {
+  flex: none;
+  color: var(--color-warning);
 }
 
 .opportunity-plan-grid {
@@ -17429,6 +17656,16 @@ html[data-theme="light"] .nav {
   background: var(--color-accent);
 }
 
+.opportunity-source-status [data-status="running"] i {
+  background: var(--color-accent);
+}
+
+.opportunity-source-status [data-status="scheduled"] i,
+.opportunity-source-status [data-status="pending"] i,
+.opportunity-source-status [data-status="manual"] i {
+  background: var(--color-neutral);
+}
+
 .opportunity-source-status [data-status="stale"] i,
 .opportunity-source-status [data-status="failed"] i {
   background: var(--color-warning);
@@ -17492,6 +17729,47 @@ html[data-theme="light"] .nav {
     flex-direction: column;
     gap: var(--space-3xs);
     padding-inline: var(--space-sm);
+  }
+
+  .opportunity-section-head {
+    align-items: flex-start;
+    padding-inline: var(--space-sm);
+  }
+
+  .opportunity-section-actions {
+    align-items: flex-end;
+    flex-direction: column;
+  }
+
+  .opportunity-section-actions .btn {
+    width: 100%;
+    min-height: var(--touch-target);
+  }
+
+  .opportunity-section-empty,
+  .opportunity-tail-note {
+    padding-inline: var(--space-sm);
+  }
+
+  .opportunity-intraday-nav button {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--space-3xs);
+    min-height: 58px;
+    padding: var(--space-xs);
+  }
+
+  .opportunity-intraday-nav button > .icon,
+  .opportunity-intraday-nav button small {
+    display: none;
+  }
+
+  .opportunity-intraday-nav button b {
+    white-space: normal;
+  }
+
+  .opportunity-intraday-nav button > strong {
+    min-width: 20px;
+    font-size: var(--text-base);
   }
 
   .opportunity-row {

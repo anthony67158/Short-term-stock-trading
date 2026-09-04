@@ -28,6 +28,7 @@ import {
   beijingDayKey,
   beijingMinutes,
   isContinuousTrading,
+  isTradingDayAt,
 } from '../shared/tradingCalendar.js'
 import {
   buildOpportunityRadarLedgerBatch,
@@ -55,6 +56,14 @@ function modeSlot(mode, now) {
   if (mode === 'close') return '1505'
   const minutes = beijingMinutes(now)
   return String(Math.floor(minutes / 5) * 5).padStart(4, '0')
+}
+
+export function canRunFormulaSelectionMode(mode, now = Date.now()) {
+  if (mode === 'intraday') return isContinuousTrading(now)
+  if (mode === 'close') {
+    return isTradingDayAt(now) && beijingMinutes(now) >= 15 * 60
+  }
+  return false
 }
 
 function createProgressReporter({
@@ -462,10 +471,12 @@ export default async function handler(req, res) {
         errorCode: 'INVALID_MODE',
       })
     }
-    if (mode === 'intraday' && !isContinuousTrading()) {
+    if (!canRunFormulaSelectionMode(mode)) {
       return reply(res, 422, {
         ok: false,
-        error: '盘中公式仅在连续竞价期间运行',
+        error: mode === 'intraday'
+          ? '盘中公式仅在连续竞价期间运行'
+          : '次日关注仅在交易日收盘后手动生成',
         errorCode: 'WINDOW_CLOSED',
       })
     }

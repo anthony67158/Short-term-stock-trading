@@ -3,6 +3,7 @@ import { api } from './apiBase'
 import { isContinuousTrading } from '../shared/tradingCalendar.js'
 import {
   loadPollingResource,
+  subscribePollingTicks,
   readPollingCache,
   readPollingCacheStale,
 } from './pollingCache.js'
@@ -33,7 +34,6 @@ export function usePolling(url, intervalMs, deps = [], options = {}) {
   const [loading, setLoading] = useState(!initialCached)
   const [error, setError] = useState(null)
   const [stale, setStale] = useState(false)
-  const timer = useRef(null)
   const ctrl = useRef(null)       // 当前在飞的请求 controller —— 组件卸载/切 url 时中止，避免旧响应覆盖新状态
   const alive = useRef(true)      // 组件是否仍挂载：卸载后禁止 setState（防 "state update on unmounted"）
   const tick = useRefreshTick()
@@ -61,12 +61,10 @@ export function usePolling(url, intervalMs, deps = [], options = {}) {
         if (!res.ok) throw new Error('HTTP ' + res.status)
         return res.json()
       }
-      const j = cacheTtlMs
-        ? await loadPollingResource(url, request, {
-            ttlMs: cacheTtlMs,
-            preferCache: false,
-          })
-        : await request()
+      const j = await loadPollingResource(url, request, {
+        ttlMs: cacheTtlMs,
+        preferCache: false,
+      })
       if (!alive.current || ac.signal.aborted) return       // 已卸载/被中止：丢弃结果，不 setState
       if (j && j.ok === false) {
         const staleData = staleIfErrorMs
@@ -132,11 +130,10 @@ export function usePolling(url, intervalMs, deps = [], options = {}) {
       setStale(false)
     }
     load()
-    if (timer.current) clearInterval(timer.current)
-    timer.current = setInterval(load, intervalMs)
+    const unsubscribe = subscribePollingTicks(url, intervalMs, load)
     return () => {
       alive.current = false
-      if (timer.current) clearInterval(timer.current)
+      unsubscribe()
       if (ctrl.current) { try { ctrl.current.abort() } catch { /* ignore */ } }
     }
     // eslint-disable-next-line
@@ -160,14 +157,16 @@ export function prefetchPolling(url, { cacheTtlMs = 0 } = {}) {
 
 // 全局刷新倒计时：与轮询间隔对齐
 export function useCountdown(intervalMs, tick = 0) {
-  const [remain, setRemain] = useState(Math.round(intervalMs / 1000))
+  const seconds = Math.max(0, Math.round(Number(intervalMs) / 1000) || 0)
+  const [remain, setRemain] = useState(seconds)
   useEffect(() => {
-    setRemain(Math.round(intervalMs / 1000))
+    setRemain(seconds)
+    if (seconds === 0) return undefined
     const id = setInterval(() => {
-      setRemain((r) => (r <= 1 ? Math.round(intervalMs / 1000) : r - 1))
+      setRemain((r) => (r <= 1 ? seconds : r - 1))
     }, 1000)
     return () => clearInterval(id)
-  }, [intervalMs, tick])
+  }, [seconds, tick])
   return remain
 }
 

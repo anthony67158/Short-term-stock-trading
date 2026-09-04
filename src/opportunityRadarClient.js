@@ -57,11 +57,32 @@ export function loadOpportunityRadar() {
   return request('/api/opportunity_radar')
 }
 
-function sectorSessionFor(snapshot, lane) {
-  if (lane === 'intraday') return 'intraday'
-  if (snapshot?.phase === 'PREOPEN') return 'overnight'
-  if (snapshot?.phase === 'INTRADAY') return 'intraday'
-  return 'close'
+export function opportunityRadarAutoRefreshDelay(
+  snapshot,
+  now = Date.now(),
+  { refreshing = false } = {},
+) {
+  if (refreshing) return 2_500
+  const tasks = Object.values(snapshot?.tasks || {})
+  if (tasks.some((task) =>
+    ['running', 'RUNNING', 'QUEUED'].includes(
+      task?.active?.status || task?.status,
+    )
+  )) return 2_500
+  const sources = Object.values(snapshot?.sourceStatus || {})
+  const activeDelays = sources
+    .filter((source) =>
+      ['running', 'pending'].includes(source?.status)
+    )
+    .map((source) => Number(source.refreshAfterMs) || 10_000)
+  if (activeDelays.length) {
+    return Math.max(1_000, Math.min(...activeDelays))
+  }
+  const scheduled = sources
+    .map((source) => Number(source?.refreshAt))
+    .filter((timestamp) => Number.isFinite(timestamp) && timestamp > now)
+  if (!scheduled.length) return null
+  return Math.max(1_000, Math.min(...scheduled) - now)
 }
 
 export async function refreshOpportunityRadar({
@@ -75,7 +96,6 @@ export async function refreshOpportunityRadar({
     timeoutMs: 300_000,
   }),
   runFormula = runFormulaSelection,
-  runTail = runTailPick,
   load = loadOpportunityRadar,
 } = {}) {
   const tasks = []
@@ -97,29 +117,12 @@ export async function refreshOpportunityRadar({
         }),
     )
   }
-  const sectorSession = sectorSessionFor(snapshot, lane)
-  const lunch = snapshot?.phase === 'LUNCH'
-  const rest = snapshot?.phase === 'REST'
-
-  if (!rest && !(lunch && sectorSession === 'intraday')) {
-    run('sector', () => runSector(sectorSession))
-  }
-
-  if (lane === 'intraday' && !lunch && !rest) {
+  if (lane === 'intraday' && snapshot?.phase === 'INTRADAY') {
+    run('sector', () => runSector('intraday'))
     run('formulaIntraday', () => runFormula('intraday'))
-  } else if (
-    lane !== 'intraday'
-    && snapshot?.phase === 'AFTER_CLOSE'
-  ) {
+  } else if (lane === 'next' && snapshot?.phase === 'AFTER_CLOSE') {
+    run('sector', () => runSector('close'))
     run('formulaClose', () => runFormula('close'))
-  }
-
-  if (
-    lane === 'next'
-    && snapshot?.tailSession?.canRun === true
-    && snapshot?.sourceStatus?.tail?.status !== 'fresh'
-  ) {
-    run('tail', () => runTail(snapshot.tailSession.tradeDate))
   }
 
   if (!tasks.length) {
@@ -139,5 +142,30 @@ export async function refreshOpportunityRadar({
       .filter((item) => item.status === 'rejected')
       .map((item) => item.reason?.source || 'unknown'),
     snapshot: latest,
+  }
+}
+
+export async function refreshTailOpportunity({
+  snapshot,
+  onSourceState = () => {},
+  runTail = runTailPick,
+  load = loadOpportunityRadar,
+} = {}) {
+  const session = snapshot?.tailSession || {}
+  if (!session.canRun || !session.tradeDate) {
+    throw new Error('当前无法运行尾盘公式')
+  }
+  onSourceState('tail', 'running', '正在提交尾盘扫描')
+  try {
+    await runTail(session.tradeDate)
+    const latest = await load()
+    onSourceState('tail', 'done')
+    return latest
+  } catch (error) {
+    const failure = new Error(opportunityRadarClientError(error))
+    failure.source = 'tail'
+    failure.cause = error
+    onSourceState('tail', 'failed', failure.message)
+    throw failure
   }
 }

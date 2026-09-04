@@ -8,6 +8,7 @@ import {
   scanFormulaSelectionCandidates,
 } from '../api/_formula_selection_data.js'
 import {
+  canRunFormulaSelectionMode,
   formulaSelectionPublicError,
   runFormulaSelection,
 } from '../api/formula_selection.js'
@@ -145,6 +146,14 @@ test('市场扫描从完整股票池生成最多五个带唯一价位的观察�
   assert.equal(
     result.candidateEvents[0].decision.priceContractValid,
     true,
+  )
+  assert.ok(
+    Number.isFinite(
+      result.candidateEvents[0].shadowFeatures.liquidityComposite,
+    ),
+  )
+  assert.ok(
+    result.candidateEvents[0].shadowFeatures.evidenceCompleteness > 0,
   )
   assert.deepEqual(
     [...new Set(progress.map((item) => item.stage))],
@@ -373,6 +382,37 @@ test('收盘定时器只接受专用触发器和正确密钥', () => {
   )
 })
 
+test('盘中公式与次日关注在服务端使用独立运行窗口', () => {
+  assert.equal(
+    canRunFormulaSelectionMode(
+      'intraday',
+      Date.parse('2026-09-03T10:00:00+08:00'),
+    ),
+    true,
+  )
+  assert.equal(
+    canRunFormulaSelectionMode(
+      'close',
+      Date.parse('2026-09-03T10:00:00+08:00'),
+    ),
+    false,
+  )
+  assert.equal(
+    canRunFormulaSelectionMode(
+      'close',
+      Date.parse('2026-09-03T15:01:00+08:00'),
+    ),
+    true,
+  )
+  assert.equal(
+    canRunFormulaSelectionMode(
+      'close',
+      Date.parse('2026-09-05T15:30:00+08:00'),
+    ),
+    false,
+  )
+})
+
 test('公式选股任务保存同一模式结果并保持幂等', async () => {
   let saved = null
   let ledgerBatch = null
@@ -440,6 +480,62 @@ test('公式选股任务保存同一模式结果并保持幂等', async () => {
     ['MARKET_GATE', 'TECHNICAL', 'SAVING', 'DONE'],
   )
   assert.equal(progress.at(-1).percent, 100)
+})
+
+test('公式选股允许未匹配板块的淘汰事件写入账本', async () => {
+  let saved = null
+  let savedLedger = null
+  const result = await runFormulaSelection({
+    mode: 'intraday',
+    store: {
+      readLatest: async () => null,
+      saveRun: async (_mode, value) => { saved = value },
+      saveProgress: async () => {},
+      claimRun: async () => ({ acquired: true, owner: 'owner' }),
+      releaseRun: async () => true,
+    },
+    ledgerStore: {
+      saveBatch: async (value) => { savedLedger = value },
+    },
+    scan: async () => ({
+      universe: {
+        total: 1,
+        inspectedCount: 1,
+        tradeDate: '2026-09-03',
+        prefilterCount: 1,
+        technicalCandidateCount: 1,
+        formulaMatchCount: 0,
+      },
+      formulas: [],
+      candidates: [],
+      candidateEvents: [{
+        code: '600001',
+        name: '未匹配板块样本',
+        stageReached: 'EVIDENCE',
+        quote: quote({ tradeDate: '2026-09-03' }),
+        formulaEvaluations: [],
+        decision: {
+          action: 'AVOID',
+          priceContractValid: false,
+        },
+        sector: null,
+        rejectionReasons: ['板块方向未确认'],
+      }],
+    }),
+    collectMarketContext: async () => ({
+      marketGate: { allowed: true },
+    }),
+    now: () => Date.UTC(2026, 8, 3, 2, 35),
+  })
+
+  assert.equal(result.decision, 'NO_MATCH')
+  assert.deepEqual(saved, result)
+  assert.equal(savedLedger.events.length, 1)
+  assert.equal(savedLedger.events[0].sector.code, '')
+  assert.deepEqual(
+    savedLedger.events[0].rejectionReasons,
+    ['板块方向未确认'],
+  )
 })
 
 test('公式结果附加影子评分但不改变现有候选顺序', async () => {
@@ -539,7 +635,7 @@ test('公式结果附加影子评分但不改变现有候选顺序', async () =>
   )
   assert.equal(
     savedLedger.events[0].scoreInput.schemaVersion,
-    'opportunity-score-feature.v1',
+    'opportunity-score-feature.v2',
   )
   assert.deepEqual(result.shadowRanking, {
     requested: 2,

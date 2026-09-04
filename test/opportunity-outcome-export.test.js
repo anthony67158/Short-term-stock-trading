@@ -12,7 +12,7 @@ test('机会训练导出只保留成熟且带冻结特征的市场级结果', ()
     maturity: 'MATURED',
     code: '600001',
     scoreInput: {
-      schemaVersion: 'opportunity-score-feature.v1',
+      schemaVersion: 'opportunity-score-feature.v2',
       code: '600001',
       formulaId: 'CLOSE_TREND_PULLBACK',
       factors: { cheapScore: 40 },

@@ -142,7 +142,7 @@ test('盘中公式与板块方向融合为包含退出计划的可操作机会',
     },
   })
 
-  assert.equal(result.schemaVersion, 'opportunity-radar.v1')
+  assert.equal(result.schemaVersion, 'opportunity-radar.v2')
   assert.equal(result.defaultLane, 'intraday')
   assert.equal(result.lanes.intraday[0].state, 'READY')
   assert.equal(result.lanes.intraday[0].entryPlan.price, 10)
@@ -160,7 +160,7 @@ test('盘中公式与板块方向融合为包含退出计划的可操作机会',
   )
 })
 
-test('同股命中收盘公式和尾盘反转时只展示一次并保留双来源', () => {
+test('收盘公式与尾盘反转进入不同业务页签且不互相混合', () => {
   const closeCandidate = formulaCandidate({
     formulaId: 'CLOSE_TREND_PULLBACK',
     primaryPrice: 10.1,
@@ -212,19 +212,25 @@ test('同股命中收盘公式和尾盘反转时只展示一次并保留双来�
     },
   })
 
-  const merged = result.lanes.next.filter(
+  const intradayTail = result.lanes.intraday.find(
     (item) => item.code === '600001',
   )
-  assert.equal(merged.length, 1)
-  assert.deepEqual(
-    merged[0].sourceSignals,
-    ['板块前瞻', '收盘趋势回踩', '尾盘反转'],
+  const nextClose = result.lanes.next.find(
+    (item) => item.code === '600001',
   )
-  assert.equal(merged[0].exitPlan.timeStopDate, '2026-09-07')
-  assert.match(merged[0].exitPlan.rule, /次日冲高1%-3%减半/)
+  assert.deepEqual(
+    intradayTail.sourceSignals,
+    ['板块前瞻', '尾盘反转'],
+  )
+  assert.deepEqual(
+    nextClose.sourceSignals,
+    ['板块前瞻', '收盘趋势回踩'],
+  )
+  assert.equal(intradayTail.exitPlan.timeStopDate, '2026-09-07')
+  assert.match(intradayTail.exitPlan.rule, /次日冲高1%-3%减半/)
 })
 
-test('只有板块方向而没有价格合同时保持方向观察', () => {
+test('只有板块方向而没有价格合同时不生成个股候选', () => {
   const result = buildOpportunityRadar({
     now: NOW,
     sector: {
@@ -234,13 +240,10 @@ test('只有板块方向而没有价格合同时保持方向观察', () => {
     formula: {},
   })
 
-  const candidate = result.lanes.layout.find(
-    (item) => item.code === '600002',
-  )
-  assert.equal(candidate.state, 'SECTOR_WATCH')
-  assert.equal(candidate.entryPlan, null)
-  assert.equal(candidate.exitPlan, null)
-  assert.match(candidate.blockers.join('；'), /尚无个股价格合同/)
+  assert.equal(result.lanes.layout.length, 0)
+  assert.equal(result.lanes.intraday.length, 0)
+  assert.equal(result.lanes.next.length, 0)
+  assert.equal(result.sectors[0].name, '先进制造')
 })
 
 test('赔率不足或盘中快照过期时不得显示为可操作', () => {
@@ -280,10 +283,7 @@ test('赔率不足或盘中快照过期时不得显示为可操作', () => {
     },
   })
   assert.equal(stale.sourceStatus.formulaIntraday.status, 'stale')
-  assert.equal(
-    stale.lanes.intraday.find((item) => item.code === '600001').state,
-    'AVOID',
-  )
+  assert.equal(stale.lanes.intraday.length, 0)
 })
 
 test('板块实时源失败时公式候选最多进入等待确认', () => {
@@ -359,12 +359,174 @@ test('收盘与尾盘结果必须属于最近完整交易日', () => {
       },
     },
   })
-  assert.equal(result.sourceStatus.formulaClose.status, 'stale')
+  assert.equal(result.sourceStatus.formulaClose.status, 'manual')
   assert.equal(result.sourceStatus.tail.status, 'stale')
   assert.equal(
-    result.lanes.next.find((item) => item.code === '600001').state,
-    'AVOID',
+    result.lanes.next.some((item) =>
+      item.sourceSignals.some((signal) =>
+      signal.includes('收盘') || signal.includes('尾盘')
+      )
+    ),
+    false,
   )
+})
+
+test('盘中次日计划不复用昨日尾盘和收盘公式并显示今日生成时间', () => {
+  const now = Date.parse('2026-09-03T14:45:00+08:00')
+  const currentSector = sectorSnapshot({
+    session: 'intraday',
+    signalDate: '2026-09-03',
+  })
+  currentSector.generatedAt = now - 60_000
+  currentSector.dataAsOf = '2026-09-03 14:44'
+  currentSector.sectors[0].stocks[0].price = 12.34
+  const oldSector = sectorSnapshot({
+    session: 'close',
+    signalDate: '2026-09-02',
+  })
+  oldSector.sectors[0].stocks[0].price = 10.04
+  const oldTail = {
+    session: {
+      tradeDate: '2026-09-02',
+      isFormal: true,
+      dataAsOf: Date.parse('2026-09-02T14:50:00+08:00'),
+    },
+    result: {
+      candidates: [{
+        code: '600003',
+        name: '昨日尾盘股',
+        quote: {
+          price: 20,
+          pct: 3,
+          tradeDate: '2026-09-02',
+        },
+        blockers: [],
+        execution: {
+          stopPrice: 19,
+          finalExitDate: '2026-09-07',
+          maxPositionPct: 5,
+        },
+      }],
+      nearCandidates: [],
+    },
+  }
+  const result = buildOpportunityRadar({
+    now,
+    sector: {
+      market: {
+        phase: 'live',
+        tradingDay: true,
+        day: '2026-09-03',
+      },
+      intraday: currentSector,
+      latest: oldSector,
+    },
+    formula: {
+      close: formulaResult(
+        'CLOSE',
+        [formulaCandidate({ formulaId: 'CLOSE_SQUEEZE' })],
+        { tradeDate: '2026-09-02' },
+      ),
+    },
+    tail: {
+      session: {
+        status: 'BEFORE_WINDOW',
+        tradeDate: '2026-09-03',
+      },
+      latest: oldTail,
+      displayResult: oldTail,
+      task: {
+        tradeDate: '2026-09-02',
+        status: 'DONE',
+      },
+    },
+  })
+
+  assert.equal(result.sourceStatus.tail.status, 'scheduled')
+  assert.equal(result.sourceStatus.tail.message, '14:50自动生成')
+  assert.equal(result.sourceStatus.formulaClose.status, 'manual')
+  assert.equal(result.sourceStatus.formulaClose.message, '收盘后手动生成')
+  assert.ok(result.sourceStatus.tail.refreshAt > now)
+  assert.equal(
+    result.lanes.next.some((item) =>
+      item.sourceSignals.includes('尾盘反转')
+    ),
+    false,
+  )
+  assert.equal(result.lanes.next.length, 0)
+})
+
+test('今日手动尾盘试算优先于昨日正式版进入次日计划', () => {
+  const now = Date.parse('2026-09-03T14:47:00+08:00')
+  const oldTail = {
+    session: {
+      tradeDate: '2026-09-02',
+      isFormal: true,
+      dataAsOf: Date.parse('2026-09-02T14:50:00+08:00'),
+    },
+    result: {
+      candidates: [],
+      nearCandidates: [],
+    },
+  }
+  const currentManual = {
+    session: {
+      tradeDate: '2026-09-03',
+      isFormal: false,
+      dataAsOf: now - 1_000,
+    },
+    result: {
+      candidates: [{
+        code: '600004',
+        name: '今日试算股',
+        quote: {
+          price: 8.8,
+          pct: 1.2,
+          tradeDate: '2026-09-03',
+        },
+        blockers: [],
+        execution: {
+          stopPrice: 8.4,
+          finalExitDate: '2026-09-08',
+          maxPositionPct: 5,
+        },
+      }],
+      nearCandidates: [],
+    },
+  }
+  const result = buildOpportunityRadar({
+    now,
+    sector: {
+      market: {
+        phase: 'live',
+        tradingDay: true,
+        day: '2026-09-03',
+      },
+      intraday: sectorSnapshot({
+        session: 'intraday',
+        signalDate: '2026-09-03',
+      }),
+    },
+    tail: {
+      session: {
+        status: 'BEFORE_WINDOW',
+        tradeDate: '2026-09-03',
+      },
+      latest: oldTail,
+      displayResult: currentManual,
+    },
+  })
+
+  assert.equal(result.sourceStatus.tail.status, 'fresh')
+  const manualRow = result.lanes.intraday.find((item) =>
+    item.code === '600004'
+    && item.sourceSignals.includes('尾盘反转')
+  )
+  assert.ok(manualRow)
+  assert.equal(manualRow.state, 'AVOID')
+  assert.equal(manualRow.entryPlan.price, 8.83)
+  assert.equal(manualRow.exitPlan.hardStopPrice, 8.4)
+  assert.match(manualRow.blockers.join('；'), /手动试算仅供观察/)
 })
 
 test('机会雷达为每个lane附加组合视图且不改变个股结论', () => {
@@ -401,4 +563,3 @@ test('机会雷达为每个lane附加组合视图且不改变个股结论', () =
   assert.equal(typeof pf.portfolioState, 'string')
   assert.ok(result.portfolios.intraday.budget)
 })
-

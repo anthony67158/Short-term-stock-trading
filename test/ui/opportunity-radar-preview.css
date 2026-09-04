@@ -1,0 +1,11 @@
+.opportunity-preview {
+  width: min(1180px, calc(100% - 32px));
+  margin: 32px auto;
+}
+
+@media (max-width: 520px) {
+  .opportunity-preview {
+    width: 100%;
+    margin: 0;
+  }
+}

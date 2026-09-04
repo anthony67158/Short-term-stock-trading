@@ -1,5 +1,9 @@
+import {
+  OPPORTUNITY_SHADOW_FEATURE_NAMES,
+} from './opportunityShadowFeatures.js'
+
 export const OPPORTUNITY_SCORE_FEATURE_SCHEMA_VERSION =
-  'opportunity-score-feature.v1'
+  'opportunity-score-feature.v2'
 export const OPPORTUNITY_SCORE_SCHEMA_VERSION =
   'opportunity-score.v1'
 
@@ -58,6 +62,7 @@ const NUMERIC_FEATURES = Object.freeze([
   'stopDistancePct',
   'targetDistancePct',
   'marketAllowed',
+  ...OPPORTUNITY_SHADOW_FEATURE_NAMES,
 ])
 
 export const OPPORTUNITY_SCORE_FEATURE_NAMES = Object.freeze([
@@ -146,6 +151,7 @@ export function buildOpportunityScoreInput({
   const quote = event.quote || {}
   const decision = event.decision || {}
   const marketGate = batch.marketGate
+  const shadow = event.shadowFeatures || {}
   const mode = category(
     batch.mode || event.mode,
     CATEGORIES.mode,
@@ -199,6 +205,32 @@ export function buildOpportunityScoreInput({
       decision.primaryPrice,
     ),
     marketAllowed: marketGate?.allowed === true ? 1 : 0,
+    ret2dPct: rounded(shadow.ret2dPct),
+    ret5dPct: rounded(shadow.ret5dPct),
+    openGapPct: rounded(shadow.openGapPct),
+    intradayRangePct: rounded(shadow.intradayRangePct),
+    distanceToHighPct: rounded(shadow.distanceToHighPct),
+    vwapDistancePct: rounded(shadow.vwapDistancePct),
+    atrPct: rounded(shadow.atrPct),
+    mainNetYi: rounded(shadow.mainNetYi),
+    retailNetYi: rounded(shadow.retailNetYi),
+    flowDivergence: rounded(shadow.flowDivergence),
+    sectorRelativeStrength: rounded(shadow.sectorRelativeStrength),
+    sectorRankPct: rounded(shadow.sectorRankPct),
+    limitUpDistancePct: rounded(shadow.limitUpDistancePct),
+    limitHitCount5d: rounded(shadow.limitHitCount5d),
+    failedLimitCount5d: rounded(shadow.failedLimitCount5d),
+    orderImbalanceShort: rounded(shadow.orderImbalanceShort),
+    overheatReversalRisk: rounded(shadow.overheatReversalRisk),
+    liquidityComposite: rounded(shadow.liquidityComposite),
+    evidenceCompleteness: rounded(shadow.evidenceCompleteness),
+    signalOrderFlowContinuation:
+      rounded(shadow.signalOrderFlowContinuation),
+    signalOverheatRisk: rounded(shadow.signalOverheatRisk),
+    signalLiquidityConfirmed: rounded(shadow.signalLiquidityConfirmed),
+    signalSectorRelativeStrength:
+      rounded(shadow.signalSectorRelativeStrength),
+    signalLimitCrowding: rounded(shadow.signalLimitCrowding),
   }
   for (const [prefix, values] of Object.entries(CATEGORIES)) {
     oneHot(factors, prefix, values, selected[prefix])

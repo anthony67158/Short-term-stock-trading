@@ -2,8 +2,10 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
+  opportunityRadarAutoRefreshDelay,
   opportunityRadarClientError,
   refreshOpportunityRadar,
+  refreshTailOpportunity,
 } from '../src/opportunityRadarClient.js'
 
 const read = (path) => readFileSync(
@@ -14,10 +16,12 @@ const read = (path) => readFileSync(
 const today = read('src/components/TodayTab.jsx')
 const radar = read('src/components/OpportunityRadar.jsx')
 const content = read('src/components/OpportunityRadarContent.jsx')
+const intradayNav = read('src/components/OpportunityIntradayNav.jsx')
 const candidate = read('src/components/OpportunityCandidateRow.jsx')
-const opportunityUi = `${content}\n${candidate}`
+const opportunityUi = `${content}\n${intradayNav}\n${candidate}`
 const client = read('src/opportunityRadarClient.js')
 const styles = read('src/styles/precision.css')
+const deployment = read('s.yaml')
 
 test('今日决策只挂载一个机会雷达模块', () => {
   assert.match(today, /import OpportunityRadar from '\.\/OpportunityRadar'/)
@@ -26,10 +30,10 @@ test('今日决策只挂载一个机会雷达模块', () => {
   assert.doesNotMatch(today, /<FormulaSelection/)
 })
 
-test('机会雷达提供提前布局盘中机会和次日计划三个视图', () => {
-  assert.match(radar, /提前布局/)
+test('机会雷达只提供盘中机会和次日关注计划两个业务入口', () => {
   assert.match(radar, /盘中机会/)
-  assert.match(radar, /次日计划/)
+  assert.match(radar, /次日关注计划/)
+  assert.doesNotMatch(radar, /id:\s*'layout'/)
   assert.match(radar, /role="tablist"/)
   assert.match(radar, /aria-selected=/)
   assert.match(radar, /loadOpportunityRadar/)
@@ -48,7 +52,36 @@ test('机会候选同时展示入场仓位和完整退出计划', () => {
   assert.match(opportunityUi, /为什么能买/)
   assert.match(content, /plannedRows/)
   assert.match(content, /当前没有形成完整买卖计划的股票/)
-  assert.match(content, /尚无完整价格，不代表可以买入/)
+  assert.match(content, /只有同时给出入场价/)
+  assert.match(opportunityUi, /成交率/)
+  assert.match(opportunityUi, /净盈利率/)
+  assert.match(opportunityUi, /样本仍在积累/)
+})
+
+test('尾盘严格与接近公式在盘中页使用独立区段展示', () => {
+  assert.match(content, /strictTailRows/)
+  assert.match(content, /tailWatchRows/)
+  assert.match(content, /title:\s*'尾盘反转'/)
+  assert.match(content, /今日严格公式未完整命中/)
+  assert.match(content, /仅供核对，不可直接买入/)
+})
+
+test('盘中机会明确拆分立即买入提前布局和尾盘反转', () => {
+  assert.match(content, /可立即买入/)
+  assert.match(content, /今日提前布局/)
+  assert.match(content, /尾盘反转/)
+  assert.match(content, /activeIntradayView/)
+  assert.match(content, /activeIntradayRows/)
+  assert.match(content, /当前查看/)
+  assert.match(intradayNav, /aria-label="盘中机会分类"/)
+  assert.match(intradayNav, /role="tab"/)
+  assert.match(intradayNav, /count/)
+  assert.match(intradayNav, /条件全部通过/)
+  assert.match(intradayNav, /等待触发或风险解除/)
+  assert.match(intradayNav, /14:50自动扫描/)
+  assert.doesNotMatch(content, /rows={readyRows}[\s\S]*rows={layoutRows}/)
+  assert.doesNotMatch(content, /方向观察/)
+  assert.doesNotMatch(candidate, /方向可看/)
 })
 
 test('已算出计划但大盘不支持时仍展示计划并说明为什么先不买', () => {
@@ -104,7 +137,7 @@ test('盘中刷新并行启动板块和盘中公式且局部失败可返回', as
   assert.deepEqual(result.failed, ['formulaIntraday'])
 })
 
-test('盘前次日计划只复核隔夜板块证据', async () => {
+test('盘前次日关注只读昨晚计划且不启动生成任务', async () => {
   const calls = []
   await refreshOpportunityRadar({
     lane: 'next',
@@ -117,7 +150,84 @@ test('盘前次日计划只复核隔夜板块证据', async () => {
     runTail: async () => calls.push(['tail']),
     load: async () => ({ ok: true, lanes: {} }),
   })
-  assert.deepEqual(calls, [['sector', 'overnight']])
+  assert.deepEqual(calls, [])
+})
+
+test('收盘后次日关注只手动运行收盘板块和收盘公式', async () => {
+  const calls = []
+  await refreshOpportunityRadar({
+    lane: 'next',
+    snapshot: {
+      phase: 'AFTER_CLOSE',
+      sourceStatus: {},
+    },
+    runSector: async (session) => calls.push(['sector', session]),
+    runFormula: async (mode) => calls.push(['formula', mode]),
+    runTail: async () => calls.push(['tail']),
+    load: async () => ({ ok: true, lanes: {} }),
+  })
+  assert.deepEqual(calls.sort(), [
+    ['formula', 'close'],
+    ['sector', 'close'],
+  ])
+})
+
+test('尾盘手动扫描使用独立入口且完成后重新读取聚合快照', async () => {
+  const calls = []
+  const result = await refreshTailOpportunity({
+    snapshot: {
+      tailSession: {
+        canRun: true,
+        tradeDate: '2026-09-03',
+      },
+    },
+    runTail: async (tradeDate) => calls.push(['tail', tradeDate]),
+    load: async () => {
+      calls.push(['load'])
+      return { ok: true, lanes: {} }
+    },
+  })
+  assert.deepEqual(calls, [
+    ['tail', '2026-09-03'],
+    ['load'],
+  ])
+  assert.equal(result.ok, true)
+})
+
+test('次日计划按定时源状态自动等待或追踪最新结果', () => {
+  const now = Date.parse('2026-09-03T14:45:00+08:00')
+  assert.equal(opportunityRadarAutoRefreshDelay({
+    sourceStatus: {
+      tail: {
+        status: 'scheduled',
+        refreshAt: now + 5 * 60 * 1000,
+      },
+    },
+    tasks: {},
+  }, now), 5 * 60 * 1000)
+  assert.equal(opportunityRadarAutoRefreshDelay({
+    sourceStatus: {
+      tail: {
+        status: 'running',
+        refreshAfterMs: 2_500,
+      },
+    },
+    tasks: {},
+  }, now), 2_500)
+  assert.equal(opportunityRadarAutoRefreshDelay({
+    sourceStatus: {
+      tail: { status: 'fresh' },
+      formulaClose: { status: 'fresh' },
+    },
+    tasks: {},
+  }, now), null)
+  assert.match(radar, /opportunityRadarAutoRefreshDelay/)
+  assert.match(content, /待生成|更新中|等待结果/)
+})
+
+test('收盘公式只保留手动运行且尾盘14:50自动任务继续启用', () => {
+  assert.doesNotMatch(deployment, /triggerName:\s*formula-selection-close-timer/)
+  assert.match(deployment, /triggerName:\s*tail-pick-1450-timer/)
 })
 
 test('机会雷达使用单层响应式布局', () => {
@@ -162,4 +272,3 @@ test('组合与漂移使用统一设计token而非独立视觉体系', () => {
     /\.opportunity-portfolio-bar\s*{[^}]*var\(--color-rule-2\)/s,
   )
 })
-

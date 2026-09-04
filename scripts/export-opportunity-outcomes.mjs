@@ -37,8 +37,10 @@ function safeOutcome(value) {
     value?.maturity !== 'MATURED'
     || !/^formula:/.test(String(value?.decisionId || ''))
     || !/^\d{6}$/.test(String(value?.code || ''))
-    || value?.scoreInput?.schemaVersion
-      !== 'opportunity-score-feature.v1'
+    || ![
+      'opportunity-score-feature.v1',
+      'opportunity-score-feature.v2',
+    ].includes(value?.scoreInput?.schemaVersion)
   ) return null
   return {
     schemaVersion: String(value.schemaVersion || ''),

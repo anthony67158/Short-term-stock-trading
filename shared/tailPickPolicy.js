@@ -157,11 +157,17 @@ export function evaluateTailPickMarketGate({
   let maxPositionPct = 0
   const regime = deriveMarketRegime(market)
   if (!regime.allowRiskIncrease) {
-    blockers.push(
-      regime.dataQuality === 'MISSING'
-        ? '大盘关键数据不完整'
-        : '当前盘面不允许新增风险',
-    )
+    if (regime.dataQuality === 'MISSING') {
+      blockers.push('大盘关键数据不完整，无法判断是否适合开新仓')
+    } else if (regime.hardRiskSignals?.length) {
+      blockers.push(
+        `市场进入防守：${regime.hardRiskSignals.join('、')}`,
+      )
+    } else {
+      blockers.push(
+        `市场综合强度${regime.score}分，低于45分开仓线`,
+      )
+    }
   }
 
   const indices = normalizedIndexSeries(indexSeries).map(indexGate)
@@ -190,7 +196,28 @@ export function evaluateTailPickMarketGate({
       maxPositionPct = 3
       reasons.push('均线尚未全面转强，但市场仍有结构性承接，仓位降至3%')
     } else {
-      blockers.push('核心指数与市场广度均未形成可参与结构')
+      const weakIndices = indices
+        .map((item) => {
+          const issues = [
+            !item.aboveMa20 ? '低于20日线' : null,
+            item.belowMa60 ? '低于60日线' : null,
+            !item.bullishStack ? '均线未形成多头' : null,
+          ].filter(Boolean)
+          return issues.length ? `${item.name}${issues.join('、')}` : null
+        })
+        .filter(Boolean)
+      const up = Number(breadth.up)
+      const down = Number(breadth.down)
+      const breadthText = up > 0 && down > 0
+        ? `上涨${up}家、下跌${down}家（涨跌比${(
+            up / down
+          ).toFixed(2)}，需至少1.05）`
+        : '上涨与下跌家数不足，无法确认市场广度'
+      blockers.push(
+        `指数与市场广度未确认：${
+          weakIndices.join('；') || '核心指数趋势未形成一致支撑'
+        }；${breadthText}`,
+      )
     }
     if (indices.some((item) => item.volumeSelloff)) {
       blockers.push('核心指数连续放量下跌并跌破60日线')

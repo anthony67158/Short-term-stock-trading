@@ -10,8 +10,11 @@ import {
 import {
   clearPollingCache,
   loadPollingResource,
+  pollingSubscriptionSnapshot,
   readPollingCache,
   readPollingCacheStale,
+  resetPollingSubscriptions,
+  subscribePollingTicks,
 } from '../src/pollingCache.js'
 
 const read = (path) => readFileSync(
@@ -84,6 +87,48 @@ test('详情短缓存合并同一资源的并发请求并支持后台重验', as
     preferCache: false,
   })
   assert.equal(calls, 2)
+})
+
+test('相同资源的多个组件共享一个轮询定时器', () => {
+  resetPollingSubscriptions()
+  const left = subscribePollingTicks('/api/market_snapshot', 20_000, () => {})
+  const right = subscribePollingTicks('/api/market_snapshot', 10_000, () => {})
+
+  assert.deepEqual(
+    pollingSubscriptionSnapshot('/api/market_snapshot'),
+    {
+      subscribers: 2,
+      intervalMs: 10_000,
+      running: true,
+    },
+  )
+
+  left()
+  assert.equal(
+    pollingSubscriptionSnapshot('/api/market_snapshot').subscribers,
+    1,
+  )
+  right()
+  assert.equal(pollingSubscriptionSnapshot('/api/market_snapshot'), null)
+})
+
+test('零间隔资源只首载且不创建重复轮询定时器', () => {
+  resetPollingSubscriptions()
+  const unsubscribe = subscribePollingTicks(
+    '/api/market_snapshot',
+    0,
+    () => {},
+  )
+
+  assert.deepEqual(
+    pollingSubscriptionSnapshot('/api/market_snapshot'),
+    {
+      subscribers: 1,
+      intervalMs: 0,
+      running: false,
+    },
+  )
+  unsubscribe()
 })
 
 test('K线实时请求失败时仍可读取一天内最近成功快照', async () => {

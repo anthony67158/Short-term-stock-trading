@@ -114,6 +114,40 @@ function latestVwap(trends = []) {
   return null
 }
 
+function numberText(value, digits = 2) {
+  const number = finite(value)
+  return number == null ? '缺失' : number.toFixed(digits)
+}
+
+function amountText(value) {
+  const number = finite(value)
+  return number == null ? '缺失' : `${(number / 100_000_000).toFixed(2)}亿元`
+}
+
+function fundBlocker(fund = {}) {
+  const mainNow = finite(fund.mainNetYi)
+  const retailNow = finite(fund.retailNetYi)
+  const main5d = finite(fund.main5dYi)
+  if (mainNow == null || retailNow == null || main5d == null) {
+    return '资金证据不完整：缺少当日主力、小单或近5日主力净额'
+  }
+  if (mainNow < 0 && retailNow > 0) {
+    return `主力净流出${Math.abs(mainNow).toFixed(2)}亿元、`
+      + `小单净流入${retailNow.toFixed(2)}亿元，存在散户承接`
+  }
+  return `主力承接不足：当日${mainNow.toFixed(2)}亿元、`
+    + `近5日${main5d.toFixed(2)}亿元`
+}
+
+function atrDistanceBlocker(label, current, anchor, atrValue, limit = 1) {
+  if (!(finite(anchor) > 0) || !(finite(atrValue) > 0)) {
+    return `${label}无法校验：支撑位或ATR数据缺失`
+  }
+  const distance = finite(current) - finite(anchor)
+  return `${label}${numberText(distance)}元，超过`
+    + `${limit}ATR上限${numberText(finite(atrValue) * limit)}元`
+}
+
 function fundSupported(fund = {}) {
   const mainNow = finite(fund.mainNetYi)
   const retailNow = finite(fund.retailNetYi)
@@ -216,21 +250,65 @@ function evaluateIntradayPullback(context) {
   ].filter((value) => value != null && value <= context.current)
   const primary = anchorValues.length ? Math.max(...anchorValues) : null
 
-  if (context.candles.length < 30) blockers.push('日线样本不足')
-  if (!(context.current > context.ma20)) blockers.push('尚未站上MA20')
-  if (!(context.ma20 >= context.ma20Past)) blockers.push('MA20仍在向下')
-  if (!(context.gain20 <= 25)) blockers.push('近20日位置过高')
-  if (!(context.currentPct <= 5)) blockers.push('当日涨幅过高')
-  if (!(context.currentAmount >= 50_000_000)) blockers.push('成交额不足')
-  if (!(context.currentTurnover >= 2)) blockers.push('换手不足')
-  if (!heldVwap || !noDump) blockers.push('最近分钟线未确认承接')
-  if (!context.sectorOpportunity.matched) blockers.push('板块方向未确认')
-  if (!fundSupported(context.fund)) blockers.push('资金承接未确认')
+  if (context.candles.length < 30) {
+    blockers.push(`日线仅${context.candles.length}日，要求至少30日`)
+  }
+  if (!(context.current > context.ma20)) {
+    blockers.push(
+      `当前价${numberText(context.current)}元，未站上`
+      + `MA20 ${numberText(context.ma20)}元`,
+    )
+  }
+  if (!(context.ma20 >= context.ma20Past)) {
+    blockers.push(
+      `MA20由${numberText(context.ma20Past)}元降至`
+      + `${numberText(context.ma20)}元，趋势仍向下`,
+    )
+  }
+  if (!(context.gain20 <= 25)) {
+    blockers.push(
+      `近20日已上涨${numberText(context.gain20, 1)}%，`
+      + '超过25%上限',
+    )
+  }
+  if (!(context.currentPct <= 5)) {
+    blockers.push(
+      `当日已上涨${numberText(context.currentPct, 1)}%，`
+      + '超过5%追高线',
+    )
+  }
+  if (!(context.currentAmount >= 50_000_000)) {
+    blockers.push(
+      `当前成交额${amountText(context.currentAmount)}，`
+      + '要求至少0.50亿元',
+    )
+  }
+  if (!(context.currentTurnover >= 2)) {
+    blockers.push(
+      `当前换手率${numberText(context.currentTurnover, 1)}%，`
+      + '要求至少2%',
+    )
+  }
+  if (!heldVwap || !noDump) {
+    blockers.push(
+      `最近3分钟未持续站稳VWAP ${numberText(context.vwap)}元`
+      + '，或区间回落超过1.5%',
+    )
+  }
+  if (!context.sectorOpportunity.matched) {
+    blockers.push('所属行业或概念未进入今日板块前瞻确认范围')
+  }
+  if (!fundSupported(context.fund)) blockers.push(fundBlocker(context.fund))
   if (
     primary == null
     || !(context.atr14 > 0)
     || context.current - primary > context.atr14
-  ) blockers.push('价格距离支撑超过1ATR')
+  ) blockers.push(atrDistanceBlocker(
+    '当前价距离支撑',
+    context.current,
+    primary,
+    context.atr14,
+  ))
 
   return result(
     FORMULA_IDS.INTRADAY_VWAP_PULLBACK,
@@ -272,22 +350,54 @@ function evaluateIntradayAccumulation(context) {
   const primary = anchorValues.length ? Math.max(...anchorValues) : null
 
   if (!(context.currentPct >= 0.5 && context.currentPct <= 4)) {
-    blockers.push('涨幅不在资金先行区间')
+    blockers.push(
+      `当前涨幅${numberText(context.currentPct, 1)}%，`
+      + '资金先行要求0.5%至4%',
+    )
   }
   if (!(context.currentTurnover >= 2 && context.currentTurnover <= 8)) {
-    blockers.push('换手率不在合理区间')
+    blockers.push(
+      `当前换手率${numberText(context.currentTurnover, 1)}%，`
+      + '要求2%至8%',
+    )
   }
-  if (!(context.currentAmount >= 100_000_000)) blockers.push('成交额不足1亿元')
-  if (!(finite(context.quote.volumeRatio) >= 1.2)) blockers.push('量比不足')
-  if (!(context.gain20 <= 20)) blockers.push('近20日位置过高')
-  if (!heldVwap) blockers.push('分钟价格未稳定在VWAP上方')
-  if (!context.sectorOpportunity.matched) blockers.push('板块方向未确认')
-  if (!fundSupported(context.fund)) blockers.push('主力资金未确认')
+  if (!(context.currentAmount >= 100_000_000)) {
+    blockers.push(
+      `当前成交额${amountText(context.currentAmount)}，`
+      + '要求至少1.00亿元',
+    )
+  }
+  if (!(finite(context.quote.volumeRatio) >= 1.2)) {
+    blockers.push(
+      `当前量比${numberText(context.quote.volumeRatio)}，`
+      + '要求至少1.20',
+    )
+  }
+  if (!(context.gain20 <= 20)) {
+    blockers.push(
+      `近20日已上涨${numberText(context.gain20, 1)}%，`
+      + '超过20%上限',
+    )
+  }
+  if (!heldVwap) {
+    blockers.push(
+      `最近5分钟未稳定在VWAP ${numberText(context.vwap)}元上方`,
+    )
+  }
+  if (!context.sectorOpportunity.matched) {
+    blockers.push('所属行业或概念未进入今日板块前瞻确认范围')
+  }
+  if (!fundSupported(context.fund)) blockers.push(fundBlocker(context.fund))
   if (
     primary == null
     || !(context.atr14 > 0)
     || context.current - primary > context.atr14
-  ) blockers.push('价格距离承接位超过1ATR')
+  ) blockers.push(atrDistanceBlocker(
+    '当前价距离承接位',
+    context.current,
+    primary,
+    context.atr14,
+  ))
 
   return result(
     FORMULA_IDS.INTRADAY_ACCUMULATION,
@@ -318,26 +428,56 @@ function evaluateCloseTrendPullback(context) {
   const primary = anchorValues.length ? Math.max(...anchorValues) : null
   const latest = context.candles.at(-1)
 
-  if (!(context.current > context.ma20)) blockers.push('收盘未站上MA20')
-  if (!(context.ma20 >= context.ma20Past)) blockers.push('MA20仍在向下')
+  if (!(context.current > context.ma20)) {
+    blockers.push(
+      `收盘价${numberText(context.current)}元，未站上`
+      + `MA20 ${numberText(context.ma20)}元`,
+    )
+  }
+  if (!(context.ma20 >= context.ma20Past)) {
+    blockers.push(
+      `MA20由${numberText(context.ma20Past)}元降至`
+      + `${numberText(context.ma20)}元，趋势仍向下`,
+    )
+  }
   if (!(context.gain20 >= 5 && context.gain20 <= 25)) {
-    blockers.push('近20日强度不在合理区间')
+    blockers.push(
+      `近20日涨幅${numberText(context.gain20, 1)}%，`
+      + '要求5%至25%',
+    )
   }
   if (
     primary == null
     || !(context.atr14 > 0)
     || context.current - primary > context.atr14 * 1.25
-  ) blockers.push('收盘距离支撑超过1.25ATR')
+  ) blockers.push(atrDistanceBlocker(
+    '收盘价距离支撑',
+    context.current,
+    primary,
+    context.atr14,
+    1.25,
+  ))
   if (
     context.currentVolume != null
     && context.volumeAvg5 != null
     && context.currentVolume > context.volumeAvg5 * 0.9
-  ) blockers.push('回踩没有缩量')
+  ) blockers.push(
+    `当日成交量为5日均量的${numberText(
+      context.currentVolume / context.volumeAvg5 * 100,
+      0,
+    )}%，要求不高于90%`,
+  )
   if (!(context.current >= context.currentOpen || context.current >= context.ma10)) {
-    blockers.push('收盘没有企稳')
+    blockers.push(
+      `收盘价${numberText(context.current)}元仍低于开盘价`
+      + `${numberText(context.currentOpen)}元和MA10 `
+      + `${numberText(context.ma10)}元`,
+    )
   }
-  if (!context.sectorOpportunity.matched) blockers.push('板块方向未确认')
-  if (!fundSupported(context.fund)) blockers.push('资金承接未确认')
+  if (!context.sectorOpportunity.matched) {
+    blockers.push('所属行业或概念未进入今日板块前瞻确认范围')
+  }
+  if (!fundSupported(context.fund)) blockers.push(fundBlocker(context.fund))
 
   return result(
     FORMULA_IDS.CLOSE_TREND_PULLBACK,
@@ -366,19 +506,56 @@ function evaluateCloseSqueeze(context) {
     ? round(context.resistance + 0.01)
     : null
 
-  if (!(context.boll?.widthPct <= 6)) blockers.push('布林带尚未收窄')
-  if (!(context.current >= context.boll?.mid)) blockers.push('收盘未站上布林中轨')
-  if (!(context.ma20 >= context.ma20Past)) blockers.push('MA20仍在向下')
-  if (!(context.gain20 <= 20)) blockers.push('近20日位置过高')
-  if (!(context.currentPct <= 4)) blockers.push('当日涨幅过高')
-  if (!(context.currentAmount >= 50_000_000)) blockers.push('成交额不足')
+  if (!(context.boll?.widthPct <= 6)) {
+    blockers.push(
+      `布林带宽度${numberText(context.boll?.widthPct, 1)}%，`
+      + '要求不高于6%',
+    )
+  }
+  if (!(context.current >= context.boll?.mid)) {
+    blockers.push(
+      `收盘价${numberText(context.current)}元，未站上布林中轨`
+      + `${numberText(context.boll?.mid)}元`,
+    )
+  }
+  if (!(context.ma20 >= context.ma20Past)) {
+    blockers.push(
+      `MA20由${numberText(context.ma20Past)}元降至`
+      + `${numberText(context.ma20)}元，趋势仍向下`,
+    )
+  }
+  if (!(context.gain20 <= 20)) {
+    blockers.push(
+      `近20日已上涨${numberText(context.gain20, 1)}%，`
+      + '超过20%上限',
+    )
+  }
+  if (!(context.currentPct <= 4)) {
+    blockers.push(
+      `当日已上涨${numberText(context.currentPct, 1)}%，`
+      + '超过4%追高线',
+    )
+  }
+  if (!(context.currentAmount >= 50_000_000)) {
+    blockers.push(
+      `当前成交额${amountText(context.currentAmount)}，`
+      + '要求至少0.50亿元',
+    )
+  }
   if (
     context.currentVolume != null
     && context.volumeAvg5 != null
     && context.currentVolume >= context.volumeAvg5
-  ) blockers.push('成交量尚未收敛')
-  if (!context.sectorOpportunity.matched) blockers.push('板块方向未确认')
-  if (!fundSupported(context.fund)) blockers.push('资金承接未确认')
+  ) blockers.push(
+    `当日成交量为5日均量的${numberText(
+      context.currentVolume / context.volumeAvg5 * 100,
+      0,
+    )}%，要求低于100%`,
+  )
+  if (!context.sectorOpportunity.matched) {
+    blockers.push('所属行业或概念未进入今日板块前瞻确认范围')
+  }
+  if (!fundSupported(context.fund)) blockers.push(fundBlocker(context.fund))
 
   return result(
     FORMULA_IDS.CLOSE_SQUEEZE,

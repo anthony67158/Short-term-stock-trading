@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { usePolling } from '../hooks'
 import Icon from './Icon'
 import StockName from './StockName'
 import { fmtPct, pctClass, fmtInflow } from '../format'
@@ -10,9 +9,14 @@ function fmtTime(t) {
   return `${s.slice(0, 2)}:${s.slice(2, 4)}`
 }
 
-export default function LimitPool({ interval }) {
+export default function LimitPool({
+  dataByKind = {},
+  loading = false,
+  errors = {},
+}) {
   const [kind, setKind] = useState('zt') // zt | zb
-  const { data, loading, error } = usePolling(`/api/board?type=limitup&kind=${kind}`, interval, [kind])
+  const data = dataByKind[kind] || null
+  const error = errors[kind === 'zt' ? 'limitUp' : 'brokenLimit'] || ''
   const list = (data && data.list) || []
 
   // 连板梯队统计（仅涨停池）

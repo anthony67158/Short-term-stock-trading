@@ -42,6 +42,14 @@ function event(overrides = {}) {
       formulaId: 'INTRADAY_VWAP_PULLBACK',
       score: 88,
     }],
+    shadowFeatures: {
+      ret2dPct: 3.2,
+      orderImbalanceShort: 46,
+      overheatReversalRisk: 18,
+      liquidityComposite: 72,
+      signalOrderFlowContinuation: 1,
+      signalLiquidityConfirmed: 1,
+    },
     decision: {
       formulaId: 'INTRADAY_VWAP_PULLBACK',
       priceType: 'PULLBACK_WATCH',
@@ -93,6 +101,10 @@ test('机会评分特征只使用决策时点数据并保持固定顺序', () =>
   assert.equal(input.factors.cheapScore, 42)
   assert.equal(input.factors.formulaScore, 88)
   assert.equal(input.factors.marketAllowed, 1)
+  assert.equal(input.factors.ret2dPct, 3.2)
+  assert.equal(input.factors.orderImbalanceShort, 46)
+  assert.equal(input.factors.signalOrderFlowContinuation, 1)
+  assert.equal(input.factors.signalLiquidityConfirmed, 1)
   assert.equal('displayed' in input.factors, false)
   assert.equal(input.factors.entryDistancePct, -1.961)
   assert.equal(input.factors.stopDistancePct, 4)

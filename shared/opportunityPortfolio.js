@@ -13,6 +13,7 @@ export const OPPORTUNITY_PORTFOLIO_SCHEMA_VERSION =
 // 默认约束：单只 5%（与军师小仓试错上限一致）、单板块 10%、总新增风险 15%。
 const DEFAULT_MAX_PER_POSITION_PCT = 5
 const DEFAULT_MAX_PER_SECTOR_PCT = 10
+const DEFAULT_MAX_CORRELATED_THEME_PCT = 8
 const DEFAULT_MAX_TOTAL_NEW_RISK_PCT = 15
 
 // 只有真正可入场的状态才占用组合预算；方向观察与不买不占预算。
@@ -43,6 +44,14 @@ function sectorKeyOf(row) {
   }
 }
 
+function themesOf(row) {
+  return [...new Set(
+    (Array.isArray(row?.tags?.concepts) ? row.tags.concepts : [])
+      .map((value) => String(value || '').trim())
+      .filter(Boolean),
+  )].slice(0, 6)
+}
+
 // 组合内排序键：可入场优先，其次盈亏比，再次量化分——只影响"谁先占预算"，
 // 不改变原 lane 展示顺序，也不改任何 state。
 function rankKey(row) {
@@ -70,10 +79,15 @@ export function analyzeOpportunityPortfolio({
   holdings = [],
   maxPerPositionPct = DEFAULT_MAX_PER_POSITION_PCT,
   maxPerSectorPct = DEFAULT_MAX_PER_SECTOR_PCT,
+  maxCorrelatedThemePct = DEFAULT_MAX_CORRELATED_THEME_PCT,
   maxTotalNewRiskPct = DEFAULT_MAX_TOTAL_NEW_RISK_PCT,
 } = {}) {
   const positionCap = Math.max(0, finite(maxPerPositionPct, 0) || 0)
   const sectorCap = Math.max(0, finite(maxPerSectorPct, 0) || 0)
+  const correlatedCap = Math.max(
+    0,
+    finite(maxCorrelatedThemePct, 0) || 0,
+  )
   const totalCap = Math.max(0, finite(maxTotalNewRiskPct, 0) || 0)
 
   // 已持仓的同板块占用，作为板块上限的起点（边际集中度）。
@@ -93,12 +107,15 @@ export function analyzeOpportunityPortfolio({
 
   const sectorApproved = new Map()
   const sectorRequested = new Map()
+  const themeApproved = new Map()
+  const themeRequested = new Map()
   let approvedTotal = 0
   const results = []
 
   for (const row of ranked) {
     const state = String(row?.state || '')
     const { code: sectorCode, name: sectorName } = sectorKeyOf(row)
+    const themes = themesOf(row)
     const base = {
       ...row,
       _order: order.get(row) ?? 0,
@@ -121,6 +138,12 @@ export function analyzeOpportunityPortfolio({
       sectorCode,
       (sectorRequested.get(sectorCode) || 0) + positionPct,
     )
+    for (const theme of themes) {
+      themeRequested.set(
+        theme,
+        (themeRequested.get(theme) || 0) + positionPct,
+      )
+    }
 
     const heldPct = heldBySector.get(sectorCode) || 0
     const sectorUsed = (sectorApproved.get(sectorCode) || 0) + heldPct
@@ -128,6 +151,11 @@ export function analyzeOpportunityPortfolio({
       sectorCap > 0 && sectorUsed + positionPct > sectorCap + 1e-9
     const overBudget =
       totalCap > 0 && approvedTotal + positionPct > totalCap + 1e-9
+    const crowdedTheme = themes.find((theme) =>
+      correlatedCap > 0
+      && (themeApproved.get(theme) || 0) + positionPct
+        > correlatedCap + 1e-9
+    )
 
     if (overSector) {
       results.push({
@@ -151,12 +179,29 @@ export function analyzeOpportunityPortfolio({
       })
       continue
     }
+    if (crowdedTheme) {
+      results.push({
+        ...base,
+        positionPct,
+        portfolioState: 'CORRELATION_CAPPED',
+        portfolioReason:
+          `与已纳入候选共同暴露于${crowdedTheme}主题，`
+          + '相关风险超过上限，本轮只保留排序更高的机会。',
+      })
+      continue
+    }
 
     sectorApproved.set(
       sectorCode,
       (sectorApproved.get(sectorCode) || 0) + positionPct,
     )
     approvedTotal += positionPct
+    for (const theme of themes) {
+      themeApproved.set(
+        theme,
+        (themeApproved.get(theme) || 0) + positionPct,
+      )
+    }
     results.push({
       ...base,
       positionPct,
@@ -195,12 +240,23 @@ export function analyzeOpportunityPortfolio({
   const included = candidates.filter(
     (item) => item.portfolioState === 'INCLUDED',
   )
+  const correlationExposure = [...themeRequested.entries()]
+    .map(([theme, requestedPct]) => ({
+      theme,
+      requestedPct: round(requestedPct),
+      approvedPct: round(themeApproved.get(theme) || 0),
+    }))
+    .sort((left, right) =>
+      right.approvedPct - left.approvedPct
+      || right.requestedPct - left.requestedPct,
+    )
 
   return {
     schemaVersion: OPPORTUNITY_PORTFOLIO_SCHEMA_VERSION,
     limits: {
       maxPerPositionPct: round(positionCap),
       maxPerSectorPct: round(sectorCap),
+      maxCorrelatedThemePct: round(correlatedCap),
       maxTotalNewRiskPct: round(totalCap),
     },
     budget: {
@@ -210,6 +266,7 @@ export function analyzeOpportunityPortfolio({
       includedCount: included.length,
     },
     sectorExposure,
+    correlationExposure,
     candidates,
   }
 }

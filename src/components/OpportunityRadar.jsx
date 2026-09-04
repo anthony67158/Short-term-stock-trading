@@ -1,13 +1,14 @@
 import {
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
 } from 'react'
 import {
   loadOpportunityRadar,
+  opportunityRadarAutoRefreshDelay,
   refreshOpportunityRadar,
+  refreshTailOpportunity,
 } from '../opportunityRadarClient.js'
 import {
   planStore,
@@ -18,9 +19,8 @@ import OpportunityRadarContent from './OpportunityRadarContent'
 import SectorForecastSettings from './SectorForecastSettings'
 
 const LANES = Object.freeze([
-  { id: 'layout', label: '提前布局' },
   { id: 'intraday', label: '盘中机会' },
-  { id: 'next', label: '次日计划' },
+  { id: 'next', label: '次日关注计划' },
 ])
 
 const SOURCE_NAMES = Object.freeze({
@@ -49,17 +49,9 @@ function taskMessage(task) {
 }
 
 function refreshLabel(lane, snapshot) {
-  if (snapshot?.phase === 'REST') return '读取最近结果'
-  if (snapshot?.phase === 'LUNCH' && lane === 'intraday') {
-    return '午间读取最新'
-  }
-  if (lane === 'intraday') return '刷新盘中机会'
-  if (lane === 'next') {
-    return snapshot?.phase === 'PREOPEN'
-      ? '复核开盘条件'
-      : '生成次日计划'
-  }
-  return '更新提前布局'
+  if (lane === 'intraday') return '扫描盘中机会'
+  if (snapshot?.phase === 'AFTER_CLOSE') return '生成次日关注'
+  return '收盘后可生成'
 }
 
 export default function OpportunityRadar() {
@@ -98,18 +90,25 @@ export default function OpportunityRadar() {
     return () => { active = false }
   }, [load])
 
-  const hasActiveTasks = useMemo(
-    () => Object.values(snapshot?.tasks || {}).some(activeTask),
-    [snapshot?.tasks],
+  const autoRefreshDelay = opportunityRadarAutoRefreshDelay(
+    snapshot,
+    Date.now(),
+    { refreshing },
   )
 
   useEffect(() => {
-    if (!refreshing && !hasActiveTasks) return undefined
-    const timer = setInterval(() => {
+    if (autoRefreshDelay == null) return undefined
+    const timer = setTimeout(() => {
       void load({ quiet: true })
-    }, 2500)
-    return () => clearInterval(timer)
-  }, [hasActiveTasks, load, refreshing])
+    }, autoRefreshDelay)
+    return () => clearTimeout(timer)
+  }, [
+    autoRefreshDelay,
+    error,
+    load,
+    refreshing,
+    snapshot?.generatedAt,
+  ])
 
   const selectLane = (value) => {
     laneSelected.current = true
@@ -117,7 +116,7 @@ export default function OpportunityRadar() {
   }
 
   const refresh = async () => {
-    if (refreshing || !snapshot) return
+    if (refreshing || !snapshot || !canRefresh) return
     setRefreshing(true)
     setError('')
     setSourceRuns({})
@@ -143,6 +142,25 @@ export default function OpportunityRadar() {
       setError(reason?.message || '机会雷达更新失败')
     } finally {
       setRefreshing(false)
+    }
+  }
+
+  const refreshTail = async () => {
+    if (tailRunning || !snapshot?.tailSession?.canRun) return
+    setError('')
+    try {
+      const next = await refreshTailOpportunity({
+        snapshot,
+        onSourceState: (source, status, message = '') => {
+          setSourceRuns((current) => ({
+            ...current,
+            [source]: { status, message },
+          }))
+        },
+      })
+      setSnapshot(next)
+    } catch (reason) {
+      setError(reason?.message || '尾盘公式运行失败')
     }
   }
 
@@ -181,6 +199,13 @@ export default function OpportunityRadar() {
       .map((item) => [item.source, item]),
   ).values()]
   const currentLane = lane || snapshot?.defaultLane || 'next'
+  const canRefresh = currentLane === 'intraday'
+    ? snapshot?.phase === 'INTRADAY'
+    : snapshot?.phase === 'AFTER_CLOSE'
+  const tailRunning = (
+    sourceRuns.tail?.status === 'running'
+    || activeTask(snapshot?.tasks?.tail)
+  )
 
   return (
     <section className="panel opportunity-radar">
@@ -188,7 +213,7 @@ export default function OpportunityRadar() {
         <div role="heading" aria-level="2" className="panel-title">
           <Icon name="radar" size={16} />
           机会雷达
-          <span className="sub-name">方向、买点与退出计划</span>
+          <span className="sub-name">全站唯一选股入口</span>
           {snapshot?.phase && (
             <span className="opportunity-phase">
               {PHASE_NAMES[snapshot.phase] || '当前'}
@@ -199,9 +224,14 @@ export default function OpportunityRadar() {
           <button
             type="button"
             className="btn btn-primary"
-            disabled={loading || refreshing || !snapshot}
+            disabled={loading || refreshing || !snapshot || !canRefresh}
             aria-busy={refreshing}
             onClick={refresh}
+            title={!canRefresh
+              ? currentLane === 'next'
+                ? '收盘后可手动生成次日关注计划'
+                : '盘中公式仅在连续竞价期间运行'
+              : ''}
           >
             <Icon
               name={refreshing ? 'refresh' : 'play'}
@@ -281,6 +311,8 @@ export default function OpportunityRadar() {
           snapshot={snapshot}
           book={book}
           onAdd={add}
+          onRunTail={refreshTail}
+          tailRunning={tailRunning}
         />
       ) : (
         <div className="empty">暂无可用机会数据</div>

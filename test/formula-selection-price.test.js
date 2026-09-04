@@ -67,7 +67,7 @@ test('大盘不支持新增风险时保留价格合同但动作降级为不买',
   assert.equal(result.riskReward, 2.5)
   assert.equal(result.priceContractValid, true)
   assert.equal(result.marketAllowsRisk, false)
-  assert.match(result.blockers.join('；'), /市场环境不支持新增风险/)
+  assert.match(result.blockers.join('；'), /市场风险条件未通过/)
 })
 
 test('未持仓没有公式或赔率不足时不编造买入价格', () => {

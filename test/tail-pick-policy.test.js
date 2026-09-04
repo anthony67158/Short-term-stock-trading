@@ -154,6 +154,54 @@ test('大盘数据缺失或没有主线时直接输出今日不开仓', () => {
   assert.match(result.blockers.join('；'), /主线方向/)
 })
 
+test('盘面风控给出可核对的炸板广度和指数原因', () => {
+  const market = strongMarket()
+  market.indices = [
+    { code: '000001', name: '上证指数', pct: 0.02 },
+    { code: '399001', name: '深证成指', pct: 0.1 },
+  ]
+  market.breadth = {
+    ...market.breadth,
+    up: 1886,
+    down: 3595,
+    flat: 146,
+    limitUp: 44,
+    limitDown: 16,
+    volumeComparable: false,
+  }
+  market.sentiment = {
+    ...market.sentiment,
+    phase: 'RETREAT',
+    phaseLabel: '退潮',
+    breakRatePct: 42.9,
+    hardRiskSignals: ['炸板率42.9%超过40%'],
+  }
+  const weakIndex = Array.from({ length: 60 }, (_, index) => ({
+    close: 16 - index * 0.05,
+    volume: 1000,
+  }))
+  const result = evaluateTailPickMarketGate({
+    market,
+    indexSeries: [
+      { code: '000001', name: '上证指数', candles: indexCandles() },
+      { code: '399001', name: '深证成指', candles: weakIndex },
+    ],
+    sectorSnapshot: {
+      sectors: [{
+        actionability: 'LAYOUT',
+        forecast: { next: { score: 68 } },
+      }],
+    },
+  })
+
+  assert.equal(result.allowed, false)
+  assert.match(result.blockers[0], /炸板率42\.9%超过40%/)
+  assert.match(result.blockers.join('；'), /上涨1886家/)
+  assert.match(result.blockers.join('；'), /下跌3595家/)
+  assert.match(result.blockers.join('；'), /涨跌比0\.52/)
+  assert.match(result.blockers.join('；'), /深证成指/)
+})
+
 test('最近5分钟持续站稳均价线且无放量跳水才通过分时纪律', () => {
   const trends = Array.from({ length: 10 }, (_, index) => ({
     time: `14:${String(41 + index).padStart(2, '0')}`,

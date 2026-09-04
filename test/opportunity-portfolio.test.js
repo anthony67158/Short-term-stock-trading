@@ -110,6 +110,43 @@ test('高相关去重：同板块高分候选优先，其余标记为冗余', ()
   assert.equal(included[0].code, '600002')
 })
 
+test('跨板块共享同一概念时按相关主题暴露去重', () => {
+  const rows = [
+    row({
+      code: '600001',
+      score: 90,
+      sector: { code: 'BK1', name: '板块一' },
+      tags: { concepts: ['机器人', '工业母机'] },
+    }),
+    row({
+      code: '600002',
+      score: 80,
+      sector: { code: 'BK2', name: '板块二' },
+      tags: { concepts: ['机器人', '人工智能'] },
+    }),
+  ]
+  const result = analyzeOpportunityPortfolio({
+    rows,
+    maxCorrelatedThemePct: 8,
+  })
+
+  assert.equal(
+    result.candidates.find((item) => item.code === '600001')
+      .portfolioState,
+    'INCLUDED',
+  )
+  const duplicate = result.candidates.find(
+    (item) => item.code === '600002',
+  )
+  assert.equal(duplicate.portfolioState, 'CORRELATION_CAPPED')
+  assert.match(duplicate.portfolioReason, /机器人|相关/)
+  assert.equal(
+    result.correlationExposure.find((item) => item.theme === '机器人')
+      .approvedPct,
+    5,
+  )
+})
+
 test('已持仓的同板块暴露计入板块上限', () => {
   const rows = [
     row({ code: '600002', sector: { code: 'BK1001', name: '先进制造' } }),

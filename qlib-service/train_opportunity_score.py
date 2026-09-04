@@ -36,6 +36,41 @@ MODEL_FILENAMES = {
     "pWinGivenFill": "opportunity_win_lgb.txt",
     "expectedNetR": "opportunity_netr_lgb.txt",
 }
+SHADOW_FEATURE_GROUPS = {
+    "orderFlow": (
+        "mainRatio",
+        "mainNetYi",
+        "retailNetYi",
+        "flowDivergence",
+        "vwapDistancePct",
+        "orderImbalanceShort",
+        "signalOrderFlowContinuation",
+    ),
+    "overheat": (
+        "intradayRangePct",
+        "distanceToHighPct",
+        "overheatReversalRisk",
+        "signalOverheatRisk",
+    ),
+    "liquidity": (
+        "logAmount",
+        "turnover",
+        "volumeRatio",
+        "liquidityComposite",
+        "signalLiquidityConfirmed",
+    ),
+    "sectorStrength": (
+        "sectorRelativeStrength",
+        "sectorRankPct",
+        "signalSectorRelativeStrength",
+    ),
+    "limitCrowding": (
+        "limitUpDistancePct",
+        "limitHitCount5d",
+        "failedLimitCount5d",
+        "signalLimitCrowding",
+    ),
+}
 
 
 def load_opportunity_dataset(path):
@@ -316,6 +351,47 @@ def _not_ready_report(now, readiness, split=None):
     }
 
 
+def _feature_group_ablation(
+    X,
+    holdout_index,
+    dates,
+    actual_net_r,
+    fill_report,
+    net_r_report,
+):
+    output = {}
+    for group, names in SHADOW_FEATURE_GROUPS.items():
+        indexes = [
+            FEATURE_NAMES.index(name)
+            for name in names
+            if name in FEATURE_NAMES
+        ]
+        if not indexes:
+            continue
+        reduced = np.array(X[holdout_index], copy=True)
+        reduced[:, indexes] = 0.0
+        fill_probability = apply_probability_calibrator(
+            _classifier_probabilities(
+                fill_report["model"],
+                reduced,
+            ),
+            fill_report["calibration"],
+        )
+        predicted_net_r = np.asarray(
+            net_r_report["model"].predict(reduced),
+            dtype=np.float64,
+        )
+        output[group] = ranking_metrics(
+            actual_net_r > 0,
+            actual_net_r,
+            fill_probability * predicted_net_r,
+            dates[holdout_index],
+            top_k=5,
+        )
+        output[group].pop("daily_net_r", None)
+    return output
+
+
 def _walk_forward_report(data, *, n_splits=3, purge_dates=5):
     folds = expanding_date_folds(
         data["dates"],
@@ -574,6 +650,18 @@ def train_opportunity_score(
         data["dates"][holdout_index],
         top_k=5,
     )
+    challenger_top3 = ranking_metrics(
+        actual_net_r > 0,
+        actual_net_r,
+        utility,
+        data["dates"][holdout_index],
+        top_k=3,
+    )
+    challenger_ranking.update({
+        key: value
+        for key, value in challenger_top3.items()
+        if key != "daily_net_r"
+    })
     formula_score_index = FEATURE_NAMES.index("formulaScore")
     baseline_ranking = ranking_metrics(
         actual_net_r > 0,
@@ -582,6 +670,18 @@ def train_opportunity_score(
         data["dates"][holdout_index],
         top_k=5,
     )
+    baseline_top3 = ranking_metrics(
+        actual_net_r > 0,
+        actual_net_r,
+        data["X"][holdout_index, formula_score_index],
+        data["dates"][holdout_index],
+        top_k=3,
+    )
+    baseline_ranking.update({
+        key: value
+        for key, value in baseline_top3.items()
+        if key != "daily_net_r"
+    })
     lower_bound = block_bootstrap_lower_bound(
         challenger_ranking["daily_net_r"],
         samples=2000,
@@ -594,6 +694,14 @@ def train_opportunity_score(
         },
         "baseline": baseline_ranking,
     }
+    metrics["featureAblation"] = _feature_group_ablation(
+        data["X"],
+        holdout_index,
+        data["dates"],
+        actual_net_r,
+        fill,
+        net_r,
+    )
     gate = shadow_gate(metrics)
     if not walk_forward["shadowEligible"]:
         gate["shadowEligible"] = False

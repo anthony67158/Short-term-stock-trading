@@ -4,9 +4,23 @@ import Icon from './Icon'
 import StockName from './StockName'
 import { fmtPct, pctClass, fmtInflow, fmtNum , fmtRaw } from '../format'
 
-export default function Movers({ interval }) {
+export default function Movers({
+  interval,
+  snapshots = {},
+  snapshotLoading = false,
+}) {
   const [kind, setKind] = useState('inflow') // inflow | speed | outflow
-  const { data, loading, error } = usePolling(`/api/board?type=movers&kind=${kind}`, interval, [kind])
+  const snapshot = snapshots[kind] || null
+  const fallback = usePolling(
+    kind === 'outflow' || (!snapshotLoading && !snapshot)
+      ? `/api/board?type=movers&kind=${kind}`
+      : null,
+    interval,
+    [kind],
+  )
+  const data = snapshot || fallback.data
+  const loading = snapshotLoading || fallback.loading
+  const error = fallback.error
   const list = (data && data.list) || []
 
   return (

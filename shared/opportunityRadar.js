@@ -8,9 +8,12 @@ import {
 import {
   analyzeOpportunityPortfolio,
 } from './opportunityPortfolio.js'
+import {
+  explainOpportunityMarketGate,
+} from './opportunityLanguage.js'
 
 export const OPPORTUNITY_RADAR_SCHEMA_VERSION =
-  'opportunity-radar.v1'
+  'opportunity-radar.v2'
 
 const PHASES = Object.freeze({
   preopen: 'PREOPEN',
@@ -33,6 +36,8 @@ const STATE_ORDER = Object.freeze({
   SECTOR_WATCH: 2,
   AVOID: 3,
 })
+const TAIL_RUN_MINUTE = 14 * 60 + 50
+const SCHEDULE_GRACE_MS = 7 * 60 * 1000
 
 function finite(value) {
   if (value == null || value === '') return null
@@ -102,13 +107,116 @@ function sourceState(value, {
   }
 }
 
-function sectorSnapshotFor(sector, phase, day) {
-  const intraday = sector?.intraday
-  if (
-    ['INTRADAY', 'LUNCH'].includes(phase)
-    && intraday?.signalDate === day
-  ) return intraday
-  return sector?.latest || intraday || null
+function sectorSnapshotFor(sector, phase, day, previousDay) {
+  const expectedDay = ['PREOPEN', 'REST'].includes(phase)
+    ? previousDay
+    : day
+  const candidates = ['INTRADAY', 'LUNCH'].includes(phase)
+    ? [sector?.intraday, sector?.latest]
+    : [sector?.latest, sector?.intraday]
+  return candidates.find((item) => sourceDay(item) === expectedDay)
+    || candidates.find(Boolean)
+    || null
+}
+
+function scheduledAt(day, minute) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day || ''))) return null
+  const hour = String(Math.floor(minute / 60)).padStart(2, '0')
+  const minuteText = String(minute % 60).padStart(2, '0')
+  const timestamp = Date.parse(`${day}T${hour}:${minuteText}:00+08:00`)
+  return Number.isFinite(timestamp) ? timestamp : null
+}
+
+function scheduledSourceState(value, {
+  expectedDay,
+  scheduleMinute,
+  task,
+  now,
+  label,
+}) {
+  const current = sourceState(value, {
+    expectedDay,
+    strictDay: true,
+  })
+  if (current.status === 'fresh') return current
+  const taskMatches = sourceDay(task) === expectedDay
+  if (taskMatches && ['QUEUED', 'RUNNING'].includes(task?.status)) {
+    return {
+      status: 'running',
+      dataAsOf: task.updatedAt || task.startedAt || null,
+      tradeDate: expectedDay,
+      message: String(task.message || `${label}正在生成`),
+      refreshAfterMs: 2_500,
+    }
+  }
+  if (taskMatches && task?.status === 'FAILED') {
+    return {
+      status: 'failed',
+      dataAsOf: task.finishedAt || task.updatedAt || null,
+      tradeDate: expectedDay,
+      error: String(task.error || task.message || `${label}生成失败`),
+    }
+  }
+  const runAt = scheduledAt(expectedDay, scheduleMinute)
+  if (runAt != null && now < runAt) {
+    return {
+      status: 'scheduled',
+      dataAsOf: null,
+      tradeDate: expectedDay,
+      message: `${String(Math.floor(scheduleMinute / 60)).padStart(2, '0')}:`
+        + `${String(scheduleMinute % 60).padStart(2, '0')}自动生成`,
+      refreshAt: runAt + 5_000,
+    }
+  }
+  if (runAt != null && now < runAt + SCHEDULE_GRACE_MS) {
+    return {
+      status: 'pending',
+      dataAsOf: null,
+      tradeDate: expectedDay,
+      message: `等待${label}结果`,
+      refreshAfterMs: 10_000,
+    }
+  }
+  return {
+    ...current,
+    error: current.error || `${label}今日尚未生成`,
+  }
+}
+
+function manualSourceState(value, {
+  expectedDay,
+  task,
+  label,
+}) {
+  const current = sourceState(value, {
+    expectedDay,
+    strictDay: true,
+  })
+  if (current.status === 'fresh') return current
+  const taskMatches = sourceDay(task) === expectedDay
+  if (taskMatches && ['QUEUED', 'RUNNING'].includes(task?.status)) {
+    return {
+      status: 'running',
+      dataAsOf: task.updatedAt || task.startedAt || null,
+      tradeDate: expectedDay,
+      message: String(task.message || `${label}正在生成`),
+      refreshAfterMs: 2_500,
+    }
+  }
+  if (taskMatches && task?.status === 'FAILED') {
+    return {
+      status: 'failed',
+      dataAsOf: task.finishedAt || task.updatedAt || null,
+      tradeDate: expectedDay,
+      error: String(task.error || task.message || `${label}生成失败`),
+    }
+  }
+  return {
+    status: 'manual',
+    dataAsOf: null,
+    tradeDate: expectedDay,
+    message: '收盘后手动生成',
+  }
 }
 
 function sectorView(value = {}) {
@@ -189,6 +297,7 @@ function formulaOpportunity(candidate, {
   lane,
   sourceFresh,
   sectorFresh,
+  marketGate,
   maps,
   now,
 }) {
@@ -196,7 +305,12 @@ function formulaOpportunity(candidate, {
   const entryPlan = formulaEntryPlan(candidate, lane)
   const exitPlan = formulaExitPlan(candidate, lane, now)
   const riskReward = finite(candidate.riskReward)
-  const blockers = [...(candidate.blockers || [])]
+  const blockers = [
+    ...(candidate.marketAllowsRisk === false
+      ? explainOpportunityMarketGate(marketGate)
+      : []),
+    ...(candidate.blockers || []),
+  ]
   if (riskReward == null || riskReward < 1.8) {
     blockers.push('盈亏比不足1.8:1')
   }
@@ -237,6 +351,7 @@ function formulaOpportunity(candidate, {
         ? '等待价格触发'
         : '本次不买',
     sector: sectorView(sector),
+    tags: candidate.tags || null,
     quote: candidate.quote || null,
     score: finite(candidate.score),
     riskReward,
@@ -282,35 +397,45 @@ function tailOpportunity(candidate, {
   if (near) blockers.unshift('仅接近公式，尚未完整命中')
   if (!formal) blockers.push('手动试算仅供观察')
   if (!sourceFresh) blockers.push('尾盘结果已过期')
+  if (['WINDOW_CLOSED', 'HISTORY'].includes(candidate.liveStatus)) {
+    blockers.push('今日尾盘执行窗口已结束')
+  }
   if (!near && (entryPrice == null || stop == null)) {
     blockers.push('尾盘买卖计划不完整')
   }
-  const valid = !near
-    && formal
-    && sourceFresh
+  const contractComplete = !near
     && entryPrice != null
     && stop != null
     && execution.finalExitDate
+  const valid = contractComplete
+    && formal
+    && sourceFresh
+    && !['WINDOW_CLOSED', 'HISTORY', 'ABANDON'].includes(
+      candidate.liveStatus,
+    )
   const ready = valid && candidate.liveStatus === 'READY'
   return {
     code: String(candidate.code || ''),
     name: String(candidate.name || ''),
-    lane: 'next',
+    lane: 'intraday',
     state: ready ? 'READY' : valid ? 'WAIT_TRIGGER' : 'AVOID',
     stateLabel: ready
       ? '尾盘可关注'
       : valid
-        ? '次日重点关注'
+        ? '尾盘等待确认'
         : '仅作参考',
     sector: sectorView(sector),
+    tags: candidate.tags || null,
     quote: candidate.quote || null,
     score: finite(candidate.score),
     riskReward: null,
-    entryPlan: valid
+    entryPlan: contractComplete
       ? {
           type: 'TAIL_REVERSAL',
           price: entryPrice,
-          window: '14:50-14:55确认，次日按计划处理',
+          window: formal
+            ? '14:50-14:55确认，次日按计划处理'
+            : '手动试算，仅用于核对尾盘条件',
           trigger: unique([
             execution.firstLeg,
             execution.secondLeg,
@@ -320,7 +445,7 @@ function tailOpportunity(candidate, {
           validUntil: null,
         }
       : null,
-    exitPlan: valid
+    exitPlan: contractComplete
       ? {
           hardStopPrice: stop,
           takeProfitPrice: null,
@@ -342,38 +467,6 @@ function tailOpportunity(candidate, {
     blockers,
     stale: !sourceFresh,
     _decisionPriority: near ? 1 : 3,
-  }
-}
-
-function sectorOpportunity(sector, stock, lane) {
-  const value = sectorView(sector)
-  return {
-    code: String(stock?.code || ''),
-    name: String(stock?.name || ''),
-    lane,
-    state: 'SECTOR_WATCH',
-    stateLabel: '方向可看，尚无买点',
-    sector: value,
-    quote: {
-      price: finite(stock?.price),
-      pct: finite(stock?.pct),
-    },
-    score:
-      finite(stock?.layoutScore)
-      ?? finite(stock?.score)
-      ?? value.layoutScore
-      ?? value.nextScore,
-    riskReward: null,
-    entryPlan: null,
-    exitPlan: null,
-    sourceSignals: ['板块前瞻'],
-    evidence: unique([
-      stock?.entryLabel,
-      ...(sector?.reasons || []),
-    ]),
-    blockers: ['尚无个股价格合同'],
-    stale: false,
-    _decisionPriority: 0,
   }
 }
 
@@ -405,30 +498,6 @@ function mergeOpportunity(left, right) {
       ),
     ]),
   }
-}
-
-function sectorRows(snapshot, lane) {
-  const sectors = Array.isArray(snapshot?.sectors)
-    ? snapshot.sectors
-    : []
-  return sectors
-    .filter((sector) => {
-      if (lane === 'layout') {
-        return (
-          sector?.timing?.lane === 'EARLY_LAYOUT'
-          || sector?.phase === 'ACCUMULATION'
-        )
-      }
-      return ['LAYOUT', 'WAIT_PULLBACK'].includes(
-        sector?.actionability,
-      )
-    })
-    .slice(0, 5)
-    .flatMap((sector) =>
-      (Array.isArray(sector?.stocks) ? sector.stocks : [])
-        .slice(0, 3)
-        .map((stock) => sectorOpportunity(sector, stock, lane)),
-    )
 }
 
 function sortedRows(rows) {
@@ -501,19 +570,36 @@ export function buildOpportunityRadar({
     timing.phase === 'AFTER_CLOSE'
     && sector?.market?.tradingDay !== false
   ) ? day : previousTradingDayKey(timestamp)
+  const nextPlanDay = ['PREOPEN', 'REST'].includes(timing.phase)
+    ? closeDay
+    : day
   const sectorSnapshot = sectorSnapshotFor(
     sector,
     timing.phase,
     day,
+    closeDay,
   )
   const maps = sectorMaps(sectorSnapshot)
   const tailState = tail || null
+  const tailExpectedDay = timing.phase === 'REST' ? closeDay : day
   const tailResult = tailState?.currentResult
-    || tailState?.latest
     || tailState?.displayResult
+    || tailState?.latest
     || tailState
     || formula?.tail
     || null
+  const closeSourceState = sourceState(formula?.close, {
+    expectedDay: nextPlanDay,
+    strictDay: true,
+    error: sourceErrors.formula,
+  })
+  const tailSourceState = sourceState(tailResult, {
+    expectedDay: tailExpectedDay,
+    strictDay: true,
+    error: sourceErrors.tail,
+  })
+  const currentDayPlan = nextPlanDay === day
+    && !['PREOPEN', 'REST'].includes(timing.phase)
   const sourceStatus = {
     sector: sourceState(sectorSnapshot, {
       expectedDay: sectorSnapshot?.session === 'intraday'
@@ -527,16 +613,22 @@ export function buildOpportunityRadar({
       strictDay: true,
       error: sourceErrors.formula,
     }),
-    formulaClose: sourceState(formula?.close, {
-      expectedDay: closeDay,
-      strictDay: true,
-      error: sourceErrors.formula,
-    }),
-    tail: sourceState(tailResult, {
-      expectedDay: closeDay,
-      strictDay: true,
-      error: sourceErrors.tail,
-    }),
+    formulaClose: currentDayPlan && !sourceErrors.formula
+      ? manualSourceState(formula?.close, {
+          expectedDay: nextPlanDay,
+          task: formula?.progress?.close,
+          label: '收盘公式',
+        })
+      : closeSourceState,
+    tail: timing.phase !== 'REST' && !sourceErrors.tail
+      ? scheduledSourceState(tailResult, {
+          expectedDay: tailExpectedDay,
+          scheduleMinute: TAIL_RUN_MINUTE,
+          task: tailState?.task,
+          now: timestamp,
+          label: '尾盘公式',
+        })
+      : tailSourceState,
   }
   const intradayFormula = Array.isArray(formula?.intraday?.candidates)
     ? formula.intraday.candidates
@@ -570,8 +662,7 @@ export function buildOpportunityRadar({
   )
 
   const layout = mergeLane([
-    ...sectorRows(sectorSnapshot, 'layout'),
-    ...preferredFormula
+    ...(preferredFormulaFresh ? preferredFormula : [])
       .filter((candidate) =>
         candidate?.sector?.actionability === 'LAYOUT',
       )
@@ -579,48 +670,59 @@ export function buildOpportunityRadar({
         lane: 'layout',
         sourceFresh: preferredFormulaFresh,
         sectorFresh: currentSectorFresh,
+        marketGate: ['INTRADAY', 'LUNCH'].includes(timing.phase)
+          ? formula?.intraday?.marketGate
+          : formula?.close?.marketGate,
         maps,
         now: timestamp,
       })),
   ])
   const intraday = mergeLane([
-    ...sectorRows(sectorSnapshot, 'intraday'),
-    ...intradayFormula.map((candidate) =>
+    ...(sourceStatus.formulaIntraday.status === 'fresh'
+      ? intradayFormula
+      : []).map((candidate) =>
       formulaOpportunity(candidate, {
         lane: 'intraday',
         sourceFresh:
           sourceStatus.formulaIntraday.status === 'fresh',
         sectorFresh: currentSectorFresh,
+        marketGate: formula?.intraday?.marketGate,
+        maps,
+        now: timestamp,
+      }),
+    ),
+    ...(sourceStatus.tail.status === 'fresh'
+      ? tailCandidates
+      : []).map((candidate) =>
+      tailOpportunity(candidate, {
+        formal: tailResult?.session?.isFormal === true,
+        sourceFresh: true,
+        maps,
+        now: timestamp,
+      }),
+    ),
+    ...(sourceStatus.tail.status === 'fresh'
+      ? tailNearCandidates
+      : []).map((candidate) =>
+      tailOpportunity(candidate, {
+        near: true,
+        formal: tailResult?.session?.isFormal === true,
+        sourceFresh: true,
         maps,
         now: timestamp,
       }),
     ),
   ])
   const next = mergeLane([
-    ...sectorRows(sector?.latest || sectorSnapshot, 'next'),
-    ...closeFormula.map((candidate) =>
+    ...(sourceStatus.formulaClose.status === 'fresh'
+      ? closeFormula
+      : []).map((candidate) =>
       formulaOpportunity(candidate, {
         lane: 'next',
-        sourceFresh: sourceStatus.formulaClose.status === 'fresh',
+        sourceFresh: true,
         sectorFresh: sourceStatus.sector.status === 'fresh',
-        maps: sectorMaps(sector?.latest || sectorSnapshot),
-        now: timestamp,
-      }),
-    ),
-    ...tailCandidates.map((candidate) =>
-      tailOpportunity(candidate, {
-        formal: tailResult?.session?.isFormal === true,
-        sourceFresh: sourceStatus.tail.status === 'fresh',
-        maps: sectorMaps(sector?.latest || sectorSnapshot),
-        now: timestamp,
-      }),
-    ),
-    ...tailNearCandidates.map((candidate) =>
-      tailOpportunity(candidate, {
-        near: true,
-        formal: tailResult?.session?.isFormal === true,
-        sourceFresh: sourceStatus.tail.status === 'fresh',
-        maps: sectorMaps(sector?.latest || sectorSnapshot),
+        marketGate: formula?.close?.marketGate,
+        maps,
         now: timestamp,
       }),
     ),

@@ -12,6 +12,10 @@ const alertStoreSource = readFileSync(
   new URL('../src/alertStore.js', import.meta.url),
   'utf8',
 )
+const todaySource = readFileSync(
+  new URL('../src/components/TodayTab.jsx', import.meta.url),
+  'utf8',
+)
 
 test('开盘前十五分钟使用10秒大盘与5秒预警轮询', () => {
   const opening = Date.parse('2026-08-24T01:35:00Z')
@@ -19,6 +23,7 @@ test('开盘前十五分钟使用10秒大盘与5秒预警轮询', () => {
   assert.deepEqual(tradingPollingIntervals(opening), {
     trading: true,
     openingBurst: true,
+    settled: false,
     marketMs: 10_000,
     alertMs: 5_000,
   })
@@ -30,26 +35,48 @@ test('开盘十五分钟后恢复20秒大盘与10秒预警轮询', () => {
   assert.deepEqual(tradingPollingIntervals(afterOpening), {
     trading: true,
     openingBurst: false,
+    settled: false,
     marketMs: 20_000,
     alertMs: 10_000,
   })
 })
 
-test('非连续竞价时段保持低频轮询', () => {
+test('午间休市改为五分钟低频轮询', () => {
   const lunchBreak = Date.parse('2026-08-24T04:00:00Z')
 
   assert.deepEqual(tradingPollingIntervals(lunchBreak), {
     trading: false,
     openingBurst: false,
-    marketMs: 120_000,
-    alertMs: 60_000,
+    settled: false,
+    marketMs: 300_000,
+    alertMs: 300_000,
   })
 })
 
+test('收盘十分钟后与非交易日只首载不重复轮询', () => {
+  const afterClose = Date.parse('2026-08-24T07:11:00Z')
+  const weekend = Date.parse('2026-08-29T02:00:00Z')
+
+  assert.deepEqual(tradingPollingIntervals(afterClose), {
+    trading: false,
+    openingBurst: false,
+    settled: true,
+    marketMs: 0,
+    alertMs: 0,
+  })
+  assert.deepEqual(tradingPollingIntervals(weekend), tradingPollingIntervals(afterClose))
+})
+
 test('工作台接入动态周期且止损触价先落盘再立即确认', () => {
-  assert.match(appSource, /const polling = tradingPollingIntervals\(\)/)
+  assert.match(
+    appSource,
+    /const polling = tradingPollingIntervals\(pollingNow\)/,
+  )
   assert.match(appSource, /const interval = polling\.marketMs/)
   assert.match(appSource, /const alertInterval = polling\.alertMs/)
+  assert.match(appSource, /usePolling\('\/api\/market_snapshot', interval\)/)
+  assert.doesNotMatch(appSource, /usePolling\('\/api\/market', interval\)/)
+  assert.doesNotMatch(todaySource, /usePolling\(/)
   assert.match(alertStoreSource, /resolveImmediateConfirmationAlert/)
   assert.match(alertStoreSource, /flushSave: flushWatchingState/)
   assert.match(alertStoreSource, /_watchingFlushPromise/)

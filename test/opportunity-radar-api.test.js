@@ -67,7 +67,7 @@ test('机会雷达聚合读取会并行启动业务来源与统计基线', async
   )
   resolvers.forEach((resolve) => resolve())
   const result = await pending
-  assert.equal(result.schemaVersion, 'opportunity-radar.v1')
+  assert.equal(result.schemaVersion, 'opportunity-radar.v2')
   assert.equal(result.sourceStatus.sector.status, 'fresh')
   assert.equal(
     result.baseline.schemaVersion,

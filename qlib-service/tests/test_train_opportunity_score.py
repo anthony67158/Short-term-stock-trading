@@ -158,6 +158,24 @@ class TrainOpportunityScoreTest(unittest.TestCase):
             self.assertIn("pWinGivenFill", report["metrics"])
             self.assertIn("expectedNetR", report["metrics"])
             self.assertIn("ranking", report["metrics"])
+            self.assertIn(
+                "precision_at_3",
+                report["metrics"]["ranking"]["challenger"],
+            )
+            self.assertIn(
+                "ndcg_at_3",
+                report["metrics"]["ranking"]["baseline"],
+            )
+            self.assertEqual(
+                set(report["metrics"]["featureAblation"]),
+                {
+                    "orderFlow",
+                    "overheat",
+                    "liquidity",
+                    "sectorStrength",
+                    "limitCrowding",
+                },
+            )
             self.assertGreaterEqual(report["walkForward"]["folds"], 2)
             self.assertTrue(report["walkForward"]["shadowEligible"])
             for filename in (

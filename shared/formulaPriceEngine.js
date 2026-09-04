@@ -141,7 +141,12 @@ function buildUnownedDecision(input) {
     ].slice(0, 4),
     blockers: marketAllowsRisk
       ? []
-      : ['当前市场环境不支持新增风险'],
+      : (
+          Array.isArray(input.marketBlockers)
+          && input.marketBlockers.length
+            ? [...new Set(input.marketBlockers.map(String))]
+            : ['市场风险条件未通过，暂停新增仓位']
+        ),
   }
 }
 

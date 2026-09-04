@@ -271,16 +271,27 @@ function MainApp() {
   const quantReportOpen = useQuantReportOpen()
   const quantModelState = useQuantModelStore()
   const aiSearchConfig = useAiSearchConfig()
-  const polling = tradingPollingIntervals()
+  const [pollingNow, setPollingNow] = useState(Date.now())
+  useEffect(() => {
+    const timer = setInterval(() => setPollingNow(Date.now()), 60_000)
+    return () => clearInterval(timer)
+  }, [])
+  const polling = tradingPollingIntervals(pollingNow)
   const trading = polling.trading
   const interval = polling.marketMs
 
   // 主流程共享数据（今日选股 / 复盘 / 助手 用）
-  const market = usePolling('/api/market', interval)
-  const sectors = usePolling('/api/sectors?type=industry&sort=main', interval)
-  const ztPool = usePolling('/api/board?type=limitup&kind=zt', interval)
-  const moversData = usePolling('/api/board?type=movers&kind=inflow', interval)
-  const speedData = usePolling('/api/board?type=movers&kind=speed', interval)
+  const marketSnapshot = usePolling('/api/market_snapshot', interval)
+  const sourceState = (key) => ({
+    data: marketSnapshot.data?.[key] || null,
+    loading: marketSnapshot.loading,
+    error: marketSnapshot.data?.errors?.[key] || marketSnapshot.error,
+  })
+  const market = sourceState('market')
+  const sectors = sourceState('sectors')
+  const ztPool = sourceState('limitUp')
+  const moversData = sourceState('movers')
+  const speedData = sourceState('speed')
 
   const refreshTick = useRefreshTick()
   const remain = useCountdown(interval, (market.data && market.data.updatedAt) + refreshTick)
@@ -456,10 +467,10 @@ function MainApp() {
             <span className={'nav-status ' + (trading ? 'on' : 'off')}>
               <span className="status-dot" />{trading ? '交易中' : '休市'}
             </span>
-            <button type="button" className="nav-refresh" onClick={triggerRefresh} title="立即刷新数据" aria-label={`刷新数据，距自动刷新 ${remain} 秒`}>
+            <button type="button" className="nav-refresh" onClick={triggerRefresh} title="立即刷新数据" aria-label={interval > 0 ? `刷新数据，距自动刷新 ${remain} 秒` : '刷新数据'}>
               <Icon name="refresh" size={14} />
               <span className="nav-refresh-label">刷新</span>
-              <span className="nav-refresh-count">{remain}s</span>
+              {interval > 0 && <span className="nav-refresh-count">{remain}s</span>}
             </button>
             <UndoButton />
             <AlertBell onOpen={() => {
@@ -496,9 +507,11 @@ function MainApp() {
           <Suspense fallback={<TabSkeleton />}>
             {tab === 'today' && (
               <TodayTab
-                interval={interval}
                 market={market.data}
                 sectors={sectors.data}
+                snapshot={marketSnapshot.data}
+                snapshotLoading={marketSnapshot.loading}
+                snapshotError={marketSnapshot.error}
               />
             )}
             {tab === 'plan' && <PlanTab interval={interval} />}
@@ -510,7 +523,14 @@ function MainApp() {
                 onSubChange={setHubSub}
               />
             )}
-            {tab === 'research' && <ResearchTab interval={interval} />}
+            {tab === 'research' && (
+              <ResearchTab
+                interval={interval}
+                snapshot={marketSnapshot.data}
+                snapshotLoading={marketSnapshot.loading}
+                snapshotError={marketSnapshot.error}
+              />
+            )}
           </Suspense>
         </ErrorBoundary>
       </main>

@@ -25,12 +25,24 @@ function sessionLabel() {
 }
 function nowClock() { const d = nowBJ(); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` }
 
-export default function FundFlowCanvas({ interval }) {
+export default function FundFlowCanvas({
+  interval,
+  snapshot = null,
+  snapshotLoading = false,
+}) {
   const theme = useTheme()
   const light = theme === 'light'
 
   // 实时快照数据源（打开时抓一次；下方 frozen 逻辑保证后续轮询不再改变画面）
-  const { data, loading } = usePolling(`/api/sectors?type=industry&sort=main`, interval, [])
+  const fallback = usePolling(
+    !snapshotLoading && !snapshot
+      ? '/api/sectors?type=industry&sort=main'
+      : null,
+    interval,
+    [],
+  )
+  const data = snapshot || fallback.data
+  const loading = snapshotLoading || fallback.loading
   const liveList = (data && data.list) || []
 
   // 冻结：把首个非空快照锁定为"打开时的市场情况"，之后即使轮询到新数据也不覆盖。

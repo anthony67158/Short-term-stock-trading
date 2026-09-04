@@ -1,4 +1,5 @@
 import math
+import json
 import os
 import sys
 import unittest
@@ -56,6 +57,30 @@ class OpportunityContractTest(unittest.TestCase):
         non_finite["factors"][FEATURE_NAMES[0]] = math.inf
         with self.assertRaisesRegex(ValueError, "特征必须是有限数值"):
             validate_score_request({"items": [non_finite]})
+
+    def test_legacy_v1_inputs_fill_new_shadow_features_with_zero(self):
+        with open(
+            os.path.join(
+                SERVICE_ROOT,
+                "contracts",
+                "opportunity-score-features.json",
+            ),
+            encoding="utf-8",
+        ) as handle:
+            manifest = json.load(handle)
+        legacy = item()
+        legacy["schemaVersion"] = "opportunity-score-feature.v1"
+        for name in manifest["legacyDefaultZeroFeatures"]:
+            del legacy["factors"][name]
+
+        normalized = validate_score_request({"items": [legacy]})[0]
+
+        self.assertEqual(
+            normalized["schemaVersion"],
+            FEATURE_SCHEMA_VERSION,
+        )
+        for name in manifest["legacyDefaultZeroFeatures"]:
+            self.assertEqual(normalized["factors"][name], 0.0)
 
     def test_request_caps_batch_and_validates_identity(self):
         with self.assertRaisesRegex(ValueError, "1到80"):

@@ -102,6 +102,31 @@ test('盘中公式在板块未确认或主力流出小单流入时全部否决',
     },
   }))
   assert.equal(distribution.matches.length, 0)
+  assert.match(
+    distribution.evaluations[0].blockers.join('；'),
+    /主力净流出0\.20亿元、小单净流入0\.20亿元/,
+  )
+})
+
+test('公式阻断文案同时给出当前值和通过门槛', () => {
+  const result = evaluateFormulaSelection(intradayInput({
+    quote: {
+      ...intradayInput().quote,
+      pct: 6.2,
+      amount: 42_000_000,
+      turnover: 1.3,
+      volumeRatio: 0.8,
+    },
+  }))
+  const blockers = result.evaluations.flatMap((item) => item.blockers)
+    .join('；')
+
+  assert.match(blockers, /当前成交额0\.42亿元/)
+  assert.match(blockers, /要求至少0\.50亿元/)
+  assert.match(blockers, /当前换手率1\.3%/)
+  assert.match(blockers, /要求至少2%/)
+  assert.match(blockers, /当日已上涨6\.2%/)
+  assert.match(blockers, /超过5%追高线/)
 })
 
 test('收盘扫描识别趋势回踩并输出次日支撑锚点', () => {

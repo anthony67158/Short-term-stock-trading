@@ -11,13 +11,29 @@ import ErrorBoundary from './ErrorBoundary'
 import { usePolling } from '../hooks'
 
 // ============ 盘面研究（次级）：大盘资金流向 + 板块/个股下钻 ============
-export default function ResearchTab({ interval }) {
+export default function ResearchTab({
+  interval,
+  snapshot,
+  snapshotLoading,
+  snapshotError,
+}) {
   const [type, setType] = useState('industry')
   const [selected, setSelected] = useState(null)
   const [sort, setSort] = useState('pct')
   const constituentsRef = useRef(null)
 
-  const sectors = usePolling(`/api/sectors?type=${type}&sort=main`, interval, [type])
+  const sectorPolling = usePolling(
+    type === 'concept' ? '/api/sectors?type=concept&sort=main' : null,
+    interval,
+    [type],
+  )
+  const sectors = type === 'industry'
+    ? {
+        data: snapshot?.sectors || null,
+        loading: snapshotLoading,
+        error: snapshot?.errors?.sectors || snapshotError,
+      }
+    : sectorPolling
   const stocks = usePolling(
     selected ? `/api/stocks?code=${selected.code}&sort=${sort}` : null,
     interval,
@@ -48,7 +64,13 @@ export default function ResearchTab({ interval }) {
           onInspect={inspectConstituents}
         />
       </ErrorBoundary>
-      <ErrorBoundary label="资金流向图"><MarketFlow interval={interval} /></ErrorBoundary>
+      <ErrorBoundary label="资金流向图">
+        <MarketFlow
+          interval={interval}
+          snapshot={snapshot?.sectors}
+          snapshotLoading={snapshotLoading}
+        />
+      </ErrorBoundary>
       <div className="grid research-grid">
         <ErrorBoundary label="板块资金">
           <SectorPanel
@@ -68,7 +90,16 @@ export default function ResearchTab({ interval }) {
         </div>
       </div>
       <div className="research-section">
-        <ErrorBoundary label="盘中异动"><Movers interval={interval} /></ErrorBoundary>
+        <ErrorBoundary label="盘中异动">
+          <Movers
+            interval={interval}
+            snapshots={{
+              inflow: snapshot?.movers,
+              speed: snapshot?.speed,
+            }}
+            snapshotLoading={snapshotLoading}
+          />
+        </ErrorBoundary>
       </div>
       <div className="research-section">
         <ErrorBoundary label="游资龙虎榜"><LhbBoard interval={interval} /></ErrorBoundary>

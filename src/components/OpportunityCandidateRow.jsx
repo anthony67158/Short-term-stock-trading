@@ -1,4 +1,8 @@
 import { openStockDetail } from '../detailStore.js'
+import {
+  explainOpportunityBlockers,
+  opportunityBlockerDetails,
+} from '../../shared/opportunityLanguage.js'
 import Icon from './Icon'
 import StockName from './StockName'
 
@@ -14,7 +18,7 @@ const STATE_VIEW = Object.freeze({
     tone: 'waiting',
   },
   SECTOR_WATCH: {
-    label: '方向可看',
+    label: '待公式确认',
     icon: 'compass',
     tone: 'sector',
   },
@@ -38,6 +42,19 @@ function pct(value) {
   return `${number >= 0 ? '+' : ''}${number.toFixed(2)}%`
 }
 
+function probabilityPct(value) {
+  const number = Number(value)
+  return Number.isFinite(number)
+    ? `${(number * 100).toFixed(0)}%`
+    : '--'
+}
+
+function expectedR(value) {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return '--'
+  return `${number >= 0 ? '+' : ''}${number.toFixed(2)}R`
+}
+
 function entryTypeLabel(value) {
   return {
     PULLBACK: '回踩确认',
@@ -48,6 +65,7 @@ function entryTypeLabel(value) {
 
 const PORTFOLIO_VIEW = Object.freeze({
   SECTOR_CAPPED: { label: '同板块集中，先观察', icon: 'compass' },
+  CORRELATION_CAPPED: { label: '同主题相关，先观察', icon: 'compass' },
   BUDGET_CAPPED: { label: '风险预算已满，先观察', icon: 'shield' },
 })
 
@@ -60,6 +78,13 @@ export default function OpportunityCandidateRow({
   const state = STATE_VIEW[opportunity.state] || STATE_VIEW.AVOID
   const entryPlan = opportunity.entryPlan
   const exitPlan = opportunity.exitPlan
+  const modelScore = opportunity.opportunityScore
+  const modelReady = modelScore?.state === 'READY'
+    && modelScore?.outOfDistribution !== true
+  const blockerExplanation = explainOpportunityBlockers(
+    opportunity.blockers,
+  )
+  const blockerDetails = opportunityBlockerDetails(opportunity.blockers)
   const canAdd = !added
   // 组合层只读提示：仅在候选被同板块集中或预算上限降级时展示，
   // 它不改变个股主状态（主状态始终由 opportunity.state 驱动）。
@@ -99,6 +124,25 @@ export default function OpportunityCandidateRow({
         <span>
           {(opportunity.sourceSignals || []).join(' · ')}
         </span>
+        {modelScore && (
+          <div
+            className="opportunity-model-signal"
+            data-state={modelReady ? 'ready' : 'pending'}
+          >
+            <Icon name={modelReady ? 'chart' : 'clock'} size={12} />
+            {modelReady ? (
+              <>
+                <span>成交率 {probabilityPct(modelScore.pFill)}</span>
+                <span>
+                  净盈利率 {probabilityPct(modelScore.pWinGivenFill)}
+                </span>
+                <span>期望 {expectedR(modelScore.expectedNetR)}</span>
+              </>
+            ) : (
+              <span>排序模型样本仍在积累，不影响当前公式结论</span>
+            )}
+          </div>
+        )}
         {portfolioNote && (
           <span
             className="opportunity-portfolio-note"
@@ -115,12 +159,9 @@ export default function OpportunityCandidateRow({
               ? '为什么先不买：'
               : '判断依据：'}
           {opportunity.state === 'AVOID'
-            ? (opportunity.blockers?.[0]
-              || (opportunity.evidence || []).slice(0, 1).join('；')
-              || '等待更多有效证据')
+            ? blockerExplanation
             : ((opportunity.evidence || []).slice(0, 2).join('；')
-              || opportunity.blockers?.[0]
-              || '等待更多有效证据')}
+              || blockerExplanation)}
         </p>
       </div>
 
@@ -143,7 +184,7 @@ export default function OpportunityCandidateRow({
               </small>
             </>
           ) : (
-            <p>方向可看，尚无买点；先进入个股详情核验价格。</p>
+            <p>尚未形成完整买点，不执行买入。</p>
           )}
         </section>
 
@@ -178,7 +219,7 @@ export default function OpportunityCandidateRow({
           {(opportunity.evidence || []).map((item) => (
             <span key={`e-${item}`}>{item}</span>
           ))}
-          {(opportunity.blockers || []).map((item) => (
+          {blockerDetails.map((item) => (
             <span className="blocker" key={`b-${item}`}>{item}</span>
           ))}
         </div>

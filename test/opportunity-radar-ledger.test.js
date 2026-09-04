@@ -29,6 +29,11 @@ function event(overrides = {}) {
       score: 88,
       blockers: [],
     }],
+    shadowFeatures: {
+      orderImbalanceShort: 48,
+      liquidityComposite: 72,
+      signalOrderFlowContinuation: 1,
+    },
     decision: {
       action: 'WATCH_BUY',
       formulaId: 'INTRADAY_VWAP_PULLBACK',
@@ -92,6 +97,11 @@ test('机会雷达账本为每只候选生成稳定决策ID和规则版本', () 
     1_788_323_600_000,
   )
   assert.equal(batch.events[0].decision.timeStopTradingDays, 5)
+  assert.equal(batch.events[0].shadowFeatures.orderImbalanceShort, 48)
+  assert.equal(
+    batch.events[0].shadowFeatures.signalOrderFlowContinuation,
+    1,
+  )
   assert.equal(batch.marketGate.riskTier, 'STANDARD')
   assert.equal(batch.marketGate.regimeLabel, '趋势偏强')
   assert.deepEqual(batch.summary, {
@@ -134,6 +144,32 @@ test('账本保留未展示和被淘汰候选而不携带大型原始数据', ()
   assert.equal(batch.events[1].displayedRank, 1)
   assert.equal(batch.summary.technical, 1)
   assert.equal(batch.summary.displayed, 1)
+})
+
+test('账本允许淘汰事件缺少板块或决策投影', () => {
+  const batch = buildOpportunityRadarLedgerBatch({
+    mode: 'intraday',
+    tradeDate: '2026-09-03',
+    slot: '0635',
+    generatedAt: 1_788_406_800_000,
+    events: [
+      event({
+        decision: null,
+        sector: null,
+        rejectionReasons: ['板块方向未确认'],
+      }),
+    ],
+  })
+
+  assert.equal(batch.events[0].decision.priceContractValid, false)
+  assert.equal(batch.events[0].decision.formulaId, null)
+  assert.equal(batch.events[0].sector.code, '')
+  assert.equal(batch.events[0].sector.name, '')
+  assert.deepEqual(
+    batch.events[0].rejectionReasons,
+    ['板块方向未确认'],
+  )
+  assert.equal(batch.summary.priceContracts, 0)
 })
 
 test('账本拒绝无效日期模式和重复股票事件', () => {

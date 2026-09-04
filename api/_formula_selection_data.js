@@ -30,6 +30,9 @@ import {
   beijingDayKey,
   isContinuousTrading,
 } from '../shared/tradingCalendar.js'
+import {
+  buildOpportunityShadowFeatures,
+} from '../shared/opportunityShadowFeatures.js'
 
 function finite(value) {
   if (value == null || value === '' || value === '-') return null
@@ -141,6 +144,7 @@ function candidateEvent(quote, cheapScore) {
     quote,
     cheapScore,
     formulaEvaluations: [],
+    shadowFeatures: {},
     decision: null,
     sector: null,
     rejectionReasons: [],
@@ -242,12 +246,11 @@ export async function scanFormulaSelectionCandidates({
       prefiltered: prefiltered.length,
     },
   })
-  const deferredBlockers = new Set([
-    '最近分钟线未确认承接',
-    '分钟价格未稳定在VWAP上方',
-    '板块方向未确认',
-    '资金承接未确认',
-  ])
+  const deferredBlocker = (value) => (
+    /分钟|VWAP|板块前瞻确认范围|板块方向|资金证据|主力.*小单|主力承接/.test(
+      String(value || ''),
+    )
+  )
   await report({
     stage: 'TECHNICAL',
     percent: 28,
@@ -284,15 +287,19 @@ export async function scanFormulaSelectionCandidates({
         })
         event.stageReached = 'TECHNICAL'
         event.formulaEvaluations = preliminary.evaluations
+        event.shadowFeatures = buildOpportunityShadowFeatures({
+          quote,
+          candles: kline.candles,
+        })
         const possible = preliminary.evaluations.some((item) =>
-          item.blockers.every((blocker) => deferredBlockers.has(blocker))
+          item.blockers.every(deferredBlocker)
         )
         if (possible) candidate = { quote, kline }
         else {
           event.rejectionReasons = uniqueReasons(
             preliminary.evaluations.map((item) =>
               item.blockers.filter(
-                (blocker) => !deferredBlockers.has(blocker),
+                (blocker) => !deferredBlocker(blocker),
               ),
             ),
           )
@@ -373,12 +380,20 @@ export async function scanFormulaSelectionCandidates({
         })
         event.formulaEvaluations = formula.evaluations
         event.sector = sectorOpportunity?.sector || null
+        event.shadowFeatures = buildOpportunityShadowFeatures({
+          quote,
+          candles: kline.candles,
+          trends: trendData?.trends || [],
+          fund,
+          sectorOpportunity,
+        })
         const rawDecision = buildFormulaPriceDecision({
           code: quote.code,
           quote,
           formulaMatches: formula.matches,
           positionMode: 'UNOWNED',
           marketAllowsRisk: marketContext?.marketGate?.allowed === true,
+          marketBlockers: marketContext?.marketGate?.blockers || [],
           dataComplete: true,
           dataFresh: true,
           now,
@@ -591,6 +606,7 @@ export async function buildStockFormulaSelection({
     technicals: holdingTechnicals(tech, kline.candles),
     fund,
     marketAllowsRisk: marketContext.marketGate?.allowed === true,
+    marketBlockers: marketContext.marketGate?.blockers || [],
     dataComplete: holding
       ? !!tech
       : !!fund && !!tags && !!tech,
