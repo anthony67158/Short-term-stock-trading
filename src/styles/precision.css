@@ -17333,6 +17333,51 @@ html[data-theme="light"] .nav {
   min-width: 0;
 }
 
+.opportunity-pre-catalyst-signal {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-2xs);
+  color: var(--color-accent);
+  font-size: var(--text-2xs);
+}
+
+.opportunity-pre-catalyst-signal > .icon {
+  flex: none;
+  margin-top: 2px;
+}
+
+.opportunity-context .opportunity-pre-catalyst-copy {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3xs) var(--space-2xs);
+  min-width: 0;
+}
+
+.opportunity-event-link {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-3xs);
+  width: 100%;
+  max-width: 100%;
+  color: var(--color-accent);
+  font-size: var(--text-2xs);
+  text-decoration: none;
+}
+
+.opportunity-event-link > .icon {
+  margin-top: 2px;
+}
+
+.opportunity-event-link > span {
+  min-width: 0;
+}
+
+.opportunity-event-link:hover {
+  text-decoration: underline;
+}
+
 .opportunity-context p {
   margin: var(--space-3xs) 0 0;
   color: var(--color-ink-2);

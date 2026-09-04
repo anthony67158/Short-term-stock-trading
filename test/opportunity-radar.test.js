@@ -160,6 +160,115 @@ test('盘中公式与板块方向融合为包含退出计划的可操作机会',
   )
 })
 
+test('预催化候选只进入提前布局并保留官方事件证据', () => {
+  const result = buildOpportunityRadar({
+    now: NOW,
+    sector: {
+      market: { phase: 'live', day: '2026-09-02' },
+      intraday: sectorSnapshot(),
+    },
+    formula: {},
+    preCatalyst: {
+      latest: {
+        schemaVersion: 'pre-catalyst.v1',
+        tradeDate: '2026-09-02',
+        generatedAt: NOW - 10_000,
+        candidates: [{
+          code: '600003',
+          name: '潜伏股份',
+          state: 'WAIT_TRIGGER',
+          stateLabel: '潜伏预判',
+          origin: 'PRE_CATALYST',
+          activationScore: 78,
+          riskReward: 1.8,
+          quote: { price: 10, pct: 0.5, amount: 100_000_000 },
+          sector: {
+            code: 'BK1001',
+            name: '先进制造',
+            actionability: 'WAIT_PULLBACK',
+          },
+          entryPlan: {
+            type: 'BREAKOUT',
+            price: 10.2,
+            maxPositionPct: 3,
+          },
+          exitPlan: {
+            hardStopPrice: 9.7,
+            takeProfitPrice: 11.1,
+          },
+          event: {
+            eventLabel: '重大订单',
+            title: '关于签订重大销售合同的公告',
+            sourceAuthority: 'OFFICIAL',
+          },
+          sourceSignals: ['预催化扫描', '重大订单', '公告主体'],
+          evidence: ['官方公告：关于签订重大销售合同的公告'],
+          blockers: ['预催化模型仍在积累样本，仅可等待量价确认'],
+        }],
+      },
+      task: { status: 'DONE' },
+    },
+  })
+
+  const candidate = result.lanes.intraday.find(
+    (item) => item.code === '600003',
+  )
+  assert.equal(result.sourceStatus.preCatalyst.status, 'fresh')
+  assert.equal(candidate.state, 'WAIT_TRIGGER')
+  assert.equal(candidate.stateLabel, '潜伏预判')
+  assert.equal(candidate.origin, 'PRE_CATALYST')
+  assert.equal(
+    result.lanes.intraday.some((item) => item.state === 'READY'),
+    false,
+  )
+  assert.ok(result.lanes.next.some((item) => item.code === '600003'))
+})
+
+test('正式公式命中同股时不继承预催化校准阻断', () => {
+  const result = buildOpportunityRadar({
+    now: NOW,
+    sector: {
+      market: { phase: 'live', day: '2026-09-02' },
+      intraday: sectorSnapshot(),
+    },
+    formula: {
+      intraday: formulaResult('INTRADAY', [formulaCandidate()]),
+    },
+    preCatalyst: {
+      latest: {
+        tradeDate: '2026-09-02',
+        generatedAt: NOW - 10_000,
+        candidates: [{
+          code: '600001',
+          name: '示例股份',
+          origin: 'PRE_CATALYST',
+          activationScore: 76,
+          riskReward: 2,
+          entryPlan: { type: 'BREAKOUT', price: 10.2 },
+          exitPlan: {
+            hardStopPrice: 9.7,
+            takeProfitPrice: 11.2,
+          },
+          blockers: [
+            '预催化模型仍在积累样本，仅可等待量价确认',
+          ],
+        }],
+      },
+    },
+  })
+
+  const candidate = result.lanes.intraday.find(
+    (item) => item.code === '600001',
+  )
+  assert.equal(candidate.state, 'READY')
+  assert.equal(
+    candidate.blockers.includes(
+      '预催化模型仍在积累样本，仅可等待量价确认',
+    ),
+    false,
+  )
+})
+
 test('收盘公式与尾盘反转进入不同业务页签且不互相混合', () => {
   const closeCandidate = formulaCandidate({
     formulaId: 'CLOSE_TREND_PULLBACK',

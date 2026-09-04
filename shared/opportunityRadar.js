@@ -219,6 +219,38 @@ function manualSourceState(value, {
   }
 }
 
+function taskSourceState(value, {
+  expectedDay,
+  task,
+  label,
+  error = '',
+}) {
+  const current = sourceState(value, {
+    expectedDay,
+    strictDay: true,
+    error,
+  })
+  if (current.status === 'fresh' || error) return current
+  if (['RUNNING', 'QUEUED'].includes(String(task?.status || ''))) {
+    return {
+      status: 'running',
+      dataAsOf: task.updatedAt || task.startedAt || null,
+      tradeDate: expectedDay,
+      message: String(task.message || `${label}正在更新`),
+      refreshAfterMs: 2_500,
+    }
+  }
+  if (task?.status === 'FAILED') {
+    return {
+      status: 'failed',
+      dataAsOf: task.finishedAt || task.updatedAt || null,
+      tradeDate: expectedDay,
+      error: String(task.error || task.message || `${label}更新失败`),
+    }
+  }
+  return current
+}
+
 function sectorView(value = {}) {
   return {
     code: String(value.code || ''),
@@ -470,6 +502,40 @@ function tailOpportunity(candidate, {
   }
 }
 
+function preCatalystOpportunity(candidate, {
+  lane,
+  sourceFresh,
+}) {
+  const contractComplete = !!(
+    candidate?.entryPlan
+    && candidate?.exitPlan
+    && finite(candidate?.entryPlan?.price) > 0
+    && finite(candidate?.exitPlan?.hardStopPrice) > 0
+    && finite(candidate?.exitPlan?.takeProfitPrice) > 0
+    && finite(candidate?.riskReward) >= 1.8
+  )
+  const blockers = unique([
+    ...(candidate?.blockers || []),
+    ...(!sourceFresh ? ['预催化扫描结果已过期'] : []),
+    ...(!contractComplete ? ['预催化价格合同不完整'] : []),
+  ])
+  const valid = sourceFresh && contractComplete
+  return {
+    ...candidate,
+    lane,
+    state: valid ? 'WAIT_TRIGGER' : 'AVOID',
+    stateLabel: valid ? '潜伏预判' : '本次不买',
+    sourceSignals: unique([
+      '预催化扫描',
+      ...(candidate?.sourceSignals || []),
+    ]),
+    evidence: unique(candidate?.evidence || []).slice(0, 6),
+    blockers,
+    stale: !sourceFresh,
+    _decisionPriority: 1,
+  }
+}
+
 function mergeOpportunity(left, right) {
   if (!left) return right
   const primary = Number(right._decisionPriority || 0)
@@ -494,7 +560,9 @@ function mergeOpportunity(left, right) {
     blockers: unique([
       ...(primary.blockers || []),
       ...(secondary.blockers || []).filter(
-        (item) => item !== '尚无个股价格合同',
+        (item) =>
+          item !== '尚无个股价格合同'
+          && item !== '预催化模型仍在积累样本，仅可等待量价确认',
       ),
     ]),
   }
@@ -556,6 +624,7 @@ export function buildOpportunityRadar({
   sector = {},
   formula = {},
   tail = null,
+  preCatalyst = null,
   sourceErrors = {},
   holdings = [],
   now = Date.now(),
@@ -587,6 +656,9 @@ export function buildOpportunityRadar({
     || tailState?.latest
     || tailState
     || formula?.tail
+    || null
+  const preCatalystSnapshot = preCatalyst?.latest
+    || preCatalyst
     || null
   const closeSourceState = sourceState(formula?.close, {
     expectedDay: nextPlanDay,
@@ -629,6 +701,14 @@ export function buildOpportunityRadar({
           label: '尾盘公式',
         })
       : tailSourceState,
+    preCatalyst: taskSourceState(preCatalystSnapshot, {
+      expectedDay: ['PREOPEN', 'REST'].includes(timing.phase)
+        ? closeDay
+        : day,
+      task: preCatalyst?.task,
+      label: '预催化扫描',
+      error: sourceErrors.preCatalyst,
+    }),
   }
   const intradayFormula = Array.isArray(formula?.intraday?.candidates)
     ? formula.intraday.candidates
@@ -643,6 +723,13 @@ export function buildOpportunityRadar({
     Array.isArray(tailResult?.result?.nearCandidates)
       ? tailResult.result.nearCandidates
       : []
+  const preCatalystCandidates = Array.isArray(
+    preCatalystSnapshot?.candidates,
+  )
+    ? preCatalystSnapshot.candidates
+    : []
+  const preCatalystFresh =
+    sourceStatus.preCatalyst.status === 'fresh'
   const preferredFormula = ['INTRADAY', 'LUNCH'].includes(timing.phase)
     ? intradayFormula
     : closeFormula
@@ -678,6 +765,12 @@ export function buildOpportunityRadar({
       })),
   ])
   const intraday = mergeLane([
+    ...(preCatalystFresh ? preCatalystCandidates : []).map(
+      (candidate) => preCatalystOpportunity(candidate, {
+        lane: 'intraday',
+        sourceFresh: true,
+      }),
+    ),
     ...(sourceStatus.formulaIntraday.status === 'fresh'
       ? intradayFormula
       : []).map((candidate) =>
@@ -714,6 +807,12 @@ export function buildOpportunityRadar({
     ),
   ])
   const next = mergeLane([
+    ...(preCatalystFresh ? preCatalystCandidates : []).map(
+      (candidate) => preCatalystOpportunity(candidate, {
+        lane: 'next',
+        sourceFresh: true,
+      }),
+    ),
     ...(sourceStatus.formulaClose.status === 'fresh'
       ? closeFormula
       : []).map((candidate) =>
@@ -746,7 +845,16 @@ export function buildOpportunityRadar({
       formulaIntraday: formula?.progress?.intraday || null,
       formulaClose: formula?.progress?.close || null,
       tail: tailState?.task || null,
+      preCatalyst: preCatalyst?.task || null,
     },
+    preCatalyst: preCatalystSnapshot
+      ? {
+          model: preCatalystSnapshot.model || null,
+          counts: preCatalystSnapshot.counts || null,
+          evaluation: preCatalyst?.evaluation || null,
+          leads: (preCatalystSnapshot.leads || []).slice(0, 5),
+        }
+      : null,
     lanes,
     portfolios,
     sectors: maps.sectors.slice(0, 5).map(sectorView),

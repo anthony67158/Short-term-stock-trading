@@ -56,6 +56,15 @@ test('机会候选同时展示入场仓位和完整退出计划', () => {
   assert.match(opportunityUi, /成交率/)
   assert.match(opportunityUi, /净盈利率/)
   assert.match(opportunityUi, /样本仍在积累/)
+  assert.match(opportunityUi, /启动观察分/)
+  assert.match(opportunityUi, /尚未定价/)
+  assert.match(opportunityUi, /资金试探/)
+  assert.match(opportunityUi, /opportunity-event-link/)
+  assert.match(opportunityUi, /<Icon name="news" size=\{12\} \/>/)
+  assert.match(
+    styles,
+    /\.opportunity-event-link\s*{[^}]*display:\s*grid[^}]*width:\s*100%/s,
+  )
   assert.match(candidate, /className="opportunity-model-pending"/)
   assert.match(
     styles,
@@ -106,11 +115,19 @@ test('统一客户端使用聚合接口并保留独立来源刷新', () => {
   assert.match(client, /\/api\/opportunity_radar/)
   assert.match(client, /sectorForecastRequest/)
   assert.match(client, /runFormulaSelection/)
+  assert.match(client, /runPreCatalyst/)
   assert.match(client, /Promise\.allSettled/)
   assert.equal(
     opportunityRadarClientError({ status: 503 }),
     '机会数据暂时不可用，请稍后重试',
   )
+})
+
+test('预催化来源并入提前布局且展示独立运行状态', () => {
+  assert.match(content, /preCatalyst: '预催化发现'/)
+  assert.match(content, /\['sector', 'formulaIntraday', 'preCatalyst', 'tail'\]/)
+  assert.match(content, /包含预催化潜伏与公式候选/)
+  assert.match(radar, /preCatalyst: '预催化发现'/)
 })
 
 test('盘中刷新并行启动板块和盘中公式且局部失败可返回', async () => {
@@ -130,15 +147,19 @@ test('盘中刷新并行启动板块和盘中公式且局部失败可返回', as
     },
     runSector: deferred('sector'),
     runFormula: deferred('formula', new Error('公式失败')),
+    runPreCatalystScan: deferred('preCatalyst'),
     runTail: deferred('tail'),
     load: async () => ({ ok: true, lanes: {} }),
   })
 
   await Promise.resolve()
-  assert.deepEqual(started.sort(), ['formula', 'sector'])
+  assert.deepEqual(
+    started.sort(),
+    ['formula', 'preCatalyst', 'sector'],
+  )
   resolvers.forEach((resolve) => resolve())
   const result = await pending
-  assert.deepEqual(result.completed, ['sector'])
+  assert.deepEqual(result.completed.sort(), ['preCatalyst', 'sector'])
   assert.deepEqual(result.failed, ['formulaIntraday'])
 })
 
@@ -152,6 +173,7 @@ test('盘前次日关注只读昨晚计划且不启动生成任务', async () =>
     },
     runSector: async (session) => calls.push(['sector', session]),
     runFormula: async (mode) => calls.push(['formula', mode]),
+    runPreCatalystScan: async () => calls.push(['preCatalyst']),
     runTail: async () => calls.push(['tail']),
     load: async () => ({ ok: true, lanes: {} }),
   })
@@ -168,11 +190,13 @@ test('收盘后次日关注只手动运行收盘板块和收盘公式', async ()
     },
     runSector: async (session) => calls.push(['sector', session]),
     runFormula: async (mode) => calls.push(['formula', mode]),
+    runPreCatalystScan: async () => calls.push(['preCatalyst']),
     runTail: async () => calls.push(['tail']),
     load: async () => ({ ok: true, lanes: {} }),
   })
   assert.deepEqual(calls.sort(), [
     ['formula', 'close'],
+    ['preCatalyst'],
     ['sector', 'close'],
   ])
 })

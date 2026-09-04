@@ -8,6 +8,7 @@ const SOURCE_LABELS = Object.freeze({
   formulaIntraday: '盘中公式',
   formulaClose: '收盘公式',
   tail: '尾盘反转',
+  preCatalyst: '预催化发现',
 })
 
 const STATUS_LABELS = Object.freeze({
@@ -318,8 +319,8 @@ export default function OpportunityRadarContent({
   const copy = laneCopy(lane, summary)
   const sectors = sectorsFromRows(rows)
   const sourceKeys = lane === 'intraday'
-    ? ['sector', 'formulaIntraday', 'tail']
-    : ['sector', 'formulaClose']
+    ? ['sector', 'formulaIntraday', 'preCatalyst', 'tail']
+    : ['sector', 'formulaClose', 'preCatalyst']
   const sourceFailures = Object.entries(snapshot?.sourceStatus || {})
     .filter(([key, value]) =>
       sourceKeys.includes(key)
@@ -330,7 +331,8 @@ export default function OpportunityRadarContent({
       (
         lane === 'next'
           ? key === 'formulaClose'
-          : ['formulaIntraday', 'tail'].includes(key)
+            || key === 'preCatalyst'
+          : ['formulaIntraday', 'preCatalyst', 'tail'].includes(key)
       )
       && ['scheduled', 'pending', 'running', 'manual'].includes(
         value?.status,
@@ -341,6 +343,16 @@ export default function OpportunityRadarContent({
   const tailButtonLabel = tailRunning
     ? '扫描中'
     : '手动扫描'
+  const preCatalystCounts = snapshot?.preCatalyst?.counts || {}
+  const preCatalystDetail = Number(
+    preCatalystCounts.eligibleCandidates,
+  ) > 0
+    ? `预催化发现${Number(
+        preCatalystCounts.eligibleCandidates,
+      )}只；联网线索${Number(
+        preCatalystCounts.externalLeads,
+      ) || 0}条待官方核验`
+    : '包含预催化潜伏与公式候选，均需等待价格、量能和资金确认'
   const intradayViewMeta = {
     ready: {
       title: '可立即买入',
@@ -350,7 +362,7 @@ export default function OpportunityRadarContent({
     },
     layout: {
       title: '今日提前布局',
-      detail: '买卖价格已经算出，等待到价触发或盘面风险解除',
+      detail: preCatalystDetail,
       icon: 'clock',
       empty: '当前0只。没有形成完整价格合同的提前布局候选。',
     },

@@ -55,6 +55,18 @@ function expectedR(value) {
   return `${number >= 0 ? '+' : ''}${number.toFixed(2)}R`
 }
 
+function eventTime(value) {
+  const timestamp = Number(value)
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return '时间待核验'
+  return new Date(timestamp).toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+}
+
 function entryTypeLabel(value) {
   return {
     PULLBACK: '回踩确认',
@@ -75,7 +87,14 @@ export default function OpportunityCandidateRow({
   added,
   onAdd,
 }) {
-  const state = STATE_VIEW[opportunity.state] || STATE_VIEW.AVOID
+  const preCatalyst = opportunity.origin === 'PRE_CATALYST'
+  const state = preCatalyst
+    ? {
+        label: '潜伏预判',
+        icon: 'radar',
+        tone: 'waiting',
+      }
+    : STATE_VIEW[opportunity.state] || STATE_VIEW.AVOID
   const entryPlan = opportunity.entryPlan
   const exitPlan = opportunity.exitPlan
   const modelScore = opportunity.opportunityScore
@@ -124,6 +143,34 @@ export default function OpportunityCandidateRow({
         <span>
           {(opportunity.sourceSignals || []).join(' · ')}
         </span>
+        {preCatalyst && (
+          <div className="opportunity-pre-catalyst-signal">
+            <Icon name="radar" size={12} />
+            <span className="opportunity-pre-catalyst-copy">
+              <span>
+                启动观察分
+                {' '}{Number(opportunity.activationScore || 0).toFixed(1)}
+              </span>
+              <span>
+                尚未定价 {Number(
+                  opportunity.underReactionScore || 0,
+                ).toFixed(1)}
+              </span>
+              <span>
+                资金试探 {Number(
+                  opportunity.flowProbeScore || 0,
+                ).toFixed(1)}
+              </span>
+              <span>
+                {opportunity.forecast?.state === 'READY'
+                  ? `3日启动率 ${probabilityPct(
+                      opportunity.forecast.pActivation3d,
+                    )}`
+                  : '启动概率校准中'}
+              </span>
+            </span>
+          </div>
+        )}
         {modelScore && (
           <div
             className="opportunity-model-signal"
@@ -166,6 +213,21 @@ export default function OpportunityCandidateRow({
             : ((opportunity.evidence || []).slice(0, 2).join('；')
               || blockerExplanation)}
         </p>
+        {preCatalyst && opportunity.event?.sourceUrl && (
+          <a
+            className="opportunity-event-link"
+            href={opportunity.event.sourceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <Icon name="news" size={12} />
+            <span>
+              {opportunity.event.eventLabel || '官方事件'}
+              {' · '}
+              {eventTime(opportunity.event.publishedAt)}
+            </span>
+          </a>
+        )}
       </div>
 
       <div className="opportunity-plan-grid">

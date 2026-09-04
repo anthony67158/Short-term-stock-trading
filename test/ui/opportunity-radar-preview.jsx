@@ -103,6 +103,42 @@ const intradayRows = [
   }),
   {
     ...plan({
+      code: '300006',
+      name: '潜伏智造',
+      state: 'WAIT_TRIGGER',
+      formula: '预催化扫描',
+      price: 16.28,
+      entry: 16.52,
+      blockers: ['预催化模型仍在积累样本，仅可等待量价确认'],
+      concepts: ['工业自动化'],
+    }),
+    origin: 'PRE_CATALYST',
+    activationScore: 78.6,
+    underReactionScore: 84.2,
+    flowProbeScore: 62.5,
+    forecast: {
+      state: 'CALIBRATING',
+      pActivation1d: null,
+      pActivation3d: null,
+      sampleCount: 0,
+    },
+    event: {
+      eventType: 'ORDER',
+      eventLabel: '重大订单',
+      title: '关于签订重大销售合同的公告',
+      publishedAt: Date.parse('2026-09-03T18:20:00+08:00'),
+      sourceAuthority: 'OFFICIAL',
+      sourceUrl:
+        'https://static.cninfo.com.cn/finalpage/2026-09-03/example.PDF',
+    },
+    sourceSignals: ['预催化扫描', '重大订单', '公告主体'],
+    evidence: [
+      '官方公告：关于签订重大销售合同的公告',
+      '公告主体，事件尚未充分扩散到价格',
+    ],
+  },
+  {
+    ...plan({
       code: '600004',
       name: '智造股份',
       state: 'AVOID',
@@ -180,6 +216,7 @@ const snapshot = {
     formulaIntraday: { status: 'fresh', tradeDate: '2026-09-03' },
     formulaClose: { status: 'fresh', tradeDate: '2026-09-03' },
     tail: { status: 'fresh', tradeDate: '2026-09-03' },
+    preCatalyst: { status: 'fresh', tradeDate: '2026-09-03' },
   },
   lanes: {
     intraday: intradayRows,

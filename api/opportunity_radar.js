@@ -12,6 +12,9 @@ import {
   readFormulaSelectionState,
 } from './formula_selection.js'
 import {
+  readPreCatalystState,
+} from './pre_catalyst.js'
+import {
   opportunityRadarBaselineStore,
 } from './_opportunity_radar_baseline_store.js'
 import {
@@ -52,14 +55,25 @@ export async function readOpportunityRadarSnapshot({
     tailReader: async () => null,
   }),
   readTail = () => readTailPickState(),
+  readPreCatalyst = () => readPreCatalystState(),
   readBaseline = () => opportunityRadarBaselineStore.readBaseline(),
   now = Date.now(),
 } = {}) {
-  const [sectorResult, formulaResult, tailResult, baselineResult] =
+  const [
+    sectorResult,
+    formulaResult,
+    tailResult,
+    preCatalystResult,
+    baselineResult,
+  ] =
     await Promise.allSettled([
       withTimeout(Promise.resolve().then(readSector), '板块结果读取'),
       withTimeout(Promise.resolve().then(readFormula), '公式结果读取'),
       withTimeout(Promise.resolve().then(readTail), '尾盘结果读取'),
+      withTimeout(
+        Promise.resolve().then(readPreCatalyst),
+        '预催化结果读取',
+      ),
       withTimeout(
         Promise.resolve().then(readBaseline),
         '统计基线读取',
@@ -75,11 +89,15 @@ export async function readOpportunityRadarSnapshot({
     tail: tailResult.status === 'rejected'
       ? '尾盘结果读取失败'
       : '',
+    preCatalyst: preCatalystResult.status === 'rejected'
+      ? '预催化结果读取失败'
+      : '',
   }
   const radar = buildOpportunityRadar({
     sector: settledValue(sectorResult, {}),
     formula: settledValue(formulaResult, {}),
     tail: settledValue(tailResult, null),
+    preCatalyst: settledValue(preCatalystResult, null),
     sourceErrors,
     now,
   })

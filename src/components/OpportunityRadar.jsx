@@ -28,6 +28,7 @@ const SOURCE_NAMES = Object.freeze({
   formulaIntraday: '盘中公式',
   formulaClose: '收盘公式',
   tail: '尾盘反转',
+  preCatalyst: '预催化发现',
 })
 
 const PHASE_NAMES = Object.freeze({

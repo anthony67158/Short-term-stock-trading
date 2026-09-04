@@ -55,6 +55,11 @@ test('机会雷达聚合读取会并行启动业务来源与统计基线', async
     readSector: source('sector', sectorState()),
     readFormula: source('formula', formulaState()),
     readTail: source('tail', null),
+    readPreCatalyst: source('preCatalyst', {
+      latest: null,
+      task: null,
+      evaluation: null,
+    }),
     readBaseline: source('baseline', {
       schemaVersion: 'opportunity-radar-baseline.v1',
     }),
@@ -63,7 +68,7 @@ test('机会雷达聚合读取会并行启动业务来源与统计基线', async
   await Promise.resolve()
   assert.deepEqual(
     started.sort(),
-    ['baseline', 'formula', 'sector', 'tail'],
+    ['baseline', 'formula', 'preCatalyst', 'sector', 'tail'],
   )
   resolvers.forEach((resolve) => resolve())
   const result = await pending
@@ -83,6 +88,11 @@ test('单个来源失败时仍返回其它结果并标记失败来源', async ()
       throw new Error('公式存储暂时不可用')
     },
     readTail: async () => null,
+    readPreCatalyst: async () => ({
+      latest: null,
+      task: null,
+      evaluation: null,
+    }),
   })
 
   assert.equal(result.ok, true)

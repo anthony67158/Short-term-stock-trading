@@ -9,6 +9,9 @@ import {
 import {
   runTailPick,
 } from './tailPickClient.js'
+import {
+  runPreCatalyst,
+} from './preCatalystClient.js'
 
 const READ_TIMEOUT_MS = 30_000
 
@@ -96,6 +99,7 @@ export async function refreshOpportunityRadar({
     timeoutMs: 300_000,
   }),
   runFormula = runFormulaSelection,
+  runPreCatalystScan = runPreCatalyst,
   load = loadOpportunityRadar,
 } = {}) {
   const tasks = []
@@ -120,9 +124,11 @@ export async function refreshOpportunityRadar({
   if (lane === 'intraday' && snapshot?.phase === 'INTRADAY') {
     run('sector', () => runSector('intraday'))
     run('formulaIntraday', () => runFormula('intraday'))
+    run('preCatalyst', () => runPreCatalystScan({ force: true }))
   } else if (lane === 'next' && snapshot?.phase === 'AFTER_CLOSE') {
     run('sector', () => runSector('close'))
     run('formulaClose', () => runFormula('close'))
+    run('preCatalyst', () => runPreCatalystScan({ force: true }))
   }
 
   if (!tasks.length) {
