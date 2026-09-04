@@ -13,7 +13,12 @@ import { usePlanStore, planStore, computePortfolio, livePositionOf, t1StatusOf }
 import { nextTradingDayLabel } from '../../shared/tradingCalendar.js'
 import { getAdvice, subscribeAdvice } from '../adviceCache'
 import { subscribeRunner, isRunning, getRunning, getResult } from '../adviceRunner'
-import { tryStartAdvice, generatingList } from '../adviceGate'
+import {
+  generatingList,
+  getAdviceSubmission,
+  subscribeAdviceSubmissions,
+  tryStartAdvice,
+} from '../adviceGate'
 import { subscribeBatch, getBatchState } from '../adviceBatch'
 import { detailStore } from '../detailStore'
 import {
@@ -258,6 +263,7 @@ export default function StockDetail({ stock, onClose }) {
         return
       }
       // 服务端任务是转交后的权威状态，优先于本地“提交未确认”占位。
+      let failedCloudItem = null
       try {
         const bs = getBatchState()
         if (bs && bs.serverMode) {
@@ -269,13 +275,34 @@ export default function StockDetail({ stock, onClose }) {
             return
           }
           if (it && it.status === 'fail') {
-            setForCode(mergeAdviceRefreshState({
-              error: (it.error && String(it.error)) || '生成失败，请重试',
-            }, cachedState))
-            return
+            failedCloudItem = it
           }
         }
       } catch { /* ignore */ }
+      const submission = getAdviceSubmission(code)
+      if (submission) {
+        setForCode(mergeAdviceRefreshState({
+          loading: true,
+          cloud: true,
+          stage: submission.stage || 'submitting',
+          phase: submission.phase
+            || '正在同步账本并提交云端任务',
+          sources: [],
+          reasoning: '',
+          quant: null,
+          deepMode: submission.deepMode === true,
+        }, cachedState))
+        return
+      }
+      if (failedCloudItem) {
+        setForCode(mergeAdviceRefreshState({
+          error: (
+            failedCloudItem.error
+            && String(failedCloudItem.error)
+          ) || '生成失败，请重试',
+        }, cachedState))
+        return
+      }
       const selectedResult = newestAdviceResult(getResult(code), cached, expectedMode)
       const res = selectedResult.source === 'runner' ? selectedResult.value : null
       if (res && res.pending) {
@@ -303,7 +330,13 @@ export default function StockDetail({ stock, onClose }) {
     const unRunner = subscribeRunner(sync)
     const unBatch = subscribeBatch(sync)   // 服务端批量进度回灌 → 云端生成中/失败态实时反映
     const unAdvice = subscribeAdvice(sync) // 云端结果回灌 adviceCache → 自动切成品
-    return () => { unRunner(); unBatch(); unAdvice() }
+    const unSubmission = subscribeAdviceSubmissions(sync)
+    return () => {
+      unRunner()
+      unBatch()
+      unAdvice()
+      unSubmission()
+    }
   }, [stock && stock.code, !!myHold])
   const loadQuant = async (deepMode = false) => {
     if (!stock) return
@@ -466,7 +499,8 @@ export default function StockDetail({ stock, onClose }) {
     }
     const unsub = subscribeBatch(refresh)
     const unsubR = subscribeRunner(refresh)
-    return () => { unsub(); unsubR() }
+    const unsubSubmission = subscribeAdviceSubmissions(refresh)
+    return () => { unsub(); unsubR(); unsubSubmission() }
     // eslint-disable-next-line
   }, [busyModal, stock && stock.code])
   const {

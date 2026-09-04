@@ -17,6 +17,14 @@ const planTab = readFileSync(
   new URL('../src/components/PlanTab.jsx', import.meta.url),
   'utf8',
 )
+const stockDetail = readFileSync(
+  new URL('../src/components/StockDetail.jsx', import.meta.url),
+  'utf8',
+)
+const adviceGate = readFileSync(
+  new URL('../src/adviceGate.js', import.meta.url),
+  'utf8',
+)
 
 const completeAdvice = {
   action: '持有',
@@ -83,6 +91,47 @@ test('同一股票提交确认前快速与深度入口共用一把锁', () => {
 
   registry.end('600487')
   assert.equal(registry.has('600487'), false)
+})
+
+test('提交状态可被弹窗重新订阅并恢复原生成模式', () => {
+  const registry = createAdviceSubmissionRegistry()
+  const snapshots = []
+  const unsubscribe = registry.subscribe(() => {
+    snapshots.push(registry.get('600487'))
+  })
+
+  registry.begin('600487', '亨通光电', {
+    deepMode: true,
+    stage: 'submitting',
+    phase: '正在同步账本并提交云端任务',
+  })
+
+  assert.deepEqual(registry.get('600487'), {
+    code: '600487',
+    name: '亨通光电',
+    deepMode: true,
+    stage: 'submitting',
+    phase: '正在同步账本并提交云端任务',
+  })
+  assert.equal(snapshots.length, 1)
+
+  registry.end('600487')
+  assert.equal(snapshots.length, 2)
+  assert.equal(snapshots[1], null)
+  unsubscribe()
+})
+
+test('个股弹窗重开后从全局提交状态恢复进度', () => {
+  assert.match(adviceGate, /export function getAdviceSubmission/)
+  assert.match(adviceGate, /export function subscribeAdviceSubmissions/)
+  assert.match(adviceGate, /正在同步账本并提交云端任务/)
+  assert.match(stockDetail, /getAdviceSubmission\(code\)/)
+  assert.match(stockDetail, /subscribeAdviceSubmissions\(sync\)/)
+  assert.match(stockDetail, /submission\.deepMode === true/)
+  assert.ok(
+    stockDetail.indexOf('const submission = getAdviceSubmission(code)')
+      < stockDetail.indexOf('if (failedCloudItem)'),
+  )
 })
 
 test('深度模式使用有界预算且不整轮自动重试', () => {

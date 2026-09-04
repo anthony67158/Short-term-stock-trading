@@ -153,27 +153,58 @@ export function generationOptions(deepMode = false) {
 
 export function createAdviceSubmissionRegistry() {
   const pending = new Map()
+  const listeners = new Set()
+  const notify = () => {
+    for (const listener of listeners) {
+      try { listener() } catch { /* 状态订阅不能阻断提交 */ }
+    }
+  }
   return {
-    begin(code, name = '') {
+    begin(code, name = '', details = {}) {
       const key = String(code || '')
       if (!key || pending.has(key)) return false
       pending.set(key, {
         code: key,
         name: String(name || key),
+        ...(details && typeof details === 'object' ? details : {}),
       })
+      notify()
+      return true
+    },
+    update(code, patch = {}) {
+      const key = String(code || '')
+      const current = pending.get(key)
+      if (!current) return false
+      pending.set(key, {
+        ...current,
+        ...(patch && typeof patch === 'object' ? patch : {}),
+        code: key,
+      })
+      notify()
       return true
     },
     end(code) {
-      pending.delete(String(code || ''))
+      if (pending.delete(String(code || ''))) notify()
     },
     has(code) {
       return pending.has(String(code || ''))
     },
+    get(code) {
+      const item = pending.get(String(code || ''))
+      return item ? { ...item } : null
+    },
     list() {
       return [...pending.values()].map((item) => ({ ...item }))
     },
+    subscribe(listener) {
+      if (typeof listener !== 'function') return () => {}
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
     clear() {
+      if (!pending.size) return
       pending.clear()
+      notify()
     },
   }
 }

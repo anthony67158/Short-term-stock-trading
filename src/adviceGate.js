@@ -16,13 +16,58 @@ import { getBatchState, getConcurrency } from './adviceBatch'
 import { canServerAdvice, triggerServerAdvice } from './serverAdvice'
 import {
   adviceJobState,
+  SERVER_FALLBACK_CONFIRM_MS,
   startAdvicePersistently,
 } from '../shared/adviceUiState.js'
 import {
   createAdviceSubmissionRegistry,
 } from '../shared/adviceBatchPolicy.js'
+import { adviceRequestId } from '../shared/adviceGenerationPolicy.js'
+import {
+  subscribeAccountSession,
+} from '../shared/accountSessionScope.js'
 
 const submissions = createAdviceSubmissionRegistry()
+const submissionExpiryTimers = new Map()
+
+function endSubmission(code, requestId = '') {
+  const key = String(code || '')
+  const current = submissions.get(key)
+  if (
+    !current
+    || (requestId && current.requestId !== requestId)
+  ) return false
+  const timer = submissionExpiryTimers.get(key)
+  if (timer) clearTimeout(timer)
+  submissionExpiryTimers.delete(key)
+  submissions.end(key)
+  return true
+}
+
+function retainUnconfirmedSubmission(code, requestId, error = '') {
+  const key = String(code || '')
+  const expiresAt = Date.now() + SERVER_FALLBACK_CONFIRM_MS
+  submissions.update(key, {
+    stage: 'submitting',
+    phase: error || '提交结果未确认，正在核对云端任务状态',
+    expiresAt,
+  })
+  const previous = submissionExpiryTimers.get(key)
+  if (previous) clearTimeout(previous)
+  const timer = setTimeout(
+    () => endSubmission(key, requestId),
+    SERVER_FALLBACK_CONFIRM_MS,
+  )
+  submissionExpiryTimers.set(key, timer)
+}
+
+export function getAdviceSubmission(code) {
+  return submissions.get(code)
+}
+
+export function subscribeAdviceSubmissions(listener) {
+  return submissions.subscribe(listener)
+}
 
 // 汇总当前"正在生成"的股票:code -> name(本地 + 云端并集)。
 export function generatingList() {
@@ -72,20 +117,56 @@ export async function tryStartAdvice(spec) {
   const busy = generatingList().filter((x) => x.code !== String(code))
   const limit = getConcurrency()
   if (busy.length >= limit) return { status: 'full', busy, concurrency: limit }
-  if (!submissions.begin(code, spec?.name || code)) {
+  const requestId = String(
+    spec?.requestId || adviceRequestId(spec),
+  )
+  if (!submissions.begin(code, spec?.name || code, {
+    requestId,
+    deepMode: spec?.deepMode === true,
+    stage: 'submitting',
+    phase: '正在同步账本并提交云端任务',
+    startedAt: Date.now(),
+  })) {
     return {
       status: 'already',
       mode: 'server',
       code: String(code),
     }
   }
+  let retainSubmission = false
   try {
-    return await startAdvicePersistently(spec, {
+    const result = await startAdvicePersistently({
+      ...spec,
+      requestId,
+    }, {
       canUseServer: canServerAdvice,
       triggerServer: triggerServerAdvice,
       startLocal: startAdvice,
     })
+    if (
+      result?.mode === 'server'
+      && (
+        result.status === 'queued'
+        || (result.status === 'started' && !result.progress)
+      )
+    ) {
+      retainSubmission = true
+      retainUnconfirmedSubmission(
+        code,
+        requestId,
+        result.error,
+      )
+    }
+    return result
   } finally {
-    submissions.end(code)
+    if (!retainSubmission) endSubmission(code, requestId)
   }
 }
+
+subscribeAccountSession(() => {
+  for (const timer of submissionExpiryTimers.values()) {
+    clearTimeout(timer)
+  }
+  submissionExpiryTimers.clear()
+  submissions.clear()
+})
