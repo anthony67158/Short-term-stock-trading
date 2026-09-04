@@ -520,7 +520,7 @@ async function fetchSectorHistory(code, days = 30) {
   return parseSectorFlowRows(selectLongestKlines(payloads), days)
 }
 
-async function fetchSectorMembers(code) {
+export async function fetchSectorMembers(code) {
   const fields =
     'f12,f14,f2,f3,f4,f8,f9,f10,f20,f23,f62,f184,f6,f7'
   const path =
