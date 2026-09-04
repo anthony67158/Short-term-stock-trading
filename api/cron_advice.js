@@ -76,10 +76,6 @@ import {
   triggeredReviewRuntime,
 } from '../shared/triggeredReviewDecision.js';
 import {
-  explicitActionInstruction,
-  explicitActionLabel,
-} from '../shared/userFacingLanguage.js';
-import {
   adviceEvidenceDigest,
   adviceTrustBands,
   prioritizeAdviceReviewCodes,
@@ -106,6 +102,9 @@ import { adviceEntryMatchesMode } from '../shared/adviceModeContext.js';
 import aiHandler from './ai.js';
 import quoteHandler from './quote.js';
 import { sendPush } from './_push_send.js';
+import {
+  buildTerminalReviewNotification,
+} from '../shared/alertNotification.js';
 import { TRUSTED_QUANT_VERSION } from './_quant_access.js';
 import {
   authorizePaidRequest,
@@ -1019,44 +1018,15 @@ export function terminalReviewNotification({
   name = '',
   advice = {},
   jobId = '',
+  alertId = '',
 } = {}) {
-  const decision = advice?.reviewDecision;
-  if (decision?.terminal !== true || !decision.outcome) return null;
-  const identity = name && name !== code
-    ? `${name}(${code})`
-    : name || code || '股票';
-  const holdingMode = /加仓|减仓|清仓|持有|止损|止盈/.test(
-    `${decision.outcome} ${advice.action || ''} ${advice.stance || ''}`,
-  );
-  const outcome = explicitActionLabel(decision.outcome, {
-    holdingMode,
-    terminal: true,
-  });
-  const action = explicitActionInstruction(
-    String(advice.actionPlan || decision.outcome)
-      .replace(/\s+/g, ' ')
-      .trim(),
-    {
-      holdingMode,
-      terminal: true,
-    },
-  );
-  const basis = String(
-    decision.basis?.[0]?.summary
-    || decision.basisSummary
-    || advice.reason
-    || '',
-  ).replace(/\s+/g, ' ').trim();
-  return {
-    title: `${identity}｜${outcome}`.slice(0, 64),
-    body: [
-      action,
-      basis ? `依据：${basis}` : '',
-    ].filter(Boolean).join('\n').slice(0, 180),
+  return buildTerminalReviewNotification({
     code,
-    tag: `review-terminal-${jobId || code}`,
-    url: '/',
-  };
+    name,
+    advice,
+    jobId,
+    alertId,
+  });
 }
 
 // 生成单只:军师内部完成统一证据采集与量化预测，任务层直接复用同一份结果。
@@ -2070,6 +2040,7 @@ async function drainAccount(nick, initialAcc) {
           name: job.name || done.code,
           advice: done.res.cacheItem?.advice,
           jobId: done.jobId,
+          alertId: job.trigger?.alertId,
         });
         if (terminalPush && !job.terminalPushSentAt) {
           try {

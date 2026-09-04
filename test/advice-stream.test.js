@@ -47,6 +47,7 @@ test('到价终局复核完成后生成明确操作推送', () => {
     code: '600519',
     name: '贵州茅台',
     jobId: 'review-1',
+    alertId: 'watch-1',
     advice: {
       actionPlan: '立即买入1手，执行区间145.2–145.4元',
       reason: '放量站稳且主力净流入',
@@ -61,10 +62,16 @@ test('到价终局复核完成后生成明确操作推送', () => {
     },
   })
 
-  assert.equal(notification.title, '贵州茅台(600519)｜立即买入')
-  assert.match(notification.body, /立即买入1手/)
-  assert.match(notification.body, /依据：放量站稳且主力净流入/)
-  assert.equal(notification.tag, 'review-terminal-review-1')
+  assert.equal(notification.title, '贵州茅台｜立即买入1手')
+  assert.equal(
+    notification.body,
+    '600519｜放量站稳且主力净流入',
+  )
+  assert.equal(notification.tag, 'trade-alert-watch-1')
+  assert.equal(notification.eventId, 'review-terminal-review-1')
+  assert.equal(notification.renotify, true)
+  assert.equal(notification.urgency, 'high')
+  assert.equal(notification.ttl, 300)
 })
 
 test('到价终局通知把内部维持枚举改写为本轮明确动作', () => {
@@ -86,12 +93,11 @@ test('到价终局通知把内部维持枚举改写为本轮明确动作', () =>
     },
   })
 
-  assert.equal(
-    notification.title,
-    '贵州茅台(600519)｜本次不加仓、不减仓',
-  )
-  assert.match(notification.body, /继续持有现有仓位/)
+  assert.equal(notification.title, '贵州茅台｜继续持有')
+  assert.match(notification.body, /本次不加仓、不减仓/)
   assert.doesNotMatch(notification.body, /维持持有/)
+  assert.equal(notification.renotify, false)
+  assert.equal(notification.silent, true)
 })
 
 test('军师行情快照保留报价接口返回的真实成交额', () => {

@@ -1,4 +1,7 @@
-import { explicitActionInstruction } from './userFacingLanguage.js'
+import {
+  explicitActionInstruction,
+  explicitActionLabel,
+} from './userFacingLanguage.js'
 
 const OP_LABEL = { gte: '≥', lte: '≤' }
 
@@ -17,6 +20,10 @@ function compactText(value, max = 40) {
   const text = String(value || '')
     .replace(/[\r\n]+/g, ' ')
     .replace(/^(?:确认[^:：]{0,12}|已失效)\s*[:：]\s*/, '')
+    .replace(
+      /(?:[，,；;。]?\s*(?:本次触发结束|不新增复核价))+[。.]?$/g,
+      '',
+    )
     .replace(/\s+/g, ' ')
     .trim()
   return text.length > max ? `${text.slice(0, max - 1)}…` : text
@@ -25,8 +32,14 @@ function compactText(value, max = 40) {
 function identityOf(alert = {}) {
   const code = String(alert.code || '').trim()
   const name = String(alert.name || '').trim()
-  if (name && code && name !== code) return `${name}(${code})`
+  if (name && name !== code) return name
   return name || code || '股票预警'
+}
+
+function codeOf(alert = {}) {
+  const code = String(alert.code || '').trim()
+  const name = String(alert.name || '').trim()
+  return code && name && name !== code ? code : ''
 }
 
 function actionOf(alert = {}) {
@@ -48,7 +61,21 @@ function actionOf(alert = {}) {
   return '价格'
 }
 
-function factLine(alert, quote) {
+function actionWithQuantity(action, opQty) {
+  const quantity = compactText(opQty, 18)
+  if (!quantity || /无需|不可卖|0手/.test(quantity)) return action
+  if (quantity.includes(action)) return quantity
+  const lots = quantity.match(/\d+\s*手/)
+  return lots ? `${action}${lots[0].replace(/\s+/g, '')}` : action
+}
+
+function compactFact(value, max = 42) {
+  return compactText(value, max)
+    .replace(/\s*([≥≤])\s*/g, '$1')
+    .replace(/^(涨跌幅|量比|换手率?)\s+/, '$1')
+}
+
+function factLine(alert, quote, reason, { threshold = true } = {}) {
   const price = priceText(
     quote?.price
     ?? alert.decisionPrice
@@ -56,35 +83,39 @@ function factLine(alert, quote) {
     ?? alert.lastJudgePrice,
   )
   const parts = []
-  if (price) parts.push(`现${price}`)
-  if (alert.type === 'price' && finite(alert.value) != null) {
-    const label = alert.reviewOnly
-      ? compactText(alert.note || '观察价', 12).replace(/复核$/, '')
-      : '目标'
-    parts.push(`${label}${OP_LABEL[alert.op] || ''}${priceText(alert.value)}`)
-  }
-  if (alert.opQty && !/无需|不可卖|0手/.test(String(alert.opQty))) {
-    parts.push(String(alert.opQty).trim())
+  const code = codeOf(alert)
+  if (code) parts.push(code)
+  if (price) {
+    const target = threshold
+      && alert.type === 'price'
+      && finite(alert.value) != null
+      ? `${OP_LABEL[alert.op] || ''}${priceText(alert.value)}`
+      : ''
+    parts.push(`现价${price}${target}`)
+  } else {
+    const fact = compactFact(reason)
+    if (fact) parts.push(fact)
   }
   return parts.join('｜')
 }
 
-function watchInstruction(action, holdingMode) {
-  if (/加仓|买入/.test(action)) {
-    return '当前不买入；止跌企稳后复核'
+function watchInstruction(action) {
+  if (/止损/.test(action)) {
+    return '先不卖出，复核中，约20秒后给结论'
   }
   if (/清仓/.test(action)) {
-    return '当前不清仓；先观察约60秒，确认冲高转弱后复核'
+    return '先不清仓，复核中，约60秒后给结论'
   }
   if (/减仓|止盈/.test(action)) {
-    return '当前不减仓；先观察约60秒，确认冲高转弱后复核'
+    return '先不减仓，复核中，约60秒后给结论'
   }
-  if (/止损/.test(action)) {
-    return '当前不卖出；先观察约20秒，确认有效跌破后复核'
+  if (/加仓/.test(action)) {
+    return '先不加仓，复核中，约60秒后给结论'
   }
-  return holdingMode
-    ? '本次不加仓、不减仓；条件满足后复核'
-    : '当前不买入；条件满足后复核'
+  if (/买入/.test(action)) {
+    return '先不买入，复核中，约60秒后给结论'
+  }
+  return '先不操作，复核中，约60秒后给结论'
 }
 
 function waitOutcome(action, holdingMode) {
@@ -106,7 +137,55 @@ function terminalReason(reason, holdingMode) {
       )
       .replace(/^本次不买入[，,；;:]?\s*/, '')
       .replace(/^本次触发结束[，,；;:]?\s*/, ''),
+    34,
   )
+}
+
+function invalidOutcome(action) {
+  if (/买入/.test(action)) return '取消买入'
+  if (/加仓/.test(action)) return '取消加仓'
+  if (/清仓/.test(action)) return '取消清仓'
+  if (/减仓|止盈/.test(action)) return '取消减仓'
+  if (/止损/.test(action)) return '止损条件失效'
+  return '取消本次操作'
+}
+
+function reviewReachedTitle(alert = {}) {
+  const label = compactText(alert.note || '', 12)
+    .replace(/复核$/, '')
+    .replace(/价$/, '')
+  return /回踩|突破|加仓|减仓|止盈|止损/.test(label)
+    ? `${label}已到`
+    : '观察价已到'
+}
+
+function watchReachedTitle(action) {
+  if (/清仓/.test(action)) return '清仓观察已到'
+  if (/减仓/.test(action)) return '减仓观察已到'
+  if (/止盈/.test(action)) return '止盈观察已到'
+  if (/止损/.test(action)) return '止损观察已到'
+  if (/加仓/.test(action)) return '加仓观察已到'
+  if (/买入/.test(action)) return '买入观察已到'
+  return '观察价已到'
+}
+
+function lifecycleId(alert = {}) {
+  return compactText(alert.id || alert.code || 'general', 80)
+    .replace(/[^\w.-]/g, '-')
+}
+
+function deliveryOf(alert, stage, eventId = '') {
+  const lifecycle = lifecycleId(alert)
+  const actionable = stage === 'confirm' || stage === 'trigger'
+  const quietTerminal = stage === 'wait' || stage === 'invalid'
+  return {
+    tag: `trade-alert-${lifecycle}`,
+    eventId: eventId || `${stage}-${lifecycle}`,
+    renotify: actionable,
+    silent: quietTerminal,
+    urgency: actionable ? 'high' : 'normal',
+    ttl: ['watch', 'review'].includes(stage) ? 180 : 300,
+  }
 }
 
 export function userFacingAlertMessage(alert = {}) {
@@ -125,15 +204,6 @@ export function userFacingAlertMessage(alert = {}) {
   })
 }
 
-function invalidOutcome(action) {
-  if (/买入/.test(action)) return '放弃买入'
-  if (/加仓/.test(action)) return '放弃加仓'
-  if (/清仓/.test(action)) return '放弃本次清仓'
-  if (/减仓|止盈/.test(action)) return '放弃本次减仓'
-  if (/止损/.test(action)) return '原止损条件失效'
-  return '放弃本次操作'
-}
-
 export function buildAlertNotification({
   alert = {},
   quote = null,
@@ -146,35 +216,111 @@ export function buildAlertNotification({
     ['add', 'reduce'].includes(String(alert.actKind || ''))
     || /加仓|减仓|止盈|止损/.test(`${action} ${alert.note || ''}`)
   )
-  const facts = factLine(alert, quote) || compactText(reason, 46)
-  const instruction = stage === 'watch'
-    ? watchInstruction(action, holdingMode)
-    : stage === 'review'
-      ? '先持续观察约60秒，再核对分时、量能和资金；2分钟内给出明确结论'
-    : stage === 'confirm'
-      ? `执行：${alert.opQty && !/不可卖/.test(String(alert.opQty)) ? alert.opQty : action}`
-      : stage === 'wait'
-        ? `结论：${waitOutcome(action, holdingMode)}；本次触发结束`
-      : stage === 'invalid'
-        ? `结论：${invalidOutcome(action)}；本次触发结束`
-        : `执行：${alert.opQty || action}`
+  const actionCommand = actionWithQuantity(action, alert.opQty)
+  const pendingFacts = factLine(alert, quote, reason)
+  const decisionFacts = factLine(alert, quote, reason, {
+    threshold: false,
+  })
   const conciseReason = terminalReason(reason, holdingMode)
-  const body = [
-    facts,
-    ['confirm', 'wait', 'invalid'].includes(stage) && conciseReason
-      ? `${instruction}；${conciseReason}`
-      : instruction,
-  ].filter(Boolean).join('\n').slice(0, 92)
   const title = stage === 'watch'
-    ? `${identity}｜${action === '复核' ? '' : action}观察价已到`
+    ? `${identity}｜${watchReachedTitle(action)}`
     : stage === 'review'
-      ? `${identity}｜观察条件已到`
+      ? `${identity}｜${reviewReachedTitle(alert)}`
     : stage === 'confirm'
-      ? `${identity}｜现在${action}`
+      ? `${identity}｜立即${actionCommand}`
       : stage === 'wait'
-        ? `${identity}｜${waitOutcome(action, holdingMode)}`
+        ? `${identity}｜${holdingMode ? '继续持有' : '本次不买入'}`
       : stage === 'invalid'
         ? `${identity}｜${invalidOutcome(action)}`
-        : `${identity}｜${action}提醒`
-  return { title, body }
+        : `${identity}｜${{
+            limitup: '临近涨停',
+            limitdown: '临近跌停',
+            pct: '涨跌幅达标',
+            vol: '量比达标',
+            turnover: '换手率达标',
+          }[alert.type] || `${action}到价`}`
+  const body = (
+    stage === 'watch'
+      ? [pendingFacts, watchInstruction(action)]
+      : stage === 'review'
+        ? [pendingFacts, '复核中，约2分钟内给结论']
+        : stage === 'confirm'
+          ? [decisionFacts, conciseReason || '信号已确认']
+          : stage === 'wait'
+            ? [
+                decisionFacts,
+                holdingMode ? waitOutcome(action, holdingMode) : '',
+                conciseReason,
+              ]
+            : stage === 'invalid'
+              ? [decisionFacts, conciseReason || '条件已失效']
+              : [pendingFacts]
+  ).filter(Boolean).join('｜').slice(0, 72)
+  return {
+    title: title.slice(0, 40),
+    body,
+    ...deliveryOf(alert, stage),
+  }
+}
+
+function reviewActionTitle(outcome, actionPlan) {
+  if (/本次不加仓、不减仓/.test(outcome)) return '继续持有'
+  if (/本次不买入/.test(outcome)) return '本次不买入'
+  const plan = compactText(actionPlan, 80)
+  const command = plan.match(
+    /(?:立即|现在)?(?:买入|加仓|减仓|清仓|卖出|止损)\s*\d+\s*手/,
+  )?.[0]
+  return compactText(command || outcome, 22).replace(/\s+/g, '')
+}
+
+export function buildTerminalReviewNotification({
+  code = '',
+  name = '',
+  advice = {},
+  jobId = '',
+  alertId = '',
+} = {}) {
+  const decision = advice?.reviewDecision
+  if (decision?.terminal !== true || !decision.outcome) return null
+  const holdingMode = /加仓|减仓|清仓|持有|止损|止盈/.test(
+    `${decision.outcome} ${advice.action || ''} ${advice.stance || ''}`,
+  )
+  const outcome = explicitActionLabel(decision.outcome, {
+    holdingMode,
+    terminal: true,
+  })
+  const actionPlan = explicitActionInstruction(
+    String(advice.actionPlan || decision.outcome),
+    { holdingMode, terminal: true },
+  )
+  const basis = compactText(
+    decision.basis?.[0]?.summary
+    || decision.basisSummary
+    || advice.reason
+    || '',
+    44,
+  )
+  const quiet = /本次不|继续持有|观望|放弃|取消/.test(outcome)
+  const id = String(alertId || jobId || code || 'review')
+  const facts = [
+    name && code && name !== code ? code : '',
+    quiet && holdingMode ? '本次不加仓、不减仓' : '',
+    basis,
+  ].filter(Boolean).join('｜').slice(0, 72)
+  return {
+    title: `${identityOf({ code, name })}｜${reviewActionTitle(
+      outcome,
+      actionPlan,
+    )}`.slice(0, 40),
+    body: facts,
+    code,
+    name,
+    tag: `trade-alert-${lifecycleId({ id, code })}`,
+    eventId: `review-terminal-${jobId || code}`,
+    url: '/',
+    renotify: !quiet,
+    silent: quiet,
+    urgency: quiet ? 'normal' : 'high',
+    ttl: 300,
+  }
 }

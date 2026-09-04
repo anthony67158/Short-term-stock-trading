@@ -250,7 +250,7 @@ function beep() {
 
 function notify(notification) {
   void showSystemNotification(notification)
-  beep()
+  if (notification?.silent !== true) beep()
 }
 
 async function triggerServerPriceReview(alert, quote) {

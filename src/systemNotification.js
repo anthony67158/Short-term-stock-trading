@@ -22,8 +22,8 @@ export async function showSystemNotification(notification = {}) {
   ) return { ok: false, reason: '系统通知权限未开启' }
 
   const tag = String(
-    notification.alertId
-    || notification.tag
+    notification.tag
+    || notification.alertId
     || `alert-${Date.now()}`,
   ).slice(0, 160)
   const options = {
@@ -31,7 +31,8 @@ export async function showSystemNotification(notification = {}) {
     icon: '/app-icon-192.png?v=7',
     badge: '/app-icon-192.png?v=7',
     tag,
-    renotify: true,
+    renotify: notification.renotify !== false,
+    silent: notification.silent === true,
     data: {
       url: notification.url || '/',
       code: String(notification.code || ''),

@@ -394,12 +394,12 @@ test('回踩与突破观察价都闭环触发提醒并排队自动复核', () =>
     assert.equal(outcome.alert.phase, 'reviewing')
     assert.equal(outcome.alert.enabled, false)
     assert.equal(outcome.wakeup.kind, 'price-review')
-    assert.match(outcome.notification.title, /观察条件已到/)
+    assert.match(outcome.notification.title, new RegExp(`${item.label}已到`))
     assert.match(
       outcome.notification.body,
-      new RegExp(`${item.label}${item.symbol}${item.price}`),
+      new RegExp(`现价${item.quote}${item.symbol}${item.price}`),
     )
-    assert.match(outcome.notification.body, /2分钟内给出明确结论/)
+    assert.match(outcome.notification.body, /约2分钟内给结论/)
 
     const queued = queueAdviceReviewForPriceTrigger(
       data,

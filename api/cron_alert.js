@@ -526,7 +526,7 @@ async function processAccount(
       collectDead(await sendPush(subs, {
         ...outcome.notification,
         code: a.code,
-        tag: 'review-' + a.id,
+        name: a.name,
         url: '/',
       }));
       Object.assign(a, outcome.alert);
@@ -563,7 +563,12 @@ async function processAccount(
         stage: 'trigger',
         reason: msg,
       });
-      collectDead(await sendPush(subs, { ...notification, code: a.code, tag: 'alert-' + a.id, url: '/' }));
+      collectDead(await sendPush(subs, {
+        ...notification,
+        code: a.code,
+        name: a.name,
+        url: '/',
+      }));
       a.triggeredAt = Date.now(); a.triggeredMsg = msg; a.enabled = false;
       changed = true;
       continue;
@@ -596,7 +601,12 @@ async function processAccount(
         stage: 'watch',
         reason: msg,
       });
-      collectDead(await sendPush(subs, { ...notification, code: a.code, tag: 'watch-' + a.id, url: '/' }));
+      collectDead(await sendPush(subs, {
+        ...notification,
+        code: a.code,
+        name: a.name,
+        url: '/',
+      }));
       a.phase = 'watching'; a.watchingAt = Date.now(); a.watchingPrice = Number(q?.price) || null; a.watchingMsg = msg;
       a.decisionDeadlineAt =
         a.watchingAt + TRIGGERED_REVIEW_TOTAL_BUDGET_MS;
@@ -643,7 +653,7 @@ async function processAccount(
           payload: {
             ...terminal.notification,
             code: a.code,
-            tag: 'review-timeout-' + a.id,
+            name: a.name,
             url: '/',
           },
         });
@@ -772,7 +782,12 @@ async function processAccount(
         pendingPushes.push({
           alertId: a.id,
           countedHit: true,
-          payload: { ...notification, code: a.code, tag: 'confirm-' + a.id, url: '/' },
+          payload: {
+            ...notification,
+            code: a.code,
+            name: a.name,
+            url: '/',
+          },
         });
         a.phase = 'confirmed'; a.triggeredAt = Date.now(); a.triggeredMsg = `确认${actZh}:${verdict.reason || ''}`; a.enabled = false;
         a.decisionPrice = Number(q.price);
@@ -811,7 +826,12 @@ async function processAccount(
         pendingPushes.push({
           alertId: a.id,
           countedHit: false,
-          payload: { ...notification, code: a.code, tag: 'invalid-' + a.id, url: '/' },
+          payload: {
+            ...notification,
+            code: a.code,
+            name: a.name,
+            url: '/',
+          },
         });
         a.phase = 'invalid'; a.triggeredAt = Date.now(); a.triggeredMsg = `已失效:${verdict.reason || ''}`; a.enabled = false;
         wakeups.push({ alert: { ...a }, verdict, at: a.triggeredAt });
@@ -831,7 +851,7 @@ async function processAccount(
           payload: {
             ...terminal.notification,
             code: a.code,
-            tag: 'review-wait-' + a.id,
+            name: a.name,
             url: '/',
           },
         });

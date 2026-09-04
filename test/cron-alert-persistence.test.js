@@ -59,7 +59,8 @@ test('Judge维持意见会终结当前价格触发而不是继续循环复核', 
   assert.equal(outcome.alert.decisionPrice, 10.02)
   assert.match(outcome.notification.title, /本次不买入/)
   assert.doesNotMatch(outcome.notification.body, /维持观望|不操作/)
-  assert.match(outcome.notification.body, /本次触发结束/)
+  assert.doesNotMatch(outcome.notification.body, /本次触发结束|不新增复核价/)
+  assert.equal(outcome.notification.silent, true)
 })
 
 test('FC回写预警状态时保留期间刚变化的持仓和新预警', async () => {

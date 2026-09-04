@@ -84,7 +84,7 @@
           "review": 0,
           "judge": 0
         },
-        "notificationIncludes": ["星河材料", "观察价已到", "当前不买入"]
+        "notificationIncludes": ["星河材料", "观察价已到", "复核中"]
       }
     },
     {
@@ -616,7 +616,7 @@
           "review": 0,
           "judge": 1
         },
-        "notificationIncludes": ["青川装备", "现在买入"]
+        "notificationIncludes": ["青川装备", "立即买入"]
       }
     },
     {
@@ -736,7 +736,7 @@
           "review": 0,
           "judge": 1
         },
-        "notificationIncludes": ["凌峰制造", "现在减仓"]
+        "notificationIncludes": ["凌峰制造", "立即减仓"]
       }
     },
     {

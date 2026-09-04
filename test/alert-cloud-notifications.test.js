@@ -148,7 +148,7 @@ test('页面轮询发现观察价到达后立即提交复核并显示同内容�
     assert.equal(requestBody.alertId, 'review-000636')
     assert.equal(planStore.get().alerts[0].phase, 'reviewing')
     assert.equal(planStore.get().alerts[0].enabled, false)
-    assert.match(alertStore.get().banners[0].title, /风华高科.*观察条件已到/)
+    assert.equal(alertStore.get().banners[0].title, '风华高科｜回踩加仓已到')
     assert.match(alertStore.get().banners[0].body, /55\.34.*55\.37/)
   } finally {
     global.fetch = originalFetch
@@ -225,5 +225,5 @@ test('云端Judge维持结论回灌为终态通知而不是再次等待', () => 
   assert.equal(notification.alertId, 'review-wait-cloud-buy-wait')
   assert.match(notification.title, /本次不买入/)
   assert.doesNotMatch(notification.body, /维持观望|不操作/)
-  assert.match(notification.body, /本次触发结束/)
+  assert.doesNotMatch(notification.body, /本次触发结束|不新增复核价/)
 })

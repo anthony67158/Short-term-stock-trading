@@ -10,14 +10,17 @@ self.addEventListener('activate', (e) => { e.waitUntil(self.clients.claim()); })
 self.addEventListener('push', (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch { data = { body: (event.data && event.data.text()) || '' }; }
-  const title = data.title || '⚡ 盯盘预警';
+  if (Number(data.expiresAt) > 0 && Date.now() >= Number(data.expiresAt)) return;
+  const title = data.title || '盯盘提醒';
   const tag = data.tag || ('alert-' + Date.now());
   const options = {
     body: data.body || '',
     icon: data.icon || '/app-icon-192.png?v=7',
     badge: '/app-icon-192.png?v=7',
     tag,
-    renotify: true,
+    renotify: data.renotify !== false,
+    silent: data.silent === true,
+    timestamp: Number(data.sentAt) || Date.now(),
     data: { url: data.url || '/', code: data.code || '' },
   };
   event.waitUntil(Promise.all([
@@ -32,8 +35,8 @@ self.addEventListener('push', (event) => {
             body: options.body,
             code: data.code || '',
             name: data.name || '',
-            alertId: tag,
-            at: Date.now(),
+            alertId: data.eventId || tag,
+            at: Number(data.sentAt) || Date.now(),
           },
         })
       ))),

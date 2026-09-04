@@ -17,17 +17,47 @@ function ensure() {
 
 export function pushConfigured() { return ensure(); }
 
+export function normalizePushDelivery(payload = {}, now = Date.now()) {
+  const requestedTtl = Math.trunc(Number(payload.ttl))
+  const ttl = Number.isFinite(requestedTtl)
+    ? Math.max(30, Math.min(3600, requestedTtl))
+    : 300
+  const urgency = ['very-low', 'low', 'normal', 'high'].includes(
+    String(payload.urgency || ''),
+  )
+    ? String(payload.urgency)
+    : 'normal'
+  const sentAt = Number.isFinite(Number(payload.sentAt))
+    ? Number(payload.sentAt)
+    : now
+  const expiresAt = Number.isFinite(Number(payload.expiresAt))
+    ? Number(payload.expiresAt)
+    : sentAt + ttl * 1000
+  return {
+    data: JSON.stringify({
+      ...payload,
+      sentAt,
+      expiresAt,
+    }),
+    options: { TTL: ttl, urgency },
+  }
+}
+
 // subs: [{endpoint, keys:{p256dh,auth}}]  payload:{title,body,tag,code,url,icon}
 // → { sent, failed, deadEndpoints:[] }
 export async function sendPush(subs, payload) {
   const out = { sent: 0, failed: 0, deadEndpoints: [] };
   if (!ensure() || !Array.isArray(subs) || !subs.length) return out;
-  const data = JSON.stringify(payload || {});
+  const delivery = normalizePushDelivery(payload);
   await Promise.all(subs.map(async (s) => {
     if (!s || !s.endpoint || !s.keys) return;
     try {
       const endpoint = await assertSafeWebPushEndpoint(s.endpoint);
-      await webpush.sendNotification({ endpoint, keys: s.keys }, data, { TTL: 3600 });
+      await webpush.sendNotification(
+        { endpoint, keys: s.keys },
+        delivery.data,
+        delivery.options,
+      );
       out.sent++;
     } catch (e) {
       out.failed++;
