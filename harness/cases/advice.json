@@ -165,7 +165,11 @@
               "expRet": 2.4
             },
             "highConfSignal": {
-              "fired": true
+              "fired": true,
+              "credibility": 65,
+              "buyPrice": 10,
+              "stopLoss": 9,
+              "takeProfit": 12
             }
           },
           "stockFund": {
@@ -276,7 +280,11 @@
               "expRet": 2.4
             },
             "highConfSignal": {
-              "fired": true
+              "fired": true,
+              "credibility": 65,
+              "buyPrice": 10,
+              "stopLoss": 9,
+              "takeProfit": 12.3
             }
           },
           "stockFund": {
@@ -365,7 +373,11 @@
               "expRet": 2.4
             },
             "highConfSignal": {
-              "fired": true
+              "fired": true,
+              "credibility": 65,
+              "buyPrice": 10,
+              "stopLoss": 9,
+              "takeProfit": 12
             }
           },
           "stockFund": {
@@ -468,7 +480,11 @@
               "expRet": 2.4
             },
             "highConfSignal": {
-              "fired": true
+              "fired": true,
+              "credibility": 65,
+              "buyPrice": 10,
+              "stopLoss": 9,
+              "takeProfit": 12
             }
           },
           "stockFund": {

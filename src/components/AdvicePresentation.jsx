@@ -248,7 +248,7 @@ function DecisionPlanSummary({ plan }) {
           <span>预计费用 <b>¥{plan.estimatedFees}</b></span>
         )}
         {expectancy?.pFill != null && (
-          <span>历史成交 <b>{probability(expectancy.pFill)}</b></span>
+          <span>模型可成交率 <b>{probability(expectancy.pFill)}</b></span>
         )}
         {expectancy?.pWinGivenFill != null && (
           <span>成功概率 <b>{probability(expectancy.pWinGivenFill)}</b></span>
@@ -257,7 +257,7 @@ function DecisionPlanSummary({ plan }) {
           <span>费后期望 <b>{rValue(expectancy.expectedNetR)}</b></span>
         )}
         {expectancy?.netRLowerBound != null && (
-          <span>保守下界 <b>{rValue(expectancy.netRLowerBound)}</b></span>
+          <span title="单次结果的低分位估计，不是平均收益置信下界">尾部结果参考 <b>{rValue(expectancy.netRLowerBound)}</b></span>
         )}
         {expectancy?.breakEvenWinProbability != null && (
           <span>

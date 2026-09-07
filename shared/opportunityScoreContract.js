@@ -292,6 +292,10 @@ export function unavailableOpportunityScore(input = {}, reason) {
     pWinGivenFill: null,
     expectedNetR: null,
     netRLowerBound: null,
+    meanConfidenceLowerBound: null,
+    lowerBoundKind: 'PREDICTION_P10',
+    shadowOnly: true,
+    productionEligible: false,
     expectedShortfall10: null,
     calibration: null,
     outOfDistribution: false,
@@ -310,6 +314,13 @@ function requiredMetric(value) {
   const number = finite(value)
   if (number == null) throw new Error('机会评分数值无效')
   return rounded(number, 6)
+}
+
+export function isExecutableOpportunityScore(value) {
+  return value?.state === 'READY'
+    && value.outOfDistribution !== true
+    && value.shadowOnly !== true
+    && value.productionEligible !== false
 }
 
 export function normalizeOpportunityScoreResponse(
@@ -362,6 +373,11 @@ export function normalizeOpportunityScoreResponse(
     pWinGivenFill: probability(response.pWinGivenFill),
     expectedNetR: requiredMetric(response.expectedNetR),
     netRLowerBound: requiredMetric(response.netRLowerBound),
+    meanConfidenceLowerBound: finite(response.meanConfidenceLowerBound),
+    lowerBoundKind: 'PREDICTION_P10',
+    shadowOnly: response.shadowOnly !== false,
+    productionEligible:
+      response.productionEligible === true && response.shadowOnly === false,
     expectedShortfall10: requiredMetric(
       response.expectedShortfall10,
     ),

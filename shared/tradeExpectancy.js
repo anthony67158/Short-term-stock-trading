@@ -3,6 +3,7 @@ import {
   executionPrice,
   tradeFees,
 } from './ashareStrategyExecution.js'
+import { isExecutableOpportunityScore } from './opportunityScoreContract.js'
 
 export const TRADE_EXPECTANCY_SCHEMA_VERSION = 'trade-expectancy.v1'
 
@@ -72,8 +73,7 @@ function modelEstimate(
   prices,
 ) {
   if (
-    opportunityScore?.state === 'READY'
-    && opportunityScore?.outOfDistribution !== true
+    isExecutableOpportunityScore(opportunityScore)
     && opportunityScore?.serverVerified === true
     && scoreMatchesPlan(opportunityScore, prices)
   ) {
@@ -100,6 +100,9 @@ function modelEstimate(
         expectedNetRGivenFill: expectedNetR,
         expectedNetRPerCandidate: pFill * expectedNetR,
         netRLowerBound: lowerBound,
+        meanConfidenceLowerBound: finite(
+          opportunityScore.meanConfidenceLowerBound,
+        ),
         lowerBoundPerCandidate: pFill * lowerBound,
         expectedShortfall10R: expectedShortfall,
         sampleCount: Math.max(
@@ -116,6 +119,8 @@ function modelEstimate(
 
   const signal = quant?.highConfSignal
   const signalAligned = signal?.fired === true
+    && quant?.shadowOnly !== true
+    && quant?.outOfDistribution !== true
     && alignedPrice(signal.buyPrice, prices.entry, 1.5)
     && alignedPrice(signal.stopLoss, prices.stop, 2)
     && alignedPrice(signal.takeProfit, prices.target, 2)
@@ -164,14 +169,20 @@ function expectancyGate(estimate, breakEvenWinProbability) {
   if (estimate.state === 'CALIBRATED') {
     if (
       estimate.expectedNetRGivenFill <= 0
-      || estimate.netRLowerBound < 0
+      || (
+        estimate.meanConfidenceLowerBound != null
+        && estimate.meanConfidenceLowerBound <= 0
+      )
     ) {
       return {
         state: 'NEGATIVE',
         allowsRiskIncrease: false,
         reason:
           `同类历史费后期望${round(estimate.expectedNetRGivenFill, 2)}R，`
-          + `下界${round(estimate.netRLowerBound, 2)}R，未证明正期望`,
+          + (estimate.meanConfidenceLowerBound != null
+            ? `均值置信下界${round(estimate.meanConfidenceLowerBound, 2)}R，`
+            : '')
+          + '未证明正期望',
       }
     }
     return {
@@ -179,7 +190,7 @@ function expectancyGate(estimate, breakEvenWinProbability) {
       allowsRiskIncrease: true,
       reason:
         `同类历史费后期望${round(estimate.expectedNetRGivenFill, 2)}R，`
-        + `下界${round(estimate.netRLowerBound, 2)}R`,
+        + `单次结果尾部参考${round(estimate.netRLowerBound, 2)}R`,
     }
   }
   if (
@@ -200,13 +211,13 @@ function expectancyGate(estimate, breakEvenWinProbability) {
     state: estimate.state === 'MODEL_ESTIMATE'
       ? 'POSITIVE_ESTIMATE'
       : 'UNCALIBRATED',
-    allowsRiskIncrease: true,
+    allowsRiskIncrease: estimate.state === 'MODEL_ESTIMATE',
     reason: estimate.state === 'MODEL_ESTIMATE'
       ? `量化成功概率${round(estimate.pWinGivenFill * 100, 1)}%，`
         + `高于费后盈亏平衡所需的${
           round(breakEvenWinProbability * 100, 1)
         }%`
-      : `尚无同类校准样本；费后盈亏平衡至少需要${
+      : `当前价格合同缺少可靠成功概率，暂不新增仓位；费后盈亏平衡至少需要${
           round(breakEvenWinProbability * 100, 1)
         }%胜率`,
   }
@@ -327,6 +338,8 @@ export function buildTradeExpectancy({
         4,
       ),
       netRLowerBound: round(estimate.netRLowerBound, 4),
+      lowerBoundKind: 'PREDICTION_P10',
+      meanConfidenceLowerBound: round(estimate.meanConfidenceLowerBound, 4),
       lowerBoundPerCandidate: round(
         estimate.lowerBoundPerCandidate,
         4,

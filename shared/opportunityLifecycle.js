@@ -94,6 +94,7 @@ export function deriveOpportunityLifecycle({
     || /EXIT|REDUCE|清仓|减仓|止损|退出/.test(action)
   const riskEntry = /BUY|ADD|买入|建仓|加仓|试错/.test(action)
   let stage = fromExecution
+  if (stage === 'CLOSED' && holding) stage = 'MANAGED'
 
   if (!stage && executionPlan && TERMINAL_EXECUTION.has(
     String(executionPlan.status || ''),

@@ -120,6 +120,14 @@
           "sellableToday": 0
         },
         "advisorPayload": {
+          "quant": {
+            "score": 62,
+            "forecast": { "direction": "看涨", "upProb": 58, "expRet": 1.8 },
+            "highConfSignal": {
+              "fired": true, "credibility": 65,
+              "buyPrice": 4.57, "stopLoss": 4.45, "takeProfit": 4.85
+            }
+          },
           "todayQuote": {
             "price": 4.72,
             "low": 4.55,
@@ -263,6 +271,14 @@
           "stockWeight": 12
         },
         "advisorPayload": {
+          "quant": {
+            "score": 62,
+            "forecast": { "direction": "看涨", "upProb": 58, "expRet": 1.8 },
+            "highConfSignal": {
+              "fired": true, "credibility": 65,
+              "buyPrice": 10.1, "stopLoss": 9.7, "takeProfit": 11.2
+            }
+          },
           "todayQuote": {
             "price": 10.4,
             "low": 10.08,
@@ -535,6 +551,14 @@
           "sellableToday": 0
         },
         "advisorPayload": {
+          "quant": {
+            "score": 62,
+            "forecast": { "direction": "看涨", "upProb": 58, "expRet": 1.8 },
+            "highConfSignal": {
+              "fired": true, "credibility": 65,
+              "buyPrice": 10, "stopLoss": 9.7, "takeProfit": 10.8
+            }
+          },
           "todayQuote": {
             "price": 10,
             "low": 9.8,
@@ -771,6 +795,14 @@
           "sellableToday": 0
         },
         "advisorPayload": {
+          "quant": {
+            "score": 62,
+            "forecast": { "direction": "看涨", "upProb": 58, "expRet": 1.8 },
+            "highConfSignal": {
+              "fired": true, "credibility": 65,
+              "buyPrice": 10, "stopLoss": 9.7, "takeProfit": 10.8
+            }
+          },
           "todayQuote": {
             "price": 10,
             "low": 9.8,
@@ -1215,6 +1247,14 @@
           "sellableToday": 0
         },
         "advisorPayload": {
+          "quant": {
+            "score": 62,
+            "forecast": { "direction": "看涨", "upProb": 58, "expRet": 1.8 },
+            "highConfSignal": {
+              "fired": true, "credibility": 65,
+              "buyPrice": 9.85, "stopLoss": 9.5, "takeProfit": 10.8
+            }
+          },
           "todayQuote": {
             "price": 10.2,
             "low": 9.78,

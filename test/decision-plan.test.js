@@ -40,7 +40,10 @@ const payload = {
   quant: {
     score: 72,
     forecast: { upProb: 62, expRet: 2.4 },
-    highConfSignal: { fired: true },
+    highConfSignal: {
+      fired: true, credibility: 65, buyPrice: 10,
+      stopLoss: 9, takeProfit: 12.1,
+    },
   },
   stockFund: {
     mainNetYi: 1.2,
@@ -439,6 +442,7 @@ test('校准后的费后期望下界为负时阻止新增风险', () => {
         pWinGivenFill: 0.56,
         expectedNetR: 0.08,
         netRLowerBound: -0.06,
+        meanConfidenceLowerBound: -0.06,
         expectedShortfall10: -1.2,
         calibration: {
           method: 'isotonic',
@@ -477,6 +481,13 @@ test('跌停压力损失超过账户上限时缩减买入手数', () => {
     },
     payload: {
       ...payload,
+      quant: {
+        ...payload.quant,
+        highConfSignal: {
+          fired: true, credibility: 65, buyPrice: 10,
+          stopLoss: 9.7, takeProfit: 10.6,
+        },
+      },
       todayQuote: {
         ...payload.todayQuote,
         limitDownPrice: 8,

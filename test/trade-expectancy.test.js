@@ -28,7 +28,7 @@ test('价格合同按双边滑点和真实费用计算费后盈亏平衡胜率',
   assert.ok(result.plan.breakEvenWinProbability > 1 / 3)
   assert.equal(result.probability.pWinGivenFill, null)
   assert.equal(result.gate.state, 'UNCALIBRATED')
-  assert.equal(result.gate.allowsRiskIncrease, true)
+  assert.equal(result.gate.allowsRiskIncrease, false)
 })
 
 test('机会模型下界为负时明确阻止新增风险', () => {
@@ -51,6 +51,7 @@ test('机会模型下界为负时明确阻止新增风险', () => {
       pWinGivenFill: 0.58,
       expectedNetR: 0.12,
       netRLowerBound: -0.04,
+      meanConfidenceLowerBound: -0.04,
       expectedShortfall10: -1.15,
       calibration: {
         method: 'isotonic',

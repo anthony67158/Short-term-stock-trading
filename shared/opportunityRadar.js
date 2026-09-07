@@ -11,6 +11,7 @@ import {
 import {
   explainOpportunityMarketGate,
 } from './opportunityLanguage.js'
+import { isExecutableOpportunityScore } from './opportunityScoreContract.js'
 
 export const OPPORTUNITY_RADAR_SCHEMA_VERSION =
   'opportunity-radar.v2'
@@ -348,16 +349,17 @@ function formulaOpportunity(candidate, {
   }
   const opportunityScore = candidate.opportunityScore
   if (
-    opportunityScore?.state === 'READY'
-    && opportunityScore?.outOfDistribution !== true
+    isExecutableOpportunityScore(opportunityScore)
     && (
       finite(opportunityScore.expectedNetR) <= 0
-      || finite(opportunityScore.netRLowerBound) < 0
+      || (
+        finite(opportunityScore.meanConfidenceLowerBound) != null
+        && finite(opportunityScore.meanConfidenceLowerBound) <= 0
+      )
     )
   ) {
     blockers.push(
       `同类历史费后期望${finite(opportunityScore.expectedNetR)}R，`
-      + `保守下界${finite(opportunityScore.netRLowerBound)}R，`
       + '尚未证明正期望',
     )
   }
@@ -587,8 +589,7 @@ function sortedRows(rows) {
   const modelMetric = (row, key, fallback) => {
     const score = row?.opportunityScore
     if (
-      score?.state !== 'READY'
-      || score?.outOfDistribution === true
+      !isExecutableOpportunityScore(score)
     ) return fallback
     return finite(score[key]) ?? fallback
   }
