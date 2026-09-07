@@ -612,8 +612,11 @@ function buildExecutionPlan({
     2,
   )
   const targetCash = totalAssets * (100 - targetPositionPct) / 100
+  const reservedCash = positive(distribution.reservedBuyCash)
+  let currentBuyCapacity = positive(distribution.cash - targetCash - reservedCash)
+  const currentBuyBudget = rounded(currentBuyCapacity, 2)
   let remainingBuyCapacity = positive(
-    distribution.cash - targetCash + estimatedSellNetProceeds,
+    distribution.cash - targetCash - reservedCash + estimatedSellNetProceeds,
   )
   const buyBudget = rounded(remainingBuyCapacity, 2)
   const buySeeds = [
@@ -655,6 +658,12 @@ function buildExecutionPlan({
         )
       : { lots: 0, estimate: estimateExecution('BUY', 0, 0) }
     const estimatedLots = affordable.lots
+    const current = referencePrice > 0
+      ? affordableBuyLots(referencePrice, estimatedLots, currentBuyCapacity)
+      : { lots: 0, estimate: estimateExecution('BUY', 0, 0) }
+    currentBuyCapacity = Math.max(
+      0, currentBuyCapacity - current.estimate.estimatedCashImpact,
+    )
     const estimatedAmount = rounded(
       estimatedLots * referencePrice * 100,
     )
@@ -684,6 +693,8 @@ function buildExecutionPlan({
       ...affordable.estimate,
       desiredLots,
       estimatedLots,
+      currentExecutableLots: current.lots,
+      requiresSellSettlement: current.lots < estimatedLots,
       sellableLots: 0,
       remainingLots: Math.max(0, desiredLots - estimatedLots),
       t1Blocked: false,
@@ -808,6 +819,7 @@ function buildExecutionPlan({
     estimatedBuyCashOutflow,
     estimatedFees,
     buyBudget,
+    currentBuyBudget,
     primaryRotation,
     orders,
     conceptActions: executableConceptActions,

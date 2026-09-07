@@ -49,7 +49,8 @@ test('机会候选同时展示入场仓位和完整退出计划', () => {
   assert.match(opportunityUi, /最大仓位/)
   assert.match(opportunityUi, /加入自选/)
   assert.match(opportunityUi, /openStockDetail/)
-  assert.match(opportunityUi, /为什么能买/)
+  assert.match(opportunityUi, /关注依据/)
+  assert.match(opportunityUi, /accountBudget/)
   assert.match(content, /plannedRows/)
   assert.match(content, /当前没有形成完整买卖计划的股票/)
   assert.match(content, /只有同时给出入场价/)
@@ -80,8 +81,8 @@ test('尾盘严格与接近公式在盘中页使用独立区段展示', () => {
   assert.match(content, /仅供核对，不可直接买入/)
 })
 
-test('盘中机会明确拆分立即买入提前布局和尾盘反转', () => {
-  assert.match(content, /可立即买入/)
+test('盘中机会明确拆分优先复核提前布局和尾盘反转', () => {
+  assert.match(content, /优先复核/)
   assert.match(content, /今日提前布局/)
   assert.match(content, /尾盘反转/)
   assert.match(content, /activeIntradayView/)
@@ -90,7 +91,7 @@ test('盘中机会明确拆分立即买入提前布局和尾盘反转', () => {
   assert.match(intradayNav, /aria-label="盘中机会分类"/)
   assert.match(intradayNav, /role="tab"/)
   assert.match(intradayNav, /count/)
-  assert.match(intradayNav, /条件全部通过/)
+  assert.match(intradayNav, /接近入场，核验账户/)
   assert.match(intradayNav, /等待触发或风险解除/)
   assert.match(intradayNav, /14:50自动扫描/)
   assert.doesNotMatch(content, /rows={readyRows}[\s\S]*rows={layoutRows}/)

@@ -45,7 +45,14 @@ function pendingPlanRiskAmount(plan = {}) {
     plan.riskAmount
     ?? plan.tradeExpectancy?.plan?.lossAmount,
   )
-  if (explicit != null) return Math.max(0, explicit)
+  if (explicit != null) {
+    const target = finite(plan.targetLots)
+    const remaining = finite(plan.remainingLots)
+    const fraction = target > 0 && remaining != null
+      ? Math.max(0, Math.min(1, remaining / target))
+      : 1
+    return Math.max(0, explicit * fraction)
+  }
   const referencePrice = finite(plan.referencePrice)
   const stopPrice = finite(plan.stopPrice)
   const lots = Math.max(
@@ -135,12 +142,14 @@ export function evaluateAccountCircuitBreaker({
         sum + Math.max(0, finite(plan.expectedNetProceeds) || 0),
       0,
     )
-  const activeOpenRiskAmount = activePlans
+  const pendingOpenRiskAmount = activePlans
     .filter((plan) => plan.side === 'BUY')
     .reduce(
       (sum, plan) => sum + pendingPlanRiskAmount(plan),
       0,
     )
+  const holdingRiskAmount = Math.max(0, finite(portfolio.holdingRiskAmount) || 0)
+  const activeOpenRiskAmount = pendingOpenRiskAmount + holdingRiskAmount
   const maximumOpenRiskAmount = totalAssets
     * maximumOpenRiskPct / 100
   const availableOpenRiskAmount = Math.max(
@@ -163,6 +172,24 @@ export function evaluateAccountCircuitBreaker({
       Math.max(maximum, finite(item?.weight) || 0)
     , 0)
   const blockers = []
+  const unknownRiskCodes = portfolio.unknownRiskCodes || []
+  const stopReachedCodes = portfolio.stopReachedCodes || []
+  if (unknownRiskCodes.length) {
+    blockers.push(breaker(
+      'HOLDING_RISK_UNKNOWN',
+      `持仓${unknownRiskCodes.join('、')}缺少报价或有效止损，补齐后再评估新增仓位`,
+      unknownRiskCodes.length,
+      0,
+    ))
+  }
+  if (stopReachedCodes.length) {
+    blockers.push(breaker(
+      'HOLDING_STOP_REACHED',
+      `持仓${stopReachedCodes.join('、')}已触及止损，先处理退出风险`,
+      stopReachedCodes.length,
+      0,
+    ))
+  }
   if (realizedLossPct >= maximumDailyRealizedLossPct) {
     blockers.push(breaker(
       'DAILY_REALIZED_LOSS',
@@ -214,7 +241,7 @@ export function evaluateAccountCircuitBreaker({
   if (openRiskPct >= maximumOpenRiskPct) {
     blockers.push(breaker(
       'OPEN_RISK_BUDGET',
-      '未完成买入计划占满账户风险预算',
+      '持仓与未完成买入占满账户风险预算',
       +openRiskPct.toFixed(2),
       maximumOpenRiskPct,
     ))
@@ -255,6 +282,8 @@ export function evaluateAccountCircuitBreaker({
     pendingSellProceeds: +pendingSellProceeds.toFixed(2),
     pendingSellProceedsRecognized: 0,
     activeOpenRiskAmount: +activeOpenRiskAmount.toFixed(2),
+    holdingRiskAmount: +holdingRiskAmount.toFixed(2),
+    pendingOpenRiskAmount: +pendingOpenRiskAmount.toFixed(2),
     maximumOpenRiskAmount: +maximumOpenRiskAmount.toFixed(2),
     availableOpenRiskAmount: +availableOpenRiskAmount.toFixed(2),
     allowedActions: allowRiskIncrease

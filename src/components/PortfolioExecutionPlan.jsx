@@ -95,6 +95,12 @@ function ActionOrder({ order }) {
             {' '}{order.remainingLots} 手待解锁
           </strong>
         )}
+        {order.requiresSellSettlement && (
+          <strong>
+            现有资金最多支持{order.currentExecutableLots}手；其余须先记录卖出成交，
+            再按最新行情与账户预算复核
+          </strong>
+        )}
       </span>
       <Icon name="chevronRight" size={14} />
     </button>
@@ -180,7 +186,7 @@ export default function PortfolioExecutionPlan({ analysis = {} }) {
       <section className="portfolio-execution-summary">
         <div>
           <div className="portfolio-analysis-section-title">
-            <Icon name="check" size={13} /> 今日执行清单
+            <Icon name="check" size={13} /> 今日调仓预案
           </div>
           <h3>{executionPlan.todayGoal}</h3>
           <p>

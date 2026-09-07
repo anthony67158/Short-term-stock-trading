@@ -55,9 +55,9 @@ function laneCopy(lane, summary) {
   if (summary.ready > 0) {
     return {
       icon: 'target',
-      title: `${summary.ready}只满足买入条件`,
+      title: `${summary.ready}只接近入场条件，优先复核`,
       detail:
-        '先核对触发条件和仓位，再按对应止损、止盈与时间退出执行。',
+        '加入自选后核验实时量价、费后期望和账户容量，再决定是否买入。',
     }
   }
   if (summary.waiting > 0) {
@@ -219,11 +219,21 @@ function PortfolioBar({ portfolio }) {
     : 0
   return (
     <div className="opportunity-portfolio-bar" role="status">
+      {portfolio.account && (
+        <div className="opportunity-portfolio-head">
+          <Icon name="wallet" size={14} />
+          <strong>本账户</strong>
+          <span>
+            预留后可用预算 {Math.floor(portfolio.account.availableCash).toLocaleString('zh-CN')}元
+            {' · '}剩余风险预算 {Math.floor(portfolio.account.availableRisk).toLocaleString('zh-CN')}元
+          </span>
+        </div>
+      )}
       <div className="opportunity-portfolio-head">
         <Icon name="shield" size={14} />
         <strong>组合风险预算</strong>
         <span>
-          已纳入 {included} 个独立机会 · 占用约 {approved}% / 上限 {limit}%
+          候选预演 {included} 个机会 · 参考仓位 {approved}% / 上限 {limit}%
         </span>
       </div>
       <div className="opportunity-portfolio-track" aria-hidden="true">
@@ -355,7 +365,7 @@ export default function OpportunityRadarContent({
     : '包含预催化潜伏与公式候选，均需等待价格、量能和资金确认'
   const intradayViewMeta = {
     ready: {
-      title: '可立即买入',
+      title: '优先复核',
       detail: '价格、量能、资金、板块和风险条件均已通过，可按计划人工执行',
       icon: 'target',
       empty: '当前0只。没有股票同时通过全部买入条件。',

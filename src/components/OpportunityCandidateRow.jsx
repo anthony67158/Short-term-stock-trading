@@ -8,12 +8,12 @@ import StockName from './StockName'
 
 const STATE_VIEW = Object.freeze({
   READY: {
-    label: '可以买入',
+    label: '优先复核',
     icon: 'target',
     tone: 'ready',
   },
   WAIT_TRIGGER: {
-    label: '到价再买',
+    label: '等待触发',
     icon: 'clock',
     tone: 'waiting',
   },
@@ -179,7 +179,8 @@ export default function OpportunityCandidateRow({
             {modelReady ? (
               <>
                 <Icon name="chart" size={12} />
-                <span>成交率 {probabilityPct(modelScore.pFill)}</span>
+                <span>{modelScore.shadowOnly || modelScore.productionEligible === false ? '研究估计' : '模型估计'}</span>
+                <span>可成交率 {probabilityPct(modelScore.pFill)}</span>
                 <span>
                   净盈利率 {probabilityPct(modelScore.pWinGivenFill)}
                 </span>
@@ -202,9 +203,14 @@ export default function OpportunityCandidateRow({
             {portfolioNote.label}
           </span>
         )}
+        {portfolio?.accountBudget && (
+          <p data-budget-state={portfolio.accountBudget.state}>
+            <Icon name="wallet" size={12} /> {portfolio.accountBudget.reason}
+          </p>
+        )}
         <p>
           {opportunity.state === 'READY'
-            ? '为什么能买：'
+            ? '关注依据：'
             : opportunity.state === 'AVOID'
               ? '为什么先不买：'
               : '判断依据：'}

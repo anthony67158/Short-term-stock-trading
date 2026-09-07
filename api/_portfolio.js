@@ -1,6 +1,8 @@
 // 服务端持仓 payload 适配层。账户计算由 shared/portfolioAccounting.js 单一实现，
 // 浏览器与 FC 只保留各自签名适配，避免做T、T+1 和估值口径再次漂移。
 import { portfolioExposureContext } from '../shared/portfolioExposure.js';
+import { buildAccountRiskContext } from '../shared/accountRiskBudget.js';
+import { fetchQuotes } from './quote.js';
 import {
   buildTActionContext,
   computePortfolio,
@@ -100,4 +102,26 @@ export function buildHoldPayload(
 // 构造【自选/非持仓个股】buy_advice 的 payload(与前端 buildWatchSpec 的 aiPayload 同口径)
 export function buildWatchPayload(code, name, portfolio, account) {
   return { code, name, account: accountFrom(portfolio, account) };
+}
+
+export async function readAccountRiskContext(data, {
+  quoteReader = fetchQuotes,
+  timeoutMs = 5000,
+} = {}) {
+  const codes = [...new Set((data?.holding || []).map((item) => item.code))];
+  let timer;
+  try {
+    const quotes = await Promise.race([
+      Promise.resolve().then(() => quoteReader(codes)),
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve([]), timeoutMs);
+      }),
+    ]).catch(() => []);
+    return buildAccountRiskContext(
+      data,
+      Object.fromEntries(quotes.map((quote) => [quote.code, quote])),
+    );
+  } finally {
+    clearTimeout(timer);
+  }
 }

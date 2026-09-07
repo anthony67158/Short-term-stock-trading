@@ -357,6 +357,9 @@ test('持仓诊断生成金额手数明确且资金守恒的组合执行单', ()
     ],
   )
   assert.equal(result.executionPlan.buyBudget < 6000, true)
+  assert.equal(result.executionPlan.currentBuyBudget, 0)
+  assert.equal(result.executionPlan.orders[1].currentExecutableLots, 0)
+  assert.equal(result.executionPlan.orders[1].requiresSellSettlement, true)
   assert.equal(result.executionPlan.estimatedBuyAmount, 3000)
   assert.equal(result.executionPlan.estimatedSellAmount, 18000)
   assert.equal(

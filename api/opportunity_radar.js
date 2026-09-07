@@ -23,6 +23,9 @@ import {
 import {
   readTailPickState,
 } from './tail_pick.js'
+import { fetchQuotes } from './quote.js'
+import { buildAccountRiskContext, allocateOpportunityBudget } from '../shared/accountRiskBudget.js'
+import { analyzeOpportunityPortfolio } from '../shared/opportunityPortfolio.js'
 
 const SOURCE_READ_TIMEOUT_MS = 15_000
 
@@ -30,14 +33,14 @@ function message(reason) {
   return String(reason?.message || reason || '').slice(0, 180)
 }
 
-function withTimeout(promise, label) {
+function withTimeout(promise, label, timeoutMs = SOURCE_READ_TIMEOUT_MS) {
   let timeout
   return Promise.race([
     promise,
     new Promise((_, reject) => {
       timeout = setTimeout(
         () => reject(new Error(`${label}超时`)),
-        SOURCE_READ_TIMEOUT_MS,
+        timeoutMs,
       )
     }),
   ]).finally(() => clearTimeout(timeout))
@@ -57,8 +60,20 @@ export async function readOpportunityRadarSnapshot({
   readTail = () => readTailPickState(),
   readPreCatalyst = () => readPreCatalystState(),
   readBaseline = () => opportunityRadarBaselineStore.readBaseline(),
+  accountData = null,
+  readQuotes = fetchQuotes,
   now = Date.now(),
 } = {}) {
+  const codes = [...new Set((accountData?.holding || []).map((item) => item.code))]
+  const riskPromise = accountData
+    ? withTimeout(Promise.resolve().then(() => readQuotes(codes)), '持仓报价', 5000)
+      .catch(() => [])
+      .then((quotes) => buildAccountRiskContext(
+        accountData,
+        Object.fromEntries(quotes.map((quote) => [quote.code, quote])),
+        now,
+      ))
+    : Promise.resolve(null)
   const [
     sectorResult,
     formulaResult,
@@ -101,6 +116,15 @@ export async function readOpportunityRadarSnapshot({
     sourceErrors,
     now,
   })
+  const accountRisk = await riskPromise
+  if (accountRisk) {
+    radar.portfolios = Object.fromEntries(Object.entries(radar.lanes).map(
+      ([lane, rows]) => [lane, allocateOpportunityBudget(
+        analyzeOpportunityPortfolio({ rows, holdings: accountRisk.exposures }),
+        accountRisk,
+      )],
+    ))
+  }
   return {
     ok: true,
     partial: Object.values(sourceErrors).some(Boolean),
@@ -139,7 +163,9 @@ export default async function handler(req, res) {
         errorCode: 'UNAUTHORIZED',
       })
     }
-    return reply(res, 200, await readOpportunityRadarSnapshot())
+    return reply(res, 200, await readOpportunityRadarSnapshot({
+      accountData: authentication.account.data,
+    }))
   } catch (error) {
     return reply(res, 500, {
       ok: false,

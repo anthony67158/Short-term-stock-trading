@@ -36,6 +36,7 @@ import {
   selectPortfolioCandidates,
 } from '../shared/portfolioAnalysis.js'
 import { deriveMarketRegime } from '../shared/marketRegime.js'
+import { buildAccountRiskContext } from '../shared/accountRiskBudget.js'
 import {
   normalizeQuantModelVersion,
   quantModelLabel,
@@ -1240,6 +1241,9 @@ export default async function handler(req, res) {
       positionConstraints,
       quoteMap,
     )
+    distribution.reservedBuyCash = buildAccountRiskContext(
+      accountData, quoteMap,
+    ).breaker.reservedBuyCash
     if (!distribution.stocks.length) {
       return fail('服务端未能重算有效持仓')
     }

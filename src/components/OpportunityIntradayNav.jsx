@@ -3,9 +3,9 @@ import Icon from './Icon'
 const MODES = Object.freeze([
   {
     id: 'ready',
-    label: '可立即买入',
-    shortLabel: '立即买入',
-    detail: '条件全部通过',
+    label: '优先复核',
+    shortLabel: '优先复核',
+    detail: '接近入场，核验账户',
     icon: 'target',
   },
   {
