@@ -18,6 +18,7 @@ import {
   deriveOpportunityLifecycle,
 } from './opportunityLifecycle.js'
 import { positionExitEffect } from './positionExit.js'
+import { buildTradeExpectancy } from './tradeExpectancy.js'
 
 export const DECISION_PLAN_SCHEMA_VERSION = 'decision-plan.v2'
 
@@ -181,6 +182,7 @@ function computeBuyCapacity({
   slippageBps,
   highConfidence,
   accountRiskMultiplier = 1,
+  availableOpenRiskAmount = null,
 }) {
   const totalAssets = positive(account.totalAssets)
   const cash = Math.max(0, finite(account.cash) || 0)
@@ -199,9 +201,16 @@ function computeBuyCapacity({
   const riskPct = (highConfidence ? 1 : 0.6)
     * (finite(market.riskMultiplier) ?? 0)
     * normalizedAccountRiskMultiplier
-  const maxLossAmount = totalAssets == null
+  const baseMaxLossAmount = totalAssets == null
     ? null
     : round(totalAssets * riskPct / 100)
+  const availableRisk = Math.max(
+    0,
+    finite(availableOpenRiskAmount) ?? Infinity,
+  )
+  const maxLossAmount = baseMaxLossAmount == null
+    ? null
+    : round(Math.min(baseMaxLossAmount, availableRisk))
 
   const entryFill = executionPrice(referencePrice, 'BUY', slippageBps)
   const stopFill = executionPrice(stopPrice, 'SELL', slippageBps)
@@ -316,6 +325,34 @@ export function compileDecisionPlan({
   const riskIncreasing = RISK_INCREASING.has(governedAction)
   const riskReducing = RISK_REDUCING.has(governedAction)
   const account = payload.account || {}
+  const expectancyCalibration =
+    payload.advisorTrack?.expectancyCalibration || {}
+  const realizedRSamples = Math.max(
+    0,
+    Math.trunc(
+      finite(expectancyCalibration.realizedRSamples) || 0,
+    ),
+  )
+  const realizedNetRLowerBound = finite(
+    expectancyCalibration.realizedNetRLowerBound,
+  )
+  const calibrationSamples = Math.max(
+    0,
+    Math.trunc(finite(expectancyCalibration.samples) || 0),
+  )
+  const brierScore = finite(expectancyCalibration.brierScore)
+  const performanceRiskMultiplier = (
+    (
+      realizedRSamples >= 20
+      && realizedNetRLowerBound != null
+      && realizedNetRLowerBound < 0
+    )
+    || (
+      calibrationSamples >= 30
+      && brierScore != null
+      && brierScore > 0.25
+    )
+  ) ? 0.5 : 1
   const referencePrice = referencePriceFor(
     governedAction,
     advice,
@@ -558,7 +595,12 @@ export function compileDecisionPlan({
       slippageBps,
       highConfidence: payload.quant?.highConfSignal?.fired === true,
       accountRiskMultiplier:
-        accountCircuitBreaker?.riskBudgetMultiplier,
+        Math.min(
+          finite(accountCircuitBreaker?.riskBudgetMultiplier) ?? 1,
+          performanceRiskMultiplier,
+        ),
+      availableOpenRiskAmount:
+        accountCircuitBreaker?.availableOpenRiskAmount,
     })
     if (capacity.lots <= 0) blockedReasons.push('风险预算或现金不足一手')
   }
@@ -619,6 +661,67 @@ export function compileDecisionPlan({
         `单手金额超过短线试仓的${probePositionLimitPct}%仓位上限`,
       )
     }
+  }
+
+  let tradeExpectancy = buildTradeExpectancy({
+    action: governedAction,
+    referencePrice,
+    stopPrice,
+    targetPrice,
+    quantityLots: Math.max(
+      1,
+      capacity.lots || requestedLots || 1,
+    ),
+    slippageBps,
+    stressExitPrice: payload.todayQuote?.limitDownPrice,
+    opportunityScore: payload.opportunityScore,
+    quant: payload.quant,
+  })
+  if (
+    riskIncreasing
+    && capacity.lots > 0
+    && positive(account.totalAssets)
+    && tradeExpectancy.stress?.lossAmount > 0
+  ) {
+    const stressLimitAmount = account.totalAssets * 0.02
+    const stressLossPerLot =
+      tradeExpectancy.stress.lossAmount / capacity.lots
+    const stressLimitedLots = Math.max(
+      0,
+      Math.floor(stressLimitAmount / stressLossPerLot),
+    )
+    if (stressLimitedLots < capacity.lots) {
+      capacity = {
+        ...capacity,
+        lots: stressLimitedLots,
+        stressLimitedLots,
+        stressLimitAmount: round(stressLimitAmount),
+      }
+      tradeExpectancy = buildTradeExpectancy({
+        action: governedAction,
+        referencePrice,
+        stopPrice,
+        targetPrice,
+        quantityLots: Math.max(1, stressLimitedLots),
+        slippageBps,
+        stressExitPrice: payload.todayQuote?.limitDownPrice,
+        opportunityScore: payload.opportunityScore,
+        quant: payload.quant,
+      })
+      if (stressLimitedLots <= 0) {
+        blockedReasons.push(
+          `按跌停压力价测算，单手潜在损失超过总资产2%（上限${
+            round(stressLimitAmount)
+          }元）`,
+        )
+      }
+    }
+  }
+  if (
+    riskIncreasing
+    && tradeExpectancy.gate?.allowsRiskIncrease === false
+  ) {
+    blockedReasons.push(tradeExpectancy.gate.reason)
   }
 
   const uniqueBlockers = [...new Set(blockedReasons.filter(Boolean))]
@@ -703,6 +806,9 @@ export function compileDecisionPlan({
     targetPrice,
     targetWeightPct,
     triggerDirection,
+    expectancyState: tradeExpectancy.state,
+    expectancyModelVersion: tradeExpectancy.modelVersion,
+    expectancyGate: tradeExpectancy.gate?.state,
     exitKind: text(advice.exitManagement?.kind, 40),
     priceLevels: priceContract.levels.map((level) => ({
       key: level.key,
@@ -882,6 +988,17 @@ export function compileDecisionPlan({
               accountCircuitBreaker.blockerCodes || [],
           }
         : null,
+      performanceCalibration: {
+        samples: calibrationSamples,
+        brierScore,
+        realizedRSamples,
+        realizedNetRLowerBound,
+        riskBudgetMultiplier: performanceRiskMultiplier,
+        reason: performanceRiskMultiplier < 1
+          ? '历史费后净回报下界或概率校准未达标，本笔风险预算减半'
+          : null,
+      },
+      tradeExpectancy,
     },
     costs,
     trigger,
@@ -909,6 +1026,24 @@ export function buildFallbackDecisionAdvice({
   now = Date.now(),
 } = {}) {
   const holdingMode = mode === 'hold_advice' || mode === 'review'
+  const previous = payload?.previousAdvice
+    && typeof payload.previousAdvice === 'object'
+    ? payload.previousAdvice
+    : {}
+  const previousStop = holdingMode
+    ? positive(previous.stopPrice)
+    : null
+  const previousReduce = holdingMode
+    ? positive(previous.reducePrice)
+    : null
+  const previousTarget = holdingMode
+    ? positive(previous.targetPrice)
+    : null
+  const previousDefense = [
+    previousStop != null ? `止损${previousStop}元` : '',
+    previousReduce != null ? `减仓${previousReduce}元` : '',
+    previousTarget != null ? `目标${previousTarget}元` : '',
+  ].filter(Boolean).join('、')
   const advice = {
     action: holdingMode ? '持有' : '观望',
     stance: holdingMode ? '持有' : '观望',
@@ -918,13 +1053,19 @@ export function buildFallbackDecisionAdvice({
       ? '解释服务暂不可用，维持现有仓位纪律'
       : '解释服务暂不可用，暂停新增风险',
     actionPlan: holdingMode
-      ? '本轮不新增仓位，也不依据不完整解释改变原计划；等待数据与解释服务恢复后重新评估。'
+      ? `本轮不新增仓位，也不依据不完整解释改变原计划；${
+          previousDefense
+            ? `继续执行上一版防守价：${previousDefense}。`
+            : '等待数据与解释服务恢复后重新评估。'
+        }`
       : '本轮不下单；等待数据与解释服务恢复并重新生成统一决策计划。',
     nextOpenPlan: holdingMode
-      ? '下一交易日开盘先恢复行情、技术与资金证据；证据完整前维持原仓位纪律，不新增风险。'
+      ? text(previous.nextOpenPlan, 500)
+        || '下一交易日开盘先恢复行情、技术与资金证据；证据完整前维持原仓位纪律，不新增风险。'
       : '',
     futurePlan: holdingMode
-      ? '解释服务恢复后重新生成1-5日退出路径；恢复前只执行原有硬止损，不延长持有周期。'
+      ? text(previous.futurePlan, 500)
+        || '解释服务恢复后重新生成1-5日退出路径；恢复前只执行原有硬止损，不延长持有周期。'
       : '',
     opQty: '无需操作',
     planQty: 0,
@@ -932,10 +1073,13 @@ export function buildFallbackDecisionAdvice({
     planAmount: 0,
     buyPrice: null,
     addPrice: null,
-    reducePrice: null,
-    stopPrice: null,
-    targetPrice: null,
-    invalidation: '关键数据或解释服务恢复后，本等待计划自动失效并必须重新计算。',
+    reducePrice: previousReduce,
+    stopPrice: previousStop,
+    targetPrice: previousTarget,
+    invalidation: holdingMode
+      ? text(previous.invalidation, 500)
+        || '关键数据或解释服务恢复后，本等待计划自动失效并必须重新计算。'
+      : '关键数据或解释服务恢复后，本等待计划自动失效并必须重新计算。',
     reason: `确定性降级：${text(error, 160) || 'LLM 未返回有效内容'}`,
     quantNote: payload.quant
       ? '量化结果已保留，但本轮没有获得完整解释，不能单独升级为交易动作。'

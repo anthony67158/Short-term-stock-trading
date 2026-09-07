@@ -256,6 +256,43 @@ function decisionPlanSummary(plan) {
   if (plan?.schemaVersion !== 'decision-plan.v2') return null
   const actionability = clean(plan.actionability, 30)
   const deferredPlan = deferredPlanPresentation(plan)
+  const expectancy = plan.risk?.tradeExpectancy
+  const expectancySummary =
+    expectancy?.schemaVersion === 'trade-expectancy.v1'
+      ? {
+          state: clean(expectancy.state, 30),
+          stateLabel: {
+            CALIBRATED: '同类历史已校准',
+            MODEL_ESTIMATE: '量化模型估计',
+            PLAN_ONLY: '历史样本积累中',
+            INVALID_PRICE_CONTRACT: '价格合同无效',
+            NOT_APPLICABLE: '本次不增加风险',
+          }[expectancy.state] || '统计状态未知',
+          pFill: displayNumber(expectancy.probability?.pFill),
+          pWinGivenFill: displayNumber(
+            expectancy.probability?.pWinGivenFill,
+          ),
+          sampleCount: displayNumber(
+            expectancy.probability?.sampleCount,
+          ),
+          expectedNetR: displayNumber(
+            expectancy.expectancy?.expectedNetRGivenFill,
+          ),
+          netRLowerBound: displayNumber(
+            expectancy.expectancy?.netRLowerBound,
+          ),
+          netRiskReward: displayNumber(
+            expectancy.plan?.netRiskReward,
+          ),
+          breakEvenWinProbability: displayNumber(
+            expectancy.plan?.breakEvenWinProbability,
+          ),
+          stressLossAmount: displayNumber(
+            expectancy.stress?.lossAmount,
+          ),
+          gateReason: clean(expectancy.gate?.reason, 180),
+        }
+      : null
   const evidenceBasis = plan.evidenceBasis
     ? {
         state: clean(plan.evidenceBasis.state, 30),
@@ -321,6 +358,7 @@ function decisionPlanSummary(plan) {
     maxLossAmount: displayNumber(plan.risk?.maxLossAmount),
     budgetPct: displayNumber(plan.risk?.budgetPct),
     estimatedFees: displayNumber(plan.costs?.estimatedFees),
+    expectancy: expectancySummary,
     evidenceBasis,
     evidenceIssues,
   }

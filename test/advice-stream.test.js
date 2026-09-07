@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import {
   adviceRuntimeUpdateFromData,
   adviceJobDeadlineMs,
+  adviceWorkerStartWindowMs,
   adviceFailureReason,
   adviceTradeStateMatches,
   createAdviceProgressSaveScheduler,
@@ -530,7 +531,7 @@ test('完整深度任务有独立总时限并在超时后释放执行资源', as
   )
 
   assert.equal(aborted, true)
-  assert.ok(adviceJobDeadlineMs(true) < 210000)
+  assert.ok(adviceJobDeadlineMs(true) < 240000)
   assert.ok(adviceJobDeadlineMs(false) < 110000)
   assert.equal(adviceJobDeadlineMs(false, {
     kind: 'price-review',
@@ -542,6 +543,14 @@ test('完整深度任务有独立总时限并在超时后释放执行资源', as
     at: 1000,
     decisionDeadlineAt: 121000,
   }, 1000) < 110000)
+})
+
+test('深度Worker窗口覆盖一轮完整任务并允许空闲槽位立即补位', () => {
+  assert.equal(adviceWorkerStartWindowMs(false), 300000)
+  assert.equal(adviceWorkerStartWindowMs(true), 300000)
+  assert.ok(
+    adviceWorkerStartWindowMs(true) > adviceJobDeadlineMs(true),
+  )
 })
 
 test('服务端进程内调用完成后立即清理长超时与中止监听', async () => {
@@ -1012,8 +1021,8 @@ test('Worker合并后采用最新活跃任务的批次且保留旧任务运行�
 })
 
 test('批量任务可收紧单股预算但不能突破安全边界', () => {
-  assert.equal(resolveAIBudget(true, 210000), 150000)
-  assert.equal(resolveAIBudget(true, 999999), 150000)
+  assert.equal(resolveAIBudget(true, 210000), 180000)
+  assert.equal(resolveAIBudget(true, 999999), 180000)
   assert.equal(resolveAIBudget(true, 1000), 30000)
   assert.equal(resolveAIBudget(false, null), 150000)
 })
@@ -1036,7 +1045,13 @@ test('军师把剩余预算交给唯一模型调用且禁止响应后的整轮�
     remainingMs: 145000,
     reasoning: true,
   }), {
-    timeoutMs: 90000,
+    timeoutMs: 142500,
+  })
+  assert.deepEqual(advisorGenerationPlan({
+    remainingMs: 175000,
+    reasoning: true,
+  }), {
+    timeoutMs: 150000,
   })
 })
 

@@ -70,6 +70,33 @@ test('execution-plan.v1绑定决策、账户版本、证据和有效期', () => 
   assert.equal(plan.pendingSellLots, 4)
 })
 
+test('买入执行计划冻结费后风险和压力风险供账户统一预留', () => {
+  const tradeExpectancy = {
+    schemaVersion: 'trade-expectancy.v1',
+    state: 'CALIBRATED',
+    plan: { lossAmount: 800 },
+    stress: { lossAmount: 1600 },
+    gate: {
+      state: 'POSITIVE',
+      allowsRiskIncrease: true,
+    },
+  }
+  const plan = compileExecutionPlan({
+    decisionPlan: decision({
+      action: 'BUY',
+      actionLabel: '买入',
+      risk: { tradeExpectancy },
+    }),
+    code: '600000',
+    accountRevision: 7,
+    now,
+  })
+
+  assert.equal(plan.riskAmount, 800)
+  assert.equal(plan.stressRiskAmount, 1600)
+  assert.deepEqual(plan.tradeExpectancy, tradeExpectancy)
+})
+
 test('执行方式按金额、流动性和数据质量选择且分批合计不超目标', () => {
   const sliced = compileExecutionPlan({
     decisionPlan: decision({

@@ -40,6 +40,23 @@ function consecutiveLossCount(closed = [], since = null) {
   return count
 }
 
+function pendingPlanRiskAmount(plan = {}) {
+  const explicit = finite(
+    plan.riskAmount
+    ?? plan.tradeExpectancy?.plan?.lossAmount,
+  )
+  if (explicit != null) return Math.max(0, explicit)
+  const referencePrice = finite(plan.referencePrice)
+  const stopPrice = finite(plan.stopPrice)
+  const lots = Math.max(
+    0,
+    Math.trunc(finite(plan.remainingLots ?? plan.targetLots) || 0),
+  )
+  return referencePrice > stopPrice && lots > 0
+    ? (referencePrice - stopPrice) * lots * 100
+    : 0
+}
+
 export function evaluateAccountCircuitBreaker({
   account = {},
   portfolio = {},
@@ -80,6 +97,9 @@ export function evaluateAccountCircuitBreaker({
   const maximumIndustryWeightPct = finite(
     limits.maximumIndustryWeightPct,
   ) ?? 30
+  const maximumOpenRiskPct = finite(
+    limits.maximumOpenRiskPct,
+  ) ?? 3
   const dayStart = beijingDayStartTs(now)
   const realizedPnl = (closed || [])
     .filter((item) =>
@@ -115,6 +135,21 @@ export function evaluateAccountCircuitBreaker({
         sum + Math.max(0, finite(plan.expectedNetProceeds) || 0),
       0,
     )
+  const activeOpenRiskAmount = activePlans
+    .filter((plan) => plan.side === 'BUY')
+    .reduce(
+      (sum, plan) => sum + pendingPlanRiskAmount(plan),
+      0,
+    )
+  const maximumOpenRiskAmount = totalAssets
+    * maximumOpenRiskPct / 100
+  const availableOpenRiskAmount = Math.max(
+    0,
+    maximumOpenRiskAmount - activeOpenRiskAmount,
+  )
+  const openRiskPct = totalAssets > 0
+    ? activeOpenRiskAmount / totalAssets * 100
+    : 0
   const availableCashAfterReservations = Math.max(
     0,
     cash - reservedBuyCash,
@@ -176,6 +211,14 @@ export function evaluateAccountCircuitBreaker({
       maximumIndustryWeightPct,
     ))
   }
+  if (openRiskPct >= maximumOpenRiskPct) {
+    blockers.push(breaker(
+      'OPEN_RISK_BUDGET',
+      '未完成买入计划占满账户风险预算',
+      +openRiskPct.toFixed(2),
+      maximumOpenRiskPct,
+    ))
+  }
   const allowRiskIncrease = blockers.length === 0
   const riskBudgetMultiplier = allowRiskIncrease
     && consecutiveLosses >= lossStreakReductionThreshold
@@ -195,6 +238,8 @@ export function evaluateAccountCircuitBreaker({
       positionPct,
       cashReservePct: +cashReservePct.toFixed(2),
       maximumIndustryWeightPct: maximumIndustry,
+      openRiskPct: +openRiskPct.toFixed(2),
+      maximumOpenRiskPct,
     },
     riskBudgetMultiplier,
     riskBudgetReason: riskBudgetMultiplier < 1
@@ -209,6 +254,9 @@ export function evaluateAccountCircuitBreaker({
       +availableCashAfterReservations.toFixed(2),
     pendingSellProceeds: +pendingSellProceeds.toFixed(2),
     pendingSellProceedsRecognized: 0,
+    activeOpenRiskAmount: +activeOpenRiskAmount.toFixed(2),
+    maximumOpenRiskAmount: +maximumOpenRiskAmount.toFixed(2),
+    availableOpenRiskAmount: +availableOpenRiskAmount.toFixed(2),
     allowedActions: allowRiskIncrease
       ? ['BUY', 'ADD', 'REDUCE', 'EXIT', 'WATCH']
       : ['REDUCE', 'EXIT', 'WATCH'],

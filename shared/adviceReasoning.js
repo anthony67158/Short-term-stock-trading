@@ -137,7 +137,7 @@ export function deepModelProgressMessage(elapsedMs = 0) {
   const elapsed = Math.max(0, Number(elapsedMs) || 0)
   const seconds = Math.floor(elapsed / 1000)
   if (elapsed >= 45000) {
-    return `模型仍在生成完整结论，连接正常；已等待${seconds}秒，达到时限将自动结束本轮。`
+    return `模型仍在处理，尚未返回完整结论；已等待${seconds}秒，达到时限将生成保守计划。`
   }
   if (elapsed >= 30000) {
     return `正在收束唯一动作、关键价位与失效条件…已用时${seconds}秒`

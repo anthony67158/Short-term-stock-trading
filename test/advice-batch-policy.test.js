@@ -139,8 +139,8 @@ test('深度模式使用有界预算且不整轮自动重试', () => {
     deepMode: true,
     fastMode: false,
     forceReasoning: true,
-    runtimeBudgetMs: 150000,
-    timeoutMs: 165000,
+    runtimeBudgetMs: 180000,
+    timeoutMs: 195000,
     maxAttempts: 1,
   })
 })

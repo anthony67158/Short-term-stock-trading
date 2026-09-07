@@ -289,6 +289,23 @@ export function compileExecutionPlan({
       : [],
     estimatedFees: finite(decisionPlan.costs?.estimatedFees) || 0,
     estimatedNetAmount,
+    riskAmount: Math.max(
+      0,
+      finite(
+        decisionPlan.risk?.tradeExpectancy?.plan?.lossAmount,
+      ) || 0,
+    ),
+    stressRiskAmount: Math.max(
+      0,
+      finite(
+        decisionPlan.risk?.tradeExpectancy?.stress?.lossAmount,
+      ) || 0,
+    ),
+    tradeExpectancy:
+      decisionPlan.risk?.tradeExpectancy?.schemaVersion
+        === 'trade-expectancy.v1'
+        ? structuredClone(decisionPlan.risk.tradeExpectancy)
+        : null,
     initialReservedCash: side === 'BUY' ? estimatedNetAmount : 0,
     reservedCash: side === 'BUY' ? estimatedNetAmount : 0,
     pendingSellLots: side === 'SELL' ? targetLots : 0,

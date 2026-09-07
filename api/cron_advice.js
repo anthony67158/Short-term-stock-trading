@@ -87,7 +87,10 @@ import {
   generationOptions,
   validateBatchMode,
 } from '../shared/adviceBatchPolicy.js';
-import { summarizeAdviceOutcomes } from '../shared/adviceOutcome.js';
+import {
+  adviceExpectancySnapshot,
+  summarizeAdviceOutcomes,
+} from '../shared/adviceOutcome.js';
 import {
   buildAdviceCacheEntry,
   compactAdvicePlan,
@@ -822,6 +825,19 @@ export function adviceJobDeadlineMs(
     : standardDeadline;
 }
 
+export function adviceWorkerStartWindowMs(deepWork = false) {
+  const fcRuntimeMs = 600000
+  const settleReserveMs = 30000
+  const startWindowCapMs = 300000
+  return Math.max(
+    40000,
+    Math.min(
+      startWindowCapMs,
+      fcRuntimeMs - adviceJobDeadlineMs(deepWork) - settleReserveMs,
+    ),
+  )
+}
+
 export function withAdviceJobDeadline(
   promise,
   {
@@ -942,6 +958,7 @@ function advisorTrackFrom(data, mode) {
       modeTotal: group ? group.total : 0,
       actionScores,
       trustBands: adviceTrustBands(stats),
+      expectancyCalibration: stats.expectancyCalibration || null,
     };
   } catch { return null; }
 }
@@ -1095,6 +1112,8 @@ async function genOne({
             meta: r.meta,
             news: r.news,
             truncated: r.truncated,
+            fallbackOnly: r.fallbackOnly === true,
+            warning: r.warning || '',
             unchanged: r.unchanged === true,
             reviewDisposition: r.reviewDisposition || '',
             reviewReason: r.reviewReason || '',
@@ -1139,6 +1158,8 @@ async function genOne({
   const meta = adviceResp && adviceResp.meta;
   const news = adviceResp && adviceResp.news;
   const truncated = !!(adviceResp && (adviceResp.truncated || (advice && advice.truncated)));
+  const fallbackOnly = adviceResp?.fallbackOnly === true;
+  const warning = adviceResp?.warning || '';
   const unchanged = adviceResp?.unchanged === true;
   const reviewDisposition = adviceResp?.reviewDisposition
     || (!advice && previousEntry && adviceFailure ? 'insufficient' : '');
@@ -1166,6 +1187,8 @@ async function genOne({
       meta,
       news,
       truncated,
+      fallbackOnly,
+      warning,
       reviewIntervalMin,
       reviewTrigger: reviewTrigger || (previousEntry ? 'scheduled' : 'initial'),
       reviewDisposition,
@@ -1181,6 +1204,7 @@ async function genOne({
       : deepMode ? 'DEEP' : 'FAST',
     durationMs: Math.max(0, Date.now() - startedAt),
     mainLlmCalls: advice && !usedTerminalFallback ? 1 : 0,
+    fallbackOnly,
     ...(reviewRuntime
       ? {
           timeLimitMinutes:
@@ -1209,8 +1233,11 @@ async function genOne({
       knowledgeActionPlan: advice.knowledgeActionPlan || null,
       knowledgeActionScore: advice.knowledgeActionScore || null,
       decisionPlanId: advice.decisionPlan?.decisionId || null,
+      decisionPlanAction:
+        advice.decisionPlan?.action || null,
       decisionPlanActionability:
         advice.decisionPlan?.actionability || null,
+      expectancy: adviceExpectancySnapshot(advice),
       tacticalState:
         advice.decisionPlan?.tactical?.timingState || null,
       tacticalHorizon:
@@ -1747,9 +1774,11 @@ async function drainAccount(nick, initialAcc) {
     };
   };
   let ok = 0, fail = 0;
-  // 深度主研判结束后只需预留 OSS 发布和 FC 收尾时间。
-  // 本轮后段不再启动新任务；剩余队列由 5 分钟云端定时器接力。
-  const startDeadline = Date.now() + (hasDeepAdviceWork(data) ? 40000 : 300000);
+  // 只在剩余 FC 时间足以覆盖一只完整任务时补位，避免空闲 advisor
+  // 因固定短窗口闲置，也避免新任务撞上 600 秒运行时硬截止。
+  const startDeadline = Date.now() + adviceWorkerStartWindowMs(
+    hasDeepAdviceWork(data),
+  );
   const progressSaver = createAdviceProgressSaveScheduler(saveWorking);
   const queueProgressSave = (force = false) =>
     progressSaver.schedule(force);

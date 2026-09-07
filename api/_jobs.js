@@ -1042,10 +1042,27 @@ export function jobsToProgress(data, now = Date.now(), concurrency = CONCURRENCY
       : job.status === 'canceled' ? 'skipped'
         : job.status;
   };
+  const advisorRunningCount = recent.filter((job) =>
+    job.status === 'running'
+    && resourceRoleOf(job) === 'advisor'
+  ).length;
+  const advisorQueuePosition = new Map(
+    recent
+      .filter((job) =>
+        job.status === 'queued'
+        && adviceJobRole(job) === 'advisor'
+      )
+      .sort((left, right) =>
+        (left.at || 0) - (right.at || 0)
+      )
+      .map((job, index) => [String(job.id || ''), index + 1]),
+  );
   const mapItem = (j) => {
     const status = mapStatus(j);
     const publishing = status === 'publishing';
     const publishFailed = j.status === 'done' && status === 'fail';
+    const queuePosition =
+      advisorQueuePosition.get(String(j.id || '')) || 0;
     const progressAgeMs = Math.max(
       0,
       Number(now) - (Number(j.progressAt) || Number(j.at) || Number(now)),
@@ -1076,7 +1093,14 @@ export function jobsToProgress(data, now = Date.now(), concurrency = CONCURRENCY
       ? '正在核验并发布最终结论'
       : publishFailed
         ? '建议发布失败，请重新生成'
-        : (j.phase || ''),
+        : status === 'queued' && queuePosition > 0
+          ? advisorRunningCount > 0
+            ? `排队第${queuePosition}位 · ${advisorRunningCount}/${Math.max(
+                1,
+                Number(concurrency) || CONCURRENCY,
+              )}路生成中，空闲后立即开始`
+            : `排队第${queuePosition}位 · 正在唤醒云端任务`
+          : (j.phase || ''),
     sources: Array.isArray(j.sources) ? j.sources : [],
     reasoning: j.reasoning || '',
     quant: j.quant || null,
@@ -1093,6 +1117,7 @@ export function jobsToProgress(data, now = Date.now(), concurrency = CONCURRENCY
     preparationRetries: j.preparationRetries || 0,
     deepMode: !!j.deepMode,
     batchRequest: !!j.batchRequest,
+    queuePosition,
     };
   };
   const items = recent

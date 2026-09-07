@@ -73,7 +73,8 @@ test('深度模型长时间无正文时持续给出有边界的真实等待状�
   assert.match(deepModelProgressMessage(10000), /已接收任务/)
   assert.match(deepModelProgressMessage(15000), /交叉核验/)
   assert.match(deepModelProgressMessage(30000), /收束唯一动作/)
-  assert.match(deepModelProgressMessage(45000), /达到时限将自动结束/)
+  assert.match(deepModelProgressMessage(45000), /达到时限将生成保守计划/)
+  assert.doesNotMatch(deepModelProgressMessage(45000), /连接正常/)
 })
 
 test('多维研判摘要按换行展示为独立步骤', () => {

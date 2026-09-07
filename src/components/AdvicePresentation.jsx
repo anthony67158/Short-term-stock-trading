@@ -189,6 +189,17 @@ function EvidenceGapNotice({ issues = [] }) {
 
 function DecisionPlanSummary({ plan }) {
   if (!plan) return null
+  const expectancy = plan.expectancy
+  const probability = (value) => (
+    Number.isFinite(Number(value))
+      ? `${(Number(value) * 100).toFixed(1)}%`
+      : null
+  )
+  const rValue = (value) => (
+    Number.isFinite(Number(value))
+      ? `${Number(value) >= 0 ? '+' : ''}${Number(value).toFixed(2)}R`
+      : null
+  )
   const statusLabel = plan.actionabilityLabel || '执行条件尚未确认'
   const statusTone = plan.actionability === 'READY'
     ? 'ready'
@@ -236,7 +247,41 @@ function DecisionPlanSummary({ plan }) {
         {plan.estimatedFees && (
           <span>预计费用 <b>¥{plan.estimatedFees}</b></span>
         )}
+        {expectancy?.pFill != null && (
+          <span>历史成交 <b>{probability(expectancy.pFill)}</b></span>
+        )}
+        {expectancy?.pWinGivenFill != null && (
+          <span>成功概率 <b>{probability(expectancy.pWinGivenFill)}</b></span>
+        )}
+        {expectancy?.expectedNetR != null && (
+          <span>费后期望 <b>{rValue(expectancy.expectedNetR)}</b></span>
+        )}
+        {expectancy?.netRLowerBound != null && (
+          <span>保守下界 <b>{rValue(expectancy.netRLowerBound)}</b></span>
+        )}
+        {expectancy?.breakEvenWinProbability != null && (
+          <span>
+            盈亏平衡 <b>
+              胜率至少{probability(expectancy.breakEvenWinProbability)}
+            </b>
+          </span>
+        )}
+        {expectancy?.stressLossAmount != null && (
+          <span>
+            跌停压力 <b>
+              ¥{Number(expectancy.stressLossAmount).toLocaleString('zh-CN')}
+            </b>
+          </span>
+        )}
       </div>
+      {expectancy?.gateReason && (
+        <p>
+          {expectancy.stateLabel}：{expectancy.gateReason}
+          {expectancy.sampleCount
+            ? `（${expectancy.sampleCount}个校准样本）`
+            : ''}
+        </p>
+      )}
       <p>{plan.statusText}</p>
     </section>
   )

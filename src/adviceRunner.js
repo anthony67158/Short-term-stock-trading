@@ -19,6 +19,9 @@ import {
   currentAccountSession,
   subscribeAccountSession,
 } from '../shared/accountSessionScope.js'
+import {
+  adviceExpectancySnapshot,
+} from '../shared/adviceOutcome.js'
 
 const running = new Map()  // code -> { phase, startedAt }
 const results = new Map()  // code -> { result, advice, meta, news, adviceMissing, truncated, error, cachedAt }
@@ -217,8 +220,11 @@ async function run(spec, record) {
             knowledgeActionPlan: advice.knowledgeActionPlan || null,
             knowledgeActionScore: advice.knowledgeActionScore || null,
             decisionPlanId: advice.decisionPlan?.decisionId || null,
+            decisionPlanAction:
+              advice.decisionPlan?.action || null,
             decisionPlanActionability:
               advice.decisionPlan?.actionability || null,
+            expectancy: adviceExpectancySnapshot(advice),
             ...evidencePersistenceFields(advice),
           })
         } catch { /* ignore */ }

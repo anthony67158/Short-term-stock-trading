@@ -22,10 +22,11 @@ import {
 } from '../shared/accountSync.js'
 import {
   ADVICE_OUTCOME_POLICY_VERSION,
-  adviceActionKind,
   adviceNeedsVerification,
   dedupeAdviceEpisodes,
+  effectiveAdviceActionKind,
   isAdviceOutcomeCurrent,
+  resolveBullAdviceOutcome,
   summarizeAdviceOutcomes,
 } from '../shared/adviceOutcome.js'
 import { evaluateKnowledgeActionCycle } from '../shared/knowledgeAction.js'
@@ -3114,7 +3115,6 @@ export const planStore = {
       const win = future.slice(0, WINDOW)            // 窗口内最多取前3个交易日
       const windowComplete = future.length >= WINDOW
       const base = r.priceAtAdvice
-      const target = Number(r.target) || null
       const stop = Number(r.stop) || null
       const maxHigh = Math.max(...win.map((c) => c.high || c.close || base))
       const minLow = Math.min(...win.map((c) => c.low || c.close || base))
@@ -3126,7 +3126,7 @@ export const planStore = {
 
       // 【持有/持股】是中性决策(已在仓，继续拿)：判对口径≠必须涨2%，而是"没明显下跌/没跌破止损"，
       // 否则一个"横盘微涨的正确持有"会被看多的+2%尺子误判成失败，把持仓建议胜率整体压低。
-      const actionKind = adviceActionKind(r.action)
+      const actionKind = effectiveAdviceActionKind(r)
       const hold = actionKind === 'hold'
       const bull = actionKind === 'bull'
       const bear = actionKind === 'bear' || actionKind === 'wait'
@@ -3134,13 +3134,18 @@ export const planStore = {
       const HOLD_DOWN_TH = 3        // 持有可容忍的最大回撤%(超过即认为本应减仓)
 
       let hit = null, settled = false, note = ''
+      let realizedNetR = null
+      let outcome = null
+      let exitPrice = null
       if (bull) {
-        if (target && maxHigh >= target) {           // 触及目标 → 提前判胜
-          hit = true; settled = true
-          note = `窗口内最高${maxHigh}触及目标${target}`
-        } else if (windowComplete) {                 // 没触及/无目标 → 看最大涨幅
-          hit = maxUpPct >= BULL_TH; settled = true
-          note = target ? `3日内最高${maxHigh}未及目标${target}(最大+${maxUpPct}%)` : `3日内最大+${maxUpPct}%`
+        const path = resolveBullAdviceOutcome(r, win)
+        if (path) {
+          hit = path.hit
+          settled = true
+          note = path.note
+          realizedNetR = path.realizedNetR
+          outcome = path.outcome
+          exitPrice = path.exitPrice
         }
       } else if (hold) {
         if (stop && minClose <= stop) {              // 收盘确认跌破止损 → 判负，盘中插针不误伤
@@ -3165,6 +3170,9 @@ export const planStore = {
         ...r, verified: true, hit,
         outcomePolicyVersion: ADVICE_OUTCOME_POLICY_VERSION,
         resultPct: bull ? maxUpPct : closePct,        // 看多看最大有利波动，持有/看空看收盘
+        realizedNetR,
+        outcome,
+        exitPrice,
         maxUpPct, maxDownPct, closePct, maxHigh, minLow, windowDays: win.length,
         verifiedAt: Date.now(), verifyNote: note,
       }

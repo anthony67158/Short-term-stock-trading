@@ -383,6 +383,7 @@ export default function StockDetail({ stock, onClose }) {
           actionScores,
           theoryScores,
           trustBands: adviceTrustBands(s),
+          expectancyCalibration: s.expectancyCalibration || null,
         }
       } catch { return null }
     })()

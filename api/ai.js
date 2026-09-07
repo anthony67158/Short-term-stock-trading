@@ -103,6 +103,7 @@ import {
   theoryReferencesOf,
 } from '../shared/advisorTheory.js';
 import {
+  adviceTrustBands,
   buildReviewReceipt,
   calibrateAdviceTrust,
   evaluateScheduledReview,
@@ -165,6 +166,12 @@ import {
   buildIntradayOpenSummary,
   buildReviewDecisionPacket,
 } from '../shared/reviewDecisionPacket.js';
+import {
+  loadAdvisorOpportunityScore,
+} from './_advisor_opportunity_score.js';
+import {
+  summarizeAdviceOutcomes,
+} from '../shared/adviceOutcome.js';
 
 export { mapRealtimeStockFund } from './_stock_fund.js';
 
@@ -210,6 +217,35 @@ export function portfolioOpportunityCostForStock(
   };
 }
 
+export function buildServerAdvisorTrack(accountData = {}, mode = '') {
+  const stats = summarizeAdviceOutcomes(accountData.adviceLog)
+  if (stats.total < 5) return null
+  const group = (stats.groups || []).find(
+    (item) => item.mode === mode,
+  )
+  const actionScores = (stats.actions || [])
+    .filter((item) => item.total >= 5)
+    .map((item) => ({
+      kind: item.kind,
+      label: item.label,
+      winRate: item.winRate,
+      total: item.total,
+      avgPct: item.avgPct,
+    }))
+  return {
+    overallWinRate: stats.winRate,
+    overallAvgPct: stats.avgPct,
+    overallTotal: stats.total,
+    winRateLowerBoundPct: stats.winRateLowerBoundPct,
+    modeWinRate: group?.winRate ?? null,
+    modeAvgPct: group?.avgPct ?? null,
+    modeTotal: group?.total ?? 0,
+    actionScores,
+    trustBands: adviceTrustBands(stats),
+    expectancyCalibration: stats.expectancyCalibration || null,
+  }
+}
+
 function avg(arr) { return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0; }
 function std(arr) { if (arr.length < 2) return 0; const m = avg(arr); return Math.sqrt(avg(arr.map((x) => (x - m) ** 2))); }
 
@@ -251,8 +287,8 @@ export function buildScheduledReviewGateResponse({
   };
 }
 
-export function resolveAIBudget(_reasoningOn, requestedMs) {
-  const fallback = 150000;
+export function resolveAIBudget(reasoningOn, requestedMs) {
+  const fallback = reasoningOn ? 180000 : 150000;
   if (requestedMs == null || !Number.isFinite(Number(requestedMs))) return fallback;
   return Math.max(30000, Math.min(fallback, Math.trunc(Number(requestedMs))));
 }
@@ -266,7 +302,7 @@ export function advisorGenerationPlan({
   remainingMs = 0,
   reasoning = false,
 } = {}) {
-  const cap = reasoning ? 90000 : 120000
+  const cap = reasoning ? 150000 : 120000
   return {
     timeoutMs: Math.max(
       8000,
@@ -1028,7 +1064,15 @@ export default async function handler(req, res) {
     delete payload.strategyGate;
     delete payload.strategyRoute;
     delete payload.opportunityCost;
+    delete payload.opportunityScore;
     delete payload.formulaPriceReference;
+    delete payload.advisorTrack;
+    if (isAdvisorMode(mode) && accountAuth.account?.data) {
+      payload.advisorTrack = buildServerAdvisorTrack(
+        accountAuth.account.data,
+        mode,
+      );
+    }
     if (isAdvisorMode(mode) && accountAuth.account?.data) {
       const opportunityCost = portfolioOpportunityCostForStock(
         accountAuth.account.data,
@@ -1158,7 +1202,6 @@ export default async function handler(req, res) {
         isAdvisorMode(mode)
         && payload.code
         && obj?.ok === false
-        && !payload.previousAdvice
       ) {
         const { error, ...rest } = obj;
         const fallback = buildFallbackDecisionAdvice({
@@ -1967,8 +2010,20 @@ export default async function handler(req, res) {
                 validationState: 'OBSERVE_ONLY',
                 sampleSize: 0,
               });
+            payload.opportunityScore =
+              await loadAdvisorOpportunityScore({
+                code: payload.code,
+                name: payload.name,
+                formula,
+                decision,
+                payload,
+                candles: dailyCandles,
+                trends: trend || [],
+                now: Date.now(),
+              });
           } catch {
             payload.formulaPriceReference = null;
+            payload.opportunityScore = null;
           }
         }
         // 风格
@@ -2272,7 +2327,7 @@ export default async function handler(req, res) {
         timeoutMs: llmTimeout,
         headerTimeoutMs: useRole === 'review'
           ? 12000
-          : useReasoning ? 25000 : 22000,
+          : useReasoning ? llmTimeout : 22000,
         reasoning: useReasoning,
         reasoningEffort: 'medium',
         forceNoReason: fastMode,
@@ -2350,7 +2405,7 @@ export default async function handler(req, res) {
         timeoutMs: llmTimeout,
         headerTimeoutMs: useRole === 'review'
           ? 12000
-          : useReasoning ? 25000 : 22000,
+          : useReasoning ? llmTimeout : 22000,
         reasoning: useReasoning,
         reasoningEffort: 'medium',
         forceNoReason: fastMode,

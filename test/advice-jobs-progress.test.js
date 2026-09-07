@@ -127,6 +127,30 @@ test('深度任务模式会持久化到任务和批次进度', () => {
   assert.equal(progress.items[0].deepMode, true)
 })
 
+test('排队任务显示队列位置与当前端点占用', () => {
+  const data = {}
+  for (const [index, code] of ['600000', '600001', '600002'].entries()) {
+    enqueueJob(data, {
+      code,
+      name: `候选${index + 1}`,
+      mode: 'buy_advice',
+      batchId: 'deep-batch',
+      deepMode: true,
+    }, 1000 + index)
+  }
+  leaseJob(data, '600000', 1100)
+  leaseJob(data, '600001', 1100)
+  data.activeAdviceBatchId = 'deep-batch'
+
+  const progress = jobsToProgress(data, 1200, 2)
+  const queued = progress.items.find((item) => item.code === '600002')
+
+  assert.equal(queued.status, 'queued')
+  assert.match(queued.phase, /排队第1位/)
+  assert.match(queued.phase, /2\/2路生成中/)
+  assert.match(queued.phase, /空闲后立即开始/)
+})
+
 test('旧深度任务的三次重试配置会在领取时收紧且失败不再整轮重跑', () => {
   const data = {}
   enqueueJob(data, {

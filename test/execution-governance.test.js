@@ -146,6 +146,12 @@ test('真实价格路径计算持有时长MFE、MAE与盈利捕获率', () => {
     referencePrice: 11.2,
     triggerPrice: 11.1,
     createdAt: now,
+    riskAmount: 100,
+    tradeExpectancy: {
+      expectancy: {
+        expectedNetRGivenFill: 0.8,
+      },
+    },
   }, {
     fills: [{
       fillId: 'f-metrics',
@@ -172,6 +178,10 @@ test('真实价格路径计算持有时长MFE、MAE与盈利捕获率', () => {
   assert.equal(result.mfePct, 20)
   assert.equal(result.maePct, -4)
   assert.equal(result.profitCapturePct, 60)
+  assert.equal(result.plannedRiskAmount, 100)
+  assert.equal(result.plannedExpectedNetR, 0.8)
+  assert.equal(result.realizedNetR, 1.14)
+  assert.equal(result.expectancyErrorR, 0.34)
   assert.equal(result.learningEligible, true)
 })
 
@@ -215,6 +225,60 @@ test('账户熔断预留未完成买入现金且不提前释放卖出资金', ()
   assert.ok(result.blockerCodes.includes('DAILY_REALIZED_LOSS'))
   assert.ok(result.blockerCodes.includes('DAILY_DRAWDOWN'))
   assert.deepEqual(result.allowedActions, ['REDUCE', 'EXIT', 'WATCH'])
+})
+
+test('未完成买入计划占用账户级开放风险预算', () => {
+  const result = evaluateAccountCircuitBreaker({
+    account: {
+      totalAssets: 100000,
+      cash: 60000,
+      dayStartAssets: 100000,
+    },
+    portfolio: {
+      position: 40,
+      industryWeights: [],
+    },
+    executionPlans: [{
+      status: 'ARMED',
+      side: 'BUY',
+      reservedCash: 20000,
+      riskAmount: 3000,
+    }],
+    now,
+  })
+
+  assert.equal(result.metrics.openRiskPct, 3)
+  assert.equal(result.activeOpenRiskAmount, 3000)
+  assert.equal(result.availableOpenRiskAmount, 0)
+  assert.equal(result.allowRiskIncrease, false)
+  assert.ok(result.blockerCodes.includes('OPEN_RISK_BUDGET'))
+})
+
+test('旧执行计划根据入场止损和剩余手数估算开放风险', () => {
+  const result = evaluateAccountCircuitBreaker({
+    account: {
+      totalAssets: 100000,
+      cash: 60000,
+      dayStartAssets: 100000,
+    },
+    portfolio: {
+      position: 40,
+      industryWeights: [],
+    },
+    executionPlans: [{
+      status: 'PARTIALLY_RECORDED',
+      side: 'BUY',
+      referencePrice: 10,
+      stopPrice: 9,
+      targetLots: 3,
+      remainingLots: 2,
+    }],
+    now,
+  })
+
+  assert.equal(result.activeOpenRiskAmount, 200)
+  assert.equal(result.availableOpenRiskAmount, 2800)
+  assert.equal(result.allowRiskIncrease, true)
 })
 
 test('当日连续两笔亏损后停止新增风险', () => {

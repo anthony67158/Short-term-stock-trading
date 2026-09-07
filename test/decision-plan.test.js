@@ -418,6 +418,80 @@ test('新增风险必须满足至少1.8比1的盈亏比', () => {
   assert.match(plan.blockedReasons.join('；'), /盈亏比/)
 })
 
+test('校准后的费后期望下界为负时阻止新增风险', () => {
+  const plan = compileDecisionPlan({
+    mode: 'buy_advice',
+    advice: {
+      action: '立即买入',
+      buyPrice: 10,
+      stopPrice: 9,
+      targetPrice: 12,
+      planQtyNum: 2,
+      actionPlan: '立即买入2手',
+    },
+    payload: {
+      ...payload,
+      opportunityScore: {
+        state: 'READY',
+        serverVerified: true,
+        modelVersion: 'opportunity-score.20260907',
+        pFill: 0.7,
+        pWinGivenFill: 0.56,
+        expectedNetR: 0.08,
+        netRLowerBound: -0.06,
+        expectedShortfall10: -1.2,
+        calibration: {
+          method: 'isotonic',
+          sampleCount: 460,
+        },
+        priceContract: {
+          entryPrice: 10,
+          stopPrice: 9,
+          targetPrice: 12,
+        },
+      },
+    },
+    evidenceSnapshot: snapshot,
+    now,
+  })
+
+  assert.equal(plan.actionability, 'BLOCKED')
+  assert.equal(
+    plan.risk.tradeExpectancy.schemaVersion,
+    'trade-expectancy.v1',
+  )
+  assert.equal(plan.risk.tradeExpectancy.gate.state, 'NEGATIVE')
+  assert.match(plan.blockedReasons.join('；'), /未证明正期望/)
+})
+
+test('跌停压力损失超过账户上限时缩减买入手数', () => {
+  const plan = compileDecisionPlan({
+    mode: 'buy_advice',
+    advice: {
+      action: '立即买入',
+      buyPrice: 10,
+      stopPrice: 9.7,
+      targetPrice: 10.6,
+      planQtyNum: 20,
+      actionPlan: '立即买入20手',
+    },
+    payload: {
+      ...payload,
+      todayQuote: {
+        ...payload.todayQuote,
+        limitDownPrice: 8,
+      },
+    },
+    evidenceSnapshot: snapshot,
+    now,
+  })
+
+  assert.equal(plan.actionability, 'READY')
+  assert.ok(plan.quantity.lots > 0)
+  assert.ok(plan.quantity.lots < 20)
+  assert.ok(plan.risk.tradeExpectancy.stress.lossAmount <= 2000)
+})
+
 test('市场硬红线不能被逆势强票和量化高把握绕过', () => {
   const plan = compileDecisionPlan({
     mode: 'buy_advice',
@@ -698,6 +772,87 @@ test('账户熔断阻止新增风险但不阻止减仓退出', () => {
   assert.equal(reduce.actionability, 'CONDITIONAL')
 })
 
+test('账户剩余开放风险预算限制本次买入手数', () => {
+  const plan = compileDecisionPlan({
+    mode: 'buy_advice',
+    advice: {
+      action: '立即买入',
+      buyPrice: 10,
+      stopPrice: 9,
+      targetPrice: 12,
+      planQtyNum: 10,
+      actionPlan: '立即买入10手',
+    },
+    payload,
+    evidenceSnapshot: snapshot,
+    accountCircuitBreaker: {
+      schemaVersion: 'account-circuit-breaker.v1',
+      allowRiskIncrease: true,
+      blockerCodes: [],
+      blockers: [],
+      riskBudgetMultiplier: 1,
+      availableOpenRiskAmount: 250,
+    },
+    now,
+  })
+
+  assert.equal(plan.actionability, 'READY')
+  assert.ok(plan.quantity.lots > 0)
+  assert.ok(plan.quantity.lots <= 2)
+  assert.equal(plan.risk.maxLossAmount, 250)
+})
+
+test('历史费后净R下界为负时下一笔风险预算自动减半', () => {
+  const regular = compileDecisionPlan({
+    mode: 'buy_advice',
+    advice: {
+      action: '立即买入',
+      buyPrice: 10,
+      stopPrice: 9,
+      targetPrice: 12,
+      planQtyNum: 20,
+      actionPlan: '立即买入20手',
+    },
+    payload,
+    evidenceSnapshot: snapshot,
+    now,
+  })
+  const reduced = compileDecisionPlan({
+    mode: 'buy_advice',
+    advice: {
+      action: '立即买入',
+      buyPrice: 10,
+      stopPrice: 9,
+      targetPrice: 12,
+      planQtyNum: 20,
+      actionPlan: '立即买入20手',
+    },
+    payload: {
+      ...payload,
+      advisorTrack: {
+        expectancyCalibration: {
+          samples: 30,
+          brierScore: 0.2,
+          realizedRSamples: 24,
+          realizedNetRLowerBound: -0.12,
+        },
+      },
+    },
+    evidenceSnapshot: snapshot,
+    now,
+  })
+
+  assert.ok(reduced.quantity.lots < regular.quantity.lots)
+  assert.equal(
+    reduced.risk.performanceCalibration.riskBudgetMultiplier,
+    0.5,
+  )
+  assert.match(
+    reduced.risk.performanceCalibration.reason,
+    /风险预算减半/,
+  )
+})
+
 test('跨日连续亏损会把下一笔风险预算减半', () => {
   const plan = compileDecisionPlan({
     mode: 'buy_advice',
@@ -758,4 +913,37 @@ test('首次模型失败时返回不含交易数字的确定性等待计划', ()
   assert.equal(fallback.planQty, 0)
   assert.equal(fallback.buyPrice, null)
   assert.equal(adviceCompleteness(fallback, 'buy_advice').complete, true)
+})
+
+test('持仓深度模型超时保留上一版防守价但不沿用加仓价', () => {
+  const fallback = buildFallbackDecisionAdvice({
+    mode: 'hold_advice',
+    payload: {
+      ...payload,
+      previousAdvice: {
+        action: '持有',
+        actionPlan: '继续持有，跌破止损退出',
+        addPrice: 10.5,
+        reducePrice: 12.2,
+        stopPrice: 9.8,
+        targetPrice: 12.8,
+        invalidation: '跌破9.80元',
+        nextOpenPlan: '低开先守9.80元止损',
+        futurePlan: '五日内未走强则退出',
+      },
+    },
+    evidenceSnapshot: snapshot,
+    error: '模型超时',
+    now,
+  })
+
+  assert.equal(fallback.action, '持有')
+  assert.equal(fallback.addPrice, null)
+  assert.equal(fallback.buyPrice, null)
+  assert.equal(fallback.reducePrice, 12.2)
+  assert.equal(fallback.stopPrice, 9.8)
+  assert.equal(fallback.targetPrice, 12.8)
+  assert.match(fallback.actionPlan, /不新增仓位/)
+  assert.match(fallback.actionPlan, /上一版防守价/)
+  assert.equal(adviceCompleteness(fallback, 'hold_advice').complete, true)
 })

@@ -636,7 +636,33 @@ test('决策计划v2优先提供最终动作、手数、费用和执行校验', 
       currentWeightPct: 0,
       targetWeightPct: 5,
       deltaWeightPct: 5,
-      risk: { maxLossAmount: 600, budgetPct: 0.6 },
+      risk: {
+        maxLossAmount: 600,
+        budgetPct: 0.6,
+        tradeExpectancy: {
+          schemaVersion: 'trade-expectancy.v1',
+          state: 'CALIBRATED',
+          probability: {
+            pFill: 0.72,
+            pWinGivenFill: 0.61,
+            sampleCount: 420,
+          },
+          expectancy: {
+            expectedNetRGivenFill: 0.18,
+            netRLowerBound: 0.03,
+          },
+          plan: {
+            netRiskReward: 1.91,
+            breakEvenWinProbability: 0.344,
+          },
+          stress: {
+            lossAmount: 1100,
+          },
+          gate: {
+            reason: '同类历史费后期望0.18R，下界0.03R',
+          },
+        },
+      },
       costs: {
         side: 'BUY',
         estimatedNetAmount: 5010,
@@ -683,6 +709,19 @@ test('决策计划v2优先提供最终动作、手数、费用和执行校验', 
     /止损9元，目标12元/,
   )
   assert.equal(view.decisionPlan.actionability, 'READY')
+  assert.deepEqual(view.decisionPlan.expectancy, {
+    state: 'CALIBRATED',
+    stateLabel: '同类历史已校准',
+    pFill: '0.72',
+    pWinGivenFill: '0.61',
+    sampleCount: '420',
+    expectedNetR: '0.18',
+    netRLowerBound: '0.03',
+    netRiskReward: '1.91',
+    breakEvenWinProbability: '0.344',
+    stressLossAmount: '1100',
+    gateReason: '同类历史费后期望0.18R，下界0.03R',
+  })
   assert.equal(view.decisionPlan.strategyName, undefined)
   assert.deepEqual(view.decisionPlan.evidenceBasis, {
     state: 'PREVIOUS_CLOSE',

@@ -14,7 +14,10 @@ import {
   llmRoleForAdviceMode,
   maxTokensForMode,
 } from '../api/_ai_prompts.js'
-import { advisorGenerationPlan } from '../api/ai.js'
+import {
+  advisorGenerationPlan,
+  buildServerAdvisorTrack,
+} from '../api/ai.js'
 
 const stockDetailSource = readFileSync(
   new URL('../src/components/StockDetail.jsx', import.meta.url),
@@ -59,6 +62,34 @@ test('同一用户请求在任务完成后重放也不能再次创建生成任�
   assert.equal(replay.replayed, true)
   assert.equal(data.jobs['600000'].status, 'done')
   assert.equal(data.jobs['600000'].id, first.job.id)
+})
+
+test('军师历史表现只从服务端账户账本重算并携带净R校准', () => {
+  const adviceLog = Array.from({ length: 5 }, (_, index) => ({
+    id: `decision-${index}`,
+    code: `60000${index}`,
+    mode: 'buy_advice',
+    action: '立即买入',
+    decisionPlanAction: 'BUY',
+    decisionPlanActionability: 'READY',
+    at: 1000 + index,
+    verified: true,
+    hit: index < 3,
+    resultPct: index < 3 ? 2 : -1,
+    realizedNetR: index < 3 ? 1.5 : -1,
+    outcomePolicyVersion: 3,
+    expectancy: { pWinGivenFill: 0.6 },
+  }))
+  const result = buildServerAdvisorTrack(
+    { adviceLog },
+    'buy_advice',
+  )
+
+  assert.equal(result.overallTotal, 5)
+  assert.equal(result.modeTotal, 5)
+  assert.equal(result.expectancyCalibration.samples, 5)
+  assert.equal(result.expectancyCalibration.averageRealizedNetR, 0.5)
+  assert.match(aiSource, /delete payload\.advisorTrack/)
 })
 
 test('生成期间到达的Judge事件不改变主建议任务终态', () => {
@@ -216,18 +247,30 @@ test('普通与深度军师都使用有界预算且深度不整轮重跑', () =>
   assert.equal(quick.runtimeBudgetMs, 55000)
   assert.equal(quick.maxAttempts, 1)
   assert.equal(deep.forceReasoning, true)
-  assert.equal(deep.runtimeBudgetMs, 150000)
-  assert.equal(deep.timeoutMs, 165000)
+  assert.equal(deep.runtimeBudgetMs, 180000)
+  assert.equal(deep.timeoutMs, 195000)
   assert.equal(deep.maxAttempts, 1)
   assert.ok(deep.runtimeBudgetMs > quick.runtimeBudgetMs)
   assert.equal(maxTokensForMode('hold_advice', false), 3200)
   assert.equal(advisorGenerationPlan({
     remainingMs: 145000,
     reasoning: true,
-  }).timeoutMs, 90000)
+  }).timeoutMs, 142500)
+  assert.equal(advisorGenerationPlan({
+    remainingMs: 175000,
+    reasoning: true,
+  }).timeoutMs, 150000)
+  assert.match(
+    aiSource,
+    /headerTimeoutMs:\s*useRole === 'review'[\s\S]*?\?\s*12000[\s\S]*?:\s*useReasoning\s*\?\s*llmTimeout\s*:\s*22000/,
+  )
   assert.doesNotMatch(aiSource, /runStreamFailover/)
   assert.doesNotMatch(aiSource, /最终JSON整理器/)
   assert.equal(maxTokensForMode('hold_advice', true), 6000)
+  assert.doesNotMatch(
+    aiSource,
+    /obj\?\.ok === false[\s\S]{0,120}!payload\.previousAdvice/,
+  )
 })
 
 test('军师准备与证据依赖采用并行编排且单源有独立截止', () => {

@@ -167,6 +167,20 @@ export function attributeExecution(plan, {
     peakPrice,
     troughPrice,
   })
+  const riskAmount = finite(
+    plan.riskAmount
+    ?? plan.tradeExpectancy?.plan?.lossAmount,
+  )
+  const expectedNetR = finite(
+    plan.tradeExpectancy?.expectancy?.expectedNetRGivenFill,
+  )
+  const realizedNetR = (
+    validationComplete === true
+    && finite(netPnl) != null
+    && riskAmount > 0
+  )
+    ? finite(netPnl) / riskAmount
+    : null
   return {
     schemaVersion: 'execution-attribution.v1',
     planId: String(plan.planId || ''),
@@ -207,6 +221,14 @@ export function attributeExecution(plan, {
       ? Math.max(0, latestAt - (finite(plan.createdAt) || latestAt))
       : null,
     netPnl: finite(netPnl),
+    plannedRiskAmount: rounded(riskAmount),
+    plannedExpectedNetR: rounded(expectedNetR, 3),
+    realizedNetR: rounded(realizedNetR, 3),
+    expectancyErrorR: (
+      realizedNetR != null && expectedNetR != null
+    )
+      ? rounded(realizedNetR - expectedNetR, 3)
+      : null,
     ...outcomeMetrics,
     validationComplete: validationComplete === true,
     learningEligible: (
@@ -248,6 +270,8 @@ export function aggregateExecutionAttribution(records = []) {
       mfePct: [],
       maePct: [],
       profitCapturePct: [],
+      realizedNetR: [],
+      expectancyErrorR: [],
     }
     current.samples++
     current.netPnl += Number(record.netPnl)
@@ -257,6 +281,8 @@ export function aggregateExecutionAttribution(records = []) {
       'mfePct',
       'maePct',
       'profitCapturePct',
+      'realizedNetR',
+      'expectancyErrorR',
     ]) {
       const value = finite(record[field])
       if (value != null) current[field].push(value)
@@ -273,6 +299,8 @@ export function aggregateExecutionAttribution(records = []) {
         mfePct,
         maePct,
         profitCapturePct,
+        realizedNetR,
+        expectancyErrorR,
         ...summary
       } = group
       return {
@@ -307,6 +335,24 @@ export function aggregateExecutionAttribution(records = []) {
                 0,
               ) / profitCapturePct.length,
               1,
+            )
+          : null,
+        averageRealizedNetR: realizedNetR.length
+          ? rounded(
+              realizedNetR.reduce(
+                (sum, value) => sum + value,
+                0,
+              ) / realizedNetR.length,
+              3,
+            )
+          : null,
+        averageExpectancyErrorR: expectancyErrorR.length
+          ? rounded(
+              expectancyErrorR.reduce(
+                (sum, value) => sum + value,
+                0,
+              ) / expectancyErrorR.length,
+              3,
             )
           : null,
       }

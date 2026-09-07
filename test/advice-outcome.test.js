@@ -1,7 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { planStore } from '../src/planStore.js'
-import { summarizeAdviceOutcomes } from '../shared/adviceOutcome.js'
+import {
+  ADVICE_OUTCOME_POLICY_VERSION,
+  resolveBullAdviceOutcome,
+  summarizeAdviceOutcomes,
+} from '../shared/adviceOutcome.js'
 
 test('持有建议不因盘中插针跌破止损而误判失败', () => {
   planStore.setData({
@@ -122,7 +126,7 @@ test('军师战绩按独立决策回合统计而不是重复刷新次数', () =>
       verified: true,
       hit: false,
       resultPct: -3,
-      outcomePolicyVersion: 2,
+      outcomePolicyVersion: ADVICE_OUTCOME_POLICY_VERSION,
     },
     {
       id: 'refresh-2',
@@ -133,7 +137,7 @@ test('军师战绩按独立决策回合统计而不是重复刷新次数', () =>
       verified: true,
       hit: false,
       resultPct: -3,
-      outcomePolicyVersion: 2,
+      outcomePolicyVersion: ADVICE_OUTCOME_POLICY_VERSION,
     },
     {
       id: 'next-day',
@@ -144,7 +148,7 @@ test('军师战绩按独立决策回合统计而不是重复刷新次数', () =>
       verified: true,
       hit: true,
       resultPct: 1,
-      outcomePolicyVersion: 2,
+      outcomePolicyVersion: ADVICE_OUTCOME_POLICY_VERSION,
     },
   ]
 
@@ -155,4 +159,64 @@ test('军师战绩按独立决策回合统计而不是重复刷新次数', () =>
   assert.equal(stats.winRate, 50)
   assert.equal(stats.raw.total, 3)
   assert.equal(stats.duplicateRefreshes, 1)
+})
+
+test('买入建议同日同时触及止损和目标时按保守路径先止损', () => {
+  const result = resolveBullAdviceOutcome({
+    entryPrice: 10,
+    priceAtAdvice: 10,
+    stop: 9.5,
+    target: 11,
+  }, [
+    { open: 10, high: 11.2, low: 9.4, close: 10.8 },
+    { open: 10.8, high: 11.1, low: 10.5, close: 11 },
+    { open: 11, high: 11.2, low: 10.8, close: 11.1 },
+  ])
+
+  assert.equal(result.outcome, 'AMBIGUOUS_STOP_FIRST')
+  assert.equal(result.hit, false)
+  assert.ok(result.realizedNetR <= -1)
+})
+
+test('概率校准统计同时报告Brier分数和实际净R下界', () => {
+  const records = [
+    {
+      id: 'a',
+      code: '600001',
+      mode: 'buy_advice',
+      action: '立即买入',
+      decisionPlanAction: 'BUY',
+      decisionPlanActionability: 'READY',
+      at: 1,
+      verified: true,
+      hit: true,
+      resultPct: 2,
+      realizedNetR: 1.5,
+      outcomePolicyVersion: ADVICE_OUTCOME_POLICY_VERSION,
+      expectancy: { pWinGivenFill: 0.7 },
+    },
+    {
+      id: 'b',
+      code: '600002',
+      mode: 'buy_advice',
+      action: '立即买入',
+      decisionPlanAction: 'BUY',
+      decisionPlanActionability: 'READY',
+      at: 2,
+      verified: true,
+      hit: false,
+      resultPct: -1,
+      realizedNetR: -1,
+      outcomePolicyVersion: ADVICE_OUTCOME_POLICY_VERSION,
+      expectancy: { pWinGivenFill: 0.6 },
+    },
+  ]
+
+  const stats = summarizeAdviceOutcomes(records)
+
+  assert.equal(stats.expectancyCalibration.samples, 2)
+  assert.equal(stats.expectancyCalibration.brierScore, 0.225)
+  assert.equal(stats.expectancyCalibration.averageRealizedNetR, 0.25)
+  assert.ok(stats.expectancyCalibration.realizedNetRLowerBound < 0)
+  assert.ok(stats.winRateLowerBoundPct > 0)
 })

@@ -39,6 +39,7 @@ function advisorTrackFor(mode) {
       actionScores,
       theoryScores,
       trustBands: adviceTrustBands(s),
+      expectancyCalibration: s.expectancyCalibration || null,
     }
   } catch { return null }
 }

@@ -346,6 +346,21 @@ function formulaOpportunity(candidate, {
   if (riskReward == null || riskReward < 1.8) {
     blockers.push('盈亏比不足1.8:1')
   }
+  const opportunityScore = candidate.opportunityScore
+  if (
+    opportunityScore?.state === 'READY'
+    && opportunityScore?.outOfDistribution !== true
+    && (
+      finite(opportunityScore.expectedNetR) <= 0
+      || finite(opportunityScore.netRLowerBound) < 0
+    )
+  ) {
+    blockers.push(
+      `同类历史费后期望${finite(opportunityScore.expectedNetR)}R，`
+      + `保守下界${finite(opportunityScore.netRLowerBound)}R，`
+      + '尚未证明正期望',
+    )
+  }
   if (!entryPlan || !exitPlan) blockers.push('买卖价格合同不完整')
   if (!sourceFresh) blockers.push('公式结果已过期')
   if (
@@ -387,7 +402,7 @@ function formulaOpportunity(candidate, {
     quote: candidate.quote || null,
     score: finite(candidate.score),
     riskReward,
-    opportunityScore: candidate.opportunityScore || null,
+    opportunityScore: opportunityScore || null,
     entryPlan,
     exitPlan,
     sourceSignals: unique([
@@ -569,11 +584,25 @@ function mergeOpportunity(left, right) {
 }
 
 function sortedRows(rows) {
+  const modelMetric = (row, key, fallback) => {
+    const score = row?.opportunityScore
+    if (
+      score?.state !== 'READY'
+      || score?.outOfDistribution === true
+    ) return fallback
+    return finite(score[key]) ?? fallback
+  }
   return [...rows]
     .sort((left, right) =>
       (STATE_ORDER[left.state] ?? 99) - (STATE_ORDER[right.state] ?? 99)
       || Number(left.blockers?.length || 0)
         - Number(right.blockers?.length || 0)
+      || modelMetric(right, 'netRLowerBound', -Infinity)
+        - modelMetric(left, 'netRLowerBound', -Infinity)
+      || modelMetric(right, 'pFill', -Infinity)
+        - modelMetric(left, 'pFill', -Infinity)
+      || modelMetric(right, 'pWinGivenFill', -Infinity)
+        - modelMetric(left, 'pWinGivenFill', -Infinity)
       || Number(right.score || 0) - Number(left.score || 0)
       || Number(left.sector?.layoutRank || left.sector?.rank || 999)
         - Number(right.sector?.layoutRank || right.sector?.rank || 999)

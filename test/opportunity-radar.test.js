@@ -160,6 +160,79 @@ test('盘中公式与板块方向融合为包含退出计划的可操作机会',
   )
 })
 
+test('同一状态内按费后净期望下界而不是热度分排序', () => {
+  const highScoreLowEdge = formulaCandidate({
+    code: '600001',
+    score: 95,
+    opportunityScore: {
+      state: 'READY',
+      pFill: 0.8,
+      pWinGivenFill: 0.58,
+      expectedNetR: 0.12,
+      netRLowerBound: 0.02,
+    },
+  })
+  const lowScoreHighEdge = formulaCandidate({
+    code: '600002',
+    name: '更高期望',
+    score: 78,
+    opportunityScore: {
+      state: 'READY',
+      pFill: 0.7,
+      pWinGivenFill: 0.62,
+      expectedNetR: 0.3,
+      netRLowerBound: 0.11,
+    },
+  })
+  const result = buildOpportunityRadar({
+    now: NOW,
+    sector: {
+      market: { phase: 'live', day: '2026-09-02' },
+      intraday: sectorSnapshot(),
+    },
+    formula: {
+      intraday: formulaResult(
+        'INTRADAY',
+        [highScoreLowEdge, lowScoreHighEdge],
+      ),
+    },
+  })
+
+  assert.deepEqual(
+    result.lanes.intraday.map((item) => item.code),
+    ['600002', '600001'],
+  )
+})
+
+test('校准后的负期望候选保留展示但降为本次不买', () => {
+  const result = buildOpportunityRadar({
+    now: NOW,
+    sector: {
+      market: { phase: 'live', day: '2026-09-02' },
+      intraday: sectorSnapshot(),
+    },
+    formula: {
+      intraday: formulaResult('INTRADAY', [
+        formulaCandidate({
+          opportunityScore: {
+            state: 'READY',
+            pFill: 0.76,
+            pWinGivenFill: 0.52,
+            expectedNetR: -0.08,
+            netRLowerBound: -0.16,
+          },
+        }),
+      ]),
+    },
+  })
+
+  assert.equal(result.lanes.intraday[0].state, 'AVOID')
+  assert.match(
+    result.lanes.intraday[0].blockers.join('；'),
+    /尚未证明正期望/,
+  )
+})
+
 test('预催化候选只进入提前布局并保留官方事件证据', () => {
   const result = buildOpportunityRadar({
     now: NOW,
