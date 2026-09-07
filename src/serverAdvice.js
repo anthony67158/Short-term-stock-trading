@@ -140,6 +140,8 @@ export async function triggerServerAdvice(codes, {
   const synced = await ensureAdviceAccountSynced({
     flushLocal: () => planStore.flushSave(),
     retryCloud: () => authStore.retrySave(),
+    isTradeStateConfirmed: () =>
+      authStore.isTradeStateConfirmed(),
   })
   if (!synced.ok) return synced
   const controller = new AbortController()

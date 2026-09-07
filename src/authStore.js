@@ -451,6 +451,11 @@ export const authStore = {
     }
     return cloudSaveQueue.retry()
   },
+  isTradeStateConfirmed() {
+    if (!_lastSyncedTradeFingerprint) return false
+    return accountTradeStateFingerprint(planStore.get())
+      === _lastSyncedTradeFingerprint
+  },
   async resolveTradeConflict() {
     const session = currentAccountSession()
     const credentials = accountCredentialPayload(_credentials)

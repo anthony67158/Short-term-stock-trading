@@ -1,11 +1,17 @@
 export async function ensureAdviceAccountSynced({
   flushLocal,
   retryCloud,
+  isTradeStateConfirmed,
 } = {}) {
   try {
     const local = typeof flushLocal === 'function'
       ? await flushLocal()
       : true
+    const tradeStateConfirmed = async () => (
+      typeof isTradeStateConfirmed === 'function'
+      && await isTradeStateConfirmed() === true
+    )
+    if (await tradeStateConfirmed()) return { ok: true }
     if (local === false) {
       return { ok: false, error: '最新交易账本尚未写入云端' }
     }
@@ -13,6 +19,7 @@ export async function ensureAdviceAccountSynced({
       ? await retryCloud()
       : true
     if (cloud === false) {
+      if (await tradeStateConfirmed()) return { ok: true }
       return { ok: false, error: '最新交易账本尚未在 OSS 确认保存' }
     }
     return { ok: true }

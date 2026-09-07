@@ -21,9 +21,40 @@ test('提交云端军师任务前必须等待最新交易账本写入OSS', async
   assert.deepEqual(result, { ok: true })
 })
 
+test('交易账本已由OSS确认时不被无关数据的失败重试阻断', async () => {
+  const events = []
+  const result = await ensureAdviceAccountSynced({
+    flushLocal: async () => {
+      events.push('flush-local')
+      return true
+    },
+    isTradeStateConfirmed: () => true,
+    retryCloud: async () => {
+      events.push('retry-cloud')
+      return false
+    },
+  })
+
+  assert.deepEqual(events, ['flush-local'])
+  assert.deepEqual(result, { ok: true })
+})
+
+test('非交易数据保存失败但交易账本已确认时仍允许提交', async () => {
+  const result = await ensureAdviceAccountSynced({
+    flushLocal: async () => false,
+    isTradeStateConfirmed: () => true,
+    retryCloud: async () => {
+      throw new Error('已确认交易事实后不应继续重试')
+    },
+  })
+
+  assert.deepEqual(result, { ok: true })
+})
+
 test('最新交易账本未确认写入OSS时禁止提交云端军师任务', async () => {
   const result = await ensureAdviceAccountSynced({
     flushLocal: async () => false,
+    isTradeStateConfirmed: () => false,
     retryCloud: async () => {
       throw new Error('本地保存失败后不应继续')
     },
@@ -31,6 +62,19 @@ test('最新交易账本未确认写入OSS时禁止提交云端军师任务', as
 
   assert.equal(result.ok, false)
   assert.match(result.error, /账本/)
+})
+
+test('交易事实已变化且OSS重试失败时继续阻止云端生成', async () => {
+  const result = await ensureAdviceAccountSynced({
+    flushLocal: async () => true,
+    isTradeStateConfirmed: () => false,
+    retryCloud: async () => false,
+  })
+
+  assert.deepEqual(result, {
+    ok: false,
+    error: '最新交易账本尚未在 OSS 确认保存',
+  })
 })
 
 test('登录态单股建议收到服务端确认后才进入云端生成态', async () => {
