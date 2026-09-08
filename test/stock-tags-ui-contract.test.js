@@ -10,6 +10,7 @@ const read = (path) => readFileSync(
 const stockName = read('src/components/StockName.jsx')
 const planTab = read('src/components/PlanTab.jsx')
 const todayTab = read('src/components/TodayTab.jsx')
+const opportunityCandidate = read('src/components/OpportunityCandidateRow.jsx')
 const movers = read('src/components/Movers.jsx')
 const stockPanel = read('src/components/StockPanel.jsx')
 const stockDetail = read('src/components/StockDetail.jsx')
@@ -60,7 +61,7 @@ test('持仓自选复用两层股票身份且不再渲染独立标签横条', ()
 
 test('核心个股场景全部接入统一标签', () => {
   for (const source of [
-    todayTab,
+    opportunityCandidate,
     movers,
     stockPanel,
     alertCenter,
@@ -70,6 +71,7 @@ test('核心个股场景全部接入统一标签', () => {
   ]) {
     assert.match(source, /StockName|StockTags/)
   }
+  assert.match(todayTab, /<OpportunityRadar/)
   assert.match(stockDetail, /<StockTags[\s\S]{0,100}code={stock\.code}/)
   assert.match(stockPanel, /<StockName code={s\.code}/)
   assert.match(dailyReport, /<StockName code={h\.code}/)

@@ -999,16 +999,16 @@ test('移动端复合头部、分段按钮与批量进度使用稳定单列布�
   )
 })
 
-test('移动端军师入口并入底部五栏导航且不再悬浮遮挡内容', () => {
+test('移动端三个工作区加军师工具占四栏且不悬浮遮挡内容', () => {
   assert.match(assistant, /className={'ai-fab'/)
   assert.match(assistant, /<span className="ai-fab-text">军师<\/span>/)
   assert.match(
     precision,
-    /@media \(max-width:\s*900px\)\s*{[\s\S]*?\.nav-tabs\s*{[^}]*grid-template-columns:\s*repeat\(5,\s*minmax\(0,\s*1fr\)\)/s,
+    /@media \(max-width:\s*900px\)\s*{[\s\S]*?\.nav-tabs\s*{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/s,
   )
   assert.match(
     precision,
-    /@media \(max-width:\s*900px\)\s*{[\s\S]*?\.ai-fab\s*{[^}]*bottom:\s*calc\(var\(--space-2xs\)\s*\+\s*env\(safe-area-inset-bottom\)\)[^}]*width:\s*calc\(20vw\s*-\s*var\(--space-2xs\)\)/s,
+    /@media \(max-width:\s*900px\)\s*{[\s\S]*?\.ai-fab\s*{[^}]*bottom:\s*calc\(var\(--space-2xs\)\s*\+\s*env\(safe-area-inset-bottom\)\)[^}]*width:\s*calc\(25vw\s*-\s*var\(--space-2xs\)\)/s,
   )
   assert.match(
     precision,

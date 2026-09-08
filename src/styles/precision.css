@@ -1287,7 +1287,7 @@ button.ar-main {
 
 .hub-tabs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-3xs);
   min-height: 48px;
   margin: 0 0 var(--space-lg);
@@ -10794,7 +10794,7 @@ button.acct-item {
     inset: auto 0 0;
     z-index: var(--z-sticky);
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 0;
     width: 100%;
     padding:
@@ -11948,7 +11948,7 @@ button.acct-item {
     right: max(var(--space-2xs), env(safe-area-inset-right));
     bottom: calc(var(--space-2xs) + env(safe-area-inset-bottom));
     z-index: calc(var(--z-sticky) + 1);
-    width: calc(20vw - var(--space-2xs));
+    width: calc(25vw - var(--space-2xs));
     height: 52px;
     min-height: 52px;
     flex-direction: column;

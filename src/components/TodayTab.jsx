@@ -1,12 +1,10 @@
 import { useState, useMemo } from 'react'
 import Icon from './Icon'
-import StockName from './StockName'
 import LimitPool from './LimitPool'
-import { planStore, usePlanStore } from '../planStore'
 import DailyReport from './DailyReport'
 import OpportunityRadar from './OpportunityRadar'
 import ErrorBoundary from './ErrorBoundary'
-import { fmtPct, pctClass, fmtInflow, fmtRaw } from '../format'
+import { fmtPct, pctClass, fmtRaw } from '../format'
 import { deriveMarketRegime } from '../../shared/marketRegime.js'
 import {
   buildMarketBoardGuidance,
@@ -28,8 +26,6 @@ export default function TodayTab({
   })
   const zt = state('limitUp')
   const zb = state('brokenLimit')
-  const movers = state('movers')
-  const speed = state('speed')
 
   return (
     <div className="today">
@@ -42,11 +38,6 @@ export default function TodayTab({
       <ErrorBoundary label="机会雷达">
         <OpportunityRadar />
       </ErrorBoundary>
-      <CandidatePool
-        zt={zt.data}
-        movers={movers.data}
-        speed={speed.data}
-      />
       <LimitPool
         dataByKind={{
           zt: zt.data,
@@ -283,140 +274,6 @@ function MarketLight({ market, sectors, limitUp }) {
         </div>
       </div>
       <MarketInterpretation guidance={guidance} />
-    </section>
-  )
-}
-
-// ---------- 精选候选池（涨停/异动/涨速/资金 合成带标签列表） ----------
-function CandidatePool({ zt, movers, speed }) {
-  const [tab, setTab] = useState('hot') // hot(综合) | limit | inflow | speed
-  const [colSort, setColSort] = useState(null) // { key, dir } 表头点击排序；null=用默认榜单排序
-  const book = usePlanStore()
-
-  const clickHead = (key) => setColSort((c) => {
-    if (!c || c.key !== key) return { key, dir: 'desc' }
-    if (c.dir === 'desc') return { key, dir: 'asc' }
-    return null
-  })
-  const Th = ({ label, k }) => (
-    <th
-      className={'th-sort' + (colSort && colSort.key === k ? ' active' : '')}
-      aria-sort={colSort?.key === k ? (colSort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
-    >
-      <button type="button" className="th-inner" onClick={() => clickHead(k)}>
-        {label}
-        <span className="th-arrow">{colSort && colSort.key === k ? (colSort.dir === 'asc' ? '↑' : '↓') : '⇅'}</span>
-      </button>
-    </th>
-  )
-
-  const rows = useMemo(() => {
-    const map = new Map()
-    const push = (s, tag) => {
-      if (!s.code) return
-      if (!map.has(s.code)) map.set(s.code, { code: s.code, name: s.name, price: s.price, pct: s.pct, tags: [], mainInflow: s.mainInflow || 0, lbc: s.lbc, speed: s.speed })
-      const o = map.get(s.code)
-      if (!o.tags.includes(tag)) o.tags.push(tag)
-      if (s.price) o.price = s.price
-      if (s.mainInflow) o.mainInflow = s.mainInflow
-      if (s.lbc) o.lbc = s.lbc
-      if (s.speed !== undefined) o.speed = s.speed
-    }
-    ;(zt?.list || []).slice(0, 20).forEach((s) => push({ ...s, mainInflow: s.fundAmount }, s.lbc >= 2 ? `${s.lbc}连板` : '涨停'))
-    ;(movers?.list || []).slice(0, 20).forEach((s) => push(s, '主力抢筹'))
-    ;(speed?.list || []).slice(0, 15).forEach((s) => push(s, '涨速'))
-
-    let arr = [...map.values()]
-    if (tab === 'limit') arr = arr.filter((x) => x.tags.some((t) => t.includes('板') || t === '涨停'))
-    else if (tab === 'inflow') arr = arr.filter((x) => x.tags.includes('主力抢筹')).sort((a, b) => b.mainInflow - a.mainInflow)
-    else if (tab === 'speed') arr = arr.filter((x) => x.tags.includes('涨速')).sort((a, b) => (b.speed || 0) - (a.speed || 0))
-    else arr = arr.sort((a, b) => b.tags.length - a.tags.length || b.mainInflow - a.mainInflow) // 综合：多标签优先
-    arr = arr.slice(0, 30)
-    // 表头点击排序（覆盖默认榜单排序）
-    if (colSort) {
-      const { key, dir } = colSort
-      arr = [...arr].sort((a, b) => {
-        const va = Number(a[key]) || 0, vb = Number(b[key]) || 0
-        return dir === 'asc' ? va - vb : vb - va
-      })
-    }
-    return arr
-  }, [zt, movers, speed, tab, colSort])
-
-  const tabs = [['hot', '综合精选'], ['limit', '涨停连板'], ['inflow', '主力抢筹'], ['speed', '涨速异动']]
-
-  return (
-    <section className="panel candidate-pool">
-      <div className="panel-head">
-        <div role="heading" aria-level="2" className="panel-title"><Icon name="fire" size={16} /> 今日精选候选池</div>
-        <div className="tabs">
-          {tabs.map(([k, t]) => (
-            <button
-              key={k}
-              type="button"
-              className={'tab' + (tab === k ? ' active' : '')}
-              aria-pressed={tab === k}
-              onClick={() => { setTab(k); setColSort(null) }}
-            >
-              {t}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div
-        className="scroll data-table-scroll data-table-scroll-lg"
-        role="region"
-        aria-label="今日精选候选池表格"
-        tabIndex="0"
-      >
-        <table className="tbl candidate-pool-table">
-          <colgroup>
-            <col className="candidate-col-name" />
-            <col className="candidate-col-price" />
-            <col className="candidate-col-pct" />
-            <col className="candidate-col-signal" />
-            <col className="candidate-col-flow" />
-            <col className="candidate-col-action" />
-          </colgroup>
-          <thead>
-            <tr><th>名称</th><Th label="现价" k="price" /><Th label="涨幅" k="pct" /><th>信号</th><Th label="主力/封资" k="mainInflow" /><th style={{ textAlign: 'center' }}>操作</th></tr>
-          </thead>
-          <tbody>
-            {rows.map((s) => {
-              const added = book.plan.some((x) => x.code === s.code)
-              return (
-                <tr key={s.code}>
-                  <td>
-                      <StockName
-                        code={s.code}
-                        name={s.name}
-                        showTags={false}
-                        className="candidate-stock-name"
-                      />
-                  </td>
-                  <td className={pctClass(s.pct)}>{s.price ? fmtRaw(s.price) : '--'}</td>
-                  <td className={pctClass(s.pct)}>{fmtPct(s.pct)}</td>
-                  <td>
-                    {s.tags.slice(0, 3).map((t, i) => (
-                      <span key={i} className={'sig-tag' + (t.includes('板') || t === '涨停' ? ' lu' : t === '主力抢筹' ? ' in' : ' sp')}>{t}</span>
-                    ))}
-                  </td>
-                  <td className={s.mainInflow >= 0 ? 'red' : 'green'}>{s.mainInflow ? fmtInflow(s.mainInflow) : '--'}</td>
-                  <td style={{ textAlign: 'center' }}>
-                    <button className={'chip-btn' + (added ? ' done' : '')} disabled={added} onClick={() => planStore.addPlan({ code: s.code, name: s.name })}>
-                      <Icon name={added ? 'check' : 'plus'} size={13} />{added ? '已加' : '加自选'}
-                    </button>
-                  </td>
-                </tr>
-              )
-            })}
-            {rows.length === 0 && <tr><td colSpan={6} className="empty">暂无数据，开盘后逐步更新</td></tr>}
-          </tbody>
-        </table>
-        <div className="legend table-note">
-          综合精选按信号重叠度排序 · 点表头「现价/涨幅/主力」切换正倒序 · 点名称看详情K线 · 点「加自选」进入计划
-        </div>
-      </div>
     </section>
   )
 }

@@ -1,33 +1,34 @@
 export const APP_SECTIONS = Object.freeze([
   {
     key: 'today',
-    label: '今日决策',
-    shortLabel: '决策',
+    label: '市场与选股',
+    shortLabel: '选股',
     icon: 'radar',
     description: '先看环境与军师结论，再决定今天是否出手。',
   },
   {
     key: 'plan',
-    label: '持仓执行',
-    shortLabel: '持仓',
+    label: '交易与持仓',
+    shortLabel: '交易',
     icon: 'wallet',
     description: '管理持仓、自选、做 T 与价格触发计划。',
   },
   {
     key: 'hub',
-    label: '账户闭环',
-    shortLabel: '账户',
+    label: '复盘与改进',
+    shortLabel: '复盘',
     icon: 'gauge',
     description: '核对资产、预警、交易记录与执行质量。',
   },
-  {
-    key: 'research',
-    label: '盘面研究',
-    shortLabel: '研究',
-    icon: 'layers',
-    description: '下钻资金、板块、异动、龙虎榜与宏观证据。',
-  },
 ])
+
+export function resolveWorkspaceLocation(tab, sub) {
+  if (tab === 'research') return { tab: 'today', sub: 'research' }
+  if (tab === 'hub' && sub === 'account') return { tab: 'plan', sub: 'account' }
+  if (tab === 'plan') return { tab, sub: sub === 'account' ? 'account' : 'positions' }
+  if (tab === 'hub') return { tab, sub: sub === 'alert' ? 'alert' : 'review' }
+  return { tab: 'today', sub: sub === 'research' ? 'research' : 'selection' }
+}
 
 const TAB_BY_KEY = Object.freeze(
   Object.fromEntries(

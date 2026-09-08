@@ -1,15 +1,14 @@
 import { useEffect } from 'react'
 import Icon from './Icon'
-import AccountTab from './AccountTab'
 import ReviewTab from './ReviewTab'
 import AlertPanel from './AlertPanel'
 import { useAlertStore, alertStore } from '../alertStore'
 
-// ============ 账户·交易 融合页：账户全景 / 预警 / 交易记录 三个子页 ============
+// 资金与仓位在交易工作区；本页只保留复盘和预警记录。
 export default function AccountHub({
   interval,
   snapshot,
-  sub = 'account',
+  sub = 'review',
   onSubChange,
 }) {
   const { unread } = useAlertStore()
@@ -18,14 +17,13 @@ export default function AccountHub({
   useEffect(() => { if (sub === 'alert') alertStore.markAllRead() }, [sub])
 
   const SUBS = [
-    { key: 'account', label: '账户全景', icon: 'gauge' },
-    { key: 'alert', label: '盯盘预警', icon: 'bell', badge: unread },
-    { key: 'review', label: '交易记录', icon: 'history' },
+    { key: 'review', label: '交易复盘', icon: 'history' },
+    { key: 'alert', label: '预警记录', icon: 'bell', badge: unread },
   ]
 
   return (
     <div className="hub">
-      <nav className="hub-tabs" aria-label="账户闭环">
+      <nav className="hub-tabs" aria-label="复盘与改进">
         {SUBS.map((s) => (
           <button
             key={s.key}
@@ -41,7 +39,6 @@ export default function AccountHub({
         ))}
       </nav>
       <div className="hub-body">
-        {sub === 'account' && <AccountTab interval={interval} />}
         {sub === 'alert' && <AlertPanel interval={interval} />}
         {sub === 'review' && <ReviewTab snapshot={snapshot} />}
       </div>

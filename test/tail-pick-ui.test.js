@@ -21,7 +21,7 @@ test('尾盘拾金作为数据源并入机会雷达', () => {
   assert.match(formulaSelection, /import TailPick from '\.\/TailPick'/)
   assert.match(today, /<OpportunityRadar/)
   assert.doesNotMatch(today, /<FormulaSelection/)
-  assert.ok(today.indexOf('<OpportunityRadar') < today.indexOf('<CandidatePool'))
+  assert.doesNotMatch(today, /<CandidatePool/)
 })
 
 test('尾盘拾金支持14:50自动正式扫描和手动试算', () => {

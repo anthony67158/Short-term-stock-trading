@@ -40,6 +40,7 @@ import {
 import {
   APP_SECTIONS,
   resolveAppShortcut,
+  resolveWorkspaceLocation,
 } from '../shared/appShell.js'
 import { tradingPollingIntervals } from '../shared/pollingPolicy.js'
 import {
@@ -70,6 +71,7 @@ const TodayTab = lazyWithReload(() => import('./components/TodayTab'), 'today')
 const PlanTab = lazyWithReload(() => import('./components/PlanTab'), 'plan')
 const ResearchTab = lazyWithReload(() => import('./components/ResearchTab'), 'research')
 const AccountHub = lazyWithReload(() => import('./components/AccountHub'), 'account-hub')
+const AccountTab = lazyWithReload(() => import('./components/AccountTab'), 'account')
 const AIAssistant = lazyWithReload(() => import('./components/AIAssistant'), 'assistant')
 const StockDetail = lazyWithReload(loadStockDetailComponent, 'stock-detail')
 const LLMConfig = lazyWithReload(() => import('./components/LLMConfig'), 'llm-config')
@@ -208,9 +210,25 @@ export default function App() {
   return <MainApp key={user} />    // key=user：切换账号时整树重挂
 }
 
-function MainApp() {
+function WorkspaceViews({ label, items, current, onChange }) {
+  return (
+    <nav className="hub-tabs workspace-views" aria-label={label}>
+      {items.map(([key, title, icon]) => (
+        <button type="button" className={'hub-tab' + (current === key ? ' active' : '')}
+          aria-current={current === key ? 'page' : undefined}
+          onClick={() => onChange(key)} key={key}>
+          <Icon name={icon} size={15} /> {title}
+        </button>
+      ))}
+    </nav>
+  )
+}
+
+export function MainApp() {
   const [tab, setTab] = useState('today')
-  const [hubSub, setHubSub] = useState('account') // 账户·交易 融合页的子页
+  const [hubSub, setHubSub] = useState('review')
+  const [todaySub, setTodaySub] = useState('selection')
+  const [planSub, setPlanSub] = useState('positions')
   const tabHistoryRef = useRef(['today'])
   useEffect(() => {
     if (!navigator.serviceWorker) return undefined
@@ -238,7 +256,14 @@ function MainApp() {
   useLayoutEffect(() => {
     window.scrollTo({ top: 0, behavior: 'auto' })
   }, [tab])
-  const navigateToTab = useCallback((next, { replace = false } = {}) => {
+  const navigateToTab = useCallback((requested, { replace = false, sub } = {}) => {
+    const location = resolveWorkspaceLocation(requested, sub)
+    const next = location.tab
+    if (sub != null || requested === 'research') {
+      if (next === 'today') setTodaySub(location.sub)
+      if (next === 'plan') setPlanSub(location.sub)
+      if (next === 'hub') setHubSub(location.sub)
+    }
     if (!APP_SECTIONS.some((section) => section.key === next)) return
     setTab((current) => {
       if (current === next) return current
@@ -260,8 +285,7 @@ function MainApp() {
       const sp = new URLSearchParams(window.location.search)
       const t = sp.get('tab')
       const sub = sp.get('sub')
-      if (t) navigateToTab(t, { replace: true })
-      if (sub) setHubSub(sub)
+      if (t) navigateToTab(t, { replace: true, sub })
     } catch { /* ignore */ }
   }, [navigateToTab])
   const { open: aiOpen } = useAIStore()
@@ -309,15 +333,23 @@ function MainApp() {
       aiStore.close()
       return
     }
-    if (tab === 'hub' && hubSub !== 'account') {
-      setHubSub('account')
+    if (tab === 'today' && todaySub !== 'selection') {
+      setTodaySub('selection')
+      return
+    }
+    if (tab === 'plan' && planSub !== 'positions') {
+      setPlanSub('positions')
+      return
+    }
+    if (tab === 'hub' && hubSub !== 'review') {
+      setHubSub('review')
       return
     }
     if (tabHistoryRef.current.length <= 1) return
     tabHistoryRef.current.pop()
     const previous = tabHistoryRef.current.at(-1) || 'today'
     setTab(previous)
-  }, [hubSub, tab])
+  }, [hubSub, todaySub, planSub, tab])
 
   useMobileEdgeBack(navigateBack)
   useOverlayScrollLock()
@@ -499,36 +531,42 @@ function MainApp() {
           <div className="workspace-identity">
             <div className="workspace-title">
               <h1>{currentSection.label}</h1>
-              <p>{currentSection.description}</p>
             </div>
           </div>
         </div>
         <ErrorBoundary key={tab} label="页面">
           <Suspense fallback={<TabSkeleton />}>
             {tab === 'today' && (
-              <TodayTab
+              <>
+              <WorkspaceViews label="市场与选股视图" current={todaySub} onChange={setTodaySub}
+                items={[['selection', '市场与机会', 'radar'], ['research', '盘面研究', 'layers']]} />
+              {todaySub === 'selection' ? <TodayTab
                 market={market.data}
                 sectors={sectors.data}
                 snapshot={marketSnapshot.data}
                 snapshotLoading={marketSnapshot.loading}
                 snapshotError={marketSnapshot.error}
-              />
+              /> : <ResearchTab
+                interval={interval}
+                snapshot={marketSnapshot.data}
+                snapshotLoading={marketSnapshot.loading}
+                snapshotError={marketSnapshot.error}
+              />}
+              </>
             )}
-            {tab === 'plan' && <PlanTab interval={interval} />}
+            {tab === 'plan' && (
+              <>
+                <WorkspaceViews label="交易与持仓视图" current={planSub} onChange={setPlanSub}
+                  items={[['positions', '持仓与自选', 'wallet'], ['account', '资金与仓位', 'gauge']]} />
+                {planSub === 'positions' ? <PlanTab interval={interval} /> : <AccountTab interval={interval} />}
+              </>
+            )}
             {tab === 'hub' && (
               <AccountHub
                 interval={interval}
                 snapshot={snapshot}
                 sub={hubSub}
                 onSubChange={setHubSub}
-              />
-            )}
-            {tab === 'research' && (
-              <ResearchTab
-                interval={interval}
-                snapshot={marketSnapshot.data}
-                snapshotLoading={marketSnapshot.loading}
-                snapshotError={marketSnapshot.error}
               />
             )}
           </Suspense>

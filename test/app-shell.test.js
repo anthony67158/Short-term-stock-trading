@@ -5,12 +5,13 @@ import { readFileSync } from 'node:fs'
 import {
   APP_SECTIONS,
   resolveAppShortcut,
+  resolveWorkspaceLocation,
 } from '../shared/appShell.js'
 
-test('工作台固定四个核心入口并只保留页面任务描述', () => {
+test('工作台固定市场选股、交易持仓、复盘改进三个核心入口', () => {
   assert.deepEqual(
     APP_SECTIONS.map((section) => section.key),
-    ['today', 'plan', 'hub', 'research'],
+    ['today', 'plan', 'hub'],
   )
   for (const section of APP_SECTIONS) {
     assert.ok(section.label)
@@ -18,6 +19,14 @@ test('工作台固定四个核心入口并只保留页面任务描述', () => {
     assert.ok(section.icon)
     assert.equal('steps' in section, false)
   }
+})
+
+test('旧研究、账户和预警深链接继续映射到正确工作区', () => {
+  assert.deepEqual(resolveWorkspaceLocation('research'), { tab: 'today', sub: 'research' })
+  assert.deepEqual(resolveWorkspaceLocation('hub', 'account'), { tab: 'plan', sub: 'account' })
+  assert.deepEqual(resolveWorkspaceLocation('hub', 'alert'), { tab: 'hub', sub: 'alert' })
+  assert.deepEqual(resolveWorkspaceLocation('hub'), { tab: 'hub', sub: 'review' })
+  assert.deepEqual(resolveWorkspaceLocation('plan'), { tab: 'plan', sub: 'positions' })
 })
 
 test('工作台支持数字键和命令快捷键且不干扰输入', () => {

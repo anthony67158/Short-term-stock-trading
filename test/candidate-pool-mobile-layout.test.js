@@ -11,17 +11,11 @@ const styles = fs.readFileSync(
   'utf8',
 )
 
-test('移动端候选池保留可读名称列并让行情列横向滚动', () => {
-  assert.match(todayTab, /className="tbl candidate-pool-table"/)
-  assert.match(todayTab, /className="candidate-stock-name"/)
-  assert.match(todayTab, /showTags=\{false\}/)
-  assert.match(styles, /\.candidate-pool-table\s*\{[\s\S]*min-width:\s*680px/)
+test('选股页撤下重复热度榜，唯一雷达在移动端使用单列', () => {
+  assert.doesNotMatch(todayTab, /CandidatePool|今日精选候选池/)
+  assert.match(todayTab, /<OpportunityRadar/)
   assert.match(
     styles,
-    /\.candidate-pool-table :is\(th, td\):first-child\s*\{[\s\S]*width:\s*132px/,
-  )
-  assert.match(
-    styles,
-    /\.candidate-stock-name \.stock-name-primary\s*\{[\s\S]*flex-direction:\s*column/,
+    /@media \(max-width:\s*720px\)[\s\S]*?\.opportunity-row\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s,
   )
 })
