@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react'
+import { normalizeSelectionOrigin } from '../shared/selectionOrigin.js'
 import { getAdvice, getAllAdvice, setAllAdvice, mergeAdvice, registerAdviceSync } from './adviceCache.js'
 import { computeSellAllowance } from '../shared/decisionGuards.js'
 import { appendExecution, createRecommendation, decisionLedgerStats, removeExecutions } from '../shared/decisionLedger.js'
@@ -1343,11 +1344,15 @@ export const planStore = {
     }
     emit()
   },
-  addPlan(stock, note = '') {
+  addPlan(stock, note = '', selectionOrigin = null) {
     if (!stock || !stock.code) return
     if (state.plan.some((x) => x.code === stock.code)) return
     if (state.holding.some((x) => x.code === stock.code)) return // 已持有的票不再入计划，请用「加仓」
-    state.plan = [...state.plan, { code: stock.code, name: stock.name, note, addedAt: Date.now() }]
+    const origin = normalizeSelectionOrigin(selectionOrigin)
+    state.plan = [...state.plan, {
+      code: stock.code, name: stock.name, note, addedAt: Date.now(),
+      ...(origin?.code === stock.code ? { selectionOrigin: origin } : {}),
+    }]
     emit()
   },
   removePlan(code) {
@@ -1405,12 +1410,14 @@ export const planStore = {
     state.holding = [...state.holding, {
       id: hid, code: p.code, name: p.name, buyPrice: price, buyAt: Date.now(),
       qty: q, buyFee: fee,
+      selectionOrigin: normalizeSelectionOrigin(p.selectionOrigin),
       // 建仓继承候选上已算好的量化得分,持仓卡也能立刻展示分数(之后AI建议刷新会更新)
       ...(p.qScore != null ? { qScore: p.qScore, qBias: p.qBias, qAt: p.qAt } : {}),
       ...(ap ? { tp: ap.tp, sl: ap.sl, tpManual: false, slManual: false } : {}),
     }]
     // 记录一条纯买入交易流水
     const txn = makeBuyTxn(p.code, p.name, price, q, fee, hid)
+    txn.selectionOrigin = normalizeSelectionOrigin(p.selectionOrigin)
     txn.cashApplied = updateAccountCash(txn.cashFlow)
     state.closed = [txn, ...state.closed].slice(0, 300)
     this._recordExecution({
@@ -1443,14 +1450,19 @@ export const planStore = {
     snapshot(`建仓 ${stock.name || stock.code}`)
     const hid = uid()
     const ap = advicePlan(stock.code)
+    const selectionOrigin = normalizeSelectionOrigin(
+      state.plan.find((item) => item.code === stock.code)?.selectionOrigin,
+    )
     state.holding = [...state.holding, {
       id: hid, code: stock.code, name: stock.name, buyPrice: price, buyAt: Date.now(),
       qty: q, buyFee: fee,
+      selectionOrigin,
       ...(ap ? { tp: ap.tp, sl: ap.sl, tpManual: false, slManual: false } : {}),
     }]
     state.plan = state.plan.filter((x) => x.code !== stock.code)
     state.alerts = (state.alerts || []).filter((a) => a.candCode !== stock.code) // 已买入 → 移除买点预警
     const txn = makeBuyTxn(stock.code, stock.name, price, q, fee, hid)
+    txn.selectionOrigin = selectionOrigin
     txn.cashApplied = updateAccountCash(txn.cashFlow)
     state.closed = [txn, ...state.closed].slice(0, 300)
     this._recordExecution({
@@ -1519,6 +1531,7 @@ export const planStore = {
       id: uid(), batchId, type: 'SELL', kind: 'SELL', code: h.code, name: h.name,
       tradeIntent: opts.tradeIntent === 't' ? 't' : 'position',
       holdingId: h.id,
+      selectionOrigin: normalizeSelectionOrigin(h.selectionOrigin),
       side: 'sell', qty: sq, price, amount: +proceeds.toFixed(2),
       fee: sellFee, cashFlow: +(proceeds - sellFee).toFixed(2), // 卖出=现金流入
       costPrice: h.buyPrice, realizedPnl: netPnl,               // 有成本基准→带已实现盈亏
@@ -1573,6 +1586,7 @@ export const planStore = {
       : x)
     // 记一条买入交易流水
     const txn = makeBuyTxn(h.code, h.name, price, q, addFee, id)
+    txn.selectionOrigin = normalizeSelectionOrigin(h.selectionOrigin)
     txn.cashApplied = updateAccountCash(txn.cashFlow)
     state.closed = [txn, ...state.closed].slice(0, 300)
     this._recordExecution({
@@ -2388,6 +2402,7 @@ export const planStore = {
     if (state.plan.some((x) => String(x.code) === String(h.code))) return    // 自选已存在 → 不重复
     state.plan = [...state.plan, {
       code: h.code, name: h.name, note: '清仓后回归盯盘', addedAt: Date.now(),
+      selectionOrigin: normalizeSelectionOrigin(h.selectionOrigin),
       ...(h.qScore != null ? { qScore: h.qScore, qBias: h.qBias, qAt: h.qAt } : {}),
       ...(h.industry ? { industry: h.industry } : {}),
     }]

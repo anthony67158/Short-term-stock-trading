@@ -3,6 +3,7 @@ import ReactECharts from 'echarts-for-react'
 import Icon from './Icon'
 import StockName from './StockName'
 import StockTags from './StockTags'
+import SelectionPerformance from './SelectionPerformance'
 import {
   computePortfolio,
   computeTFlows,
@@ -116,6 +117,7 @@ export default function ReviewTab({ snapshot }) {
 
   return (
     <div className="review">
+      <SelectionPerformance records={book.closed || []} />
       <DecisionClosure book={book} />
       <TradeStat records={records} analyticsRecords={analyticsRecords} />
       <ReviewCharts records={analyticsRecords} />
@@ -951,7 +953,7 @@ function TradeStat({ records, analyticsRecords }) {
               <div className="rv-attr-note">
                 {all.plRatio != null && all.rate != null
                   ? (all.expect >= 0
-                      ? `期望为正，策略当前是赚钱的。${all.rate < 50 && all.plRatio > 1.5 ? '胜率虽不高，但靠盈亏比取胜，注意拿住盈利单。' : all.plRatio < 1 ? '盈亏比偏低，注意止损、别让亏损单扩大。' : '维持纪律即可。'}`
+                      ? `当前已记录成交的每笔平均净收益为正，不代表未来正期望。${all.rate < 50 && all.plRatio > 1.5 ? '收益依赖较大的盈利单，注意回撤与退出纪律。' : all.plRatio < 1 ? '盈亏比偏低，注意止损、别让亏损单扩大。' : '继续核对样本范围与执行偏差。'}`
                       : '期望为负，需检视：要么提高胜率(选股/择时)，要么放大盈亏比(拿住盈利、快砍亏损)。')
                   : '样本较少，多积累几笔后指标更可信。'}
               </div>

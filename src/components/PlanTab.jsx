@@ -15,6 +15,8 @@ import AdviceGenerationStatus, {
   useAdviceReviewCardState,
 } from './AdviceGenerationStatus'
 import ExecutionQueue from './ExecutionQueue'
+import SelectionOrigin from './SelectionOrigin'
+import AccountRiskStrip from './AccountRiskStrip'
 import { AlertForm } from './AlertCenter'
 import { useMediaQuery, usePolling, useSwipe } from '../hooks'
 import { callAIStream } from '../ai'
@@ -468,6 +470,7 @@ export default function PlanTab({ interval }) {
 
   return (
     <div className="plan">
+      <AccountRiskStrip book={book} quotes={quote} />
       <ExecutionQueue
         plans={book.executionPlans || []}
         attributions={book.executionAttributions || []}
@@ -1310,6 +1313,7 @@ function PlanList({ book, quote, stockTags, batchSel }) {
         </div>
         {/* 主指令优先；盘面指标只作为次级证据。 */}
         <CandDecision p={p} q={q} />
+        <SelectionOrigin value={p.selectionOrigin} />
         <MarketPulse quote={q} />
         {/* 卡片只展示观察复核提醒；可执行买点已在上方指令区统一表达。 */}
         {(() => {
@@ -3251,6 +3255,7 @@ function HoldingItem({ h, quote: q }) {
         </button>
       )}
 
+      <SelectionOrigin value={h.selectionOrigin} />
       <StockNoteSummary
         code={h.code}
         name={h.name}

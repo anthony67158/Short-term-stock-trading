@@ -3,6 +3,7 @@ import ReactECharts from 'echarts-for-react'
 import Icon from './Icon'
 import OverlayPortal from './OverlayPortal'
 import StockTags from './StockTags'
+import SelectionOrigin from './SelectionOrigin'
 import { StockNoteEditor } from './StockNote'
 import AdviceGenerationStatus from './AdviceGenerationStatus'
 import AdvicePresentation from './AdvicePresentation'
@@ -972,6 +973,10 @@ export default function StockDetail({ stock, onClose }) {
         </div>
 
         <div className="detail-scroll">
+          <SelectionOrigin value={
+            book.holding.find((item) => item.code === stock.code)?.selectionOrigin
+            || book.plan.find((item) => item.code === stock.code)?.selectionOrigin
+          } />
           {/* 价格 & 均线概览 */}
           {overview && (
             <div className="detail-quote">

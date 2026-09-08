@@ -5,6 +5,7 @@ const VOLATILE_ITEM_FIELDS = new Set([
   'alertSyncedPrice',
   'reviewSyncedPrice',
   'reviewSyncedPrices',
+  'selectionOrigin',
 ])
 
 const ADVICE_VOLATILE_FIELDS = new Set([

@@ -17,6 +17,7 @@ import {
 import Icon from './Icon'
 import OpportunityRadarContent from './OpportunityRadarContent'
 import SectorForecastSettings from './SectorForecastSettings'
+import { selectionOriginFromOpportunity } from '../../shared/selectionOrigin.js'
 
 const LANES = Object.freeze([
   { id: 'intraday', label: '盘中机会' },
@@ -65,6 +66,11 @@ export default function OpportunityRadar() {
   const [error, setError] = useState('')
   const [sourceRuns, setSourceRuns] = useState({})
   const laneSelected = useRef(false)
+  const budgetKey = JSON.stringify([
+    book.account?.cash,
+    (book.holding || []).map((item) => [item.id, item.qty, item.sl]),
+    (book.executionPlans || []).map((item) => [item.planId, item.status, item.remainingLots]),
+  ])
 
   const load = useCallback(async ({ quiet = false } = {}) => {
     if (!quiet) setLoading(true)
@@ -89,7 +95,7 @@ export default function OpportunityRadar() {
       setSnapshot(next)
     })
     return () => { active = false }
-  }, [load])
+  }, [load, budgetKey])
 
   const autoRefreshDelay = opportunityRadarAutoRefreshDelay(
     snapshot,
@@ -179,8 +185,11 @@ export default function OpportunityRadar() {
           ? `止损${Number(exit.hardStopPrice).toFixed(2)}；`
           : ''}`
         + `${exit?.timeStopDate ? `最晚${exit.timeStopDate}复核` : ''}`,
+      selectionOriginFromOpportunity(opportunity, snapshot),
     )
-    await planStore.flushSave()
+    if (!await planStore.flushSave()) {
+      setError('已加入本机自选，云端同步尚未完成，请在账户同步恢复后继续。')
+    }
   }
 
   const taskRows = Object.entries(snapshot?.tasks || {})

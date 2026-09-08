@@ -473,6 +473,7 @@ function tailOpportunity(candidate, {
       : valid
         ? '尾盘等待确认'
         : '仅作参考',
+    origin: 'TAIL',
     sector: sectorView(sector),
     tags: candidate.tags || null,
     quote: candidate.quote || null,
