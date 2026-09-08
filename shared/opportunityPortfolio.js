@@ -92,12 +92,15 @@ export function analyzeOpportunityPortfolio({
 
   // 已持仓的同板块占用，作为板块上限的起点（边际集中度）。
   const heldBySector = new Map()
+  const heldByTheme = new Map()
   for (const holding of Array.isArray(holdings) ? holdings : []) {
     const code = String(holding?.sectorCode || holding?.sector?.code || '')
       .trim()
-    if (!code) continue
     const pct = Math.max(0, finite(holding?.positionPct, 0) || 0)
-    heldBySector.set(code, (heldBySector.get(code) || 0) + pct)
+    if (code) heldBySector.set(code, (heldBySector.get(code) || 0) + pct)
+    for (const theme of new Set(holding?.concepts || [])) {
+      heldByTheme.set(theme, (heldByTheme.get(theme) || 0) + pct)
+    }
   }
 
   const list = Array.isArray(rows) ? rows : []
@@ -153,7 +156,7 @@ export function analyzeOpportunityPortfolio({
       totalCap > 0 && approvedTotal + positionPct > totalCap + 1e-9
     const crowdedTheme = themes.find((theme) =>
       correlatedCap > 0
-      && (themeApproved.get(theme) || 0) + positionPct
+      && (themeApproved.get(theme) || 0) + (heldByTheme.get(theme) || 0) + positionPct
         > correlatedCap + 1e-9
     )
 

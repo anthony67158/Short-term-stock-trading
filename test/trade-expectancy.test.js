@@ -40,6 +40,8 @@ test('机会模型下界为负时明确阻止新增风险', () => {
     quantityLots: 2,
     opportunityScore: {
       state: 'READY',
+      shadowOnly: false,
+      productionEligible: true,
       serverVerified: true,
       modelVersion: 'opportunity-score.20260907',
       priceContract: {
@@ -79,6 +81,8 @@ test('机会模型正下界形成可执行的统计优势', () => {
     quantityLots: 1,
     opportunityScore: {
       state: 'READY',
+      shadowOnly: false,
+      productionEligible: true,
       serverVerified: true,
       modelVersion: 'opportunity-score.20260907',
       priceContract: {
@@ -136,6 +140,8 @@ test('客户端伪造或价格合同不一致的机会分不得进入硬闸门',
     targetPrice: 12,
     opportunityScore: {
       state: 'READY',
+      shadowOnly: false,
+      productionEligible: true,
       serverVerified: false,
       pFill: 0.99,
       pWinGivenFill: 0.99,

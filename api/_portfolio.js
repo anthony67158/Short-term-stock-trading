@@ -1,7 +1,7 @@
 // 服务端持仓 payload 适配层。账户计算由 shared/portfolioAccounting.js 单一实现，
 // 浏览器与 FC 只保留各自签名适配，避免做T、T+1 和估值口径再次漂移。
 import { portfolioExposureContext } from '../shared/portfolioExposure.js';
-import { buildAccountRiskContext } from '../shared/accountRiskBudget.js';
+import { buildAccountRiskContext, accountRiskCodes } from '../shared/accountRiskBudget.js';
 import { fetchQuotes } from './quote.js';
 import {
   buildTActionContext,
@@ -108,7 +108,7 @@ export async function readAccountRiskContext(data, {
   quoteReader = fetchQuotes,
   timeoutMs = 5000,
 } = {}) {
-  const codes = [...new Set((data?.holding || []).map((item) => item.code))];
+  const codes = accountRiskCodes(data);
   let timer;
   try {
     const quotes = await Promise.race([
@@ -119,7 +119,7 @@ export async function readAccountRiskContext(data, {
     ]).catch(() => []);
     return buildAccountRiskContext(
       data,
-      Object.fromEntries(quotes.map((quote) => [quote.code, quote])),
+      Object.fromEntries((Array.isArray(quotes) ? quotes : []).map((quote) => [quote.code, quote])),
     );
   } finally {
     clearTimeout(timer);

@@ -166,6 +166,8 @@ test('同一状态内按费后净期望下界而不是热度分排序', () => {
     score: 95,
     opportunityScore: {
       state: 'READY',
+      shadowOnly: false,
+      productionEligible: true,
       pFill: 0.8,
       pWinGivenFill: 0.58,
       expectedNetR: 0.12,
@@ -178,6 +180,8 @@ test('同一状态内按费后净期望下界而不是热度分排序', () => {
     score: 78,
     opportunityScore: {
       state: 'READY',
+      shadowOnly: false,
+      productionEligible: true,
       pFill: 0.7,
       pWinGivenFill: 0.62,
       expectedNetR: 0.3,
@@ -216,6 +220,8 @@ test('校准后的负期望候选保留展示但降为本次不买', () => {
         formulaCandidate({
           opportunityScore: {
             state: 'READY',
+            shadowOnly: false,
+            productionEligible: true,
             pFill: 0.76,
             pWinGivenFill: 0.52,
             expectedNetR: -0.08,

@@ -24,7 +24,7 @@ import {
   readTailPickState,
 } from './tail_pick.js'
 import { fetchQuotes } from './quote.js'
-import { buildAccountRiskContext, allocateOpportunityBudget } from '../shared/accountRiskBudget.js'
+import { buildAccountRiskContext, allocateOpportunityBudget, accountRiskCodes } from '../shared/accountRiskBudget.js'
 import { analyzeOpportunityPortfolio } from '../shared/opportunityPortfolio.js'
 
 const SOURCE_READ_TIMEOUT_MS = 15_000
@@ -64,13 +64,13 @@ export async function readOpportunityRadarSnapshot({
   readQuotes = fetchQuotes,
   now = Date.now(),
 } = {}) {
-  const codes = [...new Set((accountData?.holding || []).map((item) => item.code))]
+  const codes = accountRiskCodes(accountData)
   const riskPromise = accountData
     ? withTimeout(Promise.resolve().then(() => readQuotes(codes)), '持仓报价', 5000)
       .catch(() => [])
       .then((quotes) => buildAccountRiskContext(
         accountData,
-        Object.fromEntries(quotes.map((quote) => [quote.code, quote])),
+        Object.fromEntries((Array.isArray(quotes) ? quotes : []).map((quote) => [quote.code, quote])),
         now,
       ))
     : Promise.resolve(null)
@@ -120,7 +120,9 @@ export async function readOpportunityRadarSnapshot({
   if (accountRisk) {
     radar.portfolios = Object.fromEntries(Object.entries(radar.lanes).map(
       ([lane, rows]) => [lane, allocateOpportunityBudget(
-        analyzeOpportunityPortfolio({ rows, holdings: accountRisk.exposures }),
+        analyzeOpportunityPortfolio({
+          rows, holdings: [...accountRisk.exposures, ...accountRisk.reservedExposures],
+        }),
         accountRisk,
       )],
     ))

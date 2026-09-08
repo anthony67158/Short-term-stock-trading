@@ -78,3 +78,16 @@ test('机会雷达聚合使用所鉴权账号的持仓与现金', async () => {
   assert.equal(result.portfolios.intraday.account.totalAssets, 100000)
   assert.ok(result.portfolios.intraday.account.breaker.holdingRiskAmount > 1000)
 })
+
+test('同一行业的待买预留与已有持仓合并计算集中度', () => {
+  const result = buildAccountRiskContext({
+    ...data,
+    executionPlans: [{
+      code: '600002', side: 'BUY', status: 'ARMED',
+      reservedCash: 21000, riskAmount: 100, targetLots: 10, remainingLots: 10,
+    }],
+  }, { ...quotes, '600002': { industry: '测试行业' } }, now)
+  assert.equal(result.reservedExposures[0].positionPct, 21)
+  assert.equal(result.breaker.metrics.maximumIndustryWeightPct, 31)
+  assert.equal(result.availableCash, 0)
+})

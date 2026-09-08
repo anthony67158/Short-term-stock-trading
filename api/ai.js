@@ -66,6 +66,7 @@ import {
   deriveShortHorizonActionPolicy,
 } from '../shared/shortHorizonTactical.js';
 import { applyPortfolioRiskPolicy } from '../shared/portfolioRiskPolicy.js';
+import { readAccountRiskContext } from './_portfolio.js';
 import {
   applyShortHorizonExitPolicy,
 } from '../shared/exitManagement.js';
@@ -2754,7 +2755,25 @@ export default async function handler(req, res) {
       result.knowledgeActionScore = scoreKnowledgeActionPlan(
         result.knowledgeActionPlan,
       );
-      const accountCircuitBreaker = evaluateAccountCircuitBreaker({
+      const accountRisk = accountAuth.account?.data
+        && /买入|加仓|试仓|试错/.test(String(result.action || result.stance || ''))
+        ? await readAccountRiskContext(accountAuth.account.data)
+        : null;
+      if (accountRisk) {
+        payload.account = {
+          ...payload.account,
+          totalAssets: accountRisk.totalAssets,
+          cash: accountRisk.cash,
+          position: accountRisk.positionPct,
+          stockWeight: accountRisk.exposures
+            .filter((item) => item.code === payload.code)
+            .reduce((sum, item) => sum + (item.positionPct || 0), 0),
+          pendingStockWeight: accountRisk.reservedExposures
+            .filter((item) => item.code === payload.code)
+            .reduce((sum, item) => sum + (item.positionPct || 0), 0),
+        };
+      }
+      const accountCircuitBreaker = accountRisk?.breaker || evaluateAccountCircuitBreaker({
         account: {
           ...(accountAuth.account?.data?.account || {}),
           ...(payload.account || {}),

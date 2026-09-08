@@ -436,6 +436,8 @@ test('校准后的费后期望下界为负时阻止新增风险', () => {
       ...payload,
       opportunityScore: {
         state: 'READY',
+        shadowOnly: false,
+        productionEligible: true,
         serverVerified: true,
         modelVersion: 'opportunity-score.20260907',
         pFill: 0.7,
@@ -811,6 +813,29 @@ test('账户剩余开放风险预算限制本次买入手数', () => {
   assert.ok(plan.quantity.lots > 0)
   assert.ok(plan.quantity.lots <= 2)
   assert.equal(plan.risk.maxLossAmount, 250)
+})
+
+test('单股计划同时扣除待买预留现金与现金储备，且不挤占同股待买仓位', () => {
+  const input = {
+    mode: 'buy_advice',
+    advice: { action: '立即买入', buyPrice: 10, stopPrice: 9, targetPrice: 12, planQtyNum: 20 },
+    payload: { ...payload, account: { ...payload.account, position: 0 } },
+    evidenceSnapshot: snapshot,
+    accountCircuitBreaker: {
+      allowRiskIncrease: true,
+      reservedBuyCash: 35000,
+      availableCashAfterReservations: 15000,
+    },
+    now,
+  }
+  const cashLimited = compileDecisionPlan(input)
+  assert.ok(cashLimited.quantity.lots > 0)
+  assert.ok(cashLimited.quantity.lots <= 4)
+  const stockLimited = compileDecisionPlan({
+    ...input,
+    payload: { ...payload, account: { ...payload.account, stockWeight: 10, pendingStockWeight: 10 } },
+  })
+  assert.equal(stockLimited.quantity.lots, 0)
 })
 
 test('历史费后净R下界为负时下一笔风险预算自动减半', () => {

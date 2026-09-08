@@ -319,8 +319,8 @@ function requiredMetric(value) {
 export function isExecutableOpportunityScore(value) {
   return value?.state === 'READY'
     && value.outOfDistribution !== true
-    && value.shadowOnly !== true
-    && value.productionEligible !== false
+    && value.shadowOnly === false
+    && value.productionEligible === true
 }
 
 export function normalizeOpportunityScoreResponse(

@@ -1,5 +1,4 @@
 import { computePortfolio } from './portfolioAccounting.js'
-import { portfolioExposureContext } from './portfolioExposure.js'
 import { evaluateAccountCircuitBreaker } from './accountCircuitBreaker.js'
 import { buildTradeExpectancy } from './tradeExpectancy.js'
 import { executionPrice, tradeFees } from './ashareStrategyExecution.js'
@@ -9,6 +8,20 @@ function finite(value) {
   if (value == null || value === '') return null
   const number = Number(value)
   return Number.isFinite(number) ? number : null
+}
+
+function pendingBuys(data) {
+  return (Array.isArray(data?.executionPlans) ? data.executionPlans : []).filter((plan) =>
+    plan.side === 'BUY'
+    && ['ARMED', 'ALERTED', 'USER_CONFIRMED', 'PARTIALLY_RECORDED'].includes(plan.status)
+    && Number(plan.reservedCash) > 0,
+  )
+}
+
+export function accountRiskCodes(data) {
+  return [...new Set([
+    ...(Array.isArray(data?.holding) ? data.holding : []), ...pendingBuys(data),
+  ].map((item) => item.code).filter((code) => /^\d{6}$/.test(String(code))))]
 }
 
 export function buildAccountRiskContext(data = {}, quotes = {}, now = Date.now()) {
@@ -50,11 +63,24 @@ export function buildAccountRiskContext(data = {}, quotes = {}, now = Date.now()
       concepts: holding.selectionOrigin?.concepts || [],
     }
   })
+  const reservedExposures = pendingBuys(data).map((plan) => ({
+    code: plan.code,
+    sectorCode: quotes[plan.code]?.industry || '',
+    positionPct: portfolio.totalAssets > 0
+      ? Number(plan.reservedCash) / portfolio.totalAssets * 100 : 0,
+    concepts: [],
+  }))
+  const industryWeights = new Map()
+  for (const item of [...exposures, ...reservedExposures]) {
+    if (!item.sectorCode) continue
+    industryWeights.set(item.sectorCode,
+      (industryWeights.get(item.sectorCode) || 0) + (item.positionPct || 0))
+  }
   const breaker = evaluateAccountCircuitBreaker({
     account: { ...data.account, totalAssets: portfolio.totalAssets, cash: portfolio.available },
     portfolio: {
       ...portfolio,
-      ...portfolioExposureContext(portfolio),
+      industryWeights: [...industryWeights].map(([industry, weight]) => ({ industry, weight })),
       holdingRiskAmount,
       unknownRiskCodes: [...unknownRiskCodes],
       stopReachedCodes: [...stopReachedCodes],
@@ -73,6 +99,7 @@ export function buildAccountRiskContext(data = {}, quotes = {}, now = Date.now()
     positionPct: portfolio.position,
     cash: portfolio.available,
     exposures,
+    reservedExposures,
     breaker,
     availableCash: complete && breaker.allowRiskIncrease
       ? Math.max(0, Math.min(
@@ -92,15 +119,22 @@ export function allocateOpportunityBudget(portfolio, context) {
   let cash = context.availableCash
   let risk = context.availableRisk
   const heldByCode = new Map()
-  for (const item of context.exposures) {
+  const heldByIndustry = new Map()
+  for (const item of [...context.exposures, ...(context.reservedExposures || [])]) {
     heldByCode.set(item.code, (heldByCode.get(item.code) || 0) + (item.positionPct || 0))
+    if (item.sectorCode) heldByIndustry.set(item.sectorCode,
+      (heldByIndustry.get(item.sectorCode) || 0) + (item.positionPct || 0))
   }
   const candidates = portfolio.candidates.map((row) => {
     const price = finite(row.entryPlan?.price)
     const stop = finite(row.exitPlan?.hardStopPrice)
     const target = finite(row.exitPlan?.takeProfitPrice ?? row.exitPlan?.targetPrice)
     const holdingPct = heldByCode.get(row.code) || 0
-    const capPct = Math.max(0, Math.min(row.positionPct || 0, 20 - holdingPct))
+    const industry = row.tags?.industry || row.sector?.name || ''
+    const capPct = Math.max(0, Math.min(
+      row.positionPct || 0, 20 - holdingPct,
+      30 - (heldByIndustry.get(industry) || 0),
+    ))
     const one = buildTradeExpectancy({
       action: 'BUY', referencePrice: price, stopPrice: stop,
       targetPrice: target, quantityLots: 1,
@@ -117,6 +151,8 @@ export function allocateOpportunityBudget(portfolio, context) {
     const loss = lots * (one?.lossAmount || 0)
     cash = Math.max(0, cash - amount)
     risk = Math.max(0, risk - loss)
+    if (industry && context.totalAssets > 0) heldByIndustry.set(industry,
+      (heldByIndustry.get(industry) || 0) + amount / context.totalAssets * 100)
     return {
       ...row,
       accountBudget: {
@@ -127,6 +163,7 @@ export function allocateOpportunityBudget(portfolio, context) {
         reason: lots > 0
           ? `预算最多${lots}手，约${Math.round(amount)}元；仍需到价复核`
           : context.breaker.blockers[0]?.message
+            || (row.portfolioState !== 'INCLUDED' ? row.portfolioReason : '')
             || (context.complete
               ? '现金、单票或组合风险预算不足一手'
               : '账户现金或持仓风险证据不完整'),

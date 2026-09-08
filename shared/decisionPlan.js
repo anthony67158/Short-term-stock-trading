@@ -590,7 +590,18 @@ export function compileDecisionPlan({
       requestedLots,
       referencePrice,
       stopPrice,
-      account,
+      account: {
+        ...account,
+        cash: Math.max(0, Math.min(
+          finite(account.cash) || 0,
+          finite(accountCircuitBreaker?.availableCashAfterReservations) ?? Infinity,
+        ) - account.totalAssets * 0.1),
+        stockWeight: (finite(account.stockWeight) || 0)
+          + (finite(account.pendingStockWeight) || 0),
+        position: (finite(account.position) || 0)
+          + (finite(accountCircuitBreaker?.reservedBuyCash) || 0)
+            / account.totalAssets * 100,
+      },
       market,
       slippageBps,
       highConfidence: payload.quant?.highConfSignal?.fired === true,
