@@ -28,6 +28,8 @@ qlib-service.tar.gz
 dsw_*_tmp.png
 .dbg/
 .trae/
+.codegraph/
+.cursor/
 debug-*.md
 _export_llm_keys.mjs
 尾盘选股/
