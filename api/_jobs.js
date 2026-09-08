@@ -294,9 +294,15 @@ export function reapOrphans(data, now = Date.now()) {
   );
   for (const j of allAdviceJobs(data)) {
     const leaseExpired = isOrphan(j, now);
+    const recentlyProgressed = (
+      j?.status === 'running'
+      && Number(j.progressAt) > 0
+      && now - Number(j.progressAt) <= 45_000
+    );
     const abandonedByWorker = (
       j?.status === 'running'
       && workerUnavailable
+      && !recentlyProgressed
     );
     if (leaseExpired || abandonedByWorker) {
       const workerLostBeforeLease = abandonedByWorker && !leaseExpired;
@@ -543,6 +549,40 @@ export function requeueAdvicePreparationFailure(
   job.reasoning = '';
   job.quant = null;
   job.phase = '准备阶段中断，正在自动重试';
+  job.progressAt = now;
+  return job;
+}
+
+export function requeueAdvicePreOutputFailure(
+  data,
+  code,
+  now = Date.now(),
+  role = '',
+  jobId = '',
+) {
+  const job = findAdviceJob(data, code, { role, jobId });
+  if (
+    !job
+    || job.status !== 'running'
+    || (Number(job.preOutputRetries) || 0) >= 1
+  ) return null;
+  job.status = 'queued';
+  job.stage = 'queued';
+  job.resourceRole = adviceJobRole(job);
+  job.resourceUnits = 1;
+  job.preOutputRetries =
+    (Number(job.preOutputRetries) || 0) + 1;
+  job.attempts = Math.max(0, (Number(job.attempts) || 1) - 1);
+  job.startedAt = 0;
+  job.finishedAt = 0;
+  job.leaseUntil = 0;
+  job.error = '';
+  job.model = '';
+  job.endpoint = '';
+  job.sources = [];
+  job.reasoning = '';
+  job.quant = null;
+  job.phase = '模型端点尚未响应，正在换线重试完整计划';
   job.progressAt = now;
   return job;
 }

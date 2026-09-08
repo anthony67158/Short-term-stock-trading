@@ -383,7 +383,8 @@ export async function poolFetch(config, path, {
           : Number(timeoutMs) || 30000,
       ),
     );
-    const t = setTimeout(() => {
+    let headerTimer = null;
+    const checkHeaderTimeout = () => {
       const idleAlternative = roleEps.some((candidate) => {
         if (
           tried.has(candidate.id)
@@ -392,11 +393,20 @@ export async function poolFetch(config, path, {
         return h(candidate.id).inflight === 0;
       });
       // 所有备用端点都在服务其它任务时，切换只会把请求塞到繁忙端点，
-      // 同时丢掉当前已排队的上游请求。此时继续等待当前端点，由总预算兜底。
-      if (i + 1 >= tries || !idleAlternative) return;
+      // 同时丢掉当前已排队的上游请求。继续等待，但在备用端点释放后
+      // 重新检查，避免把已恢复的冗余线路闲置到整题超时。
+      if (i + 1 >= tries) return;
+      if (!idleAlternative) {
+        headerTimer = setTimeout(
+          checkHeaderTimeout,
+          Math.min(1000, Math.max(250, Math.floor(headerBudget / 4))),
+        );
+        return;
+      }
       headerTimedOut = true;
       ctrl.abort();
-    }, headerBudget);
+    };
+    headerTimer = setTimeout(checkHeaderTimeout, headerBudget);
     let resp;
     try {
       resp = await fetch(`${ep.baseUrl}${path}`, {
@@ -405,7 +415,7 @@ export async function poolFetch(config, path, {
         body: typeof sendBody === 'string' ? sendBody : JSON.stringify(sendBody || {}),
       });
     } catch (e) { resp = { __err: e }; }
-    clearTimeout(t);
+    clearTimeout(headerTimer);
     const errored = resp && resp.__err;
     const isAbort = errored && resp.__err && resp.__err.name === 'AbortError';
     const bad5xx = resp && !resp.__err && !resp.ok && resp.status >= 500;

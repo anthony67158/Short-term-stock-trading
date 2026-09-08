@@ -24,9 +24,11 @@
 
 import { applyCors, preflight } from './_lib.js';
 import {
+  acquireAdviceWorkerLease,
   accountCredentialMatches,
   isAccountActive,
   readAdviceRuntimeState,
+  releaseAdviceWorkerLease,
   writeAdviceBatchCancellation,
   writeAdviceRuntimeState,
   writeAdviceRuntimeUpdate,
@@ -45,8 +47,9 @@ import {
   mergeAdviceBatchCancellations,
   acquireWorkerLock, renewWorkerLock, renewLease, releaseWorkerLock, workerHeldByOther, updateJobProgress,
   adviceJobRole, allAdviceJobs, advisorAdmission, findAdviceJob,
-  resourcePatchForJobProgress, reviewJobsOf, selectStartableJobs,
-  requeueAdvicePreparationFailure,
+  resourcePatchForJobProgress, reviewJobsOf,
+  selectStartableJobs,
+  requeueAdvicePreOutputFailure, requeueAdvicePreparationFailure,
 } from './_jobs.js';
 import { ensureConfig, currentConfig } from './_llm_config.js';
 import { endpointCountForRole } from './_llm_pool.js';
@@ -838,6 +841,20 @@ export function adviceWorkerStartWindowMs(deepWork = false) {
   )
 }
 
+export function adviceWorkerStartDeadline({
+  now = Date.now(),
+  leaseExpiresAt = 0,
+  deepWork = false,
+} = {}) {
+  const current = Number(now) || Date.now();
+  const localDeadline = current + adviceWorkerStartWindowMs(deepWork);
+  const leaseDeadline = Number(leaseExpiresAt)
+    - adviceJobDeadlineMs(deepWork);
+  return leaseDeadline > current
+    ? Math.min(localDeadline, leaseDeadline)
+    : current;
+}
+
 export function withAdviceJobDeadline(
   promise,
   {
@@ -1079,6 +1096,7 @@ async function genOne({
     : baseGeneration;
   let streamedReasoning = '';
   let adviceFailure = '';
+  let adviceRequestError = null;
   let usedTerminalFallback = false;
   const adviceRequest = reviewRuntime?.expired
     ? Promise.resolve(null)
@@ -1105,6 +1123,13 @@ async function genOne({
   const adviceP = adviceRequest
     .then((r) => {
       adviceFailure = adviceFailureReason(r, mode);
+      if (r?.retryableBeforeOutput === true) {
+        const error = new Error(
+          adviceFailure || '模型端点尚未响应',
+        );
+        error.code = 'ADVICE_PRE_OUTPUT_FAILURE';
+        throw error;
+      }
       return adviceFailure
         ? null
         : {
@@ -1121,9 +1146,10 @@ async function genOne({
           };
     })
     .catch((error) => {
+      adviceRequestError = error;
       adviceFailure = error?.name === 'AbortError'
         ? '军师生成已中断'
-        : '军师生成请求异常';
+        : String(error?.message || '军师生成请求异常');
       return null;
     });
   let adviceResp = await adviceP;
@@ -1148,6 +1174,10 @@ async function genOne({
       reviewReceipt: null,
     };
   }
+  if (
+    !adviceResp
+    && adviceRequestError?.code === 'ADVICE_PRE_OUTPUT_FAILURE'
+  ) throw adviceRequestError;
   const result = quantResultFromAdviceResponse(adviceResp, priceHint);
 
   const advice = adviceResp && adviceResp.advice
@@ -1662,12 +1692,17 @@ async function persistServer(nick, workingAcc) {
   return fresh;
 }
 
+export function shouldCompactAdviceAccountAfterDrain(data) {
+  return !hasRunnableAdviceWork(data);
+}
+
 async function releaseDrainLock(
   nick,
   acc,
   myId,
   concurrency,
   recentAdviceUpdates = [],
+  workerLease = null,
 ) {
   const workingData = acc.data || (acc.data = {});
   releaseWorkerLock(workingData, myId);
@@ -1681,6 +1716,14 @@ async function releaseDrainLock(
     workingData,
     recentAdviceUpdates,
   ).catch(() => {});
+  if (workerLease?.acquired) {
+    const released = await releaseAdviceWorkerLease(workerLease)
+      .catch(() => false);
+    if (released) workerLease.acquired = false;
+  }
+  // 后续队列由下一 Worker 接手。不要在租约内压实十余 MiB 的账号主快照，
+  // 否则每一波模型完成后都会把空闲 advisor 阻塞几十秒。
+  if (!shouldCompactAdviceAccountAfterDrain(workingData)) return;
 
   try {
     const fresh = (await readAccount(nick)) || acc;
@@ -1704,6 +1747,40 @@ async function releaseDrainLock(
 // 返回 { drained(bool), ok, fail } 或 { skipped:'locked' }。
 async function drainAccount(nick, initialAcc) {
   const myId = `w_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const workerLease = await acquireAdviceWorkerLease(nick, {
+    owner: myId,
+  });
+  if (!workerLease.acquired) return { skipped: 'locked' };
+  let outcome;
+  try {
+    outcome = await drainAccountWithLease(
+      nick,
+      initialAcc,
+      myId,
+      workerLease,
+    );
+  } finally {
+    await releaseAdviceWorkerLease(workerLease).catch(() => false);
+  }
+  const {
+    continuationNeeded = false,
+    ...result
+  } = outcome || {};
+  let continued = false;
+  if (continuationNeeded) {
+    try {
+      continued = !!(await scheduleAdviceWorker(nick))?.accepted;
+    } catch { /* 5分钟恢复定时器仍会兜底 */ }
+  }
+  return { ...result, continued };
+}
+
+async function drainAccountWithLease(
+  nick,
+  initialAcc,
+  myId,
+  workerLease,
+) {
   let acc = initialAcc || (await readAccount(nick));
   if (!isAccountActive(acc)) return { drained: false, ok: 0, fail: 0 };
   let data = acc.data || (acc.data = {});
@@ -1776,9 +1853,12 @@ async function drainAccount(nick, initialAcc) {
   let ok = 0, fail = 0;
   // 只在剩余 FC 时间足以覆盖一只完整任务时补位，避免空闲 advisor
   // 因固定短窗口闲置，也避免新任务撞上 600 秒运行时硬截止。
-  const startDeadline = Date.now() + adviceWorkerStartWindowMs(
-    hasDeepAdviceWork(data),
-  );
+  const deepWork = hasDeepAdviceWork(data);
+  const startDeadline = adviceWorkerStartDeadline({
+    now: Date.now(),
+    leaseExpiresAt: workerLease.expiresAt,
+    deepWork,
+  });
   const progressSaver = createAdviceProgressSaveScheduler(saveWorking);
   const queueProgressSave = (force = false) =>
     progressSaver.schedule(force);
@@ -2133,7 +2213,18 @@ async function drainAccount(nick, initialAcc) {
           ].slice(0, 500);
         }
       } else {
-        const preparationRetry = done.err
+        const preOutputRetry = (
+          done.err?.code === 'ADVICE_PRE_OUTPUT_FAILURE'
+        )
+          ? requeueAdvicePreOutputFailure(
+              d,
+              done.code,
+              Date.now(),
+              done.role,
+              done.jobId,
+            )
+          : null;
+        const preparationRetry = !preOutputRetry && done.err
           ? requeueAdvicePreparationFailure(
               d,
               done.code,
@@ -2142,8 +2233,11 @@ async function drainAccount(nick, initialAcc) {
               done.jobId,
             )
           : null;
-        if (preparationRetry?.status === 'queued') {
-          immediateRequeues.add(String(done.jobId || ''));
+        const retry = preOutputRetry || preparationRetry;
+        if (retry?.status === 'queued') {
+          if (!preOutputRetry) {
+            immediateRequeues.add(String(done.jobId || ''));
+          }
         } else {
           failJob(
             d,
@@ -2195,15 +2289,15 @@ async function drainAccount(nick, initialAcc) {
       myId,
       CONC,
       [...recentRuntimeUpdates.values()],
+      workerLease,
     );
   }
-  let continued = false;
-  if (hasRunnableAdviceWork(acc.data)) {
-    try {
-      continued = !!(await scheduleAdviceWorker(nick))?.accepted;
-    } catch { /* 5分钟恢复定时器仍会兜底 */ }
-  }
-  return { drained: true, ok, fail, continued };
+  return {
+    drained: true,
+    ok,
+    fail,
+    continuationNeeded: hasRunnableAdviceWork(acc.data),
+  };
 }
 
 // 排入某账号的"过期/缺建议"任务(定时兜底 & 全量刷新用)。scope 过滤 hold/watch/all。

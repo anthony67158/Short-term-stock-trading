@@ -289,7 +289,7 @@ export function buildScheduledReviewGateResponse({
 }
 
 export function resolveAIBudget(reasoningOn, requestedMs) {
-  const fallback = reasoningOn ? 180000 : 150000;
+  const fallback = reasoningOn ? 540000 : 150000;
   if (requestedMs == null || !Number.isFinite(Number(requestedMs))) return fallback;
   return Math.max(30000, Math.min(fallback, Math.trunc(Number(requestedMs))));
 }
@@ -299,11 +299,23 @@ export function resolveReasoningMode(configuredReasoning, fastMode = false, forc
   return !!configuredReasoning && !fastMode;
 }
 
+export function shouldBuildAdvisorFallback({
+  isAdvisor = false,
+  generationProfile = '',
+  ok = true,
+} = {}) {
+  return (
+    isAdvisor
+    && ok === false
+    && generationProfile !== 'DEEP'
+  );
+}
+
 export function advisorGenerationPlan({
   remainingMs = 0,
   reasoning = false,
 } = {}) {
-  const cap = reasoning ? 150000 : 120000
+  const cap = reasoning ? 510000 : 120000
   return {
     timeoutMs: Math.max(
       8000,
@@ -1200,9 +1212,12 @@ export default async function handler(req, res) {
       const snapshot = ensureEvidenceSnapshot();
       let finalized = obj;
       if (
-        isAdvisorMode(mode)
+        shouldBuildAdvisorFallback({
+          isAdvisor: isAdvisorMode(mode),
+          generationProfile: payload.generationProfile,
+          ok: obj?.ok,
+        })
         && payload.code
-        && obj?.ok === false
       ) {
         const { error, ...rest } = obj;
         const fallback = buildFallbackDecisionAdvice({
@@ -2328,7 +2343,9 @@ export default async function handler(req, res) {
         timeoutMs: llmTimeout,
         headerTimeoutMs: useRole === 'review'
           ? 12000
-          : useReasoning ? llmTimeout : 22000,
+          : useReasoning
+            ? Math.min(llmTimeout, 45000)
+            : 22000,
         reasoning: useReasoning,
         reasoningEffort: 'medium',
         forceNoReason: fastMode,
@@ -2349,6 +2366,7 @@ export default async function handler(req, res) {
             ? '分析生成超时，本次已结束且不会重复生成。'
             : `网络异常：${String(resp.__err.message || resp.__err)}`,
           {
+            retryableBeforeOutput: true,
             meta: collectedMeta,
             news: newsRefs,
           },
@@ -2358,6 +2376,7 @@ export default async function handler(req, res) {
         done(false);
         return finishGenerationFailure(`LLM ${resp.status}`, {
           detail: errText.slice(0, 200),
+          retryableBeforeOutput: true,
           meta: collectedMeta,
         });
       } else {
@@ -2406,7 +2425,9 @@ export default async function handler(req, res) {
         timeoutMs: llmTimeout,
         headerTimeoutMs: useRole === 'review'
           ? 12000
-          : useReasoning ? llmTimeout : 22000,
+          : useReasoning
+            ? Math.min(llmTimeout, 45000)
+            : 22000,
         reasoning: useReasoning,
         reasoningEffort: 'medium',
         forceNoReason: fastMode,
@@ -2430,6 +2451,7 @@ export default async function handler(req, res) {
             ? '分析生成超时，本次已结束且不会重复生成。'
             : `网络异常：${String(resp.__err.message || resp.__err)}`,
           {
+            retryableBeforeOutput: true,
             meta: collectedMeta,
             news: newsRefs,
           },
@@ -2441,6 +2463,7 @@ export default async function handler(req, res) {
         const errText = await resp.text();
         return finishGenerationFailure(`LLM ${resp.status}`, {
           detail: errText.slice(0, 200),
+          retryableBeforeOutput: true,
           meta: collectedMeta,
         });
       }

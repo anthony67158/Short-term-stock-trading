@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import {
   adviceRuntimeUpdateFromData,
   adviceJobDeadlineMs,
+  adviceWorkerStartDeadline,
   adviceWorkerStartWindowMs,
   adviceFailureReason,
   adviceTradeStateMatches,
@@ -21,6 +22,7 @@ import {
   quantResultFromAdviceResponse,
   requeueAdviceForTradeChange,
   reviewEventMatchesCurrentAdvice,
+  shouldCompactAdviceAccountAfterDrain,
   startJsonHeartbeat,
   terminalReviewNotification,
   waitForTriggeredReviewMonitoring,
@@ -517,7 +519,7 @@ test('观察价复核持续更新观察进度后才进入证据采集', async ()
   assert.equal(progress.at(-1).remainingMs, 0)
 })
 
-test('完整深度任务有独立总时限并在超时后释放执行资源', async () => {
+test('完整深度任务使用FC可用窗口并在硬截止后释放资源', async () => {
   let aborted = false
   await assert.rejects(
     withAdviceJobDeadline(
@@ -531,7 +533,8 @@ test('完整深度任务有独立总时限并在超时后释放执行资源', as
   )
 
   assert.equal(aborted, true)
-  assert.ok(adviceJobDeadlineMs(true) < 240000)
+  assert.equal(adviceJobDeadlineMs(true), 583000)
+  assert.ok(adviceJobDeadlineMs(true) < 600000)
   assert.ok(adviceJobDeadlineMs(false) < 110000)
   assert.equal(adviceJobDeadlineMs(false, {
     kind: 'price-review',
@@ -545,12 +548,49 @@ test('完整深度任务有独立总时限并在超时后释放执行资源', as
   }, 1000) < 110000)
 })
 
-test('深度Worker窗口覆盖一轮完整任务并允许空闲槽位立即补位', () => {
+test('深度Worker只在启动窗口内接收首批完整任务', () => {
   assert.equal(adviceWorkerStartWindowMs(false), 300000)
-  assert.equal(adviceWorkerStartWindowMs(true), 300000)
+  assert.equal(adviceWorkerStartWindowMs(true), 40000)
   assert.ok(
-    adviceWorkerStartWindowMs(true) > adviceJobDeadlineMs(true),
+    adviceWorkerStartWindowMs(true) < adviceJobDeadlineMs(true),
   )
+})
+
+test('Worker只在原子租约剩余时间足够完成整只任务时补位', () => {
+  const now = 1000
+  const leaseExpiresAt = now + 590000
+  const deadline = adviceWorkerStartDeadline({
+    now,
+    leaseExpiresAt,
+    deepWork: true,
+  })
+
+  assert.ok(deadline > now)
+  assert.ok(
+    leaseExpiresAt - deadline
+      >= adviceJobDeadlineMs(true),
+  )
+})
+
+test('后续任务仍排队时跳过整账号压实并立即交给下一Worker', () => {
+  assert.equal(shouldCompactAdviceAccountAfterDrain({
+    jobs: {
+      '600000': {
+        id: 'queued-job',
+        code: '600000',
+        status: 'queued',
+      },
+    },
+  }), false)
+  assert.equal(shouldCompactAdviceAccountAfterDrain({
+    jobs: {
+      '600000': {
+        id: 'done-job',
+        code: '600000',
+        status: 'done',
+      },
+    },
+  }), true)
 })
 
 test('服务端进程内调用完成后立即清理长超时与中止监听', async () => {
@@ -666,6 +706,9 @@ test('题材量化分和账户时间戳更新不得把深度任务重新排队',
       industry: '专用设备',
       qScore: 55,
       qAt: 1000,
+      planReason: '上一版自动建议',
+      sl: 12,
+      tp: 14,
     }],
     closed: [],
     account: {
@@ -690,6 +733,12 @@ test('题材量化分和账户时间戳更新不得把深度任务重新排队',
       industry: '专用机械',
       qScore: 58,
       qAt: 2000,
+      planReason: '同批另一只股票生成后更新了建议摘要',
+      reasonManual: false,
+      sl: 11.8,
+      slManual: false,
+      tp: 14.2,
+      tpManual: false,
     }],
     account: {
       ...source.account,
@@ -699,6 +748,40 @@ test('题材量化分和账户时间戳更新不得把深度任务重新排队',
   }
 
   assert.equal(adviceTradeStateMatches(source, latest), true)
+})
+
+test('真实持仓与人工风险计划变化仍会让旧深度建议失效', () => {
+  const source = {
+    holding: [{
+      id: 'holding-1',
+      code: '003036',
+      qty: 1,
+      buyPrice: 12.3,
+      buyFee: 5,
+      sl: 11.8,
+      slManual: true,
+      tp: 14.2,
+      tpManual: true,
+    }],
+    closed: [],
+    account: { cash: 50000 },
+    executionPlans: [],
+  }
+
+  assert.equal(adviceTradeStateMatches(source, {
+    ...source,
+    holding: [{
+      ...source.holding[0],
+      qty: 2,
+    }],
+  }), false)
+  assert.equal(adviceTradeStateMatches(source, {
+    ...source,
+    holding: [{
+      ...source.holding[0],
+      sl: 11.6,
+    }],
+  }), false)
 })
 
 test('交易变化导致的旧建议不消耗重试次数并按最新账本重新排队', () => {
@@ -1021,8 +1104,8 @@ test('Worker合并后采用最新活跃任务的批次且保留旧任务运行�
 })
 
 test('批量任务可收紧单股预算但不能突破安全边界', () => {
-  assert.equal(resolveAIBudget(true, 210000), 180000)
-  assert.equal(resolveAIBudget(true, 999999), 180000)
+  assert.equal(resolveAIBudget(true, 210000), 210000)
+  assert.equal(resolveAIBudget(true, 999999), 540000)
   assert.equal(resolveAIBudget(true, 1000), 30000)
   assert.equal(resolveAIBudget(false, null), 150000)
 })
@@ -1048,10 +1131,10 @@ test('军师把剩余预算交给唯一模型调用且禁止响应后的整轮�
     timeoutMs: 142500,
   })
   assert.deepEqual(advisorGenerationPlan({
-    remainingMs: 175000,
+    remainingMs: 535000,
     reasoning: true,
   }), {
-    timeoutMs: 150000,
+    timeoutMs: 510000,
   })
 })
 

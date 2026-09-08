@@ -353,6 +353,63 @@ test('备用端点忙碌时保留当前请求而不是切换后重复排队', as
   }
 })
 
+test('等待响应头期间备用端点释放后在总预算内切换', async () => {
+  resetPoolHealthForTests()
+  const config = {
+    roleEndpoints: {
+      advisor: [{
+        baseUrl: 'https://advisor-1.example/v1',
+        apiKey: 'key-1',
+        model: 'model-1',
+        enabled: true,
+      }, {
+        baseUrl: 'https://advisor-2.example/v1',
+        apiKey: 'key-2',
+        model: 'model-2',
+        enabled: true,
+      }],
+    },
+  }
+  markStart('advisor-2')
+  const originalFetch = globalThis.fetch
+  const urls = []
+  globalThis.fetch = async (url, options) => {
+    urls.push(url)
+    if (urls.length === 1) {
+      await new Promise((resolve) => setTimeout(resolve, 700))
+      if (options.signal?.aborted) {
+        const error = new Error('aborted')
+        error.name = 'AbortError'
+        throw error
+      }
+    }
+    return new Response('{}', { status: 200 })
+  }
+  const releaseAlternative = setTimeout(
+    () => markSuccess('advisor-2'),
+    320,
+  )
+  try {
+    const routed = await poolFetch(config, '/chat/completions', {
+      body: { model: 'model', stream: true },
+      role: 'advisor',
+      signal: new AbortController().signal,
+      timeoutMs: 1000,
+      headerTimeoutMs: 100,
+      deferSuccess: true,
+    }, 2)
+
+    assert.equal(routed.resp.ok, true)
+    assert.equal(routed.endpoint.id, 'advisor-2')
+    assert.equal(urls.length, 2)
+    routed.releaseRole()
+  } finally {
+    clearTimeout(releaseAlternative)
+    globalThis.fetch = originalFetch
+    resetPoolHealthForTests()
+  }
+})
+
 test('外层请求取消时不得把同一题切换到备用端点', async () => {
   resetPoolHealthForTests()
   const config = {

@@ -63,6 +63,7 @@ const DAILY_HISTORY_DAYS = 90;
 const ACCOUNT_WRITE_LOCK_TTL_MS = 60 * 1000;
 const ACCOUNT_WRITE_LOCK_ATTEMPTS = 6;
 const ACCOUNT_WRITE_LOCK_RETRY_BASE_MS = 25;
+export const ADVICE_WORKER_LEASE_TTL_MS = 590 * 1000;
 export const isAccountActive = (account) => !!account && account.status !== 'deactivated';
 export function deactivateAccount(account, now = Date.now()) {
   return {
@@ -459,6 +460,10 @@ const adviceRuntimePrefixOf = (nick) => `${prefixOf(nick)}runtime/advice/`;
 const adviceRuntimeStatePathOf = (nick) => `${prefixOf(nick)}runtime/state.json`;
 const adviceRuntimeStateWriteLockPathOf = (nick) =>
   `${prefixOf(nick)}runtime/state.write.lock`;
+const adviceWorkerLeasePathOf = (nick) =>
+  `${prefixOf(nick)}runtime/worker.lease`;
+const adviceWorkerLeaseGuardPathOf = (nick) =>
+  `${prefixOf(nick)}runtime/worker-lease.write.lock`;
 const adviceBatchCancellationPathOf = (nick, batchId) =>
   `${prefixOf(nick)}runtime/cancellations/${
     sha(`batch:${String(batchId || '')}`)
@@ -499,6 +504,176 @@ export async function readAdviceRuntimeState(
     );
   }
   return runtime;
+}
+
+function isObjectAlreadyExists(error) {
+  return error?.status === 409
+    || error?.statusCode === 409
+    || [
+      'FileAlreadyExists',
+      'ObjectAlreadyExists',
+    ].includes(error?.code);
+}
+
+async function claimAdviceWorkerLeaseObject(
+  nick,
+  lease,
+  storage,
+) {
+  try {
+    await storage.put(
+      adviceWorkerLeasePathOf(nick),
+      JSON.stringify(lease),
+      {
+        contentType: 'application/json',
+        cacheControlMaxAge: 0,
+        forbidOverwrite: true,
+      },
+    );
+    return { ...lease, acquired: true };
+  } catch (error) {
+    if (!isObjectAlreadyExists(error)) throw error;
+    return { ...lease, acquired: false };
+  }
+}
+
+async function acquireAdviceWorkerLeaseGuard(
+  nick,
+  storage,
+) {
+  try {
+    return await acquireObjectWriteLock(
+      adviceWorkerLeaseGuardPathOf(nick),
+      storage,
+    );
+  } catch (error) {
+    if (error?.status === 409) return null;
+    throw error;
+  }
+}
+
+export async function acquireAdviceWorkerLease(
+  nick,
+  {
+    owner = randomUUID(),
+    now = Date.now(),
+    ttlMs = ADVICE_WORKER_LEASE_TTL_MS,
+  } = {},
+  storage = defaultStorage,
+) {
+  const requestedAt = Number(now) || Date.now();
+  const lease = {
+    owner: String(owner || randomUUID()),
+    acquiredAt: requestedAt,
+    expiresAt: requestedAt + Math.max(1000, Number(ttlMs) || 0),
+  };
+  const claimed = await claimAdviceWorkerLeaseObject(
+    nick,
+    lease,
+    storage,
+  );
+  if (claimed.acquired) {
+    return {
+      ...claimed,
+      nick,
+      pathname: adviceWorkerLeasePathOf(nick),
+    };
+  }
+
+  const current = await storage.readJson(
+    adviceWorkerLeasePathOf(nick),
+  ).catch(() => null);
+  if (!current || Number(current.expiresAt) > requestedAt) {
+    return {
+      ...lease,
+      acquired: false,
+      nick,
+      pathname: adviceWorkerLeasePathOf(nick),
+      currentOwner: String(current?.owner || ''),
+      currentExpiresAt: Number(current?.expiresAt) || 0,
+    };
+  }
+
+  const releaseGuard = await acquireAdviceWorkerLeaseGuard(
+    nick,
+    storage,
+  );
+  if (!releaseGuard) return {
+    ...lease,
+    acquired: false,
+    nick,
+    pathname: adviceWorkerLeasePathOf(nick),
+  };
+  try {
+    const latest = await storage.readJson(
+      adviceWorkerLeasePathOf(nick),
+    ).catch(() => null);
+    if (
+      latest
+      && (
+        latest.owner !== current.owner
+        || Number(latest.expiresAt) !== Number(current.expiresAt)
+        || Number(latest.expiresAt) > requestedAt
+      )
+    ) return {
+      ...lease,
+      acquired: false,
+      nick,
+      pathname: adviceWorkerLeasePathOf(nick),
+    };
+    if (latest) {
+      await storage.del(adviceWorkerLeasePathOf(nick));
+    }
+    const reclaimed = await claimAdviceWorkerLeaseObject(
+      nick,
+      lease,
+      storage,
+    );
+    return {
+      ...reclaimed,
+      nick,
+      pathname: adviceWorkerLeasePathOf(nick),
+    };
+  } finally {
+    await releaseGuard();
+  }
+}
+
+export async function releaseAdviceWorkerLease(
+  lease,
+  storage = defaultStorage,
+) {
+  if (!lease?.acquired || !lease?.nick) return false;
+  const nick = lease.nick;
+  if (!nick) return false;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const releaseGuard = await acquireAdviceWorkerLeaseGuard(
+      nick,
+      storage,
+    );
+    if (!releaseGuard) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, 25 * (attempt + 1))
+      );
+      continue;
+    }
+    try {
+      const current = await storage.readJson(
+        adviceWorkerLeasePathOf(nick),
+      );
+      if (current?.owner !== lease.owner) return false;
+      await storage.del(adviceWorkerLeasePathOf(nick));
+      return true;
+    } catch (error) {
+      if (attempt >= 2) throw error;
+      await new Promise((resolve) =>
+        setTimeout(resolve, 25 * (attempt + 1))
+      );
+    } finally {
+      await releaseGuard();
+    }
+  }
+  return false;
 }
 
 function runtimeStamp(value) {

@@ -44,9 +44,19 @@ function canonicalAdviceState(value) {
   if (!value || typeof value !== 'object') return value
   const next = {}
   for (const key of Object.keys(value).sort()) {
+    const inactiveManualFlag = (
+      ['slManual', 'tpManual', 'reasonManual'].includes(key)
+      && value[key] !== true
+    )
+    const autoManagedAdviceField = (
+      (key === 'sl' && value.slManual !== true)
+      || (key === 'tp' && value.tpManual !== true)
+      || (key === 'planReason' && value.reasonManual !== true)
+    )
     if (key === 'updatedAt' || ADVICE_VOLATILE_FIELDS.has(key)) {
       continue
     }
+    if (inactiveManualFlag || autoManagedAdviceField) continue
     next[key] = canonicalAdviceState(value[key])
   }
   return next

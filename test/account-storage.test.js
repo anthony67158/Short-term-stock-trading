@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
   accountClientSnapshot,
+  acquireAdviceWorkerLease,
   accountSyncDelta,
   applyClientAccountSave,
   deactivateAccount,
@@ -12,6 +13,7 @@ import {
   mergeAdviceRuntimeState,
   readAdviceRuntimeState,
   readAccount,
+  releaseAdviceWorkerLease,
   sha,
   writeAdviceBatchCancellation,
   writeAdviceRuntimeState,
@@ -130,6 +132,82 @@ function fakeStorage({ rejectIfMatch = false } = {}) {
     },
   }
 }
+
+test('同一账号并发唤醒时只有一个FC Worker取得原子租约', async () => {
+  const storage = fakeStorage()
+  const [first, second] = await Promise.all([
+    acquireAdviceWorkerLease('Worker租约账号', {
+      owner: 'worker-a',
+      now: 1000,
+      ttlMs: 10_000,
+    }, storage),
+    acquireAdviceWorkerLease('Worker租约账号', {
+      owner: 'worker-b',
+      now: 1000,
+      ttlMs: 10_000,
+    }, storage),
+  ])
+
+  assert.equal(
+    [first, second].filter((lease) => lease.acquired).length,
+    1,
+  )
+  assert.equal(
+    [first, second].filter((lease) => !lease.acquired).length,
+    1,
+  )
+})
+
+test('过期Worker租约可接管且旧Worker不能删除新租约', async () => {
+  const storage = fakeStorage()
+  const first = await acquireAdviceWorkerLease('Worker接管账号', {
+    owner: 'worker-old',
+    now: 1000,
+    ttlMs: 1000,
+  }, storage)
+  const next = await acquireAdviceWorkerLease('Worker接管账号', {
+    owner: 'worker-new',
+    now: 2001,
+    ttlMs: 1000,
+  }, storage)
+
+  assert.equal(first.acquired, true)
+  assert.equal(next.acquired, true)
+  assert.equal(
+    await releaseAdviceWorkerLease(first, storage),
+    false,
+  )
+  assert.equal(
+    await releaseAdviceWorkerLease(next, storage),
+    true,
+  )
+})
+
+test('Worker租约释放遇到短暂OSS删除失败时自动重试', async () => {
+  const storage = fakeStorage()
+  const lease = await acquireAdviceWorkerLease('Worker释放重试账号', {
+    owner: 'worker-retry',
+    now: 1000,
+    ttlMs: 10_000,
+  }, storage)
+  const originalDel = storage.del.bind(storage)
+  let leaseDeleteAttempts = 0
+  storage.del = async (pathname) => {
+    if (
+      String(pathname).endsWith('/runtime/worker.lease')
+      && leaseDeleteAttempts++ === 0
+    ) {
+      throw new Error('temporary OSS failure')
+    }
+    return originalDel(pathname)
+  }
+
+  assert.equal(
+    await releaseAdviceWorkerLease(lease, storage),
+    true,
+  )
+  assert.equal(leaseDeleteAttempts, 2)
+})
 
 test('列举账号时OSS故障必须向上抛出而不是伪装成空账号', async () => {
   await assert.rejects(

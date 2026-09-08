@@ -11,6 +11,7 @@ import {
   leaseJob,
   needsWorkerDispatch,
   reapOrphans,
+  requeueAdvicePreOutputFailure,
   requeueAdvicePreparationFailure,
   updateJobProgress,
 } from '../api/_jobs.js'
@@ -288,6 +289,24 @@ test('Worker锁仍有效时不得提前回收运行任务', () => {
   assert.equal(data.jobs['600000'].attempts, 1)
 })
 
+test('Worker锁快照暂时缺失但近期进度仍在时不得误回收', () => {
+  const data = {}
+  enqueueJob(data, {
+    code: '600000',
+    mode: 'buy_advice',
+    deepMode: true,
+  }, 1000)
+  leaseJob(data, '600000', 1100)
+  updateJobProgress(data, '600000', {
+    stage: 'llm',
+    phase: '模型仍在完整研判',
+  }, 1800)
+
+  assert.equal(reapOrphans(data, 2000), 0)
+  assert.equal(data.jobs['600000'].status, 'running')
+  assert.equal(data.jobs['600000'].startedAt, 1100)
+})
+
 test('模型调用前的准备故障只自动恢复一次且不消耗生成次数', () => {
   const data = {}
   enqueueJob(data, {
@@ -316,6 +335,44 @@ test('模型调用前的准备故障只自动恢复一次且不消耗生成次�
 
   leaseJob(data, '600000', 1400, 'advisor', job.id)
   const second = requeueAdvicePreparationFailure(
+    data,
+    '600000',
+    1500,
+    'advisor',
+    job.id,
+  )
+  assert.equal(second, null)
+  assert.equal(data.jobs['600000'].status, 'running')
+})
+
+test('模型无响应头时只换线重试一次完整生成', () => {
+  const data = {}
+  enqueueJob(data, {
+    code: '600000',
+    mode: 'buy_advice',
+    deepMode: true,
+  }, 1000)
+  const job = leaseJob(data, '600000', 1100)
+  updateJobProgress(data, '600000', {
+    stage: 'llm',
+    endpoint: 'advisor-1',
+  }, 1200)
+
+  const recovered = requeueAdvicePreOutputFailure(
+    data,
+    '600000',
+    1300,
+    'advisor',
+    job.id,
+  )
+
+  assert.equal(recovered.status, 'queued')
+  assert.equal(recovered.attempts, 0)
+  assert.equal(recovered.preOutputRetries, 1)
+  assert.match(recovered.phase, /换线重试完整计划/)
+
+  leaseJob(data, '600000', 1400, 'advisor', job.id)
+  const second = requeueAdvicePreOutputFailure(
     data,
     '600000',
     1500,
