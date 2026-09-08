@@ -22,7 +22,7 @@
 //   · 运行态写账号 runtime/state 小对象，单股完成按角色写独立 runtime/advice 对象；
 //     整批收尾才压实完整账号快照，且始终先重读最新账本做保护式叠加。
 
-import { applyCors, preflight } from './_lib.js';
+import { applyCors, preflight, sendJson } from './_lib.js';
 import {
   acquireAdviceWorkerLease,
   accountCredentialMatches,
@@ -2672,7 +2672,7 @@ export default async function handler(req, res) {
             );
           }
         }
-        return res.end(JSON.stringify({
+        return sendJson(res, {
           ok: true,
           jobs: jobsOf(data),
           reviewJobs: reviewJobsOf(data),
@@ -2683,7 +2683,7 @@ export default async function handler(req, res) {
           runtimeUpdates: recentRuntimeUpdates,
           workerScheduled,
           recovered,
-        }));
+        }, { cache: 0 });
       }
       if (op === 'cancel') {
         const targets = Array.isArray(body.targets)
