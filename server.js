@@ -50,6 +50,10 @@ import {
   readRequestBody,
   requestBodyLimitForPath,
 } from './api/_http_body.js';
+import {
+  sendApiResponse,
+  sendJsonResponse,
+} from './api/_http_response.js';
 
 const PORT = process.env.FC_SERVER_PORT || process.env.PORT || 9000;
 const ROOT = process.cwd();
@@ -396,8 +400,8 @@ async function handleRequest(req, res) {
       || portfolioAnalysisBody;
     req.headers['x-cron-key'] = process.env.CRON_KEY;
     res.status = (code) => { res.statusCode = code; return res; };
-    res.send = (payload) => { res.end(typeof payload === 'string' ? payload : JSON.stringify(payload)); return res; };
-    res.json = (obj) => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(obj)); return res; };
+    res.send = (payload) => sendApiResponse(req, res, payload);
+    res.json = (obj) => sendJsonResponse(req, res, obj);
     try {
       const handlerName = adviceBody
         ? 'cron_advice'
@@ -485,8 +489,8 @@ async function handleRequest(req, res) {
   try { req.body = raw ? JSON.parse(raw) : {}; } catch { req.body = raw; }
 
   res.status = (code) => { res.statusCode = code; return res; };
-  res.send = (payload) => { res.end(typeof payload === 'string' ? payload : JSON.stringify(payload)); return res; };
-  res.json = (obj) => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(obj)); return res; };
+  res.send = (payload) => sendApiResponse(req, res, payload);
+  res.json = (obj) => sendJsonResponse(req, res, obj);
 
   try {
     await handler(req, res);
