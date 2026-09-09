@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  applyCompiledDecisionPlan,
   buildFallbackDecisionAdvice,
   compileDecisionPlan,
   decisionPlanConfirmationGate,
@@ -57,6 +58,124 @@ const payload = {
     maxStockWeight: 25,
   },
 }
+
+test('核定结果同步正文、复核终态及执行触发条件，不能保留模型原手数', () => {
+  const advice = {
+    action: '立即买入', planQty: 20, planQtyNum: 20,
+    buyPrice: 10, buyZone: '10',
+    stopPrice: 9, targetPrice: 12.1, actionPlan: '立即买入20手',
+    reviewDecision: { terminal: true, operation: '买入', quantity: 20,
+      priceLow: 10, priceHigh: 11 },
+  }
+  advice.decisionPlan = compileDecisionPlan({
+    mode: 'buy_advice', advice, payload, evidenceSnapshot: snapshot, now,
+  })
+  const lots = advice.decisionPlan.quantity.lots
+  assert.ok(lots > 0 && lots < 20)
+  const normalized = applyCompiledDecisionPlan(advice)
+  assert.equal(normalized.planQtyNum, lots)
+  assert.equal(normalized.reviewDecision.quantity, lots)
+  assert.equal(normalized.reviewDecision.priceHigh, 10)
+  assert.equal(normalized.planAmount, normalized.decisionPlan.costs.estimatedNetAmount)
+  assert.match(normalized.actionPlan, new RegExp(`买入${lots}手`))
+  assert.doesNotMatch(normalized.decisionPlan.trigger, /20手/)
+  assert.equal(advice.planQty, 20)
+})
+
+test('隔夜预案跨周末有效至下一交易日收盘，即时指令不跨午休', () => {
+  const advice = { action: '立即买入', planQty: 2, buyPrice: 10,
+    stopPrice: 9, targetPrice: 12.1 }
+  const morning = Date.parse('2026-08-21T03:25:00Z')
+  const live = compileDecisionPlan({
+    mode: 'buy_advice', advice, payload, now: morning,
+    evidenceSnapshot: { ...snapshot, asOf: new Date(morning).toISOString() },
+  })
+  assert.equal(live.validUntil, '2026-08-21T03:30:00.000Z')
+  const friday = Date.parse('2026-08-21T08:00:00Z')
+  const deferred = compileDecisionPlan({
+    mode: 'buy_advice', advice, payload: {
+      ...payload, todayQuote: { ...payload.todayQuote, live: false },
+    }, now: friday,
+    evidenceSnapshot: { ...snapshot, asOf: new Date(friday).toISOString() },
+  })
+  assert.equal(deferred.actionability, 'WATCH')
+  assert.equal(deferred.validUntil, '2026-08-24T07:00:00.000Z')
+})
+
+test('条件预算复用执行风控但不把休市计划升级为可执行', () => {
+  const input = {
+    mode: 'buy_advice',
+    advice: { action: '观望', pullbackWatchPrice: 10 },
+    payload: {
+      ...payload,
+      todayQuote: { ...payload.todayQuote, price: 10.2, live: false },
+      tech: { priceHints: { stopLoss: 9, takeProfit: 12 } },
+    },
+    evidenceSnapshot: snapshot,
+    now: Date.parse('2026-08-21T08:00:00.000Z'),
+  }
+  const plan = compileDecisionPlan(input)
+  assert.equal(plan.action, 'WATCH')
+  assert.equal(plan.actionability, 'WATCH')
+  assert.equal(plan.quantity.lots, 0)
+  assert.equal(plan.entryBudget.state, 'ESTIMATED')
+  assert.equal(plan.entryBudget.referencePrice, 10)
+  assert.equal(plan.entryBudget.stopPrice, 9)
+  assert.ok(plan.entryBudget.lots > 0)
+  const cap = plan.actionPolicy.riskTier === 'PROBE' ? 5000 : 20000
+  assert.ok(plan.entryBudget.costs.estimatedNetAmount <= cap)
+  assert.equal(plan.entryBudget.executionAllowed, false)
+
+  const reserved = compileDecisionPlan({
+    ...input,
+    accountCircuitBreaker: {
+      allowRiskIncrease: true,
+      availableCashAfterReservations: 10000,
+      availableOpenRiskAmount: 1000,
+    },
+  })
+  assert.equal(reserved.entryBudget.lots, 0)
+  assert.equal(reserved.entryBudget.state, 'BLOCKED')
+  assert.match(reserved.entryBudget.reasons.join('；'), /现金不足|风险预算/)
+
+  const missing = compileDecisionPlan({
+    ...input,
+    payload: {
+      ...input.payload,
+      tech: {},
+      quant: {
+        ...payload.quant,
+        highConfSignal: { ...payload.quant.highConfSignal, stopLoss: null },
+      },
+    },
+  })
+  assert.equal(missing.entryBudget.lots, 0)
+  assert.equal(missing.entryBudget.stopPrice, null)
+  assert.match(missing.entryBudget.reasons.join('；'), /止损/)
+})
+
+test('低价窄止损计划必须通过真实费后盈亏比而非毛收益比', () => {
+  const plan = compileDecisionPlan({
+    mode: 'buy_advice',
+    advice: { action: '立即买入', buyPrice: 10, stopPrice: 9.99,
+      targetPrice: 10.02, planQtyNum: 1 },
+    payload, evidenceSnapshot: snapshot, now,
+  })
+  assert.equal(plan.actionability, 'BLOCKED')
+  assert.match(plan.blockedReasons.join('；'), /扣除手续费与滑点后盈亏比/)
+})
+
+test('新买入不得把已有行业仓位加到30%以上', () => {
+  const plan = compileDecisionPlan({
+    mode: 'buy_advice',
+    advice: { action: '立即买入', buyPrice: 10, stopPrice: 9,
+      targetPrice: 12.1, planQtyNum: 20 },
+    payload: { ...payload, account: { ...payload.account, industryWeight: 29.5 } },
+    evidenceSnapshot: snapshot, now,
+  })
+  assert.equal(plan.quantity.lots, 0)
+  assert.equal(plan.actionability, 'BLOCKED')
+})
 
 test('证据和风险条件满足时买入计划直接进入可执行状态', () => {
   const plan = compileDecisionPlan({
@@ -477,7 +596,7 @@ test('跌停压力损失超过账户上限时缩减买入手数', () => {
       action: '立即买入',
       buyPrice: 10,
       stopPrice: 9.7,
-      targetPrice: 10.6,
+      targetPrice: 10.7,
       planQtyNum: 20,
       actionPlan: '立即买入20手',
     },
@@ -487,7 +606,7 @@ test('跌停压力损失超过账户上限时缩减买入手数', () => {
         ...payload.quant,
         highConfSignal: {
           fired: true, credibility: 65, buyPrice: 10,
-          stopLoss: 9.7, takeProfit: 10.6,
+          stopLoss: 9.7, takeProfit: 10.7,
         },
       },
       todayQuote: {

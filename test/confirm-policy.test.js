@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  confirmationPolicy,
   collectOutcomeSnapshots,
   duplicateSmartAlerts,
   directionalOutcome,
@@ -16,6 +17,27 @@ import {
 
 const det = (score, decision = 'wait') => ({ score, decision, hits: [] })
 const llm = (decision, confidence) => ({ decision, confidence, reason: '模型判断' })
+
+test('确认门槛遵守动作分级且边界下方不得发出强提示', () => {
+  for (const [side, confidence, score] of [
+    ['buy', 78, 2.5],
+    ['sell', 70, 1.5],
+    ['stop', 65, 1.5],
+  ]) {
+    const policy = confirmationPolicy(side)
+    assert.equal(policy.llmConfidence, confidence)
+    assert.equal(policy.deterministicConfirm, score)
+    for (const value of [confidence - 1, confidence]) {
+      const result = fuseConfirmation({
+        side,
+        deterministic: det(score, 'confirm'),
+        llm: llm('confirm', value),
+        observationAgeMs: 5 * 60 * 1000,
+      })
+      assert.equal(result.decision, value < confidence ? 'wait' : 'confirm')
+    }
+  }
+})
 
 test('到价后高置信 LLM 可结合原计划直接确认，不机械等待全部指标共振', () => {
   const result = fuseConfirmation({

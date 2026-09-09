@@ -554,37 +554,15 @@ export function requeueAdvicePreparationFailure(
 }
 
 export function requeueAdvicePreOutputFailure(
-  data,
-  code,
-  now = Date.now(),
-  role = '',
-  jobId = '',
+  _data,
+  _code,
+  _now = Date.now(),
+  _role = '',
+  _jobId = '',
 ) {
-  const job = findAdviceJob(data, code, { role, jobId });
-  if (
-    !job
-    || job.status !== 'running'
-    || (Number(job.preOutputRetries) || 0) >= 1
-  ) return null;
-  job.status = 'queued';
-  job.stage = 'queued';
-  job.resourceRole = adviceJobRole(job);
-  job.resourceUnits = 1;
-  job.preOutputRetries =
-    (Number(job.preOutputRetries) || 0) + 1;
-  job.attempts = Math.max(0, (Number(job.attempts) || 1) - 1);
-  job.startedAt = 0;
-  job.finishedAt = 0;
-  job.leaseUntil = 0;
-  job.error = '';
-  job.model = '';
-  job.endpoint = '';
-  job.sources = [];
-  job.reasoning = '';
-  job.quant = null;
-  job.phase = '模型端点尚未响应，正在换线重试完整计划';
-  job.progressAt = now;
-  return job;
+  // Endpoint failover is already bounded inside poolFetch. A task-level
+  // restart would submit the same question again after that budget is spent.
+  return null;
 }
 
 function visibleReasoning(value) {
@@ -607,8 +585,11 @@ function visibleReasoning(value) {
       return true
     })
   const text = lines.join('\n')
-  if (text.length <= 6000) return text
-  return `${text.slice(0, 800)}\n…\n${text.slice(-5197)}`
+  if (text.length <= 12000) return { text, truncated: false }
+  return {
+    text: `${text.slice(0, 1800)}\n…\n${text.slice(-10197)}`,
+    truncated: true,
+  }
 }
 
 export function updateJobProgress(
@@ -632,7 +613,11 @@ export function updateJobProgress(
       ok: !!source?.ok,
     }))
   }
-  if (patch.reasoning != null) job.reasoning = visibleReasoning(patch.reasoning)
+  if (patch.reasoning != null) {
+    const reasoning = visibleReasoning(patch.reasoning)
+    job.reasoning = reasoning.text
+    job.reasoningTruncated = reasoning.truncated
+  }
   if (patch.quant && typeof patch.quant === 'object') {
     job.quant = {
       summary: String(patch.quant.summary || '').slice(0, 300),
@@ -1143,6 +1128,7 @@ export function jobsToProgress(data, now = Date.now(), concurrency = CONCURRENCY
           : (j.phase || ''),
     sources: Array.isArray(j.sources) ? j.sources : [],
     reasoning: j.reasoning || '',
+    reasoningTruncated: j.reasoningTruncated === true,
     quant: j.quant || null,
     model: j.model || '',
     endpoint: j.endpoint || '',

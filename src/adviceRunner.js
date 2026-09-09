@@ -12,6 +12,7 @@ import { quantResultFromAdviceMeta } from '../shared/adviceQuantResult.js'
 import { compactAdvicePlan } from '../shared/adviceContinuity.js'
 import {
   SERVER_FALLBACK_CONFIRM_MS,
+  SERVER_SUBMISSION_LOCK_MS,
   serverFallbackDisplayState,
 } from '../shared/adviceUiState.js'
 import {
@@ -25,15 +26,35 @@ import {
 
 const running = new Map()  // code -> { phase, startedAt }
 const results = new Map()  // code -> { result, advice, meta, news, adviceMissing, truncated, error, cachedAt }
+// 本地请求结束后转交云端但受理结果尚未确认的股票。它仍占用门控槽，
+// 否则用户会在本地 runner 清理后再次点击，导致同一深度任务双跑。
+const serverPending = new Map()
 const subs = new Set()
 
 function notify() { subs.forEach((fn) => { try { fn() } catch { /* ignore */ } }) }
 
-function rememberServerFallback(code, submission) {
+function rememberServerFallback(code, submission, record = null) {
+  const key = String(code || '')
   const fallback = serverFallbackDisplayState(submission)
   if (!fallback) {
+    serverPending.delete(key)
     results.delete(code)
     return
+  }
+  if (fallback.pending) {
+    const pending = {
+      code: key,
+      name: record?.name || key,
+      startedAt: Date.now(),
+    }
+    serverPending.set(key, pending)
+    setTimeout(() => {
+      if (serverPending.get(key) !== pending) return
+      serverPending.delete(key)
+      notify()
+    }, SERVER_SUBMISSION_LOCK_MS)
+  } else {
+    serverPending.delete(key)
   }
   results.set(code, fallback)
   if (!fallback.pending) return
@@ -48,11 +69,45 @@ function rememberServerFallback(code, submission) {
 }
 // 订阅：后台进度/结果变化时回调（组件用它触发重渲染）
 export function subscribeRunner(fn) { subs.add(fn); return () => subs.delete(fn) }
-export function isRunning(code) { return code ? running.has(code) : false }
+export function isRunning(code) {
+  if (!code) return false
+  const key = String(code)
+  if (running.has(key)) return true
+  const pending = serverPending.get(key)
+  if (!pending) return false
+  // 云端完成后 authStore.pull 会先合并 adviceCache；一旦看到本轮之后的
+  // 建议，立即释放本地提交锁，不必等固定超时窗口结束。
+  let completed = false
+  try {
+    completed = ['buy_advice', 'hold_advice']
+      .map((mode) => getAdvice(key, mode))
+      .some((entry) => Number(entry?.at || 0) >= Number(pending.startedAt || 0))
+  } catch { /* cache access cannot make a generation look idle */ }
+  if (completed) {
+    serverPending.delete(key)
+    return false
+  }
+  return true
+}
+export function isServerPending(code) {
+  return !!code && serverPending.has(String(code))
+}
 export function getRunning(code) { return (code && running.get(code)) || null }
 // 本地正在生成的清单:[{code, name, startedAt}](供单股触发门控/「端点已满」弹窗展示)
 export function getRunningList() {
-  return [...running.entries()].map(([code, r]) => ({ code, name: (r && r.name) || code, startedAt: (r && r.startedAt) || 0 }))
+  const local = [...running.entries()].map(([code, r]) => ({
+    code,
+    name: (r && r.name) || code,
+    startedAt: (r && r.startedAt) || 0,
+  }))
+  const pending = [...serverPending.values()]
+    .filter((entry) => isRunning(entry.code))
+    .map((entry) => ({
+      code: entry.code,
+      name: entry.name || entry.code,
+      startedAt: entry.startedAt || 0,
+    }))
+  return [...local, ...pending]
 }
 // 取本次会话内刚跑完的结果（含 error/adviceMissing/truncated 等瞬时态；跨刷新则读 adviceCache）
 export function getResult(code) { return (code && results.get(code)) || null }
@@ -73,6 +128,7 @@ export function startAdvice(spec) {
   const code = spec && spec.code
   if (!code) return Promise.resolve()
   if (running.has(code)) return running.get(code).promise || Promise.resolve()  // 已在后台跑 → 幂等，复用同一 promise
+  if (serverPending.has(String(code))) return Promise.resolve() // 云端受理未知，禁止重复生成
   results.delete(code)           // 清掉上次的瞬时结果，UI 立即进入 loading
   const rec = {
     phase: '正在准备分析…',
@@ -235,7 +291,8 @@ async function run(spec, record) {
       // 结果稍后经 authStore.pull 轮询云端回灌到本机缓存(手机/电脑都能看到)。
       rememberServerFallback(
         code,
-        await serverFallback(code, generation.deepMode),
+        await serverFallback(code, generation.deepMode, spec.requestId),
+        record,
       )
     }
   } catch (e) {
@@ -244,7 +301,7 @@ async function run(spec, record) {
       results.delete(code)
       return
     }
-    const fallback = await serverFallback(code, generation.deepMode)
+    const fallback = await serverFallback(code, generation.deepMode, spec.requestId)
     rememberServerFallback(
       code,
       fallback?.ok || fallback?.queued
@@ -253,6 +310,7 @@ async function run(spec, record) {
             error: fallback?.error
               || '获取失败：' + String((e && e.message) || e),
           },
+      record,
     )
   }
   if (belongsToCurrentAccount()) notify()
@@ -260,17 +318,22 @@ async function run(spec, record) {
 
 // 单只服务端兜底：必须等待服务端确认是否已持久化，不能把“请求已发出”
 // 误当成“任务已受理”，否则网络失败会留下永久等待态。
-async function serverFallback(code, deepMode = false) {
+async function serverFallback(code, deepMode = false, requestId = '') {
   try {
     if (!canServerAdvice()) {
       return { ok: false, error: '当前账号无法转交云端生成' }
     }
     return await triggerServerAdvice(
       [code],
-      { scope: 'all', force: true, deepMode },
+      { scope: 'all', force: true, deepMode, requestId },
     )
   } catch {
-    return { ok: false, error: '云端任务提交失败，请重新生成' }
+    return {
+      ok: false,
+      queued: true,
+      unconfirmed: true,
+      error: '云端任务提交结果未确认，正在核对任务状态',
+    }
   }
 }
 
@@ -282,5 +345,6 @@ subscribeAccountSession(() => {
   }
   running.clear()
   results.clear()
+  serverPending.clear()
   notify()
 })

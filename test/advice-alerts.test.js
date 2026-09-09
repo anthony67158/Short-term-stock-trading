@@ -774,7 +774,7 @@ test('军师主结论已是减仓时不再创建备用加仓预警', () => {
   assert.deepEqual(data.alerts.map((alert) => alert.actKind), ['reduce'])
 })
 
-test('持有建议持续创建回踩与突破两条加仓复核提醒', () => {
+test('禁止新增风险时不再投影回踩或突破加仓提醒', () => {
   const data = {
     plan: [],
     holding: [{ id: 'h1', code: '003036', name: '泰坦股份' }],
@@ -823,24 +823,10 @@ test('持有建议持续创建回踩与突破两条加仓复核提醒', () => {
   })
 
   const reviews = data.alerts.filter((alert) => alert.reviewOnly)
-  assert.deepEqual(
-    reviews.map((alert) => [
-      alert.reviewKey,
-      alert.op,
-      alert.value,
-      alert.note,
-    ]),
-    [
-      ['holding_add_pullback', 'lte', 50.94, '回踩加仓复核'],
-      ['holding_add_breakout', 'gte', 52.06, '突破加仓复核'],
-    ],
-  )
+  assert.deepEqual(reviews, [])
   assert.equal(
-    reviews.every((alert) =>
-      alert.actCode === '003036'
-      && alert.reviewIntent.mode === 'REASSESSMENT'
-    ),
-    true,
+    data.alerts.some((alert) => alert.actKind === 'add'),
+    false,
   )
 })
 
@@ -897,4 +883,42 @@ test('到价终局复核完成后清除原价格链且不创建新复核价', ()
   assert.equal(data.plan[0].alertSyncedPrice, null)
   assert.equal(data.plan[0].reviewSyncedPrice, null)
   assert.equal(data.plan[0].reviewSyncedPrices, null)
+})
+
+test('持仓结构化监控替换旧加仓价卡片且只投影可执行退出规则', () => {
+  const data = {
+    plan: [],
+    holding: [{ id: 'h-monitor', code: '002475', name: '立讯精密', qty: 1 }],
+    alerts: [{
+      id: 'old-add', code: '002475', actCode: '002475', actKind: 'add',
+      type: 'price', value: 51.88, enabled: true,
+    }],
+    settings: {},
+  }
+  const advice = {
+    name: '立讯精密',
+    monitoringPlan: {
+      schemaVersion: 'monitoring-plan.v1',
+      planId: 'decision-monitor',
+      state: 'READY',
+      validUntil: new Date(now + 3600000).toISOString(),
+      rules: [
+        {
+          id: 'risk', action: 'EXIT', kind: 'RISK_EXIT', lots: 1, logic: 'ANY',
+          priority: 1, session: 'CONTINUOUS', sustainSeconds: 0,
+          conditions: [{ metric: 'price', op: 'lte', value: 54 }],
+        },
+        {
+          id: 'hold', action: 'HOLD', kind: 'HOLD', lots: 0, logic: 'ALL',
+          priority: 3, session: 'CONTINUOUS', sustainSeconds: 60,
+          conditions: [{ metric: 'priceVsVwapPct', op: 'gte', value: 0 }],
+        },
+      ],
+    },
+  }
+  projectAdviceAlerts(data, '002475', advice, { now })
+  assert.equal(data.alerts.length, 1)
+  assert.equal(data.alerts[0].type, 'plan-condition')
+  assert.equal(data.alerts[0].planRule.kind, 'RISK_EXIT')
+  assert.equal(data.alerts.some((alert) => alert.actKind === 'add'), false)
 })

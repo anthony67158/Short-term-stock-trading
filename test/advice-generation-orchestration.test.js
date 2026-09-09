@@ -65,6 +65,14 @@ test('同一用户请求在任务完成后重放也不能再次创建生成任�
   assert.equal(data.jobs['600000'].id, first.job.id)
 })
 
+test('终局操作通知必须在结果持久化完成后且账本核验成功才发送', () => {
+  const persist = cronAdviceSource.indexOf('await persistAdviceCompletion(')
+  const notify = cronAdviceSource.indexOf("if (job.status === 'done' && !job.terminalPushSentAt)")
+  assert.ok(persist > 0 && notify > persist)
+  assert.match(cronAdviceSource, /else if \(tradeStateCheckUnavailable\)[\s\S]*?failJob/)
+  assert.doesNotMatch(cronAdviceSource, /账本复核暂不可用，保留本次结果/)
+})
+
 test('军师历史表现只从服务端账户账本重算并携带净R校准', () => {
   const adviceLog = Array.from({ length: 5 }, (_, index) => ({
     id: `decision-${index}`,
@@ -248,8 +256,8 @@ test('普通与深度军师都使用有界预算且深度不整轮重跑', () =>
   assert.equal(quick.runtimeBudgetMs, 55000)
   assert.equal(quick.maxAttempts, 1)
   assert.equal(deep.forceReasoning, true)
-  assert.equal(deep.runtimeBudgetMs, 540000)
-  assert.equal(deep.timeoutMs, 555000)
+  assert.equal(deep.runtimeBudgetMs, 360000)
+  assert.equal(deep.timeoutMs, 375000)
   assert.equal(deep.maxAttempts, 1)
   assert.ok(deep.runtimeBudgetMs > quick.runtimeBudgetMs)
   assert.equal(maxTokensForMode('hold_advice', false), 3200)
@@ -260,10 +268,10 @@ test('普通与深度军师都使用有界预算且深度不整轮重跑', () =>
   assert.equal(advisorGenerationPlan({
     remainingMs: 535000,
     reasoning: true,
-  }).timeoutMs, 510000)
+  }).timeoutMs, 300000)
   assert.match(
     aiSource,
-    /headerTimeoutMs:\s*useRole === 'review'[\s\S]*?\?\s*12000[\s\S]*?:\s*useReasoning[\s\S]*?\?\s*Math\.min\(llmTimeout,\s*45000\)[\s\S]*?:\s*22000/,
+    /headerTimeoutMs:\s*useRole === 'review'[\s\S]*?\?\s*12000[\s\S]*?:\s*useReasoning[\s\S]*?\?\s*Math\.min\(llmTimeout,\s*120000\)[\s\S]*?:\s*22000/,
   )
   assert.doesNotMatch(aiSource, /runStreamFailover/)
   assert.doesNotMatch(aiSource, /最终JSON整理器/)
@@ -274,7 +282,7 @@ test('普通与深度军师都使用有界预算且深度不整轮重跑', () =>
   )
 })
 
-test('深度研判失败不得伪装成保守计划成功', () => {
+test('军师生成失败不得伪装成保守计划成功', () => {
   assert.equal(shouldBuildAdvisorFallback({
     isAdvisor: true,
     generationProfile: 'DEEP',
@@ -284,7 +292,7 @@ test('深度研判失败不得伪装成保守计划成功', () => {
     isAdvisor: true,
     generationProfile: 'FAST',
     ok: false,
-  }), true)
+  }), false)
 })
 
 test('军师准备与证据依赖采用并行编排且单源有独立截止', () => {

@@ -81,6 +81,7 @@ export default function AdviceGenerationStatus({
   const active = generation?.active || detailState?.loading
   if (!active) return null
   const reviewing = generation?.role === 'review'
+  if (generation?.silent && variant !== 'detail') return null
 
   const cancel = (event) => {
     event.stopPropagation()
@@ -119,7 +120,9 @@ export default function AdviceGenerationStatus({
             <div>
               <b>
                 {reviewing
-                  ? '后台复核进行中'
+                  ? generation?.silent
+                    ? '后台数据检查中'
+                    : '到价确认进行中'
                   : view.deepMode ? '深度研判进行中' : '快速建议生成中'}
               </b>
               <span>{view.phase}</span>
@@ -185,9 +188,12 @@ export default function AdviceGenerationStatus({
           <details className="generation-flow-reasoning">
             <summary>
               <Icon name="brain" size={12} />
-              查看实时研判摘要
+              查看可见分析进度
             </summary>
             <div>{view.reasoning}</div>
+            {view.reasoningTruncated && (
+              <small>内容较长，当前仅保留首尾关键片段。</small>
+            )}
           </details>
         )}
       </section>
@@ -198,15 +204,15 @@ export default function AdviceGenerationStatus({
     <button type="button" className={`advice-generation-status ${variant}`} onClick={generation.cancelable ? cancel : undefined}
       disabled={!generation.cancelable}
       aria-label={reviewing
-        ? `${code}的建议正在后台复核`
+        ? `${code}正在到价确认`
         : `取消${code}的操作建议生成`}
-      title={reviewing ? '复核使用独立端点，不占用军师生成' : '点击取消本次生成'}>
+      title={reviewing ? '到价确认使用独立端点' : '点击取消本次生成'}>
       <Icon name="refresh" size={12} className="spin" />
       <span>{generation.label}</span>
       {generation.cloud && <em>云端持续运行</em>}
       <b>
         {reviewing
-          ? '独立复核'
+          ? '到价确认'
           : generation.cancelable ? '取消生成' : '取消中'}
       </b>
     </button>

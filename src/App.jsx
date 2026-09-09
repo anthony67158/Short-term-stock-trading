@@ -538,14 +538,16 @@ export function MainApp() {
           <Suspense fallback={<TabSkeleton />}>
             {tab === 'today' && (
               <>
-              <WorkspaceViews label="市场与选股视图" current={todaySub} onChange={setTodaySub}
-                items={[['selection', '市场与机会', 'radar'], ['research', '盘面研究', 'layers']]} />
+              <WorkspaceViews label="今日作战视图" current={todaySub} onChange={setTodaySub}
+                items={[['selection', '作战计划', 'radar'], ['research', '盘面研究', 'layers']]} />
               {todaySub === 'selection' ? <TodayTab
                 market={market.data}
                 sectors={sectors.data}
                 snapshot={marketSnapshot.data}
                 snapshotLoading={marketSnapshot.loading}
                 snapshotError={marketSnapshot.error}
+                book={book}
+                quotes={(reviewQuotes.data && reviewQuotes.data.list) || []}
               /> : <ResearchTab
                 interval={interval}
                 snapshot={marketSnapshot.data}
@@ -556,7 +558,7 @@ export function MainApp() {
             )}
             {tab === 'plan' && (
               <>
-                <WorkspaceViews label="交易与持仓视图" current={planSub} onChange={setPlanSub}
+                <WorkspaceViews label="持仓管理视图" current={planSub} onChange={setPlanSub}
                   items={[['positions', '持仓与自选', 'wallet'], ['account', '资金与仓位', 'gauge']]} />
                 {planSub === 'positions' ? <PlanTab interval={interval} /> : <AccountTab interval={interval} />}
               </>
@@ -668,6 +670,8 @@ function RegulatoryFooter({ showDisclaimer = false }) {
   )
 }
 
+const ALERT_BANNER_VISIBLE_MS = 4000
+
 function AlertBanner() {
   const { banners = [] } = useAlertStore()
   const banner = banners[0] || null
@@ -676,7 +680,7 @@ function AlertBanner() {
     if (!banner?.id) return undefined
     const timer = setTimeout(
       () => alertStore.dismissBanner(banner.id),
-      10000,
+      ALERT_BANNER_VISIBLE_MS,
     )
     return () => clearTimeout(timer)
   }, [banner?.id])

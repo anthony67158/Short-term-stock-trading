@@ -21,6 +21,7 @@ import {
   reconcileAdviceNumbers,
 } from '../../shared/adviceValidation.js'
 import {
+  applyCompiledDecisionPlan,
   compileDecisionPlan,
 } from '../../shared/decisionPlan.js'
 import {
@@ -321,12 +322,6 @@ function finalizeModelOutput({
     result,
     payload.shortHorizonTactical,
   )
-  result.reviewMemory = buildAdviceReviewMemory({
-    advice: result,
-    payload,
-    source: triggered ? 'FAST_REVIEW' : 'ADVISOR',
-    now,
-  })
   result.decisionPlan = compileDecisionPlan({
     mode,
     advice: result,
@@ -355,6 +350,13 @@ function finalizeModelOutput({
       })
     }
   }
+  result = applyCompiledDecisionPlan(result)
+  result.reviewMemory = buildAdviceReviewMemory({
+    advice: result,
+    payload,
+    source: triggered ? 'FAST_REVIEW' : 'ADVISOR',
+    now,
+  })
   result.priceContract = result.decisionPlan.priceContract
   result.continuity = {
     planId: `plan.fake.${payload.code}`,

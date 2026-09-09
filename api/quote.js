@@ -219,12 +219,14 @@ export function mapEastmoneyQuote(data = {}) {
     chg: num(data.f4),
     turnover: num(data.f8),
     volRatio: num(data.f10),
-    mainInflow: num(data.f62),
-    retailInflow: num(data.f84),
+    mainInflow: optionalNumber(data.f62),
+    retailInflow: optionalNumber(data.f84),
     main5dInflow: optionalNumber(data.f164),
     retail5dInflow: optionalNumber(data.f172),
     mainRatio: num(data.f184),
     amount: num(data.f6),
+    vwap: positive(data.f5) && positive(data.f6)
+      ? Number(data.f6) / (Number(data.f5) * 100) : null,
     high: num(data.f15),
     low: num(data.f16),
     open: num(data.f17),
@@ -275,6 +277,8 @@ async function quoteTx(codes) {
       volRatio: num(p[49]) || null,   // 量比(腾讯常见位)
       mainInflow: null, retailInflow: null, mainRatio: null,
       amount: num(p[37]) ? num(p[37]) * 10000 : null, // 成交额(万元→元)
+      vwap: positive(p[6]) && positive(p[37])
+        ? Number(p[37]) * 10000 / (Number(p[6]) * 100) : null,
       high: num(p[33]) || null, low: num(p[34]) || null, open: num(p[5]) || null,
       prevClose,
       tradeDate: quoteStamp ? `${quoteStamp[1]}-${quoteStamp[2]}-${quoteStamp[3]}` : null,
@@ -289,7 +293,7 @@ async function quoteEastmoney(codes) {
   // f15 最高 f16 最低 f17 今开 f18 昨收 f100 所属行业
   const fields =
     'f2,f3,f4,f8,f10,f12,f14,f62,f84,f164,f172,f184,'
-    + 'f6,f15,f16,f17,f18,f100,f124';
+    + 'f5,f6,f15,f16,f17,f18,f100,f124';
   const path =
     `/api/qt/ulist.np/get?fltt=2&invt=2&secids=${encodeURIComponent(secids)}` +
     `&fields=${fields}`;

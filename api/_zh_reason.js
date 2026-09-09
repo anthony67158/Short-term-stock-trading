@@ -231,21 +231,21 @@ function progressKey(value) {
     .toLowerCase()
 }
 
-export function createReasoningProgressTracker({ maxItems = 6 } = {}) {
+export function createReasoningProgressTracker({ maxItems = 20 } = {}) {
   const emitted = []
   let buffer = ''
   const emitCandidate = (value) => {
-    const text = normalizeProgressText(value).slice(0, 160)
+    const text = normalizeProgressText(value).slice(0, 320)
     const key = progressKey(text)
     if (
       !key
       || /^[\[{]/.test(text)
       || /"[^"]+"\s*:/.test(text)
-      || emitted.length >= Math.max(1, Number(maxItems) || 6)
+      || emitted.length >= Math.max(1, Number(maxItems) || 20)
       || emitted.some((prior) =>
         prior === key
         || (
-          Math.min(prior.length, key.length) >= 18
+          Math.min(prior.length, key.length) >= 24
           && (prior.includes(key) || key.includes(prior))
         )
       )
@@ -257,7 +257,7 @@ export function createReasoningProgressTracker({ maxItems = 6 } = {}) {
     push(piece) {
       const text = String(piece || '')
       if (!text) return ''
-      buffer = `${buffer}${text}`.slice(-800)
+      buffer = `${buffer}${text}`.slice(-2000)
       if (!/[\n。！？.!?]/.test(text) && buffer.length < 40) return ''
       const candidate = buffer
       buffer = ''

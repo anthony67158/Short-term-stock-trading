@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import {
   applyShortHorizonExitPolicy,
   EXIT_MANAGEMENT_VERSION,
+  holdingExitDeadline,
 } from '../shared/exitManagement.js'
 import {
   portfolioOpportunityCostForStock,
@@ -34,6 +35,32 @@ const basePayload = {
     timing: { reviewAfter: 'FIVE_MINUTE_BAR' },
   },
 }
+
+test('重新生成不能下移账本止损来掩盖已经发生的破位', () => {
+  const result = applyShortHorizonExitPolicy({
+    mode: 'hold_advice',
+    result: { action: '持有', stopPrice: 9, targetPrice: 12 },
+    payload: { ...basePayload, holdingStopPrice: 10,
+      todayQuote: { price: 9.7, live: true } },
+  })
+  assert.equal(result.stopPrice, 10)
+  assert.equal(result.exitManagement.kind, 'HARD_STOP')
+  assert.equal(result.opQty, '清仓4手')
+})
+
+test('持仓时间退出按交易日计数且保持T加一可卖约束', () => {
+  const started = Date.parse('2026-09-03T02:00:00Z')
+  assert.equal(new Date(holdingExitDeadline(started)).toISOString(),
+    '2026-09-09T06:45:00.000Z')
+  const result = applyShortHorizonExitPolicy({
+    mode: 'hold_advice', now: Date.parse('2026-09-09T06:50:00Z'),
+    result: { action: '持有', stopPrice: 9, targetPrice: 13 },
+    payload: { ...basePayload, holdingStartedAt: started, sellableTodayQty: 2 },
+  })
+  assert.equal(result.exitManagement.kind, 'TIME_EXIT')
+  assert.equal(result.opQty, '减仓2手')
+  assert.equal(result.exitManagement.lockedLots, 2)
+})
 
 test('硬止损优先于其他退出条件且直接覆盖为风险退出', () => {
   const result = applyShortHorizonExitPolicy({

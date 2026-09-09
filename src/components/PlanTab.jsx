@@ -86,6 +86,7 @@ import { adviceRecency } from '../../shared/adviceRecency.js'
 import { selectAutoRefreshCodes } from '../../shared/adviceAutoRefreshPolicy.js'
 import { stockNoteText } from '../../shared/stockNotes.js'
 import { quoteDisplayState } from '../../shared/quoteDisplay.js'
+import { monitoringPlanOf, monitoringView } from '../../shared/monitoringPlan.js'
 
 const REVIEW_STATUS_ICON = Object.freeze({
   queued: 'clock',
@@ -633,6 +634,20 @@ function AdviceUpdatedAt({ entry, score, bias }) {
   )
 }
 
+function fmtExpire(ts) {
+  const n = Number(ts)
+  if (!Number.isFinite(n)) return ''
+  const d = new Date(n)
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mm = String(d.getMinutes()).padStart(2, '0')
+  const diff = n - Date.now()
+  if (diff <= 0) return '已失效'
+  const hours = Math.floor(diff / 3600000)
+  if (hours > 0) return `${hh}:${mm} (${hours}h后)`
+  const mins = Math.ceil(diff / 60000)
+  return `${hh}:${mm} (${mins}分钟后)`
+}
+
 function MarketPulse({ quote }) {
   if (!quote) return null
   return (
@@ -863,8 +878,10 @@ function ActionCommand({ view, onOpen }) {
       )
   const cardInstruction = view.cardInstruction || instruction
   const importance = actionImportance(view)
-  const quantity =
-    view.quantityLabel || actionQtyLabel(view.quantity)
+  const qtyLabel = actionQtyLabel(view.quantity)
+  const quantity = view.quantityLabel
+    ? (qtyLabel ? `${view.quantityLabel} · ${qtyLabel}` : view.quantityLabel)
+    : qtyLabel
   const icon = view.kind === 'wait'
     ? 'clock'
     : ['sell', 'reduce'].includes(view.kind)
@@ -887,6 +904,12 @@ function ActionCommand({ view, onOpen }) {
             {view.commandLabel || '当前指令'}
           </span>
           {view.shortHorizon && <em>{view.shortHorizon}</em>}
+          {view.expireAt && (
+            <em className="action-command-expire" title="建议失效时间">
+              <Icon name="clock" size={11} />
+              {fmtExpire(view.expireAt)}
+            </em>
+          )}
         </span>
         <span className="action-command-main">
           <span className="action-command-icon">
@@ -909,6 +932,45 @@ function ActionCommand({ view, onOpen }) {
   )
 }
 
+function MonitoringRules({ monitoring }) {
+  if (!monitoring?.rules?.length) return null
+  const stateLabel = {
+    MATCHED: '已触发',
+    OBSERVING: '确认中',
+    WAITING: '未满足',
+    MISSING_DATA: '数据待补',
+    WAIT_SESSION: '等待开盘',
+    WINDOW_ENDED: '本轮结束',
+    T1_LOCKED: '今日锁定',
+  }
+  return (
+    <div className="monitoring-rules" aria-label="自动跟踪条件">
+      <div className="monitoring-rules-head">
+        <span><Icon name="radar" size={13} /> 系统跟踪</span>
+        <b data-active={monitoring.active}>
+          {monitoring.active ? '运行中' : monitoring.expired ? '已到期' : '未开启'}
+        </b>
+      </div>
+      <div className="monitoring-rule-list" role="list">
+        {monitoring.rules.map((rule) => (
+          <div
+            className="monitoring-rule"
+            data-state={rule.state}
+            role="listitem"
+            key={rule.id}
+          >
+            <span>{stateLabel[rule.state] || '监控中'}</span>
+            <strong>{rule.text}</strong>
+            {rule.state === 'OBSERVING' && rule.remainingSeconds != null && (
+              <em>还需 {rule.remainingSeconds} 秒</em>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function AdviceActionPanel({ view, currentPrice, onPrompt, conviction = null }) {
   if (!view) {
     return (
@@ -927,6 +989,7 @@ function AdviceActionPanel({ view, currentPrice, onPrompt, conviction = null }) 
     <div className={'action-decision tone-' + tone}>
       <ActionCommand view={view} onOpen={onPrompt} />
       <ConvictionStrip conviction={conviction} />
+      <MonitoringRules monitoring={view.monitoring} />
       {view.levels.length > 0 && (
         <div className={'action-levels levels-' + Math.min(view.levels.length, 3)}>
           {view.levels.map((item) => (
@@ -934,10 +997,16 @@ function AdviceActionPanel({ view, currentPrice, onPrompt, conviction = null }) 
           ))}
         </div>
       )}
-      {view.levels.length === 0 && view.kind !== 'wait' && (
+      {view.levels.length === 0 && view.kind !== 'wait' && !view.monitoring && (
         <EmptyActionLevels />
       )}
-      <ActionProgress trigger={view.trigger} currentPrice={currentPrice} progress={progress} />
+      {!view.monitoring && (
+        <ActionProgress
+          trigger={view.trigger}
+          currentPrice={currentPrice}
+          progress={progress}
+        />
+      )}
     </div>
   )
 }
@@ -969,7 +1038,7 @@ function CandDecision({ p, q }) {
     ? roundActionPrice(contractEntry?.price)
     : null
   const aiQty = actionable
-    ? actionHands(advice?.planQtyNum ?? advice?.planQty)
+    ? actionHands(baseView?.quantity)
     : null
   const hasSystemBuyAlert = planStore.get().alerts
     .some((alert) => alert.candCode === p.code)
@@ -1169,6 +1238,8 @@ function CandidateActions({ p, q, onBuy, onAlert, onDelete }) {
     : baseView
   const actionable = !view
     || (view.kind === 'buy' && view.actionable !== false)
+  const systemExecutable = view?.kind === 'buy'
+    && view.actionable !== false
   const detailActionLabel = !view
     ? '生成建议'
     : !actionable
@@ -1188,12 +1259,18 @@ function CandidateActions({ p, q, onBuy, onAlert, onDelete }) {
     >
       <button
         type="button"
-        className="chip-btn act-buy manual-build"
-        title="自主填写买入价和手数，仅记录人工成交"
-        onClick={() => onBuy(p, null)}
+        className={
+          systemExecutable
+            ? 'chip-btn act-buy'
+            : 'chip-btn ghost manual-build'
+        }
+        title={systemExecutable
+          ? '按当前核定计划记录实际成交'
+          : '仅记录你已自主完成的成交，不代表系统建议买入'}
+        onClick={() => onBuy(p, systemExecutable ? view : null)}
       >
         <Icon name="cart" size={12} />
-        手动建仓
+        {systemExecutable ? '记录成交' : '记录自主成交'}
       </button>
       <button
         type="button"
@@ -2862,7 +2939,13 @@ function HoldingItem({ h, quote: q }) {
     if (holdAdvice) planStore.syncActionAlerts(h.code)
   }, [adviceEntry?.at, holdAdvice, h.code])
   const currentT1 = t1StatusOf(h.code)
-  const decisionView = buildHoldingCardDecisionView({
+  const trackedView = holdAdvice ? monitoringView(holdAdvice, {
+    quote: q,
+    alerts: book.alerts,
+    holdQty: currentT1.liveQty,
+    sellableTodayQty: currentT1.sellableToday,
+  }) : null
+  const legacyView = buildHoldingCardDecisionView({
     advice: holdAdvice,
     hitTarget: hitTP,
     hitStop: hitSL,
@@ -2871,6 +2954,25 @@ function HoldingItem({ h, quote: q }) {
     t1Status: currentT1,
     nextTradeDay: nextTradingDayLabel(),
   })
+  const decisionView = trackedView || (
+    holdAdvice && !monitoringPlanOf(holdAdvice) && !hitTP && !hitSL
+      ? {
+          ...legacyView,
+          action: '继续持有',
+          quantity: `${currentT1.liveQty}手`,
+          cardInstruction: '旧建议未形成系统可跟踪条件；重新生成后自动盯价格、主力资金和分时均价',
+          levels: [],
+          actionable: false,
+          trigger: {
+            direction: 'inactive',
+            price: null,
+            label: '条件跟踪',
+            stateLabel: '需重新生成',
+            metricLabel: '当前不自动提醒',
+          },
+        }
+      : legacyView
+  )
 
   const startSell = () => {
     const t1 = currentT1

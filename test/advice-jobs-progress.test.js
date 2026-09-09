@@ -345,7 +345,7 @@ test('模型调用前的准备故障只自动恢复一次且不消耗生成次�
   assert.equal(data.jobs['600000'].status, 'running')
 })
 
-test('模型无响应头时只换线重试一次完整生成', () => {
+test('请求层耗尽换线预算后任务层不得重跑整题', () => {
   const data = {}
   enqueueJob(data, {
     code: '600000',
@@ -366,12 +366,12 @@ test('模型无响应头时只换线重试一次完整生成', () => {
     job.id,
   )
 
-  assert.equal(recovered.status, 'queued')
-  assert.equal(recovered.attempts, 0)
-  assert.equal(recovered.preOutputRetries, 1)
-  assert.match(recovered.phase, /换线重试完整计划/)
+  assert.equal(recovered, null)
+  assert.equal(job.attempts, 1)
+  assert.equal(job.preOutputRetries, undefined)
+  assert.equal(job.stage, 'llm')
 
-  leaseJob(data, '600000', 1400, 'advisor', job.id)
+  assert.equal(leaseJob(data, '600000', 1400, 'advisor', job.id), null)
   const second = requeueAdvicePreOutputFailure(
     data,
     '600000',
@@ -485,7 +485,8 @@ test('持久任务研判摘要保留原文并去重过滤JSON草稿', () => {
     1,
   )
   assert.equal(reasoning.includes('{"action"'), false)
-  assert.equal(reasoning.length <= 6000, true)
+  assert.equal(reasoning.length <= 12000, true)
+  assert.equal(data.jobs['600000'].reasoningTruncated, true)
   assert.equal(reasoning.includes('正在分析走势'), true)
 })
 

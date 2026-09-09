@@ -117,6 +117,7 @@ import {
   TRUSTED_ACCOUNT_REQUEST,
 } from './_account_auth.js';
 import { dispatchAdviceWorker } from './_advice_dispatch.js';
+import { evaluateAccountMonitoring } from './_monitoring.js';
 import { buildRealOutcomeLearning } from '../shared/realOutcomeLearning.js';
 import {
   isContinuousTrading,
@@ -130,6 +131,9 @@ const ADVICE_RUNTIME_RECENT_LIMIT = 24;
 export const ADVICE_PREPARE_ACCOUNT_TIMEOUT_MS = 5000;
 export const ADVICE_PREPARE_QUOTE_TIMEOUT_MS = 8000;
 export const ADVICE_JOB_SETTLE_GRACE_MS = 15000;
+// FC 单次请求的硬运行上限。任务启动时按该上限计算剩余预算，避免
+// 用初始 OSS Worker 租约倒推全局截止，导致深度批次只启动一只任务。
+export const ADVICE_FC_RUNTIME_MS = 600000;
 
 export function createAdviceSSEParser(onEvent) {
   let buffer = '';
@@ -853,6 +857,21 @@ export function adviceWorkerStartDeadline({
   return leaseDeadline > current
     ? Math.min(localDeadline, leaseDeadline)
     : current;
+}
+
+// 判断一只任务现在是否还有完整预算可以启动。这个判断必须针对候选
+// 任务逐个计算：已启动的模型不能被调度器中止，剩余任务则交给续跑
+// Worker，避免深度任务在 FC 尾部被半途杀掉后制造假排队。
+export function adviceWorkerCanStartJob({
+  now = Date.now(),
+  workerStartedAt = now,
+  deepMode = false,
+  reviewEvent = null,
+} = {}) {
+  const started = Number(workerStartedAt) || Number(now) || Date.now();
+  const current = Number(now) || Date.now();
+  const remaining = started + ADVICE_FC_RUNTIME_MS - current;
+  return remaining >= adviceJobDeadlineMs(deepMode, reviewEvent, current);
 }
 
 export function withAdviceJobDeadline(
@@ -1746,6 +1765,7 @@ async function releaseDrainLock(
 // ---- 并发池 drainer:单 Worker 锁下,把 queued 任务以 ≤CONCURRENCY 并发跑完 ----
 // 返回 { drained(bool), ok, fail } 或 { skipped:'locked' }。
 async function drainAccount(nick, initialAcc) {
+  const workerStartedAt = Date.now();
   const myId = `w_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const workerLease = await acquireAdviceWorkerLease(nick, {
     owner: myId,
@@ -1758,6 +1778,7 @@ async function drainAccount(nick, initialAcc) {
       initialAcc,
       myId,
       workerLease,
+      workerStartedAt,
     );
   } finally {
     await releaseAdviceWorkerLease(workerLease).catch(() => false);
@@ -1780,6 +1801,7 @@ async function drainAccountWithLease(
   initialAcc,
   myId,
   workerLease,
+  workerStartedAt = Date.now(),
 ) {
   let acc = initialAcc || (await readAccount(nick));
   if (!isAccountActive(acc)) return { drained: false, ok: 0, fail: 0 };
@@ -1816,7 +1838,6 @@ async function drainAccountWithLease(
   // ai.js 会再次校验摘要时效，不允许日报生成拆成前置 Worker 阻断主流程。
   const dailyReportSummary = data.adviceDailyReport?.summary || null;
   const inflight = new Map();   // jobId -> { promise, controller, code, role }
-  const immediateRequeues = new Set();
   const roleCapacities = {
     advisor: CONC,
     ...reviewRoleCapacities(REVIEW_CONC),
@@ -1851,14 +1872,6 @@ async function drainAccountWithLease(
     };
   };
   let ok = 0, fail = 0;
-  // 只在剩余 FC 时间足以覆盖一只完整任务时补位，避免空闲 advisor
-  // 因固定短窗口闲置，也避免新任务撞上 600 秒运行时硬截止。
-  const deepWork = hasDeepAdviceWork(data);
-  const startDeadline = adviceWorkerStartDeadline({
-    now: Date.now(),
-    leaseExpiresAt: workerLease.expiresAt,
-    deepWork,
-  });
   const progressSaver = createAdviceProgressSaveScheduler(saveWorking);
   const queueProgressSave = (force = false) =>
     progressSaver.schedule(force);
@@ -2002,11 +2015,18 @@ async function drainAccountWithLease(
         roleCapacities,
         new Set(inflight.keys()),
       );
-      const startable = Date.now() < startDeadline
-        ? startCandidates
-        : startCandidates.filter((job) =>
-            immediateRequeues.has(String(job.id || ''))
-          );
+      // 逐任务按 Worker 的实际剩余运行时间判断。初始租约通常只有
+      // 590 秒，直接用 leaseExpiresAt - 任务预算会把深度任务的启动
+      // 窗口压到约 7 秒；OSS 租约由本地 jobWorker 心跳保护，未启动
+      // 的任务在 FC 剩余时间不足时交给 continuation Worker。
+      const startable = startCandidates.filter((job) =>
+        adviceWorkerCanStartJob({
+          now: Date.now(),
+          workerStartedAt,
+          deepMode: !!job.deepMode,
+          reviewEvent: job.trigger || null,
+        })
+      );
       // 处理 queued 里已被外部取消意图标记的
       for (const j of allAdviceJobs(data)) {
         if (j && j.status === 'queued' && j.cancelRequested) {
@@ -2022,7 +2042,6 @@ async function drainAccountWithLease(
         if (!leased) continue;
         const code = j.code;
         const jobId = j.id;
-        immediateRequeues.delete(String(jobId || ''));
         const controller = new AbortController();
         const promise = withAdviceJobDeadline(
           runJobGen(
@@ -2057,7 +2076,8 @@ async function drainAccountWithLease(
 
       if (inflight.size === 0) {
         if (!hasPendingWork(acc.data)) break;   // 无在跑 + 无待办 → 完成
-        if (Date.now() >= startDeadline) break; // 留给下一次 cron 续跑，避免撞 FC 600s 硬墙
+        // 剩余 FC 时间不足一只完整任务时留给 continuation Worker，
+        // 不伪造排队进度，也不重跑已经进入模型调用的任务。
         // 有待办却起不来(理论上 free>0 时不会发生)——保护性跳出
         break;
       }
@@ -2076,17 +2096,25 @@ async function drainAccountWithLease(
         done.code,
         { role: done.role, jobId: done.jobId },
       );
+      // Completion validation must distinguish a confirmed trade change from
+      // a transient account read failure. Treating read failure as "changed"
+      // re-runs the full deep model and is the main source of duplicate slow
+      // jobs during OSS/FC hiccups.
       let tradeStateCurrent = true;
+      let tradeStateCheckUnavailable = false;
       if (done.res?.sourceTradeFingerprint) {
         try {
           const latest = await readAccount(nick, undefined, {
             includeAdviceUpdates: false,
           });
-          tradeStateCurrent = !!latest?.data
-            && adviceGenerationStateFingerprint(latest.data)
+          if (!latest?.data) {
+            tradeStateCheckUnavailable = true;
+          } else {
+            tradeStateCurrent = adviceGenerationStateFingerprint(latest.data)
               === done.res.sourceTradeFingerprint;
+          }
         } catch {
-          tradeStateCurrent = false;
+          tradeStateCheckUnavailable = true;
         }
       }
       if (!job || job.id !== done.jobId) {
@@ -2094,7 +2122,7 @@ async function drainAccountWithLease(
       } else if (job.cancelRequested || job.status === 'canceled') { // 运行中被取消 → 丢弃结果
         job.status = 'canceled'; job.finishedAt = Date.now(); job.leaseUntil = 0;
         job.resourceRole = 'none'; job.resourceUnits = 0;
-      } else if (!tradeStateCurrent) {
+      } else if (!tradeStateCurrent && !tradeStateCheckUnavailable) {
         // 生成期间若用户加/减仓、改成本或补录成交，旧结果里的手数和成本已失效。
         // 不消耗重试次数，直接以最新 OSS 账本重跑，绝不把旧建议落盘。
         const requeued = requeueAdviceForTradeChange(
@@ -2104,11 +2132,13 @@ async function drainAccountWithLease(
           done.role,
           done.jobId,
         );
-        if (requeued?.status === 'queued') {
-          immediateRequeues.add(String(done.jobId || ''));
-        } else if (requeued?.status === 'failed') {
+        if (requeued?.status === 'failed') {
           fail++;
         }
+      } else if (tradeStateCheckUnavailable) {
+        failJob(d, done.code, '生成后未能核验最新交易账本，本次不发布；保留上一版建议',
+          Date.now(), done.role, done.jobId);
+        fail++;
       } else if (done.res && done.res.cacheItem) {
         const completion = completeJob(d, done.code, Date.now(), {
           evidenceAsOf: Date.parse(
@@ -2144,30 +2174,6 @@ async function drainAccountWithLease(
           completedAt,
         );
         (d.advice || (d.advice = {}))[done.code] = done.res.cacheItem;
-        const terminalPush = terminalReviewNotification({
-          code: done.code,
-          name: job.name || done.code,
-          advice: done.res.cacheItem?.advice,
-          jobId: done.jobId,
-          alertId: job.trigger?.alertId,
-        });
-        if (terminalPush && !job.terminalPushSentAt) {
-          try {
-            const pushed = await sendPush(
-              Array.isArray(d.pushSubs) ? d.pushSubs : [],
-              terminalPush,
-            );
-            if (pushed.deadEndpoints?.length) {
-              const dead = new Set(pushed.deadEndpoints);
-              d.pushSubs = (d.pushSubs || []).filter(
-                (subscription) => !dead.has(subscription?.endpoint),
-              );
-            }
-            job.terminalPushSentAt = Date.now();
-          } catch {
-            // 推送失败不影响终局结论落盘；前端增量同步仍会展示结果。
-          }
-        }
         if (done.res.logEntry) {
           const log = d.adviceLog || (d.adviceLog = []);
           const dup = log.find((x) =>
@@ -2234,11 +2240,7 @@ async function drainAccountWithLease(
             )
           : null;
         const retry = preOutputRetry || preparationRetry;
-        if (retry?.status === 'queued') {
-          if (!preOutputRetry) {
-            immediateRequeues.add(String(done.jobId || ''));
-          }
-        } else {
+        if (retry?.status !== 'queued') {
           failJob(
             d,
             done.code,
@@ -2272,6 +2274,23 @@ async function drainAccountWithLease(
             history: false,
             verify: true,
           });
+        }
+        if (job.status === 'done' && !job.terminalPushSentAt) {
+          const terminalPush = terminalReviewNotification({
+            code: done.code,
+            name: job.name || done.code,
+            advice: d.advice?.[done.code]?.advice,
+            jobId: done.jobId,
+            alertId: job.trigger?.alertId,
+          });
+          if (terminalPush) {
+            try {
+              const pushed = await sendPush(d.pushSubs || [], terminalPush);
+              const dead = new Set(pushed.deadEndpoints || []);
+              d.pushSubs = (d.pushSubs || []).filter((sub) => !dead.has(sub?.endpoint));
+              job.terminalPushSentAt = Date.now();
+            } catch { /* 结果已持久化，推送失败不改写交易结论。 */ }
+          }
         }
       }
       // 单股结果已独立持久化；完整账号快照交给节流进度或批次收尾压实。
@@ -2511,12 +2530,26 @@ export default async function handler(req, res) {
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
   const op = body.op || 'enqueue';
   // 预热 LLM 配置 → advisorConcurrency() 才能读到最新的端点数(并发上限的权威来源)
-  if (!['cancel', 'cancelAll'].includes(op)) {
+  if (!['cancel', 'cancelAll', 'trackConditions'].includes(op)) {
     try { await ensureConfig(); } catch { /* 读失败回退 env 基线,不阻断 */ }
   }
 
   const scope = ['all', 'hold', 'watch'].includes(body.scope) ? body.scope : 'all';
   const force = body.force != null ? !!body.force : true;   // 用户主动生成默认强制重生成
+
+  if (op === 'trackConditions') {
+    try {
+      const auth = await authorizePaidRequest(req);
+      if (!auth.ok || !auth.account) {
+        res.statusCode = 403;
+        return res.end(JSON.stringify({ ok: false, error: '请先登录有权限的账号' }));
+      }
+      return res.end(JSON.stringify(await evaluateAccountMonitoring(auth.account)));
+    } catch {
+      res.statusCode = 503;
+      return res.end(JSON.stringify({ ok: false, error: '条件跟踪暂未同步，云端将接续检查' }));
+    }
+  }
 
   if (op === 'triggerPriceReview') {
     try {
@@ -2928,6 +2961,28 @@ export default async function handler(req, res) {
   const started = Date.now();
   const stopHeartbeat = startJsonHeartbeat(res);
   try {
+    // Timer/worker continuation already carries the target account. Avoid the
+    // expensive list-all/read/persist/read sequence here: it consumes the
+    // same FC window needed to start a deep task and can make a healthy queue
+    // appear stuck before the worker is even entered.
+    if (onlyNick && body.resumeOnly === true) {
+      const dr = await drainAccount(onlyNick);
+      stopHeartbeat();
+      return endWorkerResponse(res, {
+        ok: true,
+        scope,
+        accounts: 1,
+        ok2: dr?.ok || 0,
+        fail: dr?.fail || 0,
+        elapsedMs: Date.now() - started,
+        summary: [{
+          nick: onlyNick,
+          ...(dr?.skipped
+            ? { skipped: dr.skipped }
+            : { ok: dr?.ok || 0, fail: dr?.fail || 0 }),
+        }],
+      });
+    }
     let accounts = await listAllAccounts();
     if (onlyNick) accounts = accounts.filter((a) => a.nick === onlyNick);
     const summary = [];

@@ -5,8 +5,8 @@ function money(value) {
   return Math.floor(value).toLocaleString('zh-CN')
 }
 
-export default function AccountRiskStrip({ book, quotes }) {
-  const risk = buildAccountRiskContext(book, quotes)
+export default function AccountRiskStrip({ book, quotes, risk: suppliedRisk }) {
+  const risk = suppliedRisk || buildAccountRiskContext(book, quotes)
   return (
     <section className="account-risk-strip" aria-label="账户风险预算">
       <div className="account-risk-metrics">

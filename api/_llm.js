@@ -7,7 +7,8 @@ import { applyCors } from './_lib.js';
 import { currentConfig } from './_llm_config.js';
 import {
   endpointsForRole,
-  markEndpointUnusable,
+  markAborted,
+  markFailure,
   markSuccess,
   modelForEndpoint,
   poolFetch,
@@ -113,7 +114,10 @@ export async function callChat({
               Date.now() - Number(attemptStartedAt || Date.now()),
             );
           }
-          else markEndpointUnusable(endpoint.id, Date.now(), true);
+          else if (useSignal?.aborted) markAborted(endpoint.id);
+          // 正常收到响应头但流内容为空/不完整，按一次真实失败计数。
+          // 统一遵守端点连续失败阈值，避免单次深度模型空流就冷却整路 60 秒。
+          else markFailure(endpoint.id);
         } finally {
           releaseRole();
         }
@@ -189,13 +193,32 @@ export async function pumpStream(resp, onPiece) {
       buf = buf.slice(idx + 1);
       if (!line || !line.startsWith('data:')) continue;
       const data = line.slice(5).trim();
-      if (data === '[DONE]') return full;
+      if (data === '[DONE]') {
+        try { await reader.cancel(); } catch { /* ignore */ }
+        return full;
+      }
       try {
         const j = JSON.parse(data);
         const piece = j.choices?.[0]?.delta?.content || '';
         if (piece) { full += piece; onPiece(piece); }
+        // Some gateways emit finish_reason but omit [DONE]. Once the
+        // complete response is framed, stop reading instead of waiting for
+        // the proxy to close the TCP stream until the request timeout.
+        if (j.choices?.[0]?.finish_reason) {
+          try { await reader.cancel(); } catch { /* ignore */ }
+          return full;
+        }
       } catch { /* 非完整 JSON 行，忽略 */ }
     }
+  }
+  if (buf.trim()) {
+    const line = buf.trim();
+    const data = line.startsWith('data:') ? line.slice(5).trim() : line;
+    try {
+      const j = JSON.parse(data);
+      const piece = j.choices?.[0]?.delta?.content || '';
+      if (piece) { full += piece; onPiece(piece); }
+    } catch { /* trailing partial frame */ }
   }
   return full;
 }
@@ -211,6 +234,26 @@ export async function pumpStream(resp, onPiece) {
 export async function pumpChatStream(resp, { onReasoning, onContent } = {}) {
   let content = '', reasoning = '', finishReason = '', interrupted = false;
   if (!resp || !resp.body || typeof resp.body.getReader !== 'function') return { content, reasoning, finishReason };
+  // A few compatible gateways ignore stream=true and return one JSON
+  // completion. Treat it as a valid completion instead of silently parsing
+  // it as an empty SSE stream and reporting a generation failure.
+  const contentType = String(resp.headers?.get?.('content-type') || '').toLowerCase();
+  if (contentType && !contentType.includes('text/event-stream')) {
+    try {
+      const payload = await resp.json();
+      const message = payload?.choices?.[0]?.message || {};
+      content = String(message.content || '');
+      reasoning = String(
+        message.reasoning_content || message.reasoning || '',
+      );
+      finishReason = String(payload?.choices?.[0]?.finish_reason || 'stop');
+      if (reasoning && typeof onReasoning === 'function') onReasoning(reasoning);
+      if (content && typeof onContent === 'function') onContent(content);
+      return { content, reasoning, finishReason, interrupted };
+    } catch {
+      // Fall through to the reader for test doubles/proxies without headers.
+    }
+  }
   const reader = resp.body.getReader();
   const decoder = new TextDecoder('utf-8');
   let buf = '';
@@ -243,41 +286,40 @@ export async function pumpChatStream(resp, { onReasoning, onContent } = {}) {
       }
     }
   };
+  const consumeLine = (line) => {
+    if (!line.startsWith('data:')) return false;
+    const data = line.slice(5).trim();
+    if (data === '[DONE]') return true;
+    let j;
+    try { j = JSON.parse(data); } catch { return false; }
+    const delta = j.choices?.[0]?.delta || j.choices?.[0]?.message || {};
+    const rc = delta.reasoning_content || delta.reasoning || '';
+    const cc = delta.content || '';
+    if (rc) {
+      reasoning += rc;
+      try { onReasoning?.(rc); } catch { /* Progress observers cannot discard output. */ }
+    }
+    if (cc) feedContent(cc);
+    const fr = j.choices?.[0]?.finish_reason;
+    if (fr) finishReason = fr;
+    return !!fr;
+  };
   try {
-    while (true) {
+    let completed = false;
+    while (!completed) {
       const { value, done } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
+      buf += done ? decoder.decode() : decoder.decode(value, { stream: true });
+      if (done && buf.trim()) buf += '\n';
       let idx;
       while ((idx = buf.indexOf('\n')) >= 0) {
         const line = buf.slice(0, idx).trim();
         buf = buf.slice(idx + 1);
-        if (!line || !line.startsWith('data:')) continue;
-        const data = line.slice(5).trim();
-        if (data === '[DONE]') {
-          if (pend) {
-            if (inThink) {
-              reasoning += pend;
-              if (typeof onReasoning === 'function') onReasoning(pend);
-            } else {
-              content += pend;
-              if (typeof onContent === 'function') onContent(pend);
-            }
-            pend = '';
-          }
-          return { content, reasoning, finishReason, interrupted };
-        }
-        try {
-          const j = JSON.parse(data);
-          const delta = j.choices?.[0]?.delta || {};
-          const rc = delta.reasoning_content || delta.reasoning || '';
-          const cc = delta.content || '';
-          if (rc) { reasoning += rc; if (typeof onReasoning === 'function') onReasoning(rc); }
-          if (cc) feedContent(cc);   // 内联 <think> 拆分:标签内计入 reasoning,标签外计入 content
-          const fr = j.choices?.[0]?.finish_reason;
-          if (fr) finishReason = fr;
-        } catch { /* 非完整 JSON 行，忽略 */ }
+        if (consumeLine(line)) { completed = true; break; }
       }
+      if (done) break;
+    }
+    if (completed) {
+      try { void reader.cancel().catch(() => {}); } catch { /* Ignore cleanup failure. */ }
     }
   } catch {
     // 上游可能在已流出部分 token 后重置连接；保留已收到内容供调用方救援。
@@ -310,7 +352,13 @@ export async function pumpChatStream(resp, { onReasoning, onContent } = {}) {
 export function parseLLMJson(content) {
   let raw = content || '';
   // ★防御:内联思维链 <think>…</think>(含被截断的未闭合 <think>)先剥掉,否则 JSON 解析必失败。
-  raw = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/<think>[\s\S]*$/i, '').trim();
+  raw = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/<think>[\s\S]*$/i, '');
+  // ★防御:剥除不可见字符(零宽空格 U+200B、零宽不连字 U+200C、零宽连字 U+200D、
+  //   文字方向符 U+200E~U+200F、双向控制 U+202A~U+202E、BOM/零宽不换行空格 U+FEFF、
+  //   对象替换符 U+FFFC、词连接符 U+2060、不可见运算符 U+2061~U+2064、
+  //   不换行空格 U+00A0、行/段分隔符 U+2028/U+2029)。
+  //   gpt-5.6-terra 等网关会在 JSON 开头/字符串值内夹带这些字符,导致 JSON.parse 失败。
+  raw = raw.replace(/[\u00A0\u200B-\u200F\u2028\u2029\u202A-\u202E\u2060-\u2064\uFEFF\uFFFC]/g, '').trim();
 
   // —— A: 直接解析 ——
   try {

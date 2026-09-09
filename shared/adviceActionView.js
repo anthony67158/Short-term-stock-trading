@@ -34,7 +34,7 @@ const clamp = (value, low = 0, high = 100) =>
 function quantityText(value, verb = '') {
   if (value == null || value === '') return ''
   const text = clean(value, 40)
-  if (!text || /无需|不操作|不可|观望|持有\s*0|0\s*手/.test(text)) return ''
+  if (!text || /无需|不操作|不可|观望/.test(text)) return ''
   const match = text.match(/\d+(?:\.\d+)?/)
   if (!match || !(Number(match[0]) > 0)) return ''
   if (/手/.test(text)) return text
@@ -44,6 +44,7 @@ function quantityText(value, verb = '') {
 function actionKind(advice, mode) {
   const action = clean(advice.action || advice.stance, 80)
   if (/观望|等待|回避|不建议|暂不/.test(action)) return 'wait'
+  if (/条件(?:买入|加仓|试仓|建仓)/.test(action)) return 'wait'
   if (/清仓|卖出|止损|离场|退出/.test(action)) return 'sell'
   if (/减仓|止盈/.test(action)) return 'reduce'
   if (/加仓|补仓|接回|买回/.test(action)) return 'add'
@@ -124,6 +125,7 @@ function withPriceBasis(levels, advice = {}) {
 }
 
 function deferredOpportunityView(plan, executionOpen) {
+  if (plan?.entryBudget?.state === 'BLOCKED') return null
   const policy = plan?.actionPolicy || {}
   const nextSession = policy.nextSessionPlan
   const entryIntent = policy.entryIntent
@@ -163,9 +165,6 @@ function deferredOpportunityView(plan, executionOpen) {
   ) ? `仓位≤${maxPositionPct}%` : ''
   const liveReview = executionOpen === true
   const subject = addSide ? '加仓方向' : '买入方向'
-  const outcome = addSide
-    ? '具体加仓价和手数'
-    : '具体买入价和手数'
   const reviewTrigger = next.trigger
     || `${next.sessionLabel || '下一交易时段盘中'}确认入场时机`
   return {
@@ -181,7 +180,7 @@ function deferredOpportunityView(plan, executionOpen) {
     quantityLabel,
     cardInstruction: clean(reviewTrigger, 120),
     instruction: clean(
-      `${subject}已通过；${reviewTrigger}；确认通过后给出${outcome}${quantityLabel ? `，${quantityLabel}` : ''}，由你人工确认`,
+      `${subject}已通过；${reviewTrigger}；到价后由你人工确认执行${quantityLabel ? `，${quantityLabel}` : ''}`,
       240,
     ),
     trigger: {
@@ -206,13 +205,18 @@ function deferredOpportunityView(plan, executionOpen) {
 function levelsFor(kind, advice, triggerDirection = '', followUp = null) {
   const entryPrice = advice.buyPrice ?? advice.addPrice
   if (kind === 'wait') {
-    return adviceObservationLevels(advice).map((item) => ({
+    const observations = adviceObservationLevels(advice).map((item) => ({
       key: item.key,
       label: item.label,
       price: item.price,
       tone: item.direction === 'GTE' ? 'buy' : 'muted',
       active: false,
     }))
+    const stopPrice = finite(advice.stopPrice)
+    const targetPrice = finite(advice.targetPrice)
+    const stop = level('stop', '止损价', stopPrice, 'risk', false)
+    const target = level('target', '目标价', targetPrice, 'sell', false)
+    return [...observations, stop, target].filter(Boolean)
   }
   if (kind === 'buy') {
     return [
@@ -353,7 +357,7 @@ function pendingManualEntryProposal({
   ) return null
   const buyPrice = finite(advice.buyPrice)
   const quantity = quantityText(
-    advice.planQtyNum ?? advice.planQty ?? advice.opQty,
+    plan ? plan.entryBudget?.lots : advice.planQtyNum ?? advice.planQty ?? advice.opQty,
   )
   const explicitlyPlansEntry = (
     /人工确认.*(?:买入|建仓|试仓)/.test(instruction)
@@ -454,6 +458,7 @@ export function buildAdviceActionView(
     executionOpen = null,
     holdQty = null,
     sellableTodayQty = null,
+    now = Date.now(),
   } = {},
 ) {
   advice = normalizeFullExitAdvice(advice, {
@@ -463,6 +468,26 @@ export function buildAdviceActionView(
   const plan = advice.decisionPlan?.schemaVersion === 'decision-plan.v2'
     ? advice.decisionPlan
     : null
+  const expiresAt = new Date(plan?.validUntil ?? advice.expireAt ?? NaN).getTime()
+  if (Number.isFinite(expiresAt) && expiresAt <= now) {
+    return {
+      kind: mode === 'hold_advice' ? 'hold' : 'wait',
+      action: '计划已过期',
+      instruction: mode === 'hold_advice'
+        ? '旧加减仓指令已过期；已有止损纪律仍保留，重新评估当前持仓'
+        : '本计划已过期，不按旧买点下单；重新评估后再执行',
+      quantity: '',
+      quantityLabel: '',
+      levels: mode === 'hold_advice'
+        ? [level('stop', '止损价', plan?.prices?.stop, 'risk', false)].filter(Boolean)
+        : [],
+      trigger: { direction: 'inactive', price: null, label: '计划已结束',
+        stateLabel: '已过期', metricLabel: '重新评估' },
+      actionable: false,
+      actionability: 'EXPIRED',
+      expireAt: expiresAt,
+    }
+  }
   const terminalOutcome = advice.reviewDecision?.terminal === true
     ? clean(advice.reviewDecision.outcome, 30)
     : ''
@@ -541,12 +566,22 @@ export function buildAdviceActionView(
     ? holdingAddReviewPlan(source)
     : null
   const buySide = kind === 'buy'
+  const waitSide = kind === 'wait'
+  const budget = plan?.entryBudget
+  const fallbackQty = budget?.state === 'ESTIMATED'
+    && budget.executionAllowed === false
+    ? quantityText(budget.lots)
+    : ''
   const quantity = buySide
-    ? quantityText(source.planQtyNum ?? source.planQty)
-    : quantityText(source.opQty)
+    ? quantityText(plan
+        ? plan.quantity?.lots
+        : source.planQtyNum ?? source.planQty ?? fallbackQty)
+    : waitSide
+      ? plan ? fallbackQty : quantityText(source.planQtyNum || source.planQty || source.opQty)
+      : quantityText(source.opQty)
   const action = clean(source.action || source.stance, 80)
   const baseInstruction = clean(
-    plan?.actionability === 'BLOCKED'
+    plan?.actionability === 'BLOCKED' || budget?.state === 'BLOCKED'
       ? (plan.blockedReasons || []).join('；')
       : source.actionPlan
         || source.nextAction
@@ -561,7 +596,7 @@ export function buildAdviceActionView(
       : baseInstruction,
   )
   const current = finite(currentPrice)
-  const policyOpportunity = deferredOpportunityView(
+  const policyOpportunity = !terminalOutcome && deferredOpportunityView(
     plan,
     executionOpen,
   )
@@ -623,16 +658,23 @@ export function buildAdviceActionView(
     ? preferredWaitLevel(allLevels, source, current)
     : null
   const levels = kind === 'wait' && primaryWaitLevel
-    ? [primaryWaitLevel]
+    ? [
+        primaryWaitLevel,
+        ...allLevels.filter((item) =>
+          item.key === 'stop' || item.key === 'target',
+        ),
+      ]
     : allLevels
   const instruction = (
     kind === 'wait'
     && primaryWaitLevel
     && !policyOpportunity
+    && budget?.state !== 'BLOCKED'
+    && plan?.actionability !== 'BLOCKED'
   )
     ? waitPathInstruction(
         primaryWaitLevel,
-        quantityText(advice.planQtyNum ?? advice.planQty),
+        quantity,
       )
     : initialInstruction
   const entry = levels.find((item) =>
@@ -697,7 +739,9 @@ export function buildAdviceActionView(
         deferredInstruction,
         { holdingMode },
       ),
-      quantity: '',
+      quantity: plan
+        ? quantityText(plan.quantity?.lots)
+        : fallbackQty || '',
       quantityLabel: deferredOpportunity?.quantityLabel,
       levels: [{
         ...entry,
@@ -796,7 +840,10 @@ export function buildAdviceActionView(
       ),
     instruction: displayInstruction,
     quantity,
-    quantityLabel: deferredWaitPlan?.quantityLabel,
+    quantityLabel: [
+      fallbackQty ? '预案最多' : '',
+      deferredWaitPlan?.quantityLabel,
+    ].filter(Boolean).join(' · '),
     levels,
     trigger: terminalOutcome
       ? {
@@ -822,12 +869,14 @@ export function buildAdviceActionView(
       ? true
       : manualProbe,
     actionable: plan
-      ? ['READY', 'MANUAL_PROBE'].includes(plan.actionability)
+      ? executionOpen !== false && ['READY', 'MANUAL_PROBE'].includes(plan.actionability)
       : !['wait', 'hold'].includes(kind),
     deferred: deferredWait,
     deferredReason: deferredWait
       ? '当前不在连续竞价时段'
       : '',
+    expireAt: finite(source.expireAt),
+    todayAction: clean(source.todayAction || source.action, 20),
   }
 }
 

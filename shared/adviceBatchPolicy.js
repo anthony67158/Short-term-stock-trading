@@ -92,7 +92,14 @@ export function adviceCompleteness(advice, mode = '') {
   }
 }
 
-export function completeAdviceHorizonFields(advice, mode = '') {
+function endOfTradingDay(now = Date.now()) {
+  const d = new Date(now + 8 * 3600 * 1000)
+  d.setUTCHours(15, 0, 0, 0)
+  const end = d.getTime() - 8 * 3600 * 1000
+  return end > now ? end : now + 4 * 3600 * 1000
+}
+
+export function completeAdviceHorizonFields(advice, mode = '', now = Date.now()) {
   if (!advice || typeof advice !== 'object' || advice.raw) return advice
   const action = text(advice.action || advice.stance)
   const requiresPlan = (
@@ -102,9 +109,14 @@ export function completeAdviceHorizonFields(advice, mode = '') {
       && /立即买入|回调再买|小仓试错|买入/.test(action)
     )
   )
-  if (!requiresPlan) return advice
-  return {
+  const patched = {
     ...advice,
+    todayAction: action || advice.todayAction || '观望',
+    expireAt: advice.expireAt || endOfTradingDay(now),
+  }
+  if (!requiresPlan) return patched
+  return {
+    ...patched,
     nextOpenPlan: text(advice.nextOpenPlan) || (
       mode === 'hold_advice'
         ? '高开按目标或减仓条件执行，平开继续核对量价，低开优先守止损条件。'

@@ -5,6 +5,7 @@ import {
   adviceRuntimeUpdateFromData,
   adviceJobDeadlineMs,
   adviceWorkerStartDeadline,
+  adviceWorkerCanStartJob,
   adviceWorkerStartWindowMs,
   adviceFailureReason,
   adviceTradeStateMatches,
@@ -533,7 +534,7 @@ test('完整深度任务使用FC可用窗口并在硬截止后释放资源', asy
   )
 
   assert.equal(aborted, true)
-  assert.equal(adviceJobDeadlineMs(true), 583000)
+  assert.equal(adviceJobDeadlineMs(true), 403000)
   assert.ok(adviceJobDeadlineMs(true) < 600000)
   assert.ok(adviceJobDeadlineMs(false) < 110000)
   assert.equal(adviceJobDeadlineMs(false, {
@@ -548,11 +549,11 @@ test('完整深度任务使用FC可用窗口并在硬截止后释放资源', asy
   }, 1000) < 110000)
 })
 
-test('深度Worker只在启动窗口内接收首批完整任务', () => {
+test('深度Worker为完整预算保留足够的连续调度窗口', () => {
   assert.equal(adviceWorkerStartWindowMs(false), 300000)
-  assert.equal(adviceWorkerStartWindowMs(true), 40000)
+  assert.ok(adviceWorkerStartWindowMs(true) > 0)
   assert.ok(
-    adviceWorkerStartWindowMs(true) < adviceJobDeadlineMs(true),
+    adviceWorkerStartWindowMs(true) + adviceJobDeadlineMs(true) + 30000 <= 600000,
   )
 })
 
@@ -569,6 +570,37 @@ test('Worker只在原子租约剩余时间足够完成整只任务时补位', ()
   assert.ok(
     leaseExpiresAt - deadline
       >= adviceJobDeadlineMs(true),
+  )
+})
+
+test('深度Worker按FC实际剩余预算补位，不受初始OSS租约过早截止影响', () => {
+  const workerStartedAt = 1000
+  const deepBudget = adviceJobDeadlineMs(true)
+
+  assert.equal(
+    adviceWorkerCanStartJob({
+      workerStartedAt,
+      now: workerStartedAt + 17_000,
+      deepMode: true,
+    }),
+    true,
+  )
+  assert.equal(
+    adviceWorkerCanStartJob({
+      workerStartedAt,
+      now: workerStartedAt + 600_000 - deepBudget + 1,
+      deepMode: true,
+    }),
+    false,
+  )
+  // 深度任务完成后，预算不足时不在当前Worker内重跑，交给续跑Worker。
+  assert.equal(
+    adviceWorkerCanStartJob({
+      workerStartedAt,
+      now: workerStartedAt + 400_000,
+      deepMode: true,
+    }),
+    false,
   )
 })
 
@@ -1105,7 +1137,7 @@ test('Worker合并后采用最新活跃任务的批次且保留旧任务运行�
 
 test('批量任务可收紧单股预算但不能突破安全边界', () => {
   assert.equal(resolveAIBudget(true, 210000), 210000)
-  assert.equal(resolveAIBudget(true, 999999), 540000)
+  assert.equal(resolveAIBudget(true, 999999), 360000)
   assert.equal(resolveAIBudget(true, 1000), 30000)
   assert.equal(resolveAIBudget(false, null), 150000)
 })
@@ -1134,7 +1166,7 @@ test('军师把剩余预算交给唯一模型调用且禁止响应后的整轮�
     remainingMs: 535000,
     reasoning: true,
   }), {
-    timeoutMs: 510000,
+    timeoutMs: 300000,
   })
 })
 

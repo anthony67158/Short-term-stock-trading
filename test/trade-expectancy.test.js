@@ -6,6 +6,20 @@ import {
   buildTradeExpectancy,
 } from '../shared/tradeExpectancy.js'
 
+test('先跌破止损后触及目标也算命中的模型不能冒充交易胜率', () => {
+  const result = buildTradeExpectancy({
+    action: 'BUY', referencePrice: 10, stopPrice: 9, targetPrice: 12,
+    quantityLots: 2,
+    quant: { highConfSignal: {
+      fired: true, credibility: 95, buyPrice: 10, stopLoss: 9, takeProfit: 12,
+      label: '5日内触及 +20% 止盈',
+    } },
+  })
+  assert.equal(result.probability.pWinGivenFill, null)
+  assert.equal(result.gate.allowsRiskIncrease, false)
+  assert.match(result.gate.reason, /未估计止损前盈利概率/)
+})
+
 test('价格合同按双边滑点和真实费用计算费后盈亏平衡胜率', () => {
   const result = buildTradeExpectancy({
     action: 'BUY',

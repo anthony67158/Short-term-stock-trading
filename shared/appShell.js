@@ -1,21 +1,21 @@
 export const APP_SECTIONS = Object.freeze([
   {
     key: 'today',
-    label: '市场与选股',
-    shortLabel: '选股',
+    label: '今日作战',
+    shortLabel: '作战',
     icon: 'radar',
-    description: '先看环境与军师结论，再决定今天是否出手。',
+    description: '先处理当前指令，再查看等待条件和今日机会。',
   },
   {
     key: 'plan',
-    label: '交易与持仓',
-    shortLabel: '交易',
+    label: '持仓管理',
+    shortLabel: '持仓',
     icon: 'wallet',
-    description: '管理持仓、自选、做 T 与价格触发计划。',
+    description: '管理持仓、自选、执行计划与真实成交。',
   },
   {
     key: 'hub',
-    label: '复盘与改进',
+    label: '交易复盘',
     shortLabel: '复盘',
     icon: 'gauge',
     description: '核对资产、预警、交易记录与执行质量。',

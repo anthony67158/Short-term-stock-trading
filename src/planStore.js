@@ -32,6 +32,7 @@ import {
 } from '../shared/adviceOutcome.js'
 import { evaluateKnowledgeActionCycle } from '../shared/knowledgeAction.js'
 import { mergeReviewsByTimestamp } from '../shared/reviewSchedule.js'
+import { buildAdviceActionView } from '../shared/adviceActionView.js'
 import {
   TRIGGERED_REVIEW_TOTAL_BUDGET_MS,
 } from '../shared/triggeredReviewDecision.js'
@@ -73,6 +74,7 @@ import {
   isAdviceReviewEnabled,
   setAdviceReviewEnabled as withAdviceReviewEnabled,
 } from '../shared/adviceReviewPolicy.js'
+import { isContinuousTrading } from '../shared/tradingCalendar.js'
 import {
   mergeStockNotesByTimestamp,
   normalizeStockNoteText,
@@ -217,6 +219,246 @@ export function adviceFocus(code) {
   } catch { return null }
 }
 
+const ACTIVE_EXECUTION_STATES = new Set([
+  'ARMED',
+  'ALERTED',
+  'USER_CONFIRMED',
+  'PARTIALLY_RECORDED',
+])
+
+function commandPriority(command) {
+  return {
+    CONFLICT: 0,
+    RISK_EXIT: 0,
+    READY_EXIT: 1,
+    RECORD: 2,
+    READY: 2,
+    RISK_BLOCKED: 3,
+    CONFIRMING: 3,
+    WAITING: 4,
+    HOLDING: 5,
+    EMPTY: 6,
+    ENDED: 7,
+  }[command.state] ?? 8
+}
+
+function executionPlanForCode(plans = [], code = '') {
+  return plans
+    .filter((plan) =>
+      plan?.code === code
+      && !plan.dismissedAt
+      && ACTIVE_EXECUTION_STATES.has(plan.status)
+    )
+    .sort((left, right) =>
+      Number(right.updatedAt || right.createdAt || 0)
+      - Number(left.updatedAt || left.createdAt || 0)
+    )[0] || null
+}
+
+function conflictsWithPlan(plan, kind) {
+  if (!plan || !kind) return false
+  if (plan.side === 'BUY') return ['reduce', 'sell'].includes(kind)
+  if (plan.side === 'SELL') return ['buy', 'add'].includes(kind)
+  return false
+}
+
+export function buildTodayCommandList({
+  book = {},
+  quoteMap = {},
+  adviceFor = () => null,
+  now = Date.now(),
+  currentRisk = null,
+  marketRegime = null,
+} = {}) {
+  const items = []
+  const holding = Array.isArray(book.holding) ? book.holding : []
+  const watchlist = Array.isArray(book.plan) ? book.plan : []
+  const all = [...holding, ...watchlist]
+  const seen = new Set()
+  for (const item of all) {
+    if (!item?.code || seen.has(item.code)) continue
+    seen.add(item.code)
+    const isHolding = holding.some((h) => h.code === item.code)
+    const mode = isHolding ? 'hold_advice' : 'buy_advice'
+    const entry = adviceFor(item.code, mode)
+    const advice = entry?.advice || null
+    const quote = quoteMap[item.code] || {}
+    const currentPrice = Number(quote.price) || null
+    const alerts = (book.alerts || []).filter((alert) =>
+      String(alert.candCode || alert.code || '') === String(item.code)
+    )
+    const alertPhase = alerts.find((a) => a.phase === 'confirming')
+      ? 'confirming'
+      : alerts.find((a) => a.phase === 'reviewing')
+        ? 'reviewing'
+        : alerts.find((a) => a.phase === 'watching')
+          ? 'watching'
+          : null
+    let kind = 'hold'
+    let distancePct = null
+    let actionLabel = '持有'
+    let keyPrice = null
+    let view = null
+    if (advice) {
+      view = buildAdviceActionView(advice, {
+        mode,
+        currentPrice,
+        executionOpen: isContinuousTrading(now),
+        now,
+      })
+      kind = view?.kind || 'hold'
+      actionLabel = view?.action || '持有'
+      const level = view?.levels?.[0]
+      if (level?.price != null && currentPrice > 0) {
+        distancePct = Math.abs(level.price / currentPrice - 1) * 100
+        keyPrice = level.price
+      }
+    } else if (!isHolding) {
+      kind = 'none'
+      actionLabel = '待生成建议'
+    }
+    const executionPlan = executionPlanForCode(
+      book.executionPlans || [],
+      item.code,
+    )
+    const planConflict = conflictsWithPlan(executionPlan, kind)
+    const executionReady = executionPlan
+      && ['ALERTED', 'USER_CONFIRMED', 'PARTIALLY_RECORDED']
+        .includes(executionPlan.status)
+    const exitSide = ['reduce', 'sell'].includes(kind)
+      || executionPlan?.side === 'SELL'
+    const expired = (
+      executionPlan?.validUntil
+      || advice?.decisionPlan?.validUntil
+      || advice?.expireAt
+    )
+      ? new Date(
+          executionPlan?.validUntil
+          || advice?.decisionPlan?.validUntil
+          || advice?.expireAt,
+        ).getTime() <= now
+      : false
+    const sameDecisionFinished = (book.executionPlans || []).some((item) =>
+      ['COMPLETED', 'CANCELED', 'EXPIRED'].includes(item.status)
+      && item.decisionId && item.decisionId === advice?.decisionPlan?.decisionId,
+    )
+    const stop = Number(item.sl ?? advice?.decisionPlan?.prices?.stop)
+    const stopReached = isHolding && stop > 0 && currentPrice > 0 && currentPrice <= stop
+      && isContinuousTrading(now) && quote.isLivePrice !== false
+    const sellable = stopReached
+      ? sharedT1Status(holding, book.closed || [], item.code, now).sellableToday
+      : null
+    const commandState = stopReached
+      ? 'RISK_EXIT'
+      : planConflict
+      ? 'CONFLICT'
+      : expired || sameDecisionFinished
+        ? 'ENDED'
+      : ['USER_CONFIRMED', 'PARTIALLY_RECORDED'].includes(executionPlan?.status)
+        ? 'RECORD'
+      : executionReady && isContinuousTrading(now)
+        ? exitSide ? 'READY_EXIT' : 'READY'
+        : ['confirming', 'reviewing'].includes(alertPhase)
+          ? 'CONFIRMING'
+          : view?.actionable === true
+            && ['buy', 'add', 'reduce', 'sell'].includes(kind)
+            ? exitSide ? 'READY_EXIT' : 'READY'
+            : executionPlan
+              || alertPhase === 'watching'
+              || view?.deferred === true
+              || kind === 'wait'
+              ? 'WAITING'
+              : advice?.reviewDecision?.terminal === true
+                ? 'ENDED'
+                : kind === 'hold' ? 'HOLDING' : 'EMPTY'
+    const command = {
+      code: item.code,
+      name: item.name || item.code,
+      isHolding,
+      kind,
+      state: commandState,
+      actionLabel: stopReached
+        ? sellable > 0 ? '触及止损，核对退出' : '触及止损，今日仓位锁定'
+        : planConflict
+        ? '计划冲突，暂停操作'
+        : executionPlan?.actionLabel || actionLabel,
+      alertPhase,
+      distancePct: distancePct != null ? +distancePct.toFixed(2) : null,
+      keyPrice: executionPlan?.triggerPrice
+        ?? executionPlan?.referencePrice
+        ?? keyPrice,
+      quantity: executionPlan
+        ? `${executionPlan.remainingLots}/${executionPlan.targetLots}手`
+        : view?.quantity || '',
+      instruction: stopReached
+        ? `现价${currentPrice}元已到止损${stop}元；今日可卖${sellable || 0}手，不加仓摊平`
+        : planConflict
+        ? '执行队列与最新建议方向相反，请先取消旧计划或重新生成'
+        : executionPlan?.trigger || view?.instruction || '',
+      stopPrice: executionPlan?.stopPrice
+        ?? advice?.decisionPlan?.prices?.stop
+        ?? null,
+      riskAmount: executionPlan?.riskAmount
+        ?? advice?.decisionPlan?.entryBudget?.stopLossAmount
+        ?? advice?.decisionPlan?.risk?.tradeExpectancy?.plan?.lossAmount
+        ?? null,
+      validUntil: executionPlan?.validUntil
+        ?? advice?.decisionPlan?.validUntil
+        ?? advice?.expireAt
+        ?? null,
+      executionPlanId: executionPlan?.planId || null,
+      priority: 0,
+    }
+    if (command.state === 'READY') {
+      const riskBlockers = currentRisk?.breaker?.blockers || []
+      const approvedWeakProbe = marketRegime?.regime === 'RISK_OFF'
+        && marketRegime.dataQuality === 'COMPLETE'
+        && marketRegime.hardRiskOff !== true
+        && advice?.decisionPlan?.marketRegime?.regime === 'RISK_OFF'
+        && advice?.decisionPlan?.actionPolicy?.riskTier === 'PROBE'
+        && ['READY', 'MANUAL_PROBE'].includes(advice?.decisionPlan?.actionability)
+        && advice?.decisionPlan?.quantity?.lots > 0
+      const marketBlocked = marketRegime
+        && marketRegime.allowRiskIncrease !== true
+        && !approvedWeakProbe
+      const accountBlocked = currentRisk
+        && (!currentRisk.complete || currentRisk.breaker?.allowRiskIncrease !== true)
+      if (marketBlocked || accountBlocked) {
+        command.state = 'RISK_BLOCKED'
+        command.actionLabel = '暂停新增仓位'
+        command.quantity = ''
+        command.keyPrice = null
+        command.instruction = [
+          ...riskBlockers.map((item) => `${item.message}${
+            item.value != null && item.limit > 0
+              ? `（当前${item.value}，上限${item.limit}）` : ''
+          }`),
+          currentRisk && !currentRisk.complete ? '账户或报价未完整' : '',
+          marketBlocked ? `市场${marketRegime.label || '状态未确认'}，本轮不买入` : '',
+        ].filter(Boolean).join('；') || '账户风险条件变化，本轮不买入'
+      }
+    }
+    command.priority = commandPriority(command)
+    items.push(command)
+  }
+  return items.sort((left, right) =>
+    left.priority - right.priority
+    || Number(left.distancePct ?? Infinity)
+      - Number(right.distancePct ?? Infinity)
+    || String(left.code).localeCompare(String(right.code))
+  )
+}
+
+export function todayCommandList(quoteMap = {}, now = Date.now(), current = {}) {
+  return buildTodayCommandList({
+    book: state,
+    quoteMap,
+    adviceFor: getAdvice,
+    now,
+    ...current,
+  })
+}
+
 // 计划 / 持仓 交易闭环 store（云端账号驱动：数据由 authStore 登录后注入，变更自动回存云端）
 // plan:   候选   { code, name, note, addedAt }
 // holding: 持仓  { code, name, buyPrice, buyAt, qty, buyFee }  qty=手, buyFee=该持仓总买入手续费
@@ -350,6 +592,7 @@ function snapshot(label) {
 let _saver = null
 let _saveTimer = null
 let _suspend = false // setData 注入时不触发回存
+let _localEditVersion = 0
 function scheduleSave() {
   if (_suspend || !_saver) return
   if (_saveTimer) clearTimeout(_saveTimer)
@@ -426,6 +669,7 @@ function reconcilePositionAlerts(now = Date.now()) {
 
 function emit() {
   reconcilePositionAlerts()
+  if (!_suspend) _localEditVersion++
   state = { ...state }
   listeners.forEach((l) => { try { l() } catch (e) { console.error('[store] listener error', e) } })
   scheduleSave()
@@ -728,6 +972,7 @@ function buildEditedClosedRecord(record, patch = {}) {
 export const planStore = {
   subscribe(l) { listeners.add(l); return () => listeners.delete(l) },
   get() { return state },
+  localEditVersion() { return _localEditVersion },
   flushSave() { return flushPendingSave() },
   armExecutionPlan(draft, now = Date.now(), currentPrice = null) {
     if (draft?.schemaVersion !== 'execution-plan.v1') {
@@ -1120,6 +1365,10 @@ export const planStore = {
       const next = [...additions, ...state.alerts].map((a) => {
         const c = cloudById.get(a.id)
         if (!c) return a
+        if (c.type === 'plan-condition' && Number(c.updatedAt) > Number(a.updatedAt || 0)) {
+          touched = true
+          return { ...a, ...c }
+        }
         if (c.phase === 'superseded' && a.phase !== 'superseded') {
           touched = true
           return { ...a, enabled: false, phase: 'superseded', supersededBy: c.supersededBy, triggeredMsg: c.triggeredMsg || a.triggeredMsg }

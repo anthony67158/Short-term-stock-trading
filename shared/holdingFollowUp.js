@@ -15,7 +15,7 @@ function compactReasons(values = []) {
 }
 
 export function holdingAddReviewPlan(advice = {}) {
-  if (advice?.reviewDecision?.terminal === true) return null
+  if (advice?.reviewDecision?.terminal === true || advice?.monitoringPlan) return null
   const action = String(
     advice?.decisionPlan?.action
     || advice?.action
@@ -59,6 +59,7 @@ export function holdingAddReviewPlan(advice = {}) {
 
   const riskTier = String(policy.riskTier || 'NONE')
   const directionApproved = ['PROBE', 'FULL'].includes(riskTier)
+  if (!directionApproved) return null
   const reasons = compactReasons(policy.reasons)
   const probe = riskTier === 'PROBE'
   const probePositionLimitPct = probe

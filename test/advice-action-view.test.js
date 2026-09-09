@@ -188,8 +188,28 @@ test('买入建议把买入价和首笔手数编译为同一动作视图', () =>
   })
 })
 
-test('立即买入状态明确展示当前可执行价格而不是观察条件', () => {
-  const view = buildAdviceActionView({
+test('正整数手数不能被零手过滤误伤', () => {
+  for (const lots of [1, 10, 20, 21, 30, 100]) {
+    const view = buildAdviceActionView({
+      action: '立即买入',
+      buyPrice: 10,
+      stopPrice: 9.5,
+      targetPrice: 11,
+      planQty: lots,
+    }, { mode: 'buy_advice', executionOpen: true })
+    assert.equal(view.quantity, `${lots}手`)
+
+    const sell = buildAdviceActionView({
+      action: '减仓',
+      reducePrice: 11,
+      opQty: `减仓${lots}手`,
+    }, { mode: 'hold_advice', executionOpen: true })
+    assert.equal(sell.quantity, `减仓${lots}手`)
+  }
+})
+
+test('立即买入状态使用核定手数而不是条件预算', () => {
+  const advice = {
     action: '立即买入',
     buyPrice: 10.02,
     stopPrice: 9.7,
@@ -202,6 +222,7 @@ test('立即买入状态明确展示当前可执行价格而不是观察条件',
       actionLabel: '买入',
       actionability: 'READY',
       manualConfirmationOnly: false,
+      entryBudget: { state: 'ESTIMATED', lots: 21, executionAllowed: false },
       quantity: { lots: 3 },
       prices: {
         reference: 10.02,
@@ -209,7 +230,10 @@ test('立即买入状态明确展示当前可执行价格而不是观察条件',
         target: 10.8,
       },
     },
-  }, { mode: 'buy_advice', currentPrice: 10.02, executionOpen: true })
+  }
+  const view = buildAdviceActionView(advice, {
+    mode: 'buy_advice', currentPrice: 10.02, executionOpen: true,
+  })
 
   assert.equal(view.action, '现在买入')
   assert.equal(view.actionable, true)
@@ -217,6 +241,11 @@ test('立即买入状态明确展示当前可执行价格而不是观察条件',
   assert.equal(view.quantity, '3手')
   assert.equal(view.levels[0].label, '买入价')
   assert.equal(view.levels[0].price, 10.02)
+  const deferred = buildAdviceActionView(advice, {
+    mode: 'buy_advice', currentPrice: 10.02, executionOpen: false,
+  })
+  assert.equal(deferred.actionable, false)
+  assert.equal(deferred.quantity, '3手')
 })
 
 test('休市时旧买入建议在卡片上降级为下一交易时段观察', () => {
@@ -305,7 +334,7 @@ test('休市观望建议关闭系统推荐买入但保留次日条件预案', ()
   )
   assert.match(view.instruction, /回踩15\.2元确认承接/)
   assert.match(view.instruction, /方向已通过/)
-  assert.match(view.instruction, /确认通过后给出具体买入价和手数/)
+  assert.match(view.instruction, /到价后由你人工确认执行/)
 })
 
 test('下一交易日开盘后旧休市建议仍需先复核不能直接恢复买入', () => {
@@ -486,6 +515,25 @@ test('观望建议缺少结构化关注价时仍显示暂不下单状态', () =>
   })
 })
 
+test('观望建议缺少服务端止损目标时不由前端虚构价格', () => {
+  const view = buildAdviceActionView({
+    action: '观望',
+    priceContract: {
+      schemaVersion: 'advice-price-contract.v1',
+      levels: [{
+        key: 'watch_pullback',
+        label: '回踩观察',
+        price: 10,
+        direction: 'LTE',
+        strict: true,
+      }],
+    },
+  }, { mode: 'buy_advice', currentPrice: 10.2 })
+
+  assert.deepEqual(view.levels.map((item) => item.key), ['watch_pullback'])
+  assert.equal(view.quantity, '')
+})
+
 test('候选卡只展示一个主观察路径并明确后续动作', () => {
   const view = buildAdviceActionView({
     action: '观望',
@@ -618,7 +666,7 @@ test('持有建议把加仓和减仓价降级为观察边界并生成区间进�
   })
 })
 
-test('持有建议把战术回踩与突破价编译成双路径加仓复核', () => {
+test('禁止新增风险时动作视图不展示回踩或突破加仓路径', () => {
   const view = buildAdviceActionView({
     action: '持有',
     actionPlan: '今日继续持有',
@@ -639,26 +687,11 @@ test('持有建议把战术回踩与突破价编译成双路径加仓复核', ()
   assert.deepEqual(
     view.levels.map(({ key, label, price }) => ({ key, label, price })),
     [
-      {
-        key: 'holding_add_pullback',
-        label: '回踩加仓复核',
-        price: 50.94,
-      },
-      {
-        key: 'holding_add_breakout',
-        label: '突破加仓复核',
-        price: 52.06,
-      },
       { key: 'stop', label: '止损价', price: 50.89 },
     ],
   )
-  assert.equal(view.trigger.direction, 'review_paths')
-  assert.match(view.instruction, /本轮不直接加仓：成交额不足；量化尚未强确认/)
-  const progress = buildActionProgress(view.trigger, 52.16)
-  assert.equal(progress.reached, true)
-  assert.equal(progress.reachedKey, 'holding_add_breakout')
-  assert.equal(progress.stateLabel, '突破加仓复核已到')
-  assert.equal(progress.reachedHint, '已到价，正在提交复核')
+  assert.equal(view.trigger, null)
+  assert.equal(view.instruction, '今日继续持有')
 })
 
 test('持仓到价终局结论不再生成后续加仓复核路径', () => {

@@ -52,10 +52,129 @@ try {
       results.push({ view, ...geometry })
     }
     await page.goto(preview, { waitUntil: 'networkidle' })
-    await page.getByRole('heading', { level: 1, name: '市场与选股' }).waitFor()
+    await page.getByRole('heading', { level: 1, name: '今日作战' }).waitFor()
+    await page.locator('.combat-command-center').waitFor()
+    assert.equal(
+      await page.locator('.combat-command-group').first()
+        .getByText('演示标准仓').count(),
+      1,
+    )
+    assert.equal(
+      await page.locator('.combat-command-center')
+        .getByText('当前没有需要立即处理的操作。').count(),
+      0,
+    )
     await check('selection')
-    await page.locator('.nav-tabs:visible').getByRole('button', { name: /交易/ }).click()
+    await page.locator('.nav-tabs:visible').getByRole('button', { name: /持仓/ }).click()
     await page.locator('.account-risk-strip').waitFor()
+    await page.locator('.execution-queue').waitFor()
+    const monitoredHolding = page.locator(
+      '.trade-card[data-code="002475"]',
+    )
+    await monitoredHolding.locator('.monitoring-rules').waitFor()
+    assert.equal(
+      await monitoredHolding
+        .locator('.action-command-primary')
+        .textContent(),
+      '继续持有',
+    )
+    assert.equal(
+      await monitoredHolding
+        .locator('.action-command-qty')
+        .textContent(),
+      '1手',
+    )
+    assert.equal(
+      await monitoredHolding
+        .locator('.monitoring-rules-head b')
+        .textContent(),
+      '运行中',
+    )
+    assert.deepEqual(
+      await monitoredHolding
+        .locator('.monitoring-rule strong')
+        .allTextContents(),
+      [
+        '股价≤54元 或 主力净额≤-3亿元 → 清仓1手',
+        '股价≥56元 → 清仓1手',
+        '主力净额≥0亿元 且 股价站上分时均价线持续60秒 → 继续持有',
+      ],
+    )
+    const monitoredText = await monitoredHolding.textContent()
+    assert.doesNotMatch(monitoredText, /51\.88|59\.5/)
+    const monitoredGeometry = await monitoredHolding.evaluate(
+      (element) => {
+        const rows = [
+          ...element.querySelectorAll('.monitoring-rule'),
+        ]
+        const rules = element.querySelector(
+          '.monitoring-rules',
+        )
+        const ruleStyle = rows[0]
+          ? getComputedStyle(rows[0])
+          : null
+        const containerStyle = rules
+          ? getComputedStyle(rules)
+          : null
+        return {
+          width: element.clientWidth,
+          scrollWidth: element.scrollWidth,
+          rules: rows.length,
+          monitoringBorderTop:
+            containerStyle?.borderTopWidth,
+          monitoringBorderRadius:
+            containerStyle?.borderRadius,
+          monitoringBackground:
+            containerStyle?.backgroundColor,
+          ruleBorderTop: ruleStyle?.borderTopWidth,
+          redundantProgress:
+            element.querySelectorAll(
+              '.action-progress',
+            ).length,
+          childrenInsideRows: rows.every((row) => {
+            const bounds = row.getBoundingClientRect()
+            return [...row.children].every((child) => {
+              const childBounds = child.getBoundingClientRect()
+              return childBounds.left >= bounds.left - 1
+                && childBounds.right <= bounds.right + 1
+                && childBounds.top >= bounds.top - 1
+                && childBounds.bottom <= bounds.bottom + 1
+                && child.scrollWidth <= child.clientWidth + 1
+            })
+          }),
+        }
+      },
+    )
+    assert.ok(
+      monitoredGeometry.scrollWidth
+        <= monitoredGeometry.width + 1,
+      JSON.stringify({ width, monitoredGeometry }),
+    )
+    assert.equal(monitoredGeometry.rules, 3)
+    assert.equal(monitoredGeometry.childrenInsideRows, true)
+    assert.equal(monitoredGeometry.monitoringBorderTop, '0px')
+    assert.equal(monitoredGeometry.monitoringBorderRadius, '0px')
+    assert.equal(
+      monitoredGeometry.monitoringBackground,
+      'rgba(0, 0, 0, 0)',
+    )
+    assert.equal(monitoredGeometry.ruleBorderTop, '0px')
+    assert.equal(monitoredGeometry.redundantProgress, 0)
+    results.push({
+      view: 'monitoring-card',
+      width,
+      ...monitoredGeometry,
+    })
+    await monitoredHolding.screenshot({
+      path: `${output}/${width}-monitoring-card.png`,
+    })
+    const conditional = page.locator('.plan-cand').filter({ hasText: '演示候选A' })
+    const approved = page.locator('.plan-cand').filter({ hasText: '演示候选B' })
+    assert.equal(
+      await conditional.locator('.action-command-qty').textContent(),
+      '预案最多 · 20手',
+    )
+    assert.equal(await approved.locator('.action-command-qty').textContent(), '1手')
     await page.locator('.selection-origin > summary').first().click()
     assert.equal(await page.locator('.selection-origin[open]').count(), 1)
     await check('positions')

@@ -179,9 +179,15 @@ export function buildRealOutcomeLearning(
     tradeIntentT: 0,
     missingTransactionId: 0,
     missingNetPnl: 0,
+    simulatedExecutions: 0,
   }
   const records = []
   for (const execution of executions) {
+    if (data.account?.simulation === true || execution.simulation === true
+      || closedById.get(String(execution.transactionId || ''))?.simulation === true) {
+      excluded.simulatedExecutions++
+      continue
+    }
     if (execution.side !== 'sell') {
       excluded.nonExitExecutions++
       continue

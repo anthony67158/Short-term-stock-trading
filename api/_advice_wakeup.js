@@ -29,10 +29,16 @@ function decisionSideOf(alert, verdict) {
 }
 
 export function isCurrentAdvicePlan(alert, adviceEntry) {
+  const decisionId = alert?.judgeContext?.decisionPlan?.decisionId
+  const currentDecisionId = adviceEntry?.advice?.decisionPlan?.decisionId
+  if (decisionId && currentDecisionId && decisionId !== currentDecisionId) return false
   const alertPlanId = String(alert?.judgeContext?.planId || '')
   if (!alertPlanId) return true
   const currentPlanId = String(adviceEntry?.advice?.continuity?.planId || '')
-  return currentPlanId === alertPlanId
+  if (currentPlanId !== alertPlanId) return false
+  const revision = Number(alert?.judgeContext?.planRevision) || 0
+  const currentRevision = Number(adviceEntry?.advice?.continuity?.revision) || 0
+  return !revision || !currentRevision || revision === currentRevision
 }
 
 export function activatePriceReviewTrigger(
@@ -200,11 +206,9 @@ export function queueAdviceReviewForPriceTrigger(
   }
   const idempotencyKey = [
     'price-review',
-    trigger.alertId || code,
-    trigger.planId || 'no-plan',
+    code,
+    alert?.judgeContext?.decisionPlan?.decisionId || trigger.planId || trigger.alertId,
     trigger.planRevision || 0,
-    trigger.direction,
-    trigger.threshold,
   ].join(':')
   const queued = enqueueJob(data, {
     code,
@@ -214,6 +218,17 @@ export function queueAdviceReviewForPriceTrigger(
     trigger,
     idempotencyKey,
   }, now)
+  if (queued.created) {
+    for (const sibling of data.alerts || []) {
+      if (sibling.id !== alert.id && sibling.code === code && sibling.reviewOnly
+        && isCurrentAdvicePlan(sibling, data.advice?.[code])) {
+        sibling.enabled = false
+        sibling.phase = 'superseded'
+        sibling.supersededAt = now
+        sibling.triggeredMsg = '同一计划已有另一条路径进入确认，本路径结束'
+      }
+    }
+  }
   return {
     queued: true,
     created: queued.created,

@@ -211,6 +211,15 @@ export function buildAlertNotification({
   reason = '',
 } = {}) {
   const identity = identityOf(alert)
+  if (alert.type === 'plan-condition') {
+    return {
+      title: `${identity}｜${alert.opQty || '退出条件已满足'}`,
+      body: `${alert.code}｜${reason || alert.triggeredMsg || ''}；人工确认后执行`.slice(0, 180),
+      ...deliveryOf(alert, 'confirm'),
+      code: alert.code, name: alert.name,
+      eventId: `trigger-${alert.id}`, alertId: `trigger-${alert.id}`,
+    }
+  }
   const action = actionOf(alert)
   const holdingMode = (
     ['add', 'reduce'].includes(String(alert.actKind || ''))
@@ -270,7 +279,10 @@ function reviewActionTitle(outcome, actionPlan) {
   const command = plan.match(
     /(?:立即|现在)?(?:买入|加仓|减仓|清仓|卖出|止损)\s*\d+\s*手/,
   )?.[0]
-  return compactText(command || outcome, 22).replace(/\s+/g, '')
+  const instruction = command && /^立即/.test(outcome)
+    ? `立即${command.replace(/^(立即|现在)/, '')}`
+    : command || outcome
+  return compactText(instruction, 22).replace(/\s+/g, '')
 }
 
 export function buildTerminalReviewNotification({
@@ -302,8 +314,13 @@ export function buildTerminalReviewNotification({
   )
   const quiet = /本次不|继续持有|观望|放弃|取消/.test(outcome)
   const id = String(alertId || jobId || code || 'review')
+  const plan = advice.decisionPlan
+  const executable = !quiet && ['READY', 'MANUAL_PROBE'].includes(plan?.actionability)
+    && plan.quantity?.lots > 0
   const facts = [
     name && code && name !== code ? code : '',
+    executable && plan.prices?.reference > 0 ? `核定价${priceText(plan.prices.reference)}元` : '',
+    executable && plan.prices?.stop > 0 ? `止损${priceText(plan.prices.stop)}元` : '',
     quiet && holdingMode ? '本次不加仓、不减仓' : '',
     basis,
   ].filter(Boolean).join('｜').slice(0, 72)

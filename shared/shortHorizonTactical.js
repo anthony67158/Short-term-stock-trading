@@ -615,14 +615,26 @@ function riskIncreaseAssessment(tactical = {}, reviewContext = {}) {
       || '成交额数据未取得，仅允许受控试仓',
     )
   }
+  // 风险由事实决定，不能依赖可变的中文错误文案是否包含某个关键词。
+  const hasHardRisk = (
+    ['INVALID', 'TOO_EXTENDED'].includes(timingState)
+    || riskTone === 'UNKNOWN'
+    || tactical.market?.hardRiskOff === true
+    || (riskTone === 'RISK_OFF' && !weakMarketProbe)
+    || tactical.stock?.liquidity === 'THIN'
+    || tactical.stock?.location === 'EXTENDED'
+    || tactical.stock?.crowdingRisk === 'HIGH'
+    || (tactical.holding?.hasPosition === true
+      && tactical.holding?.addEligible !== true)
+  )
   const canProbe = (
-    hardBlockers.length === 0
+    !hasHardRisk
     && (
-      // 多信号共振：维持原口径
-      (confirmations.length >= 2 && (quant.supportive || flowConfirmed))
-      // 单一强信号即可小仓试错：主力确认流入 / 量化强偏多 / 放量突破已触发
-      || quant.strong
+      quant.supportive
       || flowConfirmed
+      || leadershipConfirmed
+      || strengthConfirmed
+      || technicalConfirmed
       || breakoutTriggerFired
     )
   )
@@ -650,7 +662,7 @@ function riskIncreaseAssessment(tactical = {}, reviewContext = {}) {
   // 放量突破已触发是短线最强进攻信号：配合任一核心确认直接满仓位。
   // 流动性 THIN 已在 hardBlockers 拦截，故此处不再叠加 GOOD 硬门槛。
   const breakoutFull = (
-    hardBlockers.length === 0
+    !hasHardRisk
     && breakoutTriggerFired
     && riskTone !== 'RISK_OFF'
     && coreConfirmed

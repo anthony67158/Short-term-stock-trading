@@ -256,7 +256,16 @@ export function pickEndpoint(config, now = Date.now(), role) {
   const eps = endpointsForRole(config, role);
   if (!eps.length) return null;
   const usable = eps.filter((e) => h(e.id).cooldownUntil <= now);
-  const pool = usable.length ? usable : eps;
+  // 全部端点都在冷却时只做最早到期的一路半开探测。
+  // 继续按负载评分会随机命中更晚到期的端点，造成无意义等待并放大失败率。
+  const pool = usable.length
+    ? usable
+    : [eps.reduce((earliest, endpoint) => (
+        !earliest
+        || h(endpoint.id).cooldownUntil < h(earliest.id).cooldownUntil
+        ? endpoint
+        : earliest
+      ), null)];
   const measuredLatencies = pool
     .map((endpoint) => Number(h(endpoint.id).latencyMs))
     .filter((latency) => Number.isFinite(latency) && latency > 0);
@@ -305,6 +314,13 @@ export function markFailure(id, now = Date.now()) {
   s.inflight = Math.max(0, s.inflight - 1);
   s.fails++;
   if (s.fails >= FAIL_THRESHOLD) s.cooldownUntil = now + COOLDOWN_MS;
+}
+
+// 请求由上层主动取消或总预算到期时，连接确实结束了，但这不是端点故障。
+// 只释放在途计数，保留既有健康分，避免连续取消/超时把健康端点误熔断。
+export function markAborted(id) {
+  const s = h(id);
+  s.inflight = Math.max(0, s.inflight - 1);
 }
 export function markEndpointUnusable(id, now = Date.now(), releaseInflight = false) {
   const state = h(id);
@@ -446,7 +462,10 @@ export async function poolFetch(config, path, {
       continue;
     }
     if (isAbort) {
-      markFailure(ep.id);
+      // 外层 signal 的 AbortError 表示用户取消、Worker 总时限或上游任务清理。
+      // 这类中止不能算端点失败，否则深度任务的正常截止会污染池健康状态。
+      if (signal?.aborted) markAborted(ep.id);
+      else markFailure(ep.id);
       releaseRole();
       return { resp, endpoint: ep };
     }

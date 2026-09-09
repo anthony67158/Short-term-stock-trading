@@ -15,10 +15,7 @@ function preferPlan(current, candidate) {
   if (candidateFilled !== currentFilled) {
     return candidateFilled > currentFilled ? candidate : current
   }
-  if (
-    current.status === 'COMPLETED'
-    || candidate.status === 'COMPLETED'
-  ) {
+  if ((current.status === 'COMPLETED') !== (candidate.status === 'COMPLETED')) {
     return candidate.status === 'COMPLETED' ? candidate : current
   }
   const currentTransitions = Array.isArray(current.transitions)

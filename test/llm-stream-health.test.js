@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  markFailure,
   markEndpointUnusable,
   markStart,
   markSuccess,
@@ -35,6 +36,25 @@ test('空流端点立即冷却，下一次请求切换到备用端点', () => {
   const second = pickEndpoint(config, 1001, 'advisor')
 
   assert.equal(second.id, 'advisor-2')
+})
+
+test('全部端点冷却时半开探测最早恢复的一路', () => {
+  resetPoolHealthForTests()
+  const config = {
+    roleEndpoints: {
+      advisor: [{
+        id: 'advisor-1', role: 'advisor', baseUrl: 'https://advisor-1.example/v1',
+        apiKey: 'key-1', model: 'model-1', enabled: true,
+      }, {
+        id: 'advisor-2', role: 'advisor', baseUrl: 'https://advisor-2.example/v1',
+        apiKey: 'key-2', model: 'model-2', enabled: true,
+      }],
+    },
+  }
+  markEndpointUnusable('advisor-1', 1000)
+  markEndpointUnusable('advisor-2', 2000)
+  assert.equal(pickEndpoint(config, 3000, 'advisor').id, 'advisor-1')
+  resetPoolHealthForTests()
 })
 
 test('同角色空闲端点轮询使用而不是每次固定命中第一路', () => {
@@ -155,6 +175,34 @@ test('流式请求在响应体消费完成前持续占用端点', async () => {
   } finally {
     globalThis.fetch = originalFetch
   }
+})
+
+test('流式终态失败按连续失败阈值计数，不单次熔断端点', () => {
+  resetPoolHealthForTests()
+  const config = {
+    roleEndpoints: {
+      advisor: [{
+        id: 'advisor-1',
+        role: 'advisor',
+        baseUrl: 'https://advisor-1.example/v1',
+        apiKey: 'key',
+        model: 'model',
+        enabled: true,
+      }],
+    },
+  }
+
+  markFailure('advisor-1')
+  const afterOne = poolStatus(config)[0]
+  assert.equal(afterOne.fails, 1)
+  assert.equal(afterOne.cooling, false)
+
+  markFailure('advisor-1')
+  markFailure('advisor-1')
+  const afterThree = poolStatus(config)[0]
+  assert.equal(afterThree.fails, 3)
+  assert.equal(afterThree.cooling, true)
+  resetPoolHealthForTests()
 })
 
 test('深度批量可覆盖端点默认关闭并下发有界推理参数', async () => {
@@ -459,6 +507,55 @@ test('外层请求取消时不得把同一题切换到备用端点', async () =>
   }
 })
 
+test('外层取消只释放在途，不把端点误记为故障', async () => {
+  resetPoolHealthForTests()
+  const config = {
+    roleEndpoints: {
+      advisor: [{
+        id: 'advisor-1',
+        role: 'advisor',
+        baseUrl: 'https://advisor-1.example/v1',
+        apiKey: 'key-1',
+        model: 'model-1',
+        enabled: true,
+      }],
+    },
+  }
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (_url, options) => new Promise((resolve, reject) => {
+    if (options.signal?.aborted) {
+      const error = new Error('aborted')
+      error.name = 'AbortError'
+      reject(error)
+      return
+    }
+    options.signal?.addEventListener('abort', () => {
+      const error = new Error('aborted')
+      error.name = 'AbortError'
+      reject(error)
+    }, { once: true })
+  })
+  const controller = new AbortController()
+  const pending = poolFetch(config, '/chat/completions', {
+    body: { model: 'model-1', stream: true },
+    role: 'advisor',
+    signal: controller.signal,
+    timeoutMs: 1000,
+    deferSuccess: true,
+  }, 1)
+  setTimeout(() => controller.abort(), 5)
+  try {
+    const routed = await pending
+    assert.equal(routed.resp.__err?.name, 'AbortError')
+    assert.equal(poolStatus(config)[0].inflight, 0)
+    assert.equal(poolStatus(config)[0].fails, 0)
+    assert.equal(poolStatus(config)[0].cooling, false)
+  } finally {
+    globalThis.fetch = originalFetch
+    resetPoolHealthForTests()
+  }
+})
+
 test('流读取中断时保留已经收到的推理和正文', async () => {
   const encoder = new TextEncoder()
   const chunks = [
@@ -483,4 +580,50 @@ test('流读取中断时保留已经收到的推理和正文', async () => {
 
   assert.equal(result.reasoning, '正在核对支撑位。')
   assert.equal(result.content, '{"action":"持有"')
+})
+
+test('上游发送 finish_reason 后不等待缺失的 DONE 帧', async () => {
+  const encoder = new TextEncoder()
+  const chunks = [encoder.encode(
+    'data: {"choices":[{"delta":{"content":"{\\"action\\":\\"持有\\"}"},"finish_reason":"stop"}]}\n\n',
+  )]
+  let index = 0
+  let canceled = false
+  const result = await pumpChatStream({
+    body: {
+      getReader() {
+        return {
+          async read() {
+            if (index++ === 0) return { value: chunks[0], done: false }
+            return new Promise((resolve) =>
+              setTimeout(() => resolve({ value: undefined, done: true }), 50),
+            )
+          },
+          async cancel() { canceled = true },
+        }
+      },
+    },
+  })
+  assert.equal(result.content, '{"action":"持有"}')
+  assert.equal(result.finishReason, 'stop')
+  assert.equal(canceled, true)
+})
+
+test('stream 请求被网关降级为普通 JSON 时仍解析正文', async () => {
+  const payload = {
+    choices: [{
+      message: {
+        content: '{"action":"持有"}',
+        reasoning_content: '已核对证据。',
+      },
+      finish_reason: 'stop',
+    }],
+  }
+  const result = await pumpChatStream({
+    headers: { get: () => 'application/json' },
+    body: { getReader() { throw new Error('should use json') } },
+    json: async () => payload,
+  })
+  assert.equal(result.content, payload.choices[0].message.content)
+  assert.equal(result.reasoning, payload.choices[0].message.reasoning_content)
 })

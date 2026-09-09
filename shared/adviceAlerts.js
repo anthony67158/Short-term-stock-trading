@@ -8,6 +8,7 @@ import {
 import { isAdviceReviewEnabled } from './adviceReviewPolicy.js'
 import { executionTriggerDirection } from './executionTrigger.js'
 import { holdingAddReviewPlan } from './holdingFollowUp.js'
+import { monitoringAlerts, monitoringPlanOf } from './monitoringPlan.js'
 
 function roundPrice(value) {
   const n = Number(value)
@@ -148,6 +149,16 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
   }
   const owner = liveHolder || candidate || {}
   const name = advice.name || owner.name || code
+  if (liveHolder && monitoringPlanOf(advice)) {
+    const retained = rest.filter((alert) => !(
+      alert.code === code && alert.planId === liveHolder.id
+      && !(alert.op === 'lte' ? liveHolder.slManual : liveHolder.tpManual)
+    ))
+    const next = [...retained, ...monitoringAlerts(data, code, advice, now)]
+    const changed = JSON.stringify(alerts) !== JSON.stringify(next)
+    data.alerts = next
+    return changed
+  }
   const projected = []
   if (advice.reviewDecision?.terminal === true) {
     if (candidate) {

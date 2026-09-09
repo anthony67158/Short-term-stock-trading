@@ -111,7 +111,7 @@ test('登录态单股建议收到服务端确认后才进入云端生成态', as
   assert.equal(calls[0].options.force, true)
 })
 
-test('服务端未确认受理时回退本地生成', async () => {
+test('服务端未确认受理时保留云端核对态，不回退本地重复生成', async () => {
   let localStarted = false
   const result = await startAdvicePersistently({ code: '600519' }, {
     canUseServer: () => true,
@@ -119,8 +119,39 @@ test('服务端未确认受理时回退本地生成', async () => {
     startLocal: () => { localStarted = true },
   })
 
-  assert.equal(result.mode, 'local')
-  assert.equal(localStarted, true)
+  assert.equal(result.mode, 'server')
+  assert.equal(result.status, 'queued')
+  assert.equal(result.unconfirmed, true)
+  assert.equal(localStarted, false)
+})
+
+test('服务端提交抛出网络错误时保持云端排队态，禁止本地重复生成', async () => {
+  let localStarted = false
+  const result = await startAdvicePersistently({ code: '600519', deepMode: true }, {
+    canUseServer: () => true,
+    triggerServer: async () => {
+      throw new Error('请求超时')
+    },
+    startLocal: () => { localStarted = true },
+  })
+
+  assert.equal(result.status, 'queued')
+  assert.equal(result.mode, 'server')
+  assert.equal(result.unconfirmed, true)
+  assert.equal(localStarted, false)
+})
+
+test('服务端无返回体时按未知受理处理，不启动第二个深度任务', async () => {
+  let localStarted = false
+  const result = await startAdvicePersistently({ code: '600519', deepMode: true }, {
+    canUseServer: () => true,
+    triggerServer: async () => undefined,
+    startLocal: () => { localStarted = true },
+  })
+
+  assert.equal(result.status, 'queued')
+  assert.equal(result.unconfirmed, true)
+  assert.equal(localStarted, false)
 })
 
 test('任务已持久化但Worker调度失败时保留云端排队态', async () => {

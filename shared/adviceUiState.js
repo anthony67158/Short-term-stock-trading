@@ -1,6 +1,9 @@
 import { adviceEntryMatchesMode } from './adviceModeContext.js'
 import { isCompleteAdviceEntry } from './adviceBatchPolicy.js'
-import { adviceRequestId } from './adviceGenerationPolicy.js'
+import {
+  adviceRequestId,
+  DEEP_ADVICE_TARGET_MS,
+} from './adviceGenerationPolicy.js'
 import {
   TRIGGERED_REVIEW_TIME_LIMIT_MINUTES,
 } from './triggeredReviewDecision.js'
@@ -187,13 +190,22 @@ export function adviceJobState(
   const canceling = item.status === 'canceling'
   const publishing = item.status === 'publishing'
   const review = role === 'review'
-  const defaultLabel = review
-    ? running ? '建议复核中' : '排队等待云端复核'
+  const triggeredReview = review
+    && item.triggerKind === 'price-review'
+  const routineReview = review && !triggeredReview
+  const defaultLabel = triggeredReview
+    ? running ? '到价确认中' : '等待到价确认'
+    : routineReview
+      ? running ? '后台数据检查中' : '等待后台数据检查'
     : running ? '操作建议生成中' : '排队等待云端生成'
   return {
     active: true,
     status: item.status,
-    ...(review ? { role: 'review' } : {}),
+    ...(review ? {
+      role: 'review',
+      silent: routineReview,
+      triggerKind: String(item.triggerKind || ''),
+    } : {}),
     stage: String(item.stage || ''),
     label: canceling
       ? '正在取消生成'
@@ -372,6 +384,7 @@ export function cloudAdviceLoadingState(batch, code) {
     warning: String(item.warning || ''),
     sources: Array.isArray(item.sources) ? item.sources : [],
     reasoning: String(item.reasoning || ''),
+    reasoningTruncated: item.reasoningTruncated === true,
     quant: item.quant || null,
     model: String(item.model || ''),
     endpoint: String(item.endpoint || ''),
@@ -437,12 +450,18 @@ export async function startAdvicePersistently(
   const requestId = String(
     spec?.requestId || adviceRequestId(spec),
   )
-  if (
-    code
-    && typeof canUseServer === 'function'
-    && canUseServer()
-    && typeof triggerServer === 'function'
-  ) {
+  let serverAvailable = false
+  try {
+    serverAvailable = !!(
+      code
+      && typeof canUseServer === 'function'
+      && canUseServer()
+      && typeof triggerServer === 'function'
+    )
+  } catch {
+    serverAvailable = false
+  }
+  if (serverAvailable) {
     try {
       const submission = await triggerServer([code], {
         scope: 'all',
@@ -478,8 +497,31 @@ export async function startAdvicePersistently(
           error: submission.error || '军师端点已满',
         }
       }
+      // Timeout/connection loss or an explicit server rejection can happen
+      // after the idempotent request reached the API. Keep polling rather than
+      // duplicate a deep model run in this browser.
+      if (
+        submission == null
+        || submission === false
+        || submission?.unconfirmed === true
+        || submission?.ok === false
+      ) {
+        return {
+          status: 'queued',
+          mode: 'server',
+          code,
+          unconfirmed: true,
+          error: submission?.error || '提交结果未确认，正在核对云端任务状态',
+        }
+      }
     } catch {
-      // Fall back to the local runner only when the task was not persisted.
+      return {
+        status: 'queued',
+        mode: 'server',
+        code,
+        unconfirmed: true,
+        error: '提交结果未确认，正在核对云端任务状态',
+      }
     }
   }
   if (typeof startLocal === 'function') startLocal(spec)
@@ -487,6 +529,9 @@ export async function startAdvicePersistently(
 }
 
 export const SERVER_FALLBACK_CONFIRM_MS = 30_000
+// 深度任务最多运行一个完整模型预算。提交响应丢失时，在这段时间内
+// 必须继续阻止同股票重试，避免服务端已受理而浏览器再次生成。
+export const SERVER_SUBMISSION_LOCK_MS = DEEP_ADVICE_TARGET_MS + 60_000
 
 export function serverFallbackDisplayState(
   submission,

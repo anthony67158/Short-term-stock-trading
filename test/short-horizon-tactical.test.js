@@ -53,6 +53,24 @@ function payload(overrides = {}) {
   }
 }
 
+test('硬风险不受错误文案措辞影响且任何正向信号不能绕过', () => {
+  const base = buildShortHorizonTactical(payload(), {
+    now: Date.parse('2026-08-26T02:30:00.000Z'),
+  })
+  for (const patch of [
+    { stock: { ...base.stock, liquidity: 'THIN', liquidityEvidence: { reason: '成交额300万元' } } },
+    { holding: { hasPosition: true, addEligible: false, addBlockReason: '尚未收复均价线' } },
+    { market: { ...base.market, riskTone: 'UNKNOWN' } },
+    { timing: { ...base.timing, state: 'TOO_EXTENDED' } },
+  ]) {
+    const policy = deriveShortHorizonActionPolicy({
+      mode: 'buy_advice', requestedAction: 'BUY', tactical: { ...base, ...patch },
+    })
+    assert.equal(policy.canIncreaseRisk, false)
+    assert.equal(policy.riskTier, 'NONE')
+  }
+})
+
 test('强市场前排个股与主力吸筹投影为短线可行动状态', () => {
   const result = buildShortHorizonTactical(payload(), {
     now: Date.parse('2026-08-26T02:30:00.000Z'),

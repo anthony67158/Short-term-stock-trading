@@ -6,6 +6,7 @@ import {
   ADVISOR_SYSTEM,
   ADVISOR_FAST_SYSTEM,
   ADVISOR_REVIEW_SYSTEM,
+  advisorOutputSchema,
   buildUserPrompt,
   maxTokensForMode,
 } from '../api/_ai_prompts.js'
@@ -36,12 +37,25 @@ test('快速与深度建议都使用可交付的有界输出预算', () => {
   assert.match(ADVISOR_DEEP_SYSTEM, /反方证伪/)
   assert.match(ADVISOR_DEEP_SYSTEM, /最强反方/)
   assert.match(ADVISOR_DEEP_SYSTEM, /最多五个检查点/)
+  assert.match(ADVISOR_DEEP_SYSTEM, /一次性研判协议/)
+  assert.match(ADVISOR_DEEP_SYSTEM, /无需为了确认而再次调用工具或重做整题/)
   assert.match(ADVISOR_DEEP_SYSTEM, /讲给新手听/)
   assert.match(ADVISOR_DEEP_SYSTEM, /不得.*夸大把握或承诺收益/)
   assert.match(ADVISOR_REVIEW_SYSTEM, /临盘裁决官/)
   assert.match(ADVISOR_REVIEW_SYSTEM, /利弗莫尔关键点/)
   assert.match(ADVISOR_REVIEW_SYSTEM, /1-2-3\/2B/)
   assert.match(ADVISOR_REVIEW_SYSTEM, /不得生成新观察价/)
+})
+
+test('深度输出契约保留完整字段且设置合理字数上限', () => {
+  const schema = advisorOutputSchema('buy_advice', null, { detailed: true })
+  assert.match(schema, /120字内因果链/)
+  assert.match(schema, /60字内最强反方及证伪条件/)
+  assert.match(schema, /120字内唯一可执行动作/)
+  assert.match(schema, /action/)
+  assert.match(schema, /stopPrice/)
+  assert.match(schema, /targetPrice/)
+  assert.match(schema, /invalidation/)
 })
 
 test('所有军师模式都只使用紧凑短线战术合同', () => {
@@ -690,7 +704,10 @@ test('显式深度生成使用紧凑事实契约而不丢失价格与资金约�
   assert.match(prompt, /普通市场盈亏比至少1\.8:1/)
   assert.match(prompt, /弱市试错至少2\.2:1/)
   assert.match(prompt, /内部推理过程可保留模型原始语言/)
-  assert.match(prompt, /总输出不超过900字/)
+  assert.match(prompt, /一次完成判断并直接填满全部字段/)
+  assert.match(prompt, /不要为了缩短文字省略证据、价格、手数、失效条件或退出路径/)
+  assert.doesNotMatch(prompt, /总输出不超过900字/)
+  assert.doesNotMatch(prompt, /标题不超过20字/)
   assert.match(prompt, /各证据字段不得互相改写或重复/)
   assert.doesNotMatch(prompt, /UNUSED_DEEP_PAYLOAD/)
   assert.ok(prompt.length < 7000)

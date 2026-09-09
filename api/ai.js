@@ -29,6 +29,8 @@ import {
   parseLLMJson,
   pumpChatStream,
 } from './_llm.js';
+import { parseAdvisorModelOutput } from './_advice_output.js';
+import { compileMonitoringPlan, ruleText } from '../shared/monitoringPlan.js';
 import { ensureConfig, getModel, getReasoning } from './_llm_config.js';
 import { applyCors, preflight } from './_lib.js';
 import { createReasoningProgressTracker } from './_zh_reason.js';
@@ -111,7 +113,7 @@ import {
 } from '../shared/adviceIntelligence.js';
 import { deriveMarketRegime } from '../shared/marketRegime.js';
 import {
-  buildFallbackDecisionAdvice,
+  applyCompiledDecisionPlan,
   compileDecisionPlan,
 } from '../shared/decisionPlan.js';
 import {
@@ -157,6 +159,7 @@ import {
   buildAdviceReviewMemory,
 } from '../shared/adviceReviewMemory.js';
 import {
+  adviceCompleteness,
   completeAdviceHorizonFields,
 } from '../shared/adviceBatchPolicy.js';
 import {
@@ -289,7 +292,8 @@ export function buildScheduledReviewGateResponse({
 }
 
 export function resolveAIBudget(reasoningOn, requestedMs) {
-  const fallback = reasoningOn ? 540000 : 150000;
+  // 深度研判模型窗口 300s,总预算 360s(含数据采集/后处理余量)。
+  const fallback = reasoningOn ? 360000 : 150000;
   if (requestedMs == null || !Number.isFinite(Number(requestedMs))) return fallback;
   return Math.max(30000, Math.min(fallback, Math.trunc(Number(requestedMs))));
 }
@@ -300,22 +304,19 @@ export function resolveReasoningMode(configuredReasoning, fastMode = false, forc
 }
 
 export function shouldBuildAdvisorFallback({
-  isAdvisor = false,
-  generationProfile = '',
-  ok = true,
+  isAdvisor: _isAdvisor = false,
+  generationProfile: _generationProfile = '',
+  ok: _ok = true,
 } = {}) {
-  return (
-    isAdvisor
-    && ok === false
-    && generationProfile !== 'DEEP'
-  );
+  return false;
 }
 
 export function advisorGenerationPlan({
   remainingMs = 0,
   reasoning = false,
 } = {}) {
-  const cap = reasoning ? 510000 : 120000
+  // 深度研判模型窗口 300s(low 推理实测 70-150s,2x 余量防偶发慢端点)。
+  const cap = reasoning ? 300000 : 120000
   return {
     timeoutMs: Math.max(
       8000,
@@ -1210,34 +1211,7 @@ export default async function handler(req, res) {
       stopModelProgress();
       stopHeartbeat();
       const snapshot = ensureEvidenceSnapshot();
-      let finalized = obj;
-      if (
-        shouldBuildAdvisorFallback({
-          isAdvisor: isAdvisorMode(mode),
-          generationProfile: payload.generationProfile,
-          ok: obj?.ok,
-        })
-        && payload.code
-      ) {
-        const { error, ...rest } = obj;
-        const fallback = buildFallbackDecisionAdvice({
-          mode,
-          payload,
-          evidenceSnapshot: snapshot,
-          error,
-        });
-        fallback.fundNote = buildStockFundNote(payload.stockFund)
-          || fallback.fundNote;
-        finalized = {
-          ...rest,
-          ok: true,
-          degraded: true,
-          fallbackOnly: true,
-          warning: error || '解释服务未返回完整结果',
-          result: fallback,
-        };
-      }
-      const output = attachEvidenceSnapshot(finalized, snapshot);
+      const output = attachEvidenceSnapshot(obj, snapshot);
       if (streaming) { emit('result', output); return res.end(); }
       return res.status(200).send(JSON.stringify(output));
     };
@@ -2312,6 +2286,7 @@ export default async function handler(req, res) {
     let content = '';
     let usage = null;
     let streamedReasoning = '';   // 流式路径捕获的思维链原文：模型 JSON 里没吐 reasoning 字段时,用它兜底填充,保证"军师推理过程"持久可见
+    let streamFinishReason = '';
     let selectedModel = useModel;
     let selectedEndpoint = '';
     // 深度研判只约束最终业务结论为中文；内部过程保留模型原始语言，
@@ -2324,7 +2299,11 @@ export default async function handler(req, res) {
       payload,
       ragText,
       theoryHits,
-    ) + zhTail;
+    ) + zhTail + (
+      ['hold_advice', 'review'].includes(mode) && !triggeredPriceReview
+        ? '\n【可执行监控合同】最终JSON必须额外提供executionRules数组，最多3条，放在action/title之后。每条形如{"action":"EXIT","kind":"RISK_EXIT","lots":1,"logic":"ANY","session":"CONTINUOUS","sustainSeconds":0,"conditions":[{"metric":"price","op":"lte","value":54},{"metric":"mainNetYi","op":"lte","value":-3}]}。此例数字仅示范结构，必须根据本股证据重新定价。action只允许EXIT/REDUCE/HOLD；kind为RISK_EXIT/PROFIT_EXIT/HOLD；logic为ANY或ALL；session为CONTINUOUS或OPENING(09:30-10:00)。metric只允许price(元)、mainNetYi(亿元)、priceVsVwapPct(与当日分时均价比较，阈值只能0)、openChangePct(今开相对昨收%)；op只允许lte/gte。站稳均价线要求sustainSeconds=60。无条件可写空数组，不编造监控。没有加仓方向就不写任何加仓点。全部手数不能超过持仓。正文涉及的价格、资金、开盘条件必须与executionRules完全一致；系统将按这些规则直接跟踪并提醒人工计划。风险退出优先于利润退出，HOLD只更新状态不发交易提醒。'
+        : ''
+    );
     if (streaming) {
       const reasoningProgress = createReasoningProgressTracker();
       // ★流式路径(客户端开了 SSE):以 stream:true 调上游,把模型【思维链 reasoning_content】
@@ -2344,10 +2323,10 @@ export default async function handler(req, res) {
         headerTimeoutMs: useRole === 'review'
           ? 12000
           : useReasoning
-            ? Math.min(llmTimeout, 45000)
+            ? Math.min(llmTimeout, 120000)
             : 22000,
         reasoning: useReasoning,
-        reasoningEffort: 'medium',
+        reasoningEffort: forceReasoning ? 'low' : 'medium',
         forceNoReason: fastMode,
         forceReason: forceReasoning,
         signal: req.signal,
@@ -2403,6 +2382,7 @@ export default async function handler(req, res) {
         }
         content = pumped.content;
         streamedReasoning = pumped.reasoning || '';
+        streamFinishReason = pumped.finishReason || '';
         const parsedContent = content.trim()
           ? parseLLMJson(content)
           : null;
@@ -2426,10 +2406,10 @@ export default async function handler(req, res) {
         headerTimeoutMs: useRole === 'review'
           ? 12000
           : useReasoning
-            ? Math.min(llmTimeout, 45000)
+            ? Math.min(llmTimeout, 120000)
             : 22000,
         reasoning: useReasoning,
-        reasoningEffort: 'medium',
+        reasoningEffort: forceReasoning ? 'low' : 'medium',
         forceNoReason: fastMode,
         forceReason: forceReasoning,
         signal: req.signal,
@@ -2478,42 +2458,49 @@ export default async function handler(req, res) {
       }
       done(true);
       content = j.choices?.[0]?.message?.content || '';
+      streamedReasoning = j.choices?.[0]?.message?.reasoning_content || j.choices?.[0]?.message?.reasoning || '';
+      streamFinishReason = j.choices?.[0]?.finish_reason || '';
       usage = j.usage || null;
     }
 
-    // ★通道兜底(实测线上真凶):部分 OpenAI 兼容网关(如 gpt-5.6-terra)在深度思考时
-    //   会把【完整的正文 JSON 整个写进 reasoning_content 思维链通道】,而 delta.content 全程为空。
-    //   现象="思考完了→前端却报生成失败/不展示"(content 空命中下方降级,或解析不出)。
-    //   兜底策略:正文为空、或正文里根本抠不出合法 JSON 时,回到思维链原文里再抠一次——
-    //   实测能从思维链救回完整 31 字段建议(见诊断)。streamedReasoning 仅流式路径有;
-    //   非流式路径正文本就不空,不受影响。
-    const salvageFromReasoning = () => {
-      if (!streamedReasoning || !streamedReasoning.trim()) return null;
-      const pr = parseLLMJson(streamedReasoning);
-      return pr && pr.value ? pr : null;
+    const strictAdvice = ['hold_advice', 'buy_advice', 'review'].includes(mode);
+    const output = strictAdvice ? parseAdvisorModelOutput({
+      content, reasoning: streamedReasoning, mode,
+      validate: (value) => adviceCompleteness(
+        triggeredPriceReview && value
+          ? normalizeTriggeredReviewDecision({ mode, result: value, payload, now: Date.now() })
+          : value,
+        mode,
+      ),
+    }) : null;
+    const outputReceipt = {
+      schemaVersion: 'advice-output-receipt.v1',
+      finishReason: streamFinishReason,
+      contentChars: content.length,
+      reasoningChars: streamedReasoning.length,
+      source: output?.source || 'content',
+      closingDelimitersRecovered: output?.closingDelimitersRecovered === true,
+      missing: output?.missing || [],
+      failureKind: output?.failureKind || null,
     };
-
-    // 解析模型返回的 JSON（容错：剥离 ```json 包裹 + 截断补齐）
-    let parsed = content.trim() ? parseLLMJson(content) : { value: null, salvaged: false, repaired: false };
-    // 正文抠不出对象(空正文 / 只解析出 null) → 从思维链通道兜底救 JSON
-    if (!parsed.value) {
-      const rescued = salvageFromReasoning();
-      if (rescued) {
-        parsed = rescued;
-        // 思维链已被当作正文消费,别再把整段思维链回填成 reasoning 字段(会把 JSON 原文塞进展示)
-        streamedReasoning = '';
-      }
-    }
-    if (isAdvisor && (!parsed.value || parsed.repaired)) {
+    collectedMeta.outputReceipt = outputReceipt;
+    if (strictAdvice && !output.complete) {
       return finishGenerationFailure(
-        '模型输出不完整，本次已结束且不会重复生成。',
-        {
-          model: selectedModel,
-          endpoint: selectedEndpoint,
-          meta: collectedMeta,
-          news: newsRefs,
-        },
+        output.failureKind === 'MISSING_FIELDS'
+          ? `本轮缺少${output.missing.join('、')}，未发布新计划`
+          : output.failureKind === 'EMPTY_OUTPUT'
+            ? '模型未返回业务结论，未发布新计划'
+            : `模型返回的结构未闭合${streamFinishReason === 'length' ? '（达到输出上限）' : ''}，未发布新计划`,
+        { model: selectedModel, endpoint: selectedEndpoint, meta: collectedMeta, news: newsRefs },
       );
+    }
+    let parsed = content.trim() ? parseLLMJson(content) : { value: null, salvaged: false, repaired: false };
+    if (output?.complete) {
+      parsed = { value: output.value, repaired: false, salvaged: output.closingDelimitersRecovered };
+      if (output.source === 'reasoning') streamedReasoning = '';
+    } else if (!parsed.value && streamedReasoning.trim()) {
+      parsed = parseLLMJson(streamedReasoning);
+      if (parsed.value) streamedReasoning = '';
     }
     // 兜底后仍无任何可用对象 → 才真正判定"模型未返回有效内容"
     if (!parsed.value && !content.trim()) {
@@ -2522,12 +2509,6 @@ export default async function handler(req, res) {
         error: '模型未返回有效内容，请稍后重试。', meta: collectedMeta, news: newsRefs,
       });
     }
-    // ★truncated 判定(既不误报、也绝不漏报):
-    //   ① 正文 JSON 完全解析不出(value=null)→ 只能落 raw 兜底 → 一定是残缺,truncated=true;
-    //   ② parseLLMJson 走了【截断补齐】路径(parsed.repaired,补了引号/括号才解析成功)→ 正文尾部真被截断,truncated=true;
-    //   ③ 一次干净解析成功,或仅"从前后噪声里抠出一个【完整闭合】对象"(salvaged=true 但 repaired=false)
-    //      → 对象本身完整,不算截断。即便 finish_reason=length(深度思考网关把思维链 token 计入 max_tokens
-    //      触发 length,但正文 JSON 已闭合)也不误报"建议被截断"。
     const truncated = !parsed.value || !!parsed.repaired;
     let result = parsed.value || { raw: content, truncated };
     result = completeAdviceHorizonFields(result, mode);
@@ -2736,6 +2717,12 @@ export default async function handler(req, res) {
       && typeof result === 'object'
       && !result.raw
     ) {
+      const positions = (accountAuth.account?.data?.holding || [])
+        .filter((item) => item.code === payload.code);
+      payload.holdingStartedAt = positions.map((item) => Number(item.buyAt))
+        .filter((at) => at > 0).sort((a, b) => a - b)[0] || null;
+      payload.holdingStopPrice = positions.map((item) => Number(item.sl))
+        .filter((price) => price > 0).sort((a, b) => b - a)[0] || null;
       result = applyShortHorizonExitPolicy({
         mode,
         result,
@@ -2767,35 +2754,32 @@ export default async function handler(req, res) {
       result.fundContext = compactStockFundSnapshot(payload.stockFund);
       result.formulaPriceReference =
         payload.formulaPriceReference || null;
-      result.reviewMemory = buildAdviceReviewMemory({
-        advice: result,
-        payload,
-        source: triggeredPriceReview
-          ? 'FAST_REVIEW'
-          : 'ADVISOR',
-      });
-      result.knowledgeActionPlan = buildKnowledgeActionPlan(result, { mode });
-      result.knowledgeActionScore = scoreKnowledgeActionPlan(
-        result.knowledgeActionPlan,
-      );
       const accountRisk = accountAuth.account?.data
-        && /买入|加仓|试仓|试错/.test(String(result.action || result.stance || ''))
         ? await readAccountRiskContext(accountAuth.account.data)
         : null;
-      if (accountRisk) {
-        payload.account = {
-          ...payload.account,
-          totalAssets: accountRisk.totalAssets,
-          cash: accountRisk.cash,
-          position: accountRisk.positionPct,
+      const rawAccount = accountAuth.account?.data?.account || {};
+      const industry = String(payload.todayQuote?.industry
+        || accountRisk?.exposures.find((item) => item.code === payload.code)?.sectorCode
+        || '').trim();
+      payload.account = {
+        ...payload.account,
+        totalAssets: accountRisk?.totalAssets ?? payload.account?.totalAssets ?? rawAccount.totalAssets,
+        cash: accountRisk?.cash ?? payload.account?.cash ?? rawAccount.cash,
+        position: accountRisk?.positionPct ?? payload.account?.position,
+        ...(accountRisk ? {
+          industryWeight: industry
+            ? [...accountRisk.exposures, ...accountRisk.reservedExposures]
+              .filter((item) => item.sectorCode === industry)
+              .reduce((sum, item) => sum + (item.positionPct || 0), 0)
+            : null,
           stockWeight: accountRisk.exposures
             .filter((item) => item.code === payload.code)
             .reduce((sum, item) => sum + (item.positionPct || 0), 0),
           pendingStockWeight: accountRisk.reservedExposures
             .filter((item) => item.code === payload.code)
             .reduce((sum, item) => sum + (item.positionPct || 0), 0),
-        };
-      }
+        } : {}),
+      };
       const accountCircuitBreaker = accountRisk?.breaker || evaluateAccountCircuitBreaker({
         account: {
           ...(accountAuth.account?.data?.account || {}),
@@ -2830,6 +2814,37 @@ export default async function handler(req, res) {
           accountCircuitBreaker,
         });
       }
+      result = applyCompiledDecisionPlan(result);
+      if (!triggeredPriceReview && ['hold_advice', 'review'].includes(mode)) {
+        if (!Array.isArray(result.executionRules)) {
+          return finishGenerationFailure('本轮缺少可监控操作条件，未发布新计划', {
+            meta: collectedMeta, model: selectedModel, endpoint: selectedEndpoint,
+          });
+        }
+        const monitoring = result.decisionPlan.action === 'HOLD'
+          ? compileMonitoringPlan({ advice: result, payload, decisionPlan: result.decisionPlan })
+          : null;
+        if (monitoring?.state === 'INVALID') {
+          return finishGenerationFailure(`操作条件无法核验：${monitoring.errors.join('；')}`, {
+            meta: collectedMeta, model: selectedModel, endpoint: selectedEndpoint,
+          });
+        }
+        if (monitoring) {
+          result.monitoringPlan = monitoring;
+          const rules = monitoring.rules.map(ruleText).join('；');
+          if (result.decisionPlan.action === 'HOLD') {
+            result.actionPlan = `继续持有${payload.holdQty}手；${rules}`;
+            result.nextAction = result.actionPlan;
+          }
+        }
+      }
+      result.reviewMemory = buildAdviceReviewMemory({
+        advice: result,
+        payload,
+        source: triggeredPriceReview ? 'FAST_REVIEW' : 'ADVISOR',
+      });
+      result.knowledgeActionPlan = buildKnowledgeActionPlan(result, { mode });
+      result.knowledgeActionScore = scoreKnowledgeActionPlan(result.knowledgeActionPlan);
       result.priceContract = result.decisionPlan.priceContract;
       result.executionPlan = compileExecutionPlan({
         decisionPlan: result.decisionPlan,

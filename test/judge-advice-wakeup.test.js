@@ -15,6 +15,29 @@ import {
   TRIGGERED_REVIEW_OBSERVATION_MS,
 } from '../shared/triggeredReviewDecision.js'
 
+test('同一建议的回踩和突破共用一次复核，终态后另一条路径不能续跑', () => {
+  const now = Date.parse('2026-08-28T05:30:00Z')
+  const advice = { continuity: { planId: 'same-plan', revision: 1 } }
+  const data = {
+    plan: [{ code: '000636', name: '风华高科' }], holding: [], closed: [], settings: {},
+    advice: { '000636': { mode: 'buy_advice', advice } },
+    alerts: ['lte', 'gte'].map((op) => ({
+      id: `path-${op}`, code: '000636', reviewOnly: true, enabled: true,
+      phase: 'armed', op, value: op === 'lte' ? 10 : 12,
+      decisionPrice: 10,
+      judgeContext: { planId: 'same-plan', planRevision: 1 },
+    })),
+  }
+  const first = queueAdviceReviewForPriceTrigger(data, data.alerts[0], now)
+  assert.equal(first.created, true)
+  assert.equal(data.alerts[1].enabled, false)
+  leaseJob(data, '000636', now + 1, 'review')
+  completeJob(data, '000636', now + 2, { role: 'review' })
+  const second = queueAdviceReviewForPriceTrigger(data, data.alerts[1], now + 3)
+  assert.equal(second.created, false)
+  assert.equal(second.job.id, first.job.id)
+})
+
 test('页面发现观察价已到时立即进入复核并排入紧急任务', () => {
   const now = Date.parse('2026-08-28T05:30:00.000Z')
   const data = {

@@ -165,6 +165,20 @@ test('移除执行计划使用同步标记且不会被旧设备数据恢复', ()
   assert.equal(merged.dismissedAt, now + 2)
 })
 
+test('两个已完成版本合并保留较新的移除标记与原成交', () => {
+  const completed = {
+    ...draftSellPlan(), status: 'COMPLETED', filledLots: 2,
+    fills: [{ transactionId: 'actual-fill', lots: 2 }], updatedAt: now,
+  }
+  const [dismissed] = dismissExecutionPlanInList([completed], completed.planId, now + 10)
+  for (const pair of [[dismissed, completed], [completed, dismissed]]) {
+    const [merged] = mergeExecutionPlans([pair[0]], [pair[1]])
+    assert.equal(merged.dismissedAt, now + 10)
+    assert.equal(merged.status, 'COMPLETED')
+    assert.deepEqual(merged.fills, completed.fills)
+  }
+})
+
 test('跨多笔持仓完成卖出计划时按全部成交汇总费后收益', () => {
   const boughtAt = Date.now() - 2 * 24 * 3600 * 1000
   planStore.setData({

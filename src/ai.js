@@ -1,6 +1,7 @@
 // 调用后端 AI 代理（健壮解析：后端超时/崩溃时 Vercel 返回纯文本而非 JSON）
 import { api } from './apiBase'
 import { accountRequestHeaders, quantModelHeaders } from './quantModel'
+import { readAIResultStream } from './aiStream.js'
 
 // 盘面研究·外部宏观快讯聚合：一次性拉取宏观要闻 + 7×24 快讯（非流式）
 export async function fetchMarketNews() {
@@ -104,6 +105,21 @@ export async function saveDailyReportSchedule(settings) {
 //   'reasoning'{text}    模型思维链增量(开启深度思考时)，供前端实时展示"军师在想什么"。
 // 后端不支持 SSE 时自动回退为整段 JSON，不影响结果。
 export async function callAIStream(mode, payload, onPhase, signal, onEvent, options = {}) {
+  const controller = new AbortController()
+  let timedOut = false
+  const cancel = () => controller.abort(signal?.reason)
+  if (signal?.aborted) cancel()
+  else signal?.addEventListener('abort', cancel, { once: true })
+  const configuredBudget = Number(options.runtimeBudgetMs)
+  const timeoutMs = Number(options.timeoutMs) > 0
+    ? Number(options.timeoutMs)
+    : configuredBudget > 0
+      ? configuredBudget + 15000
+      : 70000
+  const timeout = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, timeoutMs)
   try {
     const res = await fetch(api('/api/ai'), {
       method: 'POST',
@@ -120,43 +136,28 @@ export async function callAIStream(mode, payload, onPhase, signal, onEvent, opti
         ...(options.forceReasoning ? { forceReasoning: true } : {}),
         ...(options.runtimeBudgetMs ? { runtimeBudgetMs: options.runtimeBudgetMs } : {}),
       }),
-      signal,
+      signal: controller.signal,
     })
     const ctype = res.headers.get('content-type') || ''
-    // 后端未走 SSE（旧版/错误）→ 回退整段解析
+    // 旧版/错误响应在同一请求内解析 JSON，不重新请求或重跑模型。
     if (!ctype.includes('text/event-stream')) {
       const raw = await res.text()
       try { return JSON.parse(raw) } catch {
         const timeout = res.status === 504 || /timed? ?out|An error occurred/i.test(raw)
-        return { ok: false, error: timeout ? '分析超时，请稍后重试或缩小问题范围' : `服务暂时不可用（${res.status}）` }
+        return { ok: false, error: timeout ? '分析连接超时，请检查任务状态后重试' : `服务暂时不可用（${res.status}）` }
       }
     }
-    const reader = res.body.getReader()
-    const decoder = new TextDecoder('utf-8')
-    let buf = ''
-    let result = null
-    while (true) {
-      const { value, done } = await reader.read()
-      if (done) break
-      buf += decoder.decode(value, { stream: true })
-      let sep
-      while ((sep = buf.indexOf('\n\n')) >= 0) {
-        const chunk = buf.slice(0, sep); buf = buf.slice(sep + 2)
-        let event = 'message', dataStr = ''
-        for (const line of chunk.split('\n')) {
-          if (line.startsWith('event:')) event = line.slice(6).trim()
-          else if (line.startsWith('data:')) dataStr += line.slice(5).trim()
-        }
-        if (!dataStr) continue
-        let data = null; try { data = JSON.parse(dataStr) } catch { continue }
-        if (event === 'phase') { if (typeof onPhase === 'function') onPhase(data) }
-        else if (event === 'result') { result = data }
-        else if (typeof onEvent === 'function') onEvent(event, data)  // source / reasoning 等细粒度事件
-      }
-    }
-    return result || { ok: false, error: '分析未返回结果，请重试' }
+    return await readAIResultStream(res.body, {
+      onPhase,
+      onEvent,
+      signal: controller.signal,
+    })
   } catch (e) {
-    if (e.name === 'AbortError') return { ok: false, aborted: true, error: '已取消' }
+    if (timedOut) return { ok: false, timedOut: true, error: '分析连接超时，本次请求已结束，请重试' }
+    if (signal?.aborted || e.name === 'AbortError') return { ok: false, aborted: true, error: '已取消' }
     return { ok: false, error: '网络异常：' + String(e.message || e) }
+  } finally {
+    clearTimeout(timeout)
+    signal?.removeEventListener('abort', cancel)
   }
 }

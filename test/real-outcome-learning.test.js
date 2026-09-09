@@ -118,6 +118,15 @@ test('重复交易流水按 transactionId 只保留最新版本', () => {
   assert.equal(profile.overall.wins, 0)
 })
 
+test('生产测试账户模拟成交不能进入真实收益学习', () => {
+  const profile = buildRealOutcomeLearning({
+    account: { simulation: true },
+    decisionLog: [recommendation('r1'), execution('e1', 'r1', 20000)],
+  })
+  assert.equal(profile.overall.samples, 0)
+  assert.equal(profile.excluded.simulatedExecutions, 1)
+})
+
 test('做T卖腿不会误计为普通减仓或清仓的收益学习样本', () => {
   const tExecution = {
     ...execution('e-t', 'r1', 80),

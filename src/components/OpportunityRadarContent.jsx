@@ -186,8 +186,8 @@ function CandidateList({ rows, book, onAdd, portfolioMap }) {
       onAdd={onAdd}
     />
   )
-  const visible = rows.slice(0, 8)
-  const remaining = rows.slice(8)
+  const visible = rows.slice(0, 3)
+  const remaining = rows.slice(3)
   return (
     <div className="opportunity-radar-list">
       {visible.map(renderRow)}
@@ -219,16 +219,6 @@ function PortfolioBar({ portfolio }) {
     : 0
   return (
     <div className="opportunity-portfolio-bar" role="status">
-      {portfolio.account && (
-        <div className="opportunity-portfolio-head">
-          <Icon name="wallet" size={14} />
-          <strong>本账户</strong>
-          <span>
-            预留后可用预算 {Math.floor(portfolio.account.availableCash).toLocaleString('zh-CN')}元
-            {' · '}剩余风险预算 {Math.floor(portfolio.account.availableRisk).toLocaleString('zh-CN')}元
-          </span>
-        </div>
-      )}
       <div className="opportunity-portfolio-head">
         <Icon name="shield" size={14} />
         <strong>组合风险预算</strong>

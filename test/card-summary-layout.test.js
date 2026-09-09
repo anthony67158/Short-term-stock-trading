@@ -14,6 +14,7 @@ const stockDetailApi = read('api/stock_detail.js')
 const quoteApi = read('api/quote.js')
 const precision = read('src/styles/precision.css')
 const design = read('design.md')
+const designGuide = read('docs/DESIGN.md')
 const calmSurfaceMarker =
   '/* Trade workspace refinement: calm surfaces and content-led height. */'
 const calmSurface = precision.slice(precision.indexOf(calmSurfaceMarker))
@@ -169,7 +170,11 @@ test('策略摘要分离状态、主动作、仓位和执行条件', () => {
   )
   assert.match(
     planTab,
-    /view\.quantityLabel \|\| actionQtyLabel\(view\.quantity\)/,
+    /const qtyLabel = actionQtyLabel\(view\.quantity\)/,
+  )
+  assert.match(
+    planTab,
+    /\$\{view\.quantityLabel\} · \$\{qtyLabel\}/,
   )
   assert.match(
     planTab,
@@ -227,6 +232,37 @@ test('策略摘要分离状态、主动作、仓位和执行条件', () => {
   assert.match(
     precision,
     /\.card-decision-meta\s*{[^}]*display:\s*flex[^}]*flex-wrap:\s*wrap/s,
+  )
+})
+
+test('监控规则使用无框清单且不重复渲染同义进度条', () => {
+  assert.match(
+    planTab,
+    /className="monitoring-rule-list" role="list"[\s\S]*?role="listitem"/,
+  )
+  assert.match(
+    planTab,
+    /\{!view\.monitoring && \([\s\S]*?<ActionProgress/s,
+  )
+  assert.match(
+    precision,
+    /\.monitoring-rules\s*{[^}]*border:\s*0[^}]*background:\s*transparent/s,
+  )
+  assert.match(
+    precision,
+    /\.monitoring-rule-list\s*{[^}]*display:\s*grid[^}]*gap:\s*var\(--space-xs\)/s,
+  )
+  assert.match(
+    precision,
+    /\.monitoring-rule\s*{[^}]*border:\s*0[^}]*background:\s*transparent/s,
+  )
+  assert.doesNotMatch(
+    precision,
+    /\.monitoring-rule\s*{[^}]*border-top:/s,
+  )
+  assert.match(
+    designGuide,
+    /规则清单不表格化[\s\S]*卡片内部禁止再放带圆角或连续横线的规则容器/,
   )
 })
 
@@ -438,14 +474,14 @@ test('个股详情以决策优先并移除指标表格线', () => {
   )
 })
 
-test('观望建议保留重新评估且始终允许用户手动建仓', () => {
+test('观望建议保留重新评估但自主成交记录不冒充系统推荐', () => {
   assert.match(
     planTab,
     /className=\{\s*'pc-actions with-review'[\s\S]{0,180}' deferred'/,
   )
   assert.match(
     planTab,
-    /className="chip-btn act-buy manual-build"[\s\S]*?onClick=\{\(\) => onBuy\(p, null\)\}[\s\S]*?手动建仓/s,
+    /systemExecutable[\s\S]*?'chip-btn act-buy'[\s\S]*?'chip-btn ghost manual-build'[\s\S]*?systemExecutable \? view : null[\s\S]*?记录自主成交/s,
   )
   assert.match(
     planTab,

@@ -92,6 +92,12 @@ export function buildHoldPayload(
   } catch { /* ignore */ }
   return {
     code, name, holdCost, holdQty, openTNet, currentPrice,
+    holdingStartedAt: (holding || []).filter((item) => item.code === code)
+      .map((item) => Number(item.buyAt)).filter((at) => at > 0)
+      .sort((a, b) => a - b)[0] || null,
+    holdingStopPrice: (holding || []).filter((item) => item.code === code)
+      .map((item) => Number(item.sl)).filter((price) => price > 0)
+      .sort((a, b) => b - a)[0] || null,
     ...t1,
     tradeContext: tradeActivityContext(closed, code),
     tContext: buildTActionContext(holding, closed, code, now),

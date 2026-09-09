@@ -248,6 +248,7 @@ export const authStore = {
     const attempt = activateAccountSession('')
     let restoredFromCache = false
     let activeAttempt = attempt
+    let cachedEditVersion = null
     try {
       const stored = parseStoredAccountSession(loadSession())
       if (!stored) return
@@ -276,6 +277,7 @@ export const authStore = {
           state.syncError = ''
           state.lastSyncedAt = Number(cached.updatedAt) || 0
           planStore.setData(cached.data, { provisional: true })
+          cachedEditVersion = planStore.localEditVersion()
           state.booting = false
           emit()
         }
@@ -294,6 +296,20 @@ export const authStore = {
           saveSession(storedAccountSession(_credentials.nick, _credentials.token))
         }
         state.user = stored.credentials.nick; state.status = 'ready'
+        // 缓存首屏可编辑，延迟GET不能覆盖其间的修改或倒退刚完成的保存版本。
+        if (restoredFromCache && planStore.localEditVersion() !== cachedEditVersion) {
+          planStore.mergeCloud(r.data)
+          _runtimeSyncCursor.noteSnapshot(r.updatedAt)
+          await planStore.flushSave()
+          if (!accountSessionMatches(session)) return
+          if (state.syncStatus === 'restoring') state.syncStatus = 'synced'
+          writeAccountSnapshotCache(_credentials.nick, {
+            data: { ...r.data, ...planStore.get() },
+            updatedAt: state.lastSyncedAt || r.updatedAt,
+            revision: _cloudRevision,
+          })
+          return
+        }
         _cloudRevision = Number(r.revision) || 0
         _lastSyncedTradeFingerprint = accountTradeStateFingerprint(r.data)
         _tradeStateResetAt = Number(r.data?.tradeStateResetAt) || 0

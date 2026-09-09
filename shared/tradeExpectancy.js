@@ -118,7 +118,11 @@ function modelEstimate(
   }
 
   const signal = quant?.highConfSignal
+  const targetHitOnly = /future_max_high|触及.*止盈|TARGET_HIT/i.test(
+    `${signal?.label || ''} ${signal?.labelRule || ''} ${signal?.probabilityKind || ''}`,
+  ) && signal?.probabilityKind !== 'TP_BEFORE_SL'
   const signalAligned = signal?.fired === true
+    && !targetHitOnly
     && quant?.shadowOnly !== true
     && quant?.outOfDistribution !== true
     && alignedPrice(signal.buyPrice, prices.entry, 1.5)
@@ -162,6 +166,9 @@ function modelEstimate(
     expectedShortfall10R: null,
     sampleCount: null,
     calibrationMethod: null,
+    evidenceGap: targetHitOnly
+      ? '量化仅估计窗口内曾触及目标价，未估计止损前盈利概率，不能据此证明本计划正期望'
+      : null,
   }
 }
 
@@ -217,7 +224,7 @@ function expectancyGate(estimate, breakEvenWinProbability) {
         + `高于费后盈亏平衡所需的${
           round(breakEvenWinProbability * 100, 1)
         }%`
-      : `当前价格合同缺少可靠成功概率，暂不新增仓位；费后盈亏平衡至少需要${
+      : `${estimate.evidenceGap || '当前价格合同缺少可靠成功概率，暂不新增仓位'}；费后盈亏平衡至少需要${
           round(breakEvenWinProbability * 100, 1)
         }%胜率`,
   }
@@ -252,7 +259,7 @@ export function buildTradeExpectancy({
   const stop = positive(stopPrice)
   const target = positive(targetPrice)
   const lots = Math.max(1, Math.trunc(finite(quantityLots) || 1))
-  if (!(entry > stop && target > entry)) {
+  if (!(entry > 0 && stop > 0 && target > entry && entry > stop)) {
     return {
       schemaVersion: TRADE_EXPECTANCY_SCHEMA_VERSION,
       state: 'INVALID_PRICE_CONTRACT',

@@ -1,3 +1,5 @@
+import { beijingDayKey, isTradingDayAt } from './tradingCalendar.js'
+
 export const EXIT_MANAGEMENT_VERSION = 'exit-management.v1'
 
 const EXIT_PRIORITY = Object.freeze({
@@ -5,7 +7,8 @@ const EXIT_PRIORITY = Object.freeze({
   STRUCTURAL_EXIT: 2,
   TAKE_PROFIT: 3,
   TRAILING_PROTECT: 4,
-  OPPORTUNITY_REVIEW: 5,
+  TIME_EXIT: 5,
+  OPPORTUNITY_REVIEW: 6,
   HOLD: 9,
 })
 
@@ -148,6 +151,16 @@ function expiredOpportunityReview(payload, now) {
   }
 }
 
+export function holdingExitDeadline(startedAt) {
+  if (!(Number(startedAt) > 0)) return null
+  let day = Date.parse(`${beijingDayKey(Number(startedAt))}T14:45:00+08:00`)
+  let sessions = 0
+  for (let i = 0; i < 30; i++, day += 86400000) {
+    if (isTradingDayAt(day) && ++sessions === 5) return day
+  }
+  return null
+}
+
 function exitQuantity(total, sellable, full = false) {
   if (sellable <= 0) return 0
   if (full) return sellable
@@ -227,6 +240,11 @@ export function applyShortHorizonExitPolicy({
   if (!['hold_advice', 'review'].includes(mode)) return result
   const { total, sellable } = holdings(payload)
   if (total <= 0) return result
+  const ledgerStop = finite(payload.holdingStopPrice)
+  const priorStop = ledgerStop > 0 ? ledgerStop : finite(payload.previousAdvice?.stopPrice)
+  if (priorStop > 0 && (!(result.stopPrice > 0) || result.stopPrice < priorStop)) {
+    result.stopPrice = priorStop
+  }
 
   const tactical = payload.shortHorizonTactical || {}
   const current = finite(
@@ -281,6 +299,21 @@ export function applyShortHorizonExitPolicy({
       sellable,
       nextTradeDay: payload.nextTradeDay,
     })
+  }
+
+  const deadline = holdingExitDeadline(payload.holdingStartedAt)
+  if (deadline != null && now >= deadline) {
+    const timed = applyExitAction(result, {
+      kind: 'TIME_EXIT',
+      reason: '短线持仓已到第5个交易日退出窗口，不自动转为长期持有',
+      price: current,
+      total,
+      sellable,
+      full: true,
+      nextTradeDay: payload.nextTradeDay,
+    })
+    timed.exitManagement.deadlineAt = deadline
+    return timed
   }
 
   const opportunity = expiredOpportunityReview(payload, now)

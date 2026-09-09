@@ -430,7 +430,7 @@ test('同一任务完成后拒绝迟到的运行中快照', () => {
   }])
 })
 
-test('后台复核保持卡片可见但不占用或取消advisor生成', () => {
+test('后台例行检查保持静默且不占用或取消advisor生成', () => {
   const batch = {
     serverMode: true,
     running: false,
@@ -449,6 +449,8 @@ test('后台复核保持卡片可见但不占用或取消advisor生成', () => {
       active: true,
       status: 'running',
       role: 'review',
+      silent: true,
+      triggerKind: '',
       stage: '',
       label: '正在核对最新失效信号',
       cancelable: false,
@@ -460,6 +462,24 @@ test('后台复核保持卡片可见但不占用或取消advisor生成', () => {
     cloudAdviceLoadingState(batch, '600000').role,
     'review',
   )
+})
+
+test('到价确认保持可见并与后台例行检查区分', () => {
+  const state = adviceJobState({
+    serverMode: true,
+    reviews: [{
+      code: '600000',
+      role: 'review',
+      source: 'judge',
+      triggerKind: 'price-review',
+      status: 'running',
+      stage: 'llm',
+    }],
+  }, '600000', { role: 'review' })
+
+  assert.equal(state.silent, false)
+  assert.equal(state.label, '到价确认中')
+  assert.equal(state.triggerKind, 'price-review')
 })
 
 test('卡片复核状态只由真实price-review任务状态驱动', () => {

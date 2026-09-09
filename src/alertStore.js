@@ -28,6 +28,7 @@ import {
 } from '../shared/triggeredReviewDecision.js'
 import { isFreshAlertQuote } from '../shared/alertQuotePolicy.js'
 import { showSystemNotification } from './systemNotification.js'
+import { evaluateMonitoringRule, ruleText } from '../shared/monitoringPlan.js'
 
 // ============ 盯盘预警引擎 ============
 // 统一轮询自选/持仓相关个股实时报价，逐条判断预警规则是否命中；
@@ -55,6 +56,7 @@ export const ALERT_TYPES = [
 
 // 生成一条规则的可读描述
 export function describeAlert(a) {
+  if (a.type === 'plan-condition' && a.planRule) return ruleText(a.planRule)
   const t = ALERT_TYPES.find((x) => x.key === a.type)
   if (!t) return ''
   if (a.type === 'limitup') return `临近涨停(涨幅≥${formatPriceLimitThreshold(a, true)}%)`
@@ -216,6 +218,9 @@ const listeners = new Set()
 const _confirming = new Set()
 const _reviewTriggering = new Set()
 let _watchingFlushPromise = null
+let _tracking = false
+let _lastTrackingAt = 0
+let _cloudNotificationsInitialized = false
 function flushWatchingState() {
   if (!_watchingFlushPromise) {
     _watchingFlushPromise = Promise.resolve()
@@ -300,7 +305,7 @@ export const alertStore = {
   },
 
   // 记录一条站内通知(去重:同一预警 30 分钟内不重复留档,避免同规则反复刷屏)
-  push(n) {
+  push(n, { showBanner = true } = {}) {
     if (n && n.alertId) {
       const dup = state.notifications.find((x) => x.alertId === n.alertId && (Date.now() - (x.at || 0)) < 1800000)
       if (dup) return false
@@ -312,14 +317,16 @@ export const alertStore = {
       ...n,
     }
     state.notifications = [event, ...state.notifications].slice(0, 100)
-    state.banners = [...state.banners, event].slice(-20)
+    if (showBanner) {
+      state.banners = [...state.banners, event].slice(-20)
+    }
     state.unread += 1
     emit()
     return true
   },
-  publish(n) {
+  publish(n, options) {
     if (!n?.title || !n?.body) return false
-    if (!this.push(n)) return false
+    if (!this.push(n, options)) return false
     notify(n)
     return true
   },
@@ -337,7 +344,10 @@ export const alertStore = {
 
   syncCloudNotifications(alerts, now = Date.now()) {
     const recent = (at) => at && now - Number(at) >= 0 && now - Number(at) < 1800000
-    const add = (event) => this.publish(event)
+    const replayingHistory = !_cloudNotificationsInitialized
+    const add = (event) => replayingHistory
+      ? this.push(event, { showBanner: false })
+      : this.publish(event)
     for (const a of (alerts || [])) {
       if (!a?.id) continue
       if (recent(a.watchingAt)) {
@@ -377,6 +387,7 @@ export const alertStore = {
         alertId: `${a.reviewOnly ? 'review' : invalid ? 'invalid' : confirmed ? 'confirm' : reviewed ? 'review-wait' : 'trigger'}-${a.id}`,
       })
     }
+    _cloudNotificationsInitialized = true
   },
 
   // 核心：对一批实时报价 quotes(map code→q) 跑一遍所有启用的规则
@@ -398,6 +409,11 @@ export const alertStore = {
     const isSmart = (a) => smartOn && a.type === 'price' && !!a.phase && a.phase !== 'confirmed' && a.phase !== 'invalid'
     for (const storedAlert of alerts) {
       const q = quoteMap[storedAlert.code]
+      if (storedAlert.type === 'plan-condition') {
+        const result = evaluateMonitoringRule(storedAlert.planRule, q, { now, previous: storedAlert.ruleState })
+        if (['MATCHED', 'OBSERVING'].includes(result.state)) this._trackConditions(now)
+        continue
+      }
       if (storedAlert.reviewOnly) {
         const msg = hit(storedAlert, q, now)
         if (msg) this._triggerReviewOnly(storedAlert, q)
@@ -459,6 +475,21 @@ export const alertStore = {
         this._confirmWatching(a, q)
       }
     }
+  },
+
+  _trackConditions(now = Date.now()) {
+    const session = currentAccountSession()
+    if (!session.account || _tracking || now - _lastTrackingAt < 5000) return
+    _tracking = true
+    _lastTrackingAt = now
+    void fetch(api('/api/cron_advice'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...accountRequestHeaders() },
+      body: JSON.stringify({ op: 'trackConditions' }),
+      signal: AbortSignal.timeout(12000),
+    }).then((response) => response.json()).then((result) => {
+      if (accountSessionMatches(session) && result.ok) planStore.mergeCloud({ alerts: result.alerts })
+    }).catch(() => {}).finally(() => { _tracking = false })
   },
 
   _triggerReviewOnly(alert, quote) {
@@ -652,7 +683,10 @@ subscribeAccountSession(() => {
   state.notifications = []
   state.banners = []
   state.unread = 0
+  _cloudNotificationsInitialized = false
   _confirming.clear()
   _reviewTriggering.clear()
+  _tracking = false
+  _lastTrackingAt = 0
   emit()
 })

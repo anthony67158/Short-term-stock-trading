@@ -11,12 +11,17 @@
 // 「占用 advisor」的口径 = 本地 runner 正在跑的 ∪ 服务端 advisorBusy:
 //   本机点击既可能走本地生成,也可能兜底走服务端;另一台设备的服务端生成也占用同一批端点。
 //   review 任务独立占用 review 端点，不能阻塞新的主建议。
-import { startAdvice, getRunningList, isRunning } from './adviceRunner'
+import {
+  startAdvice,
+  getRunningList,
+  isRunning,
+  isServerPending,
+} from './adviceRunner'
 import { getBatchState, getConcurrency } from './adviceBatch'
 import { canServerAdvice, triggerServerAdvice } from './serverAdvice'
 import {
   adviceJobState,
-  SERVER_FALLBACK_CONFIRM_MS,
+  SERVER_SUBMISSION_LOCK_MS,
   startAdvicePersistently,
 } from '../shared/adviceUiState.js'
 import {
@@ -46,7 +51,7 @@ function endSubmission(code, requestId = '') {
 
 function retainUnconfirmedSubmission(code, requestId, error = '') {
   const key = String(code || '')
-  const expiresAt = Date.now() + SERVER_FALLBACK_CONFIRM_MS
+  const expiresAt = Date.now() + SERVER_SUBMISSION_LOCK_MS
   submissions.update(key, {
     stage: 'submitting',
     phase: error || '提交结果未确认，正在核对云端任务状态',
@@ -56,7 +61,7 @@ function retainUnconfirmedSubmission(code, requestId, error = '') {
   if (previous) clearTimeout(previous)
   const timer = setTimeout(
     () => endSubmission(key, requestId),
-    SERVER_FALLBACK_CONFIRM_MS,
+    SERVER_SUBMISSION_LOCK_MS,
   )
   submissionExpiryTimers.set(key, timer)
 }
@@ -109,7 +114,9 @@ export async function tryStartAdvice(spec) {
   if (isGenerating(code)) {
     return {
       status: 'already',
-      mode: isRunning(String(code)) ? 'local' : 'server',
+      mode: isRunning(String(code)) && !isServerPending(String(code))
+        ? 'local'
+        : 'server',
       code: String(code),
     }
   }

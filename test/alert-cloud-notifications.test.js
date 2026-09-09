@@ -49,6 +49,7 @@ test('应用根节点挂载全局预警横幅并原样展示通知内容', () =>
   assert.match(app, /banner\.title/)
   assert.match(app, /banner\.body/)
   assert.match(app, /<AlertBanner\s*\/>/)
+  assert.match(app, /ALERT_BANNER_VISIBLE_MS = 4000/)
   assert.match(app, /event\?\.data\?\.type !== 'stock-alert'/)
   assert.match(serviceWorker, /client\.postMessage\(\{/)
   assert.match(serviceWorker, /type:\s*'stock-alert'/)
@@ -157,7 +158,8 @@ test('页面轮询发现观察价到达后立即提交复核并显示同内容�
   }
 })
 
-test('云端近期到价事件回灌为去重的站内预警通知', () => {
+test('首次云端恢复只归档历史提醒，不重新弹横幅或响铃', () => {
+  activateAccountSession('cloud-history')
   alertStore.clearAll()
   const watchingAt = Date.now() - 1000
   const data = {
@@ -189,12 +191,59 @@ test('云端近期到价事件回灌为去重的站内预警通知', () => {
     }],
   }
 
-  planStore.setData(data)
-  planStore.setData(data)
+  try {
+    planStore.setData(data)
+    planStore.setData(data)
 
-  assert.equal(alertStore.get().notifications.length, 1)
-  assert.equal(alertStore.get().unread, 1)
-  assert.equal(alertStore.get().notifications[0].alertId, 'watch-cloud-reduce')
+    assert.equal(alertStore.get().notifications.length, 1)
+    assert.equal(alertStore.get().banners.length, 0)
+    assert.equal(alertStore.get().unread, 1)
+    assert.equal(alertStore.get().notifications[0].alertId, 'watch-cloud-reduce')
+  } finally {
+    activateAccountSession('')
+    alertStore.clearAll()
+  }
+})
+
+test('页面就绪后新到的云端事件仍进入临时横幅', () => {
+  activateAccountSession('cloud-live')
+  alertStore.clearAll()
+  const triggeredAt = Date.now()
+  const alert = {
+    id: 'cloud-live-trigger',
+    code: '000001',
+    name: '平安银行',
+    type: 'plan-condition',
+    opQty: '减仓1手',
+    enabled: false,
+    phase: 'triggered',
+    triggeredAt,
+    triggeredMsg: '股价≥11.5元（当前11.6元）',
+  }
+
+  try {
+    planStore.setData({
+      plan: [],
+      holding: [],
+      closed: [],
+      settings: {},
+      alerts: [],
+    })
+    alertStore.syncCloudNotifications(
+      [alert],
+      triggeredAt + 1,
+    )
+
+    assert.equal(alertStore.get().notifications.length, 1)
+    assert.equal(alertStore.get().banners.length, 1)
+    assert.equal(
+      alertStore.get().banners[0].title,
+      '平安银行｜减仓1手',
+    )
+  } finally {
+    activateAccountSession('')
+    alertStore.clearAll()
+  }
 })
 
 test('云端Judge维持结论回灌为终态通知而不是再次等待', () => {

@@ -18,7 +18,7 @@ const budgetMs = Math.max(30000, Math.min(560000, Number(process.env.HARNESS_BUD
 const profile = String(process.env.HARNESS_PROFILE || 'standard').trim().toLowerCase()
 const defaultMaxMs = {
   quick: QUICK_ADVICE_TARGET_MS,
-  deep: 90000,
+  deep: DEEP_ADVICE_TARGET_MS,
   review: 45000,
 }[profile] || 0
 const maxMs = Math.max(0, Number(process.env.HARNESS_MAX_MS) || defaultMaxMs)

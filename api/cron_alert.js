@@ -52,6 +52,7 @@ import { isAdviceReviewEnabled } from '../shared/adviceReviewPolicy.js';
 import { isContinuousTrading } from '../shared/tradingCalendar.js';
 import { buildAlertNotification } from '../shared/alertNotification.js';
 import { isFreshAlertQuote } from '../shared/alertQuotePolicy.js';
+import { evaluateAccountMonitoring } from './_monitoring.js';
 import {
   TRIGGERED_REVIEW_TOTAL_BUDGET_MS,
 } from '../shared/triggeredReviewDecision.js';
@@ -404,6 +405,9 @@ async function processAccount(
     deadline = Number.POSITIVE_INFINITY,
   } = {},
 ) {
+  if ((acc.data?.alerts || []).some((alert) => alert.type === 'plan-condition' && alert.enabled)) {
+    await evaluateAccountMonitoring(acc);
+  }
   const data = acc.data || {};
   const alerts = Array.isArray(data.alerts) ? data.alerts : [];
   const subs = Array.isArray(data.pushSubs) ? data.pushSubs : [];
@@ -435,7 +439,8 @@ async function processAccount(
   }
 
   // armed/watching 均需处理:enabled && 未最终触发(confirmed)
-  const active = cloudAlertsForEvaluation(alerts, data.settings);
+  const active = cloudAlertsForEvaluation(alerts, data.settings)
+    .filter((alert) => alert.type !== 'plan-condition');
   const outcomePending = alerts.filter((alert) =>
     alert?.phase === 'confirmed' &&
     alert.triggeredAt &&

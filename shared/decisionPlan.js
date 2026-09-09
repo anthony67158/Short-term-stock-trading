@@ -19,6 +19,13 @@ import {
 } from './opportunityLifecycle.js'
 import { positionExitEffect } from './positionExit.js'
 import { buildTradeExpectancy } from './tradeExpectancy.js'
+import {
+  beijingDayKey,
+  beijingMinutes,
+  isTradingDayAt,
+  nextTradingDate,
+  localDateKey,
+} from './tradingCalendar.js'
 
 export const DECISION_PLAN_SCHEMA_VERSION = 'decision-plan.v2'
 
@@ -240,7 +247,11 @@ function computeBuyCapacity({
   const positionCapacity = totalAssets == null
     ? 0
     : Math.max(0, (marketPositionLimit - currentPosition) / 100 * totalAssets)
-  const amountCapacity = Math.min(cash, stockCapacity, positionCapacity)
+  const industryWeight = finite(account.industryWeight)
+  const industryCapacity = totalAssets != null && industryWeight != null
+    ? Math.max(0, (30 - industryWeight) / 100 * totalAssets)
+    : Infinity
+  const amountCapacity = Math.min(cash, stockCapacity, positionCapacity, industryCapacity)
   let affordableLots = Math.floor(amountCapacity / oneLotEntryGross)
   while (affordableLots > 0) {
     const gross = entryFill * affordableLots * 100
@@ -297,6 +308,82 @@ function costEstimate(action, referencePrice, lots, slippageBps) {
   }
 }
 
+function planExpiry(now, executable) {
+  const minutes = beijingMinutes(now)
+  if (executable) {
+    const sessionEnd = Date.parse(`${beijingDayKey(now)}T${
+      minutes <= 690 ? '11:30' : '15:00'
+    }:00+08:00`)
+    return Math.min(now + 15 * 60 * 1000, sessionEnd)
+  }
+  const day = isTradingDayAt(now) && minutes < 900
+    ? beijingDayKey(now)
+    : nextTradingDate(now) && localDateKey(nextTradingDate(now))
+  return day ? Date.parse(`${day}T15:00:00+08:00`) : now
+}
+
+export function applyCompiledDecisionPlan(advice = {}) {
+  const plan = advice.decisionPlan
+  if (plan?.schemaVersion !== DECISION_PLAN_SCHEMA_VERSION
+    || !['buy_advice', 'hold_advice', 'review'].includes(plan.mode)) return advice
+  const lots = Math.max(0, Math.trunc(finite(plan.quantity?.lots) || 0))
+  const ready = ['READY', 'MANUAL_PROBE'].includes(plan.actionability)
+  const conditionalExit = plan.actionability === 'CONDITIONAL'
+    && RISK_REDUCING.has(plan.action)
+  const allowed = (ready || conditionalExit) && lots > 0
+  const holding = ['hold_advice', 'review'].includes(plan.mode)
+  const action = allowed ? actionLabel(plan.action) : holding ? '持有' : '观望'
+  const reference = positive(plan.prices?.reference)
+  const reasons = plan.blockedReasons?.filter(Boolean).join('；') || ''
+  const budget = plan.entryBudget
+  const instruction = allowed
+    ? `${conditionalExit ? '到价确认后' : '人工确认后'}${action}${lots}手，${reference}元；${
+        [plan.prices?.stop > 0 ? `止损${plan.prices.stop}元` : '',
+          plan.prices?.target > 0 ? `目标${plan.prices.target}元` : ''].filter(Boolean).join('，')
+      }`
+    : reasons ? `${holding ? '不加仓，保留现有仓位纪律' : '本次不买入'}：${reasons}`
+      : budget?.state === 'ESTIMATED'
+        ? `${plan.trigger || advice.actionPlan || '到价确认'}；预案最多${budget.lots}手，尚未授权执行`
+        : advice.actionPlan
+  const result = {
+    ...advice,
+    decisionPlan: allowed ? {
+      ...plan,
+      trigger: conditionalExit
+        ? `${plan.triggerDirection === 'LTE' ? '跌至' : '反弹至'}${reference}元并确认转弱后${action}${lots}手`
+        : instruction,
+    } : plan,
+    action,
+    stance: action,
+    actionPlan: instruction,
+    nextAction: instruction,
+    todayAction: action,
+    expireAt: Date.parse(plan.validUntil),
+    planQty: allowed && plan.action === 'BUY' ? lots : 0,
+    planQtyNum: allowed && plan.action === 'BUY' ? lots : 0,
+    opQty: allowed ? `${action}${lots}手` : '无需操作',
+    planAmount: allowed && plan.action === 'BUY' ? plan.costs?.estimatedNetAmount ?? 0 : 0,
+    opAmount: allowed ? plan.costs?.estimatedNetAmount ?? 0 : 0,
+    buyPrice: allowed && plan.action === 'BUY' ? reference : null,
+    buyZone: allowed && plan.action === 'BUY' ? String(reference) : null,
+    addPrice: allowed && plan.action === 'ADD' ? reference : null,
+    reducePrice: allowed && RISK_REDUCING.has(plan.action) ? reference : null,
+    stopPrice: plan.prices?.stop ?? null,
+    targetPrice: plan.prices?.target ?? null,
+  }
+  if (advice.reviewDecision?.terminal === true && allowed) {
+    result.reviewDecision = {
+      ...advice.reviewDecision,
+      operation: action,
+      outcome: `立即${action}`,
+      quantity: lots,
+      priceLow: reference,
+      priceHigh: reference,
+    }
+  }
+  return result
+}
+
 export function compileDecisionPlan({
   mode,
   advice = {},
@@ -306,7 +393,6 @@ export function compileDecisionPlan({
   now = Date.now(),
 } = {}) {
   const requestedAction = actionFrom(mode, advice)
-  const riskRequested = RISK_INCREASING.has(requestedAction)
   const market = payload.marketEnv?.schemaVersion
     ? payload.marketEnv
     : deriveMarketRegime(payload.market || {})
@@ -314,6 +400,7 @@ export function compileDecisionPlan({
     === 'short-horizon-tactical.v1'
     ? payload.shortHorizonTactical
     : buildShortHorizonTactical(payload, { now })
+  const account = payload.account || {}
   const actionPolicy = deriveShortHorizonActionPolicy({
     mode,
     tactical,
@@ -322,9 +409,27 @@ export function compileDecisionPlan({
   })
   const governedAction = actionPolicy.effectiveAction
     || requestedAction
-  const riskIncreasing = RISK_INCREASING.has(governedAction)
+  const conditionalEntry = ['WATCH', 'HOLD'].includes(governedAction)
+    && ['buy_advice', 'hold_advice', 'review'].includes(mode)
+    && actionPolicy.riskTier !== 'NONE'
+    && advice.reviewDecision?.terminal !== true
+  const riskRequested = RISK_INCREASING.has(requestedAction) || conditionalEntry
+  const riskIncreasing = RISK_INCREASING.has(governedAction) || conditionalEntry
+  const budgetAction = conditionalEntry
+    ? mode === 'buy_advice' ? 'BUY' : 'ADD'
+    : governedAction
   const riskReducing = RISK_REDUCING.has(governedAction)
-  const account = payload.account || {}
+  if (conditionalEntry) {
+    advice = {
+      ...advice,
+      stopPrice: positive(advice.stopPrice)
+        ?? positive(tactical.prices?.stopReference)
+        ?? positive(payload.quant?.highConfSignal?.stopLoss),
+      targetPrice: positive(advice.targetPrice)
+        ?? positive(tactical.prices?.targetReference)
+        ?? positive(payload.quant?.highConfSignal?.takeProfit),
+    }
+  }
   const expectancyCalibration =
     payload.advisorTrack?.expectancyCalibration || {}
   const realizedRSamples = Math.max(
@@ -353,12 +458,12 @@ export function compileDecisionPlan({
       && brierScore > 0.25
     )
   ) ? 0.5 : 1
-  const referencePrice = referencePriceFor(
+  let referencePrice = referencePriceFor(
     governedAction,
     advice,
     payload,
   )
-  const requestedReferencePrice = referencePriceFor(
+  let requestedReferencePrice = referencePriceFor(
     requestedAction,
     advice,
     payload,
@@ -368,6 +473,7 @@ export function compileDecisionPlan({
   const minimumRiskReward = market.regime === 'RISK_OFF'
     ? 2.2
     : 1.8
+  const minimumNetRiskReward = 1.8
   const requestedLots = requestedLotsFor(governedAction, advice)
   const slippageBps = 5
   const generatedPriceContract = buildAdvicePriceContract({
@@ -397,7 +503,22 @@ export function compileDecisionPlan({
   const observationLevels = adviceObservationLevels({
     priceContract,
   })
+  if (conditionalEntry) {
+    const preferredKey = tactical.timing?.state === 'WAIT_BREAKOUT'
+      ? 'watch_breakout'
+      : 'watch_pullback'
+    const observation = observationLevels.find((item) => item.key === preferredKey)
+      || observationLevels[0]
+    referencePrice = positive(observation?.price)
+      ?? positive(priceContract.levels.find((item) =>
+        ['entry', 'add'].includes(item.key) && item.strict === true,
+      )?.price)
+    requestedReferencePrice = referencePrice
+  }
   const blockedReasons = []
+  if (conditionalEntry && !['stop', 'target'].every((key) =>
+    priceContract.levels.some((item) => item.key === key && item.strict)
+  )) blockedReasons.push('预案止损或目标价缺少可核验依据')
   const freshness = evidenceSnapshot?.freshness || {}
   const missingRequiredSources = Array.isArray(
     freshness.missingRequiredSources,
@@ -592,6 +713,10 @@ export function compileDecisionPlan({
       stopPrice,
       account: {
         ...account,
+        maxStockWeight: actionPolicy.riskTier === 'PROBE'
+          ? Math.min(5, positive(actionPolicy.maxPositionPct) || 5,
+              positive(account.maxStockWeight) || 20)
+          : account.maxStockWeight,
         cash: Math.max(0, Math.min(
           finite(account.cash) || 0,
           finite(accountCircuitBreaker?.availableCashAfterReservations) ?? Infinity,
@@ -675,7 +800,7 @@ export function compileDecisionPlan({
   }
 
   let tradeExpectancy = buildTradeExpectancy({
-    action: governedAction,
+    action: budgetAction,
     referencePrice,
     stopPrice,
     targetPrice,
@@ -709,7 +834,7 @@ export function compileDecisionPlan({
         stressLimitAmount: round(stressLimitAmount),
       }
       tradeExpectancy = buildTradeExpectancy({
-        action: governedAction,
+        action: budgetAction,
         referencePrice,
         stopPrice,
         targetPrice,
@@ -734,18 +859,31 @@ export function compileDecisionPlan({
   ) {
     blockedReasons.push(tradeExpectancy.gate.reason)
   }
+  if (riskIncreasing && capacity.lots > 0
+    && tradeExpectancy.plan?.netRiskReward < minimumNetRiskReward) {
+    blockedReasons.push(
+      `扣除手续费与滑点后盈亏比${tradeExpectancy.plan.netRiskReward}:1，`
+      + `低于${minimumNetRiskReward}:1；费后盈利${tradeExpectancy.plan.profitAmount}元，`
+      + `计划损失${tradeExpectancy.plan.lossAmount}元`,
+    )
+  }
 
   const uniqueBlockers = [...new Set(blockedReasons.filter(Boolean))]
-  const exitConfirmed = advice.reviewDecision?.terminal === true
+  const exitConfirmed = (advice.reviewDecision?.terminal === true
     && /减仓|清仓|锁定利润|止损|退出/.test(String(
       advice.reviewDecision?.operation
       || advice.reviewDecision?.outcome
       || '',
-    ))
+    ))) || (
+      advice.exitManagement?.kind === 'HARD_STOP'
+      && advice.exitManagement?.blockedByT1 === false
+      && payload.todayQuote?.live === true
+      && positive(payload.todayQuote?.price) <= stopPrice * 0.985
+    )
   let actionability = 'WATCH'
-  if (riskRequested && uniqueBlockers.length) {
+  if (!conditionalEntry && riskRequested && uniqueBlockers.length) {
     actionability = 'BLOCKED'
-  } else if (riskIncreasing) {
+  } else if (riskIncreasing && !conditionalEntry) {
     actionability = uniqueBlockers.length ? 'BLOCKED' : 'READY'
   } else if (riskReducing) {
     actionability = uniqueBlockers.length
@@ -755,7 +893,7 @@ export function compileDecisionPlan({
   const provisionalAction = actionability === 'BLOCKED'
     ? 'WATCH'
     : governedAction
-  const lots = actionability === 'BLOCKED' ? 0 : capacity.lots
+  const lots = actionability === 'BLOCKED' || conditionalEntry ? 0 : capacity.lots
   const positionEffect = positionExitEffect({
     action: provisionalAction,
     requestedLots: lots,
@@ -786,9 +924,10 @@ export function compileDecisionPlan({
   const baseTime = Number.isFinite(Date.parse(asOf))
     ? Date.parse(asOf)
     : now
-  const validForMs = payload.todayQuote?.live === true
-    ? 15 * 60 * 1000
-    : 12 * 60 * 60 * 1000
+  const validUntil = planExpiry(
+    baseTime,
+    actionPolicy.executionOpen && ['READY', 'MANUAL_PROBE'].includes(actionability),
+  )
   const trigger = text(
     actionPolicy.overridden
       ? actionPolicy.nextReviewTrigger
@@ -862,7 +1001,7 @@ export function compileDecisionPlan({
           ? '暂不可执行'
           : '继续观察',
     asOf,
-    validUntil: new Date(baseTime + validForMs).toISOString(),
+    validUntil: new Date(validUntil).toISOString(),
     recomputeOn: [
       'PRICE_TRIGGERED',
       'BAR_5M_CLOSED',
@@ -955,6 +1094,20 @@ export function compileDecisionPlan({
       affordableLots: capacity.affordableLots,
       sellableLots: capacity.sellableLots ?? null,
     },
+    entryBudget: conditionalEntry ? {
+      state: uniqueBlockers.length ? 'BLOCKED' : 'ESTIMATED',
+      executionAllowed: false,
+      lots: uniqueBlockers.length ? 0 : capacity.lots,
+      referencePrice: round(referencePrice, 3),
+      stopPrice: round(stopPrice, 3),
+      targetPrice: round(targetPrice, 3),
+      costs: costEstimate(budgetAction, referencePrice,
+        uniqueBlockers.length ? 0 : capacity.lots, slippageBps),
+      stopLossAmount: uniqueBlockers.length
+        ? null : tradeExpectancy.plan?.lossAmount ?? null,
+      reasons: uniqueBlockers,
+      asOf,
+    } : null,
     positionEffect,
     prices: {
       reference: round(referencePrice, 3),
@@ -979,6 +1132,7 @@ export function compileDecisionPlan({
     risk: {
       budgetPct: capacity.riskPct,
       minimumRiskReward,
+      minimumNetRiskReward,
       maxLossAmount: capacity.maxLossAmount,
       estimatedLossPerLot: capacity.lossPerLot,
       manualProbeLimitPct: capacity.manualProbeLimitPct ?? null,
@@ -1055,14 +1209,15 @@ export function buildFallbackDecisionAdvice({
     previousReduce != null ? `减仓${previousReduce}元` : '',
     previousTarget != null ? `目标${previousTarget}元` : '',
   ].filter(Boolean).join('、')
+  const errorText = text(error, 120) || 'AI 决策模型未返回有效内容'
   const advice = {
     action: holdingMode ? '持有' : '观望',
     stance: holdingMode ? '持有' : '观望',
     tier: 'wait',
     tone: 'muted',
     title: holdingMode
-      ? '解释服务暂不可用，维持现有仓位纪律'
-      : '解释服务暂不可用，暂停新增风险',
+      ? `AI 决策暂不可用（${errorText}），维持现有仓位纪律`
+      : `AI 决策暂不可用（${errorText}），暂停新增风险`,
     actionPlan: holdingMode
       ? `本轮不新增仓位，也不依据不完整解释改变原计划；${
           previousDefense
