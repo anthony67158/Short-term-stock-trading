@@ -23,7 +23,7 @@ export const STOCKDB_DAILY_FIELDS = Object.freeze([
   'pre_close',
   'volume',
   'amount',
-  'turnover_rate',
+  'turnover',
   'vol_ratio',
   'float_share',
   'is_st',

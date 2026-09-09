@@ -29,7 +29,7 @@ test('StockDB历史源按A股前缀批量读取并归一化字段', async () => 
           pre_close: 100,
           volume: 1000,
           amount: 101_000,
-          turnover_rate: 1.2,
+          turnover: 1.2,
           vol_ratio: 1.1,
           float_share: 10_000,
           is_st: 0,
@@ -39,9 +39,8 @@ test('StockDB历史源按A股前缀批量读取并归一化字段', async () => 
         return [{
           date: 20260908,
           sec_code: '600519',
-          net_amount_main: 20_000,
-          net_amount_s: -5_000,
-          net_pct_main: 2.5,
+          main_net: 200_000_000,
+          small_net: -50_000_000,
         }]
       }
       if (table === '分钟k' && prefix === '6*') {

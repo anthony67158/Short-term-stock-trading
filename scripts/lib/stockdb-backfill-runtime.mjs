@@ -163,6 +163,13 @@ export async function scanHistoricalSlot({
       tradeDate,
       mode,
     )
+    if (
+      fund.mainRatio == null
+      && fund.mainNetYi != null
+      && quote.amount > 0
+    ) {
+      fund.mainRatio = fund.mainNetYi * 100_000_000 / quote.amount * 100
+    }
     quote.mainRatio = fund.mainRatio
     const history = recentDaily(dailyRows, tradeDate, mode, quote)
     if (history.length < 30 || hasSplitLikeDiscontinuity(history)) continue

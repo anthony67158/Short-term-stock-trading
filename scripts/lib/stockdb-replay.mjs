@@ -79,11 +79,13 @@ export function normalizeFundRow(value = {}) {
     yiValue(value.mainNetYi, 'yi')
     ?? yiValue(value.net_amount_main, 'wan')
     ?? yiValue(value.main_net_amount_wan, 'wan')
+    ?? yiValue(value.main_net, 'yuan')
     ?? yiValue(value.main_net_inflow, 'yuan')
   const retailNetYi =
     yiValue(value.retailNetYi ?? value.smallNetYi, 'yi')
     ?? yiValue(value.net_amount_s, 'wan')
     ?? yiValue(value.small_net_amount_wan, 'wan')
+    ?? yiValue(value.small_net, 'yuan')
     ?? yiValue(value.small_net_inflow, 'yuan')
   return {
     date,

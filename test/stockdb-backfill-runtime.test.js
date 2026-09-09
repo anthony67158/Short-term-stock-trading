@@ -99,6 +99,7 @@ test('历史时点可复用生产扫描器生成三路径账本', async () => {
 
   assert.equal(batch.tradeDate, '2026-09-08')
   assert.equal(batch.events.length, 1)
+  assert.ok(batch.events[0].quote.mainRatio > 0)
   assert.ok(batch.events[0].counterfactualPlans.length >= 1)
   assert.ok(pendingFromBatch(batch).length >= 1)
 })
