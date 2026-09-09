@@ -88,16 +88,16 @@ try {
       await monitoredHolding
         .locator('.monitoring-rules-head b')
         .textContent(),
-      '运行中',
+      '运行中3项',
     )
     assert.deepEqual(
       await monitoredHolding
         .locator('.monitoring-rule strong')
         .allTextContents(),
       [
-        '股价≤54元 或 主力净额≤-3亿元 → 清仓1手',
-        '股价≥56元 → 清仓1手',
-        '主力净额≥0亿元 且 股价站上分时均价线持续60秒 → 继续持有',
+        '股价≤54元 或 主力净额≤-3亿元清仓1手',
+        '股价≥56元清仓1手',
+        '主力净额≥0亿元 且 股价站上分时均价线持续60秒继续持有',
       ],
     )
     const monitoredText = await monitoredHolding.textContent()
@@ -175,8 +175,13 @@ try {
       '预案最多 · 20手',
     )
     assert.equal(await approved.locator('.action-command-qty').textContent(), '1手')
-    await page.locator('.selection-origin > summary').first().click()
-    assert.equal(await page.locator('.selection-origin[open]').count(), 1)
+    const selectionOrigin = page.locator('.selection-origin > summary').first()
+    if (await selectionOrigin.isVisible()) {
+      await selectionOrigin.click()
+      assert.equal(await page.locator('.selection-origin[open]').count(), 1)
+    } else {
+      assert.ok(width <= 720)
+    }
     await check('positions')
     await page.locator('.plan-cand .stock-name-link').first().click()
     await page.locator('.detail-panel .selection-origin').waitFor()

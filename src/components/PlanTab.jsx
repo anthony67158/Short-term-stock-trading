@@ -943,29 +943,54 @@ function MonitoringRules({ monitoring }) {
     WINDOW_ENDED: '本轮结束',
     T1_LOCKED: '今日锁定',
   }
+  const splitRuleText = (text) => {
+    const [condition, ...actions] = String(text || '').split(/\s*→\s*/)
+    return {
+      condition,
+      action: actions.join(' → '),
+    }
+  }
   return (
     <div className="monitoring-rules" aria-label="自动跟踪条件">
       <div className="monitoring-rules-head">
         <span><Icon name="radar" size={13} /> 系统跟踪</span>
         <b data-active={monitoring.active}>
           {monitoring.active ? '运行中' : monitoring.expired ? '已到期' : '未开启'}
+          <small>{monitoring.rules.length}项</small>
         </b>
       </div>
       <div className="monitoring-rule-list" role="list">
-        {monitoring.rules.map((rule) => (
-          <div
-            className="monitoring-rule"
-            data-state={rule.state}
-            role="listitem"
-            key={rule.id}
-          >
-            <span>{stateLabel[rule.state] || '监控中'}</span>
-            <strong>{rule.text}</strong>
-            {rule.state === 'OBSERVING' && rule.remainingSeconds != null && (
-              <em>还需 {rule.remainingSeconds} 秒</em>
-            )}
+        {monitoring.rules.map((rule) => {
+          const text = splitRuleText(rule.text)
+          return (
+            <div
+              className="monitoring-rule"
+              data-state={rule.state}
+              role="listitem"
+              key={rule.id}
+              title={rule.text}
+            >
+              <span>{stateLabel[rule.state] || '监控中'}</span>
+              <strong>
+                <span className="monitoring-rule-condition">{text.condition}</span>
+                {text.action && (
+                  <span className="monitoring-rule-action">
+                    <Icon name="chevronRight" size={12} />
+                    {text.action}
+                  </span>
+                )}
+              </strong>
+              {rule.state === 'OBSERVING' && rule.remainingSeconds != null && (
+                <em>还需 {rule.remainingSeconds} 秒</em>
+              )}
+            </div>
+          )
+        })}
+        {monitoring.rules.length > 2 && (
+          <div className="monitoring-rule-more">
+            另 {monitoring.rules.length - 2} 项条件，点卡片查看完整规则
           </div>
-        ))}
+        )}
       </div>
     </div>
   )
@@ -2737,7 +2762,7 @@ function HoldingItem({ h, quote: q }) {
   const [tradeErr, setTradeErr] = useState('')
   const mobileOperations = useMediaQuery('(max-width: 720px)')
   const swipe = useSwipe({
-    enabled: isTouch && !mode && !planDetailOpen,
+    enabled: isTouch && !mobileOperations && !mode && !planDetailOpen,
     onRight: () => openStockDetail(h.code, h.name),
   })
 

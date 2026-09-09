@@ -118,7 +118,7 @@ test('持仓和自选卡展示最近有效价但只用连续竞价价触发动�
   )
 })
 
-test('桌面同排卡片以最高内容为准等高并均匀拉伸内部节奏', () => {
+test('桌面同排卡片等高，手机用横向卡组压缩页面长度', () => {
   assert.match(
     planTab,
     /'trade-card plan-cand'[\s\S]*?\(cardAdvice \? ' has-advice' : ' no-advice'\)/,
@@ -153,11 +153,11 @@ test('桌面同排卡片以最高内容为准等高并均匀拉伸内部节奏',
   )
   assert.match(
     design,
-    /Every card stretches to the\s+tallest natural card in its desktop grid row[\s\S]*distribute the\s+extra height across section gaps[\s\S]*Mobile keeps natural height/s,
+    /Every card stretches to the\s+tallest natural card in its desktop grid row[\s\S]*Mobile groups use equal-height horizontal snap rows/s,
   )
   assert.match(
     calmSurface,
-    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.hold-swipe-wrap,[\s\S]*?\.plan-cand\s*{[^}]*height:\s*auto[\s\S]*?\.plan-cand,[\s\S]*?\.hold-grid \.hold-item\s*{[^}]*justify-content:\s*flex-start/s,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.hold-grid,[\s\S]*?\.plan-cand-grid\s*{[^}]*grid-auto-flow:\s*column[^}]*grid-auto-columns:\s*min\(88vw,\s*28rem\)[^}]*overflow-x:\s*auto[^}]*scroll-snap-type:\s*inline mandatory[\s\S]*?\.hold-swipe-wrap,[\s\S]*?\.plan-cand\s*{[^}]*height:\s*100%[^}]*scroll-snap-align:\s*start/s,
   )
 })
 
@@ -250,7 +250,7 @@ test('监控规则使用无框清单且不重复渲染同义进度条', () => {
   )
   assert.match(
     precision,
-    /\.monitoring-rule-list\s*{[^}]*display:\s*grid[^}]*gap:\s*var\(--space-xs\)/s,
+    /\.monitoring-rule-list\s*{[^}]*display:\s*grid[^}]*gap:\s*var\(--space-2xs\)/s,
   )
   assert.match(
     precision,
@@ -263,6 +263,41 @@ test('监控规则使用无框清单且不重复渲染同义进度条', () => {
   assert.match(
     designGuide,
     /规则清单不表格化[\s\S]*卡片内部禁止再放带圆角或连续横线的规则容器/,
+  )
+})
+
+test('卡片关键文字可直接阅读且手机只保留交易摘要', () => {
+  assert.match(
+    planTab,
+    /splitRuleText\(rule\.text\)[\s\S]*?monitoring-rule-condition[\s\S]*?monitoring-rule-action/s,
+  )
+  assert.match(
+    planTab,
+    /monitoring\.rules\.length > 2[\s\S]*?monitoring-rule-more/s,
+  )
+  assert.match(
+    calmSurface,
+    /\.hh-name,[\s\S]*?\.pc-nm\s*{[^}]*font-size:\s*var\(--text-md\)/s,
+  )
+  assert.match(
+    calmSurface,
+    /\.card-decision-slot \.action-command-meta\s*{[^}]*font-size:\s*var\(--text-sm\)/s,
+  )
+  assert.match(
+    precision,
+    /\.monitoring-rule > strong\s*{[^}]*font-size:\s*var\(--text-base\)/s,
+  )
+  assert.match(
+    calmSurface,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.monitoring-rule:nth-child\(n \+ 3\)\s*{[^}]*display:\s*none[\s\S]*?\.monitoring-rule-more\s*{[^}]*display:\s*flex/s,
+  )
+  assert.match(
+    calmSurface,
+    /\.hold-item > \.trade-card-pulse,[\s\S]*?\.plan-cand > \.stock-note-summary\s*{[^}]*display:\s*none/s,
+  )
+  assert.match(
+    designGuide,
+    /移动端先给交易摘要[\s\S]*盘面证据、选入依据、备注及其余监控条件进入个股详情/,
   )
 })
 
