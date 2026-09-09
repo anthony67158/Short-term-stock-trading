@@ -72,6 +72,8 @@ export function expandHistoricalLedgerBatch(batch = {}) {
 
 function contextOf(event, batch, scoreInput) {
   return {
+    source: 'STOCKDB_CAUSAL_REPLAY',
+    historicalBackfill: true,
     stageReached: String(event.stageReached || 'UNKNOWN'),
     displayedRank: Number(event.displayedRank) || null,
     marketRegimeLabel:
