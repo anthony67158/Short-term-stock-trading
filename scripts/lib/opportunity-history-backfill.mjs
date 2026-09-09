@@ -19,6 +19,7 @@ export function buildHistoricalLedgerBatch({
   tradeDate,
   slot,
   generatedAt,
+  source = 'STOCKDB_CAUSAL_REPLAY',
   scan,
   marketContext,
 } = {}) {
@@ -31,7 +32,7 @@ export function buildHistoricalLedgerBatch({
         (decision) => decision?.priceContractValid === true,
       )
     )
-  return buildOpportunityRadarLedgerBatch({
+  const batch = buildOpportunityRadarLedgerBatch({
     mode,
     tradeDate,
     slot,
@@ -40,6 +41,10 @@ export function buildHistoricalLedgerBatch({
     marketGate: marketContext?.marketGate || null,
     events,
   })
+  return {
+    ...batch,
+    source: String(source || 'STOCKDB_CAUSAL_REPLAY').slice(0, 60),
+  }
 }
 
 export function expandHistoricalLedgerBatch(batch = {}) {
@@ -72,7 +77,9 @@ export function expandHistoricalLedgerBatch(batch = {}) {
 
 function contextOf(event, batch, scoreInput) {
   return {
-    source: 'STOCKDB_CAUSAL_REPLAY',
+    source: String(
+      batch?.source || 'STOCKDB_CAUSAL_REPLAY',
+    ).slice(0, 60),
     historicalBackfill: true,
     stageReached: String(event.stageReached || 'UNKNOWN'),
     displayedRank: Number(event.displayedRank) || null,

@@ -136,6 +136,7 @@ export async function scanHistoricalSlot({
   tradeDate,
   mode,
   slot,
+  source = 'STOCKDB_CAUSAL_REPLAY',
   universeCodes,
   minutesByCode,
   dailyByCode,
@@ -213,6 +214,7 @@ export async function scanHistoricalSlot({
     tradeDate: displayDate(tradeDate),
     slot,
     generatedAt: now,
+    source,
     scan,
     marketContext,
   })

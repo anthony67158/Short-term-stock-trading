@@ -31,13 +31,14 @@ function decision(route, price) {
   }
 }
 
-function batch() {
+function batch(source = 'STOCKDB_CAUSAL_REPLAY') {
   const immediate = decision('IMMEDIATE', 10)
   return buildHistoricalLedgerBatch({
     mode: 'close',
     tradeDate: '2026-06-01',
     slot: '1510',
     generatedAt: Date.parse('2026-06-01T15:10:00+08:00'),
+    source,
     marketContext: {
       marketGate: {
         allowed: true,
@@ -99,6 +100,19 @@ test('历史账本为每条反事实价格路径生成独立决策', () => {
       'formula:2026-06-01:close:1510:600519:PULLBACK',
     ],
   )
+})
+
+test('历史回放保留明确的数据源审计标记', () => {
+  const value = batch('TUSHARE_CAUSAL_REPLAY')
+  const outcome = settleHistoricalEvent({
+    batch: value,
+    event: expandHistoricalLedgerBatch(value)[0],
+    bars: [],
+    evaluatedAt: Date.parse('2026-06-01T16:00:00+08:00'),
+  })
+
+  assert.equal(value.source, 'TUSHARE_CAUSAL_REPLAY')
+  assert.equal(outcome.context.source, 'TUSHARE_CAUSAL_REPLAY')
 })
 
 test('历史结算复用生产费用和T加一结果合同', () => {
