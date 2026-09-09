@@ -57,6 +57,8 @@ test('个股重新开启持续复核时加入对应的显式白名单', () => {
     settings: {
       'advAuto.holdCodes': [],
       'advAuto.watchCodes': [],
+      'advAuto.holdEnabled': false,
+      'advAuto.watchEnabled': false,
       'advReview.disabledCodes': ['600000', '000001'],
       'advAuto.configUpdatedAt': previousUpdatedAt,
     },
@@ -82,6 +84,14 @@ test('个股重新开启持续复核时加入对应的显式白名单', () => {
     planStore.get().settings,
     '000001',
   ), true)
+  assert.equal(
+    planStore.get().settings['advAuto.holdEnabled'],
+    true,
+  )
+  assert.equal(
+    planStore.get().settings['advAuto.watchEnabled'],
+    true,
+  )
   assert.ok(
     planStore.get().settings['advAuto.configUpdatedAt']
       > previousUpdatedAt,

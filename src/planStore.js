@@ -491,12 +491,16 @@ function applyAdviceReviewSelection(code, enabled, now = Date.now()) {
     .filter((itemCode) => itemCode !== normalizedCode)
   const watchCodes = reviewScopeCodes(AUTO_WATCH_CODES)
     .filter((itemCode) => itemCode !== normalizedCode)
+  let enabledScope = ''
   if (enabled) {
-    const scopeCodes = state.holding.some(
+    enabledScope = state.holding.some(
       (item) => String(item?.code || '') === normalizedCode,
-    ) ? holdCodes : state.plan.some(
+    ) ? 'hold' : state.plan.some(
       (item) => String(item?.code || '') === normalizedCode,
-    ) ? watchCodes : null
+    ) ? 'watch' : ''
+    const scopeCodes = enabledScope === 'hold'
+      ? holdCodes
+      : enabledScope === 'watch' ? watchCodes : null
     if (scopeCodes) scopeCodes.push(normalizedCode)
   }
   state.settings = withAdviceReviewEnabled({
@@ -504,6 +508,12 @@ function applyAdviceReviewSelection(code, enabled, now = Date.now()) {
     [AUTO_HOLD_CODES]: holdCodes,
     [AUTO_WATCH_CODES]: watchCodes,
     ...(enabled ? { aiAutoAlert: true } : {}),
+    ...(enabledScope === 'hold'
+      ? { 'advAuto.holdEnabled': true }
+      : {}),
+    ...(enabledScope === 'watch'
+      ? { 'advAuto.watchEnabled': true }
+      : {}),
   }, normalizedCode, !!enabled, configUpdatedAt)
 }
 
