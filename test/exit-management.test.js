@@ -4,7 +4,6 @@ import assert from 'node:assert/strict'
 import {
   applyShortHorizonExitPolicy,
   EXIT_MANAGEMENT_VERSION,
-  holdingExitDeadline,
 } from '../shared/exitManagement.js'
 import {
   portfolioOpportunityCostForStock,
@@ -48,18 +47,17 @@ test('重新生成不能下移账本止损来掩盖已经发生的破位', () =>
   assert.equal(result.opQty, '清仓4手')
 })
 
-test('持仓时间退出按交易日计数且保持T加一可卖约束', () => {
+test('持仓到期不机械退出而由当前动作价值继续管理', () => {
   const started = Date.parse('2026-09-03T02:00:00Z')
-  assert.equal(new Date(holdingExitDeadline(started)).toISOString(),
-    '2026-09-09T06:45:00.000Z')
   const result = applyShortHorizonExitPolicy({
     mode: 'hold_advice', now: Date.parse('2026-09-09T06:50:00Z'),
     result: { action: '持有', stopPrice: 9, targetPrice: 13 },
     payload: { ...basePayload, holdingStartedAt: started, sellableTodayQty: 2 },
   })
-  assert.equal(result.exitManagement.kind, 'TIME_EXIT')
-  assert.equal(result.opQty, '减仓2手')
-  assert.equal(result.exitManagement.lockedLots, 2)
+  assert.equal(result.exitManagement.kind, 'HOLD')
+  assert.equal(result.action, '持有')
+  assert.ok(result.exitManagement.actionValue)
+  assert.equal(result.exitManagement.actionValue.state.sellable, 2)
 })
 
 test('硬止损优先于其他退出条件且直接覆盖为风险退出', () => {
@@ -111,7 +109,7 @@ test('硬止损触发但仓位受T+1锁定时转为下一交易日优先退出',
   assert.match(result.actionPlan, /2026-08-27优先退出/)
 })
 
-test('派发并掉队时按第二优先级释放一半可卖仓位', () => {
+test('派发并掉队时动作价值允许直接退出全部可卖仓位', () => {
   const result = applyShortHorizonExitPolicy({
     mode: 'hold_advice',
     result: {
@@ -129,8 +127,8 @@ test('派发并掉队时按第二优先级释放一半可卖仓位', () => {
     },
   })
 
-  assert.equal(result.action, '减仓')
-  assert.equal(result.opQty, '减仓2手')
+  assert.equal(result.action, '清仓')
+  assert.equal(result.opQty, '清仓4手')
   assert.equal(result.exitManagement.kind, 'STRUCTURAL_EXIT')
   assert.equal(result.exitManagement.priority, 2)
 })
@@ -175,10 +173,10 @@ test('达到目标位时确定性分批止盈而不等待模型重跑', () => {
   assert.equal(result.action, '减仓')
   assert.equal(result.opQty, '减仓2手')
   assert.equal(result.exitManagement.kind, 'TAKE_PROFIT')
-  assert.match(result.actionPlan, /分批锁定利润/)
+  assert.match(result.actionPlan, /达到计划目标/)
 })
 
-test('盈利后从高点回撤且分时转弱时启动移动保护', () => {
+test('盈利后从高点回撤且分时转弱时动作价值主动减仓', () => {
   const result = applyShortHorizonExitPolicy({
     mode: 'hold_advice',
     result: {
@@ -195,11 +193,11 @@ test('盈利后从高点回撤且分时转弱时启动移动保护', () => {
   })
 
   assert.equal(result.action, '减仓')
-  assert.equal(result.exitManagement.kind, 'TRAILING_PROTECT')
-  assert.match(result.actionPlan, /从高点回撤/)
+  assert.equal(result.exitManagement.kind, 'VALUE_DECAY')
+  assert.match(result.actionPlan, /从持仓高点回撤/)
 })
 
-test('建议窗口到期且存在更强候选时只触发机会成本复核', () => {
+test('存在明显更强候选时直接降低当前仓位释放机会成本', () => {
   const now = Date.parse('2026-08-26T06:00:00.000Z')
   const result = applyShortHorizonExitPolicy({
     mode: 'hold_advice',
@@ -227,9 +225,9 @@ test('建议窗口到期且存在更强候选时只触发机会成本复核', ()
     now,
   })
 
-  assert.equal(result.action, '持有')
-  assert.equal(result.exitManagement.kind, 'OPPORTUNITY_REVIEW')
-  assert.match(result.reviewTrigger, /平安银行.*12分/)
+  assert.equal(result.action, '减仓')
+  assert.equal(result.exitManagement.kind, 'VALUE_DECAY')
+  assert.match(result.exitManagement.reason, /替代机会优势高12分/)
 })
 
 test('机会成本只从账号内已验证的首要轮动读取', () => {

@@ -35,27 +35,11 @@ export function buildFormulaEvidenceReference(
   const positionMode = String(decision.positionMode || 'UNOWNED')
   const action = String(decision.action || 'AVOID')
   const conflicts = []
-  const newRisk = (
-    positionMode === 'UNOWNED'
-    && ['WATCH_BUY', 'BUY_REVIEW'].includes(action)
-  )
-  // 大盘阻断时会保留研究价格并把动作降级为 AVOID，此时价格合同仍成立，
-  // 但它本质仍是买入方向的参考，必须一并纳入风险闸门，禁止靠历史胜率升权。
-  const buySideReference = (
-    positionMode === 'UNOWNED'
-    && decision.priceContractValid === true
-  )
 
   if (decision.dataComplete !== true) conflicts.push('关键数据不完整')
   if (decision.dataFresh !== true) conflicts.push('行情数据已过期')
   if (decision.priceContractValid !== true) {
     conflicts.push('价格合同未通过')
-  }
-  if (newRisk && !(finite(decision.riskReward) >= 1.8)) {
-    conflicts.push('盈亏比不足1.8:1')
-  }
-  if (buySideReference && decision.marketAllowsRisk !== true) {
-    conflicts.push('市场或账户不允许新增风险')
   }
 
   const hardStop = (

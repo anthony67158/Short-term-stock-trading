@@ -226,6 +226,10 @@ function entryWindow(event, rows, evaluatedAt) {
 function triggered(bar, decision) {
   const primary = finite(decision?.primaryPrice)
   if (!(primary > 0)) return false
+  if (
+    decision?.route === 'IMMEDIATE'
+    || decision?.priceType === 'IMMEDIATE'
+  ) return true
   return decision?.priceType === 'PULLBACK_WATCH'
     ? bar.low <= primary && bar.close >= primary
     : bar.high >= primary && bar.close >= primary

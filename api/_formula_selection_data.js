@@ -33,6 +33,12 @@ import {
 import {
   buildOpportunityShadowFeatures,
 } from '../shared/opportunityShadowFeatures.js'
+import {
+  buildMarketOpportunityContext,
+} from '../shared/marketOpportunityContext.js'
+import {
+  chooseAdaptivePricePlan,
+} from '../shared/adaptivePricePlans.js'
 
 function finite(value) {
   if (value == null || value === '' || value === '-') return null
@@ -44,7 +50,6 @@ function validStock(quote = {}, expectedTradeDate = beijingDayKey()) {
   return (
     /^\d{6}$/.test(String(quote.code || ''))
     && !/ST|退/i.test(String(quote.name || ''))
-    && !/^(68|8|4|9)/.test(String(quote.code || ''))
     && quote.tradeDate === expectedTradeDate
     && finite(quote.price) > 0
     && finite(quote.open) > 0
@@ -52,6 +57,22 @@ function validStock(quote = {}, expectedTradeDate = beijingDayKey()) {
     && finite(quote.low) > 0
     && finite(quote.amount) != null
     && finite(quote.turnover) != null
+  )
+}
+
+export function passesAdaptiveRealtimePrefilter(
+  quote = {},
+  expectedTradeDate = beijingDayKey(),
+) {
+  if (!validStock(quote, expectedTradeDate)) return false
+  const pct = finite(quote.pct)
+  const amount = finite(quote.amount)
+  const turnover = finite(quote.turnover)
+  return (
+    pct >= -19.8
+    && pct <= 19.8
+    && amount >= 30_000_000
+    && turnover >= 0.3
   )
 }
 
@@ -127,6 +148,79 @@ function cheapRank(quote, mode) {
   return amountScore + flowScore + ratioScore + positionScore
 }
 
+function rankedUnique(groups, limit) {
+  const selected = new Map()
+  for (const group of groups) {
+    for (const item of group) {
+      if (selected.size >= limit) break
+      if (!selected.has(item.quote.code)) {
+        selected.set(item.quote.code, item)
+      }
+    }
+  }
+  return [...selected.values()]
+}
+
+function explorationRank(code, seed) {
+  let value = (Number(code) ^ seed) >>> 0
+  value = Math.imul(value ^ (value >>> 16), 0x45d9f3b)
+  value = Math.imul(value ^ (value >>> 16), 0x45d9f3b)
+  return (value ^ (value >>> 16)) >>> 0
+}
+
+export function selectAdaptiveDeepCandidates(
+  quotes = [],
+  {
+    mode = 'intraday',
+    expectedTradeDate = beijingDayKey(),
+    limit = 96,
+  } = {},
+) {
+  const eligible = (Array.isArray(quotes) ? quotes : [])
+    .filter((quote) =>
+      passesAdaptiveRealtimePrefilter(quote, expectedTradeDate)
+    )
+    .map((quote) => ({
+      quote,
+      cheapScore: cheapRank(quote, mode),
+    }))
+  const quota = Math.max(1, Math.floor(limit / 4))
+  const momentum = eligible.slice().sort((left, right) =>
+    Number(right.quote.pct || 0) - Number(left.quote.pct || 0)
+    || Number(right.quote.amount || 0) - Number(left.quote.amount || 0)
+  ).slice(0, quota)
+  const accumulation = eligible.slice().sort((left, right) =>
+    Number(right.quote.mainRatio || 0) - Number(left.quote.mainRatio || 0)
+    || Math.abs(Number(left.quote.pct || 0))
+      - Math.abs(Number(right.quote.pct || 0))
+  ).slice(0, quota)
+  const reversal = eligible.slice().sort((left, right) =>
+    Number(left.quote.pct || 0) - Number(right.quote.pct || 0)
+    || Number(right.quote.amount || 0) - Number(left.quote.amount || 0)
+  ).slice(0, quota)
+  const liquid = eligible.slice().sort((left, right) =>
+    Number(right.quote.amount || 0) - Number(left.quote.amount || 0)
+    || right.cheapScore - left.cheapScore
+  ).slice(0, quota)
+  const firstPass = rankedUnique(
+    [momentum, accumulation, reversal, liquid],
+    limit,
+  )
+  if (firstPass.length >= limit) return firstPass
+  const selectedCodes = new Set(firstPass.map((item) => item.quote.code))
+  const explorationSeed = Number(
+    String(expectedTradeDate).replace(/\D/g, ''),
+  ) || 0
+  const exploration = eligible
+    .filter((item) => !selectedCodes.has(item.quote.code))
+    .sort((left, right) => {
+      const leftHash = explorationRank(left.quote.code, explorationSeed)
+      const rightHash = explorationRank(right.quote.code, explorationSeed)
+      return leftHash - rightHash
+    })
+  return [...firstPass, ...exploration].slice(0, limit)
+}
+
 function uniqueReasons(values = []) {
   return [...new Set(
     values
@@ -146,8 +240,46 @@ function candidateEvent(quote, cheapScore) {
     formulaEvaluations: [],
     shadowFeatures: {},
     decision: null,
+    counterfactualPlans: [],
     sector: null,
     rejectionReasons: [],
+  }
+}
+
+function adaptiveDecisionFromPlan(code, formula, selectedPlan) {
+  const adaptive = selectedPlan.adaptive
+  return {
+    schemaVersion: 'formula-price-decision.v1',
+    code: String(code),
+    formulaId: formula.matches[0]?.formulaId || 'UNKNOWN',
+    playbookId: adaptive.playbook?.key || null,
+    playbookScore: finite(adaptive.playbook?.score),
+    marketOpportunityFactor: finite(
+      adaptive.marketOpportunityFactor,
+    ),
+    route: selectedPlan.route,
+    positionMode: 'UNOWNED',
+    action: adaptive.tier === 'AVOID' ? 'AVOID' : 'WATCH_BUY',
+    primaryPrice: selectedPlan.entryPlan.price,
+    priceType: selectedPlan.entryPlan.type === 'BREAKOUT'
+      ? 'BREAKOUT_WATCH'
+      : selectedPlan.entryPlan.type === 'IMMEDIATE'
+        ? 'IMMEDIATE'
+        : 'PULLBACK_WATCH',
+    stopPrice: selectedPlan.exitPlan.hardStopPrice,
+    targetPrice: selectedPlan.exitPlan.takeProfitPrice,
+    riskReward: selectedPlan.riskReward,
+    validUntil: selectedPlan.entryPlan.validUntil,
+    timeStopTradingDays: selectedPlan.exitPlan.timeStopTradingDays,
+    priceContractValid: true,
+    dataComplete: true,
+    dataFresh: true,
+    marketAllowsRisk: adaptive.tier !== 'AVOID',
+    hardStopTriggered: false,
+    executionState: adaptive.tier,
+    sellableQty: null,
+    evidence: adaptive.playbook?.evidence || [],
+    blockers: adaptive.hardBlockers,
   }
 }
 
@@ -168,6 +300,9 @@ function publicCandidate(item, rank) {
     stopPrice: item.decision.stopPrice,
     targetPrice: item.decision.targetPrice,
     riskReward: item.decision.riskReward,
+    timeStopTradingDays: item.decision.timeStopTradingDays,
+    playbookId: item.decision.playbookId,
+    route: item.decision.route,
     validUntil: item.decision.validUntil,
     evidence: item.decision.evidence,
     blockers: item.decision.blockers,
@@ -178,6 +313,10 @@ function publicCandidate(item, rank) {
       industry: item.tags?.industry || '',
       concepts: (item.tags?.concepts || []).slice(0, 4),
     },
+    adaptive: item.adaptive || null,
+    cautions: item.adaptive?.cautions || [],
+    shadowFeatures: item.shadowFeatures || {},
+    actionAlternatives: item.counterfactualPlans || [],
   }
 }
 
@@ -212,28 +351,28 @@ export async function scanFormulaSelectionCandidates({
   const expectedDate = normalizedMode === 'close'
     ? latestQuoteDate || beijingDayKey(now)
     : beijingDayKey(now)
-  const prefiltered = allQuotes
-    .filter((quote) =>
-      passesFormulaRealtimePrefilter(
-        quote,
-        normalizedMode,
-        expectedDate,
-      ),
-    )
-    .map((quote) => ({
-      quote,
-      cheapScore: cheapRank(quote, normalizedMode),
-    }))
-    .sort((left, right) =>
-      right.cheapScore - left.cheapScore
-      || String(left.quote.code).localeCompare(String(right.quote.code))
-    )
+  const eligibleQuotes = allQuotes.filter((quote) =>
+    passesAdaptiveRealtimePrefilter(quote, expectedDate)
+  )
+  const prefiltered = selectAdaptiveDeepCandidates(allQuotes, {
+    mode: normalizedMode,
+    expectedTradeDate: expectedDate,
+    limit: 96,
+  })
   const candidateEvents = new Map(
-    prefiltered.map(({ quote, cheapScore }) => [
+    eligibleQuotes.map((quote) => [
       String(quote.code),
-      candidateEvent(quote, cheapScore),
+      candidateEvent(quote, cheapRank(quote, normalizedMode)),
     ]),
   )
+  const selectedCodes = new Set(
+    prefiltered.map((item) => String(item.quote.code)),
+  )
+  for (const event of candidateEvents.values()) {
+    if (!selectedCodes.has(String(event.code))) {
+      event.rejectionReasons = ['本轮未进入深度特征预算，保留为反事实样本']
+    }
+  }
   await report({
     stage: 'PREFILTER',
     percent: 24,
@@ -246,11 +385,6 @@ export async function scanFormulaSelectionCandidates({
       prefiltered: prefiltered.length,
     },
   })
-  const deferredBlocker = (value) => (
-    /分钟|VWAP|板块前瞻确认范围|板块方向|资金证据|主力.*小单|主力承接/.test(
-      String(value || ''),
-    )
-  )
   await report({
     stage: 'TECHNICAL',
     percent: 28,
@@ -291,19 +425,7 @@ export async function scanFormulaSelectionCandidates({
           quote,
           candles: kline.candles,
         })
-        const possible = preliminary.evaluations.some((item) =>
-          item.blockers.every(deferredBlocker)
-        )
-        if (possible) candidate = { quote, kline }
-        else {
-          event.rejectionReasons = uniqueReasons(
-            preliminary.evaluations.map((item) =>
-              item.blockers.filter(
-                (blocker) => !deferredBlocker(blocker),
-              ),
-            ),
-          )
-        }
+        candidate = { quote, kline, preliminary }
         return candidate
       } finally {
         technicalCompleted += 1
@@ -387,42 +509,52 @@ export async function scanFormulaSelectionCandidates({
           fund,
           sectorOpportunity,
         })
-        const rawDecision = buildFormulaPriceDecision({
-          code: quote.code,
+        const shadowFeatures = buildOpportunityShadowFeatures({
           quote,
-          formulaMatches: formula.matches,
-          positionMode: 'UNOWNED',
-          marketAllowsRisk: marketContext?.marketGate?.allowed === true,
-          marketBlockers: marketContext?.marketGate?.blockers || [],
-          dataComplete: true,
-          dataFresh: true,
+          candles: kline.candles,
+          trends: trendData?.trends || [],
+          fund,
+          sectorOpportunity,
+        })
+        const opportunityContext = buildMarketOpportunityContext({
+          marketGate: marketContext?.marketGate,
+        })
+        const planChoice = chooseAdaptivePricePlan({
+          candidate: {
+            code: quote.code,
+            name: quote.name || kline.name || tags.name,
+            quote,
+            fund,
+            sector: sectorOpportunity?.sector || null,
+            sectorOpportunity,
+            formulaId: formula.matches[0]?.formulaId || 'UNKNOWN',
+            shadowFeatures,
+          },
+          candles: kline.candles,
+          trends: trendData?.trends || [],
+          marketContext: opportunityContext,
           now,
         })
-        event.decision = rawDecision
-        if (!rawDecision.priceContractValid) {
-          event.rejectionReasons = uniqueReasons([
-            rawDecision.blockers || [],
-            formula.evaluations.map((item) => item.blockers),
-          ])
+        if (!planChoice.selected) {
+          event.rejectionReasons = ['未形成合法且近期可达的交易路径']
           return null
         }
-        const marketBlockers = marketContext?.marketGate?.allowed === true
-          ? []
-          : Array.isArray(marketContext?.marketGate?.blockers)
-            ? marketContext.marketGate.blockers
-            : []
-        const decision = marketBlockers.length
-          ? {
-              ...rawDecision,
-              blockers: [
-                ...new Set([
-                  ...marketBlockers,
-                  ...(rawDecision.blockers || []),
-                ]),
-              ],
-            }
-          : rawDecision
+        const selectedPlan = planChoice.selected
+        const adaptive = selectedPlan.adaptive
+        const decision = adaptiveDecisionFromPlan(
+          quote.code,
+          formula,
+          selectedPlan,
+        )
         event.decision = decision
+        event.playbookId = decision.playbookId
+        event.counterfactualPlans = [
+          selectedPlan,
+          ...planChoice.alternatives,
+        ].map((item) =>
+          adaptiveDecisionFromPlan(quote.code, formula, item)
+        )
+        event.shadowFeatures = shadowFeatures
         event.rejectionReasons = uniqueReasons(decision.blockers || [])
         return {
           code: quote.code,
@@ -433,9 +565,10 @@ export async function scanFormulaSelectionCandidates({
           sectorOpportunity,
           formula,
           decision,
-          score:
-            Number(formula.matches[0]?.score || 0)
-            + Math.max(-5, Math.min(5, Number(fund.mainNetYi || 0))),
+          adaptive,
+          shadowFeatures,
+          counterfactualPlans: event.counterfactualPlans,
+          score: Number(adaptive.playbook?.score || 0),
         }
       } finally {
         evidenceCompleted += 1
@@ -481,7 +614,13 @@ export async function scanFormulaSelectionCandidates({
       || String(left.code).localeCompare(String(right.code))
     )
   const selected = validEvaluated
-    .slice(0, 5)
+    .sort((left, right) =>
+      Number(right.adaptive?.utility ?? -Infinity)
+        - Number(left.adaptive?.utility ?? -Infinity)
+      || Number(right.score || 0) - Number(left.score || 0)
+      || String(left.code).localeCompare(String(right.code))
+    )
+    .slice(0, 12)
   selected.forEach((item, index) => {
     const event = candidateEvents.get(String(item.code))
     event.stageReached = 'DISPLAYED'

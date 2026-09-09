@@ -55,12 +55,10 @@ test('公式只有样本外稳定后才能升权且最高15%', () => {
   assert.equal(validated.effectiveWeight, 0.15)
 })
 
-test('数据过期价格非法或新增风险被阻断时权重归零', () => {
+test('数据过期或价格非法时权重归零，赔率和市场状态不重复阻断', () => {
   for (const input of [
     decision({ dataFresh: false }),
     decision({ priceContractValid: false }),
-    decision({ riskReward: 1.79 }),
-    decision({ marketAllowsRisk: false }),
   ]) {
     const result = buildFormulaEvidenceReference(input, {
       validationState: 'VALIDATED',
@@ -72,9 +70,23 @@ test('数据过期价格非法或新增风险被阻断时权重归零', () => {
     assert.equal(result.effectiveWeight, 0)
     assert.ok(result.conflicts.length > 0)
   }
+  for (const input of [
+    decision({ riskReward: 1.2 }),
+    decision({ marketAllowsRisk: false }),
+  ]) {
+    const result = buildFormulaEvidenceReference(input, {
+      validationState: 'VALIDATED',
+      sampleSize: 120,
+      expectancyPct: 0.3,
+      profitFactor: 1.2,
+      stableWindows: 2,
+    })
+    assert.equal(result.effectiveWeight, 0.15)
+    assert.equal(result.conflicts.length, 0)
+  }
 })
 
-test('大盘阻断后保留的研究价格不能升级为买入证据', () => {
+test('大盘弱势不清除公式价格证据且公式本身不能升级动作', () => {
   const result = buildFormulaEvidenceReference(decision({
     action: 'AVOID',
     marketAllowsRisk: false,
@@ -88,9 +100,9 @@ test('大盘阻断后保留的研究价格不能升级为买入证据', () => {
     stableWindows: 2,
   })
 
-  assert.equal(result.effectiveWeight, 0)
+  assert.equal(result.effectiveWeight, 0.15)
   assert.equal(result.canUpgradeAction, false)
-  assert.match(result.conflicts.join('；'), /不允许新增风险/)
+  assert.equal(result.conflicts.length, 0)
 })
 
 test('持仓硬止损作为确定性风险退出而不是普通低权重参考', () => {

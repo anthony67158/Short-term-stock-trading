@@ -11,6 +11,9 @@ import {
 import {
   settlePreCatalystOutcomes,
 } from './_pre_catalyst_settlement.js'
+import {
+  opportunityTrainingStatusStore,
+} from './_opportunity_training_status.js'
 
 function reply(res, body, status = 200) {
   applyCors(res)
@@ -33,13 +36,17 @@ export default async function handler(req, res) {
   try {
     const [settlementResult, preCatalystResult] =
       await Promise.allSettled([
-        settleOpportunityRadarOutcomes(),
+        settleOpportunityRadarOutcomes({ maxCodes: 120 }),
         settlePreCatalystOutcomes(),
       ])
     if (settlementResult.status === 'rejected') {
       throw settlementResult.reason
     }
     const baseline = await refreshOpportunityRadarBaseline()
+    await opportunityTrainingStatusStore.saveCollectionStatus({
+      generatedAt: Date.now(),
+      settlement: settlementResult.value,
+    })
     return reply(res, {
       ok: true,
       settlement: settlementResult.value,

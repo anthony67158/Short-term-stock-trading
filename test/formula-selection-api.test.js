@@ -6,6 +6,7 @@ import {
   buildStockFormulaSelection,
   passesFormulaRealtimePrefilter,
   scanFormulaSelectionCandidates,
+  selectAdaptiveDeepCandidates,
 } from '../api/_formula_selection_data.js'
 import {
   canRunFormulaSelectionMode,
@@ -80,6 +81,29 @@ test('盘中和收盘预筛使用不同边界且排除风险名称', () => {
     ),
     false,
   )
+})
+
+test('深度探索样本按交易日轮换而不是永久固定低代码', () => {
+  const rowsFor = (tradeDate) => Array.from({ length: 30 }, (_, index) =>
+    quote({
+      code: String(600001 + index),
+      tradeDate,
+      pct: 1,
+      amount: 100_000_000,
+      turnover: 2,
+      mainRatio: 1,
+    })
+  )
+  const first = selectAdaptiveDeepCandidates(rowsFor('2026-09-08'), {
+    expectedTradeDate: '2026-09-08',
+    limit: 8,
+  }).map((item) => item.quote.code)
+  const second = selectAdaptiveDeepCandidates(rowsFor('2026-09-09'), {
+    expectedTradeDate: '2026-09-09',
+    limit: 8,
+  }).map((item) => item.quote.code)
+
+  assert.notDeepEqual(first, second)
 })
 
 test('公式价位不会向界面泄露上游HTTP 501', () => {
@@ -198,11 +222,12 @@ test('市场扫描从完整股票池生成最多五个带唯一价位的观察�
   })
   assert.equal(blocked.universe.inspectedCount, 5500)
   assert.equal(blocked.candidates.length, 1)
-  assert.equal(blocked.candidates[0].action, 'AVOID')
+  assert.equal(blocked.candidates[0].action, 'WATCH_BUY')
   assert.ok(blocked.candidates[0].primaryPrice > 0)
   assert.ok(blocked.candidates[0].stopPrice > 0)
   assert.ok(blocked.candidates[0].targetPrice > 0)
-  assert.match(blocked.candidates[0].blockers.join('；'), /市场风险偏高/)
+  assert.equal(blocked.candidates[0].blockers.length, 0)
+  assert.ok(blocked.candidates[0].adaptive)
 })
 
 test('公式扫描不会因实时排序只检查前60只而漏掉后续命中', async () => {
@@ -372,6 +397,13 @@ test('收盘定时器只接受专用触发器和正确密钥', () => {
       payload: 'secret',
     }, 'secret'),
     { scheduled: true, mode: 'close' },
+  )
+  assert.deepEqual(
+    formulaSelectionTimerBody({
+      triggerName: 'formula-selection-intraday-am-timer',
+      payload: 'cron-secret',
+    }, 'cron-secret'),
+    { scheduled: true, mode: 'intraday' },
   )
   assert.equal(
     formulaSelectionTimerBody({
@@ -635,7 +667,7 @@ test('公式结果附加影子评分但不改变现有候选顺序', async () =>
   )
   assert.equal(
     savedLedger.events[0].scoreInput.schemaVersion,
-    'opportunity-score-feature.v2',
+    'opportunity-score-feature.v3',
   )
   assert.deepEqual(result.shadowRanking, {
     requested: 2,

@@ -26,6 +26,9 @@ import {
 import { fetchQuotes } from './quote.js'
 import { buildAccountRiskContext, allocateOpportunityBudget, accountRiskCodes } from '../shared/accountRiskBudget.js'
 import { analyzeOpportunityPortfolio } from '../shared/opportunityPortfolio.js'
+import {
+  opportunityTrainingStatusStore,
+} from './_opportunity_training_status.js'
 
 const SOURCE_READ_TIMEOUT_MS = 15_000
 
@@ -60,6 +63,8 @@ export async function readOpportunityRadarSnapshot({
   readTail = () => readTailPickState(),
   readPreCatalyst = () => readPreCatalystState(),
   readBaseline = () => opportunityRadarBaselineStore.readBaseline(),
+  readTrainingStatus = () =>
+    opportunityTrainingStatusStore.readStatus(),
   accountData = null,
   readQuotes = fetchQuotes,
   now = Date.now(),
@@ -80,6 +85,7 @@ export async function readOpportunityRadarSnapshot({
     tailResult,
     preCatalystResult,
     baselineResult,
+    trainingStatusResult,
   ] =
     await Promise.allSettled([
       withTimeout(Promise.resolve().then(readSector), '板块结果读取'),
@@ -92,6 +98,11 @@ export async function readOpportunityRadarSnapshot({
       withTimeout(
         Promise.resolve().then(readBaseline),
         '统计基线读取',
+      ),
+      withTimeout(
+        Promise.resolve().then(readTrainingStatus),
+        'V3训练状态读取',
+        5000,
       ),
     ])
   const sourceErrors = {
@@ -131,6 +142,7 @@ export async function readOpportunityRadarSnapshot({
     ok: true,
     partial: Object.values(sourceErrors).some(Boolean),
     baseline: settledValue(baselineResult, null),
+    trainingStatus: settledValue(trainingStatusResult, null),
     ...radar,
   }
 }

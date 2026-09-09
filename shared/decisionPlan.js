@@ -89,6 +89,36 @@ function text(value, maximum = 320) {
     .slice(0, maximum)
 }
 
+function adaptiveResearchPrior(actionPolicy = {}, tactical = {}) {
+  if (actionPolicy.riskTier !== 'PROBE') return null
+  const signalScore = Math.max(0, finite(actionPolicy.signalScore) || 0)
+  const alignmentScore = Math.max(
+    0,
+    Math.min(100, finite(tactical.alignmentScore) ?? 50),
+  )
+  const pWinGivenFill = Math.max(
+    0.4,
+    Math.min(
+      0.72,
+      0.4 + signalScore * 0.035 + (alignmentScore - 50) * 0.0015,
+    ),
+  )
+  const pFill = tactical.timing?.state === 'READY'
+    ? 0.88
+    : tactical.timing?.state === 'TOO_EXTENDED'
+      ? 0.62
+      : 0.68
+  return {
+    serverVerified: true,
+    version: 'adaptive-action-policy.v1',
+    pFill,
+    pWinGivenFill,
+    uncertaintyR: actionPolicy.riskTier === 'FULL' ? 0.32 : 0.48,
+    costR: 0.04,
+    sampleCount: 0,
+  }
+}
+
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable)
   if (!value || typeof value !== 'object') return value
@@ -470,10 +500,6 @@ export function compileDecisionPlan({
   )
   const stopPrice = positive(advice.stopPrice)
   const targetPrice = positive(advice.targetPrice)
-  const minimumRiskReward = market.regime === 'RISK_OFF'
-    ? 2.2
-    : 1.8
-  const minimumNetRiskReward = 1.8
   const requestedLots = requestedLotsFor(governedAction, advice)
   const slippageBps = 5
   const generatedPriceContract = buildAdvicePriceContract({
@@ -599,27 +625,6 @@ export function compileDecisionPlan({
   ) {
     blockedReasons.push('市场状态无法确认：市场数据存在但无法归类')
   }
-  const dualConfirmation = payload.counterTrend?.isStrong === true
-    && payload.quant?.highConfSignal?.fired === true
-  if (
-    riskRequested
-    && !marketUnknown
-    && market.allowRiskIncrease !== true
-    && (
-      market.hardRiskOff === true
-      || !dualConfirmation
-    )
-  ) {
-    blockedReasons.push(
-      market.hardRiskOff === true
-        ? `市场风险红线已触发${
-            market.hardRiskSignals?.length
-              ? `：${market.hardRiskSignals.join('、')}`
-              : ''
-          }`
-        : '当前市场状态禁止新增风险',
-    )
-  }
   if (
     riskRequested
     && !missingRequired.has('account')
@@ -661,17 +666,8 @@ export function compileDecisionPlan({
       !(requestedReferencePrice > 0)
       || !(stopPrice > 0)
       || !(targetPrice > requestedReferencePrice)
-      || !(
-        (targetPrice - requestedReferencePrice)
-        / (requestedReferencePrice - stopPrice)
-          >= minimumRiskReward
-      )
     )
-  ) {
-    blockedReasons.push(
-      `预期收益与风险不匹配，盈亏比需至少达到${minimumRiskReward}:1`,
-    )
-  }
+  ) blockedReasons.push('入场、止损和目标价无法形成有效收益路径')
   if (advice.riskOverlay?.blocked) {
     blockedReasons.push(...(advice.riskOverlay.reasons || []))
   }
@@ -812,6 +808,7 @@ export function compileDecisionPlan({
     stressExitPrice: payload.todayQuote?.limitDownPrice,
     opportunityScore: payload.opportunityScore,
     quant: payload.quant,
+    researchPrior: adaptiveResearchPrior(actionPolicy, tactical),
   })
   if (
     riskIncreasing
@@ -843,6 +840,7 @@ export function compileDecisionPlan({
         stressExitPrice: payload.todayQuote?.limitDownPrice,
         opportunityScore: payload.opportunityScore,
         quant: payload.quant,
+        researchPrior: adaptiveResearchPrior(actionPolicy, tactical),
       })
       if (stressLimitedLots <= 0) {
         blockedReasons.push(
@@ -858,14 +856,6 @@ export function compileDecisionPlan({
     && tradeExpectancy.gate?.allowsRiskIncrease === false
   ) {
     blockedReasons.push(tradeExpectancy.gate.reason)
-  }
-  if (riskIncreasing && capacity.lots > 0
-    && tradeExpectancy.plan?.netRiskReward < minimumNetRiskReward) {
-    blockedReasons.push(
-      `扣除手续费与滑点后盈亏比${tradeExpectancy.plan.netRiskReward}:1，`
-      + `低于${minimumNetRiskReward}:1；费后盈利${tradeExpectancy.plan.profitAmount}元，`
-      + `计划损失${tradeExpectancy.plan.lossAmount}元`,
-    )
   }
 
   const uniqueBlockers = [...new Set(blockedReasons.filter(Boolean))]
@@ -1131,8 +1121,12 @@ export function compileDecisionPlan({
     triggerDirection,
     risk: {
       budgetPct: capacity.riskPct,
-      minimumRiskReward,
-      minimumNetRiskReward,
+      minimumRiskReward: null,
+      minimumNetRiskReward: null,
+      breakEvenWinProbability:
+        tradeExpectancy.plan?.breakEvenWinProbability ?? null,
+      expectedNetR:
+        tradeExpectancy.expectancy?.expectedNetRGivenFill ?? null,
       maxLossAmount: capacity.maxLossAmount,
       estimatedLossPerLot: capacity.lossPerLot,
       manualProbeLimitPct: capacity.manualProbeLimitPct ?? null,

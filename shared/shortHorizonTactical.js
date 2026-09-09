@@ -507,7 +507,7 @@ function riskIncreaseAssessment(tactical = {}, reviewContext = {}) {
   if (timingState === 'INVALID') {
     hardBlockers.push('短线时机尚未形成')
   } else if (timingState === 'TOO_EXTENDED') {
-    hardBlockers.push('价格位置过热，禁止追涨')
+    fullRiskGaps.push('价格位置偏高，只允许确认延续后缩小风险')
   } else if (timingState === 'WAIT_PULLBACK' && !triggerFired) {
     fullRiskGaps.push('回踩承接尚未得到价格与量能确认')
   } else if (timingState === 'WAIT_BREAKOUT' && !triggerFired) {
@@ -523,9 +523,9 @@ function riskIncreaseAssessment(tactical = {}, reviewContext = {}) {
   if (riskTone === 'UNKNOWN') {
     hardBlockers.push('市场状态无法确认，不支持新增仓位')
   } else if (tactical.market?.hardRiskOff === true) {
-    hardBlockers.push('市场风险红线已触发，禁止新增仓位')
+    fullRiskGaps.push('市场尾部风险升高，只允许独立强势或修复类小仓验证')
   } else if (riskTone === 'RISK_OFF' && !weakMarketProbe) {
-    hardBlockers.push('弱市仅允许逆势强且量化高把握的标的小仓试错')
+    fullRiskGaps.push('弱市降低风险预算，并优先独立强势、催化或修复类机会')
   } else if (weakMarketProbe) {
     fullRiskGaps.push('普通弱市只允许不超过3%的人工试错')
   }
@@ -542,7 +542,7 @@ function riskIncreaseAssessment(tactical = {}, reviewContext = {}) {
   if (
     tactical.stock?.location === 'EXTENDED'
     || tactical.stock?.crowdingRisk === 'HIGH'
-  ) hardBlockers.push('价格拥挤度过高')
+  ) fullRiskGaps.push('价格拥挤度较高，只允许按突破延续路径小仓验证')
   if (tactical.stock?.liquidity === 'THIN') {
     hardBlockers.push(
       tactical.stock?.liquidityEvidence?.reason
@@ -617,13 +617,9 @@ function riskIncreaseAssessment(tactical = {}, reviewContext = {}) {
   }
   // 风险由事实决定，不能依赖可变的中文错误文案是否包含某个关键词。
   const hasHardRisk = (
-    ['INVALID', 'TOO_EXTENDED'].includes(timingState)
+    timingState === 'INVALID'
     || riskTone === 'UNKNOWN'
-    || tactical.market?.hardRiskOff === true
-    || (riskTone === 'RISK_OFF' && !weakMarketProbe)
     || tactical.stock?.liquidity === 'THIN'
-    || tactical.stock?.location === 'EXTENDED'
-    || tactical.stock?.crowdingRisk === 'HIGH'
     || (tactical.holding?.hasPosition === true
       && tactical.holding?.addEligible !== true)
   )

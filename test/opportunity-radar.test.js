@@ -129,7 +129,7 @@ test('交易阶段决定机会雷达默认视图', () => {
   }).defaultLane, 'next')
 })
 
-test('盘中公式与板块方向融合为包含退出计划的可操作机会', () => {
+test('未校准盘中机会保留完整退出计划但只允许小仓验证', () => {
   const result = buildOpportunityRadar({
     now: NOW,
     sector: {
@@ -144,12 +144,15 @@ test('盘中公式与板块方向融合为包含退出计划的可操作机会',
 
   assert.equal(result.schemaVersion, 'opportunity-radar.v2')
   assert.equal(result.defaultLane, 'intraday')
-  assert.equal(result.lanes.intraday[0].state, 'READY')
+  assert.equal(result.lanes.intraday[0].state, 'WAIT_TRIGGER')
+  assert.equal(result.lanes.intraday[0].adaptive.tier, 'PROBE')
   assert.equal(result.lanes.intraday[0].entryPlan.price, 10)
-  assert.equal(result.lanes.intraday[0].entryPlan.maxPositionPct, 5)
+  assert.ok(result.lanes.intraday[0].entryPlan.maxPositionPct > 0)
+  assert.ok(result.lanes.intraday[0].entryPlan.maxPositionPct <= 6)
+  assert.ok(result.lanes.intraday[0].adaptive.risk.riskPct > 0)
   assert.equal(result.lanes.intraday[0].exitPlan.hardStopPrice, 9.6)
   assert.equal(result.lanes.intraday[0].exitPlan.takeProfitPrice, 10.8)
-  assert.equal(result.lanes.intraday[0].exitPlan.timeStopDate, '2026-09-09')
+  assert.equal(result.lanes.intraday[0].exitPlan.timeStopDate, '2026-09-07')
   assert.equal(
     result.lanes.intraday[0].opportunityScore.state,
     'NOT_READY',
@@ -235,7 +238,7 @@ test('校准后的负期望候选保留展示但降为本次不买', () => {
   assert.equal(result.lanes.intraday[0].state, 'AVOID')
   assert.match(
     result.lanes.intraday[0].blockers.join('；'),
-    /尚未证明正期望/,
+    /费后期望不大于0/,
   )
 })
 
@@ -294,7 +297,7 @@ test('预催化候选只进入提前布局并保留官方事件证据', () => {
   )
   assert.equal(result.sourceStatus.preCatalyst.status, 'fresh')
   assert.equal(candidate.state, 'WAIT_TRIGGER')
-  assert.equal(candidate.stateLabel, '潜伏预判')
+  assert.equal(candidate.stateLabel, '小仓验证')
   assert.equal(candidate.origin, 'PRE_CATALYST')
   assert.equal(
     result.lanes.intraday.some((item) => item.state === 'READY'),
@@ -339,7 +342,8 @@ test('正式公式命中同股时不继承预催化校准阻断', () => {
   const candidate = result.lanes.intraday.find(
     (item) => item.code === '600001',
   )
-  assert.equal(candidate.state, 'READY')
+  assert.equal(candidate.state, 'WAIT_TRIGGER')
+  assert.equal(candidate.adaptive.tier, 'PROBE')
   assert.equal(
     candidate.blockers.includes(
       '预催化模型仍在积累样本，仅可等待量价确认',
@@ -434,7 +438,7 @@ test('只有板块方向而没有价格合同时不生成个股候选', () => {
   assert.equal(result.sectors[0].name, '先进制造')
 })
 
-test('赔率不足或盘中快照过期时不得显示为可操作', () => {
+test('较低赔率由成功概率定价但盘中快照过期仍不得展示', () => {
   const lowReward = buildOpportunityRadar({
     now: NOW,
     sector: {
@@ -450,11 +454,9 @@ test('赔率不足或盘中快照过期时不得显示为可操作', () => {
   const lowRewardCandidate = lowReward.lanes.intraday.find(
     (item) => item.code === '600001',
   )
-  assert.equal(lowRewardCandidate.state, 'AVOID')
-  assert.match(
-    lowRewardCandidate.blockers.join('；'),
-    /盈亏比不足/,
-  )
+  assert.equal(lowRewardCandidate.state, 'WAIT_TRIGGER')
+  assert.ok(lowRewardCandidate.adaptive.estimate.expectedNetR > 0)
+  assert.equal(lowRewardCandidate.riskReward, 1.4)
 
   const stale = buildOpportunityRadar({
     now: NOW,
@@ -489,7 +491,8 @@ test('板块实时源失败时公式候选最多进入等待确认', () => {
   })
   const candidate = result.lanes.intraday[0]
   assert.equal(candidate.state, 'WAIT_TRIGGER')
-  assert.match(candidate.blockers.join('；'), /板块方向需要重新确认/)
+  assert.match(candidate.cautions.join('；'), /板块方向需要重新确认/)
+  assert.equal(candidate.blockers.length, 0)
 })
 
 test('盘中只有昨日板块基线时不升级为当前可操作', () => {
@@ -514,7 +517,8 @@ test('盘中只有昨日板块基线时不升级为当前可操作', () => {
     (item) => item.code === '600001',
   )
   assert.equal(candidate.state, 'WAIT_TRIGGER')
-  assert.match(candidate.blockers.join('；'), /板块方向需要重新确认/)
+  assert.match(candidate.cautions.join('；'), /板块方向需要重新确认/)
+  assert.equal(candidate.blockers.length, 0)
 })
 
 test('收盘与尾盘结果必须属于最近完整交易日', () => {
@@ -740,14 +744,14 @@ test('机会雷达为每个lane附加组合视图且不改变个股结论', () =
   const laneRow = result.lanes.intraday.find(
     (item) => item.code === '600001',
   )
-  assert.equal(laneRow.state, 'READY')
+  assert.equal(laneRow.state, 'WAIT_TRIGGER')
   assert.equal('portfolioState' in laneRow, false)
   // 组合视图里同一只股票被标注了 portfolioState
   const pf = result.portfolios.intraday.candidates.find(
     (item) => item.code === '600001',
   )
   assert.ok(pf)
-  assert.equal(pf.state, 'READY')
+  assert.equal(pf.state, 'WAIT_TRIGGER')
   assert.equal(typeof pf.portfolioState, 'string')
   assert.ok(result.portfolios.intraday.budget)
 })

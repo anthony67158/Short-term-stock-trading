@@ -154,7 +154,7 @@ test('条件预算复用执行风控但不把休市计划升级为可执行', ()
   assert.match(missing.entryBudget.reasons.join('；'), /止损/)
 })
 
-test('低价窄止损计划必须通过真实费后盈亏比而非毛收益比', () => {
+test('低价窄止损计划必须通过真实费后盈亏平衡而非毛收益比', () => {
   const plan = compileDecisionPlan({
     mode: 'buy_advice',
     advice: { action: '立即买入', buyPrice: 10, stopPrice: 9.99,
@@ -162,7 +162,7 @@ test('低价窄止损计划必须通过真实费后盈亏比而非毛收益比',
     payload, evidenceSnapshot: snapshot, now,
   })
   assert.equal(plan.actionability, 'BLOCKED')
-  assert.match(plan.blockedReasons.join('；'), /扣除手续费与滑点后盈亏比/)
+  assert.match(plan.blockedReasons.join('；'), /费后盈亏平衡至少需要100%胜率/)
 })
 
 test('新买入不得把已有行业仓位加到30%以上', () => {
@@ -520,7 +520,7 @@ test('短线政策只开放试仓时即使模型建议重仓也强制限制5%', 
   assert.ok(plan.quantity.lots <= 5)
 })
 
-test('新增风险必须满足至少1.8比1的盈亏比', () => {
+test('新增风险使用成功概率与费后期望而不是固定1.8赔率', () => {
   const plan = compileDecisionPlan({
     mode: 'buy_advice',
     advice: {
@@ -530,14 +530,37 @@ test('新增风险必须满足至少1.8比1的盈亏比', () => {
       targetPrice: 11.5,
       planQtyNum: 2,
     },
-    payload,
+    payload: {
+      ...payload,
+      opportunityScore: {
+        state: 'READY',
+        shadowOnly: false,
+        productionEligible: true,
+        serverVerified: true,
+        modelVersion: 'opportunity-score.20260909',
+        pFill: 0.72,
+        pWinGivenFill: 0.64,
+        expectedNetR: 0.18,
+        netRLowerBound: 0.04,
+        meanConfidenceLowerBound: 0.03,
+        expectedShortfall10: -1.1,
+        calibration: { method: 'isotonic', sampleCount: 620 },
+        priceContract: {
+          entryPrice: 10,
+          stopPrice: 9,
+          targetPrice: 11.5,
+        },
+      },
+    },
     evidenceSnapshot: snapshot,
     now,
   })
 
-  assert.equal(plan.action, 'WATCH')
-  assert.equal(plan.actionability, 'BLOCKED')
-  assert.match(plan.blockedReasons.join('；'), /盈亏比/)
+  assert.equal(plan.action, 'BUY')
+  assert.equal(plan.actionability, 'READY')
+  assert.ok(plan.risk.breakEvenWinProbability > 0)
+  assert.ok(plan.risk.expectedNetR > 0)
+  assert.equal(plan.risk.minimumRiskReward, null)
 })
 
 test('校准后的费后期望下界为负时阻止新增风险', () => {
@@ -624,7 +647,7 @@ test('跌停压力损失超过账户上限时缩减买入手数', () => {
   assert.ok(plan.risk.tradeExpectancy.stress.lossAmount <= 2000)
 })
 
-test('市场硬红线不能被逆势强票和量化高把握绕过', () => {
+test('市场尾部风险把动作降为观察但不制造全局硬阻断', () => {
   const plan = compileDecisionPlan({
     mode: 'buy_advice',
     advice: {
@@ -653,11 +676,12 @@ test('市场硬红线不能被逆势强票和量化高把握绕过', () => {
   })
 
   assert.equal(plan.action, 'WATCH')
-  assert.equal(plan.actionability, 'BLOCKED')
-  assert.match(plan.blockedReasons.join('；'), /市场风险红线.*炸板率/)
+  assert.equal(plan.actionability, 'WATCH')
+  assert.equal(plan.quantity.lots, 0)
+  assert.doesNotMatch(plan.blockedReasons.join('；'), /市场风险红线/)
 })
 
-test('普通弱市逆势试仓限制为3%且要求至少2.2比1赔率', () => {
+test('普通弱市逆势试仓限制为3%且由正期望决定是否放行', () => {
   const weakPayload = {
     ...payload,
     todayQuote: {
@@ -712,13 +736,11 @@ test('普通弱市逆势试仓限制为3%且要求至少2.2比1赔率', () => {
     now,
   })
 
-  assert.equal(insufficientReward.actionability, 'BLOCKED')
-  assert.match(
-    insufficientReward.blockedReasons.join('；'),
-    /2.2:1/,
-  )
+  assert.equal(insufficientReward.actionability, 'READY')
+  assert.ok(insufficientReward.risk.expectedNetR > 0)
   assert.equal(eligible.actionability, 'READY')
   assert.equal(eligible.risk.manualProbeLimitPct, 3)
+  assert.equal(eligible.risk.minimumRiskReward, null)
 })
 
 test('观望计划只保留可核验的价格复核条件', () => {

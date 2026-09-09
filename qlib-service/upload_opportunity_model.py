@@ -55,7 +55,7 @@ def publish_opportunity_release(
     activated_at=None,
 ):
     source = os.path.abspath(directory)
-    _, run_id = _load_metadata(source)
+    metadata, run_id = _load_metadata(source)
     normalized_prefix = str(prefix or "opportunitymodel/").strip("/")
     release_prefix = f"{normalized_prefix}/runs/{run_id}/"
     manifest_files = {}
@@ -78,7 +78,11 @@ def publish_opportunity_release(
         "schemaVersion": MANIFEST_SCHEMA_VERSION,
         "runId": run_id,
         "activatedAt": int(activated_at or time.time()),
-        "shadowOnly": True,
+        "shadowOnly": metadata.get("shadowOnly", True),
+        "productionEligible": metadata.get(
+            "productionEligible",
+            False,
+        ),
         "files": manifest_files,
     }
     target_bucket.put_object(
@@ -113,7 +117,8 @@ def main():
     print(json.dumps({
         "ok": True,
         "runId": manifest["runId"],
-        "shadowOnly": True,
+        "shadowOnly": manifest["shadowOnly"],
+        "productionEligible": manifest["productionEligible"],
     }, ensure_ascii=False))
 
 

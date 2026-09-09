@@ -62,10 +62,28 @@ test('板块前瞻每五分钟唤醒且具体时间由OSS设置决定', () => {
   assert.match(server, /sectorForecastBody[\s\S]*'sector_forecast'/)
 })
 
-test('机会雷达在收盘后独立结算且不占用LLM定时任务', () => {
+test('机会雷达每日三次采样并在收盘后独立结算', () => {
   const config = read('s.yaml')
   const server = read('server.js')
   const settlement = read('api/cron_opportunity_radar.js')
+  const samplingSchedules = [
+    [
+      'formula-selection-intraday-am-timer',
+      'CRON_TZ=Asia/Shanghai 0 20 10 * * 1-5',
+    ],
+    [
+      'formula-selection-intraday-pm-timer',
+      'CRON_TZ=Asia/Shanghai 0 40 13 * * 1-5',
+    ],
+    [
+      'formula-selection-close-timer',
+      'CRON_TZ=Asia/Shanghai 0 10 15 * * 1-5',
+    ],
+  ]
+  for (const [name, cron] of samplingSchedules) {
+    assert.ok(config.includes(`- triggerName: ${name}`))
+    assert.ok(config.includes(`cronExpression: "${cron}"`))
+  }
 
   assert.ok(
     config.includes(
@@ -81,6 +99,7 @@ test('机会雷达在收盘后独立结算且不占用LLM定时任务', () => {
     /opportunityRadarBody[\s\S]*'cron_opportunity_radar'/,
   )
   assert.match(settlement, /settlePreCatalystOutcomes/)
+  assert.match(settlement, /maxCodes:\s*120/)
 })
 
 test('预催化事件在盘前盘中和收盘后使用独立低频扫描', () => {

@@ -871,11 +871,11 @@ function ConvictionStrip({ conviction }) {
 }
 
 function ActionCommand({ view, onOpen }) {
-      const instruction = view.instruction || (
-        view.kind === 'hold'
-          ? '本次不加仓、不减仓，继续持有现有仓位'
-          : '当前不下单；达到卡片所列条件后再判断'
-      )
+  const instruction = view.instruction || (
+    view.kind === 'hold'
+      ? '本次不加仓、不减仓，继续持有现有仓位'
+      : '当前不下单；达到卡片所列条件后再判断'
+  )
   const cardInstruction = view.cardInstruction || instruction
   const importance = actionImportance(view)
   const qtyLabel = actionQtyLabel(view.quantity)
@@ -894,7 +894,7 @@ function ActionCommand({ view, onOpen }) {
     <button
       type="button"
       className={`action-command importance-${importance}`}
-      title="查看完整建议"
+      title="查看股票详情与完整建议"
       onClick={onOpen}
     >
       <span className="action-command-body">
@@ -934,9 +934,27 @@ function ActionCommand({ view, onOpen }) {
 
 function MonitoringRules({ monitoring }) {
   if (!monitoring?.rules?.length) return null
+  const stateRank = {
+    TRIGGERED: 0,
+    MATCHED: 0,
+    OBSERVING: 1,
+    MISSING_DATA: 2,
+    WAIT_SESSION: 2,
+    WINDOW_ENDED: 2,
+    T1_LOCKED: 2,
+    WAITING: 3,
+  }
+  const observingCount = monitoring.rules.filter(
+    (rule) => rule.state === 'OBSERVING',
+  ).length
+  const sortedRules = [...monitoring.rules].sort((left, right) =>
+      (stateRank[left.state] ?? 4) - (stateRank[right.state] ?? 4)
+    )
+  const visibleRules = sortedRules.slice(0, 3)
   const stateLabel = {
     MATCHED: '已触发',
-    OBSERVING: '确认中',
+    TRIGGERED: '已触发',
+    OBSERVING: '观察中',
     WAITING: '未满足',
     MISSING_DATA: '数据待补',
     WAIT_SESSION: '等待开盘',
@@ -951,16 +969,34 @@ function MonitoringRules({ monitoring }) {
     }
   }
   return (
-    <div className="monitoring-rules" aria-label="自动跟踪条件">
+    <div
+      className="monitoring-rules"
+      data-observing={observingCount > 0 ? 'true' : 'false'}
+      aria-label="自动跟踪条件"
+    >
       <div className="monitoring-rules-head">
-        <span><Icon name="radar" size={13} /> 系统跟踪</span>
-        <b data-active={monitoring.active}>
-          {monitoring.active ? '运行中' : monitoring.expired ? '已到期' : '未开启'}
-          <small>{monitoring.rules.length}项</small>
+        <span className="monitoring-system-copy">
+          <span className="monitoring-system-icon">
+            <Icon name="radar" size={13} />
+          </span>
+          <strong>系统跟踪</strong>
+        </span>
+        <b
+          data-active={monitoring.active}
+          data-observing={observingCount > 0 ? 'true' : 'false'}
+        >
+          {monitoring.expired
+            ? '已到期'
+            : observingCount > 0
+              ? '到价观察'
+              : monitoring.active
+                ? '运行中'
+                : '未开启'}
+          <small>{observingCount || monitoring.rules.length}项</small>
         </b>
       </div>
       <div className="monitoring-rule-list" role="list">
-        {monitoring.rules.map((rule) => {
+        {visibleRules.map((rule) => {
           const text = splitRuleText(rule.text)
           return (
             <div
@@ -981,22 +1017,30 @@ function MonitoringRules({ monitoring }) {
                 )}
               </strong>
               {rule.state === 'OBSERVING' && rule.remainingSeconds != null && (
-                <em>还需 {rule.remainingSeconds} 秒</em>
+                <span
+                  className="monitoring-countdown"
+                  role="timer"
+                  aria-label={`倒计时${rule.remainingSeconds}秒`}
+                >
+                  <span>倒计时</span>
+                  <strong>{rule.remainingSeconds}</strong>
+                  <small>秒</small>
+                </span>
               )}
             </div>
           )
         })}
-        {monitoring.rules.length > 2 && (
-          <div className="monitoring-rule-more">
-            另 {monitoring.rules.length - 2} 项条件，点卡片查看完整规则
-          </div>
-        )}
       </div>
     </div>
   )
 }
 
-function AdviceActionPanel({ view, currentPrice, onPrompt, conviction = null }) {
+function AdviceActionPanel({
+  view,
+  currentPrice,
+  onPrompt,
+  conviction = null,
+}) {
   if (!view) {
     return (
       <button type="button" className="action-prompt" onClick={onPrompt} aria-label="生成操作建议">
@@ -1416,33 +1460,37 @@ function PlanList({ book, quote, stockTags, batchSel }) {
         {/* 主指令优先；盘面指标只作为次级证据。 */}
         <CandDecision p={p} q={q} />
         <SelectionOrigin value={p.selectionOrigin} />
-        <MarketPulse quote={q} />
+        <div className="trade-card-evidence-slot">
+          <MarketPulse quote={q} />
+        </div>
         {/* 卡片只展示观察复核提醒；可执行买点已在上方指令区统一表达。 */}
-        {(() => {
-          const stockAlerts = (book.alerts || []).filter(
-            (alert) => alert.candCode === p.code,
-          )
-          const reviewAlerts = stockAlerts.filter(
-            (alert) => alert.reviewOnly,
-          )
-          const executionOpen = isContinuousTrading(Date.now())
-          const reached = (alert) =>
-            executionOpen && priceView.livePrice != null && (
-              alert.op === 'gte'
-                ? priceView.livePrice >= alert.value
-                : priceView.livePrice <= alert.value
+        <div className="trade-card-review-slot">
+          {(() => {
+            const stockAlerts = (book.alerts || []).filter(
+              (alert) => alert.candCode === p.code,
             )
-          const anyReached = reviewAlerts.some((alert) =>
-            alert.enabled && reached(alert)
-          )
-          return (
-            <CandidateReviewStatus
-              code={p.code}
-              alerts={reviewAlerts}
-              priceReached={anyReached}
-            />
-          )
-        })()}
+            const reviewAlerts = stockAlerts.filter(
+              (alert) => alert.reviewOnly,
+            )
+            const executionOpen = isContinuousTrading(Date.now())
+            const reached = (alert) =>
+              executionOpen && priceView.livePrice != null && (
+                alert.op === 'gte'
+                  ? priceView.livePrice >= alert.value
+                  : priceView.livePrice <= alert.value
+              )
+            const anyReached = reviewAlerts.some((alert) =>
+              alert.enabled && reached(alert)
+            )
+            return (
+              <CandidateReviewStatus
+                code={p.code}
+                alerts={reviewAlerts}
+                priceReached={anyReached}
+              />
+            )
+          })()}
+        </div>
         <StockNoteSummary
           code={p.code}
           name={q?.name || p.name}
@@ -2741,6 +2789,11 @@ function HoldingList({ book, quote, stockTags, searchConfig, batchSel }) {
 function HoldingItem({ h, quote: q }) {
   const searchConfig = useAiSearchConfig()
   const [mode, setMode] = useState(null) // null | 'sell' | 'T' | 'add' | 'cost'
+  const [, setMonitoringTick] = useState(0)
+  const monitoringRuntimeRef = useRef({
+    planId: '',
+    states: new Map(),
+  })
   const detail = useDetailStore() // 监听个股详情弹窗：从个股页生成AI建议返回后自动代入价格
   const [sellPrice, setSellPrice] = useState('')
   const [sellQty, setSellQty] = useState('1')
@@ -2964,12 +3017,41 @@ function HoldingItem({ h, quote: q }) {
     if (holdAdvice) planStore.syncActionAlerts(h.code)
   }, [adviceEntry?.at, holdAdvice, h.code])
   const currentT1 = t1StatusOf(h.code)
+  const holdMonitoringPlan = monitoringPlanOf(holdAdvice)
+  const monitoringPlanId = holdMonitoringPlan?.planId || ''
+  if (monitoringRuntimeRef.current.planId !== monitoringPlanId) {
+    monitoringRuntimeRef.current = {
+      planId: monitoringPlanId,
+      states: new Map(),
+    }
+  }
   const trackedView = holdAdvice ? monitoringView(holdAdvice, {
     quote: q,
     alerts: book.alerts,
+    previousStates: monitoringRuntimeRef.current.states,
     holdQty: currentT1.liveQty,
     sellableTodayQty: currentT1.sellableToday,
+    now: Date.now(),
   }) : null
+  const trackedRules = trackedView?.monitoring?.rules || []
+  const observingRuleCount = trackedRules.filter(
+    (rule) => rule.state === 'OBSERVING',
+  ).length
+  useEffect(() => {
+    for (const rule of trackedRules) {
+      if (rule.runtimeState) {
+        monitoringRuntimeRef.current.states.set(rule.id, rule.runtimeState)
+      }
+    }
+  }, [monitoringPlanId, trackedRules])
+  useEffect(() => {
+    if (!observingRuleCount) return undefined
+    const timer = window.setInterval(
+      () => setMonitoringTick((tick) => tick + 1),
+      1000,
+    )
+    return () => window.clearInterval(timer)
+  }, [monitoringPlanId, observingRuleCount])
   const legacyView = buildHoldingCardDecisionView({
     advice: holdAdvice,
     hitTarget: hitTP,
@@ -2979,25 +3061,7 @@ function HoldingItem({ h, quote: q }) {
     t1Status: currentT1,
     nextTradeDay: nextTradingDayLabel(),
   })
-  const decisionView = trackedView || (
-    holdAdvice && !monitoringPlanOf(holdAdvice) && !hitTP && !hitSL
-      ? {
-          ...legacyView,
-          action: '继续持有',
-          quantity: `${currentT1.liveQty}手`,
-          cardInstruction: '旧建议未形成系统可跟踪条件；重新生成后自动盯价格、主力资金和分时均价',
-          levels: [],
-          actionable: false,
-          trigger: {
-            direction: 'inactive',
-            price: null,
-            label: '条件跟踪',
-            stateLabel: '需重新生成',
-            metricLabel: '当前不自动提醒',
-          },
-        }
-      : legacyView
-  )
+  const decisionView = trackedView || legacyView
 
   const startSell = () => {
     const t1 = currentT1
@@ -3357,9 +3421,11 @@ function HoldingItem({ h, quote: q }) {
         </span>
       </div>
 
-      <MarketPulse quote={q} />
+      <div className="trade-card-evidence-slot">
+        <MarketPulse quote={q} />
+      </div>
 
-      {hasPlan && (
+      {hasPlan ? (
         <button
           type="button"
           className={
@@ -3380,6 +3446,21 @@ function HoldingItem({ h, quote: q }) {
           </span>
           <Icon name="chevronRight" size={13} />
         </button>
+      ) : (
+        <button
+          type="button"
+          className="holding-plan-summary holding-plan-empty"
+          onClick={() => openPlan(false)}
+        >
+          <span className="holding-plan-summary-label">
+            <Icon name="target" size={13} />
+            纪律
+          </span>
+          <span className="holding-plan-summary-values">
+            <span>设置止盈止损</span>
+          </span>
+          <Icon name="chevronRight" size={13} />
+        </button>
       )}
 
       <SelectionOrigin value={h.selectionOrigin} />
@@ -3396,16 +3477,6 @@ function HoldingItem({ h, quote: q }) {
 
       {/* 操作区 */}
       {!mobileOperations && tradeErr && <div className="err" style={{ margin: '8px 0' }}>{tradeErr}</div>}
-      {!(h.tp || h.sl || h.planReason) && (
-        <button
-          type="button"
-          className="chip-btn ghost hold-plan-mobile"
-          onClick={() => openPlan(false)}
-        >
-          <Icon name="target" size={13} />
-          添加计划
-        </button>
-      )}
       {operationForm && !mobileOperations && mode !== 'plan' ? operationForm : (
         <div className="pi-actions">
           <div className="pi-trade-actions">
@@ -3414,7 +3485,6 @@ function HoldingItem({ h, quote: q }) {
             <button className={'chip-btn act-reduce' + (['reduce', 'sell'].includes(decisionView?.kind) ? ' recommended' : '')} onClick={startSell}>减仓/清仓</button>
           </div>
           <div className="pi-card-tools">
-            {!(h.tp || h.sl || h.planReason) && <button className="chip-btn ghost" onClick={() => openPlan(false)}>设计划</button>}
             <button className="icon-btn act-del" aria-label={`删除${h.name}持仓`} title="删除持仓" onClick={() => setConfirmDel(true)}><Icon name="trash" size={14} /></button>
           </div>
         </div>

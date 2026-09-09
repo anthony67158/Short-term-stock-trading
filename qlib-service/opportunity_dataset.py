@@ -77,6 +77,20 @@ def build_opportunity_dataset(outcomes):
         str(row[0]["scoreInput"]["formulaId"])
         for row in rows
     ], dtype="<U60")
+    playbook_ids = np.asarray([
+        str((row[0]["scoreInput"].get("dimensions") or {}).get(
+            "playbook",
+            "UNKNOWN",
+        ))
+        for row in rows
+    ], dtype="<U60")
+    routes = np.asarray([
+        str((row[0]["scoreInput"].get("dimensions") or {}).get(
+            "route",
+            "UNKNOWN",
+        ))
+        for row in rows
+    ], dtype="<U30")
     y_fill = np.asarray([
         1 if row[0].get("fillStatus") == "FILLED" else 0
         for row in rows
@@ -100,6 +114,8 @@ def build_opportunity_dataset(outcomes):
         "dates": dates,
         "codes": codes,
         "formula_ids": formula_ids,
+        "playbook_ids": playbook_ids,
+        "routes": routes,
         "y_fill": y_fill,
         "y_win": y_win,
         "y_net_r": y_net_r,
@@ -171,6 +187,8 @@ def build_opportunity_dataset_file(source_path, output_path):
             dates=dataset["dates"],
             codes=dataset["codes"],
             formula_ids=dataset["formula_ids"],
+            playbook_ids=dataset["playbook_ids"],
+            routes=dataset["routes"],
             y_fill=dataset["y_fill"],
             y_win=dataset["y_win"],
             y_net_r=dataset["y_net_r"],

@@ -3,7 +3,7 @@ import {
 } from './opportunityShadowFeatures.js'
 
 export const OPPORTUNITY_SCORE_FEATURE_SCHEMA_VERSION =
-  'opportunity-score-feature.v2'
+  'opportunity-score-feature.v3'
 export const OPPORTUNITY_SCORE_SCHEMA_VERSION =
   'opportunity-score.v1'
 
@@ -14,6 +14,21 @@ const CATEGORIES = Object.freeze({
     'INTRADAY_ACCUMULATION',
     'CLOSE_TREND_PULLBACK',
     'CLOSE_SQUEEZE',
+    'UNKNOWN',
+  ],
+  playbook: [
+    'MOMENTUM_BREAKOUT',
+    'LEADER_PULLBACK',
+    'ACCUMULATION',
+    'CATALYST',
+    'PANIC_REVERSAL',
+    'RANGE_REVERSION',
+    'UNKNOWN',
+  ],
+  route: [
+    'IMMEDIATE',
+    'PULLBACK',
+    'BREAKOUT',
     'UNKNOWN',
   ],
   mode: ['INTRADAY', 'CLOSE', 'UNKNOWN'],
@@ -62,6 +77,8 @@ const NUMERIC_FEATURES = Object.freeze([
   'stopDistancePct',
   'targetDistancePct',
   'marketAllowed',
+  'playbookScore',
+  'marketOpportunityFactor',
   ...OPPORTUNITY_SHADOW_FEATURE_NAMES,
 ])
 
@@ -158,6 +175,14 @@ export function buildOpportunityScoreInput({
   )
   const selected = {
     formula: category(formulaId, CATEGORIES.formula),
+    playbook: category(
+      decision.playbookId || event.playbookId,
+      CATEGORIES.playbook,
+    ),
+    route: category(
+      decision.route,
+      CATEGORIES.route,
+    ),
     mode,
     priceType: category(
       decision.priceType,
@@ -205,6 +230,9 @@ export function buildOpportunityScoreInput({
       decision.primaryPrice,
     ),
     marketAllowed: marketGate?.allowed === true ? 1 : 0,
+    playbookScore: rounded(decision.playbookScore),
+    marketOpportunityFactor:
+      rounded(decision.marketOpportunityFactor),
     ret2dPct: rounded(shadow.ret2dPct),
     ret5dPct: rounded(shadow.ret5dPct),
     openGapPct: rounded(shadow.openGapPct),
@@ -247,6 +275,8 @@ export function buildOpportunityScoreInput({
     ),
     dimensions: {
       mode: selected.mode,
+      playbook: selected.playbook,
+      route: selected.route,
       priceType: selected.priceType,
       marketState: selected.market,
       sectorPhase: selected.sector,

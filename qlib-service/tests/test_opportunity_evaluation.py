@@ -56,6 +56,28 @@ class OpportunityEvaluationTest(unittest.TestCase):
         self.assertEqual(metrics["ndcg_at_1"], 1.0)
         self.assertEqual(metrics["mean_net_r_at_1"], 1.5)
 
+    def test_ranking_metrics_keep_one_route_per_stock(self):
+        dates = np.asarray([
+            "2026-09-01",
+            "2026-09-01",
+            "2026-09-01",
+        ])
+        codes = np.asarray(["600001", "600001", "600002"])
+        relevance = np.asarray([1.0, 0.8, 0.4])
+        score = np.asarray([0.9, 0.85, 0.7])
+
+        metrics = ranking_metrics(
+            relevance > 0,
+            relevance,
+            score,
+            dates,
+            top_k=2,
+            group_ids=codes,
+        )
+
+        self.assertEqual(metrics["precision_at_2"], 1.0)
+        self.assertEqual(metrics["mean_net_r_at_2"], 0.7)
+
     def test_regression_metrics_and_daily_bootstrap_are_deterministic(self):
         actual = np.asarray([-1.0, 0.0, 1.0, 2.0])
         predicted = np.asarray([-0.8, 0.1, 0.8, 1.7])

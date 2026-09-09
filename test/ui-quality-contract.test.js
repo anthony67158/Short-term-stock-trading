@@ -32,6 +32,9 @@ const fundFlowCanvas = read('src/components/FundFlowCanvas.jsx')
 const calmSurface = precision.slice(precision.indexOf(
   '/* Trade workspace refinement: calm surfaces and content-led height. */',
 ))
+const fixedCards = precision.slice(precision.indexOf(
+  '/* Fixed trade-card anatomy: content changes, landmarks do not. */',
+))
 const semanticTabSources = [
   'src/components/AlertCenter.jsx',
   'src/components/AlertPanel.jsx',
@@ -613,7 +616,7 @@ test('操作建议卡使用语义图标、仓位徽标与固定价位列', () =>
 test('尚无操作建议使用紧凑单行生成入口', () => {
   assert.match(
     planTab,
-    /function AdviceActionPanel\(\{ view, currentPrice, onPrompt, conviction = null \}\)/,
+    /function AdviceActionPanel\(\{[\s\S]*?view,[\s\S]*?currentPrice,[\s\S]*?onPrompt,[\s\S]*?conviction = null,[\s\S]*?\}\)/,
   )
   assert.match(planTab, /className="action-prompt-label">尚无操作建议<\/span>/)
   assert.match(planTab, /className="action-prompt-action">生成<\/span>/)
@@ -711,16 +714,20 @@ test('持仓页大型展开层统一挂到顶层Portal避免被吸顶区遮盖',
   )
 })
 
-test('持仓与自选卡桌面同排等高且手机使用横向吸附卡组', () => {
-  assert.match(calmSurface, /\.hold-grid,[\s\S]*?\.plan-cand-grid\s*{[^}]*align-items:\s*stretch[^}]*grid-auto-rows:\s*auto/s)
-  assert.match(calmSurface, /\.hold-swipe-wrap,[\s\S]*?\.plan-cand\s*{[^}]*height:\s*100%/s)
+test('持仓与自选卡使用固定外框与固定内容槽位', () => {
+  assert.match(fixedCards, /\.hold-grid \.hold-item\s*{[^}]*height:\s*700px[^}]*max-height:\s*700px/s)
+  assert.match(fixedCards, /\.plan-cand\s*{[^}]*height:\s*640px[^}]*max-height:\s*640px/s)
   assert.match(
-    calmSurface,
-    /\.plan-cand \.card-decision-slot,[\s\S]*?\.hold-item \.card-decision-slot\s*{[^}]*min-height:\s*0/s,
+    fixedCards,
+    /\.hold-item \.card-decision-slot\s*{[^}]*height:\s*364px[^}]*max-height:\s*364px/s,
   )
   assert.match(
-    calmSurface,
-    /\.plan-cand,[\s\S]*?\.hold-grid \.hold-item\s*{[^}]*justify-content:\s*space-between/s,
+    fixedCards,
+    /\.plan-cand \.card-decision-slot\s*{[^}]*height:\s*368px[^}]*max-height:\s*368px/s,
+  )
+  assert.match(
+    fixedCards,
+    /\.trade-card-evidence-slot\s*{[^}]*height:\s*24px[^}]*max-height:\s*24px/s,
   )
   assert.match(
     calmSurface,
@@ -744,15 +751,17 @@ test('持仓与自选卡桌面同排等高且手机使用横向吸附卡组', ()
   )
 })
 
-test('卡片内只保留单行建议摘要且完整内容进入个股详情', () => {
-  assert.match(planTab, /function ActionCommand\(\{ view, onOpen \}\)/)
+test('卡片直接展示操作摘要和最多三条核心条件', () => {
   assert.match(
     planTab,
-    /<button[\s\S]*?className={`action-command importance-\$\{importance\}`}[\s\S]*?onClick=\{onOpen\}/,
+    /function ActionCommand\(\{ view, onOpen \}\)/,
   )
-  assert.doesNotMatch(planTab, /className="action-command-open"/)
-  assert.doesNotMatch(precision, /\.action-command-open/)
-  assert.doesNotMatch(planTab, /action-command-disclosure|new ResizeObserver\(measure\)/)
+  assert.match(
+    planTab,
+    /className={`action-command importance-\$\{importance\}`}[\s\S]*?onClick=\{onOpen\}/,
+  )
+  assert.match(planTab, /const visibleRules = sortedRules\.slice\(0, 3\)/)
+  assert.doesNotMatch(planTab, /CardAdviceDisclosure|embeddedFull/)
   assert.doesNotMatch(planTab, /action-beginner-note|cardBeginnerNote/)
   assert.doesNotMatch(advicePresentation, /advice-beginner-note|beginnerNote/)
   assert.doesNotMatch(precision, /\.action-beginner-note\s*{/)

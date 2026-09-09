@@ -77,6 +77,27 @@ test('重复结算返回首份结果且拒绝改写历史', async () => {
   assert.deepEqual(await store.listOutcomes(original), [original])
 })
 
+test('同一股票的不同交易路径使用独立不可变对象', async () => {
+  const storage = memoryStorage()
+  const store = createOpportunityRadarOutcomeStore(storage)
+  const immediate = outcome({
+    decisionId: 'formula:2026-09-02:close:1505:600001:IMMEDIATE',
+    route: 'IMMEDIATE',
+  })
+  const pullback = outcome({
+    decisionId: 'formula:2026-09-02:close:1505:600001:PULLBACK',
+    route: 'PULLBACK',
+    outcome: 'TIME_EXIT',
+  })
+
+  await store.saveOutcome(immediate)
+  await store.saveOutcome(pullback)
+
+  assert.equal(storage.objects.size, 2)
+  assert.deepEqual(await store.readOutcome(immediate), immediate)
+  assert.deepEqual(await store.readOutcome(pullback), pullback)
+})
+
 test('未成熟结果不能写入最终结果目录', async () => {
   const store = createOpportunityRadarOutcomeStore(memoryStorage())
 

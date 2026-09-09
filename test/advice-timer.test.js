@@ -127,20 +127,33 @@ test('尾盘拾金异步Worker只接受内部密钥和受支持模式', () => {
   assert.equal(tailPickWorkerBody(event, 'wrong-key'), null)
 })
 
-test('公式选股收盘Timer只接受专用触发器和匹配密钥', () => {
-  const event = {
-    triggerName: 'formula-selection-close-timer',
-    payload: 'secret-key',
+test('公式选股Timer区分盘中与收盘模式并验证密钥', () => {
+  const modes = {
+    'formula-selection-intraday-am-timer': 'intraday',
+    'formula-selection-intraday-pm-timer': 'intraday',
+    'formula-selection-close-timer': 'close',
   }
 
-  assert.deepEqual(
-    formulaSelectionTimerBody(event, 'secret-key'),
-    { scheduled: true, mode: 'close' },
-  )
+  for (const [triggerName, mode] of Object.entries(modes)) {
+    assert.deepEqual(
+      formulaSelectionTimerBody({
+        triggerName,
+        payload: 'secret-key',
+      }, 'secret-key'),
+      { scheduled: true, mode },
+    )
+  }
   assert.equal(
-    formulaSelectionTimerBody(event, 'wrong-key'),
+    formulaSelectionTimerBody({
+      triggerName: 'formula-selection-close-timer',
+      payload: 'secret-key',
+    }, 'wrong-key'),
     null,
   )
+  assert.equal(formulaSelectionTimerBody({
+    triggerName: 'formula-selection-other',
+    payload: 'secret-key',
+  }, 'secret-key'), null)
 })
 
 test('盯盘预警只接受交易时段专用Timer触发器和匹配密钥', () => {

@@ -30,7 +30,7 @@ import {
   pumpChatStream,
 } from './_llm.js';
 import { parseAdvisorModelOutput } from './_advice_output.js';
-import { compileMonitoringPlan, ruleText } from '../shared/monitoringPlan.js';
+import { attachMonitoringPlan } from '../shared/monitoringPlan.js';
 import { ensureConfig, getModel, getReasoning } from './_llm_config.js';
 import { applyCors, preflight } from './_lib.js';
 import { createReasoningProgressTracker } from './_zh_reason.js';
@@ -124,6 +124,18 @@ import {
   evaluateAccountCircuitBreaker,
 } from '../shared/accountCircuitBreaker.js';
 import {
+  buildMarketOpportunityContext,
+} from '../shared/marketOpportunityContext.js';
+import {
+  chooseAdaptivePricePlan,
+} from '../shared/adaptivePricePlans.js';
+import {
+  evaluateHoldingActions,
+} from '../shared/holdingActionValue.js';
+import {
+  applyAdaptiveAdvicePolicy,
+} from '../shared/adaptiveAdvicePolicy.js';
+import {
   compileAdvicePresentationV3,
 } from '../shared/advicePresentation.js';
 import {
@@ -166,6 +178,9 @@ import {
   deepModelProgressMessage,
   ensureAdviceReasoning,
 } from '../shared/adviceReasoning.js';
+import {
+  buildLLMTradingContribution,
+} from '../shared/llmTradingContribution.js';
 import {
   buildIntradayOpenSummary,
   buildReviewDecisionPacket,
@@ -1250,6 +1265,8 @@ export default async function handler(req, res) {
     let searchReference = null;
     let theoryHits = [];
     let theoryRefs = [];
+    let advisorDailyCandles = [];
+    let advisorTrends = [];
     if (mode === 'stock' && payload.code) {
       try {
         const corpus = await buildCorpus(payload.code, { name: payload.name });
@@ -1525,6 +1542,10 @@ export default async function handler(req, res) {
           dailyCandles,
           todayQuote,
         } = quantEvidence || {};
+        advisorDailyCandles = Array.isArray(dailyCandles)
+          ? dailyCandles
+          : [];
+        advisorTrends = Array.isArray(trend) ? trend : [];
         const {
           industry = '',
           result: advisorSearch = emptyAdvisorSearch('unavailable'),
@@ -2065,6 +2086,32 @@ export default async function handler(req, res) {
           reviewEvent: payload.reviewEvent,
         }),
       };
+      payload.marketOpportunityContext = buildMarketOpportunityContext({
+        market: payload.market || {},
+        marketGate: { regime: payload.marketEnv || {} },
+      });
+      if (Number(payload.holdQty) > 0) {
+        payload.adaptiveAction = evaluateHoldingActions({
+          payload,
+          advice: payload.previousAdvice || {},
+        });
+      } else {
+        payload.adaptiveAction = chooseAdaptivePricePlan({
+          candidate: {
+            code: payload.code,
+            name: payload.name,
+            quote: payload.todayQuote || {},
+            fund: payload.stockFund || {},
+            sector: payload.sectorOpportunity?.sector || null,
+            sectorOpportunity: payload.sectorOpportunity,
+            technical: payload.tech,
+            opportunityScore: payload.opportunityScore,
+          },
+          candles: advisorDailyCandles,
+          trends: advisorTrends,
+          marketContext: payload.marketOpportunityContext,
+        });
+      }
       if (triggeredPriceReview) {
         payload.reviewDecisionPacket = buildReviewDecisionPacket({
           channel: 'FAST_REVIEW',
@@ -2300,7 +2347,7 @@ export default async function handler(req, res) {
       theoryHits,
     ) + zhTail + (
       ['hold_advice', 'review'].includes(mode) && !triggeredPriceReview
-        ? '\n【可执行监控合同】最终JSON必须额外提供executionRules数组，最多3条，放在action/title之后。每条形如{"action":"EXIT","kind":"RISK_EXIT","lots":1,"logic":"ANY","session":"CONTINUOUS","sustainSeconds":0,"conditions":[{"metric":"price","op":"lte","value":54},{"metric":"mainNetYi","op":"lte","value":-3}]}。此例数字仅示范结构，必须根据本股证据重新定价。action只允许EXIT/REDUCE/HOLD；kind为RISK_EXIT/PROFIT_EXIT/HOLD；logic为ANY或ALL；session为CONTINUOUS或OPENING(09:30-10:00)。metric只允许price(元)、mainNetYi(亿元)、priceVsVwapPct(与当日分时均价比较，阈值只能0)、openChangePct(今开相对昨收%)；op只允许lte/gte。站稳均价线要求sustainSeconds=60。无条件可写空数组，不编造监控。没有加仓方向就不写任何加仓点。全部手数不能超过持仓。正文涉及的价格、资金、开盘条件必须与executionRules完全一致；系统将按这些规则直接跟踪并提醒人工计划。风险退出优先于利润退出，HOLD只更新状态不发交易提醒。'
+        ? '\n【可执行监控合同】最终JSON必须额外提供executionRules数组，最多3条，放在action/title之后。每条形如{"action":"EXIT","kind":"RISK_EXIT","lots":1,"logic":"ANY","session":"CONTINUOUS","sustainSeconds":0,"conditions":[{"metric":"price","op":"lte","value":54},{"metric":"drawdownFromHighPct","op":"gte","value":3}]}。此例数字仅示范结构，必须根据本股证据重新定价。action只允许EXIT/REDUCE/HOLD；kind为RISK_EXIT/PROFIT_EXIT/HOLD；logic为ANY或ALL；session为CONTINUOUS或OPENING(09:30-10:00)。metric允许price、pct、mainNetYi、retailNetYi、priceVsVwapPct、openChangePct、volumeRatio、turnover、drawdownFromHighPct；op只允许lte/gte。站稳均价线要求sustainSeconds=60。板块与相对强弱变化由五分钟事件复核处理，不得写进秒级规则。持仓结论即使是HOLD，也必须至少提供1条有明确阈值的EXIT或REDUCE风险退出规则；没有其它可监控条件时直接省略该规则，禁止输出空conditions或占位规则，也不得编造条件。无论executionRules是否可用，actionPlan与nextAction都必须独立给出当前动作、手数、执行时点和无法自动跟踪时的人工核对条件。全部手数不能超过持仓。正文条件必须与executionRules一致；风险退出优先于利润退出，HOLD只更新状态不发交易提醒。'
         : ''
     );
     if (streaming) {
@@ -2691,6 +2738,18 @@ export default async function handler(req, res) {
         payload,
       });
     }
+    if (
+      mode === 'buy_advice'
+      && result
+      && typeof result === 'object'
+      && !result.raw
+    ) {
+      result = applyAdaptiveAdvicePolicy({
+        mode,
+        result,
+        payload,
+      });
+    }
     if (['buy_advice', 'hold_advice', 'review', 't_advice'].includes(mode) && result && typeof result === 'object' && !result.raw) {
       result = reconcileAdviceNumbers({ mode, result, payload }).result;
     }
@@ -2815,27 +2874,11 @@ export default async function handler(req, res) {
       }
       result = applyCompiledDecisionPlan(result);
       if (!triggeredPriceReview && ['hold_advice', 'review'].includes(mode)) {
-        if (!Array.isArray(result.executionRules)) {
-          return finishGenerationFailure('本轮缺少可监控操作条件，未发布新计划', {
-            meta: collectedMeta, model: selectedModel, endpoint: selectedEndpoint,
-          });
-        }
-        const monitoring = result.decisionPlan.action === 'HOLD'
-          ? compileMonitoringPlan({ advice: result, payload, decisionPlan: result.decisionPlan })
-          : null;
-        if (monitoring?.state === 'INVALID') {
-          return finishGenerationFailure(`操作条件无法核验：${monitoring.errors.join('；')}`, {
-            meta: collectedMeta, model: selectedModel, endpoint: selectedEndpoint,
-          });
-        }
-        if (monitoring) {
-          result.monitoringPlan = monitoring;
-          const rules = monitoring.rules.map(ruleText).join('；');
-          if (result.decisionPlan.action === 'HOLD') {
-            result.actionPlan = `继续持有${payload.holdQty}手；${rules}`;
-            result.nextAction = result.actionPlan;
-          }
-        }
+        result = attachMonitoringPlan({
+          advice: result,
+          payload,
+          decisionPlan: result.decisionPlan,
+        });
       }
       result.reviewMemory = buildAdviceReviewMemory({
         advice: result,
@@ -2953,6 +2996,15 @@ export default async function handler(req, res) {
         deepMode: payload.generationProfile === 'DEEP',
       });
       if (isAdvisorMode(mode)) {
+        result.llmContribution = buildLLMTradingContribution({
+          mode,
+          role: useRole,
+          model: selectedModel,
+          result,
+          payload,
+          usedRag: !!ragText,
+          searchReference,
+        });
         result.presentation = compileAdvicePresentationV3(result);
       }
     }

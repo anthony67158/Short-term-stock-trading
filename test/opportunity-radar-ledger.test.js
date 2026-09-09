@@ -111,6 +111,7 @@ test('机会雷达账本为每只候选生成稳定决策ID和规则版本', () 
     evidence: 1,
     displayed: 0,
     priceContracts: 1,
+    counterfactualPlans: 0,
   })
 })
 

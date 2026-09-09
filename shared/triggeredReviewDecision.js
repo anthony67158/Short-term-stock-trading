@@ -470,7 +470,7 @@ function normalizeBuyReview(result, payload, bases, now) {
     result.nextOpenPlan = result.nextOpenPlan
       || `下一交易日跌破${stop}元立即退出；站稳则按${target}元目标管理`
     result.futurePlan = result.futurePlan
-      || `最迟第5个交易日未达到${target}元则退出，不转为长线持有`
+      || `按本轮打法有效期管理；延续价值转负或跌破${stop}元时退出`
     if (positionCap.capped) {
       result.positionNote =
         `按原计划总仓位不超过${positionCap.limitPct}%，本次最多买入${quantity}手`
@@ -490,7 +490,7 @@ function normalizeBuyReview(result, payload, bases, now) {
   result.nextOpenPlan = result.nextOpenPlan
     || '下一交易时段沿用本次终局结论，不围绕原触发价再次复核'
   result.futurePlan = result.futurePlan
-    || '最迟第5个交易日按现有止损、目标和仓位纪律退出或减仓'
+    || '按本轮打法有效期、止损、目标和机会成本动态管理'
   result.reason = reason
   if (!usefulEvidence(result.techNote) && bases[0]) {
     result.techNote = bases[0].summary
@@ -620,7 +620,7 @@ function normalizeHoldingReview(result, payload, bases, now) {
   result.nextOpenPlan = result.nextOpenPlan
     || '下一交易时段沿用本次终局结论，不围绕原触发价再次复核'
   result.futurePlan = result.futurePlan
-    || '最迟第5个交易日按现有止损、目标和仓位纪律退出或减仓'
+    || '按本轮打法有效期、止损、目标和机会成本动态管理'
   result.reason = reason
   if (!usefulEvidence(result.techNote) && bases[0]) {
     result.techNote = bases[0].summary

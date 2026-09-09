@@ -44,15 +44,45 @@ async function mapLimit(items, concurrency, mapper) {
 
 function eligibleEvents(batch) {
   return (Array.isArray(batch?.events) ? batch.events : [])
-    .filter((event) => (
-      event?.decision?.priceContractValid === true
-      && /^\d{6}$/.test(String(event?.code || ''))
-    ))
+    .flatMap((event) => {
+      if (!/^\d{6}$/.test(String(event?.code || ''))) return []
+      const plans = (
+        Array.isArray(event.counterfactualPlans)
+        && event.counterfactualPlans.length
+      )
+        ? event.counterfactualPlans
+        : [event.decision]
+      return plans
+        .filter((decision) => decision?.priceContractValid === true)
+        .map((decision, index) => {
+          const selected = (
+            decision.route === event.decision?.route
+            && decision.primaryPrice === event.decision?.primaryPrice
+          )
+          return {
+            ...event,
+            tradeDate: event.tradeDate || batch.tradeDate,
+            mode: event.mode || batch.mode,
+            stageReached: selected
+              ? event.stageReached
+              : 'EVIDENCE',
+            displayedRank: selected ? event.displayedRank : null,
+            parentDecisionId: event.decisionId,
+            decisionId: `${event.decisionId}:${
+              decision.route || decision.priceType || index + 1
+            }`,
+            decision,
+            scoreInput: null,
+            opportunityScore: null,
+          }
+        })
+    })
 }
 
-function persistedOutcome(batch, outcome) {
-  const event = batch.events?.find(
-    (item) => item.decisionId === outcome.decisionId,
+function persistedOutcome(batch, outcome, settlementEvent = null) {
+  const event = settlementEvent || batch.events?.find(
+    (item) => item.decisionId === outcome.parentDecisionId
+      || item.decisionId === outcome.decisionId,
   ) || {}
   const scoreInput = (
     isOpportunityScoreInput(event.scoreInput)
@@ -67,6 +97,9 @@ function persistedOutcome(batch, outcome) {
     slot: String(batch.slot || 'manual'),
     ledgerSchemaVersion: String(batch.schemaVersion || ''),
     ruleVersion: String(event.ruleVersion || ''),
+    parentDecisionId: String(outcome.parentDecisionId || ''),
+    playbookId: String(outcome.playbookId || ''),
+    route: String(outcome.route || ''),
     context: {
       stageReached: String(event.stageReached || 'UNKNOWN'),
       displayedRank: Number(event.displayedRank) || null,
@@ -172,7 +205,12 @@ export async function settleOpportunityRadarOutcomes({
       bars: barsByCode.get(event.code) || [],
       evaluatedAt,
     })
-    const value = persistedOutcome(batch, result)
+    const value = persistedOutcome(batch, {
+      ...result,
+      parentDecisionId: event.parentDecisionId,
+      playbookId: event.decision?.playbookId || '',
+      route: event.decision?.route || '',
+    }, event)
     if (value.maturity === 'MATURED') {
       resolved.push(await outcomeStore.saveOutcome(value))
     } else {

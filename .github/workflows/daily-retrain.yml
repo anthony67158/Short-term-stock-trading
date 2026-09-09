@@ -70,6 +70,8 @@ jobs:
             tests/test_opportunity_app.py \
             tests/test_upload_opportunity_model.py \
             tests/test_collect_opportunity_outcomes.py \
+            tests/test_promote_opportunity_model.py \
+            tests/test_publish_opportunity_training_status.py \
             2>&1 | tee ../test-artifacts/retrain-contract-tests.log
 
       - name: Upload contract diagnostics
@@ -286,13 +288,55 @@ jobs:
             --dataset opportunity-dataset.npz \
             --output opportunity-model
 
-      - name: Publish eligible shadow model
+      - name: Publish eligible shadow model to isolated channel
         run: |
           if [ -f opportunity-model/shadow/opportunity_meta.json ]; then
             python upload_opportunity_model.py \
-              --directory opportunity-model/shadow
+              --directory opportunity-model/shadow \
+              --prefix opportunitymodel/shadow/
           else
-            echo "Opportunity model is not shadow-eligible; keeping current manifest."
+            echo "Opportunity model is not shadow-eligible; keeping current shadow manifest."
+          fi
+
+      - name: Evaluate production promotion gates
+        run: |
+          python promote_opportunity_model.py \
+            --source opportunity-model/shadow \
+            --report opportunity-model/opportunity_training_report.json \
+            --output opportunity-model/production \
+            --check-only \
+            --decision-output opportunity-model/promotion_decision.json
+
+      - name: Publish production model only after all gates pass
+        run: |
+          eligible=$(python - <<'PY'
+          import json
+          with open("opportunity-model/promotion_decision.json", encoding="utf-8") as fh:
+              print("true" if json.load(fh).get("eligible") is True else "false")
+          PY
+          )
+          if [ "$eligible" = "true" ]; then
+            python promote_opportunity_model.py \
+              --source opportunity-model/shadow \
+              --report opportunity-model/opportunity_training_report.json \
+              --output opportunity-model/production
+            python upload_opportunity_model.py \
+              --directory opportunity-model/production \
+              --prefix opportunitymodel/
+          else
+            echo "Production gates not passed; keeping the current production manifest."
+          fi
+
+      - name: Publish V3 readiness to the workbench
+        if: always()
+        run: |
+          if [ -f opportunity-model/opportunity_training_report.json ]; then
+            python publish_opportunity_training_status.py \
+              --report opportunity-model/opportunity_training_report.json \
+              --promotion opportunity-model/promotion_decision.json \
+              --prefix opportunitymodel/
+          else
+            echo "::warning::Opportunity training report is missing; status was not updated."
           fi
 
       - name: Upload opportunity diagnostics
@@ -303,6 +347,8 @@ jobs:
           path: |
             qlib-service/opportunity-model/opportunity_training_report.json
             qlib-service/opportunity-model/opportunity_trials.jsonl
+            qlib-service/opportunity-model/promotion_decision.json
+            qlib-service/opportunity-outcomes.json
           if-no-files-found: warn
 
   sector-retrain:

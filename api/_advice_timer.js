@@ -114,9 +114,15 @@ export function tailPickWorkerBody(event, cronKey) {
 
 export function formulaSelectionTimerBody(event, cronKey) {
   if (!cronKey || !event || typeof event !== 'object') return null;
-  if (event.triggerName !== 'formula-selection-close-timer') return null;
+  const modes = new Map([
+    ['formula-selection-intraday-am-timer', 'intraday'],
+    ['formula-selection-intraday-pm-timer', 'intraday'],
+    ['formula-selection-close-timer', 'close'],
+  ]);
+  const mode = modes.get(String(event.triggerName || ''));
+  if (!mode) return null;
   if (String(event.payload || '') !== String(cronKey)) return null;
-  return { scheduled: true, mode: 'close' };
+  return { scheduled: true, mode };
 }
 
 const REVIEW_TIMER_SESSIONS = new Map([

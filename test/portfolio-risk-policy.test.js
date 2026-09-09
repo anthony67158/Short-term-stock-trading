@@ -63,7 +63,7 @@ test('弱市只有逆势强势与高把握信号同时成立才允许小仓买�
   assert.equal(risk.blocked, false)
 })
 
-test('市场硬红线不能被逆势强势与高把握信号绕过', () => {
+test('市场尾部风险不在组合层重复否决已核定小仓机会', () => {
   const { result, risk } = applyPortfolioRiskPolicy({
     mode: 'buy_advice',
     result: {
@@ -90,9 +90,10 @@ test('市场硬红线不能被逆势强势与高把握信号绕过', () => {
     },
   })
 
-  assert.equal(result.action, '观望')
-  assert.equal(risk.blocked, true)
-  assert.match(risk.reasons.join('；'), /市场风险红线/)
+  assert.equal(result.action, '小仓试错')
+  assert.equal(result.planQty, 1)
+  assert.equal(risk.blocked, false)
+  assert.doesNotMatch(risk.reasons.join('；'), /市场风险红线/)
 })
 
 test('持仓未盈利且未站回关键位时加仓降级为持有', () => {
@@ -200,7 +201,7 @@ test('止损未破且账户风险正常时保留继续持有', () => {
   assert.equal(risk.stopBreached, false)
 })
 
-test('弱市非逆势强票下跌超过2%时继续持有改为部分减仓', () => {
+test('弱市下跌不再绕过持仓动作价值机械减仓', () => {
   const { result, risk } = applyPortfolioRiskPolicy({
     mode: 'hold_advice',
     result: {
@@ -219,8 +220,8 @@ test('弱市非逆势强票下跌超过2%时继续持有改为部分减仓', () 
     },
   })
 
-  assert.equal(result.action, '减仓')
-  assert.equal(result.opQty, '减仓2手')
-  assert.equal(result.reducePrice, 9.7)
-  assert.equal(risk.weakMarketDefense, true)
+  assert.equal(result.action, '持有')
+  assert.equal(result.opQty, undefined)
+  assert.equal(result.reducePrice, undefined)
+  assert.equal(risk.weakMarketDefense, false)
 })

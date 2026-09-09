@@ -15,7 +15,10 @@ import numpy as np
 
 from factors_lib import compute_factors, feature_vector, FEATURE_NAMES
 from model_lib import model_score, garch_sigma, get_model, signal_prob, event_tag_for
-from opportunity_model import predict_opportunity_items
+from opportunity_model import (
+    get_opportunity_models,
+    predict_opportunity_items,
+)
 from sector_model import get_sector_models, predict_sector_items
 
 app = FastAPI(title="Quant Score & Forecast", version="3.0")
@@ -284,11 +287,27 @@ def opportunity_score(
 ):
     _check_key(x_api_key)
     try:
+        models, metadata = get_opportunity_models()
+        predictions = predict_opportunity_items(
+            payload,
+            models=models,
+            metadata=metadata,
+        )
+        production_eligible = bool(
+            (metadata or {}).get("productionEligible")
+        )
         return {
             "ok": True,
-            "shadowOnly": True,
-            "predictions": predict_opportunity_items(payload),
-            "note": "影子统计口径，不参与生产排序，不构成投资建议",
+            "shadowOnly": not production_eligible,
+            "productionEligible": production_eligible,
+            "modelVersion":
+                (metadata or {}).get("modelVersion"),
+            "predictions": predictions,
+            "note": (
+                "已通过生产晋级闸门"
+                if production_eligible
+                else "影子统计口径，不参与正式仓位"
+            ),
         }
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)[:120])

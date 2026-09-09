@@ -736,6 +736,105 @@
           "立即买入2手"
         ]
       }
+    },
+    {
+      "schemaVersion": "harness-case.v1",
+      "id": "advice-monitoring-empty-optional-rule",
+      "adapter": "advice",
+      "tags": ["advice", "monitoring", "regression"],
+      "input": {
+        "mode": "hold_advice",
+        "attachMonitoringPlan": true,
+        "now": 1788920000000,
+        "payload": {
+          "code": "003036",
+          "name": "泰坦股份",
+          "holdCost": 14,
+          "holdQty": 1,
+          "sellableTodayQty": 1,
+          "todayQuote": {
+            "price": 14,
+            "limitDownPrice": 12.6,
+            "limitUpPrice": 15.4
+          },
+          "tech": {
+            "atr": 0.5
+          }
+        },
+        "decisionPlan": {
+          "schemaVersion": "decision-plan.v2",
+          "mode": "hold_advice",
+          "action": "HOLD",
+          "decisionId": "titan-empty-rule-3",
+          "validUntil": "2026-09-09T15:00:00.000Z",
+          "prices": {
+            "stop": 12.8,
+            "target": 15.2
+          }
+        },
+        "result": {
+          "action": "持有",
+          "title": "继续持有1手",
+          "opQty": "无需操作",
+          "actionPlan": "继续持有1手，按退出条件跟踪",
+          "invalidation": "退出条件失效后重新评估",
+          "executionRules": [
+            {
+              "action": "EXIT",
+              "kind": "RISK_EXIT",
+              "lots": 1,
+              "logic": "ANY",
+              "session": "CONTINUOUS",
+              "sustainSeconds": 0,
+              "conditions": [
+                {
+                  "metric": "price",
+                  "op": "lte",
+                  "value": 12.8
+                }
+              ]
+            },
+            {
+              "action": "REDUCE",
+              "kind": "PROFIT_EXIT",
+              "lots": 1,
+              "logic": "ANY",
+              "session": "CONTINUOUS",
+              "sustainSeconds": 0,
+              "conditions": [
+                {
+                  "metric": "price",
+                  "op": "gte",
+                  "value": 15.2
+                }
+              ]
+            },
+            {
+              "action": "HOLD",
+              "kind": "HOLD",
+              "lots": 0,
+              "logic": "ALL",
+              "session": "CONTINUOUS",
+              "sustainSeconds": 0,
+              "conditions": []
+            }
+          ]
+        }
+      },
+      "expect": {
+        "minOverall": 0.9,
+        "expectedValid": true,
+        "expectedAction": "持有",
+        "expectedQty": 0,
+        "expectedMonitoringState": "READY",
+        "expectedMonitoringRules": 2,
+        "requiredMonitoringWarningIncludes": "rule-3为空条件",
+        "requiredIssueIncludes": [],
+        "forbiddenIssueIncludes": [],
+        "forbiddenText": [
+          "操作条件无法核验"
+        ]
+      }
     }
   ]
 }

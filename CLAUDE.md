@@ -11,6 +11,25 @@
   地址 `https://stock-dashboard-znrlekbzit.cn-hangzhou.fcapp.run`（cn-hangzhou）。
   前端通过 `VITE_API_BASE` 注入此地址，浏览器**直连 FC**（Vercel 侧不跑 serverless）。
 
+## 决策架构铁律
+
+当前生产决策架构是 `docs/adaptive-trading-engine.md` 定义的自适应动作价值引擎：
+
+- 全市场扫描后按动量、资金潜伏、超跌修复和流动性四路召回，旧公式只作特征。
+- 每只深查股票同时计算现价、回踩、突破三条路径，并分别进入反事实结算。
+- 市场状态只切换打法和风险预算，不能作为普通全局买入开关。
+- 新增风险以费后净期望、尾部损失和账户开放风险为准，不使用统一
+  `1.8:1` / `2.2:1` 盈亏比。
+- 持仓同时比较加仓、持有、减仓、退出，不使用固定第 5 日退出。
+- LLM 只解释服务端动作，不得决定价格、手数、路径或覆盖 T+1 与账户风控。
+
+必须保留兼容的数据只有账户、持仓、真实成交、执行计划、执行归因、T+1批次和
+费用信息。旧建议正文、旧公式结果和旧页面结构不得反向约束新架构。
+
+机会模型使用 `opportunity-score-feature.v3`。只有
+`npm run opportunity:promote` 通过 walk-forward、净R提升、下置信界和回撤闸门后，
+才能从影子晋级生产；禁止直接修改 `shadowOnly` 或 `productionEligible`。
+
 ## 铁律：前端改动必须双部署
 
 **只要改动会影响前端 `dist/`（例如 `src/**`、`public/**`、`index.html`、`tokens.css`），

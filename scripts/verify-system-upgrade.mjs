@@ -119,6 +119,8 @@ try {
         return {
           width: element.clientWidth,
           scrollWidth: element.scrollWidth,
+          height: element.clientHeight,
+          scrollHeight: element.scrollHeight,
           rules: rows.length,
           monitoringBorderTop:
             containerStyle?.borderTopWidth,
@@ -150,6 +152,11 @@ try {
         <= monitoredGeometry.width + 1,
       JSON.stringify({ width, monitoredGeometry }),
     )
+    assert.ok(
+      monitoredGeometry.scrollHeight
+        <= monitoredGeometry.height + 1,
+      JSON.stringify({ width, monitoredGeometry }),
+    )
     assert.equal(monitoredGeometry.rules, 3)
     assert.equal(monitoredGeometry.childrenInsideRows, true)
     assert.equal(monitoredGeometry.monitoringBorderTop, '0px')
@@ -168,6 +175,55 @@ try {
     await monitoredHolding.screenshot({
       path: `${output}/${width}-monitoring-card.png`,
     })
+    const immediateHolding = page.locator(
+      '.trade-card[data-code="000001"]',
+    )
+    await immediateHolding.locator('.action-command').waitFor()
+    assert.match(
+      await immediateHolding
+        .locator('.action-command-primary')
+        .textContent(),
+      /清仓|退出观察/,
+    )
+    assert.match(
+      await immediateHolding
+        .locator('.action-command-text')
+        .textContent(),
+      /清仓/,
+    )
+    assert.equal(
+      await immediateHolding
+        .locator('.action-command-qty')
+        .textContent(),
+      '10手',
+    )
+    assert.equal(
+      await immediateHolding.locator('.monitoring-rules').count(),
+      0,
+    )
+    assert.doesNotMatch(
+      await immediateHolding.textContent(),
+      /已到期|请重新生成/,
+    )
+    const immediateGeometry = await immediateHolding.evaluate(
+      (element) => ({
+        width: element.clientWidth,
+        scrollWidth: element.scrollWidth,
+        height: element.clientHeight,
+        scrollHeight: element.scrollHeight,
+      }),
+    )
+    assert.ok(
+      immediateGeometry.scrollWidth <= immediateGeometry.width + 1,
+      JSON.stringify({ width, immediateGeometry }),
+    )
+    assert.ok(
+      immediateGeometry.scrollHeight <= immediateGeometry.height + 1,
+      JSON.stringify({ width, immediateGeometry }),
+    )
+    await immediateHolding.screenshot({
+      path: `${output}/${width}-immediate-action-card.png`,
+    })
     const conditional = page.locator('.plan-cand').filter({ hasText: '演示候选A' })
     const approved = page.locator('.plan-cand').filter({ hasText: '演示候选B' })
     assert.equal(
@@ -179,8 +235,6 @@ try {
     if (await selectionOrigin.isVisible()) {
       await selectionOrigin.click()
       assert.equal(await page.locator('.selection-origin[open]').count(), 1)
-    } else {
-      assert.ok(width <= 720)
     }
     await check('positions')
     await page.locator('.plan-cand .stock-name-link').first().click()

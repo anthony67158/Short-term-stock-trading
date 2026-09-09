@@ -2,6 +2,7 @@ import {
   reconcileAdviceNumbers,
 } from '../../shared/adviceValidation.js'
 import { compileDecisionPlan } from '../../shared/decisionPlan.js'
+import { attachMonitoringPlan } from '../../shared/monitoringPlan.js'
 
 function finite(value) {
   const number = Number(value)
@@ -34,17 +35,27 @@ export async function runAdviceHarnessCase(testCase) {
     result: input.result,
     payload: input.payload,
   })
-  const result = reconciled.result
-  const decisionPlan = input.compileDecisionPlan === true
-    ? compileDecisionPlan({
+  let result = reconciled.result
+  const decisionPlan = input.decisionPlan || (
+    input.compileDecisionPlan === true
+      ? compileDecisionPlan({
         mode: input.mode,
         advice: result,
         payload: input.payload,
         evidenceSnapshot: input.evidenceSnapshot || null,
         now: Number(input.now) || Date.now(),
       })
-    : null
+      : null
+  )
   if (decisionPlan) result.decisionPlan = decisionPlan
+  if (input.attachMonitoringPlan === true && decisionPlan) {
+    result = attachMonitoringPlan({
+      advice: result,
+      payload: input.payload,
+      decisionPlan,
+      now: Number(input.now) || Date.now(),
+    })
+  }
   const action = String(result.action || result.stance || '')
   const isBuy = input.mode === 'buy_advice'
   const quantity = isBuy
@@ -72,6 +83,8 @@ export async function runAdviceHarnessCase(testCase) {
   const forbiddenText = expected.forbiddenText || []
   const requiredIssues = expected.requiredIssueIncludes || []
   const forbiddenIssues = expected.forbiddenIssueIncludes || []
+  const monitoringPlan = result.monitoringPlan || null
+  const monitoringWarnings = monitoringPlan?.warnings || []
   const checks = [
     item(
       'advice-contract',
@@ -265,6 +278,35 @@ export async function runAdviceHarnessCase(testCase) {
         ),
       '统一决策计划没有计入交易费用',
       { hard: true, code: 'DECISION_PLAN_COSTS_MISSING' },
+    ),
+    item(
+      'monitoring-plan-contract',
+      'contract',
+      !expected.expectedMonitoringState
+        || (
+          monitoringPlan?.state === expected.expectedMonitoringState
+          && (
+            expected.expectedMonitoringRules == null
+            || monitoringPlan.rules?.length
+              === Number(expected.expectedMonitoringRules)
+          )
+          && (
+            !expected.requiredMonitoringWarningIncludes
+            || monitoringWarnings.some((warning) =>
+              warning.includes(expected.requiredMonitoringWarningIncludes)
+            )
+          )
+        ),
+      '监控计划未完成安全修复或缺少可执行规则',
+      {
+        hard: true,
+        code: 'MONITORING_PLAN_CONTRACT_INVALID',
+        details: {
+          state: monitoringPlan?.state || null,
+          rules: monitoringPlan?.rules?.length || 0,
+          warnings: monitoringWarnings,
+        },
+      },
     ),
   ]
   return {

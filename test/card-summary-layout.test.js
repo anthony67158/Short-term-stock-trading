@@ -18,17 +18,43 @@ const designGuide = read('docs/DESIGN.md')
 const calmSurfaceMarker =
   '/* Trade workspace refinement: calm surfaces and content-led height. */'
 const calmSurface = precision.slice(precision.indexOf(calmSurfaceMarker))
+const fixedCardMarker =
+  '/* Fixed trade-card anatomy: content changes, landmarks do not. */'
+const fixedCards = precision.slice(precision.indexOf(fixedCardMarker))
 
-test('持仓与自选卡只展示固定策略摘要并从详情入口查看完整建议', () => {
-  assert.match(planTab, /function ActionCommand\(\{ view, onOpen \}\)/)
+test('持仓与自选卡直接展示核心摘要并保留详情入口', () => {
+  assert.match(
+    planTab,
+    /function ActionCommand\(\{ view, onOpen \}\)/,
+  )
   assert.equal((planTab.match(/<ActionCommand[\s\S]{0,120}onOpen=/g) || []).length, 2)
   assert.match(
     planTab,
-    /<button[\s\S]*?className={`action-command importance-\$\{importance\}`}[\s\S]*?onClick=\{onOpen\}/,
+    /className={`action-command importance-\$\{importance\}`}[\s\S]*?title="查看股票详情与完整建议"[\s\S]*?onClick=\{onOpen\}/,
   )
-  assert.doesNotMatch(planTab, /className="action-command-open"/)
-  assert.doesNotMatch(planTab, /action-command-disclosure/)
+  assert.doesNotMatch(planTab, /CardAdviceDisclosure|embeddedFull/)
   assert.doesNotMatch(planTab, /useLayoutEffect/)
+})
+
+test('监控不可用时卡片回退最新操作建议而不是要求重新生成', () => {
+  assert.match(
+    planTab,
+    /const decisionView = trackedView \|\| legacyView/,
+  )
+  assert.doesNotMatch(planTab, /TrackingRepairAction|repairTracking/)
+  assert.doesNotMatch(planTab, /旧建议只有结论|生成可追踪建议/)
+})
+
+test('卡片直接显示最多三条核心监控规则', () => {
+  assert.match(
+    planTab,
+    /const visibleRules = sortedRules\.slice\(0, 3\)/,
+  )
+  assert.match(
+    precision,
+    /\.monitoring-rule:nth-child\(n \+ 4\)\s*{[^}]*display:\s*none/s,
+  )
+  assert.doesNotMatch(planTab, /monitoring-rule-more/)
 })
 
 test('卡片主结论使用统一的重要程度与交易语义色', () => {
@@ -118,7 +144,7 @@ test('持仓和自选卡展示最近有效价但只用连续竞价价触发动�
   )
 })
 
-test('桌面同排卡片等高，手机用横向卡组压缩页面长度', () => {
+test('交易卡片使用固定尺寸和固定区域骨架', () => {
   assert.match(
     planTab,
     /'trade-card plan-cand'[\s\S]*?\(cardAdvice \? ' has-advice' : ' no-advice'\)/,
@@ -127,33 +153,19 @@ test('桌面同排卡片等高，手机用横向卡组压缩页面长度', () =>
     planTab,
     /'trade-card hold-item stock-detail-card-hitarea'[\s\S]*?\(holdAdvice \? ' has-advice' : ' no-advice'\)/,
   )
-  assert.match(
-    calmSurface,
-    /\.hold-grid,[\s\S]*?\.plan-cand-grid\s*{[^}]*align-items:\s*stretch[^}]*grid-auto-rows:\s*auto/s,
-  )
-  assert.match(
-    calmSurface,
-    /\.hold-swipe-wrap,[\s\S]*?\.plan-cand\s*{[^}]*height:\s*100%/s,
-  )
-  assert.match(
-    calmSurface,
-    /\.plan-cand,[\s\S]*?\.hold-grid \.hold-item\s*{[^}]*justify-content:\s*space-between/s,
-  )
-  assert.match(
-    calmSurface,
-    /\.plan-cand \.card-decision-slot,[\s\S]*?\.hold-item \.card-decision-slot\s*{[^}]*min-height:\s*0/s,
-  )
-  assert.match(
-    calmSurface,
-    /\.card-decision-slot > \.action-prompt\s*{[^}]*min-height:\s*48px[^}]*flex:\s*none/s,
-  )
-  assert.match(
-    calmSurface,
-    /\.hold-item > \.pi-actions,[\s\S]*?\.plan-cand \.pc-actions\s*{[^}]*margin-top:\s*0[^}]*padding-top:\s*var\(--space-sm\)/s,
-  )
+  assert.match(precision, new RegExp(fixedCardMarker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+  assert.match(fixedCards, /\.hold-grid \.hold-item\s*{[^}]*height:\s*700px[^}]*min-height:\s*700px[^}]*max-height:\s*700px/s)
+  assert.match(fixedCards, /\.plan-cand\s*{[^}]*height:\s*640px[^}]*min-height:\s*640px[^}]*max-height:\s*640px/s)
+  assert.match(fixedCards, /\.hold-grid \.hold-head,[\s\S]*?\.plan-cand \.pc-top\s*{[^}]*height:\s*64px[^}]*max-height:\s*64px/s)
+  assert.match(fixedCards, /\.hold-item \.card-decision-slot\s*{[^}]*height:\s*364px[^}]*max-height:\s*364px[^}]*overflow:\s*hidden/s)
+  assert.match(fixedCards, /\.plan-cand \.card-decision-slot\s*{[^}]*height:\s*368px[^}]*max-height:\s*368px[^}]*overflow:\s*hidden/s)
+  assert.match(fixedCards, /\.hold-card-metrics\s*{[^}]*height:\s*76px[^}]*max-height:\s*76px/s)
+  assert.match(fixedCards, /\.trade-card-evidence-slot\s*{[^}]*height:\s*24px[^}]*max-height:\s*24px/s)
+  assert.match(fixedCards, /\.holding-plan-summary\s*{[^}]*height:\s*44px[^}]*max-height:\s*44px/s)
+  assert.match(fixedCards, /\.hold-item > \.pi-actions,[\s\S]*?\.plan-cand \.pc-actions\s*{[^}]*min-height:\s*56px[^}]*max-height:\s*56px/s)
   assert.match(
     design,
-    /Every card stretches to the\s+tallest natural card in its desktop grid row[\s\S]*Mobile groups use equal-height horizontal snap rows/s,
+    /Cards of the same type use fixed\s+dimensions and fixed-height identity, decision, evidence, discipline and\s+action regions/s,
   )
   assert.match(
     calmSurface,
@@ -193,8 +205,8 @@ test('策略摘要分离状态、主动作、仓位和执行条件', () => {
     /view\.detailActionLabel \|\| '查看后续预案'/,
   )
   assert.match(
-    precision,
-    /\.card-decision-slot \.action-command-text\s*{[^}]*display:\s*-webkit-box[^}]*white-space:\s*normal[^}]*-webkit-line-clamp:\s*2/s,
+    fixedCards,
+    /\.card-decision-slot \.action-command-text\s*{[^}]*max-height:\s*none[^}]*overflow:\s*visible[^}]*-webkit-line-clamp:\s*unset/s,
   )
   assert.match(
     calmSurface,
@@ -235,7 +247,7 @@ test('策略摘要分离状态、主动作、仓位和执行条件', () => {
   )
 })
 
-test('监控规则使用无框清单且不重复渲染同义进度条', () => {
+test('系统跟踪使用状态条，规则正文保持无框且不重复进度条', () => {
   assert.match(
     planTab,
     /className="monitoring-rule-list" role="list"[\s\S]*?role="listitem"/,
@@ -247,6 +259,10 @@ test('监控规则使用无框清单且不重复渲染同义进度条', () => {
   assert.match(
     precision,
     /\.monitoring-rules\s*{[^}]*border:\s*0[^}]*background:\s*transparent/s,
+  )
+  assert.match(
+    precision,
+    /\.monitoring-rules-head\s*{[^}]*border:\s*1px solid var\(--color-rule-2\)[^}]*border-inline-start:\s*3px solid var\(--color-accent\)[^}]*background:\s*var\(--color-paper-4\)/s,
   )
   assert.match(
     precision,
@@ -262,18 +278,46 @@ test('监控规则使用无框清单且不重复渲染同义进度条', () => {
   )
   assert.match(
     designGuide,
-    /规则清单不表格化[\s\S]*卡片内部禁止再放带圆角或连续横线的规则容器/,
+    /规则清单不表格化[\s\S]*系统状态标题可以使用单个描边状态条[\s\S]*规则正文禁止卡片化/,
   )
 })
 
-test('卡片关键文字可直接阅读且手机只保留交易摘要', () => {
+test('到价观察使用真实一秒时钟和带边界的倒计时状态', () => {
+  assert.match(
+    planTab,
+    /const \[, setMonitoringTick\] = useState\(0\)[\s\S]*?monitoringRuntimeRef[\s\S]*?runtimeState[\s\S]*?window\.setInterval\([\s\S]*?1000/s,
+  )
+  assert.match(
+    planTab,
+    /OBSERVING:\s*'观察中'[\s\S]*?className="monitoring-countdown"[\s\S]*?aria-label=\{`倒计时\$\{rule\.remainingSeconds\}秒`\}/s,
+  )
+  assert.match(
+    precision,
+    /\.monitoring-countdown\s*{[^}]*border:\s*1px solid[^}]*border-radius:\s*var\(--radius-badge\)[^}]*background:\s*color-mix/s,
+  )
+  assert.match(
+    designGuide,
+    /观察倒计时必须真实[\s\S]*逐秒显示“倒计时 xx 秒”[\s\S]*matchedSince/,
+  )
+})
+
+test('卡片关键文字建立层级且长内容收敛为固定摘要', () => {
   assert.match(
     planTab,
     /splitRuleText\(rule\.text\)[\s\S]*?monitoring-rule-condition[\s\S]*?monitoring-rule-action/s,
   )
   assert.match(
     planTab,
-    /monitoring\.rules\.length > 2[\s\S]*?monitoring-rule-more/s,
+    /const stateRank = \{[\s\S]*?OBSERVING:\s*1[\s\S]*?const sortedRules = \[\.\.\.monitoring\.rules\]\.sort\([\s\S]*?const visibleRules = sortedRules\.slice\(0, 3\)/s,
+  )
+  assert.equal(
+    (planTab.match(/className="trade-card-evidence-slot"/g) || []).length,
+    2,
+  )
+  assert.match(planTab, /className="trade-card-review-slot"/)
+  assert.match(
+    planTab,
+    /className="holding-plan-summary holding-plan-empty"[\s\S]*?>设置止盈止损</s,
   )
   assert.match(
     calmSurface,
@@ -288,16 +332,16 @@ test('卡片关键文字可直接阅读且手机只保留交易摘要', () => {
     /\.monitoring-rule > strong\s*{[^}]*font-size:\s*var\(--text-base\)/s,
   )
   assert.match(
-    calmSurface,
-    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.monitoring-rule:nth-child\(n \+ 3\)\s*{[^}]*display:\s*none[\s\S]*?\.monitoring-rule-more\s*{[^}]*display:\s*flex/s,
+    fixedCards,
+    /\.monitoring-rule:nth-child\(n \+ 4\)\s*{[^}]*display:\s*none/s,
   )
   assert.match(
-    calmSurface,
-    /\.hold-item > \.trade-card-pulse,[\s\S]*?\.plan-cand > \.stock-note-summary\s*{[^}]*display:\s*none/s,
+    fixedCards,
+    /\.hold-item > \.selection-origin,[\s\S]*?\.plan-cand > \.stock-note-summary\s*{[^}]*display:\s*none/s,
   )
   assert.match(
     designGuide,
-    /移动端先给交易摘要[\s\S]*盘面证据、选入依据、备注及其余监控条件进入个股详情/,
+    /移动端先给交易摘要[\s\S]*最多三项核心执行条件/,
   )
 })
 
@@ -379,7 +423,7 @@ test('成本编辑是贴近数值的低权重图标而不是独立描边按钮',
   )
 })
 
-test('策略摘要不再使用遮挡卡片的悬浮预览且文字区域直接进入详情', () => {
+test('策略摘要不使用悬浮预览且文字区域进入股票详情', () => {
   assert.doesNotMatch(
     planTab,
     /className="action-command-preview"[\s\S]*?完整操作建议[\s\S]*?\{instruction\}/,
@@ -390,9 +434,9 @@ test('策略摘要不再使用遮挡卡片的悬浮预览且文字区域直接�
   )
   assert.match(
     planTab,
-    /className={`action-command importance-\$\{importance\}`}[\s\S]*?title="查看完整建议"[\s\S]*?onClick=\{onOpen\}/,
+    /className={`action-command importance-\$\{importance\}`}[\s\S]*?title="查看股票详情与完整建议"[\s\S]*?onClick=\{onOpen\}/,
   )
-  assert.doesNotMatch(planTab, /className="action-command-open"/)
+  assert.doesNotMatch(planTab, /aria-label="卡片内完整研判"/)
 })
 
 test('持仓卡先展示指令再展示仓位核心数据与次级盘面证据', () => {
@@ -430,7 +474,7 @@ test('持仓卡先展示指令再展示仓位核心数据与次级盘面证据',
 test('自选卡把当前指令放在盘面证据之前并取消四格指标墙', () => {
   assert.match(
     planTab,
-    /<CandDecision p=\{p\} q=\{q\} \/>[\s\S]*?<MarketPulse quote=\{q\}/,
+    /<CandDecision[\s\S]*?p=\{p\}[\s\S]*?q=\{q\}[\s\S]*?\/>[\s\S]*?<MarketPulse quote=\{q\}/,
   )
   assert.doesNotMatch(
     planTab,
@@ -554,10 +598,10 @@ test('持仓卡使用紧凑决策区并统一操作与工具列', () => {
   )
   assert.match(
     precision,
-    /\.hold-item > \.pi-actions\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+104px[^}]*min-height:\s*40px[^}]*margin-top:\s*auto/s,
+    /\.hold-item > \.pi-actions\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+40px[^}]*min-height:\s*40px[^}]*margin-top:\s*auto/s,
   )
   assert.match(
     precision,
-    /\.pi-card-tools\s*{[^}]*width:\s*104px/s,
+    /\.pi-card-tools\s*{[^}]*width:\s*40px/s,
   )
 })

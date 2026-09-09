@@ -91,6 +91,10 @@ function decisionProjection(value = {}) {
   return {
     action: text(source.action, 40),
     formulaId: text(source.formulaId, 60) || null,
+    playbookId: text(source.playbookId, 60) || null,
+    playbookScore: finite(source.playbookScore),
+    marketOpportunityFactor: finite(source.marketOpportunityFactor),
+    route: text(source.route, 30) || null,
     primaryPrice: finite(source.primaryPrice),
     priceType: text(source.priceType, 40) || null,
     stopPrice: finite(source.stopPrice),
@@ -166,6 +170,13 @@ function eventProjection(value, context) {
         : []
     ).map(formulaProjection).slice(0, 4),
     decision: decisionProjection(value?.decision),
+    counterfactualPlans: (
+      Array.isArray(value?.counterfactualPlans)
+        ? value.counterfactualPlans
+        : []
+    ).map(decisionProjection).filter(
+      (decision) => decision.priceContractValid,
+    ).slice(0, 3),
     sector: sectorProjection(value?.sector),
     rejectionReasons: uniqueText(value?.rejectionReasons),
   }
@@ -244,6 +255,10 @@ export function buildOpportunityRadarLedgerBatch({
       priceContracts: projected.filter(
         (event) => event.decision.priceContractValid,
       ).length,
+      counterfactualPlans: projected.reduce(
+        (sum, event) => sum + event.counterfactualPlans.length,
+        0,
+      ),
     },
     events: projected,
   }

@@ -27,6 +27,30 @@ export function confirmationPolicy(side) {
   return POLICY[side] || POLICY.buy
 }
 
+export function adaptiveConfirmationThreshold(
+  side,
+  deterministic = {},
+  context = {},
+) {
+  const policy = confirmationPolicy(side)
+  const score = Number(deterministic?.score) || 0
+  const scoreMargin = score - policy.deterministicConfirm
+  const actionMargin = Number(context?.actionValueMargin) || 0
+  const tailRisk = Number(context?.tailRisk) || 0
+  const minimum = side === 'buy' ? 64 : side === 'sell' ? 60 : 55
+  const maximum = side === 'buy' ? 84 : side === 'sell' ? 78 : 72
+  return Math.round(Math.max(
+    minimum,
+    Math.min(
+      maximum,
+      policy.llmConfidence
+        - Math.max(0, scoreMargin) * 6
+        - Math.max(0, actionMargin) * 0.15
+        + Math.max(0, tailRisk) * 0.12,
+    ),
+  ))
+}
+
 export function shouldRequestConfirmation(
   side,
   watchingAt,
@@ -84,8 +108,14 @@ export function fuseConfirmation({
   deterministic,
   llm,
   observationAgeMs,
+  context = {},
 } = {}) {
   const policy = confirmationPolicy(side)
+  const confidenceThreshold = adaptiveConfirmationThreshold(
+    side,
+    deterministic,
+    context,
+  )
   const det = deterministic || { decision: 'wait', score: 0, hits: [] }
   const score = Number(det.score) || 0
   const observed = !Number.isFinite(observationAgeMs) || observationAgeMs >= policy.minObserveMs
@@ -161,14 +191,15 @@ export function fuseConfirmation({
     }
   }
 
-  if (llm.confidence < policy.llmConfidence) {
+  if (llm.confidence < confidenceThreshold) {
     return {
       decision: 'wait',
       confidence: llm.confidence,
-      reason: `模型把握不足(${llm.confidence}<${policy.llmConfidence})，本次不执行：${llm.reason || ''}`,
+      reason: `当前证据差不足(${llm.confidence}<${confidenceThreshold})，本次不执行：${llm.reason || ''}`,
       gated: true,
       rawDecision: 'confirm',
       policy: 'confidence-gated',
+      confidenceThreshold,
     }
   }
 
@@ -177,6 +208,7 @@ export function fuseConfirmation({
     confidence: llm.confidence,
     reason: llm.reason || det.hits?.join('、') || '模型与客观信号共振',
     policy: 'consensus',
+    confidenceThreshold,
   }
 }
 

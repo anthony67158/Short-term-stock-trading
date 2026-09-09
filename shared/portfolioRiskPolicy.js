@@ -107,37 +107,6 @@ function applyConfirmedStop(result, payload, risk) {
   appendAdjustment(result, '止损已确认跌破，继续持有已改为风险退出')
 }
 
-function applyWeakMarketDefense(result, payload, risk) {
-  const pct = finite(payload?.todayQuote?.pct)
-  const price = finite(payload?.todayQuote?.price)
-  const marketWeak = payload?.marketEnv?.weak === true
-  const counterStrong = payload?.counterTrend?.isStrong === true
-  if (!(marketWeak && !counterStrong && pct <= -2 && price > 0)) return
-
-  const holdQty = Math.max(0, Math.trunc(finite(payload?.holdQty) || 0))
-  const sellable = Math.max(0, Math.min(
-    holdQty,
-    Math.trunc(finite(payload?.sellableTodayQty) ?? holdQty),
-  ))
-  risk.weakMarketDefense = true
-  risk.reasons.push(`弱市中个股下跌${Math.abs(pct)}%且未形成逆势强势`)
-  if (!(sellable > 0)) {
-    result.actionPlan = `弱市中个股下跌${Math.abs(pct)}%，但今日无可卖仓位；下一交易日优先降低风险`
-    appendAdjustment(result, '弱市防守触发但受T+1限制')
-    return
-  }
-
-  const quantity = Math.max(1, Math.ceil(sellable / 3))
-  result.action = '减仓'
-  result.tone = 'green'
-  result.opQty = `减仓${quantity}手`
-  result.reducePrice = price
-  result.opAmount = Math.round(price * quantity * 100)
-  result.actionPlan = `弱市中本股下跌${Math.abs(pct)}%且未显著抗跌，先减仓${quantity}手控制回撤；重新转强后再评估`
-  result.positionNote = `当前${holdQty}手、今日可卖${sellable}手；本次先降低约三分之一可卖风险敞口`
-  appendAdjustment(result, '弱市继续持有已改为部分减仓')
-}
-
 export function applyPortfolioRiskPolicy({
   mode,
   result: input,
@@ -169,12 +138,6 @@ export function applyPortfolioRiskPolicy({
     ? +((stockWeight || 0) + plannedWeight).toFixed(1)
     : stockWeight
   const marketScore = finite(payload.marketEnv?.score)
-  const marketWeak = payload.marketEnv?.weak === true
-    || (marketScore != null && marketScore <= 44)
-  const marketHardRiskOff =
-    payload.marketEnv?.hardRiskOff === true
-  const dualConfirmation = payload.counterTrend?.isStrong === true
-    && payload.quant?.highConfSignal?.fired === true
   const risk = {
     blocked: false,
     stopBreached: false,
@@ -206,11 +169,6 @@ export function applyPortfolioRiskPolicy({
   if (sectorWeight != null && sectorWeight >= 30) {
     risk.reasons.push(`所属行业占比${sectorWeight}%过高`)
   }
-  if (marketHardRiskOff) {
-    risk.reasons.push('市场风险红线已触发')
-  } else if (marketWeak && !dualConfirmation) {
-    risk.reasons.push('弱市且未同时满足逆势强势与高把握信号')
-  }
   if (
     mode === 'hold_advice'
     && isAddAction(result)
@@ -232,9 +190,6 @@ export function applyPortfolioRiskPolicy({
     }
     if (/持有|持股|继续持/.test(String(result.action || ''))) {
       applyConfirmedStop(result, payload, risk)
-    }
-    if (/持有|持股|继续持/.test(String(result.action || ''))) {
-      applyWeakMarketDefense(result, payload, risk)
     }
   }
 

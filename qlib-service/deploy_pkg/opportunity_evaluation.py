@@ -157,16 +157,23 @@ def ranking_metrics(
     dates,
     *,
     top_k=5,
+    group_ids=None,
 ):
     positive = np.asarray(positive_labels, dtype=bool)
     relevance = np.asarray(relevance, dtype=np.float64)
     scores = np.asarray(scores, dtype=np.float64)
     dates = np.asarray(dates).astype(str)
+    groups = (
+        np.asarray(group_ids).astype(str)
+        if group_ids is not None
+        else np.arange(len(dates)).astype(str)
+    )
     if not (
         positive.shape
         == relevance.shape
         == scores.shape
         == dates.shape
+        == groups.shape
     ) or positive.ndim != 1:
         raise ValueError("排序评测输入维度不一致")
     if not np.isfinite(relevance).all() or not np.isfinite(scores).all():
@@ -180,12 +187,30 @@ def ranking_metrics(
         selected = np.flatnonzero(dates == date)
         if not len(selected):
             continue
-        order = selected[
+        ranked = selected[
             np.argsort(-scores[selected], kind="stable")
-        ][: min(k, len(selected))]
-        ideal = np.sort(np.maximum(relevance[selected], 0))[::-1][
-            : len(order)
         ]
+        order = []
+        seen_groups = set()
+        for index in ranked:
+            group = groups[index]
+            if group in seen_groups:
+                continue
+            seen_groups.add(group)
+            order.append(index)
+            if len(order) >= k:
+                break
+        order = np.asarray(order, dtype=np.int64)
+        ideal_by_group = {}
+        for index in selected:
+            group = groups[index]
+            ideal_by_group[group] = max(
+                ideal_by_group.get(group, 0.0),
+                max(float(relevance[index]), 0.0),
+            )
+        ideal = np.sort(
+            np.asarray(list(ideal_by_group.values()), dtype=np.float64)
+        )[::-1][: len(order)]
         discounts = 1 / np.log2(np.arange(len(order)) + 2)
         dcg = float(
             np.sum(np.maximum(relevance[order], 0) * discounts)
@@ -202,6 +227,17 @@ def ranking_metrics(
         if ndcgs else None,
         f"mean_net_r_at_{k}": round(float(np.mean(net_returns)), 6)
         if net_returns else None,
+        f"max_drawdown_r_at_{k}": (
+            round(float(max(
+                np.maximum.accumulate(np.cumsum(net_returns))
+                - np.cumsum(net_returns)
+            )), 6)
+            if net_returns else None
+        ),
+        f"worst_daily_net_r_at_{k}": (
+            round(float(np.min(net_returns)), 6)
+            if net_returns else None
+        ),
         "daily_net_r": daily_net_r,
     }
 

@@ -126,6 +126,29 @@ function FullEvidence({ advice }) {
   )
 }
 
+function LLMContribution({ audit }) {
+  if (!audit?.used || !Array.isArray(audit.contributions)) return null
+  const labels = audit.contributions
+    .map((item) => item?.label)
+    .filter(Boolean)
+  if (!labels.length) return null
+  return (
+    <section className="advice-basis" aria-label="模型本轮贡献">
+      <div className="advice-basis-title">模型本轮贡献</div>
+      <div className="ab-row">
+        <span className="ab-k theory">参与</span>
+        <span className="ab-v">{labels.join('、')}</span>
+      </div>
+      <div className="ab-row">
+        <span className="ab-k warn">边界</span>
+        <span className="ab-v">
+          动作、价格、手数、费后期望和账户风险均已由服务端核定
+        </span>
+      </div>
+    </section>
+  )
+}
+
 function TGridExperiment({ experiment }) {
   if (!experiment?.eligible || !experiment.levels?.length) return null
   return (
@@ -155,6 +178,7 @@ export default function AdviceDetails({ advice, review }) {
       <KnowledgeAction advice={advice} />
       <TGridExperiment experiment={advice.tGridExperiment} />
       {advice.knowledgeActionPlan && <ExecutionReview review={review} />}
+      <LLMContribution audit={advice.llmContribution} />
       <FullEvidence advice={advice} />
     </div>
   )

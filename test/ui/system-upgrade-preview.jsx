@@ -110,6 +110,52 @@ book.advice['002475'] = {
     },
   },
 }
+book.advice['000001'] = {
+  ...book.advice['000001'],
+  at: now,
+  cachedAt: now,
+  advice: {
+    ...book.advice['000001'].advice,
+    action: '清仓',
+    title: '风险条件成立，清仓10手',
+    actionPlan: '清仓10手，按当前可卖数量人工执行并记录成交。',
+    nextAction: '清仓10手，按当前可卖数量人工执行并记录成交。',
+    opQty: '清仓10手',
+    decisionPlan: {
+      schemaVersion: 'decision-plan.v2',
+      decisionId: 'decision-demo-immediate-exit',
+      mode: 'hold_advice',
+      action: 'EXIT',
+      actionability: 'READY',
+      quantity: { lots: 10 },
+      validUntil: new Date(now + 86400000).toISOString(),
+    },
+    monitoringPlan: {
+      schemaVersion: 'monitoring-plan.v1',
+      planId: 'decision-demo-expired-monitoring',
+      code: '000001',
+      createdAt: now - 86400000,
+      validUntil: new Date(now - 1000).toISOString(),
+      state: 'READY',
+      errors: [],
+      rules: [{
+        id: 'expired-stop',
+        action: 'EXIT',
+        kind: 'RISK_EXIT',
+        priority: 1,
+        lots: 10,
+        logic: 'ANY',
+        session: 'CONTINUOUS',
+        sustainSeconds: 0,
+        conditions: [{
+          metric: 'price',
+          op: 'lte',
+          value: 10.26,
+        }],
+      }],
+    },
+  },
+}
 book.executionPlans = [{
   schemaVersion: 'execution-plan.v1',
   planId: 'execution.demo-sell',

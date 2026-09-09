@@ -85,7 +85,11 @@ def load_opportunity_dataset(path):
         "y_net_r",
         "feature_names",
     }
-    if set(data.files) != required:
+    optional = {"playbook_ids", "routes"}
+    if (
+        not required.issubset(set(data.files))
+        or not set(data.files).issubset(required | optional)
+    ):
         raise ValueError("机会训练数据字段不完整")
     feature_names = tuple(data["feature_names"].astype(str).tolist())
     if feature_names != FEATURE_NAMES:
@@ -94,6 +98,16 @@ def load_opportunity_dataset(path):
     dates = data["dates"].astype(str)
     codes = data["codes"].astype(str)
     formula_ids = data["formula_ids"].astype(str)
+    playbook_ids = (
+        data["playbook_ids"].astype(str)
+        if "playbook_ids" in data.files
+        else np.full(len(X), "UNKNOWN", dtype="<U60")
+    )
+    routes = (
+        data["routes"].astype(str)
+        if "routes" in data.files
+        else np.full(len(X), "UNKNOWN", dtype="<U30")
+    )
     y_fill = data["y_fill"].astype(np.int8)
     y_win = data["y_win"].astype(np.float32)
     y_net_r = data["y_net_r"].astype(np.float32)
@@ -102,6 +116,8 @@ def load_opportunity_dataset(path):
         len(dates),
         len(codes),
         len(formula_ids),
+        len(playbook_ids),
+        len(routes),
         len(y_fill),
         len(y_win),
         len(y_net_r),
@@ -120,6 +136,8 @@ def load_opportunity_dataset(path):
         "dates": dates,
         "codes": codes,
         "formula_ids": formula_ids,
+        "playbook_ids": playbook_ids,
+        "routes": routes,
         "y_fill": y_fill,
         "y_win": y_win,
         "y_net_r": y_net_r,
@@ -355,6 +373,7 @@ def _feature_group_ablation(
     X,
     holdout_index,
     dates,
+    codes,
     actual_net_r,
     fill_report,
     net_r_report,
@@ -387,6 +406,7 @@ def _feature_group_ablation(
             fill_probability * predicted_net_r,
             dates[holdout_index],
             top_k=5,
+            group_ids=codes[holdout_index],
         )
         output[group].pop("daily_net_r", None)
     return output
@@ -649,6 +669,7 @@ def train_opportunity_score(
         utility,
         data["dates"][holdout_index],
         top_k=5,
+        group_ids=data["codes"][holdout_index],
     )
     challenger_top3 = ranking_metrics(
         actual_net_r > 0,
@@ -656,6 +677,7 @@ def train_opportunity_score(
         utility,
         data["dates"][holdout_index],
         top_k=3,
+        group_ids=data["codes"][holdout_index],
     )
     challenger_ranking.update({
         key: value
@@ -669,6 +691,7 @@ def train_opportunity_score(
         data["X"][holdout_index, formula_score_index],
         data["dates"][holdout_index],
         top_k=5,
+        group_ids=data["codes"][holdout_index],
     )
     baseline_top3 = ranking_metrics(
         actual_net_r > 0,
@@ -676,6 +699,7 @@ def train_opportunity_score(
         data["X"][holdout_index, formula_score_index],
         data["dates"][holdout_index],
         top_k=3,
+        group_ids=data["codes"][holdout_index],
     )
     baseline_ranking.update({
         key: value
@@ -698,6 +722,7 @@ def train_opportunity_score(
         data["X"],
         holdout_index,
         data["dates"],
+        data["codes"],
         actual_net_r,
         fill,
         net_r,

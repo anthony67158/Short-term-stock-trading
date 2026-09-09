@@ -36,6 +36,10 @@ const adviceRunnerSource = readFileSync(
   new URL('../src/adviceRunner.js', import.meta.url),
   'utf8',
 )
+const adviceHarnessSource = readFileSync(
+  new URL('../scripts/advice-reliability-harness.mjs', import.meta.url),
+  'utf8',
+)
 
 test('同一用户请求在任务完成后重放也不能再次创建生成任务', () => {
   const data = {}
@@ -293,6 +297,40 @@ test('军师生成失败不得伪装成保守计划成功', () => {
     generationProfile: 'FAST',
     ok: false,
   }), false)
+})
+
+test('可修复的监控规则结构不得让完整军师建议整题失败', () => {
+  assert.match(
+    aiSource,
+    /result = attachMonitoringPlan\(\{[\s\S]*?advice:\s*result,[\s\S]*?decisionPlan:\s*result\.decisionPlan/,
+  )
+  assert.doesNotMatch(aiSource, /操作条件无法核验/)
+  assert.doesNotMatch(aiSource, /本轮缺少可监控操作条件/)
+  assert.match(
+    aiSource,
+    /持仓结论即使是HOLD，也必须至少提供1条有明确阈值的EXIT或REDUCE风险退出规则/,
+  )
+  assert.match(
+    aiSource,
+    /没有其它可监控条件时直接省略该规则，禁止输出空conditions或占位规则/,
+  )
+  assert.match(
+    aiSource,
+    /无论executionRules是否可用，actionPlan与nextAction都必须独立给出当前动作、手数、执行时点/,
+  )
+})
+
+test('在线军师抽样轮询全部测试持仓与自选而不是重复首只股票', () => {
+  assert.match(adviceHarnessSource, /const holdings =/)
+  assert.match(adviceHarnessSource, /const watches =/)
+  assert.match(adviceHarnessSource, /selectedSubjects\[index % selectedSubjects\.length\]/)
+  assert.match(adviceHarnessSource, /HARNESS_SCOPE/)
+  assert.match(adviceHarnessSource, /HARNESS_CODES/)
+  assert.match(adviceHarnessSource, /monitoringPlan\?\.state !== 'READY'/)
+  assert.match(adviceHarnessSource, /monitoringWarnings:/)
+  assert.match(adviceHarnessSource, /if \(!checked\.valid && checked\.issues\.length\)/)
+  assert.match(adviceHarnessSource, /adjustments:\s*checked\.issues/)
+  assert.doesNotMatch(adviceHarnessSource, /const holding = .*?\[0\]/)
 })
 
 test('军师准备与证据依赖采用并行编排且单源有独立截止', () => {

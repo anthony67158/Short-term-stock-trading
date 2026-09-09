@@ -131,7 +131,26 @@ resources:
             cronExpression: "CRON_TZ=Asia/Shanghai 0 15 15 * * 1-5"
             enable: true
             payload: ${env('CRON_KEY')}
-        # 机会雷达影子结算：只读历史账本与原始分钟价，成熟结果禁止覆盖写入。
+        # V3 机会样本：盘中两次+收盘一次完整市场扫描，形成三路径反事实账本。
+        - triggerName: formula-selection-intraday-am-timer
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 20 10 * * 1-5"
+            enable: true
+            payload: ${env('CRON_KEY')}
+        - triggerName: formula-selection-intraday-pm-timer
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 40 13 * * 1-5"
+            enable: true
+            payload: ${env('CRON_KEY')}
+        - triggerName: formula-selection-close-timer
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 10 15 * * 1-5"
+            enable: true
+            payload: ${env('CRON_KEY')}
+        # 机会雷达结果结算：读取历史账本与原始分钟价，成熟结果禁止覆盖写入。
         - triggerName: opportunity-radar-settlement-timer
           triggerType: timer
           triggerConfig:

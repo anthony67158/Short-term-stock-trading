@@ -1,0 +1,156 @@
+"""Promote a shadow opportunity model only after return-based gates pass."""
+
+import argparse
+import json
+import os
+import shutil
+
+from opportunity_model import (
+    ARTIFACT_FILENAMES,
+    validate_opportunity_metadata,
+)
+
+
+PROMOTION_SCHEMA_VERSION = "opportunity-promotion.v1"
+
+
+def _number(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def production_model_version(value):
+    version = str(value or "").strip()
+    if not version:
+        raise ValueError("机会模型版本缺失")
+    if version.endswith(".production"):
+        return version
+    promoted = version + ".production"
+    if len(promoted) > 96:
+        raise ValueError("机会生产模型版本过长")
+    return promoted
+
+
+def promotion_decision(report):
+    blockers = []
+    if report.get("state") != "SHADOW_READY":
+        blockers.append("影子模型尚未通过训练闸门")
+    walk = report.get("walkForward") or {}
+    if (
+        walk.get("shadowEligible") is not True
+        or int(walk.get("folds") or 0) < 2
+    ):
+        blockers.append("独立walk-forward窗口不足或不稳定")
+    ranking = ((report.get("metrics") or {}).get("ranking") or {})
+    challenger = ranking.get("challenger") or {}
+    baseline = ranking.get("baseline") or {}
+    lower_bound = _number(challenger.get("netRLowerBound"))
+    challenger_net_r = _number(challenger.get("mean_net_r_at_5"))
+    baseline_net_r = _number(baseline.get("mean_net_r_at_5"))
+    if lower_bound is None or lower_bound <= 0:
+        blockers.append("Top5费后净R下置信界未大于0")
+    if challenger_net_r is None or baseline_net_r is None:
+        blockers.append("Top5净R对照指标缺失")
+    else:
+        minimum_lift = max(0.05, abs(baseline_net_r) * 0.2)
+        if challenger_net_r < baseline_net_r + minimum_lift:
+            blockers.append("Top5费后净R未较旧公式提升至少20%或0.05R")
+    challenger_drawdown = _number(
+        challenger.get("max_drawdown_r_at_5")
+    )
+    baseline_drawdown = _number(baseline.get("max_drawdown_r_at_5"))
+    if (
+        challenger_drawdown is None
+        or baseline_drawdown is None
+        or challenger_drawdown > baseline_drawdown * 1.1 + 1e-9
+    ):
+        blockers.append("Top5最大回撤较旧公式恶化超过10%")
+    challenger_precision = _number(challenger.get("precision_at_5"))
+    baseline_precision = _number(baseline.get("precision_at_5"))
+    if (
+        challenger_precision is None
+        or baseline_precision is None
+        or challenger_precision < baseline_precision
+    ):
+        blockers.append("Top5正净R命中率低于旧公式")
+    return {
+        "schemaVersion": PROMOTION_SCHEMA_VERSION,
+        "eligible": not blockers,
+        "blockers": blockers,
+        "metrics": {
+            "netRLowerBound": lower_bound,
+            "challengerMeanNetRAt5": challenger_net_r,
+            "baselineMeanNetRAt5": baseline_net_r,
+            "challengerMaxDrawdownRAt5": challenger_drawdown,
+            "baselineMaxDrawdownRAt5": baseline_drawdown,
+            "challengerPrecisionAt5": challenger_precision,
+            "baselinePrecisionAt5": baseline_precision,
+        },
+    }
+
+
+def promote(source_directory, report_path, output_directory):
+    with open(report_path, encoding="utf-8") as handle:
+        report = json.load(handle)
+    decision = promotion_decision(report)
+    if not decision["eligible"]:
+        raise ValueError("；".join(decision["blockers"]))
+    source = os.path.abspath(source_directory)
+    target = os.path.abspath(output_directory)
+    os.makedirs(target, exist_ok=True)
+    for filename in ARTIFACT_FILENAMES.values():
+        source_path = os.path.join(source, filename)
+        if not os.path.isfile(source_path):
+            raise FileNotFoundError(source_path)
+        shutil.copy2(source_path, os.path.join(target, filename))
+    metadata_path = os.path.join(target, ARTIFACT_FILENAMES["meta"])
+    with open(metadata_path, encoding="utf-8") as handle:
+        metadata = json.load(handle)
+    validate_opportunity_metadata(metadata)
+    metadata.update({
+        "modelVersion": production_model_version(
+            metadata.get("modelVersion"),
+        ),
+        "shadowOnly": False,
+        "productionEligible": True,
+        "promotion": decision,
+    })
+    temporary = metadata_path + ".part"
+    with open(temporary, "w", encoding="utf-8") as handle:
+        json.dump(metadata, handle, ensure_ascii=False, indent=2)
+    os.replace(temporary, metadata_path)
+    validate_opportunity_metadata(metadata)
+    return decision
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="晋级机会动作价值模型",
+    )
+    parser.add_argument("--source", required=True)
+    parser.add_argument("--report", required=True)
+    parser.add_argument("--output", required=True)
+    parser.add_argument("--check-only", action="store_true")
+    parser.add_argument("--decision-output")
+    args = parser.parse_args()
+    with open(args.report, encoding="utf-8") as handle:
+        report = json.load(handle)
+    checked = promotion_decision(report)
+    if args.decision_output:
+        destination = os.path.abspath(args.decision_output)
+        os.makedirs(os.path.dirname(destination), exist_ok=True)
+        temporary = destination + ".part"
+        with open(temporary, "w", encoding="utf-8") as handle:
+            json.dump(checked, handle, ensure_ascii=False, indent=2)
+        os.replace(temporary, destination)
+    if args.check_only:
+        print(json.dumps(checked, ensure_ascii=False, indent=2))
+        return
+    decision = promote(args.source, args.report, args.output)
+    print(json.dumps(decision, ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    main()

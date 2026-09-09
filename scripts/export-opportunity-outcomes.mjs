@@ -40,6 +40,7 @@ function safeOutcome(value) {
     || ![
       'opportunity-score-feature.v1',
       'opportunity-score-feature.v2',
+      'opportunity-score-feature.v3',
     ].includes(value?.scoreInput?.schemaVersion)
   ) return null
   return {

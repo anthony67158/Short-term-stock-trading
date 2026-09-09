@@ -12,6 +12,12 @@ import {
   explainOpportunityMarketGate,
 } from './opportunityLanguage.js'
 import { isExecutableOpportunityScore } from './opportunityScoreContract.js'
+import {
+  buildMarketOpportunityContext,
+} from './marketOpportunityContext.js'
+import {
+  rankAdaptiveOpportunities,
+} from './adaptiveOpportunity.js'
 
 export const OPPORTUNITY_RADAR_SCHEMA_VERSION =
   'opportunity-radar.v2'
@@ -295,17 +301,21 @@ function formulaEntryPlan(candidate, lane) {
   const price = finite(candidate.primaryPrice)
   if (price == null) return null
   const pullback = candidate.priceType === 'PULLBACK_WATCH'
+  const immediate = candidate.priceType === 'IMMEDIATE'
   const nextSession = lane === 'next'
   return {
-    type: pullback ? 'PULLBACK' : 'BREAKOUT',
+    type: immediate ? 'IMMEDIATE' : pullback ? 'PULLBACK' : 'BREAKOUT',
     price,
     window: nextSession
       ? '下一交易日开盘确认后'
       : '当前连续竞价时段',
-    trigger: pullback
-      ? '回踩观察价后重新站稳，且资金承接未转弱'
-      : '放量突破观察价并保持站稳',
-    maxPositionPct: 5,
+    trigger: immediate
+      ? '现价保持承接且当前打法未失效'
+      : pullback
+        ? '回踩观察价后重新站稳，且资金承接未转弱'
+        : '放量突破观察价并保持站稳',
+    maxPositionPct:
+      finite(candidate.adaptive?.risk?.maxPositionPct) ?? 0,
     validUntil: finite(candidate.validUntil),
   }
 }
@@ -314,13 +324,20 @@ function formulaExitPlan(candidate, lane, now) {
   const stop = finite(candidate.stopPrice)
   const target = finite(candidate.targetPrice)
   if (stop == null || target == null) return null
+  const timeStopTradingDays = Math.max(
+    1,
+    Math.min(8, Math.trunc(
+      finite(candidate.timeStopTradingDays) || 3,
+    )),
+  )
   return {
     hardStopPrice: stop,
     takeProfitPrice: target,
-    timeStopDate: tradingDayAfter(now, 5),
+    timeStopDate: tradingDayAfter(now, timeStopTradingDays),
+    timeStopTradingDays,
     rule: lane === 'intraday'
-      ? '目标或止损先到先执行；第3个交易日未脱离成本区则减仓，第5个交易日仍未走强则退出'
-      : '次日确认后生效；目标或止损先到先执行，第5个交易日仍未走强则退出',
+      ? '结构失效、目标到达或相对机会价值转负时，以先发生者为准'
+      : '次日确认后生效；随后按打法有效期、结构和机会成本动态管理',
     t1Constraint:
       '当日买入不可卖出，下一可卖时段优先处理风险',
   }
@@ -344,9 +361,6 @@ function formulaOpportunity(candidate, {
       : []),
     ...(candidate.blockers || []),
   ]
-  if (riskReward == null || riskReward < 1.8) {
-    blockers.push('盈亏比不足1.8:1')
-  }
   const opportunityScore = candidate.opportunityScore
   if (
     isExecutableOpportunityScore(opportunityScore)
@@ -405,6 +419,8 @@ function formulaOpportunity(candidate, {
     score: finite(candidate.score),
     riskReward,
     opportunityScore: opportunityScore || null,
+    adaptive: candidate.adaptive || null,
+    cautions: candidate.cautions || [],
     entryPlan,
     exitPlan,
     sourceSignals: unique([
@@ -857,17 +873,32 @@ export function buildOpportunityRadar({
       }),
     ),
   ])
-  const lanes = { layout, intraday, next }
+  const opportunityContext = buildMarketOpportunityContext({
+    market: sector?.market || {},
+    marketGate: ['INTRADAY', 'LUNCH'].includes(timing.phase)
+      ? formula?.intraday?.marketGate
+      : formula?.close?.marketGate,
+  })
+  const lanes = Object.fromEntries(
+    Object.entries({ layout, intraday, next }).map(([key, rows]) => [
+      key,
+      rankAdaptiveOpportunities(rows, opportunityContext),
+    ]),
+  )
   const portfolios = {
-    layout: analyzeOpportunityPortfolio({ rows: layout, holdings }),
-    intraday: analyzeOpportunityPortfolio({ rows: intraday, holdings }),
-    next: analyzeOpportunityPortfolio({ rows: next, holdings }),
+    layout: analyzeOpportunityPortfolio({ rows: lanes.layout, holdings }),
+    intraday: analyzeOpportunityPortfolio({
+      rows: lanes.intraday,
+      holdings,
+    }),
+    next: analyzeOpportunityPortfolio({ rows: lanes.next, holdings }),
   }
   return {
     schemaVersion: OPPORTUNITY_RADAR_SCHEMA_VERSION,
     generatedAt: timestamp,
     ...timing,
     market: sector?.market || null,
+    opportunityContext,
     settings: sector?.settings || null,
     tailSession: tailState?.session || null,
     sourceStatus,

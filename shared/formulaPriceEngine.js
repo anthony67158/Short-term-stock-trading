@@ -106,11 +106,9 @@ function buildUnownedDecision(input) {
     && stop < primary
     && target > primary
     && withinLegalBand(stop, input.quote)
-    && withinLegalBand(target, input.quote)
-    && riskReward >= 1.8
   )
   if (!priceContractValid) {
-    return emptyDecision(input, ['公式价位无法形成至少1.8:1的盈亏比'])
+    return emptyDecision(input, ['公式价位无法形成合法收益路径'])
   }
 
   const marketAllowsRisk = input.marketAllowsRisk === true

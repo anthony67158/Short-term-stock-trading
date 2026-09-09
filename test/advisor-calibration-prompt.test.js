@@ -31,16 +31,16 @@ test('快速与深度建议都使用可交付的有界输出预算', () => {
   assert.match(ADVISOR_FAST_SYSTEM, /盘中执行官/)
   assert.match(ADVISOR_FAST_SYSTEM, /道氏趋势/)
   assert.match(ADVISOR_FAST_SYSTEM, /威科夫量价/)
-  assert.match(ADVISOR_DEEP_SYSTEM, /同一战术合同/)
+  assert.match(ADVISOR_DEEP_SYSTEM, /服务端决策事实/)
   assert.match(ADVISOR_DEEP_SYSTEM, /主策略官/)
-  assert.match(ADVISOR_DEEP_SYSTEM, /情绪周期/)
-  assert.match(ADVISOR_DEEP_SYSTEM, /反方证伪/)
+  assert.match(ADVISOR_DEEP_SYSTEM, /动作价值/)
+  assert.match(ADVISOR_DEEP_SYSTEM, /证伪较弱的一套/)
   assert.match(ADVISOR_DEEP_SYSTEM, /最强反方/)
   assert.match(ADVISOR_DEEP_SYSTEM, /最多五个检查点/)
   assert.match(ADVISOR_DEEP_SYSTEM, /一次性研判协议/)
   assert.match(ADVISOR_DEEP_SYSTEM, /无需为了确认而再次调用工具或重做整题/)
-  assert.match(ADVISOR_DEEP_SYSTEM, /讲给新手听/)
-  assert.match(ADVISOR_DEEP_SYSTEM, /不得.*夸大把握或承诺收益/)
+  assert.match(ADVISOR_DEEP_SYSTEM, /新手能听懂/)
+  assert.match(ADVISOR_DEEP_SYSTEM, /不得承诺收益/)
   assert.match(ADVISOR_REVIEW_SYSTEM, /临盘裁决官/)
   assert.match(ADVISOR_REVIEW_SYSTEM, /利弗莫尔关键点/)
   assert.match(ADVISOR_REVIEW_SYSTEM, /1-2-3\/2B/)
@@ -106,7 +106,7 @@ test('军师生成前必须服从短线内核给出的唯一允许动作集合',
   assert.match(prompt, /不得把集合外动作写成当前可执行/)
 })
 
-test('市场硬红线在快速与深度提示词中都禁止逆势开仓', () => {
+test('市场尾部风险只缩小预算且最终服从服务端动作策略', () => {
   const payload = {
     code: '600000',
     shortHorizonTactical: {
@@ -128,8 +128,8 @@ test('市场硬红线在快速与深度提示词中都禁止逆势开仓', () =>
     generationProfile: 'DEEP',
   })
 
-  assert.match(fast, /市场红线优先于逆势强票例外/)
-  assert.match(deep, /无论个股是否逆势强都禁止新增风险/)
+  assert.match(fast, /是否允许买入只服从服务端动作策略/)
+  assert.match(deep, /服务端已批准的极小风险预算/)
 })
 
 test('试仓档位强制模型输出5%以内并要求人工确认', () => {
@@ -154,7 +154,8 @@ test('试仓档位强制模型输出5%以内并要求人工确认', () => {
   assert.match(prompt, /必须人工确认/)
   assert.match(prompt, /必须给出可立即人工确认的具体buyPrice/)
   assert.match(prompt, /不得只给回踩或突破观察价/)
-  assert.match(prompt, /盈亏比至少1.8:1/)
+  assert.match(prompt, /费后正期望/)
+  assert.match(prompt, /不设跨打法统一盈亏比/)
 })
 
 test('正式进攻档位按主攻路线给出积极仓位而不等待全条件同向', () => {
@@ -182,7 +183,7 @@ test('正式进攻档位按主攻路线给出积极仓位而不等待全条件�
   assert.match(prompt, /优先给出立即买入或加仓/)
 })
 
-test('弱市逆势试仓提示词使用3%仓位和2.2比1赔率', () => {
+test('弱市试仓使用3%仓位并切换到独立机会打法', () => {
   const prompt = buildUserPrompt('buy_advice', {
     code: '600000',
     shortHorizonTactical: {
@@ -204,7 +205,9 @@ test('弱市逆势试仓提示词使用3%仓位和2.2比1赔率', () => {
   })
 
   assert.match(prompt, /仓位不得超过总资产3%/)
-  assert.match(prompt, /弱市.*盈亏比至少2.2:1/)
+  assert.match(prompt, /弱市不等于无机会/)
+  assert.match(prompt, /独立催化、逆势核心和恐慌修复/)
+  assert.doesNotMatch(prompt, /2\.2:1/)
   assert.doesNotMatch(prompt, /仓位不得超过总资产5%/)
 })
 
@@ -498,7 +501,7 @@ test('持仓建议明确列出本次决策使用的持仓和可用资金快照',
   assert.match(prompt, /T\+1/)
 })
 
-test('弱市买入必须同时通过个股强势和高把握信号硬闸门', () => {
+test('弱市买入切换打法并服从动作价值与账户风险', () => {
   const prompt = buildUserPrompt('buy_advice', {
     code: '600000',
     marketEnv: {
@@ -520,8 +523,8 @@ test('弱市买入必须同时通过个股强势和高把握信号硬闸门', ()
 
   assert.match(prompt, /"riskTone":"RISK_OFF"/)
   assert.match(prompt, /"highConfidence":false/)
-  assert.match(prompt, /个股逆势强、量化高把握和账户风险同时允许/)
-  assert.match(prompt, /任一不足必须观望/)
+  assert.match(prompt, /独立催化、逆势核心或恐慌修复/)
+  assert.match(prompt, /服从adaptiveAction给出的缩小仓位/)
   assert.doesNotMatch(prompt, /共振分≥2且个股结构不坏，就应给出明确的做多/)
 })
 
@@ -544,8 +547,7 @@ test('板块前排机会允许受控人工试仓但不绕过个股和账户条�
   assert.match(prompt, /短线战术合同/)
   assert.match(prompt, /新能源车/)
   assert.match(prompt, /"stockRole":"LEADER"/)
-  assert.match(prompt, /板块前排只能提高关注优先级/)
-  assert.match(prompt, /不能绕过个股与账户条件/)
+  assert.match(prompt, /不得绕过价格、账户和正期望条件/)
 })
 
 test('观望买入建议区分观察锚与买入价并比较两条入场路径', () => {
@@ -574,7 +576,7 @@ test('观望买入建议区分观察锚与买入价并比较两条入场路径',
   }
 })
 
-test('买入建议必须同时给出T加一次日应对和五日内退出路径', () => {
+test('买入建议必须同时给出T加一次日应对和打法有效期退出路径', () => {
   const prompt = buildUserPrompt('buy_advice', {
     code: '600000',
   })
@@ -582,7 +584,8 @@ test('买入建议必须同时给出T加一次日应对和五日内退出路径'
   assert.match(prompt, /"nextOpenPlan":/)
   assert.match(prompt, /"futurePlan":/)
   assert.match(prompt, /T\+1/)
-  assert.match(prompt, /最迟第5个交易日/)
+  assert.match(prompt, /按照当前打法有效期/)
+  assert.doesNotMatch(prompt, /最迟第5个交易日/)
 })
 
 test('军师区分真实费后收益与三日建议命中统计', () => {
@@ -613,7 +616,8 @@ test('军师面向新手给明确结论且保持诚实不承诺收益', () => {
   assert.doesNotMatch(ADVISOR_SYSTEM, /strategyGate|strategyRoute/)
   assert.match(ADVISOR_SYSTEM, /不得承诺收益/)
   assert.match(ADVISOR_FAST_SYSTEM, /内部枚举和字段名/)
-  assert.match(ADVISOR_SYSTEM, /1\.8:1盈亏比/)
+  assert.match(ADVISOR_SYSTEM, /费后净期望为正/)
+  assert.doesNotMatch(ADVISOR_SYSTEM, /1\.8:1/)
 })
 
 test('所有军师模式都要求价格可追溯且无法核验时留空', () => {
@@ -701,8 +705,8 @@ test('显式深度生成使用紧凑事实契约而不丢失价格与资金约�
   assert.match(prompt, /"mainNetYi":0.8/)
   assert.match(prompt, /"retailNetYi":-0.2/)
   assert.match(prompt, /"quantTargetHigh":10.8/)
-  assert.match(prompt, /普通市场盈亏比至少1\.8:1/)
-  assert.match(prompt, /弱市试错至少2\.2:1/)
+  assert.match(prompt, /不得用固定盈亏比替代成交概率/)
+  assert.match(prompt, /弱市切换到独立催化、逆势核心或恐慌修复/)
   assert.match(prompt, /内部推理过程可保留模型原始语言/)
   assert.match(prompt, /一次完成判断并直接填满全部字段/)
   assert.match(prompt, /不要为了缩短文字省略证据、价格、手数、失效条件或退出路径/)

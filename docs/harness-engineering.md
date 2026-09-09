@@ -61,6 +61,12 @@ node harness/run.mjs --update-baseline
 
 # 现有真实军师在线抽样，保持兼容；凭证仅存在当前进程
 HARNESS_NICK=... HARNESS_PASSWORD=... npm run harness:advice
+
+# 轮询测试账号全部持仓，或按代码筛选；profile 可选 quick/deep/review/mixed
+HARNESS_SCOPE=holding HARNESS_PROFILE=deep HARNESS_RUNS=3 \
+  HARNESS_NICK=... HARNESS_PASSWORD=... npm run harness:advice
+HARNESS_CODES=000001,600036 HARNESS_NICK=... HARNESS_PASSWORD=... \
+  npm run harness:advice
 ```
 
 ## 目录

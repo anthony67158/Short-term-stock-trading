@@ -390,14 +390,29 @@ export default async function handler(req, res) {
         || req.query?.key
         || '',
       )
-      if (!expected || supplied !== expected || body.mode !== 'close') {
+      const scheduledMode = normalizedMode(body.mode)
+      if (
+        !expected
+        || supplied !== expected
+        || !['intraday', 'close'].includes(scheduledMode)
+      ) {
         return reply(res, 401, {
           ok: false,
           error: 'unauthorized',
           errorCode: 'UNAUTHORIZED',
         })
       }
-      return reply(res, 200, await runFormulaSelection({ mode: 'close' }))
+      if (!canRunFormulaSelectionMode(scheduledMode)) {
+        return reply(res, 200, {
+          ok: true,
+          skipped: true,
+          reason: 'WINDOW_CLOSED',
+          mode: scheduledMode.toUpperCase(),
+        })
+      }
+      return reply(res, 200, await runFormulaSelection({
+        mode: scheduledMode,
+      }))
     }
 
     // 公式价位只依赖主快照中的持仓与设置，无需为鉴权扫描建议运行态。

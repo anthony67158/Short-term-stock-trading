@@ -71,6 +71,7 @@ function modelEstimate(
   quant,
   rewardR,
   prices,
+  researchPrior,
 ) {
   if (
     isExecutableOpportunityScore(opportunityScore)
@@ -153,6 +154,40 @@ function modelEstimate(
     }
   }
 
+  const priorWin = researchPrior?.serverVerified === true
+    ? probability(researchPrior.pWinGivenFill)
+    : null
+  if (priorWin != null && rewardR > 0) {
+    const priorFill = probability(researchPrior.pFill)
+    const expectedNetR = priorWin * rewardR - (1 - priorWin)
+      - Math.max(0, finite(researchPrior.costR) || 0)
+    const lowerNetR = finite(researchPrior.lowerNetR)
+      ?? expectedNetR - Math.max(
+        0.2,
+        finite(researchPrior.uncertaintyR) || 0.45,
+      )
+    return {
+      state: 'RESEARCH_ESTIMATE',
+      source: 'SERVER_ACTION_POLICY',
+      modelVersion:
+        String(researchPrior.version || 'adaptive-action-policy.v1'),
+      pFill: priorFill,
+      pWinGivenFill: priorWin,
+      expectedNetRGivenFill: expectedNetR,
+      expectedNetRPerCandidate: priorFill == null
+        ? null
+        : priorFill * expectedNetR,
+      netRLowerBound: lowerNetR,
+      lowerBoundPerCandidate: null,
+      expectedShortfall10R: finite(researchPrior.expectedShortfall10R),
+      sampleCount: Math.max(
+        0,
+        Math.trunc(finite(researchPrior.sampleCount) || 0),
+      ),
+      calibrationMethod: 'SERVER_RESEARCH_PRIOR',
+    }
+  }
+
   return {
     state: 'PLAN_ONLY',
     source: 'PRICE_CONTRACT',
@@ -200,10 +235,9 @@ function expectancyGate(estimate, breakEvenWinProbability) {
         + `单次结果尾部参考${round(estimate.netRLowerBound, 2)}R`,
     }
   }
-  if (
-    estimate.state === 'MODEL_ESTIMATE'
-    && estimate.expectedNetRGivenFill <= 0
-  ) {
+  const estimated = ['MODEL_ESTIMATE', 'RESEARCH_ESTIMATE']
+    .includes(estimate.state)
+  if (estimated && estimate.expectedNetRGivenFill <= 0) {
     return {
       state: 'NEGATIVE',
       allowsRiskIncrease: false,
@@ -215,12 +249,14 @@ function expectancyGate(estimate, breakEvenWinProbability) {
     }
   }
   return {
-    state: estimate.state === 'MODEL_ESTIMATE'
-      ? 'POSITIVE_ESTIMATE'
+    state: estimated
+      ? estimate.state === 'RESEARCH_ESTIMATE'
+        ? 'POSITIVE_RESEARCH_ESTIMATE'
+        : 'POSITIVE_ESTIMATE'
       : 'UNCALIBRATED',
-    allowsRiskIncrease: estimate.state === 'MODEL_ESTIMATE',
-    reason: estimate.state === 'MODEL_ESTIMATE'
-      ? `量化成功概率${round(estimate.pWinGivenFill * 100, 1)}%，`
+    allowsRiskIncrease: estimated,
+    reason: estimated
+      ? `${estimate.state === 'RESEARCH_ESTIMATE' ? '动作先验' : '量化'}成功概率${round(estimate.pWinGivenFill * 100, 1)}%，`
         + `高于费后盈亏平衡所需的${
           round(breakEvenWinProbability * 100, 1)
         }%`
@@ -240,6 +276,7 @@ export function buildTradeExpectancy({
   stressExitPrice = null,
   opportunityScore = null,
   quant = null,
+  researchPrior = null,
 } = {}) {
   const normalizedAction = String(action || '').toUpperCase()
   if (!RISK_INCREASING.has(normalizedAction)) {
@@ -294,6 +331,7 @@ export function buildTradeExpectancy({
     quant,
     rewardR,
     { entry, stop, target },
+    researchPrior,
   )
   const stressPrice = positive(stressExitPrice)
   const stressExit = stressPrice != null && stressPrice < stop

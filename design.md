@@ -183,16 +183,18 @@
 - In dense equal-width command rows, prefer short text-only labels when icons
   would reduce the required inner padding.
 - Holding and watchlist cards share one anatomy: identity row, three-column
-  metric strip, decision summary, then actions. Every card stretches to the
-  tallest natural card in its desktop grid row. Shorter cards distribute the
-  extra height across section gaps instead of leaving one large void above the
-  action rail. Mobile groups use equal-height horizontal snap rows so one
-  section consumes one card height instead of stacking every full card. The
-  full advice opens in stock detail.
+  metric strip, decision summary, then actions. Cards of the same type use fixed
+  dimensions and fixed-height identity, decision, evidence, discipline and
+  action regions; variable prose is summarized instead of moving later
+  regions. The primary operation instruction is never line-clamped, and up to
+  three structured monitoring rules are shown directly. Monitoring uses one
+  outlined status rail above unframed rules; sustained observations show a
+  real second-by-second countdown from the rule's matched time. Mobile groups
+  use equal-height horizontal snap rows.
 - Card decision summaries separate status, primary action, position limit and
   execution condition into distinct visual rows. Use one semantic icon for the
-  primary action, render position as a compact badge, and clamp the condition to
-  two lines while keeping the full text available in stock detail.
+  primary action, render position as a compact badge, and reserve the expanded
+  decision area for the current operation plus no more than three core rules.
 - Card identity rows align price context and icon controls on one vertical
   centerline. Status, count and position badges use the shared pill radius;
   icon buttons use the control radius.

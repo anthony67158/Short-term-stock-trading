@@ -53,7 +53,7 @@ function payload(overrides = {}) {
   }
 }
 
-test('硬风险不受错误文案措辞影响且任何正向信号不能绕过', () => {
+test('交易合法性硬风险不可绕过但位置过高只降为小仓验证', () => {
   const base = buildShortHorizonTactical(payload(), {
     now: Date.parse('2026-08-26T02:30:00.000Z'),
   })
@@ -61,7 +61,6 @@ test('硬风险不受错误文案措辞影响且任何正向信号不能绕过',
     { stock: { ...base.stock, liquidity: 'THIN', liquidityEvidence: { reason: '成交额300万元' } } },
     { holding: { hasPosition: true, addEligible: false, addBlockReason: '尚未收复均价线' } },
     { market: { ...base.market, riskTone: 'UNKNOWN' } },
-    { timing: { ...base.timing, state: 'TOO_EXTENDED' } },
   ]) {
     const policy = deriveShortHorizonActionPolicy({
       mode: 'buy_advice', requestedAction: 'BUY', tactical: { ...base, ...patch },
@@ -69,6 +68,18 @@ test('硬风险不受错误文案措辞影响且任何正向信号不能绕过',
     assert.equal(policy.canIncreaseRisk, false)
     assert.equal(policy.riskTier, 'NONE')
   }
+  const extended = deriveShortHorizonActionPolicy({
+    mode: 'buy_advice',
+    requestedAction: 'BUY',
+    tactical: {
+      ...base,
+      timing: { ...base.timing, state: 'TOO_EXTENDED' },
+    },
+  })
+  assert.equal(extended.canIncreaseRisk, false)
+  assert.equal(extended.riskTier, 'PROBE')
+  assert.equal(extended.entryIntent.state, 'CONDITIONAL_PROBE')
+  assert.match(extended.reasons.join('；'), /价格位置偏高/)
 })
 
 test('强市场前排个股与主力吸筹投影为短线可行动状态', () => {
@@ -356,7 +367,7 @@ test('普通弱市的逆势强票允许3%人工试仓但不能升级正式买入
   assert.equal(policy.entryIntent.maxPositionPct, 3)
 })
 
-test('市场硬红线下逆势强票仍不得试仓', () => {
+test('市场尾部风险下逆势强票保留3%条件试仓路径', () => {
   const tactical = buildShortHorizonTactical(payload({
     todayQuote: {
       ...payload().todayQuote,
@@ -378,8 +389,10 @@ test('市场硬红线下逆势强票仍不得试仓', () => {
   })
 
   assert.equal(policy.canIncreaseRisk, false)
-  assert.equal(policy.riskTier, 'NONE')
+  assert.equal(policy.riskTier, 'PROBE')
+  assert.equal(policy.maxPositionPct, 3)
   assert.deepEqual(policy.allowedActions, ['WATCH'])
+  assert.equal(policy.entryIntent.state, 'CONDITIONAL_PROBE')
 })
 
 test('持仓亏损且未站回关键位时禁止下跌加仓', () => {

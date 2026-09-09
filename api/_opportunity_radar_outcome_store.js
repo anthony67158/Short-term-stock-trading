@@ -45,9 +45,22 @@ function safeCode(value) {
   return code
 }
 
-function outcomePath({ tradeDate, mode, slot, code }) {
+function safeRoute(value) {
+  const route = String(value || '').trim().toUpperCase()
+  if (!route) return ''
+  if (!/^[A-Z0-9_-]{1,30}$/.test(route)) {
+    throw new Error('机会雷达结果路径无效')
+  }
+  return route.toLowerCase()
+}
+
+function outcomePath({ tradeDate, mode, slot, code, route }) {
+  const routeSuffix = safeRoute(route)
+    ? `-${safeRoute(route)}`
+    : ''
   return `${OPPORTUNITY_RADAR_OUTCOME_PREFIX}${safeDate(tradeDate)}/`
-    + `${safeMode(mode)}-${safeSlot(slot)}/${safeCode(code)}.json`
+    + `${safeMode(mode)}-${safeSlot(slot)}/`
+    + `${safeCode(code)}${routeSuffix}.json`
 }
 
 function dateRange(from, to, maximumDays = 366) {

@@ -60,7 +60,7 @@ test('个股详情聚焦备注区域但保持阅读态', () => {
   assert.doesNotMatch(component, /initialEditing/)
 })
 
-test('移动端三个持仓交易按钮固定在同一行', () => {
+test('持仓交易按钮与纪律槽位保持固定位置', () => {
   assert.match(
     precision,
     /@media \(max-width:\s*30rem\)\s*{[\s\S]*?\.hold-item\s*>\s*\.pi-actions\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+44px/s,
@@ -79,16 +79,10 @@ test('移动端三个持仓交易按钮固定在同一行', () => {
   )
   assert.match(
     planTab,
-    /className="chip-btn ghost hold-plan-mobile"[\s\S]*?添加计划/,
+    /className="holding-plan-summary holding-plan-empty"[\s\S]*?纪律[\s\S]*?设置止盈止损/,
   )
-  assert.match(
-    precision,
-    /\.hold-plan-mobile\s*{[^}]*display:\s*none/s,
-  )
-  assert.match(
-    precision,
-    /@media \(max-width:\s*30rem\)\s*{[\s\S]*?\.hold-plan-mobile\s*{[^}]*display:\s*inline-flex/s,
-  )
+  assert.doesNotMatch(planTab, /hold-plan-mobile/)
+  assert.match(precision, /\.holding-plan-empty\s*{[^}]*color:\s*var\(--color-muted\)/s)
 })
 
 test('卡片备注复用完整建议的高对比悬浮预览且不改变触屏布局', () => {

@@ -27,6 +27,7 @@
     "opportunity:export": "node scripts/export-opportunity-outcomes.mjs",
     "opportunity:dataset": "python3 qlib-service/opportunity_dataset.py --input qlib-service/opportunity-outcomes.json --output qlib-service/opportunity-dataset.npz",
     "opportunity:train": "python3 qlib-service/train_opportunity_score.py --dataset qlib-service/opportunity-dataset.npz --output qlib-service/opportunity-model",
+    "opportunity:promote": "python3 qlib-service/promote_opportunity_model.py --source qlib-service/opportunity-model/shadow --report qlib-service/opportunity-model/opportunity_training_report.json --output qlib-service/opportunity-model/production",
     "backtest": "node backtest/run.mjs"
   },
   "dependencies": {

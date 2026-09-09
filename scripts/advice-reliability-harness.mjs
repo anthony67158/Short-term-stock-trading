@@ -22,14 +22,39 @@ const defaultMaxMs = {
   review: 45000,
 }[profile] || 0
 const maxMs = Math.max(0, Number(process.env.HARNESS_MAX_MS) || defaultMaxMs)
+const scope = String(process.env.HARNESS_SCOPE || 'mixed').trim().toLowerCase()
+const selectedCodes = new Set(
+  String(process.env.HARNESS_CODES || '')
+    .split(',')
+    .map((code) => code.trim())
+    .filter(Boolean),
+)
 
 if (!nick) throw new Error('请通过 HARNESS_NICK 指定用于只读取样的账号')
 if (!password) throw new Error('请通过 HARNESS_PASSWORD 提供Harness账号密码')
 const account = await readAccount(nick)
 if (!account?.data) throw new Error('Harness 账号不存在或无法读取')
-const holding = (account.data.holding || [])[0]
-const watch = (account.data.plan || []).find((item) => item.code !== holding?.code) || (account.data.plan || [])[0]
-if (!holding || !watch) throw new Error('Harness 至少需要一只持仓和一只自选')
+const holdings = (account.data.holding || []).filter((item) => item?.code)
+const holdingCodes = new Set(holdings.map((item) => item.code))
+const watches = (account.data.plan || []).filter((item) =>
+  item?.code && !holdingCodes.has(item.code)
+)
+const subjects = []
+const subjectCount = Math.max(holdings.length, watches.length)
+for (let index = 0; index < subjectCount; index += 1) {
+  if (holdings[index] && scope !== 'watch') {
+    subjects.push({ mode: 'hold_advice', stock: holdings[index] })
+  }
+  if (watches[index] && scope !== 'holding') {
+    subjects.push({ mode: 'buy_advice', stock: watches[index] })
+  }
+}
+const selectedSubjects = selectedCodes.size
+  ? subjects.filter((item) => selectedCodes.has(item.stock.code))
+  : subjects
+if (!selectedSubjects.length) {
+  throw new Error('Harness 没有符合范围的持仓或自选标的')
+}
 
 function parseFrame(frame) {
   let event = ''
@@ -118,20 +143,22 @@ function caseAt(index) {
   const selected = profile === 'mixed'
     ? ['quick', 'deep', 'review'][index % 3]
     : profile
-  if (index % 2 === 0) {
-    const previousAdvice = account.data.advice?.[holding.code]?.advice
-      || account.data.advice?.[holding.code]
+  const subject = selectedSubjects[index % selectedSubjects.length]
+  const stock = subject.stock
+  if (subject.mode === 'hold_advice') {
+    const previousAdvice = account.data.advice?.[stock.code]?.advice
+      || account.data.advice?.[stock.code]
       || null
     const now = Date.now()
     return {
-      id: `hold-${index / 2 + 1}`,
+      id: `hold-${stock.code}-${index + 1}`,
       mode: 'hold_advice',
       payload: {
-        code: holding.code,
-        name: holding.name,
-        holdCost: holding.buyPrice,
-        holdQty: holding.qty,
-        sellableTodayQty: holding.qty,
+        code: stock.code,
+        name: stock.name,
+        holdCost: stock.buyPrice,
+        holdQty: stock.qty,
+        sellableTodayQty: stock.qty,
         account: account.data.account || null,
         ...(selected === 'review' ? {
           previousAdvice,
@@ -141,8 +168,8 @@ function caseAt(index) {
             reviewMode: 'EXIT_PROTECTION',
             plannedAction: '减仓',
             direction: 'lte',
-            threshold: Number(holding.sl || holding.buyPrice),
-            price: Number(holding.sl || holding.buyPrice),
+            threshold: Number(stock.sl || stock.buyPrice),
+            price: Number(stock.sl || stock.buyPrice),
             at: now,
             timeLimitMinutes: TRIGGERED_REVIEW_TIME_LIMIT_MINUTES,
             decisionDeadlineAt: now
@@ -153,16 +180,16 @@ function caseAt(index) {
       profile: selected,
     }
   }
-  const previousAdvice = account.data.advice?.[watch.code]?.advice
-    || account.data.advice?.[watch.code]
+  const previousAdvice = account.data.advice?.[stock.code]?.advice
+    || account.data.advice?.[stock.code]
     || null
   const now = Date.now()
   return {
-    id: `buy-${Math.floor(index / 2) + 1}`,
+    id: `buy-${stock.code}-${index + 1}`,
     mode: 'buy_advice',
     payload: {
-      code: watch.code,
-      name: watch.name,
+      code: stock.code,
+      name: stock.name,
       account: account.data.account || null,
       ...(selected === 'review' ? {
         previousAdvice,
@@ -174,8 +201,8 @@ function caseAt(index) {
           actionLabel: '条件试仓',
           directionApproved: true,
           direction: 'gte',
-          threshold: Number(watch.buyPrice),
-          price: Number(watch.buyPrice),
+        threshold: Number(stock.buyPrice),
+        price: Number(stock.buyPrice),
           at: now,
           timeLimitMinutes: TRIGGERED_REVIEW_TIME_LIMIT_MINUTES,
           decisionDeadlineAt: now
@@ -232,7 +259,22 @@ async function execute(testCase) {
       errors.push(output?.warning || '仅返回确定性降级结果')
     }
     if (output?.truncated) errors.push('结果被截断')
-    if (checked.issues.length) errors.push(...checked.issues)
+    if (!checked.valid && checked.issues.length) {
+      errors.push(...checked.issues)
+    }
+    const decisionAction = output?.result?.decisionPlan?.action || null
+    const monitoringPlan = output?.result?.monitoringPlan || null
+    if (
+      testCase.mode === 'hold_advice'
+      && decisionAction === 'HOLD'
+      && monitoringPlan?.state !== 'READY'
+    ) {
+      errors.push(
+        monitoringPlan
+          ? `监控计划不可用：${(monitoringPlan.errors || []).join('；')}`
+          : '持有建议缺少监控计划',
+      )
+    }
     const liveReasoningQuality = reasoningQuality(
       parsed.visibleReasoning,
     )
@@ -272,6 +314,8 @@ async function execute(testCase) {
     }
     return {
       id: testCase.id,
+      code: testCase.payload.code,
+      name: testCase.payload.name,
       mode: testCase.mode,
       profile: testCase.profile,
       ok: errors.length === 0,
@@ -281,6 +325,10 @@ async function execute(testCase) {
       llmPasses,
       model: output?.model || '',
       endpoint: output?.endpoint || '',
+      decisionAction,
+      monitoringState: monitoringPlan?.state || null,
+      monitoringWarnings: monitoringPlan?.warnings || [],
+      adjustments: checked.issues,
       liveReasoningQuality,
       finalReasoningQuality,
       errors,
@@ -289,6 +337,8 @@ async function execute(testCase) {
   } catch (error) {
     return {
       id: testCase.id,
+      code: testCase.payload.code,
+      name: testCase.payload.name,
       mode: testCase.mode,
       profile: testCase.profile,
       ok: false,

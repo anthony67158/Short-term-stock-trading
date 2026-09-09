@@ -70,7 +70,7 @@ test('大盘不支持新增风险时保留价格合同但动作降级为不买',
   assert.match(result.blockers.join('；'), /市场风险条件未通过/)
 })
 
-test('未持仓没有公式或赔率不足时不编造买入价格', () => {
+test('未持仓没有公式时不编造价格，较低赔率保留为研究路径', () => {
   const noFormula = buildFormulaPriceDecision({
     code: '600001',
     quote: { price: 10.2 },
@@ -100,9 +100,10 @@ test('未持仓没有公式或赔率不足时不编造买入价格', () => {
     dataComplete: true,
     dataFresh: true,
   })
-  assert.equal(poorReward.action, 'AVOID')
-  assert.equal(poorReward.primaryPrice, null)
-  assert.match(poorReward.blockers.join('；'), /盈亏比/)
+  assert.equal(poorReward.action, 'WATCH_BUY')
+  assert.equal(poorReward.primaryPrice, 10)
+  assert.ok(poorReward.riskReward > 0)
+  assert.equal(poorReward.blockers.length, 0)
 })
 
 test('突破观察使用ATR生成入场上方目标而不是沿用原压力', () => {

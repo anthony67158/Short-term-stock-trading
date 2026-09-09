@@ -255,8 +255,10 @@ test('次日计划按定时源状态自动等待或追踪最新结果', () => {
   assert.match(content, /待生成|更新中|等待结果/)
 })
 
-test('收盘公式只保留手动运行且尾盘14:50自动任务继续启用', () => {
-  assert.doesNotMatch(deployment, /triggerName:\s*formula-selection-close-timer/)
+test('V3候选自动采样且尾盘14:50任务继续启用', () => {
+  assert.match(deployment, /triggerName:\s*formula-selection-intraday-am-timer/)
+  assert.match(deployment, /triggerName:\s*formula-selection-intraday-pm-timer/)
+  assert.match(deployment, /triggerName:\s*formula-selection-close-timer/)
   assert.match(deployment, /triggerName:\s*tail-pick-1450-timer/)
 })
 

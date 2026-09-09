@@ -1,4 +1,4 @@
-"""OSS-hot-reloaded inference for the shadow-only opportunity model."""
+"""OSS-hot-reloaded inference for the opportunity action-value model."""
 
 import hashlib
 import json
@@ -89,7 +89,12 @@ def validate_opportunity_metadata(metadata, model_version=None):
         or metadata.get("featureSchemaVersion") != FEATURE_SCHEMA_VERSION
         or tuple(metadata.get("featureNames") or ()) != FEATURE_NAMES
         or metadata.get("shadowEligible") is not True
-        or metadata.get("shadowOnly") is not True
+        or not isinstance(metadata.get("shadowOnly"), bool)
+        or not isinstance(metadata.get("productionEligible"), bool)
+        or (
+            metadata.get("productionEligible") is True
+            and metadata.get("shadowOnly") is not False
+        )
     ):
         raise ValueError("机会模型元数据无效")
     if (
@@ -162,6 +167,13 @@ def _download_release():
             final_paths["meta"] + ".part",
         )
         validate_opportunity_metadata(metadata, run_id)
+        if (
+            metadata.get("shadowOnly")
+            != manifest.get("shadowOnly", True)
+            or metadata.get("productionEligible")
+            != manifest.get("productionEligible", False)
+        ):
+            raise ValueError("机会模型清单与元数据状态不一致")
         for destination in final_paths.values():
             os.replace(destination + ".part", destination)
         return models, metadata
@@ -369,6 +381,10 @@ def predict_opportunity_items(
                 "bucket": _calibration_bucket(item),
             },
             "outOfDistribution": False,
-            "shadowOnly": True,
+            "shadowOnly": metadata.get("shadowOnly", True),
+            "productionEligible": metadata.get(
+                "productionEligible",
+                False,
+            ),
         })
     return predictions

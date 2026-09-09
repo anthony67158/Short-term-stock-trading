@@ -220,6 +220,87 @@ test('重复运行跳过已经不可变落盘的成熟结果', async () => {
   assert.equal(replayed.matured, 0)
 })
 
+test('事件缺少日期和模式时继承所属批次避免整批结算中断', async () => {
+  const candidate = event({
+    tradeDate: '2026-09-01',
+    priceType: 'BREAKOUT_WATCH',
+    primaryPrice: 10.8,
+    stopPrice: 10.3,
+    targetPrice: 11.8,
+  })
+  delete candidate.tradeDate
+  delete candidate.mode
+  const store = outcomeStore()
+
+  const result = await settleOpportunityRadarOutcomes({
+    ledgerStore: {
+      async listBatches() {
+        return [batch('2026-09-01', candidate)]
+      },
+    },
+    outcomeStore: store,
+    fetchBars: async () => bars(),
+    now: Date.parse('2026-09-03T09:10:00.000Z'),
+  })
+
+  assert.equal(result.matured, 1)
+  assert.equal(store.values[0].tradeDate, '2026-09-01')
+  assert.equal(store.values[0].mode, 'CLOSE')
+})
+
+test('同股多路径分别结算且使用各自路线特征', async () => {
+  const candidate = event({
+    tradeDate: '2026-09-01',
+    priceType: 'IMMEDIATE',
+    primaryPrice: 10,
+    stopPrice: 9.7,
+    targetPrice: 10.3,
+  })
+  candidate.stageReached = 'DISPLAYED'
+  candidate.decision.route = 'IMMEDIATE'
+  candidate.decision.playbookId = 'MOMENTUM_BREAKOUT'
+  candidate.counterfactualPlans = [
+    candidate.decision,
+    {
+      ...candidate.decision,
+      route: 'PULLBACK',
+      priceType: 'PULLBACK_WATCH',
+      primaryPrice: 9.9,
+      stopPrice: 9.6,
+      targetPrice: 10.4,
+    },
+  ]
+  const store = outcomeStore()
+  const result = await settleOpportunityRadarOutcomes({
+    ledgerStore: {
+      async listBatches() {
+        return [batch('2026-09-01', candidate)]
+      },
+    },
+    outcomeStore: store,
+    fetchBars: async () => bars(),
+    now: Date.parse('2026-09-10T09:10:00.000Z'),
+  })
+
+  assert.equal(result.candidates, 2)
+  assert.equal(store.values.length, 2)
+  assert.deepEqual(
+    new Set(store.values.map((item) => item.route)),
+    new Set(['IMMEDIATE', 'PULLBACK']),
+  )
+  assert.deepEqual(
+    new Set(store.values.map((item) =>
+      item.scoreInput.dimensions.route
+    )),
+    new Set(['IMMEDIATE', 'PULLBACK']),
+  )
+  assert.equal(
+    store.values.find((item) => item.route === 'PULLBACK')
+      .context.displayedRank,
+    null,
+  )
+})
+
 test('单轮行情请求受股票上限约束且未处理候选明确顺延', async () => {
   const candidates = ['600001', '600002', '600003'].map((code) =>
     event({

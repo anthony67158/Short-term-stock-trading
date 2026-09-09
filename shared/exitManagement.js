@@ -1,4 +1,4 @@
-import { beijingDayKey, isTradingDayAt } from './tradingCalendar.js'
+import { evaluateHoldingActions } from './holdingActionValue.js'
 
 export const EXIT_MANAGEMENT_VERSION = 'exit-management.v1'
 
@@ -6,9 +6,7 @@ const EXIT_PRIORITY = Object.freeze({
   HARD_STOP: 1,
   STRUCTURAL_EXIT: 2,
   TAKE_PROFIT: 3,
-  TRAILING_PROTECT: 4,
-  TIME_EXIT: 5,
-  OPPORTUNITY_REVIEW: 6,
+  VALUE_DECAY: 4,
   HOLD: 9,
 })
 
@@ -84,81 +82,6 @@ function structuralExit(tactical = {}) {
       && relativeStrength < 45
     )
   )
-}
-
-function trailingProtection(payload, advice) {
-  const current = finite(
-    payload.todayQuote?.price
-    ?? payload.intraday?.now
-    ?? payload.currentPrice,
-  )
-  const cost = finite(payload.holdCost)
-  const peak = finite(
-    payload.holdingPeakPrice
-    ?? payload.todayQuote?.high
-    ?? payload.intraday?.dayHigh,
-  )
-  if (!(current > cost && peak > current && peak > cost)) return null
-  const profitPct = (current / cost - 1) * 100
-  const drawdownPct = (peak - current) / peak * 100
-  const atr = finite(payload.tech?.atr?.atr ?? payload.tech?.atr)
-  const atrPct = atr != null && current > 0
-    ? atr / current * 100
-    : null
-  const thresholdPct = Math.max(
-    1,
-    Math.min(3, (atrPct ?? 1.5) * 0.75),
-  )
-  const weakening = (
-    /回落|走弱|跳水|破位/.test(
-      String(payload.intraday?.rhythm || ''),
-    )
-    || Number(payload.intraday?.vsVwap) < 0
-    || /跌破/.test(String(payload.history?.vsMa5 || ''))
-  )
-  if (
-    profitPct < 2
-    || drawdownPct < thresholdPct
-    || !weakening
-  ) return null
-  return {
-    current,
-    peak,
-    profitPct: rounded(profitPct),
-    drawdownPct: rounded(drawdownPct),
-    thresholdPct: rounded(thresholdPct),
-    stopReference: finite(advice.stopPrice),
-  }
-}
-
-function expiredOpportunityReview(payload, now) {
-  const previous = payload.previousAdvice || {}
-  const validUntil = Date.parse(
-    previous.decisionPlan?.validUntil || '',
-  )
-  const opportunity = payload.shortHorizonTactical?.opportunityCost
-  if (
-    !Number.isFinite(validUntil)
-    || now <= validUntil
-    || !opportunity?.targetCode
-  ) return null
-  const edgeScore = finite(opportunity.edgeScore)
-  if (!(edgeScore >= 5)) return null
-  return {
-    targetCode: text(opportunity.targetCode, 12),
-    targetName: text(opportunity.targetName, 40),
-    edgeScore: rounded(edgeScore, 1),
-  }
-}
-
-export function holdingExitDeadline(startedAt) {
-  if (!(Number(startedAt) > 0)) return null
-  let day = Date.parse(`${beijingDayKey(Number(startedAt))}T14:45:00+08:00`)
-  let sessions = 0
-  for (let i = 0; i < 30; i++, day += 86400000) {
-    if (isTradingDayAt(day) && ++sessions === 5) return day
-  }
-  return null
 }
 
 function exitQuantity(total, sellable, full = false) {
@@ -264,77 +187,33 @@ export function applyShortHorizonExitPolicy({
     })
   }
 
-  if (structuralExit(tactical)) {
+  const actionValue = {
+    ...evaluateHoldingActions({
+      payload: {
+        ...payload,
+        shortHorizonTactical: tactical,
+      },
+      advice: result,
+    }),
+    evaluatedAt: now,
+  }
+  if (['EXIT', 'REDUCE'].includes(actionValue.selected.action)) {
+    const structural = structuralExit(tactical)
+    const targetReached = current > 0
+      && finite(result.targetPrice) > 0
+      && current >= finite(result.targetPrice)
     return applyExitAction(result, {
-      kind: 'STRUCTURAL_EXIT',
-      reason: tactical.flow?.relation === 'DISTRIBUTION'
-        ? '主力流出、小单承接且板块或个股地位转弱'
-        : '负面催化出现且个股相对强度不足',
+      kind: structural
+        ? 'STRUCTURAL_EXIT'
+        : targetReached ? 'TAKE_PROFIT' : 'VALUE_DECAY',
+      reason: actionValue.selected.reasons.join('；')
+        || '继续持有的预期价值已低于降低风险',
       price: current,
       total,
       sellable,
+      full: actionValue.selected.action === 'EXIT',
       nextTradeDay: payload.nextTradeDay,
     })
-  }
-
-  const target = finite(result.targetPrice)
-  if (current > 0 && target > 0 && current >= target) {
-    return applyExitAction(result, {
-      kind: 'TAKE_PROFIT',
-      reason: `现价${current}已达到目标${target}，先分批锁定利润`,
-      price: current,
-      total,
-      sellable,
-      nextTradeDay: payload.nextTradeDay,
-    })
-  }
-
-  const trailing = trailingProtection(payload, result)
-  if (trailing) {
-    return applyExitAction(result, {
-      kind: 'TRAILING_PROTECT',
-      reason: `盈利${trailing.profitPct}%后从高点回撤${trailing.drawdownPct}%，且盘中结构转弱`,
-      price: trailing.current,
-      total,
-      sellable,
-      nextTradeDay: payload.nextTradeDay,
-    })
-  }
-
-  const deadline = holdingExitDeadline(payload.holdingStartedAt)
-  if (deadline != null && now >= deadline) {
-    const timed = applyExitAction(result, {
-      kind: 'TIME_EXIT',
-      reason: '短线持仓已到第5个交易日退出窗口，不自动转为长期持有',
-      price: current,
-      total,
-      sellable,
-      full: true,
-      nextTradeDay: payload.nextTradeDay,
-    })
-    timed.exitManagement.deadlineAt = deadline
-    return timed
-  }
-
-  const opportunity = expiredOpportunityReview(payload, now)
-  if (opportunity) {
-    result.reviewTrigger = `原短线窗口到期，${opportunity.targetName}相对优势高${opportunity.edgeScore}分，立即重评是否轮动`
-    result.exitManagement = {
-      schemaVersion: EXIT_MANAGEMENT_VERSION,
-      kind: 'OPPORTUNITY_REVIEW',
-      priority: EXIT_PRIORITY.OPPORTUNITY_REVIEW,
-      action: '复核',
-      lots: 0,
-      totalLots: total,
-      sellableLots: sellable,
-      lockedLots: Math.max(0, total - sellable),
-      blockedByT1: false,
-      referencePrice: rounded(current, 3),
-      reason: result.reviewTrigger,
-      nextReviewTrigger: result.reviewTrigger,
-      opportunity,
-    }
-    return result
   }
 
   result.exitManagement = {
@@ -348,13 +227,15 @@ export function applyShortHorizonExitPolicy({
     lockedLots: Math.max(0, total - sellable),
     blockedByT1: false,
     referencePrice: rounded(current, 3),
-    reason: '尚未触发退出优先级，继续等待止损、结构、目标或到期事件',
+    reason: actionValue.selected.reasons.join('；')
+      || '继续持有的当前价值仍高于减仓或退出',
     nextReviewTrigger: text(
       result.reviewTrigger
       || tactical.timing?.reviewAfter
       || '五分钟结构变化',
       160,
     ),
+    actionValue,
   }
   return result
 }

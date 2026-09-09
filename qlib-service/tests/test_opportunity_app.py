@@ -37,16 +37,47 @@ class OpportunityAppTest(unittest.TestCase):
             app,
             "predict_opportunity_items",
             return_value=[expected],
-        ) as predict:
+        ) as predict, patch.object(
+            app,
+            "get_opportunity_models",
+            return_value=(None, None),
+        ):
+            response = app.opportunity_score(
+                    {"items": [item()]},
+                    x_api_key="",
+                )
+
+        self.assertTrue(response["ok"])
+        self.assertTrue(response["shadowOnly"])
+        self.assertFalse(response["productionEligible"])
+        self.assertEqual(response["predictions"], [expected])
+        predict.assert_called_once()
+
+    def test_production_metadata_enables_executable_channel(self):
+        metadata = {
+            "modelVersion": "opportunity-score.prod",
+            "productionEligible": True,
+        }
+        with patch.object(
+            app,
+            "predict_opportunity_items",
+            return_value=[],
+        ), patch.object(
+            app,
+            "get_opportunity_models",
+            return_value=({"pFill": object()}, metadata),
+        ):
             response = app.opportunity_score(
                 {"items": [item()]},
                 x_api_key="",
             )
 
-        self.assertTrue(response["ok"])
-        self.assertTrue(response["shadowOnly"])
-        self.assertEqual(response["predictions"], [expected])
-        predict.assert_called_once()
+        self.assertFalse(response["shadowOnly"])
+        self.assertTrue(response["productionEligible"])
+        self.assertEqual(
+            response["modelVersion"],
+            "opportunity-score.prod",
+        )
 
     def test_opportunity_endpoint_rejects_invalid_request(self):
         with patch.object(

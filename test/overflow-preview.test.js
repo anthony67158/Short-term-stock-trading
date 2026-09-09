@@ -46,7 +46,7 @@ test('溢出检测监听容器尺寸和字体加载变化', () => {
   assert.match(hook, /window\.addEventListener\('resize'/)
 })
 
-test('操作建议使用两行摘要和详情入口而不渲染遮挡式预览', () => {
+test('操作建议使用摘要和股票详情入口而不渲染遮挡式预览', () => {
   assert.doesNotMatch(
     planTab,
     /useTextOverflow\(instruction\)/,
@@ -60,7 +60,10 @@ test('操作建议使用两行摘要和详情入口而不渲染遮挡式预览',
     /'action-command'[\s\S]*?has-preview/,
   )
   assert.match(planTab, /className="action-command-text" title=\{instruction\}/)
-  assert.match(planTab, /title="查看完整建议"/)
+  assert.match(
+    planTab,
+    /title="查看股票详情与完整建议"/,
+  )
 })
 
 test('个人备注只有省略时才渲染完整预览', () => {

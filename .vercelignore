@@ -12,6 +12,7 @@ backtest/
 # 依赖与本地产物,严禁上传(Vercel 只需 dist/ 静态产物,构建由其云端 npm run build 完成)
 node_modules/
 dist/
+harness-artifacts/
 .git/
 .s/
 .s/**
