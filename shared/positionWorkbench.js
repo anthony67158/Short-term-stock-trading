@@ -2,7 +2,14 @@ import { buildAccountRiskContext } from './accountRiskBudget.js'
 import { buildAdviceActionView } from './adviceActionView.js'
 import { t1StatusOf } from './portfolioAccounting.js'
 import { isContinuousTrading } from './tradingCalendar.js'
-import { rankWatchlistCandidates } from './watchlistRanking.js'
+import {
+  autoConfigFromSettings,
+  selectAutoRefreshCodes,
+} from './adviceAutoRefreshPolicy.js'
+import {
+  rankWatchlistCandidates,
+  watchlistActionValue,
+} from './watchlistRanking.js'
 
 export const POSITION_WORKBENCH_VERSION = 'position-workbench.v1'
 
@@ -12,6 +19,12 @@ const ACTIVE_EXECUTION_STATES = new Set([
   'USER_CONFIRMED',
   'PARTIALLY_RECORDED',
 ])
+
+function finite(value) {
+  if (value == null || value === '') return null
+  const number = Number(value)
+  return Number.isFinite(number) ? number : null
+}
 
 function commandPriority(command) {
   return {
@@ -60,6 +73,12 @@ export function buildTodayCommandList({
   const items = []
   const holding = Array.isArray(book.holding) ? book.holding : []
   const watchlist = Array.isArray(book.plan) ? book.plan : []
+  const managedWatchCodes = new Set(selectAutoRefreshCodes({
+    config: autoConfigFromSettings(book.settings || {}),
+    holdings: holding,
+    watchlist,
+    scopes: ['watch'],
+  }).watchCodes)
   const all = [...holding, ...watchlist]
   const seen = new Set()
   for (const item of all) {
@@ -69,7 +88,9 @@ export function buildTodayCommandList({
       holdingItem.code === item.code
     )
     const mode = isHolding ? 'hold_advice' : 'buy_advice'
-    const entry = adviceFor(item.code, mode)
+    const entry = !isHolding && !managedWatchCodes.has(String(item.code))
+      ? null
+      : adviceFor(item.code, mode)
     const advice = entry?.advice || null
     const quote = quoteMap[item.code] || {}
     const currentPrice = Number(quote.price) || null
@@ -214,6 +235,12 @@ export function buildTodayCommandList({
         ?? null,
       decisionId: advice?.decisionPlan?.decisionId || null,
       executionPlanId: executionPlan?.planId || null,
+      actionValue: isHolding
+        ? finite(
+            advice?.adaptiveAction?.selected?.valueR
+            ?? advice?.adaptiveAction?.selected?.value,
+          )
+        : watchlistActionValue(entry)?.utility ?? null,
       priority: 0,
     }
     if (command.state === 'READY') {
@@ -249,6 +276,8 @@ export function buildTodayCommandList({
   }
   return items.sort((left, right) =>
     left.priority - right.priority
+    || Number(right.actionValue ?? -Infinity)
+      - Number(left.actionValue ?? -Infinity)
     || Number(left.distancePct ?? Infinity)
       - Number(right.distancePct ?? Infinity)
     || String(left.code).localeCompare(String(right.code))
@@ -262,11 +291,12 @@ function adviceForAccount(book = {}, code = '', mode = '') {
   return entry
 }
 
-function projectedStock(item, command, entry, quote) {
+function projectedStock(item, command, entry, quote, managed = true) {
   const advice = entry?.advice || null
   return {
     code: item.code,
     name: item.name || quote?.name || item.code,
+    managed,
     quote: quote || null,
     command: command || null,
     decisionPlan: advice?.decisionPlan || null,
@@ -284,8 +314,19 @@ export function buildPositionWorkbench({
 } = {}) {
   const accountRisk = buildAccountRiskContext(book, quoteMap, now)
   const marketContext = opportunityRadar?.opportunityContext || null
-  const adviceFor = (code, mode) =>
-    adviceForAccount(book, code, mode)
+  const trackingSelection = selectAutoRefreshCodes({
+    config: autoConfigFromSettings(book.settings || {}),
+    holdings: book.holding || [],
+    watchlist: book.plan || [],
+  })
+  const managedWatchCodes = new Set(trackingSelection.watchCodes)
+  const adviceFor = (code, mode) => {
+    if (
+      mode === 'buy_advice'
+      && !managedWatchCodes.has(String(code))
+    ) return null
+    return adviceForAccount(book, code, mode)
+  }
   const actions = buildTodayCommandList({
     book,
     quoteMap,
@@ -310,15 +351,28 @@ export function buildPositionWorkbench({
       adviceFor(item.code, 'hold_advice'),
       quoteMap[item.code],
     )
-  )
-  const adviceByCode = Object.fromEntries(
-    (book.plan || []).map((item) => [
-      item.code,
-      adviceFor(item.code, 'buy_advice'),
-    ]),
-  )
+  ).sort((left, right) => {
+    const leftIndex = actions.findIndex((item) =>
+      item.code === left.code
+    )
+    const rightIndex = actions.findIndex((item) =>
+      item.code === right.code
+    )
+    return (
+      (leftIndex < 0 ? Infinity : leftIndex)
+      - (rightIndex < 0 ? Infinity : rightIndex)
+    )
+  })
+  const rankedCandidates = (book.plan || []).map((item) => ({
+    ...item,
+    managed: managedWatchCodes.has(String(item.code)),
+  }))
+  const adviceByCode = Object.fromEntries(rankedCandidates.map((item) => [
+    item.code,
+    adviceFor(item.code, 'buy_advice'),
+  ]))
   const rankedWatchlist = rankWatchlistCandidates(
-    book.plan || [],
+    rankedCandidates,
     quoteMap,
     adviceByCode,
   )
@@ -328,6 +382,7 @@ export function buildPositionWorkbench({
       actionByCode.get(item.code),
       adviceByCode[item.code],
       quoteMap[item.code],
+      item.managed,
     )
   )
   const primaryAction = actions.find((action) =>
@@ -345,14 +400,17 @@ export function buildPositionWorkbench({
     watchlist,
     opportunitySummary: opportunityRadar?.summary || null,
     runtime: {
-      activeTrackingCount: (book.alerts || [])
-        .filter((alert) => alert.enabled).length,
-      observingCount: (book.alerts || [])
-        .filter((alert) => alert.phase === 'watching').length,
-      reviewingCount: (book.alerts || [])
+      activeTrackingCount: trackingSelection.allCodes.length,
+      observingCount: new Set((book.alerts || [])
+        .filter((alert) => alert.phase === 'watching')
+        .map((alert) => String(alert.candCode || alert.code || ''))
+        .filter(Boolean)).size,
+      reviewingCount: new Set((book.alerts || [])
         .filter((alert) =>
           ['reviewing', 'confirming'].includes(alert.phase)
-        ).length,
+        )
+        .map((alert) => String(alert.candCode || alert.code || ''))
+        .filter(Boolean)).size,
     },
   }
 }

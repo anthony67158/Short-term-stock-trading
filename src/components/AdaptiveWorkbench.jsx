@@ -10,9 +10,12 @@ import {
   refreshOpportunityRadar,
 } from '../opportunityRadarClient.js'
 import {
+  computePortfolio,
   planStore,
   todayCommandList,
 } from '../planStore.js'
+import { buildWatchSpec } from '../adviceDaily.js'
+import { tryStartAdvice } from '../adviceGate.js'
 import {
   buildAccountRiskContext,
 } from '../../shared/accountRiskBudget.js'
@@ -167,7 +170,15 @@ function ActionQueue({ commands, onOpen }) {
   )
 }
 
-function OpportunityRow({ opportunity, rank, added, onAdd, onOpen }) {
+function OpportunityRow({
+  opportunity,
+  rank,
+  held,
+  managed,
+  enrolling,
+  onAdd,
+  onOpen,
+}) {
   const adaptive = opportunity.adaptive || {}
   const estimate = adaptive.estimate || {}
   const winLabel = estimate.productionReady === true
@@ -236,12 +247,25 @@ function OpportunityRow({ opportunity, rank, added, onAdd, onOpen }) {
         <button
           type="button"
           className="icon-btn"
-          aria-label={added ? `${opportunity.name}已在自选` : `加入${opportunity.name}`}
-          title={added ? '已在自选' : '加入自选'}
-          disabled={added}
+          aria-label={held
+            ? `${opportunity.name}已持有`
+            : managed
+              ? `${opportunity.name}已纳入作战`
+            : `将${opportunity.name}纳入作战`}
+          title={held
+            ? '当前已持有'
+            : managed ? '已纳入作战' : '纳入作战并持续跟踪'}
+          disabled={held || managed || enrolling}
+          aria-busy={enrolling}
           onClick={() => onAdd(opportunity)}
         >
-          <Icon name={added ? 'check' : 'plus'} size={15} />
+          <Icon
+            name={held || managed
+              ? 'check'
+              : enrolling ? 'refresh' : 'target'}
+            size={15}
+            className={enrolling ? 'spin' : ''}
+          />
         </button>
       </div>
       {(adaptive.cautions || []).length > 0 && (
@@ -253,11 +277,17 @@ function OpportunityRow({ opportunity, rank, added, onAdd, onOpen }) {
   )
 }
 
-function OpportunityBoard({ book, onOpen, initialSnapshot = null }) {
+function OpportunityBoard({
+  book,
+  quoteMap,
+  onOpen,
+  initialSnapshot = null,
+}) {
   const [snapshot, setSnapshot] = useState(initialSnapshot)
   const [lane, setLane] = useState(
     initialSnapshot?.defaultLane || '',
   )
+  const [enrollingCode, setEnrollingCode] = useState('')
   const [loading, setLoading] = useState(!initialSnapshot)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState('')
@@ -329,14 +359,51 @@ function OpportunityBoard({ book, onOpen, initialSnapshot = null }) {
     .filter((item) => item.state !== 'AVOID')
     .slice(0, 5)
   const add = async (opportunity) => {
+    if (!opportunity?.code || enrollingCode) return
+    setEnrollingCode(opportunity.code)
     planStore.addPlan(
       { code: opportunity.code, name: opportunity.name },
       `${opportunity.adaptive?.playbook?.label || '短线机会'}；`
         + `${opportunity.entryPlan?.trigger || ''}`,
       selectionOriginFromOpportunity(opportunity, snapshot),
     )
-    if (!await planStore.flushSave()) {
-      setError('已加入本机自选，云端同步尚未完成')
+    planStore.setAdviceReviewEnabled(opportunity.code, true)
+    const current = planStore.get()
+    const enrichedQuotes = {
+      ...quoteMap,
+      [opportunity.code]: {
+        ...(quoteMap?.[opportunity.code] || {}),
+        code: opportunity.code,
+        name: opportunity.name,
+        price: quoteMap?.[opportunity.code]?.price
+          ?? opportunity.entryPlan?.price
+          ?? null,
+      },
+    }
+    try {
+      const synced = await planStore.flushSave()
+      const result = await tryStartAdvice(buildWatchSpec(
+        opportunity.code,
+        opportunity.name,
+        enrichedQuotes,
+        computePortfolio(
+          current.holding || [],
+          enrichedQuotes,
+          current.account,
+        ),
+        current.account,
+      ))
+      if (result?.status === 'full') {
+        setError('已纳入作战，生成通道正忙，系统将继续排队检查')
+      } else if (!synced) {
+        setError('已在本机纳入作战，云端设置正在重试同步')
+      } else {
+        setError('')
+      }
+    } catch (reason) {
+      setError(reason?.message || '已纳入作战，本次生成未启动')
+    } finally {
+      setEnrollingCode('')
     }
   }
   return (
@@ -390,7 +457,18 @@ function OpportunityBoard({ book, onOpen, initialSnapshot = null }) {
               key={item.code}
               opportunity={item}
               rank={index + 1}
-              added={(book.plan || []).some((row) => row.code === item.code)}
+              held={(book.holding || []).some(
+                (row) => row.code === item.code,
+              )}
+              managed={
+                (book.plan || []).some((row) => row.code === item.code)
+                && (
+                  !Array.isArray(book.settings?.['advAuto.watchCodes'])
+                  || book.settings['advAuto.watchCodes']
+                    .includes(item.code)
+                )
+              }
+              enrolling={enrollingCode === item.code}
               onAdd={add}
               onOpen={onOpen}
             />
@@ -475,6 +553,7 @@ export default function AdaptiveWorkbench({
         <ActionQueue commands={commands} onOpen={openStockDetail} />
         <OpportunityBoard
           book={book}
+          quoteMap={quoteMap}
           onOpen={openStockDetail}
           initialSnapshot={previewSnapshot}
         />

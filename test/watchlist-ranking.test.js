@@ -274,6 +274,32 @@ test('同一建议档位内优先使用自适应动作价值', () => {
   assert.equal(watchlistActionValue(advice['600002']).utility, 0.31)
 })
 
+test('已纳入作战的股票固定排在普通收藏之前', () => {
+  const candidates = [
+    {
+      code: '600001',
+      managed: false,
+      qScore: 99,
+      targetPrice: 10,
+    },
+    {
+      code: '600002',
+      managed: true,
+      qScore: 40,
+      targetPrice: 10,
+    },
+  ]
+  const ranked = rankWatchlistCandidates(candidates, {
+    '600001': { price: 10 },
+    '600002': { price: 12 },
+  })
+
+  assert.deepEqual(
+    ranked.map((item) => item.code),
+    ['600002', '600001'],
+  )
+})
+
 test('自选列表订阅建议更新并把建议映射传入排序器', () => {
   const source = readFileSync(
     new URL('../src/components/PlanTab.jsx', import.meta.url),

@@ -79,7 +79,7 @@ test('持仓工作台只聚合既有决策并按动作价值排列自选', () =>
   })
 
   assert.equal(result.schemaVersion, POSITION_WORKBENCH_VERSION)
-  assert.equal(result.primaryAction.code, '600001')
+  assert.equal(result.primaryAction.code, '600002')
   assert.deepEqual(
     result.watchlist.map((item) => item.code),
     ['600002', '600001'],
@@ -87,6 +87,51 @@ test('持仓工作台只聚合既有决策并按动作价值排列自选', () =>
   assert.equal(
     result.watchlist[0].decisionPlan.decisionId,
     'decision-600002',
+  )
+  assert.equal(result.runtime.activeTrackingCount, 2)
+})
+
+test('普通收藏不读取旧建议且固定排在已纳入作战股票之后', () => {
+  const book = {
+    account: { totalAssets: 100_000, cash: 80_000 },
+    holding: [],
+    plan: [
+      { code: '600001', name: '普通收藏', qScore: 99 },
+      { code: '600002', name: '已纳入作战', qScore: 40 },
+    ],
+    advice: {
+      '600001': buyAdvice('600001', 0.8),
+      '600002': buyAdvice('600002', 0.2),
+    },
+    settings: {
+      'advAuto.holdCodes': [],
+      'advAuto.watchCodes': ['600002'],
+    },
+    alerts: [],
+    executionPlans: [],
+    closed: [],
+  }
+
+  const result = buildPositionWorkbench({
+    book,
+    quoteMap: {
+      '600001': { code: '600001', price: 10 },
+      '600002': { code: '600002', price: 10 },
+    },
+    now,
+  })
+
+  assert.deepEqual(
+    result.watchlist.map((item) => item.code),
+    ['600002', '600001'],
+  )
+  assert.equal(result.watchlist[0].managed, true)
+  assert.equal(result.watchlist[1].managed, false)
+  assert.equal(result.runtime.activeTrackingCount, 1)
+  assert.equal(result.watchlist[1].decisionPlan, null)
+  assert.equal(
+    result.actions.find((item) => item.code === '600001').state,
+    'EMPTY',
   )
 })
 
@@ -139,4 +184,25 @@ test('FC 持仓工作台接口保持账号鉴权、只读和禁缓存', () => {
   assert.match(source, /req\.method !== 'GET'/)
   assert.match(source, /Cache-Control', 'no-store'/)
   assert.match(source, /buildPositionWorkbench/)
+})
+
+test('浏览器工作台读取带鉴权、禁缓存和独立超时', () => {
+  const source = readFileSync(
+    new URL('../src/positionWorkbench.js', import.meta.url),
+    'utf8',
+  )
+  assert.match(source, /accountRequestHeaders\(\)/)
+  assert.match(source, /cache:\s*'no-store'/)
+  assert.match(source, /REQUEST_TIMEOUT_MS = 15_000/)
+  assert.match(source, /setTimeout\(abort, REQUEST_TIMEOUT_MS\)/)
+})
+
+test('今日作战纳入机会时同步授权并触发同源买入建议', () => {
+  const source = readFileSync(
+    new URL('../src/components/AdaptiveWorkbench.jsx', import.meta.url),
+    'utf8',
+  )
+  assert.match(source, /planStore\.setAdviceReviewEnabled\(opportunity\.code, true\)/)
+  assert.match(source, /tryStartAdvice\(buildWatchSpec\(/)
+  assert.match(source, /纳入作战并持续跟踪/)
 })

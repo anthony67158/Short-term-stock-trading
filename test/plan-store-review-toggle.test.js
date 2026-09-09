@@ -115,6 +115,93 @@ test('开启单股持续复核会同步开启自动预警总开关', () => {
   )
 })
 
+test('旧账号新增普通收藏时固化存量白名单且不自动跟踪新股票', () => {
+  planStore.setData({
+    plan: [{ code: '000001', name: '平安银行' }],
+    holding: [{ code: '600000', name: '浦发银行' }],
+    closed: [],
+    settings: {},
+    alerts: [],
+  })
+
+  planStore.addPlan({ code: '000002', name: '万科A' })
+
+  assert.deepEqual(
+    planStore.get().settings['advAuto.holdCodes'],
+    ['600000'],
+  )
+  assert.deepEqual(
+    planStore.get().settings['advAuto.watchCodes'],
+    ['000001'],
+  )
+  assert.equal(
+    isAdviceReviewEnabled(planStore.get().settings, '000002'),
+    false,
+  )
+})
+
+test('记录买入时把持续管理从自选白名单迁移到持仓白名单', () => {
+  planStore.setData({
+    plan: [{ code: '000001', name: '平安银行' }],
+    holding: [],
+    closed: [],
+    account: { totalAssets: 100_000, cash: 90_000 },
+    settings: {
+      'advAuto.holdCodes': [],
+      'advAuto.watchCodes': ['000001'],
+      'advReview.disabledCodes': [],
+    },
+    alerts: [],
+  })
+
+  const result = planStore.buy('000001', 10, 1, {
+    adviceReviewEnabled: true,
+  })
+
+  assert.equal(result.ok, true)
+  assert.deepEqual(
+    planStore.get().settings['advAuto.holdCodes'],
+    ['000001'],
+  )
+  assert.deepEqual(
+    planStore.get().settings['advAuto.watchCodes'],
+    [],
+  )
+})
+
+test('记录买入可明确拒绝持续管理', () => {
+  planStore.setData({
+    plan: [{ code: '000001', name: '平安银行' }],
+    holding: [],
+    closed: [],
+    account: { totalAssets: 100_000, cash: 90_000 },
+    settings: {
+      'advAuto.holdCodes': [],
+      'advAuto.watchCodes': ['000001'],
+      'advReview.disabledCodes': [],
+    },
+    alerts: [],
+  })
+
+  const result = planStore.buy('000001', 10, 1, {
+    adviceReviewEnabled: false,
+  })
+
+  assert.equal(result.ok, true)
+  assert.deepEqual(
+    planStore.get().settings['advAuto.holdCodes'],
+    [],
+  )
+  assert.deepEqual(
+    planStore.get().settings['advAuto.watchCodes'],
+    [],
+  )
+  assert.equal(
+    isAdviceReviewEnabled(planStore.get().settings, '000001'),
+    false,
+  )
+})
+
 test('云端生成的新行动预警增量同步到当前页面', () => {
   planStore.setData({
     plan: [],

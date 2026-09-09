@@ -202,6 +202,7 @@ export function rankWatchlistCandidates(
 ) {
   return candidates.map((candidate, index) => ({
     ...candidate,
+    managed: candidate.managed !== false,
     advicePriority: watchlistAdvicePriority(
       adviceByCode[candidate.code],
     ),
@@ -214,6 +215,9 @@ export function rankWatchlistCandidates(
     ),
     _rankingIndex: index,
   })).sort((left, right) => {
+    if (left.managed !== right.managed) {
+      return left.managed ? -1 : 1
+    }
     if (left.advicePriority.score !== right.advicePriority.score) {
       return right.advicePriority.score - left.advicePriority.score
     }

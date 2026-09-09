@@ -448,8 +448,67 @@ function emit() {
   scheduleSave()
 }
 
+function reviewScopeCodes(scopeKey) {
+  const configured = state.settings?.[scopeKey]
+  if (Array.isArray(configured)) {
+    return [...new Set(configured
+      .map((code) => String(code || '').trim())
+      .filter((code) => /^\d{6}$/.test(code)))]
+  }
+  const source = scopeKey === AUTO_HOLD_CODES
+    ? state.holding
+    : state.plan
+  return [...new Set((source || [])
+    .map((item) => String(item?.code || '').trim())
+    .filter((code) => /^\d{6}$/.test(code)))]
+}
+
+function ensureExplicitReviewScopes(now = Date.now()) {
+  if (
+    Array.isArray(state.settings?.[AUTO_HOLD_CODES])
+    && Array.isArray(state.settings?.[AUTO_WATCH_CODES])
+  ) return
+  state.settings = {
+    ...(state.settings || {}),
+    [AUTO_HOLD_CODES]: reviewScopeCodes(AUTO_HOLD_CODES),
+    [AUTO_WATCH_CODES]: reviewScopeCodes(AUTO_WATCH_CODES),
+    [AUTO_CONFIG_UPDATED_AT]: Math.max(
+      Number(now) || Date.now(),
+      (Number(state.settings?.[AUTO_CONFIG_UPDATED_AT]) || 0) + 1,
+    ),
+  }
+}
+
+function applyAdviceReviewSelection(code, enabled, now = Date.now()) {
+  const normalizedCode = String(code || '').trim()
+  if (!/^\d{6}$/.test(normalizedCode)) return
+  ensureExplicitReviewScopes(now)
+  const configUpdatedAt = Math.max(
+    Number(now) || Date.now(),
+    (Number(state.settings?.[AUTO_CONFIG_UPDATED_AT]) || 0) + 1,
+  )
+  const holdCodes = reviewScopeCodes(AUTO_HOLD_CODES)
+    .filter((itemCode) => itemCode !== normalizedCode)
+  const watchCodes = reviewScopeCodes(AUTO_WATCH_CODES)
+    .filter((itemCode) => itemCode !== normalizedCode)
+  if (enabled) {
+    const scopeCodes = state.holding.some(
+      (item) => String(item?.code || '') === normalizedCode,
+    ) ? holdCodes : state.plan.some(
+      (item) => String(item?.code || '') === normalizedCode,
+    ) ? watchCodes : null
+    if (scopeCodes) scopeCodes.push(normalizedCode)
+  }
+  state.settings = withAdviceReviewEnabled({
+    ...(state.settings || {}),
+    [AUTO_HOLD_CODES]: holdCodes,
+    [AUTO_WATCH_CODES]: watchCodes,
+    ...(enabled ? { aiAutoAlert: true } : {}),
+  }, normalizedCode, !!enabled, configUpdatedAt)
+}
+
 // 把某笔持仓上已配对的做T收益，归档为独立的 closed 记录(kind:'T')；
-// 未配平的开口腿按净额方向归档为 加仓(BUY) / 减仓(SELL)，避免"当天没追平底仓"时无处归类。
+// 未配平的开口腿按净额方向归档为加仓(BUY)/减仓(SELL)，避免当天未配平时无处归类。
 // batchId：同一次结算/清仓产生的记录共享，删除时可按批级联，保证各分类联动一致。
 function archiveTFlows(h, batchId, { deterministicIds = false } = {}) {
   const r = computeTFlows(h.tFlows)
@@ -1314,48 +1373,7 @@ export const planStore = {
   setAdviceReviewEnabled(code, enabled) {
     if (!code) return
     const normalizedCode = String(code)
-    const configUpdatedAt = Math.max(
-      Date.now(),
-      (Number(state.settings?.[AUTO_CONFIG_UPDATED_AT]) || 0) + 1,
-    )
-    state.settings = withAdviceReviewEnabled(
-      state.settings || {},
-      normalizedCode,
-      !!enabled,
-      configUpdatedAt,
-    )
-    if (enabled) {
-      state.settings = {
-        ...state.settings,
-        aiAutoAlert: true,
-      }
-      const scopeKey = state.holding.some(
-        (item) => String(item?.code || '') === normalizedCode,
-      )
-        ? AUTO_HOLD_CODES
-        : state.plan.some(
-            (item) => String(item?.code || '') === normalizedCode,
-          )
-          ? AUTO_WATCH_CODES
-          : ''
-      if (scopeKey && Array.isArray(state.settings[scopeKey])) {
-        state.settings = {
-          ...state.settings,
-          [scopeKey]: [...new Set([
-            ...state.settings[scopeKey],
-            normalizedCode,
-          ])],
-        }
-      }
-    } else {
-      const nextSettings = { ...state.settings }
-      for (const scopeKey of [AUTO_HOLD_CODES, AUTO_WATCH_CODES]) {
-        if (!Array.isArray(nextSettings[scopeKey])) continue
-        nextSettings[scopeKey] = nextSettings[scopeKey]
-          .filter((itemCode) => String(itemCode) !== normalizedCode)
-      }
-      state.settings = nextSettings
-    }
+    applyAdviceReviewSelection(normalizedCode, enabled)
     if (!enabled) {
       state.alerts = (state.alerts || []).filter((alert) =>
         !(
@@ -1370,6 +1388,8 @@ export const planStore = {
     if (!stock || !stock.code) return
     if (state.plan.some((x) => x.code === stock.code)) return
     if (state.holding.some((x) => x.code === stock.code)) return // 已持有的票不再入计划，请用「加仓」
+    // 旧账号缺少显式白名单时先固化当前存量，避免新收藏被默认纳入持续复核。
+    ensureExplicitReviewScopes()
     const origin = normalizeSelectionOrigin(selectionOrigin)
     state.plan = [...state.plan, {
       code: stock.code, name: stock.name, note, addedAt: Date.now(),
@@ -1413,6 +1433,9 @@ export const planStore = {
   buy(code, buyPrice, qty = 1, opts = {}) {
     const p = state.plan.find((x) => x.code === code)
     if (!p) return { ok: false, error: '候选股票不存在或已建仓' }
+    const adviceReviewEnabled = opts.adviceReviewEnabled == null
+      ? isAdviceReviewEnabled(state.settings || {}, code)
+      : opts.adviceReviewEnabled === true
     const q = Number(qty)
     const price = Number(buyPrice)
     if (!Number.isInteger(q) || q <= 0 || !Number.isFinite(price) || price <= 0) {
@@ -1437,6 +1460,7 @@ export const planStore = {
       ...(p.qScore != null ? { qScore: p.qScore, qBias: p.qBias, qAt: p.qAt } : {}),
       ...(ap ? { tp: ap.tp, sl: ap.sl, tpManual: false, slManual: false } : {}),
     }]
+    applyAdviceReviewSelection(code, adviceReviewEnabled)
     // 记录一条纯买入交易流水
     const txn = makeBuyTxn(p.code, p.name, price, q, fee, hid)
     txn.selectionOrigin = normalizeSelectionOrigin(p.selectionOrigin)
@@ -1460,6 +1484,9 @@ export const planStore = {
   // 直接建仓（同股也可多笔，不去重）
   buyDirect(stock, buyPrice, qty = 1, opts = {}) {
     if (!stock || !stock.code) return { ok: false, error: '股票信息不完整' }
+    const adviceReviewEnabled = opts.adviceReviewEnabled == null
+      ? isAdviceReviewEnabled(state.settings || {}, stock.code)
+      : opts.adviceReviewEnabled === true
     const q = Number(qty)
     const price = Number(buyPrice)
     if (!Number.isInteger(q) || q <= 0 || !Number.isFinite(price) || price <= 0) {
@@ -1481,6 +1508,7 @@ export const planStore = {
       selectionOrigin,
       ...(ap ? { tp: ap.tp, sl: ap.sl, tpManual: false, slManual: false } : {}),
     }]
+    applyAdviceReviewSelection(stock.code, adviceReviewEnabled)
     state.plan = state.plan.filter((x) => x.code !== stock.code)
     state.alerts = (state.alerts || []).filter((a) => a.candCode !== stock.code) // 已买入 → 移除买点预警
     const txn = makeBuyTxn(stock.code, stock.name, price, q, fee, hid)
