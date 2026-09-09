@@ -711,7 +711,7 @@ test('持仓页大型展开层统一挂到顶层Portal避免被吸顶区遮盖',
   )
 })
 
-test('持仓与自选卡桌面同排以最高卡片等高并分散内部留白', () => {
+test('持仓与自选卡桌面同排等高且手机使用横向吸附卡组', () => {
   assert.match(calmSurface, /\.hold-grid,[\s\S]*?\.plan-cand-grid\s*{[^}]*align-items:\s*stretch[^}]*grid-auto-rows:\s*auto/s)
   assert.match(calmSurface, /\.hold-swipe-wrap,[\s\S]*?\.plan-cand\s*{[^}]*height:\s*100%/s)
   assert.match(
@@ -724,7 +724,7 @@ test('持仓与自选卡桌面同排以最高卡片等高并分散内部留白',
   )
   assert.match(
     calmSurface,
-    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.hold-swipe-wrap,[\s\S]*?\.plan-cand\s*{[^}]*height:\s*auto[\s\S]*?\.plan-cand,[\s\S]*?\.hold-grid \.hold-item\s*{[^}]*justify-content:\s*flex-start/s,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.hold-grid,[\s\S]*?\.plan-cand-grid\s*{[^}]*grid-auto-flow:\s*column[^}]*overflow-x:\s*auto[^}]*scroll-snap-type:\s*inline mandatory[\s\S]*?\.hold-swipe-wrap,[\s\S]*?\.plan-cand\s*{[^}]*height:\s*100%[^}]*scroll-snap-align:\s*start/s,
   )
   assert.match(
     precision,

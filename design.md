@@ -186,8 +186,9 @@
   metric strip, decision summary, then actions. Every card stretches to the
   tallest natural card in its desktop grid row. Shorter cards distribute the
   extra height across section gaps instead of leaving one large void above the
-  action rail. Mobile keeps natural height and compact flow. The full advice
-  opens in stock detail.
+  action rail. Mobile groups use equal-height horizontal snap rows so one
+  section consumes one card height instead of stacking every full card. The
+  full advice opens in stock detail.
 - Card decision summaries separate status, primary action, position limit and
   execution condition into distinct visual rows. Use one semantic icon for the
   primary action, render position as a compact badge, and clamp the condition to
