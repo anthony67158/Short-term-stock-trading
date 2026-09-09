@@ -16444,6 +16444,18 @@ html[data-theme="light"] .plan-cand.starred {
   }
 }
 
+@media (max-width: 360px) {
+  .hold-head {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-2xs);
+  }
+
+  .hold-head-market {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
 /* Portfolio cards: a restrained contact shadow and inner highlight preserve
    card boundaries on both the midnight and ice surfaces. */
 .plan-cand,
