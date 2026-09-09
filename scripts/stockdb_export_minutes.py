@@ -12,7 +12,7 @@ import sys
 CODE = re.compile(r"^\d{6}$")
 DATE = re.compile(r"^\d{8}$")
 MAX_DATES = 160
-MAX_CODES_PER_DATE = 4000
+MAX_CODES_PER_DATE = 6000
 
 
 def load_manifest(path):

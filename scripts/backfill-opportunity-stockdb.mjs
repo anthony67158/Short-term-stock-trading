@@ -1,0 +1,410 @@
+#!/usr/bin/env node
+
+import { spawn } from 'node:child_process'
+import {
+  mkdir,
+  readFile,
+  rename,
+  stat,
+  writeFile,
+} from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+import { promisify } from 'node:util'
+import { fileURLToPath } from 'node:url'
+import {
+  gunzip,
+  gzip,
+} from 'node:zlib'
+
+import {
+  createStockDbHttpClient,
+} from './lib/stockdb-http.mjs'
+import {
+  StockDbHistorySource,
+  indexRowsByCode,
+} from './lib/stockdb-history-source.mjs'
+import {
+  buildMinuteExportManifest,
+  selectCausalUniverse,
+  selectReplayDates,
+} from './lib/stockdb-backfill-plan.mjs'
+import {
+  appendBarsForCodes,
+  beijingSlotTimestamp,
+  groupMinuteRows,
+  pendingFromBatch,
+  scanHistoricalSlot,
+  settlePendingHistoricalEvents,
+} from './lib/stockdb-backfill-runtime.mjs'
+import {
+  mergeHistoricalOutcomes,
+} from './lib/opportunity-history-backfill.mjs'
+
+const gzipAsync = promisify(gzip)
+const gunzipAsync = promisify(gunzip)
+const SCRIPT = fileURLToPath(import.meta.url)
+const ROOT = path.resolve(path.dirname(SCRIPT), '..')
+const DEFAULT_STOCKDB_ROOT = path.join(
+  os.homedir(),
+  '.stockdb-v0.3.5-run',
+)
+const DEFAULT_WORK_DIR = path.join(
+  os.homedir(),
+  '.stockdb-v3-work',
+)
+const SLOT_CONFIG = Object.freeze([
+  { mode: 'intraday', slot: '1020' },
+  { mode: 'intraday', slot: '1340' },
+  { mode: 'close', slot: '1510' },
+])
+
+function beijingDay() {
+  return new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date()).replaceAll('-', '')
+}
+
+function dayOffset(day, offset) {
+  const date = new Date(
+    `${day.slice(0, 4)}-${day.slice(4, 6)}-${day.slice(6)}T00:00:00Z`,
+  )
+  date.setUTCDate(date.getUTCDate() + offset)
+  return date.toISOString().slice(0, 10).replaceAll('-', '')
+}
+
+function positiveInteger(value, fallback, maximum) {
+  const number = Math.trunc(Number(value))
+  return Number.isFinite(number) && number > 0
+    ? Math.min(number, maximum)
+    : fallback
+}
+
+export function parseStockDbBackfillArgs(argv = []) {
+  const values = {}
+  for (let index = 0; index < argv.length; index += 1) {
+    const name = argv[index]
+    if (!name.startsWith('--')) continue
+    const key = name.slice(2)
+    if (![
+      'stockdb-root',
+      'work-dir',
+      'base-url',
+      'from',
+      'to',
+      'signal-days',
+      'universe-size',
+    ].includes(key)) {
+      throw new Error(`未知StockDB回填参数: ${name}`)
+    }
+    values[key] = argv[index + 1]
+    index += 1
+  }
+  const to = String(values.to || beijingDay()).replaceAll('-', '')
+  const from = String(values.from || dayOffset(to, -300)).replaceAll('-', '')
+  if (!/^\d{8}$/.test(from) || !/^\d{8}$/.test(to) || from >= to) {
+    throw new Error('StockDB回填日期范围无效')
+  }
+  return {
+    stockdbRoot: path.resolve(values['stockdb-root'] || DEFAULT_STOCKDB_ROOT),
+    workDir: path.resolve(values['work-dir'] || DEFAULT_WORK_DIR),
+    baseUrl: values['base-url'] || 'http://127.0.0.1:7899',
+    from,
+    to,
+    signalDays: positiveInteger(values['signal-days'], 90, 120),
+    universeSize: positiveInteger(values['universe-size'], 1000, 2000),
+  }
+}
+
+function assertDisposableDirectory(directory) {
+  const home = os.homedir()
+  if (
+    !directory.startsWith(`${home}${path.sep}`)
+    || directory === home
+    || directory.startsWith(`${ROOT}${path.sep}`)
+  ) {
+    throw new Error('StockDB回填工作目录必须位于项目外的用户目录')
+  }
+}
+
+async function fileExists(file) {
+  try {
+    return (await stat(file)).isFile()
+  } catch {
+    return false
+  }
+}
+
+async function writeGzipJson(file, value) {
+  const temporary = `${file}.part`
+  const encoded = Buffer.from(JSON.stringify(value))
+  const compressed = await gzipAsync(encoded, { level: 6 })
+  try {
+    await writeFile(temporary, compressed, { mode: 0o600 })
+    await rename(temporary, file)
+  } finally {
+    encoded.fill(0)
+    compressed.fill(0)
+  }
+}
+
+async function readGzipJson(file) {
+  const compressed = await readFile(file)
+  const decoded = await gunzipAsync(compressed)
+  try {
+    return JSON.parse(decoded.toString('utf8'))
+  } finally {
+    compressed.fill(0)
+    decoded.fill(0)
+  }
+}
+
+async function cachedJson(file, loader) {
+  if (await fileExists(file)) return readGzipJson(file)
+  const value = await loader()
+  await writeGzipJson(file, value)
+  return value
+}
+
+function writeProgress(stage, details = {}) {
+  process.stdout.write(JSON.stringify({
+    at: new Date().toISOString(),
+    stage,
+    ...details,
+  }) + '\n')
+}
+
+function validateCoverage(daily, funds, plan, universeSize) {
+  const dailyCodes = new Set(daily.map((row) => row.code))
+  const fundDates = new Set(funds.map((row) => row.date))
+  if (dailyCodes.size < Math.min(800, universeSize)) {
+    throw new Error(`StockDB有效股票不足800只: ${dailyCodes.size}`)
+  }
+  if (plan.signalDates.length < 60) {
+    throw new Error(`StockDB有效训练日期不足60日: ${plan.signalDates.length}`)
+  }
+  if (fundDates.size < 60) {
+    throw new Error(`StockDB资金流有效日期不足60日: ${fundDates.size}`)
+  }
+}
+
+async function runMinuteExporter(options, manifestPath, minuteDirectory) {
+  await new Promise((resolve, reject) => {
+    const child = spawn('python3', [
+      path.join(ROOT, 'scripts', 'stockdb_export_minutes.py'),
+      '--manifest',
+      manifestPath,
+      '--stockdb-root',
+      options.stockdbRoot,
+      '--output-dir',
+      minuteDirectory,
+    ], {
+      cwd: ROOT,
+      stdio: ['ignore', 'inherit', 'inherit'],
+    })
+    child.once('error', reject)
+    child.once('exit', (code, signal) => {
+      if (code === 0) resolve()
+      else reject(new Error(
+        `StockDB分钟导出失败: ${signal || code}`,
+      ))
+    })
+  })
+}
+
+function minuteMap(payload) {
+  const values = payload?.codes
+  if (!values || typeof values !== 'object' || Array.isArray(values)) {
+    throw new Error('StockDB分钟缓存结构无效')
+  }
+  const result = new Map()
+  for (const [code, rows] of Object.entries(values)) {
+    const grouped = groupMinuteRows(rows)
+    result.set(code, grouped.get(code) || [])
+  }
+  return result
+}
+
+function pruneBars(barsByCode, pending) {
+  const active = new Set(pending.map((item) => item.event.code))
+  for (const code of barsByCode.keys()) {
+    if (!active.has(code)) barsByCode.delete(code)
+  }
+}
+
+async function loadExistingOutcomes() {
+  const file = path.join(
+    ROOT,
+    'qlib-service',
+    'opportunity-outcomes.json',
+  )
+  if (!await fileExists(file)) return []
+  const payload = JSON.parse(await readFile(file, 'utf8'))
+  return Array.isArray(payload) ? payload : payload.outcomes || []
+}
+
+async function main() {
+  const options = parseStockDbBackfillArgs(process.argv.slice(2))
+  assertDisposableDirectory(options.workDir)
+  await mkdir(options.workDir, { recursive: true, mode: 0o700 })
+  const minuteDirectory = path.join(options.workDir, 'minutes')
+  await mkdir(minuteDirectory, { recursive: true, mode: 0o700 })
+  const client = createStockDbHttpClient({
+    baseUrl: options.baseUrl,
+    timeoutMs: 300_000,
+  })
+  const source = new StockDbHistorySource(client)
+  const dailyFile = path.join(options.workDir, 'daily.json.gz')
+  const fundFile = path.join(options.workDir, 'funds.json.gz')
+  writeProgress('DAILY_START', { from: options.from, to: options.to })
+  const daily = await cachedJson(
+    dailyFile,
+    () => source.dailyRange(options.from, options.to),
+  )
+  writeProgress('FUND_START', { dailyRows: daily.length })
+  const funds = await cachedJson(
+    fundFile,
+    () => source.fundRange(options.from, options.to),
+  )
+  const dailyByCode = indexRowsByCode(daily)
+  const fundByCode = indexRowsByCode(funds)
+  const plan = selectReplayDates(daily, {
+    signalDays: options.signalDays,
+  })
+  validateCoverage(daily, funds, plan, options.universeSize)
+  const universesByDate = new Map()
+  for (const date of plan.signalDates) {
+    universesByDate.set(date, selectCausalUniverse(
+      dailyByCode,
+      date,
+      { limit: options.universeSize },
+    ))
+  }
+  const manifest = buildMinuteExportManifest({
+    processingDates: plan.processingDates,
+    signalDates: plan.signalDates,
+    universesByDate,
+  })
+  const manifestPath = path.join(options.workDir, 'minute-manifest.json')
+  await writeFile(
+    manifestPath,
+    JSON.stringify(manifest, null, 2),
+    { mode: 0o600 },
+  )
+  writeProgress('MINUTE_EXPORT_START', {
+    signalDates: plan.signalDates.length,
+    processingDates: manifest.dates.length,
+    maximumCodes: Math.max(...manifest.dates.map((row) => row.codes.length)),
+  })
+  await runMinuteExporter(options, manifestPath, minuteDirectory)
+
+  const signalSet = new Set(plan.signalDates)
+  const barsByCode = new Map()
+  const outcomes = []
+  let pending = []
+  let batchCount = 0
+  let eventCount = 0
+  for (let index = 0; index < plan.processingDates.length; index += 1) {
+    const tradeDate = plan.processingDates[index]
+    const file = path.join(minuteDirectory, `${tradeDate}.json.gz`)
+    const minutesByCode = minuteMap(await readGzipJson(file))
+    const appendedToday = new Set(
+      pending.map((item) => item.event.code),
+    )
+    appendBarsForCodes(barsByCode, minutesByCode, appendedToday)
+    if (signalSet.has(tradeDate)) {
+      const universeCodes = universesByDate.get(tradeDate) || []
+      for (const config of SLOT_CONFIG) {
+        const batch = await scanHistoricalSlot({
+          tradeDate,
+          ...config,
+          universeCodes,
+          minutesByCode,
+          dailyByCode,
+          fundByCode,
+        })
+        const next = pendingFromBatch(batch)
+        const newCodes = new Set(next.map((item) => item.event.code))
+        appendBarsForCodes(
+          barsByCode,
+          minutesByCode,
+          [...newCodes].filter((code) => !appendedToday.has(code)),
+        )
+        newCodes.forEach((code) => appendedToday.add(code))
+        pending.push(...next)
+        batchCount += 1
+        eventCount += next.length
+      }
+    }
+    const settled = settlePendingHistoricalEvents({
+      pending,
+      barsByCode,
+      evaluatedAt: beijingSlotTimestamp(tradeDate, '1600'),
+    })
+    outcomes.push(...settled.matured)
+    pending = settled.pending
+    pruneBars(barsByCode, pending)
+    writeProgress('REPLAY_DAY', {
+      progress: index + 1,
+      total: plan.processingDates.length,
+      tradeDate,
+      batches: batchCount,
+      events: eventCount,
+      matured: outcomes.length,
+      pending: pending.length,
+    })
+  }
+
+  const existing = await loadExistingOutcomes()
+  const merged = mergeHistoricalOutcomes(outcomes, existing)
+  const output = {
+    schemaVersion: 'opportunity-outcome-export.v1',
+    exportedAt: Date.now(),
+    range: {
+      from: displayDate(plan.signalDates[0]),
+      to: displayDate(plan.signalDates.at(-1)),
+    },
+    source: {
+      type: 'STOCKDB_CAUSAL_REPLAY',
+      version: '0.3.5',
+      signalDates: plan.signalDates.length,
+      universeSize: options.universeSize,
+      batches: batchCount,
+    },
+    summary: {
+      existing: existing.length,
+      historical: outcomes.length,
+      merged: merged.length,
+      pending: pending.length,
+    },
+    outcomes: merged,
+  }
+  const outputPath = path.join(
+    options.workDir,
+    'opportunity-outcomes-combined.json',
+  )
+  await writeFile(
+    outputPath,
+    JSON.stringify(output),
+    { mode: 0o600 },
+  )
+  writeProgress('DONE', { output: outputPath, ...output.summary })
+}
+
+function displayDate(value) {
+  const date = String(value || '')
+  return `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6)}`
+}
+
+if (
+  process.argv[1]
+  && path.resolve(process.argv[1]) === path.resolve(SCRIPT)
+) {
+  main().catch((error) => {
+    process.stderr.write(`${error?.stack || error}\n`)
+    process.exitCode = 1
+  })
+}
