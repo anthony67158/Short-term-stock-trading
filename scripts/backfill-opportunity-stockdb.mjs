@@ -119,6 +119,12 @@ export function parseStockDbBackfillArgs(argv = []) {
   }
 }
 
+export function filterStockDbRowsByRange(rows, from, to) {
+  return (Array.isArray(rows) ? rows : []).filter(
+    (row) => row?.date >= from && row?.date <= to,
+  )
+}
+
 function assertDisposableDirectory(directory) {
   const home = os.homedir()
   if (
@@ -260,14 +266,24 @@ async function main() {
   const dailyFile = path.join(options.workDir, 'daily.json.gz')
   const fundFile = path.join(options.workDir, 'funds.json.gz')
   writeProgress('DAILY_START', { from: options.from, to: options.to })
-  const daily = await cachedJson(
+  const cachedDaily = await cachedJson(
     dailyFile,
     () => source.dailyRange(options.from, options.to),
   )
+  const daily = filterStockDbRowsByRange(
+    cachedDaily,
+    options.from,
+    options.to,
+  )
   writeProgress('FUND_START', { dailyRows: daily.length })
-  const funds = await cachedJson(
+  const cachedFunds = await cachedJson(
     fundFile,
     () => source.fundRange(options.from, options.to),
+  )
+  const funds = filterStockDbRowsByRange(
+    cachedFunds,
+    options.from,
+    options.to,
   )
   const dailyByCode = indexRowsByCode(daily)
   const fundByCode = indexRowsByCode(funds)

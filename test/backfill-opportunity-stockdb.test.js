@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  filterStockDbRowsByRange,
   parseStockDbBackfillArgs,
 } from '../scripts/backfill-opportunity-stockdb.mjs'
 
@@ -40,5 +41,19 @@ test('StockDB回填命令拒绝未知参数和倒置日期', () => {
       '20260901',
     ]),
     /日期范围/,
+  )
+})
+
+test('StockDB回填缓存严格按本次日期范围裁剪', () => {
+  assert.deepEqual(
+    filterStockDbRowsByRange([
+      { date: '20260730', value: 1 },
+      { date: '20260731', value: 2 },
+      { date: '20260803', value: 3 },
+    ], '20260701', '20260731'),
+    [
+      { date: '20260730', value: 1 },
+      { date: '20260731', value: 2 },
+    ],
   )
 })
