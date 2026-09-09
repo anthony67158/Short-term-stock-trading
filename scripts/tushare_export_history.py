@@ -323,8 +323,15 @@ def export_metadata(args):
     }, ensure_ascii=False), flush=True)
 
 
-def _minute_rows(rows, expected_code, allowed_dates):
+def _minute_rows(
+    rows,
+    expected_code,
+    allowed_dates,
+    *,
+    include_exclusions=False,
+):
     normalized = {}
+    excluded_dates = set()
     expected_ts_code = to_tushare_code(expected_code)
     for row in rows:
         if not isinstance(row, dict):
@@ -342,6 +349,12 @@ def _minute_rows(rows, expected_code, allowed_dates):
             raise ValueError("Tushare分钟数据含无效数值")
         for field in ("open", "close", "high", "low"):
             values[field] = round(values[field], 6)
+        if all(
+            values[field] == 0
+            for field in ("open", "close", "high", "low", "vol", "amount")
+        ):
+            excluded_dates.add(timestamp[:8])
+            continue
         if (
             min(values["open"], values["close"], values["low"]) <= 0
             or values["high"] < max(values["open"], values["close"])
@@ -365,7 +378,14 @@ def _minute_rows(rows, expected_code, allowed_dates):
         if existing is not None and existing != item:
             raise ValueError("Tushare分钟数据存在冲突重复")
         normalized[timestamp] = item
-    return [normalized[key] for key in sorted(normalized)]
+    values = [
+        normalized[key]
+        for key in sorted(normalized)
+        if normalized[key][1] not in excluded_dates
+    ]
+    if include_exclusions:
+        return values, sorted(excluded_dates)
+    return values
 
 
 def _minute_database(path):
@@ -396,6 +416,14 @@ def _minute_database(path):
           start_date TEXT NOT NULL,
           end_date TEXT NOT NULL,
           rows INTEGER NOT NULL
+        )
+    """)
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS exclusions (
+          code TEXT NOT NULL,
+          date TEXT NOT NULL,
+          reason TEXT NOT NULL,
+          PRIMARY KEY (code, date)
         )
     """)
     return connection
@@ -469,14 +497,19 @@ def export_minutes(args):
                     raise ValueError(
                         f"Tushare分钟响应触及8000行上限: {code}"
                     )
-                normalized = _minute_rows(
+                normalized, excluded_dates = _minute_rows(
                     rows,
                     code,
                     requested_by_code[code],
+                    include_exclusions=True,
                 )
                 with connection:
                     connection.execute(
                         "DELETE FROM bars WHERE code = ?",
+                        (code,),
+                    )
+                    connection.execute(
+                        "DELETE FROM exclusions WHERE code = ?",
                         (code,),
                     )
                     connection.executemany("""
@@ -484,6 +517,13 @@ def export_minutes(args):
                           code,date,trade_time,open,high,low,close,volume,amount
                         ) VALUES (?,?,?,?,?,?,?,?,?)
                     """, normalized)
+                    connection.executemany("""
+                        INSERT INTO exclusions(code,date,reason)
+                        VALUES (?,?,'ZERO_OHLCV_SUSPENSION')
+                    """, [
+                        (code, date)
+                        for date in excluded_dates
+                    ])
                     connection.execute("""
                         INSERT INTO completed(code,start_date,end_date,rows)
                         VALUES (?,?,?,?)
@@ -564,6 +604,11 @@ def export_minutes(args):
             "downloadedCodes": downloaded,
             "cachedCodes": cached,
             "bars": total_bars,
+            "sourceQualityExcludedCodeDays": int(
+                connection.execute(
+                    "SELECT count(*) FROM exclusions"
+                ).fetchone()[0]
+            ),
             "minimumCoverage": min(
                 row["coverage"] for row in coverage_rows
             ),

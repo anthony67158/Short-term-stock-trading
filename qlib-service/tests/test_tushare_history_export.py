@@ -135,6 +135,35 @@ class TushareHistoryExportTest(unittest.TestCase):
         self.assertEqual(rows[0][3], 10.28)
         self.assertEqual(rows[0][4], 10.28)
 
+    def test_minute_rows_exclude_whole_zero_ohlcv_suspension_day(self):
+        rows, exclusions = self.module._minute_rows(
+            [{
+                "ts_code": "001331.SZ",
+                "trade_time": "2026-06-18 09:35:00",
+                "open": 0,
+                "close": 0,
+                "high": 0,
+                "low": 0,
+                "vol": 0,
+                "amount": 0,
+            }, {
+                "ts_code": "001331.SZ",
+                "trade_time": "2026-06-18 09:40:00",
+                "open": 10,
+                "close": 10,
+                "high": 10,
+                "low": 10,
+                "vol": 100,
+                "amount": 1000,
+            }],
+            "001331",
+            {"20260618"},
+            include_exclusions=True,
+        )
+
+        self.assertEqual(rows, [])
+        self.assertEqual(exclusions, ["20260618"])
+
 
 if __name__ == "__main__":
     unittest.main()
