@@ -18,6 +18,7 @@ test('StockDB查询生成本地只读URL', () => {
   assert.equal(url.origin, 'http://127.0.0.1:7899')
   assert.equal(url.searchParams.get('cmd'), 'vals')
   assert.equal(url.searchParams.get('t'), '日k')
+  assert.equal(url.searchParams.get('json'), '1')
   assert.equal(url.searchParams.get('k1'), 'qz:6')
   assert.equal(url.searchParams.get('k2'), 'fwd:20260401,20260908')
   assert.equal(url.searchParams.get('ap'), 'get.date,code,close')

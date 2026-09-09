@@ -86,6 +86,7 @@ export function buildStockDbUrl({
   url.search = ''
   url.searchParams.set('cmd', safeCommand(command))
   url.searchParams.set('t', safeTable(table))
+  url.searchParams.set('json', '1')
   if (codePattern != null) {
     url.searchParams.set('k1', keyArgument(safeCodePattern(codePattern)))
   }
