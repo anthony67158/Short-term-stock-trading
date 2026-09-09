@@ -182,7 +182,7 @@ test('旧建议过期仍须显示已触及的持仓止损风险', () => {
   assert.match(commands[0].instruction, /今日可卖2手/)
 })
 
-test('最新风险阻断旧买入授权，但不阻断退出与真实成交补录', () => {
+test('账户硬风险阻断旧买入授权，但普通弱市只调整动作价值', () => {
   const book = {
     plan: [{ code: '600007' }, { code: '600008' }, { code: '600009' }],
     executionPlans: [
@@ -205,7 +205,7 @@ test('最新风险阻断旧买入授权，但不阻断退出与真实成交补�
   const marketOnly = buildTodayCommandList({
     book, now, marketRegime: { allowRiskIncrease: false, label: '数据不足' },
   })
-  assert.equal(marketOnly.find((item) => item.code === '600007').state, 'RISK_BLOCKED')
+  assert.equal(marketOnly.find((item) => item.code === '600007').state, 'READY')
   const probe = entry({ action: '买入', decisionPlan: {
     schemaVersion: 'decision-plan.v2', action: 'BUY', actionability: 'READY',
     quantity: { lots: 1 }, prices: { reference: 10 },
