@@ -3,6 +3,7 @@ function clean(value, limit = 1200) {
   return text.length > limit ? `${text.slice(0, limit - 1)}…` : text
 }
 
+const REASONING_TEXT_LIMIT = 16000
 const STEP_MARKS = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩']
 
 export function splitAdviceReasoningSteps(value) {
@@ -79,11 +80,13 @@ export function buildDeepAdviceReasoningSummary(
   streamedReasoning = '',
 ) {
   if (!advice || typeof advice !== 'object') return ''
-  const existing = clean(advice.reasoning)
-  if (
-    existing.split('\n').filter(Boolean).length >= 3
-    && /(?:结论|量化|技术|资金|消息|风险|执行)：/.test(existing)
-  ) return existing
+  const existing = clean(advice.reasoning, REASONING_TEXT_LIMIT)
+  const existingLines = existing.split('\n').filter(Boolean)
+  const placeholderOnly = existingLines.length > 0
+    && existingLines.every((line) =>
+      /正在(?:继续)?核验量价、资金、消息与风险约束/.test(line)
+    )
+  if (existing && !placeholderOnly) return existing
 
   const conclusion = uniqueText([
     advice.title || advice.headline,
@@ -166,10 +169,13 @@ export function ensureAdviceReasoning(
       ),
     }
   }
-  if (clean(advice.reasoning)) {
-    return { ...advice, reasoning: clean(advice.reasoning) }
+  if (clean(advice.reasoning, REASONING_TEXT_LIMIT)) {
+    return {
+      ...advice,
+      reasoning: clean(advice.reasoning, REASONING_TEXT_LIMIT),
+    }
   }
-  const streamed = clean(streamedReasoning)
+  const streamed = clean(streamedReasoning, REASONING_TEXT_LIMIT)
   if (streamed) return { ...advice, reasoning: streamed }
   const pieces = [
     advice.quantNote,

@@ -14,6 +14,18 @@ test('优先保留模型返回的结构化研判思路', () => {
   assert.equal(advice.reasoning, '先看资金流，再按支撑位确定动作。')
 })
 
+test('完整保留模型返回的长篇用户可见研判', () => {
+  const reasoning = Array.from(
+    { length: 100 },
+    (_, index) => `步骤${index + 1}：核对量价、资金和风险约束。`,
+  ).join('\n')
+  const advice = ensureAdviceReasoning({ reasoning }, '', {
+    deepMode: true,
+  })
+
+  assert.equal(advice.reasoning, reasoning)
+})
+
 test('批量快速模式缺失思考链时使用可追溯依据补齐', () => {
   const advice = ensureAdviceReasoning({
     actionPlan: '回踩10元企稳再买1手',

@@ -256,8 +256,8 @@ test('普通与深度军师都使用有界预算且深度不整轮重跑', () =>
   assert.equal(quick.runtimeBudgetMs, 55000)
   assert.equal(quick.maxAttempts, 1)
   assert.equal(deep.forceReasoning, true)
-  assert.equal(deep.runtimeBudgetMs, 360000)
-  assert.equal(deep.timeoutMs, 375000)
+  assert.equal(deep.runtimeBudgetMs, 540000)
+  assert.equal(deep.timeoutMs, 555000)
   assert.equal(deep.maxAttempts, 1)
   assert.ok(deep.runtimeBudgetMs > quick.runtimeBudgetMs)
   assert.equal(maxTokensForMode('hold_advice', false), 3200)
@@ -268,10 +268,10 @@ test('普通与深度军师都使用有界预算且深度不整轮重跑', () =>
   assert.equal(advisorGenerationPlan({
     remainingMs: 535000,
     reasoning: true,
-  }).timeoutMs, 300000)
+  }).timeoutMs, 510000)
   assert.match(
     aiSource,
-    /headerTimeoutMs:\s*useRole === 'review'[\s\S]*?\?\s*12000[\s\S]*?:\s*useReasoning[\s\S]*?\?\s*Math\.min\(llmTimeout,\s*120000\)[\s\S]*?:\s*22000/,
+    /headerTimeoutMs:\s*useRole === 'review'[\s\S]*?\?\s*12000[\s\S]*?:\s*useReasoning[\s\S]*?\?\s*Math\.min\(llmTimeout,\s*180000\)[\s\S]*?:\s*22000/,
   )
   assert.doesNotMatch(aiSource, /runStreamFailover/)
   assert.doesNotMatch(aiSource, /最终JSON整理器/)

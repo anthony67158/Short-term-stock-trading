@@ -834,13 +834,12 @@ export function adviceJobDeadlineMs(
 
 export function adviceWorkerStartWindowMs(deepWork = false) {
   const fcRuntimeMs = 600000
-  const settleReserveMs = 30000
   const startWindowCapMs = 300000
   return Math.max(
-    40000,
+    0,
     Math.min(
       startWindowCapMs,
-      fcRuntimeMs - adviceJobDeadlineMs(deepWork) - settleReserveMs,
+      fcRuntimeMs - adviceJobDeadlineMs(deepWork),
     ),
   )
 }

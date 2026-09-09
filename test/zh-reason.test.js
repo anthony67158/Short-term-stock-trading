@@ -45,3 +45,13 @@ test('实时研判进度保留模型原文并过滤重复与JSON片段', () => {
   ])
   assert.equal(new Set(outputs).size, outputs.length)
 })
+
+test('深度研判不会在二十条后静默丢弃后续可见进度', () => {
+  const tracker = createReasoningProgressTracker()
+  const outputs = Array.from({ length: 40 }, (_, index) =>
+    tracker.push(`第${index + 1}项独立证据核验已经完成。`),
+  ).filter(Boolean)
+
+  assert.equal(outputs.length, 40)
+  assert.equal(outputs.at(-1), '第40项独立证据核验已经完成。')
+})

@@ -466,7 +466,7 @@ test('准备阶段长时间无进展时明确提示将自动跳过慢源', () =>
   assert.match(item.warning, /自动跳过并继续/)
 })
 
-test('持久任务研判摘要保留原文并去重过滤JSON草稿', () => {
+test('持久任务研判进度完整保留原文并去重过滤JSON草稿', () => {
   const data = {}
   enqueueJob(data, { code: '600000', name: '浦发银行', mode: 'buy_advice' }, 1000)
   updateJobProgress(data, '600000', {
@@ -485,8 +485,8 @@ test('持久任务研判摘要保留原文并去重过滤JSON草稿', () => {
     1,
   )
   assert.equal(reasoning.includes('{"action"'), false)
-  assert.equal(reasoning.length <= 12000, true)
-  assert.equal(data.jobs['600000'].reasoningTruncated, true)
+  assert.equal(reasoning.includes('中文推理'.repeat(3000)), true)
+  assert.equal(data.jobs['600000'].reasoningTruncated, false)
   assert.equal(reasoning.includes('正在分析走势'), true)
 })
 

@@ -534,7 +534,7 @@ test('完整深度任务使用FC可用窗口并在硬截止后释放资源', asy
   )
 
   assert.equal(aborted, true)
-  assert.equal(adviceJobDeadlineMs(true), 403000)
+  assert.equal(adviceJobDeadlineMs(true), 583000)
   assert.ok(adviceJobDeadlineMs(true) < 600000)
   assert.ok(adviceJobDeadlineMs(false) < 110000)
   assert.equal(adviceJobDeadlineMs(false, {
@@ -551,9 +551,9 @@ test('完整深度任务使用FC可用窗口并在硬截止后释放资源', asy
 
 test('深度Worker为完整预算保留足够的连续调度窗口', () => {
   assert.equal(adviceWorkerStartWindowMs(false), 300000)
-  assert.ok(adviceWorkerStartWindowMs(true) > 0)
+  assert.equal(adviceWorkerStartWindowMs(true), 17000)
   assert.ok(
-    adviceWorkerStartWindowMs(true) + adviceJobDeadlineMs(true) + 30000 <= 600000,
+    adviceWorkerStartWindowMs(true) + adviceJobDeadlineMs(true) <= 600000,
   )
 })
 
@@ -1137,7 +1137,7 @@ test('Worker合并后采用最新活跃任务的批次且保留旧任务运行�
 
 test('批量任务可收紧单股预算但不能突破安全边界', () => {
   assert.equal(resolveAIBudget(true, 210000), 210000)
-  assert.equal(resolveAIBudget(true, 999999), 360000)
+  assert.equal(resolveAIBudget(true, 999999), 540000)
   assert.equal(resolveAIBudget(true, 1000), 30000)
   assert.equal(resolveAIBudget(false, null), 150000)
 })
@@ -1166,7 +1166,7 @@ test('军师把剩余预算交给唯一模型调用且禁止响应后的整轮�
     remainingMs: 535000,
     reasoning: true,
   }), {
-    timeoutMs: 300000,
+    timeoutMs: 510000,
   })
 })
 

@@ -292,8 +292,8 @@ export function buildScheduledReviewGateResponse({
 }
 
 export function resolveAIBudget(reasoningOn, requestedMs) {
-  // 深度研判模型窗口 300s,总预算 360s(含数据采集/后处理余量)。
-  const fallback = reasoningOn ? 360000 : 150000;
+  // 深度研判总预算 540s，为证据采集、510s 模型窗口和结果落盘留出边界。
+  const fallback = reasoningOn ? 540000 : 150000;
   if (requestedMs == null || !Number.isFinite(Number(requestedMs))) return fallback;
   return Math.max(30000, Math.min(fallback, Math.trunc(Number(requestedMs))));
 }
@@ -315,8 +315,7 @@ export function advisorGenerationPlan({
   remainingMs = 0,
   reasoning = false,
 } = {}) {
-  // 深度研判模型窗口 300s(low 推理实测 70-150s,2x 余量防偶发慢端点)。
-  const cap = reasoning ? 300000 : 120000
+  const cap = reasoning ? 510000 : 120000
   return {
     timeoutMs: Math.max(
       8000,
@@ -2323,7 +2322,7 @@ export default async function handler(req, res) {
         headerTimeoutMs: useRole === 'review'
           ? 12000
           : useReasoning
-            ? Math.min(llmTimeout, 120000)
+            ? Math.min(llmTimeout, 180000)
             : 22000,
         reasoning: useReasoning,
         reasoningEffort: forceReasoning ? 'low' : 'medium',
@@ -2406,7 +2405,7 @@ export default async function handler(req, res) {
         headerTimeoutMs: useRole === 'review'
           ? 12000
           : useReasoning
-            ? Math.min(llmTimeout, 120000)
+            ? Math.min(llmTimeout, 180000)
             : 22000,
         reasoning: useReasoning,
         reasoningEffort: forceReasoning ? 'low' : 'medium',

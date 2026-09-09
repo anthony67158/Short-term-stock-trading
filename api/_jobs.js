@@ -566,6 +566,7 @@ export function requeueAdvicePreOutputFailure(
 }
 
 function visibleReasoning(value) {
+  const maxChars = 32000
   const seen = new Set()
   const lines = String(value || '')
     .split(/\r?\n/)
@@ -585,9 +586,9 @@ function visibleReasoning(value) {
       return true
     })
   const text = lines.join('\n')
-  if (text.length <= 12000) return { text, truncated: false }
+  if (text.length <= maxChars) return { text, truncated: false }
   return {
-    text: `${text.slice(0, 1800)}\n…\n${text.slice(-10197)}`,
+    text: `${text.slice(0, 6000)}\n…\n${text.slice(-(maxChars - 6003))}`,
     truncated: true,
   }
 }

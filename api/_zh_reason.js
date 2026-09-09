@@ -231,7 +231,7 @@ function progressKey(value) {
     .toLowerCase()
 }
 
-export function createReasoningProgressTracker({ maxItems = 20 } = {}) {
+export function createReasoningProgressTracker({ maxItems = 100 } = {}) {
   const emitted = []
   let buffer = ''
   const emitCandidate = (value) => {
@@ -241,7 +241,7 @@ export function createReasoningProgressTracker({ maxItems = 20 } = {}) {
       !key
       || /^[\[{]/.test(text)
       || /"[^"]+"\s*:/.test(text)
-      || emitted.length >= Math.max(1, Number(maxItems) || 20)
+      || emitted.length >= Math.max(1, Number(maxItems) || 100)
       || emitted.some((prior) =>
         prior === key
         || (
