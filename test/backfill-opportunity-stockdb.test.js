@@ -25,8 +25,10 @@ test('StockDB回填命令限制日期、样本天数和股票池规模', () => {
 
   assert.equal(options.from, '20260101')
   assert.equal(options.to, '20260909')
+  assert.equal(options.provider, 'stockdb')
   assert.equal(options.signalDays, 120)
   assert.equal(options.universeSize, 2000)
+  assert.equal(options.maxPerMinute, 90)
 })
 
 test('StockDB回填命令拒绝未知参数和倒置日期', () => {
@@ -43,6 +45,27 @@ test('StockDB回填命令拒绝未知参数和倒置日期', () => {
     ]),
     /日期范围/,
   )
+  assert.throws(
+    () => parseStockDbBackfillArgs(['--provider', 'unknown']),
+    /数据源无效/,
+  )
+})
+
+test('Tushare回填使用独立工作目录和受限请求速率', () => {
+  const options = parseStockDbBackfillArgs([
+    '--provider',
+    'tushare',
+    '--from',
+    '20251101',
+    '--to',
+    '20260909',
+    '--max-per-min',
+    '999',
+  ])
+
+  assert.equal(options.provider, 'tushare')
+  assert.match(options.workDir, /\.tushare-v3-work$/)
+  assert.equal(options.maxPerMinute, 120)
 })
 
 test('StockDB回填缓存严格按本次日期范围裁剪', () => {

@@ -53,6 +53,10 @@ const DEFAULT_WORK_DIR = path.join(
   os.homedir(),
   '.stockdb-v3-work',
 )
+const DEFAULT_TUSHARE_WORK_DIR = path.join(
+  os.homedir(),
+  '.tushare-v3-work',
+)
 const SLOT_CONFIG = Object.freeze([
   { mode: 'intraday', slot: '1020' },
   { mode: 'intraday', slot: '1340' },
@@ -90,6 +94,7 @@ export function parseStockDbBackfillArgs(argv = []) {
     if (!name.startsWith('--')) continue
     const key = name.slice(2)
     if (![
+      'provider',
       'stockdb-root',
       'work-dir',
       'base-url',
@@ -97,6 +102,7 @@ export function parseStockDbBackfillArgs(argv = []) {
       'to',
       'signal-days',
       'universe-size',
+      'max-per-min',
     ].includes(key)) {
       throw new Error(`未知StockDB回填参数: ${name}`)
     }
@@ -108,14 +114,27 @@ export function parseStockDbBackfillArgs(argv = []) {
   if (!/^\d{8}$/.test(from) || !/^\d{8}$/.test(to) || from >= to) {
     throw new Error('StockDB回填日期范围无效')
   }
+  const provider = String(values.provider || 'stockdb').toLowerCase()
+  if (!['stockdb', 'tushare'].includes(provider)) {
+    throw new Error('历史回填数据源无效')
+  }
   return {
+    provider,
     stockdbRoot: path.resolve(values['stockdb-root'] || DEFAULT_STOCKDB_ROOT),
-    workDir: path.resolve(values['work-dir'] || DEFAULT_WORK_DIR),
+    workDir: path.resolve(
+      values['work-dir']
+      || (
+        provider === 'tushare'
+          ? DEFAULT_TUSHARE_WORK_DIR
+          : DEFAULT_WORK_DIR
+      ),
+    ),
     baseUrl: values['base-url'] || 'http://127.0.0.1:7899',
     from,
     to,
     signalDays: positiveInteger(values['signal-days'], 90, 120),
     universeSize: positiveInteger(values['universe-size'], 1000, 2000),
+    maxPerMinute: positiveInteger(values['max-per-min'], 90, 120),
   }
 }
 
@@ -211,17 +230,9 @@ function validateCoverage(daily, funds, plan, universeSize) {
   }
 }
 
-async function runMinuteExporter(options, manifestPath, minuteDirectory) {
+async function runPythonExporter(arguments_, label) {
   await new Promise((resolve, reject) => {
-    const child = spawn('python3', [
-      path.join(ROOT, 'scripts', 'stockdb_export_minutes.py'),
-      '--manifest',
-      manifestPath,
-      '--stockdb-root',
-      options.stockdbRoot,
-      '--output-dir',
-      minuteDirectory,
-    ], {
+    const child = spawn('python3', arguments_, {
       cwd: ROOT,
       stdio: ['ignore', 'inherit', 'inherit'],
     })
@@ -229,10 +240,53 @@ async function runMinuteExporter(options, manifestPath, minuteDirectory) {
     child.once('exit', (code, signal) => {
       if (code === 0) resolve()
       else reject(new Error(
-        `StockDB分钟导出失败: ${signal || code}`,
+        `${label}失败: ${signal || code}`,
       ))
     })
   })
+}
+
+async function runTushareMetadataExporter(options) {
+  return runPythonExporter([
+    path.join(ROOT, 'scripts', 'tushare_export_history.py'),
+    '--stage',
+    'metadata',
+    '--work-dir',
+    options.workDir,
+    '--from',
+    options.from,
+    '--to',
+    options.to,
+    '--max-per-min',
+    String(options.maxPerMinute),
+  ], 'Tushare历史元数据导出')
+}
+
+async function runMinuteExporter(options, manifestPath, minuteDirectory) {
+  if (options.provider === 'tushare') {
+    return runPythonExporter([
+      path.join(ROOT, 'scripts', 'tushare_export_history.py'),
+      '--stage',
+      'minutes',
+      '--work-dir',
+      options.workDir,
+      '--manifest',
+      manifestPath,
+      '--output-dir',
+      minuteDirectory,
+      '--max-per-min',
+      String(options.maxPerMinute),
+    ], 'Tushare分钟导出')
+  }
+  return runPythonExporter([
+    path.join(ROOT, 'scripts', 'stockdb_export_minutes.py'),
+    '--manifest',
+    manifestPath,
+    '--stockdb-root',
+    options.stockdbRoot,
+    '--output-dir',
+    minuteDirectory,
+  ], 'StockDB分钟导出')
 }
 
 function minuteMap(payload) {
@@ -272,28 +326,36 @@ async function main() {
   await mkdir(options.workDir, { recursive: true, mode: 0o700 })
   const minuteDirectory = path.join(options.workDir, 'minutes')
   await mkdir(minuteDirectory, { recursive: true, mode: 0o700 })
-  const client = createStockDbHttpClient({
-    baseUrl: options.baseUrl,
-    timeoutMs: 300_000,
-  })
-  const source = new StockDbHistorySource(client)
   const dailyFile = path.join(options.workDir, 'daily.json.gz')
   const fundFile = path.join(options.workDir, 'funds.json.gz')
   writeProgress('DAILY_START', { from: options.from, to: options.to })
-  const cachedDaily = await cachedJson(
-    dailyFile,
-    () => source.dailyRange(options.from, options.to),
-  )
+  let cachedDaily
+  let cachedFunds
+  if (options.provider === 'tushare') {
+    await runTushareMetadataExporter(options)
+    cachedDaily = await readGzipJson(dailyFile)
+    cachedFunds = await readGzipJson(fundFile)
+  } else {
+    const client = createStockDbHttpClient({
+      baseUrl: options.baseUrl,
+      timeoutMs: 300_000,
+    })
+    const source = new StockDbHistorySource(client)
+    cachedDaily = await cachedJson(
+      dailyFile,
+      () => source.dailyRange(options.from, options.to),
+    )
+    cachedFunds = await cachedJson(
+      fundFile,
+      () => source.fundRange(options.from, options.to),
+    )
+  }
   const daily = filterStockDbRowsByRange(
     cachedDaily,
     options.from,
     options.to,
   )
   writeProgress('FUND_START', { dailyRows: daily.length })
-  const cachedFunds = await cachedJson(
-    fundFile,
-    () => source.fundRange(options.from, options.to),
-  )
   const funds = filterStockDbRowsByRange(
     cachedFunds,
     options.from,
@@ -331,6 +393,9 @@ async function main() {
   })
   await runMinuteExporter(options, manifestPath, minuteDirectory)
 
+  const sourceType = options.provider === 'tushare'
+    ? 'TUSHARE_CAUSAL_REPLAY'
+    : 'STOCKDB_CAUSAL_REPLAY'
   const replayDates = replayDatesFromManifest(manifest)
   const signalSet = new Set(plan.signalDates)
   const barsByCode = new Map()
@@ -352,6 +417,7 @@ async function main() {
         const batch = await scanHistoricalSlot({
           tradeDate,
           ...config,
+          source: sourceType,
           universeCodes,
           minutesByCode,
           dailyByCode,
@@ -399,8 +465,10 @@ async function main() {
       to: displayDate(plan.signalDates.at(-1)),
     },
     source: {
-      type: 'STOCKDB_CAUSAL_REPLAY',
-      version: '0.3.5',
+      type: sourceType,
+      version: options.provider === 'tushare'
+        ? 'proxy-v1'
+        : '0.3.5',
       signalDates: plan.signalDates.length,
       universeSize: options.universeSize,
       batches: batchCount,
