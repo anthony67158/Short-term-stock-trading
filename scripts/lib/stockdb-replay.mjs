@@ -227,6 +227,10 @@ export function buildCausalSnapshot({
     )
     .sort((left, right) => left.timestamp.localeCompare(right.timestamp))
   if (!minutes.length) return null
+  const expectedMinute = String(slot).padStart(4, '0')
+  const firstMinute = minutes[0].timestamp.slice(8, 12)
+  const lastMinute = minutes.at(-1).timestamp.slice(8, 12)
+  if (firstMinute > '0935' || lastMinute < expectedMinute) return null
   const completedDaily = dailyHistory
     .map(normalizeDailyRow)
     .filter((row) => row && row.code === String(code) && row.date < date)

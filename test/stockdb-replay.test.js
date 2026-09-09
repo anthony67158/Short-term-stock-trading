@@ -61,6 +61,22 @@ test('盘中快照严格排除信号时刻之后的数据', () => {
   assert.equal(snapshot.volumeRatio, 1)
 })
 
+test('盘中快照拒绝缺少目标时点分钟线的陈旧价格', () => {
+  const snapshot = buildCausalSnapshot({
+    code: '600519',
+    name: '贵州茅台',
+    tradeDate: '2026-09-08',
+    dailyHistory: daily,
+    slot: '1020',
+    minuteRows: [
+      minute('0931', { close: 100 }),
+      minute('1019', { close: 101 }),
+    ],
+  })
+
+  assert.equal(snapshot, null)
+})
+
 test('分时均价只累计信号时刻以前的成交', () => {
   const trends = buildCausalTrends([
     minute('0931', { close: 10, volume: 100, amount: 1000 }),
