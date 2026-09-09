@@ -23,7 +23,11 @@ const site = process.env.PRODUCTION_COMBAT_ORIGIN
   || 'https://stock-dashboard-one-plum.vercel.app'
 const apiBase = process.env.PRODUCTION_COMBAT_API
   || 'https://stock-dashboard-znrlekbzit.cn-hangzhou.fcapp.run'
-assert.equal(new URL(site).hostname, 'stock-dashboard-one-plum.vercel.app')
+assert.ok(new Set([
+  'stock-dashboard-one-plum.vercel.app',
+  'stock-dashboard-znrlekbzit.cn-hangzhou.fcapp.run',
+  '127.0.0.1',
+]).has(new URL(site).hostname))
 assert.equal(
   new URL(apiBase).hostname,
   'stock-dashboard-znrlekbzit.cn-hangzhou.fcapp.run',
@@ -75,8 +79,10 @@ async function seedAccount(token, current) {
   data.settings = {
     ...(data.settings || {}),
     'advAuto.enabled': false,
-    'advAuto.holdEnabled': false,
+    'advAuto.holdEnabled': true,
     'advAuto.watchEnabled': false,
+    'advAuto.holdCodes': ['000001'],
+    'advAuto.watchCodes': [],
     'advAuto.configUpdatedAt': now,
     aiAutoAlert: true,
     'advReview.disabledCodes': (
@@ -263,7 +269,8 @@ try {
   await page.goto(site, { waitUntil: 'networkidle', timeout: 90_000 })
   await page.getByRole('heading', { level: 1, name: '今日作战' }).waitFor()
   assert.match(await page.locator('.acct-btn').innerText(), /测试账号/)
-  assert.equal(await page.locator('.combat-command-center').count(), 1)
+  assert.equal(await page.locator('.adaptive-workbench').count(), 1)
+  assert.equal(await page.locator('.aw-actions').count(), 1)
   report.checks.push('登录与作战首页')
   console.log('测试账号首页与独立浏览器会话通过')
 
@@ -282,7 +289,11 @@ try {
     await added.waitFor()
     await added.locator('.pc-pin').click()
     assert.equal(await added.locator('.pc-pin').getAttribute('aria-pressed'), 'true')
-    await added.getByRole('button', { name: '预警', exact: true }).click()
+    await added.locator('.card-more-actions > summary').click()
+    await added.getByRole('button', {
+      name: '设置手动预警',
+      exact: true,
+    }).click()
     await added.getByPlaceholder('价格', { exact: true }).fill('60.01')
     await added.getByRole('button', { name: '设预警', exact: true }).click()
     let saved
@@ -309,7 +320,16 @@ try {
     await page.getByRole('dialog').getByRole('button', { name: '删除', exact: true }).click()
     await rule.waitFor({ state: 'detached' })
     await page.locator('.nav-tabs:visible').getByRole('button', { name: /持仓/ }).click()
-    await page.locator('.plan-cand[data-code="601318"]').getByRole('button', { name: '删除中国平安', exact: true }).click()
+    const addedAfterRefresh = page.locator(
+      '.plan-cand[data-code="601318"]',
+    )
+    await addedAfterRefresh.locator(
+      '.card-more-actions > summary',
+    ).click()
+    await addedAfterRefresh.getByRole('button', {
+      name: '删除自选',
+      exact: true,
+    }).click()
     await page.getByRole('dialog').getByRole('button', { name: '删除', exact: true }).click()
     await page.locator('.plan-cand[data-code="601318"]').waitFor({ state: 'detached' })
     for (let attempt = 0; attempt < 40; attempt++) {
@@ -332,18 +352,38 @@ try {
   ]) {
     const before = await currentAccount(login.token)
     assertNoActiveJobs(before.data)
-    await page.locator(
-      `${cardSelector}[data-code="${code}"] .stock-name-link`,
-    ).first().click()
-    const button = page.locator(`.detail-footbar .footbar-${profile}`)
-    await button.waitFor()
     const previousJob = before.data.jobs?.[code]
     const reusable = resumeAfter > 0 && previousJob?.status === 'done'
       && previousJob.at >= resumeAfter
       && Boolean(previousJob.deepMode) === (profile === 'deep')
       && before.data.advice?.[code]?.at >= previousJob.at
     const startedAt = reusable ? previousJob.at : Date.now()
-    if (!reusable) await button.click()
+    const card = page.locator(
+      `${cardSelector}[data-code="${code}"]`,
+    )
+    if (profile === 'quick' && !reusable) {
+      await card.getByRole('button', {
+        name: '纳入作战',
+        exact: true,
+      }).click()
+      await page.getByRole('dialog', {
+        name: '纳入作战并持续跟踪？',
+      }).getByRole('button', {
+        name: '纳入作战',
+        exact: true,
+      }).click()
+      await card.locator('.stock-name-link').first().click()
+    } else {
+      await card.locator('.stock-name-link').first().click()
+      if (!reusable) {
+        await page.locator(
+          `.detail-footbar .footbar-${profile}`,
+        ).click()
+      }
+    }
+    await page.locator(
+      `.detail-footbar .footbar-${profile}`,
+    ).waitFor()
     console.log(`${code} ${label} ${reusable ? '续验已完成任务' : '已点击，等待任务终态'}`)
     const phases = []
     let saved = reusable ? before.data.advice[code] : null
@@ -390,7 +430,7 @@ try {
     )
     const monitoring = saved.advice.monitoringPlan
     if (code === '000001' && saved.advice.decisionPlan.action === 'HOLD') {
-      assert.equal(monitoring?.schemaVersion, 'monitoring-plan.v1')
+      assert.equal(monitoring?.schemaVersion, 'monitoring-plan.v2')
       assert.equal(monitoring.state, 'READY')
       assert.ok(monitoring.rules.length > 0 && monitoring.rules.length <= 3)
       assert.ok(
@@ -532,12 +572,21 @@ try {
   report.checks.push('已确认模拟计划记录减仓')
 
   const candidate = page.locator('.plan-cand[data-code="002594"]')
-  await candidate.getByRole('button', { name: /记录.*成交/ }).click()
+  await candidate.locator('.card-more-actions > summary').click()
+  await candidate.getByRole('button', {
+    name: '记录自主成交',
+    exact: true,
+  }).click()
+  const trackingOption = candidate.getByRole('checkbox', {
+    name: '将这笔持仓加入系统持续管理',
+  })
+  assert.equal(await trackingOption.isChecked(), true)
+  await trackingOption.uncheck()
   await candidate.getByPlaceholder('买入价').fill(String(quoteMap['002594'].price))
   await candidate.getByPlaceholder('手').fill('1')
   await candidate.locator('.buy-inline .act-buy.solid').click()
   await page.locator('.hold-item[data-code="002594"]').waitFor()
-  report.checks.push('模拟买入与持仓接续')
+  report.checks.push('模拟买入、持续管理显式选择与持仓接续')
 
   await page.locator('.nav-tabs:visible')
     .getByRole('button', { name: /复盘/ }).click()

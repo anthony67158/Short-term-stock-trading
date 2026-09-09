@@ -9,6 +9,7 @@ import { projectAdviceAlerts } from '../../shared/adviceAlerts.js'
 import { selectionOriginFromOpportunity } from '../../shared/selectionOrigin.js'
 import { buildAccountRiskContext, allocateOpportunityBudget } from '../../shared/accountRiskBudget.js'
 import { analyzeOpportunityPortfolio } from '../../shared/opportunityPortfolio.js'
+import { buildPositionWorkbench } from '../../shared/positionWorkbench.js'
 
 if (!import.meta.env.DEV) throw new Error('Local fixture only')
 
@@ -16,7 +17,17 @@ const now = Date.now()
 const book = structuredClone(fixture)
 book.alerts = []
 book.jobs = {}
-book.settings['advAuto.enabled'] = false
+book.settings['advAuto.enabled'] = true
+book.settings['advAuto.holdEnabled'] = true
+book.settings['advAuto.watchEnabled'] = true
+book.settings['advAuto.holdCodes'] = [
+  ...new Set(book.holding.map((item) => item.code)),
+  '002475',
+]
+book.settings['advAuto.watchCodes'] = book.plan
+  .filter((item) => item.code !== '600519')
+  .map((item) => item.code)
+book.settings['advReview.disabledCodes'] = []
 book.settings.aiAutoAlert = true
 book.holding.unshift({
   id: 'demo-hold-monitoring',
@@ -330,6 +341,16 @@ window.fetch = async (input, options) => {
   }
   if (url.pathname === '/api/quote') data = { ...empty, list: quotes }
   if (url.pathname === '/api/opportunity_radar') data = radar
+  if (url.pathname === '/api/position_workbench') data = {
+    ok: true,
+    partial: false,
+    ...buildPositionWorkbench({
+      book,
+      quoteMap,
+      opportunityRadar: radar,
+      now,
+    }),
+  }
   if (url.pathname === '/api/stock_tags') data = {
     ...empty, list: quotes.map((quote) => ({ ...quote, concepts: ['测试题材'], conceptVerified: true })),
   }

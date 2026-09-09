@@ -17,10 +17,19 @@ const { chromium } = await import(
   process.env.PLAYWRIGHT_MODULE || 'playwright'
 )
 const historyOnly = process.argv.includes('--history-only')
-const site =
-  'https://stock-dashboard-one-plum.vercel.app'
-const apiBase =
-  'https://stock-dashboard-znrlekbzit.cn-hangzhou.fcapp.run'
+const site = process.env.PRODUCTION_MONITORING_ORIGIN
+  || 'https://stock-dashboard-one-plum.vercel.app'
+const apiBase = process.env.PRODUCTION_MONITORING_API
+  || 'https://stock-dashboard-znrlekbzit.cn-hangzhou.fcapp.run'
+assert.ok(new Set([
+  'stock-dashboard-one-plum.vercel.app',
+  'stock-dashboard-znrlekbzit.cn-hangzhou.fcapp.run',
+  '127.0.0.1',
+]).has(new URL(site).hostname))
+assert.equal(
+  new URL(apiBase).hostname,
+  'stock-dashboard-znrlekbzit.cn-hangzhou.fcapp.run',
+)
 const credentialsText = await fs.readFile('CREDENTIALS.md', 'utf8')
 const accountSection = credentialsText
   .split('## 7. 自动化测试账号')[1]

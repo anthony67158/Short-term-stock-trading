@@ -53,21 +53,59 @@ try {
     }
     await page.goto(preview, { waitUntil: 'networkidle' })
     await page.getByRole('heading', { level: 1, name: '今日作战' }).waitFor()
-    await page.locator('.combat-command-center').waitFor()
+    await page.locator('.aw-actions').waitFor()
     assert.equal(
-      await page.locator('.combat-command-group').first()
+      await page.locator('.aw-actions')
         .getByText('演示标准仓').count(),
       1,
     )
     assert.equal(
-      await page.locator('.combat-command-center')
-        .getByText('当前没有需要立即处理的操作。').count(),
+      await page.locator('.aw-actions')
+        .getByText('持仓风险和待成交计划均无待办').count(),
       0,
     )
     await check('selection')
     await page.locator('.nav-tabs:visible').getByRole('button', { name: /持仓/ }).click()
     await page.locator('.account-risk-strip').waitFor()
     await page.locator('.execution-queue').waitFor()
+    const actionStrip = page.locator('.position-action-strip')
+    await actionStrip.waitFor()
+    assert.match(await actionStrip.innerText(), /演示标准仓/)
+    assert.match(await actionStrip.innerText(), /补录成交/)
+    const actionStripGeometry = await actionStrip.evaluate(
+      (element) => ({
+        width: element.clientWidth,
+        scrollWidth: element.scrollWidth,
+        height: element.clientHeight,
+        scrollHeight: element.scrollHeight,
+      }),
+    )
+    assert.ok(
+      actionStripGeometry.scrollWidth
+        <= actionStripGeometry.width + 1,
+      JSON.stringify({ width, actionStripGeometry }),
+    )
+    const ordinary = page.locator(
+      '.plan-cand[data-code="600519"]',
+    )
+    assert.match(await ordinary.innerText(), /普通收藏/)
+    await ordinary.getByRole('button', {
+      name: '纳入作战',
+      exact: true,
+    }).click()
+    const enrollmentDialog = page.getByRole('dialog', {
+      name: '纳入作战并持续跟踪？',
+    })
+    await enrollmentDialog.waitFor()
+    assert.match(
+      await enrollmentDialog.innerText(),
+      /价格、资金、板块和量价变化/,
+    )
+    await enrollmentDialog.getByRole('button', {
+      name: '取消',
+      exact: true,
+    }).click()
+    await enrollmentDialog.waitFor({ state: 'detached' })
     const monitoredHolding = page.locator(
       '.trade-card[data-code="002475"]',
     )
