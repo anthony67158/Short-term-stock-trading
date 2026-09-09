@@ -125,6 +125,20 @@ export function filterStockDbRowsByRange(rows, from, to) {
   )
 }
 
+export function replayDatesFromManifest(manifest = {}) {
+  if (!Array.isArray(manifest.dates) || !manifest.dates.length) {
+    throw new Error('StockDB分钟导出清单不含可回放日期')
+  }
+  const dates = manifest.dates.map((row) => String(row?.date || ''))
+  if (
+    dates.some((date) => !/^\d{8}$/.test(date))
+    || new Set(dates).size !== dates.length
+  ) {
+    throw new Error('StockDB分钟导出清单日期无效')
+  }
+  return dates
+}
+
 function assertDisposableDirectory(directory) {
   const home = os.homedir()
   if (
@@ -317,14 +331,15 @@ async function main() {
   })
   await runMinuteExporter(options, manifestPath, minuteDirectory)
 
+  const replayDates = replayDatesFromManifest(manifest)
   const signalSet = new Set(plan.signalDates)
   const barsByCode = new Map()
   const outcomes = []
   let pending = []
   let batchCount = 0
   let eventCount = 0
-  for (let index = 0; index < plan.processingDates.length; index += 1) {
-    const tradeDate = plan.processingDates[index]
+  for (let index = 0; index < replayDates.length; index += 1) {
+    const tradeDate = replayDates[index]
     const file = path.join(minuteDirectory, `${tradeDate}.json.gz`)
     const minutesByCode = minuteMap(await readGzipJson(file))
     const appendedToday = new Set(
@@ -365,7 +380,7 @@ async function main() {
     pruneBars(barsByCode, pending)
     writeProgress('REPLAY_DAY', {
       progress: index + 1,
-      total: plan.processingDates.length,
+      total: replayDates.length,
       tradeDate,
       batches: batchCount,
       events: eventCount,

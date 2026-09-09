@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import {
   filterStockDbRowsByRange,
   parseStockDbBackfillArgs,
+  replayDatesFromManifest,
 } from '../scripts/backfill-opportunity-stockdb.mjs'
 
 test('StockDB回填命令限制日期、样本天数和股票池规模', () => {
@@ -55,5 +56,26 @@ test('StockDB回填缓存严格按本次日期范围裁剪', () => {
       { date: '20260730', value: 1 },
       { date: '20260731', value: 2 },
     ],
+  )
+})
+
+test('StockDB回放只读取分钟导出清单中的实际日期', () => {
+  const planDates = ['20260730', '20260731']
+  const manifest = {
+    dates: [{
+      date: planDates[0],
+      codes: ['600001'],
+    }],
+  }
+
+  assert.deepEqual(
+    replayDatesFromManifest(manifest),
+    ['20260730'],
+  )
+  assert.throws(
+    () => replayDatesFromManifest({
+      dates: [{ date: '20260730' }, { date: '20260730' }],
+    }),
+    /日期无效/,
   )
 })
