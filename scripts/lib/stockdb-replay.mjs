@@ -63,6 +63,40 @@ export function normalizeDailyRow(value = {}) {
   }
 }
 
+function yiValue(value, unit) {
+  const number = finite(value)
+  if (number == null) return null
+  if (unit === 'wan') return number / 10_000
+  if (unit === 'yuan') return number / 100_000_000
+  return number
+}
+
+export function normalizeFundRow(value = {}) {
+  const code = String(value.code ?? value.sec_code ?? '')
+  const date = compactDate(value.date ?? value.trade_date)
+  if (!/^\d{6}$/.test(code) || !date) return null
+  const mainNetYi =
+    yiValue(value.mainNetYi, 'yi')
+    ?? yiValue(value.net_amount_main, 'wan')
+    ?? yiValue(value.main_net_amount_wan, 'wan')
+    ?? yiValue(value.main_net_inflow, 'yuan')
+  const retailNetYi =
+    yiValue(value.retailNetYi ?? value.smallNetYi, 'yi')
+    ?? yiValue(value.net_amount_s, 'wan')
+    ?? yiValue(value.small_net_amount_wan, 'wan')
+    ?? yiValue(value.small_net_inflow, 'yuan')
+  return {
+    date,
+    code,
+    mainNetYi: rounded(mainNetYi, 6),
+    retailNetYi: rounded(retailNetYi, 6),
+    mainRatio: rounded(
+      value.mainRatio ?? value.net_pct_main ?? value.main_net_pct,
+      6,
+    ),
+  }
+}
+
 export function normalizeMinuteRow(value = {}) {
   const code = String(value.code ?? value.sec_code ?? '')
   const timestamp = String(
