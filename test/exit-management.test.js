@@ -55,7 +55,8 @@ test('持仓到期不机械退出而由当前动作价值继续管理', () => {
     payload: { ...basePayload, holdingStartedAt: started, sellableTodayQty: 2 },
   })
   assert.equal(result.exitManagement.kind, 'HOLD')
-  assert.equal(result.action, '持有')
+  assert.equal(result.action, '加仓')
+  assert.equal(result.adaptiveAction.selected.action, 'ADD')
   assert.ok(result.exitManagement.actionValue)
   assert.equal(result.exitManagement.actionValue.state.sellable, 2)
 })
@@ -277,4 +278,65 @@ test('机会成本只从账号内已验证的首要轮动读取', () => {
     ),
     null,
   )
+})
+
+test('持仓最终动作服从模型调用前的自适应动作价值', () => {
+  const result = applyShortHorizonExitPolicy({
+    mode: 'hold_advice',
+    result: {
+      action: '加仓',
+      opQty: '加仓4手',
+      stopPrice: 8,
+      targetPrice: 15,
+    },
+    payload: {
+      ...basePayload,
+      holdingStopPrice: 9.5,
+      adaptiveAction: {
+        schemaVersion: 'holding-action-value.v2',
+        selected: {
+          action: 'REDUCE',
+          quantity: 2,
+          reasons: ['替代机会费后价值更高'],
+        },
+        alternatives: [],
+        economics: { expectedNetR: -0.1 },
+      },
+    },
+  })
+
+  assert.equal(result.action, '减仓')
+  assert.equal(result.opQty, '减仓2手')
+  assert.equal(result.stopPrice, 9.5)
+  assert.equal(result.adaptiveAction.selected.action, 'REDUCE')
+})
+
+test('模型清仓文本不能覆盖服务端已选继续持有动作', () => {
+  const result = applyShortHorizonExitPolicy({
+    mode: 'hold_advice',
+    result: {
+      action: '清仓',
+      opQty: '清仓4手',
+      stopPrice: 9,
+      targetPrice: 12,
+    },
+    payload: {
+      ...basePayload,
+      adaptiveAction: {
+        schemaVersion: 'holding-action-value.v2',
+        selected: {
+          action: 'HOLD',
+          quantity: 0,
+          reasons: ['继续持有费后价值仍为正'],
+        },
+        alternatives: [],
+        economics: { expectedNetR: 0.3 },
+      },
+    },
+  })
+
+  assert.equal(result.action, '持有')
+  assert.equal(result.opQty, '无需操作')
+  assert.equal(result.addPrice, null)
+  assert.equal(result.exitManagement.action, '持有')
 })

@@ -163,13 +163,24 @@ export function applyShortHorizonExitPolicy({
   if (!['hold_advice', 'review'].includes(mode)) return result
   const { total, sellable } = holdings(payload)
   if (total <= 0) return result
-  const ledgerStop = finite(payload.holdingStopPrice)
-  const priorStop = ledgerStop > 0 ? ledgerStop : finite(payload.previousAdvice?.stopPrice)
-  if (priorStop > 0 && (!(result.stopPrice > 0) || result.stopPrice < priorStop)) {
-    result.stopPrice = priorStop
-  }
-
   const tactical = payload.shortHorizonTactical || {}
+  const ledgerStop = finite(payload.holdingStopPrice)
+  const policyStop = [
+    ledgerStop,
+    finite(tactical.prices?.stopReference),
+    finite(tactical.prices?.support),
+    finite(payload.previousAdvice?.stopPrice),
+    finite(result.stopPrice),
+  ].find((value) => value > 0)
+  const policyTarget = [
+    finite(tactical.prices?.targetReference),
+    finite(tactical.prices?.quantTargetHigh),
+    finite(tactical.prices?.resistance),
+    finite(payload.previousAdvice?.targetPrice),
+    finite(result.targetPrice),
+  ].find((value) => value > 0)
+  if (policyStop > 0) result.stopPrice = policyStop
+  if (policyTarget > 0) result.targetPrice = policyTarget
   const current = finite(
     payload.todayQuote?.price
     ?? payload.intraday?.now
@@ -187,16 +198,30 @@ export function applyShortHorizonExitPolicy({
     })
   }
 
+  const suppliedActionValue = (
+    (
+      payload.adaptiveAction?.schemaVersion === 'holding-action-value.v2'
+      || payload.adaptiveAction?.schemaVersion === 'holding-action-value.v1'
+    )
+    && ['ADD', 'HOLD', 'REDUCE', 'EXIT'].includes(
+      payload.adaptiveAction?.selected?.action,
+    )
+  ) ? payload.adaptiveAction : null
   const actionValue = {
-    ...evaluateHoldingActions({
+    ...(suppliedActionValue || evaluateHoldingActions({
       payload: {
         ...payload,
         shortHorizonTactical: tactical,
       },
-      advice: result,
-    }),
+      advice: {
+        ...result,
+        stopPrice: policyStop,
+        targetPrice: policyTarget,
+      },
+    })),
     evaluatedAt: now,
   }
+  result.adaptiveAction = actionValue
   if (['EXIT', 'REDUCE'].includes(actionValue.selected.action)) {
     const structural = structuralExit(tactical)
     const targetReached = current > 0
@@ -216,6 +241,33 @@ export function applyShortHorizonExitPolicy({
     })
   }
 
+  if (actionValue.selected.action === 'ADD') {
+    const addPrice = finite(
+      tactical.prices?.current
+      ?? tactical.timing?.pullbackPrice
+      ?? result.addPrice,
+    )
+    const lots = Math.max(
+      1,
+      Math.trunc(finite(actionValue.selected.quantity) || 1),
+    )
+    result.action = '加仓'
+    result.stance = '加仓'
+    result.tone = 'red'
+    result.opQty = `加仓${lots}手`
+    if (addPrice > 0) result.addPrice = addPrice
+    result.actionPlan = [
+      addPrice > 0 ? `参考${rounded(addPrice, 3)}元加仓${lots}手` : `加仓${lots}手`,
+      actionValue.selected.reasons.join('；'),
+    ].filter(Boolean).join('；')
+  } else {
+    result.action = '持有'
+    result.stance = '持有'
+    result.opQty = '无需操作'
+    result.addPrice = null
+    result.actionPlan = actionValue.selected.reasons.join('；')
+      || '继续持有现有仓位，等待下一实质事件'
+  }
   result.exitManagement = {
     schemaVersion: EXIT_MANAGEMENT_VERSION,
     kind: 'HOLD',

@@ -1089,6 +1089,7 @@ export default async function handler(req, res) {
   let modelProgressTimer = null;
   try {
     const payload = stripClientSearchFields((body && body.payload) || {});
+    let authoritativeAccountRisk = null;
     delete payload.strategyGate;
     delete payload.strategyRoute;
     delete payload.opportunityCost;
@@ -1107,6 +1108,105 @@ export default async function handler(req, res) {
         payload.code,
       );
       if (opportunityCost) payload.opportunityCost = opportunityCost;
+    }
+    if (isAdvisorMode(mode) && accountAuth.account?.data) {
+      authoritativeAccountRisk = await readAccountRiskContext(
+        accountAuth.account.data,
+      ).catch(() => null);
+      const rawAccount = accountAuth.account.data.account || {};
+      if (authoritativeAccountRisk) {
+        const exposures = [
+          ...authoritativeAccountRisk.exposures,
+          ...authoritativeAccountRisk.reservedExposures,
+        ];
+        const industry = String(
+          payload.todayQuote?.industry
+          || authoritativeAccountRisk.exposures.find(
+            (item) => item.code === payload.code,
+          )?.sectorCode
+          || '',
+        ).trim();
+        const industryWeights = [...exposures.reduce(
+          (weights, item) => {
+            const key = String(item.sectorCode || '').trim();
+            if (key) {
+              weights.set(
+                key,
+                (weights.get(key) || 0) + (item.positionPct || 0),
+              );
+            }
+            return weights;
+          },
+          new Map(),
+        )].map(([name, weight]) => ({ industry: name, weight }));
+        const totalAssets = authoritativeAccountRisk.totalAssets;
+        const cash = authoritativeAccountRisk.cash;
+        const goal = Number(rawAccount.goal) > 0
+          ? Number(rawAccount.goal)
+          : null;
+        payload.account = {
+          totalAssets,
+          cash,
+          position: authoritativeAccountRisk.positionPct,
+          holdMktValue: totalAssets > 0
+            && Number.isFinite(Number(cash))
+            ? Math.max(0, totalAssets - cash)
+            : null,
+          goal,
+          goalProgress: goal && totalAssets > 0
+            ? +(totalAssets / goal * 100).toFixed(1)
+            : null,
+          goalGap: goal && totalAssets > 0
+            ? +(goal - totalAssets).toFixed(2)
+            : null,
+          goalReturnPct: goal && totalAssets > 0
+            ? +((goal - totalAssets) / totalAssets * 100).toFixed(1)
+            : null,
+          cashReservePct: totalAssets > 0
+            && Number.isFinite(Number(cash))
+            ? +(cash / totalAssets * 100).toFixed(1)
+            : null,
+          maxStockWeight: Math.max(
+            0,
+            ...authoritativeAccountRisk.exposures.map(
+              (item) => Number(item.positionPct) || 0,
+            ),
+          ),
+          industryWeights,
+          industryWeight: industry
+            ? exposures.filter((item) => item.sectorCode === industry)
+                .reduce(
+                  (sum, item) => sum + (item.positionPct || 0),
+                  0,
+                )
+            : null,
+          stockWeight: authoritativeAccountRisk.exposures
+            .filter((item) => item.code === payload.code)
+            .reduce(
+              (sum, item) => sum + (item.positionPct || 0),
+              0,
+            ),
+          pendingStockWeight:
+            authoritativeAccountRisk.reservedExposures
+              .filter((item) => item.code === payload.code)
+              .reduce(
+                (sum, item) => sum + (item.positionPct || 0),
+                0,
+              ),
+        };
+      } else {
+        payload.account = {
+          totalAssets: rawAccount.totalAssets ?? null,
+          cash: rawAccount.cash ?? null,
+          position: null,
+          stockWeight: null,
+          pendingStockWeight: null,
+          industryWeight: null,
+          cashReservePct: null,
+          maxStockWeight: null,
+          industryWeights: [],
+        };
+      }
     }
     if (
       isAdvisorMode(mode)
@@ -2091,9 +2191,24 @@ export default async function handler(req, res) {
         marketGate: { regime: payload.marketEnv || {} },
       });
       if (Number(payload.holdQty) > 0) {
+        const deterministicHoldingPlan = {
+          ...(payload.previousAdvice || {}),
+          stopPrice:
+            payload.holdingStopPrice
+            ?? tactical.prices?.stopReference
+            ?? tactical.prices?.support
+            ?? payload.previousAdvice?.stopPrice
+            ?? null,
+          targetPrice:
+            tactical.prices?.targetReference
+            ?? tactical.prices?.quantTargetHigh
+            ?? tactical.prices?.resistance
+            ?? payload.previousAdvice?.targetPrice
+            ?? null,
+        };
         payload.adaptiveAction = evaluateHoldingActions({
           payload,
-          advice: payload.previousAdvice || {},
+          advice: deterministicHoldingPlan,
         });
       } else {
         payload.adaptiveAction = chooseAdaptivePricePlan({
@@ -2812,33 +2927,9 @@ export default async function handler(req, res) {
       result.fundContext = compactStockFundSnapshot(payload.stockFund);
       result.formulaPriceReference =
         payload.formulaPriceReference || null;
-      const accountRisk = accountAuth.account?.data
-        ? await readAccountRiskContext(accountAuth.account.data)
-        : null;
-      const rawAccount = accountAuth.account?.data?.account || {};
-      const industry = String(payload.todayQuote?.industry
-        || accountRisk?.exposures.find((item) => item.code === payload.code)?.sectorCode
-        || '').trim();
-      payload.account = {
-        ...payload.account,
-        totalAssets: accountRisk?.totalAssets ?? payload.account?.totalAssets ?? rawAccount.totalAssets,
-        cash: accountRisk?.cash ?? payload.account?.cash ?? rawAccount.cash,
-        position: accountRisk?.positionPct ?? payload.account?.position,
-        ...(accountRisk ? {
-          industryWeight: industry
-            ? [...accountRisk.exposures, ...accountRisk.reservedExposures]
-              .filter((item) => item.sectorCode === industry)
-              .reduce((sum, item) => sum + (item.positionPct || 0), 0)
-            : null,
-          stockWeight: accountRisk.exposures
-            .filter((item) => item.code === payload.code)
-            .reduce((sum, item) => sum + (item.positionPct || 0), 0),
-          pendingStockWeight: accountRisk.reservedExposures
-            .filter((item) => item.code === payload.code)
-            .reduce((sum, item) => sum + (item.positionPct || 0), 0),
-        } : {}),
-      };
-      const accountCircuitBreaker = accountRisk?.breaker || evaluateAccountCircuitBreaker({
+      const accountRisk = authoritativeAccountRisk;
+      const accountCircuitBreaker = accountRisk?.breaker
+        || evaluateAccountCircuitBreaker({
         account: {
           ...(accountAuth.account?.data?.account || {}),
           ...(payload.account || {}),

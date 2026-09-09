@@ -105,6 +105,29 @@ test('军师历史表现只从服务端账户账本重算并携带净R校准', (
   assert.match(aiSource, /delete payload\.advisorTrack/)
 })
 
+test('军师在模型调用前用鉴权账户覆盖客户端仓位与现金', () => {
+  const riskRead = aiSource.indexOf(
+    'authoritativeAccountRisk = await readAccountRiskContext',
+  )
+  const actionValue = aiSource.indexOf(
+    'payload.adaptiveAction = evaluateHoldingActions',
+  )
+  assert.ok(riskRead > 0)
+  assert.ok(actionValue > riskRead)
+  assert.match(
+    aiSource,
+    /payload\.account = \{\s*totalAssets,\s*cash,\s*position: authoritativeAccountRisk\.positionPct/s,
+  )
+  assert.match(
+    aiSource,
+    /totalAssets: rawAccount\.totalAssets \?\? null,[\s\S]*?position: null,/,
+  )
+  assert.doesNotMatch(
+    aiSource,
+    /payload\.account\?\.totalAssets \?\? rawAccount\.totalAssets/,
+  )
+})
+
 test('生成期间到达的Judge事件不改变主建议任务终态', () => {
   const data = {}
   enqueueJob(data, {
