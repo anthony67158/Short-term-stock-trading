@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 
 import {
   rankWatchlistCandidates,
+  watchlistActionValue,
   watchlistAdvicePriority,
   watchlistReadiness,
 } from '../shared/watchlistRanking.js'
@@ -138,7 +139,7 @@ test('明显跌穿买入价不会被误判为最高买入准备度', () => {
   assert.ok(near.score > broken.score)
 })
 
-test('重点关注仍置顶且缺少买入价时不会获得虚假接近度', () => {
+test('置顶不覆盖资本排序且缺少买入价时不会获得虚假接近度', () => {
   const candidates = [
     { code: '600001', qScore: 90 },
     { code: '600002', qScore: 30, star: true },
@@ -150,11 +151,11 @@ test('重点关注仍置顶且缺少买入价时不会获得虚假接近度', ()
 
   const ranked = rankWatchlistCandidates(candidates, quotes)
 
-  assert.deepEqual(ranked.map((item) => item.code), ['600002', '600001'])
-  assert.equal(ranked[0].readiness.proximityScore, null)
+  assert.deepEqual(ranked.map((item) => item.code), ['600001', '600002'])
+  assert.equal(ranked[1].readiness.proximityScore, null)
 })
 
-test('人工置顶绝对优先，其余自选按建议档位分层', () => {
+test('服务端建议档位优先于人工置顶', () => {
   const candidates = [
     { code: '600001', qScore: 30, targetPrice: 10 },
     { code: '600002', qScore: 95, targetPrice: 10 },
@@ -192,15 +193,15 @@ test('人工置顶绝对优先，其余自选按建议档位分层', () => {
 
   assert.deepEqual(
     ranked.map((item) => item.code),
-    ['600003', '600001', '600002', '600005', '600004'],
+    ['600001', '600002', '600005', '600004', '600003'],
   )
   assert.deepEqual(
     ranked.map((item) => item.advicePriority.label),
-    ['观望', '立即买入', '回调再买', '小仓试错', '尚无建议'],
+    ['立即买入', '回调再买', '小仓试错', '尚无建议', '观望'],
   )
 })
 
-test('同一建议档位内仍按重点关注和原买入准备度排序', () => {
+test('同一建议档位内按买入准备度排序，置顶只作为末级同分项', () => {
   const candidates = [
     { code: '600001', qScore: 80, targetPrice: 10 },
     { code: '600002', qScore: 40, targetPrice: 10, star: true },
@@ -226,8 +227,51 @@ test('同一建议档位内仍按重点关注和原买入准备度排序', () =>
 
   assert.deepEqual(
     ranked.map((item) => item.code),
-    ['600002', '600003', '600001'],
+    ['600003', '600001', '600002'],
   )
+})
+
+test('同一建议档位内优先使用自适应动作价值', () => {
+  const candidates = [
+    { code: '600001', qScore: 95, targetPrice: 10 },
+    { code: '600002', qScore: 50, targetPrice: 10 },
+  ]
+  const quotes = {
+    '600001': { price: 10 },
+    '600002': { price: 10 },
+  }
+  const advice = Object.fromEntries(
+    candidates.map((item, index) => [item.code, {
+      mode: 'buy_advice',
+      advice: {
+        action: '回调再买',
+        tier: 'pullback',
+        adaptiveAction: {
+          selected: {
+            route: 'PULLBACK',
+            adaptive: {
+              tier: 'PROBE',
+              utility: index === 0 ? 0.08 : 0.31,
+              estimate: {
+                pFill: 0.6,
+                expectedNetR: index === 0 ? 0.12 : 0.42,
+                lowerNetR: -0.1,
+              },
+            },
+          },
+        },
+      },
+    }]),
+  )
+
+  const ranked = rankWatchlistCandidates(
+    candidates,
+    quotes,
+    advice,
+  )
+
+  assert.deepEqual(ranked.map((item) => item.code), ['600002', '600001'])
+  assert.equal(watchlistActionValue(advice['600002']).utility, 0.31)
 })
 
 test('自选列表订阅建议更新并把建议映射传入排序器', () => {
@@ -242,5 +286,5 @@ test('自选列表订阅建议更新并把建议映射传入排序器', () => {
     source,
     /rankWatchlistCandidates\([\s\S]*?quote,[\s\S]*?adviceByCode/,
   )
-  assert.match(source, /置顶优先，其余按最可能买入排序/)
+  assert.match(source, /按账户动作价值排序/)
 })

@@ -1596,7 +1596,7 @@ function PlanList({ book, quote, stockTags, batchSel }) {
     <section className="panel plan-section plan-section-watch">
       <div className="plan-section-sticky">
         <div className="panel-head plan-head">
-          <div role="heading" aria-level="2" className="panel-title"><Icon name="eye" size={16} /> 自选 / 候选 <span className="sub-name">{book.plan.length} 只 · 置顶优先，其余按最可能买入排序</span></div>
+          <div role="heading" aria-level="2" className="panel-title"><Icon name="eye" size={16} /> 自选 / 候选 <span className="sub-name">{book.plan.length} 只 · 按账户动作价值排序</span></div>
           <div className="plan-head-r">
             <div className="plan-search"><StockSearch /></div>
           </div>
@@ -1618,7 +1618,7 @@ function PlanList({ book, quote, stockTags, batchSel }) {
         <div className="empty small">搜索股票加入自选，或在「今日选股」点「加自选」。这里实时盯盘资金/量比，并按概念或行业分类；点每张卡左上的星标可置顶重点关注。</div>
       ) : (
         <>
-          {/* 当前 tab：重点关注置顶，其余按量化55% + 买点接近度45%排序 */}
+          {/* 当前 tab：服务端动作档位与自适应价值优先，置顶只用于同分整理。 */}
           <div className="plan-cand-grid">{shown.map(Card)}</div>
         </>
       )}

@@ -55,6 +55,60 @@ function decisionPlanBuyPriority(advice) {
   return null
 }
 
+function adaptiveDecision(advice = {}) {
+  const selected = advice?.adaptiveAction?.selected
+  const adaptive = selected?.adaptive
+  if (!selected || !adaptive) return null
+  const utility = finite(adaptive.utility)
+  const expectedNetR = finite(adaptive.estimate?.expectedNetR)
+  const lowerNetR = finite(adaptive.estimate?.lowerNetR)
+  const pFill = finite(adaptive.estimate?.pFill)
+  return {
+    route: String(selected.route || ''),
+    tier: String(adaptive.tier || ''),
+    utility,
+    expectedNetR,
+    lowerNetR,
+    pFill,
+    score: utility == null
+      ? null
+      : utility * 100
+        + (lowerNetR == null ? 0 : Math.min(0, lowerNetR) * 20),
+  }
+}
+
+export function watchlistActionValue(entry) {
+  const advice = entry?.advice || entry
+  if (!advice || typeof advice !== 'object') return null
+  const adaptive = adaptiveDecision(advice)
+  const expectancy = advice?.decisionPlan?.risk?.tradeExpectancy
+  const expectedNetR = finite(
+    expectancy?.expectancy?.expectedNetRPerCandidate
+    ?? expectancy?.expectancy?.expectedNetRGivenFill,
+  )
+  const lowerNetR = finite(
+    expectancy?.expectancy?.meanConfidenceLowerBound
+    ?? expectancy?.expectancy?.netRLowerBound,
+  )
+  const pFill = finite(expectancy?.probability?.pFill)
+  const score = adaptive?.score ?? (
+    expectedNetR == null
+      ? null
+      : expectedNetR * 100
+        + (lowerNetR == null ? 0 : Math.min(0, lowerNetR) * 20)
+  )
+  if (score == null) return null
+  return {
+    score: rounded(score, 2),
+    utility: rounded(adaptive?.utility ?? expectedNetR, 4),
+    expectedNetR: rounded(adaptive?.expectedNetR ?? expectedNetR, 4),
+    lowerNetR: rounded(adaptive?.lowerNetR ?? lowerNetR, 4),
+    pFill: rounded(adaptive?.pFill ?? pFill, 4),
+    route: adaptive?.route || '',
+    tier: adaptive?.tier || '',
+  }
+}
+
 export function watchlistAdvicePriority(entry) {
   const advice = entry?.advice || entry
   if (!advice || typeof advice !== 'object') {
@@ -151,17 +205,26 @@ export function rankWatchlistCandidates(
     advicePriority: watchlistAdvicePriority(
       adviceByCode[candidate.code],
     ),
+    actionValue: watchlistActionValue(
+      adviceByCode[candidate.code],
+    ),
     readiness: watchlistReadiness(
       candidate,
       quotes[candidate.code] || {},
     ),
     _rankingIndex: index,
   })).sort((left, right) => {
-    if (Boolean(left.star) !== Boolean(right.star)) {
-      return left.star ? -1 : 1
-    }
     if (left.advicePriority.score !== right.advicePriority.score) {
       return right.advicePriority.score - left.advicePriority.score
+    }
+    const leftActionValue = left.actionValue?.score
+    const rightActionValue = right.actionValue?.score
+    if (leftActionValue != null || rightActionValue != null) {
+      if (leftActionValue == null) return 1
+      if (rightActionValue == null) return -1
+      if (leftActionValue !== rightActionValue) {
+        return rightActionValue - leftActionValue
+      }
     }
     if (left.readiness.score !== right.readiness.score) {
       return right.readiness.score - left.readiness.score
@@ -173,6 +236,9 @@ export function rankWatchlistCandidates(
     }
     if (left.readiness.quantScore !== right.readiness.quantScore) {
       return right.readiness.quantScore - left.readiness.quantScore
+    }
+    if (Boolean(left.star) !== Boolean(right.star)) {
+      return left.star ? -1 : 1
     }
     return left._rankingIndex - right._rankingIndex
   }).map(({ _rankingIndex, ...candidate }) => candidate)
