@@ -340,6 +340,8 @@ def _minute_rows(rows, expected_code, allowed_dates):
         }
         if any(value is None for value in values.values()):
             raise ValueError("Tushare分钟数据含无效数值")
+        for field in ("open", "close", "high", "low"):
+            values[field] = round(values[field], 6)
         if (
             min(values["open"], values["close"], values["low"]) <= 0
             or values["high"] < max(values["open"], values["close"])

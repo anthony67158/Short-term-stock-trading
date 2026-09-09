@@ -116,6 +116,25 @@ class TushareHistoryExportTest(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0][1], "20260722")
 
+    def test_minute_rows_normalize_binary_float_noise_before_ohlc_checks(self):
+        rows = self.module._minute_rows(
+            [{
+                "ts_code": "000001.SZ",
+                "trade_time": "2026-07-02 15:00:00",
+                "open": 10.279999999999998,
+                "close": 10.279999999999998,
+                "high": 10.279999999999996,
+                "low": 10.27,
+                "vol": 2049100,
+                "amount": 21062661.02000002,
+            }],
+            "000001",
+            {"20260702"},
+        )
+
+        self.assertEqual(rows[0][3], 10.28)
+        self.assertEqual(rows[0][4], 10.28)
+
 
 if __name__ == "__main__":
     unittest.main()
