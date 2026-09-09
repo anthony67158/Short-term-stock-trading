@@ -85,7 +85,7 @@ test('全站表面使用更柔和的圆角层级和低噪声边框', () => {
   )
 })
 
-test('所有按钮受父容器约束且卖出按钮保持短标签', () => {
+test('所有按钮受父容器约束且持仓只保留一个推荐主动作', () => {
   assert.match(
     precision,
     /button\s*{[^}]*min-width:\s*0[^}]*max-width:\s*100%[^}]*overflow:\s*hidden/s,
@@ -98,9 +98,12 @@ test('所有按钮受父容器约束且卖出按钮保持短标签', () => {
     precision,
     /\.hold-item > \.pi-actions > \.chip-btn\s*{[^}]*padding-inline:\s*var\(--space-2xs\)[^}]*font-size:\s*var\(--text-xs\)[^}]*white-space:\s*nowrap/s,
   )
-  assert.match(planTab, /onClick=\{startAdd\}>加仓<\/button>/)
-  assert.match(planTab, /onClick=\{startT\}>做T<\/button>/)
-  assert.match(planTab, /onClick=\{startSell\}>减仓\/清仓<\/button>/)
+  assert.match(planTab, /const recommendedHoldingAction = \(\(\) =>/)
+  assert.match(
+    planTab,
+    /recommendedHoldingAction\.run[\s\S]*?\{recommendedHoldingAction\.label\}/,
+  )
+  assert.match(planTab, /className="card-more-actions holding-more-actions"/)
   assert.doesNotMatch(planTab, /按指令(?:加仓|卖出)/)
   assert.doesNotMatch(planTab, /按浮盈金额排序/)
 })
@@ -255,12 +258,13 @@ test('持仓与自选卡片使用独立身份行且决策优先于次级指标',
     /className=\{'trade-card hold-item stock-detail-card-hitarea'[\s\S]*?\(holdAdvice \? ' has-advice' : ' no-advice'\)/,
   )
   assert.match(planTab, /className="stock-card-metrics hold-card-metrics"/)
-  assert.match(planTab, /className={'trade-card plan-cand'/)
+  assert.match(planTab, /className=\{'trade-card plan-cand stock-detail-card-hitarea'/)
   assert.doesNotMatch(planTab, /className="stock-card-metrics pc-metrics"/)
   assert.equal(
     (planTab.match(/<MarketPulse quote=\{q\}/g) || []).length,
-    2,
+    0,
   )
+  assert.match(planTab, /className="adaptive-value-strip"/)
   assert.match(planTab, /className={'pc-pin'/)
   assert.match(
     precision,
@@ -401,27 +405,18 @@ test('卡片指标与阅读型建议用留白和底色分组而不连续画横�
   )
 })
 
-test('持仓与自选卡把量化分收进建议元信息而不是混入行情首行', () => {
-  const holdHeadStart = planTab.indexOf('<div className="hold-head">')
-  const holdDecisionStart = planTab.indexOf('<div className="card-decision-slot">', holdHeadStart)
-  const holdMetricsStart = planTab.indexOf('<div className="stock-card-metrics hold-card-metrics">', holdDecisionStart)
-  const holdHead = planTab.slice(holdHeadStart, holdDecisionStart)
-  const holdMetrics = planTab.slice(holdMetricsStart, planTab.indexOf('<MarketPulse quote={q}', holdMetricsStart))
-  const candTopStart = planTab.indexOf('<div className="pc-top">')
-  const candDecisionStart = planTab.indexOf('<CandDecision p={p} q={q} />', candTopStart)
-  const candTop = planTab.slice(candTopStart, candDecisionStart)
-
-  assert.doesNotMatch(holdHead, /<QuantBadge score=\{h\.qScore\}/)
-  assert.doesNotMatch(holdMetrics, /<QuantBadge score=\{h\.qScore\}/)
-  assert.doesNotMatch(candTop, /<QuantBadge score=\{p\.qScore\}/)
-  assert.match(planTab, /function AdviceUpdatedAt\(\{ entry, score, bias \}\)/)
+test('持仓与自选卡用动作价值替代量化分徽标', () => {
+  assert.doesNotMatch(planTab, /function QuantBadge/)
+  assert.doesNotMatch(planTab, /<QuantBadge/)
+  assert.match(planTab, /function AdviceUpdatedAt\(\{ entry \}\)/)
+  assert.match(planTab, /function AdaptiveValueStrip\(\{ advice, holding = false \}\)/)
   assert.equal(
     (planTab.match(/<AdviceUpdatedAt\b/g) || []).length,
     2,
   )
   assert.match(
-    legacyStyles,
-    /\.advice-updated-at \.q-badge\.auxiliary\s*{[^}]*border:\s*0[^}]*background:\s*transparent/s,
+    precision,
+    /\.adaptive-value-strip\s*{[^}]*grid-template-columns:\s*repeat\(3,/s,
   )
 })
 
@@ -559,7 +554,7 @@ test('持仓区共用页面边线、筛选栏留出安全区且卡片展示建�
     precision,
     /\.stock-group-filter \.stock-group-tabs\s*{[^}]*padding-inline-start:\s*var\(--space-2xs\)[^}]*border-inline-start:\s*1px solid var\(--color-rule-2\)/s,
   )
-  assert.match(planTab, /function AdviceUpdatedAt\(\{ entry, score, bias \}\)/)
+  assert.match(planTab, /function AdviceUpdatedAt\(\{ entry \}\)/)
   assert.equal((planTab.match(/<AdviceUpdatedAt\b/g) || []).length, 2)
   assert.match(planTab, /className="advice-updated-at"/)
   assert.match(precision, /\.hold-grid\s*{[^}]*align-items:\s*stretch/s)
@@ -690,27 +685,18 @@ test('价格路线图窄卡自动切为两列且语义颜色明确区分', () =>
 test('持仓页大型展开层统一挂到顶层Portal避免被吸顶区遮盖', () => {
   assert.match(
     planTab,
-    /<OverlayPortal>[\s\S]*?className="advisor-score-mask"/,
-  )
-  assert.match(
-    planTab,
-    /className="advisor-pop advisor-score-dialog discipline-dialog"/,
-  )
-  assert.match(
-    planTab,
     /<OverlayPortal>[\s\S]*?className="auto-ref-mask"/,
   )
   assert.doesNotMatch(
     planTab,
     /open && \(mobile[\s\S]*?auto-ref-mask/,
   )
-  assert.match(
-    planTab,
-    /busyModal && \([\s\S]*?<OverlayPortal>[\s\S]*?className="busy-modal-mask"/,
-  )
+  assert.match(planTab, /<HoldingPlanDialog/)
+  assert.match(planTab, /<ConfirmDialog/)
+  assert.doesNotMatch(planTab, /className="busy-modal-mask"/)
   assert.match(
     precision,
-    /\.advisor-score-mask\s*{[^}]*z-index:\s*var\(--z-modal\)[^}]*overflow-y:\s*auto/s,
+    /\.auto-ref-mask\s*{[^}]*z-index:\s*var\(--z-modal\)/s,
   )
 })
 
@@ -748,6 +734,21 @@ test('持仓与自选卡使用固定外框与固定内容槽位', () => {
   assert.match(
     precision,
     /@media \(max-width:\s*30rem\)\s*{[\s\S]*?\.hold-item > \.pi-actions\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s,
+  )
+})
+
+test('宽屏卡片保持固定列宽且单一持仓动作占满操作区', () => {
+  assert.match(
+    precision,
+    /\.hold-grid\s*{[^}]*repeat\(auto-fill,\s*minmax\(min\(100%,\s*380px\),\s*1fr\)\)/s,
+  )
+  assert.match(
+    precision,
+    /\.plan-cand-grid\s*{[^}]*repeat\(auto-fill,\s*minmax\(min\(100%,\s*360px\),\s*1fr\)\)/s,
+  )
+  assert.match(
+    precision,
+    /\.pi-trade-actions\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s,
   )
 })
 

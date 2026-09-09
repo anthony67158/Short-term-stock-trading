@@ -18,13 +18,15 @@ const styles = readFileSync(
   'utf8',
 )
 
-test('持续复核在持仓和自选下分别选择具体股票', () => {
+test('系统盯盘在持仓和自选下分别选择具体股票且不暴露手动刷新', () => {
   assert.match(planTab, /AutoRefreshStockSelector/)
   assert.match(planTab, /scope:\s*'hold'/)
   assert.match(planTab, /scope:\s*'watch'/)
   assert.match(planTab, /scope=\{scope\}/)
   assert.match(planTab, /setAutoSelectedCodes/)
-  assert.match(planTab, /立即复核已选股票/)
+  assert.match(planTab, /由价格与实质事件自动复核/)
+  assert.match(planTab, /系统盯盘·\$\{runnableSelection\.allCodes\.length\}只/)
+  assert.doesNotMatch(planTab, /立即复核已选股票/)
   assert.doesNotMatch(planTab, /立即刷新全部/)
 })
 

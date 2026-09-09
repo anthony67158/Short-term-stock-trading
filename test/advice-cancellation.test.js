@@ -382,15 +382,15 @@ test('批次取消响应丢失后重试仍可由服务端墓碑确认', async ()
   assert.equal(sends, 2)
 })
 
-test('本地个股停止同时中止runner并更新批量项且全部按钮语义明确', () => {
+test('本地个股停止同时中止runner并更新批量项且持仓页不暴露批量停止', () => {
   assert.match(
     generationStatusSource,
     /else\s*\{\s*cancelAdvice\(code\)\s*void cancelOne\(code\)/,
   )
-  assert.match(planTabSource, /全部停止/)
+  assert.doesNotMatch(planTabSource, /全部停止/)
 })
 
-test('全部停止不等待提交请求并使用批次级取消协议', () => {
+test('底层全部停止不等待提交请求并保留批次级取消协议', () => {
   const cancelAllBlock = adviceBatchSource.match(
     /async function cancelBatchInternal\(\)[\s\S]*?(?=export function cancelBatch)/,
   )?.[0] || ''
@@ -409,5 +409,5 @@ test('全部停止不等待提交请求并使用批次级取消协议', () => {
   assert.match(cronAdviceSource, /includeAdviceUpdates:\s*!\[/)
   assert.doesNotMatch(serverCancelAllBlock, /outsideTargets/)
   assert.doesNotMatch(serverCancelAllBlock, /confirmAdviceCancellation\(/)
-  assert.match(planTabSource, /batch\.cancelError\s*\?\s*'重试停止'/)
+  assert.doesNotMatch(planTabSource, /batch\.cancelError\s*\?\s*'重试停止'/)
 })

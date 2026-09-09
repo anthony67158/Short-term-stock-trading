@@ -103,7 +103,7 @@ test('持仓与自选支持整卡进入详情且保留卡内独立操作', () =>
   )
   assert.match(
     planTab,
-    /trade-card plan-cand[\s\S]*?stock-detail-card-hitarea[\s\S]*?role={selectMode \? undefined : 'button'}[\s\S]*?onClick={selectMode \? undefined : \(event\) => openDetailFromCardEvent/s,
+    /trade-card plan-cand stock-detail-card-hitarea[\s\S]*?role="button"[\s\S]*?onClick=\{\(event\) => openDetailFromCardEvent/s,
   )
   assert.match(
     planTab,
@@ -147,7 +147,7 @@ test('持仓和自选卡展示最近有效价但只用连续竞价价触发动�
 test('交易卡片使用固定尺寸和固定区域骨架', () => {
   assert.match(
     planTab,
-    /'trade-card plan-cand'[\s\S]*?\(cardAdvice \? ' has-advice' : ' no-advice'\)/,
+    /'trade-card plan-cand stock-detail-card-hitarea'[\s\S]*?\(cardAdvice \? ' has-advice' : ' no-advice'\)/,
   )
   assert.match(
     planTab,
@@ -312,8 +312,9 @@ test('卡片关键文字建立层级且长内容收敛为固定摘要', () => {
   )
   assert.equal(
     (planTab.match(/className="trade-card-evidence-slot"/g) || []).length,
-    2,
+    0,
   )
+  assert.match(planTab, /className="adaptive-value-strip"/)
   assert.match(planTab, /className="trade-card-review-slot"/)
   assert.match(
     planTab,
@@ -471,10 +472,10 @@ test('持仓卡先展示指令再展示仓位核心数据与次级盘面证据',
   )
 })
 
-test('自选卡把当前指令放在盘面证据之前并取消四格指标墙', () => {
+test('自选卡直接展示动作价值并取消四格盘面指标墙', () => {
   assert.match(
     planTab,
-    /<CandDecision[\s\S]*?p=\{p\}[\s\S]*?q=\{q\}[\s\S]*?\/>[\s\S]*?<MarketPulse quote=\{q\}/,
+    /<CandDecision[\s\S]*?p=\{p\}[\s\S]*?q=\{q\}[\s\S]*?managed=\{managed\}[\s\S]*?\/>/,
   )
   assert.doesNotMatch(
     planTab,
@@ -482,15 +483,12 @@ test('自选卡把当前指令放在盘面证据之前并取消四格指标墙',
   )
   assert.equal(
     (planTab.match(/<MarketPulse quote=\{q\}/g) || []).length,
-    2,
+    0,
   )
-  assert.match(
-    planTab,
-    /className="trade-card-pulse" role="group" aria-label="盘面证据"/,
-  )
+  assert.match(planTab, /<AdaptiveValueStrip advice=\{advice\} \/>/)
   assert.match(
     precision,
-    /\.trade-card-pulse\s*{[^}]*display:\s*flex[^}]*flex-wrap:\s*wrap/s,
+    /\.adaptive-value-strip\s*{[^}]*display:\s*grid[^}]*grid-template-columns:\s*repeat\(3,/s,
   )
 })
 
@@ -553,30 +551,22 @@ test('个股详情以决策优先并移除指标表格线', () => {
   )
 })
 
-test('观望建议保留重新评估但自主成交记录不冒充系统推荐', () => {
+test('普通收藏先纳入作战且自主成交记录不冒充系统推荐', () => {
   assert.match(
     planTab,
     /className=\{\s*'pc-actions with-review'[\s\S]{0,180}' deferred'/,
   )
   assert.match(
     planTab,
-    /systemExecutable[\s\S]*?'chip-btn act-buy'[\s\S]*?'chip-btn ghost manual-build'[\s\S]*?systemExecutable \? view : null[\s\S]*?记录自主成交/s,
+    /systemExecutable && managed[\s\S]*?记录买入[\s\S]*?!managed[\s\S]*?纳入作战[\s\S]*?记录自主成交/s,
   )
   assert.match(
     planTab,
-    /const detailActionLabel = !view[\s\S]*?'生成建议'[\s\S]*?view\.deferred[\s\S]*?'查看后续预案'[\s\S]*?'重新评估'[\s\S]*?'查看建议'/s,
+    /generation\?\.active \|\| enrolling[\s\S]*?正在生成决策[\s\S]*?!view[\s\S]*?重新评估[\s\S]*?系统盯盘中/s,
   )
   assert.match(
     precision,
-    /\.plan-cand \.pc-actions\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(88px,\s*112px\)\s+64px\s+40px[^}]*margin-top:\s*auto/s,
-  )
-  assert.match(
-    precision,
-    /@media \(max-width:\s*30rem\)\s*{[\s\S]*?\.plan-cand \.pc-actions\.with-review\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(0,\s*1fr\)\s+40px/s,
-  )
-  assert.match(
-    precision,
-    /@media \(max-width:\s*30rem\)\s*{[\s\S]*?\.plan-cand \.pc-actions\.with-review \.manual-build\s*{[^}]*grid-column:\s*1\s*\/\s*-1/s,
+    /\.plan-cand \.pc-actions\.with-review\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/s,
   )
 })
 

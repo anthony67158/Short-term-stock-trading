@@ -14,7 +14,7 @@ const styles = read('src/styles/precision.css')
 test('持仓与自选默认按概念胶囊筛选，并可切换到行业', () => {
   assert.match(planTab, /useStockTags\(codes\)/)
   assert.ok((planTab.match(/useState\('concept'\)/g) || []).length >= 2)
-  assert.ok((planTab.match(/<StockGroupFilter/g) || []).length >= 3)
+  assert.ok((planTab.match(/<StockGroupFilter/g) || []).length >= 2)
   assert.match(groupFilter, /aria-label="切换概念或行业筛选"/)
   assert.match(groupFilter, /aria-pressed={dimension === 'concept'}/)
   assert.match(groupFilter, /aria-pressed={dimension === 'industry'}/)
@@ -58,27 +58,22 @@ test('移动端筛选保持单行横滑且胶囊不会穿到维度开关下方',
   )
 })
 
-test('一次性生成保留股票池范围并增加概念或行业板块维度', () => {
-  assert.match(planTab, /className="batch-scope-options"/)
-  assert.match(planTab, /持仓 \(\{holdCodes\.length\}\)/)
-  assert.match(planTab, /自选 \(\{watchCodes\.length\}\)/)
-  assert.match(planTab, /两者 \(\{allCodes\.length\}\)/)
-  assert.match(planTab, /const pinnedWatchCodes =/)
-  assert.match(planTab, /count:\s*pinnedWatchCodes\.length/)
-  assert.match(planTab, /pinnedOnly:\s*nextPinnedOnly/)
+test('持仓页删除一次性生成并保留持仓与待买机会筛选', () => {
+  assert.doesNotMatch(planTab, /className="batch-scope-options"/)
+  assert.doesNotMatch(planTab, /className="batch-filter-stack"/)
+  assert.doesNotMatch(planTab, /一次性生成/)
+  assert.match(planTab, /function HoldingList/)
+  assert.match(planTab, /function PlanList/)
   assert.match(groupFilter, /pinnedOption = null/)
   assert.match(groupFilter, /name="starFill"/)
   assert.match(groupFilter, /置顶 <span className="ind-tab-n">/)
   assert.match(styles, /\.stock-group-tabs > \.ind-tab\.pinned\.on\s*\{/)
-  assert.match(planTab, /selectBatchGroupCodes\(/)
-  assert.match(planTab, /className="batch-filter-stack"/)
 })
 
-test('一次性生成的概念和行业板块支持多选', () => {
-  assert.match(planTab, /const \[batchGroup, setBatchGroup\] = useState\(\(\) => \[\]\)/)
-  assert.match(planTab, /toggleBatchGroupSelection\(batchGroup, group\)/)
-  assert.match(planTab, /groups: nextGroups/)
-  assert.match(planTab, /multiSelect/)
+test('共享分组组件继续支持系统盯盘的概念和行业多选', () => {
+  assert.match(planTab, /<AutoRefreshStockSelector/)
+  assert.match(planTab, /scope=\{scope\}/)
+  assert.match(planTab, /setAutoSelectedCodes/)
   assert.match(groupFilter, /multiSelect = false/)
   assert.match(groupFilter, /Array\.isArray\(active\)/)
   assert.match(groupFilter, /aria-label=\{`按\$\{dimensionLabel\}\$\{multiSelect \? '多选' : '筛选'\}股票`\}/)
@@ -119,13 +114,11 @@ test('持仓总览位于当前持仓标题和筛选胶囊上方', () => {
   )
 })
 
-test('胜率、复核、批量生成与进度统一归入整体总览区', () => {
+test('账户总览只保留系统盯盘授权并移除批量生成控制', () => {
   const holdingSection = planTab.slice(planTab.indexOf('function HoldingList'))
   const overviewZone = holdingSection.indexOf('className="portfolio-overview-zone"')
   const overview = holdingSection.indexOf('<HoldOverview')
   const controls = holdingSection.indexOf('className="portfolio-command-actions"')
-  const batchBar = holdingSection.indexOf('className="batch-bar"')
-  const progress = holdingSection.indexOf("className={'batch-prog'")
   const heading = holdingSection.indexOf('plan-section-head-sticky')
   const headingEnd = holdingSection.indexOf('plan-section-filter-sticky')
   const holdingHeader = holdingSection.slice(heading, headingEnd)
@@ -133,10 +126,13 @@ test('胜率、复核、批量生成与进度统一归入整体总览区', () =>
   assert.ok(overviewZone >= 0, '整体账户总览区必须存在')
   assert.ok(overview > overviewZone, '财务总览应位于整体区内')
   assert.ok(controls > overview, '整体控制条应紧接财务总览')
-  assert.ok(batchBar > controls, '批量选择工具应归入整体区')
-  assert.ok(progress > controls, '生成进度应归入整体区')
-  assert.ok(heading > batchBar, '当前持仓标题必须位于整体批量工具之后')
-  assert.ok(heading > progress, '当前持仓标题必须位于整体生成进度之后')
+  assert.ok(heading > controls, '当前持仓标题必须位于整体控制条之后')
+  assert.match(
+    holdingSection.slice(controls, heading),
+    /<AutoRefreshControl/,
+  )
+  assert.doesNotMatch(holdingSection, /className="batch-bar"/)
+  assert.doesNotMatch(holdingSection, /className=\{'batch-prog'/)
   assert.doesNotMatch(holdingHeader, /<AdvisorScore|<AutoRefreshControl|batch-entry/)
   assert.match(styles, /\.portfolio-overview-zone\s*\{/)
   assert.match(styles, /\.portfolio-command-actions\s*\{/)

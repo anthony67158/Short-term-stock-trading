@@ -145,13 +145,12 @@ test('深度模式使用有界预算且不整轮自动重试', () => {
   })
 })
 
-test('一次性生成界面明确区分普通生成与深度生成', () => {
-  assert.match(planTab, /普通生成（\{selCount\}）/)
-  assert.match(planTab, /深度生成（2路并行）/)
-  assert.match(planTab, /正在后台\{batch\.deepMode \? '深度' : '普通'\}生成/)
-  assert.match(planTab, /pending: '同步账本'/)
-  assert.match(planTab, /queued: '排队中'/)
-  assert.doesNotMatch(planTab, /快速生成（\{selCount\}）/)
+test('持仓页移除一次性生成并由单股作战入口承接生成状态', () => {
+  assert.doesNotMatch(planTab, /普通生成（\{selCount\}）/)
+  assert.doesNotMatch(planTab, /深度生成（2路并行）/)
+  assert.doesNotMatch(planTab, /className="batch-bar"/)
+  assert.match(planTab, />\s*纳入作战\s*</)
+  assert.match(planTab, /<AdviceGenerationStatus code=\{p\.code\}/)
 })
 
 test('所有任务只有完整AI建议才能计为成功', () => {

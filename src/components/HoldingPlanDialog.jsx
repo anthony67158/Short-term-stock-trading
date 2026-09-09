@@ -9,7 +9,6 @@ export default function HoldingPlanDialog({
   aiPlan,
   hitTP,
   hitSL,
-  play,
   onClose,
   onEdit,
   onClear,
@@ -97,15 +96,6 @@ export default function HoldingPlanDialog({
               </section>
             )}
 
-            {play && (
-              <section
-                className="holding-plan-session"
-                data-tone={play.tone}
-              >
-                <span>{play.when} · {play.tag}</span>
-                <p>{play.tip}</p>
-              </section>
-            )}
           </div>
 
           <footer className="holding-plan-footer">
