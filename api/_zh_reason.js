@@ -231,17 +231,21 @@ function progressKey(value) {
     .toLowerCase()
 }
 
-export function createReasoningProgressTracker({ maxItems = 100 } = {}) {
+export function createReasoningProgressTracker({
+  maxItems = 1000,
+  maxChars = 32000,
+} = {}) {
   const emitted = []
+  let emittedChars = 0
   let buffer = ''
   const emitCandidate = (value) => {
-    const text = normalizeProgressText(value).slice(0, 320)
+    const text = normalizeProgressText(value)
     const key = progressKey(text)
     if (
       !key
       || /^[\[{]/.test(text)
       || /"[^"]+"\s*:/.test(text)
-      || emitted.length >= Math.max(1, Number(maxItems) || 100)
+      || emitted.length >= Math.max(1, Number(maxItems) || 1000)
       || emitted.some((prior) =>
         prior === key
         || (
@@ -250,23 +254,43 @@ export function createReasoningProgressTracker({ maxItems = 100 } = {}) {
         )
       )
     ) return ''
+    const available = Math.max(
+      0,
+      Math.trunc(Number(maxChars) || 32000) - emittedChars,
+    )
+    if (!available) return ''
+    const visible = text.slice(0, available)
     emitted.push(key)
-    return text
+    emittedChars += visible.length
+    return visible
+  }
+  const drain = (flush = false) => {
+    const output = []
+    let boundary = 0
+    const separators = /[\n。！？]+/g
+    while (separators.exec(buffer) !== null) {
+      const candidate = buffer.slice(boundary, separators.lastIndex)
+      boundary = separators.lastIndex
+      const visible = emitCandidate(candidate)
+      if (visible) output.push(visible)
+    }
+    buffer = buffer.slice(boundary)
+    if (flush || buffer.length >= 2000) {
+      const visible = emitCandidate(buffer)
+      buffer = ''
+      if (visible) output.push(visible)
+    }
+    return output.join('\n')
   }
   return {
     push(piece) {
       const text = String(piece || '')
       if (!text) return ''
-      buffer = `${buffer}${text}`.slice(-2000)
-      if (!/[\n。！？.!?]/.test(text) && buffer.length < 40) return ''
-      const candidate = buffer
-      buffer = ''
-      return emitCandidate(candidate)
+      buffer += text
+      return drain(false)
     },
     flush() {
-      const candidate = buffer
-      buffer = ''
-      return emitCandidate(candidate)
+      return drain(true)
     },
     snapshot() {
       return [...emitted]

@@ -55,3 +55,16 @@ test('深度研判不会在二十条后静默丢弃后续可见进度', () => {
   assert.equal(outputs.length, 40)
   assert.equal(outputs.at(-1), '第40项独立证据核验已经完成。')
 })
+
+test('上游一次返回大段分析时完整拆分而不是只保留末尾片段', () => {
+  const tracker = createReasoningProgressTracker()
+  const input = Array.from(
+    { length: 80 },
+    (_, index) => `第${index + 1}项证据核验包含量价、资金、技术和账户风险。`,
+  ).join('\n')
+  const output = tracker.push(input)
+
+  assert.match(output, /第1项证据核验/)
+  assert.match(output, /第80项证据核验/)
+  assert.ok(output.length >= input.length - 80)
+})
