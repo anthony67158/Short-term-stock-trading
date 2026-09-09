@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from model_lib import _oss_bucket
 from opportunity_dataset import build_opportunity_dataset_file
+from opportunity_history import load_opportunity_history
 
 
 OUTCOME_PREFIX = "market/opportunity-radar/v1/outcomes/"
@@ -88,14 +89,21 @@ def collect_opportunity_outcomes(
             lambda key: _read_json(bucket, key),
             keys,
         ))
+    live = (
+        value
+        for value in values
+        if value
+        and value.get("maturity") == "MATURED"
+        and str(value.get("decisionId") or "").startswith("formula:")
+    )
+    unique = {
+        str(value.get("decisionId") or ""): value
+        for value in load_opportunity_history(bucket)
+    }
+    for value in live:
+        unique[str(value.get("decisionId") or "")] = value
     return sorted(
-        (
-            value
-            for value in values
-            if value
-            and value.get("maturity") == "MATURED"
-            and str(value.get("decisionId") or "").startswith("formula:")
-        ),
+        unique.values(),
         key=lambda item: str(item.get("decisionId") or ""),
     )
 

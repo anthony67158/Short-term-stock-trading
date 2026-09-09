@@ -70,6 +70,7 @@ jobs:
             tests/test_opportunity_app.py \
             tests/test_upload_opportunity_model.py \
             tests/test_collect_opportunity_outcomes.py \
+            tests/test_opportunity_history.py \
             tests/test_promote_opportunity_model.py \
             tests/test_publish_opportunity_training_status.py \
             2>&1 | tee ../test-artifacts/retrain-contract-tests.log
