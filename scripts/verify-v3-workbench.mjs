@@ -22,7 +22,10 @@ try {
     await page.locator('.plan-cand.v3-card').first().waitFor()
     const holding = (code) => page.locator(`.hold-item[data-code="${code}"]`)
     const candidate = (code) => page.locator(`.plan-cand[data-code="${code}"]`)
-    assert.match(await holding('000001').innerText(), /清仓 10 手/)
+    const pendingExitText = await holding('000001').innerText()
+    assert.match(pendingExitText, /等待退出前复核/)
+    assert.doesNotMatch(pendingExitText, /清仓 10 手/)
+    assert.match(pendingExitText, /约60秒/)
     assert.match(await holding('600036').innerText(), /继续持有 5 手/)
     assert.match(await holding('300750').innerText(), /V3模型调用失败/)
     assert.match(await candidate('002594').innerText(), /等待回踩 84元/)
@@ -74,7 +77,7 @@ try {
     await context.close()
   }
   await fs.writeFile(`${output}/geometry.json`, JSON.stringify(results, null, 2))
-  console.log(JSON.stringify({ passed: true, viewports: results.map((item) => item.width), checks: ['six-states', 'single-primary-action', 'no-deep-generation', 'enrollment-cancel', 'record-buy', 't1', 'detail-return', 'no-overflow'] }))
+  console.log(JSON.stringify({ passed: true, viewports: results.map((item) => item.width), checks: ['exit-review-pending', 'six-states', 'single-primary-action', 'no-deep-generation', 'enrollment-cancel', 'record-buy', 't1', 'detail-return', 'no-overflow'] }))
 } finally {
   await browser.close()
 }
