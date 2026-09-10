@@ -189,7 +189,8 @@ export async function fetchMarketSnapshot({
   brokenLimitPool,
 } = {}) {
   const idxSecids = '1.000001,0.399001,0.399006,0.899050';
-  const idxFields = 'f2,f3,f4,f12,f14,f6,f104,f105,f106';
+  const idxFields =
+    'f2,f3,f4,f6,f12,f14,f62,f184,f104,f105,f106';
   const idxPath =
     `/api/qt/ulist.np/get?fltt=2&invt=2&secids=${encodeURIComponent(idxSecids)}` +
     `&fields=${idxFields}`;
@@ -218,6 +219,8 @@ export async function fetchMarketSnapshot({
     pct: num(d.f3),
     chg: num(d.f4),
     amount: num(d.f6),
+    mainInflow: num(d.f62),
+    mainRatio: num(d.f184),
   }));
 
   const marketBreadth = summarizeMarketBreadth(

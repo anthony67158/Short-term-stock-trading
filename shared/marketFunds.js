@@ -12,21 +12,34 @@ function round(value, digits = 2) {
   return Math.round(value * scale) / scale
 }
 
-function uniqueSectorFlows(sectors) {
-  const rows = Array.isArray(sectors?.list)
-    ? sectors.list
-    : Array.isArray(sectors) ? sectors : []
+const PRIMARY_MARKETS = new Map([
+  ['000001', '沪市'],
+  ['399001', '深市'],
+  ['899050', '北证'],
+])
+
+function primaryMarketFlows(market) {
+  const rows = Array.isArray(market?.indices)
+    ? market.indices
+    : []
   const seen = new Set()
   const result = []
   for (const row of rows) {
-    const key = String(row?.code || row?.name || '').trim()
+    const code = String(row?.code || '')
     const mainInflow = finite(row?.mainInflow)
-    if (!key || mainInflow == null || seen.has(key)) continue
-    seen.add(key)
+    if (
+      !PRIMARY_MARKETS.has(code)
+      || mainInflow == null
+      || seen.has(code)
+    ) continue
+    seen.add(code)
     result.push({
-      code: String(row?.code || ''),
-      name: String(row?.name || ''),
+      code,
+      name: String(row?.name || PRIMARY_MARKETS.get(code)),
+      label: PRIMARY_MARKETS.get(code),
       mainInflow,
+      amount: finite(row?.amount),
+      pct: finite(row?.pct),
     })
   }
   return result
@@ -67,16 +80,15 @@ function turnoverSnapshot(breadth = {}) {
 }
 
 export function buildMarketFundsSnapshot({
-  sectors = null,
   market = null,
   updatedAt = Date.now(),
 } = {}) {
-  const rows = uniqueSectorFlows(sectors)
+  const rows = primaryMarketFlows(market)
   const inflows = rows
     .filter((row) => row.mainInflow > 0)
     .sort((left, right) => right.mainInflow - left.mainInflow)
   const outflows = rows.filter((row) => row.mainInflow < 0)
-  const flatSectorCount = rows.filter(
+  const flatMarketCount = rows.filter(
     (row) => row.mainInflow === 0,
   ).length
   const inflowTotal = inflows.reduce(
@@ -88,21 +100,42 @@ export function buildMarketFundsSnapshot({
     0,
   ))
   const grossFlow = inflowTotal + outflowTotal
+  const totalAmount = rows.reduce(
+    (sum, row) => sum + Math.max(0, row.amount || 0),
+    0,
+  )
   const mainNet = rows.length
     ? inflowTotal - outflowTotal
     : null
-  const top3Inflow = inflows.slice(0, 3).reduce(
-    (sum, row) => sum + row.mainInflow,
-    0,
-  )
+  const dominant = rows.slice().sort(
+    (left, right) =>
+      Math.abs(right.mainInflow) - Math.abs(left.mainInflow),
+  )[0] || null
+  const indexMoves = rows
+    .map((row) => row.pct)
+    .filter((value) => value != null)
+  const averageIndexPct = indexMoves.length
+    ? indexMoves.reduce((sum, value) => sum + value, 0)
+      / indexMoves.length
+    : null
   const turnover = turnoverSnapshot(market?.breadth)
   const hasTurnover = turnover.amountYi != null
+  const resonance = mainNet == null || averageIndexPct == null
+    ? 'UNKNOWN'
+    : mainNet > 0 && averageIndexPct > 0
+      ? 'POSITIVE'
+      : mainNet < 0 && averageIndexPct < 0
+        ? 'NEGATIVE'
+        : mainNet === 0 || averageIndexPct === 0
+          ? 'NEUTRAL' : 'DIVERGENT'
 
   return {
     schemaVersion: MARKET_FUNDS_SCHEMA_VERSION,
-    source: 'eastmoney-industry-aggregate',
-    status: rows.length
+    source: 'eastmoney-primary-index-aggregate',
+    status: rows.length === PRIMARY_MARKETS.size
       ? 'READY'
+      : rows.length
+        ? 'PARTIAL'
       : hasTurnover ? 'PARTIAL' : 'MISSING',
     asOf: Number(updatedAt) || Date.now(),
     mainNetYi: mainNet == null
@@ -118,19 +151,26 @@ export function buildMarketFundsSnapshot({
       ? 'UNKNOWN'
       : mainNet > 0 ? 'INFLOW'
         : mainNet < 0 ? 'OUTFLOW' : 'FLAT',
-    netStrengthPct: grossFlow > 0
-      ? round(mainNet / grossFlow * 100, 1)
-      : rows.length ? 0 : null,
-    inflowSectorCount: rows.length ? inflows.length : null,
-    outflowSectorCount: rows.length ? outflows.length : null,
-    flatSectorCount: rows.length ? flatSectorCount : null,
-    sectorCount: rows.length || null,
-    inflowBreadthPct: rows.length
-      ? round(inflows.length / rows.length * 100, 1)
-      : null,
-    top3InflowSharePct: inflowTotal > 0
-      ? round(top3Inflow / inflowTotal * 100, 1)
-      : null,
+    netStrengthPct: totalAmount > 0
+      ? round(mainNet / totalAmount * 100, 2)
+      : grossFlow > 0
+        ? round(mainNet / grossFlow * 100, 2)
+        : rows.length ? 0 : null,
+    inflowMarketCount: rows.length ? inflows.length : null,
+    outflowMarketCount: rows.length ? outflows.length : null,
+    flatMarketCount: rows.length ? flatMarketCount : null,
+    marketCount: rows.length || null,
+    averageIndexPct: round(averageIndexPct, 2),
+    resonance,
+    dominantMarket: dominant ? {
+      code: dominant.code,
+      name: dominant.name,
+      label: dominant.label,
+      mainNetYi: round(dominant.mainInflow / 1e8, 2),
+      direction: dominant.mainInflow > 0
+        ? 'INFLOW'
+        : dominant.mainInflow < 0 ? 'OUTFLOW' : 'FLAT',
+    } : null,
     turnover,
   }
 }

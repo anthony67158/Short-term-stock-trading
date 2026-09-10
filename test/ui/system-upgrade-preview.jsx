@@ -369,10 +369,38 @@ const radar = {
 const market = {
   updatedAt: now,
   indices: [
-    { code: '000001', name: '上证指数', price: 3200, pct: 0.6 },
-    { code: '399001', name: '深证成指', price: 10480, pct: 0.82 },
-    { code: '399006', name: '创业板指', price: 2180, pct: -0.21 },
-    { code: '899050', name: '北证50', price: 1120, pct: 1.08 },
+    {
+      code: '000001',
+      name: '上证指数',
+      price: 3200,
+      pct: 0.6,
+      amount: 600_000_000_000,
+      mainInflow: 3_800_000_000,
+    },
+    {
+      code: '399001',
+      name: '深证成指',
+      price: 10480,
+      pct: 0.82,
+      amount: 340_000_000_000,
+      mainInflow: 2_400_000_000,
+    },
+    {
+      code: '399006',
+      name: '创业板指',
+      price: 2180,
+      pct: -0.21,
+      amount: 150_000_000_000,
+      mainInflow: -1_000_000_000,
+    },
+    {
+      code: '899050',
+      name: '北证50',
+      price: 1120,
+      pct: 1.08,
+      amount: 28_000_000_000,
+      mainInflow: -3_200_000_000,
+    },
   ],
   breadth: {
     up: 3200,
@@ -417,7 +445,6 @@ const sectorSnapshot = {
   ],
 }
 const marketFunds = buildMarketFundsSnapshot({
-  sectors: sectorSnapshot,
   market,
   updatedAt: now,
 })

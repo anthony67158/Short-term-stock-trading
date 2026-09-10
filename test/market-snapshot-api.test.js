@@ -21,6 +21,26 @@ test('聚合行情复用同一批涨跌停数据并返回国内外七类快照',
     },
     market: async (options) => ({
       ok: true,
+      indices: [
+        {
+          code: '000001',
+          mainInflow: 300_000_000,
+          amount: 6_000_000_000,
+          pct: 0.5,
+        },
+        {
+          code: '399001',
+          mainInflow: -100_000_000,
+          amount: 4_000_000_000,
+          pct: -0.2,
+        },
+        {
+          code: '899050',
+          mainInflow: 0,
+          amount: 500_000_000,
+          pct: 0,
+        },
+      ],
       breadth: {
         amountYi: 1_000,
         volVsAvg5: 25,

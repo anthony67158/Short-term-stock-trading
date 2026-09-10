@@ -92,7 +92,6 @@ export async function collectMarketSnapshot({
     sectors: sectorsValue,
     marketFunds: buildMarketFundsSnapshot({
       market: marketValue,
-      sectors: sectorsValue,
       updatedAt: timestamp,
     }),
     limitUp: settledValue(results[2]),

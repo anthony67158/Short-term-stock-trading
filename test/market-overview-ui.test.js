@@ -42,10 +42,10 @@ test('今日大盘优先展示全市场资金方向和可比较的流动性变�
     /marketFunds=\{snapshot\?\.marketFunds\}/,
   )
   assert.match(overview, /全市场主力净额/)
-  assert.match(overview, /行业板块主力净额汇总/)
+  assert.match(overview, /沪市、深市与北证主力净额汇总/)
   assert.match(overview, /净流强度/)
-  assert.match(overview, /流入 \/ 流出行业/)
-  assert.match(overview, /流入集中度/)
+  assert.match(overview, /流入 \/ 流出市场/)
+  assert.match(overview, /最大资金方向/)
   assert.match(overview, /流动性变化/)
   assert.match(overview, /盘中累计/)
   assert.match(overview, /较5日均量/)

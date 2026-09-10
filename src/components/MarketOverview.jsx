@@ -102,9 +102,8 @@ function formatYi(value, {
 
 function marketFundsView(funds) {
   const mainNetYi = finite(funds?.mainNetYi)
-  const breadth = finite(funds?.inflowBreadthPct)
-  const concentration = finite(funds?.top3InflowSharePct)
   const direction = funds?.direction || 'UNKNOWN'
+  const resonance = funds?.resonance || 'UNKNOWN'
   if (mainNetYi == null || direction === 'UNKNOWN') {
     return {
       tone: 'muted',
@@ -116,20 +115,22 @@ function marketFundsView(funds) {
     return {
       tone: 'red',
       headline: `净流入 ${formatYi(mainNetYi, { signed: true })}`,
-      verdict: concentration >= 55
-        ? '资金净流入，但主要集中在少数行业'
-        : breadth >= 55
-          ? '多数行业获得主力回流，资金扩散较好'
-          : '资金净流入，行业扩散仍需继续确认',
+      verdict: resonance === 'POSITIVE'
+        ? '指数与主力资金同向走强，资金价格形成正向共振'
+        : resonance === 'DIVERGENT'
+          ? '主力净流入，但指数尚未同步走强'
+          : '主力资金净流入，继续观察指数确认',
     }
   }
   if (direction === 'OUTFLOW') {
     return {
       tone: 'green',
       headline: `净流出 ${formatYi(mainNetYi)}`,
-      verdict: breadth != null && breadth <= 35
-        ? '多数行业承压，整体资金偏防守'
-        : '整体资金净流出，但仍有局部行业承接',
+      verdict: resonance === 'NEGATIVE'
+        ? '指数与主力资金同步走弱，整体环境偏防守'
+        : resonance === 'DIVERGENT'
+          ? '主力净流出，但指数尚有局部支撑'
+          : '整体主力资金净流出，优先控制风险',
     }
   }
   return {
@@ -165,9 +166,15 @@ function MarketFundsSummary({ funds }) {
   const view = marketFundsView(funds)
   const turnover = turnoverView(funds?.turnover)
   const strength = finite(funds?.netStrengthPct)
-  const inflowCount = finite(funds?.inflowSectorCount)
-  const outflowCount = finite(funds?.outflowSectorCount)
-  const concentration = finite(funds?.top3InflowSharePct)
+  const inflowCount = finite(funds?.inflowMarketCount)
+  const outflowCount = finite(funds?.outflowMarketCount)
+  const dominant = funds?.dominantMarket || null
+  const dominantNetYi = finite(dominant?.mainNetYi)
+  const dominantText = dominantNetYi == null
+    ? '--'
+    : `${dominant.label || dominant.name} ${
+        dominantNetYi > 0 ? '净流入' : dominantNetYi < 0 ? '净流出' : '平衡'
+      } ${formatYi(dominantNetYi, { signed: true })}`
   return (
     <section
       className="market-funds-summary"
@@ -190,7 +197,7 @@ function MarketFundsSummary({ funds }) {
           </dd>
         </div>
         <div>
-          <dt>流入 / 流出行业</dt>
+          <dt>流入 / 流出市场</dt>
           <dd>
             {inflowCount == null || outflowCount == null
               ? '--'
@@ -198,11 +205,9 @@ function MarketFundsSummary({ funds }) {
           </dd>
         </div>
         <div>
-          <dt>流入集中度</dt>
-          <dd>
-            {concentration == null
-              ? '--'
-              : `前三行业 ${concentration.toFixed(1)}%`}
+          <dt>最大资金方向</dt>
+          <dd className={pctClass(dominantNetYi)}>
+            {dominantText}
           </dd>
         </div>
         <div>
@@ -214,7 +219,7 @@ function MarketFundsSummary({ funds }) {
         </div>
       </dl>
       <p>
-        行业板块主力净额汇总，概念板块不重复计入
+        沪市、深市与北证主力净额汇总；创业板已包含在深市内
       </p>
     </section>
   )
