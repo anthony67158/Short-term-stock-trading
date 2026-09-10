@@ -14,6 +14,11 @@ function buyAdvice(code, utility) {
     mode: 'buy_advice',
     at: now,
     advice: {
+      decisionSource: { engine: 'V3', state: 'READY' },
+      selectedV3Plan: {
+        route: 'IMMEDIATE',
+        opportunityScore: { pFill: 0.8, expectedNetR: utility, netRLowerBound: 0.05 },
+      },
       action: '立即买入',
       adaptiveAction: {
         selected: {

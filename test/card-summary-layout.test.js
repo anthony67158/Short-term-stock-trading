@@ -23,23 +23,17 @@ const fixedCardMarker =
 const fixedCards = precision.slice(precision.indexOf(fixedCardMarker))
 
 test('持仓与自选卡直接展示核心摘要并保留详情入口', () => {
-  assert.match(
-    planTab,
-    /function ActionCommand\(\{ view, onOpen \}\)/,
-  )
-  assert.equal((planTab.match(/<ActionCommand[\s\S]{0,120}onOpen=/g) || []).length, 2)
-  assert.match(
-    planTab,
-    /className={`action-command importance-\$\{importance\}`}[\s\S]*?title="查看股票详情与完整建议"[\s\S]*?onClick=\{onOpen\}/,
-  )
+  assert.equal((planTab.match(/<V3DecisionSummary/g) || []).length, 3)
+  assert.match(planTab, /openDetailFromCardEvent/)
+  assert.match(planTab, /v3DecisionPresentation/)
   assert.doesNotMatch(planTab, /CardAdviceDisclosure|embeddedFull/)
   assert.doesNotMatch(planTab, /useLayoutEffect/)
 })
 
-test('监控不可用时卡片回退最新操作建议而不是要求重新生成', () => {
+test('卡片当前动作由V3与账本止损共同投影而不读取旧军师', () => {
   assert.match(
     planTab,
-    /const decisionView = trackedView \|\| legacyView/,
+    /const decisionView = v3DecisionPresentation/,
   )
   assert.doesNotMatch(planTab, /TrackingRepairAction|repairTracking/)
   assert.doesNotMatch(planTab, /旧建议只有结论|生成可追踪建议/)
@@ -147,11 +141,11 @@ test('持仓和自选卡展示最近有效价但只用连续竞价价触发动�
 test('交易卡片使用固定尺寸和固定区域骨架', () => {
   assert.match(
     planTab,
-    /'trade-card plan-cand stock-detail-card-hitarea'[\s\S]*?\(cardAdvice \? ' has-advice' : ' no-advice'\)/,
+    /'trade-card plan-cand stock-detail-card-hitarea v3-card'[\s\S]*?\(cardAdvice \? ' has-advice' : ' no-advice'\)/,
   )
   assert.match(
     planTab,
-    /'trade-card hold-item stock-detail-card-hitarea'[\s\S]*?\(holdAdvice \? ' has-advice' : ' no-advice'\)/,
+    /'trade-card hold-item stock-detail-card-hitarea v3-card'[\s\S]*?\(holdAdvice \? ' has-advice' : ' no-advice'\)/,
   )
   assert.match(precision, new RegExp(fixedCardMarker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
   assert.match(fixedCards, /\.hold-grid \.hold-item\s*{[^}]*height:\s*700px[^}]*min-height:\s*700px[^}]*max-height:\s*700px/s)
@@ -200,10 +194,7 @@ test('策略摘要分离状态、主动作、仓位和执行条件', () => {
     planTab,
     /className="action-command-detail"[\s\S]*?className="action-command-detail-label">执行条件[\s\S]*?<Icon name="chevronRight"/,
   )
-  assert.match(
-    planTab,
-    /view\.detailActionLabel \|\| '查看后续预案'/,
-  )
+  assert.match(planTab, /查看跟踪条件/)
   assert.match(
     fixedCards,
     /\.card-decision-slot \.action-command-text\s*{[^}]*max-height:\s*none[^}]*overflow:\s*visible[^}]*-webkit-line-clamp:\s*unset/s,
@@ -442,7 +433,7 @@ test('策略摘要不使用悬浮预览且文字区域进入股票详情', () =>
 
 test('持仓卡先展示指令再展示仓位核心数据与次级盘面证据', () => {
   const holdStart = planTab.indexOf(
-    "<div className={'trade-card hold-item stock-detail-card-hitarea'",
+    "<div className={'trade-card hold-item stock-detail-card-hitarea v3-card'",
   )
   const holdEnd = planTab.indexOf(
     '{operationForm && (mobileOperations',
@@ -472,7 +463,7 @@ test('持仓卡先展示指令再展示仓位核心数据与次级盘面证据',
   )
 })
 
-test('自选卡直接展示动作价值并取消四格盘面指标墙', () => {
+test('自选卡直接展示操作摘要并把概率依据移入详情', () => {
   assert.match(
     planTab,
     /<CandDecision[\s\S]*?p=\{p\}[\s\S]*?q=\{q\}[\s\S]*?managed=\{managed\}[\s\S]*?\/>/,
@@ -485,11 +476,9 @@ test('自选卡直接展示动作价值并取消四格盘面指标墙', () => {
     (planTab.match(/<MarketPulse quote=\{q\}/g) || []).length,
     0,
   )
-  assert.match(planTab, /<AdaptiveValueStrip advice=\{advice\} \/>/)
-  assert.match(
-    precision,
-    /\.adaptive-value-strip\s*{[^}]*display:\s*grid[^}]*grid-template-columns:\s*repeat\(3,/s,
-  )
+  assert.match(planTab, /<V3DecisionSummary advice=\{advice\} view=\{baseView\}/)
+  assert.doesNotMatch(planTab.slice(planTab.indexOf('function CandDecision')), /<AdaptiveValueStrip/)
+  assert.match(read('src/components/V3DecisionSummary.jsx'), /detailed &&[\s\S]*决策依据/)
 })
 
 test('个股详情展示最近收盘快照与近5日关键趋势', () => {
@@ -530,7 +519,7 @@ test('个股详情展示最近收盘快照与近5日关键趋势', () => {
 
 test('个股详情以决策优先并移除指标表格线', () => {
   const quoteIndex = stockDetail.indexOf('className="detail-quote"')
-  const formulaIndex = stockDetail.indexOf('<FormulaPrice')
+  const formulaIndex = stockDetail.indexOf('<V3DecisionSummary')
   const noteIndex = stockDetail.indexOf(
     'className="stock-note-anchor detail-note-section"',
   )
@@ -562,7 +551,7 @@ test('普通收藏先纳入作战且自主成交记录不冒充系统推荐', ()
   )
   assert.match(
     planTab,
-    /generation\?\.active \|\| enrolling[\s\S]*?正在生成决策[\s\S]*?!view[\s\S]*?重新评估[\s\S]*?系统盯盘中/s,
+    /generation\?\.active \|\| enrolling[\s\S]*?正在更新决策[\s\S]*?!view\.waiting[\s\S]*?更新 V3 决策[\s\S]*?查看跟踪条件/s,
   )
   assert.match(
     precision,

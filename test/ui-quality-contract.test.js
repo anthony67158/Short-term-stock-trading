@@ -255,16 +255,16 @@ test('持仓与自选卡片共用真实股票题材标签且移动端可换行',
 test('持仓与自选卡片使用独立身份行且决策优先于次级指标', () => {
   assert.match(
     planTab,
-    /className=\{'trade-card hold-item stock-detail-card-hitarea'[\s\S]*?\(holdAdvice \? ' has-advice' : ' no-advice'\)/,
+    /className=\{'trade-card hold-item stock-detail-card-hitarea v3-card'[\s\S]*?\(holdAdvice \? ' has-advice' : ' no-advice'\)/,
   )
   assert.match(planTab, /className="stock-card-metrics hold-card-metrics"/)
-  assert.match(planTab, /className=\{'trade-card plan-cand stock-detail-card-hitarea'/)
+  assert.match(planTab, /className=\{'trade-card plan-cand stock-detail-card-hitarea v3-card'/)
   assert.doesNotMatch(planTab, /className="stock-card-metrics pc-metrics"/)
   assert.equal(
     (planTab.match(/<MarketPulse quote=\{q\}/g) || []).length,
     0,
   )
-  assert.match(planTab, /className="adaptive-value-strip"/)
+  assert.match(planTab, /<V3DecisionSummary/)
   assert.match(planTab, /className={'pc-pin'/)
   assert.match(
     precision,
@@ -1391,10 +1391,10 @@ test('休市卡片不显示到价且自动复核状态只在触发后出现', ()
   )
   assert.match(
     planTab,
-    /view\.detailActionLabel \|\| '查看后续预案'/,
+    /查看跟踪条件/,
   )
   assert.match(
     planTab,
-    /view\.deferred \? 'clock' : 'spark'/,
+    /!view\.waiting/,
   )
 })

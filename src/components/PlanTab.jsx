@@ -29,6 +29,8 @@ import {
   buildWatchSpec,
 } from '../adviceDaily'
 import { tryStartAdvice } from '../adviceGate'
+import V3DecisionSummary from './V3DecisionSummary'
+import { v3DecisionPresentation } from '../../shared/v3DecisionPresentation.js'
 import {
   getAutoConfig,
   setAutoConfigSetting,
@@ -63,9 +65,6 @@ import {
 import {
   actionImportance,
   buildActionProgress,
-  buildAdviceActionView,
-  buildHoldingCardDecisionView,
-  entryConvictionView,
 } from '../../shared/adviceActionView.js'
 import { visibleAiSources } from '../../shared/aiSearchUi.js'
 import { useAiSearchConfig } from '../aiSearchConfigStore'
@@ -575,9 +574,9 @@ function AdviceUpdatedAt({ entry }) {
   const recency = adviceRecency(entry && entry.at)
   if (!label || !recency) return null
   return (
-    <div className="advice-updated-at" data-recency={recency.tone} title={`最近一次军师操作建议生成于 ${new Date(entry.at).toLocaleString('zh-CN')}`}>
+    <div className="advice-updated-at" data-recency={recency.tone} title={`V3决策更新于 ${new Date(entry.at).toLocaleString('zh-CN')}`}>
       <Icon name="history" size={11} />
-      <span>最近生成</span>
+      <span>最近更新</span>
       <strong>{recency.label}</strong>
       {recency.tone === 'fresh' && (
         <time dateTime={new Date(entry.at).toISOString()}>{label}</time>
@@ -1060,19 +1059,15 @@ function CandDecision({ p, q, managed }) {
   useEffect(() => subscribeAdvice(() => force((n) => n + 1)), [])
   const generation = useAdviceGeneration(p.code)
   const entry = getAdvice(p.code, 'buy_advice')
-  const advice = entry?.advice || null
+  const advice = entry?.advice?.decisionSource?.engine === 'V3'
+    ? entry.advice : null
   const hasAdvice = !!advice
-  const executionOpen = isContinuousTrading(Date.now())
   const livePrice = quoteDisplayState(q).livePrice
-  const baseView = advice
-    ? buildAdviceActionView(advice, {
-        mode: 'buy_advice',
-        currentPrice: livePrice,
-        executionOpen,
-      })
-    : null
-  const actionable = baseView?.kind === 'buy'
-    && baseView.actionable !== false
+  const baseView = v3DecisionPresentation({
+    advice, currentPrice: livePrice, managed, loading: generation?.active,
+    executionPlans: planStore.get().executionPlans || [],
+  })
+  const actionable = baseView.kind === 'buy' && baseView.executable
   const contractEntry = baseView?.levels.find(
     (level) => level.key === 'entry',
   )
@@ -1122,70 +1117,18 @@ function CandDecision({ p, q, managed }) {
   if (!managed) {
     return (
       <div className="card-decision-slot">
-        <div className="candidate-unmanaged-state">
-          <Icon name="star" size={15} />
-          <strong>普通收藏</strong>
-          <span>尚未进入账户机会排序和自动复核</span>
-        </div>
+        <V3DecisionSummary managed={false} />
       </div>
     )
   }
 
-  const target = p.targetPrice != null
-    ? Number(p.targetPrice)
-    : aiPrice
-  const qty = p.buyQty != null ? p.buyQty : aiQty
-  const view = advice
-    ? buildAdviceActionView({
-        ...advice,
-        ...(actionable ? { buyPrice: target, planQty: qty } : {}),
-      }, {
-        mode: 'buy_advice',
-        currentPrice: livePrice,
-        executionOpen,
-      })
-    : null
-  const progress = view?.trigger
-  const progressState = buildActionProgress(progress, livePrice)
-  const reachedKey = view ? reachedLevelKey(view, progressState) : ''
-
   return (
     <div className="card-decision-slot">
-      {!view ? (
-        !generation?.active && (
-          <AdviceActionPanel
-            onPrompt={() => openStockDetail(p.code, q?.name || p.name)}
-          />
-        )
-      ) : (
-        <div
-          className={
-            'action-decision cand-decision tone-'
-            + (view.displayTone || actionTone(view.kind))
-          }
-        >
-          <ActionCommand
-            view={view}
-            onOpen={() => openStockDetail(p.code, q?.name || p.name)}
-          />
-          <ConvictionStrip conviction={entryConvictionView(advice)} />
-          <AdaptiveValueStrip advice={advice} />
-          {view.levels.length > 0 ? (
-            <div className={'action-levels levels-' + Math.min(view.levels.length, 3)}>
-              {view.levels.map((item) => (
-                <ActionLevel key={item.key} level={item} reached={item.key === reachedKey} />
-              ))}
-            </div>
-          ) : view.kind !== 'wait' ? (
-            <EmptyActionLevels />
-          ) : null}
-          <ActionProgress trigger={progress} currentPrice={livePrice} progress={progressState} />
-        </div>
-      )}
+      <V3DecisionSummary advice={advice} view={baseView} loading={generation?.active} />
       <div className="card-decision-meta">
-        <AdviceUpdatedAt
+        {advice && <AdviceUpdatedAt
           entry={entry}
-        />
+        />}
         {generation?.active && (
           <AdviceGenerationStatus code={p.code} />
         )}
@@ -1208,45 +1151,18 @@ function CandidateActions({
   useEffect(() => subscribeAdvice(() => force((n) => n + 1)), [])
   const generation = useAdviceGeneration(p.code)
   const entry = getAdvice(p.code, 'buy_advice')
-  const executionOpen = isContinuousTrading(Date.now())
   const livePrice = quoteDisplayState(q).livePrice
-  const baseView = entry?.advice
-    ? buildAdviceActionView(entry.advice, {
-        mode: 'buy_advice',
-        currentPrice: livePrice,
-        executionOpen,
-      })
-    : null
-  const view = baseView?.kind === 'buy'
-    ? buildAdviceActionView({
-        ...entry.advice,
-        buyPrice: p.targetPrice ?? entry.advice.buyPrice,
-        planQty: p.buyQty ?? entry.advice.planQty,
-      }, {
-        mode: 'buy_advice',
-        currentPrice: livePrice,
-        executionOpen,
-      })
-    : baseView
-  const actionable = !view
-    || (view.kind === 'buy' && view.actionable !== false)
-  const systemExecutable = view?.kind === 'buy'
-    && view.actionable !== false
-  const detailActionLabel = !view
-    ? '生成建议'
-    : !actionable
-      ? view.deferred
-        ? view.detailActionLabel || '查看后续预案'
-        : '重新评估'
-      : '查看建议'
-  const detailActionIcon = !view || actionable
-    ? 'target'
-    : view.deferred ? 'clock' : 'spark'
+  const view = v3DecisionPresentation({
+    advice: entry?.advice, currentPrice: livePrice, managed,
+    loading: generation?.active || enrolling,
+    executionPlans: planStore.get().executionPlans || [],
+  })
+  const systemExecutable = view.kind === 'buy' && view.executable
   return (
     <div
       className={
         'pc-actions with-review'
-        + (view?.deferred ? ' deferred' : '')
+        + (view.waiting ? ' deferred' : '')
       }
     >
       {systemExecutable && managed ? (
@@ -1276,16 +1192,16 @@ function CandidateActions({
           aria-busy="true"
         >
           <Icon name="refresh" size={12} className="spin" />
-          正在生成决策
+          正在更新决策
         </button>
-      ) : !view ? (
+      ) : !view.waiting ? (
         <button
           type="button"
           className="chip-btn ghost review-action candidate-primary-action"
           onClick={() => onEnroll(p, { confirm: false })}
         >
           <Icon name="refresh" size={12} />
-          重新评估
+          更新 V3 决策
         </button>
       ) : (
         <button
@@ -1293,8 +1209,8 @@ function CandidateActions({
           className="chip-btn ghost review-action candidate-primary-action"
           onClick={() => openStockDetail(p.code, q?.name || p.name)}
         >
-          <Icon name={view.deferred ? 'radar' : detailActionIcon} size={12} />
-          {view.deferred ? '系统盯盘中' : detailActionLabel}
+          <Icon name="radar" size={12} />
+          查看跟踪条件
         </button>
       )}
       <details className="card-more-actions">
@@ -1450,7 +1366,7 @@ function PlanList({ book, quote, stockTags }) {
       ? getAdvice(p.code, 'buy_advice')?.advice || null
       : null
     return (
-      <div className={'trade-card plan-cand stock-detail-card-hitarea' + (cardAdvice ? ' has-advice' : ' no-advice') + (p.star ? ' starred' : '')}
+      <div className={'trade-card plan-cand stock-detail-card-hitarea v3-card' + (cardAdvice ? ' has-advice' : ' no-advice') + (p.star ? ' starred' : '')}
         key={p.code}
         data-code={p.code}
         role="button"
@@ -1621,6 +1537,7 @@ function PlanList({ book, quote, stockTags }) {
     () => Object.fromEntries(filteredCandidates.map((candidate) => [
       candidate.code,
       managedWatchCodes.has(candidate.code)
+        && getAdvice(candidate.code, 'buy_advice')?.advice?.decisionSource?.engine === 'V3'
         ? getAdvice(candidate.code, 'buy_advice')
         : null,
     ])),
@@ -2426,6 +2343,7 @@ function HoldingList({ book, quote, stockTags }) {
 
 // ---------- 单笔持仓 ----------
 function HoldingItem({ h, quote: q }) {
+  const generation = useAdviceGeneration(h.code)
   const searchConfig = useAiSearchConfig()
   const [mode, setMode] = useState(null) // null | 'sell' | 'T' | 'add' | 'cost'
   const [, setMonitoringTick] = useState(0)
@@ -2618,7 +2536,8 @@ function HoldingItem({ h, quote: q }) {
   }
 
   const adviceEntry = getAdvice(h.code, 'hold_advice')
-  const holdAdvice = adviceEntry?.advice || null
+  const holdAdvice = adviceEntry?.advice?.decisionSource?.engine === 'V3'
+    ? adviceEntry.advice : null
   useEffect(() => {
     if (holdAdvice) planStore.syncActionAlerts(h.code)
   }, [adviceEntry?.at, holdAdvice, h.code])
@@ -2658,16 +2577,12 @@ function HoldingItem({ h, quote: q }) {
     )
     return () => window.clearInterval(timer)
   }, [monitoringPlanId, observingRuleCount])
-  const legacyView = buildHoldingCardDecisionView({
-    advice: holdAdvice,
-    hitTarget: hitTP,
-    hitStop: hitSL,
-    targetPrice: effectivePlanTarget,
+  const decisionView = v3DecisionPresentation({
+    advice: holdAdvice, holdingLots: liveQty,
     stopPrice: effectivePlanStop,
-    t1Status: currentT1,
-    nextTradeDay: nextTradingDayLabel(),
+    currentPrice: validPx, sellableLots: currentT1.sellableToday,
+    loading: generation?.active, executionPlans: book.executionPlans || [],
   })
-  const decisionView = trackedView || legacyView
 
   const startSell = () => {
     const t1 = currentT1
@@ -2837,6 +2752,14 @@ function HoldingItem({ h, quote: q }) {
           ? '修改成本价'
           : ''
   const isPlanEditor = mode === 'plan'
+  const refreshDecision = () => {
+    const book = planStore.get()
+    const quotes = { [h.code]: q }
+    return tryStartAdvice(buildHoldSpec(
+      h.code, h.name, quotes,
+      computePortfolio(book.holding, quotes, book.account), book.account,
+    ))
+  }
   const recommendedHoldingAction = (() => {
     if (
       decisionView?.kind === 'add'
@@ -2877,12 +2800,10 @@ function HoldingItem({ h, quote: q }) {
       }
     }
     return {
-      label: decisionView?.monitoring
-        ? '查看跟踪计划'
-        : '查看当前判断',
-      icon: decisionView?.monitoring ? 'radar' : 'target',
+      label: generation?.active ? '正在更新决策' : '更新 V3 决策',
+      icon: 'refresh',
       className: 'ghost',
-      run: () => openStockDetail(h.code, h.name),
+      run: refreshDecision,
     }
   })()
   const operationForm = mode === 'add' ? (
@@ -2900,7 +2821,7 @@ function HoldingItem({ h, quote: q }) {
       <div className="buy-inline">
         <input className="wl-input" value={sellPrice} onChange={(e) => setSellPrice(e.target.value)} placeholder="卖出价" inputMode="decimal" />
         <input className="wl-input" value={sellQty} onChange={(e) => setSellQty(e.target.value)} placeholder="手" inputMode="numeric" />
-        <span className="qty-hint">今日可卖 / {h.qty}手</span>
+        <span className="qty-hint">今日可卖 {currentT1.sellableToday}手</span>
         {sellPrice && Number(sellQty) > 0 && <span className="fee-hint">费≈{calcSellFee(Number(sellPrice) * Number(sellQty) * 100).toFixed(2)}</span>}
         <button className={'chip-btn solid ' + (Number(sellQty) >= h.qty ? 'act-clear' : 'act-reduce')} onClick={confirmSell}><Icon name="check" size={13} />{Number(sellQty) >= h.qty ? '确认清仓' : '确认减仓'}</button>
         <button className="chip-btn ghost" onClick={() => setMode(null)}>取消</button>
@@ -2967,7 +2888,7 @@ function HoldingItem({ h, quote: q }) {
       {swipe.swiping && isTouch && swipe.dx > 0 && (
         <div className={'hsw-hint hsw-right' + (swipe.dx >= 64 ? ' armed' : '')}><Icon name="chart" size={16} /><span>详情</span></div>
       )}
-      <div className={'trade-card hold-item stock-detail-card-hitarea' + (holdAdvice ? ' has-advice' : ' no-advice')} {...swipe.bind}
+      <div className={'trade-card hold-item stock-detail-card-hitarea v3-card' + (holdAdvice ? ' has-advice' : ' no-advice')} {...swipe.bind}
         data-code={h.code}
         role="button"
         tabIndex={0}
@@ -3024,18 +2945,18 @@ function HoldingItem({ h, quote: q }) {
 
       {/* 当前动作永远先于持仓快照与盘面证据。 */}
       <div className="card-decision-slot">
-        <AdviceActionPanel
-          view={decisionView}
-          currentPrice={validPx}
-          conviction={entryConvictionView(holdAdvice)}
+        <V3DecisionSummary
           advice={holdAdvice}
-          holding
-          onPrompt={() => openStockDetail(h.code, h.name)}
+          holdingLots={liveQty}
+          stopPrice={h.sl}
+          loading={generation?.active}
+          view={decisionView}
+          monitoring={trackedView?.monitoring}
         />
         <div className="card-decision-meta">
-          <AdviceUpdatedAt
+          {holdAdvice && <AdviceUpdatedAt
             entry={adviceEntry}
-          />
+          />}
           <AdviceGenerationStatus code={h.code} />
         </div>
       </div>
@@ -3135,6 +3056,7 @@ function HoldingItem({ h, quote: q }) {
             <button
               className={`chip-btn ${recommendedHoldingAction.className} recommended`}
               onClick={recommendedHoldingAction.run}
+              disabled={generation?.active && !decisionView.hardStop}
             >
               <Icon name={recommendedHoldingAction.icon} size={12} />
               {recommendedHoldingAction.label}

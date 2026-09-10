@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import { computeTFlows, planStore, t1StatusOf } from './planStore.js'
 import { getAdvice } from './adviceCache.js'
+import { isCurrentDecisionAlert, v3ActionAlertMessage } from '../shared/adviceAlerts.js'
 import { api } from './apiBase.js'
 import { accountRequestHeaders } from './quantModel.js'
 import {
@@ -156,6 +157,7 @@ function currentPositionGate(alert) {
 // 判断单条规则是否命中（q=该股实时报价）
 function hit(a, q, now = Date.now()) {
   if (!isFreshAlertQuote(q, now)) return null
+  if (a.decisionEngine === 'V3' && !a.reviewOnly && a.type === 'price') return v3ActionAlertMessage(a, q)
   // 数值型字段统一取有限数:接口异常/字符串/NaN 时返回 null(不判定),
   // 避免后续 .toFixed 在字符串上抛错(会中断整个 evaluate 预警循环)或渲染出字面 "NaN"。
   const fin = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null }
@@ -408,6 +410,7 @@ export const alertStore = {
     // 该预警是否走智能二段确认:仅【价位类 + 带 phase(AI 派生)】;手动/涨跌幅/量比/涨跌停 → 老逻辑
     const isSmart = (a) => smartOn && a.type === 'price' && !!a.phase && a.phase !== 'confirmed' && a.phase !== 'invalid'
     for (const storedAlert of alerts) {
+      if (!isCurrentDecisionAlert(storedAlert, getAdvice(storedAlert.code), now)) continue
       const q = quoteMap[storedAlert.code]
       if (storedAlert.type === 'plan-condition') {
         const result = evaluateMonitoringRule(storedAlert.planRule, q, { now, previous: storedAlert.ruleState })

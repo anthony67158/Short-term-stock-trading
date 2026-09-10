@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import Icon from './Icon'
 import {
-  adviceGenerationSteps,
   adviceJobState,
   adviceReviewCardState,
 } from '../../shared/adviceUiState.js'
@@ -26,7 +25,7 @@ export function useAdviceGeneration(code) {
       active: true,
       status: canceling ? 'canceling' : 'running',
       stage: String(running?.stage || ''),
-      label: canceling ? '正在取消生成' : (running?.phase || '操作建议生成中'),
+      label: canceling ? '正在取消评估' : (running?.phase || 'V3决策更新中'),
       cancelable: !canceling,
       cloud: false,
       deepMode: running?.deepMode === true,
@@ -101,10 +100,18 @@ export default function AdviceGenerationStatus({
       phase:
         generation?.label
         || detailState?.phase
-        || '正在准备本次建议',
+        || '正在准备V3评估',
     }
     const sources = visibleAiSources(searchEnabled, view.sources)
-    const steps = adviceGenerationSteps(view)
+    const ordered = [
+      { key: 'collect', label: '读取行情' },
+      { key: 'quant', label: 'V3评估' },
+      { key: 'finalize', label: '核定并保存' },
+    ]
+    const activeIndex = Math.max(0, ordered.findIndex((step) => step.key === view.stage))
+    const steps = ordered.map((step, index) => ({
+      ...step, state: index < activeIndex ? 'done' : index === activeIndex ? 'active' : 'pending',
+    }))
     return (
       <section
         className={
@@ -123,7 +130,7 @@ export default function AdviceGenerationStatus({
                   ? generation?.silent
                     ? '后台数据检查中'
                     : '到价确认进行中'
-                  : view.deepMode ? '深度研判进行中' : '快速建议生成中'}
+                  : 'V3决策更新中'}
               </b>
               <span>{view.phase}</span>
             </div>
@@ -133,8 +140,8 @@ export default function AdviceGenerationStatus({
               type="button"
               className="generation-cancel"
               onClick={cancel}
-              aria-label={`停止${code}的操作建议生成`}
-              title="停止本次生成"
+              aria-label={`停止${code}的V3评估`}
+              title="停止本次评估"
             >
               <Icon name="close" size={13} />
               <span>停止</span>
@@ -205,15 +212,15 @@ export default function AdviceGenerationStatus({
       disabled={!generation.cancelable}
       aria-label={reviewing
         ? `${code}正在到价确认`
-        : `取消${code}的操作建议生成`}
-      title={reviewing ? '到价确认使用独立端点' : '点击取消本次生成'}>
+        : `取消${code}的V3评估`}
+      title={reviewing ? '到价后由V3重新评估' : '点击取消本次评估'}>
       <Icon name="refresh" size={12} className="spin" />
       <span>{generation.label}</span>
       {generation.cloud && <em>云端持续运行</em>}
       <b>
         {reviewing
           ? '到价确认'
-          : generation.cancelable ? '取消生成' : '取消中'}
+          : generation.cancelable ? '取消评估' : '取消中'}
       </b>
     </button>
   )

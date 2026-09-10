@@ -91,8 +91,9 @@ test('公式候选只允许加入自选且展示唯一主价位', () => {
   assert.doesNotMatch(selection, /planStore\.buy/)
 })
 
-test('个股详情独立展示公式价位和军师参考权重', () => {
-  assert.match(detail, /<FormulaPrice/)
+test('个股详情只展示V3决策且不并列旧公式价格', () => {
+  assert.doesNotMatch(detail, /<FormulaPrice/)
+  assert.match(detail, /<V3DecisionSummary/)
   assert.match(price, /公式价位/)
   assert.match(price, /effectiveWeight/)
   assert.match(price, /唯一/)

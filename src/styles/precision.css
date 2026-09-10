@@ -19606,3 +19606,164 @@ html[data-theme="light"] .nav {
     grid-template-columns: minmax(0, 1fr) auto;
   }
 }
+
+.v3-decision-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  min-width: 0;
+  padding-block: var(--space-md);
+  color: var(--color-ink);
+}
+
+.v3-decision-eyebrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 20px;
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.v3-decision-headline {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  font-size: 21px;
+  line-height: 1.4;
+}
+
+.v3-decision-headline > .icon {
+  flex: 0 0 21px;
+  margin-top: 4px;
+}
+
+.v3-decision-headline strong,
+.v3-execution-facts dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.v3-decision-summary.buy .v3-decision-headline {
+  color: var(--color-up);
+}
+
+.v3-decision-summary.exit .v3-decision-headline {
+  color: var(--color-danger);
+}
+
+.v3-decision-reason {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 14px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.v3-execution-facts {
+  display: grid;
+  gap: var(--space-md);
+  margin: var(--space-sm) 0 0;
+}
+
+.v3-execution-facts div {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  align-items: baseline;
+  gap: var(--space-sm);
+}
+
+.v3-execution-facts dt {
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.v3-execution-facts dd {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.v3-evidence-toggle {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: var(--space-xs);
+  min-height: var(--control-size);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-accent);
+  cursor: pointer;
+}
+
+.v3-decision-evidence {
+  font-size: 14px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.v3-decision-evidence p { margin: 0 0 var(--space-sm); }
+
+.hold-grid .hold-item.v3-card,
+.plan-cand.v3-card {
+  height: 640px;
+  min-height: 640px;
+  max-height: 640px;
+}
+
+.trade-card.v3-card .card-decision-slot {
+  flex: 0 0 300px;
+  height: 300px;
+  min-height: 300px;
+  max-height: 300px;
+  overflow: visible;
+}
+
+.trade-card.v3-card .v3-decision-summary {
+  flex: 1;
+  padding-block: var(--space-2xs);
+  gap: var(--space-2xs);
+}
+
+.trade-card.v3-card .v3-execution-facts {
+  gap: var(--space-xs);
+  margin-top: var(--space-xs);
+}
+
+.trade-card.v3-card .card-decision-meta {
+  margin-top: auto;
+}
+
+.trade-card.v3-card .hold-t1-metric em {
+  display: block;
+  font-size: var(--font-xs, 12px);
+  white-space: normal;
+}
+
+@media (max-width: 720px) {
+  .hold-grid .hold-item.v3-card,
+  .plan-cand.v3-card,
+  .hold-swipe-wrap:has(.v3-card),
+  .hold-select-wrap:has(.v3-card) {
+    height: 660px;
+    min-height: 660px;
+    max-height: 660px;
+  }
+  .plan-cand.v3-card .pc-actions {
+    flex: 0 0 44px;
+    min-height: 44px;
+    max-height: 44px;
+  }
+}
+
+.plan-cand.v3-card:has(> .buy-inline-wrap),
+.plan-cand.v3-card:has(> .pc-alert-box) {
+  height: auto;
+  max-height: none;
+}
+
+.detail-footbar .footbar-evidence {
+  flex: 1 1 0;
+  min-width: 0;
+}

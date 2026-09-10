@@ -6,7 +6,7 @@ import StockTags from './StockTags'
 import SelectionOrigin from './SelectionOrigin'
 import { StockNoteEditor } from './StockNote'
 import AdviceGenerationStatus from './AdviceGenerationStatus'
-import AdvicePresentation from './AdvicePresentation'
+import V3DecisionSummary from './V3DecisionSummary'
 import { usePolling } from '../hooks'
 import { fmtPct, pctClass, fmtRaw, fmtNum } from '../format'
 import { api } from '../apiBase'
@@ -33,10 +33,8 @@ import {
   newestAdviceResult,
   shouldShowAdviceResult,
 } from '../../shared/adviceUiState.js'
-import { latestKnowledgeActionReview } from '../../shared/knowledgeAction.js'
 import {
   adviceGenerationActions,
-  adviceModeGuidance,
   stockWatchAction,
 } from '../../shared/stockDetailActions.js'
 import { AlertForm } from './AlertCenter'
@@ -54,8 +52,7 @@ import {
   restoreAdviceEntryQuantEvidence,
 } from '../../shared/adviceQuantResult.js'
 import { stockNoteText } from '../../shared/stockNotes.js'
-import { stockDetailHeaderState } from '../../shared/quoteDisplay.js'
-import FormulaPrice from './FormulaPrice'
+import { stockDetailHeaderState, quoteDisplayState } from '../../shared/quoteDisplay.js'
 import { useTheme } from '../themeStore'
 import {
   STOCK_DETAIL_CACHE_TTL_MS,
@@ -197,6 +194,7 @@ export default function StockDetail({ stock, onClose }) {
   const [busyModal, setBusyModal] = useState(null) // 端点已满提示:{ busy:[{code,name}], concurrency } | null
   const quantRefreshRef = useRef('')
   const noteAnchorRef = useRef(null)
+  const decisionAnchorRef = useRef(null)
   const searchConfig = useAiSearchConfig()
   const book = usePlanStore()
   const reviewEnabled = (
@@ -205,13 +203,6 @@ export default function StockDetail({ stock, onClose }) {
       book.settings,
       stock && stock.code,
     )
-  )
-  const knowledgeActionReview = useMemo(
-    () => latestKnowledgeActionReview(
-      book.decisionLog,
-      stock && stock.code,
-    ),
-    [book.decisionLog, stock && stock.code],
   )
   // 账户全景(总资产/可用现金/总仓位/单票占比)——供 AI 按资金和仓位算具体手数。
   // ★不要依赖 overview(它在后面才定义，提前引用会触发 TDZ 报错导致弹窗白屏)；
@@ -890,9 +881,6 @@ export default function StockDetail({ stock, onClose }) {
     stateCode: quantState?.code || '',
     currentCode: stock.code,
   })
-  const modeGuidance = adviceModeGuidance({
-    hasAdvice: Boolean(quantState?.advice),
-  })
   const stockNote = stockNoteText(book.stockNotes, stock.code)
 
   useEffect(() => {
@@ -1103,12 +1091,12 @@ export default function StockDetail({ stock, onClose }) {
                 </div>
               )}
               {/* ===== AI 操作建议（核心：紧跟价格，第一优先展示）===== */}
-              <div className={'decide-box' + (!quantState ? ' is-empty' : '')}>
+              <div ref={decisionAnchorRef} className={'decide-box' + (!quantState ? ' is-empty' : '')}>
                 <div className="decide-head">
                   <div className="decide-primary">
                     <div className="decide-title">
                       <Icon name="target" size={14} />
-                      <span>军师 · 操作建议</span>
+                      <span>V3 · 操作决策</span>
                     </div>
                     {myHold ? <span className="decide-hold">持仓 {myHold.qty}手 · 成本{fmtRaw(myHold.cost)}</span>
                             : <span className="decide-hold none">未持仓</span>}
@@ -1121,7 +1109,7 @@ export default function StockDetail({ stock, onClose }) {
                           量化信号 · {formatQuantAsOf(quantState.result.asOf)}
                         </span>
                       )
-                      : <span className="quant-asof muted">量化结果尚未返回</span>}
+                      : <span className="quant-asof muted">价格与手数由服务端核定</span>}
                     <button
                       type="button"
                       className={'advice-review-toggle' + (reviewEnabled ? ' on' : '')}
@@ -1142,11 +1130,13 @@ export default function StockDetail({ stock, onClose }) {
                   </div>
                 </div>
 
-                {!quantState && (
-                  <div className="quant-cta" role="status">
-                    <Icon name="spark" size={14} />
-                    <span>尚无操作建议</span>
-                  </div>
+                {!quantState?.loading && quantState?.advice?.decisionSource?.engine !== 'V3' && (
+                  <V3DecisionSummary
+                    holdingLots={myHold?.qty || 0}
+                    stopPrice={book.holding.find((item) => item.code === stock.code)?.sl}
+                    currentPrice={quoteDisplayState(overview).livePrice}
+                    sellableLots={t1StatusOf(stock.code).sellableToday}
+                  />
                 )}
                 {quantState && quantState.loading && (
                   <AdviceGenerationStatus
@@ -1163,7 +1153,7 @@ export default function StockDetail({ stock, onClose }) {
                     </button>
                   </div>
                 )}
-                {shouldShowAdviceResult(quantState) && (() => {
+                {shouldShowAdviceResult(quantState) && quantState?.advice?.decisionSource?.engine === 'V3' && (() => {
                   const q = quantState.result || {}
                   const adv = quantState.advice
                   const dec = q.decision || {}
@@ -1200,23 +1190,13 @@ export default function StockDetail({ stock, onClose }) {
                   return (
                     <>
                       {adv ? (
-                        <AdvicePresentation
+                        <V3DecisionSummary
                           advice={adv}
-                          knowledgeActionReview={knowledgeActionReview}
-                          reviewEnabled={reviewEnabled}
-                          executionPlanState={
-                            (book.executionPlans || []).find(
-                              (plan) =>
-                                plan.planId === adv.executionPlan?.planId,
-                            ) || null
-                          }
-                          onArmExecutionPlan={() =>
-                            planStore.armExecutionPlan(
-                              adv.executionPlan,
-                              Date.now(),
-                              overview?.price,
-                            )
-                          }
+                          holdingLots={myHold?.qty || 0}
+                          stopPrice={book.holding.find((item) => item.code === stock.code)?.sl}
+                          currentPrice={quoteDisplayState(overview).livePrice}
+                          sellableLots={t1StatusOf(stock.code).sellableToday}
+                          detailed
                         />
                       ) : (
                         <div className={'decide-verdict ' + fallbackVerdict.tone}>
@@ -1236,11 +1216,7 @@ export default function StockDetail({ stock, onClose }) {
                           {generationMetrics?.durationMs > 0 && (
                             <span className="generation-proof">
                               <Icon name="check" size={10} />
-                              完整结果 · {generationMetrics.profile === 'DEEP'
-                                ? '深度生成'
-                                : generationMetrics.profile === 'TRIGGERED_REVIEW'
-                                  ? '限时到价复核'
-                                  : '快速生成'}
+                              V3 决策已保存
                               {' · '}
                               {(generationMetrics.durationMs / 1000).toFixed(1)}秒
                             </span>
@@ -1468,13 +1444,12 @@ export default function StockDetail({ stock, onClose }) {
                         </div>
                       )}
 
-                      <div className="dq-hint">{adv ? (myHold ? '军师建议结合量化预测、技术面和你的持仓成本生成' : '军师建议结合量化走势预测、技术面、历史规律和当日盘面生成') : '走势预测=基于历史波动的蒙特卡洛模拟，量化=多因子打分'}；均为统计口径，仅供参考，非投资建议</div>
+                      <div className="dq-hint">走势统计仅作参考，不覆盖上方V3决策。</div>
                     </>
                   )
                 })()}
               </div>
 
-              <FormulaPrice code={stock && stock.code} />
 
               <div
                 ref={noteAnchorRef}
@@ -1673,14 +1648,14 @@ export default function StockDetail({ stock, onClose }) {
           </div>
         </div>
 
-        {/* 固定底部动作栏：快速建议 / 深度建议 / 预警 */}
+        {/* 决策计算与依据查看分开，不再由深度生成决定交易动作。 */}
         <div className="detail-footbar">
           <button
             className="btn btn-primary footbar-generate footbar-quick"
             type="button"
             disabled={adviceActions.quick.disabled}
             aria-busy={adviceActions.quick.active}
-            title="关闭深度思考，直接生成单模型操作建议"
+            title="读取当前行情并由V3重新核定操作"
             onClick={() => loadQuant(false)}
           >
             <Icon
@@ -1689,32 +1664,21 @@ export default function StockDetail({ stock, onClose }) {
               className={adviceActions.quick.active ? 'spin' : ''}
             />
             <span className="footbar-action-copy">
-              <span>{adviceActions.quick.label}</span>
+              <span>{quantState?.loading ? '正在评估' : '更新 V3 决策'}</span>
             </span>
           </button>
           <button
-            className="btn footbar-generate footbar-deep"
+            className="btn footbar-evidence"
             type="button"
-            disabled={adviceActions.deep.disabled}
-            aria-busy={adviceActions.deep.active}
-            data-recommended={
-              modeGuidance.firstGeneration ? 'true' : undefined
-            }
-            title={modeGuidance.deepTitle}
-            onClick={() => loadQuant(true)}
+            title="查看当前动作与模型依据"
+            onClick={() => decisionAnchorRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })}
           >
             <span className="footbar-action-main">
               <Icon
-                name={adviceActions.deep.icon}
+                name="layers"
                 size={14}
-                className={adviceActions.deep.active ? 'spin' : ''}
               />
-              <span>{adviceActions.deep.label}</span>
-              {modeGuidance.deepBadge && (
-                <small className="footbar-mode-badge">
-                  {modeGuidance.deepBadge}
-                </small>
-              )}
+              <span>查看依据</span>
             </span>
           </button>
           <button

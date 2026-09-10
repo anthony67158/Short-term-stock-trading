@@ -1,5 +1,5 @@
 import { buildAccountRiskContext } from './accountRiskBudget.js'
-import { buildAdviceActionView } from './adviceActionView.js'
+import { v3DecisionPresentation } from './v3DecisionPresentation.js'
 import { t1StatusOf } from './portfolioAccounting.js'
 import { isContinuousTrading } from './tradingCalendar.js'
 import {
@@ -42,12 +42,14 @@ function commandPriority(command) {
   }[command.state] ?? 8
 }
 
-function executionPlanForCode(plans = [], code = '') {
+function executionPlanForCode(plans = [], code = '', decisionId = '') {
   return plans
     .filter((plan) =>
       plan?.code === code
       && !plan.dismissedAt
       && ACTIVE_EXECUTION_STATES.has(plan.status)
+      && (['USER_CONFIRMED', 'PARTIALLY_RECORDED'].includes(plan.status)
+        || (decisionId && plan.decisionId === decisionId))
     )
     .sort((left, right) =>
       Number(right.updatedAt || right.createdAt || 0)
@@ -91,7 +93,7 @@ export function buildTodayCommandList({
     const entry = !isHolding && !managedWatchCodes.has(String(item.code))
       ? null
       : adviceFor(item.code, mode)
-    const advice = entry?.advice || null
+    const advice = entry?.advice?.decisionSource?.engine === 'V3' ? entry.advice : null
     const quote = quoteMap[item.code] || {}
     const currentPrice = Number(quote.price) || null
     const alerts = (book.alerts || []).filter((alert) =>
@@ -112,14 +114,14 @@ export function buildTodayCommandList({
     let keyPrice = null
     let view = null
     if (advice) {
-      view = buildAdviceActionView(advice, {
-        mode,
-        currentPrice,
-        executionOpen: isContinuousTrading(now),
-        now,
+      view = v3DecisionPresentation({
+        advice, currentPrice, now,
+        holdingLots: isHolding ? t1StatusOf(holding, book.closed || [], item.code, now).liveQty : 0,
+        sellableLots: isHolding ? t1StatusOf(holding, book.closed || [], item.code, now).sellableToday : 0,
+        stopPrice: item.sl, executionPlans: book.executionPlans || [],
       })
       kind = view?.kind || 'hold'
-      actionLabel = view?.action || '持有'
+      actionLabel = view?.headline || '持有'
       const level = view?.levels?.[0]
       if (level?.price != null && currentPrice > 0) {
         distancePct = Math.abs(level.price / currentPrice - 1) * 100
@@ -127,11 +129,12 @@ export function buildTodayCommandList({
       }
     } else if (!isHolding) {
       kind = 'none'
-      actionLabel = '待生成建议'
+      actionLabel = '等待V3评估'
     }
     const executionPlan = executionPlanForCode(
       book.executionPlans || [],
       item.code,
+      advice?.decisionPlan?.decisionId,
     )
     const planConflict = conflictsWithPlan(executionPlan, kind)
     const executionReady = executionPlan
@@ -220,8 +223,8 @@ export function buildTodayCommandList({
       instruction: stopReached
         ? `现价${currentPrice}元已到止损${stop}元；今日可卖${sellable || 0}手，不加仓摊平`
         : planConflict
-          ? '执行队列与最新建议方向相反，请先取消旧计划或重新生成'
-          : executionPlan?.trigger || view?.instruction || '',
+          ? '执行队列与最新决策方向相反，请先核对已有计划'
+          : executionPlan?.trigger || (view ? `${view.headline}；${view.reason}` : '请更新V3决策'),
       stopPrice: executionPlan?.stopPrice
         ?? advice?.decisionPlan?.prices?.stop
         ?? null,
@@ -235,10 +238,9 @@ export function buildTodayCommandList({
         ?? null,
       decisionId: advice?.decisionPlan?.decisionId || null,
       executionPlanId: executionPlan?.planId || null,
-      actionValue: isHolding
+      actionValue: advice?.decisionSource?.state !== 'READY' ? null : isHolding
         ? finite(
-            advice?.adaptiveAction?.selected?.valueR
-            ?? advice?.adaptiveAction?.selected?.value,
+            advice?.selectedV3Plan?.opportunityScore?.expectedNetR,
           )
         : watchlistActionValue(entry)?.utility ?? null,
       priority: 0,
@@ -287,6 +289,7 @@ export function buildTodayCommandList({
 function adviceForAccount(book = {}, code = '', mode = '') {
   const entry = book.advice?.[code]
   if (!entry) return null
+  if (entry.advice?.decisionSource?.engine !== 'V3') return null
   if (mode && entry.mode && entry.mode !== mode) return null
   return entry
 }

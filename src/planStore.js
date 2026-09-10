@@ -178,7 +178,9 @@ export function advicePlan(code) {
       : 'buy_advice'
     const a = getAdvice(code, expectedMode)
     const adv = a && a.advice
-    if (!adv) return null
+    if (adv?.decisionSource?.engine !== 'V3') return null
+    if (adv.decisionSource.state !== 'READY') return null
+    if (Date.parse(adv.decisionPlan?.validUntil) <= Date.now()) return null
     const priceContract = sanitizedAdvicePriceContract(adv)
     if (!priceContract) return null
     const targetLevel = advicePriceLevel(adv, 'target')

@@ -82,7 +82,7 @@ test('共享分组组件继续支持系统盯盘的概念和行业多选', () =>
 test('卡片最近生成时间展示相对新鲜度并按三档状态突出', () => {
   assert.match(planTab, /adviceRecency\(entry && entry\.at\)/)
   assert.match(planTab, /data-recency={recency\.tone}/)
-  assert.match(planTab, /<span>最近生成<\/span>/)
+  assert.match(planTab, /<span>最近更新<\/span>/)
   assert.match(styles, /\.advice-updated-at\[data-recency="fresh"\]/)
   assert.match(styles, /\.advice-updated-at\[data-recency="today"\]/)
   assert.match(styles, /\.advice-updated-at\[data-recency="older"\]/)

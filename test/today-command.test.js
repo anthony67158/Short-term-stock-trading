@@ -6,7 +6,8 @@ import { buildTodayCommandList } from '../src/planStore.js'
 const now = Date.parse('2026-09-09T02:00:00.000Z')
 
 function entry(advice) {
-  return { mode: advice.mode || 'buy_advice', at: now, advice }
+  return { mode: advice.mode || 'buy_advice', at: now,
+    advice: { decisionSource: { engine: 'V3', state: 'READY' }, ...advice } }
 }
 
 test('当前指令优先退出风险并保留服务端核定数量', () => {
@@ -26,6 +27,7 @@ test('当前指令优先退出风险并保留服务端核定数量', () => {
     })],
     ['600002:buy_advice', entry({
       action: '观望',
+      pullbackWatchPrice: 20,
       actionPlan: '回踩20元企稳后确认',
       decisionPlan: {
         schemaVersion: 'decision-plan.v2',
@@ -68,7 +70,7 @@ test('当前指令优先退出风险并保留服务端核定数量', () => {
   ])
   const commands = buildTodayCommandList({
     book: {
-      holding: [{ code: '600001', name: '退出股' }],
+      holding: [{ code: '600001', name: '退出股', qty: 3, buyPrice: 10, buyAt: now - 86400000 }],
       plan: [{ code: '600002', name: '条件股' }],
       alerts: [],
       executionPlans: [],
@@ -83,9 +85,9 @@ test('当前指令优先退出风险并保留服务端核定数量', () => {
 
   assert.equal(commands[0].code, '600001')
   assert.equal(commands[0].state, 'READY_EXIT')
-  assert.equal(commands[0].quantity, '减仓2手')
+  assert.equal(commands[0].quantity, '2手')
   assert.equal(commands[1].state, 'WAITING')
-  assert.equal(commands[1].quantity, '3手')
+  assert.equal(commands[1].quantity, '')
   assert.equal(commands[1].riskAmount, 180)
 })
 
@@ -101,7 +103,7 @@ test('执行计划与最新建议方向冲突时只输出冲突状态', () => {
         code: '600003',
         side: 'BUY',
         actionLabel: '加仓',
-        status: 'ARMED',
+        status: 'USER_CONFIRMED',
         remainingLots: 1,
         targetLots: 1,
         referencePrice: 10,
@@ -195,7 +197,12 @@ test('账户硬风险阻断旧买入授权，但普通弱市只调整动作价�
     allowRiskIncrease: false,
     blockers: [{ message: '账户回撤达到熔断线', value: 4, limit: 3 }],
   } }
-  const commands = buildTodayCommandList({ book, now, currentRisk })
+  const cached = () => entry({ decisionPlan: {
+    schemaVersion: 'decision-plan.v2', decisionId: 'v3-active', action: 'WATCH',
+    validUntil: new Date(now + 60000).toISOString(),
+  } })
+  book.executionPlans.forEach((plan) => { plan.decisionId = 'v3-active' })
+  const commands = buildTodayCommandList({ book, now, currentRisk, adviceFor: cached })
   const buy = commands.find((item) => item.code === '600007')
   assert.equal(buy.state, 'RISK_BLOCKED')
   assert.equal(buy.quantity, '')
@@ -203,7 +210,7 @@ test('账户硬风险阻断旧买入授权，但普通弱市只调整动作价�
   assert.equal(commands.find((item) => item.code === '600008').state, 'READY_EXIT')
   assert.equal(commands.find((item) => item.code === '600009').state, 'RECORD')
   const marketOnly = buildTodayCommandList({
-    book, now, marketRegime: { allowRiskIncrease: false, label: '数据不足' },
+    book, now, adviceFor: cached, marketRegime: { allowRiskIncrease: false, label: '数据不足' },
   })
   assert.equal(marketOnly.find((item) => item.code === '600007').state, 'READY')
   const probe = entry({ action: '买入', decisionPlan: {
@@ -217,11 +224,13 @@ test('账户硬风险阻断旧买入授权，但普通弱市只调整动作价�
   }
   const weak = buildTodayCommandList({
     book, now, marketRegime, adviceFor: (code) => code === '600007' ? probe : null,
+    quoteMap: { '600007': { price: 10 } },
   })
   assert.equal(weak.find((item) => item.code === '600007').state, 'READY')
   const redLine = buildTodayCommandList({
     book, now, marketRegime: { ...marketRegime, hardRiskOff: true },
     adviceFor: (code) => code === '600007' ? probe : null,
+    quoteMap: { '600007': { price: 10 } },
   })
   assert.equal(redLine.find((item) => item.code === '600007').state, 'RISK_BLOCKED')
 })

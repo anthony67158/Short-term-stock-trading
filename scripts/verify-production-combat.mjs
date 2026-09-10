@@ -347,8 +347,8 @@ try {
     await page.screenshot({ path: `${output}/interactions-complete.png`, fullPage: true })
   } else {
   for (const [code, profile, label, cardSelector] of [
-    ['000001', 'deep', '持仓深度生成', '.hold-item'],
-    ['688981', 'quick', '快速生成', '.plan-cand'],
+    ['000001', 'quick', '持仓V3评估', '.hold-item'],
+    ['688981', 'quick', '自选V3评估', '.plan-cand'],
   ]) {
     const before = await currentAccount(login.token)
     assertNoActiveJobs(before.data)
@@ -361,7 +361,7 @@ try {
     const card = page.locator(
       `${cardSelector}[data-code="${code}"]`,
     )
-    if (profile === 'quick' && !reusable) {
+    if (code === '688981' && !reusable) {
       await card.getByRole('button', {
         name: '纳入作战',
         exact: true,
@@ -417,17 +417,9 @@ try {
     assert.equal(finalJob?.attempts, 1, '单次生成只能领取一次任务租约')
     assert.equal(saved.advice.decisionPlan?.schemaVersion, 'decision-plan.v2')
     assert.equal(saved.advice.priceContract?.schemaVersion, 'advice-price-contract.v1')
-    assert.equal(
-      saved.meta?.outputReceipt?.schemaVersion,
-      'advice-output-receipt.v1',
-    )
-    assert.equal(saved.meta.outputReceipt.failureKind, null)
-    assert.deepEqual(saved.meta.outputReceipt.missing, [])
-    assert.ok(
-      Number(saved.meta.outputReceipt.contentChars)
-        + Number(saved.meta.outputReceipt.reasoningChars) > 0,
-      '输出回执必须记录实际业务内容',
-    )
+    assert.equal(saved.advice.decisionSource.engine, 'V3')
+    assert.equal(saved.meta.llmCalls, 0)
+    assert.equal(saved.generationMetrics.mainLlmCalls, 0)
     const monitoring = saved.advice.monitoringPlan
     if (code === '000001' && saved.advice.decisionPlan.action === 'HOLD') {
       assert.equal(monitoring?.schemaVersion, 'monitoring-plan.v2')
@@ -458,14 +450,9 @@ try {
         '可执行监控规则必须全部投影为云端条件提醒',
       )
     }
-    const resultLabel = profile === 'deep'
-      ? '深度生成'
-      : '快速生成'
-    const complete = new RegExp(
-      `完整结果\\s*·\\s*${resultLabel}`,
-    )
+    const complete = /V3 决策已保存/
     await page.locator('.detail-panel').getByText(complete).first().waitFor({ timeout: 45_000 })
-    await page.screenshot({ path: `${output}/${profile}-generation-complete.png`, fullPage: true })
+    await page.screenshot({ path: `${output}/${code}-v3-complete.png`, fullPage: true })
     report.generations.push({
       code, profile, jobId,
       attempts: finalJob?.attempts,
@@ -476,7 +463,8 @@ try {
       actionability: saved.advice.decisionPlan.actionability,
       quantity: saved.advice.decisionPlan.quantity,
       blockedReasons: saved.advice.decisionPlan.blockedReasons,
-      outputReceipt: saved.meta.outputReceipt,
+      decisionSource: saved.advice.decisionSource,
+      llmCalls: saved.meta.llmCalls,
       monitoringPlan: monitoring
         ? {
             schemaVersion: monitoring.schemaVersion,
@@ -487,7 +475,7 @@ try {
         : null,
       complete: true,
     })
-    await fs.writeFile(`${output}/${profile}-result.json`, JSON.stringify(saved, null, 2))
+    await fs.writeFile(`${output}/${code}-v3-result.json`, JSON.stringify(saved, null, 2))
     console.log(`${code} ${label}及OSS保存通过`)
     await page.reload({ waitUntil: 'domcontentloaded', timeout: 90_000 })
     await page.locator('.nav-tabs:visible').getByRole('button', { name: /持仓/ }).click()
@@ -495,7 +483,7 @@ try {
       const holdingCard = page.locator(
         `.hold-item[data-code="${code}"]`,
       )
-      await holdingCard.locator('.monitoring-rules').waitFor()
+      await holdingCard.locator('.v3-decision-summary').waitFor()
       assert.doesNotMatch(
         await holdingCard.innerText(),
         /51\.88|59\.5/,
@@ -552,8 +540,10 @@ try {
   await fs.writeFile(`${output}/review-result.json`, JSON.stringify(review, null, 2))
   assert.equal(review.ok, true, review.error)
   assert.equal(review.result.decisionPlan?.schemaVersion, 'decision-plan.v2')
-  report.checks.push('平安银行真实行情与独立review角色复核')
-  console.log('000001 实际review模型与决策合同通过')
+  assert.equal(review.result.decisionSource.engine, 'V3')
+  assert.equal(review.meta.llmCalls, 0)
+  report.checks.push('平安银行真实行情与V3复核，零LLM调用')
+  console.log('000001 V3复核与决策合同通过')
 
   const alreadySold = beforeTrades.closed.some((fill) => fill.code === '600036' && fill.at >= (resumeAfter || report.startedAt))
   if (!alreadySold) {
