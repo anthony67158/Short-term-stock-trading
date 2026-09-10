@@ -284,6 +284,11 @@ jobs:
             --export opportunity-outcomes.json \
             --dataset opportunity-dataset.npz
 
+      - name: Compact mature outcomes into versioned training baseline
+        run: |
+          python publish_opportunity_history.py \
+            --input opportunity-outcomes.json
+
       - name: Train and evaluate opportunity challenger
         run: |
           python train_opportunity_score.py \

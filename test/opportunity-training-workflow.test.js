@@ -38,3 +38,17 @@ test('直接发布不等待晋级结果且V3样本允许导出', () => {
   assert.doesNotMatch(shadowStep, /eligible.*true|promotion_decision/)
   assert.match(exporter, /opportunity-score-feature\.v3/)
 })
+
+test('每日重训把新成熟结果压实进版本化历史基线', () => {
+  const collectAt = workflow.indexOf('python collect_opportunity_outcomes.py')
+  const compactAt = workflow.indexOf('python publish_opportunity_history.py')
+  const trainAt = workflow.indexOf('python train_opportunity_score.py')
+
+  assert.ok(collectAt >= 0)
+  assert.ok(compactAt > collectAt)
+  assert.ok(trainAt > compactAt)
+  assert.match(
+    workflow.slice(compactAt, trainAt),
+    /--input opportunity-outcomes\.json/,
+  )
+})
