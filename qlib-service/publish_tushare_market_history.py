@@ -17,13 +17,13 @@ def read_gzip_json(path):
         return json.load(handle)
 
 
-def local_market_artifacts(work_dir, *, from_date=None, to_date=None):
+def iter_local_market_artifacts(work_dir, *, from_date=None, to_date=None):
     root = Path(work_dir).expanduser().resolve()
     metadata = root / "tushare-metadata" / "days"
     minutes = root / "minutes"
     if not metadata.is_dir() or not minutes.is_dir():
         raise ValueError("Tushare历史工作目录不完整")
-    artifacts = []
+    found = False
     for minute_path in sorted(minutes.glob("*.json.gz")):
         date = minute_path.name[:8]
         if from_date and date < from_date:
@@ -38,7 +38,8 @@ def local_market_artifacts(work_dir, *, from_date=None, to_date=None):
         if day.get("date") != date or minute.get("date") != date:
             raise ValueError(f"Tushare历史分片日期不一致: {date}")
         codes = minute.get("codes") or {}
-        artifacts.append(build_market_day_artifact(
+        found = True
+        yield build_market_day_artifact(
             date=date,
             daily=day.get("daily"),
             funds=day.get("funds"),
@@ -46,10 +47,9 @@ def local_market_artifacts(work_dir, *, from_date=None, to_date=None):
             source="TUSHARE_CAUSAL_REPLAY",
             universe_source_date=date,
             requested_codes=len(codes),
-        ))
-    if not artifacts:
+        )
+    if not found:
         raise ValueError("没有可发布的Tushare历史分片")
-    return artifacts
 
 
 def main():
@@ -58,20 +58,39 @@ def main():
     parser.add_argument("--from", dest="from_date")
     parser.add_argument("--to", dest="to_date")
     args = parser.parse_args()
-    result = publish_market_days(
-        bucket(),
-        local_market_artifacts(
-            args.work_dir,
-            from_date=args.from_date,
-            to_date=args.to_date,
-        ),
-    )
+    target = bucket()
+    batch = []
+    published = []
+    manifest = None
+    for artifact in iter_local_market_artifacts(
+        args.work_dir,
+        from_date=args.from_date,
+        to_date=args.to_date,
+    ):
+        batch.append(artifact)
+        if len(batch) < 4:
+            continue
+        result = publish_market_days(target, batch)
+        published.extend(result["published"])
+        manifest = result["manifest"]
+        print(json.dumps({
+            "stage": "MARKET_ARCHIVE",
+            "publishedDates": len(published),
+            "lastDate": published[-1]["date"],
+        }, ensure_ascii=False), flush=True)
+        batch = []
+    if batch:
+        result = publish_market_days(target, batch)
+        published.extend(result["published"])
+        manifest = result["manifest"]
+    if manifest is None:
+        raise ValueError("没有可发布的Tushare历史分片")
     print(json.dumps({
-        "publishedDates": len(result["published"]),
-        "totalDates": result["manifest"]["summary"]["dates"],
-        "minuteBars": result["manifest"]["summary"]["minuteBars"],
-        "from": result["manifest"]["dateRange"]["from"],
-        "to": result["manifest"]["dateRange"]["to"],
+        "publishedDates": len(published),
+        "totalDates": manifest["summary"]["dates"],
+        "minuteBars": manifest["summary"]["minuteBars"],
+        "from": manifest["dateRange"]["from"],
+        "to": manifest["dateRange"]["to"],
     }, ensure_ascii=False))
 
 

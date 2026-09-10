@@ -1,6 +1,8 @@
 import json
+import gzip
 import os
 import sys
+import tempfile
 import unittest
 
 
@@ -14,6 +16,9 @@ from opportunity_market_archive import (  # noqa: E402
     encode_market_day,
     load_market_day,
     publish_market_days,
+)
+from publish_tushare_market_history import (  # noqa: E402
+    iter_local_market_artifacts,
 )
 
 
@@ -163,6 +168,37 @@ class OpportunityMarketArchiveTest(unittest.TestCase):
         bucket.values[MANIFEST_KEY] = json.dumps(manifest).encode()
         with self.assertRaisesRegex(ValueError, "manifest"):
             load_market_day(bucket, "20260909")
+
+    def test_local_history_is_streamed_as_day_artifacts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            metadata = os.path.join(
+                directory, "tushare-metadata", "days",
+            )
+            minute_dir = os.path.join(directory, "minutes")
+            os.makedirs(metadata)
+            os.makedirs(minute_dir)
+            with gzip.open(
+                os.path.join(metadata, "20260909.json.gz"),
+                "wt",
+                encoding="utf-8",
+            ) as handle:
+                json.dump({
+                    "date": "20260909",
+                    "daily": rows("20260909", 800),
+                    "funds": rows("20260909", 500, funds=True),
+                }, handle)
+            with gzip.open(
+                os.path.join(minute_dir, "20260909.json.gz"),
+                "wt",
+                encoding="utf-8",
+            ) as handle:
+                json.dump(minutes("20260909"), handle)
+
+            stream = iter_local_market_artifacts(directory)
+            self.assertFalse(isinstance(stream, list))
+            self.assertEqual(next(stream)["date"], "20260909")
+            with self.assertRaises(StopIteration):
+                next(stream)
 
 
 if __name__ == "__main__":
