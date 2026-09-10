@@ -3,6 +3,7 @@ import { sendJson, preflight } from './_lib.js';
 import {
   dedupeQuantReports,
   normalizeRetrainRun,
+  opportunityReportSnapshot,
 } from '../shared/quantRetrainReport.js';
 
 // ============ 量化每日重训「中文汇报」台账（阿里云 OSS 持久化）============
@@ -79,17 +80,28 @@ async function workflowStatus() {
 }
 
 // 读全部汇报（倒序，最新在前）
-async function listReports(limit) {
-  const { blobs } = await list({ prefix: PREFIX, limit: 500 });
+export async function listReports(limit, storage = { list, readJson }) {
+  const { blobs } = await storage.list({ prefix: PREFIX, limit: 10000 });
   const sorted = (blobs || []).slice().sort(
     (a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
-  ).slice(0, limit);
+  ).slice(0, Math.min(400, limit * 2));
   const out = [];
-  for (const b of sorted) {
-    const j = await readJson(b);
-    if (j) out.push({ id: b.pathname, ...j });
+  for (let offset = 0; offset < sorted.length; offset += 8) {
+    const batch = await Promise.all(sorted.slice(offset, offset + 8).map(async (b) => {
+      const record = await storage.readJson(b);
+      return record ? { ...record, id: b.pathname } : null;
+    }));
+    out.push(...batch.filter(Boolean));
   }
   return dedupeQuantReports(out).slice(0, limit);
+}
+
+export async function readOpportunitySummary(reader = readJson) {
+  try {
+    return opportunityReportSnapshot(await reader('opportunitymodel/training-status.json'));
+  } catch {
+    return null;
+  }
 }
 
 export default async function handler(req, res) {
@@ -99,11 +111,12 @@ export default async function handler(req, res) {
   try {
     if (req.method === 'GET') {
       const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
-      const [reports, workflow] = await Promise.all([
+      const [reports, workflow, opportunity] = await Promise.all([
         listReports(limit),
         workflowStatus(),
+        readOpportunitySummary(),
       ]);
-      return ok(res, { ok: true, reports, workflow });
+      return ok(res, { ok: true, reports, workflow, opportunity });
     }
 
     if (req.method === 'POST') {

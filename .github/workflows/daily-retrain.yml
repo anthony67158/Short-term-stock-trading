@@ -73,6 +73,7 @@ jobs:
             tests/test_opportunity_history.py \
             tests/test_promote_opportunity_model.py \
             tests/test_publish_opportunity_training_status.py \
+            tests/test_publish_model_retrain_report.py \
             2>&1 | tee ../test-artifacts/retrain-contract-tests.log
 
       - name: Upload contract diagnostics
@@ -290,11 +291,13 @@ jobs:
             --output opportunity-model
 
       - name: Publish eligible shadow model to isolated channel
+        id: opportunity-shadow
         run: |
           if [ -f opportunity-model/shadow/opportunity_meta.json ]; then
             python upload_opportunity_model.py \
               --directory opportunity-model/shadow \
               --prefix opportunitymodel/shadow/
+            echo "published=true" >> "$GITHUB_OUTPUT"
           else
             echo "Opportunity model is not shadow-eligible; keeping current shadow manifest."
           fi
@@ -309,6 +312,7 @@ jobs:
             --decision-output opportunity-model/promotion_decision.json
 
       - name: Publish production model only after all gates pass
+        id: opportunity-production
         run: |
           eligible=$(python - <<'PY'
           import json
@@ -324,6 +328,7 @@ jobs:
             python upload_opportunity_model.py \
               --directory opportunity-model/production \
               --prefix opportunitymodel/
+            echo "published=true" >> "$GITHUB_OUTPUT"
           else
             echo "Production gates not passed; keeping the current production manifest."
           fi
@@ -339,6 +344,19 @@ jobs:
           else
             echo "::warning::Opportunity training report is missing; status was not updated."
           fi
+
+      - name: Publish V3 result to in-app quant report
+        if: always()
+        continue-on-error: true
+        env:
+          RETRAIN_JOB_STATUS: ${{ job.status }}
+          RETRAIN_PUBLISHED: ${{ steps.opportunity-production.outputs.published }}
+          RETRAIN_SHADOW_PUBLISHED: ${{ steps.opportunity-shadow.outputs.published }}
+        run: |
+          python publish_model_retrain_report.py \
+            --model opportunity \
+            --report opportunity-model/opportunity_training_report.json \
+            --promotion opportunity-model/promotion_decision.json
 
       - name: Upload opportunity diagnostics
         if: always()
@@ -481,6 +499,17 @@ jobs:
           set -o pipefail
           python train_sector_model.py |
             tee sector_retrain_result.json
+
+      - name: Publish sector result to in-app quant report
+        if: always()
+        continue-on-error: true
+        env:
+          RETRAIN_JOB_STATUS: ${{ job.status }}
+          RETRAIN_PREFLIGHT: ${{ steps.sector-preflight.outputs.reachable }}
+        run: |
+          python publish_model_retrain_report.py \
+            --model sector \
+            --report sector_retrain_result.json
 
       - name: Upload sector retrain diagnostics
         if: always()

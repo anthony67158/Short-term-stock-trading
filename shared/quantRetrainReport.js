@@ -8,7 +8,7 @@ function positiveInteger(value) {
   return Number.isSafeInteger(number) && number > 0 ? number : null
 }
 
-function safeRunUrl(value) {
+export function safeRunUrl(value) {
   const text = String(value || '')
   return /^https:\/\/github\.com\/[^/]+\/[^/]+\/actions\/runs\/\d+$/i.test(text)
     ? text
@@ -67,6 +67,58 @@ function legacySignature(report) {
   ].join('\n')
 }
 
+export const QUANT_REPORT_MODELS = Object.freeze({
+  opportunity: 'V3 机会模型',
+  stock: '个股模型',
+  sector: '板块模型',
+})
+
+export function quantReportModel(report) {
+  const model = report?.model || report?.meta?.model
+  return Object.hasOwn(QUANT_REPORT_MODELS, model) ? model : 'stock'
+}
+
+function finite(value) {
+  if (value == null || value === '' || typeof value === 'boolean') return null
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric : null
+}
+
+export function formatQuantMetric(value, unit = 'number') {
+  const numeric = finite(value)
+  if (numeric == null) return '未提供'
+  if (unit === 'percent') return `${(numeric * 100).toFixed(2)}%`
+  if (unit === 'r') return `${numeric.toFixed(3)} R`
+  return numeric.toFixed(4)
+}
+
+export function opportunityReportSnapshot(value) {
+  if (!value || !timestamp(value.generatedAt)) return null
+  const rawTime = finite(value.trainingGeneratedAt)
+  const at = rawTime > 0
+    ? timestamp(rawTime < 100_000_000_000 ? rawTime * 1000 : rawTime)
+    : timestamp(value.generatedAt)
+  const labels = {
+    NOT_READY: '等待成熟样本',
+    REJECTED: '未通过验证',
+    SHADOW_READY: '通过影子验证',
+    PRODUCTION_READY: '生产模型已就绪',
+  }
+  const readiness = value.readiness || {}
+  return {
+    at,
+    label: labels[value.state] || '状态待核对',
+    productionEligible: value.productionEligible === true,
+    samples: finite(readiness.samples),
+    filledSamples: finite(readiness.filledSamples ?? readiness.filled_samples),
+    dates: finite(readiness.dates),
+    blockers: [...new Set([
+      ...(Array.isArray(readiness.blockers) ? readiness.blockers : []),
+      ...(Array.isArray(value.promotionBlockers) ? value.promotionBlockers : []),
+    ])].map((item) => String(item).slice(0, 180)).slice(0, 8),
+  }
+}
+
 export function dedupeQuantReports(reports = []) {
   const sorted = (Array.isArray(reports) ? reports : [])
     .filter((item) => item && typeof item === 'object')
@@ -75,7 +127,8 @@ export function dedupeQuantReports(reports = []) {
   const seen = new Set()
   return sorted.filter((report) => {
     const runId = positiveInteger(report?.meta?.runId)
-    const key = runId ? `run:${runId}` : `legacy:${legacySignature(report)}`
+    const model = quantReportModel(report)
+    const key = runId ? `${model}:run:${runId}` : `${model}:legacy:${legacySignature(report)}`
     if (seen.has(key)) return false
     seen.add(key)
     return true
