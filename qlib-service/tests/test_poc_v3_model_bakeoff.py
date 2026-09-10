@@ -13,6 +13,7 @@ from poc_v3_model_bakeoff import (  # noqa: E402
     active_feature_mask,
     clip_labels,
     compose_expected_net_r,
+    constant_probability_metrics,
     relevance_labels,
 )
 
@@ -62,6 +63,15 @@ class PocV3ModelBakeoffTest(unittest.TestCase):
         )
 
         np.testing.assert_allclose(values, [-0.25, 1.25])
+
+    def test_constant_probability_baseline_uses_training_rate(self):
+        metrics = constant_probability_metrics(
+            np.asarray([0, 0, 1, 1]),
+            np.asarray([0, 1]),
+        )
+
+        self.assertEqual(metrics["brier"], 0.25)
+        self.assertEqual(metrics["positive_rate"], 0.5)
 
 
 if __name__ == "__main__":

@@ -123,7 +123,7 @@ def rank_training_data(dataset, indices, labels, feature_mask):
 class LightGbmFamily:
     name = "lightgbm"
 
-    def __init__(self, estimators, threads):
+    def __init__(self, estimators, threads, seed):
         import lightgbm as lgb
 
         self.lgb = lgb
@@ -139,7 +139,7 @@ class LightGbmFamily:
             "colsample_bytree": 0.85,
             "reg_alpha": 0.3,
             "reg_lambda": 1.0,
-            "random_state": 42,
+            "random_state": seed,
             "n_jobs": threads,
             "verbosity": -1,
         }
@@ -177,7 +177,7 @@ class LightGbmFamily:
 class CatBoostFamily:
     name = "catboost"
 
-    def __init__(self, estimators, threads):
+    def __init__(self, estimators, threads, seed):
         import catboost
 
         self.cb = catboost
@@ -186,7 +186,7 @@ class CatBoostFamily:
             "iterations": estimators,
             "learning_rate": 0.04,
             "depth": 6,
-            "random_seed": 42,
+            "random_seed": seed,
             "thread_count": threads,
             "verbose": False,
             "allow_writing_files": False,
@@ -224,7 +224,7 @@ class CatBoostFamily:
 class XGBoostFamily:
     name = "xgboost"
 
-    def __init__(self, estimators, threads):
+    def __init__(self, estimators, threads, seed):
         import xgboost as xgb
 
         self.xgb = xgb
@@ -238,7 +238,7 @@ class XGBoostFamily:
             "colsample_bytree": 0.85,
             "reg_alpha": 0.3,
             "reg_lambda": 1.0,
-            "random_state": 42,
+            "random_state": seed,
             "n_jobs": threads,
             "tree_method": "hist",
         }
@@ -278,7 +278,7 @@ class XGBoostFamily:
         model.fit(data["X"], data["y"], qid=data["qid"])
 
 
-def model_family(name, estimators, threads):
+def model_family(name, estimators, threads, seed):
     factories = {
         "lightgbm": LightGbmFamily,
         "catboost": CatBoostFamily,
@@ -286,7 +286,7 @@ def model_family(name, estimators, threads):
     }
     if name not in factories:
         raise ValueError(f"未知POC模型: {name}")
-    return factories[name](estimators, threads)
+    return factories[name](estimators, threads, seed)
 
 
 def _probability(model, X):
@@ -294,6 +294,16 @@ def _probability(model, X):
     if values.ndim != 2 or values.shape[1] != 2:
         raise ValueError("POC分类模型概率维度无效")
     return np.clip(values[:, 1], 1e-8, 1 - 1e-8)
+
+
+def constant_probability_metrics(train_labels, validation_labels):
+    probability = float(np.mean(train_labels))
+    values = np.full(
+        len(validation_labels),
+        np.clip(probability, 1e-8, 1 - 1e-8),
+        dtype=np.float64,
+    )
+    return binary_metrics(validation_labels, values)
 
 
 def _ranking(actual, scores, dataset, validation):
@@ -461,6 +471,33 @@ def run_family_fold(family, dataset, fold):
         loss_payoff_model,
         quantile_model,
     )
+    fill_metrics = binary_metrics(
+        dataset["y_fill"][validation],
+        fill_probability,
+    )
+    fill_baseline = constant_probability_metrics(
+        dataset["y_fill"][train],
+        dataset["y_fill"][validation],
+    )
+    win_metrics = binary_metrics(
+        dataset["y_win"][filled_validation].astype(np.int8),
+        win_probability,
+    )
+    win_baseline = constant_probability_metrics(
+        dataset["y_win"][filled_train].astype(np.int8),
+        dataset["y_win"][filled_validation].astype(np.int8),
+    )
+    net_r_metrics = {
+        **regression_metrics(actual_filled, expected_net_r_filled),
+        "medianAbsoluteError": round(float(np.median(
+            np.abs(expected_net_r_filled - actual_filled)
+        )), 6),
+    }
+    baseline_net_r = np.full(
+        len(actual_filled),
+        float(np.median(dataset["y_net_r"][filled_train])),
+        dtype=np.float64,
+    )
     return {
         "metadata": {
             **fold["metadata"],
@@ -472,19 +509,33 @@ def run_family_fold(family, dataset, fold):
             },
             "relevanceThresholds": relevance_thresholds,
         },
-        "pFill": binary_metrics(
-            dataset["y_fill"][validation],
-            fill_probability,
-        ),
-        "pWinGivenFill": binary_metrics(
-            dataset["y_win"][filled_validation].astype(np.int8),
-            win_probability,
-        ),
+        "pFill": {
+            **fill_metrics,
+            "constantBaseline": fill_baseline,
+            "brierSkill": round(
+                1 - fill_metrics["brier"] / fill_baseline["brier"],
+                6,
+            ),
+        },
+        "pWinGivenFill": {
+            **win_metrics,
+            "constantBaseline": win_baseline,
+            "brierSkill": round(
+                1 - win_metrics["brier"] / win_baseline["brier"],
+                6,
+            ),
+        },
         "expectedNetR": {
-            **regression_metrics(actual_filled, expected_net_r_filled),
-            "medianAbsoluteError": round(float(np.median(
-                np.abs(expected_net_r_filled - actual_filled)
-            )), 6),
+            **net_r_metrics,
+            "constantMedianBaseline": regression_metrics(
+                actual_filled,
+                baseline_net_r,
+            ),
+            "maeSkill": round(
+                1 - net_r_metrics["mae"]
+                / regression_metrics(actual_filled, baseline_net_r)["mae"],
+                6,
+            ),
         },
         "quantile10": {
             "coverage": round(float(
@@ -558,11 +609,20 @@ def aggregate_family(folds):
         )
     return {
         "pFillBrier": _mean([fold["pFill"]["brier"] for fold in folds]),
+        "pFillBrierSkill": _mean([
+            fold["pFill"]["brierSkill"] for fold in folds
+        ]),
         "pWinBrier": _mean([
             fold["pWinGivenFill"]["brier"] for fold in folds
         ]),
+        "pWinBrierSkill": _mean([
+            fold["pWinGivenFill"]["brierSkill"] for fold in folds
+        ]),
         "netRMae": _mean([
             fold["expectedNetR"]["mae"] for fold in folds
+        ]),
+        "netRMaeSkill": _mean([
+            fold["expectedNetR"]["maeSkill"] for fold in folds
         ]),
         "netRRankCorrelation": _mean([
             fold["expectedNetR"]["rank_correlation"] for fold in folds
@@ -645,6 +705,7 @@ def run_bakeoff(
     folds_count=3,
     estimators=180,
     threads=4,
+    seed=42,
 ):
     dataset = build_poc_dataset(input_path)
     folds = interval_expanding_folds(
@@ -654,7 +715,7 @@ def run_bakeoff(
     filled = np.isfinite(dataset["y_net_r"])
     results = {}
     for name in families:
-        family = model_family(name, estimators, threads)
+        family = model_family(name, estimators, threads, seed)
         fold_results = []
         for fold_number, fold in enumerate(folds, 1):
             value = run_family_fold(family, dataset, fold)
@@ -688,6 +749,7 @@ def run_bakeoff(
             "platform": platform.platform(),
             "estimators": int(estimators),
             "threads": int(threads),
+            "seed": int(seed),
         },
         "dataset": {
             "sha256": _sha256(input_path),
@@ -747,6 +809,7 @@ def main():
     parser.add_argument("--folds", type=int, default=3)
     parser.add_argument("--estimators", type=int, default=180)
     parser.add_argument("--threads", type=int, default=4)
+    parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
     families = tuple(
         name.strip()
@@ -760,6 +823,7 @@ def main():
         folds_count=args.folds,
         estimators=args.estimators,
         threads=args.threads,
+        seed=args.seed,
     )
     print(json.dumps({
         "ok": True,
