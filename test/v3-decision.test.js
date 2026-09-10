@@ -161,6 +161,19 @@ test('模型缺失及资金故障不能阻断持仓硬止损', async () => {
   assert.equal(result.meta.llmCalls, 0)
 })
 
+test('其他持仓风险不完整不阻断V3负期望仓位退出', async () => {
+  const result = await evaluateV3Decision(scenario({
+    book: { account: { cash: 80000 }, closed: [], holding: [
+      { code: '600001', qty: 2, buyPrice: 10, sl: 9, buyAt: now - 86400000 },
+      { code: '600002', qty: 1, buyPrice: 10, buyAt: now - 86400000 },
+    ] },
+    score: async ([input]) => new Map([[input.code, { ...plan.opportunityScore, expectedNetR: -0.2 }]]),
+  }))
+  assert.equal(result.result.decisionSource.state, 'READY')
+  assert.equal(result.result.decisionPlan.action, 'EXIT')
+  assert.equal(result.result.decisionPlan.quantity.lots, 2)
+})
+
 test('V3换版期间不得混用三条路径的模型概率', () => {
   const result = buildV3Action({ payload, plans: [plan, {
     ...plan, route: 'PULLBACK',
@@ -168,6 +181,20 @@ test('V3换版期间不得混用三条路径的模型概率', () => {
   }] })
   assert.equal(result.selectedV3Plan, null)
   assert.equal(result.planQty, 0)
+})
+
+test('到价复核终态采用账户核定后的动作而不是核定前买入', async () => {
+  const input = scenario()
+  const result = await evaluateV3Decision({ ...input, reviewEvent: { kind: 'price_event' },
+    book: { ...input.book, account: { cash: 0 } },
+  })
+  const advice = result.result
+  assert.notEqual(advice.decisionPlan.action, 'BUY')
+  assert.equal(advice.reviewDecision.quantity, 0)
+  assert.equal(advice.reviewDecision.outcome, advice.action)
+  assert.equal(advice.reviewDecision.operation, advice.actionPlan)
+  assert.equal(advice.pullbackWatchPrice, null)
+  assert.equal(advice.breakoutWatchPrice, null)
 })
 
 test('单股入口和任务worker的决策主链不调用LLM', () => {

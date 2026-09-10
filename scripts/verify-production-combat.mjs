@@ -76,6 +76,10 @@ async function seedAccount(token, current) {
   data.batchProgress = null
   data.account.simulation = true
   data.realOutcomeLearning = null
+  const fixtureStops = { '000001': 11, '600036': 39, '300750': 320 }
+  data.holding = data.holding.map((holding) => ({
+    ...holding, sl: fixtureStops[holding.code], slManual: true,
+  }))
   data.settings = {
     ...(data.settings || {}),
     'advAuto.enabled': false,

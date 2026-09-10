@@ -6,6 +6,7 @@ import { trackedRuleHit } from '../shared/monitoringPlan.js'
 import { buildAlertNotification } from '../shared/alertNotification.js'
 import { isContinuousTrading } from '../shared/tradingCalendar.js'
 import { isAdviceReviewEnabled } from '../shared/adviceReviewPolicy.js'
+import { isCurrentDecisionAlert } from '../shared/adviceAlerts.js'
 
 export async function evaluateAccountMonitoring(account, {
   now = Date.now(),
@@ -32,7 +33,8 @@ export async function evaluateAccountMonitoring(account, {
     for (const alert of enabled(data).sort((a, b) => a.planRule.priority - b.planRule.priority)) {
       if (!alert.enabled) continue
       const currentPlan = data.advice?.[alert.code]?.advice?.monitoringPlan
-      if (currentPlan?.planId !== alert.monitoringPlanId || Date.parse(alert.validUntil) <= now) {
+      if (!isCurrentDecisionAlert(alert, data.advice?.[alert.code], now)
+        || currentPlan?.planId !== alert.monitoringPlanId || Date.parse(alert.validUntil) <= now) {
         Object.assign(alert, { phase: 'superseded', enabled: false, supersededAt: now })
         changed = true
         continue

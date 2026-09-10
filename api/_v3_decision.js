@@ -70,7 +70,7 @@ export async function evaluateV3Decision({
     candles.length < 20 ? '至少20根有效日线' : '',
     !(market?.breadth?.up != null && market?.breadth?.down != null) ? '市场涨跌家数' : '',
     !(fund?.mainNetYi != null && fund?.retailNetYi != null) ? '主力与小单资金' : '',
-    !accountRisk.complete ? '账户现金或持仓风险' : '',
+    !holding.length && !accountRisk.complete ? '账户现金或持仓风险' : '',
   ].filter(Boolean)
   const payload = {
     ...holdPayload,
@@ -181,6 +181,14 @@ export async function evaluateV3Decision({
   }
   advice = {
     ...advice,
+    ...(reviewEvent ? {
+      reviewDecision: {
+        ...advice.reviewDecision,
+        outcome: advice.action,
+        operation: advice.actionPlan,
+        quantity: decisionPlan.quantity.lots,
+      },
+    } : {}),
     priceContract: decisionPlan.priceContract,
     executionPlan: compileExecutionPlan({ decisionPlan, code, name, now }),
     continuity: {

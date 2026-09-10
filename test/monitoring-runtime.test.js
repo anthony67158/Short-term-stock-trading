@@ -19,11 +19,15 @@ function account() {
       holding: [{ id: 'h1', code: '002475', name: '立讯精密', qty: 1, buyPrice: 54.165, buyAt: now - 86400000 }],
       closed: [], plan: [], pushSubs: [{ endpoint: 'test' }],
       settings: { aiAutoAlert: true },
-      advice: { '002475': { mode: 'hold_advice', advice: { monitoringPlan: plan } } },
+      advice: { '002475': { mode: 'hold_advice', advice: {
+        monitoringPlan: plan, decisionSource: { engine: 'V3' },
+        decisionPlan: { decisionId: plan.planId },
+      } } },
       alerts: [{
         id: 'monitor:decision-1:rule-1', code: '002475', name: '立讯精密',
         type: 'plan-condition', actCode: '002475', actKind: 'reduce',
         enabled: true, phase: 'armed', monitoringPlanId: plan.planId,
+        decisionEngine: 'V3', decisionId: plan.planId,
         validUntil: plan.validUntil, planRule: rule,
       }],
     },
@@ -79,4 +83,19 @@ test('T+1锁定时记录条件已满足但不发错误清仓指令', async () =>
   assert.equal(pushes, 0)
   assert.equal(acc.data.alerts[0].enabled, true)
   assert.equal(acc.data.alerts[0].ruleState.state, 'T1_LOCKED')
+})
+
+test('旧军师监控不绕过V3版本校验而继续推送', async () => {
+  const acc = account()
+  delete acc.data.advice['002475'].advice.decisionSource
+  let pushes = 0
+  const result = await evaluateAccountMonitoring(acc, {
+    now, quoteReader: async () => [quote({ price: 53 })],
+    save: async () => {},
+    push: async () => { pushes++ },
+  })
+  assert.equal(result.triggered, 0)
+  assert.equal(pushes, 0)
+  assert.equal(acc.data.alerts[0].enabled, false)
+  assert.equal(acc.data.alerts[0].phase, 'superseded')
 })
