@@ -44,6 +44,7 @@ class OpportunityReviewDatasetTest(unittest.TestCase):
             "code": "600001",
             "metrics": {"netR": 1.2},
             "reviewScoreInput": review_input(),
+            "exit": {"at": 1_788_406_400_000},
         }
         dataset = build_opportunity_review_dataset([
             valid,

@@ -22,7 +22,7 @@ from v3_poc_dataset import build_poc_dataset, interval_expanding_folds
 
 
 POC_SCHEMA_VERSION = "v3-model-bakeoff.v1"
-FAMILY_NAMES = ("lightgbm", "catboost", "xgboost")
+FAMILY_NAMES = ("lightgbm", "catboost")
 
 
 def _sha256(path):

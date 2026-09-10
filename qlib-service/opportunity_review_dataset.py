@@ -23,13 +23,26 @@ def build_opportunity_review_dataset(outcomes):
         try:
             net_r = float(net_r)
             vector = feature_vector(outcome.get("reviewScoreInput"))
+            label_start = int(
+                (outcome.get("reviewScoreInput") or {}).get("asOf")
+                or 0
+            )
+            label_end = int(
+                (outcome.get("exit") or {}).get("at")
+                or outcome.get("evaluatedAt")
+                or 0
+            )
         except (TypeError, ValueError):
             excluded += 1
             continue
-        if not np.isfinite(net_r):
+        if (
+            not np.isfinite(net_r)
+            or label_start <= 0
+            or label_end < label_start
+        ):
             excluded += 1
             continue
-        rows.append((outcome, vector, net_r))
+        rows.append((outcome, vector, net_r, label_start, label_end))
     return {
         "schema_version": DATASET_SCHEMA_VERSION,
         "X": np.asarray(
@@ -43,6 +56,14 @@ def build_opportunity_review_dataset(outcomes):
         "codes": np.asarray(
             [str(item[0].get("code") or "") for item in rows],
             dtype="<U6",
+        ),
+        "label_start_ms": np.asarray(
+            [item[3] for item in rows],
+            dtype=np.int64,
+        ),
+        "label_end_ms": np.asarray(
+            [item[4] for item in rows],
+            dtype=np.int64,
         ),
         "y_win": np.asarray(
             [1 if item[2] > 0 else 0 for item in rows],
