@@ -349,9 +349,13 @@ def _minute_rows(
             raise ValueError("Tushare分钟数据含无效数值")
         for field in ("open", "close", "high", "low"):
             values[field] = round(values[field], 6)
-        if all(
-            values[field] == 0
-            for field in ("open", "close", "high", "low", "vol", "amount")
+        if (
+            values["vol"] == 0
+            and values["amount"] == 0
+            and any(
+                values[field] <= 0
+                for field in ("open", "close", "high", "low")
+            )
         ):
             excluded_dates.add(timestamp[:8])
             continue

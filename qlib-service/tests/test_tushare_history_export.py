@@ -155,14 +155,23 @@ class TushareHistoryExportTest(unittest.TestCase):
                 "low": 10,
                 "vol": 100,
                 "amount": 1000,
+            }, {
+                "ts_code": "001331.SZ",
+                "trade_time": "2026-06-19 09:35:00",
+                "open": 144,
+                "close": 0,
+                "high": 144,
+                "low": 0,
+                "vol": 0,
+                "amount": 0,
             }],
             "001331",
-            {"20260618"},
+            {"20260618", "20260619"},
             include_exclusions=True,
         )
 
         self.assertEqual(rows, [])
-        self.assertEqual(exclusions, ["20260618"])
+        self.assertEqual(exclusions, ["20260618", "20260619"])
 
 
 if __name__ == "__main__":
