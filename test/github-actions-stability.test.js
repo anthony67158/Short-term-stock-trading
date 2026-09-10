@@ -34,8 +34,10 @@ test('重训主模型、板块模型与V3模型分离运行', () => {
   assert.match(retrain, /Verify stock model OSS connectivity/)
   assert.match(retrain, /Verify sector model OSS connectivity/)
   assert.match(retrain, /Collect mature opportunity outcomes/)
+  assert.match(retrain, /Run three-seed LightGBM and CatBoost walk-forward/)
   assert.match(retrain, /Train and evaluate opportunity challenger/)
-  assert.match(retrain, /Publish current V3 model directly without promotion prerequisite/)
+  assert.match(retrain, /Publish best available combination as the DIRECT baseline/)
+  assert.match(retrain, /--activate-baseline/)
   assert.match(
     retrain,
     /if \[ -f opportunity-model\/shadow\/opportunity_meta\.json \]/,
@@ -48,6 +50,8 @@ test('重训主模型、板块模型与V3模型分离运行', () => {
     /except \(urllib\.error\.URLError, TimeoutError, ConnectionError\) as error:/,
   )
   assert.match(retrain, /Skip sector retrain \(数据源不可达\)/)
+  assert.match(retrain, /Archive latest completed market day from public sources/)
+  assert.match(retrain, /archive-market-day/)
 })
 
 test('Actions总是保留诊断产物且发布报告失败不遮蔽训练结果', () => {

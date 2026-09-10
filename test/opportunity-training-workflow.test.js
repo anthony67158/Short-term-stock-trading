@@ -32,11 +32,11 @@ test('V3每日重训直接发布模型，晋级保留为后置诊断', () => {
 
 test('直接发布不等待晋级结果且V3样本允许导出', () => {
   const shadowStep = workflow.match(
-    /- name: Publish current V3 model directly without promotion prerequisite([\s\S]*?)(?=\n      - name:)/,
+    /- name: Publish best available combination as the DIRECT baseline([\s\S]*?)(?=\n      - name:)/,
   )?.[1] || ''
-  assert.match(shadowStep, /--prefix opportunitymodel\/\s*(?:\n|$)/)
+  assert.match(shadowStep, /--prefix opportunitymodel\/\s*\\\s*\n\s*--activate-baseline/)
   assert.doesNotMatch(shadowStep, /eligible.*true|promotion_decision/)
-  assert.match(exporter, /opportunity-score-feature\.v3/)
+  assert.match(exporter, /opportunity-score-feature\.v4/)
 })
 
 test('每日重训把新成熟结果压实进版本化历史基线', () => {
