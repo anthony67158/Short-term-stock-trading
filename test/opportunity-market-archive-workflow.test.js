@@ -36,3 +36,13 @@ test('市场归档合同进入每日重训验证门禁', () => {
   assert.match(workflow, /tests\/test_opportunity_market_archive\.py/)
   assert.match(workflow, /tests\/test_archive_tushare_market_day\.py/)
 })
+
+test('市场归档与板块训练串行使用同一Tushare限流额度', () => {
+  const job = workflow.split('  sector-retrain:')[1] || ''
+
+  assert.match(job, /needs:\s*\n\s+- verify\s*\n\s+- market-data-archive/)
+  assert.match(
+    job,
+    /if: \$\{\{ always\(\) && needs\.verify\.result == 'success' \}\}/,
+  )
+})

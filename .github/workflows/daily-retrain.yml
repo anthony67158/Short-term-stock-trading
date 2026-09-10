@@ -455,7 +455,10 @@ jobs:
           if-no-files-found: warn
 
   sector-retrain:
-    needs: verify
+    needs:
+      - verify
+      - market-data-archive
+    if: ${{ always() && needs.verify.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     defaults:
