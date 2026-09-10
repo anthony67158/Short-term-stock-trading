@@ -25,6 +25,7 @@ from tushare_export_history import (  # noqa: E402
 from opportunity_market_archive import (  # noqa: E402
     build_market_day_artifact,
     load_market_day,
+    market_close_ms,
     publish_market_days,
 )
 from tushare_client import TushareClient  # noqa: E402
@@ -218,6 +219,7 @@ def archive_latest(*, target_date=None, max_per_min=120, universe_size=1000):
         source="TUSHARE_DAILY_INCREMENT",
         universe_source_date=previous,
         requested_codes=len(universe),
+        generated_at=market_close_ms(target),
     )
     published = publish_market_days(oss, [artifact])
     return {

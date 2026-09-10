@@ -15,6 +15,7 @@ from opportunity_market_archive import (  # noqa: E402
     build_market_day_artifact,
     encode_market_day,
     load_market_day,
+    market_close_ms,
     publish_market_days,
 )
 from publish_tushare_market_history import (  # noqa: E402
@@ -112,6 +113,9 @@ def artifact(date="20260909"):
 
 
 class OpportunityMarketArchiveTest(unittest.TestCase):
+    def test_market_close_timestamp_is_stable_beijing_time(self):
+        self.assertEqual(market_close_ms("20260909"), 1788940800000)
+
     def test_builds_deterministic_validated_daily_shard(self):
         value = artifact()
         self.assertEqual(value["summary"]["dailyRows"], 800)

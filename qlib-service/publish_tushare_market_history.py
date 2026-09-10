@@ -1,13 +1,13 @@
 """Publish validated local Tushare replay files as immutable OSS day shards."""
 
 import argparse
-from datetime import datetime, timedelta, timezone
 import gzip
 import json
 from pathlib import Path
 
 from opportunity_market_archive import (
     build_market_day_artifact,
+    market_close_ms,
     publish_market_days,
 )
 from upload_model import bucket
@@ -16,15 +16,6 @@ from upload_model import bucket
 def read_gzip_json(path):
     with gzip.open(path, "rt", encoding="utf-8") as handle:
         return json.load(handle)
-
-
-def market_close_ms(date):
-    beijing = timezone(timedelta(hours=8))
-    closed_at = datetime.strptime(date, "%Y%m%d").replace(
-        hour=16,
-        tzinfo=beijing,
-    )
-    return int(closed_at.timestamp() * 1000)
 
 
 def iter_local_market_artifacts(work_dir, *, from_date=None, to_date=None):

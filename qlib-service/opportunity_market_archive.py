@@ -1,5 +1,6 @@
 """Immutable, checksummed market-data shards for reproducible V3 replay."""
 
+from datetime import datetime, timedelta, timezone
 import gzip
 import hashlib
 import json
@@ -14,6 +15,16 @@ PREFIX = "opportunitymodel/market-data/v1"
 MANIFEST_KEY = f"{PREFIX}/manifest.json"
 DATE_PATTERN = re.compile(r"^\d{8}$")
 CODE_PATTERN = re.compile(r"^\d{6}$")
+
+
+def market_close_ms(date):
+    date = _date(date)
+    beijing = timezone(timedelta(hours=8))
+    closed_at = datetime.strptime(date, "%Y%m%d").replace(
+        hour=16,
+        tzinfo=beijing,
+    )
+    return int(closed_at.timestamp() * 1000)
 
 
 def _date(value):
