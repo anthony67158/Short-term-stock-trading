@@ -262,6 +262,18 @@ async function runTushareMetadataExporter(options) {
   ], 'Tushare历史元数据导出')
 }
 
+async function runTushareSectorExporter(output) {
+  return runPythonExporter([
+    path.join(
+      ROOT,
+      'qlib-service',
+      'archive_tushare_sector_membership.py',
+    ),
+    '--output',
+    output,
+  ], 'Tushare历史行业成员导出')
+}
+
 async function runMinuteExporter(options, manifestPath, minuteDirectory) {
   if (options.provider === 'tushare') {
     return runPythonExporter([
@@ -328,11 +340,18 @@ async function main() {
   await mkdir(minuteDirectory, { recursive: true, mode: 0o700 })
   const dailyFile = path.join(options.workDir, 'daily.json.gz')
   const fundFile = path.join(options.workDir, 'funds.json.gz')
+  const sectorFile = path.join(
+    options.workDir,
+    'sector-membership.json.gz',
+  )
   writeProgress('DAILY_START', { from: options.from, to: options.to })
   let cachedDaily
   let cachedFunds
   if (options.provider === 'tushare') {
     await runTushareMetadataExporter(options)
+    if (!await fileExists(sectorFile)) {
+      await runTushareSectorExporter(sectorFile)
+    }
     cachedDaily = await readGzipJson(dailyFile)
     cachedFunds = await readGzipJson(fundFile)
   } else {
@@ -363,6 +382,9 @@ async function main() {
   )
   const dailyByCode = indexRowsByCode(daily)
   const fundByCode = indexRowsByCode(funds)
+  const sectorMemberships = await fileExists(sectorFile)
+    ? (await readGzipJson(sectorFile)).memberships || []
+    : []
   const plan = selectReplayDates(daily, {
     signalDays: options.signalDays,
   })
@@ -422,6 +444,7 @@ async function main() {
           minutesByCode,
           dailyByCode,
           fundByCode,
+          sectorMemberships,
         })
         const next = pendingFromBatch(batch)
         const newCodes = new Set(next.map((item) => item.event.code))

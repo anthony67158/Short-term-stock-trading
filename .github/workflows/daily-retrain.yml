@@ -72,6 +72,7 @@ jobs:
             tests/test_collect_opportunity_outcomes.py \
             tests/test_opportunity_history.py \
             tests/test_opportunity_market_archive.py \
+            tests/test_opportunity_sector_archive.py \
             tests/test_archive_tushare_market_day.py \
             tests/test_promote_opportunity_model.py \
             tests/test_publish_opportunity_training_status.py \
@@ -432,6 +433,11 @@ jobs:
             --universe-size 1000 \
             --max-per-min 120 \
             --report market-archive-report.json
+
+      - name: Archive historical sector membership
+        run: |
+          python archive_tushare_sector_membership.py \
+            --publish
 
       - name: Publish archive summary
         if: always()

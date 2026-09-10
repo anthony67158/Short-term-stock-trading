@@ -340,6 +340,12 @@ export function sectorOpportunityFromTags({
       nextScore: finite(sector.forecast?.next?.score),
       weekScore: finite(sector.forecast?.week?.score),
       breadth: finite(sector.breadth?.inflowPct),
+      breadthPct: finite(sector.breadth?.inflowPct),
+      memberCount: finite(sector.breadth?.memberCount),
+      mainNetYi: finite(sector.mainInflow) == null
+        ? null
+        : finite(sector.mainInflow) / 100_000_000,
+      flowRank: finite(sector.rank),
       reasons: (sector.reasons || []).slice(0, 4),
       risks: (sector.risks || []).slice(0, 4),
     },

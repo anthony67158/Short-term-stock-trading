@@ -264,6 +264,17 @@ class TushareClient:
             params["end_date"] = end_date
         return self.rows("ths_daily", params, fields)
 
+    def index_member_all(
+        self,
+        ts_code=None,
+        fields="l1_code,l1_name,l2_code,l2_name,l3_code,l3_name,"
+        "ts_code,name,in_date,out_date,is_new",
+    ):
+        params = {}
+        if ts_code:
+            params["ts_code"] = ts_code
+        return self.rows("index_member_all", params, fields)
+
     def moneyflow_ind_ths(
         self,
         ts_code=None,

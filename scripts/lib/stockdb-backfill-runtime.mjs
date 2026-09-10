@@ -10,6 +10,10 @@ import {
   settleHistoricalEvent,
 } from './opportunity-history-backfill.mjs'
 import {
+  activeSectorMembershipByCode,
+  buildHistoricalSectorOpportunities,
+} from './historical-sector-context.mjs'
+import {
   aggregateFiveMinuteBars,
   buildCausalSnapshot,
   buildCausalTrends,
@@ -141,6 +145,7 @@ export async function scanHistoricalSlot({
   minutesByCode,
   dailyByCode,
   fundByCode,
+  sectorMemberships = [],
 } = {}) {
   const quotes = []
   const funds = new Map()
@@ -184,6 +189,16 @@ export async function scanHistoricalSlot({
     marketGate: marketContext.marketGate,
   })
   marketContext.marketGate.regime.label = adaptiveContext.phase
+  const sectorByCode = buildHistoricalSectorOpportunities({
+    quotes,
+    funds,
+    memberships: sectorMemberships,
+    tradeDate,
+  })
+  const membershipByCode = activeSectorMembershipByCode(
+    sectorMemberships,
+    tradeDate,
+  )
   const now = beijingSlotTimestamp(tradeDate, slot)
   const scan = await scanFormulaSelectionCandidates({
     mode,
@@ -204,10 +219,11 @@ export async function scanHistoricalSlot({
     fetchFund: async (code) => funds.get(code) || {},
     fetchTags: async (code) => ({
       name: currentDaily(dailyByCode.get(code) || [], tradeDate)?.name || code,
-      industry: '',
+      industry: membershipByCode.get(code)?.sectorName || '',
       concepts: [],
     }),
-    matchSector: () => ({ matched: false, sector: null }),
+    matchSector: ({ code }) => sectorByCode.get(String(code))
+      || { matched: false, sector: null },
   })
   return buildHistoricalLedgerBatch({
     mode,
