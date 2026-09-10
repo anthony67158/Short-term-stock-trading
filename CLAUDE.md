@@ -26,9 +26,10 @@
 必须保留兼容的数据只有账户、持仓、真实成交、执行计划、执行归因、T+1批次和
 费用信息。旧建议正文、旧公式结果和旧页面结构不得反向约束新架构。
 
-机会模型使用 `opportunity-score-feature.v3`。只有
-`npm run opportunity:promote` 通过 walk-forward、净R提升、下置信界和回撤闸门后，
-才能从影子晋级生产；禁止直接修改 `shadowOnly` 或 `productionEligible`。
+机会模型使用 `opportunity-score-feature.v3`。按用户2026-09-10指示，模型文件、
+特征合同及预测数值有效即以 `usagePolicy=DIRECT` 直接启用，不等待影子或晋级。
+原 `shadowOnly`、`productionEligible` 保留为真实评测记录，不能伪造。
+每日训练先发布当前有效产物，晋级只作后置诊断；保留真实错误、正期望与账户风控。
 
 ## 铁律：前端改动必须双部署
 

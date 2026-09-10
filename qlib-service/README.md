@@ -10,8 +10,9 @@ https://quant-score-nlxgclpdbu.cn-hangzhou.fcapp.run
 服务基于 FastAPI、LightGBM 和 GARCH，提供量化评分、走势预测、模型信息与
 健康检查。模型优先从部署包加载，并按小时从阿里云 OSS 热更新。
 
-独立的 `POST /opportunity-score` 承载机会动作价值评分。未通过时间外验证时
-只返回影子结果，不得驱动正式仓位；没有有效模型时稳定返回 `NOT_READY`，
+独立的 `POST /opportunity-score` 承载机会动作价值评分。按用户要求，当前模型
+以 `usagePolicy=DIRECT` 直接用于决策，不以影子资格或晋级结果为前提。
+分布外只提示，不关闭预测。文件、特征合同或预测数值异常仍如实报错，
 不影响现有 36 维 `/predict`。
 
 机会模型训练必须从项目根目录执行以下顺序：
@@ -24,18 +25,18 @@ npm run opportunity:train
 ```
 
 少于 1000 个成熟候选、300 个完整成交结果或 60 个独立交易日时，训练只生成
-`NOT_READY` 报告。通过影子闸门后先发布到隔离 shadow 通道，禁止覆盖线上
-生产模型：
+`NOT_READY` 报告。完成训练后无论评测是否通过，均保存实际三头模型。
+`shadow` 是兼容保留的产物目录名，不代表仅允许影子使用。直接发布当前模型：
 
 ```bash
 cd qlib-service
 python3 upload_opportunity_model.py \
   --directory opportunity-model/shadow \
-  --prefix opportunitymodel/shadow/
+  --prefix opportunitymodel/
 ```
 
-只有 walk-forward、Top5 费后净R提升、下置信界、回撤和命中率同时通过时，
-才允许晋级并发布生产模型：
+walk-forward、Top5 费后净R提升、下置信界、回撤和命中率仍保留为晋级诊断，
+不阻止当前模型使用。可选的晋级记录生成：
 
 ```bash
 cd ..
@@ -46,11 +47,12 @@ python3 upload_opportunity_model.py \
   --prefix opportunitymodel/
 ```
 
-禁止直接修改 `shadowOnly` 或 `productionEligible`。
+`shadowOnly`、`productionEligible` 保留真实评测记录，不需要人为改成通过。
+模型启用由 `usagePolicy=DIRECT` 明确表达；不得伪造评测成功。
 
 `.github/workflows/daily-retrain.yml` 在每个工作日北京时间 01:15 自动执行
-成熟样本收集、V3训练、shadow发布、生产晋级检查和状态发布。晋级检查未全部
-通过时，`opportunitymodel/manifest.json` 保持不变。生产采样由主 FC 在
+成熟样本收集、V3训练、当前模型直接发布、晋级诊断和状态发布。晋级检查未全部
+通过不会撤销当前直接发布的模型。生产采样由主 FC 在
 10:20、13:40、15:10 运行，17:10 结算。历史加速回填的数据合同见
 `../docs/v3-opportunity-history-data.md`。
 

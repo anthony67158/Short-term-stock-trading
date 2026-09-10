@@ -757,9 +757,7 @@ def train_opportunity_score(
     }
     _append_trial(trial_path, report)
     _write_report(report_path, report)
-    if not gate["shadowEligible"]:
-        return report
-
+    # Evaluation remains diagnostic; saving usable weights does not require promotion.
     shadow = os.path.join(output_directory, "shadow")
     os.makedirs(shadow, exist_ok=True)
     _save_booster(fill["model"], os.path.join(
@@ -791,8 +789,9 @@ def train_opportunity_score(
         "trainedAt": timestamp,
         "featureNames": list(FEATURE_NAMES),
         "shadowOnly": True,
-        "shadowEligible": True,
+        "shadowEligible": gate["shadowEligible"],
         "productionEligible": False,
+        "usagePolicy": "DIRECT",
         "split": split,
         "metrics": metrics,
         "calibration": {

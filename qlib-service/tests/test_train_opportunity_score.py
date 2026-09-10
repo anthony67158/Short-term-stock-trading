@@ -199,6 +199,30 @@ class TrainOpportunityScoreTest(unittest.TestCase):
             self.assertEqual(meta["featureNames"], list(FEATURE_NAMES))
             self.assertTrue(meta["shadowOnly"])
             self.assertFalse(meta["productionEligible"])
+            self.assertEqual(meta["usagePolicy"], "DIRECT")
+
+    def test_rejected_evaluation_still_exports_real_weights(self):
+        value = dataset(samples=1200, dates_count=120)
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "dataset.npz")
+            np.savez_compressed(path, **value)
+            with (
+                patch("train_opportunity_score._fit_lgb_classifier", return_value=FakeClassifier()),
+                patch("train_opportunity_score._fit_logistic_classifier", return_value=FakeClassifier()),
+                patch("train_opportunity_score._fit_lgb_regressor", return_value=FakeRegressor()),
+                patch("train_opportunity_score._fit_linear_regressor", return_value=FakeRegressor()),
+                patch("train_opportunity_score.shadow_gate", return_value={
+                    "shadowEligible": False, "shadowBlockers": ["diagnostic failure"],
+                    "productionBlockers": ["diagnostic failure"],
+                }),
+            ):
+                report = train_opportunity_score(path, directory)
+            self.assertEqual(report["state"], "REJECTED")
+            with open(os.path.join(directory, "shadow", "opportunity_meta.json"), encoding="utf-8") as handle:
+                metadata = json.load(handle)
+            self.assertEqual(metadata["usagePolicy"], "DIRECT")
+            self.assertFalse(metadata["shadowEligible"])
+            self.assertTrue(os.path.isfile(os.path.join(directory, "shadow", "opportunity_fill_lgb.txt")))
 
 
 if __name__ == "__main__":

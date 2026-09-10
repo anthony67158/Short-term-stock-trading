@@ -27,7 +27,7 @@ MODEL_PREFIX = os.environ.get(
     "opportunitymodel/",
 )
 MANIFEST_KEY = MODEL_PREFIX + "manifest.json"
-MODEL_TTL_SECONDS = 3600
+MODEL_TTL_SECONDS = 60
 LOCAL_RELEASE_ROOT = "/tmp/opportunitymodel-releases"
 HERE = os.path.dirname(os.path.abspath(__file__))
 ARTIFACT_FILENAMES = {
@@ -88,13 +88,7 @@ def validate_opportunity_metadata(metadata, model_version=None):
         or metadata.get("schemaVersion") != SCORE_SCHEMA_VERSION
         or metadata.get("featureSchemaVersion") != FEATURE_SCHEMA_VERSION
         or tuple(metadata.get("featureNames") or ()) != FEATURE_NAMES
-        or metadata.get("shadowEligible") is not True
-        or not isinstance(metadata.get("shadowOnly"), bool)
-        or not isinstance(metadata.get("productionEligible"), bool)
-        or (
-            metadata.get("productionEligible") is True
-            and metadata.get("shadowOnly") is not False
-        )
+        or not str(metadata.get("modelVersion") or "")
     ):
         raise ValueError("机会模型元数据无效")
     if (
@@ -141,6 +135,8 @@ def _download_release():
     if manifest is None:
         return None
     run_id = manifest["runId"]
+    if _MODELS and (_META or {}).get("modelVersion") == run_id:
+        return _MODELS, _META
     release_dir = os.path.join(LOCAL_RELEASE_ROOT, run_id)
     os.makedirs(release_dir, exist_ok=True)
     final_paths = {
@@ -167,13 +163,6 @@ def _download_release():
             final_paths["meta"] + ".part",
         )
         validate_opportunity_metadata(metadata, run_id)
-        if (
-            metadata.get("shadowOnly")
-            != manifest.get("shadowOnly", True)
-            or metadata.get("productionEligible")
-            != manifest.get("productionEligible", False)
-        ):
-            raise ValueError("机会模型清单与元数据状态不一致")
         for destination in final_paths.values():
             os.replace(destination + ".part", destination)
         return models, metadata
@@ -299,7 +288,7 @@ def predict_opportunity_items(
         models, metadata = get_opportunity_models()
     if not models or metadata is None:
         return [
-            not_ready_prediction(item, "MODEL_NOT_READY")
+            not_ready_prediction(item, "MODEL_FILES_MISSING")
             for item in items
         ]
     try:
@@ -346,16 +335,7 @@ def predict_opportunity_items(
     )
     predictions = []
     for index, item in enumerate(items):
-        if _is_out_of_distribution(matrix[index], metadata):
-            prediction = not_ready_prediction(
-                item,
-                "OUT_OF_DISTRIBUTION",
-            )
-            prediction["state"] = "OUT_OF_DISTRIBUTION"
-            prediction["modelVersion"] = metadata["modelVersion"]
-            prediction["outOfDistribution"] = True
-            predictions.append(prediction)
-            continue
+        out_of_distribution = _is_out_of_distribution(matrix[index], metadata)
         predictions.append({
             "schemaVersion": SCORE_SCHEMA_VERSION,
             "state": "READY",
@@ -380,7 +360,8 @@ def predict_opportunity_items(
                 "sampleCount": calibration_samples,
                 "bucket": _calibration_bucket(item),
             },
-            "outOfDistribution": False,
+            "usagePolicy": "DIRECT",
+            "outOfDistribution": out_of_distribution,
             "shadowOnly": metadata.get("shadowOnly", True),
             "productionEligible": metadata.get(
                 "productionEligible",

@@ -290,19 +290,19 @@ jobs:
             --dataset opportunity-dataset.npz \
             --output opportunity-model
 
-      - name: Publish eligible shadow model to isolated channel
+      - name: Publish current V3 model directly without promotion prerequisite
         id: opportunity-shadow
         run: |
           if [ -f opportunity-model/shadow/opportunity_meta.json ]; then
             python upload_opportunity_model.py \
               --directory opportunity-model/shadow \
-              --prefix opportunitymodel/shadow/
+              --prefix opportunitymodel/
             echo "published=true" >> "$GITHUB_OUTPUT"
           else
-            echo "Opportunity model is not shadow-eligible; keeping current shadow manifest."
+            echo "No valid model artifacts were produced; keeping the current model."
           fi
 
-      - name: Evaluate production promotion gates
+      - name: Evaluate promotion metrics for diagnostics
         run: |
           python promote_opportunity_model.py \
             --source opportunity-model/shadow \

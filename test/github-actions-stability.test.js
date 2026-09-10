@@ -20,7 +20,7 @@ test('所有Python Actions共享精确版本依赖并包含TestClient运行时',
   assert.doesNotMatch(retrain, /pip install "fastapi/)
 })
 
-test('重训主模型、板块模型与机会影子模型分离运行', () => {
+test('重训主模型、板块模型与V3模型分离运行', () => {
   assert.match(retrain, /^\s{2}verify:/m)
   assert.match(retrain, /^\s{2}stock-retrain:/m)
   assert.match(retrain, /^\s{2}sector-retrain:/m)
@@ -35,7 +35,7 @@ test('重训主模型、板块模型与机会影子模型分离运行', () => {
   assert.match(retrain, /Verify sector model OSS connectivity/)
   assert.match(retrain, /Collect mature opportunity outcomes/)
   assert.match(retrain, /Train and evaluate opportunity challenger/)
-  assert.match(retrain, /Publish eligible shadow model/)
+  assert.match(retrain, /Publish current V3 model directly without promotion prerequisite/)
   assert.match(
     retrain,
     /if \[ -f opportunity-model\/shadow\/opportunity_meta\.json \]/,

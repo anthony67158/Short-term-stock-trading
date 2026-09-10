@@ -39,6 +39,7 @@ def _active_model(bucket, prefix):
         "productionEligible":
             value.get("productionEligible") is True,
         "activatedAt": _count(value.get("activatedAt")),
+        "usagePolicy": value.get("usagePolicy"),
     }
 
 
@@ -48,6 +49,7 @@ def build_training_status(report, promotion=None, active_model=None):
     production = bool(
         (active_model or {}).get("productionEligible")
     )
+    direct = (active_model or {}).get("usagePolicy") == "DIRECT"
     promotion_blockers = list(
         (promotion or {}).get("blockers")
         or report.get("productionBlockers")
@@ -59,7 +61,7 @@ def build_training_status(report, promotion=None, active_model=None):
         "generatedAt": int(time.time() * 1000),
         "trainingGeneratedAt": _count(report.get("generatedAt")),
         "state": (
-            "PRODUCTION_READY"
+            "DIRECT_ACTIVE" if direct else "PRODUCTION_READY"
             if production
             else str(report.get("state") or "NOT_READY")
         ),
@@ -68,6 +70,7 @@ def build_training_status(report, promotion=None, active_model=None):
             or report.get("modelVersion"),
         "shadowEligible": report.get("shadowEligible") is True,
         "productionEligible": production,
+        "usagePolicy": "DIRECT" if direct else None,
         "readiness": {
             "samples": _count(readiness.get("samples")),
             "filledSamples": _count(

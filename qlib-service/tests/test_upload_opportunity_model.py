@@ -83,7 +83,7 @@ class UploadOpportunityModelTest(unittest.TestCase):
             self.assertIn(ARTIFACT_FILENAMES[slot], item["key"])
         self.assertEqual(bucket.assert_forbid, "true")
 
-    def test_rejects_non_shadow_or_production_eligible_metadata(self):
+    def test_publishes_unpromoted_weights_without_faking_qualification(self):
         bucket = FakeBucket()
         with tempfile.TemporaryDirectory() as directory:
             for slot, filename in ARTIFACT_FILENAMES.items():
@@ -102,8 +102,9 @@ class UploadOpportunityModelTest(unittest.TestCase):
                 with open(path, "w", encoding="utf-8") as handle:
                     handle.write(content)
 
-            with self.assertRaisesRegex(ValueError, "影子闸门"):
-                publish_opportunity_release(bucket, directory)
+            manifest = publish_opportunity_release(bucket, directory)
+            self.assertEqual(manifest["usagePolicy"], "DIRECT")
+            self.assertFalse(manifest["productionEligible"])
 
 
 if __name__ == "__main__":

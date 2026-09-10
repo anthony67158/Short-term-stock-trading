@@ -300,14 +300,12 @@ def opportunity_score(
             "ok": True,
             "shadowOnly": not production_eligible,
             "productionEligible": production_eligible,
+            "usagePolicy": "DIRECT",
+            "modelLoaded": bool(models),
             "modelVersion":
                 (metadata or {}).get("modelVersion"),
             "predictions": predictions,
-            "note": (
-                "已通过生产晋级闸门"
-                if production_eligible
-                else "影子统计口径，不参与正式仓位"
-            ),
+            "note": "直接使用当前V3模型；评测与晋级记录不限制推理",
         }
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)[:120])

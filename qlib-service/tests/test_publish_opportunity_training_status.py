@@ -71,6 +71,19 @@ class OpportunityTrainingStatusTest(unittest.TestCase):
         self.assertEqual(value["state"], "PRODUCTION_READY")
         self.assertTrue(value["productionEligible"])
 
+    def test_direct_manifest_is_active_without_promotion(self):
+        value = build_training_status(
+            {"state": "REJECTED"},
+            active_model={
+                "modelVersion": "opportunity-score.direct",
+                "usagePolicy": "DIRECT",
+                "productionEligible": False,
+            },
+        )
+        self.assertEqual(value["state"], "DIRECT_ACTIVE")
+        self.assertFalse(value["productionEligible"])
+        self.assertEqual(value["usagePolicy"], "DIRECT")
+
     def test_publishes_compact_status_to_stable_oss_key(self):
         bucket = Bucket({
             "runId": "opportunity-score.prod",

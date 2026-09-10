@@ -1,4 +1,4 @@
-"""Publish a validated opportunity shadow-model release to OSS."""
+"""Publish a structurally validated opportunity model directly to OSS."""
 
 import argparse
 import hashlib
@@ -37,7 +37,7 @@ def _load_metadata(directory):
     try:
         validate_opportunity_metadata(metadata)
     except ValueError as error:
-        raise ValueError("机会模型未通过影子闸门") from error
+        raise ValueError("机会模型文件或特征合同无效") from error
     run_id = str(metadata.get("modelVersion") or "")
     if (
         not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{2,95}", run_id)
@@ -78,6 +78,7 @@ def publish_opportunity_release(
         "schemaVersion": MANIFEST_SCHEMA_VERSION,
         "runId": run_id,
         "activatedAt": int(activated_at or time.time()),
+        "usagePolicy": "DIRECT",
         "shadowOnly": metadata.get("shadowOnly", True),
         "productionEligible": metadata.get(
             "productionEligible",
@@ -98,7 +99,7 @@ def publish_opportunity_release(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="发布机会雷达影子模型",
+        description="直接发布机会雷达模型，不要求晋级",
     )
     parser.add_argument("--directory", required=True)
     parser.add_argument(

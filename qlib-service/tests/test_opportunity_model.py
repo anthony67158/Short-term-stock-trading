@@ -138,6 +138,7 @@ class OpportunityModelTest(unittest.TestCase):
 
         result = predictions[0]
         self.assertEqual(result["state"], "READY")
+        self.assertEqual(result["usagePolicy"], "DIRECT")
         self.assertAlmostEqual(result["pFill"], 0.7)
         self.assertAlmostEqual(result["pWinGivenFill"], 0.6)
         self.assertAlmostEqual(result["expectedNetR"], 0.2)
@@ -149,7 +150,7 @@ class OpportunityModelTest(unittest.TestCase):
         )
         self.assertEqual(result["calibration"]["sampleCount"], 300)
 
-    def test_out_of_distribution_item_fails_closed(self):
+    def test_out_of_distribution_is_diagnostic_without_blocking_direct_use(self):
         value = item()
         for name in FEATURE_NAMES[:10]:
             value["factors"][name] = 100.0
@@ -164,12 +165,12 @@ class OpportunityModelTest(unittest.TestCase):
             metadata=meta(),
         )[0]
 
-        self.assertEqual(result["state"], "OUT_OF_DISTRIBUTION")
+        self.assertEqual(result["state"], "READY")
         self.assertTrue(result["outOfDistribution"])
-        self.assertIsNone(result["pFill"])
-        self.assertIsNone(result["expectedNetR"])
+        self.assertAlmostEqual(result["pFill"], 0.9)
+        self.assertAlmostEqual(result["expectedNetR"], 1.0)
 
-    def test_unseen_unknown_category_fails_closed(self):
+    def test_unseen_unknown_category_keeps_model_prediction_with_warning(self):
         value = item()
         value["factors"]["market_STANDARD"] = 0.0
         value["factors"]["market_UNKNOWN"] = 1.0
@@ -187,7 +188,25 @@ class OpportunityModelTest(unittest.TestCase):
             metadata=metadata,
         )[0]
 
-        self.assertEqual(result["state"], "OUT_OF_DISTRIBUTION")
+        self.assertEqual(result["state"], "READY")
+        self.assertTrue(result["outOfDistribution"])
+        self.assertAlmostEqual(result["pFill"], 0.9)
+
+    def test_failed_promotion_does_not_block_existing_model(self):
+        metadata = meta()
+        metadata["shadowEligible"] = False
+        result = predict_opportunity_items(
+            {"items": [item()]},
+            models={
+                "pFill": FakeModel(0.7),
+                "pWinGivenFill": FakeModel(0.6),
+                "expectedNetR": FakeModel(0.2),
+            },
+            metadata=metadata,
+        )[0]
+        self.assertEqual(result["state"], "READY")
+        self.assertEqual(result["usagePolicy"], "DIRECT")
+        self.assertFalse(result["productionEligible"])
 
     def test_loader_caches_missing_manifest_and_keeps_last_good_model(self):
         previous = (

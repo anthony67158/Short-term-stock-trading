@@ -10,13 +10,13 @@ const read = (path) => readFileSync(
 const workflow = read('.github/workflows/daily-retrain.yml')
 const exporter = read('scripts/export-opportunity-outcomes.mjs')
 
-test('V3每日重训包含采集、训练、影子发布、晋级和状态发布', () => {
+test('V3每日重训直接发布模型，晋级保留为后置诊断', () => {
   assert.match(workflow, /opportunity-retrain:/)
   assert.match(workflow, /collect_opportunity_outcomes\.py/)
   assert.match(workflow, /train_opportunity_score\.py/)
   assert.match(
     workflow,
-    /--prefix opportunitymodel\/shadow\//,
+    /--directory opportunity-model\/shadow[\s\S]*?--prefix opportunitymodel\//,
   )
   assert.match(workflow, /--check-only/)
   assert.match(workflow, /promotion_decision\.json/)
@@ -30,14 +30,11 @@ test('V3每日重训包含采集、训练、影子发布、晋级和状态发布
   )
 })
 
-test('影子发布不能覆盖生产模型入口且V3样本允许导出', () => {
+test('直接发布不等待晋级结果且V3样本允许导出', () => {
   const shadowStep = workflow.match(
-    /- name: Publish eligible shadow model to isolated channel([\s\S]*?)(?=\n      - name:)/,
+    /- name: Publish current V3 model directly without promotion prerequisite([\s\S]*?)(?=\n      - name:)/,
   )?.[1] || ''
-  assert.match(shadowStep, /opportunitymodel\/shadow\//)
-  assert.doesNotMatch(
-    shadowStep,
-    /--prefix opportunitymodel\/\s*(?:\n|$)/,
-  )
+  assert.match(shadowStep, /--prefix opportunitymodel\/\s*(?:\n|$)/)
+  assert.doesNotMatch(shadowStep, /eligible.*true|promotion_decision/)
   assert.match(exporter, /opportunity-score-feature\.v3/)
 })
