@@ -16,7 +16,7 @@ import {
 } from './_opportunity_radar_outcome_store.js'
 import {
   fetchFiveMinuteBars,
-} from './_v2_quant.js'
+} from './_minute_kline.js'
 
 export const OPPORTUNITY_RADAR_SETTLEMENT_SCHEMA_VERSION =
   'opportunity-radar-settlement.v1'

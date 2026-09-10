@@ -8,8 +8,8 @@ import {
   fetchSelectedQuantPredict,
   techSummaryForAI,
 } from './_ta.js';
-import { quantModelLabel } from '../shared/modelVersion.js';
 import { buildQuantAdviceContext } from '../shared/quantAdviceContext.js';
+import { QUANT_MODEL_DEFAULT } from '../shared/modelVersion.js';
 import { marketTimePromptBlock, marketTimeContext } from './_market_time.js';
 import { getLatestDailySummary } from './_daily_summary.js';
 import { fetchNews, fetchMarketFlashes } from './_market_data.js';
@@ -47,10 +47,6 @@ import {
 } from './_ai_prompts.js';
 import { reconcileAdviceNumbers } from '../shared/adviceValidation.js';
 import { normalizePickDecision } from '../shared/stockRanking.js';
-import {
-  canUseQuantModel,
-  resolveQuantModelForRequest,
-} from './_quant_access.js';
 import { authorizePaidRequest } from './_account_auth.js';
 import { runV3Decision } from './_v3_decision.js';
 import {
@@ -1429,18 +1425,8 @@ export default async function handler(req, res) {
     };
     // 采集里程碑进度事件
     const phase = (text, key) => emit('phase', { text, key });
-    const quantModelVersion = await resolveQuantModelForRequest(
-      req,
-      payload.quantModelVersion,
-      { account: accountAuth.account },
-    );
+    const quantModelVersion = QUANT_MODEL_DEFAULT;
     payload.quantModelVersion = quantModelVersion;
-    if (!(await canUseQuantModel(req, quantModelVersion))) {
-      return finish({
-        ok: false,
-        error: `${quantModelLabel(quantModelVersion)}需要已登录且当前账号已选择该版本`,
-      });
-    }
 
     // ===== 全局时间预算:前端浏览器直连阿里云 FC(超时 600s),不受 Vercel 60s 限制 =====
     // 数据采集阶段(补大盘/资金/分时/量化…)可能耗时 15~20s,之后 LLM 生成又要时间。
@@ -1775,17 +1761,6 @@ export default async function handler(req, res) {
           }
         }
         const industrySearch = advisorSearch?.industry;
-        if (
-          !triggeredPriceReview
-          && quantModelVersion !== 'default'
-          && !quant
-        ) {
-          return finish({
-            ok: false,
-            error: `${quantModelLabel(quantModelVersion)}服务未运行或预测不可用，请先开启服务后重试`,
-            quantModelVersion,
-          });
-        }
         if (industry && industrySearch?.items?.length) {
           payload.industry = industry;
           payload.industryNews = industrySearch.items
@@ -1962,12 +1937,7 @@ export default async function handler(req, res) {
             selectedModelVersion: quant.selectedModelVersion
               || quantModelVersion,
             runtimeModelVersion: quant.runtimeModelVersion || null,
-            modelLabel: quant.modelLabel || '当前生产模型',
-            v2: quant.v2 || null,
-            v21: quant.v21 || null,
-            fallback: quant.fallback || null,
-            reliability: quant.reliability || null,
-            experimental: quant.experimental === true,
+            modelLabel: quant.modelLabel || '36因子日线辅助模型',
           };
           // ★高把握买点信号头(isotonic校准 + gate≥85%闸门):只有 fired=true 才是"校准后高可信"信号。
           //   连同买入/止盈/止损价一并透传给军师,支撑其"把握闸+赔率闸"双闸门判断(P0"少出手"纪律)。
@@ -2019,7 +1989,6 @@ export default async function handler(req, res) {
               currentTradingDayForecast:
                 payload.quant.currentTradingDayForecast || null,
               forecastAvailability: payload.quant.forecastAvailability || null,
-              executionReference: payload.quant.v2?.executionReference || null,
               reads: payload.quant.reads || null,
               inputAsOf: payload.quant.inputAsOf || null,
               inputSource: payload.quant.inputSource || null,

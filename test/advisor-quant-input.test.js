@@ -53,7 +53,7 @@ test('盘后在主源与备用源之间选择包含当天收盘的最新完整�
   })
 })
 
-test('量化输入闸门按所选模型的数据口径判断', () => {
+test('量化输入闸门统一使用日线辅助模型口径', () => {
   assert.deepEqual(
     quantInputReadiness('default', candles('2026-08-26', 24)),
     {
@@ -85,17 +85,17 @@ test('量化输入闸门按所选模型的数据口径判断', () => {
   assert.deepEqual(
     quantInputReadiness('v2', []),
     {
-      ready: true,
-      source: 'minute',
-      reason: '',
+      ready: false,
+      source: 'daily',
+      reason: 'INSUFFICIENT_DAILY_CANDLES',
     },
   )
   assert.deepEqual(
     quantInputReadiness('v2.1', []),
     {
-      ready: true,
-      source: 'minute',
-      reason: '',
+      ready: false,
+      source: 'daily',
+      reason: 'INSUFFICIENT_DAILY_CANDLES',
     },
   )
 })

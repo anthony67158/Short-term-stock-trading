@@ -64,7 +64,7 @@ class ForecastContractTest(unittest.TestCase):
     def test_daily_model_explicitly_refuses_to_fake_same_day_range(self):
         app = load_app()
 
-        availability = app.forecast_availability(realtime={"live": True})
+        availability = app.forecast_availability()
 
         self.assertTrue(availability["nextTradeDay"])
         self.assertFalse(availability["currentSession"])

@@ -546,36 +546,24 @@ test('军师展示契约去除重复依据并兼容持仓建议旧字段', () =>
   )
 })
 
-test('军师默认展示所选模型、实际窗口与V2.1实验风险', () => {
+test('军师统一展示日线辅助模型身份', () => {
   const view = buildAdvicePresentation({
     action: '观望',
     title: '等待盘中信号确认',
     quantContext: {
-      selectedModelVersion: 'v2.1',
-      effectiveModelVersion: 'v2.1',
-      runtimeModelVersion: 'v2.1-intraday',
-      modelLabel: '分钟 Transformer V2.1（盘中实验）',
-      horizon: '未来30分钟',
+      selectedModelVersion: 'default',
+      effectiveModelVersion: 'default',
+      runtimeModelVersion: '',
+      modelLabel: '36因子日线辅助模型',
+      horizon: '下一交易日',
       asOf: '2026-08-12 10:30:00',
-      experimental: true,
-      reliability: {
-        productionGatePassed: false,
-        thresholdPct: 58,
-        balancedAccuracyPct: {
-          next30m: 53.92,
-          sessionClose: 54.58,
-        },
-      },
     },
   })
 
   assert.deepEqual(view.model, {
-    label: '分钟 Transformer V2.1（盘中实验）',
-    horizon: '未来30分钟',
+    label: '36因子日线辅助模型',
+    horizon: '下一交易日',
     asOf: '2026-08-12 10:30:00',
-    experimental: true,
-    fallback: null,
-    reliabilityText: '30分钟 53.92% · 收盘 54.58% · 门槛 58%',
   })
 })
 
@@ -587,7 +575,7 @@ test('军师模型摘要直接展示本次采用的生产模型次日预测', ()
       selectedModelVersion: 'default',
       effectiveModelVersion: 'default',
       runtimeModelVersion: '',
-      modelLabel: '当前生产模型',
+      modelLabel: '36因子日线辅助模型',
       horizon: 'next5TradingDays',
       asOf: '2026-08-19',
       experimental: false,

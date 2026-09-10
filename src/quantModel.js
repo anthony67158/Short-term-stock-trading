@@ -1,5 +1,5 @@
 import { planStore } from './planStore.js'
-import { normalizeQuantModelVersion } from '../shared/modelVersion.js'
+import { QUANT_MODEL_DEFAULT } from '../shared/modelVersion.js'
 import {
   accountCredentialHeaders,
   parseStoredAccountSession,
@@ -22,33 +22,37 @@ function accountCredentials() {
 
 export function currentQuantModelVersion() {
   try {
-    return normalizeQuantModelVersion(
-      planStore.getSetting(QUANT_MODEL_SETTING, 'default'),
+    const stored = planStore.getSetting(
+      QUANT_MODEL_SETTING,
+      QUANT_MODEL_DEFAULT,
     )
+    if (stored !== QUANT_MODEL_DEFAULT) {
+      planStore.setSetting(
+        QUANT_MODEL_SETTING,
+        QUANT_MODEL_DEFAULT,
+      )
+    }
   } catch {
-    return 'default'
+    // 账号尚未恢复时也只使用默认辅助模型。
   }
+  return QUANT_MODEL_DEFAULT
 }
 
-export function quantModelQuery(version = currentQuantModelVersion()) {
-  return `&model=${encodeURIComponent(normalizeQuantModelVersion(version))}`
+export function quantModelQuery() {
+  return `&model=${QUANT_MODEL_DEFAULT}`
 }
 
 export function accountRequestHeaders() {
   return accountCredentialHeaders(accountCredentials())
 }
 
-export function quantModelHeaders(version = currentQuantModelVersion()) {
-  if (normalizeQuantModelVersion(version) === 'default') return {}
+export function quantModelHeaders() {
   return accountRequestHeaders()
 }
 
-export function withQuantModelPayload(
-  payload,
-  version = currentQuantModelVersion(),
-) {
+export function withQuantModelPayload(payload) {
   return {
     ...(payload || {}),
-    quantModelVersion: normalizeQuantModelVersion(version),
+    quantModelVersion: QUANT_MODEL_DEFAULT,
   }
 }

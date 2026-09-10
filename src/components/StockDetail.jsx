@@ -1157,15 +1157,8 @@ export default function StockDetail({ stock, onClose }) {
                   const adv = quantState.advice
                   const dec = q.decision || {}
                   const fc = q.forecast
-                  const isV21 = q.modelVersion === 'v2.1' && !!q.v21
-                  const isV2 = q.modelVersion === 'v2' && !!q.v2
-                  const isMinuteModel = isV21 || isV2
-                  const nextFc = !isMinuteModel
-                    ? q.nextTradeDayForecast
-                    : null
-                  const currentDayFc = !isMinuteModel
-                    ? q.currentTradingDayForecast
-                    : null
+                  const nextFc = q.nextTradeDayForecast
+                  const currentDayFc = q.currentTradingDayForecast
                   const primarySelection = selectPrimaryProductionForecast({
                     currentTradingDayForecast: currentDayFc,
                     nextTradeDayForecast: nextFc,
@@ -1255,7 +1248,7 @@ export default function StockDetail({ stock, onClose }) {
                                   {primaryWindow.shortLabel}{primaryFc.direction}·概率{primaryFc.upProb}%·{fmtRaw(primaryFc.targetLow)}~{fmtRaw(primaryFc.targetHigh)}
                                 </span>
                               )}
-                              {fc && <span className={'fc-dir-inline ' + (fc.direction === '看涨' ? 'red' : fc.direction === '看跌' ? 'green' : 'muted')}>量化{isMinuteModel ? (fc.horizon || '下一交易日') : `${fc.days || 5}日`}{fc.direction}·概率{fc.upProb}%</span>}
+                              {fc && <span className={'fc-dir-inline ' + (fc.direction === '看涨' ? 'red' : fc.direction === '看跌' ? 'green' : 'muted')}>量化{fc.days || 5}日{fc.direction}·概率{fc.upProb}%</span>}
                               {q.score != null && <span className={'quant-chip sm ' + (q.score >= 62 ? 'red' : q.score <= 38 ? 'green' : 'gold')}>量化 {q.score}·{q.bias}</span>}
                             </span>
                             <Icon name={showForecast ? 'chevronDown' : 'chevronRight'} size={13} />
@@ -1268,102 +1261,11 @@ export default function StockDetail({ stock, onClose }) {
                                     <span className={'fc-dir ' + ((primaryFc || fc).direction === '看涨' ? 'red' : (primaryFc || fc).direction === '看跌' ? 'green' : 'muted')}>
                                       {primaryFc
                                         ? `${primaryWindow.label} ${primaryFc.direction}`
-                                        : `${isMinuteModel ? (fc.horizon || '下一交易日') : `未来${fc.days || 5}日`} ${fc.direction}`}
+                                        : `未来${fc.days || 5}日 ${fc.direction}`}
                                     </span>
                                     <span className="fc-conf">预测信心 {(primaryFc || fc).confidence}</span>
                                   </div>
-                                  {isV21 ? (
-                                    <div className="v21-heads">
-                                      <div className="v21-asof">
-                                        <b>V2.1 盘中双头</b>
-                                        <span>信号 {q.asOf || '—'} · {q.v21.session || '盘中'} · 当前采用{q.v21.activeHead === 'sessionClose' ? '截至收盘' : '未来30分钟'}</span>
-                                      </div>
-                                      {[
-                                        ['next30m', '未来30分钟'],
-                                        ['sessionClose', '截至今日收盘'],
-                                      ].map(([key, label]) => {
-                                        const head = q.v21.heads?.[key]
-                                        if (!head) return null
-                                        const probabilities = head.probabilities || {}
-                                        return (
-                                          <div className={'v21-head ' + (q.v21.activeHead === key ? 'active' : '')} key={key}>
-                                            <div className="v2-price-head">
-                                              <span>{label}</span>
-                                              <small>{head.predictedClass || '待判断'}{q.v21.activeHead === key ? ' · 当前采用' : ''}</small>
-                                            </div>
-                                            <div className="fc-grid v2">
-                                              <div className="fc-cell"><span className="fc-k">止盈概率</span><span className="fc-v red">{Math.round((probabilities.takeProfit || 0) * 100)}%</span></div>
-                                              <div className="fc-cell"><span className="fc-k">止损概率</span><span className="fc-v green">{Math.round((probabilities.stopLoss || 0) * 100)}%</span></div>
-                                              <div className="fc-cell"><span className="fc-k">震荡概率</span><span className="fc-v">{Math.round((probabilities.timeout || 0) * 100)}%</span></div>
-                                              <div className="fc-cell"><span className="fc-k">障碍期望</span><span className={'fc-v ' + ((head.outlook?.expectedBarrierReturnPct || 0) >= 0 ? 'red' : 'green')}>{head.outlook?.expectedBarrierReturnPct ?? '—'}%</span></div>
-                                            </div>
-                                          </div>
-                                        )
-                                      })}
-                                      {q.v21.priceReferences && (
-                                        <div className="v2-price-refs">
-                                          <div className="v2-price-head">
-                                            <span>盘中价格锚点</span>
-                                            <small>截至信号时点，不是保证目标价</small>
-                                          </div>
-                                          <div className="v2-price-grid">
-                                            <span>锚点 <b>{q.v21.priceReferences.anchorPrice ?? '—'}</b></span>
-                                            <span>支撑 <b className="red">{q.v21.priceReferences.supportPrice ?? '—'}</b></span>
-                                            <span>压力 <b className="green">{q.v21.priceReferences.resistancePrice ?? '—'}</b></span>
-                                          </div>
-                                        </div>
-                                      )}
-                                    </div>
-                                  ) : isV2 ? (
-                                    <>
-                                      <div className="fc-grid v2">
-                                        <div className="fc-cell"><span className="fc-k">止盈概率</span><span className="fc-v red">{fc.upProb}%</span></div>
-                                        <div className="fc-cell"><span className="fc-k">止损概率</span><span className="fc-v green">{fc.downProb}%</span></div>
-                                        <div className="fc-cell"><span className="fc-k">超时概率</span><span className="fc-v">{fc.timeoutProb}%</span></div>
-                                        <div className="fc-cell"><span className="fc-k">概率优势</span><span className="fc-v">{q.v2.outlook?.probabilityEdgePct ?? '—'}%</span></div>
-                                        <div className="fc-cell"><span className="fc-k">障碍期望</span><span className={'fc-v ' + (fc.expRet >= 0 ? 'red' : 'green')}>{fc.expRet >= 0 ? '+' : ''}{fc.expRet}%</span></div>
-                                        <div className="fc-cell"><span className="fc-k">确定度 / 不确定性</span><span className="fc-v">{q.v2.outlook?.convictionScore ?? '—'} / {q.v2.outlook?.uncertaintyLevel || '—'}</span></div>
-                                        <div className="fc-cell"><span className="fc-k">30分钟动量</span><span className="fc-v">{q.v2.marketContext?.momentum30mPct ?? '—'}%</span></div>
-                                        <div className="fc-cell"><span className="fc-k">波动 / 量能比</span><span className="fc-v">{q.v2.marketContext?.realizedVolPct ?? '—'}% / {q.v2.marketContext?.volumeRatio20 ?? '—'}</span></div>
-                                        <div className="fc-cell"><span className="fc-k">收盘位置</span><span className="fc-v">{q.v2.marketContext?.closeLocationPct ?? '—'}%</span></div>
-                                        <div className="fc-cell"><span className="fc-k">风险 / 强度</span><span className="fc-v">{q.v2.outlook?.riskLevel || '—'} / {q.v2.outlook?.signalStrength || '—'}</span></div>
-                                      </div>
-                                      {q.v2.executionReference && (
-                                        <div className="v2-execution-ref">
-                                          <div className="v2-price-head">
-                                            <span>当前时段执行参考</span>
-                                            <small>{q.v2.executionReference.horizon} · 不计入V2正确率</small>
-                                          </div>
-                                          <div className="v2-price-grid">
-                                            <span>实时锚点 <b>{q.v2.executionReference.anchorPrice}</b></span>
-                                            <span>VWAP <b>{q.v2.executionReference.vwap}</b></span>
-                                            <span>动态下沿 <b className="green">{q.v2.executionReference.rangeLow}</b></span>
-                                            <span>动态上沿 <b className="red">{q.v2.executionReference.rangeHigh}</b></span>
-                                            <span>30分钟动量 <b>{q.v2.executionReference.momentum30mPct}%</b></span>
-                                          </div>
-                                        </div>
-                                      )}
-                                      {q.v2.v21FallbackReason && (
-                                        <div className="qmc-error">V2.1 暂不可用，已回退上一收盘日 V2：{q.v2.v21FallbackReason}</div>
-                                      )}
-                                      {q.v2.priceReferences && (
-                                        <div className="v2-price-refs">
-                                          <div className="v2-price-head">
-                                            <span>价格参考</span>
-                                            <small>{q.v2.executionReference ? '模型原始锚点，盘中执行以上方实时区间为准' : '信号收盘近似，下个交易时段开盘后需修正'}</small>
-                                          </div>
-                                          <div className="v2-price-grid">
-                                            <span>锚点 <b>{q.v2.priceReferences.anchorPrice ?? '—'}</b></span>
-                                            <span>支撑 <b className="red">{q.v2.priceReferences.supportPrice ?? '—'}</b></span>
-                                            <span>压力 <b className="green">{q.v2.priceReferences.resistancePrice ?? '—'}</b></span>
-                                            <span>参考止盈 <b className="red">{q.v2.priceReferences.indicativeTakeProfitPrice ?? '—'}</b></span>
-                                            <span>参考止损 <b className="green">{q.v2.priceReferences.indicativeStopLossPrice ?? '—'}</b></span>
-                                          </div>
-                                        </div>
-                                      )}
-                                    </>
-                                  ) : (
-                                    <>
+                                  <>
                                       {primaryFc && (
                                         <div className="production-next-forecast">
                                           <div className="fc-grid">
@@ -1390,11 +1292,10 @@ export default function StockDetail({ stock, onClose }) {
                                         <div className="fc-cell"><span className="fc-k">P10-P90 价格区间</span><span className="fc-v"><b className="green">{fmtRaw(fc.targetLow)}</b> ~ <b className="red">{fmtRaw(fc.targetHigh)}</b></span></div>
                                         <div className="fc-cell"><span className="fc-k">价格中枢</span><span className="fc-v">{fmtRaw(fc.targetMid)}</span></div>
                                       </div>
-                                    </>
-                                  )}
+                                  </>
                                 </div>
                               )}
-                              {q.highConfSignal && q.highConfSignal.fired && !isMinuteModel && (() => {
+                              {q.highConfSignal && q.highConfSignal.fired && (() => {
                                 const hcs = q.highConfSignal;
                                 // 即时赔率 = (止盈-买入)/(买入-止损)；用现价替代买入价算“照现价追”的真实赔率，更贴用户实际处境
                                 const curPx = (overview && overview.price != null) ? overview.price : (q.price != null ? q.price : hcs.buyPrice);

@@ -64,13 +64,6 @@ export function portfolioAnalysisTimerBody(event, cronKey) {
   return { op: 'resume' };
 }
 
-export function v2AccuracyTimerBody(event, cronKey) {
-  if (!cronKey || !event || typeof event !== 'object') return null;
-  if (event.triggerName !== 'v2-accuracy-timer') return null;
-  if (String(event.payload || '') !== String(cronKey)) return null;
-  return { scheduled: true };
-}
-
 export function opportunityRadarTimerBody(event, cronKey) {
   if (!cronKey || !event || typeof event !== 'object') return null;
   if (

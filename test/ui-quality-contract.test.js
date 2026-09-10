@@ -22,7 +22,6 @@ const dailyReport = read('src/components/DailyReport.jsx')
 const dailyReportSchedule = read('src/components/DailyReportSchedule.jsx')
 const lhbBoard = read('src/components/LhbBoard.jsx')
 const llmConfig = read('src/components/LLMConfig.jsx')
-const quantModelControl = read('src/components/QuantModelControl.jsx')
 const planTab = read('src/components/PlanTab.jsx')
 const todayTab = read('src/components/TodayTab.jsx')
 const marketOverview = read('src/components/MarketOverview.jsx')
@@ -1272,42 +1271,6 @@ test('模型配置为角色端点网格提供足够宽度', () => {
     precision,
     /\.llm-role-endpoints\.dual\s*{[^}]*grid-template-columns:\s*repeat\(2,/s,
   )
-  assert.match(
-    precision,
-    /\.qmc-options\s*{[^}]*grid-template-columns:\s*1fr/s,
-  )
-  assert.match(
-    precision,
-    /\.qmc-option\s*{[^}]*min-height:\s*0/s,
-  )
-})
-
-test('量化模型配置以生产模型前向回测命中率为主并按日展示', () => {
-  assert.match(quantModelControl, /function ProductionAccuracyPanel/)
-  assert.match(quantModelControl, /生产模型实际回测/)
-  assert.match(quantModelControl, /productionAccuracy\.overall\.accuracyPct/)
-  assert.match(quantModelControl, /productionAccuracy\.overall\.correct/)
-  assert.match(quantModelControl, /productionAccuracy\.nextTradeDayDirection/)
-  assert.match(quantModelControl, /productionAccuracy\.nextTradeDayRange/)
-  assert.match(quantModelControl, /次日方向/)
-  assert.match(quantModelControl, /次日区间覆盖/)
-  assert.match(quantModelControl, /平衡准确率/)
-  assert.match(quantModelControl, /强信号命中/)
-  assert.match(quantModelControl, /productionAccuracy\.days/)
-  assert.match(quantModelControl, /只统计训练截止日后/)
-  assert.match(quantModelControl, /AUC仅衡量排序能力/)
-  assert.match(precision, /\.qmc-production-metrics/)
-  assert.match(precision, /\.qmc-backtest-meta/)
-})
-
-test('生产模型每日回测默认折叠且展开后展示所有历史日期', () => {
-  assert.match(quantModelControl, /className="qmc-backtest-history"/)
-  assert.match(quantModelControl, /<summary>/)
-  assert.match(quantModelControl, /每日前向回测/)
-  assert.match(quantModelControl, /historyDays\.map\(\(day\)/)
-  assert.doesNotMatch(quantModelControl, /days\.slice\(0,\s*6\)/)
-  assert.match(precision, /\.qmc-backtest-history > summary/)
-  assert.match(precision, /\.qmc-backtest-days/)
 })
 
 test('做T使用独立居中弹窗而不是与策略日报共用右侧抽屉定位', () => {

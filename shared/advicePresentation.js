@@ -166,17 +166,6 @@ function coreEvidence(advice) {
 function modelSummary(advice) {
   const context = advice.quantContext
   if (!context || typeof context !== 'object') return null
-  const reliability = context.reliability || {}
-  const next30m = displayNumber(
-    reliability.balancedAccuracyPct?.next30m,
-  )
-  const sessionClose = displayNumber(
-    reliability.balancedAccuracyPct?.sessionClose,
-  )
-  const threshold = displayNumber(reliability.thresholdPct)
-  const reliabilityText = next30m || sessionClose || threshold
-    ? `30分钟 ${next30m || '—'}% · 收盘 ${sessionClose || '—'}% · 门槛 ${threshold || '—'}%`
-    : ''
   const next = context.nextTradeDayForecast
   const nextTradeDayText = next && typeof next === 'object'
     ? [
@@ -188,13 +177,10 @@ function modelSummary(advice) {
       ].join(' · ')
     : ''
   return {
-    label: clean(context.modelLabel, 120),
+    label: '36因子日线辅助模型',
     horizon: clean(context.horizon, 120),
     asOf: clean(context.inputAsOf || context.asOf, 40),
     ...(context.inputAsOf ? { asOfLabel: '输入截至' } : {}),
-    experimental: context.experimental === true,
-    fallback: context.fallback || null,
-    reliabilityText,
     ...(nextTradeDayText ? { nextTradeDayText } : {}),
   }
 }

@@ -271,13 +271,6 @@ function compactPromptList(value, limit = 4, maximum = 180) {
     .slice(0, limit)
 }
 
-function quantVersionLabel(value, fallback = '') {
-  const normalized = String(value || '').trim().toLowerCase()
-  if (normalized === 'v2.1') return 'V2.1'
-  if (normalized === 'v2' || normalized === 'v2.0') return 'V2.0'
-  return String(value || fallback)
-}
-
 function tacticalQuantRule(tactical = {}) {
   const quant = tactical.quant || {}
   const rules = []
@@ -289,28 +282,6 @@ function tacticalQuantRule(tactical = {}) {
           ? '，由已完成5分钟K聚合后运行'
           : ''
       ),
-    )
-  }
-  if (quant.v21) {
-    const reliability = quant.v21.reliability || {}
-    rules.push(
-      '当前为V2.1盘中双头模型，用户手动选择的实验模型；'
-      + `信号时间${quant.asOf || '未知'}，`
-      + `未来30分钟=${JSON.stringify(quant.v21.heads?.next30m || {})}，`
-      + `截至今日收盘=${JSON.stringify(quant.v21.heads?.sessionClose || {})}。`
-      + '不得与上一收盘日V2概率混用；离线平衡准确率'
-      + `未来30分钟${reliability.balancedAccuracyPct?.next30m ?? 53.92}%、`
-      + `截至收盘${reliability.balancedAccuracyPct?.sessionClose ?? 54.58}%，`
-      + `未达到${reliability.thresholdPct ?? 58}%生产门槛，`
-      + '不能单独推动交易，confidence最多为“中”',
-    )
-  }
-  if (quant.fallback) {
-    rules.push(
-      `用户选择了${quantVersionLabel(quant.fallback.from, 'V2.1')}，`
-      + `实际已回退${quantVersionLabel(quant.fallback.to, 'V2.0')}；`
-      + `原因=${quant.fallback.reason || '当前不可用'}。`
-      + '不得冒充盘中双头结果',
     )
   }
   if (
@@ -336,12 +307,10 @@ function tacticalQuantRule(tactical = {}) {
       + `区间${current.targetLow}~${current.targetHigh}`,
     )
   }
-  if (!quant.v21) {
-    rules.push(
-      '生产日线模型禁止把盘中支撑压力或实时执行价带冒充同日模型预测；'
-      + '只有明确标记的V2.1实验头可解释盘中剩余窗口',
-    )
-  }
+  rules.push(
+    '36因子日线辅助模型禁止把盘中支撑压力或实时执行价带冒充同日模型预测；'
+    + '交易动作、价格、手数和风险只服从服务端V3决策',
+  )
   return rules.length
     ? `【量化使用纪律】${rules.join('；')}`
     : ''
@@ -1341,14 +1310,9 @@ function genericPrompt(mode, payload, data, ragText) {
 输出真实TOP3方向，不得编造股票。JSON={"reasoning":"依据","marketMood":"大盘定调","topDirections":[{"rank":1,"direction":"方向","logic":"依据","representStocks":[{"name":"股票名","code":"代码"}],"strength":"强|中|弱"}],"strategy":"短线计划","topRisk":"风险"}`
   }
   if (mode === 'scan_pick') {
-    const model = payload.quantModelVersion === 'v2.1'
-      ? '分钟 Transformer V2.1（盘中实验）'
-      : payload.quantModelVersion === 'v2'
-        ? '分钟 Transformer V2'
-        : '当前生产模型'
     return `【AI选股请求】先选产业方向，再选真实成分股；比较国家战略、产业周期和公司质量代理分，再用资金与量化确认。不能把涨停、连板或短期热度作为主要入选理由。
 【候选数据】字段nextUpProb/nextExpRet/nextTargetLow~nextTargetHigh表示下一交易日预测。${data}
-【模型纪律】本次只使用${model}，不得混用默认模型、V2.0或V2.1分数。逐只核对候选实际运行版本和fallback；回退V2.0时不得把V2.0分数描述成V2.1盘中结果。
+【模型纪律】36因子日线模型仅作辅助证据；交易动作、价格、手数、账户风险与排序只服从服务端V3结果，不得由模型说明覆盖。
 【龙头纪律】conceptLeadership只接受服务端确定性结果，不得重新猜测或改写龙头身份；龙头身份不等于买点，仍须服从量化与entrySignal。
 【三队列】opportunityQueue是服务端确定性分层：IMMEDIATE=立即关注，PULLBACK=回踩候选，REJECTED=淘汰。不得改变服务端队列；REJECTED不得进入picks。entrySignal.passed=false不得升级为“可执行”，必须引用failedRules。没有IMMEDIATE时仍从PULLBACK保留1~3只条件候选。
 【输出】candidates 非空时 picks 必须给1~3只；noTrade=true只表示没有立即买点，不能清空条件候选。休市或盘前的结论面向下一交易日开盘。

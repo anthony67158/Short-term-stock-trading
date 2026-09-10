@@ -31,15 +31,15 @@ function snapshot(overrides = {}) {
       cashReservePct: 10,
     },
     quant: {
-      selectedModelVersion: 'v2.1',
-      runtimeModelVersion: 'v2',
+      selectedModelVersion: 'default',
+      runtimeModelVersion: 'default',
       asOf: '2026-08-13T02:29:00.000Z',
     },
     sourceVersion: {
       schema: 'canonical-evidence.v1',
       collector: 'ai-collector.v1',
       prompt: 'advisor.abc',
-      quant: 'v2',
+      quant: 'default',
       accountRevision: 8,
     },
     sources: {
@@ -96,7 +96,7 @@ test('确定性回放重建账户约束、T+1、市场和量化事实', () => {
   assert.equal(replay.constraints.totalPositionHigh, true)
   assert.equal(replay.constraints.stockConcentrated, true)
   assert.equal(replay.market.weak, true)
-  assert.equal(replay.quant.didFallback, true)
+  assert.equal(replay.quant.didFallback, false)
   assert.deepEqual(replay.quality.failedSources, ['news'])
   assert.match(replay.fingerprint, /^replay\./)
 })
@@ -134,7 +134,7 @@ test('差异引擎只报告白名单事实变化并标记高风险变化', () =>
     },
     quant: {
       ...snapshot().quant,
-      runtimeModelVersion: 'v2.1',
+      runtimeModelVersion: 'daily-aux-r2',
     },
     evidence: {
       ...snapshot().evidence,

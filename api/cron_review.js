@@ -138,7 +138,7 @@ export function buildReviewPayload(
     todayTrades: todayTradesOf(data, code, now),
     tradeHistory: tradeHistoryOf(data, code),
     knowledgeActionReview: latestKnowledgeActionReviewOf(data, code),
-    quantModelVersion: data.settings?.quantModelVersion || 'default',
+    quantModelVersion: 'default',
   }
 }
 
@@ -178,7 +178,6 @@ async function generateReview(payload) {
       runtimeBudgetMs: REVIEW_RUNTIME_BUDGET_MS,
     },
     timeoutMs: REVIEW_RUNTIME_BUDGET_MS + 30000,
-    trustedQuantVersion: payload.quantModelVersion,
     trustedAccount: true,
   })
   if (!response?.ok || !response.result) {

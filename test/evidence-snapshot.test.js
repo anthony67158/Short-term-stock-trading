@@ -47,8 +47,8 @@ const payload = {
     score: 72,
     bias: '偏多',
     asOf: '2026-08-13T02:30:00.000Z',
-    selectedModelVersion: 'v2',
-    runtimeModelVersion: 'v2.1-intraday',
+    selectedModelVersion: 'default',
+    runtimeModelVersion: '',
     forecast: { upProb: 61, expRet: 2.2, direction: '上涨' },
   },
   tech: { rsi: 58, maTrend: '多头' },
@@ -77,8 +77,8 @@ test('统一证据快照包含稳定版本、来源、账户与量化上下文',
   assert.equal(snapshot.security.code, '600001')
   assert.equal(snapshot.account.revision, 12)
   assert.equal(snapshot.account.sellableTodayQty, 2)
-  assert.equal(snapshot.quant.selectedModelVersion, 'v2')
-  assert.equal(snapshot.quant.runtimeModelVersion, 'v2.1-intraday')
+  assert.equal(snapshot.quant.selectedModelVersion, 'default')
+  assert.equal(snapshot.quant.runtimeModelVersion, null)
   assert.equal(snapshot.sourceVersion.prompt, 'advisor-test')
   assert.equal(snapshot.sources.quote.state, 'LIVE')
   assert.equal(snapshot.freshness.status, 'LIVE')
@@ -403,7 +403,7 @@ test('响应只在meta保存完整快照并给建议附轻量引用', () => {
   assert.equal(response.meta.evidenceSnapshot, snapshot)
   assert.equal(response.result.evidenceSnapshotRef.snapshotId, snapshot.snapshotId)
   assert.equal(response.result.evidenceSnapshotRef.accountRevision, 12)
-  assert.equal(response.result.evidenceSnapshotRef.quantModelVersion, 'v2.1-intraday')
+  assert.equal(response.result.evidenceSnapshotRef.quantModelVersion, 'default')
   assert.equal(response.result.evidenceSnapshot, undefined)
 })
 

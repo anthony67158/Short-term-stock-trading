@@ -133,46 +133,29 @@ test('军师明确写不加仓或赔率不足时不能创建加仓提醒', () =>
   }), false)
 })
 
-test('Judge上下文保留用户选择、实际运行模型与V2.1实验可靠性', () => {
+test('Judge上下文只保留日线辅助模型身份', () => {
   const context = buildJudgeAdviceContext({
     action: '小仓试错',
     quantContext: {
-      selectedModelVersion: 'v2.1',
-      effectiveModelVersion: 'v2.1',
-      runtimeModelVersion: 'v2.1-intraday',
-      modelLabel: '分钟 Transformer V2.1（盘中实验）',
+      selectedModelVersion: 'default',
+      effectiveModelVersion: 'default',
+      runtimeModelVersion: '',
+      modelLabel: '36因子日线辅助模型',
       horizon: '未来30分钟',
       asOf: '2026-08-12 10:30:00',
-      experimental: true,
-      fallback: null,
-      reliability: {
-        productionGatePassed: false,
-        thresholdPct: 58,
-        balancedAccuracyPct: {
-          next30m: 53.92,
-          sessionClose: 54.58,
-        },
-      },
     },
   })
 
   assert.deepEqual(context.quantContext, {
-    selectedModelVersion: 'v2.1',
-    effectiveModelVersion: 'v2.1',
-    runtimeModelVersion: 'v2.1-intraday',
-    modelLabel: '分钟 Transformer V2.1（盘中实验）',
+    selectedModelVersion: 'default',
+    effectiveModelVersion: 'default',
+    runtimeModelVersion: '',
+    modelLabel: '36因子日线辅助模型',
     horizon: '未来30分钟',
     asOf: '2026-08-12 10:30:00',
-    experimental: true,
+    experimental: false,
     fallback: null,
-    reliability: {
-      productionGatePassed: false,
-      thresholdPct: 58,
-      balancedAccuracyPct: {
-        next30m: 53.92,
-        sessionClose: 54.58,
-      },
-    },
+    reliability: null,
   })
 })
 

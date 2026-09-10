@@ -635,18 +635,13 @@ export default function AdvicePresentation({
               <DecisionPlanSummary plan={view.decisionPlan} />
               {view.model && (
                 <section
-                  className={
-                    'advice-model-context'
-                    + (view.model.experimental ? ' experimental' : '')
-                    + (view.model.fallback ? ' fallback' : '')
-                  }
+                  className="advice-model-context"
                   aria-label="本次量化模型"
                 >
                   <div className="amc-head">
                     <span>
                       <Icon name="activity" size={13} /> {view.model.label}
                     </span>
-                    {view.model.experimental && <b>实验</b>}
                   </div>
                   <div className="amc-meta">
                     {view.model.horizon && (
@@ -661,16 +656,6 @@ export default function AdvicePresentation({
                   {view.model.nextTradeDayText && (
                     <div className="amc-next">
                       {view.model.nextTradeDayText}
-                    </div>
-                  )}
-                  {view.model.reliabilityText && (
-                    <div className="amc-reliability">
-                      {view.model.reliabilityText}
-                    </div>
-                  )}
-                  {view.model.fallback && (
-                    <div className="amc-fallback">
-                      已回退 V2.0：{view.model.fallback.reason}
                     </div>
                   )}
                 </section>

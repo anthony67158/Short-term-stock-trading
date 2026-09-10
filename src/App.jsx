@@ -25,7 +25,6 @@ import {
 import { alertStore, useAlertStore } from './alertStore'
 import { useLLMConfigOpen } from './llmConfigStore'
 import { useQuantReportOpen } from './quantReportUiStore'
-import { useQuantModelStore } from './quantModelStore'
 import {
   aiSearchConfigStore,
   useAiSearchConfig,
@@ -85,7 +84,6 @@ const AIAssistant = lazyWithReload(() => import('./components/AIAssistant'), 'as
 const StockDetail = lazyWithReload(loadStockDetailComponent, 'stock-detail')
 const LLMConfig = lazyWithReload(() => import('./components/LLMConfig'), 'llm-config')
 const QuantReport = lazyWithReload(() => import('./components/QuantReport'), 'quant-report')
-const QuantModelControl = lazyWithReload(() => import('./components/QuantModelControl'), 'quant-model-control')
 const AISearchConfig = lazyWithReload(() => import('./components/AISearchConfig'), 'ai-search-config')
 const ICP_NUMBER = '沪ICP备2026040243号-1'
 const PUBLIC_SECURITY_NUMBER = '沪公网安备31011002008126号'
@@ -316,7 +314,6 @@ export function MainApp() {
   const { stock: detailStock } = useDetailStore()
   const llmConfigOpen = useLLMConfigOpen()
   const quantReportOpen = useQuantReportOpen()
-  const quantModelState = useQuantModelStore()
   const aiSearchConfig = useAiSearchConfig()
   const [pollingNow, setPollingNow] = useState(Date.now())
   useEffect(() => {
@@ -641,13 +638,6 @@ export function MainApp() {
         </ErrorBoundary>
       )}
 
-      {quantModelState.open && (
-        <ErrorBoundary label="量化模型配置">
-          <Suspense fallback={null}>
-            <QuantModelControl />
-          </Suspense>
-        </ErrorBoundary>
-      )}
       {aiSearchConfig.open && (
         <ErrorBoundary label="豆包联网搜索设置">
           <Suspense fallback={null}>

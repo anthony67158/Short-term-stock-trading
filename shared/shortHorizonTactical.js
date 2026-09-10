@@ -2,9 +2,6 @@ import {
   adviceObservationLevels,
   buildAdvicePriceContract,
 } from './advicePriceContract.js'
-import {
-  V21_EXPERIMENTAL_RELIABILITY,
-} from './modelVersion.js'
 
 export const SHORT_HORIZON_TACTICAL_VERSION =
   'short-horizon-tactical.v1'
@@ -470,8 +467,6 @@ function quantConfirmation(tactical = {}) {
     tactical.quant,
     tactical.quant?.nextTradeDay,
     tactical.quant?.currentTradingDay,
-    tactical.quant?.v21?.heads?.next30m,
-    tactical.quant?.v21?.heads?.sessionClose,
   ].filter(Boolean)
   let supportive = false
   let strong = false
@@ -1252,22 +1247,6 @@ export function buildShortHorizonTactical(
               payload.quant.currentTradingDayForecast.targetHigh,
               3,
             ),
-          }
-        : null,
-      v21: payload.quant?.v21
-        ? {
-            activeHead: text(payload.quant.v21.activeHead, 30),
-            session: text(payload.quant.v21.session, 30),
-            heads: payload.quant.v21.heads || null,
-            reliability: payload.quant.reliability
-              || V21_EXPERIMENTAL_RELIABILITY,
-          }
-        : null,
-      fallback: payload.quant?.fallback
-        ? {
-            from: text(payload.quant.fallback.from, 30),
-            to: text(payload.quant.fallback.to, 30),
-            reason: text(payload.quant.fallback.reason, 120),
           }
         : null,
     },

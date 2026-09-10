@@ -129,7 +129,7 @@ test('量化高把握信号映射到当前价格合同时计算计划期望', ()
     targetPrice: 12,
     quantityLots: 1,
     quant: {
-      selectedModelVersion: 'v2',
+      selectedModelVersion: 'default',
       highConfSignal: {
         fired: true,
         credibility: 70,

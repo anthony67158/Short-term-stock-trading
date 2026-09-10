@@ -50,14 +50,8 @@ resources:
         SEARXNG_BASE_URL: ${env('SEARXNG_BASE_URL')}
         QUANT_URL: ${env('QUANT_URL')}
         QUANT_KEY: ${env('QUANT_KEY')}
-        # ---- V2 分钟 Transformer（独立 EAS，可手动启停）----
-        V2_QUANT_URL: ${env('V2_QUANT_URL')}
-        V2_EAS_TOKEN: ${env('V2_EAS_TOKEN')}
-        V2_API_KEY: ${env('V2_API_KEY')}
         AUTHORIZED_ACCOUNT_HASHES: ${env('AUTHORIZED_ACCOUNT_HASHES')}
         RUNTIME_CONFIG_ADMIN_HASHES: ${env('RUNTIME_CONFIG_ADMIN_HASHES')}
-        V2_LAB_OSS_BUCKET: stock-quant-lab-1730034925594178
-        V2_LAB_OSS_ENDPOINT: https://oss-cn-hangzhou-internal.aliyuncs.com
         # ---- OSS 存储（替代 Vercel Blob）----
         OSS_REGION: ${env('OSS_REGION')}
         OSS_BUCKET: ${env('OSS_BUCKET')}
@@ -67,7 +61,7 @@ resources:
         OSS_ACCESS_KEY_ID: ${env('OSS_ACCESS_KEY_ID')}
         OSS_ACCESS_KEY_SECRET: ${env('OSS_ACCESS_KEY_SECRET')}
         # ---- FC Timer / 云端任务鉴权口令 ----
-        # Timer payload 与该值匹配后才允许进入 cron_advice / cron_alert / cron_v2_accuracy。
+        # Timer payload 与该值匹配后才允许进入内部定时任务。
         CRON_KEY: ${env('CRON_KEY')}
         # 新备案域名设备授权码的 HMAC 摘要；签名密钥复用 CRON_KEY，明文授权码不入库。
         SITE_ACCESS_CODE_HMAC: "lowdmv8a1a48u9Bdws4_vjCHZReAjhhBsEx0ndSChFc"
@@ -122,12 +116,6 @@ resources:
           triggerType: timer
           triggerConfig:
             cronExpression: "CRON_TZ=Asia/Shanghai 0 50,52 14 * * 1-5"
-            enable: true
-            payload: ${env('CRON_KEY')}
-        - triggerName: v2-accuracy-timer
-          triggerType: timer
-          triggerConfig:
-            cronExpression: "CRON_TZ=Asia/Shanghai 0 15 15 * * 1-5"
             enable: true
             payload: ${env('CRON_KEY')}
         # V3 机会样本：盘中两次+收盘一次完整市场扫描，形成三路径反事实账本。

@@ -1,13 +1,6 @@
 import { sendJson, sendError, num } from './_lib.js';
 import { computeTechnicals, fetchSelectedQuantPredict } from './_ta.js';
-import {
-  normalizeQuantModelVersion,
-  quantModelLabel,
-} from '../shared/modelVersion.js';
-import {
-  canUseQuantModel,
-  resolveQuantModelForRequest,
-} from './_quant_access.js';
+import { QUANT_MODEL_DEFAULT } from '../shared/modelVersion.js';
 import {
   fetchResilientStockFund,
 } from './_stock_fund.js';
@@ -331,18 +324,7 @@ export default async function handler(req, res) {
     const wantQuote = req.query.quote === '1';
     const wantQuant = req.query.quant === '1';
     const requestedAt = Date.now();
-    const quantModelVersion = wantQuant
-      ? await resolveQuantModelForRequest(req, req.query.model)
-      : normalizeQuantModelVersion(req.query.model);
-    if (
-      wantQuant
-      && !(await canUseQuantModel(req, quantModelVersion))
-    ) {
-      return sendJson(res, {
-        ok: false,
-        error: `${quantModelLabel(quantModelVersion)}需要已登录且当前账号已选择该版本`,
-      }, { cache: 0 });
-    }
+    const quantModelVersion = QUANT_MODEL_DEFAULT;
     const secid = toSecid(code);
 
     // 当日分时（trends2：f51时间,f53现价,f56量,f58均价）
@@ -439,7 +421,6 @@ export default async function handler(req, res) {
     // 量化预测（quant=1 时调用；把本地已取到的 K线传给量化服务，绕开其取数被风控）
     // 可选持仓：holdCost 传入则给"加/减/做T"建议，否则给"买/观望"建议
     let quant = null;
-    let quantError = '';
     if (wantQuant && candles.length >= 25) {
       const holdCost = Number(req.query.holdCost) || null;
       const hold = holdCost ? { cost: holdCost, qty: Number(req.query.holdQty) || null } : null;
@@ -451,23 +432,8 @@ export default async function handler(req, res) {
           hold,
           20000,
         )
-      } catch (error) {
-        quantError = String(error?.message || error || '')
-      }
+      } catch { /* 辅助预测失败不阻断详情 */ }
     }
-    if (
-      wantQuant
-      && quantModelVersion !== 'default'
-      && !quant
-    ) {
-      return sendJson(res, {
-        ok: false,
-        error: quantError
-          || `${quantModelLabel(quantModelVersion)}服务未运行或预测不可用`,
-        quantModelVersion,
-      }, { cache: 0 })
-    }
-
     // 缓存策略：带量化请求时，拿到 quant 才短缓存(60s)，没拿到不缓存(下次可重试冷启动后的服务)
     const cacheSec = wantQuant ? (quant ? 60 : 0) : (candles.length ? 120 : 0);
     sendJson(

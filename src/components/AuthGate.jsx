@@ -4,7 +4,6 @@ import BrandMark from './BrandMark'
 import { authStore, useAuthStore, hasLegacyData } from '../authStore'
 import { llmConfigStore } from '../llmConfigStore'
 import { quantReportUiStore } from '../quantReportUiStore'
-import { quantModelStore } from '../quantModelStore'
 import {
   aiSearchConfigStore,
   useAiSearchConfig,
@@ -194,9 +193,6 @@ export function AccountMenu() {
             <button type="button" role="menuitem" className="acct-item" onClick={() => { aiSearchConfigStore.open(); setOpen(false) }}>
               <Icon name="edit" size={13} />
               {searchConfig.hasKey ? '更换豆包 API Key' : '配置豆包 API Key'}
-            </button>
-            <button type="button" role="menuitem" className="acct-item" onClick={() => { quantModelStore.open(); setOpen(false) }}>
-              <Icon name="activity" size={13} />量化模型配置
             </button>
             <button type="button" role="menuitem" className="acct-item" onClick={() => { quantReportUiStore.open(); setOpen(false) }}>
               <Icon name="gauge" size={13} />量化汇报

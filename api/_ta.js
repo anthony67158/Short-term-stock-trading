@@ -1,17 +1,5 @@
 // ============================================================
-import {
-  deriveV2SessionExecutionReference,
-  fetchFiveMinuteBars,
-  fetchV2QuantPredict,
-  fetchV21QuantPredict,
-  selectV21IntradayBars,
-  v2ForecastHorizon,
-} from './_v2_quant.js';
-import {
-  normalizeQuantModelVersion,
-  QUANT_MODEL_V2,
-  QUANT_MODEL_V21,
-} from '../shared/modelVersion.js';
+import { fetchFiveMinuteBars } from './_minute_kline.js';
 import {
   backfillDailyCandlesFromMinuteBars,
 } from '../shared/advisorQuantInput.js';
@@ -451,7 +439,7 @@ export function mergeLatestMinuteSessionIntoDailyCandles(
 }
 
 export async function fetchSelectedQuantPredict(
-  version,
+  _version,
   code,
   candles,
   hold,
@@ -460,137 +448,54 @@ export async function fetchSelectedQuantPredict(
   {
     fetchBars = fetchFiveMinuteBars,
     fetchDefault = fetchQuantPredict,
-    fetchV2 = fetchV2QuantPredict,
-    fetchV21 = fetchV21QuantPredict,
     timeContext = marketTimeContext(),
     refreshDailyFromMinutes = false,
   } = {},
 ) {
-  const selectedVersion = normalizeQuantModelVersion(version)
-  if (selectedVersion === 'default') {
-    let prepared = {
-      candles,
-      inputAsOf: candles?.at(-1)?.date || null,
-      inputSource: 'daily-kline',
-      inputBarCount: 0,
-    }
-    if (refreshDailyFromMinutes) {
-      try {
-        const needsBackfill = !Array.isArray(candles)
-          || candles.length < 25
-        const bars = await fetchBars(code, {
-          timeoutMs: Math.min(timeoutMs, 2500),
-          limit: needsBackfill ? 1200 : 300,
-          completedWindowOnly: false,
-        })
-        prepared = needsBackfill
-          ? backfillDailyCandlesFromMinuteBars(
-              candles,
-              bars,
-              timeContext,
-            )
-          : mergeLatestMinuteSessionIntoDailyCandles(
-              candles,
-              bars,
-              timeContext,
-            )
-      } catch {
-        // 分钟源不可用时保留最新日K，生产模型仍可降级运行。
-      }
-    }
-    const prediction = await fetchDefault(
-      code,
-      prepared.candles,
-      hold,
-      timeoutMs,
-      realtime,
-    )
-    return prediction
-      ? {
-          ...prediction,
-          inputAsOf: prepared.inputAsOf || prediction.asOf || null,
-          inputSource: prepared.inputSource,
-          inputBarCount: prepared.inputBarCount,
-        }
-      : null
+  let prepared = {
+    candles,
+    inputAsOf: candles?.at(-1)?.date || null,
+    inputSource: 'daily-kline',
+    inputBarCount: 0,
   }
-  const bars = await fetchBars(code, {
-    timeoutMs: Math.min(timeoutMs, 6000),
-    limit: 300,
-    completedWindowOnly: false,
-  })
-  let v21FallbackReason = ''
-  if (selectedVersion === QUANT_MODEL_V21) {
-    const v21Bars = selectV21IntradayBars(bars, timeContext)
-    if (v21Bars.length) {
-      try {
-        const asOfHm = String(v21Bars.at(-1)?.tradeTime || '').slice(11, 16)
-        const prediction = await fetchV21(code, {
-          bars: v21Bars,
-          price: realtime?.price ?? candles?.at(-1)?.close ?? null,
-          activeHead: asOfHm >= '14:30' ? 'sessionClose' : 'next30m',
-          timeoutMs,
-        })
-        if (prediction) {
-          return {
-            ...prediction,
-            selectedModelVersion: QUANT_MODEL_V21,
-          }
-        }
-        v21FallbackReason = 'V2.1盘中模型未返回结果'
-      } catch (error) {
-        v21FallbackReason = String(error?.message || 'V2.1盘中模型不可用')
-      }
-    } else {
-      v21FallbackReason = '当前时段不在V2.1支持的盘中预测窗口'
+  if (refreshDailyFromMinutes) {
+    try {
+      const needsBackfill = !Array.isArray(candles)
+        || candles.length < 25
+      const bars = await fetchBars(code, {
+        timeoutMs: Math.min(timeoutMs, 2500),
+        limit: needsBackfill ? 1200 : 300,
+        completedWindowOnly: false,
+      })
+      prepared = needsBackfill
+        ? backfillDailyCandlesFromMinuteBars(
+            candles,
+            bars,
+            timeContext,
+          )
+        : mergeLatestMinuteSessionIntoDailyCandles(
+            candles,
+            bars,
+            timeContext,
+          )
+    } catch {
+      // 分钟源不可用时保留最新日K，辅助模型仍可降级运行。
     }
   }
-  const prediction = await fetchV2(code, {
-    bars,
-    price: realtime?.price ?? candles?.at(-1)?.close ?? null,
+  const prediction = await fetchDefault(
+    code,
+    prepared.candles,
+    hold,
     timeoutMs,
-  })
-  if (!prediction) {
-    throw new Error('V2模型服务未运行或预测不可用')
-  }
-  const horizon = v2ForecastHorizon(timeContext, prediction.asOf)
-  const executionReference = horizon.startsWith('下一交易日')
-    ? null
-    : deriveV2SessionExecutionReference(
-        bars,
-        prediction,
-        timeContext,
-      )
-  return {
-    ...prediction,
-    selectedModelVersion: selectedVersion,
-    runtimeModelVersion: 'v2.0-daily',
-    forecast: {
-      ...(prediction.forecast || {}),
-      horizon,
-    },
-    reads: (prediction.reads || []).map((item, index) =>
-      index === 0
-        ? String(item).replace('下一交易日', horizon)
-        : item
-    ).concat(
-      selectedVersion === QUANT_MODEL_V21 && v21FallbackReason
-        ? [`V2.1已回退V2.0：${v21FallbackReason}`]
-        : [],
-    ),
-    ...(selectedVersion === QUANT_MODEL_V21 ? {
-      fallback: {
-        from: QUANT_MODEL_V21,
-        to: QUANT_MODEL_V2,
-        reason: v21FallbackReason || 'V2.1盘中模型不可用',
-      },
-    } : {}),
-    v2: {
-      ...(prediction.v2 || {}),
-      ...(selectedVersion === QUANT_MODEL_V21 && v21FallbackReason
-        ? { v21FallbackReason }
-        : {}),
-      ...(executionReference ? { executionReference } : {}),
-    },
-  }
+    realtime,
+  )
+  return prediction
+    ? {
+        ...prediction,
+        selectedModelVersion: 'default',
+        inputAsOf: prepared.inputAsOf || prediction.asOf || null,
+        inputSource: prepared.inputSource,
+        inputBarCount: prepared.inputBarCount,
+      }
+    : null
 }

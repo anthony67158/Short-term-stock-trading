@@ -162,7 +162,7 @@ def forecast_outputs(
     }
 
 
-def forecast_availability(realtime=None, current_trading_day=False):
+def forecast_availability(current_trading_day=False):
     """Declare boundaries so daily outputs cannot masquerade as intraday."""
     return {
         "nextTradeDay": True,
@@ -170,11 +170,7 @@ def forecast_availability(realtime=None, current_trading_day=False):
         "currentSession": False,
         "currentSessionReason":
             "daily_model_has_no_intraday_remaining-session_label",
-        "currentSessionAlternative": (
-            "v2.1-intraday"
-            if isinstance(realtime, dict) and realtime.get("live")
-            else None
-        ),
+        "currentSessionAlternative": None,
     }
 
 
@@ -443,7 +439,6 @@ def predict(payload: dict = Body(...), x_api_key: str = Header(default="")):
             "nextTradeDayForecast": next_fc,
             "currentTradingDayForecast": current_fc,
             "forecastAvailability": forecast_availability(
-                payload.get("realtime"),
                 current_trading_day=current_fc is not None,
             ),
             "decision": dec, "reads": reads,

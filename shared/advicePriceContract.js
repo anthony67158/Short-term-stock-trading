@@ -74,7 +74,6 @@ function collectAnchors(payload = {}) {
   const forecast = quant.forecast || {}
   const next = quant.nextTradeDayForecast || {}
   const highConfidence = quant.highConfSignal || {}
-  const references = quant.v2?.priceReferences || {}
   const anchors = []
   const all = [
     'entry', 'add', 'reduce', 'stop', 'target',
@@ -120,12 +119,6 @@ function collectAnchors(payload = {}) {
     pushAnchor(anchors, `${prefix}.targetMid`, item.targetMid, upper)
     pushAnchor(anchors, `${prefix}.targetHigh`, item.targetHigh, upper)
   }
-  pushAnchor(anchors, 'quant.v2.referenceBuyZoneLow', references.referenceBuyZoneLow, lower)
-  pushAnchor(anchors, 'quant.v2.referenceBuyZoneHigh', references.referenceBuyZoneHigh, lower)
-  pushAnchor(anchors, 'quant.v2.supportPrice', references.supportPrice, lower)
-  pushAnchor(anchors, 'quant.v2.resistancePrice', references.resistancePrice, upper)
-  pushAnchor(anchors, 'quant.v2.takeProfit', references.indicativeTakeProfitPrice, ['reduce', 'target'])
-  pushAnchor(anchors, 'quant.v2.stopLoss', references.indicativeStopLossPrice, ['stop'])
   return anchors
 }
 

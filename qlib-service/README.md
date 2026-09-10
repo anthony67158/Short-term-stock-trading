@@ -10,6 +10,9 @@ https://quant-score-nlxgclpdbu.cn-hangzhou.fcapp.run
 服务基于 FastAPI、LightGBM 和 GARCH，提供量化评分、走势预测、模型信息与
 健康检查。模型优先从部署包加载，并按小时从阿里云 OSS 热更新。
 
+交易决策只由 V3 机会模型产生。36 维 `/predict` 仅提供日线辅助证据；
+Transformer V2/V2.1、独立 EAS 推理和对应训练管线已下线。
+
 独立的 `POST /opportunity-score` 承载机会动作价值评分。按用户要求，当前模型
 以 `usagePolicy=DIRECT` 直接用于决策，不以影子资格或晋级结果为前提。
 分布外只提示，不关闭预测。文件、特征合同或预测数值异常仍如实报错，

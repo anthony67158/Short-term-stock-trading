@@ -111,7 +111,6 @@ import { sendPush } from './_push_send.js';
 import {
   buildTerminalReviewNotification,
 } from '../shared/alertNotification.js';
-import { TRUSTED_QUANT_VERSION } from './_quant_access.js';
 import {
   authorizePaidRequest,
   TRUSTED_ACCOUNT_REQUEST,
@@ -555,7 +554,6 @@ export function invoke(handler, {
   body = null,
   signal,
   timeoutMs = 595000,
-  trustedQuantVersion,
   trustedAccount = false,
 } = {}) {
   return new Promise((resolve) => {
@@ -600,9 +598,6 @@ export function invoke(handler, {
       headers: internalRequestHeaders(),
       signal: requestController.signal,
     };
-    if (trustedQuantVersion) {
-      req[TRUSTED_QUANT_VERSION] = trustedQuantVersion;
-    }
     if (trustedAccount) req[TRUSTED_ACCOUNT_REQUEST] = true;
     const abortAndFinish = () => {
       requestController.abort();
@@ -632,7 +627,6 @@ export function invokeSSE(handler, {
   onEvent,
   timeoutMs = 135000,
   signal,
-  trustedQuantVersion,
   trustedAccount = false,
 } = {}) {
   return new Promise((resolve) => {
@@ -684,9 +678,6 @@ export function invokeSSE(handler, {
       headers: internalRequestHeaders(),
       signal: requestController.signal,
     };
-    if (trustedQuantVersion) {
-      req[TRUSTED_QUANT_VERSION] = trustedQuantVersion;
-    }
     if (trustedAccount) req[TRUSTED_ACCOUNT_REQUEST] = true;
     timer = setTimeout(() => {
       requestController.abort();
@@ -1129,7 +1120,6 @@ async function genOne({
     },
     timeoutMs: generation.timeoutMs,
     signal,
-    trustedQuantVersion: payload.quantModelVersion,
     trustedAccount: true,
     onEvent(event, data) {
       if (event === 'reasoning' && data?.text) streamedReasoning += String(data.text);

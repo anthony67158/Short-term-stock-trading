@@ -304,7 +304,7 @@ test('策略日报失败只降级证据且不阻断军师任务', () => {
 
 test('军师载荷直接携带闸门确认的日报摘要', () => {
   const payload = attachAdviceDailyReport(
-    { code: '600000', quantModelVersion: 'v2' },
+    { code: '600000', quantModelVersion: 'default' },
     SUMMARY,
     NOW,
   )

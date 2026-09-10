@@ -29,7 +29,6 @@ import {
   sectorForecastTimerBody,
   tailPickTimerBody,
   tailPickWorkerBody,
-  v2AccuracyTimerBody,
 } from './api/_advice_timer.js';
 import {
   PROTECTED_SITE_HOST,
@@ -346,7 +345,6 @@ async function handleRequest(req, res) {
       event,
       process.env.CRON_KEY,
     ) || dailyReportWorkerBody(event, process.env.CRON_KEY);
-    const v2Body = v2AccuracyTimerBody(event, process.env.CRON_KEY);
     const opportunityRadarBody = opportunityRadarTimerBody(
       event,
       process.env.CRON_KEY,
@@ -376,7 +374,6 @@ async function handleRequest(req, res) {
     if (
       !adviceBody
       && !dailyReportBody
-      && !v2Body
       && !opportunityRadarBody
       && !preCatalystBody
       && !alertBody
@@ -389,7 +386,6 @@ async function handleRequest(req, res) {
     req.query = {};
     req.body = adviceBody
       || dailyReportBody
-      || v2Body
       || opportunityRadarBody
       || preCatalystBody
       || alertBody
@@ -407,12 +403,10 @@ async function handleRequest(req, res) {
         ? 'cron_advice'
         : dailyReportBody
           ? 'cron_daily_report'
-          : v2Body
-            ? 'cron_v2_accuracy'
-            : opportunityRadarBody
-              ? 'cron_opportunity_radar'
-              : preCatalystBody
-                ? 'pre_catalyst'
+          : opportunityRadarBody
+            ? 'cron_opportunity_radar'
+            : preCatalystBody
+              ? 'pre_catalyst'
               : alertBody
                 ? 'cron_alert'
                 : reviewBody

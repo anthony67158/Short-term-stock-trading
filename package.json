@@ -39,7 +39,6 @@
     "backtest": "node backtest/run.mjs"
   },
   "dependencies": {
-    "@alicloud/eas20210701": "^7.9.0",
     "@alicloud/fc20230330": "^4.7.9",
     "@alicloud/openapi-core": "^1.0.8",
     "@fontsource-variable/jetbrains-mono": "^5.3.0",

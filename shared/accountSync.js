@@ -122,8 +122,7 @@ export function adviceGenerationStateFingerprint(data = {}) {
     closed: comparableClosed(data.closed),
     account: data.account || null,
     executionPlans: data.executionPlans || [],
-    quantModelVersion:
-      data.settings?.quantModelVersion || 'default',
+    quantModelVersion: 'default',
   }))
 }
 

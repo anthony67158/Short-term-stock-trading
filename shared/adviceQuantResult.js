@@ -127,13 +127,8 @@ export function normalizeReusableQuantEvidence(value) {
           : null
       ),
     ),
-    reliability: compact(value.reliability),
     reads: compact(value.reads),
     eventTag: compact(value.eventTag),
-    v2: compact(value.v2),
-    v21: compact(value.v21),
-    fallback: compact(value.fallback),
-    experimental: value.experimental === true,
   }
 }
 
