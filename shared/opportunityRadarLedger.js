@@ -131,6 +131,20 @@ function shadowProjection(value = {}) {
   )
 }
 
+function recallProjection(value = {}) {
+  const source = value && typeof value === 'object' ? value : {}
+  return {
+    primarySource: text(source.primarySource, 30) || 'UNKNOWN',
+    sources: uniqueText(source.sources, 6),
+    momentumPct: finite(source.momentumPct),
+    accumulationPct: finite(source.accumulationPct),
+    reversalPct: finite(source.reversalPct),
+    liquidityPct: finite(source.liquidityPct),
+    cheapScorePct: finite(source.cheapScorePct),
+    exploration: source.exploration === true,
+  }
+}
+
 function eventProjection(value, context) {
   const code = text(value?.code, 6)
   if (!/^\d{6}$/.test(code)) {
@@ -163,6 +177,7 @@ function eventProjection(value, context) {
     ),
     quote: quoteProjection(value?.quote),
     cheapScore: finite(value?.cheapScore),
+    recall: recallProjection(value?.recall),
     shadowFeatures: shadowProjection(value?.shadowFeatures),
     formulaEvaluations: (
       Array.isArray(value?.formulaEvaluations)

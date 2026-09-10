@@ -11,6 +11,10 @@ export const OPPORTUNITY_SHADOW_FEATURE_NAMES = Object.freeze([
   'flowDivergence',
   'sectorRelativeStrength',
   'sectorRankPct',
+  'sectorMainNetYi',
+  'sectorBreadthPct',
+  'sectorMemberCount',
+  'sectorFlowRankPct',
   'limitUpDistancePct',
   'limitHitCount5d',
   'failedLimitCount5d',
@@ -147,6 +151,25 @@ export function buildOpportunityShadowFeatures({
     ?? sector.rank
     ?? sector.nextRank,
   )
+  const sectorMainNetYi = finite(
+    sector.mainNetYi
+    ?? sector.netAmount
+    ?? sector.mainInflow,
+  ) ?? 0
+  const sectorBreadthPct = finite(
+    sector.breadthPct
+    ?? sector.breadth?.inflowPct
+    ?? sector.breadth,
+  ) ?? 0
+  const sectorMemberCount = finite(
+    sector.memberCount
+    ?? sector.companyNum
+    ?? sector.breadth?.total,
+  ) ?? 0
+  const sectorFlowRank = finite(
+    sector.flowRank
+    ?? sector.rank,
+  )
   const amount = Math.max(0, finite(quote.amount) ?? 0)
   const turnover = Math.max(0, finite(quote.turnover) ?? 0)
   const volumeRatio = Math.max(0, finite(quote.volumeRatio) ?? 0)
@@ -212,6 +235,12 @@ export function buildOpportunityShadowFeatures({
     sectorRankPct: sectorRank == null
       ? 0
       : clamp(1 - (sectorRank - 1) / 20, 0, 1),
+    sectorMainNetYi,
+    sectorBreadthPct,
+    sectorMemberCount,
+    sectorFlowRankPct: sectorFlowRank == null
+      ? 0
+      : clamp(1 - (sectorFlowRank - 1) / 30, 0, 1),
     limitUpDistancePct,
     limitHitCount5d: limits.hits,
     failedLimitCount5d: limits.failed,

@@ -94,16 +94,26 @@ test('深度探索样本按交易日轮换而不是永久固定低代码', () =>
       mainRatio: 1,
     })
   )
-  const first = selectAdaptiveDeepCandidates(rowsFor('2026-09-08'), {
+  const firstRows = selectAdaptiveDeepCandidates(rowsFor('2026-09-08'), {
     expectedTradeDate: '2026-09-08',
     limit: 8,
-  }).map((item) => item.quote.code)
+  })
+  const first = firstRows.map((item) => item.quote.code)
   const second = selectAdaptiveDeepCandidates(rowsFor('2026-09-09'), {
     expectedTradeDate: '2026-09-09',
     limit: 8,
   }).map((item) => item.quote.code)
 
   assert.notDeepEqual(first, second)
+  assert.ok(firstRows.every((item) =>
+    item.recall.cheapScorePct >= 0
+    && item.recall.cheapScorePct <= 1
+    && item.recall.sources.length >= 1
+  ))
+  assert.ok(firstRows.some((item) =>
+    item.recall.primarySource === 'EXPLORATION'
+    && item.recall.exploration === true
+  ))
 })
 
 test('公式价位不会向界面泄露上游HTTP 501', () => {
@@ -178,6 +188,9 @@ test('市场扫描从完整股票池生成最多五个带唯一价位的观察�
   )
   assert.ok(
     result.candidateEvents[0].shadowFeatures.evidenceCompleteness > 0,
+  )
+  assert.ok(
+    result.candidateEvents[0].recall.sources.length >= 1,
   )
   assert.deepEqual(
     [...new Set(progress.map((item) => item.stage))],
@@ -669,7 +682,7 @@ test('公式结果使用生产V3评分并按动作价值调整候选顺序', asy
   )
   assert.equal(
     savedLedger.events[0].scoreInput.schemaVersion,
-    'opportunity-score-feature.v3',
+    'opportunity-score-feature.v4',
   )
   assert.deepEqual(result.v3Scoring, {
     usagePolicy: 'DIRECT',

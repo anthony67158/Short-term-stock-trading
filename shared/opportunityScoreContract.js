@@ -3,7 +3,7 @@ import {
 } from './opportunityShadowFeatures.js'
 
 export const OPPORTUNITY_SCORE_FEATURE_SCHEMA_VERSION =
-  'opportunity-score-feature.v3'
+  'opportunity-score-feature.v4'
 export const OPPORTUNITY_SCORE_SCHEMA_VERSION =
   'opportunity-score.v1'
 
@@ -62,6 +62,14 @@ const CATEGORIES = Object.freeze({
     'CLOSE_NEXT_SESSION',
   ],
   liquidity: ['HIGH', 'GOOD', 'LIMITED', 'THIN', 'UNKNOWN'],
+  recall: [
+    'MOMENTUM',
+    'ACCUMULATION',
+    'REVERSAL',
+    'LIQUIDITY',
+    'EXPLORATION',
+    'UNKNOWN',
+  ],
 })
 
 const NUMERIC_FEATURES = Object.freeze([
@@ -79,6 +87,13 @@ const NUMERIC_FEATURES = Object.freeze([
   'marketAllowed',
   'playbookScore',
   'marketOpportunityFactor',
+  'cheapScorePct',
+  'recallMomentumPct',
+  'recallAccumulationPct',
+  'recallReversalPct',
+  'recallLiquidityPct',
+  'recallSourceCount',
+  'explorationSample',
   ...OPPORTUNITY_SHADOW_FEATURE_NAMES,
 ])
 
@@ -165,6 +180,12 @@ export function buildOpportunityScoreInput({
       ? event.formulaEvaluations
       : []
   ).find((item) => item?.formulaId === formulaId)
+  const bestFormulaScore = (Array.isArray(event.formulaEvaluations)
+    ? event.formulaEvaluations
+    : [])
+    .map((item) => finite(item?.score))
+    .filter((value) => value != null)
+    .sort((left, right) => right - left)[0]
   const quote = event.quote || {}
   const decision = event.decision || {}
   const marketGate = batch.marketGate
@@ -204,10 +225,16 @@ export function buildOpportunityScoreInput({
     ),
     time: timeBucket(mode, batch.slot),
     liquidity: liquidityBucket(quote.amount),
+    recall: category(
+      event.recall?.primarySource,
+      CATEGORIES.recall,
+    ),
   }
   const factors = {
     cheapScore: rounded(event.cheapScore),
-    formulaScore: rounded(formulaEvaluation?.score),
+    formulaScore: rounded(
+      formulaEvaluation?.score ?? bestFormulaScore,
+    ),
     quotePct: rounded(quote.pct),
     logAmount: rounded(
       finite(quote.amount) >= 0 ? Math.log1p(Number(quote.amount)) : 0,
@@ -233,6 +260,18 @@ export function buildOpportunityScoreInput({
     playbookScore: rounded(decision.playbookScore),
     marketOpportunityFactor:
       rounded(decision.marketOpportunityFactor),
+    cheapScorePct: rounded(event.recall?.cheapScorePct),
+    recallMomentumPct: rounded(event.recall?.momentumPct),
+    recallAccumulationPct: rounded(event.recall?.accumulationPct),
+    recallReversalPct: rounded(event.recall?.reversalPct),
+    recallLiquidityPct: rounded(event.recall?.liquidityPct),
+    recallSourceCount: Math.max(
+      0,
+      (Array.isArray(event.recall?.sources)
+        ? event.recall.sources
+        : []).length,
+    ),
+    explorationSample: event.recall?.exploration === true ? 1 : 0,
     ret2dPct: rounded(shadow.ret2dPct),
     ret5dPct: rounded(shadow.ret5dPct),
     openGapPct: rounded(shadow.openGapPct),
@@ -245,6 +284,10 @@ export function buildOpportunityScoreInput({
     flowDivergence: rounded(shadow.flowDivergence),
     sectorRelativeStrength: rounded(shadow.sectorRelativeStrength),
     sectorRankPct: rounded(shadow.sectorRankPct),
+    sectorMainNetYi: rounded(shadow.sectorMainNetYi),
+    sectorBreadthPct: rounded(shadow.sectorBreadthPct),
+    sectorMemberCount: rounded(shadow.sectorMemberCount),
+    sectorFlowRankPct: rounded(shadow.sectorFlowRankPct),
     limitUpDistancePct: rounded(shadow.limitUpDistancePct),
     limitHitCount5d: rounded(shadow.limitHitCount5d),
     failedLimitCount5d: rounded(shadow.failedLimitCount5d),
@@ -283,6 +326,7 @@ export function buildOpportunityScoreInput({
       sectorActionability: selected.sectorAction,
       timeBucket: selected.time,
       liquidityBucket: selected.liquidity,
+      recallSource: selected.recall,
       displayed: event.stageReached === 'DISPLAYED',
     },
   }

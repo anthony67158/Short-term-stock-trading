@@ -14,6 +14,7 @@ from opportunity_contract import (  # noqa: E402
     FEATURE_SCHEMA_VERSION,
     SCORE_SCHEMA_VERSION,
     feature_vector,
+    feature_names_for_schema,
     not_ready_prediction,
     validate_score_request,
 )
@@ -80,6 +81,37 @@ class OpportunityContractTest(unittest.TestCase):
             FEATURE_SCHEMA_VERSION,
         )
         for name in manifest["legacyDefaultZeroFeatures"]:
+            self.assertEqual(normalized["factors"][name], 0.0)
+
+    def test_legacy_v3_inputs_only_fill_v4_features_with_zero(self):
+        with open(
+            os.path.join(
+                SERVICE_ROOT,
+                "contracts",
+                "opportunity-score-features.json",
+            ),
+            encoding="utf-8",
+        ) as handle:
+            manifest = json.load(handle)
+        defaults = manifest["legacyDefaultsByVersion"][
+            "opportunity-score-feature.v3"
+        ]
+        legacy = item()
+        legacy["schemaVersion"] = "opportunity-score-feature.v3"
+        for name in defaults:
+            del legacy["factors"][name]
+
+        normalized = validate_score_request({"items": [legacy]})[0]
+
+        self.assertEqual(
+            tuple(legacy["factors"]),
+            feature_names_for_schema("opportunity-score-feature.v3"),
+        )
+        self.assertEqual(
+            normalized["sourceSchemaVersion"],
+            "opportunity-score-feature.v3",
+        )
+        for name in defaults:
             self.assertEqual(normalized["factors"][name], 0.0)
 
     def test_request_caps_batch_and_validates_identity(self):

@@ -15,9 +15,11 @@ import opportunity_model  # noqa: E402
 from opportunity_contract import (  # noqa: E402
     FEATURE_NAMES,
     FEATURE_SCHEMA_VERSION,
+    feature_names_for_schema,
 )
 from opportunity_model import (  # noqa: E402
     predict_opportunity_items,
+    validate_opportunity_metadata,
     validate_opportunity_manifest,
 )
 
@@ -150,9 +152,38 @@ class OpportunityModelTest(unittest.TestCase):
         )
         self.assertEqual(result["calibration"]["sampleCount"], 300)
 
+    def test_v4_request_can_use_loaded_v3_model_during_cutover(self):
+        metadata = meta()
+        legacy_names = feature_names_for_schema(
+            "opportunity-score-feature.v3",
+        )
+        metadata.update({
+            "featureSchemaVersion": "opportunity-score-feature.v3",
+            "featureNames": list(legacy_names),
+            "ood": {
+                "minimum": [-1.0] * len(legacy_names),
+                "maximum": [2.0] * len(legacy_names),
+                "maximumViolationFraction": 0.1,
+            },
+        })
+
+        validate_opportunity_metadata(metadata)
+        result = predict_opportunity_items(
+            {"items": [item()]},
+            models={
+                "pFill": FakeModel(0.7),
+                "pWinGivenFill": FakeModel(0.6),
+                "expectedNetR": FakeModel(0.2),
+            },
+            metadata=metadata,
+        )[0]
+
+        self.assertEqual(result["state"], "READY")
+        self.assertAlmostEqual(result["expectedNetR"], 0.2)
+
     def test_out_of_distribution_is_diagnostic_without_blocking_direct_use(self):
         value = item()
-        for name in FEATURE_NAMES[:10]:
+        for name in FEATURE_NAMES[:12]:
             value["factors"][name] = 100.0
 
         result = predict_opportunity_items(

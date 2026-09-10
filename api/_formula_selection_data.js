@@ -148,10 +148,79 @@ function cheapRank(quote, mode) {
   return amountScore + flowScore + ratioScore + positionScore
 }
 
+function assignPercentiles(items, key, score) {
+  const ranked = items
+    .map((item) => ({ item, value: Number(score(item)) || 0 }))
+    .sort((left, right) =>
+      left.value - right.value
+      || String(left.item.quote.code).localeCompare(
+        String(right.item.quote.code),
+      )
+    )
+  const denominator = Math.max(1, ranked.length - 1)
+  let cursor = 0
+  while (cursor < ranked.length) {
+    let end = cursor + 1
+    while (end < ranked.length && ranked[end].value === ranked[cursor].value) {
+      end += 1
+    }
+    const percentile = ranked.length === 1
+      ? 1
+      : ((cursor + end - 1) / 2) / denominator
+    for (let index = cursor; index < end; index += 1) {
+      ranked[index].item.recall[key] = +percentile.toFixed(6)
+    }
+    cursor = end
+  }
+}
+
+function withRecallMetadata(items, mode) {
+  const values = items.map((item) => ({
+    ...item,
+    recall: {
+      primarySource: 'UNKNOWN',
+      sources: [],
+      momentumPct: 0,
+      accumulationPct: 0,
+      reversalPct: 0,
+      liquidityPct: 0,
+      cheapScorePct: 0,
+      exploration: false,
+    },
+  }))
+  assignPercentiles(values, 'momentumPct', (item) =>
+    Number(item.quote.pct || 0) * 2
+    + Math.log1p(Math.max(0, Number(item.quote.amount || 0))) / 4
+  )
+  assignPercentiles(values, 'accumulationPct', (item) =>
+    Number(item.quote.mainRatio || 0)
+    - Math.abs(Number(item.quote.pct || 0)) * 0.8
+    + Number(item.quote.volumeRatio || 0)
+  )
+  assignPercentiles(values, 'reversalPct', (item) =>
+    -Number(item.quote.pct || 0) * 2
+    + Math.log1p(Math.max(0, Number(item.quote.amount || 0))) / 5
+  )
+  assignPercentiles(values, 'liquidityPct', (item) =>
+    Math.log1p(Math.max(0, Number(item.quote.amount || 0)))
+    + Math.min(12, Number(item.quote.turnover || 0)) / 3
+  )
+  assignPercentiles(values, 'cheapScorePct', (item) =>
+    cheapRank(item.quote, mode)
+  )
+  return values
+}
+
 function rankedUnique(groups, limit) {
   const selected = new Map()
-  for (const group of groups) {
-    for (const item of group) {
+  for (const { source, items } of groups) {
+    for (const item of items) {
+      if (!item.recall.sources.includes(source)) {
+        item.recall.sources.push(source)
+      }
+      if (item.recall.primarySource === 'UNKNOWN') {
+        item.recall.primarySource = source
+      }
       if (selected.size >= limit) break
       if (!selected.has(item.quote.code)) {
         selected.set(item.quote.code, item)
@@ -184,26 +253,32 @@ export function selectAdaptiveDeepCandidates(
       quote,
       cheapScore: cheapRank(quote, mode),
     }))
+  const rankedEligible = withRecallMetadata(eligible, mode)
   const quota = Math.max(1, Math.floor(limit / 4))
-  const momentum = eligible.slice().sort((left, right) =>
+  const momentum = rankedEligible.slice().sort((left, right) =>
     Number(right.quote.pct || 0) - Number(left.quote.pct || 0)
     || Number(right.quote.amount || 0) - Number(left.quote.amount || 0)
   ).slice(0, quota)
-  const accumulation = eligible.slice().sort((left, right) =>
+  const accumulation = rankedEligible.slice().sort((left, right) =>
     Number(right.quote.mainRatio || 0) - Number(left.quote.mainRatio || 0)
     || Math.abs(Number(left.quote.pct || 0))
       - Math.abs(Number(right.quote.pct || 0))
   ).slice(0, quota)
-  const reversal = eligible.slice().sort((left, right) =>
+  const reversal = rankedEligible.slice().sort((left, right) =>
     Number(left.quote.pct || 0) - Number(right.quote.pct || 0)
     || Number(right.quote.amount || 0) - Number(left.quote.amount || 0)
   ).slice(0, quota)
-  const liquid = eligible.slice().sort((left, right) =>
+  const liquid = rankedEligible.slice().sort((left, right) =>
     Number(right.quote.amount || 0) - Number(left.quote.amount || 0)
     || right.cheapScore - left.cheapScore
   ).slice(0, quota)
   const firstPass = rankedUnique(
-    [momentum, accumulation, reversal, liquid],
+    [
+      { source: 'MOMENTUM', items: momentum },
+      { source: 'ACCUMULATION', items: accumulation },
+      { source: 'REVERSAL', items: reversal },
+      { source: 'LIQUIDITY', items: liquid },
+    ],
     limit,
   )
   if (firstPass.length >= limit) return firstPass
@@ -211,13 +286,22 @@ export function selectAdaptiveDeepCandidates(
   const explorationSeed = Number(
     String(expectedTradeDate).replace(/\D/g, ''),
   ) || 0
-  const exploration = eligible
+  const exploration = rankedEligible
     .filter((item) => !selectedCodes.has(item.quote.code))
     .sort((left, right) => {
       const leftHash = explorationRank(left.quote.code, explorationSeed)
       const rightHash = explorationRank(right.quote.code, explorationSeed)
       return leftHash - rightHash
     })
+    .map((item) => ({
+      ...item,
+      recall: {
+        ...item.recall,
+        primarySource: 'EXPLORATION',
+        sources: [...item.recall.sources, 'EXPLORATION'],
+        exploration: true,
+      },
+    }))
   return [...firstPass, ...exploration].slice(0, limit)
 }
 
@@ -230,13 +314,14 @@ function uniqueReasons(values = []) {
   )]
 }
 
-function candidateEvent(quote, cheapScore) {
+function candidateEvent(quote, cheapScore, recall = {}) {
   return {
     code: quote.code,
     name: quote.name,
     stageReached: 'PREFILTER',
     quote,
     cheapScore,
+    recall,
     formulaEvaluations: [],
     shadowFeatures: {},
     decision: null,
@@ -359,17 +444,28 @@ export async function scanFormulaSelectionCandidates({
   const eligibleQuotes = allQuotes.filter((quote) =>
     passesAdaptiveRealtimePrefilter(quote, expectedDate)
   )
+  const eligibleWithRecall = withRecallMetadata(
+    eligibleQuotes.map((quote) => ({
+      quote,
+      cheapScore: cheapRank(quote, normalizedMode),
+    })),
+    normalizedMode,
+  )
   const prefiltered = selectAdaptiveDeepCandidates(allQuotes, {
     mode: normalizedMode,
     expectedTradeDate: expectedDate,
     limit: 96,
   })
   const candidateEvents = new Map(
-    eligibleQuotes.map((quote) => [
-      String(quote.code),
-      candidateEvent(quote, cheapRank(quote, normalizedMode)),
+    eligibleWithRecall.map((item) => [
+      String(item.quote.code),
+      candidateEvent(item.quote, item.cheapScore, item.recall),
     ]),
   )
+  for (const item of prefiltered) {
+    const event = candidateEvents.get(String(item.quote.code))
+    if (event) event.recall = item.recall
+  }
   const selectedCodes = new Set(
     prefiltered.map((item) => String(item.quote.code)),
   )

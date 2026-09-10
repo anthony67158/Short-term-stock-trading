@@ -45,11 +45,25 @@ function event(overrides = {}) {
     }],
     shadowFeatures: {
       ret2dPct: 3.2,
+      sectorMainNetYi: 1.2,
+      sectorBreadthPct: 63,
+      sectorMemberCount: 42,
+      sectorFlowRankPct: 0.9,
       orderImbalanceShort: 46,
       overheatReversalRisk: 18,
       liquidityComposite: 72,
       signalOrderFlowContinuation: 1,
       signalLiquidityConfirmed: 1,
+    },
+    recall: {
+      primarySource: 'ACCUMULATION',
+      sources: ['ACCUMULATION', 'LIQUIDITY'],
+      momentumPct: 0.62,
+      accumulationPct: 0.94,
+      reversalPct: 0.18,
+      liquidityPct: 0.88,
+      cheapScorePct: 0.81,
+      exploration: false,
     },
     decision: {
       formulaId: 'INTRADAY_VWAP_PULLBACK',
@@ -102,6 +116,9 @@ test('机会评分特征只使用决策时点数据并保持固定顺序', () =>
   assert.equal(input.factors.cheapScore, 42)
   assert.equal(input.factors.formulaScore, 88)
   assert.equal(input.factors.marketAllowed, 1)
+  assert.equal(input.factors.recallAccumulationPct, 0.94)
+  assert.equal(input.factors.recallSourceCount, 2)
+  assert.equal(input.factors.explorationSample, 0)
   assert.equal(input.factors.ret2dPct, 3.2)
   assert.equal(input.factors.orderImbalanceShort, 46)
   assert.equal(input.factors.signalOrderFlowContinuation, 1)
@@ -113,6 +130,7 @@ test('机会评分特征只使用决策时点数据并保持固定顺序', () =>
   assert.equal(input.factors.formula_INTRADAY_VWAP_PULLBACK, 1)
   assert.equal(input.factors.market_STANDARD, 1)
   assert.equal(input.factors.sector_ACCUMULATION, 1)
+  assert.equal(input.factors.recall_ACCUMULATION, 1)
   assert.equal(input.factors.time_INTRADAY_OPEN, 1)
   assert.equal(input.factors.liquidity_HIGH, 1)
   assert.equal('netR' in input.factors, false)
@@ -124,6 +142,24 @@ test('机会评分特征只使用决策时点数据并保持固定顺序', () =>
       futureReturn: 9,
     },
   }), false)
+})
+
+test('未知公式保留最高接近度而不是把公式分清零', () => {
+  const input = buildOpportunityScoreInput({
+    event: event({
+      formulaEvaluations: [
+        { formulaId: 'INTRADAY_VWAP_PULLBACK', score: 40 },
+        { formulaId: 'INTRADAY_ACCUMULATION', score: 64 },
+      ],
+      decision: {
+        ...event().decision,
+        formulaId: 'UNKNOWN',
+      },
+    }),
+    batch: batch(),
+  })
+
+  assert.equal(input.factors.formulaScore, 64)
 })
 
 test('前后端机会评分特征清单与版本保持一致', () => {

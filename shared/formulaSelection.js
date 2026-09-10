@@ -210,11 +210,14 @@ function commonContext(input = {}) {
 }
 
 function result(formulaId, name, matched, score, input = {}) {
+  const blockers = (input.blockers || []).filter(Boolean)
   return {
     formulaId,
     name,
     matched,
-    score: matched ? score : 0,
+    score: matched
+      ? score
+      : Math.max(0, score - blockers.length * 12),
     validationState: 'OBSERVE_ONLY',
     action: matched ? 'WATCH_BUY' : 'AVOID',
     priceType: input.priceType || null,
@@ -226,7 +229,7 @@ function result(formulaId, name, matched, score, input = {}) {
       vwap: round(input.vwap),
     },
     evidence: (input.evidence || []).filter(Boolean).slice(0, 4),
-    blockers: (input.blockers || []).filter(Boolean),
+    blockers,
   }
 }
 

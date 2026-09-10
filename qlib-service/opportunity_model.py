@@ -12,9 +12,9 @@ import numpy as np
 from model_lib import _ensure_lightgbm_dense_imports, _oss_bucket
 from opportunity_contract import (
     FEATURE_NAMES,
-    FEATURE_SCHEMA_VERSION,
     SCORE_SCHEMA_VERSION,
     feature_vector,
+    feature_names_for_schema,
     not_ready_prediction,
     validate_score_request,
 )
@@ -83,11 +83,19 @@ def validate_opportunity_manifest(manifest):
 
 
 def validate_opportunity_metadata(metadata, model_version=None):
+    feature_schema_version = (
+        metadata.get("featureSchemaVersion")
+        if isinstance(metadata, dict)
+        else None
+    )
+    try:
+        expected_names = feature_names_for_schema(feature_schema_version)
+    except ValueError as error:
+        raise ValueError("机会模型元数据无效") from error
     if (
         not isinstance(metadata, dict)
         or metadata.get("schemaVersion") != SCORE_SCHEMA_VERSION
-        or metadata.get("featureSchemaVersion") != FEATURE_SCHEMA_VERSION
-        or tuple(metadata.get("featureNames") or ()) != FEATURE_NAMES
+        or tuple(metadata.get("featureNames") or ()) != expected_names
         or not str(metadata.get("modelVersion") or "")
     ):
         raise ValueError("机会模型元数据无效")
@@ -243,7 +251,8 @@ def _is_out_of_distribution(vector, metadata):
         return True
     span = np.maximum(maximum - minimum, 1e-6)
     tolerance = span * 0.05
-    for index, name in enumerate(FEATURE_NAMES):
+    feature_names = tuple(metadata.get("featureNames") or ())
+    for index, name in enumerate(feature_names):
         if (
             name.endswith("_UNKNOWN")
             and values[index] >= 0.5
@@ -293,8 +302,12 @@ def predict_opportunity_items(
         ]
     try:
         metadata = validate_opportunity_metadata(metadata)
+        model_feature_names = tuple(metadata["featureNames"])
         matrix = np.asarray(
-            [feature_vector(item) for item in items],
+            [
+                feature_vector(item, model_feature_names)
+                for item in items
+            ],
             dtype=np.float32,
         )
         raw_fill = np.clip(
