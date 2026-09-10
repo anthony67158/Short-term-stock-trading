@@ -396,20 +396,7 @@ def publish_market_days(bucket, artifacts, *, activated_at=None):
         ).encode("utf-8"),
         headers={"Cache-Control": "no-cache"},
     )
-    fund_history = publish_recent_fund_history(
-        bucket,
-        manifest,
-        generated_at=manifest["activatedAt"],
-    )
-    return {
-        "manifest": manifest,
-        "published": published,
-        "fundHistory": {
-            "key": FUND_HISTORY_KEY,
-            "dates": fund_history["dates"],
-            "stocks": len(fund_history["stocks"]),
-        },
-    }
+    return {"manifest": manifest, "published": published}
 
 
 def load_market_day(bucket, date):

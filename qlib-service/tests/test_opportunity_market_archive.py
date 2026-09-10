@@ -170,6 +170,7 @@ class OpportunityMarketArchiveTest(unittest.TestCase):
             latest_market_day_before(bucket, "20260910")["date"],
             "20260909",
         )
+        refreshed = refresh_recent_fund_history(bucket, generated_at=4000)
         fund_history = json.loads(bucket.values[FUND_HISTORY_KEY])
         self.assertEqual(
             fund_history["schemaVersion"],
@@ -190,7 +191,6 @@ class OpportunityMarketArchiveTest(unittest.TestCase):
         publish_market_days(bucket, [artifact("20260909")], activated_at=3000)
         objects = [key for key in bucket.values if key.endswith(".json.gz")]
         self.assertEqual(len(objects), 2)
-        refreshed = refresh_recent_fund_history(bucket, generated_at=4000)
         self.assertEqual(refreshed["generatedAt"], 4000)
         self.assertEqual(refreshed["dates"], ["20260909", "20260910"])
 
