@@ -79,6 +79,12 @@ class PublishModelRetrainReportTest(unittest.TestCase):
                 "top5MeanNetR": 0.336083,
                 "top5LowerBound": 0.104692,
             },
+            "folds": [{
+                "validationStartDate": "2026-07-28",
+                "validationEndDate": "2026-09-10",
+                "meanNetRAt5": -0.056952,
+                "netRLowerBound": -0.525318,
+            }],
             "decision": {
                 "eligible": False,
                 "reason": "最新独立窗口仍为负",
@@ -100,7 +106,11 @@ class PublishModelRetrainReportTest(unittest.TestCase):
             for value in report["details"]["metrics"]
         ))
         self.assertNotIn("净R下界未大于0", report["details"]["blockers"])
-        self.assertIn("最新独立窗口仍为负", report["details"]["blockers"])
+        self.assertIn(
+            "最新独立窗口（2026-07-28 至 2026-09-10）"
+            " Top5费后净R -0.057R，下置信界 -0.525R",
+            report["details"]["blockers"],
+        )
 
     def test_missing_report_and_not_ready_are_explicit(self):
         _, report = build_report("opportunity", env=ENV)

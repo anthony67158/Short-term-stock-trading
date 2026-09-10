@@ -21,6 +21,30 @@ def _number(value):
         return None
 
 
+def ensemble_window_blocker(ensemble):
+    folds = ensemble.get("folds") or []
+    latest = max(
+        (fold for fold in folds if isinstance(fold, dict)),
+        key=lambda fold: str(fold.get("validationEndDate") or ""),
+        default=None,
+    )
+    if not latest:
+        return "三种子集成仍有负收益独立窗口"
+    mean = _number(latest.get("meanNetRAt5"))
+    lower = _number(latest.get("netRLowerBound"))
+    if mean is None or lower is None:
+        return "三种子集成仍有负收益独立窗口"
+    period = " 至 ".join(filter(None, (
+        str(latest.get("validationStartDate") or ""),
+        str(latest.get("validationEndDate") or ""),
+    )))
+    prefix = f"最新独立窗口（{period}）" if period else "最新独立窗口"
+    return (
+        f"{prefix} Top5费后净R {mean:+.3f}R，"
+        f"下置信界 {lower:+.3f}R"
+    )
+
+
 def production_model_version(value):
     version = str(value or "").strip()
     if not version:
@@ -76,7 +100,7 @@ def promotion_decision(report, stability=None):
         (_number(fold.get("meanNetRAt5")) or 0) <= 0
         for fold in ensemble_folds
     ):
-        blockers.append("三种子集成仍有负收益独立窗口")
+        blockers.append(ensemble_window_blocker(ensemble))
     if challenger_net_r is None or baseline_net_r is None:
         blockers.append("Top5净R对照指标缺失")
     else:

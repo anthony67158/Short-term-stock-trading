@@ -46,6 +46,30 @@ def text(value):
     return str(value or "").strip()[:180]
 
 
+def ensemble_window_note(ensemble):
+    folds = ensemble.get("folds") or []
+    latest = max(
+        (fold for fold in folds if isinstance(fold, dict)),
+        key=lambda fold: str(fold.get("validationEndDate") or ""),
+        default=None,
+    )
+    if not latest:
+        return ""
+    mean = number(latest.get("meanNetRAt5"))
+    lower = number(latest.get("netRLowerBound"))
+    if mean is None or lower is None:
+        return ""
+    period = " 至 ".join(filter(None, (
+        text(latest.get("validationStartDate")),
+        text(latest.get("validationEndDate")),
+    )))
+    prefix = f"最新独立窗口（{period}）" if period else "最新独立窗口"
+    return (
+        f"{prefix} Top5费后净R {mean:+.3f}R，"
+        f"下置信界 {lower:+.3f}R"
+    )
+
+
 def metric_row(label, challenger, baseline=None, unit="number"):
     return {
         "label": label,
@@ -147,7 +171,8 @@ def opportunity_details(report, promotion, env):
         ])
     if ensemble and ensemble_decision.get("eligible") is not True:
         blockers.append(
-            text(ensemble_decision.get("reason"))
+            ensemble_window_note(ensemble)
+            or text(ensemble_decision.get("reason"))
             or "三种子集成仍存在未通过的独立窗口"
         )
     for head, label, key in (

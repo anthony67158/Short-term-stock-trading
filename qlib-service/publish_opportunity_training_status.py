@@ -23,6 +23,38 @@ def _count(value):
         return 0
 
 
+def _number(value):
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    return result if result == result and abs(result) != float("inf") else None
+
+
+def _ensemble_window_note(ensemble):
+    folds = ensemble.get("folds") or []
+    latest = max(
+        (fold for fold in folds if isinstance(fold, dict)),
+        key=lambda fold: str(fold.get("validationEndDate") or ""),
+        default=None,
+    )
+    if not latest:
+        return ""
+    mean = _number(latest.get("meanNetRAt5"))
+    lower = _number(latest.get("netRLowerBound"))
+    if mean is None or lower is None:
+        return ""
+    period = " 至 ".join(filter(None, (
+        str(latest.get("validationStartDate") or ""),
+        str(latest.get("validationEndDate") or ""),
+    )))
+    prefix = f"最新独立窗口（{period}）" if period else "最新独立窗口"
+    return (
+        f"{prefix} Top5费后净R {mean:+.3f}R，"
+        f"下置信界 {lower:+.3f}R"
+    )
+
+
 def _active_model(bucket, prefix):
     key = f"{str(prefix).strip('/')}/manifest.json"
     try:
@@ -53,7 +85,10 @@ def build_training_status(report, promotion=None, active_model=None):
     ensemble = report.get("seedEnsemble") or {}
     ensemble_decision = ensemble.get("decision") or {}
     if direct and ensemble:
-        reason = str(ensemble_decision.get("reason") or "").strip()
+        reason = (
+            _ensemble_window_note(ensemble)
+            or str(ensemble_decision.get("reason") or "").strip()
+        )
         promotion_blockers = (
             [reason] if ensemble_decision.get("eligible") is not True and reason
             else []

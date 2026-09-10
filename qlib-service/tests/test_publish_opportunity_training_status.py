@@ -89,6 +89,12 @@ class OpportunityTrainingStatusTest(unittest.TestCase):
             {
                 "state": "REJECTED",
                 "seedEnsemble": {
+                    "folds": [{
+                        "validationStartDate": "2026-07-28",
+                        "validationEndDate": "2026-09-10",
+                        "meanNetRAt5": -0.056952,
+                        "netRLowerBound": -0.525318,
+                    }],
                     "decision": {
                         "eligible": False,
                         "reason": "三种子集成仍有负收益独立窗口",
@@ -111,7 +117,10 @@ class OpportunityTrainingStatusTest(unittest.TestCase):
 
         self.assertEqual(
             value["promotionBlockers"],
-            ["三种子集成仍有负收益独立窗口"],
+            [
+                "最新独立窗口（2026-07-28 至 2026-09-10）"
+                " Top5费后净R -0.057R，下置信界 -0.525R",
+            ],
         )
 
     def test_publishes_compact_status_to_stable_oss_key(self):
