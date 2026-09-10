@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import {
   opportunityRadarAutoRefreshDelay,
   opportunityRadarClientError,
+  opportunityRadarHasStaleModelSource,
   refreshOpportunityRadar,
   refreshTailOpportunity,
 } from '../src/opportunityRadarClient.js'
@@ -118,6 +119,28 @@ test('机会雷达显示真实来源状态和局部失败', () => {
 test('自适应作战台提示上一模型版本结果需要重新扫描', () => {
   assert.match(adaptive, /modelVersionStale/)
   assert.match(adaptive, /部分机会来自上一模型版本，请重新扫描/)
+  const snapshot = {
+    sourceStatus: {
+      formulaIntraday: {
+        status: 'stale',
+        error: '结果来自上一模型版本，请重新生成',
+      },
+      formulaClose: { status: 'fresh' },
+      tail: {
+        status: 'stale',
+        error: '结果来自上一模型版本，请重新生成',
+      },
+      preCatalyst: { status: 'fresh' },
+    },
+  }
+  assert.equal(
+    opportunityRadarHasStaleModelSource(snapshot, 'intraday'),
+    true,
+  )
+  assert.equal(
+    opportunityRadarHasStaleModelSource(snapshot, 'next'),
+    false,
+  )
 })
 
 test('统一客户端使用聚合接口并保留独立来源刷新', () => {

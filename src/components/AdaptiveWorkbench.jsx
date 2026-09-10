@@ -7,6 +7,7 @@ import {
 import {
   loadOpportunityRadar,
   opportunityRadarAutoRefreshDelay,
+  opportunityRadarHasStaleModelSource,
   refreshOpportunityRadar,
 } from '../opportunityRadarClient.js'
 import {
@@ -352,15 +353,13 @@ function OpportunityBoard({
   }
 
   const currentLane = lane || snapshot?.defaultLane || 'intraday'
-  const modelVersionStale = Object.values(
-    snapshot?.sourceStatus || {},
-  ).some((source) =>
-    source?.status === 'stale'
-    && /上一模型版本/.test(String(source?.error || ''))
-  )
   const rows = (snapshot?.lanes?.[currentLane] || [])
     .filter((item) => item.state !== 'AVOID')
     .slice(0, 5)
+  const modelVersionStale = opportunityRadarHasStaleModelSource(
+    snapshot,
+    currentLane,
+  )
   const add = async (opportunity) => {
     if (!opportunity?.code || enrollingCode) return
     setEnrollingCode(opportunity.code)

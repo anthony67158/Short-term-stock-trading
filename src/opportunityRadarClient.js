@@ -88,6 +88,20 @@ export function opportunityRadarAutoRefreshDelay(
   return Math.max(1_000, Math.min(...scheduled) - now)
 }
 
+export function opportunityRadarHasStaleModelSource(
+  snapshot,
+  lane = snapshot?.defaultLane || 'intraday',
+) {
+  const sources = lane === 'next'
+    ? ['formulaClose', 'preCatalyst']
+    : ['formulaIntraday', 'preCatalyst', 'tail']
+  return sources.some((source) => {
+    const state = snapshot?.sourceStatus?.[source]
+    return state?.status === 'stale'
+      && /上一模型版本/.test(String(state?.error || ''))
+  })
+}
+
 export async function refreshOpportunityRadar({
   lane,
   snapshot,
