@@ -154,7 +154,9 @@ function modeSlot(mode, now) {
 export function canRunFormulaSelectionMode(mode, now = Date.now()) {
   if (mode === 'intraday') return isContinuousTrading(now)
   if (mode === 'close') {
-    return isTradingDayAt(now) && beijingMinutes(now) >= 15 * 60
+    if (!isTradingDayAt(now)) return false
+    const minutes = beijingMinutes(now)
+    return minutes < 9 * 60 + 30 || minutes >= 15 * 60
   }
   return false
 }
@@ -691,7 +693,7 @@ export default async function handler(req, res) {
         ok: false,
         error: mode === 'intraday'
           ? '盘中公式仅在连续竞价期间运行'
-          : '次日关注仅在交易日收盘后手动生成',
+          : '次日关注仅在交易日盘前或收盘后手动生成',
         errorCode: 'WINDOW_CLOSED',
       })
     }

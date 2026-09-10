@@ -212,6 +212,35 @@ test('盘前次日关注只读昨晚计划且不启动生成任务', async () =>
   assert.deepEqual(calls, [])
 })
 
+test('盘前次日关注遇到旧V3来源时重新生成过期来源', async () => {
+  const calls = []
+  await refreshOpportunityRadar({
+    lane: 'next',
+    snapshot: {
+      phase: 'PREOPEN',
+      sourceStatus: {
+        formulaClose: {
+          status: 'stale',
+          error: '结果来自上一模型版本，请重新生成',
+        },
+        preCatalyst: {
+          status: 'stale',
+          error: '结果使用旧评分口径，请重新生成',
+        },
+      },
+    },
+    runSector: async (session) => calls.push(['sector', session]),
+    runFormula: async (mode) => calls.push(['formula', mode]),
+    runPreCatalystScan: async () => calls.push(['preCatalyst']),
+    runTail: async () => calls.push(['tail']),
+    load: async () => ({ ok: true, lanes: {} }),
+  })
+  assert.deepEqual(calls.sort(), [
+    ['formula', 'close'],
+    ['preCatalyst'],
+  ])
+})
+
 test('收盘后次日关注只手动运行收盘板块和收盘公式', async () => {
   const calls = []
   await refreshOpportunityRadar({

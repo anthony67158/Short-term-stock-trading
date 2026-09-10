@@ -98,7 +98,25 @@ export function opportunityRadarHasStaleModelSource(
   return sources.some((source) => {
     const state = snapshot?.sourceStatus?.[source]
     return state?.status === 'stale'
-      && /上一模型版本/.test(String(state?.error || ''))
+      && /上一模型版本|旧评分口径/.test(
+        String(state?.error || ''),
+      )
+  })
+}
+
+function staleModelSources(
+  snapshot,
+  lane = snapshot?.defaultLane || 'intraday',
+) {
+  const sources = lane === 'next'
+    ? ['formulaClose', 'preCatalyst']
+    : ['formulaIntraday', 'preCatalyst', 'tail']
+  return sources.filter((source) => {
+    const state = snapshot?.sourceStatus?.[source]
+    return state?.status === 'stale'
+      && /上一模型版本|旧评分口径/.test(
+        String(state?.error || ''),
+      )
   })
 }
 
@@ -143,6 +161,14 @@ export async function refreshOpportunityRadar({
     run('sector', () => runSector('close'))
     run('formulaClose', () => runFormula('close'))
     run('preCatalyst', () => runPreCatalystScan({ force: true }))
+  } else if (lane === 'next' && snapshot?.phase === 'PREOPEN') {
+    const staleSources = staleModelSources(snapshot, lane)
+    if (staleSources.includes('formulaClose')) {
+      run('formulaClose', () => runFormula('close'))
+    }
+    if (staleSources.includes('preCatalyst')) {
+      run('preCatalyst', () => runPreCatalystScan({ force: true }))
+    }
   }
 
   if (!tasks.length) {

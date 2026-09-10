@@ -445,6 +445,13 @@ test('盘中公式与次日关注在服务端使用独立运行窗口', () => {
   assert.equal(
     canRunFormulaSelectionMode(
       'close',
+      Date.parse('2026-09-03T08:00:00+08:00'),
+    ),
+    true,
+  )
+  assert.equal(
+    canRunFormulaSelectionMode(
+      'close',
       Date.parse('2026-09-03T15:01:00+08:00'),
     ),
     true,
