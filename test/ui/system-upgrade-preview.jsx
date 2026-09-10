@@ -8,6 +8,7 @@ import { planStore } from '../../src/planStore.js'
 import { projectAdviceAlerts } from '../../shared/adviceAlerts.js'
 import { selectionOriginFromOpportunity } from '../../shared/selectionOrigin.js'
 import { buildAccountRiskContext, allocateOpportunityBudget } from '../../shared/accountRiskBudget.js'
+import { buildMarketFundsSnapshot } from '../../shared/marketFunds.js'
 import { analyzeOpportunityPortfolio } from '../../shared/opportunityPortfolio.js'
 import { buildPositionWorkbench } from '../../shared/positionWorkbench.js'
 
@@ -380,6 +381,8 @@ const market = {
     limitUp: 55,
     limitDown: 3,
     amountYi: 9680,
+    avg5AmountYi: 8913.4,
+    amountDeltaVsAvg5Yi: 766.6,
     volVsAvg5: 8.6,
     volLevel: '平量',
     volumeComparable: true,
@@ -399,6 +402,25 @@ const overseas = {
     { label: 'COMEX黄金', price: 3640.2, pct: 0.28 },
   ],
 }
+const sectorSnapshot = {
+  ok: true,
+  updatedAt: now,
+  list: [
+    { code: 'BK01', name: '电子', pct: 1.8, mainInflow: 3_800_000_000 },
+    { code: 'BK02', name: '通信', pct: 1.3, mainInflow: 2_400_000_000 },
+    { code: 'BK03', name: '汽车', pct: 0.9, mainInflow: 1_200_000_000 },
+    { code: 'BK04', name: '银行', pct: 0.4, mainInflow: 800_000_000 },
+    { code: 'BK05', name: '医药', pct: 0.2, mainInflow: 500_000_000 },
+    { code: 'BK06', name: '煤炭', pct: -1.1, mainInflow: -2_800_000_000 },
+    { code: 'BK07', name: '地产', pct: -0.8, mainInflow: -1_700_000_000 },
+    { code: 'BK08', name: '钢铁', pct: -0.5, mainInflow: -1_200_000_000 },
+  ],
+}
+const marketFunds = buildMarketFundsSnapshot({
+  sectors: sectorSnapshot,
+  market,
+  updatedAt: now,
+})
 const originalFetch = window.fetch
 window.fetch = async (input, options) => {
   const url = new URL(typeof input === 'string' ? input : input.url, location.origin)
@@ -409,7 +431,13 @@ window.fetch = async (input, options) => {
   const empty = { ok: true, list: [], history: [], updatedAt: now }
   let data = empty
   if (url.pathname === '/api/market_snapshot') data = {
-    ...empty, market, overseas, sectors: empty, limitUp: empty, brokenLimit: empty,
+    ...empty,
+    market,
+    marketFunds,
+    overseas,
+    sectors: sectorSnapshot,
+    limitUp: empty,
+    brokenLimit: empty,
     movers: empty, speed: empty, errors: {},
   }
   if (url.pathname === '/api/quote') data = { ...empty, list: quotes }

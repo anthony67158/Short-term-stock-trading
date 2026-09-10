@@ -209,8 +209,9 @@
 ## Per-page hierarchy
 
 - 今日决策 · 作战计划: account risk → executable commands → opportunity radar.
-- 今日决策 · 盘面研究: A-share and overseas indices → market breadth and
-  sentiment → concepts → sector flow → stocks → events and macro.
+- 今日决策 · 盘面研究: whole-market main-fund direction and comparable
+  liquidity change → A-share and overseas indices → market breadth and sentiment
+  → concepts → sector flow → stocks → events and macro.
 - 持仓执行: portfolio risk → holdings → watchlist → detailed trade tools.
 - 账户闭环: total assets and cash → alerts → executions → review.
 - 个股详情: current price and position → military-advisor action → trigger/invalidation → evidence → full analysis.

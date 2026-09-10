@@ -87,6 +87,139 @@ function MarketExternalGroup({
   )
 }
 
+function formatYi(value, {
+  signed = false,
+  digits = 1,
+} = {}) {
+  const number = finite(value)
+  if (number == null) return '--'
+  const sign = signed && number > 0 ? '+' : ''
+  return `${sign}${number.toLocaleString('zh-CN', {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  })}亿`
+}
+
+function marketFundsView(funds) {
+  const mainNetYi = finite(funds?.mainNetYi)
+  const breadth = finite(funds?.inflowBreadthPct)
+  const concentration = finite(funds?.top3InflowSharePct)
+  const direction = funds?.direction || 'UNKNOWN'
+  if (mainNetYi == null || direction === 'UNKNOWN') {
+    return {
+      tone: 'muted',
+      headline: '整体资金待更新',
+      verdict: '行业资金数据恢复后再判断资金方向',
+    }
+  }
+  if (direction === 'INFLOW') {
+    return {
+      tone: 'red',
+      headline: `净流入 ${formatYi(mainNetYi, { signed: true })}`,
+      verdict: concentration >= 55
+        ? '资金净流入，但主要集中在少数行业'
+        : breadth >= 55
+          ? '多数行业获得主力回流，资金扩散较好'
+          : '资金净流入，行业扩散仍需继续确认',
+    }
+  }
+  if (direction === 'OUTFLOW') {
+    return {
+      tone: 'green',
+      headline: `净流出 ${formatYi(mainNetYi)}`,
+      verdict: breadth != null && breadth <= 35
+        ? '多数行业承压，整体资金偏防守'
+        : '整体资金净流出，但仍有局部行业承接',
+    }
+  }
+  return {
+    tone: 'muted',
+    headline: '主力净额接近平衡',
+    verdict: '资金方向不集中，结合指数和成交量观察',
+  }
+}
+
+function turnoverView(turnover = {}) {
+  const amountYi = finite(turnover.amountYi)
+  const deltaYi = finite(turnover.deltaYi)
+  const deltaPct = finite(turnover.deltaPct)
+  if (turnover.comparable && deltaYi != null) {
+    return {
+      tone: deltaYi > 0 ? 'red' : deltaYi < 0 ? 'green' : '',
+      value: `${deltaYi >= 0 ? '增加' : '减少'} ${formatYi(Math.abs(deltaYi))}`,
+      detail: `较5日均量 ${fmtPct(deltaPct)}`,
+    }
+  }
+  return {
+    tone: '',
+    value: amountYi == null
+      ? '--'
+      : `盘中累计 ${formatYi(amountYi)}`,
+    detail: amountYi == null
+      ? '成交额待更新'
+      : '收盘后再与近5日均量比较',
+  }
+}
+
+function MarketFundsSummary({ funds }) {
+  const view = marketFundsView(funds)
+  const turnover = turnoverView(funds?.turnover)
+  const strength = finite(funds?.netStrengthPct)
+  const inflowCount = finite(funds?.inflowSectorCount)
+  const outflowCount = finite(funds?.outflowSectorCount)
+  const concentration = finite(funds?.top3InflowSharePct)
+  return (
+    <section
+      className="market-funds-summary"
+      data-tone={view.tone}
+      aria-label="全市场资金"
+    >
+      <div className="market-funds-primary">
+        <span>
+          <Icon name="wave" size={14} />
+          全市场主力净额
+        </span>
+        <strong className={view.tone}>{view.headline}</strong>
+        <small>{view.verdict}</small>
+      </div>
+      <dl className="market-funds-metrics">
+        <div>
+          <dt>净流强度</dt>
+          <dd className={pctClass(strength)}>
+            {strength == null ? '--' : fmtPct(strength)}
+          </dd>
+        </div>
+        <div>
+          <dt>流入 / 流出行业</dt>
+          <dd>
+            {inflowCount == null || outflowCount == null
+              ? '--'
+              : `${inflowCount} / ${outflowCount}`}
+          </dd>
+        </div>
+        <div>
+          <dt>流入集中度</dt>
+          <dd>
+            {concentration == null
+              ? '--'
+              : `前三行业 ${concentration.toFixed(1)}%`}
+          </dd>
+        </div>
+        <div>
+          <dt>流动性变化</dt>
+          <dd className={turnover.tone}>
+            {turnover.value}
+            <small>{turnover.detail}</small>
+          </dd>
+        </div>
+      </dl>
+      <p>
+        行业板块主力净额汇总，概念板块不重复计入
+      </p>
+    </section>
+  )
+}
+
 function SentimentGauge({
   zt,
   zb,
@@ -247,6 +380,7 @@ function SentimentGauge({
 
 function MarketBoard({
   market,
+  marketFunds,
   overseas,
   sectors,
   limitUp,
@@ -375,6 +509,8 @@ function MarketBoard({
             </div>
           </div>
 
+          <MarketFundsSummary funds={marketFunds} />
+
           <div className="market-section-label">
             <strong>A股指数</strong>
             <span>实时 / 最近收盘</span>
@@ -460,6 +596,7 @@ function MarketBoard({
 
 export default function MarketOverview({
   market,
+  marketFunds,
   overseas,
   sectors,
   limitUp,
@@ -472,6 +609,7 @@ export default function MarketOverview({
     <div className="research-market-overview">
       <MarketBoard
         market={market}
+        marketFunds={marketFunds}
         overseas={overseas}
         sectors={sectors}
         limitUp={limitUp}

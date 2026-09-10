@@ -385,6 +385,13 @@ try {
           element.querySelector(
             '[aria-label="关键商品"]',
           )?.querySelectorAll('.market-external-quote').length,
+        marketFundsText:
+          element.querySelector('.market-funds-summary')
+            ?.innerText,
+        marketFundsMetrics:
+          element.querySelectorAll(
+            '.market-funds-metrics > div',
+          ).length,
       }
     })
     assert.ok(
@@ -394,6 +401,13 @@ try {
     assert.equal(marketGeometry.domesticIndices, 4)
     assert.equal(marketGeometry.overseasIndices, 5)
     assert.equal(marketGeometry.commodities, 3)
+    assert.equal(marketGeometry.marketFundsMetrics, 4)
+    assert.match(marketGeometry.marketFundsText, /净流入 \+30\.0亿/)
+    assert.match(marketGeometry.marketFundsText, /净流强度/)
+    assert.match(marketGeometry.marketFundsText, /流入 \/ 流出行业/)
+    assert.match(marketGeometry.marketFundsText, /流动性变化/)
+    assert.match(marketGeometry.marketFundsText, /增加/)
+    assert.match(marketGeometry.marketFundsText, /较5日均量/)
     assert.ok(
       marketGeometry.bottom <= marketGeometry.conceptTop + 1,
       JSON.stringify({ width, marketGeometry }),

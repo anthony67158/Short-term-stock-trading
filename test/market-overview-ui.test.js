@@ -36,6 +36,21 @@ test('今日大盘同时展示A股、海外指数、商品与市场广度', () =
   assert.match(overview, /涨\/跌停/)
 })
 
+test('今日大盘优先展示全市场资金方向和可比较的流动性变化', () => {
+  assert.match(
+    research,
+    /marketFunds=\{snapshot\?\.marketFunds\}/,
+  )
+  assert.match(overview, /全市场主力净额/)
+  assert.match(overview, /行业板块主力净额汇总/)
+  assert.match(overview, /净流强度/)
+  assert.match(overview, /流入 \/ 流出行业/)
+  assert.match(overview, /流入集中度/)
+  assert.match(overview, /流动性变化/)
+  assert.match(overview, /盘中累计/)
+  assert.match(overview, /较5日均量/)
+})
+
 test('大盘模块桌面双栏并在移动端收敛为单列', () => {
   assert.match(
     styles,
@@ -52,5 +67,9 @@ test('大盘模块桌面双栏并在移动端收敛为单列', () => {
   assert.match(
     styles,
     /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.market-external-grid\s*{[^}]*grid-template-columns:\s*1fr[\s\S]*?\.market-board \.mb-stats\s*{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s,
+  )
+  assert.match(
+    styles,
+    /\.market-funds-metrics\s*{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/s,
   )
 })

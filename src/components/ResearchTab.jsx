@@ -63,6 +63,7 @@ export default function ResearchTab({
       <ErrorBoundary label="今日大盘">
         <MarketOverview
           market={snapshot?.market}
+          marketFunds={snapshot?.marketFunds}
           overseas={snapshot?.overseas}
           sectors={snapshot?.sectors}
           limitUp={snapshot?.limitUp}
