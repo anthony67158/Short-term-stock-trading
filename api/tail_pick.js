@@ -9,6 +9,9 @@ import {
   collectTailPickMarketContext,
   scanTailPickCandidates,
 } from './_tail_pick_data.js'
+import {
+  scoreCandidatesWithDirectV3,
+} from './_opportunity_candidate_v3.js'
 import { fetchTrendsTx } from './stock_detail.js'
 import {
   tailPickStore,
@@ -22,6 +25,12 @@ import {
   evaluateTailPickIntraday,
   tailPickSession,
 } from '../shared/tailPickPolicy.js'
+import {
+  buildMarketOpportunityContext,
+} from '../shared/marketOpportunityContext.js'
+import {
+  beijingMinutes,
+} from '../shared/tradingCalendar.js'
 
 export const TAIL_PICK_SCHEMA_VERSION = 'tail-pick.v1'
 
@@ -64,6 +73,12 @@ function publicCandidate(candidate) {
     blockers: candidate.stockGate?.blockers || [],
     decisionWarnings: candidate.decisionWarnings || [],
     execution: candidate.execution,
+    entryPlan: candidate.entryPlan || null,
+    exitPlan: candidate.exitPlan || null,
+    opportunityScore: candidate.opportunityScore || null,
+    adaptive: candidate.adaptive || null,
+    actionAlternatives: candidate.actionAlternatives || [],
+    v3Scoring: candidate.v3Scoring || null,
   }
 }
 
@@ -137,6 +152,7 @@ export function runTailPickScan({
   store = tailPickStore,
   collectMarketContext = collectTailPickMarketContext,
   scanCandidates = scanTailPickCandidates,
+  scoreCandidates = scoreCandidatesWithDirectV3,
   rankCandidates = rankTailPickCandidates,
   now = Date.now,
   mode = 'manual',
@@ -155,7 +171,10 @@ export function runTailPickScan({
     const session = tailPickSession(requestedAt, {
       hasResult: !!existing,
     })
-    if (existing) {
+    if (
+      existing
+      && existing.result?.v3Scoring?.usagePolicy === 'DIRECT'
+    ) {
       return {
         ...existing,
         reused: true,
@@ -242,13 +261,35 @@ export function runTailPickScan({
         '正在汇总位置、分时、资金与流动性指标',
         now,
       )
-      const ranked = rankCandidates(scanned.candidates, {
+      const opportunityContext = buildMarketOpportunityContext({
+        market: marketContext.market || {},
+        marketGate: marketContext.marketGate || null,
+      })
+      const [scoredCandidates, scoredNearCandidates] = await Promise.all([
+        scoreCandidates(scanned.candidates, {
+          mode: 'INTRADAY',
+          slot: beijingMinutes(requestedAt),
+          market: marketContext.market || {},
+          marketGate: marketContext.marketGate || null,
+          marketContext: opportunityContext,
+          now: requestedAt,
+        }),
+        scoreCandidates(scanned.nearCandidates, {
+          mode: 'INTRADAY',
+          slot: beijingMinutes(requestedAt),
+          market: marketContext.market || {},
+          marketGate: marketContext.marketGate || null,
+          marketContext: opportunityContext,
+          now: requestedAt,
+        }),
+      ])
+      const ranked = rankCandidates(scoredCandidates, {
         timestamp: Number(now()) || Date.now(),
         maxPositionPct:
           marketContext.marketGate.maxPositionPct,
       })
       const nearRanked = rankTailPickNearCandidates(
-        scanned.nearCandidates,
+        scoredNearCandidates,
       )
       const generatedAt = Number(now()) || Date.now()
       const result = {
@@ -265,6 +306,18 @@ export function runTailPickScan({
         marketGate: marketContext.marketGate,
         result: {
           ...ranked,
+          v3Scoring: {
+            usagePolicy: 'DIRECT',
+            requested:
+              scoredCandidates.length + scoredNearCandidates.length,
+            direct: [
+              ...scoredCandidates,
+              ...scoredNearCandidates,
+            ].filter((candidate) =>
+              candidate?.opportunityScore?.state === 'READY'
+              && candidate?.opportunityScore?.usagePolicy === 'DIRECT'
+            ).length,
+          },
           reason: ranked.candidates.length
             ? `展示${ranked.candidates.length}只严格公式计算结果；风险项随股票列出，请自行判断`
             : nearRanked.length

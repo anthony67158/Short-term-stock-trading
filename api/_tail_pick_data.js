@@ -17,6 +17,9 @@ import {
   evaluateTailPickMarketGate,
   evaluateTailPickStockGate,
 } from '../shared/tailPickPolicy.js'
+import {
+  buildOpportunityShadowFeatures,
+} from '../shared/opportunityShadowFeatures.js'
 import { beijingDayKey } from '../shared/tradingCalendar.js'
 
 const MARKET_FS =
@@ -441,11 +444,21 @@ export async function scanTailPickCandidates({
       return {
         ...item,
         intraday,
+        trends,
         fund: fundResult.status === 'fulfilled'
           ? fundResult.value
           : null,
         tags: profile,
         sectorOpportunity,
+        shadowFeatures: buildOpportunityShadowFeatures({
+          quote: item.quote,
+          candles: item.candles,
+          trends,
+          fund: fundResult.status === 'fulfilled'
+            ? fundResult.value || {}
+            : {},
+          sectorOpportunity,
+        }),
         stockGate,
       }
     },

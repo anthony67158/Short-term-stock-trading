@@ -50,7 +50,7 @@ const opportunities = [
       actionLabel: '优先执行',
       playbook: { label: '主升突破', score: 82 },
       estimate: {
-        source: 'CALIBRATED_MODEL',
+        source: 'V3_DIRECT',
         productionReady: true,
         pFill: 0.88,
         pWinGivenFill: 0.64,
@@ -82,8 +82,8 @@ const opportunities = [
       actionLabel: '小仓验证',
       playbook: { label: '核心回踩', score: 75 },
       estimate: {
-        source: 'RESEARCH_PRIOR',
-        productionReady: false,
+        source: 'V3_DIRECT',
+        productionReady: true,
         pFill: 0.66,
         pWinGivenFill: 0.59,
         expectedNetR: 0.26,
@@ -114,8 +114,8 @@ const opportunities = [
       actionLabel: '等待优势扩大',
       playbook: { label: '催化先手', score: 68 },
       estimate: {
-        source: 'RESEARCH_PRIOR',
-        productionReady: false,
+        source: 'V3_DIRECT',
+        productionReady: true,
         pFill: 0.48,
         pWinGivenFill: 0.55,
         expectedNetR: 0.18,

@@ -43,6 +43,15 @@ function candidate(overrides = {}) {
       liquidityComposite: 76,
       vwapDistancePct: 0.4,
     },
+    opportunityScore: {
+      state: 'READY',
+      usagePolicy: 'DIRECT',
+      pFill: 0.72,
+      pWinGivenFill: 0.58,
+      expectedNetR: 0.24,
+      netRLowerBound: -0.05,
+      calibration: { sampleCount: 1000 },
+    },
     ...overrides,
   }
 }
@@ -72,6 +81,7 @@ test('calibrated negative expectation cannot be promoted by a strong playbook', 
     blockers: [],
     opportunityScore: {
       state: 'READY',
+      usagePolicy: 'DIRECT',
       shadowOnly: false,
       productionEligible: true,
       outOfDistribution: false,
@@ -92,6 +102,7 @@ test('score for a different price route is not reused as calibrated evidence', (
     blockers: [],
     opportunityScore: {
       state: 'READY',
+      usagePolicy: 'DIRECT',
       shadowOnly: false,
       productionEligible: true,
       outOfDistribution: false,
@@ -108,9 +119,10 @@ test('score for a different price route is not reused as calibrated evidence', (
     },
   }), market)
 
-  assert.equal(result.estimate.source, 'RESEARCH_PRIOR')
+  assert.equal(result.estimate.source, 'V3_UNAVAILABLE')
+  assert.equal(result.estimate.pWinGivenFill, null)
   assert.equal(result.estimate.productionReady, false)
-  assert.notEqual(result.tier, 'ATTACK')
+  assert.equal(result.tier, 'AVOID')
 })
 
 test('ranking uses action value rather than source formula score', () => {
@@ -118,6 +130,12 @@ test('ranking uses action value rather than source formula score', () => {
     candidate({
       code: '000001',
       score: 98,
+      opportunityScore: {
+        ...candidate().opportunityScore,
+        pFill: 0.5,
+        expectedNetR: 0.1,
+        netRLowerBound: -0.2,
+      },
       quote: {
         price: 10,
         pct: 8.8,
@@ -134,7 +152,16 @@ test('ranking uses action value rather than source formula score', () => {
         vwapDistancePct: 4,
       },
     }),
-    candidate({ code: '000002', score: 70 }),
+    candidate({
+      code: '000002',
+      score: 70,
+      opportunityScore: {
+        ...candidate().opportunityScore,
+        pFill: 0.8,
+        expectedNetR: 0.4,
+        netRLowerBound: 0.1,
+      },
+    }),
   ], market)
 
   assert.equal(rows[0].code, '000002')

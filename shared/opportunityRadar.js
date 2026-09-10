@@ -11,7 +11,6 @@ import {
 import {
   explainOpportunityMarketGate,
 } from './opportunityLanguage.js'
-import { isExecutableOpportunityScore } from './opportunityScoreContract.js'
 import {
   buildMarketOpportunityContext,
 } from './marketOpportunityContext.js'
@@ -50,6 +49,10 @@ function finite(value) {
   if (value == null || value === '') return null
   const number = Number(value)
   return Number.isFinite(number) ? number : null
+}
+
+function directV3Score(value) {
+  return value?.state === 'READY' && value?.usagePolicy === 'DIRECT'
 }
 
 function unique(values = []) {
@@ -363,7 +366,7 @@ function formulaOpportunity(candidate, {
   ]
   const opportunityScore = candidate.opportunityScore
   if (
-    isExecutableOpportunityScore(opportunityScore)
+    directV3Score(opportunityScore)
     && (
       finite(opportunityScore.expectedNetR) <= 0
       || (
@@ -445,12 +448,17 @@ function tailOpportunity(candidate, {
   const execution = candidate.execution || {}
   const quotePrice = finite(candidate.quote?.price)
   const vwap = finite(candidate.intraday?.vwap)
-  const entryPrice = quotePrice == null
-    ? null
-    : +(
+  const v3Entry = candidate.entryPlan || null
+  const v3Exit = candidate.exitPlan || null
+  const entryPrice = finite(v3Entry?.price) ?? (
+    quotePrice == null
+      ? null
+      : +(
         Math.max(quotePrice, vwap || quotePrice) * 1.003
       ).toFixed(2)
-  const stop = finite(execution.stopPrice)
+  )
+  const stop = finite(v3Exit?.hardStopPrice ?? execution.stopPrice)
+  const target = finite(v3Exit?.takeProfitPrice)
   const blockers = unique([
     ...(candidate.blockers || []),
     ...(candidate.decisionWarnings || []),
@@ -465,13 +473,12 @@ function tailOpportunity(candidate, {
   if (['WINDOW_CLOSED', 'HISTORY'].includes(candidate.liveStatus)) {
     blockers.push('今日尾盘执行窗口已结束')
   }
-  if (!near && (entryPrice == null || stop == null)) {
+  if (entryPrice == null || stop == null || target == null) {
     blockers.push('尾盘买卖计划不完整')
   }
-  const contractComplete = !near
-    && entryPrice != null
+  const contractComplete = entryPrice != null
     && stop != null
-    && execution.finalExitDate
+    && target != null
   const valid = contractComplete
     && formal
     && sourceFresh
@@ -494,9 +501,14 @@ function tailOpportunity(candidate, {
     tags: candidate.tags || null,
     quote: candidate.quote || null,
     score: finite(candidate.score),
-    riskReward: null,
+    riskReward: finite(candidate.riskReward),
+    opportunityScore: candidate.opportunityScore || null,
+    adaptive: candidate.adaptive || null,
+    cautions: candidate.cautions || [],
+    actionAlternatives: candidate.actionAlternatives || [],
     entryPlan: contractComplete
       ? {
+          ...(v3Entry || {}),
           type: 'TAIL_REVERSAL',
           price: entryPrice,
           window: formal
@@ -506,15 +518,23 @@ function tailOpportunity(candidate, {
             execution.firstLeg,
             execution.secondLeg,
           ]).join('；') || execution.action || '尾盘结构确认后介入',
-          maxPositionPct:
-            Math.min(5, Math.max(0, finite(execution.maxPositionPct) || 5)),
+          maxPositionPct: Math.min(
+            5,
+            Math.max(
+              0,
+              finite(v3Entry?.maxPositionPct)
+              ?? finite(execution.maxPositionPct)
+              ?? 5,
+            ),
+          ),
           validUntil: null,
         }
       : null,
     exitPlan: contractComplete
       ? {
+          ...(v3Exit || {}),
           hardStopPrice: stop,
-          takeProfitPrice: null,
+          takeProfitPrice: target,
           timeStopDate:
             execution.finalExitDate || tradingDayAfter(now, 3),
           rule:
@@ -546,10 +566,12 @@ function preCatalystOpportunity(candidate, {
     && finite(candidate?.entryPlan?.price) > 0
     && finite(candidate?.exitPlan?.hardStopPrice) > 0
     && finite(candidate?.exitPlan?.takeProfitPrice) > 0
-    && finite(candidate?.riskReward) >= 1.8
   )
   const blockers = unique([
-    ...(candidate?.blockers || []),
+    ...(candidate?.blockers || []).filter(
+      (item) =>
+        item !== '预催化模型仍在积累样本，仅可等待量价确认',
+    ),
     ...(!sourceFresh ? ['预催化扫描结果已过期'] : []),
     ...(!contractComplete ? ['预催化价格合同不完整'] : []),
   ])
@@ -606,7 +628,7 @@ function sortedRows(rows) {
   const modelMetric = (row, key, fallback) => {
     const score = row?.opportunityScore
     if (
-      !isExecutableOpportunityScore(score)
+      !directV3Score(score)
     ) return fallback
     return finite(score[key]) ?? fallback
   }

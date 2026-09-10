@@ -181,9 +181,6 @@ function OpportunityRow({
 }) {
   const adaptive = opportunity.adaptive || {}
   const estimate = adaptive.estimate || {}
-  const winLabel = estimate.productionReady === true
-    ? '胜率'
-    : '研究先验'
   const entry = opportunity.entryPlan || {}
   const exit = opportunity.exitPlan || {}
   return (
@@ -214,7 +211,7 @@ function OpportunityRow({
           成交 <b>{probability(estimate.pFill)}</b>
         </span>
         <span>
-          {winLabel} <b>{probability(estimate.pWinGivenFill)}</b>
+          V3胜率 <b>{probability(estimate.pWinGivenFill)}</b>
         </span>
         <span>
           净期望 <b data-positive={Number(estimate.expectedNetR) > 0}>

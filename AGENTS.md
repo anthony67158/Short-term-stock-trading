@@ -207,6 +207,7 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST "$FC/api/ai" -H "Content-Type: 
 - **两段式确认**（`_confirm.js`）：价到点→`watching`（弱提醒）；持续观察结束后由确定性信号决定是否进入 V3 复核，LLM 不参与动作确认。置信阈值由确定性分数边际、动作价值差和尾部风险动态计算，不得恢复买入78/卖出70/止损65的固定阈值。
 - **V3 数据必须分层归档**：成熟反事实标签保存在 `opportunitymodel/training-data/`，每日训练先合并线上真实成熟结果并发布新的版本化基线；规范化日线、资金流和因果股票池 5 分钟线按交易日保存在 `opportunitymodel/market-data/v1/`，对象不可变且必须校验 SHA-256。原始行情不能直接冒充标签，Token 只从环境或 Actions Secret 读取。完整协议见 `docs/v3-market-data-archive.md`。
 - **V3直接使用，不以晋级为前置条件**：按用户2026-09-10指示，当前V3产物通过文件、特征合同和数值校验后以 `usagePolicy=DIRECT` 直接启用；`shadowOnly`、`shadowEligible`、`productionEligible` 只保留为评测记录，不阻止推理或动作编译。分布外保留提示而不关闭预测。训练完成即保存权重并发布当前模型，每日晋级只作后置诊断；不得把真实加载失败伪装成成功，不得伪造晋级结果。正费后价值、现金、费用、T+1和账户风险约束继续有效。
+- **今日作战只认生产V3**：预催化、盘中公式、收盘公式和尾盘候选都必须在服务端比较现价/回踩/突破路径，并且只允许 `READY + usagePolicy=DIRECT` 的 V3 分数参与动作、排序和仓位。缺少 DIRECT 结果时明确标记不可执行；禁止用研究先验、影子分、灰度排序或旧预催化样本提示补出概率。
 - **每日重训**（`retrain_daily.py`）：冠军-挑战者,leak-free holdout AUC 过护栏才晋级、只升不降;腾讯为硬性前置,新浪仅参考(海外 CI 出口 IP 拉不到新浪),股票池有 `pool_cache.json` 兜底。
 - **A股规则**：T+1(今日买入手数当日锁定)、手续费(佣金万3最低5/印花税千0.5仅卖/过户费万0.1)、做T FIFO 配对、含费均价。
 - **健壮性**：各模块 ErrorBoundary 隔离、事件订阅 try-catch、网络请求带超时、数值渲染 `Number.isFinite` 守卫。改动时保持这些防护,勿裸 fetch、勿无超时。

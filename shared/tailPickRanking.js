@@ -20,6 +20,13 @@ function rounded(value, digits = 2) {
   return number == null ? null : +number.toFixed(digits)
 }
 
+function v3Priority(candidate) {
+  return candidate?.opportunityScore?.state === 'READY'
+    && candidate?.opportunityScore?.usagePolicy === 'DIRECT'
+    ? finite(candidate.adaptive?.utility) ?? -Infinity
+    : -Infinity
+}
+
 function fundScore(fund) {
   if (!fund) return { score: 0, label: '资金数据缺失' }
   const mainNow = finite(fund.mainNetYi)
@@ -200,7 +207,8 @@ export function rankTailPickCandidates(
       ...candidateScore(item),
     }))
     .sort((left, right) =>
-      Number(left.decisionWarnings.length)
+      v3Priority(right) - v3Priority(left)
+      || Number(left.decisionWarnings.length)
         - Number(right.decisionWarnings.length)
       || Number(right.score) - Number(left.score)
       || Number(right.quote?.amount || 0)
@@ -237,7 +245,8 @@ export function rankTailPickNearCandidates(
       ...nearCandidateScore(item),
     }))
     .sort((left, right) =>
-      Number(left.nearMatch?.failedRules?.length || 99)
+      v3Priority(right) - v3Priority(left)
+      || Number(left.nearMatch?.failedRules?.length || 99)
         - Number(right.nearMatch?.failedRules?.length || 99)
       || Number(left.decisionWarnings.length)
         - Number(right.decisionWarnings.length)

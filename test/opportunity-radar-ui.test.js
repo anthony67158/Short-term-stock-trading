@@ -56,7 +56,9 @@ test('机会候选同时展示入场仓位和完整退出计划', () => {
   assert.match(content, /只有同时给出入场价/)
   assert.match(opportunityUi, /成交率/)
   assert.match(opportunityUi, /净盈利率/)
-  assert.match(opportunityUi, /样本仍在积累/)
+  assert.match(opportunityUi, /生产V3估计/)
+  assert.match(opportunityUi, /生产V3评分不可用，本次不执行/)
+  assert.doesNotMatch(opportunityUi, /研究先验|研究估计|样本仍在积累/)
   assert.match(opportunityUi, /启动观察分/)
   assert.match(opportunityUi, /尚未定价/)
   assert.match(opportunityUi, /资金试探/)
@@ -283,8 +285,9 @@ test('机会雷达展示组合层去重与风险预算但不改个股结论', ()
   assert.match(candidate, /portfolioState|portfolioReason|portfolioNote/)
   // 板块集中/预算受限提示文案
   assert.match(candidate, /板块|预算|集中/)
-  // 组合视图不写回个股 state：仍以 opportunity.state 驱动主状态
-  assert.match(candidate, /STATE_VIEW\[opportunity\.state\]/)
+  // 组合视图不写回个股 state；生产 V3 不可用时只在展示层降级
+  assert.match(candidate, /STATE_VIEW\[displayState\]/)
+  assert.match(candidate, /modelReady \? opportunity\.state : 'AVOID'/)
 })
 
 test('漂移检出时展示只读预警且样本不足时不显示噪音', () => {

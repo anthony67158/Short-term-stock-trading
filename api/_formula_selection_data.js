@@ -248,6 +248,9 @@ function candidateEvent(quote, cheapScore) {
 
 function adaptiveDecisionFromPlan(code, formula, selectedPlan) {
   const adaptive = selectedPlan.adaptive
+  const planningBlockers = (adaptive.hardBlockers || []).filter(
+    (item) => item !== 'V3评分不可用，当前不执行',
+  )
   return {
     schemaVersion: 'formula-price-decision.v1',
     code: String(code),
@@ -259,7 +262,7 @@ function adaptiveDecisionFromPlan(code, formula, selectedPlan) {
     ),
     route: selectedPlan.route,
     positionMode: 'UNOWNED',
-    action: adaptive.tier === 'AVOID' ? 'AVOID' : 'WATCH_BUY',
+    action: planningBlockers.length ? 'AVOID' : 'WATCH_BUY',
     primaryPrice: selectedPlan.entryPlan.price,
     priceType: selectedPlan.entryPlan.type === 'BREAKOUT'
       ? 'BREAKOUT_WATCH'
@@ -274,12 +277,14 @@ function adaptiveDecisionFromPlan(code, formula, selectedPlan) {
     priceContractValid: true,
     dataComplete: true,
     dataFresh: true,
-    marketAllowsRisk: adaptive.tier !== 'AVOID',
+    marketAllowsRisk: planningBlockers.length === 0,
     hardStopTriggered: false,
-    executionState: adaptive.tier,
+    executionState: planningBlockers.length
+      ? 'BLOCKED'
+      : 'V3_PENDING',
     sellableQty: null,
     evidence: adaptive.playbook?.evidence || [],
-    blockers: adaptive.hardBlockers,
+    blockers: planningBlockers,
   }
 }
 
@@ -290,7 +295,7 @@ function publicCandidate(item, rank) {
     rank,
     score: item.score,
     formulaId: item.decision.formulaId,
-    validationState: 'OBSERVE_ONLY',
+    validationState: 'V3_PENDING',
     action: item.decision.action,
     executionState: item.decision.executionState,
     marketAllowsRisk: item.decision.marketAllowsRisk,

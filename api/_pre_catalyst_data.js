@@ -8,6 +8,9 @@ import {
   rankPreCatalystCandidates,
 } from '../shared/preCatalyst.js'
 import {
+  buildOpportunityShadowFeatures,
+} from '../shared/opportunityShadowFeatures.js'
+import {
   fetchTailPickRealtimePool,
 } from './_tail_pick_data.js'
 import {
@@ -372,6 +375,8 @@ export async function collectPreCatalystSnapshot({
   fetchTags = fetchStockTagProfile,
   fetchSectorMembers: fetchMembers = fetchSectorMembers,
   fetchKline = fetchKlineTx,
+  fetchTrends = async () => [],
+  fetchFund = async () => null,
   readRelations = async () => ({ edges: [] }),
   previous = null,
   onProgress = async () => {},
@@ -593,7 +598,7 @@ export async function collectPreCatalystSnapshot({
         '101',
         60,
       ).catch(() => null)
-      return buildPreCatalystCandidate({
+      const candidate = buildPreCatalystCandidate({
         event: reference.event,
         relation: reference.relation,
         quote,
@@ -601,6 +606,12 @@ export async function collectPreCatalystSnapshot({
         tags: reference.tags,
         now: timestamp,
       })
+      return candidate
+        ? {
+            ...candidate,
+            candles: kline?.candles || [],
+          }
+        : null
     },
   )
   await onProgress({
@@ -608,9 +619,42 @@ export async function collectPreCatalystSnapshot({
     percent: 88,
     message: '正在计算未定价程度、资金试探和拥挤风险',
   })
-  const candidates = rankPreCatalystCandidates(
+  const rankedCandidates = rankPreCatalystCandidates(
     candidateRows.filter(Boolean),
     { limit: 20, maxPerConcept: 2 },
+  )
+  const candidates = await mapLimit(
+    rankedCandidates,
+    6,
+    async (candidate) => {
+      const [trendsResult, fundResult] = await Promise.allSettled([
+        fetchTrends(candidate.code),
+        fetchFund(candidate.code, {
+          preferRealtime: true,
+          fetchedAt: timestamp,
+        }),
+      ])
+      const trends = trendsResult.status === 'fulfilled'
+        ? trendsResult.value?.trends || trendsResult.value || []
+        : []
+      const fund = fundResult.status === 'fulfilled'
+        ? fundResult.value
+        : null
+      return {
+        ...candidate,
+        trends,
+        fund,
+        shadowFeatures: buildOpportunityShadowFeatures({
+          quote: candidate.quote,
+          candles: candidate.candles,
+          trends,
+          fund: fund || {},
+          sectorOpportunity: {
+            sector: candidate.sector,
+          },
+        }),
+      }
+    },
   )
   const tradeDate = quotes
     .map((item) => String(item?.tradeDate || ''))
@@ -629,12 +673,7 @@ export async function collectPreCatalystSnapshot({
       authority: 'OFFICIAL',
       lookbackDays: 4,
     },
-    model: {
-      state: 'CALIBRATING',
-      version: 'pre-catalyst-rule.v1',
-      sampleCount: 0,
-      probabilitiesPublished: false,
-    },
+    model: null,
     counts: {
       announcements: events.length,
       relevantEvents: relevant.length,

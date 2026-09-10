@@ -7,6 +7,22 @@ import {
 
 const NOW = Date.parse('2026-09-02T10:00:00+08:00')
 
+function directScore(overrides = {}) {
+  return {
+    schemaVersion: 'opportunity-score.v1',
+    state: 'READY',
+    usagePolicy: 'DIRECT',
+    modelVersion: 'v3-production',
+    pFill: 0.72,
+    pWinGivenFill: 0.58,
+    expectedNetR: 0.24,
+    netRLowerBound: -0.05,
+    expectedShortfall10: -0.8,
+    calibration: { sampleCount: 1000 },
+    ...overrides,
+  }
+}
+
 function sectorSnapshot({
   session = 'intraday',
   signalDate = '2026-09-02',
@@ -72,11 +88,7 @@ function formulaCandidate(overrides = {}) {
     validUntil: NOW + 60 * 60 * 1000,
     evidence: ['回踩均价线后重新站稳'],
     blockers: [],
-    opportunityScore: {
-      schemaVersion: 'opportunity-score.v1',
-      state: 'NOT_READY',
-      pFill: null,
-    },
+    opportunityScore: directScore(),
     quote: {
       price: 10.04,
       amount: 250_000_000,
@@ -129,7 +141,7 @@ test('交易阶段决定机会雷达默认视图', () => {
   }).defaultLane, 'next')
 })
 
-test('未校准盘中机会保留完整退出计划但只允许小仓验证', () => {
+test('生产V3盘中机会保留完整退出计划并按动作价值小仓验证', () => {
   const result = buildOpportunityRadar({
     now: NOW,
     sector: {
@@ -155,7 +167,11 @@ test('未校准盘中机会保留完整退出计划但只允许小仓验证', ()
   assert.equal(result.lanes.intraday[0].exitPlan.timeStopDate, '2026-09-07')
   assert.equal(
     result.lanes.intraday[0].opportunityScore.state,
-    'NOT_READY',
+    'READY',
+  )
+  assert.equal(
+    result.lanes.intraday[0].opportunityScore.usagePolicy,
+    'DIRECT',
   )
   assert.deepEqual(
     result.lanes.intraday[0].sourceSignals,
@@ -169,6 +185,7 @@ test('同一状态内按费后净期望下界而不是热度分排序', () => {
     score: 95,
     opportunityScore: {
       state: 'READY',
+      usagePolicy: 'DIRECT',
       shadowOnly: false,
       productionEligible: true,
       pFill: 0.8,
@@ -183,6 +200,7 @@ test('同一状态内按费后净期望下界而不是热度分排序', () => {
     score: 78,
     opportunityScore: {
       state: 'READY',
+      usagePolicy: 'DIRECT',
       shadowOnly: false,
       productionEligible: true,
       pFill: 0.7,
@@ -223,6 +241,7 @@ test('校准后的负期望候选保留展示但降为本次不买', () => {
         formulaCandidate({
           opportunityScore: {
             state: 'READY',
+            usagePolicy: 'DIRECT',
             shadowOnly: false,
             productionEligible: true,
             pFill: 0.76,
@@ -285,7 +304,8 @@ test('预催化候选只进入提前布局并保留官方事件证据', () => {
           },
           sourceSignals: ['预催化扫描', '重大订单', '公告主体'],
           evidence: ['官方公告：关于签订重大销售合同的公告'],
-          blockers: ['预催化模型仍在积累样本，仅可等待量价确认'],
+          blockers: [],
+          opportunityScore: directScore(),
         }],
       },
       task: { status: 'DONE' },
@@ -367,6 +387,25 @@ test('收盘公式与尾盘反转进入不同业务页签且不互相混合', ()
     sector: closeCandidate.sector,
     evidence: ['尾盘结构命中'],
     blockers: [],
+    entryPlan: {
+      type: 'IMMEDIATE',
+      price: 10.3,
+      maxPositionPct: 5,
+    },
+    exitPlan: {
+      hardStopPrice: 9.8,
+      takeProfitPrice: 10.9,
+      timeStopDate: '2026-09-07',
+      rule: '次日冲高1%-3%减半',
+    },
+    riskReward: 1.2,
+    opportunityScore: directScore({
+      priceContract: {
+        entryPrice: 10.3,
+        stopPrice: 9.8,
+        targetPrice: 10.9,
+      },
+    }),
     execution: {
       role: 'PRIMARY',
       action: '尾盘确认后观察介入',
@@ -593,6 +632,24 @@ test('盘中次日计划不复用昨日尾盘和收盘公式并显示今日生�
           tradeDate: '2026-09-02',
         },
         blockers: [],
+        entryPlan: {
+          type: 'IMMEDIATE',
+          price: 8.83,
+          maxPositionPct: 5,
+        },
+        exitPlan: {
+          hardStopPrice: 8.4,
+          takeProfitPrice: 9.4,
+          timeStopDate: '2026-09-08',
+        },
+        riskReward: 1.33,
+        opportunityScore: directScore({
+          priceContract: {
+            entryPrice: 8.83,
+            stopPrice: 8.4,
+            targetPrice: 9.4,
+          },
+        }),
         execution: {
           stopPrice: 19,
           finalExitDate: '2026-09-07',
@@ -716,9 +773,12 @@ test('今日手动尾盘试算优先于昨日正式版进入次日计划', () =>
   )
   assert.ok(manualRow)
   assert.equal(manualRow.state, 'AVOID')
-  assert.equal(manualRow.entryPlan.price, 8.83)
-  assert.equal(manualRow.exitPlan.hardStopPrice, 8.4)
-  assert.match(manualRow.blockers.join('；'), /手动试算仅供观察/)
+  assert.equal(manualRow.entryPlan, null)
+  assert.equal(manualRow.exitPlan, null)
+  assert.match(
+    manualRow.blockers.join('；'),
+    /手动试算仅供观察|V3评分不可用/,
+  )
 })
 
 test('机会雷达为每个lane附加组合视图且不改变个股结论', () => {

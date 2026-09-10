@@ -413,20 +413,12 @@ export function buildPreCatalystCandidate({
     underReactionScore: round(underReactionScore, 1),
     flowProbeScore: round(flowProbeScore, 1),
     crowdingRisk: round(crowdingRisk, 1),
-    forecast: {
-      state: 'CALIBRATING',
-      pActivation1d: null,
-      pActivation3d: null,
-      pOutperform5d: null,
-      sampleCount: 0,
-    },
     evaluationContext: {
       signalTradeDate,
       decisionPrice: round(price),
       baselineDailyAmount: round(baselineDailyAmount, 0),
     },
     score: activationScore,
-    opportunityScore: null,
     riskReward: contract.riskReward,
     entryPlan: contract.entryPlan,
     exitPlan: contract.exitPlan,
@@ -449,9 +441,7 @@ export function buildPreCatalystCandidate({
       `${relationLabel}，事件尚未充分扩散到价格`,
       `当日涨跌${round(pct)}%，资金试探分${round(flowProbeScore, 1)}`,
     ],
-    blockers: [
-      '预催化模型仍在积累样本，仅可等待量价确认',
-    ],
+    blockers: [],
     discoveredAt: Number(now) || Date.now(),
   }
 }

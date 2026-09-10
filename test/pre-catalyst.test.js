@@ -102,7 +102,8 @@ test('事件强但价格未启动的股票进入潜伏观察而不是立即买�
 
   assert.equal(candidate.state, 'WAIT_TRIGGER')
   assert.equal(candidate.stateLabel, '潜伏预判')
-  assert.equal(candidate.forecast.state, 'CALIBRATING')
+  assert.equal(candidate.forecast, undefined)
+  assert.deepEqual(candidate.blockers, [])
   assert.ok(candidate.activationScore >= 60)
   assert.ok(candidate.entryPlan.price > 0)
   assert.ok(candidate.exitPlan.hardStopPrice < candidate.entryPlan.price)

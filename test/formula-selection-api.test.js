@@ -163,7 +163,7 @@ test('市场扫描从完整股票池生成最多五个带唯一价位的观察�
   assert.equal(result.universe.inspectedCount, 5500)
   assert.equal(result.candidates.length, 1)
   assert.equal(result.candidates[0].action, 'WATCH_BUY')
-  assert.equal(result.candidates[0].validationState, 'OBSERVE_ONLY')
+  assert.equal(result.candidates[0].validationState, 'V3_PENDING')
   assert.ok(result.candidates[0].primaryPrice > 0)
   assert.equal(result.candidateEvents.length, 1)
   assert.equal(result.candidateEvents[0].stageReached, 'DISPLAYED')
@@ -570,7 +570,7 @@ test('公式选股允许未匹配板块的淘汰事件写入账本', async () =>
   )
 })
 
-test('公式结果附加影子评分但不改变现有候选顺序', async () => {
+test('公式结果使用生产V3评分并按动作价值调整候选顺序', async () => {
   let savedLedger = null
   let scoreInputs = null
   const candidates = ['600002', '600001'].map((code, index) => ({
@@ -635,6 +635,8 @@ test('公式结果附加影子评分但不改变现有候选顺序', async () =>
         {
           schemaVersion: 'opportunity-score.v1',
           state: 'READY',
+          usagePolicy: 'DIRECT',
+          modelVersion: 'v3-production',
           code: input.code,
           formulaId: input.formulaId,
           pFill: 0.6 + index * 0.2,
@@ -657,10 +659,10 @@ test('公式结果附加影子评分但不改变现有候选顺序', async () =>
   assert.equal(scoreInputs.length, 2)
   assert.deepEqual(
     result.candidates.map((item) => item.code),
-    ['600002', '600001'],
+    ['600001', '600002'],
   )
-  assert.equal(result.candidates[0].opportunityScore.pFill, 0.6)
-  assert.equal(result.candidates[1].opportunityScore.pFill, 0.8)
+  assert.equal(result.candidates[0].opportunityScore.pFill, 0.8)
+  assert.equal(result.candidates[1].opportunityScore.pFill, 0.6)
   assert.equal(
     savedLedger.events[0].opportunityScore.state,
     'READY',
@@ -669,12 +671,15 @@ test('公式结果附加影子评分但不改变现有候选顺序', async () =>
     savedLedger.events[0].scoreInput.schemaVersion,
     'opportunity-score-feature.v3',
   )
-  assert.deepEqual(result.shadowRanking, {
+  assert.deepEqual(result.v3Scoring, {
+    usagePolicy: 'DIRECT',
     requested: 2,
-    ready: 2,
+    direct: 2,
     unavailable: 0,
-    appliedToOrder: false,
+    appliedToOrder: true,
   })
+  assert.equal(result.validationState, 'V3_DIRECT')
+  assert.equal(result.shadowRanking, undefined)
 })
 
 test('公式选股进度按模式独立持久化并可恢复读取', async () => {

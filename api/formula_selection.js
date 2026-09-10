@@ -19,6 +19,9 @@ import {
   fetchOpportunityScores,
 } from './_opportunity_score.js'
 import {
+  scoreCandidatesWithDirectV3,
+} from './_opportunity_candidate_v3.js'
+import {
   collectTailPickMarketContext,
 } from './_tail_pick_data.js'
 import {
@@ -50,6 +53,65 @@ function reply(res, status, body) {
 function normalizedMode(value) {
   const mode = String(value || '').toLowerCase()
   return ['intraday', 'close', 'tail'].includes(mode) ? mode : null
+}
+
+function directV3Score(value) {
+  return value?.state === 'READY' && value?.usagePolicy === 'DIRECT'
+}
+
+function verifiedScore(score, candidate) {
+  if (!score) return null
+  return {
+    ...score,
+    serverVerified: true,
+    priceContract: {
+      entryPrice: Number(candidate?.primaryPrice) || null,
+      stopPrice: Number(candidate?.stopPrice) || null,
+      targetPrice: Number(candidate?.targetPrice) || null,
+    },
+  }
+}
+
+function v3Utility(candidate) {
+  const score = candidate?.opportunityScore
+  if (!directV3Score(score)) return -Infinity
+  return (
+    Number(score.pFill) * Number(score.expectedNetR)
+    + Math.min(
+      0,
+      Number(score.netRLowerBound ?? score.meanConfidenceLowerBound) || 0,
+    ) * 0.35
+  )
+}
+
+function scoredDecision(base = {}, candidate = {}) {
+  return {
+    ...base,
+    playbookId: candidate.adaptive?.playbook?.key || base.playbookId,
+    playbookScore:
+      Number(candidate.adaptive?.playbook?.score) || base.playbookScore,
+    marketOpportunityFactor:
+      Number(candidate.adaptive?.marketOpportunityFactor)
+      || base.marketOpportunityFactor,
+    route: candidate.route || candidate.entryPlan?.type || base.route,
+    primaryPrice:
+      Number(candidate.entryPlan?.price) || base.primaryPrice,
+    priceType: candidate.entryPlan?.type === 'BREAKOUT'
+      ? 'BREAKOUT_WATCH'
+      : 'PULLBACK_WATCH',
+    stopPrice:
+      Number(candidate.exitPlan?.hardStopPrice) || base.stopPrice,
+    targetPrice:
+      Number(candidate.exitPlan?.takeProfitPrice) || base.targetPrice,
+    riskReward: Number(candidate.riskReward) || base.riskReward,
+    validUntil:
+      Number(candidate.entryPlan?.validUntil) || base.validUntil,
+    priceContractValid: true,
+    executionState: directV3Score(candidate.opportunityScore)
+      ? candidate.adaptive?.tier || 'V3_DIRECT'
+      : 'V3_UNAVAILABLE',
+    blockers: candidate.blockers || [],
+  }
 }
 
 function modeSlot(mode, now) {
@@ -132,6 +194,7 @@ export function runFormulaSelection({
     if (
       existing?.tradeDate === tradeDate
       && existing?.slot === slot
+      && existing?.v3Scoring?.usagePolicy === 'DIRECT'
     ) return { ...existing, reused: true }
     const claim = await store.claimRun(
       normalized,
@@ -205,18 +268,92 @@ export function runFormulaSelection({
       )
       const scoreMap = await scoreOpportunities(scoreInputs)
         .catch(() => new Map())
-      ledgerBatch.events = ledgerBatch.events.map((event) => ({
-        ...event,
-        scoreInput: scoreInputMap.get(event.code) || null,
-        opportunityScore: scoreMap.get(event.code) || null,
-      }))
-      const scoredCandidates = scanned.candidates.map((candidate) => ({
+      const initiallyScoredCandidates = scanned.candidates.map((candidate) => {
+        const score = verifiedScore(
+          scoreMap.get(candidate.code),
+          candidate,
+        )
+        return {
+          ...candidate,
+          validationState: directV3Score(score)
+            ? 'V3_DIRECT'
+            : 'V3_UNAVAILABLE',
+          opportunityScore: score,
+        }
+      })
+      const selectedCandidates = await scoreCandidatesWithDirectV3(
+        initiallyScoredCandidates,
+        {
+          mode: normalized.toUpperCase(),
+          slot,
+          market: marketContext?.market || {},
+          marketGate: marketContext?.marketGate || null,
+          now: timestamp,
+          scoreOpportunities,
+        },
+      )
+      const scoredCandidates = selectedCandidates.map((candidate) => ({
         ...candidate,
-        opportunityScore: scoreMap.get(candidate.code) || null,
-      }))
-      const readyScores = [...scoreMap.values()].filter(
-        (score) => score?.state === 'READY',
+        primaryPrice:
+          candidate.entryPlan?.price ?? candidate.primaryPrice,
+        priceType: candidate.entryPlan?.type === 'BREAKOUT'
+          ? 'BREAKOUT_WATCH'
+          : candidate.entryPlan
+            ? 'PULLBACK_WATCH'
+            : candidate.priceType,
+        stopPrice:
+          candidate.exitPlan?.hardStopPrice ?? candidate.stopPrice,
+        targetPrice:
+          candidate.exitPlan?.takeProfitPrice ?? candidate.targetPrice,
+        validationState: directV3Score(candidate.opportunityScore)
+          ? 'V3_DIRECT'
+          : 'V3_UNAVAILABLE',
+      })).sort((left, right) =>
+        v3Utility(right) - v3Utility(left)
+        || Number(right.score || 0) - Number(left.score || 0)
+        || String(left.code).localeCompare(String(right.code))
+      )
+      const candidateByCode = new Map(
+        scoredCandidates.map((candidate) => [candidate.code, candidate]),
+      )
+      ledgerBatch.events = ledgerBatch.events.map((event) => {
+        const candidate = candidateByCode.get(event.code)
+        if (!candidate) {
+          return {
+            ...event,
+            scoreInput: scoreInputMap.get(event.code) || null,
+            opportunityScore: verifiedScore(
+              scoreMap.get(event.code),
+              event.decision,
+            ),
+          }
+        }
+        const decision = scoredDecision(event.decision, candidate)
+        const scoredEvent = {
+          ...event,
+          decision,
+        }
+        let input = null
+        try {
+          input = buildOpportunityScoreInput({
+            event: scoredEvent,
+            batch: ledgerBatch,
+          })
+        } catch {}
+        return {
+          ...scoredEvent,
+          scoreInput: input,
+          opportunityScore: candidate.opportunityScore,
+        }
+      })
+      const readyScores = scoredCandidates.filter((candidate) =>
+        directV3Score(candidate.opportunityScore)
       ).length
+      const validationState = !scoredCandidates.length
+        ? 'NO_CANDIDATE'
+        : readyScores === scoredCandidates.length
+          ? 'V3_DIRECT'
+          : readyScores > 0 ? 'V3_PARTIAL' : 'V3_UNAVAILABLE'
       const result = {
         ok: true,
         schemaVersion: FORMULA_SELECTION_SCHEMA_VERSION,
@@ -225,16 +362,18 @@ export function runFormulaSelection({
         slot,
         generatedAt: timestamp,
         dataAsOf: timestamp,
-        validationState: 'OBSERVE_ONLY',
+        validationState,
         marketGate: marketContext?.marketGate || null,
         universe: scanned.universe,
         formulas: scanned.formulas,
         candidates: scoredCandidates,
-        shadowRanking: {
-          requested: scoreInputs.length,
-          ready: readyScores,
-          unavailable: Math.max(0, scoreInputs.length - readyScores),
-          appliedToOrder: false,
+        v3Scoring: {
+          usagePolicy: 'DIRECT',
+          requested: scoredCandidates.length,
+          direct: readyScores,
+          unavailable:
+            Math.max(0, scoredCandidates.length - readyScores),
+          appliedToOrder: true,
         },
         ledger: {
           schemaVersion: ledgerBatch.schemaVersion,

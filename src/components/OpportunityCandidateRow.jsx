@@ -69,6 +69,7 @@ function eventTime(value) {
 
 function entryTypeLabel(value) {
   return {
+    IMMEDIATE: '现价确认',
     PULLBACK: '回踩确认',
     BREAKOUT: '突破确认',
     TAIL_REVERSAL: '尾盘反转',
@@ -88,25 +89,26 @@ export default function OpportunityCandidateRow({
   onAdd,
 }) {
   const preCatalyst = opportunity.origin === 'PRE_CATALYST'
-  const state = preCatalyst
-    ? {
-        label: '潜伏预判',
-        icon: 'radar',
-        tone: 'waiting',
-      }
-    : STATE_VIEW[opportunity.state] || STATE_VIEW.AVOID
   const entryPlan = opportunity.entryPlan
   const exitPlan = opportunity.exitPlan
   const modelScore = opportunity.opportunityScore
   const modelReady = modelScore?.state === 'READY'
-    && modelScore?.outOfDistribution !== true
+    && modelScore?.usagePolicy === 'DIRECT'
+  const displayState = modelReady ? opportunity.state : 'AVOID'
+  const state = STATE_VIEW[displayState] || STATE_VIEW.AVOID
+  const displayBlockers = modelReady
+    ? opportunity.blockers
+    : [
+        '生产V3评分不可用，当前不执行',
+        ...(opportunity.blockers || []),
+      ]
   const blockerExplanation = explainOpportunityBlockers(
-    opportunity.blockers,
+    displayBlockers,
   )
-  const blockerDetails = opportunityBlockerDetails(opportunity.blockers)
+  const blockerDetails = opportunityBlockerDetails(displayBlockers)
   const canAdd = !added
   // 组合层只读提示：仅在候选被同板块集中或预算上限降级时展示，
-  // 它不改变个股主状态（主状态始终由 opportunity.state 驱动）。
+  // 它不改变个股主状态；缺少生产 V3 时由上方统一降级。
   const portfolioNote = portfolio
     && PORTFOLIO_VIEW[portfolio.portfolioState]
     ? {
@@ -162,16 +164,12 @@ export default function OpportunityCandidateRow({
                 ).toFixed(1)}
               </span>
               <span>
-                {opportunity.forecast?.state === 'READY'
-                  ? `3日启动率 ${probabilityPct(
-                      opportunity.forecast.pActivation3d,
-                    )}`
-                  : '启动概率校准中'}
+                {modelReady ? '生产V3已评分' : 'V3评分不可用'}
               </span>
             </span>
           </div>
         )}
-        {modelScore && (
+        {(modelScore || preCatalyst) && (
           <div
             className="opportunity-model-signal"
             data-state={modelReady ? 'ready' : 'pending'}
@@ -179,7 +177,7 @@ export default function OpportunityCandidateRow({
             {modelReady ? (
               <>
                 <Icon name="chart" size={12} />
-                <span>{modelScore.usagePolicy === 'DIRECT' ? 'V3模型估计' : modelScore.shadowOnly || modelScore.productionEligible === false ? '研究估计' : '模型估计'}</span>
+                <span>生产V3估计</span>
                 <span>可成交率 {probabilityPct(modelScore.pFill)}</span>
                 <span>
                   净盈利率 {probabilityPct(modelScore.pWinGivenFill)}
@@ -189,7 +187,7 @@ export default function OpportunityCandidateRow({
             ) : (
               <span className="opportunity-model-pending">
                 <Icon name="clock" size={12} />
-                <span>排序模型样本仍在积累，不影响当前公式结论</span>
+                <span>生产V3评分不可用，本次不执行</span>
               </span>
             )}
           </div>
@@ -209,12 +207,12 @@ export default function OpportunityCandidateRow({
           </p>
         )}
         <p>
-          {opportunity.state === 'READY'
+          {displayState === 'READY'
             ? '关注依据：'
-            : opportunity.state === 'AVOID'
+            : displayState === 'AVOID'
               ? '为什么先不买：'
               : '判断依据：'}
-          {opportunity.state === 'AVOID'
+          {displayState === 'AVOID'
             ? blockerExplanation
             : ((opportunity.evidence || []).slice(0, 2).join('；')
               || blockerExplanation)}

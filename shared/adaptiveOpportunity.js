@@ -1,7 +1,4 @@
 import {
-  isExecutableOpportunityScore,
-} from './opportunityScoreContract.js'
-import {
   scoreOpportunityPlaybooks,
 } from './opportunityPlaybooks.js'
 
@@ -51,6 +48,10 @@ function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, value))
 }
 
+function directV3Score(value) {
+  return value?.state === 'READY' && value?.usagePolicy === 'DIRECT'
+}
+
 function rounded(value, digits = 3) {
   const number = finite(value)
   return number == null ? null : +number.toFixed(digits)
@@ -98,28 +99,10 @@ function pricePlan(candidate = {}) {
   }
 }
 
-function executionProbability(candidate, plan, playbookScore) {
-  const supplied = finite(candidate.opportunityScore?.pFill)
-  if (supplied != null) return clamp(supplied, 0.02, 0.98)
-  const current = finite(candidate.quote?.price)
-  const distance = current > 0 && plan.entry > 0
-    ? Math.abs(plan.entry / current - 1) * 100
-    : 2
-  const triggerType = String(
-    candidate.entryPlan?.type || candidate.priceType || '',
-  )
-  const base = /IMMEDIATE/.test(triggerType)
-    ? 0.9
-    : /BREAKOUT/.test(triggerType)
-      ? 0.58
-      : 0.68
-  return clamp(
-    base
-      - Math.min(0.35, distance * 0.055)
-      + (playbookScore - 60) / 500,
-    0.15,
-    0.94,
-  )
+function executionProbability(candidate) {
+  if (!directV3Score(candidate.opportunityScore)) return null
+  const supplied = finite(candidate.opportunityScore.pFill)
+  return supplied == null ? null : clamp(supplied, 0.02, 0.98)
 }
 
 function scoreMatchesPlan(score, plan) {
@@ -138,7 +121,7 @@ function scoreMatchesPlan(score, plan) {
   })
 }
 
-function researchEstimate(candidate, plan, playbookScore) {
+function v3Estimate(candidate, plan) {
   const score = candidate.opportunityScore || {}
   const suppliedWin = finite(score.pWinGivenFill)
   const suppliedNetR = finite(score.expectedNetR)
@@ -147,40 +130,29 @@ function researchEstimate(candidate, plan, playbookScore) {
     ?? score.netRLowerBound,
   )
   if (
+    directV3Score(score)
+    &&
     suppliedWin != null
     && suppliedNetR != null
     && scoreMatchesPlan(score, plan)
   ) {
     return {
-      source: isExecutableOpportunityScore(score)
-        ? 'CALIBRATED_MODEL'
-        : 'SHADOW_MODEL',
+      source: 'V3_DIRECT',
       pWinGivenFill: clamp(suppliedWin, 0.02, 0.98),
       expectedNetR: suppliedNetR,
       lowerNetR: suppliedLower,
-      productionReady: isExecutableOpportunityScore(score),
+      productionReady: true,
       sampleCount: Math.max(
         0,
         Math.trunc(finite(score.calibration?.sampleCount) || 0),
       ),
     }
   }
-  const probability = clamp(
-    0.36 + playbookScore / 260,
-    0.4,
-    0.72,
-  )
-  const costR = plan.riskReward > 0
-    ? clamp(0.055 / Math.max(0.5, plan.riskReward), 0.025, 0.11)
-    : 0.08
-  const expectedNetR = probability * plan.riskReward
-    - (1 - probability)
-    - costR
   return {
-    source: 'RESEARCH_PRIOR',
-    pWinGivenFill: probability,
-    expectedNetR,
-    lowerNetR: expectedNetR - 0.55,
+    source: 'V3_UNAVAILABLE',
+    pWinGivenFill: null,
+    expectedNetR: null,
+    lowerNetR: null,
     productionReady: false,
     sampleCount: 0,
   }
@@ -221,7 +193,6 @@ function riskBudget({
   tier,
   plan,
   playbook,
-  estimate,
   marketContext,
 }) {
   if (!['ATTACK', 'PROBE'].includes(tier)) {
@@ -229,12 +200,9 @@ function riskBudget({
   }
   const base = finite(marketContext.baseRiskPct) ?? 0.35
   const edgeFactor = clamp(playbook.score / 70, 0.65, 1.25)
-  const confidenceFactor = estimate.productionReady
-    ? 1
-    : estimate.source === 'SHADOW_MODEL' ? 0.65 : 0.45
   const tierFactor = tier === 'ATTACK' ? 1 : 0.55
   const riskPct = clamp(
-    base * edgeFactor * confidenceFactor * tierFactor,
+    base * edgeFactor * tierFactor,
     0.08,
     tier === 'ATTACK' ? 0.8 : 0.28,
   )
@@ -268,23 +236,25 @@ export function evaluateAdaptiveOpportunity(
   )
   if (!plan.valid) hardBlockers.push('买卖价格合同不完整')
   const estimate = plan.valid
-    ? researchEstimate(
+    ? v3Estimate(
         candidate,
         plan,
-        playbooks.selected?.score || 0,
       )
     : {
-        source: 'UNAVAILABLE',
+        source: 'V3_UNAVAILABLE',
         pWinGivenFill: null,
         expectedNetR: null,
         lowerNetR: null,
         productionReady: false,
         sampleCount: 0,
       }
+  if (estimate.source !== 'V3_DIRECT') {
+    hardBlockers.push('V3评分不可用，当前不执行')
+  }
   if (
-    estimate.source === 'CALIBRATED_MODEL'
+    estimate.source === 'V3_DIRECT'
     && !(estimate.expectedNetR > 0)
-  ) hardBlockers.push('校准后的费后期望不大于0')
+  ) hardBlockers.push('V3费后期望不大于0')
   const tier = tierFor({
     plan,
     estimate,
@@ -296,8 +266,6 @@ export function evaluateAdaptiveOpportunity(
   const pFill = plan.valid
     ? executionProbability(
         candidate,
-        plan,
-        playbooks.selected?.score || 0,
       )
     : null
   const utility = pFill == null || estimate.expectedNetR == null
@@ -337,7 +305,6 @@ export function evaluateAdaptiveOpportunity(
       tier,
       plan,
       playbook: playbooks.selected,
-      estimate,
       marketContext,
     }),
     utility: rounded(utility, 4),

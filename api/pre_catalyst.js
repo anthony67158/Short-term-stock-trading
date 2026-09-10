@@ -11,14 +11,27 @@ import {
   fetchCninfoAnnouncements,
 } from './_pre_catalyst_data.js'
 import {
+  scoreCandidatesWithDirectV3,
+} from './_opportunity_candidate_v3.js'
+import {
   fetchAiSearchReference,
 } from './_ai_search.js'
+import {
+  fetchStockFund,
+} from './_stock_fund.js'
 import {
   preCatalystStore,
 } from './_pre_catalyst_store.js'
 import {
-  hydratePreCatalystForecasts,
-} from '../shared/preCatalystEvaluation.js'
+  collectTailPickMarketContext,
+} from './_tail_pick_data.js'
+import {
+  fetchTrendsTx,
+} from './stock_detail.js'
+import {
+  beijingMinutes,
+  isContinuousTrading,
+} from '../shared/tradingCalendar.js'
 
 const runFlights = new Map()
 const REUSE_MS = 10 * 60 * 1000
@@ -42,6 +55,8 @@ function collectProductionSnapshot(options = {}) {
         cacheKey: beijingSearchKey(now),
         cacheMinutes: 30,
       }),
+    fetchTrends: fetchTrendsTx,
+    fetchFund: fetchStockFund,
   })
 }
 
@@ -76,6 +91,8 @@ function publicError(error) {
 export function runPreCatalystScan({
   store = preCatalystStore,
   collect = collectProductionSnapshot,
+  collectMarketContext = collectTailPickMarketContext,
+  scoreCandidates = scoreCandidatesWithDirectV3,
   force = false,
   now = Date.now,
 } = {}) {
@@ -90,6 +107,10 @@ export function runPreCatalystScan({
       !force
       && previous?.generatedAt
       && timestamp - Number(previous.generatedAt) < REUSE_MS
+      && (previous.candidates || []).every((candidate) =>
+        candidate?.opportunityScore?.state === 'READY'
+        && candidate?.opportunityScore?.usagePolicy === 'DIRECT'
+      )
     ) {
       return { ok: true, reused: true, snapshot: previous }
     }
@@ -123,17 +144,49 @@ export function runPreCatalystScan({
     }
     try {
       await store.saveProgress(baseTask)
-      const collected = await collect({
-        now: timestamp,
-        previous,
-        readRelations: () => store.readRelations(),
-        onProgress: report,
+      const [collected, marketContext] = await Promise.all([
+        collect({
+          now: timestamp,
+          previous,
+          readRelations: () => store.readRelations(),
+          onProgress: report,
+        }),
+        collectMarketContext({ now: timestamp }).catch(() => ({
+          market: {},
+          marketGate: null,
+        })),
+      ])
+      await report({
+        stage: 'V3_SCORING',
+        percent: 94,
+        message: '正在使用生产V3比较价格路径',
       })
-      const evaluation = await store.readEvaluation()
-      const snapshot = hydratePreCatalystForecasts(
-        collected,
-        evaluation,
+      const candidates = await scoreCandidates(collected.candidates, {
+        mode: isContinuousTrading(timestamp) ? 'INTRADAY' : 'CLOSE',
+        slot: beijingMinutes(timestamp),
+        market: marketContext?.market || {},
+        marketGate: marketContext?.marketGate || null,
+        now: timestamp,
+      })
+      const directCandidates = candidates.filter((candidate) =>
+        candidate?.opportunityScore?.state === 'READY'
+        && candidate?.opportunityScore?.usagePolicy === 'DIRECT'
       )
+      const snapshot = {
+        ...collected,
+        model: {
+          state: directCandidates.length === candidates.length
+            ? 'DIRECT'
+            : 'PARTIAL',
+          usagePolicy: 'DIRECT',
+          version:
+            directCandidates[0]?.opportunityScore?.modelVersion || null,
+          scoredCandidates: directCandidates.length,
+          unavailableCandidates:
+            Math.max(0, candidates.length - directCandidates.length),
+        },
+        candidates,
+      }
       await store.saveSnapshot(snapshot)
       const completed = {
         ...task,
@@ -180,7 +233,7 @@ export async function readPreCatalystState(
     store.readEvaluation(),
   ])
   return {
-    latest: hydratePreCatalystForecasts(latest, evaluation),
+    latest,
     task,
     evaluation,
   }

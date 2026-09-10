@@ -179,7 +179,7 @@ test('预催化扫描从公告主体扩展到同题材低拥挤股票', async ()
   )
   assert.ok(snapshot.candidates.every((item) =>
     item.state === 'WAIT_TRIGGER'
-    && item.forecast.state === 'CALIBRATING',
+    && item.shadowFeatures?.evidenceCompleteness > 0,
   ))
   assert.equal(
     snapshot.candidates.find((item) => item.code === '300003')
@@ -350,10 +350,23 @@ test('预催化扫描先写运行态并在完成后发布快照', async () => {
       assert.deepEqual(await readRelations(), { edges: [] })
       return snapshot
     },
+    collectMarketContext: async () => ({
+      market: {},
+      marketGate: { allowed: true, riskTier: 'STANDARD' },
+    }),
+    scoreCandidates: async (candidates) => candidates.map((candidate) => ({
+      ...candidate,
+      opportunityScore: {
+        state: 'READY',
+        usagePolicy: 'DIRECT',
+        modelVersion: 'v3-production',
+      },
+    })),
   })
 
   assert.equal(result.ok, true)
-  assert.equal(saved, snapshot)
+  assert.equal(saved.candidates[0].opportunityScore.usagePolicy, 'DIRECT')
+  assert.equal(saved.model.state, 'DIRECT')
   assert.equal(progress[0].status, 'RUNNING')
   assert.equal(progress.at(-1).status, 'DONE')
   assert.equal(released, true)

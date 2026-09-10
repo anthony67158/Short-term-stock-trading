@@ -59,6 +59,8 @@ function plan({
 
 const readyScore = {
   state: 'READY',
+  usagePolicy: 'DIRECT',
+  modelVersion: 'v3-production',
   pFill: 0.72,
   pWinGivenFill: 0.61,
   expectedNetR: 0.28,
@@ -109,19 +111,14 @@ const intradayRows = [
       formula: '预催化扫描',
       price: 16.28,
       entry: 16.52,
-      blockers: ['预催化模型仍在积累样本，仅可等待量价确认'],
+      score: readyScore,
+      blockers: [],
       concepts: ['工业自动化'],
     }),
     origin: 'PRE_CATALYST',
     activationScore: 78.6,
     underReactionScore: 84.2,
     flowProbeScore: 62.5,
-    forecast: {
-      state: 'CALIBRATING',
-      pActivation1d: null,
-      pActivation3d: null,
-      sampleCount: 0,
-    },
     event: {
       eventType: 'ORDER',
       eventLabel: '重大订单',

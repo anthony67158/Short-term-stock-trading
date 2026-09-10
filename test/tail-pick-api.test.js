@@ -426,6 +426,85 @@ test('大盘环境风险只作提示，仍完整扫描并返回公式结果', as
   assert.equal(tasks.at(-1).status, 'DONE')
 })
 
+test('尾盘候选保存前统一使用生产V3评分', async () => {
+  let scored = 0
+  const store = {
+    readRun: async () => null,
+    claimRun: async () => ({ acquired: true }),
+    releaseRun: async () => true,
+    saveRun: async () => {},
+    saveTask: async () => {},
+  }
+  const result = await runTailPickScan({
+    store,
+    mode: 'scheduled',
+    now: () => beijingTimestamp('2026-08-28T14:51:00'),
+    collectMarketContext: async () => ({
+      market: {},
+      marketGate: {
+        allowed: true,
+        riskTier: 'STANDARD',
+        maxPositionPct: 5,
+        blockers: [],
+      },
+    }),
+    scanCandidates: async () => ({
+      universe: {
+        inspectedCount: 5500,
+        formulaMatchCount: 1,
+        nearFormulaCount: 0,
+      },
+      candidates: [{
+        code: '600001',
+        name: 'V3尾盘样本',
+        formula: { matched: true, signals: [] },
+        stockGate: { passed: true, evidence: [], blockers: [] },
+        intraday: { passed: true, price: 10, vwap: 9.96 },
+        quote: { price: 10, low: 9.5, amount: 100_000_000 },
+        sectorOpportunity: { matched: true },
+        fund: {
+          mainNetYi: 0.1,
+          retailNetYi: -0.05,
+          main5dYi: 0.3,
+          historyDayCount: 5,
+        },
+      }],
+      nearCandidates: [],
+    }),
+    scoreCandidates: async (candidates, options) => {
+      scored += candidates.length
+      assert.equal(options.mode, 'INTRADAY')
+      return candidates.map((candidate) => ({
+        ...candidate,
+        state: 'WAIT_TRIGGER',
+        entryPlan: { type: 'IMMEDIATE', price: 10, maxPositionPct: 3 },
+        exitPlan: {
+          hardStopPrice: 9.6,
+          takeProfitPrice: 10.8,
+        },
+        riskReward: 2,
+        opportunityScore: {
+          state: 'READY',
+          usagePolicy: 'DIRECT',
+          modelVersion: 'v3-production',
+          pFill: 0.8,
+          pWinGivenFill: 0.6,
+          expectedNetR: 0.3,
+          netRLowerBound: 0.1,
+        },
+        adaptive: { utility: 0.24 },
+      }))
+    },
+  })
+
+  assert.equal(scored, 1)
+  assert.equal(
+    result.result.candidates[0].opportunityScore.usagePolicy,
+    'DIRECT',
+  )
+  assert.equal(result.result.candidates[0].entryPlan.price, 10)
+})
+
 test('严格公式为空时仍返回独立接近观察池且不生成仓位', async () => {
   let saved = null
   const store = {
