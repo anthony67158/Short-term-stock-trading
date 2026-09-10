@@ -11,6 +11,8 @@ SERVICE_ROOT = os.path.abspath(os.path.join(HERE, ".."))
 sys.path.insert(0, SERVICE_ROOT)
 
 from opportunity_market_archive import (  # noqa: E402
+    FUND_HISTORY_KEY,
+    FUND_HISTORY_SCHEMA_VERSION,
     MANIFEST_KEY,
     build_market_day_artifact,
     encode_market_day,
@@ -166,6 +168,22 @@ class OpportunityMarketArchiveTest(unittest.TestCase):
         self.assertEqual(
             latest_market_day_before(bucket, "20260910")["date"],
             "20260909",
+        )
+        fund_history = json.loads(bucket.values[FUND_HISTORY_KEY])
+        self.assertEqual(
+            fund_history["schemaVersion"],
+            FUND_HISTORY_SCHEMA_VERSION,
+        )
+        self.assertEqual(
+            fund_history["dates"],
+            ["20260909", "20260910"],
+        )
+        self.assertEqual(
+            fund_history["stocks"]["000001"],
+            [
+                ["20260909", 0.1, -0.1, None],
+                ["20260910", 0.1, -0.1, None],
+            ],
         )
 
         publish_market_days(bucket, [artifact("20260909")], activated_at=3000)

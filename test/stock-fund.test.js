@@ -5,6 +5,7 @@ import {
   buildStockFundSnapshot,
   fetchStockFund,
   fetchResilientStockFund,
+  parseArchivedStockFundHistory,
   parseStockFundHistory,
 } from '../api/_stock_fund.js'
 import {
@@ -234,6 +235,51 @@ test('专用资金历史镜像不足时回退普通HTTP镜像补齐五日', asyn
   assert.equal(snapshot.historyDayCount, 5)
   assert.equal(snapshot.historyComplete, true)
   assert.deepEqual(snapshot.mainTrend5, [1, 1.2, 1.5, 1.8, 2])
+})
+
+test('公开历史接口不可用时使用OSS归档补齐五日资金', async () => {
+  let historyFetches = 0
+  const archived = parseArchivedStockFundHistory([
+    ['20260824', 1.2, -0.7, 3.5],
+    ['20260825', 1.5, -0.8, 4.1],
+    ['20260826', 1.8, -0.9, 4.8],
+    ['20260827', 2, -1, 5.2],
+  ])
+  const snapshot = await fetchResilientStockFund('002594', {
+    fetchedAt: Date.parse('2026-08-28T02:00:00.000Z'),
+    fetchArchivedHistory: async () => archived,
+    fetchHttpsHistory: async () => {
+      historyFetches += 1
+      return []
+    },
+    fetchImpl: async (url) => {
+      if (url.includes('/fflow/daykline/get')) {
+        historyFetches += 1
+        return { ok: true, async json() { return { data: null } } }
+      }
+      return {
+        ok: true,
+        async json() {
+          return {
+            data: {
+              f124: Date.parse('2026-08-28T07:00:00.000Z') / 1000,
+              f62: 181_000_000,
+              f84: -211_000_000,
+            },
+          }
+        },
+      }
+    },
+  })
+
+  assert.equal(historyFetches, 0)
+  assert.equal(snapshot.historyDayCount, 5)
+  assert.equal(snapshot.historyComplete, true)
+  assert.deepEqual(snapshot.mainTrend5, [1.2, 1.5, 1.8, 2, 1.81])
+  assert.deepEqual(
+    snapshot.retailTrend5,
+    [-0.7, -0.8, -0.9, -1, -2.11],
+  )
 })
 
 test('资金快照比较识别主力由流入转流出与散户反向承接', () => {

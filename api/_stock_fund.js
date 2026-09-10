@@ -1,7 +1,15 @@
 import { get as httpsGet } from 'node:https';
 
 import { parseEastmoneyPayload } from './_lib.js';
+import { readJson } from './_blob.js';
 import { buildRetailFlowEvidence } from '../shared/retailFundFlow.js';
+
+const FUND_HISTORY_SCHEMA_VERSION = 'opportunity-market-fund-history.v1';
+const FUND_HISTORY_KEY =
+  'opportunitymodel/market-data/v1/fund-history/latest.json';
+const FUND_HISTORY_CACHE_MS = 5 * 60 * 1000;
+let archivedFundHistoryCache = null;
+let archivedFundHistoryExpiresAt = 0;
 
 const DEDICATED_HISTORY_HOSTS = [
   'https://push2his.eastmoney.com',
@@ -112,6 +120,63 @@ export function parseStockFundHistory(lines = []) {
     })
     .filter(Boolean)
     .slice(-8);
+}
+
+export function parseArchivedStockFundHistory(rows = []) {
+  return (Array.isArray(rows) ? rows : [])
+    .map((row) => {
+      if (!Array.isArray(row)) return null;
+      const date = String(row[0] || '').slice(0, 10);
+      if (!/^\d{8}$/.test(date)) return null;
+      return {
+        date: `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}`,
+        mainNetYi: optionalNumber(row[1]),
+        retailNetYi: optionalNumber(row[2]),
+        mainNetPct: optionalNumber(row[3]),
+      };
+    })
+    .filter(Boolean)
+    .slice(-8);
+}
+
+export async function readArchivedStockFundHistory(
+  code,
+  {
+    now = Date.now(),
+    read = readJson,
+  } = {},
+) {
+  if (
+    !archivedFundHistoryCache
+    || now >= archivedFundHistoryExpiresAt
+  ) {
+    const payload = await read(FUND_HISTORY_KEY).catch(() => null);
+    archivedFundHistoryCache = (
+      payload?.schemaVersion === FUND_HISTORY_SCHEMA_VERSION
+      && payload?.stocks
+      && typeof payload.stocks === 'object'
+    ) ? payload : null;
+    archivedFundHistoryExpiresAt = now + FUND_HISTORY_CACHE_MS;
+  }
+  return parseArchivedStockFundHistory(
+    archivedFundHistoryCache?.stocks?.[String(code || '')],
+  );
+}
+
+function archivedHistoryLines(rows = []) {
+  return rows.map((row) => [
+    row.date,
+    optionalNumber(row.mainNetYi) == null
+      ? ''
+      : Number(row.mainNetYi) * 1e8,
+    optionalNumber(row.retailNetYi) == null
+      ? ''
+      : Number(row.retailNetYi) * 1e8,
+    '',
+    '',
+    '',
+    optionalNumber(row.mainNetPct) ?? '',
+  ].join(','));
 }
 
 export function buildStockFundSnapshot({
@@ -401,14 +466,23 @@ export async function fetchStockFund(code, {
   });
 }
 
-export function fetchResilientStockFund(code, options = {}) {
+export async function fetchResilientStockFund(code, options = {}) {
   const fetchImpl = options.fetchImpl || fetch;
   const fetchHttpsHistory =
     options.fetchHttpsHistory || fetchStockFundHistoryViaHttps;
+  const fetchArchivedHistory =
+    options.fetchArchivedHistory || readArchivedStockFundHistory;
+  const archivedHistoryPromise = Promise.resolve()
+    .then(() => fetchArchivedHistory(code))
+    .catch(() => []);
   return fetchStockFund(code, {
     ...options,
     fetchImpl,
     fetchHistory: options.fetchHistory || (async (path, settings) => {
+      const archived = await archivedHistoryPromise;
+      if (Array.isArray(archived) && archived.length >= 4) {
+        return archivedHistoryLines(archived);
+      }
       const viaHttps = await fetchHttpsHistory(path, settings);
       if (Array.isArray(viaHttps) && viaHttps.length >= 5) {
         return viaHttps;

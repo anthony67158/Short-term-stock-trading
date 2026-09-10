@@ -11,8 +11,10 @@ import time
 
 SCHEMA_VERSION = "opportunity-market-day.v1"
 MANIFEST_SCHEMA_VERSION = "opportunity-market-manifest.v1"
+FUND_HISTORY_SCHEMA_VERSION = "opportunity-market-fund-history.v1"
 PREFIX = "opportunitymodel/market-data/v1"
 MANIFEST_KEY = f"{PREFIX}/manifest.json"
+FUND_HISTORY_KEY = f"{PREFIX}/fund-history/latest.json"
 DATE_PATTERN = re.compile(r"^\d{8}$")
 CODE_PATTERN = re.compile(r"^\d{6}$")
 
@@ -246,6 +248,81 @@ def _existing_bytes(bucket, key):
         raise
 
 
+def build_recent_fund_history(artifacts, *, generated_at=None, limit=5):
+    ordered = sorted(
+        (
+            artifact for artifact in artifacts
+            if isinstance(artifact, dict)
+            and artifact.get("schemaVersion") == SCHEMA_VERSION
+            and DATE_PATTERN.fullmatch(str(artifact.get("date") or ""))
+        ),
+        key=lambda artifact: artifact["date"],
+    )[-max(1, int(limit or 5)):]
+    stocks = {}
+    for artifact in ordered:
+        date = artifact["date"]
+        for row in artifact.get("funds") or []:
+            code = str(row.get("code") or "")
+            if (
+                not CODE_PATTERN.fullmatch(code)
+                or str(row.get("date") or "") != date
+            ):
+                continue
+            main = _number(row.get("mainNetYi"))
+            retail = _number(row.get("retailNetYi"))
+            if main is None and retail is None:
+                continue
+            stocks.setdefault(code, []).append([
+                date,
+                main,
+                retail,
+                _number(row.get("mainNetPct", row.get("mainRatio"))),
+            ])
+    return {
+        "schemaVersion": FUND_HISTORY_SCHEMA_VERSION,
+        "generatedAt": int(generated_at or time.time() * 1000),
+        "dates": [artifact["date"] for artifact in ordered],
+        "stocks": stocks,
+    }
+
+
+def _load_market_day_entry(bucket, entry):
+    encoded = bucket.get_object(entry["key"]).read()
+    if hashlib.sha256(encoded).hexdigest() != entry.get("sha256"):
+        raise ValueError("市场数据分片摘要校验失败")
+    artifact = json.loads(gzip.decompress(encoded).decode("utf-8"))
+    if (
+        artifact.get("schemaVersion") != SCHEMA_VERSION
+        or artifact.get("date") != entry.get("date")
+    ):
+        raise ValueError("市场数据分片内容无效")
+    return artifact
+
+
+def publish_recent_fund_history(bucket, manifest, *, generated_at=None):
+    entries = [
+        row for row in (manifest or {}).get("dates", [])
+        if isinstance(row, dict)
+        and DATE_PATTERN.fullmatch(str(row.get("date") or ""))
+    ][-5:]
+    artifacts = [_load_market_day_entry(bucket, entry) for entry in entries]
+    payload = build_recent_fund_history(
+        artifacts,
+        generated_at=generated_at,
+    )
+    bucket.put_object(
+        FUND_HISTORY_KEY,
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8"),
+        headers={"Cache-Control": "no-cache"},
+    )
+    return payload
+
+
 def publish_market_days(bucket, artifacts, *, activated_at=None):
     current = _json(bucket, MANIFEST_KEY)
     if current is not None and current.get("schemaVersion") != MANIFEST_SCHEMA_VERSION:
@@ -306,7 +383,20 @@ def publish_market_days(bucket, artifacts, *, activated_at=None):
         ).encode("utf-8"),
         headers={"Cache-Control": "no-cache"},
     )
-    return {"manifest": manifest, "published": published}
+    fund_history = publish_recent_fund_history(
+        bucket,
+        manifest,
+        generated_at=manifest["activatedAt"],
+    )
+    return {
+        "manifest": manifest,
+        "published": published,
+        "fundHistory": {
+            "key": FUND_HISTORY_KEY,
+            "dates": fund_history["dates"],
+            "stocks": len(fund_history["stocks"]),
+        },
+    }
 
 
 def load_market_day(bucket, date):
@@ -322,13 +412,7 @@ def load_market_day(bucket, date):
     )
     if entry is None:
         return None
-    encoded = bucket.get_object(entry["key"]).read()
-    if hashlib.sha256(encoded).hexdigest() != entry.get("sha256"):
-        raise ValueError("市场数据分片摘要校验失败")
-    artifact = json.loads(gzip.decompress(encoded).decode("utf-8"))
-    if artifact.get("schemaVersion") != SCHEMA_VERSION or artifact.get("date") != date:
-        raise ValueError("市场数据分片内容无效")
-    return artifact
+    return _load_market_day_entry(bucket, entry)
 
 
 def latest_market_day_before(bucket, date):
