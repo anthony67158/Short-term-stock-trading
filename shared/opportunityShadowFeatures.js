@@ -159,6 +159,80 @@ function signedStreak(values) {
   return result
 }
 
+export function buildOpportunityFundFeatures(fund = {}) {
+  const rawMainNetYi = finite(fund.mainNetYi)
+  const rawRetailNetYi = finite(fund.retailNetYi)
+  const mainNetYi = rawMainNetYi ?? 0
+  const retailNetYi = rawRetailNetYi ?? 0
+  const mainTrend5 = fundTrend(fund.mainTrend5 ?? fund.trend5)
+  const retailTrend5 = fundTrend(fund.retailTrend5)
+  const historyDayCount = clamp(
+    finite(fund.historyDayCount)
+      ?? Math.max(mainTrend5.length, retailTrend5.length),
+    0,
+    5,
+  )
+  const historyComplete = (
+    historyDayCount >= 5
+    && mainTrend5.filter((value) => value != null).length >= 5
+    && retailTrend5.filter((value) => value != null).length >= 5
+  )
+  const fundHistoryAvailable = (
+    historyDayCount > 0
+    && (
+      mainTrend5.some((value) => value != null)
+      || retailTrend5.some((value) => value != null)
+    )
+  )
+  const main5dYi = finite(fund.main5dYi)
+    ?? (
+      historyComplete
+        ? mainTrend5.reduce((sum, value) => sum + value, 0)
+        : 0
+    )
+  const retail5dYi = finite(fund.retail5dYi)
+    ?? (
+      historyComplete
+        ? retailTrend5.reduce((sum, value) => sum + value, 0)
+        : 0
+    )
+  const flowDivergenceBalance5 = Array.from({
+    length: Math.max(mainTrend5.length, retailTrend5.length),
+  }).reduce((sum, _, index) => {
+    const main = mainTrend5[index]
+    const retail = retailTrend5[index]
+    if (main > 0 && retail < 0) return sum + 1
+    if (main < 0 && retail > 0) return sum - 1
+    return sum
+  }, 0)
+  return {
+    mainNetYi,
+    retailNetYi,
+    fundCurrentAvailable:
+      rawMainNetYi != null && rawRetailNetYi != null ? 1 : 0,
+    fundHistoryAvailable: fundHistoryAvailable ? 1 : 0,
+    fundHistoryDayCount: historyDayCount,
+    fundHistoryComplete: historyComplete ? 1 : 0,
+    main5dYi,
+    retail5dYi,
+    mainInflowDays5: finite(fund.inflowDays)
+      ?? mainTrend5.filter((value) => value > 0).length,
+    retailInflowDays5: finite(fund.retailInflowDays)
+      ?? retailTrend5.filter((value) => value > 0).length,
+    mainStreak5: finite(fund.mainStreak) ?? signedStreak(mainTrend5),
+    retailStreak5:
+      finite(fund.retailStreak) ?? signedStreak(retailTrend5),
+    mainTrendSlope5: trendSlope(mainTrend5),
+    retailTrendSlope5: trendSlope(retailTrend5),
+    flowDivergenceBalance5,
+    flowDivergence: mainNetYi > 0 && retailNetYi < 0
+      ? 1
+      : mainNetYi < 0 && retailNetYi > 0
+        ? -1
+        : 0,
+  }
+}
+
 function minuteStructure(trends) {
   const recent = (Array.isArray(trends) ? trends : [])
     .slice(-6)
@@ -198,33 +272,7 @@ export function buildOpportunityShadowFeatures({
     ?? daily.at(-2)?.close
   const minute = minuteStructure(trends)
   const atr = atr14(daily)
-  const rawMainNetYi = finite(fund.mainNetYi)
-  const rawRetailNetYi = finite(fund.retailNetYi)
-  const mainNetYi = rawMainNetYi ?? 0
-  const retailNetYi = rawRetailNetYi ?? 0
-  const mainTrend5 = fundTrend(fund.mainTrend5 ?? fund.trend5)
-  const retailTrend5 = fundTrend(fund.retailTrend5)
-  const historyDayCount = clamp(
-    finite(fund.historyDayCount)
-      ?? Math.max(mainTrend5.length, retailTrend5.length),
-    0,
-    5,
-  )
-  const historyComplete = (
-    historyDayCount >= 5
-    && mainTrend5.filter((value) => value != null).length >= 5
-    && retailTrend5.filter((value) => value != null).length >= 5
-  )
-  const fundCurrentAvailable = (
-    rawMainNetYi != null && rawRetailNetYi != null
-  )
-  const fundHistoryAvailable = (
-    historyDayCount > 0
-    && (
-      mainTrend5.some((value) => value != null)
-      || retailTrend5.some((value) => value != null)
-    )
-  )
+  const fundFeatures = buildOpportunityFundFeatures(fund)
   const mainRatio = finite(quote.mainRatio) ?? 0
   const sector = sectorOpportunity?.sector || sectorOpportunity || {}
   const sectorContextAvailable = !!(
@@ -273,11 +321,6 @@ export function buildOpportunityShadowFeatures({
     current,
   )
   const limits = limitStats(daily)
-  const flowDivergence = mainNetYi > 0 && retailNetYi < 0
-    ? 1
-    : mainNetYi < 0 && retailNetYi > 0
-      ? -1
-      : 0
   const orderImbalanceShort = clamp(
     mainRatio * 2
     + minute.slopePct * 8
@@ -306,19 +349,10 @@ export function buildOpportunityShadowFeatures({
   const evidenceCompleteness = [
     dailyTechnicalAvailable,
     intradayTechnicalAvailable,
-    fundCurrentAvailable,
-    historyComplete,
+    fundFeatures.fundCurrentAvailable === 1,
+    fundFeatures.fundHistoryComplete === 1,
     sectorContextAvailable,
   ].filter(Boolean).length / 5
-  const flowDivergenceBalance5 = Array.from({
-    length: Math.max(mainTrend5.length, retailTrend5.length),
-  }).reduce((sum, _, index) => {
-    const main = mainTrend5[index]
-    const retail = retailTrend5[index]
-    if (main > 0 && retail < 0) return sum + 1
-    if (main < 0 && retail > 0) return sum - 1
-    return sum
-  }, 0)
   const raw = {
     ret2dPct: daily.length >= 3 ? pct(current, daily.at(-3).close) : 0,
     ret5dPct: daily.length >= 6 ? pct(current, daily.at(-6).close) : 0,
@@ -330,35 +364,7 @@ export function buildOpportunityShadowFeatures({
     distanceToHighPct: pct(current, quote.high),
     vwapDistancePct,
     atrPct: current > 0 ? atr / current * 100 : 0,
-    mainNetYi,
-    retailNetYi,
-    fundCurrentAvailable: fundCurrentAvailable ? 1 : 0,
-    fundHistoryAvailable: fundHistoryAvailable ? 1 : 0,
-    fundHistoryDayCount: historyDayCount,
-    fundHistoryComplete: historyComplete ? 1 : 0,
-    main5dYi: finite(fund.main5dYi)
-      ?? (
-        historyComplete
-          ? mainTrend5.reduce((sum, value) => sum + value, 0)
-          : 0
-      ),
-    retail5dYi: finite(fund.retail5dYi)
-      ?? (
-        historyComplete
-          ? retailTrend5.reduce((sum, value) => sum + value, 0)
-          : 0
-      ),
-    mainInflowDays5: finite(fund.inflowDays)
-      ?? mainTrend5.filter((value) => value > 0).length,
-    retailInflowDays5: finite(fund.retailInflowDays)
-      ?? retailTrend5.filter((value) => value > 0).length,
-    mainStreak5: finite(fund.mainStreak) ?? signedStreak(mainTrend5),
-    retailStreak5:
-      finite(fund.retailStreak) ?? signedStreak(retailTrend5),
-    mainTrendSlope5: trendSlope(mainTrend5),
-    retailTrendSlope5: trendSlope(retailTrend5),
-    flowDivergenceBalance5,
-    flowDivergence,
+    ...fundFeatures,
     sectorRelativeStrength,
     sectorRankPct: sectorRank == null
       ? 0
