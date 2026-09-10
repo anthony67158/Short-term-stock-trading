@@ -32,6 +32,7 @@ LOCAL_RELEASE_ROOT = "/tmp/opportunitymodel-releases"
 HERE = os.path.dirname(os.path.abspath(__file__))
 LEGACY_PREDICTION_CONTRACT_VERSION = "opportunity-three-head.v1"
 PREDICTION_CONTRACT_VERSION = "opportunity-hurdle-q10.v1"
+ENSEMBLE_PREDICTION_CONTRACT_VERSION = "opportunity-seed-ensemble.v1"
 LEGACY_ARTIFACT_FILENAMES = {
     "pFill": "opportunity_fill_lgb.txt",
     "pWinGivenFill": "opportunity_win_lgb.txt",
@@ -47,6 +48,10 @@ ARTIFACT_FILENAMES = {
     "ranking": "opportunity_ranker_catboost.json",
     "meta": "opportunity_meta.json",
 }
+ENSEMBLE_ARTIFACT_FILENAMES = {
+    "ensemble": "opportunity_seed_ensemble.json",
+    "meta": "opportunity_meta.json",
+}
 
 _MODELS = None
 _META = None
@@ -55,9 +60,10 @@ _LOAD_LOCK = threading.Lock()
 
 
 class _CatBoostJsonRanker:
-    def __init__(self, path):
-        with open(path, encoding="utf-8") as handle:
-            payload = json.load(handle)
+    def __init__(self, path=None, *, payload=None):
+        if payload is None:
+            with open(path, encoding="utf-8") as handle:
+                payload = json.load(handle)
         trees = payload.get("oblivious_trees")
         if not isinstance(trees, list) or not trees:
             raise ValueError("CatBoost排序模型结构无效")
@@ -115,7 +121,11 @@ def validate_opportunity_manifest(manifest):
     ):
         raise ValueError("机会模型runId无效")
     files = manifest.get("files")
-    layouts = (ARTIFACT_FILENAMES, LEGACY_ARTIFACT_FILENAMES)
+    layouts = (
+        ENSEMBLE_ARTIFACT_FILENAMES,
+        ARTIFACT_FILENAMES,
+        LEGACY_ARTIFACT_FILENAMES,
+    )
     layout = next(
         (
             candidate
@@ -152,6 +162,8 @@ def artifact_filenames_for_metadata(metadata):
         return LEGACY_ARTIFACT_FILENAMES
     if contract == PREDICTION_CONTRACT_VERSION:
         return ARTIFACT_FILENAMES
+    if contract == ENSEMBLE_PREDICTION_CONTRACT_VERSION:
+        return ENSEMBLE_ARTIFACT_FILENAMES
     raise ValueError("机会模型预测合同无效")
 
 
@@ -181,6 +193,32 @@ def validate_opportunity_metadata(metadata, model_version=None):
         )
     ):
         raise ValueError("机会模型头合同无效")
+    if (
+        feature_schema_version
+        and metadata.get("predictionContract")
+        == ENSEMBLE_PREDICTION_CONTRACT_VERSION
+    ):
+        members = metadata.get("ensembleMembers")
+        size = int(metadata.get("ensembleSize") or 0)
+        seeds = [
+            int(member.get("seed") or 0)
+            for member in members
+        ] if isinstance(members, list) else []
+        if (
+            not 2 <= size <= 5
+            or not isinstance(members, list)
+            or len(members) != size
+            or len(set(seeds)) != size
+            or any(seed <= 0 for seed in seeds)
+            or any(
+                not isinstance(member, dict)
+                or not isinstance(member.get("calibration"), dict)
+                or not isinstance(member.get("rankingCalibration"), dict)
+                or not isinstance(member.get("rankValueCalibration"), dict)
+                for member in members
+            )
+        ):
+            raise ValueError("机会模型集成元数据无效")
     if (
         model_version
         and str(metadata.get("modelVersion") or "") != str(model_version)
@@ -214,6 +252,48 @@ def _load_release(paths, metadata_path):
     model_slots = tuple(slot for slot in layout if slot != "meta")
     if set(paths) != set(model_slots):
         raise ValueError("机会模型加载文件与预测合同不一致")
+    if (
+        metadata.get("predictionContract")
+        == ENSEMBLE_PREDICTION_CONTRACT_VERSION
+    ):
+        with open(paths["ensemble"], encoding="utf-8") as handle:
+            payload = json.load(handle)
+        members = payload.get("members")
+        if (
+            payload.get("schemaVersion")
+            != "opportunity-seed-ensemble-artifact.v1"
+            or payload.get("featureSchemaVersion")
+            != metadata.get("featureSchemaVersion")
+            or not isinstance(members, list)
+            or len(members) != metadata["ensembleSize"]
+        ):
+            raise ValueError("机会模型集成文件无效")
+        required = {
+            "pFill",
+            "pWinGivenFill",
+            "winPayoffR",
+            "lossPayoffR",
+            "netRLower10",
+            "ranking",
+        }
+        loaded = []
+        for index, member in enumerate(members):
+            models = member.get("models") or {}
+            if (
+                set(models) != required
+                or int(member.get("seed"))
+                != int(metadata["ensembleMembers"][index].get("seed"))
+            ):
+                raise ValueError("机会模型集成成员不完整")
+            loaded.append({
+                slot: (
+                    _CatBoostJsonRanker(payload=models[slot])
+                    if slot == "ranking"
+                    else lgb.Booster(model_str=models[slot])
+                )
+                for slot in required
+            })
+        return {"ensemble": loaded}, metadata
     models = {}
     for slot in model_slots:
         if slot == "ranking":
@@ -235,10 +315,14 @@ def _download_release():
         return _MODELS, _META
     release_dir = os.path.join(LOCAL_RELEASE_ROOT, run_id)
     os.makedirs(release_dir, exist_ok=True)
-    layout = (
-        ARTIFACT_FILENAMES
-        if set(manifest["files"]) == set(ARTIFACT_FILENAMES)
-        else LEGACY_ARTIFACT_FILENAMES
+    layout = next(
+        value
+        for value in (
+            ENSEMBLE_ARTIFACT_FILENAMES,
+            ARTIFACT_FILENAMES,
+            LEGACY_ARTIFACT_FILENAMES,
+        )
+        if set(manifest["files"]) == set(value)
     )
     final_paths = {
         slot: os.path.join(release_dir, filename)
@@ -297,7 +381,11 @@ def _download_release():
 
 
 def _bundled_release():
-    for layout in (ARTIFACT_FILENAMES, LEGACY_ARTIFACT_FILENAMES):
+    for layout in (
+        ENSEMBLE_ARTIFACT_FILENAMES,
+        ARTIFACT_FILENAMES,
+        LEGACY_ARTIFACT_FILENAMES,
+    ):
         paths = {
             slot: os.path.join(HERE, filename)
             for slot, filename in layout.items()
@@ -433,6 +521,88 @@ def _calibration_bucket(item):
     ])
 
 
+def _ensemble_prediction_arrays(models, metadata, matrix):
+    members = models.get("ensemble")
+    configs = metadata.get("ensembleMembers")
+    if (
+        not isinstance(members, list)
+        or not isinstance(configs, list)
+        or len(members) != len(configs)
+        or not members
+    ):
+        raise ValueError("机会模型集成成员不匹配")
+    fill_values = []
+    win_values = []
+    action_values = []
+    q10_values = []
+    rank_values = []
+    rank_percentiles = []
+    for member, config in zip(members, configs):
+        calibration = config["calibration"]
+        p_fill = apply_probability_calibrator(
+            np.clip(
+                _model_prediction(member["pFill"], matrix),
+                1e-8,
+                1 - 1e-8,
+            ),
+            calibration["pFill"],
+        )
+        p_win = apply_probability_calibrator(
+            np.clip(
+                _model_prediction(member["pWinGivenFill"], matrix),
+                1e-8,
+                1 - 1e-8,
+            ),
+            calibration["pWinGivenFill"],
+        )
+        win_payoff = np.maximum(
+            0,
+            _model_prediction(member["winPayoffR"], matrix),
+        )
+        loss_payoff = np.minimum(
+            0,
+            _model_prediction(member["lossPayoffR"], matrix),
+        )
+        ranking_raw = _model_prediction(member["ranking"], matrix)
+        fill_values.append(p_fill)
+        win_values.append(p_win)
+        action_values.append(
+            p_win * win_payoff + (1 - p_win) * loss_payoff
+        )
+        q10_values.append(
+            _model_prediction(member["netRLower10"], matrix)
+            + float(config.get("q10CalibrationOffset", 0.0))
+        )
+        rank_values.append(_rank_expected_net_r(
+            ranking_raw,
+            config["rankValueCalibration"],
+        ))
+        rank_percentiles.append(_empirical_percentile(
+            ranking_raw,
+            config["rankingCalibration"],
+        ))
+    action_value = np.mean(action_values, axis=0)
+    rank_value = np.mean(rank_values, axis=0)
+    blend_weight = max(0.0, min(
+        1.0,
+        float(metadata.get("rankBlendWeight", 0.0)),
+    ))
+    expected_net_r = (
+        (1 - blend_weight) * action_value
+        + blend_weight * rank_value
+    )
+    return {
+        "pFill": np.mean(fill_values, axis=0),
+        "pWinGivenFill": np.mean(win_values, axis=0),
+        "expectedNetR": expected_net_r,
+        "netRLowerBound": np.minimum(
+            np.mean(q10_values, axis=0),
+            expected_net_r,
+        ),
+        "rankingScore": np.mean(rank_percentiles, axis=0),
+    }
+
+
 def predict_opportunity_items(
     payload,
     *,
@@ -457,86 +627,101 @@ def predict_opportunity_items(
             ],
             dtype=np.float32,
         )
-        raw_fill = np.clip(
-            _model_prediction(models["pFill"], matrix),
-            1e-8,
-            1 - 1e-8,
-        )
-        raw_win = np.clip(
-            _model_prediction(models["pWinGivenFill"], matrix),
-            1e-8,
-            1 - 1e-8,
-        )
         calibration = metadata["calibration"]
-        p_fill = apply_probability_calibrator(
-            raw_fill,
-            calibration["pFill"],
-        )
-        p_win = apply_probability_calibrator(
-            raw_win,
-            calibration["pWinGivenFill"],
-        )
         prediction_contract = str(
             metadata.get("predictionContract")
             or LEGACY_PREDICTION_CONTRACT_VERSION
         )
-        if prediction_contract == PREDICTION_CONTRACT_VERSION:
-            win_payoff = np.maximum(
-                0,
-                _model_prediction(models["winPayoffR"], matrix),
-            )
-            loss_payoff = np.minimum(
-                0,
-                _model_prediction(models["lossPayoffR"], matrix),
-            )
-            action_value = (
-                p_win * win_payoff
-                + (1 - p_win) * loss_payoff
-            )
-            ranking_raw = _model_prediction(
-                models["ranking"],
+        if (
+            prediction_contract
+            == ENSEMBLE_PREDICTION_CONTRACT_VERSION
+        ):
+            ensemble = _ensemble_prediction_arrays(
+                models,
+                metadata,
                 matrix,
             )
-            rank_value = _rank_expected_net_r(
-                ranking_raw,
-                metadata.get("rankValueCalibration"),
-            )
-            blend_weight = max(0.0, min(
-                1.0,
-                float(metadata.get("rankBlendWeight", 0.0)),
-            ))
-            expected_net_r = (
-                (1 - blend_weight) * action_value
-                + blend_weight * rank_value
-            )
-            q10_offset = float(
-                (metadata.get("risk") or {}).get(
-                    "q10CalibrationOffset",
-                    0.0,
-                )
-            )
-            net_r_lower_bound = np.minimum(
-                _model_prediction(models["netRLower10"], matrix)
-                + q10_offset,
-                expected_net_r,
-            )
-            ranking_score = _empirical_percentile(
-                ranking_raw,
-                metadata.get("rankingCalibration"),
-            )
+            p_fill = ensemble["pFill"]
+            p_win = ensemble["pWinGivenFill"]
+            expected_net_r = ensemble["expectedNetR"]
+            net_r_lower_bound = ensemble["netRLowerBound"]
+            ranking_score = ensemble["rankingScore"]
         else:
-            expected_net_r = _model_prediction(
-                models["expectedNetR"],
-                matrix,
+            raw_fill = np.clip(
+                _model_prediction(models["pFill"], matrix),
+                1e-8,
+                1 - 1e-8,
             )
-            residual_lower = float(
-                (metadata.get("risk") or {}).get(
-                    "netRResidualLower10",
-                    0.0,
+            raw_win = np.clip(
+                _model_prediction(models["pWinGivenFill"], matrix),
+                1e-8,
+                1 - 1e-8,
+            )
+            p_fill = apply_probability_calibrator(
+                raw_fill,
+                calibration["pFill"],
+            )
+            p_win = apply_probability_calibrator(
+                raw_win,
+                calibration["pWinGivenFill"],
+            )
+            if prediction_contract == PREDICTION_CONTRACT_VERSION:
+                win_payoff = np.maximum(
+                    0,
+                    _model_prediction(models["winPayoffR"], matrix),
                 )
-            )
-            net_r_lower_bound = expected_net_r + residual_lower
-            ranking_score = np.full(len(matrix), np.nan)
+                loss_payoff = np.minimum(
+                    0,
+                    _model_prediction(models["lossPayoffR"], matrix),
+                )
+                action_value = (
+                    p_win * win_payoff
+                    + (1 - p_win) * loss_payoff
+                )
+                ranking_raw = _model_prediction(
+                    models["ranking"],
+                    matrix,
+                )
+                rank_value = _rank_expected_net_r(
+                    ranking_raw,
+                    metadata.get("rankValueCalibration"),
+                )
+                blend_weight = max(0.0, min(
+                    1.0,
+                    float(metadata.get("rankBlendWeight", 0.0)),
+                ))
+                expected_net_r = (
+                    (1 - blend_weight) * action_value
+                    + blend_weight * rank_value
+                )
+                q10_offset = float(
+                    (metadata.get("risk") or {}).get(
+                        "q10CalibrationOffset",
+                        0.0,
+                    )
+                )
+                net_r_lower_bound = np.minimum(
+                    _model_prediction(models["netRLower10"], matrix)
+                    + q10_offset,
+                    expected_net_r,
+                )
+                ranking_score = _empirical_percentile(
+                    ranking_raw,
+                    metadata.get("rankingCalibration"),
+                )
+            else:
+                expected_net_r = _model_prediction(
+                    models["expectedNetR"],
+                    matrix,
+                )
+                residual_lower = float(
+                    (metadata.get("risk") or {}).get(
+                        "netRResidualLower10",
+                        0.0,
+                    )
+                )
+                net_r_lower_bound = expected_net_r + residual_lower
+                ranking_score = np.full(len(matrix), np.nan)
     except Exception:
         return [
             not_ready_prediction(item, "MODEL_INVALID")
