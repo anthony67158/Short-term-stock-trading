@@ -10,6 +10,7 @@ from opportunity_dataset import (
     build_opportunity_dataset,
     opportunity_dataset_readiness,
 )
+from opportunity_contract import FEATURE_SCHEMA_VERSION
 
 
 HISTORY_SCHEMA_VERSION = "opportunity-history.v1"
@@ -92,7 +93,7 @@ def normalize_history_outcomes(payload):
             not isinstance(value, dict)
             or value.get("maturity") != "MATURED"
             or value.get("scoreInput", {}).get("schemaVersion")
-            != "opportunity-score-feature.v3"
+            != FEATURE_SCHEMA_VERSION
         ):
             continue
         decision_id = str(value.get("decisionId") or "")

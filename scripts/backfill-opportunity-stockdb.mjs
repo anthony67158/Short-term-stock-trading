@@ -115,7 +115,7 @@ export function parseStockDbBackfillArgs(argv = []) {
     throw new Error('StockDB回填日期范围无效')
   }
   const provider = String(values.provider || 'stockdb').toLowerCase()
-  if (!['stockdb', 'tushare'].includes(provider)) {
+  if (!['stockdb', 'tushare', 'archive'].includes(provider)) {
     throw new Error('历史回填数据源无效')
   }
   return {
@@ -274,8 +274,30 @@ async function runTushareSectorExporter(output) {
   ], 'Tushare历史行业成员导出')
 }
 
+async function runArchiveExporter(options) {
+  return runPythonExporter([
+    path.join(
+      ROOT,
+      'qlib-service',
+      'export_opportunity_market_archive.py',
+    ),
+    '--work-dir',
+    options.workDir,
+    '--from',
+    options.from,
+    '--to',
+    options.to,
+    '--max-per-min',
+    String(options.maxPerMinute),
+  ], 'OSS市场归档导出')
+}
+
 async function runMinuteExporter(options, manifestPath, minuteDirectory) {
-  if (options.provider === 'tushare') {
+  if (options.provider === 'archive') {
+    await runArchiveExporter(options)
+    cachedDaily = await readGzipJson(dailyFile)
+    cachedFunds = await readGzipJson(fundFile)
+  } else if (options.provider === 'tushare') {
     return runPythonExporter([
       path.join(ROOT, 'scripts', 'tushare_export_history.py'),
       '--stage',
@@ -387,6 +409,7 @@ async function main() {
     : []
   const plan = selectReplayDates(daily, {
     signalDays: options.signalDays,
+    settlementDays: options.provider === 'archive' ? 6 : 7,
   })
   validateCoverage(daily, funds, plan, options.universeSize)
   const universesByDate = new Map()
@@ -413,11 +436,14 @@ async function main() {
     processingDates: manifest.dates.length,
     maximumCodes: Math.max(...manifest.dates.map((row) => row.codes.length)),
   })
-  await runMinuteExporter(options, manifestPath, minuteDirectory)
+  if (options.provider !== 'archive') {
+    await runMinuteExporter(options, manifestPath, minuteDirectory)
+  }
 
-  const sourceType = options.provider === 'tushare'
-    ? 'TUSHARE_CAUSAL_REPLAY'
-    : 'STOCKDB_CAUSAL_REPLAY'
+  const sourceType = {
+    tushare: 'TUSHARE_CAUSAL_REPLAY',
+    archive: 'TUSHARE_OSS_CAUSAL_REPLAY',
+  }[options.provider] || 'STOCKDB_CAUSAL_REPLAY'
   const replayDates = replayDatesFromManifest(manifest)
   const signalSet = new Set(plan.signalDates)
   const barsByCode = new Map()
@@ -478,7 +504,9 @@ async function main() {
     })
   }
 
-  const existing = await loadExistingOutcomes()
+  const existing = options.provider === 'archive'
+    ? []
+    : await loadExistingOutcomes()
   const merged = mergeHistoricalOutcomes(outcomes, existing)
   const output = {
     schemaVersion: 'opportunity-outcome-export.v1',

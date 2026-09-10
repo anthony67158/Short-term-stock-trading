@@ -41,6 +41,7 @@ function safeOutcome(value) {
       'opportunity-score-feature.v1',
       'opportunity-score-feature.v2',
       'opportunity-score-feature.v3',
+      'opportunity-score-feature.v4',
     ].includes(value?.scoreInput?.schemaVersion)
   ) return null
   return {
@@ -57,6 +58,10 @@ function safeOutcome(value) {
     fillStatus: String(value.fillStatus || ''),
     exitStatus: String(value.exitStatus || ''),
     scoreInput: value.scoreInput,
+    reviewScoreInput: value.reviewScoreInput || null,
+    trigger: value.trigger || null,
+    entry: value.entry || null,
+    exit: value.exit || null,
     metrics: value.metrics && typeof value.metrics === 'object'
       ? value.metrics
       : null,

@@ -8,7 +8,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SERVICE_ROOT = os.path.abspath(os.path.join(HERE, ".."))
 sys.path.insert(0, SERVICE_ROOT)
 
-from opportunity_contract import FEATURE_NAMES  # noqa: E402
+from opportunity_contract import (  # noqa: E402
+    FEATURE_NAMES,
+    FEATURE_SCHEMA_VERSION,
+)
 from opportunity_history import (  # noqa: E402
     HISTORY_MANIFEST_KEY,
     PLANNED_RISK_BASIS,
@@ -53,7 +56,7 @@ def outcome(index, filled, net_r=None):
         "maturity": "MATURED",
         "fillStatus": "FILLED" if filled else "NOT_TRIGGERED",
         "scoreInput": {
-            "schemaVersion": "opportunity-score-feature.v3",
+            "schemaVersion": FEATURE_SCHEMA_VERSION,
             "asOf": 1_800_000_000_000 + index,
             "code": f"600{index:03d}",
             "formulaId": "UNKNOWN",

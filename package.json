@@ -27,6 +27,7 @@
     "opportunity:export": "node scripts/export-opportunity-outcomes.mjs",
     "opportunity:backfill-stockdb": "node --max-old-space-size=6144 scripts/backfill-opportunity-stockdb.mjs",
     "opportunity:backfill-tushare": "node --max-old-space-size=6144 scripts/backfill-opportunity-stockdb.mjs --provider tushare",
+    "opportunity:replay-archive": "node --max-old-space-size=6144 scripts/backfill-opportunity-stockdb.mjs --provider archive",
     "opportunity:archive-tushare": "python3 qlib-service/publish_tushare_market_history.py",
     "opportunity:archive-daily": "python3 qlib-service/archive_tushare_market_day.py",
     "opportunity:dataset": "python3 qlib-service/opportunity_dataset.py --input qlib-service/opportunity-outcomes.json --output qlib-service/opportunity-dataset.npz",
