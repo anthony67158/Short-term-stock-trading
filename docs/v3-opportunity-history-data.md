@@ -60,9 +60,11 @@ opportunitymodel/training-data/runs/
   1789040187715-d304fed5814faba0.json.gz
 ```
 
-当前激活模型为 `opportunity-score.20260910T112451Z`。它继续使用
-`usagePolicy=DIRECT`，但 `productionEligible=false`：这是当前最佳可用基准，
-不代表已通过全部稳定盈利门槛。
+当前激活模型为 `opportunity-score.20260910T134128Z.ensemble3`。它将三个
+固定种子的成员预测在校准后平均，回测 Top5 均值为 `+0.3361R`、总体下界为
+`+0.1047R`。它继续使用 `usagePolicy=DIRECT`，但
+`productionEligible=false`：最新独立窗口仍为负，不代表已通过全部稳定盈利
+门槛。
 
 生产晋级最低要求为 1000 个成熟候选、300 个完整成交结果和 60 个独立
 交易日。数量达到只代表可以训练，模型还必须通过独立时间窗、Top5 费后净R
@@ -320,6 +322,6 @@ LightGBM + CatBoost 组合直接作为 `usagePolicy=DIRECT` 基准。是否通�
 门槛仍单独记录，不能伪造。任何新增风险仍必须同时通过价格、现金、T+1、
 费后正期望和账户风险检查。
 
-V5 激活版本为 `opportunity-score.20260910T112451Z`。线上
-`/model_info` 已确认六个模型头全部加载，`baselineSelected=true`；
-`productionEligible=false` 如实保留当前样本外稳定性仍未过线的事实。
+V5 三种子集成版本为 `opportunity-score.20260910T134128Z.ensemble3`。
+线上 `/model_info` 已确认集成模型加载、`baselineSelected=true`；
+`productionEligible=false` 如实保留最新窗口仍未过线的事实。

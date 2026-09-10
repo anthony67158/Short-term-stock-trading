@@ -29,8 +29,10 @@ npm run opportunity:train
 ```
 
 少于 1000 个成熟候选、300 个完整成交结果或 60 个独立交易日时，训练只生成
-`NOT_READY` 报告。当前组合保存 LightGBM 的成交、胜率、胜单R、亏单R、Q10
-五个动作价值头，以及一个 CatBoost `YetiRankPairwise` 排序头。
+`NOT_READY` 报告。当前组合保存三个固定种子的 LightGBM 成交、胜率、
+胜单R、亏单R、Q10 动作价值头，以及三个 CatBoost `YetiRankPairwise`
+排序头。每个成员独立校准后在预测层平均，最终仍只输出一组概率、动作价值和
+排序分。
 排序头在训练端导出为 JSON 对称树，线上由 NumPy 等价执行，不携带 CatBoost
 runtime；与原生 CatBoost 的 1,000 条样本对拍最大绝对误差为
 `1.67e-16`。
@@ -60,9 +62,10 @@ python3 upload_opportunity_model.py \
 模型启用由 `usagePolicy=DIRECT` 明确表达；不得伪造评测成功。
 
 `.github/workflows/daily-retrain.yml` 在每个工作日北京时间 01:15 自动执行
-成熟样本收集、三折三种子回测、V3组合训练、当前基准直接发布、资格诊断和状态
-发布。资格检查未全部通过不会伪造 `productionEligible`，也不会撤销用户指定
-的当前 `DIRECT` 基准。生产采样由主 FC 在
+成熟样本收集、三折三种子回测、预测级集成训练、当前基准直接发布、资格诊断和
+状态发布。回测不会用负期望候选补满 Top5，无机会日期按 `0R` 保留。资格检查
+未全部通过不会伪造 `productionEligible`，也不会撤销用户指定的当前 `DIRECT`
+基准。生产采样由主 FC 在
 10:20、13:40、15:10 运行，17:10 结算。历史加速回填的数据合同见
 `../docs/v3-opportunity-history-data.md`。
 
