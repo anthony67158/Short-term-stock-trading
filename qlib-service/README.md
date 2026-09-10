@@ -15,6 +15,10 @@ https://quant-score-nlxgclpdbu.cn-hangzhou.fcapp.run
 分布外只提示，不关闭预测。文件、特征合同或预测数值异常仍如实报错，
 不影响现有 36 维 `/predict`。
 
+当前机会特征合同为 `opportunity-score-feature.v5`，共 120 维。V5 增加
+五日主力/小单连续性及数据可用性字段；旧 V1-V4 请求在量化服务内按版本投影，
+新增字段补零，支持主服务与模型的无中断切换。
+
 机会模型训练必须从项目根目录执行以下顺序：
 
 ```bash
