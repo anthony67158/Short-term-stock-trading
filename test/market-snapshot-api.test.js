@@ -6,7 +6,8 @@ import {
   resetMarketSnapshotCache,
 } from '../api/market_snapshot.js'
 
-test('聚合行情复用同一批涨跌停数据并返回六类快照', async () => {
+test('聚合行情复用同一批涨跌停数据并返回国内外七类快照', async () => {
+  resetMarketSnapshotCache()
   const poolCalls = []
   const pools = {
     zt: { kind: 'zt', list: [{ code: '600001' }] },
@@ -26,6 +27,10 @@ test('聚合行情复用同一批涨跌停数据并返回六类快照', async ()
     }),
     sectors: async () => ({ ok: true, list: [{ code: 'BK001' }] }),
     movers: async (kind) => ({ ok: true, kind, list: [] }),
+    overseas: async () => ({
+      indices: [{ label: '纳斯达克', price: 18000, pct: 0.8 }],
+      commodities: [{ label: '美原油(WTI)', price: 70, pct: -0.3 }],
+    }),
     now: () => 123,
   })
 
@@ -36,6 +41,8 @@ test('聚合行情复用同一批涨跌停数据并返回六类快照', async ()
   assert.equal(result.sectors.list[0].code, 'BK001')
   assert.equal(result.movers.kind, 'inflow')
   assert.equal(result.speed.kind, 'speed')
+  assert.equal(result.overseas.indices[0].label, '纳斯达克')
+  assert.equal(result.overseas.commodities[0].label, '美原油(WTI)')
   assert.deepEqual(result.errors, {})
 })
 
@@ -53,6 +60,7 @@ test('聚合行情允许单个数据源失败并缓存并发请求', async () =>
     },
     limitPool: async (kind) => ({ kind, list: [] }),
     movers: async (kind) => ({ ok: true, kind, list: [] }),
+    overseas: async () => ({ indices: [], commodities: [] }),
     now: () => 1_000,
   }
 
