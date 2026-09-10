@@ -4,6 +4,9 @@ import { fetchOverseas } from './_market_data.js'
 import { fetchMarketSnapshot } from './market.js'
 import { fetchMovers } from './board.js'
 import { fetchSectorList } from './sectors.js'
+import {
+  buildMarketFundsSnapshot,
+} from '../shared/marketFunds.js'
 
 const CACHE_TTL_MS = 8_000
 const OVERSEAS_CACHE_TTL_MS = 60_000
@@ -80,11 +83,18 @@ export async function collectMarketSnapshot({
       .map((result, index) => [names[index], settledError(result)])
       .filter(([, error]) => error),
   )
+  const marketValue = settledValue(results[0])
+  const sectorsValue = settledValue(results[1])
   return {
     ok: results.some((result) => result.status === 'fulfilled'),
     updatedAt: timestamp,
-    market: settledValue(results[0]),
-    sectors: settledValue(results[1]),
+    market: marketValue,
+    sectors: sectorsValue,
+    marketFunds: buildMarketFundsSnapshot({
+      market: marketValue,
+      sectors: sectorsValue,
+      updatedAt: timestamp,
+    }),
     limitUp: settledValue(results[2]),
     brokenLimit: settledValue(results[3]),
     movers: settledValue(results[4]),

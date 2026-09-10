@@ -247,7 +247,11 @@ export async function fetchMarketSnapshot({
     });
   };
   const shAmts = klAmt(shK), szAmts = klAmt(szK);
-  let marketAmountYi = indexAmountYi, volVsAvg5 = null, volLevel = null;
+  let marketAmountYi = indexAmountYi;
+  let avg5AmountYi = null;
+  let amountDeltaVsAvg5Yi = null;
+  let volVsAvg5 = null;
+  let volLevel = null;
   let volumeComparison = { comparable: false, tradeDate: null };
   if (shAmts.length && szAmts.length) {
     const n = Math.min(shAmts.length, szAmts.length);
@@ -265,6 +269,12 @@ export async function fetchMarketSnapshot({
       : 0;
     if (todayAmt > 0) marketAmountYi = +(todayAmt / 1e8).toFixed(0);
     if (todayAmt > 0 && avg5 > 0) {
+      avg5AmountYi = +(avg5 / 1e8).toFixed(1);
+      if (volumeComparison.comparable) {
+        amountDeltaVsAvg5Yi = +(
+          (todayAmt - avg5) / 1e8
+        ).toFixed(1);
+      }
       volVsAvg5 = +((todayAmt / avg5 - 1) * 100).toFixed(1);
       volLevel = volVsAvg5 >= 15
         ? '放量'
@@ -290,6 +300,8 @@ export async function fetchMarketSnapshot({
       total: marketBreadth.total,
       complete: marketBreadth.complete,
       amountYi: marketAmountYi,
+      avg5AmountYi,
+      amountDeltaVsAvg5Yi,
       volVsAvg5,
       volLevel,
       volumeComparable: volumeComparison.comparable,

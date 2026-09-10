@@ -21,11 +21,22 @@ test('聚合行情复用同一批涨跌停数据并返回国内外七类快照',
     },
     market: async (options) => ({
       ok: true,
+      breadth: {
+        amountYi: 1_000,
+        volVsAvg5: 25,
+        volumeComparable: true,
+      },
       zt: await options.limitUpPool,
       dt: await options.limitDownPool,
       zb: await options.brokenLimitPool,
     }),
-    sectors: async () => ({ ok: true, list: [{ code: 'BK001' }] }),
+    sectors: async () => ({
+      ok: true,
+      list: [
+        { code: 'BK001', mainInflow: 300_000_000 },
+        { code: 'BK002', mainInflow: -100_000_000 },
+      ],
+    }),
     movers: async (kind) => ({ ok: true, kind, list: [] }),
     overseas: async () => ({
       indices: [{ label: '纳斯达克', price: 18000, pct: 0.8 }],
@@ -43,6 +54,9 @@ test('聚合行情复用同一批涨跌停数据并返回国内外七类快照',
   assert.equal(result.speed.kind, 'speed')
   assert.equal(result.overseas.indices[0].label, '纳斯达克')
   assert.equal(result.overseas.commodities[0].label, '美原油(WTI)')
+  assert.equal(result.marketFunds.mainNetYi, 2)
+  assert.equal(result.marketFunds.direction, 'INFLOW')
+  assert.equal(result.marketFunds.turnover.deltaYi, 200)
   assert.deepEqual(result.errors, {})
 })
 
