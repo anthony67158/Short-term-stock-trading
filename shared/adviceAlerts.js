@@ -20,6 +20,36 @@ function defaultId() {
   return `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
 }
 
+export function isCurrentDecisionAlert(alert, entry, now = Date.now()) {
+  if (!alert?.candCode && !alert?.actCode) return true
+  const advice = entry?.advice || entry
+  if (advice?.decisionSource?.engine !== 'V3' || alert.decisionEngine !== 'V3') return false
+  return alert.decisionId === advice.decisionPlan?.decisionId
+    && Date.parse(alert.validUntil) > now
+}
+
+export function v3ActionAlertMessage(alert, quote) {
+  const price = Number(quote?.price)
+  const reference = Number(alert.value)
+  if (!(price > 0 && reference > 0)) return null
+  if (alert.actionSide === 'BUY'
+    && Math.abs(price / reference - 1) > 0.015) return null
+  return alert.timing || alert.judgeContext?.actionPlan || null
+}
+
+function v3Alert(alert, advice) {
+  if (advice.decisionSource?.engine !== 'V3') return alert
+  return {
+    ...alert, decisionEngine: 'V3',
+    decisionId: advice.decisionPlan.decisionId,
+    validUntil: advice.decisionPlan.validUntil,
+    actionSide: ['BUY', 'ADD'].includes(advice.decisionPlan.action) ? 'BUY' : 'SELL',
+    timing: advice.actionPlan,
+    // An approved V3 action is a notification, not a second LLM decision.
+    phase: alert.reviewOnly ? alert.phase : null,
+  }
+}
+
 function baseAlert({ idFactory, now, code, name, op, value, note }) {
   return {
     id: idFactory(),
@@ -154,7 +184,8 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
       alert.code === code && alert.planId === liveHolder.id
       && !(alert.op === 'lte' ? liveHolder.slManual : liveHolder.tpManual)
     ))
-    const next = [...retained, ...monitoringAlerts(data, code, advice, now)]
+    const next = [...retained, ...monitoringAlerts(data, code, advice, now)
+      .map((alert) => v3Alert(alert, advice))]
     const changed = JSON.stringify(alerts) !== JSON.stringify(next)
     data.alerts = next
     return changed
@@ -528,6 +559,8 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
   }
 
   if (oldProjected.length !== projected.length) changed = true
-  data.alerts = [...projected, ...rest]
+  const finalProjected = projected.map((alert) => v3Alert(alert, advice))
+  if (JSON.stringify(finalProjected) !== JSON.stringify(oldProjected)) changed = true
+  data.alerts = [...finalProjected, ...rest]
   return changed
 }

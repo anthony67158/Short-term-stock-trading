@@ -23,6 +23,7 @@ import { sendPush } from './_push_send.js';
 import { ensureConfig } from './_llm_config.js';
 import { judgeConfirmation, sideOf } from './_confirm.js';
 import { actionLabelOf } from '../shared/judgeAdviceContext.js';
+import { isCurrentDecisionAlert, v3ActionAlertMessage } from '../shared/adviceAlerts.js';
 import {
   positionGateForAlert,
   requiresPositionCheck,
@@ -119,6 +120,7 @@ function describeAlert(a) {
 // —— 与前端 alertStore.hit 同口径 ——
 function hit(a, q, now = Date.now()) {
   if (!isFreshAlertQuote(q, now)) return null;
+  if (a.decisionEngine === 'V3' && !a.reviewOnly && a.type === 'price') return v3ActionAlertMessage(a, q);
   const cmp = (v, op, t) => (op === 'lte' ? v <= t : v >= t);
   switch (a.type) {
     case 'price': {
@@ -504,6 +506,7 @@ async function processAccount(
   const isSmart = (a) => smartOn && a.type === 'price' && !!a.phase && a.phase !== 'confirmed' && a.phase !== 'invalid';
 
   for (const storedAlert of activeForEvaluation) {
+    if (!isCurrentDecisionAlert(storedAlert, adviceMap[storedAlert.code], Date.now())) continue;
     const t1Alert = applyT1ToAlert(
       storedAlert,
       t1StatusOf(data.holding || [], data.closed || [], storedAlert.code),

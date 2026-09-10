@@ -261,6 +261,7 @@ export function buildAdvicePriceContract({
   payload = {},
   evidenceSnapshot = null,
   action = '',
+  trustedPricePlan = null,
 } = {}) {
   const quote = payload.todayQuote || {}
   const currentPrice = roundedPrice(
@@ -276,6 +277,11 @@ export function buildAdvicePriceContract({
     : null
   const watchHorizonPct = observationHorizonPct(atrPct)
   const anchors = collectAnchors(payload)
+  if (trustedPricePlan) {
+    pushAnchor(anchors, 'v3.entry', trustedPricePlan.entryPlan?.price, ['entry', 'add', 'watch_pullback', 'watch_breakout'])
+    pushAnchor(anchors, 'v3.stop', trustedPricePlan.exitPlan?.hardStopPrice, ['stop'])
+    pushAnchor(anchors, 'v3.target', trustedPricePlan.exitPlan?.takeProfitPrice, ['target'])
+  }
   const levels = []
   const issues = []
 

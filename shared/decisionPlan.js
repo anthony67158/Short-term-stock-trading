@@ -225,7 +225,7 @@ function computeBuyCapacity({
   const cash = Math.max(0, finite(account.cash) || 0)
   const currentPosition = Math.max(0, finite(account.position) || 0)
   const currentStockWeight = Math.max(0, finite(account.stockWeight) || 0)
-  const configuredStockLimit = positive(account.maxStockWeight) || 20
+  const configuredStockLimit = Math.max(0, finite(account.maxStockWeight) ?? 20)
   const stockLimit = Math.min(20, configuredStockLimit)
   const marketPositionLimit = Math.min(
     85,
@@ -420,6 +420,7 @@ export function compileDecisionPlan({
   payload = {},
   evidenceSnapshot = null,
   accountCircuitBreaker = null,
+  deterministicPolicy = null,
   now = Date.now(),
 } = {}) {
   const requestedAction = actionFrom(mode, advice)
@@ -431,7 +432,7 @@ export function compileDecisionPlan({
     ? payload.shortHorizonTactical
     : buildShortHorizonTactical(payload, { now })
   const account = payload.account || {}
-  const actionPolicy = deriveShortHorizonActionPolicy({
+  const actionPolicy = deterministicPolicy || deriveShortHorizonActionPolicy({
     mode,
     tactical,
     requestedAction,
@@ -508,6 +509,7 @@ export function compileDecisionPlan({
     payload,
     evidenceSnapshot,
     action: governedAction,
+    trustedPricePlan: deterministicPolicy ? payload.v3PricePlan : null,
   })
   const suppliedPriceContract = advice.priceContract?.schemaVersion
     === ADVICE_PRICE_CONTRACT_SCHEMA_VERSION
@@ -723,9 +725,13 @@ export function compileDecisionPlan({
           + (finite(accountCircuitBreaker?.reservedBuyCash) || 0)
             / account.totalAssets * 100,
       },
-      market,
+      market: deterministicPolicy ? {
+        ...market,
+        targetPositionPct: { max: deterministicPolicy.maxPositionPct ?? 85 },
+        riskMultiplier: deterministicPolicy.riskMultiplier ?? 1,
+      } : market,
       slippageBps,
-      highConfidence: payload.quant?.highConfSignal?.fired === true,
+      highConfidence: !deterministicPolicy && payload.quant?.highConfSignal?.fired === true,
       accountRiskMultiplier:
         Math.min(
           finite(accountCircuitBreaker?.riskBudgetMultiplier) ?? 1,
@@ -807,18 +813,23 @@ export function compileDecisionPlan({
     slippageBps,
     stressExitPrice: payload.todayQuote?.limitDownPrice,
     opportunityScore: payload.opportunityScore,
-    quant: payload.quant,
-    researchPrior: adaptiveResearchPrior(actionPolicy, tactical),
+    quant: deterministicPolicy ? null : payload.quant,
+    researchPrior: deterministicPolicy ? null : adaptiveResearchPrior(actionPolicy, tactical),
   })
+  const modelTailLoss = deterministicPolicy && tradeExpectancy.plan?.lossAmount > 0
+    ? Math.max(0, -(finite(payload.opportunityScore?.expectedShortfall10) || 0))
+      * tradeExpectancy.plan.lossAmount
+    : 0
+  const stressLoss = Math.max(modelTailLoss, tradeExpectancy.stress?.lossAmount || 0)
   if (
     riskIncreasing
     && capacity.lots > 0
     && positive(account.totalAssets)
-    && tradeExpectancy.stress?.lossAmount > 0
+    && stressLoss > 0
   ) {
     const stressLimitAmount = account.totalAssets * 0.02
     const stressLossPerLot =
-      tradeExpectancy.stress.lossAmount / capacity.lots
+      stressLoss / capacity.lots
     const stressLimitedLots = Math.max(
       0,
       Math.floor(stressLimitAmount / stressLossPerLot),
@@ -839,12 +850,12 @@ export function compileDecisionPlan({
         slippageBps,
         stressExitPrice: payload.todayQuote?.limitDownPrice,
         opportunityScore: payload.opportunityScore,
-        quant: payload.quant,
-        researchPrior: adaptiveResearchPrior(actionPolicy, tactical),
+        quant: deterministicPolicy ? null : payload.quant,
+        researchPrior: deterministicPolicy ? null : adaptiveResearchPrior(actionPolicy, tactical),
       })
       if (stressLimitedLots <= 0) {
         blockedReasons.push(
-          `按跌停压力价测算，单手潜在损失超过总资产2%（上限${
+          `按尾部风险测算，单手潜在损失超过总资产2%（上限${
             round(stressLimitAmount)
           }元）`,
         )
@@ -859,7 +870,8 @@ export function compileDecisionPlan({
   }
 
   const uniqueBlockers = [...new Set(blockedReasons.filter(Boolean))]
-  const exitConfirmed = (advice.reviewDecision?.terminal === true
+  const exitConfirmed = ((deterministicPolicy?.hardProtection === true || deterministicPolicy?.exitConfirmed === true)
+    && payload.todayQuote?.live === true) || (advice.reviewDecision?.terminal === true
     && /减仓|清仓|锁定利润|止损|退出/.test(String(
       advice.reviewDecision?.operation
       || advice.reviewDecision?.outcome

@@ -1,0 +1,225 @@
+import { fetchQuotes } from './quote.js'
+import { fetchResilientKline, fetchTrendsTx } from './stock_detail.js'
+import { fetchResilientStockFund } from './_stock_fund.js'
+import { loadSectorOpportunity } from './_sector_opportunity.js'
+import { fetchOpportunityScores } from './_opportunity_score.js'
+import { internalApiOrigin } from './_internal_origin.js'
+import { accountFrom, buildHoldPayload, computePortfolio } from './_portfolio.js'
+import { buildAccountRiskContext, accountRiskCodes } from '../shared/accountRiskBudget.js'
+import { buildAdaptivePricePlans } from '../shared/adaptivePricePlans.js'
+import { buildMarketOpportunityContext } from '../shared/marketOpportunityContext.js'
+import { scoreOpportunityPlaybooks } from '../shared/opportunityPlaybooks.js'
+import { buildOpportunityShadowFeatures } from '../shared/opportunityShadowFeatures.js'
+import { buildOpportunityScoreInput, unavailableOpportunityScore } from '../shared/opportunityScoreContract.js'
+import { buildV3Action } from '../shared/adaptiveAdvicePolicy.js'
+import { compileDecisionPlan, applyCompiledDecisionPlan } from '../shared/decisionPlan.js'
+import { compileExecutionPlan } from '../shared/executionPlan.js'
+import { deriveMarketRegime } from '../shared/marketRegime.js'
+import { buildStockFundNote } from '../shared/retailFundFlow.js'
+import { beijingDayKey, beijingMinutes, isContinuousTrading } from '../shared/tradingCalendar.js'
+import { attachMonitoringPlan } from '../shared/monitoringPlan.js'
+
+async function bounded(promise, fallback, milliseconds = 7000) {
+  let timer
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((resolve) => { timer = setTimeout(() => resolve(fallback), milliseconds) }),
+    ])
+  } catch { return fallback }
+  finally { clearTimeout(timer) }
+}
+
+async function readMarket(req) {
+  const response = await fetch(`${internalApiOrigin(req)}/api/market`, {
+    signal: AbortSignal.timeout(6000),
+  })
+  if (!response.ok) return null
+  return response.json()
+}
+
+export async function evaluateV3Decision({
+  code, book, quotes, detail, trends, fund, sector, market, now = Date.now(),
+  score = fetchOpportunityScores,
+  reviewEvent = null,
+}) {
+  const quoteMap = Object.fromEntries(quotes.map((item) => [item.code, item]))
+  const quote = quoteMap[code]
+  if (!(Number(quote?.price) > 0)) throw new Error('行情不可用，未发布新决策')
+  const name = quote.name || code
+  const holding = (book.holding || []).filter((item) => item.code === code)
+  const portfolio = computePortfolio(book.holding || [], quoteMap, book.account)
+  const accountRisk = buildAccountRiskContext(book, quoteMap, now)
+  const candles = (detail?.candles || []).filter((bar) =>
+    [bar.close, bar.high, bar.low].every((value) => Number.isFinite(Number(value)) && Number(value) > 0))
+  const context = buildMarketOpportunityContext({ market: market || {} })
+  const candidate = { code, name, quote, fund, sectorOpportunity: sector }
+  const playbook = scoreOpportunityPlaybooks(candidate, context).selected
+  let plans = buildAdaptivePricePlans({ candidate, candles, trends, marketContext: context, now })
+  const holdPayload = holding.length ? buildHoldPayload(
+    book.holding, code, name, portfolio, book.account, book.closed, null, quote, now,
+  ) : { code, name, holdQty: 0 }
+  const pendingStockWeight = accountRisk.reservedExposures
+    .filter((item) => item.code === code)
+    .reduce((sum, item) => sum + item.positionPct, 0)
+  const industry = quote.industry || ''
+  const industryWeight = industry ? [...accountRisk.exposures, ...accountRisk.reservedExposures]
+    .filter((item) => item.sectorCode === industry)
+    .reduce((sum, item) => sum + item.positionPct, 0) : 0
+  const missingEvidence = [
+    candles.length < 20 ? '至少20根有效日线' : '',
+    !(market?.breadth?.up != null && market?.breadth?.down != null) ? '市场涨跌家数' : '',
+    !(fund?.mainNetYi != null && fund?.retailNetYi != null) ? '主力与小单资金' : '',
+    !accountRisk.complete ? '账户现金或持仓风险' : '',
+  ].filter(Boolean)
+  const payload = {
+    ...holdPayload,
+    account: {
+      ...accountFrom(portfolio, book.account), ...holdPayload.account,
+      pendingStockWeight,
+      maxStockWeight: Math.max(0, Math.min(20,
+        30 - industryWeight + (holdPayload.account?.stockWeight || 0) + pendingStockWeight)),
+    },
+    todayQuote: {
+      ...quote,
+      volumeRatio: quote.volumeRatio ?? quote.volRatio,
+      live: quote.isLivePrice === true && quote.tradeDate === beijingDayKey(now) && isContinuousTrading(now),
+    },
+    market: market || {},
+    marketEnv: deriveMarketRegime(market || {}),
+    holdingStopPrice: Math.max(0, ...holding.map((item) => Number(item.sl) || 0)) || null,
+    stockFund: fund,
+    missingEvidence,
+    evidenceIncomplete: missingEvidence.length > 0,
+  }
+  if (holding.length && payload.holdingStopPrice > 0) {
+    plans = plans.filter((plan) => plan.route === 'IMMEDIATE')
+      .map((plan) => ({
+        ...plan,
+        exitPlan: { ...plan.exitPlan, hardStopPrice: payload.holdingStopPrice },
+        riskReward: (plan.exitPlan.takeProfitPrice - plan.entryPlan.price)
+          / (plan.entryPlan.price - payload.holdingStopPrice),
+      }))
+      .filter((plan) => plan.entryPlan.price > plan.exitPlan.hardStopPrice)
+  }
+  const shadowFeatures = buildOpportunityShadowFeatures({
+    quote, candles, trends, fund: fund || {}, sectorOpportunity: sector || {},
+  })
+  // One request per route prevents stock-code keyed clients from mixing three prices.
+  const evaluated = await Promise.all(plans.map(async (plan) => {
+    const input = buildOpportunityScoreInput({
+      batch: {
+        mode: payload.todayQuote.live ? 'INTRADAY' : 'CLOSE',
+        slot: beijingMinutes(now),
+        marketGate: {
+          allowed: payload.marketEnv.allowRiskIncrease === true,
+          riskTier: payload.marketEnv.allowRiskIncrease !== true
+            ? 'BLOCKED' : payload.marketEnv.weak === true ? 'CAUTIOUS' : 'STANDARD',
+        },
+      },
+      event: {
+        code, asOf: now, quote: payload.todayQuote, shadowFeatures,
+        decision: {
+          formulaId: 'UNKNOWN', priceContractValid: true,
+          playbookId: playbook?.key, playbookScore: playbook?.score,
+          marketOpportunityFactor: context.opportunityFactor,
+          route: plan.route, primaryPrice: plan.entryPlan.price,
+          priceType: plan.route === 'BREAKOUT' ? 'BREAKOUT_WATCH' : 'PULLBACK_WATCH',
+          stopPrice: plan.exitPlan.hardStopPrice, targetPrice: plan.exitPlan.takeProfitPrice,
+          riskReward: plan.riskReward,
+        },
+        sector: sector?.sector,
+      },
+    })
+    const scores = await score([input]).catch(() => new Map())
+    return {
+      ...plan,
+      opportunityScore: {
+        ...(scores.get(code) || unavailableOpportunityScore(input, 'MISSING_RESPONSE')),
+        serverVerified: true,
+        priceContract: {
+          entryPrice: plan.entryPlan.price,
+          stopPrice: plan.exitPlan.hardStopPrice,
+          targetPrice: plan.exitPlan.takeProfitPrice,
+        },
+      },
+    }
+  }))
+  let advice = { ...buildV3Action({ payload, plans: evaluated, now }), fundNote: '' }
+  if (reviewEvent) {
+    advice.pullbackWatchPrice = null
+    advice.breakoutWatchPrice = null
+    advice.reviewDecision = {
+      schemaVersion: 'triggered-review-decision.v1',
+      terminal: true,
+      outcome: advice.action,
+      operation: advice.action,
+      quantity: Number(advice.opQty.match(/\d+/)?.[0]) || 0,
+    }
+  }
+  payload.opportunityScore = advice.selectedV3Plan?.opportunityScore || null
+  payload.v3PricePlan = advice.selectedV3Plan
+  const action = { 清仓: 'EXIT', 减仓: 'REDUCE', 持有: 'HOLD', 立即买入: 'BUY', 观望: 'WATCH' }[advice.action]
+  const mode = holding.length ? 'hold_advice' : 'buy_advice'
+  advice.fundNote = buildStockFundNote(fund || {}) || '资金数据暂缺，未据此推断资金方向'
+  const decisionPlan = compileDecisionPlan({
+    mode, advice, payload, now, accountCircuitBreaker: accountRisk.breaker,
+    deterministicPolicy: {
+      effectiveAction: action, riskTier: action === 'BUY' ? 'FULL' : 'NONE',
+      executionOpen: payload.todayQuote.live,
+      hardProtection: advice.decisionSource.hardProtection,
+      exitConfirmed: ['EXIT', 'REDUCE'].includes(action),
+      riskMultiplier: context.baseRiskPct / 0.6,
+      maxPositionPct: 85,
+    },
+  })
+  const sourceInstruction = advice.actionPlan
+  advice = applyCompiledDecisionPlan({ ...advice, decisionPlan })
+  if (!['BUY', 'ADD'].includes(decisionPlan.action) && !decisionPlan.blockedReasons?.length) {
+    advice.actionPlan = sourceInstruction
+    advice.nextAction = sourceInstruction
+  }
+  advice = {
+    ...advice,
+    priceContract: decisionPlan.priceContract,
+    executionPlan: compileExecutionPlan({ decisionPlan, code, name, now }),
+    continuity: {
+      planId: decisionPlan.decisionId, revision: 1, thesisVersion: 1, changeType: 'initial',
+    },
+  }
+  if (decisionPlan.action === 'HOLD' && payload.holdingStopPrice > 0) {
+    advice.executionRules = [{
+      id: 'ledger-stop', action: 'EXIT', kind: 'RISK_EXIT',
+      lots: Math.max(0, Math.trunc(Number(payload.holdQty) || 0)),
+      logic: 'ALL', session: 'CONTINUOUS', sustainSeconds: 0,
+      conditions: [{ metric: 'price', op: 'lte', value: payload.holdingStopPrice }],
+    }]
+    advice = attachMonitoringPlan({ advice, payload, decisionPlan, now })
+  }
+  return {
+    ok: true, mode, result: advice, updatedAt: now,
+    model: advice.decisionSource.modelVersion || 'V3_MODEL_UNAVAILABLE',
+    meta: { todayQuote: payload.todayQuote, decisionSource: advice.decisionSource, llmCalls: 0 },
+    news: [], truncated: false,
+  }
+}
+
+export async function runV3Decision({ req, book, code, onProgress = () => {}, signal, reviewEvent = null }) {
+  if (!/^\d{6}$/.test(String(code || ''))) throw new Error('股票代码无效')
+  signal?.throwIfAborted()
+  onProgress('采集行情、账户与V3特征', 'collect')
+  const codes = [...new Set([code, ...accountRiskCodes(book)])]
+  const [quotes, detail, trends, fund, sector, market] = await Promise.all([
+    bounded(fetchQuotes(codes), []),
+    bounded(fetchResilientKline(code, '101', 120), null),
+    bounded(fetchTrendsTx(code), []),
+    bounded(fetchResilientStockFund(code), null),
+    bounded(loadSectorOpportunity(code), null),
+    bounded(readMarket(req), null),
+  ])
+  signal?.throwIfAborted()
+  onProgress('V3评估三条价格路径与账户风险', 'quant')
+  const result = await evaluateV3Decision({ code, book, quotes, detail, trends, fund, sector, market, reviewEvent })
+  signal?.throwIfAborted()
+  return result
+}

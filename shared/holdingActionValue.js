@@ -150,6 +150,34 @@ export function evaluateHoldingActions({
   payload = {},
   advice = {},
 } = {}) {
+  if (payload.decisionEngine === 'V3') {
+    const score = payload.opportunityScore
+    const total = Math.max(0, Math.trunc(Number(payload.holdQty) || 0))
+    const sellable = Math.max(0, Math.min(total, Math.trunc(Number(payload.sellableTodayQty) || 0)))
+    const ready = score?.state === 'READY' && score.serverVerified === true
+      && score.productionEligible === true && score.shadowOnly === false
+      && score.outOfDistribution !== true
+      && finite(score.expectedNetR) != null
+    const price = finite(payload.todayQuote?.price)
+    const stop = finite(payload.holdingStopPrice)
+    const hardStop = price > 0 && stop > 0 && price <= stop
+      && payload.todayQuote?.live === true
+    const reduceRisk = hardStop || (ready && score.expectedNetR <= 0)
+    const selected = reduceRisk
+      ? { action: sellable ? sellable === total ? 'EXIT' : 'REDUCE' : 'HOLD_LOCKED', quantity: sellable }
+      : { action: 'HOLD', quantity: 0 }
+    return {
+      schemaVersion: HOLDING_ACTION_VALUE_VERSION,
+      selected,
+      alternatives: [],
+      economics: {
+        source: ready ? 'V3_PATH_MODEL' : 'UNAVAILABLE',
+        expectedNetR: ready ? score.expectedNetR : null,
+        pWin: ready ? score.pWinGivenFill : null,
+      },
+      state: { hardStop, total, sellable, modelReady: ready },
+    }
+  }
   const tactical = payload.shortHorizonTactical || {}
   const price = finite(
     payload.todayQuote?.price

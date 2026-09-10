@@ -52,6 +52,7 @@ import {
   resolveQuantModelForRequest,
 } from './_quant_access.js';
 import { authorizePaidRequest } from './_account_auth.js';
+import { runV3Decision } from './_v3_decision.js';
 import {
   continuityEvidenceFromPayload,
   reconcileAdviceContinuity,
@@ -1041,6 +1042,35 @@ export default async function handler(req, res) {
   }
 
   const mode = (body && body.mode) || 'market';
+  if (['buy_advice', 'hold_advice', 'review'].includes(mode)) {
+    const streaming = body?.stream === true;
+    res.setHeader('Content-Type', streaming
+      ? 'text/event-stream; charset=utf-8' : 'application/json; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    const finishV3 = (value) => {
+      if (streaming) {
+        res.write(`event: result\ndata: ${JSON.stringify(value)}\n\n`);
+        return res.end();
+      }
+      return res.status(200).send(JSON.stringify(value));
+    };
+    if (!accountAuth.account?.data) {
+      return finishV3({ ok: false, error: '缺少已鉴权的账户账本，未执行V3评估' });
+    }
+    try {
+      return finishV3(await runV3Decision({
+        req,
+        book: accountAuth.account.data,
+        code: String(body?.payload?.code || ''),
+        signal: req.signal,
+        onProgress: (text, key) => {
+          if (streaming) res.write(`event: phase\ndata: ${JSON.stringify({ text, key })}\n\n`);
+        },
+      }));
+    } catch (error) {
+      return finishV3({ ok: false, error: String(error?.message || 'V3评估失败') });
+    }
+  }
   const useRole = llmRoleForAdviceMode(
     mode,
     body?.payload?.reviewOrigin,

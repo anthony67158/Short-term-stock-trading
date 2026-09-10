@@ -51,8 +51,6 @@ import {
   selectStartableJobs,
   requeueAdvicePreOutputFailure, requeueAdvicePreparationFailure,
 } from './_jobs.js';
-import { ensureConfig, currentConfig } from './_llm_config.js';
-import { endpointCountForRole } from './_llm_pool.js';
 import { projectAdviceAlerts } from '../shared/adviceAlerts.js';
 import { sanitizedAdvicePriceContract } from '../shared/advicePriceContract.js';
 import {
@@ -106,6 +104,7 @@ import {
 import { attachAdviceDailyReport } from '../shared/adviceDailyReportPolicy.js';
 import { adviceEntryMatchesMode } from '../shared/adviceModeContext.js';
 import aiHandler from './ai.js';
+import { runV3Decision } from './_v3_decision.js';
 import quoteHandler from './quote.js';
 import { sendPush } from './_push_send.js';
 import {
@@ -212,16 +211,13 @@ function endWorkerResponse(res, payload) {
   return res.end(`event: result\ndata: ${JSON.stringify(payload)}\n\n`);
 }
 
-// ---- 并发上限:严格等于用户为「操盘军师(advisor)」角色配置的端点数(核心规则1)----
-// AI 操作建议实际调用 advisor 角色 → 承接该角色的端点数即为可并行生成的最大只数。
-// 未配任何附加端点 → 退化为 1(仅主端点),endpointCountForRole 已保证最小 1。
-// 读取的是全局 LLM 配置(config/llm.json,进程级缓存),故所有账号/设备共享同一上限。
+// V3使用独立计算容量，LLM端点是否配置不影响决策与复核。
 function advisorConcurrency() {
-  try { return endpointCountForRole(currentConfig(), 'advisor'); } catch { return CONCURRENCY; }
+  return 2;
 }
 
 function reviewConcurrency() {
-  try { return endpointCountForRole(currentConfig(), 'review'); } catch { return 0; }
+  return 4;
 }
 
 export function reviewRoleCapacities(endpointCount) {
@@ -1424,9 +1420,7 @@ async function runJobGen(
     });
   }
   const prepared = await prepareAdviceInputs(acc, { signal });
-  const sourceAcc = prepared.sourceAcc;
   const data = prepared.data;
-  const quoteMap = prepared.quoteMap;
   const sourceTradeFingerprint = adviceGenerationStateFingerprint(data);
   const holding = data.holding || [], watch = data.plan || [];
   const holdSet = new Set(holding.map((h) => h.code));
@@ -1436,10 +1430,7 @@ async function runJobGen(
       phase: '账户与实时行情已就位，正在采集分析证据',
     });
   }
-  const portfolio = computePortfolio(holding, quoteMap, data.account);
   const name = (holding.find((h) => h.code === code) || watch.find((w) => w.code === code) || {}).name || code;
-  const priceHint = Number(quoteMap[code]?.price) > 0 ? Number(quoteMap[code].price) : null;
-  const quantModelVersion = data.settings?.quantModelVersion || 'default';
   const realOutcomeLearning = buildRealOutcomeLearning(data);
   data.realOutcomeLearning = realOutcomeLearning;
   const mode = holdSet.has(code) ? 'hold_advice' : 'buy_advice';
@@ -1465,51 +1456,53 @@ async function runJobGen(
     error.code = 'STALE_REVIEW_PLAN';
     throw error;
   }
-  const previousAdvice = compactAdvicePlan(previousEntry);
-  const previousEvidenceDigest = previousEntry?.meta?.evidenceSnapshot
-    ? adviceEvidenceDigest(previousEntry.meta.evidenceSnapshot)
-    : null;
-  if (mode === 'hold_advice') {
-    let p = buildHoldPayload(
-      holding,
-      code,
-      name,
-      portfolio,
-      data.account,
-      data.closed,
-      nextTradingDayLabel(),
-      quoteMap[code],
-    );
-    p.advisorTrack = advisorTrackFrom(data, 'hold_advice');
-    p.realOutcomeLearning = realOutcomeLearning;
-    p.quantModelVersion = quantModelVersion;
-    p.accountRevision = Number(sourceAcc.clientRevision) || null;
-    p = attachAdviceDailyReport(p, dailyReportSummary);
-    if (previousAdvice) p.previousAdvice = previousAdvice;
-    if (previousEvidenceDigest) p.previousEvidenceDigest = previousEvidenceDigest;
-    if (reviewEvent) p.reviewEvent = reviewEvent;
-    if (reviewOrigin) p.reviewOrigin = reviewOrigin;
-    const result = await genOne({ code, name, mode: 'hold_advice', payload: p, priceHint, onProgress, signal, deepMode, previousEntry, reviewIntervalMin, reviewTrigger: reviewEvent ? `judge_${reviewEvent.decision}` : '' });
-    return {
-      ...result,
-      sourceTradeFingerprint,
-      sourceAdviceAt,
-      sourcePlanId,
-    };
-  }
-  let p = buildWatchPayload(code, name, portfolio, data.account);
-  p.advisorTrack = advisorTrackFrom(data, 'buy_advice');
-  p.realOutcomeLearning = realOutcomeLearning;
-  p.quantModelVersion = quantModelVersion;
-  p.accountRevision = Number(sourceAcc.clientRevision) || null;
-  p = attachAdviceDailyReport(p, dailyReportSummary);
-  if (previousAdvice) p.previousAdvice = previousAdvice;
-  if (previousEvidenceDigest) p.previousEvidenceDigest = previousEvidenceDigest;
-  if (reviewEvent) p.reviewEvent = reviewEvent;
-  if (reviewOrigin) p.reviewOrigin = reviewOrigin;
-  const result = await genOne({ code, name, mode: 'buy_advice', payload: p, priceHint, onProgress, signal, deepMode, previousEntry, reviewIntervalMin, reviewTrigger: reviewEvent ? `judge_${reviewEvent.decision}` : '' });
+  const startedAt = Date.now();
+  const result = await runV3Decision({
+    book: data, code, signal,
+    reviewEvent,
+    onProgress: (phase, stage) => onProgress?.({
+      phase, stage, model: 'V3', decisionEngine: 'V3',
+    }),
+  });
+  onProgress?.({ stage: 'finalize', phase: 'V3评估完成，正在核验账本并保存', model: 'V3' });
+  const cacheItem = buildAdviceCacheEntry(previousEntry, {
+    mode,
+    advice: result.result,
+    meta: result.meta,
+    news: [],
+    truncated: false,
+    reviewIntervalMin,
+    reviewTrigger: reviewEvent ? 'price_event' : previousEntry ? 'scheduled' : 'initial',
+  }, result.updatedAt);
+  cacheItem.generationMetrics = {
+    schemaVersion: 'advice-generation-metrics.v1',
+    profile: 'V3',
+    durationMs: Date.now() - startedAt,
+    mainLlmCalls: 0,
+  };
   return {
-    ...result,
+    cacheItem,
+    logEntry: {
+      code, name, mode, at: result.updatedAt,
+      action: result.result.action,
+      decisionPlanId: result.result.decisionPlan.decisionId,
+      decisionPlanAction: result.result.decisionPlan.action,
+      decisionPlanActionability: result.result.decisionPlan.actionability,
+      entryPrice: result.result.decisionPlan.prices.reference,
+      priceAtAdvice: result.meta.todayQuote.price,
+      stop: result.result.stopPrice,
+      target: result.result.targetPrice,
+      expectancy: adviceExpectancySnapshot(result.result),
+      planId: result.result.continuity.planId,
+      planRevision: result.result.continuity.revision,
+      tacticalTriggerPath: result.result.selectedV3Plan?.route || 'NONE',
+      decisionSource: result.result.decisionSource,
+    },
+    quantScore: null,
+    reviewRecord: buildAdviceReviewRecord({
+      code, mode, origin: reviewOrigin, previousEntry, cacheItem,
+      llmRan: false, durationMs: Date.now() - startedAt,
+    }),
     sourceTradeFingerprint,
     sourceAdviceAt,
     sourcePlanId,
@@ -1636,7 +1629,7 @@ async function persistServer(nick, workingAcc) {
     const cur = fa[k];
     if (!cur || (v.at || 0) > (cur.at || 0)) fa[k] = v;
     const effective = fa[k];
-    if (effective && effective.advice) {
+    if (effective?.advice?.decisionSource?.engine === 'V3') {
       projectAdviceAlerts(fdata, k, effective.advice, {
         adviceAt: Math.max(
           Number(effective.updatedAt) || 0,
@@ -2528,11 +2521,6 @@ export default async function handler(req, res) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
   const op = body.op || 'enqueue';
-  // 预热 LLM 配置 → advisorConcurrency() 才能读到最新的端点数(并发上限的权威来源)
-  if (!['cancel', 'cancelAll', 'trackConditions'].includes(op)) {
-    try { await ensureConfig(); } catch { /* 读失败回退 env 基线,不阻断 */ }
-  }
-
   const scope = ['all', 'hold', 'watch'].includes(body.scope) ? body.scope : 'all';
   const force = body.force != null ? !!body.force : true;   // 用户主动生成默认强制重生成
 
