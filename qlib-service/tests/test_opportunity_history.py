@@ -11,9 +11,11 @@ sys.path.insert(0, SERVICE_ROOT)
 from opportunity_contract import FEATURE_NAMES  # noqa: E402
 from opportunity_history import (  # noqa: E402
     HISTORY_MANIFEST_KEY,
+    PLANNED_RISK_BASIS,
     build_history_artifact,
     load_opportunity_history,
     publish_opportunity_history,
+    repair_outcome_net_r,
 )
 
 
@@ -65,6 +67,7 @@ def outcome(index, filled, net_r=None):
             {
                 "netR": net_r,
                 "netPnl": 100 if net_r > 0 else -100,
+                "riskBasis": PLANNED_RISK_BASIS,
             }
             if filled else None
         ),
@@ -72,6 +75,28 @@ def outcome(index, filled, net_r=None):
 
 
 class OpportunityHistoryTest(unittest.TestCase):
+    def test_legacy_net_r_is_rebuilt_from_planned_price_contract(self):
+        value = outcome(1, True, -500)
+        value["trigger"] = {"price": 10}
+        value["entry"] = {"quantity": 100}
+        value["scoreInput"]["factors"]["stopDistancePct"] = 5
+        value["metrics"] = {
+            "netR": -500,
+            "netPnl": -100,
+            "initialRiskCash": 0.2,
+        }
+
+        repaired = repair_outcome_net_r(value)
+
+        self.assertEqual(repaired["metrics"]["netR"], -2)
+        self.assertEqual(repaired["metrics"]["initialRiskCash"], 50)
+        self.assertEqual(repaired["metrics"]["actualFillRiskCash"], 0.2)
+        self.assertEqual(
+            repaired["metrics"]["riskBasis"],
+            PLANNED_RISK_BASIS,
+        )
+        self.assertNotIn("riskBasis", value["metrics"])
+
     def test_build_publish_and_reload_verified_history(self):
         payload = {
             "outcomes": [
