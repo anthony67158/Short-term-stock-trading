@@ -40,6 +40,7 @@ import {
   buildOpportunityRadarLedgerBatch,
 } from '../shared/opportunityRadarLedger.js'
 import {
+  OPPORTUNITY_SCORE_INPUT_CONTEXT_VERSION,
   buildOpportunityScoreInput,
 } from '../shared/opportunityScoreContract.js'
 
@@ -232,6 +233,8 @@ export function runFormulaSelection({
       existing?.tradeDate === tradeDate
       && existing?.slot === slot
       && existing?.v3Scoring?.usagePolicy === 'DIRECT'
+      && existing?.v3Scoring?.inputContextVersion
+        === OPPORTUNITY_SCORE_INPUT_CONTEXT_VERSION
       && (
         !activeModelVersion
         || resultModelVersion(existing) === activeModelVersion
@@ -421,6 +424,8 @@ export function runFormulaSelection({
         candidates: scoredCandidates,
         v3Scoring: {
           usagePolicy: 'DIRECT',
+          inputContextVersion:
+            OPPORTUNITY_SCORE_INPUT_CONTEXT_VERSION,
           modelVersion: activeModelVersion
             || (scoreVersions.size === 1
               ? [...scoreVersions][0]

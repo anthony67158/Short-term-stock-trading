@@ -17,6 +17,9 @@ import {
 import {
   rankAdaptiveOpportunities,
 } from './adaptiveOpportunity.js'
+import {
+  OPPORTUNITY_SCORE_INPUT_CONTEXT_VERSION,
+} from './opportunityScoreContract.js'
 
 export const OPPORTUNITY_RADAR_SCHEMA_VERSION =
   'opportunity-radar.v2'
@@ -142,17 +145,53 @@ function sourceModelVersions(value = {}) {
   ])
 }
 
+function sourceInputContextVersions(value = {}) {
+  const declared = [
+    value?.v3Scoring?.inputContextVersion,
+    value?.result?.v3Scoring?.inputContextVersion,
+    value?.model?.inputContextVersion,
+  ].map((item) => String(item || '')).filter(Boolean)
+  const candidates = [
+    ...(Array.isArray(value?.candidates) ? value.candidates : []),
+    ...(Array.isArray(value?.result?.candidates)
+      ? value.result.candidates
+      : []),
+    ...(Array.isArray(value?.result?.nearCandidates)
+      ? value.result.nearCandidates
+      : []),
+  ]
+  return new Set([
+    ...declared,
+    ...candidates
+      .map((candidate) =>
+        String(
+          candidate?.opportunityScore?.inputContextVersion || '',
+        )
+      )
+      .filter(Boolean),
+  ])
+}
+
 function enforceActiveModel(state, value, activeModelVersion) {
   const current = String(activeModelVersion || '')
   if (state?.status !== 'fresh' || !current) return state
   const versions = sourceModelVersions(value)
-  if (!versions.size || (
-    versions.size === 1 && versions.has(current)
-  )) return state
+  const inputContexts = sourceInputContextVersions(value)
+  const currentModel = (
+    !versions.size
+    || (versions.size === 1 && versions.has(current))
+  )
+  const currentInput = (
+    inputContexts.size === 1
+    && inputContexts.has(OPPORTUNITY_SCORE_INPUT_CONTEXT_VERSION)
+  )
+  if (currentModel && currentInput) return state
   return {
     ...state,
     status: 'stale',
-    error: '结果来自上一模型版本，请重新生成',
+    error: currentModel
+      ? '结果使用旧评分口径，请重新生成'
+      : '结果来自上一模型版本，请重新生成',
     modelVersion: [...versions].join(','),
   }
 }

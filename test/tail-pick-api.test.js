@@ -502,6 +502,10 @@ test('尾盘候选保存前统一使用生产V3评分', async () => {
     result.result.candidates[0].opportunityScore.usagePolicy,
     'DIRECT',
   )
+  assert.equal(
+    result.result.v3Scoring.inputContextVersion,
+    'opportunity-score-input-context.v2',
+  )
   assert.equal(result.result.candidates[0].entryPlan.price, 10)
 })
 

@@ -4,6 +4,9 @@ import {
   buildOpportunityRadar,
   resolveOpportunityRadarPhase,
 } from '../shared/opportunityRadar.js'
+import {
+  OPPORTUNITY_SCORE_INPUT_CONTEXT_VERSION,
+} from '../shared/opportunityScoreContract.js'
 
 const NOW = Date.parse('2026-09-02T10:00:00+08:00')
 
@@ -13,6 +16,7 @@ function directScore(overrides = {}) {
     state: 'READY',
     usagePolicy: 'DIRECT',
     modelVersion: 'v3-production',
+    inputContextVersion: OPPORTUNITY_SCORE_INPUT_CONTEXT_VERSION,
     pFill: 0.72,
     pWinGivenFill: 0.58,
     expectedNetR: 0.24,
@@ -115,6 +119,11 @@ function formulaResult(mode, candidates, {
     tradeDate,
     generatedAt: dataAsOf,
     dataAsOf,
+    v3Scoring: {
+      usagePolicy: 'DIRECT',
+      inputContextVersion:
+        OPPORTUNITY_SCORE_INPUT_CONTEXT_VERSION,
+    },
     candidates,
   }
 }
@@ -203,6 +212,35 @@ test('机会雷达不把上一模型版本结果当作当前生产机会', () =>
   assert.match(
     result.sourceStatus.formulaIntraday.error,
     /上一模型版本/,
+  )
+  assert.equal(result.lanes.intraday.length, 0)
+})
+
+test('机会雷达不复用旧评分输入口径的同版本结果', () => {
+  const source = formulaResult(
+    'INTRADAY',
+    [formulaCandidate()],
+  )
+  delete source.v3Scoring.inputContextVersion
+  source.candidates = source.candidates.map((candidate) => {
+    const next = structuredClone(candidate)
+    delete next.opportunityScore.inputContextVersion
+    return next
+  })
+  const result = buildOpportunityRadar({
+    now: NOW,
+    activeModelVersion: 'v3-production',
+    sector: {
+      market: { phase: 'live', day: '2026-09-02' },
+      intraday: sectorSnapshot(),
+    },
+    formula: { intraday: source },
+  })
+
+  assert.equal(result.sourceStatus.formulaIntraday.status, 'stale')
+  assert.match(
+    result.sourceStatus.formulaIntraday.error,
+    /旧评分口径/,
   )
   assert.equal(result.lanes.intraday.length, 0)
 })

@@ -367,6 +367,10 @@ test('预催化扫描先写运行态并在完成后发布快照', async () => {
   assert.equal(result.ok, true)
   assert.equal(saved.candidates[0].opportunityScore.usagePolicy, 'DIRECT')
   assert.equal(saved.model.state, 'DIRECT')
+  assert.equal(
+    saved.model.inputContextVersion,
+    'opportunity-score-input-context.v2',
+  )
   assert.equal(progress[0].status, 'RUNNING')
   assert.equal(progress.at(-1).status, 'DONE')
   assert.equal(released, true)

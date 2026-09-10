@@ -32,6 +32,9 @@ import {
   beijingMinutes,
   isContinuousTrading,
 } from '../shared/tradingCalendar.js'
+import {
+  OPPORTUNITY_SCORE_INPUT_CONTEXT_VERSION,
+} from '../shared/opportunityScoreContract.js'
 
 const runFlights = new Map()
 const REUSE_MS = 10 * 60 * 1000
@@ -107,6 +110,8 @@ export function runPreCatalystScan({
       !force
       && previous?.generatedAt
       && timestamp - Number(previous.generatedAt) < REUSE_MS
+      && previous?.model?.inputContextVersion
+        === OPPORTUNITY_SCORE_INPUT_CONTEXT_VERSION
       && (previous.candidates || []).every((candidate) =>
         candidate?.opportunityScore?.state === 'READY'
         && candidate?.opportunityScore?.usagePolicy === 'DIRECT'
@@ -179,6 +184,8 @@ export function runPreCatalystScan({
             ? 'DIRECT'
             : 'PARTIAL',
           usagePolicy: 'DIRECT',
+          inputContextVersion:
+            OPPORTUNITY_SCORE_INPUT_CONTEXT_VERSION,
           version:
             directCandidates[0]?.opportunityScore?.modelVersion || null,
           scoredCandidates: directCandidates.length,

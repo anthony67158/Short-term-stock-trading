@@ -12,6 +12,9 @@ import {
 import {
   scoreCandidatesWithDirectV3,
 } from './_opportunity_candidate_v3.js'
+import {
+  OPPORTUNITY_SCORE_INPUT_CONTEXT_VERSION,
+} from '../shared/opportunityScoreContract.js'
 import { fetchTrendsTx } from './stock_detail.js'
 import {
   tailPickStore,
@@ -174,6 +177,8 @@ export function runTailPickScan({
     if (
       existing
       && existing.result?.v3Scoring?.usagePolicy === 'DIRECT'
+      && existing.result?.v3Scoring?.inputContextVersion
+        === OPPORTUNITY_SCORE_INPUT_CONTEXT_VERSION
     ) {
       return {
         ...existing,
@@ -308,6 +313,8 @@ export function runTailPickScan({
           ...ranked,
           v3Scoring: {
             usagePolicy: 'DIRECT',
+            inputContextVersion:
+              OPPORTUNITY_SCORE_INPUT_CONTEXT_VERSION,
             requested:
               scoredCandidates.length + scoredNearCandidates.length,
             direct: [

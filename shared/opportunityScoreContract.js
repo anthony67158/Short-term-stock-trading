@@ -6,6 +6,8 @@ export const OPPORTUNITY_SCORE_FEATURE_SCHEMA_VERSION =
   'opportunity-score-feature.v5'
 export const OPPORTUNITY_SCORE_SCHEMA_VERSION =
   'opportunity-score.v1'
+export const OPPORTUNITY_SCORE_INPUT_CONTEXT_VERSION =
+  'opportunity-score-input-context.v2'
 
 const CATEGORIES = Object.freeze({
   formula: [
@@ -335,6 +337,7 @@ export function buildOpportunityScoreInput({
   }
   return {
     schemaVersion: OPPORTUNITY_SCORE_FEATURE_SCHEMA_VERSION,
+    inputContextVersion: OPPORTUNITY_SCORE_INPUT_CONTEXT_VERSION,
     asOf,
     code,
     formulaId,
@@ -402,6 +405,9 @@ export function unavailableOpportunityScore(input = {}, reason) {
     expectedShortfall10: null,
     calibration: null,
     outOfDistribution: false,
+    inputContextVersion:
+      input.inputContextVersion
+      || OPPORTUNITY_SCORE_INPUT_CONTEXT_VERSION,
   }
 }
 
@@ -497,5 +503,8 @@ export function normalizeOpportunityScoreResponse(
       bucket: String(response.calibration?.bucket || ''),
     },
     outOfDistribution: response.outOfDistribution === true,
+    inputContextVersion:
+      expected.inputContextVersion
+      || OPPORTUNITY_SCORE_INPUT_CONTEXT_VERSION,
   }
 }
