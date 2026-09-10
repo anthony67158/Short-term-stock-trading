@@ -38,7 +38,7 @@ MODEL_FILENAMES = {
     "winPayoffR": "opportunity_win_payoff_lgb.txt",
     "lossPayoffR": "opportunity_loss_payoff_lgb.txt",
     "netRLower10": "opportunity_q10_lgb.txt",
-    "ranking": "opportunity_ranker_catboost.cbm",
+    "ranking": "opportunity_ranker_catboost.json",
 }
 SHADOW_FEATURE_GROUPS = {
     "orderFlow": (
@@ -1534,10 +1534,10 @@ def train_opportunity_score(
             shadow,
             MODEL_FILENAMES[slot],
         ))
-    final_ranker["model"].save_model(os.path.join(
-        shadow,
-        MODEL_FILENAMES["ranking"],
-    ))
+    final_ranker["model"].save_model(
+        os.path.join(shadow, MODEL_FILENAMES["ranking"]),
+        format="json",
+    )
     sorted_train_net_r = np.sort(data["y_net_r"][development_win])
     tail_count = max(1, int(np.ceil(len(sorted_train_net_r) * 0.1)))
     meta = {

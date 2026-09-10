@@ -44,7 +44,7 @@ ARTIFACT_FILENAMES = {
     "winPayoffR": "opportunity_win_payoff_lgb.txt",
     "lossPayoffR": "opportunity_loss_payoff_lgb.txt",
     "netRLower10": "opportunity_q10_lgb.txt",
-    "ranking": "opportunity_ranker_catboost.cbm",
+    "ranking": "opportunity_ranker_catboost.json",
     "meta": "opportunity_meta.json",
 }
 
@@ -52,6 +52,46 @@ _MODELS = None
 _META = None
 _LAST_CHECK_AT = 0.0
 _LOAD_LOCK = threading.Lock()
+
+
+class _CatBoostJsonRanker:
+    def __init__(self, path):
+        with open(path, encoding="utf-8") as handle:
+            payload = json.load(handle)
+        trees = payload.get("oblivious_trees")
+        if not isinstance(trees, list) or not trees:
+            raise ValueError("CatBoost排序模型结构无效")
+        self.trees = trees
+        scale_and_bias = payload.get("scale_and_bias") or [1.0, [0.0]]
+        self.scale = float(scale_and_bias[0])
+        bias = scale_and_bias[1]
+        self.bias = float(bias[0] if isinstance(bias, list) else bias)
+
+    def predict(self, matrix):
+        values = np.asarray(matrix, dtype=np.float64)
+        if values.ndim != 2:
+            raise ValueError("CatBoost排序输入维度无效")
+        result = np.zeros(len(values), dtype=np.float64)
+        for tree in self.trees:
+            splits = tree.get("splits") or []
+            leaves = np.asarray(
+                tree.get("leaf_values"),
+                dtype=np.float64,
+            )
+            if len(leaves) != 2 ** len(splits):
+                raise ValueError("CatBoost排序树叶子数量无效")
+            leaf_index = np.zeros(len(values), dtype=np.int64)
+            for depth, split in enumerate(splits):
+                if split.get("split_type") != "FloatFeature":
+                    raise ValueError("CatBoost排序模型包含非数值切分")
+                feature = int(split.get("float_feature_index"))
+                if not 0 <= feature < values.shape[1]:
+                    raise ValueError("CatBoost排序特征索引无效")
+                leaf_index |= (
+                    values[:, feature] > float(split.get("border"))
+                ).astype(np.int64) << depth
+            result += leaves[leaf_index]
+        return result * self.scale + self.bias
 
 
 def _sha256(path):
@@ -177,11 +217,7 @@ def _load_release(paths, metadata_path):
     models = {}
     for slot in model_slots:
         if slot == "ranking":
-            from catboost import CatBoostRanker
-
-            model = CatBoostRanker()
-            model.load_model(paths[slot])
-            models[slot] = model
+            models[slot] = _CatBoostJsonRanker(paths[slot])
         else:
             models[slot] = lgb.Booster(model_file=paths[slot])
     return models, metadata

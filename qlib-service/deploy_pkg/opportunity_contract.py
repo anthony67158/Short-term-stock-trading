@@ -26,8 +26,25 @@ _LEGACY_SCHEMA_VERSIONS = frozenset(
 _LEGACY_DEFAULTS = frozenset(
     _CONTRACT.get("legacyDefaultZeroFeatures", ())
 )
-_LEGACY_FEATURE_SET = _FEATURE_SET - _LEGACY_DEFAULTS
+_LEGACY_DEFAULTS_BY_VERSION = {
+    str(version): frozenset(names)
+    for version, names in (
+        _CONTRACT.get("legacyDefaultsByVersion", {})
+    ).items()
+}
 _CODE = re.compile(r"^\d{6}$")
+
+
+def feature_names_for_schema(schema_version):
+    if schema_version == FEATURE_SCHEMA_VERSION:
+        return FEATURE_NAMES
+    if schema_version not in _LEGACY_SCHEMA_VERSIONS:
+        raise ValueError("机会评分特征版本无效")
+    defaults = _LEGACY_DEFAULTS_BY_VERSION.get(
+        schema_version,
+        _LEGACY_DEFAULTS,
+    )
+    return tuple(name for name in FEATURE_NAMES if name not in defaults)
 
 
 def _finite(value, label):
@@ -56,10 +73,8 @@ def validate_score_item(item):
     if not formula_id or len(formula_id) > 60:
         raise ValueError("机会评分公式无效")
     factors = item.get("factors")
-    expected_features = (
-        _FEATURE_SET
-        if schema_version == FEATURE_SCHEMA_VERSION
-        else _LEGACY_FEATURE_SET
+    expected_features = frozenset(
+        feature_names_for_schema(schema_version)
     )
     if not isinstance(factors, dict) or set(factors) != expected_features:
         raise ValueError("机会评分特征字段不匹配")
@@ -76,6 +91,7 @@ def validate_score_item(item):
         raise ValueError("机会评分时点必须为正数")
     return {
         "schemaVersion": FEATURE_SCHEMA_VERSION,
+        "sourceSchemaVersion": schema_version,
         "asOf": as_of,
         "code": code,
         "formulaId": formula_id,
@@ -92,11 +108,11 @@ def validate_score_request(payload):
     return [validate_score_item(item) for item in items]
 
 
-def feature_vector(item):
+def feature_vector(item, feature_names=FEATURE_NAMES):
     normalized = validate_score_item(item)
     return [
         normalized["factors"][name]
-        for name in FEATURE_NAMES
+        for name in feature_names
     ]
 
 

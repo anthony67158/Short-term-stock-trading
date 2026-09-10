@@ -1,6 +1,8 @@
 import hashlib
+import json
 import os
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -20,6 +22,7 @@ from opportunity_contract import (  # noqa: E402
 from opportunity_model import (  # noqa: E402
     ARTIFACT_FILENAMES,
     PREDICTION_CONTRACT_VERSION,
+    _CatBoostJsonRanker,
     predict_opportunity_items,
     validate_opportunity_metadata,
     validate_opportunity_manifest,
@@ -88,6 +91,29 @@ def meta():
 
 
 class OpportunityModelTest(unittest.TestCase):
+    def test_catboost_json_ranker_matches_oblivious_tree_contract(self):
+        payload = {
+            "oblivious_trees": [{
+                "splits": [{
+                    "split_type": "FloatFeature",
+                    "float_feature_index": 0,
+                    "border": 0.5,
+                }],
+                "leaf_values": [-0.25, 0.75],
+            }],
+            "scale_and_bias": [2.0, [0.1]],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "ranker.json")
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle)
+            model = _CatBoostJsonRanker(path)
+
+        np.testing.assert_allclose(
+            model.predict(np.asarray([[0.2], [0.8]])),
+            [-0.4, 1.6],
+        )
+
     def test_manifest_requires_hashed_files_under_release_prefix(self):
         run_id = "opportunity-score.20260902"
         digest = hashlib.sha256(b"x").hexdigest()

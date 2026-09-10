@@ -11,7 +11,7 @@ if [ ! -f "$ROOT/.env" ]; then
   exit 1
 fi
 
-if [ ! -d "$PKG/deps" ] || [ ! -d "$PKG/deps/catboost" ]; then
+if [ ! -d "$PKG/deps" ]; then
   bash "$HERE/build_deploy_pkg.sh"
 else
   cp \

@@ -27,6 +27,9 @@ npm run opportunity:train
 少于 1000 个成熟候选、300 个完整成交结果或 60 个独立交易日时，训练只生成
 `NOT_READY` 报告。当前组合保存 LightGBM 的成交、胜率、胜单R、亏单R、Q10
 五个动作价值头，以及一个 CatBoost `YetiRankPairwise` 排序头。
+排序头在训练端导出为 JSON 对称树，线上由 NumPy 等价执行，不携带 CatBoost
+runtime；与原生 CatBoost 的 1,000 条样本对拍最大绝对误差为
+`1.67e-16`。
 `shadow` 是兼容保留的产物目录名，不代表仅允许影子使用。直接发布当前模型：
 
 ```bash

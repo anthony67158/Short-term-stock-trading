@@ -8,6 +8,7 @@
 """
 import os
 import time
+from typing import Optional
 
 from fastapi import FastAPI, Header, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,6 +21,7 @@ from opportunity_model import (
     predict_opportunity_items,
 )
 from sector_model import get_sector_models, predict_sector_items
+from archive_public_market_day import archive_latest_public
 
 app = FastAPI(title="Quant Score & Forecast", version="3.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -298,17 +300,50 @@ def opportunity_score(
         )
         return {
             "ok": True,
-            "shadowOnly": not production_eligible,
+            "shadowOnly": (metadata or {}).get(
+                "shadowOnly",
+                not production_eligible,
+            ),
             "productionEligible": production_eligible,
+            "baselineSelected": bool(
+                (metadata or {}).get("baselineSelected")
+            ),
             "usagePolicy": "DIRECT",
             "modelLoaded": bool(models),
             "modelVersion":
                 (metadata or {}).get("modelVersion"),
             "predictions": predictions,
-            "note": "直接使用当前V3模型；评测与晋级记录不限制推理",
+            "note": "直接使用当前V3组合；回测与资格状态独立记录",
         }
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)[:120])
+
+
+@app.post("/archive-market-day")
+def archive_market_day(
+    payload: Optional[dict] = Body(default=None),
+    x_api_key: str = Header(default=""),
+):
+    _check_key(x_api_key)
+    try:
+        options = payload or {}
+        universe_size = int(options.get("universeSize") or 1000)
+        workers = int(options.get("workers") or 12)
+        if not 100 <= universe_size <= 2000:
+            raise ValueError("universeSize必须在100到2000之间")
+        if not 1 <= workers <= 20:
+            raise ValueError("workers必须在1到20之间")
+        return {
+            "ok": True,
+            **archive_latest_public(
+                universe_size=universe_size,
+                workers=workers,
+            ),
+        }
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)[:160])
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail=str(error)[:160])
 
 
 @app.post("/predict")
@@ -428,7 +463,27 @@ def predict(payload: dict = Body(...), x_api_key: str = Header(default="")):
 def model_info(x_api_key: str = Header(default="")):
     _check_key(x_api_key)
     booster, meta = get_model()
-    return {"loaded": booster is not None, "meta": meta}
+    opportunity_models, opportunity_meta = get_opportunity_models()
+    return {
+        "loaded": booster is not None,
+        "meta": meta,
+        "opportunity": {
+            "loaded": bool(opportunity_models),
+            "modelVersion":
+                (opportunity_meta or {}).get("modelVersion"),
+            "predictionContract":
+                (opportunity_meta or {}).get("predictionContract"),
+            "modelHeads": sorted((opportunity_models or {}).keys()),
+            "baselineSelected": bool(
+                (opportunity_meta or {}).get("baselineSelected")
+            ),
+            "productionEligible": bool(
+                (opportunity_meta or {}).get("productionEligible")
+            ),
+            "usagePolicy":
+                (opportunity_meta or {}).get("usagePolicy"),
+        },
+    }
 
 
 @app.get("/score")

@@ -1,13 +1,42 @@
 {
-  "featureSchemaVersion": "opportunity-score-feature.v3",
+  "featureSchemaVersion": "opportunity-score-feature.v4",
   "scoreSchemaVersion": "opportunity-score.v1",
   "legacyFeatureSchemaVersions": [
     "opportunity-score-feature.v1",
-    "opportunity-score-feature.v2"
+    "opportunity-score-feature.v2",
+    "opportunity-score-feature.v3"
   ],
+  "legacyDefaultsByVersion": {
+    "opportunity-score-feature.v3": [
+      "cheapScorePct",
+      "recallMomentumPct",
+      "recallAccumulationPct",
+      "recallReversalPct",
+      "recallLiquidityPct",
+      "recallSourceCount",
+      "explorationSample",
+      "sectorMainNetYi",
+      "sectorBreadthPct",
+      "sectorMemberCount",
+      "sectorFlowRankPct",
+      "recall_MOMENTUM",
+      "recall_ACCUMULATION",
+      "recall_REVERSAL",
+      "recall_LIQUIDITY",
+      "recall_EXPLORATION",
+      "recall_UNKNOWN"
+    ]
+  },
   "legacyDefaultZeroFeatures": [
     "playbookScore",
     "marketOpportunityFactor",
+    "cheapScorePct",
+    "recallMomentumPct",
+    "recallAccumulationPct",
+    "recallReversalPct",
+    "recallLiquidityPct",
+    "recallSourceCount",
+    "explorationSample",
     "playbook_MOMENTUM_BREAKOUT",
     "playbook_LEADER_PULLBACK",
     "playbook_ACCUMULATION",
@@ -31,6 +60,10 @@
     "flowDivergence",
     "sectorRelativeStrength",
     "sectorRankPct",
+    "sectorMainNetYi",
+    "sectorBreadthPct",
+    "sectorMemberCount",
+    "sectorFlowRankPct",
     "limitUpDistancePct",
     "limitHitCount5d",
     "failedLimitCount5d",
@@ -42,7 +75,13 @@
     "signalOverheatRisk",
     "signalLiquidityConfirmed",
     "signalSectorRelativeStrength",
-    "signalLimitCrowding"
+    "signalLimitCrowding",
+    "recall_MOMENTUM",
+    "recall_ACCUMULATION",
+    "recall_REVERSAL",
+    "recall_LIQUIDITY",
+    "recall_EXPLORATION",
+    "recall_UNKNOWN"
   ],
   "featureNames": [
     "cheapScore",
@@ -59,6 +98,13 @@
     "marketAllowed",
     "playbookScore",
     "marketOpportunityFactor",
+    "cheapScorePct",
+    "recallMomentumPct",
+    "recallAccumulationPct",
+    "recallReversalPct",
+    "recallLiquidityPct",
+    "recallSourceCount",
+    "explorationSample",
     "ret2dPct",
     "ret5dPct",
     "openGapPct",
@@ -71,6 +117,10 @@
     "flowDivergence",
     "sectorRelativeStrength",
     "sectorRankPct",
+    "sectorMainNetYi",
+    "sectorBreadthPct",
+    "sectorMemberCount",
+    "sectorFlowRankPct",
     "limitUpDistancePct",
     "limitHitCount5d",
     "failedLimitCount5d",
@@ -131,6 +181,12 @@
     "liquidity_GOOD",
     "liquidity_LIMITED",
     "liquidity_THIN",
-    "liquidity_UNKNOWN"
+    "liquidity_UNKNOWN",
+    "recall_MOMENTUM",
+    "recall_ACCUMULATION",
+    "recall_REVERSAL",
+    "recall_LIQUIDITY",
+    "recall_EXPLORATION",
+    "recall_UNKNOWN"
   ]
 }

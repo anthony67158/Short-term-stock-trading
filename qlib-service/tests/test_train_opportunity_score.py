@@ -82,7 +82,9 @@ class FakeRegressor:
 
 
 class FakeRanker(FakeRegressor):
-    pass
+    def save_model(self, path, format=None):
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(f"ranker:{format}")
 
 
 class TrainOpportunityScoreTest(unittest.TestCase):
@@ -223,7 +225,7 @@ class TrainOpportunityScoreTest(unittest.TestCase):
                 "opportunity_win_payoff_lgb.txt",
                 "opportunity_loss_payoff_lgb.txt",
                 "opportunity_q10_lgb.txt",
-                "opportunity_ranker_catboost.cbm",
+                "opportunity_ranker_catboost.json",
                 "opportunity_meta.json",
             ):
                 self.assertTrue(os.path.exists(
