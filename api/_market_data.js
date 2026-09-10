@@ -3,6 +3,47 @@
 // 全部为公开免费接口；海外/商品多为昨收或延迟，调用方需诚实标注时效。
 
 // 腾讯行情批量：返回 v_xxx="...~..."; 字段 [1]=名称 [3]=现价 [4]=昨收 [5]=今开 [32]=涨跌幅%
+export function parseTencentQuoteText(text) {
+  const out = {};
+  String(text || '').split(';').forEach((line) => {
+    const match = line.match(/v_([^=]+)="([^"]*)"/);
+    if (!match) return;
+    const key = match[1].trim();
+    const payload = match[2];
+    if (key.startsWith('hf_')) {
+      const fields = payload.split(',');
+      const price = Number(fields[0]);
+      const prevClose = Number(fields[7]);
+      const pct = Number(fields[1]);
+      if (!Number.isFinite(price) || price <= 0) return;
+      out[key] = {
+        name: fields[13] || key,
+        price,
+        prevClose: Number.isFinite(prevClose) ? prevClose : null,
+        pct: Number.isFinite(pct) ? pct : null,
+      };
+      return;
+    }
+    const fields = payload.split('~');
+    if (fields.length < 5) return;
+    const price = Number(fields[3]);
+    const prevClose = Number(fields[4]);
+    const pct = fields[32] != null
+      ? Number(fields[32])
+      : prevClose
+        ? +(((price - prevClose) / prevClose) * 100).toFixed(2)
+        : null;
+    if (!Number.isFinite(price) || price <= 0) return;
+    out[key] = {
+      name: fields[1],
+      price,
+      prevClose: Number.isFinite(prevClose) ? prevClose : null,
+      pct: Number.isFinite(pct) ? pct : null,
+    };
+  });
+  return out;
+}
+
 async function tencentQuote(codes) {
   try {
     const ctrl = new AbortController();
@@ -14,18 +55,7 @@ async function tencentQuote(codes) {
     const buf = await r.arrayBuffer();
     // 腾讯返回 GBK，用 TextDecoder 解码
     const txt = new TextDecoder('gbk').decode(buf);
-    const out = {};
-    txt.split(';').forEach((line) => {
-      const m = line.match(/v_([^=]+)="([^"]*)"/);
-      if (!m) return;
-      const key = m[1].trim();
-      const p = m[2].split('~');
-      if (p.length < 5) return;
-      const price = Number(p[3]); const prev = Number(p[4]);
-      let pct = p[32] != null ? Number(p[32]) : (prev ? +(((price - prev) / prev) * 100).toFixed(2) : null);
-      out[key] = { name: p[1], price, prevClose: prev, pct: isNaN(pct) ? null : pct };
-    });
-    return out;
+    return parseTencentQuoteText(txt);
   } catch { return {}; }
 }
 
