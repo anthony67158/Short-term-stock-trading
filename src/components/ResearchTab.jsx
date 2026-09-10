@@ -4,6 +4,8 @@ import StockPanel from './StockPanel'
 import SectorHistory from './SectorHistory'
 import ConceptTrendPanel from './ConceptTrendPanel'
 import MarketFlow from './FundFlowCanvas'
+import MarketOverview from './MarketOverview'
+import LimitPool from './LimitPool'
 import Movers from './Movers'
 import LhbBoard from './LhbBoard'
 import MarketNews from './MarketNews'
@@ -58,6 +60,21 @@ export default function ResearchTab({
 
   return (
     <div className="research">
+      <ErrorBoundary label="今日大盘">
+        <MarketOverview
+          market={snapshot?.market}
+          overseas={snapshot?.overseas}
+          sectors={snapshot?.sectors}
+          limitUp={snapshot?.limitUp}
+          brokenLimit={snapshot?.brokenLimit}
+          loading={snapshotLoading}
+          error={
+            snapshot?.errors?.market
+            || snapshotError
+          }
+          overseasError={snapshot?.errors?.overseas}
+        />
+      </ErrorBoundary>
       <ErrorBoundary label="概念走势">
         <ConceptTrendPanel
           interval={interval}
@@ -98,6 +115,18 @@ export default function ResearchTab({
               speed: snapshot?.speed,
             }}
             snapshotLoading={snapshotLoading}
+          />
+        </ErrorBoundary>
+      </div>
+      <div className="research-section">
+        <ErrorBoundary label="涨停研究">
+          <LimitPool
+            dataByKind={{
+              zt: snapshot?.limitUp,
+              zb: snapshot?.brokenLimit,
+            }}
+            loading={snapshotLoading}
+            errors={snapshot?.errors}
           />
         </ErrorBoundary>
       </div>

@@ -25,6 +25,7 @@ const llmConfig = read('src/components/LLMConfig.jsx')
 const quantModelControl = read('src/components/QuantModelControl.jsx')
 const planTab = read('src/components/PlanTab.jsx')
 const todayTab = read('src/components/TodayTab.jsx')
+const marketOverview = read('src/components/MarketOverview.jsx')
 const generationStatus = read('src/components/AdviceGenerationStatus.jsx')
 const holdingPlanDialog = read('src/components/HoldingPlanDialog.jsx')
 const reviewTab = read('src/components/ReviewTab.jsx')
@@ -514,15 +515,15 @@ test('盘面指标垂直居中并在数据后直接给出结论与操作参考',
     /\.mb-idx,[\s\S]*?\.mb-stat\s*{[^}]*display:\s*flex[^}]*justify-content:\s*center[^}]*text-align:\s*center/s,
   )
   assert.match(
-    todayTab,
+    marketOverview,
     /function MarketInterpretation\(\{ guidance, compact = false \}\)/,
   )
   assert.equal(
-    (todayTab.match(/<MarketInterpretation\b/g) || []).length,
+    (marketOverview.match(/<MarketInterpretation\b/g) || []).length,
     2,
   )
-  assert.match(todayTab, /这些数据说明/)
-  assert.match(todayTab, /操作参考/)
+  assert.match(marketOverview, /这些数据说明/)
+  assert.match(marketOverview, /操作参考/)
   assert.match(
     precision,
     /\.market-interpretation\s*{[^}]*display:\s*grid[^}]*border-top:\s*1px solid var\(--color-rule-2\)/s,

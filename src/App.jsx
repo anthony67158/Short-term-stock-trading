@@ -565,10 +565,6 @@ export function MainApp() {
                 items={[['selection', '作战计划', 'radar'], ['research', '盘面研究', 'layers']]} />
               {todaySub === 'selection' ? <TodayTab
                 market={market.data}
-                sectors={sectors.data}
-                snapshot={marketSnapshot.data}
-                snapshotLoading={marketSnapshot.loading}
-                snapshotError={marketSnapshot.error}
                 book={book}
                 quotes={(reviewQuotes.data && reviewQuotes.data.list) || []}
               /> : <ResearchTab

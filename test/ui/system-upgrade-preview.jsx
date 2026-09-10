@@ -367,8 +367,37 @@ const radar = {
 }
 const market = {
   updatedAt: now,
-  indices: [{ code: '000001', name: '上证指数', price: 3200, pct: 0.6 }],
-  breadth: { up: 3200, down: 1800, flat: 100, limitUp: 55, limitDown: 3 },
+  indices: [
+    { code: '000001', name: '上证指数', price: 3200, pct: 0.6 },
+    { code: '399001', name: '深证成指', price: 10480, pct: 0.82 },
+    { code: '399006', name: '创业板指', price: 2180, pct: -0.21 },
+    { code: '899050', name: '北证50', price: 1120, pct: 1.08 },
+  ],
+  breadth: {
+    up: 3200,
+    down: 1800,
+    flat: 100,
+    limitUp: 55,
+    limitDown: 3,
+    amountYi: 9680,
+    volVsAvg5: 8.6,
+    volLevel: '平量',
+    volumeComparable: true,
+  },
+}
+const overseas = {
+  indices: [
+    { label: '恒生指数', price: 25832, pct: 0.72 },
+    { label: '恒生科技', price: 5681, pct: 1.12 },
+    { label: '道琼斯', price: 45210, pct: -0.18 },
+    { label: '纳斯达克', price: 21879, pct: 0.44 },
+    { label: '标普500', price: 6492, pct: 0.21 },
+  ],
+  commodities: [
+    { label: '伦敦金(现货)', price: 3625.4, pct: 0.31 },
+    { label: '美原油(WTI)', price: 63.8, pct: -0.46 },
+    { label: 'COMEX黄金', price: 3640.2, pct: 0.28 },
+  ],
 }
 const originalFetch = window.fetch
 window.fetch = async (input, options) => {
@@ -380,7 +409,7 @@ window.fetch = async (input, options) => {
   const empty = { ok: true, list: [], history: [], updatedAt: now }
   let data = empty
   if (url.pathname === '/api/market_snapshot') data = {
-    ...empty, market, sectors: empty, limitUp: empty, brokenLimit: empty,
+    ...empty, market, overseas, sectors: empty, limitUp: empty, brokenLimit: empty,
     movers: empty, speed: empty, errors: {},
   }
   if (url.pathname === '/api/quote') data = { ...empty, list: quotes }

@@ -16,6 +16,11 @@ try {
     const page = await context.newPage()
     const errors = []
     page.on('pageerror', (error) => errors.push(error.message))
+    page.on('console', (message) => {
+      if (['error', 'warning'].includes(message.type())) {
+        errors.push(`${message.type()}: ${message.text()}`)
+      }
+    })
     await page.clock.install({
       time: new Date('2026-09-10T04:30:00Z'),
     })
@@ -352,7 +357,81 @@ try {
     await check('review')
     await page.goto(`${preview}?tab=research`, { waitUntil: 'networkidle' })
     await page.locator('.research').waitFor()
+    const marketOverview = page.locator('.research-market-overview')
+    await marketOverview.waitFor()
+    const marketGeometry = await marketOverview.evaluate((element) => {
+      const bounds = element.getBoundingClientRect()
+      const market = element.querySelector('.market-board')
+        ?.getBoundingClientRect()
+      const sentiment = element.querySelector('.senti-gauge')
+        ?.getBoundingClientRect()
+      const concept = document.querySelector('.concept-trend-panel')
+        ?.getBoundingClientRect()
+      return {
+        width: bounds.width,
+        scrollWidth: element.scrollWidth,
+        top: bounds.top,
+        bottom: bounds.bottom,
+        marketTop: market?.top,
+        sentimentTop: sentiment?.top,
+        conceptTop: concept?.top,
+        domesticIndices:
+          element.querySelectorAll('.mb-idx').length,
+        overseasIndices:
+          element.querySelector(
+            '[aria-label="海外指数"]',
+          )?.querySelectorAll('.market-external-quote').length,
+        commodities:
+          element.querySelector(
+            '[aria-label="关键商品"]',
+          )?.querySelectorAll('.market-external-quote').length,
+      }
+    })
+    assert.ok(
+      marketGeometry.scrollWidth <= marketGeometry.width + 1,
+      JSON.stringify({ width, marketGeometry }),
+    )
+    assert.equal(marketGeometry.domesticIndices, 4)
+    assert.equal(marketGeometry.overseasIndices, 5)
+    assert.equal(marketGeometry.commodities, 3)
+    assert.ok(
+      marketGeometry.bottom <= marketGeometry.conceptTop + 1,
+      JSON.stringify({ width, marketGeometry }),
+    )
+    if (width > 900) {
+      assert.ok(
+        Math.abs(
+          marketGeometry.marketTop
+          - marketGeometry.sentimentTop,
+        ) <= 1,
+        JSON.stringify({ width, marketGeometry }),
+      )
+    } else {
+      assert.ok(
+        marketGeometry.sentimentTop > marketGeometry.marketTop,
+        JSON.stringify({ width, marketGeometry }),
+      )
+    }
+    results.push({
+      view: 'market-overview',
+      width,
+      ...marketGeometry,
+    })
     await check('legacy-research')
+    if (width === 1440) {
+      await page.getByRole('button', {
+        name: '切到白天模式',
+        exact: true,
+      }).click()
+      await page.screenshot({
+        path: `${output}/1440-light-market-overview.png`,
+        fullPage: true,
+      })
+      await page.getByRole('button', {
+        name: '切到夜间模式',
+        exact: true,
+      }).click()
+    }
     await page.goto(`${preview}?tab=hub&sub=account`, { waitUntil: 'networkidle' })
     await page.locator('.acc-hero').waitFor()
     await check('legacy-account')
