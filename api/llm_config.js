@@ -20,9 +20,15 @@ import {
   isRuntimeConfigAdmin,
 } from './_account_auth.js';
 import { assertSafeRemoteUrl } from './_safe_remote_url.js';
+import {
+  resolveV3DecisionConcurrency,
+} from '../shared/adviceBatchPolicy.js';
 
 export const MODEL_TEST_TIMEOUT_MS = 120000;
-export const V3_DECISION_CONCURRENCY = 2;
+export const V3_DECISION_CONCURRENCY =
+  resolveV3DecisionConcurrency(
+    process.env.V3_DECISION_CONCURRENCY,
+  );
 
 const normalizeBaseUrl = (value) => String(value || '').trim().replace(/\/+$/, '');
 

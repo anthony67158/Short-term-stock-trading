@@ -439,7 +439,7 @@ export default function StockDetail({ stock, onClose }) {
     const priceHint = (overview && overview.price) || myHold?.cost || null
     // ★关键★ 生成流程交给模块级后台 runner：关闭弹窗也照跑完、落缓存、记决策；
     // 本组件仅订阅 runner + 缓存来展示进度/结果（见下方 useEffect）。
-    // 经门控层触发:并发已满 → 不启动,弹「端点已满 + 正在生成清单」;该股已在生成 → 复用进度不重复触发。
+    // 经门控层触发:V3容量已满 → 展示正在评估清单;该股已在生成 → 复用进度不重复触发。
     const r = await tryStartAdvice({
       code: stock.code,
       mode: myHold ? 'hold_advice' : 'buy_advice',
@@ -481,8 +481,7 @@ export default function StockDetail({ stock, onClose }) {
     }
   }
   const [showAlert, setShowAlert] = useState(false) // 设预警表单开关
-  // 端点已满弹窗打开时,订阅本地/云端生成进度 → 实时刷新「正在生成」清单;
-  // 有端点腾空(清单减少到并发上限以下)则自动关闭弹窗,方便用户马上重试。
+  // V3容量已满时订阅本地/云端进度；有任务完成后自动关闭弹窗。
   useEffect(() => {
     if (!busyModal) return
     const refresh = () => {
@@ -1690,8 +1689,7 @@ export default function StockDetail({ stock, onClose }) {
           </button>
         </div>
 
-        {/* 端点已满弹窗:并发数=承接 advisor 角色的 AI 端点数;当前端点全部在生成时触发。
-            列出正在生成的股票名(可点击直接跳转到对应个股详情),等有端点腾空再来生成本股。*/}
+        {/* V3容量已满时列出正在评估的股票，可点击查看进度。 */}
         {busyModal && (
           <div className="busy-modal-mask" onClick={() => setBusyModal(null)}>
             <div className="busy-modal" onClick={(e) => e.stopPropagation()}>
@@ -1701,7 +1699,7 @@ export default function StockDetail({ stock, onClose }) {
               </div>
               <div className="busy-modal-desc">
                 当前 {busyModal.concurrency || busyModal.busy.length} 个生成通道都在使用中，请等待其中一个完成。
-                下列个股正在生成，完成后会自动腾出端点，届时可再次点击生成。
+                下列个股正在评估，完成后会自动释放容量，届时可再次更新。
               </div>
               <div className="busy-modal-list">
                 {busyModal.busy.map((x) => (

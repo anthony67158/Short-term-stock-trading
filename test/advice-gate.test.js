@@ -1,7 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { startAdvicePersistently } from '../shared/adviceUiState.js'
+import {
+  adviceSubmissionResolution,
+  SERVER_SUBMISSION_LOCK_MS,
+  startAdvicePersistently,
+} from '../shared/adviceUiState.js'
 import { ensureAdviceAccountSynced } from '../shared/adviceAccountSync.js'
 
 test('提交云端军师任务前必须等待最新交易账本写入OSS', async () => {
@@ -138,6 +142,7 @@ test('服务端提交抛出网络错误时保持云端排队态，禁止本地�
   assert.equal(result.status, 'queued')
   assert.equal(result.mode, 'server')
   assert.equal(result.unconfirmed, true)
+  assert.match(result.error, /最长30秒/)
   assert.equal(localStarted, false)
 })
 
@@ -159,8 +164,16 @@ test('任务已持久化但Worker调度失败时保留云端排队态', async ()
     canUseServer: () => true,
     triggerServer: async () => ({
       ok: false,
+      accepted: true,
       queued: true,
       error: '等待云端定时恢复',
+      progress: {
+        items: [{
+          code: '600519',
+          status: 'queued',
+          progressAt: 1_000,
+        }],
+      },
     }),
     startLocal: () => {
       throw new Error('已持久化任务不能再本地重复生成')
@@ -169,5 +182,37 @@ test('任务已持久化但Worker调度失败时保留云端排队态', async ()
 
   assert.equal(result.mode, 'server')
   assert.equal(result.status, 'queued')
+  assert.equal(result.confirmed, true)
   assert.equal(result.error, '等待云端定时恢复')
+})
+
+test('未确认提交在权威任务出现或30秒到期后解除占位', () => {
+  const submission = {
+    code: '600519',
+    startedAt: 1_000,
+    expiresAt: 31_000,
+  }
+  assert.deepEqual(
+    adviceSubmissionResolution(submission, {
+      items: [{
+        code: '600519',
+        status: 'running',
+        progressAt: 1_100,
+      }],
+    }, 2_000),
+    { state: 'confirmed' },
+  )
+  assert.deepEqual(
+    adviceSubmissionResolution(submission, {
+      items: [],
+    }, 20_000),
+    { state: 'pending' },
+  )
+  assert.deepEqual(
+    adviceSubmissionResolution(submission, {
+      items: [],
+    }, 31_000),
+    { state: 'expired' },
+  )
+  assert.equal(SERVER_SUBMISSION_LOCK_MS, 30_000)
 })

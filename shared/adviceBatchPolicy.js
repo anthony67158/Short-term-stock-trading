@@ -3,9 +3,21 @@ import {
   QUICK_ADVICE_TARGET_MS,
 } from './adviceGenerationPolicy.js'
 
-export const DEEP_BATCH_CONCURRENCY = 2
+export const DEFAULT_V3_DECISION_CONCURRENCY = 4
+export const MAX_V3_DECISION_CONCURRENCY = 8
 export const QUICK_ADVICE_BUDGET_MS = QUICK_ADVICE_TARGET_MS
 export const DEEP_ADVICE_BUDGET_MS = DEEP_ADVICE_TARGET_MS
+
+export function resolveV3DecisionConcurrency(value) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return DEFAULT_V3_DECISION_CONCURRENCY
+  }
+  return Math.min(
+    MAX_V3_DECISION_CONCURRENCY,
+    Math.max(1, Math.floor(parsed)),
+  )
+}
 
 export function validateBatchMode(codes = [], deepMode = false) {
   const count = new Set((codes || []).filter(Boolean).map(String)).size
@@ -14,8 +26,8 @@ export function validateBatchMode(codes = [], deepMode = false) {
 }
 
 export function batchConcurrency(endpointCount, deepMode = false) {
-  const available = Math.max(1, Number(endpointCount) || 1)
-  return deepMode ? Math.min(DEEP_BATCH_CONCURRENCY, available) : available
+  void deepMode
+  return resolveV3DecisionConcurrency(endpointCount)
 }
 
 export function adviceConcurrency(
@@ -25,10 +37,8 @@ export function adviceConcurrency(
     batchRequest = false,
   } = {},
 ) {
-  const available = Math.max(1, Number(endpointCount) || 1)
-  return batchRequest
-    ? batchConcurrency(available, deepMode)
-    : available
+  void batchRequest
+  return batchConcurrency(endpointCount, deepMode)
 }
 
 const text = (value) => String(value || '').trim()

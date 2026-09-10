@@ -1,16 +1,16 @@
 // 「单股 AI 操作建议」触发门控层。
 // 落实设计规则:
-//   规则1(并发绑定端点数):同一时刻正在生成的股票数 ≤ 用户配置的 AI 端点数(承接 advisor 角色)。
-//                          上限来自服务端权威值,经 adviceBatch.getConcurrency() 拿到(云端回灌/首屏预置)。
+//   规则1(V3独立并发):同一时刻正在评估的股票数 ≤ 服务端V3容量。
+//                      默认4路，经 adviceBatch.getConcurrency() 读取云端权威值。
 //   规则2(全局共享 & 不重复触发):同一只已在生成 → 不再重复触发,直接复用进度(UI 照常订阅展示)。
-// 触发逻辑(以 2 个端点为例):
-//   · 依次点 A、B(端点空闲)→ 直接并行启动;
-//   · 再点 C(端点已满)→ 返回 { status:'full', busy:[{code,name}] },由 UI 弹「端点已满 + 正在生成清单」,
+// 触发逻辑(以4路V3容量为例):
+//   · 依次点 A、B、C、D → 直接并行启动;
+//   · 再点 E → 返回 { status:'full', busy:[{code,name}] },由 UI 展示当前任务清单,
 //     清单项可点击跳转到对应个股。
 //
-// 「占用 advisor」的口径 = 本地 runner 正在跑的 ∪ 服务端 advisorBusy:
-//   本机点击既可能走本地生成,也可能兜底走服务端;另一台设备的服务端生成也占用同一批端点。
-//   review 任务独立占用 review 端点，不能阻塞新的主建议。
+// 「占用V3容量」的口径 = 本地 runner 正在跑的 ∪ 服务端 advisorBusy:
+//   本机点击既可能走本地评估,也可能兜底走服务端;另一台设备的服务端评估也占用同一容量。
+//   review 任务使用独立复核容量，不能阻塞新的主评估。
 import {
   startAdvice,
   getRunningList,
@@ -20,8 +20,10 @@ import {
 import { getBatchState, getConcurrency } from './adviceBatch'
 import { canServerAdvice, triggerServerAdvice } from './serverAdvice'
 import {
+  adviceSubmissionResolution,
   adviceJobState,
   SERVER_SUBMISSION_LOCK_MS,
+  SERVER_SUBMISSION_PENDING_MESSAGE,
   startAdvicePersistently,
 } from '../shared/adviceUiState.js'
 import {
@@ -52,9 +54,15 @@ function endSubmission(code, requestId = '') {
 function retainUnconfirmedSubmission(code, requestId, error = '') {
   const key = String(code || '')
   const expiresAt = Date.now() + SERVER_SUBMISSION_LOCK_MS
+  const detail = String(error || '')
   submissions.update(key, {
     stage: 'submitting',
-    phase: error || '提交结果未确认，正在核对云端任务状态',
+    phase: (
+      !detail
+      || /提交结果未确认|云端返回异常/.test(detail)
+    )
+      ? SERVER_SUBMISSION_PENDING_MESSAGE
+      : detail,
     expiresAt,
   })
   const previous = submissionExpiryTimers.get(key)
@@ -67,7 +75,20 @@ function retainUnconfirmedSubmission(code, requestId, error = '') {
 }
 
 export function getAdviceSubmission(code) {
-  return submissions.get(code)
+  const key = String(code || '')
+  const submission = submissions.get(key)
+  const resolution = adviceSubmissionResolution(
+    submission,
+    getBatchState(),
+  )
+  if (
+    resolution.state === 'confirmed'
+    || resolution.state === 'expired'
+  ) {
+    endSubmission(key, submission?.requestId)
+    return null
+  }
+  return submission
 }
 
 export function subscribeAdviceSubmissions(listener) {
@@ -77,7 +98,9 @@ export function subscribeAdviceSubmissions(listener) {
 // 汇总当前"正在生成"的股票:code -> name(本地 + 云端并集)。
 export function generatingList() {
   const map = new Map()
-  for (const item of submissions.list()) {
+  for (const item of submissions.list().filter((entry) =>
+    getAdviceSubmission(entry.code)
+  )) {
     map.set(item.code, item.name)
   }
   // 本地正在跑
@@ -98,7 +121,7 @@ export function generatingList() {
 export function isGenerating(code) {
   if (!code) return false
   const c = String(code)
-  if (submissions.has(c)) return true
+  if (getAdviceSubmission(c)) return true
   if (isRunning(c)) return true
   try { return !!adviceJobState(getBatchState(), c)?.active } catch { return false }
 }
@@ -153,7 +176,10 @@ export async function tryStartAdvice(spec) {
     if (
       result?.mode === 'server'
       && (
-        result.status === 'queued'
+        (
+          result.status === 'queued'
+          && result.confirmed !== true
+        )
         || (result.status === 'started' && !result.progress)
       )
     ) {

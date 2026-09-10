@@ -2,7 +2,6 @@ import { adviceEntryMatchesMode } from './adviceModeContext.js'
 import { isCompleteAdviceEntry } from './adviceBatchPolicy.js'
 import {
   adviceRequestId,
-  DEEP_ADVICE_TARGET_MS,
 } from './adviceGenerationPolicy.js'
 import {
   TRIGGERED_REVIEW_TIME_LIMIT_MINUTES,
@@ -478,11 +477,20 @@ export async function startAdvicePersistently(
         }
       }
       if (submission?.queued) {
+        const unconfirmed = (
+          submission.unconfirmed === true
+          || submission.accepted !== true
+        )
         return {
           status: 'queued',
           mode: 'server',
           code,
-          error: submission.error || '任务已排队，等待云端恢复',
+          confirmed: submission.accepted === true,
+          unconfirmed,
+          progress: submission.progress || null,
+          error: unconfirmed
+            ? SERVER_SUBMISSION_PENDING_MESSAGE
+            : submission.error || '任务已排队，等待云端恢复',
         }
       }
       if (submission?.code === 'ADVISOR_CAPACITY_FULL') {
@@ -494,7 +502,7 @@ export async function startAdvicePersistently(
             ? submission.busy
             : [],
           concurrency: Number(submission.concurrency) || 1,
-          error: submission.error || '军师端点已满',
+          error: submission.error || 'V3评估容量已满',
         }
       }
       // Timeout/connection loss or an explicit server rejection can happen
@@ -511,7 +519,8 @@ export async function startAdvicePersistently(
           mode: 'server',
           code,
           unconfirmed: true,
-          error: submission?.error || '提交结果未确认，正在核对云端任务状态',
+          error: submission?.error
+            || SERVER_SUBMISSION_PENDING_MESSAGE,
         }
       }
     } catch {
@@ -520,7 +529,7 @@ export async function startAdvicePersistently(
         mode: 'server',
         code,
         unconfirmed: true,
-        error: '提交结果未确认，正在核对云端任务状态',
+        error: SERVER_SUBMISSION_PENDING_MESSAGE,
       }
     }
   }
@@ -529,9 +538,42 @@ export async function startAdvicePersistently(
 }
 
 export const SERVER_FALLBACK_CONFIRM_MS = 30_000
-// 深度任务最多运行一个完整模型预算。提交响应丢失时，在这段时间内
-// 必须继续阻止同股票重试，避免服务端已受理而浏览器再次生成。
-export const SERVER_SUBMISSION_LOCK_MS = DEEP_ADVICE_TARGET_MS + 60_000
+export const SERVER_SUBMISSION_PENDING_MESSAGE =
+  '提交结果未确认，正在核对云端任务（最长30秒）'
+// 请求幂等和服务端同股活跃任务去重已经负责防止双跑；本地未确认占位
+// 只需覆盖状态快轮询窗口，不能沿用旧深度模型预算卡住用户数分钟。
+export const SERVER_SUBMISSION_LOCK_MS = SERVER_FALLBACK_CONFIRM_MS
+
+export function adviceSubmissionResolution(
+  submission,
+  batch,
+  now = Date.now(),
+) {
+  if (!submission || typeof submission !== 'object') {
+    return { state: 'missing' }
+  }
+  const code = String(submission.code || '')
+  const startedAt = Number(submission.startedAt) || 0
+  const jobs = [
+    ...(Array.isArray(batch?.items) ? batch.items : []),
+    ...(Array.isArray(batch?.reviews) ? batch.reviews : []),
+  ]
+  const confirmed = jobs.some((item) =>
+    String(item?.code || '') === code
+    && (
+      !startedAt
+      || Number(item?.progressAt) >= startedAt
+    )
+  )
+  if (confirmed) return { state: 'confirmed' }
+  if (
+    Number(submission.expiresAt) > 0
+    && Number(now) >= Number(submission.expiresAt)
+  ) {
+    return { state: 'expired' }
+  }
+  return { state: 'pending' }
+}
 
 export function serverFallbackDisplayState(
   submission,
@@ -542,7 +584,7 @@ export function serverFallbackDisplayState(
   if (submission?.queued) {
     return {
       pending: true,
-      error: submission.error || '云端提交状态未确认，正在核对任务状态',
+      error: submission.error || SERVER_SUBMISSION_PENDING_MESSAGE,
       cachedAt,
       expiresAt: cachedAt + SERVER_FALLBACK_CONFIRM_MS,
     }

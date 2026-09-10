@@ -9,7 +9,9 @@ import {
   adviceConcurrency,
   batchConcurrency,
   completeAdviceHorizonFields,
+  DEFAULT_V3_DECISION_CONCURRENCY,
   generationOptions,
+  resolveV3DecisionConcurrency,
   validateBatchMode,
 } from '../shared/adviceBatchPolicy.js'
 
@@ -46,25 +48,29 @@ test('深度批量允许全选，不限制总股票数量', () => {
   })
 })
 
-test('深度批量固定最多两路并行，普通模式保持端点并发数', () => {
-  assert.equal(batchConcurrency(3, true), 2)
+test('V3批量不再受旧深度端点限制并默认四路', () => {
+  assert.equal(DEFAULT_V3_DECISION_CONCURRENCY, 4)
+  assert.equal(resolveV3DecisionConcurrency(undefined), 4)
+  assert.equal(resolveV3DecisionConcurrency(6), 6)
+  assert.equal(resolveV3DecisionConcurrency(99), 8)
+  assert.equal(batchConcurrency(4, true), 4)
   assert.equal(batchConcurrency(1, true), 1)
-  assert.equal(batchConcurrency(3, false), 3)
+  assert.equal(batchConcurrency(4, false), 4)
 })
 
-test('单股深度生成使用全部军师端点，只有一次性深度批量限制两路', () => {
-  assert.equal(adviceConcurrency(3, {
+test('单股与批量V3评估使用同一独立容量', () => {
+  assert.equal(adviceConcurrency(4, {
     deepMode: true,
     batchRequest: false,
-  }), 3)
-  assert.equal(adviceConcurrency(3, {
+  }), 4)
+  assert.equal(adviceConcurrency(4, {
     deepMode: true,
     batchRequest: true,
-  }), 2)
-  assert.equal(adviceConcurrency(3, {
+  }), 4)
+  assert.equal(adviceConcurrency(4, {
     deepMode: false,
     batchRequest: true,
-  }), 3)
+  }), 4)
 })
 
 test('普通模式关闭深度思考并使用短预算', () => {
@@ -124,6 +130,8 @@ test('提交状态可被弹窗重新订阅并恢复原生成模式', () => {
 test('个股弹窗重开后从全局提交状态恢复进度', () => {
   assert.match(adviceGate, /export function getAdviceSubmission/)
   assert.match(adviceGate, /export function subscribeAdviceSubmissions/)
+  assert.match(adviceGate, /adviceSubmissionResolution/)
+  assert.match(adviceGate, /SERVER_SUBMISSION_PENDING_MESSAGE/)
   assert.match(adviceGate, /正在同步账本并提交云端任务/)
   assert.match(stockDetail, /getAdviceSubmission\(code\)/)
   assert.match(stockDetail, /subscribeAdviceSubmissions\(sync\)/)

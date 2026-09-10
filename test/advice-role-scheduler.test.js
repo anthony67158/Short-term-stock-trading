@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import {
   advisorAdmission,
   completeJob,
+  CONCURRENCY,
   enqueueJob,
   jobsToProgress,
   leaseJob,
@@ -19,6 +20,10 @@ import {
   reviewRoleCapacities,
   reviewResultStillCurrent,
 } from '../api/cron_advice.js'
+
+test('服务端任务表默认使用四路V3主评估容量', () => {
+  assert.equal(CONCURRENCY, 4)
+})
 
 test('同一股票的主建议与复核使用独立任务槽位', () => {
   const data = {}

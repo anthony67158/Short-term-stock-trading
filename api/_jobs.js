@@ -21,13 +21,17 @@
 import {
   generationOptions,
   isCompleteAdviceEntry,
+  resolveV3DecisionConcurrency,
 } from '../shared/adviceBatchPolicy.js';
 import {
   isTriggeredReviewEvent,
   triggeredReviewMonitoringWindow,
 } from '../shared/triggeredReviewDecision.js';
 
-export const CONCURRENCY = Number(process.env.ADVICE_CONCURRENCY || 3); // 全局并发上限【默认/回退】(运行时优先按承接 advisor 角色的端点数,见 cron_advice.js)
+export const CONCURRENCY = resolveV3DecisionConcurrency(
+  process.env.V3_DECISION_CONCURRENCY
+  || process.env.ADVICE_CONCURRENCY,
+);
 export const LEASE_MS = 270 * 1000;      // 单只运行租约:大于批量单股 225s 护栏；Worker 每 20s 续租，中断后约 4.5 分钟可回收
 export const LOCK_TTL_MS = 60 * 1000;    // Worker 锁 TTL:drainer 周期续租;崩溃后此后过期,他人接管
 export const MAX_ATTEMPTS = 3;           // 失败最多重试次数

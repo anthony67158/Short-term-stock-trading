@@ -13,6 +13,7 @@ import { compactAdvicePlan } from '../shared/adviceContinuity.js'
 import {
   SERVER_FALLBACK_CONFIRM_MS,
   SERVER_SUBMISSION_LOCK_MS,
+  SERVER_SUBMISSION_PENDING_MESSAGE,
   serverFallbackDisplayState,
 } from '../shared/adviceUiState.js'
 import {
@@ -332,7 +333,7 @@ async function serverFallback(code, deepMode = false, requestId = '') {
       ok: false,
       queued: true,
       unconfirmed: true,
-      error: '云端任务提交结果未确认，正在核对任务状态',
+      error: SERVER_SUBMISSION_PENDING_MESSAGE,
     }
   }
 }

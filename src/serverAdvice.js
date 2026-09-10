@@ -8,7 +8,10 @@ import { api } from './apiBase'
 import { authStore } from './authStore'
 import { planStore } from './planStore'
 import { ensureAdviceAccountSynced } from '../shared/adviceAccountSync.js'
-import { createAdviceCompletionPuller } from '../shared/adviceUiState.js'
+import {
+  createAdviceCompletionPuller,
+  SERVER_SUBMISSION_PENDING_MESSAGE,
+} from '../shared/adviceUiState.js'
 import {
   activeAdviceCancellationTargets,
   confirmAdviceBatchCancellation,
@@ -168,6 +171,7 @@ export async function triggerServerAdvice(codes, {
       return {
         ok: false,
         queued: true,
+        unconfirmed: true,
         error: `云端返回异常(${response.status})，正在核对任务状态`,
       }
     }
@@ -181,7 +185,8 @@ export async function triggerServerAdvice(codes, {
     return {
       ok: false,
       queued: true,
-      error: '提交结果未确认，正在核对云端任务状态',
+      unconfirmed: true,
+      error: SERVER_SUBMISSION_PENDING_MESSAGE,
     }
   } finally {
     clearTimeout(timeout)

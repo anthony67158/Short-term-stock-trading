@@ -73,7 +73,7 @@ window.fetch = async (input) => {
     roles,
     roleSlots,
     pool,
-    concurrency: 2,
+    concurrency: 4,
     config: {
       roleEndpoints,
       source: 'fixture',

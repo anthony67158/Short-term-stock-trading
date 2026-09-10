@@ -2,7 +2,7 @@
 // 用户在自选/候选区多选(或全选)若干只股票 → 一键后台批量生成 AI 操作建议。
 // 特点:
 //   1) 模块级单例 + pub/sub —— 关闭面板/切 Tab 也照跑,回来还能看到实时进度(后台处理)。
-//   2) 动态并发:普通模式按 advisor 端点数填槽，深度模式最多两路。
+//   2) 动态并发:V3评估使用独立容量，默认四路，不再绑定LLM端点。
 //   3) 复用与手动生成完全同源的 spec 构造(buildHoldSpec/buildWatchSpec)与后台 runner(startAdvice)。
 //   4) 不做新鲜度节流:用户勾选了哪些就重生成哪些(选择权完全交给用户)。
 //   5) 可取消:批次墓碑立即阻止后续派发，并协作中止在途请求。
@@ -25,7 +25,9 @@ import {
 } from '../shared/adviceUiState.js'
 import {
   batchConcurrency,
+  DEFAULT_V3_DECISION_CONCURRENCY,
   generationOptions,
+  resolveV3DecisionConcurrency,
   validateBatchMode,
 } from '../shared/adviceBatchPolicy.js'
 import {
@@ -35,7 +37,7 @@ import {
   settleQueuedAdviceCancellations,
 } from '../shared/adviceCancellation.js'
 
-// 本地兜底并发不再写死为 1:改为「动态并行填槽」——容量 = 端点数 − 非本批占用数,
+// 本地兜底并发按V3容量动态填槽——容量 = 总容量 − 非本批占用数,
 // 谁跑完就补谁的槽,与服务端 drainAccount 的调度模型一致(见 runBatchAdvice 末尾的 worker)。
 
 // 进度状态(单例):
@@ -63,17 +65,21 @@ const state = {
   _canceledBatchIds: new Set(),
   _cancelBatchPromise: null,
   _cancelOnePromises: new Map(),
-  concurrency: 1,      // 并发上限=服务端 advisor 端点数(云端进度回灌覆盖;首屏由 seedConcurrency 预置)
+  concurrency: DEFAULT_V3_DECISION_CONCURRENCY,
 }
 const subs = new Set()
 function notify() { subs.forEach((fn) => { try { fn() } catch { /* ignore */ } }) }
 export function subscribeBatch(fn) { subs.add(fn); return () => subs.delete(fn) }
-// 并发上限(=承接 advisor 角色的端点数)。首屏可由 /api/llm_config 预置(seedConcurrency),
-// 之后随云端 batchProgress.concurrency 覆盖为权威值。
-export function getConcurrency() { return Math.max(1, Number(state.concurrency) || 1) }
-export function seedConcurrency(n) { const v = Math.max(1, Number(n) || 0); if (v) { state.concurrency = v; notify() } }
-// 同步窥视 advisor 端点占用(供批量入口 UI 先行门控)。
-// 返回 { busy:[{code,name}], concurrency, full }。full=true 表示端点已被非本批单股生成占满。
+// V3 决策并发与 LLM 端点数量无关。首屏默认4路，之后由服务端进度回灌权威值。
+export function getConcurrency() {
+  return resolveV3DecisionConcurrency(state.concurrency)
+}
+export function seedConcurrency(n) {
+  state.concurrency = resolveV3DecisionConcurrency(n)
+  notify()
+}
+// 同步窥视V3容量占用(供批量入口 UI 先行门控)。
+// 返回 { busy:[{code,name}], concurrency, full }。full=true 表示容量已被非本批单股评估占满。
 export function peekBatchBusy(excludeCodes, deepMode = false) {
   const ex = new Set((excludeCodes || []).filter(Boolean).map(String))
   const busy = advisorBusyCodes()
@@ -372,7 +378,7 @@ export function applyCloudBatch(bp, force = false) {
   if (!state._cancelAllRequested) state.cancelError = ''
   state.batchId = String(bp.batchId || state.batchId || '')
   state.deepMode = !!bp.deepMode
-  if (Number(bp.concurrency) > 0) state.concurrency = Number(bp.concurrency)   // 权威并发上限=服务端 advisor 端点数
+  if (Number(bp.concurrency) > 0) state.concurrency = Number(bp.concurrency)
   state.total = bp.total || 0
   state.done = bp.done || 0
   state.ok = bp.ok || 0

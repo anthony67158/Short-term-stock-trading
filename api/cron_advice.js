@@ -3,8 +3,8 @@
 //   旧版:一次 FC 请求内【串行】生成指定 codes,进度写 batchProgress。任务不持久 → FC 崩/超时即丢,
 //         无状态/无重试/无取消,点两次起两份。
 //   新版:任务按角色沉到账号 data.jobs/reviewJobs(OSS 持久,见 _jobs.js),服务端为唯一权威源:
-//         · advisor/review 各自按端点数限流；
-//           同一协调器串行持久化，但两个角色的模型调用可并行。
+//         · 主V3评估默认四路，review 使用独立四路容量；
+//           同一协调器串行持久化，但两条任务lane可并行。
 //         · 断点续跑:running 但租约过期(FC 崩)= 孤儿 → 下次 drain 自动回收重跑。
 //         · 失败重试:失败回 queued 直到 maxAttempts。
 //         · 取消:queued 立即 canceled;running 协作式(跑完丢弃结果)。
@@ -86,6 +86,7 @@ import {
   adviceCompleteness,
   adviceConcurrency,
   generationOptions,
+  resolveV3DecisionConcurrency,
   validateBatchMode,
 } from '../shared/adviceBatchPolicy.js';
 import {
@@ -213,7 +214,9 @@ function endWorkerResponse(res, payload) {
 
 // V3使用独立计算容量，LLM端点是否配置不影响决策与复核。
 function advisorConcurrency() {
-  return 2;
+  return resolveV3DecisionConcurrency(
+    process.env.V3_DECISION_CONCURRENCY,
+  );
 }
 
 function reviewConcurrency() {
@@ -1619,7 +1622,7 @@ async function persistServer(nick, workingAcc) {
     }
     fdata.settings = settings;
   }
-  // 进度快照(旧前端仍消费 batchProgress);concurrency=当前 advisor 端点数(供前端单股触发门控)
+  // 进度快照供前端门控；concurrency=当前V3主评估容量。
   fdata.batchProgress = jobsToProgress(wdata, Date.now(), effectiveAdviceConcurrency(wdata));
   // advice 逐条时间戳并入
   const wa = (wdata.advice && typeof wdata.advice === 'object') ? wdata.advice : {};
@@ -2840,7 +2843,7 @@ export default async function handler(req, res) {
           accepted: false,
           queued: false,
           code: 'ADVISOR_CAPACITY_FULL',
-          error: '军师端点已满，请等待当前生成完成',
+          error: 'V3评估容量已满，请等待当前任务完成',
           busy: admission.busy,
           concurrency: admission.capacity,
           progress: jobsToProgress(
