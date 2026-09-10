@@ -18975,7 +18975,7 @@ html[data-theme="light"] .nav {
   }
 }
 
-/* Fixed trade-card anatomy: content changes, landmarks do not. */
+/* Stable trade-card anatomy: compact by default, expands only for real content. */
 .hold-grid .hold-item,
 .plan-cand {
   box-sizing: border-box;
@@ -19764,35 +19764,37 @@ html[data-theme="light"] .nav {
 }
 
 .hold-grid .hold-item.v3-card {
-  height: 760px;
-  min-height: 760px;
-  max-height: 760px;
+  height: auto;
+  min-height: 500px;
+  max-height: none;
+  align-self: start;
 }
 
 .plan-cand.v3-card {
-  height: 640px;
-  min-height: 640px;
-  max-height: 640px;
+  height: auto;
+  min-height: 350px;
+  max-height: none;
+  align-self: start;
 }
 
 .hold-item.v3-card .card-decision-slot {
-  flex: 0 0 420px;
-  height: 420px;
-  min-height: 420px;
-  max-height: 420px;
+  flex: 0 0 auto;
+  height: auto;
+  min-height: 230px;
+  max-height: none;
   overflow: visible;
 }
 
 .plan-cand.v3-card .card-decision-slot {
-  flex: 0 0 300px;
-  height: 300px;
-  min-height: 300px;
-  max-height: 300px;
+  flex: 0 0 auto;
+  height: auto;
+  min-height: 180px;
+  max-height: none;
   overflow: visible;
 }
 
 .trade-card.v3-card .v3-decision-summary {
-  flex: 1;
+  flex: none;
   padding-block: var(--space-2xs);
   gap: var(--space-2xs);
 }
@@ -19803,7 +19805,7 @@ html[data-theme="light"] .nav {
 }
 
 .trade-card.v3-card .card-decision-meta {
-  margin-top: auto;
+  margin-top: var(--space-xs);
 }
 
 .trade-card.v3-card .hold-t1-metric em {
@@ -19812,24 +19814,46 @@ html[data-theme="light"] .nav {
   white-space: normal;
 }
 
+.trade-card.v3-card .trade-card-review-slot:empty {
+  display: none;
+}
+
+.hold-grid:has(.v3-card),
+.plan-cand-grid:has(.v3-card) {
+  align-items: start;
+}
+
+.hold-swipe-wrap:has(.v3-card),
+.hold-select-wrap:has(.v3-card) {
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  align-self: start;
+}
+
+.hold-item.v3-card > .pi-actions,
+.plan-cand.v3-card .pc-actions {
+  margin-top: var(--space-md);
+}
+
 @media (max-width: 720px) {
   .hold-grid .hold-item.v3-card,
   .hold-swipe-wrap:has(.v3-card),
   .hold-select-wrap:has(.v3-card) {
-    height: 880px;
-    min-height: 880px;
-    max-height: 880px;
+    height: auto;
+    min-height: 520px;
+    max-height: none;
   }
   .hold-item.v3-card .card-decision-slot {
-    flex-basis: 540px;
-    height: 540px;
-    min-height: 540px;
-    max-height: 540px;
+    flex-basis: auto;
+    height: auto;
+    min-height: 250px;
+    max-height: none;
   }
   .plan-cand.v3-card {
-    height: 660px;
-    min-height: 660px;
-    max-height: 660px;
+    height: auto;
+    min-height: 370px;
+    max-height: none;
   }
   .plan-cand.v3-card .pc-actions {
     flex: 0 0 44px;

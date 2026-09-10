@@ -16,6 +16,9 @@ try {
     const page = await context.newPage()
     const errors = []
     page.on('pageerror', (error) => errors.push(error.message))
+    await page.clock.install({
+      time: new Date('2026-09-10T04:30:00Z'),
+    })
     await context.route('**/*', (route) => {
       const url = new URL(route.request().url())
       return url.origin === base ? route.continue() : route.abort()

@@ -183,14 +183,15 @@
 - In dense equal-width command rows, prefer short text-only labels when icons
   would reduce the required inner padding.
 - Holding and watchlist cards share one anatomy: identity row, three-column
-  metric strip, decision summary, then actions. Cards of the same type use fixed
-  dimensions and fixed-height identity, decision, evidence, discipline and
-  action regions; variable prose is summarized instead of moving later
-  regions. The primary operation instruction is never line-clamped, and up to
-  three structured monitoring rules are shown directly. Monitoring uses one
-  outlined status rail above unframed rules; sustained observations show a
-  real second-by-second countdown from the rule's matched time. Mobile groups
-  use equal-height horizontal snap rows.
+  metric strip, decision summary, then actions. Identity, metric, discipline and
+  action controls keep stable dimensions, while the card shell uses a compact
+  minimum height and collapses empty review or evidence regions. Decision
+  content must never stretch with `flex: 1` merely to fill space. Up to three
+  structured monitoring rules expand only the cards that contain them.
+  Monitoring uses one outlined status rail above unframed rules; sustained
+  observations show a real second-by-second countdown from the rule's matched
+  time. Mobile groups keep horizontal snap navigation without forcing every
+  card to inherit the tallest card's height.
 - Card decision summaries separate status, primary action, position limit and
   execution condition into distinct visual rows. Use one semantic icon for the
   primary action, render position as a compact badge, and reserve the expanded

@@ -16,11 +16,18 @@ book.executionPlans = []
 book.jobs = {}
 book.reviewJobs = {}
 book.advice = {}
+book.plan.push({
+  code: '600522',
+  name: '中天科技',
+  star: true,
+  industry: '通信设备',
+  concept: 'PCB',
+})
 book.settings = {
   ...book.settings, aiAutoAlert: true,
   'advAuto.holdEnabled': true, 'advAuto.watchEnabled': true,
   'advAuto.holdCodes': book.holding.map((item) => item.code),
-  'advAuto.watchCodes': ['002594', '688981'],
+  'advAuto.watchCodes': ['002594', '688981', '600522'],
   'advReview.disabledCodes': [],
 }
 const values = [
@@ -36,6 +43,22 @@ const quotes = values.map(([code, name, price]) => ({
   amount: 2e8, pct: 0, isLivePrice: true, live: true, priceStatus: 'LIVE',
   priceLabel: '实时', tradeDate: '2026-09-10', industry: '本地测试',
 }))
+quotes.push({
+  code: '600522',
+  name: '中天科技',
+  price: 33.48,
+  prevClose: 34.12,
+  high: 34.2,
+  low: 33.1,
+  amount: 1.8e8,
+  pct: -1.88,
+  isLivePrice: false,
+  live: false,
+  priceStatus: 'CLOSE',
+  priceLabel: '午间收盘',
+  tradeDate: '2026-09-10',
+  industry: '通信设备',
+})
 const quoteMap = Object.fromEntries(quotes.map((quote) => [quote.code, quote]))
 for (const [code, name, price, action, lots, state] of values) {
   const holding = book.holding.find((item) => item.code === code)

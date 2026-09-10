@@ -33,7 +33,7 @@ const calmSurface = precision.slice(precision.indexOf(
   '/* Trade workspace refinement: calm surfaces and content-led height. */',
 ))
 const fixedCards = precision.slice(precision.indexOf(
-  '/* Fixed trade-card anatomy: content changes, landmarks do not. */',
+  '/* Stable trade-card anatomy: compact by default, expands only for real content. */',
 ))
 const semanticTabSources = [
   'src/components/AlertCenter.jsx',
@@ -560,6 +560,10 @@ test('持仓区共用页面边线、筛选栏留出安全区且卡片展示建�
   assert.match(precision, /\.hold-grid\s*{[^}]*align-items:\s*stretch/s)
   assert.match(
     precision,
+    /\.hold-grid:has\(\.v3-card\),[\s\S]*?\.plan-cand-grid:has\(\.v3-card\)\s*{[^}]*align-items:\s*start/s,
+  )
+  assert.match(
+    precision,
     /\.hold-swipe-wrap > \.hold-item\s*{[^}]*height:\s*100%[^}]*display:\s*flex[^}]*flex-direction:\s*column/s,
   )
   assert.match(
@@ -700,16 +704,22 @@ test('持仓页大型展开层统一挂到顶层Portal避免被吸顶区遮盖',
   )
 })
 
-test('持仓与自选卡使用固定外框与固定内容槽位', () => {
-  assert.match(fixedCards, /\.hold-grid \.hold-item\s*{[^}]*height:\s*700px[^}]*max-height:\s*700px/s)
-  assert.match(fixedCards, /\.plan-cand\s*{[^}]*height:\s*640px[^}]*max-height:\s*640px/s)
+test('V3持仓与自选卡回收空槽且保留固定功能区域', () => {
   assert.match(
     fixedCards,
-    /\.hold-item \.card-decision-slot\s*{[^}]*height:\s*364px[^}]*max-height:\s*364px/s,
+    /\.hold-grid \.hold-item\.v3-card\s*{[^}]*height:\s*auto[^}]*min-height:\s*500px[^}]*max-height:\s*none/s,
   )
   assert.match(
     fixedCards,
-    /\.plan-cand \.card-decision-slot\s*{[^}]*height:\s*368px[^}]*max-height:\s*368px/s,
+    /\.plan-cand\.v3-card\s*{[^}]*height:\s*auto[^}]*min-height:\s*350px[^}]*max-height:\s*none/s,
+  )
+  assert.match(
+    fixedCards,
+    /\.hold-item\.v3-card \.card-decision-slot\s*{[^}]*height:\s*auto[^}]*min-height:\s*230px[^}]*max-height:\s*none/s,
+  )
+  assert.match(
+    fixedCards,
+    /\.plan-cand\.v3-card \.card-decision-slot\s*{[^}]*height:\s*auto[^}]*min-height:\s*180px[^}]*max-height:\s*none/s,
   )
   assert.match(
     fixedCards,

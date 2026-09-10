@@ -19,7 +19,7 @@ const calmSurfaceMarker =
   '/* Trade workspace refinement: calm surfaces and content-led height. */'
 const calmSurface = precision.slice(precision.indexOf(calmSurfaceMarker))
 const fixedCardMarker =
-  '/* Fixed trade-card anatomy: content changes, landmarks do not. */'
+  '/* Stable trade-card anatomy: compact by default, expands only for real content. */'
 const fixedCards = precision.slice(precision.indexOf(fixedCardMarker))
 
 test('持仓与自选卡直接展示核心摘要并保留详情入口', () => {
@@ -138,7 +138,7 @@ test('持仓和自选卡展示最近有效价但只用连续竞价价触发动�
   )
 })
 
-test('交易卡片使用固定尺寸和固定区域骨架', () => {
+test('交易卡片保留稳定区域且V3空状态按内容收缩', () => {
   assert.match(
     planTab,
     /'trade-card plan-cand stock-detail-card-hitarea v3-card'[\s\S]*?\(cardAdvice \? ' has-advice' : ' no-advice'\)/,
@@ -148,18 +148,30 @@ test('交易卡片使用固定尺寸和固定区域骨架', () => {
     /'trade-card hold-item stock-detail-card-hitarea v3-card'[\s\S]*?\(holdAdvice \? ' has-advice' : ' no-advice'\)/,
   )
   assert.match(precision, new RegExp(fixedCardMarker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
-  assert.match(fixedCards, /\.hold-grid \.hold-item\s*{[^}]*height:\s*700px[^}]*min-height:\s*700px[^}]*max-height:\s*700px/s)
-  assert.match(fixedCards, /\.plan-cand\s*{[^}]*height:\s*640px[^}]*min-height:\s*640px[^}]*max-height:\s*640px/s)
   assert.match(fixedCards, /\.hold-grid \.hold-head,[\s\S]*?\.plan-cand \.pc-top\s*{[^}]*height:\s*64px[^}]*max-height:\s*64px/s)
-  assert.match(fixedCards, /\.hold-item \.card-decision-slot\s*{[^}]*height:\s*364px[^}]*max-height:\s*364px[^}]*overflow:\s*hidden/s)
-  assert.match(fixedCards, /\.plan-cand \.card-decision-slot\s*{[^}]*height:\s*368px[^}]*max-height:\s*368px[^}]*overflow:\s*hidden/s)
   assert.match(fixedCards, /\.hold-card-metrics\s*{[^}]*height:\s*76px[^}]*max-height:\s*76px/s)
   assert.match(fixedCards, /\.trade-card-evidence-slot\s*{[^}]*height:\s*24px[^}]*max-height:\s*24px/s)
   assert.match(fixedCards, /\.holding-plan-summary\s*{[^}]*height:\s*44px[^}]*max-height:\s*44px/s)
   assert.match(fixedCards, /\.hold-item > \.pi-actions,[\s\S]*?\.plan-cand \.pc-actions\s*{[^}]*min-height:\s*56px[^}]*max-height:\s*56px/s)
   assert.match(
     design,
-    /Cards of the same type use fixed\s+dimensions and fixed-height identity, decision, evidence, discipline and\s+action regions/s,
+    /card shell uses a compact\s+minimum height and collapses empty review or evidence regions/s,
+  )
+  assert.match(
+    fixedCards,
+    /\.hold-grid \.hold-item\.v3-card\s*{[^}]*height:\s*auto[^}]*min-height:\s*500px[^}]*max-height:\s*none/s,
+  )
+  assert.match(
+    fixedCards,
+    /\.plan-cand\.v3-card\s*{[^}]*height:\s*auto[^}]*min-height:\s*350px[^}]*max-height:\s*none/s,
+  )
+  assert.match(
+    fixedCards,
+    /\.trade-card\.v3-card \.v3-decision-summary\s*{[^}]*flex:\s*none/s,
+  )
+  assert.match(
+    fixedCards,
+    /\.trade-card\.v3-card \.trade-card-review-slot:empty\s*{[^}]*display:\s*none/s,
   )
   assert.match(
     calmSurface,

@@ -31,6 +31,10 @@ try {
     assert.match(await candidate('002594').innerText(), /等待回踩 84元/)
     assert.match(await candidate('688981').innerText(), /买入 1 手/)
     assert.match(await candidate('600519').innerText(), /仅收藏，尚未跟踪/)
+    assert.match(
+      await candidate('600522').innerText(),
+      /尚无本轮V3决策/,
+    )
     const geometry = await page.evaluate(() => ({
       width: innerWidth,
       scrollWidth: document.documentElement.scrollWidth,
@@ -38,12 +42,48 @@ try {
         const summary = element.querySelector('.v3-decision-summary').getBoundingClientRect()
         const slot = element.querySelector('.card-decision-slot').getBoundingClientRect()
         const meta = element.querySelector('.card-decision-meta')?.getBoundingClientRect()
+        const monitoring = element.querySelector('.monitoring-rules')
+          ?.getBoundingClientRect()
+        const decisionContentBottom = Math.max(
+          ...[...element.querySelectorAll(
+            '.v3-decision-summary > *',
+          )].map((node) => node.getBoundingClientRect().bottom),
+          summary.top,
+        )
+        const nextSection = element.matches('.hold-item')
+          ? element.querySelector('.hold-card-metrics')?.getBoundingClientRect()
+          : element.querySelector('.trade-card-review-slot')?.getBoundingClientRect()
+        const plan = element.querySelector('.holding-plan-summary')
+          ?.getBoundingClientRect()
+        const actions = element.matches('.hold-item')
+          ? element.querySelector('.pi-actions')?.getBoundingClientRect()
+          : element.querySelector('.pc-actions')?.getBoundingClientRect()
+        const contentBottom = Math.max(
+          decisionContentBottom,
+          meta?.height > 0 ? meta.bottom : decisionContentBottom,
+          monitoring?.height > 0
+            ? monitoring.bottom
+            : decisionContentBottom,
+        )
+        const beforeActionsBottom = Math.max(
+          contentBottom,
+          nextSection?.bottom || contentBottom,
+          plan?.bottom || contentBottom,
+        )
         return {
           code: element.dataset.code,
+          type: element.matches('.hold-item') ? 'holding' : 'candidate',
+          monitoring: !!monitoring?.height,
           width: element.clientWidth, scrollWidth: element.scrollWidth,
           height: element.clientHeight, scrollHeight: element.scrollHeight,
           summaryBottom: summary.bottom, slotBottom: slot.bottom,
           metaTop: meta?.height > 0 ? meta.top : slot.bottom,
+          decisionGap: nextSection
+            ? Math.max(0, nextSection.top - contentBottom)
+            : null,
+          actionGap: actions
+            ? Math.max(0, actions.top - beforeActionsBottom)
+            : null,
         }
       }),
     }))
@@ -53,8 +93,22 @@ try {
       assert.ok(card.scrollHeight <= card.height + 1, JSON.stringify(card))
       assert.ok(card.summaryBottom <= card.slotBottom + 1, JSON.stringify(card))
       assert.ok(card.summaryBottom <= card.metaTop + 1, JSON.stringify(card))
+      assert.ok(card.decisionGap <= 32, JSON.stringify(card))
+      assert.ok(card.actionGap <= 32, JSON.stringify(card))
+      if (!card.monitoring && card.type === 'holding') {
+        assert.ok(card.height <= 640, JSON.stringify(card))
+      }
+      if (card.type === 'candidate') {
+        assert.ok(card.height <= 500, JSON.stringify(card))
+      }
     }
     await page.screenshot({ path: `${output}/${width}-cards.png`, fullPage: true })
+    await holding('300750').screenshot({
+      path: `${output}/${width}-holding-compact.png`,
+    })
+    await candidate('600522').screenshot({
+      path: `${output}/${width}-candidate-compact.png`,
+    })
     await candidate('600519').getByRole('button', { name: '纳入作战', exact: true }).click()
     const confirm = page.getByRole('dialog', { name: '纳入作战并持续跟踪？' })
     await confirm.waitFor()
@@ -72,6 +126,28 @@ try {
     assert.equal(await page.getByRole('button', { name: '深度生成', exact: true }).count(), 0)
     assert.equal(await page.locator('.footbar-quick').innerText(), '更新 V3 决策')
     await page.getByRole('button', { name: '关闭个股详情', exact: true }).click()
+    if ([320, 1440].includes(width)) {
+      if (width === 1440) {
+        await page.getByRole('button', {
+          name: '切到白天模式',
+          exact: true,
+        }).click()
+      } else {
+        await page.evaluate(() => {
+          document.documentElement.setAttribute('data-theme', 'light')
+        })
+      }
+      assert.equal(
+        await page.locator('html').getAttribute('data-theme'),
+        'light',
+      )
+      await holding('300750').screenshot({
+        path: `${output}/${width}-holding-compact-light.png`,
+      })
+      await candidate('600522').screenshot({
+        path: `${output}/${width}-candidate-compact-light.png`,
+      })
+    }
     assert.deepEqual(errors, [])
     results.push(geometry)
     await context.close()
