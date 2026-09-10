@@ -155,10 +155,10 @@ function turnoverView(turnover = {}) {
     tone: '',
     value: amountYi == null
       ? '--'
-      : `盘中累计 ${formatYi(amountYi)}`,
+      : `当前成交额 ${formatYi(amountYi)}`,
     detail: amountYi == null
       ? '成交额待更新'
-      : '收盘后再与近5日均量比较',
+      : '近5日均量对比暂不可用',
   }
 }
 

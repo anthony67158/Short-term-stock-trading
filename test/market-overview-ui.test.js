@@ -47,7 +47,7 @@ test('今日大盘优先展示全市场资金方向和可比较的流动性变�
   assert.match(overview, /流入 \/ 流出市场/)
   assert.match(overview, /最大资金方向/)
   assert.match(overview, /流动性变化/)
-  assert.match(overview, /盘中累计/)
+  assert.match(overview, /当前成交额/)
   assert.match(overview, /较5日均量/)
 })
 
