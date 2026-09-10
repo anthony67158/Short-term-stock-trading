@@ -73,6 +73,29 @@ def relevance_labels(values, thresholds=None):
     return labels, [round(float(value), 6) for value in thresholds]
 
 
+def compose_expected_net_r(
+    win_probability,
+    win_payoff,
+    loss_payoff,
+):
+    probability = np.clip(
+        np.asarray(win_probability, dtype=np.float64),
+        0,
+        1,
+    )
+    positive = np.maximum(
+        0,
+        np.asarray(win_payoff, dtype=np.float64),
+    )
+    negative = np.minimum(
+        0,
+        np.asarray(loss_payoff, dtype=np.float64),
+    )
+    if probability.shape != positive.shape or negative.shape != positive.shape:
+        raise ValueError("POC动作价值数组维度不一致")
+    return probability * positive + (1 - probability) * negative
+
+
 def active_feature_mask(X):
     matrix = np.asarray(X, dtype=np.float64)
     return np.ptp(matrix, axis=0) > 1e-12
@@ -327,8 +350,19 @@ def run_family_fold(family, dataset, fold):
     X_validation = dataset["X"][validation][:, mask]
     X_filled_train = dataset["X"][filled_train][:, mask]
     X_filled_calibration = dataset["X"][filled_calibration][:, mask]
-    X_filled_validation = dataset["X"][filled_validation][:, mask]
-    clipped_net_r, clipping = clip_labels(
+    positive_train = filled_train[
+        dataset["y_net_r"][filled_train] > 0
+    ]
+    negative_train = filled_train[
+        dataset["y_net_r"][filled_train] <= 0
+    ]
+    positive_net_r, positive_clipping = clip_labels(
+        dataset["y_net_r"][positive_train],
+    )
+    negative_net_r, negative_clipping = clip_labels(
+        dataset["y_net_r"][negative_train],
+    )
+    quantile_net_r, quantile_clipping = clip_labels(
         dataset["y_net_r"][filled_train],
     )
     rank_actual_train = np.nan_to_num(
@@ -350,10 +384,18 @@ def run_family_fold(family, dataset, fold):
     fill_model.fit(X_train, dataset["y_fill"][train])
     win_model = family.classifier()
     win_model.fit(X_filled_train, dataset["y_win"][filled_train])
-    net_r_model = family.regressor()
-    net_r_model.fit(X_filled_train, clipped_net_r)
+    win_payoff_model = family.regressor()
+    win_payoff_model.fit(
+        dataset["X"][positive_train][:, mask],
+        positive_net_r,
+    )
+    loss_payoff_model = family.regressor()
+    loss_payoff_model.fit(
+        dataset["X"][negative_train][:, mask],
+        negative_net_r,
+    )
     quantile_model = family.quantile()
-    quantile_model.fit(X_filled_train, clipped_net_r)
+    quantile_model.fit(X_filled_train, quantile_net_r)
     ranker = family.ranker()
     family.fit_ranker(ranker, rank_data)
     fit_seconds = time.perf_counter() - started
@@ -370,13 +412,25 @@ def run_family_fold(family, dataset, fold):
         _probability(fill_model, X_validation),
         fill_calibrator,
     )
-    win_probability = apply_probability_calibrator(
-        _probability(win_model, X_filled_validation),
+    win_probability_all = apply_probability_calibrator(
+        _probability(win_model, X_validation),
         win_calibrator,
     )
-    expected_net_r = np.asarray(
-        net_r_model.predict(X_validation),
+    win_probability = win_probability_all[
+        np.isfinite(dataset["y_net_r"][validation])
+    ]
+    win_payoff = np.asarray(
+        win_payoff_model.predict(X_validation),
         dtype=np.float64,
+    )
+    loss_payoff = np.asarray(
+        loss_payoff_model.predict(X_validation),
+        dtype=np.float64,
+    )
+    expected_net_r = compose_expected_net_r(
+        win_probability_all,
+        win_payoff,
+        loss_payoff,
     )
     expected_net_r_filled = expected_net_r[
         np.isfinite(dataset["y_net_r"][validation])
@@ -403,14 +457,19 @@ def run_family_fold(family, dataset, fold):
     models = (
         fill_model,
         win_model,
-        net_r_model,
+        win_payoff_model,
+        loss_payoff_model,
         quantile_model,
     )
     return {
         "metadata": {
             **fold["metadata"],
             "activeFeatures": int(mask.sum()),
-            "labelClip": clipping,
+            "labelClip": {
+                "winPayoff": positive_clipping,
+                "lossPayoff": negative_clipping,
+                "quantile10": quantile_clipping,
+            },
             "relevanceThresholds": relevance_thresholds,
         },
         "pFill": binary_metrics(
@@ -470,7 +529,8 @@ def run_family_fold(family, dataset, fold):
         "serializedBytes": len(pickle.dumps({
             "fill": fill_model,
             "win": win_model,
-            "netR": net_r_model,
+            "winPayoff": win_payoff_model,
+            "lossPayoff": loss_payoff_model,
             "q10": quantile_model,
             "ranker": ranker,
         }, protocol=pickle.HIGHEST_PROTOCOL)),

@@ -12,6 +12,7 @@ sys.path.insert(0, SERVICE_ROOT)
 from poc_v3_model_bakeoff import (  # noqa: E402
     active_feature_mask,
     clip_labels,
+    compose_expected_net_r,
     relevance_labels,
 )
 
@@ -52,6 +53,15 @@ class PocV3ModelBakeoffTest(unittest.TestCase):
             active_feature_mask(matrix).tolist(),
             [False, True, False],
         )
+
+    def test_expected_net_r_combines_win_and_loss_once(self):
+        values = compose_expected_net_r(
+            np.asarray([0.25, 0.75]),
+            np.asarray([2.0, 2.0]),
+            np.asarray([-1.0, -1.0]),
+        )
+
+        np.testing.assert_allclose(values, [-0.25, 1.25])
 
 
 if __name__ == "__main__":
