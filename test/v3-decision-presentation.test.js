@@ -42,7 +42,7 @@ test('过期和未就绪明确不执行而不是0%胜率', () => {
   })
   assert.equal(expired.executable, false)
   assert.match(expired.reason, /过期/)
-  assert.match(unavailable.reason, /模型当前不可用/)
+  assert.match(unavailable.reason, /模型调用失败/)
   assert.doesNotMatch(unavailable.reason, /0%/)
 })
 

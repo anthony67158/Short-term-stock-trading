@@ -1,3 +1,5 @@
+import { isExecutableOpportunityScore } from './opportunityScoreContract.js'
+
 export const HOLDING_ACTION_VALUE_VERSION = 'holding-action-value.v2'
 
 function finite(value) {
@@ -154,9 +156,7 @@ export function evaluateHoldingActions({
     const score = payload.opportunityScore
     const total = Math.max(0, Math.trunc(Number(payload.holdQty) || 0))
     const sellable = Math.max(0, Math.min(total, Math.trunc(Number(payload.sellableTodayQty) || 0)))
-    const ready = score?.state === 'READY' && score.serverVerified === true
-      && score.productionEligible === true && score.shadowOnly === false
-      && score.outOfDistribution !== true
+    const ready = isExecutableOpportunityScore(score) && score.serverVerified === true
       && finite(score.expectedNetR) != null
     const price = finite(payload.todayQuote?.price)
     const stop = finite(payload.holdingStopPrice)

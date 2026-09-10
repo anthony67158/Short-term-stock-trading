@@ -66,6 +66,18 @@ test('生产模型状态允许V3直接建仓', () => {
   assert.match(status.directEntry.reason, /晋级闸门/)
 })
 
+test('未晋级模型的直接使用清单覆盖旧拒绝报告', () => {
+  const status = normalizeOpportunityTrainingStatus(
+    { state: 'REJECTED', productionEligible: false }, null,
+    { runId: 'opportunity-score.direct', usagePolicy: 'DIRECT', productionEligible: false },
+  )
+  assert.equal(status.state, 'DIRECT_ACTIVE')
+  assert.equal(status.enabled, true)
+  assert.equal(status.directEntry.eligible, true)
+  assert.equal(status.productionEligible, false)
+  assert.match(status.directEntry.reason, /不等待训练或晋级/)
+})
+
 test('状态存储合并训练状态与最新结算进度', async () => {
   const objects = new Map([
     [OPPORTUNITY_TRAINING_STATUS_PATH, {

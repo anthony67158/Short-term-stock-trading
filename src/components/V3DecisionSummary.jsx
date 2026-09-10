@@ -47,6 +47,7 @@ export default function V3DecisionSummary({
               {score?.expectedNetR != null && <p>费后期望 {score.expectedNetR}R · 尾部损失参考 {score.expectedShortfall10}R</p>}
               <p>{advice?.quantNote || '尚无V3结果。'}</p>
               <p>{advice?.fundNote || '资金数据暂不可用。'}</p>
+              {score?.outOfDistribution && <p>部分行情特征超出训练范围，当前预测仍取自V3模型。</p>}
               {advice?.decisionSource?.modelVersion && <p>模型版本 {advice.decisionSource.modelVersion}</p>}
             </div>
           )}

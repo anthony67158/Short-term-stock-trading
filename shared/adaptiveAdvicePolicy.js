@@ -1,14 +1,12 @@
 import { evaluateHoldingActions } from './holdingActionValue.js'
+import { isExecutableOpportunityScore } from './opportunityScoreContract.js'
 
 export const ADAPTIVE_ADVICE_POLICY_VERSION =
   'adaptive-advice-policy.v1'
 
 export function v3DecisionReadiness(score) {
-  return score?.state === 'READY'
+  return isExecutableOpportunityScore(score)
     && score.serverVerified === true
-    && score.productionEligible === true
-    && score.shadowOnly === false
-    && score.outOfDistribution !== true
     && Number(score.pFill) >= 0 && Number(score.pFill) <= 1
     && Number(score.pWinGivenFill) >= 0 && Number(score.pWinGivenFill) <= 1
     && [score.pFill, score.pWinGivenFill, score.expectedNetR,
@@ -37,7 +35,7 @@ export function buildV3Action({ payload, plans = [], now = Date.now() }) {
         - a.opportunityScore.pFill * a.opportunityScore.expectedNetR)
   const selected = scored[0] || null
   const state = payload.evidenceIncomplete ? 'EVIDENCE_INCOMPLETE'
-    : selected ? 'READY' : 'MODEL_NOT_READY'
+    : selected ? 'READY' : 'MODEL_ERROR'
   const holdingAction = held ? evaluateHoldingActions({
     payload: { ...payload, decisionEngine: 'V3', opportunityScore: selected?.opportunityScore },
   }) : null
@@ -56,8 +54,8 @@ export function buildV3Action({ payload, plans = [], now = Date.now() }) {
     ? sellable > 0
       ? `已触及账本止损${priceText(stop)}元，人工卖出可卖${sellable}手并记录成交`
       : `已触及账本止损${priceText(stop)}元，今日仓位受T+1锁定，下一可卖时段优先处理`
-    : !selected ? held ? '暂不加仓；V3评估未就绪，已有止损继续有效'
-      : '本次不买入；V3评估未就绪'
+    : !selected ? held ? '暂不加仓；V3模型调用失败，已有止损继续有效'
+      : '本次不买入；V3模型调用失败'
       : held ? selling ? `V3剩余路径费后价值不为正，${action}${sellable}手`
         : holdingAction.selected.action === 'HOLD_LOCKED' ? 'V3提示退出，但今日仓位受T+1锁定，下一可卖时段优先处理'
           : `继续持有${Math.trunc(payload.holdQty)}手；V3剩余路径费后价值为正，暂不加仓`
@@ -86,7 +84,7 @@ export function buildV3Action({ payload, plans = [], now = Date.now() }) {
     futurePlan: '持续按账本止损和当前模型状态管理，不按固定天数机械退出',
     quantNote: score
       ? `V3成交概率${(score.pFill * 100).toFixed(1)}%，成交后费后盈利率${(score.pWinGivenFill * 100).toFixed(1)}%，费后期望${score.expectedNetR}R`
-      : 'V3未提供可用于生产执行的概率；未使用旧模型或手写概率替代',
+      : 'V3模型未返回有效预测；未使用旧模型或手写概率替代',
     techNote: price > 0 ? `行情参考价${priceText(price)}元` : '行情暂不可用',
     decisionSource: {
       schemaVersion: 'v3-decision-source.v1',
@@ -98,6 +96,8 @@ export function buildV3Action({ payload, plans = [], now = Date.now() }) {
       hardProtection: hardStop,
       coverage: held ? 'REMAINING_PRICE_PATH' : 'ENTRY_PATH',
       missingEvidence: payload.missingEvidence || [],
+      usagePolicy: score?.usagePolicy || null,
+      outOfDistribution: score?.outOfDistribution === true,
     },
     adaptiveAction: holdingAction,
     v3Plans: plans,

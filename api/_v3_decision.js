@@ -40,7 +40,7 @@ async function readMarket(req) {
 
 export async function evaluateV3Decision({
   code, book, quotes, detail, trends, fund, sector, market, now = Date.now(),
-  score = fetchOpportunityScores,
+  score = (inputs) => fetchOpportunityScores(inputs, { timeoutMs: 8000 }),
   reviewEvent = null,
 }) {
   const quoteMap = Object.fromEntries(quotes.map((item) => [item.code, item]))

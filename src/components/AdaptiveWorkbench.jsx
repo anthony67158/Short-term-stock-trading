@@ -485,8 +485,8 @@ function OpportunityBoard({
           <span>{PHASE_LABELS[snapshot.opportunityContext.phase] || '市场状态待确认'}</span>
           <span>基础单笔风险 {number(snapshot.opportunityContext.baseRiskPct, 2)}%</span>
           <span>候选 {rows.length}</span>
-          {snapshot.trainingStatus?.productionEligible === true ? (
-            <span>V3正式模型已启用</span>
+          {snapshot.trainingStatus?.enabled === true ? (
+            <span>V3当前模型已启用</span>
           ) : snapshot.trainingStatus?.readiness ? (
             <span title={snapshot.trainingStatus.directEntry?.reason || ''}>
               V3成熟样本 {snapshot.trainingStatus.readiness.samples}

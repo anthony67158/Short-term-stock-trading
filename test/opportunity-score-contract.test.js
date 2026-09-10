@@ -8,6 +8,7 @@ import {
   OPPORTUNITY_SCORE_SCHEMA_VERSION,
   buildOpportunityScoreInput,
   isOpportunityScoreInput,
+  isExecutableOpportunityScore,
   normalizeOpportunityScoreResponse,
   unavailableOpportunityScore,
 } from '../shared/opportunityScoreContract.js'
@@ -205,6 +206,24 @@ test('模型未就绪和分布外结果必须保持概率为空', () => {
   assert.equal(outOfDistribution.state, 'OUT_OF_DISTRIBUTION')
   assert.equal(outOfDistribution.pWinGivenFill, null)
   assert.equal(outOfDistribution.expectedNetR, null)
+})
+
+test('直接使用响应保留分布外预测和真实晋级记录', () => {
+  const expected = { code: '600001', formulaId: 'UNKNOWN', asOf: 1788320000000 }
+  const result = normalizeOpportunityScoreResponse({
+    ...expected, schemaVersion: OPPORTUNITY_SCORE_SCHEMA_VERSION,
+    state: 'READY', modelVersion: 'opportunity-score.direct',
+    usagePolicy: 'DIRECT', shadowOnly: true, productionEligible: false,
+    outOfDistribution: true, pFill: 0.7, pWinGivenFill: 0.6,
+    expectedNetR: 0.2, netRLowerBound: -0.2, expectedShortfall10: -1.1,
+  }, expected)
+  assert.equal(result.state, 'READY')
+  assert.equal(result.productionEligible, false)
+  assert.equal(result.pFill, 0.7)
+  assert.equal(isExecutableOpportunityScore(result), true)
+  assert.throws(() => normalizeOpportunityScoreResponse({
+    ...result, pFill: 1.2,
+  }, expected), /概率无效/)
 })
 
 test('就绪评分验证代码、概率范围和完整数值合同', () => {

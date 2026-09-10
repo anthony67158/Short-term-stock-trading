@@ -348,9 +348,11 @@ function requiredMetric(value) {
 
 export function isExecutableOpportunityScore(value) {
   return value?.state === 'READY'
-    && value.outOfDistribution !== true
-    && value.shadowOnly === false
-    && value.productionEligible === true
+    && (value.usagePolicy === 'DIRECT' || (
+      value.outOfDistribution !== true
+      && value.shadowOnly === false
+      && value.productionEligible === true
+    ))
 }
 
 export function normalizeOpportunityScoreResponse(
@@ -372,7 +374,7 @@ export function normalizeOpportunityScoreResponse(
   if (!['READY', 'NOT_READY', 'OUT_OF_DISTRIBUTION'].includes(state)) {
     throw new Error('机会评分状态无效')
   }
-  if (state !== 'READY' || response.outOfDistribution === true) {
+  if (state !== 'READY' || (response.outOfDistribution === true && response.usagePolicy !== 'DIRECT')) {
     return {
       ...unavailableOpportunityScore(
         expected,
@@ -408,6 +410,7 @@ export function normalizeOpportunityScoreResponse(
     shadowOnly: response.shadowOnly !== false,
     productionEligible:
       response.productionEligible === true && response.shadowOnly === false,
+    usagePolicy: response.usagePolicy === 'DIRECT' ? 'DIRECT' : 'QUALIFIED',
     expectedShortfall10: requiredMetric(
       response.expectedShortfall10,
     ),
@@ -416,6 +419,6 @@ export function normalizeOpportunityScoreResponse(
       sampleCount,
       bucket: String(response.calibration?.bucket || ''),
     },
-    outOfDistribution: false,
+    outOfDistribution: response.outOfDistribution === true,
   }
 }

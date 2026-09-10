@@ -24,7 +24,7 @@ try {
     const candidate = (code) => page.locator(`.plan-cand[data-code="${code}"]`)
     assert.match(await holding('000001').innerText(), /清仓 10 手/)
     assert.match(await holding('600036').innerText(), /继续持有 5 手/)
-    assert.match(await holding('300750').innerText(), /V3模型当前不可用/)
+    assert.match(await holding('300750').innerText(), /V3模型调用失败/)
     assert.match(await candidate('002594').innerText(), /等待回踩 84元/)
     assert.match(await candidate('688981').innerText(), /买入 1 手/)
     assert.match(await candidate('600519').innerText(), /仅收藏，尚未跟踪/)

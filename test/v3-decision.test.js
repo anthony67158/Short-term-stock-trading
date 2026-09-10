@@ -32,14 +32,28 @@ test('V3选定动作不接受LLM手数或结论', () => {
   assert.equal(first.decisionSource.explanationRequired, false)
 })
 
-test('未晋级模型不得由手写先验补为可交易', () => {
+test('直接使用模式不要求模型通过晋级', () => {
   const result = buildV3Action({
     payload,
-    plans: [{ ...plan, opportunityScore: { ...plan.opportunityScore, productionEligible: false } }],
+    plans: [{ ...plan, opportunityScore: {
+      ...plan.opportunityScore, productionEligible: false, shadowOnly: true, usagePolicy: 'DIRECT',
+    } }],
   })
-  assert.equal(result.action, '观望')
-  assert.equal(result.decisionSource.state, 'MODEL_NOT_READY')
-  assert.equal(result.selectedV3Plan, null)
+  assert.equal(result.action, '立即买入')
+  assert.equal(result.decisionSource.state, 'READY')
+  assert.equal(result.decisionSource.usagePolicy, 'DIRECT')
+})
+
+test('直接使用模型的分布外提示不再伪装成未就绪', () => {
+  const result = buildV3Action({
+    payload, plans: [{ ...plan, opportunityScore: {
+      ...plan.opportunityScore, productionEligible: false, shadowOnly: true,
+      usagePolicy: 'DIRECT', outOfDistribution: true,
+    } }],
+  })
+  assert.equal(result.action, '立即买入')
+  assert.equal(result.decisionSource.state, 'READY')
+  assert.equal(result.decisionSource.outOfDistribution, true)
 })
 
 test('没有持仓模型时仍保留止损和T+1保护', () => {
@@ -50,7 +64,7 @@ test('没有持仓模型时仍保留止损和T+1保护', () => {
   assert.match(locked.actionPlan, /T\+1/)
   assert.equal(sellable.action, '减仓')
   assert.equal(sellable.opQty, '减仓1手')
-  assert.equal(sellable.decisionSource.state, 'MODEL_NOT_READY')
+  assert.equal(sellable.decisionSource.state, 'MODEL_ERROR')
 })
 
 test('V3使用剩余价格路径价值管理持仓而不调用旧加权公式', () => {
@@ -79,9 +93,9 @@ test('完整V3评估在模型未就绪时独立返回明确状态与零LLM调用
   })
   assert.equal(calls, 3)
   assert.equal(result.meta.llmCalls, 0)
-  assert.equal(result.result.decisionSource.state, 'MODEL_NOT_READY')
+  assert.equal(result.result.decisionSource.state, 'MODEL_ERROR')
   assert.equal(result.result.decisionPlan.quantity.lots, 0)
-  assert.match(result.result.actionPlan, /V3评估未就绪/)
+  assert.match(result.result.actionPlan, /V3模型调用失败/)
   assert.equal(adviceCompleteness(result.result, result.mode).complete, true)
 })
 

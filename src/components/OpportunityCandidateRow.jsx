@@ -179,7 +179,7 @@ export default function OpportunityCandidateRow({
             {modelReady ? (
               <>
                 <Icon name="chart" size={12} />
-                <span>{modelScore.shadowOnly || modelScore.productionEligible === false ? '研究估计' : '模型估计'}</span>
+                <span>{modelScore.usagePolicy === 'DIRECT' ? 'V3模型估计' : modelScore.shadowOnly || modelScore.productionEligible === false ? '研究估计' : '模型估计'}</span>
                 <span>可成交率 {probabilityPct(modelScore.pFill)}</span>
                 <span>
                   净盈利率 {probabilityPct(modelScore.pWinGivenFill)}

@@ -61,11 +61,15 @@ function normalizedReadiness(value = {}) {
 export function normalizeOpportunityTrainingStatus(
   training,
   collection,
+  manifest = null,
 ) {
   const source = training && typeof training === 'object'
     ? training
     : {}
-  const active = source.activeModel || {}
+  const active = manifest ? {
+    ...manifest, modelVersion: manifest.runId,
+  } : source.activeModel || {}
+  const direct = active.usagePolicy === 'DIRECT'
   const readiness = normalizedReadiness(source.readiness)
   const productionEligible = (
     source.productionEligible === true
@@ -74,13 +78,15 @@ export function normalizeOpportunityTrainingStatus(
   return {
     schemaVersion: OPPORTUNITY_TRAINING_STATUS_SCHEMA_VERSION,
     generatedAt: count(source.generatedAt),
-    state: productionEligible
+    state: direct ? 'DIRECT_ACTIVE' : productionEligible
       ? 'PRODUCTION_READY'
       : text(source.state, 40) || 'NOT_READY',
     modelVersion:
       text(active.modelVersion || source.modelVersion, 100) || null,
     shadowEligible: source.shadowEligible === true,
     productionEligible,
+    enabled: direct || productionEligible,
+    usagePolicy: direct ? 'DIRECT' : 'QUALIFIED',
     readiness,
     promotionBlockers: (Array.isArray(source.promotionBlockers)
       ? source.promotionBlockers
@@ -96,10 +102,11 @@ export function normalizeOpportunityTrainingStatus(
           pending: count(collection.settlement?.pending),
         }
       : null,
-    directEntry: productionEligible
+    directEntry: direct || productionEligible
       ? {
           eligible: true,
-          reason: 'V3已通过独立时间窗、净R和回撤晋级闸门',
+          reason: direct ? 'V3当前模型直接启用，不等待训练或晋级'
+            : 'V3已通过独立时间窗、净R和回撤晋级闸门',
         }
       : {
           eligible: false,
@@ -122,13 +129,15 @@ export function createOpportunityTrainingStatusStore(storage = {
           memoryCollection,
         )
       }
-      const [training, collection] = await Promise.all([
+      const [training, collection, manifest] = await Promise.all([
         storage.readJson(OPPORTUNITY_TRAINING_STATUS_PATH)
           .catch(() => null),
         storage.readJson(OPPORTUNITY_COLLECTION_STATUS_PATH)
           .catch(() => null),
+        storage.readJson('opportunitymodel/manifest.json')
+          .catch(() => null),
       ])
-      return normalizeOpportunityTrainingStatus(training, collection)
+      return normalizeOpportunityTrainingStatus(training, collection, manifest)
     },
     async saveCollectionStatus(value) {
       const snapshot = {

@@ -103,12 +103,14 @@ export function opportunityReportSnapshot(value) {
     REJECTED: '未通过验证',
     SHADOW_READY: '通过影子验证',
     PRODUCTION_READY: '生产模型已就绪',
+    DIRECT_ACTIVE: '当前模型直接使用',
   }
   const readiness = value.readiness || {}
   return {
     at,
     label: labels[value.state] || '状态待核对',
     productionEligible: value.productionEligible === true,
+    directUse: value.usagePolicy === 'DIRECT' || value.activeModel?.usagePolicy === 'DIRECT',
     samples: finite(readiness.samples),
     filledSamples: finite(readiness.filledSamples ?? readiness.filled_samples),
     dates: finite(readiness.dates),

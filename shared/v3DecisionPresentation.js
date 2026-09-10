@@ -84,8 +84,8 @@ export function v3DecisionPresentation({
     headline = held ? '暂不加仓' : '暂不买入'
     reason = source.state === 'EVIDENCE_INCOMPLETE'
       ? `缺少${source.missingEvidence?.join('、') || '行情或资金数据'}，尚不能确认新操作。`
-      : 'V3模型当前不可用，未产生新的交易指令。'
-    timing = '模型或数据就绪后重评'
+      : 'V3模型调用失败，请更新后重试；未使用旧结论替代。'
+    timing = '数据恢复后重新评估'
   } else if (plan.blockedReasons?.length) {
     headline = held ? '本次不加仓' : '本次不买入'
     reason = humanizeUserFacingText(plan.blockedReasons.join('；'))
