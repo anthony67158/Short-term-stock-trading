@@ -186,6 +186,114 @@ test('其他持仓风险不完整不阻断V3负期望仓位退出', async () => 
   assert.equal(result.result.decisionSource.state, 'READY')
   assert.equal(result.result.decisionPlan.action, 'EXIT')
   assert.equal(result.result.decisionPlan.quantity.lots, 2)
+  assert.equal(result.result.decisionPlan.actionability, 'CONDITIONAL')
+  assert.equal(result.result.decisionSource.hardProtection, false)
+})
+
+test('只有真实触及账本止损才允许V3退出直接进入可执行态', async () => {
+  const result = await evaluateV3Decision(scenario({
+    book: { account: { cash: 80000 }, closed: [], holding: [
+      { code: '600001', qty: 2, buyPrice: 10, sl: 10.1, buyAt: now - 86400000 },
+    ] },
+    score: async ([input]) => new Map([[input.code, {
+      ...plan.opportunityScore,
+      expectedNetR: -0.2,
+    }]]),
+  }))
+
+  assert.equal(result.result.decisionPlan.action, 'EXIT')
+  assert.equal(result.result.decisionPlan.actionability, 'READY')
+  assert.equal(result.result.decisionSource.hardProtection, true)
+})
+
+test('退出前复核用最新V3结果撤销反弹后的旧清仓或确认新价退出', async () => {
+  const holdingBook = {
+    account: { cash: 80000 },
+    closed: [],
+    holding: [{
+      code: '600001',
+      qty: 1,
+      buyPrice: 51.55,
+      sl: 48.85,
+      buyAt: now - 86400000,
+    }],
+  }
+  const marketData = {
+    detail: {
+      candles: Array.from({ length: 30 }, () => ({
+        close: 53,
+        high: 54,
+        low: 52,
+      })),
+    },
+    trends: Array.from({ length: 12 }, (_, index) => ({
+      time: `10:${String(index).padStart(2, '0')}`,
+      price: 53 + index * 0.08,
+      avgPrice: 53 + index * 0.04,
+      volume: 1000 + index * 100,
+    })),
+  }
+  const initial = await evaluateV3Decision(scenario({
+    ...marketData,
+    book: holdingBook,
+    quotes: [{
+      code: '600001',
+      price: 53.47,
+      isLivePrice: true,
+      tradeDate: '2026-09-10',
+    }],
+    score: async ([input]) => new Map([[input.code, {
+      ...plan.opportunityScore,
+      expectedNetR: -0.2,
+    }]]),
+  }))
+  assert.equal(initial.result.decisionPlan.action, 'EXIT')
+  assert.equal(initial.result.decisionPlan.actionability, 'CONDITIONAL')
+
+  const rebound = await evaluateV3Decision(scenario({
+    ...marketData,
+    book: holdingBook,
+    quotes: [{
+      code: '600001',
+      price: 53.9,
+      isLivePrice: true,
+      tradeDate: '2026-09-10',
+    }],
+    reviewEvent: {
+      kind: 'price-review',
+      price: 53.9,
+    },
+    score: async ([input]) => new Map([[input.code, {
+      ...plan.opportunityScore,
+      expectedNetR: 0.18,
+    }]]),
+  }))
+  assert.equal(rebound.result.decisionPlan.action, 'HOLD')
+  assert.equal(rebound.result.action, '持有')
+  assert.equal(rebound.result.reviewDecision.terminal, true)
+  assert.equal(rebound.meta.llmCalls, 0)
+
+  const confirmedExit = await evaluateV3Decision(scenario({
+    ...marketData,
+    book: holdingBook,
+    quotes: [{
+      code: '600001',
+      price: 53.9,
+      isLivePrice: true,
+      tradeDate: '2026-09-10',
+    }],
+    reviewEvent: {
+      kind: 'price-review',
+      price: 53.9,
+    },
+    score: async ([input]) => new Map([[input.code, {
+      ...plan.opportunityScore,
+      expectedNetR: -0.2,
+    }]]),
+  }))
+  assert.equal(confirmedExit.result.decisionPlan.action, 'EXIT')
+  assert.equal(confirmedExit.result.decisionPlan.actionability, 'READY')
+  assert.equal(confirmedExit.result.decisionPlan.prices.reference, 53.9)
 })
 
 test('V3换版期间不得混用三条路径的模型概率', () => {

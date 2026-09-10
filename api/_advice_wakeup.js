@@ -85,11 +85,15 @@ export function activatePriceReviewTrigger(
   }
   const price = Number(quote.price)
   const threshold = Number(alert.value)
-  const crossed = alert.op === 'gte'
-    ? price >= threshold
-    : alert.op === 'lte'
-      ? price <= threshold
-      : false
+  const exitReassessment =
+    alert.reviewCategory === 'holding-exit'
+  const crossed = exitReassessment
+    ? price > 0
+    : alert.op === 'gte'
+      ? price >= threshold
+      : alert.op === 'lte'
+        ? price <= threshold
+        : false
   if (!(threshold > 0) || !crossed) {
     return { ok: false, reason: 'price-not-reached' }
   }
@@ -137,6 +141,11 @@ export function queueAdviceReviewForPriceTrigger(
   const mode = holdingReview ? 'hold_advice' : 'buy_advice'
   const rawIntent = alert?.reviewIntent || {}
   const intendedAction = String(rawIntent.plannedAction || '')
+  const exitReassessment = (
+    alert?.reviewCategory === 'holding-exit'
+    && rawIntent.mode === 'EXIT_REASSESSMENT'
+    && ['EXIT', 'REDUCE'].includes(intendedAction)
+  )
   const entryConfirmation = (
     rawIntent.mode === 'ENTRY_CONFIRMATION'
     && rawIntent.directionApproved === true
@@ -145,7 +154,18 @@ export function queueAdviceReviewForPriceTrigger(
     )
   )
   const maxPositionPct = Number(rawIntent.maxPositionPct)
-  const reviewIntent = entryConfirmation
+  const reviewIntent = exitReassessment
+    ? {
+        reviewMode: 'EXIT_REASSESSMENT',
+        plannedAction: intendedAction,
+        actionLabel: intendedAction === 'EXIT'
+          ? '重新核对清仓'
+          : '重新核对减仓',
+        directionApproved: false,
+        maxPositionPct: null,
+        manualConfirmationOnly: false,
+      }
+    : entryConfirmation
     ? {
         reviewMode: 'ENTRY_CONFIRMATION',
         plannedAction: intendedAction,
@@ -188,7 +208,9 @@ export function queueAdviceReviewForPriceTrigger(
       ? Number(alert.decisionPrice)
       : null,
     ...reviewIntent,
-    reason: entryConfirmation
+    reason: exitReassessment
+      ? '非止损退出建议已进入观察窗口，结合最新价格路径、资金和V3结果重新评估'
+      : entryConfirmation
       ? holdingReview
         ? '条件加仓价已触发，只确认加仓时机并生成具体执行价'
         : '条件建仓价已触发，只确认入场时机并生成具体执行价'

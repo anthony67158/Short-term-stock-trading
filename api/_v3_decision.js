@@ -18,6 +18,7 @@ import { deriveMarketRegime } from '../shared/marketRegime.js'
 import { buildStockFundNote } from '../shared/retailFundFlow.js'
 import { beijingDayKey, beijingMinutes, isContinuousTrading } from '../shared/tradingCalendar.js'
 import { attachMonitoringPlan } from '../shared/monitoringPlan.js'
+import { isTriggeredReviewEvent } from '../shared/triggeredReviewDecision.js'
 
 async function bounded(promise, fallback, milliseconds = 7000) {
   let timer
@@ -89,6 +90,7 @@ export async function evaluateV3Decision({
     marketEnv: deriveMarketRegime(market || {}),
     holdingStopPrice: Math.max(0, ...holding.map((item) => Number(item.sl) || 0)) || null,
     stockFund: fund,
+    reviewEvent,
     missingEvidence,
     evidenceIncomplete: missingEvidence.length > 0,
   }
@@ -168,7 +170,10 @@ export async function evaluateV3Decision({
       effectiveAction: action, riskTier: action === 'BUY' ? 'FULL' : 'NONE',
       executionOpen: payload.todayQuote.live,
       hardProtection: advice.decisionSource.hardProtection,
-      exitConfirmed: ['EXIT', 'REDUCE'].includes(action),
+      exitConfirmed: (
+        ['EXIT', 'REDUCE'].includes(action)
+        && isTriggeredReviewEvent(reviewEvent)
+      ),
       riskMultiplier: context.baseRiskPct / 0.6,
       maxPositionPct: 85,
     },

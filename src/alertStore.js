@@ -62,6 +62,9 @@ export function describeAlert(a) {
   if (!t) return ''
   if (a.type === 'limitup') return `临近涨停(涨幅≥${formatPriceLimitThreshold(a, true)}%)`
   if (a.type === 'limitdown') return `临近跌停(跌幅≥${formatPriceLimitThreshold(a, true)}%)`
+  if (a.type === 'price' && a.reviewCategory === 'holding-exit') {
+    return `退出前复核 · 参考 ${a.value}元`
+  }
   if (a.type === 'price' && a.reviewOnly) {
     return `${a.note || '观察价'} ${OP_LABEL[a.op] || ''} ${a.value}元 · 到价复核`
   }
@@ -157,6 +160,10 @@ function currentPositionGate(alert) {
 // 判断单条规则是否命中（q=该股实时报价）
 function hit(a, q, now = Date.now()) {
   if (!isFreshAlertQuote(q, now)) return null
+  if (a.reviewCategory === 'holding-exit') {
+    const price = Number(q?.price)
+    return price > 0 ? `现价 ${price}，开始退出前复核` : null
+  }
   if (a.decisionEngine === 'V3' && !a.reviewOnly && a.type === 'price') return v3ActionAlertMessage(a, q)
   // 数值型字段统一取有限数:接口异常/字符串/NaN 时返回 null(不判定),
   // 避免后续 .toFixed 在字符串上抛错(会中断整个 evaluate 预警循环)或渲染出字面 "NaN"。

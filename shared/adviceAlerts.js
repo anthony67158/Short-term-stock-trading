@@ -118,6 +118,24 @@ function reviewIntentOf(advice = {}) {
   }
 }
 
+export function v3ExitReviewOf(advice = {}) {
+  const action = String(advice.decisionPlan?.action || '').toUpperCase()
+  if (
+    advice.decisionSource?.engine !== 'V3'
+    || advice.decisionSource?.hardProtection === true
+    || advice.decisionSource?.exitReviewRequired === false
+    || advice.reviewDecision?.terminal === true
+    || !['EXIT', 'REDUCE'].includes(action)
+  ) return null
+  return {
+    mode: 'EXIT_REASSESSMENT',
+    plannedAction: action,
+    actionLabel: action === 'EXIT' ? '清仓复核' : '减仓复核',
+    directionApproved: false,
+    manualConfirmationOnly: false,
+  }
+}
+
 function refreshReviewAlert(previous, next, adviceAt) {
   const triggeredAt = Number(previous?.triggeredAt) || 0
   const superseded = (
@@ -460,6 +478,72 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
     }
   }
 
+  const exitReview = liveHolder
+    ? v3ExitReviewOf(advice)
+    : null
+  let exitReviewProjected = false
+  if (exitReview) {
+    const contractLevel = advicePriceLevel(advice, 'reduce')
+      || advicePriceLevel(advice, 'target')
+    const reviewPrice = roundPrice(
+      contractLevel?.price
+      ?? advice.decisionPlan?.prices?.reference
+      ?? advice.reducePrice,
+    )
+    if (reviewPrice != null) {
+      const direction = executionTriggerDirection({
+        action: advice.decisionPlan.action,
+        trigger: advice.decisionPlan.trigger || advice.actionPlan,
+        triggerDirection: advice.decisionPlan.triggerDirection,
+      })
+      const op = direction === 'GTE' ? 'gte' : 'lte'
+      const previous = alerts.find((alert) =>
+        alert?.actCode === code
+        && alert.reviewOnly === true
+        && alert.reviewCategory === 'holding-exit'
+      )
+      const samePlan = !!(
+        previous?.judgeContext?.decisionPlan?.decisionId
+        && previous.judgeContext.decisionPlan.decisionId
+          === advice.decisionPlan.decisionId
+      )
+      const next = previous && samePlan
+        ? refreshReviewAlert(previous, {
+            ...previous,
+            value: reviewPrice,
+            op,
+            note: '退出前复核',
+            reviewKey: 'holding-exit',
+            reviewCategory: 'holding-exit',
+            judgeContext,
+            reviewIntent: exitReview,
+          }, adviceAt)
+        : {
+            ...baseAlert({
+              idFactory,
+              now,
+              code,
+              name,
+              op,
+              value: reviewPrice,
+              note: '退出前复核',
+            }),
+            actCode: code,
+            reviewOnly: true,
+            reviewKey: 'holding-exit',
+            reviewCategory: 'holding-exit',
+            judgeContext,
+            reviewIntent: exitReview,
+            phase: 'armed',
+          }
+      projected.push(next)
+      exitReviewProjected = true
+      if (!previous || !samePlan || JSON.stringify(previous) !== JSON.stringify(next)) {
+        changed = true
+      }
+    }
+  }
+
   const opQty = advice.opQty || ''
   const timing = advice.exitTiming || advice.actionPlan || ''
   const t1Status = options.t1Status || null
@@ -543,19 +627,21 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
     if (adviceSupportsIntent('add', judgeContext)) {
       buildAction('add', 'lte', advice.addPrice, liveHolder.muteAdd)
     }
-    const reduceDirection = executionTriggerDirection({
-      action: advice.decisionPlan?.action || 'REDUCE',
-      trigger: advice.actionPlan
-        || advice.nextAction
-        || advice.exitTiming,
-      triggerDirection: advice.decisionPlan?.triggerDirection,
-    })
-    buildAction(
-      'reduce',
-      reduceDirection === 'LTE' ? 'lte' : 'gte',
-      advice.reducePrice,
-      liveHolder.muteReduce,
-    )
+    if (!exitReviewProjected) {
+      const reduceDirection = executionTriggerDirection({
+        action: advice.decisionPlan?.action || 'REDUCE',
+        trigger: advice.actionPlan
+          || advice.nextAction
+          || advice.exitTiming,
+        triggerDirection: advice.decisionPlan?.triggerDirection,
+      })
+      buildAction(
+        'reduce',
+        reduceDirection === 'LTE' ? 'lte' : 'gte',
+        advice.reducePrice,
+        liveHolder.muteReduce,
+      )
+    }
   }
 
   if (oldProjected.length !== projected.length) changed = true

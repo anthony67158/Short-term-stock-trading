@@ -23,7 +23,12 @@ import { sendPush } from './_push_send.js';
 import { ensureConfig } from './_llm_config.js';
 import { judgeConfirmation, sideOf } from './_confirm.js';
 import { actionLabelOf } from '../shared/judgeAdviceContext.js';
-import { isCurrentDecisionAlert, v3ActionAlertMessage } from '../shared/adviceAlerts.js';
+import {
+  isCurrentDecisionAlert,
+  projectAdviceAlerts,
+  v3ActionAlertMessage,
+  v3ExitReviewOf,
+} from '../shared/adviceAlerts.js';
 import {
   positionGateForAlert,
   requiresPositionCheck,
@@ -103,6 +108,9 @@ export function shouldRunAlertCron(now = Date.now()) {
 function describeAlert(a) {
   if (a.type === 'limitup') return `临近涨停(涨幅≥${formatPriceLimitThreshold(a, true)}%)`;
   if (a.type === 'limitdown') return `临近跌停(跌幅≥${formatPriceLimitThreshold(a, true)}%)`;
+  if (a.type === 'price' && a.reviewCategory === 'holding-exit') {
+    return `退出前复核 · 参考 ${a.value}元`;
+  }
   if (a.type === 'price' && a.reviewOnly) {
     return `${a.note || '观察价'} ${OP_LABEL[a.op] || ''} ${a.value}元 · 到价复核`;
   }
@@ -120,6 +128,10 @@ function describeAlert(a) {
 // —— 与前端 alertStore.hit 同口径 ——
 function hit(a, q, now = Date.now()) {
   if (!isFreshAlertQuote(q, now)) return null;
+  if (a.reviewCategory === 'holding-exit') {
+    const price = Number(q?.price);
+    return price > 0 ? `现价 ${price}，开始退出前复核` : null;
+  }
   if (a.decisionEngine === 'V3' && !a.reviewOnly && a.type === 'price') return v3ActionAlertMessage(a, q);
   const cmp = (v, op, t) => (op === 'lte' ? v <= t : v >= t);
   switch (a.type) {
@@ -311,6 +323,36 @@ function alertStamp(alert) {
   );
 }
 
+export function migrateV3ExitReviewAlerts(
+  data,
+  now = Date.now(),
+) {
+  let changed = false;
+  for (const [code, entry] of Object.entries(data?.advice || {})) {
+    const advice = entry?.advice;
+    if (!v3ExitReviewOf(advice)) continue;
+    const alreadyProjected = (data.alerts || []).some((alert) =>
+      alert?.code === code
+      && alert.reviewCategory === 'holding-exit'
+      && alert.decisionId === advice.decisionPlan?.decisionId
+    );
+    if (alreadyProjected) continue;
+    changed = projectAdviceAlerts(data, code, advice, {
+      now,
+      adviceAt: Math.max(
+        Number(entry?.updatedAt) || 0,
+        Number(entry?.at) || 0,
+      ),
+      t1Status: t1StatusOf(
+        data.holding || [],
+        data.closed || [],
+        code,
+      ),
+    }) || changed;
+  }
+  return changed;
+}
+
 async function persistProcessedAccount(
   processed,
   deadEndpoints = [],
@@ -411,12 +453,13 @@ async function processAccount(
     await evaluateAccountMonitoring(acc);
   }
   const data = acc.data || {};
+  const migratedExitReview = migrateV3ExitReviewAlerts(data);
   const alerts = Array.isArray(data.alerts) ? data.alerts : [];
   const subs = Array.isArray(data.pushSubs) ? data.pushSubs : [];
   const adviceMap = (data.advice && typeof data.advice === 'object') ? data.advice : {};
   // 智能确认默认开启;账号显式关掉(settings.smartConfirm===false)则回退「见价即强推」旧行为。
   const smartOn = !(data.settings && data.settings.smartConfirm === false);
-  let changed = false, hits = 0, sent = 0;
+  let changed = migratedExitReview, hits = 0, sent = 0;
   const wakeups = [];
   const confirmationLeases = [];
   const pendingPushes = [];
@@ -1012,6 +1055,7 @@ export const __test = {
   describeAlert,
   hasJudgeBudget,
   hit,
+  migrateV3ExitReviewAlerts,
   persistProcessedAccount,
   positionContextOf,
   reviewPriceTriggerOutcome,

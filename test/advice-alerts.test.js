@@ -554,6 +554,54 @@ test('一手持仓的退出价生成清仓观察预警而不是立即清仓指�
   assert.equal(alert.opQty, '清仓1手')
 })
 
+test('非硬止损V3清仓先观察并重评而不是直接推送卖出', () => {
+  const data = {
+    plan: [],
+    holding: [{ id: 'h-v3', code: '003036', name: '泰坦股份' }],
+    alerts: [],
+    settings: {},
+  }
+  const validUntil = new Date(now + 15 * 60 * 1000).toISOString()
+
+  projectAdviceAlerts(data, '003036', {
+    name: '泰坦股份',
+    action: '清仓',
+    actionPlan: '到价确认后清仓1手，53.47元',
+    reducePrice: 53.47,
+    stopPrice: 48.85,
+    opQty: '清仓1手',
+    decisionSource: {
+      engine: 'V3',
+      state: 'READY',
+      hardProtection: false,
+    },
+    decisionPlan: {
+      decisionId: 'decision-v3-exit',
+      action: 'EXIT',
+      actionability: 'READY',
+      validUntil,
+      triggerDirection: 'LTE',
+      positionEffect: { fullExit: true },
+    },
+  }, {
+    now,
+    idFactory: ids,
+    t1Status: {
+      liveQty: 1,
+      boughtToday: 0,
+      sellableToday: 1,
+    },
+  })
+
+  assert.equal(data.alerts.length, 1)
+  assert.equal(data.alerts[0].reviewOnly, true)
+  assert.equal(data.alerts[0].reviewCategory, 'holding-exit')
+  assert.equal(data.alerts[0].phase, 'armed')
+  assert.equal(data.alerts[0].op, 'lte')
+  assert.equal(data.alerts[0].value, 53.47)
+  assert.equal(data.alerts[0].decisionEngine, 'V3')
+})
+
 test('T+1导致减仓降级为持有时不生成方向相反的加仓复核提醒', () => {
   const data = {
     plan: [],

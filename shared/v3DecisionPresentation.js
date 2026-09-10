@@ -30,6 +30,13 @@ export function v3DecisionPresentation({
     : plan?.action || (held ? 'HOLD' : 'WATCH')
   const selling = ['EXIT', 'REDUCE'].includes(action)
   const buying = ['BUY', 'ADD'].includes(action)
+  const exitReviewRequired = (
+    selling
+    && !hardStop
+    && source?.hardProtection !== true
+    && source?.exitReviewRequired !== false
+    && advice?.reviewDecision?.terminal !== true
+  )
   const plannedQty = Math.max(0, Math.trunc(Number(plan?.quantity?.lots) || 0))
   const qty = hardStop ? sellable || 0
     : selling && sellable != null ? Math.min(plannedQty, sellable) : plannedQty
@@ -39,7 +46,7 @@ export function v3DecisionPresentation({
   const executable = hardStop ? qty > 0 : managed && !loading && active
     && (ready || (selling && source?.hardProtection === true))
     && (selling || buying) && plan?.actionability === 'READY'
-    && qty > 0 && live && !priceMoved
+    && qty > 0 && live && !priceMoved && !exitReviewRequired
   const trigger = advice?.pullbackWatchPrice ?? advice?.breakoutWatchPrice
   const waiting = ready && !held && finite(trigger) && Number(trigger) > 0
   let headline = held ? `继续持有 ${holdingLots} 手` : '本次不买入'
@@ -86,6 +93,13 @@ export function v3DecisionPresentation({
       ? `缺少${source.missingEvidence?.join('、') || '行情或资金数据'}，尚不能确认新操作。`
       : 'V3模型调用失败，请更新后重试；未使用旧结论替代。'
     timing = '数据恢复后重新评估'
+  } else if (
+    exitReviewRequired
+  ) {
+    headline = '等待退出前复核'
+    reason = '这不是硬止损。系统先观察约60秒，再按最新价格、资金和V3结果决定是否卖出。'
+    timing = '下一笔有效报价开始观察'
+    icon = 'clock'
   } else if (plan.blockedReasons?.length) {
     headline = held ? '本次不加仓' : '本次不买入'
     reason = humanizeUserFacingText(plan.blockedReasons.join('；'))

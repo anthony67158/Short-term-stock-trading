@@ -102,6 +102,149 @@ test('页面发现观察价已到时立即进入复核并排入紧急任务', ()
   assert.match(data.reviewJobs['000636'].phase, /持续观察/)
 })
 
+test('V3退出建议后价格反弹也会启动退出前复核', () => {
+  const now = Date.parse('2026-09-10T05:30:00.000Z')
+  const data = {
+    plan: [],
+    holding: [{ id: 'titan', code: '003036', qty: 1 }],
+    closed: [],
+    settings: {},
+    advice: {
+      '003036': {
+        mode: 'hold_advice',
+        advice: {
+          decisionPlan: {
+            decisionId: 'decision-v3-exit',
+          },
+          continuity: {
+            planId: 'plan-v3-exit',
+            revision: 1,
+          },
+        },
+      },
+    },
+    alerts: [{
+      id: 'review-v3-exit',
+      code: '003036',
+      name: '泰坦股份',
+      type: 'price',
+      op: 'lte',
+      value: 53.47,
+      reviewOnly: true,
+      reviewCategory: 'holding-exit',
+      enabled: true,
+      phase: 'armed',
+      reviewIntent: {
+        mode: 'EXIT_REASSESSMENT',
+        plannedAction: 'EXIT',
+      },
+      judgeContext: {
+        planId: 'plan-v3-exit',
+        planRevision: 1,
+        decisionPlan: {
+          decisionId: 'decision-v3-exit',
+        },
+      },
+    }],
+  }
+  const reboundQuote = {
+    code: '003036',
+    price: 53.9,
+    tradeDate: '2026-09-10',
+    isLivePrice: true,
+  }
+
+  assert.match(
+    cronAlertTest.hit(data.alerts[0], reboundQuote, now),
+    /退出前复核/,
+  )
+
+  const result = activatePriceReviewTrigger(data, {
+    alertId: 'review-v3-exit',
+    code: '003036',
+    quote: reboundQuote,
+  }, now)
+
+  assert.equal(result.ok, true)
+  assert.equal(result.alert.phase, 'reviewing')
+  assert.equal(result.alert.decisionPrice, 53.9)
+  assert.equal(
+    data.reviewJobs['003036'].trigger.reviewMode,
+    'EXIT_REASSESSMENT',
+  )
+  assert.equal(
+    data.reviewJobs['003036'].trigger.plannedAction,
+    'EXIT',
+  )
+  assert.match(data.reviewJobs['003036'].trigger.reason, /非止损退出/)
+})
+
+test('FC自动把线上旧版V3直接清仓提醒迁移成退出前复核', () => {
+  const now = Date.parse('2026-09-10T05:30:00.000Z')
+  const data = {
+    plan: [],
+    holding: [{
+      id: 'titan',
+      code: '003036',
+      name: '泰坦股份',
+      qty: 1,
+      buyAt: now - 86400000,
+    }],
+    closed: [],
+    settings: {},
+    advice: {
+      '003036': {
+        mode: 'hold_advice',
+        updatedAt: now - 30_000,
+        advice: {
+          name: '泰坦股份',
+          action: '清仓',
+          actionPlan: '清仓1手',
+          reducePrice: 53.47,
+          opQty: '清仓1手',
+          decisionSource: {
+            engine: 'V3',
+            state: 'READY',
+            hardProtection: false,
+          },
+          decisionPlan: {
+            decisionId: 'legacy-v3-exit',
+            action: 'EXIT',
+            actionability: 'READY',
+            validUntil: new Date(now + 15 * 60 * 1000).toISOString(),
+            prices: { reference: 53.47 },
+            positionEffect: { fullExit: true },
+          },
+        },
+      },
+    },
+    alerts: [{
+      id: 'legacy-direct-exit',
+      code: '003036',
+      actCode: '003036',
+      actKind: 'reduce',
+      type: 'price',
+      op: 'lte',
+      value: 53.47,
+      decisionEngine: 'V3',
+      decisionId: 'legacy-v3-exit',
+      actionSide: 'SELL',
+      enabled: false,
+      triggeredAt: now - 10_000,
+    }],
+  }
+
+  assert.equal(
+    cronAlertTest.migrateV3ExitReviewAlerts(data, now),
+    true,
+  )
+  assert.equal(data.alerts.length, 1)
+  assert.equal(data.alerts[0].reviewCategory, 'holding-exit')
+  assert.equal(data.alerts[0].reviewOnly, true)
+  assert.equal(data.alerts[0].enabled, true)
+  assert.equal(data.alerts[0].decisionId, 'legacy-v3-exit')
+})
+
 test('页面即时复核拒绝未到价和非当日实时行情', () => {
   const now = Date.parse('2026-08-28T05:30:00.000Z')
   const buildData = () => ({

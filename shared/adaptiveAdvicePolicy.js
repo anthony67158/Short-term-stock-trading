@@ -1,5 +1,6 @@
 import { evaluateHoldingActions } from './holdingActionValue.js'
 import { isExecutableOpportunityScore } from './opportunityScoreContract.js'
+import { isTriggeredReviewEvent } from './triggeredReviewDecision.js'
 
 export const ADAPTIVE_ADVICE_POLICY_VERSION =
   'adaptive-advice-policy.v1'
@@ -50,13 +51,17 @@ export function buildV3Action({ payload, plans = [], now = Date.now() }) {
     ? { EXIT: '清仓', REDUCE: '减仓', HOLD: '持有', HOLD_LOCKED: '持有' }[holdingAction.selected.action]
     : immediate ? '立即买入' : '观望'
   const selling = ['清仓', '减仓'].includes(action)
+  const reviewedExit = selling
+    && isTriggeredReviewEvent(payload.reviewEvent)
   const instruction = hardStop
     ? sellable > 0
       ? `已触及账本止损${priceText(stop)}元，人工卖出可卖${sellable}手并记录成交`
       : `已触及账本止损${priceText(stop)}元，今日仓位受T+1锁定，下一可卖时段优先处理`
     : !selected ? held ? '暂不加仓；V3模型调用失败，已有止损继续有效'
       : '本次不买入；V3模型调用失败'
-      : held ? selling ? `V3剩余路径费后价值不为正，${action}${sellable}手`
+      : held ? selling ? reviewedExit
+        ? `退出前复核后V3剩余路径费后价值仍不为正，${action}${sellable}手`
+        : `V3剩余路径费后价值不为正，先观察约60秒并重新评估；复核仍不为正再${action}${sellable}手`
         : holdingAction.selected.action === 'HOLD_LOCKED' ? 'V3提示退出，但今日仓位受T+1锁定，下一可卖时段优先处理'
           : `继续持有${Math.trunc(payload.holdQty)}手；V3剩余路径费后价值为正，暂不加仓`
         : !expectedPositive ? 'V3预测费后净期望不为正，放弃本次买入'
@@ -94,6 +99,7 @@ export function buildV3Action({ payload, plans = [], now = Date.now() }) {
       explanationRequired: false,
       evaluatedAt: now,
       hardProtection: hardStop,
+      exitReviewRequired: selling && !hardStop && !reviewedExit,
       coverage: held ? 'REMAINING_PRICE_PATH' : 'ENTRY_PATH',
       missingEvidence: payload.missingEvidence || [],
       usagePolicy: score?.usagePolicy || null,

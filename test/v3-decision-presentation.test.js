@@ -73,3 +73,45 @@ test('卡片在没有V3或评估期间仍输出账本止损与可卖数量', () 
   assert.equal(locked.executable, false)
   assert.match(locked.reason, /T\+1/)
 })
+
+test('旧版非止损清仓建议也先显示退出复核，复核终态后才可执行', () => {
+  const exitAdvice = {
+    decisionSource: {
+      engine: 'V3',
+      state: 'READY',
+      hardProtection: false,
+    },
+    stopPrice: 48.85,
+    decisionPlan: {
+      decisionId: 'old-v3-exit',
+      action: 'EXIT',
+      actionability: 'READY',
+      quantity: { lots: 1 },
+      prices: { reference: 53.47 },
+      validUntil: '2026-09-10T03:30:00Z',
+    },
+  }
+  const pending = v3DecisionPresentation({
+    advice: exitAdvice,
+    holdingLots: 1,
+    sellableLots: 1,
+    currentPrice: 53.9,
+    now,
+  })
+  assert.equal(pending.executable, false)
+  assert.equal(pending.headline, '等待退出前复核')
+  assert.match(pending.reason, /约60秒/)
+
+  const reviewed = v3DecisionPresentation({
+    advice: {
+      ...exitAdvice,
+      reviewDecision: { terminal: true, outcome: '清仓' },
+    },
+    holdingLots: 1,
+    sellableLots: 1,
+    currentPrice: 53.9,
+    now,
+  })
+  assert.equal(reviewed.executable, true)
+  assert.equal(reviewed.headline, '清仓 1 手')
+})
