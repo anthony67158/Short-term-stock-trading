@@ -30,7 +30,8 @@ rm -rf "$VEND" "$PKG/deps"; mkdir -p "$VEND" "$PKG/deps"
 PURE="oss2==2.19.1 crcmod==1.7 pycryptodome==3.21.0 aliyun-python-sdk-core==2.16.0 \
 aliyun-python-sdk-kms==2.16.5 requests==2.32.3 urllib3==2.2.3 charset-normalizer==3.4.0 \
 certifi==2024.8.30 idna==3.10 jmespath==0.10.0 six==1.16.0 cryptography==43.0.3 cffi==1.17.1 \
-pycparser==2.22 python-dateutil==2.9.0.post0 pytz==2024.2 tzdata==2024.2 patsy==1.0.1 packaging==24.1 \
+pyopenssl==24.2.1 pycparser==2.22 python-dateutil==2.9.0.post0 pytz==2024.2 tzdata==2024.2 patsy==1.0.1 packaging==24.1 \
+narwhals==2.26.0 \
 fastapi==0.115.14 uvicorn==0.34.3 starlette==0.46.2 pydantic==2.13.4 pydantic-core==2.46.4 \
 anyio==4.14.2 sniffio==1.3.1 h11==0.16.0 click==8.4.2 annotated-types==0.8.0 \
 typing-extensions==4.15.0 typing-inspection==0.4.2 exceptiongroup==1.3.1 \
