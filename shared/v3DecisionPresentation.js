@@ -91,7 +91,7 @@ export function v3DecisionPresentation({
     headline = held ? '暂不加仓' : '暂不买入'
     reason = source.state === 'EVIDENCE_INCOMPLETE'
       ? `缺少${source.missingEvidence?.join('、') || '行情或资金数据'}，尚不能确认新操作。`
-      : 'V3模型调用失败，请更新后重试；未使用旧结论替代。'
+      : '本轮未获得有效V3结果，请更新后重试；未使用旧结论替代。'
     timing = '数据恢复后重新评估'
   } else if (
     exitReviewRequired

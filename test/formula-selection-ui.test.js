@@ -8,6 +8,8 @@ import {
   formulaPriceCachePolicy,
   isFormulaSelectionTransientError,
   loadStockFormulaPrice,
+  recoverFormulaSelectionRun,
+  runFormulaSelection,
   staleFormulaPricePayload,
 } from '../src/formulaSelectionClient.js'
 
@@ -121,6 +123,42 @@ test('公式价位前端不直接展示HTTP 501', () => {
   )
   assert.match(client, /stockFormulaCache/)
   assert.match(client, /stale:\s*true/)
+})
+
+test('公式扫描响应中断后恢复已落盘终态而不是误报失败', async () => {
+  const completed = {
+    ok: true,
+    mode: 'CLOSE',
+    candidates: [{ code: '600001' }],
+  }
+  const recovered = await runFormulaSelection('close', {
+    requestFn: async () => {
+      const error = new Error('Failed to fetch')
+      error.errorCode = 'NETWORK_ERROR'
+      throw error
+    },
+    loadProgress: async () => ({ status: 'DONE' }),
+    loadState: async () => ({ close: completed }),
+  })
+
+  assert.equal(recovered.recovered, true)
+  assert.deepEqual(recovered.candidates, completed.candidates)
+})
+
+test('公式扫描响应中断但任务仍运行时继续轮询', async () => {
+  const recovered = await recoverFormulaSelectionRun(
+    'close',
+    { errorCode: 'NETWORK_ERROR' },
+    {
+      loadProgress: async () => ({
+        status: 'RUNNING',
+        stage: 'V3_SCORING',
+      }),
+    },
+  )
+
+  assert.equal(recovered.running, true)
+  assert.equal(recovered.task.stage, 'V3_SCORING')
 })
 
 test('公式价位旧快照按账号隔离且只在临时故障时回退', () => {

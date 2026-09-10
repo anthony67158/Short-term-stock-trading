@@ -12,6 +12,9 @@ test('测试账号假数据覆盖系统能力且不会自动触发付费任务',
   assert.ok(fixture.account?.totalAssets > 0)
   assert.ok(fixture.account?.cash > 0)
   assert.ok(fixture.holding.length >= 3)
+  assert.equal(fixture.holding.every((item) =>
+    Number(item.sl) > 0 && item.slManual === true
+  ), true)
   assert.ok(fixture.holding.some((item) => item.tRealizedPnl > 0))
   assert.ok(fixture.plan.length >= 3)
 

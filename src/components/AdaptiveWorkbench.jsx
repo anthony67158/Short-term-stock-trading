@@ -352,6 +352,12 @@ function OpportunityBoard({
   }
 
   const currentLane = lane || snapshot?.defaultLane || 'intraday'
+  const modelVersionStale = Object.values(
+    snapshot?.sourceStatus || {},
+  ).some((source) =>
+    source?.status === 'stale'
+    && /上一模型版本/.test(String(source?.error || ''))
+  )
   const rows = (snapshot?.lanes?.[currentLane] || [])
     .filter((item) => item.state !== 'AVOID')
     .slice(0, 5)
@@ -444,7 +450,11 @@ function OpportunityBoard({
           </button>
         </div>
       </div>
-      {error && <div className="aw-inline-error" role="status">{error}</div>}
+      {(error || modelVersionStale) && (
+        <div className="aw-inline-error" role="status">
+          {error || '部分机会来自上一模型版本，请重新扫描'}
+        </div>
+      )}
       {loading && !snapshot ? (
         <div className="aw-loading" role="status">正在计算动作价值…</div>
       ) : rows.length ? (

@@ -221,16 +221,51 @@ export function loadFormulaSelectionState() {
   return request('/api/formula_selection?view=latest')
 }
 
-export function runFormulaSelection(mode) {
-  return request('/api/formula_selection', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Idempotency-Key':
-        `formula-selection:${mode}:${Date.now()}`,
-    },
-    body: JSON.stringify({ mode }),
-  }, mode === 'close' ? 100_000 : 70_000)
+export async function recoverFormulaSelectionRun(
+  mode,
+  error,
+  {
+    loadProgress = loadFormulaSelectionProgress,
+    loadState = loadFormulaSelectionState,
+  } = {},
+) {
+  if (!isFormulaSelectionTransientError(error)) throw error
+  const task = await loadProgress(mode).catch(() => null)
+  if (['RUNNING', 'QUEUED'].includes(task?.status)) {
+    return { ok: true, running: true, recovered: true, task }
+  }
+  if (task?.status === 'DONE') {
+    const state = await loadState().catch(() => null)
+    const result = state?.[mode]
+    if (result) return { ...result, recovered: true }
+  }
+  throw error
+}
+
+export async function runFormulaSelection(
+  mode,
+  {
+    requestFn = request,
+    loadProgress = loadFormulaSelectionProgress,
+    loadState = loadFormulaSelectionState,
+  } = {},
+) {
+  try {
+    return await requestFn('/api/formula_selection', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key':
+          `formula-selection:${mode}:${Date.now()}`,
+      },
+      body: JSON.stringify({ mode }),
+    }, mode === 'close' ? 100_000 : 70_000)
+  } catch (error) {
+    return recoverFormulaSelectionRun(mode, error, {
+      loadProgress,
+      loadState,
+    })
+  }
 }
 
 export function loadFormulaSelectionProgress(mode) {
