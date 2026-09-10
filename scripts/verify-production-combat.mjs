@@ -424,6 +424,13 @@ try {
     assert.equal(saved.advice.decisionSource.engine, 'V3')
     assert.equal(saved.meta.llmCalls, 0)
     assert.equal(saved.generationMetrics.mainLlmCalls, 0)
+    if (process.argv.includes('--require-direct-model')) {
+      assert.ok(saved.advice.v3Plans?.some((plan) =>
+        plan.opportunityScore?.state === 'READY'
+        && plan.opportunityScore.usagePolicy === 'DIRECT'
+        && Number.isFinite(plan.opportunityScore.expectedNetR),
+      ), '必须收到真实V3模型预测，不能以未就绪状态通过验收')
+    }
     const monitoring = saved.advice.monitoringPlan
     if (code === '000001' && saved.advice.decisionPlan.action === 'HOLD') {
       assert.equal(monitoring?.schemaVersion, 'monitoring-plan.v2')

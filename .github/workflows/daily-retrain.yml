@@ -351,7 +351,7 @@ jobs:
         env:
           RETRAIN_JOB_STATUS: ${{ job.status }}
           RETRAIN_PUBLISHED: ${{ steps.opportunity-production.outputs.published }}
-          RETRAIN_SHADOW_PUBLISHED: ${{ steps.opportunity-shadow.outputs.published }}
+          RETRAIN_DIRECT_PUBLISHED: ${{ steps.opportunity-shadow.outputs.published }}
         run: |
           python publish_model_retrain_report.py \
             --model opportunity \

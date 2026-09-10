@@ -10,6 +10,7 @@ import './QuantReport.css'
 
 const DECISION_META = {
   promote: { label: '已发布', tone: 'ok' },
+  updated: { label: '已更新', tone: 'neutral' },
   shadow: { label: '仅影子发布', tone: 'neutral' },
   reject: { label: '未通过晋级', tone: 'warn' },
   skip: { label: '等待数据', tone: 'neutral' },

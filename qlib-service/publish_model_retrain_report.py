@@ -11,6 +11,7 @@ from pathlib import Path
 MODEL_LABELS = {"opportunity": "V3 机会模型", "sector": "板块模型"}
 DECISIONS = {
     "promote": "已发布",
+    "updated": "已更新",
     "shadow": "仅影子发布",
     "reject": "未通过晋级",
     "skip": "等待数据",
@@ -64,12 +65,13 @@ def opportunity_details(report, promotion, env):
     state = text(report.get("state"))
     eligible = promotion.get("eligible") is True
     published = eligible and env.get("RETRAIN_PUBLISHED") == "true"
+    direct = env.get("RETRAIN_DIRECT_PUBLISHED") == "true"
     shadow = (
         report.get("shadowEligible") is True
         and env.get("RETRAIN_SHADOW_PUBLISHED") == "true"
     )
     decision = (
-        "promote" if published else "shadow" if shadow
+        "promote" if published else "updated" if direct else "shadow" if shadow
         else "skip" if state == "NOT_READY" else "reject"
     )
     blockers = [
@@ -77,7 +79,7 @@ def opportunity_details(report, promotion, env):
         *(report.get("shadowBlockers") or []),
         *(promotion.get("blockers") or []),
     ]
-    if eligible and not published:
+    if eligible and not published and not direct:
         decision = "error"
         blockers.insert(0, "晋级检查已通过，但生产发布未确认成功")
     elif not promotion and state != "NOT_READY":
@@ -176,6 +178,7 @@ def build_report(model, report=None, promotion=None, *, env=None, now_ms=None):
     blockers = list(dict.fromkeys(text(value) for value in blockers if text(value)))[:12]
     summary = {
         "promote": "本轮模型已通过检查并发布。",
+        "updated": "本轮模型已直接更新；发布成功不代表通过晋级，评测结果如下。",
         "shadow": "仅发布影子模型，未切换生产模型。",
         "reject": "本轮未通过晋级，生产模型未切换。",
         "skip": "本轮跳过训练或样本尚未成熟。",

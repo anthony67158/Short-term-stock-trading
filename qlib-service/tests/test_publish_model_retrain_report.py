@@ -72,6 +72,15 @@ class PublishModelRetrainReportTest(unittest.TestCase):
                                     env={**ENV, "RETRAIN_JOB_STATUS": "cancelled"})
         self.assertEqual(cancelled["decision"], "cancelled")
 
+    def test_direct_publication_is_reported_without_claiming_promotion(self):
+        _, report = build_report("opportunity", sample(), {
+            "eligible": False, "blockers": ["净R下界未大于0"],
+        }, env={**ENV, "RETRAIN_DIRECT_PUBLISHED": "true"})
+        self.assertEqual(report["decision"], "updated")
+        self.assertIn("不代表通过晋级", report["summary"])
+        self.assertEqual(report["details"]["metrics"][0]["challenger"], -0.213379)
+        self.assertIn("净R下界未大于0", report["details"]["blockers"])
+
     def test_missing_report_and_not_ready_are_explicit(self):
         _, report = build_report("opportunity", env=ENV)
         self.assertEqual(report["decision"], "error")
