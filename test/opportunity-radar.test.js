@@ -179,6 +179,34 @@ test('生产V3盘中机会保留完整退出计划并按动作价值小仓验证
   )
 })
 
+test('机会雷达不把上一模型版本结果当作当前生产机会', () => {
+  const result = buildOpportunityRadar({
+    now: NOW,
+    activeModelVersion: 'v3-current',
+    sector: {
+      market: { phase: 'live', day: '2026-09-02' },
+      intraday: sectorSnapshot(),
+    },
+    formula: {
+      intraday: formulaResult(
+        'INTRADAY',
+        [formulaCandidate({
+          opportunityScore: directScore({
+            modelVersion: 'v3-previous',
+          }),
+        })],
+      ),
+    },
+  })
+
+  assert.equal(result.sourceStatus.formulaIntraday.status, 'stale')
+  assert.match(
+    result.sourceStatus.formulaIntraday.error,
+    /上一模型版本/,
+  )
+  assert.equal(result.lanes.intraday.length, 0)
+})
+
 test('同一状态内按费后净期望下界而不是热度分排序', () => {
   const highScoreLowEdge = formulaCandidate({
     code: '600001',

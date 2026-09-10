@@ -687,6 +687,7 @@ test('公式结果使用LightGBM动作门槛和CatBoost排序分组合排序', a
   )
   assert.deepEqual(result.v3Scoring, {
     usagePolicy: 'DIRECT',
+    modelVersion: 'v3-production',
     requested: 2,
     direct: 2,
     unavailable: 0,
@@ -694,6 +695,58 @@ test('公式结果使用LightGBM动作门槛和CatBoost排序分组合排序', a
   })
   assert.equal(result.validationState, 'V3_DIRECT')
   assert.equal(result.shadowRanking, undefined)
+})
+
+test('生产模型换版后同日公式结果必须重算而不是复用旧分数', async () => {
+  let scanCalls = 0
+  let saved = null
+  const store = {
+    readLatest: async () => ({
+      tradeDate: '2026-08-28',
+      slot: '1505',
+      v3Scoring: {
+        usagePolicy: 'DIRECT',
+        modelVersion: 'old-model',
+      },
+      candidates: [],
+    }),
+    saveRun: async (_mode, value) => { saved = value },
+    saveProgress: async () => {},
+    claimRun: async () => ({ acquired: true, owner: 'owner' }),
+    releaseRun: async () => true,
+  }
+
+  const result = await runFormulaSelection({
+    mode: 'close',
+    store,
+    readTrainingStatus: async () => ({
+      enabled: true,
+      usagePolicy: 'DIRECT',
+      modelVersion: 'current-model',
+    }),
+    scan: async () => {
+      scanCalls += 1
+      return {
+        universe: {
+          total: 5500,
+          inspectedCount: 5500,
+          tradeDate: '2026-08-28',
+        },
+        formulas: [],
+        candidates: [],
+        candidateEvents: [],
+      }
+    },
+    collectMarketContext: async () => ({
+      marketGate: { allowed: true },
+    }),
+    now: () => Date.UTC(2026, 7, 28, 7, 5),
+  })
+
+  assert.equal(scanCalls, 1)
+  assert.equal(result.reused, undefined)
+  assert.equal(result.v3Scoring.modelVersion, 'current-model')
+  assert.equal(saved.v3Scoring.modelVersion, 'current-model')
 })
 
 test('公式选股进度按模式独立持久化并可恢复读取', async () => {

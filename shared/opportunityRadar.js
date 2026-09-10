@@ -117,6 +117,46 @@ function sourceState(value, {
   }
 }
 
+function sourceModelVersions(value = {}) {
+  const declared = [
+    value?.v3Scoring?.modelVersion,
+    value?.result?.v3Scoring?.modelVersion,
+    value?.model?.version,
+  ].map((item) => String(item || '')).filter(Boolean)
+  const candidates = [
+    ...(Array.isArray(value?.candidates) ? value.candidates : []),
+    ...(Array.isArray(value?.result?.candidates)
+      ? value.result.candidates
+      : []),
+    ...(Array.isArray(value?.result?.nearCandidates)
+      ? value.result.nearCandidates
+      : []),
+  ]
+  return new Set([
+    ...declared,
+    ...candidates
+      .map((candidate) =>
+        String(candidate?.opportunityScore?.modelVersion || '')
+      )
+      .filter(Boolean),
+  ])
+}
+
+function enforceActiveModel(state, value, activeModelVersion) {
+  const current = String(activeModelVersion || '')
+  if (state?.status !== 'fresh' || !current) return state
+  const versions = sourceModelVersions(value)
+  if (!versions.size || (
+    versions.size === 1 && versions.has(current)
+  )) return state
+  return {
+    ...state,
+    status: 'stale',
+    error: '结果来自上一模型版本，请重新生成',
+    modelVersion: [...versions].join(','),
+  }
+}
+
 function sectorSnapshotFor(sector, phase, day, previousDay) {
   const expectedDay = ['PREOPEN', 'REST'].includes(phase)
     ? previousDay
@@ -698,6 +738,7 @@ export function buildOpportunityRadar({
   preCatalyst = null,
   sourceErrors = {},
   holdings = [],
+  activeModelVersion = '',
   now = Date.now(),
 } = {}) {
   const timestamp = Number(now) || Date.now()
@@ -781,6 +822,26 @@ export function buildOpportunityRadar({
       error: sourceErrors.preCatalyst,
     }),
   }
+  sourceStatus.formulaIntraday = enforceActiveModel(
+    sourceStatus.formulaIntraday,
+    formula?.intraday,
+    activeModelVersion,
+  )
+  sourceStatus.formulaClose = enforceActiveModel(
+    sourceStatus.formulaClose,
+    formula?.close,
+    activeModelVersion,
+  )
+  sourceStatus.tail = enforceActiveModel(
+    sourceStatus.tail,
+    tailResult,
+    activeModelVersion,
+  )
+  sourceStatus.preCatalyst = enforceActiveModel(
+    sourceStatus.preCatalyst,
+    preCatalystSnapshot,
+    activeModelVersion,
+  )
   const intradayFormula = Array.isArray(formula?.intraday?.candidates)
     ? formula.intraday.candidates
     : []

@@ -201,6 +201,41 @@ test('详情与军师共用可靠资金入口读取完整五日资金', async ()
   assert.equal(snapshot.retail5dYi, -4)
 })
 
+test('专用资金历史镜像不足时回退普通HTTP镜像补齐五日', async () => {
+  let historyFetches = 0
+  const snapshot = await fetchResilientStockFund('300750', {
+    fetchedAt: Date.parse('2026-08-29T02:00:00.000Z'),
+    fetchHttpsHistory: async () => historyLines.slice(-1),
+    fetchImpl: async (url) => {
+      if (url.includes('/fflow/daykline/get')) {
+        historyFetches += 1
+        return {
+          ok: true,
+          async json() {
+            return { data: { klines: historyLines } }
+          },
+        }
+      }
+      return {
+        ok: true,
+        async json() {
+          return {
+            data: {
+              f62: 200_000_000,
+              f84: -100_000_000,
+            },
+          }
+        },
+      }
+    },
+  })
+
+  assert.ok(historyFetches > 0)
+  assert.equal(snapshot.historyDayCount, 5)
+  assert.equal(snapshot.historyComplete, true)
+  assert.deepEqual(snapshot.mainTrend5, [1, 1.2, 1.5, 1.8, 2])
+})
+
 test('资金快照比较识别主力由流入转流出与散户反向承接', () => {
   const change = compareStockFundSnapshots({
     mainNetYi: -0.4,

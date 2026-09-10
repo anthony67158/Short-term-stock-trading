@@ -402,9 +402,30 @@ export async function fetchStockFund(code, {
 }
 
 export function fetchResilientStockFund(code, options = {}) {
+  const fetchImpl = options.fetchImpl || fetch;
+  const fetchHttpsHistory =
+    options.fetchHttpsHistory || fetchStockFundHistoryViaHttps;
   return fetchStockFund(code, {
     ...options,
-    fetchHistory:
-      options.fetchHistory || fetchStockFundHistoryViaHttps,
+    fetchImpl,
+    fetchHistory: options.fetchHistory || (async (path, settings) => {
+      const viaHttps = await fetchHttpsHistory(path, settings);
+      if (Array.isArray(viaHttps) && viaHttps.length >= 5) {
+        return viaHttps;
+      }
+      const viaFetch = await bestValid(HISTORY_HOSTS, path, {
+        fetchImpl,
+        timeoutMs: settings.timeoutMs,
+        pick: (payload) => {
+          const lines = payload?.data?.klines;
+          return Array.isArray(lines) && lines.length ? lines : null;
+        },
+        score: (lines) => Array.isArray(lines) ? lines.length : 0,
+      });
+      return (
+        Array.isArray(viaFetch)
+        && viaFetch.length > (viaHttps?.length || 0)
+      ) ? viaFetch : viaHttps;
+    }),
   });
 }

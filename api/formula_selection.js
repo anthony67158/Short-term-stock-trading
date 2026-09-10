@@ -16,6 +16,9 @@ import {
   opportunityRadarLedgerStore,
 } from './_opportunity_radar_ledger_store.js'
 import {
+  opportunityTrainingStatusStore,
+} from './_opportunity_training_status.js'
+import {
   fetchOpportunityScores,
 } from './_opportunity_score.js'
 import {
@@ -55,8 +58,26 @@ function normalizedMode(value) {
   return ['intraday', 'close', 'tail'].includes(mode) ? mode : null
 }
 
-function directV3Score(value) {
-  return value?.state === 'READY' && value?.usagePolicy === 'DIRECT'
+function directV3Score(value, modelVersion = '') {
+  return value?.state === 'READY'
+    && value?.usagePolicy === 'DIRECT'
+    && (
+      !modelVersion
+      || String(value?.modelVersion || '') === modelVersion
+    )
+}
+
+function resultModelVersion(value = {}) {
+  const declared = String(value?.v3Scoring?.modelVersion || '')
+  if (declared) return declared
+  const versions = new Set(
+    (Array.isArray(value?.candidates) ? value.candidates : [])
+      .map((candidate) =>
+        String(candidate?.opportunityScore?.modelVersion || '')
+      )
+      .filter(Boolean),
+  )
+  return versions.size === 1 ? [...versions][0] : ''
 }
 
 function verifiedScore(score, candidate) {
@@ -186,6 +207,8 @@ export function runFormulaSelection({
   scoreOpportunities = fetchOpportunityScores,
   scan = scanFormulaSelectionCandidates,
   collectMarketContext = collectTailPickMarketContext,
+  readTrainingStatus = () =>
+    opportunityTrainingStatusStore.readStatus(),
   now = Date.now,
 } = {}) {
   const normalized = normalizedMode(mode)
@@ -199,11 +222,20 @@ export function runFormulaSelection({
   if (runFlights.has(flightKey)) return runFlights.get(flightKey)
 
   const promise = (async () => {
+    const trainingStatus = await readTrainingStatus().catch(() => null)
+    const activeModelVersion = (
+      trainingStatus?.enabled === true
+      && trainingStatus?.usagePolicy === 'DIRECT'
+    ) ? String(trainingStatus.modelVersion || '') : ''
     const existing = await store.readLatest(normalized)
     if (
       existing?.tradeDate === tradeDate
       && existing?.slot === slot
       && existing?.v3Scoring?.usagePolicy === 'DIRECT'
+      && (
+        !activeModelVersion
+        || resultModelVersion(existing) === activeModelVersion
+      )
     ) return { ...existing, reused: true }
     const claim = await store.claimRun(
       normalized,
@@ -284,7 +316,7 @@ export function runFormulaSelection({
         )
         return {
           ...candidate,
-          validationState: directV3Score(score)
+          validationState: directV3Score(score, activeModelVersion)
             ? 'V3_DIRECT'
             : 'V3_UNAVAILABLE',
           opportunityScore: score,
@@ -314,7 +346,10 @@ export function runFormulaSelection({
           candidate.exitPlan?.hardStopPrice ?? candidate.stopPrice,
         targetPrice:
           candidate.exitPlan?.takeProfitPrice ?? candidate.targetPrice,
-        validationState: directV3Score(candidate.opportunityScore)
+        validationState: directV3Score(
+          candidate.opportunityScore,
+          activeModelVersion,
+        )
           ? 'V3_DIRECT'
           : 'V3_UNAVAILABLE',
       })).sort((left, right) =>
@@ -357,8 +392,15 @@ export function runFormulaSelection({
         }
       })
       const readyScores = scoredCandidates.filter((candidate) =>
-        directV3Score(candidate.opportunityScore)
+        directV3Score(candidate.opportunityScore, activeModelVersion)
       ).length
+      const scoreVersions = new Set(
+        scoredCandidates
+          .map((candidate) =>
+            String(candidate?.opportunityScore?.modelVersion || '')
+          )
+          .filter(Boolean),
+      )
       const validationState = !scoredCandidates.length
         ? 'NO_CANDIDATE'
         : readyScores === scoredCandidates.length
@@ -379,6 +421,10 @@ export function runFormulaSelection({
         candidates: scoredCandidates,
         v3Scoring: {
           usagePolicy: 'DIRECT',
+          modelVersion: activeModelVersion
+            || (scoreVersions.size === 1
+              ? [...scoreVersions][0]
+              : null),
           requested: scoredCandidates.length,
           direct: readyScores,
           unavailable:

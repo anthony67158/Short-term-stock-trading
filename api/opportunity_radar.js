@@ -119,12 +119,17 @@ export async function readOpportunityRadarSnapshot({
       ? '预催化结果读取失败'
       : '',
   }
+  const trainingStatus = settledValue(trainingStatusResult, null)
   const radar = buildOpportunityRadar({
     sector: settledValue(sectorResult, {}),
     formula: settledValue(formulaResult, {}),
     tail: settledValue(tailResult, null),
     preCatalyst: settledValue(preCatalystResult, null),
     sourceErrors,
+    activeModelVersion:
+      trainingStatus?.enabled === true
+        ? trainingStatus.modelVersion
+        : '',
     now,
   })
   const accountRisk = await riskPromise
@@ -142,7 +147,7 @@ export async function readOpportunityRadarSnapshot({
     ok: true,
     partial: Object.values(sourceErrors).some(Boolean),
     baseline: settledValue(baselineResult, null),
-    trainingStatus: settledValue(trainingStatusResult, null),
+    trainingStatus,
     ...radar,
   }
 }

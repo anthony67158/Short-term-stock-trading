@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
   fetchOpportunityScores,
+  OPPORTUNITY_SCORE_TIMEOUT_MS,
 } from '../api/_opportunity_score.js'
 import {
   OPPORTUNITY_SCORE_FEATURE_NAMES,
@@ -21,6 +22,10 @@ function input(code = '600001') {
     ),
   }
 }
+
+test('生产机会评分为集成模型冷启动保留八秒预算', () => {
+  assert.equal(OPPORTUNITY_SCORE_TIMEOUT_MS, 8_000)
+})
 
 test('量化服务未配置时为每只候选返回NOT_READY', async () => {
   const scores = await fetchOpportunityScores(

@@ -5,6 +5,7 @@ import {
 
 const REQUEST_BATCH_SIZE = 80
 const MAX_SHADOW_ITEMS = 240
+export const OPPORTUNITY_SCORE_TIMEOUT_MS = 8_000
 
 function fallbackMap(inputs, reason) {
   return new Map(inputs.map((input) => [
@@ -69,7 +70,7 @@ async function fetchBatch(inputs, {
 export async function fetchOpportunityScores(inputs, {
   env = process.env,
   fetchImpl = fetch,
-  timeoutMs = 2000,
+  timeoutMs = OPPORTUNITY_SCORE_TIMEOUT_MS,
 } = {}) {
   const values = (Array.isArray(inputs) ? inputs : [])
     .filter((item) => /^\d{6}$/.test(String(item?.code || '')))
