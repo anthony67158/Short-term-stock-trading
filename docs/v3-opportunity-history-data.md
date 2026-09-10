@@ -16,6 +16,16 @@
 - 69 个独立交易日，其中历史信号日为 65 日；
 - 所有历史样本均使用 `opportunity-score-feature.v3`。
 
+同日使用 Tushare `stk_mins` 完成更长窗口复核后，训练基线进一步更新为：
+
+- 2026-03-10 至 2026-08-31 共 120 个历史信号日；
+- 5,208 只去重股票、13,354,992 根合格 5 分钟线；
+- 126 个回放/结算日的最低完整代码覆盖率为 99.6075%；
+- 19 个停牌零值占位“股票-日”被整日排除，没有填充虚假价格；
+- 72,847 个历史成熟候选，另有 1 条未成熟路径被排除；
+- 与线上结果合并后共 73,004 个成熟候选、37,516 个完整成交结果、
+  124 个独立交易日。
+
 生产晋级最低要求为 1000 个成熟候选、300 个完整成交结果和 60 个独立
 交易日。数量达到只代表可以训练，模型还必须通过独立时间窗、Top5 费后净R
 下界、相对旧公式提升、回撤和命中率闸门。
@@ -195,6 +205,50 @@ opportunitymodel/training-data/runs/
 
 因此线上状态保持 `productionEligible=false` 和 `MODEL_NOT_READY`。历史基线
 会继续与后续真实前向样本合并训练，禁止因样本数量达标而绕过效果闸门。
+
+## Tushare 完整回填
+
+批量任务使用项目内置 HTTP 客户端，不经 MCP；Token 只从进程环境变量读取。
+网关限制为 150 次/分钟，回填器最多允许 120 次/分钟，默认 90 次/分钟，并
+共享 429 冷却。
+
+执行入口：
+
+```bash
+export TUSHARE_TOKEN="..."
+npm run opportunity:backfill-tushare -- \
+  --work-dir "$HOME/.tushare-v3-work" \
+  --from 20251101 \
+  --to 20260909 \
+  --signal-days 120 \
+  --universe-size 1000 \
+  --max-per-min 120
+```
+
+日线 `vol` 从手转换为股，`amount` 从千元转换为元；资金流按 Tushare
+大单+特大单及小单买卖额分别计算主力和散户代理净额。分钟价格先消除
+IEEE-754 序列化噪声，再执行严格 OHLC 校验。仅当成交量、成交额均为 0 且
+至少一个 OHLC 非正时，整交易日按停牌占位排除。
+
+本轮训练仍为 `REJECTED`，没有发布 shadow 或 production 模型：
+
+- 独立 holdout：2026-08-11 至 2026-09-08；
+- V3 Top5 平均费后净R为 -0.213379R，旧公式为 -0.664453R；
+- V3 Top5 最大回撤为 4.8656R，旧公式为 12.2156R；
+- V3 Top5 正净R命中率为 24.2105%，旧公式为 7.3684%；
+- V3 Top5 净R下置信界为 -0.518984R；
+- `pWinGivenFill` LogLoss、`expectedNetR` MAE 和 walk-forward 稳定性未过闸。
+
+历史基线已发布到 `opportunitymodel/training-data/`，训练状态已发布为
+`REJECTED`。数量门槛已满足，但最近窗口仍是负期望，禁止以“完整重训练”为由
+强行晋级。
+
+参考：
+
+- Tushare 代理接入与限频：https://ts.gyzcloud.top/docs
+- 官方分钟接口：https://tushare.pro/document/2?doc_id=370
+- 官方日线接口：https://tushare.pro/document/2?doc_id=27
+- 官方资金流接口：https://tushare.pro/document/2?doc_id=170
 
 ## 上线判定
 
