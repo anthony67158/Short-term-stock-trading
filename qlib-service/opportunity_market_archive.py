@@ -220,10 +220,6 @@ def publish_market_days(bucket, artifacts, *, activated_at=None):
             "from": dates[0]["date"] if dates else None,
             "to": dates[-1]["date"] if dates else None,
         },
-        "dateRange": {
-            "from": dates[0]["date"] if dates else None,
-            "to": dates[-1]["date"] if dates else None,
-        },
         "summary": {
             "dates": len(dates),
             "minuteBars": sum(

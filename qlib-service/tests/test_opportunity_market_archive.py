@@ -186,6 +186,12 @@ class OpportunityMarketArchiveTest(unittest.TestCase):
             os.makedirs(metadata)
             os.makedirs(minute_dir)
             with gzip.open(
+                os.path.join(metadata, "20260908.json.gz"),
+                "wt",
+                encoding="utf-8",
+            ) as handle:
+                json.dump({"date": "20260908"}, handle)
+            with gzip.open(
                 os.path.join(metadata, "20260909.json.gz"),
                 "wt",
                 encoding="utf-8",
@@ -204,7 +210,15 @@ class OpportunityMarketArchiveTest(unittest.TestCase):
 
             stream = iter_local_market_artifacts(directory)
             self.assertFalse(isinstance(stream, list))
-            self.assertEqual(next(stream)["date"], "20260909")
+            item = next(stream)
+            self.assertEqual(item["date"], "20260909")
+            self.assertEqual(item["universe"]["sourceDate"], "20260908")
+            self.assertEqual(
+                encode_market_day(item),
+                encode_market_day(next(
+                    iter_local_market_artifacts(directory),
+                )),
+            )
             with self.assertRaises(StopIteration):
                 next(stream)
 

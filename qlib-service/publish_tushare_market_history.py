@@ -1,6 +1,7 @@
 """Publish validated local Tushare replay files as immutable OSS day shards."""
 
 import argparse
+from datetime import datetime, timedelta, timezone
 import gzip
 import json
 from pathlib import Path
@@ -17,12 +18,31 @@ def read_gzip_json(path):
         return json.load(handle)
 
 
+def market_close_ms(date):
+    beijing = timezone(timedelta(hours=8))
+    closed_at = datetime.strptime(date, "%Y%m%d").replace(
+        hour=16,
+        tzinfo=beijing,
+    )
+    return int(closed_at.timestamp() * 1000)
+
+
 def iter_local_market_artifacts(work_dir, *, from_date=None, to_date=None):
     root = Path(work_dir).expanduser().resolve()
     metadata = root / "tushare-metadata" / "days"
     minutes = root / "minutes"
     if not metadata.is_dir() or not minutes.is_dir():
         raise ValueError("Tushare历史工作目录不完整")
+    metadata_dates = sorted(
+        path.name[:8]
+        for path in metadata.glob("*.json.gz")
+        if path.name[:8].isdigit()
+    )
+    previous_dates = {
+        date: metadata_dates[index - 1]
+        for index, date in enumerate(metadata_dates)
+        if index > 0
+    }
     found = False
     for minute_path in sorted(minutes.glob("*.json.gz")):
         date = minute_path.name[:8]
@@ -37,6 +57,9 @@ def iter_local_market_artifacts(work_dir, *, from_date=None, to_date=None):
         minute = read_gzip_json(minute_path)
         if day.get("date") != date or minute.get("date") != date:
             raise ValueError(f"Tushare历史分片日期不一致: {date}")
+        universe_source_date = previous_dates.get(date)
+        if universe_source_date is None:
+            raise ValueError(f"Tushare历史分片缺少前一交易日: {date}")
         codes = minute.get("codes") or {}
         found = True
         yield build_market_day_artifact(
@@ -45,8 +68,9 @@ def iter_local_market_artifacts(work_dir, *, from_date=None, to_date=None):
             funds=day.get("funds"),
             minutes=minute,
             source="TUSHARE_CAUSAL_REPLAY",
-            universe_source_date=date,
+            universe_source_date=universe_source_date,
             requested_codes=len(codes),
+            generated_at=market_close_ms(date),
         )
     if not found:
         raise ValueError("没有可发布的Tushare历史分片")
