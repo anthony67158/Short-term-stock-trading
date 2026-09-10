@@ -11,7 +11,7 @@ if [ ! -f "$ROOT/.env" ]; then
   exit 1
 fi
 
-if [ ! -d "$PKG/deps" ]; then
+if [ ! -d "$PKG/deps" ] || [ ! -d "$PKG/deps/catboost" ]; then
   bash "$HERE/build_deploy_pkg.sh"
 else
   cp \
@@ -21,6 +21,8 @@ else
     "$HERE/opportunity_contract.py" \
     "$HERE/opportunity_evaluation.py" \
     "$HERE/opportunity_model.py" \
+    "$HERE/opportunity_market_archive.py" \
+    "$HERE/archive_public_market_day.py" \
     "$HERE/sector_contract.py" \
     "$HERE/sector_factors.py" \
     "$HERE/sector_model.py" \

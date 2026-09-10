@@ -12,12 +12,12 @@ resources:
     props:
       region: ${vars.region}
       functionName: ${vars.functionName}
-      description: 量化打分(LightGBM)+走势预测(GARCH+蒙特卡洛)微服务(FastAPI, FC3.0 自定义运行时 免Docker)
+      description: 量化打分(LightGBM+CatBoost)+走势预测(GARCH+蒙特卡洛)微服务(FastAPI, FC3.0 自定义运行时 免Docker)
       runtime: custom.debian10          # 自定义运行时(免 Docker),依赖 vendored 到 deps/,与主服务同栈
       cpu: 1                            # LGB 推理 + GARCH 拟合 + 蒙特卡洛
       memorySize: 2048                  # lightgbm+arch+scipy+numpy 常驻,2GB 稳
       diskSize: 512
-      timeout: 60
+      timeout: 600
       instanceConcurrency: 10
       caPort: 9000                      # 与 bootstrap 里 uvicorn 监听端口一致
       code: ./deploy_pkg               # 部署包目录(app+factors+model_lib+bundled模型+deps/+bootstrap)

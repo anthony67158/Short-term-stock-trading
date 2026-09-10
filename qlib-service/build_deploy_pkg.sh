@@ -20,7 +20,10 @@ rm -rf "$VEND" "$PKG/deps"; mkdir -p "$VEND" "$PKG/deps"
 # 注意 lightgbm 4.x 只发 manylinux_2_28 tag(FC debian10 glibc>=2.28,兼容)
 pip download --no-deps --only-binary=:all: --index-url "$IDX" \
   --platform manylinux_2_28_x86_64 --python-version 310 --implementation cp --abi cp310 \
-  -d "$VEND" "lightgbm==4.6.0"
+  -d "$VEND" "lightgbm==4.7.0"
+pip download --no-deps --only-binary=:all: --index-url "$IDX" \
+  --platform manylinux2014_x86_64 --python-version 310 --implementation cp --abi cp310 \
+  -d "$VEND" "catboost==1.2.10"
 pip download --no-deps --only-binary=:all: --index-url "$IDX" \
   --platform manylinux_2_17_x86_64 --python-version 310 --implementation cp --abi cp310 \
   -d "$VEND" "arch==7.2.0" "statsmodels==0.14.4" "scipy==1.14.1" "pandas==2.2.3" "numpy==2.0.2"
@@ -54,7 +57,8 @@ find "$PKG/deps" -name "*.pyc" -delete 2>/dev/null || true
 # --- 5) 拷贝源码 + bundled 模型 + bootstrap(这些进 git) ---
 cp "$HERE/app.py" "$HERE/factors_lib.py" "$HERE/model_lib.py" \
    "$HERE/opportunity_contract.py" "$HERE/opportunity_evaluation.py" \
-   "$HERE/opportunity_model.py" \
+   "$HERE/opportunity_model.py" "$HERE/opportunity_market_archive.py" \
+   "$HERE/archive_public_market_day.py" \
    "$HERE/sector_contract.py" "$HERE/sector_factors.py" \
    "$HERE/sector_model.py" \
    "$HERE/lgb_score.txt" "$HERE/meta.json" "$HERE/bootstrap" "$PKG/"

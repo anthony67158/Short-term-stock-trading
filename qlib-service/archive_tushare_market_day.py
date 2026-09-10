@@ -27,48 +27,14 @@ from opportunity_market_archive import (  # noqa: E402
     load_market_day,
     market_close_ms,
     publish_market_days,
+    select_causal_universe,
+    stable_hash,
 )
 from tushare_client import TushareClient  # noqa: E402
 from upload_model import bucket  # noqa: E402
 
 
 MINUTE_PROBE_CODES = ("600519", "000001", "601318")
-
-
-def stable_hash(value):
-    result = 2166136261
-    for character in str(value):
-        result ^= ord(character)
-        result = (result * 16777619) & 0xFFFFFFFF
-    return result
-
-
-def select_causal_universe(rows, trade_date, *, limit=1000, liquid_share=0.8):
-    candidates = [
-        row for row in rows
-        if re.fullmatch(r"\d{6}", str(row.get("code") or ""))
-        and not row.get("isSt")
-        and not re.search(r"ST|退", str(row.get("name") or ""), re.IGNORECASE)
-        and float(row.get("close") or 0) > 0
-        and float(row.get("amount") or 0) >= 30_000_000
-        and float(row.get("turnover") or 0) >= 0.3
-    ]
-    normalized_limit = max(100, int(limit or 1000))
-    liquid_limit = max(1, min(normalized_limit, int(normalized_limit * liquid_share)))
-    liquid = sorted(
-        candidates,
-        key=lambda row: (-float(row["amount"]), str(row["code"])),
-    )[:liquid_limit]
-    selected = {str(row["code"]) for row in liquid}
-    exploration = sorted(
-        (row for row in candidates if str(row["code"]) not in selected),
-        key=lambda row: (stable_hash(f"{trade_date}:{row['code']}"), str(row["code"])),
-    )
-    for row in exploration:
-        if len(selected) >= normalized_limit:
-            break
-        selected.add(str(row["code"]))
-    return sorted(selected)
 
 
 def completed_trade_dates(calendar, *, now=None):

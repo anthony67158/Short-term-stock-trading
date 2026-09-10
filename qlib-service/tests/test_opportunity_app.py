@@ -90,6 +90,25 @@ class OpportunityAppTest(unittest.TestCase):
 
         self.assertEqual(error.exception.status_code, 400)
 
+    def test_archive_endpoint_runs_public_source_pipeline(self):
+        with patch.object(
+            app,
+            "archive_latest_public",
+            return_value={
+                "status": "published",
+                "date": "20260909",
+                "source": "EASTMONEY_TENCENT_DAILY_INCREMENT",
+            },
+        ) as archive:
+            response = app.archive_market_day(
+                {"universeSize": 1000, "workers": 8},
+                x_api_key="",
+            )
+
+        self.assertTrue(response["ok"])
+        self.assertEqual(response["date"], "20260909")
+        archive.assert_called_once_with(universe_size=1000, workers=8)
+
     def test_existing_stock_predict_contract_stays_36_dimensional(self):
         from factors_lib import FEATURE_NAMES as stock_features
 

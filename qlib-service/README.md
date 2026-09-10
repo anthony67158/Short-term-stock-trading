@@ -25,14 +25,16 @@ npm run opportunity:train
 ```
 
 少于 1000 个成熟候选、300 个完整成交结果或 60 个独立交易日时，训练只生成
-`NOT_READY` 报告。完成训练后无论评测是否通过，均保存实际三头模型。
+`NOT_READY` 报告。当前组合保存 LightGBM 的成交、胜率、胜单R、亏单R、Q10
+五个动作价值头，以及一个 CatBoost `YetiRankPairwise` 排序头。
 `shadow` 是兼容保留的产物目录名，不代表仅允许影子使用。直接发布当前模型：
 
 ```bash
 cd qlib-service
 python3 upload_opportunity_model.py \
   --directory opportunity-model/shadow \
-  --prefix opportunitymodel/
+  --prefix opportunitymodel/ \
+  --activate-baseline
 ```
 
 walk-forward、Top5 费后净R提升、下置信界、回撤和命中率仍保留为晋级诊断，
@@ -51,10 +53,16 @@ python3 upload_opportunity_model.py \
 模型启用由 `usagePolicy=DIRECT` 明确表达；不得伪造评测成功。
 
 `.github/workflows/daily-retrain.yml` 在每个工作日北京时间 01:15 自动执行
-成熟样本收集、V3训练、当前模型直接发布、晋级诊断和状态发布。晋级检查未全部
-通过不会撤销当前直接发布的模型。生产采样由主 FC 在
+成熟样本收集、三折三种子回测、V3组合训练、当前基准直接发布、资格诊断和状态
+发布。资格检查未全部通过不会伪造 `productionEligible`，也不会撤销用户指定
+的当前 `DIRECT` 基准。生产采样由主 FC 在
 10:20、13:40、15:10 运行，17:10 结算。历史加速回填的数据合同见
 `../docs/v3-opportunity-history-data.md`。
+
+每日原始市场数据不依赖 Tushare。GitHub Actions 调用杭州量化 FC 的
+`POST /archive-market-day`，由 FC 使用东方财富全市场/历史 5 分钟接口并以
+腾讯 5 分钟接口兜底，完整性通过后写入 OSS。Tushare 只保留为短期回填和
+行业成员刷新工具。
 
 ## 生产架构
 

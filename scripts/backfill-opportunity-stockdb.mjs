@@ -293,11 +293,7 @@ async function runArchiveExporter(options) {
 }
 
 async function runMinuteExporter(options, manifestPath, minuteDirectory) {
-  if (options.provider === 'archive') {
-    await runArchiveExporter(options)
-    cachedDaily = await readGzipJson(dailyFile)
-    cachedFunds = await readGzipJson(fundFile)
-  } else if (options.provider === 'tushare') {
+  if (options.provider === 'tushare') {
     return runPythonExporter([
       path.join(ROOT, 'scripts', 'tushare_export_history.py'),
       '--stage',
@@ -369,7 +365,11 @@ async function main() {
   writeProgress('DAILY_START', { from: options.from, to: options.to })
   let cachedDaily
   let cachedFunds
-  if (options.provider === 'tushare') {
+  if (options.provider === 'archive') {
+    await runArchiveExporter(options)
+    cachedDaily = await readGzipJson(dailyFile)
+    cachedFunds = await readGzipJson(fundFile)
+  } else if (options.provider === 'tushare') {
     await runTushareMetadataExporter(options)
     if (!await fileExists(sectorFile)) {
       await runTushareSectorExporter(sectorFile)
@@ -442,7 +442,7 @@ async function main() {
 
   const sourceType = {
     tushare: 'TUSHARE_CAUSAL_REPLAY',
-    archive: 'TUSHARE_OSS_CAUSAL_REPLAY',
+    archive: 'OSS_MARKET_CAUSAL_REPLAY',
   }[options.provider] || 'STOCKDB_CAUSAL_REPLAY'
   const replayDates = replayDatesFromManifest(manifest)
   const signalSet = new Set(plan.signalDates)
@@ -519,7 +519,9 @@ async function main() {
       type: sourceType,
       version: options.provider === 'tushare'
         ? 'proxy-v1'
-        : '0.3.5',
+        : options.provider === 'archive'
+          ? 'market-data-v1'
+          : '0.3.5',
       signalDates: plan.signalDates.length,
       universeSize: options.universeSize,
       batches: batchCount,

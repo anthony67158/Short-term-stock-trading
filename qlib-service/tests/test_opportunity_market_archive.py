@@ -14,6 +14,7 @@ from opportunity_market_archive import (  # noqa: E402
     MANIFEST_KEY,
     build_market_day_artifact,
     encode_market_day,
+    latest_market_day_before,
     load_market_day,
     market_close_ms,
     publish_market_days,
@@ -162,6 +163,10 @@ class OpportunityMarketArchiveTest(unittest.TestCase):
             ["20260909", "20260910"],
         )
         self.assertEqual(load_market_day(bucket, "20260909")["date"], "20260909")
+        self.assertEqual(
+            latest_market_day_before(bucket, "20260910")["date"],
+            "20260909",
+        )
 
         publish_market_days(bucket, [artifact("20260909")], activated_at=3000)
         objects = [key for key in bucket.values if key.endswith(".json.gz")]

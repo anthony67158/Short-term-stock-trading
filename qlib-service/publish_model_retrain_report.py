@@ -60,7 +60,10 @@ def opportunity_details(report, promotion, env):
     split = report.get("split") or {}
     ranking = (report.get("metrics") or {}).get("ranking") or {}
     candidate = ranking.get("challenger") or {}
+    action_value = ranking.get("actionValue") or {}
+    ranker = ranking.get("ranker") or {}
     baseline = ranking.get("baseline") or {}
+    quantile = (report.get("metrics") or {}).get("quantile10") or {}
     walk = report.get("walkForward") or {}
     state = text(report.get("state"))
     eligible = promotion.get("eligible") is True
@@ -96,11 +99,17 @@ def opportunity_details(report, promotion, env):
             f"/{display(walk.get('folds'))} 窗通过"
         )},
         {"label": "候选版本", "value": text(report.get("modelVersion")) or "未生成"},
+        {"label": "模型组合", "value": "LightGBM 动作价值 + CatBoost 排序"},
     ]
     metrics = [
-        metric_row("Top5 费后净R", candidate.get("mean_net_r_at_5"),
+        metric_row("组合 Top5 费后净R", candidate.get("mean_net_r_at_5"),
                    baseline.get("mean_net_r_at_5"), "r"),
-        metric_row("Top5 净R下置信界", candidate.get("netRLowerBound"), unit="r"),
+        metric_row("组合 Top5 净R下置信界", candidate.get("netRLowerBound"), unit="r"),
+        metric_row("动作价值 Top5 费后净R",
+                   action_value.get("mean_net_r_at_5"), unit="r"),
+        metric_row("CatBoost Top5 费后净R",
+                   ranker.get("mean_net_r_at_5"), unit="r"),
+        metric_row("Q10 覆盖率", quantile.get("coverage"), unit="percent"),
         metric_row("Top5 最大回撤", candidate.get("max_drawdown_r_at_5"),
                    baseline.get("max_drawdown_r_at_5"), "r"),
         metric_row("Top5 正净R信号占比", candidate.get("precision_at_5"),

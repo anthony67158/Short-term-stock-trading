@@ -17,6 +17,62 @@ DATE_PATTERN = re.compile(r"^\d{8}$")
 CODE_PATTERN = re.compile(r"^\d{6}$")
 
 
+def stable_hash(value):
+    result = 2166136261
+    for character in str(value):
+        result ^= ord(character)
+        result = (result * 16777619) & 0xFFFFFFFF
+    return result
+
+
+def select_causal_universe(
+    rows,
+    trade_date,
+    *,
+    limit=1000,
+    liquid_share=0.8,
+):
+    candidates = [
+        row for row in rows
+        if CODE_PATTERN.fullmatch(str(row.get("code") or ""))
+        and not row.get("isSt")
+        and not re.search(
+            r"ST|退",
+            str(row.get("name") or ""),
+            re.IGNORECASE,
+        )
+        and float(row.get("close") or 0) > 0
+        and float(row.get("amount") or 0) >= 30_000_000
+        and float(row.get("turnover") or 0) >= 0.3
+    ]
+    normalized_limit = max(100, int(limit or 1000))
+    liquid_limit = max(
+        1,
+        min(normalized_limit, int(normalized_limit * liquid_share)),
+    )
+    liquid = sorted(
+        candidates,
+        key=lambda row: (-float(row["amount"]), str(row["code"])),
+    )[:liquid_limit]
+    selected = {str(row["code"]) for row in liquid}
+    exploration = sorted(
+        (
+            row
+            for row in candidates
+            if str(row["code"]) not in selected
+        ),
+        key=lambda row: (
+            stable_hash(f"{trade_date}:{row['code']}"),
+            str(row["code"]),
+        ),
+    )
+    for row in exploration:
+        if len(selected) >= normalized_limit:
+            break
+        selected.add(str(row["code"]))
+    return sorted(selected)
+
+
 def market_close_ms(date):
     date = _date(date)
     beijing = timezone(timedelta(hours=8))
@@ -273,3 +329,20 @@ def load_market_day(bucket, date):
     if artifact.get("schemaVersion") != SCHEMA_VERSION or artifact.get("date") != date:
         raise ValueError("市场数据分片内容无效")
     return artifact
+
+
+def latest_market_day_before(bucket, date):
+    date = _date(date)
+    manifest = _json(bucket, MANIFEST_KEY)
+    if manifest is None:
+        return None
+    if manifest.get("schemaVersion") != MANIFEST_SCHEMA_VERSION:
+        raise ValueError("市场数据manifest版本无效")
+    candidates = sorted(
+        str(row.get("date") or "")
+        for row in manifest.get("dates", [])
+        if isinstance(row, dict)
+        and DATE_PATTERN.fullmatch(str(row.get("date") or ""))
+        and str(row.get("date")) < date
+    )
+    return load_market_day(bucket, candidates[-1]) if candidates else None

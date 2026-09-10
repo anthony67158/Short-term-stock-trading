@@ -7,15 +7,16 @@ import json
 import os
 from pathlib import Path
 
-from archive_tushare_market_day import day_metadata, security_names
 from model_lib import _oss_bucket
 from opportunity_market_archive import (
     MANIFEST_KEY,
     MANIFEST_SCHEMA_VERSION,
     SCHEMA_VERSION,
 )
-from opportunity_sector_archive import build_sector_membership_artifact
-from tushare_client import TushareClient
+from opportunity_sector_archive import (
+    SCHEMA_VERSION as SECTOR_SCHEMA_VERSION,
+    load_sector_membership,
+)
 
 
 def _write_gzip(path, value):
@@ -140,49 +141,34 @@ def export_market_archive(
                 "date": value["date"],
             }), flush=True)
 
-    first_archive_date = entries[0]["date"]
-    client = TushareClient(max_per_min=max_per_min)
-    names = security_names(client)
-    calendar = client.trade_cal(
-        start_date=from_date,
-        end_date=first_archive_date,
-    )
-    prehistory_dates = sorted({
-        str(row.get("cal_date") or "")
-        for row in calendar
-        if int(row.get("is_open") or 0) == 1
-        and str(row.get("cal_date") or "") < first_archive_date
-    })
+    prehistory_dates = []
     cache_dir = work / "prehistory-days"
     cache_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-    for index, date in enumerate(prehistory_dates, 1):
-        path = cache_dir / f"{date}.json.gz"
-        if path.is_file():
+    cached_prehistory = sorted(cache_dir.glob("*.json.gz"))
+    for path in cached_prehistory:
+        date = path.name[:8]
+        if from_date <= date < entries[0]["date"]:
             value = _read_gzip(path)
-        else:
-            day_daily, day_funds = day_metadata(
-                client,
-                date,
-                names,
-            )
-            value = {
-                "daily": day_daily,
-                "funds": day_funds,
-            }
-            _write_gzip(path, value)
-        daily.extend(value["daily"])
-        funds.extend(value["funds"])
-        if index == 1 or index % 10 == 0 or index == len(prehistory_dates):
-            print(json.dumps({
-                "stage": "PREHISTORY_DAY",
-                "progress": index,
-                "total": len(prehistory_dates),
-                "date": date,
-            }), flush=True)
+            daily.extend(value.get("daily") or [])
+            funds.extend(value.get("funds") or [])
+            prehistory_dates.append(date)
 
-    sector_artifact = build_sector_membership_artifact(
-        client.index_member_all()
-    )
+    memberships = load_sector_membership(bucket)
+    if not memberships:
+        raise ValueError("OSS缺少行业成员档案")
+    sector_artifact = {
+        "schemaVersion": SECTOR_SCHEMA_VERSION,
+        "source": "OSS_SECTOR_MEMBERSHIP",
+        "summary": {
+            "memberships": len(memberships),
+            "codes": len({item["code"] for item in memberships}),
+            "sectors": len({
+                item["sectorCode"]
+                for item in memberships
+            }),
+        },
+        "memberships": memberships,
+    }
     _write_gzip(
         work / "sector-membership.json.gz",
         sector_artifact,

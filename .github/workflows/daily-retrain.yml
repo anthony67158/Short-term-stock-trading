@@ -73,6 +73,7 @@ jobs:
             tests/test_collect_opportunity_outcomes.py \
             tests/test_opportunity_history.py \
             tests/test_opportunity_market_archive.py \
+            tests/test_archive_public_market_day.py \
             tests/test_opportunity_sector_archive.py \
             tests/test_archive_tushare_market_day.py \
             tests/test_promote_opportunity_model.py \
@@ -237,7 +238,7 @@ jobs:
   opportunity-retrain:
     needs: verify
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 60
     defaults:
       run:
         working-directory: qlib-service
@@ -293,29 +294,50 @@ jobs:
           python publish_opportunity_history.py \
             --input opportunity-outcomes.json
 
+      - name: Run three-seed LightGBM and CatBoost walk-forward
+        run: |
+          mkdir -p opportunity-model/stability
+          for seed in 42 7 2026; do
+            python poc_v3_model_bakeoff.py \
+              --input opportunity-outcomes.json \
+              --output-dir "opportunity-model/seed-${seed}" \
+              --families lightgbm,catboost \
+              --folds 3 \
+              --estimators 180 \
+              --threads 4 \
+              --seed "$seed"
+          done
+          python summarize_v3_poc_runs.py \
+            opportunity-model/seed-42/report.json \
+            opportunity-model/seed-7/report.json \
+            opportunity-model/seed-2026/report.json \
+            --output-dir opportunity-model/stability
+
       - name: Train and evaluate opportunity challenger
         run: |
           python train_opportunity_score.py \
             --dataset opportunity-dataset.npz \
             --output opportunity-model
 
-      - name: Publish current V3 model directly without promotion prerequisite
-        id: opportunity-shadow
+      - name: Publish best available combination as the DIRECT baseline
+        id: opportunity-baseline
         run: |
           if [ -f opportunity-model/shadow/opportunity_meta.json ]; then
             python upload_opportunity_model.py \
               --directory opportunity-model/shadow \
-              --prefix opportunitymodel/
+              --prefix opportunitymodel/ \
+              --activate-baseline
             echo "published=true" >> "$GITHUB_OUTPUT"
           else
             echo "No valid model artifacts were produced; keeping the current model."
           fi
 
-      - name: Evaluate promotion metrics for diagnostics
+      - name: Evaluate production model combination
         run: |
           python promote_opportunity_model.py \
             --source opportunity-model/shadow \
             --report opportunity-model/opportunity_training_report.json \
+            --stability opportunity-model/stability/stability.json \
             --output opportunity-model/production \
             --check-only \
             --decision-output opportunity-model/promotion_decision.json
@@ -333,6 +355,7 @@ jobs:
             python promote_opportunity_model.py \
               --source opportunity-model/shadow \
               --report opportunity-model/opportunity_training_report.json \
+              --stability opportunity-model/stability/stability.json \
               --output opportunity-model/production
             python upload_opportunity_model.py \
               --directory opportunity-model/production \
@@ -360,7 +383,7 @@ jobs:
         env:
           RETRAIN_JOB_STATUS: ${{ job.status }}
           RETRAIN_PUBLISHED: ${{ steps.opportunity-production.outputs.published }}
-          RETRAIN_DIRECT_PUBLISHED: ${{ steps.opportunity-shadow.outputs.published }}
+          RETRAIN_DIRECT_PUBLISHED: ${{ steps.opportunity-baseline.outputs.published }}
         run: |
           python publish_model_retrain_report.py \
             --model opportunity \
@@ -376,6 +399,10 @@ jobs:
             qlib-service/opportunity-model/opportunity_training_report.json
             qlib-service/opportunity-model/opportunity_trials.jsonl
             qlib-service/opportunity-model/promotion_decision.json
+            qlib-service/opportunity-model/stability/
+            qlib-service/opportunity-model/seed-42/report.json
+            qlib-service/opportunity-model/seed-7/report.json
+            qlib-service/opportunity-model/seed-2026/report.json
             qlib-service/opportunity-outcomes.json
           if-no-files-found: warn
 
@@ -390,6 +417,7 @@ jobs:
       PYTHONUNBUFFERED: "1"
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       PIP_DEFAULT_TIMEOUT: "90"
+      QUANT_KEY: ${{ secrets.QUANT_KEY }}
       TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
       OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
       OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
@@ -415,11 +443,7 @@ jobs:
       - name: Verify archive secrets
         run: |
           missing=0
-          for name in \
-            TUSHARE_TOKEN \
-            OSS_ACCESS_KEY_ID \
-            OSS_ACCESS_KEY_SECRET \
-            OSS_BUCKET
+          for name in QUANT_KEY
           do
             if [ -z "${!name}" ]; then
               echo "::error title=Missing Actions secret::$name 未配置"
@@ -428,17 +452,39 @@ jobs:
           done
           exit "$missing"
 
-      - name: Archive latest completed market day
+      - name: Archive latest completed market day from public sources
+        id: public-archive
+        continue-on-error: true
         run: |
+          curl --fail --silent --show-error \
+            --retry 2 --retry-all-errors --max-time 590 \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -H "X-API-Key: $QUANT_KEY" \
+            -d '{"universeSize":1000,"workers":12}' \
+            https://quant-score-nlxgclpdbu.cn-hangzhou.fcapp.run/archive-market-day \
+            > market-archive-report.json
+
+      - name: Temporary Tushare fallback while token is available
+        if: steps.public-archive.outcome != 'success'
+        run: |
+          if [ -z "$TUSHARE_TOKEN" ]; then
+            echo "::error::公开行情归档失败，且Tushare临时令牌不可用"
+            exit 1
+          fi
           python archive_tushare_market_day.py \
             --universe-size 1000 \
             --max-per-min 120 \
             --report market-archive-report.json
 
-      - name: Archive historical sector membership
+      - name: Refresh sector membership while Tushare is available
+        continue-on-error: true
         run: |
-          python archive_tushare_sector_membership.py \
-            --publish
+          if [ -n "$TUSHARE_TOKEN" ]; then
+            python archive_tushare_sector_membership.py --publish
+          else
+            echo "Tushare token unavailable; using the existing OSS membership archive."
+          fi
 
       - name: Publish archive summary
         if: always()
@@ -502,7 +548,6 @@ jobs:
         run: |
           missing=0
           for name in \
-            TUSHARE_TOKEN \
             OSS_ACCESS_KEY_ID \
             OSS_ACCESS_KEY_SECRET \
             OSS_BUCKET
@@ -537,10 +582,15 @@ jobs:
         run: |
           python - <<'PY'
           import datetime as dt
+          import os
           import urllib.error
           from tushare_client import TushareClient
 
           state = "skip"
+          if not os.environ.get("TUSHARE_TOKEN"):
+              print("[preflight] Tushare token unavailable; keep current sector model")
+              open("sector_preflight.txt", "w").write(state)
+              raise SystemExit(0)
           try:
               end = dt.date.today()
               start = end - dt.timedelta(days=14)
