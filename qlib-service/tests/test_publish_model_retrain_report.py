@@ -89,9 +89,9 @@ class PublishModelRetrainReportTest(unittest.TestCase):
         }, env={**ENV, "RETRAIN_DIRECT_PUBLISHED": "true"})
         self.assertEqual(report["decision"], "updated")
         self.assertIn("不代表通过晋级", report["summary"])
-        self.assertEqual(report["details"]["metrics"][0]["challenger"], -0.213379)
+        self.assertEqual(report["details"]["metrics"][0]["challenger"], 0.336083)
         self.assertTrue(any(
-            value["label"] == "三种子集成 Top5 净R下界"
+            value["label"] == "当前组合 Top5 净R下置信界"
             and value["challenger"] == 0.104692
             for value in report["details"]["metrics"]
         ))

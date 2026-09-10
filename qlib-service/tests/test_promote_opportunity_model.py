@@ -82,6 +82,37 @@ class OpportunityPromotionTest(unittest.TestCase):
             for blocker in decision["blockers"]
         ))
 
+    def test_ensemble_uses_current_aggregate_and_keeps_negative_fold_blocker(self):
+        value = report(netRLowerBound=-0.5, mean_net_r_at_5=-0.2)
+        value["seedEnsemble"] = {
+            "aggregate": {
+                "top5MeanNetR": 0.33,
+                "top5LowerBound": 0.1,
+            },
+            "folds": [
+                {"meanNetRAt5": 0.6},
+                {"meanNetRAt5": 0.4},
+                {"meanNetRAt5": -0.05},
+            ],
+        }
+
+        decision = promotion_decision(value)
+
+        self.assertFalse(decision["eligible"])
+        self.assertEqual(decision["metrics"]["netRLowerBound"], 0.1)
+        self.assertEqual(
+            decision["metrics"]["challengerMeanNetRAt5"],
+            0.33,
+        )
+        self.assertFalse(any(
+            "下置信界未大于0" in blocker
+            for blocker in decision["blockers"]
+        ))
+        self.assertTrue(any(
+            "负收益独立窗口" in blocker
+            for blocker in decision["blockers"]
+        ))
+
 
 if __name__ == "__main__":
     unittest.main()

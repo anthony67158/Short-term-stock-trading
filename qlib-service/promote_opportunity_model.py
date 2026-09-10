@@ -35,6 +35,13 @@ def production_model_version(value):
 
 def promotion_decision(report, stability=None):
     blockers = []
+    ensemble = report.get("seedEnsemble") or {}
+    ensemble_aggregate = ensemble.get("aggregate") or {}
+    ensemble_folds = ensemble.get("folds") or []
+    has_ensemble_metrics = (
+        _number(ensemble_aggregate.get("top5MeanNetR")) is not None
+        and _number(ensemble_aggregate.get("top5LowerBound")) is not None
+    )
     if stability is not None:
         combination = stability.get("combination") or {}
         if combination.get("eligible") is not True:
@@ -52,11 +59,24 @@ def promotion_decision(report, stability=None):
     ranking = ((report.get("metrics") or {}).get("ranking") or {})
     challenger = ranking.get("challenger") or {}
     baseline = ranking.get("baseline") or {}
-    lower_bound = _number(challenger.get("netRLowerBound"))
-    challenger_net_r = _number(challenger.get("mean_net_r_at_5"))
+    lower_bound = _number(
+        ensemble_aggregate.get("top5LowerBound")
+        if has_ensemble_metrics
+        else challenger.get("netRLowerBound")
+    )
+    challenger_net_r = _number(
+        ensemble_aggregate.get("top5MeanNetR")
+        if has_ensemble_metrics
+        else challenger.get("mean_net_r_at_5")
+    )
     baseline_net_r = _number(baseline.get("mean_net_r_at_5"))
     if lower_bound is None or lower_bound <= 0:
         blockers.append("Top5费后净R下置信界未大于0")
+    if has_ensemble_metrics and any(
+        (_number(fold.get("meanNetRAt5")) or 0) <= 0
+        for fold in ensemble_folds
+    ):
+        blockers.append("三种子集成仍有负收益独立窗口")
     if challenger_net_r is None or baseline_net_r is None:
         blockers.append("Top5净R对照指标缺失")
     else:

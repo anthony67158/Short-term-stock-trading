@@ -15,6 +15,7 @@ const read = (path) => readFileSync(
 
 const today = read('src/components/TodayTab.jsx')
 const radar = read('src/components/OpportunityRadar.jsx')
+const adaptive = read('src/components/AdaptiveWorkbench.jsx')
 const content = read('src/components/OpportunityRadarContent.jsx')
 const intradayNav = read('src/components/OpportunityIntradayNav.jsx')
 const candidate = read('src/components/OpportunityCandidateRow.jsx')
@@ -112,6 +113,11 @@ test('机会雷达显示真实来源状态和局部失败', () => {
   assert.match(content, /stale/)
   assert.match(radar, /role="status"/)
   assert.match(radar, /aria-busy=/)
+})
+
+test('自适应作战台提示上一模型版本结果需要重新扫描', () => {
+  assert.match(adaptive, /modelVersionStale/)
+  assert.match(adaptive, /部分机会来自上一模型版本，请重新扫描/)
 })
 
 test('统一客户端使用聚合接口并保留独立来源刷新', () => {

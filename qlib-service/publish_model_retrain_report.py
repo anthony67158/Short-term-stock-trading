@@ -112,9 +112,21 @@ def opportunity_details(report, promotion, env):
         },
     ]
     metrics = [
-        metric_row("组合 Top5 费后净R", candidate.get("mean_net_r_at_5"),
-                   baseline.get("mean_net_r_at_5"), "r"),
-        metric_row("组合 Top5 净R下置信界", candidate.get("netRLowerBound"), unit="r"),
+        metric_row(
+            "当前组合 Top5 费后净R",
+            ensemble_aggregate.get("top5MeanNetR")
+            if ensemble_aggregate
+            else candidate.get("mean_net_r_at_5"),
+            baseline.get("mean_net_r_at_5"),
+            "r",
+        ),
+        metric_row(
+            "当前组合 Top5 净R下置信界",
+            ensemble_aggregate.get("top5LowerBound")
+            if ensemble_aggregate
+            else candidate.get("netRLowerBound"),
+            unit="r",
+        ),
         metric_row("动作价值 Top5 费后净R",
                    action_value.get("mean_net_r_at_5"), unit="r"),
         metric_row("CatBoost Top5 费后净R",
@@ -125,19 +137,6 @@ def opportunity_details(report, promotion, env):
         metric_row("Top5 正净R信号占比", candidate.get("precision_at_5"),
                    baseline.get("precision_at_5"), "percent"),
     ]
-    if ensemble_aggregate:
-        metrics.extend([
-            metric_row(
-                "三种子集成 Top5 费后净R",
-                ensemble_aggregate.get("top5MeanNetR"),
-                unit="r",
-            ),
-            metric_row(
-                "三种子集成 Top5 净R下界",
-                ensemble_aggregate.get("top5LowerBound"),
-                unit="r",
-            ),
-        ])
     if ensemble and ensemble_decision.get("eligible") is not True:
         blockers.append(
             text(ensemble_decision.get("reason"))
