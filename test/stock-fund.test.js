@@ -307,6 +307,20 @@ test('并发资金采集只读取一次OSS历史索引', async () => {
   assert.equal(second[0].mainNetYi, 2)
 })
 
+test('OSS历史索引缺失时也缓存空结果避免重复读取', async () => {
+  let reads = 0
+  const read = async () => {
+    reads += 1
+    return null
+  }
+  const now = Number.MAX_SAFE_INTEGER - 5_000
+
+  await readArchivedStockFundHistory('000001', { now, read })
+  await readArchivedStockFundHistory('600036', { now, read })
+
+  assert.equal(reads, 1)
+})
+
 test('资金快照比较识别主力由流入转流出与散户反向承接', () => {
   const change = compareStockFundSnapshots({
     mainNetYi: -0.4,

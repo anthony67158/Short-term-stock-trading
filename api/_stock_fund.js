@@ -11,6 +11,8 @@ const FUND_HISTORY_CACHE_MS = 5 * 60 * 1000;
 let archivedFundHistoryCache = null;
 let archivedFundHistoryExpiresAt = 0;
 let archivedFundHistoryFlight = null;
+let archivedFundHistoryLoaded = false;
+let archivedFundHistoryReader = null;
 
 const DEDICATED_HISTORY_HOSTS = [
   'https://push2his.eastmoney.com',
@@ -147,8 +149,15 @@ export async function readArchivedStockFundHistory(
     read = readJson,
   } = {},
 ) {
+  if (archivedFundHistoryReader !== read) {
+    archivedFundHistoryCache = null;
+    archivedFundHistoryExpiresAt = 0;
+    archivedFundHistoryFlight = null;
+    archivedFundHistoryLoaded = false;
+    archivedFundHistoryReader = read;
+  }
   if (
-    !archivedFundHistoryCache
+    !archivedFundHistoryLoaded
     || now >= archivedFundHistoryExpiresAt
   ) {
     archivedFundHistoryFlight ||= Promise.resolve()
@@ -161,6 +170,7 @@ export async function readArchivedStockFundHistory(
           && typeof payload.stocks === 'object'
         ) ? payload : null;
         archivedFundHistoryExpiresAt = now + FUND_HISTORY_CACHE_MS;
+        archivedFundHistoryLoaded = true;
       })
       .finally(() => {
         archivedFundHistoryFlight = null;
