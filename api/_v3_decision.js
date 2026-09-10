@@ -10,6 +10,7 @@ import { buildAdaptivePricePlans } from '../shared/adaptivePricePlans.js'
 import { buildMarketOpportunityContext } from '../shared/marketOpportunityContext.js'
 import { scoreOpportunityPlaybooks } from '../shared/opportunityPlaybooks.js'
 import { buildOpportunityShadowFeatures } from '../shared/opportunityShadowFeatures.js'
+import { buildOpportunityReviewFeatureInput } from '../shared/opportunityReviewFeatures.js'
 import { buildOpportunityScoreInput, unavailableOpportunityScore } from '../shared/opportunityScoreContract.js'
 import { buildV3Action } from '../shared/adaptiveAdvicePolicy.js'
 import { compileDecisionPlan, applyCompiledDecisionPlan } from '../shared/decisionPlan.js'
@@ -39,6 +40,27 @@ async function readMarket(req) {
   return response.json()
 }
 
+function beijingMinuteOfDay(value) {
+  const timestamp = Number(value)
+  if (!(timestamp > 0)) return null
+  const iso = new Date(timestamp + 8 * 60 * 60 * 1000).toISOString()
+  return Number(iso.slice(11, 13)) * 60 + Number(iso.slice(14, 16))
+}
+
+function trendMinuteOfDay(value) {
+  const match = String(value || '').match(/^(\d{1,2}):(\d{2})/)
+  return match ? Number(match[1]) * 60 + Number(match[2]) : null
+}
+
+function postTriggerRows(trends, triggeredAt) {
+  const minute = beijingMinuteOfDay(triggeredAt)
+  if (minute == null) return []
+  return trends.filter((item) => {
+    const current = trendMinuteOfDay(item?.time)
+    return current != null && current >= minute
+  }).slice(0, 12)
+}
+
 export async function evaluateV3Decision({
   code, book, quotes, detail, trends, fund, sector, market, now = Date.now(),
   score = (inputs) => fetchOpportunityScores(inputs, { timeoutMs: 8000 }),
@@ -48,6 +70,9 @@ export async function evaluateV3Decision({
   const quote = quoteMap[code]
   if (!(Number(quote?.price) > 0)) throw new Error('行情不可用，未发布新决策')
   const name = quote.name || code
+  const trendRows = Array.isArray(trends)
+    ? trends
+    : Array.isArray(trends?.trends) ? trends.trends : []
   const holding = (book.holding || []).filter((item) => item.code === code)
   const portfolio = computePortfolio(book.holding || [], quoteMap, book.account)
   const accountRisk = buildAccountRiskContext(book, quoteMap, now)
@@ -56,7 +81,13 @@ export async function evaluateV3Decision({
   const context = buildMarketOpportunityContext({ market: market || {} })
   const candidate = { code, name, quote, fund, sectorOpportunity: sector }
   const playbook = scoreOpportunityPlaybooks(candidate, context).selected
-  let plans = buildAdaptivePricePlans({ candidate, candles, trends, marketContext: context, now })
+  let plans = buildAdaptivePricePlans({
+    candidate,
+    candles,
+    trends: trendRows,
+    marketContext: context,
+    now,
+  })
   const holdPayload = holding.length ? buildHoldPayload(
     book.holding, code, name, portfolio, book.account, book.closed, null, quote, now,
   ) : { code, name, holdQty: 0 }
@@ -105,7 +136,11 @@ export async function evaluateV3Decision({
       .filter((plan) => plan.entryPlan.price > plan.exitPlan.hardStopPrice)
   }
   const shadowFeatures = buildOpportunityShadowFeatures({
-    quote, candles, trends, fund: fund || {}, sectorOpportunity: sector || {},
+    quote,
+    candles,
+    trends: trendRows,
+    fund: fund || {},
+    sectorOpportunity: sector || {},
   })
   // One request per route prevents stock-code keyed clients from mixing three prices.
   const evaluated = await Promise.all(plans.map(async (plan) => {
@@ -148,6 +183,22 @@ export async function evaluateV3Decision({
     }
   }))
   let advice = { ...buildV3Action({ payload, plans: evaluated, now }), fundNote: '' }
+  const reviewScoreInput = isTriggeredReviewEvent(reviewEvent)
+    ? buildOpportunityReviewFeatureInput({
+        code,
+        asOf: now,
+        triggerPrice:
+          reviewEvent.threshold
+          ?? reviewEvent.price,
+        direction:
+          reviewEvent.direction
+          ?? reviewEvent.plannedAction,
+        rows: postTriggerRows(trendRows, reviewEvent.at),
+        initialScore:
+          advice.selectedV3Plan?.opportunityScore,
+      })
+    : null
+  if (reviewScoreInput) payload.reviewScoreInput = reviewScoreInput
   if (reviewEvent) {
     advice.pullbackWatchPrice = null
     advice.breakoutWatchPrice = null
@@ -212,7 +263,12 @@ export async function evaluateV3Decision({
   return {
     ok: true, mode, result: advice, updatedAt: now,
     model: advice.decisionSource.modelVersion || 'V3_MODEL_UNAVAILABLE',
-    meta: { todayQuote: payload.todayQuote, decisionSource: advice.decisionSource, llmCalls: 0 },
+    meta: {
+      todayQuote: payload.todayQuote,
+      decisionSource: advice.decisionSource,
+      reviewScoreInput,
+      llmCalls: 0,
+    },
     news: [], truncated: false,
   }
 }

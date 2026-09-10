@@ -130,6 +130,39 @@ test('V3完整编译保留同一路径价格与概率，保存恢复不依赖LLM
   assert.equal(adviceCompleteness(restored.advice, result.mode).complete, true)
 })
 
+test('触发后路径特征只在复核事件中生成', async () => {
+  const trends = {
+    preClose: 9.8,
+    trends: [
+      { time: '10:09', price: 9.98, avg: 10, volume: 100 },
+      { time: '10:10', price: 10, avg: 10, volume: 120 },
+      { time: '10:11', price: 10.08, avg: 10.01, volume: 180 },
+      { time: '10:12', price: 10.12, avg: 10.03, volume: 200 },
+    ],
+  }
+  const initial = await evaluateV3Decision(scenario({ trends }))
+  const review = await evaluateV3Decision(scenario({
+    trends,
+    reviewEvent: {
+      kind: 'price-review',
+      at: now,
+      threshold: 10,
+      direction: 'gte',
+      plannedAction: 'BUY',
+    },
+  }))
+
+  assert.equal(initial.meta.reviewScoreInput, null)
+  assert.equal(
+    review.meta.reviewScoreInput.schemaVersion,
+    'opportunity-review-feature.v1',
+  )
+  assert.equal(
+    review.meta.reviewScoreInput.factors.direction_BREAKOUT,
+    1,
+  )
+})
+
 test('预留买入现金、单票预留和模型尾损均约束V3手数', async () => {
   const input = scenario()
   const normal = await evaluateV3Decision(input)

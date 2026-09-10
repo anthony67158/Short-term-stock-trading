@@ -7,6 +7,9 @@ import {
 import {
   buildOpportunityScoreInput,
 } from '../../shared/opportunityScoreContract.js'
+import {
+  buildOpportunityReviewFeatureInput,
+} from '../../shared/opportunityReviewFeatures.js'
 
 function routeKey(decision, index) {
   return String(
@@ -95,6 +98,51 @@ function contextOf(event, batch, scoreInput) {
   }
 }
 
+function barTimestamp(value) {
+  const text = String(
+    value?.tradeTime
+    || value?.timestamp
+    || '',
+  ).trim()
+  if (!text) return null
+  const normalized = text.includes('T')
+    ? text
+    : text.replace(' ', 'T')
+  const timestamp = Date.parse(
+    /(?:Z|[+-]\d{2}:\d{2})$/.test(normalized)
+      ? normalized
+      : `${normalized}+08:00`,
+  )
+  return Number.isFinite(timestamp) ? timestamp : null
+}
+
+function reviewFeatureInput(event, outcome, bars) {
+  const triggeredAt = Number(outcome?.trigger?.at)
+  if (!(triggeredAt > 0)) return null
+  const rows = (Array.isArray(bars) ? bars : [])
+    .map((bar) => ({
+      ...bar,
+      at: barTimestamp(bar),
+    }))
+    .filter((bar) =>
+      bar.at != null
+      && bar.at >= triggeredAt
+      && bar.at <= triggeredAt + 10 * 60 * 1000
+    )
+    .sort((left, right) => left.at - right.at)
+    .slice(0, 2)
+  return buildOpportunityReviewFeatureInput({
+    code: event.code,
+    asOf: rows.at(-1)?.at,
+    triggerPrice: outcome.trigger?.price,
+    direction:
+      event.decision?.route
+      || event.decision?.priceType,
+    rows,
+    initialScore: event.opportunityScore,
+  })
+}
+
 export function settleHistoricalEvent({
   batch,
   event,
@@ -109,6 +157,11 @@ export function settleHistoricalEvent({
   })
   return {
     ...outcome,
+    reviewScoreInput: reviewFeatureInput(
+      event,
+      outcome,
+      bars,
+    ),
     runId: String(batch.runId || ''),
     tradeDate: String(batch.tradeDate || ''),
     mode: String(batch.mode || '').toUpperCase(),

@@ -63,6 +63,7 @@ jobs:
             test_build_sector_dataset.py \
             test_sector_app.py \
             tests/test_opportunity_contract.py \
+            tests/test_opportunity_review_dataset.py \
             tests/test_opportunity_dataset.py \
             tests/test_opportunity_evaluation.py \
             tests/test_train_opportunity_score.py \

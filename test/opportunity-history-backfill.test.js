@@ -169,6 +169,11 @@ test('历史结算复用生产费用和T加一结果合同', () => {
   assert.equal(outcome.route, 'IMMEDIATE')
   assert.equal(outcome.context.source, 'STOCKDB_CAUSAL_REPLAY')
   assert.equal(outcome.context.historicalBackfill, true)
+  assert.equal(
+    outcome.reviewScoreInput.schemaVersion,
+    'opportunity-review-feature.v1',
+  )
+  assert.equal(outcome.reviewScoreInput.factors.observationBars, 2)
 })
 
 test('历史样本合并按决策ID去重并保留最新值', () => {
