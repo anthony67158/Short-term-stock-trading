@@ -22,12 +22,14 @@ test('Transformer V2与V2.1运行时入口已完全下线', () => {
   const app = read('src/App.jsx')
   const accountMenu = read('src/components/AuthGate.jsx')
   const deployment = read('s.yaml')
+  const runtimePackage = read('fc-runtime/package.json')
   assert.doesNotMatch(app, /QuantModelControl|quantModelStore/)
   assert.doesNotMatch(accountMenu, /量化模型配置|quantModelStore/)
   assert.doesNotMatch(
     deployment,
     /V2_QUANT_URL|V2_EAS_TOKEN|V2_API_KEY|v2-accuracy-timer/,
   )
+  assert.doesNotMatch(runtimePackage, /@alicloud\/eas20210701/)
 })
 
 test('每日训练继续保留V3三种子集成与直接发布', () => {

@@ -11,7 +11,6 @@
     "harness:shadow": "node harness/run.mjs --suite shadow --online --no-baseline"
   },
   "dependencies": {
-    "@alicloud/eas20210701": "^7.9.0",
     "@alicloud/fc20230330": "^4.7.9",
     "@alicloud/openapi-core": "^1.0.8",
     "ali-oss": "^6.23.0",
