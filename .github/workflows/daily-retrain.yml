@@ -66,6 +66,7 @@ jobs:
             tests/test_opportunity_review_dataset.py \
             tests/test_opportunity_dataset.py \
             tests/test_opportunity_evaluation.py \
+            tests/test_poc_v3_seed_ensemble.py \
             tests/test_train_opportunity_score.py \
             tests/test_opportunity_model.py \
             tests/test_opportunity_app.py \
@@ -312,12 +313,21 @@ jobs:
             opportunity-model/seed-7/report.json \
             opportunity-model/seed-2026/report.json \
             --output-dir opportunity-model/stability
+          python poc_v3_seed_ensemble.py \
+            --input opportunity-outcomes.json \
+            --output-dir opportunity-model/seed-ensemble \
+            --seeds 42,7,2026 \
+            --folds 3 \
+            --estimators 180 \
+            --threads 4
 
       - name: Train and evaluate opportunity challenger
         run: |
-          python train_opportunity_score.py \
+          python train_opportunity_seed_ensemble.py \
             --dataset opportunity-dataset.npz \
-            --output opportunity-model
+            --output opportunity-model \
+            --seeds 42,7,2026 \
+            --poc-report opportunity-model/seed-ensemble/report.json
 
       - name: Publish best available combination as the DIRECT baseline
         id: opportunity-baseline

@@ -13,7 +13,7 @@ const exporter = read('scripts/export-opportunity-outcomes.mjs')
 test('V3每日重训直接发布模型，晋级保留为后置诊断', () => {
   assert.match(workflow, /opportunity-retrain:/)
   assert.match(workflow, /collect_opportunity_outcomes\.py/)
-  assert.match(workflow, /train_opportunity_score\.py/)
+  assert.match(workflow, /train_opportunity_seed_ensemble\.py/)
   assert.match(
     workflow,
     /--directory opportunity-model\/shadow[\s\S]*?--prefix opportunitymodel\//,
@@ -42,7 +42,9 @@ test('直接发布不等待晋级结果且V3样本允许导出', () => {
 test('每日重训把新成熟结果压实进版本化历史基线', () => {
   const collectAt = workflow.indexOf('python collect_opportunity_outcomes.py')
   const compactAt = workflow.indexOf('python publish_opportunity_history.py')
-  const trainAt = workflow.indexOf('python train_opportunity_score.py')
+  const trainAt = workflow.indexOf(
+    'python train_opportunity_seed_ensemble.py',
+  )
 
   assert.ok(collectAt >= 0)
   assert.ok(compactAt > collectAt)

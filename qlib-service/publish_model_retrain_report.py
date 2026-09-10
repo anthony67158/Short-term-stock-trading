@@ -65,6 +65,9 @@ def opportunity_details(report, promotion, env):
     baseline = ranking.get("baseline") or {}
     quantile = (report.get("metrics") or {}).get("quantile10") or {}
     walk = report.get("walkForward") or {}
+    ensemble = report.get("seedEnsemble") or {}
+    ensemble_aggregate = ensemble.get("aggregate") or {}
+    ensemble_decision = ensemble.get("decision") or {}
     state = text(report.get("state"))
     eligible = promotion.get("eligible") is True
     published = eligible and env.get("RETRAIN_PUBLISHED") == "true"
@@ -99,7 +102,14 @@ def opportunity_details(report, promotion, env):
             f"/{display(walk.get('folds'))} 窗通过"
         )},
         {"label": "候选版本", "value": text(report.get("modelVersion")) or "未生成"},
-        {"label": "模型组合", "value": "LightGBM 动作价值 + CatBoost 排序"},
+        {
+            "label": "模型组合",
+            "value": (
+                "三种子 LightGBM 动作价值 + CatBoost 排序集成"
+                if ensemble
+                else "LightGBM 动作价值 + CatBoost 排序"
+            ),
+        },
     ]
     metrics = [
         metric_row("组合 Top5 费后净R", candidate.get("mean_net_r_at_5"),
@@ -115,6 +125,24 @@ def opportunity_details(report, promotion, env):
         metric_row("Top5 正净R信号占比", candidate.get("precision_at_5"),
                    baseline.get("precision_at_5"), "percent"),
     ]
+    if ensemble_aggregate:
+        metrics.extend([
+            metric_row(
+                "三种子集成 Top5 费后净R",
+                ensemble_aggregate.get("top5MeanNetR"),
+                unit="r",
+            ),
+            metric_row(
+                "三种子集成 Top5 净R下界",
+                ensemble_aggregate.get("top5LowerBound"),
+                unit="r",
+            ),
+        ])
+    if ensemble and ensemble_decision.get("eligible") is not True:
+        blockers.append(
+            text(ensemble_decision.get("reason"))
+            or "三种子集成仍存在未通过的独立窗口"
+        )
     for head, label, key in (
         ("pFill", "成交概率校准误差", "brier"),
         ("pWinGivenFill", "盈利概率校准误差", "brier"),

@@ -25,7 +25,7 @@ test('机会训练先合并并压实增量样本再训练', () => {
     ?.split('\n  market-data-archive:')[0] || ''
   const collect = job.indexOf('collect_opportunity_outcomes.py')
   const compact = job.indexOf('publish_opportunity_history.py')
-  const train = job.indexOf('train_opportunity_score.py')
+  const train = job.indexOf('train_opportunity_seed_ensemble.py')
 
   assert.ok(collect >= 0)
   assert.ok(compact > collect)

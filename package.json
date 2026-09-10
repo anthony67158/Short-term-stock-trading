@@ -33,7 +33,8 @@
     "opportunity:archive-tushare-daily": "python3 qlib-service/archive_tushare_market_day.py",
     "opportunity:migrate-v5": "node --max-old-space-size=6144 scripts/migrate-opportunity-history-v5.mjs",
     "opportunity:dataset": "python3 qlib-service/opportunity_dataset.py --input qlib-service/opportunity-outcomes.json --output qlib-service/opportunity-dataset.npz",
-    "opportunity:train": "python3 qlib-service/train_opportunity_score.py --dataset qlib-service/opportunity-dataset.npz --output qlib-service/opportunity-model",
+    "opportunity:ensemble-poc": "python3 qlib-service/poc_v3_seed_ensemble.py --input qlib-service/opportunity-outcomes.json --output-dir qlib-service/opportunity-model/seed-ensemble",
+    "opportunity:train": "python3 qlib-service/train_opportunity_seed_ensemble.py --dataset qlib-service/opportunity-dataset.npz --output qlib-service/opportunity-model --poc-report qlib-service/opportunity-model/seed-ensemble/report.json",
     "opportunity:promote": "python3 qlib-service/promote_opportunity_model.py --source qlib-service/opportunity-model/shadow --report qlib-service/opportunity-model/opportunity_training_report.json --output qlib-service/opportunity-model/production",
     "backtest": "node backtest/run.mjs"
   },

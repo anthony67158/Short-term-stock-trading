@@ -73,13 +73,30 @@ class PublishModelRetrainReportTest(unittest.TestCase):
         self.assertEqual(cancelled["decision"], "cancelled")
 
     def test_direct_publication_is_reported_without_claiming_promotion(self):
-        _, report = build_report("opportunity", sample(), {
+        source = sample()
+        source["seedEnsemble"] = {
+            "aggregate": {
+                "top5MeanNetR": 0.336083,
+                "top5LowerBound": 0.104692,
+            },
+            "decision": {
+                "eligible": False,
+                "reason": "最新独立窗口仍为负",
+            },
+        }
+        _, report = build_report("opportunity", source, {
             "eligible": False, "blockers": ["净R下界未大于0"],
         }, env={**ENV, "RETRAIN_DIRECT_PUBLISHED": "true"})
         self.assertEqual(report["decision"], "updated")
         self.assertIn("不代表通过晋级", report["summary"])
         self.assertEqual(report["details"]["metrics"][0]["challenger"], -0.213379)
+        self.assertTrue(any(
+            value["label"] == "三种子集成 Top5 净R下界"
+            and value["challenger"] == 0.104692
+            for value in report["details"]["metrics"]
+        ))
         self.assertIn("净R下界未大于0", report["details"]["blockers"])
+        self.assertIn("最新独立窗口仍为负", report["details"]["blockers"])
 
     def test_missing_report_and_not_ready_are_explicit(self):
         _, report = build_report("opportunity", env=ENV)
