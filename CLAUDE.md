@@ -31,6 +31,12 @@
 原 `shadowOnly`、`productionEligible` 保留为真实评测记录，不能伪造。
 每日训练先发布当前有效产物，晋级只作后置诊断；保留真实错误、正期望与账户风控。
 
+V3 训练数据分两层保存在 OSS：成熟标签使用
+`opportunitymodel/training-data/` 并在每日训练前合并新增真实结果后压实；
+可复算的日线、资金流和因果股票池 5 分钟线使用
+`opportunitymodel/market-data/v1/` 按交易日不可变归档并校验 SHA-256。
+原始行情不得直接充当标签，Tushare Token 只能由环境变量或 Actions Secret 注入。
+
 ## 铁律：前端改动必须双部署
 
 **只要改动会影响前端 `dist/`（例如 `src/**`、`public/**`、`index.html`、`tokens.css`），
