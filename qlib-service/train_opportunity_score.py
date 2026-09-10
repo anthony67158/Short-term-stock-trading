@@ -175,7 +175,13 @@ def _classifier_probabilities(model, X):
     return np.clip(values[:, 1], 1e-8, 1 - 1e-8)
 
 
-def _fit_lgb_classifier(X, labels, sample_weight=None):
+def _fit_lgb_classifier(
+    X,
+    labels,
+    sample_weight=None,
+    *,
+    random_state=42,
+):
     import lightgbm as lgb
 
     model = lgb.LGBMClassifier(
@@ -190,7 +196,7 @@ def _fit_lgb_classifier(X, labels, sample_weight=None):
         colsample_bytree=0.85,
         reg_alpha=0.3,
         reg_lambda=1.0,
-        random_state=42,
+        random_state=int(random_state),
         n_jobs=-1,
         verbosity=-1,
     )
@@ -203,7 +209,13 @@ def _fit_lgb_classifier(X, labels, sample_weight=None):
     return model
 
 
-def _fit_lgb_regressor(X, labels, sample_weight=None):
+def _fit_lgb_regressor(
+    X,
+    labels,
+    sample_weight=None,
+    *,
+    random_state=42,
+):
     import lightgbm as lgb
 
     model = lgb.LGBMRegressor(
@@ -219,7 +231,7 @@ def _fit_lgb_regressor(X, labels, sample_weight=None):
         colsample_bytree=0.85,
         reg_alpha=0.3,
         reg_lambda=1.0,
-        random_state=42,
+        random_state=int(random_state),
         n_jobs=-1,
         verbosity=-1,
     )
@@ -232,7 +244,13 @@ def _fit_lgb_regressor(X, labels, sample_weight=None):
     return model
 
 
-def _fit_lgb_quantile_regressor(X, labels, sample_weight=None):
+def _fit_lgb_quantile_regressor(
+    X,
+    labels,
+    sample_weight=None,
+    *,
+    random_state=42,
+):
     import lightgbm as lgb
 
     model = lgb.LGBMRegressor(
@@ -248,7 +266,7 @@ def _fit_lgb_quantile_regressor(X, labels, sample_weight=None):
         colsample_bytree=0.85,
         reg_alpha=0.3,
         reg_lambda=1.0,
-        random_state=42,
+        random_state=int(random_state),
         n_jobs=-1,
         verbosity=-1,
     )
@@ -507,7 +525,7 @@ def _apply_rank_value_calibrator(scores, artifact):
     return np.interp(values, x, y)
 
 
-def _fit_catboost_ranker(data, train_index):
+def _fit_catboost_ranker(data, train_index, *, random_state=42):
     from catboost import CatBoostRanker
 
     selected = np.asarray(train_index, dtype=np.int64)
@@ -525,7 +543,7 @@ def _fit_catboost_ranker(data, train_index):
         iterations=240,
         learning_rate=0.04,
         depth=6,
-        random_seed=42,
+        random_seed=int(random_state),
         thread_count=-1,
         verbose=False,
         allow_writing_files=False,
@@ -657,15 +675,14 @@ def _select_rank_blend_weight(
             + weight * rank_value
         )
         coverage = float(np.mean(expected > 0))
-        floor = float(np.min(ranker_scores) - 1.0)
-        selection = np.where(expected > 0, ranker_scores, floor)
         metrics = ranking_metrics(
             actual > 0,
             actual,
-            selection,
+            ranker_scores,
             data["dates"][calibration_index],
             top_k=5,
             group_ids=data["codes"][calibration_index],
+            eligible_mask=expected > 0,
         )
         candidates.append({
             "weight": weight,
@@ -1048,19 +1065,16 @@ def _walk_forward_report(data, *, n_splits=3, purge_dates=5):
                 data["dates"][validation],
                 top_k=5,
                 group_ids=data["codes"][validation],
+                eligible_mask=validation_action_value > 0,
             )
-            score_floor = float(np.min(ranker["scores"]) - 1.0)
             combination_ranking = ranking_metrics(
                 actual_net_r > 0,
                 actual_net_r,
-                np.where(
-                    validation_net_r > 0,
-                    ranker["scores"],
-                    score_floor,
-                ),
+                ranker["scores"],
                 data["dates"][validation],
                 top_k=5,
                 group_ids=data["codes"][validation],
+                eligible_mask=validation_net_r > 0,
             )
             filled_mask = np.isfinite(data["y_net_r"][validation])
             actual_filled = data["y_net_r"][validation][filled_mask]
@@ -1072,19 +1086,6 @@ def _walk_forward_report(data, *, n_splits=3, purge_dates=5):
             value_baseline = _constant_regression_metrics(
                 data["y_net_r"][win_train],
                 actual_filled,
-            )
-            combined_scores = np.where(
-                validation_net_r > 0,
-                ranker["scores"],
-                float(np.min(ranker["scores"]) - 1.0),
-            )
-            combined_ranking = ranking_metrics(
-                actual_net_r > 0,
-                actual_net_r,
-                combined_scores,
-                data["dates"][validation],
-                top_k=5,
-                group_ids=data["codes"][validation],
             )
             formula_score_index = FEATURE_NAMES.index("formulaScore")
             ranking_baseline = ranking_metrics(
@@ -1365,6 +1366,7 @@ def train_opportunity_score(
         data["dates"][holdout_index],
         top_k=5,
         group_ids=data["codes"][holdout_index],
+        eligible_mask=holdout_net_r_all > 0,
     )
     challenger_top3 = ranking_metrics(
         actual_net_r > 0,
@@ -1406,26 +1408,23 @@ def train_opportunity_score(
         samples=2000,
         random_state=42,
     )
-    combined_scores = np.where(
-        holdout_net_r_all > 0,
-        ranker["scores"],
-        float(np.min(ranker["scores"]) - 1.0),
-    )
     combined_ranking = ranking_metrics(
         actual_net_r > 0,
         actual_net_r,
-        combined_scores,
+        ranker["scores"],
         data["dates"][holdout_index],
         top_k=5,
         group_ids=data["codes"][holdout_index],
+        eligible_mask=holdout_net_r_all > 0,
     )
     combined_top3 = ranking_metrics(
         actual_net_r > 0,
         actual_net_r,
-        combined_scores,
+        ranker["scores"],
         data["dates"][holdout_index],
         top_k=3,
         group_ids=data["codes"][holdout_index],
+        eligible_mask=holdout_net_r_all > 0,
     )
     combined_ranking.update({
         key: value

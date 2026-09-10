@@ -158,6 +158,7 @@ def ranking_metrics(
     *,
     top_k=5,
     group_ids=None,
+    eligible_mask=None,
 ):
     positive = np.asarray(positive_labels, dtype=bool)
     relevance = np.asarray(relevance, dtype=np.float64)
@@ -168,12 +169,18 @@ def ranking_metrics(
         if group_ids is not None
         else np.arange(len(dates)).astype(str)
     )
+    eligible = (
+        np.ones(len(dates), dtype=bool)
+        if eligible_mask is None
+        else np.asarray(eligible_mask, dtype=bool)
+    )
     if not (
         positive.shape
         == relevance.shape
         == scores.shape
         == dates.shape
         == groups.shape
+        == eligible.shape
     ) or positive.ndim != 1:
         raise ValueError("排序评测输入维度不一致")
     if not np.isfinite(relevance).all() or not np.isfinite(scores).all():
@@ -182,11 +189,18 @@ def ranking_metrics(
     ndcgs = []
     net_returns = []
     daily_net_r = {}
+    selected_total = 0
+    active_days = 0
     k = max(1, int(top_k))
     for date in sorted(set(dates)):
-        selected = np.flatnonzero(dates == date)
+        selected = np.flatnonzero((dates == date) & eligible)
         if not len(selected):
+            precisions.append(0.0)
+            ndcgs.append(0.0)
+            daily_net_r[date] = 0.0
+            net_returns.append(0.0)
             continue
+        active_days += 1
         ranked = selected[
             np.argsort(-scores[selected], kind="stable")
         ]
@@ -201,6 +215,7 @@ def ranking_metrics(
             if len(order) >= k:
                 break
         order = np.asarray(order, dtype=np.int64)
+        selected_total += len(order)
         ideal_by_group = {}
         for index in selected:
             group = groups[index]
@@ -239,6 +254,8 @@ def ranking_metrics(
             if net_returns else None
         ),
         "daily_net_r": daily_net_r,
+        "selected": int(selected_total),
+        "active_days": int(active_days),
     }
 
 

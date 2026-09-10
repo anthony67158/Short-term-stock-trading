@@ -312,7 +312,14 @@ def constant_probability_metrics(train_labels, validation_labels):
     return binary_metrics(validation_labels, values)
 
 
-def _ranking(actual, scores, dataset, validation):
+def _ranking(
+    actual,
+    scores,
+    dataset,
+    validation,
+    *,
+    eligible_mask=None,
+):
     output = {}
     for top_k in (3, 5):
         metrics = ranking_metrics(
@@ -322,6 +329,7 @@ def _ranking(actual, scores, dataset, validation):
             dataset["dates"][validation],
             top_k=top_k,
             group_ids=dataset["codes"][validation],
+            eligible_mask=eligible_mask,
         )
         output[f"top{top_k}"] = {
             **metrics,
@@ -605,6 +613,7 @@ def run_family_fold(family, dataset, fold):
                 utility,
                 dataset,
                 validation,
+                eligible_mask=expected_net_r > 0,
             ),
             "ranker": _ranking(
                 actual_all,
@@ -768,16 +777,12 @@ def combine_action_value_and_ranker(dataset, lightgbm_folds, catboost_folds):
                 (1 - weight) * calibration_action
                 + weight * calibration_rank
             )
-            floor = float(np.min(calibration_rank_score) - 1.0)
             metrics = _ranking(
                 calibration_actual,
-                np.where(
-                    expected > 0,
-                    calibration_rank_score,
-                    floor,
-                ),
+                calibration_rank_score,
                 dataset,
                 calibration,
+                eligible_mask=expected > 0,
             )
             blend_trials.append({
                 "weight": weight,
@@ -816,21 +821,16 @@ def combine_action_value_and_ranker(dataset, lightgbm_folds, catboost_folds):
             ranking["rankerScore"],
             dtype=np.float64,
         )
-        score_floor = float(np.min(ranker_score) - 1.0)
-        combined_score = np.where(
-            expected_net_r > 0,
-            ranker_score,
-            score_floor,
-        )
         actual = np.nan_to_num(
             dataset["y_net_r"][validation],
             nan=0.0,
         )
         metrics = _ranking(
             actual,
-            combined_score,
+            ranker_score,
             dataset,
             validation,
+            eligible_mask=expected_net_r > 0,
         )
         daily.update(metrics["top5"]["daily_net_r"])
         folds.append({
