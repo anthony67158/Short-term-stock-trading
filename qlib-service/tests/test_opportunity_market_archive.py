@@ -20,6 +20,7 @@ from opportunity_market_archive import (  # noqa: E402
     load_market_day,
     market_close_ms,
     publish_market_days,
+    refresh_recent_fund_history,
 )
 from publish_tushare_market_history import (  # noqa: E402
     iter_local_market_artifacts,
@@ -189,6 +190,9 @@ class OpportunityMarketArchiveTest(unittest.TestCase):
         publish_market_days(bucket, [artifact("20260909")], activated_at=3000)
         objects = [key for key in bucket.values if key.endswith(".json.gz")]
         self.assertEqual(len(objects), 2)
+        refreshed = refresh_recent_fund_history(bucket, generated_at=4000)
+        self.assertEqual(refreshed["generatedAt"], 4000)
+        self.assertEqual(refreshed["dates"], ["20260909", "20260910"])
 
     def test_tampered_shard_fails_closed(self):
         bucket = FakeBucket()

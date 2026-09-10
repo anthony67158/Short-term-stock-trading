@@ -323,6 +323,19 @@ def publish_recent_fund_history(bucket, manifest, *, generated_at=None):
     return payload
 
 
+def refresh_recent_fund_history(bucket, *, generated_at=None):
+    manifest = _json(bucket, MANIFEST_KEY)
+    if manifest is None:
+        raise ValueError("市场数据manifest不存在")
+    if manifest.get("schemaVersion") != MANIFEST_SCHEMA_VERSION:
+        raise ValueError("市场数据manifest版本无效")
+    return publish_recent_fund_history(
+        bucket,
+        manifest,
+        generated_at=generated_at,
+    )
+
+
 def publish_market_days(bucket, artifacts, *, activated_at=None):
     current = _json(bucket, MANIFEST_KEY)
     if current is not None and current.get("schemaVersion") != MANIFEST_SCHEMA_VERSION:

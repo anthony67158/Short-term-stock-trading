@@ -22,6 +22,7 @@ V3 保留两类相互独立的数据：
 opportunitymodel/market-data/v1/
   manifest.json
   dates/YYYYMMDD-<sha256前16位>.json.gz
+  fund-history/latest.json
 ```
 
 分片内容：
@@ -35,6 +36,10 @@ opportunitymodel/market-data/v1/
 日对象按内容摘要命名，并用 `x-oss-forbid-overwrite` 创建。`manifest.json`
 记录完整 SHA-256、大小、日期范围和累计分钟行数。读取时必须校验摘要。
 OSS Bucket 必须保持私有；归档不包含账号账本、用户昵称、Token 或 API Key。
+
+`fund-history/latest.json` 是最近 5 个归档交易日的轻量资金索引，按股票代码
+保存主力、小单和主力净占比。线上 V3 在东财历史资金接口不可用时读取该索引，
+再以当天实时资金覆盖同日值；它只补证据，不改变原始归档和训练标签。
 
 ## 每日增量
 

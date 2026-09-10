@@ -487,6 +487,9 @@ jobs:
             --max-per-min 120 \
             --report market-archive-report.json
 
+      - name: Refresh online five-day fund history
+        run: python publish_recent_fund_history.py
+
       - name: Refresh sector membership while Tushare is available
         continue-on-error: true
         run: |
