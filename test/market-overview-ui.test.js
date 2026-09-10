@@ -73,3 +73,18 @@ test('大盘模块桌面双栏并在移动端收敛为单列', () => {
     /\.market-funds-metrics\s*{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/s,
   )
 })
+
+test('海外指数价格和涨跌幅分行展示且不能相互覆盖', () => {
+  assert.match(
+    styles,
+    /\.market-external-quote\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s,
+  )
+  assert.match(
+    styles,
+    /\.market-external-quote > strong,[\s\S]*?\.market-external-quote > b\s*{[^}]*grid-column:\s*1/s,
+  )
+  assert.match(
+    styles,
+    /\.market-external-quote > b\s*{[^}]*justify-self:\s*start/s,
+  )
+})

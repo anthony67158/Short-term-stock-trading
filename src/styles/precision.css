@@ -2806,9 +2806,10 @@ textarea:focus {
 
 .market-external-quote {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--space-3xs) var(--space-xs);
-  min-height: 64px;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: center;
+  gap: var(--space-3xs);
+  min-height: 76px;
   padding: var(--space-xs);
   border: 1px solid var(--color-rule-2);
   border-radius: var(--radius-input);
@@ -2826,14 +2827,16 @@ textarea:focus {
 
 .market-external-quote > strong,
 .market-external-quote > b {
+  grid-column: 1;
   align-self: end;
+  width: 100%;
   font-family: var(--font-mono);
   font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
 }
 
 .market-external-quote > b {
-  justify-self: end;
+  justify-self: start;
 }
 
 .senti-gauge {

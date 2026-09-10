@@ -392,6 +392,33 @@ try {
           element.querySelectorAll(
             '.market-funds-metrics > div',
           ).length,
+        externalQuotes: [
+          ...element.querySelectorAll('.market-external-quote'),
+        ].map((quote) => {
+          const bounds = quote.getBoundingClientRect()
+          const price = quote.querySelector('strong')
+            ?.getBoundingClientRect()
+          const change = quote.querySelector('b')
+            ?.getBoundingClientRect()
+          const overlap = price && change
+            ? Math.min(price.right, change.right)
+                - Math.max(price.left, change.left) > 0
+              && Math.min(price.bottom, change.bottom)
+                - Math.max(price.top, change.top) > 0
+            : false
+          return {
+            label: quote.querySelector('span')?.textContent,
+            overlap,
+            contained: [...quote.children].every((child) => {
+              const childBounds = child.getBoundingClientRect()
+              return childBounds.left >= bounds.left - 1
+                && childBounds.right <= bounds.right + 1
+                && childBounds.top >= bounds.top - 1
+                && childBounds.bottom <= bounds.bottom + 1
+                && child.scrollWidth <= child.clientWidth + 1
+            }),
+          }
+        }),
       }
     })
     assert.ok(
@@ -410,6 +437,13 @@ try {
     assert.match(marketGeometry.marketFundsText, /流动性变化/)
     assert.match(marketGeometry.marketFundsText, /增加/)
     assert.match(marketGeometry.marketFundsText, /较5日均量/)
+    assert.equal(
+      marketGeometry.externalQuotes.every(
+        (quote) => !quote.overlap && quote.contained,
+      ),
+      true,
+      JSON.stringify({ width, quotes: marketGeometry.externalQuotes }),
+    )
     assert.ok(
       marketGeometry.bottom <= marketGeometry.conceptTop + 1,
       JSON.stringify({ width, marketGeometry }),
