@@ -153,16 +153,16 @@ export default async function handler(req, res) {
 
       if (action === 'delete') {
         const id = String(body.id || '').trim();
-        if (!id) return ok(res, { ok: false, error: '缺少 id' });
-        try { await del(id); } catch { /* ignore */ }
+        if (!id.startsWith(PREFIX) || id.includes('..') || !id.endsWith('.json')) {
+          return ok(res, { ok: false, error: '无效的汇报记录' });
+        }
+        await del(id);
         return ok(res, { ok: true });
       }
 
       if (action === 'clear') {
-        try {
-          const { blobs } = await list({ prefix: PREFIX, limit: 500 });
-          for (const b of (blobs || [])) { try { await del(b.url); } catch { /* ignore */ } }
-        } catch { /* ignore */ }
+        const { blobs } = await list({ prefix: PREFIX, limit: 10000 });
+        for (const b of (blobs || [])) await del(b.url);
         return ok(res, { ok: true });
       }
 
