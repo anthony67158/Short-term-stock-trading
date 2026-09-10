@@ -50,12 +50,21 @@ def build_training_status(report, promotion=None, active_model=None):
         (active_model or {}).get("productionEligible")
     )
     direct = (active_model or {}).get("usagePolicy") == "DIRECT"
-    promotion_blockers = list(
-        (promotion or {}).get("blockers")
-        or report.get("productionBlockers")
-        or report.get("shadowBlockers")
-        or []
-    )
+    ensemble = report.get("seedEnsemble") or {}
+    ensemble_decision = ensemble.get("decision") or {}
+    if direct and ensemble:
+        reason = str(ensemble_decision.get("reason") or "").strip()
+        promotion_blockers = (
+            [reason] if ensemble_decision.get("eligible") is not True and reason
+            else []
+        )
+    else:
+        promotion_blockers = list(
+            (promotion or {}).get("blockers")
+            or report.get("productionBlockers")
+            or report.get("shadowBlockers")
+            or []
+        )
     return {
         "schemaVersion": STATUS_SCHEMA_VERSION,
         "generatedAt": int(time.time() * 1000),

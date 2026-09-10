@@ -84,6 +84,36 @@ class OpportunityTrainingStatusTest(unittest.TestCase):
         self.assertFalse(value["productionEligible"])
         self.assertEqual(value["usagePolicy"], "DIRECT")
 
+    def test_direct_ensemble_only_reports_current_combination_risk(self):
+        value = build_training_status(
+            {
+                "state": "REJECTED",
+                "seedEnsemble": {
+                    "decision": {
+                        "eligible": False,
+                        "reason": "三种子集成仍有负收益独立窗口",
+                    },
+                },
+            },
+            {
+                "eligible": False,
+                "blockers": [
+                    "Top5费后净R下置信界未大于0",
+                    "旧单模型回撤较差",
+                ],
+            },
+            active_model={
+                "modelVersion": "opportunity-score.ensemble3",
+                "usagePolicy": "DIRECT",
+                "productionEligible": False,
+            },
+        )
+
+        self.assertEqual(
+            value["promotionBlockers"],
+            ["三种子集成仍有负收益独立窗口"],
+        )
+
     def test_publishes_compact_status_to_stable_oss_key(self):
         bucket = Bucket({
             "runId": "opportunity-score.prod",

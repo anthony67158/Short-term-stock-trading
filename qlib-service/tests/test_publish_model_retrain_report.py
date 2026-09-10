@@ -95,7 +95,11 @@ class PublishModelRetrainReportTest(unittest.TestCase):
             and value["challenger"] == 0.104692
             for value in report["details"]["metrics"]
         ))
-        self.assertIn("净R下界未大于0", report["details"]["blockers"])
+        self.assertFalse(any(
+            value["label"] == "Top5 最大回撤"
+            for value in report["details"]["metrics"]
+        ))
+        self.assertNotIn("净R下界未大于0", report["details"]["blockers"])
         self.assertIn("最新独立窗口仍为负", report["details"]["blockers"])
 
     def test_missing_report_and_not_ready_are_explicit(self):

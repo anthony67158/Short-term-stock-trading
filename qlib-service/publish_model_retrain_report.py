@@ -80,11 +80,10 @@ def opportunity_details(report, promotion, env):
         "promote" if published else "updated" if direct else "shadow" if shadow
         else "skip" if state == "NOT_READY" else "reject"
     )
-    blockers = [
-        *(readiness.get("blockers") or []),
-        *(report.get("shadowBlockers") or []),
-        *(promotion.get("blockers") or []),
-    ]
+    blockers = [*(readiness.get("blockers") or [])]
+    if not ensemble:
+        blockers.extend(report.get("shadowBlockers") or [])
+        blockers.extend(promotion.get("blockers") or [])
     if eligible and not published and not direct:
         decision = "error"
         blockers.insert(0, "晋级检查已通过，但生产发布未确认成功")
@@ -132,11 +131,20 @@ def opportunity_details(report, promotion, env):
         metric_row("CatBoost Top5 费后净R",
                    ranker.get("mean_net_r_at_5"), unit="r"),
         metric_row("Q10 覆盖率", quantile.get("coverage"), unit="percent"),
-        metric_row("Top5 最大回撤", candidate.get("max_drawdown_r_at_5"),
-                   baseline.get("max_drawdown_r_at_5"), "r"),
-        metric_row("Top5 正净R信号占比", candidate.get("precision_at_5"),
-                   baseline.get("precision_at_5"), "percent"),
     ]
+    if ensemble_aggregate:
+        metrics.append(metric_row(
+            "当前组合正期望覆盖率",
+            ensemble_aggregate.get("positiveExpectedCoverage"),
+            unit="percent",
+        ))
+    else:
+        metrics.extend([
+            metric_row("Top5 最大回撤", candidate.get("max_drawdown_r_at_5"),
+                       baseline.get("max_drawdown_r_at_5"), "r"),
+            metric_row("Top5 正净R信号占比", candidate.get("precision_at_5"),
+                       baseline.get("precision_at_5"), "percent"),
+        ])
     if ensemble and ensemble_decision.get("eligible") is not True:
         blockers.append(
             text(ensemble_decision.get("reason"))
