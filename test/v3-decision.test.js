@@ -130,6 +130,29 @@ test('V3完整编译保留同一路径价格与概率，保存恢复不依赖LLM
   assert.equal(adviceCompleteness(restored.advice, result.mode).complete, true)
 })
 
+test('单股直接评估使用训练集已有的探索召回语义', async () => {
+  const inputs = []
+  await evaluateV3Decision(scenario({
+    score: async (values) => {
+      inputs.push(...values)
+      return new Map(values.map((input) => [input.code, {
+        ...plan.opportunityScore,
+        usagePolicy: 'DIRECT',
+        code: input.code,
+        formulaId: input.formulaId,
+      }]))
+    },
+  }))
+
+  assert.ok(inputs.length > 0)
+  assert.ok(inputs.every(
+    (input) =>
+      input.dimensions.recallSource === 'EXPLORATION'
+      && input.factors.recall_EXPLORATION === 1
+      && input.factors.recall_UNKNOWN === 0,
+  ))
+})
+
 test('V3结果固化本次使用的技术、五日资金和板块证据', async () => {
   const result = await evaluateV3Decision(scenario({
     trends: Array.from({ length: 6 }, (_, index) => ({

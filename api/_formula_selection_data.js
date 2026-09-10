@@ -7,7 +7,7 @@ import {
   fetchKlineTx,
   fetchTrendsTx,
 } from './stock_detail.js'
-import { fetchStockFund } from './_stock_fund.js'
+import { fetchResilientStockFund } from './_stock_fund.js'
 import { fetchStockTagProfile } from './stock_tags.js'
 import { fetchQuotes } from './quote.js'
 import { computeTechnicals } from './_ta.js'
@@ -416,7 +416,7 @@ export async function scanFormulaSelectionCandidates({
   fetchUniverse = fetchTailPickRealtimePool,
   fetchKline = fetchKlineTx,
   fetchTrends = fetchTrendsTx,
-  fetchFund = fetchStockFund,
+  fetchFund = fetchResilientStockFund,
   fetchTags = fetchStockTagProfile,
   matchSector = sectorOpportunityFromTags,
   onProgress = null,
@@ -502,7 +502,7 @@ export async function scanFormulaSelectionCandidates({
   const technicalCandidates = (await mapLimit(
     prefiltered,
     12,
-    async ({ quote }) => {
+    async ({ quote, cheapScore, recall }) => {
       let candidate = null
       const event = candidateEvents.get(String(quote.code))
       try {
@@ -526,7 +526,13 @@ export async function scanFormulaSelectionCandidates({
           quote,
           candles: kline.candles,
         })
-        candidate = { quote, kline, preliminary }
+        candidate = {
+          quote,
+          kline,
+          preliminary,
+          cheapScore,
+          recall,
+        }
         return candidate
       } finally {
         technicalCompleted += 1
@@ -565,7 +571,7 @@ export async function scanFormulaSelectionCandidates({
   const evaluated = await mapLimit(
     technicalCandidates,
     8,
-    async ({ quote, kline }) => {
+    async ({ quote, kline, cheapScore, recall }) => {
       const event = candidateEvents.get(String(quote.code))
       try {
         const [trendData, fund, tags] = await Promise.all([
@@ -661,6 +667,8 @@ export async function scanFormulaSelectionCandidates({
           code: quote.code,
           name: quote.name || kline.name || tags.name,
           quote,
+          cheapScore,
+          recall,
           fund,
           tags,
           sectorOpportunity,
@@ -780,7 +788,7 @@ export async function buildStockFormulaSelection({
   fetchQuote = async (value) => (await fetchQuotes([value]))[0] || null,
   fetchKline = fetchResilientKline,
   fetchTrends = fetchTrendsTx,
-  fetchFund = fetchStockFund,
+  fetchFund = fetchResilientStockFund,
   fetchTags = fetchStockTagProfile,
   collectMarketContext = collectTailPickMarketContext,
   matchSector = sectorOpportunityFromTags,

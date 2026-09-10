@@ -190,6 +190,10 @@ export function buildOpportunityScoreInput({
   const decision = event.decision || {}
   const marketGate = batch.marketGate
   const shadow = event.shadowFeatures || {}
+  const recallSource = String(
+    event.recall?.primarySource || '',
+  ).trim().toUpperCase()
+  const hasRecallContext = !!recallSource && recallSource !== 'UNKNOWN'
   const mode = category(
     batch.mode || event.mode,
     CATEGORIES.mode,
@@ -226,7 +230,9 @@ export function buildOpportunityScoreInput({
     time: timeBucket(mode, batch.slot),
     liquidity: liquidityBucket(quote.amount),
     recall: category(
-      event.recall?.primarySource,
+      hasRecallContext
+        ? recallSource
+        : 'EXPLORATION',
       CATEGORIES.recall,
     ),
   }
@@ -266,12 +272,13 @@ export function buildOpportunityScoreInput({
     recallReversalPct: rounded(event.recall?.reversalPct),
     recallLiquidityPct: rounded(event.recall?.liquidityPct),
     recallSourceCount: Math.max(
-      0,
+      hasRecallContext ? 0 : 1,
       (Array.isArray(event.recall?.sources)
         ? event.recall.sources
         : []).length,
     ),
-    explorationSample: event.recall?.exploration === true ? 1 : 0,
+    explorationSample:
+      event.recall?.exploration === true || !hasRecallContext ? 1 : 0,
     ret2dPct: rounded(shadow.ret2dPct),
     ret5dPct: rounded(shadow.ret5dPct),
     openGapPct: rounded(shadow.openGapPct),

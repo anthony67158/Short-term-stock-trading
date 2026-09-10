@@ -17,7 +17,7 @@ import {
   fetchAiSearchReference,
 } from './_ai_search.js'
 import {
-  fetchStockFund,
+  fetchResilientStockFund,
 } from './_stock_fund.js'
 import {
   preCatalystStore,
@@ -56,7 +56,7 @@ function collectProductionSnapshot(options = {}) {
         cacheMinutes: 30,
       }),
     fetchTrends: fetchTrendsTx,
-    fetchFund: fetchStockFund,
+    fetchFund: fetchResilientStockFund,
   })
 }
 

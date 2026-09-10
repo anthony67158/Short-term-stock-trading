@@ -4,7 +4,7 @@ import {
   fetchKlineTx,
   fetchTrendsTx,
 } from './stock_detail.js'
-import { fetchStockFund } from './_stock_fund.js'
+import { fetchResilientStockFund } from './_stock_fund.js'
 import { fetchStockTagProfile } from './stock_tags.js'
 import { sectorForecastStore } from './_sector_forecast_store.js'
 import { buildSectorOpportunity } from '../shared/sectorOpportunity.js'
@@ -365,7 +365,7 @@ export async function scanTailPickCandidates({
   fetchPool = fetchTailPickRealtimePool,
   fetchKline = fetchKlineTx,
   fetchTrends = fetchTrendsTx,
-  fetchFund = fetchStockFund,
+  fetchFund = fetchResilientStockFund,
   fetchTags = fetchStockTagProfile,
   now = Date.now(),
 } = {}) {

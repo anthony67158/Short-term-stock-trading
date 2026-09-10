@@ -599,6 +599,12 @@ test('公式结果使用LightGBM动作门槛和CatBoost排序分组合排序', a
     riskReward: 2,
     priceContractValid: true,
     quote: quote({ code }),
+    recall: {
+      primarySource: 'MOMENTUM',
+      sources: ['MOMENTUM'],
+      momentumPct: 0.9,
+      exploration: false,
+    },
     blockers: [],
   }))
   const candidateEvents = candidates.map((candidate, index) => ({
@@ -642,7 +648,7 @@ test('公式结果使用LightGBM动作门槛和CatBoost排序分组合排序', a
       candidateEvents,
     }),
     scoreOpportunities: async (inputs) => {
-      scoreInputs = inputs
+      scoreInputs = [...(scoreInputs || []), ...inputs]
       return new Map(inputs.map((input, index) => [
         input.code,
         {
@@ -670,7 +676,13 @@ test('公式结果使用LightGBM动作门槛和CatBoost排序分组合排序', a
     now: () => Date.UTC(2026, 7, 28, 7, 5),
   })
 
-  assert.equal(scoreInputs.length, 2)
+  assert.ok(scoreInputs.length >= 2)
+  assert.ok(scoreInputs.every(
+    (input) => input.factors.recall_UNKNOWN === 0,
+  ))
+  assert.ok(scoreInputs.some(
+    (input) => input.factors.recall_MOMENTUM === 1,
+  ))
   assert.deepEqual(
     result.candidates.map((item) => item.code),
     ['600002', '600001'],

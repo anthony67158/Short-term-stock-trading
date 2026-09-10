@@ -7,6 +7,7 @@ import {
   fetchResilientStockFund,
   parseArchivedStockFundHistory,
   parseStockFundHistory,
+  readArchivedStockFundHistory,
 } from '../api/_stock_fund.js'
 import {
   compareStockFundSnapshots,
@@ -280,6 +281,30 @@ test('公开历史接口不可用时使用OSS归档补齐五日资金', async ()
     snapshot.retailTrend5,
     [-0.7, -0.8, -0.9, -1, -2.11],
   )
+})
+
+test('并发资金采集只读取一次OSS历史索引', async () => {
+  let reads = 0
+  const read = async () => {
+    reads += 1
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    return {
+      schemaVersion: 'opportunity-market-fund-history.v1',
+      stocks: {
+        '000001': [['20260910', 1, -1, 2]],
+        '600036': [['20260910', 2, -2, 3]],
+      },
+    }
+  }
+  const now = Number.MAX_SAFE_INTEGER - 10_000
+  const [first, second] = await Promise.all([
+    readArchivedStockFundHistory('000001', { now, read }),
+    readArchivedStockFundHistory('600036', { now, read }),
+  ])
+
+  assert.equal(reads, 1)
+  assert.equal(first[0].mainNetYi, 1)
+  assert.equal(second[0].mainNetYi, 2)
 })
 
 test('资金快照比较识别主力由流入转流出与散户反向承接', () => {

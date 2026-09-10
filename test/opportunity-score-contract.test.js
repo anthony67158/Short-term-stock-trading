@@ -176,6 +176,21 @@ test('未知公式保留最高接近度而不是把公式分清零', () => {
   assert.equal(input.factors.formulaScore, 64)
 })
 
+test('未经过市场召回的单股评估按探索样本编码', () => {
+  const source = event()
+  delete source.recall
+  const input = buildOpportunityScoreInput({
+    event: source,
+    batch: batch({ mode: 'CLOSE', slot: 'manual' }),
+  })
+
+  assert.equal(input.dimensions.recallSource, 'EXPLORATION')
+  assert.equal(input.factors.recall_EXPLORATION, 1)
+  assert.equal(input.factors.recall_UNKNOWN, 0)
+  assert.equal(input.factors.recallSourceCount, 1)
+  assert.equal(input.factors.explorationSample, 1)
+})
+
 test('前后端机会评分特征清单与版本保持一致', () => {
   assert.equal(
     contractManifest.featureSchemaVersion,

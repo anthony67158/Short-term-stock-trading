@@ -23,6 +23,18 @@ const confirmSource = readFileSync(
   new URL('../api/_confirm.js', import.meta.url),
   'utf8',
 )
+const formulaSource = readFileSync(
+  new URL('../api/_formula_selection_data.js', import.meta.url),
+  'utf8',
+)
+const preCatalystSource = readFileSync(
+  new URL('../api/pre_catalyst.js', import.meta.url),
+  'utf8',
+)
+const tailSource = readFileSync(
+  new URL('../api/_tail_pick_data.js', import.meta.url),
+  'utf8',
+)
 
 test('资金说明由服务端写入完整五日序列和合计', () => {
   const note = buildStockFundNote({
@@ -274,4 +286,12 @@ test('快速深度军师与Judge统一使用可靠资金入口', () => {
     confirmSource,
     /providers\.fetchStockFund\s*\|\|\s*fetchResilientStockFund/,
   )
+  for (const source of [
+    formulaSource,
+    preCatalystSource,
+    tailSource,
+  ]) {
+    assert.match(source, /fetchResilientStockFund/)
+    assert.doesNotMatch(source, /fetchFund\s*=\s*fetchStockFund/)
+  }
 })

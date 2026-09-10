@@ -25,6 +25,7 @@ from opportunity_model import (  # noqa: E402
     ENSEMBLE_PREDICTION_CONTRACT_VERSION,
     PREDICTION_CONTRACT_VERSION,
     _CatBoostJsonRanker,
+    _is_out_of_distribution,
     predict_opportunity_items,
     validate_opportunity_metadata,
     validate_opportunity_manifest,
@@ -372,6 +373,20 @@ class OpportunityModelTest(unittest.TestCase):
         self.assertEqual(result["state"], "READY")
         self.assertTrue(result["outOfDistribution"])
         self.assertAlmostEqual(result["pFill"], 0.9)
+
+    def test_supported_exploration_category_is_not_unknown_distribution(self):
+        value = item()
+        value["factors"]["recall_EXPLORATION"] = 1.0
+        metadata = meta()
+        unknown_index = FEATURE_NAMES.index("recall_UNKNOWN")
+        exploration_index = FEATURE_NAMES.index("recall_EXPLORATION")
+        metadata["ood"]["maximum"][unknown_index] = 0.0
+        metadata["ood"]["maximum"][exploration_index] = 1.0
+
+        self.assertFalse(_is_out_of_distribution(
+            [value["factors"][name] for name in FEATURE_NAMES],
+            metadata,
+        ))
 
     def test_failed_promotion_does_not_block_existing_model(self):
         metadata = meta()

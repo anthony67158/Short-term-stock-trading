@@ -162,6 +162,7 @@ function scoreInput(candidate, plan, {
       stageReached: 'DISPLAYED',
       quote: candidate.quote,
       cheapScore: finite(candidate.activationScore ?? candidate.score),
+      recall: candidate.recall,
       formulaEvaluations:
         candidate.formulaEvaluations
         || candidate.formula?.evaluations
