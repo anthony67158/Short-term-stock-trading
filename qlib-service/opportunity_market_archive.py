@@ -107,6 +107,8 @@ def build_market_day_artifact(
 ):
     date = _date(date)
     universe_source_date = _date(universe_source_date or date)
+    if universe_source_date > date:
+        raise ValueError("分钟股票池使用了未来日期")
     normalized_daily = _rows(daily, date, name="日线")
     normalized_funds = _rows(funds, date, name="资金流")
     normalized_minutes, minute_bars = _minutes(minutes, date)

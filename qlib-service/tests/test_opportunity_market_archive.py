@@ -127,6 +127,14 @@ class OpportunityMarketArchiveTest(unittest.TestCase):
                 funds=[],
                 minutes=minutes("20260909"),
             )
+        with self.assertRaisesRegex(ValueError, "未来日期"):
+            build_market_day_artifact(
+                date="20260909",
+                daily=rows("20260909", 800),
+                funds=rows("20260909", 500, funds=True),
+                minutes=minutes("20260909"),
+                universe_source_date="20260910",
+            )
         broken = minutes("20260909")
         broken["codes"]["000001"] = broken["codes"]["000001"][:20]
         with self.assertRaisesRegex(ValueError, "不完整"):
