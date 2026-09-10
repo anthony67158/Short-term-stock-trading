@@ -75,3 +75,25 @@ test('聚合行情允许单个数据源失败并缓存并发请求', async () =>
   assert.equal(left.sectors, null)
   assert.match(left.errors.sectors, /sector unavailable/)
 })
+
+test('海外行情失败只降级海外区域', async () => {
+  resetMarketSnapshotCache()
+  const result = await collectMarketSnapshot({
+    market: async () => ({
+      ok: true,
+      indices: [{ code: '000001', name: '上证指数' }],
+    }),
+    sectors: async () => ({ ok: true, list: [] }),
+    limitPool: async (kind) => ({ kind, list: [] }),
+    movers: async (kind) => ({ ok: true, kind, list: [] }),
+    overseas: async () => {
+      throw new Error('overseas unavailable')
+    },
+    now: () => 2_000,
+  })
+
+  assert.equal(result.ok, true)
+  assert.equal(result.market.indices[0].name, '上证指数')
+  assert.equal(result.overseas, null)
+  assert.match(result.errors.overseas, /overseas unavailable/)
+})
