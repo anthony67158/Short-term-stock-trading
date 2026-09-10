@@ -35,10 +35,45 @@ try {
       await candidate('600522').innerText(),
       /尚无本轮V3决策/,
     )
+    if (width === 1440) {
+      const exitHolding = holding('000001')
+      await exitHolding.locator(
+        'summary[aria-label="平安银行更多操作"]',
+      ).click()
+      const manualSell = exitHolding.getByRole('button', {
+        name: '记录自主卖出',
+        exact: true,
+      })
+      assert.equal(await manualSell.count(), 1)
+      await exitHolding.screenshot({
+        path: `${output}/1440-manual-sell-menu.png`,
+      })
+      await manualSell.click()
+      const sellForm = exitHolding.locator('.buy-inline')
+      const sellQty = sellForm.getByPlaceholder('手', {
+        exact: true,
+      })
+      const sellConfirm = sellForm.getByRole('button', {
+        name: /确认减仓|确认清仓/,
+      })
+      assert.equal(await sellQty.getAttribute('max'), '10')
+      await sellQty.fill('11')
+      assert.equal(await sellConfirm.isDisabled(), true)
+      await exitHolding.screenshot({
+        path: `${output}/1440-manual-sell-form.png`,
+      })
+      await sellQty.fill('1')
+      assert.equal(await sellConfirm.isEnabled(), true)
+      await sellForm.getByRole('button', {
+        name: '取消',
+        exact: true,
+      }).click()
+    }
     const geometry = await page.evaluate(() => ({
       width: innerWidth,
       scrollWidth: document.documentElement.scrollWidth,
       cards: [...document.querySelectorAll('.v3-card')].map((element) => {
+        const card = element.getBoundingClientRect()
         const summary = element.querySelector('.v3-decision-summary').getBoundingClientRect()
         const slot = element.querySelector('.card-decision-slot').getBoundingClientRect()
         const meta = element.querySelector('.card-decision-meta')?.getBoundingClientRect()
@@ -74,6 +109,8 @@ try {
           code: element.dataset.code,
           type: element.matches('.hold-item') ? 'holding' : 'candidate',
           monitoring: !!monitoring?.height,
+          top: card.top,
+          bottom: card.bottom,
           width: element.clientWidth, scrollWidth: element.scrollWidth,
           height: element.clientHeight, scrollHeight: element.scrollHeight,
           summaryBottom: summary.bottom, slotBottom: slot.bottom,
@@ -83,6 +120,9 @@ try {
             : null,
           actionGap: actions
             ? Math.max(0, actions.top - beforeActionsBottom)
+            : null,
+          actionBottomInset: actions
+            ? Math.max(0, card.bottom - actions.bottom)
             : null,
         }
       }),
@@ -94,12 +134,32 @@ try {
       assert.ok(card.summaryBottom <= card.slotBottom + 1, JSON.stringify(card))
       assert.ok(card.summaryBottom <= card.metaTop + 1, JSON.stringify(card))
       assert.ok(card.decisionGap <= 32, JSON.stringify(card))
-      assert.ok(card.actionGap <= 32, JSON.stringify(card))
+      assert.ok(card.actionBottomInset <= 24, JSON.stringify(card))
+      if (width <= 720) {
+        assert.ok(card.actionGap <= 32, JSON.stringify(card))
+      }
       if (!card.monitoring && card.type === 'holding') {
-        assert.ok(card.height <= 640, JSON.stringify(card))
+        assert.ok(card.height <= 700, JSON.stringify(card))
       }
       if (card.type === 'candidate') {
         assert.ok(card.height <= 500, JSON.stringify(card))
+      }
+    }
+    if (width > 720) {
+      for (const type of ['holding', 'candidate']) {
+        const rows = new Map()
+        for (const card of geometry.cards.filter((item) => item.type === type)) {
+          const rowKey = String(Math.round(card.top))
+          rows.set(rowKey, [...(rows.get(rowKey) || []), card])
+        }
+        for (const row of rows.values()) {
+          if (row.length < 2) continue
+          const heights = row.map((card) => card.height)
+          assert.ok(
+            Math.max(...heights) - Math.min(...heights) <= 1,
+            JSON.stringify({ width, type, row }),
+          )
+        }
       }
     }
     await page.screenshot({ path: `${output}/${width}-cards.png`, fullPage: true })
@@ -153,7 +213,23 @@ try {
     await context.close()
   }
   await fs.writeFile(`${output}/geometry.json`, JSON.stringify(results, null, 2))
-  console.log(JSON.stringify({ passed: true, viewports: results.map((item) => item.width), checks: ['exit-review-pending', 'six-states', 'single-primary-action', 'no-deep-generation', 'enrollment-cancel', 'record-buy', 't1', 'detail-return', 'no-overflow'] }))
+  console.log(JSON.stringify({
+    passed: true,
+    viewports: results.map((item) => item.width),
+    checks: [
+      'exit-review-pending',
+      'manual-sell',
+      'desktop-row-equal-height',
+      'six-states',
+      'single-primary-action',
+      'no-deep-generation',
+      'enrollment-cancel',
+      'record-buy',
+      't1',
+      'detail-return',
+      'no-overflow',
+    ],
+  }))
 } finally {
   await browser.close()
 }

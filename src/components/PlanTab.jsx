@@ -2601,7 +2601,16 @@ function HoldingItem({ h, quote: q }) {
     )))
   }
   const confirmSell = () => {
-    if (!sellPrice || !(Number(sellQty) > 0)) return
+    const price = Number(sellPrice)
+    const qty = Number(sellQty)
+    if (!Number.isFinite(price) || price <= 0 || !Number.isInteger(qty) || qty <= 0) {
+      setTradeErr('请输入有效的卖出价格和整手数量')
+      return
+    }
+    if (qty > currentT1.sellableToday) {
+      setTradeErr(`受 T+1 限制，今天最多可卖 ${currentT1.sellableToday} 手`)
+      return
+    }
     const result = planStore.sell(h.id, sellPrice, Number(sellQty))
     if (!result || !result.ok) { setTradeErr((result && result.error) || '卖出记录失败'); return }
     setTradeErr(result.message || '')
@@ -2748,6 +2757,15 @@ function HoldingItem({ h, quote: q }) {
           ? '修改成本价'
           : ''
   const isPlanEditor = mode === 'plan'
+  const sellPriceValue = Number(sellPrice)
+  const sellQtyValue = Number(sellQty)
+  const sellRequestValid = (
+    Number.isFinite(sellPriceValue)
+    && sellPriceValue > 0
+    && Number.isInteger(sellQtyValue)
+    && sellQtyValue > 0
+    && sellQtyValue <= currentT1.sellableToday
+  )
   const refreshDecision = () => {
     const book = planStore.get()
     const quotes = { [h.code]: q }
@@ -2815,11 +2833,43 @@ function HoldingItem({ h, quote: q }) {
   ) : mode === 'sell' ? (
     <div className="buy-inline-wrap">
       <div className="buy-inline">
-        <input className="wl-input" value={sellPrice} onChange={(e) => setSellPrice(e.target.value)} placeholder="卖出价" inputMode="decimal" />
-        <input className="wl-input" value={sellQty} onChange={(e) => setSellQty(e.target.value)} placeholder="手" inputMode="numeric" />
+        <input
+          className="wl-input"
+          type="number"
+          min="0.001"
+          step="0.001"
+          value={sellPrice}
+          onChange={(event) => {
+            setSellPrice(event.target.value)
+            setTradeErr('')
+          }}
+          placeholder="卖出价"
+          inputMode="decimal"
+        />
+        <input
+          className="wl-input"
+          type="number"
+          min="1"
+          max={currentT1.sellableToday}
+          step="1"
+          value={sellQty}
+          onChange={(event) => {
+            setSellQty(event.target.value)
+            setTradeErr('')
+          }}
+          placeholder="手"
+          inputMode="numeric"
+        />
         <span className="qty-hint">今日可卖 {currentT1.sellableToday}手</span>
         {sellPrice && Number(sellQty) > 0 && <span className="fee-hint">费≈{calcSellFee(Number(sellPrice) * Number(sellQty) * 100).toFixed(2)}</span>}
-        <button className={'chip-btn solid ' + (Number(sellQty) >= h.qty ? 'act-clear' : 'act-reduce')} onClick={confirmSell}><Icon name="check" size={13} />{Number(sellQty) >= h.qty ? '确认清仓' : '确认减仓'}</button>
+        <button
+          className={'chip-btn solid ' + (Number(sellQty) >= h.qty ? 'act-clear' : 'act-reduce')}
+          onClick={confirmSell}
+          disabled={!sellRequestValid}
+        >
+          <Icon name="check" size={13} />
+          {Number(sellQty) >= h.qty ? '确认清仓' : '确认减仓'}
+        </button>
         <button className="chip-btn ghost" onClick={() => setMode(null)}>取消</button>
       </div>
     </div>
@@ -3073,9 +3123,7 @@ function HoldingItem({ h, quote: q }) {
                 ) && (
                   <button type="button" onClick={startT}>记录自主做T</button>
                 )}
-                {!['reduce', 'sell'].includes(decisionView?.kind) && (
-                  <button type="button" onClick={startSell}>记录自主卖出</button>
-                )}
+                <button type="button" onClick={startSell}>记录自主卖出</button>
                 <button type="button" onClick={() => openPlan(hasPlan)}>
                   设置手动保护
                 </button>

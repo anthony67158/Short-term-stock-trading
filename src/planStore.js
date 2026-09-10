@@ -1547,7 +1547,17 @@ export const planStore = {
   sell(id, sellPrice, sellQty, opts = {}) {
     const h = state.holding.find((x) => x.id === id)
     if (!h) return { ok: false, error: '持仓不存在或已被删除' }
-    const requested = Math.min(Number(sellQty) || h.qty, h.qty)
+    const price = Number(sellPrice)
+    const requestedQty = Number(sellQty)
+    if (
+      !Number.isFinite(price)
+      || price <= 0
+      || !Number.isInteger(requestedQty)
+      || requestedQty <= 0
+    ) {
+      return { ok: false, error: '请输入有效的卖出价格和整手数量' }
+    }
+    const requested = Math.min(requestedQty, h.qty)
     const t1 = t1StatusOf(h.code)
     const allowance = computeSellAllowance(requested, t1.sellableToday)
     if (!allowance.ok) {
@@ -1555,7 +1565,6 @@ export const planStore = {
     }
     const sq = allowance.allowed
     snapshot(`${sq >= h.qty ? '清仓' : '减仓'} ${h.name || h.code}`)
-    const price = Number(sellPrice)
     const shares = sq * 100
     const cost = h.buyPrice * shares
     const proceeds = price * shares

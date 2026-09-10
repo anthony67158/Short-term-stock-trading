@@ -155,7 +155,7 @@ test('交易卡片保留稳定区域且V3空状态按内容收缩', () => {
   assert.match(fixedCards, /\.hold-item > \.pi-actions,[\s\S]*?\.plan-cand \.pc-actions\s*{[^}]*min-height:\s*56px[^}]*max-height:\s*56px/s)
   assert.match(
     design,
-    /card shell uses a compact\s+minimum height and collapses empty review or evidence regions/s,
+    /card shell uses a compact\s+minimum height and collapses empty review or evidence regions[\s\S]*?desktop cards\s+in the same visual row stretch to the tallest real content/s,
   )
   assert.match(
     fixedCards,
@@ -164,6 +164,10 @@ test('交易卡片保留稳定区域且V3空状态按内容收缩', () => {
   assert.match(
     fixedCards,
     /\.plan-cand\.v3-card\s*{[^}]*height:\s*auto[^}]*min-height:\s*350px[^}]*max-height:\s*none/s,
+  )
+  assert.match(
+    fixedCards,
+    /@media \(min-width:\s*721px\)\s*{[\s\S]*?\.hold-grid \.hold-item\.v3-card,[\s\S]*?\.plan-cand\.v3-card\s*{[^}]*height:\s*100%[^}]*align-self:\s*stretch/s,
   )
   assert.match(
     fixedCards,

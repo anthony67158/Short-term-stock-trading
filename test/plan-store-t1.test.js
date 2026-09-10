@@ -65,6 +65,38 @@ test('历史持仓仍可正常卖出', () => {
   assert.equal(planStore.get().holding[0].qty, 1)
 })
 
+test('自主卖出只接受有效价格和整手数量', () => {
+  const holding = {
+    id: 'manual_sell_holding',
+    code: '000001',
+    name: '平安银行',
+    buyPrice: 10,
+    buyAt: Date.now() - 86400000,
+    qty: 2,
+    buyFee: 5,
+  }
+  planStore.setData({
+    plan: [],
+    holding: [holding],
+    closed: [],
+  })
+
+  for (const [price, qty] of [
+    [0, 1],
+    [-1, 1],
+    [10.5, 0],
+    [10.5, -1],
+    [10.5, 1.5],
+  ]) {
+    const result = planStore.sell(holding.id, price, qty)
+    assert.equal(result.ok, false)
+    assert.match(result.error, /有效的卖出价格和整手数量/)
+  }
+
+  assert.equal(planStore.get().holding[0].qty, 2)
+  assert.equal(planStore.get().closed.length, 0)
+})
+
 test('减仓后仍留在持仓区，只有同股全部清仓才回自选', () => {
   const yesterday = Date.now() - 86400000
   planStore.setData({

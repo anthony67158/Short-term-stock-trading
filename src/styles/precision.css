@@ -19836,6 +19836,30 @@ html[data-theme="light"] .nav {
   margin-top: var(--space-md);
 }
 
+@media (min-width: 721px) {
+  .hold-grid:has(.v3-card),
+  .plan-cand-grid:has(.v3-card) {
+    align-items: stretch;
+  }
+
+  .hold-swipe-wrap:has(.v3-card),
+  .hold-select-wrap:has(.v3-card) {
+    height: 100%;
+    align-self: stretch;
+  }
+
+  .hold-grid .hold-item.v3-card,
+  .plan-cand.v3-card {
+    height: 100%;
+    align-self: stretch;
+  }
+
+  .hold-item.v3-card > .pi-actions,
+  .plan-cand.v3-card .pc-actions {
+    margin-top: auto;
+  }
+}
+
 @media (max-width: 720px) {
   .hold-grid .hold-item.v3-card,
   .hold-swipe-wrap:has(.v3-card),

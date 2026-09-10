@@ -75,6 +75,31 @@ try {
     await actionStrip.waitFor()
     assert.match(await actionStrip.innerText(), /演示标准仓/)
     assert.match(await actionStrip.innerText(), /补录成交/)
+    if (width > 720) {
+      const holdingRows = await page.locator(
+        '.hold-grid .hold-item',
+      ).evaluateAll((cards) => cards.map((card) => {
+        const bounds = card.getBoundingClientRect()
+        return {
+          code: card.dataset.code,
+          top: bounds.top,
+          height: bounds.height,
+        }
+      }))
+      const rows = new Map()
+      for (const card of holdingRows) {
+        const rowKey = String(Math.round(card.top))
+        rows.set(rowKey, [...(rows.get(rowKey) || []), card])
+      }
+      for (const row of rows.values()) {
+        if (row.length < 2) continue
+        const heights = row.map((card) => card.height)
+        assert.ok(
+          Math.max(...heights) - Math.min(...heights) <= 1,
+          JSON.stringify({ width, row }),
+        )
+      }
+    }
     const actionStripGeometry = await actionStrip.evaluate(
       (element) => ({
         width: element.clientWidth,
@@ -226,6 +251,13 @@ try {
       await monitoredHolding.locator(
         'summary[aria-label="立讯精密更多操作"]',
       ).click()
+      assert.equal(
+        await monitoredHolding.getByRole('button', {
+          name: '记录自主卖出',
+          exact: true,
+        }).count(),
+        1,
+      )
       await monitoredHolding.getByText(
         '记录自主做T',
         { exact: true },

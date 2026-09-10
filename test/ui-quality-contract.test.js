@@ -104,6 +104,14 @@ test('所有按钮受父容器约束且持仓只保留一个推荐主动作', ()
     /recommendedHoldingAction\.run[\s\S]*?\{recommendedHoldingAction\.label\}/,
   )
   assert.match(planTab, /className="card-more-actions holding-more-actions"/)
+  assert.match(
+    planTab,
+    /<button type="button" onClick=\{startSell\}>记录自主卖出<\/button>/,
+  )
+  assert.doesNotMatch(
+    planTab,
+    /!\['reduce', 'sell'\]\.includes\(decisionView\?\.kind\)[\s\S]{0,160}startSell/,
+  )
   assert.doesNotMatch(planTab, /按指令(?:加仓|卖出)/)
   assert.doesNotMatch(planTab, /按浮盈金额排序/)
 })
@@ -564,6 +572,10 @@ test('持仓区共用页面边线、筛选栏留出安全区且卡片展示建�
   )
   assert.match(
     precision,
+    /@media \(min-width:\s*721px\)\s*{[\s\S]*?\.hold-grid:has\(\.v3-card\),[\s\S]*?\.plan-cand-grid:has\(\.v3-card\)\s*{[^}]*align-items:\s*stretch/s,
+  )
+  assert.match(
+    precision,
     /\.hold-swipe-wrap > \.hold-item\s*{[^}]*height:\s*100%[^}]*display:\s*flex[^}]*flex-direction:\s*column/s,
   )
   assert.match(
@@ -744,6 +756,10 @@ test('V3持仓与自选卡回收空槽且保留固定功能区域', () => {
   assert.match(
     precision,
     /@media \(max-width:\s*30rem\)\s*{[\s\S]*?\.hold-item > \.pi-actions\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s,
+  )
+  assert.match(
+    fixedCards,
+    /@media \(min-width:\s*721px\)\s*{[\s\S]*?\.hold-item\.v3-card > \.pi-actions,[\s\S]*?\.plan-cand\.v3-card \.pc-actions\s*{[^}]*margin-top:\s*auto/s,
   )
 })
 
