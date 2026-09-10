@@ -254,6 +254,46 @@ test('T+1后目标先到时按统一费用与滑点口径结算净结果', () =>
   assert.equal(result.metrics.holdingTradingSessions, 2)
 })
 
+test('成交价贴近止损时仍按计划价格合同计算R值', () => {
+  const result = resolveOpportunityOutcome({
+    event: event(),
+    bars: [
+      bar('2026-09-01', { close: 10 }),
+      bar('2026-09-02', {
+        tradeTime: '09:35:00',
+        low: 9.9,
+        close: 10,
+      }),
+      bar('2026-09-02', {
+        tradeTime: '09:40:00',
+        open: 9.51,
+        high: 9.6,
+        low: 9.4,
+        close: 9.45,
+        preClose: 10,
+      }),
+      bar('2026-09-03', {
+        tradeTime: '09:35:00',
+        open: 9.4,
+        high: 9.5,
+        low: 9.3,
+        close: 9.4,
+        preClose: 9.45,
+      }),
+    ],
+    evaluatedAt: Date.parse('2026-09-03T08:00:00.000Z'),
+  })
+
+  assert.equal(result.maturity, 'MATURED')
+  assert.ok((result.entry.fillPrice - 9.5) * 100 < 2)
+  assert.equal(result.metrics.initialRiskCash, 50)
+  assert.equal(result.metrics.riskBasis, 'PLANNED_PRICE_CONTRACT')
+  assert.equal(
+    result.metrics.netR,
+    Math.round(result.metrics.netPnl / 50 * 1000) / 1000,
+  )
+})
+
 test('同一根K线止盈止损均触及时按止损优先并标记路径不明', () => {
   const result = resolveOpportunityOutcome({
     event: event(),

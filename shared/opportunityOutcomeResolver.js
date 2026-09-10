@@ -291,12 +291,18 @@ function exitOutcome(reason) {
 }
 
 function completedMetrics(entry, exit, extremes, {
+  entryPrice,
   stopPrice,
   sessionCount,
 }) {
   const netPnl = rounded(entry.cashFlow + exit.cashFlow, 2)
   const costCash = Math.abs(entry.cashFlow)
   const initialRiskCash = (
+    entryPrice > stopPrice
+      ? (entryPrice - stopPrice) * entry.quantity
+      : null
+  )
+  const actualFillRiskCash = (
     entry.fillPrice > stopPrice
       ? (entry.fillPrice - stopPrice) * entry.quantity
       : null
@@ -310,6 +316,8 @@ function completedMetrics(entry, exit, extremes, {
       ? rounded(netPnl / initialRiskCash, 3)
       : null,
     initialRiskCash: rounded(initialRiskCash, 2),
+    actualFillRiskCash: rounded(actualFillRiskCash, 2),
+    riskBasis: 'PLANNED_PRICE_CONTRACT',
     totalFees: rounded(entry.fees.total + exit.fees.total, 2),
     mfePct: extremes.high > 0
       ? rounded((extremes.high / entry.fillPrice - 1) * 100, 3)
@@ -584,6 +592,7 @@ export function resolveOpportunityOutcome({
       entry,
       exit,
       metrics: completedMetrics(entryExecution, exitExecution, extremes, {
+        entryPrice,
         stopPrice,
         sessionCount: sessionOrdinals.get(bar.date) || 1,
       }),
