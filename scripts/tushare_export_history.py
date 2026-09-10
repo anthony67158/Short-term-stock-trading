@@ -349,6 +349,9 @@ def _minute_rows(
             raise ValueError("Tushare分钟数据含无效数值")
         for field in ("open", "close", "high", "low"):
             values[field] = round(values[field], 6)
+        for field in ("vol", "amount"):
+            if -1e-6 < values[field] < 0:
+                values[field] = 0.0
         if (
             values["vol"] == 0
             and values["amount"] == 0
