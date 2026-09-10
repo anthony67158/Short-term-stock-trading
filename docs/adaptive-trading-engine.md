@@ -78,7 +78,9 @@
 现价、回踩和突破路径都写入 `counterfactualPlans`，离线结算按路径拆开，
 而不是只结算最终展示结果。
 
-机会模型特征协议为 `opportunity-score-feature.v4`。生产组合由 LightGBM
+机会模型特征协议为 `opportunity-score-feature.v5`，共 120 维。V5 在 V4
+基础上增加五日主力/小单资金合计、流入天数、连续方向、趋势斜率、分歧天数，
+并用独立可用性字段区分真实零值和缺失数据。生产组合由 LightGBM
 动作价值头和 CatBoost 横截面排序头组成：
 
 - LightGBM 分别估计成交概率、成交后胜率、胜单 R、亏单 R 和 Q10；

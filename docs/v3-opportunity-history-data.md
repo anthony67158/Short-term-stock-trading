@@ -44,6 +44,26 @@ opportunitymodel/training-data/runs/
 该版本包含 72,847 条样本、37,491 条完整成交结果和 120 个独立交易日，
 风险口径为 `PLANNED_PRICE_CONTRACT`。
 
+同日第三轮升级为 `opportunity-score-feature.v5`：
+
+- 73,215 条成熟候选、37,544 条完整成交结果、126 个独立交易日；
+- 120 个首次决策特征；
+- 69,887 条样本具有完整五日主力/小单逐日序列；
+- 72,411 条样本至少具有一日资金历史，72,388 条具有有效板块上下文；
+- 数值零值与数据缺失通过独立 availability 特征区分；
+- 盘中历史样本严格排除当日盘后资金，避免未来信息泄漏。
+
+V5 成熟基线已发布到：
+
+```text
+opportunitymodel/training-data/runs/
+  1789040187715-d304fed5814faba0.json.gz
+```
+
+当前激活模型为 `opportunity-score.20260910T112451Z`。它继续使用
+`usagePolicy=DIRECT`，但 `productionEligible=false`：这是当前最佳可用基准，
+不代表已通过全部稳定盈利门槛。
+
 生产晋级最低要求为 1000 个成熟候选、300 个完整成交结果和 60 个独立
 交易日。数量达到只代表可以训练，模型还必须通过独立时间窗、Top5 费后净R
 下界、相对旧公式提升、回撤和命中率闸门。
@@ -300,6 +320,6 @@ LightGBM + CatBoost 组合直接作为 `usagePolicy=DIRECT` 基准。是否通�
 门槛仍单独记录，不能伪造。任何新增风险仍必须同时通过价格、现金、T+1、
 费后正期望和账户风险检查。
 
-首次激活版本为 `opportunity-score.20260910T101955Z`。线上
+V5 激活版本为 `opportunity-score.20260910T112451Z`。线上
 `/model_info` 已确认六个模型头全部加载，`baselineSelected=true`；
 `productionEligible=false` 如实保留当前样本外稳定性仍未过线的事实。

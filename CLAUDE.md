@@ -29,7 +29,8 @@
 必须保留兼容的数据只有账户、持仓、真实成交、执行计划、执行归因、T+1批次和
 费用信息。旧建议正文、旧公式结果和旧页面结构不得反向约束新架构。
 
-机会模型使用 `opportunity-score-feature.v4`。生产组合固定为 LightGBM
+机会模型使用 `opportunity-score-feature.v5`（120 维，包含五日主力/小单
+资金序列、连续方向、趋势斜率和数据可用性标识）。生产组合固定为 LightGBM
 成交/胜率/胜负R/Q10 动作价值头 + CatBoost 横截面排序头。按用户2026-09-10
 指示，模型文件、特征合同及预测数值有效即以 `usagePolicy=DIRECT` 直接启用。
 原 `shadowOnly`、`productionEligible` 保留为真实评测记录，不能伪造。

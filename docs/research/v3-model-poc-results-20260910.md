@@ -247,3 +247,35 @@ poc-artifacts/v3-model-bakeoff/v4-ensemble-stability/
 DoubleEnsemble 研究结果，详见
 [`v3-model-selection-github.md`](./v3-model-selection-github.md)。其中
 DoubleEnsemble 仅借鉴困难样本重加权思想，不引入 Qlib runtime。
+
+## 第三轮 V5 资金连续性修复
+
+V5 将首次决策合同扩展到 120 维，新增主力/小单五日合计、流入天数、连续
+方向、趋势斜率、资金分歧天数，以及资金、日线、分时和板块的显式可用性
+标识。历史升级只读取决策时点可见的数据；盘中样本不使用当日盘后资金。
+
+数据集包含 73,215 条成熟候选、37,544 条完整成交路径和 126 个独立交易日。
+其中 69,887 条具有完整五日双资金序列，72,411 条至少具有一日资金历史，
+72,388 条具有有效板块上下文。
+
+三折三种子复验结果：
+
+| 组件 | 样本外结果 | 结论 |
+|---|---:|---|
+| LightGBM 动作价值 Top5 | `+0.0687R` | 最差种子下界 `-0.1958R` |
+| CatBoost Ranker Top5 | `+0.3004R` | 最差种子下界 `+0.0547R`，但仍有负窗口 |
+| 正期望过滤 + CatBoost 排序 | `+0.2029R` | 最差种子下界 `-0.0508R` |
+| Q10 覆盖率 | `91.8%` | 位于 88%–92% 目标区间 |
+| pWin 技能 | `-0.61%`（最差种子） | 仍未稳定优于常数胜率 |
+| NetR 技能 | `+0.22%`（最差种子） | 已略高于常数中位数 |
+
+V5 对排序能力有实质改善，但组合尚未满足“所有窗口为正”和下界大于零的正式
+晋级条件。因此激活版本 `opportunity-score.20260910T112451Z` 作为当前最佳
+`DIRECT` 基准，继续如实记录 `productionEligible=false`。完整本地报告位于：
+
+```text
+poc-artifacts/v3-model-bakeoff/v5-seed42/
+poc-artifacts/v3-model-bakeoff/v5-seed7/
+poc-artifacts/v3-model-bakeoff/v5-seed2026/
+poc-artifacts/v3-model-bakeoff/v5-stability/
+```
