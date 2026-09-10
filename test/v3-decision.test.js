@@ -130,6 +130,47 @@ test('V3完整编译保留同一路径价格与概率，保存恢复不依赖LLM
   assert.equal(adviceCompleteness(restored.advice, result.mode).complete, true)
 })
 
+test('V3结果固化本次使用的技术、五日资金和板块证据', async () => {
+  const result = await evaluateV3Decision(scenario({
+    trends: Array.from({ length: 6 }, (_, index) => ({
+      time: `10:${String(index).padStart(2, '0')}`,
+      price: 9.9 + index * 0.02,
+      avg: 9.88 + index * 0.02,
+    })),
+    fund: {
+      asOfDate: '2026-09-10',
+      mainNetYi: 1.2,
+      retailNetYi: -0.5,
+      mainTrend5: [0.2, 0.4, 0.6, 0.8, 1.2],
+      retailTrend5: [-0.1, -0.2, -0.3, -0.4, -0.5],
+      historyDayCount: 5,
+      historyComplete: true,
+    },
+    sector: {
+      matched: true,
+      sector: {
+        code: 'BK1000',
+        name: '测试板块',
+        phase: 'ACCUMULATION',
+        actionability: 'LAYOUT',
+        rank: 2,
+        mainNetYi: 3.1,
+        breadthPct: 65,
+      },
+    },
+  }))
+
+  const evidence = result.result.decisionEvidence
+  assert.equal(evidence.schemaVersion, 'v3-decision-evidence.v1')
+  assert.equal(evidence.availability.completeFundHistory, true)
+  assert.equal(evidence.availability.sectorContext, true)
+  assert.equal(evidence.availability.intradayTechnical, true)
+  assert.deepEqual(evidence.funds.mainTrend5, [0.2, 0.4, 0.6, 0.8, 1.2])
+  assert.equal(evidence.funds.mainStreak5, 5)
+  assert.equal(evidence.sector.name, '测试板块')
+  assert.equal(evidence.knownGaps.length, 0)
+})
+
 test('触发后路径特征只在复核事件中生成', async () => {
   const trends = {
     preClose: 9.8,

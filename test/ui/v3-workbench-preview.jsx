@@ -96,7 +96,7 @@ for (const [code, name, price, action, lots, state] of values) {
       ...(code === '600036'
         ? {
             v3Explanation: {
-              schemaVersion: 'v3-explanation.v1',
+              schemaVersion: 'v3-explanation.v2',
               status: 'ready',
               decisionId: `test-${code}`,
               model: 'LOCAL_EXPLAIN_DOUBLE',

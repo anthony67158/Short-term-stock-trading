@@ -252,7 +252,7 @@ book.advice['002594'].advice = {
     },
   },
   v3Explanation: {
-    schemaVersion: 'v3-explanation.v1',
+    schemaVersion: 'v3-explanation.v2',
     status: 'ready',
     decisionId: 'decision-demo-watch',
     model: 'LOCAL_EXPLAIN_DOUBLE',

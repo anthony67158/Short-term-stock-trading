@@ -61,6 +61,124 @@ function postTriggerRows(trends, triggeredAt) {
   }).slice(0, 12)
 }
 
+function finite(value) {
+  if (value == null || value === '') return null
+  const number = Number(value)
+  return Number.isFinite(number) ? number : null
+}
+
+function evidenceTrend(values) {
+  return (Array.isArray(values) ? values : [])
+    .slice(-5)
+    .map((value) => finite(value))
+}
+
+function buildDecisionEvidence({
+  now,
+  quote,
+  market,
+  sector,
+  fund,
+  shadowFeatures,
+  missingEvidence,
+}) {
+  const availability = {
+    dailyTechnical: shadowFeatures.dailyTechnicalAvailable === 1,
+    intradayTechnical: shadowFeatures.intradayTechnicalAvailable === 1,
+    currentFund: shadowFeatures.fundCurrentAvailable === 1,
+    fundHistory: shadowFeatures.fundHistoryAvailable === 1,
+    completeFundHistory: shadowFeatures.fundHistoryComplete === 1,
+    sectorContext: shadowFeatures.sectorContextAvailable === 1,
+    marketBreadth: (
+      finite(market?.breadth?.up) != null
+      && finite(market?.breadth?.down) != null
+    ),
+  }
+  const knownGaps = [...(missingEvidence || [])]
+  if (!availability.completeFundHistory) {
+    knownGaps.push(
+      `资金逐日历史仅${Math.trunc(
+        finite(shadowFeatures.fundHistoryDayCount) || 0,
+      )}个交易日，不能判断完整5日连续性`,
+    )
+  }
+  if (!availability.sectorContext) {
+    knownGaps.push('未匹配到有效板块上下文')
+  }
+  if (quote?.live === true && !availability.intradayTechnical) {
+    knownGaps.push('当前分时均价线数据缺失')
+  }
+  const sectorValue = sector?.sector || {}
+  const completeHistory = availability.completeFundHistory
+  return {
+    schemaVersion: 'v3-decision-evidence.v1',
+    asOf: now,
+    availability,
+    technical: {
+      quotePct: finite(quote?.pct),
+      ret2dPct: finite(shadowFeatures.ret2dPct),
+      ret5dPct: finite(shadowFeatures.ret5dPct),
+      atrPct: finite(shadowFeatures.atrPct),
+      vwapDistancePct: finite(shadowFeatures.vwapDistancePct),
+      intradayRangePct: finite(shadowFeatures.intradayRangePct),
+    },
+    funds: {
+      asOfDate: String(fund?.asOfDate || '').slice(0, 10) || null,
+      mainNetYi: availability.currentFund
+        ? finite(fund?.mainNetYi)
+        : null,
+      retailNetYi: availability.currentFund
+        ? finite(fund?.retailNetYi)
+        : null,
+      historyDayCount:
+        finite(shadowFeatures.fundHistoryDayCount) || 0,
+      historyComplete: completeHistory,
+      mainTrend5: evidenceTrend(fund?.mainTrend5 ?? fund?.trend5),
+      retailTrend5: evidenceTrend(fund?.retailTrend5),
+      main5dYi: finite(fund?.main5dYi)
+        ?? (completeHistory ? finite(shadowFeatures.main5dYi) : null),
+      retail5dYi: finite(fund?.retail5dYi)
+        ?? (completeHistory ? finite(shadowFeatures.retail5dYi) : null),
+      mainInflowDays5: availability.fundHistory
+        ? finite(shadowFeatures.mainInflowDays5)
+        : null,
+      retailInflowDays5: availability.fundHistory
+        ? finite(shadowFeatures.retailInflowDays5)
+        : null,
+      mainStreak5: availability.fundHistory
+        ? finite(shadowFeatures.mainStreak5)
+        : null,
+      retailStreak5: availability.fundHistory
+        ? finite(shadowFeatures.retailStreak5)
+        : null,
+    },
+    sector: {
+      matched: availability.sectorContext,
+      code: String(sectorValue.code || '').slice(0, 20) || null,
+      name: String(sectorValue.name || '').slice(0, 60) || null,
+      phase: String(sectorValue.phase || '').slice(0, 40) || null,
+      actionability:
+        String(sectorValue.actionability || '').slice(0, 40) || null,
+      rank: finite(sectorValue.rank),
+      mainNetYi: finite(
+        sectorValue.mainNetYi
+        ?? sectorValue.mainInflow,
+      ),
+      breadthPct: finite(
+        sectorValue.breadthPct
+        ?? sectorValue.breadth?.inflowPct
+        ?? sectorValue.breadth,
+      ),
+    },
+    market: {
+      up: finite(market?.breadth?.up),
+      down: finite(market?.breadth?.down),
+      flat: finite(market?.breadth?.flat),
+    },
+    knownGaps: [...new Set(knownGaps.filter(Boolean))],
+  }
+}
+
 export async function evaluateV3Decision({
   code, book, quotes, detail, trends, fund, sector, market, now = Date.now(),
   score = (inputs) => fetchOpportunityScores(inputs, { timeoutMs: 8000 }),
@@ -141,6 +259,15 @@ export async function evaluateV3Decision({
     trends: trendRows,
     fund: fund || {},
     sectorOpportunity: sector || {},
+  })
+  const decisionEvidence = buildDecisionEvidence({
+    now,
+    quote: payload.todayQuote,
+    market,
+    sector,
+    fund,
+    shadowFeatures,
+    missingEvidence,
   })
   // One request per route prevents stock-code keyed clients from mixing three prices.
   const evaluated = await Promise.all(plans.map(async (plan) => {
@@ -247,6 +374,7 @@ export async function evaluateV3Decision({
     } : {}),
     priceContract: decisionPlan.priceContract,
     executionPlan: compileExecutionPlan({ decisionPlan, code, name, now }),
+    decisionEvidence,
     continuity: {
       planId: decisionPlan.decisionId, revision: 1, thesisVersion: 1, changeType: 'initial',
     },

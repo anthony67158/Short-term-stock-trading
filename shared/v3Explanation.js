@@ -1,4 +1,4 @@
-export const V3_EXPLANATION_SCHEMA_VERSION = 'v3-explanation.v1'
+export const V3_EXPLANATION_SCHEMA_VERSION = 'v3-explanation.v2'
 
 const OUTPUT_FIELDS = new Set([
   'summary',
@@ -19,6 +19,80 @@ function finite(value) {
   if (value == null || value === '') return null
   const number = Number(value)
   return Number.isFinite(number) ? number : null
+}
+
+function evidenceValues(values) {
+  return (Array.isArray(values) ? values : [])
+    .slice(-5)
+    .map((value) => finite(value))
+}
+
+function evidenceGaps(values) {
+  return [...new Set(
+    (Array.isArray(values) ? values : [])
+      .map((item) => clean(item, 180))
+      .filter(Boolean),
+  )].slice(0, 8)
+}
+
+function projectDecisionEvidence(value) {
+  if (!value || typeof value !== 'object') return null
+  const availability = value.availability || {}
+  const technical = value.technical || {}
+  const funds = value.funds || {}
+  const sector = value.sector || {}
+  const market = value.market || {}
+  return {
+    asOf: finite(value.asOf),
+    availability: {
+      dailyTechnical: availability.dailyTechnical === true,
+      intradayTechnical: availability.intradayTechnical === true,
+      currentFund: availability.currentFund === true,
+      fundHistory: availability.fundHistory === true,
+      completeFundHistory: availability.completeFundHistory === true,
+      sectorContext: availability.sectorContext === true,
+      marketBreadth: availability.marketBreadth === true,
+    },
+    technical: {
+      quotePct: finite(technical.quotePct),
+      ret2dPct: finite(technical.ret2dPct),
+      ret5dPct: finite(technical.ret5dPct),
+      atrPct: finite(technical.atrPct),
+      vwapDistancePct: finite(technical.vwapDistancePct),
+      intradayRangePct: finite(technical.intradayRangePct),
+    },
+    funds: {
+      asOfDate: clean(funds.asOfDate, 16) || null,
+      mainNetYi: finite(funds.mainNetYi),
+      retailNetYi: finite(funds.retailNetYi),
+      historyDayCount: finite(funds.historyDayCount),
+      historyComplete: funds.historyComplete === true,
+      mainTrend5: evidenceValues(funds.mainTrend5),
+      retailTrend5: evidenceValues(funds.retailTrend5),
+      main5dYi: finite(funds.main5dYi),
+      retail5dYi: finite(funds.retail5dYi),
+      mainInflowDays5: finite(funds.mainInflowDays5),
+      retailInflowDays5: finite(funds.retailInflowDays5),
+      mainStreak5: finite(funds.mainStreak5),
+      retailStreak5: finite(funds.retailStreak5),
+    },
+    sector: {
+      matched: sector.matched === true,
+      code: clean(sector.code, 20) || null,
+      name: clean(sector.name, 60) || null,
+      phase: clean(sector.phase, 40) || null,
+      actionability: clean(sector.actionability, 40) || null,
+      rank: finite(sector.rank),
+      mainNetYi: finite(sector.mainNetYi),
+      breadthPct: finite(sector.breadthPct),
+    },
+    market: {
+      up: finite(market.up),
+      down: finite(market.down),
+      flat: finite(market.flat),
+    },
+    knownGaps: evidenceGaps(value.knownGaps),
+  }
 }
 
 export function currentV3Advice(accountData, code, decisionId) {
@@ -44,8 +118,17 @@ export function cachedV3Explanation(advice, decisionId) {
 export function buildV3ExplanationPacket(advice = {}) {
   const plan = advice.decisionPlan || {}
   const score = advice.selectedV3Plan?.opportunityScore || {}
+  const evidence = projectDecisionEvidence(advice.decisionEvidence)
+  const knownGaps = evidence?.knownGaps
+    || evidenceGaps(advice.decisionSource?.missingEvidence)
+  const evidenceFacts = evidence
+    ? Object.fromEntries(
+        Object.entries(evidence)
+          .filter(([name]) => name !== 'knownGaps'),
+      )
+    : null
   return {
-    schemaVersion: 'v3-explanation-packet.v1',
+    schemaVersion: 'v3-explanation-packet.v2',
     decisionId: plan.decisionId,
     action: plan.action,
     actionability: plan.actionability,
@@ -73,6 +156,8 @@ export function buildV3ExplanationPacket(advice = {}) {
         .map((item) => clean(item, 180))
         .filter(Boolean)
         .slice(0, 6),
+      evidence: evidenceFacts,
+      knownGaps,
     },
   }
 }
@@ -81,12 +166,19 @@ export function normalizeV3Explanation(value, {
   decisionId,
   model,
   now = Date.now(),
+  evidenceGaps: authoritativeEvidenceGaps,
 } = {}) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('模型解读返回格式无效')
   }
   const extra = Object.keys(value).filter((key) => !OUTPUT_FIELDS.has(key))
   if (extra.length) throw new Error('模型解读包含越权字段')
+  const authoritativeGap = Array.isArray(authoritativeEvidenceGaps)
+    ? clean(
+        evidenceGaps(authoritativeEvidenceGaps).join('；') || '无',
+        240,
+      )
+    : null
   const explanation = {
     schemaVersion: V3_EXPLANATION_SCHEMA_VERSION,
     status: 'ready',
@@ -96,7 +188,7 @@ export function normalizeV3Explanation(value, {
     summary: clean(value.summary, 320),
     counterCase: clean(value.counterCase, 320),
     invalidation: clean(value.invalidation, 320),
-    evidenceGap: clean(value.evidenceGap, 240),
+    evidenceGap: authoritativeGap ?? clean(value.evidenceGap, 240),
   }
   if (!explanation.decisionId || ![
     explanation.summary,

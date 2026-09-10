@@ -39,7 +39,7 @@ const advice = {
     },
   },
   v3Explanation: {
-    schemaVersion: 'v3-explanation.v1',
+    schemaVersion: 'v3-explanation.v2',
     status: 'ready',
     decisionId,
     model: 'LOCAL_EXPLAIN_DOUBLE',
