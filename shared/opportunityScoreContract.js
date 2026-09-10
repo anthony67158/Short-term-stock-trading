@@ -3,7 +3,7 @@ import {
 } from './opportunityShadowFeatures.js'
 
 export const OPPORTUNITY_SCORE_FEATURE_SCHEMA_VERSION =
-  'opportunity-score-feature.v4'
+  'opportunity-score-feature.v5'
 export const OPPORTUNITY_SCORE_SCHEMA_VERSION =
   'opportunity-score.v1'
 
@@ -281,6 +281,20 @@ export function buildOpportunityScoreInput({
     atrPct: rounded(shadow.atrPct),
     mainNetYi: rounded(shadow.mainNetYi),
     retailNetYi: rounded(shadow.retailNetYi),
+    fundCurrentAvailable: rounded(shadow.fundCurrentAvailable),
+    fundHistoryAvailable: rounded(shadow.fundHistoryAvailable),
+    fundHistoryDayCount: rounded(shadow.fundHistoryDayCount),
+    fundHistoryComplete: rounded(shadow.fundHistoryComplete),
+    main5dYi: rounded(shadow.main5dYi),
+    retail5dYi: rounded(shadow.retail5dYi),
+    mainInflowDays5: rounded(shadow.mainInflowDays5),
+    retailInflowDays5: rounded(shadow.retailInflowDays5),
+    mainStreak5: rounded(shadow.mainStreak5),
+    retailStreak5: rounded(shadow.retailStreak5),
+    mainTrendSlope5: rounded(shadow.mainTrendSlope5),
+    retailTrendSlope5: rounded(shadow.retailTrendSlope5),
+    flowDivergenceBalance5:
+      rounded(shadow.flowDivergenceBalance5),
     flowDivergence: rounded(shadow.flowDivergence),
     sectorRelativeStrength: rounded(shadow.sectorRelativeStrength),
     sectorRankPct: rounded(shadow.sectorRankPct),
@@ -302,6 +316,12 @@ export function buildOpportunityScoreInput({
     signalSectorRelativeStrength:
       rounded(shadow.signalSectorRelativeStrength),
     signalLimitCrowding: rounded(shadow.signalLimitCrowding),
+    dailyTechnicalAvailable:
+      rounded(shadow.dailyTechnicalAvailable),
+    intradayTechnicalAvailable:
+      rounded(shadow.intradayTechnicalAvailable),
+    sectorContextAvailable:
+      rounded(shadow.sectorContextAvailable),
   }
   for (const [prefix, values] of Object.entries(CATEGORIES)) {
     oneHot(factors, prefix, values, selected[prefix])

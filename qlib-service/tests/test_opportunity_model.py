@@ -225,13 +225,13 @@ class OpportunityModelTest(unittest.TestCase):
         self.assertAlmostEqual(result["expectedShortfall10"], -1.3)
         self.assertAlmostEqual(result["rankingScore"], 0.5)
 
-    def test_v4_request_can_use_loaded_v3_model_during_cutover(self):
+    def test_v5_request_can_use_loaded_v4_model_during_cutover(self):
         metadata = meta()
         legacy_names = feature_names_for_schema(
-            "opportunity-score-feature.v3",
+            "opportunity-score-feature.v4",
         )
         metadata.update({
-            "featureSchemaVersion": "opportunity-score-feature.v3",
+            "featureSchemaVersion": "opportunity-score-feature.v4",
             "featureNames": list(legacy_names),
             "ood": {
                 "minimum": [-1.0] * len(legacy_names),
@@ -256,7 +256,7 @@ class OpportunityModelTest(unittest.TestCase):
 
     def test_out_of_distribution_is_diagnostic_without_blocking_direct_use(self):
         value = item()
-        for name in FEATURE_NAMES[:12]:
+        for name in FEATURE_NAMES[:13]:
             value["factors"][name] = 100.0
 
         result = predict_opportunity_items(

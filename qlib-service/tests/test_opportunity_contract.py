@@ -83,7 +83,7 @@ class OpportunityContractTest(unittest.TestCase):
         for name in manifest["legacyDefaultZeroFeatures"]:
             self.assertEqual(normalized["factors"][name], 0.0)
 
-    def test_legacy_v3_inputs_only_fill_v4_features_with_zero(self):
+    def test_legacy_v4_inputs_only_fill_v5_features_with_zero(self):
         with open(
             os.path.join(
                 SERVICE_ROOT,
@@ -94,10 +94,10 @@ class OpportunityContractTest(unittest.TestCase):
         ) as handle:
             manifest = json.load(handle)
         defaults = manifest["legacyDefaultsByVersion"][
-            "opportunity-score-feature.v3"
+            "opportunity-score-feature.v4"
         ]
         legacy = item()
-        legacy["schemaVersion"] = "opportunity-score-feature.v3"
+        legacy["schemaVersion"] = "opportunity-score-feature.v4"
         for name in defaults:
             del legacy["factors"][name]
 
@@ -105,11 +105,11 @@ class OpportunityContractTest(unittest.TestCase):
 
         self.assertEqual(
             tuple(legacy["factors"]),
-            feature_names_for_schema("opportunity-score-feature.v3"),
+            feature_names_for_schema("opportunity-score-feature.v4"),
         )
         self.assertEqual(
             normalized["sourceSchemaVersion"],
-            "opportunity-score-feature.v3",
+            "opportunity-score-feature.v4",
         )
         for name in defaults:
             self.assertEqual(normalized["factors"][name], 0.0)

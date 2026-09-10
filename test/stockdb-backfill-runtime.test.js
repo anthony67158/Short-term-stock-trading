@@ -49,26 +49,45 @@ function minute(time, close) {
 
 test('盘中资金特征不读取当日盘后资金', () => {
   const rows = [
-    {
-      date: '20260907',
-      mainNetYi: 1,
-      retailNetYi: -0.5,
-      mainRatio: 2,
-    },
-    {
-      date: '20260908',
-      mainNetYi: 9,
-      retailNetYi: -4,
-      mainRatio: 8,
-    },
-  ]
+    ['20260903', 1, -1],
+    ['20260904', -2, 2],
+    ['20260905', 3, -3],
+    ['20260906', 4, -4],
+    ['20260907', 5, -5],
+    ['20260908', 9, -4],
+  ].map(([date, mainNetYi, retailNetYi]) => ({
+    date,
+    mainNetYi,
+    retailNetYi,
+    mainRatio: mainNetYi,
+  }))
 
   const intraday = buildHistoricalFund(rows, '20260908', 'intraday')
   const close = buildHistoricalFund(rows, '20260908', 'close')
   assert.equal(intraday.mainNetYi, null)
-  assert.equal(intraday.main5dYi, 1)
+  assert.deepEqual(intraday.mainTrend5, [1, -2, 3, 4, 5])
+  assert.deepEqual(intraday.retailTrend5, [-1, 2, -3, -4, -5])
+  assert.equal(intraday.main5dYi, 11)
+  assert.equal(intraday.historyComplete, true)
+  assert.equal(intraday.mainStreak, 3)
+  assert.equal(intraday.retailStreak, -3)
   assert.equal(close.mainNetYi, 9)
-  assert.equal(close.main5dYi, 10)
+  assert.deepEqual(close.mainTrend5, [-2, 3, 4, 5, 9])
+  assert.equal(close.main5dYi, 19)
+  assert.equal(close.historyComplete, true)
+})
+
+test('历史资金不足五日时不把部分合计冒充五日资金', () => {
+  const fund = buildHistoricalFund([{
+    date: '20260907',
+    mainNetYi: 1,
+    retailNetYi: -0.5,
+  }], '20260908', 'intraday')
+
+  assert.equal(fund.historyDayCount, 1)
+  assert.equal(fund.historyComplete, false)
+  assert.equal(fund.main5dYi, null)
+  assert.equal(fund.retail5dYi, null)
 })
 
 test('历史时点可复用生产扫描器生成三路径账本', async () => {

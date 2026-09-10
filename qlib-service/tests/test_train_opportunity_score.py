@@ -211,6 +211,8 @@ class TrainOpportunityScoreTest(unittest.TestCase):
                 set(report["metrics"]["featureAblation"]),
                 {
                     "orderFlow",
+                    "fundContinuity",
+                    "dataAvailability",
                     "overheat",
                     "liquidity",
                     "sectorStrength",

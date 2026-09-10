@@ -10,7 +10,7 @@ from opportunity_dataset import (
     build_opportunity_dataset,
     opportunity_dataset_readiness,
 )
-from opportunity_contract import FEATURE_SCHEMA_VERSION
+from opportunity_contract import feature_names_for_schema
 
 
 HISTORY_SCHEMA_VERSION = "opportunity-history.v1"
@@ -89,12 +89,13 @@ def repair_outcome_net_r(value):
 def normalize_history_outcomes(payload):
     unique = {}
     for value in _outcomes(payload):
-        if (
-            not isinstance(value, dict)
-            or value.get("maturity") != "MATURED"
-            or value.get("scoreInput", {}).get("schemaVersion")
-            != FEATURE_SCHEMA_VERSION
-        ):
+        if not isinstance(value, dict) or value.get("maturity") != "MATURED":
+            continue
+        try:
+            feature_names_for_schema(
+                value.get("scoreInput", {}).get("schemaVersion")
+            )
+        except ValueError:
             continue
         decision_id = str(value.get("decisionId") or "")
         if not decision_id.startswith("formula:"):

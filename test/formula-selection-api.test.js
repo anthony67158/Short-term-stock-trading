@@ -683,7 +683,7 @@ test('公式结果使用LightGBM动作门槛和CatBoost排序分组合排序', a
   )
   assert.equal(
     savedLedger.events[0].scoreInput.schemaVersion,
-    'opportunity-score-feature.v4',
+    'opportunity-score-feature.v5',
   )
   assert.deepEqual(result.v3Scoring, {
     usagePolicy: 'DIRECT',

@@ -11,12 +11,14 @@ sys.path.insert(0, SERVICE_ROOT)
 from opportunity_contract import (  # noqa: E402
     FEATURE_NAMES,
     FEATURE_SCHEMA_VERSION,
+    feature_names_for_schema,
 )
 from opportunity_history import (  # noqa: E402
     HISTORY_MANIFEST_KEY,
     PLANNED_RISK_BASIS,
     build_history_artifact,
     load_opportunity_history,
+    normalize_history_outcomes,
     publish_opportunity_history,
     repair_outcome_net_r,
 )
@@ -78,6 +80,26 @@ def outcome(index, filled, net_r=None):
 
 
 class OpportunityHistoryTest(unittest.TestCase):
+    def test_v4_history_is_preserved_during_v5_migration(self):
+        value = outcome(1, True, 1.2)
+        value["scoreInput"]["schemaVersion"] = (
+            "opportunity-score-feature.v4"
+        )
+        value["scoreInput"]["factors"] = {
+            name: 0.0
+            for name in feature_names_for_schema(
+                "opportunity-score-feature.v4"
+            )
+        }
+
+        normalized = normalize_history_outcomes({"outcomes": [value]})
+
+        self.assertEqual(len(normalized), 1)
+        self.assertEqual(
+            normalized[0]["scoreInput"]["schemaVersion"],
+            "opportunity-score-feature.v4",
+        )
+
     def test_legacy_net_r_is_rebuilt_from_planned_price_contract(self):
         value = outcome(1, True, -500)
         value["trigger"] = {"price": 10}

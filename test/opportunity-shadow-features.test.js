@@ -41,6 +41,10 @@ test('影子特征只使用决策时点量价资金和板块证据', () => {
     fund: {
       mainNetYi: 1.2,
       retailNetYi: -0.5,
+      mainTrend5: [0.2, 0.4, 0.8, 1, 1.2],
+      retailTrend5: [-0.1, -0.2, -0.3, -0.4, -0.5],
+      historyDayCount: 5,
+      historyComplete: true,
     },
     sectorOpportunity: {
       sector: {
@@ -57,6 +61,15 @@ test('影子特征只使用决策时点量价资金和板块证据', () => {
     OPPORTUNITY_SHADOW_FEATURE_NAMES,
   )
   assert.equal(factors.flowDivergence, 1)
+  assert.equal(factors.fundCurrentAvailable, 1)
+  assert.equal(factors.fundHistoryComplete, 1)
+  assert.equal(factors.mainInflowDays5, 5)
+  assert.equal(factors.retailInflowDays5, 0)
+  assert.equal(factors.mainStreak5, 5)
+  assert.equal(factors.retailStreak5, -5)
+  assert.equal(factors.flowDivergenceBalance5, 5)
+  assert.ok(factors.mainTrendSlope5 > 0)
+  assert.ok(factors.retailTrendSlope5 < 0)
   assert.ok(factors.orderImbalanceShort >= 30)
   assert.equal(factors.signalOrderFlowContinuation, 1)
   assert.equal(factors.signalLiquidityConfirmed, 1)
@@ -74,5 +87,35 @@ test('影子特征在证据缺失时使用有限中性值而不是NaN', () => {
     true,
   )
   assert.equal(factors.evidenceCompleteness, 0)
+  assert.equal(factors.fundCurrentAvailable, 0)
+  assert.equal(factors.fundHistoryAvailable, 0)
+  assert.equal(factors.fundHistoryComplete, 0)
+  assert.equal(factors.dailyTechnicalAvailable, 0)
+  assert.equal(factors.intradayTechnicalAvailable, 0)
+  assert.equal(factors.sectorContextAvailable, 0)
   assert.equal(factors.signalOrderFlowContinuation, 0)
+})
+
+test('单日资金与完整五日资金使用独立可用性标识', () => {
+  const factors = buildOpportunityShadowFeatures({
+    quote: { price: 10, preClose: 9.8 },
+    candles: candles(),
+    fund: {
+      mainNetYi: 0,
+      retailNetYi: 0,
+      mainTrend5: [0],
+      retailTrend5: [0],
+      historyDayCount: 1,
+      historyComplete: true,
+    },
+  })
+
+  assert.equal(factors.mainNetYi, 0)
+  assert.equal(factors.retailNetYi, 0)
+  assert.equal(factors.fundCurrentAvailable, 1)
+  assert.equal(factors.fundHistoryAvailable, 1)
+  assert.equal(factors.fundHistoryDayCount, 1)
+  assert.equal(factors.fundHistoryComplete, 0)
+  assert.equal(factors.main5dYi, 0)
+  assert.equal(factors.retail5dYi, 0)
 })

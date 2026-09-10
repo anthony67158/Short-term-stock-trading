@@ -86,6 +86,24 @@ function hasSplitLikeDiscontinuity(candles) {
   return false
 }
 
+function finite(value) {
+  if (value == null || value === '') return null
+  const number = Number(value)
+  return Number.isFinite(number) ? number : null
+}
+
+function signedStreak(values) {
+  let result = 0
+  for (let index = values.length - 1; index >= 0; index -= 1) {
+    const value = values[index]
+    if (value == null || value === 0) break
+    if (result === 0) result = value > 0 ? 1 : -1
+    else if ((result > 0) === (value > 0)) result += result > 0 ? 1 : -1
+    else break
+  }
+  return result
+}
+
 export function buildHistoricalFund(rows, tradeDate, mode) {
   const date = String(tradeDate).replaceAll('-', '')
   const visible = (Array.isArray(rows) ? rows : [])
@@ -97,21 +115,32 @@ export function buildHistoricalFund(rows, tradeDate, mode) {
     ? visible.findLast((row) => row.date === date)
     : null
   const recent = visible.slice(-5)
-  const sum = (field) => {
-    const values = recent
-      .map((row) => Number(row?.[field]))
-      .filter(Number.isFinite)
-    return values.length
-      ? values.reduce((total, value) => total + value, 0)
-      : null
-  }
+  const mainTrend5 = recent.map((row) => finite(row?.mainNetYi))
+  const retailTrend5 = recent.map((row) => finite(row?.retailNetYi))
+  const historyComplete = (
+    recent.length >= 5
+    && mainTrend5.every((value) => value != null)
+    && retailTrend5.every((value) => value != null)
+  )
   return {
     mainNetYi: current?.mainNetYi ?? null,
     retailNetYi: current?.retailNetYi ?? null,
     mainRatio: current?.mainRatio ?? null,
-    main5dYi: sum('mainNetYi'),
-    retail5dYi: sum('retailNetYi'),
+    main5dYi: historyComplete
+      ? mainTrend5.reduce((total, value) => total + value, 0)
+      : null,
+    retail5dYi: historyComplete
+      ? retailTrend5.reduce((total, value) => total + value, 0)
+      : null,
     historyDayCount: recent.length,
+    historyComplete,
+    mainTrend5,
+    retailTrend5,
+    inflowDays: mainTrend5.filter((value) => value > 0).length,
+    retailInflowDays:
+      retailTrend5.filter((value) => value > 0).length,
+    mainStreak: signedStreak(mainTrend5),
+    retailStreak: signedStreak(retailTrend5),
   }
 }
 

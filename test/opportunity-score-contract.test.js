@@ -45,6 +45,14 @@ function event(overrides = {}) {
     }],
     shadowFeatures: {
       ret2dPct: 3.2,
+      fundCurrentAvailable: 1,
+      fundHistoryAvailable: 1,
+      fundHistoryDayCount: 5,
+      fundHistoryComplete: 1,
+      main5dYi: 2.4,
+      retail5dYi: -1.1,
+      mainStreak5: 3,
+      retailStreak5: -2,
       sectorMainNetYi: 1.2,
       sectorBreadthPct: 63,
       sectorMemberCount: 42,
@@ -54,6 +62,9 @@ function event(overrides = {}) {
       liquidityComposite: 72,
       signalOrderFlowContinuation: 1,
       signalLiquidityConfirmed: 1,
+      dailyTechnicalAvailable: 1,
+      intradayTechnicalAvailable: 1,
+      sectorContextAvailable: 1,
     },
     recall: {
       primarySource: 'ACCUMULATION',
@@ -120,6 +131,9 @@ test('机会评分特征只使用决策时点数据并保持固定顺序', () =>
   assert.equal(input.factors.recallSourceCount, 2)
   assert.equal(input.factors.explorationSample, 0)
   assert.equal(input.factors.ret2dPct, 3.2)
+  assert.equal(input.factors.fundHistoryDayCount, 5)
+  assert.equal(input.factors.main5dYi, 2.4)
+  assert.equal(input.factors.retailStreak5, -2)
   assert.equal(input.factors.orderImbalanceShort, 46)
   assert.equal(input.factors.signalOrderFlowContinuation, 1)
   assert.equal(input.factors.signalLiquidityConfirmed, 1)
