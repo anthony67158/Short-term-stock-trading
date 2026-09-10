@@ -39,8 +39,8 @@ class PocV3ModelBakeoffTest(unittest.TestCase):
             thresholds,
         )
 
-        self.assertEqual(labels.tolist(), [0, 0, 1, 1, 2, 3, 0])
-        self.assertEqual(validation.tolist(), [0, 1, 2, 3])
+        self.assertEqual(labels.tolist(), [0, 1, 2, 2, 3, 4, 1])
+        self.assertEqual(validation.tolist(), [0, 2, 3, 4])
         self.assertEqual(reused, thresholds)
 
     def test_constant_training_features_are_excluded_for_all_models(self):

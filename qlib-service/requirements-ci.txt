@@ -6,6 +6,7 @@ pandas==2.2.3
 scipy==1.14.1
 scikit-learn==1.5.2
 lightgbm==4.7.0
+catboost==1.2.10
 arch==8.0.0
 oss2==2.19.1
 httpx==0.28.1

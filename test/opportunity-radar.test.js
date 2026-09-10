@@ -229,6 +229,48 @@ test('同一状态内按费后净期望下界而不是热度分排序', () => {
   )
 })
 
+test('组合模型在同一可执行状态内优先使用CatBoost排序分', () => {
+  const highValue = formulaCandidate({
+    code: '600001',
+    opportunityScore: {
+      state: 'READY',
+      usagePolicy: 'DIRECT',
+      pFill: 0.8,
+      pWinGivenFill: 0.62,
+      expectedNetR: 0.4,
+      netRLowerBound: 0.1,
+      rankingScore: 0.3,
+    },
+  })
+  const highRank = formulaCandidate({
+    code: '600002',
+    opportunityScore: {
+      state: 'READY',
+      usagePolicy: 'DIRECT',
+      pFill: 0.7,
+      pWinGivenFill: 0.58,
+      expectedNetR: 0.12,
+      netRLowerBound: 0.02,
+      rankingScore: 0.9,
+    },
+  })
+  const result = buildOpportunityRadar({
+    now: NOW,
+    sector: {
+      market: { phase: 'live', day: '2026-09-02' },
+      intraday: sectorSnapshot(),
+    },
+    formula: {
+      intraday: formulaResult('INTRADAY', [highValue, highRank]),
+    },
+  })
+
+  assert.deepEqual(
+    result.lanes.intraday.map((item) => item.code),
+    ['600002', '600001'],
+  )
+})
+
 test('校准后的负期望候选保留展示但降为本次不买', () => {
   const result = buildOpportunityRadar({
     now: NOW,

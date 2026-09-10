@@ -366,9 +366,11 @@ export function unavailableOpportunityScore(input = {}, reason) {
     pWinGivenFill: null,
     expectedNetR: null,
     netRLowerBound: null,
+    rankingScore: null,
     meanConfidenceLowerBound: null,
     lowerBoundKind: 'PREDICTION_P10',
     shadowOnly: true,
+    baselineSelected: false,
     productionEligible: false,
     expectedShortfall10: null,
     calibration: null,
@@ -449,9 +451,13 @@ export function normalizeOpportunityScoreResponse(
     pWinGivenFill: probability(response.pWinGivenFill),
     expectedNetR: requiredMetric(response.expectedNetR),
     netRLowerBound: requiredMetric(response.netRLowerBound),
+    rankingScore: response.rankingScore == null
+      ? null
+      : probability(response.rankingScore),
     meanConfidenceLowerBound: finite(response.meanConfidenceLowerBound),
     lowerBoundKind: 'PREDICTION_P10',
     shadowOnly: response.shadowOnly !== false,
+    baselineSelected: response.baselineSelected === true,
     productionEligible:
       response.productionEligible === true && response.shadowOnly === false,
     usagePolicy: response.usagePolicy === 'DIRECT' ? 'DIRECT' : 'QUALIFIED',

@@ -70,6 +70,18 @@ class OpportunityPromotionTest(unittest.TestCase):
             for blocker in decision["blockers"]
         ))
 
+    def test_daily_gate_requires_joint_model_stability(self):
+        decision = promotion_decision(
+            report(),
+            {"combination": {"eligible": False}},
+        )
+
+        self.assertFalse(decision["eligible"])
+        self.assertTrue(any(
+            "CatBoost排序" in blocker
+            for blocker in decision["blockers"]
+        ))
+
 
 if __name__ == "__main__":
     unittest.main()

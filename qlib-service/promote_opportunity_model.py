@@ -6,7 +6,7 @@ import os
 import shutil
 
 from opportunity_model import (
-    ARTIFACT_FILENAMES,
+    artifact_filenames_for_metadata,
     validate_opportunity_metadata,
 )
 
@@ -33,8 +33,14 @@ def production_model_version(value):
     return promoted
 
 
-def promotion_decision(report):
+def promotion_decision(report, stability=None):
     blockers = []
+    if stability is not None:
+        combination = stability.get("combination") or {}
+        if combination.get("eligible") is not True:
+            blockers.append(
+                "LightGBM动作价值与CatBoost排序未同时通过多种子门槛"
+            )
     if report.get("state") != "SHADOW_READY":
         blockers.append("影子模型尚未通过训练闸门")
     walk = report.get("walkForward") or {}
@@ -91,24 +97,38 @@ def promotion_decision(report):
     }
 
 
-def promote(source_directory, report_path, output_directory):
+def promote(
+    source_directory,
+    report_path,
+    output_directory,
+    *,
+    stability_path=None,
+):
     with open(report_path, encoding="utf-8") as handle:
         report = json.load(handle)
-    decision = promotion_decision(report)
+    stability = None
+    if stability_path:
+        with open(stability_path, encoding="utf-8") as handle:
+            stability = json.load(handle)
+    decision = promotion_decision(report, stability)
     if not decision["eligible"]:
         raise ValueError("；".join(decision["blockers"]))
     source = os.path.abspath(source_directory)
     target = os.path.abspath(output_directory)
     os.makedirs(target, exist_ok=True)
-    for filename in ARTIFACT_FILENAMES.values():
+    metadata_path = os.path.join(source, "opportunity_meta.json")
+    with open(metadata_path, encoding="utf-8") as handle:
+        metadata = validate_opportunity_metadata(json.load(handle))
+    artifact_filenames = artifact_filenames_for_metadata(metadata)
+    for filename in artifact_filenames.values():
         source_path = os.path.join(source, filename)
         if not os.path.isfile(source_path):
             raise FileNotFoundError(source_path)
         shutil.copy2(source_path, os.path.join(target, filename))
-    metadata_path = os.path.join(target, ARTIFACT_FILENAMES["meta"])
-    with open(metadata_path, encoding="utf-8") as handle:
-        metadata = json.load(handle)
-    validate_opportunity_metadata(metadata)
+    metadata_path = os.path.join(
+        target,
+        artifact_filenames["meta"],
+    )
     metadata.update({
         "modelVersion": production_model_version(
             metadata.get("modelVersion"),
@@ -132,12 +152,17 @@ def main():
     parser.add_argument("--source", required=True)
     parser.add_argument("--report", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--stability")
     parser.add_argument("--check-only", action="store_true")
     parser.add_argument("--decision-output")
     args = parser.parse_args()
     with open(args.report, encoding="utf-8") as handle:
         report = json.load(handle)
-    checked = promotion_decision(report)
+    stability = None
+    if args.stability:
+        with open(args.stability, encoding="utf-8") as handle:
+            stability = json.load(handle)
+    checked = promotion_decision(report, stability)
     if args.decision_output:
         destination = os.path.abspath(args.decision_output)
         os.makedirs(os.path.dirname(destination), exist_ok=True)
@@ -148,7 +173,12 @@ def main():
     if args.check_only:
         print(json.dumps(checked, ensure_ascii=False, indent=2))
         return
-    decision = promote(args.source, args.report, args.output)
+    decision = promote(
+        args.source,
+        args.report,
+        args.output,
+        stability_path=args.stability,
+    )
     print(json.dumps(decision, ensure_ascii=False, indent=2))
 
 

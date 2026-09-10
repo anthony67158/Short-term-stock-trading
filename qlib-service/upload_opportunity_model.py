@@ -10,6 +10,7 @@ import time
 from opportunity_model import (
     ARTIFACT_FILENAMES,
     MANIFEST_SCHEMA_VERSION,
+    artifact_filenames_for_metadata,
     validate_opportunity_metadata,
 )
 from model_lib import _oss_bucket
@@ -44,7 +45,7 @@ def _load_metadata(directory):
         or ".." in run_id
     ):
         raise ValueError("机会模型版本无效")
-    return metadata, run_id
+    return metadata, run_id, artifact_filenames_for_metadata(metadata)
 
 
 def publish_opportunity_release(
@@ -53,13 +54,14 @@ def publish_opportunity_release(
     *,
     prefix="opportunitymodel/",
     activated_at=None,
+    activate_baseline=False,
 ):
     source = os.path.abspath(directory)
-    metadata, run_id = _load_metadata(source)
+    metadata, run_id, artifact_filenames = _load_metadata(source)
     normalized_prefix = str(prefix or "opportunitymodel/").strip("/")
     release_prefix = f"{normalized_prefix}/runs/{run_id}/"
     manifest_files = {}
-    for slot, filename in ARTIFACT_FILENAMES.items():
+    for slot, filename in artifact_filenames.items():
         path = os.path.join(source, filename)
         if not os.path.isfile(path):
             raise FileNotFoundError(path)
@@ -79,7 +81,16 @@ def publish_opportunity_release(
         "runId": run_id,
         "activatedAt": int(activated_at or time.time()),
         "usagePolicy": "DIRECT",
-        "shadowOnly": metadata.get("shadowOnly", True),
+        "predictionContract": metadata.get(
+            "predictionContract",
+            "opportunity-three-head.v1",
+        ),
+        "shadowOnly": (
+            False
+            if activate_baseline
+            else metadata.get("shadowOnly", True)
+        ),
+        "baselineSelected": bool(activate_baseline),
         "productionEligible": metadata.get(
             "productionEligible",
             False,
@@ -109,17 +120,24 @@ def main():
             "opportunitymodel/",
         ),
     )
+    parser.add_argument(
+        "--activate-baseline",
+        action="store_true",
+        help="将当前最佳组合设为DIRECT基准，但不伪造生产门槛结果",
+    )
     args = parser.parse_args()
     manifest = publish_opportunity_release(
         _bucket(),
         args.directory,
         prefix=args.prefix,
+        activate_baseline=args.activate_baseline,
     )
     print(json.dumps({
         "ok": True,
         "runId": manifest["runId"],
         "shadowOnly": manifest["shadowOnly"],
         "productionEligible": manifest["productionEligible"],
+        "baselineSelected": manifest["baselineSelected"],
     }, ensure_ascii=False))
 
 

@@ -273,6 +273,7 @@ test('就绪评分验证代码、概率范围和完整数值合同', () => {
     pWinGivenFill: 0.61,
     expectedNetR: 0.18,
     netRLowerBound: 0.03,
+    rankingScore: 0.87,
     expectedShortfall10: -1.12,
     calibration: {
       method: 'isotonic',
@@ -288,6 +289,7 @@ test('就绪评分验证代码、概率范围和完整数值合同', () => {
 
   assert.equal(result.state, 'READY')
   assert.equal(result.pFill, 0.74)
+  assert.equal(result.rankingScore, 0.87)
   assert.equal(result.calibration.sampleCount, 426)
   assert.throws(() => normalizeOpportunityScoreResponse({
     ...result,

@@ -637,6 +637,8 @@ function sortedRows(rows) {
       (STATE_ORDER[left.state] ?? 99) - (STATE_ORDER[right.state] ?? 99)
       || Number(left.blockers?.length || 0)
         - Number(right.blockers?.length || 0)
+      || modelMetric(right, 'rankingScore', -Infinity)
+        - modelMetric(left, 'rankingScore', -Infinity)
       || modelMetric(right, 'netRLowerBound', -Infinity)
         - modelMetric(left, 'netRLowerBound', -Infinity)
       || modelMetric(right, 'pFill', -Infinity)

@@ -1,4 +1,4 @@
-"""Train the independent, shadow-only opportunity ranking sidecar."""
+"""Train the production-gated opportunity action-value candidate."""
 
 import argparse
 import json
@@ -31,10 +31,14 @@ from time_splits import (
 
 MODEL_VERSION_PREFIX = "opportunity-score"
 TRAINING_SCHEMA_VERSION = "opportunity-training.v1"
+PREDICTION_CONTRACT_VERSION = "opportunity-hurdle-q10.v1"
 MODEL_FILENAMES = {
     "pFill": "opportunity_fill_lgb.txt",
     "pWinGivenFill": "opportunity_win_lgb.txt",
-    "expectedNetR": "opportunity_netr_lgb.txt",
+    "winPayoffR": "opportunity_win_payoff_lgb.txt",
+    "lossPayoffR": "opportunity_loss_payoff_lgb.txt",
+    "netRLower10": "opportunity_q10_lgb.txt",
+    "ranking": "opportunity_ranker_catboost.cbm",
 }
 SHADOW_FEATURE_GROUPS = {
     "orderFlow": (
@@ -151,7 +155,7 @@ def _classifier_probabilities(model, X):
     return np.clip(values[:, 1], 1e-8, 1 - 1e-8)
 
 
-def _fit_lgb_classifier(X, labels):
+def _fit_lgb_classifier(X, labels, sample_weight=None):
     import lightgbm as lgb
 
     model = lgb.LGBMClassifier(
@@ -170,32 +174,21 @@ def _fit_lgb_classifier(X, labels):
         n_jobs=-1,
         verbosity=-1,
     )
-    model.fit(X, labels, feature_name=list(FEATURE_NAMES))
-    return model
-
-
-def _fit_logistic_classifier(X, labels):
-    from sklearn.linear_model import LogisticRegression
-    from sklearn.pipeline import make_pipeline
-    from sklearn.preprocessing import StandardScaler
-
-    model = make_pipeline(
-        StandardScaler(),
-        LogisticRegression(
-            C=0.5,
-            max_iter=2000,
-            random_state=42,
-        ),
+    model.fit(
+        X,
+        labels,
+        sample_weight=sample_weight,
+        feature_name=list(FEATURE_NAMES),
     )
-    model.fit(X, labels)
     return model
 
 
-def _fit_lgb_regressor(X, labels):
+def _fit_lgb_regressor(X, labels, sample_weight=None):
     import lightgbm as lgb
 
     model = lgb.LGBMRegressor(
-        objective="regression",
+        objective="huber",
+        alpha=0.9,
         n_estimators=240,
         learning_rate=0.035,
         num_leaves=15,
@@ -210,20 +203,41 @@ def _fit_lgb_regressor(X, labels):
         n_jobs=-1,
         verbosity=-1,
     )
-    model.fit(X, labels, feature_name=list(FEATURE_NAMES))
+    model.fit(
+        X,
+        labels,
+        sample_weight=sample_weight,
+        feature_name=list(FEATURE_NAMES),
+    )
     return model
 
 
-def _fit_linear_regressor(X, labels):
-    from sklearn.linear_model import Ridge
-    from sklearn.pipeline import make_pipeline
-    from sklearn.preprocessing import StandardScaler
+def _fit_lgb_quantile_regressor(X, labels, sample_weight=None):
+    import lightgbm as lgb
 
-    model = make_pipeline(
-        StandardScaler(),
-        Ridge(alpha=10.0),
+    model = lgb.LGBMRegressor(
+        objective="quantile",
+        alpha=0.1,
+        n_estimators=240,
+        learning_rate=0.035,
+        num_leaves=15,
+        max_depth=5,
+        min_child_samples=30,
+        subsample=0.85,
+        subsample_freq=1,
+        colsample_bytree=0.85,
+        reg_alpha=0.3,
+        reg_lambda=1.0,
+        random_state=42,
+        n_jobs=-1,
+        verbosity=-1,
     )
-    model.fit(X, labels)
+    model.fit(
+        X,
+        labels,
+        sample_weight=sample_weight,
+        feature_name=list(FEATURE_NAMES),
+    )
     return model
 
 
@@ -258,7 +272,413 @@ def _conditional_indices(indices, *targets):
     return selected[mask]
 
 
+def _clip_labels(values, low=0.005, high=0.995):
+    data = np.asarray(values, dtype=np.float64)
+    lower, upper = np.quantile(data, [low, high])
+    return np.clip(data, lower, upper), {
+        "lower": round(float(lower), 6),
+        "upper": round(float(upper), 6),
+    }
+
+
+def _compose_expected_net_r(
+    win_probability,
+    win_payoff,
+    loss_payoff,
+):
+    probability = np.clip(
+        np.asarray(win_probability, dtype=np.float64),
+        0,
+        1,
+    )
+    positive = np.maximum(
+        0,
+        np.asarray(win_payoff, dtype=np.float64),
+    )
+    negative = np.minimum(
+        0,
+        np.asarray(loss_payoff, dtype=np.float64),
+    )
+    if (
+        probability.shape != positive.shape
+        or negative.shape != positive.shape
+    ):
+        raise ValueError("机会动作价值数组维度不一致")
+    return probability * positive + (1 - probability) * negative
+
+
+def _constant_regression_metrics(train_labels, holdout_labels):
+    prediction = np.full(
+        len(holdout_labels),
+        float(np.median(train_labels)),
+        dtype=np.float64,
+    )
+    return regression_metrics(holdout_labels, prediction)
+
+
+def _training_weights(data, indices, labels=None):
+    selected = np.asarray(indices, dtype=np.int64)
+    weights = np.ones(len(selected), dtype=np.float64)
+    dates = data["dates"][selected].astype(str)
+    unique_dates = np.unique(dates)
+    date_rank = {
+        date: rank
+        for rank, date in enumerate(unique_dates)
+    }
+    if len(unique_dates) > 1:
+        weights *= np.asarray([
+            0.75 + 0.5 * date_rank[date] / (len(unique_dates) - 1)
+            for date in dates
+        ])
+    strata = np.char.add(
+        np.char.add(data["playbook_ids"][selected].astype(str), ":"),
+        data["routes"][selected].astype(str),
+    )
+    _, inverse, counts = np.unique(
+        strata,
+        return_inverse=True,
+        return_counts=True,
+    )
+    weights *= np.sqrt(len(selected) / np.maximum(
+        len(counts) * counts[inverse],
+        1,
+    ))
+    if labels is not None:
+        binary = np.asarray(labels, dtype=np.int8)
+        if binary.shape != (len(selected),):
+            raise ValueError("机会训练权重标签维度无效")
+        _, class_inverse, class_counts = np.unique(
+            binary,
+            return_inverse=True,
+            return_counts=True,
+        )
+        weights *= len(selected) / np.maximum(
+            len(class_counts) * class_counts[class_inverse],
+            1,
+        )
+        formula_index = FEATURE_NAMES.index("formulaScore")
+        formula_strength = np.clip(
+            data["X"][selected, formula_index] / 100.0,
+            0,
+            1,
+        )
+        weights *= np.where(
+            binary == 0,
+            1 + 0.75 * formula_strength,
+            1.0,
+        )
+    weights = np.clip(weights, 0.25, 4.0)
+    return weights / max(float(weights.mean()), 1e-9)
+
+
+def _rank_relevance(values):
+    actual = np.nan_to_num(
+        np.asarray(values, dtype=np.float64),
+        nan=0.0,
+    )
+    positive = actual[actual > 0]
+    if not len(positive):
+        raise ValueError("排序训练集没有正收益样本")
+    middle, high = np.quantile(positive, [0.5, 0.8])
+    labels = np.ones(len(actual), dtype=np.int32)
+    labels[actual < 0] = 0
+    labels[actual > 0] = 2
+    labels[actual > middle] = 3
+    labels[actual > high] = 4
+    return labels, {
+        "zeroOrUnfilled": 1,
+        "positiveMedian": round(float(middle), 6),
+        "positiveHigh": round(float(high), 6),
+    }
+
+
+def _fit_rank_value_calibrator(scores, values):
+    x = np.asarray(scores, dtype=np.float64)
+    y = np.asarray(values, dtype=np.float64)
+    if (
+        x.ndim != 1
+        or y.shape != x.shape
+        or len(x) < 20
+        or not np.isfinite(x).all()
+        or not np.isfinite(y).all()
+    ):
+        raise ValueError("排序价值校准样本无效")
+    lower, upper = np.quantile(y, [0.01, 0.99])
+    order = np.argsort(x, kind="stable")
+    ordered_x = x[order]
+    ordered_y = np.clip(y[order], lower, upper)
+    unique_x, inverse = np.unique(ordered_x, return_inverse=True)
+    if len(unique_x) == 1:
+        unique_x = np.asarray(
+            [unique_x[0] - 1e-9, unique_x[0] + 1e-9],
+            dtype=np.float64,
+        )
+        mean = float(np.mean(ordered_y))
+        return {
+            "method": "isotonic",
+            "score": unique_x.astype(float).tolist(),
+            "expectedNetR": [mean, mean],
+            "sampleCount": int(len(x)),
+            "labelClip": {
+                "lower": round(float(lower), 6),
+                "upper": round(float(upper), 6),
+            },
+        }
+    sums = np.bincount(inverse, weights=ordered_y).astype(np.float64)
+    counts = np.bincount(inverse).astype(np.float64)
+    blocks = [
+        {
+            "start": index,
+            "end": index,
+            "weight": counts[index],
+            "sum": sums[index],
+        }
+        for index in range(len(unique_x))
+    ]
+    cursor = 0
+    while cursor < len(blocks) - 1:
+        left = blocks[cursor]
+        right = blocks[cursor + 1]
+        left_mean = left["sum"] / left["weight"]
+        right_mean = right["sum"] / right["weight"]
+        if left_mean <= right_mean:
+            cursor += 1
+            continue
+        blocks[cursor:cursor + 2] = [{
+            "start": left["start"],
+            "end": right["end"],
+            "weight": left["weight"] + right["weight"],
+            "sum": left["sum"] + right["sum"],
+        }]
+        cursor = max(0, cursor - 1)
+    fitted = np.empty(len(unique_x), dtype=np.float64)
+    for block in blocks:
+        fitted[block["start"]:block["end"] + 1] = (
+            block["sum"] / block["weight"]
+        )
+    return {
+        "method": "isotonic",
+        "score": unique_x.astype(float).tolist(),
+        "expectedNetR": fitted.astype(float).tolist(),
+        "sampleCount": int(len(x)),
+        "labelClip": {
+            "lower": round(float(lower), 6),
+            "upper": round(float(upper), 6),
+        },
+    }
+
+
+def _apply_rank_value_calibrator(scores, artifact):
+    x = np.asarray((artifact or {}).get("score"), dtype=np.float64)
+    y = np.asarray(
+        (artifact or {}).get("expectedNetR"),
+        dtype=np.float64,
+    )
+    values = np.asarray(scores, dtype=np.float64)
+    if (
+        x.ndim != 1
+        or y.shape != x.shape
+        or len(x) < 2
+        or not np.isfinite(x).all()
+        or not np.isfinite(y).all()
+        or np.any(np.diff(x) < 0)
+    ):
+        raise ValueError("排序价值校准参数无效")
+    return np.interp(values, x, y)
+
+
+def _fit_catboost_ranker(data, train_index):
+    from catboost import CatBoostRanker
+
+    selected = np.asarray(train_index, dtype=np.int64)
+    dates = data["dates"][selected].astype(str)
+    codes = data["codes"][selected].astype(str)
+    order = np.lexsort((codes, dates))
+    sorted_index = selected[order]
+    sorted_dates = dates[order]
+    _, group_ids = np.unique(sorted_dates, return_inverse=True)
+    relevance, thresholds = _rank_relevance(
+        data["y_net_r"][sorted_index],
+    )
+    model = CatBoostRanker(
+        loss_function="YetiRankPairwise",
+        iterations=240,
+        learning_rate=0.04,
+        depth=6,
+        random_seed=42,
+        thread_count=-1,
+        verbose=False,
+        allow_writing_files=False,
+    )
+    model.fit(
+        data["X"][sorted_index],
+        relevance,
+        group_id=group_ids.astype(np.int32),
+    )
+    return model, thresholds
+
+
+def _ranker_report(
+    data,
+    train_index,
+    calibration_index,
+    holdout_index,
+):
+    model, thresholds = _fit_catboost_ranker(data, train_index)
+    calibration_scores = np.asarray(
+        model.predict(data["X"][calibration_index]),
+        dtype=np.float64,
+    )
+    holdout_scores = np.asarray(
+        model.predict(data["X"][holdout_index]),
+        dtype=np.float64,
+    )
+    if (
+        not np.isfinite(calibration_scores).all()
+        or not np.isfinite(holdout_scores).all()
+    ):
+        raise ValueError("CatBoost排序分包含非有限值")
+    filled_calibration = calibration_index[
+        np.isfinite(data["y_net_r"][calibration_index])
+    ]
+    if len(filled_calibration) < 20:
+        raise ValueError("CatBoost排序价值校准样本不足")
+    calibration_filled_scores = np.asarray(
+        model.predict(data["X"][filled_calibration]),
+        dtype=np.float64,
+    )
+    value_calibration = _fit_rank_value_calibrator(
+        calibration_filled_scores,
+        data["y_net_r"][filled_calibration],
+    )
+    score_quantiles = np.quantile(
+        calibration_scores,
+        np.linspace(0.0, 1.0, 101),
+    )
+    actual = np.nan_to_num(
+        data["y_net_r"][holdout_index],
+        nan=0.0,
+    )
+    ranking = ranking_metrics(
+        actual > 0,
+        actual,
+        holdout_scores,
+        data["dates"][holdout_index],
+        top_k=5,
+        group_ids=data["codes"][holdout_index],
+    )
+    return {
+        "model": model,
+        "scores": holdout_scores,
+        "expected_net_r": _apply_rank_value_calibrator(
+            holdout_scores,
+            value_calibration,
+        ),
+        "ranking": {
+            **ranking,
+            "netRLowerBound": block_bootstrap_lower_bound(
+                ranking["daily_net_r"],
+                samples=2000,
+                random_state=42,
+            ),
+        },
+        "calibration": {
+            "method": "empirical-cdf",
+            "sampleCount": int(len(calibration_scores)),
+            "scoreQuantiles": score_quantiles.astype(float).tolist(),
+        },
+        "valueCalibration": value_calibration,
+        "relevance": thresholds,
+    }
+
+
+def _predict_action_value(X, win_report, action_value_report):
+    win_probability = apply_probability_calibrator(
+        _classifier_probabilities(win_report["model"], X),
+        win_report["calibration"],
+    )
+    return _compose_expected_net_r(
+        win_probability,
+        action_value_report["models"]["winPayoffR"].predict(X),
+        action_value_report["models"]["lossPayoffR"].predict(X),
+    )
+
+
+def _select_rank_blend_weight(
+    data,
+    calibration_index,
+    win_report,
+    action_value_report,
+    ranker_report,
+):
+    action_value = _predict_action_value(
+        data["X"][calibration_index],
+        win_report,
+        action_value_report,
+    )
+    ranker_scores = np.asarray(
+        ranker_report["model"].predict(
+            data["X"][calibration_index]
+        ),
+        dtype=np.float64,
+    )
+    rank_value = _apply_rank_value_calibrator(
+        ranker_scores,
+        ranker_report["valueCalibration"],
+    )
+    actual = np.nan_to_num(
+        data["y_net_r"][calibration_index],
+        nan=0.0,
+    )
+    candidates = []
+    for weight in (0.0, 0.25, 0.5, 0.75, 1.0):
+        expected = (
+            (1 - weight) * action_value
+            + weight * rank_value
+        )
+        coverage = float(np.mean(expected > 0))
+        floor = float(np.min(ranker_scores) - 1.0)
+        selection = np.where(expected > 0, ranker_scores, floor)
+        metrics = ranking_metrics(
+            actual > 0,
+            actual,
+            selection,
+            data["dates"][calibration_index],
+            top_k=5,
+            group_ids=data["codes"][calibration_index],
+        )
+        candidates.append({
+            "weight": weight,
+            "meanNetRAt5": metrics["mean_net_r_at_5"],
+            "positiveExpectedCoverage": round(coverage, 6),
+        })
+    eligible = [
+        item
+        for item in candidates
+        if item["positiveExpectedCoverage"] >= 0.02
+    ] or candidates
+    selected = max(
+        eligible,
+        key=lambda item: (
+            item["meanNetRAt5"]
+            if item["meanNetRAt5"] is not None
+            else -float("inf"),
+            -item["weight"],
+        ),
+    )
+    return selected["weight"], candidates
+
+
+def _blend_expected_net_r(action_value, rank_value, weight):
+    normalized = max(0.0, min(1.0, float(weight)))
+    return (
+        (1 - normalized) * np.asarray(action_value, dtype=np.float64)
+        + normalized * np.asarray(rank_value, dtype=np.float64)
+    )
+
+
 def _classification_report(
+    data,
     X,
     labels,
     train_index,
@@ -268,86 +688,155 @@ def _classification_report(
     challenger = _fit_lgb_classifier(
         X[train_index],
         labels[train_index],
-    )
-    baseline = _fit_logistic_classifier(
-        X[train_index],
-        labels[train_index],
+        sample_weight=_training_weights(
+            data,
+            train_index,
+            labels[train_index],
+        ),
     )
     challenger_calibration_prob = _classifier_probabilities(
         challenger,
-        X[calibration_index],
-    )
-    baseline_calibration_prob = _classifier_probabilities(
-        baseline,
         X[calibration_index],
     )
     challenger_calibration = fit_probability_calibrator(
         labels[calibration_index],
         challenger_calibration_prob,
     )
-    baseline_calibration = fit_probability_calibrator(
-        labels[calibration_index],
-        baseline_calibration_prob,
-    )
     challenger_holdout_prob = apply_probability_calibrator(
         _classifier_probabilities(challenger, X[holdout_index]),
         challenger_calibration,
     )
-    baseline_holdout_prob = apply_probability_calibrator(
-        _classifier_probabilities(baseline, X[holdout_index]),
-        baseline_calibration,
+    constant_probability = np.full(
+        len(holdout_index),
+        np.clip(
+            float(np.mean(labels[train_index])),
+            1e-8,
+            1 - 1e-8,
+        ),
+        dtype=np.float64,
+    )
+    challenger_metrics = binary_metrics(
+        labels[holdout_index],
+        challenger_holdout_prob,
+    )
+    constant_metrics = binary_metrics(
+        labels[holdout_index],
+        constant_probability,
     )
     return {
         "model": challenger,
         "calibration": challenger_calibration,
         "challenger_probabilities": challenger_holdout_prob,
-        "baseline_probabilities": baseline_holdout_prob,
-        "challenger": binary_metrics(
-            labels[holdout_index],
-            challenger_holdout_prob,
-        ),
-        "baseline": binary_metrics(
-            labels[holdout_index],
-            baseline_holdout_prob,
+        "challenger": challenger_metrics,
+        "baseline": constant_metrics,
+        "constantBaseline": constant_metrics,
+        "brierSkill": round(
+            1 - challenger_metrics["brier"] / constant_metrics["brier"],
+            6,
         ),
         "calibration_samples": int(len(calibration_index)),
     }
 
 
-def _regression_report(
+def _action_value_report(
+    data,
     X,
     labels,
     train_index,
+    calibration_index,
     holdout_index,
+    win_report,
 ):
-    challenger = _fit_lgb_regressor(
-        X[train_index],
+    positive_train = train_index[labels[train_index] > 0]
+    negative_train = train_index[labels[train_index] <= 0]
+    if not len(positive_train) or not len(negative_train):
+        raise ValueError("胜负幅度训练样本不完整")
+    positive_labels, positive_clip = _clip_labels(
+        labels[positive_train],
+    )
+    negative_labels, negative_clip = _clip_labels(
+        labels[negative_train],
+    )
+    quantile_labels, quantile_clip = _clip_labels(
         labels[train_index],
     )
-    baseline = _fit_linear_regressor(
+    win_payoff = _fit_lgb_regressor(
+        X[positive_train],
+        positive_labels,
+        sample_weight=_training_weights(data, positive_train),
+    )
+    loss_payoff = _fit_lgb_regressor(
+        X[negative_train],
+        negative_labels,
+        sample_weight=_training_weights(data, negative_train),
+    )
+    quantile = _fit_lgb_quantile_regressor(
         X[train_index],
+        quantile_labels,
+        sample_weight=_training_weights(data, train_index),
+    )
+    win_probability = apply_probability_calibrator(
+        _classifier_probabilities(
+            win_report["model"],
+            X[holdout_index],
+        ),
+        win_report["calibration"],
+    )
+    expected_net_r = _compose_expected_net_r(
+        win_probability,
+        win_payoff.predict(X[holdout_index]),
+        loss_payoff.predict(X[holdout_index]),
+    )
+    raw_calibration_q10 = np.asarray(
+        quantile.predict(X[calibration_index]),
+        dtype=np.float64,
+    )
+    q10_offset = float(np.quantile(
+        labels[calibration_index] - raw_calibration_q10,
+        0.1,
+    ))
+    q10_prediction = np.minimum(
+        np.asarray(
+            quantile.predict(X[holdout_index]),
+            dtype=np.float64,
+        ) + q10_offset,
+        expected_net_r,
+    )
+    actual = np.asarray(labels[holdout_index], dtype=np.float64)
+    challenger_metrics = regression_metrics(
+        actual,
+        expected_net_r,
+    )
+    baseline_metrics = _constant_regression_metrics(
         labels[train_index],
-    )
-    challenger_prediction = np.asarray(
-        challenger.predict(X[holdout_index]),
-        dtype=np.float64,
-    )
-    baseline_prediction = np.asarray(
-        baseline.predict(X[holdout_index]),
-        dtype=np.float64,
+        actual,
     )
     return {
-        "model": challenger,
-        "challenger_predictions": challenger_prediction,
-        "baseline_predictions": baseline_prediction,
-        "challenger": regression_metrics(
-            labels[holdout_index],
-            challenger_prediction,
+        "models": {
+            "winPayoffR": win_payoff,
+            "lossPayoffR": loss_payoff,
+            "netRLower10": quantile,
+        },
+        "expected_net_r": expected_net_r,
+        "q10_prediction": q10_prediction,
+        "q10_offset": q10_offset,
+        "challenger": challenger_metrics,
+        "baseline": baseline_metrics,
+        "mae_skill": round(
+            1 - challenger_metrics["mae"] / baseline_metrics["mae"],
+            6,
         ),
-        "baseline": regression_metrics(
-            labels[holdout_index],
-            baseline_prediction,
-        ),
+        "quantile10": {
+            "coverage": round(float(np.mean(actual >= q10_prediction)), 6),
+            "crossingRate": round(float(np.mean(
+                q10_prediction > expected_net_r
+            )), 6),
+        },
+        "labelClip": {
+            "winPayoff": positive_clip,
+            "lossPayoff": negative_clip,
+            "quantile10": quantile_clip,
+        },
     }
 
 
@@ -376,7 +865,8 @@ def _feature_group_ablation(
     codes,
     actual_net_r,
     fill_report,
-    net_r_report,
+    win_report,
+    action_value_report,
 ):
     output = {}
     for group, names in SHADOW_FEATURE_GROUPS.items():
@@ -396,9 +886,21 @@ def _feature_group_ablation(
             ),
             fill_report["calibration"],
         )
-        predicted_net_r = np.asarray(
-            net_r_report["model"].predict(reduced),
-            dtype=np.float64,
+        win_probability = apply_probability_calibrator(
+            _classifier_probabilities(
+                win_report["model"],
+                reduced,
+            ),
+            win_report["calibration"],
+        )
+        predicted_net_r = _compose_expected_net_r(
+            win_probability,
+            action_value_report["models"]["winPayoffR"].predict(
+                reduced
+            ),
+            action_value_report["models"]["lossPayoffR"].predict(
+                reduced
+            ),
         )
         output[group] = ranking_metrics(
             actual_net_r > 0,
@@ -463,6 +965,7 @@ def _walk_forward_report(data, *, n_splits=3, purge_dates=5):
                 ):
                     raise ValueError("fold二分类标签不完整")
             fill = _classification_report(
+                data,
                 data["X"],
                 data["y_fill"],
                 train_index,
@@ -474,30 +977,148 @@ def _walk_forward_report(data, *, n_splits=3, purge_dates=5):
                 nan=0.0,
             ).astype(np.int8)
             win = _classification_report(
+                data,
                 data["X"],
                 win_labels,
                 win_train,
                 win_calibration,
                 win_validation,
             )
-            net_r = _regression_report(
+            action_value = _action_value_report(
+                data,
                 data["X"],
                 data["y_net_r"],
                 win_train,
+                win_calibration,
                 win_validation,
+                win,
+            )
+            ranker = _ranker_report(
+                data,
+                train_index,
+                calibration_index,
+                validation,
+            )
+            blend_weight, blend_trials = _select_rank_blend_weight(
+                data,
+                calibration_index,
+                win,
+                action_value,
+                ranker,
+            )
+            validation_action_value = _predict_action_value(
+                data["X"][validation],
+                win,
+                action_value,
+            )
+            validation_net_r = _blend_expected_net_r(
+                validation_action_value,
+                ranker["expected_net_r"],
+                blend_weight,
+            )
+            actual_net_r = np.nan_to_num(
+                data["y_net_r"][validation],
+                nan=0.0,
+            )
+            action_ranking = ranking_metrics(
+                actual_net_r > 0,
+                actual_net_r,
+                fill["challenger_probabilities"]
+                * validation_action_value,
+                data["dates"][validation],
+                top_k=5,
+                group_ids=data["codes"][validation],
+            )
+            score_floor = float(np.min(ranker["scores"]) - 1.0)
+            combination_ranking = ranking_metrics(
+                actual_net_r > 0,
+                actual_net_r,
+                np.where(
+                    validation_net_r > 0,
+                    ranker["scores"],
+                    score_floor,
+                ),
+                data["dates"][validation],
+                top_k=5,
+                group_ids=data["codes"][validation],
+            )
+            filled_mask = np.isfinite(data["y_net_r"][validation])
+            actual_filled = data["y_net_r"][validation][filled_mask]
+            predicted_filled = validation_net_r[filled_mask]
+            value_metrics = regression_metrics(
+                actual_filled,
+                predicted_filled,
+            )
+            value_baseline = _constant_regression_metrics(
+                data["y_net_r"][win_train],
+                actual_filled,
+            )
+            combined_scores = np.where(
+                validation_net_r > 0,
+                ranker["scores"],
+                float(np.min(ranker["scores"]) - 1.0),
+            )
+            combined_ranking = ranking_metrics(
+                actual_net_r > 0,
+                actual_net_r,
+                combined_scores,
+                data["dates"][validation],
+                top_k=5,
+                group_ids=data["codes"][validation],
+            )
+            formula_score_index = FEATURE_NAMES.index("formulaScore")
+            ranking_baseline = ranking_metrics(
+                actual_net_r > 0,
+                actual_net_r,
+                data["X"][validation, formula_score_index],
+                data["dates"][validation],
+                top_k=5,
+                group_ids=data["codes"][validation],
             )
             fold_metrics = {
                 "pFill": {
                     "challenger": fill["challenger"],
                     "baseline": fill["baseline"],
+                    "constantBaseline": fill["constantBaseline"],
+                    "brierSkill": fill["brierSkill"],
                 },
                 "pWinGivenFill": {
                     "challenger": win["challenger"],
                     "baseline": win["baseline"],
+                    "constantBaseline": win["constantBaseline"],
+                    "brierSkill": win["brierSkill"],
                 },
                 "expectedNetR": {
-                    "challenger": net_r["challenger"],
-                    "baseline": net_r["baseline"],
+                    "challenger": value_metrics,
+                    "baseline": value_baseline,
+                    "maeSkill": round(
+                        1 - value_metrics["mae"]
+                        / value_baseline["mae"],
+                        6,
+                    ),
+                    "rankBlendWeight": blend_weight,
+                    "blendTrials": blend_trials,
+                },
+                "quantile10": action_value["quantile10"],
+                "ranking": {
+                    "challenger": {
+                        **combination_ranking,
+                        "netRLowerBound": block_bootstrap_lower_bound(
+                            combination_ranking["daily_net_r"],
+                            samples=2000,
+                            random_state=42,
+                        ),
+                    },
+                    "actionValue": {
+                        **action_ranking,
+                        "netRLowerBound": block_bootstrap_lower_bound(
+                            action_ranking["daily_net_r"],
+                            samples=2000,
+                            random_state=42,
+                        ),
+                    },
+                    "baseline": ranking_baseline,
+                    "ranker": ranker["ranking"],
                 },
             }
             gate = shadow_gate(fold_metrics)
@@ -616,6 +1237,7 @@ def train_opportunity_score(
         return report
 
     fill = _classification_report(
+        data,
         data["X"],
         data["y_fill"],
         train_index,
@@ -627,37 +1249,90 @@ def train_opportunity_score(
         nan=0.0,
     ).astype(np.int8)
     win = _classification_report(
+        data,
         data["X"],
         win_labels,
         win_train,
         win_calibration,
         win_holdout,
     )
-    net_r = _regression_report(
+    action_value = _action_value_report(
+        data,
         data["X"],
         data["y_net_r"],
         win_train,
+        win_calibration,
         win_holdout,
+        win,
+    )
+    ranker = _ranker_report(
+        data,
+        train_index,
+        calibration_index,
+        holdout_index,
+    )
+    blend_weight, blend_trials = _select_rank_blend_weight(
+        data,
+        calibration_index,
+        win,
+        action_value,
+        ranker,
+    )
+    holdout_action_value = _predict_action_value(
+        data["X"][holdout_index],
+        win,
+        action_value,
+    )
+    holdout_net_r_all = _blend_expected_net_r(
+        holdout_action_value,
+        ranker["expected_net_r"],
+        blend_weight,
+    )
+    filled_holdout_mask = np.isfinite(data["y_net_r"][holdout_index])
+    actual_filled = data["y_net_r"][holdout_index][filled_holdout_mask]
+    predicted_filled = holdout_net_r_all[filled_holdout_mask]
+    value_metrics = regression_metrics(
+        actual_filled,
+        predicted_filled,
+    )
+    value_baseline = _constant_regression_metrics(
+        data["y_net_r"][win_train],
+        actual_filled,
     )
     metrics = {
         "pFill": {
             "challenger": fill["challenger"],
             "baseline": fill["baseline"],
+            "constantBaseline": fill["constantBaseline"],
+            "brierSkill": fill["brierSkill"],
         },
         "pWinGivenFill": {
             "challenger": win["challenger"],
             "baseline": win["baseline"],
+            "constantBaseline": win["constantBaseline"],
+            "brierSkill": win["brierSkill"],
         },
         "expectedNetR": {
-            "challenger": net_r["challenger"],
-            "baseline": net_r["baseline"],
+            "challenger": value_metrics,
+            "baseline": value_baseline,
+            "maeSkill": round(
+                1 - value_metrics["mae"] / value_baseline["mae"],
+                6,
+            ),
+            "rankBlendWeight": blend_weight,
+            "blendTrials": blend_trials,
+        },
+        "quantile10": action_value["quantile10"],
+        "coverage": {
+            "positiveExpected": round(float(np.mean(
+                holdout_net_r_all > 0
+            )), 6),
+            "positiveQ10": round(float(np.mean(
+                action_value["q10_prediction"] > 0
+            )), 6),
         },
     }
     holdout_fill = fill["challenger_probabilities"]
-    holdout_net_r_all = np.asarray(
-        net_r["model"].predict(data["X"][holdout_index]),
-        dtype=np.float64,
-    )
     utility = holdout_fill * holdout_net_r_all
     actual_net_r = np.nan_to_num(
         data["y_net_r"][holdout_index],
@@ -711,12 +1386,47 @@ def train_opportunity_score(
         samples=2000,
         random_state=42,
     )
+    combined_scores = np.where(
+        holdout_net_r_all > 0,
+        ranker["scores"],
+        float(np.min(ranker["scores"]) - 1.0),
+    )
+    combined_ranking = ranking_metrics(
+        actual_net_r > 0,
+        actual_net_r,
+        combined_scores,
+        data["dates"][holdout_index],
+        top_k=5,
+        group_ids=data["codes"][holdout_index],
+    )
+    combined_top3 = ranking_metrics(
+        actual_net_r > 0,
+        actual_net_r,
+        combined_scores,
+        data["dates"][holdout_index],
+        top_k=3,
+        group_ids=data["codes"][holdout_index],
+    )
+    combined_ranking.update({
+        key: value
+        for key, value in combined_top3.items()
+        if key != "daily_net_r"
+    })
     metrics["ranking"] = {
         "challenger": {
+            **combined_ranking,
+            "netRLowerBound": block_bootstrap_lower_bound(
+                combined_ranking["daily_net_r"],
+                samples=2000,
+                random_state=42,
+            ),
+        },
+        "actionValue": {
             **challenger_ranking,
             "netRLowerBound": lower_bound,
         },
         "baseline": baseline_ranking,
+        "ranker": ranker["ranking"],
     }
     metrics["featureAblation"] = _feature_group_ablation(
         data["X"],
@@ -725,7 +1435,8 @@ def train_opportunity_score(
         data["codes"],
         actual_net_r,
         fill,
-        net_r,
+        win,
+        action_value,
     )
     gate = shadow_gate(metrics)
     if not walk_forward["shadowEligible"]:
@@ -757,30 +1468,77 @@ def train_opportunity_score(
     }
     _append_trial(trial_path, report)
     _write_report(report_path, report)
-    # Evaluation remains diagnostic; saving usable weights does not require promotion.
+    development_index = np.sort(np.concatenate([
+        train_index,
+        calibration_index,
+    ]))
+    development_win = _conditional_indices(
+        development_index,
+        data["y_win"],
+        data["y_net_r"],
+    )
+    final_fill = _classification_report(
+        data,
+        data["X"],
+        data["y_fill"],
+        development_index,
+        holdout_index,
+        holdout_index,
+    )
+    final_win = _classification_report(
+        data,
+        data["X"],
+        win_labels,
+        development_win,
+        win_holdout,
+        win_holdout,
+    )
+    final_action_value = _action_value_report(
+        data,
+        data["X"],
+        data["y_net_r"],
+        development_win,
+        win_holdout,
+        win_holdout,
+        final_win,
+    )
+    final_ranker = _ranker_report(
+        data,
+        development_index,
+        holdout_index,
+        holdout_index,
+    )
+    final_blend_weight, final_blend_trials = (
+        _select_rank_blend_weight(
+            data,
+            holdout_index,
+            final_win,
+            final_action_value,
+            final_ranker,
+        )
+    )
+    # The latest holdout remains the final calibration window. The tree heads
+    # train on all earlier samples after the independent POC has been recorded.
     shadow = os.path.join(output_directory, "shadow")
     os.makedirs(shadow, exist_ok=True)
-    _save_booster(fill["model"], os.path.join(
+    _save_booster(final_fill["model"], os.path.join(
         shadow,
         MODEL_FILENAMES["pFill"],
     ))
-    _save_booster(win["model"], os.path.join(
+    _save_booster(final_win["model"], os.path.join(
         shadow,
         MODEL_FILENAMES["pWinGivenFill"],
     ))
-    _save_booster(net_r["model"], os.path.join(
+    for slot, model in final_action_value["models"].items():
+        _save_booster(model, os.path.join(
+            shadow,
+            MODEL_FILENAMES[slot],
+        ))
+    final_ranker["model"].save_model(os.path.join(
         shadow,
-        MODEL_FILENAMES["expectedNetR"],
+        MODEL_FILENAMES["ranking"],
     ))
-    calibration_net_r = np.asarray(
-        net_r["model"].predict(data["X"][win_calibration]),
-        dtype=np.float64,
-    )
-    residuals = (
-        data["y_net_r"][win_calibration]
-        - calibration_net_r
-    )
-    sorted_train_net_r = np.sort(data["y_net_r"][win_train])
+    sorted_train_net_r = np.sort(data["y_net_r"][development_win])
     tail_count = max(1, int(np.ceil(len(sorted_train_net_r) * 0.1)))
     meta = {
         "schemaVersion": SCORE_SCHEMA_VERSION,
@@ -788,6 +1546,8 @@ def train_opportunity_score(
         "modelVersion": model_version,
         "trainedAt": timestamp,
         "featureNames": list(FEATURE_NAMES),
+        "predictionContract": PREDICTION_CONTRACT_VERSION,
+        "modelHeads": list(MODEL_FILENAMES),
         "shadowOnly": True,
         "shadowEligible": gate["shadowEligible"],
         "productionEligible": False,
@@ -795,29 +1555,37 @@ def train_opportunity_score(
         "split": split,
         "metrics": metrics,
         "calibration": {
-            "pFill": fill["calibration"],
-            "pWinGivenFill": win["calibration"],
-            "pFillSampleCount": int(len(calibration_index)),
-            "pWinGivenFillSampleCount": int(len(win_calibration)),
+            "pFill": final_fill["calibration"],
+            "pWinGivenFill": final_win["calibration"],
+            "pFillSampleCount": int(len(holdout_index)),
+            "pWinGivenFillSampleCount": int(len(win_holdout)),
         },
+        "rankingCalibration": final_ranker["calibration"],
+        "rankValueCalibration": final_ranker["valueCalibration"],
+        "rankBlendWeight": final_blend_weight,
+        "rankBlendTrials": final_blend_trials,
+        "rankingRelevance": final_ranker["relevance"],
         "risk": {
-            "netRResidualLower10": round(
-                float(np.percentile(residuals, 10)),
+            "q10CalibrationOffset": round(
+                float(final_action_value["q10_offset"]),
                 6,
             ),
+            "q10Coverage":
+                final_action_value["quantile10"]["coverage"],
             "expectedShortfall10": round(
                 float(sorted_train_net_r[:tail_count].mean()),
                 6,
             ),
         },
+        "labelClip": action_value["labelClip"],
         "ood": {
             "minimum": np.percentile(
-                data["X"][train_index],
+                data["X"][development_index],
                 0.5,
                 axis=0,
             ).astype(float).tolist(),
             "maximum": np.percentile(
-                data["X"][train_index],
+                data["X"][development_index],
                 99.5,
                 axis=0,
             ).astype(float).tolist(),
@@ -833,7 +1601,7 @@ def train_opportunity_score(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="训练机会雷达独立旁路模型",
+        description="训练机会雷达动作价值候选模型",
     )
     parser.add_argument("--dataset", required=True)
     parser.add_argument("--output", required=True)

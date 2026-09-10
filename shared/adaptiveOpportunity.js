@@ -343,6 +343,11 @@ export function rankAdaptiveOpportunities(
     .sort((left, right) =>
       ({ READY: 0, WAIT_TRIGGER: 1, AVOID: 2 }[left.state] ?? 3)
         - ({ READY: 0, WAIT_TRIGGER: 1, AVOID: 2 }[right.state] ?? 3)
+      || Number(
+        right.opportunityScore?.rankingScore ?? -Infinity
+      ) - Number(
+        left.opportunityScore?.rankingScore ?? -Infinity
+      )
       || Number(right.adaptive?.utility ?? -Infinity)
         - Number(left.adaptive?.utility ?? -Infinity)
       || Number(right.adaptive?.playbook?.score || 0)

@@ -18,6 +18,18 @@ def _minimum(values):
     return round(float(np.min(values)), 6)
 
 
+def _fold_metric(report, family, path):
+    values = []
+    for fold in report["families"][family].get("folds") or []:
+        current = fold
+        for key in path:
+            current = (current or {}).get(key)
+        if current is None:
+            return []
+        values.append(float(current))
+    return values
+
+
 def summarize_reports(paths):
     reports = []
     for path in paths:
@@ -64,13 +76,50 @@ def summarize_reports(paths):
             float(value["q10Coverage"])
             for value in runs
         ]
+        pwin_skills = [
+            float(value.get("pWinBrierSkill", float("-inf")))
+            for value in runs
+        ]
+        netr_skills = [
+            float(value.get("netRMaeSkill", float("-inf")))
+            for value in runs
+        ]
+        positive_coverages = [
+            float(value.get("positiveExpectedCoverage", 0))
+            for value in runs
+        ]
+        utility_fold_means = [
+            metric
+            for report in reports
+            for metric in _fold_metric(
+                report,
+                name,
+                ("ranking", "utility", "top5", "mean_net_r_at_5"),
+            )
+        ]
+        ranker_fold_means = [
+            metric
+            for report in reports
+            for metric in _fold_metric(
+                report,
+                name,
+                ("ranking", "ranker", "top5", "mean_net_r_at_5"),
+            )
+        ]
         passed = (
-            _minimum(utility_lowers) > 0
+            len(utility_fold_means) >= len(reports) * 3
+            and min(utility_fold_means) > 0
+            and _minimum(utility_lowers) > 0
             and min(q10_coverages) >= 0.88
             and max(q10_coverages) <= 0.92
+            and _minimum(pwin_skills) > 0
+            and _minimum(netr_skills) > 0
+            and _minimum(positive_coverages) >= 0.02
         )
         ranker_candidate = (
-            min(ranker_means) > 0
+            len(ranker_fold_means) >= len(reports) * 3
+            and min(ranker_fold_means) > 0
+            and min(ranker_means) > 0
             and _minimum(ranker_lowers) > 0
         )
         families[name] = {
@@ -87,10 +136,60 @@ def summarize_reports(paths):
             ),
             "q10CoverageMean": _mean(q10_coverages),
             "q10CoverageMinimum": _minimum(q10_coverages),
+            "pWinBrierSkillWorstSeed": _minimum(pwin_skills),
+            "netRMaeSkillWorstSeed": _minimum(netr_skills),
+            "positiveExpectedCoverageWorstSeed": _minimum(
+                positive_coverages,
+            ),
+            "allUtilityFoldsPositive": (
+                len(utility_fold_means) >= len(reports) * 3
+                and min(utility_fold_means) > 0
+            ),
+            "allRankerFoldsPositive": (
+                len(ranker_fold_means) >= len(reports) * 3
+                and min(ranker_fold_means) > 0
+            ),
             "productionGatePassed": passed,
             "rankerGatePassed": ranker_candidate,
         }
 
+    combination_runs = [
+        value
+        for report in reports
+        for value in [
+            (report.get("combination") or {}).get("aggregate")
+        ]
+        if isinstance(value, dict)
+        and value.get("top5MeanNetR") is not None
+        and value.get("top5LowerBound") is not None
+    ]
+    combination_means = [
+        float(value["top5MeanNetR"])
+        for value in combination_runs
+    ]
+    combination_lowers = [
+        float(value["top5LowerBound"])
+        for value in combination_runs
+    ]
+    combination_fold_means = [
+        float(
+            fold["ranking"]["top5"]["mean_net_r_at_5"]
+        )
+        for report in reports
+        for fold in (report.get("combination") or {}).get("folds") or []
+    ]
+    combination_ready = bool(
+        (families.get("lightgbm") or {}).get(
+            "productionGatePassed"
+        )
+        and (families.get("catboost") or {}).get(
+            "rankerGatePassed"
+        )
+        and len(combination_runs) == len(reports)
+        and len(combination_fold_means) >= len(reports) * 3
+        and min(combination_fold_means) > 0
+        and _minimum(combination_lowers) > 0
+    )
     winners = [
         name
         for name, value in families.items()
@@ -101,17 +200,42 @@ def summarize_reports(paths):
         "datasetSha256": dataset_hashes.pop(),
         "runs": len(reports),
         "families": families,
+        "combination": {
+            "actionValue": "lightgbm",
+            "ranking": "catboost",
+            "eligible": combination_ready,
+            "top5MeanNetR": (
+                _mean(combination_means)
+                if combination_means else None
+            ),
+            "top5WorstSeedLowerBound": (
+                _minimum(combination_lowers)
+                if combination_lowers else None
+            ),
+            "allFoldsPositive": (
+                len(combination_fold_means) >= len(reports) * 3
+                and min(combination_fold_means) > 0
+            ),
+        },
         "decision": {
             "state": (
-                "STABLE_WINNER"
+                "PRODUCTION_COMBINATION_READY"
+                if combination_ready
+                else "STABLE_WINNER"
                 if len(winners) == 1
                 else "NO_STABLE_WINNER"
             ),
-            "winner": winners[0] if len(winners) == 1 else None,
+            "winner": (
+                "lightgbm+catboost"
+                if combination_ready
+                else winners[0] if len(winners) == 1 else None
+            ),
             "reason": (
-                f"{winners[0]}通过多种子费后价值与尾部校准门槛"
+                "LightGBM动作价值与CatBoost排序同时通过多种子门槛"
+                if combination_ready
+                else f"{winners[0]}通过多种子费后价值与尾部校准门槛"
                 if len(winners) == 1
-                else "没有模型在所有种子下同时通过费后价值下界和Q10校准门槛"
+                else "当前组合未同时通过窗口、下界、校准、技能和覆盖率门槛"
             ),
         },
     }
@@ -129,7 +253,7 @@ def markdown(summary):
             f"{'通过' if value['productionGatePassed'] else '未通过'} |"
         )
     return "\n".join([
-        "# V3 三模型多种子稳定性总结",
+        "# V3 双模型多种子稳定性总结",
         "",
         f"- 数据摘要：`{summary['datasetSha256']}`",
         f"- 重复次数：{summary['runs']}",
@@ -144,7 +268,7 @@ def markdown(summary):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="汇总V3三模型多种子POC",
+        description="汇总V3双模型多种子POC",
     )
     parser.add_argument("reports", nargs="+")
     parser.add_argument("--output-dir", required=True)

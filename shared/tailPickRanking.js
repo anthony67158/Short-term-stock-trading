@@ -27,6 +27,14 @@ function v3Priority(candidate) {
     : -Infinity
 }
 
+function v3RankPriority(candidate) {
+  return candidate?.opportunityScore?.state === 'READY'
+    && candidate?.opportunityScore?.usagePolicy === 'DIRECT'
+    && Number(candidate.opportunityScore.expectedNetR) > 0
+    ? finite(candidate.opportunityScore.rankingScore) ?? -Infinity
+    : -Infinity
+}
+
 function fundScore(fund) {
   if (!fund) return { score: 0, label: '资金数据缺失' }
   const mainNow = finite(fund.mainNetYi)
@@ -207,7 +215,8 @@ export function rankTailPickCandidates(
       ...candidateScore(item),
     }))
     .sort((left, right) =>
-      v3Priority(right) - v3Priority(left)
+      v3RankPriority(right) - v3RankPriority(left)
+      || v3Priority(right) - v3Priority(left)
       || Number(left.decisionWarnings.length)
         - Number(right.decisionWarnings.length)
       || Number(right.score) - Number(left.score)
@@ -245,7 +254,8 @@ export function rankTailPickNearCandidates(
       ...nearCandidateScore(item),
     }))
     .sort((left, right) =>
-      v3Priority(right) - v3Priority(left)
+      v3RankPriority(right) - v3RankPriority(left)
+      || v3Priority(right) - v3Priority(left)
       || Number(left.nearMatch?.failedRules?.length || 99)
         - Number(right.nearMatch?.failedRules?.length || 99)
       || Number(left.decisionWarnings.length)

@@ -182,3 +182,64 @@ Q10 的目标覆盖率为约 90%。三个模型都偏低，说明尾部损失仍
   `poc-artifacts/v3-model-bakeoff/final-stability/stability.md`
 
 `poc-artifacts/` 已被 Git 忽略，只保留在本机，不会误发为生产模型。
+
+## 第二轮 V4 实施结果
+
+第二轮已完成以下数据修复：
+
+- 特征协议升级为 `opportunity-score-feature.v4`，共 104 维；
+- 历史行业阶段按申万一级行业成员生效区间重建，`UNKNOWN` 降至
+  715 / 72,847；
+- `formulaScore=0` 降至 2 / 72,847；
+- 四路召回来源完整覆盖，另保留 4,074 条稳定探索样本；
+- 41,544 条结果带有独立的触发后复核特征，且这些字段不进入首次决策；
+- 最终得到 72,847 条成熟候选、37,491 条成交路径、120 个信号日。
+
+训练结构收敛为：
+
+1. LightGBM `pFill` 与 `pWinGivenFill` 分类头；
+2. LightGBM 胜单 R / 亏单 R 两个 Huber 头；
+3. LightGBM Q10 尾部头，并只用校准区间修正覆盖率；
+4. CatBoost `YetiRankPairwise` 横截面排序头；
+5. 排序标签明确区分亏损、未成交/零收益、小正收益、中位以上正收益和高分位
+   正收益；
+6. 分类训练使用类别平衡、近期样本、打法/路径分层和高分困难负样本权重。
+
+三种子复验结果：
+
+| 组件 | 样本外结果 | 结论 |
+|---|---:|---|
+| LightGBM 动作价值 Top5 | `+0.026R` | 均值略正，但最差种子下界 `-0.143R` |
+| CatBoost Ranker Top5 | `+0.158R` | 当前最强组件，但最差种子下界 `-0.148R` |
+| 正期望过滤 + CatBoost 排序 | `-0.077R` | 严格组合仍受近期负窗口拖累 |
+| LightGBM Q10 覆盖率 | `89.4%` | 已进入 88%–92% 目标区间 |
+| LightGBM pWin 技能 | `-5.3%`（最差种子） | 尚未优于常数胜率 |
+| LightGBM NetR 技能 | `-0.7%`（最差种子） | 尚未优于常数中位数 |
+
+因此，**效果和潜力最优的生产组合确定为 LightGBM 稳健动作价值头 +
+CatBoost Ranker**。按用户 2026-09-10 的最新指示，该组合直接作为
+`usagePolicy=DIRECT` 基准替换旧三头模型；`productionEligible` 继续记录真实
+门槛结果，不因直接启用而伪造为通过。后续每日使用新增成熟样本全量重训并执行
+三折、三种子回测；回测结果写入量化汇报。
+
+生产职责严格分离：
+
+- LightGBM 决定 `pFill`、`pWinGivenFill`、`expectedNetR` 和 Q10 下界；
+- CatBoost 只提供 0–1 横截面 `rankingScore`；
+- `expectedNetR <= 0` 仍禁止新增风险，排序头不能覆盖费用、现金、T+1、
+  价格合法性和账户风控；
+- 触发后复核特征仍只用于独立复核数据集，不泄漏到首次决策模型。
+
+第二轮报告位于：
+
+```text
+poc-artifacts/v3-model-bakeoff/v4-ensemble-seed42/
+poc-artifacts/v3-model-bakeoff/v4-ensemble-seed7/
+poc-artifacts/v3-model-bakeoff/v4-ensemble-seed2026/
+poc-artifacts/v3-model-bakeoff/v4-ensemble-stability/
+```
+
+外部实现依据仍采用已固定版本的 LightGBM、CatBoost 和 Qlib
+DoubleEnsemble 研究结果，详见
+[`v3-model-selection-github.md`](./v3-model-selection-github.md)。其中
+DoubleEnsemble 仅借鉴困难样本重加权思想，不引入 Qlib runtime。

@@ -17,6 +17,7 @@ from upload_opportunity_model import (  # noqa: E402
     ARTIFACT_FILENAMES,
     publish_opportunity_release,
 )
+from opportunity_model import PREDICTION_CONTRACT_VERSION  # noqa: E402
 
 
 class FakeBucket:
@@ -47,6 +48,12 @@ class UploadOpportunityModelTest(unittest.TestCase):
                         "featureSchemaVersion": FEATURE_SCHEMA_VERSION,
                         "modelVersion": "opportunity-score.20260902",
                         "featureNames": list(FEATURE_NAMES),
+                        "predictionContract":
+                            PREDICTION_CONTRACT_VERSION,
+                        "modelHeads": [
+                            name for name in ARTIFACT_FILENAMES
+                            if name != "meta"
+                        ],
                         "shadowEligible": True,
                         "shadowOnly": True,
                         "productionEligible": False,
@@ -95,6 +102,12 @@ class UploadOpportunityModelTest(unittest.TestCase):
                         "featureSchemaVersion": FEATURE_SCHEMA_VERSION,
                         "modelVersion": "opportunity-score.20260902",
                         "featureNames": list(FEATURE_NAMES),
+                        "predictionContract":
+                            PREDICTION_CONTRACT_VERSION,
+                        "modelHeads": [
+                            name for name in ARTIFACT_FILENAMES
+                            if name != "meta"
+                        ],
                         "shadowEligible": False,
                         "shadowOnly": True,
                         "productionEligible": False,
@@ -105,6 +118,44 @@ class UploadOpportunityModelTest(unittest.TestCase):
             manifest = publish_opportunity_release(bucket, directory)
             self.assertEqual(manifest["usagePolicy"], "DIRECT")
             self.assertFalse(manifest["productionEligible"])
+
+    def test_can_activate_best_available_baseline_without_faking_gate(self):
+        bucket = FakeBucket()
+        with tempfile.TemporaryDirectory() as directory:
+            for slot, filename in ARTIFACT_FILENAMES.items():
+                content = "{}"
+                if slot == "meta":
+                    content = json.dumps({
+                        "schemaVersion": "opportunity-score.v1",
+                        "featureSchemaVersion": FEATURE_SCHEMA_VERSION,
+                        "modelVersion": "opportunity-score.20260910",
+                        "featureNames": list(FEATURE_NAMES),
+                        "predictionContract":
+                            PREDICTION_CONTRACT_VERSION,
+                        "modelHeads": [
+                            name for name in ARTIFACT_FILENAMES
+                            if name != "meta"
+                        ],
+                        "shadowEligible": False,
+                        "shadowOnly": True,
+                        "productionEligible": False,
+                    })
+                with open(
+                    os.path.join(directory, filename),
+                    "w",
+                    encoding="utf-8",
+                ) as handle:
+                    handle.write(content)
+
+            manifest = publish_opportunity_release(
+                bucket,
+                directory,
+                activate_baseline=True,
+            )
+
+        self.assertFalse(manifest["shadowOnly"])
+        self.assertTrue(manifest["baselineSelected"])
+        self.assertFalse(manifest["productionEligible"])
 
 
 if __name__ == "__main__":

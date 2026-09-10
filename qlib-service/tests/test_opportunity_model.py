@@ -18,6 +18,8 @@ from opportunity_contract import (  # noqa: E402
     feature_names_for_schema,
 )
 from opportunity_model import (  # noqa: E402
+    ARTIFACT_FILENAMES,
+    PREDICTION_CONTRACT_VERSION,
     predict_opportunity_items,
     validate_opportunity_metadata,
     validate_opportunity_manifest,
@@ -151,6 +153,51 @@ class OpportunityModelTest(unittest.TestCase):
             "STANDARD:ACCUMULATION:INTRADAY_OPEN",
         )
         self.assertEqual(result["calibration"]["sampleCount"], 300)
+        self.assertIsNone(result["rankingScore"])
+
+    def test_hurdle_q10_ranker_model_composes_prediction(self):
+        metadata = meta()
+        metadata.update({
+            "predictionContract": PREDICTION_CONTRACT_VERSION,
+            "modelHeads": [
+                slot for slot in ARTIFACT_FILENAMES if slot != "meta"
+            ],
+            "rankingCalibration": {
+                "method": "empirical-cdf",
+                "sampleCount": 200,
+                "scoreQuantiles": [-1.0, 0.0, 1.0],
+            },
+            "rankValueCalibration": {
+                "method": "isotonic",
+                "sampleCount": 200,
+                "score": [-1.0, 0.0, 1.0],
+                "expectedNetR": [-0.5, 0.5, 1.5],
+            },
+            "rankBlendWeight": 0.5,
+            "risk": {
+                "q10CalibrationOffset": -0.1,
+                "q10Coverage": 0.9,
+                "expectedShortfall10": -1.3,
+            },
+        })
+        result = predict_opportunity_items(
+            {"items": [item()]},
+            models={
+                "pFill": FakeModel(0.7),
+                "pWinGivenFill": FakeModel(0.6),
+                "winPayoffR": FakeModel(2.0),
+                "lossPayoffR": FakeModel(-1.0),
+                "netRLower10": FakeModel(-0.4),
+                "ranking": FakeModel(0.0),
+            },
+            metadata=metadata,
+        )[0]
+
+        self.assertEqual(result["state"], "READY")
+        self.assertAlmostEqual(result["expectedNetR"], 0.65)
+        self.assertAlmostEqual(result["netRLowerBound"], -0.5)
+        self.assertAlmostEqual(result["expectedShortfall10"], -1.3)
+        self.assertAlmostEqual(result["rankingScore"], 0.5)
 
     def test_v4_request_can_use_loaded_v3_model_during_cutover(self):
         metadata = meta()

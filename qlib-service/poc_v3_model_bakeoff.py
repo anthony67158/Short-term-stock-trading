@@ -18,6 +18,11 @@ from opportunity_evaluation import (
     ranking_metrics,
     regression_metrics,
 )
+from train_opportunity_score import (
+    _apply_rank_value_calibrator,
+    _fit_rank_value_calibrator,
+    _training_weights,
+)
 from v3_poc_dataset import build_poc_dataset, interval_expanding_folds
 
 
@@ -66,10 +71,11 @@ def relevance_labels(values, thresholds=None):
         if not len(positive):
             raise ValueError("排序训练集没有正收益样本")
         thresholds = np.quantile(positive, [0.5, 0.8]).astype(float)
-    labels = np.zeros(len(data), dtype=np.int32)
-    labels[data > 0] = 1
-    labels[data > thresholds[0]] = 2
-    labels[data > thresholds[1]] = 3
+    labels = np.ones(len(data), dtype=np.int32)
+    labels[data < 0] = 0
+    labels[data > 0] = 2
+    labels[data > thresholds[0]] = 3
+    labels[data > thresholds[1]] = 4
     return labels, [round(float(value), 6) for value in thresholds]
 
 
@@ -164,7 +170,7 @@ class LightGbmFamily:
     def ranker(self):
         return self.lgb.LGBMRanker(
             objective="lambdarank",
-            label_gain=[0, 1, 3, 7],
+            label_gain=[0, 1, 2, 4, 8],
             lambdarank_truncation_level=8,
             **self.common,
         )
@@ -391,21 +397,43 @@ def run_family_fold(family, dataset, fold):
 
     started = time.perf_counter()
     fill_model = family.classifier()
-    fill_model.fit(X_train, dataset["y_fill"][train])
+    fill_model.fit(
+        X_train,
+        dataset["y_fill"][train],
+        sample_weight=_training_weights(
+            dataset,
+            train,
+            dataset["y_fill"][train],
+        ),
+    )
     win_model = family.classifier()
-    win_model.fit(X_filled_train, dataset["y_win"][filled_train])
+    win_model.fit(
+        X_filled_train,
+        dataset["y_win"][filled_train],
+        sample_weight=_training_weights(
+            dataset,
+            filled_train,
+            dataset["y_win"][filled_train],
+        ),
+    )
     win_payoff_model = family.regressor()
     win_payoff_model.fit(
         dataset["X"][positive_train][:, mask],
         positive_net_r,
+        sample_weight=_training_weights(dataset, positive_train),
     )
     loss_payoff_model = family.regressor()
     loss_payoff_model.fit(
         dataset["X"][negative_train][:, mask],
         negative_net_r,
+        sample_weight=_training_weights(dataset, negative_train),
     )
     quantile_model = family.quantile()
-    quantile_model.fit(X_filled_train, quantile_net_r)
+    quantile_model.fit(
+        X_filled_train,
+        quantile_net_r,
+        sample_weight=_training_weights(dataset, filled_train),
+    )
     ranker = family.ranker()
     family.fit_ranker(ranker, rank_data)
     fit_seconds = time.perf_counter() - started
@@ -417,6 +445,14 @@ def run_family_fold(family, dataset, fold):
     win_calibrator = fit_probability_calibrator(
         dataset["y_win"][filled_calibration].astype(np.int8),
         _probability(win_model, X_filled_calibration),
+    )
+    rank_calibration_scores = np.asarray(
+        ranker.predict(X_calibration),
+        dtype=np.float64,
+    )
+    rank_value_calibration = _fit_rank_value_calibrator(
+        ranker.predict(X_filled_calibration),
+        dataset["y_net_r"][filled_calibration],
     )
     fill_probability = apply_probability_calibrator(
         _probability(fill_model, X_validation),
@@ -442,6 +478,13 @@ def run_family_fold(family, dataset, fold):
         win_payoff,
         loss_payoff,
     )
+    rank_expected_net_r = _apply_rank_value_calibrator(
+        rank_scores := np.asarray(
+            ranker.predict(X_validation),
+            dtype=np.float64,
+        ),
+        rank_value_calibration,
+    )
     expected_net_r_filled = expected_net_r[
         np.isfinite(dataset["y_net_r"][validation])
     ]
@@ -449,6 +492,15 @@ def run_family_fold(family, dataset, fold):
         quantile_model.predict(X_validation),
         dtype=np.float64,
     )
+    calibration_q10 = np.asarray(
+        quantile_model.predict(X_filled_calibration),
+        dtype=np.float64,
+    )
+    q10 += float(np.quantile(
+        dataset["y_net_r"][filled_calibration] - calibration_q10,
+        0.1,
+    ))
+    q10 = np.minimum(q10, expected_net_r)
     q10_filled = q10[np.isfinite(dataset["y_net_r"][validation])]
     actual_filled = dataset["y_net_r"][filled_validation]
     actual_all = np.nan_to_num(
@@ -456,10 +508,6 @@ def run_family_fold(family, dataset, fold):
         nan=0.0,
     )
     utility = fill_probability * expected_net_r
-    rank_scores = np.asarray(
-        ranker.predict(X_validation),
-        dtype=np.float64,
-    )
     formula_index = list(dataset["feature_names"].astype(str)).index(
         "formulaScore",
     )
@@ -571,6 +619,29 @@ def run_family_fold(family, dataset, fold):
                 validation,
             ),
         },
+        "_selection": {
+            "validation": validation.astype(int).tolist(),
+            "expectedNetR": expected_net_r.astype(float).tolist(),
+            "rankerScore": rank_scores.astype(float).tolist(),
+            "rankExpectedNetR":
+                rank_expected_net_r.astype(float).tolist(),
+            "calibration": calibration.astype(int).tolist(),
+            "calibrationExpectedNetR": compose_expected_net_r(
+                apply_probability_calibrator(
+                    _probability(win_model, X_calibration),
+                    win_calibrator,
+                ),
+                win_payoff_model.predict(X_calibration),
+                loss_payoff_model.predict(X_calibration),
+            ).astype(float).tolist(),
+            "calibrationRankerScore":
+                rank_calibration_scores.astype(float).tolist(),
+            "calibrationRankExpectedNetR":
+                _apply_rank_value_calibrator(
+                    rank_calibration_scores,
+                    rank_value_calibration,
+                ).astype(float).tolist(),
+        },
         "fitSeconds": round(fit_seconds, 3),
         "batch240P95Ms": _latency_ms(
             models,
@@ -660,6 +731,138 @@ def aggregate_family(folds):
     }
 
 
+def combine_action_value_and_ranker(dataset, lightgbm_folds, catboost_folds):
+    folds = []
+    daily = {}
+    for action_fold, ranker_fold in zip(lightgbm_folds, catboost_folds):
+        action = action_fold["_selection"]
+        ranking = ranker_fold["_selection"]
+        validation = np.asarray(action["validation"], dtype=np.int64)
+        if validation.tolist() != ranking["validation"]:
+            raise ValueError("动作价值与排序模型验证切分不一致")
+        calibration = np.asarray(
+            action["calibration"],
+            dtype=np.int64,
+        )
+        if calibration.tolist() != ranking["calibration"]:
+            raise ValueError("动作价值与排序模型校准切分不一致")
+        calibration_action = np.asarray(
+            action["calibrationExpectedNetR"],
+            dtype=np.float64,
+        )
+        calibration_rank = np.asarray(
+            ranking["calibrationRankExpectedNetR"],
+            dtype=np.float64,
+        )
+        calibration_rank_score = np.asarray(
+            ranking["calibrationRankerScore"],
+            dtype=np.float64,
+        )
+        calibration_actual = np.nan_to_num(
+            dataset["y_net_r"][calibration],
+            nan=0.0,
+        )
+        blend_trials = []
+        for weight in (0.0, 0.25, 0.5, 0.75, 1.0):
+            expected = (
+                (1 - weight) * calibration_action
+                + weight * calibration_rank
+            )
+            floor = float(np.min(calibration_rank_score) - 1.0)
+            metrics = _ranking(
+                calibration_actual,
+                np.where(
+                    expected > 0,
+                    calibration_rank_score,
+                    floor,
+                ),
+                dataset,
+                calibration,
+            )
+            blend_trials.append({
+                "weight": weight,
+                "meanNetRAt5":
+                    metrics["top5"]["mean_net_r_at_5"],
+                "positiveExpectedCoverage": round(float(np.mean(
+                    expected > 0
+                )), 6),
+            })
+        eligible = [
+            trial
+            for trial in blend_trials
+            if trial["positiveExpectedCoverage"] >= 0.02
+        ] or blend_trials
+        selected = max(
+            eligible,
+            key=lambda trial: (
+                trial["meanNetRAt5"],
+                -trial["weight"],
+            ),
+        )
+        weight = selected["weight"]
+        action_expected = np.asarray(
+            action["expectedNetR"],
+            dtype=np.float64,
+        )
+        rank_expected = np.asarray(
+            ranking["rankExpectedNetR"],
+            dtype=np.float64,
+        )
+        expected_net_r = (
+            (1 - weight) * action_expected
+            + weight * rank_expected
+        )
+        ranker_score = np.asarray(
+            ranking["rankerScore"],
+            dtype=np.float64,
+        )
+        score_floor = float(np.min(ranker_score) - 1.0)
+        combined_score = np.where(
+            expected_net_r > 0,
+            ranker_score,
+            score_floor,
+        )
+        actual = np.nan_to_num(
+            dataset["y_net_r"][validation],
+            nan=0.0,
+        )
+        metrics = _ranking(
+            actual,
+            combined_score,
+            dataset,
+            validation,
+        )
+        daily.update(metrics["top5"]["daily_net_r"])
+        folds.append({
+            "fold": action_fold["fold"],
+            "validationStartDate":
+                action_fold["metadata"]["validationStartDate"],
+            "validationEndDate":
+                action_fold["metadata"]["validationEndDate"],
+            "positiveExpectedCoverage": round(float(np.mean(
+                expected_net_r > 0
+            )), 6),
+            "rankBlendWeight": weight,
+            "blendTrials": blend_trials,
+            "ranking": metrics,
+        })
+    return {
+        "folds": folds,
+        "aggregate": {
+            "top5MeanNetR": _mean(daily.values()),
+            "top5LowerBound": block_bootstrap_lower_bound(
+                daily,
+                samples=5000,
+                random_state=42,
+            ),
+            "positiveExpectedCoverage": _mean([
+                fold["positiveExpectedCoverage"]
+                for fold in folds
+            ]),
+        },
+    }
+
+
 def _markdown(report):
     rows = []
     for name, value in report["families"].items():
@@ -675,7 +878,7 @@ def _markdown(report):
             f"{summary['serializedBytes'] / 1024 / 1024:.1f}MB |"
         )
     return "\n".join([
-        "# V3 三模型同口径 POC",
+        "# V3 双模型同口径 POC",
         "",
         f"- 状态：`{report['decision']['state']}`",
         f"- 数据摘要：`{report['dataset']['sha256']}`",
@@ -726,6 +929,16 @@ def run_bakeoff(
             "folds": fold_results,
             "aggregate": aggregate_family(fold_results),
         }
+    combination = None
+    if "lightgbm" in results and "catboost" in results:
+        combination = combine_action_value_and_ranker(
+            dataset,
+            results["lightgbm"]["folds"],
+            results["catboost"]["folds"],
+        )
+    for family in results.values():
+        for fold in family["folds"]:
+            fold.pop("_selection", None)
     ranked = sorted(
         results.items(),
         key=lambda item: (
@@ -764,6 +977,7 @@ def run_bakeoff(
             "splits": [fold["metadata"] for fold in folds],
         },
         "families": results,
+        "combination": combination,
         "decision": {
             "state": (
                 "POC_WINNER_CANDIDATE"
@@ -798,7 +1012,7 @@ def run_bakeoff(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="运行V3三模型同口径离线POC",
+        description="运行V3双模型同口径离线POC",
     )
     parser.add_argument("--input", required=True)
     parser.add_argument("--output-dir", required=True)

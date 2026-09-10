@@ -84,6 +84,15 @@ function v3Utility(candidate) {
   )
 }
 
+function v3RankingScore(candidate) {
+  const score = candidate?.opportunityScore
+  if (!directV3Score(score) || !(Number(score.expectedNetR) > 0)) {
+    return -Infinity
+  }
+  const ranking = Number(score.rankingScore)
+  return Number.isFinite(ranking) ? ranking : -Infinity
+}
+
 function scoredDecision(base = {}, candidate = {}) {
   return {
     ...base,
@@ -309,7 +318,8 @@ export function runFormulaSelection({
           ? 'V3_DIRECT'
           : 'V3_UNAVAILABLE',
       })).sort((left, right) =>
-        v3Utility(right) - v3Utility(left)
+        v3RankingScore(right) - v3RankingScore(left)
+        || v3Utility(right) - v3Utility(left)
         || Number(right.score || 0) - Number(left.score || 0)
         || String(left.code).localeCompare(String(right.code))
       )

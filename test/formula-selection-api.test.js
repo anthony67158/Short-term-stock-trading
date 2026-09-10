@@ -583,7 +583,7 @@ test('公式选股允许未匹配板块的淘汰事件写入账本', async () =>
   )
 })
 
-test('公式结果使用生产V3评分并按动作价值调整候选顺序', async () => {
+test('公式结果使用LightGBM动作门槛和CatBoost排序分组合排序', async () => {
   let savedLedger = null
   let scoreInputs = null
   const candidates = ['600002', '600001'].map((code, index) => ({
@@ -657,6 +657,7 @@ test('公式结果使用生产V3评分并按动作价值调整候选顺序', asy
           expectedNetR: 0.1 + index,
           netRLowerBound: -0.1,
           expectedShortfall10: -1,
+          rankingScore: index === 0 ? 0.9 : 0.2,
         },
       ]))
     },
@@ -672,10 +673,10 @@ test('公式结果使用生产V3评分并按动作价值调整候选顺序', asy
   assert.equal(scoreInputs.length, 2)
   assert.deepEqual(
     result.candidates.map((item) => item.code),
-    ['600001', '600002'],
+    ['600002', '600001'],
   )
-  assert.equal(result.candidates[0].opportunityScore.pFill, 0.8)
-  assert.equal(result.candidates[1].opportunityScore.pFill, 0.6)
+  assert.equal(result.candidates[0].opportunityScore.pFill, 0.6)
+  assert.equal(result.candidates[1].opportunityScore.pFill, 0.8)
   assert.equal(
     savedLedger.events[0].opportunityScore.state,
     'READY',

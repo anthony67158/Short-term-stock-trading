@@ -233,11 +233,33 @@ Qlib-style ensemble 作为 A/B/C 的可选外层：3–5 个时间种子/子模�
   再进入 TabM 第二阶段 POC。
 - 在没有更多独立交易日之前，不采用 TRA/Transformer/RL 作为生产核心。
 
+## 2026-09-10 最终生产选择
+
+**ADOPT：LightGBM 动作价值头 + CatBoost YetiRankPairwise 排序头。**
+
+- `FACT`：V4 三种子复验中，LightGBM 动作价值 Top5 均值为 `+0.026R`；
+  CatBoost Ranker Top5 均值为 `+0.158R`，是已测排序器中最高。
+- `FACT`：LightGBM sklearn 接口接受非负 `sample_weight`，可在不改变线上
+  特征合同的前提下处理类别不平衡和困难样本。
+- `FACT`：CatBoost `fit` 支持 `group_id`，本项目按交易日形成 query，并已在
+  72,847 条真实 V4 成熟样本上执行三折 POC。
+- `INFERENCE`：正负样本不做简单复制扩增。当前采用类别总权重平衡、近期
+  权重、打法/路径逆频率权重和高公式分失败样本加权，避免重复样本放大过拟合。
+- `INFERENCE`：只借鉴 Qlib DoubleEnsemble 的困难样本重加权思想，不引入其
+  runtime，也不沿用其 MSE 标签口径。
+
+最大反方是最新样本外窗口仍为负，组合尚未证明稳定盈利。按用户要求，本轮将
+其作为“当前最佳可回滚基准”直接上线，而不是把评测状态改成通过；后续每日
+三折三种子回测继续暴露最差窗口、bootstrap 下界、Q10 覆盖和相对常数基线
+技能分。
+
 ## 来源
 
 - [LightGBM 参数与目标函数](https://github.com/lightgbm-org/LightGBM/blob/7d3d1d829981fc670629f63f00e11ce25d6624f5/docs/Parameters.rst)
 - [LightGBM LambdaRank 示例](https://github.com/lightgbm-org/LightGBM/tree/7d3d1d829981fc670629f63f00e11ce25d6624f5/examples/lambdarank)
+- [LightGBM sklearn 权重接口](https://github.com/microsoft/LightGBM/blob/7d3d1d829981fc670629f63f00e11ce25d6624f5/python-package/lightgbm/sklearn.py)
 - [CatBoost 损失与排序枚举](https://github.com/catboost/catboost/blob/88b87b2c5136ebe0b132c7d4d7f7bbef7710ce6f/catboost/private/libs/options/enums.h)
+- [CatBoost Python 排序接口](https://github.com/catboost/catboost/blob/5dbb7346bc5b75e1a6c9b6578a90454f418bd2d3/catboost/python-package/catboost/core.py)
 - [XGBoost 参数](https://github.com/dmlc/xgboost/blob/49530df058646d9c67ef47108e9a0b1eb3e164bf/doc/parameter.rst)
 - [XGBoost Learning to Rank](https://github.com/dmlc/xgboost/blob/49530df058646d9c67ef47108e9a0b1eb3e164bf/doc/tutorials/learning_to_rank.rst)
 - [Qlib DoubleEnsemble](https://github.com/microsoft/qlib/blob/79633dd9506ea689e5400dea0197717b5b3d74b7/qlib/contrib/model/double_ensemble.py)

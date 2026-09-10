@@ -14,6 +14,8 @@ sys.path.insert(0, SERVICE_ROOT)
 
 from opportunity_contract import FEATURE_NAMES  # noqa: E402
 from train_opportunity_score import (  # noqa: E402
+    _rank_relevance,
+    _training_weights,
     load_opportunity_dataset,
     train_opportunity_score,
 )
@@ -79,7 +81,40 @@ class FakeRegressor:
             handle.write("regressor")
 
 
+class FakeRanker(FakeRegressor):
+    pass
+
+
 class TrainOpportunityScoreTest(unittest.TestCase):
+    def test_training_weights_balance_classes_and_emphasize_hard_negatives(self):
+        value = dataset(samples=40, dates_count=20)
+        formula_index = FEATURE_NAMES.index("formulaScore")
+        value["X"][:, formula_index] = 0
+        value["X"][0, formula_index] = 100
+        labels = np.asarray([0] * 30 + [1] * 10, dtype=np.int8)
+
+        weights = _training_weights(
+            {
+                **value,
+                "playbook_ids": np.asarray(["A"] * 40),
+                "routes": np.asarray(["IMMEDIATE"] * 40),
+            },
+            np.arange(40),
+            labels,
+        )
+
+        self.assertAlmostEqual(float(weights.mean()), 1.0)
+        self.assertGreater(weights[0], weights[1])
+        self.assertGreater(weights[30:].mean(), weights[1:30].mean())
+
+    def test_rank_relevance_keeps_losses_below_unfilled_and_wins(self):
+        labels, thresholds = _rank_relevance(
+            np.asarray([-1.0, np.nan, 0.0, 0.2, 1.0, 2.0]),
+        )
+
+        self.assertEqual(labels.tolist(), [0, 1, 1, 2, 2, 4])
+        self.assertGreater(thresholds["positiveHigh"], 0)
+
     def test_loader_rejects_feature_contract_drift(self):
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, "dataset.npz")
@@ -112,10 +147,10 @@ class TrainOpportunityScoreTest(unittest.TestCase):
                 "opportunity_trials.jsonl",
             )))
 
-    def test_ready_dataset_trains_three_heads_and_keeps_shadow_only(self):
+    def test_ready_dataset_trains_hurdle_q10_and_ranker_heads(self):
         value = dataset(samples=1200, dates_count=120)
 
-        def classifier(X, labels):
+        def classifier(X, labels, sample_weight=None):
             labels = np.asarray(labels)
             column = 0 if np.array_equal(
                 X[:, 0].astype(int),
@@ -132,16 +167,20 @@ class TrainOpportunityScoreTest(unittest.TestCase):
                     side_effect=classifier,
                 ),
                 patch(
-                    "train_opportunity_score._fit_logistic_classifier",
-                    side_effect=classifier,
-                ),
-                patch(
                     "train_opportunity_score._fit_lgb_regressor",
                     return_value=FakeRegressor(),
                 ),
                 patch(
-                    "train_opportunity_score._fit_linear_regressor",
+                    "train_opportunity_score._fit_lgb_quantile_regressor",
                     return_value=FakeRegressor(),
+                ),
+                patch(
+                    "train_opportunity_score._fit_catboost_ranker",
+                    return_value=(FakeRanker(), {
+                        "zeroOrUnfilled": 1,
+                        "positiveMedian": 1.0,
+                        "positiveHigh": 1.0,
+                    }),
                 ),
             ):
                 report = train_opportunity_score(
@@ -181,7 +220,10 @@ class TrainOpportunityScoreTest(unittest.TestCase):
             for filename in (
                 "opportunity_fill_lgb.txt",
                 "opportunity_win_lgb.txt",
-                "opportunity_netr_lgb.txt",
+                "opportunity_win_payoff_lgb.txt",
+                "opportunity_loss_payoff_lgb.txt",
+                "opportunity_q10_lgb.txt",
+                "opportunity_ranker_catboost.cbm",
                 "opportunity_meta.json",
             ):
                 self.assertTrue(os.path.exists(
@@ -197,6 +239,11 @@ class TrainOpportunityScoreTest(unittest.TestCase):
             ) as handle:
                 meta = json.load(handle)
             self.assertEqual(meta["featureNames"], list(FEATURE_NAMES))
+            self.assertEqual(
+                meta["predictionContract"],
+                "opportunity-hurdle-q10.v1",
+            )
+            self.assertEqual(meta["rankingCalibration"]["sampleCount"], 180)
             self.assertTrue(meta["shadowOnly"])
             self.assertFalse(meta["productionEligible"])
             self.assertEqual(meta["usagePolicy"], "DIRECT")
@@ -208,9 +255,12 @@ class TrainOpportunityScoreTest(unittest.TestCase):
             np.savez_compressed(path, **value)
             with (
                 patch("train_opportunity_score._fit_lgb_classifier", return_value=FakeClassifier()),
-                patch("train_opportunity_score._fit_logistic_classifier", return_value=FakeClassifier()),
                 patch("train_opportunity_score._fit_lgb_regressor", return_value=FakeRegressor()),
-                patch("train_opportunity_score._fit_linear_regressor", return_value=FakeRegressor()),
+                patch("train_opportunity_score._fit_lgb_quantile_regressor", return_value=FakeRegressor()),
+                patch("train_opportunity_score._fit_catboost_ranker", return_value=(
+                    FakeRanker(),
+                    {"zeroOrUnfilled": 1, "positiveMedian": 1.0, "positiveHigh": 1.0},
+                )),
                 patch("train_opportunity_score.shadow_gate", return_value={
                     "shadowEligible": False, "shadowBlockers": ["diagnostic failure"],
                     "productionBlockers": ["diagnostic failure"],
