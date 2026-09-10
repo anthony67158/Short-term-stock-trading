@@ -239,9 +239,16 @@ IEEE-754 序列化噪声，再执行严格 OHLC 校验。仅当成交量、成�
 - V3 Top5 净R下置信界为 -0.518984R；
 - `pWinGivenFill` LogLoss、`expectedNetR` MAE 和 walk-forward 稳定性未过闸。
 
-历史基线已发布到 `opportunitymodel/training-data/`，训练状态已发布为
-`REJECTED`。数量门槛已满足，但最近窗口仍是负期望，禁止以“完整重训练”为由
-强行晋级。
+历史基线已发布到：
+
+```text
+opportunitymodel/training-data/runs/
+  1788999755827-779cec2912c59bcd.json.gz
+```
+
+压缩对象大小为 13,149,845 字节，下载后 SHA-256 与 manifest 一致。训练状态
+已发布为 `REJECTED`。数量门槛已满足，但最近窗口仍是负期望，禁止以“完整
+重训练”为由强行晋级。
 
 参考：
 
