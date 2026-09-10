@@ -299,3 +299,7 @@ opportunitymodel/training-data/runs/
 LightGBM + CatBoost 组合直接作为 `usagePolicy=DIRECT` 基准。是否通过稳定性
 门槛仍单独记录，不能伪造。任何新增风险仍必须同时通过价格、现金、T+1、
 费后正期望和账户风险检查。
+
+首次激活版本为 `opportunity-score.20260910T101955Z`。线上
+`/model_info` 已确认六个模型头全部加载，`baselineSelected=true`；
+`productionEligible=false` 如实保留当前样本外稳定性仍未过线的事实。
