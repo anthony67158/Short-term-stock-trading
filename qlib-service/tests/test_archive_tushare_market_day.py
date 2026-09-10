@@ -11,7 +11,9 @@ sys.path.insert(0, SERVICE_ROOT)
 
 from archive_tushare_market_day import (  # noqa: E402
     completed_trade_dates,
+    minute_day_available,
     minute_payload,
+    resolve_archive_target,
     select_causal_universe,
     stable_hash,
 )
@@ -109,6 +111,41 @@ class ArchiveTushareMarketDayTest(unittest.TestCase):
                 "20260909",
                 [f"{index:06d}" for index in range(1, 11)],
             )
+
+    def test_archive_target_falls_back_to_latest_data_ready_day(self):
+        dates = ["20260907", "20260908", "20260909"]
+        target, existing = resolve_archive_target(
+            dates,
+            existing_for_date=lambda _date: None,
+            available_for_date=lambda date: date == "20260908",
+        )
+        self.assertEqual(target, "20260908")
+        self.assertIsNone(existing)
+
+        archived = {"date": "20260908"}
+        target, existing = resolve_archive_target(
+            dates,
+            existing_for_date=lambda date: archived if date == "20260908" else None,
+            available_for_date=lambda _date: False,
+        )
+        self.assertEqual(target, "20260908")
+        self.assertIs(existing, archived)
+
+    def test_explicit_unavailable_day_fails_before_full_download(self):
+        with self.assertRaisesRegex(ValueError, "尚未发布"):
+            resolve_archive_target(
+                ["20260908", "20260909"],
+                target_date="20260909",
+                existing_for_date=lambda _date: None,
+                available_for_date=lambda _date: False,
+            )
+        self.assertTrue(
+            minute_day_available(
+                FakeClient(),
+                "20260909",
+                probe_codes=("000001",),
+            )
+        )
 
 
 if __name__ == "__main__":

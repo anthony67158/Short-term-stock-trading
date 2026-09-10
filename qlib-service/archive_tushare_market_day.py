@@ -32,6 +32,9 @@ from tushare_client import TushareClient  # noqa: E402
 from upload_model import bucket  # noqa: E402
 
 
+MINUTE_PROBE_CODES = ("600519", "000001", "601318")
+
+
 def stable_hash(value):
     result = 2166136261
     for character in str(value):
@@ -120,6 +123,46 @@ def day_metadata(client, date, names):
     )
 
 
+def minute_day_available(client, date, probe_codes=MINUTE_PROBE_CODES):
+    for code in probe_codes:
+        rows = client.rows(
+            "stk_mins",
+            {
+                "ts_code": to_tushare_code(code),
+                "freq": "5min",
+                "start_date": f"{date[:4]}-{date[4:6]}-{date[6:]} 09:30:00",
+                "end_date": f"{date[:4]}-{date[4:6]}-{date[6:]} 15:00:00",
+            },
+            "ts_code,trade_time,open,close,high,low,vol,amount",
+        )
+        normalized = _minute_rows(rows, code, {date})
+        if _complete_minute_day(normalized):
+            return True
+    return False
+
+
+def resolve_archive_target(
+    dates,
+    *,
+    target_date=None,
+    existing_for_date,
+    available_for_date,
+):
+    requested = str(target_date or "")
+    if requested and requested not in dates:
+        raise ValueError("指定日期不是近期已完成交易日")
+    candidates = [requested] if requested else reversed(dates)
+    for candidate in candidates:
+        existing = existing_for_date(candidate)
+        if existing is not None:
+            return candidate, existing
+        if available_for_date(candidate):
+            return candidate, None
+    if requested:
+        raise ValueError(f"Tushare分钟数据尚未发布: {requested}")
+    raise ValueError("Tushare近期完整交易日分钟数据均未发布")
+
+
 def minute_payload(client, date, codes):
     complete = {}
     excluded = []
@@ -180,15 +223,17 @@ def archive_latest(*, target_date=None, max_per_min=120, universe_size=1000):
         start_date=start.strftime("%Y%m%d"),
         end_date=end.strftime("%Y%m%d"),
     ))
-    target = str(target_date or dates[-1])
-    if target not in dates:
-        raise ValueError("指定日期不是近期已完成交易日")
+    oss = bucket()
+    target, existing = resolve_archive_target(
+        dates,
+        target_date=target_date,
+        existing_for_date=lambda date: load_market_day(oss, date),
+        available_for_date=lambda date: minute_day_available(client, date),
+    )
     index = dates.index(target)
     if index < 1:
         raise ValueError("缺少目标日之前的交易日")
     previous = dates[index - 1]
-    oss = bucket()
-    existing = load_market_day(oss, target)
     if existing is not None:
         return {
             "status": "already_archived",
